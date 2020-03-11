@@ -53,6 +53,8 @@ enum Node_Type_Op : uint64_t {
   // op_class: Tuple
   TupAdd_Op,
   TupGet_Op,
+  TupRef_Op,
+  TupKey_Op,
   // op_class: dfg
   DfgRef_Op,
   DfgPendingGraph_Op,
@@ -659,11 +661,28 @@ class Node_Type_TupGet : public Node_Type {
 public:
   Node_Type_TupGet() : Node_Type("tuple_get", TupGet_Op, false) {
     inputs.push_back("A");
-    inputs.push_back("K");
+    inputs.push_back("KN");
+    inputs.push_back("KP");
     outputs.push_back("Y");
   };
 };
 
+
+// Y = tuple root name, only used for tuple initialization
+class Node_Type_TupRef : public Node_Type {
+public:
+  Node_Type_TupRef() : Node_Type("tuple_ref", TupRef_Op, true) {
+    outputs.push_back("Y");
+  };
+};
+
+// Y = tuple key name
+class Node_Type_TupKey : public Node_Type {
+public:
+  Node_Type_TupKey() : Node_Type("tuple_key", TupKey_Op, true) {
+    outputs.push_back("Y");
+  };
+};
 
 class Node_Type_DfgRef : public Node_Type {
 public:

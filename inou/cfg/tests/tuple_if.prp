@@ -1,0 +1,21 @@
+x.__bits = 2
+y.__bits = 3
+
+x = 2
+y = 7
+
+A = (x, foo = y, bar = 4)   // A0
+
+if (A.foo == 7) {           // A0
+  A = A++6                  // A1 = A0++6
+} else {
+  A = A++8                  // A2 = A0++8
+}
+                            // A3 = phi(A1, A2)
+
+A[0] = 3                    // A4
+
+
+%out1 = A[0] + A.foo        // A4; 3 + 7 = 10
+%out2 = A[3] + A.bar        // A4; 4 + 6 = 10 
+%out3 = A.foo               // A4; 7

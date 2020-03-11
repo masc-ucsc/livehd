@@ -3,38 +3,39 @@
 #include <libRW.hpp>
 using namespace std;
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv) {
+
   graalThread* thread = new graalThread();
 
-  char* design_name = const_cast<char*>("myDesign");
-  char* ff_1        = const_cast<char*>("ff_1");
-  char* ff_2        = const_cast<char*>("ff_2");
-  char* and2_name   = const_cast<char*>("and2");
-  char* fileName    = const_cast<char*>("./dcp/and2_ff.dcp");
+  char * design_name = const_cast<char*>("Hello1stDesign");
+  char * top_design_name = const_cast<char*>("HelloModuleTop");
+  char * ff_name = const_cast<char*>("ff_1");
+  char * and2_name = const_cast<char*>("and2");
+  char * fileName = const_cast<char*>("./dcp/and2_ff.dcp");
+
+  char * modInst_name = const_cast<char*>("modInst");
+  char * mod_fileName = const_cast<char*>("./dcp/and2_ff_module.dcp");
 
   int design_ID = thread->create_Design(design_name);
-  int ff_1_ID   = thread->create_FF(ff_1, design_ID);
-  // int ff_2_ID = thread->create_FF(ff_2, design_ID);
-  int AND2_ID = thread->create_AND2(and2_name, design_ID);
-  // cout << "ff_1_ID: " << ff_1_ID << endl;
-  // cout << "ff_2_ID: " << ff_2_ID << endl;
-  cout << "AND2_ID: " << AND2_ID << endl;
+  int ff_ID = thread->create_FF(ff_name, design_ID);
+  int cell_ID = thread ->create_FF(and2_name, design_ID);
 
-  thread->place_Cell(ff_1_ID, design_ID);
-  // thread -> place_Cell(ff_2_ID, design_ID);
-  bool placed = thread->place_Cell(AND2_ID, design_ID);
-  cout << "Is AND2 is successfully placed? " << placed << endl;
-  thread->write_DCP(const_cast<char*>("./dcp/unrouted.dcp"), design_ID);
 
-  // thread -> connect_Ports(design_ID, ff_1_ID, ff_2_ID);
-  thread->connect_Ports(design_ID, ff_1_ID, const_cast<char*>("Q"), AND2_ID, const_cast<char*>("I0"));
-  thread->connect_Ports(design_ID, AND2_ID, const_cast<char*>("O"), AND2_ID, const_cast<char*>("I1"));
-  // thread->costumRoute(design_ID, ff_1_ID, ff_2_ID);
+  thread -> place_Cell(cell_ID, design_ID);
+  thread -> place_Cell(ff_ID, design_ID);
+  thread->costum_Route(design_ID, cell_ID, ff_ID);
   thread->set_IO_Buffer(false, design_ID);
-
-  thread->route_Design(design_ID);
-
+  //thread->route_Design(design_ID);
   thread->write_DCP(fileName, design_ID);
+
+  //create a new top design to test module
+  int top_design_ID = thread->create_Design(top_design_name);
+  cout << "after design" << endl;
+  int module_ID = thread->create_Module(design_ID, top_design_ID);
+  cout << "after module" << endl;
+  int moduleInst_ID = thread->create_ModuleInst(modInst_name, module_ID, top_design_ID); //need to add module id
+  cout << "after moduleInst" << endl;
+  thread->write_DCP(mod_fileName, top_design_ID);
 
   return 0;
 }

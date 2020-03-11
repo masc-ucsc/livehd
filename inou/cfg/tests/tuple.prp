@@ -1,19 +1,17 @@
 x.__bits = 2
 y.__bits = 3
 
-x = 2
+x = 3
 y = 7
 
-A = (x, foo = y, bar = 4)
+A = (x, foo = y, bar = 4) // A0
 
-if (A.foo == 7) {
-  A = A++6
-} else {
-  A = A++8
-}
+A = A++3                  // A1 = A0++3
+A = A++5                  // A2 = A1++5
 
-A[0] = 3
+A.foo = A[2]              // A3.foo = A2[2]
+A[2]  = 5                 // A4[2] = 5
+A[3]  = A.foo + A[2]      // A5[3] = A4.foo + A4[2]
 
-
-%out1 = A[0] + A.foo  // 3 + 7 = 10 
-%out2 = A[3] + A.bar  // 4 + 6 = 10 
+%out1 = A[4] + A.foo      // A5; 5 + 4 = 9
+%out2 = A[1] + A[2]       // A5; 9 + 5 = 14

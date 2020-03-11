@@ -183,8 +183,11 @@ uint32_t Inou_lnast_dfg::cal_bin_val_32b(const std::string &token) {
   return val;
 }
 
-Node Inou_lnast_dfg::process_bin_token(LGraph *g, const std::string &token, const uint16_t &bit_width, bool is_signed) {
-  if(bit_width > 32) {
+Node Inou_lnast_dfg::process_bin_token(LGraph *g, const std::string &token, uint16_t bit_width, bool is_signed) {
+  if (bit_width == 0)
+    bit_width = 1;
+
+  if (bit_width > 32) {
     std::vector<Node_pin> dpins;
     Node  node_const32;
     auto  t_size    = (uint16_t)token.size();
@@ -278,14 +281,6 @@ Node Inou_lnast_dfg::create_const32_node(LGraph *g, const std::string &str_val, 
   if(!node_const32.setup_driver_pin().has_name())
     node_const32.setup_driver_pin().set_name(absl::StrCat("0d", std::to_string(val)));
 
-  //SH:FIXME: Attribute for Node_pin explicit/implicit bitwidth??? TBD.
-  /*
-  Node_bitwidth &nb = node_const32.get_driver_pin().get_bits();
-  if(is_signed)
-    nb.e.set_sconst(val);
-  else
-    nb.e.set_uconst(val);
-  */
   return node_const32;
 }
 

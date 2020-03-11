@@ -1,0 +1,13 @@
+#-----------------------------------------------------------
+# Vivado v2019.2 (64-bit)
+# SW Build 2708876 on Wed Nov  6 21:40:23 MST 2019
+# IP Build 2700528 on Thu Nov  7 00:09:20 MST 2019
+# Start of session at: Tue Mar 10 23:00:25 2020
+# Process ID: 25396
+# Current directory: C:/Users/Doris/Desktop/masc/RapidWright/livehd/dcp
+# Command line: vivado.exe -gui_launcher_event rodinguilauncherevent25052 C:\Users\Doris\Desktop\masc\RapidWright\livehd\dcp\and2_ff_module.dcp
+# Log file: C:/Users/Doris/Desktop/masc/RapidWright/livehd/dcp/vivado.log
+# Journal file: C:/Users/Doris/Desktop/masc/RapidWright/livehd/dcp\vivado.jou
+#-----------------------------------------------------------
+start_gui
+open_checkpoint C:/Users/Doris/Desktop/masc/RapidWright/livehd/dcp/and2_ff_module.dcp

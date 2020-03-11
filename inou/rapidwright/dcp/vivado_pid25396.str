@@ -1,0 +1,159 @@
+/*
+
+Xilinx Vivado v2019.2 (64-bit) [Major: 2019, Minor: 2]
+SW Build: 2708876 on Wed Nov  6 21:40:23 MST 2019
+IP Build: 2700528 on Thu Nov  7 00:09:20 MST 2019
+
+Process ID (PID): 25396
+License: Customer
+
+Current time: 	Tue Mar 10 23:00:35 PDT 2020
+Time zone: 	Pacific Standard Time (America/Los_Angeles)
+
+OS: Windows 10
+OS Version: 10.0
+OS Architecture: amd64
+Available processors (cores): 16
+
+Screen size: 3840x2160
+Screen resolution (DPI): 150
+Available screens: 2
+Available disk space: 661 GB
+Default font: family=Segoe UI,name=Segoe UI,style=plain,size=18
+
+Java version: 	9.0.4 64-bit
+Java home: 	C:/Xilinx/Vivado/2019.2/tps/win64/jre9.0.4
+Java executable location: 	C:/Xilinx/Vivado/2019.2/tps/win64/jre9.0.4/bin/java.exe
+Java initial memory (-Xms): 	128 MB
+Java maximum memory (-Xmx):	 3 GB
+
+
+User name: 	Doris
+User home directory: C:/Users/Doris
+User working directory: C:/Users/Doris/Desktop/masc/RapidWright/livehd/dcp
+User country: 	US
+User language: 	en
+User locale: 	en_US
+
+RDI_BASEROOT: C:/Xilinx/Vivado
+HDI_APPROOT: C:/Xilinx/Vivado/2019.2
+RDI_DATADIR: C:/Xilinx/Vivado/2019.2/data
+RDI_BINDIR: C:/Xilinx/Vivado/2019.2/bin
+
+Vivado preferences file location: C:/Users/Doris/AppData/Roaming/Xilinx/Vivado/2019.2/vivado.xml
+Vivado preferences directory: C:/Users/Doris/AppData/Roaming/Xilinx/Vivado/2019.2/
+Vivado layouts directory: C:/Users/Doris/AppData/Roaming/Xilinx/Vivado/2019.2/layouts
+PlanAhead jar file location: 	C:/Xilinx/Vivado/2019.2/lib/classes/planAhead.jar
+Vivado log file location: 	C:/Users/Doris/Desktop/masc/RapidWright/livehd/dcp/vivado.log
+Vivado journal file location: 	C:/Users/Doris/Desktop/masc/RapidWright/livehd/dcp/vivado.jou
+Engine tmp dir: 	C:/Users/Doris/Desktop/masc/RapidWright/livehd/dcp/.Xil/Vivado-25396-DESKTOP-O5EEVF3
+
+Xilinx Environment Variables
+----------------------------
+XILINX: C:/Xilinx/Vivado/2019.2/ids_lite/ISE
+XILINX_DSP: C:/Xilinx/Vivado/2019.2/ids_lite/ISE
+XILINX_PLANAHEAD: C:/Xilinx/Vivado/2019.2
+XILINX_VIVADO: C:/Xilinx/Vivado/2019.2
+XILINX_VIVADO_HLS: C:/Xilinx/Vivado/2019.2
+
+
+GUI allocated memory:	154 MB
+GUI max memory:		3,072 MB
+Engine allocated memory: 730 MB
+
+Copyright 1986-2019 Xilinx, Inc. All Rights Reserved.
+
+*/
+
+// TclEventType: START_GUI
+// TclEventType: PROJECT_OPEN_DIALOG
+// Tcl Message: start_gui 
+// TclEventType: PROJECT_OPEN_DIALOG
+// [GUI Memory]: 100 MB (+101997kb) [00:00:04]
+// [Engine Memory]: 647 MB (+527256kb) [00:00:04]
+// bB (cr):  Open Checkpoint : addNotify
+// TclEventType: DEBUG_PROBE_SET_CHANGE
+// Tcl Message: open_checkpoint C:/Users/Doris/Desktop/masc/RapidWright/livehd/dcp/and2_ff_module.dcp 
+// Tcl Message: Command: open_checkpoint C:/Users/Doris/Desktop/masc/RapidWright/livehd/dcp/and2_ff_module.dcp  Starting open_checkpoint Task  Time (s): cpu = 00:00:00 ; elapsed = 00:00:00.034 . Memory (MB): peak = 708.980 ; gain = 0.000 
+// TclEventType: FILE_SET_NEW
+// TclEventType: RUN_ADD
+// TclEventType: RUN_CURRENT
+// TclEventType: PROJECT_DASHBOARD_NEW
+// TclEventType: PROJECT_DASHBOARD_GADGET_NEW
+// TclEventType: PROJECT_DASHBOARD_GADGET_CHANGE
+// TclEventType: PROJECT_DASHBOARD_GADGET_NEW
+// TclEventType: PROJECT_DASHBOARD_GADGET_CHANGE
+// TclEventType: PROJECT_DASHBOARD_GADGET_NEW
+// TclEventType: PROJECT_DASHBOARD_GADGET_CHANGE
+// TclEventType: PROJECT_DASHBOARD_GADGET_NEW
+// TclEventType: PROJECT_DASHBOARD_GADGET_CHANGE
+// TclEventType: PROJECT_DASHBOARD_GADGET_NEW
+// TclEventType: PROJECT_DASHBOARD_GADGET_CHANGE
+// TclEventType: PROJECT_DASHBOARD_GADGET_NEW
+// TclEventType: PROJECT_DASHBOARD_GADGET_CHANGE
+// TclEventType: PROJECT_NEW
+// [GUI Memory]: 115 MB (+10655kb) [00:00:08]
+// [Engine Memory]: 817 MB (+143701kb) [00:00:08]
+// WARNING: HEventQueue.dispatchEvent() is taking  1170 ms.
+// Tcl Message: INFO: [IP_Flow 19-234] Refreshing IP repositories INFO: [IP_Flow 19-1704] No user IP repositories specified INFO: [IP_Flow 19-2313] Loaded Vivado IP repository 'C:/Xilinx/Vivado/2019.2/data/ip'. 
+// HMemoryUtils.trashcanNow. Engine heap size: 879 MB. GUI used memory: 61 MB. Current time: 3/10/20, 11:00:38 PM PDT
+// TclEventType: FLOORPLAN_MODIFY
+// TclEventType: DESIGN_NEW
+// HMemoryUtils.trashcanNow. Engine heap size: 1,275 MB. GUI used memory: 60 MB. Current time: 3/10/20, 11:00:44 PM PDT
+// [Engine Memory]: 1,275 MB (+437864kb) [00:00:16]
+// [Engine Memory]: 1,363 MB (+25339kb) [00:00:16]
+// TclEventType: HFED_INIT_ROUTE_STORAGE_COMPLETED
+// TclEventType: DESIGN_NEW
+// [GUI Memory]: 129 MB (+8518kb) [00:00:17]
+// [GUI Memory]: 140 MB (+4952kb) [00:00:17]
+// Device: addNotify
+// DeviceView Instantiated
+// TclEventType: CURR_DESIGN_SET
+// TclEventType: PROJ_DESIGN_MODE_SET
+// Tcl Message: INFO: [Device 21-403] Loading part xc7z020clg400-1 
+// Tcl Message: Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 1182.891 ; gain = 0.000 
+// Tcl Message: INFO: [Project 1-479] Netlist was created with RapidWright 2019.2.0 INFO: [Project 1-570] Preparing netlist for logic optimization 
+// Tcl Message: Reading XDEF placement. Reading placer database... Reading XDEF routing. 
+// Tcl Message: Read XDEF File: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00.151 . Memory (MB): peak = 1293.422 ; gain = 25.105 
+// Tcl Message: Restored from archive | CPU: 0.000000 secs | Memory: 0.000000 MB | 
+// Tcl Message: Finished XDEF File Restore: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00.151 . Memory (MB): peak = 1293.422 ; gain = 25.105 
+// Tcl Message: INFO: [Opt 31-138] Pushed 0 inverter(s) to 0 load pin(s). 
+// Tcl Message: Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 1297.523 ; gain = 0.000 
+// Tcl Message: INFO: [Project 1-111] Unisim Transformation Summary: No Unisim elements were transformed.  
+// TclEventType: PROJ_DESIGN_MODE_SET
+// TclEventType: PROJECT_DASHBOARD_GADGET_DELETE
+// TclEventType: PROJ_DESIGN_MODE_SET
+// Device view-level: 0.0
+// TclEventType: PROJ_DESIGN_MODE_SET
+// TclEventType: DESIGN_MODE_CHANGE
+// Tcl Message: open_checkpoint: Time (s): cpu = 00:00:23 ; elapsed = 00:00:14 . Memory (MB): peak = 1444.246 ; gain = 749.238 
+// Project name: project_and2_ff_module; location: C:/Users/Doris/Desktop/masc/RapidWright/livehd/dcp; part: xc7z020clg400-1
+dismissDialog("Open Checkpoint"); // bB (cr)
+selectButton(PAResourceCommand.PACommandNames_SCHEMATIC, "run_schematic"); // E (f, cr)
+// Run Command: PAResourceCommand.PACommandNames_SCHEMATIC
+// Schematic: addNotify
+// RouteApi::initDelayMediator elapsed time: 8.1s
+// RouteApi: Init Delay Mediator Swing Worker Finished
+selectButton(PAResourceCommand.PACommandNames_SCHEMATIC, "run_schematic"); // E (f, cr)
+// Run Command: PAResourceCommand.PACommandNames_SCHEMATIC
+// Schematic: addNotify
+// [Engine Memory]: 1,784 MB (+369445kb) [00:00:27]
+// [GUI Memory]: 151 MB (+4117kb) [00:00:30]
+selectTab("PlanAheadTabBaseWorkspace_JideTabbedPane", (HResource) null, "Device", 0); // i (h, cr)
+selectGraphicalView(PAResourceOtoP.PAViews_DEVICE, 330723, 70314); // D (I, cr)
+// Device view-level: 1.5
+// HMemoryUtils.trashcanNow. Engine heap size: 1,788 MB. GUI used memory: 90 MB. Current time: 3/10/20, 11:01:02 PM PDT
+// HMemoryUtils.trashcanNow. Engine heap size: 1,788 MB. GUI used memory: 90 MB. Current time: 3/10/20, 11:01:02 PM PDT
+selectButton(PAResourceCommand.PACommandNames_ZOOM_OUT, "Device_zoom_out"); // E (f, cr)
+// Run Command: PAResourceCommand.PACommandNames_ZOOM_OUT
+// Device view-level: 0.9
+selectButton(PAResourceCommand.PACommandNames_ZOOM_OUT, "Device_zoom_out"); // E (f, cr)
+// Run Command: PAResourceCommand.PACommandNames_ZOOM_OUT
+// Device view-level: 0.3
+selectButton(PAResourceCommand.PACommandNames_ZOOM_OUT, "Device_zoom_out"); // E (f, cr)
+// Run Command: PAResourceCommand.PACommandNames_ZOOM_OUT
+// Device view-level: 0.0
+selectButton(PAResourceCommand.PACommandNames_ZOOM_OUT, "Device_zoom_out"); // E (f, cr)
+selectTab("PlanAheadTabBaseWorkspace_JideTabbedPane", (HResource) null, "Schematic (2)", 2); // i (h, cr)
+selectTab("PlanAheadTabBaseWorkspace_JideTabbedPane", (HResource) null, "Schematic", 1); // i (h, cr)
+selectButton(PAResourceItoN.NetlistSchematicView_SHOW_NETS_IN_THIS_SCHEMATIC, "1 Net"); // h (f, cr)
