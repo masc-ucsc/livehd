@@ -18,7 +18,7 @@ private:
   absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Node_Type_Op> primitive_type_lnast2lg;
 
   absl::flat_hash_map<std::string, Node_pin>  name2dpin;
-  absl::flat_hash_map<std::string, Lnast_nid> name2lnidx_opr; //mainly for dot and select recording
+  absl::flat_hash_map<std::string, Lnast_nid> name2lnidx; //mainly for dot and select recording
 
   int lginp_cnt;
   int lgout_cnt;
@@ -27,6 +27,7 @@ protected:
   void                  setup_memblock();
   std::vector<LGraph *> do_tolg();
   static void           do_resolve_tuples(LGraph *dfg);
+  static void           do_reduced_or_elimination(LGraph *dfg);
   std::vector<LGraph *> do_gen_temp_lg();
 
   void lnast2lgraph             (LGraph *dfg);
@@ -67,6 +68,7 @@ protected:
   }
 
 
+  // tuple related
   Node_pin     add_tuple_add_from_dot (LGraph *dfg, const Lnast_nid &lnidx_dot, const Lnast_nid &lnidx_assign);
   Node_pin     add_tuple_add_from_sel (LGraph *dfg, const Lnast_nid &lnidx_sel, const Lnast_nid &lnidx_assign);
   Node_pin     add_tuple_get_from_dot_or_sel (LGraph *dfg, const Lnast_nid &lnidx_opr);
@@ -89,6 +91,7 @@ protected:
   // eprp callbacks
   static void tolg(Eprp_var &var);
   static void resolve_tuples(Eprp_var &var);
+  static void reduced_or_elimination(Eprp_var &var);
   static void gen_temp_lg(Eprp_var &var);
 
 public:

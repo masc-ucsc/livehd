@@ -1,8 +1,3 @@
-0. ssa of tuple dot and select ....
-0-1. before SSA, do a little pass on lnast for determining dot/sel lhs/rhs
-0-2. at first SSA pass -> treat ldot/lsel as assign and update lhs cnt and token
-0-3. at second SSA pass -> if ldot/lsel ->copy token.subs
-                        -> elif rdot/rsel ->ssa_rhs_handle_a_statement
 1. resovle basic tuple (w/o if)
 2. basic if-else 
 3. nested if-else

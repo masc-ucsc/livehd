@@ -16,14 +16,19 @@ void Inou_lnast_dfg::setup() {
   m1.add_label_optional("path", "path to put the lgraph[s]", "lgdb");
   register_inou("lnast_dfg", m1);
 
-  Eprp_method m2("inou.lnast_dfg.resolve_tuples", "resolve tuple chains for flattened lgraph", &Inou_lnast_dfg::resolve_tuples);
+  Eprp_method m2("inou.lnast_dfg.reduced_or_elimination", "reduced_or_op elimination for clear algorithm", &Inou_lnast_dfg::reduced_or_elimination);
   m2.add_label_optional("path", "path to read the lgraph[s]", "lgdb");
   m2.add_label_optional("odir", "output directory for generated verilog files", ".");
   register_inou("lnast_dfg",m2);
 
-  Eprp_method m3("inou.lnast_dfg.gen_temp_lg", "create temp lgraph for bitwidth", &Inou_lnast_dfg::gen_temp_lg);
-  m3.add_label_optional("path", "path to put the lgraph[s]", "lgdb");
-  register_inou("lnast_dfg", m3);
+  Eprp_method m3("inou.lnast_dfg.resolve_tuples", "resolve tuple chains for flattened lgraph", &Inou_lnast_dfg::resolve_tuples);
+  m3.add_label_optional("path", "path to read the lgraph[s]", "lgdb");
+  m3.add_label_optional("odir", "output directory for generated verilog files", ".");
+  register_inou("lnast_dfg",m3);
+
+  Eprp_method m4("inou.lnast_dfg.gen_temp_lg", "create temp lgraph for bitwidth", &Inou_lnast_dfg::gen_temp_lg);
+  m4.add_label_optional("path", "path to put the lgraph[s]", "lgdb");
+  register_inou("lnast_dfg", m4);
 }
 
 Inou_lnast_dfg::Inou_lnast_dfg(const Eprp_var &var) : Pass("inou.lnast_dfg", var), lginp_cnt(1), lgout_cnt(0) {
@@ -49,6 +54,17 @@ void Inou_lnast_dfg::resolve_tuples(Eprp_var &var) {
     p.do_resolve_tuples(l);
   }
 }
+
+
+void Inou_lnast_dfg::reduced_or_elimination(Eprp_var &var) {
+  Inou_lnast_dfg p(var);
+  std::vector<LGraph *> lgs;
+
+  for (const auto &l : var.lgs) {
+    p.do_reduced_or_elimination(l);
+  }
+}
+
 
 
 std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
@@ -108,6 +124,31 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
 
     } else if (node.get_type().op == TupGet_Op) {
       ;
+    }
+  }
+
+  for (auto &itr : to_be_deleted) {
+    fmt::print("delete {}\n", itr.get_node(dfg).debug_name());
+    itr.get_node(dfg).del_node();
+  }
+}
+
+
+void Inou_lnast_dfg::do_reduced_or_elimination(LGraph *dfg) {
+  absl::flat_hash_set<Node::Compact> to_be_deleted;
+  for (const auto &node : dfg->fast()) {
+    if (node.get_type().op == Or_Op) {
+      bool is_reduced_or = node.out_edges().begin()->driver.get_pid() == 1;
+      if (is_reduced_or) {
+        I(node.inp_edges().size() == 1);
+        for (auto &out : node.out_edges()) {
+          auto dpin = node.inp_edges().begin()->driver;
+          dpin.set_name(node.get_driver_pin(1).get_name());
+          auto spin = out.sink;
+          dfg->add_edge(dpin, spin);
+        }
+        to_be_deleted.insert(node.get_compact());
+      }
     }
   }
 
@@ -206,8 +247,8 @@ void Inou_lnast_dfg::process_ast_binary_op(LGraph *dfg, const Lnast_nid &lnidx_o
     else {
       auto child_name = lnast->get_sname(*opr_child);
       Node_pin opd;
-      if (name2lnidx_opr.find(child_name) != name2lnidx_opr.end()) {
-        opd = add_tuple_get_from_dot_or_sel(dfg, name2lnidx_opr[child_name]);
+      if (name2lnidx.find(child_name) != name2lnidx.end()) {
+        opd = add_tuple_get_from_dot_or_sel(dfg, name2lnidx[child_name]);
       } else {
         opd = setup_ref_node_dpin(dfg, *opr_child);
       }
@@ -222,22 +263,40 @@ void Inou_lnast_dfg::process_ast_assign_op(LGraph *dfg, const Lnast_nid &lnidx_a
   auto c0_name = lnast->get_sname(c0);
   auto c1_name = lnast->get_sname(c1);
 
-  if (name2lnidx_opr.find(c0_name) != name2lnidx_opr.end()) {
-    auto ast_opr_idx = name2lnidx_opr[c0_name];
+
+  if ((name2lnidx.find(c0_name) != name2lnidx.end()) and name2lnidx.find(c1_name) != name2lnidx.end()) {
+    auto ast_opr_idx = name2lnidx[c1_name];
+    //rhs example: (1)bar = tup.foo; (2) bar = tup.foo + tup[1]
+    if (lnast->get_type(ast_opr_idx).is_dot() or lnast->get_type(ast_opr_idx).is_select())
+      add_tuple_get_from_dot_or_sel(dfg, name2lnidx[c1_name]);
+
+    ast_opr_idx = name2lnidx[c0_name];
     //lhs cases: (1)tup.foo = bar; (2)tup[1] = bar;
     if (lnast->get_type(ast_opr_idx).is_dot()) {
-      add_tuple_add_from_dot(dfg, name2lnidx_opr[c0_name], lnidx_assign);
+      add_tuple_add_from_dot(dfg, name2lnidx[c0_name], lnidx_assign);
     } else {
-      add_tuple_add_from_sel(dfg, name2lnidx_opr[c0_name], lnidx_assign);
+      add_tuple_add_from_sel(dfg, name2lnidx[c0_name], lnidx_assign);
     }
     return;
   }
 
-  if (name2lnidx_opr.find(c1_name) != name2lnidx_opr.end()) {
-    auto ast_opr_idx = name2lnidx_opr[c1_name];
+
+  if (name2lnidx.find(c0_name) != name2lnidx.end()) {
+    auto ast_opr_idx = name2lnidx[c0_name];
+    //lhs cases: (1)tup.foo = bar; (2)tup[1] = bar;
+    if (lnast->get_type(ast_opr_idx).is_dot()) {
+      add_tuple_add_from_dot(dfg, name2lnidx[c0_name], lnidx_assign);
+    } else {
+      add_tuple_add_from_sel(dfg, name2lnidx[c0_name], lnidx_assign);
+    }
+    return;
+  }
+
+  if (name2lnidx.find(c1_name) != name2lnidx.end()) {
+    auto ast_opr_idx = name2lnidx[c1_name];
     //rhs example: (1)bar = tup.foo; (2) bar = tup.foo + tup[1]
     if (lnast->get_type(ast_opr_idx).is_dot() or lnast->get_type(ast_opr_idx).is_select())
-      add_tuple_get_from_dot_or_sel(dfg, name2lnidx_opr[c1_name]);
+      add_tuple_get_from_dot_or_sel(dfg, name2lnidx[c1_name]);
   }
 
   Node_pin opr  = setup_node_assign_and_target(dfg, lnidx_assign);
@@ -407,13 +466,15 @@ Node_pin Inou_lnast_dfg::setup_tuple_key(LGraph *dfg, std::string_view key_name)
 void Inou_lnast_dfg::process_ast_dot_op(const Lnast_nid &lnidx_dot) {
   //note: the opr name is stored in 1st child in lnast
   auto c0 = lnast->get_first_child(lnidx_dot);
-  name2lnidx_opr[lnast->get_sname(c0)] = lnidx_dot;
+  name2lnidx[lnast->get_sname(c0)] = lnidx_dot;
 }
 
 void Inou_lnast_dfg::process_ast_select_op(const Lnast_nid &lnidx_sel) {
   //note: the opr name is stored in 1st child in lnast
   auto c0 = lnast->get_first_child(lnidx_sel);
-  name2lnidx_opr[lnast->get_sname(c0)] = lnidx_sel;
+  name2lnidx[lnast->get_sname(c0)] = lnidx_sel;
+  fmt::print("select_op target_name:{}\n", lnast->get_sname(c0));
+  fmt::print("stored select first child:{}\n", lnast->get_sname(lnast->get_first_child(name2lnidx[lnast->get_sname(c0)])));
 }
 
 

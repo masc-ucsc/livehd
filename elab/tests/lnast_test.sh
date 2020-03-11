@@ -2,7 +2,7 @@
 rm -rf ./lgdb
 rm -f  yosys_script.*
 
-pts='tuple tuple_if trivial_bitwidth ssa_rhs function_call tuple ssa_nested_if ssa_if nested_if'
+pts='simple_tuple tuple tuple_if trivial_bitwidth ssa_rhs function_call tuple ssa_nested_if ssa_if nested_if'
 # pts='ssa_rhs'
 # pts='tuple'
 # pts='trivial_bitwidth'
@@ -82,7 +82,26 @@ do
 
 
   ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.fromlg verbose:false"
+  mv ${pt}.dot ${pt}.no_bits.tuple.reduced_or.dot
+
+
+  echo ""
+  echo ""
+  echo ""
+  echo "----------------------------------------------------"
+  echo "Reduced_Or_Op Elimination(LGraph)"  
+  echo "----------------------------------------------------"
+  ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.reduced_or_elimination"
+  if [ $? -eq 0 ]; then
+    echo "Successfully eliminate all reduced_or_op: ${pt}.cfg"
+  else
+    echo "ERROR: Pyrope compiler failed: reduced_or_elimination, testcase: ${pt}.cfg"
+    exit 1
+  fi
+
+  ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.fromlg verbose:false"
   mv ${pt}.dot ${pt}.no_bits.tuple.dot
+
 
   echo ""
   echo ""
