@@ -15,11 +15,13 @@ using namespace std;
 
 using google::protobuf::util::TimeUtil;
 
+//----------------Helper Functions--------------------------
+//
 //If the bitwidth is specified, in LNAST we have to create a new variable which represents
 //  the number of bits that a variable will have.
 //FIXME: I need to add stuff to determine if input/output/register and add $/%/# respectively.
 void Inou_firrtl::CreateBitwidthAttribute(uint32_t bitwidth, Lnast_nid& parent_node, std::string port_id) {
-  std::string str_fix = "_B_" + port_id;
+  std::string str_fix = "___" + port_id;
 
   //std::string_view port_name{ port_id };
   std::string_view b_port_name = std::string_view{ str_fix };
@@ -27,7 +29,7 @@ void Inou_firrtl::CreateBitwidthAttribute(uint32_t bitwidth, Lnast_nid& parent_n
   //auto idx_dot     = lnast.add_child(parent_node, Lnast_node::create_dot("dot"));
   cout << "ATTEMPT:-----------------------\nFirst:\n";
   lnast.dump();
-  auto idx_tmp = lnast.add_child(/*idx_dot*/parent_node, Lnast_node::create_ref( b_port_name ));//"_B_" + port_id));
+  auto idx_tmp = lnast.add_child(/*idx_dot*/parent_node, Lnast_node::create_ref( b_port_name ));//"___" + port_id));
   //lnast.add_child(idx_dot, Lnast_node::create_ref(port_name));
   //lnast.add_child(idx_dot, Lnast_node::create_ref("__bits"));
 
@@ -35,14 +37,72 @@ void Inou_firrtl::CreateBitwidthAttribute(uint32_t bitwidth, Lnast_nid& parent_n
 
 
   //auto idx_asg     = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
-  //lnast.add_child(idx_asg, Lnast_node::create_ref(str_fix));//"_B_" + port_id));
+  //lnast.add_child(idx_asg, Lnast_node::create_ref(str_fix));//"___" + port_id));
   //lnast.add_child(idx_asg, Lnast_node::create_const(to_string(bitwidth)));//FIXME: Make sure this gives right value.*/
   cout << "\n\nSecond:\n";
   lnast.dump();
 }
 
+/* These functions are useful because they analyze what the condition of something is
+ * (useful for whens, muxes, ifs, etc.) but instead of creating some node type based
+ * off the expression type, they instead create a "condition" typed node whose
+ * token is the condition itself. */
+void Inou_firrtl::CreateConditionNode(const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node) {
+  CreateConditionNode(expr, parent_node, "");
+}
+
+void Inou_firrtl::CreateConditionNode(const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, const std::string tail) {
+  switch(expr.expression_case()) {
+    case 1: { //Reference
+      cout << expr.reference().id();
+      if(tail == "") {
+        lnast.add_child(parent_node, Lnast_node::create_cond(expr.reference().id()));
+      } else {
+        std::string full_name = expr.reference().id() + "." + tail;
+        //TODO: Figure out how to do this better since right now this leads to string_view out-of-scope corruption.
+        lnast.add_child(parent_node, Lnast_node::create_cond(full_name));
+      }
+      break;
+    } case 7: { //SubField -- this is called when you're accessing a bundle's field (like io.var1)
+      CreateConditionNode(expr.sub_field().expression(), parent_node, expr.sub_field().field());
+      cout << "." << expr.sub_field().field();
+      break;
+
+    } default:
+      cout << "CreateConditionNode: ERROR. Trying to create a condition node for an expression not yet supported or unknown.: " << expr.expression_case() << endl;
+      return;
+  }
+}
+
+/* No mux node type exists in LNAST. To support FIRRTL muxes, we instead
+ * map a mux to an if-else statement whose condition is the same condition
+ * as the first argument of the mux. */
+void Inou_firrtl::HandleMuxAssign(const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, std::string lhs_of_asg) {
+  auto idx_mux_if    = lnast.add_child(parent_node, Lnast_node::create_if("mux"));
+  //FIXME: I'm not sure yet how to make the reference into a cond, yet... auto idx_mux_cond  = lnast.add_child(
+  CreateConditionNode(expr.mux().condition(), idx_mux_if);
+  auto idx_stmt_tr   = lnast.add_child(idx_mux_if, Lnast_node::create_stmts("mux_stmt_true"));
+  auto idx_stmt_f    = lnast.add_child(idx_mux_if, Lnast_node::create_stmts("mux_stmt_false"));
+
+  auto idx_asg_true  = lnast.add_child(idx_stmt_tr, Lnast_node::create_assign("assign"));
+  lnast.add_child(idx_asg_true, Lnast_node::create_ref(lhs_of_asg));
+
+  auto idx_asg_false = lnast.add_child(idx_stmt_f, Lnast_node::create_assign("assign"));
+  lnast.add_child(idx_asg_false, Lnast_node::create_ref(lhs_of_asg));
+
+  cout << "Mux(c:";
+  ListExprInfo(expr.mux().condition(), idx_mux_if);//FIXME
+  cout << ", t:";
+  ListExprInfo(expr.mux().t_value(), idx_asg_true);//FIXME
+  cout << ", f:";
+  ListExprInfo(expr.mux().f_value(), parent_node);//FIXME
+  cout << ");";
+}
+
+
+
 //----------Ports-------------------------
-void Inou_firrtl::CheckPortType(const firrtl::FirrtlPB_Type& type, Lnast_nid& parent_node, std::string port_id) {
+void Inou_firrtl::ListTypeInfo(const firrtl::FirrtlPB_Type& type, Lnast_nid& parent_node, std::string port_id) {
   switch (type.type_case()) {
     case 2: { //UInt type
       cout << "UInt[" << type.uint_type().width().value() << "]" << endl;
@@ -70,7 +130,7 @@ void Inou_firrtl::CheckPortType(const firrtl::FirrtlPB_Type& type, Lnast_nid& pa
       for (int i = 0; i < type.bundle_type().field_size(); i++) {
         cout << "\t" << btype.field(i).id() << ": ";
         //FIXME: This will flatten out any bundles from Chisel design, like in LoFIRRTL. Do we want that?
-        CheckPortType(btype.field(i).type(), parent_node, port_id + "_" + btype.field(i).id());
+        ListTypeInfo(btype.field(i).type(), parent_node, port_id + "_" + btype.field(i).id());
       }
       cout << "\t}\n";
       break;
@@ -79,7 +139,7 @@ void Inou_firrtl::CheckPortType(const firrtl::FirrtlPB_Type& type, Lnast_nid& pa
       const firrtl::FirrtlPB_Type_VectorType vtype = type.vector_type();
       cout << "FIXME: Vector[" << vtype.size()  << "]" << endl;
       //FIXME: How do we want to handle Vectors for LNAST? Should I flatten?
-      //CheckPortType(vtype.type(), parent_node, );//FIXME: Should this be parent_idx?
+      //ListTypeInfo(vtype.type(), parent_node, );//FIXME: Should this be parent_idx?
       break;
 
     } case 7: { //Fixed type
@@ -106,22 +166,21 @@ void Inou_firrtl::CheckPortType(const firrtl::FirrtlPB_Type& type, Lnast_nid& pa
 
 void Inou_firrtl::ListPortInfo(const firrtl::FirrtlPB_Port& port, Lnast_nid parent_node) {
   cout << "\t" << port.id() << ": " << port.direction() << ", ";
-  CheckPortType(port.type(), parent_node, port.id());
+  ListTypeInfo(port.type(), parent_node, port.id());
 }
+
+
 
 //-----------Primitive Operations---------------------
 void Inou_firrtl::PrintPrimOp(const firrtl::FirrtlPB_Expression_PrimOp& op, const std::string symbol, Lnast_nid& parent_node) {
   for (int i = 0; i < op.arg_size(); i++) {
-    //cout << "a_";
     ListExprInfo(op.arg(i), parent_node);//FIXME
     if ((i == (op.arg_size()-1) && (op.const__size() == 0)))
         break;
     cout << symbol;
   }
   for (int j = 0; j < op.const__size(); j++) {
-    //cout << "c_";
-    //Note: We can't just call ListExprInfo like above since this is not of type Expression.
-    lnast.add_child(parent_node, Lnast_node::create_ref(op.const_(j).value()));
+    lnast.add_child(parent_node, Lnast_node::create_const(op.const_(j).value()));
     cout << op.const_(j).value();
     if (j == (op.const__size()-1))
         break;
@@ -193,15 +252,18 @@ void Inou_firrtl::ListPrimOpInfo(const firrtl::FirrtlPB_Expression_PrimOp& op, L
       break;
 
     } case 12: { //Op_Bit_And
-      PrintPrimOp(op, " & ", parent_node);
+      auto idx_and = lnast.add_child(parent_node, Lnast_node::create_and("&"));
+      PrintPrimOp(op, " & ", idx_and);
       break;
 
     } case 13: { //Op_Bit_Or
-      PrintPrimOp(op, " | ", parent_node);
+      auto idx_or = lnast.add_child(parent_node, Lnast_node::create_or("|"));
+      PrintPrimOp(op, " | ", idx_or);
       break;
 
     } case 14: { //Op_Bit_Xor
-      PrintPrimOp(op, " ^ ", parent_node);
+      auto idx_xor = lnast.add_child(parent_node, Lnast_node::create_xor("^"));
+      PrintPrimOp(op, " ^ ", idx_xor);
       break;
 
     } case 15: { //Op_Bit_Not
@@ -268,7 +330,8 @@ void Inou_firrtl::ListPrimOpInfo(const firrtl::FirrtlPB_Expression_PrimOp& op, L
       cout << ".asSint";
       break;
 
-    } case 30: { //Op_Extract_Bits ------ FIXME
+    } case 30: { //Op_Extract_Bits -- this is what's used for grabbing a range of bits from a variable (i.e. foo[3:1])
+
       cout << "primOp: " << op.op();
       break;
 
@@ -336,6 +399,14 @@ void Inou_firrtl::ListPrimOpInfo(const firrtl::FirrtlPB_Expression_PrimOp& op, L
 }
 
 //--------------Expressions-----------------------
+/*TODO:
+ * Reference (need to resolve out-of-scope error)
+ * UIntLiteral (need to resolve out-of-scope error, also make sure used correct syntax: #u(bits))
+ * SIntLiteral (need to resolve out-of-scope error, also make sure used correct syntax: #s(bits))
+ * ValidIf
+ * FixedLiteral
+ * Mux
+ */
 void Inou_firrtl::ListExprInfo(const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node) {
   ListExprInfo(expr, parent_node, "");
 }
@@ -356,43 +427,72 @@ void Inou_firrtl::ListExprInfo(const firrtl::FirrtlPB_Expression& expr, Lnast_ni
     } case 2: { //UIntLiteral
       cout << expr.uint_literal().value().value() << ".U("
            << expr.uint_literal().width().value() << ".W)";
+      std::string constVal = expr.uint_literal().value().value() + "u"
+                             + std::to_string(expr.uint_literal().width().value());
+      //TODO: Figure out how to do this better since right now this leads to string_view out-of-scope corruption.
+      lnast.add_child(parent_node, Lnast_node::create_const(constVal));
       break;
 
     } case 3: { //SIntLiteral
-      cout << expr.uint_literal().value().value() << ".S("
-           << expr.uint_literal().width().value() << ".W)";
+      cout << expr.sint_literal().value().value() << ".S("
+           << expr.sint_literal().width().value() << ".W)";
+      std::string constVal = expr.sint_literal().value().value() + "s"
+                             + std::to_string(expr.sint_literal().width().value());
+      //TODO: Figure out how to do this better since right now this leads to string_view out-of-scope corruption.
+      lnast.add_child(parent_node, Lnast_node::create_const(constVal));
       break;
 
-    } case 4: { //ValidIf
-      cout << "validIf()\n";
+    } case 4: { //ValidIf -- "conditionally valids", looks like: c <= validIf(valid, a), if valid then c = a else c = undefined
+      //FIXME: I think using "if" node type is fine, but maybe it could be better to have a node type for validIfs
+      auto idx_if = lnast.add_child(parent_node, Lnast_node::create_if("validIf"));
+      cout << "validIf(";
+      ListExprInfo(expr.valid_if().condition(), idx_if);
+      cout << ", ";
+      ListExprInfo(expr.valid_if().value(), idx_if);
+      cout << ")\n";
       //FIXME: What is this?
       break;
 
-    } case 6: { //Mux
-      cout << "Mux(t:";
-      ListExprInfo(expr.mux().t_value(), parent_node);//FIXME
+    } case 6: { //Mux -- always has form mux(sel, a, b);
+      //So we need not support mux node types, just change into if-else.
+      auto idx_mux_if    = lnast.add_child(parent_node, Lnast_node::create_if("mux"));
+      //FIXME: I'm not sure yet how to make the reference into a cond, yet... auto idx_mux_cond  = lnast.add_child(
+      auto idx_stmt_tr   = lnast.add_child(idx_mux_if, Lnast_node::create_stmts("mux_stmt_true"));
+      auto idx_stmt_f    = lnast.add_child(idx_mux_if, Lnast_node::create_stmts("mux_stmt_false"));
+
+      auto idx_asg_true  = lnast.add_child(idx_stmt_tr, Lnast_node::create_assign("assign"));
+      auto idx_asg_false = lnast.add_child(idx_stmt_f, Lnast_node::create_assign("assign"));
+
+      cout << "Mux(c:";
+      ListExprInfo(expr.mux().condition(), parent_node);//FIXME
+      cout << ", t:";
+      ListExprInfo(expr.mux().t_value(), idx_asg_true);//FIXME
       cout << ", f:";
       ListExprInfo(expr.mux().f_value(), parent_node);//FIXME
-      cout << ", c:";
-      ListExprInfo(expr.mux().condition(), parent_node);//FIXME
       cout << ");";
       break;
 
-    } case 7: { //SubField -- this is called when you have something like io.var1
+    } case 7: { //SubField -- this is called when you're accessing a bundle's field (like io.var1)
       ListExprInfo(expr.sub_field().expression(), parent_node, expr.sub_field().field());
       cout << "." << expr.sub_field().field();
       break;
 
-    } case 8: { //SubIndex -- this is used when accessing an element of a vector
+    } case 8: { //SubIndex -- this is used when statically accessing an element of a vector-like object
       cout << "Subindex()\n";
+      auto idx_select = lnast.add_child(parent_node, Lnast_node(Lnast_ntype::create_select(), Token(0, 0, 0, 0, "select")));
+      ListExprInfo(expr.sub_index().expression(), idx_select);
+      lnast.add_child(parent_node, Lnast_node::create_const(expr.sub_index().index().value()));
       break;
 
-    } case 9: { //SubAccess
+    } case 9: { //SubAccess -- this is used when dynamically accessing an element of a vector-like object
       cout << "Subaccess()\n";
+      auto idx_select = lnast.add_child(parent_node, Lnast_node(Lnast_ntype::create_select(), Token(0, 0, 0, 0, "select")));
+      ListExprInfo(expr.sub_access().expression(), idx_select);
+      ListExprInfo(expr.sub_access().index(), idx_select);
       break;
 
     } case 10: { //PrimOp
-      ListPrimOpInfo(expr.prim_op(), parent_node);//FIXME
+      ListPrimOpInfo(expr.prim_op(), parent_node);
       break;
 
     } case 11: { //FixedLiteral
@@ -408,6 +508,19 @@ void Inou_firrtl::ListExprInfo(const firrtl::FirrtlPB_Expression& expr, Lnast_ni
 
 
 //------------Statements----------------------
+/*TODO:
+ * Wire
+ * Register
+ * Memory
+ * CMemory
+ * Instances
+ * Stop
+ * Printf
+ * PartialConnect
+ * IsInvalid
+ * MemoryPort
+ * Attach
+*/
 void Inou_firrtl::ListStatementInfo(const firrtl::FirrtlPB_Statement& stmt, Lnast_nid& parent_node) {
   //Print out statement
   switch(stmt.statement_case()) {
@@ -428,26 +541,74 @@ void Inou_firrtl::ListStatementInfo(const firrtl::FirrtlPB_Statement& stmt, Lnas
       break;
 
     } case 3: { //Memory
+      cout << "mem " << stmt.memory().id() << " :\n\t";
+      //ListTypeInfo(
+      cout << "\tdepth => ";
+      switch(stmt.memory().depth_case()) {
+        case 0: {
+          cout << "Depth not set, ERROR\n";
+        } case 3: {
+          cout << stmt.memory().uint_depth() << "\n";
+          break;
+        } case 9: {
+          //FIXME: Not sure this case will work properly... More testing needed.
+          std::string depth = stmt.memory().bigint_depth().value();//2s complement binary rep.
+          cout << depth << "\n";
+          break;
+        } default:
+          cout << "Memory depth error\n";
+      }
+      cout << "\tread-latency => " << stmt.memory().read_latency() << "\n";
+      cout << "\twrite-latency => " << stmt.memory().write_latency() << "\n";
+      for (int i = 0; i < stmt.memory().reader_id_size(); i++) {
+        cout << "\treader => " << stmt.memory().reader_id(i) << "\n";
+      }
+      for (int j = 0; j < stmt.memory().writer_id_size(); j++) {
+        cout << "\twriter => " << stmt.memory().writer_id(j) << "\n";
+      }
+      for (int k = 0; k < stmt.memory().readwriter_id_size(); k++) {
+        cout << "\tread-writer => " << stmt.memory().readwriter_id(k) << "\n";
+      }
+      cout << "\tread-under-write <= ";
+      switch(stmt.memory().read_under_write()) {
+        case 0:
+          cout << "undefined\n";
+          break;
+        case 1:
+          cout << "old\n";
+          break;
+        case 2:
+          cout << "new\n";
+          break;
+        default:
+          cout << "RUW Error...\n";
+      }
       break;
 
     } case 4: { //CMemory
       break;
 
-    } case 5: { //Instance
+    } case 5: { //Instance -- creating an instance of a module inside another
       break;
 
     } case 6: { //Node -- nodes are simply named intermediates in a circuit
       //FIXME: This doesn't follow the tutorial which says we have to break down complex assigns.
-      auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
-      lnast.add_child(idx_asg, Lnast_node::create_ref(stmt.node().id()));
 
       cout << "node " << stmt.node().id();
       cout << " = ";
-      ListExprInfo(stmt.node().expression(), idx_asg);
+      if (stmt.node().expression().expression_case() == 6) { //Expr is a Mux
+        //if expr is a mux, handle differently.
+        HandleMuxAssign(stmt.node().expression(), parent_node, stmt.node().id());
+      } else {
+        //if expr is not a mux, handle normally.
+        auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
+        lnast.add_child(idx_asg, Lnast_node::create_ref(stmt.node().id()));
+        ListExprInfo(stmt.node().expression(), idx_asg);
+      }
       cout << "\n";
       break;
 
-    } case 7: { //When
+    } case 7: { //When -- FIXME I handle conditions wrong here.
       auto idx_when         = lnast.add_child(parent_node, Lnast_node::create_if("when"));
       auto idx_cond         = lnast.add_child(idx_when, Lnast_node::create_cond("cond"));
       auto idx_stmts_ifTrue = lnast.add_child(idx_when, Lnast_node::create_stmts("stmts_when"));
@@ -476,6 +637,7 @@ void Inou_firrtl::ListStatementInfo(const firrtl::FirrtlPB_Statement& stmt, Lnas
 
     } case 10: { //Printf
       //FIXME: Not fully implemented, I think.
+
       cout << "printf(" << stmt.printf().value() << ")\n";
       break;
 
@@ -484,7 +646,6 @@ void Inou_firrtl::ListStatementInfo(const firrtl::FirrtlPB_Statement& stmt, Lnas
       break;
 
     } case 15: { //Connect -- Must have form (female/bi-gender expression) <= (male/bi-gender/passive expression)
-      //FIXME: This doesn't follow the tutorial which says we have to break down complex assigns.
       //FIXME: Should this be just an "assign" or something special?
       auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
 
@@ -529,7 +690,7 @@ Lnast Inou_firrtl::ListUserModuleInfo(const firrtl::FirrtlPB_Module& module) {
   //FIXME: This will probably break for multi-module designs since "lnast" object isn't empty.
   I(lnast.empty());
   //Lnast lnast(module.user_module().id()); //FIXME: The LNAST is currently gets no module name.
-  lnast.set_root(Lnast_node(Lnast_ntype::create_top(), Token()));
+  lnast.set_root(Lnast_node(Lnast_ntype::create_top(), Token(0, 0, 0, 0, "top")));
   auto idx_stmts = lnast.add_child(lnast.get_root(), Lnast_node::create_stmts("stmts"));
 
   //Iterate over I/O of the module.
