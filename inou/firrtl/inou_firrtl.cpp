@@ -78,25 +78,41 @@ void Inou_firrtl::CreateConditionNode(const firrtl::FirrtlPB_Expression& expr, L
  * map a mux to an if-else statement whose condition is the same condition
  * as the first argument of the mux. */
 void Inou_firrtl::HandleMuxAssign(const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, std::string lhs_of_asg) {
+  cout << "Mux\n";
+
   auto idx_mux_if    = lnast.add_child(parent_node, Lnast_node::create_if("mux"));
-  //FIXME: I'm not sure yet how to make the reference into a cond, yet... auto idx_mux_cond  = lnast.add_child(
   CreateConditionNode(expr.mux().condition(), idx_mux_if);
   auto idx_stmt_tr   = lnast.add_child(idx_mux_if, Lnast_node::create_stmts("mux_stmt_true"));
   auto idx_stmt_f    = lnast.add_child(idx_mux_if, Lnast_node::create_stmts("mux_stmt_false"));
 
   auto idx_asg_true  = lnast.add_child(idx_stmt_tr, Lnast_node::create_assign("assign"));
   lnast.add_child(idx_asg_true, Lnast_node::create_ref(lhs_of_asg));
+  ListExprInfo(expr.mux().t_value(), idx_asg_true);
 
   auto idx_asg_false = lnast.add_child(idx_stmt_f, Lnast_node::create_assign("assign"));
   lnast.add_child(idx_asg_false, Lnast_node::create_ref(lhs_of_asg));
+  ListExprInfo(expr.mux().f_value(), idx_asg_false);
+}
 
-  cout << "Mux(c:";
-  ListExprInfo(expr.mux().condition(), idx_mux_if);//FIXME
-  cout << ", t:";
-  ListExprInfo(expr.mux().t_value(), idx_asg_true);//FIXME
-  cout << ", f:";
-  ListExprInfo(expr.mux().f_value(), parent_node);//FIXME
-  cout << ");";
+/* ValidIfs get detected as the RHS of an assign statement and we can't have a child of
+ * an assign be an if-typed node. Thus, we have to detect ahead of time if it is a validIf
+ * if we're doing an assign. If that is the case, do this instead of using ListExprType().*/
+void Inou_firrtl::HandleValidIfAssign(const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, std::string lhs_of_asg) {
+  cout << "ValidIf\n";
+
+  auto idx_v_if      = lnast.add_child(parent_node, Lnast_node::create_if("validIf"));
+  CreateConditionNode(expr.valid_if().condition(), idx_v_if);
+  auto idx_stmt_tr   = lnast.add_child(idx_v_if, Lnast_node::create_stmts("vIf_stmt_true"));
+  auto idx_stmt_f    = lnast.add_child(idx_v_if, Lnast_node::create_stmts("vIf_stmt_false"));
+
+  auto idx_asg_true  = lnast.add_child(idx_stmt_tr, Lnast_node::create_assign("assign"));
+  lnast.add_child(idx_asg_true, Lnast_node::create_ref(lhs_of_asg));
+  ListExprInfo(expr.valid_if().value(), idx_v_if);
+
+  //For validIf, if the condition is not met then what the LHS equals is undefined. We'll just use 0.
+  auto idx_asg_false = lnast.add_child(idx_stmt_f, Lnast_node::create_assign("assign"));
+  lnast.add_child(idx_asg_false, Lnast_node::create_ref(lhs_of_asg));
+  lnast.add_child(idx_asg_false, Lnast_node::create_const("0"));
 }
 
 
@@ -403,9 +419,7 @@ void Inou_firrtl::ListPrimOpInfo(const firrtl::FirrtlPB_Expression_PrimOp& op, L
  * Reference (need to resolve out-of-scope error)
  * UIntLiteral (need to resolve out-of-scope error, also make sure used correct syntax: #u(bits))
  * SIntLiteral (need to resolve out-of-scope error, also make sure used correct syntax: #s(bits))
- * ValidIf
  * FixedLiteral
- * Mux
  */
 void Inou_firrtl::ListExprInfo(const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node) {
   ListExprInfo(expr, parent_node, "");
@@ -443,33 +457,11 @@ void Inou_firrtl::ListExprInfo(const firrtl::FirrtlPB_Expression& expr, Lnast_ni
       break;
 
     } case 4: { //ValidIf -- "conditionally valids", looks like: c <= validIf(valid, a), if valid then c = a else c = undefined
-      //FIXME: I think using "if" node type is fine, but maybe it could be better to have a node type for validIfs
-      auto idx_if = lnast.add_child(parent_node, Lnast_node::create_if("validIf"));
-      cout << "validIf(";
-      ListExprInfo(expr.valid_if().condition(), idx_if);
-      cout << ", ";
-      ListExprInfo(expr.valid_if().value(), idx_if);
-      cout << ")\n";
-      //FIXME: What is this?
+      cout << "ListExprInfo Error: Handling validIfs should not be handled here (see HandleValidIfAssign function)\n";
       break;
 
     } case 6: { //Mux -- always has form mux(sel, a, b);
-      //So we need not support mux node types, just change into if-else.
-      auto idx_mux_if    = lnast.add_child(parent_node, Lnast_node::create_if("mux"));
-      //FIXME: I'm not sure yet how to make the reference into a cond, yet... auto idx_mux_cond  = lnast.add_child(
-      auto idx_stmt_tr   = lnast.add_child(idx_mux_if, Lnast_node::create_stmts("mux_stmt_true"));
-      auto idx_stmt_f    = lnast.add_child(idx_mux_if, Lnast_node::create_stmts("mux_stmt_false"));
-
-      auto idx_asg_true  = lnast.add_child(idx_stmt_tr, Lnast_node::create_assign("assign"));
-      auto idx_asg_false = lnast.add_child(idx_stmt_f, Lnast_node::create_assign("assign"));
-
-      cout << "Mux(c:";
-      ListExprInfo(expr.mux().condition(), parent_node);//FIXME
-      cout << ", t:";
-      ListExprInfo(expr.mux().t_value(), idx_asg_true);//FIXME
-      cout << ", f:";
-      ListExprInfo(expr.mux().f_value(), parent_node);//FIXME
-      cout << ");";
+      cout << "ListExprInfo Error: Handling muxes should not be handled here (see HandleMuxAssign function)\n";
       break;
 
     } case 7: { //SubField -- this is called when you're accessing a bundle's field (like io.var1)
@@ -596,15 +588,20 @@ void Inou_firrtl::ListStatementInfo(const firrtl::FirrtlPB_Statement& stmt, Lnas
 
       cout << "node " << stmt.node().id();
       cout << " = ";
-      if (stmt.node().expression().expression_case() == 6) { //Expr is a Mux
+
+      if (stmt.node().expression().expression_case() == 4) { //Expr is a validIf
+        //if expr is a validIf, handle differently
+        HandleValidIfAssign(stmt.node().expression(), parent_node, stmt.node().id());
+      } else if (stmt.node().expression().expression_case() == 6) { //Expr is a mux
         //if expr is a mux, handle differently.
         HandleMuxAssign(stmt.node().expression(), parent_node, stmt.node().id());
       } else {
-        //if expr is not a mux, handle normally.
+        //the expr can be handled normally.
         auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
         lnast.add_child(idx_asg, Lnast_node::create_ref(stmt.node().id()));
         ListExprInfo(stmt.node().expression(), idx_asg);
       }
+
       cout << "\n";
       break;
 
