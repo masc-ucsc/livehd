@@ -60,8 +60,6 @@ do
     exit 1
   fi
   
-
-
   echo ""
   echo ""
   echo ""

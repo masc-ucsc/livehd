@@ -236,7 +236,7 @@ void Inou_lnast_dfg::process_ast_assign_op(LGraph *dfg, const Lnast_nid &lnidx_a
   if (name2lnidx_opr.find(c1_name) != name2lnidx_opr.end()) {
     auto ast_opr_idx = name2lnidx_opr[c1_name];
     //rhs example: (1)bar = tup.foo; (2) bar = tup.foo + tup[1]
-    if (lnast->get_type(ast_opr_idx).is_dot() || lnast->get_type(ast_opr_idx).is_select())
+    if (lnast->get_type(ast_opr_idx).is_dot() or lnast->get_type(ast_opr_idx).is_select())
       add_tuple_get_from_dot_or_sel(dfg, name2lnidx_opr[c1_name]);
   }
 
