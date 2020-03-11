@@ -7,10 +7,10 @@
 # (1) RapidWrightAPI.java
 # (2) RapidWrightExample.cpp
 
-GRAAL_PATH := $(shell pwd)/graalvm-ce-19.2.1/bin
-RAPIDWRIGHT_PATH := $(shell pwd)/RapidWright
+# GRAAL_PATH := $(shell pwd)/graalvm-ce-19.2.1/bin
+# RAPIDWRIGHT_PATH := $(shell pwd)/RapidWright
 JAR_PATH=$(RAPIDWRIGHT_PATH)/jars
-LiveHD_PATH := $(shell pwd)/livehd/inou/rapidwright
+# LiveHD_PATH := $(shell pwd)/livehd/inou/rapidwright
 
 .PHONY: all run run_RapidWrightExample
 
@@ -19,24 +19,20 @@ LiveHD_PATH := $(shell pwd)/livehd/inou/rapidwright
 # This target will run all steps in order (installing RapidWright and Graal, updating RapidWright, compiling the .so and the compiling and running the example)
 all: testAPI
 
-update_graal:
-	wget https://github.com/oracle/graal/releases/download/vm-19.2.1/graalvm-ce-linux-amd64-19.2.1.tar.gz
-	tar zxf graalvm-ce-linux-amd64-19.2.1.tar.gz
-	$(GRAAL_PATH)/gu install native-image
 
-# Installs RapidWright with source code
-install_rapidwright:
-	wget http://www.rapidwright.io/docs/_downloads/rapidwright-installer.jar
-	PATH="$(GRAAL_PATH):$(PATH)" && java -jar rapidwright-installer.jar -t -k
+# # Installs RapidWright with source code
+# install_rapidwright:
+# 	wget http://www.rapidwright.io/docs/_downloads/rapidwright-installer.jar
+# 	PATH="$(GRAAL_PATH):$(PATH)" && java -jar rapidwright-installer.jar -t -k
 
-# Removes the one file dependency in RapidWright on Jython and removes unnecessary jars
-remove_jython:
-	rm $(JAR_PATH)/jython-standalone-2.7.0.jar
-	rm $(JAR_PATH)/jupyter-kernel-jsr223.jar
-	rm $(JAR_PATH)/jeromq-0.3.6.jar
-	rm $(JAR_PATH)/junit-4.12.jar
-	rm $(RAPIDWRIGHT_PATH)/bin/com/xilinx/rapidwright/util/RapidWright.class
-	rm $(RAPIDWRIGHT_PATH)/src/com/xilinx/rapidwright/util/RapidWright.java
+# # Removes the one file dependency in RapidWright on Jython and removes unnecessary jars
+# remove_jython:
+# 	rm $(JAR_PATH)/jython-standalone-2.7.0.jar
+# 	rm $(JAR_PATH)/jupyter-kernel-jsr223.jar
+# 	rm $(JAR_PATH)/jeromq-0.3.6.jar
+# 	rm $(JAR_PATH)/junit-4.12.jar
+# 	rm $(RAPIDWRIGHT_PATH)/bin/com/xilinx/rapidwright/util/RapidWright.class
+# 	rm $(RAPIDWRIGHT_PATH)/src/com/xilinx/rapidwright/util/RapidWright.java
 
 # Adds an example file and compiles it for use with the C++ calls to the RapidWright project/classpath
 $(RAPIDWRIGHT_PATH)/bin/com/xilinx/rapidwright/examples/RapidWrightAPI.class: RapidWrightAPI.java
@@ -54,13 +50,13 @@ RapidWrightExample: librapidwright.so RapidWrightExample.cpp
 testAPI: librapidwright.so testAPI.cpp
 	g++ -o testAPI testAPI.cpp -I. -L. -lrapidwright
 
-duplicateFiles:
-	#rm $(LiveHD_PATH)/librapidwright_dynamic.h #$(LiveHD_PATH)/librapidwright.h $(LiveHD_PATH)/RapidWrightAPI.java $(LiveHD_PATH)/testAPI.cpp $(LiveHD_PATH)/Makefile
-	cp *.java $(LiveHD_PATH)
-	cp *.h $(LiveHD_PATH)
-	cp *.hpp $(LiveHD_PATH)
-	cp *.cpp $(LiveHD_PATH)
-	cp Makefile $(LiveHD_PATH)
+# duplicateFiles:
+# 	#rm $(LiveHD_PATH)/librapidwright_dynamic.h #$(LiveHD_PATH)/librapidwright.h $(LiveHD_PATH)/RapidWrightAPI.java $(LiveHD_PATH)/testAPI.cpp $(LiveHD_PATH)/Makefile
+# 	cp *.java $(LiveHD_PATH)
+# 	cp *.h $(LiveHD_PATH)
+# 	cp *.hpp $(LiveHD_PATH)
+# 	cp *.cpp $(LiveHD_PATH)
+# 	cp Makefile $(LiveHD_PATH)
 
 # Runs the example C++ program, should generte two dcp files separately
 run: testAPI

@@ -32,8 +32,12 @@ import org.graalvm.word.WordFactory;
 import com.xilinx.rapidwright.design.Cell;
 import com.xilinx.rapidwright.design.Design;
 import com.xilinx.rapidwright.design.DesignTools;
+import com.xilinx.rapidwright.design.Module;
+import com.xilinx.rapidwright.design.ModuleInst;
 import com.xilinx.rapidwright.design.Net;
 import com.xilinx.rapidwright.design.PinType;
+import com.xilinx.rapidwright.design.Port;
+import com.xilinx.rapidwright.design.SitePinInst;
 import com.xilinx.rapidwright.design.Unisim;
 import com.xilinx.rapidwright.device.Device;
 import com.xilinx.rapidwright.util.FileTools;
@@ -53,6 +57,7 @@ import com.xilinx.rapidwright.router.RouteNode;
 import com.xilinx.rapidwright.router.Router;
 import com.xilinx.rapidwright.edif.EDIFParser;
 import com.xilinx.rapidwright.edif.EDIFTools;
+import com.xilinx.rapidwright.edif.EDIFLibrary;
 import com.xilinx.rapidwright.placer.blockplacer.BlockPlacer;
 import com.xilinx.rapidwright.placer.blockplacer.BlockPlacer2;
 import com.xilinx.rapidwright.placer.blockplacer.Point;
@@ -69,34 +74,12 @@ import java.util.*;
 import java.io.FileNotFoundException;
 import java.io.PrintWriter;
 
-//import com.xilinx.rapidwright.examples.RapidWrightAPI.cInterfaceHeaderFunctions;
 
-//@CContext(cInterfaceHeaderFunctions.class)
 public class RapidWrightAPI {
-  //static final HashMap<Integer, Design> DESIGN_ID_LIST = new HashMap<Integer, Design>(); //vector<>
   private static List<Design> DESIGN_ID_LIST = new ArrayList<Design>();
   private static List<Cell> CELL_ID_LIST = new ArrayList<Cell>();
-  /*static class cInterfaceHeaderFunctions implements CContext.Directives {
-      @Override
-      public List<String> getHeaderFiles() {
-          /*
-           * The header file with the C declarations that are imported. We use a helper class that
-           * locates the file in our project structure.
-           */
-  /*        return Collections.singletonList("</mnt/c/Users/27688/Desktop/Lgraph_rapidwright/xilinx/GraalVMExample/myObjects.h>");
-      }
-  }*/
-  /* Import a C structure, with accessor methods for every field. */
-    /*@CStruct("my_design")
-    interface myDesign extends PointerBase {
-
-        @CField("java_object_handle")
-        ObjectHandle getJavaObject();
-
-        @CField("java_object_handle")
-        void setJavaObject(ObjectHandle value);
-    }*/
-
+  private static List<Module> MODULE_ID_LIST = new ArrayList<Module>();
+  private static List<ModuleInst> MODULEINST_ID_LIST = new ArrayList<ModuleInst>();
     /*
      *java functions to create a new Design
      */
@@ -136,25 +119,60 @@ public class RapidWrightAPI {
       Design design = DESIGN_ID_LIST.get(design_ID);
       String gateName = CTypeConversion.toJavaString(gateName_c);
       Cell and2 = design.createCell(gateName, Unisim.AND2);
-      //DesignTools.placeCell(and2, design);
       CELL_ID_LIST.add(and2);
       return CELL_ID_LIST.indexOf(and2);
     }
 
     /*
+     *java functions to create module inherit from design and build on a new topdesign
+     */
+    @CEntryPoint( name = "RW_create_Module")
+    public static int RW_create_Module(IsolateThread thread, int design_ID, int top_design_ID)
+    {
+
+      Design topDesign = DESIGN_ID_LIST.get(top_design_ID);
+      Design design = DESIGN_ID_LIST.get(design_ID);
+      Module module = new Module(design);
+
+      module.setNetlist(design.getNetlist());
+      for(EDIFCell cell : design.getNetlist().getWorkLibrary().getCells()){
+			topDesign.getNetlist().getWorkLibrary().addCell(cell);
+  		}
+  		EDIFLibrary hdi = topDesign.getNetlist().getHDIPrimitivesLibrary();
+  		for(EDIFCell cell : design.getNetlist().getHDIPrimitivesLibrary().getCells()){
+  			if(!hdi.containsCell(cell)) hdi.addCell(cell);
+  		}
+
+      MODULE_ID_LIST.add(module);
+      return MODULE_ID_LIST.size() - 1;
+    }
+
+    /*
+     *java functions to create module instance from a existing module on a given topdesign
+     */
+    @CEntryPoint( name = "RW_create_ModuleInst")
+    public static int RW_create_ModuleInst(IsolateThread thread, CCharPointer modInst_name, int module_ID, int top_design_ID)
+    {
+
+      Design topDesign = DESIGN_ID_LIST.get(top_design_ID);
+      Module module = MODULE_ID_LIST.get(module_ID);
+      System.out.println("module and design have been found");
+      ModuleInst moduleInst = topDesign.createModuleInst("moduleInst", module);
+      moduleInst.place(module.getAnchor().getSite());
+
+      MODULEINST_ID_LIST.add(moduleInst);
+      return MODULEINST_ID_LIST.size() - 1;
+    }
+    /*
      *A separte function to place cells
      */
     @CEntryPoint( name = "RW_place_Cell")
-    public static boolean RW_place_Cell(IsolateThread thread, int cell_ID, int design_ID)
+    public static void RW_place_Cell(IsolateThread thread, int cell_ID, int design_ID)
     {
 
       Design design = DESIGN_ID_LIST.get(design_ID);
       Cell cell = CELL_ID_LIST.get(cell_ID);
-      System.out.println("cellID: " + cell_ID);
-      System.out.println("cell's name: " + cell.getName());
-      boolean placed = DesignTools.placeCell(cell, design);
-      System.out.println(cell.getSiteName());
-      return placed;
+      DesignTools.placeCell(cell, design);
 
     }
 
@@ -163,7 +181,6 @@ public class RapidWrightAPI {
     {
       Design design = DESIGN_ID_LIST.get(design_ID);
       design.setAutoIOBuffers(bool);
-
       return bool;
     }
 
@@ -174,21 +191,15 @@ public class RapidWrightAPI {
       Design placed_design = new BlockPlacer2().placeDesign(design, false);
     }
 
-    @CEntryPoint( name = "RW_connect_Ports")
-    public static void RW_connect_Ports(IsolateThread thread, int design_ID, int src_ID, CCharPointer src_port, int snk_ID, CCharPointer snk_port)
+    @CEntryPoint( name = "RW_costum_Route")
+    public static void RW_costumRoute(IsolateThread thread, int design_ID, int src_ID, int snk_ID)
     {
       Design design = DESIGN_ID_LIST.get(design_ID);
       Cell src = CELL_ID_LIST.get(src_ID);
-      String src_portName = CTypeConversion.toJavaString(src_port);
-      if (src == null) {
-        System.out.println("src and2 is null!!!");
-        return;
-      }
       Cell snk = CELL_ID_LIST.get(snk_ID);
-      String snk_portName = CTypeConversion.toJavaString(snk_port);
-      Net net = design.createNet(src_portName + "to" + snk_portName);
-      net.connect(src, src_portName);
-      net.connect(snk, snk_portName);
+      Net customRoutedNet = design.createNet("src");
+      customRoutedNet.connect(src, "Q");
+		  customRoutedNet.connect(snk, "D");
     }
 
     @CEntryPoint( name = "RW_route_Design")
