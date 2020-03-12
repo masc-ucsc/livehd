@@ -646,7 +646,7 @@ public:
 // TN = tuple name, KP = key position , KN = key name, V = value
 class Node_Type_TupAdd : public Node_Type {
 public:
-  Node_Type_TupAdd() : Node_Type("tuple_add", TupAdd_Op, false) {
+  Node_Type_TupAdd() : Node_Type("tup_add", TupAdd_Op, false) {
     inputs.push_back("TN");
     inputs.push_back("KN");
     inputs.push_back("KP");
@@ -659,7 +659,7 @@ public:
 // A = tuple precedence, K = position or name, Y = value
 class Node_Type_TupGet : public Node_Type {
 public:
-  Node_Type_TupGet() : Node_Type("tuple_get", TupGet_Op, false) {
+  Node_Type_TupGet() : Node_Type("tup_get", TupGet_Op, false) {
     inputs.push_back("A");
     inputs.push_back("KN");
     inputs.push_back("KP");
@@ -671,7 +671,7 @@ public:
 // Y = tuple root name, only used for tuple initialization
 class Node_Type_TupRef : public Node_Type {
 public:
-  Node_Type_TupRef() : Node_Type("tuple_ref", TupRef_Op, true) {
+  Node_Type_TupRef() : Node_Type("tup_ref", TupRef_Op, true) {
     outputs.push_back("Y");
   };
 };
@@ -679,7 +679,7 @@ public:
 // Y = tuple key name
 class Node_Type_TupKey : public Node_Type {
 public:
-  Node_Type_TupKey() : Node_Type("tuple_key", TupKey_Op, true) {
+  Node_Type_TupKey() : Node_Type("tup_key", TupKey_Op, true) {
     outputs.push_back("Y");
   };
 };

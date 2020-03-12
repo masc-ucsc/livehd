@@ -35,16 +35,6 @@ Inou_lnast_dfg::Inou_lnast_dfg(const Eprp_var &var) : Pass("inou.lnast_dfg", var
   setup_lnast_to_lgraph_primitive_type_mapping();
 }
 
-void Inou_lnast_dfg::tolg(Eprp_var &var) {
-  Inou_lnast_dfg p(var);
-  std::vector<LGraph *> lgs = p.do_tolg();
-
-  if (lgs.empty()) {
-    error("failed to generate any lgraph from lnast");
-  } else {
-    var.add(lgs);
-  }
-}
 
 void Inou_lnast_dfg::resolve_tuples(Eprp_var &var) {
   Inou_lnast_dfg p(var);
@@ -55,6 +45,35 @@ void Inou_lnast_dfg::resolve_tuples(Eprp_var &var) {
   }
 }
 
+void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
+
+  absl::flat_hash_set<Node::Compact> to_be_deleted;
+  for (const auto &node : dfg->fast()) {
+    if (node.get_type().op == TupAdd_Op) {
+      to_be_deleted.insert(node.get_compact());
+
+      I(node.get_sink_pin(0).inp_edges().size() == 1);
+      I(node.get_sink_pin(3).inp_edges().size() == 1);
+
+      if (is_bit_attr_tuple_add(node)) {
+        //FIXME->sh: now I assume value pin is connected to constant node directly, need to switch to full tuple chain path resolution
+        auto bits = node.get_sink_pin(3).inp_edges().begin()->driver.get_node().get_type_const_value();
+        auto target_dpin = Node_pin::find_driver_pin(dfg, node.get_driver_pin().get_name());
+        target_dpin.ref_bitwidth()->e.set_ubits(bits);
+      } else {
+        ; // true tuple resolving
+      }
+
+    } else if (node.get_type().op == TupGet_Op) {
+      ;
+    }
+  }
+
+  for (auto &itr : to_be_deleted) {
+    fmt::print("delete {}\n", itr.get_node(dfg).debug_name());
+    itr.get_node(dfg).del_node();
+  }
+}
 
 void Inou_lnast_dfg::reduced_or_elimination(Eprp_var &var) {
   Inou_lnast_dfg p(var);
@@ -65,6 +84,42 @@ void Inou_lnast_dfg::reduced_or_elimination(Eprp_var &var) {
   }
 }
 
+
+void Inou_lnast_dfg::do_reduced_or_elimination(LGraph *dfg) {
+  absl::flat_hash_set<Node::Compact> to_be_deleted;
+  for (const auto &node : dfg->fast()) {
+    if (node.get_type().op == Or_Op) {
+      bool is_reduced_or = node.out_edges().begin()->driver.get_pid() == 1;
+      if (is_reduced_or) {
+        I(node.inp_edges().size() == 1);
+        for (auto &out : node.out_edges()) {
+          auto dpin = node.inp_edges().begin()->driver;
+          dpin.set_name(node.get_driver_pin(1).get_name());
+          auto spin = out.sink;
+          dfg->add_edge(dpin, spin);
+        }
+        to_be_deleted.insert(node.get_compact());
+      }
+    }
+  }
+
+  for (auto &itr : to_be_deleted) {
+    fmt::print("delete {}\n", itr.get_node(dfg).debug_name());
+    itr.get_node(dfg).del_node();
+  }
+}
+
+
+void Inou_lnast_dfg::tolg(Eprp_var &var) {
+  Inou_lnast_dfg p(var);
+  std::vector<LGraph *> lgs = p.do_tolg();
+
+  if (lgs.empty()) {
+    error("failed to generate any lgraph from lnast");
+  } else {
+    var.add(lgs);
+  }
+}
 
 
 std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
@@ -103,60 +158,8 @@ std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
   return lgs;
 }
 
-void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
-
-  absl::flat_hash_set<Node::Compact> to_be_deleted;
-  for (const auto &node : dfg->fast()) {
-    if (node.get_type().op == TupAdd_Op) {
-      to_be_deleted.insert(node.get_compact());
-
-      I(node.get_sink_pin(0).inp_edges().size() == 1);
-      I(node.get_sink_pin(3).inp_edges().size() == 1);
-
-      if (is_bit_attr_tuple_add(node)) {
-        //FIXME->sh: now I assume value pin is connected to constant node directly, need to switch to full tuple chain path resolution
-        auto bits = node.get_sink_pin(3).inp_edges().begin()->driver.get_node().get_type_const_value();
-        auto target_dpin = Node_pin::find_driver_pin(dfg, node.get_driver_pin().get_name());
-        target_dpin.ref_bitwidth()->e.set_ubits(bits);
-      } else {
-        ; // true tuple resolving
-      }
-
-    } else if (node.get_type().op == TupGet_Op) {
-      ;
-    }
-  }
-
-  for (auto &itr : to_be_deleted) {
-    fmt::print("delete {}\n", itr.get_node(dfg).debug_name());
-    itr.get_node(dfg).del_node();
-  }
-}
 
 
-void Inou_lnast_dfg::do_reduced_or_elimination(LGraph *dfg) {
-  absl::flat_hash_set<Node::Compact> to_be_deleted;
-  for (const auto &node : dfg->fast()) {
-    if (node.get_type().op == Or_Op) {
-      bool is_reduced_or = node.out_edges().begin()->driver.get_pid() == 1;
-      if (is_reduced_or) {
-        I(node.inp_edges().size() == 1);
-        for (auto &out : node.out_edges()) {
-          auto dpin = node.inp_edges().begin()->driver;
-          dpin.set_name(node.get_driver_pin(1).get_name());
-          auto spin = out.sink;
-          dfg->add_edge(dpin, spin);
-        }
-        to_be_deleted.insert(node.get_compact());
-      }
-    }
-  }
-
-  for (auto &itr : to_be_deleted) {
-    fmt::print("delete {}\n", itr.get_node(dfg).debug_name());
-    itr.get_node(dfg).del_node();
-  }
-}
 
 
 void Inou_lnast_dfg::lnast2lgraph(LGraph *dfg) {
@@ -212,7 +215,7 @@ void Inou_lnast_dfg::process_ast_stmts(LGraph *dfg, const Lnast_nid &lnidx_stmts
   }
 }
 
-// FIXME->sh: maybe handle concatenate like dot/sel to avoid internal reduced Or_Op
+
 void Inou_lnast_dfg::process_ast_concat_op(LGraph *dfg, const Lnast_nid &lnidx_concat) {
   auto tup_add    = dfg->create_node(TupAdd_Op);
   auto tn_spin    = tup_add.setup_sink_pin(0); //tuple name
@@ -388,7 +391,12 @@ Node_pin Inou_lnast_dfg::add_tuple_add_from_sel(LGraph *dfg, const Lnast_nid &ln
   auto c1_sel = lnast->get_sibling_next(c0_sel);   //c1: tuple name
   auto c2_sel = lnast->get_sibling_next(c1_sel);   //c2: key position
 
-  auto tn_dpin = setup_tuple_ref(dfg, lnast->get_sname(c1_sel));
+
+  auto target_subs = lnast->get_subs(c1_sel) == 0 ? 0 : lnast->get_subs(c1_sel) -1 ; //FIXME->sh: need check with __bits attr.
+  auto target_tuple_ref_name = absl::StrCat(std::string(lnast->get_name(c1_sel)), "_", lnast->get_subs(c1_sel)-1);
+  // auto tn_dpin = setup_tuple_ref(dfg, lnast->get_sname(c1_sel));
+  auto tn_dpin = setup_tuple_ref(dfg, target_tuple_ref_name);
+
   dfg->add_edge(tn_dpin, tn_spin);
 
   auto kp_dpin = setup_ref_node_dpin(dfg, c2_sel);
@@ -399,7 +407,6 @@ Node_pin Inou_lnast_dfg::add_tuple_add_from_sel(LGraph *dfg, const Lnast_nid &ln
   auto value_dpin = setup_ref_node_dpin(dfg, c1_assign);
   dfg->add_edge(value_dpin, value_spin);
 
-  I(lnast->get_sname(c1_sel) == tn_dpin.get_name());
   name2dpin[lnast->get_sname(c1_sel)] = tup_add.setup_driver_pin();
   tup_add.setup_driver_pin().set_name(lnast->get_sname(c1_sel)); //note: tuple ref semantically move to here
   fmt::print("tup_add dpin name is:{}\n", lnast->get_sname(c1_sel));
@@ -420,7 +427,10 @@ Node_pin Inou_lnast_dfg::add_tuple_add_from_dot(LGraph *dfg, const Lnast_nid &ln
   auto c1_dot = lnast->get_sibling_next(c0_dot);   //c1: tuple name
   auto c2_dot = lnast->get_sibling_next(c1_dot);   //c2: key name
 
-  auto tn_dpin = setup_tuple_ref(dfg, lnast->get_sname(c1_dot));
+  auto target_subs = lnast->get_subs(c1_dot) == 0 ? 0 : lnast->get_subs(c1_dot) -1 ;
+  auto target_tuple_ref_name = absl::StrCat(std::string(lnast->get_name(c1_dot)), "_", target_subs);
+  // auto tn_dpin = setup_tuple_ref(dfg, lnast->get_sname(c1_dot));
+  auto tn_dpin = setup_tuple_ref(dfg, target_tuple_ref_name);
   dfg->add_edge(tn_dpin, tn_spin);
 
   auto kn_dpin = setup_tuple_key(dfg, lnast->get_sname(c2_dot));
@@ -431,7 +441,6 @@ Node_pin Inou_lnast_dfg::add_tuple_add_from_dot(LGraph *dfg, const Lnast_nid &ln
   auto value_dpin = setup_ref_node_dpin(dfg, c1_assign);
   dfg->add_edge(value_dpin, value_spin);
 
-  I(lnast->get_sname(c1_dot) == tn_dpin.get_name());
   name2dpin[lnast->get_sname(c1_dot)] = tup_add.setup_driver_pin();
   tup_add.setup_driver_pin().set_name(lnast->get_sname(c1_dot)); //note: tuple ref semantically move to here
   fmt::print("tup_add dpin name is:{}\n", lnast->get_sname(c1_dot));

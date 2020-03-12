@@ -145,6 +145,8 @@ void Inou_graphviz::populate_lg_data(LGraph *g) {
         data += fmt::format(" {}->{}[label=<{}b:({},{})>];\n", dn_name, sn_name, dbits, dp_pid, sp_pid);
       else if (node.get_type().op == TupRef_Op)
         data += fmt::format(" {}->{}[label=<({},{}):<font color=\"#0000ff\">{}</font>>];\n", dn_name, sn_name, dp_pid, sp_pid, dp_name);
+      else if (node.get_type().op == TupAdd_Op)
+        data += fmt::format(" {}->{}[label=<{}b:({},{}):<font color=\"#0000ff\">{}</font>>];\n", dn_name, sn_name, dbits, dp_pid, sp_pid, dp_name);
       else
         data += fmt::format(" {}->{}[label=<{}b:({},{}):{}>];\n", dn_name, sn_name, dbits, dp_pid, sp_pid, dp_name);
     }
