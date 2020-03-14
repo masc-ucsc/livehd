@@ -33,6 +33,9 @@ class Test1 extends Module {
   when (io.vec_set) {
     io.vec_subInd_out := io.vec(1)
     io.vec_subAcc_out := io.vec(io.vec_subAcc)
+  } .otherwise {
+    io.vec_subInd_out := 0.U
+    io.vec_subAcc_out := 0.U
   }
 
 }

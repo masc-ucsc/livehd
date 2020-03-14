@@ -16,31 +16,21 @@ using namespace std;
 using google::protobuf::util::TimeUtil;
 
 //----------------Helper Functions--------------------------
-//
+
 //If the bitwidth is specified, in LNAST we have to create a new variable which represents
 //  the number of bits that a variable will have.
 //FIXME: I need to add stuff to determine if input/output/register and add $/%/# respectively.
 void Inou_firrtl::CreateBitwidthAttribute(uint32_t bitwidth, Lnast_nid& parent_node, std::string port_id) {
   std::string str_fix = "___" + port_id;
 
-  //std::string_view port_name{ port_id };
-  std::string_view b_port_name = std::string_view{ str_fix };
-  //cout << "CreateBitwidthAttr: " << to_string(bitwidth) << ", " << port_name;
-  //auto idx_dot     = lnast.add_child(parent_node, Lnast_node::create_dot("dot"));
-  cout << "ATTEMPT:-----------------------\nFirst:\n";
-  lnast.dump();
-  auto idx_tmp = lnast.add_child(/*idx_dot*/parent_node, Lnast_node::create_ref( b_port_name ));//"___" + port_id));
-  //lnast.add_child(idx_dot, Lnast_node::create_ref(port_name));
-  //lnast.add_child(idx_dot, Lnast_node::create_ref("__bits"));
+  auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_dot("dot"));
+  lnast.add_child(idx_dot, Lnast_node::create_ref( str_fix ));
+  lnast.add_child(idx_dot, Lnast_node::create_ref(port_id));
+  lnast.add_child(idx_dot, Lnast_node::create_ref("__bits"));
 
-  //cout << "...{" << lnast.get_data(idx_tmp).token.text << ", " << port_name << ", " << "}\n";
-
-
-  //auto idx_asg     = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
-  //lnast.add_child(idx_asg, Lnast_node::create_ref(str_fix));//"___" + port_id));
-  //lnast.add_child(idx_asg, Lnast_node::create_const(to_string(bitwidth)));//FIXME: Make sure this gives right value.*/
-  cout << "\n\nSecond:\n";
-  lnast.dump();
+  auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
+  lnast.add_child(idx_asg, Lnast_node::create_ref(str_fix));
+  lnast.add_child(idx_asg, Lnast_node::create_const(to_string(bitwidth)));//TODO: Make sure this gives right value.
 }
 
 /* These functions are useful because they analyze what the condition of something is
@@ -118,20 +108,21 @@ void Inou_firrtl::HandleValidIfAssign(const firrtl::FirrtlPB_Expression& expr, L
 
 
 //----------Ports-------------------------
+/* This function is used for the following syntax rules in FIRRTL:
+ * creating a wire, creating a register, instantiating an input/output (port),
+ */
 void Inou_firrtl::ListTypeInfo(const firrtl::FirrtlPB_Type& type, Lnast_nid& parent_node, std::string port_id) {
   switch (type.type_case()) {
     case 2: { //UInt type
       cout << "UInt[" << type.uint_type().width().value() << "]" << endl;
-      if(type.uint_type().width().value() != 0) { //BW is explicit.
+      if(type.uint_type().width().value() != 0) { //if BW is explicit.
         CreateBitwidthAttribute(type.uint_type().width().value(), parent_node, port_id);
-        cout << "\n\nThird:\n";
-        lnast.dump();
       }
       break;
 
     } case 3: { //SInt type
       cout << "SInt[" << type.uint_type().width().value() << "]" << endl;
-      if(type.sint_type().width().value() != 0) { //BW is explicit.
+      if(type.sint_type().width().value() != 0) { //if BW is explicit.
         //CreateBitwidthAttribute(type.uint_type().width().value(), parent_node, port_id);
       }
       break;
@@ -146,7 +137,7 @@ void Inou_firrtl::ListTypeInfo(const firrtl::FirrtlPB_Type& type, Lnast_nid& par
       for (int i = 0; i < type.bundle_type().field_size(); i++) {
         cout << "\t" << btype.field(i).id() << ": ";
         //FIXME: This will flatten out any bundles from Chisel design, like in LoFIRRTL. Do we want that?
-        ListTypeInfo(btype.field(i).type(), parent_node, port_id + "_" + btype.field(i).id());
+        ListTypeInfo(btype.field(i).type(), parent_node, port_id + "." + btype.field(i).id());
       }
       cout << "\t}\n";
       break;
@@ -204,6 +195,39 @@ void Inou_firrtl::PrintPrimOp(const firrtl::FirrtlPB_Expression_PrimOp& op, cons
   }
 }
 
+/* TODO:
+ * Many primitive ops...
+ * Tail
+ * Head
+ * Rem
+ * Shift_Left
+ * Shirt_Right
+ * Dynamic_Shift_Left
+ * Dynamic_Shift_Right
+ * Bit_Not
+ * Concat
+ * Equal
+ * Pad
+ * Not_Equal
+ * Neg
+ * Convert
+ * As_UInt
+ * As_SInt
+ * Extract_Bits
+ * As_Clock
+ * As_Fixed_Point
+ * Xor_Reduce -- Reductions use same node type as normal, but will only have 1 input "ref". Is this ok?
+ * And_Reduce -- see xor reduce
+ * Or_Reduce  -- see xor reduce
+ * Increase_Precision
+ * Decrease_Precision
+ * Set_Precision
+ * As_Async_Reset
+ * Wrap
+ * Clip
+ * Squeeze
+ * As_Interval
+ */
 void Inou_firrtl::ListPrimOpInfo(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node) {
   //FIXME: Add stuff to this eventually;
   switch(op.op()) {
@@ -329,7 +353,8 @@ void Inou_firrtl::ListPrimOpInfo(const firrtl::FirrtlPB_Expression_PrimOp& op, L
       break;
 
     } case 26: { //Op_Xor_Reduce
-      PrintPrimOp(op, ".xorR", parent_node);
+      auto idx_xorr = lnast.add_child(parent_node, Lnast_node::create_xor("^r"));
+      PrintPrimOp(op, ".xorR", idx_xorr);
       break;
 
     } case 27: { //Op_Convert ----- FIXME
@@ -347,8 +372,9 @@ void Inou_firrtl::ListPrimOpInfo(const firrtl::FirrtlPB_Expression_PrimOp& op, L
       break;
 
     } case 30: { //Op_Extract_Bits -- this is what's used for grabbing a range of bits from a variable (i.e. foo[3:1])
-
-      cout << "primOp: " << op.op();
+      auto idx_extrBits = lnast.add_child(parent_node, Lnast_node(Lnast_ntype::create_bit_select(), Token(0, 0, 0, 0, "bitSelect_EB")));
+      cout << "EXTRACT BITS = ";
+      PrintPrimOp(op, "", idx_extrBits);
       break;
 
     } case 31: { //Op_As_Clock
@@ -363,11 +389,13 @@ void Inou_firrtl::ListPrimOpInfo(const firrtl::FirrtlPB_Expression_PrimOp& op, L
       break;
 
     } case 33: { //Op_And_Reduce
-      PrintPrimOp(op, ".andR", parent_node);
+      auto idx_andr = lnast.add_child(parent_node, Lnast_node::create_and("&r"));
+      PrintPrimOp(op, ".andR", idx_andr);
       break;
 
     } case 34: { //Op_Or_Reduce
-      PrintPrimOp(op, ".orR", parent_node);
+      auto idx_orr = lnast.add_child(parent_node, Lnast_node::create_or("|r"));
+      PrintPrimOp(op, ".orR", idx_orr);
       break;
 
     } case 35: { //Op_Increase_Precision
@@ -392,19 +420,19 @@ void Inou_firrtl::ListPrimOpInfo(const firrtl::FirrtlPB_Expression_PrimOp& op, L
       cout << ".asAsyncReset";
       break;
 
-    } case 39: { //Op_Wrap ----- FIXME
+    } case 39: { //Op_Wrap ----- FIXME: Rely upon Intervals (not supported in LNAST yet?)
       cout << "primOp: " << op.op();
       break;
 
-    } case 40: { //Op_Clip ----- FIXME
+    } case 40: { //Op_Clip ----- FIXME: Rely upon Intervals (not supported in LNAST yet?)
       cout << "primOp: " << op.op();
       break;
 
-    } case 41: { //Op_Squeeze ----- FIXME
+    } case 41: { //Op_Squeeze ----- FIXME: Rely upon Intervals (not supported in LNAST yet?)
       cout << "primOp: " << op.op();
       break;
 
-    } case 42: { //Op_As_interval ----- FIXME
+    } case 42: { //Op_As_interval ----- FIXME: Rely upon Intervals (not supported in LNAST yet?)
       cout << "primOp: " << op.op();
       break;
 
@@ -471,14 +499,14 @@ void Inou_firrtl::ListExprInfo(const firrtl::FirrtlPB_Expression& expr, Lnast_ni
 
     } case 8: { //SubIndex -- this is used when statically accessing an element of a vector-like object
       cout << "Subindex()\n";
-      auto idx_select = lnast.add_child(parent_node, Lnast_node(Lnast_ntype::create_select(), Token(0, 0, 0, 0, "select")));
+      auto idx_select = lnast.add_child(parent_node, Lnast_node(Lnast_ntype::create_select(), Token(0, 0, 0, 0, "selectSI")));
       ListExprInfo(expr.sub_index().expression(), idx_select);
       lnast.add_child(parent_node, Lnast_node::create_const(expr.sub_index().index().value()));
       break;
 
     } case 9: { //SubAccess -- this is used when dynamically accessing an element of a vector-like object
       cout << "Subaccess()\n";
-      auto idx_select = lnast.add_child(parent_node, Lnast_node(Lnast_ntype::create_select(), Token(0, 0, 0, 0, "select")));
+      auto idx_select = lnast.add_child(parent_node, Lnast_node(Lnast_ntype::create_select(), Token(0, 0, 0, 0, "selectSA")));
       ListExprInfo(expr.sub_access().expression(), idx_select);
       ListExprInfo(expr.sub_access().index(), idx_select);
       break;
@@ -501,13 +529,14 @@ void Inou_firrtl::ListExprInfo(const firrtl::FirrtlPB_Expression& expr, Lnast_ni
 
 //------------Statements----------------------
 /*TODO:
- * Wire
- * Register
+ * Wire -- I don't think I need to do anything for this unless bw is explicit. If so, create "dot" node.
+ * Register -- Same as Wire.
  * Memory
  * CMemory
  * Instances
  * Stop
  * Printf
+ * Connect
  * PartialConnect
  * IsInvalid
  * MemoryPort
@@ -519,17 +548,17 @@ void Inou_firrtl::ListStatementInfo(const firrtl::FirrtlPB_Statement& stmt, Lnas
     case 1: { //Wire
       const firrtl::FirrtlPB_Statement_Wire& wire = stmt.wire();
       cout << wire.id() << " := Wire(";
-      //ListTypeInfo(wire.type(), parent_node);//FIXME: Should this be parent_idx?
+      ListTypeInfo(wire.type(), parent_node, wire.id());//FIXME: Should this be parent_idx?
       break;
 
     } case 2: { //Register
       cout << "Reg(";
-      ListExprInfo(stmt.register_().clock(), parent_node);//FIXME
+      /*ListExprInfo(stmt.register_().clock(), parent_node);//FIXME
       cout << ", ";
       ListExprInfo(stmt.register_().reset(), parent_node);//FIXME
       cout << ", ";
       ListExprInfo(stmt.register_().init(), parent_node);//FIXME
-      cout << ");\n" << endl;
+      cout << ");\n" << endl;*/
       break;
 
     } case 3: { //Memory
@@ -539,6 +568,7 @@ void Inou_firrtl::ListStatementInfo(const firrtl::FirrtlPB_Statement& stmt, Lnas
       switch(stmt.memory().depth_case()) {
         case 0: {
           cout << "Depth not set, ERROR\n";
+          break;
         } case 3: {
           cout << stmt.memory().uint_depth() << "\n";
           break;
@@ -644,6 +674,7 @@ void Inou_firrtl::ListStatementInfo(const firrtl::FirrtlPB_Statement& stmt, Lnas
 
     } case 15: { //Connect -- Must have form (female/bi-gender expression) <= (male/bi-gender/passive expression)
       //FIXME: Should this be just an "assign" or something special?
+      //
       auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
 
       ListExprInfo(stmt.connect().location(), idx_asg);
@@ -674,7 +705,7 @@ void Inou_firrtl::ListStatementInfo(const firrtl::FirrtlPB_Statement& stmt, Lnas
       return;
   }
 
-  //Print out source info on the side
+  //TODO: Attach source info into node creation (line #, col #).
 }
 
 //--------------Modules/Circuits--------------------
@@ -693,7 +724,7 @@ Lnast Inou_firrtl::ListUserModuleInfo(const firrtl::FirrtlPB_Module& module) {
   //Iterate over I/O of the module.
   for (int i = 0; i < user_module.port_size(); i++) {
     const firrtl::FirrtlPB_Port& port = user_module.port(i);
-    //ListPortInfo(port, idx_stmts);//FIXME: This is so fundamentally broken w.r.t. storing names in the table. Get back to this later.
+    ListPortInfo(port, idx_stmts);//FIXME: Careful about this bc until LNAST has the internal string map the names of vars will be off.
   }
 
   //Iterate over statements of the module.
