@@ -605,13 +605,37 @@ public:
       inputs.push_back(wr + "_ADDR");
       inputs.push_back(wr + "_DATA");
       inputs.push_back(wr + "_EN");
+      //inputs.push_back(wr + "_SEQID");
 
       std::string rd = "RD" + std::to_string(i);
       inputs.push_back(rd + "_ADDR");
       inputs.push_back(rd + "_EN");
+      //inputs.push_back(wr + "_SEQID");
 
       outputs.push_back(rd + "_DATA");
     }
+
+    /*
+     a.rd2_seqid = 0
+     a.rd2_addr = 3
+     I(a.rd2_data == 0)
+
+     a.wr0_seqid =1
+     a.wr0_addr = 3
+     a.wr0_data = 3
+
+     a.rd0_seqid = 4
+     a.rd0_addr = 3
+     I(a.rd0_data == 3)
+
+     a.wr1_seqid =7
+     a.wr1_addr = 3
+     a.wr1_data = 4
+
+     a.rd1_seqid = 8
+     a.rd1_addr = 3
+     I(a.rd1_data == 4)
+    */
   };
 };
 
