@@ -74,6 +74,7 @@ protected:
   Node_pin     add_tuple_get_from_dot_or_sel (LGraph *dfg, const Lnast_nid &lnidx_opr);
   Node_pin     setup_tuple_ref (LGraph *dfg, std::string_view tup_name);
   Node_pin     setup_tuple_key (LGraph *dfg, std::string_view tup_name);
+  Node_pin     setup_tuple_chain_new_max_pos (LGraph *dfg, const Node_pin &tn_dpin);
 
 
   // constant resolving

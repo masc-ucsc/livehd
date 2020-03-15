@@ -47,6 +47,25 @@ void Inou_lnast_dfg::resolve_tuples(Eprp_var &var) {
 
 void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
 
+  // //phase-1: resovle unknown position for some tuple elements
+  // //FIXME->sh: could be merged with the reduced_or_op elimination passes to avoid one extra lgraph traverse
+  // for (const auto &node : dfg->fast()) {
+  //   if (node.get_type().op == TupRef_Op) {
+  //     Node chain_head;
+  //     for (auto &out : node.out_edges()) {
+  //       auto tup_add_node = out.sink.get_node();
+  //       bool pos_is_defined = !tup_add_node.setup_driver_pin(2).inp_edges().empty(); //FIXME->sh: use some static constant instead of plain constant for tuple_name/key
+  //       if (pos_is_defined)
+  //         continue;
+  //       else
+  //         // start to check the tuple chain from pos max
+  //         // what if all defined? start from the largest?
+  //         chain_head
+  //     }
+  //   }
+  // }
+
+  //phase-2: resolve TupGet source and destination
   absl::flat_hash_set<Node::Compact> to_be_deleted;
   for (const auto &node : dfg->fast()) {
     if (node.get_type().op == TupAdd_Op) {
@@ -220,7 +239,7 @@ void Inou_lnast_dfg::process_ast_concat_op(LGraph *dfg, const Lnast_nid &lnidx_c
   auto tup_add    = dfg->create_node(TupAdd_Op);
   auto tn_spin    = tup_add.setup_sink_pin(0); //tuple name
   // auto kn_spin    = tup_add.setup_sink_pin(1); //key name, unknown when concatenating
-  // auto kp_spin    = tup_add.setup_sink_pin(2); //key pos, unknown when concatenating
+  auto kp_spin    = tup_add.setup_sink_pin(2); //key pos
   auto value_spin = tup_add.setup_sink_pin(3); //value
 
   auto c0_concat = lnast->get_first_child(lnidx_concat); //c0: target name for concat.
@@ -229,6 +248,9 @@ void Inou_lnast_dfg::process_ast_concat_op(LGraph *dfg, const Lnast_nid &lnidx_c
 
   auto tn_dpin = setup_tuple_ref(dfg, lnast->get_sname(c1_concat));
   dfg->add_edge(tn_dpin, tn_spin);
+
+  auto kp_dpin = setup_tuple_chain_new_max_pos(dfg, tn_dpin);
+  dfg->add_edge(kp_dpin, kp_spin);
 
   auto value_dpin = setup_ref_node_dpin(dfg, c2_concat);
   dfg->add_edge(value_dpin, value_spin);
@@ -239,6 +261,35 @@ void Inou_lnast_dfg::process_ast_concat_op(LGraph *dfg, const Lnast_nid &lnidx_c
   fmt::print("dpin name from map is:{}\n", name2dpin[tup_add.get_driver_pin().get_name()].get_name());
 
 }
+
+Node_pin Inou_lnast_dfg::setup_tuple_chain_new_max_pos(LGraph *dfg, const Node_pin &tn_dpin) {
+  uint32_t max = 0;
+  auto chain_itr = tn_dpin.get_node();
+  while (chain_itr.get_type().op != TupRef_Op) {
+
+    if (chain_itr.get_type().op == TupAdd_Op) {
+      I(chain_itr.setup_sink_pin(0).inp_edges().size() == 1); // tuple name
+      I(chain_itr.setup_sink_pin(2).inp_edges().size() == 1); // key pos
+      auto dnode_of_kp_spin = chain_itr.setup_sink_pin(2).inp_edges().begin()->driver.get_node();
+      //FIXME->sh: constant propagation problem again!? now assume the dnode of kp_spin is always a well-defined constant
+      if (dnode_of_kp_spin.get_type_const_value() > max)
+        max = dnode_of_kp_spin.get_type_const_value();
+      auto next_itr = chain_itr.setup_sink_pin(0).inp_edges().begin()->driver.get_node();
+      chain_itr = next_itr;
+    } else if (chain_itr.get_type().op == Or_Op) {
+      I(chain_itr.setup_sink_pin(0).inp_edges().size() == 1);
+      auto next_itr = chain_itr.setup_sink_pin(0).inp_edges().begin()->driver.get_node();
+      chain_itr = next_itr;
+    } else {
+      I(false); //compile error: tuple chain must only contains TupRef_Op or Or_Op
+    }
+  }
+
+  auto new_pos_str = "0d" + std::to_string(max + 1);
+  return resolve_constant(dfg, new_pos_str).setup_driver_pin();
+}
+
+
 
 void Inou_lnast_dfg::process_ast_binary_op(LGraph *dfg, const Lnast_nid &lnidx_opr) {
   auto opr_node = setup_node_operator_and_target(dfg, lnidx_opr).get_node();
@@ -311,13 +362,14 @@ void Inou_lnast_dfg::process_ast_assign_op(LGraph *dfg, const Lnast_nid &lnidx_a
 
 
 void Inou_lnast_dfg::process_ast_tuple_struct(LGraph *dfg, const Lnast_nid &lnidx_tup) {
-  Node_pin tn_dpin;
+  std::string tup_name;
   int kp = 0;
 
+  //note: each new tuple element will be the new tuple chain tail and inherit the tuple name
   for (auto tup_child = lnast->children(lnidx_tup).begin(); tup_child != lnast->children(lnidx_tup).end(); ++tup_child) {
     if (tup_child == lnast->children(lnidx_tup).begin()) {
-      auto tup_name = lnast->get_sname(*tup_child);
-      tn_dpin = setup_tuple_ref(dfg, tup_name);
+      tup_name = lnast->get_sname(*tup_child);
+      setup_tuple_ref(dfg, tup_name);
     } else {
       I(lnast->get_type(*tup_child).is_assign());
       auto c0      = lnast->get_first_child(*tup_child);
@@ -325,6 +377,7 @@ void Inou_lnast_dfg::process_ast_tuple_struct(LGraph *dfg, const Lnast_nid &lnid
       auto c0_name = lnast->get_sname(c0);
       auto c1_name = lnast->get_sname(c1);
 
+      auto tn_dpin    = setup_tuple_ref(dfg, tup_name);
       auto kn_dpin    = setup_tuple_key(dfg, c0_name);
       auto kp_dnode   = resolve_constant(dfg, "0d" + std::to_string(kp));
       auto kp_dpin    = kp_dnode.setup_driver_pin();
@@ -341,7 +394,10 @@ void Inou_lnast_dfg::process_ast_tuple_struct(LGraph *dfg, const Lnast_nid &lnid
         dfg->add_edge(kn_dpin, kn_spin);
       dfg->add_edge(kp_dpin, kp_spin);
       dfg->add_edge(value_dpin, value_spin);
+
       kp++;
+      name2dpin[tup_name] = tup_add.setup_driver_pin();
+      tup_add.setup_driver_pin().set_name(tup_name);
     }
   }
 }
@@ -392,7 +448,7 @@ Node_pin Inou_lnast_dfg::add_tuple_add_from_sel(LGraph *dfg, const Lnast_nid &ln
   auto c2_sel = lnast->get_sibling_next(c1_sel);   //c2: key position
 
 
-  auto target_subs = lnast->get_subs(c1_sel) == 0 ? 0 : lnast->get_subs(c1_sel) -1 ; //FIXME->sh: need check with __bits attr.
+  auto target_subs = lnast->get_subs(c1_sel) == 0 ? 0 : lnast->get_subs(c1_sel) - 1 ; //FIXME->sh: need check with __bits attr.
   auto target_tuple_ref_name = absl::StrCat(std::string(lnast->get_name(c1_sel)), "_", lnast->get_subs(c1_sel)-1);
   // auto tn_dpin = setup_tuple_ref(dfg, lnast->get_sname(c1_sel));
   auto tn_dpin = setup_tuple_ref(dfg, target_tuple_ref_name);
@@ -427,7 +483,7 @@ Node_pin Inou_lnast_dfg::add_tuple_add_from_dot(LGraph *dfg, const Lnast_nid &ln
   auto c1_dot = lnast->get_sibling_next(c0_dot);   //c1: tuple name
   auto c2_dot = lnast->get_sibling_next(c1_dot);   //c2: key name
 
-  auto target_subs = lnast->get_subs(c1_dot) == 0 ? 0 : lnast->get_subs(c1_dot) -1 ;
+  auto target_subs = lnast->get_subs(c1_dot) == 0 ? 0 : lnast->get_subs(c1_dot) - 1 ;
   auto target_tuple_ref_name = absl::StrCat(std::string(lnast->get_name(c1_dot)), "_", target_subs);
   // auto tn_dpin = setup_tuple_ref(dfg, lnast->get_sname(c1_dot));
   auto tn_dpin = setup_tuple_ref(dfg, target_tuple_ref_name);
@@ -463,6 +519,7 @@ Node_pin Inou_lnast_dfg::setup_tuple_ref(LGraph *dfg, std::string_view ref_name)
 Node_pin Inou_lnast_dfg::setup_tuple_key(LGraph *dfg, std::string_view key_name) {
   if (key_name.substr(0,4)== "null")
     return Node_pin();
+
   if (name2dpin.find(key_name) == name2dpin.end()) {
     auto dpin = dfg->create_node(TupKey_Op).setup_driver_pin();
     dpin.set_name(key_name);
