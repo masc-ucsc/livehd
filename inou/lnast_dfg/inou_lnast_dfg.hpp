@@ -62,7 +62,7 @@ protected:
   static bool is_input    (std::string_view name) {return name.substr(0, 1) == "$" ;}
   static bool is_output   (std::string_view name) {return name.substr(0, 1) == "%" ;}
   static bool is_const    (std::string_view name) {return name.substr(0, 2) == "0d" or name.substr(0, 3) == "-0d";}
-  static bool is_bit_attr_tuple_add(Node node) {
+  static bool is_bit_attr_tuple_add(const Node &node) {
     return (node.get_sink_pin(1).inp_edges().size() == 1) &&
            (node.get_sink_pin(1).inp_edges().begin()->driver.get_name().substr(0,6) == "__bits");
   }
@@ -75,6 +75,10 @@ protected:
   Node_pin     setup_tuple_ref (LGraph *dfg, std::string_view tup_name);
   Node_pin     setup_tuple_key (LGraph *dfg, std::string_view tup_name);
   Node_pin     setup_tuple_chain_new_max_pos (LGraph *dfg, const Node_pin &tn_dpin);
+  static bool  tuple_get_has_key_name        (const Node &tup_get);
+  static bool  tuple_get_has_key_pos         (const Node &tup_get);
+  static bool  is_tup_get_target             (const Node &tup_add, std::string_view tup_get_target);
+  static bool  is_tup_get_target             (const Node &tup_add, uint32_t         tup_get_target);
 
 
   // constant resolving
