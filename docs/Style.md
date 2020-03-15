@@ -4,6 +4,13 @@
 These are the coding style rules for LGraph. Each rule can be broken, but it
 should be VERY rare, and a small comment should be placed explaining why.
 
+## Overall
+
+* When possible keep the system simple. Complexity is the enemy of maintenance.
+* Deprecate no longer used features.
+* Try to reduce friction. This means to avoid hidden/complex steps.
+* Every main API should have a unit test for testing but also to demonstrate usage.
+
 ## comments
 
 Code should be the comments, try to keep comments concise. They should explain
