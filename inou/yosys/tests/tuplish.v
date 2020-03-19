@@ -10,7 +10,7 @@ module tuplish
     ,output reg    [3:0] q2
   );
 
-  reg [3:0] tup[7:0];
+  reg [3:0] tup [7:0];
 
   integer i;
   always_comb begin
@@ -27,6 +27,9 @@ module tuplish
     end
     q1 = tup[raddr1];
     q2 = tup[raddr2];
+    /* q1 = tup[raddr1]; */
+    /* tup[raddr1] = 4'h5; */
+    /* q2 = tup[raddr1]; */
   end
 
 endmodule

@@ -55,9 +55,6 @@ enum Node_Type_Op : uint64_t {
   TupGet_Op,
   TupRef_Op,
   TupKey_Op,
-  // op_class: dfg
-  DfgRef_Op,
-  DfgPendingGraph_Op,
 // Add here, operators needed
 #if 1
   // WARNING: deprecated once we have LUTs working (mockturtle)
@@ -708,21 +705,6 @@ public:
   };
 };
 
-class Node_Type_DfgRef : public Node_Type {
-public:
-  Node_Type_DfgRef() : Node_Type("dfg_ref", DfgRef_Op, false) {
-    inputs.push_back("A");
-    outputs.push_back("Y");
-  };
-};
-
-class Node_Type_DfgPendingGraph : public Node_Type {
-public:
-  Node_Type_DfgPendingGraph() : Node_Type("dfg_pending_graph", DfgPendingGraph_Op, false) {
-    inputs.push_back("A");
-    outputs.push_back("Y");
-  };
-};
 
 class Node_Type_DontCare : public Node_Type {
 public:

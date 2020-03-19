@@ -44,8 +44,6 @@ Node_Type::_init::_init() {
   Node_Type::table[TupRef_Op]          = new Node_Type_TupRef();
   Node_Type::table[TupKey_Op]          = new Node_Type_TupKey();
   Node_Type::table[DontCare_Op]        = new Node_Type_DontCare();
-  Node_Type::table[DfgRef_Op]          = new Node_Type_DfgRef();
-  Node_Type::table[DfgPendingGraph_Op] = new Node_Type_DfgPendingGraph();
 
   Node_Type::table[Loop_breaker_begin] = new Node_Type_Invalid();
   Node_Type::table[SFlop_Op]           = new Node_Type_Flop();
