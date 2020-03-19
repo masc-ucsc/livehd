@@ -31,5 +31,9 @@ void Pass_lec::work(Eprp_var &var) {
 
 void Pass_lec::check_lec(LGraph *g) {
   fmt::print("TODO: implement LEC\n");
+
+  for (const auto node : g->forward()) {
+    fmt::print("node type:{}\n", node.get_type().get_name());
+  }
 }
 
