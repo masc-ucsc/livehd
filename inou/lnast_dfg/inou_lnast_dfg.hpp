@@ -19,9 +19,11 @@ private:
 
   absl::flat_hash_map<std::string, Node_pin>  name2dpin;
   absl::flat_hash_map<std::string, Lnast_nid> name2lnidx; //mainly for dot and select recording
+  static constexpr uint8_t TN = 0;  // tuple name
+  static constexpr uint8_t KN = 1;  // tuple element key name
+  static constexpr uint8_t KP = 2;  // tuple element key position
+  static constexpr uint8_t KV = 3;  // tuple element key value
 
-  int lginp_cnt;
-  int lgout_cnt;
 
 protected:
   void                  setup_memblock();

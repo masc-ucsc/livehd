@@ -671,17 +671,17 @@ public:
     inputs.push_back("TN");
     inputs.push_back("KN");
     inputs.push_back("KP");
-    inputs.push_back("V");
+    inputs.push_back("KV");
     outputs.push_back("Y");
   };
 };
 
 
-// A = tuple precedence, K = position or name, Y = value
+// TN = tuple precedence name, K = position or name, Y = value
 class Node_Type_TupGet : public Node_Type {
 public:
   Node_Type_TupGet() : Node_Type("tup_get", TupGet_Op, false) {
-    inputs.push_back("A");
+    inputs.push_back("TN");
     inputs.push_back("KN");
     inputs.push_back("KP");
     outputs.push_back("Y");
@@ -689,7 +689,7 @@ public:
 };
 
 
-// Y = tuple root name, only used for tuple initialization
+// Y = tuple root name
 class Node_Type_TupRef : public Node_Type {
 public:
   Node_Type_TupRef() : Node_Type("tup_ref", TupRef_Op, true) {
@@ -704,7 +704,6 @@ public:
     outputs.push_back("Y");
   };
 };
-
 
 class Node_Type_DontCare : public Node_Type {
 public:
