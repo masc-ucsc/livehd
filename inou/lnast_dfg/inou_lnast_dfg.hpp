@@ -19,6 +19,7 @@ private:
 
   absl::flat_hash_map<std::string, Node_pin>  name2dpin;
   absl::flat_hash_map<std::string, Lnast_nid> name2lnidx; //mainly for dot and select recording
+  absl::flat_hash_map<std::string, std::string>  keyname2pos;
   static constexpr uint8_t TN = 0;  // tuple name
   static constexpr uint8_t KN = 1;  // tuple element key name
   static constexpr uint8_t KP = 2;  // tuple element key position
@@ -75,7 +76,7 @@ protected:
   Node_pin     add_tuple_add_from_sel (LGraph *dfg, const Lnast_nid &lnidx_sel, const Lnast_nid &lnidx_assign);
   Node_pin     add_tuple_get_from_dot_or_sel (LGraph *dfg, const Lnast_nid &lnidx_opr);
   Node_pin     setup_tuple_ref (LGraph *dfg, std::string_view tup_name);
-  Node_pin     setup_tuple_key (LGraph *dfg, std::string_view tup_name);
+  Node_pin     setup_tuple_key (LGraph *dfg, std::string_view key_name);
   Node_pin     setup_tuple_chain_new_max_pos (LGraph *dfg, const Node_pin &tn_dpin);
   static bool  tuple_get_has_key_name        (const Node &tup_get);
   static bool  tuple_get_has_key_pos         (const Node &tup_get);
