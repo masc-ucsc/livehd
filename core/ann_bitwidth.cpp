@@ -82,7 +82,7 @@ void Ann_bitwidth::Explicit_range::set_sconst(uint32_t val) {
 }
 
 void Ann_bitwidth::Implicit_range::dump() const {
-  fmt::print("max:{} min:{} sign:{} {}", max, min, sign, overflow ? "overflow" : "");
+  fmt::print("max:{} min:{} sign:{} {}\n", max, min, sign, overflow ? "overflow" : "");
 }
 
 int64_t Ann_bitwidth::Implicit_range::round_power2(int64_t x) const {

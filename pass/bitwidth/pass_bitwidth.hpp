@@ -12,7 +12,7 @@ protected:
   int max_iterations{};
 
   std::vector<Node_pin> pending;
-  std::vector<Node_pin> initial_imp_unset;
+  // std::vector<Node_pin> initial_imp_unset;
   std::vector<Node_pin> next_pending;
 
   void mark_all_outputs  (Node_pin &pin);
@@ -30,7 +30,7 @@ protected:
   void bw_pass_setup             (LGraph *lg);
   void bw_pass_dump              (LGraph *lg);
   void bw_implicit_range_to_bits (LGraph *lg);
-  bool bw_pass_iterate           (LGraph *lg);
+  bool bw_pass_iterate           ();
   void bw_settle_graph_outputs   (LGraph *lg);
 
   static void trans(Eprp_var &var);
