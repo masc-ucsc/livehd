@@ -31,13 +31,11 @@ protected:
   std::vector<LGraph *> do_tolg();
   static void           do_resolve_tuples(LGraph *dfg);
   static void           do_reduced_or_elimination(LGraph *dfg);
-  std::vector<LGraph *> do_gen_temp_lg();
 
   void lnast2lgraph             (LGraph *dfg);
   void process_ast_stmts        (LGraph *dfg, const Lnast_nid &lnidx_stmts);
   void process_ast_assign_op    (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_binary_op    (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_unary_op     (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_logical_op   (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_as_op        (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_label_op     (LGraph *dfg, const Lnast_nid &lnidx);
@@ -100,7 +98,6 @@ protected:
   static void tolg(Eprp_var &var);
   static void resolve_tuples(Eprp_var &var);
   static void reduced_or_elimination(Eprp_var &var);
-  static void gen_temp_lg(Eprp_var &var);
 
 public:
   explicit Inou_lnast_dfg(const Eprp_var &var);

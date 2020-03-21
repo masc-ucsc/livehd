@@ -1,3 +1,11 @@
+$a.__bits = 4
+$b.__bits = 4
+$c.__bits = 4
+$d.__bits = 4
+$e.__bits = 4
+$f.__bits = 4
+
+
 x = $a                         //x0
 if ($a > 1) {
   x = $e                       //x1
@@ -16,8 +24,6 @@ if ($a > 1) {
 }
                                //x8 = phi(($a > 1), x6, x7)                  
                                //y1 = phi(($a > 1), y0, default)
-%o1.__bits = 2
-%o2.__bits = 2
 
 %o1 = x + $a
 %o2 = y + $a
