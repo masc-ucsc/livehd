@@ -6,9 +6,11 @@
 
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
+#include "lbench.hpp"
 #include "lnast.hpp"
 #include "pass.hpp"
 #include "likely.hpp"
+#include "lnast_parser.hpp"
 #include "pass_bitwidth.hpp"
 
 class Inou_lnast_dfg : public Pass {
