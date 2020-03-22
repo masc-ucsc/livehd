@@ -60,12 +60,13 @@ void Pass_bitwidth::do_trans(LGraph *lg) {
 // MIT Algorithm
 void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
   fmt::print("Phase-I: bitwidth pass setup\n");
-  lg->each_graph_input([this](const Node_pin &pin) {
+  lg->each_graph_input([this](const Node_pin &dpin) {
     // FIXME->sh: should we force all input bitwidth set explicitly?
-    I(pin.has_bitwidth());
-    auto editable_pin = pin;
+    // FIXME->sh: it's not necessarily true for sub-graph
+    I(dpin.has_bitwidth());
+    auto editable_pin = dpin;
     editable_pin.ref_bitwidth()->set_implicit();
-    pending.push_back(pin);
+    pending.push_back(dpin);
   });
 
   fmt::print("\n");
@@ -76,12 +77,16 @@ void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
     for (const auto &out_edge : node.out_edges()) {
       auto dpin = out_edge.driver;
 
-      // note: currently, first iteration will iterate over same driver pins multiple times,
-      //       in some cases. (If more than 1 edge has pin X as its driver)
+      // currently, first iteration will iterate over same driver pins multiple times,
+      // in some cases. (If more than 1 edge has pin X as its driver)
       // FIXME->sh: why?
       if (dpin.has_bitwidth()) {
         dpin.ref_bitwidth()->set_implicit();
         pending.push_back(dpin);
+      } else { // if don't has bitwidth initially, set bits 0 to avoid unnecessary trouble that bitwidth attribute table undefined for some dpin
+        dpin.ref_bitwidth()->e.set_ubits(0);
+        dpin.ref_bitwidth()->set_implicit();
+        ;
       }
       // FIXME->sh: will lead to unset imp insert to pending vector duplicately, why am I doing this?
       // else {
@@ -97,13 +102,17 @@ bool Pass_bitwidth::bw_pass_iterate() {
   if (pending.empty())
     fmt::print("bw_pass_iterate pass -- no driver pins to iterate over\n");
 
+  // dbg
+  // max_iterations = 0;
   int iterations = 0;
   do {
     I(next_pending.empty());
     fmt::print("\nIteration:{}\n", iterations);
 
-    auto dpin = pending.back();
-    pending.pop_back();
+    // auto dpin = pending.back();
+    auto dpin = pending.front();
+    // pending.pop_back();
+    pending.pop_front();
     dpin.ref_bitwidth()->niters++;
 
     //note: with using the current std::vector, this might fire off much earlier than
@@ -117,8 +126,10 @@ bool Pass_bitwidth::bw_pass_iterate() {
       iterate_driver_pin(dpin);
       if (pending.empty())
         break;
-      dpin = pending.back();
-      pending.pop_back();
+      // dpin = pending.back();
+      dpin = pending.front();
+      // pending.pop_back();
+      pending.pop_front();
     } while (true);
     fmt::print("Iteration:{}, all dpin in pending vector visited!\n", iterations);
 
@@ -137,7 +148,7 @@ bool Pass_bitwidth::bw_pass_iterate() {
     // }
 
     pending = std::move(next_pending);
-    next_pending.clear(); //note: need to clear the moved container or it will be in a "valid, but undefined state"
+    next_pending.clear(); // need to clear the moved container or it will be in a "valid, but undefined state"
 
     iterations++;
     fmt::print("after Iteration:{}, pending vector size:{}\n", iterations, pending.size());
@@ -145,17 +156,18 @@ bool Pass_bitwidth::bw_pass_iterate() {
 }
 
 
-void Pass_bitwidth::mark_all_outputs(Node_pin &pin) {
+void Pass_bitwidth::mark_all_outputs(Node_pin &dpin) {
   // Mark driver pins that need to change based off current driver pin.
-  Node cur_node = pin.get_node();
+  Node cur_node = dpin.get_node();
 
-  pin.get_bitwidth().i.dump();
+  dpin.get_bitwidth().i.dump();
   for (const auto &out_edge : cur_node.out_edges()) {
     auto spin          = out_edge.sink;
     auto affected_node = spin.get_node();
     for (const auto &aff_out_edge : affected_node.out_edges()) {
       if (std::find(next_pending.begin(), next_pending.end(), aff_out_edge.driver) == next_pending.end()) {
-        next_pending.emplace_back(aff_out_edge.driver);
+        // next_pending.emplace_back(aff_out_edge.driver);
+        next_pending.push_back(aff_out_edge.driver);
         fmt::print("push into next_pending, driver:{}\n", aff_out_edge.driver.debug_name());
       }
     }
@@ -415,76 +427,78 @@ void Pass_bitwidth::iterate_shift(Node_pin &pin) {
 }
 
 void Pass_bitwidth::iterate_comparison(Node_pin &pin) {
-  // NOTE: The system will take care of constant values such as (a >= 4'b0) or (4'b1111 > 4'b0111)
-  //      behind the scenes. FIXME: This was an old note. Is it still true?
+  // FIXME->sh: the comparison op only has boolean output and only connect to mux selection pin?
 
-  bool updated   = false;
-  bool set       = false;
-  bool terminate = false;
-  auto op        = pin.get_node().get_type().op;
+  // bool updated   = false;
+  // bool set       = false;
+  // bool terminate = false;
+  // auto op        = pin.get_node().get_type().op;
   Ann_bitwidth::Implicit_range imp;
   imp.min = 1;
   imp.max = 1;
+  pin.ref_bitwidth()->i.update(imp);
 
-  // Due to nature of comparison type nodes, I need to iterate over every BS|BU pin
-  //  for each AS|AU pin I iterate over. (i.e. I have to check A1 > B1, A2 > B1, ..., A1 > B2, ...
-  for (const auto &inp_edge : pin.get_node().inp_edges()) {
-    auto dpin = inp_edge.driver;
-    auto spin = inp_edge.sink;
-    if (spin.get_pid() == 0 || spin.get_pid() == 1) {  // If AS or AU pins
-      if(dpin.get_bitwidth().i.overflow | terminate) {
-        //If overflow is involved, impossible to calculate.
-        fmt::print("\tOverflow involved\n");
-        imp.min = 0;
-        imp.max = 1;
-        set = true;
-        break;
-      }
+  // updated = pin.ref_bitwidth()->i.update(imp);
 
-      for (const auto &comp_edge : pin.get_node().inp_edges()) {
-        auto comp_dpin = comp_edge.driver;
-        auto comp_spin = comp_edge.sink;
-        if (comp_spin.get_pid() == 2 || comp_spin.get_pid() == 3) {  // If BS or BU pins
-          set = true;
-          if(comp_dpin.get_bitwidth().i.overflow) {
-            //B pin is set to overflow mode. Impossible to calculate bw now.
-            terminate = true;
-            break;
-          }
+  // // Due to nature of comparison type nodes, I need to iterate over every BS|BU pin
+  // //  for each AS|AU pin I iterate over. (i.e. I have to check A1 > B1, A2 > B1, ..., A1 > B2, ...
+  // for (const auto &inp_edge : pin.get_node().inp_edges()) {
+  //   auto dpin = inp_edge.driver;
+  //   auto spin = inp_edge.sink;
+  //   if (spin.get_pid() == 0 || spin.get_pid() == 1) {  // If AS or AU pins
+  //     if(dpin.get_bitwidth().i.overflow | terminate) {
+  //       //If overflow is involved, impossible to calculate.
+  //       fmt::print("\tOverflow involved\n");
+  //       imp.min = 0;
+  //       imp.max = 1;
+  //       set = true;
+  //       break;
+  //     }
+  //
+  //     for (const auto &comp_edge : pin.get_node().inp_edges()) {
+  //       auto comp_dpin = comp_edge.driver;
+  //       auto comp_spin = comp_edge.sink;
+  //       if (comp_spin.get_pid() == 2 || comp_spin.get_pid() == 3) {  // If BS or BU pins
+  //         set = true;
+  //         if(comp_dpin.get_bitwidth().i.overflow) {
+  //           //B pin is set to overflow mode. Impossible to calculate bw now.
+  //           terminate = true;
+  //           break;
+  //         }
+  //
+  //         switch (op) {
+  //           // NOTE: At some point, go back over this logic and make sure it's right.
+  //           case LessThan_Op:
+  //             imp.min &= dpin.get_bitwidth().i.max < comp_dpin.get_bitwidth().i.min;
+  //             imp.max &= dpin.get_bitwidth().i.min < comp_dpin.get_bitwidth().i.max;
+  //             break;
+  //           case GreaterThan_Op:
+  //             imp.min &= dpin.get_bitwidth().i.min > comp_dpin.get_bitwidth().i.max;
+  //             imp.max &= dpin.get_bitwidth().i.max > comp_dpin.get_bitwidth().i.min;
+  //             break;
+  //           case LessEqualThan_Op:
+  //             imp.min &= dpin.get_bitwidth().i.max <= comp_dpin.get_bitwidth().i.min;
+  //             imp.max &= dpin.get_bitwidth().i.min <= comp_dpin.get_bitwidth().i.max;
+  //             break;
+  //           case GreaterEqualThan_Op:
+  //             imp.min &= dpin.get_bitwidth().i.min >= comp_dpin.get_bitwidth().i.max;
+  //             imp.max &= dpin.get_bitwidth().i.max >= comp_dpin.get_bitwidth().i.min;
+  //             break;
+  //           default: fmt::print("Error: comparison op not understood\n");
+  //         }
+  //       }
+  //     }
+  //   }
+  // }
 
-          switch (op) {
-            // NOTE: At some point, go back over this logic and make sure it's right.
-            case LessThan_Op:
-              imp.min &= dpin.get_bitwidth().i.max < comp_dpin.get_bitwidth().i.min;
-              imp.max &= dpin.get_bitwidth().i.min < comp_dpin.get_bitwidth().i.max;
-              break;
-            case GreaterThan_Op:
-              imp.min &= dpin.get_bitwidth().i.min > comp_dpin.get_bitwidth().i.max;
-              imp.max &= dpin.get_bitwidth().i.max > comp_dpin.get_bitwidth().i.min;
-              break;
-            case LessEqualThan_Op:
-              imp.min &= dpin.get_bitwidth().i.max <= comp_dpin.get_bitwidth().i.min;
-              imp.max &= dpin.get_bitwidth().i.min <= comp_dpin.get_bitwidth().i.max;
-              break;
-            case GreaterEqualThan_Op:
-              imp.min &= dpin.get_bitwidth().i.min >= comp_dpin.get_bitwidth().i.max;
-              imp.max &= dpin.get_bitwidth().i.max >= comp_dpin.get_bitwidth().i.min;
-              break;
-            default: fmt::print("Error: comparison op not understood\n");
-          }
-        }
-      }
-    }
-  }
+  // if (set) {
+  //   updated = pin.ref_bitwidth()->i.update(imp);
+  // }
 
-  if (set) {
-    updated = pin.ref_bitwidth()->i.update(imp);
-  }
-
-  if (updated) {
-    fmt::print("\tUpdate: ");
-    mark_all_outputs(pin);
-  }
+  // if (updated) {
+  //   fmt::print("\tUpdate: ");
+  //   mark_all_outputs(pin);
+  // }
 }
 
 void Pass_bitwidth::iterate_join(Node_pin &pin) {
@@ -499,16 +513,14 @@ void Pass_bitwidth::iterate_join(Node_pin &pin) {
   bool updated = false;
 
   for (const auto &inp_edge : pin.get_node().inp_edges_ordered()) {
-    //FIXME: This will work for all non-negative numbers, I think.
-    //  Figure out how to get working for negatives.
-    //FIXME: My understanding is input 1 is A, input 2 is B, etc.,
-    //  the final output Y should be [...,C,B,A]
+    //FIXME->hunter: This will work for all non-negative numbers, I think. Figure out how to get working for negatives.
+    //FIXME->hunter: My understanding is input 1 is A, input 2 is B, etc., the final output Y should be [...,C,B,A]
     auto dpin = inp_edge.driver;
     if(first) {
       if(dpin.get_bitwidth().i.overflow) {//input in ovfl mode
         fmt::print("\t1\n");
         ovfl = true;
-        imp.min = 0;//FIXME: Maybe set this to 1 bit? If so, need to also set t_b_min to 1
+        imp.min = 0;//FIXME->hunter: Maybe set this to 1 bit? If so, need to also set t_b_min to 1
         imp.max = dpin.get_bitwidth().i.max;//In this case, dpin max is max # bits.
         total_bits_max = dpin.get_bitwidth().i.max;
       } else {
@@ -622,23 +634,24 @@ void Pass_bitwidth::iterate_equals(Node_pin &pin) {
 }
 
 
-void Pass_bitwidth::iterate_mux(Node_pin &pin) {
+void Pass_bitwidth::iterate_mux(Node_pin &dpin) {
   Ann_bitwidth::Implicit_range imp;
 
   bool updated = false;
   bool first = true;
-  for (const auto &inp_edge : pin.get_node().inp_edges_ordered()) {
+  for (const auto &inp_edge : dpin.get_node().inp_edges_ordered()) {
     auto dpin = inp_edge.driver;
     auto spin = inp_edge.sink;
-    if(spin.get_pid() != 0) { // Base bw off pins except "S" pin
-      fmt::print("\tNot S pin bw: {} {}\n", dpin.get_bitwidth().i.min, dpin.get_bitwidth().i.max);
-      if(first) {
+    if (spin.get_pid() != 0) { // Base bw off pins except "S" dpin
+      fmt::print("dpin:{}\n", dpin.debug_name());
+      fmt::print("Not S dpin bw: {} {}\n", dpin.get_bitwidth().i.min, dpin.get_bitwidth().i.max);
+      if (first) {
         imp.min = dpin.get_bitwidth().i.min;
         imp.max = dpin.get_bitwidth().i.max;
         imp.overflow = dpin.get_bitwidth().i.overflow;
         first = false;
-      } else if(dpin.get_bitwidth().i.overflow) {
-        if(imp.overflow) {
+      } else if (dpin.get_bitwidth().i.overflow) {
+        if (imp.overflow) {
           //Compare which overflow is larger (requires more bits).
           imp.max = (imp.max < dpin.get_bitwidth().i.max) ? dpin.get_bitwidth().i.max : imp.max;
         } else {
@@ -655,68 +668,68 @@ void Pass_bitwidth::iterate_mux(Node_pin &pin) {
     }
   }
 
-  updated = pin.ref_bitwidth()->i.update(imp);
+  updated = dpin.ref_bitwidth()->i.update(imp);
   if (updated) {
     fmt::print("\tUpdate: ");
-    mark_all_outputs(pin);
+    mark_all_outputs(dpin);
   }
 }
 
 
-void Pass_bitwidth::iterate_driver_pin(Node_pin &pin) {
-  const auto node      = pin.get_node();
+void Pass_bitwidth::iterate_driver_pin(Node_pin &dpin) {
+  const auto node      = dpin.get_node();
   const auto node_type = node.get_type().op;
 
   switch (node_type) {
     //FIXME->Hunter: GraphIO will never happen here, right? Maybe from subgraph nodes?
     case GraphIO_Op:
       fmt::print("GraphIO_Op\n");
-      mark_all_outputs(pin);
+      mark_all_outputs(dpin);
       break;
     case And_Op:
     case Or_Op:
     case Xor_Op:
     case Not_Op:
       fmt::print("Logic Op: ");
-      iterate_logic(pin);
+      iterate_logic(dpin);
       break;
     case Sum_Op:
     case Mult_Op:
     case Div_Op:
     case Mod_Op:
-      iterate_arith(pin);
+      iterate_arith(dpin);
       break;
     case LessThan_Op:
     case GreaterThan_Op:
     case LessEqualThan_Op:
     case GreaterEqualThan_Op:
       fmt::print("Comparison Op: ");
-      iterate_comparison(pin);
+      iterate_comparison(dpin);
       break;
     case Equals_Op:
       fmt::print("Equals Op: ");
-      iterate_equals(pin);
+      iterate_equals(dpin);
       break;
     case ShiftLeft_Op:
     case ShiftRight_Op:
       fmt::print("Shift Op: \n");
-      iterate_shift(pin);
+      iterate_shift(dpin);
       break;
     case Join_Op:
       fmt::print("Join_Op: \n");
-      iterate_join(pin);
+      iterate_join(dpin);
       break;
     case Pick_Op:
       fmt::print("Pick_Op: n");
-      iterate_pick(pin);
+      iterate_pick(dpin);
       break;
     case U32Const_Op:
       fmt::print("U32Const_Op:{}\n", node.get_type_const_value());
-      mark_all_outputs(pin);
+      mark_all_outputs(dpin);
       break;
     case Mux_Op:
       fmt::print("Mux_Op: \n");
-      iterate_mux(pin);
+      iterate_mux(dpin);
       break;
     default: fmt::print("Op not yet supported in iterate_driver_pin\n");
   }
@@ -725,8 +738,7 @@ void Pass_bitwidth::iterate_driver_pin(Node_pin &pin) {
 // back to some working condition later for debugging.
 void Pass_bitwidth::bw_pass_dump(LGraph *lg) {
   lg->each_graph_input([](const Node_pin &pin) {
-    fmt::print("inp name={}, sink?={}, driver?={}, pid={}, has_bitwidth={} ", pin.get_name(), pin.is_sink(), pin.is_driver(), pin.get_pid(), pin.has_bitwidth()); pin.get_bitwidth().e.dump();
-    fmt::print("\n");
+    fmt::print("inp name={}, sink?={}, driver?={}, pid={}, has_bitwidth={}\n", pin.get_name(), pin.is_sink(), pin.is_driver(), pin.get_pid(), pin.has_bitwidth()); pin.get_bitwidth().e.dump();
   });
 
   lg->each_graph_output([](const Node_pin &pin) {
@@ -737,10 +749,30 @@ void Pass_bitwidth::bw_pass_dump(LGraph *lg) {
 }
 
 void Pass_bitwidth::bw_implicit_range_to_bits(LGraph *lg) {
+  auto graph_inp_node = lg->get_graph_input_node();
+  for (auto &out : graph_inp_node.out_edges()) {
+    if (out.driver.has_bitwidth()) {
+      auto bits = ceil(log2(out.driver.get_bitwidth().i.max));
+      out.driver.set_bits(bits);
+      fmt::print("graph input:{}, bits:{}\n", out.driver.debug_name(), uint32_t(bits));
+    } else {
+      fmt::print("graph input :{} doesn't have bitwidth assignment!\n", out.driver.debug_name());
+      I(false); // compile error!
+    }
+  }
+
   for (const auto& node: lg->fast()) {
+    if (node.get_type().op == U32Const_Op)
+      continue;
+
     for (auto& out:node.out_edges()) {
       if (out.driver.has_bitwidth()) {
-        auto bits = ceil(log2(out.driver.get_bitwidth().i.max));
+        uint32_t bits;
+        if (out.driver.get_bitwidth().i.max == 1)
+          bits = 1;
+        else
+          bits = ceil(log2(out.driver.get_bitwidth().i.max));
+
         out.driver.set_bits(bits);
         fmt::print("dpin:{}, bits:{}\n", out.driver.debug_name(), uint32_t(bits));
       } else {
@@ -748,6 +780,8 @@ void Pass_bitwidth::bw_implicit_range_to_bits(LGraph *lg) {
       }
     }
   }
+
+  //FIXME->sh: what about graph outputs? has it handled in lg->fast()?
 }
 
 void Pass_bitwidth::bw_settle_graph_outputs(LGraph *lg) {

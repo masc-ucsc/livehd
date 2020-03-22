@@ -387,7 +387,6 @@ public:
   // Super types
   bool is_logical_op()   const { return (val == Lnast_ntype_logical_and) or
                                         (val == Lnast_ntype_logical_or); }
-  bool is_unary_op()     const { return false; } // FIXME: were is the NOT??
 
   bool is_binary_op()    const { return (val == Lnast_ntype_and) or
                                         (val == Lnast_ntype_or) or

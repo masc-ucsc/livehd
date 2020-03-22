@@ -2,6 +2,7 @@
 #pragma once
 
 #include <vector>
+#include <deque>
 
 #include "node_pin.hpp"
 #include "node_type_base.hpp"
@@ -9,11 +10,13 @@
 
 class Pass_bitwidth : public Pass {
 protected:
-  int max_iterations{};
+  int max_iterations {};
 
-  std::vector<Node_pin> pending;
+  // std::vector<Node_pin> pending;
+  std::deque<Node_pin> pending;
+  // std::vector<Node_pin> next_pending;
+  std::deque<Node_pin> next_pending;
   // std::vector<Node_pin> initial_imp_unset;
-  std::vector<Node_pin> next_pending;
 
   void mark_all_outputs  (Node_pin &pin);
   void iterate_logic     (Node_pin &pin);
@@ -28,8 +31,8 @@ protected:
   void iterate_driver_pin        (Node_pin &pin);
 
   void bw_pass_setup             (LGraph *lg);
-  void bw_pass_dump              (LGraph *lg);
-  void bw_implicit_range_to_bits (LGraph *lg);
+  static void bw_pass_dump              (LGraph *lg);
+  static void bw_implicit_range_to_bits (LGraph *lg);
   bool bw_pass_iterate           ();
   void bw_settle_graph_outputs   (LGraph *lg);
 

@@ -111,7 +111,7 @@ std::string Node_pin::debug_name() const {
     }
   }
 
-  return absl::StrCat("node_pin_", std::to_string(get_node().nid), "_", name, "_", std::to_string(pid), sink ? "s" : "d", "_lg_",
+  return absl::StrCat("node_pin_", "n", std::to_string(get_node().nid), "_", name, "_", sink ? "s" : "d", std::to_string(pid),  "_lg_",
                       current_g->get_name());
 }
 

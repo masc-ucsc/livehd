@@ -27,142 +27,6 @@ Inou_lnast_dfg::Inou_lnast_dfg(const Eprp_var &var) : Pass("inou.lnast_dfg", var
 }
 
 
-// void Inou_lnast_dfg::resolve_tuples(Eprp_var &var) {
-//   Inou_lnast_dfg p(var);
-//   std::vector<LGraph *> lgs;
-//
-//   for (const auto &l : var.lgs) {
-//     p.do_resolve_tuples(l);
-//   }
-// }
-//
-// void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
-//
-//   //resolve TupGet source and destination
-//   absl::flat_hash_set<Node::Compact> to_be_deleted;
-//   absl::flat_hash_map<Node_pin, Node_pin> tg2actual_dpin; //record tuple_get to its actual reference dpin
-//   for (const auto &node : dfg->fast()) {
-//     if (node.get_type().op == TupAdd_Op) {
-//       I(node.get_sink_pin(TN).inp_edges().size() == 1);
-//       // I(node.get_sink_pin(3).inp_edges().size() == 1); //not necessarily true, might get extra inp from TupGet
-//
-//       to_be_deleted.insert(node.get_compact());
-//
-//       // handle special case: bits attribute
-//       if (is_bit_attr_tuple_add(node)) {
-//         //FIXME->sh: now I assume value pin is connected to constant node directly, but here is another copy propagation problem
-//         auto bits = node.get_sink_pin(KV).inp_edges().begin()->driver.get_node().get_type_const_value();
-//         auto target_dpin = Node_pin::find_driver_pin(dfg, node.get_driver_pin().get_name());
-//         target_dpin.ref_bitwidth()->e.set_ubits(bits);
-//       }
-//     } else if (node.get_type().op == TupGet_Op and tuple_get_has_key_name(node)) {
-//       to_be_deleted.insert(node.get_compact());
-//       auto tup_get_target = node.get_sink_pin(KN).inp_edges().begin()->driver.get_name();
-//       fmt::print("tup_get_target:{}\n", tup_get_target);
-//       auto chain_itr = node.get_sink_pin(TN).inp_edges().begin()->driver.get_node();
-//       while (chain_itr.get_type().op != TupRef_Op) {
-//         I(chain_itr.get_type().op == TupAdd_Op);
-//         if (chain_itr.setup_sink_pin(KN).is_connected() and is_tup_get_target(chain_itr, tup_get_target)) {
-//           auto value_dpin = chain_itr.setup_sink_pin(KV).inp_edges().begin()->driver;
-//           if (value_dpin.get_node().get_type().op == TupGet_Op)
-//             value_dpin = tg2actual_dpin[value_dpin];
-//           else
-//             tg2actual_dpin[node.get_driver_pin()] = value_dpin;
-//           fmt::print("driver info:{}\n", value_dpin.get_node().debug_name());
-//
-//           // auto value_spin = node.get_sink_pin(TN).out_edges().begin()->sink;
-//           auto value_spin = node.get_driver_pin().out_edges().begin()->sink;
-//           fmt::print("sink info:{}\n", value_spin.get_node().debug_name());
-//           dfg->add_edge(value_dpin, value_spin);
-//           break;
-//         }
-//         auto next_itr = chain_itr.setup_sink_pin(TN).inp_edges().begin()->driver.get_node();
-//         chain_itr = next_itr;
-//       }
-//
-//     } else if (node.get_type().op == TupGet_Op and tuple_get_has_key_pos(node)) {
-//       to_be_deleted.insert(node.get_compact());
-//       auto tup_get_target = node.get_sink_pin(KP).inp_edges().begin()->driver.get_node().get_type_const_value(); //FIXME->sh: need lgmem.prp
-//       fmt::print("tup_get_target:{}\n", tup_get_target);
-//       auto chain_itr = node.get_sink_pin(TN).inp_edges().begin()->driver.get_node();
-//       while (chain_itr.get_type().op != TupRef_Op) {
-//         I(chain_itr.get_type().op == TupAdd_Op);
-//         if (chain_itr.setup_sink_pin(KP).is_connected() and is_tup_get_target(chain_itr, tup_get_target)) {
-//           auto value_dpin = chain_itr.setup_sink_pin(KV).inp_edges().begin()->driver;
-//           if (value_dpin.get_node().get_type().op == TupGet_Op)
-//             value_dpin = tg2actual_dpin[value_dpin];
-//           else
-//             tg2actual_dpin[node.get_driver_pin()] = value_dpin;
-//
-//           // auto value_spin = node.get_sink_pin(TN).out_edges().begin()->sink;
-//           auto value_spin = node.get_driver_pin().out_edges().begin()->sink;
-//           dfg->add_edge(value_dpin, value_spin);
-//           break;
-//         }
-//         auto next_itr = chain_itr.setup_sink_pin(TN).inp_edges().begin()->driver.get_node();
-//         chain_itr = next_itr;
-//       }
-//     }
-//   }
-//
-//   for (auto &itr : to_be_deleted) {
-//     fmt::print("delete {}\n", itr.get_node(dfg).debug_name());
-//     itr.get_node(dfg).del_node();
-//   }
-// }
-//
-// bool Inou_lnast_dfg::tuple_get_has_key_name(const Node &tup_get) {
-//   return tup_get.get_sink_pin(KN).is_connected();
-// }
-//
-// bool Inou_lnast_dfg::tuple_get_has_key_pos(const Node &tup_get) {
-//   return tup_get.get_sink_pin(KP).is_connected();
-// }
-//
-// bool Inou_lnast_dfg::is_tup_get_target(const Node &tup_add, std::string_view tup_get_target) {
-//   auto tup_add_key_name = tup_add.get_sink_pin(KN).inp_edges().begin()->driver.get_name();
-//   return (tup_add_key_name == tup_get_target);
-// }
-//
-// bool Inou_lnast_dfg::is_tup_get_target(const Node &tup_add, uint32_t tup_get_target) {
-//   auto tup_add_key_pos = tup_add.get_sink_pin(KP).inp_edges().begin()->driver.get_node().get_type_const_value(); //FIXME->sh: need lgmem.prp
-//   return (tup_add_key_pos == tup_get_target);
-// }
-//
-// void Inou_lnast_dfg::reduced_or_elimination(Eprp_var &var) {
-//   Inou_lnast_dfg p(var);
-//   std::vector<LGraph *> lgs;
-//
-//   for (const auto &l : var.lgs) {
-//     p.do_reduced_or_elimination(l);
-//   }
-// }
-//
-//
-// void Inou_lnast_dfg::do_reduced_or_elimination(LGraph *dfg) {
-//   absl::flat_hash_set<Node::Compact> to_be_deleted;
-//   for (const auto &node : dfg->fast()) {
-//     if (node.get_type().op == Or_Op) {
-//       bool is_reduced_or = node.out_edges().begin()->driver.get_pid() == 1;
-//       if (is_reduced_or) {
-//         I(node.inp_edges().size() == 1);
-//         for (auto &out : node.out_edges()) {
-//           auto dpin = node.inp_edges().begin()->driver;
-//           dpin.set_name(node.get_driver_pin(1).get_name());
-//           auto spin = out.sink;
-//           dfg->add_edge(dpin, spin);
-//         }
-//         to_be_deleted.insert(node.get_compact());
-//       }
-//     }
-//   }
-//
-//   for (auto &itr : to_be_deleted) {
-//     fmt::print("delete {}\n", itr.get_node(dfg).debug_name());
-//     itr.get_node(dfg).del_node();
-//   }
-// }
-
 
 void Inou_lnast_dfg::tolg(Eprp_var &var) {
   Inou_lnast_dfg p(var);
@@ -222,6 +86,7 @@ void Inou_lnast_dfg::lnast2lgraph(LGraph *dfg) {
 void Inou_lnast_dfg::process_ast_stmts(LGraph *dfg, const Lnast_nid &lnidx_stmts) {
   for (const auto &lnidx : lnast->children(lnidx_stmts)) {
     const auto ntype = lnast->get_data(lnidx).type;
+    // FIXME->sh: how to use switch to gain performance?
     if (ntype.is_assign()) {
       process_ast_assign_op(dfg, lnidx);
     } else if (ntype.is_binary_op()) {
@@ -265,6 +130,47 @@ void Inou_lnast_dfg::process_ast_stmts(LGraph *dfg, const Lnast_nid &lnidx_stmts
 }
 
 
+void Inou_lnast_dfg::process_ast_if_op(LGraph *dfg, const Lnast_nid &lnidx_if) {
+  for (const auto& if_child : lnast->children(lnidx_if)) {
+    auto ntype = lnast->get_type(if_child);
+    if (ntype.is_cstmts() || ntype.is_stmts()) {
+      process_ast_stmts(dfg, if_child);
+    } else if (ntype.is_cond()) {
+      continue;
+    } else if (ntype.is_phi()) {
+      process_ast_phi_op(dfg, if_child);
+    } else {
+      I(false); // if-subtree should only contain cstmts/stmts/cond/phi nodes
+    }
+  }
+}
+
+void Inou_lnast_dfg::process_ast_phi_op(LGraph *dfg, const Lnast_nid &lnidx_phi) {
+  auto phi        = dfg->create_node(Mux_Op);
+  auto cond_spin  = phi.setup_sink_pin("S"); // Y = ~SA + SB
+  auto true_spin  = phi.setup_sink_pin("B");
+  auto false_spin = phi.setup_sink_pin("A");
+
+  auto c0 = lnast->get_first_child(lnidx_phi);
+  auto c1 = lnast->get_sibling_next(c0);
+  auto c2 = lnast->get_sibling_next(c1);
+  auto c3 = lnast->get_sibling_next(c2);
+
+  auto cond_dpin   = setup_ref_node_dpin(dfg, c1);
+  auto true_dpin   = setup_ref_node_dpin(dfg, c2);
+  auto false_dpin  = setup_ref_node_dpin(dfg, c3);
+
+  dfg->add_edge(cond_dpin, cond_spin);
+  dfg->add_edge(true_dpin, true_spin);
+  dfg->add_edge(false_dpin, false_spin);
+
+  name2dpin[lnast->get_sname(c0)] = phi.setup_driver_pin();
+  phi.setup_driver_pin().set_name(lnast->get_sname(c0));
+
+
+}
+
+
 void Inou_lnast_dfg::process_ast_concat_op(LGraph *dfg, const Lnast_nid &lnidx_concat) {
   auto tup_add    = dfg->create_node(TupAdd_Op);
   auto tn_spin    = tup_add.setup_sink_pin(TN); //tuple name
@@ -287,9 +193,6 @@ void Inou_lnast_dfg::process_ast_concat_op(LGraph *dfg, const Lnast_nid &lnidx_c
 
   name2dpin[lnast->get_sname(c0_concat)] = tup_add.setup_driver_pin();
   tup_add.setup_driver_pin().set_name(lnast->get_sname(c0_concat));
-  fmt::print("tup_add dpin name is:{}\n", lnast->get_sname(c1_concat));
-  fmt::print("dpin name from map is:{}\n", name2dpin[tup_add.get_driver_pin().get_name()].get_name());
-
 }
 
 
@@ -433,6 +336,23 @@ void Inou_lnast_dfg::process_ast_tuple_struct(LGraph *dfg, const Lnast_nid &lnid
   }
 }
 
+
+void Inou_lnast_dfg::process_ast_dot_op(const Lnast_nid &lnidx_dot) {
+  //note: the opr name is stored in 1st child in lnast
+  auto c0 = lnast->get_first_child(lnidx_dot);
+  name2lnidx[lnast->get_sname(c0)] = lnidx_dot;
+}
+
+void Inou_lnast_dfg::process_ast_select_op(const Lnast_nid &lnidx_sel) {
+  //note: the opr name is stored in 1st child in lnast
+  auto c0 = lnast->get_first_child(lnidx_sel);
+  name2lnidx[lnast->get_sname(c0)] = lnidx_sel;
+  fmt::print("select_op target_name:{}\n", lnast->get_sname(c0));
+  fmt::print("stored select first child:{}\n", lnast->get_sname(lnast->get_first_child(name2lnidx[lnast->get_sname(c0)])));
+}
+
+
+
 Node_pin Inou_lnast_dfg::add_tuple_get_from_dot_or_sel(LGraph *dfg, const Lnast_nid &lnidx_opr) {
   //lnidx_opr = dot or sel
   auto c0_dot = lnast->get_first_child(lnidx_opr);
@@ -498,38 +418,50 @@ Node_pin Inou_lnast_dfg::add_tuple_add_from_sel(LGraph *dfg, const Lnast_nid &ln
 
 
 Node_pin Inou_lnast_dfg::add_tuple_add_from_dot(LGraph *dfg, const Lnast_nid &lnidx_dot, const Lnast_nid &lnidx_assign) {
+
   auto tup_add    = dfg->create_node(TupAdd_Op);
   auto tn_spin    = tup_add.setup_sink_pin(TN); //tuple name
   auto kn_spin    = tup_add.setup_sink_pin(KN); //key name
-  auto kp_spin    = tup_add.setup_sink_pin(KP); //key position of the key_name is recored at tuple initialization
+  auto kp_spin    = tup_add.setup_sink_pin(KP); //key position of the key_name is recorded at tuple initialization
   auto value_spin = tup_add.setup_sink_pin(KV); //value
-
-  auto c0_dot = lnast->get_first_child(lnidx_dot); //c0: intermediate name for dot.
-  auto c1_dot = lnast->get_sibling_next(c0_dot);   //c1: tuple name
-  auto c2_dot = lnast->get_sibling_next(c1_dot);   //c2: key name
-
-  auto target_subs = lnast->get_subs(c1_dot) == 0 ? 0 : lnast->get_subs(c1_dot) - 1 ;
-  auto target_tuple_ref_name = absl::StrCat(std::string(lnast->get_name(c1_dot)), "_", target_subs);
-  auto tn_dpin = setup_tuple_ref(dfg, target_tuple_ref_name);
-  dfg->add_edge(tn_dpin, tn_spin);
-
-  auto kn_dpin = setup_tuple_key(dfg, lnast->get_sname(c2_dot));
-  dfg->add_edge(kn_dpin, kn_spin);
-
+  auto c0_dot   = lnast->get_first_child(lnidx_dot); //c0: intermediate name for dot.
+  auto c1_dot   = lnast->get_sibling_next(c0_dot);   //c1: tuple name
+  auto c2_dot   = lnast->get_sibling_next(c1_dot);   //c2: key name
   auto key_name = lnast->get_sname(c2_dot);
-  if (key_name.substr(0,6) != "__bits") {
+
+  if (key_name.substr(0,6) == "__bits") {
+    // no need to connect to tuple_ref when __bits, meaningless
+    // instead, when it's $/%/#, you should create corresponding io/reg node
+    setup_ref_node_dpin(dfg, c1_dot);
+    auto kn_dpin = setup_tuple_key(dfg, key_name);
+    dfg->add_edge(kn_dpin, kn_spin);
+
+    auto c0_assign = lnast->get_first_child(lnidx_assign);
+    auto c1_assign = lnast->get_sibling_next(c0_assign);
+    auto value_dpin = setup_ref_node_dpin(dfg, c1_assign);
+    dfg->add_edge(value_dpin, value_spin);
+    tup_add.setup_driver_pin().set_name(lnast->get_sname(c1_dot)); // set name on driver_pin, but don't enter name2dpin table
+
+  } else {
+    auto target_subs = lnast->get_subs(c1_dot) == 0 ? 0 : lnast->get_subs(c1_dot) - 1 ;
+    auto target_tuple_ref_name = absl::StrCat(std::string(lnast->get_name(c1_dot)), "_", target_subs);
+    auto tn_dpin = setup_tuple_ref(dfg, target_tuple_ref_name);
+    dfg->add_edge(tn_dpin, tn_spin);
+
+    auto kn_dpin = setup_tuple_key(dfg, lnast->get_sname(c2_dot));
+    dfg->add_edge(kn_dpin, kn_spin);
+
     auto kp_str = keyname2pos[key_name];
     auto kp_dpin = resolve_constant(dfg, kp_str).setup_driver_pin();
     dfg->add_edge(kp_dpin, kp_spin);
+
+    auto c0_assign = lnast->get_first_child(lnidx_assign);
+    auto c1_assign = lnast->get_sibling_next(c0_assign);
+    auto value_dpin = setup_ref_node_dpin(dfg, c1_assign);
+    dfg->add_edge(value_dpin, value_spin);
+    name2dpin[lnast->get_sname(c1_dot)] = tup_add.setup_driver_pin();
+    tup_add.setup_driver_pin().set_name(lnast->get_sname(c1_dot)); // tuple ref semantically move to here
   }
-
-  auto c0_assign = lnast->get_first_child(lnidx_assign);
-  auto c1_assign = lnast->get_sibling_next(c0_assign);
-  auto value_dpin = setup_ref_node_dpin(dfg, c1_assign);
-  dfg->add_edge(value_dpin, value_spin);
-
-  name2dpin[lnast->get_sname(c1_dot)] = tup_add.setup_driver_pin();
-  tup_add.setup_driver_pin().set_name(lnast->get_sname(c1_dot)); //note: tuple ref semantically move to here
 
   return tup_add.get_driver_pin();
 }
@@ -558,29 +490,15 @@ Node_pin Inou_lnast_dfg::setup_tuple_key(LGraph *dfg, std::string_view key_name)
 }
 
 
-void Inou_lnast_dfg::process_ast_dot_op(const Lnast_nid &lnidx_dot) {
-  //note: the opr name is stored in 1st child in lnast
-  auto c0 = lnast->get_first_child(lnidx_dot);
-  name2lnidx[lnast->get_sname(c0)] = lnidx_dot;
-}
-
-void Inou_lnast_dfg::process_ast_select_op(const Lnast_nid &lnidx_sel) {
-  //note: the opr name is stored in 1st child in lnast
-  auto c0 = lnast->get_first_child(lnidx_sel);
-  name2lnidx[lnast->get_sname(c0)] = lnidx_sel;
-  fmt::print("select_op target_name:{}\n", lnast->get_sname(c0));
-  fmt::print("stored select first child:{}\n", lnast->get_sname(lnast->get_first_child(name2lnidx[lnast->get_sname(c0)])));
-}
 
 
-
-// note: for operator, we must create a new node and dpin as it represents a new gate in the netlist
+// for operator, we must create a new node and dpin as it represents a new gate in the netlist
 Node_pin Inou_lnast_dfg::setup_node_operator_and_target(LGraph *dfg, const Lnast_nid &lnidx_opr) {
   const auto c0 = lnast->get_first_child(lnidx_opr);
   const auto c0_name = lnast->get_sname(c0);
 
-  //// note: generally, there won't be a case that the target node point to a output/reg directly
-  //         this is not allowed by LNAST.
+  // generally, there won't be a case that the target node point to a output/reg directly
+  // this is not allowed by LNAST.
 
   const auto lg_ntype_op = decode_lnast_op(lnidx_opr);
   auto node_dpin     = dfg->create_node(lg_ntype_op).setup_driver_pin(0);
@@ -610,8 +528,8 @@ Node_pin Inou_lnast_dfg::setup_node_assign_and_target(LGraph *dfg, const Lnast_n
 }
 
 
-//note: for both target and operands, except the new io, reg, and const, the node and its dpin
-//      should already be in the table as the operand comes from existing operator output
+// for both target and operands, except the new io, reg, and const, the node and its dpin
+// should already be in the table as the operand comes from existing operator output
 Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx_opd) {
 
   auto name = lnast->get_sname(lnidx_opd);
@@ -633,12 +551,14 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
     node_dpin = dfg->create_node(FFlop_Op).setup_driver_pin();
   } else if (is_const(name)) {
     node_dpin = resolve_constant(dfg, name).setup_driver_pin();
+  } else if (is_default_const(name)) {
+    node_dpin = resolve_constant(dfg, "0d0").setup_driver_pin();
   } else {
-    I(false);
+    return node_dpin; //return empty node_pin
   }
 
   node_dpin.set_name(name);
-  name2dpin[name] = node_dpin;  // note: for io and reg, the %$# identifier also recorded
+  name2dpin[name] = node_dpin;  // for io and reg, the %$# identifier is still recorded
   return node_dpin;
 }
 
@@ -647,10 +567,13 @@ Node_Type_Op Inou_lnast_dfg::decode_lnast_op(const Lnast_nid &lnidx_opr) {
   return primitive_type_lnast2lg[raw_ntype];
 }
 
+
+
+
+
 void Inou_lnast_dfg::process_ast_logical_op(LGraph *dfg, const Lnast_nid &lnidx) { ; };
 void Inou_lnast_dfg::process_ast_as_op(LGraph *dfg, const Lnast_nid &lnidx) { ; };
 void Inou_lnast_dfg::process_ast_label_op(LGraph *dfg, const Lnast_nid &lnidx) { ; };
-void Inou_lnast_dfg::process_ast_if_op(LGraph *dfg, const Lnast_nid &lnidx) { ; };
 void Inou_lnast_dfg::process_ast_uif_op(LGraph *dfg, const Lnast_nid &lnidx) { ; };
 void Inou_lnast_dfg::process_ast_func_call_op(LGraph *dfg, const Lnast_nid &lnidx) { ; };
 void Inou_lnast_dfg::process_ast_func_def_op(LGraph *dfg, const Lnast_nid &lnidx) { ; };

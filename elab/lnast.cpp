@@ -196,7 +196,6 @@ void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
     } else if (!is_lhs(psts_nid, opr_nid)) {
       ssa_rhs_handle_a_operand(psts_nid, c1_opr);
     }
-    fmt::print("dot/sel:{}, tuple:{}, new subs:{}\n", get_name(c0_opr), get_name(c1_opr), get_subs(c1_opr));
   } else {
     //handle statement rhs of normal operators
     for (auto itr_opd : children(opr_nid)) {
@@ -211,7 +210,6 @@ void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
     auto c1_opr      = get_sibling_next(c0_opr); // c1 of dot/sel is target_nid
     if (is_lhs(psts_nid, opr_nid))
       update_rhs_ssa_cnt_table(psts_nid, c1_opr);
-    //fmt::print("dot/sel:{}, tuple:{}, new subs:{}\n", get_name(c0_opr), get_name(c1_opr), get_subs(c1_opr));
   }
 
   //handle statement lhs
@@ -258,7 +256,6 @@ void Lnast::ssa_rhs_handle_a_operand_special(const Lnast_nid &gpsts_nid, const L
   if (ssa_rhs_cnt_table.find(opd_name) != ssa_rhs_cnt_table.end()) {
     auto  new_subs = ssa_rhs_cnt_table[opd_name] - 1;
     set_data(opd_nid, Lnast_node(opd_type, ori_token, new_subs));
-    fmt::print("variable:{}, new subs:{}\n", opd_name, new_subs);
   }
 }
 
@@ -273,7 +270,6 @@ void Lnast::ssa_rhs_handle_a_operand(const Lnast_nid &gpsts_nid, const Lnast_nid
 
     auto  new_subs = ssa_rhs_cnt_table[opd_name];
     set_data(opd_nid, Lnast_node(opd_type, ori_token, new_subs));
-    fmt::print("variable:{}, new subs:{}\n", opd_name, new_subs);
   } else {
     int8_t  new_subs = check_rhs_cnt_table_parents_chain(gpsts_nid, opd_nid);
     if (new_subs == -1) {
@@ -390,7 +386,6 @@ Lnast_nid Lnast::check_phi_table_parents_chain(std::string_view target_name, con
     return parent_table[target_name];
 
   if (get_parent(psts_nid) == get_root() && originate_from_csts) {//current sts is top_sts
-    //I(false); //variable not defined
   } else if (get_parent(psts_nid) == get_root() && !originate_from_csts){
     return default_const_nid;
   } else {
@@ -434,7 +429,6 @@ void Lnast::ssa_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &o
     if (target_name.substr(0,3) == "___") return;
 
     update_global_lhs_ssa_cnt_table(target_nid);
-    fmt::print("variable:{}, new subs:{}\n", get_name(target_nid), get_subs(target_nid));
     update_phi_resolve_table(psts_nid, target_nid);
     return;
   }
@@ -446,7 +440,6 @@ void Lnast::ssa_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &o
       auto c1_opr      = get_sibling_next(c0_opr); // c1 of dot/sel is target_nid
       update_global_lhs_ssa_cnt_table(c1_opr);
       update_phi_resolve_table(psts_nid, c1_opr);
-      fmt::print("dot/sel:{}, tuple:{}, new subs:{}\n", get_name(c0_opr), get_name(c1_opr), get_subs(c1_opr));
     }
   }
 }

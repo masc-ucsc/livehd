@@ -277,7 +277,9 @@ Node Inou_lnast_dfg::create_const32_node(LGraph *g, const std::string &str_val, 
   uint32_t val = cal_bin_val_32b(str_val);
   Node node_const32 = g->create_node_const(val);
   node_const32.setup_driver_pin().ref_bitwidth()->e.set_ubits(node_bit_width);
+  I(node_bit_width != 0);
   I(node_const32.get_driver_pin().get_bits() == node_bit_width);
+  I(node_const32.get_driver_pin().get_bits() != 0);
   if(!node_const32.setup_driver_pin().has_name())
     node_const32.setup_driver_pin().set_name(absl::StrCat("0d", std::to_string(val)));
 

@@ -17,22 +17,30 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
   absl::flat_hash_map<Node_pin, Node_pin> tg2actual_dpin; //record tuple_get to its actual reference dpin
   for (const auto &node : dfg->fast()) {
     if (node.get_type().op == TupAdd_Op) {
-      I(node.get_sink_pin(TN).inp_edges().size() == 1);
-      // I(node.get_sink_pin(3).inp_edges().size() == 1); //not necessarily true, might get extra inp from TupGet
+      // I(node.get_sink_pin(TN).inp_edges().size() == 1); // not necessarily true when its __bits assignment
+      // I(node.get_sink_pin(KV).inp_edges().size() == 1); // not necessarily true, might get extra inp from TupGet
 
       to_be_deleted.insert(node.get_compact());
 
       // handle special case: bits attribute
       if (is_bit_attr_tuple_add(node)) {
-        //FIXME->sh: now I assume value pin is connected to constant node directly, but here is another copy propagation problem
-        auto bits = node.get_sink_pin(KV).inp_edges().begin()->driver.get_node().get_type_const_value();
-        auto target_dpin = Node_pin::find_driver_pin(dfg, node.get_driver_pin().get_name());
+        auto bits = node.get_sink_pin(KV).inp_edges().begin()->driver.get_node().get_type_const_value(); // FIXME->sh: now I assume value pin is connected to constant node directly, but here is another copy propagation problem
+        fmt::print("try to assign bits, target name:{}, bits:{}\n", node.get_driver_pin().get_name(), bits);
+        auto target_name = node.get_driver_pin().get_name();
+        Node_pin target_dpin;
+
+        if (is_input(target_name) or is_output(target_name) /*or is_register(target_name)*/) { // FIXME->sh: what about the case of register?
+          target_dpin = Node_pin::find_driver_pin(dfg, target_name.substr(1));
+          fmt::print("target_dpin:{}\n", target_dpin.debug_name());
+        } else {
+          target_dpin = Node_pin::find_driver_pin(dfg, target_name);
+        }
+
         target_dpin.ref_bitwidth()->e.set_ubits(bits);
       }
     } else if (node.get_type().op == TupGet_Op and tuple_get_has_key_name(node)) {
       to_be_deleted.insert(node.get_compact());
       auto tup_get_target = node.get_sink_pin(KN).inp_edges().begin()->driver.get_name();
-      fmt::print("tup_get_target:{}\n", tup_get_target);
       auto chain_itr = node.get_sink_pin(TN).inp_edges().begin()->driver.get_node();
       while (chain_itr.get_type().op != TupRef_Op) {
         I(chain_itr.get_type().op == TupAdd_Op);
@@ -42,11 +50,9 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
             value_dpin = tg2actual_dpin[value_dpin];
           else
             tg2actual_dpin[node.get_driver_pin()] = value_dpin;
-          fmt::print("driver info:{}\n", value_dpin.get_node().debug_name());
 
           // auto value_spin = node.get_sink_pin(TN).out_edges().begin()->sink;
           auto value_spin = node.get_driver_pin().out_edges().begin()->sink;
-          fmt::print("sink info:{}\n", value_spin.get_node().debug_name());
           dfg->add_edge(value_dpin, value_spin);
           break;
         }
@@ -57,7 +63,6 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
     } else if (node.get_type().op == TupGet_Op and tuple_get_has_key_pos(node)) {
       to_be_deleted.insert(node.get_compact());
       auto tup_get_target = node.get_sink_pin(KP).inp_edges().begin()->driver.get_node().get_type_const_value(); //FIXME->sh: need lgmem.prp
-      fmt::print("tup_get_target:{}\n", tup_get_target);
       auto chain_itr = node.get_sink_pin(TN).inp_edges().begin()->driver.get_node();
       while (chain_itr.get_type().op != TupRef_Op) {
         I(chain_itr.get_type().op == TupAdd_Op);
@@ -80,7 +85,6 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
   }
 
   for (auto &itr : to_be_deleted) {
-    fmt::print("delete {}\n", itr.get_node(dfg).debug_name());
     itr.get_node(dfg).del_node();
   }
 }
@@ -117,7 +121,10 @@ void Inou_lnast_dfg::do_reduced_or_elimination(LGraph *dfg) {
   absl::flat_hash_set<Node::Compact> to_be_deleted;
   for (const auto &node : dfg->fast()) {
     if (node.get_type().op == Or_Op) {
-      bool is_reduced_or = node.out_edges().begin()->driver.get_pid() == 1;
+      bool is_reduced_or = false;
+      if (node.has_outputs() && node.out_edges().begin()->driver.get_pid() == 1)
+        is_reduced_or = true;
+
       if (is_reduced_or) {
         I(node.inp_edges().size() == 1);
         for (auto &out : node.out_edges()) {
@@ -132,7 +139,6 @@ void Inou_lnast_dfg::do_reduced_or_elimination(LGraph *dfg) {
   }
 
   for (auto &itr : to_be_deleted) {
-    fmt::print("delete {}\n", itr.get_node(dfg).debug_name());
     itr.get_node(dfg).del_node();
   }
 }

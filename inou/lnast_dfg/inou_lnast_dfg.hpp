@@ -42,6 +42,7 @@ protected:
   void process_ast_as_op        (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_label_op     (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_if_op        (LGraph *dfg, const Lnast_nid &lnidx);
+  void process_ast_phi_op       (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_uif_op       (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_func_call_op (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_func_def_op  (LGraph *dfg, const Lnast_nid &lnidx);
@@ -61,10 +62,11 @@ protected:
   void         setup_lnast_to_lgraph_primitive_type_mapping();
 
 
-  static bool is_register (std::string_view name) {return name.substr(0, 1) == "#" ;}
-  static bool is_input    (std::string_view name) {return name.substr(0, 1) == "$" ;}
-  static bool is_output   (std::string_view name) {return name.substr(0, 1) == "%" ;}
-  static bool is_const    (std::string_view name) {return name.substr(0, 2) == "0d" or name.substr(0, 3) == "-0d";}
+  static bool is_register (std::string_view name)      {return name.substr(0, 1) == "#" ; }
+  static bool is_input    (std::string_view name)      {return name.substr(0, 1) == "$" ; }
+  static bool is_output   (std::string_view name)      {return name.substr(0, 1) == "%" ; }
+  static bool is_const    (std::string_view name)      {return name.substr(0, 2) == "0d" or name.substr(0, 3) == "-0d"; }
+  static bool is_default_const (std::string_view name) {return name.substr(0,13) == "default_const"; }
   static bool is_bit_attr_tuple_add(const Node &node) {
     return (node.get_sink_pin(1).inp_edges().size() == 1) &&
            (node.get_sink_pin(1).inp_edges().begin()->driver.get_name().substr(0,6) == "__bits");
@@ -72,9 +74,9 @@ protected:
 
 
   // tuple related
-  Node_pin     add_tuple_add_from_dot (LGraph *dfg, const Lnast_nid &lnidx_dot, const Lnast_nid &lnidx_assign);
-  Node_pin     add_tuple_add_from_sel (LGraph *dfg, const Lnast_nid &lnidx_sel, const Lnast_nid &lnidx_assign);
-  Node_pin     add_tuple_get_from_dot_or_sel (LGraph *dfg, const Lnast_nid &lnidx_opr);
+  Node_pin     add_tuple_add_from_dot          (LGraph *dfg, const Lnast_nid &lnidx_dot, const Lnast_nid &lnidx_assign);
+  Node_pin     add_tuple_add_from_sel          (LGraph *dfg, const Lnast_nid &lnidx_sel, const Lnast_nid &lnidx_assign);
+  Node_pin     add_tuple_get_from_dot_or_sel   (LGraph *dfg, const Lnast_nid &lnidx_opr);
   Node_pin     setup_tuple_ref (LGraph *dfg, std::string_view tup_name);
   Node_pin     setup_tuple_key (LGraph *dfg, std::string_view key_name);
   Node_pin     setup_tuple_chain_new_max_pos (LGraph *dfg, const Node_pin &tn_dpin);
