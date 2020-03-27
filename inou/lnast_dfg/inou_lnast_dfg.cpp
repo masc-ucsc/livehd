@@ -227,21 +227,21 @@ Node_pin Inou_lnast_dfg::setup_tuple_chain_new_max_pos(LGraph *dfg, const Node_p
 void Inou_lnast_dfg::process_ast_binary_op(LGraph *dfg, const Lnast_nid &lnidx_opr) {
   auto opr_node = setup_node_operator_and_target(dfg, lnidx_opr).get_node();
 
-  for (auto opr_child = lnast->children(lnidx_opr).begin();
-       opr_child != lnast->children(lnidx_opr).end(); ++opr_child) {
-    if (opr_child == lnast->children(lnidx_opr).begin())
+  for (const auto &opr_child : lnast->children(lnidx_opr)) {
+    if (opr_child == lnast->get_first_child(lnidx_opr))
       continue; // already handled at setup_node_operator_and_target();
     else {
-      auto child_name = lnast->get_sname(*opr_child);
+      auto child_name = lnast->get_sname(opr_child);
       Node_pin opd;
       if (name2lnidx.find(child_name) != name2lnidx.end()) {
         opd = add_tuple_get_from_dot_or_sel(dfg, name2lnidx[child_name]);
       } else {
-        opd = setup_ref_node_dpin(dfg, *opr_child);
+        opd = setup_ref_node_dpin(dfg, opr_child);
       }
       dfg->add_edge(opd, opr_node.setup_sink_pin(0));// FIXME->sh: the sink_pin should be determined by the functionality, not just zero
     }
-  };
+  }
+
 }
 
 void Inou_lnast_dfg::process_ast_assign_op(LGraph *dfg, const Lnast_nid &lnidx_assign) {
@@ -548,7 +548,8 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
   } else if (is_input(name)) {
     node_dpin = dfg->add_graph_input(name.substr(1), Port_invalid, 0);
   } else if (is_register(name)) {
-    node_dpin = dfg->create_node(FFlop_Op).setup_driver_pin();
+    //FIXME->sh: need to extend to Fluid_flop, Async_flop etc...
+    node_dpin = dfg->create_node(SFlop_Op).setup_driver_pin();
   } else if (is_const(name)) {
     node_dpin = resolve_constant(dfg, name).setup_driver_pin();
   } else if (is_default_const(name)) {
