@@ -33,18 +33,17 @@ void help_labels(const std::string& cmd, const std::string& txt, bool required) 
 }
 
 // prototypes
-Replxx::completions_t hook_completion(std::string const& context, int index, std::vector<std::string> const& user_data);//SG
-Replxx::hints_t       hook_hint(std::string const& context, int index, Replxx::Color& color, std::vector<std::string> const& user_data);//SG
-void                  hook_color(std::string const& str, Replxx::colors_t& colors, std::vector<std::pair<std::string, Replxx::Color>> const& user_data);//SG
+Replxx::completions_t hook_completion(std::string const& context, int index, std::vector<std::string> const& user_data);
+Replxx::hints_t       hook_hint(std::string const& context, int index, Replxx::Color& color, std::vector<std::string> const& user_data);
+void                  hook_color(std::string const& str, Replxx::colors_t& colors, std::vector<std::pair<std::string, Replxx::Color>> const& user_data);
 
-Replxx::completions_t hook_shared(std::string const& context, int index, std::vector<std::string> const& user_data, bool add_all) {//SG_trial
+Replxx::completions_t hook_shared(std::string const& context, int index, std::vector<std::string> const& user_data) {//SG_trial
   //auto*                 examples = static_cast<std::vector<std::string>*>(user_data);//SG_trial
   auto*                 examples = &(user_data);//SG_trial
   Replxx::completions_t completions;
 
-  int  last_cmd_start = context.size();
+  int  last_cmd_start = 0;
   int  last_cmd_end   = context.size();
-  bool skipping_word  = true;
 
   int  last_label_start = context.size();
   bool last_label_found = false;
@@ -52,15 +51,15 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
 
   for (int i = context.size(); i >= 0; i--) {
     if (context[i] == ' ') {
-      skipping_word   = false;
       last_label_done = true;
       continue;
     }
-    if (context[i] == '>') break;
+    if (context[i] == '>') {
+      last_cmd_start = i+1;
+      break;
+    }
     if (context[i] == ':') {
-      last_cmd_start = i;
       last_cmd_end   = i;
-      skipping_word  = true;
       if (!last_label_found && !last_label_done) {
         last_label_found = true;
       } else {
@@ -70,14 +69,16 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
     if (last_label_found && !last_label_done) {
       last_label_start = i;
     }
-    if (!skipping_word) {
-      last_cmd_start = i;
-    }
+  }
+  while (context[last_cmd_start] == ' ') {
+    last_cmd_start++;
   }
 
   std::vector<std::string> fields;
 
-  std::string prefix{context.substr(index)};
+  std::string prefix{context.substr(context.size()-index)};
+
+  std::string last_cmd;
 
   std::string prefix_add = "";
 
@@ -95,6 +96,7 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
       prefix        = full_filename;  // Overwrite beginning of the match
       label         = label.substr(0, pos);
     }
+    //std::cerr << "[" << context << "][" << prefix << "]" << context.size() << ":" << index << "label[" << label << "]" << std::endl;
     bool label_files  = strcasecmp(label.c_str(), "files") == 0;
     bool label_output = strcasecmp(label.c_str(), "output") == 0;
     bool label_path   = strcasecmp(label.c_str(), "path") == 0;
@@ -148,74 +150,57 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
     if (pos != std::string::npos) {
       cmd = cmd.substr(0, pos);
     }
-    // fmt::print("cmd[{}]\n", cmd);
+    //fmt::print("cmd[{}]\n", cmd);
     Main_api::get_labels(
-        cmd, [&fields](const std::string& label, const std::string txt, bool required) { (void)txt; fields.push_back(label + ":"); });
+        cmd, [&fields](const std::string& label, const std::string txt, bool required) { (void)required; (void)txt; fields.push_back(label + ":"); });
     if (!fields.empty()) examples = &fields;
+    prefix = cmd;
   }
 
   for (auto const& e : *examples) {
-    // fmt::print("checking {} vs {}\n",e, prefix);
+    //fmt::print("checking {} vs {}\n",e, prefix);
     if (strncasecmp(prefix.c_str(), e.c_str(), prefix.size()) == 0) {
-      // fmt::print("match {}\n",e);
-      if (add_all) {
-        auto pos = prefix_add.find_last_of('/');
-        if (pos != std::string::npos) {
-          prefix_add = prefix_add.substr(pos + 1);
-        }
-        completions.emplace_back((prefix_add + e).c_str());
-      } else
-        completions.emplace_back(e.c_str());
+      //fmt::print("match {} prefix:{}\n", e, prefix);
+      completions.emplace_back(e.c_str());
     }
   }
 
-#if 1
-  if (!add_all && completions.size() == 1 && !prefix_add.empty()) {
-    // find last / as completions seem to work upto last char
-    auto pos = prefix_add.find_last_of('/');
-    if (pos != std::string::npos) {
-      prefix_add = prefix_add.substr(pos + 1);
+  if (context.size() != static_cast<unsigned>(index)) {
+    std::string fprefix{context.substr(context.size()-index)};
+    auto to_chop = prefix.size() - fprefix.size();
+    for (auto i=0;i<completions.size();++i) {
+      const std::string comp = completions[i].text();
+      //fmt::print("fprefix[{}] completion[{}]\n", fprefix, comp);
+      if (comp.size() > to_chop && to_chop > 0) completions[i] = Replxx::Completion(comp.substr(to_chop));
     }
-    //completions[0] = prefix_add + completions[0];//SG_27jun_trial
-    //SG_27jun_trial //std::cout<<prefix_add + completions[0].text();
-   completions[0] = Replxx::Completion(prefix_add + completions[0].text());//SG_27jun_trial
-    //SG_27jun_trial //completions[0](prefix_add + completions[0].text(), completions[0].color());
   }
-#endif
 
   return completions;
 }
 
-Replxx::completions_t hook_completion(std::string const& context, int index, std::vector<std::string> const& user_data) {//SG;
-  return hook_shared(context, index, user_data, false);
+Replxx::completions_t hook_completion(std::string const& context, int index, std::vector<std::string> const& user_data) {
+  return hook_shared(context, index, user_data);
 }
 
-Replxx::hints_t hook_hint(std::string const& context, int index, Replxx::Color& color, std::vector<std::string> const& user_data) {//SG;
+// context is the string passed on command line
+// index is the length of the last "chunk" of the string since last non-alphanumeric character
+// E.g: foo       has size:3 index:3
+//      foo.b     has size:5 index:1
+Replxx::hints_t hook_hint(std::string const& context, int index, Replxx::Color& color,
+                          std::vector<std::string> const& user_data) {  // SG;
   Replxx::hints_t hints;
 
-  // only show hint if prefix is at least 'n' chars long
+
+// only show hint if prefix is at least 'n' chars long
   // or if prefix begins with a specific character
-  std::string prefix{context.substr(index)};
+  std::string prefix{context.substr(context.size()-index)};
+
   if (prefix.size() >= 2 || (!prefix.empty() && prefix.at(0) == '!')) {
-    auto opts = hook_shared(context, index, user_data, true);
-    
-#if 1
+    auto opts = hook_shared(context, index, user_data);
+
     for (auto const& e : opts) {
-      // fmt::print("prefix[{}] e[{}]\n",prefix,e);
-      // if (strncasecmp(e.c_str(), prefix.c_str(), prefix.size()) == 0 ) {
-      //SG_27jun_trial:      std::cout << e.text().size()<<std::endl;
-      if (e.text().size()>prefix.size())//SG_27jun_trial
-        hints.emplace_back(e.text().substr(prefix.size()).c_str());//SG_27jun_trial
-      //}
+      hints.emplace_back(e.text());
     }
-#else
-    auto* examples = static_cast<std::vector<std::string>*>(user_data);
-    for (auto const& e : *examples) {
-      if (e.compare(0, prefix.size(), prefix) == 0) {
-        hints.emplace_back(e.substr(prefix.size()).c_str());
-      }
-    }
-#endif
   }
 
   // set hint color to green if single match found
@@ -248,7 +233,7 @@ void hook_color(std::string const& context, Replxx::colors_t& colors, std::vecto
   //SG: auto* regex_color = static_cast<std::vector<std::pair<std::string, Replxx::Color>>*>(user_data);
 
   // highlight matching regex sequences
-  //SG: for (auto const& e : *regex_color) 
+  //SG: for (auto const& e : *regex_color)
   for (auto const& e : regex_color) {
     size_t      pos{0};
     std::string str = context;
@@ -462,7 +447,7 @@ int main(int argc, char** argv) {
 
     } else if (input.compare(0, 7, "history") == 0) {
       // display the current history
-      //SG_17dec for (size_t i = 0, sz = rx.history_size(); i < sz; ++i) 
+      //SG_17dec for (size_t i = 0, sz = rx.history_size(); i < sz; ++i)
        //SG_17dec std::cout << std::setw(4) << i << ": " << rx.history_line(i) << "\n";
       Replxx::HistoryScan hs( rx.history_scan() );//SG_17dec
 			for ( int i( 0 ); hs.next(); ++ i ) {//SG_17dec
