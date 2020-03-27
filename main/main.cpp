@@ -37,9 +37,8 @@ Replxx::completions_t hook_completion(std::string const& context, int index, std
 Replxx::hints_t       hook_hint(std::string const& context, int index, Replxx::Color& color, std::vector<std::string> const& user_data);
 void                  hook_color(std::string const& str, Replxx::colors_t& colors, std::vector<std::pair<std::string, Replxx::Color>> const& user_data);
 
-Replxx::completions_t hook_shared(std::string const& context, int index, std::vector<std::string> const& user_data) {//SG_trial
-  //auto*                 examples = static_cast<std::vector<std::string>*>(user_data);//SG_trial
-  auto*                 examples = &(user_data);//SG_trial
+Replxx::completions_t hook_shared(std::string const& context, int index, std::vector<std::string> const& user_data) {
+  auto*                 examples = &(user_data);
   Replxx::completions_t completions;
 
   int  last_cmd_start = 0;
@@ -141,8 +140,7 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
           fields = sort_files;
         }
       }
-      examples = &fields;//SG_trial
-      //user_data = &fields;
+      examples = &fields;
     }
   } else if (last_cmd_start < last_cmd_end) {
     std::string cmd = context.substr(last_cmd_start, last_cmd_end);
@@ -168,7 +166,7 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
   if (context.size() != static_cast<unsigned>(index)) {
     std::string fprefix{context.substr(context.size()-index)};
     auto to_chop = prefix.size() - fprefix.size();
-    for (auto i=0;i<completions.size();++i) {
+    for (auto i=0u;i<completions.size();++i) {
       const std::string comp = completions[i].text();
       //fmt::print("fprefix[{}] completion[{}]\n", fprefix, comp);
       if (comp.size() > to_chop && to_chop > 0) completions[i] = Replxx::Completion(comp.substr(to_chop));
@@ -187,7 +185,7 @@ Replxx::completions_t hook_completion(std::string const& context, int index, std
 // E.g: foo       has size:3 index:3
 //      foo.b     has size:5 index:1
 Replxx::hints_t hook_hint(std::string const& context, int index, Replxx::Color& color,
-                          std::vector<std::string> const& user_data) {  // SG;
+                          std::vector<std::string> const& user_data) {
   Replxx::hints_t hints;
 
 
@@ -229,11 +227,7 @@ int real_len(std::string const& s) {
   return (len);
 }
 
-void hook_color(std::string const& context, Replxx::colors_t& colors, std::vector<std::pair<std::string, Replxx::Color>> const& regex_color) {//SG;
-  //SG: auto* regex_color = static_cast<std::vector<std::pair<std::string, Replxx::Color>>*>(user_data);
-
-  // highlight matching regex sequences
-  //SG: for (auto const& e : *regex_color)
+void hook_color(std::string const& context, Replxx::colors_t& colors, std::vector<std::pair<std::string, Replxx::Color>> const& regex_color) {
   for (auto const& e : regex_color) {
     size_t      pos{0};
     std::string str = context;
@@ -319,7 +313,7 @@ int main(int argc, char** argv) {
   };
 
   // init all the lgraph libraries used
-  Main_api::get_commands([&examples](const std::string& cmd, const std::string& help_msg) { examples.push_back(cmd); });
+  Main_api::get_commands([&examples](const std::string& _cmd, const std::string& help_msg) { (void)help_msg; examples.push_back(_cmd); });
 
   const char* env_home = std::getenv("HOME");
   bool        history  = true;
@@ -364,16 +358,11 @@ int main(int argc, char** argv) {
   }
 
   rx.set_max_history_size(8192);
-  // rx.set_max_line_size(32768);
   rx.set_max_hint_rows(6);
-  using namespace std::placeholders;//SG;
-  //SG: rx.set_highlighter_callback(hook_color, static_cast<void*>(&regex_color));
-  rx.set_highlighter_callback( std::bind( &hook_color, _1, _2, cref( regex_color ) ));
+  rx.set_highlighter_callback( std::bind( &hook_color, std::placeholders::_1, std::placeholders::_2, cref( regex_color ) ));
 
-  //SG: rx.set_completion_callback(hook_completion, static_cast<void*>(&examples));
-  rx.set_completion_callback(std::bind( &hook_completion, _1, _2, cref( examples ) ));
-  //SG: rx.set_hint_callback(hook_hint, static_cast<void*>(&examples));
-  rx.set_hint_callback(std::bind( &hook_hint, _1, _2, _3, cref( examples ) ));
+  rx.set_completion_callback(std::bind( &hook_completion, std::placeholders::_1, std::placeholders::_2, cref( examples ) ));
+  rx.set_hint_callback(std::bind( &hook_hint, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, cref( examples ) ));
 
   if (!option_quiet) {
     std::cout << "Welcome to lgraph\n"
@@ -447,13 +436,10 @@ int main(int argc, char** argv) {
 
     } else if (input.compare(0, 7, "history") == 0) {
       // display the current history
-      //SG_17dec for (size_t i = 0, sz = rx.history_size(); i < sz; ++i)
-       //SG_17dec std::cout << std::setw(4) << i << ": " << rx.history_line(i) << "\n";
-      Replxx::HistoryScan hs( rx.history_scan() );//SG_17dec
-			for ( int i( 0 ); hs.next(); ++ i ) {//SG_17dec
-				std::cout << std::setw(4) << i << ": " << hs.get().text() << "\n";//SG_17dec
-      }//SG_17dec
-
+      Replxx::HistoryScan hs( rx.history_scan() );
+			for ( int i( 0 ); hs.next(); ++ i ) {
+				std::cout << std::setw(4) << i << ": " << hs.get().text() << "\n";
+      }
 
       rx.history_add(input);
       continue;
