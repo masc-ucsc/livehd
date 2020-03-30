@@ -10,5 +10,5 @@ clean:
 	@rm -f sample
 	@rm -f perf.*
 	@rm -f *.o *.gch
-	@rm -f check_*.cpkt
+	@rm -f check_*.ckpt
 

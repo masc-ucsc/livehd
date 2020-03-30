@@ -8,10 +8,15 @@
 #include <dirent.h>
 
 #include <cassert>
-
+#include <iostream>
 #include "lbench.hpp"
 #include "likely.hpp"
 #include "simlib_signature.hpp"
+
+//#include "fmt/format.h"
+#include "absl/strings/substitute.h"
+#include <vector>
+#include <iterator>
 
 template<typename Top_struct>
 class Simlib_checkpoint {
@@ -19,7 +24,7 @@ class Simlib_checkpoint {
   int checkpoint_ncycles;
   int next_checkpoint_ncycles;
   double last_checkpoint_sec;
-
+  uint64_t reset_ncycles;
   const std::string name;
   std::string path; // checkpoint enabled/path
 
@@ -37,7 +42,7 @@ class Simlib_checkpoint {
   };
 
 public:
-  Simlib_checkpoint(std::string_view _name, uint64_t reset_ncycles = 10000) : name(_name), top(0), perf(name) {
+  Simlib_checkpoint(std::string_view _name, uint64_t _reset_ncycles = 10000) : name(_name), top(0), perf(name), reset_ncycles(_reset_ncycles) {
     ncycles = 0;
     checkpoint_ncycles = -1; // Disable checkpoint by default
     next_checkpoint_ncycles = 1000000000;
@@ -46,6 +51,7 @@ public:
     advance_reset(reset_ncycles);
 
     top.add_signature(signature);
+    //std::cout<<"name: "<<name<<"\n top: "<<top.hidx<<"\n"<<"---"<<"\n" ;
   };
 
   ~Simlib_checkpoint() {
@@ -130,13 +136,17 @@ public:
   bool load_checkpoint(uint64_t cycles) {
     printf("load checkpoint @%lld\n", cycles);
     std::string filename = path + "/" + name + "_" + std::to_string(cycles) + ".ckpt";
+    //std::cout<<"filename is :"<<filename<<std::endl;//SG
     int fd = ::open(filename.c_str(), O_RDONLY, 0644);
+    //0644 file system permission flags : it stands for -rw-r--r-- file permission.
     if (fd <0) {
+      //fd<0 means the file was not opened/not found for opening/error while opening.
       return false;
     }
 
     Simlib_signature s2(signature);
     auto sz = read(fd, s2.get_map_address(), s2.get_map_bytes());
+//    std::cout<<"-------sz: \n"<<sz<<"\nfd is:"<<fd<<" s2.get_map_address gives ["<<s2.get_map_address()<<"] and s2.get_map_bytes gives ["<<s2.get_map_bytes()<<"]"<<"\n------------"<<std::endl;
     if (sz!=signature.get_map_bytes()) {
       fprintf(stderr,"simlib: ERROR corrupted checkpoint:%s signature loading\n",filename.c_str());
       exit(3);
@@ -157,6 +167,64 @@ public:
     return true;
   }
 
+  bool load_intermediate_checkpoint(uint64_t cycles){
+   //read all filenames with check_....ckpt
+   printf("load intermediate checkpoint @%lld\n", cycles);
+   std::vector<int> myvector;
+    DIR *dr = opendir(path.c_str());
+   if (dr ==NULL) {
+     fprintf(stderr,"simlib: ERROR unable to access path:%s\n", path.c_str());
+     exit(-1);
+   }// else {printf ("accessing path: %s\n", path.c_str());}
+   struct dirent *de;
+   std::string match = "check_";
+   while ((de = readdir(dr)) != NULL) {
+     std::string chop_name(de->d_name);
+     if (chop_name.substr(0,6)==match) {
+//       printf("required: %d\n",atoi(chop_name.substr(6,chop_name.size()-11).c_str()));
+         int mydata = atoi(chop_name.substr(6,chop_name.size()-11).c_str());
+         //myvector.push_back(atoi(chop_name.substr(6,chop_name.size()-11)));
+         myvector.push_back(mydata);
+       //printf("chop_name is %s\n", chop_name.c_str());
+       //printf("match is %s\n", match.c_str());
+       //std::string file_name = path+"/"+de->d_name;//absl::StrCat(path, "/", de->d_name);
+       //printf("file is %s\n", file_name.c_str());
+     }// else {printf("chop_name in else is %s\n", chop_name.c_str());}
+   }
+    for (int i=0;i<myvector.size();i++) {
+      if(cycles==myvector[i]) {
+        load_checkpoint(cycles);
+        return true;
+      }
+    }
+
+    std::sort (myvector.begin(), myvector.end());
+//    for (int i=0;i<myvector.size();i++) {
+//      std::cout<<"vect: "<<myvector[i]<<std::endl;
+//    }
+    std::vector<int>::iterator low;
+    low=std::lower_bound (myvector.begin(), myvector.end(), cycles);
+    //std::cout << "lower_bound :  " << myvector[low- myvector.begin()-1] << '\n';
+    int lower_cycles = myvector[low- myvector.begin()-1] ;
+    if(lower_cycles==0) {
+      //std::cout<<"--resetting--"<<std::endl;
+      advance_reset(reset_ncycles);
+      //std::cout<<"--advancing clock--\n";
+      advance_clock(cycles-reset_ncycles);
+      return true;}
+    load_checkpoint(lower_cycles);
+    advance_clock(cycles-lower_cycles);
+   //extract ... -> atoi -> store in vector v
+   //if cycles == any entry in v
+   //  call load_checkpoint
+   //  return true;
+   //
+   //sort v
+   //find number smaller than cycles = lowercycle
+   //load_checkpoint(lowercycle)
+   //advance_clock(cycles-lowercycle)  
+    return true;
+  }
   void save_checkpoint() {
     printf("Save checkpoint @%lld\n", ncycles);
     std::string filename = path + "/" + name + "_" + std::to_string(ncycles) + ".ckpt";
@@ -185,6 +253,7 @@ public:
   }
 
   void handle_checkpoint() {
+    std::cout<<"in handle"<<std::endl;
     auto delta_secs = perf.get_secs()-last_checkpoint_sec;
     if (true || delta_secs>0.4)
       save_checkpoint();
@@ -203,12 +272,13 @@ public:
   }
 
   void advance_clock(uint64_t n=1) {
+//    std::cout<<"in advance_clock with n= " <<n<<std::endl;
     do {
       int step = n;
       if (step> next_checkpoint_ncycles)
         step = next_checkpoint_ncycles;
 
-      n -= step;
+      n -= step;//SG: if step==n then this line will make n=0 thus making the possibility of n>0 unlikely.
       next_checkpoint_ncycles -= step;
       for(auto i=0;i<step;++i)
         top.cycle();
