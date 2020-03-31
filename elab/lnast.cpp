@@ -70,10 +70,11 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid){
 
 
 void Lnast::determine_dot_sel_lrhs(const Lnast_nid &psts_nid) {
-  Dot_sel_lrhs_table top_dot_sel_lrhs_table;
+  Dot_sel_lrhs_table  top_dot_sel_lrhs_table;
   dot_sel_lrhs_tables[get_name(psts_nid)] = top_dot_sel_lrhs_table;
   for (const auto &opr_nid : children(psts_nid)) {
     if (get_type(opr_nid).is_func_def()) {
+      continue;
     } else if (get_type(opr_nid).is_if()) {
       determine_dot_sel_lrhs_if_subtree(opr_nid);
     } else if (get_type(opr_nid).is_dot() or get_type(opr_nid).is_select()) {
@@ -434,14 +435,14 @@ void Lnast::ssa_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &o
   }
 
 
-  if (type.is_dot() or type.is_select()) {
-    if (is_lhs(psts_nid, opr_nid)) {
-      auto c0_opr      = get_first_child(opr_nid);
-      auto c1_opr      = get_sibling_next(c0_opr); // c1 of dot/sel is target_nid
-      update_global_lhs_ssa_cnt_table(c1_opr);
-      update_phi_resolve_table(psts_nid, c1_opr);
-    }
-  }
+  // if (type.is_dot() or type.is_select()) {
+  //   if (is_lhs(psts_nid, opr_nid)) {
+  //     auto c0_opr      = get_first_child(opr_nid);
+  //     auto c1_opr      = get_sibling_next(c0_opr); // c1 of dot/sel is target_nid
+  //     update_global_lhs_ssa_cnt_table(c1_opr);
+  //     update_phi_resolve_table(psts_nid, c1_opr);
+  //   }
+  // }
 }
 
 bool Lnast::is_lhs(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {

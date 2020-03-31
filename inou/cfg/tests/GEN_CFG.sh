@@ -16,6 +16,7 @@ generate ssa_no_else_if
 # ./prp nested_if.prp     | sort -n  > y && column -t y > x && rm -f y && mv x nested_if.cfg
 # ./prp tuple.prp         | sort -n  > y && column -t y > x && rm -f y && mv x tuple.cfg
 # ./prp tuple_if.prp      | sort -n  > y && column -t y > x && rm -f y && mv x tuple_if.cfg
+# ./prp tuple_if2.prp     | sort -n  > y && column -t y > x && rm -f y && mv x tuple_if2.cfg
 # ./prp ssa_if.prp        | sort -n  > y && column -t y > x && rm -f y && mv x ssa_if.cfg
 # ./prp ssa_nested_if.prp | sort -n  > y && column -t y > x && rm -f y && mv x ssa_nested_if.cfg
 

@@ -2,7 +2,7 @@
 rm -rf ./lgdb
 rm -f  yosys_script.*
 
-pts='tuple_if ssa_rhs ssa_nested_if ssa_if nested_if tuple simple_tuple trivial_bitwidth function_call tuple '
+pts='tuple_if2 tuple_if ssa_rhs ssa_nested_if ssa_if nested_if tuple simple_tuple trivial_bitwidth function_call tuple '
 # pts='ssa_rhs'
 # pts='tuple'
 # pts='trivial_bitwidth'
