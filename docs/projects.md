@@ -21,21 +21,7 @@ small tasks that are not enough for a thesis/project, but great to help.
 Open projects are potential MS thesis/projects.
 
 
-## FIRRTL 2 LNAST
-
-There is an ongoing effort to bring from frontends to LNAST. This is a frontend/backend
-project ot interface with high level FIRRTL.
-
-Dependence: none
-
-Main features:
-
-* Bridge between high level FIRRTL and LGraph using LNAST (to/from FIRRTL translation)
-* Ideally handle "high level FIRRTL" Then, we can read out of CHISEL.
-* Benchmark is rocketchip and BOOM
-* How to handle annotations? (unclear at the moment if we need this)
-
-## slang 2 LNAST
+## Verilog input with a slang 2 LNAST pass
 
 slang (https://github.com/MikePopoloski/slang) is an open source System Verilog parser/compiler.
 It is fairly fast and complete. The goal of this project is to interface slang to LNAST. Notice
@@ -58,6 +44,8 @@ to handle classes.
         * BOOM
         * https://github.com/SymbiFlow/sv-tests
         * https://github.com/taichi-ishitani/tnoc
+* The interface with slang could be through the C++ ASTVisitor in slang or maybe just handling the dumped json
+
 
 ## Hot-Reload Simulation Console
 
@@ -116,6 +104,18 @@ Main features:
 * Break graph partitions in disjoin sets and areas that do not have cross optimization (disjoin)
 * Mark graph with hypergraph partition
 * Patch traversal so that we have fast/forward/backward for a "color graph"
+
+## Parallel and Hierarchical Synthesis with Mockturtle
+
+Mockturtle is integrated with LiveHD. The goal of this task is to iron out bugs
+and issues and to use the LiveHD Tasks API to parallelize the synthesis.
+
+Dependence: none
+
+Main features:
+
+* The current synthesis divides the circuit in partitions. Each partition can be synthesized in parallel.
+* Support hierarchical synthesis to optimize cross Lgraphs (cross verilog module optimization)
 
 ## Bring Back Incremental Synthesis to LGraph
 
@@ -247,7 +247,7 @@ Some related papers in clustering:
 
 We perform regression for correctness, we should have regressions for
 performance. This includes completion times and tracking CPU performance
-counters. The setup uses prometheous/grafana
+counters. The setup uses prometheus/grafana
 (https://prometheus.io/docs/visualization/grafana/)
 
 Dependence: none
@@ -364,7 +364,7 @@ Main features:
 
 ## FPGA Placer
 
-Build an analytical placer for FPGAs. We do not reuse existing to have better target for incremental. 
+Build an analytical placer for FPGAs based on Ripple-FPGA.
 
 Dependence: none
 
@@ -374,16 +374,25 @@ Main features:
 * Being able to transfer placed design to Rapidwright
 * Target Alveo U250
 
-Some characteristics
+Main steps:
 
-* Overall flow based on: "BonnPlace: A Self-Stabilizing Placement Framework"
+* Dump animations on placement with https://github.com/dtschump/CImg Just dump png every n-iterations (or seconds)
+* Replace lpsolve with google glop (Bazel build) https://developers.google.com/optimization/lp/glop
+* Replace patoh with kahypar (Bazel build) https://github.com/SebastianSchlag/kahypar
+* Get it to build with Bazel as a separate repo (not in lgraph)
+* Benchmark a potential replacement of Eigen library with SuperSCS (This is over 70% of the time for large bench. Try different libraries pick faster SuperSCS?)
+    * gp_qsolve.cpp (location for Eigen)
+    * SuperSCS code example in C: https://kul-forbes.github.io/scs/examples_in_c.html
+    * In-place solver leveraging LGraph is also very reasonable as alternative
+
+Some characteristics/thoughts to consider:
+
+* Get inspirantion from "BonnPlace: A Self-Stabilizing Placement Framework" and RippleFPGA
 * If floorplaner is there, leverage floorplan, but do not assume shape (square) in contour. Allow to place around each floorplan area (amorphous. A center of gravity per floorplan block)
 * Use timing in feedback
 * Cluster flops (buses)
-* Decide SuperSCS semidefinite or eigen++ or in-place solver
 * To allow fast incremental placement. Allow to do analytical over subset of design, and other areas are fixed (legalization to handle)
 * Critical paths are aligned
-* Use timing
 * Use a rough global router to "spread" when needed.
 * Use constraint solver for packing
 * Support "annotations"
@@ -400,18 +409,7 @@ Integrate with the nextPNR FPGA placement/routing
 Dependence: Rapidwright
 
 Main features:
-* Create a bridge to/from LGraph and nextpntr
-* Create common API that can talk with RapidWright and/or NextPNR
-    * Being able to transfer placed design to Rapidwright
-    * Common API to query FPGA properties (LUT map, dps map...)
-
-## VPR
-
-Integrate LGraph wiht VPR. Similar to  NextPNR project, but with VPR.
-
-Dependence: Rapidwright
-
-# Active Projects (already selected)
+* Create a bridge to/from LGraph and nextpntr (json)
 
 ## Cloud
 
@@ -455,6 +453,8 @@ After each command, the "delta" is sent back and applied to the front
     * cloud.start priority:33 cloud:xxx-parameters-for-gcloud
     * cloud.shutdown # kills any cloud.start that was spawned before
     * cloud.list   # list servers available at this lgdb setup (previous clould.start...)
+
+# Active Projects (already selected)
 
 ## SAT Solver
 
@@ -517,6 +517,21 @@ Some tasks that were not finished that a potential future project can address: (
 
 Integrate ABC with LGraph. The interface use the C-API, bit the file dump format.
 
+## FIRRTL 2 LNAST (Hunter Coffman)
+
+There is an ongoing effort to bring from frontends to LNAST. This is a frontend/backend
+project ot interface with high level FIRRTL.
+
+Dependence: none
+
+Main features:
+
+* Bridge between high level FIRRTL and LGraph using LNAST (to/from FIRRTL translation)
+* Ideally handle "high level FIRRTL" Then, we can read out of CHISEL.
+* Benchmark is rocketchip and BOOM
+* How to handle annotations? (unclear at the moment if we need this)
+
+
 # Open Medium Size Tasks (not MS project/thesis)
 
 This is a list of small tasks. Each should take 1-3 weeks to implement. These
@@ -554,21 +569,10 @@ should be good to allow a pop_back (erase last element). Notice that the mmap
 call is expensive, we just need to really reduce size when there is a
 significant fraction to be saved.
 
-## mmap_lib benchmark tune
-
-Do some fine grain benchmarking. E.g: show the impact of huge TLB with filesystem backup and
-performance impact. Setup mada0 and script to setup for multiusers hugeTLBfs
-
 ## Setup a vagrant image
 
 We have several dockers for testing, a simple vagrant (ubuntu based?) for most users may
 be nice to have. Maybe based on https://github.com/VLSIDA/openram-vagrant-image
-
-## Fix lgshell
-
-* **Autocompletion for lgraph names too (now, it is just files).
-* Autocompletion patch for directories. Now finished with "foo", it should be "foo/"
-* Upgrade to the latest replxx. There was a change in API, and it requires to rework lgshell
 
 ## lgshell ctrl+C
 
@@ -579,16 +583,6 @@ be nice to have. Maybe based on https://github.com/VLSIDA/openram-vagrant-image
 
 * Record the time (and perf stats) for each lgshell command executed.
 * Print the statistics when clossing the lgshell
-
-## Elab parser
-
-The memblock is typically mmap, and the token list is managed manually. It
-would be nice to have a Scanner context class that keeps the memblock and token
-list. It can serialize the token list if needed.
-
- * Clearer API
- * Capacity to serialize (optional)
- * Callback when a memmap changes to retrigger parse, and pass token list to step down the flow
 
 ## Query shell (not lgshell) to query graphs
 
@@ -637,6 +631,10 @@ Create a pass that checks that the LGraph (and/or LNAST) is sementically correct
 * No nodes that could be DCE
 * Check for innefficient splits (do not split busses that can be combined)
 * Transformations stages should not drop names if same net is preserved
+
+## Copy Propagation Pass
+
+Create a copy propagation pass that works with hierarchy.
 
 ## Smaller tasks
 
