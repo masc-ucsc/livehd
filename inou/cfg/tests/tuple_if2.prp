@@ -17,10 +17,14 @@ if ($cond == 12) {
 //value = phi (cond, 4, tg) // create phi for TupAdd value, notice the target is not SSAed
 //A[0] = TA(pos0, value)    // create TupAdd in LNAST
 
+//tg = TG(A, pos0)
+//x1 = tg +1
 
 
 //A[0]   = phi(cond,  5, A[0])
 //A[x+y] = phi(cond,  6, A[x+y])
+
+
 //A[x-y] = phi(!cond, 7, A[x-y])
 //A[0]   = phi(!cond, 8, A[0])
 

@@ -363,11 +363,33 @@ Lnast_ntype Lnast_parser::operator_analysis() {
       } else {
         type = Lnast_ntype::create_label();
       }
-  } else if (scan_is_token(Token_id_dot)) { //handle .()
+  } else if (scan_is_token(Token_id_gt)) {
+    if (scan_peep_is_token(Token_id_gt, 1) and scan_peep_is_token(Token_id_gt, 2)) {
+      type = Lnast_ntype::create_arith_shift_right();
+      walk_next_token();
+      walk_next_token();
+    } else if (scan_peep_is_token(Token_id_gt, 1)) {
+      // FIXME->sh: how to differentiate shift right and logic shift right?
+      type = Lnast_ntype::create_shift_right();
+      walk_next_token();
+    } else {
+      type = Lnast_ntype::create_gt();
+    }
+  } else if (scan_is_token(Token_id_lt)) {
+    if (scan_peep_is_token(Token_id_lt, 1)) {
+      type = Lnast_ntype::create_shift_left();
+      walk_next_token();
+    } else {
+      type = Lnast_ntype::create_lt();
+    }
+  } else if (scan_is_token(Token_id_dot)) { //handle ".()" or "range" or "dot"
       if (scan_peep_is_token(Token_id_op, 1)) {
         type = Lnast_ntype::create_func_call(); // must be a function call op
         walk_next_token();
         I(scan_peep_is_token(Token_id_cp, 1));
+        walk_next_token();
+      } else if (scan_peep_is_token(Token_id_dot, 1)) {
+        type = Lnast_ntype::create_range();
         walk_next_token();
       } else {
         type = Lnast_ntype::create_dot();
@@ -427,12 +449,8 @@ Lnast_ntype Lnast_parser::operator_analysis() {
     type = Lnast_ntype::create_same();
   } else if (scan_is_token(Token_id_le)) {
     type = Lnast_ntype::create_le();
-  } else if (scan_is_token(Token_id_lt)) {
-    type = Lnast_ntype::create_lt();
   } else if (scan_is_token(Token_id_ge)) {
     type = Lnast_ntype::create_ge();
-  } else if (scan_is_token(Token_id_gt)) {
-    type = Lnast_ntype::create_gt();
   } else {
     I(type.is_invalid());
   }

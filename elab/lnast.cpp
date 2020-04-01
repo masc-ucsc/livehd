@@ -46,11 +46,9 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid){
   Phi_rtable top_phi_resolve_table;
   phi_resolve_tables[get_name(top_sts_nid)] = top_phi_resolve_table;
 
-  //step-1: determine lhs or rhs of tuple dot/sel
   fmt::print("\nStep-1: Determine LHS or RHS of tuple dot/sel\n");
   determine_dot_sel_lrhs(top_sts_nid);
 
-  //step-2: lhs ssa
   fmt::print("\nStep-2: LHS SSA\n");
   for (const auto &opr_nid : children(top_sts_nid)) {
     if (get_type(opr_nid).is_if()) {
@@ -62,7 +60,8 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid){
     }
   }
 
-  //step-3: rhs ssa
+
+
   fmt::print("\nStep-3: RHS SSA\n");
   resolve_ssa_rhs_subs(top_sts_nid);
 }
