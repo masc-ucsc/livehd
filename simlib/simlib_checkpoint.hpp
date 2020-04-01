@@ -146,7 +146,6 @@ public:
 
     Simlib_signature s2(signature);
     auto sz = read(fd, s2.get_map_address(), s2.get_map_bytes());
-//    std::cout<<"-------sz: \n"<<sz<<"\nfd is:"<<fd<<" s2.get_map_address gives ["<<s2.get_map_address()<<"] and s2.get_map_bytes gives ["<<s2.get_map_bytes()<<"]"<<"\n------------"<<std::endl;
     if (sz!=signature.get_map_bytes()) {
       fprintf(stderr,"simlib: ERROR corrupted checkpoint:%s signature loading\n",filename.c_str());
       exit(3);
@@ -168,28 +167,21 @@ public:
   }
 
   bool load_intermediate_checkpoint(uint64_t cycles){
-   //read all filenames with check_....ckpt
    printf("load intermediate checkpoint @%lld\n", cycles);
    std::vector<int> myvector;
     DIR *dr = opendir(path.c_str());
    if (dr ==NULL) {
      fprintf(stderr,"simlib: ERROR unable to access path:%s\n", path.c_str());
      exit(-1);
-   }// else {printf ("accessing path: %s\n", path.c_str());}
+   }
    struct dirent *de;
    std::string match = "check_";
    while ((de = readdir(dr)) != NULL) {
      std::string chop_name(de->d_name);
      if (chop_name.substr(0,6)==match) {
-//       printf("required: %d\n",atoi(chop_name.substr(6,chop_name.size()-11).c_str()));
          int mydata = atoi(chop_name.substr(6,chop_name.size()-11).c_str());
-         //myvector.push_back(atoi(chop_name.substr(6,chop_name.size()-11)));
          myvector.push_back(mydata);
-       //printf("chop_name is %s\n", chop_name.c_str());
-       //printf("match is %s\n", match.c_str());
-       //std::string file_name = path+"/"+de->d_name;//absl::StrCat(path, "/", de->d_name);
-       //printf("file is %s\n", file_name.c_str());
-     }// else {printf("chop_name in else is %s\n", chop_name.c_str());}
+     }
    }
     for (int i=0;i<myvector.size();i++) {
       if(cycles==myvector[i]) {
@@ -199,30 +191,15 @@ public:
     }
 
     std::sort (myvector.begin(), myvector.end());
-//    for (int i=0;i<myvector.size();i++) {
-//      std::cout<<"vect: "<<myvector[i]<<std::endl;
-//    }
     std::vector<int>::iterator low;
     low=std::lower_bound (myvector.begin(), myvector.end(), cycles);
-    //std::cout << "lower_bound :  " << myvector[low- myvector.begin()-1] << '\n';
     int lower_cycles = myvector[low- myvector.begin()-1] ;
     if(lower_cycles==0) {
-      //std::cout<<"--resetting--"<<std::endl;
       advance_reset(reset_ncycles);
-      //std::cout<<"--advancing clock--\n";
       advance_clock(cycles-reset_ncycles);
       return true;}
     load_checkpoint(lower_cycles);
     advance_clock(cycles-lower_cycles);
-   //extract ... -> atoi -> store in vector v
-   //if cycles == any entry in v
-   //  call load_checkpoint
-   //  return true;
-   //
-   //sort v
-   //find number smaller than cycles = lowercycle
-   //load_checkpoint(lowercycle)
-   //advance_clock(cycles-lowercycle)  
     return true;
   }
   void save_checkpoint() {
@@ -272,7 +249,6 @@ public:
   }
 
   void advance_clock(uint64_t n=1) {
-//    std::cout<<"in advance_clock with n= " <<n<<std::endl;
     do {
       int step = n;
       if (step> next_checkpoint_ncycles)

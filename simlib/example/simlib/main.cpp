@@ -7,12 +7,8 @@ int main(int argc, char **argv) {
   top.enable_trace(".");
   top.advance_clock(100000000);
   // Replay last cycles:
-  //top.load_checkpoint(30000);
-  //top.load_checkpoint(4891136);
-  //top.advance_clock(100000000-4891136);
   top.load_intermediate_checkpoint(30000);
-//  top.advance_clock(100000000-19219460);
-//  top.advance_clock(100000000-30000);
+  top.advance_clock(100000000-30000);
   // top.advance_clock(100000000-30000);
   //auto v = top.find_previous_checkpoint(3000000);
   //printf("previous_check = %lld\n", (long)v);
