@@ -16,10 +16,12 @@ protected:
   void populate_lg_data(LGraph *lg);
 
   void do_fromlnast(std::string_view files);
+  void do_fromfirrtl(Eprp_var &var);
 
   // eprp callback methods
   static void fromlg(Eprp_var &var);
   static void fromlnast(Eprp_var &var);
+  static void fromfirrtl(Eprp_var &var);
   static void hierarchy(Eprp_var &var);
 
 public:
