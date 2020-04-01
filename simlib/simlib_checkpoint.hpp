@@ -8,13 +8,10 @@
 #include <dirent.h>
 
 #include <cassert>
-#include <iostream>
 #include "lbench.hpp"
 #include "likely.hpp"
 #include "simlib_signature.hpp"
 
-//#include "fmt/format.h"
-#include "absl/strings/substitute.h"
 #include <vector>
 #include <iterator>
 
@@ -230,7 +227,7 @@ public:
   }
 
   void handle_checkpoint() {
-    std::cout<<"in handle"<<std::endl;
+    //std::cout<<"in handle"<<std::endl;
     auto delta_secs = perf.get_secs()-last_checkpoint_sec;
     if (true || delta_secs>0.4)
       save_checkpoint();

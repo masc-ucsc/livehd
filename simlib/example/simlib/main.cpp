@@ -9,7 +9,6 @@ int main(int argc, char **argv) {
   // Replay last cycles:
   top.load_intermediate_checkpoint(30000);
   top.advance_clock(100000000-30000);
-  // top.advance_clock(100000000-30000);
   //auto v = top.find_previous_checkpoint(3000000);
   //printf("previous_check = %lld\n", (long)v);
   return 0;
