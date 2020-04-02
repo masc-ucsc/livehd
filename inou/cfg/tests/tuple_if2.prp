@@ -1,0 +1,35 @@
+$cond.__bits = 4
+A.foo = 3
+x = 0
+y = 0
+if ($cond == 12) {
+  A[0] = 4
+  A[0] = 5
+  A[x+y] = 6
+  x = A[0] + 1
+} else {
+  A[x-y] = 7
+  A[0] = 8
+}
+//After SSA, create TupleAdd and TupleGet explicitly
+//A[0] = phi(cond, 4, A[0]) // should be expanded to 3 expressions
+//tg = TG(A, pos0)          // create TupGet in LNAST
+//value = phi (cond, 4, tg) // create phi for TupAdd value, notice the target is not SSAed
+//A[0] = TA(pos0, value)    // create TupAdd in LNAST
+
+//tg = TG(A, pos0)
+//x1 = tg +1
+
+
+//A[0]   = phi(cond,  5, A[0])
+//A[x+y] = phi(cond,  6, A[x+y])
+
+
+//A[x-y] = phi(!cond, 7, A[x-y])
+//A[0]   = phi(!cond, 8, A[0])
+
+//x2 = phi(cond, x1, x0)
+A = A ++ 8
+
+%out = A[0] + A[1]
+

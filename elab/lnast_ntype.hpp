@@ -20,8 +20,6 @@ public:
     Lnast_ntype_phi,
     Lnast_ntype_func_call,    // .()
     Lnast_ntype_func_def,     // ::{   func_def = sub-graph in lgraph
-    Lnast_ntype_select,       // []
-    Lnast_ntype_bit_select,   // [[]]
 
     //group: primitive operator
     Lnast_ntype_assign,       // =, pure assignment
@@ -46,6 +44,15 @@ public:
     Lnast_ntype_ge,
     Lnast_ntype_tuple,        // ()
     Lnast_ntype_tuple_concat, // ++
+    Lnast_ntype_select,       // []
+    Lnast_ntype_bit_select,   // [[]]
+    Lnast_ntype_range,        // ..
+    Lnast_ntype_shift_right,
+    Lnast_ntype_shift_left,
+    Lnast_ntype_logic_shift_right,
+    Lnast_ntype_arith_shift_right,
+    Lnast_ntype_dynamic_shift_right,
+    Lnast_ntype_dynamic_shift_left,
 
     //group: language variable
     Lnast_ntype_ref,
@@ -74,8 +81,6 @@ protected:
     "phi",
     "func_call",
     "func_def",
-    "select", // []
-    "bit_select", // [[]]
 
     //group: primitive operator
     "assign",
@@ -100,6 +105,15 @@ protected:
     "ge",
     "tuple",
     "tuple_concat", // ++
+    "select",     // []
+    "bit_select", // [[]]
+    "range",      // ..
+    "shift_right",
+    "shift_left",
+    "logic_shift_right",
+    "arith_shift_right",
+    "dynamic_shift_right",
+    "dynamic_shift_left",
 
     //group: language variable
     "ref",
@@ -125,8 +139,6 @@ protected:
     "phi",
     "func_call",
     "func_def",
-    "select",  // []
-    "bit_select", // [[]]
     "=",
     ":=",
     "as",
@@ -149,6 +161,16 @@ protected:
     ">=",
     "()",
     "tuple_concat", // ++
+    "select",  // []
+    "bit_select", // [[]]
+    "range", // ..
+    "shift_right",
+    "shift_left",
+    "logic_shift_right",
+    "arith_shift_right",
+    "dynamic_shift_right",
+    "dynamic_shift_left",
+
     "ref",
     "const",
     "attr",
@@ -168,8 +190,6 @@ protected:
     "phi",
     "func_call",
     "func_def",
-    "select",  // []
-    "bit_select", // [[]]
     "=",
     ":=",
     "as",
@@ -192,6 +212,16 @@ protected:
     ">=",
     "()",
     "tuple_concat", // ++
+    "select",  // []
+    "bit_select", // [[]]
+    "range",      // ..
+    "shift_right",
+    "shift_left",
+    "logic_shift_right",
+    "arith_shift_right",
+    "dynamic_shift_right",
+    "dynamic_shift_left",
+
     "ref",
     "const",
     "attr",
@@ -211,8 +241,6 @@ protected:
     "phi",
     "func_call",
     "func_def",
-    "select", // []
-    "bit_select", // [[]]
     "=",
     ":=",
     "as",
@@ -235,6 +263,16 @@ protected:
     ">=",
     "()",
     "tuple_concat",
+    "select", // []
+    "bit_select", // [[]]
+    "range",      // ..
+    "shift_right",
+    "shift_left",
+    "logic_shift_right",
+    "arith_shift_right",
+    "dynamic_shift_right",
+    "dynamic_shift_left",
+
     "ref",
     "const",
     "attr",
@@ -254,8 +292,6 @@ protected:
     "phi",
     "func_call",
     "func_def",
-    "select", // []
-    "bit_select", // [[]]
     "=", // assign
     ":=",
     "as",
@@ -278,6 +314,16 @@ protected:
     "operator>=",
     "()",
     "tuple_concat", // ++
+    "select", // []
+    "bit_select", // [[]]
+    "range",         // ..
+    "shift_right",
+    "shift_left",
+    "logic_shift_right",
+    "arith_shift_right",
+    "dynamic_shift_right",
+    "dynamic_shift_left",
+
     "ref",
     "const",
     "attr",
@@ -304,8 +350,6 @@ public:
   static Lnast_ntype create_phi()          { return Lnast_ntype(Lnast_ntype_phi); }
   static Lnast_ntype create_func_call()    { return Lnast_ntype(Lnast_ntype_func_call); }
   static Lnast_ntype create_func_def()     { return Lnast_ntype(Lnast_ntype_func_def); }
-  static Lnast_ntype create_select()       { return Lnast_ntype(Lnast_ntype_select);}
-  static Lnast_ntype create_bit_select()   { return Lnast_ntype(Lnast_ntype_bit_select);}
 
   static Lnast_ntype create_assign()       { return Lnast_ntype(Lnast_ntype_assign); }
   static Lnast_ntype create_dp_assign()    { return Lnast_ntype(Lnast_ntype_dp_assign); }
@@ -329,6 +373,22 @@ public:
   static Lnast_ntype create_ge()           { return Lnast_ntype(Lnast_ntype_ge); }
   static Lnast_ntype create_tuple()        { return Lnast_ntype(Lnast_ntype_tuple); }
   static Lnast_ntype create_tuple_concat() { return Lnast_ntype(Lnast_ntype_tuple_concat); }
+  static Lnast_ntype create_select()       { return Lnast_ntype(Lnast_ntype_select);}
+  static Lnast_ntype create_bit_select()   { return Lnast_ntype(Lnast_ntype_bit_select);}
+  static Lnast_ntype create_range()        { return Lnast_ntype(Lnast_ntype_range);}
+
+  static Lnast_ntype create_shift_right()         {return Lnast_ntype(Lnast_ntype_shift_right);}
+  static Lnast_ntype create_shift_left()          {return Lnast_ntype(Lnast_ntype_shift_left);}
+  static Lnast_ntype create_logic_shift_right()   {return Lnast_ntype(Lnast_ntype_logic_shift_right);}
+  static Lnast_ntype create_arith_shift_right()   {return Lnast_ntype(Lnast_ntype_arith_shift_right);}
+  static Lnast_ntype create_dynamic_shift_right() {return Lnast_ntype(Lnast_ntype_dynamic_shift_right);}
+  static Lnast_ntype create_dynamic_shift_left()  {return Lnast_ntype(Lnast_ntype_dynamic_shift_left);}
+
+
+
+
+
+
 
   static Lnast_ntype create_ref()          { return Lnast_ntype(Lnast_ntype_ref); }
   static Lnast_ntype create_const()        { return Lnast_ntype(Lnast_ntype_const); }
@@ -351,8 +411,6 @@ public:
   bool is_phi()          const { return val == Lnast_ntype_phi; }
   bool is_func_call()    const { return val == Lnast_ntype_func_call; }
   bool is_func_def()     const { return val == Lnast_ntype_func_def; }
-  bool is_select()       const { return val == Lnast_ntype_select; }
-  bool is_bit_select()   const { return val == Lnast_ntype_bit_select; }
 
   bool is_assign()       const { return val == Lnast_ntype_assign; }
   bool is_dp_assign()    const { return val == Lnast_ntype_dp_assign; }
@@ -376,6 +434,18 @@ public:
   bool is_ge()           const { return val == Lnast_ntype_ge; }
   bool is_tuple()        const { return val == Lnast_ntype_tuple; }
   bool is_tuple_concat() const { return val == Lnast_ntype_tuple_concat; }
+  bool is_select()       const { return val == Lnast_ntype_select; }
+  bool is_bit_select()   const { return val == Lnast_ntype_bit_select; }
+  bool is_range()        const { return val == Lnast_ntype_range; }
+
+  bool is_shift_right()         const { return val == Lnast_ntype_shift_right; }
+  bool is_shift_left()          const { return val == Lnast_ntype_shift_left; }
+  bool is_logic_shift_right()   const { return val == Lnast_ntype_logic_shift_right; }
+  bool is_arith_shift_right()   const { return val == Lnast_ntype_arith_shift_right; }
+  bool is_dynamic_shift_right() const { return val == Lnast_ntype_dynamic_shift_right; }
+  bool is_dynamic_shift_left()  const { return val == Lnast_ntype_dynamic_shift_left; }
+
+
 
   bool is_ref()          const { return val == Lnast_ntype_ref; }
   bool is_const()        const { return val == Lnast_ntype_const; }

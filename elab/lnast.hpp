@@ -11,6 +11,7 @@ using Lnast_nid          = mmap_lib::Tree_index;
 using Phi_rtable         = std::map<std::string_view, Lnast_nid>; //rtable = resolve_table
 using Cnt_rtable         = absl::flat_hash_map<std::string_view, int8_t>;
 using Dot_sel_lrhs_table = absl::flat_hash_map<Lnast_nid, bool>;
+
 //tricky old C macro to avoid redundant code from function overloadings
 #define CREATE_LNAST_NODE(type) \
         static Lnast_node create##type(std::string_view sview){return Lnast_node(Lnast_ntype::create##type(), Token(0, 0, 0, 0, sview));}\
@@ -70,6 +71,15 @@ struct Lnast_node {
   CREATE_LNAST_NODE(_ge)
   CREATE_LNAST_NODE(_tuple)
   CREATE_LNAST_NODE(_tuple_concat)
+  CREATE_LNAST_NODE(_select)
+  CREATE_LNAST_NODE(_bit_select)
+  CREATE_LNAST_NODE(_range)
+  CREATE_LNAST_NODE(_shift_right)
+  CREATE_LNAST_NODE(_shift_left)
+  CREATE_LNAST_NODE(_logic_shift_right)
+  CREATE_LNAST_NODE(_arith_shift_right)
+  CREATE_LNAST_NODE(_dynamic_shift_right)
+  CREATE_LNAST_NODE(_dynamic_shift_left)
   CREATE_LNAST_NODE(_ref)
   CREATE_LNAST_NODE(_const)
   CREATE_LNAST_NODE(_attr)

@@ -4,18 +4,22 @@ y.__bits = 3
 x = 2
 y = 7
 
-A = (x, foo = y, bar = 4)   // A0
+A = (x, foo = y, bar = 4)   // A[0]_0, A.foo_0, A.bar_0
 
-if (A.foo == 7) {           // A0
-  A = A++6                  // A1 = A0++6
+if (A.foo == 7) {           // 
+  A = A++6                  // A[3]_0
+  A.bar = 13                // A.bar_1
+  A[1]  = 17                // A[1]_1
 } else {
-  A = A++8                  // A2 = A0++8
+  A = A++8                  // A[3]_1
+  A.bar = 14                // A.bar_2
+  A[0]  = 4                 // A[0]_1
 }
-                            // A3 = phi(A1, A2)
+                            // A.bar3 = phi (C, A.bar_1, A.bar_2)
+                            // A[3]_2 = phi (C, A[3]_0, A[3]_1)
+                            // A[1]_2 = phi (C, A[1]_1, A[1]_0 = foo??? how do you know?)
 
-A[0] = 3                    // A4
+%out1 = A.bar + A[3]        //  T:= 13 + 6 = 19; F:= 14 + 8 = 22
 
-
-%out1 = A[0] + A.foo        // A4; 3 + 7 = 10
-%out2 = A[3] + A.bar        // A4; 4 + 6 = 10 
-%out3 = A.foo               // A4; 7
+A[0] = 3                    // 
+%out2 = A[0] + A.foo        //  T:= 3 + 17 = 20; F:= 3 + 7 = 10
