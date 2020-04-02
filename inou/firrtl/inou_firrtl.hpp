@@ -17,6 +17,10 @@ protected:
   void HandleValidIfAssign(const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, std::string lhs_of_asg);
   void CreateConditionNode(const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node);
   void CreateConditionNode(const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, const std::string tail);
+  void HandleNEQOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node);
+  void HandleNotOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node);
+  void HandleExtractBitsOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node);
+  void HandleHeadOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node);
 
   // Deconstructing Protobuf Hierarchy
   void ListTypeInfo(const firrtl::FirrtlPB_Type& type, Lnast_nid& parent_node, std::string port_id);
@@ -26,7 +30,6 @@ protected:
   void ListPrimOpInfo(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node);
   void ListExprInfo(const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node);
   void ListExprInfo(const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, std::string tail);
-
 
 
   void ListStatementInfo(const firrtl::FirrtlPB_Statement& stmt, Lnast_nid& parent_node);
@@ -41,6 +44,8 @@ protected:
 private:
   Lnast lnast;
   std::vector<Lnast> lnast_vec;
+
+  uint32_t id_counter;
 
 public:
   Inou_firrtl(const Eprp_var &var);
