@@ -24,7 +24,7 @@ class Simlib_checkpoint {
   uint64_t reset_ncycles;
   const std::string name;
   std::string path; // checkpoint enabled/path
-
+  //static inline std::string const checkpoint_file_initial = "ckpt_";
   Top_struct top;
   Simlib_signature signature;
 
@@ -103,37 +103,30 @@ public:
     return str.size() >= prefix.size() && 0 == str.compare(0, prefix.size(), prefix);
   }
 
-  uint64_t find_previous_checkpoint(uint64_t cycles) {
-    DIR *dr = opendir(path.c_str());
-    assert(dr != nullptr);
-
-    struct dirent *de;  // Pointer for directory entry
-
-    uint64_t best_found = 0; // reset everything
-
-    while ((de = readdir(dr)) != NULL) {
+   uint64_t find_previous_checkpoint(uint64_t cycles) {
+     DIR *dr = opendir(path.c_str());
+     assert(dr != nullptr);
+     struct dirent *de;  // Pointer for directory entry
+     uint64_t best_found = 0; // reset everything
+     while ((de = readdir(dr)) != NULL) {
       const std::string d_name{de->d_name};
-
-      if (!str_starts_with(d_name, name))
+       if (!str_starts_with(d_name, name))
         continue;
-      if (!str_ends_with(d_name, ".ckpt"))
+       if (!str_ends_with(d_name, ".ckpt"))
         continue;
-
-      const std::string str_cycles = d_name.substr(name.size()+1, d_name.size()-5); // 5 for .ckpt
-      auto val = std::atoi(str_cycles.c_str());
-
-      if (val > best_found && val <= cycles)
-        best_found = val;
-    }
-    closedir(dr);
-
-    return best_found;
-  }
+       const std::string str_cycles = d_name.substr(name.size()+1, d_name.size()-5); // 5 for .ckpt
+       auto val = std::atoi(str_cycles.c_str());
+       if (val > best_found && val <= cycles)
+         best_found = val;
+     }
+     closedir(dr);
+     return best_found;
+   }
 
   bool load_checkpoint(uint64_t cycles) {
     printf("load checkpoint @%lld\n", cycles);
-    std::string filename = path + "/" + name + "_" + std::to_string(cycles) + ".ckpt";
-    //std::cout<<"filename is :"<<filename<<std::endl;//SG
+    //std::string filename = path + "/" + name + "_" + std::to_string(cycles) + ".ckpt";
+    std::string filename = path + "/" + name + "_" + std::to_string(cycles);
     int fd = ::open(filename.c_str(), O_RDONLY, 0644);
     //0644 file system permission flags : it stands for -rw-r--r-- file permission.
     if (fd <0) {
@@ -172,24 +165,23 @@ public:
      exit(-1);
    }
    struct dirent *de;
-   std::string match = "check_";
    while ((de = readdir(dr)) != NULL) {
      std::string chop_name(de->d_name);
-     if (chop_name.substr(0,6)==match) {
-         int mydata = atoi(chop_name.substr(6,chop_name.size()-11).c_str());
+     if (chop_name.substr(0,name.size()+1)==(name+"_")) { //name is provided in main.cpp
+         int mydata = atoi(chop_name.substr(name.size()+1,chop_name.size()-name.size()+1).c_str());//name.size() is due to ckpt and +1 is for "_"
          myvector.push_back(mydata);
      }
    }
-    for (int i=0;i<myvector.size();i++) {
-      if(cycles==myvector[i]) {
+    for (const auto e:myvector) {
+      std::cout<<"vect: "<<e<<std::endl;
+      if(e==cycles) {
         load_checkpoint(cycles);
         return true;
       }
     }
 
     std::sort (myvector.begin(), myvector.end());
-    std::vector<int>::iterator low;
-    low=std::lower_bound (myvector.begin(), myvector.end(), cycles);
+    std::vector<int>::iterator low = std::lower_bound (myvector.begin(), myvector.end(), cycles);
     int lower_cycles = myvector[low- myvector.begin()-1] ;
     if(lower_cycles==0) {
       advance_reset(reset_ncycles);
@@ -201,7 +193,8 @@ public:
   }
   void save_checkpoint() {
     printf("Save checkpoint @%lld\n", ncycles);
-    std::string filename = path + "/" + name + "_" + std::to_string(ncycles) + ".ckpt";
+//    std::string filename = path + "/" + name + "_" + std::to_string(ncycles) + ".ckpt";
+    std::string filename = path + "/" + name + "_" + std::to_string(ncycles);
 
     int fd = ::open(filename.c_str(), O_RDWR | O_CREAT, 0644);
     if (fd <0) {
