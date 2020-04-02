@@ -11,4 +11,5 @@ clean:
 	@rm -f perf.*
 	@rm -f *.o *.gch
 	@rm -f check_*.ckpt
+	@rm -f ckpt_*
 
