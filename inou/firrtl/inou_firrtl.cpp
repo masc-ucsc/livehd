@@ -15,6 +15,10 @@ using namespace std;
 
 using google::protobuf::util::TimeUtil;
 
+/* For help understanding the meanings of the semantics behind
+ * everything in the FIRRTL language, see this link:
+ * www2.eecs.berkeley.edu/Pubs/TechRpts/2019/EECS-2019-168.pdf */
+
 //----------------Helper Functions--------------------------
 
 //If the bitwidth is specified, in LNAST we have to create a new variable which represents
@@ -109,31 +113,68 @@ void Inou_firrtl::HandleValidIfAssign(const firrtl::FirrtlPB_Expression& expr, L
  * This is because NEQ has to be broken down into two sub-operations:
  * checking equivalence and then performing the not. */
 void Inou_firrtl::HandleNEQOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node) {
-  //auto stmt_node = get_parent(parent_node);
+  auto idx_stmt = lnast.get_parent(parent_node);
+  //I(idx_stmt.is_stmts() | idx_stmt.is_cstmts());
 
-  //auto idx_eq = lnast.add_child(stmt_node, Lnast_node::create_eq("eq2"));
-  //FIXME not done yet...
-  //PrintPrimOp(op, "===", parent_node);
+  /* x = neq(a, b) should take graph form:
+   *     equal       asg
+   *    /  |  \     /   \
+   *___F0  a   b   x  ~___F0  */
+
+  auto idx_eq = lnast.add_child(idx_stmt, Lnast_node::create_eq("eq2"));
+  lnast.add_child(idx_eq, Lnast_node::create_ref("___F" + to_string(id_counter)));
+  PrintPrimOp(op, "===", idx_eq);
+
+  lnast.add_child(parent_node, Lnast_node::create_ref("~___F" + to_string(id_counter)));
+
+  id_counter += 1;
 }
 
 /* "Not" operations are handled in a way where (currently) there is no LNAST
  * node type that supports "not". Instead, we would want to have an assign
  * node and have the "rhs" child of the assign node be "~temp". */
 void Inou_firrtl::HandleNotOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node) {
-  /*std::string str_not_port;// = "___" + port_id;
+  /* x = not(y) should take graph form:
+   *    asg
+   *   /   \
+   * x     ~y  */
 
-  if (op.arg_size() == 1) {
-    //FIXME: Current problem is that I can't just get the string for the arg, or it's possible arg(0)
-    //  isn't even a string. It could possibly be a prim op, in which this would no longer work,
-    //  or at least it would involve a more thorough solution.
-    //str_not_port = "~" + op.arg(0);
-  } else if (op.const__size() == 1) {
-    str_not_port = "~" + op.const_(0).value();
+  if ((op.arg_size() == 1) && (op.const__size() == 0)) {
+    std::string arg_string = "~" + ReturnExprString(op.arg(0), "");//FIXME(?)
+    lnast.add_child(parent_node, Lnast_node::create_ref(arg_string));
+  } else if ((op.arg_size() == 0) && (op.const__size() == 1)) {
+    std::string const_string = "~" + op.const_(0).value();//FIXME(?)
+    lnast.add_child(parent_node, Lnast_node::create_ref(const_string));
   } else {
-    cout << "Error in HandleNotOp: too many operators given ('not' should have 1 argument)." << endl;
+    cout << "Error in HandleNotOp: not correct # of operators given ('not' should have 1 argument)." << endl;
   }
-  lnast.add_child(parent_node, Lnast_node::create_ref(str_not_port));*/
 
+}
+
+/* */
+void Inou_firrtl::HandleNegateOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node) {
+  auto idx_stmt = lnast.get_parent(parent_node);
+  //I(idx_stmt.is_stmts() | idx_stmt.is_cstmts());
+
+  /* x = negate(y) should take graph form:
+   *     minus       asg
+   *    /  |  \     /   \
+   *___F0  0   y   x   ___F0  */
+
+  auto idx_mns = lnast.add_child(idx_stmt, Lnast_node::create_ref("minus_negate"));
+  lnast.add_child(idx_mns, Lnast_node::create_ref("___F" + to_string(id_counter)));
+  lnast.add_child(idx_mns, Lnast_node::create_const("0"));
+  if ((op.arg_size() == 1) && (op.const__size() == 0)) {
+    ListExprInfo(op.arg(0), idx_mns);//FIXME(?)
+  } else if ((op.arg_size() == 0) && (op.const__size() == 1)) {
+    lnast.add_child(idx_mns, Lnast_node::create_const(op.const_(0).value()));
+  } else {
+    cout << "Error in HandleNegateOp: not correct # of operators given ('negate' should have 1 argument)." << endl;
+  }
+
+  lnast.add_child(parent_node, Lnast_node::create_ref("___F" + to_string(id_counter)));
+
+  id_counter += 1;
 }
 
 /* The Extract Bits primitive op is invoked on some variable
@@ -340,31 +381,36 @@ void Inou_firrtl::PrintPrimOp(const firrtl::FirrtlPB_Expression_PrimOp& op, cons
 }
 
 /* TODO:
- * Many primitive ops...
- * Tail
- * Head
- * Rem
- * Shift_Left/Right -- In FIRRTL these are different than what is used in Verilog. May need other way to represent.
- * Bit_Not
- * Extract_Bits
- * Concat
- * Pad
- * Not_Equal
- * Neg
- * Convert
- * As_UInt
- * As_SInt
- * As_Clock
- * As_Fixed_Point
- * Or/And/Xor_Reduce -- Reductions use same node type as normal, but will only have 1 input "ref". Is this ok?
- * Increase_Precision
- * Decrease_Precision
- * Set_Precision
- * As_Async_Reset
- * Wrap
- * Clip
- * Squeeze
- * As_Interval
+ * Need review/testing:
+ *   Tail
+ *   Head
+ *   Neg
+ *   Extract_Bits
+ *   Shift_Left/Right -- In FIRRTL these are different than what is used in Verilog. May need other way to represent.
+ *   Or/And/Xor_Reduce -- Reductions use same node type as normal, but will only have 1 input "ref". Is this ok?
+ * Need 'As' node type:
+ *   As_UInt
+ *   As_SInt
+ *   As_Clock
+ *   As_Fixed_Point
+ *   As_Async_Reset
+ *   As_Interval
+ * Rely upon intervals:
+ *   Wrap
+ *   Clip
+ *   Squeeze
+ * Rely upon precision/fixed point:
+ *   Increase_Precision
+ *   Decrease_Precision
+ *   Set_Precision
+ * Not yet implemented node types (?):
+ *   Rem
+ *   Concat
+ *   Convert
+ * In progress:
+ *   Bit_Not
+ *   Pad
+ *   Not_Equal
  */
 void Inou_firrtl::ListPrimOpInfo(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node) {
   //FIXME: Add stuff to this eventually;
@@ -485,13 +531,12 @@ void Inou_firrtl::ListPrimOpInfo(const firrtl::FirrtlPB_Expression_PrimOp& op, L
       break;
 
     } case 23: { //Op_Not_Equal
-      /*auto idx_neq = lnast.add_child(parent_node, Lnast_node::create_eq("eq2"));
-      PrintPrimOp(op, "=/=", parent_node);*/
+      HandleNEQOp(op, parent_node);
       break;
 
     } case 24: { //Op_Negate -- this takes a # (UInt or SInt) and returns it's negative value 10 -> -10 or -20 -> 20.
       //Note: the output's bitwidth = bitwidth of the input + 1.
-      //PrintPrimOp(op, "!", parent_node);
+      HandleNegateOp(op, parent_node);
       break;
 
     } case 26: { //Op_Xor_Reduce
@@ -656,11 +701,7 @@ void Inou_firrtl::ListExprInfo(const firrtl::FirrtlPB_Expression& expr, Lnast_ni
       break;
 
     } case 10: { //PrimOp
-      if(expr.prim_op().op() == 23) { //If Not_Equal primitive operation, handle differently
-        HandleNEQOp(expr.prim_op(), parent_node);
-      } else {
-        ListPrimOpInfo(expr.prim_op(), parent_node);
-      }
+      ListPrimOpInfo(expr.prim_op(), parent_node);
       break;
 
     } case 11: { //FixedLiteral
@@ -674,6 +715,36 @@ void Inou_firrtl::ListExprInfo(const firrtl::FirrtlPB_Expression& expr, Lnast_ni
   }
 }
 
+std::string Inou_firrtl::ReturnExprString(const firrtl::FirrtlPB_Expression& expr, std::string tail) {
+  //FIXME: Might have to adjust how some of these are represented (in string format).
+  std::string expr_string = "";
+  switch(expr.expression_case()) {
+    case 1: { //Reference
+      if(tail == "") {
+        expr_string = expr.reference().id();
+      } else {
+        expr_string = expr.reference().id() + "." + tail;
+      }
+      break;
+    } case 2: { //UIntLiteral
+      expr_string = expr.uint_literal().value().value() + ".U(" + expr.uint_literal().value().value() + ".W)";
+      break;
+    } case 3: { //SIntLiteral
+      expr_string = expr.uint_literal().value().value() + ".S(" + expr.uint_literal().value().value() + ".W)";
+      break;
+    } case 7: { //SubField
+      std::string head_string = ReturnExprString(expr.sub_field().expression(), expr.sub_field().field());
+      expr_string = head_string + "." + expr.sub_field().field();
+      break;
+    } case 11: { //FixedLiteral
+      //FIXME: Unsure of how this should be.
+      break;
+    } default:
+      //Error: I don't think this should occur if we're using Chisel's protobuf utility.
+      I(false);
+  }
+  return expr_string;
+}
 
 //------------Statements----------------------
 /*TODO:
@@ -812,8 +883,8 @@ void Inou_firrtl::ListStatementInfo(const firrtl::FirrtlPB_Statement& stmt, Lnas
 
     } case 10: { //Printf
       //FIXME: Not fully implemented, I think.
-
       cout << "printf(" << stmt.printf().value() << ")\n";
+
       break;
 
     } case 14: { //Skip
@@ -823,12 +894,12 @@ void Inou_firrtl::ListStatementInfo(const firrtl::FirrtlPB_Statement& stmt, Lnas
     } case 15: { //Connect -- Must have form (female/bi-gender expression) <= (male/bi-gender/passive expression)
       //FIXME: Should this be just an "assign" or something special?
       //
-      auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
+      /*auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
 
       ListExprInfo(stmt.connect().location(), idx_asg);
       cout << " <= ";
       ListExprInfo(stmt.connect().expression(), idx_asg);
-      cout << ";\n";
+      cout << ";\n";*/
       break;
 
     } case 16: { //PartialConnect

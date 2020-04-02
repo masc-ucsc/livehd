@@ -19,6 +19,7 @@ protected:
   void CreateConditionNode(const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, const std::string tail);
   void HandleNEQOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node);
   void HandleNotOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node);
+  void HandleNegateOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node);
   void HandleExtractBitsOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node);
   void HandleHeadOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node);
   void HandleTailOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node);
@@ -31,6 +32,7 @@ protected:
   void ListPrimOpInfo(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node);
   void ListExprInfo(const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node);
   void ListExprInfo(const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, std::string tail);
+  std::string ReturnExprString(const firrtl::FirrtlPB_Expression& expr, std::string tail);
 
 
   void ListStatementInfo(const firrtl::FirrtlPB_Statement& stmt, Lnast_nid& parent_node);
