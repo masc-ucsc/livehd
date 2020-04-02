@@ -48,7 +48,6 @@ public:
     advance_reset(reset_ncycles);
 
     top.add_signature(signature);
-    //std::cout<<"name: "<<name<<"\n top: "<<top.hidx<<"\n"<<"---"<<"\n" ;
   };
 
   ~Simlib_checkpoint() {
@@ -173,7 +172,6 @@ public:
      }
    }
     for (const auto e:myvector) {
-      std::cout<<"vect: "<<e<<std::endl;
       if(e==cycles) {
         load_checkpoint(cycles);
         return true;
@@ -193,7 +191,6 @@ public:
   }
   void save_checkpoint() {
     printf("Save checkpoint @%lld\n", ncycles);
-//    std::string filename = path + "/" + name + "_" + std::to_string(ncycles) + ".ckpt";
     std::string filename = path + "/" + name + "_" + std::to_string(ncycles);
 
     int fd = ::open(filename.c_str(), O_RDWR | O_CREAT, 0644);
