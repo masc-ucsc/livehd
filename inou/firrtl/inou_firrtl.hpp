@@ -21,6 +21,7 @@ protected:
   void HandleNotOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node);
   void HandleExtractBitsOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node);
   void HandleHeadOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node);
+  void HandleTailOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node);
 
   // Deconstructing Protobuf Hierarchy
   void ListTypeInfo(const firrtl::FirrtlPB_Type& type, Lnast_nid& parent_node, std::string port_id);

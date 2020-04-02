@@ -210,6 +210,44 @@ void Inou_firrtl::HandleHeadOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lna
 
   lnast.add_child(parent_node, Lnast_node::create_ref("___F" + to_string(id_counter + 4)));
 
+  id_counter += 5;
+}
+
+/* */
+void Inou_firrtl::HandleTailOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node) {
+  auto idx_stmt = lnast.get_parent(parent_node);
+  //I(idx_stmt.is_stmts() | idx_stmt.is_cstmts());
+
+  /* x = tail(tmp)(2) should take graph form: (like x = tmp[tmp.__bits - 3 : 0])
+   *     dot                minus          range            bit_sel         asg
+   *  /   |   \           /   |   \      /   |    \        /   |   \      /     \
+   *___F0 tmp __bits  ___F1 ___F0  3  ___F2 ___F1  0   ___F3 tmp ___F2   x    ___F3 */
+
+  auto idx_dot = lnast.add_child(idx_stmt, Lnast_node::create_ref("dot_tail"));
+  lnast.add_child(idx_dot, Lnast_node::create_ref("___F" + to_string(id_counter)));
+  I(op.arg_size() == 1);
+  ListExprInfo(op.arg(0), idx_dot);//FIXME(?)
+  lnast.add_child(idx_dot, Lnast_node::create_ref("__bits"));
+
+  auto idx_mns = lnast.add_child(idx_stmt, Lnast_node::create_minus("minus_tail"));
+  lnast.add_child(idx_mns, Lnast_node::create_ref("___F" + to_string(id_counter + 1)));
+  lnast.add_child(idx_mns, Lnast_node::create_ref("___F" + to_string(id_counter)));
+  I(op.const__size() == 1);
+  int const_plus_one = stoi(op.const_(0).value()) + 1;//FIXME: If the const str is a # that overflows an int, this will be problems here.
+  lnast.add_child(idx_mns, Lnast_node::create_const(to_string(const_plus_one)));
+
+  auto idx_range = lnast.add_child(idx_stmt, Lnast_node::create_range("range_tail"));
+  lnast.add_child(idx_range, Lnast_node::create_ref("___F" + to_string(id_counter + 2)));
+  lnast.add_child(idx_range, Lnast_node::create_ref("___F" + to_string(id_counter + 1)));
+  lnast.add_child(idx_range, Lnast_node::create_const("0"));
+
+  auto idx_bit_sel = lnast.add_child(idx_stmt, Lnast_node::create_bit_select("bit_sel_tail"));
+  lnast.add_child(idx_bit_sel, Lnast_node::create_ref("___F" + to_string(id_counter + 3)));
+  ListExprInfo(op.arg(0), idx_bit_sel);//FIXME(?)
+  lnast.add_child(idx_bit_sel, Lnast_node::create_ref("___F" + to_string(id_counter + 2)));
+
+  lnast.add_child(parent_node, Lnast_node::create_ref("___F" + to_string(id_counter + 3)));
+
   id_counter += 4;
 }
 
@@ -342,15 +380,11 @@ void Inou_firrtl::ListPrimOpInfo(const firrtl::FirrtlPB_Expression_PrimOp& op, L
       break;
 
     } case 3: { //Op_Tail -- take in some 'n', returns value with 'n' MSBs removed
-      cout << "tail(";
-      PrintPrimOp(op, ", ", parent_node);
-      cout << ");";
+      HandleTailOp(op, parent_node);
       break;
 
-    } case 4: { //Op_Head -- take in some 'n', returns
-      cout << "head(";
-      PrintPrimOp(op, ", ", parent_node);
-      cout << ");";
+    } case 4: { //Op_Head -- take in some 'n', returns 'n' MSBs of variable invoked on
+      HandleHeadOp(op, parent_node);
       break;
 
     } case 5: { //Op_Times
