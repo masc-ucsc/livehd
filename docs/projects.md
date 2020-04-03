@@ -411,6 +411,17 @@ Dependence: Rapidwright
 Main features:
 * Create a bridge to/from LGraph and nextpntr (json)
 
+## simdjson
+
+Migrate out of rapidjson to simdjson.
+
+Dependence: none
+
+Main requirements:
+
+* Use https://github.com/simdjson/simdjson/tree/master/singleheader instead of rapidjson
+* Create a json dump compatible with yosys json dump to interface with netlistsvg, yosys, and nextpnr
+
 ## Cloud
 
 Main requirements:
