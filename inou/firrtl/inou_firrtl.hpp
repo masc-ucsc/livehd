@@ -33,13 +33,13 @@ protected:
   void AttachExprToOperator(const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node);
   void AttachExprToOperator(const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, std::string tail);
   void InitialExprAdd(const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, std::string lhs, std::string tail);
-  std::string ReturnExprString(const firrtl::FirrtlPB_Expression& expr, std::string tail);
+  std::string ReturnExprString(const firrtl::FirrtlPB_Expression& expr);
 
 
   void ListStatementInfo(const firrtl::FirrtlPB_Statement& stmt, Lnast_nid& parent_node);
 
-  Lnast ListUserModuleInfo(const firrtl::FirrtlPB_Module& module);
-  Lnast ListModuleInfo(const firrtl::FirrtlPB_Module& module);
+  void ListUserModuleInfo(const firrtl::FirrtlPB_Module& module);
+  void ListModuleInfo(const firrtl::FirrtlPB_Module& module);
   void IterateModules(const firrtl::FirrtlPB_Circuit& circuit);
   void IterateCircuits(const firrtl::FirrtlPB& firrtl_input);
 
@@ -47,7 +47,7 @@ protected:
 
 private:
   Lnast lnast;
-  std::vector<Lnast> lnast_vec;
+  //std::vector<Lnast> lnast_vec;
 
   uint32_t id_counter;
 
