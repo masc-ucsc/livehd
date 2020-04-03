@@ -76,6 +76,35 @@ std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
   return lgs;
 }
 
+void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
+
+  absl::flat_hash_set<Node::Compact> to_be_deleted;
+  for (const auto &node : dfg->fast()) {
+    if (node.get_type().op == TupAdd_Op) {
+      to_be_deleted.insert(node.get_compact());
+
+      I(node.get_sink_pin(0).inp_edges().size() == 1);
+      I(node.get_sink_pin(3).inp_edges().size() == 1);
+
+      if (is_bit_attr_tuple_add(node)) {
+        //FIXME->sh: now I assume value pin is connected to constant node directly, might need to switch to full tuple chain path resolution
+        auto bits = node.get_sink_pin(3).inp_edges().begin()->driver.get_node().get_type_const_value();
+        // TODO auto bits = node.get_sink_pin(3).get_driver_node().get_type_const_value();
+
+        auto target_dpin = Node_pin::find_driver_pin(dfg, node.get_driver_pin().get_name());
+        target_dpin.ref_bitwidth()->e.set_ubits(bits);
+      } else {
+        ; // true tuple resolving
+      }
+
+    }
+  }
+
+  for (auto &itr : to_be_deleted) {
+    fmt::print("delete {}\n", itr.get_node(dfg).debug_name());
+    itr.get_node(dfg).del_node();
+  }
+}
 
 void Inou_lnast_dfg::lnast2lgraph(LGraph *dfg) {
   const auto top   = lnast->get_root();

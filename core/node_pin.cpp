@@ -47,6 +47,13 @@ Node Node_pin::get_node() const {
   return Node(top_g, current_g, hidx, nid);
 }
 
+Node Node_pin::get_driver_node() const {
+  // TODO: Correct but inneficient. Create a faster call that avoids the slow inp_edges call (patch lgraph)
+  auto xedge = current_g->inp_edges(*this);
+  I(xedge.size()==1);
+  return xedge.front().driver.get_node();
+}
+
 void Node_pin::connect_sink(Node_pin &spin) {
   I(spin.is_sink());
   I(is_driver());

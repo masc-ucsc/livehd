@@ -1,4 +1,7 @@
-#include <mmap_vector.hpp>
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
+#include "mmap_vector.hpp"
+
 #include "lnast.hpp"
 
 void Lnast_node::dump() const {
@@ -38,6 +41,26 @@ note: if not handle ssa cnt on lhs and rhs separately, there will be a race cond
       - just copy the subs from the lnast nodes into the local table
         as the lhs subs has been handled in 1st algorithm.
 */
+
+Lnast::~Lnast() {
+  for (auto *ptr : string_pool) delete ptr;
+}
+
+std::string_view Lnast::add_string(std::string_view sview) {
+  string_pool.emplace_back(new std::string(sview));
+
+  auto *str_ptr = string_pool.back();
+
+  return *str_ptr;
+}
+
+std::string_view Lnast::add_string(const std::string &str) {
+  string_pool.emplace_back(new std::string(str));
+
+  auto *str_ptr = string_pool.back();
+
+  return *str_ptr;
+}
 
 void Lnast::do_ssa_trans(const Lnast_nid &top_nid){
   Lnast_nid top_sts_nid = get_first_child(top_nid);

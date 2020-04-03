@@ -119,15 +119,22 @@ private:
   absl::flat_hash_map<std::string_view, Cnt_rtable>         ssa_rhs_cnt_tables;
   absl::flat_hash_map<std::string_view, uint8_t>            global_ssa_lhs_cnt_table;
   absl::flat_hash_map<std::string_view, Dot_sel_lrhs_table> dot_sel_lrhs_tables;
+
   Phi_rtable new_added_phi_node_table;
   Lnast_nid  default_const_nid;
 
+  std::vector<std::string *> string_pool;
+
 public:
   Lnast() = default;
+  virtual ~Lnast();
   explicit Lnast(std::string_view _module_name): top_module_name(_module_name) { }
   void ssa_trans(){
     do_ssa_trans(get_root());
   };
+
+  std::string_view add_string(std::string_view str);
+  std::string_view add_string(const std::string &str);
 
   std::string_view get_top_module_name() const { return top_module_name; }
 
