@@ -1,0 +1,6 @@
+func_xor = :($a, $b, %out):{
+  %out = $a ^ $b
+}
+
+my_xor = func_xor(a = $foo, b = $bar)
+%out = my_xor.out

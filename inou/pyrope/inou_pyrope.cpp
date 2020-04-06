@@ -10,25 +10,23 @@
 void setup_inou_pyrope() { Inou_pyrope::setup(); }
 
 void Inou_pyrope::setup() {
-  Eprp_method m1("inou.pyrope", "convert from pyrope to LNAST/lgraph", &Inou_pyrope::work);
+  Eprp_method m1("inou.pyrope_parse", "Parse the input file into a pyrope AST", &Inou_pyrope::parse_only);
   m1.add_label_required("files", "pyrope files to process (comma separated)");
-  m1.add_label_optional("path", "path to put the lgraph[s]", "lgdb");
+  
+  Eprp_method m2("inou_pyrope_to_lnast", "Parse the input file and convert to an LNAST", &Inou_pyrope::parse_to_lnast);
+  m2.add_label_required("files", "pyrope files to process (comma separated)");
 
   register_pass(m1);
+  register_pass(m2);
 }
 
 Inou_pyrope::Inou_pyrope(const Eprp_var &var) : Pass("inou.pyrope", var) {}
 
-void Inou_pyrope::work(Eprp_var &var) {
+void Inou_pyrope::parse_only(Eprp_var &var) {
   Inou_pyrope p(var);
-
+  Prp scanner;
+  
   for (auto f : absl::StrSplit(p.files, ',')) {
-    p.to_lgraph(f);
+    scanner.parse_file(f);
   }
-}
-
-void Inou_pyrope::to_lgraph(std::string_view file) {
-  Lbench b("inou.pyrope");
-
-  I(false);  // FIXME: add code here
 }

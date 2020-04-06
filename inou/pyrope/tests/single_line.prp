@@ -1,1 +1,3 @@
-out1 = b+c
+func_xor = :($a, $b, $valid, %out) when (b+1 == 2):{
+  %out = $a ^ $b
+}
