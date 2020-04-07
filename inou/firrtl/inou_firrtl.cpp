@@ -36,7 +36,7 @@ void Inou_firrtl::CreateBitwidthAttribute(uint32_t bitwidth, Lnast_nid& parent_n
 
   auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
   lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(str_fix)));
-  lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(to_string(bitwidth))));//TODO: Make sure this gives right value.
+  lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(to_string(bitwidth))));
 }
 
 /* These functions are useful because they analyze what the condition of something is
@@ -54,7 +54,6 @@ void Inou_firrtl::CreateConditionNode(const firrtl::FirrtlPB_Expression& expr, L
         lnast.add_child(parent_node, Lnast_node::create_cond(expr.reference().id()));
       } else {
         std::string full_name = expr.reference().id() + "." + tail;
-        //TODO: Figure out how to do this better since right now this leads to string_view out-of-scope corruption.
         lnast.add_child(parent_node, Lnast_node::create_cond(lnast.add_string(full_name)));
       }
       break;
@@ -126,27 +125,27 @@ void Inou_firrtl::HandleNEQOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnas
   id_counter += 1;
 }
 
-/* "Not" operations are handled in a way where (currently) there is no LNAST
- * node type that supports "not". Instead, we would want to have an assign
- * node and have the "rhs" child of the assign node be "~temp". */
-void Inou_firrtl::HandleNotOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, std::string lhs) {
+/* Unary operations are handled in a way where (currently) there is no LNAST
+ * node type that supports unary ops. Instead, we would want to have an assign
+ * node and have the "rhs" child of the assign node be "[op]temp". */
+void Inou_firrtl::HandleUnaryOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, std::string lhs, std::string sop) {
   //I(parent_node.is_stmts() | parent_node.is_cstmts());
 
-  /* x = not(y) should take graph form:
+  /* x = not(y) should take graph form: (xor_/and_/or_reduce all look same just different op)
    *    asg
    *   /   \
    * x     ~y  */
 
-  auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg_not"));
+  auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg_unary"));
   lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs)));
   if ((op.arg_size() == 1) && (op.const__size() == 0)) {
-    std::string arg_string = "~" + ReturnExprString(op.arg(0));//FIXME(?)
+    std::string arg_string = sop + ReturnExprString(op.arg(0));
     lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(arg_string)));
   } else if ((op.arg_size() == 0) && (op.const__size() == 1)) {
-    std::string const_string = "~" + op.const_(0).value();//FIXME(?)
-    lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(const_string)));
+    std::string const_string = sop + op.const_(0).value();
+    lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(const_string)));//FIXME(?): Should consts take this form?
   } else {
-    cout << "Error in HandleNotOp: not correct # of operators given ('not' should have 1 argument)." << endl;
+    cout << "Error in HandleUnaryOp: not correct # of operators given (unary ops should have 1 argument)." << endl;
     assert(false);
   }
 }
@@ -164,7 +163,7 @@ void Inou_firrtl::HandleNegateOp(const firrtl::FirrtlPB_Expression_PrimOp& op, L
   lnast.add_child(idx_mns, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter))));
   lnast.add_child(idx_mns, Lnast_node::create_const("0"));
   if ((op.arg_size() == 1) && (op.const__size() == 0)) {
-    AttachExprToOperator(op.arg(0), idx_mns);//FIXME(?)
+    AttachExprToOperator(op.arg(0), idx_mns);
   } else if ((op.arg_size() == 0) && (op.const__size() == 1)) {
     lnast.add_child(idx_mns, Lnast_node::create_const(op.const_(0).value()));
   } else {
@@ -191,7 +190,6 @@ void Inou_firrtl::HandleExtractBitsOp(const firrtl::FirrtlPB_Expression_PrimOp& 
    *    /   |   \             /   |   \             /     \
    *___F0 num1 num2        ___F1  a ___F0          x    ___F1 */
 
-  //FIXME: Out-of-scope string issues
   auto idx_range = lnast.add_child(parent_node, Lnast_node::create_range("range_EB"));
   lnast.add_child(idx_range, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter))));
   I(op.const__size() == 2);
@@ -201,7 +199,7 @@ void Inou_firrtl::HandleExtractBitsOp(const firrtl::FirrtlPB_Expression_PrimOp& 
   auto idx_bit_sel = lnast.add_child(parent_node, Lnast_node::create_bit_select("bit_sel_EB"));
   lnast.add_child(idx_bit_sel, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter+1))));
   I(op.arg_size() == 1);
-  AttachExprToOperator(op.arg(0), idx_bit_sel);//FIXME(?)
+  AttachExprToOperator(op.arg(0), idx_bit_sel);
   lnast.add_child(idx_bit_sel, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter))));
 
   auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg_eb"));
@@ -223,11 +221,10 @@ void Inou_firrtl::HandleHeadOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lna
    *  /   |   \           /   |   \       /   |   \       /   |    \        /   |   \        /     \
    *___F0 tmp __bits  ___F1 ___F0  1  ___F2 ___F0  4  ___F3 ___F1 ___F2   ___F4 tmp ___F3   x    ___F4 */
 
-  //FIXME: Out-of-scope string issues
   auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_dot("dot_head"));
   lnast.add_child(idx_dot, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter))));
   I(op.arg_size() == 1);
-  AttachExprToOperator(op.arg(0), idx_dot);//FIXME(?)
+  AttachExprToOperator(op.arg(0), idx_dot);
   lnast.add_child(idx_dot, Lnast_node::create_ref("__bits"));
 
   auto idx_mns1 = lnast.add_child(parent_node, Lnast_node::create_minus("minus1_head"));
@@ -248,7 +245,7 @@ void Inou_firrtl::HandleHeadOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lna
 
   auto idx_bit_sel = lnast.add_child(parent_node, Lnast_node::create_bit_select("bit_sel_head"));
   lnast.add_child(idx_bit_sel, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter + 4))));
-  AttachExprToOperator(op.arg(0), idx_bit_sel);//FIXME(?)
+  AttachExprToOperator(op.arg(0), idx_bit_sel);
   lnast.add_child(idx_bit_sel, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter + 3))));
 
   auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg_head"));
@@ -270,7 +267,7 @@ void Inou_firrtl::HandleTailOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lna
   auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_ref("dot_tail"));
   lnast.add_child(idx_dot, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter))));
   I(op.arg_size() == 1);
-  AttachExprToOperator(op.arg(0), idx_dot);//FIXME(?)
+  AttachExprToOperator(op.arg(0), idx_dot);
   lnast.add_child(idx_dot, Lnast_node::create_ref("__bits"));
 
   auto idx_mns = lnast.add_child(parent_node, Lnast_node::create_minus("minus_tail"));
@@ -287,7 +284,7 @@ void Inou_firrtl::HandleTailOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lna
 
   auto idx_bit_sel = lnast.add_child(parent_node, Lnast_node::create_bit_select("bit_sel_tail"));
   lnast.add_child(idx_bit_sel, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter + 3))));
-  AttachExprToOperator(op.arg(0), idx_bit_sel);//FIXME(?)
+  AttachExprToOperator(op.arg(0), idx_bit_sel);
   lnast.add_child(idx_bit_sel, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter + 2))));
 
   auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg_tail"));
@@ -313,17 +310,17 @@ void Inou_firrtl::HandlePadOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnas
 
   auto idx_if_cstmts = lnast.add_child(idx_if, Lnast_node::create_cstmts("cstmt"));
 
-    auto idx_dot1 = lnast.add_child(idx_if_cstmts, Lnast_node::create_dot("dot"));
-    lnast.add_child(idx_dot1, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter))));
-    I(op.arg_size() == 1);
-    AttachExprToOperator(op.arg(0), idx_dot1);
-    lnast.add_child(idx_dot1, Lnast_node::create_ref("__bits"));
+  auto idx_dot1 = lnast.add_child(idx_if_cstmts, Lnast_node::create_dot("dot"));
+  lnast.add_child(idx_dot1, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter))));
+  I(op.arg_size() == 1);
+  AttachExprToOperator(op.arg(0), idx_dot1);
+  lnast.add_child(idx_dot1, Lnast_node::create_ref("__bits"));
 
-    auto idx_lt = lnast.add_child(idx_if_cstmts, Lnast_node::create_lt("lt"));
-    lnast.add_child(idx_lt, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter + 1))));
-    lnast.add_child(idx_lt, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter))));
-    I(op.const__size() == 1);
-    lnast.add_child(idx_lt, Lnast_node::create_const(op.const_(0).value()));
+  auto idx_lt = lnast.add_child(idx_if_cstmts, Lnast_node::create_lt("lt"));
+  lnast.add_child(idx_lt, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter + 1))));
+  lnast.add_child(idx_lt, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter))));
+  I(op.const__size() == 1);
+  lnast.add_child(idx_lt, Lnast_node::create_const(op.const_(0).value()));
 
 
   auto idx_if_cond = lnast.add_child(idx_if, Lnast_node::create_cond(lnast.add_string("___F" + to_string(id_counter + 1))));
@@ -331,32 +328,32 @@ void Inou_firrtl::HandlePadOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnas
 
   auto idx_if_stmtT = lnast.add_child(idx_if, Lnast_node::create_stmts("stmtsT"));
 
-    auto idx_dot2 = lnast.add_child(idx_if_stmtT, Lnast_node::create_dot("dot"));
-    lnast.add_child(idx_dot2, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter + 2))));
-    lnast.add_child(idx_dot2, Lnast_node::create_ref(lnast.add_string(lhs)));
-    lnast.add_child(idx_dot2, Lnast_node::create_ref("__bits"));
+  auto idx_dot2 = lnast.add_child(idx_if_stmtT, Lnast_node::create_dot("dot"));
+  lnast.add_child(idx_dot2, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter + 2))));
+  lnast.add_child(idx_dot2, Lnast_node::create_ref(lnast.add_string(lhs)));
+  lnast.add_child(idx_dot2, Lnast_node::create_ref("__bits"));
 
-    auto idx_asgT = lnast.add_child(idx_if_stmtT, Lnast_node::create_assign("asg"));
-    lnast.add_child(idx_asgT, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter + 2))));
-    I(op.const__size() == 1);
-    lnast.add_child(idx_asgT, Lnast_node::create_const(op.const_(0).value()));
+  auto idx_asgT = lnast.add_child(idx_if_stmtT, Lnast_node::create_assign("asg"));
+  lnast.add_child(idx_asgT, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter + 2))));
+  I(op.const__size() == 1);
+  lnast.add_child(idx_asgT, Lnast_node::create_const(op.const_(0).value()));
 
 
   auto idx_if_stmtF = lnast.add_child(idx_if, Lnast_node::create_stmts("stmtsF"));
 
-    auto idx_dot3 = lnast.add_child(idx_if_stmtF, Lnast_node::create_dot("dot"));
-    lnast.add_child(idx_dot3, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter + 3))));
-    lnast.add_child(idx_dot3, Lnast_node::create_ref(lnast.add_string(lhs)));
-    lnast.add_child(idx_dot3, Lnast_node::create_ref("__bits"));
+  auto idx_dot3 = lnast.add_child(idx_if_stmtF, Lnast_node::create_dot("dot"));
+  lnast.add_child(idx_dot3, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter + 3))));
+  lnast.add_child(idx_dot3, Lnast_node::create_ref(lnast.add_string(lhs)));
+  lnast.add_child(idx_dot3, Lnast_node::create_ref("__bits"));
 
-    auto idx_dot4 = lnast.add_child(idx_if_stmtF, Lnast_node::create_dot("dot"));
-    lnast.add_child(idx_dot4, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter + 4))));
-    lnast.add_child(idx_dot4, Lnast_node::create_ref(lnast.add_string(lhs)));
-    lnast.add_child(idx_dot4, Lnast_node::create_ref("__bits"));
+  auto idx_dot4 = lnast.add_child(idx_if_stmtF, Lnast_node::create_dot("dot"));
+  lnast.add_child(idx_dot4, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter + 4))));
+  lnast.add_child(idx_dot4, Lnast_node::create_ref(lnast.add_string(lhs)));
+  lnast.add_child(idx_dot4, Lnast_node::create_ref("__bits"));
 
-    auto idx_asgF = lnast.add_child(idx_if_stmtF, Lnast_node::create_assign("asg"));
-    lnast.add_child(idx_asgF, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter + 3))));
-    lnast.add_child(idx_asgF, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter + 4))));
+  auto idx_asgF = lnast.add_child(idx_if_stmtF, Lnast_node::create_assign("asg"));
+  lnast.add_child(idx_asgF, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter + 3))));
+  lnast.add_child(idx_asgF, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter + 4))));
 
 
   auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg_pad"));
@@ -378,9 +375,9 @@ void Inou_firrtl::ListTypeInfo(const firrtl::FirrtlPB_Type& type, Lnast_nid& par
       break;
 
     } case 3: { //SInt type
-      cout << "SInt[" << type.uint_type().width().value() << "]" << endl;
+      cout << "SInt[" << type.sint_type().width().value() << "]" << endl;
       if(type.sint_type().width().value() != 0) { //if BW is explicit.
-        //CreateBitwidthAttribute(type.uint_type().width().value(), parent_node, port_id);
+        CreateBitwidthAttribute(type.sint_type().width().value(), parent_node, port_id);
       }
       break;
 
@@ -438,7 +435,7 @@ void Inou_firrtl::ListPortInfo(const firrtl::FirrtlPB_Port& port, Lnast_nid pare
 //-----------Primitive Operations---------------------
 void Inou_firrtl::PrintPrimOp(const firrtl::FirrtlPB_Expression_PrimOp& op, const std::string symbol, Lnast_nid& parent_node) {
   for (int i = 0; i < op.arg_size(); i++) {
-    AttachExprToOperator(op.arg(i), parent_node);//FIXME
+    AttachExprToOperator(op.arg(i), parent_node);
     if ((i == (op.arg_size()-1) && (op.const__size() == 0)))
         break;
     cout << symbol;
@@ -462,6 +459,7 @@ void Inou_firrtl::PrintPrimOp(const firrtl::FirrtlPB_Expression_PrimOp& op, cons
  *   Or/And/Xor_Reduce -- Reductions use same node type as normal, but will only have 1 input "ref". Is this ok?
  *   Bit_Not
  *   Not_Equal
+ *   Pad
  * Need 'As' node type:
  *   As_UInt
  *   As_SInt
@@ -482,7 +480,7 @@ void Inou_firrtl::PrintPrimOp(const firrtl::FirrtlPB_Expression_PrimOp& op, cons
  *   Concat
  *   Convert
  * In progress:
- *   Pad
+ *   -
  */
 void Inou_firrtl::ListPrimOpInfo(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, std::string lhs) {
   switch(op.op()) {
@@ -573,7 +571,7 @@ void Inou_firrtl::ListPrimOpInfo(const firrtl::FirrtlPB_Expression_PrimOp& op, L
       break;
 
     } case 15: { //Op_Bit_Not
-      HandleNotOp(op, parent_node, lhs);
+      HandleUnaryOp(op, parent_node, lhs, "~");
       break;
 
     } case 16: { //Op_Concat
@@ -626,12 +624,13 @@ void Inou_firrtl::ListPrimOpInfo(const firrtl::FirrtlPB_Expression_PrimOp& op, L
       break;
 
     } case 26: { //Op_Xor_Reduce
-      auto idx_xorr = lnast.add_child(parent_node, Lnast_node::create_xor("xor_red"));
-      lnast.add_child(idx_xorr, Lnast_node::create_ref(lnast.add_string(lhs)));
-      PrintPrimOp(op, ".xorR", idx_xorr);
+      //auto idx_xorr = lnast.add_child(parent_node, Lnast_node::create_xor("xor_red"));
+      //lnast.add_child(idx_xorr, Lnast_node::create_ref(lnast.add_string(lhs)));
+      //PrintPrimOp(op, ".xorR", idx_xorr);
+      HandleUnaryOp(op, parent_node, lhs, "^");
       break;
 
-    } case 27: { //Op_Convert ----- FIXME
+    } case 27: { //Op_Convert
       cout << "primOp: " << op.op();
       break;
 
@@ -662,15 +661,11 @@ void Inou_firrtl::ListPrimOpInfo(const firrtl::FirrtlPB_Expression_PrimOp& op, L
       break;
 
     } case 33: { //Op_And_Reduce
-      auto idx_andr = lnast.add_child(parent_node, Lnast_node::create_and("and_red"));
-      lnast.add_child(idx_andr, Lnast_node::create_ref(lnast.add_string(lhs)));
-      PrintPrimOp(op, ".andR", idx_andr);
+      HandleUnaryOp(op, parent_node, lhs, "&");
       break;
 
     } case 34: { //Op_Or_Reduce
-      auto idx_orr = lnast.add_child(parent_node, Lnast_node::create_or("or_red"));
-      lnast.add_child(idx_orr, Lnast_node::create_ref(lnast.add_string(lhs)));
-      PrintPrimOp(op, ".orR", idx_orr);
+      HandleUnaryOp(op, parent_node, lhs, "|");
       break;
 
     } case 35: { //Op_Increase_Precision
@@ -719,9 +714,8 @@ void Inou_firrtl::ListPrimOpInfo(const firrtl::FirrtlPB_Expression_PrimOp& op, L
 
 //--------------Expressions-----------------------
 /*TODO:
- * Reference (need to resolve out-of-scope error)
- * UIntLiteral (need to resolve out-of-scope error, also make sure used correct syntax: #u(bits))
- * SIntLiteral (need to resolve out-of-scope error, also make sure used correct syntax: #s(bits))
+ * UIntLiteral (make sure used correct syntax: #u(bits))
+ * SIntLiteral (make sure used correct syntax: #s(bits))
  * FixedLiteral
  */
 
@@ -737,22 +731,21 @@ void Inou_firrtl::InitialExprAdd(const firrtl::FirrtlPB_Expression& expr, Lnast_
         lnast.add_child(idx_asg, Lnast_node::create_ref(expr.reference().id()));
       } else {
         std::string full_name = expr.reference().id() + "." + tail;
-        //TODO: Figure out how to do this better since right now this leads to string_view out-of-scope corruption.
         lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(full_name)));
       }
       break;
 
     } case 2: { //UIntLiteral
       auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
-      lnast.add_child(idx_asg, Lnast_node::create_ref(lhs));
-      std::string str_val = expr.uint_literal().value().value() + ".U(" + to_string(expr.uint_literal().width().value()) + ".W)";
+      lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs)));
+      std::string str_val = "0d" + expr.uint_literal().value().value() + "u" + to_string(expr.uint_literal().width().value());
       lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(str_val)));
       break;
 
     } case 3: { //SIntLiteral
       auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
-      lnast.add_child(idx_asg, Lnast_node::create_ref(lhs));
-      std::string str_val = expr.uint_literal().value().value() + ".S(" + to_string(expr.uint_literal().width().value()) + ".W)";
+      lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs)));
+      std::string str_val = "0d" + expr.sint_literal().value().value() + "s" + to_string(expr.sint_literal().width().value());
       lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(str_val)));
       break;
 
@@ -792,7 +785,7 @@ void Inou_firrtl::InitialExprAdd(const firrtl::FirrtlPB_Expression& expr, Lnast_
       break;
 
     } case 11: { //FixedLiteral
-      auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
+      auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg_FP"));
       lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs)));
       //FIXME: How do I represent a FixedPoint literal???
       break;
@@ -815,28 +808,18 @@ void Inou_firrtl::AttachExprToOperator(const firrtl::FirrtlPB_Expression& expr, 
         lnast.add_child(parent_node, Lnast_node::create_ref(expr.reference().id()));
       } else {
         std::string full_name = expr.reference().id() + "." + tail;
-        //TODO: Figure out how to do this better since right now this leads to string_view out-of-scope corruption.
         lnast.add_child(parent_node, Lnast_node::create_ref(lnast.add_string(full_name)));
       }
       break;
 
     } case 2: { //UIntLiteral
-      cout << expr.uint_literal().value().value() << ".U("
-           << expr.uint_literal().width().value() << ".W)";
-      //TODO: Change string rep. to something like "0d#". How would I do this to impact signed though?
-      std::string constVal = expr.uint_literal().value().value() + "u"
-                             + std::to_string(expr.uint_literal().width().value());
-      //TODO: Figure out how to do this better since right now this leads to string_view out-of-scope corruption.
-      lnast.add_child(parent_node, Lnast_node::create_const(lnast.add_string(constVal)));
+      std::string const_val = "0d" + expr.uint_literal().value().value() + "u" + to_string(expr.uint_literal().width().value());
+      lnast.add_child(parent_node, Lnast_node::create_const(lnast.add_string(const_val)));
       break;
 
     } case 3: { //SIntLiteral
-      cout << expr.sint_literal().value().value() << ".S("
-           << expr.sint_literal().width().value() << ".W)";
-      std::string constVal = expr.sint_literal().value().value() + "s"
-                             + std::to_string(expr.sint_literal().width().value());
-      //TODO: Figure out how to do this better since right now this leads to string_view out-of-scope corruption.
-      lnast.add_child(parent_node, Lnast_node::create_const(lnast.add_string(constVal)));
+      std::string const_val = "0d" + expr.sint_literal().value().value() + "s" + to_string(expr.sint_literal().width().value());
+      lnast.add_child(parent_node, Lnast_node::create_const(lnast.add_string(const_val)));
       break;
 
     } case 4: { //ValidIf -- "conditionally valids", looks like: c <= validIf(valid, a), if valid then c = a else c = undefined
@@ -875,8 +858,10 @@ void Inou_firrtl::AttachExprToOperator(const firrtl::FirrtlPB_Expression& expr, 
 
     } case 11: { //FixedLiteral
       //FIXME: I'm not sure how to deal with FixedPoint literals yet.
-      cout << expr.uint_literal().value().value() << " ("
-           << expr.uint_literal().width().value() << "bits)";
+      //
+      cout << expr.fixed_literal().value().value() << " ("
+           << expr.fixed_literal().width().value() << ".W, "
+           << expr.fixed_literal().point().value() << ".W)";
       break;
 
     } default:
@@ -885,18 +870,20 @@ void Inou_firrtl::AttachExprToOperator(const firrtl::FirrtlPB_Expression& expr, 
   }
 }
 
+/* TODO:
+ *   Make sure all of these are formatted consistently with other LNAST representations.
+ */
 std::string Inou_firrtl::ReturnExprString(const firrtl::FirrtlPB_Expression& expr) {
-  //FIXME: Might have to adjust how some of these are represented (in string format).
   std::string expr_string = "";
   switch(expr.expression_case()) {
     case 1: { //Reference
       expr_string = expr.reference().id();
       break;
     } case 2: { //UIntLiteral
-      expr_string = expr.uint_literal().value().value() + ".U(" + expr.uint_literal().value().value() + ".W)";
+      expr_string = "0d" + expr.uint_literal().value().value() + "u" + to_string(expr.uint_literal().width().value());
       break;
     } case 3: { //SIntLiteral
-      expr_string = expr.uint_literal().value().value() + ".S(" + expr.uint_literal().value().value() + ".W)";
+      expr_string = "0d" + expr.sint_literal().value().value() + "s" + to_string(expr.sint_literal().width().value());
       break;
     } case 7: { //SubField
       std::string head_string = ReturnExprString(expr.sub_field().expression());
@@ -931,19 +918,17 @@ void Inou_firrtl::ListStatementInfo(const firrtl::FirrtlPB_Statement& stmt, Lnas
   //Print out statement
   switch(stmt.statement_case()) {
     case 1: { //Wire
-      const firrtl::FirrtlPB_Statement_Wire& wire = stmt.wire();
-      cout << wire.id() << " := Wire(";
-      ListTypeInfo(wire.type(), parent_node, wire.id());//FIXME: Should this be parent_idx?
+      ListTypeInfo(stmt.wire().type(), parent_node, stmt.wire().id());
       break;
 
     } case 2: { //Register
-      cout << "Reg(";
       /*AttachExprToOperator(stmt.register_().clock(), parent_node);//FIXME
       cout << ", ";
       AttachExprToOperator(stmt.register_().reset(), parent_node);//FIXME
       cout << ", ";
       AttachExprToOperator(stmt.register_().init(), parent_node);//FIXME
       cout << ");\n" << endl;*/
+      ListTypeInfo(stmt.register_().type(), parent_node, stmt.register_().id());//FIXME: How to incorporate clock/reset/init?
       break;
 
     } case 3: { //Memory
@@ -1007,7 +992,7 @@ void Inou_firrtl::ListStatementInfo(const firrtl::FirrtlPB_Statement& stmt, Lnas
       cout << "\n";
       break;
 
-    } case 7: { //When -- FIXME I handle conditions wrong here (no cstmts???).
+    } case 7: { //When
       auto idx_when         = lnast.add_child(parent_node, Lnast_node::create_if("when"));
       CreateConditionNode(stmt.when().predicate(), idx_when);
       auto idx_stmts_ifTrue = lnast.add_child(idx_when, Lnast_node::create_stmts("stmts_when"));
@@ -1100,7 +1085,7 @@ void Inou_firrtl::ListUserModuleInfo(const firrtl::FirrtlPB_Module& module) {
   //Iterate over I/O of the module.
   for (int i = 0; i < user_module.port_size(); i++) {
     const firrtl::FirrtlPB_Port& port = user_module.port(i);
-    ListPortInfo(port, idx_stmts);//FIXME: Careful about this bc until LNAST has the internal string map the names of vars will be off.
+    ListPortInfo(port, idx_stmts);
   }
 
   //Iterate over statements of the module.
@@ -1109,8 +1094,6 @@ void Inou_firrtl::ListUserModuleInfo(const firrtl::FirrtlPB_Module& module) {
     ListStatementInfo(stmt, idx_stmts);
     //lnast.dump();
   }
-
-  //return lnast;
 }
 
 //TODO: External module handling.
@@ -1119,9 +1102,9 @@ void Inou_firrtl::ListModuleInfo(const firrtl::FirrtlPB_Module& module) {
     cout << "External module.\n";
   } else if (module.module_case() == 2) {
     ListUserModuleInfo(module);
-    //return ListUserModuleInfo(module);
   } else {
     cout << "Module not set.\n";
+    assert(false);
   }
 }
 
@@ -1130,7 +1113,7 @@ void Inou_firrtl::IterateModules(const firrtl::FirrtlPB_Circuit& circuit) {
   for (int i = 0; i < circuit.module_size(); i++) {
     if (circuit.top_size() > 1) {
       cout << "ERROR: More than 1 top module?\n";
-      exit(-1);//FIXME?
+      assert(false);
     }
 
     //For each module of the circuit, create its own LNAST.
