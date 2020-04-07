@@ -297,6 +297,73 @@ void Inou_firrtl::HandleTailOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lna
   id_counter += 4;
 }
 
+void Inou_firrtl::HandlePadOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, std::string lhs) {
+  //I(parent_node.is_stmts() | parent_node.is_cstmts());
+
+  /* x = pad(e)(4) sets x = n and sets bw(x) = max(4, bw(e));
+   *               [___________________________if_________________________________]                         asg
+   *               /               /           /                                 \                         /   \
+   *        [__ cstmts__]     cond, ___F1    stmts                     [________stmts________]            x     e
+   *        /           \                   /      \                  /          |           \
+   *      dot            gt, <           dot         asg          dot            dot           asg
+   *    /  | \          /  |   \        / | \       /   \        / | \          / | \         /   \
+   * ___F0 e __bits ___F1 ___F0 4   ___F2 x __bits ___F2 4   ___F3 x __bits ___F4 x __bits ___F3 ___F4 */
+
+  auto idx_if = lnast.add_child(parent_node, Lnast_node::create_if("if_pad"));
+
+  auto idx_if_cstmts = lnast.add_child(idx_if, Lnast_node::create_cstmts("cstmt"));
+
+    auto idx_dot1 = lnast.add_child(idx_if_cstmts, Lnast_node::create_dot("dot"));
+    lnast.add_child(idx_dot1, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter))));
+    I(op.arg_size() == 1);
+    AttachExprToOperator(op.arg(0), idx_dot1);
+    lnast.add_child(idx_dot1, Lnast_node::create_ref("__bits"));
+
+    auto idx_lt = lnast.add_child(idx_if_cstmts, Lnast_node::create_lt("lt"));
+    lnast.add_child(idx_lt, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter + 1))));
+    lnast.add_child(idx_lt, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter))));
+    I(op.const__size() == 1);
+    lnast.add_child(idx_lt, Lnast_node::create_const(op.const_(0).value()));
+
+
+  auto idx_if_cond = lnast.add_child(idx_if, Lnast_node::create_cond(lnast.add_string("___F" + to_string(id_counter + 1))));
+
+
+  auto idx_if_stmtT = lnast.add_child(idx_if, Lnast_node::create_stmts("stmtsT"));
+
+    auto idx_dot2 = lnast.add_child(idx_if_stmtT, Lnast_node::create_dot("dot"));
+    lnast.add_child(idx_dot2, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter + 2))));
+    lnast.add_child(idx_dot2, Lnast_node::create_ref(lnast.add_string(lhs)));
+    lnast.add_child(idx_dot2, Lnast_node::create_ref("__bits"));
+
+    auto idx_asgT = lnast.add_child(idx_if_stmtT, Lnast_node::create_assign("asg"));
+    lnast.add_child(idx_asgT, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter + 2))));
+    I(op.const__size() == 1);
+    lnast.add_child(idx_asgT, Lnast_node::create_const(op.const_(0).value()));
+
+
+  auto idx_if_stmtF = lnast.add_child(idx_if, Lnast_node::create_stmts("stmtsF"));
+
+    auto idx_dot3 = lnast.add_child(idx_if_stmtF, Lnast_node::create_dot("dot"));
+    lnast.add_child(idx_dot3, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter + 3))));
+    lnast.add_child(idx_dot3, Lnast_node::create_ref(lnast.add_string(lhs)));
+    lnast.add_child(idx_dot3, Lnast_node::create_ref("__bits"));
+
+    auto idx_dot4 = lnast.add_child(idx_if_stmtF, Lnast_node::create_dot("dot"));
+    lnast.add_child(idx_dot4, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter + 4))));
+    lnast.add_child(idx_dot4, Lnast_node::create_ref(lnast.add_string(lhs)));
+    lnast.add_child(idx_dot4, Lnast_node::create_ref("__bits"));
+
+    auto idx_asgF = lnast.add_child(idx_if_stmtF, Lnast_node::create_assign("asg"));
+    lnast.add_child(idx_asgF, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter + 3))));
+    lnast.add_child(idx_asgF, Lnast_node::create_ref(lnast.add_string("___F" + to_string(id_counter + 4))));
+
+
+  auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg_pad"));
+  lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs)));
+  AttachExprToOperator(op.arg(0), idx_asg);
+}
+
 //----------Ports-------------------------
 /* This function is used for the following syntax rules in FIRRTL:
  * creating a wire, creating a register, instantiating an input/output (port),
@@ -393,6 +460,8 @@ void Inou_firrtl::PrintPrimOp(const firrtl::FirrtlPB_Expression_PrimOp& op, cons
  *   Extract_Bits
  *   Shift_Left/Right -- In FIRRTL these are different than what is used in Verilog. May need other way to represent.
  *   Or/And/Xor_Reduce -- Reductions use same node type as normal, but will only have 1 input "ref". Is this ok?
+ *   Bit_Not
+ *   Not_Equal
  * Need 'As' node type:
  *   As_UInt
  *   As_SInt
@@ -413,12 +482,9 @@ void Inou_firrtl::PrintPrimOp(const firrtl::FirrtlPB_Expression_PrimOp& op, cons
  *   Concat
  *   Convert
  * In progress:
- *   Bit_Not
  *   Pad
- *   Not_Equal
  */
 void Inou_firrtl::ListPrimOpInfo(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, std::string lhs) {
-  //FIXME: Add stuff to this eventually;
   switch(op.op()) {
     case 1: { //Op_Add
       auto idx_add = lnast.add_child(parent_node, Lnast_node::create_plus("plus"));
@@ -507,8 +573,7 @@ void Inou_firrtl::ListPrimOpInfo(const firrtl::FirrtlPB_Expression_PrimOp& op, L
       break;
 
     } case 15: { //Op_Bit_Not
-      //HandleNotOp(op, parent_node);
-      //PrintPrimOp(op, "~", parent_node);
+      HandleNotOp(op, parent_node, lhs);
       break;
 
     } case 16: { //Op_Concat
@@ -547,8 +612,8 @@ void Inou_firrtl::ListPrimOpInfo(const firrtl::FirrtlPB_Expression_PrimOp& op, L
       PrintPrimOp(op, "===", idx_eq);
       break;
 
-    } case 22: { //Op_Pad ----- FIXME
-      cout << "primOp: " << op.op();
+    } case 22: { //Op_Pad
+      HandlePadOp(op, parent_node, lhs);
       break;
 
     } case 23: { //Op_Not_Equal
@@ -581,9 +646,6 @@ void Inou_firrtl::ListPrimOpInfo(const firrtl::FirrtlPB_Expression_PrimOp& op, L
       break;
 
     } case 30: { //Op_Extract_Bits -- this is what's used for grabbing a range of bits from a variable (i.e. foo[3:1])
-      /*auto idx_extrBits = lnast.add_child(parent_node, Lnast_node(Lnast_ntype::create_bit_select(), Token(0, 0, 0, 0, "bitSelect_EB")));
-      cout << "EXTRACT BITS = ";
-      PrintPrimOp(op, "", idx_extrBits);*/
       //Note to self: extract bits has two parameters which always must be static int literals
       HandleExtractBitsOp(op, parent_node, lhs);
       break;
