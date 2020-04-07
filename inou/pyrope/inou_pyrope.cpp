@@ -13,7 +13,7 @@ void Inou_pyrope::setup() {
   Eprp_method m1("inou.pyrope_parse", "Parse the input file into a pyrope AST", &Inou_pyrope::parse_only);
   m1.add_label_required("files", "pyrope files to process (comma separated)");
   
-  Eprp_method m2("inou_pyrope_to_lnast", "Parse the input file and convert to an LNAST", &Inou_pyrope::parse_to_lnast);
+  Eprp_method m2("inou.pyrope_to_lnast", "Parse the input file and convert to an LNAST", &Inou_pyrope::parse_to_lnast);
   m2.add_label_required("files", "pyrope files to process (comma separated)");
 
   register_pass(m1);
