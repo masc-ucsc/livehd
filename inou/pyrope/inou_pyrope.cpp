@@ -30,3 +30,5 @@ void Inou_pyrope::parse_only(Eprp_var &var) {
     scanner.parse_file(f);
   }
 }
+
+void Inou_pyrope::parse_to_lnast(Eprp_var &var){}
