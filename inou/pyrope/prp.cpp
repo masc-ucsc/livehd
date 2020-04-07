@@ -448,8 +448,14 @@ uint8_t Prp::rule_fcall_explicit(std::list<std::tuple<uint8_t, Rule_id, Token_en
   if(CHECK_RULE(&Prp::rule_constant)){ RULE_FAILED("Failed rule_fcall_explicit; found a constant.\n"); }
   
   // optional
+  int cur_tokens = tokens_consumed;
+  int cur_loc_list_size = loc_list.size();
+  
   if(CHECK_RULE(&Prp::rule_tuple_notation)){
-    if(!SCAN_IS_TOKEN(Token_id_dot)){ RULE_FAILED("Failed rule_fcall_explicit; couldn't find an answering dot token.\n"); }
+    if(!SCAN_IS_TOKEN(Token_id_dot)){
+      go_back(tokens_consumed - cur_tokens);
+      loc_list.resize(cur_loc_list_size);
+    }
   }
   
   if(!CHECK_RULE(&Prp::rule_tuple_dot_notation)){ RULE_FAILED("Failed rule_fcall_explicit; couldn't find a tuple_dot_notation.\n"); }
@@ -720,9 +726,8 @@ uint8_t Prp::rule_tuple_dot_dot(std::list<std::tuple<uint8_t, Rule_id, Token_ent
   while(next){ // NOTE: collisions?
     cur_tokens = tokens_consumed;
     cur_loc_list_size = loc_list.size();
-    if(!SCAN_IS_TOKEN(Token_id_dot)){
-      next = false; 
-    }
+    if(!SCAN_IS_TOKEN(Token_id_dot, Prp_rule_tuple_dot_dot))
+      next = false;
     else{
       if(!CHECK_RULE(&Prp::rule_tuple_array_notation)){
         go_back(tokens_consumed - cur_tokens);
@@ -1346,6 +1351,8 @@ std::string Prp::rule_id_to_string(Rule_id rid){
       return "Scope declaration";
     case Prp_rule_scope_condition:
       return "Scope condition";
+    case Prp_rule_fcall_explicit:
+      return "Fcall explicit";
     default: return fmt::format("{}", rid);
   }
 }
