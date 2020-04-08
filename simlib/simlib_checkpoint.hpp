@@ -253,5 +253,25 @@ public:
     }while(unlikely(n>0));
   };
 
+#ifdef SIMLIB_VCD
+  void vcd_advance_clock(uint64_t n=1) {
+    do {
+      int step = n;
+      if (step> next_checkpoint_ncycles)
+        step = next_checkpoint_ncycles;
+
+      n -= step;//SG: if step==n then this line will make n=0 thus making the possibility of n>0 unlikely.
+      next_checkpoint_ncycles -= step;
+      for(auto i=0;i<step;++i)
+        top.vcd_cycle();
+      ncycles += step;
+
+      if (unlikely(next_checkpoint_ncycles<=0)) {
+        handle_checkpoint();
+      }
+    }while(unlikely(n>0));
+  };
+#endif
+
 };
 
