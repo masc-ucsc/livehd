@@ -102,25 +102,25 @@ public:
     return str.size() >= prefix.size() && 0 == str.compare(0, prefix.size(), prefix);
   }
 
-   uint64_t find_previous_checkpoint(uint64_t cycles) {
-     DIR *dr = opendir(path.c_str());
-     assert(dr != nullptr);
-     struct dirent *de;  // Pointer for directory entry
-     uint64_t best_found = 0; // reset everything
-     while ((de = readdir(dr)) != NULL) {
-      const std::string d_name{de->d_name};
-       if (!str_starts_with(d_name, name))
-        continue;
-       if (!str_ends_with(d_name, ".ckpt"))
-        continue;
-       const std::string str_cycles = d_name.substr(name.size()+1, d_name.size()-5); // 5 for .ckpt
-       auto val = std::atoi(str_cycles.c_str());
-       if (val > best_found && val <= cycles)
-         best_found = val;
-     }
-     closedir(dr);
-     return best_found;
-   }
+//   uint64_t find_previous_checkpoint(uint64_t cycles) {
+//     DIR *dr = opendir(path.c_str());
+//     assert(dr != nullptr);
+//     struct dirent *de;  // Pointer for directory entry
+//     uint64_t best_found = 0; // reset everything
+//     while ((de = readdir(dr)) != NULL) {
+//      const std::string d_name{de->d_name};
+//       if (!str_starts_with(d_name, name))
+//        continue;
+//       if (!str_ends_with(d_name, ".ckpt"))
+//        continue;
+//       const std::string str_cycles = d_name.substr(name.size()+1, d_name.size()-5); // 5 for .ckpt
+//       auto val = std::atoi(str_cycles.c_str());
+//       if (val > best_found && val <= cycles)
+//         best_found = val;
+//     }
+//     closedir(dr);
+//     return best_found;
+//   }
 
   bool load_checkpoint(uint64_t cycles) {
     printf("load checkpoint @%lld\n", cycles);
@@ -198,21 +198,21 @@ public:
       fprintf(stderr,"simlib: ERROR unable to create checkpoint:%s\n",filename.c_str());
       exit(3);
     }
-    int ret = ::ftruncate(fd, calc_bytes());
+    int ret = ::ftruncate(fd, calc_bytes());//fs is made of size of top size + signature size
     if (ret<0) {
       fprintf(stderr,"simlib: ERROR unable to grown checkpoint:%s\n",filename.c_str());
       exit(3);
     }
-    uint8_t *base = (uint8_t *)::mmap(nullptr, calc_bytes(), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    uint8_t *base = (uint8_t *)::mmap(nullptr, calc_bytes(), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);//fd and base are mapped as shared mem locations ; mem mapped size is otained by calc_bytes which is top size+signature size
 
     if (base == MAP_FAILED) {
       fprintf(stderr,"simlib: ERROR unable to mmap checkpoint:%s\n",filename.c_str());
       exit(3);
     }
 
-    ::memcpy(base, signature.get_map_address(), signature.get_map_bytes());
-    ::memcpy(&base[signature.get_map_bytes()], &top, sizeof(top));
-    ::munmap(base, calc_bytes());
+    ::memcpy(base, signature.get_map_address(), signature.get_map_bytes());//mem form signature is copied to base for the size of signature
+    ::memcpy(&base[signature.get_map_bytes()], &top, sizeof(top));//data from top is copied to base with starting adress as that after signature area copied in last command
+    ::munmap(base, calc_bytes());//memm unmap of base for the calc_bytes i.e size of top + size of signature
     close(fd);
   }
 
@@ -252,6 +252,26 @@ public:
       }
     }while(unlikely(n>0));
   };
+
+#ifdef SIMLIB_VCD
+  void vcd_advance_clock(uint64_t n=1) {
+    do {
+      int step = n;
+      if (step> next_checkpoint_ncycles)
+        step = next_checkpoint_ncycles;
+
+      n -= step;//SG: if step==n then this line will make n=0 thus making the possibility of n>0 unlikely.
+      next_checkpoint_ncycles -= step;
+      for(auto i=0;i<step;++i)
+        top.vcd_cycle();
+      ncycles += step;
+
+      if (unlikely(next_checkpoint_ncycles<=0)) {
+        handle_checkpoint();
+      }
+    }while(unlikely(n>0));
+  };
+#endif
 
 };
 
