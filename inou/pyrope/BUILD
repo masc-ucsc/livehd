@@ -49,6 +49,15 @@ cc_binary(
     ],
 )
 
+cc_binary(
+    name = "prp_lnast_test",
+    srcs = ["prp_lnast_test.cpp"],
+    deps = [
+        "@gtest//:gtest_main",
+        ":inou_pyrope",
+    ],
+)
+
 cc_test(
     name = "prp_unit_test",
     srcs = ["prp_unit_test.cpp"],

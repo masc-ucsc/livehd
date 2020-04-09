@@ -76,7 +76,6 @@ std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
   return lgs;
 }
 
-
 void Inou_lnast_dfg::lnast2lgraph(LGraph *dfg) {
   const auto top   = lnast->get_root();
   const auto stmts = lnast->get_first_child(top);

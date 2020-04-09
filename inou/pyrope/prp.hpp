@@ -20,6 +20,7 @@
 #include "elab_scanner.hpp"
 
 //#define DEBUG
+//#define DEBUG_LN
 
 // variable argument number macro (adapted from stackoverflow.com/questions/3046889/optional-parameters-with-c-macros)
 #define SCAN_IS_TOKEN_1_ARGS(tok) chk_and_consume(tok, Prp_invalid, &sub_cnt, loc_list)
@@ -32,8 +33,14 @@
   
 #define SCAN_IS_TOKEN(...) SCAN_IS_TOKEN_MACRO_CHOOSER(__VA_ARGS__)(__VA_ARGS__)
 
+#ifdef DEBUG_LN
+#define PRINT_LN(...) fmt::print(__VA_ARGS__)
+#else
+#define PRINT_LN(...)
+#endif
+  
 #ifdef DEBUG
-#define PRINT(...) fmt::print(__VA_ARGS__);
+#define PRINT(...) fmt::print(__VA_ARGS__)
 #else
 #define PRINT(...)
 #endif
@@ -104,14 +111,6 @@
 #endif
 
 #define CHECK_RULE(func) check_function(func, &sub_cnt, loc_list)
-
-/*
-#define AST_DOWN() \
-  ast_down()
-
-#define AST_UP(rule) \
-  ast_up(rule)
-*/
   
 // control
 constexpr Token_id Pyrope_id_if     = 128;
@@ -176,73 +175,6 @@ protected:
   std::unique_ptr<Ast_parser> ast;
   absl::flat_hash_map<std::string, Token_id> pyrope_keyword;
   std::vector<std::string> rule_call_stack;
-  
-  enum Prp_rules: Rule_id {
-    Prp_invalid = 0,
-    Prp_rule,
-    Prp_rule_start,
-    Prp_rule_code_blocks,
-    Prp_rule_code_block_int,
-    Prp_rule_if_statement,
-    Prp_rule_else_statement,
-    Prp_rule_for_statement,
-    Prp_rule_while_statement,
-    Prp_rule_try_statement,
-    Prp_rule_punch_format,
-    Prp_rule_function_pipe,
-    Prp_rule_fcall_explicit,
-    Prp_rule_fcall_implicit, 
-    Prp_rule_for_index,
-    Prp_rule_assignment_expression,
-    Prp_rule_logical_expression,
-    Prp_rule_relational_expression,
-    Prp_rule_additive_expression,
-    Prp_rule_bitwise_expression,
-    Prp_rule_multiplicative_expression,
-    Prp_rule_unary_expression,
-    Prp_rule_factor,
-    Prp_rule_tuple_by_notation,
-    Prp_rule_tuple_notation_no_bracket,
-    Prp_rule_tuple_notation,
-    Prp_rule_tuple_notation_with_object,
-    Prp_rule_range_notation,
-    Prp_rule_bit_selection_bracket,
-    Prp_rule_bit_selection_notation,
-    Prp_rule_tuple_array_bracket,
-    Prp_rule_tuple_array_notation,
-    Prp_rule_lhs_expression,
-    Prp_rule_lhs_var_name,
-    Prp_rule_rhs_expression_property,
-    Prp_rule_rhs_expression,
-    Prp_rule_identifier,
-    Prp_rule_constant,
-    Prp_rule_assignment_operator,
-    Prp_rule_tuple_dot_notation,
-    Prp_rule_tuple_dot_dot,
-    Prp_rule_overload_notation,
-    Prp_rule_scope_else,
-    Prp_rule_scope_body,
-    Prp_rule_scope_declaration,
-    Prp_rule_scope,
-    Prp_rule_scope_condition,
-    Prp_rule_scope_argument,
-    Prp_rule_punch_rhs,
-    Prp_rule_fcall_arg_notation,
-    Prp_rule_return_statement,
-    Prp_rule_compile_check_statement,
-    Prp_rule_block_body,
-    Prp_rule_empty_scope_colon,
-    Prp_rule_assertion_statement,
-    Prp_rule_negation_statement,
-    Prp_rule_scope_colon,
-    Prp_rule_numerical_constant,
-    Prp_rule_string_constant,
-    Prp_rule_overload_name,
-    Prp_rule_overload_exception,
-    Prp_rule_for_in_notation,
-    Prp_rule_not_in_implicit,
-    Prp_rule_keyword
-  };
   
   void elaborate();
   
@@ -374,4 +306,71 @@ public:
     
     pyrope_keyword["default"] = Pyrope_id_default;
   }
+  
+ enum Prp_rules: Rule_id {
+    Prp_invalid = 0,
+    Prp_rule,
+    Prp_rule_start,
+    Prp_rule_code_blocks,
+    Prp_rule_code_block_int,
+    Prp_rule_if_statement,
+    Prp_rule_else_statement,
+    Prp_rule_for_statement,
+    Prp_rule_while_statement,
+    Prp_rule_try_statement,
+    Prp_rule_punch_format,
+    Prp_rule_function_pipe,
+    Prp_rule_fcall_explicit,
+    Prp_rule_fcall_implicit, 
+    Prp_rule_for_index,
+    Prp_rule_assignment_expression,
+    Prp_rule_logical_expression,
+    Prp_rule_relational_expression,
+    Prp_rule_additive_expression,
+    Prp_rule_bitwise_expression,
+    Prp_rule_multiplicative_expression,
+    Prp_rule_unary_expression,
+    Prp_rule_factor,
+    Prp_rule_tuple_by_notation,
+    Prp_rule_tuple_notation_no_bracket,
+    Prp_rule_tuple_notation,
+    Prp_rule_tuple_notation_with_object,
+    Prp_rule_range_notation,
+    Prp_rule_bit_selection_bracket,
+    Prp_rule_bit_selection_notation,
+    Prp_rule_tuple_array_bracket,
+    Prp_rule_tuple_array_notation,
+    Prp_rule_lhs_expression,
+    Prp_rule_lhs_var_name,
+    Prp_rule_rhs_expression_property,
+    Prp_rule_rhs_expression,
+    Prp_rule_identifier,
+    Prp_rule_constant,
+    Prp_rule_assignment_operator,
+    Prp_rule_tuple_dot_notation,
+    Prp_rule_tuple_dot_dot,
+    Prp_rule_overload_notation,
+    Prp_rule_scope_else,
+    Prp_rule_scope_body,
+    Prp_rule_scope_declaration,
+    Prp_rule_scope,
+    Prp_rule_scope_condition,
+    Prp_rule_scope_argument,
+    Prp_rule_punch_rhs,
+    Prp_rule_fcall_arg_notation,
+    Prp_rule_return_statement,
+    Prp_rule_compile_check_statement,
+    Prp_rule_block_body,
+    Prp_rule_empty_scope_colon,
+    Prp_rule_assertion_statement,
+    Prp_rule_negation_statement,
+    Prp_rule_scope_colon,
+    Prp_rule_numerical_constant,
+    Prp_rule_string_constant,
+    Prp_rule_overload_name,
+    Prp_rule_overload_exception,
+    Prp_rule_for_in_notation,
+    Prp_rule_not_in_implicit,
+    Prp_rule_keyword
+  };
 };

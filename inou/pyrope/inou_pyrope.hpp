@@ -2,6 +2,7 @@
 #pragma once
 
 #include "pass.hpp"
+#include "prp_lnast.hpp"
 
 class Inou_pyrope : public Pass {
 protected:
@@ -10,7 +11,8 @@ protected:
   void do_work(const LGraph *g);
 
   // eprp callbacks
-  static void work(Eprp_var &var);
+  static void parse_only(Eprp_var &var);
+  static void parse_to_lnast(Eprp_var &var);
 
 public:
   Inou_pyrope(const Eprp_var &var);
