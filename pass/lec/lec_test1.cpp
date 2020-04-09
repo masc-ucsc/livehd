@@ -22,7 +22,8 @@ protected:
 };
 
 TEST_F(LecMainTest, NoLGraphTest) {
-
+  //Attempt 2 to add to Git for review
+  
   ezMiniSAT sat;
 
   std::vector<int> vx = sat.vec_var("x", 2);
