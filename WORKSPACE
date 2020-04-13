@@ -180,17 +180,17 @@ new_git_repository(
 #)
 
 # Hermetic even for the toolchain :D
-http_archive(
-    name = "bazel_toolchains",
-    sha256 = "4598bf5a8b4f5ced82c782899438a7ba695165d47b3bf783ce774e89a8c6e617",
-    strip_prefix = "bazel-toolchains-0.27.0",
-    urls = [
-        "https://mirror.bazel.build/github.com/bazelbuild/bazel-toolchains/archive/0.27.0.tar.gz",
-        "https://github.com/bazelbuild/bazel-toolchains/archive/0.27.0.tar.gz",
-    ],
-)
+#http_archive(
+    #name = "bazel_toolchains",
+    #sha256 = "239a1a673861eabf988e9804f45da3b94da28d1aff05c373b013193c315d9d9e",
+    #strip_prefix = "bazel-toolchains-3.0.1",
+    #urls = [
+        #"https://github.com/bazelbuild/bazel-toolchains/releases/download/3.0.1/bazel-toolchains-3.0.1.tar.gz",
+        #"https://mirror.bazel.build/github.com/bazelbuild/bazel-toolchains/releases/download/3.0.1/bazel-toolchains-3.0.1.tar.gz",
+    #],
+#)
 
-load("@bazel_toolchains//rules:rbe_repo.bzl", "rbe_autoconfig")
+#load("@bazel_toolchains//rules:rbe_repo.bzl", "rbe_autoconfig")
 
 git_repository(
     name = "rules_graal",
