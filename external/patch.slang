@@ -25767,6 +25767,21 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +}
 +
 +}
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./include/slang/text/SourceManager.h ./include/slang/text/SourceManager.h
+--- ./include/slang/text/SourceManager.h	2020-04-12 20:09:54.091612606 -0700
++++ ./include/slang/text/SourceManager.h	2020-04-13 11:31:01.875515822 -0700
+@@ -13,10 +13,11 @@
+ #include <memory>
+ #include <mutex>
+ #include <set>
+ #include <shared_mutex>
+ #include <variant>
++#include <map>
+ 
+ #include "slang/text/SourceLocation.h"
+ #include "slang/util/Util.h"
+ 
+ namespace fs = std::filesystem;
 diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./source/codegen/CodeGenerator.cpp ./source/codegen/CodeGenerator.cpp
 --- ./source/codegen/CodeGenerator.cpp	2020-04-12 20:09:54.151611342 -0700
 +++ ./source/codegen/CodeGenerator.cpp	1969-12-31 16:00:00.000000000 -0800
