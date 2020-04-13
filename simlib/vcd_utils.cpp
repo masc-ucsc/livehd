@@ -1,4 +1,5 @@
 // This file is distributed under the LICENSE.vcd-writer License. See LICENSE for details.
+
 #include <cstdarg>
 #include <string>
 #include <vector>

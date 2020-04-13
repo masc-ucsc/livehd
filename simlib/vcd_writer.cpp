@@ -4,11 +4,8 @@
 #include <cassert>
 #include <sstream>
 #include <iostream>
-#include "vcd_writer.h"
-#include "vcd_utils.cpp"
-
-	using namespace vcd;
-
+#include "vcd_writer.hpp"
+//#include "vcd_utils.cpp"
 
 namespace vcd {
 

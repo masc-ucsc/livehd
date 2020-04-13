@@ -1,5 +1,5 @@
 #pragma once
-
+#include "vcd_writer.hpp"
 struct Sample3_stage {
   uint64_t hidx;
 
@@ -10,19 +10,11 @@ struct Sample3_stage {
   uint8_t reset_iterator;
   UInt<32> tmp;
   UInt<32> tmp2;
-#ifdef SIMLIB_VCD
-  VarPtr vcd_to1_b;
-
-  VarPtr vcd_tmp;
-  VarPtr vcd_tmp2;
-
-  void vcd_cycle(UInt<1> s1_to3_cValid, UInt<32> s1_to3_c, UInt<1> s2_to3_dValid, UInt<32> s2_to3_d);
-#endif
 
   #ifdef SIMLIB_VCD
-    VarPtr vcd_to1_b;
-    VarPtr vcd_tmp;
-    VarPtr vcd_tmp2;
+    vcd::VarPtr vcd_to1_b;
+    vcd::VarPtr vcd_tmp;
+    vcd::VarPtr vcd_tmp2;
     void vcd_cycle(UInt<1> s1_to3_cValid, UInt<32> s1_to3_c, UInt<1> s2_to3_dValid, UInt<32> s2_to3_d);
   #endif
 

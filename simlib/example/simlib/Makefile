@@ -13,5 +13,5 @@ clean:
 	@rm -f *.o *.gch
 	@rm -f check_*.ckpt
 	@rm -f ckpt_*
-	@rm -f dump*
+	@rm -f *.vcd
 
