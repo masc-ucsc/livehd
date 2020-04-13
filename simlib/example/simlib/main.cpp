@@ -3,7 +3,6 @@
 #include "simlib_checkpoint.hpp"
 #include "sample_stage.hpp"
 #include "vcd_writer.hpp"
-#include "vcd_utils.cpp"
 
 int main(int argc, char **argv) {
   Simlib_checkpoint<Sample_stage> top("ckpt");

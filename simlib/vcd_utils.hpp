@@ -1,11 +1,17 @@
 // This file is distributed under the LICENSE.vcd-writer License. See LICENSE for details.
 
 #include <cstdarg>
-#include <string>
-#include <vector>
 #include <ctime>
+#include <cstring>
+#include <cassert>
+#include <sstream>
+#include <iostream>
+
+#include <vector>
+#include <string>
 
 namespace vcd {
+namespace utils {
 // -----------------------------
 std::string format(const char *fmt, ...) {
   va_list args;
@@ -38,7 +44,7 @@ std::string now() {
   time_t rawtime;
   time(&rawtime);
 
-  struct tm timeinfo = localtime(&rawtime);
+  struct tm *timeinfo = localtime(&rawtime);
 
   char buffer[128];
   strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", timeinfo);
@@ -58,11 +64,12 @@ void replace_new_lines(std::string &str, const std::string &sub) {
       { for (auto c : sub) str[k++] = c; }
       nl = !nl;
     } else {
-      nl = false;
+      nl       = false;
       str[k++] = str[j];
     }
   }
 }
 
 // -----------------------------
-}
+}  // namespace utils
+}  // namespace vcd
