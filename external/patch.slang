@@ -25769,14 +25769,16 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +}
 diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./include/slang/text/SourceManager.h ./include/slang/text/SourceManager.h
 --- ./include/slang/text/SourceManager.h	2020-04-12 20:09:54.091612606 -0700
-+++ ./include/slang/text/SourceManager.h	2020-04-13 11:31:01.875515822 -0700
-@@ -13,10 +13,11 @@
++++ ./include/slang/text/SourceManager.h	2020-04-13 11:46:45.445756639 -0700
+@@ -13,10 +13,13 @@
  #include <memory>
  #include <mutex>
  #include <set>
  #include <shared_mutex>
  #include <variant>
++#include <unordered_map>
 +#include <map>
++#include <vector>
  
  #include "slang/text/SourceLocation.h"
  #include "slang/util/Util.h"
