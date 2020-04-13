@@ -13,11 +13,9 @@ void Sample2_stage::reset_cycle() {
   to1_aValid = false;
 }
 
-#ifdef SIMLIB_TRACE
 void Sample2_stage::add_signature(Simlib_signature &s) {
   s.append(11002); // tmp
   s.append(33); // to3_dValid
   s.append(2222); //...
   s.append(222); //...
 }
-#endif

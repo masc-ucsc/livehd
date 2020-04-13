@@ -11,8 +11,8 @@ int main(int argc, char **argv) {
 //  vcd::VCDWriter vcd_writer{"SIMLIB_VCD.vcd", vcd::makeVCDHeader(vcd::TimeScale::ONE, vcd::TimeScaleUnit::ns, vcd::utils::now(), "This is the VCD file", "version_simlib_") };
   top.advance_clock(100000000);
   // Replay last cycles:
-  top.load_intermediate_checkpoint(30000);
-  top.advance_clock(100000000-30000);
+  //top.load_intermediate_checkpoint(30000);
+  //top.advance_clock(100000000-30000);
   // top.advance_clock(100000000-30000);
   //auto v = top.find_previous_checkpoint(3000000);
   //printf("previous_check = %lld\n", (long)v);

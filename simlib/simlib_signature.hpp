@@ -1,9 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#ifdef SIMLIB_TRACE
 #include <functional>
-#include <vector>
 
 class Simlib_signature {
 private:
@@ -16,7 +14,6 @@ public:
   void append(uint64_t d) {
     h ^= std::hash<uint64_t>{}(d);
   }
-
   uint64_t *get_map_address() {
     return &h;
   }
@@ -30,4 +27,3 @@ public:
   }
 
 };
-#endif

@@ -24,8 +24,6 @@ struct Sample3_stage {
 
   void reset_cycle();
   void cycle(UInt<1> s1_to3_cValid, UInt<32> s1_to3_c, UInt<1> s2_to3_dValid, UInt<32> s2_to3_d);
-#ifdef SIMLIB_TRACE
   void add_signature(Simlib_signature &sign);
-#endif
 };
 

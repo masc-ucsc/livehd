@@ -32,8 +32,6 @@ struct Sample2_stage {
 
     tmp = tmp.addw(UInt<32>(13));
   }
-#ifdef SIMLIB_TRACE
   void add_signature(Simlib_signature &sign);
-#endif
 };
 

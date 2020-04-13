@@ -5,15 +5,13 @@
 #include <sstream>
 #include <iostream>
 #include "vcd_writer.hpp"
-//#include "vcd_utils.cpp"
+
+#include "vcd_utils.cpp" // FIXME: Include cpp is not clean
 
 namespace vcd {
 
 // -----------------------------
-namespace utils {
 void replace_new_lines(std::string &str, const std::string &sub);
-}
-using namespace utils;
 
 // -----------------------------
 struct VCDHeader
