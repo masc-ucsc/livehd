@@ -5,8 +5,12 @@
 #include <dirent.h>
 #include <limits.h>
 #include <stdlib.h>
-#include <sys/sendfile.h>
 #include <sys/stat.h>
+#ifdef __APPLE__
+#include <copyfile.h>
+#else
+#include <sys/sendfile.h>
+#endif
 
 #include <cassert>
 #include <fstream>
@@ -427,11 +431,15 @@ Lg_type_id Graph_library::copy_lgraph(std::string_view name, std::string_view ne
       int source = open(file.c_str(), O_RDONLY, 0);
       int dest   = open(new_file.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
 
+#ifdef __APPLE__
+      fcopyfile(dest, source, nullptr, COPYFILE_DATA);
+#else
       // struct required, rationale: function stat() exists also
       struct stat stat_source;
       fstat(source, &stat_source);
 
-      sendfile(dest, source, 0, stat_source.st_size);
+      sendfile(dest, source, nullptr, stat_source.st_size);
+#endif
 
       close(source);
       close(dest);

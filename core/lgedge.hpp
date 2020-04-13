@@ -369,6 +369,7 @@ public:
     if (state == Free_node_state) return false;
 
     I(false);  // if a node is deleted it should be Free (todo after garbage collect) or Last
+    return false;
   }
   bool is_valid() const {
     return nid && is_node_state();

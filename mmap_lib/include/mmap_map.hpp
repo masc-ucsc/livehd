@@ -44,6 +44,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <algorithm>
 
 #include <cstring>
 #include <stdexcept>
@@ -1045,11 +1046,11 @@ private:
 		return insertion_idx;
 	}
 
-  static inline size_t static_mNumElements           = 0;
-  static inline size_t static_mMask                  = 0;
-  static inline size_t static_mMaxNumElementsAllowed = 0;
-  static inline InfoType static_InitialInfoInc       = InitialInfoInc;
-  static inline InfoType static_InitialInfoHashShift = InitialInfoHashShift;
+  static inline uint64_t static_mNumElements           = 0;
+  static inline uint64_t static_mMask                  = 0;
+  static inline uint64_t static_mMaxNumElementsAllowed = 0;
+  static inline InfoType static_InitialInfoInc         = InitialInfoInc;
+  static inline InfoType static_InitialInfoHashShift   = InitialInfoHashShift;
 
   void setup_pointers() {
 
@@ -1460,8 +1461,12 @@ private:
     assert(txt.size()<40000); // OK to go bigger but likely bug
 
     auto insert_point = mmap_txt_base[0]+1;
-    if (mmap_txt_size <= (8*insert_point+2*txt.size()))
-      grow_txt_mmap(std::max(mmap_txt_size*2,8*insert_point+2*txt.size()));
+    if (mmap_txt_size <= (8*insert_point+2*txt.size())) {
+      auto new_size = mmap_txt_size*2;
+      if (new_size < 8*insert_point+2*txt.size())
+        new_size = 8*insert_point+2*txt.size();
+      grow_txt_mmap(new_size);
+    }
     assert(mmap_txt_size > (8*insert_point+txt.size()));
 
     char *ptr = reinterpret_cast<char *>(&mmap_txt_base[insert_point+1]);
@@ -1654,9 +1659,9 @@ private:
 	// members are sorted so no padding occurs
 	mutable Node      *mKeyVals = nullptr;
 	mutable uint8_t   *mInfo = nullptr;
-	mutable size_t    *mNumElements;
-	mutable size_t    *mMask;
-	mutable size_t    *mMaxNumElementsAllowed;
+	mutable uint64_t  *mNumElements;
+	mutable uint64_t  *mMask;
+	mutable uint64_t  *mMaxNumElementsAllowed;
 	mutable InfoType  *mInfoInc;
 	mutable InfoType  *mInfoHashShift;
 	const std::string  mmap_name;

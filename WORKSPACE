@@ -13,14 +13,14 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
     #tag = "0.8.0",  # change this to use a different release
 #)
 
-new_git_repository(
-    name = "opentimer",
-    build_file = "BUILD.opentimer", # relative to external path
-    commit = "62f809407ec3a8ac7e6d4f67e7410b92cfc2dbae", # May 18
-    remote = "https://github.com/OpenTimer/OpenTimer.git",
-    #strip_prefix = "ot", OpenTimer uses ot/... so, we have to keep it
-    patches = ["//external:patch.opentimer"],  # For generated ot/config.hpp
-)
+#new_git_repository(
+    #name = "opentimer",
+    #build_file = "BUILD.opentimer", # relative to external path
+    #commit = "4f389dc878405340a9bc283ce6fbb4cb133c3566", # April 10, 2020 62f809407ec3a8ac7e6d4f67e7410b92cfc2dbae", # May 18
+    #remote = "https://github.com/OpenTimer/OpenTimer.git",
+    ##strip_prefix = "ot", OpenTimer uses ot/... so, we have to keep it
+    #patches = ["//external:patch.opentimer"],  # For generated ot/config.hpp
+#)
 new_git_repository( # Open_timer user taskflow
     name = "taskflow",
     build_file = "BUILD.taskflow",

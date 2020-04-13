@@ -301,7 +301,24 @@ public:
       }
     }
 
-    void *base = mremap(mmap_old_base, old_size, new_size, MREMAP_MAYMOVE);
+    void *base;
+#ifdef __APPLE__
+    // No remap in OS X
+    if (it->second.fd>0) {
+      munmap(mmap_old_base, old_size);
+      base = ::mmap(0, new_size, PROT_READ | PROT_WRITE, MAP_SHARED, it->second.fd, 0); // no superpages
+      if (base == MAP_FAILED) {
+        std::cerr << "ERROR: OS X could not allocate" << mmap_name << "txt with " << new_size << "bytes\n";
+        exit(-1);
+      }
+    }else{
+      // Painful new allocation, and then copy
+      base = ::mmap(0, new_size, PROT_READ | PROT_WRITE, MAP_SHARED, it->second.fd, 0); // no superpages
+      memcpy(base, mmap_old_base, old_size);
+      munmap(mmap_old_base, old_size);
+    }
+#else
+    base = mremap(mmap_old_base, old_size, new_size, MREMAP_MAYMOVE);
     if (base == MAP_FAILED) {
       try_collect_mmap();
       base = mremap(mmap_old_base, old_size, new_size, MREMAP_MAYMOVE);
@@ -310,6 +327,7 @@ public:
         exit(-1);
       }
     }
+#endif
     auto entry = it->second;
     entry.size = new_size;
 

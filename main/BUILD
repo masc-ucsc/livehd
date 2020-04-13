@@ -25,7 +25,7 @@ cc_binary(
             # "//pass/abc:pass_abc",
             # "//pass/dfg:pass_dfg",
             "//pass/dce:pass_dce",
-            "//pass/opentimer:pass_opentimer",
+            #"//pass/opentimer:pass_opentimer",
             "//pass/lec:pass_lec",
             "//pass/punch:pass_punch",
             "//pass/sample:pass_sample",
