@@ -67,18 +67,19 @@ git_repository(
 new_git_repository(
     name = "fmt",
     build_file = "BUILD.fmt",
-    commit = "7512a55aa3ae309587ca89668ef9ec4074a51a1f", # 6.0.0 October 12, 2019
+    commit = "f94b7364b9409f05207c3af3fa4666730e11a854", # 6.1.2.0 APril 13, 2020 7512a55aa3ae309587ca89668ef9ec4074a51a1f", # 6.0.0 October 12, 2019
     remote = "https://github.com/fmtlib/fmt.git",
     #strip_prefix = "include",
 )
 # Move xxhash.c to xxhash.cpp, fix include inside xxhash.h
 # mkdir build; cd build ; cmake ../ ; make ; mv source ../generated/ ; cd ..
+# rm -rf source/codegen # LLVM code generation code
 # mkpatch --exclude=CMakeFiles ../slang_orig/ .
 # s/\.\/slang_orig//g
 new_git_repository(
     name = "slang",
     build_file = "BUILD.slang",
-    commit = "0e2381c9b408cef18950f928e5c411ed58c54eb6", # Nov 23, 2019
+    commit = "f525b308e8c1c147639e91889fc8d801bc45169e", #April 12, 2020 0e2381c9b408cef18950f928e5c411ed58c54eb6", # Nov 23, 2019
     remote = "https://github.com/MikePopoloski/slang.git",
     patches = ["//external:patch.slang"],
 )

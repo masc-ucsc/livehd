@@ -11,8 +11,17 @@
 cc_library(
    name = "slang",
    srcs = glob(["source/**/*.cpp", "generated/*.cpp", "generated/**/*.cpp"]),
-   hdrs = glob(["source/**/*.h","include/slang/**/*.h", "generated/slang/**/*.h", "external/*.hpp", "external/gsl/*", "external/xxhash/*.h" ,"external/xxhash/*.cpp", "external/ieee1800/*.h"]),
-   includes = [ "include", "external", "generated"], # Needed because some includes use <foo.h>
+   hdrs = glob(["source/**/*.h",
+                "include/slang/**/*.h",
+                "generated/slang/**/*.h",
+                "generated/source/slang/**/*.h",
+                "external/*.hpp",
+                "external/gsl/*",
+                "external/xxhash/*.h",
+                "external/xxhash/*.cpp",
+                "external/ieee1800/*.h",
+              ]),
+   includes = [ "include", "external", "generated" ,"generated/source"], # Needed because some includes use <foo.h>
    visibility = ["//visibility:public"],
    deps = ["@fmt",
            "@json",
