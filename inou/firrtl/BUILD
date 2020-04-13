@@ -18,8 +18,6 @@ cc_library(
     srcs = [
         "inou_firrtl.cpp",
         "inou_firrtl.hpp",
-        "firrtl.pb.h",
-        "firrtl.pb.cc",
     ],
     hdrs = ["inou_firrtl.hpp"],
     #FIXME: The .pb.* files above have to be manually copied into

@@ -18,7 +18,7 @@ void setup_pass_bitwidth();
 void setup_pass_dce();
 void setup_pass_dfg();
 void setup_pass_lec();
-void setup_pass_opentimer();
+//void setup_pass_opentimer();
 void setup_pass_punch();
 void setup_pass_sample();
 void setup_pass_mockturtle();
@@ -41,7 +41,7 @@ void setup_cops_live();
 void Main_api::init() {
   setup_pass_dce();
   /* setup_pass_dfg(); */
-  setup_pass_opentimer();
+  //setup_pass_opentimer();
   setup_pass_lec();
   setup_pass_punch();
   setup_pass_sample();

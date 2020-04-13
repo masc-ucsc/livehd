@@ -1,5 +1,11 @@
-#include <fcntl.h>
+
+#ifdef __APPLE__
+#include <util.h>
+#else
 #include <pty.h>
+#endif
+
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/wait.h>
