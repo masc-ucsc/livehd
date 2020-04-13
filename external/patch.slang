@@ -26071,3 +26071,19 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 -
 -} // namespace slang
 \ No newline at end of file
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./source/parsing/Preprocessor_macros.cpp ./source/parsing/Preprocessor_macros.cpp
+--- ./source/parsing/Preprocessor_macros.cpp	2020-04-12 20:09:54.211610078 -0700
++++ ./source/parsing/Preprocessor_macros.cpp	2020-04-13 11:59:03.720274522 -0700
+@@ -490,11 +490,11 @@
+             Token token(alloc, TokenKind::StringLiteral, {}, rawText, loc, fileName);
+             expansion.append(token, loc);
+             break;
+         }
+         case MacroIntrinsic::Line: {
+-            size_t lineNum = sourceManager.getLineNumber(loc);
++            uint64_t lineNum = sourceManager.getLineNumber(loc);
+             uintToStr(text, lineNum);
+ 
+             string_view rawText = toStringView(text.copy(alloc));
+             Token token(alloc, TokenKind::IntegerLiteral, {}, rawText, loc, lineNum);
+             expansion.append(token, loc);
