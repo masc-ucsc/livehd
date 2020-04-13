@@ -15,8 +15,6 @@ struct Sample_stage {
 
   void reset_cycle();
   void cycle();
-#ifdef SIMLIB_TRACE
   void add_signature(Simlib_signature &sign);
-#endif
 };
 

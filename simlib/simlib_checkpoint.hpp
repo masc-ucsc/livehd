@@ -218,6 +218,7 @@ public:
 
   void handle_checkpoint() {
     //std::cout<<"in handle"<<std::endl;
+#ifdef SIMLIB_TRACE
     auto delta_secs = perf.get_secs()-last_checkpoint_sec;
     if (true || delta_secs>0.4)
       save_checkpoint();
@@ -233,6 +234,9 @@ public:
     }else{
       set_checkpoint_cycles(checkpoint_ncycles/1.5);
     }
+#else
+    set_checkpoint_cycles(10000);
+#endif
   }
 
   void advance_clock(uint64_t n=1) {

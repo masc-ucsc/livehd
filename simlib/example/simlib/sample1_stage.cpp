@@ -26,7 +26,6 @@ void Sample1_stage::cycle(UInt<32> s3_to1_b, UInt<1> s2_to1_aValid, UInt<32> s2_
   tmp = tmp.addw(UInt<32>(23));
 }
 
-#ifdef SIMLIB_TRACE
 void Sample1_stage::add_signature(Simlib_signature &s) {
   s.append(hidx);
   s.append(33 );  // 33 is the semantic ID (hash inputs + op + bits) for to2_aValid
@@ -38,4 +37,3 @@ void Sample1_stage::add_signature(Simlib_signature &s) {
 
   s.append(202); // memory signature (ports/size/...) semantic ID (sid)
 }
-#endif

@@ -34,10 +34,8 @@ void Sample_stage::cycle() {
 
 }
 
-#ifdef SIMLIB_TRACE
 void Sample_stage::add_signature(Simlib_signature &s) {
   s1.add_signature(s);
   s2.add_signature(s);
   s3.add_signature(s);
 }
-#endif

@@ -1033,7 +1033,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 -#endif  /* XXH_NO_LONG_LONG */
 diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./external/xxhash/xxhash.cpp ./external/xxhash/xxhash.cpp
 --- ./external/xxhash/xxhash.cpp	1969-12-31 16:00:00.000000000 -0800
-+++ ./external/xxhash/xxhash.cpp	2019-11-23 10:36:56.926380085 -0800
++++ ./external/xxhash/xxhash.cpp	2020-04-12 19:57:39.337095835 -0700
 @@ -0,0 +1,1029 @@
 +/*
 +*  xxHash - Fast Hash algorithm
@@ -2066,7 +2066,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +#endif  /* XXH_NO_LONG_LONG */
 diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./external/xxhash/xxhash.h ./external/xxhash/xxhash.h
 --- ./external/xxhash/xxhash.h	2019-10-15 18:26:53.568949244 -0700
-+++ ./external/xxhash/xxhash.h	2019-11-23 10:37:36.745536367 -0800
++++ ./external/xxhash/xxhash.h	2020-04-12 20:09:05.632633131 -0700
 @@ -313,11 +313,11 @@
  
  # endif
@@ -2082,13 +2082,13 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
  
 diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/AllSyntax.cpp ./generated/AllSyntax.cpp
 --- ./generated/AllSyntax.cpp	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/AllSyntax.cpp	2019-11-23 10:40:28.821890357 -0800
-@@ -0,0 +1,12494 @@
++++ ./generated/AllSyntax.cpp	2020-04-13 10:23:52.710371660 -0700
+@@ -0,0 +1,12978 @@
 +//------------------------------------------------------------------------------
 +// AllSyntax.cpp
-+// All generated syntax node data structures.
++// All generated syntax node data structures
 +//
-+// File is under the MIT license; see LICENSE for details.
++// File is under the MIT license; see LICENSE for details
 +//------------------------------------------------------------------------------
 +#include "slang/syntax/AllSyntax.h"
 +
@@ -2181,7 +2181,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::ConstraintDeclaration: return 5;
 +        case SyntaxKind::ConstraintPrototype: return 5;
 +        case SyntaxKind::ConstructorName: return 1;
-+        case SyntaxKind::ContinuousAssign: return 4;
++        case SyntaxKind::ContinuousAssign: return 6;
 +        case SyntaxKind::CoverPropertyStatement: return 8;
 +        case SyntaxKind::CoverSequenceStatement: return 8;
 +        case SyntaxKind::CoverageBins: return 9;
@@ -2200,6 +2200,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::DefaultPatternKeyExpression: return 1;
 +        case SyntaxKind::DeferredAssertion: return 3;
 +        case SyntaxKind::DefineDirective: return 4;
++        case SyntaxKind::Delay3: return 8;
 +        case SyntaxKind::DelayControl: return 2;
 +        case SyntaxKind::DescendingRangeSelect: return 3;
 +        case SyntaxKind::DisableConstraint: return 4;
@@ -2259,6 +2260,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::FunctionPort: return 6;
 +        case SyntaxKind::FunctionPortList: return 3;
 +        case SyntaxKind::FunctionPrototype: return 5;
++        case SyntaxKind::GateInstance: return 4;
++        case SyntaxKind::GateInstanceName: return 2;
++        case SyntaxKind::GateInstantiation: return 6;
 +        case SyntaxKind::GenerateBlock: return 7;
 +        case SyntaxKind::GenerateRegion: return 4;
 +        case SyntaxKind::GenvarDeclaration: return 4;
@@ -2341,13 +2345,14 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::MultipleConcatenationExpression: return 4;
 +        case SyntaxKind::MultiplyAssignmentExpression: return 4;
 +        case SyntaxKind::MultiplyExpression: return 4;
++        case SyntaxKind::NameValuePragmaExpression: return 3;
 +        case SyntaxKind::NamedArgument: return 5;
 +        case SyntaxKind::NamedBlockClause: return 2;
 +        case SyntaxKind::NamedLabel: return 2;
 +        case SyntaxKind::NamedPortConnection: return 6;
 +        case SyntaxKind::NamedStructurePatternMember: return 3;
 +        case SyntaxKind::NamedType: return 1;
-+        case SyntaxKind::NetDeclaration: return 7;
++        case SyntaxKind::NetDeclaration: return 8;
 +        case SyntaxKind::NetPortHeader: return 3;
 +        case SyntaxKind::NetTypeDeclaration: return 6;
 +        case SyntaxKind::NewArrayExpression: return 5;
@@ -2361,7 +2366,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::NonblockingAssignmentExpression: return 4;
 +        case SyntaxKind::NonblockingEventTriggerStatement: return 5;
 +        case SyntaxKind::NullLiteralExpression: return 1;
++        case SyntaxKind::NumberPragmaExpression: return 3;
 +        case SyntaxKind::OneStepLiteralExpression: return 1;
++        case SyntaxKind::OpenRangeExpression: return 5;
 +        case SyntaxKind::OpenRangeList: return 3;
 +        case SyntaxKind::OrAssignmentExpression: return 4;
 +        case SyntaxKind::OrSequenceExpression: return 4;
@@ -2380,6 +2387,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::ParameterPortList: return 4;
 +        case SyntaxKind::ParameterValueAssignment: return 2;
 +        case SyntaxKind::ParenExpressionList: return 3;
++        case SyntaxKind::ParenPragmaExpression: return 3;
 +        case SyntaxKind::ParenthesizedEventExpression: return 3;
 +        case SyntaxKind::ParenthesizedExpression: return 3;
 +        case SyntaxKind::PatternCaseItem: return 5;
@@ -2389,7 +2397,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::PostdecrementExpression: return 3;
 +        case SyntaxKind::PostincrementExpression: return 3;
 +        case SyntaxKind::PowerExpression: return 4;
-+        case SyntaxKind::PragmaDirective: return 1;
++        case SyntaxKind::PragmaDirective: return 3;
 +        case SyntaxKind::PrimaryBlockEventExpression: return 2;
 +        case SyntaxKind::ProceduralAssignStatement: return 7;
 +        case SyntaxKind::ProceduralDeassignStatement: return 5;
@@ -2431,6 +2439,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::SignalEventExpression: return 2;
 +        case SyntaxKind::SignedCastExpression: return 3;
 +        case SyntaxKind::SimpleAssignmentPattern: return 3;
++        case SyntaxKind::SimplePragmaExpression: return 1;
 +        case SyntaxKind::SimpleRangeSelect: return 3;
 +        case SyntaxKind::SolveBeforeConstraint: return 5;
 +        case SyntaxKind::StandardCaseItem: return 3;
@@ -2468,7 +2477,6 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::TypeAssignment: return 2;
 +        case SyntaxKind::TypeParameterDeclaration: return 3;
 +        case SyntaxKind::TypeReference: return 4;
-+        case SyntaxKind::TypeType: return 1;
 +        case SyntaxKind::TypedefDeclaration: return 6;
 +        case SyntaxKind::UnaryBitwiseAndExpression: return 3;
 +        case SyntaxKind::UnaryBitwiseNandExpression: return 3;
@@ -2486,7 +2494,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::UnarySequenceDelayExpression: return 3;
 +        case SyntaxKind::UnarySequenceEventExpression: return 3;
 +        case SyntaxKind::UnbasedUnsizedLiteralExpression: return 1;
-+        case SyntaxKind::UnconnectedDriveDirective: return 1;
++        case SyntaxKind::UnconnectedDriveDirective: return 2;
 +        case SyntaxKind::UndefDirective: return 2;
 +        case SyntaxKind::UndefineAllDirective: return 1;
 +        case SyntaxKind::UnionType: return 8;
@@ -4423,8 +4431,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    switch (index) {
 +        case 0: return &attributes;
 +        case 1: return assign;
-+        case 2: return &assignments;
-+        case 3: return semi;
++        case 2: return strength;
++        case 3: return delay;
++        case 4: return &assignments;
++        case 5: return semi;
 +        default: return nullptr;
 +    }
 +}
@@ -4433,8 +4443,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    switch (index) {
 +        case 0: return &attributes;
 +        case 1: return assign;
-+        case 2: return &assignments;
-+        case 3: return semi;
++        case 2: return strength;
++        case 3: return delay;
++        case 4: return &assignments;
++        case 5: return semi;
 +        default: return nullptr;
 +    }
 +}
@@ -4443,8 +4455,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    switch (index) {
 +        case 0: attributes = child.node()->as<SyntaxList<AttributeInstanceSyntax>>(); return;
 +        case 1: assign = child.token(); return;
-+        case 2: assignments = child.node()->as<SeparatedSyntaxList<ExpressionSyntax>>(); return;
-+        case 3: semi = child.token(); return;
++        case 2: strength = &child.node()->as<DriveStrengthSyntax>(); return;
++        case 3: delay = &child.node()->as<TimingControlSyntax>(); return;
++        case 4: assignments = child.node()->as<SeparatedSyntaxList<ExpressionSyntax>>(); return;
++        case 5: semi = child.token(); return;
 +        default: THROW_UNREACHABLE;
 +    }
 +}
@@ -4681,7 +4695,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case 1: return keyword;
 +        case 2: return stringLiteral;
 +        case 3: return property;
-+        case 4: return name;
++        case 4: return c_identifier;
 +        case 5: return equals;
 +        case 6: return method.get();
 +        case 7: return semi;
@@ -4695,7 +4709,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case 1: return keyword;
 +        case 2: return stringLiteral;
 +        case 3: return property;
-+        case 4: return name;
++        case 4: return c_identifier;
 +        case 5: return equals;
 +        case 6: return method.get();
 +        case 7: return semi;
@@ -4709,7 +4723,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case 1: keyword = child.token(); return;
 +        case 2: stringLiteral = child.token(); return;
 +        case 3: property = child.token(); return;
-+        case 4: name = child.token(); return;
++        case 4: c_identifier = child.token(); return;
 +        case 5: equals = child.token(); return;
 +        case 6: method = &child.node()->as<FunctionPrototypeSyntax>(); return;
 +        case 7: semi = child.token(); return;
@@ -4786,7 +4800,6 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::StructType:
 +        case SyntaxKind::TimeType:
 +        case SyntaxKind::TypeReference:
-+        case SyntaxKind::TypeType:
 +        case SyntaxKind::UnionType:
 +        case SyntaxKind::Untyped:
 +        case SyntaxKind::VirtualInterfaceType:
@@ -5072,6 +5085,56 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +DefineDirectiveSyntax* DefineDirectiveSyntax::clone(BumpAllocator& alloc) const {
 +    return alloc.emplace<DefineDirectiveSyntax>(*this);
++}
++
++bool Delay3Syntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::Delay3;
++}
++
++TokenOrSyntax Delay3Syntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return hash;
++        case 1: return openParen;
++        case 2: return delay1.get();
++        case 3: return comma1;
++        case 4: return delay2;
++        case 5: return comma2;
++        case 6: return delay3;
++        case 7: return closeParen;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax Delay3Syntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return hash;
++        case 1: return openParen;
++        case 2: return delay1.get();
++        case 3: return comma1;
++        case 4: return delay2;
++        case 5: return comma2;
++        case 6: return delay3;
++        case 7: return closeParen;
++        default: return nullptr;
++    }
++}
++
++void Delay3Syntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: hash = child.token(); return;
++        case 1: openParen = child.token(); return;
++        case 2: delay1 = &child.node()->as<ExpressionSyntax>(); return;
++        case 3: comma1 = child.token(); return;
++        case 4: delay2 = &child.node()->as<ExpressionSyntax>(); return;
++        case 5: comma2 = child.token(); return;
++        case 6: delay3 = &child.node()->as<ExpressionSyntax>(); return;
++        case 7: closeParen = child.token(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++Delay3Syntax* Delay3Syntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<Delay3Syntax>(*this);
 +}
 +
 +bool DelaySyntax::isKind(SyntaxKind kind) {
@@ -6412,7 +6475,6 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::DefaultPatternKeyExpression:
 +        case SyntaxKind::DivideAssignmentExpression:
 +        case SyntaxKind::DivideExpression:
-+        case SyntaxKind::ElementSelect:
 +        case SyntaxKind::ElementSelectExpression:
 +        case SyntaxKind::EmptyIdentifierName:
 +        case SyntaxKind::EmptyQueueExpression:
@@ -6466,6 +6528,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::NonblockingAssignmentExpression:
 +        case SyntaxKind::NullLiteralExpression:
 +        case SyntaxKind::OneStepLiteralExpression:
++        case SyntaxKind::OpenRangeExpression:
 +        case SyntaxKind::OrAssignmentExpression:
 +        case SyntaxKind::OrSequenceExpression:
 +        case SyntaxKind::OverlappedFollowedByPropertyExpression:
@@ -6509,7 +6572,6 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::TimingControlExpression:
 +        case SyntaxKind::TimingControlExpressionConcatenation:
 +        case SyntaxKind::TypeReference:
-+        case SyntaxKind::TypeType:
 +        case SyntaxKind::UnaryBitwiseAndExpression:
 +        case SyntaxKind::UnaryBitwiseNandExpression:
 +        case SyntaxKind::UnaryBitwiseNorExpression:
@@ -7081,6 +7143,120 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +FunctionPrototypeSyntax* FunctionPrototypeSyntax::clone(BumpAllocator& alloc) const {
 +    return alloc.emplace<FunctionPrototypeSyntax>(*this);
++}
++
++bool GateInstanceNameSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::GateInstanceName;
++}
++
++TokenOrSyntax GateInstanceNameSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return name;
++        case 1: return &dimensions;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax GateInstanceNameSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return name;
++        case 1: return &dimensions;
++        default: return nullptr;
++    }
++}
++
++void GateInstanceNameSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: name = child.token(); return;
++        case 1: dimensions = child.node()->as<SyntaxList<VariableDimensionSyntax>>(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++GateInstanceNameSyntax* GateInstanceNameSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<GateInstanceNameSyntax>(*this);
++}
++
++bool GateInstanceSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::GateInstance;
++}
++
++TokenOrSyntax GateInstanceSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return decl;
++        case 1: return openParen;
++        case 2: return &connections;
++        case 3: return closeParen;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax GateInstanceSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return decl;
++        case 1: return openParen;
++        case 2: return &connections;
++        case 3: return closeParen;
++        default: return nullptr;
++    }
++}
++
++void GateInstanceSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: decl = &child.node()->as<GateInstanceNameSyntax>(); return;
++        case 1: openParen = child.token(); return;
++        case 2: connections = child.node()->as<SeparatedSyntaxList<ExpressionSyntax>>(); return;
++        case 3: closeParen = child.token(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++GateInstanceSyntax* GateInstanceSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<GateInstanceSyntax>(*this);
++}
++
++bool GateInstantiationSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::GateInstantiation;
++}
++
++TokenOrSyntax GateInstantiationSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return &attributes;
++        case 1: return gateType;
++        case 2: return strength;
++        case 3: return delay;
++        case 4: return &instances;
++        case 5: return semi;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax GateInstantiationSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return &attributes;
++        case 1: return gateType;
++        case 2: return strength;
++        case 3: return delay;
++        case 4: return &instances;
++        case 5: return semi;
++        default: return nullptr;
++    }
++}
++
++void GateInstantiationSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: attributes = child.node()->as<SyntaxList<AttributeInstanceSyntax>>(); return;
++        case 1: gateType = child.token(); return;
++        case 2: strength = &child.node()->as<DriveStrengthSyntax>(); return;
++        case 3: delay = &child.node()->as<TimingControlSyntax>(); return;
++        case 4: instances = child.node()->as<SeparatedSyntaxList<GateInstanceSyntax>>(); return;
++        case 5: semi = child.token(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++GateInstantiationSyntax* GateInstantiationSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<GateInstantiationSyntax>(*this);
 +}
 +
 +bool GenerateBlockSyntax::isKind(SyntaxKind kind) {
@@ -8061,7 +8237,6 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::SequenceType:
 +        case SyntaxKind::ShortRealType:
 +        case SyntaxKind::StringType:
-+        case SyntaxKind::TypeType:
 +        case SyntaxKind::Untyped:
 +        case SyntaxKind::VoidType:
 +            return true;
@@ -8657,6 +8832,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::ForwardInterfaceClassTypedefDeclaration:
 +        case SyntaxKind::ForwardTypedefDeclaration:
 +        case SyntaxKind::FunctionDeclaration:
++        case SyntaxKind::GateInstantiation:
 +        case SyntaxKind::GenerateBlock:
 +        case SyntaxKind::GenerateRegion:
 +        case SyntaxKind::GenvarDeclaration:
@@ -9209,6 +9385,41 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    }
 +}
 +
++bool NameValuePragmaExpressionSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::NameValuePragmaExpression;
++}
++
++TokenOrSyntax NameValuePragmaExpressionSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return name;
++        case 1: return equals;
++        case 2: return value.get();
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax NameValuePragmaExpressionSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return name;
++        case 1: return equals;
++        case 2: return value.get();
++        default: return nullptr;
++    }
++}
++
++void NameValuePragmaExpressionSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: name = child.token(); return;
++        case 1: equals = child.token(); return;
++        case 2: value = &child.node()->as<PragmaExpressionSyntax>(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++NameValuePragmaExpressionSyntax* NameValuePragmaExpressionSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<NameValuePragmaExpressionSyntax>(*this);
++}
++
 +bool NamedArgumentSyntax::isKind(SyntaxKind kind) {
 +    return kind == SyntaxKind::NamedArgument;
 +}
@@ -9433,8 +9644,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case 2: return strength;
 +        case 3: return expansionHint;
 +        case 4: return type.get();
-+        case 5: return &declarators;
-+        case 6: return semi;
++        case 5: return delay;
++        case 6: return &declarators;
++        case 7: return semi;
 +        default: return nullptr;
 +    }
 +}
@@ -9446,8 +9658,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case 2: return strength;
 +        case 3: return expansionHint;
 +        case 4: return type.get();
-+        case 5: return &declarators;
-+        case 6: return semi;
++        case 5: return delay;
++        case 6: return &declarators;
++        case 7: return semi;
 +        default: return nullptr;
 +    }
 +}
@@ -9459,8 +9672,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case 2: strength = &child.node()->as<NetStrengthSyntax>(); return;
 +        case 3: expansionHint = child.token(); return;
 +        case 4: type = &child.node()->as<DataTypeSyntax>(); return;
-+        case 5: declarators = child.node()->as<SeparatedSyntaxList<DeclaratorSyntax>>(); return;
-+        case 6: semi = child.token(); return;
++        case 5: delay = &child.node()->as<TimingControlSyntax>(); return;
++        case 6: declarators = child.node()->as<SeparatedSyntaxList<DeclaratorSyntax>>(); return;
++        case 7: semi = child.token(); return;
 +        default: THROW_UNREACHABLE;
 +    }
 +}
@@ -9709,6 +9923,82 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        default:
 +            return false;
 +    }
++}
++
++bool NumberPragmaExpressionSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::NumberPragmaExpression;
++}
++
++TokenOrSyntax NumberPragmaExpressionSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return size;
++        case 1: return base;
++        case 2: return value;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax NumberPragmaExpressionSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return size;
++        case 1: return base;
++        case 2: return value;
++        default: return nullptr;
++    }
++}
++
++void NumberPragmaExpressionSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: size = child.token(); return;
++        case 1: base = child.token(); return;
++        case 2: value = child.token(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++NumberPragmaExpressionSyntax* NumberPragmaExpressionSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<NumberPragmaExpressionSyntax>(*this);
++}
++
++bool OpenRangeExpressionSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::OpenRangeExpression;
++}
++
++TokenOrSyntax OpenRangeExpressionSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return openBracket;
++        case 1: return left.get();
++        case 2: return colon;
++        case 3: return right.get();
++        case 4: return closeBracket;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax OpenRangeExpressionSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return openBracket;
++        case 1: return left.get();
++        case 2: return colon;
++        case 3: return right.get();
++        case 4: return closeBracket;
++        default: return nullptr;
++    }
++}
++
++void OpenRangeExpressionSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: openBracket = child.token(); return;
++        case 1: left = &child.node()->as<ExpressionSyntax>(); return;
++        case 2: colon = child.token(); return;
++        case 3: right = &child.node()->as<ExpressionSyntax>(); return;
++        case 4: closeBracket = child.token(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++OpenRangeExpressionSyntax* OpenRangeExpressionSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<OpenRangeExpressionSyntax>(*this);
 +}
 +
 +bool OpenRangeListSyntax::isKind(SyntaxKind kind) {
@@ -10119,6 +10409,41 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return alloc.emplace<ParenExpressionListSyntax>(*this);
 +}
 +
++bool ParenPragmaExpressionSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::ParenPragmaExpression;
++}
++
++TokenOrSyntax ParenPragmaExpressionSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return openParen;
++        case 1: return &values;
++        case 2: return closeParen;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax ParenPragmaExpressionSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return openParen;
++        case 1: return &values;
++        case 2: return closeParen;
++        default: return nullptr;
++    }
++}
++
++void ParenPragmaExpressionSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: openParen = child.token(); return;
++        case 1: values = child.node()->as<SeparatedSyntaxList<PragmaExpressionSyntax>>(); return;
++        case 2: closeParen = child.token(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++ParenPragmaExpressionSyntax* ParenPragmaExpressionSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<ParenPragmaExpressionSyntax>(*this);
++}
++
 +bool ParenthesizedEventExpressionSyntax::isKind(SyntaxKind kind) {
 +    return kind == SyntaxKind::ParenthesizedEventExpression;
 +}
@@ -10456,6 +10781,53 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +PostfixUnaryExpressionSyntax* PostfixUnaryExpressionSyntax::clone(BumpAllocator& alloc) const {
 +    return alloc.emplace<PostfixUnaryExpressionSyntax>(*this);
++}
++
++bool PragmaDirectiveSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::PragmaDirective;
++}
++
++TokenOrSyntax PragmaDirectiveSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return directive;
++        case 1: return name;
++        case 2: return &args;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax PragmaDirectiveSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return directive;
++        case 1: return name;
++        case 2: return &args;
++        default: return nullptr;
++    }
++}
++
++void PragmaDirectiveSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: directive = child.token(); return;
++        case 1: name = child.token(); return;
++        case 2: args = child.node()->as<SeparatedSyntaxList<PragmaExpressionSyntax>>(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++PragmaDirectiveSyntax* PragmaDirectiveSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<PragmaDirectiveSyntax>(*this);
++}
++
++bool PragmaExpressionSyntax::isKind(SyntaxKind kind) {
++    switch (kind) {
++        case SyntaxKind::NameValuePragmaExpression:
++        case SyntaxKind::NumberPragmaExpression:
++        case SyntaxKind::ParenPragmaExpression:
++        case SyntaxKind::SimplePragmaExpression:
++            return true;
++        default:
++            return false;
++    }
 +}
 +
 +bool PrefixUnaryExpressionSyntax::isKind(SyntaxKind kind) {
@@ -11400,9 +11772,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::EndCellDefineDirective:
 +        case SyntaxKind::EndKeywordsDirective:
 +        case SyntaxKind::NoUnconnectedDriveDirective:
-+        case SyntaxKind::PragmaDirective:
 +        case SyntaxKind::ResetAllDirective:
-+        case SyntaxKind::UnconnectedDriveDirective:
 +        case SyntaxKind::UndefineAllDirective:
 +            return true;
 +        default:
@@ -11433,6 +11803,35 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +SimpleDirectiveSyntax* SimpleDirectiveSyntax::clone(BumpAllocator& alloc) const {
 +    return alloc.emplace<SimpleDirectiveSyntax>(*this);
++}
++
++bool SimplePragmaExpressionSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::SimplePragmaExpression;
++}
++
++TokenOrSyntax SimplePragmaExpressionSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return value;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax SimplePragmaExpressionSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return value;
++        default: return nullptr;
++    }
++}
++
++void SimplePragmaExpressionSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: value = child.token(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++SimplePragmaExpressionSyntax* SimplePragmaExpressionSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<SimplePragmaExpressionSyntax>(*this);
 +}
 +
 +bool SolveBeforeConstraintSyntax::isKind(SyntaxKind kind) {
@@ -12157,6 +12556,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +bool TimingControlSyntax::isKind(SyntaxKind kind) {
 +    switch (kind) {
 +        case SyntaxKind::CycleDelay:
++        case SyntaxKind::Delay3:
 +        case SyntaxKind::DelayControl:
 +        case SyntaxKind::EventControl:
 +        case SyntaxKind::EventControlWithExpression:
@@ -12491,6 +12891,38 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +UnconditionalBranchDirectiveSyntax* UnconditionalBranchDirectiveSyntax::clone(BumpAllocator& alloc) const {
 +    return alloc.emplace<UnconditionalBranchDirectiveSyntax>(*this);
++}
++
++bool UnconnectedDriveDirectiveSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::UnconnectedDriveDirective;
++}
++
++TokenOrSyntax UnconnectedDriveDirectiveSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return directive;
++        case 1: return strength;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax UnconnectedDriveDirectiveSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return directive;
++        case 1: return strength;
++        default: return nullptr;
++    }
++}
++
++void UnconnectedDriveDirectiveSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: directive = child.token(); return;
++        case 1: strength = child.token(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++UnconnectedDriveDirectiveSyntax* UnconnectedDriveDirectiveSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<UnconnectedDriveDirectiveSyntax>(*this);
 +}
 +
 +bool UndefDirectiveSyntax::isKind(SyntaxKind kind) {
@@ -13305,8 +13737,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return *alloc.emplace<ConstraintPrototypeSyntax>(attributes, qualifiers, keyword, name, semi);
 +}
 +
-+ContinuousAssignSyntax& SyntaxFactory::continuousAssign(const SyntaxList<AttributeInstanceSyntax>& attributes, Token assign, const SeparatedSyntaxList<ExpressionSyntax>& assignments, Token semi) {
-+    return *alloc.emplace<ContinuousAssignSyntax>(attributes, assign, assignments, semi);
++ContinuousAssignSyntax& SyntaxFactory::continuousAssign(const SyntaxList<AttributeInstanceSyntax>& attributes, Token assign, DriveStrengthSyntax* strength, TimingControlSyntax* delay, const SeparatedSyntaxList<ExpressionSyntax>& assignments, Token semi) {
++    return *alloc.emplace<ContinuousAssignSyntax>(attributes, assign, strength, delay, assignments, semi);
 +}
 +
 +CoverageBinsSyntax& SyntaxFactory::coverageBins(const SyntaxList<AttributeInstanceSyntax>& attributes, Token wildcard, Token keyword, Token name, ElementSelectSyntax* selector, Token equals, CoverageBinInitializerSyntax& initializer, IffClauseSyntax* iff, Token semi) {
@@ -13325,8 +13757,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return *alloc.emplace<CoverpointSyntax>(attributes, type, label, coverpoint, expr, openBrace, members, closeBrace, emptySemi);
 +}
 +
-+DPIImportExportSyntax& SyntaxFactory::dPIImportExport(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, Token stringLiteral, Token property, Token name, Token equals, FunctionPrototypeSyntax& method, Token semi) {
-+    return *alloc.emplace<DPIImportExportSyntax>(attributes, keyword, stringLiteral, property, name, equals, method, semi);
++DPIImportExportSyntax& SyntaxFactory::dPIImportExport(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, Token stringLiteral, Token property, Token c_identifier, Token equals, FunctionPrototypeSyntax& method, Token semi) {
++    return *alloc.emplace<DPIImportExportSyntax>(attributes, keyword, stringLiteral, property, c_identifier, equals, method, semi);
 +}
 +
 +DataDeclarationSyntax& SyntaxFactory::dataDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, const TokenList& modifiers, DataTypeSyntax& type, const SeparatedSyntaxList<DeclaratorSyntax>& declarators, Token semi) {
@@ -13363,6 +13795,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +DefineDirectiveSyntax& SyntaxFactory::defineDirective(Token directive, Token name, MacroFormalArgumentListSyntax* formalArguments, const TokenList& body) {
 +    return *alloc.emplace<DefineDirectiveSyntax>(directive, name, formalArguments, body);
++}
++
++Delay3Syntax& SyntaxFactory::delay3(Token hash, Token openParen, ExpressionSyntax& delay1, Token comma1, ExpressionSyntax* delay2, Token comma2, ExpressionSyntax* delay3, Token closeParen) {
++    return *alloc.emplace<Delay3Syntax>(hash, openParen, delay1, comma1, delay2, comma2, delay3, closeParen);
 +}
 +
 +DelaySyntax& SyntaxFactory::delay(SyntaxKind kind, Token hash, ExpressionSyntax& delayValue) {
@@ -13551,6 +13987,18 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +FunctionPrototypeSyntax& SyntaxFactory::functionPrototype(Token keyword, Token lifetime, DataTypeSyntax& returnType, NameSyntax& name, FunctionPortListSyntax* portList) {
 +    return *alloc.emplace<FunctionPrototypeSyntax>(keyword, lifetime, returnType, name, portList);
++}
++
++GateInstanceNameSyntax& SyntaxFactory::gateInstanceName(Token name, const SyntaxList<VariableDimensionSyntax>& dimensions) {
++    return *alloc.emplace<GateInstanceNameSyntax>(name, dimensions);
++}
++
++GateInstanceSyntax& SyntaxFactory::gateInstance(GateInstanceNameSyntax* decl, Token openParen, const SeparatedSyntaxList<ExpressionSyntax>& connections, Token closeParen) {
++    return *alloc.emplace<GateInstanceSyntax>(decl, openParen, connections, closeParen);
++}
++
++GateInstantiationSyntax& SyntaxFactory::gateInstantiation(const SyntaxList<AttributeInstanceSyntax>& attributes, Token gateType, DriveStrengthSyntax* strength, TimingControlSyntax* delay, const SeparatedSyntaxList<GateInstanceSyntax>& instances, Token semi) {
++    return *alloc.emplace<GateInstantiationSyntax>(attributes, gateType, strength, delay, instances, semi);
 +}
 +
 +GenerateBlockSyntax& SyntaxFactory::generateBlock(const SyntaxList<AttributeInstanceSyntax>& attributes, NamedLabelSyntax* label, Token begin, NamedBlockClauseSyntax* beginName, const SyntaxList<MemberSyntax>& members, Token end, NamedBlockClauseSyntax* endName) {
@@ -13765,6 +14213,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return *alloc.emplace<MultipleConcatenationExpressionSyntax>(openBrace, expression, concatenation, closeBrace);
 +}
 +
++NameValuePragmaExpressionSyntax& SyntaxFactory::nameValuePragmaExpression(Token name, Token equals, PragmaExpressionSyntax& value) {
++    return *alloc.emplace<NameValuePragmaExpressionSyntax>(name, equals, value);
++}
++
 +NamedArgumentSyntax& SyntaxFactory::namedArgument(Token dot, Token name, Token openParen, ExpressionSyntax* expr, Token closeParen) {
 +    return *alloc.emplace<NamedArgumentSyntax>(dot, name, openParen, expr, closeParen);
 +}
@@ -13789,8 +14241,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return *alloc.emplace<NamedTypeSyntax>(name);
 +}
 +
-+NetDeclarationSyntax& SyntaxFactory::netDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, Token netType, NetStrengthSyntax* strength, Token expansionHint, DataTypeSyntax& type, const SeparatedSyntaxList<DeclaratorSyntax>& declarators, Token semi) {
-+    return *alloc.emplace<NetDeclarationSyntax>(attributes, netType, strength, expansionHint, type, declarators, semi);
++NetDeclarationSyntax& SyntaxFactory::netDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, Token netType, NetStrengthSyntax* strength, Token expansionHint, DataTypeSyntax& type, TimingControlSyntax* delay, const SeparatedSyntaxList<DeclaratorSyntax>& declarators, Token semi) {
++    return *alloc.emplace<NetDeclarationSyntax>(attributes, netType, strength, expansionHint, type, delay, declarators, semi);
 +}
 +
 +NetPortHeaderSyntax& SyntaxFactory::netPortHeader(Token direction, Token netType, DataTypeSyntax& dataType) {
@@ -13815,6 +14267,14 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +NonAnsiPortListSyntax& SyntaxFactory::nonAnsiPortList(Token openParen, const SeparatedSyntaxList<NonAnsiPortSyntax>& ports, Token closeParen) {
 +    return *alloc.emplace<NonAnsiPortListSyntax>(openParen, ports, closeParen);
++}
++
++NumberPragmaExpressionSyntax& SyntaxFactory::numberPragmaExpression(Token size, Token base, Token value) {
++    return *alloc.emplace<NumberPragmaExpressionSyntax>(size, base, value);
++}
++
++OpenRangeExpressionSyntax& SyntaxFactory::openRangeExpression(Token openBracket, ExpressionSyntax& left, Token colon, ExpressionSyntax& right, Token closeBracket) {
++    return *alloc.emplace<OpenRangeExpressionSyntax>(openBracket, left, colon, right, closeBracket);
 +}
 +
 +OpenRangeListSyntax& SyntaxFactory::openRangeList(Token openBrace, const SeparatedSyntaxList<ExpressionSyntax>& valueRanges, Token closeBrace) {
@@ -13861,6 +14321,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return *alloc.emplace<ParenExpressionListSyntax>(openParen, expressions, closeParen);
 +}
 +
++ParenPragmaExpressionSyntax& SyntaxFactory::parenPragmaExpression(Token openParen, const SeparatedSyntaxList<PragmaExpressionSyntax>& values, Token closeParen) {
++    return *alloc.emplace<ParenPragmaExpressionSyntax>(openParen, values, closeParen);
++}
++
 +ParenthesizedEventExpressionSyntax& SyntaxFactory::parenthesizedEventExpression(Token openParen, EventExpressionSyntax& expr, Token closeParen) {
 +    return *alloc.emplace<ParenthesizedEventExpressionSyntax>(openParen, expr, closeParen);
 +}
@@ -13887,6 +14351,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +PostfixUnaryExpressionSyntax& SyntaxFactory::postfixUnaryExpression(SyntaxKind kind, ExpressionSyntax& operand, const SyntaxList<AttributeInstanceSyntax>& attributes, Token operatorToken) {
 +    return *alloc.emplace<PostfixUnaryExpressionSyntax>(kind, operand, attributes, operatorToken);
++}
++
++PragmaDirectiveSyntax& SyntaxFactory::pragmaDirective(Token directive, Token name, const SeparatedSyntaxList<PragmaExpressionSyntax>& args) {
++    return *alloc.emplace<PragmaDirectiveSyntax>(directive, name, args);
 +}
 +
 +PrefixUnaryExpressionSyntax& SyntaxFactory::prefixUnaryExpression(SyntaxKind kind, Token operatorToken, const SyntaxList<AttributeInstanceSyntax>& attributes, ExpressionSyntax& operand) {
@@ -13979,6 +14447,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +SimpleDirectiveSyntax& SyntaxFactory::simpleDirective(SyntaxKind kind, Token directive) {
 +    return *alloc.emplace<SimpleDirectiveSyntax>(kind, directive);
++}
++
++SimplePragmaExpressionSyntax& SyntaxFactory::simplePragmaExpression(Token value) {
++    return *alloc.emplace<SimplePragmaExpressionSyntax>(value);
 +}
 +
 +SolveBeforeConstraintSyntax& SyntaxFactory::solveBeforeConstraint(Token solve, const SeparatedSyntaxList<ExpressionSyntax>& beforeExpr, Token before, const SeparatedSyntaxList<ExpressionSyntax>& afterExpr, Token semi) {
@@ -14083,6 +14555,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +UnconditionalBranchDirectiveSyntax& SyntaxFactory::unconditionalBranchDirective(SyntaxKind kind, Token directive, const TokenList& disabledTokens) {
 +    return *alloc.emplace<UnconditionalBranchDirectiveSyntax>(kind, directive, disabledTokens);
++}
++
++UnconnectedDriveDirectiveSyntax& SyntaxFactory::unconnectedDriveDirective(Token directive, Token strength) {
++    return *alloc.emplace<UnconnectedDriveDirectiveSyntax>(directive, strength);
 +}
 +
 +UndefDirectiveSyntax& SyntaxFactory::undefDirective(Token directive, Token name) {
@@ -14257,6 +14733,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::DefaultPatternKeyExpression: return "DefaultPatternKeyExpression";
 +        case SyntaxKind::DeferredAssertion: return "DeferredAssertion";
 +        case SyntaxKind::DefineDirective: return "DefineDirective";
++        case SyntaxKind::Delay3: return "Delay3";
 +        case SyntaxKind::DelayControl: return "DelayControl";
 +        case SyntaxKind::DescendingRangeSelect: return "DescendingRangeSelect";
 +        case SyntaxKind::DisableConstraint: return "DisableConstraint";
@@ -14316,6 +14793,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::FunctionPort: return "FunctionPort";
 +        case SyntaxKind::FunctionPortList: return "FunctionPortList";
 +        case SyntaxKind::FunctionPrototype: return "FunctionPrototype";
++        case SyntaxKind::GateInstance: return "GateInstance";
++        case SyntaxKind::GateInstanceName: return "GateInstanceName";
++        case SyntaxKind::GateInstantiation: return "GateInstantiation";
 +        case SyntaxKind::GenerateBlock: return "GenerateBlock";
 +        case SyntaxKind::GenerateRegion: return "GenerateRegion";
 +        case SyntaxKind::GenvarDeclaration: return "GenvarDeclaration";
@@ -14398,6 +14878,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::MultipleConcatenationExpression: return "MultipleConcatenationExpression";
 +        case SyntaxKind::MultiplyAssignmentExpression: return "MultiplyAssignmentExpression";
 +        case SyntaxKind::MultiplyExpression: return "MultiplyExpression";
++        case SyntaxKind::NameValuePragmaExpression: return "NameValuePragmaExpression";
 +        case SyntaxKind::NamedArgument: return "NamedArgument";
 +        case SyntaxKind::NamedBlockClause: return "NamedBlockClause";
 +        case SyntaxKind::NamedLabel: return "NamedLabel";
@@ -14418,7 +14899,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::NonblockingAssignmentExpression: return "NonblockingAssignmentExpression";
 +        case SyntaxKind::NonblockingEventTriggerStatement: return "NonblockingEventTriggerStatement";
 +        case SyntaxKind::NullLiteralExpression: return "NullLiteralExpression";
++        case SyntaxKind::NumberPragmaExpression: return "NumberPragmaExpression";
 +        case SyntaxKind::OneStepLiteralExpression: return "OneStepLiteralExpression";
++        case SyntaxKind::OpenRangeExpression: return "OpenRangeExpression";
 +        case SyntaxKind::OpenRangeList: return "OpenRangeList";
 +        case SyntaxKind::OrAssignmentExpression: return "OrAssignmentExpression";
 +        case SyntaxKind::OrSequenceExpression: return "OrSequenceExpression";
@@ -14437,6 +14920,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::ParameterPortList: return "ParameterPortList";
 +        case SyntaxKind::ParameterValueAssignment: return "ParameterValueAssignment";
 +        case SyntaxKind::ParenExpressionList: return "ParenExpressionList";
++        case SyntaxKind::ParenPragmaExpression: return "ParenPragmaExpression";
 +        case SyntaxKind::ParenthesizedEventExpression: return "ParenthesizedEventExpression";
 +        case SyntaxKind::ParenthesizedExpression: return "ParenthesizedExpression";
 +        case SyntaxKind::PatternCaseItem: return "PatternCaseItem";
@@ -14488,6 +14972,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::SignalEventExpression: return "SignalEventExpression";
 +        case SyntaxKind::SignedCastExpression: return "SignedCastExpression";
 +        case SyntaxKind::SimpleAssignmentPattern: return "SimpleAssignmentPattern";
++        case SyntaxKind::SimplePragmaExpression: return "SimplePragmaExpression";
 +        case SyntaxKind::SimpleRangeSelect: return "SimpleRangeSelect";
 +        case SyntaxKind::SolveBeforeConstraint: return "SolveBeforeConstraint";
 +        case SyntaxKind::StandardCaseItem: return "StandardCaseItem";
@@ -14525,7 +15010,6 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::TypeAssignment: return "TypeAssignment";
 +        case SyntaxKind::TypeParameterDeclaration: return "TypeParameterDeclaration";
 +        case SyntaxKind::TypeReference: return "TypeReference";
-+        case SyntaxKind::TypeType: return "TypeType";
 +        case SyntaxKind::TypedefDeclaration: return "TypedefDeclaration";
 +        case SyntaxKind::UnaryBitwiseAndExpression: return "UnaryBitwiseAndExpression";
 +        case SyntaxKind::UnaryBitwiseNandExpression: return "UnaryBitwiseNandExpression";
@@ -14580,8 +15064,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +}
 diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/cmake_install.cmake ./generated/cmake_install.cmake
 --- ./generated/cmake_install.cmake	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/cmake_install.cmake	2019-11-23 10:40:22.972014303 -0800
-@@ -0,0 +1,39 @@
++++ ./generated/cmake_install.cmake	2020-04-13 10:23:46.700499356 -0700
+@@ -0,0 +1,63 @@
 +# Install script for directory: /soe/renau/projs/synth/slang/source
 +
 +# Set the install prefix
@@ -14613,7 +15097,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# Install shared libraries without execute permission?
 +if(NOT DEFINED CMAKE_INSTALL_SO_NO_EXE)
-+  set(CMAKE_INSTALL_SO_NO_EXE "0")
++  set(CMAKE_INSTALL_SO_NO_EXE "1")
 +endif()
 +
 +# Is this installation the result of a crosscompile?
@@ -14621,15 +15105,39 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +  set(CMAKE_CROSSCOMPILING "FALSE")
 +endif()
 +
++if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
++  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib" TYPE STATIC_LIBRARY FILES "/soe/renau/projs/synth/slang/build/lib/libslang.a")
++endif()
++
++if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
++  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/include" TYPE DIRECTORY FILES "/soe/renau/projs/synth/slang/source/../include/")
++endif()
++
++if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
++  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/include" TYPE DIRECTORY FILES "/soe/renau/projs/synth/slang/source/../external/")
++endif()
++
++if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
++  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/include/slang/diagnostics" TYPE DIRECTORY FILES "/soe/renau/projs/synth/slang/build/source/slang/diagnostics/")
++endif()
++
++if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
++  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/include/slang/syntax" TYPE FILE FILES "/soe/renau/projs/synth/slang/build/source/slang/syntax/AllSyntax.h")
++endif()
++
++if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
++  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/include/slang/syntax" TYPE FILE FILES "/soe/renau/projs/synth/slang/build/source/slang/syntax/SyntaxKind.h")
++endif()
++
 diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/DiagCode.cpp ./generated/DiagCode.cpp
 --- ./generated/DiagCode.cpp	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/DiagCode.cpp	2019-11-23 10:40:28.831890148 -0800
-@@ -0,0 +1,378 @@
++++ ./generated/DiagCode.cpp	2020-04-13 10:23:52.720371448 -0700
+@@ -0,0 +1,438 @@
 +//------------------------------------------------------------------------------
 +// DiagCode.cpp
-+// Generated diagnostic helpers.
++// Generated diagnostic helpers
 +//
-+// File is under the MIT license; see LICENSE for details.
++// File is under the MIT license; see LICENSE for details
 +//------------------------------------------------------------------------------
 +#include "slang/diagnostics/AllDiags.h"
 +
@@ -14638,24 +15146,29 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +namespace slang {
 +
 +static const flat_hash_map<DiagCode, std::tuple<string_view, string_view, DiagnosticSeverity, string_view>> data = {
-+    {diag::ExpressionNotConstant, std::make_tuple("ExpressionNotConstant"sv, "expression is not constant"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::MaxInstanceDepthExceeded, std::make_tuple("MaxInstanceDepthExceeded"sv, "module instantiation exceeded maximum depth of {}"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::NoteInCallTo, std::make_tuple("NoteInCallTo"sv, "in call to '{}'"sv, DiagnosticSeverity::Note, ""sv)},
 +    {diag::NoteSkippingFrames, std::make_tuple("NoteSkippingFrames"sv, "(skipping {} calls in backtrace; use --constexpr-backtrace-limit=0 to see all)"sv, DiagnosticSeverity::Note, ""sv)},
-+    {diag::NoteNonConstVariable, std::make_tuple("NoteNonConstVariable"sv, "reference to non-constant variable '{}' is not allowed in a constant expression"sv, DiagnosticSeverity::Note, ""sv)},
-+    {diag::NoteArrayIndexInvalid, std::make_tuple("NoteArrayIndexInvalid"sv, "cannot refer to element {} of array of type {} in a constant expression"sv, DiagnosticSeverity::Note, ""sv)},
-+    {diag::NotePartSelectInvalid, std::make_tuple("NotePartSelectInvalid"sv, "cannot select range of {}:{} from array of type {} in a constant expression"sv, DiagnosticSeverity::Note, ""sv)},
-+    {diag::NoteStringIndexInvalid, std::make_tuple("NoteStringIndexInvalid"sv, "cannot select index {} from string of length {}"sv, DiagnosticSeverity::Note, ""sv)},
-+    {diag::NoteReplicationCountInvalid, std::make_tuple("NoteReplicationCountInvalid"sv, "string replication count {} is invalid"sv, DiagnosticSeverity::Note, ""sv)},
-+    {diag::NoteHierarchicalNameInCE, std::make_tuple("NoteHierarchicalNameInCE"sv, "reference to '{}' by hierarchical name is not allowed in a constant expression"sv, DiagnosticSeverity::Note, ""sv)},
-+    {diag::NoteFunctionIdentifiersMustBeLocal, std::make_tuple("NoteFunctionIdentifiersMustBeLocal"sv, "all identifiers that are not parameters must be declared locally to a constant function"sv, DiagnosticSeverity::Note, ""sv)},
-+    {diag::NoteParamUsedInCEBeforeDecl, std::make_tuple("NoteParamUsedInCEBeforeDecl"sv, "parameter '{}' is declared after the invocation of the current constant function"sv, DiagnosticSeverity::Note, ""sv)},
-+    {diag::NoteNoCaseItemsMatched, std::make_tuple("NoteNoCaseItemsMatched"sv, "no items in {} case statement matched value {}"sv, DiagnosticSeverity::Note, ""sv)},
-+    {diag::NoteCaseItemsNotUnique, std::make_tuple("NoteCaseItemsNotUnique"sv, "more than one match found in unique case statement for value {}"sv, DiagnosticSeverity::Note, ""sv)},
-+    {diag::NoteTimedStmtNotConst, std::make_tuple("NoteTimedStmtNotConst"sv, "constant expressions cannot schedule events"sv, DiagnosticSeverity::Note, ""sv)},
-+    {diag::NoteAssertionFailed, std::make_tuple("NoteAssertionFailed"sv, "assertion failed"sv, DiagnosticSeverity::Note, ""sv)},
-+    {diag::NoteParallelBlockNotConst, std::make_tuple("NoteParallelBlockNotConst"sv, "parallel blocks are not allowed in constant expressions"sv, DiagnosticSeverity::Note, ""sv)},
-+    {diag::NoteExceededMaxCallDepth, std::make_tuple("NoteExceededMaxCallDepth"sv, "constant evaluation exceeded maximum depth of {} calls"sv, DiagnosticSeverity::Note, ""sv)},
-+    {diag::NoteExceededMaxSteps, std::make_tuple("NoteExceededMaxSteps"sv, "constant evaluation hit maximum step limit; possible infinite loop?"sv, DiagnosticSeverity::Note, ""sv)},
++    {diag::ConstEvalNonConstVariable, std::make_tuple("ConstEvalNonConstVariable"sv, "reference to non-constant variable '{}' is not allowed in a constant expression"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ConstEvalArrayIndexInvalid, std::make_tuple("ConstEvalArrayIndexInvalid"sv, "cannot refer to element {} of array of type {} in a constant expression"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ConstEvalPartSelectInvalid, std::make_tuple("ConstEvalPartSelectInvalid"sv, "cannot select range of {}:{} from array of type {} in a constant expression"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ConstEvalStringIndexInvalid, std::make_tuple("ConstEvalStringIndexInvalid"sv, "cannot select index {} from string of length {} in a constant expression"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ConstEvalReplicationCountInvalid, std::make_tuple("ConstEvalReplicationCountInvalid"sv, "string replication count {} is invalid in a constant expression"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ConstEvalHierarchicalNameInCE, std::make_tuple("ConstEvalHierarchicalNameInCE"sv, "reference to '{}' by hierarchical name is not allowed in a constant expression"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ConstEvalFunctionIdentifiersMustBeLocal, std::make_tuple("ConstEvalFunctionIdentifiersMustBeLocal"sv, "all identifiers that are not parameters or enums must be declared locally to a constant function"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ConstEvalIdUsedInCEBeforeDecl, std::make_tuple("ConstEvalIdUsedInCEBeforeDecl"sv, "identifier '{}' is declared after the invocation of the current constant function"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ConstEvalNoCaseItemsMatched, std::make_tuple("ConstEvalNoCaseItemsMatched"sv, "no items in {} case statement matched value {} in constant function"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ConstEvalCaseItemsNotUnique, std::make_tuple("ConstEvalCaseItemsNotUnique"sv, "more than one match found in unique case statement for value {} in constant function"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ConstEvalTimedStmtNotConst, std::make_tuple("ConstEvalTimedStmtNotConst"sv, "constant expressions cannot schedule events"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ConstEvalAssertionFailed, std::make_tuple("ConstEvalAssertionFailed"sv, "assertion failed in constant function"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ConstEvalParallelBlockNotConst, std::make_tuple("ConstEvalParallelBlockNotConst"sv, "parallel blocks are not allowed in constant functions"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ConstEvalExceededMaxCallDepth, std::make_tuple("ConstEvalExceededMaxCallDepth"sv, "constant evaluation exceeded maximum depth of {} calls"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ConstEvalExceededMaxSteps, std::make_tuple("ConstEvalExceededMaxSteps"sv, "constant evaluation hit maximum step limit; possible infinite loop?"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ConstEvalTaskNotConstant, std::make_tuple("ConstEvalTaskNotConstant"sv, "cannot invoke a task in a constant expression"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ConstEvalVoidNotConstant, std::make_tuple("ConstEvalVoidNotConstant"sv, "cannot call a void function in a constant expression"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ConstEvalFunctionArgDirection, std::make_tuple("ConstEvalFunctionArgDirection"sv, "cannot call a function with output, inout, or ref arguments in a constant expression"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ConstEvalFunctionInsideGenerate, std::make_tuple("ConstEvalFunctionInsideGenerate"sv, "cannot call a function declared inside a generate block in a constant expression"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ConstEvalStaticSkipped, std::make_tuple("ConstEvalStaticSkipped"sv, "static variable initialization is skipped in constant function calls"sv, DiagnosticSeverity::Warning, "static-skipped"sv)},
 +    {diag::LocalParamNoInitializer, std::make_tuple("LocalParamNoInitializer"sv, "local parameter is missing an initializer"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::BodyParamNoInitializer, std::make_tuple("BodyParamNoInitializer"sv, "parameter declaration is missing an initializer"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InvalidDimensionRange, std::make_tuple("InvalidDimensionRange"sv, "invalid dimension range"sv, DiagnosticSeverity::Error, ""sv)},
@@ -14686,7 +15199,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::DuplicatePortConnection, std::make_tuple("DuplicatePortConnection"sv, "duplicate connection for port '{}'"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::TooManyPortConnections, std::make_tuple("TooManyPortConnections"sv, "too many port connections given to instantiation of module '{}' ({} given, expected {})"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::PortDoesNotExist, std::make_tuple("PortDoesNotExist"sv, "port '{}' does not exist in module '{}'"sv, DiagnosticSeverity::Error, ""sv)},
-+    {diag::PortConnDimensionsMismatch, std::make_tuple("PortConnDimensionsMismatch"sv, "dimensions of port connection do not match its declaration"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::PortConnDimensionsMismatch, std::make_tuple("PortConnDimensionsMismatch"sv, "dimensions of connection for port '{}' do not match its declaration"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InterfacePortNotConnected, std::make_tuple("InterfacePortNotConnected"sv, "interface port '{}' not connected"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InterfacePortInvalidExpression, std::make_tuple("InterfacePortInvalidExpression"sv, "invalid expression for interface port '{}'"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InterfacePortTypeMismatch, std::make_tuple("InterfacePortTypeMismatch"sv, "cannot connect instance of interface '{}' to port of interface '{}'"sv, DiagnosticSeverity::Error, ""sv)},
@@ -14696,9 +15209,11 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::GenvarUnknownBits, std::make_tuple("GenvarUnknownBits"sv, "value of {} is invalid for loop generation value"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ImplicitNamedPortNotFound, std::make_tuple("ImplicitNamedPortNotFound"sv, "could not find connection for implicit named port '{}'"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ImplicitNamedPortTypeMismatch, std::make_tuple("ImplicitNamedPortTypeMismatch"sv, "implicit named port '{}' of type {} connects to value of inequivalent type {}"sv, DiagnosticSeverity::Error, ""sv)},
-+    {diag::MaxInstanceDepthExceeded, std::make_tuple("MaxInstanceDepthExceeded"sv, "module instantiation exceeded maximum depth of {}"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::MaxGenerateStepsExceeded, std::make_tuple("MaxGenerateStepsExceeded"sv, "generate loop hit maximum step limit; possible infinite loop?"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::MixingSubroutinePortKinds, std::make_tuple("MixingSubroutinePortKinds"sv, "port declarations not allowed when subroutine defines a formal argument list"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::UnpackedArrayParamType, std::make_tuple("UnpackedArrayParamType"sv, "unpacked array parameter requires explicit data type"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::AutomaticNotAllowed, std::make_tuple("AutomaticNotAllowed"sv, "automatic variables can only be declared in procedural contexts"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::StaticInitializerMustBeExplicit, std::make_tuple("StaticInitializerMustBeExplicit"sv, "initializing a static variable in a procedural context requires an explicit 'static' keyword"sv, DiagnosticSeverity::Warning, "explicit-static"sv)},
 +    {diag::CaseGenerateDup, std::make_tuple("CaseGenerateDup"sv, "more than one case generate block matches the value {}"sv, DiagnosticSeverity::Warning, "case-gen-dup"sv)},
 +    {diag::CaseGenerateNoBlock, std::make_tuple("CaseGenerateNoBlock"sv, "no case generate expression matches the value {}"sv, DiagnosticSeverity::Warning, "case-gen-none"sv)},
 +    {diag::UnconnectedNamedPort, std::make_tuple("UnconnectedNamedPort"sv, "port '{}' has no connection"sv, DiagnosticSeverity::Warning, "unconnected-port"sv)},
@@ -14712,7 +15227,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::BadIndexExpression, std::make_tuple("BadIndexExpression"sv, "value of type {} cannot be indexed"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::BadConcatExpression, std::make_tuple("BadConcatExpression"sv, "invalid operand type {} in concatenation"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::BadReplicationExpression, std::make_tuple("BadReplicationExpression"sv, "invalid operands to replication expression ({} and {})"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::BadOpenRange, std::make_tuple("BadOpenRange"sv, "invalid bounds in open range ({} and {})"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::BadCastType, std::make_tuple("BadCastType"sv, "invalid casting type {}"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::BadSetMembershipType, std::make_tuple("BadSetMembershipType"sv, "invalid type {} for {} expression"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ConcatWithStringInt, std::make_tuple("ConcatWithStringInt"sv, "cannot mix strings and integers in a concatenation (use a cast if this is desired)"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::BadRangeExpression, std::make_tuple("BadRangeExpression"sv, "cannot select range of {}:{} from array of type {}"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::RangeWidthTooLarge, std::make_tuple("RangeWidthTooLarge"sv, "cannot select range of {} elements from array of type {}"sv, DiagnosticSeverity::Error, ""sv)},
@@ -14732,8 +15249,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::ExpressionNotCallable, std::make_tuple("ExpressionNotCallable"sv, "expression is not callable"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::NotBooleanConvertible, std::make_tuple("NotBooleanConvertible"sv, "value of type {} is not convertible to a boolean predicate"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::EnumValueSizeMismatch, std::make_tuple("EnumValueSizeMismatch"sv, "expression width of {} does not exactly match declared enum type width of {}"sv, DiagnosticSeverity::Error, ""sv)},
-+    {diag::InvalidCaseStmtType, std::make_tuple("InvalidCaseStmtType"sv, "invalid expression type {} for {} statement"sv, DiagnosticSeverity::Error, ""sv)},
-+    {diag::NoCommonCaseStmtType, std::make_tuple("NoCommonCaseStmtType"sv, "case expression of type {} is not comparable to common type {}"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::EnumValueUnknownBits, std::make_tuple("EnumValueUnknownBits"sv, "value of {} is invalid for enum with base type {}"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::NoCommonComparisonType, std::make_tuple("NoCommonComparisonType"sv, "{} expression of type {} is not comparable to common type {}"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::AssignmentPatternNoContext, std::make_tuple("AssignmentPatternNoContext"sv, "assignment pattern target type cannot be deduced in this context"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::BadAssignmentPatternType, std::make_tuple("BadAssignmentPatternType"sv, "invalid target type {} for assignment pattern"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::WrongNumberAssignmentPatterns, std::make_tuple("WrongNumberAssignmentPatterns"sv, "assignment pattern for type {} requires {} elements but {} were provided"sv, DiagnosticSeverity::Error, ""sv)},
@@ -14746,6 +15263,19 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::AssignmentPatternMissingElements, std::make_tuple("AssignmentPatternMissingElements"sv, "not all elements of array are covered by an assignment pattern key"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::EmptyArgNotAllowed, std::make_tuple("EmptyArgNotAllowed"sv, "empty argument not allowed"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::NamedArgNotAllowed, std::make_tuple("NamedArgNotAllowed"sv, "named argument not allowed"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::DuplicateArgAssignment, std::make_tuple("DuplicateArgAssignment"sv, "duplicate assignment for argument '{}'"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::MixingOrderedAndNamedArgs, std::make_tuple("MixingOrderedAndNamedArgs"sv, "ordered arguments are not allowed after named arguments"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ArgDoesNotExist, std::make_tuple("ArgDoesNotExist"sv, "argument '{}' does not exist in subroutine '{}'"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ArgCannotBeEmpty, std::make_tuple("ArgCannotBeEmpty"sv, "argument '{}' cannot be empty because it does not have a default value"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::UnconnectedArg, std::make_tuple("UnconnectedArg"sv, "argument '{}' is missing a value"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::MissingReturnValue, std::make_tuple("MissingReturnValue"sv, "must provide a return value for non-void function"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::AssignmentNotAllowed, std::make_tuple("AssignmentNotAllowed"sv, "assignment expressions are not allowed in this context"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::IncDecNotAllowed, std::make_tuple("IncDecNotAllowed"sv, "increment and decrement expressions are not allowed in this context"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::AssignmentRequiresParens, std::make_tuple("AssignmentRequiresParens"sv, "assignment expressions must be parenthesized"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::PortConnArrayMismatch, std::make_tuple("PortConnArrayMismatch"sv, "cannot connect {} to each port of type {} in '{}'"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::AutoFromStaticInit, std::make_tuple("AutoFromStaticInit"sv, "cannot refer to automatic variable '{}' from static initializer"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::NonblockingAssignmentToAuto, std::make_tuple("NonblockingAssignmentToAuto"sv, "nonblocking assignment to automatic variable '{}' is not allowed"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::AssignmentToConst, std::make_tuple("AssignmentToConst"sv, "cannot assign to read-only variable '{}'"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::NotYetSupported, std::make_tuple("NotYetSupported"sv, "language feature not yet supported"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExpectedExpression, std::make_tuple("ExpectedExpression"sv, "expected expression"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::NotePreviousDefinition, std::make_tuple("NotePreviousDefinition"sv, "previous definition here"sv, DiagnosticSeverity::Note, ""sv)},
@@ -14753,6 +15283,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::NoteDeclarationHere, std::make_tuple("NoteDeclarationHere"sv, "declared here"sv, DiagnosticSeverity::Note, ""sv)},
 +    {diag::NotePreviousMatch, std::make_tuple("NotePreviousMatch"sv, "previous match here"sv, DiagnosticSeverity::Note, ""sv)},
 +    {diag::AttributesNotAllowed, std::make_tuple("AttributesNotAllowed"sv, "attributes are not allowed here"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::WarnNotYetSupported, std::make_tuple("WarnNotYetSupported"sv, "language feature not yet supported"sv, DiagnosticSeverity::Warning, "not-supported"sv)},
 +    {diag::NonPrintableChar, std::make_tuple("NonPrintableChar"sv, "non-printable character in source text; SystemVerilog only supports ASCII text"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::UTF8Char, std::make_tuple("UTF8Char"sv, "UTF-8 sequence in source text; SystemVerilog only supports ASCII text"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::UnicodeBOM, std::make_tuple("UnicodeBOM"sv, "Unicode BOM at start of source text; SystemVerilog only supports ASCII text"sv, DiagnosticSeverity::Error, ""sv)},
@@ -14774,22 +15305,23 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::BadOctalDigit, std::make_tuple("BadOctalDigit"sv, "expected octal digit"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::BadDecimalDigit, std::make_tuple("BadDecimalDigit"sv, "expected decimal digit"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::BadHexDigit, std::make_tuple("BadHexDigit"sv, "expected hexadecimal digit"sv, DiagnosticSeverity::Error, ""sv)},
-+    {diag::IncludeNotFirstOnLine, std::make_tuple("IncludeNotFirstOnLine"sv, "include directives must begin on their own line"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::TooManyLexerErrors, std::make_tuple("TooManyLexerErrors"sv, "lexer has encountered too many errors (input is a binary file?)"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::Redefinition, std::make_tuple("Redefinition"sv, "redefinition of '{}'"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::RedefinitionDifferentType, std::make_tuple("RedefinitionDifferentType"sv, "redefinition of '{}' with a different type: {} vs {}"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::RedefinitionDifferentSymbolKind, std::make_tuple("RedefinitionDifferentSymbolKind"sv, "redefinition of '{}' as different kind of symbol"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::AmbiguousWildcardImport, std::make_tuple("AmbiguousWildcardImport"sv, "multiple imports found for identifier '{}'"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::NoteImportedFrom, std::make_tuple("NoteImportedFrom"sv, "imported from here"sv, DiagnosticSeverity::Note, ""sv)},
++    {diag::NoteHierarchicalNameInCE, std::make_tuple("NoteHierarchicalNameInCE"sv, "reference to '{}' by hierarchical name is not allowed in a constant expression"sv, DiagnosticSeverity::Note, ""sv)},
 +    {diag::ImportNameCollision, std::make_tuple("ImportNameCollision"sv, "import of '{}' collides with an existing declaration"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::UndeclaredIdentifier, std::make_tuple("UndeclaredIdentifier"sv, "use of undeclared identifier '{}'"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::TypoIdentifier, std::make_tuple("TypoIdentifier"sv, "use of undeclared identifier '{}'; did you mean '{}'?"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::UnknownSystemName, std::make_tuple("UnknownSystemName"sv, "unknown system name '{}'"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::UnknownClassOrPackage, std::make_tuple("UnknownClassOrPackage"sv, "unknown class or package '{}'"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::UsedBeforeDeclared, std::make_tuple("UsedBeforeDeclared"sv, "identifier '{}' used before its declaration"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::NotAType, std::make_tuple("NotAType"sv, "'{}' is not a type"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::NotAValue, std::make_tuple("NotAValue"sv, "'{}' does not refer to a value"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::NotAHierarchicalScope, std::make_tuple("NotAHierarchicalScope"sv, "cannot use dot operator on '{}'; it is not a variable or hierarchical scope"sv, DiagnosticSeverity::Error, ""sv)},
-+    {diag::NotAModport, std::make_tuple("NotAModport"sv, "'{}' is not a modport"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::NotAModport, std::make_tuple("NotAModport"sv, "'{}' is not a modport of '{}'"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::NotAnInterface, std::make_tuple("NotAnInterface"sv, "'{}' is not an interface instance or array of instances"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::NotAGenvar, std::make_tuple("NotAGenvar"sv, "'{}' is not a genvar"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::DotOnType, std::make_tuple("DotOnType"sv, "cannot use dot operator on a type"sv, DiagnosticSeverity::Error, ""sv)},
@@ -14798,12 +15330,15 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::UnknownPackageMember, std::make_tuple("UnknownPackageMember"sv, "no member named '{}' in package '{}'"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::UnknownUnitMember, std::make_tuple("UnknownUnitMember"sv, "no member named '{}' in compilation unit"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::RecursiveDefinition, std::make_tuple("RecursiveDefinition"sv, "'{}' recursively depends on its own definition"sv, DiagnosticSeverity::Error, ""sv)},
-+    {diag::UnknownSystemMethod, std::make_tuple("UnknownSystemMethod"sv, "unknown built-in method '{}'"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::UnknownSystemMethod, std::make_tuple("UnknownSystemMethod"sv, "unknown built-in method '{}' on type {}"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ScopeNotIndexable, std::make_tuple("ScopeNotIndexable"sv, "hierarchical scope '{}' is not indexable"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InvalidScopeIndexExpression, std::make_tuple("InvalidScopeIndexExpression"sv, "invalid hierarchical index expression"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ScopeIndexOutOfRange, std::make_tuple("ScopeIndexOutOfRange"sv, "hierarchical index {} is out of scope's declared range"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::CouldNotResolveHierarchicalPath, std::make_tuple("CouldNotResolveHierarchicalPath"sv, "could not resolve hierarchical path name '{}'"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::UnresolvedForwardTypedef, std::make_tuple("UnresolvedForwardTypedef"sv, "forward typedef '{}' does not resolve to a data type"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::DefinitionUsedAsType, std::make_tuple("DefinitionUsedAsType"sv, "'{}' is {} definition but is used like a type"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::DefinitionUsedAsValue, std::make_tuple("DefinitionUsedAsValue"sv, "'{}' is {} definition but is used as a value"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::AutoVariableHierarchical, std::make_tuple("AutoVariableHierarchical"sv, "cannot refer to automatic variable via hierarchical reference"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::DuplicateImport, std::make_tuple("DuplicateImport"sv, "duplicate import declaration is redundant"sv, DiagnosticSeverity::Warning, "dup-import"sv)},
 +    {diag::TooManyErrors, std::make_tuple("TooManyErrors"sv, "too many errors emitted, stopping now [--error-limit=]"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::UnknownWarningOption, std::make_tuple("UnknownWarningOption"sv, "unknown warning option '{}'"sv, DiagnosticSeverity::Warning, "unknown-warning-option"sv)},
@@ -14815,8 +15350,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::ValueMustBePositive, std::make_tuple("ValueMustBePositive"sv, "value must be positive"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ValueExceedsMaxBitWidth, std::make_tuple("ValueExceedsMaxBitWidth"sv, "value exceeds maximum vector width ({} bits)"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ValueOutOfRange, std::make_tuple("ValueOutOfRange"sv, "{} is out of allowed range ({} to {})"sv, DiagnosticSeverity::Error, ""sv)},
-+    {diag::RealLiteralUnderflow, std::make_tuple("RealLiteralUnderflow"sv, "value of real literal is too small; minimum is {}"sv, DiagnosticSeverity::Warning, "real-underflow"sv)},
-+    {diag::RealLiteralOverflow, std::make_tuple("RealLiteralOverflow"sv, "value of real literal is too large; maximum is {}"sv, DiagnosticSeverity::Warning, "real-overflow"sv)},
++    {diag::ExpectedVectorDigits, std::make_tuple("ExpectedVectorDigits"sv, "expected vector literal digits"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::RealLiteralUnderflow, std::make_tuple("RealLiteralUnderflow"sv, "value of real literal is too small; minimum is {:.5e}"sv, DiagnosticSeverity::Warning, "real-underflow"sv)},
++    {diag::RealLiteralOverflow, std::make_tuple("RealLiteralOverflow"sv, "value of real literal is too large; maximum is {:.5e}"sv, DiagnosticSeverity::Warning, "real-overflow"sv)},
 +    {diag::VectorLiteralOverflow, std::make_tuple("VectorLiteralOverflow"sv, "vector literal too large for the given number of bits"sv, DiagnosticSeverity::Warning, "literal-overflow"sv)},
 +    {diag::ExpectedIdentifier, std::make_tuple("ExpectedIdentifier"sv, "expected identifier"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExpectedStringLiteral, std::make_tuple("ExpectedStringLiteral"sv, "expected string literal"sv, DiagnosticSeverity::Error, ""sv)},
@@ -14841,10 +15377,11 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::ExpectedConditionalPattern, std::make_tuple("ExpectedConditionalPattern"sv, "expected conditional pattern"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExpectedAttribute, std::make_tuple("ExpectedAttribute"sv, "expected attribute"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExpectedPackageImport, std::make_tuple("ExpectedPackageImport"sv, "expected package import"sv, DiagnosticSeverity::Error, ""sv)},
-+    {diag::ExpectedHierarchicalInstantiation, std::make_tuple("ExpectedHierarchicalInstantiation"sv, "expected hierarhical instantiation"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ExpectedHierarchicalInstantiation, std::make_tuple("ExpectedHierarchicalInstantiation"sv, "expected hierarchical instantiation"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ExpectedGateInstance, std::make_tuple("ExpectedGateInstance"sv, "expected gate instance"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExpectedPortConnection, std::make_tuple("ExpectedPortConnection"sv, "expected port connection"sv, DiagnosticSeverity::Error, ""sv)},
-+    {diag::ExpectedVectorDigits, std::make_tuple("ExpectedVectorDigits"sv, "expected vector literal digits"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExpectedVariableAssignment, std::make_tuple("ExpectedVariableAssignment"sv, "expected variable assignment"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ExpectedContinuousAssignment, std::make_tuple("ExpectedContinuousAssignment"sv, "expected continuous assignment"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExpectedInterfaceClassName, std::make_tuple("ExpectedInterfaceClassName"sv, "expected interface class name"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExpectedAssignmentKey, std::make_tuple("ExpectedAssignmentKey"sv, "expected assignment key"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExpectedDistItem, std::make_tuple("ExpectedDistItem"sv, "expected dist item"sv, DiagnosticSeverity::Error, ""sv)},
@@ -14852,6 +15389,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::ExpectedClassScope, std::make_tuple("ExpectedClassScope"sv, "expected class scope before new keyword"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExpectedNetStrength, std::make_tuple("ExpectedNetStrength"sv, "expected net strength keyword"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExpectedEnumBase, std::make_tuple("ExpectedEnumBase"sv, "expected enum base type"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ExpectedCaseItem, std::make_tuple("ExpectedCaseItem"sv, "expected case item"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::NoLabelOnSemicolon, std::make_tuple("NoLabelOnSemicolon"sv, "labels are not allowed on empty semicolon"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::DeferredDelayMustBeZero, std::make_tuple("DeferredDelayMustBeZero"sv, "deferred assertion delay must be zero"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InvalidGenvarIterExpression, std::make_tuple("InvalidGenvarIterExpression"sv, "invalid genvar iteration expression"sv, DiagnosticSeverity::Error, ""sv)},
@@ -14873,15 +15411,21 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::EndNameNotEmpty, std::make_tuple("EndNameNotEmpty"sv, "trailing name not allowed on previously unnamed block"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::DeclarationsAtStart, std::make_tuple("DeclarationsAtStart"sv, "declaration must come before all statements in the block"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::VoidNotAllowed, std::make_tuple("VoidNotAllowed"sv, "'void' type not allowed"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::DuplicateDeclModifier, std::make_tuple("DuplicateDeclModifier"sv, "duplicate '{}' modifier in declaration"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::DeclModifierOrdering, std::make_tuple("DeclModifierOrdering"sv, "modifier '{}' must come before '{}' in a declaration"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::DeclModifierConflict, std::make_tuple("DeclModifierConflict"sv, "modifier '{}' cannot be used together with '{}' in a declaration"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::TypeRefDeclVar, std::make_tuple("TypeRefDeclVar"sv, "a type reference cannot be used in a variable declaration without a preceeding 'var' keyword"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::NonStandardGenBlock, std::make_tuple("NonStandardGenBlock"sv, "standalone generate block without loop or condition is not allowed in SystemVerilog"sv, DiagnosticSeverity::Warning, "nonstandard-generate"sv)},
++    {diag::NoteToMatchThis, std::make_tuple("NoteToMatchThis"sv, "to match this '{}'"sv, DiagnosticSeverity::Note, ""sv)},
 +    {diag::CouldNotOpenIncludeFile, std::make_tuple("CouldNotOpenIncludeFile"sv, "could not find or open include file"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExceededMaxIncludeDepth, std::make_tuple("ExceededMaxIncludeDepth"sv, "exceeded max include depth"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::UnknownDirective, std::make_tuple("UnknownDirective"sv, "unknown macro or compiler directive '{}'"sv, DiagnosticSeverity::Error, ""sv)},
-+    {diag::ExpectedEndOfDirective, std::make_tuple("ExpectedEndOfDirective"sv, "expected end of directive (missing newline?)"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::UnexpectedConditionalDirective, std::make_tuple("UnexpectedConditionalDirective"sv, "unexpected conditional directive"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::MissingEndIfDirective, std::make_tuple("MissingEndIfDirective"sv, "missing `endif directive"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::UnbalancedMacroArgDims, std::make_tuple("UnbalancedMacroArgDims"sv, "unbalanced macro argument delimiters ((), [], or {{}}); didn't see an end '{}'"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExpectedMacroArgs, std::make_tuple("ExpectedMacroArgs"sv, "expected macro arguments for function-like macro"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExpectedNetType, std::make_tuple("ExpectedNetType"sv, "expected net type specifier"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ExpectedDriveStrength, std::make_tuple("ExpectedDriveStrength"sv, "expected pull1 or pull0 strength"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InvalidMacroName, std::make_tuple("InvalidMacroName"sv, "can't redefine compiler directive as a macro"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::TooManyActualMacroArgs, std::make_tuple("TooManyActualMacroArgs"sv, "too many arguments provided to function-like macro"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::NotEnoughMacroArgs, std::make_tuple("NotEnoughMacroArgs"sv, "not enough arguments provided to function-like macro"sv, DiagnosticSeverity::Error, ""sv)},
@@ -14896,8 +15440,17 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::SplitBlockCommentInDirective, std::make_tuple("SplitBlockCommentInDirective"sv, "block comments on the same line as a directive must also be terminated on that line"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExpectedIncludeFileName, std::make_tuple("ExpectedIncludeFileName"sv, "expected an include file name"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExpectedTimeLiteral, std::make_tuple("ExpectedTimeLiteral"sv, "expected time literal"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ExpectedMacroStringifyEnd, std::make_tuple("ExpectedMacroStringifyEnd"sv, "expected closing quote to end macro stringification"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ExpectedPragmaName, std::make_tuple("ExpectedPragmaName"sv, "expected pragma name"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ExpectedPragmaExpression, std::make_tuple("ExpectedPragmaExpression"sv, "expected pragma expression"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::DirectiveInsideDesignElement, std::make_tuple("DirectiveInsideDesignElement"sv, "directive is not allowed inside a design element"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::IgnoredMacroPaste, std::make_tuple("IgnoredMacroPaste"sv, "paste token is pointless because it is adjacent to whitespace"sv, DiagnosticSeverity::Warning, "ignored-macro-paste"sv)},
 +    {diag::RedefiningMacro, std::make_tuple("RedefiningMacro"sv, "macro '{}' redefined"sv, DiagnosticSeverity::Warning, "redef-macro"sv)},
++    {diag::UnknownPragma, std::make_tuple("UnknownPragma"sv, "unknown pragma '{}'"sv, DiagnosticSeverity::Warning, "unknown-pragma"sv)},
++    {diag::ExtraPragmaArgs, std::make_tuple("ExtraPragmaArgs"sv, "too many arguments provided for pragma '{}'"sv, DiagnosticSeverity::Warning, "extra-pragma-args"sv)},
++    {diag::ExpectedDiagPragmaArg, std::make_tuple("ExpectedDiagPragmaArg"sv, "expected diagnostic pragma argument"sv, DiagnosticSeverity::Warning, "expected-diag-arg"sv)},
++    {diag::UnknownDiagPragmaArg, std::make_tuple("UnknownDiagPragmaArg"sv, "unknown diagnostic pragma argument '{}'"sv, DiagnosticSeverity::Warning, "unknown-diag-arg"sv)},
++    {diag::ExpectedDiagPragmaLevel, std::make_tuple("ExpectedDiagPragmaLevel"sv, "expected diagnostic severity (ignore,warn,error,fatal)"sv, DiagnosticSeverity::Warning, "pragma-diag-level"sv)},
 +    {diag::ReturnNotInSubroutine, std::make_tuple("ReturnNotInSubroutine"sv, "return statement is only valid inside task and function blocks"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::DelayNotNumeric, std::make_tuple("DelayNotNumeric"sv, "delay expression type {} is not numeric"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InvalidEventExpression, std::make_tuple("InvalidEventExpression"sv, "invalid type {} for event expression"sv, DiagnosticSeverity::Error, ""sv)},
@@ -14905,6 +15458,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::StatementNotInLoop, std::make_tuple("StatementNotInLoop"sv, "statement can only be used inside a loop"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExprNotStatement, std::make_tuple("ExprNotStatement"sv, "expression is not allowed as a statement"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::VoidCastFuncCall, std::make_tuple("VoidCastFuncCall"sv, "void casting is only allowed for function calls"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::NotAnArray, std::make_tuple("NotAnArray"sv, "name must refer to an array"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::TooManyForeachVars, std::make_tuple("TooManyForeachVars"sv, "too many loop variables for array of type {}"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::LoopVarShadowsArray, std::make_tuple("LoopVarShadowsArray"sv, "loop variable '{}' shadows foreach array target"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::CaseInsideKeyword, std::make_tuple("CaseInsideKeyword"sv, "set membership cannot be used with {} statements"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::EventExpressionConstant, std::make_tuple("EventExpressionConstant"sv, "edge expression is constant"sv, DiagnosticSeverity::Warning, "event-const"sv)},
 +    {diag::EmptyStatement, std::make_tuple("EmptyStatement"sv, "empty statement has no effect"sv, DiagnosticSeverity::Warning, "empty-stmt"sv)},
 +    {diag::PointlessVoidCast, std::make_tuple("PointlessVoidCast"sv, "cast to void for void-returning function '{}' has no effect"sv, DiagnosticSeverity::Warning, "pointless-void-cast"sv)},
@@ -14917,12 +15474,14 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::FormatSpecifierNotFloat, std::make_tuple("FormatSpecifierNotFloat"sv, "floating point format specifier options used on non-floating point field"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::FormatUnspecifiedType, std::make_tuple("FormatUnspecifiedType"sv, "cannot format values of type {} without a specification string"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::FormatMismatchedType, std::make_tuple("FormatMismatchedType"sv, "value of type {} is invalid for '%{}' format specifier"sv, DiagnosticSeverity::Error, ""sv)},
-+    {diag::InvalidFormatStringType, std::make_tuple("InvalidFormatStringType"sv, "value of type {} is not valid as a format string"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::FormatNoArgument, std::make_tuple("FormatNoArgument"sv, "no argument provided for '%{}' format specifier"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::FormatEmptyArg, std::make_tuple("FormatEmptyArg"sv, "empty argument not allowed -- expecting value for '%{}' format specifier"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::FormatTooManyArgs, std::make_tuple("FormatTooManyArgs"sv, "too many arguments provided for format string"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::InvalidStringArg, std::make_tuple("InvalidStringArg"sv, "value of type {} is not a valid string argument"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ArrayReductionIntegral, std::make_tuple("ArrayReductionIntegral"sv, "array reduction methods can only be called on unpacked arrays of integral values"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::BadFinishNum, std::make_tuple("BadFinishNum"sv, "finish argument must have value of 0, 1, or 2"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::FormatRealInt, std::make_tuple("FormatRealInt"sv, "real value provided for integer format specifier '%{}'"sv, DiagnosticSeverity::Warning, "format-real"sv)},
 +    {diag::InvalidEnumBase, std::make_tuple("InvalidEnumBase"sv, "invalid enum base type {} (must be a single dimensional integer type)"sv, DiagnosticSeverity::Error, ""sv)},
-+    {diag::EnumValueUnknownBits, std::make_tuple("EnumValueUnknownBits"sv, "value of {} is invalid for enum with base type {}"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::EnumValueOverflow, std::make_tuple("EnumValueOverflow"sv, "incrementing previous value {} would overflow enum base type {}"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::EnumIncrementUnknown, std::make_tuple("EnumIncrementUnknown"sv, "cannot increment previous value {} because it has unknown bits"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::EnumValueDuplicate, std::make_tuple("EnumValueDuplicate"sv, "redefinition of enum value {}"sv, DiagnosticSeverity::Error, ""sv)},
@@ -14935,6 +15494,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +};
 +
 +static const flat_hash_map<string_view, DiagCode> optionMap = {
++    {"static-skipped"sv, diag::ConstEvalStaticSkipped},
++    {"explicit-static"sv, diag::StaticInitializerMustBeExplicit},
 +    {"case-gen-dup"sv, diag::CaseGenerateDup},
 +    {"case-gen-none"sv, diag::CaseGenerateNoBlock},
 +    {"unconnected-port"sv, diag::UnconnectedNamedPort},
@@ -14942,6 +15503,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {"implicit-net-port"sv, diag::ImplicitNetPortNoDefault},
 +    {"dup-attr"sv, diag::DuplicateAttribute},
 +    {"empty-member"sv, diag::EmptyMember},
++    {"not-supported"sv, diag::WarnNotYetSupported},
 +    {"dup-import"sv, diag::DuplicateImport},
 +    {"unknown-warning-option"sv, diag::UnknownWarningOption},
 +    {"real-underflow"sv, diag::RealLiteralUnderflow},
@@ -14950,15 +15512,21 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {"nonstandard-generate"sv, diag::NonStandardGenBlock},
 +    {"ignored-macro-paste"sv, diag::IgnoredMacroPaste},
 +    {"redef-macro"sv, diag::RedefiningMacro},
++    {"unknown-pragma"sv, diag::UnknownPragma},
++    {"extra-pragma-args"sv, diag::ExtraPragmaArgs},
++    {"expected-diag-arg"sv, diag::ExpectedDiagPragmaArg},
++    {"unknown-diag-arg"sv, diag::UnknownDiagPragmaArg},
++    {"pragma-diag-level"sv, diag::ExpectedDiagPragmaLevel},
 +    {"event-const"sv, diag::EventExpressionConstant},
 +    {"empty-stmt"sv, diag::EmptyStatement},
 +    {"pointless-void-cast"sv, diag::PointlessVoidCast},
 +    {"unused-result"sv, diag::UnusedResult},
++    {"format-real"sv, diag::FormatRealInt},
 +};
 +
 +static const flat_hash_map<string_view, DiagGroup> groupMap = {
-+    {"default"sv, DiagGroup("default", { diag::RealLiteralUnderflow, diag::RealLiteralOverflow, diag::VectorLiteralOverflow, diag::IgnoredMacroPaste, diag::CaseGenerateDup, diag::CaseGenerateNoBlock, diag::UnconnectedNamedPort, diag::UnconnectedUnnamedPort, diag::DuplicateAttribute, diag::EventExpressionConstant, diag::DuplicateImport, diag::RedefiningMacro, diag::NonStandardGenBlock, diag::PointlessVoidCast, diag::UnusedResult })},
-+    {"extra"sv, DiagGroup("extra", { diag::EmptyMember, diag::EmptyStatement })},
++    {"default"sv, DiagGroup("default", { diag::RealLiteralUnderflow, diag::RealLiteralOverflow, diag::VectorLiteralOverflow, diag::IgnoredMacroPaste, diag::CaseGenerateDup, diag::CaseGenerateNoBlock, diag::UnconnectedNamedPort, diag::UnconnectedUnnamedPort, diag::DuplicateAttribute, diag::EventExpressionConstant, diag::RedefiningMacro, diag::NonStandardGenBlock, diag::PointlessVoidCast, diag::UnusedResult, diag::WarnNotYetSupported, diag::UnknownPragma, diag::ExtraPragmaArgs, diag::ExpectedDiagPragmaArg, diag::UnknownDiagPragmaArg, diag::ExpectedDiagPragmaLevel, diag::StaticInitializerMustBeExplicit, diag::ConstEvalStaticSkipped })},
++    {"extra"sv, DiagGroup("extra", { diag::EmptyMember, diag::EmptyStatement, diag::DuplicateImport })},
 +};
 +
 +std::ostream& operator<<(std::ostream& os, DiagCode code) {
@@ -15005,10 +15573,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +}
 diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/Makefile ./generated/Makefile
 --- ./generated/Makefile	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/Makefile	2019-11-23 10:40:22.972014303 -0800
-@@ -0,0 +1,2188 @@
++++ ./generated/Makefile	2020-04-13 10:23:46.700499356 -0700
+@@ -0,0 +1,2538 @@
 +# CMAKE generated file: DO NOT EDIT!
-+# Generated by "Unix Makefiles" Generator, CMake Version 3.15
++# Generated by "Unix Makefiles" Generator, CMake Version 3.16
 +
 +# Default target executed when no arguments are given to make.
 +default_target: all
@@ -15065,6 +15633,52 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +#=============================================================================
 +# Targets provided globally by CMake.
 +
++# Special rule for the target install/strip
++install/strip: preinstall
++	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --cyan "Installing the project stripped..."
++	/usr/bin/cmake -DCMAKE_INSTALL_DO_STRIP=1 -P cmake_install.cmake
++.PHONY : install/strip
++
++# Special rule for the target install/strip
++install/strip/fast: preinstall/fast
++	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --cyan "Installing the project stripped..."
++	/usr/bin/cmake -DCMAKE_INSTALL_DO_STRIP=1 -P cmake_install.cmake
++.PHONY : install/strip/fast
++
++# Special rule for the target install/local
++install/local: preinstall
++	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --cyan "Installing only the local directory..."
++	/usr/bin/cmake -DCMAKE_INSTALL_LOCAL_ONLY=1 -P cmake_install.cmake
++.PHONY : install/local
++
++# Special rule for the target install/local
++install/local/fast: preinstall/fast
++	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --cyan "Installing only the local directory..."
++	/usr/bin/cmake -DCMAKE_INSTALL_LOCAL_ONLY=1 -P cmake_install.cmake
++.PHONY : install/local/fast
++
++# Special rule for the target install
++install: preinstall
++	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --cyan "Install the project..."
++	/usr/bin/cmake -P cmake_install.cmake
++.PHONY : install
++
++# Special rule for the target install
++install/fast: preinstall/fast
++	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --cyan "Install the project..."
++	/usr/bin/cmake -P cmake_install.cmake
++.PHONY : install/fast
++
++# Special rule for the target list_install_components
++list_install_components:
++	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --cyan "Available install components are: \"Unspecified\""
++.PHONY : list_install_components
++
++# Special rule for the target list_install_components
++list_install_components/fast: list_install_components
++
++.PHONY : list_install_components/fast
++
 +# Special rule for the target rebuild_cache
 +rebuild_cache:
 +	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --cyan "Running CMake to regenerate build system..."
@@ -15078,8 +15692,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +# Special rule for the target edit_cache
 +edit_cache:
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --cyan "Running CMake cache editor..."
-+	/usr/bin/ccmake -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR)
++	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --cyan "No interactive CMake dialog available..."
++	/usr/bin/cmake -E echo No\ interactive\ CMake\ dialog\ available.
 +.PHONY : edit_cache
 +
 +# Special rule for the target edit_cache
@@ -15131,21 +15745,6 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +.PHONY : depend
 +
 +# Convenience name for target.
-+source/CMakeFiles/gen_version.dir/rule:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f CMakeFiles/Makefile2 source/CMakeFiles/gen_version.dir/rule
-+.PHONY : source/CMakeFiles/gen_version.dir/rule
-+
-+# Convenience name for target.
-+gen_version: source/CMakeFiles/gen_version.dir/rule
-+
-+.PHONY : gen_version
-+
-+# fast build rule for target.
-+gen_version/fast:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/gen_version.dir/build.make source/CMakeFiles/gen_version.dir/build
-+.PHONY : gen_version/fast
-+
-+# Convenience name for target.
 +source/CMakeFiles/slang.dir/rule:
 +	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f CMakeFiles/Makefile2 source/CMakeFiles/slang.dir/rule
 +.PHONY : source/CMakeFiles/slang.dir/rule
@@ -15159,6 +15758,21 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +slang/fast:
 +	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/build
 +.PHONY : slang/fast
++
++# Convenience name for target.
++source/CMakeFiles/gen_version.dir/rule:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f CMakeFiles/Makefile2 source/CMakeFiles/gen_version.dir/rule
++.PHONY : source/CMakeFiles/gen_version.dir/rule
++
++# Convenience name for target.
++gen_version: source/CMakeFiles/gen_version.dir/rule
++
++.PHONY : gen_version
++
++# fast build rule for target.
++gen_version/fast:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/gen_version.dir/build.make source/CMakeFiles/gen_version.dir/build
++.PHONY : gen_version/fast
 +
 +AllSyntax.o: AllSyntax.cpp.o
 +
@@ -15241,6 +15855,33 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/Version.cpp.s
 +.PHONY : Version.cpp.s
 +
++binding/AssignmentExpressions.o: binding/AssignmentExpressions.cpp.o
++
++.PHONY : binding/AssignmentExpressions.o
++
++# target to build an object file
++binding/AssignmentExpressions.cpp.o:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/AssignmentExpressions.cpp.o
++.PHONY : binding/AssignmentExpressions.cpp.o
++
++binding/AssignmentExpressions.i: binding/AssignmentExpressions.cpp.i
++
++.PHONY : binding/AssignmentExpressions.i
++
++# target to preprocess a source file
++binding/AssignmentExpressions.cpp.i:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/AssignmentExpressions.cpp.i
++.PHONY : binding/AssignmentExpressions.cpp.i
++
++binding/AssignmentExpressions.s: binding/AssignmentExpressions.cpp.s
++
++.PHONY : binding/AssignmentExpressions.s
++
++# target to generate assembly for a file
++binding/AssignmentExpressions.cpp.s:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/AssignmentExpressions.cpp.s
++.PHONY : binding/AssignmentExpressions.cpp.s
++
 +binding/BindContext.o: binding/BindContext.cpp.o
 +
 +.PHONY : binding/BindContext.o
@@ -15322,59 +15963,140 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/EvalContext.cpp.s
 +.PHONY : binding/EvalContext.cpp.s
 +
-+binding/Expressions.o: binding/Expressions.cpp.o
++binding/Expression.o: binding/Expression.cpp.o
 +
-+.PHONY : binding/Expressions.o
-+
-+# target to build an object file
-+binding/Expressions.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/Expressions.cpp.o
-+.PHONY : binding/Expressions.cpp.o
-+
-+binding/Expressions.i: binding/Expressions.cpp.i
-+
-+.PHONY : binding/Expressions.i
-+
-+# target to preprocess a source file
-+binding/Expressions.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/Expressions.cpp.i
-+.PHONY : binding/Expressions.cpp.i
-+
-+binding/Expressions.s: binding/Expressions.cpp.s
-+
-+.PHONY : binding/Expressions.s
-+
-+# target to generate assembly for a file
-+binding/Expressions.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/Expressions.cpp.s
-+.PHONY : binding/Expressions.cpp.s
-+
-+binding/Expressions_eval.o: binding/Expressions_eval.cpp.o
-+
-+.PHONY : binding/Expressions_eval.o
++.PHONY : binding/Expression.o
 +
 +# target to build an object file
-+binding/Expressions_eval.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.o
-+.PHONY : binding/Expressions_eval.cpp.o
++binding/Expression.cpp.o:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/Expression.cpp.o
++.PHONY : binding/Expression.cpp.o
 +
-+binding/Expressions_eval.i: binding/Expressions_eval.cpp.i
++binding/Expression.i: binding/Expression.cpp.i
 +
-+.PHONY : binding/Expressions_eval.i
++.PHONY : binding/Expression.i
 +
 +# target to preprocess a source file
-+binding/Expressions_eval.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.i
-+.PHONY : binding/Expressions_eval.cpp.i
++binding/Expression.cpp.i:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/Expression.cpp.i
++.PHONY : binding/Expression.cpp.i
 +
-+binding/Expressions_eval.s: binding/Expressions_eval.cpp.s
++binding/Expression.s: binding/Expression.cpp.s
 +
-+.PHONY : binding/Expressions_eval.s
++.PHONY : binding/Expression.s
 +
 +# target to generate assembly for a file
-+binding/Expressions_eval.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/Expressions_eval.cpp.s
-+.PHONY : binding/Expressions_eval.cpp.s
++binding/Expression.cpp.s:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/Expression.cpp.s
++.PHONY : binding/Expression.cpp.s
++
++binding/LiteralExpressions.o: binding/LiteralExpressions.cpp.o
++
++.PHONY : binding/LiteralExpressions.o
++
++# target to build an object file
++binding/LiteralExpressions.cpp.o:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/LiteralExpressions.cpp.o
++.PHONY : binding/LiteralExpressions.cpp.o
++
++binding/LiteralExpressions.i: binding/LiteralExpressions.cpp.i
++
++.PHONY : binding/LiteralExpressions.i
++
++# target to preprocess a source file
++binding/LiteralExpressions.cpp.i:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/LiteralExpressions.cpp.i
++.PHONY : binding/LiteralExpressions.cpp.i
++
++binding/LiteralExpressions.s: binding/LiteralExpressions.cpp.s
++
++.PHONY : binding/LiteralExpressions.s
++
++# target to generate assembly for a file
++binding/LiteralExpressions.cpp.s:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/LiteralExpressions.cpp.s
++.PHONY : binding/LiteralExpressions.cpp.s
++
++binding/MiscExpressions.o: binding/MiscExpressions.cpp.o
++
++.PHONY : binding/MiscExpressions.o
++
++# target to build an object file
++binding/MiscExpressions.cpp.o:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/MiscExpressions.cpp.o
++.PHONY : binding/MiscExpressions.cpp.o
++
++binding/MiscExpressions.i: binding/MiscExpressions.cpp.i
++
++.PHONY : binding/MiscExpressions.i
++
++# target to preprocess a source file
++binding/MiscExpressions.cpp.i:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/MiscExpressions.cpp.i
++.PHONY : binding/MiscExpressions.cpp.i
++
++binding/MiscExpressions.s: binding/MiscExpressions.cpp.s
++
++.PHONY : binding/MiscExpressions.s
++
++# target to generate assembly for a file
++binding/MiscExpressions.cpp.s:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/MiscExpressions.cpp.s
++.PHONY : binding/MiscExpressions.cpp.s
++
++binding/OperatorExpressions.o: binding/OperatorExpressions.cpp.o
++
++.PHONY : binding/OperatorExpressions.o
++
++# target to build an object file
++binding/OperatorExpressions.cpp.o:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/OperatorExpressions.cpp.o
++.PHONY : binding/OperatorExpressions.cpp.o
++
++binding/OperatorExpressions.i: binding/OperatorExpressions.cpp.i
++
++.PHONY : binding/OperatorExpressions.i
++
++# target to preprocess a source file
++binding/OperatorExpressions.cpp.i:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/OperatorExpressions.cpp.i
++.PHONY : binding/OperatorExpressions.cpp.i
++
++binding/OperatorExpressions.s: binding/OperatorExpressions.cpp.s
++
++.PHONY : binding/OperatorExpressions.s
++
++# target to generate assembly for a file
++binding/OperatorExpressions.cpp.s:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/OperatorExpressions.cpp.s
++.PHONY : binding/OperatorExpressions.cpp.s
++
++binding/PatternExpressions.o: binding/PatternExpressions.cpp.o
++
++.PHONY : binding/PatternExpressions.o
++
++# target to build an object file
++binding/PatternExpressions.cpp.o:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/PatternExpressions.cpp.o
++.PHONY : binding/PatternExpressions.cpp.o
++
++binding/PatternExpressions.i: binding/PatternExpressions.cpp.i
++
++.PHONY : binding/PatternExpressions.i
++
++# target to preprocess a source file
++binding/PatternExpressions.cpp.i:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/PatternExpressions.cpp.i
++.PHONY : binding/PatternExpressions.cpp.i
++
++binding/PatternExpressions.s: binding/PatternExpressions.cpp.s
++
++.PHONY : binding/PatternExpressions.s
++
++# target to generate assembly for a file
++binding/PatternExpressions.cpp.s:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/binding/PatternExpressions.cpp.s
++.PHONY : binding/PatternExpressions.cpp.s
 +
 +binding/Statements.o: binding/Statements.cpp.o
 +
@@ -15483,6 +16205,60 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +compilation/Compilation.cpp.s:
 +	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/Compilation.cpp.s
 +.PHONY : compilation/Compilation.cpp.s
++
++compilation/Definition.o: compilation/Definition.cpp.o
++
++.PHONY : compilation/Definition.o
++
++# target to build an object file
++compilation/Definition.cpp.o:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/Definition.cpp.o
++.PHONY : compilation/Definition.cpp.o
++
++compilation/Definition.i: compilation/Definition.cpp.i
++
++.PHONY : compilation/Definition.i
++
++# target to preprocess a source file
++compilation/Definition.cpp.i:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/Definition.cpp.i
++.PHONY : compilation/Definition.cpp.i
++
++compilation/Definition.s: compilation/Definition.cpp.s
++
++.PHONY : compilation/Definition.s
++
++# target to generate assembly for a file
++compilation/Definition.cpp.s:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/Definition.cpp.s
++.PHONY : compilation/Definition.cpp.s
++
++compilation/InstanceCache.o: compilation/InstanceCache.cpp.o
++
++.PHONY : compilation/InstanceCache.o
++
++# target to build an object file
++compilation/InstanceCache.cpp.o:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/InstanceCache.cpp.o
++.PHONY : compilation/InstanceCache.cpp.o
++
++compilation/InstanceCache.i: compilation/InstanceCache.cpp.i
++
++.PHONY : compilation/InstanceCache.i
++
++# target to preprocess a source file
++compilation/InstanceCache.cpp.i:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/InstanceCache.cpp.i
++.PHONY : compilation/InstanceCache.cpp.i
++
++compilation/InstanceCache.s: compilation/InstanceCache.cpp.s
++
++.PHONY : compilation/InstanceCache.s
++
++# target to generate assembly for a file
++compilation/InstanceCache.cpp.s:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/compilation/InstanceCache.cpp.s
++.PHONY : compilation/InstanceCache.cpp.s
 +
 +compilation/ScriptSession.o: compilation/ScriptSession.cpp.o
 +
@@ -15943,33 +16719,6 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/numeric/Time.cpp.s
 +.PHONY : numeric/Time.cpp.s
 +
-+numeric/VectorBuilder.o: numeric/VectorBuilder.cpp.o
-+
-+.PHONY : numeric/VectorBuilder.o
-+
-+# target to build an object file
-+numeric/VectorBuilder.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.o
-+.PHONY : numeric/VectorBuilder.cpp.o
-+
-+numeric/VectorBuilder.i: numeric/VectorBuilder.cpp.i
-+
-+.PHONY : numeric/VectorBuilder.i
-+
-+# target to preprocess a source file
-+numeric/VectorBuilder.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.i
-+.PHONY : numeric/VectorBuilder.cpp.i
-+
-+numeric/VectorBuilder.s: numeric/VectorBuilder.cpp.s
-+
-+.PHONY : numeric/VectorBuilder.s
-+
-+# target to generate assembly for a file
-+numeric/VectorBuilder.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/numeric/VectorBuilder.cpp.s
-+.PHONY : numeric/VectorBuilder.cpp.s
-+
 +parsing/Lexer.o: parsing/Lexer.cpp.o
 +
 +.PHONY : parsing/Lexer.o
@@ -16023,6 +16772,33 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +parsing/LexerFacts.cpp.s:
 +	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/LexerFacts.cpp.s
 +.PHONY : parsing/LexerFacts.cpp.s
++
++parsing/NumberParser.o: parsing/NumberParser.cpp.o
++
++.PHONY : parsing/NumberParser.o
++
++# target to build an object file
++parsing/NumberParser.cpp.o:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/NumberParser.cpp.o
++.PHONY : parsing/NumberParser.cpp.o
++
++parsing/NumberParser.i: parsing/NumberParser.cpp.i
++
++.PHONY : parsing/NumberParser.i
++
++# target to preprocess a source file
++parsing/NumberParser.cpp.i:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/NumberParser.cpp.i
++.PHONY : parsing/NumberParser.cpp.i
++
++parsing/NumberParser.s: parsing/NumberParser.cpp.s
++
++.PHONY : parsing/NumberParser.s
++
++# target to generate assembly for a file
++parsing/NumberParser.cpp.s:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/NumberParser.cpp.s
++.PHONY : parsing/NumberParser.cpp.s
 +
 +parsing/Parser.o: parsing/Parser.cpp.o
 +
@@ -16186,6 +16962,33 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Preprocessor.cpp.s
 +.PHONY : parsing/Preprocessor.cpp.s
 +
++parsing/Preprocessor_macros.o: parsing/Preprocessor_macros.cpp.o
++
++.PHONY : parsing/Preprocessor_macros.o
++
++# target to build an object file
++parsing/Preprocessor_macros.cpp.o:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Preprocessor_macros.cpp.o
++.PHONY : parsing/Preprocessor_macros.cpp.o
++
++parsing/Preprocessor_macros.i: parsing/Preprocessor_macros.cpp.i
++
++.PHONY : parsing/Preprocessor_macros.i
++
++# target to preprocess a source file
++parsing/Preprocessor_macros.cpp.i:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Preprocessor_macros.cpp.i
++.PHONY : parsing/Preprocessor_macros.cpp.i
++
++parsing/Preprocessor_macros.s: parsing/Preprocessor_macros.cpp.s
++
++.PHONY : parsing/Preprocessor_macros.s
++
++# target to generate assembly for a file
++parsing/Preprocessor_macros.cpp.s:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Preprocessor_macros.cpp.s
++.PHONY : parsing/Preprocessor_macros.cpp.s
++
 +parsing/Token.o: parsing/Token.cpp.o
 +
 +.PHONY : parsing/Token.o
@@ -16213,6 +17016,33 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/parsing/Token.cpp.s
 +.PHONY : parsing/Token.cpp.s
 +
++symbols/ASTSerializer.o: symbols/ASTSerializer.cpp.o
++
++.PHONY : symbols/ASTSerializer.o
++
++# target to build an object file
++symbols/ASTSerializer.cpp.o:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/ASTSerializer.cpp.o
++.PHONY : symbols/ASTSerializer.cpp.o
++
++symbols/ASTSerializer.i: symbols/ASTSerializer.cpp.i
++
++.PHONY : symbols/ASTSerializer.i
++
++# target to preprocess a source file
++symbols/ASTSerializer.cpp.i:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/ASTSerializer.cpp.i
++.PHONY : symbols/ASTSerializer.cpp.i
++
++symbols/ASTSerializer.s: symbols/ASTSerializer.cpp.s
++
++.PHONY : symbols/ASTSerializer.s
++
++# target to generate assembly for a file
++symbols/ASTSerializer.cpp.s:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/ASTSerializer.cpp.s
++.PHONY : symbols/ASTSerializer.cpp.s
++
 +symbols/AllTypes.o: symbols/AllTypes.cpp.o
 +
 +.PHONY : symbols/AllTypes.o
@@ -16239,6 +17069,33 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +symbols/AllTypes.cpp.s:
 +	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/AllTypes.cpp.s
 +.PHONY : symbols/AllTypes.cpp.s
++
++symbols/AttributeSymbol.o: symbols/AttributeSymbol.cpp.o
++
++.PHONY : symbols/AttributeSymbol.o
++
++# target to build an object file
++symbols/AttributeSymbol.cpp.o:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/AttributeSymbol.cpp.o
++.PHONY : symbols/AttributeSymbol.cpp.o
++
++symbols/AttributeSymbol.i: symbols/AttributeSymbol.cpp.i
++
++.PHONY : symbols/AttributeSymbol.i
++
++# target to preprocess a source file
++symbols/AttributeSymbol.cpp.i:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/AttributeSymbol.cpp.i
++.PHONY : symbols/AttributeSymbol.cpp.i
++
++symbols/AttributeSymbol.s: symbols/AttributeSymbol.cpp.s
++
++.PHONY : symbols/AttributeSymbol.s
++
++# target to generate assembly for a file
++symbols/AttributeSymbol.cpp.s:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/AttributeSymbol.cpp.s
++.PHONY : symbols/AttributeSymbol.cpp.s
 +
 +symbols/BlockSymbols.o: symbols/BlockSymbols.cpp.o
 +
@@ -16321,32 +17178,32 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/DeclaredType.cpp.s
 +.PHONY : symbols/DeclaredType.cpp.s
 +
-+symbols/DefinitionSymbols.o: symbols/DefinitionSymbols.cpp.o
++symbols/InstanceSymbols.o: symbols/InstanceSymbols.cpp.o
 +
-+.PHONY : symbols/DefinitionSymbols.o
++.PHONY : symbols/InstanceSymbols.o
 +
 +# target to build an object file
-+symbols/DefinitionSymbols.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/DefinitionSymbols.cpp.o
-+.PHONY : symbols/DefinitionSymbols.cpp.o
++symbols/InstanceSymbols.cpp.o:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/InstanceSymbols.cpp.o
++.PHONY : symbols/InstanceSymbols.cpp.o
 +
-+symbols/DefinitionSymbols.i: symbols/DefinitionSymbols.cpp.i
++symbols/InstanceSymbols.i: symbols/InstanceSymbols.cpp.i
 +
-+.PHONY : symbols/DefinitionSymbols.i
++.PHONY : symbols/InstanceSymbols.i
 +
 +# target to preprocess a source file
-+symbols/DefinitionSymbols.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/DefinitionSymbols.cpp.i
-+.PHONY : symbols/DefinitionSymbols.cpp.i
++symbols/InstanceSymbols.cpp.i:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/InstanceSymbols.cpp.i
++.PHONY : symbols/InstanceSymbols.cpp.i
 +
-+symbols/DefinitionSymbols.s: symbols/DefinitionSymbols.cpp.s
++symbols/InstanceSymbols.s: symbols/InstanceSymbols.cpp.s
 +
-+.PHONY : symbols/DefinitionSymbols.s
++.PHONY : symbols/InstanceSymbols.s
 +
 +# target to generate assembly for a file
-+symbols/DefinitionSymbols.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/DefinitionSymbols.cpp.s
-+.PHONY : symbols/DefinitionSymbols.cpp.s
++symbols/InstanceSymbols.cpp.s:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/InstanceSymbols.cpp.s
++.PHONY : symbols/InstanceSymbols.cpp.s
 +
 +symbols/Lookup.o: symbols/Lookup.cpp.o
 +
@@ -16536,33 +17393,6 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +symbols/Symbol.cpp.s:
 +	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/Symbol.cpp.s
 +.PHONY : symbols/Symbol.cpp.s
-+
-+symbols/TimeScaleSymbolBase.o: symbols/TimeScaleSymbolBase.cpp.o
-+
-+.PHONY : symbols/TimeScaleSymbolBase.o
-+
-+# target to build an object file
-+symbols/TimeScaleSymbolBase.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/TimeScaleSymbolBase.cpp.o
-+.PHONY : symbols/TimeScaleSymbolBase.cpp.o
-+
-+symbols/TimeScaleSymbolBase.i: symbols/TimeScaleSymbolBase.cpp.i
-+
-+.PHONY : symbols/TimeScaleSymbolBase.i
-+
-+# target to preprocess a source file
-+symbols/TimeScaleSymbolBase.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/TimeScaleSymbolBase.cpp.i
-+.PHONY : symbols/TimeScaleSymbolBase.cpp.i
-+
-+symbols/TimeScaleSymbolBase.s: symbols/TimeScaleSymbolBase.cpp.s
-+
-+.PHONY : symbols/TimeScaleSymbolBase.s
-+
-+# target to generate assembly for a file
-+symbols/TimeScaleSymbolBase.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/symbols/TimeScaleSymbolBase.cpp.s
-+.PHONY : symbols/TimeScaleSymbolBase.cpp.s
 +
 +symbols/Type.o: symbols/Type.cpp.o
 +
@@ -16780,6 +17610,33 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/syntax/SyntaxVisitor.cpp.s
 +.PHONY : syntax/SyntaxVisitor.cpp.s
 +
++text/Json.o: text/Json.cpp.o
++
++.PHONY : text/Json.o
++
++# target to build an object file
++text/Json.cpp.o:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/text/Json.cpp.o
++.PHONY : text/Json.cpp.o
++
++text/Json.i: text/Json.cpp.i
++
++.PHONY : text/Json.i
++
++# target to preprocess a source file
++text/Json.cpp.i:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/text/Json.cpp.i
++.PHONY : text/Json.cpp.i
++
++text/Json.s: text/Json.cpp.s
++
++.PHONY : text/Json.s
++
++# target to generate assembly for a file
++text/Json.cpp.s:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/text/Json.cpp.s
++.PHONY : text/Json.cpp.s
++
 +text/SFormat.o: text/SFormat.cpp.o
 +
 +.PHONY : text/SFormat.o
@@ -16942,6 +17799,33 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/Hash.cpp.s
 +.PHONY : util/Hash.cpp.s
 +
++util/OS.o: util/OS.cpp.o
++
++.PHONY : util/OS.o
++
++# target to build an object file
++util/OS.cpp.o:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/OS.cpp.o
++.PHONY : util/OS.cpp.o
++
++util/OS.i: util/OS.cpp.i
++
++.PHONY : util/OS.i
++
++# target to preprocess a source file
++util/OS.cpp.i:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/OS.cpp.i
++.PHONY : util/OS.cpp.i
++
++util/OS.s: util/OS.cpp.s
++
++.PHONY : util/OS.s
++
++# target to generate assembly for a file
++util/OS.cpp.s:
++	cd /soe/renau/projs/synth/slang/build && $(MAKE) -f source/CMakeFiles/slang.dir/build.make source/CMakeFiles/slang.dir/util/OS.cpp.s
++.PHONY : util/OS.cpp.s
++
 +util/String.o: util/String.cpp.o
 +
 +.PHONY : util/String.o
@@ -16975,11 +17859,15 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +	@echo "... all (the default if no target is provided)"
 +	@echo "... clean"
 +	@echo "... depend"
++	@echo "... install/strip"
++	@echo "... install/local"
++	@echo "... install"
++	@echo "... list_install_components"
 +	@echo "... rebuild_cache"
 +	@echo "... edit_cache"
-+	@echo "... gen_version"
 +	@echo "... test"
 +	@echo "... slang"
++	@echo "... gen_version"
 +	@echo "... AllSyntax.o"
 +	@echo "... AllSyntax.i"
 +	@echo "... AllSyntax.s"
@@ -16989,6 +17877,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +	@echo "... Version.o"
 +	@echo "... Version.i"
 +	@echo "... Version.s"
++	@echo "... binding/AssignmentExpressions.o"
++	@echo "... binding/AssignmentExpressions.i"
++	@echo "... binding/AssignmentExpressions.s"
 +	@echo "... binding/BindContext.o"
 +	@echo "... binding/BindContext.i"
 +	@echo "... binding/BindContext.s"
@@ -16998,12 +17889,21 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +	@echo "... binding/EvalContext.o"
 +	@echo "... binding/EvalContext.i"
 +	@echo "... binding/EvalContext.s"
-+	@echo "... binding/Expressions.o"
-+	@echo "... binding/Expressions.i"
-+	@echo "... binding/Expressions.s"
-+	@echo "... binding/Expressions_eval.o"
-+	@echo "... binding/Expressions_eval.i"
-+	@echo "... binding/Expressions_eval.s"
++	@echo "... binding/Expression.o"
++	@echo "... binding/Expression.i"
++	@echo "... binding/Expression.s"
++	@echo "... binding/LiteralExpressions.o"
++	@echo "... binding/LiteralExpressions.i"
++	@echo "... binding/LiteralExpressions.s"
++	@echo "... binding/MiscExpressions.o"
++	@echo "... binding/MiscExpressions.i"
++	@echo "... binding/MiscExpressions.s"
++	@echo "... binding/OperatorExpressions.o"
++	@echo "... binding/OperatorExpressions.i"
++	@echo "... binding/OperatorExpressions.s"
++	@echo "... binding/PatternExpressions.o"
++	@echo "... binding/PatternExpressions.i"
++	@echo "... binding/PatternExpressions.s"
 +	@echo "... binding/Statements.o"
 +	@echo "... binding/Statements.i"
 +	@echo "... binding/Statements.s"
@@ -17016,6 +17916,12 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +	@echo "... compilation/Compilation.o"
 +	@echo "... compilation/Compilation.i"
 +	@echo "... compilation/Compilation.s"
++	@echo "... compilation/Definition.o"
++	@echo "... compilation/Definition.i"
++	@echo "... compilation/Definition.s"
++	@echo "... compilation/InstanceCache.o"
++	@echo "... compilation/InstanceCache.i"
++	@echo "... compilation/InstanceCache.s"
 +	@echo "... compilation/ScriptSession.o"
 +	@echo "... compilation/ScriptSession.i"
 +	@echo "... compilation/ScriptSession.s"
@@ -17067,15 +17973,15 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +	@echo "... numeric/Time.o"
 +	@echo "... numeric/Time.i"
 +	@echo "... numeric/Time.s"
-+	@echo "... numeric/VectorBuilder.o"
-+	@echo "... numeric/VectorBuilder.i"
-+	@echo "... numeric/VectorBuilder.s"
 +	@echo "... parsing/Lexer.o"
 +	@echo "... parsing/Lexer.i"
 +	@echo "... parsing/Lexer.s"
 +	@echo "... parsing/LexerFacts.o"
 +	@echo "... parsing/LexerFacts.i"
 +	@echo "... parsing/LexerFacts.s"
++	@echo "... parsing/NumberParser.o"
++	@echo "... parsing/NumberParser.i"
++	@echo "... parsing/NumberParser.s"
 +	@echo "... parsing/Parser.o"
 +	@echo "... parsing/Parser.i"
 +	@echo "... parsing/Parser.s"
@@ -17094,12 +18000,21 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +	@echo "... parsing/Preprocessor.o"
 +	@echo "... parsing/Preprocessor.i"
 +	@echo "... parsing/Preprocessor.s"
++	@echo "... parsing/Preprocessor_macros.o"
++	@echo "... parsing/Preprocessor_macros.i"
++	@echo "... parsing/Preprocessor_macros.s"
 +	@echo "... parsing/Token.o"
 +	@echo "... parsing/Token.i"
 +	@echo "... parsing/Token.s"
++	@echo "... symbols/ASTSerializer.o"
++	@echo "... symbols/ASTSerializer.i"
++	@echo "... symbols/ASTSerializer.s"
 +	@echo "... symbols/AllTypes.o"
 +	@echo "... symbols/AllTypes.i"
 +	@echo "... symbols/AllTypes.s"
++	@echo "... symbols/AttributeSymbol.o"
++	@echo "... symbols/AttributeSymbol.i"
++	@echo "... symbols/AttributeSymbol.s"
 +	@echo "... symbols/BlockSymbols.o"
 +	@echo "... symbols/BlockSymbols.i"
 +	@echo "... symbols/BlockSymbols.s"
@@ -17109,9 +18024,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +	@echo "... symbols/DeclaredType.o"
 +	@echo "... symbols/DeclaredType.i"
 +	@echo "... symbols/DeclaredType.s"
-+	@echo "... symbols/DefinitionSymbols.o"
-+	@echo "... symbols/DefinitionSymbols.i"
-+	@echo "... symbols/DefinitionSymbols.s"
++	@echo "... symbols/InstanceSymbols.o"
++	@echo "... symbols/InstanceSymbols.i"
++	@echo "... symbols/InstanceSymbols.s"
 +	@echo "... symbols/Lookup.o"
 +	@echo "... symbols/Lookup.i"
 +	@echo "... symbols/Lookup.s"
@@ -17133,9 +18048,6 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +	@echo "... symbols/Symbol.o"
 +	@echo "... symbols/Symbol.i"
 +	@echo "... symbols/Symbol.s"
-+	@echo "... symbols/TimeScaleSymbolBase.o"
-+	@echo "... symbols/TimeScaleSymbolBase.i"
-+	@echo "... symbols/TimeScaleSymbolBase.s"
 +	@echo "... symbols/Type.o"
 +	@echo "... symbols/Type.i"
 +	@echo "... symbols/Type.s"
@@ -17160,6 +18072,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +	@echo "... syntax/SyntaxVisitor.o"
 +	@echo "... syntax/SyntaxVisitor.i"
 +	@echo "... syntax/SyntaxVisitor.s"
++	@echo "... text/Json.o"
++	@echo "... text/Json.i"
++	@echo "... text/Json.s"
 +	@echo "... text/SFormat.o"
 +	@echo "... text/SFormat.i"
 +	@echo "... text/SFormat.s"
@@ -17178,6 +18093,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +	@echo "... util/Hash.o"
 +	@echo "... util/Hash.i"
 +	@echo "... util/Hash.s"
++	@echo "... util/OS.o"
++	@echo "... util/OS.i"
++	@echo "... util/OS.s"
 +	@echo "... util/String.o"
 +	@echo "... util/String.i"
 +	@echo "... util/String.s"
@@ -17197,16 +18115,17 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/AllDiags.h ./generated/slang/diagnostics/AllDiags.h
 --- ./generated/slang/diagnostics/AllDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/AllDiags.h	2019-11-23 10:40:28.821890357 -0800
-@@ -0,0 +1,22 @@
++++ ./generated/slang/diagnostics/AllDiags.h	2020-04-13 10:23:52.700371875 -0700
+@@ -0,0 +1,23 @@
 +//------------------------------------------------------------------------------
-+// AllDiags.h
-+// Combined header that includes all subsystem-specific diagnostic headers.
++//! @file AllDiags.h
++//! @brief Combined header that includes all subsystem-specific diagnostic headers
 +//
-+// File is under the MIT license; see LICENSE for details.
++// File is under the MIT license; see LICENSE for details
 +//------------------------------------------------------------------------------
 +#pragma once
 +
++#include "slang/diagnostics/CompilationDiags.h"
 +#include "slang/diagnostics/ConstEvalDiags.h"
 +#include "slang/diagnostics/DeclarationsDiags.h"
 +#include "slang/diagnostics/ExpressionsDiags.h"
@@ -17221,15 +18140,15 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +#include "slang/diagnostics/SysFuncsDiags.h"
 +#include "slang/diagnostics/TypesDiags.h"
 +
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/ConstEvalDiags.h ./generated/slang/diagnostics/ConstEvalDiags.h
---- ./generated/slang/diagnostics/ConstEvalDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/ConstEvalDiags.h	2019-11-23 10:40:28.821890357 -0800
-@@ -0,0 +1,32 @@
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/CompilationDiags.h ./generated/slang/diagnostics/CompilationDiags.h
+--- ./generated/slang/diagnostics/CompilationDiags.h	1969-12-31 16:00:00.000000000 -0800
++++ ./generated/slang/diagnostics/CompilationDiags.h	2020-04-13 10:23:52.680372298 -0700
+@@ -0,0 +1,15 @@
 +//------------------------------------------------------------------------------
-+// ConstEvalDiags.h
-+// Generated diagnostic enums for the ConstEval subsystem.
++//! @file CompilationDiags.h
++//! @brief Generated diagnostic enums for the Compilation subsystem
 +//
-+// File is under the MIT license; see LICENSE for details.
++// File is under the MIT license; see LICENSE for details
 +//------------------------------------------------------------------------------
 +#pragma once
 +
@@ -17237,35 +18156,58 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +namespace slang::diag {
 +
-+inline constexpr DiagCode ExpressionNotConstant(DiagSubsystem::ConstEval, 0);
-+inline constexpr DiagCode NoteInCallTo(DiagSubsystem::ConstEval, 1);
-+inline constexpr DiagCode NoteSkippingFrames(DiagSubsystem::ConstEval, 2);
-+inline constexpr DiagCode NoteNonConstVariable(DiagSubsystem::ConstEval, 3);
-+inline constexpr DiagCode NoteArrayIndexInvalid(DiagSubsystem::ConstEval, 4);
-+inline constexpr DiagCode NotePartSelectInvalid(DiagSubsystem::ConstEval, 5);
-+inline constexpr DiagCode NoteStringIndexInvalid(DiagSubsystem::ConstEval, 6);
-+inline constexpr DiagCode NoteReplicationCountInvalid(DiagSubsystem::ConstEval, 7);
-+inline constexpr DiagCode NoteHierarchicalNameInCE(DiagSubsystem::ConstEval, 8);
-+inline constexpr DiagCode NoteFunctionIdentifiersMustBeLocal(DiagSubsystem::ConstEval, 9);
-+inline constexpr DiagCode NoteParamUsedInCEBeforeDecl(DiagSubsystem::ConstEval, 10);
-+inline constexpr DiagCode NoteNoCaseItemsMatched(DiagSubsystem::ConstEval, 11);
-+inline constexpr DiagCode NoteCaseItemsNotUnique(DiagSubsystem::ConstEval, 12);
-+inline constexpr DiagCode NoteTimedStmtNotConst(DiagSubsystem::ConstEval, 13);
-+inline constexpr DiagCode NoteAssertionFailed(DiagSubsystem::ConstEval, 14);
-+inline constexpr DiagCode NoteParallelBlockNotConst(DiagSubsystem::ConstEval, 15);
-+inline constexpr DiagCode NoteExceededMaxCallDepth(DiagSubsystem::ConstEval, 16);
-+inline constexpr DiagCode NoteExceededMaxSteps(DiagSubsystem::ConstEval, 17);
++inline constexpr DiagCode MaxInstanceDepthExceeded(DiagSubsystem::Compilation, 0);
++
++}
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/ConstEvalDiags.h ./generated/slang/diagnostics/ConstEvalDiags.h
+--- ./generated/slang/diagnostics/ConstEvalDiags.h	1969-12-31 16:00:00.000000000 -0800
++++ ./generated/slang/diagnostics/ConstEvalDiags.h	2020-04-13 10:23:52.680372298 -0700
+@@ -0,0 +1,36 @@
++//------------------------------------------------------------------------------
++//! @file ConstEvalDiags.h
++//! @brief Generated diagnostic enums for the ConstEval subsystem
++//
++// File is under the MIT license; see LICENSE for details
++//------------------------------------------------------------------------------
++#pragma once
++
++#include "slang/diagnostics/Diagnostics.h"
++
++namespace slang::diag {
++
++inline constexpr DiagCode NoteInCallTo(DiagSubsystem::ConstEval, 0);
++inline constexpr DiagCode NoteSkippingFrames(DiagSubsystem::ConstEval, 1);
++inline constexpr DiagCode ConstEvalNonConstVariable(DiagSubsystem::ConstEval, 2);
++inline constexpr DiagCode ConstEvalArrayIndexInvalid(DiagSubsystem::ConstEval, 3);
++inline constexpr DiagCode ConstEvalPartSelectInvalid(DiagSubsystem::ConstEval, 4);
++inline constexpr DiagCode ConstEvalStringIndexInvalid(DiagSubsystem::ConstEval, 5);
++inline constexpr DiagCode ConstEvalReplicationCountInvalid(DiagSubsystem::ConstEval, 6);
++inline constexpr DiagCode ConstEvalHierarchicalNameInCE(DiagSubsystem::ConstEval, 7);
++inline constexpr DiagCode ConstEvalFunctionIdentifiersMustBeLocal(DiagSubsystem::ConstEval, 8);
++inline constexpr DiagCode ConstEvalIdUsedInCEBeforeDecl(DiagSubsystem::ConstEval, 9);
++inline constexpr DiagCode ConstEvalNoCaseItemsMatched(DiagSubsystem::ConstEval, 10);
++inline constexpr DiagCode ConstEvalCaseItemsNotUnique(DiagSubsystem::ConstEval, 11);
++inline constexpr DiagCode ConstEvalTimedStmtNotConst(DiagSubsystem::ConstEval, 12);
++inline constexpr DiagCode ConstEvalAssertionFailed(DiagSubsystem::ConstEval, 13);
++inline constexpr DiagCode ConstEvalParallelBlockNotConst(DiagSubsystem::ConstEval, 14);
++inline constexpr DiagCode ConstEvalExceededMaxCallDepth(DiagSubsystem::ConstEval, 15);
++inline constexpr DiagCode ConstEvalExceededMaxSteps(DiagSubsystem::ConstEval, 16);
++inline constexpr DiagCode ConstEvalTaskNotConstant(DiagSubsystem::ConstEval, 17);
++inline constexpr DiagCode ConstEvalVoidNotConstant(DiagSubsystem::ConstEval, 18);
++inline constexpr DiagCode ConstEvalFunctionArgDirection(DiagSubsystem::ConstEval, 19);
++inline constexpr DiagCode ConstEvalFunctionInsideGenerate(DiagSubsystem::ConstEval, 20);
++inline constexpr DiagCode ConstEvalStaticSkipped(DiagSubsystem::ConstEval, 21);
 +
 +}
 diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/DeclarationsDiags.h ./generated/slang/diagnostics/DeclarationsDiags.h
 --- ./generated/slang/diagnostics/DeclarationsDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/DeclarationsDiags.h	2019-11-23 10:40:28.821890357 -0800
-@@ -0,0 +1,64 @@
++++ ./generated/slang/diagnostics/DeclarationsDiags.h	2020-04-13 10:23:52.690372086 -0700
+@@ -0,0 +1,66 @@
 +//------------------------------------------------------------------------------
-+// DeclarationsDiags.h
-+// Generated diagnostic enums for the Declarations subsystem.
++//! @file DeclarationsDiags.h
++//! @brief Generated diagnostic enums for the Declarations subsystem
 +//
-+// File is under the MIT license; see LICENSE for details.
++// File is under the MIT license; see LICENSE for details
 +//------------------------------------------------------------------------------
 +#pragma once
 +
@@ -17313,27 +18255,29 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode GenvarUnknownBits(DiagSubsystem::Declarations, 37);
 +inline constexpr DiagCode ImplicitNamedPortNotFound(DiagSubsystem::Declarations, 38);
 +inline constexpr DiagCode ImplicitNamedPortTypeMismatch(DiagSubsystem::Declarations, 39);
-+inline constexpr DiagCode MaxInstanceDepthExceeded(DiagSubsystem::Declarations, 40);
-+inline constexpr DiagCode MaxGenerateStepsExceeded(DiagSubsystem::Declarations, 41);
-+inline constexpr DiagCode MixingSubroutinePortKinds(DiagSubsystem::Declarations, 42);
-+inline constexpr DiagCode CaseGenerateDup(DiagSubsystem::Declarations, 43);
-+inline constexpr DiagCode CaseGenerateNoBlock(DiagSubsystem::Declarations, 44);
-+inline constexpr DiagCode UnconnectedNamedPort(DiagSubsystem::Declarations, 45);
-+inline constexpr DiagCode UnconnectedUnnamedPort(DiagSubsystem::Declarations, 46);
-+inline constexpr DiagCode ImplicitNetPortNoDefault(DiagSubsystem::Declarations, 47);
-+inline constexpr DiagCode DuplicateAttribute(DiagSubsystem::Declarations, 48);
-+inline constexpr DiagCode EmptyMember(DiagSubsystem::Declarations, 49);
++inline constexpr DiagCode MaxGenerateStepsExceeded(DiagSubsystem::Declarations, 40);
++inline constexpr DiagCode MixingSubroutinePortKinds(DiagSubsystem::Declarations, 41);
++inline constexpr DiagCode UnpackedArrayParamType(DiagSubsystem::Declarations, 42);
++inline constexpr DiagCode AutomaticNotAllowed(DiagSubsystem::Declarations, 43);
++inline constexpr DiagCode StaticInitializerMustBeExplicit(DiagSubsystem::Declarations, 44);
++inline constexpr DiagCode CaseGenerateDup(DiagSubsystem::Declarations, 45);
++inline constexpr DiagCode CaseGenerateNoBlock(DiagSubsystem::Declarations, 46);
++inline constexpr DiagCode UnconnectedNamedPort(DiagSubsystem::Declarations, 47);
++inline constexpr DiagCode UnconnectedUnnamedPort(DiagSubsystem::Declarations, 48);
++inline constexpr DiagCode ImplicitNetPortNoDefault(DiagSubsystem::Declarations, 49);
++inline constexpr DiagCode DuplicateAttribute(DiagSubsystem::Declarations, 50);
++inline constexpr DiagCode EmptyMember(DiagSubsystem::Declarations, 51);
 +
 +}
 diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/ExpressionsDiags.h ./generated/slang/diagnostics/ExpressionsDiags.h
 --- ./generated/slang/diagnostics/ExpressionsDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/ExpressionsDiags.h	2019-11-23 10:40:28.821890357 -0800
-@@ -0,0 +1,54 @@
++++ ./generated/slang/diagnostics/ExpressionsDiags.h	2020-04-13 10:23:52.690372086 -0700
+@@ -0,0 +1,69 @@
 +//------------------------------------------------------------------------------
-+// ExpressionsDiags.h
-+// Generated diagnostic enums for the Expressions subsystem.
++//! @file ExpressionsDiags.h
++//! @brief Generated diagnostic enums for the Expressions subsystem
 +//
-+// File is under the MIT license; see LICENSE for details.
++// File is under the MIT license; see LICENSE for details
 +//------------------------------------------------------------------------------
 +#pragma once
 +
@@ -17347,51 +18291,66 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode BadIndexExpression(DiagSubsystem::Expressions, 3);
 +inline constexpr DiagCode BadConcatExpression(DiagSubsystem::Expressions, 4);
 +inline constexpr DiagCode BadReplicationExpression(DiagSubsystem::Expressions, 5);
-+inline constexpr DiagCode BadCastType(DiagSubsystem::Expressions, 6);
-+inline constexpr DiagCode ConcatWithStringInt(DiagSubsystem::Expressions, 7);
-+inline constexpr DiagCode BadRangeExpression(DiagSubsystem::Expressions, 8);
-+inline constexpr DiagCode RangeWidthTooLarge(DiagSubsystem::Expressions, 9);
-+inline constexpr DiagCode CannotIndexScalar(DiagSubsystem::Expressions, 10);
-+inline constexpr DiagCode ExprMustBeIntegral(DiagSubsystem::Expressions, 11);
-+inline constexpr DiagCode IndexValueInvalid(DiagSubsystem::Expressions, 12);
-+inline constexpr DiagCode SelectEndianMismatch(DiagSubsystem::Expressions, 13);
-+inline constexpr DiagCode BadAssignment(DiagSubsystem::Expressions, 14);
-+inline constexpr DiagCode BadConversion(DiagSubsystem::Expressions, 15);
-+inline constexpr DiagCode BadIntegerCast(DiagSubsystem::Expressions, 16);
-+inline constexpr DiagCode NoImplicitConversion(DiagSubsystem::Expressions, 17);
-+inline constexpr DiagCode TooManyArguments(DiagSubsystem::Expressions, 18);
-+inline constexpr DiagCode TooFewArguments(DiagSubsystem::Expressions, 19);
-+inline constexpr DiagCode ExpressionNotAssignable(DiagSubsystem::Expressions, 20);
-+inline constexpr DiagCode ReplicationZeroOutsideConcat(DiagSubsystem::Expressions, 21);
-+inline constexpr DiagCode InvalidMemberAccess(DiagSubsystem::Expressions, 22);
-+inline constexpr DiagCode ExpressionNotCallable(DiagSubsystem::Expressions, 23);
-+inline constexpr DiagCode NotBooleanConvertible(DiagSubsystem::Expressions, 24);
-+inline constexpr DiagCode EnumValueSizeMismatch(DiagSubsystem::Expressions, 25);
-+inline constexpr DiagCode InvalidCaseStmtType(DiagSubsystem::Expressions, 26);
-+inline constexpr DiagCode NoCommonCaseStmtType(DiagSubsystem::Expressions, 27);
-+inline constexpr DiagCode AssignmentPatternNoContext(DiagSubsystem::Expressions, 28);
-+inline constexpr DiagCode BadAssignmentPatternType(DiagSubsystem::Expressions, 29);
-+inline constexpr DiagCode WrongNumberAssignmentPatterns(DiagSubsystem::Expressions, 30);
-+inline constexpr DiagCode AssignmentPatternKeyExpr(DiagSubsystem::Expressions, 31);
-+inline constexpr DiagCode AssignmentPatternKeyDupDefault(DiagSubsystem::Expressions, 32);
-+inline constexpr DiagCode AssignmentPatternKeyDupValue(DiagSubsystem::Expressions, 33);
-+inline constexpr DiagCode AssignmentPatternKeyDupName(DiagSubsystem::Expressions, 34);
-+inline constexpr DiagCode AssignmentPatternNoMember(DiagSubsystem::Expressions, 35);
-+inline constexpr DiagCode AssignmentPatternNestedNoMember(DiagSubsystem::Expressions, 36);
-+inline constexpr DiagCode AssignmentPatternMissingElements(DiagSubsystem::Expressions, 37);
-+inline constexpr DiagCode EmptyArgNotAllowed(DiagSubsystem::Expressions, 38);
-+inline constexpr DiagCode NamedArgNotAllowed(DiagSubsystem::Expressions, 39);
++inline constexpr DiagCode BadOpenRange(DiagSubsystem::Expressions, 6);
++inline constexpr DiagCode BadCastType(DiagSubsystem::Expressions, 7);
++inline constexpr DiagCode BadSetMembershipType(DiagSubsystem::Expressions, 8);
++inline constexpr DiagCode ConcatWithStringInt(DiagSubsystem::Expressions, 9);
++inline constexpr DiagCode BadRangeExpression(DiagSubsystem::Expressions, 10);
++inline constexpr DiagCode RangeWidthTooLarge(DiagSubsystem::Expressions, 11);
++inline constexpr DiagCode CannotIndexScalar(DiagSubsystem::Expressions, 12);
++inline constexpr DiagCode ExprMustBeIntegral(DiagSubsystem::Expressions, 13);
++inline constexpr DiagCode IndexValueInvalid(DiagSubsystem::Expressions, 14);
++inline constexpr DiagCode SelectEndianMismatch(DiagSubsystem::Expressions, 15);
++inline constexpr DiagCode BadAssignment(DiagSubsystem::Expressions, 16);
++inline constexpr DiagCode BadConversion(DiagSubsystem::Expressions, 17);
++inline constexpr DiagCode BadIntegerCast(DiagSubsystem::Expressions, 18);
++inline constexpr DiagCode NoImplicitConversion(DiagSubsystem::Expressions, 19);
++inline constexpr DiagCode TooManyArguments(DiagSubsystem::Expressions, 20);
++inline constexpr DiagCode TooFewArguments(DiagSubsystem::Expressions, 21);
++inline constexpr DiagCode ExpressionNotAssignable(DiagSubsystem::Expressions, 22);
++inline constexpr DiagCode ReplicationZeroOutsideConcat(DiagSubsystem::Expressions, 23);
++inline constexpr DiagCode InvalidMemberAccess(DiagSubsystem::Expressions, 24);
++inline constexpr DiagCode ExpressionNotCallable(DiagSubsystem::Expressions, 25);
++inline constexpr DiagCode NotBooleanConvertible(DiagSubsystem::Expressions, 26);
++inline constexpr DiagCode EnumValueSizeMismatch(DiagSubsystem::Expressions, 27);
++inline constexpr DiagCode EnumValueUnknownBits(DiagSubsystem::Expressions, 28);
++inline constexpr DiagCode NoCommonComparisonType(DiagSubsystem::Expressions, 29);
++inline constexpr DiagCode AssignmentPatternNoContext(DiagSubsystem::Expressions, 30);
++inline constexpr DiagCode BadAssignmentPatternType(DiagSubsystem::Expressions, 31);
++inline constexpr DiagCode WrongNumberAssignmentPatterns(DiagSubsystem::Expressions, 32);
++inline constexpr DiagCode AssignmentPatternKeyExpr(DiagSubsystem::Expressions, 33);
++inline constexpr DiagCode AssignmentPatternKeyDupDefault(DiagSubsystem::Expressions, 34);
++inline constexpr DiagCode AssignmentPatternKeyDupValue(DiagSubsystem::Expressions, 35);
++inline constexpr DiagCode AssignmentPatternKeyDupName(DiagSubsystem::Expressions, 36);
++inline constexpr DiagCode AssignmentPatternNoMember(DiagSubsystem::Expressions, 37);
++inline constexpr DiagCode AssignmentPatternNestedNoMember(DiagSubsystem::Expressions, 38);
++inline constexpr DiagCode AssignmentPatternMissingElements(DiagSubsystem::Expressions, 39);
++inline constexpr DiagCode EmptyArgNotAllowed(DiagSubsystem::Expressions, 40);
++inline constexpr DiagCode NamedArgNotAllowed(DiagSubsystem::Expressions, 41);
++inline constexpr DiagCode DuplicateArgAssignment(DiagSubsystem::Expressions, 42);
++inline constexpr DiagCode MixingOrderedAndNamedArgs(DiagSubsystem::Expressions, 43);
++inline constexpr DiagCode ArgDoesNotExist(DiagSubsystem::Expressions, 44);
++inline constexpr DiagCode ArgCannotBeEmpty(DiagSubsystem::Expressions, 45);
++inline constexpr DiagCode UnconnectedArg(DiagSubsystem::Expressions, 46);
++inline constexpr DiagCode MissingReturnValue(DiagSubsystem::Expressions, 47);
++inline constexpr DiagCode AssignmentNotAllowed(DiagSubsystem::Expressions, 48);
++inline constexpr DiagCode IncDecNotAllowed(DiagSubsystem::Expressions, 49);
++inline constexpr DiagCode AssignmentRequiresParens(DiagSubsystem::Expressions, 50);
++inline constexpr DiagCode PortConnArrayMismatch(DiagSubsystem::Expressions, 51);
++inline constexpr DiagCode AutoFromStaticInit(DiagSubsystem::Expressions, 52);
++inline constexpr DiagCode NonblockingAssignmentToAuto(DiagSubsystem::Expressions, 53);
++inline constexpr DiagCode AssignmentToConst(DiagSubsystem::Expressions, 54);
 +
 +}
 diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/GeneralDiags.h ./generated/slang/diagnostics/GeneralDiags.h
 --- ./generated/slang/diagnostics/GeneralDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/GeneralDiags.h	2019-11-23 10:40:28.821890357 -0800
-@@ -0,0 +1,21 @@
++++ ./generated/slang/diagnostics/GeneralDiags.h	2020-04-13 10:23:52.690372086 -0700
+@@ -0,0 +1,22 @@
 +//------------------------------------------------------------------------------
-+// GeneralDiags.h
-+// Generated diagnostic enums for the General subsystem.
++//! @file GeneralDiags.h
++//! @brief Generated diagnostic enums for the General subsystem
 +//
-+// File is under the MIT license; see LICENSE for details.
++// File is under the MIT license; see LICENSE for details
 +//------------------------------------------------------------------------------
 +#pragma once
 +
@@ -17406,17 +18365,18 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode NoteDeclarationHere(DiagSubsystem::General, 4);
 +inline constexpr DiagCode NotePreviousMatch(DiagSubsystem::General, 5);
 +inline constexpr DiagCode AttributesNotAllowed(DiagSubsystem::General, 6);
++inline constexpr DiagCode WarnNotYetSupported(DiagSubsystem::General, 7);
 +
 +}
 diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/LexerDiags.h ./generated/slang/diagnostics/LexerDiags.h
 --- ./generated/slang/diagnostics/LexerDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/LexerDiags.h	2019-11-23 10:40:28.821890357 -0800
-@@ -0,0 +1,37 @@
++++ ./generated/slang/diagnostics/LexerDiags.h	2020-04-13 10:23:52.700371875 -0700
+@@ -0,0 +1,36 @@
 +//------------------------------------------------------------------------------
-+// LexerDiags.h
-+// Generated diagnostic enums for the Lexer subsystem.
++//! @file LexerDiags.h
++//! @brief Generated diagnostic enums for the Lexer subsystem
 +//
-+// File is under the MIT license; see LICENSE for details.
++// File is under the MIT license; see LICENSE for details
 +//------------------------------------------------------------------------------
 +#pragma once
 +
@@ -17445,19 +18405,18 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode BadOctalDigit(DiagSubsystem::Lexer, 18);
 +inline constexpr DiagCode BadDecimalDigit(DiagSubsystem::Lexer, 19);
 +inline constexpr DiagCode BadHexDigit(DiagSubsystem::Lexer, 20);
-+inline constexpr DiagCode IncludeNotFirstOnLine(DiagSubsystem::Lexer, 21);
-+inline constexpr DiagCode TooManyLexerErrors(DiagSubsystem::Lexer, 22);
++inline constexpr DiagCode TooManyLexerErrors(DiagSubsystem::Lexer, 21);
 +
 +}
 diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/LookupDiags.h ./generated/slang/diagnostics/LookupDiags.h
 --- ./generated/slang/diagnostics/LookupDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/LookupDiags.h	2019-11-23 10:40:28.821890357 -0800
-@@ -0,0 +1,43 @@
++++ ./generated/slang/diagnostics/LookupDiags.h	2020-04-13 10:23:52.700371875 -0700
+@@ -0,0 +1,48 @@
 +//------------------------------------------------------------------------------
-+// LookupDiags.h
-+// Generated diagnostic enums for the Lookup subsystem.
++//! @file LookupDiags.h
++//! @brief Generated diagnostic enums for the Lookup subsystem
 +//
-+// File is under the MIT license; see LICENSE for details.
++// File is under the MIT license; see LICENSE for details
 +//------------------------------------------------------------------------------
 +#pragma once
 +
@@ -17470,41 +18429,46 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode RedefinitionDifferentSymbolKind(DiagSubsystem::Lookup, 2);
 +inline constexpr DiagCode AmbiguousWildcardImport(DiagSubsystem::Lookup, 3);
 +inline constexpr DiagCode NoteImportedFrom(DiagSubsystem::Lookup, 4);
-+inline constexpr DiagCode ImportNameCollision(DiagSubsystem::Lookup, 5);
-+inline constexpr DiagCode UndeclaredIdentifier(DiagSubsystem::Lookup, 6);
-+inline constexpr DiagCode UnknownSystemName(DiagSubsystem::Lookup, 7);
-+inline constexpr DiagCode UnknownClassOrPackage(DiagSubsystem::Lookup, 8);
-+inline constexpr DiagCode UsedBeforeDeclared(DiagSubsystem::Lookup, 9);
-+inline constexpr DiagCode NotAType(DiagSubsystem::Lookup, 10);
-+inline constexpr DiagCode NotAValue(DiagSubsystem::Lookup, 11);
-+inline constexpr DiagCode NotAHierarchicalScope(DiagSubsystem::Lookup, 12);
-+inline constexpr DiagCode NotAModport(DiagSubsystem::Lookup, 13);
-+inline constexpr DiagCode NotAnInterface(DiagSubsystem::Lookup, 14);
-+inline constexpr DiagCode NotAGenvar(DiagSubsystem::Lookup, 15);
-+inline constexpr DiagCode DotOnType(DiagSubsystem::Lookup, 16);
-+inline constexpr DiagCode HierarchicalNotAllowedInConstant(DiagSubsystem::Lookup, 17);
-+inline constexpr DiagCode UnknownMember(DiagSubsystem::Lookup, 18);
-+inline constexpr DiagCode UnknownPackageMember(DiagSubsystem::Lookup, 19);
-+inline constexpr DiagCode UnknownUnitMember(DiagSubsystem::Lookup, 20);
-+inline constexpr DiagCode RecursiveDefinition(DiagSubsystem::Lookup, 21);
-+inline constexpr DiagCode UnknownSystemMethod(DiagSubsystem::Lookup, 22);
-+inline constexpr DiagCode ScopeNotIndexable(DiagSubsystem::Lookup, 23);
-+inline constexpr DiagCode InvalidScopeIndexExpression(DiagSubsystem::Lookup, 24);
-+inline constexpr DiagCode ScopeIndexOutOfRange(DiagSubsystem::Lookup, 25);
-+inline constexpr DiagCode CouldNotResolveHierarchicalPath(DiagSubsystem::Lookup, 26);
-+inline constexpr DiagCode UnresolvedForwardTypedef(DiagSubsystem::Lookup, 27);
-+inline constexpr DiagCode DuplicateImport(DiagSubsystem::Lookup, 28);
++inline constexpr DiagCode NoteHierarchicalNameInCE(DiagSubsystem::Lookup, 5);
++inline constexpr DiagCode ImportNameCollision(DiagSubsystem::Lookup, 6);
++inline constexpr DiagCode UndeclaredIdentifier(DiagSubsystem::Lookup, 7);
++inline constexpr DiagCode TypoIdentifier(DiagSubsystem::Lookup, 8);
++inline constexpr DiagCode UnknownSystemName(DiagSubsystem::Lookup, 9);
++inline constexpr DiagCode UnknownClassOrPackage(DiagSubsystem::Lookup, 10);
++inline constexpr DiagCode UsedBeforeDeclared(DiagSubsystem::Lookup, 11);
++inline constexpr DiagCode NotAType(DiagSubsystem::Lookup, 12);
++inline constexpr DiagCode NotAValue(DiagSubsystem::Lookup, 13);
++inline constexpr DiagCode NotAHierarchicalScope(DiagSubsystem::Lookup, 14);
++inline constexpr DiagCode NotAModport(DiagSubsystem::Lookup, 15);
++inline constexpr DiagCode NotAnInterface(DiagSubsystem::Lookup, 16);
++inline constexpr DiagCode NotAGenvar(DiagSubsystem::Lookup, 17);
++inline constexpr DiagCode DotOnType(DiagSubsystem::Lookup, 18);
++inline constexpr DiagCode HierarchicalNotAllowedInConstant(DiagSubsystem::Lookup, 19);
++inline constexpr DiagCode UnknownMember(DiagSubsystem::Lookup, 20);
++inline constexpr DiagCode UnknownPackageMember(DiagSubsystem::Lookup, 21);
++inline constexpr DiagCode UnknownUnitMember(DiagSubsystem::Lookup, 22);
++inline constexpr DiagCode RecursiveDefinition(DiagSubsystem::Lookup, 23);
++inline constexpr DiagCode UnknownSystemMethod(DiagSubsystem::Lookup, 24);
++inline constexpr DiagCode ScopeNotIndexable(DiagSubsystem::Lookup, 25);
++inline constexpr DiagCode InvalidScopeIndexExpression(DiagSubsystem::Lookup, 26);
++inline constexpr DiagCode ScopeIndexOutOfRange(DiagSubsystem::Lookup, 27);
++inline constexpr DiagCode CouldNotResolveHierarchicalPath(DiagSubsystem::Lookup, 28);
++inline constexpr DiagCode UnresolvedForwardTypedef(DiagSubsystem::Lookup, 29);
++inline constexpr DiagCode DefinitionUsedAsType(DiagSubsystem::Lookup, 30);
++inline constexpr DiagCode DefinitionUsedAsValue(DiagSubsystem::Lookup, 31);
++inline constexpr DiagCode AutoVariableHierarchical(DiagSubsystem::Lookup, 32);
++inline constexpr DiagCode DuplicateImport(DiagSubsystem::Lookup, 33);
 +
 +}
 diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/MetaDiags.h ./generated/slang/diagnostics/MetaDiags.h
 --- ./generated/slang/diagnostics/MetaDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/MetaDiags.h	2019-11-23 10:40:28.821890357 -0800
++++ ./generated/slang/diagnostics/MetaDiags.h	2020-04-13 10:23:52.700371875 -0700
 @@ -0,0 +1,16 @@
 +//------------------------------------------------------------------------------
-+// MetaDiags.h
-+// Generated diagnostic enums for the Meta subsystem.
++//! @file MetaDiags.h
++//! @brief Generated diagnostic enums for the Meta subsystem
 +//
-+// File is under the MIT license; see LICENSE for details.
++// File is under the MIT license; see LICENSE for details
 +//------------------------------------------------------------------------------
 +#pragma once
 +
@@ -17518,13 +18482,13 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +}
 diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/NumericDiags.h ./generated/slang/diagnostics/NumericDiags.h
 --- ./generated/slang/diagnostics/NumericDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/NumericDiags.h	2019-11-23 10:40:28.821890357 -0800
-@@ -0,0 +1,25 @@
++++ ./generated/slang/diagnostics/NumericDiags.h	2020-04-13 10:23:52.700371875 -0700
+@@ -0,0 +1,26 @@
 +//------------------------------------------------------------------------------
-+// NumericDiags.h
-+// Generated diagnostic enums for the Numeric subsystem.
++//! @file NumericDiags.h
++//! @brief Generated diagnostic enums for the Numeric subsystem
 +//
-+// File is under the MIT license; see LICENSE for details.
++// File is under the MIT license; see LICENSE for details
 +//------------------------------------------------------------------------------
 +#pragma once
 +
@@ -17540,20 +18504,21 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode ValueMustBePositive(DiagSubsystem::Numeric, 5);
 +inline constexpr DiagCode ValueExceedsMaxBitWidth(DiagSubsystem::Numeric, 6);
 +inline constexpr DiagCode ValueOutOfRange(DiagSubsystem::Numeric, 7);
-+inline constexpr DiagCode RealLiteralUnderflow(DiagSubsystem::Numeric, 8);
-+inline constexpr DiagCode RealLiteralOverflow(DiagSubsystem::Numeric, 9);
-+inline constexpr DiagCode VectorLiteralOverflow(DiagSubsystem::Numeric, 10);
++inline constexpr DiagCode ExpectedVectorDigits(DiagSubsystem::Numeric, 8);
++inline constexpr DiagCode RealLiteralUnderflow(DiagSubsystem::Numeric, 9);
++inline constexpr DiagCode RealLiteralOverflow(DiagSubsystem::Numeric, 10);
++inline constexpr DiagCode VectorLiteralOverflow(DiagSubsystem::Numeric, 11);
 +
 +}
 diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/ParserDiags.h ./generated/slang/diagnostics/ParserDiags.h
 --- ./generated/slang/diagnostics/ParserDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/ParserDiags.h	2019-11-23 10:40:28.821890357 -0800
-@@ -0,0 +1,70 @@
++++ ./generated/slang/diagnostics/ParserDiags.h	2020-04-13 10:23:52.700371875 -0700
+@@ -0,0 +1,77 @@
 +//------------------------------------------------------------------------------
-+// ParserDiags.h
-+// Generated diagnostic enums for the Parser subsystem.
++//! @file ParserDiags.h
++//! @brief Generated diagnostic enums for the Parser subsystem
 +//
-+// File is under the MIT license; see LICENSE for details.
++// File is under the MIT license; see LICENSE for details
 +//------------------------------------------------------------------------------
 +#pragma once
 +
@@ -17585,49 +18550,56 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode ExpectedAttribute(DiagSubsystem::Parser, 21);
 +inline constexpr DiagCode ExpectedPackageImport(DiagSubsystem::Parser, 22);
 +inline constexpr DiagCode ExpectedHierarchicalInstantiation(DiagSubsystem::Parser, 23);
-+inline constexpr DiagCode ExpectedPortConnection(DiagSubsystem::Parser, 24);
-+inline constexpr DiagCode ExpectedVectorDigits(DiagSubsystem::Parser, 25);
++inline constexpr DiagCode ExpectedGateInstance(DiagSubsystem::Parser, 24);
++inline constexpr DiagCode ExpectedPortConnection(DiagSubsystem::Parser, 25);
 +inline constexpr DiagCode ExpectedVariableAssignment(DiagSubsystem::Parser, 26);
-+inline constexpr DiagCode ExpectedInterfaceClassName(DiagSubsystem::Parser, 27);
-+inline constexpr DiagCode ExpectedAssignmentKey(DiagSubsystem::Parser, 28);
-+inline constexpr DiagCode ExpectedDistItem(DiagSubsystem::Parser, 29);
-+inline constexpr DiagCode ExpectedIfOrCase(DiagSubsystem::Parser, 30);
-+inline constexpr DiagCode ExpectedClassScope(DiagSubsystem::Parser, 31);
-+inline constexpr DiagCode ExpectedNetStrength(DiagSubsystem::Parser, 32);
-+inline constexpr DiagCode ExpectedEnumBase(DiagSubsystem::Parser, 33);
-+inline constexpr DiagCode NoLabelOnSemicolon(DiagSubsystem::Parser, 34);
-+inline constexpr DiagCode DeferredDelayMustBeZero(DiagSubsystem::Parser, 35);
-+inline constexpr DiagCode InvalidGenvarIterExpression(DiagSubsystem::Parser, 36);
-+inline constexpr DiagCode ExpectedGenvarIterVar(DiagSubsystem::Parser, 37);
-+inline constexpr DiagCode ConstFunctionPortRequiresRef(DiagSubsystem::Parser, 38);
-+inline constexpr DiagCode ExpectedClockingSkew(DiagSubsystem::Parser, 39);
-+inline constexpr DiagCode ExpectedDPISpecString(DiagSubsystem::Parser, 40);
-+inline constexpr DiagCode ParseTreeTooDeep(DiagSubsystem::Parser, 41);
-+inline constexpr DiagCode MissingModportPortDirection(DiagSubsystem::Parser, 42);
-+inline constexpr DiagCode CaseStatementEmpty(DiagSubsystem::Parser, 43);
-+inline constexpr DiagCode MultipleDefaultCases(DiagSubsystem::Parser, 44);
-+inline constexpr DiagCode DirectionOnInterfacePort(DiagSubsystem::Parser, 45);
-+inline constexpr DiagCode UnexpectedQualifiers(DiagSubsystem::Parser, 46);
-+inline constexpr DiagCode ExpectedSampleKeyword(DiagSubsystem::Parser, 47);
-+inline constexpr DiagCode MultipleGenerateDefaultCases(DiagSubsystem::Parser, 48);
-+inline constexpr DiagCode CaseGenerateEmpty(DiagSubsystem::Parser, 49);
-+inline constexpr DiagCode LabelAndName(DiagSubsystem::Parser, 50);
-+inline constexpr DiagCode EndNameMismatch(DiagSubsystem::Parser, 51);
-+inline constexpr DiagCode EndNameNotEmpty(DiagSubsystem::Parser, 52);
-+inline constexpr DiagCode DeclarationsAtStart(DiagSubsystem::Parser, 53);
-+inline constexpr DiagCode VoidNotAllowed(DiagSubsystem::Parser, 54);
-+inline constexpr DiagCode NonStandardGenBlock(DiagSubsystem::Parser, 55);
++inline constexpr DiagCode ExpectedContinuousAssignment(DiagSubsystem::Parser, 27);
++inline constexpr DiagCode ExpectedInterfaceClassName(DiagSubsystem::Parser, 28);
++inline constexpr DiagCode ExpectedAssignmentKey(DiagSubsystem::Parser, 29);
++inline constexpr DiagCode ExpectedDistItem(DiagSubsystem::Parser, 30);
++inline constexpr DiagCode ExpectedIfOrCase(DiagSubsystem::Parser, 31);
++inline constexpr DiagCode ExpectedClassScope(DiagSubsystem::Parser, 32);
++inline constexpr DiagCode ExpectedNetStrength(DiagSubsystem::Parser, 33);
++inline constexpr DiagCode ExpectedEnumBase(DiagSubsystem::Parser, 34);
++inline constexpr DiagCode ExpectedCaseItem(DiagSubsystem::Parser, 35);
++inline constexpr DiagCode NoLabelOnSemicolon(DiagSubsystem::Parser, 36);
++inline constexpr DiagCode DeferredDelayMustBeZero(DiagSubsystem::Parser, 37);
++inline constexpr DiagCode InvalidGenvarIterExpression(DiagSubsystem::Parser, 38);
++inline constexpr DiagCode ExpectedGenvarIterVar(DiagSubsystem::Parser, 39);
++inline constexpr DiagCode ConstFunctionPortRequiresRef(DiagSubsystem::Parser, 40);
++inline constexpr DiagCode ExpectedClockingSkew(DiagSubsystem::Parser, 41);
++inline constexpr DiagCode ExpectedDPISpecString(DiagSubsystem::Parser, 42);
++inline constexpr DiagCode ParseTreeTooDeep(DiagSubsystem::Parser, 43);
++inline constexpr DiagCode MissingModportPortDirection(DiagSubsystem::Parser, 44);
++inline constexpr DiagCode CaseStatementEmpty(DiagSubsystem::Parser, 45);
++inline constexpr DiagCode MultipleDefaultCases(DiagSubsystem::Parser, 46);
++inline constexpr DiagCode DirectionOnInterfacePort(DiagSubsystem::Parser, 47);
++inline constexpr DiagCode UnexpectedQualifiers(DiagSubsystem::Parser, 48);
++inline constexpr DiagCode ExpectedSampleKeyword(DiagSubsystem::Parser, 49);
++inline constexpr DiagCode MultipleGenerateDefaultCases(DiagSubsystem::Parser, 50);
++inline constexpr DiagCode CaseGenerateEmpty(DiagSubsystem::Parser, 51);
++inline constexpr DiagCode LabelAndName(DiagSubsystem::Parser, 52);
++inline constexpr DiagCode EndNameMismatch(DiagSubsystem::Parser, 53);
++inline constexpr DiagCode EndNameNotEmpty(DiagSubsystem::Parser, 54);
++inline constexpr DiagCode DeclarationsAtStart(DiagSubsystem::Parser, 55);
++inline constexpr DiagCode VoidNotAllowed(DiagSubsystem::Parser, 56);
++inline constexpr DiagCode DuplicateDeclModifier(DiagSubsystem::Parser, 57);
++inline constexpr DiagCode DeclModifierOrdering(DiagSubsystem::Parser, 58);
++inline constexpr DiagCode DeclModifierConflict(DiagSubsystem::Parser, 59);
++inline constexpr DiagCode TypeRefDeclVar(DiagSubsystem::Parser, 60);
++inline constexpr DiagCode NonStandardGenBlock(DiagSubsystem::Parser, 61);
++inline constexpr DiagCode NoteToMatchThis(DiagSubsystem::Parser, 62);
 +
 +}
 diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/PreprocessorDiags.h ./generated/slang/diagnostics/PreprocessorDiags.h
 --- ./generated/slang/diagnostics/PreprocessorDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/PreprocessorDiags.h	2019-11-23 10:40:28.821890357 -0800
-@@ -0,0 +1,38 @@
++++ ./generated/slang/diagnostics/PreprocessorDiags.h	2020-04-13 10:23:52.700371875 -0700
+@@ -0,0 +1,48 @@
 +//------------------------------------------------------------------------------
-+// PreprocessorDiags.h
-+// Generated diagnostic enums for the Preprocessor subsystem.
++//! @file PreprocessorDiags.h
++//! @brief Generated diagnostic enums for the Preprocessor subsystem
 +//
-+// File is under the MIT license; see LICENSE for details.
++// File is under the MIT license; see LICENSE for details
 +//------------------------------------------------------------------------------
 +#pragma once
 +
@@ -17638,38 +18610,48 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode CouldNotOpenIncludeFile(DiagSubsystem::Preprocessor, 0);
 +inline constexpr DiagCode ExceededMaxIncludeDepth(DiagSubsystem::Preprocessor, 1);
 +inline constexpr DiagCode UnknownDirective(DiagSubsystem::Preprocessor, 2);
-+inline constexpr DiagCode ExpectedEndOfDirective(DiagSubsystem::Preprocessor, 3);
-+inline constexpr DiagCode UnexpectedConditionalDirective(DiagSubsystem::Preprocessor, 4);
++inline constexpr DiagCode UnexpectedConditionalDirective(DiagSubsystem::Preprocessor, 3);
++inline constexpr DiagCode MissingEndIfDirective(DiagSubsystem::Preprocessor, 4);
 +inline constexpr DiagCode UnbalancedMacroArgDims(DiagSubsystem::Preprocessor, 5);
 +inline constexpr DiagCode ExpectedMacroArgs(DiagSubsystem::Preprocessor, 6);
 +inline constexpr DiagCode ExpectedNetType(DiagSubsystem::Preprocessor, 7);
-+inline constexpr DiagCode InvalidMacroName(DiagSubsystem::Preprocessor, 8);
-+inline constexpr DiagCode TooManyActualMacroArgs(DiagSubsystem::Preprocessor, 9);
-+inline constexpr DiagCode NotEnoughMacroArgs(DiagSubsystem::Preprocessor, 10);
-+inline constexpr DiagCode InvalidLineDirectiveLevel(DiagSubsystem::Preprocessor, 11);
-+inline constexpr DiagCode UndefineBuiltinDirective(DiagSubsystem::Preprocessor, 12);
-+inline constexpr DiagCode UnrecognizedKeywordVersion(DiagSubsystem::Preprocessor, 13);
-+inline constexpr DiagCode MismatchedEndKeywordsDirective(DiagSubsystem::Preprocessor, 14);
-+inline constexpr DiagCode InvalidTimeScaleSpecifier(DiagSubsystem::Preprocessor, 15);
-+inline constexpr DiagCode InvalidTimeScalePrecision(DiagSubsystem::Preprocessor, 16);
-+inline constexpr DiagCode RecursiveMacro(DiagSubsystem::Preprocessor, 17);
-+inline constexpr DiagCode MacroOpsOutsideDefinition(DiagSubsystem::Preprocessor, 18);
-+inline constexpr DiagCode SplitBlockCommentInDirective(DiagSubsystem::Preprocessor, 19);
-+inline constexpr DiagCode ExpectedIncludeFileName(DiagSubsystem::Preprocessor, 20);
-+inline constexpr DiagCode ExpectedTimeLiteral(DiagSubsystem::Preprocessor, 21);
-+inline constexpr DiagCode IgnoredMacroPaste(DiagSubsystem::Preprocessor, 22);
-+inline constexpr DiagCode RedefiningMacro(DiagSubsystem::Preprocessor, 23);
++inline constexpr DiagCode ExpectedDriveStrength(DiagSubsystem::Preprocessor, 8);
++inline constexpr DiagCode InvalidMacroName(DiagSubsystem::Preprocessor, 9);
++inline constexpr DiagCode TooManyActualMacroArgs(DiagSubsystem::Preprocessor, 10);
++inline constexpr DiagCode NotEnoughMacroArgs(DiagSubsystem::Preprocessor, 11);
++inline constexpr DiagCode InvalidLineDirectiveLevel(DiagSubsystem::Preprocessor, 12);
++inline constexpr DiagCode UndefineBuiltinDirective(DiagSubsystem::Preprocessor, 13);
++inline constexpr DiagCode UnrecognizedKeywordVersion(DiagSubsystem::Preprocessor, 14);
++inline constexpr DiagCode MismatchedEndKeywordsDirective(DiagSubsystem::Preprocessor, 15);
++inline constexpr DiagCode InvalidTimeScaleSpecifier(DiagSubsystem::Preprocessor, 16);
++inline constexpr DiagCode InvalidTimeScalePrecision(DiagSubsystem::Preprocessor, 17);
++inline constexpr DiagCode RecursiveMacro(DiagSubsystem::Preprocessor, 18);
++inline constexpr DiagCode MacroOpsOutsideDefinition(DiagSubsystem::Preprocessor, 19);
++inline constexpr DiagCode SplitBlockCommentInDirective(DiagSubsystem::Preprocessor, 20);
++inline constexpr DiagCode ExpectedIncludeFileName(DiagSubsystem::Preprocessor, 21);
++inline constexpr DiagCode ExpectedTimeLiteral(DiagSubsystem::Preprocessor, 22);
++inline constexpr DiagCode ExpectedMacroStringifyEnd(DiagSubsystem::Preprocessor, 23);
++inline constexpr DiagCode ExpectedPragmaName(DiagSubsystem::Preprocessor, 24);
++inline constexpr DiagCode ExpectedPragmaExpression(DiagSubsystem::Preprocessor, 25);
++inline constexpr DiagCode DirectiveInsideDesignElement(DiagSubsystem::Preprocessor, 26);
++inline constexpr DiagCode IgnoredMacroPaste(DiagSubsystem::Preprocessor, 27);
++inline constexpr DiagCode RedefiningMacro(DiagSubsystem::Preprocessor, 28);
++inline constexpr DiagCode UnknownPragma(DiagSubsystem::Preprocessor, 29);
++inline constexpr DiagCode ExtraPragmaArgs(DiagSubsystem::Preprocessor, 30);
++inline constexpr DiagCode ExpectedDiagPragmaArg(DiagSubsystem::Preprocessor, 31);
++inline constexpr DiagCode UnknownDiagPragmaArg(DiagSubsystem::Preprocessor, 32);
++inline constexpr DiagCode ExpectedDiagPragmaLevel(DiagSubsystem::Preprocessor, 33);
 +
 +}
 diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/StatementsDiags.h ./generated/slang/diagnostics/StatementsDiags.h
 --- ./generated/slang/diagnostics/StatementsDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/StatementsDiags.h	2019-11-23 10:40:28.821890357 -0800
-@@ -0,0 +1,25 @@
++++ ./generated/slang/diagnostics/StatementsDiags.h	2020-04-13 10:23:52.700371875 -0700
+@@ -0,0 +1,29 @@
 +//------------------------------------------------------------------------------
-+// StatementsDiags.h
-+// Generated diagnostic enums for the Statements subsystem.
++//! @file StatementsDiags.h
++//! @brief Generated diagnostic enums for the Statements subsystem
 +//
-+// File is under the MIT license; see LICENSE for details.
++// File is under the MIT license; see LICENSE for details
 +//------------------------------------------------------------------------------
 +#pragma once
 +
@@ -17684,21 +18666,25 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode StatementNotInLoop(DiagSubsystem::Statements, 4);
 +inline constexpr DiagCode ExprNotStatement(DiagSubsystem::Statements, 5);
 +inline constexpr DiagCode VoidCastFuncCall(DiagSubsystem::Statements, 6);
-+inline constexpr DiagCode EventExpressionConstant(DiagSubsystem::Statements, 7);
-+inline constexpr DiagCode EmptyStatement(DiagSubsystem::Statements, 8);
-+inline constexpr DiagCode PointlessVoidCast(DiagSubsystem::Statements, 9);
-+inline constexpr DiagCode UnusedResult(DiagSubsystem::Statements, 10);
++inline constexpr DiagCode NotAnArray(DiagSubsystem::Statements, 7);
++inline constexpr DiagCode TooManyForeachVars(DiagSubsystem::Statements, 8);
++inline constexpr DiagCode LoopVarShadowsArray(DiagSubsystem::Statements, 9);
++inline constexpr DiagCode CaseInsideKeyword(DiagSubsystem::Statements, 10);
++inline constexpr DiagCode EventExpressionConstant(DiagSubsystem::Statements, 11);
++inline constexpr DiagCode EmptyStatement(DiagSubsystem::Statements, 12);
++inline constexpr DiagCode PointlessVoidCast(DiagSubsystem::Statements, 13);
++inline constexpr DiagCode UnusedResult(DiagSubsystem::Statements, 14);
 +
 +}
 diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/SysFuncsDiags.h ./generated/slang/diagnostics/SysFuncsDiags.h
 --- ./generated/slang/diagnostics/SysFuncsDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/SysFuncsDiags.h	2019-11-23 10:40:28.821890357 -0800
-@@ -0,0 +1,26 @@
++++ ./generated/slang/diagnostics/SysFuncsDiags.h	2020-04-13 10:23:52.700371875 -0700
+@@ -0,0 +1,29 @@
 +//------------------------------------------------------------------------------
-+// SysFuncsDiags.h
-+// Generated diagnostic enums for the SysFuncs subsystem.
++//! @file SysFuncsDiags.h
++//! @brief Generated diagnostic enums for the SysFuncs subsystem
 +//
-+// File is under the MIT license; see LICENSE for details.
++// File is under the MIT license; see LICENSE for details
 +//------------------------------------------------------------------------------
 +#pragma once
 +
@@ -17714,21 +18700,24 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode FormatSpecifierNotFloat(DiagSubsystem::SysFuncs, 5);
 +inline constexpr DiagCode FormatUnspecifiedType(DiagSubsystem::SysFuncs, 6);
 +inline constexpr DiagCode FormatMismatchedType(DiagSubsystem::SysFuncs, 7);
-+inline constexpr DiagCode InvalidFormatStringType(DiagSubsystem::SysFuncs, 8);
++inline constexpr DiagCode FormatNoArgument(DiagSubsystem::SysFuncs, 8);
 +inline constexpr DiagCode FormatEmptyArg(DiagSubsystem::SysFuncs, 9);
-+inline constexpr DiagCode ArrayReductionIntegral(DiagSubsystem::SysFuncs, 10);
-+inline constexpr DiagCode BadFinishNum(DiagSubsystem::SysFuncs, 11);
++inline constexpr DiagCode FormatTooManyArgs(DiagSubsystem::SysFuncs, 10);
++inline constexpr DiagCode InvalidStringArg(DiagSubsystem::SysFuncs, 11);
++inline constexpr DiagCode ArrayReductionIntegral(DiagSubsystem::SysFuncs, 12);
++inline constexpr DiagCode BadFinishNum(DiagSubsystem::SysFuncs, 13);
++inline constexpr DiagCode FormatRealInt(DiagSubsystem::SysFuncs, 14);
 +
 +}
 diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/TypesDiags.h ./generated/slang/diagnostics/TypesDiags.h
 --- ./generated/slang/diagnostics/TypesDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/TypesDiags.h	2019-11-23 10:40:28.821890357 -0800
-@@ -0,0 +1,25 @@
++++ ./generated/slang/diagnostics/TypesDiags.h	2020-04-13 10:23:52.700371875 -0700
+@@ -0,0 +1,24 @@
 +//------------------------------------------------------------------------------
-+// TypesDiags.h
-+// Generated diagnostic enums for the Types subsystem.
++//! @file TypesDiags.h
++//! @brief Generated diagnostic enums for the Types subsystem
 +//
-+// File is under the MIT license; see LICENSE for details.
++// File is under the MIT license; see LICENSE for details
 +//------------------------------------------------------------------------------
 +#pragma once
 +
@@ -17737,27 +18726,26 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +namespace slang::diag {
 +
 +inline constexpr DiagCode InvalidEnumBase(DiagSubsystem::Types, 0);
-+inline constexpr DiagCode EnumValueUnknownBits(DiagSubsystem::Types, 1);
-+inline constexpr DiagCode EnumValueOverflow(DiagSubsystem::Types, 2);
-+inline constexpr DiagCode EnumIncrementUnknown(DiagSubsystem::Types, 3);
-+inline constexpr DiagCode EnumValueDuplicate(DiagSubsystem::Types, 4);
-+inline constexpr DiagCode EnumRangeMultiDimensional(DiagSubsystem::Types, 5);
-+inline constexpr DiagCode ForwardTypedefDoesNotMatch(DiagSubsystem::Types, 6);
-+inline constexpr DiagCode PackedMemberNotIntegral(DiagSubsystem::Types, 7);
-+inline constexpr DiagCode PackedMemberHasInitializer(DiagSubsystem::Types, 8);
-+inline constexpr DiagCode PackedDimsOnPredefinedType(DiagSubsystem::Types, 9);
-+inline constexpr DiagCode PackedUnionWidthMismatch(DiagSubsystem::Types, 10);
++inline constexpr DiagCode EnumValueOverflow(DiagSubsystem::Types, 1);
++inline constexpr DiagCode EnumIncrementUnknown(DiagSubsystem::Types, 2);
++inline constexpr DiagCode EnumValueDuplicate(DiagSubsystem::Types, 3);
++inline constexpr DiagCode EnumRangeMultiDimensional(DiagSubsystem::Types, 4);
++inline constexpr DiagCode ForwardTypedefDoesNotMatch(DiagSubsystem::Types, 5);
++inline constexpr DiagCode PackedMemberNotIntegral(DiagSubsystem::Types, 6);
++inline constexpr DiagCode PackedMemberHasInitializer(DiagSubsystem::Types, 7);
++inline constexpr DiagCode PackedDimsOnPredefinedType(DiagSubsystem::Types, 8);
++inline constexpr DiagCode PackedUnionWidthMismatch(DiagSubsystem::Types, 9);
 +
 +}
 diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/syntax/AllSyntax.h ./generated/slang/syntax/AllSyntax.h
 --- ./generated/slang/syntax/AllSyntax.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/syntax/AllSyntax.h	2019-11-23 10:40:28.811890570 -0800
-@@ -0,0 +1,6291 @@
++++ ./generated/slang/syntax/AllSyntax.h	2020-04-13 10:23:52.690372086 -0700
+@@ -0,0 +1,6551 @@
 +//------------------------------------------------------------------------------
-+// AllSyntax.h
-+// All generated syntax node data structures.
++//! @file AllSyntax.h
++//! @brief All generated syntax node data structures
 +//
-+// File is under the MIT license; see LICENSE for details.
++// File is under the MIT license; see LICENSE for details
 +//------------------------------------------------------------------------------
 +#pragma once
 +
@@ -18444,6 +19432,28 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    TaggedUnionExpressionSyntax* clone(BumpAllocator& alloc) const;
 +};
 +
++struct OpenRangeExpressionSyntax : public ExpressionSyntax {
++    Token openBracket;
++    not_null<ExpressionSyntax*> left;
++    Token colon;
++    not_null<ExpressionSyntax*> right;
++    Token closeBracket;
++
++    OpenRangeExpressionSyntax(Token openBracket, ExpressionSyntax& left, Token colon, ExpressionSyntax& right, Token closeBracket) :
++        ExpressionSyntax(SyntaxKind::OpenRangeExpression), openBracket(openBracket), left(&left), colon(colon), right(&right), closeBracket(closeBracket) {
++        this->left->parent = this;
++        this->right->parent = this;
++    }
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    OpenRangeExpressionSyntax* clone(BumpAllocator& alloc) const;
++};
++
 +struct OpenRangeListSyntax : public SyntaxNode {
 +    Token openBrace;
 +    SeparatedSyntaxList<ExpressionSyntax> valueRanges;
@@ -18579,13 +19589,13 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    RangeSelectSyntax* clone(BumpAllocator& alloc) const;
 +};
 +
-+struct ElementSelectSyntax : public ExpressionSyntax {
++struct ElementSelectSyntax : public SyntaxNode {
 +    Token openBracket;
 +    SelectorSyntax* selector;
 +    Token closeBracket;
 +
 +    ElementSelectSyntax(Token openBracket, SelectorSyntax* selector, Token closeBracket) :
-+        ExpressionSyntax(SyntaxKind::ElementSelect), openBracket(openBracket), selector(selector), closeBracket(closeBracket) {
++        SyntaxNode(SyntaxKind::ElementSelect), openBracket(openBracket), selector(selector), closeBracket(closeBracket) {
 +        if (this->selector) this->selector->parent = this;
 +    }
 +
@@ -19117,6 +20127,32 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    DelaySyntax* clone(BumpAllocator& alloc) const;
 +};
 +
++struct Delay3Syntax : public TimingControlSyntax {
++    Token hash;
++    Token openParen;
++    not_null<ExpressionSyntax*> delay1;
++    Token comma1;
++    ExpressionSyntax* delay2;
++    Token comma2;
++    ExpressionSyntax* delay3;
++    Token closeParen;
++
++    Delay3Syntax(Token hash, Token openParen, ExpressionSyntax& delay1, Token comma1, ExpressionSyntax* delay2, Token comma2, ExpressionSyntax* delay3, Token closeParen) :
++        TimingControlSyntax(SyntaxKind::Delay3), hash(hash), openParen(openParen), delay1(&delay1), comma1(comma1), delay2(delay2), comma2(comma2), delay3(delay3), closeParen(closeParen) {
++        this->delay1->parent = this;
++        if (this->delay2) this->delay2->parent = this;
++        if (this->delay3) this->delay3->parent = this;
++    }
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    Delay3Syntax* clone(BumpAllocator& alloc) const;
++};
++
 +struct EventControlSyntax : public TimingControlSyntax {
 +    Token at;
 +    not_null<NameSyntax*> eventName;
@@ -19579,13 +20615,15 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    NetStrengthSyntax* strength;
 +    Token expansionHint;
 +    not_null<DataTypeSyntax*> type;
++    TimingControlSyntax* delay;
 +    SeparatedSyntaxList<DeclaratorSyntax> declarators;
 +    Token semi;
 +
-+    NetDeclarationSyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, Token netType, NetStrengthSyntax* strength, Token expansionHint, DataTypeSyntax& type, const SeparatedSyntaxList<DeclaratorSyntax>& declarators, Token semi) :
-+        MemberSyntax(SyntaxKind::NetDeclaration, attributes), netType(netType), strength(strength), expansionHint(expansionHint), type(&type), declarators(declarators), semi(semi) {
++    NetDeclarationSyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, Token netType, NetStrengthSyntax* strength, Token expansionHint, DataTypeSyntax& type, TimingControlSyntax* delay, const SeparatedSyntaxList<DeclaratorSyntax>& declarators, Token semi) :
++        MemberSyntax(SyntaxKind::NetDeclaration, attributes), netType(netType), strength(strength), expansionHint(expansionHint), type(&type), delay(delay), declarators(declarators), semi(semi) {
 +        if (this->strength) this->strength->parent = this;
 +        this->type->parent = this;
++        if (this->delay) this->delay->parent = this;
 +        this->declarators.parent = this;
 +        for (auto child : this->declarators)
 +            child->parent = this;
@@ -21581,6 +22619,74 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    HierarchyInstantiationSyntax* clone(BumpAllocator& alloc) const;
 +};
 +
++struct GateInstanceNameSyntax : public SyntaxNode {
++    Token name;
++    SyntaxList<VariableDimensionSyntax> dimensions;
++
++    GateInstanceNameSyntax(Token name, const SyntaxList<VariableDimensionSyntax>& dimensions) :
++        SyntaxNode(SyntaxKind::GateInstanceName), name(name), dimensions(dimensions) {
++        this->dimensions.parent = this;
++        for (auto child : this->dimensions)
++            child->parent = this;
++    }
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    GateInstanceNameSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct GateInstanceSyntax : public SyntaxNode {
++    GateInstanceNameSyntax* decl;
++    Token openParen;
++    SeparatedSyntaxList<ExpressionSyntax> connections;
++    Token closeParen;
++
++    GateInstanceSyntax(GateInstanceNameSyntax* decl, Token openParen, const SeparatedSyntaxList<ExpressionSyntax>& connections, Token closeParen) :
++        SyntaxNode(SyntaxKind::GateInstance), decl(decl), openParen(openParen), connections(connections), closeParen(closeParen) {
++        if (this->decl) this->decl->parent = this;
++        this->connections.parent = this;
++        for (auto child : this->connections)
++            child->parent = this;
++    }
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    GateInstanceSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct GateInstantiationSyntax : public MemberSyntax {
++    Token gateType;
++    DriveStrengthSyntax* strength;
++    TimingControlSyntax* delay;
++    SeparatedSyntaxList<GateInstanceSyntax> instances;
++    Token semi;
++
++    GateInstantiationSyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, Token gateType, DriveStrengthSyntax* strength, TimingControlSyntax* delay, const SeparatedSyntaxList<GateInstanceSyntax>& instances, Token semi) :
++        MemberSyntax(SyntaxKind::GateInstantiation, attributes), gateType(gateType), strength(strength), delay(delay), instances(instances), semi(semi) {
++        if (this->strength) this->strength->parent = this;
++        if (this->delay) this->delay->parent = this;
++        this->instances.parent = this;
++        for (auto child : this->instances)
++            child->parent = this;
++    }
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    GateInstantiationSyntax* clone(BumpAllocator& alloc) const;
++};
++
 +struct FunctionPortSyntax : public SyntaxNode {
 +    SyntaxList<AttributeInstanceSyntax> attributes;
 +    Token constKeyword;
@@ -21937,11 +23043,15 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +struct ContinuousAssignSyntax : public MemberSyntax {
 +    Token assign;
++    DriveStrengthSyntax* strength;
++    TimingControlSyntax* delay;
 +    SeparatedSyntaxList<ExpressionSyntax> assignments;
 +    Token semi;
 +
-+    ContinuousAssignSyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, Token assign, const SeparatedSyntaxList<ExpressionSyntax>& assignments, Token semi) :
-+        MemberSyntax(SyntaxKind::ContinuousAssign, attributes), assign(assign), assignments(assignments), semi(semi) {
++    ContinuousAssignSyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, Token assign, DriveStrengthSyntax* strength, TimingControlSyntax* delay, const SeparatedSyntaxList<ExpressionSyntax>& assignments, Token semi) :
++        MemberSyntax(SyntaxKind::ContinuousAssign, attributes), assign(assign), strength(strength), delay(delay), assignments(assignments), semi(semi) {
++        if (this->strength) this->strength->parent = this;
++        if (this->delay) this->delay->parent = this;
 +        this->assignments.parent = this;
 +        for (auto child : this->assignments)
 +            child->parent = this;
@@ -22255,13 +23365,13 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    Token keyword;
 +    Token stringLiteral;
 +    Token property;
-+    Token name;
++    Token c_identifier;
 +    Token equals;
 +    not_null<FunctionPrototypeSyntax*> method;
 +    Token semi;
 +
-+    DPIImportExportSyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, Token stringLiteral, Token property, Token name, Token equals, FunctionPrototypeSyntax& method, Token semi) :
-+        MemberSyntax(SyntaxKind::DPIImportExport, attributes), keyword(keyword), stringLiteral(stringLiteral), property(property), name(name), equals(equals), method(&method), semi(semi) {
++    DPIImportExportSyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, Token stringLiteral, Token property, Token c_identifier, Token equals, FunctionPrototypeSyntax& method, Token semi) :
++        MemberSyntax(SyntaxKind::DPIImportExport, attributes), keyword(keyword), stringLiteral(stringLiteral), property(property), c_identifier(c_identifier), equals(equals), method(&method), semi(semi) {
 +        this->method->parent = this;
 +    }
 +
@@ -23288,6 +24398,22 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    DefaultNetTypeDirectiveSyntax* clone(BumpAllocator& alloc) const;
 +};
 +
++struct UnconnectedDriveDirectiveSyntax : public DirectiveSyntax {
++    Token strength;
++
++    UnconnectedDriveDirectiveSyntax(Token directive, Token strength) :
++        DirectiveSyntax(SyntaxKind::UnconnectedDriveDirective, directive), strength(strength) {
++    }
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    UnconnectedDriveDirectiveSyntax* clone(BumpAllocator& alloc) const;
++};
++
 +struct LineDirectiveSyntax : public DirectiveSyntax {
 +    Token lineNumber;
 +    Token fileName;
@@ -23336,6 +24462,109 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    void setChild(size_t index, TokenOrSyntax child);
 +
 +    BeginKeywordsDirectiveSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct PragmaExpressionSyntax : public SyntaxNode {
++
++    PragmaExpressionSyntax(SyntaxKind kind) :
++        SyntaxNode(kind) {
++    }
++
++    static bool isKind(SyntaxKind kind);
++};
++
++struct SimplePragmaExpressionSyntax : public PragmaExpressionSyntax {
++    Token value;
++
++    SimplePragmaExpressionSyntax(Token value) :
++        PragmaExpressionSyntax(SyntaxKind::SimplePragmaExpression), value(value) {
++    }
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    SimplePragmaExpressionSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct NameValuePragmaExpressionSyntax : public PragmaExpressionSyntax {
++    Token name;
++    Token equals;
++    not_null<PragmaExpressionSyntax*> value;
++
++    NameValuePragmaExpressionSyntax(Token name, Token equals, PragmaExpressionSyntax& value) :
++        PragmaExpressionSyntax(SyntaxKind::NameValuePragmaExpression), name(name), equals(equals), value(&value) {
++        this->value->parent = this;
++    }
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    NameValuePragmaExpressionSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct NumberPragmaExpressionSyntax : public PragmaExpressionSyntax {
++    Token size;
++    Token base;
++    Token value;
++
++    NumberPragmaExpressionSyntax(Token size, Token base, Token value) :
++        PragmaExpressionSyntax(SyntaxKind::NumberPragmaExpression), size(size), base(base), value(value) {
++    }
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    NumberPragmaExpressionSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct ParenPragmaExpressionSyntax : public PragmaExpressionSyntax {
++    Token openParen;
++    SeparatedSyntaxList<PragmaExpressionSyntax> values;
++    Token closeParen;
++
++    ParenPragmaExpressionSyntax(Token openParen, const SeparatedSyntaxList<PragmaExpressionSyntax>& values, Token closeParen) :
++        PragmaExpressionSyntax(SyntaxKind::ParenPragmaExpression), openParen(openParen), values(values), closeParen(closeParen) {
++        this->values.parent = this;
++        for (auto child : this->values)
++            child->parent = this;
++    }
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    ParenPragmaExpressionSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct PragmaDirectiveSyntax : public DirectiveSyntax {
++    Token name;
++    SeparatedSyntaxList<PragmaExpressionSyntax> args;
++
++    PragmaDirectiveSyntax(Token directive, Token name, const SeparatedSyntaxList<PragmaExpressionSyntax>& args) :
++        DirectiveSyntax(SyntaxKind::PragmaDirective, directive), name(name), args(args) {
++        this->args.parent = this;
++        for (auto child : this->args)
++            child->parent = this;
++    }
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    PragmaDirectiveSyntax* clone(BumpAllocator& alloc) const;
 +};
 +
 +class SyntaxFactory {
@@ -23388,12 +24617,12 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    ConstraintBlockSyntax& constraintBlock(Token openBrace, const SyntaxList<ConstraintItemSyntax>& items, Token closeBrace);
 +    ConstraintDeclarationSyntax& constraintDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, const TokenList& qualifiers, Token keyword, Token name, ConstraintBlockSyntax& block);
 +    ConstraintPrototypeSyntax& constraintPrototype(const SyntaxList<AttributeInstanceSyntax>& attributes, const TokenList& qualifiers, Token keyword, Token name, Token semi);
-+    ContinuousAssignSyntax& continuousAssign(const SyntaxList<AttributeInstanceSyntax>& attributes, Token assign, const SeparatedSyntaxList<ExpressionSyntax>& assignments, Token semi);
++    ContinuousAssignSyntax& continuousAssign(const SyntaxList<AttributeInstanceSyntax>& attributes, Token assign, DriveStrengthSyntax* strength, TimingControlSyntax* delay, const SeparatedSyntaxList<ExpressionSyntax>& assignments, Token semi);
 +    CoverageBinsSyntax& coverageBins(const SyntaxList<AttributeInstanceSyntax>& attributes, Token wildcard, Token keyword, Token name, ElementSelectSyntax* selector, Token equals, CoverageBinInitializerSyntax& initializer, IffClauseSyntax* iff, Token semi);
 +    CoverageOptionSyntax& coverageOption(const SyntaxList<AttributeInstanceSyntax>& attributes, Token option, Token dot, Token name, Token equals, ExpressionSyntax& expr, Token semi);
 +    CovergroupDeclarationSyntax& covergroupDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, Token covergroup, Token name, AnsiPortListSyntax* portList, SyntaxNode* event, Token semi, const SyntaxList<MemberSyntax>& members, Token endgroup, NamedBlockClauseSyntax* endBlockName);
 +    CoverpointSyntax& coverpoint(const SyntaxList<AttributeInstanceSyntax>& attributes, DataTypeSyntax* type, NamedLabelSyntax* label, Token coverpoint, ExpressionSyntax& expr, Token openBrace, const SyntaxList<MemberSyntax>& members, Token closeBrace, Token emptySemi);
-+    DPIImportExportSyntax& dPIImportExport(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, Token stringLiteral, Token property, Token name, Token equals, FunctionPrototypeSyntax& method, Token semi);
++    DPIImportExportSyntax& dPIImportExport(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, Token stringLiteral, Token property, Token c_identifier, Token equals, FunctionPrototypeSyntax& method, Token semi);
 +    DataDeclarationSyntax& dataDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, const TokenList& modifiers, DataTypeSyntax& type, const SeparatedSyntaxList<DeclaratorSyntax>& declarators, Token semi);
 +    DeclaratorSyntax& declarator(Token name, const SyntaxList<VariableDimensionSyntax>& dimensions, EqualsValueClauseSyntax* initializer);
 +    DefParamAssignmentSyntax& defParamAssignment(NameSyntax& name, EqualsValueClauseSyntax* setter);
@@ -23403,6 +24632,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    DefaultNetTypeDirectiveSyntax& defaultNetTypeDirective(Token directive, Token netType);
 +    DeferredAssertionSyntax& deferredAssertion(Token hash, Token zero, Token finalKeyword);
 +    DefineDirectiveSyntax& defineDirective(Token directive, Token name, MacroFormalArgumentListSyntax* formalArguments, const TokenList& body);
++    Delay3Syntax& delay3(Token hash, Token openParen, ExpressionSyntax& delay1, Token comma1, ExpressionSyntax* delay2, Token comma2, ExpressionSyntax* delay3, Token closeParen);
 +    DelaySyntax& delay(SyntaxKind kind, Token hash, ExpressionSyntax& delayValue);
 +    DisableConstraintSyntax& disableConstraint(Token disable, Token soft, NameSyntax& name, Token semi);
 +    DisableForkStatementSyntax& disableForkStatement(NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, Token disable, Token fork, Token semi);
@@ -23450,6 +24680,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    FunctionPortListSyntax& functionPortList(Token openParen, const SeparatedSyntaxList<FunctionPortSyntax>& ports, Token closeParen);
 +    FunctionPortSyntax& functionPort(const SyntaxList<AttributeInstanceSyntax>& attributes, Token constKeyword, Token direction, Token varKeyword, DataTypeSyntax* dataType, DeclaratorSyntax& declarator);
 +    FunctionPrototypeSyntax& functionPrototype(Token keyword, Token lifetime, DataTypeSyntax& returnType, NameSyntax& name, FunctionPortListSyntax* portList);
++    GateInstanceNameSyntax& gateInstanceName(Token name, const SyntaxList<VariableDimensionSyntax>& dimensions);
++    GateInstanceSyntax& gateInstance(GateInstanceNameSyntax* decl, Token openParen, const SeparatedSyntaxList<ExpressionSyntax>& connections, Token closeParen);
++    GateInstantiationSyntax& gateInstantiation(const SyntaxList<AttributeInstanceSyntax>& attributes, Token gateType, DriveStrengthSyntax* strength, TimingControlSyntax* delay, const SeparatedSyntaxList<GateInstanceSyntax>& instances, Token semi);
 +    GenerateBlockSyntax& generateBlock(const SyntaxList<AttributeInstanceSyntax>& attributes, NamedLabelSyntax* label, Token begin, NamedBlockClauseSyntax* beginName, const SyntaxList<MemberSyntax>& members, Token end, NamedBlockClauseSyntax* endName);
 +    GenerateRegionSyntax& generateRegion(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, const SyntaxList<MemberSyntax>& members, Token endgenerate);
 +    GenvarDeclarationSyntax& genvarDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, const SeparatedSyntaxList<IdentifierNameSyntax>& identifiers, Token semi);
@@ -23503,19 +24736,22 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    ModuleDeclarationSyntax& moduleDeclaration(SyntaxKind kind, const SyntaxList<AttributeInstanceSyntax>& attributes, ModuleHeaderSyntax& header, const SyntaxList<MemberSyntax>& members, Token endmodule, NamedBlockClauseSyntax* blockName);
 +    ModuleHeaderSyntax& moduleHeader(SyntaxKind kind, Token moduleKeyword, Token lifetime, Token name, const SyntaxList<PackageImportDeclarationSyntax>& imports, ParameterPortListSyntax* parameters, PortListSyntax* ports, Token semi);
 +    MultipleConcatenationExpressionSyntax& multipleConcatenationExpression(Token openBrace, ExpressionSyntax& expression, ConcatenationExpressionSyntax& concatenation, Token closeBrace);
++    NameValuePragmaExpressionSyntax& nameValuePragmaExpression(Token name, Token equals, PragmaExpressionSyntax& value);
 +    NamedArgumentSyntax& namedArgument(Token dot, Token name, Token openParen, ExpressionSyntax* expr, Token closeParen);
 +    NamedBlockClauseSyntax& namedBlockClause(Token colon, Token name);
 +    NamedLabelSyntax& namedLabel(Token name, Token colon);
 +    NamedPortConnectionSyntax& namedPortConnection(const SyntaxList<AttributeInstanceSyntax>& attributes, Token dot, Token name, Token openParen, ExpressionSyntax* expr, Token closeParen);
 +    NamedStructurePatternMemberSyntax& namedStructurePatternMember(Token name, Token colon, PatternSyntax& pattern);
 +    NamedTypeSyntax& namedType(NameSyntax& name);
-+    NetDeclarationSyntax& netDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, Token netType, NetStrengthSyntax* strength, Token expansionHint, DataTypeSyntax& type, const SeparatedSyntaxList<DeclaratorSyntax>& declarators, Token semi);
++    NetDeclarationSyntax& netDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, Token netType, NetStrengthSyntax* strength, Token expansionHint, DataTypeSyntax& type, TimingControlSyntax* delay, const SeparatedSyntaxList<DeclaratorSyntax>& declarators, Token semi);
 +    NetPortHeaderSyntax& netPortHeader(Token direction, Token netType, DataTypeSyntax& dataType);
 +    NetTypeDeclarationSyntax& netTypeDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, DataTypeSyntax& type, Token name, WithFunctionClauseSyntax* withFunction, Token semi);
 +    NewArrayExpressionSyntax& newArrayExpression(Token newKeyword, Token openBracket, ExpressionSyntax& sizeExpr, Token closeBracket, ParenthesizedExpressionSyntax* initializer);
 +    NewClassExpressionSyntax& newClassExpression(ClassScopeSyntax* classScope, Token newKeyword, ArgumentListSyntax* arguments);
 +    NewExpressionSyntax& newExpression(Token newKeyword, ExpressionSyntax& expr);
 +    NonAnsiPortListSyntax& nonAnsiPortList(Token openParen, const SeparatedSyntaxList<NonAnsiPortSyntax>& ports, Token closeParen);
++    NumberPragmaExpressionSyntax& numberPragmaExpression(Token size, Token base, Token value);
++    OpenRangeExpressionSyntax& openRangeExpression(Token openBracket, ExpressionSyntax& left, Token colon, ExpressionSyntax& right, Token closeBracket);
 +    OpenRangeListSyntax& openRangeList(Token openBrace, const SeparatedSyntaxList<ExpressionSyntax>& valueRanges, Token closeBrace);
 +    OrderedArgumentSyntax& orderedArgument(ExpressionSyntax& expr);
 +    OrderedPortConnectionSyntax& orderedPortConnection(const SyntaxList<AttributeInstanceSyntax>& attributes, ExpressionSyntax* expr);
@@ -23527,6 +24763,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    ParameterPortListSyntax& parameterPortList(Token hash, Token openParen, const SeparatedSyntaxList<ParameterDeclarationBaseSyntax>& declarations, Token closeParen);
 +    ParameterValueAssignmentSyntax& parameterValueAssignment(Token hash, ArgumentListSyntax& assignments);
 +    ParenExpressionListSyntax& parenExpressionList(Token openParen, const SeparatedSyntaxList<ExpressionSyntax>& expressions, Token closeParen);
++    ParenPragmaExpressionSyntax& parenPragmaExpression(Token openParen, const SeparatedSyntaxList<PragmaExpressionSyntax>& values, Token closeParen);
 +    ParenthesizedEventExpressionSyntax& parenthesizedEventExpression(Token openParen, EventExpressionSyntax& expr, Token closeParen);
 +    ParenthesizedExpressionSyntax& parenthesizedExpression(Token openParen, ExpressionSyntax& expression, Token closeParen);
 +    PatternCaseItemSyntax& patternCaseItem(PatternSyntax& pattern, Token tripleAnd, ExpressionSyntax* expr, Token colon, StatementSyntax& statement);
@@ -23534,6 +24771,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    PortDeclarationSyntax& portDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, PortHeaderSyntax& header, const SeparatedSyntaxList<DeclaratorSyntax>& declarators, Token semi);
 +    PortReferenceSyntax& portReference(Token name, ElementSelectSyntax* select);
 +    PostfixUnaryExpressionSyntax& postfixUnaryExpression(SyntaxKind kind, ExpressionSyntax& operand, const SyntaxList<AttributeInstanceSyntax>& attributes, Token operatorToken);
++    PragmaDirectiveSyntax& pragmaDirective(Token directive, Token name, const SeparatedSyntaxList<PragmaExpressionSyntax>& args);
 +    PrefixUnaryExpressionSyntax& prefixUnaryExpression(SyntaxKind kind, Token operatorToken, const SyntaxList<AttributeInstanceSyntax>& attributes, ExpressionSyntax& operand);
 +    PrimaryBlockEventExpressionSyntax& primaryBlockEventExpression(Token keyword, NameSyntax& name);
 +    ProceduralAssignStatementSyntax& proceduralAssignStatement(SyntaxKind kind, NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, ExpressionSyntax& lvalue, Token equals, ExpressionSyntax& value, Token semi);
@@ -23557,6 +24795,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    SignedCastExpressionSyntax& signedCastExpression(Token signing, Token apostrophe, ParenthesizedExpressionSyntax& inner);
 +    SimpleAssignmentPatternSyntax& simpleAssignmentPattern(Token openBrace, const SeparatedSyntaxList<ExpressionSyntax>& items, Token closeBrace);
 +    SimpleDirectiveSyntax& simpleDirective(SyntaxKind kind, Token directive);
++    SimplePragmaExpressionSyntax& simplePragmaExpression(Token value);
 +    SolveBeforeConstraintSyntax& solveBeforeConstraint(Token solve, const SeparatedSyntaxList<ExpressionSyntax>& beforeExpr, Token before, const SeparatedSyntaxList<ExpressionSyntax>& afterExpr, Token semi);
 +    StandardCaseItemSyntax& standardCaseItem(const SeparatedSyntaxList<ExpressionSyntax>& expressions, Token colon, SyntaxNode& clause);
 +    StreamExpressionSyntax& streamExpression(ExpressionSyntax& expression, StreamExpressionWithRangeSyntax* withRange);
@@ -23583,6 +24822,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    TypeReferenceSyntax& typeReference(Token typeKeyword, Token openParen, ExpressionSyntax& expr, Token closeParen);
 +    TypedefDeclarationSyntax& typedefDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, Token typedefKeyword, DataTypeSyntax& type, Token name, const SyntaxList<VariableDimensionSyntax>& dimensions, Token semi);
 +    UnconditionalBranchDirectiveSyntax& unconditionalBranchDirective(SyntaxKind kind, Token directive, const TokenList& disabledTokens);
++    UnconnectedDriveDirectiveSyntax& unconnectedDriveDirective(Token directive, Token strength);
 +    UndefDirectiveSyntax& undefDirective(Token directive, Token name);
 +    UniquenessConstraintSyntax& uniquenessConstraint(Token unique, OpenRangeListSyntax& ranges, Token semi);
 +    VariableDimensionSyntax& variableDimension(Token openBracket, DimensionSpecifierSyntax* specifier, Token closeBracket);
@@ -23711,6 +24951,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::DefaultPatternKeyExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const LiteralExpressionSyntax*, LiteralExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::DeferredAssertion: return visitor.visit(*static_cast<std::conditional_t<isConst, const DeferredAssertionSyntax*, DeferredAssertionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::DefineDirective: return visitor.visit(*static_cast<std::conditional_t<isConst, const DefineDirectiveSyntax*, DefineDirectiveSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::Delay3: return visitor.visit(*static_cast<std::conditional_t<isConst, const Delay3Syntax*, Delay3Syntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::DelayControl: return visitor.visit(*static_cast<std::conditional_t<isConst, const DelaySyntax*, DelaySyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::DescendingRangeSelect: return visitor.visit(*static_cast<std::conditional_t<isConst, const RangeSelectSyntax*, RangeSelectSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::DisableConstraint: return visitor.visit(*static_cast<std::conditional_t<isConst, const DisableConstraintSyntax*, DisableConstraintSyntax*>>(node), std::forward<Args>(args)...);
@@ -23770,6 +25011,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::FunctionPort: return visitor.visit(*static_cast<std::conditional_t<isConst, const FunctionPortSyntax*, FunctionPortSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::FunctionPortList: return visitor.visit(*static_cast<std::conditional_t<isConst, const FunctionPortListSyntax*, FunctionPortListSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::FunctionPrototype: return visitor.visit(*static_cast<std::conditional_t<isConst, const FunctionPrototypeSyntax*, FunctionPrototypeSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::GateInstance: return visitor.visit(*static_cast<std::conditional_t<isConst, const GateInstanceSyntax*, GateInstanceSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::GateInstanceName: return visitor.visit(*static_cast<std::conditional_t<isConst, const GateInstanceNameSyntax*, GateInstanceNameSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::GateInstantiation: return visitor.visit(*static_cast<std::conditional_t<isConst, const GateInstantiationSyntax*, GateInstantiationSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::GenerateBlock: return visitor.visit(*static_cast<std::conditional_t<isConst, const GenerateBlockSyntax*, GenerateBlockSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::GenerateRegion: return visitor.visit(*static_cast<std::conditional_t<isConst, const GenerateRegionSyntax*, GenerateRegionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::GenvarDeclaration: return visitor.visit(*static_cast<std::conditional_t<isConst, const GenvarDeclarationSyntax*, GenvarDeclarationSyntax*>>(node), std::forward<Args>(args)...);
@@ -23852,6 +25096,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::MultipleConcatenationExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const MultipleConcatenationExpressionSyntax*, MultipleConcatenationExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::MultiplyAssignmentExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const BinaryExpressionSyntax*, BinaryExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::MultiplyExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const BinaryExpressionSyntax*, BinaryExpressionSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::NameValuePragmaExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const NameValuePragmaExpressionSyntax*, NameValuePragmaExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::NamedArgument: return visitor.visit(*static_cast<std::conditional_t<isConst, const NamedArgumentSyntax*, NamedArgumentSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::NamedBlockClause: return visitor.visit(*static_cast<std::conditional_t<isConst, const NamedBlockClauseSyntax*, NamedBlockClauseSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::NamedLabel: return visitor.visit(*static_cast<std::conditional_t<isConst, const NamedLabelSyntax*, NamedLabelSyntax*>>(node), std::forward<Args>(args)...);
@@ -23872,7 +25117,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::NonblockingAssignmentExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const BinaryExpressionSyntax*, BinaryExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::NonblockingEventTriggerStatement: return visitor.visit(*static_cast<std::conditional_t<isConst, const EventTriggerStatementSyntax*, EventTriggerStatementSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::NullLiteralExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const LiteralExpressionSyntax*, LiteralExpressionSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::NumberPragmaExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const NumberPragmaExpressionSyntax*, NumberPragmaExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::OneStepLiteralExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const LiteralExpressionSyntax*, LiteralExpressionSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::OpenRangeExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const OpenRangeExpressionSyntax*, OpenRangeExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::OpenRangeList: return visitor.visit(*static_cast<std::conditional_t<isConst, const OpenRangeListSyntax*, OpenRangeListSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::OrAssignmentExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const BinaryExpressionSyntax*, BinaryExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::OrSequenceExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const BinaryExpressionSyntax*, BinaryExpressionSyntax*>>(node), std::forward<Args>(args)...);
@@ -23891,6 +25138,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::ParameterPortList: return visitor.visit(*static_cast<std::conditional_t<isConst, const ParameterPortListSyntax*, ParameterPortListSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::ParameterValueAssignment: return visitor.visit(*static_cast<std::conditional_t<isConst, const ParameterValueAssignmentSyntax*, ParameterValueAssignmentSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::ParenExpressionList: return visitor.visit(*static_cast<std::conditional_t<isConst, const ParenExpressionListSyntax*, ParenExpressionListSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::ParenPragmaExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const ParenPragmaExpressionSyntax*, ParenPragmaExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::ParenthesizedEventExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const ParenthesizedEventExpressionSyntax*, ParenthesizedEventExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::ParenthesizedExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const ParenthesizedExpressionSyntax*, ParenthesizedExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::PatternCaseItem: return visitor.visit(*static_cast<std::conditional_t<isConst, const PatternCaseItemSyntax*, PatternCaseItemSyntax*>>(node), std::forward<Args>(args)...);
@@ -23900,7 +25148,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::PostdecrementExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const PostfixUnaryExpressionSyntax*, PostfixUnaryExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::PostincrementExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const PostfixUnaryExpressionSyntax*, PostfixUnaryExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::PowerExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const BinaryExpressionSyntax*, BinaryExpressionSyntax*>>(node), std::forward<Args>(args)...);
-+        case SyntaxKind::PragmaDirective: return visitor.visit(*static_cast<std::conditional_t<isConst, const SimpleDirectiveSyntax*, SimpleDirectiveSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::PragmaDirective: return visitor.visit(*static_cast<std::conditional_t<isConst, const PragmaDirectiveSyntax*, PragmaDirectiveSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::PrimaryBlockEventExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const PrimaryBlockEventExpressionSyntax*, PrimaryBlockEventExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::ProceduralAssignStatement: return visitor.visit(*static_cast<std::conditional_t<isConst, const ProceduralAssignStatementSyntax*, ProceduralAssignStatementSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::ProceduralDeassignStatement: return visitor.visit(*static_cast<std::conditional_t<isConst, const ProceduralDeassignStatementSyntax*, ProceduralDeassignStatementSyntax*>>(node), std::forward<Args>(args)...);
@@ -23942,6 +25190,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::SignalEventExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const SignalEventExpressionSyntax*, SignalEventExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::SignedCastExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const SignedCastExpressionSyntax*, SignedCastExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::SimpleAssignmentPattern: return visitor.visit(*static_cast<std::conditional_t<isConst, const SimpleAssignmentPatternSyntax*, SimpleAssignmentPatternSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::SimplePragmaExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const SimplePragmaExpressionSyntax*, SimplePragmaExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::SimpleRangeSelect: return visitor.visit(*static_cast<std::conditional_t<isConst, const RangeSelectSyntax*, RangeSelectSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::SolveBeforeConstraint: return visitor.visit(*static_cast<std::conditional_t<isConst, const SolveBeforeConstraintSyntax*, SolveBeforeConstraintSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::StandardCaseItem: return visitor.visit(*static_cast<std::conditional_t<isConst, const StandardCaseItemSyntax*, StandardCaseItemSyntax*>>(node), std::forward<Args>(args)...);
@@ -23979,7 +25228,6 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::TypeAssignment: return visitor.visit(*static_cast<std::conditional_t<isConst, const TypeAssignmentSyntax*, TypeAssignmentSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::TypeParameterDeclaration: return visitor.visit(*static_cast<std::conditional_t<isConst, const TypeParameterDeclarationSyntax*, TypeParameterDeclarationSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::TypeReference: return visitor.visit(*static_cast<std::conditional_t<isConst, const TypeReferenceSyntax*, TypeReferenceSyntax*>>(node), std::forward<Args>(args)...);
-+        case SyntaxKind::TypeType: return visitor.visit(*static_cast<std::conditional_t<isConst, const KeywordTypeSyntax*, KeywordTypeSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::TypedefDeclaration: return visitor.visit(*static_cast<std::conditional_t<isConst, const TypedefDeclarationSyntax*, TypedefDeclarationSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::UnaryBitwiseAndExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const PrefixUnaryExpressionSyntax*, PrefixUnaryExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::UnaryBitwiseNandExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const PrefixUnaryExpressionSyntax*, PrefixUnaryExpressionSyntax*>>(node), std::forward<Args>(args)...);
@@ -23997,7 +25245,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::UnarySequenceDelayExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const PrefixUnaryExpressionSyntax*, PrefixUnaryExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::UnarySequenceEventExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const PrefixUnaryExpressionSyntax*, PrefixUnaryExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::UnbasedUnsizedLiteralExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const LiteralExpressionSyntax*, LiteralExpressionSyntax*>>(node), std::forward<Args>(args)...);
-+        case SyntaxKind::UnconnectedDriveDirective: return visitor.visit(*static_cast<std::conditional_t<isConst, const SimpleDirectiveSyntax*, SimpleDirectiveSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::UnconnectedDriveDirective: return visitor.visit(*static_cast<std::conditional_t<isConst, const UnconnectedDriveDirectiveSyntax*, UnconnectedDriveDirectiveSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::UndefDirective: return visitor.visit(*static_cast<std::conditional_t<isConst, const UndefDirectiveSyntax*, UndefDirectiveSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::UndefineAllDirective: return visitor.visit(*static_cast<std::conditional_t<isConst, const SimpleDirectiveSyntax*, SimpleDirectiveSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::UnionType: return visitor.visit(*static_cast<std::conditional_t<isConst, const StructUnionTypeSyntax*, StructUnionTypeSyntax*>>(node), std::forward<Args>(args)...);
@@ -24046,13 +25294,13 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +}
 diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/syntax/SyntaxKind.h ./generated/slang/syntax/SyntaxKind.h
 --- ./generated/slang/syntax/SyntaxKind.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/syntax/SyntaxKind.h	2019-11-23 10:40:28.821890357 -0800
-@@ -0,0 +1,433 @@
++++ ./generated/slang/syntax/SyntaxKind.h	2020-04-13 10:23:52.710371660 -0700
+@@ -0,0 +1,441 @@
 +//------------------------------------------------------------------------------
-+// SyntaxKind.h
-+// Generated SyntaxKind enum.
++//! @file SyntaxKind.h
++//! @brief Generated SyntaxKind enum
 +//
-+// File is under the MIT license; see LICENSE for details.
++// File is under the MIT license; see LICENSE for details
 +//------------------------------------------------------------------------------
 +#pragma once
 +
@@ -24159,6 +25407,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    DefaultPatternKeyExpression,
 +    DeferredAssertion,
 +    DefineDirective,
++    Delay3,
 +    DelayControl,
 +    DescendingRangeSelect,
 +    DisableConstraint,
@@ -24218,6 +25467,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    FunctionPort,
 +    FunctionPortList,
 +    FunctionPrototype,
++    GateInstance,
++    GateInstanceName,
++    GateInstantiation,
 +    GenerateBlock,
 +    GenerateRegion,
 +    GenvarDeclaration,
@@ -24300,6 +25552,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    MultipleConcatenationExpression,
 +    MultiplyAssignmentExpression,
 +    MultiplyExpression,
++    NameValuePragmaExpression,
 +    NamedArgument,
 +    NamedBlockClause,
 +    NamedLabel,
@@ -24320,7 +25573,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    NonblockingAssignmentExpression,
 +    NonblockingEventTriggerStatement,
 +    NullLiteralExpression,
++    NumberPragmaExpression,
 +    OneStepLiteralExpression,
++    OpenRangeExpression,
 +    OpenRangeList,
 +    OrAssignmentExpression,
 +    OrSequenceExpression,
@@ -24339,6 +25594,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    ParameterPortList,
 +    ParameterValueAssignment,
 +    ParenExpressionList,
++    ParenPragmaExpression,
 +    ParenthesizedEventExpression,
 +    ParenthesizedExpression,
 +    PatternCaseItem,
@@ -24390,6 +25646,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    SignalEventExpression,
 +    SignedCastExpression,
 +    SimpleAssignmentPattern,
++    SimplePragmaExpression,
 +    SimpleRangeSelect,
 +    SolveBeforeConstraint,
 +    StandardCaseItem,
@@ -24427,7 +25684,6 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    TypeAssignment,
 +    TypeParameterDeclaration,
 +    TypeReference,
-+    TypeType,
 +    TypedefDeclaration,
 +    UnaryBitwiseAndExpression,
 +    UnaryBitwiseNandExpression,
@@ -24483,11 +25739,11 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +}
 diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/Version.cpp ./generated/Version.cpp
 --- ./generated/Version.cpp	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/Version.cpp	2019-11-23 10:40:28.691893113 -0800
++++ ./generated/Version.cpp	2020-04-13 10:23:52.590374210 -0700
 @@ -0,0 +1,26 @@
 +//------------------------------------------------------------------------------
-+// Version.cpp.in
-+// Input file for build-time version source generation.
++// Version.cpp
++// Input file for build-time version source generation
 +//
 +// File is under the MIT license; see LICENSE for details.
 +//------------------------------------------------------------------------------
@@ -24503,11 +25759,313 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +}
 +
 +int VersionInfo::getMinor() {
-+    return 1;
++    return 4;
 +}
 +
 +string_view VersionInfo::getRevision() {
-+    return "0e2381c9"sv;
++    return "f525b308"sv;
 +}
 +
 +}
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./include/slang/text/SourceManager.h ./include/slang/text/SourceManager.h
+--- ./include/slang/text/SourceManager.h	2020-04-12 20:09:54.091612606 -0700
++++ ./include/slang/text/SourceManager.h	2020-04-13 11:31:01.875515822 -0700
+@@ -13,10 +13,11 @@
+ #include <memory>
+ #include <mutex>
+ #include <set>
+ #include <shared_mutex>
+ #include <variant>
++#include <map>
+ 
+ #include "slang/text/SourceLocation.h"
+ #include "slang/util/Util.h"
+ 
+ namespace fs = std::filesystem;
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./source/codegen/CodeGenerator.cpp ./source/codegen/CodeGenerator.cpp
+--- ./source/codegen/CodeGenerator.cpp	2020-04-12 20:09:54.151611342 -0700
++++ ./source/codegen/CodeGenerator.cpp	1969-12-31 16:00:00.000000000 -0800
+@@ -1,190 +0,0 @@
+-//------------------------------------------------------------------------------
+-// CodeGenerator.cpp
+-// Executable code generation
+-// NOTE: Only included if slang is configured to use LLVM
+-//
+-// File is under the MIT license; see LICENSE for details
+-//------------------------------------------------------------------------------
+-#include "slang/codegen/CodeGenerator.h"
+-
+-#include <llvm/IR/BasicBlock.h>
+-#include <llvm/IR/IRBuilder.h>
+-#include <llvm/IR/LLVMContext.h>
+-#include <llvm/IR/Module.h>
+-#include <llvm/IR/Verifier.h>
+-
+-#include "slang/codegen/ExpressionEmitter.h"
+-#include "slang/codegen/StatementEmitter.h"
+-#include "slang/compilation/Compilation.h"
+-#include "slang/symbols/ASTVisitor.h"
+-#include "slang/symbols/Symbol.h"
+-
+-namespace slang {
+-
+-CodeGenerator::CodeGenerator(Compilation& compilation) : compilation(compilation) {
+-    ctx = std::make_unique<llvm::LLVMContext>();
+-    module = std::make_unique<llvm::Module>("primary", *ctx);
+-
+-    // Register built-in types.
+-    typeMap.emplace(&compilation.getVoidType(), llvm::Type::getVoidTy(*ctx));
+-
+-    // Create the main entry point.
+-    auto intType = llvm::Type::getInt32Ty(*ctx);
+-    auto funcType = llvm::FunctionType::get(intType, /* isVarArg */ false);
+-    mainFunc = llvm::Function::Create(funcType, llvm::Function::ExternalLinkage, "main", *module);
+-
+-    // Create the first basic block that will run at the start of simulation
+-    // to initialize all static variables.
+-    globalInitBlock = llvm::BasicBlock::Create(*ctx, "", mainFunc);
+-}
+-
+-CodeGenerator::~CodeGenerator() = default;
+-
+-std::string CodeGenerator::finish() {
+-    // Insert all initial blocks into the main function.
+-    auto lastBlock = globalInitBlock;
+-    for (auto block : initialBlocks) {
+-        llvm::IRBuilder<>(lastBlock).CreateBr(block);
+-        lastBlock = block;
+-    }
+-
+-    // Finish the main function.
+-    auto intType = llvm::Type::getInt32Ty(*ctx);
+-    llvm::IRBuilder<>(lastBlock).CreateRet(llvm::ConstantInt::get(intType, 0));
+-
+-    // Verify all generated code.
+-    bool bad = llvm::verifyModule(*module, &llvm::errs());
+-    if (bad) {
+-        module->dump();
+-        return "";
+-    }
+-
+-    // Return the module bitcode.
+-    std::string result;
+-    llvm::raw_string_ostream os(result);
+-    module->print(os, nullptr);
+-
+-    return os.str();
+-}
+-
+-void CodeGenerator::genInstance(const InstanceSymbol& instance) {
+-    instance.visit(makeVisitor([this](const VariableSymbol& symbol) { genGlobal(symbol); },
+-                               [this](const ProceduralBlockSymbol& symbol) { genBlock(symbol); }));
+-}
+-
+-void CodeGenerator::genBlock(const ProceduralBlockSymbol& block) {
+-    // For now skip everything except initial blocks.
+-    if (block.procedureKind != ProceduralBlockKind::Initial)
+-        return;
+-
+-    // Create a block that will contain all of the process's statements.
+-    auto bb = llvm::BasicBlock::Create(*ctx, "", mainFunc);
+-    genStmt(bb, block.getBody());
+-    initialBlocks.push_back(bb);
+-}
+-
+-llvm::Type* CodeGenerator::genType(const Type& type) {
+-    // Unwrap aliases.
+-    if (type.isAlias())
+-        return genType(type.getCanonicalType());
+-
+-    // Check the cache.
+-    if (auto it = typeMap.find(&type); it != typeMap.end())
+-        return it->second;
+-
+-    if (!type.isIntegral())
+-        THROW_UNREACHABLE;
+-
+-    // Underlying representation for integer types:
+-    // - Two state types: use the bitwidth as specified
+-    // - Four state types: double the specified bitwidth,
+-    //                     the upper bits indicate a 1 for unknowns
+-    // - If the actual width > configured limit, switch to an array of bytes
+-    auto& intType = type.as<IntegralType>();
+-    uint32_t bits = intType.bitWidth;
+-    if (intType.isFourState)
+-        bits *= 2;
+-
+-    llvm::Type* result;
+-    if (bits > options.maxIntBits)
+-        result = llvm::ArrayType::get(llvm::Type::getInt64Ty(*ctx), (bits + 63) / 64);
+-    else
+-        result = llvm::Type::getIntNTy(*ctx, bits);
+-
+-    typeMap.emplace(&type, result);
+-    return result;
+-}
+-
+-llvm::Constant* CodeGenerator::genConstant(const Type& type, const ConstantValue& cv) {
+-    // TODO: other value types
+-    return genConstant(type, cv.integer());
+-}
+-
+-llvm::Constant* CodeGenerator::genConstant(const Type& type, const SVInt& integer) {
+-    auto& intType = type.as<IntegralType>();
+-    uint32_t bits = intType.bitWidth;
+-    if (intType.isFourState)
+-        bits *= 2;
+-
+-    llvm::ArrayRef<uint64_t> data(integer.getRawPtr(), integer.getNumWords());
+-    if (bits <= options.maxIntBits)
+-        return llvm::ConstantInt::get(*ctx, llvm::APInt(bits, data));
+-    else
+-        return llvm::ConstantDataArray::get(*ctx, data);
+-}
+-
+-llvm::Value* CodeGenerator::genExpr(llvm::BasicBlock* bb, const Expression& expr) {
+-    ExpressionEmitter emitter(*this, bb);
+-    return emitter.emit(expr);
+-}
+-
+-void CodeGenerator::genStmt(llvm::BasicBlock* bb, const Statement& stmt) {
+-    StatementEmitter emitter(*this, bb);
+-    emitter.emit(stmt);
+-}
+-
+-void CodeGenerator::genGlobal(const VariableSymbol& variable) {
+-    ASSERT(variable.lifetime == VariableLifetime::Static);
+-
+-    auto& type = variable.getType();
+-
+-    bool needsInitializer = false;
+-    llvm::Constant* constVal = nullptr;
+-    if (auto init = variable.getInitializer()) {
+-        EvalContext evCtx(compilation);
+-        ConstantValue val = init->eval(evCtx);
+-        if (val)
+-            constVal = genConstant(type, val);
+-        else
+-            needsInitializer = true;
+-    }
+-
+-    // If no initializer provided, use the default for the type.
+-    if (!constVal)
+-        constVal = genConstant(type, type.getDefaultValue());
+-
+-    auto global = new llvm::GlobalVariable(*module, genType(type), /* isConstant */ false,
+-                                           llvm::GlobalValue::PrivateLinkage, constVal);
+-    globalMap.emplace(&variable, global);
+-
+-    // If we set needsInitializer, the variable has an initializer expression
+-    // but it's not constant. Emit it into the basic block that will run at
+-    // the start of simulation.
+-    if (needsInitializer) {
+-        auto expr = genExpr(globalInitBlock, *variable.getInitializer());
+-        llvm::IRBuilder<> ir(globalInitBlock);
+-        ir.CreateStore(expr, global);
+-    }
+-}
+-
+-llvm::Function* CodeGenerator::genSubroutine(const SubroutineSymbol&) {
+-    THROW_UNREACHABLE;
+-}
+-
+-llvm::Function* CodeGenerator::genSubroutine(const SystemSubroutine& subroutine) {
+-    auto it = sysSubroutineMap.find(&subroutine);
+-    ASSERT(it != sysSubroutineMap.end());
+-    return it->second;
+-}
+-
+-} // namespace slang
+\ No newline at end of file
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./source/codegen/ExpressionEmitter.cpp ./source/codegen/ExpressionEmitter.cpp
+--- ./source/codegen/ExpressionEmitter.cpp	2020-04-12 20:09:54.151611342 -0700
++++ ./source/codegen/ExpressionEmitter.cpp	1969-12-31 16:00:00.000000000 -0800
+@@ -1,35 +0,0 @@
+-//------------------------------------------------------------------------------
+-// ExpressionEmitter.cpp
+-// Code emitter for expression trees
+-// NOTE: Only included if slang is configured to use LLVM
+-//
+-// File is under the MIT license; see LICENSE for details
+-//------------------------------------------------------------------------------
+-#include "slang/codegen/ExpressionEmitter.h"
+-
+-#include "slang/codegen/CodeGenerator.h"
+-#include "slang/symbols/ASTVisitor.h"
+-
+-namespace slang {
+-
+-ExpressionEmitter::ExpressionEmitter(CodeGenerator& generator, llvm::BasicBlock* bb) :
+-    generator(generator), ir(bb) {
+-}
+-
+-llvm::Value* ExpressionEmitter::emit(const Expression& expr) {
+-    return expr.visit(*this);
+-}
+-
+-llvm::Value* ExpressionEmitter::visit(const IntegerLiteral& expr) {
+-    return generator.genConstant(*expr.type, expr.getValue());
+-}
+-
+-llvm::Value* ExpressionEmitter::visit(const CallExpression& expr) {
+-    return getUndef(*expr.type);
+-}
+-
+-llvm::Value* ExpressionEmitter::getUndef(const Type& type) {
+-    return llvm::UndefValue::get(generator.genType(type));
+-}
+-
+-} // namespace slang
+\ No newline at end of file
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./source/codegen/StatementEmitter.cpp ./source/codegen/StatementEmitter.cpp
+--- ./source/codegen/StatementEmitter.cpp	2020-04-12 20:09:54.151611342 -0700
++++ ./source/codegen/StatementEmitter.cpp	1969-12-31 16:00:00.000000000 -0800
+@@ -1,27 +0,0 @@
+-//------------------------------------------------------------------------------
+-// StatementEmitter.cpp
+-// Code emitter for statements
+-// NOTE: Only included if slang is configured to use LLVM
+-//
+-// File is under the MIT license; see LICENSE for details
+-//------------------------------------------------------------------------------
+-#include "slang/codegen/StatementEmitter.h"
+-
+-#include "slang/codegen/CodeGenerator.h"
+-#include "slang/symbols/ASTVisitor.h"
+-
+-namespace slang {
+-
+-StatementEmitter::StatementEmitter(CodeGenerator& generator, llvm::BasicBlock* bb) :
+-    generator(generator), ir(bb) {
+-}
+-
+-void StatementEmitter::emit(const Statement& stmt) {
+-    stmt.visit(*this);
+-}
+-
+-void StatementEmitter::visit(const ExpressionStatement& stmt) {
+-    generator.genExpr(ir.GetInsertBlock(), stmt.expr);
+-}
+-
+-} // namespace slang
+\ No newline at end of file
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./source/codegen/SystemCallEmitter.cpp ./source/codegen/SystemCallEmitter.cpp
+--- ./source/codegen/SystemCallEmitter.cpp	2020-04-12 20:09:54.151611342 -0700
++++ ./source/codegen/SystemCallEmitter.cpp	1969-12-31 16:00:00.000000000 -0800
+@@ -1,15 +0,0 @@
+-//------------------------------------------------------------------------------
+-// SystemCallEmitter.cpp
+-// Code emitter for system calls (tasks and functions)
+-// NOTE: Only included if slang is configured to use LLVM
+-//
+-// File is under the MIT license; see LICENSE for details
+-//------------------------------------------------------------------------------
+-#include "slang/codegen/SystemCallEmitter.h"
+-
+-#include "slang/binding/SystemSubroutine.h"
+-#include "slang/codegen/CodeGenerator.h"
+-
+-namespace slang {
+-
+-} // namespace slang
+\ No newline at end of file
