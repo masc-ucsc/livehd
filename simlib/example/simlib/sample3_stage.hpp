@@ -12,9 +12,11 @@ struct Sample3_stage {
   UInt<32> tmp2;
 
   #ifdef SIMLIB_VCD
-    vcd::VarPtr vcd_to1_b;
-    vcd::VarPtr vcd_tmp;
-    vcd::VarPtr vcd_tmp2;
+  vcd::VCDWriter vcd_writer{"SIMLIB_VCD.vcd", vcd::makeVCDHeader(vcd::TimeScale::ONE, vcd::TimeScaleUnit::ns, vcd::utils::now(), "This is the VCD file", "version_simlib_") };
+
+  vcd::VarPtr vcd_to1_b = vcd_writer.register_var("SS3", "to1_b", vcd::VariableType::integer, sizeof(to1_b));
+    vcd::VarPtr vcd_tmp = vcd_writer.register_var("SS3", "tmp", vcd::VariableType::integer, sizeof(to1_b));
+    vcd::VarPtr vcd_tmp2 = vcd_writer.register_var("SS3", "tmp2", vcd::VariableType::integer, sizeof(to1_b));
     void vcd_cycle(UInt<1> s1_to3_cValid, UInt<32> s1_to3_c, UInt<1> s2_to3_dValid, UInt<32> s2_to3_d);
   #endif
 

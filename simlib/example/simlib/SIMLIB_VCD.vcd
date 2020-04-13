@@ -1,0 +1,16 @@
+$timescale 1 ns $end
+$date 2020-04-13 01:32:38 $end
+$comment This is the VCD file $end
+$version version_simlib_ $end
+$scope module SS3 $end
+$var integer 8 0 to1_b $end
+$var integer 8 1 tmp $end
+$var integer 8 2 tmp2 $end
+$upscope $end
+$enddefinitions $end
+#0
+$dumpvars
+b002
+b000
+b001
+$end
