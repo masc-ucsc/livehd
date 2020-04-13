@@ -1,7 +1,7 @@
 #include "livesim_types.hpp"
 
 #include <stdio.h>
-
+#include <chrono>
 #include "sample3_stage.hpp"
 
 Sample3_stage::Sample3_stage(uint64_t _hidx)
@@ -41,20 +41,21 @@ void Sample3_stage::vcd_cycle(UInt<1> s1_to3_cValid, UInt<32> s1_to3_c, UInt<1> 
       printf("memory[127] = %ud\n",memory[127]);
     }
     tmp2 = tmp2.addw(UInt<32>(1));
-    vcd_write.change(current_clock, tmp2);
+    vcd_writer.change(vcd_tmp2, t , vcd::utils::format("%d",tmp2));
   }
 
   to1_b = memory[(tmp&UInt<32>(0xff)).as_single_word()];
-  vcd_write.change(vcd_to1_b, current_clock, to1_b);
+  vcd_writer.change(vcd_to1_b, t, vcd::utils::format("%d",to1_b));
 
   if (s1_to3_cValid && s2_to3_dValid) {
     UInt<32> tmp3 = s1_to3_c.addw(tmp);
-    vcd_write.change(vcd_tmp3, current_clock, tmp3);
+    vcd::VarPtr vcd_tmp3 = vcd_writer.register_var("SS3", "tmp3", vcd::VariableType::integer, sizeof(tmp3));
+    vcd_writer.change(vcd_tmp3, t,  vcd::utils::format("%d",tmp3));
     memory[(tmp3 & UInt<32>(0xff)).as_single_word()] = s2_to3_d;
   }
 
   tmp = tmp.addw(UInt<32>(7));
-  vcd_write.change(vcd_tmp, current_clock, tmp);
+  vcd_writer.change(vcd_tmp, t,  vcd::utils::format("%d",tmp));
 }
 #endif
 

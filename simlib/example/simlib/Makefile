@@ -15,9 +15,6 @@ sample: livesim_types.hpp.gch $(SIMLIB_OBJS) $(GENERATED_OBJS) main.o
 vcd_writer.o:../../vcd_writer.cpp
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
-vcd_utils.o:../../vcd_utils.cpp
-	$(CXX) $(CXXFLAGS) -c -o $@ $<
-
 livesim_types.hpp.gch: livesim_types.hpp
 	$(CXX) $(CXXFLAGS) -x c++-header -c livesim_types.hpp
 

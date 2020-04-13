@@ -1,5 +1,6 @@
 #pragma once
 #include "vcd_writer.hpp"
+#include <time.h>
 struct Sample3_stage {
   uint64_t hidx;
 
@@ -13,6 +14,7 @@ struct Sample3_stage {
 
   #ifdef SIMLIB_VCD
   vcd::VCDWriter vcd_writer{"SIMLIB_VCD.vcd", vcd::makeVCDHeader(vcd::TimeScale::ONE, vcd::TimeScaleUnit::ns, vcd::utils::now(), "This is the VCD file", "version_simlib_") };
+  clock_t t;// = clock();
 
   vcd::VarPtr vcd_to1_b = vcd_writer.register_var("SS3", "to1_b", vcd::VariableType::integer, sizeof(to1_b));
     vcd::VarPtr vcd_tmp = vcd_writer.register_var("SS3", "tmp", vcd::VariableType::integer, sizeof(to1_b));
