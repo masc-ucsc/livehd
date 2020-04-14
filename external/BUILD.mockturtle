@@ -3,12 +3,19 @@ cc_library(
    name = "mockturtle",
    hdrs = glob(["include/**/*.hpp"])
         + glob(["lib/ez/ez/*.hpp"])
+#        + glob(["lib/bill/bill/sat/interface/*.hpp"])
+#        + glob(["lib/bill/bill/sat/solver/*.hpp"])
+#        + glob(["lib/bill/bill/sat/*.hpp"])
+#        + glob(["lib/bill/bill/utils/*.hpp"])
         + glob(["lib/kitty/**/*.hpp"])
+        + glob(["lib/percy/percy/*.h"])
+        + glob(["lib/percy/percy/*.hpp"])
         + glob(["lib/percy/percy/solvers/*.hpp"])
+        + glob(["lib/percy/percy/encoders/*.hpp"])
         + glob(["lib/abcsat/abc/*.h"])
         + glob(["lib/sparsepp/sparsepp/*.h"]),
     srcs = glob(["lib/abcsat/*.cpp"]),
-   includes = ["include", "lib/ez", "lib/kitty", "lib/sparsepp", "lib/percy", "lib/abcsat"],
+   includes = ["include", "lib/ez", "lib/kitty", "lib/sparsepp", "lib/percy", "lib/abcsat", "lib/bill"],
    visibility = ["//visibility:public"],
-   defines = ["LIN64", "ABC_NAMESPACE=pabc"],
+   defines = ["LIN64", "ABC_NAMESPACE=pabc","DISABLE_NAUTY"],
 )
