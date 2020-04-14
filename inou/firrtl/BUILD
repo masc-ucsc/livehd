@@ -27,21 +27,8 @@ cc_library(
     # livehd/inou/firrtl/ directory.
     visibility = ["//visibility:public"],
     includes = ["."],
-    deps = [":firrtl_cc_proto", "//core:core",],
+    deps = [
+        ":firrtl_cc_proto",
+        "//core:core",
+    ],
 )
-
-#cc_library(
-#    name = "inou_firrtl",
-#    srcs = glob(["*.cpp","*.cc"],exclude=["*test*.cpp"]),
-#    hdrs = glob(["*.hpp","*.h"]),
-#    #alwayslink=1,
-#    visibility = ["//visibility:public"],
-#    linkopts = ["-pthread", "-lprotobuf"],
-#    #linkopts = ["-lstdc++fs"],  # Needed for gcc 7-8
-#    deps = [
-#        "//core:core",
-#        ":firrtl_cc_proto",
-#    ],
-#)
-
-

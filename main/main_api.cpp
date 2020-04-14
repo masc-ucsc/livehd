@@ -22,6 +22,7 @@ void setup_pass_lec();
 void setup_pass_punch();
 void setup_pass_sample();
 void setup_pass_mockturtle();
+void setup_pass_lgraph_to_lnast();
 
 void setup_inou_cgen();
 void setup_inou_liveparse();
@@ -48,6 +49,7 @@ void Main_api::init() {
   setup_pass_mockturtle();
   /* setup_pass_abc(); */
   setup_pass_bitwidth();
+  setup_pass_lgraph_to_lnast();
 
 
   setup_inou_cgen();

@@ -31,6 +31,7 @@ cc_binary(
             "//pass/sample:pass_sample",
             "//pass/bitwidth:pass_bitwidth",
             "//pass/mockturtle:pass_mockturtle",
+            "//pass/lgraph_to_lnast:pass_lgraph_to_lnast",
 
             # "//cops/live:cops_live",
 
