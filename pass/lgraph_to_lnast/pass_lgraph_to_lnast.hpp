@@ -7,8 +7,13 @@
 
 class Pass_lgraph_to_lnast : public Pass {
 protected:
+  std::vector<Lnast> lnasts;
+
   static void trans(Eprp_var &var);
   void        do_trans(LGraph *g);
+
+  bool iterate_over_lg(LGraph *g);
+  void handle_io(LGraph *g, Lnast_nid& parent_lnast_node, Lnast& lnast);
 
 public:
   Pass_lgraph_to_lnast(const Eprp_var &var);
