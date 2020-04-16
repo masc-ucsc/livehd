@@ -12,7 +12,11 @@ protected:
   static void trans(Eprp_var &var);
   void        do_trans(LGraph *g);
 
-  bool iterate_over_lg(LGraph *g);
+  bool        iterate_over_lg(LGraph *g);
+  void        initial_tree_coloring(LGraph *g);
+  void        begin_transformation(LGraph *g);
+  std::string handle_source_node(LGraph *lg, Node& node);
+
   void handle_io(LGraph *g, Lnast_nid& parent_lnast_node, Lnast& lnast);
 
 public:
