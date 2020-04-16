@@ -22,6 +22,7 @@ struct Ann_name {
   static constexpr char bitwidth[]   = "bitwidth";
   static constexpr char file_loc[]   = "file_loc";
   static constexpr char tree_pos[]   = "tree_pos";
+  static constexpr char color[]      = "color";
 };
 
 using Ann_node_pin_offset = Attribute<Ann_name::wireoffset, Node_pin, mmap_lib::map<Node_pin::Compact_class_driver, uint16_t> >;
@@ -43,6 +44,8 @@ using Ann_node_file_loc = Attribute<Ann_name::file_loc, Node, mmap_lib::map<Node
 
 using Ann_node_tree_pos = Attribute<Ann_name::tree_pos, Node, mmap_lib::map<Node::Compact_class, uint32_t> >;
 
+using Ann_node_color = Attribute<Ann_name::color, Node, mmap_lib::bimap<Node::Compact_class, std::string_view> >;
+
 struct Ann_support {
   // TODO: Change to object to register annotations, and have an "update" for incremental
   static void clear(LGraph *lg) {
@@ -57,5 +60,6 @@ struct Ann_support {
     Ann_node_cfgmeta::clear(lg);
     Ann_node_file_loc::clear(lg);
     Ann_node_tree_pos::clear(lg);
+    Ann_node_color::clear(lg);
   };
 };
