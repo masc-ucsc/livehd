@@ -80,7 +80,7 @@ void Pass_lgraph_to_lnast::begin_transformation(LGraph *lg) {
     fmt::print("opin: {} pid: {}\n", pin.get_name(), pin.get_pid());
     I(pin.get_node().get_type().op == GraphIO_Op);
     auto node = pin.get_node();
-    std::string temp = handle_source_node(lg, node);
+    std::string_view temp = handle_source_node(lg, node);
     fmt::print("End - node color: {}\n", node.get_color());
   });
 
@@ -97,7 +97,7 @@ void Pass_lgraph_to_lnast::begin_transformation(LGraph *lg) {
  * call we will invoke constantly as we work up the
  * LGraph. At the end, regardless of if any work is
  * needed to be done, return the node's name. */
-std::string Pass_lgraph_to_lnast::handle_source_node(LGraph *lg, Node& node) {
+std::string_view Pass_lgraph_to_lnast::handle_source_node(LGraph *lg, Node& node) {
   node.set_color(GREY);
   for (const auto &inp : node.inp_edges()) {
     if (inp.driver.has_name()) {
@@ -109,7 +109,7 @@ std::string Pass_lgraph_to_lnast::handle_source_node(LGraph *lg, Node& node) {
     if (inp.driver.get_node().get_color() == WHITE) {
     //if (!inp.driver.get_node().has_color()) {
       auto nd = inp.driver.get_node();
-      std::string temp2 = handle_source_node(lg, nd);
+      std::string_view temp2 = handle_source_node(lg, nd);
       I(nd.get_color() == BLACK);
     }
   }

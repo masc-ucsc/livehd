@@ -9,13 +9,13 @@ class Pass_lgraph_to_lnast : public Pass {
 protected:
   std::vector<Lnast> lnasts;
 
-  static void trans(Eprp_var &var);
-  void        do_trans(LGraph *g);
+  static void       trans(Eprp_var &var);
+  void              do_trans(LGraph *g);
 
-  bool        iterate_over_lg(LGraph *g);
-  void        initial_tree_coloring(LGraph *g);
-  void        begin_transformation(LGraph *g);
-  std::string handle_source_node(LGraph *lg, Node& node);
+  bool              iterate_over_lg(LGraph *g);
+  void              initial_tree_coloring(LGraph *g);
+  void              begin_transformation(LGraph *g);
+  std::string_view  handle_source_node(LGraph *lg, Node& node);
 
   void handle_io(LGraph *g, Lnast_nid& parent_lnast_node, Lnast& lnast);
 
