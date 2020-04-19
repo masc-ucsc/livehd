@@ -31,4 +31,12 @@ void Inou_pyrope::parse_only(Eprp_var &var) {
   }
 }
 
-void Inou_pyrope::parse_to_lnast(Eprp_var &var){}
+void Inou_pyrope::parse_to_lnast(Eprp_var &var){
+  Inou_pyrope p(var);
+  Prp_lnast converter;
+
+  for (auto f : absl::StrSplit(p.files, ',')) {
+    converter.parse_file(f);
+    converter.prp_ast_to_lnast();
+  }
+}
