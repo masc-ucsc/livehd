@@ -1361,7 +1361,7 @@ void Prp::elaborate(){
   std::list<std::tuple<uint8_t, Rule_id, Token_entry>> loc_list;
   
   int failed = 0;
-  int64_t sub_cnt = 0;
+  uint64_t sub_cnt = 0;
   
   if(!CHECK_RULE(&Prp::rule_start)){
       failed = 1;
@@ -1471,7 +1471,7 @@ void Prp::ast_builder(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass
   }
 }
 
-inline uint8_t Prp::check_function(uint8_t (Prp::*rule)(std::list<std::tuple<uint8_t, Rule_id, Token_entry>>&), int64_t *sub_cnt, std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &loc_list){
+inline uint8_t Prp::check_function(uint8_t (Prp::*rule)(std::list<std::tuple<uint8_t, Rule_id, Token_entry>>&), uint64_t *sub_cnt, std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &loc_list){
   PRINT("Called check_function.\n");
   uint64_t starting_size = loc_list.size();
   uint8_t ret = (this->*rule)(loc_list);
@@ -1487,7 +1487,7 @@ inline uint8_t Prp::check_function(uint8_t (Prp::*rule)(std::list<std::tuple<uin
   return ret;
 }
 
-inline bool Prp::chk_and_consume(Token_id tok, Rule_id rid, int64_t *sub_cnt, std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &loc_list){
+inline bool Prp::chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &loc_list){
   if(scan_is_token(tok)){
     if(tok == Pyrope_id_elif || tok == Pyrope_id_if || tok == Pyrope_id_unique || tok == Pyrope_id_else || tok == Pyrope_id_while || tok == Pyrope_id_punch || tok == Pyrope_id_for || tok == Pyrope_id_when){
       scan_next();
