@@ -363,7 +363,7 @@ public:
     return token_list[p];
   }
   
-  Token get_token(Token_entry entry){
+  const Token &get_token(Token_entry entry){
     return token_list[entry];
   }
 };
