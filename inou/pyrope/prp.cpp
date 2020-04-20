@@ -45,7 +45,7 @@ uint8_t Prp::rule_code_blocks(std::list<std::tuple<uint8_t, Rule_id, Token_entry
 uint8_t Prp::rule_code_block_int(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list){
   INIT_FUNCTION("rule_code_block_int.");
   
-  eat_comments();
+  check_lb();
   
   if (CHECK_RULE(&Prp::rule_if_statement)){ RULE_SUCCESS("Matched rule_code_block_int.\n", Prp_rule_code_block_int); }
   else if (CHECK_RULE(&Prp::rule_for_statement)){ RULE_SUCCESS("Matched rule_code_block_int.\n", Prp_rule_code_block_int); }
@@ -1315,6 +1315,7 @@ inline void Prp::check_lb(){
   while(next){
     inc_line_cnt();
     if(scan_is_token(Token_id_comment)){
+      scan_next();
       tokens_consumed++;
       next = true;
     }
