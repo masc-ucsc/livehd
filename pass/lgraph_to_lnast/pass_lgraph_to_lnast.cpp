@@ -260,7 +260,7 @@ void Pass_lgraph_to_lnast::attach_output_to_lnast(Lnast& lnast, Lnast_nid& paren
       //We have found the sink pin associated with the output pin. Assign the output to the sink pin's edge.
       I(count == 0);
       auto asg_node = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
-      lnast.add_child(asg_node, Lnast_node::create_ref(absl::StrCat("%", opin.get_name())));
+      lnast.add_child(asg_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("%", opin.get_name()))));
       lnast.add_child(asg_node, Lnast_node::create_ref(inp.driver.get_name()));
       count++;
     }
@@ -269,7 +269,7 @@ void Pass_lgraph_to_lnast::attach_output_to_lnast(Lnast& lnast, Lnast_nid& paren
   if(count == 0) {
     //There was no inp edge, therefore we set the output to 0.
     auto asg_node = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
-    lnast.add_child(asg_node, Lnast_node::create_ref(absl::StrCat("%", opin.get_name())));
+    lnast.add_child(asg_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("%", opin.get_name()))));
     lnast.add_child(asg_node, Lnast_node::create_const("0"));
     count++;
   }
