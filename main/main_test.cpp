@@ -66,18 +66,27 @@ protected:
   std::string read_line() {
     std::string line;
     char        buffer;
-    while (1) {
-      int sz = read(master, &buffer, 1);
-      if (sz != 1) break;
+    while(1) {
+      bool skipping_warning = false;
+      while (1) {
+        int sz = read(master, &buffer, 1);
+        if (sz != 1) break;
 
-      if ((buffer == '#') && line.size()) break;
+        if (line == ":0:0 warning:") {
+          skipping_warning = true;
+        }
+        if ((buffer == '#') && line.size()) break;
 
-      if ((buffer == '\n' || buffer == '\r' || buffer == ' ') && line.empty()) continue;
+        if ((buffer == '\n' || buffer == '\r' || buffer == ' ') && line.empty()) continue;
 
-      if ((buffer == '\n' || buffer == '\r') && line.size())
+        if ((buffer == '\n' || buffer == '\r') && line.size()) break;
+
+        line += buffer;
+      }
+
+      if (!skipping_warning)
         break;
-
-      line += buffer;
+      line.clear(); // let's try again
     }
 
     {
@@ -177,23 +186,25 @@ TEST_F(MainTest, Autocomplete) {
   EXPECT_THAT(l1, HasSubstr("files"));
 }
 
-#if 0
 TEST_F(MainTest, LabelsComplete) {
 
   drain_stdin();
-  std::string cmd = "files pa\t:nothing#\n";
+  std::string cmd = "files pa\t\n";
 
   write(master,cmd.c_str(),cmd.size());
 
   std::string l0 = read_line();
   std::string l1 = read_line();
-  std::cout << "labels:" << l0 << std::endl;
-  std::cout << "labels:" << l1 << std::endl;
-
-  EXPECT_THAT(l0, HasSubstr("path:"));
-  EXPECT_THAT(l0, HasSubstr("nothing"));
-}
+  std::string l2 = read_line();
+#if 0
+  std::cout << "labels:" << l0 << std::endl; // typed
+  std::cout << "labels:" << l1 << std::endl; // shell
+  std::cout << "labels:" << l2 << std::endl; // echo
 #endif
+
+  EXPECT_THAT(l1, HasSubstr("path:"));
+  EXPECT_THAT(l2, HasSubstr("path:"));
+}
 
 TEST_F(MainTest, Help) {
   drain_stdin();

@@ -155,10 +155,20 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
     prefix = cmd;
   }
 
+  int  last_match_end   = context.size();
+  int  last_match_start = last_match_end;
+  for (int i = last_match_end - 1; i >= 0; --i) {
+    if (!std::isalnum(context[i]) && context[i] != '.')
+      break;
+    last_match_start = i;
+  }
+  std::string match = context.substr(last_match_start, last_match_end);
+
+  //fmt::print("match[{}]\n", match);
   for (auto const& e : *examples) {
-    //fmt::print("checking {} vs {}\n",e, prefix);
-    if (strncasecmp(prefix.c_str(), e.c_str(), prefix.size()) == 0) {
-      //fmt::print("match {} prefix:{}\n", e, prefix);
+    //fmt::print("checking {} vs {}\n",e, match);
+    if (strncasecmp(match.c_str(), e.c_str(), match.size()) == 0) {
+      //fmt::print("match {} match:{}\n", e, match);
       completions.emplace_back(e.c_str());
     }
   }
@@ -168,6 +178,8 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
     auto to_chop = prefix.size() - fprefix.size();
     for (auto i=0u;i<completions.size();++i) {
       const std::string comp = completions[i].text();
+      if (comp.back() == ':')
+        continue;
       //fmt::print("fprefix[{}] completion[{}]\n", fprefix, comp);
       if (comp.size() > to_chop && to_chop > 0) completions[i] = Replxx::Completion(comp.substr(to_chop));
     }
@@ -411,12 +423,12 @@ int main(int argc, char** argv) {
 
         Main_api::get_commands(help);
       } else {
-        std::string cmd  = input.substr(pos + 1);
-        auto        pos2 = cmd.find(" ");
-        if (pos2 != std::string::npos) cmd = cmd.substr(0, pos2);
+        std::string cmd2  = input.substr(pos + 1);
+        auto        pos2 = cmd2.find(" ");
+        if (pos2 != std::string::npos) cmd2 = cmd2.substr(0, pos2);
 
-        help(cmd, Main_api::get_command_help(cmd));
-        Main_api::get_labels(cmd, help_labels);
+        help(cmd2, Main_api::get_command_help(cmd2));
+        Main_api::get_labels(cmd2, help_labels);
       }
 
       rx.history_add(input);
