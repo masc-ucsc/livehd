@@ -269,7 +269,7 @@ int main(int argc, char** argv) {
   Main_api::init();
 
   if (!cmd.empty()) {
-    fmt::print("lgraph cmd {}\n", cmd);
+    fmt::print("livehd cmd {}\n", cmd);
     Main_api::parse_inline(cmd);
     exit(0);
   }
@@ -312,7 +312,7 @@ int main(int argc, char** argv) {
       "help", "history", "quit", "exit", "clear", "prompt ",
   };
 
-  // init all the lgraph libraries used
+  // init all the livehd libraries used
   Main_api::get_commands([&examples](const std::string& _cmd, const std::string& help_msg) { (void)help_msg; examples.push_back(_cmd); });
 
   const char* env_home = std::getenv("HOME");
@@ -326,24 +326,24 @@ int main(int argc, char** argv) {
 
   if (history) {
     history_file = std::string(env_home);
-    history_file.append("/.config/lgraph/history.txt");
+    history_file.append("/.config/livehd/history.txt");
 
     if (access(history_file.c_str(), F_OK) == -1) {
-      std::cout << "Setting history file to $HOME/.config/lgraph/history.txt\n";
-      std::string lgraph_path(env_home);
-      lgraph_path.append("/.config");
-      if (access(lgraph_path.c_str(), F_OK) == -1) {
-        int ok = mkdir(lgraph_path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+      std::cout << "Setting history file to $HOME/.config/livehd/history.txt\n";
+      std::string livehd_path(env_home);
+      livehd_path.append("/.config");
+      if (access(livehd_path.c_str(), F_OK) == -1) {
+        int ok = mkdir(livehd_path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
         if (ok < 0) {
-          std::cerr << "error: could not create " << lgraph_path << " directory for history.txt\n";
+          std::cerr << "error: could not create " << livehd_path << " directory for history.txt\n";
           exit(-3);
         }
       }
-      lgraph_path.append("/lgraph");
-      if (access(lgraph_path.c_str(), F_OK) == -1) {
-        int ok = mkdir(lgraph_path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+      livehd_path.append("/livehd");
+      if (access(livehd_path.c_str(), F_OK) == -1) {
+        int ok = mkdir(livehd_path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
         if (ok < 0) {
-          std::cerr << "error: could not create " << lgraph_path << " directory for history.txt\n";
+          std::cerr << "error: could not create " << livehd_path << " directory for history.txt\n";
           exit(-3);
         }
       }
@@ -365,14 +365,14 @@ int main(int argc, char** argv) {
   rx.set_hint_callback(std::bind( &hook_hint, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, cref( examples ) ));
 
   if (!option_quiet) {
-    std::cout << "Welcome to lgraph\n"
+    std::cout << "Welcome to livehd\n"
               << "Press 'tab' to view autocompletions\n"
               << "Type 'help' for help\n"
               << "Type 'quit' or 'exit' to exit\n\n";
   }
 
   // set the repl prompt
-  std::string prompt{"\x1b[1;32mlgraph\x1b[0m> "};
+  std::string prompt{"\x1b[1;32mlivehd\x1b[0m> "};
 
   // main repl loop
   for (;;) {
@@ -403,8 +403,8 @@ int main(int argc, char** argv) {
 
       if (pos == std::string::npos) {
         help("help [str]", "this output, or for a specific command");
-        help("quit", "exit lgraph");
-        help("exit", "exit lgraph");
+        help("quit", "exit livehd");
+        help("exit", "exit livehd");
         help("clear", "clear the screen");
         help("history", "display the current history");
         help("prompt <str>", "change the current prompt");

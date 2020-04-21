@@ -99,11 +99,18 @@ cc_binary(
     linkopts = ["-lpthread"],
 )
 
+cc_library(
+    name = "tmt",
+    srcs = ["tmt_test.cpp"],
+    hdrs = ["tmt_test.hpp"],
+)
+
 cc_test(
     name = "main_test",
     srcs = ["main_test.cpp"],
     deps = [
         "@gtest//:gtest_main",
+        ":tmt",
     ],
     data = [
         ":lgshell",
