@@ -123,8 +123,14 @@ std::string Node_pin::debug_name() const {
 }
 
 std::string_view Node_pin::get_name() const {
-  I(has_name());  // get_name should be called for named driver_pins
-  return Ann_node_pin_name::ref(current_g)->get_val_sview(get_compact_class_driver());
+#ifndef NDEBUG
+  if (!is_graph_io()) {
+    I(is_driver());
+    I(has_name());  // get_name should be called for named driver_pins
+  }
+#endif
+  // NOTE: Not the usual get_compact_class_driver() to handle IO change from driver/sink
+  return Ann_node_pin_name::ref(current_g)->get_val_sview(Compact_class_driver(idx));
 }
 
 std::string_view Node_pin::create_name() const {

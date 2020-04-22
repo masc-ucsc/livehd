@@ -124,6 +124,30 @@ void Inou_graphviz::do_fromlg(LGraph *lg_parent) {
   });
 }
 
+void Inou_graphviz::populate_lg_handle_xedge(const Node &node, const XEdge &out, std::string &data) {
+  auto  dp_pid  = out.driver.get_pid();
+  auto  sp_pid  = out.sink.get_pid();
+  auto  dn_name = out.driver.get_node().debug_name();
+  if (out.driver.is_graph_io()) {
+    dn_name = out.driver.get_name();
+  }
+  auto  sn_name = out.sink.get_node().debug_name();
+  if (out.sink.is_graph_io()) {
+    sn_name = out.sink.get_name();
+  }
+  auto  dbits   = out.driver.get_bits();
+  auto  dp_name = out.driver.has_name() ? out.driver.get_name() : "";
+
+  if (node.get_type().op == U32Const_Op)
+    data += fmt::format(" {}->{}[label=<{}b:({},{})>];\n", dn_name, sn_name, dbits, dp_pid, sp_pid);
+  else if (node.get_type().op == TupRef_Op)
+    data += fmt::format(" {}->{}[label=<({},{}):<font color=\"#0000ff\">{}</font>>];\n", dn_name, sn_name, dp_pid, sp_pid, dp_name);
+  else if (node.get_type().op == TupAdd_Op)
+    data += fmt::format(" {}->{}[label=<{}b:({},{}):<font color=\"#0000ff\">{}</font>>];\n", dn_name, sn_name, dbits, dp_pid, sp_pid, dp_name);
+  else
+    data += fmt::format(" {}->{}[label=<{}b:({},{}):{}>];\n", dn_name, sn_name, dbits, dp_pid, sp_pid, dp_name);
+}
+
 void Inou_graphviz::populate_lg_data(LGraph *g) {
   std::string data = "digraph {\n";
 
@@ -143,29 +167,18 @@ void Inou_graphviz::populate_lg_data(LGraph *g) {
       data += fmt::format(" {} [label=<{}>];\n", node.debug_name(), node_info);
 
 
-    for (auto &out : node.out_edges()) {
-      auto  dp_pid  = out.driver.get_pid();
-      auto  sp_pid  = out.sink.get_pid();
-      auto  dn_name = out.driver.get_node().debug_name();
-      auto  sn_name = out.sink.get_node().debug_name();
-      auto  dbits   = out.driver.get_bits();
-      auto  dp_name = out.driver.has_name() ? out.driver.get_name() : "";
-
-      if (node.get_type().op == U32Const_Op)
-        data += fmt::format(" {}->{}[label=<{}b:({},{})>];\n", dn_name, sn_name, dbits, dp_pid, sp_pid);
-      else if (node.get_type().op == TupRef_Op)
-        data += fmt::format(" {}->{}[label=<({},{}):<font color=\"#0000ff\">{}</font>>];\n", dn_name, sn_name, dp_pid, sp_pid, dp_name);
-      else if (node.get_type().op == TupAdd_Op)
-        data += fmt::format(" {}->{}[label=<{}b:({},{}):<font color=\"#0000ff\">{}</font>>];\n", dn_name, sn_name, dbits, dp_pid, sp_pid, dp_name);
-      else
-        data += fmt::format(" {}->{}[label=<{}b:({},{}):{}>];\n", dn_name, sn_name, dbits, dp_pid, sp_pid, dp_name);
+    for (const auto &out : node.out_edges()) {
+      populate_lg_handle_xedge(node, out, data);
     }
   });
 
-  g->each_graph_output([&data](const Node_pin &pin) {
-    std::string_view dst_str = "virtual_dst_module";
-    auto             dbits   = pin.get_bits();
-    data += fmt::format(" {}->{}[label=<{}b:{}>];\n", pin.get_node().debug_name(), dst_str, dbits, pin.get_name());
+  g->each_graph_input([&data](const Node_pin &pin) {
+    std::string_view io_name = pin.get_name();
+    data += fmt::format(" {} [label=<{}>];\n", io_name, io_name); // pin.debug_name());
+
+    for (const auto &out : pin.out_edges()) {
+      populate_lg_handle_xedge(pin.get_node(), out, data);
+    }
   });
 
   data += "}\n";
