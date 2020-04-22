@@ -379,6 +379,9 @@ public:
     I(is_node_state());
     return root;
   }
+  bool is_graph_io() const {
+    return nid == 1 || nid == 2; // hardcoded input or output
+  }
   bool is_master_root() const {
     I(is_node_state());
     bool ms = nid == get_self_idx().value;
