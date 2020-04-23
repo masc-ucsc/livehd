@@ -20,6 +20,7 @@ function generate () {
 ./prp tuple_if2.prp     | sort -n  > y && column -t y > x && rm -f y && mv x tuple_if2.cfg
 ./prp if.prp            | sort -n  > y && column -t y > x && rm -f y && mv x if.cfg
 ./prp if2.prp           | sort -n  > y && column -t y > x && rm -f y && mv x if2.cfg
+./prp if3_err.prp       | sort -n  > y && column -t y > x && rm -f y && mv x if3_err.cfg
 ./prp nested_if2.prp    | sort -n  > y && column -t y > x && rm -f y && mv x nested_if.cfg
 
 

@@ -541,28 +541,29 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
   Node_pin node_dpin;
 
   if (is_output(name)) {
-    // Port_invalid pos, means I do not care about position
+    // Port_invalid pos means do not care about position
     dfg->add_graph_output(name.substr(1), Port_invalid, 0);
     node_dpin = dfg->get_graph_output_driver_pin(name.substr(1));
-    node_dpin.set_name(name.substr(1)); //get rif of %
   } else if (is_input(name)) {
     node_dpin = dfg->add_graph_input(name.substr(1), Port_invalid, 0);
-    node_dpin.set_name(name.substr(1)); //get rif of $
   } else if (is_register(name)) {
     //FIXME->sh: need to extend to Fluid_flop, Async_flop etc...
     node_dpin = dfg->create_node(SFlop_Op).setup_driver_pin();
-    node_dpin.set_name(name.substr(1)); //get rif of #
   } else if (is_const(name)) {
     node_dpin = resolve_constant(dfg, name).setup_driver_pin();
-    node_dpin.set_name(name);
   } else if (is_default_const(name)) {
     node_dpin = resolve_constant(dfg, "0d0").setup_driver_pin();
-    node_dpin.set_name(name);
   } else {
     return node_dpin; //return empty node_pin
   }
 
-  name2dpin[name] = node_dpin;  // for io and reg, the %$# identifier is still recorded
+  if (is_output(name) || is_input(name) || is_register(name)) {
+    node_dpin.set_name(name.substr(1));
+  } else {
+    node_dpin.set_name(name);
+  }
+
+  name2dpin[name] = node_dpin;  // for io and reg, the %$# identifier are still used in symbol table
   return node_dpin;
 }
 
