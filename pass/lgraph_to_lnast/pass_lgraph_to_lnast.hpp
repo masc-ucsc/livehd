@@ -30,6 +30,7 @@ protected:
   void        attach_comparison_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin &pin);
   void        attach_simple_node    (Lnast& lnast, Lnast_nid& parent_node, const Node_pin &pin);
   void        attach_mux_node       (Lnast& lnast, Lnast_nid& parent_node, const Node_pin &pin);
+  void        attach_subgraph_node  (Lnast& lnast, Lnast_nid& parent_node, const Node_pin &pin);
 
   void        attach_children_to_node(Lnast& lnast, Lnast_nid& op_node, const Node_pin &pin);
   void        attach_child(Lnast& lnast, Lnast_nid& op_node, const Node_pin &dpin);

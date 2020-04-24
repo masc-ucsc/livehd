@@ -170,8 +170,6 @@ void Pass_lgraph_to_lnast::handle_source_node(LGraph *lg, Node_pin& pin, Lnast& 
   // op_class: memory
   Memory_Op,
   SubGraph_Op,
-  U32Const_Op,
-  StrConst_Op,
   // op_class: sub
   SubGraphMin_Op,  // Each subgraph cell starts here
   SubGraphMax_Op = SubGraphMin_Op + ((1ULL << 32) - 1),
@@ -241,6 +239,9 @@ void Pass_lgraph_to_lnast::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node,
     case StrConst_Op:
       //FIXME: I'm encounter strconst of "x". What does this mean?
       fmt::print("StrConst: {}\n", pin.get_node().get_type_const_sview());
+      break;
+    case SubGraph_Op:
+      attach_subgraph_node(lnast, parent_node, pin);
       break;
     default: fmt::print("Op not yet supported in attach_to_lnast\n");
   }
@@ -415,7 +416,17 @@ void Pass_lgraph_to_lnast::attach_not_node(Lnast& lnast, Lnast_nid& parent_node,
   int inp_count = 0;
   for(const auto inp : pin.get_node().inp_edges()) {
     auto dpin = inp.driver;
-    attach_child(lnast, asg_node, dpin);
+    //Basically call attach_child, but have to add the "~" in front of the rhs name.
+    if(dpin.get_node().is_graph_io()) {
+      //If the input to the node is from a GraphIO node (it's a module input), add the $ in front.
+      lnast.add_child(asg_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("~$", dpin.get_name()))));
+    } else if(dpin.get_node().get_type().op == U32Const_Op) {
+      lnast.add_child(asg_node, Lnast_node::create_const(
+                                 lnast.add_string(absl::StrCat("~", dpin.get_node().get_type_const_value()))));
+    } else {
+      lnast.add_child(asg_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("~", dpin.get_name()))));
+    }
+    //attach_child(lnast, asg_node, dpin);
     inp_count++;
   }
   I(inp_count == 1);
@@ -602,6 +613,42 @@ void Pass_lgraph_to_lnast::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node,
   lnast.add_child(asg_node_false, Lnast_node::create_ref(pin.get_name()));
   attach_child(lnast, asg_node_false, dpins.front());
   dpins.pop();
+}
+
+void Pass_lgraph_to_lnast::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin &pin) {
+
+  //Create a tuple that contains all arguments.
+  auto args_tup_node = lnast.add_child(parent_node, Lnast_node::create_tuple("args_tuple"));
+  //Tuple name
+  auto tuple_temp_holder = temp_var_count;
+  lnast.add_child(args_tup_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("T", temp_var_count))));
+  temp_var_count++;
+  //Set up each key-value of the arg tuple (key = name in submodule | null, value = name in calling module)
+  for(const auto inp : pin.get_node().inp_edges()) {
+    auto key_value_asg_node = lnast.add_child(args_tup_node, Lnast_node::create_assign("assign"));
+    lnast.add_child(key_value_asg_node, Lnast_node::create_ref("null"));
+    attach_child(lnast, key_value_asg_node, inp.driver);
+  }
+
+  auto func_call_node = lnast.add_child(parent_node, Lnast_node::create_func_call("func_call"));
+  //LHS
+  auto func_temp_holder = temp_var_count;
+  lnast.add_child(func_call_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("T", temp_var_count))));
+  temp_var_count++;
+  //func_name
+  lnast.add_child(func_call_node, Lnast_node::create_ref("FIXME_FNAME"));
+  //arguments (just use tuple created above)
+  //NOTE: Below, we do not use temp_var_count, we use tuple_temp_holder (so we can reference tuple name).
+  lnast.add_child(func_call_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("T", tuple_temp_holder))));
+
+  //FIXME: Need a way to do the dot stuff. Below in incomplete but serves as proof of idea.
+  for(const auto out : pin.get_node().out_edges()) {
+    auto dot_node = lnast.add_child(parent_node, Lnast_node::create_dot("dot"));
+    attach_child(lnast, dot_node, out.driver);
+    //NOTE: Below, we do not use temp_var_count, we use tuple_temp_holder (so we can reference tuple name).
+    lnast.add_child(dot_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("T", func_temp_holder))));
+    //FIXME: Now how do I get the output pin's name from the submodule?
+  }
 }
 
 //------------- Helper Functions ------------
