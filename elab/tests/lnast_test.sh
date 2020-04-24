@@ -170,7 +170,6 @@ do
   echo "----------------------------------------------------"
   echo "Logic Equivalence Check"  
   echo "----------------------------------------------------"
-  echo "Todo ..."
 
   ${LGCHECK} --implementation=${pt}.v --reference=./inou/cfg/tests/verilog_gld/${pt}.gld.v
 

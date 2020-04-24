@@ -509,12 +509,12 @@ Node_pin Inou_lnast_dfg::setup_node_operator_and_target(LGraph *dfg, const Lnast
 Node_pin Inou_lnast_dfg::setup_node_assign_and_target(LGraph *dfg, const Lnast_nid &lnidx_opr) {
   const auto c0   = lnast->get_first_child(lnidx_opr);
   const auto c0_name = lnast->get_sname(c0);
-  if (c0_name.substr(0,1) == "%") {
-    if(dfg->is_graph_output(c0_name.substr(1))) {
-      return dfg->get_graph_output(c0_name.substr(1));  //get rid of '%' char
+  if (is_output(c0_name)) {
+    if(dfg->is_graph_output(c0_name.substr(1, c0_name.size()-3))) {
+      return dfg->get_graph_output(c0_name.substr(1, c0_name.size()-3));  //get rid of '%' char
     } else {
       setup_ref_node_dpin(dfg, c0);
-      return dfg->get_graph_output(c0_name.substr(1));
+      return dfg->get_graph_output(c0_name.substr(1, c0_name.size()-3));
     }
   } else if (c0_name.substr(0,1) == "#") {
     return setup_ref_node_dpin(dfg, c0).get_node().setup_sink_pin("D");  //FIXME->sh: check later
@@ -541,11 +541,12 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
   Node_pin node_dpin;
 
   if (is_output(name)) {
-    // Port_invalid pos means do not care about position
-    dfg->add_graph_output(name.substr(1), Port_invalid, 0);
-    node_dpin = dfg->get_graph_output_driver_pin(name.substr(1));
+    dfg->add_graph_output(name.substr(1, name.size()-3), Port_invalid, 0); // Port_invalid pos means do not care about position
+    fmt::print("add graph out:{}\n", name.substr(1, name.size()-3));
+    node_dpin = dfg->get_graph_output_driver_pin(name.substr(1, name.size()-3));
   } else if (is_input(name)) {
-    node_dpin = dfg->add_graph_input(name.substr(1), Port_invalid, 0);
+    node_dpin = dfg->add_graph_input(name.substr(1, name.size()-3), Port_invalid, 0);
+    fmt::print("add graph inp:{}\n", name.substr(1, name.size()-3));
   } else if (is_register(name)) {
     //FIXME->sh: need to extend to Fluid_flop, Async_flop etc...
     node_dpin = dfg->create_node(SFlop_Op).setup_driver_pin();
@@ -558,7 +559,8 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
   }
 
   if (is_output(name) || is_input(name) || is_register(name)) {
-    node_dpin.set_name(name.substr(1));
+    /* node_dpin.set_name(name.substr(1)); */
+    ;
   } else {
     node_dpin.set_name(name);
   }
