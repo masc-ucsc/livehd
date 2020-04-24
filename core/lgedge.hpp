@@ -201,8 +201,8 @@ struct __attribute__((packed)) SEdge : public Edge_raw {  // 2 bytes total
   SEdge() { snode = 1; };
 };
 
-enum Node_State {
-  Invalid_State = 0,  // No used or initialized
+enum Node_state {
+  Invalid_state = 0,  // No used or initialized
   // bit3 == 1 is_node_state
   Free_node_state = 1,  // Node was deleted, it is in a free list
   Page_node_state = 2,  // No node in use, page info (page align)
@@ -213,7 +213,7 @@ enum Node_State {
 class Node_Internal;
 
 struct __attribute__((packed)) Node_Internal_Page {
-  Node_State state : 3;  // 1byte
+  Node_state state : 3;  // 1byte
   uint8_t    pad1[7];    // 7bytes waste just to get Index_ID aligned
   uint32_t   idx;        // 4bytes 32bits but for speed
   uint32_t   free_idx;   // 4bytes 32bits to the first free node
@@ -261,7 +261,7 @@ struct __attribute__((packed)) Node_Internal_Page {
 class __attribute__((packed)) Node_Internal {
 private:
   // BEGIN 12 Bytes common payload
-  Node_State state : 3;  // State must be the first thing (Node_Internal_Page)
+  Node_state state : 3;  // State must be the first thing (Node_Internal_Page)
   uint16_t   inp_pos : 5;
   uint16_t   driver_setup : 1;
   uint16_t   sink_setup : 1;
