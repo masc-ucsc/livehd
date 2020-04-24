@@ -41,6 +41,13 @@ bool Node_pin::is_graph_input() const { return current_g->is_graph_input(idx); }
 
 bool Node_pin::is_graph_output() const { return current_g->is_graph_output(idx); }
 
+Node_pin Node_pin::get_sink_from_output() const {
+  I(is_graph_output());
+  I(is_driver());
+
+  return Node_pin(top_g, current_g, hidx, idx, pid, true);
+}
+
 Node Node_pin::get_node() const {
   auto nid = current_g->get_node_nid(idx);
 

@@ -225,14 +225,18 @@ static Node resolve_memory(LGraph *g, RTLIL::Cell *cell) {
 
       if (chunk.width == wire->width) {
         if (wire2pin.find(wire) != wire2pin.end()) {
-          auto join_dpin = wire2pin[wire];
-          auto join_node = join_dpin.get_node();
-          I(join_node.get_type().op == Join_Op);
-          I(join_node.inp_connected_pins().size() == 0);
+          const auto &join_dpin = wire2pin[wire];
+          if (join_dpin.is_graph_output()) {
+            g->add_edge(dpin, join_dpin.get_sink_from_output());
+          } else {
+            auto join_node = join_dpin.get_node();
+            I(join_node.get_type().op == Join_Op);
+            I(join_node.inp_connected_pins().size() == 0);
 
-          auto spin_join = join_node.setup_sink_pin(0);
-          g->add_edge(dpin, spin_join);
-          I(join_dpin.get_bits() == wire->width);
+            auto spin_join = join_node.setup_sink_pin(0);
+            g->add_edge(dpin, spin_join);
+            I(join_dpin.get_bits() == wire->width);
+          }
         } else if (chunk.width == ss.size()) {
           // output port drives a single wire
           wire2pin[wire] = dpin;

@@ -243,6 +243,8 @@ public:
   bool is_graph_input() const;
   bool is_graph_output() const;
 
+  Node_pin get_sink_from_output() const;
+
   bool is_input() const {
     I(idx);
     return sink;
