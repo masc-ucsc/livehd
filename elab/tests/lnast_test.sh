@@ -10,6 +10,7 @@ pts='if if2'
 # pts='function_call'
 
 LGSHELL=./bazel-bin/main/lgshell
+LGCHECK=./inou/yosys/lgcheck
 
 if [ ! -f $LGSHELL ]; then
   if [ -f ./main/lgshell ]; then
@@ -171,15 +172,23 @@ do
   echo "----------------------------------------------------"
   echo "Todo ..."
 
+  ${LGCHECK} --implementation=${pt}.v --reference=./inou/cfg/tests/verilog_gld/${pt}.gld.v
 
+  if [ $? -eq 0 ]; then
+    echo "Successfully pass logic equivilence check!"
+  else
+    echo "FAIL: "${pt}".v !== "${pt}".gld.v"
+    exit 1
+  fi
 
+  rm -f ${pt}.v
   rm -f ${pt}.cfg
   rm -f lnast.dot
   rm -f lnast.dot.gld
   rm -f lnast.nodes
   rm -f lnast.nodes.gld
   
-done
+done #end of for
 
 
 
