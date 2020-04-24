@@ -634,44 +634,52 @@ void Pass_bitwidth::iterate_equals(Node_pin &pin) {
 }
 
 
-void Pass_bitwidth::iterate_mux(Node_pin &dpin) {
+void Pass_bitwidth::iterate_mux(Node_pin &node_dpin) {
   Ann_bitwidth::Implicit_range imp;
 
-  bool updated = false;
-  bool first = true;
-  for (const auto &inp_edge : dpin.get_node().inp_edges_ordered()) {
+  auto updated = false;
+  bool is_first_edge = true;
+  Node_pin first_edge_dpin; // assuming always 2-to-1 mux in lgraph
+
+  for (const auto &inp_edge : node_dpin.get_node().inp_edges_ordered()) {
     auto dpin = inp_edge.driver;
     auto spin = inp_edge.sink;
-    if (spin.get_pid() != 0) { // Base bw off pins except "S" dpin
-      fmt::print("dpin:{}\n", dpin.debug_name());
-      fmt::print("Not S dpin bw: {} {}\n", dpin.get_bitwidth().i.min, dpin.get_bitwidth().i.max);
-      if (first) {
-        imp.min = dpin.get_bitwidth().i.min;
-        imp.max = dpin.get_bitwidth().i.max;
-        imp.overflow = dpin.get_bitwidth().i.overflow;
-        first = false;
-      } else if (dpin.get_bitwidth().i.overflow) {
-        if (imp.overflow) {
-          //Compare which overflow is larger (requires more bits).
-          imp.max = (imp.max < dpin.get_bitwidth().i.max) ? dpin.get_bitwidth().i.max : imp.max;
-        } else {
-          //Output bw isn't yet in overflow mode so this has to be biggest.
-          imp.min = 0;
-          imp.max = dpin.get_bitwidth().i.max;
-          imp.overflow = true;
-        }
-      } else if (!imp.overflow) {
-        //If neither are in overflow mode, widen BW range to contain both ranges.
-        imp.min = (imp.min > dpin.get_bitwidth().i.min) ? dpin.get_bitwidth().i.min : imp.min;
+    if (spin.get_pid() == 0) { 
+      // Base bw off pins except "S" dpin
+      continue;
+    } else if (is_first_edge) {
+      imp.min = dpin.get_bitwidth().i.min;
+      imp.max = dpin.get_bitwidth().i.max;
+      imp.overflow = dpin.get_bitwidth().i.overflow;
+      is_first_edge = false;
+      first_edge_dpin = dpin;
+    } else if (dpin.get_bitwidth().i.overflow) {
+      if (imp.overflow) {
+        // Compare which overflow is larger (requires more bits).
         imp.max = (imp.max < dpin.get_bitwidth().i.max) ? dpin.get_bitwidth().i.max : imp.max;
+      } else {
+        // Output bw isn't yet in overflow mode so this has to be biggest.
+        imp.min = 0;
+        imp.max = dpin.get_bitwidth().i.max;
+        imp.overflow = true;
       }
+    } else if (!imp.overflow) {
+      // If neither are in overflow mode, widen BW range to contain both ranges.
+      imp.min = (imp.min > dpin.get_bitwidth().i.min) ? dpin.get_bitwidth().i.min : imp.min;
+      imp.max = (imp.max < dpin.get_bitwidth().i.max) ? dpin.get_bitwidth().i.max : imp.max;
+      fmt::print("for this mux, min:{}, max:{}\n", imp.min, imp.max);
     }
   }
 
-  updated = dpin.ref_bitwidth()->i.update(imp);
+  updated = first_edge_dpin.ref_bitwidth()->i.update(imp);
   if (updated) {
-    fmt::print("\tUpdate: ");
-    mark_all_outputs(dpin);
+    mark_all_outputs(first_edge_dpin);
+  }
+
+  
+  updated = node_dpin.ref_bitwidth()->i.update(imp);
+  if (updated) {
+    mark_all_outputs(node_dpin);
   }
 }
 
@@ -762,16 +770,17 @@ void Pass_bitwidth::bw_implicit_range_to_bits(LGraph *lg) {
   }
 
   for (const auto& node: lg->fast()) {
-    if (node.get_type().op == U32Const_Op)
-      continue;
+    /* if (node.get_type().op == U32Const_Op) */
+    /*   continue; */
 
     for (auto& out:node.out_edges()) {
       if (out.driver.has_bitwidth()) {
         uint32_t bits;
-        if (out.driver.get_bitwidth().i.max == 1)
+        if (out.driver.get_bitwidth().i.max == 1) {
           bits = 1;
-        else
+        } else {
           bits = ceil(log2(out.driver.get_bitwidth().i.max));
+        }
 
         out.driver.set_bits(bits);
         fmt::print("dpin:{}, bits:{}\n", out.driver.debug_name(), uint32_t(bits));

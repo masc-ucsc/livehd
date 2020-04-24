@@ -1,8 +1,7 @@
 #!/bin/bash
 rm -rf ./lgdb
-rm -f  yosys_script.*
 
-pts='if'
+pts='if if2'
 # pts='tuple_if2 tuple_if ssa_rhs ssa_nested_if ssa_if nested_if tuple simple_tuple trivial_bitwidth function_call tuple '
 # pts='ssa_rhs'
 # pts='tuple'
@@ -156,7 +155,8 @@ do
 
   ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg"
   if [ $? -eq 0 ] && [ -f ${pt}.v ]; then
-    echo "Successfully generate Verilog: ${pt}.v"
+    echo "Successfully generate Verilog: ${pt}.v"a
+    rm -f  yosys_script.*
   else
     echo "ERROR: Pyrope compiler failed: verilog generation, testcase: ${pt}.cfg"
     exit 1
