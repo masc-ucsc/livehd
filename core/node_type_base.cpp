@@ -43,6 +43,7 @@ Node_Type::_init::_init() {
   Node_Type::table[TupGet_Op]          = new Node_Type_TupGet();
   Node_Type::table[TupRef_Op]          = new Node_Type_TupRef();
   Node_Type::table[TupKey_Op]          = new Node_Type_TupKey();
+  Node_Type::table[CompileErr_Op]      = new Node_Type_CompileErr();
   Node_Type::table[DontCare_Op]        = new Node_Type_DontCare();
 
   Node_Type::table[Loop_breaker_begin] = new Node_Type_Invalid();

@@ -5,8 +5,10 @@
 #include "mmap_tree.hpp"
 #include "lnast_ntype.hpp"
 
-//FIXME: need ordered map to guarantee phi-node generation order to be able to test LNAST-SSA, better to use absl::btree_map
-//using Phi_rtable = absl::flat_hash_map<std::string_view, Lnast_nid>; //rtable = resolve_table
+// FIXME->sh: need ordered map to guarantee phi-node generation order to be able
+// to test LNAST-SSA, better to use absl::btree_map
+
+/* using Phi_rtable = absl::flat_hash_map<std::string_view, Lnast_nid>; //rtable = resolve_table */
 using Lnast_nid          = mmap_lib::Tree_index;
 using Phi_rtable         = std::map<std::string_view, Lnast_nid>; //rtable = resolve_table
 using Cnt_rtable         = absl::flat_hash_map<std::string_view, int8_t>;
@@ -122,6 +124,7 @@ private:
 
   Phi_rtable new_added_phi_node_table;
   Lnast_nid  default_const_nid;
+  Lnast_nid  err_var_undefined;
 
   std::vector<std::string *> string_pool;
 
@@ -129,7 +132,8 @@ public:
   Lnast() = default;
   virtual ~Lnast();
   explicit Lnast(std::string_view _module_name): top_module_name(_module_name) { }
-  void ssa_trans(){
+
+  void ssa_trans() {
     do_ssa_trans(get_root());
   };
 

@@ -20,7 +20,7 @@ digraph {
  10->22;
  38 [label=<ref, x<I><SUB><font color="#ff1020">0</font></SUB></I>>];
  22->38;
- 39 [label=<const, 0d3>];
+ 39 [label=<const, 0d1>];
  22->39;
  23 [label=<if, >];
  10->23;
@@ -62,4 +62,6 @@ digraph {
  24->317;
  25 [label=<const, default_const>];
  10->25;
+ 26 [label=<error_flag, err_var_undefined>];
+ 10->26;
 }

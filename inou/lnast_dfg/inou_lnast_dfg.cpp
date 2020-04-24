@@ -121,6 +121,9 @@ void Inou_lnast_dfg::process_ast_stmts(LGraph *dfg, const Lnast_nid &lnidx_stmts
     } else if (ntype.is_const()) {
       I(lnast->get_name(lnidx) == "default_const");
       continue;
+    } else if (ntype.is_err_flag()) {
+      I(lnast->get_name(lnidx) == "err_var_undefined");
+      continue;
     } else {
       I(false);
       return;
@@ -542,7 +545,7 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
 
   if (is_output(name)) {
     dfg->add_graph_output(name.substr(1, name.size()-3), Port_invalid, 0); // Port_invalid pos means do not care about position
-    fmt::print("add graph out:{}\n", name.substr(1, name.size()-3));
+    fmt::print("add graph out:{}\n", name.substr(1, name.size()-3));       // -3 means get rid of %, _0(ssa subscript)
     node_dpin = dfg->get_graph_output_driver_pin(name.substr(1, name.size()-3));
   } else if (is_input(name)) {
     node_dpin = dfg->add_graph_input(name.substr(1, name.size()-3), Port_invalid, 0);
@@ -554,6 +557,8 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
     node_dpin = resolve_constant(dfg, name).setup_driver_pin();
   } else if (is_default_const(name)) {
     node_dpin = resolve_constant(dfg, "0d0").setup_driver_pin();
+  } else if (is_err_var_undefined(name)) {
+    node_dpin = dfg->create_node(CompileErr_Op).setup_driver_pin();
   } else {
     return node_dpin; //return empty node_pin
   }
@@ -576,17 +581,15 @@ Node_Type_Op Inou_lnast_dfg::decode_lnast_op(const Lnast_nid &lnidx_opr) {
 
 
 
-
-
-void Inou_lnast_dfg::process_ast_logical_op(LGraph *dfg, const Lnast_nid &lnidx) { ; };
-void Inou_lnast_dfg::process_ast_as_op(LGraph *dfg, const Lnast_nid &lnidx) { ; };
-void Inou_lnast_dfg::process_ast_label_op(LGraph *dfg, const Lnast_nid &lnidx) { ; };
-void Inou_lnast_dfg::process_ast_uif_op(LGraph *dfg, const Lnast_nid &lnidx) { ; };
+void Inou_lnast_dfg::process_ast_logical_op  (LGraph *dfg, const Lnast_nid &lnidx) { ; };
+void Inou_lnast_dfg::process_ast_as_op       (LGraph *dfg, const Lnast_nid &lnidx) { ; };
+void Inou_lnast_dfg::process_ast_label_op    (LGraph *dfg, const Lnast_nid &lnidx) { ; };
+void Inou_lnast_dfg::process_ast_uif_op      (LGraph *dfg, const Lnast_nid &lnidx) { ; };
 void Inou_lnast_dfg::process_ast_func_call_op(LGraph *dfg, const Lnast_nid &lnidx) { ; };
-void Inou_lnast_dfg::process_ast_func_def_op(LGraph *dfg, const Lnast_nid &lnidx) { ; };
-void Inou_lnast_dfg::process_ast_sub_op(LGraph *dfg, const Lnast_nid &lnidx) { ; };
-void Inou_lnast_dfg::process_ast_for_op(LGraph *dfg, const Lnast_nid &lnidx) { ; };
-void Inou_lnast_dfg::process_ast_while_op(LGraph *dfg, const Lnast_nid &lnidx) { ; };
+void Inou_lnast_dfg::process_ast_func_def_op (LGraph *dfg, const Lnast_nid &lnidx) { ; };
+void Inou_lnast_dfg::process_ast_sub_op      (LGraph *dfg, const Lnast_nid &lnidx) { ; };
+void Inou_lnast_dfg::process_ast_for_op      (LGraph *dfg, const Lnast_nid &lnidx) { ; };
+void Inou_lnast_dfg::process_ast_while_op    (LGraph *dfg, const Lnast_nid &lnidx) { ; };
 void Inou_lnast_dfg::process_ast_dp_assign_op(LGraph *dfg, const Lnast_nid &lnidx) { ; };
 
 void Inou_lnast_dfg::setup_lnast_to_lgraph_primitive_type_mapping() {
