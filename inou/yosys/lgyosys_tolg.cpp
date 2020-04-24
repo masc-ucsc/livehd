@@ -67,16 +67,17 @@ static void look_for_wire(LGraph *g, const RTLIL::Wire *wire) {
     if (!g->is_graph_output(&wire->name.c_str()[1])) {
       g->add_graph_output(&wire->name.c_str()[1], wire->port_id, wire->width);
     }
-    auto pin = g->get_graph_output(&wire->name.c_str()[1]);
-    I(pin.get_bits() == wire->width);
+    auto dpin = g->get_graph_output_driver_pin(&wire->name.c_str()[1]);
+    I(dpin.get_bits() == wire->width);
     if (wire->start_offset) {
-      auto dpin = g->get_graph_output_driver_pin(&wire->name.c_str()[1]);
-      I(dpin.get_pid() == pin.get_pid());
+      //auto dpin = g->get_graph_output_driver_pin(&wire->name.c_str()[1]);
+      //I(dpin.get_pid() == pin.get_pid());
       dpin.set_offset(wire->start_offset);
     }
-    auto node = g->create_node(Join_Op, wire->width);
+    //auto node = g->create_node(Join_Op, wire->width);
+    //wire2pin[wire] = node.setup_driver_pin();
 
-    wire2pin[wire] = node.setup_driver_pin();
+    wire2pin[wire] = dpin;
 
     // g->add_edge(node.get_driver_pin(), pin);
   }
