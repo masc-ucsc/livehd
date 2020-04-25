@@ -40,7 +40,8 @@ protected:
 
 private:
   //FIXME-sh: all data member should be initialized!
-  Lnast       lnast;
+  std::string top_module_name;
+  std::shared_ptr<Lnast> lnast;
   uint32_t    line_num;
   uint8_t     line_tkcnt;
   Token       buffer_if_condition;
@@ -58,6 +59,6 @@ public:
   Lnast_parser(std::string_view file);
   Lnast_parser(std::string_view _top_module_name, std::string_view _text);
 
-  Lnast *ref_lnast() { return &lnast;};
+  std::shared_ptr<Lnast> ref_lnast() { return lnast; };
 };
 

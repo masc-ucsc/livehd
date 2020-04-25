@@ -50,7 +50,7 @@ void Inou_cgen::to_xxx(Cgen_type cgen_type) {
   for (const auto &f : absl::StrSplit(files, ',')) {
     Lnast_parser lnast_parser(f);
 
-    auto *lnast = lnast_parser.ref_lnast();
+    auto lnast = lnast_parser.ref_lnast();
     // needed??? lnast->ssa_trans();
 
     std::unique_ptr<Lnast_to_xxx> lnast_to;
