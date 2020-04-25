@@ -212,14 +212,14 @@ VarPtr VCDWriter::register_var(const std::string &scope, const std::string &name
     if (scope.size() == 0 || name.size() == 0)
         throw VCDTypeException{ utils::format("Empty scope '%s' or name '%s'", scope.c_str(), name.c_str()) };
 
-    _search->vcd_scope.name = scope;
+    _search->vcd_scope.name = scope;//"a" goes to vcd_scope.name
     auto cur_scope = _scopes.find(_search->ptr_scope);
     if (cur_scope == _scopes.end())
     {
         auto res = _scopes.insert(std::make_shared<VCDScope>(scope, _scope_def_type));
         if (!res.second)
             throw VCDPhaseException{ utils::format("Cannot insert scope '%s'", scope.c_str()) };
-        cur_scope = res.first;
+        cur_scope = res.first;//first is the shared ptr of type VCD scope and second is a bool
     }
 
     auto sz = [&size](unsigned def) { return (size ? size : def);  };
@@ -233,6 +233,9 @@ VarPtr VCDWriter::register_var(const std::string &scope, const std::string &name
                 pvar = VarPtr(new VCDScalarVariable(name, type, 1, *cur_scope, _next_var_id));
             else
                 pvar = VarPtr(new VCDVectorVariable(name, type, sz(64), *cur_scope, _next_var_id));
+           //SG:as per default: pvar = VarPtr(new VCDVectorVariable(name, type, size, *cur_scope, _next_var_id));
+              //  if (init_value.size() == 1 && init_value[0] == VCDValues::UNDEF)
+               //     init_value = std::string(size, VCDValues::ZERO);
             break;
 
         case VariableType::real:
@@ -244,16 +247,14 @@ VarPtr VCDWriter::register_var(const std::string &scope, const std::string &name
         case VariableType::string:
             pvar = VarPtr(new VCDStringVariable(name, type, sz(1), *cur_scope, _next_var_id));
             break;
-
         case VariableType::event:
             pvar = VarPtr(new VCDScalarVariable(name, type, 1, *cur_scope, _next_var_id));
             break;
 
         default:
             if (!size)
-                throw VCDTypeException{ utils::format("Must supply size for type '%s' of var '%s'",
+                 throw VCDTypeException{ utils::format("Must supply size for type '%s' of var '%s'",
                                                VCDVariable::VAR_TYPES[(int)type].c_str(), name.c_str()) };
-
             pvar = VarPtr(new VCDVectorVariable(name, type, size, *cur_scope, _next_var_id));
             if (init_value.size() == 1 && init_value[0] == VCDValues::UNDEF)
                 init_value = std::string(size, VCDValues::UNDEF);
@@ -283,30 +284,54 @@ bool VCDWriter::_change(VarPtr var, TimeStamp timestamp, const VarValue &value, 
     if (!var)
         throw VCDTypeException{ "Invalid VCDVariable" };
 
-    std::string change_value = var->change_record(value);
+        if (timestamp > _timestamp)
+        {
+            if (_registering)
+                _finalize_registration();
+            if (_dumping)
+                fprintf(_ofile, "#%d\n", timestamp);
+            _timestamp = timestamp;
+        }
+
+    std::string change_value = var->change_record(value);//after the method completes, this line is executed last
+    //std::cout<<change_value<<value<<std::endl; //SG:fprintf(_ofile, "\n%s  .  .  .\n", change_value);
     // if value changed
-    if (_vars_prevs.find(var) != _vars_prevs.end())
+    if (_vars_prevs.find(var) != _vars_prevs.end())//not entered in 1st entry @ main:544 //_vars_prev is unordered_map of (varptr, str) pairs
     {
         if (_vars_prevs[var] == change_value) return false;
-        _vars_prevs[var] = change_value;
+        _vars_prevs[var] = change_value;//entered for #0
+
     }
     else
         if (!reg)
             throw VCDTypeException{ utils::format("VCDVariable '%s' do not registered", var->_name.c_str()) };
         else
-            _vars_prevs.insert(std::make_pair(var, change_value));
 
-    if (timestamp > _timestamp)
-    {
-        if (_registering)
-            _finalize_registration();
-        if (_dumping)
-            fprintf(_ofile, "#%d\n", timestamp);
-        _timestamp = timestamp;
-    }
+           _vars_prevs.insert(std::make_pair(var, change_value));// registering: inserted the pair for the first time
+
+
+
+
+
+//    if (timestamp > _timestamp)
+//    {
+//        if (_registering)
+//            _finalize_registration();
+//        if (_dumping)
+//            fprintf(_ofile, "#%d\n", timestamp);
+//        _timestamp = timestamp;
+//    }
     // dump it into file
-    if (_dumping && !_registering)
-        fprintf(_ofile, "%s%s\n", change_value.c_str(), var->_ident.c_str());
+    if (_dumping && !_registering){//not entered in 1st entry 
+
+            if (change_value.size() != 1){
+                fprintf(_ofile, "%s %s\n", change_value.c_str(), var->_ident.c_str());
+            }
+            else {
+                fprintf(_ofile, "%s%s\n", change_value.c_str(), var->_ident.c_str());
+            }
+//            fprintf(_ofile, "%s%s\n", change_value.c_str(), var->_ident.c_str());
+        }
     return true;
 }
 
@@ -372,7 +397,13 @@ void VCDWriter::_dump_values(const std::string &keyword)
     {
         const char *ident = p.first->_ident.c_str();
         const char *value = p.second.c_str();
-        fprintf(_ofile, "%s%s\n", value, ident);
+            if (p.second.size() != 1){
+                fprintf(_ofile, "%s %s\n", value, ident);
+            }
+            else {
+                fprintf(_ofile, "%s%s\n", value,
+                        ident);// the space gives the spacing between value and identifier in the dumped file
+            }
     }
     fprintf(_ofile, "$end\n");
 }
@@ -380,7 +411,6 @@ void VCDWriter::_dump_values(const std::string &keyword)
 void VCDWriter::_scope_declaration(const std::string &scope, size_t sub_beg, size_t sub_end)
 {
     const std::string SCOPE_TYPES[] = { "begin", "fork", "function", "module", "task" };
-
     auto scope_name = scope.substr(sub_beg, sub_end - sub_beg);
     auto scope_type = SCOPE_TYPES[int(_scope_def_type)].c_str();
     fprintf(_ofile, "$scope %s %s $end\n", scope_type, scope_name.c_str());
@@ -500,8 +530,9 @@ VarValue VCDVectorVariable::change_record(const VarValue &value) const
     if (value.size() > _size)
         throw VCDTypeException{ utils::format("Invalid binary vector value '%s' size '%d'", value.c_str(), _size) };
 
-    std::string val = ('b' + value + ' ');
-    auto val_sz = value.size();
+ //    std::string val = ('b' + value + ' ');
+  std::string val = ('b' + value );
+  auto val_sz = val.size();
     
     for (auto i = 1u; i < (val_sz - 1); ++i)
     {
@@ -516,12 +547,14 @@ VarValue VCDVectorVariable::change_record(const VarValue &value) const
     // align
     else if (val_sz < _size)
     {
-        val.reserve(_size + 2);
+        val.resize(_size + 2);
         auto k = (_size - (val_sz - 1));
         for (auto i = (val_sz - 1); i >= 1; --i)
             val[k + i] = val[i];
-        for (auto i = 1u; i <= k; ++i)
-            val[i] = VCDValues::ZERO;
+        for (auto i = 1u; i <= k; ++i) {
+          //makes all the values 0 for intialization;
+          val[i] = VCDValues::ZERO;
+        }
     }
     return val;
 }

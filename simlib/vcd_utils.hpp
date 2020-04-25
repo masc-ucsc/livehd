@@ -1,5 +1,5 @@
 // This file is distributed under the LICENSE.vcd-writer License. See LICENSE for details.
-
+#pragma once
 #include <cstdarg>
 #include <ctime>
 #include <cstring>

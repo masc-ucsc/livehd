@@ -165,6 +165,7 @@ public:
         if (!_dumping && !_registering && _vars_prevs.size())
             fprintf(_ofile, "#%d", current);
         _dump_values("$dumpon");
+//            _dump_values();
         _dumping = true;
     }
 
@@ -211,6 +212,7 @@ public:
 protected:
     bool _change(VarPtr, TimeStamp, const VarValue&, bool);
     void _dump_off(TimeStamp);
+//        void _dump_values();
     void _dump_values(const std::string& keyword);
     void _scope_declaration(const std::string& scope, size_t sub_beg, size_t sub_end = std::string::npos);
     //! Dump VCD header into file
