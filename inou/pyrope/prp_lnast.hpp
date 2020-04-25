@@ -7,8 +7,6 @@ protected:
   std::unique_ptr<Lnast> lnast; // translate the AST to lnAST
   // this is equal to the index of the statements node the current rule adds to
   mmap_lib::Tree_index cur_stmts = mmap_lib::Tree_index(-1,-1);
-  // the node and a number that says how far to travel down the right of the tree before find the parent of the new node
-  std::list<std::tuple<Lnast_node, uint16_t>> lnast_buffer;
   
   std::list<std::string> temp_vars;
   std::string current_temp_var = "___a";
