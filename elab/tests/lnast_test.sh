@@ -1,7 +1,7 @@
 #!/bin/bash
 rm -rf ./lgdb
 
-pts='if if2 if3_err'
+pts='if if2 if3_err nested_if_err nested_if'
 # pts='tuple_if2 tuple_if ssa_rhs ssa_nested_if ssa_if nested_if tuple simple_tuple trivial_bitwidth function_call tuple '
 # pts='ssa_rhs'
 # pts='tuple'
@@ -23,16 +23,18 @@ fi
 
 for pt in $pts
 do
-    echo "Pattern:${pt}.cfg"
-    echo "Pattern:${pt}.cfg"
-    echo "Pattern:${pt}.cfg"
+    echo ""
+    echo ""
     echo ""
     echo "---------------------------------------------------"
     echo "CFG -> LNAST -> Graphviz Test"
     echo "---------------------------------------------------"
+    echo "Pattern:${pt}.cfg"
+    echo "Pattern:${pt}.cfg"
+    echo "Pattern:${pt}.cfg"
     echo ""
     
-    if [! -f inou/cfg/tests/${pt}.cfg]; then
+    if [ ! -f inou/cfg/tests/${pt}.cfg ]; then
       echo "ERROR: could not find ${pt}.cfg in /inou/cfg/tests"
       exit !
     fi
@@ -82,7 +84,7 @@ do
     fi
 
 
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.fromlg verbose:false"
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
     mv ${pt}.dot ${pt}.no_bits.tuple.reduced_or.dot
 
 
@@ -100,7 +102,7 @@ do
       exit 1
     fi
 
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.fromlg verbose:false"
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
     mv ${pt}.dot ${pt}.no_bits.tuple.dot
 
 
@@ -118,7 +120,7 @@ do
       exit 1
     fi
 
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.fromlg verbose:false"
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
     mv ${pt}.dot ${pt}.no_bits.dot
 
     echo ""
@@ -136,7 +138,7 @@ do
       exit 1
     fi
 
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.fromlg verbose:false"
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
 
     echo ""
     echo ""
@@ -150,7 +152,7 @@ do
 
     if [[ ${pt} == *_err* ]]; then 
         echo "----------------------------------------------------"
-        echo "This is a Compile Error Test, No Need to Generate Verilog Code "  
+        echo "Pass! This is a Compile Error Test, No Need to Generate Verilog Code "  
         echo "----------------------------------------------------"
     else
         echo ""
@@ -162,7 +164,7 @@ do
 
         ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg"
         if [ $? -eq 0 ] && [ -f ${pt}.v ]; then
-          echo "Successfully generate Verilog: ${pt}.v"a
+          echo "Successfully generate Verilog: ${pt}.v"
           rm -f  yosys_script.*
         else
           echo "ERROR: Pyrope compiler failed: verilog generation, testcase: ${pt}.cfg"

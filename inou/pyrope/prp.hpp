@@ -19,7 +19,10 @@
 #include "ast.hpp"
 #include "elab_scanner.hpp"
 
-//#define DEBUG
+#define OUTPUT_AST
+#define OUTPUT_LN
+
+//#define DEBUG_AST
 //#define DEBUG_LN
 
 // variable argument number macro (adapted from stackoverflow.com/questions/3046889/optional-parameters-with-c-macros)
@@ -34,19 +37,31 @@
 #define SCAN_IS_TOKEN(...) SCAN_IS_TOKEN_MACRO_CHOOSER(__VA_ARGS__)(__VA_ARGS__)
 
 #ifdef DEBUG_LN
+#define PRINT_DBG_LN(...) PRINT_LN(__VA_ARGS__)
+#else
+#define PRINT_DBG_LN(...)
+#endif
+
+#ifdef DEBUG_AST
+#define PRINT_DBG_AST(...) PRINT_AST(__VA_ARGS__)
+#else
+#define PRINT_DBG_AST(...)
+#endif
+
+#ifdef OUTPUT_AST
+#define PRINT_AST(...) fmt::print(__VA_ARGS__)
+#else
+#define PRINT_AST(...)
+#endif
+
+#ifdef OUTPUT_LN
 #define PRINT_LN(...) fmt::print(__VA_ARGS__)
 #else
 #define PRINT_LN(...)
 #endif
-  
-#ifdef DEBUG
-#define PRINT(...) fmt::print(__VA_ARGS__)
-#else
-#define PRINT(...)
-#endif
-  
+
 // function-like macros
-#ifdef DEBUG
+#ifdef DEBUG_AST
     #define INIT_FUNCTION(...) \
     debug_stat.rules_called++; \
     rule_call_stack.push_back(__VA_ARGS__); \
@@ -63,13 +78,13 @@
     std::list<std::tuple<uint8_t, Rule_id, Token_entry>> loc_list
 #endif
 
-#ifdef DEBUG
+#ifdef DEBUG_AST
 #define RULE_FAILED(...) \
     fmt::print(__VA_ARGS__); \
     rule_call_stack.pop_back(); \
     print_rule_call_stack(); \
     if(loc_list.size() > 0){\
-      PRINT("tokens_consumed: {}.\n", tokens_consumed-starting_tokens); \
+      PRINT_DBG_AST("tokens_consumed: {}.\n", tokens_consumed-starting_tokens); \
       print_loc_list(loc_list);\
     }\
     else{ \
@@ -88,7 +103,7 @@
     return false
 #endif
 
-#ifdef DEBUG
+#ifdef DEBUG_AST
 #define RULE_SUCCESS(message, rule) \
   fmt::print(message); \
   rule_call_stack.pop_back(); \
@@ -281,7 +296,7 @@ protected:
   void ast_trimmer();
   void process_ast();
   
-#ifdef DEBUG
+#ifdef DEBUG_AST
   void print_loc_list(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &loc_list);
   void print_rule_call_stack();
 #endif

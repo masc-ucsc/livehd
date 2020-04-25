@@ -923,7 +923,7 @@ uint8_t Prp::rule_identifier(std::list<std::tuple<uint8_t, Rule_id, Token_entry>
   SCAN_IS_TOKEN(Token_id_bang, Prp_rule_identifier) || SCAN_IS_TOKEN(Pyrope_id_tilde, Prp_rule_identifier);
   
   if(SCAN_IS_TOKEN(Token_id_label, Prp_rule_identifier)){
-    PRINT("Matched rule_identifier; found a label.\n");
+    PRINT_DBG_AST("Matched rule_identifier; found a label.\n");
     debug_stat.rules_matched++;
     if(sub_cnt > 1){
       loc_list.push_front(std::make_tuple(0, 0, 0));
@@ -1094,7 +1094,7 @@ uint8_t Prp::rule_additive_expression(std::list<std::tuple<uint8_t, Rule_id, Tok
   INIT_FUNCTION("rule_additive_expression.");
   
   if(!CHECK_RULE(&Prp::rule_bitwise_expression)){ RULE_FAILED("Failed rule_additive_expression; couldn't find a bitwise expression.\n"); }
-  PRINT("rule_additive_expression: just checked for first operand; sub_cnt = {}.\n", sub_cnt);
+  PRINT_DBG_AST("rule_additive_expression: just checked for first operand; sub_cnt = {}.\n", sub_cnt);
   bool next = true;
   bool found_op = false;
   
@@ -1109,7 +1109,7 @@ uint8_t Prp::rule_additive_expression(std::list<std::tuple<uint8_t, Rule_id, Tok
       // optional
       SCAN_IS_TOKEN(Token_id_plus, Prp_rule_additive_expression) || SCAN_IS_TOKEN(Token_id_mult, Prp_rule_additive_expression);
       found_op = true;
-      PRINT("rule_additive_expression: just found operator; sub_cnt = {}.\n", sub_cnt);
+      PRINT_DBG_AST("rule_additive_expression: just found operator; sub_cnt = {}.\n", sub_cnt);
     }
     else if(SCAN_IS_TOKEN(Token_id_lt)){ // left and right shift operators
       if(SCAN_IS_TOKEN(Token_id_lt, Prp_rule_additive_expression)){
@@ -1150,7 +1150,7 @@ uint8_t Prp::rule_additive_expression(std::list<std::tuple<uint8_t, Rule_id, Tok
     }
     if(found_op){
       if(!CHECK_RULE(&Prp::rule_bitwise_expression)){ RULE_FAILED("Failed rule_additive_expression; couldn't find an answering bitwise expression.\n"); }
-      PRINT("rule_additive_expression: just checked for second operand; sub_cnt = {}.\n", sub_cnt);
+      PRINT_DBG_AST("rule_additive_expression: just checked for second operand; sub_cnt = {}.\n", sub_cnt);
       found_op = false;
     }
   }
@@ -1356,7 +1356,7 @@ inline bool Prp::check_eos(){
 void Prp::elaborate(){
   patch_pass(pyrope_keyword);
   
-  PRINT("RULE AND AST CALL TRACE \n\n");
+  PRINT_DBG_AST("RULE AND AST CALL TRACE \n\n");
   
   ast = std::make_unique<Ast_parser>(get_memblock(), Prp_rule);
   std::list<std::tuple<uint8_t, Rule_id, Token_entry>> loc_list;
@@ -1369,38 +1369,39 @@ void Prp::elaborate(){
   }
   
   if(failed){
-    fmt::print("\nParsing FAILED!\n");
+    PRINT_AST("\nParsing FAILED!\n");
+    exit(1);
   }
   else{
-    fmt::print("\nParsing SUCCESSFUL!\n");
+    PRINT_AST("\nParsing SUCCESSFUL!\n");
   }
   
-  PRINT("\nAST Call List\n\n");
+  PRINT_DBG_AST("\nAST Call List\n\n");
   for(auto it = loc_list.begin(); it != loc_list.end(); ++it){
-    PRINT("Operation: {}, Rule: {}, Token: {}\n", std::get<0>(*it), rule_id_to_string(std::get<1>(*it)), scan_text(std::get<2>(*it)));
+    PRINT_DBG_AST("Operation: {}, Rule: {}, Token: {}\n", std::get<0>(*it), rule_id_to_string(std::get<1>(*it)), scan_text(std::get<2>(*it)));
   }
   
-  PRINT("\nAST BUILD LOG\n\n");
+  PRINT_DBG_AST("\nAST BUILD LOG\n\n");
   
   // build the ast
   ast_builder(loc_list);
   
-  fmt::print("\nAST PREORDER TRAVERSAL\n\n");
+  PRINT_AST("\nAST PREORDER TRAVERSAL\n\n");
   
   // next, write the AST traversal
   ast_handler();
   
-  PRINT("\nSTATISTICS\n\n");
+  PRINT_DBG_AST("\nSTATISTICS\n\n");
   
   // finally, write the statistics
-  PRINT(fmt::format("Number of rules called: {}\n", debug_stat.rules_called));
-  PRINT(fmt::format("Number of rules matched: {}\n", debug_stat.rules_matched));
-  PRINT(fmt::format("Number of rules failed: {}\n", debug_stat.rules_failed));
-  PRINT(fmt::format("Number of tokens consumed: {}\n", debug_stat.tokens_consumed));
-  PRINT(fmt::format("Number of tokens unconsumed: {}\n", debug_stat.tokens_unconsumed));
-  PRINT(fmt::format("Number of ast->up() calls: {}\n", debug_stat.ast_up_calls));
-  PRINT(fmt::format("Number of ast->down() calls: {}\n", debug_stat.ast_down_calls));
-  PRINT(fmt::format("Number of ast_add() calls: {}\n", debug_stat.ast_add_calls));
+  PRINT_DBG_AST(fmt::format("Number of rules called: {}\n", debug_stat.rules_called));
+  PRINT_DBG_AST(fmt::format("Number of rules matched: {}\n", debug_stat.rules_matched));
+  PRINT_DBG_AST(fmt::format("Number of rules failed: {}\n", debug_stat.rules_failed));
+  PRINT_DBG_AST(fmt::format("Number of tokens consumed: {}\n", debug_stat.tokens_consumed));
+  PRINT_DBG_AST(fmt::format("Number of tokens unconsumed: {}\n", debug_stat.tokens_unconsumed));
+  PRINT_DBG_AST(fmt::format("Number of ast->up() calls: {}\n", debug_stat.ast_up_calls));
+  PRINT_DBG_AST(fmt::format("Number of ast->down() calls: {}\n", debug_stat.ast_down_calls));
+  PRINT_DBG_AST(fmt::format("Number of ast_add() calls: {}\n", debug_stat.ast_add_calls));
 }
 
 /* Consumes a token and dumps the new one */
@@ -1412,7 +1413,7 @@ bool Prp::consume_token(){
 
 /* Unconsumes a token and dumps it if debug is defined */
 bool Prp::unconsume_token(){
-  PRINT("Unconsuming token: ");
+  PRINT_DBG_AST("Unconsuming token: ");
   debug_stat.tokens_unconsumed++;
   tokens_consumed--;
 #ifdef DEBUG
@@ -1429,7 +1430,7 @@ bool Prp::go_back(uint64_t num_tok){
   bool ok;
   if(num_tok == 0)
     return true;
-  PRINT("Going back {} token(s); total token(s) consumed: {}.\n", num_tok, tokens_consumed);
+  PRINT_DBG_AST("Going back {} token(s); total token(s) consumed: {}.\n", num_tok, tokens_consumed);
   for(i=0;i<num_tok;i++){
     ok = unconsume_token();
   }
@@ -1443,7 +1444,7 @@ void Prp::ast_handler(){
     auto node = ast->get_data(it);
     rule_name = rule_id_to_string(node.rule_id);
     auto token_text = scan_text(node.token_entry);
-    fmt::print("Rule name: {}, Token text: {}, Tree level: {}\n", rule_name, token_text, it.level);
+    PRINT_AST("Rule name: {}, Token text: {}, Tree level: {}\n", rule_name, token_text, it.level);
   }
 }
 
@@ -1454,18 +1455,18 @@ void Prp::ast_builder(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass
       case 0:
         debug_stat.ast_down_calls++;
         ast->down();
-        PRINT("Went down.\n");
+        PRINT_DBG_AST("Went down.\n");
         break;
       case 1:
         debug_stat.ast_up_calls++;
         ast->up(std::get<1>(ast_op));
-        PRINT("Went up with rule {}.\n", rule_id_to_string(std::get<1>(ast_op)));
+        PRINT_DBG_AST("Went up with rule {}.\n", rule_id_to_string(std::get<1>(ast_op)));
         break;
       case 2:
         debug_stat.ast_add_calls++;
         ast->down();
         ast->add(std::get<1>(ast_op), std::get<2>(ast_op));
-        PRINT("Added token {} from rule {}.\n", scan_text(std::get<2>(ast_op)), rule_id_to_string(std::get<1>(ast_op)));
+        PRINT_DBG_AST("Added token {} from rule {}.\n", scan_text(std::get<2>(ast_op)), rule_id_to_string(std::get<1>(ast_op)));
         ast->up(std::get<1>(ast_op));
         break;
     }
@@ -1473,7 +1474,7 @@ void Prp::ast_builder(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass
 }
 
 inline uint8_t Prp::check_function(uint8_t (Prp::*rule)(std::list<std::tuple<uint8_t, Rule_id, Token_entry>>&), uint64_t *sub_cnt, std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &loc_list){
-  PRINT("Called check_function.\n");
+  PRINT_DBG_AST("Called check_function.\n");
   uint64_t starting_size = loc_list.size();
   uint8_t ret = (this->*rule)(loc_list);
   if(ret == false){
@@ -1482,7 +1483,7 @@ inline uint8_t Prp::check_function(uint8_t (Prp::*rule)(std::list<std::tuple<uin
   
   if(loc_list.size() > starting_size){
     (*sub_cnt)++;
-    PRINT("check_function: incremented sub_cnt to {}.\n", *sub_cnt);
+    PRINT_DBG_AST("check_function: incremented sub_cnt to {}.\n", *sub_cnt);
   }
   
   return ret;
@@ -1501,9 +1502,9 @@ inline bool Prp::chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, s
     if(rid != Prp_invalid){
       loc_list.push_back(std::make_tuple(2, rid, scan_token()));
       (*sub_cnt)++;
-      PRINT("chk_and_consume: incremented sub_cnt to {}\n", *sub_cnt);
+      PRINT_DBG_AST("chk_and_consume: incremented sub_cnt to {}\n", *sub_cnt);
     }
-    PRINT("Consuming token {} from rule {}.\n", scan_text(scan_token()), rule_id_to_string(rid));
+    PRINT_DBG_AST("Consuming token {} from rule {}.\n", scan_text(scan_token()), rule_id_to_string(rid));
 #ifdef DEBUG
     print_loc_list(loc_list);
 #endif
@@ -1739,14 +1740,14 @@ std::string Prp::tok_id_to_string(Token_id tok){
 inline void Prp::print_loc_list(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &loc_list){
   int i = 0;
   for(auto it = loc_list.begin(); it != loc_list.end(); it++){
-    PRINT("loc_list[{}]: operation: {} rule: {} token: {}.\n", i++, std::get<0>(*it), rule_id_to_string(std::get<1>(*it)), scan_text(std::get<2>(*it)));
+    PRINT_DBG_AST("loc_list[{}]: operation: {} rule: {} token: {}.\n", i++, std::get<0>(*it), rule_id_to_string(std::get<1>(*it)), scan_text(std::get<2>(*it)));
   }
 }
 
 inline void Prp::print_rule_call_stack(){
   for(auto it = rule_call_stack.begin(); it != rule_call_stack.end(); it++){
-    PRINT("{} ", *it);
+    PRINT_DBG_AST("{} ", *it);
   }
-  PRINT("\n");
+  PRINT_DBG_AST("\n");
 }
 #endif
