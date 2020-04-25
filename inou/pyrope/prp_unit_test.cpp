@@ -52,7 +52,7 @@ public:
     }
     
     inline uint8_t check_function(uint8_t (Prp::*rule)(std::list<std::tuple<uint8_t, Rule_id, Token_entry>>&), int64_t *sub_cnt, std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &loc_list){
-      PRINT("Called check_function.\n");
+      PRINT_LN("Called check_function.\n");
       uint64_t starting_size = loc_list.size();
       uint8_t ret = (this->*rule)(loc_list);
       if(ret == false){
@@ -61,7 +61,7 @@ public:
       
       if(loc_list.size() > starting_size){
         (*sub_cnt)++;
-        PRINT("check_function: incremented sub_cnt to {}.\n", *sub_cnt);
+        PRINT_LN("check_function: incremented sub_cnt to {}.\n", *sub_cnt);
       }
       
       return ret;
@@ -72,9 +72,9 @@ public:
         if(rid != Prp_invalid){
           loc_list.push_back(std::make_tuple(2, rid, scan_token()));
           (*sub_cnt)++;
-          PRINT("chk_and_consume: incremented sub_cnt to {}\n", *sub_cnt);
+          PRINT_LN("chk_and_consume: incremented sub_cnt to {}\n", *sub_cnt);
         }
-        PRINT("Consuming token {} from rule {}.\n", scan_text(scan_token()), rule_id_to_string(rid));
+        PRINT_LN("Consuming token {} from rule {}.\n", scan_text(scan_token()), rule_id_to_string(rid));
     #ifdef DEBUG
         print_loc_list(loc_list);
     #endif
