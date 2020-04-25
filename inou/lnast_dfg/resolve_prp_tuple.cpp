@@ -29,8 +29,8 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
         auto target_name = node.get_driver_pin().get_name();
         Node_pin target_dpin;
 
-        if (is_input(target_name) or is_output(target_name) /*or is_register(target_name)*/) { // FIXME->sh: what about the case of register?
-          target_dpin = Node_pin::find_driver_pin(dfg, target_name.substr(1));
+        if (is_input(target_name) || is_output(target_name)) { // FIXME->sh: what about the case of register?
+          target_dpin = Node_pin::find_driver_pin(dfg, target_name.substr(1, target_name.size()-3));
           fmt::print("target_dpin:{}\n", target_dpin.debug_name());
         } else {
           target_dpin = Node_pin::find_driver_pin(dfg, target_name);

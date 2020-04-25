@@ -194,6 +194,11 @@ private:
   void parse_step();
 
 protected:
+  std::pair<std::string_view, int> transfer_memblock_ownership() {
+    std::pair<std::string_view, int> p{memblock, memblock_fd};
+    memblock_fd = -1;
+    return p;
+  }
   std::string_view get_memblock() const { return memblock; }
   std::string_view get_filename() const { I(memblock_fd != -1); return buffer_name; }
   bool is_parse_inline() const { return memblock_fd == -1; }
@@ -361,5 +366,9 @@ public:
     //else if (offset > static_cast<int>(scanner_pos))
     //  p = 0 ;
     return token_list[p];
+  }
+  
+  const Token &get_token(Token_entry entry){
+    return token_list[entry];
   }
 };

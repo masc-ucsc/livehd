@@ -51,13 +51,15 @@
     debug_stat.rules_called++; \
     rule_call_stack.push_back(__VA_ARGS__); \
     print_rule_call_stack(); \
-    int64_t starting_tokens = tokens_consumed; \
-    int64_t sub_cnt = 0; \
+    auto starting_tokens = tokens_consumed; \
+    auto starting_line = cur_line; \
+    uint64_t sub_cnt = 0; \
     std::list<std::tuple<uint8_t, Rule_id, Token_entry>> loc_list
 #else
     #define INIT_FUNCTION(...) \
-    int64_t starting_tokens = tokens_consumed; \
-    int64_t sub_cnt = 0; \
+    auto starting_tokens = tokens_consumed; \
+    auto starting_line = cur_line; \
+    uint64_t sub_cnt = 0; \
     std::list<std::tuple<uint8_t, Rule_id, Token_entry>> loc_list
 #endif
 
@@ -74,12 +76,14 @@
       fmt::print("No problem; loc_list had nothing in it.\n");\
     }\
     go_back(tokens_consumed-starting_tokens); \
+    cur_line = starting_line; \
     debug_stat.rules_failed++; \
     std::list<std::tuple<uint8_t, Rule_id, Token_entry>>().swap(loc_list); \
     return false
 #else
 #define RULE_FAILED(...) \
     go_back(tokens_consumed-starting_tokens); \
+    cur_line = starting_line; \
     std::list<std::tuple<uint8_t, Rule_id, Token_entry>>().swap(loc_list); \
     return false
 #endif
@@ -111,6 +115,18 @@
 #endif
 
 #define CHECK_RULE(func) check_function(func, &sub_cnt, loc_list)
+
+#define INIT_PSEUDO_FAIL() \
+  uint64_t cur_tokens; \
+  uint64_t cur_loc_list_size 
+
+#define UPDATE_PSEUDO_FAIL() \
+  cur_tokens = tokens_consumed; \
+  cur_loc_list_size = loc_list.size() 
+
+#define PSEUDO_FAIL() \
+  go_back(tokens_consumed - cur_tokens); \
+  loc_list.resize(cur_loc_list_size) 
   
 // control
 constexpr Token_id Pyrope_id_if     = 128;
@@ -171,6 +187,7 @@ protected:
   
   uint64_t tokens_consumed = 0;
   uint64_t subtree_index = 0;
+  uint64_t cur_line = 0;
   
   std::unique_ptr<Ast_parser> ast;
   absl::flat_hash_map<std::string, Token_id> pyrope_keyword;
@@ -243,6 +260,10 @@ protected:
   uint8_t rule_not_in_implicit(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
   uint8_t rule_keyword(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
   
+  inline void check_lb();
+  inline bool check_eos();
+  inline bool inc_line_cnt();
+  
   bool unconsume_token();
   bool consume_token();
   bool go_back(uint64_t num_tok);
@@ -252,8 +273,8 @@ protected:
   std::string rule_id_to_string(Rule_id rid);
   std::string tok_id_to_string(Token_id tok);
   
-  inline uint8_t check_function(uint8_t (Prp::*rule)(std::list<std::tuple<uint8_t, Rule_id, Token_entry>>&), int64_t *sub_cnt, std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &loc_list);
-  inline bool chk_and_consume(Token_id tok, Rule_id rid, int64_t *sub_cnt, std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &loc_list);
+  inline uint8_t check_function(uint8_t (Prp::*rule)(std::list<std::tuple<uint8_t, Rule_id, Token_entry>>&), uint64_t *sub_cnt, std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &loc_list);
+  inline bool chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &loc_list);
   
   void ast_handler();
   void ast_builder(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &passed_list);

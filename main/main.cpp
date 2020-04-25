@@ -155,10 +155,20 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
     prefix = cmd;
   }
 
+  int  last_match_end   = context.size();
+  int  last_match_start = last_match_end;
+  for (int i = last_match_end - 1; i >= 0; --i) {
+    if (!std::isalnum(context[i]) && context[i] != '.' && context[i] != '_')
+      break;
+    last_match_start = i;
+  }
+  std::string match = context.substr(last_match_start, last_match_end);
+
+  //fmt::print("match[{}]\n", match);
   for (auto const& e : *examples) {
-    //fmt::print("checking {} vs {}\n",e, prefix);
-    if (strncasecmp(prefix.c_str(), e.c_str(), prefix.size()) == 0) {
-      //fmt::print("match {} prefix:{}\n", e, prefix);
+    //fmt::print("checking {} vs {}\n",e, match);
+    if (strncasecmp(match.c_str(), e.c_str(), match.size()) == 0) {
+      //fmt::print("match {} match:{}\n", e, match);
       completions.emplace_back(e.c_str());
     }
   }
@@ -168,6 +178,8 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
     auto to_chop = prefix.size() - fprefix.size();
     for (auto i=0u;i<completions.size();++i) {
       const std::string comp = completions[i].text();
+      if (comp.back() == ':')
+        continue;
       //fmt::print("fprefix[{}] completion[{}]\n", fprefix, comp);
       if (comp.size() > to_chop && to_chop > 0) completions[i] = Replxx::Completion(comp.substr(to_chop));
     }
@@ -269,7 +281,7 @@ int main(int argc, char** argv) {
   Main_api::init();
 
   if (!cmd.empty()) {
-    fmt::print("lgraph cmd {}\n", cmd);
+    fmt::print("livehd cmd {}\n", cmd);
     Main_api::parse_inline(cmd);
     exit(0);
   }
@@ -312,7 +324,7 @@ int main(int argc, char** argv) {
       "help", "history", "quit", "exit", "clear", "prompt ",
   };
 
-  // init all the lgraph libraries used
+  // init all the livehd libraries used
   Main_api::get_commands([&examples](const std::string& _cmd, const std::string& help_msg) { (void)help_msg; examples.push_back(_cmd); });
 
   const char* env_home = std::getenv("HOME");
@@ -326,24 +338,24 @@ int main(int argc, char** argv) {
 
   if (history) {
     history_file = std::string(env_home);
-    history_file.append("/.config/lgraph/history.txt");
+    history_file.append("/.config/livehd/history.txt");
 
     if (access(history_file.c_str(), F_OK) == -1) {
-      std::cout << "Setting history file to $HOME/.config/lgraph/history.txt\n";
-      std::string lgraph_path(env_home);
-      lgraph_path.append("/.config");
-      if (access(lgraph_path.c_str(), F_OK) == -1) {
-        int ok = mkdir(lgraph_path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+      std::cout << "Setting history file to $HOME/.config/livehd/history.txt\n";
+      std::string livehd_path(env_home);
+      livehd_path.append("/.config");
+      if (access(livehd_path.c_str(), F_OK) == -1) {
+        int ok = mkdir(livehd_path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
         if (ok < 0) {
-          std::cerr << "error: could not create " << lgraph_path << " directory for history.txt\n";
+          std::cerr << "error: could not create " << livehd_path << " directory for history.txt\n";
           exit(-3);
         }
       }
-      lgraph_path.append("/lgraph");
-      if (access(lgraph_path.c_str(), F_OK) == -1) {
-        int ok = mkdir(lgraph_path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+      livehd_path.append("/livehd");
+      if (access(livehd_path.c_str(), F_OK) == -1) {
+        int ok = mkdir(livehd_path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
         if (ok < 0) {
-          std::cerr << "error: could not create " << lgraph_path << " directory for history.txt\n";
+          std::cerr << "error: could not create " << livehd_path << " directory for history.txt\n";
           exit(-3);
         }
       }
@@ -365,14 +377,14 @@ int main(int argc, char** argv) {
   rx.set_hint_callback(std::bind( &hook_hint, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, cref( examples ) ));
 
   if (!option_quiet) {
-    std::cout << "Welcome to lgraph\n"
+    std::cout << "Welcome to livehd\n"
               << "Press 'tab' to view autocompletions\n"
               << "Type 'help' for help\n"
               << "Type 'quit' or 'exit' to exit\n\n";
   }
 
   // set the repl prompt
-  std::string prompt{"\x1b[1;32mlgraph\x1b[0m> "};
+  std::string prompt{"\x1b[1;32mlivehd\x1b[0m> "};
 
   // main repl loop
   for (;;) {
@@ -403,20 +415,20 @@ int main(int argc, char** argv) {
 
       if (pos == std::string::npos) {
         help("help [str]", "this output, or for a specific command");
-        help("quit", "exit lgraph");
-        help("exit", "exit lgraph");
+        help("quit", "exit livehd");
+        help("exit", "exit livehd");
         help("clear", "clear the screen");
         help("history", "display the current history");
         help("prompt <str>", "change the current prompt");
 
         Main_api::get_commands(help);
       } else {
-        std::string cmd  = input.substr(pos + 1);
-        auto        pos2 = cmd.find(" ");
-        if (pos2 != std::string::npos) cmd = cmd.substr(0, pos2);
+        std::string cmd2  = input.substr(pos + 1);
+        auto        pos2 = cmd2.find(" ");
+        if (pos2 != std::string::npos) cmd2 = cmd2.substr(0, pos2);
 
-        help(cmd, Main_api::get_command_help(cmd));
-        Main_api::get_labels(cmd, help_labels);
+        help(cmd2, Main_api::get_command_help(cmd2));
+        Main_api::get_labels(cmd2, help_labels);
       }
 
       rx.history_add(input);

@@ -33,6 +33,7 @@ protected:
   Lnast_node eval_tuple_array_notation(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln);
   Lnast_node eval_fcall_explicit(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln);
   Lnast_node eval_tuple_dot_notation(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln);
+  Lnast_node eval_bit_selection_notation(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln);
   
   inline Lnast_node gen_operator(mmap_lib::Tree_index idx, uint8_t *skip_sibs);
   inline bool is_expr(mmap_lib::Tree_index idx);
@@ -40,6 +41,8 @@ protected:
   inline void create_simple_lhs_expr(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln, Lnast_node rhs_node);
   std::string Lnast_type_to_string(Lnast_ntype type);
   
+  // debugging
+  void print_ast_node(mmap_lib::Tree_index idx);
 public:
-  std::unique_ptr<Lnast> prp_ast_to_lnast();
+  std::unique_ptr<Lnast> prp_ast_to_lnast(std::string_view module_name);
 };

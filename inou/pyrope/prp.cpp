@@ -24,19 +24,28 @@ uint8_t Prp::rule_start(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pa
 uint8_t Prp::rule_code_blocks(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list){
   INIT_FUNCTION("rule_code_blocks.");
   
-  eat_comments();
   if(!CHECK_RULE(&Prp::rule_code_block_int)){
     RULE_FAILED("Failed rule_code_blocks; no first rule.\n");
   }
-  while(CHECK_RULE(&Prp::rule_code_block_int) && !scan_is_end());
-    
+  
+  bool next = true;
+  while(next){
+    if(!check_eos()){
+      next = false;
+    }
+    else{
+      if(!CHECK_RULE(&Prp::rule_code_block_int))
+        next = false;
+    }
+  }
+  
   RULE_SUCCESS("Matched rule_code_blocks.\n", Prp_rule_code_blocks);
 }
 
 uint8_t Prp::rule_code_block_int(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list){
   INIT_FUNCTION("rule_code_block_int.");
   
-  eat_comments();
+  check_lb();
   
   if (CHECK_RULE(&Prp::rule_if_statement)){ RULE_SUCCESS("Matched rule_code_block_int.\n", Prp_rule_code_block_int); }
   else if (CHECK_RULE(&Prp::rule_for_statement)){ RULE_SUCCESS("Matched rule_code_block_int.\n", Prp_rule_code_block_int); }
@@ -68,7 +77,10 @@ uint8_t Prp::rule_if_statement(std::list<std::tuple<uint8_t, Rule_id, Token_entr
   }
   
   bool next = true;
+  INIT_PSEUDO_FAIL();
+  
   while(next){
+    UPDATE_PSEUDO_FAIL();
     if(!CHECK_RULE(&Prp::rule_assignment_expression)){
       next = false;
     }
@@ -78,7 +90,8 @@ uint8_t Prp::rule_if_statement(std::list<std::tuple<uint8_t, Rule_id, Token_entr
         if(SCAN_IS_TOKEN(Token_id_semicolon, Prp_rule_if_statement)){ next_prime = true; }
       } while(SCAN_IS_TOKEN(Token_id_semicolon, Prp_rule_if_statement));
       if(!next_prime){
-        RULE_FAILED("Failed rule_if_statement; couldn't find answering semicolon.\n");
+        next = false;
+        PSEUDO_FAIL();
       }
     }
   }
@@ -86,8 +99,16 @@ uint8_t Prp::rule_if_statement(std::list<std::tuple<uint8_t, Rule_id, Token_entr
   if(!CHECK_RULE(&Prp::rule_logical_expression)){ RULE_FAILED("Failed rule_if_statement; couldn't find a logical_expression.\n"); }
   if(!CHECK_RULE(&Prp::rule_empty_scope_colon)){ RULE_FAILED("Failed rule_if_statement; couldn't find an empty_scope_colon.\n"); }
   if(!CHECK_RULE(&Prp::rule_block_body)){ RULE_FAILED("Failed rule_if_statement; couldn't find a block_body.\n"); }
+  
+  auto lines_start = cur_line;
+  auto tokens_start = tokens_consumed;
+  
   // optional
-  CHECK_RULE(&Prp::rule_else_statement);
+  check_lb();
+  if(!CHECK_RULE(&Prp::rule_else_statement)){
+    cur_line = lines_start;
+    go_back(tokens_consumed - tokens_start);
+  }
   
   RULE_SUCCESS("Matched rule_if_statement (with condition).\n", Prp_rule_if_statement);
 }
@@ -98,7 +119,10 @@ uint8_t Prp::rule_for_statement(std::list<std::tuple<uint8_t, Rule_id, Token_ent
   if(!SCAN_IS_TOKEN(Pyrope_id_for)){ RULE_FAILED("Failed rule_for_statement; couldn't find a for token.\n"); }
   
   bool next = true;
+  INIT_PSEUDO_FAIL();
+  
   while(next){
+    UPDATE_PSEUDO_FAIL();
     if(!CHECK_RULE(&Prp::rule_assignment_expression)){
       next = false;
     }
@@ -108,7 +132,8 @@ uint8_t Prp::rule_for_statement(std::list<std::tuple<uint8_t, Rule_id, Token_ent
         if(SCAN_IS_TOKEN(Token_id_semicolon, Prp_rule_for_index)){ next_prime = true; }
       } while(SCAN_IS_TOKEN(Token_id_semicolon, Prp_rule_for_index));
       if(!next_prime){
-        RULE_FAILED("Failed rule_for_statement; couldn't find an answering semicolon.\n");
+        next = false;
+        PSEUDO_FAIL();
       }
     }
   }
@@ -136,13 +161,19 @@ uint8_t Prp::rule_for_index(std::list<std::tuple<uint8_t, Rule_id, Token_entry>>
   if(!CHECK_RULE(&Prp::rule_for_in_notation)){ RULE_FAILED("Failed rule_for_index; couldn't find a for_in_notation.\n"); }
   
   bool next = true;
+  INIT_PSEUDO_FAIL();
+  
   while(next){
+    UPDATE_PSEUDO_FAIL();
     bool next_prime = false;
     do{
       if(SCAN_IS_TOKEN(Token_id_semicolon, Prp_rule_for_index)){ next_prime = true; }
     } while(SCAN_IS_TOKEN(Token_id_semicolon, Prp_rule_for_index));
     if(next_prime){
-      if(!CHECK_RULE(&Prp::rule_for_in_notation)){ RULE_FAILED("Failed rule_for_index; couldn't find an answering for_in_notation.\n"); }
+      if(!CHECK_RULE(&Prp::rule_for_in_notation)){
+        next = false;
+        PSEUDO_FAIL();
+      }
     }
     else{
       next = false;
@@ -169,8 +200,17 @@ uint8_t Prp::rule_else_statement(std::list<std::tuple<uint8_t, Rule_id, Token_en
     if(!CHECK_RULE(&Prp::rule_logical_expression)){ RULE_FAILED("Failed rule_else_statement (ELIF path); couldn't find a condition for the elif.\n"); }
     if(!CHECK_RULE(&Prp::rule_empty_scope_colon)){ RULE_FAILED("Failed rule_else_statement; couldn't find an empty_scope_colon.\n"); }
     if(!CHECK_RULE(&Prp::rule_block_body)){ RULE_FAILED("Failed rule_else_statement; couldn't find a block_body.\n"); }
+    
+    auto lines_start = cur_line;
+    auto tokens_start = tokens_consumed;
+    
     // optional
-    CHECK_RULE(&Prp::rule_else_statement);
+    check_lb();
+    if(!CHECK_RULE(&Prp::rule_else_statement)){
+      cur_line = lines_start;
+      go_back(tokens_consumed - tokens_start);
+    }
+    
     RULE_SUCCESS("Matched rule_else_statement (ELIF path).\n", Prp_rule_else_statement);
   }
   // option 2
@@ -187,7 +227,10 @@ uint8_t Prp::rule_while_statement(std::list<std::tuple<uint8_t, Rule_id, Token_e
   if(!SCAN_IS_TOKEN(Pyrope_id_while)){ RULE_FAILED("Failed rule_while_statement; couldn't find a while.\n"); }
   
   bool next = true;
+  INIT_PSEUDO_FAIL();
+  
   while(next){
+    UPDATE_PSEUDO_FAIL();
     if(!CHECK_RULE(&Prp::rule_assignment_expression)){
       next = false;
     }
@@ -197,7 +240,8 @@ uint8_t Prp::rule_while_statement(std::list<std::tuple<uint8_t, Rule_id, Token_e
         if(SCAN_IS_TOKEN(Token_id_semicolon, Prp_rule_for_index)){ next_prime = true; }
       } while(SCAN_IS_TOKEN(Token_id_semicolon, Prp_rule_for_index));
       if(!next_prime){
-        RULE_FAILED("Failed rule_while_statement; couldn't find an answering semicolon.\n");
+        next = false;
+        PSEUDO_FAIL();
       }
     }
   }
@@ -216,8 +260,15 @@ uint8_t Prp::rule_try_statement(std::list<std::tuple<uint8_t, Rule_id, Token_ent
   if(!CHECK_RULE(&Prp::rule_empty_scope_colon)){ RULE_FAILED("Failed rule_try_statement; couldn't find an empty_scope_colon\n"); }
   if(!CHECK_RULE(&Prp::rule_block_body)){ RULE_FAILED("Failed rule_try_statement; couldn't find a block_body.\n"); }
   
+  auto lines_start = cur_line;
+  auto tokens_start = tokens_consumed;
+  
   // optional
-  CHECK_RULE(&Prp::rule_scope_else);
+  check_lb();
+  if(!CHECK_RULE(&Prp::rule_scope_else)){
+    cur_line = lines_start;
+    go_back(tokens_consumed - tokens_start);
+  }
   
   RULE_SUCCESS("Matched rule_try_statement.\n", Prp_rule_try_statement);
 }
@@ -256,17 +307,11 @@ uint8_t Prp::rule_empty_scope_colon(std::list<std::tuple<uint8_t, Rule_id, Token
   }
   
   if(!SCAN_IS_TOKEN(Token_id_ob, Prp_rule_empty_scope_colon)){ RULE_FAILED("Failed rule_empty_scope_colon; couldn't find an opening brace.\n"); }
+  check_eos();
+  check_lb();
 
   RULE_SUCCESS("Matched rule_empty_scope_colon.\n", Prp_rule_empty_scope_colon);
 }
-
-/*
- * 
- * NOTES FOR NEXT TIME:
- * 1. tuple notation and parenthesis for LNAST eval expression
- * 2. adding parentheses greatly increases parsing time for us
- * 
- */
 
 uint8_t Prp::rule_scope_else(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list){
   INIT_FUNCTION("rule_scope_else.");
@@ -275,30 +320,42 @@ uint8_t Prp::rule_scope_else(std::list<std::tuple<uint8_t, Rule_id, Token_entry>
   
   if(!SCAN_IS_TOKEN(Token_id_ob, Prp_rule_scope_else)){ RULE_FAILED("Failed rule_scope_else; couldn't find an open brace.\n"); }
   
+  check_eos();
+  check_lb();
+  
   if(!CHECK_RULE(&Prp::rule_scope_body)){ RULE_FAILED("Failed rule_scope_else; couldn't find a scope_body.\n"); }
   
   RULE_SUCCESS("Matched rule_scope_else.\n", Prp_rule_scope_else);
 }
 
-
 // WARNING: this rule was modified to look more like block_body
 uint8_t Prp::rule_scope_body(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list){
   INIT_FUNCTION("rule_scope_body.");
   
-  // option 1 - nothing inside, just braces
-  
-  if(SCAN_IS_TOKEN(Token_id_cb, Prp_rule_scope_body)){ RULE_SUCCESS("Matched rule_scope_body; option 1.\n", Prp_rule_scope_body); }
-  
-  // option 2 - logical expression inside only
+  // option 1 and 2 - logical expression inside only or just a closing brace
   if(!CHECK_RULE(&Prp::rule_code_blocks)){
-    if(!CHECK_RULE(&Prp::rule_logical_expression)){ RULE_FAILED("Failed rule_scope_body; couldn't find either a logical_expression or a code_blocks.\n"); }
+    if(!CHECK_RULE(&Prp::rule_logical_expression)){ 
+      check_eos();
+      check_lb();
+      if(!SCAN_IS_TOKEN(Token_id_cb, Prp_rule_scope_body)){ RULE_FAILED("Failed rule_scope_body (option 1); couldn't find a closing brace.\n"); }
+    }
+    check_lb();
+    check_eos();
+    check_lb();
     if(!SCAN_IS_TOKEN(Token_id_cb, Prp_rule_scope_body)){ RULE_FAILED("Failed rule_scope_body (option 2), couldn't find a closing bracket.\n"); }
     RULE_SUCCESS("Matched rule_scope_body (option 2).\n", Prp_rule_scope_body);
   }
   
-  // option 3 - code blocks plus optional logical expression
-  CHECK_RULE(&Prp::rule_logical_expression);
   
+  // option 3 - code blocks plus optional logical expression
+  if(check_eos()){
+    if(CHECK_RULE(&Prp::rule_logical_expression)){
+      check_lb();
+    }
+  }
+  
+  check_eos();
+  check_lb();
   if(!SCAN_IS_TOKEN(Token_id_cb, Prp_rule_scope_body)){ RULE_FAILED("Failed rule_scope_body (option 3); couldn't find a closing bracket."); }
   
   RULE_SUCCESS("Matched rule_scope_body.\n", Prp_rule_scope_body);
@@ -339,10 +396,17 @@ uint8_t Prp::rule_scope_colon(std::list<std::tuple<uint8_t, Rule_id, Token_entry
   // option 1
   if(!CHECK_RULE(&Prp::rule_scope)){
     if(!SCAN_IS_TOKEN(Token_id_ob)){ RULE_FAILED("Failed rule_scope_colon; couldn't find an opening brace or a scope.\n"); }
+    if(!check_eos()){
+      check_lb();
+    }
+    RULE_SUCCESS("Matched rule_scope_colon.\n", Prp_rule_scope_condition);
   }
   
   // option 2
   if(!SCAN_IS_TOKEN(Token_id_ob)){ RULE_FAILED("Failed rule_scope_colon; couldn't find an answering opening brace.\n"); }
+  if(!check_eos()){
+    check_lb();
+  }
   
   RULE_SUCCESS("Matched rule_scope_colon.\n", Prp_rule_scope_colon);
 }
@@ -375,10 +439,21 @@ uint8_t Prp::rule_scope_declaration(std::list<std::tuple<uint8_t, Rule_id, Token
   
   if(!SCAN_IS_TOKEN(Token_id_ob, Prp_rule_scope_declaration)){ RULE_FAILED("Failed rule_scope_declaration; couldn't find an open brace.\n"); }
   
+  check_eos();
+  check_lb();
+  
   if(!CHECK_RULE(&Prp::rule_scope_body)){ RULE_FAILED("Failed rule_scope_declaration; couldn't find a scope body.\n"); }
   
+  auto lines_start = cur_line;
+  auto cur_tokens = tokens_consumed;
+  
   // optional
-  CHECK_RULE(&Prp::rule_scope_else);
+  check_lb();
+  if(!CHECK_RULE(&Prp::rule_scope_else)){
+    go_back(tokens_consumed - cur_tokens);
+    cur_line = lines_start;
+  }
+  
   
   RULE_SUCCESS("Matched rule_scope_declaration.\n", Prp_rule_scope_declaration);
 }
@@ -390,25 +465,37 @@ uint8_t Prp::rule_punch_rhs(std::list<std::tuple<uint8_t, Rule_id, Token_entry>>
   
   // optional
   bool next = true;
+  INIT_PSEUDO_FAIL();
+  UPDATE_PSEUDO_FAIL();
+  
   if(CHECK_RULE(&Prp::rule_identifier)){
     while(next){
       if(!SCAN_IS_TOKEN(Token_id_dot))
         next = false;
       else{
-        if(!CHECK_RULE(&Prp::rule_identifier)){ RULE_FAILED("Failed rule_punch_rhs; couldn't find an answering identifier.\n") ;}
+        if(!CHECK_RULE(&Prp::rule_identifier)){ 
+          PSEUDO_FAIL();
+          next = false;
+        }
       }
     }
+    UPDATE_PSEUDO_FAIL();
   }
   
   if(!SCAN_IS_TOKEN(Token_id_div)){ RULE_FAILED("Failed rule_punch_rhs; couldn't find a div token."); }
   
   next = true;
+  
   while(next){
+    UPDATE_PSEUDO_FAIL();
     if(!SCAN_IS_TOKEN(Token_id_dot)){
       next = false;
     }
     else{
-      if(!CHECK_RULE(&Prp::rule_identifier)){ RULE_FAILED("Failed rule_punch_rhs; couldn't find an identifier.\n") ;}
+      if(!CHECK_RULE(&Prp::rule_identifier)){
+        PSEUDO_FAIL();
+        next = false;
+      }
     }
   }
   
@@ -426,13 +513,17 @@ uint8_t Prp::rule_function_pipe(std::list<std::tuple<uint8_t, Rule_id, Token_ent
       }
     }
     bool next = true;
+    INIT_PSEUDO_FAIL();
+    
     /* zero or more of the following */
     while(next){
+      UPDATE_PSEUDO_FAIL();
       if(!SCAN_IS_TOKEN(Token_id_pipe, Prp_rule_function_pipe)){ next = false; }
       else{
         if(!CHECK_RULE(&Prp::rule_fcall_implicit)){
           if(!CHECK_RULE(&Prp::rule_fcall_explicit)){
-            RULE_FAILED("Failed rule_function_pipe; couldn't find a terminating function call.\n");
+            PSEUDO_FAIL();
+            next = false;
           }
         }
       }
@@ -447,15 +538,16 @@ uint8_t Prp::rule_fcall_explicit(std::list<std::tuple<uint8_t, Rule_id, Token_en
   
   if(CHECK_RULE(&Prp::rule_constant)){ RULE_FAILED("Failed rule_fcall_explicit; found a constant.\n"); }
   
+  INIT_PSEUDO_FAIL();
+  UPDATE_PSEUDO_FAIL();
+  
   // optional
-  int cur_tokens = tokens_consumed;
-  int cur_loc_list_size = loc_list.size();
   
   if(CHECK_RULE(&Prp::rule_tuple_notation)){
     if(!SCAN_IS_TOKEN(Token_id_dot)){
-      go_back(tokens_consumed - cur_tokens);
-      loc_list.resize(cur_loc_list_size);
+      PSEUDO_FAIL();
     }
+    UPDATE_PSEUDO_FAIL();
   }
   
   if(!CHECK_RULE(&Prp::rule_tuple_dot_notation)){ RULE_FAILED("Failed rule_fcall_explicit; couldn't find a tuple_dot_notation.\n"); }
@@ -466,15 +558,18 @@ uint8_t Prp::rule_fcall_explicit(std::list<std::tuple<uint8_t, Rule_id, Token_en
   CHECK_RULE(&Prp::rule_scope_declaration);
   
   bool next = true;
+  
   while(next){
+    UPDATE_PSEUDO_FAIL();
     if(SCAN_IS_TOKEN(Token_id_dot)){
       if(!CHECK_RULE(&Prp::rule_fcall_explicit)){
         if(!CHECK_RULE(&Prp::rule_tuple_dot_notation)){ 
-          RULE_FAILED("Failed rule_fcall_explicit; couldn't find answering fcall_explicit or tuple_dot_notation\n"); 
+          next = false;
+          PSEUDO_FAIL();
         }
       }
     }
-    else 
+    else
       next = false;
   }
   
@@ -486,7 +581,6 @@ uint8_t Prp::rule_fcall_explicit(std::list<std::tuple<uint8_t, Rule_id, Token_en
 
 uint8_t Prp::rule_fcall_arg_notation(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list){
   INIT_FUNCTION("rule_fcall_arg_notation.");
-  bool next = true;
   
   if(!SCAN_IS_TOKEN(Token_id_op, Prp_rule_fcall_arg_notation)){ RULE_FAILED("Failed rule_fcall_arg_notation; couldn't find an opening parenthesis.\n"); }
   
@@ -497,12 +591,18 @@ uint8_t Prp::rule_fcall_arg_notation(std::list<std::tuple<uint8_t, Rule_id, Toke
       RULE_FAILED("Failed rule_fcall_arg_notation; couldn't find either an rhs_expression_property or a logical_expression.\n");
     }
   }
+  
+  bool next = true;
+  INIT_PSEUDO_FAIL();
+  
   // zero or more of the following
   while(next){
+    UPDATE_PSEUDO_FAIL();
     if(SCAN_IS_TOKEN(Token_id_comma, Prp_rule_fcall_arg_notation)){
       if(!CHECK_RULE(&Prp::rule_assignment_expression)){
         if(!CHECK_RULE(&Prp::rule_logical_expression)){
-          RULE_FAILED("Failed rule_fcall_arg_notation; couldn't find either an rhs_expression_property or a logical_expression.\n");
+          PSEUDO_FAIL();
+          next = false;
         }
       }
     }
@@ -546,12 +646,34 @@ uint8_t Prp::rule_not_in_implicit(std::list<std::tuple<uint8_t, Rule_id, Token_e
   if(CHECK_RULE(&Prp::rule_assignment_operator)){
     RULE_SUCCESS("Matched rule_not_in_implicit; found an assignment operator.\n", Prp_rule_not_in_implicit);
   }
+  
+  if(SCAN_IS_TOKEN(Token_id_op) || SCAN_IS_TOKEN(Token_id_colon)){
+    RULE_SUCCESS("Matched rule_not_in_implicit; found a single character token without a previous line break.\n", Prp_rule_not_in_implicit);
+  }
+  
+  if(SCAN_IS_TOKEN(Token_id_obr)){
+    if(SCAN_IS_TOKEN(Token_id_obr)){
+      RULE_SUCCESS("Matched rule_not_in_implicit; found two open brackets.\n", Prp_rule_not_in_implicit);
+    }
+    RULE_SUCCESS("Matched rule_not_in_implicit; found an bracket.\n", Prp_rule_not_in_implicit);
+  }
+  
+  if(SCAN_IS_TOKEN(Token_id_dot)){
+    if(SCAN_IS_TOKEN(Token_id_dot)){
+      RULE_SUCCESS("Matched rule_not_in_implicit; found two dots.\n", Prp_rule_not_in_implicit);
+    }
+  }
+  
+  check_lb();
+  
   if(CHECK_RULE(&Prp::rule_overload_notation)){
     RULE_SUCCESS("Matched rule_not_in_implicit; found an overload notation.\n", Prp_rule_not_in_implicit);
   }
-  if(SCAN_IS_TOKEN(Token_id_op) || SCAN_IS_TOKEN(Token_id_obr) || SCAN_IS_TOKEN(Token_id_colon) || SCAN_IS_TOKEN(Token_id_plus) || SCAN_IS_TOKEN(Token_id_minus) || SCAN_IS_TOKEN(Token_id_mult) || SCAN_IS_TOKEN(Token_id_div) || SCAN_IS_TOKEN(Pyrope_id_or) || SCAN_IS_TOKEN(Pyrope_id_and) || SCAN_IS_TOKEN(Pyrope_id_xor) || SCAN_IS_TOKEN(Token_id_same) || SCAN_IS_TOKEN(Token_id_diff) || SCAN_IS_TOKEN(Pyrope_id_is) || SCAN_IS_TOKEN(Token_id_le) || SCAN_IS_TOKEN(Token_id_ge) || SCAN_IS_TOKEN(Token_id_lt) || SCAN_IS_TOKEN(Token_id_gt) || SCAN_IS_TOKEN(Pyrope_id_union) || SCAN_IS_TOKEN(Pyrope_id_intersect) || SCAN_IS_TOKEN(Pyrope_id_in) || SCAN_IS_TOKEN(Token_id_xor) || SCAN_IS_TOKEN(Token_id_and) || SCAN_IS_TOKEN(Token_id_pipe)){
+  
+  if(SCAN_IS_TOKEN(Token_id_minus) || SCAN_IS_TOKEN(Token_id_mult) || SCAN_IS_TOKEN(Token_id_div) || SCAN_IS_TOKEN(Pyrope_id_or) || SCAN_IS_TOKEN(Pyrope_id_and) || SCAN_IS_TOKEN(Pyrope_id_xor) || SCAN_IS_TOKEN(Token_id_same) || SCAN_IS_TOKEN(Token_id_diff) || SCAN_IS_TOKEN(Pyrope_id_is) || SCAN_IS_TOKEN(Token_id_le) || SCAN_IS_TOKEN(Token_id_ge) || SCAN_IS_TOKEN(Token_id_lt) || SCAN_IS_TOKEN(Token_id_gt) || SCAN_IS_TOKEN(Pyrope_id_union) || SCAN_IS_TOKEN(Pyrope_id_intersect) || SCAN_IS_TOKEN(Pyrope_id_in) || SCAN_IS_TOKEN(Token_id_xor) || SCAN_IS_TOKEN(Token_id_and) || SCAN_IS_TOKEN(Token_id_pipe)){
     RULE_SUCCESS("Matched rule_not_in_implicit; found a single character token.\n", Prp_rule_not_in_implicit);
   }
+  
   if(SCAN_IS_TOKEN(Token_id_plus)){
     if(SCAN_IS_TOKEN(Token_id_plus)){
       RULE_SUCCESS("Matched rule_not_in_implicit; found two plus tokens.\n", Prp_rule_not_in_implicit);
@@ -559,8 +681,7 @@ uint8_t Prp::rule_not_in_implicit(std::list<std::tuple<uint8_t, Rule_id, Token_e
     if(SCAN_IS_TOKEN(Token_id_mult)){
       RULE_SUCCESS("Matched rule_not_in_implicit; found plus and mult tokens.\n", Prp_rule_not_in_implicit);
     }
-    unconsume_token();
-    std::list<std::tuple<uint8_t, Rule_id, Token_entry>>().swap(loc_list);
+    RULE_SUCCESS("Matched rule_not_in_implicit; found a plus.\n", Prp_rule_not_in_implicit);
   }
   
   RULE_FAILED("Failed rule_not_in_implicit.\n");
@@ -575,7 +696,11 @@ uint8_t Prp::rule_assignment_expression(std::list<std::tuple<uint8_t, Rule_id, T
       RULE_FAILED("Failed rule_assignment_expression; couldn't find either an overload_notation or an lhs_expression.\n"); 
     }
   }
+  
+  check_lb();
   if(!CHECK_RULE(&Prp::rule_assignment_operator)){ RULE_FAILED("Failed rule_assignment_expression; couldn't find an assignment_operator.\n"); }
+  
+  check_lb();
   if(!CHECK_RULE(&Prp::rule_logical_expression)){ 
     if(!CHECK_RULE(&Prp::rule_fcall_implicit)){
       RULE_FAILED("Failed rule_assignment_expression; couldn't find an fcall_implicit, or a logical_expression.\n");
@@ -608,6 +733,9 @@ uint8_t Prp::rule_block_body(std::list<std::tuple<uint8_t, Rule_id, Token_entry>
   
   // optional
   CHECK_RULE(&Prp::rule_code_blocks);
+  
+  check_eos();
+  check_lb();
   
   if(!SCAN_IS_TOKEN(Token_id_cb, Prp_rule_block_body)){ RULE_FAILED("Failed rule_block_body; couldn't find a closing brace.\n"); }
   
@@ -643,13 +771,26 @@ uint8_t Prp::rule_tuple_notation(std::list<std::tuple<uint8_t, Rule_id, Token_en
     }
     
     bool next = true;
+    INIT_PSEUDO_FAIL();
+    uint64_t lines_start;
+    
     while(next){
+      UPDATE_PSEUDO_FAIL();
+      lines_start = cur_line;
       if(!SCAN_IS_TOKEN(Token_id_comma, Prp_rule_tuple_notation)){ next = false; }
       else{
         if(!CHECK_RULE(&Prp::rule_assignment_expression)){
           if(!CHECK_RULE(&Prp::rule_logical_expression)){
-            RULE_FAILED("Failed rule_tuple_notation; couldn't find either an assignment_expression or a logical_expression.\n"); 
+            PSEUDO_FAIL();
+            cur_line = lines_start;
+            next = false;
           }
+          else{
+            check_lb();
+          }
+        }
+        else{
+          check_lb();
         }
       }
     }
@@ -658,15 +799,12 @@ uint8_t Prp::rule_tuple_notation(std::list<std::tuple<uint8_t, Rule_id, Token_en
     SCAN_IS_TOKEN(Token_id_comma, Prp_rule_tuple_notation);
     
     if(SCAN_IS_TOKEN(Token_id_cp, Prp_rule_tuple_notation)){
-      
       // optional
       if(!CHECK_RULE(&Prp::rule_tuple_by_notation)){
         CHECK_RULE(&Prp::rule_bit_selection_bracket);
       }
-      
       // optional
       CHECK_RULE(&Prp::rule_function_pipe);
-      
       RULE_SUCCESS("Matched rule_tuple_notation; second option.\n", Prp_rule_tuple_notation); 
     }
     else{ RULE_FAILED("Failed rule_tuple_notation; couldn't match option 1 or 2.\n"); }
@@ -718,20 +856,15 @@ uint8_t Prp::rule_tuple_dot_dot(std::list<std::tuple<uint8_t, Rule_id, Token_ent
   INIT_FUNCTION("rule_tuple_dot_dot.");
   bool next = true;
   
-  // TODO: resolve experimental code into macro or remove
-  // "pseudo-failure"
-  int cur_tokens;
-  int cur_loc_list_size;
+  INIT_PSEUDO_FAIL();
   
-  while(next){ // NOTE: collisions?
-    cur_tokens = tokens_consumed;
-    cur_loc_list_size = loc_list.size();
+  while(next){
+    UPDATE_PSEUDO_FAIL();
     if(!SCAN_IS_TOKEN(Token_id_dot, Prp_rule_tuple_dot_dot))
       next = false;
     else{
       if(!CHECK_RULE(&Prp::rule_tuple_array_notation)){
-        go_back(tokens_consumed - cur_tokens);
-        loc_list.resize(cur_loc_list_size);
+        PSEUDO_FAIL();
         next = false;
       }
     }
@@ -759,13 +892,22 @@ uint8_t Prp::rule_lhs_var_name(std::list<std::tuple<uint8_t, Rule_id, Token_entr
 
 uint8_t Prp::rule_tuple_array_bracket(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list){
   INIT_FUNCTION("rule_tuple_array_bracket.");
+  
   bool next = true;
+  INIT_PSEUDO_FAIL();
   
   while(next){
+    UPDATE_PSEUDO_FAIL();
     if(!SCAN_IS_TOKEN(Token_id_obr, Prp_rule_tuple_array_bracket)){ next = false; }
     else{
-      if(!CHECK_RULE(&Prp::rule_logical_expression)){ RULE_FAILED("Failed rule_tuple_array_bracket; couldn't find a logical_expression.\n"); }
-      if(!SCAN_IS_TOKEN(Token_id_cbr, Prp_rule_tuple_array_bracket)){ RULE_FAILED("Failed rule_tuple_array_bracket; couldn't find a closing bracket.\n"); }
+      if(!CHECK_RULE(&Prp::rule_logical_expression)){
+        PSEUDO_FAIL();
+        next = false;
+      }
+      if(!SCAN_IS_TOKEN(Token_id_cbr, Prp_rule_tuple_array_bracket)){
+        PSEUDO_FAIL();
+        next = false;
+      }
     }
   }
   
@@ -868,15 +1010,28 @@ uint8_t Prp::rule_tuple_by_notation(std::list<std::tuple<uint8_t, Rule_id, Token
 
 uint8_t Prp::rule_bit_selection_bracket(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list){
   INIT_FUNCTION("rule_bit_selection_bracket.");
+  
   bool next = true;
+  INIT_PSEUDO_FAIL();
+  
   while(next){
+    UPDATE_PSEUDO_FAIL();
     if(!SCAN_IS_TOKEN(Token_id_obr)){ next = false; }
     else{
-      if(!SCAN_IS_TOKEN(Token_id_obr)){ RULE_FAILED("Failed rule_bit_selection_bracket; couldn't find a second open bracket.\n"); }
+      if(!SCAN_IS_TOKEN(Token_id_obr)){
+        PSEUDO_FAIL();
+        next = false;
+      }
       // optional
       CHECK_RULE(&Prp::rule_logical_expression);
-      if(!SCAN_IS_TOKEN(Token_id_cbr)){ RULE_FAILED("Failed rule_bit_selection_bracket; couldn't find a closing bracket.\n"); }
-      if(!SCAN_IS_TOKEN(Token_id_cbr)){ RULE_FAILED("Failed rule_bit_selection_bracket; couldn't find a second closing bracket.\n"); }
+      if(!SCAN_IS_TOKEN(Token_id_cbr)){
+        PSEUDO_FAIL();
+        next = false;
+      }
+      if(!SCAN_IS_TOKEN(Token_id_cbr)){
+        PSEUDO_FAIL();
+        next = false;
+      }
     }
   }
   
@@ -889,12 +1044,21 @@ uint8_t Prp::rule_logical_expression(std::list<std::tuple<uint8_t, Rule_id, Toke
   if(!CHECK_RULE(&Prp::rule_relational_expression)){ RULE_FAILED("Failed rule_logical_expression; couldn't find a relational_expression.\n"); }
   
   bool next = true;
+  uint64_t lines_start;
+  uint64_t tokens_start;
   
   while(next){
+    lines_start = cur_line;
+    tokens_start = tokens_consumed;
+    check_lb();
     if(SCAN_IS_TOKEN(Pyrope_id_or, Prp_rule_logical_expression) || SCAN_IS_TOKEN(Pyrope_id_and, Prp_rule_logical_expression) || SCAN_IS_TOKEN(Pyrope_id_xor, Prp_rule_logical_expression)){
       if(!CHECK_RULE(&Prp::rule_relational_expression)){ RULE_FAILED("Failed rule_logical_expression; couldn't find an answering relational_expression.\n"); }
     }
-    else{ next = false; }
+    else{
+      cur_line = lines_start;
+      go_back(tokens_consumed - tokens_start);
+      next = false;
+    }
   }
   
   RULE_SUCCESS("Matched rule_logical_expression.\n", Prp_rule_logical_expression);
@@ -906,11 +1070,21 @@ uint8_t Prp::rule_relational_expression(std::list<std::tuple<uint8_t, Rule_id, T
   if(!CHECK_RULE(&Prp::rule_additive_expression)){ RULE_FAILED("Failed rule_relational_expression; couldn't find an additive_expression.\n"); }
   
   bool next = true;
+  uint64_t lines_start;
+  uint64_t tokens_start;
+  
   while(next){
+    lines_start = cur_line;
+    tokens_start = tokens_consumed;
+    check_lb();
     if(SCAN_IS_TOKEN(Token_id_le, Prp_rule_relational_expression) || SCAN_IS_TOKEN(Token_id_ge, Prp_rule_relational_expression) || SCAN_IS_TOKEN(Token_id_lt, Prp_rule_relational_expression) || SCAN_IS_TOKEN(Token_id_gt, Prp_rule_relational_expression) || SCAN_IS_TOKEN(Token_id_same, Prp_rule_relational_expression) || SCAN_IS_TOKEN(Token_id_diff, Prp_rule_relational_expression) || SCAN_IS_TOKEN(Pyrope_id_is, Prp_rule_relational_expression)){
       if(!CHECK_RULE(&Prp::rule_additive_expression)){ RULE_FAILED("Failed Prp_rule_relational_expression; couldn't find an answering additive_expression.\n"); }
     }
-    else{ next = false; }
+    else{
+      cur_line = lines_start;
+      go_back(tokens_consumed - tokens_start);
+      next = false;
+    }
   }
   
   RULE_SUCCESS("Matched rule_relational_expression.\n", Prp_rule_relational_expression);
@@ -924,9 +1098,13 @@ uint8_t Prp::rule_additive_expression(std::list<std::tuple<uint8_t, Rule_id, Tok
   bool next = true;
   bool found_op = false;
   
-  int second_phase_starting_tokens = tokens_consumed;
+  uint64_t lines_start;
+  uint64_t tokens_start;
   
   while(next){
+    lines_start = cur_line;
+    tokens_start = tokens_consumed;
+    check_lb();
     if(SCAN_IS_TOKEN(Token_id_plus, Prp_rule_additive_expression)){ // can be +, ++, or +*
       // optional
       SCAN_IS_TOKEN(Token_id_plus, Prp_rule_additive_expression) || SCAN_IS_TOKEN(Token_id_mult, Prp_rule_additive_expression);
@@ -941,7 +1119,8 @@ uint8_t Prp::rule_additive_expression(std::list<std::tuple<uint8_t, Rule_id, Tok
         found_op = true;
       }
       else{
-        go_back(tokens_consumed - second_phase_starting_tokens);
+        cur_line = lines_start;
+        go_back(tokens_consumed - tokens_start);
         next = false;
       }
     }
@@ -953,7 +1132,8 @@ uint8_t Prp::rule_additive_expression(std::list<std::tuple<uint8_t, Rule_id, Tok
         found_op = true;
       }
       else{
-        go_back(tokens_consumed - second_phase_starting_tokens);
+        cur_line = lines_start;
+        go_back(tokens_consumed - tokens_start);
         next = false;
       }
     }
@@ -964,6 +1144,8 @@ uint8_t Prp::rule_additive_expression(std::list<std::tuple<uint8_t, Rule_id, Tok
       found_op = true;
     }
     else{
+      cur_line = lines_start;
+      go_back(tokens_consumed - tokens_start);
       next = false;
     }
     if(found_op){
@@ -973,9 +1155,14 @@ uint8_t Prp::rule_additive_expression(std::list<std::tuple<uint8_t, Rule_id, Tok
     }
   }
   // optional
+  INIT_PSEUDO_FAIL();
+  UPDATE_PSEUDO_FAIL();
+  
   if(SCAN_IS_TOKEN(Token_id_dot, Prp_rule_additive_expression)){
     if(!SCAN_IS_TOKEN(Token_id_dot, Prp_rule_additive_expression)){
-      RULE_FAILED("Failed rule_additive_expression; couldn't find a second dot.\n");
+      PSEUDO_FAIL();
+    }
+    else{
       // optional
       CHECK_RULE(&Prp::rule_additive_expression);
     }
@@ -990,11 +1177,22 @@ uint8_t Prp::rule_bitwise_expression(std::list<std::tuple<uint8_t, Rule_id, Toke
   if(!CHECK_RULE(&Prp::rule_multiplicative_expression)){ RULE_FAILED("Failed rule_bitwise_expression; couldn't find a multiplicative_expression.\n"); }
   
   bool next = true;
+  
+  uint64_t lines_start;
+  uint64_t tokens_start;
+  
   while(next){
+    lines_start = cur_line;
+    tokens_start = tokens_consumed;
+    check_lb();
     if(SCAN_IS_TOKEN(Token_id_or, Prp_rule_bitwise_expression) || SCAN_IS_TOKEN(Token_id_and, Prp_rule_bitwise_expression) || SCAN_IS_TOKEN(Token_id_xor, Prp_rule_bitwise_expression)){
       if(!CHECK_RULE(&Prp::rule_multiplicative_expression)){ RULE_FAILED("Failed rule_bitwise_expression; couldn't find an answering multiplicative expression.\n"); }
     }
-    else{ next = false; }
+    else{
+      cur_line = lines_start;
+      go_back(tokens_consumed - tokens_start);
+      next = false; 
+    }
   }
   
   RULE_SUCCESS("Matched rule_bitwise_expression.\n", Prp_rule_bitwise_expression);
@@ -1006,11 +1204,21 @@ uint8_t Prp::rule_multiplicative_expression(std::list<std::tuple<uint8_t, Rule_i
   if(!CHECK_RULE(&Prp::rule_unary_expression)){ RULE_FAILED("Failed rule_multiplicative_expression; couldn't find a unary_expression.\n"); }
   
   bool next = true;
+  uint64_t lines_start;
+  uint64_t tokens_start;
+  
   while(next){
+    lines_start = cur_line;
+    tokens_start = tokens_consumed;
+    check_lb();
     if(SCAN_IS_TOKEN(Token_id_mult, Prp_rule_multiplicative_expression) || SCAN_IS_TOKEN(Token_id_div, Prp_rule_multiplicative_expression)){
       if(!CHECK_RULE(&Prp::rule_unary_expression)){ RULE_FAILED("Failed rule_multiplicative_expression; couldn't find an answering unary expression.\n"); }
     }
-    else{ next = false; }
+    else{
+      cur_line = lines_start;
+      go_back(tokens_consumed - tokens_start);
+      next = false;
+    }
   }
   
   RULE_SUCCESS("Matched rule_multiplicative_expression.\n", Prp_rule_multiplicative_expression);
@@ -1035,7 +1243,9 @@ uint8_t Prp::rule_factor(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &p
   }
   // option 2
   else if(SCAN_IS_TOKEN(Token_id_op, Prp_rule_factor)){
+    check_lb();
     if(!CHECK_RULE(&Prp::rule_logical_expression)){ RULE_FAILED("Failed rule_factor; couldn't find a logical_expression.\n"); }
+    check_lb();
     if(!SCAN_IS_TOKEN(Token_id_cp, Prp_rule_factor)){ RULE_FAILED("Failed rule_factor; couldn't find a closing parenthesis.\n"); }
     
     // optional
@@ -1098,6 +1308,51 @@ uint8_t Prp::rule_keyword(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &
   RULE_FAILED("Failed rule_keyword.\n");
 }
 
+// corresponds to "__" rule in pegjs parser
+inline void Prp::check_lb(){
+  bool next = true;
+  
+  while(next){
+    inc_line_cnt();
+    if(scan_is_token(Token_id_comment)){
+      scan_next();
+      tokens_consumed++;
+      next = true;
+    }
+    else
+      next = false;
+  }
+}
+
+inline bool Prp::check_eos(){
+  bool next = true;
+  bool found = false;
+  // option 1 : an optional line break plus one or more semicolons
+  bool start_line = cur_line;
+  check_lb();
+  while(next){
+    if(scan_is_token(Token_id_semicolon)){
+      tokens_consumed++;
+      found = true;
+      next = true;
+    }
+    else
+      next = false;
+  }
+  
+  if(found){
+    return true;
+  }
+  
+  // option 2: a comment plus a line terminator
+  if(cur_line > start_line){
+    return true;
+  }
+  
+  // option 3: end of file
+  return scan_is_end();
+}
+
 void Prp::elaborate(){
   patch_pass(pyrope_keyword);
   
@@ -1107,7 +1362,7 @@ void Prp::elaborate(){
   std::list<std::tuple<uint8_t, Rule_id, Token_entry>> loc_list;
   
   int failed = 0;
-  int64_t sub_cnt = 0;
+  uint64_t sub_cnt = 0;
   
   if(!CHECK_RULE(&Prp::rule_start)){
       failed = 1;
@@ -1178,6 +1433,7 @@ bool Prp::go_back(uint64_t num_tok){
   for(i=0;i<num_tok;i++){
     ok = unconsume_token();
   }
+  cur_line = scan_line();
   return ok;
 }
 
@@ -1216,7 +1472,7 @@ void Prp::ast_builder(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass
   }
 }
 
-inline uint8_t Prp::check_function(uint8_t (Prp::*rule)(std::list<std::tuple<uint8_t, Rule_id, Token_entry>>&), int64_t *sub_cnt, std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &loc_list){
+inline uint8_t Prp::check_function(uint8_t (Prp::*rule)(std::list<std::tuple<uint8_t, Rule_id, Token_entry>>&), uint64_t *sub_cnt, std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &loc_list){
   PRINT("Called check_function.\n");
   uint64_t starting_size = loc_list.size();
   uint8_t ret = (this->*rule)(loc_list);
@@ -1232,8 +1488,16 @@ inline uint8_t Prp::check_function(uint8_t (Prp::*rule)(std::list<std::tuple<uin
   return ret;
 }
 
-inline bool Prp::chk_and_consume(Token_id tok, Rule_id rid, int64_t *sub_cnt, std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &loc_list){
+inline bool Prp::chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &loc_list){
   if(scan_is_token(tok)){
+    if(tok == Pyrope_id_elif || tok == Pyrope_id_if || tok == Pyrope_id_unique || tok == Pyrope_id_else || tok == Pyrope_id_while || tok == Pyrope_id_punch || tok == Pyrope_id_for || tok == Pyrope_id_when){
+      scan_next();
+      auto next_pos = get_token_pos();
+      scan_prev();
+      auto cur_pos_end = get_token_pos() + scan_text().length();
+      if((next_pos - cur_pos_end) < 1)
+        return false;
+    }
     if(rid != Prp_invalid){
       loc_list.push_back(std::make_tuple(2, rid, scan_token()));
       (*sub_cnt)++;
@@ -1243,7 +1507,17 @@ inline bool Prp::chk_and_consume(Token_id tok, Rule_id rid, int64_t *sub_cnt, st
 #ifdef DEBUG
     print_loc_list(loc_list);
 #endif
-    consume_token();
+    if(scan_line() == cur_line){
+      consume_token();
+      return true;
+    }
+  }
+  return false;
+}
+
+inline bool Prp::inc_line_cnt(){
+  if(scan_line() > cur_line){
+    cur_line = scan_line();
     return true;
   }
   return false;

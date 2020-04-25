@@ -41,6 +41,13 @@ bool Node_pin::is_graph_input() const { return current_g->is_graph_input(idx); }
 
 bool Node_pin::is_graph_output() const { return current_g->is_graph_output(idx); }
 
+Node_pin Node_pin::get_sink_from_output() const {
+  I(is_graph_output());
+  I(is_driver());
+
+  return Node_pin(top_g, current_g, hidx, idx, pid, true);
+}
+
 Node Node_pin::get_node() const {
   auto nid = current_g->get_node_nid(idx);
 
@@ -123,8 +130,14 @@ std::string Node_pin::debug_name() const {
 }
 
 std::string_view Node_pin::get_name() const {
-  I(has_name());  // get_name should be called for named driver_pins
-  return Ann_node_pin_name::ref(current_g)->get_val_sview(get_compact_class_driver());
+#ifndef NDEBUG
+  if (!is_graph_io()) {
+    I(is_driver());
+    I(has_name());  // get_name should be called for named driver_pins
+  }
+#endif
+  // NOTE: Not the usual get_compact_class_driver() to handle IO change from driver/sink
+  return Ann_node_pin_name::ref(current_g)->get_val_sview(Compact_class_driver(idx));
 }
 
 std::string_view Node_pin::create_name() const {

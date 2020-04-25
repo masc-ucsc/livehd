@@ -44,6 +44,16 @@ note: if not handle ssa cnt on lhs and rhs separately, there will be a race cond
 
 Lnast::~Lnast() {
   for (auto *ptr : string_pool) delete ptr;
+
+  if (memblock_fd==-1)
+    return;
+
+  int ok = ::munmap((void *)memblock.data(), memblock.size());
+  I(ok==0);
+  close(memblock_fd);
+
+  memblock = "";
+  memblock_fd = -1;
 }
 
 std::string_view Lnast::add_string(std::string_view sview) {
@@ -65,6 +75,7 @@ std::string_view Lnast::add_string(const std::string &str) {
 void Lnast::do_ssa_trans(const Lnast_nid &top_nid){
   Lnast_nid top_sts_nid = get_first_child(top_nid);
   default_const_nid = add_child(top_sts_nid, Lnast_node(Lnast_ntype::create_const(), Token(Token_id_alnum, 0, 0, 0, "default_const")));
+  err_var_undefined = add_child(top_sts_nid, Lnast_node(Lnast_ntype::create_err_flag(), Token(Token_id_alnum, 0, 0, 0, "err_var_undefined")));
 
   Phi_rtable top_phi_resolve_table;
   phi_resolve_tables[get_name(top_sts_nid)] = top_phi_resolve_table;
@@ -82,8 +93,6 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid){
       ssa_handle_a_statement(top_sts_nid, opr_nid);
     }
   }
-
-
 
   fmt::print("\nStep-3: RHS SSA\n");
   resolve_ssa_rhs_subs(top_sts_nid);
@@ -408,9 +417,10 @@ Lnast_nid Lnast::check_phi_table_parents_chain(std::string_view target_name, con
   if(parent_table.find(target_name) != parent_table.end())
     return parent_table[target_name];
 
-  if (get_parent(psts_nid) == get_root() && originate_from_csts) {//current sts is top_sts
+  if (get_parent(psts_nid) == get_root() && originate_from_csts) {
+    ; // do nothing for csts
   } else if (get_parent(psts_nid) == get_root() && !originate_from_csts){
-    return default_const_nid;
+    return err_var_undefined;
   } else {
     auto tmp_if_nid = get_parent(psts_nid);
     auto new_psts_nid = get_parent(tmp_if_nid);

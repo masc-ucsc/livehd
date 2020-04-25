@@ -19,8 +19,8 @@ private:
 
   absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Node_Type_Op> primitive_type_lnast2lg;
 
-  absl::flat_hash_map<std::string, Node_pin>  name2dpin;
-  absl::flat_hash_map<std::string, Lnast_nid> name2lnidx; //mainly for dot and select recording
+  absl::flat_hash_map<std::string, Node_pin>     name2dpin;
+  absl::flat_hash_map<std::string, Lnast_nid>    name2lnidx; //mainly for dot and select recording
   absl::flat_hash_map<std::string, std::string>  keyname2pos;
   static constexpr uint8_t TN = 0;  // tuple name
   static constexpr uint8_t KN = 1;  // tuple element key name
@@ -66,7 +66,8 @@ protected:
   static bool is_input    (std::string_view name)      {return name.substr(0, 1) == "$" ; }
   static bool is_output   (std::string_view name)      {return name.substr(0, 1) == "%" ; }
   static bool is_const    (std::string_view name)      {return name.substr(0, 2) == "0d" or name.substr(0, 3) == "-0d"; }
-  static bool is_default_const (std::string_view name) {return name.substr(0,13) == "default_const"; }
+  static bool is_default_const     (std::string_view name) {return name.substr(0,13) == "default_const"; }
+  static bool is_err_var_undefined (std::string_view name) {return name.substr(0,17) == "err_var_undefined"; }
   static bool is_bit_attr_tuple_add(const Node &node) {
     return (node.get_sink_pin(1).inp_edges().size() == 1) &&
            (node.get_sink_pin(1).inp_edges().begin()->driver.get_name().substr(0,6) == "__bits");

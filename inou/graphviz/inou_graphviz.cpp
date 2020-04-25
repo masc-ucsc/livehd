@@ -17,7 +17,7 @@
 void setup_inou_graphviz() { Inou_graphviz::setup(); }
 
 void Inou_graphviz::setup() {
-  Eprp_method m1("inou.graphviz.fromlg", "export lgraph to graphviz dot format", &Inou_graphviz::fromlg);
+  Eprp_method m1("inou.graphviz.from", "export lgraph/lnast to graphviz dot format", &Inou_graphviz::from);
 
   m1.add_label_optional("bits", "dump bits (true/false)", "false");
   m1.add_label_optional("verbose", "dump bits and wirename (true/false)", "false");
@@ -25,7 +25,7 @@ void Inou_graphviz::setup() {
 
   register_inou("graphviz", m1);
 
-  Eprp_method m2("inou.graphviz.fromlnast", "export lnast to graphviz dot format", &Inou_graphviz::fromlnast);
+  Eprp_method m2("inou.graphviz.fromlnast", "export lnast cfg to graphviz dot format", &Inou_graphviz::fromlnast);
 
   // m2.add_label_required("files",  "cfg_text files to process (comma separated)");
   // m2.add_label_optional("odir",   "path to put the dot", ".");
@@ -55,11 +55,14 @@ Inou_graphviz::Inou_graphviz(const Eprp_var &var) : Pass("inou.graphviz", var) {
   verbose = v != "false" && v != "0";
 }
 
-void Inou_graphviz::fromlg(Eprp_var &var) {
+void Inou_graphviz::from(Eprp_var &var) {
   Inou_graphviz p(var);
 
   for (const auto &l : var.lgs) {
-    p.do_fromlg(l);
+    p.do_from_lgraph(l);
+  }
+  for (const auto &l : var.lnasts) {
+    p.do_from_lnast(l);
   }
 }
 
@@ -75,7 +78,12 @@ void Inou_graphviz::fromlnast(Eprp_var &var) {
   Inou_graphviz p(var);
 
   for (const auto &f : absl::StrSplit(p.files, ',')) {
-    p.do_fromlnast(f);
+    Lnast_parser lnast_parser(f);
+
+    std::shared_ptr<Lnast> lnast{lnast_parser.ref_lnast()};
+    lnast->ssa_trans();
+
+    p.do_from_lnast(lnast);
   }
 }
 
@@ -113,7 +121,7 @@ void Inou_graphviz::do_hierarchy(LGraph *g) {
   close(fd);
 }
 
-void Inou_graphviz::do_fromlg(LGraph *lg_parent) {
+void Inou_graphviz::do_from_lgraph(LGraph *lg_parent) {
   populate_lg_data(lg_parent);
 
   lg_parent->each_sub_fast([lg_parent, this](Node &node, Lg_type_id lgid) {
@@ -122,6 +130,30 @@ void Inou_graphviz::do_fromlg(LGraph *lg_parent) {
     LGraph *lg_child = LGraph::open(lg_parent->get_path(), lgid);
     populate_lg_data(lg_child);
   });
+}
+
+void Inou_graphviz::populate_lg_handle_xedge(const Node &node, const XEdge &out, std::string &data) {
+  auto  dp_pid  = out.driver.get_pid();
+  auto  sp_pid  = out.sink.get_pid();
+  auto  dn_name = out.driver.get_node().debug_name();
+  if (out.driver.is_graph_io()) {
+    dn_name = out.driver.get_name();
+  }
+  auto  sn_name = out.sink.get_node().debug_name();
+  if (out.sink.is_graph_io()) {
+    sn_name = out.sink.get_name();
+  }
+  auto  dbits   = out.driver.get_bits();
+  auto  dp_name = out.driver.has_name() ? out.driver.get_name() : "";
+
+  if (node.get_type().op == U32Const_Op)
+    data += fmt::format(" {}->{}[label=<{}b:({},{})>];\n", dn_name, sn_name, dbits, dp_pid, sp_pid);
+  else if (node.get_type().op == TupRef_Op)
+    data += fmt::format(" {}->{}[label=<({},{}):<font color=\"#0000ff\">{}</font>>];\n", dn_name, sn_name, dp_pid, sp_pid, dp_name);
+  else if (node.get_type().op == TupAdd_Op)
+    data += fmt::format(" {}->{}[label=<{}b:({},{}):<font color=\"#0000ff\">{}</font>>];\n", dn_name, sn_name, dbits, dp_pid, sp_pid, dp_name);
+  else
+    data += fmt::format(" {}->{}[label=<{}b:({},{}):{}>];\n", dn_name, sn_name, dbits, dp_pid, sp_pid, dp_name);
 }
 
 void Inou_graphviz::populate_lg_data(LGraph *g) {
@@ -143,29 +175,18 @@ void Inou_graphviz::populate_lg_data(LGraph *g) {
       data += fmt::format(" {} [label=<{}>];\n", node.debug_name(), node_info);
 
 
-    for (auto &out : node.out_edges()) {
-      auto  dp_pid  = out.driver.get_pid();
-      auto  sp_pid  = out.sink.get_pid();
-      auto  dn_name = out.driver.get_node().debug_name();
-      auto  sn_name = out.sink.get_node().debug_name();
-      auto  dbits   = out.driver.get_bits();
-      auto  dp_name = out.driver.has_name() ? out.driver.get_name() : "";
-
-      if (node.get_type().op == U32Const_Op)
-        data += fmt::format(" {}->{}[label=<{}b:({},{})>];\n", dn_name, sn_name, dbits, dp_pid, sp_pid);
-      else if (node.get_type().op == TupRef_Op)
-        data += fmt::format(" {}->{}[label=<({},{}):<font color=\"#0000ff\">{}</font>>];\n", dn_name, sn_name, dp_pid, sp_pid, dp_name);
-      else if (node.get_type().op == TupAdd_Op)
-        data += fmt::format(" {}->{}[label=<{}b:({},{}):<font color=\"#0000ff\">{}</font>>];\n", dn_name, sn_name, dbits, dp_pid, sp_pid, dp_name);
-      else
-        data += fmt::format(" {}->{}[label=<{}b:({},{}):{}>];\n", dn_name, sn_name, dbits, dp_pid, sp_pid, dp_name);
+    for (const auto &out : node.out_edges()) {
+      populate_lg_handle_xedge(node, out, data);
     }
   });
 
-  g->each_graph_output([&data](const Node_pin &pin) {
-    std::string_view dst_str = "virtual_dst_module";
-    auto             dbits   = pin.get_bits();
-    data += fmt::format(" {}->{}[label=<{}b:{}>];\n", pin.get_node().debug_name(), dst_str, dbits, pin.get_name());
+  g->each_graph_input([&data](const Node_pin &pin) {
+    std::string_view io_name = pin.get_name();
+    data += fmt::format(" {} [label=<{}>];\n", io_name, io_name); // pin.debug_name());
+
+    for (const auto &out : pin.out_edges()) {
+      populate_lg_handle_xedge(pin.get_node(), out, data);
+    }
   });
 
   data += "}\n";
@@ -230,11 +251,7 @@ void Inou_graphviz::do_fromfirrtl(Eprp_var &var) {
   close(fd);
 }
 
-void Inou_graphviz::do_fromlnast(std::string_view f) {
-  Lnast_parser lnast_parser(f);
-
-  auto *lnast = lnast_parser.ref_lnast();
-  lnast->ssa_trans();
+void Inou_graphviz::do_from_lnast(std::shared_ptr<Lnast> lnast) {
   std::string data = "digraph {\n";
 
   for (const auto &itr : lnast->depth_preorder(lnast->get_root())) {
@@ -262,7 +279,7 @@ void Inou_graphviz::do_fromlnast(std::string_view f) {
 
   data += "}\n";
 
-  auto f2 = f.substr(0, f.length()-4); // remove ".cfg" in the end
+  auto f2 = lnast->get_top_module_name();
   auto file = absl::StrCat(odir, "/", f2, ".lnast.dot");
   int         fd   = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
   if (fd < 0) {

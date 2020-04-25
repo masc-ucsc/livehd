@@ -63,6 +63,7 @@ public:
 
     //group: others
     Lnast_ntype_assert,       // I
+    Lnast_ntype_err_flag,     // compile error flag
   };
 
 protected:
@@ -124,6 +125,7 @@ protected:
 
     //group: others
     "assert",
+    "error_flag"
   };
   static inline std::string_view namemap_cfg[] = {
     "invalid",
@@ -226,6 +228,7 @@ protected:
     "const",
     "attr",
     "assert",
+    "error_flag"
   };
   static inline std::string_view namemap_verilog[] = {
     "invalid",
@@ -277,6 +280,7 @@ protected:
     "const",
     "attr",
     "assert",
+    "error_flag"
   };
   static inline std::string_view namemap_cpp[] = {
     "invalid",
@@ -328,6 +332,7 @@ protected:
     "const",
     "attr",
     "assert",
+    "error_flag"
   };
 
   Lnast_ntype_int val;
@@ -396,6 +401,7 @@ public:
   static Lnast_ntype create_attr()         { return Lnast_ntype(Lnast_ntype_attr); }
 
   static Lnast_ntype create_assert()       { return Lnast_ntype(Lnast_ntype_assert); }
+  static Lnast_ntype create_err_flag()     { return Lnast_ntype(Lnast_ntype_err_flag); }
 
   bool is_invalid()      const { return val == Lnast_ntype_invalid; }
   bool is_top()          const { return val == Lnast_ntype_top; }
@@ -453,6 +459,7 @@ public:
   bool is_attr()         const { return val == Lnast_ntype_attr; }
 
   bool is_assert()       const { return val == Lnast_ntype_assert; }
+  bool is_err_flag()     const { return val == Lnast_ntype_err_flag; }
 
   // Super types
   bool is_logical_op()   const { return (val == Lnast_ntype_logical_and) or

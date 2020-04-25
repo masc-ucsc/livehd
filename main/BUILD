@@ -31,6 +31,7 @@ cc_binary(
             "//pass/sample:pass_sample",
             "//pass/bitwidth:pass_bitwidth",
             "//pass/mockturtle:pass_mockturtle",
+            "//pass/lgraph_to_lnast:pass_lgraph_to_lnast",
 
             # "//cops/live:cops_live",
 
@@ -98,11 +99,18 @@ cc_binary(
     linkopts = ["-lpthread"],
 )
 
+cc_library(
+    name = "tmt",
+    srcs = ["tmt_test.cpp"],
+    hdrs = ["tmt_test.hpp"],
+)
+
 cc_test(
     name = "main_test",
     srcs = ["main_test.cpp"],
     deps = [
         "@gtest//:gtest_main",
+        ":tmt",
     ],
     data = [
         ":lgshell",

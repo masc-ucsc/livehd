@@ -5,8 +5,10 @@
 #include "mmap_tree.hpp"
 #include "lnast_ntype.hpp"
 
-//FIXME: need ordered map to guarantee phi-node generation order to be able to test LNAST-SSA, better to use absl::btree_map
-//using Phi_rtable = absl::flat_hash_map<std::string_view, Lnast_nid>; //rtable = resolve_table
+// FIXME->sh: need ordered map to guarantee phi-node generation order to be able
+// to test LNAST-SSA, better to use absl::btree_map
+
+/* using Phi_rtable = absl::flat_hash_map<std::string_view, Lnast_nid>; //rtable = resolve_table */
 using Lnast_nid          = mmap_lib::Tree_index;
 using Phi_rtable         = std::map<std::string_view, Lnast_nid>; //rtable = resolve_table
 using Cnt_rtable         = absl::flat_hash_map<std::string_view, int8_t>;
@@ -89,7 +91,10 @@ struct Lnast_node {
 
 class Lnast : public mmap_lib::tree<Lnast_node> {
 private:
-  std::string top_module_name;
+  std::string      top_module_name;
+  std::string_view memblock;
+  int              memblock_fd;
+
   void      do_ssa_trans               (const Lnast_nid  &top_nid);
   void      ssa_handle_a_statement     (const Lnast_nid  &psts_nid, const Lnast_nid &opr_nid);
   void      ssa_rhs_handle_a_statement (const Lnast_nid  &psts_nid, const Lnast_nid &opr_nid);
@@ -122,14 +127,17 @@ private:
 
   Phi_rtable new_added_phi_node_table;
   Lnast_nid  default_const_nid;
+  Lnast_nid  err_var_undefined;
 
   std::vector<std::string *> string_pool;
 
 public:
   Lnast() = default;
-  virtual ~Lnast();
-  explicit Lnast(std::string_view _module_name): top_module_name(_module_name) { }
-  void ssa_trans(){
+  ~Lnast();
+  explicit Lnast(std::string_view _module_name): top_module_name(_module_name), memblock_fd(-1) { }
+  explicit Lnast(std::string_view _module_name, std::pair<std::string_view, int> o): top_module_name(_module_name), memblock(o.first), memblock_fd(o.second) { }
+
+  void ssa_trans() {
     do_ssa_trans(get_root());
   };
 

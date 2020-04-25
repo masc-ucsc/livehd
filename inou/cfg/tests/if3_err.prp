@@ -1,0 +1,7 @@
+$inp.__bits = 1
+
+if ($inp == 0) {
+  x = 4 
+} 
+
+%out = x

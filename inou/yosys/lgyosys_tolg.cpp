@@ -67,16 +67,17 @@ static void look_for_wire(LGraph *g, const RTLIL::Wire *wire) {
     if (!g->is_graph_output(&wire->name.c_str()[1])) {
       g->add_graph_output(&wire->name.c_str()[1], wire->port_id, wire->width);
     }
-    auto pin = g->get_graph_output(&wire->name.c_str()[1]);
-    I(pin.get_bits() == wire->width);
+    auto dpin = g->get_graph_output_driver_pin(&wire->name.c_str()[1]);
+    I(dpin.get_bits() == wire->width);
     if (wire->start_offset) {
-      auto dpin = g->get_graph_output_driver_pin(&wire->name.c_str()[1]);
-      I(dpin.get_pid() == pin.get_pid());
+      //auto dpin = g->get_graph_output_driver_pin(&wire->name.c_str()[1]);
+      //I(dpin.get_pid() == pin.get_pid());
       dpin.set_offset(wire->start_offset);
     }
-    auto node = g->create_node(Join_Op, wire->width);
+    //auto node = g->create_node(Join_Op, wire->width);
+    //wire2pin[wire] = node.setup_driver_pin();
 
-    wire2pin[wire] = node.setup_driver_pin();
+    wire2pin[wire] = dpin;
 
     // g->add_edge(node.get_driver_pin(), pin);
   }
@@ -224,14 +225,18 @@ static Node resolve_memory(LGraph *g, RTLIL::Cell *cell) {
 
       if (chunk.width == wire->width) {
         if (wire2pin.find(wire) != wire2pin.end()) {
-          auto join_dpin = wire2pin[wire];
-          auto join_node = join_dpin.get_node();
-          I(join_node.get_type().op == Join_Op);
-          I(join_node.inp_connected_pins().size() == 0);
+          const auto &join_dpin = wire2pin[wire];
+          if (join_dpin.is_graph_output()) {
+            g->add_edge(dpin, join_dpin.get_sink_from_output());
+          } else {
+            auto join_node = join_dpin.get_node();
+            I(join_node.get_type().op == Join_Op);
+            I(join_node.inp_connected_pins().size() == 0);
 
-          auto spin_join = join_node.setup_sink_pin(0);
-          g->add_edge(dpin, spin_join);
-          I(join_dpin.get_bits() == wire->width);
+            auto spin_join = join_node.setup_sink_pin(0);
+            g->add_edge(dpin, spin_join);
+            I(join_dpin.get_bits() == wire->width);
+          }
         } else if (chunk.width == ss.size()) {
           // output port drives a single wire
           wire2pin[wire] = dpin;

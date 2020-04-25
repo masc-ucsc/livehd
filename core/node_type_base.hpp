@@ -50,11 +50,12 @@ enum Node_Type_Op : uint64_t {
   // op_class: wire
   GraphIO_Op,
   DontCare_Op,
-  // op_class: Tuple
+  // op_class: Pyrope Compiler
   TupAdd_Op,
   TupGet_Op,
   TupRef_Op,
   TupKey_Op,
+  CompileErr_Op,
 // Add here, operators needed
 #if 1
   // WARNING: deprecated once we have LUTs working (mockturtle)
@@ -704,6 +705,16 @@ public:
     outputs.push_back("Y");
   };
 };
+
+
+// Y = tuple root name
+class Node_Type_CompileErr : public Node_Type {
+public:
+  Node_Type_CompileErr() : Node_Type("compile_err", CompileErr_Op, true) {
+    outputs.push_back("Y");
+  };
+};
+
 
 class Node_Type_DontCare : public Node_Type {
 public:
