@@ -208,7 +208,7 @@ void Inou_graphviz::populate_lg_data(LGraph *g) {
 void Inou_graphviz::do_fromfirrtl(Eprp_var &var) {
   Inou_firrtl inou_firrtl(var);
 
-  auto *lnast = inou_firrtl.ref_lnast();
+  auto lnast = inou_firrtl.ref_lnast();
   std::string data = "digraph {\n";
 
   for (const auto &itr : lnast->depth_preorder(lnast->get_root())) {

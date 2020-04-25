@@ -47,7 +47,7 @@ protected:
   static void toLNAST(Eprp_var &var);
 
 private:
-  Lnast lnast;
+  std::shared_ptr<Lnast> lnast;
   //std::vector<Lnast> lnast_vec;
 
   uint32_t id_counter;
@@ -57,5 +57,5 @@ public:
 
   static void setup();
 
-  Lnast *ref_lnast() { return &lnast; };//FIXME: Temporary workaround for graphviz to work (only works for 1 module)
+  std::shared_ptr<Lnast> ref_lnast() { return lnast; };//FIXME: Temporary workaround for graphviz to work (only works for 1 module)
 };

@@ -15,7 +15,7 @@
 
 class Inou_lnast_dfg : public Pass {
 private:
-  Lnast *lnast{};
+  std::shared_ptr<Lnast> lnast;
 
   absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Node_Type_Op> primitive_type_lnast2lg;
 
