@@ -233,9 +233,6 @@ VarPtr VCDWriter::register_var(const std::string &scope, const std::string &name
                 pvar = VarPtr(new VCDScalarVariable(name, type, 1, *cur_scope, _next_var_id));
             else
                 pvar = VarPtr(new VCDVectorVariable(name, type, sz(64), *cur_scope, _next_var_id));
-           //SG:as per default: pvar = VarPtr(new VCDVectorVariable(name, type, size, *cur_scope, _next_var_id));
-              //  if (init_value.size() == 1 && init_value[0] == VCDValues::UNDEF)
-               //     init_value = std::string(size, VCDValues::ZERO);
             break;
 
         case VariableType::real:
@@ -284,6 +281,7 @@ bool VCDWriter::_change(VarPtr var, TimeStamp timestamp, const VarValue &value, 
     if (!var)
         throw VCDTypeException{ "Invalid VCDVariable" };
 
+    std::string change_value = var->change_record(value);
         if (timestamp > _timestamp)
         {
             if (_registering)
@@ -293,8 +291,6 @@ bool VCDWriter::_change(VarPtr var, TimeStamp timestamp, const VarValue &value, 
             _timestamp = timestamp;
         }
 
-    std::string change_value = var->change_record(value);//after the method completes, this line is executed last
-    //std::cout<<change_value<<value<<std::endl; //SG:fprintf(_ofile, "\n%s  .  .  .\n", change_value);
     // if value changed
     if (_vars_prevs.find(var) != _vars_prevs.end())//not entered in 1st entry @ main:544 //_vars_prev is unordered_map of (varptr, str) pairs
     {
@@ -309,18 +305,6 @@ bool VCDWriter::_change(VarPtr var, TimeStamp timestamp, const VarValue &value, 
 
            _vars_prevs.insert(std::make_pair(var, change_value));// registering: inserted the pair for the first time
 
-
-
-
-
-//    if (timestamp > _timestamp)
-//    {
-//        if (_registering)
-//            _finalize_registration();
-//        if (_dumping)
-//            fprintf(_ofile, "#%d\n", timestamp);
-//        _timestamp = timestamp;
-//    }
     // dump it into file
     if (_dumping && !_registering){//not entered in 1st entry 
 
@@ -534,7 +518,7 @@ VarValue VCDVectorVariable::change_record(const VarValue &value) const
   std::string val = ('b' + value );
   auto val_sz = val.size();
     
-    for (auto i = 1u; i < (val_sz - 1); ++i)
+    for (auto i = 1u; i < val_sz; ++i)
     {
         char &c = val[i];
         c = tolower(val[i]);
