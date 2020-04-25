@@ -34,7 +34,7 @@ do
     echo "Pattern:${pt}.cfg"
     echo ""
     
-    if [! -f inou/cfg/tests/${pt}.cfg]; then
+    if [ ! -f inou/cfg/tests/${pt}.cfg ]; then
       echo "ERROR: could not find ${pt}.cfg in /inou/cfg/tests"
       exit !
     fi
@@ -84,7 +84,7 @@ do
     fi
 
 
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.fromlg verbose:false"
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
     mv ${pt}.dot ${pt}.no_bits.tuple.reduced_or.dot
 
 
@@ -102,7 +102,7 @@ do
       exit 1
     fi
 
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.fromlg verbose:false"
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
     mv ${pt}.dot ${pt}.no_bits.tuple.dot
 
 
@@ -120,7 +120,7 @@ do
       exit 1
     fi
 
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.fromlg verbose:false"
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
     mv ${pt}.dot ${pt}.no_bits.dot
 
     echo ""
@@ -138,7 +138,7 @@ do
       exit 1
     fi
 
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.fromlg verbose:false"
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
 
     echo ""
     echo ""
@@ -164,7 +164,7 @@ do
 
         ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg"
         if [ $? -eq 0 ] && [ -f ${pt}.v ]; then
-          echo "Successfully generate Verilog: ${pt}.v"a
+          echo "Successfully generate Verilog: ${pt}.v"
           rm -f  yosys_script.*
         else
           echo "ERROR: Pyrope compiler failed: verilog generation, testcase: ${pt}.cfg"
