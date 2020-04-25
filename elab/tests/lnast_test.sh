@@ -1,7 +1,7 @@
 #!/bin/bash
 rm -rf ./lgdb
 
-pts='if if2 if3_err'
+pts='if if2 if3_err nested_if_err'
 # pts='tuple_if2 tuple_if ssa_rhs ssa_nested_if ssa_if nested_if tuple simple_tuple trivial_bitwidth function_call tuple '
 # pts='ssa_rhs'
 # pts='tuple'
@@ -23,13 +23,15 @@ fi
 
 for pt in $pts
 do
-    echo "Pattern:${pt}.cfg"
-    echo "Pattern:${pt}.cfg"
-    echo "Pattern:${pt}.cfg"
+    echo ""
+    echo ""
     echo ""
     echo "---------------------------------------------------"
     echo "CFG -> LNAST -> Graphviz Test"
     echo "---------------------------------------------------"
+    echo "Pattern:${pt}.cfg"
+    echo "Pattern:${pt}.cfg"
+    echo "Pattern:${pt}.cfg"
     echo ""
     
     if [! -f inou/cfg/tests/${pt}.cfg]; then
@@ -150,7 +152,7 @@ do
 
     if [[ ${pt} == *_err* ]]; then 
         echo "----------------------------------------------------"
-        echo "This is a Compile Error Test, No Need to Generate Verilog Code "  
+        echo "Pass This is a Compile Error Test, No Need to Generate Verilog Code "  
         echo "----------------------------------------------------"
     else
         echo ""

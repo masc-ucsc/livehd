@@ -243,7 +243,6 @@ void Inou_lnast_dfg::process_ast_binary_op(LGraph *dfg, const Lnast_nid &lnidx_o
       dfg->add_edge(opd, opr_node.setup_sink_pin(0));// FIXME->sh: the sink_pin should be determined by the functionality, not just zero
     }
   }
-
 }
 
 void Inou_lnast_dfg::process_ast_assign_op(LGraph *dfg, const Lnast_nid &lnidx_assign) {
