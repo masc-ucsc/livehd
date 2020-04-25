@@ -44,5 +44,5 @@ protected:
   // debugging
   void print_ast_node(mmap_lib::Tree_index idx);
 public:
-  std::unique_ptr<Lnast> prp_ast_to_lnast();
+  std::unique_ptr<Lnast> prp_ast_to_lnast(std::string_view module_name);
 };

@@ -17,7 +17,7 @@
 void setup_inou_graphviz() { Inou_graphviz::setup(); }
 
 void Inou_graphviz::setup() {
-  Eprp_method m1("inou.graphviz.fromlg", "export lgraph to graphviz dot format", &Inou_graphviz::fromlg);
+  Eprp_method m1("inou.graphviz.from", "export lgraph/lnast to graphviz dot format", &Inou_graphviz::from);
 
   m1.add_label_optional("bits", "dump bits (true/false)", "false");
   m1.add_label_optional("verbose", "dump bits and wirename (true/false)", "false");
@@ -25,7 +25,7 @@ void Inou_graphviz::setup() {
 
   register_inou("graphviz", m1);
 
-  Eprp_method m2("inou.graphviz.fromlnast", "export lnast to graphviz dot format", &Inou_graphviz::fromlnast);
+  Eprp_method m2("inou.graphviz.fromlnast", "export lnast cfg to graphviz dot format", &Inou_graphviz::fromlnast);
 
   // m2.add_label_required("files",  "cfg_text files to process (comma separated)");
   // m2.add_label_optional("odir",   "path to put the dot", ".");
@@ -55,11 +55,14 @@ Inou_graphviz::Inou_graphviz(const Eprp_var &var) : Pass("inou.graphviz", var) {
   verbose = v != "false" && v != "0";
 }
 
-void Inou_graphviz::fromlg(Eprp_var &var) {
+void Inou_graphviz::from(Eprp_var &var) {
   Inou_graphviz p(var);
 
   for (const auto &l : var.lgs) {
-    p.do_fromlg(l);
+    p.do_from_lgraph(l);
+  }
+  for (const auto &l : var.lnasts) {
+    p.do_from_lnast(l);
   }
 }
 
@@ -75,7 +78,12 @@ void Inou_graphviz::fromlnast(Eprp_var &var) {
   Inou_graphviz p(var);
 
   for (const auto &f : absl::StrSplit(p.files, ',')) {
-    p.do_fromlnast(f);
+    Lnast_parser lnast_parser(f);
+
+    std::shared_ptr<Lnast> lnast{lnast_parser.ref_lnast()};
+    lnast->ssa_trans();
+
+    p.do_from_lnast(lnast);
   }
 }
 
@@ -113,7 +121,7 @@ void Inou_graphviz::do_hierarchy(LGraph *g) {
   close(fd);
 }
 
-void Inou_graphviz::do_fromlg(LGraph *lg_parent) {
+void Inou_graphviz::do_from_lgraph(LGraph *lg_parent) {
   populate_lg_data(lg_parent);
 
   lg_parent->each_sub_fast([lg_parent, this](Node &node, Lg_type_id lgid) {
@@ -243,11 +251,7 @@ void Inou_graphviz::do_fromfirrtl(Eprp_var &var) {
   close(fd);
 }
 
-void Inou_graphviz::do_fromlnast(std::string_view f) {
-  Lnast_parser lnast_parser(f);
-
-  auto *lnast = lnast_parser.ref_lnast();
-  lnast->ssa_trans();
+void Inou_graphviz::do_from_lnast(std::shared_ptr<Lnast> lnast) {
   std::string data = "digraph {\n";
 
   for (const auto &itr : lnast->depth_preorder(lnast->get_root())) {
@@ -275,7 +279,7 @@ void Inou_graphviz::do_fromlnast(std::string_view f) {
 
   data += "}\n";
 
-  auto f2 = f.substr(0, f.length()-4); // remove ".cfg" in the end
+  auto f2 = lnast->get_top_module_name();
   auto file = absl::StrCat(odir, "/", f2, ".lnast.dot");
   int         fd   = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
   if (fd < 0) {

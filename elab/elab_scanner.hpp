@@ -194,6 +194,11 @@ private:
   void parse_step();
 
 protected:
+  std::pair<std::string_view, int> transfer_memblock_ownership() {
+    std::pair<std::string_view, int> p{memblock, memblock_fd};
+    memblock_fd = -1;
+    return p;
+  }
   std::string_view get_memblock() const { return memblock; }
   std::string_view get_filename() const { I(memblock_fd != -1); return buffer_name; }
   bool is_parse_inline() const { return memblock_fd == -1; }

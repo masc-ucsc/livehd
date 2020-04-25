@@ -44,6 +44,16 @@ note: if not handle ssa cnt on lhs and rhs separately, there will be a race cond
 
 Lnast::~Lnast() {
   for (auto *ptr : string_pool) delete ptr;
+
+  if (memblock_fd==-1)
+    return;
+
+  int ok = ::munmap((void *)memblock.data(), memblock.size());
+  I(ok==0);
+  close(memblock_fd);
+
+  memblock = "";
+  memblock_fd = -1;
 }
 
 std::string_view Lnast::add_string(std::string_view sview) {

@@ -98,11 +98,15 @@ protected:
   static void dump(Eprp_var &var) {
     fmt::print("lgraph.dump labels:\n");
     for (const auto &l : var.dict) {
-      fmt::print(fmt::format("  {}:{}\n", l.first, l.second));
+      fmt::print("  {}:{}\n", l.first, l.second);
     }
     fmt::print("lgraph.dump lgraphs:\n");
     for (const auto &l : var.lgs) {
-      fmt::print(fmt::format("  {}/{}\n", l->get_path(), l->get_name()));
+      fmt::print("  {}/{}\n", l->get_path(), l->get_name());
+    }
+    fmt::print("lgraph.dump lnast:\n");
+    for (const auto &l : var.lnasts) {
+      fmt::print("  {}\n", l->get_top_module_name());
     }
   }
 

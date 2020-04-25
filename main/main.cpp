@@ -158,7 +158,7 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
   int  last_match_end   = context.size();
   int  last_match_start = last_match_end;
   for (int i = last_match_end - 1; i >= 0; --i) {
-    if (!std::isalnum(context[i]) && context[i] != '.')
+    if (!std::isalnum(context[i]) && context[i] != '.' && context[i] != '_')
       break;
     last_match_start = i;
   }
