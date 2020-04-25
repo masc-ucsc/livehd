@@ -605,7 +605,9 @@ END
 
 TEST_F(Lnast_test, Traverse_breadth_first_check_on_ast) {
   fmt::print("Traverse_breadth_first_check_on_ast\n");
-  auto *lnast = lnast_parser.ref_lnast();
+  std::shared_ptr<Lnast> lnast;
+  lnast = lnast_parser.ref_lnast();
+  /* auto *lnast = lnast_parser.ref_lnast(); */
   std::vector<std::vector<tuple>> ast_sorted_testee;
 
   lnast->each_top_down_fast([&ast_sorted_testee, &lnast] (const mmap_lib::Tree_index &self,
@@ -635,7 +637,9 @@ TEST_F(Lnast_test, Traverse_breadth_first_check_on_ast) {
 
 TEST_F(Lnast_test,Traverse_preorder_check_on_lnast){
   fmt::print("Traverse_preorder_check_on_ast\n");
-  auto *lnast = lnast_parser.ref_lnast();
+  std::shared_ptr<Lnast> lnast;
+  lnast = lnast_parser.ref_lnast();
+
   std::vector<std::vector<tuple>> ast_preorder_testee;
 
   for (const auto &it: lnast->depth_preorder(lnast->get_root()) ) {
