@@ -367,12 +367,13 @@ void Pass_bitwidth::iterate_shift(Node_pin &pin) {
   Ann_bitwidth::Implicit_range imp;
   auto op = pin.get_node().get_type().op;
 
-  bool updated = false;
+  //bool updated = false;
   int64_t pos = 0;
 
   int64_t shift_by_min, shift_by_max;
-  char s_extend_pin_min, s_extend_pin_max;
-          //double bits = ceil(log2(inp_edge.driver.get_bitwidth().i.max + 1));
+  //char s_extend_pin_min, s_extend_pin_max;
+
+  //double bits = ceil(log2(inp_edge.driver.get_bitwidth().i.max + 1));
 
   for (const auto &inp_edge : pin.get_node().inp_edges_ordered()) {
     auto dpin = inp_edge.driver;
@@ -385,8 +386,8 @@ void Pass_bitwidth::iterate_shift(Node_pin &pin) {
       shift_by_max = dpin.get_bitwidth().i.max;
       pos++;
     } else if(pos == 2) { // "S" pin, if applicable
-      s_extend_pin_min = dpin.get_bitwidth().i.min;
-      s_extend_pin_max = dpin.get_bitwidth().i.max;
+      // s_extend_pin_min = dpin.get_bitwidth().i.min;
+      // s_extend_pin_max = dpin.get_bitwidth().i.max;
       pos++;
     } else {
       //FIXME: This should never occur, I think?
@@ -644,7 +645,7 @@ void Pass_bitwidth::iterate_mux(Node_pin &node_dpin) {
   for (const auto &inp_edge : node_dpin.get_node().inp_edges_ordered()) {
     auto dpin = inp_edge.driver;
     auto spin = inp_edge.sink;
-    if (spin.get_pid() == 0) { 
+    if (spin.get_pid() == 0) {
       // Base bw off pins except "S" dpin
       continue;
     } else if (is_first_edge) {
@@ -667,7 +668,7 @@ void Pass_bitwidth::iterate_mux(Node_pin &node_dpin) {
       // If neither are in overflow mode, widen BW range to contain both ranges.
       imp.min = (imp.min > dpin.get_bitwidth().i.min) ? dpin.get_bitwidth().i.min : imp.min;
       imp.max = (imp.max < dpin.get_bitwidth().i.max) ? dpin.get_bitwidth().i.max : imp.max;
-      fmt::print("for this mux, min:{}, max:{}\n", imp.min, imp.max);
+      fmt::print("for this mux, min:{}, max:{}\n", (int)imp.min, (int)imp.max);
     }
   }
 
@@ -676,7 +677,7 @@ void Pass_bitwidth::iterate_mux(Node_pin &node_dpin) {
     mark_all_outputs(first_edge_dpin);
   }
 
-  
+
   updated = node_dpin.ref_bitwidth()->i.update(imp);
   if (updated) {
     mark_all_outputs(node_dpin);
