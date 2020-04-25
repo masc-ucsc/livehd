@@ -129,7 +129,9 @@ void Inou_lnast_dfg::do_reduced_or_elimination(LGraph *dfg) {
         I(node.inp_edges().size() == 1);
         for (auto &out : node.out_edges()) {
           auto dpin = node.inp_edges().begin()->driver;
-          dpin.set_name(node.get_driver_pin(1).get_name());
+          if (!dpin.get_node().is_graph_input()) { // don't rename the graph inputs 
+            dpin.set_name(node.get_driver_pin(1).get_name());
+          }
           auto spin = out.sink;
           dfg->add_edge(dpin, spin);
         }

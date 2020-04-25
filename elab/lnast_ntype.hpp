@@ -465,7 +465,7 @@ public:
   bool is_logical_op()   const { return (val == Lnast_ntype_logical_and) or
                                         (val == Lnast_ntype_logical_or); }
 
-  bool is_binary_op()    const { return (val == Lnast_ntype_and) or
+  bool is_nary_op()      const { return (val == Lnast_ntype_and) or
                                         (val == Lnast_ntype_or) or
                                         (val == Lnast_ntype_xor) or
                                         (val == Lnast_ntype_plus) or

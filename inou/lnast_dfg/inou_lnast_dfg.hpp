@@ -37,7 +37,7 @@ protected:
   void lnast2lgraph             (LGraph *dfg);
   void process_ast_stmts        (LGraph *dfg, const Lnast_nid &lnidx_stmts);
   void process_ast_assign_op    (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_binary_op    (LGraph *dfg, const Lnast_nid &lnidx);
+  void process_ast_nary_op      (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_logical_op   (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_as_op        (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_label_op     (LGraph *dfg, const Lnast_nid &lnidx);
@@ -53,19 +53,20 @@ protected:
   void process_ast_dot_op       (const Lnast_nid &lnidx);
   void process_ast_select_op    (const Lnast_nid &lnidx);
   void process_ast_tuple_struct (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_concat_op (LGraph *dfg, const Lnast_nid &lnidx);
+  void process_ast_concat_op    (LGraph *dfg, const Lnast_nid &lnidx);
 
-  Node_pin     setup_node_operator_and_target (LGraph *dfg, const Lnast_nid &lnidx_opr);
-  Node_pin     setup_node_assign_and_target   (LGraph *dfg, const Lnast_nid &lnidx_opr);
+  Node_pin     setup_node_opr_and_lhs         (LGraph *dfg, const Lnast_nid &lnidx_opr);
+  Node_pin     setup_node_assign_and_lhs      (LGraph *dfg, const Lnast_nid &lnidx_opr);
   Node_pin     setup_ref_node_dpin            (LGraph *dfg, const Lnast_nid &lnidx);
   Node_Type_Op decode_lnast_op                (const Lnast_nid &lnidx_opr);
   void         setup_lnast_to_lgraph_primitive_type_mapping();
+  void         nary_node_rhs_connections      (LGraph *dfg, Node &opr_node, const std::vector<Node_pin> &opds);
 
 
-  static bool is_register (std::string_view name)      {return name.substr(0, 1) == "#" ; }
-  static bool is_input    (std::string_view name)      {return name.substr(0, 1) == "$" ; }
-  static bool is_output   (std::string_view name)      {return name.substr(0, 1) == "%" ; }
-  static bool is_const    (std::string_view name)      {return name.substr(0, 2) == "0d" or name.substr(0, 3) == "-0d"; }
+  static bool is_register          (std::string_view name) {return name.substr(0, 1) == "#" ; }
+  static bool is_input             (std::string_view name) {return name.substr(0, 1) == "$" ; }
+  static bool is_output            (std::string_view name) {return name.substr(0, 1) == "%" ; }
+  static bool is_const             (std::string_view name) {return name.substr(0, 2) == "0d" or name.substr(0, 3) == "-0d"; }
   static bool is_default_const     (std::string_view name) {return name.substr(0,13) == "default_const"; }
   static bool is_err_var_undefined (std::string_view name) {return name.substr(0,17) == "err_var_undefined"; }
   static bool is_bit_attr_tuple_add(const Node &node) {
@@ -75,11 +76,11 @@ protected:
 
 
   // tuple related
-  Node_pin     add_tuple_add_from_dot          (LGraph *dfg, const Lnast_nid &lnidx_dot, const Lnast_nid &lnidx_assign);
-  Node_pin     add_tuple_add_from_sel          (LGraph *dfg, const Lnast_nid &lnidx_sel, const Lnast_nid &lnidx_assign);
-  Node_pin     add_tuple_get_from_dot_or_sel   (LGraph *dfg, const Lnast_nid &lnidx_opr);
-  Node_pin     setup_tuple_ref (LGraph *dfg, std::string_view tup_name);
-  Node_pin     setup_tuple_key (LGraph *dfg, std::string_view key_name);
+  Node_pin     add_tuple_add_from_dot        (LGraph *dfg, const Lnast_nid &lnidx_dot, const Lnast_nid &lnidx_assign);
+  Node_pin     add_tuple_add_from_sel        (LGraph *dfg, const Lnast_nid &lnidx_sel, const Lnast_nid &lnidx_assign);
+  Node_pin     add_tuple_get_from_dot_or_sel (LGraph *dfg, const Lnast_nid &lnidx_opr);
+  Node_pin     setup_tuple_ref               (LGraph *dfg, std::string_view tup_name);
+  Node_pin     setup_tuple_key               (LGraph *dfg, std::string_view key_name);
   Node_pin     setup_tuple_chain_new_max_pos (LGraph *dfg, const Node_pin &tn_dpin);
   static bool  tuple_get_has_key_name        (const Node &tup_get);
   static bool  tuple_get_has_key_pos         (const Node &tup_get);
@@ -97,7 +98,7 @@ protected:
   static std::string  hex_char_to_bin(char c);
   static std::string  hex_msb_char_to_bin(char c);
 
-  //static void build_lnast(Inou_lnast_dfg &p, Eprp_var &var);
+  // static void build_lnast(Inou_lnast_dfg &p, Eprp_var &var);
 
   // eprp callbacks
   static void tolg(Eprp_var &var);

@@ -1,7 +1,7 @@
 #!/bin/bash
 rm -rf ./lgdb
 
-pts='if if2 if3_err nested_if_err'
+pts='if if2 if3_err nested_if_err nested_if'
 # pts='tuple_if2 tuple_if ssa_rhs ssa_nested_if ssa_if nested_if tuple simple_tuple trivial_bitwidth function_call tuple '
 # pts='ssa_rhs'
 # pts='tuple'
@@ -152,7 +152,7 @@ do
 
     if [[ ${pt} == *_err* ]]; then 
         echo "----------------------------------------------------"
-        echo "Pass This is a Compile Error Test, No Need to Generate Verilog Code "  
+        echo "Pass! This is a Compile Error Test, No Need to Generate Verilog Code "  
         echo "----------------------------------------------------"
     else
         echo ""

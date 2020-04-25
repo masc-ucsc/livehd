@@ -224,7 +224,7 @@ public:
 
 // Y = (As+...+As+Au+...+Au) - (Bs+...+Bs+Bu+...+Bu)
 // add is a subset of Sum
-// y = As + Au (is an unsigned add)
+// Y = As + Au (is an unsigned add)
 class Node_Type_Sum : public Node_Type {
 public:
   Node_Type_Sum() : Node_Type("sum", Sum_Op, false) {

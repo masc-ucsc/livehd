@@ -88,8 +88,8 @@ void Inou_lnast_dfg::process_ast_stmts(LGraph *dfg, const Lnast_nid &lnidx_stmts
     // FIXME->sh: how to use switch to gain performance?
     if (ntype.is_assign()) {
       process_ast_assign_op(dfg, lnidx);
-    } else if (ntype.is_binary_op()) {
-      process_ast_binary_op(dfg, lnidx);
+    } else if (ntype.is_nary_op()) {
+      process_ast_nary_op(dfg, lnidx);
     } else if (ntype.is_dot()) {
       process_ast_dot_op(lnidx);
     } else if (ntype.is_select()) {
@@ -226,24 +226,64 @@ Node_pin Inou_lnast_dfg::setup_tuple_chain_new_max_pos(LGraph *dfg, const Node_p
 
 
 
-void Inou_lnast_dfg::process_ast_binary_op(LGraph *dfg, const Lnast_nid &lnidx_opr) {
-  auto opr_node = setup_node_operator_and_target(dfg, lnidx_opr).get_node();
+void Inou_lnast_dfg::process_ast_nary_op(LGraph *dfg, const Lnast_nid &lnidx_opr) {
+  auto opr_node = setup_node_opr_and_lhs(dfg, lnidx_opr).get_node();
 
+  std::vector<Node_pin> opds;
   for (const auto &opr_child : lnast->children(lnidx_opr)) {
+    Node_pin opd;
     if (opr_child == lnast->get_first_child(lnidx_opr))
-      continue; // already handled at setup_node_operator_and_target();
+      continue; // the lhs has been handled at setup_node_opr_and_lhs();
     else {
       auto child_name = lnast->get_sname(opr_child);
-      Node_pin opd;
       if (name2lnidx.find(child_name) != name2lnidx.end()) {
         opd = add_tuple_get_from_dot_or_sel(dfg, name2lnidx[child_name]);
       } else {
         opd = setup_ref_node_dpin(dfg, opr_child);
       }
-      dfg->add_edge(opd, opr_node.setup_sink_pin(0));// FIXME->sh: the sink_pin should be determined by the functionality, not just zero
+    }
+    opds.emplace_back(opd);
+  }
+
+  nary_node_rhs_connections(dfg, opr_node, opds);
+}
+
+void Inou_lnast_dfg::nary_node_rhs_connections(LGraph *dfg, Node &opr_node, const std::vector<Node_pin> &opds) {
+  // FIXME->sh: need to think about signed number handling and signed number copy-propagation analysis
+  // for now, assuming everything is unsigned number
+  switch(opr_node.get_type().op){
+    case Sum_Op:
+    case Mult_Op: {
+      for (const auto &opd : opds) {
+        dfg->add_edge(opd, opr_node.setup_sink_pin(1));  
+      }
+      break;
+    }
+    case LessThan_Op:
+    case LessEqualThan_Op:
+    case GreaterThan_Op:
+    case GreaterEqualThan_Op: {
+      auto i = 0;
+      for (const auto &opd : opds) {
+        if (i == 0) {
+          dfg->add_edge(opd, opr_node.setup_sink_pin(1));  
+        } else {
+          dfg->add_edge(opd, opr_node.setup_sink_pin(3));  
+        }
+        i++;
+        I(i <= 2); 
+      }
+      break;
+    }
+    default: {
+      for (const auto &opd : opds) {
+        dfg->add_edge(opd, opr_node.setup_sink_pin(0));  
+      }
     }
   }
 }
+
+
 
 void Inou_lnast_dfg::process_ast_assign_op(LGraph *dfg, const Lnast_nid &lnidx_assign) {
   auto c0 = lnast->get_first_child(lnidx_assign);
@@ -287,7 +327,7 @@ void Inou_lnast_dfg::process_ast_assign_op(LGraph *dfg, const Lnast_nid &lnidx_a
       add_tuple_get_from_dot_or_sel(dfg, name2lnidx[c1_name]);
   }
 
-  Node_pin opr  = setup_node_assign_and_target(dfg, lnidx_assign);
+  Node_pin opr  = setup_node_assign_and_lhs(dfg, lnidx_assign);
   Node_pin opd1 = setup_ref_node_dpin(dfg, c1);
   GI(opd1.get_node().get_type().op != U32Const_Op, opd1.get_bits() == 0);
 
@@ -494,7 +534,7 @@ Node_pin Inou_lnast_dfg::setup_tuple_key(LGraph *dfg, std::string_view key_name)
 
 
 // for operator, we must create a new node and dpin as it represents a new gate in the netlist
-Node_pin Inou_lnast_dfg::setup_node_operator_and_target(LGraph *dfg, const Lnast_nid &lnidx_opr) {
+Node_pin Inou_lnast_dfg::setup_node_opr_and_lhs(LGraph *dfg, const Lnast_nid &lnidx_opr) {
   const auto c0 = lnast->get_first_child(lnidx_opr);
   const auto c0_name = lnast->get_sname(c0);
 
@@ -508,7 +548,7 @@ Node_pin Inou_lnast_dfg::setup_node_operator_and_target(LGraph *dfg, const Lnast
   return node_dpin;
 }
 
-Node_pin Inou_lnast_dfg::setup_node_assign_and_target(LGraph *dfg, const Lnast_nid &lnidx_opr) {
+Node_pin Inou_lnast_dfg::setup_node_assign_and_lhs(LGraph *dfg, const Lnast_nid &lnidx_opr) {
   const auto c0   = lnast->get_first_child(lnidx_opr);
   const auto c0_name = lnast->get_sname(c0);
   if (is_output(c0_name)) {
