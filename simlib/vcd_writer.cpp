@@ -252,7 +252,10 @@ VarPtr VCDWriter::register_var(const std::string &scope, const std::string &name
             if (!size)
                  throw VCDTypeException{ utils::format("Must supply size for type '%s' of var '%s'",
                                                VCDVariable::VAR_TYPES[(int)type].c_str(), name.c_str()) };
-            pvar = VarPtr(new VCDVectorVariable(name, type, size, *cur_scope, _next_var_id));
+            if (sz(64) == 1)
+                    pvar = VarPtr(new VCDScalarVariable(name, type, 1, *cur_scope, _next_var_id));
+                else
+                  pvar = VarPtr(new VCDVectorVariable(name, type, size, *cur_scope, _next_var_id));
             if (init_value.size() == 1 && init_value[0] == VCDValues::UNDEF)
                 init_value = std::string(size, VCDValues::UNDEF);
             break;
