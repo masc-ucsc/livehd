@@ -48,7 +48,7 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid){
   phi_resolve_tables[get_name(top_sts_nid)] = top_phi_resolve_table;
 
   fmt::print("\nStep-1: Analyze LHS or RHS of tuple dot/sel\n");
-  analyze_dot_sel_lrhs(top_sts_nid);
+  analyze_dot_lrhs(top_sts_nid);
 
   fmt::print("\nStep-2: Tuple_Add/Tuple_Get Analysis\n");
   trans_tuple_opr(top_sts_nid);
@@ -142,29 +142,53 @@ void Lnast::trans_tuple_opr_if_subtree(const Lnast_nid &if_nid) {
   }
 }
 void Lnast::trans_tuple_opr_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
-  ;
+  I(get_type(opr_nid).is_dot() || get_type(opr_nid).is_select());
+  auto &tuple_var_table = tuple_var_tables[get_name(psts_nid)];
+
+  auto dot_nid     = opr_nid;
+  auto c0_dot      = get_first_child(dot_nid); //c0 = intermediate target
+  auto c1_dot      = get_sibling_next(c0_dot);
+  auto c1_dot_name = get_name(c1_dot);
+  /* if (tuple_var_table.find(c1_dot_name) != tuple_var_table.end()) { */
+  /* pseudocode
+   * if (tuple variable exists on parents scope) {
+   *   always transform  
+   * } else if (tuple variable exists on current scope) {
+   *   I(local tuple chain exists)
+   *   follow local tuple chain
+   * } else {
+   *   create local tuple chain.
+   * }
+   *  
+   * */
+
+  /* if (check_tuple_table_parents_chain(psts_nid, c1_dot_name) { */
+  /*   dot2ta_tg_phi(psts_nid, dot_nid); */
+  /* } else { */
+  /*   dot2ta_tg(psts_nid, dot_nid); */
+  /* } */
 }
 
-void Lnast::analyze_dot_sel_lrhs(const Lnast_nid &psts_nid) {
-  Dot_sel_lrhs_table  top_dot_sel_lrhs_table;
-  dot_sel_lrhs_tables[get_name(psts_nid)] = top_dot_sel_lrhs_table;
+void Lnast::analyze_dot_lrhs(const Lnast_nid &psts_nid) {
+  Dot_lrhs_table  top_dot_lrhs_table;
+  dot_lrhs_tables[get_name(psts_nid)] = top_dot_lrhs_table;
   for (const auto &opr_nid : children(psts_nid)) {
     if (get_type(opr_nid).is_func_def()) {
       continue;
     } else if (get_type(opr_nid).is_if()) {
-      analyze_dot_sel_lrhs_if_subtree(opr_nid);
+      analyze_dot_lrhs_if_subtree(opr_nid);
     } else if (get_type(opr_nid).is_dot() || get_type(opr_nid).is_select()) {
-      analyze_dot_sel_lrhs_handle_a_statement(psts_nid, opr_nid);
+      analyze_dot_lrhs_handle_a_statement(psts_nid, opr_nid);
     }
   }
 }
 
-void Lnast::analyze_dot_sel_lrhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
+void Lnast::analyze_dot_lrhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
   I(get_type(opr_nid).is_dot() || get_type(opr_nid).is_select());
-  auto &dot_sel_lrhs_table = dot_sel_lrhs_tables[get_name(psts_nid)];
+  auto &dot_lrhs_table = dot_lrhs_tables[get_name(psts_nid)];
 
   if (get_type(opr_nid).is_dot() and has_attribute_bits(opr_nid)) {
-    dot_sel_lrhs_table[opr_nid] = false;
+    dot_lrhs_table[opr_nid] = false;
     fmt::print("dot/sel:{} is rhs\n", get_name(get_first_child(opr_nid)));
     return;
   }
@@ -180,11 +204,11 @@ void Lnast::analyze_dot_sel_lrhs_handle_a_statement(const Lnast_nid &psts_nid, c
       //only possible for assign_op
       if (sib_child == get_first_child(sib_nid) and get_name(sib_child) == c0_dot_name) {
         hit = true;
-        dot_sel_lrhs_table[dot_nid] = true;
+        dot_lrhs_table[dot_nid] = true;
         fmt::print("dot/sel:{} is lhs\n", get_name(get_first_child(dot_nid)));
       } else if (get_name(sib_child) == c0_dot_name){
         hit = true;
-        dot_sel_lrhs_table[dot_nid] = false;
+        dot_lrhs_table[dot_nid] = false;
         fmt::print("dot/sel:{} is rhs\n", get_name(get_first_child(dot_nid)));
       }
     }
@@ -192,24 +216,24 @@ void Lnast::analyze_dot_sel_lrhs_handle_a_statement(const Lnast_nid &psts_nid, c
 }
 
 
-void Lnast::analyze_dot_sel_lrhs_if_subtree(const Lnast_nid &if_nid) {
+void Lnast::analyze_dot_lrhs_if_subtree(const Lnast_nid &if_nid) {
   for (const auto &itr_nid : children(if_nid)) {
     if (get_type(itr_nid).is_stmts()) {
       Cnt_rtable if_sts_ssa_rhs_cnt_table;
-      Dot_sel_lrhs_table  if_sts_dot_sel_lrhs_table;
-      dot_sel_lrhs_tables[get_name(itr_nid)] = if_sts_dot_sel_lrhs_table;
+      Dot_lrhs_table  if_sts_dot_lrhs_table;
+      dot_lrhs_tables[get_name(itr_nid)] = if_sts_dot_lrhs_table;
 
       for (const auto &opr_nid : children(itr_nid)) {
         I(!get_type(opr_nid).is_func_def());
         if (get_type(opr_nid).is_if())
-          analyze_dot_sel_lrhs_if_subtree(opr_nid);
+          analyze_dot_lrhs_if_subtree(opr_nid);
         else if (get_type(opr_nid).is_dot() || get_type(opr_nid).is_select())
-          analyze_dot_sel_lrhs_handle_a_statement(itr_nid, opr_nid);
+          analyze_dot_lrhs_handle_a_statement(itr_nid, opr_nid);
       }
     } else if (get_type(itr_nid).is_cstmts()) {
       for (const auto &opr_nid : children(itr_nid)){
         if (get_type(opr_nid).is_dot() || get_type(opr_nid).is_select())
-          analyze_dot_sel_lrhs_handle_a_statement(itr_nid, opr_nid);
+          analyze_dot_lrhs_handle_a_statement(itr_nid, opr_nid);
       }
     } else if (get_type(itr_nid).is_phi()){
       //FIXME->sh: check with phi
@@ -268,7 +292,7 @@ void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
     //handle dot/set which is a rhs
     auto c0_opr      = get_first_child(opr_nid);
     auto c1_opr      = get_sibling_next(c0_opr); // c1 of dot/sel is target_nid
-    if (!is_lhs(psts_nid, opr_nid) and is_special_case_of_dot_sel_rhs(psts_nid, opr_nid)) {
+    if (!is_lhs(psts_nid, opr_nid) and is_special_case_of_dot_rhs(psts_nid, opr_nid)) {
       ssa_rhs_handle_a_operand_special(psts_nid, c1_opr);
     } else if (!is_lhs(psts_nid, opr_nid)) {
       ssa_rhs_handle_a_operand(psts_nid, c1_opr);
@@ -303,8 +327,8 @@ void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
 
 //handle cases: A.foo = A[2] or A.foo = A[1] + A[2] + A.bar; where lhs rhs are both the struct elements;
 //the ssa should be: A_2.foo = A_1[2] or A_6.foo = A_5[1] + A_5[2] + A_5.bar
-bool Lnast::is_special_case_of_dot_sel_rhs(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
-  auto &dot_sel_lrhs_table = dot_sel_lrhs_tables[get_name(psts_nid)];
+bool Lnast::is_special_case_of_dot_rhs(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
+  auto &dot_lrhs_table = dot_lrhs_tables[get_name(psts_nid)];
   I(!is_lhs(psts_nid, opr_nid));
 
   if (opr_nid == get_first_child(psts_nid))
@@ -313,9 +337,9 @@ bool Lnast::is_special_case_of_dot_sel_rhs(const Lnast_nid &psts_nid, const Lnas
   auto prev_sib_nid = get_sibling_prev(opr_nid);
 
   if ((get_type(prev_sib_nid).is_dot() || get_type(prev_sib_nid).is_select())) {
-    if (not dot_sel_lrhs_table[prev_sib_nid]) {
-      return is_special_case_of_dot_sel_rhs(psts_nid, prev_sib_nid);
-    } else if (dot_sel_lrhs_table[prev_sib_nid]) {
+    if (not dot_lrhs_table[prev_sib_nid]) {
+      return is_special_case_of_dot_rhs(psts_nid, prev_sib_nid);
+    } else if (dot_lrhs_table[prev_sib_nid]) {
       return true;
     }
   }
@@ -510,23 +534,13 @@ void Lnast::ssa_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &o
     update_phi_resolve_table(psts_nid, target_nid);
     return;
   }
-
-
-  // if (type.is_dot() || type.is_select()) {
-  //   if (is_lhs(psts_nid, opr_nid)) {
-  //     auto c0_opr      = get_first_child(opr_nid);
-  //     auto c1_opr      = get_sibling_next(c0_opr); // c1 of dot/sel is target_nid
-  //     update_global_lhs_ssa_cnt_table(c1_opr);
-  //     update_phi_resolve_table(psts_nid, c1_opr);
-  //   }
-  // }
 }
 
 bool Lnast::is_lhs(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
-  auto &dot_sel_lrhs_table = dot_sel_lrhs_tables[get_name(psts_nid)];
+  auto &dot_lrhs_table = dot_lrhs_tables[get_name(psts_nid)];
   I(get_type(opr_nid).is_dot() || get_type(opr_nid).is_select());
-  if (dot_sel_lrhs_table.find(opr_nid)!= dot_sel_lrhs_table.end())
-    return dot_sel_lrhs_table[opr_nid];
+  if (dot_lrhs_table.find(opr_nid)!= dot_lrhs_table.end())
+    return dot_lrhs_table[opr_nid];
   I(false);
 }
 
