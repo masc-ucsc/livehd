@@ -46,6 +46,17 @@ to handle classes.
         * https://github.com/taichi-ishitani/tnoc
 * The interface with slang could be through the C++ ASTVisitor in slang or maybe just handling the dumped json
 
+## Lgraph to Yosys JSON
+
+The json format from yosys is used by several tools like nextpnr and netlistsvg. Creating the json interface
+could simplify the interface with yosys too.
+
+Dependence: none
+
+Main features:
+
+* Create a yosysjson pass that generates yosys compatible json files out of Lgraph
+* It may be also interesting to accept yosys json as input. Then, the bridge between yosys and LiveHD could be removed.
 
 ## Hot-Reload Simulation Console
 
@@ -603,6 +614,13 @@ be nice to have. Maybe based on https://github.com/VLSIDA/openram-vagrant-image
     * https://www.jameswhanlon.com/querying-logical-paths-in-a-verilog-design.html
 * It would be cool if subsections (selected) parts can be visualized with something like https://github.com/nturley/netlistsvg
 * The shell may be expanded to support simulation in the future
+
+## SIMD json
+
+LiveHD uses rapidjson in several places. There is a newer SIMD json library that leverages SIMD instructions to perform a faster json parsing. An issue is that SIMD json does not have code generation.
+
+The idea will be to benchmark the difference in speed, if the difference is less than 2x, it may not bet worth having 2 code bases.
+
 
 ## Benchmark API in lgshell
 
