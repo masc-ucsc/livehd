@@ -13,6 +13,7 @@ using Lnast_nid          = mmap_lib::Tree_index;
 using Phi_rtable         = std::map<std::string_view, Lnast_nid>; //rtable = resolve_table
 using Cnt_rtable         = absl::flat_hash_map<std::string_view, int8_t>;
 using Dot_sel_lrhs_table = absl::flat_hash_map<Lnast_nid, bool>;
+using Tuple_var_table        = absl::flat_hash_set<std::string_view>;
 
 //tricky old C macro to avoid redundant code from function overloadings
 #define CREATE_LNAST_NODE(type) \
@@ -113,21 +114,28 @@ private:
   void      update_global_lhs_ssa_cnt_table      (const Lnast_nid &target_nid);
   int8_t    check_rhs_cnt_table_parents_chain    (const Lnast_nid &psts_nid, const Lnast_nid &target_key);
   void      update_rhs_ssa_cnt_table             (const Lnast_nid &psts_nid, const Lnast_nid &target_key);
-  void      determine_dot_sel_lrhs               (const Lnast_nid &psts_nid);
-  void      determine_dot_sel_lrhs_if_subtree    (const Lnast_nid &if_nid);
-  void      determine_dot_sel_lrhs_handle_a_statement (const Lnast_nid &psts_nid, const Lnast_nid &opr_nid);
+  void      analyze_dot_sel_lrhs               (const Lnast_nid &psts_nid);
+  void      analyze_dot_sel_lrhs_if_subtree    (const Lnast_nid &if_nid);
+  void      analyze_dot_sel_lrhs_handle_a_statement (const Lnast_nid &psts_nid, const Lnast_nid &opr_nid);
 
   bool      has_attribute_bits                   (const Lnast_nid &opr_nid);
   bool      is_special_case_of_dot_sel_rhs       (const Lnast_nid &psts_nid,  const Lnast_nid &opr_nid);
   void      ssa_rhs_handle_a_operand             (const Lnast_nid &gpsts_nid, const Lnast_nid &opd_nid); //gpsts = grand parent
   void      ssa_rhs_handle_a_operand_special     (const Lnast_nid &gpsts_nid, const Lnast_nid &opd_nid);
 
+  // tuple operator process
+  void      trans_tuple_opr                    (const Lnast_nid &pats_nid); // from dot/sel to tuple_add/get
+  void      trans_tuple_opr_if_subtree         (const Lnast_nid &if_nid); 
+  void      trans_tuple_opr_handle_a_statement (const Lnast_nid &pats_nid, const Lnast_nid &opr_nid); 
+
+
   absl::flat_hash_map<std::string_view, Phi_rtable>         phi_resolve_tables;
   absl::flat_hash_map<std::string_view, Cnt_rtable>         ssa_rhs_cnt_tables;
-  absl::flat_hash_map<std::string_view, uint8_t>            global_ssa_lhs_cnt_table;
   absl::flat_hash_map<std::string_view, Dot_sel_lrhs_table> dot_sel_lrhs_tables;
+  absl::flat_hash_map<std::string_view, Tuple_var_table>    tuple_var_tables;
 
   Phi_rtable new_added_phi_node_table;
+  absl::flat_hash_map<std::string_view, uint8_t>            global_ssa_lhs_cnt_table;
   Lnast_nid  default_const_nid;
   Lnast_nid  err_var_undefined;
 
