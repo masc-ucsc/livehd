@@ -188,7 +188,7 @@ void Lnast::analyze_dot_lrhs_handle_a_statement(const Lnast_nid &psts_nid, const
   auto &dot_lrhs_table = dot_lrhs_tables[get_name(psts_nid)];
 
   if (get_type(opr_nid).is_dot() and has_attribute_bits(opr_nid)) {
-    dot_lrhs_table[opr_nid] = false;
+    dot_lrhs_table[opr_nid].first = false;
     fmt::print("dot/sel:{} is rhs\n", get_name(get_first_child(opr_nid)));
     return;
   }
@@ -204,11 +204,13 @@ void Lnast::analyze_dot_lrhs_handle_a_statement(const Lnast_nid &psts_nid, const
       //only possible for assign_op
       if (sib_child == get_first_child(sib_nid) and get_name(sib_child) == c0_dot_name) {
         hit = true;
-        dot_lrhs_table[dot_nid] = true;
+        dot_lrhs_table[dot_nid].first = true;
+        dot_lrhs_table[dot_nid].second = sib_nid;
         fmt::print("dot/sel:{} is lhs\n", get_name(get_first_child(dot_nid)));
       } else if (get_name(sib_child) == c0_dot_name){
         hit = true;
-        dot_lrhs_table[dot_nid] = false;
+        dot_lrhs_table[dot_nid].first  = false;
+        dot_lrhs_table[dot_nid].second = Lnast_nid(-1, -1); // rhs dot doesn't need the corresponding assignment nid
         fmt::print("dot/sel:{} is rhs\n", get_name(get_first_child(dot_nid)));
       }
     }
@@ -337,9 +339,9 @@ bool Lnast::is_special_case_of_dot_rhs(const Lnast_nid &psts_nid, const Lnast_ni
   auto prev_sib_nid = get_sibling_prev(opr_nid);
 
   if ((get_type(prev_sib_nid).is_dot() || get_type(prev_sib_nid).is_select())) {
-    if (not dot_lrhs_table[prev_sib_nid]) {
+    if (!dot_lrhs_table[prev_sib_nid].first) {
       return is_special_case_of_dot_rhs(psts_nid, prev_sib_nid);
-    } else if (dot_lrhs_table[prev_sib_nid]) {
+    } else if (dot_lrhs_table[prev_sib_nid].first) {
       return true;
     }
   }
@@ -540,7 +542,7 @@ bool Lnast::is_lhs(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
   auto &dot_lrhs_table = dot_lrhs_tables[get_name(psts_nid)];
   I(get_type(opr_nid).is_dot() || get_type(opr_nid).is_select());
   if (dot_lrhs_table.find(opr_nid)!= dot_lrhs_table.end())
-    return dot_lrhs_table[opr_nid];
+    return dot_lrhs_table[opr_nid].first;
   I(false);
 }
 
