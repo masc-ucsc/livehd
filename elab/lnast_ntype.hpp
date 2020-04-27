@@ -29,8 +29,10 @@ public:
     Lnast_ntype_dot,          // .
     Lnast_ntype_logical_and,  // and
     Lnast_ntype_logical_or,   // or
+    Lnast_ntype_logical_not,  // !
     Lnast_ntype_and,          // &
     Lnast_ntype_or,           // |
+    Lnast_ntype_not,          // ~
     Lnast_ntype_xor,          // ^
     Lnast_ntype_plus,
     Lnast_ntype_minus,
@@ -91,8 +93,10 @@ protected:
     "dot",
     "logical_and",
     "logical_or",
+    "logical_not",
     "and",
     "or",
+    "not",
     "xor",
     "plus",
     "minus",
@@ -251,8 +255,10 @@ protected:
     "_",
     "and",
     "or",
+    "not",
     "&",
     "|",
+    "~",
     "^",
     "+",
     "-",
@@ -303,8 +309,10 @@ protected:
     ".", // dot
     "&&", // logical_and
     "||", // logical_or
+    "!",  // logical_not
     "operator&", // and
     "operator|", // or
+    "operator~", // not
     "operator^",
     "operator+",
     "operator-",
@@ -363,8 +371,10 @@ public:
   static Lnast_ntype create_dot()          { return Lnast_ntype(Lnast_ntype_dot); }
   static Lnast_ntype create_logical_and()  { return Lnast_ntype(Lnast_ntype_logical_and); }
   static Lnast_ntype create_logical_or()   { return Lnast_ntype(Lnast_ntype_logical_or); }
+  static Lnast_ntype create_logical_not()  { return Lnast_ntype(Lnast_ntype_logical_not); }
   static Lnast_ntype create_and()          { return Lnast_ntype(Lnast_ntype_and); }
   static Lnast_ntype create_or()           { return Lnast_ntype(Lnast_ntype_or); }
+  static Lnast_ntype create_not()          { return Lnast_ntype(Lnast_ntype_not); }
   static Lnast_ntype create_xor()          { return Lnast_ntype(Lnast_ntype_xor); }
   static Lnast_ntype create_plus()         { return Lnast_ntype(Lnast_ntype_plus); }
   static Lnast_ntype create_minus()        { return Lnast_ntype(Lnast_ntype_minus); }
@@ -425,8 +435,10 @@ public:
   bool is_dot()          const { return val == Lnast_ntype_dot; }
   bool is_logical_and()  const { return val == Lnast_ntype_logical_and; }
   bool is_logical_or()   const { return val == Lnast_ntype_logical_or; }
+  bool is_logical_not()  const { return val == Lnast_ntype_logical_not; }
   bool is_and()          const { return val == Lnast_ntype_and; }
   bool is_or()           const { return val == Lnast_ntype_or; }
+  bool is_not()          const { return val == Lnast_ntype_not; }
   bool is_xor()          const { return val == Lnast_ntype_xor; }
   bool is_plus()         const { return val == Lnast_ntype_plus; }
   bool is_minus()        const { return val == Lnast_ntype_minus; }
@@ -463,7 +475,10 @@ public:
 
   // Super types
   bool is_logical_op()   const { return (val == Lnast_ntype_logical_and) or
-                                        (val == Lnast_ntype_logical_or); }
+                                        (val == Lnast_ntype_logical_or) or 
+                                        (val == Lnast_ntype_logical_not); }
+
+  bool is_unary_op()     const { return (val == Lnast_ntype_not); }
 
   bool is_nary_op()      const { return (val == Lnast_ntype_and) or
                                         (val == Lnast_ntype_or) or

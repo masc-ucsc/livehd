@@ -636,8 +636,10 @@ void Inou_lnast_dfg::setup_lnast_to_lgraph_primitive_type_mapping() {
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_assign]      = Or_Op;
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_logical_and] = And_Op;
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_logical_or]  = Or_Op;
+  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_logical_not] = Not_Op;
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_and]         = And_Op;
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_or]          = Or_Op;
+  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_not]         = Not_Op;
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_xor]         = Xor_Op;
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_plus]        = Sum_Op;
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_minus]       = Sum_Op;
