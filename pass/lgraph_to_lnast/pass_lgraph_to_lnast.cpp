@@ -410,26 +410,11 @@ void Pass_lgraph_to_lnast::attach_binaryop_node(Lnast& lnast, Lnast_nid& parent_
 }
 
 void Pass_lgraph_to_lnast::attach_not_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin &pin) {
-  auto asg_node = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
-  lnast.add_child(asg_node, Lnast_node::create_ref(pin.get_name()));
+  auto not_node = lnast.add_child(parent_node, Lnast_node::create_not("not"));
+  lnast.add_child(not_node, Lnast_node::create_ref(pin.get_name()));
 
   int inp_count = 0;
-  for(const auto inp : pin.get_node().inp_edges()) {
-    auto dpin = inp.driver;
-    //Basically call attach_child, but have to add the "~" in front of the rhs name.
-    if(dpin.get_node().is_graph_io()) {
-      //If the input to the node is from a GraphIO node (it's a module input), add the $ in front.
-      lnast.add_child(asg_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("~$", dpin.get_name()))));
-    } else if(dpin.get_node().get_type().op == U32Const_Op) {
-      lnast.add_child(asg_node, Lnast_node::create_const(
-                                 lnast.add_string(absl::StrCat("~", dpin.get_node().get_type_const_value()))));
-    } else {
-      lnast.add_child(asg_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("~", dpin.get_name()))));
-    }
-    //attach_child(lnast, asg_node, dpin);
-    inp_count++;
-  }
-  I(inp_count == 1);
+  attach_children_to_node(lnast, not_node, pin);
 }
 
 void Pass_lgraph_to_lnast::attach_join_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin &pin) {
@@ -636,7 +621,7 @@ void Pass_lgraph_to_lnast::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_
   lnast.add_child(func_call_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("T", temp_var_count))));
   temp_var_count++;
   //func_name
-  lnast.add_child(func_call_node, Lnast_node::create_ref("FIXME_FNAME"));
+  lnast.add_child(func_call_node, Lnast_node::create_ref(lnast.add_string(pin.get_node().debug_name())));//"FIXME_FNAME"));
   //arguments (just use tuple created above)
   //NOTE: Below, we do not use temp_var_count, we use tuple_temp_holder (so we can reference tuple name).
   lnast.add_child(func_call_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("T", tuple_temp_holder))));
@@ -672,7 +657,8 @@ void Pass_lgraph_to_lnast::attach_child(Lnast& lnast, Lnast_nid& op_node, const 
     //If the input to the node is from a GraphIO node (it's a module input), add the $ in front.
     lnast.add_child(op_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("$", dpin.get_name()))));
   } else if(dpin.get_node().get_type().op == U32Const_Op) {
-    lnast.add_child(op_node, Lnast_node::create_const(lnast.add_string(std::to_string(dpin.get_node().get_type_const_value()))));
+    lnast.add_child(op_node, Lnast_node::create_const(
+                              lnast.add_string(absl::StrCat("0d", dpin.get_node().get_type_const_value()))));
   } else {
     lnast.add_child(op_node, Lnast_node::create_ref(dpin.get_name()));
   }
