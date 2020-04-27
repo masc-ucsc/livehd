@@ -100,4 +100,6 @@ digraph {
  24->317;
  25 [label=<const, default_const>];
  10->25;
+ 26 [label=<error_flag, err_var_undefined>];
+ 10->26;
 }
