@@ -19,7 +19,7 @@ public:
       std::list<std::tuple<uint8_t, Rule_id, Token_entry>> loc_list;
 
       int failed = 0;
-      int64_t sub_cnt = 0;
+      uint64_t sub_cnt = 0;
 
       if(!CHECK_RULE(&Prp_test_class::rule_start)){
           failed = 1;
@@ -39,49 +39,16 @@ public:
       ast = nullptr;
     }
     void ast_handler(){
-      std::string rule_name;
+      int i = 0;
       for(const auto &it:ast->depth_preorder(ast->get_root())) {
         auto node = ast->get_data(it);
         auto token_text = scan_text(node.token_entry);
         if(token_text != ""){
           tree_traversal_tokens.push_back(token_text);
         }
-        tree_traversal_rules.push_back(rule_id_to_string(node.rule_id));
-        fmt::print("Rule name: {}, Token text: {}, Tree level: {}\n", rule_id_to_string(node.rule_id), scan_text(node.token_entry), it.level);
+        tree_traversal_rules.emplace_back(rule_id_to_string(node.rule_id));
+        fmt::print("Rule name: {}, Token text: {}, Tree level: {}\n", tree_traversal_rules.back(), scan_text(node.token_entry), it.level);
       }
-    }
-
-    inline uint8_t check_function(uint8_t (Prp::*rule)(std::list<std::tuple<uint8_t, Rule_id, Token_entry>>&), int64_t *sub_cnt, std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &loc_list){
-      PRINT_LN("Called check_function.\n");
-      uint64_t starting_size = loc_list.size();
-      uint8_t ret = (this->*rule)(loc_list);
-      if(ret == false){
-        return false;
-      }
-
-      if(loc_list.size() > starting_size){
-        (*sub_cnt)++;
-        PRINT_LN("check_function: incremented sub_cnt to {}.\n", *sub_cnt);
-      }
-
-      return ret;
-    }
-
-    inline bool chk_and_consume(Token_id tok, Rule_id rid, int64_t *sub_cnt, std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &loc_list){
-      if(scan_is_token(tok)){
-        if(rid != Prp_invalid){
-          loc_list.push_back(std::make_tuple(2, rid, scan_token()));
-          (*sub_cnt)++;
-          PRINT_LN("chk_and_consume: incremented sub_cnt to {}\n", *sub_cnt);
-        }
-        PRINT_LN("Consuming token {} from rule {}.\n", scan_text(scan_token()), rule_id_to_string(rid));
-    #ifdef DEBUG
-        print_loc_list(loc_list);
-    #endif
-        consume_token();
-        return true;
-      }
-      return false;
     }
   public:
     std::vector<std::string_view> tree_traversal_tokens;
@@ -130,31 +97,30 @@ TEST_F(Prp_test, assignment_expression2){
   tree_traversal_check_tokens.push_back("as");
   tree_traversal_check_tokens.push_back("(");
   tree_traversal_check_tokens.push_back("__bits");
-  tree_traversal_check_tokens.push_back(":=");
+  tree_traversal_check_tokens.push_back("=");
   tree_traversal_check_tokens.push_back("10");
   tree_traversal_check_tokens.push_back(",");
-  tree_traversal_check_tokens.push_back("__foo");
+  tree_traversal_check_tokens.push_back("__bits");
   tree_traversal_check_tokens.push_back("as");
-  tree_traversal_check_tokens.push_back("9");
+  tree_traversal_check_tokens.push_back("10");
   tree_traversal_check_tokens.push_back(")");
 
   tree_traversal_check_rules.push_back("Program");
-  tree_traversal_check_rules.push_back("Code blocks");
   tree_traversal_check_rules.push_back("Assignment expression");
   tree_traversal_check_rules.push_back("Identifier");
   tree_traversal_check_rules.push_back("Assignment operator");
   tree_traversal_check_rules.push_back("Tuple notation");
   tree_traversal_check_rules.push_back("Tuple notation");
-  tree_traversal_check_rules.push_back("RHS expression property");
+  tree_traversal_check_rules.push_back("Assignment expression");
   tree_traversal_check_rules.push_back("Identifier");
+  tree_traversal_check_rules.push_back("Assignment operator");
   tree_traversal_check_rules.push_back("Numerical constant");
   tree_traversal_check_rules.push_back("Tuple notation");
   tree_traversal_check_rules.push_back("Assignment expression");
   tree_traversal_check_rules.push_back("Identifier");
   tree_traversal_check_rules.push_back("Assignment operator");
-  tree_traversal_check_rules.push_back("RHS expression property");
-  tree_traversal_check_rules.push_back("Identifier");
   tree_traversal_check_rules.push_back("Numerical constant");
+  tree_traversal_check_rules.push_back("Tuple notation");
 
   scanner.parse_inline("\%out as (__bits:=10 \n, __bits as 10)\n");
   EXPECT_EQ(tree_traversal_check_tokens, scanner.tree_traversal_tokens);

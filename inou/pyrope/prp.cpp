@@ -917,15 +917,7 @@ uint8_t Prp::rule_identifier(std::list<std::tuple<uint8_t, Rule_id, Token_entry>
   // optional
   SCAN_IS_TOKEN(Token_id_bang, Prp_rule_identifier) || SCAN_IS_TOKEN(Pyrope_id_tilde, Prp_rule_identifier);
   
-  if(SCAN_IS_TOKEN(Token_id_label, Prp_rule_identifier)){
-    PRINT_DBG_AST("Matched rule_identifier; found a label.\n");
-    debug_stat.rules_matched++;
-    if(sub_cnt > 1){
-      loc_list.push_front(std::make_tuple(0, 0, 0));
-      loc_list.push_back(std::make_tuple(1, Prp_rule_identifier, 0));
-    }
-    return 2;
-  }
+  if(SCAN_IS_TOKEN(Token_id_label, Prp_rule_identifier)){ RULE_SUCCESS("Matched rule_identifier; found a label.\n", Prp_rule_identifier); }
   
   if(!(SCAN_IS_TOKEN(Token_id_register, Prp_rule_identifier) || SCAN_IS_TOKEN(Token_id_input, Prp_rule_identifier) || SCAN_IS_TOKEN(Token_id_output, Prp_rule_identifier) || SCAN_IS_TOKEN(Token_id_alnum, Prp_rule_identifier))){ RULE_FAILED("Failed rule_identifier; couldn't find a name.\n"); }
   
@@ -1495,6 +1487,8 @@ inline bool Prp::chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, s
       if((next_pos - cur_pos_end) < 1)
         return false;
     }
+    if(tok == Token_id_comma)
+      check_lb();
     if(rid != Prp_invalid){
       loc_list.push_back(std::make_tuple(2, rid, scan_token()));
       (*sub_cnt)++;
