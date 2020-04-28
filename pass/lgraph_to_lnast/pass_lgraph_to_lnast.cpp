@@ -24,40 +24,40 @@ void Pass_lgraph_to_lnast::setup() {
 Pass_lgraph_to_lnast::Pass_lgraph_to_lnast(const Eprp_var &var) : Pass("pass.lgraph_to_lnast", var) { }
 
 void Pass_lgraph_to_lnast::trans(Eprp_var &var) {
+  Lbench b("pass.lgraph_to_lnast");
+
   Pass_lgraph_to_lnast p(var);
 
   //std::vector<const LGraph *> lgs;
   for (const auto &l : var.lgs) {
-    p.do_trans(l);
+    p.do_trans(l, var);
   }
 }
 
-void Pass_lgraph_to_lnast::do_trans(LGraph *lg) {
-  Lbench b("pass.lgraph_to_lnast");
+/*void Pass_lgraph_to_lnast::do_trans(LGraph *lg) {
 
   //pass_setup(lg);
   bool successful = iterate_over_lg(lg);
   if (!successful) {
     error("Could not properly map LGraph to LNAST\n");//FIXME: Maybe later print out why
   }
-}
+}*/
 
-bool Pass_lgraph_to_lnast::iterate_over_lg(LGraph *lg) {
+void Pass_lgraph_to_lnast::do_trans(LGraph *lg, Eprp_var &var) {
   fmt::print("iterate_over_lg\n");
-  Lnast lnast;
-  lnast.set_root(Lnast_node(Lnast_ntype::create_top(), Token(0, 0, 0, 0, "top")));
-  auto idx_stmts = lnast.add_child(lnast.get_root(), Lnast_node::create_stmts("stmts"));
+  //Lnast lnast("module_name_fixme");//FIXME: Get actual name.
+  std::unique_ptr<Lnast> lnast = std::make_unique<Lnast>("module_name_fixme");
+  lnast->set_root(Lnast_node(Lnast_ntype::create_top(), Token(0, 0, 0, 0, "top")));
+  auto idx_stmts = lnast->add_child(lnast->get_root(), Lnast_node::create_stmts("stmts"));
 
   //handle_io(lg, idx_stmts, lnast);
   initial_tree_coloring(lg);
 
-  begin_transformation(lg, lnast, idx_stmts);
+  begin_transformation(lg, *lnast, idx_stmts);
 
-  lnast.dump();
+  lnast->dump();
 
-  //lnasts.emplace_back(lnast);//FIXME: Need to reinsert this at some point.
-
-  return true;
+  var.add(std::move(lnast));
 }
 
 void Pass_lgraph_to_lnast::initial_tree_coloring(LGraph *lg) {
@@ -252,7 +252,7 @@ void Pass_lgraph_to_lnast::handle_io(LGraph *lg, Lnast_nid& parent_lnast_node, L
    * As an example, if we had an input x that was 7 bits wide, this would be added:
    *     dot             asg
    *   /  |  \         /     \
-   *___C0 $x __bits  ___C0  d7    (note that the $ would be % if it was an output)*/
+   *___C0 $x __bits  ___C0  0d7    (note that the $ would be % if it was an output)*/
 
   lg->each_graph_input([this, &lnast, lg, parent_lnast_node](const Node_pin &pin) {
     //I(pin.has_bitwidth());//FIXME: Not necessarily true for subgraphs?
