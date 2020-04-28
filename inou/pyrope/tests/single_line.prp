@@ -1,2 +1,1 @@
-%out as (__bits:=10
-, __bits as 10)
+x = (b+c) + !x
