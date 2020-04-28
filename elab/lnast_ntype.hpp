@@ -66,6 +66,11 @@ public:
     //group: others
     Lnast_ntype_assert,       // I
     Lnast_ntype_err_flag,     // compile error flag
+
+    //group: compiler internal type
+    Lnast_ntype_tuple_add,
+    Lnast_ntype_tuple_get,
+    Lnast_ntype_tuple_phi_add,
   };
 
 protected:
@@ -129,7 +134,10 @@ protected:
 
     //group: others
     "assert",
-    "error_flag"
+    "error_flag",
+    //group: compiler internal type
+    "tuple_add",
+    "tuple_get",
   };
   static inline std::string_view namemap_cfg[] = {
     "invalid",
@@ -181,6 +189,8 @@ protected:
     "const",
     "attr",
     "I",
+    "tuple_add",
+    "tuple_get",
   };
   static inline std::string_view namemap_pyrope[] = {
     "invalid",
@@ -232,7 +242,9 @@ protected:
     "const",
     "attr",
     "assert",
-    "error_flag"
+    "error_flag",
+    "tuple_add",
+    "tuple_get",
   };
   static inline std::string_view namemap_verilog[] = {
     "invalid",
@@ -286,7 +298,9 @@ protected:
     "const",
     "attr",
     "assert",
-    "error_flag"
+    "error_flag",
+    "tuple_add",
+    "tuple_get",
   };
   static inline std::string_view namemap_cpp[] = {
     "invalid",
@@ -340,7 +354,9 @@ protected:
     "const",
     "attr",
     "assert",
-    "error_flag"
+    "error_flag",
+    "tuple_add",
+    "tuple_get",
   };
 
   Lnast_ntype_int val;
@@ -350,6 +366,7 @@ public:
 
   Lnast_ntype_int get_raw_ntype() const { return val; }
 
+  static Lnast_ntype create_invalid()      { return Lnast_ntype(Lnast_ntype_invalid); }
   static Lnast_ntype create_top()          { return Lnast_ntype(Lnast_ntype_top); }
 
   static Lnast_ntype create_stmts()        { return Lnast_ntype(Lnast_ntype_stmts); }
@@ -405,13 +422,17 @@ public:
 
 
 
-  static Lnast_ntype create_ref()          { return Lnast_ntype(Lnast_ntype_ref); }
-  static Lnast_ntype create_const()        { return Lnast_ntype(Lnast_ntype_const); }
+  static Lnast_ntype create_ref()           { return Lnast_ntype(Lnast_ntype_ref); }
+  static Lnast_ntype create_const()         { return Lnast_ntype(Lnast_ntype_const); }
 
-  static Lnast_ntype create_attr()         { return Lnast_ntype(Lnast_ntype_attr); }
+  static Lnast_ntype create_attr()          { return Lnast_ntype(Lnast_ntype_attr); }
 
-  static Lnast_ntype create_assert()       { return Lnast_ntype(Lnast_ntype_assert); }
-  static Lnast_ntype create_err_flag()     { return Lnast_ntype(Lnast_ntype_err_flag); }
+  static Lnast_ntype create_assert()        { return Lnast_ntype(Lnast_ntype_assert); }
+  static Lnast_ntype create_err_flag()      { return Lnast_ntype(Lnast_ntype_err_flag); }
+
+  static Lnast_ntype create_tuple_add()     { return Lnast_ntype(Lnast_ntype_tuple_add);}
+  static Lnast_ntype create_tuple_get()     { return Lnast_ntype(Lnast_ntype_tuple_get);}
+  static Lnast_ntype create_tuple_phi_add() { return Lnast_ntype(Lnast_ntype_tuple_phi_add) ;}
 
   bool is_invalid()      const { return val == Lnast_ntype_invalid; }
   bool is_top()          const { return val == Lnast_ntype_top; }
@@ -465,13 +486,17 @@ public:
 
 
 
-  bool is_ref()          const { return val == Lnast_ntype_ref; }
-  bool is_const()        const { return val == Lnast_ntype_const; }
+  bool is_ref()           const { return val == Lnast_ntype_ref; }
+  bool is_const()         const { return val == Lnast_ntype_const; }
 
-  bool is_attr()         const { return val == Lnast_ntype_attr; }
+  bool is_attr()          const { return val == Lnast_ntype_attr; }
 
-  bool is_assert()       const { return val == Lnast_ntype_assert; }
-  bool is_err_flag()     const { return val == Lnast_ntype_err_flag; }
+  bool is_assert()        const { return val == Lnast_ntype_assert; }
+  bool is_err_flag()      const { return val == Lnast_ntype_err_flag; }
+
+  bool is_tuple_add()     const { return val == Lnast_ntype_tuple_add; }
+  bool is_tuple_get()     const { return val == Lnast_ntype_tuple_get; }
+  bool is_tuple_phi_add() const { return val == Lnast_ntype_tuple_phi_add; }
 
   // Super types
   bool is_logical_op()   const { return (val == Lnast_ntype_logical_and) or
