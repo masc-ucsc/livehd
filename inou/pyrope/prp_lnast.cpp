@@ -167,11 +167,7 @@ Lnast_node Prp_lnast::eval_rule(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tr
       case Prp_rule_identifier:
         PRINT_DBG_LN("Prp_rule_identifier\n");
         if(node.token_entry == 0){
-          auto idx_unary_op = ast->get_child(idx_start_ast);
-          auto node_op = ast->get_data(idx_unary_op);
-          auto node_id = ast->get_data(ast->get_sibling_next(idx_unary_op));
-          temp_vars.emplace_back(std::string(scan_text(node_op.token_entry)) + std::string(scan_text(node_id.token_entry)));
-          return Lnast_node::create_ref(temp_vars.back());
+          return eval_expression(idx_start_ast, idx_start_ln);
         }
         else
           lnast->add_child(idx_start_ln, Lnast_node::create_ref(get_token(node.token_entry)));
@@ -912,7 +908,13 @@ Lnast_node Prp_lnast::eval_expression(mmap_lib::Tree_index idx_start_ast, mmap_l
     
     if(child_cur_data.token_entry != 0){ // is a leaf
       if(child_cur_data.rule_id == Prp_rule_identifier){ // identifier
-        operand_stack.emplace_back(Lnast_node::create_ref(get_token(child_cur_data.token_entry)));
+        if(scan_text(child_cur_data.token_entry) == "!" || scan_text(child_cur_data.token_entry) == "~"){
+          uint8_t skip_sibs;
+          auto op_node = gen_operator(child_cur, &skip_sibs);
+          operator_stack.emplace_back(op_node);
+        }
+        else
+          operand_stack.emplace_back(Lnast_node::create_ref(get_token(child_cur_data.token_entry)));
       }
       else if(child_cur_data.rule_id == Prp_rule_numerical_constant || child_cur_data.rule_id == Prp_rule_string_constant){
         operand_stack.emplace_back(Lnast_node::create_const(get_token(child_cur_data.token_entry)));
@@ -941,20 +943,21 @@ Lnast_node Prp_lnast::eval_expression(mmap_lib::Tree_index idx_start_ast, mmap_l
     // add as a child of the starting node
     auto idx_operator_ln = lnast->add_child(idx_nxt_ln, *it);
     
-    auto op1 = operand_stack.front();
-    operand_stack.pop_front();
-    auto op2 = operand_stack.front();
-    operand_stack.pop_front();
-    
     // create our lhs variable
     temp_vars.emplace_back(current_temp_var);
     auto lhs = Lnast_node::create_ref(temp_vars.back());
     get_next_temp_var();
     
-    // add both operands and the LHS as a child of the operator
-    lnast->add_child(idx_operator_ln, lhs);
-    lnast->add_child(idx_operator_ln, op1);
-    lnast->add_child(idx_operator_ln, op2);
+    // add both operands and the LHS as a child of the operator unless the operator is a unary operator
+    lnast->add_child(idx_operator_ln, lhs); // LHS node
+    auto op1 = operand_stack.front();
+    operand_stack.pop_front();
+    lnast->add_child(idx_operator_ln, op1); // first operand
+    if(!((*it).type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_not || (*it).type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_logical_not)){
+      auto op2 = operand_stack.front(); // optional second operand
+      operand_stack.pop_front();
+      lnast->add_child(idx_operator_ln, op2);
+    }
     
     while(1){
       if(std::next(it,1) != operator_stack.end()){
@@ -1232,7 +1235,7 @@ inline Lnast_node Prp_lnast::gen_operator(mmap_lib::Tree_index idx, uint8_t *ski
     return Lnast_node();
   }
   if(tid == "xor"){
-    return Lnast_node::create_xor(tid); // FIXME: need logical xor in LNAST
+    return Lnast_node::create_xor(tid);
   }
   if(tid == "or"){
     return Lnast_node::create_logical_or(tid);
@@ -1241,8 +1244,12 @@ inline Lnast_node Prp_lnast::gen_operator(mmap_lib::Tree_index idx, uint8_t *ski
     return Lnast_node::create_logical_and(tid);
   }
   if(tid == "is"){
-    return Lnast_node::create_same(tid); // FIXME: "==" is not "is" operator
+    return Lnast_node::create_same(tid); // WARNING: "==" is not "is" operator?
   }
+  if(tid == "!")
+    return Lnast_node::create_logical_not(tid);
+  if(tid == "~")
+    return Lnast_node::create_not(tid);
   else{
     PRINT_LN("Token id {} is not an operator or not supported.\n", tid);
     return Lnast_node();
@@ -1333,6 +1340,10 @@ std::string Prp_lnast::Lnast_type_to_string(Lnast_ntype type){
       return "attribute";
     case Lnast_ntype::Lnast_ntype_assert:
       return "assert";
+    case Lnast_ntype::Lnast_ntype_not:
+      return "bitwise not";
+    case Lnast_ntype::Lnast_ntype_logical_not:
+      return "logical not";
     default:
       return "unknown type";
   }
@@ -1368,3 +1379,24 @@ inline void Prp_lnast::create_simple_lhs_expr(mmap_lib::Tree_index idx_start_ast
   else
     PRINT_LN("ERROR: simple lhs expression was passed an invalid AST node.\n");
 }
+
+/*
+inline Lnast_node Prp_lnast::create_const_node(mmap_lib::Tree index idx, bool is_string){
+  auto node = ast->get_data(idx);
+  if(is_string){
+    if(node.token_entry){ // this must be a double (") string
+      return Lnast_node::create_const(get_token(node.token_entry));
+    }
+    else{ // merge the single ' string into one token
+      auto idx_cur_string = ast->get_child(idx);
+      // skip the starting '
+      idx_cur_string = get_sibling_next
+      uint64_t string_length = 0;
+      uint64_t string_start = 
+    }
+  }
+  else{ // we need to add the datatype to the token string if it's implicit (decimal only)
+    
+  }
+}
+*/

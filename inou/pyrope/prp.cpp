@@ -100,14 +100,12 @@ uint8_t Prp::rule_if_statement(std::list<std::tuple<uint8_t, Rule_id, Token_entr
   if(!CHECK_RULE(&Prp::rule_empty_scope_colon)){ RULE_FAILED("Failed rule_if_statement; couldn't find an empty_scope_colon.\n"); }
   if(!CHECK_RULE(&Prp::rule_block_body)){ RULE_FAILED("Failed rule_if_statement; couldn't find a block_body.\n"); }
   
-  auto lines_start = cur_line;
-  auto tokens_start = tokens_consumed;
+  UPDATE_PSEUDO_FAIL();
   
   // optional
   check_lb();
   if(!CHECK_RULE(&Prp::rule_else_statement)){
-    cur_line = lines_start;
-    go_back(tokens_consumed - tokens_start);
+    PSEUDO_FAIL();
   }
   
   RULE_SUCCESS("Matched rule_if_statement (with condition).\n", Prp_rule_if_statement);
@@ -445,12 +443,12 @@ uint8_t Prp::rule_scope_declaration(std::list<std::tuple<uint8_t, Rule_id, Token
   if(!CHECK_RULE(&Prp::rule_scope_body)){ RULE_FAILED("Failed rule_scope_declaration; couldn't find a scope body.\n"); }
   
   auto lines_start = cur_line;
-  auto cur_tokens = tokens_consumed;
+  auto tokens_start = tokens_consumed;
   
   // optional
   check_lb();
   if(!CHECK_RULE(&Prp::rule_scope_else)){
-    go_back(tokens_consumed - cur_tokens);
+    go_back(tokens_consumed - tokens_start);
     cur_line = lines_start;
   }
   
@@ -772,17 +770,14 @@ uint8_t Prp::rule_tuple_notation(std::list<std::tuple<uint8_t, Rule_id, Token_en
     
     bool next = true;
     INIT_PSEUDO_FAIL();
-    uint64_t lines_start;
     
     while(next){
       UPDATE_PSEUDO_FAIL();
-      lines_start = cur_line;
       if(!SCAN_IS_TOKEN(Token_id_comma, Prp_rule_tuple_notation)){ next = false; }
       else{
         if(!CHECK_RULE(&Prp::rule_assignment_expression)){
           if(!CHECK_RULE(&Prp::rule_logical_expression)){
             PSEUDO_FAIL();
-            cur_line = lines_start;
             next = false;
           }
           else{
@@ -965,7 +960,26 @@ uint8_t Prp::rule_numerical_constant(std::list<std::tuple<uint8_t, Rule_id, Toke
 uint8_t Prp::rule_string_constant(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list){
   INIT_FUNCTION("rule_string_constant.");
   
-  if(!SCAN_IS_TOKEN(Token_id_string, Prp_rule_string_constant)){ RULE_FAILED("Failed rule_string_constant; couldn't find a double string.\n"); }
+  // option 1: double " string
+  if(!SCAN_IS_TOKEN(Token_id_string, Prp_rule_string_constant)){ 
+    // option 2: single ' string
+    if(!SCAN_IS_TOKEN(Token_id_tick, Prp_rule_string_constant)){ RULE_FAILED("Failed rule_string_constant; couldn't find either a single tick or double tick string.\n"); }
+    bool next = true;
+    while(next){
+      auto start_line = cur_line;
+      check_lb();
+      if(cur_line > start_line) { RULE_FAILED("Failed rule_string_constant (single tick path); found a line break in the middle of the string.\n"); }
+      if(scan_is_end()) { RULE_FAILED("Failed rule_string_constant (single tick path); found the end of the scan before a terminating tick.\n"); }
+      if(SCAN_IS_TOKEN(Token_id_tick, Prp_rule_string_constant)){
+        next = false;
+      }
+      else{ // WARNING: unfortunately, since we cannot easily make SCAN_IS_TOKEN match and add any token to the list, we need this extra code here.
+        loc_list.push_back(std::make_tuple(2, Prp_rule_string_constant, scan_token()));
+        sub_cnt++;
+        consume_token();
+      }
+    }
+  }
   
   RULE_SUCCESS("Matched rule_string_constant.\n", Prp_rule_string_constant);
 }
@@ -1044,19 +1058,16 @@ uint8_t Prp::rule_logical_expression(std::list<std::tuple<uint8_t, Rule_id, Toke
   if(!CHECK_RULE(&Prp::rule_relational_expression)){ RULE_FAILED("Failed rule_logical_expression; couldn't find a relational_expression.\n"); }
   
   bool next = true;
-  uint64_t lines_start;
-  uint64_t tokens_start;
+  INIT_PSEUDO_FAIL();
   
   while(next){
-    lines_start = cur_line;
-    tokens_start = tokens_consumed;
+    UPDATE_PSEUDO_FAIL();
     check_lb();
     if(SCAN_IS_TOKEN(Pyrope_id_or, Prp_rule_logical_expression) || SCAN_IS_TOKEN(Pyrope_id_and, Prp_rule_logical_expression) || SCAN_IS_TOKEN(Pyrope_id_xor, Prp_rule_logical_expression)){
       if(!CHECK_RULE(&Prp::rule_relational_expression)){ RULE_FAILED("Failed rule_logical_expression; couldn't find an answering relational_expression.\n"); }
     }
     else{
-      cur_line = lines_start;
-      go_back(tokens_consumed - tokens_start);
+      PSEUDO_FAIL();
       next = false;
     }
   }
@@ -1070,19 +1081,16 @@ uint8_t Prp::rule_relational_expression(std::list<std::tuple<uint8_t, Rule_id, T
   if(!CHECK_RULE(&Prp::rule_additive_expression)){ RULE_FAILED("Failed rule_relational_expression; couldn't find an additive_expression.\n"); }
   
   bool next = true;
-  uint64_t lines_start;
-  uint64_t tokens_start;
+  INIT_PSEUDO_FAIL();
   
   while(next){
-    lines_start = cur_line;
-    tokens_start = tokens_consumed;
+    UPDATE_PSEUDO_FAIL();
     check_lb();
     if(SCAN_IS_TOKEN(Token_id_le, Prp_rule_relational_expression) || SCAN_IS_TOKEN(Token_id_ge, Prp_rule_relational_expression) || SCAN_IS_TOKEN(Token_id_lt, Prp_rule_relational_expression) || SCAN_IS_TOKEN(Token_id_gt, Prp_rule_relational_expression) || SCAN_IS_TOKEN(Token_id_same, Prp_rule_relational_expression) || SCAN_IS_TOKEN(Token_id_diff, Prp_rule_relational_expression) || SCAN_IS_TOKEN(Pyrope_id_is, Prp_rule_relational_expression)){
       if(!CHECK_RULE(&Prp::rule_additive_expression)){ RULE_FAILED("Failed Prp_rule_relational_expression; couldn't find an answering additive_expression.\n"); }
     }
     else{
-      cur_line = lines_start;
-      go_back(tokens_consumed - tokens_start);
+      PSEUDO_FAIL();
       next = false;
     }
   }
@@ -1098,12 +1106,10 @@ uint8_t Prp::rule_additive_expression(std::list<std::tuple<uint8_t, Rule_id, Tok
   bool next = true;
   bool found_op = false;
   
-  uint64_t lines_start;
-  uint64_t tokens_start;
+  INIT_PSEUDO_FAIL();
   
   while(next){
-    lines_start = cur_line;
-    tokens_start = tokens_consumed;
+    UPDATE_PSEUDO_FAIL();
     check_lb();
     if(SCAN_IS_TOKEN(Token_id_plus, Prp_rule_additive_expression)){ // can be +, ++, or +*
       // optional
@@ -1119,8 +1125,7 @@ uint8_t Prp::rule_additive_expression(std::list<std::tuple<uint8_t, Rule_id, Tok
         found_op = true;
       }
       else{
-        cur_line = lines_start;
-        go_back(tokens_consumed - tokens_start);
+        PSEUDO_FAIL();
         next = false;
       }
     }
@@ -1132,8 +1137,7 @@ uint8_t Prp::rule_additive_expression(std::list<std::tuple<uint8_t, Rule_id, Tok
         found_op = true;
       }
       else{
-        cur_line = lines_start;
-        go_back(tokens_consumed - tokens_start);
+        PSEUDO_FAIL();
         next = false;
       }
     }
@@ -1144,8 +1148,7 @@ uint8_t Prp::rule_additive_expression(std::list<std::tuple<uint8_t, Rule_id, Tok
       found_op = true;
     }
     else{
-      cur_line = lines_start;
-      go_back(tokens_consumed - tokens_start);
+      PSEUDO_FAIL();
       next = false;
     }
     if(found_op){
@@ -1155,7 +1158,6 @@ uint8_t Prp::rule_additive_expression(std::list<std::tuple<uint8_t, Rule_id, Tok
     }
   }
   // optional
-  INIT_PSEUDO_FAIL();
   UPDATE_PSEUDO_FAIL();
   
   if(SCAN_IS_TOKEN(Token_id_dot, Prp_rule_additive_expression)){
@@ -1178,19 +1180,16 @@ uint8_t Prp::rule_bitwise_expression(std::list<std::tuple<uint8_t, Rule_id, Toke
   
   bool next = true;
   
-  uint64_t lines_start;
-  uint64_t tokens_start;
+  INIT_PSEUDO_FAIL();
   
   while(next){
-    lines_start = cur_line;
-    tokens_start = tokens_consumed;
+    UPDATE_PSEUDO_FAIL();
     check_lb();
     if(SCAN_IS_TOKEN(Token_id_or, Prp_rule_bitwise_expression) || SCAN_IS_TOKEN(Token_id_and, Prp_rule_bitwise_expression) || SCAN_IS_TOKEN(Token_id_xor, Prp_rule_bitwise_expression)){
       if(!CHECK_RULE(&Prp::rule_multiplicative_expression)){ RULE_FAILED("Failed rule_bitwise_expression; couldn't find an answering multiplicative expression.\n"); }
     }
     else{
-      cur_line = lines_start;
-      go_back(tokens_consumed - tokens_start);
+      PSEUDO_FAIL();
       next = false; 
     }
   }
@@ -1204,19 +1203,16 @@ uint8_t Prp::rule_multiplicative_expression(std::list<std::tuple<uint8_t, Rule_i
   if(!CHECK_RULE(&Prp::rule_unary_expression)){ RULE_FAILED("Failed rule_multiplicative_expression; couldn't find a unary_expression.\n"); }
   
   bool next = true;
-  uint64_t lines_start;
-  uint64_t tokens_start;
+  INIT_PSEUDO_FAIL();
   
   while(next){
-    lines_start = cur_line;
-    tokens_start = tokens_consumed;
+    UPDATE_PSEUDO_FAIL();
     check_lb();
     if(SCAN_IS_TOKEN(Token_id_mult, Prp_rule_multiplicative_expression) || SCAN_IS_TOKEN(Token_id_div, Prp_rule_multiplicative_expression)){
       if(!CHECK_RULE(&Prp::rule_unary_expression)){ RULE_FAILED("Failed rule_multiplicative_expression; couldn't find an answering unary expression.\n"); }
     }
     else{
-      cur_line = lines_start;
-      go_back(tokens_consumed - tokens_start);
+      PSEUDO_FAIL();
       next = false;
     }
   }
@@ -1416,7 +1412,7 @@ bool Prp::unconsume_token(){
   PRINT_DBG_AST("Unconsuming token: ");
   debug_stat.tokens_unconsumed++;
   tokens_consumed--;
-#ifdef DEBUG
+#ifdef DEBUG_AST
   bool ok = scan_prev();
   dump_token();
   return ok;
@@ -1505,7 +1501,7 @@ inline bool Prp::chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, s
       PRINT_DBG_AST("chk_and_consume: incremented sub_cnt to {}\n", *sub_cnt);
     }
     PRINT_DBG_AST("Consuming token {} from rule {}.\n", scan_text(scan_token()), rule_id_to_string(rid));
-#ifdef DEBUG
+#ifdef DEBUG_AST
     print_loc_list(loc_list);
 #endif
     if(scan_line() == cur_line){
@@ -1736,7 +1732,7 @@ std::string Prp::tok_id_to_string(Token_id tok){
   }
 }
 
-#ifdef DEBUG
+#ifdef DEBUG_AST
 inline void Prp::print_loc_list(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &loc_list){
   int i = 0;
   for(auto it = loc_list.begin(); it != loc_list.end(); it++){

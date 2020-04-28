@@ -93,13 +93,11 @@
     go_back(tokens_consumed-starting_tokens); \
     cur_line = starting_line; \
     debug_stat.rules_failed++; \
-    std::list<std::tuple<uint8_t, Rule_id, Token_entry>>().swap(loc_list); \
     return false
 #else
 #define RULE_FAILED(...) \
     go_back(tokens_consumed-starting_tokens); \
     cur_line = starting_line; \
-    std::list<std::tuple<uint8_t, Rule_id, Token_entry>>().swap(loc_list); \
     return false
 #endif
 
@@ -116,7 +114,6 @@
     loc_list.push_back(std::make_tuple(1, rule, 0)); \
   } \
   pass_list.splice(pass_list.end(), loc_list); \
-  std::list<std::tuple<uint8_t, Rule_id, Token_entry>>().swap(loc_list); \
   return true
 #else
 #define RULE_SUCCESS(message, rule) \
@@ -125,7 +122,6 @@
     loc_list.push_back(std::make_tuple(1, rule, 0)); \
   } \
   pass_list.splice(pass_list.end(), loc_list); \
-  std::list<std::tuple<uint8_t, Rule_id, Token_entry>>().swap(loc_list); \
   return true
 #endif
 
@@ -133,15 +129,18 @@
 
 #define INIT_PSEUDO_FAIL() \
   uint64_t cur_tokens; \
-  uint64_t cur_loc_list_size 
+  uint64_t cur_loc_list_size; \
+  uint64_t lines_start
 
 #define UPDATE_PSEUDO_FAIL() \
   cur_tokens = tokens_consumed; \
-  cur_loc_list_size = loc_list.size() 
+  cur_loc_list_size = loc_list.size(); \
+  lines_start = cur_line
 
 #define PSEUDO_FAIL() \
   go_back(tokens_consumed - cur_tokens); \
-  loc_list.resize(cur_loc_list_size) 
+  loc_list.resize(cur_loc_list_size); \
+  cur_line = lines_start
   
 // control
 constexpr Token_id Pyrope_id_if     = 128;
