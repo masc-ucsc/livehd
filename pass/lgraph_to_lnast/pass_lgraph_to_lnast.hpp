@@ -10,7 +10,7 @@ class Pass_lgraph_to_lnast : public Pass {
 protected:
   uint64_t           temp_var_count = 0;
 
-  void do_trans(LGraph *g, Eprp_var &var);
+  void        do_trans(LGraph *g, Eprp_var &var, std::string_view module_name);
 
   void        initial_tree_coloring(LGraph *g);
   void        begin_transformation(LGraph *g, Lnast& lnast, Lnast_nid& ln_node);

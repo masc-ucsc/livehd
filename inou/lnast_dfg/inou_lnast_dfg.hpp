@@ -12,6 +12,7 @@
 #include "likely.hpp"
 #include "lnast_parser.hpp"
 #include "pass_bitwidth.hpp"
+#include "pass_lgraph_to_lnast.hpp"
 
 class Inou_lnast_dfg : public Pass {
 private:
@@ -31,6 +32,7 @@ private:
 protected:
   void                  setup_memblock();
   std::vector<LGraph *> do_tolg();
+  std::vector<LGraph *> do_lglnverif_tolg(Eprp_var &var);
   static void           do_resolve_tuples(LGraph *dfg);
   static void           do_reduced_or_elimination(LGraph *dfg);
 
@@ -104,6 +106,7 @@ protected:
   static void tolg(Eprp_var &var);
   static void resolve_tuples(Eprp_var &var);
   static void reduced_or_elimination(Eprp_var &var);
+  static void lglnverif_tolg(Eprp_var &var);
 
 public:
   explicit Inou_lnast_dfg(const Eprp_var &var);

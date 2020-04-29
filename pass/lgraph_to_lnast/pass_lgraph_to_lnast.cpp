@@ -30,8 +30,14 @@ void Pass_lgraph_to_lnast::trans(Eprp_var &var) {
 
   //std::vector<const LGraph *> lgs;
   for (const auto &l : var.lgs) {
-    p.do_trans(l, var);
+    p.do_trans(l, var, l->get_name());
   }
+
+  /*fmt::print("Post LG -> LN:");
+  for (const auto &l : var.lnasts) {
+    fmt::print(" {}", l->get_top_module_name());
+  }
+  fmt::print("\n");*/
 }
 
 /*void Pass_lgraph_to_lnast::do_trans(LGraph *lg) {
@@ -43,14 +49,14 @@ void Pass_lgraph_to_lnast::trans(Eprp_var &var) {
   }
 }*/
 
-void Pass_lgraph_to_lnast::do_trans(LGraph *lg, Eprp_var &var) {
+void Pass_lgraph_to_lnast::do_trans(LGraph *lg, Eprp_var &var, std::string_view module_name) {
   fmt::print("iterate_over_lg\n");
   //Lnast lnast("module_name_fixme");//FIXME: Get actual name.
-  std::unique_ptr<Lnast> lnast = std::make_unique<Lnast>("module_name_fixme");
+  std::unique_ptr<Lnast> lnast = std::make_unique<Lnast>(module_name);
   lnast->set_root(Lnast_node(Lnast_ntype::create_top(), Token(0, 0, 0, 0, "top")));
   auto idx_stmts = lnast->add_child(lnast->get_root(), Lnast_node::create_stmts("stmts"));
 
-  //handle_io(lg, idx_stmts, lnast);
+  handle_io(lg, idx_stmts, *lnast);
   initial_tree_coloring(lg);
 
   begin_transformation(lg, *lnast, idx_stmts);
@@ -193,6 +199,7 @@ void Pass_lgraph_to_lnast::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node,
     fmt::print(" {}", dpin.get_name());
   }
   fmt::print("\n");
+
   switch(pin.get_node().get_type().op) {//Future note to self: when doing src_pins, always check if sources to node are io inputs
     case GraphIO_Op:
     case U32Const_Op:
@@ -272,8 +279,8 @@ void Pass_lgraph_to_lnast::handle_io(LGraph *lg, Lnast_nid& parent_lnast_node, L
         lnast.add_child(idx_asg, Lnast_node::create_const(
                       lnast.add_string( "0d" + std::to_string((uint64_t)(floor(log2(pin.get_bitwidth().e.max))+1)) )));
       }
-
-      lnast.dump();
+    } else {
+      fmt::print("input {} has no bitwidth\n", pin.get_name());
     }
   });
 
@@ -295,8 +302,6 @@ void Pass_lgraph_to_lnast::handle_io(LGraph *lg, Lnast_nid& parent_lnast_node, L
         lnast.add_child(idx_asg, Lnast_node::create_const(
                       lnast.add_string( "0d" + std::to_string((uint64_t)(floor(log2(pin.get_bitwidth().e.max))+1)) )));
       }
-
-      lnast.dump();
     }
   });
 }
