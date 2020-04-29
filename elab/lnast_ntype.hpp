@@ -138,6 +138,7 @@ protected:
     //group: compiler internal type
     "tuple_add",
     "tuple_get",
+    "tuple_phi_add",
   };
   static inline std::string_view namemap_cfg[] = {
     "invalid",
@@ -191,6 +192,7 @@ protected:
     "I",
     "tuple_add",
     "tuple_get",
+    "tuple_phi_add",
   };
   static inline std::string_view namemap_pyrope[] = {
     "invalid",
@@ -245,6 +247,7 @@ protected:
     "error_flag",
     "tuple_add",
     "tuple_get",
+    "tuple_phi_add",
   };
   static inline std::string_view namemap_verilog[] = {
     "invalid",
@@ -301,6 +304,7 @@ protected:
     "error_flag",
     "tuple_add",
     "tuple_get",
+    "tuple_phi_add",
   };
   static inline std::string_view namemap_cpp[] = {
     "invalid",
@@ -357,6 +361,7 @@ protected:
     "error_flag",
     "tuple_add",
     "tuple_get",
+    "tuple_phi_add",
   };
 
   Lnast_ntype_int val;
