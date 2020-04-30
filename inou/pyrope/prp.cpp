@@ -920,11 +920,6 @@ uint8_t Prp::rule_identifier(std::list<std::tuple<uint8_t, Rule_id, Token_entry>
   // optional
   SCAN_IS_TOKEN(Token_id_bang, Prp_rule_identifier) || SCAN_IS_TOKEN(Pyrope_id_tilde, Prp_rule_identifier);
 
-  I(false); // FIXME Renau: The Token_id_label is gone, FIX this code
-#if 0
-  if(SCAN_IS_TOKEN(Token_id_label, Prp_rule_identifier)){ RULE_SUCCESS("Matched rule_identifier; found a label.\n", Prp_rule_identifier); }
-#endif
-
   if(!(SCAN_IS_TOKEN(Token_id_register, Prp_rule_identifier) || SCAN_IS_TOKEN(Token_id_input, Prp_rule_identifier) || SCAN_IS_TOKEN(Token_id_output, Prp_rule_identifier) || SCAN_IS_TOKEN(Token_id_alnum, Prp_rule_identifier))){ RULE_FAILED("Failed rule_identifier; couldn't find a name.\n"); }
 
   // optional
@@ -1357,7 +1352,6 @@ void Prp::elaborate(){
 
   int failed = 0;
   uint64_t sub_cnt = 0;
-<<<<<<< HEAD
 #ifdef DEBUG_AST
   int i = 0;
   while(!scan_is_end()){
@@ -1367,10 +1361,6 @@ void Prp::elaborate(){
   }
   go_back(i);
 #endif
-  
-=======
-
->>>>>>> 9b8850ed030674ec8eb2f5980333e0593b89c7a3
   if(!CHECK_RULE(&Prp::rule_start)){
       failed = 1;
   }
