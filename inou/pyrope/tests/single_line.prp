@@ -1,1 +1,4 @@
-x = (b+c) + !x
+tupcat = :($tup1, $tup2, %tupconcat):{
+    %tupconcat = $tup1 ++ $tup2
+}
+mytupcat = tupcat((17,4),(9, 20))

@@ -343,15 +343,19 @@ void Prp_lnast::eval_scope_declaration(mmap_lib::Tree_index idx_start_ast, mmap_
   print_tree_index(idx_cond_nxt_ast);
   idx_cond_nxt_ast = ast->get_child(idx_cond_nxt_ast); // :
   print_tree_index(idx_cond_nxt_ast);
-  auto idx_fcall = ast->get_sibling_next(idx_cond_nxt_ast); // scope cond or fcall
-  print_tree_index(idx_fcall);
-  auto idx_cond_ast = ast->get_last_child(idx_fcall); // expression for fcall truth
+  auto idx_fcall = ast->get_sibling_next(idx_cond_nxt_ast); // scope cond or fcall_args or another colon (no arguments)
+  auto fcall_node = ast->get_data(idx_fcall); // it's called fcall, but it could be any of those three
   
+  mmap_lib::Tree_index idx_cond_ast;
+  bool cond_is_expr;
   Lnast_node cond_lhs;
-  bool cond_is_expr = false;
-  if(is_expr(idx_cond_ast)){
-    cond_lhs = eval_rule(idx_cond_ast, idx_start_ln);
-    cond_is_expr = true;
+  if(fcall_node.token_entry == 0){
+    idx_cond_ast = ast->get_last_child(idx_fcall); // expression for fcall truth
+    cond_is_expr = false;
+    if(is_expr(idx_cond_ast)){
+      cond_lhs = eval_rule(idx_cond_ast, idx_start_ln);
+      cond_is_expr = true;
+    }
   }
   
   auto idx_func_root = lnast->add_child(idx_nxt_ln, Lnast_node::create_func_def(""));
@@ -359,7 +363,7 @@ void Prp_lnast::eval_scope_declaration(mmap_lib::Tree_index idx_start_ast, mmap_
   // add the name of the function
   lnast->add_child(idx_func_root, Lnast_node::create_ref(get_token(ast->get_data(idx_nxt_ast).token_entry)));
   
-  // move to either fcall_arg_notation or scope_cond
+  // move to either fcall_arg_notation or scope_cond or just another colon
   if(ast->get_data(idx_fcall).rule_id == Prp_rule_scope_condition){
     // add the condition to the LNAST
     if(cond_is_expr)
@@ -389,7 +393,8 @@ void Prp_lnast::eval_scope_declaration(mmap_lib::Tree_index idx_start_ast, mmap_
   print_tree_index(idx_fcall);
   // translate the scope argument (which can only be fcall arg notation for now)
   // evaluate the fcall arg notation, if present
-  eval_rule(idx_fcall, idx_func_root);
+  if(fcall_node.token_entry == 0)
+    eval_rule(idx_fcall, idx_func_root);
 }
 
 void Prp_lnast::eval_while_statement(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln){

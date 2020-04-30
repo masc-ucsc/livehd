@@ -365,9 +365,12 @@ uint8_t Prp::rule_scope(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pa
   if(SCAN_IS_TOKEN(Token_id_colon, Prp_rule_scope)){
     // optional
     CHECK_RULE(&Prp::rule_scope_condition);
+    PRINT_DBG_AST("{}\n", scan_text());
+    PRINT_DBG_AST("cur_line = {}\n", cur_line);
     if(SCAN_IS_TOKEN(Token_id_colon, Prp_rule_scope)){
+      
       // optional
-      CHECK_RULE(&Prp::rule_logical_expression);
+      //CHECK_RULE(&Prp::rule_logical_expression);
       RULE_SUCCESS("Matched rule_scope.\n", Prp_rule_scope);
     }
   }
@@ -1351,6 +1354,15 @@ void Prp::elaborate(){
   
   int failed = 0;
   uint64_t sub_cnt = 0;
+#ifdef DEBUG_AST
+  int i = 0;
+  while(!scan_is_end()){
+    PRINT_DBG_AST("Token {}: {}\n", i, scan_text());
+    scan_next();
+    i++;
+  }
+  go_back(i);
+#endif
   
   if(!CHECK_RULE(&Prp::rule_start)){
       failed = 1;
