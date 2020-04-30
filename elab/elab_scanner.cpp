@@ -27,7 +27,7 @@ void Elab_scanner::setup_translate() {
 
   translate['{']  = Token_id_ob;
   translate['}']  = Token_id_cb;
-  translate[':']  = Translate_item(Token_id_colon, true);  // Token_id_label
+  translate[':']  = Token_id_colon;
   translate['|']  = Token_id_or;
   translate['.']  = Token_id_dot;
   translate[';']  = Token_id_semicolon;
@@ -50,6 +50,7 @@ void Elab_scanner::setup_translate() {
   translate['\''] = Token_id_tick;
 
   translate['@'] = Token_id_at;
+  translate['~'] = Token_id_tilde;
   translate['$'] = Token_id_dollar;
   translate['%'] = Token_id_percent;
 
@@ -115,9 +116,6 @@ void Elab_scanner::add_token(Token &t) {
       token_list.back().append_token(t);
       return;
     }
-  } else if (last_tok.tok == Token_id_alnum && t.tok == Token_id_colon) {
-    last_tok.tok = Token_id_label;
-    return;
   }
 
   token_list_spaced = false;

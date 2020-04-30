@@ -34,13 +34,15 @@ bool Eprp::rule_path(std::string &path) {
 
 // rule_label_path = label path
 bool Eprp::rule_label_path(const std::string &cmd_line, Eprp_var &next_var) {
-  if (!scan_is_token(Token_id_label)) return false;
+  if (!(scan_is_token(Token_id_alnum) && scan_is_next_token(1, Token_id_colon))) return false;
 
   auto label = scan_text();
 
   ast->add(Eprp_rule_label_path, scan_token());
 
-  scan_next();  // Skip LABEL token
+  scan_next();  // Skip alnum token
+  scan_next();  // Skip colon token
+
   eat_comments();
 
   if (scan_is_end()) {
@@ -95,14 +97,24 @@ bool Eprp::rule_cmd_line(std::string &path) {
   if (!scan_is_token(Token_id_alnum)) return false;
 
   do {
-    absl::StrAppend(&path, scan_text());
+    absl::StrAppend(&path, scan_text()); // Add the Token_id_alnum
     ast->add(Eprp_rule_cmd_line, scan_token());
 
-    bool ok = scan_next();
-    if (!ok) break;
-    eat_comments();
+    bool ok1 = scan_next();
+    if (!ok1) break;
 
-  } while (scan_is_token(Token_id_dot) || scan_is_token(Token_id_alnum));
+    if (!scan_is_token(Token_id_dot))
+      break;
+
+    absl::StrAppend(&path, scan_text());   // Add the Token_id_dot
+    ast->add(Eprp_rule_cmd_line, scan_token());
+
+    bool ok2 = scan_next();
+    if (!ok2) break;
+
+  } while (scan_is_token(Token_id_alnum));
+
+  eat_comments();
 
   return true;
 }
