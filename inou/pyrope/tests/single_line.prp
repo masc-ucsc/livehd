@@ -1,4 +1,1 @@
-tupcat = :when valid:{
-    %tupconcat = $tup1 ++ $tup2
-}
-mytupcat = tupcat((17,4),(9, 20))
+a = 20

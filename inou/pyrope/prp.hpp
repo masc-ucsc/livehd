@@ -19,8 +19,8 @@
 #include "ast.hpp"
 #include "elab_scanner.hpp"
 
-#define OUTPUT_AST
-#define OUTPUT_LN
+//#define OUTPUT_AST
+//#define OUTPUT_LN
 
 //#define DEBUG_AST
 //#define DEBUG_LN

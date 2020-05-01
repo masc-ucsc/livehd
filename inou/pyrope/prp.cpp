@@ -1321,6 +1321,7 @@ inline bool Prp::check_eos(){
   check_lb();
   while(next){
     if(scan_is_token(Token_id_semicolon)){
+      scan_next();
       tokens_consumed++;
       found = true;
       next = true;
@@ -1352,6 +1353,7 @@ void Prp::elaborate(){
 
   int failed = 0;
   uint64_t sub_cnt = 0;
+  /*
 #ifdef DEBUG_AST
   int i = 0;
   while(!scan_is_end()){
@@ -1361,6 +1363,7 @@ void Prp::elaborate(){
   }
   go_back(i);
 #endif
+*/
   if(!CHECK_RULE(&Prp::rule_start)){
       failed = 1;
   }
