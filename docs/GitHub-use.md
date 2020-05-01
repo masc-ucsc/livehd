@@ -145,8 +145,8 @@ https://github.com/masc-ucsc/livehd/fork ) the LiveHD repo.
 5. Synchronize origin/master from main upstream/master
 
     # Add remote upstream (if not added before)
-    git remove -v   
-    # If remove -v did not list upstream. Add them
+    git remote -v   
+    # If remote -v did not list upstream. Add them
     git remote add upstream https://github.com/masc-ucsc/livehd.git
     git fetch upstream
 
