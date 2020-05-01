@@ -26,6 +26,9 @@ bool Eprp::rule_path(std::string &path) {
     if (!ok) break;
     eat_comments();
 
+    if (scan_is_next_token(1, Token_id_colon))
+      break; // stop if file:foo is the next argument list
+
   } while (scan_is_token(Token_id_dot) || scan_is_token(Token_id_alnum) || scan_is_token(Token_id_string) ||
            scan_is_token(Token_id_comma) || scan_is_token(Token_id_div));
 
