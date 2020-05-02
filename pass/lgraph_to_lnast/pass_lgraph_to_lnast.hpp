@@ -4,7 +4,6 @@
 #include "pass.hpp"
 #include "lnast.hpp"
 #include "lgraph.hpp"
-#include "elab_scanner.hpp"
 
 class Pass_lgraph_to_lnast : public Pass {
 protected:
@@ -32,6 +31,7 @@ protected:
 
   void        attach_children_to_node(Lnast& lnast, Lnast_nid& op_node, const Node_pin &pin);
   void        attach_child(Lnast& lnast, Lnast_nid& op_node, const Node_pin &dpin);
+  void        attach_cond_child(Lnast& lnast, Lnast_nid& op_node, const Node_pin &dpin);
 
   void handle_io(LGraph *g, Lnast_nid& parent_lnast_node, Lnast& lnast);
 

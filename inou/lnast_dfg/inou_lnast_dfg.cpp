@@ -125,6 +125,7 @@ void Inou_lnast_dfg::process_ast_stmts(LGraph *dfg, const Lnast_nid &lnidx_stmts
       I(lnast->get_name(lnidx) == "err_var_undefined");
       continue;
     } else {
+      fmt::print("not yet processeable: {}\n", ntype.debug_name_verilog());
       I(false);
       return;
     }
@@ -536,6 +537,7 @@ Node_pin Inou_lnast_dfg::setup_tuple_key(LGraph *dfg, std::string_view key_name)
 // for operator, we must create a new node and dpin as it represents a new gate in the netlist
 Node_pin Inou_lnast_dfg::setup_node_opr_and_lhs(LGraph *dfg, const Lnast_nid &lnidx_opr) {
   const auto c0 = lnast->get_first_child(lnidx_opr);
+  lnast->dump();
   const auto c0_name = lnast->get_sname(c0);
 
   // generally, there won't be a case that the target node point to a output/reg directly
@@ -659,28 +661,24 @@ void Inou_lnast_dfg::lglnverif_tolg(Eprp_var &var) {
   //Take LG[s], translate them to into LNAST[s]
   Pass_lgraph_to_lnast p(var);
   p.trans(var);
-  fmt::print("Pre LN -> LG:");
-  for (const auto &l : var.lnasts) {
-    fmt::print(" {}", l->get_top_module_name());
-  }
-  fmt::print("\n");
 
   //For each new LNAST, translate them to LG[s]
   Inou_lnast_dfg i(var);
-  std::vector<LGraph *> lgs = i.do_lglnverif_tolg(var);
+
+  std::vector<LGraph *> lgs;// = i.do_lglnverif_tolg(var);
+  for (const auto &l : var.lnasts) {
+    lgs.push_back(i.do_lglnverif_tolg(l));
+  }
   var.add(lgs);
 }
 
-std::vector<LGraph *> Inou_lnast_dfg::do_lglnverif_tolg(Eprp_var &var) {
+LGraph* Inou_lnast_dfg::do_lglnverif_tolg(std::shared_ptr<Lnast> llnast) {
   Lbench b("inou.lnast_dfg.do_lglnverif_tolg");
 
-  std::vector<LGraph *> lgs;
-  for (const auto &l : var.lnasts) {
-    LGraph *dfg = LGraph::create("lgdb2", absl::StrCat(l->get_top_module_name(),"_new"), "my_test");
+  std::string module_name = static_cast<std::string>(llnast->get_top_module_name().size(), llnast->get_top_module_name().data());
+  LGraph *dfg = LGraph::create("lgdb2", module_name, "my_test");
 
-    lnast = l;
-    lnast2lgraph(dfg);
-    lgs.push_back(dfg);
-  }
-  return lgs;
+  lnast = llnast;
+  lnast2lgraph(dfg);
+  return dfg;
 }

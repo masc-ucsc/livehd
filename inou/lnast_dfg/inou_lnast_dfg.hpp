@@ -32,7 +32,7 @@ private:
 protected:
   void                  setup_memblock();
   std::vector<LGraph *> do_tolg();
-  std::vector<LGraph *> do_lglnverif_tolg(Eprp_var &var);
+  LGraph*               do_lglnverif_tolg(std::shared_ptr<Lnast> llnast);
   static void           do_resolve_tuples(LGraph *dfg);
   static void           do_reduced_or_elimination(LGraph *dfg);
 
