@@ -1438,7 +1438,8 @@ bool Prp::go_back(uint64_t num_tok){
   return ok;
 }
 
-void Prp::ast_handler(){
+void Prp::ast_handler() {
+#ifdef DEBUG_AST
   std::string rule_name;
   for(const auto &it:ast->depth_preorder(ast->get_root())){
     auto node = ast->get_data(it);
@@ -1446,6 +1447,7 @@ void Prp::ast_handler(){
     auto token_text = scan_text(node.token_entry);
     PRINT_AST("Rule name: {}, Token text: {}, Tree level: {}\n", rule_name, token_text, it.level);
   }
+#endif
 }
 
 void Prp::ast_builder(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &passed_list){
@@ -1489,33 +1491,33 @@ inline uint8_t Prp::check_function(uint8_t (Prp::*rule)(std::list<std::tuple<uin
   return ret;
 }
 
-inline bool Prp::chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &loc_list){
-  if(scan_is_token(tok)){
-    if(tok == Pyrope_id_elif || tok == Pyrope_id_if || tok == Pyrope_id_unique || tok == Pyrope_id_else || tok == Pyrope_id_while || tok == Pyrope_id_punch || tok == Pyrope_id_for || tok == Pyrope_id_when){
-      scan_next();
-      auto next_pos = get_token_pos();
-      scan_prev();
-      auto cur_pos_end = get_token_pos() + scan_text().length();
-      if((next_pos - cur_pos_end) < 1)
-        return false;
-    }
-    if(tok == Token_id_comma)
-      check_lb();
-    if(rid != Prp_invalid){
-      loc_list.push_back(std::make_tuple(2, rid, scan_token()));
-      (*sub_cnt)++;
-      PRINT_DBG_AST("chk_and_consume: incremented sub_cnt to {}\n", *sub_cnt);
-    }
-    PRINT_DBG_AST("Consuming token {} from rule {}.\n", scan_text(scan_token()), rule_id_to_string(rid));
-#ifdef DEBUG_AST
-    print_loc_list(loc_list);
-#endif
-    if(scan_line() == cur_line){
-      consume_token();
-      return true;
-    }
+bool Prp::chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &loc_list){
+  if (!scan_is_token(tok))
+    return false;
+
+  if(tok == Pyrope_id_elif || tok == Pyrope_id_if || tok == Pyrope_id_unique || tok == Pyrope_id_else || tok == Pyrope_id_while || tok == Pyrope_id_punch || tok == Pyrope_id_for || tok == Pyrope_id_when){
+    scan_next();
+    auto next_pos = get_token_pos();
+    scan_prev();
+    auto cur_pos_end = get_token_pos() + scan_text().length();
+    if((next_pos - cur_pos_end) < 1)
+      return false;
+  }else if(tok == Token_id_comma)
+    check_lb();
+
+  if(rid != Prp_invalid){
+    loc_list.push_back(std::make_tuple(2, rid, scan_token()));
+    (*sub_cnt)++;
+    PRINT_DBG_AST("chk_and_consume: incremented sub_cnt to {}\n", *sub_cnt);
   }
-  return false;
+  PRINT_DBG_AST("Consuming token {} from rule {}.\n", scan_text(scan_token()), rule_id_to_string(rid));
+#ifdef DEBUG_AST
+  print_loc_list(loc_list);
+#endif
+  if(scan_line() == cur_line){
+    consume_token();
+    return true;
+  }
 }
 
 inline bool Prp::inc_line_cnt(){

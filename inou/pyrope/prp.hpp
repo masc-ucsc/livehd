@@ -288,7 +288,7 @@ protected:
   std::string tok_id_to_string(Token_id tok);
   
   inline uint8_t check_function(uint8_t (Prp::*rule)(std::list<std::tuple<uint8_t, Rule_id, Token_entry>>&), uint64_t *sub_cnt, std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &loc_list);
-  inline bool chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &loc_list);
+  bool chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &loc_list);
   
   void ast_handler();
   void ast_builder(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &passed_list);
