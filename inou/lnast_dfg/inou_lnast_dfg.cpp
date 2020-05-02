@@ -542,7 +542,6 @@ Node_pin Inou_lnast_dfg::setup_tuple_key(LGraph *dfg, std::string_view key_name)
 // for operator, we must create a new node and dpin as it represents a new gate in the netlist
 Node_pin Inou_lnast_dfg::setup_node_opr_and_lhs(LGraph *dfg, const Lnast_nid &lnidx_opr) {
   const auto c0 = lnast->get_first_child(lnidx_opr);
-  lnast->dump();
   const auto c0_name = lnast->get_sname(c0);
 
   // generally, there won't be a case that the target node point to a output/reg directly
@@ -705,6 +704,7 @@ void Inou_lnast_dfg::tolg_from_pipe(Eprp_var &var) {
 
 
 std::vector<LGraph *> Inou_lnast_dfg::do_tolg_from_pipe(std::shared_ptr<Lnast> ln) {
+    Lbench b("inou.lnast_dfg.do_tolg_from_pipe");
     lnast = ln; //FIXME->sh: should use ln directly? redesign when integrating all front-end
     LGraph *dfg = LGraph::create(path, lnast->get_top_module_name(), "from_front_end_lnast_pipe");
     std::vector<LGraph *> lgs;

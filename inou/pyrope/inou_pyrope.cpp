@@ -32,6 +32,7 @@ void Inou_pyrope::parse_only(Eprp_var &var) {
 }
 
 void Inou_pyrope::parse_to_lnast(Eprp_var &var){
+  Lbench b("inou.pyrope_to_lnast");
   Inou_pyrope p(var);
   Prp_lnast converter;
 
