@@ -33,6 +33,7 @@ protected:
   void                  setup_memblock();
   std::vector<LGraph *> do_tolg();
   LGraph*               do_lglnverif_tolg(std::shared_ptr<Lnast> llnast);
+  std::vector<LGraph *> do_tolg_from_pipe(std::shared_ptr<Lnast> l);
   static void           do_resolve_tuples(LGraph *dfg);
   static void           do_reduced_or_elimination(LGraph *dfg);
 
@@ -107,6 +108,7 @@ protected:
   static void resolve_tuples(Eprp_var &var);
   static void reduced_or_elimination(Eprp_var &var);
   static void lglnverif_tolg(Eprp_var &var);
+  static void tolg_from_pipe(Eprp_var &var);
 
 public:
   explicit Inou_lnast_dfg(const Eprp_var &var);

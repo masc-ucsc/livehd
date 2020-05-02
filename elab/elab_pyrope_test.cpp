@@ -83,9 +83,6 @@ public:
       // dump_token();
       total++;
 
-      if (scan_is_token(Token_id_label)) {
-        fmt::print("LABEL [{}]\n", scan_text());
-      }
       if (scan_is_token(Pyrope_id_if)) {
         fmt::print("IF [{}]\n", scan_text());
       }

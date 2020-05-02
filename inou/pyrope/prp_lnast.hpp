@@ -8,8 +8,9 @@ protected:
   // this is equal to the index of the statements node the current rule adds to
   mmap_lib::Tree_index cur_stmts = mmap_lib::Tree_index(-1,-1);
   
-  std::list<std::string> temp_vars;
+  //std::list<std::string> temp_vars;
   std::string current_temp_var = "___a";
+  uint64_t current_seq = 0;
   void get_next_temp_var();
   
   void translate_code_blocks(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln, Rule_id term_rule=Prp_invalid);
@@ -37,6 +38,8 @@ protected:
   inline bool is_expr(mmap_lib::Tree_index idx);
   inline bool maybe_child_expr(mmap_lib::Tree_index idx);
   inline void create_simple_lhs_expr(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln, Lnast_node rhs_node);
+  inline Lnast_node create_const_node(mmap_lib::Tree_index idx);
+  inline bool is_decimal(std::string_view number);
   std::string Lnast_type_to_string(Lnast_ntype type);
   
   // debugging

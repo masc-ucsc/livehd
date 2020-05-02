@@ -5,6 +5,7 @@
 void setup_inou_lnast_dfg() { Inou_lnast_dfg::setup(); }
 
 void Inou_lnast_dfg::setup() {
+  //FIXME->sh: shoudl be deprecate and use pipe approach
   Eprp_method m1("inou.lnast_dfg.tolg", "parse cfg_text -> build lnast -> generate lgraph", &Inou_lnast_dfg::tolg);
   m1.add_label_required("files", "cfg_text files to process (comma separated)");
   m1.add_label_optional("path", "path to put the lgraph[s]", "lgdb");
@@ -22,6 +23,10 @@ void Inou_lnast_dfg::setup() {
 
   Eprp_method m4("inou.lnast_dfg.lglnast.tolg", "translate lg -> lnast -> lg (for verif. purposes)", &Inou_lnast_dfg::lglnverif_tolg);
   register_inou("lnast_dfg", m4);
+
+  // FIXME->sh: when stable, change method name to just tolg()
+  Eprp_method m5("inou.lnast_dfg.tolg_from_pipe", "Pyrope code-> build lnast -> generate lgraph", &Inou_lnast_dfg::tolg_from_pipe);
+  register_inou("lnast_dfg", m5);
 }
 
 Inou_lnast_dfg::Inou_lnast_dfg(const Eprp_var &var) : Pass("inou.lnast_dfg", var) {
@@ -682,3 +687,32 @@ LGraph* Inou_lnast_dfg::do_lglnverif_tolg(std::shared_ptr<Lnast> llnast) {
   lnast2lgraph(dfg);
   return dfg;
 }
+
+void Inou_lnast_dfg::tolg_from_pipe(Eprp_var &var) {
+  Inou_lnast_dfg p(var);
+  std::vector<LGraph *> lgs;
+  for (const auto &ln : var.lnasts) {
+    lgs = p.do_tolg_from_pipe(ln);
+  }
+
+
+  if (lgs.empty()) {
+    error("failed to generate any lgraph from lnast");
+  } else {
+    var.add(lgs);
+  }
+}
+
+
+std::vector<LGraph *> Inou_lnast_dfg::do_tolg_from_pipe(std::shared_ptr<Lnast> ln) {
+    lnast = ln; //FIXME->sh: should use ln directly? redesign when integrating all front-end
+    LGraph *dfg = LGraph::create(path, lnast->get_top_module_name(), "from_front_end_lnast_pipe");
+    std::vector<LGraph *> lgs;
+    lnast->ssa_trans();
+    lnast2lgraph(dfg);
+    lgs.push_back(dfg);
+
+    return lgs;
+}
+
+

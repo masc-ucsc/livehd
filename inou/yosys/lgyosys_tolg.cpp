@@ -151,7 +151,7 @@ public:
 };
 
 bool operator==(const Pick_ID &lhs, const Pick_ID &rhs) {
-  return lhs.driver == rhs.driver && lhs.driver == rhs.driver && lhs.offset == rhs.offset;
+  return lhs.driver == rhs.driver && lhs.width == rhs.width && lhs.offset == rhs.offset;
 }
 
 absl::flat_hash_map<Pick_ID, Node_pin> picks;  // NODE, not flat to preserve pointer stability
@@ -160,7 +160,9 @@ static Node_pin &create_pick_operator(LGraph *g, Node_pin &driver, int offset, i
   if (offset == 0 && (int)driver.get_bits() == width) return driver;
 
   Pick_ID pick_id(driver, offset, width);
-  if (picks.find(pick_id) != picks.end()) return picks.at(pick_id);
+  if (picks.find(pick_id) != picks.end()) {
+    return picks.at(pick_id);
+  }
 
   auto node        = g->create_node(Pick_Op, width);
   auto driver_pin0 = node.setup_driver_pin();

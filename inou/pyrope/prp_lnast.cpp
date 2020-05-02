@@ -238,11 +238,11 @@ Lnast_node Prp_lnast::eval_rule(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tr
         break;
       case Prp_rule_numerical_constant:
         PRINT_DBG_LN("Prp_rule_numerical_constant\n");
-        lnast->add_child(idx_start_ln, Lnast_node::create_const(get_token(node.token_entry)));
+        lnast->add_child(idx_start_ln, create_const_node(idx_start_ast));
         break;
       case Prp_rule_string_constant:
         PRINT_DBG_LN("Prp_rule_string_constant\n");
-        lnast->add_child(idx_start_ln, Lnast_node::create_const(get_token(node.token_entry)));
+        lnast->add_child(idx_start_ln, create_const_node(idx_start_ast));
         break;
       case Prp_rule_overload_name:
         PRINT_DBG_LN("Prp_rule_overload_name\n");
@@ -292,7 +292,8 @@ void Prp_lnast::eval_fcall_arg_notation(mmap_lib::Tree_index idx_start_ast, mmap
 
   if(cur_stmts == lnast->invalid_index()){
     // create a statements node if we are the direct child of root
-    auto subtree_root = Lnast_node::create_stmts("");
+    auto lnast_seq = lnast->add_string("___SEQ" + std::to_string(current_seq++));
+    auto subtree_root = Lnast_node::create_stmts(lnast_seq);
     idx_nxt_ln = lnast->add_child(idx_nxt_ln, subtree_root);
     cur_stmts = idx_nxt_ln;
   }
@@ -328,7 +329,8 @@ void Prp_lnast::eval_scope_declaration(mmap_lib::Tree_index idx_start_ast, mmap_
 
   if(cur_stmts == lnast->invalid_index()){
     // create a statements node if we are the direct child of root
-    auto subtree_root = Lnast_node::create_stmts("");
+    auto lnast_seq = lnast->add_string("___SEQ" + std::to_string(current_seq++));
+    auto subtree_root = Lnast_node::create_stmts(lnast_seq);
     idx_nxt_ln = lnast->add_child(idx_nxt_ln, subtree_root);
     cur_stmts = idx_nxt_ln;
   }
@@ -338,20 +340,24 @@ void Prp_lnast::eval_scope_declaration(mmap_lib::Tree_index idx_start_ast, mmap_
   
   // first, we need to check whether the condition is an expression
   auto idx_scope_dec = ast->get_last_child(idx_start_ast); // scope dec
-  print_tree_index(idx_scope_dec);
+  //print_tree_index(idx_scope_dec);
   auto idx_cond_nxt_ast = ast->get_child(idx_scope_dec); // scope
-  print_tree_index(idx_cond_nxt_ast);
+  //print_tree_index(idx_cond_nxt_ast);
   idx_cond_nxt_ast = ast->get_child(idx_cond_nxt_ast); // :
-  print_tree_index(idx_cond_nxt_ast);
-  auto idx_fcall = ast->get_sibling_next(idx_cond_nxt_ast); // scope cond or fcall
-  print_tree_index(idx_fcall);
-  auto idx_cond_ast = ast->get_last_child(idx_fcall); // expression for fcall truth
+  //print_tree_index(idx_cond_nxt_ast);
+  auto idx_fcall = ast->get_sibling_next(idx_cond_nxt_ast); // scope cond or fcall_args or another colon (no arguments)
+  auto fcall_node = ast->get_data(idx_fcall); // it's called fcall, but it could be any of those three
   
+  mmap_lib::Tree_index idx_cond_ast;
+  bool cond_is_expr;
   Lnast_node cond_lhs;
-  bool cond_is_expr = false;
-  if(is_expr(idx_cond_ast)){
-    cond_lhs = eval_rule(idx_cond_ast, idx_start_ln);
-    cond_is_expr = true;
+  if(fcall_node.token_entry == 0){
+    idx_cond_ast = ast->get_last_child(idx_fcall); // expression for fcall truth
+    cond_is_expr = false;
+    if(is_expr(idx_cond_ast)){
+      cond_lhs = eval_rule(idx_cond_ast, idx_start_ln);
+      cond_is_expr = true;
+    }
   }
   
   auto idx_func_root = lnast->add_child(idx_nxt_ln, Lnast_node::create_func_def(""));
@@ -359,7 +365,7 @@ void Prp_lnast::eval_scope_declaration(mmap_lib::Tree_index idx_start_ast, mmap_
   // add the name of the function
   lnast->add_child(idx_func_root, Lnast_node::create_ref(get_token(ast->get_data(idx_nxt_ast).token_entry)));
   
-  // move to either fcall_arg_notation or scope_cond
+  // move to either fcall_arg_notation or scope_cond or just another colon
   if(ast->get_data(idx_fcall).rule_id == Prp_rule_scope_condition){
     // add the condition to the LNAST
     if(cond_is_expr)
@@ -378,7 +384,8 @@ void Prp_lnast::eval_scope_declaration(mmap_lib::Tree_index idx_start_ast, mmap_
   idx_nxt_ast = ast->get_last_child(idx_scope_dec);
   
   // create the new statements node
-  auto idx_stmts = lnast->add_child(idx_func_root, Lnast_node::create_stmts(""));
+  auto lnast_seq = lnast->add_string("___SEQ" + std::to_string(current_seq++));
+  auto idx_stmts = lnast->add_child(idx_func_root, Lnast_node::create_stmts(lnast_seq));
   
   // translate the scope statements
   auto old_stmts = cur_stmts;
@@ -386,10 +393,11 @@ void Prp_lnast::eval_scope_declaration(mmap_lib::Tree_index idx_start_ast, mmap_
   translate_code_blocks(idx_nxt_ast, idx_stmts, Prp_rule_scope_body);
   cur_stmts = old_stmts;
   
-  print_tree_index(idx_fcall);
+  //print_tree_index(idx_fcall);
   // translate the scope argument (which can only be fcall arg notation for now)
   // evaluate the fcall arg notation, if present
-  eval_rule(idx_fcall, idx_func_root);
+  if(fcall_node.token_entry == 0)
+    eval_rule(idx_fcall, idx_func_root);
 }
 
 void Prp_lnast::eval_while_statement(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln){
@@ -397,7 +405,8 @@ void Prp_lnast::eval_while_statement(mmap_lib::Tree_index idx_start_ast, mmap_li
 
   if(cur_stmts == lnast->invalid_index()){
     // create a statements node if we are the direct child of root
-    auto subtree_root = Lnast_node::create_stmts("");
+    auto lnast_seq = lnast->add_string("___SEQ" + std::to_string(current_seq++));
+    auto subtree_root = Lnast_node::create_stmts(lnast_seq);
     idx_nxt_ln = lnast->add_child(idx_nxt_ln, subtree_root);
     cur_stmts = idx_nxt_ln;
   }
@@ -428,7 +437,8 @@ void Prp_lnast::eval_while_statement(mmap_lib::Tree_index idx_start_ast, mmap_li
   idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast);
   
   // create statements node
-  auto idx_stmts = lnast->add_child(idx_start_ln, Lnast_node::create_stmts(""));
+  auto lnast_seq = lnast->add_string("___SEQ" + std::to_string(current_seq++));
+  auto idx_stmts = lnast->add_child(idx_start_ln, Lnast_node::create_stmts(lnast_seq));
   
   // evaluate the block inside the while
   auto old_stmts = cur_stmts;
@@ -443,7 +453,8 @@ void Prp_lnast::eval_for_statement(mmap_lib::Tree_index idx_start_ast, mmap_lib:
 
   if(cur_stmts == lnast->invalid_index()){
     // create a statements node if we are the direct child of root
-    auto subtree_root = Lnast_node::create_stmts("");
+    auto lnast_seq = lnast->add_string("___SEQ" + std::to_string(current_seq++));
+    auto subtree_root = Lnast_node::create_stmts(lnast_seq);
     idx_nxt_ln = lnast->add_child(idx_nxt_ln, subtree_root);
     cur_stmts = idx_nxt_ln;
   }
@@ -485,7 +496,8 @@ void Prp_lnast::eval_for_statement(mmap_lib::Tree_index idx_start_ast, mmap_lib:
   auto idx_for_root = lnast->add_child(idx_nxt_ln, Lnast_node::create_for(""));
   
   // add our new statements node
-  auto idx_stmts = lnast->add_child(idx_for_root, Lnast_node::create_stmts(""));
+  auto lnast_seq = lnast->add_string("___SEQ" + std::to_string(current_seq++));
+  auto idx_stmts = lnast->add_child(idx_for_root, Lnast_node::create_stmts(lnast_seq));
   
   // add the name of our index tracking value
   lnast->add_child(idx_for_root, Lnast_node::create_ref(get_token(ast->get_data(idx_for_counter).token_entry)));
@@ -504,7 +516,8 @@ void Prp_lnast::eval_if_statement(mmap_lib::Tree_index idx_start_ast, mmap_lib::
   
   if(cur_stmts == lnast->invalid_index()){
     // create a statements node if we are the direct child of root
-    auto subtree_root = Lnast_node::create_stmts("");
+    auto lnast_seq = lnast->add_string("___SEQ" + std::to_string(current_seq++));
+    auto subtree_root = Lnast_node::create_stmts(lnast_seq);
     idx_nxt_ln = lnast->add_child(idx_nxt_ln, subtree_root);
     cur_stmts = idx_nxt_ln;
   }
@@ -552,7 +565,8 @@ void Prp_lnast::eval_if_statement(mmap_lib::Tree_index idx_start_ast, mmap_lib::
       }
       // eval statements
       // add statements node
-      auto idx_stmts = lnast->add_child(idx_nxt_ln, Lnast_node::create_stmts(""));
+      auto lnast_seq = lnast->add_string("___SEQ" + std::to_string(current_seq++));
+      auto idx_stmts = lnast->add_child(idx_nxt_ln, Lnast_node::create_stmts(lnast_seq));
       auto old_stmts = cur_stmts;
       cur_stmts = idx_stmts;
       // skip { token
@@ -569,7 +583,8 @@ void Prp_lnast::eval_assignment_expression(mmap_lib::Tree_index idx_start_ast, m
   
   if(cur_stmts == lnast->invalid_index()){
     // create a statements node if we are the direct child of root
-    auto subtree_root = Lnast_node::create_stmts("");
+    auto lnast_seq = lnast->add_string("___SEQ" + std::to_string(current_seq++));
+    auto subtree_root = Lnast_node::create_stmts(lnast_seq);
     idx_nxt_ln = lnast->add_child(idx_nxt_ln, subtree_root);
     cur_stmts = idx_nxt_ln;
   }
@@ -606,7 +621,7 @@ void Prp_lnast::eval_assignment_expression(mmap_lib::Tree_index idx_start_ast, m
   mmap_lib::Tree_index idx_assign;
   
   Lnast_node rhs_node;
-  bool rhs_is_leaf = ast->get_data(rhs_ast).token_entry != 0;
+  bool rhs_is_leaf = ast->get_data(rhs_ast).token_entry != 0 || ast->get_data(rhs_ast).rule_id == Prp_rule_string_constant;
   bool rhs_is_tuple = false;
   
   if(is_op_assign){
@@ -662,13 +677,13 @@ void Prp_lnast::eval_range_notation(mmap_lib::Tree_index idx_start_ast, mmap_lib
   
   auto idx_assign1 = lnast->add_child(idx_start_ln, Lnast_node::create_assign(""));
   lnast->add_child(idx_assign1, Lnast_node::create_ref("__range_begin"));
-  lnast->add_child(idx_assign1, Lnast_node::create_const(get_token(ast->get_data(idx_next_ast).token_entry)));
+  lnast->add_child(idx_assign1, create_const_node(idx_next_ast));
   
   idx_next_ast = ast->get_sibling_next(idx_next_ast);
   
   auto idx_assign2 = lnast->add_child(idx_start_ln, Lnast_node::create_assign(""));
   lnast->add_child(idx_assign2, Lnast_node::create_ref("__range_end"));
-  lnast->add_child(idx_assign2, Lnast_node::create_const(get_token(ast->get_data(idx_next_ast).token_entry)));
+  lnast->add_child(idx_assign2, create_const_node(idx_next_ast));
 }
 
 // this function requires that we pass to it the root of the assignment expression or the root of the tuple
@@ -748,8 +763,8 @@ Lnast_node Prp_lnast::eval_tuple(mmap_lib::Tree_index idx_start_ast, mmap_lib::T
   }
   else{ // we are just a tuple_notation
     // add a temporary variable as the tuple name
-    temp_vars.emplace_back(current_temp_var);
-    retnode = Lnast_node::create_ref(temp_vars.back());
+    auto lnast_temp = lnast->add_string(current_temp_var);
+    retnode = Lnast_node::create_ref(lnast_temp);
     lnast->add_child(idx_tup_root, retnode);
     get_next_temp_var();
   }
@@ -848,7 +863,7 @@ Lnast_node Prp_lnast::eval_expression(mmap_lib::Tree_index idx_start_ast, mmap_l
   mmap_lib::Tree_index idx_nxt_ln = cur_stmts;
   PRINT_DBG_LN("eval_expression: starting idx ast: ");
   auto idx_nxt_ast = idx_start_ast;
-  print_tree_index(idx_nxt_ast);
+  //print_tree_index(idx_nxt_ast);
   
   // if we're a real tuple, need to evaluate ourselves that way
   if(ast->get_data(idx_nxt_ast).rule_id == Prp_rule_tuple_notation){
@@ -906,7 +921,7 @@ Lnast_node Prp_lnast::eval_expression(mmap_lib::Tree_index idx_start_ast, mmap_l
     auto child_cur_data = ast->get_data(child_cur);
     PRINT_DBG_LN("Rule name: {}, Token text: {}\n", rule_id_to_string(child_cur_data.rule_id), scan_text(child_cur_data.token_entry));
     
-    if(child_cur_data.token_entry != 0){ // is a leaf
+    if(child_cur_data.token_entry != 0 || child_cur_data.rule_id == Prp_rule_string_constant){ // is a leaf
       if(child_cur_data.rule_id == Prp_rule_identifier){ // identifier
         if(scan_text(child_cur_data.token_entry) == "!" || scan_text(child_cur_data.token_entry) == "~"){
           uint8_t skip_sibs;
@@ -917,7 +932,7 @@ Lnast_node Prp_lnast::eval_expression(mmap_lib::Tree_index idx_start_ast, mmap_l
           operand_stack.emplace_back(Lnast_node::create_ref(get_token(child_cur_data.token_entry)));
       }
       else if(child_cur_data.rule_id == Prp_rule_numerical_constant || child_cur_data.rule_id == Prp_rule_string_constant){
-        operand_stack.emplace_back(Lnast_node::create_const(get_token(child_cur_data.token_entry)));
+        operand_stack.emplace_back(create_const_node(child_cur));
       }
       else if(child_cur_data.rule_id == Prp_rule_tuple_notation){ // WARNING: nested parentheses?
           inside_par ^= true;
@@ -944,8 +959,8 @@ Lnast_node Prp_lnast::eval_expression(mmap_lib::Tree_index idx_start_ast, mmap_l
     auto idx_operator_ln = lnast->add_child(idx_nxt_ln, *it);
     
     // create our lhs variable
-    temp_vars.emplace_back(current_temp_var);
-    auto lhs = Lnast_node::create_ref(temp_vars.back());
+    auto lnast_temp = lnast->add_string(current_temp_var);
+    auto lhs = Lnast_node::create_ref(lnast_temp);
     get_next_temp_var();
     
     // add both operands and the LHS as a child of the operator unless the operator is a unary operator
@@ -1028,8 +1043,8 @@ Lnast_node Prp_lnast::eval_tuple_array_notation(mmap_lib::Tree_index idx_start_a
   auto idx_sel_root = lnast->add_child(idx_nxt_ln, Lnast_node::create_select(""));
   
   // create the LHS temporary variable
-  temp_vars.emplace_back(current_temp_var);
-  auto retnode = Lnast_node::create_ref(temp_vars.back());
+  auto lnast_temp = lnast->add_string(current_temp_var);
+  auto retnode = Lnast_node::create_ref(lnast_temp);
   lnast->add_child(idx_sel_root, retnode);
   get_next_temp_var();
   
@@ -1068,8 +1083,8 @@ Lnast_node Prp_lnast::eval_fcall_explicit(mmap_lib::Tree_index idx_start_ast, mm
       lhs_node = Lnast_node::create_ref(get_token(ast->get_data(ast->get_child(idx_start_ast)).token_entry));
   }
   else{
-    temp_vars.emplace_back(current_temp_var);
-    lhs_node = Lnast_node::create_ref(temp_vars.back());
+    auto lnast_temp = lnast->add_string(current_temp_var);
+    lhs_node = Lnast_node::create_ref(lnast_temp);
     get_next_temp_var();
   }
   
@@ -1095,8 +1110,8 @@ Lnast_node Prp_lnast::eval_tuple_dot_notation(mmap_lib::Tree_index idx_start_ast
   // root is a tuple_dot_notation node
   
   // create the lhs temp variable
-  temp_vars.emplace_back(current_temp_var);
-  auto lhs_node = Lnast_node::create_ref(temp_vars.back());
+  auto lnast_temp = lnast->add_string(current_temp_var);
+  auto lhs_node = Lnast_node::create_ref(lnast_temp);
   get_next_temp_var();
   
   auto idx_dot_root = lnast->add_child(idx_nxt_ln, Lnast_node::create_dot(""));
@@ -1141,8 +1156,8 @@ Lnast_node Prp_lnast::eval_bit_selection_notation(mmap_lib::Tree_index idx_start
   auto idx_sel_root = lnast->add_child(idx_nxt_ln, Lnast_node::create_bit_select(""));
   
   // create the LHS temporary variable
-  temp_vars.emplace_back(current_temp_var);
-  auto retnode = Lnast_node::create_ref(temp_vars.back());
+  auto lnast_temp = lnast->add_string(current_temp_var);
+  auto retnode = Lnast_node::create_ref(lnast_temp);
   lnast->add_child(idx_sel_root, retnode);
   get_next_temp_var();
   
@@ -1222,6 +1237,8 @@ inline Lnast_node Prp_lnast::gen_operator(mmap_lib::Tree_index idx, uint8_t *ski
   }
   if(tid=="==")
     return Lnast_node::create_same(tid);
+  if(tid =="!=")
+    return Lnast_node::create_eq(tid);
   if(tid==">=")
     return Lnast_node::create_ge(tid);
   if(tid=="<=")
@@ -1317,7 +1334,7 @@ std::string Prp_lnast::Lnast_type_to_string(Lnast_ntype type){
     case Lnast_ntype::Lnast_ntype_div:
       return "divide";
     case Lnast_ntype::Lnast_ntype_eq:
-      return "equals";
+      return "not equal";
     case Lnast_ntype::Lnast_ntype_same:
       return "same";
     case Lnast_ntype::Lnast_ntype_lt:
@@ -1380,9 +1397,9 @@ inline void Prp_lnast::create_simple_lhs_expr(mmap_lib::Tree_index idx_start_ast
     PRINT_LN("ERROR: simple lhs expression was passed an invalid AST node.\n");
 }
 
-/*
-inline Lnast_node Prp_lnast::create_const_node(mmap_lib::Tree index idx, bool is_string){
+inline Lnast_node Prp_lnast::create_const_node(mmap_lib::Tree_index idx){
   auto node = ast->get_data(idx);
+  bool is_string = node.rule_id == Prp_rule_string_constant;
   if(is_string){
     if(node.token_entry){ // this must be a double (") string
       return Lnast_node::create_const(get_token(node.token_entry));
@@ -1390,13 +1407,48 @@ inline Lnast_node Prp_lnast::create_const_node(mmap_lib::Tree index idx, bool is
     else{ // merge the single ' string into one token
       auto idx_cur_string = ast->get_child(idx);
       // skip the starting '
-      idx_cur_string = get_sibling_next
+      idx_cur_string = ast->get_sibling_next(idx_cur_string);
       uint64_t string_length = 0;
-      uint64_t string_start = 
+      auto cur_node = ast->get_data(idx_cur_string);
+      auto cur_token = get_token(cur_node.token_entry);
+      std::string new_token_text = "";
+      auto string_start = cur_token.pos1;
+      while(scan_text(cur_node.token_entry) != "\'"){
+        if(string_length != 0){
+          // insert space(s)
+          auto spaces_needed = cur_token.pos1 - (string_start+string_length);
+          new_token_text.append(spaces_needed, ' ');
+        }
+        string_length += cur_token.text.size();
+        absl::StrAppend(&new_token_text, std::string(cur_token.text));
+        idx_cur_string = ast->get_sibling_next(idx_cur_string);
+        cur_node = ast->get_data(idx_cur_string);
+        cur_token = get_token(cur_node.token_entry);
+      }
+      auto new_token_view = lnast->add_string(new_token_text);
+      return Lnast_node::create_const(new_token_view, cur_token.line, string_start, string_start + string_length+1);
     }
   }
   else{ // we need to add the datatype to the token string if it's implicit (decimal only)
-    
+    auto token = get_token(node.token_entry);
+    if(is_decimal(token.text)){
+      auto ln_decimal_view = lnast->add_string(absl::StrCat("0d", token.text));
+      return Lnast_node::create_const(ln_decimal_view, token.line, token.pos1, token.pos2);
+    }
+    else
+      return Lnast_node::create_const(token);
   }
 }
-*/
+
+inline bool Prp_lnast::is_decimal(std::string_view number){
+  if(number.size() < 3) // must have at least 0x/n/b(something), otherwise it must be decimal
+    return true;
+  
+  if(number[0] != '0')
+    return true; // must start with 0;
+  
+  if(number[1] != 'x' || number[1] != 'X' || number[1] == 'b' || number[1] == 'B')
+    return false;
+  
+  return true;
+} 
