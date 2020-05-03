@@ -1,5 +1,2 @@
-a = 20
-
-if a == 20{
-  b = x
-}
+%out as (__bits=10,
+__bits as 10)

@@ -122,7 +122,7 @@ TEST_F(Prp_test, assignment_expression2){
   tree_traversal_check_rules.push_back("Numerical constant");
   tree_traversal_check_rules.push_back("Tuple notation");
 
-  scanner.parse_inline("\%out as (__bits:=10 \n, __bits as 10)\n");
+  scanner.parse_inline("\%out as (__bits=10,__bits as 10)\n");
   EXPECT_EQ(tree_traversal_check_tokens, scanner.tree_traversal_tokens);
   EXPECT_EQ(tree_traversal_check_rules, scanner.tree_traversal_rules);
 }
