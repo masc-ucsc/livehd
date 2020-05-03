@@ -19,8 +19,8 @@
 #include "ast.hpp"
 #include "elab_scanner.hpp"
 
-#define OUTPUT_AST
-#define OUTPUT_LN
+//#define OUTPUT_AST
+//#define OUTPUT_LN
 
 //#define DEBUG_AST
 //#define DEBUG_LN
@@ -69,13 +69,13 @@
     auto starting_tokens = tokens_consumed; \
     auto starting_line = cur_line; \
     uint64_t sub_cnt = 0; \
-    std::list<std::tuple<uint8_t, Rule_id, Token_entry>> loc_list
+    std::list<std::tuple<Rule_id, Token_entry>> loc_list
 #else
     #define INIT_FUNCTION(...) \
     auto starting_tokens = tokens_consumed; \
     auto starting_line = cur_line; \
     uint64_t sub_cnt = 0; \
-    std::list<std::tuple<uint8_t, Rule_id, Token_entry>> loc_list
+    std::list<std::tuple<Rule_id, Token_entry>> loc_list
 #endif
 
 #ifdef DEBUG_AST
@@ -110,16 +110,16 @@
   fmt::print("Rule {} had a sub_cnt of {}.\n", rule_id_to_string(rule), sub_cnt); \
   if(sub_cnt > 1){ \
     fmt::print("Had a subtree of at least size two in rule {} it was of size {}.\n", rule_id_to_string(rule), sub_cnt);\
-    loc_list.push_front(std::make_tuple(0, 0, 0)); \
-    loc_list.push_back(std::make_tuple(1, rule, 0)); \
+    loc_list.push_front(std::make_tuple(0, 0)); \
+    loc_list.push_back(std::make_tuple(rule, 0)); \
   } \
   pass_list.splice(pass_list.end(), loc_list); \
   return true
 #else
 #define RULE_SUCCESS(message, rule) \
   if(sub_cnt > 1){ \
-    loc_list.push_front(std::make_tuple(0, 0, 0)); \
-    loc_list.push_back(std::make_tuple(1, rule, 0)); \
+    loc_list.push_front(std::make_tuple(0, 0)); \
+    loc_list.push_back(std::make_tuple(rule, 0)); \
   } \
   pass_list.splice(pass_list.end(), loc_list); \
   return true
@@ -209,94 +209,87 @@ protected:
   
   void elaborate();
   
-  void eat_comments();
-  
-  uint8_t rule_start(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_code_blocks(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_code_block_int(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_if_statement(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_else_statement(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_for_statement(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_while_statement(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_try_statement(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_punch_format(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_function_pipe(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_fcall_explicit(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_fcall_implicit(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_for_index(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_assignment_expression(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_logical_expression(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_relational_expression(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_additive_expression(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_bitwise_expression(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_multiplicative_expression(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_unary_expression(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_factor(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_tuple_by_notation(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_tuple_notation_no_bracket(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_tuple_notation(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_tuple_notation_with_object(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_range_notation(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_bit_selection_bracket(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_bit_selection_notation(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_tuple_array_bracket(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_tuple_array_notation(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_lhs_expression(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_lhs_var_name(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_rhs_expression_property(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_rhs_expression(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_identifier(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_constant(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_assignment_operator(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_tuple_dot_notation(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_tuple_dot_dot(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_overload_notation(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_overload_name(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_overload_exception(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_scope_else(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_scope_body(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_scope_declaration(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_scope(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_scope_condition(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_scope_argument(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_punch_rhs(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_fcall_arg_notation(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_return_statement(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_compile_check_statement(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_block_body(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_empty_scope_colon(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_assertion_statement(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_negation_statement(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_scope_colon(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_numerical_constant(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_string_constant(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_for_in_notation(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_not_in_implicit(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
-  uint8_t rule_keyword(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_start(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_code_blocks(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_code_block_int(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_if_statement(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_else_statement(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_for_statement(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_while_statement(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_try_statement(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_punch_format(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_function_pipe(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_fcall_explicit(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_fcall_implicit(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_for_index(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_assignment_expression(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_logical_expression(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_relational_expression(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_additive_expression(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_bitwise_expression(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_multiplicative_expression(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_unary_expression(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_factor(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_tuple_by_notation(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_tuple_notation_no_bracket(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_tuple_notation(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_tuple_notation_with_object(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_range_notation(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_bit_selection_bracket(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_bit_selection_notation(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_tuple_array_bracket(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_tuple_array_notation(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_lhs_expression(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_lhs_var_name(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_rhs_expression_property(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_rhs_expression(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_identifier(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_constant(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_assignment_operator(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_tuple_dot_notation(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_tuple_dot_dot(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_overload_notation(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_overload_name(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_overload_exception(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_scope_else(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_scope_body(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_scope_declaration(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_scope(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_scope_condition(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_scope_argument(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_punch_rhs(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_fcall_arg_notation(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_return_statement(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_compile_check_statement(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_block_body(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_empty_scope_colon(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_assertion_statement(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_negation_statement(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_scope_colon(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_numerical_constant(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_string_constant(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_for_in_notation(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_not_in_implicit(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_keyword(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
   
   inline void check_lb();
   inline bool check_eos();
   inline bool inc_line_cnt();
   
-  bool unconsume_token();
-  bool consume_token();
+  inline bool unconsume_token();
+  inline bool consume_token();
   bool go_back(uint64_t num_tok);
-  void ast_up(Rule_id rid);
-  void ast_down();
-  void ast_add(Rule_id rid, Token_entry token);
   std::string rule_id_to_string(Rule_id rid);
   std::string tok_id_to_string(Token_id tok);
   
-  inline uint8_t check_function(uint8_t (Prp::*rule)(std::list<std::tuple<uint8_t, Rule_id, Token_entry>>&), uint64_t *sub_cnt, std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &loc_list);
-  bool chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &loc_list);
+  inline uint8_t check_function(uint8_t (Prp::*rule)(std::list<std::tuple<Rule_id, Token_entry>>&), uint64_t *sub_cnt, std::list<std::tuple<Rule_id, Token_entry>> &loc_list);
+  bool chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, std::list<std::tuple<Rule_id, Token_entry>> &loc_list);
   
   void ast_handler();
-  void ast_builder(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &passed_list);
-  void ast_trimmer();
-  void process_ast();
+  void ast_builder(std::list<std::tuple<Rule_id, Token_entry>> &passed_list);
   
 #ifdef DEBUG_AST
-  void print_loc_list(std::list<std::tuple<uint8_t, Rule_id, Token_entry>> &loc_list);
+  void print_loc_list(std::list<std::tuple<Rule_id, Token_entry>> &loc_list);
   void print_rule_call_stack();
 #endif
   

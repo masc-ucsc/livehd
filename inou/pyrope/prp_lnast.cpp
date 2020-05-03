@@ -1182,10 +1182,12 @@ std::unique_ptr<Lnast> Prp_lnast::prp_ast_to_lnast(std::string_view module_name)
   lnast = std::make_unique<Lnast>(module_name, transfer_memblock_ownership());
 
   lnast->set_root(Lnast_node(Lnast_ntype::create_top()));
-
+  
+  generate_op_map();
+  
   translate_code_blocks(ast->get_root(), lnast->get_root());
 
-#ifdef DEBUG_AST
+#ifdef OUTPUT_LN
   PRINT_LN("AST to LNAST output:\n\n");
 
   std::string rule_name;
@@ -1203,74 +1205,53 @@ std::unique_ptr<Lnast> Prp_lnast::prp_ast_to_lnast(std::string_view module_name)
  */
 
 // TODO: support for union, intersect, question mark and "**" operators
-inline Lnast_node Prp_lnast::gen_operator(mmap_lib::Tree_index idx, uint8_t *skip_sibs){
+Lnast_node Prp_lnast::gen_operator(mmap_lib::Tree_index idx, uint8_t *skip_sibs){
   auto tid = scan_text(ast->get_data(idx).token_entry);
   *skip_sibs = 0;
   if(tid==">"){
     if(scan_text(ast->get_data(ast->get_sibling_next(idx)).token_entry) == ">"){
       *skip_sibs = 1;
-      return Lnast_node::create_shift_right(tid);
+      return operator_map[">>"];
     }
-    return Lnast_node::create_gt(tid);
   }
-  if(tid=="|")
-    return Lnast_node::create_or(tid);
-  if(tid=="/")
-    return Lnast_node::create_div(tid);
-  if(tid=="*")
-    return Lnast_node::create_mult(tid);
   if(tid=="+"){
     if(scan_text(ast->get_data(ast->get_sibling_next(idx)).token_entry) == "+"){
       *skip_sibs = 1;
-      return Lnast_node::create_tuple_concat(tid);
+      return operator_map["++"];
     }
-    return Lnast_node::create_plus(tid);
   }
-  if(tid=="-")
-    return Lnast_node::create_minus(tid);
   if(tid=="<"){
     if(scan_text(ast->get_data(ast->get_sibling_next(idx)).token_entry) == "<"){
       *skip_sibs = 1;
-      return Lnast_node::create_shift_left(tid);
+      return operator_map["<<"];
     }
-    return Lnast_node::create_lt(tid);
   }
-  if(tid=="==")
-    return Lnast_node::create_same(tid);
-  if(tid =="!=")
-    return Lnast_node::create_eq(tid);
-  if(tid==">=")
-    return Lnast_node::create_ge(tid);
-  if(tid=="<=")
-    return Lnast_node::create_le(tid);
-  if(tid=="&")
-    return Lnast_node::create_and(tid);
-  if(tid=="^")
-    return Lnast_node::create_xor(tid);
-  if(tid=="?"){
-    PRINT_LN("qmark is not yet supported.\n");
-    return Lnast_node();
-  }
-  if(tid == "xor"){
-    return Lnast_node::create_xor(tid);
-  }
-  if(tid == "or"){
-    return Lnast_node::create_logical_or(tid);
-  }
-  if(tid == "and"){
-    return Lnast_node::create_logical_and(tid);
-  }
-  if(tid == "is"){
-    return Lnast_node::create_same(tid); // WARNING: "==" is not "is" operator?
-  }
-  if(tid == "!")
-    return Lnast_node::create_logical_not(tid);
-  if(tid == "~")
-    return Lnast_node::create_not(tid);
-  else{
-    PRINT_LN("Token id {} is not an operator or not supported.\n", tid);
-    return Lnast_node();
-  }
+  return operator_map[tid];
+}
+
+void Prp_lnast::generate_op_map(){
+  operator_map[">>"] = Lnast_node::create_shift_right(">>");
+  operator_map[">"] = Lnast_node::create_gt(">");
+  operator_map["<<"] = Lnast_node::create_shift_left("<<");
+  operator_map["<"] = Lnast_node::create_lt("<");
+  operator_map["|"] = Lnast_node::create_or("|");
+  operator_map["/"] = Lnast_node::create_div("/");
+  operator_map["*"] = Lnast_node::create_mult("*");
+  operator_map["++"] = Lnast_node::create_tuple_concat("++");
+  operator_map["+"] = Lnast_node::create_plus("+");
+  operator_map["-"] = Lnast_node::create_minus("-");
+  operator_map["=="] = Lnast_node::create_same("==");
+  operator_map["!="] = Lnast_node::create_eq("!=");
+  operator_map[">="] = Lnast_node::create_ge(">=");
+  operator_map["<="] = Lnast_node::create_le("<=");
+  operator_map["&"] = Lnast_node::create_and("&");
+  operator_map["^"] = Lnast_node::create_xor("^");
+  operator_map["xor"] = Lnast_node::create_xor("xor");
+  operator_map["or"] = Lnast_node::create_logical_or("or");
+  operator_map["and"] = Lnast_node::create_logical_and("and");
+  operator_map["is"] = Lnast_node::create_same("is");
+  operator_map["!"] = Lnast_node::create_logical_not("!");
+  operator_map["~"] = Lnast_node::create_not("~");
 }
 
 std::string Prp_lnast::Lnast_type_to_string(Lnast_ntype type){
