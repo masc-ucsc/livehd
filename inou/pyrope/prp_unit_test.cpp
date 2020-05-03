@@ -16,7 +16,7 @@ public:
       patch_pass(pyrope_keyword);
 
       ast = std::make_unique<Ast_parser>(get_memblock(), Prp_rule);
-      std::list<std::tuple<uint8_t, Rule_id, Token_entry>> loc_list;
+      std::list<std::tuple<Rule_id, Token_entry>> loc_list;
 
       int failed = 0;
       uint64_t sub_cnt = 0;
