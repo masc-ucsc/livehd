@@ -19,7 +19,7 @@
 #include "ast.hpp"
 #include "elab_scanner.hpp"
 
-#define OUTPUT_AST
+//#define OUTPUT_AST
 //#define OUTPUT_LN
 
 //#define DEBUG_AST
@@ -206,6 +206,7 @@ protected:
   std::unique_ptr<Ast_parser> ast;
   absl::flat_hash_map<std::string, Token_id> pyrope_keyword;
   std::vector<std::string> rule_call_stack;
+  uint64_t term_token = 1;
   
   void elaborate();
   

@@ -1386,16 +1386,17 @@ void Prp::elaborate(){
   }
 
   if(failed){
-    PRINT_AST("\nParsing FAILED!\n");
+    fmt::print("\nParsing FAILED!\n");
+    fmt::print("Syntax error at line {}, after last correct token = {}.\n", get_token(term_token).line, scan_text(term_token));
     exit(1);
   }
   else{
-    PRINT_AST("\nParsing SUCCESSFUL!\n");
+    fmt::print("\nParsing SUCCESSFUL!\n");
   }
 
   PRINT_DBG_AST("\nAST Call List\n\n");
   for(auto it = loc_list.begin(); it != loc_list.end(); ++it){
-    PRINT_DBG_AST("Operation: {}, Rule: {}, Token: {}\n", std::get<0>(*it), rule_id_to_string(std::get<1>(*it)), scan_text(std::get<2>(*it)));
+    PRINT_DBG_AST("Rule: {}, Token: {}\n", rule_id_to_string(std::get<0>(*it)), scan_text(std::get<1>(*it)));
   }
 
   PRINT_DBG_AST("\nAST BUILD LOG\n\n");
@@ -1531,9 +1532,16 @@ bool Prp::chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, std::lis
   print_loc_list(loc_list);
 #endif
   if(scan_line() == cur_line){
+    if(tokens_consumed >= term_token){
+      term_token++;
+      consume_token();
+      PRINT_DBG_AST("Incrementing term token to {}\n", term_token);
+      return true;
+    }
     consume_token();
     return true;
   }
+  return false;
 }
 
 inline bool Prp::inc_line_cnt(){
@@ -1760,7 +1768,7 @@ std::string Prp::tok_id_to_string(Token_id tok){
 inline void Prp::print_loc_list(std::list<std::tuple<Rule_id, Token_entry>> &loc_list){
   int i = 0;
   for(auto it = loc_list.begin(); it != loc_list.end(); it++){
-    PRINT_DBG_AST("loc_list[{}]: operation: {} rule: {} token: {}.\n", i++, std::get<0>(*it), rule_id_to_string(std::get<1>(*it)), scan_text(std::get<2>(*it)));
+    PRINT_DBG_AST("loc_list[{}]:rule: {} token: {}.\n", i++, rule_id_to_string(std::get<0>(*it)), scan_text(std::get<1>(*it)));
   }
 }
 
