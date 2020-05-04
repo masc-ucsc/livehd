@@ -683,6 +683,7 @@ LGraph* Inou_lnast_dfg::do_lglnverif_tolg(std::shared_ptr<Lnast> llnast) {
   LGraph *dfg = LGraph::create("lgdb2", module_name, "my_test");
 
   lnast = llnast;
+  lnast->ssa_trans();
   lnast2lgraph(dfg);
   return dfg;
 }

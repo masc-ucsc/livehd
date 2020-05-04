@@ -564,7 +564,7 @@ void Pass_lgraph_to_lnast::attach_simple_node(Lnast& lnast, Lnast_nid& parent_no
       fmt::print("Error: attach_simple_node unknown node type provided\n");
       I(false);
   }
-  lnast.add_child(simple_node, Lnast_node::create_ref(pin.get_name()));
+  lnast.add_child(simple_node, Lnast_node::create_ref(lnast.add_string(pin.get_name())));
 
   //Attach the name of each of the node's inputs to the Lnast operation node we just made.
   attach_children_to_node(lnast, simple_node, pin);
@@ -586,15 +586,17 @@ void Pass_lgraph_to_lnast::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node,
   }
   I(dpins.size() >= 2);
 
+  auto pin_name = lnast.add_string(pin.get_name());
+
   auto if_true_stmt_node = lnast.add_child(if_node, Lnast_node::create_stmts("mux_stmt_true"));
   auto asg_node_true = lnast.add_child(if_true_stmt_node, Lnast_node::create_assign("assign_true"));
-  lnast.add_child(asg_node_true, Lnast_node::create_ref(pin.get_name()));
+  lnast.add_child(asg_node_true, Lnast_node::create_ref(pin_name));
   attach_child(lnast, asg_node_true, dpins.front());
   dpins.pop();
 
   auto if_false_stmt_node = lnast.add_child(if_node, Lnast_node::create_stmts("mux_stmt_false"));
   auto asg_node_false = lnast.add_child(if_false_stmt_node, Lnast_node::create_assign("assign_false"));
-  lnast.add_child(asg_node_false, Lnast_node::create_ref(pin.get_name()));
+  lnast.add_child(asg_node_false, Lnast_node::create_ref(pin_name));
   attach_child(lnast, asg_node_false, dpins.front());
   dpins.pop();
 }
@@ -659,7 +661,7 @@ void Pass_lgraph_to_lnast::attach_child(Lnast& lnast, Lnast_nid& op_node, const 
     lnast.add_child(op_node, Lnast_node::create_const(
                               lnast.add_string(absl::StrCat("0d", dpin.get_node().get_type_const_value()))));
   } else {
-    lnast.add_child(op_node, Lnast_node::create_ref(dpin.get_name()));
+    lnast.add_child(op_node, Lnast_node::create_ref(lnast.add_string(dpin.get_name())));
   }
 }
 
@@ -676,6 +678,6 @@ void Pass_lgraph_to_lnast::attach_cond_child(Lnast& lnast, Lnast_nid& op_node, c
     lnast.add_child(op_node, Lnast_node::create_cond(
                               lnast.add_string(absl::StrCat("0d", dpin.get_node().get_type_const_value()))));
   } else {
-    lnast.add_child(op_node, Lnast_node::create_cond(dpin.get_name()));
+    lnast.add_child(op_node, Lnast_node::create_cond(lnast.add_string(dpin.get_name())));
   }
 }
