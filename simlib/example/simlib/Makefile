@@ -1,7 +1,9 @@
-CXXFLAGS=-std=c++17 -O3 -I../../ -I../../../lbench/include
+CXXFLAGS=-std=c++17 -I../../ -I../../../lbench/include
+CXXFLAGS+=-O3
+#make this -O3 for final optimized run.
 CXXFLAGS+=-g
 CXXFLAGS+=-DSIMLIB_TRACE
-CXXFLAGS+=-DSIMLIB_VCD
+#CXXFLAGS+=-DSIMLIB_VCD
 
 all: sample
 

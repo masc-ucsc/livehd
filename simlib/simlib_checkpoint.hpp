@@ -65,17 +65,17 @@ public:
     fprintf(stderr, "simlib: simulation finished with %lld cycles (%.2f%s)\n", (long)ncycles, (float)speed, ext.c_str());
   }
 
-  void set_checkpoint_cycles(int n) {
+  void set_checkpoint_cycles(int n) {//main.cpp:9
     if (path.empty())
       n = 1000000000;
-
-    n >>= 10;
-    n <<= 10;
+//n=10000
+    n >>= 10;//n is divided by 2pow10//n=9
+    n <<= 10;//new n is multiplied by 2pow10//n=2916
     if (n<1024)
       n = 1024;
-    checkpoint_ncycles = n;
-
-    next_checkpoint_ncycles = ncycles + checkpoint_ncycles;
+    checkpoint_ncycles = n;//checkpoint_ncycles=-1->9216//2ndRun:2048
+//next_checkpoint_ncycles=1000000000
+    next_checkpoint_ncycles = ncycles + checkpoint_ncycles;//19216//2ndRun:31264
   }
 
   size_t calc_bytes() const {
@@ -173,21 +173,41 @@ public:
    }
     for (const auto e:myvector) {
       if(e==cycles) {
-        load_checkpoint(cycles);
+        load_checkpoint(cycles);//checkpoint already available, so load it and return 
         return true;
       }
     }
-
+//if checkpoint is not already saved:
     std::sort (myvector.begin(), myvector.end());
     std::vector<int>::iterator low = std::lower_bound (myvector.begin(), myvector.end(), cycles);
-    int lower_cycles = myvector[low- myvector.begin()-1] ;
-    if(lower_cycles==0) {
+    int lower_cycles = myvector[low- myvector.begin()-1] ;//find the nearest checkpoint of lesser value
+    ncycles=lower_cycles;
+    if(lower_cycles==0) {//if the nearest smaller checkpoint is 0
       advance_reset(reset_ncycles);
-      advance_clock(cycles-reset_ncycles);
-      return true;}
+        checkpoint_ncycles=cycles-ncycles;
+        next_checkpoint_ncycles=ncycles+checkpoint_ncycles;
+      save_intermediate_checkpoint(cycles-reset_ncycles);
+      return true;}//else:
     load_checkpoint(lower_cycles);
-    advance_clock(cycles-lower_cycles);
+        checkpoint_ncycles=cycles-ncycles;
+        next_checkpoint_ncycles=ncycles+checkpoint_ncycles;
+    save_intermediate_checkpoint(cycles-lower_cycles);
+   // need to modify next checkpoint n cycles and ncycles since they control the flow of handling and saving checkpoint;//maybe for next checkpoint_ncycles we can use set checkpoint cycles fu cntion
     return true;
+  }
+  void save_intermediate_checkpoint(uint64_t n=1) {
+    do {
+      int step = n;
+      if (step> next_checkpoint_ncycles)
+        step = next_checkpoint_ncycles;
+
+      n -= step;//SG: if step==n then this line will make n=0 thus making the possibility of n>0 unlikely.
+      next_checkpoint_ncycles -= step;
+      for(auto i=0;i<step;++i)
+        top.cycle();
+      ncycles += step;
+        save_checkpoint();
+    }while(unlikely(n>0));
   }
   void save_checkpoint() {
     printf("Save checkpoint @%lld\n", ncycles);
@@ -198,7 +218,7 @@ public:
       fprintf(stderr,"simlib: ERROR unable to create checkpoint:%s\n",filename.c_str());
       exit(3);
     }
-    int ret = ::ftruncate(fd, calc_bytes());//fs is made of size of top size + signature size
+    int ret = ::ftruncate(fd, calc_bytes());//fd is made of size of top size + signature size//Upon successful completion, ftruncate() and truncate() return 0. Otherwise a -1 is returned, and errno is set to indicate the error.
     if (ret<0) {
       fprintf(stderr,"simlib: ERROR unable to grown checkpoint:%s\n",filename.c_str());
       exit(3);
@@ -217,10 +237,9 @@ public:
   }
 
   void handle_checkpoint() {
-    //std::cout<<"in handle"<<std::endl;
 #ifdef SIMLIB_TRACE
-    auto delta_secs = perf.get_secs()-last_checkpoint_sec;
-    if (true || delta_secs>0.4)
+    auto delta_secs = perf.get_secs()-last_checkpoint_sec;//delta_secs is of type double
+    if ( delta_secs>0.4)
       save_checkpoint();
     else
       last_checkpoint_sec = perf.get_secs();
