@@ -192,19 +192,19 @@ new_git_repository(
 
 #load("@bazel_toolchains//rules:rbe_repo.bzl", "rbe_autoconfig")
 
-git_repository(
-    name = "rules_graal",
-    commit = "acfe667b44c6a8e78178eb39ad10cc5ba2ee954c",
-    remote = "git://github.com/andyscott/rules_graal",
-)
-
-load("@rules_graal//graal:graal_bindist.bzl", "graal_bindist_repository")
-
-graal_bindist_repository(
-    name = "graal",
-    version = "19.3.1",
-    java_version = "11",
-)
+#git_repository(
+#    name = "rules_graal",
+#    commit = "acfe667b44c6a8e78178eb39ad10cc5ba2ee954c",
+#    remote = "git://github.com/andyscott/rules_graal",
+#)
+#
+#load("@rules_graal//graal:graal_bindist.bzl", "graal_bindist_repository")
+#
+#graal_bindist_repository(
+#    name = "graal",
+#    version = "19.3.1",
+#    java_version = "11",
+#)
 
 http_archive(
     name = "com_google_protobuf",
