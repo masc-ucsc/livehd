@@ -18,6 +18,8 @@
 
 #include <type_traits>
 
+#define BENCHSIZE 10000
+
 void random_std_map(int max) {
   Lrand<int> rng;
 
@@ -26,7 +28,7 @@ void random_std_map(int max) {
   std::unordered_map<uint32_t,uint32_t> map;
 
   for (int n = 1; n < 100; ++n) {
-    for (int i = 0; i < 10'000; ++i) {
+    for (int i = 0; i < BENCHSIZE; ++i) {
       int pos = rng.max(max);
       map[pos] = i;
       pos = rng.max(max);
@@ -43,7 +45,7 @@ void random_robin_map(int max) {
   robin_hood::unordered_map<uint32_t,uint32_t> map;
 
   for (int n = 1; n < 100; ++n) {
-    for (int i = 0; i < 10'000; ++i) {
+    for (int i = 0; i < BENCHSIZE; ++i) {
       int pos = rng.max(max);
       map[pos] = i;
       pos = rng.max(max);
@@ -62,7 +64,7 @@ void random_mmap_map(int max) {
     map.clear();
 
   for (int n = 1; n < 100; ++n) {
-    for (int i = 0; i < 10'000; ++i) {
+    for (int i = 0; i < BENCHSIZE; ++i) {
       uint32_t pos = rng.max(max);
       map.set(pos,i);
       pos = rng.max(max);
@@ -77,7 +79,7 @@ void random_mmap_map(int max) {
     map.clear();
 
     for (int n = 1; n < 100; ++n) {
-      for (int i = 0; i < 10'000; ++i) {
+      for (int i = 0; i < BENCHSIZE; ++i) {
         uint32_t pos = rng.max(max);
         map.set(pos,i);
         pos = rng.max(max);
@@ -95,7 +97,7 @@ void random_abseil_map(int max) {
   absl::flat_hash_map<uint32_t,uint32_t> map;
 
   for (int n = 1; n < 100; ++n) {
-    for (int i = 0; i < 10'000; ++i) {
+    for (int i = 0; i < BENCHSIZE; ++i) {
       int pos = rng.max(max);
       map[pos] = i;
       pos = rng.max(max);
@@ -112,7 +114,7 @@ void random_ska_map(int max) {
   ska::flat_hash_map<uint32_t,uint32_t> map;
 
   for (int n = 1; n < 100; ++n) {
-    for (int i = 0; i < 10'000; ++i) {
+    for (int i = 0; i < BENCHSIZE; ++i) {
       int pos = rng.max(max);
       map[pos] = i;
       pos = rng.max(max);
@@ -130,7 +132,7 @@ void random_vector_map(int max) {
   map.resize(max);
 
   for (int n = 1; n < 100; ++n) {
-    for (int i = 0; i < 10'000; ++i) {
+    for (int i = 0; i < BENCHSIZE; ++i) {
       int pos = rng.max(max);
       map[pos] = i;
       pos = rng.max(max);
@@ -149,7 +151,7 @@ void random_mmap_vector(int max) {
     map.reserve(max);
 
     for (int n = 1; n < 100; ++n) {
-      for (int i = 0; i < 10'000; ++i) {
+      for (int i = 0; i < BENCHSIZE; ++i) {
         int pos = rng.max(max);
         map.set(pos, i);
         pos = rng.max(max);
@@ -164,7 +166,7 @@ void random_mmap_vector(int max) {
     map.reserve(max);
 
     for (int n = 1; n < 100; ++n) {
-      for (int i = 0; i < 10'000; ++i) {
+      for (int i = 0; i < BENCHSIZE; ++i) {
         int pos = rng.max(max);
         map.set(pos,i);
         pos = rng.max(max);

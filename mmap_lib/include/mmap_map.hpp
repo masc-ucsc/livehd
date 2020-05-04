@@ -931,14 +931,10 @@ private:
 		// TODO we don't need to move everything, just the last one for the same bucket.
 		mKeyVals[idx].destroy(*this);
 
-		// until we find one that is either empty or has zero offset.
-		auto nextIdx = next_idx(idx);
-
-		while (mInfo[nextIdx] >= 2 * *mInfoInc) {
-			mInfo[idx] = static_cast<uint8_t>(mInfo[nextIdx] - *mInfoInc);
-			mKeyVals[idx] = std::move(mKeyVals[nextIdx]);
-			idx = nextIdx;
-			nextIdx = next_idx(idx);
+		while (mInfo[idx+1] >= 2 * *mInfoInc) {
+			mInfo[idx] = static_cast<uint8_t>(mInfo[idx+1] - *mInfoInc);
+			mKeyVals[idx] = std::move(mKeyVals[idx+1]);
+			++idx;
 		}
 
 		mInfo[idx] = 0;

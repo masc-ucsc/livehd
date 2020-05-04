@@ -68,6 +68,8 @@ TEST_F(Setup_mmap_map_test, string_data) {
       conta--;
     }
     for(auto it:map2) {
+      if(!map.has(it.first))
+        std::cout << "HI\n";
       EXPECT_TRUE(map.has(it.first));
     }
 
