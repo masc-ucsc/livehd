@@ -1,1 +1,8 @@
-x = (b+c)*x
+%out as foo
+
+
+
+
+if (x==y){
+  b = 1
+}

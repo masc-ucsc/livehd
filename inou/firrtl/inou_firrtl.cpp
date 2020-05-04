@@ -110,17 +110,17 @@ void Inou_firrtl::HandleNEQOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnas
   //I(parent_node.is_stmts() | parent_node.is_cstmts());
 
   /* x = neq(a, b) should take graph form:
-   *     equal       asg
+   *     equal        ~
    *    /  |  \     /   \
-   *___F0  a   b   x  ~___F0  */
+   *___F0  a   b   x  ___F0  */
 
   auto idx_eq = lnast->add_child(parent_node, Lnast_node::create_eq("eq2"));
   lnast->add_child(idx_eq, Lnast_node::create_ref(lnast->add_string("___F" + to_string(id_counter))));
   PrintPrimOp(op, "===", idx_eq);
 
-  auto idx_asg = lnast->add_child(parent_node, Lnast_node::create_assign("asg_eq2"));
+  auto idx_asg = lnast->add_child(parent_node, Lnast_node::create_not("asg_neg"));
   lnast->add_child(idx_asg, Lnast_node::create_ref(lnast->add_string(lhs)));
-  lnast->add_child(idx_asg, Lnast_node::create_ref(lnast->add_string("~___F" + to_string(id_counter))));
+  lnast->add_child(idx_asg, Lnast_node::create_ref(lnast->add_string("___F" + to_string(id_counter))));
 
   id_counter += 1;
 }
@@ -128,22 +128,22 @@ void Inou_firrtl::HandleNEQOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnas
 /* Unary operations are handled in a way where (currently) there is no LNAST
  * node type that supports unary ops. Instead, we would want to have an assign
  * node and have the "rhs" child of the assign node be "[op]temp". */
-void Inou_firrtl::HandleUnaryOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, std::string lhs, std::string sop) {
+void Inou_firrtl::HandleUnaryOp(const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, std::string lhs) {
   //I(parent_node.is_stmts() | parent_node.is_cstmts());
 
   /* x = not(y) should take graph form: (xor_/and_/or_reduce all look same just different op)
-   *    asg
+   *     ~
    *   /   \
-   * x     ~y  */
+   * x     y  */
 
-  auto idx_asg = lnast->add_child(parent_node, Lnast_node::create_assign("asg_unary"));
-  lnast->add_child(idx_asg, Lnast_node::create_ref(lnast->add_string(lhs)));
+  auto idx_not = lnast->add_child(parent_node, Lnast_node::create_not("not"));
+  lnast->add_child(idx_not, Lnast_node::create_ref(lnast->add_string(lhs)));
   if ((op.arg_size() == 1) && (op.const__size() == 0)) {
-    std::string arg_string = sop + ReturnExprString(op.arg(0));
-    lnast->add_child(idx_asg, Lnast_node::create_ref(lnast->add_string(arg_string)));
+    std::string arg_string = ReturnExprString(op.arg(0));
+    lnast->add_child(idx_not, Lnast_node::create_ref(lnast->add_string(arg_string)));
   } else if ((op.arg_size() == 0) && (op.const__size() == 1)) {
-    std::string const_string = sop + op.const_(0).value();
-    lnast->add_child(idx_asg, Lnast_node::create_const(lnast->add_string(const_string)));//FIXME(?): Should consts take this form?
+    std::string const_string = op.const_(0).value();
+    lnast->add_child(idx_not, Lnast_node::create_const(lnast->add_string(const_string)));//FIXME(?): Should consts take this form?
   } else {
     cout << "Error in HandleUnaryOp: not correct # of operators given (unary ops should have 1 argument)." << endl;
     assert(false);
@@ -571,7 +571,7 @@ void Inou_firrtl::ListPrimOpInfo(const firrtl::FirrtlPB_Expression_PrimOp& op, L
       break;
 
     } case 15: { //Op_Bit_Not
-      HandleUnaryOp(op, parent_node, lhs, "~");
+      HandleUnaryOp(op, parent_node, lhs);
       break;
 
     } case 16: { //Op_Concat
@@ -624,10 +624,11 @@ void Inou_firrtl::ListPrimOpInfo(const firrtl::FirrtlPB_Expression_PrimOp& op, L
       break;
 
     } case 26: { //Op_Xor_Reduce
-      //auto idx_xorr = lnast->add_child(parent_node, Lnast_node::create_xor("xor_red"));
-      //lnast->add_child(idx_xorr, Lnast_node::create_ref(lnast->add_string(lhs)));
-      //PrintPrimOp(op, ".xorR", idx_xorr);
-      HandleUnaryOp(op, parent_node, lhs, "^");
+      //HandleUnaryOp(op, parent_node, lhs, "^");
+      //break;
+      auto idx_xor = lnast->add_child(parent_node, Lnast_node::create_xor("xorR"));
+      lnast->add_child(idx_xor, Lnast_node::create_ref(lnast->add_string(lhs)));
+      PrintPrimOp(op, " ^ ", idx_xor);
       break;
 
     } case 27: { //Op_Convert
@@ -661,12 +662,18 @@ void Inou_firrtl::ListPrimOpInfo(const firrtl::FirrtlPB_Expression_PrimOp& op, L
       break;
 
     } case 33: { //Op_And_Reduce
-      HandleUnaryOp(op, parent_node, lhs, "&");
-      break;
+      //HandleUnaryOp(op, parent_node, lhs, "&");
+      //break;
+      auto idx_and = lnast->add_child(parent_node, Lnast_node::create_and("andR"));
+      lnast->add_child(idx_and, Lnast_node::create_ref(lnast->add_string(lhs)));
+      PrintPrimOp(op, " & ", idx_and);
 
     } case 34: { //Op_Or_Reduce
-      HandleUnaryOp(op, parent_node, lhs, "|");
-      break;
+      //HandleUnaryOp(op, parent_node, lhs, "|");
+      //break;
+      auto idx_or = lnast->add_child(parent_node, Lnast_node::create_or("orR"));
+      lnast->add_child(idx_or, Lnast_node::create_ref(lnast->add_string(lhs)));
+      PrintPrimOp(op, " | ", idx_or);
 
     } case 35: { //Op_Increase_Precision
       //FIXME: Might need to take one # from front into parens so I know precision bit count

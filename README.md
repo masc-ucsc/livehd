@@ -242,9 +242,10 @@ the following publications. If you are doing research or projects corresponding
 to LiveHD, please send us a notification, we are glad to add your paper.
 
 #### Live techniques 
+1. [LiveSim: A Fast Hot Reload Simulator for HDLs](docs/papers/LiveSim_ISPASS20.pdf), Haven Skinner, Rafael T. Possignolo, Sheng-Hong Wang, and Jose Renau, International Symposium on Performance Analysis of Systems and Software (ISPASS), April 2020. **(Best Paper Nomination)**
 
 1. [SMatch: Structural Matching for Fast Resynthesis in FPGAs](docs/papers/SMatch_DAC19.pdf), Rafael T.
-   Possignolo and Jose Renau, Design Automation Conference (DAC), June 2019
+   Possignolo and Jose Renau, Design Automation Conference (DAC), June 2019.
 
 2. [LiveSynth: Towards an Interactive Synthesis Flow](docs/papers/LiveSynth_DAC17.pdf), Rafael T. Possignolo, and
    Jose Renau, Design Automation Conference (DAC), June 2017.

@@ -5,6 +5,7 @@
 void setup_inou_lnast_dfg() { Inou_lnast_dfg::setup(); }
 
 void Inou_lnast_dfg::setup() {
+  //FIXME->sh: shoudl be deprecate and use pipe approach
   Eprp_method m1("inou.lnast_dfg.tolg", "parse cfg_text -> build lnast -> generate lgraph", &Inou_lnast_dfg::tolg);
   m1.add_label_required("files", "cfg_text files to process (comma separated)");
   m1.add_label_optional("path", "path to put the lgraph[s]", "lgdb");
@@ -20,13 +21,17 @@ void Inou_lnast_dfg::setup() {
   m3.add_label_optional("odir", "output directory for generated verilog files", ".");
   register_inou("lnast_dfg",m3);
 
+  Eprp_method m4("inou.lnast_dfg.lglnast.tolg", "translate lg -> lnast -> lg (for verif. purposes)", &Inou_lnast_dfg::lglnverif_tolg);
+  register_inou("lnast_dfg", m4);
+
+  // FIXME->sh: when stable, change method name to just tolg()
+  Eprp_method m5("inou.lnast_dfg.tolg_from_pipe", "Pyrope code-> build lnast -> generate lgraph", &Inou_lnast_dfg::tolg_from_pipe);
+  register_inou("lnast_dfg", m5);
 }
 
 Inou_lnast_dfg::Inou_lnast_dfg(const Eprp_var &var) : Pass("inou.lnast_dfg", var) {
   setup_lnast_to_lgraph_primitive_type_mapping();
 }
-
-
 
 void Inou_lnast_dfg::tolg(Eprp_var &var) {
   Inou_lnast_dfg p(var);
@@ -125,6 +130,7 @@ void Inou_lnast_dfg::process_ast_stmts(LGraph *dfg, const Lnast_nid &lnidx_stmts
       I(lnast->get_name(lnidx) == "err_var_undefined");
       continue;
     } else {
+      fmt::print("not yet processeable: {}\n", ntype.debug_name_verilog());
       I(false);
       return;
     }
@@ -636,8 +642,10 @@ void Inou_lnast_dfg::setup_lnast_to_lgraph_primitive_type_mapping() {
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_assign]      = Or_Op;
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_logical_and] = And_Op;
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_logical_or]  = Or_Op;
+  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_logical_not] = Not_Op;
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_and]         = And_Op;
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_or]          = Or_Op;
+  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_not]         = Not_Op;
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_xor]         = Xor_Op;
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_plus]        = Sum_Op;
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_minus]       = Sum_Op;
@@ -649,6 +657,62 @@ void Inou_lnast_dfg::setup_lnast_to_lgraph_primitive_type_mapping() {
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_gt]          = GreaterThan_Op;
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_ge]          = GreaterEqualThan_Op;
   // sh_fixme: to be extended ...
+}
+
+void Inou_lnast_dfg::lglnverif_tolg(Eprp_var &var) {
+  //Assumption: Pipe some LG[s] into this command.
+
+  //Take LG[s], translate them to into LNAST[s]
+  Pass_lgraph_to_lnast p(var);
+  p.trans(var);
+
+  //For each new LNAST, translate them to LG[s]
+  Inou_lnast_dfg i(var);
+
+  std::vector<LGraph *> lgs;// = i.do_lglnverif_tolg(var);
+  for (const auto &l : var.lnasts) {
+    lgs.push_back(i.do_lglnverif_tolg(l));
+  }
+  var.add(lgs);
+}
+
+LGraph* Inou_lnast_dfg::do_lglnverif_tolg(std::shared_ptr<Lnast> llnast) {
+  Lbench b("inou.lnast_dfg.do_lglnverif_tolg");
+
+  std::string module_name = static_cast<std::string>(llnast->get_top_module_name().size(), llnast->get_top_module_name().data());
+  LGraph *dfg = LGraph::create("lgdb2", module_name, "my_test");
+
+  lnast = llnast;
+  lnast2lgraph(dfg);
+  return dfg;
+}
+
+void Inou_lnast_dfg::tolg_from_pipe(Eprp_var &var) {
+  Inou_lnast_dfg p(var);
+  std::vector<LGraph *> lgs;
+  for (const auto &ln : var.lnasts) {
+    lgs = p.do_tolg_from_pipe(ln);
+  }
+
+
+  if (lgs.empty()) {
+    error("failed to generate any lgraph from lnast");
+  } else {
+    var.add(lgs);
+  }
+}
+
+
+std::vector<LGraph *> Inou_lnast_dfg::do_tolg_from_pipe(std::shared_ptr<Lnast> ln) {
+    Lbench b("inou.lnast_dfg.do_tolg_from_pipe");
+    lnast = ln; //FIXME->sh: should use ln directly? redesign when integrating all front-end
+    LGraph *dfg = LGraph::create(path, lnast->get_top_module_name(), "from_front_end_lnast_pipe");
+    std::vector<LGraph *> lgs;
+    lnast->ssa_trans();
+    lnast2lgraph(dfg);
+    lgs.push_back(dfg);
+
+    return lgs;
 }
 
 

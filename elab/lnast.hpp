@@ -8,11 +8,12 @@
 // FIXME->sh: need ordered map to guarantee phi-node generation order to be able
 // to test LNAST-SSA, better to use absl::btree_map
 
-/* using Phi_rtable = absl::flat_hash_map<std::string_view, Lnast_nid>; //rtable = resolve_table */
-using Lnast_nid          = mmap_lib::Tree_index;
-using Phi_rtable         = std::map<std::string_view, Lnast_nid>; //rtable = resolve_table
-using Cnt_rtable         = absl::flat_hash_map<std::string_view, int8_t>;
-using Dot_sel_lrhs_table = absl::flat_hash_map<Lnast_nid, bool>;
+/* using Phi_rtable = absl::flat_hash_map<std::string_view, Lnast_nid>; // rtable = resolve_table */
+using Lnast_nid       = mmap_lib::Tree_index;
+using Phi_rtable      = std::map<std::string_view, Lnast_nid>; // rtable = resolve_table
+using Cnt_rtable      = absl::flat_hash_map<std::string_view, int8_t>;
+using Dot_lrhs_table  = absl::flat_hash_map<Lnast_nid, std::pair<bool, Lnast_nid>>;  // for both dot and selection, dot -> (lrhs, related assign node)
+using Tuple_var_table = absl::flat_hash_set<std::string_view>;
 
 //tricky old C macro to avoid redundant code from function overloadings
 #define CREATE_LNAST_NODE(type) \
@@ -39,6 +40,7 @@ struct Lnast_node {
 
   void dump() const;
 
+  CREATE_LNAST_NODE(_invalid)
   CREATE_LNAST_NODE(_top)
   CREATE_LNAST_NODE(_stmts)
   CREATE_LNAST_NODE(_cstmts)
@@ -58,8 +60,10 @@ struct Lnast_node {
   CREATE_LNAST_NODE(_dot)
   CREATE_LNAST_NODE(_logical_and)
   CREATE_LNAST_NODE(_logical_or)
+  CREATE_LNAST_NODE(_logical_not)
   CREATE_LNAST_NODE(_and)
   CREATE_LNAST_NODE(_or)
+  CREATE_LNAST_NODE(_not)
   CREATE_LNAST_NODE(_xor)
   CREATE_LNAST_NODE(_plus)
   CREATE_LNAST_NODE(_minus)
@@ -107,27 +111,41 @@ private:
   Lnast_nid add_phi_node               (const Lnast_nid  &cond_nid, const Lnast_nid &t_nid, const Lnast_nid &f_nid);
   Lnast_nid get_complement_nid            (std::string_view brother_name, const Lnast_nid &psts_nid, bool false_path);
   Lnast_nid check_phi_table_parents_chain (std::string_view brother_name, const Lnast_nid &psts_nid, bool originate_from_csts);
-  void      resolve_ssa_rhs_subs                 (const Lnast_nid &psts_nid);
-  void      update_global_lhs_ssa_cnt_table      (const Lnast_nid &target_nid);
-  int8_t    check_rhs_cnt_table_parents_chain    (const Lnast_nid &psts_nid, const Lnast_nid &target_key);
-  void      update_rhs_ssa_cnt_table             (const Lnast_nid &psts_nid, const Lnast_nid &target_key);
-  void      determine_dot_sel_lrhs               (const Lnast_nid &psts_nid);
-  void      determine_dot_sel_lrhs_if_subtree    (const Lnast_nid &if_nid);
-  void      determine_dot_sel_lrhs_handle_a_statement (const Lnast_nid &psts_nid, const Lnast_nid &opr_nid);
+  void      resolve_ssa_rhs_subs              (const Lnast_nid &psts_nid);
+  void      update_global_lhs_ssa_cnt_table   (const Lnast_nid &target_nid);
+  int8_t    check_rhs_cnt_table_parents_chain (const Lnast_nid &psts_nid, const Lnast_nid &target_key);
+  void      update_rhs_ssa_cnt_table          (const Lnast_nid &psts_nid, const Lnast_nid &target_key);
+  void      analyze_dot_lrhs               (const Lnast_nid &psts_nid);
+  void      analyze_dot_lrhs_if_subtree    (const Lnast_nid &if_nid);
+  void      analyze_dot_lrhs_handle_a_statement (const Lnast_nid &psts_nid, const Lnast_nid &opr_nid);
 
-  bool      has_attribute_bits                   (const Lnast_nid &opr_nid);
-  bool      is_special_case_of_dot_sel_rhs       (const Lnast_nid &psts_nid,  const Lnast_nid &opr_nid);
-  void      ssa_rhs_handle_a_operand             (const Lnast_nid &gpsts_nid, const Lnast_nid &opd_nid); //gpsts = grand parent
-  void      ssa_rhs_handle_a_operand_special     (const Lnast_nid &gpsts_nid, const Lnast_nid &opd_nid);
+  bool      has_attribute_bits               (const Lnast_nid &opr_nid);
+  bool      is_special_case_of_dot_rhs       (const Lnast_nid &psts_nid,  const Lnast_nid &opr_nid);
+  void      ssa_rhs_handle_a_operand         (const Lnast_nid &gpsts_nid, const Lnast_nid &opd_nid); //gpsts = grand parent
+  void      ssa_rhs_handle_a_operand_special (const Lnast_nid &gpsts_nid, const Lnast_nid &opd_nid);
 
-  absl::flat_hash_map<std::string_view, Phi_rtable>         phi_resolve_tables;
-  absl::flat_hash_map<std::string_view, Cnt_rtable>         ssa_rhs_cnt_tables;
-  absl::flat_hash_map<std::string_view, uint8_t>            global_ssa_lhs_cnt_table;
-  absl::flat_hash_map<std::string_view, Dot_sel_lrhs_table> dot_sel_lrhs_tables;
+  // tuple operator process
+  void      trans_tuple_opr                    (const Lnast_nid &pats_nid); // from dot/sel to tuple_add/get
+  void      trans_tuple_opr_if_subtree         (const Lnast_nid &if_nid); 
+  void      trans_tuple_opr_handle_a_statement (const Lnast_nid &pats_nid, const Lnast_nid &opr_nid); 
+  bool      check_tuple_table_parents_chain    (const Lnast_nid &psts_nid, std::string_view ref_name);
+  void      dot2local_tuple_chain              (const Lnast_nid &pats_nid, Lnast_nid &dot_nid);
+  void      dot2hier_tuple_chain               (const Lnast_nid &psts_nid, Lnast_nid &dot_nid, const Lnast_nid &cond_nid, bool is_else_sts); 
+  void      find_cond_nid                      (const Lnast_nid &psts_nid, Lnast_nid &cond_nid, bool &is_else_sts); 
+  bool      is_bit_attr_tuple_add              (const Lnast_nid &opr_nid);
+
+
+  // hierarchical statements node -> symbol table
+  absl::flat_hash_map<std::string_view, Phi_rtable>      phi_resolve_tables;
+  absl::flat_hash_map<std::string_view, Cnt_rtable>      ssa_rhs_cnt_tables;
+  absl::flat_hash_map<std::string_view, Dot_lrhs_table>  dot_lrhs_tables;
+  absl::flat_hash_map<std::string_view, Tuple_var_table> tuple_var_tables;   
 
   Phi_rtable new_added_phi_node_table;
+  absl::flat_hash_map<std::string_view, uint8_t>         global_ssa_lhs_cnt_table;
   Lnast_nid  default_const_nid;
   Lnast_nid  err_var_undefined;
+  uint32_t   tup_internal_cnt = 0;
 
   std::vector<std::string *> string_pool;
 

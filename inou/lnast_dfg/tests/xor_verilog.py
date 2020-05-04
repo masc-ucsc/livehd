@@ -2,7 +2,7 @@
 
 def main():
     import subprocess
-    nums = [1, 10, 100, 1000, 10000, 100000]
+    nums = [10000, 20000, 30000, 40000, 50000, 60000, 70000, 80000, 90000, 100000]
     for num in nums:
       f = open("xor_" + str(num) + ".v", "w+")
 

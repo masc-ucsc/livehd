@@ -54,9 +54,9 @@ private:
   RTLIL::IdString next_id(LGraph *lg) { return RTLIL::IdString(absl::StrCat("\\", unique_name(lg, "lg"))); }
 
   // FIXME: any way of merging these two?
-  typedef RTLIL::Cell *(RTLIL::Module::*add_cell_fnc_sign)(RTLIL::IdString, RTLIL::SigSpec, RTLIL::SigSpec, RTLIL::SigSpec, bool,
+  typedef RTLIL::Cell *(RTLIL::Module::*add_cell_fnc_sign)(RTLIL::IdString, const RTLIL::SigSpec &, const RTLIL::SigSpec &, const RTLIL::SigSpec &, bool,
                                                            const std::string &);
-  typedef RTLIL::Cell *(RTLIL::Module::*add_cell_fnc)(RTLIL::IdString, RTLIL::SigSpec, RTLIL::SigSpec, RTLIL::SigSpec,
+  typedef RTLIL::Cell *(RTLIL::Module::*add_cell_fnc)(RTLIL::IdString, const RTLIL::SigSpec &, const RTLIL::SigSpec &, const RTLIL::SigSpec &,
                                                       const std::string &);
 
   RTLIL::Wire *create_tree(LGraph *g, std::vector<RTLIL::Wire *> &wires, RTLIL::Module *mod, add_cell_fnc_sign add_cell, bool sign,

@@ -222,7 +222,7 @@ TEST_F(MainTest, Help) {
 
 TEST_F(MainTest, HelpPass) {
   drain_stdin();
-  std::string cmd = "help inou.graphviz.fromlg #\n ";  // # is a marker for the stupid space lines
+  std::string cmd = "help inou.graphviz.from #\n ";  // # is a marker for the stupid space lines
 
   auto sz = write(master, cmd.c_str(), cmd.size());
   EXPECT_EQ(sz, cmd.size());
@@ -239,7 +239,6 @@ TEST_F(MainTest, HelpPass) {
   EXPECT_THAT(l3, HasSubstr("dot format")); // explanation
 
   EXPECT_THAT(l4, HasSubstr("optional")); // first arg explained
-  EXPECT_THAT(l4, HasSubstr("verbose")); // first arg explained
 }
 
 TEST_F(MainTest, Quit) {

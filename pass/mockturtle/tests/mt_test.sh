@@ -57,10 +57,10 @@ do
   echo "Mockturtle LUT Synthesis Flow"
   echo ""
   ${LGSHELL} "inou.yosys.tolg files:inou/yosys/tests/${pt}.v"
-  ${LGSHELL} "lgraph.open name:${pt}          |> inou.graphviz.fromlg"
+  ${LGSHELL} "lgraph.open name:${pt}          |> inou.graphviz.from"
   ${LGSHELL} "lgraph.open name:${pt}          |> pass.mockturtle"
   ${LGSHELL} "lgraph.open name:${pt}_lutified |> inou.yosys.fromlg"
-  ${LGSHELL} "lgraph.open name:${pt}_lutified |> inou.graphviz.fromlg"
+  ${LGSHELL} "lgraph.open name:${pt}_lutified |> inou.graphviz.from"
 
   if [ $? -eq 0 ] && [ -f ${pt}_lutified.v ]; then
     echo "Successfully created lutified verilog:${pt}_lutified.v"
