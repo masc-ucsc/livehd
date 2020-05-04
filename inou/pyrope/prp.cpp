@@ -1492,7 +1492,7 @@ void Prp::ast_builder(std::list<std::tuple<Rule_id, Token_entry>> &passed_list){
   }
 }
 
-inline uint8_t Prp::check_function(uint8_t (Prp::*rule)(std::list<std::tuple<Rule_id, Token_entry>>&), uint64_t *sub_cnt, std::list<std::tuple<Rule_id, Token_entry>> &loc_list){
+uint8_t Prp::check_function(uint8_t (Prp::*rule)(std::list<std::tuple<Rule_id, Token_entry>>&), uint64_t *sub_cnt, std::list<std::tuple<Rule_id, Token_entry>> &loc_list){
   PRINT_DBG_AST("Called check_function.\n");
   uint64_t starting_size = loc_list.size();
   uint8_t ret = (this->*rule)(loc_list);

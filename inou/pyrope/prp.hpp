@@ -283,7 +283,7 @@ protected:
   std::string rule_id_to_string(Rule_id rid);
   std::string tok_id_to_string(Token_id tok);
   
-  inline uint8_t check_function(uint8_t (Prp::*rule)(std::list<std::tuple<Rule_id, Token_entry>>&), uint64_t *sub_cnt, std::list<std::tuple<Rule_id, Token_entry>> &loc_list);
+  uint8_t check_function(uint8_t (Prp::*rule)(std::list<std::tuple<Rule_id, Token_entry>>&), uint64_t *sub_cnt, std::list<std::tuple<Rule_id, Token_entry>> &loc_list);
   bool chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, std::list<std::tuple<Rule_id, Token_entry>> &loc_list);
   
   void ast_handler();
