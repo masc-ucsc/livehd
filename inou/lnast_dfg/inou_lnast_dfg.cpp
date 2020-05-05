@@ -130,7 +130,6 @@ void Inou_lnast_dfg::process_ast_stmts(LGraph *dfg, const Lnast_nid &lnidx_stmts
       I(lnast->get_name(lnidx) == "err_var_undefined");
       continue;
     } else {
-      fmt::print("not yet processeable: {}\n", ntype.debug_name_verilog());
       I(false);
       return;
     }
@@ -251,17 +250,23 @@ void Inou_lnast_dfg::process_ast_nary_op(LGraph *dfg, const Lnast_nid &lnidx_opr
     opds.emplace_back(opd);
   }
 
-  nary_node_rhs_connections(dfg, opr_node, opds);
+  nary_node_rhs_connections(dfg, opr_node, opds, lnast->get_type(lnidx_opr).is_minus());
 }
 
-void Inou_lnast_dfg::nary_node_rhs_connections(LGraph *dfg, Node &opr_node, const std::vector<Node_pin> &opds) {
+void Inou_lnast_dfg::nary_node_rhs_connections(LGraph *dfg, Node &opr_node, const std::vector<Node_pin> &opds, bool is_subt) {
   // FIXME->sh: need to think about signed number handling and signed number copy-propagation analysis
   // for now, assuming everything is unsigned number
   switch(opr_node.get_type().op){
     case Sum_Op:
     case Mult_Op: {
+      bool is_first = true;
       for (const auto &opd : opds) {
-        dfg->add_edge(opd, opr_node.setup_sink_pin(1));  
+        if (is_subt & !is_first) { //note: hunter -- for subtraction
+          dfg->add_edge(opd, opr_node.setup_sink_pin(3));
+        } else {
+          dfg->add_edge(opd, opr_node.setup_sink_pin(1));
+          is_first = false;
+        }
       }
       break;
     }

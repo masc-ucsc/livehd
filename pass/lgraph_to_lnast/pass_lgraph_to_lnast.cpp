@@ -258,6 +258,7 @@ void Pass_lgraph_to_lnast::handle_io(LGraph *lg, Lnast_nid& parent_lnast_node, L
 
       auto idx_asg = lnast.add_child(parent_lnast_node, Lnast_node::create_assign("asg"));
       lnast.add_child(idx_asg, Lnast_node::create_ref(temp_name));
+      //FIXME: Is the next line the best way to get driver bitwidth?
       lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(absl::StrCat("0d" + std::to_string(edge.get_bits())))));
     }
   }
@@ -318,7 +319,7 @@ void Pass_lgraph_to_lnast::attach_output_to_lnast(Lnast& lnast, Lnast_nid& paren
     //There was no inp edge, therefore we set the output to 0.
     auto asg_node = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
     lnast.add_child(asg_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("%", opin.get_name()))));
-    lnast.add_child(asg_node, Lnast_node::create_const("0"));
+    lnast.add_child(asg_node, Lnast_node::create_const("0d0"));
     count++;
   }
 
@@ -333,6 +334,7 @@ void Pass_lgraph_to_lnast::attach_sum_node(Lnast& lnast, Lnast_nid& parent_node,
   Lnast_nid add_node, subt_node;
 
   //Determine if we're doing an add, sub, or both.
+  auto pin_name = lnast.add_string(pin.get_name());
   for(const auto inp : pin.get_node().inp_edges()) {
     auto spin = inp.sink;
     if((spin.get_pid() == 0) || (spin.get_pid() == 1)) {
@@ -352,22 +354,22 @@ void Pass_lgraph_to_lnast::attach_sum_node(Lnast& lnast, Lnast_nid& parent_node,
   //Now that we know which, create the necessary operation nodes.
   if(is_add & !is_subt) {
     add_node = lnast.add_child(parent_node, Lnast_node::create_plus("plus"));
-    lnast.add_child(add_node, Lnast_node::create_ref(pin.get_name()));
+    lnast.add_child(add_node, Lnast_node::create_ref(pin_name));
   } else if(!is_add & is_subt) {
     subt_node = lnast.add_child(parent_node, Lnast_node::create_minus("minus"));
     /*Note: the next line is a strange workaround but it is important. If we didn't do this, the later
         for loop would try to attach something to "add_node", but we never specified what that was. */
     add_node = subt_node;
-    lnast.add_child(subt_node, Lnast_node::create_ref(pin.get_name()));
+    lnast.add_child(subt_node, Lnast_node::create_ref(pin_name));
   } else {
     add_node = lnast.add_child(parent_node, Lnast_node::create_plus("plus"));
     subt_node = lnast.add_child(parent_node, Lnast_node::create_minus("minus"));
 
-    std::string_view intermediate_var_name = absl::StrCat("T", temp_var_count);
+    auto intermediate_var_name = lnast.add_string(absl::StrCat("T", temp_var_count));
     temp_var_count++;
-    lnast.add_child(add_node, Lnast_node::create_ref( lnast.add_string(intermediate_var_name)));
-    lnast.add_child(subt_node, Lnast_node::create_ref(pin.get_name()));
-    lnast.add_child(subt_node, Lnast_node::create_ref( lnast.add_string(intermediate_var_name)));
+    lnast.add_child(add_node, Lnast_node::create_ref(intermediate_var_name));
+    lnast.add_child(subt_node, Lnast_node::create_ref(pin_name));
+    lnast.add_child(subt_node, Lnast_node::create_ref(intermediate_var_name));
   }
 
   //Attach the name of each of the node's inputs to the Lnast operation node we just made.
@@ -402,7 +404,7 @@ void Pass_lgraph_to_lnast::attach_binaryop_node(Lnast& lnast, Lnast_nid& parent_
       fmt::print("Error: attach_binaryop_node doesn't support given node type\n");
       I(false);
   }
-  lnast.add_child(bop_node, Lnast_node::create_ref(pin.get_name()));
+  lnast.add_child(bop_node, Lnast_node::create_ref(lnast.add_string(pin.get_name())));
 
   //Attach the name of each of the node's inputs to the Lnast operation node we just made.
   attach_children_to_node(lnast, bop_node, pin);
@@ -410,7 +412,7 @@ void Pass_lgraph_to_lnast::attach_binaryop_node(Lnast& lnast, Lnast_nid& parent_
 
 void Pass_lgraph_to_lnast::attach_not_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin &pin) {
   auto not_node = lnast.add_child(parent_node, Lnast_node::create_not("not"));
-  lnast.add_child(not_node, Lnast_node::create_ref(pin.get_name()));
+  lnast.add_child(not_node, Lnast_node::create_ref(lnast.add_string(pin.get_name())));
 
   int inp_count = 0;
   attach_children_to_node(lnast, not_node, pin);
@@ -432,7 +434,7 @@ void Pass_lgraph_to_lnast::attach_join_node(Lnast& lnast, Lnast_nid& parent_node
     //FIXME (BIG!): This is a temporary fix. This node type should be not "assign" but some concatenation node type.
     //  One currently does not exist in LNAST.
     auto join_node = lnast.add_child(parent_node, Lnast_node::create_assign("join"));
-    lnast.add_child(join_node, Lnast_node::create_ref(pin.get_name()));
+    lnast.add_child(join_node, Lnast_node::create_ref(lnast.add_string(pin.get_name())));
     //Attach each of the inputs to join with the first being added as the most significant and last as least sig.
     for(int i = dpins.size(); i > 0; i--) {
       attach_child(lnast, join_node, dpins.top());
@@ -488,7 +490,7 @@ void Pass_lgraph_to_lnast::attach_comparison_node(Lnast& lnast, Lnast_nid& paren
         fmt::print("Error: invalid node type in attach_comparison_node\n");
         I(false);
     }
-    lnast.add_child(comp_node, Lnast_node::create_ref(pin.get_name()));
+    lnast.add_child(comp_node, Lnast_node::create_ref(lnast.add_string(pin.get_name())));
     attach_child(lnast, comp_node, a_pins[0]);
     attach_child(lnast, comp_node, b_pins[0]);
 
@@ -523,7 +525,7 @@ void Pass_lgraph_to_lnast::attach_comparison_node(Lnast& lnast, Lnast_nid& paren
     }
 
     auto and_node = lnast.add_child(parent_node, Lnast_node::create_and("and"));
-    lnast.add_child(and_node, Lnast_node::create_ref(pin.get_name()));
+    lnast.add_child(and_node, Lnast_node::create_ref(lnast.add_string(pin.get_name())));
     for(int i = 1; i <= comparisons; i++) {
       lnast.add_child(and_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("T", temp_var_count-i))));
     }

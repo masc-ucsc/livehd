@@ -63,7 +63,7 @@ protected:
   Node_pin     setup_ref_node_dpin            (LGraph *dfg, const Lnast_nid &lnidx);
   Node_Type_Op decode_lnast_op                (const Lnast_nid &lnidx_opr);
   void         setup_lnast_to_lgraph_primitive_type_mapping();
-  void         nary_node_rhs_connections      (LGraph *dfg, Node &opr_node, const std::vector<Node_pin> &opds);
+  void         nary_node_rhs_connections      (LGraph *dfg, Node &opr_node, const std::vector<Node_pin> &opds, bool is_subt);
 
 
   static bool is_register          (std::string_view name) {return name.substr(0, 1) == "#" ; }
