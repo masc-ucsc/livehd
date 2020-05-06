@@ -12,7 +12,8 @@ void Inou_lnast_dfg::setup() {
   /* register_inou("lnast_dfg", m1); */
 
   Eprp_method m1("inou.lnast_dfg.tolg", " front-end language lnast -> lgraph", &Inou_lnast_dfg::tolg);
-  register_inou("lnast_dfg", m1);
+  m1.add_label_optional("path", "path to output the lgraph[s] to", "lgdb");
+  register_pass(m1);
 
 
   Eprp_method m2("inou.lnast_dfg.reduced_or_elimination", "reduced_or_op elimination for clear algorithm", &Inou_lnast_dfg::reduced_or_elimination);
