@@ -475,7 +475,7 @@ private:
   constexpr int static word_index_c(int bit_index) { return bit_index / kWordSize; }
 
   uint64_t static upper(uint64_t i) { return i >> 32; }
-  uint64_t static lower(uint64_t i) { return i & 0x00000000ffffffff; }
+  uint64_t static lower(uint64_t i) { return i & 0x00000000ffffffffUL; }
 
   // Hack to prevent compiler warnings for shift amount being too large
   int static cap(int s) { return s % kWordSize; }
