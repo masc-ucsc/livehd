@@ -27,10 +27,12 @@ protected:
   void        attach_comparison_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin &pin);
   void        attach_simple_node    (Lnast& lnast, Lnast_nid& parent_node, const Node_pin &pin);
   void        attach_mux_node       (Lnast& lnast, Lnast_nid& parent_node, const Node_pin &pin);
+  void        attach_flop_node      (Lnast& lnast, Lnast_nid& parent_node, const Node_pin &pin);
   void        attach_subgraph_node  (Lnast& lnast, Lnast_nid& parent_node, const Node_pin &pin);
 
   void        attach_children_to_node(Lnast& lnast, Lnast_nid& op_node, const Node_pin &pin);
   void        attach_child(Lnast& lnast, Lnast_nid& op_node, const Node_pin &dpin);
+  void        attach_child(Lnast& lnast, Lnast_nid& op_node, const Node_pin &dpin, std::string prefix);
   void        attach_cond_child(Lnast& lnast, Lnast_nid& op_node, const Node_pin &dpin);
 
   void handle_io(LGraph *g, Lnast_nid& parent_lnast_node, Lnast& lnast);

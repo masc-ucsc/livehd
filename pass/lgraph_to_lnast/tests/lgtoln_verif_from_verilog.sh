@@ -2,9 +2,14 @@
 rm -rf ./lgdb
 rm -rf ./lgdb2
 
-pts='trivial trivial_and mux'
+pts='trivial trivial_and mux assigns compare simple_flop'
+#TO ADD LIST, but have bugs:
+#picker -- pick op not yet implemented in lnast2lg
+#simple_add -- output 'h' has 1 extra bit, happens in pass.bitwidth
+#simple_flop, shift, cse_basic -- no flop representation in LNAST yet
 #add -- encountering problems with minus
-#trivial1 -- contingent on ~ (not yet implemented in lnast2lg)
+#arith -- same problem with minus, can't do %
+#trivial1, compare2 -- contingent on ~ (not yet implemented in lnast2lg)
 #trivial2 -- subgraphs (try to test this)
 
 LGSHELL=./bazel-bin/main/lgshell
@@ -58,7 +63,7 @@ do
     fi
 
     ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.newlg.dot
+    mv ${pt}.dot ${pt}.newlg.precomp.dot
 
 
     echo ""
@@ -67,6 +72,7 @@ do
     echo "----------------------------------------------------"
     echo "Reduced_Or_Op Elimination"
     echo "----------------------------------------------------"
+
     ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.lnast_dfg.reduced_or_elimination"
     if [ $? -eq 0 ]; then
       echo "Successfully eliminate all reduced_or_op in new lg: ${pt}.v"
@@ -82,6 +88,7 @@ do
     echo "----------------------------------------------------"
     echo "Tuple Chain Resolve"
     echo "----------------------------------------------------"
+
     ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.lnast_dfg.resolve_tuples"
     if [ $? -eq 0 ]; then
       echo "Successfully resolve the tuple chain in new lg: ${pt}.v"
@@ -89,6 +96,8 @@ do
       echo "ERROR: Pyrope compiler failed on new lg: resolve tuples, testcase: ${pt}.v"
       exit 1
     fi
+    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
+    mv ${pt}.dot ${pt}.newlg.prebw.dot
 
 
     echo ""
@@ -105,56 +114,42 @@ do
       echo "ERROR: Pyrope compiler failed on new lg: bitwidth optimization, testcase: ${pt}.v"
       exit 1
     fi
+    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
+    mv ${pt}.dot ${pt}.newlg.dot
 
 
- #   if [[ ${pt} == *_err* ]]; then
- #       echo "----------------------------------------------------"
- #       echo "Pass! This is a Compile Error Test, No Need to Generate Verilog Code "
- #       echo "----------------------------------------------------"
- #   else
-        echo ""
-        echo ""
-        echo ""
-        echo "----------------------------------------------------"
-        echo "LGraph -> Verilog"
-        echo "----------------------------------------------------"
+    echo ""
+    echo ""
+    echo ""
+    echo "----------------------------------------------------"
+    echo "LGraph -> Verilog"
+    echo "----------------------------------------------------"
 
-        ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.yosys.fromlg"
-        if [ $? -eq 0 ] && [ -f ${pt}.v ]; then
-          echo "Successfully generate Verilog: ${pt}.v"
-          rm -f  yosys_script.*
-        else
-          echo "ERROR: Yosys failed: verilog generation, testcase: ${pt}.v"
-          exit 1
-        fi
+    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.yosys.fromlg"
+    if [ $? -eq 0 ] && [ -f ${pt}.v ]; then
+      echo "Successfully generate Verilog: ${pt}.v"
+      rm -f  yosys_script.*
+    else
+      echo "ERROR: Yosys failed: verilog generation, testcase: ${pt}.v"
+      exit 1
+    fi
 
 
-        echo ""
-        echo ""
-        echo ""
-        echo "----------------------------------------------------"
-        echo "Logic Equivalence Check"
-        echo "----------------------------------------------------"
+    echo ""
+    echo ""
+    echo ""
+    echo "----------------------------------------------------"
+    echo "Logic Equivalence Check"
+    echo "----------------------------------------------------"
 
-        ${LGCHECK} --implementation=${pt}.v --reference=./inou/yosys/tests/${pt}.v
+    ${LGCHECK} --implementation=${pt}.v --reference=./inou/yosys/tests/${pt}.v
 
-        if [ $? -eq 0 ]; then
-          echo "Successfully pass logic equivilence check!"
-        else
-          echo "FAIL: "${pt}".v !== "${pt}".gld.v"
-          exit 1
-        fi
- #   fi
+    if [ $? -eq 0 ]; then
+      echo "Successfully pass logic equivilence check!"
+    else
+      echo "FAIL: "${pt}".v !== "${pt}".gld.v"
+      exit 1
+    fi
     ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
 
-
-    #rm -f ${pt}.v
-    rm -f ${pt}.cfg
-    rm -f lnast.dot
-    rm -f lnast.dot.gld
-    rm -f lnast.nodes
-    rm -f lnast.nodes.gld
 done #end of for
-
-
-
