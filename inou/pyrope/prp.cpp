@@ -1235,7 +1235,7 @@ uint8_t Prp::rule_unary_expression(std::list<std::tuple<Rule_id, Token_entry>> &
 
   // option 1
   if(CHECK_RULE(&Prp::rule_factor)){ RULE_SUCCESS("Matched rule_unary_expression, option 1.\n", Prp_rule_unary_expression); }
-  if(!(SCAN_IS_TOKEN(Token_id_bang, Prp_rule_unary_expression) || SCAN_IS_TOKEN(Pyrope_id_tilde, Prp_rule_unary_expression))){ RULE_FAILED("Failed rule_unary_expression; couldn't find a factor or a unary operator.\n"); }
+  if(!(SCAN_IS_TOKEN(Token_id_bang, Prp_rule_unary_expression) || SCAN_IS_TOKEN(Token_id_tilde, Prp_rule_unary_expression))){ RULE_FAILED("Failed rule_unary_expression; couldn't find a factor or a unary operator.\n"); }
   if(!CHECK_RULE(&Prp::rule_factor)){ RULE_FAILED("Failed rule_unary_expression; couldn't find an answering factor.\n"); }
 
   RULE_SUCCESS("Matched rule_unary_expression, option 2.\n", Prp_rule_unary_expression);

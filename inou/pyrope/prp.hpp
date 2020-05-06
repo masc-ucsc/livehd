@@ -326,7 +326,6 @@ public:
     pyrope_keyword["in"]        = Pyrope_id_in;
     pyrope_keyword["by"]        = Pyrope_id_by;
     pyrope_keyword["punch"]     = Pyrope_id_punch;
-    pyrope_keyword["~"]         = Pyrope_id_tilde;
     
     pyrope_keyword["false"] = Pyrope_id_false;
     pyrope_keyword["FALSE"] = Pyrope_id_FALSE;

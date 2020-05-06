@@ -117,6 +117,7 @@ Lnast_node Prp_lnast::eval_rule(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tr
         break;
       case Prp_rule_unary_expression:
         PRINT_DBG_LN("Prp_rule_unary_expression\n");
+        return eval_expression(idx_start_ast, idx_start_ln);
         break;
       case Prp_rule_factor:
         PRINT_DBG_LN("Prp_rule_factor\n");
@@ -923,7 +924,7 @@ Lnast_node Prp_lnast::eval_expression(mmap_lib::Tree_index idx_start_ast, mmap_l
 
     if(child_cur_data.token_entry != 0 || child_cur_data.rule_id == Prp_rule_string_constant){ // is a leaf
       if(child_cur_data.rule_id == Prp_rule_identifier){ // identifier
-        if(scan_text(child_cur_data.token_entry) == "!" || scan_text(child_cur_data.token_entry) == "~"){
+        if(scan_text(child_cur_data.token_entry) == "!"){
           uint8_t skip_sibs;
           auto op_node = gen_operator(child_cur, &skip_sibs);
           operator_stack.emplace_back(op_node);
