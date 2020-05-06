@@ -34,53 +34,36 @@ Inou_lnast_dfg::Inou_lnast_dfg(const Eprp_var &var) : Pass("inou.lnast_dfg", var
   setup_lnast_to_lgraph_primitive_type_mapping();
 }
 
-/* void Inou_lnast_dfg::tolg(Eprp_var &var) { */
-/*   Inou_lnast_dfg p(var); */
-/*   std::vector<LGraph *> lgs = p.do_tolg(); */
 
-/*   if (lgs.empty()) { */
-/*     error("failed to generate any lgraph from lnast"); */
-/*   } else { */
-/*     var.add(lgs); */
-/*   } */
-/* } */
+void Inou_lnast_dfg::tolg(Eprp_var &var) {
+  Inou_lnast_dfg p(var);
+  std::vector<LGraph *> lgs;
+  for (const auto &ln : var.lnasts) {
+    lgs = p.do_tolg(ln);
+  }
 
 
-/* std::vector<LGraph *> Inou_lnast_dfg::do_tolg() { */
-/*   Lbench b("inou.lnast_dfg.do_tolg"); */
-/*   I(!files.empty()); */
-/*   I(!path.empty()); */
+  if (lgs.empty()) {
+    error("failed to generate any lgraph from lnast");
+  } else {
+    var.add(lgs);
+  }
+}
 
-/*   std::vector<LGraph *> lgs; */
 
-/*   for (auto &itr_f : absl::StrSplit(files, ',')) { */
-/*     const auto f = std::string(itr_f); */
-/*     Cfg_parser cfg_parser(f); */
+std::vector<LGraph *> Inou_lnast_dfg::do_tolg(std::shared_ptr<Lnast> ln) {
+    Lbench b("inou.lnast_dfg.do_tolg_from_pipe");
+    lnast = ln; 
+    LGraph *dfg = LGraph::create(path, lnast->get_top_module_name(), "from_front_end_lnast_pipe");
+    std::vector<LGraph *> lgs;
+    lnast->ssa_trans();
+    lnast2lgraph(dfg);
+    lgs.push_back(dfg);
 
-/*     lnast = cfg_parser.ref_lnast(); */
-/*     lnast->ssa_trans(); */
+    return lgs;
+}
 
-/*     auto        pos = f.rfind('/'); */
-/*     std::string basename; */
-/*     if (pos != std::string::npos) */
-/*       basename = f.substr(pos + 1); */
-/*     else */
-/*       basename = f; */
 
-/*     auto pos2 = basename.rfind('.'); */
-
-/*     if (pos2 != std::string::npos) */
-/*       basename = basename.substr(0, pos2); */
-
-/*     LGraph *dfg = LGraph::create(path, basename, f); */
-
-/*     lnast2lgraph(dfg); */
-
-/*     lgs.push_back(dfg); */
-/*   } */
-
-/*   return lgs; */
-/* } */
 
 void Inou_lnast_dfg::lnast2lgraph(LGraph *dfg) {
   const auto top   = lnast->get_root();
@@ -694,32 +677,52 @@ LGraph* Inou_lnast_dfg::do_lglnverif_tolg(std::shared_ptr<Lnast> llnast) {
   return dfg;
 }
 
-void Inou_lnast_dfg::tolg(Eprp_var &var) {
-  Inou_lnast_dfg p(var);
-  std::vector<LGraph *> lgs;
-  for (const auto &ln : var.lnasts) {
-    lgs = p.do_tolg(ln);
-  }
+// ----------------- to be deprecated  ---------------------
+
+/* void Inou_lnast_dfg::tolg(Eprp_var &var) { */
+/*   Inou_lnast_dfg p(var); */
+/*   std::vector<LGraph *> lgs = p.do_tolg(); */
+
+/*   if (lgs.empty()) { */
+/*     error("failed to generate any lgraph from lnast"); */
+/*   } else { */
+/*     var.add(lgs); */
+/*   } */
+/* } */
 
 
-  if (lgs.empty()) {
-    error("failed to generate any lgraph from lnast");
-  } else {
-    var.add(lgs);
-  }
-}
+/* std::vector<LGraph *> Inou_lnast_dfg::do_tolg() { */
+/*   Lbench b("inou.lnast_dfg.do_tolg"); */
+/*   I(!files.empty()); */
+/*   I(!path.empty()); */
 
+/*   std::vector<LGraph *> lgs; */
 
-std::vector<LGraph *> Inou_lnast_dfg::do_tolg(std::shared_ptr<Lnast> ln) {
-    Lbench b("inou.lnast_dfg.do_tolg_from_pipe");
-    lnast = ln; 
-    LGraph *dfg = LGraph::create(path, lnast->get_top_module_name(), "from_front_end_lnast_pipe");
-    std::vector<LGraph *> lgs;
-    lnast->ssa_trans();
-    lnast2lgraph(dfg);
-    lgs.push_back(dfg);
+/*   for (auto &itr_f : absl::StrSplit(files, ',')) { */
+/*     const auto f = std::string(itr_f); */
+/*     Cfg_parser cfg_parser(f); */
 
-    return lgs;
-}
+/*     lnast = cfg_parser.ref_lnast(); */
+/*     lnast->ssa_trans(); */
 
+/*     auto        pos = f.rfind('/'); */
+/*     std::string basename; */
+/*     if (pos != std::string::npos) */
+/*       basename = f.substr(pos + 1); */
+/*     else */
+/*       basename = f; */
 
+/*     auto pos2 = basename.rfind('.'); */
+
+/*     if (pos2 != std::string::npos) */
+/*       basename = basename.substr(0, pos2); */
+
+/*     LGraph *dfg = LGraph::create(path, basename, f); */
+
+/*     lnast2lgraph(dfg); */
+
+/*     lgs.push_back(dfg); */
+/*   } */
+
+/*   return lgs; */
+/* } */
