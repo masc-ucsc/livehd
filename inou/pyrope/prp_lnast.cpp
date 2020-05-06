@@ -1142,16 +1142,22 @@ Lnast_node Prp_lnast::eval_tuple_dot_notation(mmap_lib::Tree_index idx_start_ast
 Lnast_node Prp_lnast::eval_bit_selection_notation(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln){
   mmap_lib::Tree_index idx_nxt_ln = cur_stmts;
 
-  // go down to the select expression on the AST
-  auto select_expr_idx = ast->get_last_child(idx_start_ast);
+  // go down to the identifier being selected
+  auto select_expr_idx = ast->get_child(idx_start_ast);
+  select_expr_idx = ast->get_sibling_next(select_expr_idx);
+  select_expr_idx = ast->get_child(select_expr_idx);
+  select_expr_idx = ast->get_sibling_next(select_expr_idx); // skip the [
   print_ast_node(select_expr_idx);
-  // first evaluate the select expression
+  // first evaluate the select expression if it exists
+  bool sel_exists = scan_text(ast->get_data(select_expr_idx).token_entry) != "]";
+  bool sel_is_expr = false;
   Lnast_node sel_rhs;
-  bool sel_is_expr = is_expr(select_expr_idx);
-  if(sel_is_expr){
-    sel_rhs = eval_rule(select_expr_idx, idx_nxt_ln);
+  if(sel_exists){
+    sel_is_expr = is_expr(select_expr_idx);
+    if(sel_is_expr){
+      sel_rhs = eval_rule(select_expr_idx, idx_nxt_ln);
+    }
   }
-
   // create bit select node
   auto idx_sel_root = lnast->add_child(idx_nxt_ln, Lnast_node::create_bit_select(""));
 
@@ -1165,10 +1171,13 @@ Lnast_node Prp_lnast::eval_bit_selection_notation(mmap_lib::Tree_index idx_start
   lnast->add_child(idx_sel_root, Lnast_node::create_ref(get_token(ast->get_data(ast->get_child(idx_start_ast)).token_entry)));
 
   // add the rhs value of the select expression
-  if(sel_is_expr)
-    lnast->add_child(idx_sel_root, sel_rhs);
-  else{
-    eval_rule(select_expr_idx, idx_sel_root);
+  if(sel_exists){
+    if(sel_is_expr){
+      lnast->add_child(idx_sel_root, sel_rhs);
+    }
+    else{
+      eval_rule(select_expr_idx, idx_sel_root);
+    }
   }
 
   return retnode;
@@ -1374,8 +1383,9 @@ inline void Prp_lnast::create_simple_lhs_expr(mmap_lib::Tree_index idx_start_ast
     lnast->add_child(expr_root_idx, Lnast_node::create_ref(get_token(ast->get_data(expr_lhs_idx).token_entry)));
     lnast->add_child(expr_root_idx, rhs_node);
   }
-  else
+  else{
     PRINT_LN("ERROR: simple lhs expression was passed an invalid AST node.\n");
+  }
 }
 
 inline Lnast_node Prp_lnast::create_const_node(mmap_lib::Tree_index idx){

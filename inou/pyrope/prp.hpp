@@ -37,13 +37,13 @@
 #define SCAN_IS_TOKEN(...) SCAN_IS_TOKEN_MACRO_CHOOSER(__VA_ARGS__)(__VA_ARGS__)
 
 #ifdef DEBUG_LN
-#define PRINT_DBG_LN(...) PRINT_LN(__VA_ARGS__)
+#define PRINT_DBG_LN(...) fmt::print(__VA_ARGS__)
 #else
 #define PRINT_DBG_LN(...)
 #endif
 
 #ifdef DEBUG_AST
-#define PRINT_DBG_AST(...) PRINT_AST(__VA_ARGS__)
+#define PRINT_DBG_AST(...) fmt::print(__VA_ARGS__)
 #else
 #define PRINT_DBG_AST(...)
 #endif

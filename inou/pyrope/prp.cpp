@@ -1020,7 +1020,7 @@ uint8_t Prp::rule_bit_selection_bracket(std::list<std::tuple<Rule_id, Token_entr
 
   while(next){
     UPDATE_PSEUDO_FAIL();
-    if(!SCAN_IS_TOKEN(Token_id_obr)){ next = false; }
+    if(!SCAN_IS_TOKEN(Token_id_obr, Prp_rule_bit_selection_bracket)){ next = false; }
     else{
       if(!SCAN_IS_TOKEN(Token_id_obr)){
         PSEUDO_FAIL();
@@ -1032,7 +1032,7 @@ uint8_t Prp::rule_bit_selection_bracket(std::list<std::tuple<Rule_id, Token_entr
         PSEUDO_FAIL();
         next = false;
       }
-      if(!SCAN_IS_TOKEN(Token_id_cbr)){
+      if(!SCAN_IS_TOKEN(Token_id_cbr, Prp_rule_bit_selection_bracket)){
         PSEUDO_FAIL();
         next = false;
       }
