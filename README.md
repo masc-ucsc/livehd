@@ -264,4 +264,7 @@ to LiveHD, please send us a notification, we are glad to add your paper.
    Second Workshop on Open-Source EDA Technology (WOSET), 2019.
 
 
+> :warning: LiveHD is under active development and we keep improving the API.
+> Breaks in compatibility would not happen unless justified, but expect to be
+> the case until version 1.0 is released.
 
