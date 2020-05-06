@@ -12,7 +12,7 @@
 #include "fmt/format.h"
 
 #include "lnast.hpp"
-#include "lnast_parser.hpp"
+#include "cfg_parser.hpp"
 
 using tuple = std::tuple<std::string, uint8_t , uint8_t>;// <node_name, node_type, scope>
 
@@ -23,10 +23,10 @@ int main(int argc, char **argv) {
     exit(-3);
   }
 
-  Lnast_parser lnast_parser;
-  lnast_parser.parse_file(argv[1]);
+  Cfg_parser cfg_parser;
+  cfg_parser.parse_file(argv[1]);
 
-  lnast_parser.ref_lnast()->ssa_trans();
+  cfg_parser.ref_lnast()->ssa_trans();
 
   // FIXME: Any check?
 }

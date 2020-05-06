@@ -14,7 +14,7 @@ static inline constexpr int   CFG_OP_FUNC_ROOT_RANGE   =  1; //K9  K14  0 59 96 
 static inline constexpr int   CFG_TARGET_TMP_REF_RANGE =  1; //K14 K15  0 59 96   =  fun1  \___e
 
 
-class Lnast_parser : public Elab_scanner {
+class Cfg_parser : public Elab_scanner {
 protected:
   void         set_module_name(std::string_view filename);
   void         elaborate() override;
@@ -41,7 +41,8 @@ protected:
 private:
   //FIXME-sh: all data member should be initialized!
   std::string top_module_name;
-  std::shared_ptr<Lnast> lnast;
+  /* std::shared_ptr<Lnast> lnast; */
+  std::unique_ptr<Lnast> lnast;
   uint32_t    line_num;
   uint8_t     line_tkcnt;
   Token       buffer_if_condition;
@@ -55,10 +56,10 @@ private:
   std::string get_module_name(std::string_view filename);
 
 public:
-  Lnast_parser();
-  Lnast_parser(std::string_view file);
-  Lnast_parser(std::string_view _top_module_name, std::string_view _text);
+  Cfg_parser();
+  Cfg_parser(std::string_view file);
+  Cfg_parser(std::string_view _top_module_name, std::string_view _text);
 
-  std::shared_ptr<Lnast> ref_lnast() { return lnast; };
+  std::unique_ptr<Lnast> ref_lnast() { return std::move(lnast); };
 };
 

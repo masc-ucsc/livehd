@@ -29,6 +29,7 @@ void setup_inou_liveparse();
 void setup_inou_graphviz();
 void setup_inou_json();
 void setup_inou_pyrope();
+void setup_inou_cfg();
 void setup_inou_rand();
 void setup_inou_verific();
 void setup_inou_lnast_dfg();
@@ -41,7 +42,6 @@ void setup_cops_live();
 
 void Main_api::init() {
   setup_pass_dce();
-  /* setup_pass_dfg(); */
   //setup_pass_opentimer();
   setup_pass_lec();
   setup_pass_punch();
@@ -56,6 +56,7 @@ void Main_api::init() {
   setup_inou_liveparse();
   setup_inou_graphviz();
   setup_inou_pyrope();
+  setup_inou_cfg();
   setup_inou_lnast_dfg();
   setup_inou_yosys();
   setup_inou_firrtl();

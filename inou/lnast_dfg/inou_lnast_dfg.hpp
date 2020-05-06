@@ -10,7 +10,7 @@
 #include "lnast.hpp"
 #include "pass.hpp"
 #include "likely.hpp"
-#include "lnast_parser.hpp"
+#include "cfg_lnast.hpp"
 #include "pass_bitwidth.hpp"
 #include "pass_lgraph_to_lnast.hpp"
 
@@ -31,9 +31,9 @@ private:
 
 protected:
   void                  setup_memblock();
-  std::vector<LGraph *> do_tolg();
+  /* std::vector<LGraph *> do_tolg(); */
+  std::vector<LGraph *> do_tolg(std::shared_ptr<Lnast> l);
   LGraph*               do_lglnverif_tolg(std::shared_ptr<Lnast> llnast);
-  std::vector<LGraph *> do_tolg_from_pipe(std::shared_ptr<Lnast> l);
   static void           do_resolve_tuples(LGraph *dfg);
   static void           do_reduced_or_elimination(LGraph *dfg);
 
@@ -92,23 +92,23 @@ protected:
 
 
   // constant resolving
-  static Node         resolve_constant(LGraph *g, std::string_view str_in);
-  static Node         process_bin_token(LGraph *g, const std::string &token1st, uint16_t bit_width, bool is_signed);
-  static Node         process_bin_token_with_dc(LGraph *g, const std::string &token1st,bool is_signed);
-  static uint32_t     cal_bin_val_32b(const std::string &);
-  static Node         create_const32_node(LGraph *g, const std::string &, uint16_t node_bit_width, bool is_signed);
-  static Node         create_dontcare_node(LGraph *g, uint16_t node_bit_width);
-  static std::string  hex_char_to_bin(char c);
-  static std::string  hex_msb_char_to_bin(char c);
+  static Node         resolve_constant          (LGraph *g, std::string_view str_in);
+  static Node         process_bin_token         (LGraph *g, const std::string &token1st, uint16_t bit_width, bool is_signed);
+  static Node         process_bin_token_with_dc (LGraph *g, const std::string &token1st,bool is_signed);
+  static uint32_t     cal_bin_val_32b           (const std::string &);
+  static Node         create_const32_node       (LGraph *g, const std::string &, uint16_t node_bit_width, bool is_signed);
+  static Node         create_dontcare_node      (LGraph *g, uint16_t node_bit_width);
+  static std::string  hex_char_to_bin           (char c);
+  static std::string  hex_msb_char_to_bin       (char c);
 
   // static void build_lnast(Inou_lnast_dfg &p, Eprp_var &var);
 
   // eprp callbacks
-  static void tolg(Eprp_var &var);
-  static void resolve_tuples(Eprp_var &var);
+  static void tolg                  (Eprp_var &var);
+  static void resolve_tuples        (Eprp_var &var);
   static void reduced_or_elimination(Eprp_var &var);
-  static void lglnverif_tolg(Eprp_var &var);
-  static void tolg_from_pipe(Eprp_var &var);
+  static void lglnverif_tolg        (Eprp_var &var);
+  /* static void tolg_from_pipe        (Eprp_var &var); */
 
 public:
   explicit Inou_lnast_dfg(const Eprp_var &var);

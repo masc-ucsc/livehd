@@ -3,27 +3,27 @@
 #include <charconv>
 
 #include "likely.hpp"
-#include "lnast_parser.hpp"
+#include "cfg_lnast.hpp"
 
-Lnast_parser::Lnast_parser():top_module_name("INVALID"), line_num(0), line_tkcnt(1) {
+Cfg_parser::Cfg_parser():top_module_name("INVALID"), line_num(0), line_tkcnt(1) {
   ;
 }
 
-Lnast_parser::Lnast_parser(std::string_view f): top_module_name(get_module_name(f)), line_num(0), line_tkcnt(1) {
+Cfg_parser::Cfg_parser(std::string_view f): top_module_name(get_module_name(f)), line_num(0), line_tkcnt(1) {
   parse_file(f);
 }
 
-Lnast_parser::Lnast_parser(std::string_view _top_module_name, std::string_view _text): top_module_name(_top_module_name), line_num(0), line_tkcnt(1) {
+Cfg_parser::Cfg_parser(std::string_view _top_module_name, std::string_view _text): top_module_name(_top_module_name), line_num(0), line_tkcnt(1) {
   parse_inline(_text);
 }
 
-std::string Lnast_parser::get_module_name(std::string_view filename) {
+std::string Cfg_parser::get_module_name(std::string_view filename) {
   std::vector<std::string> filepath_split = absl::StrSplit(filename, '/');
   std::pair<std::string, std::string> fname = absl::StrSplit(filepath_split[filepath_split.size() - 1], '.');
   return fname.first;
 }
 
-void Lnast_parser::elaborate() {
+void Cfg_parser::elaborate() {
   lnast = std::make_unique<Lnast>(top_module_name, transfer_memblock_ownership());
 
   lnast->set_root(Lnast_node(Lnast_ntype::create_top(), Token()));
@@ -31,12 +31,9 @@ void Lnast_parser::elaborate() {
   process_stmts_op(lnast->get_root(), 1);
   build_lnast();
 
-  //for(const auto &index : lnast.depth_preorder()) {
-  //  lnast.get_data(index).dump();
-  //}
 }
 
-void Lnast_parser::build_lnast() {
+void Cfg_parser::build_lnast() {
   uint32_t    cfg_nidx    = 0;
   uint32_t    cfg_nparent = 0;
   Token       cfg_token_beg;
@@ -130,7 +127,7 @@ void Lnast_parser::build_lnast() {
   }
 }
 
-void Lnast_parser::process_tuple_op(const Lnast_nid& parent_of_tup, uint32_t self_idx) {
+void Cfg_parser::process_tuple_op(const Lnast_nid& parent_of_tup, uint32_t self_idx) {
   auto idx_tuple_seq = lnast->add_child(parent_of_tup, Lnast_node::create_tuple(scan_get_token()));
   cfg_parent_id2lnast_node[self_idx] = idx_tuple_seq;
   fmt::print("tuple sequence :{}\n", scan_get_token().get_text());
@@ -139,7 +136,7 @@ void Lnast_parser::process_tuple_op(const Lnast_nid& parent_of_tup, uint32_t sel
   buffer_tmp_tuple_name_idx = lnast->add_child(idx_tuple_seq, Lnast_node::create_ref(scan_get_token())); //tuple_name
 }
 
-void Lnast_parser::process_stmts_op(const Lnast_nid& parent_of_sts, uint32_t self_idx) {
+void Cfg_parser::process_stmts_op(const Lnast_nid& parent_of_sts, uint32_t self_idx) {
   if (lnast->get_data(parent_of_sts).type.is_top()) {
     auto tree_top_sts = lnast->add_child(parent_of_sts, Lnast_node::create_stmts(scan_get_token(3)));
     fmt::print("stmts name :{}\n", scan_get_token().get_text());
@@ -165,7 +162,7 @@ void Lnast_parser::process_stmts_op(const Lnast_nid& parent_of_sts, uint32_t sel
 }
 
 //scan pos start from the end of operator token
-Lnast_nid Lnast_parser::process_operator_node(const Lnast_nid& opr_parent_node, Lnast_ntype type, uint32_t self_idx, const Token& target_name) {
+Lnast_nid Cfg_parser::process_operator_node(const Lnast_nid& opr_parent_node, Lnast_ntype type, uint32_t self_idx, const Token& target_name) {
   if (type.is_func_def()) {
     auto func_def_root = lnast->add_child(opr_parent_node, Lnast_node::create_func_def(Token()));
     cfg_parent_id2lnast_node[self_idx] = func_def_root;
@@ -190,7 +187,7 @@ Lnast_nid Lnast_parser::process_operator_node(const Lnast_nid& opr_parent_node, 
 }
 
 //scan pos start: first operand token, stop: last operand
-void Lnast_parser::add_operator_subtree(const Lnast_nid& tree_idx_opr, const Token& target_name) {
+void Cfg_parser::add_operator_subtree(const Lnast_nid& tree_idx_opr, const Token& target_name) {
   //fmt::print("token is :{}\n", scan_text());
   const auto nt = lnast->get_data(tree_idx_opr).type;
 
@@ -207,7 +204,7 @@ void Lnast_parser::add_operator_subtree(const Lnast_nid& tree_idx_opr, const Tok
 
 
 //scan pos start: first operand token, stop: last operand
-void  Lnast_parser::process_func_def_op(const Lnast_nid& tree_idx_fdef, const Token& target_name) {
+void  Cfg_parser::process_func_def_op(const Lnast_nid& tree_idx_fdef, const Token& target_name) {
   //10  1  8  59  96  ::{  ___e   null $a    $b  %o
 
   buffer_tmp_func_def_name_idx = lnast->add_child(tree_idx_fdef, Lnast_node::create_ref(target_name));
@@ -230,7 +227,7 @@ void  Lnast_parser::process_func_def_op(const Lnast_nid& tree_idx_fdef, const To
 
 
 //scan pos start: first operand token, stop: last operand
-void  Lnast_parser::process_func_call_op(const Lnast_nid& tree_idx_fcall, const Token& target_name) {
+void  Cfg_parser::process_func_call_op(const Lnast_nid& tree_idx_fcall, const Token& target_name) {
   //true function call case: K17  K18  0  98  121  .()  ___g  fun1  ___h   ___i
   //fake function call case: K19  K20  0  123 129  .()  ___j  $a
 
@@ -257,7 +254,7 @@ void  Lnast_parser::process_func_call_op(const Lnast_nid& tree_idx_fcall, const 
 }
 
 //scan pos start: first operand token, stop: last operand
-void Lnast_parser::process_binary_op(const Lnast_nid& tree_idx_opr, const Token& target_name) {
+void Cfg_parser::process_binary_op(const Lnast_nid& tree_idx_opr, const Token& target_name) {
   lnast->add_child(tree_idx_opr, Lnast_node::create_ref(target_name));
   I(token_is_valid_ref());
   lnast->add_child(tree_idx_opr, Lnast_node(operand_analysis(), scan_get_token()));
@@ -268,13 +265,13 @@ void Lnast_parser::process_binary_op(const Lnast_nid& tree_idx_opr, const Token&
 
 
 //scan pos start: first operand token, stop: last operand
-void Lnast_parser::process_assign_like_op(const Lnast_nid& tree_idx_opr, const Token& target_name) {
+void Cfg_parser::process_assign_like_op(const Lnast_nid& tree_idx_opr, const Token& target_name) {
   lnast->add_child(tree_idx_opr, Lnast_node::create_ref(target_name));
   I(scan_is_token(Token_id_alnum) || scan_is_token(Token_id_output) || scan_is_token(Token_id_input) || scan_is_token(Token_id_reference));
   lnast->add_child(tree_idx_opr, Lnast_node(operand_analysis(), scan_get_token()));
 }
 
-Lnast_ntype  Lnast_parser::operand_analysis() {
+Lnast_ntype  Cfg_parser::operand_analysis() {
   if (scan_text().at(0) == '0' || scan_text().at(0) == '-') {
     return Lnast_ntype::create_const();
   } else {
@@ -283,7 +280,7 @@ Lnast_ntype  Lnast_parser::operand_analysis() {
 }
 
 
-bool Lnast_parser::tuple_name_correction(Lnast_ntype type, const Token &target_name) {
+bool Cfg_parser::tuple_name_correction(Lnast_ntype type, const Token &target_name) {
   I(type.is_assign());
   if (buffer_tmp_tuple_name_idx.level != -1 &&
       lnast->get_name(buffer_tmp_tuple_name_idx) == scan_peep_text(1)) {
@@ -293,7 +290,7 @@ bool Lnast_parser::tuple_name_correction(Lnast_ntype type, const Token &target_n
   return false;
 }
 
-bool Lnast_parser::function_def_name_correction(Lnast_ntype type, const Token& target_name) {
+bool Cfg_parser::function_def_name_correction(Lnast_ntype type, const Token& target_name) {
   I(type.is_assign());
   if (scan_peep_is_token(Token_id_reference, 1) && scan_peep_text(1).substr(1,3) == "___") {
     lnast->ref_data(buffer_tmp_func_def_name_idx)->token = target_name;
@@ -303,7 +300,7 @@ bool Lnast_parser::function_def_name_correction(Lnast_ntype type, const Token& t
 }
 
 
-bool Lnast_parser::function_instance_name_correction(Lnast_ntype type, const Token& target_name) {
+bool Cfg_parser::function_instance_name_correction(Lnast_ntype type, const Token& target_name) {
   I(type.is_assign());
   if(buffer_tmp_funcall_idx == Lnast_nid(-1, -1))
     return false;
@@ -344,7 +341,7 @@ bool Lnast_parser::function_instance_name_correction(Lnast_ntype type, const Tok
 
 
 //scan pos will stop at the end of operator token
-Lnast_ntype Lnast_parser::operator_analysis() {
+Lnast_ntype Cfg_parser::operator_analysis() {
   Lnast_ntype type;
   if (scan_is_token(Token_id_op)) { //deal with ()
     type = Lnast_ntype::create_tuple(); // must be a tuple op
@@ -456,7 +453,7 @@ Lnast_ntype Lnast_parser::operator_analysis() {
   return type;
 }
 
-bool Lnast_parser::token_is_valid_ref() {
+bool Cfg_parser::token_is_valid_ref() {
   return (scan_is_token(Token_id_alnum) || scan_is_token(Token_id_output) || scan_is_token(Token_id_input) || scan_is_token(Token_id_register));
 }
 

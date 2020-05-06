@@ -75,7 +75,8 @@ do
     echo "CFG -> LNAST -> LGraph"  
     echo "----------------------------------------------------"
     
-    ${LGSHELL} "inou.lnast_dfg.tolg files:${pt}.cfg"
+    # ${LGSHELL} "inou.lnast_dfg.tolg files:${pt}.cfg"
+    ${LGSHELL} "inou.cfg_to_lnast files:${pt}.cfg |> inou.lnast_dfg.tolg"
     if [ $? -eq 0 ]; then
       echo "Successfully create the inital LGraph with tuples: ${pt}.cfg"
     else

@@ -7,7 +7,8 @@ cc_library(
     visibility = ["//visibility:public"],
     includes = ["."],
     deps = [
-        "//core:core"
+        "//core:core",
+        "//inou/cfg:inou_cfg"
     ],
 )
 

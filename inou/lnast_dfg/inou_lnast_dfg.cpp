@@ -5,11 +5,15 @@
 void setup_inou_lnast_dfg() { Inou_lnast_dfg::setup(); }
 
 void Inou_lnast_dfg::setup() {
-  //FIXME->sh: shoudl be deprecate and use pipe approach
-  Eprp_method m1("inou.lnast_dfg.tolg", "parse cfg_text -> build lnast -> generate lgraph", &Inou_lnast_dfg::tolg);
-  m1.add_label_required("files", "cfg_text files to process (comma separated)");
-  m1.add_label_optional("path", "path to put the lgraph[s]", "lgdb");
+  /* //FIXME->sh: shoudl be deprecate and use pipe approach */
+  /* Eprp_method m1("inou.lnast_dfg.tolg", "parse cfg_text -> build lnast -> generate lgraph", &Inou_lnast_dfg::tolg); */
+  /* m1.add_label_required("files", "cfg_text files to process (comma separated)"); */
+  /* m1.add_label_optional("path", "path to put the lgraph[s]", "lgdb"); */
+  /* register_inou("lnast_dfg", m1); */
+
+  Eprp_method m1("inou.lnast_dfg.tolg", " front-end language lnast -> lgraph", &Inou_lnast_dfg::tolg);
   register_inou("lnast_dfg", m1);
+
 
   Eprp_method m2("inou.lnast_dfg.reduced_or_elimination", "reduced_or_op elimination for clear algorithm", &Inou_lnast_dfg::reduced_or_elimination);
   m2.add_label_optional("path", "path to read the lgraph[s]", "lgdb");
@@ -24,62 +28,59 @@ void Inou_lnast_dfg::setup() {
   Eprp_method m4("inou.lnast_dfg.lglnast.tolg", "translate lg -> lnast -> lg (for verif. purposes)", &Inou_lnast_dfg::lglnverif_tolg);
   register_inou("lnast_dfg", m4);
 
-  // FIXME->sh: when stable, change method name to just tolg()
-  Eprp_method m5("inou.lnast_dfg.tolg_from_pipe", "Pyrope code-> build lnast -> generate lgraph", &Inou_lnast_dfg::tolg_from_pipe);
-  register_inou("lnast_dfg", m5);
 }
 
 Inou_lnast_dfg::Inou_lnast_dfg(const Eprp_var &var) : Pass("inou.lnast_dfg", var) {
   setup_lnast_to_lgraph_primitive_type_mapping();
 }
 
-void Inou_lnast_dfg::tolg(Eprp_var &var) {
-  Inou_lnast_dfg p(var);
-  std::vector<LGraph *> lgs = p.do_tolg();
+/* void Inou_lnast_dfg::tolg(Eprp_var &var) { */
+/*   Inou_lnast_dfg p(var); */
+/*   std::vector<LGraph *> lgs = p.do_tolg(); */
 
-  if (lgs.empty()) {
-    error("failed to generate any lgraph from lnast");
-  } else {
-    var.add(lgs);
-  }
-}
+/*   if (lgs.empty()) { */
+/*     error("failed to generate any lgraph from lnast"); */
+/*   } else { */
+/*     var.add(lgs); */
+/*   } */
+/* } */
 
 
-std::vector<LGraph *> Inou_lnast_dfg::do_tolg() {
-  Lbench b("inou.lnast_dfg.do_tolg");
-  I(!files.empty());
-  I(!path.empty());
+/* std::vector<LGraph *> Inou_lnast_dfg::do_tolg() { */
+/*   Lbench b("inou.lnast_dfg.do_tolg"); */
+/*   I(!files.empty()); */
+/*   I(!path.empty()); */
 
-  std::vector<LGraph *> lgs;
+/*   std::vector<LGraph *> lgs; */
 
-  for (auto &itr_f : absl::StrSplit(files, ',')) {
-    const auto f = std::string(itr_f);
-    Lnast_parser lnast_parser(f);
+/*   for (auto &itr_f : absl::StrSplit(files, ',')) { */
+/*     const auto f = std::string(itr_f); */
+/*     Cfg_parser cfg_parser(f); */
 
-    lnast = lnast_parser.ref_lnast();
-    lnast->ssa_trans();
+/*     lnast = cfg_parser.ref_lnast(); */
+/*     lnast->ssa_trans(); */
 
-    auto        pos = f.rfind('/');
-    std::string basename;
-    if (pos != std::string::npos)
-      basename = f.substr(pos + 1);
-    else
-      basename = f;
+/*     auto        pos = f.rfind('/'); */
+/*     std::string basename; */
+/*     if (pos != std::string::npos) */
+/*       basename = f.substr(pos + 1); */
+/*     else */
+/*       basename = f; */
 
-    auto pos2 = basename.rfind('.');
+/*     auto pos2 = basename.rfind('.'); */
 
-    if (pos2 != std::string::npos)
-      basename = basename.substr(0, pos2);
+/*     if (pos2 != std::string::npos) */
+/*       basename = basename.substr(0, pos2); */
 
-    LGraph *dfg = LGraph::create(path, basename, f);
+/*     LGraph *dfg = LGraph::create(path, basename, f); */
 
-    lnast2lgraph(dfg);
+/*     lnast2lgraph(dfg); */
 
-    lgs.push_back(dfg);
-  }
+/*     lgs.push_back(dfg); */
+/*   } */
 
-  return lgs;
-}
+/*   return lgs; */
+/* } */
 
 void Inou_lnast_dfg::lnast2lgraph(LGraph *dfg) {
   const auto top   = lnast->get_root();
@@ -693,11 +694,11 @@ LGraph* Inou_lnast_dfg::do_lglnverif_tolg(std::shared_ptr<Lnast> llnast) {
   return dfg;
 }
 
-void Inou_lnast_dfg::tolg_from_pipe(Eprp_var &var) {
+void Inou_lnast_dfg::tolg(Eprp_var &var) {
   Inou_lnast_dfg p(var);
   std::vector<LGraph *> lgs;
   for (const auto &ln : var.lnasts) {
-    lgs = p.do_tolg_from_pipe(ln);
+    lgs = p.do_tolg(ln);
   }
 
 
@@ -709,9 +710,9 @@ void Inou_lnast_dfg::tolg_from_pipe(Eprp_var &var) {
 }
 
 
-std::vector<LGraph *> Inou_lnast_dfg::do_tolg_from_pipe(std::shared_ptr<Lnast> ln) {
+std::vector<LGraph *> Inou_lnast_dfg::do_tolg(std::shared_ptr<Lnast> ln) {
     Lbench b("inou.lnast_dfg.do_tolg_from_pipe");
-    lnast = ln; //FIXME->sh: should use ln directly? redesign when integrating all front-end
+    lnast = ln; 
     LGraph *dfg = LGraph::create(path, lnast->get_top_module_name(), "from_front_end_lnast_pipe");
     std::vector<LGraph *> lgs;
     lnast->ssa_trans();

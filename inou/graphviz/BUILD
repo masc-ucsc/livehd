@@ -7,6 +7,7 @@ cc_library(
     includes = ["."],
     deps = [
         "//inou/firrtl:inou_firrtl_cpp",
+        "//inou/cfg:inou_cfg",
         "//core:core",
     ],
 )

@@ -11,7 +11,7 @@
 #include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraphbase.hpp"
-#include "lnast_parser.hpp"
+#include "cfg_lnast.hpp"
 #include "inou_firrtl.hpp"
 
 void setup_inou_graphviz() { Inou_graphviz::setup(); }
@@ -78,9 +78,9 @@ void Inou_graphviz::fromlnast(Eprp_var &var) {
   Inou_graphviz p(var);
 
   for (const auto &f : absl::StrSplit(p.files, ',')) {
-    Lnast_parser lnast_parser(f);
+    Cfg_parser cfg_parser(f);
 
-    std::shared_ptr<Lnast> lnast{lnast_parser.ref_lnast()};
+    std::shared_ptr<Lnast> lnast{cfg_parser.ref_lnast()};
     lnast->ssa_trans();
 
     p.do_from_lnast(lnast);

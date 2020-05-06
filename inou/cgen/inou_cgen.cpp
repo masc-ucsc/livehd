@@ -10,7 +10,7 @@
 
 #include "eprp_utils.hpp"
 #include "lgedgeiter.hpp"
-#include "lnast_parser.hpp"
+#include "cfg_lnast.hpp"
 #include "lnast_to_cfg_parser.hpp"
 #include "lnast_to_cpp_parser.hpp"
 #include "lnast_to_prp_parser.hpp"
@@ -48,26 +48,40 @@ void Inou_cgen::setup() {
 
 void Inou_cgen::to_xxx(Cgen_type cgen_type) {
   for (const auto &f : absl::StrSplit(files, ',')) {
-    Lnast_parser lnast_parser(f);
+    Cfg_parser cfg_parser(f);
 
-    auto lnast = lnast_parser.ref_lnast();
+    auto lnast = cfg_parser.ref_lnast();
     // needed??? lnast->ssa_trans();
 
     std::unique_ptr<Lnast_to_xxx> lnast_to;
 
     if (cgen_type == Cgen_type::Type_verilog) {
-      lnast_to = std::make_unique<Lnast_to_verilog_parser>(lnast, path);
+      lnast_to = std::make_unique<Lnast_to_verilog_parser>(std::move(lnast), path);
     } else if (cgen_type == Cgen_type::Type_prp) {
-      lnast_to = std::make_unique<Lnast_to_prp_parser>(lnast, path);
+      lnast_to = std::make_unique<Lnast_to_prp_parser>(std::move(lnast), path);
     } else if (cgen_type == Cgen_type::Type_cfg) {
-      lnast_to = std::make_unique<Lnast_to_cfg_parser>(lnast, path);
+      lnast_to = std::make_unique<Lnast_to_cfg_parser>(std::move(lnast), path);
     } else if (cgen_type == Cgen_type::Type_cpp) {
-      lnast_to = std::make_unique<Lnast_to_cpp_parser>(lnast, path);
+      lnast_to = std::make_unique<Lnast_to_cpp_parser>(std::move(lnast), path);
     } else {
       I(false);  // Invalid
-      lnast_to = std::make_unique<Lnast_to_prp_parser>(lnast, path);
+      lnast_to = std::make_unique<Lnast_to_prp_parser>(std::move(lnast), path);
     }
     lnast_to->generate();
+
+    /* if (cgen_type == Cgen_type::Type_verilog) { */
+    /*   lnast_to = std::make_unique<Lnast_to_verilog_parser>(lnast, path); */
+    /* } else if (cgen_type == Cgen_type::Type_prp) { */
+    /*   lnast_to = std::make_unique<Lnast_to_prp_parser>(lnast, path); */
+    /* } else if (cgen_type == Cgen_type::Type_cfg) { */
+    /*   lnast_to = std::make_unique<Lnast_to_cfg_parser>(lnast, path); */
+    /* } else if (cgen_type == Cgen_type::Type_cpp) { */
+    /*   lnast_to = std::make_unique<Lnast_to_cpp_parser>(lnast, path); */
+    /* } else { */
+    /*   I(false);  // Invalid */
+    /*   lnast_to = std::make_unique<Lnast_to_prp_parser>(lnast, path); */
+    /* } */
+    /* lnast_to->generate(); */
   }
 }
 

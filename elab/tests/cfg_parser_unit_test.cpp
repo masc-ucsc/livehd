@@ -12,18 +12,18 @@
 
 #include "gtest/gtest.h"
 #include "fmt/format.h"
-#include "lnast_parser.hpp"
+#include "cfg_parser.hpp"
 
 using tuple     = std::tuple<std::string, std::string>;          // <type, name>
 using tuple_ssa = std::tuple<std::string, std::string, uint16_t>;// <type, name, sbs>
 
-class Lnast_test : public ::testing::Test, public Lnast_parser {
+class Lnast_test : public ::testing::Test, public Cfg_parser {
   std::vector<std::vector<tuple>> ast_sorted_golden;
   std::vector<std::vector<tuple>> ast_preorder_golden;
 
 public:
   mmap_lib::tree<tuple>  ast_gld;
-  Lnast_parser lnast_parser;
+  Cfg_parser cfg_parser;
 
   void SetUp() override {
     setup_lnast_golden();
@@ -43,7 +43,7 @@ public:
 
 /*
  *
-CFG text input for lnast parser
+CFG text input for cfg parser
 
 END
 1    0   99  SEQ0
@@ -599,15 +599,14 @@ END
     std::string tmp_str = get_current_working_dir();
     std::string file_path = tmp_str + "/inou/cfg/tests/lnast_utest.cfg";
 
-    lnast_parser.parse_file(file_path);
+    cfg_parser.parse_file(file_path);
   }
 };//end class
 
 TEST_F(Lnast_test, Traverse_breadth_first_check_on_ast) {
   fmt::print("Traverse_breadth_first_check_on_ast\n");
   std::shared_ptr<Lnast> lnast;
-  lnast = lnast_parser.ref_lnast();
-  /* auto *lnast = lnast_parser.ref_lnast(); */
+  lnast = cfg_parser.ref_lnast();
   std::vector<std::vector<tuple>> ast_sorted_testee;
 
   lnast->each_top_down_fast([&ast_sorted_testee, &lnast] (const mmap_lib::Tree_index &self,
@@ -638,7 +637,7 @@ TEST_F(Lnast_test, Traverse_breadth_first_check_on_ast) {
 TEST_F(Lnast_test,Traverse_preorder_check_on_lnast){
   fmt::print("Traverse_preorder_check_on_ast\n");
   std::shared_ptr<Lnast> lnast;
-  lnast = lnast_parser.ref_lnast();
+  lnast = cfg_parser.ref_lnast();
 
   std::vector<std::vector<tuple>> ast_preorder_testee;
 
