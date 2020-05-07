@@ -21,12 +21,9 @@ protected:
 
   void do_from_lnast(std::shared_ptr<Lnast> lnast);
 
-  void do_fromfirrtl(Eprp_var &var);
-
   // eprp callback methods
   static void from(Eprp_var &var);
   static void fromlnast(Eprp_var &var);
-  static void fromfirrtl(Eprp_var &var);
   static void hierarchy(Eprp_var &var);
 
 public:

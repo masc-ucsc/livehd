@@ -12,7 +12,6 @@
 #include "lgedgeiter.hpp"
 #include "lgraphbase.hpp"
 #include "cfg_lnast.hpp"
-#include "inou_firrtl.hpp"
 
 void setup_inou_graphviz() { Inou_graphviz::setup(); }
 
@@ -32,15 +31,11 @@ void Inou_graphviz::setup() {
 
   register_inou("graphviz", m2);
 
-  Eprp_method m3("inou.graphviz.fromfirrtl", "export firrtl protobuf to graphviz dot format", &Inou_graphviz::fromfirrtl);
-
-  register_inou("graphviz", m3);
-
-  Eprp_method m4("inou.graphviz.fromlg.hierarchy", "export lgraph hierarchy to graphviz dot format", &Inou_graphviz::hierarchy);
+  Eprp_method m3("inou.graphviz.fromlg.hierarchy", "export lgraph hierarchy to graphviz dot format", &Inou_graphviz::hierarchy);
 
   // m3.add_label_optional("odir",   "path to put the dot", ".");
 
-  register_inou("graphviz", m4);
+  register_inou("graphviz", m3);
 }
 
 Inou_graphviz::Inou_graphviz(const Eprp_var &var) : Pass("inou.graphviz", var) {
@@ -85,11 +80,6 @@ void Inou_graphviz::fromlnast(Eprp_var &var) {
 
     p.do_from_lnast(lnast);
   }
-}
-
-void Inou_graphviz::fromfirrtl(Eprp_var &var) {
-  Inou_graphviz p(var);
-  p.do_fromfirrtl(var);
 }
 
 void Inou_graphviz::do_hierarchy(LGraph *g) {
@@ -200,52 +190,6 @@ void Inou_graphviz::populate_lg_data(LGraph *g) {
   size_t sz = write(fd, data.c_str(), data.size());
   if (sz != data.size()) {
     Pass::error("inou.graphviz unexpected write missmatch");
-    return;
-  }
-  close(fd);
-}
-
-void Inou_graphviz::do_fromfirrtl(Eprp_var &var) {
-  Inou_firrtl inou_firrtl(var);
-
-  auto lnast = inou_firrtl.ref_lnast();
-  std::string data = "digraph {\n";
-
-  for (const auto &itr : lnast->depth_preorder(lnast->get_root())) {
-    auto node_data = lnast->get_data(itr);
-
-    auto subs = node_data.subs;
-    auto name = node_data.token.get_text();
-
-    auto id = std::to_string(itr.level) + std::to_string(itr.pos);
-    if (node_data.type.is_ref()) {
-      data += fmt::format(" {} [label=<{}, {}<I><SUB><font color=\"#ff1020\">{}</font></SUB></I>>];\n", id, node_data.type.debug_name(), name, subs);
-    } else {
-      data += fmt::format(" {} [label=<{}, {}>];\n", id, node_data.type.debug_name(), name);
-    }
-
-    if (node_data.type.is_top()) continue;
-
-    // get parent data for link
-    auto        p = lnast->get_parent(itr);
-    std::string pname(lnast->get_data(p).token.get_text());
-
-    auto parent_id = std::to_string(p.level) + std::to_string(p.pos);
-    data += fmt::format(" {}->{};\n", parent_id, id);
-  }
-
-  data += "}\n";
-
-  auto f2 = "firrtlGraphTemp";
-  auto file = absl::StrCat(odir, "/", f2, ".lnast.dot");
-  int         fd   = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
-  if (fd < 0) {
-    Pass::error("inou.graphviz_lnast unable to create {}", file);
-    return;
-  }
-  size_t sz = write(fd, data.c_str(), data.size());
-  if (sz != data.size()) {
-    Pass::error("inou.graphviz_firrtl unexpected write missmatch");
     return;
   }
   close(fd);
