@@ -15,6 +15,7 @@
 #include "kernel/sigtools.h"
 #include "kernel/yosys.h"
 #include "lgyosys_dump.hpp"
+#include "lbench.hpp"
 
 USING_YOSYS_NAMESPACE
 PRIVATE_NAMESPACE_BEGIN
@@ -70,6 +71,8 @@ struct LG2Yosys_Pass : public Yosys::Pass {
     // handle extra options (e.g. selection)
     extra_args(args, argidx, design);
 
+    Lbench b("inou.yosys.fromlg");
+
     std::vector<LGraph *> lgs;
     if (single_graph_mode) {
       LGraph *lg = LGraph::open(path, name);
@@ -95,21 +98,6 @@ struct LG2Yosys_Pass : public Yosys::Pass {
     for (auto *g : lgs) {
       generated.insert(g);
     }
-
-#if 0
-    while(dumper.subgraphs().size() >= generated.size()) {
-      std::vector<LGraph *> lgs_;
-      for(auto *g : dumper.subgraphs()) {
-        if(generated.find(g) == generated.end()) {
-          lgs_.push_back(g);
-          generated.insert(g);
-        }
-      }
-      if (lgs_.empty())
-        break;
-      dumper.fromlg(lgs_);
-    }
-#endif
   }
 
 } Lg2yosys_Pass;

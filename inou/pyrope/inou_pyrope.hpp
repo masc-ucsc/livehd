@@ -11,7 +11,6 @@ protected:
   void do_work(const LGraph *g);
 
   // eprp callbacks
-  static void parse_only(Eprp_var &var);
   static void parse_to_lnast(Eprp_var &var);
 
 public:

@@ -206,12 +206,22 @@ public:
     linux.close();
 
     std::chrono::duration<double> t = tp - start_time;
-    std::cerr
+    std::stringstream sstr;
+    sstr
       << sample_name << " in " << t.count() << " secs total"
       << ":IPC=" << ((double)stats[1]) / (stats[0]+1)
       << ":BR MPKI=" << ((double)stats[2]*1000) / (stats[1]+1)
       << ":L2 MPKI=" << ((double)stats[3]*1000) / (stats[1]+1)
       << "\n";
+
+    std::cerr << sstr.str();
+
+    int tfd = ::open("lbench.trace",O_CREAT|O_RDWR|O_APPEND, 0644);
+
+    if (tfd>=0) {
+      write(tfd, sstr.str().data(), sstr.str().size());
+      close(tfd);
+    }
   }
 };
 #endif

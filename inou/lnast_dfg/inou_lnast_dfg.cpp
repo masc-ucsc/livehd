@@ -49,9 +49,10 @@ void Inou_lnast_dfg::tolg(Eprp_var &var) {
 
 
 std::vector<LGraph *> Inou_lnast_dfg::do_tolg(std::shared_ptr<Lnast> ln) {
-    Lbench b("inou.lnast_dfg.do_tolg_from_pipe");
-    lnast = ln; 
-    LGraph *dfg = LGraph::create(path, lnast->get_top_module_name(), "from_front_end_lnast_pipe");
+    Lbench b("inou.lnast_dfg.tolg");
+
+    lnast = ln;
+    LGraph *dfg = LGraph::create(path, lnast->get_top_module_name(), "inou.lnast_dfg.tolg");
     std::vector<LGraph *> lgs;
     lnast->ssa_trans();
     lnast2lgraph(dfg);

@@ -16,6 +16,7 @@
 #include "kernel/yosys.h"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
+#include "lbench.hpp"
 
 //#include "absl/container/node_hash_map.h"
 #include "absl/container/flat_hash_map.h"
@@ -1237,6 +1238,8 @@ struct Yosys2lg_Pass : public Yosys::Pass {
     ct_all.setup(design);
 
     driven_signals.clear();
+
+    Lbench b("inou.yosys.tolg");
 
     for (auto &it : design->modules_) {
       RTLIL::Module *module = it.second;
