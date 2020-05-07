@@ -388,90 +388,94 @@ int main(int argc, char** argv) {
 
   // main repl loop
   for (;;) {
-    // display the prompt and retrieve input from the user
-    char const* cinput{nullptr};
+    try {
+      // display the prompt and retrieve input from the user
+      char const* cinput{nullptr};
 
-    do {
-      cinput = rx.input(prompt);
-    } while ((cinput == nullptr) && (errno == EAGAIN));
+      do {
+        cinput = rx.input(prompt);
+      } while ((cinput == nullptr) && (errno == EAGAIN));
 
-    if (cinput == nullptr) {
-      break;
-    }
-    if (cinput[0] == 0) {
-      continue;  // Empty line
-    }
+      if (cinput == nullptr) {
+        break;
+      }
+      if (cinput[0] == 0) {
+        continue;  // Empty line
+      }
 
-    std::string input{cinput};
+      std::string input{cinput};
 
-    if (input.compare(0, 4, "quit") == 0 || input.compare(0, 4, "exit") == 0 || input.compare(0, 1, "q") == 0 ||
-        input.compare(0, 1, "x") == 0) {
-      rx.history_add(input);
-      break;
+      if (input.compare(0, 4, "quit") == 0 || input.compare(0, 4, "exit") == 0 || input.compare(0, 1, "q") == 0 ||
+          input.compare(0, 1, "x") == 0) {
+        rx.history_add(input);
+        break;
 
-    } else if (input.compare(0, 4, "help") == 0) {
-      auto pos = input.find(" ");
-      while (input[pos + 1] == ' ') pos++;
+      } else if (input.compare(0, 4, "help") == 0) {
+        auto pos = input.find(" ");
+        while (input[pos + 1] == ' ') pos++;
 
-      if (pos == std::string::npos) {
-        help("help [str]", "this output, or for a specific command");
-        help("quit", "exit livehd");
-        help("exit", "exit livehd");
-        help("clear", "clear the screen");
-        help("history", "display the current history");
-        help("prompt <str>", "change the current prompt");
+        if (pos == std::string::npos) {
+          help("help [str]", "this output, or for a specific command");
+          help("quit", "exit livehd");
+          help("exit", "exit livehd");
+          help("clear", "clear the screen");
+          help("history", "display the current history");
+          help("prompt <str>", "change the current prompt");
 
-        Main_api::get_commands(help);
+          Main_api::get_commands(help);
+        } else {
+          std::string cmd2  = input.substr(pos + 1);
+          auto        pos2 = cmd2.find(" ");
+          if (pos2 != std::string::npos) cmd2 = cmd2.substr(0, pos2);
+
+          help(cmd2, Main_api::get_command_help(cmd2));
+          Main_api::get_labels(cmd2, help_labels);
+        }
+
+        rx.history_add(input);
+        continue;
+
+      } else if (input.compare(0, 6, "prompt") == 0) {
+        // set the repl prompt text
+        auto pos = input.find(" ");
+        if (pos == std::string::npos) {
+          std::cout << "Error: 'prompt' missing argument\n";
+        } else {
+          prompt = input.substr(pos + 1) + " ";
+        }
+
+        rx.history_add(input);
+        continue;
+
+      } else if (input.compare(0, 7, "history") == 0) {
+        // display the current history
+        Replxx::HistoryScan hs( rx.history_scan() );
+        for ( int i( 0 ); hs.next(); ++ i ) {
+          std::cout << std::setw(4) << i << ": " << hs.get().text() << "\n";
+        }
+
+        rx.history_add(input);
+        continue;
+
+      } else if (input.compare(0, 5, "clear") == 0) {
+        // clear the screen
+        rx.clear_screen();
+
+        rx.history_add(input);
+        continue;
+
       } else {
-        std::string cmd2  = input.substr(pos + 1);
-        auto        pos2 = cmd2.find(" ");
-        if (pos2 != std::string::npos) cmd2 = cmd2.substr(0, pos2);
+        // default action
+        std::cout << input << "\n";
 
-        help(cmd2, Main_api::get_command_help(cmd2));
-        Main_api::get_labels(cmd2, help_labels);
+        Main_api::parse_inline(input);
+        Graph_library::sync_all();
+
+        rx.history_add(input);
+        continue;
       }
-
-      rx.history_add(input);
-      continue;
-
-    } else if (input.compare(0, 6, "prompt") == 0) {
-      // set the repl prompt text
-      auto pos = input.find(" ");
-      if (pos == std::string::npos) {
-        std::cout << "Error: 'prompt' missing argument\n";
-      } else {
-        prompt = input.substr(pos + 1) + " ";
-      }
-
-      rx.history_add(input);
-      continue;
-
-    } else if (input.compare(0, 7, "history") == 0) {
-      // display the current history
-      Replxx::HistoryScan hs( rx.history_scan() );
-			for ( int i( 0 ); hs.next(); ++ i ) {
-				std::cout << std::setw(4) << i << ": " << hs.get().text() << "\n";
-      }
-
-      rx.history_add(input);
-      continue;
-
-    } else if (input.compare(0, 5, "clear") == 0) {
-      // clear the screen
-      rx.clear_screen();
-
-      rx.history_add(input);
-      continue;
-
-    } else {
-      // default action
-      std::cout << input << "\n";
-
-      Main_api::parse_inline(input);
-      Graph_library::sync_all();
-
-      rx.history_add(input);
-      continue;
+    } catch (...) {
+      fmt::print("command aborted...\n");
     }
   }
 

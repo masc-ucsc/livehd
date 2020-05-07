@@ -29,7 +29,26 @@ void Eprp_var::add(std::unique_ptr<Lnast> lnast) {
   lnasts.emplace_back(std::move(lnast));
 }
 
-void Eprp_var::add(const std::string &name, std::string_view value) { dict[name] = value; }
+void Eprp_var::add(const std::string &name, std::string_view value) {
+  if (name == "files") {
+    std::vector<std::string> svector = absl::StrSplit(value,',');
+
+    for (const auto& v : svector) {
+      const std::string file{v};
+      if (access(file.c_str(), R_OK)==-1) {
+        fmt::print("ERROR: file {} is not accessible (skipping)\n", v);
+        throw std::runtime_error("not valid file");
+      }
+    }
+  } else if (name == "path") {
+    const std::string path { value };
+    if (access(path.c_str(), R_OK)==-1) {
+      fmt::print("ERROR: path {} is not accessible (skipping)\n", path);
+      throw std::runtime_error("not valid file");
+    }
+  }
+  dict[name] = value;
+}
 
 void Eprp_var::delete_label(const std::string &name) {
   auto it = dict.find(name);
