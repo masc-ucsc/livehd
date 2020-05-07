@@ -1386,11 +1386,9 @@ void Prp::elaborate(){
   }
 
   if(failed){
-    fmt::print("\nParsing FAILED!\n");
-    fmt::print("Syntax error at line {}, after last correct token = {}.\n", get_token(term_token).line, scan_text(term_token));
-    exit(1);
-  }
-  else{
+    fmt::print("Parsing error line {} unexpected token {}.\n", get_token(term_token).line, scan_text(term_token));
+    parser_error("unexpected token {}.\n", scan_text(term_token));
+  }else{
     fmt::print("\nParsing SUCCESSFUL!\n");
   }
 
