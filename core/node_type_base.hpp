@@ -278,6 +278,7 @@ public:
   };
 };
 
+// Y = bitwise invert of A
 class Node_Type_Not : public Node_Type {
 public:
   Node_Type_Not() : Node_Type("not", Not_Op, false) {

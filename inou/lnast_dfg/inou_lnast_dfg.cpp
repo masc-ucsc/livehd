@@ -77,6 +77,8 @@ void Inou_lnast_dfg::process_ast_stmts(LGraph *dfg, const Lnast_nid &lnidx_stmts
       process_ast_assign_op(dfg, lnidx);
     } else if (ntype.is_nary_op()) {
       process_ast_nary_op(dfg, lnidx);
+    } else if (ntype.is_unary_op()) {
+      process_ast_nary_op(dfg, lnidx); // could be handled like unary
     } else if (ntype.is_dot()) {
       process_ast_dot_op(lnidx);
     } else if (ntype.is_select()) {
@@ -211,7 +213,14 @@ Node_pin Inou_lnast_dfg::setup_tuple_chain_new_max_pos(LGraph *dfg, const Node_p
   return resolve_constant(dfg, new_pos_str).setup_driver_pin();
 }
 
+/* void Inou_lnast_dfg::process_ast_unary_op(LGraph *dfg, const Lnast_nid &lnidx_opr) { */
+/*   auto opr_node = setup_node_opr_and_lhs(dfg, lnidx_opr).get_node(); */
 
+/*   auto c0_opr = lnast->get_first_child(lnidx_opr); */
+/*   auto c1_opr = lnast->get_sibling_next(c0_opr); */
+
+/*   Node_pin opd = setup_ref_node_dpin(dfg, c1_opr); */
+/* } */
 
 void Inou_lnast_dfg::process_ast_nary_op(LGraph *dfg, const Lnast_nid &lnidx_opr) {
   auto opr_node = setup_node_opr_and_lhs(dfg, lnidx_opr).get_node();
@@ -322,6 +331,9 @@ void Inou_lnast_dfg::process_ast_assign_op(LGraph *dfg, const Lnast_nid &lnidx_a
 
   Node_pin opr  = setup_node_assign_and_lhs(dfg, lnidx_assign);
   Node_pin opd1 = setup_ref_node_dpin(dfg, c1);
+  fmt::print("c1 name:{}\n", lnast->get_sname(c1));
+  fmt::print("opr:{}\n", opr.debug_name());
+  fmt::print("opd1:{}\n", opd1.debug_name());
   GI(opd1.get_node().get_type().op != U32Const_Op, opd1.get_bits() == 0);
 
   dfg->add_edge(opd1, opr);
@@ -570,8 +582,10 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
   assert(!name.empty());
 
   const auto it = name2dpin.find(name);
-  if (it != name2dpin.end())
+  if (it != name2dpin.end()){
+    fmt::print("hello\n");
     return it->second;
+  }
 
   Node_pin node_dpin;
 
@@ -610,6 +624,7 @@ Node_Type_Op Inou_lnast_dfg::decode_lnast_op(const Lnast_nid &lnidx_opr) {
   const auto raw_ntype = lnast->get_data(lnidx_opr).type.get_raw_ntype();
   return primitive_type_lnast2lg[raw_ntype];
 }
+
 
 
 

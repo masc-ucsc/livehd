@@ -182,7 +182,6 @@ Lnast_nid Cfg_parser::process_operator_node(const Lnast_nid& opr_parent_node, Ln
     buffer_tmp_funcall_idx = func_call_idx;
     return func_call_idx;
   }
-
   return lnast->add_child(opr_parent_node, Lnast_node(type, Token()));
 }
 
@@ -191,7 +190,7 @@ void Cfg_parser::add_operator_subtree(const Lnast_nid& tree_idx_opr, const Token
   //fmt::print("token is :{}\n", scan_text());
   const auto nt = lnast->get_data(tree_idx_opr).type;
 
-  if (nt.is_assign() || nt.is_dp_assign() || nt.is_as() || nt.is_tuple()) {//sh:fixme: handle tuple seperately
+  if (nt.is_assign() || nt.is_dp_assign() || nt.is_as() || nt.is_tuple() || nt.is_not() || nt.is_logical_not()) {//sh:fixme: handle tuple seperately
     process_assign_like_op(tree_idx_opr, target_name);
   } else if (nt.is_func_call()) {
     process_func_call_op(tree_idx_opr, target_name);
@@ -427,6 +426,10 @@ Lnast_ntype Cfg_parser::operator_analysis() {
     type = Lnast_ntype::create_logical_and();
   } else if (scan_is_token(Token_id_alnum) && scan_text() == "or") {
     type = Lnast_ntype::create_logical_or();
+  } else if (scan_is_token(Token_id_bang)) {
+    type = Lnast_ntype::create_logical_not();
+  } else if (scan_is_token(Token_id_tilde)) {
+    type = Lnast_ntype::create_not();
   } else if (scan_is_token(Token_id_eq)) {
     type = Lnast_ntype::create_assign();
   } else if (scan_is_token(Token_id_and)) {

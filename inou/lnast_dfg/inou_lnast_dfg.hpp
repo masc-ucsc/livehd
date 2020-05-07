@@ -40,6 +40,7 @@ protected:
   void process_ast_stmts        (LGraph *dfg, const Lnast_nid &lnidx_stmts);
   void process_ast_assign_op    (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_nary_op      (LGraph *dfg, const Lnast_nid &lnidx);
+  void process_ast_unary_op     (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_logical_op   (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_as_op        (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_label_op     (LGraph *dfg, const Lnast_nid &lnidx);

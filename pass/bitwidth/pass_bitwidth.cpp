@@ -224,7 +224,10 @@ void Pass_bitwidth::iterate_logic(Node_pin &pin) {
         break;
       case Not_Op:
         // FIXME: Not gets really complicated... I need to think this over.
-        fmt::print("Not op not yet implemented.\n");
+        // FIXME->sh: ask hunter's concerns
+        I(pin.get_node().get_type().op == Not_Op);
+        imp.min     = inp_edge.driver.get_bitwidth().i.min;
+        imp.max     = inp_edge.driver.get_bitwidth().i.max;
         break;
       default: fmt::print("Error: logic op not understood\n");
     }
