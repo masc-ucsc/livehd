@@ -189,7 +189,7 @@ public:
       else
         m = s.mem - prev_mem;
 
-      std::cerr << s.name << " in " << t.count() << " secs";
+      std::cerr << s.name << " secs=" << t.count();
       if (s.ncycles) {
         std::cerr
           << ":IPC=" << ((double)s.ninst) / (s.ncycles+1)
@@ -208,7 +208,7 @@ public:
     std::chrono::duration<double> t = tp - start_time;
     std::stringstream sstr;
     sstr
-      << sample_name << " in " << t.count() << " secs total"
+      << sample_name << " secs=" << t.count()
       << ":IPC=" << ((double)stats[1]) / (stats[0]+1)
       << ":BR MPKI=" << ((double)stats[2]*1000) / (stats[1]+1)
       << ":L2 MPKI=" << ((double)stats[3]*1000) / (stats[1]+1)

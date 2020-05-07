@@ -107,7 +107,6 @@ void Chunkify_verilog::add_io(Sub_node *sub, bool input, std::string_view io_nam
 }
 
 void Chunkify_verilog::elaborate() {
-  Lbench bench("live.parse");
 
   std::string parse_path = absl::StrCat(path, "/parse/");  // Keep trailing /
   if (access(parse_path.c_str(), F_OK) != 0) {
@@ -136,6 +135,7 @@ void Chunkify_verilog::elaborate() {
       if (format_name[i] == '/') format_name[i] = '.';
     }
   }
+  Lbench bench("live.parse " + format_name);
 
   auto source = absl::StrCat(parse_path, "file_", format_name);
 
