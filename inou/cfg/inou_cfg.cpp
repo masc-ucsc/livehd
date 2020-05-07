@@ -10,7 +10,7 @@
 void setup_inou_cfg() { Inou_cfg::setup(); }
 
 void Inou_cfg::setup() {
-  Eprp_method m1("inou.cfg_to_lnast", "Parse the cfg file and convert to an LNAST", &Inou_cfg::parse_to_lnast);
+  Eprp_method m1("inou.cfg", "Parse the cfg file and convert to an LNAST", &Inou_cfg::parse_to_lnast);
   m1.add_label_required("files", "cfg files to process (comma separated)");
 
   register_pass(m1);
@@ -20,7 +20,7 @@ Inou_cfg::Inou_cfg(const Eprp_var &var) : Pass("inou.cfg", var) {}
 
 
 void Inou_cfg::parse_to_lnast(Eprp_var &var){
-  Lbench b("inou.cfg_to_lnast");
+  Lbench b("inou.cfg");
   Inou_cfg p(var);
 
 
