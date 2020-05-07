@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "prp_lnast.hpp"
+
 #include "lbench.hpp"
 
 int main(int argc, char **argv) {
@@ -15,18 +16,17 @@ int main(int argc, char **argv) {
   b.end();
 
   Lbench b2("prp_last_test.convert");
-  auto lnast = converter.prp_ast_to_lnast("test");
+  auto   lnast = converter.prp_ast_to_lnast("test");
   b2.end();
 
   fmt::print("AST to LNAST output:\n\n");
 
   std::string rule_name;
 #ifdef OUTPUT_LN
-  for(const auto &it:lnast->depth_preorder(lnast->get_root())){
-    auto node = lnast->get_data(it);
+  for (const auto &it : lnast->depth_preorder(lnast->get_root())) {
+    auto        node = lnast->get_data(it);
     std::string indent{"  "};
-    for(int i=0;i<it.level;++i)
-      indent += "  ";
+    for (int i = 0; i < it.level; ++i) indent += "  ";
 
     fmt::print("{} {} {:>20} : {}\n", it.level, indent, converter.Lnast_type_to_string(node.type), node.token.text);
   }

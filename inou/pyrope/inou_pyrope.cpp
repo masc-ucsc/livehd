@@ -18,22 +18,20 @@ void Inou_pyrope::setup() {
 
 Inou_pyrope::Inou_pyrope(const Eprp_var &var) : Pass("inou.pyrope", var) {}
 
-void Inou_pyrope::parse_to_lnast(Eprp_var &var){
-  Lbench b("inou.pyrope");
+void Inou_pyrope::parse_to_lnast(Eprp_var &var) {
+  Lbench      b("inou.pyrope");
   Inou_pyrope p(var);
-  Prp_lnast converter;
+  Prp_lnast   converter;
 
   for (auto f : absl::StrSplit(p.files, ',')) {
     converter.parse_file(f);
 
     std::string name{f};
-    auto found_path = name.find_last_of('/');
-    if (found_path != std::string::npos)
-      name = name.substr(found_path+1);
+    auto        found_path = name.find_last_of('/');
+    if (found_path != std::string::npos) name = name.substr(found_path + 1);
 
-    auto found_dot  = name.find_last_of('.');
-    if (found_dot != std::string::npos)
-      name = name.substr(0,found_dot);
+    auto found_dot = name.find_last_of('.');
+    if (found_dot != std::string::npos) name = name.substr(0, found_dot);
     var.add(std::move(converter.prp_ast_to_lnast(name)));
   }
 }

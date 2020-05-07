@@ -6,8 +6,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include <iostream>
 #include <chrono>
+#include <iostream>
 
 int main(int argc, char **argv) {
   if (argc != 2) {
@@ -15,7 +15,7 @@ int main(int argc, char **argv) {
     exit(1);
   }
 
-  Prp scanner;
+  Prp  scanner;
   auto start = std::chrono::system_clock::now();
   scanner.parse_file(argv[1]);
   auto end = std::chrono::system_clock::now();

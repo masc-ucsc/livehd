@@ -9,13 +9,12 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <tuple>
-#include <fstream>
 
+#include <fstream>
 #include <string>
+#include <tuple>
 
 #include "absl/container/flat_hash_map.h"
-
 #include "ast.hpp"
 #include "elab_scanner.hpp"
 
@@ -31,9 +30,8 @@
 #define SCAN_IS_TOKEN_2_ARGS(tok, rid) chk_and_consume(tok, rid, &sub_cnt, loc_list)
 
 #define GET_3RD_ARG(arg1, arg2, arg3, ...) arg3
-#define SCAN_IS_TOKEN_MACRO_CHOOSER(...) \
-  GET_3RD_ARG(__VA_ARGS__, SCAN_IS_TOKEN_2_ARGS, SCAN_IS_TOKEN_1_ARGS)
-  
+#define SCAN_IS_TOKEN_MACRO_CHOOSER(...) GET_3RD_ARG(__VA_ARGS__, SCAN_IS_TOKEN_2_ARGS, SCAN_IS_TOKEN_1_ARGS)
+
 #define SCAN_IS_TOKEN(...) SCAN_IS_TOKEN_MACRO_CHOOSER(__VA_ARGS__)(__VA_ARGS__)
 
 #ifdef DEBUG_LN
@@ -62,86 +60,85 @@
 
 // function-like macros
 #ifdef DEBUG_AST
-    #define INIT_FUNCTION(...) \
-    debug_stat.rules_called++; \
-    rule_call_stack.push_back(__VA_ARGS__); \
-    print_rule_call_stack(); \
-    auto starting_tokens = tokens_consumed; \
-    auto starting_line = cur_line; \
-    uint64_t sub_cnt = 0; \
-    std::list<std::tuple<Rule_id, Token_entry>> loc_list
+#define INIT_FUNCTION(...)                                                       \
+  debug_stat.rules_called++;                                                     \
+  rule_call_stack.push_back(__VA_ARGS__);                                        \
+  print_rule_call_stack();                                                       \
+  auto                                        starting_tokens = tokens_consumed; \
+  auto                                        starting_line   = cur_line;        \
+  uint64_t                                    sub_cnt         = 0;               \
+  std::list<std::tuple<Rule_id, Token_entry>> loc_list
 #else
-    #define INIT_FUNCTION(...) \
-    auto starting_tokens = tokens_consumed; \
-    auto starting_line = cur_line; \
-    uint64_t sub_cnt = 0; \
-    std::list<std::tuple<Rule_id, Token_entry>> loc_list
+#define INIT_FUNCTION(...)                                                       \
+  auto                                        starting_tokens = tokens_consumed; \
+  auto                                        starting_line   = cur_line;        \
+  uint64_t                                    sub_cnt         = 0;               \
+  std::list<std::tuple<Rule_id, Token_entry>> loc_list
 #endif
 
 #ifdef DEBUG_AST
-#define RULE_FAILED(...) \
-    fmt::print(__VA_ARGS__); \
-    rule_call_stack.pop_back(); \
-    print_rule_call_stack(); \
-    if(loc_list.size() > 0){\
-      PRINT_DBG_AST("tokens_consumed: {}.\n", tokens_consumed-starting_tokens); \
-      print_loc_list(loc_list);\
-    }\
-    else{ \
-      fmt::print("No problem; loc_list had nothing in it.\n");\
-    }\
-    go_back(tokens_consumed-starting_tokens); \
-    cur_line = starting_line; \
-    debug_stat.rules_failed++; \
-    return false
+#define RULE_FAILED(...)                                                        \
+  fmt::print(__VA_ARGS__);                                                      \
+  rule_call_stack.pop_back();                                                   \
+  print_rule_call_stack();                                                      \
+  if (loc_list.size() > 0) {                                                    \
+    PRINT_DBG_AST("tokens_consumed: {}.\n", tokens_consumed - starting_tokens); \
+    print_loc_list(loc_list);                                                   \
+  } else {                                                                      \
+    fmt::print("No problem; loc_list had nothing in it.\n");                    \
+  }                                                                             \
+  go_back(tokens_consumed - starting_tokens);                                   \
+  cur_line = starting_line;                                                     \
+  debug_stat.rules_failed++;                                                    \
+  return false
 #else
-#define RULE_FAILED(...) \
-    go_back(tokens_consumed-starting_tokens); \
-    cur_line = starting_line; \
-    return false
+#define RULE_FAILED(...)                      \
+  go_back(tokens_consumed - starting_tokens); \
+  cur_line = starting_line;                   \
+  return false
 #endif
 
 #ifdef DEBUG_AST
-#define RULE_SUCCESS(message, rule) \
-  fmt::print(message); \
-  rule_call_stack.pop_back(); \
-  print_rule_call_stack(); \
-  debug_stat.rules_matched++;\
-  fmt::print("Rule {} had a sub_cnt of {}.\n", rule_id_to_string(rule), sub_cnt); \
-  if(sub_cnt > 1){ \
-    fmt::print("Had a subtree of at least size two in rule {} it was of size {}.\n", rule_id_to_string(rule), sub_cnt);\
-    loc_list.push_front(std::make_tuple(0, 0)); \
-    loc_list.push_back(std::make_tuple(rule, 0)); \
-  } \
-  pass_list.splice(pass_list.end(), loc_list); \
+#define RULE_SUCCESS(message, rule)                                                                                     \
+  fmt::print(message);                                                                                                  \
+  rule_call_stack.pop_back();                                                                                           \
+  print_rule_call_stack();                                                                                              \
+  debug_stat.rules_matched++;                                                                                           \
+  fmt::print("Rule {} had a sub_cnt of {}.\n", rule_id_to_string(rule), sub_cnt);                                       \
+  if (sub_cnt > 1) {                                                                                                    \
+    fmt::print("Had a subtree of at least size two in rule {} it was of size {}.\n", rule_id_to_string(rule), sub_cnt); \
+    loc_list.push_front(std::make_tuple(0, 0));                                                                         \
+    loc_list.push_back(std::make_tuple(rule, 0));                                                                       \
+  }                                                                                                                     \
+  pass_list.splice(pass_list.end(), loc_list);                                                                          \
   return true
 #else
-#define RULE_SUCCESS(message, rule) \
-  if(sub_cnt > 1){ \
-    loc_list.push_front(std::make_tuple(0, 0)); \
+#define RULE_SUCCESS(message, rule)               \
+  if (sub_cnt > 1) {                              \
+    loc_list.push_front(std::make_tuple(0, 0));   \
     loc_list.push_back(std::make_tuple(rule, 0)); \
-  } \
-  pass_list.splice(pass_list.end(), loc_list); \
+  }                                               \
+  pass_list.splice(pass_list.end(), loc_list);    \
   return true
 #endif
 
 #define CHECK_RULE(func) check_function(func, &sub_cnt, loc_list)
 
-#define INIT_PSEUDO_FAIL() \
-  uint64_t cur_tokens; \
+#define INIT_PSEUDO_FAIL()    \
+  uint64_t cur_tokens;        \
   uint64_t cur_loc_list_size; \
   uint64_t lines_start
 
-#define UPDATE_PSEUDO_FAIL() \
-  cur_tokens = tokens_consumed; \
+#define UPDATE_PSEUDO_FAIL()           \
+  cur_tokens        = tokens_consumed; \
   cur_loc_list_size = loc_list.size(); \
-  lines_start = cur_line
+  lines_start       = cur_line
 
-#define PSEUDO_FAIL() \
+#define PSEUDO_FAIL()                    \
   go_back(tokens_consumed - cur_tokens); \
-  loc_list.resize(cur_loc_list_size); \
+  loc_list.resize(cur_loc_list_size);    \
   cur_line = lines_start
-  
+
 // control
 constexpr Token_id Pyrope_id_if     = 128;
 constexpr Token_id Pyrope_id_else   = 129;
@@ -155,7 +152,7 @@ constexpr Token_id Pyrope_id_when   = 135;
 constexpr Token_id Pyrope_id_as = 136;
 constexpr Token_id Pyrope_id_is = 137;
 // Debug
-constexpr Token_id Pyrope_id_c = 153;
+constexpr Token_id Pyrope_id_c         = 153;
 constexpr Token_id Pyrope_id_assertion = 138;
 constexpr Token_id Pyrope_id_negation  = 139;
 constexpr Token_id Pyrope_id_yield     = 140;
@@ -185,7 +182,7 @@ constexpr Token_id Pyrope_id_default = 158;
 
 class Prp : public Elab_scanner {
 protected:
-  struct debug_statistics{
+  struct debug_statistics {
     uint16_t rules_called;
     uint16_t rules_matched;
     uint16_t rules_failed;
@@ -195,21 +192,21 @@ protected:
     uint16_t ast_down_calls;
     uint16_t ast_add_calls;
   };
-  
-  debug_statistics debug_stat{0,0,0,0,0,0,0,0};
+
+  debug_statistics         debug_stat{0, 0, 0, 0, 0, 0, 0, 0};
   std::vector<std::string> ast_call_trace;
-  
+
   uint64_t tokens_consumed = 0;
-  uint64_t subtree_index = 0;
-  uint64_t cur_line = 0;
-  
-  std::unique_ptr<Ast_parser> ast;
+  uint64_t subtree_index   = 0;
+  uint64_t cur_line        = 0;
+
+  std::unique_ptr<Ast_parser>                ast;
   absl::flat_hash_map<std::string, Token_id> pyrope_keyword;
-  std::vector<std::string> rule_call_stack;
-  uint64_t term_token = 1;
-  
+  std::vector<std::string>                   rule_call_stack;
+  uint64_t                                   term_token = 1;
+
   void elaborate();
-  
+
   uint8_t rule_start(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
   uint8_t rule_code_blocks(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
   uint8_t rule_code_block_int(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
@@ -272,28 +269,29 @@ protected:
   uint8_t rule_for_in_notation(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
   uint8_t rule_not_in_implicit(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
   uint8_t rule_keyword(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
-  
+
   inline void check_lb();
   inline bool check_eos();
   inline bool inc_line_cnt();
-  
+
   inline bool unconsume_token();
   inline bool consume_token();
-  bool go_back(uint64_t num_tok);
+  bool        go_back(uint64_t num_tok);
   std::string rule_id_to_string(Rule_id rid);
   std::string tok_id_to_string(Token_id tok);
-  
-  uint8_t check_function(uint8_t (Prp::*rule)(std::list<std::tuple<Rule_id, Token_entry>>&), uint64_t *sub_cnt, std::list<std::tuple<Rule_id, Token_entry>> &loc_list);
-  bool chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, std::list<std::tuple<Rule_id, Token_entry>> &loc_list);
-  
+
+  uint8_t check_function(uint8_t (Prp::*rule)(std::list<std::tuple<Rule_id, Token_entry>> &), uint64_t *sub_cnt,
+                         std::list<std::tuple<Rule_id, Token_entry>> &loc_list);
+  bool    chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, std::list<std::tuple<Rule_id, Token_entry>> &loc_list);
+
   void ast_handler();
   void ast_builder(std::list<std::tuple<Rule_id, Token_entry>> &passed_list);
-  
+
 #ifdef DEBUG_AST
   void print_loc_list(std::list<std::tuple<Rule_id, Token_entry>> &loc_list);
   void print_rule_call_stack();
 #endif
-  
+
 public:
   Prp() {
     pyrope_keyword["if"]     = Pyrope_id_if;
@@ -313,10 +311,10 @@ public:
     pyrope_keyword["or"]  = Pyrope_id_or;
     pyrope_keyword["not"] = Pyrope_id_not;
     pyrope_keyword["xor"] = Pyrope_id_xor;
-    
-    pyrope_keyword["C"] = Pyrope_id_c;
-    pyrope_keyword["I"] = Pyrope_id_assertion;
-    pyrope_keyword["N"] = Pyrope_id_negation;
+
+    pyrope_keyword["C"]       = Pyrope_id_c;
+    pyrope_keyword["I"]       = Pyrope_id_assertion;
+    pyrope_keyword["N"]       = Pyrope_id_negation;
     pyrope_keyword["yield"]   = Pyrope_id_yield;
     pyrope_keyword["waitfor"] = Pyrope_id_waitfor;
 
@@ -326,16 +324,16 @@ public:
     pyrope_keyword["in"]        = Pyrope_id_in;
     pyrope_keyword["by"]        = Pyrope_id_by;
     pyrope_keyword["punch"]     = Pyrope_id_punch;
-    
+
     pyrope_keyword["false"] = Pyrope_id_false;
     pyrope_keyword["FALSE"] = Pyrope_id_FALSE;
-    pyrope_keyword["true"] = Pyrope_id_true;
-    pyrope_keyword["TRUE"] = Pyrope_id_TRUE;
-    
+    pyrope_keyword["true"]  = Pyrope_id_true;
+    pyrope_keyword["TRUE"]  = Pyrope_id_TRUE;
+
     pyrope_keyword["default"] = Pyrope_id_default;
   }
-  
- enum Prp_rules: Rule_id {
+
+  enum Prp_rules : Rule_id {
     Prp_invalid = 0,
     Prp_rule,
     Prp_rule_start,
@@ -349,7 +347,7 @@ public:
     Prp_rule_punch_format,
     Prp_rule_function_pipe,
     Prp_rule_fcall_explicit,
-    Prp_rule_fcall_implicit, 
+    Prp_rule_fcall_implicit,
     Prp_rule_for_index,
     Prp_rule_assignment_expression,
     Prp_rule_logical_expression,
