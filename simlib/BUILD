@@ -18,6 +18,7 @@ cc_test(
         ":simlib",
         "@gtest//:gtest_main",
         "@fmt//:fmt",
+        "//lbench:headers",
         ],
     )
 

@@ -1,5 +1,6 @@
+
 #include "prp_lnast.hpp"
-#include <chrono>
+#include "lbench.hpp"
 
 int main(int argc, char **argv) {
   if (argc != 2) {
@@ -8,14 +9,13 @@ int main(int argc, char **argv) {
   }
   Prp_lnast converter;
 
-  auto start = std::chrono::system_clock::now();
+  Lbench b("prp_lnast_test.parse");
   converter.parse_file(argv[1]);
+  b.end();
+
+  Lbench b2("prp_last_test.convert");
   auto lnast = converter.prp_ast_to_lnast("test");
-  auto end = std::chrono::system_clock::now();
-
-  auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-
-  std::cout << "Elapsed time: " << elapsed_time.count() << " ms\n";
+  b2.end();
 
   fmt::print("AST to LNAST output:\n\n");
 

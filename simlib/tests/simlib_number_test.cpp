@@ -7,6 +7,8 @@
 #include "gtest/gtest.h"
 #include "fmt/format.h"
 
+#include "lbench.hpp"
+
 #include "sint.hpp"
 #include "uint.hpp"
 
@@ -16,8 +18,12 @@ public:
   void SetUp() override {};
 };
 
+
 TEST_F(Simlib_number, Trivial) {
 
+  Lbench b("trivial");
+
+  UInt<1>   a1u(0x1);
   UInt<16>  a16u(0xcafe);
   UInt<16>  b16u(0xbebe);
   UInt<64>  a64u(0xe2bd5b4ff8b30fc8);
@@ -26,6 +32,12 @@ TEST_F(Simlib_number, Trivial) {
   UInt<80>  b80u("0x563a0757a07b7bd27485");
   UInt<128> a128u("0xe903646a697fcaa344d2b2aa95e47b5d");
   UInt<128> b128u("0x56fa570ecb04adca42405f12bf28b822");
+
+  fmt::print("UInt<1> has sizeof {}\n", sizeof(a1u));
+  fmt::print("UInt<16> has sizeof {}\n", sizeof(a16u));
+  fmt::print("UInt<64> has sizeof {}\n", sizeof(a64u));
+  fmt::print("UInt<80> has sizeof {}\n", sizeof(a80u));
+  fmt::print("UInt<128> has sizeof {}\n", sizeof(a128u));
 
   SInt<16>  a16s(0x6dba);
   SInt<16>  b16s(0xccb2);
@@ -46,5 +58,13 @@ TEST_F(Simlib_number, Trivial) {
   EXPECT_EQ( a80u.cat(a128u)  , UInt<208>("0x987426c1f7cd7d4d693ae903646a697fcaa344d2b2aa95e47b5d") );
   EXPECT_EQ( a128u.cat(a80u)  , UInt<208>("0xe903646a697fcaa344d2b2aa95e47b5d987426c1f7cd7d4d693a") );
   EXPECT_EQ( a128u.cat(b128u) , UInt<256>("0xe903646a697fcaa344d2b2aa95e47b5d56fa570ecb04adca42405f12bf28b822") );
+
+#if 0
+  auto base_ptr = data.data();
+  auto& big_int_ref = *base_ptr;
+
+    auto x = reinterpret_cast<big_int<Len> *>(base_ptr + i);
+    auto y = reinterpret_cast<big_int<Len> *>(base_ptr + i + Len);
+#endif
 }
 
