@@ -38,7 +38,7 @@ void Pass_lgraph_to_lnast::do_trans(LGraph *lg, Eprp_var &var, std::string_view 
   //Lnast lnast("module_name_fixme");//FIXME: Get actual name.
   std::unique_ptr<Lnast> lnast = std::make_unique<Lnast>(module_name);
   lnast->set_root(Lnast_node(Lnast_ntype::create_top(), Token(0, 0, 0, 0, "top")));
-  auto idx_stmts = lnast->add_child(lnast->get_root(), Lnast_node::create_stmts("stmts"));
+  auto idx_stmts = lnast->add_child(lnast->get_root(), Lnast_node::create_stmts(get_new_seq_name(*lnast)));
 
   handle_io(lg, idx_stmts, *lnast);
   initial_tree_coloring(lg);
@@ -681,8 +681,8 @@ void Pass_lgraph_to_lnast::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node,
 
   auto pin_name = lnast.add_string(pin.get_name());
 
-  auto if_true_stmt_node = lnast.add_child(if_node, Lnast_node::create_stmts("mux_stmt_true"));
-  auto if_false_stmt_node = lnast.add_child(if_node, Lnast_node::create_stmts("mux_stmt_false"));
+  auto if_true_stmt_node = lnast.add_child(if_node, Lnast_node::create_stmts(get_new_seq_name(lnast)));
+  auto if_false_stmt_node = lnast.add_child(if_node, Lnast_node::create_stmts(get_new_seq_name(lnast)));
 
   auto asg_node_false = lnast.add_child(if_false_stmt_node, Lnast_node::create_assign("assign_false"));
   lnast.add_child(asg_node_false, Lnast_node::create_ref(pin_name));
@@ -882,4 +882,10 @@ std::string_view Pass_lgraph_to_lnast::get_driver_of_output(const Node_pin dpin)
 
   I(false);//There should always be some driver.
   //FIXME: Perhaps change this instead to just "0d0" (though the place this calls would have to be const not ref).
+}
+
+std::string_view Pass_lgraph_to_lnast::get_new_seq_name(Lnast& lnast) {
+  auto seq_name = lnast.add_string(absl::StrCat("SEQ", seq_count));
+  seq_count++;
+  return seq_name;
 }

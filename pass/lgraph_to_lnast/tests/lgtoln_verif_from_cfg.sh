@@ -2,7 +2,7 @@
 rm -rf ./lgdb
 rm -rf ./lgdb2
 
-pts='if if2 nested_if ssa_rhs' #if2 if3_err nested_if_err nested_if ssa_rhs'
+pts='if if2 nested_if ssa_rhs not'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -29,7 +29,7 @@ do
     echo "CFG -> LNAST -> LGraph"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "inou.cfg_to_lnast files:inou/cfg/tests/${pt}.cfg |> inou.lnast_dfg.tolg"
+    ${LGSHELL} "inou.cfg files:inou/cfg/tests/${pt}.cfg |> inou.lnast_dfg.tolg"
     if [ $? -eq 0 ]; then
       echo "Successfully create the inital LGraph with tuples: ${pt}.cfg"
     else

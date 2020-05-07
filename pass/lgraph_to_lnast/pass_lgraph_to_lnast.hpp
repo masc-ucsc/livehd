@@ -8,6 +8,7 @@
 class Pass_lgraph_to_lnast : public Pass {
 protected:
   uint64_t           temp_var_count = 0;
+  uint64_t           seq_count = 0;
 
   void        do_trans(LGraph *g, Eprp_var &var, std::string_view module_name);
 
@@ -38,6 +39,7 @@ protected:
   void handle_io(LGraph *g, Lnast_nid& parent_lnast_node, Lnast& lnast);
 
   std::string_view get_driver_of_output(const Node_pin dpin);
+  std::string_view get_new_seq_name(Lnast& lnast);
 
 public:
   static void trans(Eprp_var &var);
