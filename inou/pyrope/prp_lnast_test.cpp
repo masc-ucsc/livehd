@@ -1,3 +1,4 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "prp_lnast.hpp"
 #include "lbench.hpp"
@@ -20,6 +21,7 @@ int main(int argc, char **argv) {
   fmt::print("AST to LNAST output:\n\n");
 
   std::string rule_name;
+#ifdef OUTPUT_LN
   for(const auto &it:lnast->depth_preorder(lnast->get_root())){
     auto node = lnast->get_data(it);
     std::string indent{"  "};
@@ -28,6 +30,7 @@ int main(int argc, char **argv) {
 
     fmt::print("{} {} {:>20} : {}\n", it.level, indent, converter.Lnast_type_to_string(node.type), node.token.text);
   }
+#endif
 
   return 0;
 }

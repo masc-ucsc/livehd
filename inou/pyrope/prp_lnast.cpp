@@ -1,3 +1,5 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
 #include "fmt/format.h"
 #include "prp_lnast.hpp"
 
@@ -1196,16 +1198,6 @@ std::unique_ptr<Lnast> Prp_lnast::prp_ast_to_lnast(std::string_view module_name)
   generate_op_map();
   
   translate_code_blocks(ast->get_root(), lnast->get_root());
-
-#ifdef OUTPUT_LN
-  PRINT_LN("AST to LNAST output:\n\n");
-
-  std::string rule_name;
-  for(const auto &it:lnast->depth_preorder(lnast->get_root())){
-    auto node = lnast->get_data(it);
-    PRINT_LN("Type: {}, Token text: {}, Tree level: {}\n", Lnast_type_to_string(node.type), node.token.text, it.level);
-  }
-#endif
 
   return std::move(lnast);
 }

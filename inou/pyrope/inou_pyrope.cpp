@@ -34,7 +34,6 @@ void Inou_pyrope::parse_to_lnast(Eprp_var &var){
     auto found_dot  = name.find_last_of('.');
     if (found_dot != std::string::npos)
       name = name.substr(0,found_dot);
-
     var.add(std::move(converter.prp_ast_to_lnast(name)));
   }
 }
