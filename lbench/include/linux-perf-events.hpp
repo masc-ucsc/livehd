@@ -17,14 +17,14 @@
 template <int TYPE = PERF_TYPE_HARDWARE>
 class LinuxEvents {
   static inline int fd=-1; // Shared across calls
-  bool working;
+  static inline bool working = true;
   perf_event_attr attribs{};
   size_t num_events{};
   std::vector<uint64_t> temp_result_vec{};
   std::vector<uint64_t> ids{};
 
 public:
-  LinuxEvents() : working(true) {}
+  LinuxEvents() {}
 
   void setup(const std::vector<int> &config_vec) {
     if (!working)
@@ -67,7 +67,7 @@ public:
   }
 
   inline void close() {
-    if (fd == 1) return;
+    if (fd == -1) return;
     ::close(fd);
     fd = -1;
   }
@@ -129,6 +129,7 @@ private:
     if (working)
       std::cerr << (context + ": " + std::string(strerror(errno))) << std::endl;
     working = false;
+    fd = -1; // disable all the APIs
   }
 };
 #else
