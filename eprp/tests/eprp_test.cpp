@@ -24,7 +24,7 @@ static bool is_equal_called = false;
 class test1{
 public:
   static void files2(Eprp_var &var) {
-    auto files = var.get("files");
+    auto files = var.get("nofiles");
 
     std::vector<std::string> svector = absl::StrSplit(files,',');
 
@@ -137,14 +137,14 @@ protected:
   Eprp eprp;
   void SetUp() override {
     Eprp_method m1("test1.files2", "Generate a random test/method call to foo", &test1::files2);
-    m1.add_label_required("files","list of files");
+    m1.add_label_required("nofiles","list of files");
 
     eprp.register_method(m1);
   }
 };
 
 TEST_F(Eprp_files, ParseFiles) {
-  const char *buffer =" test1.files2 match:\"nothing\" files:g3xx,./f1/f1.v,xotato/../bar.prp,potato/bar.v";
+  const char *buffer =" test1.files2 match:\"nothing\" nofiles:g3xx,./f1/f1.v,xotato/../bar.prp,potato/bar.v";
 
   eprp.parse_inline(buffer);
 }

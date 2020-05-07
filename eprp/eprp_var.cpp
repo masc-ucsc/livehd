@@ -43,8 +43,11 @@ void Eprp_var::add(const std::string &name, std::string_view value) {
   } else if (name == "path") {
     const std::string path { value };
     if (access(path.c_str(), R_OK)==-1) {
-      fmt::print("ERROR: path {} is not accessible (skipping)\n", path);
-      throw std::runtime_error("not valid file");
+      mkdir(path.c_str(),0755);
+      if (access(path.c_str(), R_OK)==-1) {
+        fmt::print("ERROR: path {} is not accessible (skipping)\n", path);
+        throw std::runtime_error("not valid file");
+      }
     }
   }
   dict[name] = value;
