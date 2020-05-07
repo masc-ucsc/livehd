@@ -37,6 +37,8 @@ protected:
 
   void handle_io(LGraph *g, Lnast_nid& parent_lnast_node, Lnast& lnast);
 
+  std::string_view get_driver_of_output(const Node_pin dpin);
+
 public:
   static void trans(Eprp_var &var);
 

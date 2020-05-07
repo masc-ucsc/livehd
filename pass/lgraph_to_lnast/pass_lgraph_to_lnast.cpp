@@ -72,7 +72,9 @@ void Pass_lgraph_to_lnast::initial_tree_coloring(LGraph *lg) {
 void Pass_lgraph_to_lnast::begin_transformation(LGraph *lg, Lnast& lnast, Lnast_nid& ln_node) {
   //note: in graph out node, spin_pid == dpin_pid is always true
 
+  lg->get_graph_output_node().set_color(BLACK);
   lg->each_graph_output([&](const Node_pin &pin) {//TODO: Make sure I have the capture list correct
+    I(pin.get_node().get_color() == BLACK);
     //Note: pin is a driver pin.
     fmt::print("opin: {} pid: {}\n", pin.get_name(), pin.get_pid());
     I(pin.get_node().get_type().op == GraphIO_Op);
@@ -345,15 +347,15 @@ void Pass_lgraph_to_lnast::attach_output_to_lnast(Lnast& lnast, Lnast_nid& paren
     }
   }
 
-  if(count == 0) {
+  /*if(count == 0) {
     //There was no inp edge, therefore we set the output to 0.
     auto asg_node = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
     lnast.add_child(asg_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("%", opin.get_name()))));
     lnast.add_child(asg_node, Lnast_node::create_const("0d0"));
     count++;
-  }
+  }*/
 
-  I(count == 1);//There shouldn't be multiple edges leading to a single sink pid on a GraphIO.
+  I(count <= 1);//There shouldn't be multiple edges leading to a single sink pid on a GraphIO.
 }
 
 void Pass_lgraph_to_lnast::attach_sum_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin &pin) {
@@ -655,20 +657,27 @@ void Pass_lgraph_to_lnast::attach_simple_node(Lnast& lnast, Lnast_nid& parent_no
 }
 
 void Pass_lgraph_to_lnast::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin &pin) {
-  //FIXME: Currently, this will only support a mux that has 1 condition, like below. Eventually handle more.
-  // Y = SA | ~SB
+  //FIXME: Currently, this will only support a mux that has 1 cond + 2 vals. Eventually handle more.
+  // PID: 0 = S, 1 = A, 2 = B, ...
+  // Y = ~SA | SB
 
   auto if_node = lnast.add_child(parent_node, Lnast_node::create_if("mux"));
-  //FIXME: If I need to add cstmt stuff, it would go right where this comment is.
-  std::queue<Node_pin> dpins;
+
+  std::vector<XEdge> mux_vals;
   for(const auto inp : pin.get_node().inp_edges()) {
     if(inp.sink.get_pid() == 0) { //If mux selector S, create if's "condition"
       attach_cond_child(lnast, if_node, inp.driver);
     } else {
-      dpins.push(inp.driver);
+      mux_vals.push_back(inp);
     }
   }
-  I(dpins.size() >= 2);
+  I(mux_vals.size() >= 2);
+
+  Node_pin dpins[mux_vals.size() + 1];
+   //dpins[1] = driver of A, dpins[2] driver of B, etc... dpins[0] leave empty
+  for(const auto edge : mux_vals) {
+    dpins[edge.sink.get_pid()] = edge.driver;
+  }
 
   auto pin_name = lnast.add_string(pin.get_name());
 
@@ -677,13 +686,11 @@ void Pass_lgraph_to_lnast::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node,
 
   auto asg_node_false = lnast.add_child(if_false_stmt_node, Lnast_node::create_assign("assign_false"));
   lnast.add_child(asg_node_false, Lnast_node::create_ref(pin_name));
-  attach_child(lnast, asg_node_false, dpins.front());
-  dpins.pop();
+  attach_child(lnast, asg_node_false, dpins[1]);
 
   auto asg_node_true = lnast.add_child(if_true_stmt_node, Lnast_node::create_assign("assign_true"));
   lnast.add_child(asg_node_true, Lnast_node::create_ref(pin_name));
-  attach_child(lnast, asg_node_true, dpins.front());
-  dpins.pop();
+  attach_child(lnast, asg_node_true, dpins[2]);
 }
 
 void Pass_lgraph_to_lnast::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin &pin) {
@@ -824,9 +831,12 @@ void Pass_lgraph_to_lnast::attach_child(Lnast& lnast, Lnast_nid& op_node, const 
   //The input "dpin" needs to be a driver pin.
 
   //FIXME: This will only work for var/wire names. This will mess up for constants, I think.
-  if(dpin.get_node().is_graph_io()) {
+  if(dpin.get_node().is_graph_input()) {
     //If the input to the node is from a GraphIO node (it's a module input), add the $ in front.
     lnast.add_child(op_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat(prefix, "$", dpin.get_name()))));
+  } else if(dpin.get_node().is_graph_output()) {
+    auto out_driver_name = lnast.add_string(get_driver_of_output(dpin));
+    lnast.add_child(op_node, Lnast_node::create_ref(out_driver_name));//lnast.add_string(absl::StrCat(prefix, "%", dpin.get_name()))));
   } else if((dpin.get_node().get_type().op == AFlop_Op) || (dpin.get_node().get_type().op == SFlop_Op)) {
     lnast.add_child(op_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat(prefix, "#", dpin.get_name()))));
   } else if(dpin.get_node().get_type().op == U32Const_Op) {
@@ -843,9 +853,11 @@ void Pass_lgraph_to_lnast::attach_cond_child(Lnast& lnast, Lnast_nid& op_node, c
   //The input "dpin" needs to be a driver pin.
 
   //FIXME: This will only work for var/wire names. This will mess up for constants, I think.
-  if(dpin.get_node().is_graph_io()) {
+  if(dpin.get_node().is_graph_input()) {
     //If the input to the node is from a GraphIO node (it's a module input), add the $ in front.
     lnast.add_child(op_node, Lnast_node::create_cond(lnast.add_string(absl::StrCat("$", dpin.get_name()))));
+  } else if(dpin.get_node().is_graph_output()) {
+    lnast.add_child(op_node, Lnast_node::create_cond(lnast.add_string(absl::StrCat("%", dpin.get_name()))));
   } else if((dpin.get_node().get_type().op == AFlop_Op) || (dpin.get_node().get_type().op == SFlop_Op)) {
     lnast.add_child(op_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("#", dpin.get_name()))));
   } else if(dpin.get_node().get_type().op == U32Const_Op) {
@@ -854,4 +866,20 @@ void Pass_lgraph_to_lnast::attach_cond_child(Lnast& lnast, Lnast_nid& op_node, c
   } else {
     lnast.add_child(op_node, Lnast_node::create_cond(lnast.add_string(dpin.get_name())));
   }
+}
+
+/* Since having statements like "%x = %y + a" causes problems in
+ * Yosys Verilog generation, we instead return the name of the
+ * thing that drives %y. So in the case where some %y = T0, the
+ * above statement becomes "%x = T0 + a". This function returns
+ * the name of the driver of %y in this case (T0). */
+std::string_view Pass_lgraph_to_lnast::get_driver_of_output(const Node_pin dpin) {
+  for(const auto inp : dpin.get_node().inp_edges()) {
+    if(inp.sink.get_pid() == dpin.get_pid()) {
+      return inp.driver.get_name();
+    }
+  }
+
+  I(false);//There should always be some driver.
+  //FIXME: Perhaps change this instead to just "0d0" (though the place this calls would have to be const not ref).
 }
