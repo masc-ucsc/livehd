@@ -474,6 +474,12 @@ int main(int argc, char** argv) {
         rx.history_add(input);
         continue;
       }
+    } catch (const std::runtime_error& re) {
+      fmt::print("ERROR: {}\n", re.what());
+      fmt::print("command aborted...\n");
+    } catch (const std::exception& ex) {
+      fmt::print("ERROR: {}\n", ex.what());
+      fmt::print("command aborted...\n");
     } catch (...) {
       fmt::print("command aborted...\n");
     }
