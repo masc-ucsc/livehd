@@ -2,7 +2,7 @@
 rm -rf ./lgdb
 rm -rf ./lgdb2
 
-pts='if' #if2 if3_err nested_if_err nested_if ssa_rhs'
+pts='if if2 nested_if ssa_rhs' #if2 if3_err nested_if_err nested_if ssa_rhs'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -29,15 +29,13 @@ do
     echo "CFG -> LNAST -> LGraph"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "inou.lnast_dfg.tolg files:inou/cfg/tests/${pt}.cfg"
+    ${LGSHELL} "inou.cfg_to_lnast files:inou/cfg/tests/${pt}.cfg |> inou.lnast_dfg.tolg"
     if [ $? -eq 0 ]; then
       echo "Successfully create the inital LGraph with tuples: ${pt}.cfg"
     else
       echo "ERROR: Pyrope compiler failed: LNAST -> LGraph, testcase: ${pt}.cfg"
       exit 1
-
     fi
-
 
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
     mv ${pt}.dot ${pt}.no_bits.tuple.reduced_or.dot
@@ -109,7 +107,7 @@ do
     echo "LGraph (golden) -> LNAST -> LGraph (new)"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.lglnast.tolg"
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.lgraph_to_lnast |> inou.lnast_dfg.tolg path:lgdb2"
     if [ $? -eq 0 ]; then
       echo "Successfully create the new LG: ${pt}.cfg"
     else
@@ -174,9 +172,9 @@ do
     ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
     mv ${pt}.dot ${pt}.newlg.dot
 
-    echo "TESTER------------------------------------"
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> lgraph.dump"
-    echo "TESTER------------------------------------"
+    #echo "TESTER------------------------------------"
+    #${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> lgraph.dump"
+    #echo "TESTER------------------------------------"
 
 
     if [[ ${pt} == *_err* ]]; then

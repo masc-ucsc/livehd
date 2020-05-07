@@ -25,10 +25,6 @@ void Inou_lnast_dfg::setup() {
   m3.add_label_optional("path", "path to read the lgraph[s]", "lgdb");
   m3.add_label_optional("odir", "output directory for generated verilog files", ".");
   register_inou("lnast_dfg",m3);
-
-  Eprp_method m4("inou.lnast_dfg.lglnast.tolg", "translate lg -> lnast -> lg (for verif. purposes)", &Inou_lnast_dfg::lglnverif_tolg);
-  register_inou("lnast_dfg", m4);
-
 }
 
 Inou_lnast_dfg::Inou_lnast_dfg(const Eprp_var &var) : Pass("inou.lnast_dfg", var) {
@@ -647,35 +643,6 @@ void Inou_lnast_dfg::setup_lnast_to_lgraph_primitive_type_mapping() {
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_gt]          = GreaterThan_Op;
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_ge]          = GreaterEqualThan_Op;
   // sh_fixme: to be extended ...
-}
-
-void Inou_lnast_dfg::lglnverif_tolg(Eprp_var &var) {
-  //Assumption: Pipe some LG[s] into this command.
-
-  //Take LG[s], translate them to into LNAST[s]
-  Pass_lgraph_to_lnast p(var);
-  p.trans(var);
-
-  //For each new LNAST, translate them to LG[s]
-  Inou_lnast_dfg i(var);
-
-  std::vector<LGraph *> lgs;// = i.do_lglnverif_tolg(var);
-  for (const auto &l : var.lnasts) {
-    lgs.push_back(i.do_lglnverif_tolg(l));
-  }
-  var.add(lgs);
-}
-
-LGraph* Inou_lnast_dfg::do_lglnverif_tolg(std::shared_ptr<Lnast> llnast) {
-  Lbench b("inou.lnast_dfg.do_lglnverif_tolg");
-
-  std::string module_name = static_cast<std::string>(llnast->get_top_module_name().size(), llnast->get_top_module_name().data());
-  LGraph *dfg = LGraph::create("lgdb2", module_name, "my_test");
-
-  lnast = llnast;
-  lnast->ssa_trans();
-  lnast2lgraph(dfg);
-  return dfg;
 }
 
 // ----------------- to be deprecated  ---------------------

@@ -2,11 +2,11 @@
 rm -rf ./lgdb
 rm -rf ./lgdb2
 
-pts='trivial trivial_and mux assigns compare simple_flop'
+pts='trivial trivial_and mux assigns compare add'
 #TO ADD LIST, but have bugs:
 #picker -- pick op not yet implemented in lnast2lg
 #simple_add -- output 'h' has 1 extra bit, happens in pass.bitwidth
-#simple_flop, shift, cse_basic -- no flop representation in LNAST yet
+#simple_flop, shift, cse_basic -- problems arise with flops somewhere??
 #add -- encountering problems with minus
 #arith -- same problem with minus, can't do %
 #trivial1, compare2 -- contingent on ~ (not yet implemented in lnast2lg)
@@ -54,7 +54,7 @@ do
     echo "LGraph -> LNAST -> LGraph"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.lglnast.tolg"
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.lgraph_to_lnast |> inou.lnast_dfg.tolg path:lgdb2"
     if [ $? -eq 0 ]; then
       echo "Successfully went from LG -> LN -> LG: ${pt}.v"
     else
