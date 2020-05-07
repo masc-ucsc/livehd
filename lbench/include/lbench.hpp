@@ -19,8 +19,12 @@
 
 #include "likely.hpp"
 
+#include "linux-perf-events.hpp"
+
 class Lbench {
 private:
+  LinuxEvents<PERF_TYPE_HARDWARE> linux;
+
   int parseLine(char *line) {
     // This assumes that a digit will be found and the line ends in " Kb".
     int         i = strlen(line);
@@ -56,6 +60,10 @@ protected:
   struct Time_Sample {
     Time_Point  tp;
     int         mem;
+    size_t      ninst;
+    size_t      ncycles;
+    size_t      nbr_misses;
+    size_t      nmem_misses;
     std::string name;
   };
   std::vector<Time_Sample> record;
@@ -109,8 +117,17 @@ public:
   explicit Lbench(const std::string &name)
       : sample_name(name) {
     end_called = false;
-    start();
     perf_start(name);
+
+    const std::vector<int> evts{
+      PERF_COUNT_HW_CPU_CYCLES,
+      PERF_COUNT_HW_INSTRUCTIONS,
+      PERF_COUNT_HW_BRANCH_MISSES,
+      PERF_COUNT_HW_CACHE_REFERENCES
+    };
+    linux.setup(evts);
+
+    start();
   };
 
   ~Lbench() {
@@ -123,13 +140,21 @@ public:
   void start() {
     start_time = std::chrono::system_clock::now();
     start_mem  = getValue();
+    linux.start();
   }
 
   void sample(const std::string &name) {
+    std::vector<size_t> stats(4);
+    linux.sample(stats);
+
     Time_Sample s;
-    s.tp   = std::chrono::system_clock::now();
-    s.mem  = getValue();
-    s.name = name;
+    s.tp          = std::chrono::system_clock::now();
+    s.mem         = getValue();
+    s.ncycles     = stats[0];
+    s.ninst       = stats[1];
+    s.nbr_misses  = stats[2];
+    s.nmem_misses = stats[3];
+    s.name        = name;
 
     record.push_back(s);
   }
@@ -143,6 +168,9 @@ public:
   }
 
   void end() {
+    if (end_called)
+      return;
+    end_called = true;
 
     Time_Point tp = std::chrono::system_clock::now();
 
@@ -161,14 +189,29 @@ public:
       else
         m = s.mem - prev_mem;
 
-      std::cerr << s.name << " in " << t.count() << " secs, " << m << " KB delta " << s.mem << "KB abs\n";
+      std::cerr << s.name << " in " << t.count() << " secs";
+      if (s.ncycles) {
+        std::cerr
+          << ":IPC=" << ((double)s.ninst) / (s.ncycles+1)
+          << ":BR MPKI=" << ((double)s.nbr_misses*1000 ) / (s.ninst+1)
+          << ":L2 MPKI=" << ((double)s.nmem_misses*1000) / (s.ninst+1);
+      }
+      std::cerr << m << ":KB delta " << s.mem << "KB abs\n";
 
       prev     = s.tp;
       prev_mem = s.mem;
     }
+    std::vector<size_t> stats(4);
+    linux.stop(stats);
+    linux.close();
 
     std::chrono::duration<double> t = tp - start_time;
-    std::cerr << sample_name << " in " << t.count() << " secs total\n";
+    std::cerr
+      << sample_name << " in " << t.count() << " secs total"
+      << ":IPC=" << ((double)stats[1]) / (stats[0]+1)
+      << ":BR MPKI=" << ((double)stats[2]*1000) / (stats[1]+1)
+      << ":L2 MPKI=" << ((double)stats[3]*1000) / (stats[1]+1)
+      << "\n";
   }
 };
 #endif
