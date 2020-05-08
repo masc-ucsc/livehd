@@ -75,7 +75,7 @@ struct TMT {
     enum State state;
 };
 
-static TMTATTRS defattrs = {.fg = TMT_COLOR_DEFAULT, .bg = TMT_COLOR_DEFAULT};
+static TMTATTRS defattrs = {false, false, false, false, false, false, TMT_COLOR_DEFAULT, TMT_COLOR_DEFAULT};
 static void writecharatcurs(TMT *vt, wchar_t w);
 
 static wchar_t
