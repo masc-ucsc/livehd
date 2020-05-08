@@ -2,6 +2,7 @@
 #pragma once
 
 #include <string>
+#include <tuple>
 
 #include "pass.hpp"
 #include "lnast.hpp"
@@ -11,8 +12,11 @@
 class Inou_firrtl : public Pass {
 protected:
 
+  std::string_view create_temp_var(Lnast& lnast);
+  std::string_view get_new_seq_name(Lnast& lnast);
+
   // Helper Functions (for handling specific cases)
-  void CreateBitwidthAttribute(Lnast &lnast, uint32_t bw, Lnast_nid& parent_node, std::string port_id);
+  void create_bitwidth_dot_node(Lnast &lnast, uint32_t bw, Lnast_nid& parent_node, std::string port_id);
   void HandleMuxAssign(Lnast &lnast, const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, std::string lhs_of_asg);
   void HandleValidIfAssign(Lnast &lnast, const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, std::string lhs_of_asg);
   void CreateConditionNode(Lnast &lnast, const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node);
@@ -26,7 +30,8 @@ protected:
   void HandlePadOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, std::string lhs);
 
   // Deconstructing Protobuf Hierarchy
-  void ListTypeInfo(Lnast &lnast, const firrtl::FirrtlPB_Type& type, Lnast_nid& parent_node, std::string port_id);
+  void create_io_list(const firrtl::FirrtlPB_Type& type, uint8_t dir, std::string port_id,
+                        std::vector<std::tuple<std::string, uint8_t, uint32_t>>& vec);
   void ListPortInfo(Lnast &lnast, const firrtl::FirrtlPB_Port& port, Lnast_nid parent_node);
 
   void PrintPrimOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, const std::string symbol, Lnast_nid& parent_node);
@@ -47,10 +52,11 @@ protected:
   static void toLNAST(Eprp_var &var);
 
 private:
-  //std::shared_ptr<Lnast> lnast;
-  //std::vector<Lnast> lnast_vec;
+  std::vector<std::string> input_names;
+  std::vector<std::string> output_names;
 
-  uint32_t id_counter;
+  uint32_t temp_var_count;
+  uint32_t seq_counter;
 
 public:
   Inou_firrtl(const Eprp_var &var);
