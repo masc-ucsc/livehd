@@ -33,7 +33,7 @@ else
   exit 8
 fi
 
-bazel test -c ${LIVEHD_BUILD_MODE} //...
+CXX=${CXX} CC=${CC} bazel test -c ${LIVEHD_BUILD_MODE} //...
 if [ $? -ne 0 ]; then
   echo "run-test.sh: short test failed"
   exit 1
@@ -41,27 +41,21 @@ fi
 
 if [ "$RUN_TYPE" == "long" ]; then
   # Not manual test
-  bazel test -c ${LIVEHD_BUILD_MODE} --test_tag_filters "long1,long2,long3,long4,long5,long6,long7,long8" //...
-  if [ $? -ne 0 ]; then
-    echo "run-test.sh: long test failed"
-    exit 1
-  fi
+  TST="long1,long2,long3,long4,long5,long6,long7,long8"
 elif [ "$RUN_TYPE" == "long1" ]; then
   # Not manual test
-  bazel test -c ${LIVEHD_BUILD_MODE} --test_tag_filters "long1" //...
-  if [ $? -ne 0 ]; then
-    echo "run-test.sh: long1 test failed"
-    exit 1
-  fi
+  TST="long1"
 elif [ "$RUN_TYPE" == "long2" ]; then
   # Not manual test
-  bazel test -c ${LIVEHD_BUILD_MODE} --test_tag_filters "long2" //...
-  if [ $? -ne 0 ]; then
-    echo "run-test.sh: long2 test failed"
-    exit 1
-  fi
+  TST="long2"
 elif [ "$RUN_TYPE" != "" ]; then
   echo "run-test.sh: unknown ${RUN_TYPE} run option"
+  exit 1
+fi
+
+bazel test -c ${LIVEHD_BUILD_MODE} --test_tag_filters ${TST} //...
+if [ $? -ne 0 ]; then
+  echo "run-test.sh: long test failed"
   exit 1
 fi
 

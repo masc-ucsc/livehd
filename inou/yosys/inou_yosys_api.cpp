@@ -32,10 +32,10 @@ void Inou_yosys_api::set_script_liblg(const Eprp_var &var, bool do_read) {
   auto main_path = Eprp_utils::get_exe_path();
 
   if (liblg.empty()) {
-    liblg = main_path + "/lgshell.runfiles/lgraph/inou/yosys/liblgraph_yosys.so";
+    liblg = main_path + "/lgshell.runfiles/livehd/inou/yosys/liblgraph_yosys.so";
     if (access(liblg.c_str(), X_OK) == -1) {
-      // Maybe it is installed in /usr/local/bin/lgraph and /usr/local/share/lgraph/inou/yosys/liblgrapth...
-      const std::string liblg2 = main_path + "/../share/lgraph/inou/yosys/liblgraph_yosys.so";
+      // Maybe it is installed in /usr/local/bin/livehd and /usr/local/share/livehd/inou/yosys/liblgrapth...
+      const std::string liblg2 = main_path + "/../share/livehd/inou/yosys/liblgraph_yosys.so";
       if (access(liblg2.c_str(), X_OK) == -1) {
         // sandbox path
         const std::string liblg3 = main_path + "/inou/yosys/liblgraph_yosys.so";
@@ -59,10 +59,10 @@ void Inou_yosys_api::set_script_liblg(const Eprp_var &var, bool do_read) {
     else
       do_read_str = "inou_yosys_write.ys";
 
-    script_file = main_path + "/lgshell.runfiles/lgraph/inou/yosys/" + do_read_str;
+    script_file = main_path + "/lgshell.runfiles/livehd/inou/yosys/" + do_read_str;
     if (access(script_file.c_str(), R_OK) == -1) {
-      // Maybe it is installed in /usr/local/bin/lgraph and /usr/local/share/lgraph/inou/yosys/liblgrapth...
-      const std::string script_file2 = main_path + "/../share/lgraph/inou/yosys/" + do_read_str;
+      // Maybe it is installed in /usr/local/bin/livehd and /usr/local/share/livehd/inou/yosys/liblgrapth...
+      const std::string script_file2 = main_path + "/../share/livehd/inou/yosys/" + do_read_str;
       if (access(script_file2.c_str(), R_OK) == -1) {
         const std::string script_file3 = main_path + "/inou/yosys/" + do_read_str;
         if (access(script_file3.c_str(), R_OK) != -1) {

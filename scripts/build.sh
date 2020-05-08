@@ -16,36 +16,31 @@ cd ${LIVEHD_SRC}
 
 if [ $LIVEHD_COMPILER == "g++" ]; then
   echo "build.sh: g++"
-  CXX=g++ CC=gcc bazel build -c ${LIVEHD_BUILD_MODE} //...
-  if [ $? -eq 0 ]; then
-    echo "build.sh: g++ build completed correctly"
-    exit 0
-  fi
+  export CXX=g++
+  export CC=gcc
 elif [ $LIVEHD_COMPILER == "clang++" ]; then
   echo "build.sh: clang++"
-  CXX=clang++ CC=clang bazel build -c ${LIVEHD_BUILD_MODE} //...
-  if [ $? -eq 0 ]; then
-    echo "build.sh: clang++ build completed correctly"
-    exit 0
-  fi
+  export CXX=clang++
+  export CC=clang
 elif [ $LIVEHD_COMPILER == "clang++-8" ]; then
   echo "build.sh: clang++-8"
-  CXX=clang++-8 CC=clang-8 bazel build -c ${LIVEHD_BUILD_MODE} //...
-  if [ $? -eq 0 ]; then
-    echo "build.sh: clang++-8 build completed correctly"
-    exit 0
-  fi
+  export CXX=clang++-8
+  export CC=clang-8
 elif [ $LIVEHD_COMPILER == "g++-8" ]; then
   echo "build.sh: g++-8"
-  CXX=g++-8 CC=gcc-8 bazel build -c ${LIVEHD_BUILD_MODE} //...
-  if [ $? -eq 0 ]; then
-    echo "build.sh: g++-8 build completed correctly"
-    exit 0
-  fi
+  export CXX=g++-8
+  export CC=gcc-8
 else
   echo "build.sh: ERROR, unrecognized $LIVEHD_COMPILER option"
-  exit 4
+  exit 8
+fi
+
+bazel build -c ${LIVEHD_BUILD_MODE} //...
+if [ $? -eq 0 ]; then
+  echo "build.sh: clang++ build completed correctly"
+  exit 0
 fi
 
 echo "build.sh: Build had an exit code condition"
 exit 2
+
