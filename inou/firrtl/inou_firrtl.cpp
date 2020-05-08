@@ -1150,7 +1150,7 @@ void Inou_firrtl::ListUserModuleInfo(Eprp_var &var, const firrtl::FirrtlPB_Modul
   //lnast = std::make_unique<Lnast>("top_module_name"); // NOTE: no need to transfer ownership (no parser)
 
   lnast->set_root(Lnast_node(Lnast_ntype::create_top(), Token(0, 0, 0, 0, "top")));
-  auto idx_stmts = lnast->add_child(lnast->get_root(), Lnast_node::create_stmts(get_new_seq_name(lnast)));
+  auto idx_stmts = lnast->add_child(lnast->get_root(), Lnast_node::create_stmts(get_new_seq_name(*lnast)));
 
   //Iterate over I/O of the module.
   for (int i = 0; i < user_module.port_size(); i++) {
