@@ -72,7 +72,7 @@ LGraph *Inou_rand::do_tolg() {
 
   for (int i = 0; i < rand_size; i++) {
     if (rnd_const.any() < rand_crate) {
-      created.emplace_back(g->create_node_const(rnd_u32op.any()));
+      created.emplace_back(g->create_node_const(rnd_u32op.any(), rnd_bits2.any()));
     } else {
       created.emplace_back(g->create_node(static_cast<Node_Type_Op>(rnd_op.any())));
     }
