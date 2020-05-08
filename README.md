@@ -39,7 +39,8 @@ contact renau@ucsc.edu to query about them.
 
 ## Building
 
-LiveHD uses bazel as a build system. [Bazel.md](docs/Bazel.md) has more details
+LiveHD uses bazel as a build system, it requires gcc/clang 8 or newer to
+support all the c++17 features. [Bazel.md](docs/Bazel.md) has more details
 about how to build, test, and debug with bazel.
 
 For a simple release build:

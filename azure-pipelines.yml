@@ -15,7 +15,7 @@ jobs:
       vmImage: 'Ubuntu 16.04'
 
     steps:
-      - bash: ./scripts/run-docker-test.sh `pwd` dbg mascucsc/archlinux-masc /root/livehd g++ . long1
+      - bash: ./scripts/run-docker-test.sh `pwd` dbg mascucsc/kalilinux-masc /root/livehd g++ . long1
 
   - job: ClangLong
     displayName: run archlinux-masc with debug and clang++ long1 tests
@@ -25,5 +25,23 @@ jobs:
 
     steps:
       - bash: ./scripts/run-docker-test.sh `pwd` dbg mascucsc/archlinux-masc /root/livehd g++ . long1
+
+  - job: AlpineGcc
+    displayName: run alpine-masc with debug and g++ tests
+
+    pool:
+      vmImage: 'Ubuntu 16.04'
+
+    steps:
+      - bash: ./scripts/run-docker-test.sh `pwd` dbg mascucsc/alpine-masc /root/livehd g++
+
+  - job: AlpineClang
+    displayName: run alpine-masc with debug and clang++ tests
+
+    pool:
+      vmImage: 'Ubuntu 16.04'
+
+    steps:
+      - bash: ./scripts/run-docker-test.sh `pwd` dbg mascucsc/alpine-masc /root/livehd clang++
 
 

@@ -19,7 +19,7 @@ env:
     - BUILD_MODE=opt       DOCKER=mascucsc/archlinux-masc DOCKER_LGRAPH_SRC=/root/livehd      LGRAPH_COMPILER=g++
     - BUILD_MODE=dbg       DOCKER=mascucsc/archlinux-masc DOCKER_LGRAPH_SRC=/root/livehd      LGRAPH_COMPILER=clang++
     - BUILD_MODE=fastbuild DOCKER=mascucsc/kaliriscv-masc DOCKER_LGRAPH_SRC=/root/livehd      LGRAPH_COMPILER=g++
-    - BUILD_MODE=dbg       DOCKER=mascucsc/ubuntu-masc    DOCKER_LGRAPH_SRC=/root/livehd      LGRAPH_COMPILER=g++
+    - BUILD_MODE=dbg       DOCKER=mascucsc/ubuntu-masc    DOCKER_LGRAPH_SRC=/root/livehd      LGRAPH_COMPILER=g++-8
 
 before_install:
    - docker pull $DOCKER
