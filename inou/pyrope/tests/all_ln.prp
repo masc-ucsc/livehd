@@ -37,7 +37,7 @@ if a > 3 {
 }
 tup = (foo = 1, bar = cat + 2)
 tup = (foo = 1, bar = cat + 2) 
-tup = tup ++ (4, dog)
+tup ++= (4, dog)
 %out = !$inp
 while (tup_foo[i] > 2) {
   tup_foo[i] = tup_bar[3-i]

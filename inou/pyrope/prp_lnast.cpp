@@ -384,7 +384,7 @@ void Prp_lnast::eval_for_statement(mmap_lib::Tree_index idx_start_ast, mmap_lib:
   auto rhs_ast_child  = ast->get_child(idx_tuple);
   bool index_is_tuple = false;
 
-  while (rhs_ast_child != ast->invalid_index()) {
+  /*while (rhs_ast_child != ast->invalid_index()) {
     if (scan_text(ast->get_data(rhs_ast_child).token_entry) == "," ||
         ast->get_data(rhs_ast_child).rule_id == Prp_rule_range_notation ||
         ast->get_data(rhs_ast_child).rule_id == Prp_rule_assignment_expression) {
@@ -392,13 +392,13 @@ void Prp_lnast::eval_for_statement(mmap_lib::Tree_index idx_start_ast, mmap_lib:
       break;
     }
     rhs_ast_child = ast->get_sibling_next(rhs_ast_child);
-  }
+  }*/
 
-  Lnast_node rhs_for_index;
-  if (index_is_tuple)
-    rhs_for_index = eval_tuple(idx_tuple, idx_nxt_ln);
-  else
-    rhs_for_index = eval_rule(idx_tuple, idx_nxt_ln);
+  //Lnast_node rhs_for_index;
+  //if (index_is_tuple)
+    //rhs_for_index = eval_tuple(idx_tuple, idx_nxt_ln);
+  //else
+  auto rhs_for_index = eval_rule(idx_tuple, idx_nxt_ln);
 
   // skip the {
   idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast);
@@ -461,19 +461,18 @@ void Prp_lnast::eval_if_statement(mmap_lib::Tree_index idx_start_ast, mmap_lib::
       }
       // find condition if it's present
       if (is_expr(idx_nxt_ast) || cur_ast.rule_id == Prp_rule_identifier || cur_ast.rule_id == Prp_rule_numerical_constant) {
-        // create cstmts node
-        auto idx_cond_ln = lnast->add_child(idx_nxt_ln, Lnast_node::create_cstmts(""));
-        auto old_stmts   = cur_stmts;
-        cur_stmts        = idx_cond_ln;
         Lnast_node cond_lhs;
         if (is_expr(idx_nxt_ast)) {
+          auto idx_cond_ln = lnast->add_child(idx_nxt_ln, Lnast_node::create_cstmts(""));
+          auto old_stmts   = cur_stmts;
+          cur_stmts        = idx_cond_ln;
           cond_lhs = eval_rule(idx_nxt_ast, idx_cond_ln);
           lnast->add_child(idx_nxt_ln, Lnast_node::create_cond(cond_lhs.token));
+          cur_stmts   = old_stmts;
         } else
           lnast->add_child(idx_nxt_ln, Lnast_node::create_cond(get_token(cur_ast.token_entry)));
         // go past expression token
         idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast);
-        cur_stmts   = old_stmts;
       }
       // eval statements
       // add statements node
@@ -541,17 +540,9 @@ void Prp_lnast::eval_assignment_expression(mmap_lib::Tree_index idx_start_ast, m
     // if the tuple is assigned with equals, there is no assign or as node
     if (!is_as) {
       if (ast->get_data(rhs_ast).rule_id == Prp_rule_tuple_notation) {
-        // iterate over the children of rhs_ast
-        auto rhs_ast_child = ast->get_child(rhs_ast);
-        while (rhs_ast_child != ast->invalid_index()) {
-          if (scan_text(ast->get_data(rhs_ast_child).token_entry) == "," ||
-              ast->get_data(rhs_ast_child).rule_id == Prp_rule_range_notation ||
-              ast->get_data(rhs_ast_child).rule_id == Prp_rule_assignment_expression)
-            rhs_is_tuple = true;
-          rhs_ast_child = ast->get_sibling_next(rhs_ast_child);
-        }
+        rhs_node = eval_tuple(rhs_ast, idx_nxt_ln);
       }
-      if (!rhs_is_tuple && !rhs_is_leaf) {
+      else if (!rhs_is_leaf) {
         rhs_node = eval_rule(rhs_ast, idx_nxt_ln);
       }
     }
@@ -767,8 +758,9 @@ Lnast_node Prp_lnast::eval_expression(mmap_lib::Tree_index idx_start_ast, mmap_l
   auto idx_nxt_ast = idx_start_ast;
   // print_tree_index(idx_nxt_ast);
 
-  // if we're a real tuple, need to evaluate ourselves that way
-  if (ast->get_data(idx_nxt_ast).rule_id == Prp_rule_tuple_notation) {
+  // if we're a tuple, we need to evaluate ourselves as one
+  /*if (ast->get_data(idx_nxt_ast).rule_id == Prp_rule_tuple_notation) {
+    return eval_tuple(idx_nxt_ast, idx_nxt_ln);
     auto idx_tup_tst_nxt = ast->get_child(idx_nxt_ast);
     // skip the open parenth
     idx_tup_tst_nxt = ast->get_sibling_next(idx_tup_tst_nxt);
@@ -783,20 +775,22 @@ Lnast_node Prp_lnast::eval_expression(mmap_lib::Tree_index idx_start_ast, mmap_l
       idx_tup_tst_nxt = ast->get_sibling_next(idx_tup_tst_nxt);
       if (scan_text(ast->get_data(idx_tup_tst_nxt).token_entry) == ",") return eval_tuple(idx_nxt_ast, idx_nxt_ln);
     }
-  }
+  }*/
 
   std::list<Lnast_node> operand_stack;
   std::list<Lnast_node> operator_stack;
-
+  Lnast_node assign_operator, assign_operand;
+  bool has_assign_op = false;
   // first, we need to see if we're an expression of the form (op)=, e.g. +=
   if (ast->get_data(idx_nxt_ast).rule_id == Prp_rule_assignment_expression) {
+    has_assign_op = true;
     idx_nxt_ast          = ast->get_child(idx_nxt_ast);
     auto operand_special = ast->get_data(idx_nxt_ast);
 
     if (operand_special.token_entry != 0)  // can only be an identifier
-      operand_stack.emplace_back(Lnast_node::create_ref(get_token(operand_special.token_entry)));
+      assign_operand = Lnast_node::create_ref(get_token(operand_special.token_entry));
     else {
-      operand_stack.emplace_back(eval_rule(idx_nxt_ast, idx_nxt_ln));
+      assign_operand = eval_rule(idx_nxt_ast, idx_nxt_ln);
     }
 
     // move to the op= node
@@ -804,10 +798,14 @@ Lnast_node Prp_lnast::eval_expression(mmap_lib::Tree_index idx_start_ast, mmap_l
 
     auto    idx_op_ast = ast->get_child(idx_nxt_ast);
     uint8_t skip_sibs;
-    operator_stack.emplace_back(gen_operator(idx_op_ast, &skip_sibs));
+    assign_operator = gen_operator(idx_op_ast, &skip_sibs);
 
     // go to the root of the RHS expression, like normal
     idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast);
+  }
+  
+  if (ast->get_data(idx_nxt_ast).rule_id == Prp_rule_tuple_notation) {
+    return eval_tuple(idx_nxt_ast, idx_nxt_ln);
   }
 
   mmap_lib::Tree_index child_cur;
@@ -842,6 +840,11 @@ Lnast_node Prp_lnast::eval_expression(mmap_lib::Tree_index idx_start_ast, mmap_l
       operand_stack.emplace_back(eval_rule(child_cur, idx_nxt_ln));
     }
     child_cur = ast->get_sibling_next(child_cur);
+  }
+  
+  if(has_assign_op){
+    operator_stack.emplace_back(assign_operator);
+    operand_stack.emplace_back(assign_operand);
   }
 
   for (auto it = operator_stack.begin(); it != operator_stack.end(); ++it) {
@@ -892,23 +895,7 @@ Lnast_node Prp_lnast::eval_for_in_notation(mmap_lib::Tree_index idx_start_ast, m
 
   PRINT_DBG_LN("The for expression is rule {}.\n", rule_id_to_string(ast->get_data(idx_tuple).rule_id));
 
-  // check whether the for index is a real tuple
-  auto rhs_ast_child  = ast->get_child(idx_tuple);
-  bool index_is_tuple = false;
-
-  while (rhs_ast_child != ast->invalid_index()) {
-    if (scan_text(ast->get_data(rhs_ast_child).token_entry) == "," ||
-        ast->get_data(rhs_ast_child).rule_id == Prp_rule_range_notation ||
-        ast->get_data(rhs_ast_child).rule_id == Prp_rule_assignment_expression) {
-      index_is_tuple = true;
-      break;
-    }
-  }
-
-  if (index_is_tuple)
-    return eval_tuple(idx_tuple, idx_nxt_ln);
-  else
-    return eval_rule(idx_tuple, idx_nxt_ln);
+  return eval_rule(idx_tuple, idx_nxt_ln);
 }
 
 Lnast_node Prp_lnast::eval_tuple_array_notation(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln) {
