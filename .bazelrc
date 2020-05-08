@@ -1,5 +1,5 @@
 
-# lgraph specific bazel options
+# livehd specific bazel options
 build --output_filter='^//((?!(external/*):))*$' --cxxopt="-std=c++17" --cxxopt="-Wno-unknown-pragmas" --cxxopt="-Wextra" --cxxopt="-Wunused" --cxxopt="-Wshadow" --force_pic --build_tag_filters="-fixme"
 # test --cache_test_results=no
 

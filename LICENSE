@@ -29,17 +29,17 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ==============================================================================
-Copyrights and Licenses for Third Party Software Distributed with LGRAPH:
+Copyrights and Licenses for Third Party Software Distributed with LiveHD:
 ==============================================================================
 
-The LGRAPH software contains code written by third parties.  Such software will
+The LiveHD software contains code written by third parties.  Such software will
 have its own individual LICENSE file in the directory in which it appears. This
 file will describe the copyrights, license, and restrictions which apply to that
 code.
 
 The disclaimer of warranty in the Open Source License applies to all code in the
-LGRAPH Distribution, and nothing in any of the other licenses gives permission
-to use the names of the LGRAPH Team to endorse or promote products derived from
+LiveHD Distribution, and nothing in any of the other licenses gives permission
+to use the names of the LiveHD Team to endorse or promote products derived from
 this Software.
 
 The following pieces of software have additional or alternate copyrights,
@@ -64,7 +64,7 @@ external/httplib: MIT style license
 external/replxx: BSD style license
 external/googletest: BSD 3-Clause
 
-External repos used for benchmarking, not inside lgraph:
+External repos used for benchmarking, not inside LiveHD:
 
 external/verilator: LGPL license
 third_party/anubis: BSD 2-Clause license
