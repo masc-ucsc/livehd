@@ -26,6 +26,18 @@ elif [ $LGRAPH_COMPILER == "clang++" ]; then
     echo "build.sh: clang++ build completed correctly"
     exit 0
   fi
+elif [ $LGRAPH_COMPILER == "clang++-8" ]; then
+  CXX=clang++-8 CC=clang-8 bazel build -c ${LGRAPH_BUILD_MODE} //...
+  if [ $? -eq 0 ]; then
+    echo "build.sh: clang++-8 build completed correctly"
+    exit 0
+  fi
+elif [ $LGRAPH_COMPILER == "g++-8" ]; then
+  CXX=g++-8 CC=gcc-8 bazel build -c ${LGRAPH_BUILD_MODE} //...
+  if [ $? -eq 0 ]; then
+    echo "build.sh: g++-8 build completed correctly"
+    exit 0
+  fi
 else
   echo "build.sh: ERROR, unrecognized $LGRAPH_COMPILER option"
   exit 4
