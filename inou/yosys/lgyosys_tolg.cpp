@@ -786,7 +786,8 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
       entry_node = g->create_node(Equals_Op, 1);
 
       if (size > 1) {
-        auto zero_pin = g->create_node_const(0,size-1).setup_driver_pin();
+        /* auto zero_pin = g->create_node_const(0,size-1).setup_driver_pin(); */
+        auto zero_pin = g->create_node_const(0,1).setup_driver_pin();
         auto not_node = g->create_node(Not_Op, 1);
         g->add_edge(entry_node.setup_driver_pin(0), not_node.setup_sink_pin());
 
