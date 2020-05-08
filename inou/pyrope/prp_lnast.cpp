@@ -832,8 +832,6 @@ Lnast_node Prp_lnast::eval_expression(mmap_lib::Tree_index idx_start_ast, mmap_l
           operand_stack.emplace_back(Lnast_node::create_ref(get_token(child_cur_data.token_entry)));
       } else if (child_cur_data.rule_id == Prp_rule_numerical_constant || child_cur_data.rule_id == Prp_rule_string_constant) {
         operand_stack.emplace_back(create_const_node(child_cur));
-      } else if (child_cur_data.rule_id == Prp_rule_tuple_notation) {  // WARNING: nested parentheses?
-        inside_par ^= true;
       } else {  // operator
         uint8_t skip_sibs;
         auto    op_node = gen_operator(child_cur, &skip_sibs);
@@ -841,8 +839,6 @@ Lnast_node Prp_lnast::eval_expression(mmap_lib::Tree_index idx_start_ast, mmap_l
         operator_stack.emplace_back(op_node);
       }
     } else {
-      if (inside_par) return eval_rule(child_cur, idx_nxt_ln);
-      // else, continue
       operand_stack.emplace_back(eval_rule(child_cur, idx_nxt_ln));
     }
     child_cur = ast->get_sibling_next(child_cur);

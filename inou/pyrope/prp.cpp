@@ -242,7 +242,6 @@ uint8_t Prp::rule_else_statement(std::list<std::tuple<Rule_id, Token_entry>> &pa
     if (!CHECK_RULE(&Prp::rule_block_body)) {
       RULE_FAILED("Failed rule_else_statement; couldn't find a block_body.\n");
     }
-
     auto lines_start  = cur_line;
     auto tokens_start = tokens_consumed;
 
@@ -255,7 +254,6 @@ uint8_t Prp::rule_else_statement(std::list<std::tuple<Rule_id, Token_entry>> &pa
 
     RULE_SUCCESS("Matched rule_else_statement (ELIF path).\n", Prp_rule_else_statement);
   }
-  // option 2
   else if (!SCAN_IS_TOKEN(Pyrope_id_else, Prp_rule_else_statement)) {
     RULE_FAILED("Failed rule_else_statement; couldn't find either an else or an elif.\n");
   }
@@ -1379,6 +1377,7 @@ uint8_t Prp::rule_additive_expression(std::list<std::tuple<Rule_id, Token_entry>
   // optional
   cur_tokens             = tokens_consumed;
   lines_start            = cur_line;
+  auto sub_cnt_start     = sub_cnt;
   auto cur_loc_list_size = loc_list.size();
 
   if (SCAN_IS_TOKEN(Token_id_dot, Prp_rule_additive_expression)) {
@@ -1473,24 +1472,32 @@ uint8_t Prp::rule_unary_expression(std::list<std::tuple<Rule_id, Token_entry>> &
 
 uint8_t Prp::rule_factor(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
   INIT_FUNCTION("rule_factor.");
+  
   // option 1
-  if (CHECK_RULE(&Prp::rule_rhs_expression)) {
-    RULE_SUCCESS("Matched rule_factor; option 1.\n", Prp_rule_factor);
-  }
-  // option 2
-  else if (SCAN_IS_TOKEN(Token_id_op, Prp_rule_factor)) {
+  INIT_PSEUDO_FAIL();
+  UPDATE_PSEUDO_FAIL();
+  if (SCAN_IS_TOKEN(Token_id_op)) {
     check_lb();
     if (!CHECK_RULE(&Prp::rule_logical_expression)) {
-      RULE_FAILED("Failed rule_factor; couldn't find a logical_expression.\n");
+      PSEUDO_FAIL();
     }
-    check_lb();
-    if (!SCAN_IS_TOKEN(Token_id_cp, Prp_rule_factor)) {
-      RULE_FAILED("Failed rule_factor; couldn't find a closing parenthesis.\n");
+    else{
+      check_lb();
+      if (!SCAN_IS_TOKEN(Token_id_cp)) {
+        PSEUDO_FAIL();
+      }
+      else{
+        // optional
+        CHECK_RULE(&Prp::rule_bit_selection_bracket);
+        RULE_SUCCESS("Matched rule_factor; option 1.\n", Prp_rule_factor);
+      }
     }
-
-    // optional
-    CHECK_RULE(&Prp::rule_bit_selection_bracket);
-  } else {
+  }
+  // option 2
+  if(CHECK_RULE(&Prp::rule_rhs_expression)) {
+    RULE_SUCCESS("Matched rule_factor; option 2.\n", Prp_rule_factor);
+  }
+  else {
     RULE_FAILED("Failed rule_factor; couldn't match either option.\n");
   }
 
@@ -1647,7 +1654,8 @@ void Prp::elaborate() {
 
   if (failed) {
     fmt::print("Parsing error line {} unexpected token {}.\n", get_token(term_token).line, scan_text(term_token));
-    parser_error("unexpected token {}.\n", scan_text(term_token));
+    //parser_error("unexpected token {}.\n", scan_text(term_token));
+    exit(1);
   } else {
     fmt::print("\nParsing SUCCESSFUL!\n");
   }
@@ -1767,7 +1775,7 @@ uint8_t Prp::check_function(uint8_t (Prp::*rule)(std::list<std::tuple<Rule_id, T
 bool Prp::chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, std::list<std::tuple<Rule_id, Token_entry>> &loc_list) {
   if (!scan_is_token(tok)) return false;
 
-  if (tok == Pyrope_id_elif || tok == Pyrope_id_if || tok == Pyrope_id_unique || tok == Pyrope_id_else || tok == Pyrope_id_while ||
+  if (tok == Pyrope_id_elif || tok == Pyrope_id_if || tok == Pyrope_id_unique || tok == Pyrope_id_while ||
       tok == Pyrope_id_punch || tok == Pyrope_id_for || tok == Pyrope_id_when) {
     scan_next();
     auto next_pos = get_token_pos();

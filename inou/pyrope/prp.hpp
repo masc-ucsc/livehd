@@ -19,7 +19,7 @@
 #include "elab_scanner.hpp"
 
 //#define OUTPUT_AST
-#define OUTPUT_LN
+//#define OUTPUT_LN
 
 //#define DEBUG_AST
 //#define DEBUG_LN
@@ -127,16 +127,19 @@
 #define INIT_PSEUDO_FAIL()    \
   uint64_t cur_tokens;        \
   uint64_t cur_loc_list_size; \
+  uint64_t sub_cnt_start;     \
   uint64_t lines_start
 
 #define UPDATE_PSEUDO_FAIL()           \
   cur_tokens        = tokens_consumed; \
   cur_loc_list_size = loc_list.size(); \
+  sub_cnt_start     = sub_cnt;         \
   lines_start       = cur_line
 
 #define PSEUDO_FAIL()                    \
   go_back(tokens_consumed - cur_tokens); \
   loc_list.resize(cur_loc_list_size);    \
+  sub_cnt = sub_cnt_start; \
   cur_line = lines_start
 
 // control
