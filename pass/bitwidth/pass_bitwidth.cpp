@@ -223,11 +223,14 @@ void Pass_bitwidth::iterate_logic(Node_pin &pin) {
         }
         break;
       case Not_Op:
-        // FIXME: Not gets really complicated... I need to think this over.
-        // FIXME->sh: ask hunter's concerns
+        {
         I(pin.get_node().get_type().op == Not_Op);
-        imp.min     = inp_edge.driver.get_bitwidth().i.min;
-        imp.max     = inp_edge.driver.get_bitwidth().i.max;
+        auto bits_max = ceil(log2(inp_edge.driver.get_bitwidth().i.max + 1));
+        auto ori_min    = inp_edge.driver.get_bitwidth().i.min;
+        auto ori_max    = inp_edge.driver.get_bitwidth().i.max;
+        imp.min         = ~ori_max & (int64_t)(pow(2, bits_max) -1);
+        imp.max         = ~ori_min & (int64_t)(pow(2, bits_max) -1);
+        }
         break;
       default: fmt::print("Error: logic op not understood\n");
     }
