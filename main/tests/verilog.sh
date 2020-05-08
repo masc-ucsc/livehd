@@ -40,6 +40,8 @@ fi
 pass=0
 fail=0
 fail_list=""
+rm -rf tmp_yosys_mix
+mkdir -p tmp_yosys_mix
 for full_input in ${inputs}
 do
   input=$(basename ${full_input})
@@ -104,7 +106,7 @@ do
   #${YOSYS} -g${base} -h > ./yosys-test/log_to_yosys_${input} 2> ./yosys-test/err_to_yosys_${input}
 
   echo "lgraph.match path:lgdb_yosys |> inou.yosys.fromlg odir:tmp_yosys" | ${LGSHELL} -q 2>tmp_yosys/${input}.err
-  LC=$(grep -iv Warning tmp_yosys/${input}.err | grep -v "recommended to use " | wc -l | cut -d" " -f1)
+  LC=$(grep -iv Warning tmp_yosys/${input}.err | grep -v "recommended to use " | grep -v "IPC=" | wc -l | cut -d" " -f1)
   if [[ $LC -gt 0 ]]; then
     echo "FAIL: Faulty "$LC" err verilog file tmp_yosys/${input}.err"
     ((fail++))
@@ -120,31 +122,43 @@ do
     fail_list+=" "$base
     continue
   fi
-  $(cat tmp_yosys/*.v >tmp_yosys/all_${base}.v)
+  $(cat tmp_yosys/*.v >tmp_yosys_mix/all_${base}.v)
 
   if [[ $input =~ "nocheck_" ]]; then
-    LC=$(wc -l tmp_yosys/all_${base}.v | cut -d" " -f1)
+    LC=$(wc -l tmp_yosys_mix/all_${base}.v | cut -d" " -f1)
     echo "Skipping check for "$base" LC:"$LC
     if [[ $LC -lt 2 ]]; then
-      echo "FAIL: Generated verilog file tmp_yosys/all_${base}.v is too small"
+      echo "FAIL: Generated verilog file tmp_yosys_mix/all_${base}.v is too small"
       ((fail++))
       fail_list+=" "$base
     fi
   else
-    ${LGCHECK} --implementation=tmp_yosys/all_${base}.v --reference=${full_input} --top=${base}
-    if [ $? -eq 0 ]; then
-      echo "Successfully matched generated verilog with original verilog (${full_input})"
+    if [[ $fixme == "true" ]]; then
+      ${LGCHECK} --implementation=tmp_yosys_mix/all_${base}.v --reference=${full_input} --top=${base}
+      if [ $? -eq 0 ]; then
+        echo "Successfully matched generated verilog with original verilog (${full_input})"
+      else
+        echo "FAIL: circuits are not equivalent (${full_input})"
+        ((fail++))
+        fail_list+=" "$base
+      fi
     else
-      echo "FAIL: circuits are not equivalent (${full_input})"
-      ((fail++))
-      fail_list+=" "$base
+      echo "PARALLEL yosys test"
+      ${LGCHECK} --implementation=tmp_yosys_mix/all_${base}.v --reference=${full_input} --top=${base} &
     fi
   fi
 
   ((pass++))
 done
 
-if [ $fail -eq 0 ]; then
+FAIL=$fail
+for job in `jobs -p`
+do
+  echo $job
+  wait $job || let "FAIL+=1"
+done
+
+if [ $FAIL -eq 0 ]; then
   echo "SUCCESS: pass:${pass} tests without errors"
   exit 0
 else

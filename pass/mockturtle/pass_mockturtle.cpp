@@ -1062,6 +1062,10 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
       }
     } else {
       for (auto i = 0UL; i < bit_width; i++) {
+        uint16_t bits = (64 - __builtin_clzll(i));
+        if (bits==0)
+          bits=1;
+
         const auto &vec_klut_node_and_lg_pid = gid_pi2sink_node_lg_pid[std::make_pair(group_id, sigs[i])];
         for (const auto &klut_node_and_lg_pid : vec_klut_node_and_lg_pid) {
           // const auto & klut_node_and_lg_pid = gid_pi2sink_node_lg_pid[std::make_pair(group_id, sigs[i])];
@@ -1074,7 +1078,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
           auto pick_node_sink_pin        = pick_node.setup_sink_pin(0);
           auto pick_node_offset_pin      = pick_node.setup_sink_pin(1);
           auto pick_node_driver_pin      = pick_node.setup_driver_pin();
-          auto const_node_for_bit_select = new_lg->create_node_const(i);
+          auto const_node_for_bit_select = new_lg->create_node_const(i, bits);
           auto bit_select_signal         = const_node_for_bit_select.get_driver_pin();
           pick_node_driver_pin.set_bits(1);
           new_lg->add_edge(bit_select_signal, pick_node_offset_pin);

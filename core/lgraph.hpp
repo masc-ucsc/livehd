@@ -207,7 +207,7 @@ public:
 
   Node create_node(Node_Type_Op op);
   Node create_node(Node_Type_Op op, uint32_t bits);
-  Node create_node_const(uint32_t value);
+  Node create_node_const(uint32_t value, uint16_t bits);
   // Node create_node_const(std::string_view value);
   Node create_node_const(std::string_view value, uint32_t bits);
   Node create_node_sub(Lg_type_id sub);

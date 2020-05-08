@@ -128,7 +128,8 @@ static Node_pin &get_edge_pin(LGraph *g, const RTLIL::Wire *wire) {
 }
 
 static Node_pin connect_constant(LGraph *g, uint32_t value, Node &exit_node, Port_ID opid) {
-  auto dpin = g->create_node_const(value).setup_driver_pin();
+  uint64_t bits = (64 - __builtin_clzll(value));
+  auto dpin = g->create_node_const(value, bits).setup_driver_pin();
   auto spin = exit_node.setup_sink_pin(opid);
 
   spin.connect_driver(dpin);
@@ -376,7 +377,7 @@ static Node_pin resolve_constant(LGraph *g, const std::vector<RTLIL::State> &dat
   }
 
   if (u32_const && data.size() <= 32) {
-    auto node = g->create_node_const(value);
+    auto node = g->create_node_const(value, data.size());
     I(node.get_driver_pin().get_bits() <= data.size());
     return node.setup_driver_pin();
   }
@@ -384,17 +385,6 @@ static Node_pin resolve_constant(LGraph *g, const std::vector<RTLIL::State> &dat
   auto node = g->create_node_const(val, val.size());
   return node.setup_driver_pin();
 }
-
-#if 0
-// does not treat string, keeps as it is (useful for names)
-static void connect_string(LGraph *g, std::string_view value, Node &exit_node, Port_ID opid) {
-
-  auto spin = exit_node.setup_sink_pin(opid);
-  auto dpin = g->create_node_const(value).setup_driver_pin();
-
-  spin.connect_driver(dpin);
-}
-#endif
 
 static void look_for_cell_outputs(RTLIL::Module *module, const std::string &path) {
   // log("yosys2lg look_for_cell_outputs pass for module %s:\n", module->name.c_str());
@@ -556,9 +546,9 @@ static Node_pin create_join_operator(LGraph *g, const RTLIL::SigSpec &ss) {
 
   for (auto &chunk : ss.chunks()) {
     if (chunk.wire == nullptr) {
-      auto dpin = resolve_constant(g, chunk.data);
-      inp_pins.push_back(dpin);
-      for (size_t i = dpin.get_bits(); i < chunk.data.size(); ++i) inp_pins.push_back(g->create_node_const(0).setup_driver_pin());
+      inp_pins.emplace_back(resolve_constant(g, chunk.data));
+      //for (size_t i = dpin.get_bits(); i < chunk.data.size(); ++i) 
+      //  inp_pins.push_back(g->create_node_const(0,1).setup_driver_pin());
     } else {
       inp_pins.push_back(create_pick_operator(g, chunk.wire, chunk.offset, chunk.width));
     }
@@ -796,13 +786,13 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
       entry_node = g->create_node(Equals_Op, 1);
 
       if (size > 1) {
-        auto zero_pin = g->create_node_const(0).setup_driver_pin();
+        auto zero_pin = g->create_node_const(0,size-1).setup_driver_pin();
         auto not_node = g->create_node(Not_Op, 1);
         g->add_edge(entry_node.setup_driver_pin(0), not_node.setup_sink_pin());
 
         exit_node.set_type(Join_Op);
         g->add_edge(not_node.setup_driver_pin(), exit_node.setup_sink_pin(0));
-        for (size_t i = 1; i < size; ++i) g->add_edge(zero_pin, exit_node.setup_sink_pin(i));
+        g->add_edge(zero_pin, exit_node.setup_sink_pin(1));
       } else {
         exit_node.set_type(Not_Op);
         g->add_edge(entry_node.setup_driver_pin(0), exit_node.setup_sink_pin());
@@ -1104,7 +1094,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
             for (uint32_t rdport = 0; rdport < rdports; rdport++) {
               Node_pin spin = entry_node.setup_sink_pin(LGRAPH_MEMOP_RDEN(rdport));
               if (ss.extract(rdport, 1)[0].data == RTLIL::State::Sx) {  // Yosys has Sx as enable sometimes, WEIRD. Fix it to 0
-                auto     node = g->create_node_const(0);
+                auto     node = g->create_node_const(0,1);
                 Node_pin dpin = node.setup_driver_pin();
                 g->add_edge(dpin, spin);
               } else {

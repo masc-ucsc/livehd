@@ -544,7 +544,7 @@ Node LGraph::create_node(const Node &old_node) {
   } else if (op == SubGraph_Op) {
     new_node = create_node_sub(old_node.get_type_sub());
   } else if (op == U32Const_Op) {
-    new_node = create_node_const(old_node.get_type_const_value());
+    new_node = create_node_const(old_node.get_type_const_value(), old_node.get_driver_pin().get_bits());
     I(new_node.get_driver_pin().get_bits() == old_node.get_driver_pin().get_bits());
   } else if (op == StrConst_Op) {
     new_node = create_node_const(old_node.get_type_const_sview(), old_node.get_driver_pin().get_bits());
@@ -579,11 +579,11 @@ Node LGraph::create_node(Node_Type_Op op, uint32_t bits) {
   return node;
 }
 
-Node LGraph::create_node_const(uint32_t value) {
-  auto nid = find_type_const_value(value);
+Node LGraph::create_node_const(uint32_t value, uint16_t bits) {
+  auto nid = find_type_const_value(value, bits);
   if (nid == 0) {
     nid = create_node_int();
-    set_type_const_value(nid, value);
+    set_type_const_value(nid, value, bits);
   }
 
   I(node_internal[nid].get_dst_pid() == 0);

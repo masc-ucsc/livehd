@@ -9,7 +9,7 @@
 #include "sub_node.hpp"
 
 using Node_sview_map = mmap_lib::map<std::string_view, Node::Compact_class>;
-using Node_value_map = mmap_lib::map<uint32_t, Node::Compact_class>;
+using Node_value_map = mmap_lib::map<uint64_t, Node::Compact_class>; // <value,bits> -> node_id
 using Node_down_map  = mmap_lib::map<Node::Compact_class, Lg_type_id>;
 
 class LGraph_Node_Type : virtual public LGraph_Base {
@@ -43,10 +43,10 @@ protected:
 
   void set_type_const_value(Index_ID nid, std::string_view value);
   void set_type_const_sview(Index_ID nid, std::string_view value);
-  void set_type_const_value(Index_ID nid, uint32_t value);
+  void set_type_const_value(Index_ID nid, uint32_t value, uint16_t bits);
 
   Index_ID find_type_const_sview(std::string_view value) const;
-  Index_ID find_type_const_value(uint32_t value) const;
+  Index_ID find_type_const_value(uint32_t value, uint16_t bits) const;
 
   std::string_view get_type_const_sview(Index_ID nid) const;
   uint32_t         get_type_const_value(Index_ID nid) const;
@@ -60,5 +60,5 @@ public:
 
   const Node_sview_map &get_const_sview_map() const { return const_sview; };
   const Node_value_map &get_const_value_map() const { return const_value; };
-  const Node_down_map & get_down_nodes_map() const { return down_nodes; };
+  const Node_down_map  &get_down_nodes_map()  const { return down_nodes;  };
 };
