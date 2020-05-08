@@ -1,9 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "node.hpp"
-
-#include <charconv>
-
 #include "annotate.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
@@ -489,7 +486,7 @@ void Node::set_color(int new_color) {
 int Node::get_color() const {
   auto str = Ann_node_color::ref(current_g)->get_val_sview(get_compact_class());
   int color;
-  std::from_chars(str.data(), str.data() + str.size(), color);
+  absl::SimpleAtoi(str, &color);
   return color;
 }
 

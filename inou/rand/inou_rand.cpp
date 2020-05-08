@@ -2,7 +2,6 @@
 
 #include "inou_rand.hpp"
 
-#include <charconv>
 #include <string>
 
 #include "absl/container/flat_hash_map.h"
@@ -30,15 +29,15 @@ Inou_rand::Inou_rand(const Eprp_var &var) : Pass("rand", var) {
   rand_eratio = 4;
 
   if (var.has_label("crate")) {
-    auto sv = var.get("crate");
-    std::from_chars(sv.data(), sv.data() + sv.size(), rand_crate);
+    bool ok = absl::SimpleAtoi(var.get("crate"), &rand_crate);
+    if(!ok)
+      Pass::error("crate parameter must be integer");
   }
 
   if (var.has_label("eratio")) {
-    auto sv = var.get("eratio");
-    int  val;
-    std::from_chars(sv.data(), sv.data() + sv.size(), val);
-    rand_eratio = val;
+    bool ok = absl::SimpleAtof(var.get("eratio"), &rand_eratio);
+    if(!ok)
+      Pass::error("crate parameter must be integer");
   }
 
   name = var.get("name");

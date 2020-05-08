@@ -1,7 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include <cmath>
 #include <algorithm>
-#include <charconv>
 #include <vector>
 
 #include "lbench.hpp"
@@ -22,9 +21,8 @@ void Pass_bitwidth::setup() {
 Pass_bitwidth::Pass_bitwidth(const Eprp_var &var) : Pass("pass.bitwidth", var) {
   auto miters = var.get("max_iterations");
 
-  std::from_chars(miters.data(), miters.data() + miters.size(), max_iterations);
-
-  if (max_iterations == 0) {
+  bool ok = absl::SimpleAtoi(miters, &max_iterations);
+  if (max_iterations == 0 || !ok) {
     error("pass.bitwidth max_iterations:{} should be bigger than zero", miters);
     return;
   }

@@ -1,7 +1,5 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include <charconv>
-
 #include "likely.hpp"
 #include "cfg_lnast.hpp"
 
@@ -52,16 +50,14 @@ void Cfg_parser::build_lnast() {
     I(line_tkcnt == CFG_IDX_POS);
     auto t = scan_text();
     fmt::print("pos1 scan_text:{}\n", t);
-    std::from_chars(t.data(), t.data() + t.size(), cfg_nidx);
+    absl::SimpleAtoi(t,&cfg_nidx);
     walk_next_token();
-
 
     I(line_tkcnt == CFG_PARENT_POS);
     auto t2 = scan_text();
-    std::from_chars(t2.data(), t2.data()+t.size(), cfg_nparent);
+    absl::SimpleAtoi(t2, &cfg_nparent);
     walk_next_token();
     opr_parent_node = cfg_parent_id2lnast_node[cfg_nparent];
-
 
     I(line_tkcnt == CFG_CHILD_POS);
     walk_next_token();
