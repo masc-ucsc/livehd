@@ -649,7 +649,7 @@ void Pass_bitwidth::bw_implicit_range_to_bits(LGraph *lg) {
   for (auto &out : graph_inp_node.out_edges()) {
     if (out.driver.has_bitwidth()) {
       uint32_t bits;
-      if (out.driver.get_bitwidth().i.max == 1) {
+      if (out.driver.get_bitwidth().i.max == 1 || out.driver.get_bitwidth().i.max == 0) {
         bits = 1;
       } else {
         bits = ceil(log2(out.driver.get_bitwidth().i.max));
@@ -668,7 +668,7 @@ void Pass_bitwidth::bw_implicit_range_to_bits(LGraph *lg) {
     for (auto& out:node.out_edges()) {
       if (out.driver.has_bitwidth()) {
         uint32_t bits;
-        if (out.driver.get_bitwidth().i.max == 1) {
+        if (out.driver.get_bitwidth().i.max == 1 || out.driver.get_bitwidth().i.max == 0) {
           bits = 1;
         } else {
           bits = ceil(log2(out.driver.get_bitwidth().i.max));

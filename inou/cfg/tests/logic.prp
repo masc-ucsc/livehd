@@ -1,0 +1,17 @@
+$a.__bits = 1
+$b.__bits = 3
+$c.__bits = 3
+
+// bitwise 
+%o1 = ~$a  
+%o2 = ~$b
+%o3 = $c & $b
+%o4 = $c | $b
+%o5 = $c ^ $b
+
+// logical 
+%o6 = !$a  
+%o7 = !$b 
+//FIXME->sh: wait for discussion result
+//%o8 = $a and $b
+//%o9 = $a or $b

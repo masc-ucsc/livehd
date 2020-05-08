@@ -17,7 +17,7 @@ generate if3_err
 generate nested_if
 generate nested_if_err
 generate ssa_rhs
-generate not
+generate logic
 
 # ./prp simple_tuple.prp  | sort -n  > y && column -t y > x && rm -f y && mv x simple_tuple.cfg
 # ./prp function_call.prp | sort -n  > y && column -t y > x && rm -f y && mv x function_call.cfg

@@ -230,19 +230,44 @@ void Inou_lnast_dfg::process_ast_nary_op(LGraph *dfg, const Lnast_nid &lnidx_opr
     Node_pin opd;
     if (opr_child == lnast->get_first_child(lnidx_opr))
       continue; // the lhs has been handled at setup_node_opr_and_lhs();
-    else {
-      auto child_name = lnast->get_sname(opr_child);
-      if (name2lnidx.find(child_name) != name2lnidx.end()) {
-        opd = add_tuple_get_from_dot_or_sel(dfg, name2lnidx[child_name]);
-      } else {
-        opd = setup_ref_node_dpin(dfg, opr_child);
-      }
+
+    auto child_name = lnast->get_sname(opr_child);
+    if (name2lnidx.find(child_name) != name2lnidx.end()) {
+      opd = add_tuple_get_from_dot_or_sel(dfg, name2lnidx[child_name]);
+    } else {
+      opd = setup_ref_node_dpin(dfg, opr_child);
     }
     opds.emplace_back(opd);
   }
 
   nary_node_rhs_connections(dfg, opr_node, opds, lnast->get_type(lnidx_opr).is_minus());
 }
+
+
+void Inou_lnast_dfg::process_ast_logical_op  (LGraph *dfg, const Lnast_nid &lnidx_opr) {
+  // (1) create logical operator node and record the dpin to symbol table
+  // (2) create comparator node and compare with 0 for each of the inputs 
+  // (3) take the result of every comparator as the inputs of logical operator inputs
+
+  auto opr_node = setup_node_opr_and_lhs(dfg, lnidx_opr).get_node();
+  std::vector<Node_pin> eqs_dpins;
+  for (const auto &opr_child : lnast->children(lnidx_opr)) {
+    if (opr_child == lnast->get_first_child(lnidx_opr))
+      continue; // the lhs has been handled at setup_node_opr_and_lhs();
+
+    auto node_eq = dfg->create_node(Equals_Op);
+    auto ori_opd = setup_ref_node_dpin(dfg, opr_child);
+    auto zero_dpin = dfg->create_node_const(0).setup_driver_pin();
+    dfg->add_edge(ori_opd, node_eq.setup_sink_pin(1));
+    dfg->add_edge(zero_dpin, node_eq.setup_sink_pin(1));
+
+    eqs_dpins.emplace_back(node_eq.setup_driver_pin());
+  }
+
+  nary_node_rhs_connections(dfg, opr_node, eqs_dpins, lnast->get_type(lnidx_opr).is_minus());
+};
+
+
 
 void Inou_lnast_dfg::nary_node_rhs_connections(LGraph *dfg, Node &opr_node, const std::vector<Node_pin> &opds, bool is_subt) {
   // FIXME->sh: need to think about signed number handling and signed number copy-propagation analysis
@@ -583,7 +608,6 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
 
   const auto it = name2dpin.find(name);
   if (it != name2dpin.end()){
-    fmt::print("hello\n");
     return it->second;
   }
 
@@ -626,9 +650,6 @@ Node_Type_Op Inou_lnast_dfg::decode_lnast_op(const Lnast_nid &lnidx_opr) {
 }
 
 
-
-
-void Inou_lnast_dfg::process_ast_logical_op  (LGraph *dfg, const Lnast_nid &lnidx) { ; };
 void Inou_lnast_dfg::process_ast_as_op       (LGraph *dfg, const Lnast_nid &lnidx) { ; };
 void Inou_lnast_dfg::process_ast_label_op    (LGraph *dfg, const Lnast_nid &lnidx) { ; };
 void Inou_lnast_dfg::process_ast_uif_op      (LGraph *dfg, const Lnast_nid &lnidx) { ; };
