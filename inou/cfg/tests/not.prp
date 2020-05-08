@@ -1,7 +1,8 @@
 $a.__bits = 1
 $b.__bits = 3
 
-%o1 = ~$a
+%o1 = ~$a  // bitwise
 %o2 = ~$b
-
+%o3 = !$a  // logical
+%o4 = !$b 
 //FIXME->sh: need to extend to logical not

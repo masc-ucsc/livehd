@@ -308,8 +308,8 @@ public:
   };
 };
 
-// Y0 = A & A & A...
-// Y1 = & {A, A, A...} //reduction
+// Y0 = A0 & A1 & A2...   // multi-inputs on same pin
+// Y1 = & {A0, A1, A2...} // bitwise reduction for all inputs bits
 class Node_Type_And : public Node_Type {
 public:
   Node_Type_And() : Node_Type("and", And_Op, false) {
@@ -319,8 +319,8 @@ public:
   };
 };
 
-// Y0 = A | A | A...
-// Y1 = | {A, A, A...} //reduction
+// Y0 = A0 | A1 | A2...   // multi-inputs on same pin
+// Y1 = | {A0, A1, A2...} // bitwise reduction for all inputs bits
 class Node_Type_Or : public Node_Type {
 public:
   Node_Type_Or() : Node_Type("or", Or_Op, false) {
@@ -330,8 +330,8 @@ public:
   };
 };
 
-// Y0 = A ^ A ^ A...
-// Y1 = ^ {A, A, A...} //reduction
+// Y0 = A0 ^ A1 ^ A2...   // multi-inputs on same pin
+// Y1 = ^ {A0, A1, A2...} // bitwise reduction for all inputs bits
 class Node_Type_Xor : public Node_Type {
 public:
   Node_Type_Xor() : Node_Type("xor", Xor_Op, false) {
