@@ -257,7 +257,7 @@ void Inou_lnast_dfg::process_ast_logical_op  (LGraph *dfg, const Lnast_nid &lnid
 
     auto node_eq = dfg->create_node(Equals_Op);
     auto ori_opd = setup_ref_node_dpin(dfg, opr_child);
-    auto zero_dpin = dfg->create_node_const(0).setup_driver_pin();
+    auto zero_dpin = dfg->create_node_const(0, 1).setup_driver_pin();
     dfg->add_edge(ori_opd, node_eq.setup_sink_pin(1));
     dfg->add_edge(zero_dpin, node_eq.setup_sink_pin(1));
 
