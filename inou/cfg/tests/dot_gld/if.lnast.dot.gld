@@ -4,13 +4,13 @@ digraph {
  00->10;
  20 [label=<dot, >];
  10->20;
- 30 [label=<ref, ___a<I><SUB><font color="#ff1020">0</font></SUB></I>>];
+ 30 [label=<ref, $inp<I><SUB><font color="#ff1020">0</font></SUB></I>>];
  20->30;
- 31 [label=<ref, $inp<I><SUB><font color="#ff1020">0</font></SUB></I>>];
+ 31 [label=<ref, __bits<I><SUB><font color="#ff1020">0</font></SUB></I>>];
  20->31;
- 32 [label=<ref, __bits<I><SUB><font color="#ff1020">0</font></SUB></I>>];
+ 32 [label=<const, 0d1>];
  20->32;
- 21 [label=<assign, >];
+ 21 [label=<invalid, >];
  10->21;
  34 [label=<ref, ___a<I><SUB><font color="#ff1020">0</font></SUB></I>>];
  21->34;

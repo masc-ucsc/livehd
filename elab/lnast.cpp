@@ -115,8 +115,9 @@ void Lnast::trans_tuple_opr(const Lnast_nid &psts_nid) {
       auto tuple_name_nid = get_first_child(opr_nid);
       auto &tuple_var_table = tuple_var_tables[get_name(psts_nid)];
       tuple_var_table.insert(get_name(tuple_name_nid));
-    } else if (is_bit_attr_tuple_add(opr_nid)) {
-      continue;
+    } else if (is_bit_attr_setting(opr_nid)) { //note: should be extended to all Pyrope compiler paramters, ex. __posedge or __clk_pin
+      auto dot_nid = opr_nid;
+      merge_dot_attr_value_assign(psts_nid, dot_nid);
     } else if (get_type(opr_nid).is_dot() || get_type(opr_nid).is_select()) {
       trans_tuple_opr_handle_a_statement(psts_nid, opr_nid);
     }
@@ -133,8 +134,9 @@ void Lnast::trans_tuple_opr_if_subtree(const Lnast_nid &if_nid) {
         I(!get_type(opr_nid).is_func_def());
         if (get_type(opr_nid).is_if()) {
           trans_tuple_opr_if_subtree(opr_nid);
-        } else if (is_bit_attr_tuple_add(opr_nid)) {
-          continue;
+        } else if (is_bit_attr_setting(opr_nid)) {
+          auto dot_nid = opr_nid;
+          merge_dot_attr_value_assign(itr_nid, dot_nid);
         } else if (get_type(opr_nid).is_dot() || get_type(opr_nid).is_select()) {
           trans_tuple_opr_handle_a_statement(itr_nid, opr_nid);
         } else if (get_type(opr_nid).is_tuple()) {
@@ -147,9 +149,7 @@ void Lnast::trans_tuple_opr_if_subtree(const Lnast_nid &if_nid) {
   }
 }
 
-//FIXME->sh: this is a temporary approach to not pollute existing passing pattern,
-//           should be deprecated after my advancement 
-bool Lnast::is_bit_attr_tuple_add(const Lnast_nid &opr_nid) {
+bool Lnast::is_bit_attr_setting(const Lnast_nid &opr_nid) {
   if (get_type(opr_nid).is_dot()) {
     auto c0_dot = get_first_child(opr_nid);
     auto c1_dot = get_sibling_next(c0_dot);
@@ -160,6 +160,46 @@ bool Lnast::is_bit_attr_tuple_add(const Lnast_nid &opr_nid) {
   }
   return false;
 }
+
+
+//  LNAST attr_bits merge from dot and assign lnast nodes 
+//  
+//  original:
+//     dot               assign   
+//    / | \               /  \
+//   /  |  \             /    \
+//  /   |   \           /      \
+// ___t $a  __bits    ___t     0d4
+//
+//
+// merged:
+//     dot               invalid   
+//    / | \               /  \
+//   /  |  \             /    \
+//  /   |   \           /      \
+// $a __bits 0d4      ___t     0d4
+
+
+void Lnast::merge_dot_attr_value_assign(const Lnast_nid &psts_nid, Lnast_nid &dot_nid) {
+  auto &dot_lrhs_table   = dot_lrhs_tables[get_name(psts_nid)];
+  auto paired_assign_nid = dot_lrhs_table[dot_nid].second;
+  
+  auto c0_dot = get_first_child(dot_nid);
+  auto c1_dot = get_sibling_next(c0_dot);
+  auto c2_dot = get_sibling_next(c1_dot);
+
+  auto c0_assign = get_first_child(paired_assign_nid);
+  auto c1_assign = get_sibling_next(c0_assign);
+
+
+    // change node semantic from dot/sel->tuple add; assign->invalid  
+    ref_data(c0_dot)->token = get_data(c1_dot).token;
+    ref_data(c1_dot)->token = get_data(c2_dot).token;
+    ref_data(c2_dot)->token = get_data(c1_assign).token;
+    ref_data(c2_dot)->type  = Lnast_ntype::create_const();
+    ref_data(paired_assign_nid)->type = Lnast_ntype::create_invalid();
+} 
+
 
 void Lnast::trans_tuple_opr_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
   I(get_type(opr_nid).is_dot() || get_type(opr_nid).is_select());
@@ -202,6 +242,7 @@ void Lnast::find_cond_nid(const Lnast_nid &psts_nid, Lnast_nid &cond_nid, bool &
 void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid) {
   auto &tuple_var_table = tuple_var_tables[get_name(psts_nid)];
   auto &dot_lrhs_table  =  dot_lrhs_tables[get_name(psts_nid)];
+  
 
   auto c0_dot      = get_first_child(dot_nid); //c0 = intermediate target
   auto c1_dot      = get_sibling_next(c0_dot);
@@ -246,8 +287,8 @@ void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid)
 //   c1 = rhs         / | | \      ...        c0 = temporary target of dot/sel
 //                                            c1 = tuple name
 //                                            c2 = tuple field
-//                                                                                        
-
+//  To know more detail, see my note
+//  https://drive.google.com/open?id=16DSzAPf0GzuxYptxkZzdPKJDDP8DxnBz
 
 // FIXME->sh: need to add condition nid parameter
 void Lnast::dot2hier_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid, const Lnast_nid &cond_nid, bool is_else_sts) {
@@ -355,11 +396,11 @@ void Lnast::analyze_dot_lrhs_handle_a_statement(const Lnast_nid &psts_nid, const
   I(get_type(opr_nid).is_dot() || get_type(opr_nid).is_select());
   auto &dot_lrhs_table = dot_lrhs_tables[get_name(psts_nid)];
 
-  if (get_type(opr_nid).is_dot() and has_attribute_bits(opr_nid)) {
-    dot_lrhs_table[opr_nid].first = false;
-    fmt::print("dot/sel:{} is rhs\n", get_name(get_first_child(opr_nid)));
-    return;
-  }
+  /* if (get_type(opr_nid).is_dot() and has_attribute_bits(opr_nid)) { */
+  /*   dot_lrhs_table[opr_nid].first = false; */
+  /*   fmt::print("dot/sel:{} is rhs\n", get_name(get_first_child(opr_nid))); */
+  /*   return; */
+  /* } */
 
   auto dot_nid     = opr_nid;
   auto c0_dot      = get_first_child(dot_nid); //c0 = intermediate target

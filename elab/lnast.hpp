@@ -111,12 +111,12 @@ private:
   Lnast_nid add_phi_node               (const Lnast_nid  &cond_nid, const Lnast_nid &t_nid, const Lnast_nid &f_nid);
   Lnast_nid get_complement_nid            (std::string_view brother_name, const Lnast_nid &psts_nid, bool false_path);
   Lnast_nid check_phi_table_parents_chain (std::string_view brother_name, const Lnast_nid &psts_nid, bool originate_from_csts);
-  void      resolve_ssa_rhs_subs              (const Lnast_nid &psts_nid);
-  void      update_global_lhs_ssa_cnt_table   (const Lnast_nid &target_nid);
-  int8_t    check_rhs_cnt_table_parents_chain (const Lnast_nid &psts_nid, const Lnast_nid &target_key);
-  void      update_rhs_ssa_cnt_table          (const Lnast_nid &psts_nid, const Lnast_nid &target_key);
-  void      analyze_dot_lrhs               (const Lnast_nid &psts_nid);
-  void      analyze_dot_lrhs_if_subtree    (const Lnast_nid &if_nid);
+  void      resolve_ssa_rhs_subs                (const Lnast_nid &psts_nid);
+  void      update_global_lhs_ssa_cnt_table     (const Lnast_nid &target_nid);
+  int8_t    check_rhs_cnt_table_parents_chain   (const Lnast_nid &psts_nid, const Lnast_nid &target_key);
+  void      update_rhs_ssa_cnt_table            (const Lnast_nid &psts_nid, const Lnast_nid &target_key);
+  void      analyze_dot_lrhs                    (const Lnast_nid &psts_nid);
+  void      analyze_dot_lrhs_if_subtree         (const Lnast_nid &if_nid);
   void      analyze_dot_lrhs_handle_a_statement (const Lnast_nid &psts_nid, const Lnast_nid &opr_nid);
 
   bool      has_attribute_bits               (const Lnast_nid &opr_nid);
@@ -132,7 +132,8 @@ private:
   void      dot2local_tuple_chain              (const Lnast_nid &pats_nid, Lnast_nid &dot_nid);
   void      dot2hier_tuple_chain               (const Lnast_nid &psts_nid, Lnast_nid &dot_nid, const Lnast_nid &cond_nid, bool is_else_sts); 
   void      find_cond_nid                      (const Lnast_nid &psts_nid, Lnast_nid &cond_nid, bool &is_else_sts); 
-  bool      is_bit_attr_tuple_add              (const Lnast_nid &opr_nid);
+  bool      is_bit_attr_setting                (const Lnast_nid &opr_nid);
+  void      merge_dot_attr_value_assign        (const Lnast_nid &psts_nid, Lnast_nid &opr_nid);
 
 
   // hierarchical statements node -> symbol table
@@ -140,9 +141,9 @@ private:
   absl::flat_hash_map<std::string_view, Cnt_rtable>      ssa_rhs_cnt_tables;
   absl::flat_hash_map<std::string_view, Dot_lrhs_table>  dot_lrhs_tables;
   absl::flat_hash_map<std::string_view, Tuple_var_table> tuple_var_tables;   
+  absl::flat_hash_map<std::string_view, uint8_t>         global_ssa_lhs_cnt_table;
 
   Phi_rtable new_added_phi_node_table;
-  absl::flat_hash_map<std::string_view, uint8_t>         global_ssa_lhs_cnt_table;
   Lnast_nid  default_const_nid;
   Lnast_nid  err_var_undefined;
   uint32_t   tup_internal_cnt = 0;
