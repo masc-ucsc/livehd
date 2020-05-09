@@ -33,6 +33,20 @@ std::string_view Inou_firrtl::get_new_seq_name(Lnast& lnast) {
   return seq_name;
 }
 
+std::string Inou_firrtl::get_full_name(std::string term) {
+  //FIXME: Eventually add a list for registers, too.
+  if(std::find(input_names.begin(), input_names.end(), term) != input_names.end()) {
+    //string matching "term" was found to be an input to the module
+    return absl::StrCat("$", term);
+  } else if(std::find(output_names.begin(), output_names.end(), term) != output_names.end()) {
+    return absl::StrCat("%", term);
+  } else if(std::find(register_names.begin(), register_names.end(), term) != register_names.end()) {
+    return absl::StrCat("#", term);
+  } else {
+    return term;
+  }
+}
+
 //If the bitwidth is specified, in LNAST we have to create a new variable which represents
 //  the number of bits that a variable will have.
 //FIXME: I need to add stuff to determine if input/output/register and add $/%/# respectively.
@@ -47,6 +61,52 @@ void Inou_firrtl::create_bitwidth_dot_node(Lnast& lnast, uint32_t bitwidth, Lnas
   auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
   lnast.add_child(idx_asg, Lnast_node::create_ref(temp_var_name));
   lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(absl::StrCat("0d", bitwidth))));
+}
+
+/* When creating a register, we have to set the register's
+ * clock, reset, and init values using "dot" nodes in the LNAST.
+ * This function creates all of those when a reg is first declared. */
+void Inou_firrtl::init_register_dots(Lnast& lnast, const firrtl::FirrtlPB_Statement_Register& expr, Lnast_nid& parent_node) {
+  auto reg_name = lnast.add_string(get_full_name(expr.id()));
+  auto clk_name = lnast.add_string(get_full_name(ReturnExprString(expr.clock())));
+  auto res_name = lnast.add_string(get_full_name(ReturnExprString(expr.reset())));
+  auto init_name = lnast.add_string(get_full_name(ReturnExprString(expr.init())));
+
+  //FIXME: maybe I should also specify __bits here
+
+  //Creating clock "dot" node.
+  auto clk_dot_node = lnast.add_child(parent_node, Lnast_node::create_dot("dot_clk"));
+  auto temp_var_name_clk = create_temp_var(lnast);
+  lnast.add_child(clk_dot_node, Lnast_node::create_ref(temp_var_name_clk));
+  lnast.add_child(clk_dot_node, Lnast_node::create_ref(reg_name));
+  lnast.add_child(clk_dot_node, Lnast_node::create_assign("__clk_pin"));
+
+  auto clk_asg_node = lnast.add_child(parent_node, Lnast_node::create_assign("asg_clk"));
+  lnast.add_child(clk_asg_node, Lnast_node::create_ref(temp_var_name_clk));
+  if(clk_name.compare(0, 2, "0d") == 0) {
+    lnast.add_child(clk_asg_node, Lnast_node::create_const(clk_name));
+  } else {
+    lnast.add_child(clk_asg_node, Lnast_node::create_ref(temp_var_name_clk));
+  }
+
+  //Creating reset "dot" node.
+  auto res_dot_node = lnast.add_child(parent_node, Lnast_node::create_dot("dot_reset"));
+  auto temp_var_name_res = create_temp_var(lnast);
+  lnast.add_child(res_dot_node, Lnast_node::create_ref(temp_var_name_res));
+  lnast.add_child(res_dot_node, Lnast_node::create_ref(reg_name));
+  lnast.add_child(res_dot_node, Lnast_node::create_assign("__reset_pin"));
+
+  auto res_asg_node = lnast.add_child(parent_node, Lnast_node::create_assign("asg_reset"));
+  lnast.add_child(res_asg_node, Lnast_node::create_ref(temp_var_name_res));
+  if(clk_name.compare(0, 2, "0d") == 0) {
+    lnast.add_child(res_asg_node, Lnast_node::create_const(res_name));
+  } else {
+    lnast.add_child(res_asg_node, Lnast_node::create_ref(temp_var_name_res));
+  }
+
+  //Creating init value "dot" node.
+  auto init_dot_node = lnast.add_child(parent_node, Lnast_node::create_dot("dot_init"));
+  //FIXME: Add later.
 }
 
 /* These functions are useful because they analyze what the condition of something is
@@ -149,8 +209,9 @@ void Inou_firrtl::HandleUnaryOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_
   auto idx_not = lnast.add_child(parent_node, Lnast_node::create_not("not"));
   lnast.add_child(idx_not, Lnast_node::create_ref(lnast.add_string(lhs)));
   if ((op.arg_size() == 1) && (op.const__size() == 0)) {
-    std::string arg_string = ReturnExprString(op.arg(0));
-    lnast.add_child(idx_not, Lnast_node::create_ref(lnast.add_string(arg_string)));
+    auto arg_string = ReturnExprString(op.arg(0));
+    auto full_name = get_full_name(arg_string);
+    lnast.add_child(idx_not, Lnast_node::create_ref(lnast.add_string(full_name)));
   } else if ((op.arg_size() == 0) && (op.const__size() == 1)) {
     std::string const_string = op.const_(0).value();
     lnast.add_child(idx_not, Lnast_node::create_const(lnast.add_string(const_string)));//FIXME(?): Should consts take this form?
@@ -397,28 +458,14 @@ void Inou_firrtl::create_io_list(const firrtl::FirrtlPB_Type& type, uint8_t dir,
                                     std::vector<std::tuple<std::string, uint8_t, uint32_t>>& vec) {
   switch (type.type_case()) {
     case 2: { //UInt type
-      cout << port_id << endl;
       vec.push_back(std::make_tuple(port_id, dir, type.uint_type().width().value()));
       break;
 
-      /*cout << "UInt[" << type.uint_type().width().value() << "]" << endl;
-      if(type.uint_type().width().value() != 0) { //if BW is explicit.
-        CreateBitwidthAttribute(lnast, type.uint_type().width().value(), parent_node, port_id);
-      }
-      break;*/
-
     } case 3: { //SInt type
-      cout << port_id << endl;
       vec.push_back(std::make_tuple(port_id, dir, type.sint_type().width().value()));
       break;
-      /*cout << "SInt[" << type.sint_type().width().value() << "]" << endl;
-      if(type.sint_type().width().value() != 0) { //if BW is explicit.
-        CreateBitwidthAttribute(lnast, type.sint_type().width().value(), parent_node, port_id);
-      }
-      break;*/
 
     } case 4: { //Clock type
-      cout << port_id << endl;
       vec.push_back(std::make_tuple(port_id, dir, 1));
       break;
 
@@ -462,7 +509,7 @@ void Inou_firrtl::create_io_list(const firrtl::FirrtlPB_Type& type, uint8_t dir,
       break;
 
     } case 10: { //Reset type
-      //cout << "Reset" << endl;
+      vec.push_back(std::make_tuple(port_id, dir, 1));
       break;
 
     } default:
@@ -788,9 +835,10 @@ void Inou_firrtl::ListPrimOpInfo(Lnast& lnast, const firrtl::FirrtlPB_Expression
  */
 
 /* */
-void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, std::string lhs, std::string tail) {
+void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, std::string lhs_unaltered, std::string tail) {
   //Note: here, parent_node is the "stmt" node above where this expression will go.
-  cout << lhs << "\n";
+  auto lhs = get_full_name(lhs_unaltered);
+  cout << "LHS test: " << lhs << "\n";
   switch(expr.expression_case()) {
     case 1: { //Reference
       auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
@@ -806,14 +854,14 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
     } case 2: { //UIntLiteral
       auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
       lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs)));
-      std::string str_val = "0d" + expr.uint_literal().value().value() + "u" + to_string(expr.uint_literal().width().value());
+      std::string str_val = "0d" + expr.uint_literal().value().value();// + "u" + to_string(expr.uint_literal().width().value());
       lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(str_val)));
       break;
 
     } case 3: { //SIntLiteral
       auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
       lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs)));
-      std::string str_val = "0d" + expr.sint_literal().value().value() + "s" + to_string(expr.sint_literal().width().value());
+      std::string str_val = "0d" + expr.sint_literal().value().value();// + "s" + to_string(expr.sint_literal().width().value());
       lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(str_val)));
       break;
 
@@ -873,20 +921,22 @@ void Inou_firrtl::AttachExprToOperator(Lnast& lnast, const firrtl::FirrtlPB_Expr
     case 1: { //Reference
       cout << expr.reference().id();
       if(tail == "") {
-        lnast.add_child(parent_node, Lnast_node::create_ref(expr.reference().id()));
+        auto expr_name = get_full_name(expr.reference().id());
+        lnast.add_child(parent_node, Lnast_node::create_ref(lnast.add_string(expr_name)));//expr.reference().id()));
       } else {
-        std::string full_name = expr.reference().id() + "." + tail;
-        lnast.add_child(parent_node, Lnast_node::create_ref(lnast.add_string(full_name)));
+        std::string whole_name = expr.reference().id() + "." + tail;
+        auto expr_name = get_full_name(whole_name);
+        lnast.add_child(parent_node, Lnast_node::create_ref(lnast.add_string(expr_name)));//lnast.add_string(full_name)));
       }
       break;
 
     } case 2: { //UIntLiteral
-      std::string const_val = "0d" + expr.uint_literal().value().value() + "u" + to_string(expr.uint_literal().width().value());
+      std::string const_val = "0d" + expr.uint_literal().value().value();// + "u" + to_string(expr.uint_literal().width().value());
       lnast.add_child(parent_node, Lnast_node::create_const(lnast.add_string(const_val)));
       break;
 
     } case 3: { //SIntLiteral
-      std::string const_val = "0d" + expr.sint_literal().value().value() + "s" + to_string(expr.sint_literal().width().value());
+      std::string const_val = "0d" + expr.sint_literal().value().value();// + "s" + to_string(expr.sint_literal().width().value());
       lnast.add_child(parent_node, Lnast_node::create_const(lnast.add_string(const_val)));
       break;
 
@@ -948,10 +998,10 @@ std::string Inou_firrtl::ReturnExprString(const firrtl::FirrtlPB_Expression& exp
       expr_string = expr.reference().id();
       break;
     } case 2: { //UIntLiteral
-      expr_string = "0d" + expr.uint_literal().value().value() + "u" + to_string(expr.uint_literal().width().value());
+      expr_string = "0d" + expr.uint_literal().value().value();// + "u" + to_string(expr.uint_literal().width().value());
       break;
     } case 3: { //SIntLiteral
-      expr_string = "0d" + expr.sint_literal().value().value() + "s" + to_string(expr.sint_literal().width().value());
+      expr_string = "0d" + expr.sint_literal().value().value();// + "s" + to_string(expr.sint_literal().width().value());
       break;
     } case 7: { //SubField
       std::string head_string = ReturnExprString(expr.sub_field().expression());
@@ -962,7 +1012,7 @@ std::string Inou_firrtl::ReturnExprString(const firrtl::FirrtlPB_Expression& exp
       break;
     } default:
       //Error: I don't think this should occur if we're using Chisel's protobuf utility.
-      assert(false);
+      I(false);
   }
   return expr_string;
 }
@@ -999,6 +1049,8 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
       cout << ");\n" << endl;*/
       //FIXME BIG: Need to make a new interface for wire, since I altered old one.
       //ListTypeInfo(lnast, stmt.register_().type(), parent_node, stmt.register_().id());//FIXME: How to incorporate clock/reset/init?
+      register_names.push_back(stmt.register_().id());
+      init_register_dots(lnast, stmt.register_(), parent_node);
       break;
 
     } case 3: { //Memory
