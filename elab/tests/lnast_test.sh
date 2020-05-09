@@ -195,7 +195,7 @@ do
 
     rm -f ${pt}.v
     rm -f ${pt}.cfg
-    rm -f lnast.dot
+    # rm -f lnast.dot
     rm -f lnast.dot.gld
     rm -f lnast.nodes
     rm -f lnast.nodes.gld
