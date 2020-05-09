@@ -258,7 +258,7 @@ to LiveHD, please send us a notification, we are glad to add your paper.
 
 4. [LGraph: A multi-language open-source database for VLSI](docs/papers/LGraph_WOSET18.pdf), Rafael T. Possignolo,
    Sheng-Hong Wang, Haven Skinner, and Jose Renau. First Workshop on Open-Source
-   EDA Technology (WOSET), November 2018.
+   EDA Technology (WOSET), November 2018. **(Best Tool Nomination)**
 
 #### LNAST 
 5. [LNAST: A Language Neutral Intermediate Representation for Hardware Description Languages](docs/papers/LNAST_WOSET19.pdf), Sheng-Hong Wang, Akash Sridhar, and Jose Renau,

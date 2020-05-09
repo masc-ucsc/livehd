@@ -5,11 +5,6 @@
 void setup_inou_lnast_dfg() { Inou_lnast_dfg::setup(); }
 
 void Inou_lnast_dfg::setup() {
-  /* //FIXME->sh: shoudl be deprecate and use pipe approach */
-  /* Eprp_method m1("inou.lnast_dfg.tolg", "parse cfg_text -> build lnast -> generate lgraph", &Inou_lnast_dfg::tolg); */
-  /* m1.add_label_required("files", "cfg_text files to process (comma separated)"); */
-  /* m1.add_label_optional("path", "path to put the lgraph[s]", "lgdb"); */
-  /* register_inou("lnast_dfg", m1); */
 
   Eprp_method m1("inou.lnast_dfg.tolg", " front-end language lnast -> lgraph", &Inou_lnast_dfg::tolg);
   m1.add_label_optional("path", "path to output the lgraph[s] to", "lgdb");
@@ -208,7 +203,7 @@ Node_pin Inou_lnast_dfg::setup_tuple_chain_new_max_pos(LGraph *dfg, const Node_p
       auto next_itr = chain_itr.setup_sink_pin(TN).inp_edges().begin()->driver.get_node();
       chain_itr = next_itr;
     } else {
-      I(false); //compile error: tuple chain must only contains TupRef_Op or Or_Op
+      I(false, "Compile Error: tuple chain must only contains TupAdd_Op or Or_Op"); 
     }
   }
 
@@ -322,6 +317,11 @@ void Inou_lnast_dfg::process_ast_assign_op(LGraph *dfg, const Lnast_nid &lnidx_a
   auto c0_name = lnast->get_sname(c0);
   auto c1_name = lnast->get_sname(c1);
 
+  Node_pin opr  = setup_node_assign_and_lhs(dfg, lnidx_assign);
+  Node_pin opd1 = setup_ref_node_dpin(dfg, c1);
+  GI(opd1.get_node().get_type().op != U32Const_Op, opd1.get_bits() == 0);
+
+  dfg->add_edge(opd1, opr);
 
   /* if ((name2lnidx.find(c0_name) != name2lnidx.end()) and name2lnidx.find(c1_name) != name2lnidx.end()) { */
   /*   auto ast_opr_idx = name2lnidx[c1_name]; */
@@ -358,14 +358,6 @@ void Inou_lnast_dfg::process_ast_assign_op(LGraph *dfg, const Lnast_nid &lnidx_a
   /*     add_tuple_get_from_dot_or_sel(dfg, name2lnidx[c1_name]); */
   /* } */
 
-  Node_pin opr  = setup_node_assign_and_lhs(dfg, lnidx_assign);
-  Node_pin opd1 = setup_ref_node_dpin(dfg, c1);
-  fmt::print("c1 name:{}\n", lnast->get_sname(c1));
-  fmt::print("opr:{}\n", opr.debug_name());
-  fmt::print("opd1:{}\n", opd1.debug_name());
-  GI(opd1.get_node().get_type().op != U32Const_Op, opd1.get_bits() == 0);
-
-  dfg->add_edge(opd1, opr);
 }
 
 
@@ -419,6 +411,21 @@ void Inou_lnast_dfg::process_ast_dot_op(LGraph *dfg, const Lnast_nid &lnidx_dot)
   
   if (is_attr_bits(lnast->get_name(c1))) {
     auto ref_dpin = setup_ref_node_dpin(dfg, c0);
+    if (ref_dpin == Node_pin()) {
+      // note: initial bits attribute allowed for $/%/# as the type is already known
+      //       but not valid for undefind "local" variable.
+      // e.g.
+      //   // case I: invalid  
+      //   x.__bits = 2 -> x undefined, nonsense to set bit for it 
+      //   x = 2 
+      //   // case II: valid
+      //   x = 2
+      //   x.__bits = 2
+      //   $a.__bits = 3 //valid, $a is io, not local var
+      //       
+      I(false, "Compile Error: bitwidth assignment to an undefined local variable");  
+    } 
+
     if (is_const(lnast->get_sname(c2))) {
       auto bits = resolve_constant(dfg, lnast->get_sname(c2)).get_type_const_value();
       ref_dpin.ref_bitwidth()->e.set_ubits(bits);
@@ -582,13 +589,13 @@ Node_pin Inou_lnast_dfg::setup_tuple_key(LGraph *dfg, std::string_view key_name)
 
 // for operator, we must create a new node and dpin as it represents a new gate in the netlist
 Node_pin Inou_lnast_dfg::setup_node_opr_and_lhs(LGraph *dfg, const Lnast_nid &lnidx_opr) {
-  const auto c0 = lnast->get_first_child(lnidx_opr);
-  const auto c0_name = lnast->get_sname(c0);
+  auto c0 = lnast->get_first_child(lnidx_opr);
+  auto c0_name = lnast->get_sname(c0);
 
   // generally, there won't be a case that the target node point to a output/reg directly
   // this is not allowed by LNAST.
 
-  const auto lg_ntype_op = decode_lnast_op(lnidx_opr);
+  auto lg_ntype_op   = decode_lnast_op(lnidx_opr);
   auto node_dpin     = dfg->create_node(lg_ntype_op).setup_driver_pin(0);
   name2dpin[c0_name] = node_dpin;
   node_dpin.set_name(c0_name);
@@ -596,8 +603,8 @@ Node_pin Inou_lnast_dfg::setup_node_opr_and_lhs(LGraph *dfg, const Lnast_nid &ln
 }
 
 Node_pin Inou_lnast_dfg::setup_node_assign_and_lhs(LGraph *dfg, const Lnast_nid &lnidx_opr) {
-  const auto c0   = lnast->get_first_child(lnidx_opr);
-  const auto c0_name = lnast->get_sname(c0);
+  auto c0      = lnast->get_first_child(lnidx_opr);
+  auto c0_name = lnast->get_sname(c0);
   if (is_output(c0_name)) {
     if(dfg->is_graph_output(c0_name.substr(1, c0_name.size()-3))) {
       return dfg->get_graph_output(c0_name.substr(1, c0_name.size()-3));  //get rid of '%' char
@@ -647,7 +654,7 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
   } else if (is_err_var_undefined(name)) {
     node_dpin = dfg->create_node(CompileErr_Op).setup_driver_pin();
   } else {
-    return node_dpin; //return empty node_pin
+    return node_dpin; //return empty node_pin and trigger compile error
   }
 
   if (is_output(name) || is_input(name) || is_register(name)) {

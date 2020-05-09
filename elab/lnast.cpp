@@ -192,7 +192,7 @@ void Lnast::merge_dot_attr_value_assign(const Lnast_nid &psts_nid, Lnast_nid &do
   auto c1_assign = get_sibling_next(c0_assign);
 
 
-    // change node semantic from dot/sel->tuple add; assign->invalid  
+    // change node semantic from dot->dot with bits info.; assign->invalid  
     ref_data(c0_dot)->token = get_data(c1_dot).token;
     ref_data(c1_dot)->token = get_data(c2_dot).token;
     ref_data(c2_dot)->token = get_data(c1_assign).token;
