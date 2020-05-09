@@ -133,7 +133,7 @@ private:
   void      dot2hier_tuple_chain               (const Lnast_nid &psts_nid, Lnast_nid &dot_nid, const Lnast_nid &cond_nid, bool is_else_sts); 
   void      find_cond_nid                      (const Lnast_nid &psts_nid, Lnast_nid &cond_nid, bool &is_else_sts); 
   bool      is_bit_attr_setting                (const Lnast_nid &opr_nid);
-  void      merge_dot_attr_value_assign        (const Lnast_nid &psts_nid, Lnast_nid &opr_nid);
+  void      dot_attr2tuple_add                 (const Lnast_nid &psts_nid, Lnast_nid &opr_nid);
 
 
   // hierarchical statements node -> symbol table

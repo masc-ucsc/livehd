@@ -2,7 +2,7 @@ digraph {
  00 [label=<top, >];
  10 [label=<stmts, SEQ0>];
  00->10;
- 20 [label=<dot, >];
+ 20 [label=<tuple_add, >];
  10->20;
  30 [label=<ref, $inp<I><SUB><font color="#ff1020">0</font></SUB></I>>];
  20->30;

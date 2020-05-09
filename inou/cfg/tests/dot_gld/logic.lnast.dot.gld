@@ -2,7 +2,7 @@ digraph {
  00 [label=<top, >];
  10 [label=<stmts, SEQ0>];
  00->10;
- 20 [label=<dot, >];
+ 20 [label=<tuple_add, >];
  10->20;
  30 [label=<ref, $a<I><SUB><font color="#ff1020">0</font></SUB></I>>];
  20->30;
@@ -16,7 +16,7 @@ digraph {
  21->34;
  35 [label=<const, 0d1>];
  21->35;
- 22 [label=<dot, >];
+ 22 [label=<tuple_add, >];
  10->22;
  38 [label=<ref, $b<I><SUB><font color="#ff1020">0</font></SUB></I>>];
  22->38;
@@ -30,7 +30,7 @@ digraph {
  23->312;
  313 [label=<const, 0d3>];
  23->313;
- 24 [label=<dot, >];
+ 24 [label=<tuple_add, >];
  10->24;
  316 [label=<ref, $c<I><SUB><font color="#ff1020">0</font></SUB></I>>];
  24->316;

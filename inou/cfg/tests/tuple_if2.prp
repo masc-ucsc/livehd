@@ -1,8 +1,8 @@
-x = 2
-y = 7
-
 x.__bits = 2
 y.__bits = 3
+
+x = 2
+y = 7
 
 
 A = (x, foo = y, bar = 4)   

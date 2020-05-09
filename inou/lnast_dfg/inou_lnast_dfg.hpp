@@ -42,6 +42,8 @@ protected:
   void process_ast_nary_op      (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_unary_op     (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_logical_op   (LGraph *dfg, const Lnast_nid &lnidx);
+  void process_ast_tuple_add_op (LGraph *dfg, const Lnast_nid &lnidx_ta);
+  void process_ast_tuple_get_op (LGraph *dfg, const Lnast_nid &lnidx_tg);
   void process_ast_as_op        (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_label_op     (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_if_op        (LGraph *dfg, const Lnast_nid &lnidx);
@@ -82,9 +84,9 @@ protected:
 
 
   // tuple related
-  Node_pin     add_tuple_add_from_dot        (LGraph *dfg, const Lnast_nid &lnidx_dot, const Lnast_nid &lnidx_assign);
-  Node_pin     add_tuple_add_from_sel        (LGraph *dfg, const Lnast_nid &lnidx_sel, const Lnast_nid &lnidx_assign);
-  Node_pin     add_tuple_get_from_dot_or_sel (LGraph *dfg, const Lnast_nid &lnidx_opr);
+  /* Node_pin     add_tuple_add_from_dot        (LGraph *dfg, const Lnast_nid &lnidx_dot, const Lnast_nid &lnidx_assign); */
+  /* Node_pin     add_tuple_add_from_sel        (LGraph *dfg, const Lnast_nid &lnidx_sel, const Lnast_nid &lnidx_assign); */
+  /* Node_pin     add_tuple_get_from_dot_or_sel (LGraph *dfg, const Lnast_nid &lnidx_opr); */
   Node_pin     setup_tuple_ref               (LGraph *dfg, std::string_view tup_name);
   Node_pin     setup_tuple_key               (LGraph *dfg, std::string_view key_name);
   Node_pin     setup_tuple_chain_new_max_pos (LGraph *dfg, const Node_pin &tn_dpin);

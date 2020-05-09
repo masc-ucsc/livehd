@@ -2,7 +2,7 @@ digraph {
  00 [label=<top, >];
  10 [label=<stmts, SEQ0>];
  00->10;
- 20 [label=<dot, >];
+ 20 [label=<tuple_add, >];
  10->20;
  30 [label=<ref, $a<I><SUB><font color="#ff1020">0</font></SUB></I>>];
  20->30;
@@ -16,7 +16,7 @@ digraph {
  21->34;
  35 [label=<const, 0d4>];
  21->35;
- 22 [label=<dot, >];
+ 22 [label=<tuple_add, >];
  10->22;
  38 [label=<ref, $b<I><SUB><font color="#ff1020">0</font></SUB></I>>];
  22->38;
@@ -30,7 +30,7 @@ digraph {
  23->312;
  313 [label=<const, 0d4>];
  23->313;
- 24 [label=<dot, >];
+ 24 [label=<tuple_add, >];
  10->24;
  316 [label=<ref, $c<I><SUB><font color="#ff1020">0</font></SUB></I>>];
  24->316;
@@ -44,7 +44,7 @@ digraph {
  25->320;
  321 [label=<const, 0d4>];
  25->321;
- 26 [label=<dot, >];
+ 26 [label=<tuple_add, >];
  10->26;
  324 [label=<ref, $d<I><SUB><font color="#ff1020">0</font></SUB></I>>];
  26->324;
@@ -58,7 +58,7 @@ digraph {
  27->328;
  329 [label=<const, 0d4>];
  27->329;
- 28 [label=<dot, >];
+ 28 [label=<tuple_add, >];
  10->28;
  332 [label=<ref, $e<I><SUB><font color="#ff1020">0</font></SUB></I>>];
  28->332;
@@ -72,7 +72,7 @@ digraph {
  29->336;
  337 [label=<const, 0d4>];
  29->337;
- 210 [label=<dot, >];
+ 210 [label=<tuple_add, >];
  10->210;
  340 [label=<ref, $f<I><SUB><font color="#ff1020">0</font></SUB></I>>];
  210->340;

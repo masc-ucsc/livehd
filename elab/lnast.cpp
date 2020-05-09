@@ -117,7 +117,7 @@ void Lnast::trans_tuple_opr(const Lnast_nid &psts_nid) {
       tuple_var_table.insert(get_name(tuple_name_nid));
     } else if (is_bit_attr_setting(opr_nid)) { //note: should be extended to all Pyrope compiler paramters, ex. __posedge or __clk_pin
       auto dot_nid = opr_nid;
-      merge_dot_attr_value_assign(psts_nid, dot_nid);
+      dot_attr2tuple_add(psts_nid, dot_nid);
     } else if (get_type(opr_nid).is_dot() || get_type(opr_nid).is_select()) {
       trans_tuple_opr_handle_a_statement(psts_nid, opr_nid);
     }
@@ -136,7 +136,7 @@ void Lnast::trans_tuple_opr_if_subtree(const Lnast_nid &if_nid) {
           trans_tuple_opr_if_subtree(opr_nid);
         } else if (is_bit_attr_setting(opr_nid)) {
           auto dot_nid = opr_nid;
-          merge_dot_attr_value_assign(itr_nid, dot_nid);
+          dot_attr2tuple_add(itr_nid, dot_nid);
         } else if (get_type(opr_nid).is_dot() || get_type(opr_nid).is_select()) {
           trans_tuple_opr_handle_a_statement(itr_nid, opr_nid);
         } else if (get_type(opr_nid).is_tuple()) {
@@ -162,7 +162,7 @@ bool Lnast::is_bit_attr_setting(const Lnast_nid &opr_nid) {
 }
 
 
-//  LNAST attr_bits merge from dot and assign lnast nodes 
+//  LNAST attr_bits merge from dot and assign lnast nodes and create Tuple_Add node
 //  
 //  original:
 //     dot               assign   
@@ -173,14 +173,14 @@ bool Lnast::is_bit_attr_setting(const Lnast_nid &opr_nid) {
 //
 //
 // merged:
-//     dot               invalid   
+//   Tuple_Add           invalid   
 //    / | \               /  \
 //   /  |  \             /    \
 //  /   |   \           /      \
 // $a __bits 0d4      ___t     0d4
 
 
-void Lnast::merge_dot_attr_value_assign(const Lnast_nid &psts_nid, Lnast_nid &dot_nid) {
+void Lnast::dot_attr2tuple_add(const Lnast_nid &psts_nid, Lnast_nid &dot_nid) {
   auto &dot_lrhs_table   = dot_lrhs_tables[get_name(psts_nid)];
   auto paired_assign_nid = dot_lrhs_table[dot_nid].second;
   
@@ -197,6 +197,7 @@ void Lnast::merge_dot_attr_value_assign(const Lnast_nid &psts_nid, Lnast_nid &do
     ref_data(c1_dot)->token = get_data(c2_dot).token;
     ref_data(c2_dot)->token = get_data(c1_assign).token;
     ref_data(c2_dot)->type  = Lnast_ntype::create_const();
+    ref_data(dot_nid)->type = Lnast_ntype::create_tuple_add();
     ref_data(paired_assign_nid)->type = Lnast_ntype::create_invalid();
 } 
 

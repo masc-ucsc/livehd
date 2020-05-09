@@ -17,7 +17,7 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
   absl::flat_hash_map<Node_pin, Node_pin> tg2actual_dpin; //record tuple_get to its actual reference dpin
   for (const auto &node : dfg->fast()) {
     if (node.get_type().op == TupAdd_Op) {
-      // I(node.get_sink_pin(TN).inp_edges().size() == 1); // not necessarily true when its __bits assignment
+      // I(node.get_sink_pin(TN).inp_edges().size() == 1); // not necessarily true when it's __bits assignment
       // I(node.get_sink_pin(KV).inp_edges().size() == 1); // not necessarily true, might get extra inp from TupGet
 
       to_be_deleted.insert(node.get_compact());
