@@ -259,6 +259,9 @@ void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid)
     ref_data(dot_nid)->type = Lnast_ntype::create_tuple_add();
     ref_data(c0_dot)->token = get_data(c1_dot).token;
     ref_data(c1_dot)->token = get_data(c2_dot).token;
+    fmt::print("c1_dot name:{}\n", get_name(c1_dot));
+    if (get_name(c1_dot).substr(0,2) == "0d" || get_name(c1_dot).substr(0,3) == "-0d")
+      ref_data(c1_dot)->type = Lnast_ntype::create_const();
     ref_data(c2_dot)->token = get_data(c1_assign).token;
 
     ref_data(paired_assign_nid)->type = Lnast_ntype::create_invalid();
@@ -346,7 +349,11 @@ void Lnast::dot2hier_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid, 
 
     // handle the new tuple_add
     add_child(new_ta_nid, Lnast_node(Lnast_ntype::create_ref(), get_token(c1_dot), get_subs(c1_dot)));
-    add_child(new_ta_nid, Lnast_node(Lnast_ntype::create_ref(), get_token(c2_dot), get_subs(c2_dot)));
+    if (get_data(c2_dot).type.is_const()) {
+      add_child(new_ta_nid, Lnast_node(Lnast_ntype::create_const(), get_token(c2_dot), get_subs(c2_dot)));
+    } else {
+      add_child(new_ta_nid, Lnast_node(Lnast_ntype::create_ref(), get_token(c2_dot), get_subs(c2_dot)));
+    } 
     add_child(new_ta_nid, Lnast_node(Lnast_ntype::create_ref(), get_token(c0_phi), get_subs(c0_phi)));
 
     ref_data(new_ta_nid)->token = Token();

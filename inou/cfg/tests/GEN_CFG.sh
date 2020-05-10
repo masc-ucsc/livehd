@@ -11,6 +11,7 @@ generate tuple
 generate tuple_if
 generate tuple_if2
 generate tuple_if3
+generate tuple_if4
 generate nested_if
 generate if
 generate if2
