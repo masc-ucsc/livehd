@@ -21,7 +21,6 @@ private:
   absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Node_Type_Op> primitive_type_lnast2lg;
 
   absl::flat_hash_map<std::string, Node_pin>     name2dpin;
-  /* absl::flat_hash_map<std::string, Lnast_nid>    name2lnidx; //mainly for dot and select recording */
   absl::flat_hash_map<std::string, std::string>  keyname2pos;
   static constexpr uint8_t TN = 0;  // tuple name
   static constexpr uint8_t KN = 1;  // tuple element key name
@@ -54,7 +53,6 @@ protected:
   void process_ast_while_op     (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_dp_assign_op (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_dot_op       (LGraph *dfg, const Lnast_nid &lnidx);
-  /* void process_ast_select_op    (const Lnast_nid &lnidx); */
   void process_ast_tuple_struct (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_concat_op    (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_tuple_add_op (LGraph *dfg, const Lnast_nid &lnidx_ta);
@@ -86,9 +84,6 @@ protected:
 
 
   // tuple related
-  /* Node_pin     add_tuple_add_from_dot        (LGraph *dfg, const Lnast_nid &lnidx_dot, const Lnast_nid &lnidx_assign); */
-  /* Node_pin     add_tuple_add_from_sel        (LGraph *dfg, const Lnast_nid &lnidx_sel, const Lnast_nid &lnidx_assign); */
-  /* Node_pin     add_tuple_get_from_dot_or_sel (LGraph *dfg, const Lnast_nid &lnidx_opr); */
   Node_pin     setup_tuple_ref               (LGraph *dfg, std::string_view tup_name);
   Node_pin     setup_tuple_key               (LGraph *dfg, std::string_view key_name);
   Node_pin     setup_tuple_chain_new_max_pos (LGraph *dfg, const Node_pin &tn_dpin);
@@ -108,13 +103,11 @@ protected:
   static std::string  hex_char_to_bin           (char c);
   static std::string  hex_msb_char_to_bin       (char c);
 
-  // static void build_lnast(Inou_lnast_dfg &p, Eprp_var &var);
 
   // eprp callbacks
   static void tolg                  (Eprp_var &var);
   static void resolve_tuples        (Eprp_var &var);
   static void reduced_or_elimination(Eprp_var &var);
-  /* static void tolg_from_pipe        (Eprp_var &var); */
 
 public:
   explicit Inou_lnast_dfg(const Eprp_var &var);
