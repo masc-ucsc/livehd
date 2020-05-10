@@ -427,11 +427,23 @@ void Inou_lnast_dfg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnid
     auto tn_dpin = setup_tuple_ref(dfg, tup_name);
     dfg->add_edge(tn_dpin, tn_spin);
 
-    auto kn_dpin = setup_tuple_key(dfg, lnast->get_sname(c1_ta));
+    Node_pin kn_dpin;
+    if (is_const(key_name)) {// it is a key_pos, not a key_name
+       // find pos2key_name
+      for (auto &i : keyname2pos) {
+        if (i.second == key_name) {
+          kn_dpin = setup_tuple_key(dfg, i.first);
+          break;
+        }
+      }
+    } else {
+      kn_dpin = setup_tuple_key(dfg, lnast->get_sname(c1_ta));
+    }
     dfg->add_edge(kn_dpin, kn_spin);
+    
 
     std::string kp_str;
-    if (is_const(key_name)) {
+    if (is_const(key_name)) { // it is a key_pos, not a key_name
       kp_str = key_name;
     } else {
       kp_str = keyname2pos[key_name];

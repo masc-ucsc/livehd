@@ -15,10 +15,6 @@ if (A.foo == 7) {
 
 %out1 = A[1] + A.bar
 
-//A[0] = 3                    
-//%out2 = A[0] + A.foo        
-//
-//%out3 = x
 
 
 
