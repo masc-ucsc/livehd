@@ -1,0 +1,24 @@
+x.__bits = 2
+y.__bits = 3
+
+x = 2
+y = 7
+
+A = (x, foo = y, bar = 4)   
+
+if (A.foo == 7) {           
+  A = A++6                  
+  A.bar = 13                
+  A[1]  = 17                
+  x = A.foo
+}                            
+
+%out1 = A.bar + A[3]        
+
+A[0] = 3                    
+%out2 = A[0] + A.foo        
+
+%out3 = x
+
+
+

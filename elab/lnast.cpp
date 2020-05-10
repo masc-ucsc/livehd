@@ -305,6 +305,7 @@ void Lnast::dot2hier_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid, 
     auto c0_assign = get_first_child(paired_assign_nid);
     auto c1_assign = get_sibling_next(c0_assign);
 
+    bool c1_assign_is_const = get_data(c1_assign).type.is_const();
     // change node semantic from dot/sel->TG; assign-> phiTA w/ (phi + TA); 
     // also add four children for the new phi node, three childre for new TA node
     ref_data(dot_nid)->type           = Lnast_ntype::create_tuple_get();
@@ -326,9 +327,17 @@ void Lnast::dot2hier_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid, 
     add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_cond(), get_token(cond_nid), get_subs(cond_nid)));
     if (is_else_sts) {
       add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_ref(), get_token(c0_tg), get_subs(c0_tg)));
-      add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_ref(), get_token(c1_assign), get_subs(c1_assign)));
+      if (c1_assign_is_const) {
+        add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_const(), get_token(c1_assign), get_subs(c1_assign)));
+      } else {
+        add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_ref(), get_token(c1_assign), get_subs(c1_assign)));
+      }
     } else {
-      add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_ref(), get_token(c1_assign), get_subs(c1_assign)));
+      if (c1_assign_is_const) {
+        add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_const(), get_token(c1_assign), get_subs(c1_assign)));
+      } else {
+        add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_ref(), get_token(c1_assign), get_subs(c1_assign)));
+      }
       add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_ref(), get_token(c0_tg), get_subs(c0_tg)));
     }
     

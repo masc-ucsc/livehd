@@ -42,8 +42,6 @@ protected:
   void process_ast_nary_op      (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_unary_op     (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_logical_op   (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_tuple_add_op (LGraph *dfg, const Lnast_nid &lnidx_ta);
-  void process_ast_tuple_get_op (LGraph *dfg, const Lnast_nid &lnidx_tg);
   void process_ast_as_op        (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_label_op     (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_if_op        (LGraph *dfg, const Lnast_nid &lnidx);
@@ -59,6 +57,10 @@ protected:
   /* void process_ast_select_op    (const Lnast_nid &lnidx); */
   void process_ast_tuple_struct (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_concat_op    (LGraph *dfg, const Lnast_nid &lnidx);
+  void process_ast_tuple_add_op (LGraph *dfg, const Lnast_nid &lnidx_ta);
+  void process_ast_tuple_get_op (LGraph *dfg, const Lnast_nid &lnidx_tg);
+  void process_ast_tuple_phi_add_op (LGraph *dfg, const Lnast_nid &lnidx_tpa);
+
 
   Node_pin     setup_node_opr_and_lhs         (LGraph *dfg, const Lnast_nid &lnidx_opr);
   Node_pin     setup_node_assign_and_lhs      (LGraph *dfg, const Lnast_nid &lnidx_opr);
