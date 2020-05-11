@@ -276,7 +276,8 @@ Node Inou_lnast_dfg::process_bin_token_with_dc(LGraph *g, const std::string &tok
 Node Inou_lnast_dfg::create_const32_node(LGraph *g, const std::string &str_val, uint16_t node_bit_width, bool is_signed) {
   uint32_t val = cal_bin_val_32b(str_val);
   Node node_const32 = g->create_node_const(val, node_bit_width);
-  node_const32.setup_driver_pin().ref_bitwidth()->e.set_ubits(node_bit_width);
+  /* node_const32.setup_driver_pin().ref_bitwidth()->e.set_ubits(node_bit_width); */
+  node_const32.setup_driver_pin().ref_bitwidth()->e.set_uconst(val);
   I(node_bit_width != 0);
   I(node_const32.get_driver_pin().get_bits() == node_bit_width);
   I(node_const32.get_driver_pin().get_bits() != 0);

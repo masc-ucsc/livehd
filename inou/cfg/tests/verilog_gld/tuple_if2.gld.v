@@ -1,5 +1,5 @@
 module tuple_if2_gld (
-  output [5:0] out1
+  output [4:0] out1
   /* output [4:0] out2, */
   /* output [4:0] out3 */
 );

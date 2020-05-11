@@ -669,7 +669,7 @@ void Pass_bitwidth::bw_implicit_range_to_bits(LGraph *lg) {
         if (out.driver.get_bitwidth().i.max == 1 || out.driver.get_bitwidth().i.max == 0) {
           bits = 1;
         } else {
-          bits = ceil(log2(out.driver.get_bitwidth().i.max));
+          bits = ceil(log2(out.driver.get_bitwidth().i.max + 1));
         }
 
         out.driver.set_bits(bits);
