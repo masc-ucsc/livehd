@@ -13,5 +13,5 @@ $c.__bits = 3
 %o6 = !$a  
 %o7 = !$b 
 //FIXME->sh: wait for discussion result
-//%o8 = $a and $b
-//%o9 = $a or $b
+%o8 = $a and $b
+%o9 = $a or $b
