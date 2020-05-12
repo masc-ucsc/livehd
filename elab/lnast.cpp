@@ -434,12 +434,12 @@ void Lnast::analyze_dot_lrhs_handle_a_statement(const Lnast_nid &psts_nid, const
         hit = true;
         dot_lrhs_table[dot_nid].first = true;
         dot_lrhs_table[dot_nid].second = sib_nid;
-        fmt::print("dot/sel:{} is lhs\n", get_name(get_first_child(dot_nid)));
+        /* fmt::print("dot/sel:{} is lhs\n", get_name(get_first_child(dot_nid))); */
       } else if (get_name(sib_child) == c0_dot_name){
         hit = true;
         dot_lrhs_table[dot_nid].first  = false;
         dot_lrhs_table[dot_nid].second = Lnast_nid(-1, -1); // rhs dot doesn't need the corresponding assignment nid
-        fmt::print("dot/sel:{} is rhs\n", get_name(get_first_child(dot_nid)));
+        /* fmt::print("dot/sel:{} is rhs\n", get_name(get_first_child(dot_nid))); */
       }
     }
   } //note: practically, the assign/opr_op related to the dot/sel_op should be very close
