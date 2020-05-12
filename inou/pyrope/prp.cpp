@@ -1262,13 +1262,19 @@ uint8_t Prp::rule_logical_expression(std::list<std::tuple<Rule_id, Token_entry>>
   while (next) {
     cur_tokens  = tokens_consumed;
     lines_start = cur_line;
-    check_lb();
+    bool eos = check_eos();
+    if(eos){
+      loc_list.push_back(std::tuple<Rule_id, Token_entry>(Prp_rule_sentinel, 1));
+    }
     if (SCAN_IS_TOKEN(Pyrope_id_or, Prp_rule_logical_expression) || SCAN_IS_TOKEN(Pyrope_id_and, Prp_rule_logical_expression) ||
         SCAN_IS_TOKEN(Pyrope_id_xor, Prp_rule_logical_expression)) {
       if (!CHECK_RULE(&Prp::rule_relational_expression)) {
         RULE_FAILED("Failed rule_logical_expression; couldn't find an answering relational_expression.\n");
       }
     } else {
+      if(eos){
+        loc_list.pop_back();
+      }
       go_back(tokens_consumed - cur_tokens);
       cur_line = lines_start;
       next     = false;
@@ -1292,7 +1298,10 @@ uint8_t Prp::rule_relational_expression(std::list<std::tuple<Rule_id, Token_entr
   while (next) {
     cur_tokens  = tokens_consumed;
     lines_start = cur_line;
-    check_lb();
+    bool eos = check_eos();
+    if(eos){
+      loc_list.push_back(std::tuple<Rule_id, Token_entry>(Prp_rule_sentinel, 1));
+    }
     if (SCAN_IS_TOKEN(Token_id_le, Prp_rule_relational_expression) || SCAN_IS_TOKEN(Token_id_ge, Prp_rule_relational_expression) ||
         SCAN_IS_TOKEN(Token_id_lt, Prp_rule_relational_expression) || SCAN_IS_TOKEN(Token_id_gt, Prp_rule_relational_expression) ||
         SCAN_IS_TOKEN(Token_id_same, Prp_rule_relational_expression) ||
@@ -1302,6 +1311,8 @@ uint8_t Prp::rule_relational_expression(std::list<std::tuple<Rule_id, Token_entr
         RULE_FAILED("Failed Prp_rule_relational_expression; couldn't find an answering additive_expression.\n");
       }
     } else {
+      if(eos)
+        loc_list.pop_back();
       go_back(tokens_consumed - cur_tokens);
       cur_line = lines_start;
       next     = false;
@@ -1327,7 +1338,10 @@ uint8_t Prp::rule_additive_expression(std::list<std::tuple<Rule_id, Token_entry>
   while (next) {
     cur_tokens  = tokens_consumed;
     lines_start = cur_line;
-    check_lb();
+    bool eos = check_eos();
+    if(eos){
+      loc_list.push_back(std::tuple<Rule_id, Token_entry>(Prp_rule_sentinel, 1));
+    }
     if (SCAN_IS_TOKEN(Token_id_plus, Prp_rule_additive_expression)) {  // can be +, ++, or +*
       // optional
       SCAN_IS_TOKEN(Token_id_plus, Prp_rule_additive_expression) || SCAN_IS_TOKEN(Token_id_mult, Prp_rule_additive_expression);
@@ -1340,6 +1354,9 @@ uint8_t Prp::rule_additive_expression(std::list<std::tuple<Rule_id, Token_entry>
         consume_token();
         found_op = true;
       } else {
+        if(eos){
+          loc_list.pop_back();
+        }
         go_back(tokens_consumed - cur_tokens);
         cur_line = lines_start;
         next     = false;
@@ -1351,6 +1368,9 @@ uint8_t Prp::rule_additive_expression(std::list<std::tuple<Rule_id, Token_entry>
         consume_token();
         found_op = true;
       } else {
+        if(eos){
+          loc_list.pop_back();
+        }
         go_back(tokens_consumed - cur_tokens);
         cur_line = lines_start;
         next     = false;
@@ -1362,6 +1382,9 @@ uint8_t Prp::rule_additive_expression(std::list<std::tuple<Rule_id, Token_entry>
     } else if (CHECK_RULE(&Prp::rule_overload_notation)) {
       found_op = true;
     } else {
+      if(eos){
+        loc_list.pop_back();
+      }
       go_back(tokens_consumed - cur_tokens);
       cur_line = lines_start;
       next     = false;
@@ -1407,13 +1430,19 @@ uint8_t Prp::rule_bitwise_expression(std::list<std::tuple<Rule_id, Token_entry>>
   while (next) {
     cur_tokens  = tokens_consumed;
     lines_start = cur_line;
-    check_lb();
+    bool eos = check_eos();
+    if(eos){
+      loc_list.push_back(std::tuple<Rule_id, Token_entry>(Prp_rule_sentinel, 1));
+    }
     if (SCAN_IS_TOKEN(Token_id_or, Prp_rule_bitwise_expression) || SCAN_IS_TOKEN(Token_id_and, Prp_rule_bitwise_expression) ||
         SCAN_IS_TOKEN(Token_id_xor, Prp_rule_bitwise_expression)) {
       if (!CHECK_RULE(&Prp::rule_multiplicative_expression)) {
         RULE_FAILED("Failed rule_bitwise_expression; couldn't find an answering multiplicative expression.\n");
       }
     } else {
+      if(eos){
+        loc_list.pop_back();
+      }
       go_back(tokens_consumed - cur_tokens);
       cur_line = lines_start;
       next     = false;
@@ -1437,13 +1466,19 @@ uint8_t Prp::rule_multiplicative_expression(std::list<std::tuple<Rule_id, Token_
   while (next) {
     cur_tokens  = tokens_consumed;
     lines_start = cur_line;
-    check_lb();
+    bool eos = check_eos();
+    if(eos){
+      loc_list.push_back(std::tuple<Rule_id, Token_entry>(Prp_rule_sentinel, 1));
+    }
     if (SCAN_IS_TOKEN(Token_id_mult, Prp_rule_multiplicative_expression) ||
         SCAN_IS_TOKEN(Token_id_div, Prp_rule_multiplicative_expression)) {
       if (!CHECK_RULE(&Prp::rule_unary_expression)) {
         RULE_FAILED("Failed rule_multiplicative_expression; couldn't find an answering unary expression.\n");
       }
     } else {
+      if(eos){
+        loc_list.pop_back();
+      }
       go_back(tokens_consumed - cur_tokens);
       cur_line = lines_start;
       next     = false;
@@ -1602,7 +1637,7 @@ inline bool Prp::check_eos() {
   bool next  = true;
   bool found = false;
   // option 1 : an optional line break plus one or more semicolons
-  bool start_line = cur_line;
+  auto start_line = cur_line;
   check_lb();
   while (next) {
     if (scan_is_token(Token_id_semicolon)) {
@@ -1653,7 +1688,7 @@ void Prp::elaborate() {
   }
 
   if (failed) {
-    fmt::print("Parsing error line {} unexpected token {}.\n", get_token(term_token).line, scan_text(term_token));
+    fmt::print("Parsing error line {}. Unexpected token {}.\n", get_token(term_token).line+1, scan_text(term_token));
     //parser_error("unexpected token {}.\n", scan_text(term_token));
     exit(1);
   } else {
@@ -1775,14 +1810,7 @@ uint8_t Prp::check_function(uint8_t (Prp::*rule)(std::list<std::tuple<Rule_id, T
 bool Prp::chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, std::list<std::tuple<Rule_id, Token_entry>> &loc_list) {
   if (!scan_is_token(tok)) return false;
 
-  if (tok == Pyrope_id_elif || tok == Pyrope_id_if || tok == Pyrope_id_unique || tok == Pyrope_id_while ||
-      tok == Pyrope_id_punch || tok == Pyrope_id_for || tok == Pyrope_id_when) {
-    scan_next();
-    auto next_pos = get_token_pos();
-    scan_prev();
-    auto cur_pos_end = get_token_pos() + scan_text().length();
-    if ((next_pos - cur_pos_end) < 1) return false;
-  } else if (tok == Token_id_comma)
+  if (tok == Token_id_comma)
     check_lb();
 
   if (rid != Prp_invalid) {

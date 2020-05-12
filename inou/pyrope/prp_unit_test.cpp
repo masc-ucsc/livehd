@@ -137,11 +137,9 @@ TEST_F(Prp_test, if_statement1) {
   std::vector<std::string>      tree_traversal_check_rules;
 
   tree_traversal_check_tokens.push_back("if");
-  tree_traversal_check_tokens.push_back("(");
   tree_traversal_check_tokens.push_back("x");
   tree_traversal_check_tokens.push_back(">");
   tree_traversal_check_tokens.push_back("5");
-  tree_traversal_check_tokens.push_back(")");
   tree_traversal_check_tokens.push_back("{");
   tree_traversal_check_tokens.push_back("b");
   tree_traversal_check_tokens.push_back("=");
@@ -156,13 +154,10 @@ TEST_F(Prp_test, if_statement1) {
   tree_traversal_check_rules.push_back("Program");
   tree_traversal_check_rules.push_back("If statement");
   tree_traversal_check_rules.push_back("If statement");
-  tree_traversal_check_rules.push_back("Tuple notation");
-  tree_traversal_check_rules.push_back("Tuple notation");
   tree_traversal_check_rules.push_back("Relational expression");
   tree_traversal_check_rules.push_back("Identifier");
   tree_traversal_check_rules.push_back("Relational expression");
   tree_traversal_check_rules.push_back("Numerical constant");
-  tree_traversal_check_rules.push_back("Tuple notation");
   tree_traversal_check_rules.push_back("Empty scope colon");
   tree_traversal_check_rules.push_back("Block body");
   tree_traversal_check_rules.push_back("Code blocks");

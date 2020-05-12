@@ -813,8 +813,10 @@ Lnast_node Prp_lnast::eval_expression(mmap_lib::Tree_index idx_start_ast, mmap_l
     child_cur = ast->get_child(idx_nxt_ast);
   else
     child_cur = idx_nxt_ast;
-
-  bool inside_par = false;
+  auto expr_line = get_token(ast->get_data(child_cur).token_entry).line;
+  
+  Lnast_node op_node_last;
+  bool last_op_valid = false;
   while (child_cur != ast->invalid_index()) {
     auto child_cur_data = ast->get_data(child_cur);
     PRINT_DBG_LN("Rule name: {}, Token text: {}\n", rule_id_to_string(child_cur_data.rule_id),
@@ -830,10 +832,38 @@ Lnast_node Prp_lnast::eval_expression(mmap_lib::Tree_index idx_start_ast, mmap_l
           operand_stack.emplace_back(Lnast_node::create_ref(get_token(child_cur_data.token_entry)));
       } else if (child_cur_data.rule_id == Prp_rule_numerical_constant || child_cur_data.rule_id == Prp_rule_string_constant) {
         operand_stack.emplace_back(create_const_node(child_cur));
+      } else if (child_cur_data.rule_id == Prp_rule_sentinel){
+        // get the index of the operator that is not inside the parentheses
+        auto sentinel_op_idx = ast->get_sibling_next(child_cur);
+        child_cur = sentinel_op_idx;
+        // generate that operator and put it into the stack
+        uint8_t skip_sibs;
+        auto    op_node = gen_operator(sentinel_op_idx, &skip_sibs);
+        for (int i = 0; i < skip_sibs; i++) child_cur = ast->get_sibling_next(child_cur);
+        operator_stack.emplace_back(op_node);
+        // evaluate the rest of the expression as though it were inside parentheses
+        child_cur = ast->get_sibling_next(child_cur);
+        operand_stack.emplace_back(eval_expression(child_cur, idx_nxt_ln));
+        break;
       } else {  // operator
         uint8_t skip_sibs;
         auto    op_node = gen_operator(child_cur, &skip_sibs);
+        if(last_op_valid){
+          auto pri_op_cur = priority_map[op_node.type.get_raw_ntype()];
+          if(pri_op_cur == priority_map[op_node_last.type.get_raw_ntype()]){
+            if(op_node.type.get_raw_ntype() != op_node_last.type.get_raw_ntype()){
+              bool op0_pm = op_node.type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_plus || op_node.type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_minus;
+              bool op1_pm = op_node_last.type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_plus || op_node_last.type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_minus;
+              if(!(op0_pm && op1_pm)){
+                fmt::print("Operator priority error in expression around line {}.\n", expr_line+1);
+                exit(1);
+              }
+            }
+          }
+        }
         for (int i = 0; i < skip_sibs; i++) child_cur = ast->get_sibling_next(child_cur);
+        op_node_last = op_node;
+        last_op_valid=true;
         operator_stack.emplace_back(op_node);
       }
     } else {
@@ -867,7 +897,6 @@ Lnast_node Prp_lnast::eval_expression(mmap_lib::Tree_index idx_start_ast, mmap_l
       operand_stack.pop_front();
       lnast->add_child(idx_operator_ln, op2);
     }
-
     while (1) {
       if (std::next(it, 1) != operator_stack.end()) {
         if ((*(std::next(it, 1))).type.get_raw_ntype() == (*it).type.get_raw_ntype()) {
@@ -1067,6 +1096,7 @@ std::unique_ptr<Lnast> Prp_lnast::prp_ast_to_lnast(std::string_view module_name)
   lnast->set_root(Lnast_node(Lnast_ntype::create_top()));
 
   generate_op_map();
+  generate_priority_map();
 
   translate_code_blocks(ast->get_root(), lnast->get_root());
 
@@ -1077,7 +1107,7 @@ std::unique_ptr<Lnast> Prp_lnast::prp_ast_to_lnast(std::string_view module_name)
  * Translation helper functions
  */
 
-// TODO: support for union, intersect, question mark and "**" operators
+// TODO: support for question mark, -- and rotate operator
 Lnast_node Prp_lnast::gen_operator(mmap_lib::Tree_index idx, uint8_t *skip_sibs) {
   auto tid   = scan_text(ast->get_data(idx).token_entry);
   *skip_sibs = 0;
@@ -1125,6 +1155,26 @@ void Prp_lnast::generate_op_map() {
   operator_map["is"]  = Lnast_node::create_same("is");
   operator_map["!"]   = Lnast_node::create_logical_not("!");
   operator_map["~"]   = Lnast_node::create_not("~");
+}
+
+void Prp_lnast::generate_priority_map() {
+  priority_map[Lnast_ntype::Lnast_ntype_logical_and]  = 4;
+  priority_map[Lnast_ntype::Lnast_ntype_logical_or]   = 4;
+  priority_map[Lnast_ntype::Lnast_ntype_gt]           = 3;
+  priority_map[Lnast_ntype::Lnast_ntype_lt]           = 3;
+  priority_map[Lnast_ntype::Lnast_ntype_ge]           = 3;
+  priority_map[Lnast_ntype::Lnast_ntype_le]           = 3;
+  priority_map[Lnast_ntype::Lnast_ntype_same]         = 3;
+  priority_map[Lnast_ntype::Lnast_ntype_tuple_concat] = 2;
+  priority_map[Lnast_ntype::Lnast_ntype_shift_right]  = 2;
+  priority_map[Lnast_ntype::Lnast_ntype_shift_left]   = 2;
+  priority_map[Lnast_ntype::Lnast_ntype_minus]        = 2;
+  priority_map[Lnast_ntype::Lnast_ntype_plus]         = 2;
+  priority_map[Lnast_ntype::Lnast_ntype_xor]          = 1;
+  priority_map[Lnast_ntype::Lnast_ntype_or]           = 1;
+  priority_map[Lnast_ntype::Lnast_ntype_and]          = 1;
+  priority_map[Lnast_ntype::Lnast_ntype_div]          = 0;
+  priority_map[Lnast_ntype::Lnast_ntype_mult]         = 0;
 }
 
 std::string Prp_lnast::Lnast_type_to_string(Lnast_ntype type) {

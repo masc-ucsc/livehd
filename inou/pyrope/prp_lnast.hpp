@@ -11,6 +11,7 @@ protected:
   mmap_lib::Tree_index cur_stmts = mmap_lib::Tree_index(-1, -1);
 
   absl::flat_hash_map<std::string, Lnast_node> operator_map;
+  absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, uint8_t> priority_map;
 
   // std::list<std::string> temp_vars;
   std::string current_temp_var = "___a";
@@ -47,6 +48,7 @@ protected:
   inline bool       is_decimal(std::string_view number);
 
   void generate_op_map();
+  void generate_priority_map();
 
   // debugging
   void print_ast_node(mmap_lib::Tree_index idx);

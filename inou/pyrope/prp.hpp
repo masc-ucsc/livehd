@@ -19,7 +19,7 @@
 #include "elab_scanner.hpp"
 
 //#define OUTPUT_AST
-#define OUTPUT_LN
+//#define OUTPUT_LN
 
 //#define DEBUG_AST
 //#define DEBUG_LN
@@ -207,6 +207,29 @@ protected:
   absl::flat_hash_map<std::string, Token_id> pyrope_keyword;
   std::vector<std::string>                   rule_call_stack;
   uint64_t                                   term_token = 1;
+  
+  enum operators : uint8_t {
+    op_and = 1,
+    op_or,
+    op_lt,
+    op_gt,
+    op_ge,
+    op_le,
+    op_same,
+    op_diff,
+    op_is,
+    op_concat,
+    op_remove,
+    op_lshift,
+    op_rshit,
+    op_plus,
+    op_minus,
+    op_lrotate,
+    op_rrotate,
+    op_xor,
+    op_mult,
+    op_div
+  };
 
   void elaborate();
 
@@ -400,6 +423,7 @@ public:
     Prp_rule_overload_exception,
     Prp_rule_for_in_notation,
     Prp_rule_not_in_implicit,
-    Prp_rule_keyword
+    Prp_rule_keyword,
+    Prp_rule_sentinel // last rule is a special one for communicating with the LNAST translator
   };
 };
