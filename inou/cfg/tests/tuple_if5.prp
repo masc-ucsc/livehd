@@ -1,0 +1,9 @@
+$c.__bits = 1
+x = 5
+if ($c == 1) {
+  A.foo = 3 //local tuple
+  A[0] = 4
+  x = A[0] + 1
+} 
+
+%out = x 

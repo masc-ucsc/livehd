@@ -1,0 +1,9 @@
+if ($c) {
+  A.foo = 3
+  A[0] = 4
+  x = A[0] + 1
+} else {
+  A.foo = 5
+}
+
+x = A.foo //compile error: undefined tuple A
