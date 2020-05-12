@@ -68,7 +68,7 @@ do
     echo ""
     echo ""
     echo "===================================================="
-    echo "Pyrope Full Compilation"  
+    echo "Pyrope Full Compilation (CFG)"  
     echo "===================================================="
 
     echo "----------------------------------------------------"
@@ -201,6 +201,4 @@ do
     # rm -f lnast.dot
     # rm -f *.dot
 done #end of for
-
-
 

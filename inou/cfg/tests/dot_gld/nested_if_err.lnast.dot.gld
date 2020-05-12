@@ -224,7 +224,7 @@ digraph {
  373->417;
  418 [label=<ref, y<I><SUB><font color="#ff1020">0</font></SUB></I>>];
  373->418;
- 419 [label=<ref, err_var_undefined<I><SUB><font color="#ff1020">0</font></SUB></I>>];
+ 419 [label=<error_flag, err_var_undefined>];
  373->419;
  214 [label=<plus, >];
  10->214;

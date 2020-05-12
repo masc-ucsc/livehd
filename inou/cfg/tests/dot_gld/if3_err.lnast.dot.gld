@@ -46,7 +46,7 @@ digraph {
  311->49;
  410 [label=<ref, x<I><SUB><font color="#ff1020">0</font></SUB></I>>];
  311->410;
- 411 [label=<ref, err_var_undefined<I><SUB><font color="#ff1020">0</font></SUB></I>>];
+ 411 [label=<error_flag, err_var_undefined>];
  311->411;
  23 [label=<assign, >];
  10->23;
