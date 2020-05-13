@@ -11,7 +11,7 @@
 
 class Inou_firrtl : public Pass {
 protected:
-
+  //----------- FOR toLNAST ----------
   std::string_view create_temp_var(Lnast& lnast);
   std::string_view get_new_seq_name(Lnast& lnast);
   std::string      get_full_name(std::string term);
@@ -53,7 +53,13 @@ protected:
 
   static void toLNAST(Eprp_var &var);
 
+
+  //----------- FOR toFIRRTL ----------
+  static void toFIRRTL(Eprp_var &var);
+  void do_tofirrtl(std::shared_ptr<Lnast> ln);
+
 private:
+  //----------- FOR toLNAST ----------
   std::vector<std::string> input_names;
   std::vector<std::string> output_names;
   std::vector<std::string> register_names;
@@ -65,6 +71,4 @@ public:
   Inou_firrtl(const Eprp_var &var);
 
   static void setup();
-
-  //std::shared_ptr<Lnast> ref_lnast() { return lnast; };//FIXME: Temporary workaround for graphviz to work (only works for 1 module)
 };

@@ -1,8 +1,7 @@
 #!/bin/bash
 rm -rf ./lgdb
-rm -rf ./lgdb2
 
-pts='SimpleBitOps GCD'
+pts='GCD SimpleBitOps'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -29,7 +28,7 @@ do
     echo "FIRRTL (Proto) -> LNAST -> LGraph"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "inou.firrtl files:inou/firrtl/tests/proto/${pt}_proto.data |> inou.lnast_dfg.tolg"
+    ${LGSHELL} "inou.firrtl.tolnast files:inou/firrtl/tests/proto/${pt}_proto.data |> inou.lnast_dfg.tolg"
     if [ $? -eq 0 ]; then
       echo "Successfully translated FIRRTL to LNAST to LGraph: ${pt}"
     else
@@ -47,9 +46,9 @@ do
 
     ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.reduced_or_elimination"
     if [ $? -eq 0 ]; then
-      echo "Successfully eliminate all reduced_or_op in new lg: ${pt}.v"
+      echo "Successfully eliminate all reduced_or_op in new lg: ${pt}_proto.data"
     else
-      echo "ERROR: Pyrope compiler failed on new lg: reduced_or_elimination, testcase: ${pt}.v"
+      echo "ERROR: Pyrope compiler failed on new lg: reduced_or_elimination, testcase: ${pt}_proto.data"
       exit 1
     fi
 
@@ -63,9 +62,9 @@ do
 
     ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.resolve_tuples"
     if [ $? -eq 0 ]; then
-      echo "Successfully resolve the tuple chain in new lg: ${pt}.v"
+      echo "Successfully resolve the tuple chain in new lg: ${pt}_proto.data"
     else
-      echo "ERROR: Pyrope compiler failed on new lg: resolve tuples, testcase: ${pt}.v"
+      echo "ERROR: Pyrope compiler failed on new lg: resolve tuples, testcase: ${pt}_proto.data"
       exit 1
     fi
 
@@ -79,12 +78,12 @@ do
 
     ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth"
     if [ $? -eq 0 ]; then
-      echo "Successfully optimize design bitwidth on new lg: ${pt}.v"
+      echo "Successfully optimize design bitwidth on new lg: ${pt}_proto.data"
     else
-      echo "ERROR: Pyrope compiler failed on new lg: bitwidth optimization, testcase: ${pt}.v"
+      echo "ERROR: Pyrope compiler failed on new lg: bitwidth optimization, testcase: ${pt}_proto.data"
       exit 1
     fi
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
     mv ${pt}.dot ${pt}.newlg.dot
 
 
@@ -95,12 +94,12 @@ do
     echo "LGraph -> Verilog"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.yosys.fromlg"
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg"
     if [ $? -eq 0 ] && [ -f ${pt}.v ]; then
       echo "Successfully generate Verilog: ${pt}.v"
       rm -f  yosys_script.*
     else
-      echo "ERROR: Yosys failed: verilog generation, testcase: ${pt}.v"
+      echo "ERROR: Yosys failed: verilog generation, testcase: ${pt}_proto.data"
       exit 1
     fi
 

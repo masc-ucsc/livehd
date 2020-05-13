@@ -17,6 +17,8 @@ cc_library(
     name = "inou_firrtl_cpp",
     srcs = [
         "inou_firrtl.cpp",
+        "fir_to_lnast.cpp",
+        "lnast_to_fir.cpp",
         "inou_firrtl.hpp",
     ],
     hdrs = ["inou_firrtl.hpp"],
