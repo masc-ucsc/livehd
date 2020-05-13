@@ -683,20 +683,27 @@ void Lnast::resolve_phi_nodes(const Lnast_nid &cond_nid, Phi_rtable &true_table,
     }
   }
 
+  std::vector<std::string_view> key_list;
   for (auto const&[key, val] : true_table) {
     if (true_table.empty()) // it might be empty due to the erase from previous for loop
       break;
 
     if (false_table.find(key) != false_table.end()) {
       add_phi_node(cond_nid, true_table[key], false_table[key]);
-      true_table.erase(key);
+      key_list.push_back(key);
+      //true_table.erase(key);
     } else {
       auto if_nid = get_parent(cond_nid);
       auto psts_nid = get_parent(if_nid);
       auto f_nid = get_complement_nid(key, psts_nid, true);
       add_phi_node(cond_nid, true_table[key], f_nid);
-      true_table.erase(key);
+      key_list.push_back(key);
+      //true_table.erase(key);
     }
+  }
+
+  for (auto key : key_list) {
+    true_table.erase(key);
   }
   //I(true_table.empty()); not necessarily true
 }
