@@ -15,7 +15,7 @@ jobs:
       vmImage: 'Ubuntu 16.04'
 
     steps:
-      - bash: ./scripts/run-docker-test.sh `pwd` dbg mascucsc/kalilinux-masc /root/livehd g++ . long1
+      - bash: ./scripts/run-docker-test.sh `pwd` dbg mascucsc/kaliriscv-masc /root/livehd g++ . long1
 
   - job: ClangLong
     displayName: run archlinux-masc with debug and clang++ long1 tests

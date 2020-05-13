@@ -202,7 +202,7 @@ void Chunkify_verilog::elaborate() {
                scan_is_token(Token_id_comment)) {  // Before Token_id_comma
       if (last_input || last_output) {
         if (in_module && scan_is_prev_token(Token_id_alnum)) {
-#if 1
+#if 0
           // FIXME: bug in char_array prevents to use sview. Delete this once we move to LGraph 0.2 (mmap_map/mmap_bimap)
           std::string label{scan_prev_text()};
 #else

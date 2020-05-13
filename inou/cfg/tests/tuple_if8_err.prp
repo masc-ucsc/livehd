@@ -1,0 +1,12 @@
+$c.__bits = 1
+
+if ($c == 1) {
+  A.foo = 3
+  A[0] = 4
+  x = A[0] + 1
+} else {
+  A.foo = 6
+  A[0] = 7
+} 
+
+%out = x //compile error: undefined x 

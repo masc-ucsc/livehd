@@ -10,8 +10,12 @@ generate function_call
 generate tuple
 generate tuple_if
 generate tuple_if2
-generate tuple_if3
-generate tuple_if4
+generate tuple_if3_err
+generate tuple_if4_err
+generate tuple_if5
+generate tuple_if6_err
+generate tuple_if7_err
+generate tuple_if8_err
 generate nested_if
 generate if
 generate if2
