@@ -51,6 +51,9 @@ elif [ "$RUN_TYPE" == "long2" ]; then
 elif [ "$RUN_TYPE" != "" ]; then
   echo "run-test.sh: unknown ${RUN_TYPE} run option"
   exit 1
+else
+  echo "run-test.sh: no need to do long test"
+  exit 0
 fi
 
 bazel test -c ${LIVEHD_BUILD_MODE} --test_tag_filters ${TST} //...
