@@ -29,3 +29,4 @@ if [ -s cov/coverage.info ]; then
   ./cov/codecov -f 'cov/coverage.info' -t becc0c47-6817-4ba5-966c-3fc4dbb376ff >/dev/null
 fi
 
+exit 0
