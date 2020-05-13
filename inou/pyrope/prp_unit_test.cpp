@@ -75,12 +75,12 @@ TEST_F(Prp_test, assignment_expression1) {
 
   tree_traversal_check_rules.push_back("Program");
   tree_traversal_check_rules.push_back("Assignment expression");
-  tree_traversal_check_rules.push_back("Identifier");
+  tree_traversal_check_rules.push_back("Reference");
   tree_traversal_check_rules.push_back("Assignment operator");
   tree_traversal_check_rules.push_back("Tuple notation");
   tree_traversal_check_rules.push_back("Tuple notation");
   tree_traversal_check_rules.push_back("Assignment expression");
-  tree_traversal_check_rules.push_back("Identifier");
+  tree_traversal_check_rules.push_back("Reference");
   tree_traversal_check_rules.push_back("Assignment operator");
   tree_traversal_check_rules.push_back("Numerical constant");
   tree_traversal_check_rules.push_back("Tuple notation");
@@ -110,17 +110,17 @@ TEST_F(Prp_test, assignment_expression2) {
 
   tree_traversal_check_rules.push_back("Program");
   tree_traversal_check_rules.push_back("Assignment expression");
-  tree_traversal_check_rules.push_back("Identifier");
+  tree_traversal_check_rules.push_back("Reference");
   tree_traversal_check_rules.push_back("Assignment operator");
   tree_traversal_check_rules.push_back("Tuple notation");
   tree_traversal_check_rules.push_back("Tuple notation");
   tree_traversal_check_rules.push_back("Assignment expression");
-  tree_traversal_check_rules.push_back("Identifier");
+  tree_traversal_check_rules.push_back("Reference");
   tree_traversal_check_rules.push_back("Assignment operator");
   tree_traversal_check_rules.push_back("Numerical constant");
   tree_traversal_check_rules.push_back("Tuple notation");
   tree_traversal_check_rules.push_back("Assignment expression");
-  tree_traversal_check_rules.push_back("Identifier");
+  tree_traversal_check_rules.push_back("Reference");
   tree_traversal_check_rules.push_back("Assignment operator");
   tree_traversal_check_rules.push_back("Numerical constant");
   tree_traversal_check_rules.push_back("Tuple notation");
@@ -155,23 +155,23 @@ TEST_F(Prp_test, if_statement1) {
   tree_traversal_check_rules.push_back("If statement");
   tree_traversal_check_rules.push_back("If statement");
   tree_traversal_check_rules.push_back("Relational expression");
-  tree_traversal_check_rules.push_back("Identifier");
+  tree_traversal_check_rules.push_back("Reference");
   tree_traversal_check_rules.push_back("Relational expression");
   tree_traversal_check_rules.push_back("Numerical constant");
   tree_traversal_check_rules.push_back("Empty scope colon");
   tree_traversal_check_rules.push_back("Block body");
   tree_traversal_check_rules.push_back("Code blocks");
   tree_traversal_check_rules.push_back("Assignment expression");
-  tree_traversal_check_rules.push_back("Identifier");
+  tree_traversal_check_rules.push_back("Reference");
   tree_traversal_check_rules.push_back("Assignment operator");
   tree_traversal_check_rules.push_back("Numerical constant");
   tree_traversal_check_rules.push_back("Assignment expression");
-  tree_traversal_check_rules.push_back("Identifier");
+  tree_traversal_check_rules.push_back("Reference");
   tree_traversal_check_rules.push_back("Assignment operator");
   tree_traversal_check_rules.push_back("Additive expression");
   tree_traversal_check_rules.push_back("Numerical constant");
   tree_traversal_check_rules.push_back("Additive expression");
-  tree_traversal_check_rules.push_back("Identifier");
+  tree_traversal_check_rules.push_back("Reference");
   tree_traversal_check_rules.push_back("Block body");
 
   scanner.parse_inline("if (x>5){\nb = 10\n c = 10 + x\n}\n");

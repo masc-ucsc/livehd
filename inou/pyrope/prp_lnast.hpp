@@ -10,7 +10,7 @@ protected:
   // this is equal to the index of the statements node the current rule adds to
   mmap_lib::Tree_index cur_stmts = mmap_lib::Tree_index(-1, -1);
 
-  absl::flat_hash_map<std::string, Lnast_node> operator_map;
+  absl::flat_hash_map<std::string, Lnast_node> operator_map; // unused for now
   absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, uint8_t> priority_map;
 
   // std::list<std::string> temp_vars;
@@ -39,6 +39,7 @@ protected:
   Lnast_node eval_fcall_explicit(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln);
   Lnast_node eval_tuple_dot_notation(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln);
   Lnast_node eval_bit_selection_notation(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln);
+  Lnast_node eval_fluid_ref(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln);
 
   Lnast_node  gen_operator(mmap_lib::Tree_index idx, uint8_t *skip_sibs);
   inline bool is_expr(mmap_lib::Tree_index idx);
@@ -47,8 +48,8 @@ protected:
   inline Lnast_node create_const_node(mmap_lib::Tree_index idx);
   inline bool       is_decimal(std::string_view number);
 
-  void generate_op_map();
-  void generate_priority_map();
+  inline void generate_op_map();
+  inline void generate_priority_map();
 
   // debugging
   void print_ast_node(mmap_lib::Tree_index idx);

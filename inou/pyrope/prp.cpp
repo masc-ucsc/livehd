@@ -1083,17 +1083,30 @@ uint8_t Prp::rule_identifier(std::list<std::tuple<Rule_id, Token_entry>> &pass_l
   if (CHECK_RULE(&Prp::rule_keyword)) {
     RULE_FAILED("Failed rule identifier; found a keyword instead.\n");
   }
-
+  
   // optional
-  SCAN_IS_TOKEN(Token_id_bang, Prp_rule_identifier) || SCAN_IS_TOKEN(Pyrope_id_tilde, Prp_rule_identifier);
-
-  if (!(SCAN_IS_TOKEN(Token_id_register, Prp_rule_identifier) || SCAN_IS_TOKEN(Token_id_input, Prp_rule_identifier) ||
-        SCAN_IS_TOKEN(Token_id_output, Prp_rule_identifier) || SCAN_IS_TOKEN(Token_id_alnum, Prp_rule_identifier))) {
+  bool op = false;
+  if(SCAN_IS_TOKEN(Token_id_bang, Prp_rule_identifier) || SCAN_IS_TOKEN(Pyrope_id_tilde, Prp_rule_identifier))
+    op = true;
+  
+  if (!(SCAN_IS_TOKEN(Token_id_register, Prp_rule_reference) || SCAN_IS_TOKEN(Token_id_input, Prp_rule_reference) ||
+        SCAN_IS_TOKEN(Token_id_output, Prp_rule_reference) || SCAN_IS_TOKEN(Token_id_alnum, Prp_rule_reference))) {
     RULE_FAILED("Failed rule_identifier; couldn't find a name.\n");
   }
-
-  // optional
-  SCAN_IS_TOKEN(Token_id_qmark);
+  
+  if(!SCAN_IS_TOKEN(Token_id_qmark, Prp_rule_reference)){
+    if(SCAN_IS_TOKEN(Token_id_bang, Prp_rule_reference)){
+      SCAN_IS_TOKEN(Token_id_bang, Prp_rule_reference);
+      if(op){ loc_list.emplace(std::next(loc_list.begin()), 0, 0); }
+      else{ loc_list.emplace(loc_list.begin(), 0, 0); }
+      loc_list.emplace_back(Prp_rule_reference, 0);
+    }
+  }
+  else{
+    if(op){ loc_list.emplace(std::next(loc_list.begin()), 0, 0); }
+    else{ loc_list.emplace(loc_list.begin(), 0, 0); }
+    loc_list.emplace_back(Prp_rule_reference, 0);
+  }
 
   RULE_SUCCESS("Matched rule_identifier.\n", Prp_rule_identifier);
 }
@@ -1342,13 +1355,15 @@ uint8_t Prp::rule_additive_expression(std::list<std::tuple<Rule_id, Token_entry>
     if(eos){
       loc_list.push_back(std::tuple<Rule_id, Token_entry>(Prp_rule_sentinel, 1));
     }
-    if (SCAN_IS_TOKEN(Token_id_plus, Prp_rule_additive_expression)) {  // can be +, ++, or +*
+    if (SCAN_IS_TOKEN(Token_id_plus, Prp_rule_additive_expression)) {  // can be + or ++
       // optional
-      SCAN_IS_TOKEN(Token_id_plus, Prp_rule_additive_expression) || SCAN_IS_TOKEN(Token_id_mult, Prp_rule_additive_expression);
+      SCAN_IS_TOKEN(Token_id_plus, Prp_rule_additive_expression);
       found_op = true;
       PRINT_DBG_AST("rule_additive_expression: just found operator; sub_cnt = {}.\n", sub_cnt);
-    } else if (SCAN_IS_TOKEN(Token_id_lt)) {  // left and right shift operators
+    } else if (SCAN_IS_TOKEN(Token_id_lt)) {  // left and right shift and rotate operators
       if (SCAN_IS_TOKEN(Token_id_lt, Prp_rule_additive_expression)) {
+        // optional
+        SCAN_IS_TOKEN(Token_id_lt, Prp_rule_additive_expression);
         unconsume_token();
         loc_list.push_back(std::make_tuple(Prp_rule_additive_expression, scan_token()));
         consume_token();
@@ -1363,6 +1378,8 @@ uint8_t Prp::rule_additive_expression(std::list<std::tuple<Rule_id, Token_entry>
       }
     } else if (SCAN_IS_TOKEN(Token_id_gt)) {
       if (SCAN_IS_TOKEN(Token_id_gt, Prp_rule_additive_expression)) {
+        //optional
+        SCAN_IS_TOKEN(Token_id_gt, Prp_rule_additive_expression);
         unconsume_token();
         loc_list.push_back(std::make_tuple(Prp_rule_additive_expression, scan_token()));
         consume_token();
@@ -1375,8 +1392,11 @@ uint8_t Prp::rule_additive_expression(std::list<std::tuple<Rule_id, Token_entry>
         cur_line = lines_start;
         next     = false;
       }
-    } else if (SCAN_IS_TOKEN(Token_id_minus, Prp_rule_additive_expression) ||
-               SCAN_IS_TOKEN(Pyrope_id_intersect, Prp_rule_additive_expression) ||
+    } else if (SCAN_IS_TOKEN(Token_id_minus, Prp_rule_additive_expression)){
+      // optional
+      SCAN_IS_TOKEN(Token_id_minus, Prp_rule_additive_expression);
+      found_op = true;
+    } else if(SCAN_IS_TOKEN(Pyrope_id_intersect, Prp_rule_additive_expression) ||
                SCAN_IS_TOKEN(Pyrope_id_union, Prp_rule_additive_expression)) {  // can only be a single token
       found_op = true;
     } else if (CHECK_RULE(&Prp::rule_overload_notation)) {
@@ -1874,6 +1894,7 @@ std::string Prp::rule_id_to_string(Rule_id rid) {
     case Prp_rule_rhs_expression_property: return "RHS expression property";
     case Prp_rule_rhs_expression: return "RHS expression";
     case Prp_rule_identifier: return "Identifier";
+    case Prp_rule_reference: return "Reference";
     case Prp_rule_constant: return "Constant";
     case Prp_rule_assignment_operator: return "Assignment operator";
     case Prp_rule_tuple_dot_notation: return "Tuple dot notation";
