@@ -102,8 +102,11 @@ void Chunkify_verilog::add_io(Sub_node *sub, bool input, std::string_view io_nam
 
   auto dir = input ? Sub_node::Direction::Input : Sub_node::Direction::Output;
 
-  I(!sub->has_pin(io_name));  // reset_sub clears all the pins
-  sub->add_pin(io_name, dir, pos);
+  if (sub->has_pin(io_name)) {
+    sub->map_graph_pos(io_name, dir, pos);
+  } else {
+    sub->add_pin(io_name, dir, pos);
+  }
 }
 
 void Chunkify_verilog::elaborate() {
@@ -169,6 +172,7 @@ void Chunkify_verilog::elaborate() {
 
   Sub_node *sub = nullptr;
 
+  int inside_task_function = 0;
   while (!scan_is_end()) {
     bool endmodule_found = false;
     if (scan_is_token(Token_id_alnum)) {
@@ -187,22 +191,30 @@ void Chunkify_verilog::elaborate() {
         I(sub);
 
       } else if (txt == "input") {
-        last_input = true;
+        last_input  = true;
+        last_output = false;
       } else if (txt == "output") {
+        last_input  = false;
         last_output = true;
       } else if (txt == "endmodule") {
         if (in_module) {
-          in_module       = false;
-          endmodule_found = true;
+          in_module            = false;
+          endmodule_found      = true;
+          inside_task_function = 0;
         } else {
           scan_error(fmt::format("found endmodule without corresponding module"));
         }
+      } else if (txt == "task" || txt =="function") {
+        inside_task_function++;
+      } else if (txt == "endtask" || txt == "endfunction") {
+        inside_task_function--;
       }
+
     } else if (scan_is_token(Token_id_comma) || scan_is_token(Token_id_semicolon) || scan_is_token(Token_id_cp) ||
                scan_is_token(Token_id_comment)) {  // Before Token_id_comma
       if (last_input || last_output) {
-        if (in_module && scan_is_prev_token(Token_id_alnum)) {
-#if 0
+        if (in_module && scan_is_prev_token(Token_id_alnum) && inside_task_function==0) {
+#if 1
           // FIXME: bug in char_array prevents to use sview. Delete this once we move to LGraph 0.2 (mmap_map/mmap_bimap)
           std::string label{scan_prev_text()};
 #else
