@@ -46,15 +46,17 @@ public:
     Lnast_ntype_ge,
     Lnast_ntype_tuple,        // ()
     Lnast_ntype_tuple_concat, // ++
+    Lnast_ntype_tuple_delete, // --
     Lnast_ntype_select,       // []
     Lnast_ntype_bit_select,   // [[]]
     Lnast_ntype_range,        // ..
-    Lnast_ntype_shift_right,
-    Lnast_ntype_shift_left,
-    Lnast_ntype_logic_shift_right,
-    Lnast_ntype_arith_shift_right,
-    Lnast_ntype_dynamic_shift_right,
-    Lnast_ntype_dynamic_shift_left,
+    Lnast_ntype_shift_right,  // >>
+    Lnast_ntype_shift_left,   // <<
+    Lnast_ntype_logic_shift_right, // >>
+    Lnast_ntype_arith_shift_right, // >>>
+    Lnast_ntype_arith_shift_left,  // <<<
+    Lnast_ntype_dynamic_shift_right, //FIXME->sh: maybe
+    Lnast_ntype_dynamic_shift_left,  //FIXME->sh: maybe
 
     //group: language variable
     Lnast_ntype_ref,
@@ -115,6 +117,7 @@ protected:
     "ge",
     "tuple",
     "tuple_concat", // ++
+    "tuple_delete", // --
     "select",     // []
     "bit_select", // [[]]
     "range",      // ..
@@ -122,6 +125,7 @@ protected:
     "shift_left",
     "logic_shift_right",
     "arith_shift_right",
+    "arith_shift_left",
     "dynamic_shift_right",
     "dynamic_shift_left",
 
@@ -176,6 +180,7 @@ protected:
     ">=",
     "()",
     "tuple_concat", // ++
+    "tuple_delete", // --
     "select",  // []
     "bit_select", // [[]]
     "range", // ..
@@ -183,6 +188,7 @@ protected:
     "shift_left",
     "logic_shift_right",
     "arith_shift_right",
+    "arith_shift_left",
     "dynamic_shift_right",
     "dynamic_shift_left",
 
@@ -230,6 +236,7 @@ protected:
     ">=",
     "()",
     "tuple_concat", // ++
+    "tuple_delete", // --
     "select",  // []
     "bit_select", // [[]]
     "range",      // ..
@@ -237,6 +244,7 @@ protected:
     "shift_left",
     "logic_shift_right",
     "arith_shift_right",
+    "arith_shift_left",
     "dynamic_shift_right",
     "dynamic_shift_left",
 
@@ -287,6 +295,7 @@ protected:
     ">=",
     "()",
     "tuple_concat",
+    "tuple_delete",
     "select", // []
     "bit_select", // [[]]
     "range",      // ..
@@ -294,6 +303,7 @@ protected:
     "shift_left",
     "logic_shift_right",
     "arith_shift_right",
+    "arith_shift_left",
     "dynamic_shift_right",
     "dynamic_shift_left",
 
@@ -344,6 +354,7 @@ protected:
     "operator>=",
     "()",
     "tuple_concat", // ++
+    "tuple_delete", // --
     "select", // []
     "bit_select", // [[]]
     "range",         // ..
@@ -351,6 +362,7 @@ protected:
     "shift_left",
     "logic_shift_right",
     "arith_shift_right",
+    "arith_shift_left",
     "dynamic_shift_right",
     "dynamic_shift_left",
 
@@ -410,6 +422,7 @@ public:
   static Lnast_ntype create_ge()           { return Lnast_ntype(Lnast_ntype_ge); }
   static Lnast_ntype create_tuple()        { return Lnast_ntype(Lnast_ntype_tuple); }
   static Lnast_ntype create_tuple_concat() { return Lnast_ntype(Lnast_ntype_tuple_concat); }
+  static Lnast_ntype create_tuple_delete() { return Lnast_ntype(Lnast_ntype_tuple_delete); }
   static Lnast_ntype create_select()       { return Lnast_ntype(Lnast_ntype_select);}
   static Lnast_ntype create_bit_select()   { return Lnast_ntype(Lnast_ntype_bit_select);}
   static Lnast_ntype create_range()        { return Lnast_ntype(Lnast_ntype_range);}
@@ -418,13 +431,9 @@ public:
   static Lnast_ntype create_shift_left()          {return Lnast_ntype(Lnast_ntype_shift_left);}
   static Lnast_ntype create_logic_shift_right()   {return Lnast_ntype(Lnast_ntype_logic_shift_right);}
   static Lnast_ntype create_arith_shift_right()   {return Lnast_ntype(Lnast_ntype_arith_shift_right);}
+  static Lnast_ntype create_arith_shift_left()    {return Lnast_ntype(Lnast_ntype_arith_shift_left);}
   static Lnast_ntype create_dynamic_shift_right() {return Lnast_ntype(Lnast_ntype_dynamic_shift_right);}
   static Lnast_ntype create_dynamic_shift_left()  {return Lnast_ntype(Lnast_ntype_dynamic_shift_left);}
-
-
-
-
-
 
 
   static Lnast_ntype create_ref()           { return Lnast_ntype(Lnast_ntype_ref); }
@@ -478,6 +487,7 @@ public:
   bool is_ge()           const { return val == Lnast_ntype_ge; }
   bool is_tuple()        const { return val == Lnast_ntype_tuple; }
   bool is_tuple_concat() const { return val == Lnast_ntype_tuple_concat; }
+  bool is_tuple_delete() const { return val == Lnast_ntype_tuple_delete; }
   bool is_select()       const { return val == Lnast_ntype_select; }
   bool is_bit_select()   const { return val == Lnast_ntype_bit_select; }
   bool is_range()        const { return val == Lnast_ntype_range; }
@@ -486,6 +496,7 @@ public:
   bool is_shift_left()          const { return val == Lnast_ntype_shift_left; }
   bool is_logic_shift_right()   const { return val == Lnast_ntype_logic_shift_right; }
   bool is_arith_shift_right()   const { return val == Lnast_ntype_arith_shift_right; }
+  bool is_arith_shift_left()    const { return val == Lnast_ntype_arith_shift_left; }
   bool is_dynamic_shift_right() const { return val == Lnast_ntype_dynamic_shift_right; }
   bool is_dynamic_shift_left()  const { return val == Lnast_ntype_dynamic_shift_left; }
 

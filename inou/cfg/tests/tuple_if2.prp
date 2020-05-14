@@ -8,7 +8,7 @@ y = 7
 A = (x, foo = y, bar = 4)   
 
 if (A.foo == 7) {           
-  A = A++11
+  //A = A++13
   A[1]  = 17                
   A.bar = 13                
   x = A.foo
@@ -21,5 +21,5 @@ A[0] = 3
 
 %out3 = x
 
-%out4 = x + A[3]
+//%out4 = x + A[3]
 
