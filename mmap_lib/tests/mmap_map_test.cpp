@@ -58,7 +58,7 @@ TEST_F(Setup_mmap_map_test, string_data) {
       (void)it;
       if(it.getFirst() == 0)
         zero_found = true;
-      auto key = map.get_key(it);
+      const auto &key = map.get_key(it);
       EXPECT_TRUE(map.has(key));
 
       std::string_view val1 = map.get_sview(it.second);
@@ -463,8 +463,8 @@ TEST_F(Setup_mmap_map_test, lots_of_strings) {
       EXPECT_TRUE(bimap.has_key(i));
       EXPECT_TRUE(bimap.has_val(str));
 
-      auto str2 = bimap.get_val_sview(i);
-      auto i2   = bimap.get_key(str);
+      auto str2      = bimap.get_val_sview(i);
+      const auto &i2 = bimap.get_key(str);
 
       EXPECT_EQ(str, str2);
       EXPECT_EQ(i, i2);
@@ -483,7 +483,7 @@ TEST_F(Setup_mmap_map_test, lots_of_strings) {
       EXPECT_TRUE(bimap.has_val(str));
 
       auto str2 = bimap.get_val_sview(i);
-      auto i2   = bimap.get_key(str);
+      const auto &i2   = bimap.get_key(str);
 
       EXPECT_EQ(str, str2);
       EXPECT_EQ(i, i2);

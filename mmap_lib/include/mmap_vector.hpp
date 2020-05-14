@@ -7,64 +7,68 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include <functional>
 #include <cassert>
+#include <functional>
 #include <iostream>
 
 #include "mmap_gc.hpp"
 
 namespace mmap_lib {
-#define MMAPA_MIN_ENTRIES  (1ULL << 10)
+#define MMAPA_MIN_ENTRIES (1ULL << 10)
 #define MMAPA_INCR_ENTRIES (1ULL << 14)
-#define MMAPA_MAX_ENTRIES  (1ULL << 31)
+#define MMAPA_MAX_ENTRIES (1ULL << 31)
 
-template<typename T> class vector {
+template <typename T>
+class vector {
 protected:
   size_t set_mmap_file() const {
     assert(!mmap_name.empty());
 
-    if (mmap_fd<0) {
+    if (mmap_fd < 0) {
       mmap_fd = mmap_gc::open(mmap_name);
     }
 
     // Get the size of the file
     struct stat s;
     int         status = fstat(mmap_fd, &s);
+    /* LCOV_EXCL_STOP */
     if (status < 0) {
       std::cerr << "ERROR: Could not check file status " << mmap_name << std::endl;
       exit(-3);
     }
+    /* LCOV_EXCL_START */
 
     return s.st_size;
   }
 
   void truncate_file_adjust_mmap_size(size_t file_size) const {
-    if (file_size > mmap_size && (file_size < (4*mmap_size))) {
+    if (file_size > mmap_size && (file_size < (4 * mmap_size))) {
       // If the mmap was there, reuse as long as it was not huge
-      mmap_size     = file_size;
-      assert(file_size>4096);
+      mmap_size = file_size;
+      assert(file_size > 4096);
     }
     if (mmap_size != file_size) {
       int ret = ftruncate(mmap_fd, mmap_size);
-      if (ret<0) {
+      /* LCOV_EXCL_STOP */
+      if (ret < 0) {
         std::cerr << "ERROR: ftruncate could not resize  " << mmap_name << " to " << mmap_size << "\n";
         mmap_base = 0;
         exit(-1);
       }
+      /* LCOV_EXCL_START */
       file_size = mmap_size;
     }
   }
 
   void grow_mmap_size(size_t n) const {
-    if (n < MMAPA_MIN_ENTRIES)
-      n = MMAPA_MIN_ENTRIES;
+    if (n < MMAPA_MIN_ENTRIES) n = MMAPA_MIN_ENTRIES;
 
     size_t req_size = sizeof(T) * n + 4096;
     if (mmap_size == 0) {
       mmap_size = req_size;
-    }else if (mmap_size <= req_size) {
-      mmap_size += mmap_size / 2; // 1.5 every time
-      while(mmap_size <= req_size) {
+    } else if (mmap_size <= req_size) {
+      mmap_size += mmap_size / 2;  // 1.5 every time
+      while (mmap_size <= req_size) {
         mmap_size += MMAPA_INCR_ENTRIES;
       }
       assert(mmap_size <= MMAPA_MAX_ENTRIES * sizeof(T));
@@ -72,33 +76,32 @@ protected:
   }
 
   void adjust_mmap(size_t old_mmap_size) const {
-    assert(mmap_base!=nullptr);
-    if (mmap_size == old_mmap_size)
-      return;
+    assert(mmap_base != nullptr);
+    assert(mmap_size != old_mmap_size); // waste of time. Who call it?
 
     void *base;
-    std::tie(base,mmap_size) = mmap_gc::remap(mmap_name, mmap_base, old_mmap_size, mmap_size);
-    mmap_base = reinterpret_cast<uint8_t *>(base);
-    entries_capacity = (mmap_size-4096) / sizeof(T);
-    entries_size     = (uint64_t *)mmap_base; // First word in mmap
+    std::tie(base, mmap_size) = mmap_gc::remap(mmap_name, mmap_base, old_mmap_size, mmap_size);
+    mmap_base                 = reinterpret_cast<uint8_t *>(base);
+    entries_capacity          = (mmap_size - 4096) / sizeof(T);
+    entries_size              = (uint64_t *)mmap_base;  // First word in mmap
   }
 
   void setup_mmap() const {
-    assert(mmap_base==nullptr);
-    assert(mmap_size>=calc_min_mmap_size());
+    assert(mmap_base == nullptr);
+    assert(mmap_size >= calc_min_mmap_size());
 
     void *base;
-    std::tie(base, mmap_size) = mmap_gc::mmap(mmap_name, mmap_fd, mmap_size, std::bind(&vector<T>::gc_done, this, std::placeholders::_1, std::placeholders::_2));
+    std::tie(base, mmap_size) = mmap_gc::mmap(mmap_name, mmap_fd, mmap_size,
+                                              std::bind(&vector<T>::gc_done, this, std::placeholders::_1, std::placeholders::_2));
 
-    entries_capacity = (mmap_size-4096)/sizeof(T);
+    entries_capacity = (mmap_size - 4096) / sizeof(T);
     mmap_base        = reinterpret_cast<uint8_t *>(base);
 
-    entries_size     = (uint64_t *)mmap_base; // First word in mmap
+    entries_size = (uint64_t *)mmap_base;  // First word in mmap
   }
 
   __attribute__((noinline)) T *reserve_int(size_t n) const {
-
-    if(mmap_base == nullptr) {
+    if (mmap_base == nullptr) {
       assert(mmap_fd < 0);
       assert(mmap_size == 0);
 
@@ -112,7 +115,7 @@ protected:
       setup_mmap();
 
       assert(mmap_base);
-      assert(mmap_size >= (sizeof(T) * n+4096));
+      assert(mmap_size >= (sizeof(T) * n + 4096));
       assert(entries_capacity >= n);
       return (T *)(&mmap_base[4096]);
     }
@@ -136,9 +139,9 @@ protected:
     return (T *)(&mmap_base[4096]);
   }
 
-  mutable uint8_t  *__restrict__ mmap_base;
+  mutable uint8_t *__restrict__ mmap_base;
   mutable uint64_t *entries_size;
-  mutable size_t    entries_capacity; // size/sizeof - space_control
+  mutable size_t    entries_capacity;  // size/sizeof - space_control
   mutable size_t    mmap_size;
   mutable int       mmap_fd;
   const std::string mmap_path;
@@ -167,9 +170,9 @@ protected:
     }
     if (mmap_name.empty()) {
       mmap_size = calc_min_mmap_size();
-    }else{
+    } else {
       size_t file_sz = set_mmap_file();
-      if (file_sz==0) {
+      if (file_sz == 0) {
         mmap_size = calc_min_mmap_size();
       } else {
         mmap_size = file_sz;
@@ -183,30 +186,23 @@ protected:
 
 public:
   explicit vector(std::string_view _path, std::string_view _map_name)
-		: mmap_base(0)
-		, entries_size(nullptr)
-		, entries_capacity(0)
-		, mmap_size(0)
-		, mmap_fd(-1)
-	  , mmap_path(_path.empty()?".":_path)
-		, mmap_name{std::string(_path) + std::string("/") + std::string(_map_name)} {
-
-		if (mmap_path != ".") {
-			struct stat sb;
-      if (stat(mmap_path.c_str(), &sb) != 0 || !S_ISDIR(sb.st_mode)) {
-        int e = mkdir(mmap_path.c_str(), 0755);
-        assert(e>=0);
-      }
-    }
-  }
-
-  explicit vector()
       : mmap_base(0)
       , entries_size(nullptr)
       , entries_capacity(0)
       , mmap_size(0)
-      , mmap_fd(-1) {
+      , mmap_fd(-1)
+      , mmap_path(_path.empty() ? "." : _path)
+      , mmap_name{std::string(_path) + std::string("/") + std::string(_map_name)} {
+    if (mmap_path != ".") {
+      struct stat sb;
+      if (stat(mmap_path.c_str(), &sb) != 0 || !S_ISDIR(sb.st_mode)) {
+        int e = mkdir(mmap_path.c_str(), 0755);
+        assert(e >= 0);
+      }
+    }
   }
+
+  explicit vector() : mmap_base(0), entries_size(nullptr), entries_capacity(0), mmap_size(0), mmap_fd(-1) {}
 
   ~vector() {
     if (mmap_base) {
@@ -216,23 +212,22 @@ public:
   }
 
   // Allocates space, but it does not touch contents
-  void reserve(size_t n) const {
-    reserve_int(n);
-  }
+  void reserve(size_t n) const { reserve_int(n); }
 
   void emplace_back() {
     ref_base();
     if (MMAP_LIB_UNLIKELY(capacity() <= *entries_size)) {
-      reserve_int(size()+1);
+      reserve_int(size() + 1);
     }
     (*entries_size)++;
   }
 
-  template <class... Args> void emplace_back(Args &&... args) {
+  template <class... Args>
+  void emplace_back(Args &&... args) {
     auto *base = ref_base();
     assert(entries_size);
     if (MMAP_LIB_UNLIKELY(capacity() <= *entries_size)) {
-      base = reserve_int(size()+1);
+      base = reserve_int(size() + 1);
     }
 
     base[*entries_size] = T(std::forward<Args>(args)...);
@@ -255,7 +250,8 @@ public:
 		return doCreate(idx, val);
 	}
 #endif
-  template <class... Args> T *set(const size_t idx, Args &&... args) {
+  template <class... Args>
+  T *set(const size_t idx, Args &&... args) {
     auto *base = ref_base();
     assert(base);
     assert(idx < capacity());
@@ -265,19 +261,13 @@ public:
     return &base[idx];
   }
 
-	[[nodiscard]] T get(size_t const& idx) const {
-    const auto *base = ref_base();
-    assert(idx < size());
-    return base[idx];
-  }
-
-	[[nodiscard]] const T *ref(size_t const& idx) const {
+  [[nodiscard]] const T *ref(size_t const &idx) const {
     const auto *base = ref_base();
     assert(idx < size());
     return &base[idx];
   }
 
-	[[nodiscard]] T *ref(size_t const& idx) {
+  [[nodiscard]] T *ref(size_t const &idx) {
     auto *base = ref_base();
     assert(idx < size());
     return &base[idx];
@@ -301,7 +291,7 @@ public:
     return base[size() - 1];
   }
 
-  T *begin() { return ref_base(); }
+  T *      begin() { return ref_base(); }
   const T *cbegin() const { return ref_base(); }
   const T *begin() const { return ref_base(); }
 
@@ -323,20 +313,19 @@ public:
   void clear() {
     if (mmap_base == nullptr) {
       assert(mmap_base == nullptr);
-      assert(mmap_fd <0);
-      if (!mmap_name.empty())
-        unlink(mmap_name.c_str());
+      assert(mmap_fd < 0);
+      if (!mmap_name.empty()) unlink(mmap_name.c_str());
       return;
     }
-    if (*entries_size!=0) {
+    if (*entries_size != 0) {
       *entries_size = 0;
     }
 
-    *entries_size    = 0; // Setting zero, triggers an unlink when calling gc_done
+    *entries_size = 0;  // Setting zero, triggers an unlink when calling gc_done
 
     mmap_gc::recycle(mmap_base);
     assert(entries_capacity == 0);
-    assert(entries_size     == nullptr);
+    assert(entries_size == nullptr);
   }
 
   [[nodiscard]] inline std::string_view get_name() const { return mmap_name; }
@@ -345,10 +334,10 @@ public:
   [[nodiscard]] inline size_t capacity() const { return entries_capacity; }
 
   uint64_t *ref_config_data(int offset) const {
-    assert(offset<4096/8);
-    assert(offset>0);
+    assert(offset < 4096 / 8);
+    assert(offset > 0);
 
-    ref_base(); // Force to get mmap_base
+    ref_base();  // Force to get mmap_base
     assert(mmap_base);
 
     return (uint64_t *)&mmap_base[offset];
@@ -358,15 +347,11 @@ public:
     if (MMAP_LIB_LIKELY(entries_size != nullptr)) {
       return *entries_size;
     }
-    ref_base(); // Force to get entries_size
+    ref_base();  // Force to get entries_size
     return *entries_size;
   }
 
-  bool empty() const {
-    return size() == 0;
-  }
-
+  bool empty() const { return size() == 0; }
 };
 
-} // namespace mmap_lib
-
+}  // namespace mmap_lib

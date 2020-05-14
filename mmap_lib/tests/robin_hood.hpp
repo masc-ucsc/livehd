@@ -1,3 +1,4 @@
+/* LCOV_EXCL_START */
 //                 ______  _____                 ______                _________
 //  ______________ ___  /_ ___(_)_______         ___  /_ ______ ______ ______  /
 //  __  ___/_  __ \__  __ \__  / __  __ \        __  __ \_  __ \_  __ \_  __  /
@@ -2223,3 +2224,4 @@ using unordered_set = detail::Table<sizeof(Key) <= sizeof(size_t) * 6 &&
 } // namespace robin_hood
 
 #endif
+/* LCOV_EXCL_STOP */

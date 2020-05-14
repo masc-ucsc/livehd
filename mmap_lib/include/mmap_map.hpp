@@ -1176,17 +1176,18 @@ public:
 		return sview;
 	}
 
-	// Returns a reference to the value found for key.
-	[[nodiscard]] T get(key_type const& key) const {
-		const auto idx = findIdx(key);
-		assert(idx>=0);
+#if 1
+  [[nodiscard]] T get(key_type const& key) const {
+    const auto idx = findIdx(key);
+    assert(idx>=0);
 
-		if constexpr (using_val_sview) {
+    if constexpr (using_val_sview) {
       return get_sview(mKeyVals[idx].getSecond());
     }else{
       return mKeyVals[idx].getSecond();
     }
-	}
+  }
+#endif
 
 	[[nodiscard]] std::string_view get_sview(const value_type& it) const {
     static_assert(using_val_sview,"mmap_lib::map::get_sview should be called only when 'value' is a string_view\n");
