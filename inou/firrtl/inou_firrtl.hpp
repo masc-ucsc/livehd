@@ -55,14 +55,22 @@ protected:
 
 
   //----------- FOR toFIRRTL ----------
-  static void toFIRRTL(Eprp_var &var);
-  void        do_tofirrtl(std::shared_ptr<Lnast> ln);
+  static void toFIRRTL            (Eprp_var &var);
+  void        do_tofirrtl         (std::shared_ptr<Lnast> ln);
   void        process_ln_stmts    (Lnast &ln, const Lnast_nid &lnidx_smts);
   void        process_ln_assign_op(Lnast &ln, const Lnast_nid &lnidx_assign);
-  void        process_ln_nary_op  (Lnast &ln, const Lnast_nid &lnidx_assign);
-  void        process_ln_if_op    (Lnast &ln, const Lnast_nid &lnidx_assign);
+  void        process_ln_nary_op  (Lnast &ln, const Lnast_nid &lnidx_op);
+  void        process_ln_not_op   (Lnast &ln, const Lnast_nid &lnidx_op);
+  void        process_ln_if_op    (Lnast &ln, const Lnast_nid &lnidx_if);
+  void        process_ln_phi_op   (Lnast &ln, const Lnast_nid &lnidx_phi);
 
-  bool        is_inp_outp_or_reg(const std::string_view str);
+  uint8_t     process_op_children (Lnast &ln, const Lnast_nid &lnidx_if, const std::string firrtl_op);
+
+  // Helper Functions
+  bool        is_inp_outp_or_reg    (const std::string_view str);
+  std::string get_firrtl_name_format(Lnast &ln, const std::string_view str, const Lnast_nid &lnidx);
+  std::string strip_prefixes        (const std::string_view str);
+  std::string create_const_token    (const std::string_view str);
 
 private:
   //----------- FOR toLNAST ----------
