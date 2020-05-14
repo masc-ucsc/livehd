@@ -1,7 +1,7 @@
 #!/bin/bash
 rm -rf ./lgdb
 
-pts='GCD SimpleBitOps'
+pts='TrivialArith GCD SimpleBitOps'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck

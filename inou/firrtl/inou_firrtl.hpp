@@ -56,7 +56,13 @@ protected:
 
   //----------- FOR toFIRRTL ----------
   static void toFIRRTL(Eprp_var &var);
-  void do_tofirrtl(std::shared_ptr<Lnast> ln);
+  void        do_tofirrtl(std::shared_ptr<Lnast> ln);
+  void        process_ln_stmts    (Lnast &ln, const Lnast_nid &lnidx_smts);
+  void        process_ln_assign_op(Lnast &ln, const Lnast_nid &lnidx_assign);
+  void        process_ln_nary_op  (Lnast &ln, const Lnast_nid &lnidx_assign);
+  void        process_ln_if_op    (Lnast &ln, const Lnast_nid &lnidx_assign);
+
+  bool        is_inp_outp_or_reg(const std::string_view str);
 
 private:
   //----------- FOR toLNAST ----------
