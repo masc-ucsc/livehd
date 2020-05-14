@@ -86,6 +86,8 @@ struct Lnast_node {
   CREATE_LNAST_NODE(_logic_shift_right)
   CREATE_LNAST_NODE(_arith_shift_right)
   CREATE_LNAST_NODE(_arith_shift_left)
+  CREATE_LNAST_NODE(_rotate_shift_right)
+  CREATE_LNAST_NODE(_rotate_shift_left)
   CREATE_LNAST_NODE(_dynamic_shift_right)
   CREATE_LNAST_NODE(_dynamic_shift_left)
   CREATE_LNAST_NODE(_ref)

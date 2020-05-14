@@ -53,8 +53,10 @@ public:
     Lnast_ntype_shift_right,  // >>
     Lnast_ntype_shift_left,   // <<
     Lnast_ntype_logic_shift_right, // >>
-    Lnast_ntype_arith_shift_right, // >>>
-    Lnast_ntype_arith_shift_left,  // <<<
+    Lnast_ntype_arith_shift_right, // FIXME->sh: TBD
+    Lnast_ntype_arith_shift_left,  // FIXME->sh: TBD
+    Lnast_ntype_rotate_shift_right, // >>>
+    Lnast_ntype_rotate_shift_left,  // <<<
     Lnast_ntype_dynamic_shift_right, //FIXME->sh: maybe
     Lnast_ntype_dynamic_shift_left,  //FIXME->sh: maybe
 
@@ -126,6 +128,8 @@ protected:
     "logic_shift_right",
     "arith_shift_right",
     "arith_shift_left",
+    "rotate_shift_right",
+    "rotate_shift_left",
     "dynamic_shift_right",
     "dynamic_shift_left",
 
@@ -189,6 +193,8 @@ protected:
     "logic_shift_right",
     "arith_shift_right",
     "arith_shift_left",
+    "rotate_shift_right",
+    "rotate_shift_left",
     "dynamic_shift_right",
     "dynamic_shift_left",
 
@@ -245,6 +251,8 @@ protected:
     "logic_shift_right",
     "arith_shift_right",
     "arith_shift_left",
+    "rotate_shift_right",
+    "rotate_shift_left",
     "dynamic_shift_right",
     "dynamic_shift_left",
 
@@ -304,6 +312,8 @@ protected:
     "logic_shift_right",
     "arith_shift_right",
     "arith_shift_left",
+    "rotate_shift_right",
+    "rotate_shift_left",
     "dynamic_shift_right",
     "dynamic_shift_left",
 
@@ -363,6 +373,8 @@ protected:
     "logic_shift_right",
     "arith_shift_right",
     "arith_shift_left",
+    "rotate_shift_right",
+    "rotate_shift_left",
     "dynamic_shift_right",
     "dynamic_shift_left",
 
@@ -432,6 +444,8 @@ public:
   static Lnast_ntype create_logic_shift_right()   {return Lnast_ntype(Lnast_ntype_logic_shift_right);}
   static Lnast_ntype create_arith_shift_right()   {return Lnast_ntype(Lnast_ntype_arith_shift_right);}
   static Lnast_ntype create_arith_shift_left()    {return Lnast_ntype(Lnast_ntype_arith_shift_left);}
+  static Lnast_ntype create_rotate_shift_right()  {return Lnast_ntype(Lnast_ntype_rotate_shift_right);}
+  static Lnast_ntype create_rotate_shift_left()   {return Lnast_ntype(Lnast_ntype_rotate_shift_left);}
   static Lnast_ntype create_dynamic_shift_right() {return Lnast_ntype(Lnast_ntype_dynamic_shift_right);}
   static Lnast_ntype create_dynamic_shift_left()  {return Lnast_ntype(Lnast_ntype_dynamic_shift_left);}
 
@@ -497,6 +511,8 @@ public:
   bool is_logic_shift_right()   const { return val == Lnast_ntype_logic_shift_right; }
   bool is_arith_shift_right()   const { return val == Lnast_ntype_arith_shift_right; }
   bool is_arith_shift_left()    const { return val == Lnast_ntype_arith_shift_left; }
+  bool is_rotate_shift_right()  const { return val == Lnast_ntype_rotate_shift_right; }
+  bool is_rotate_shift_left()   const { return val == Lnast_ntype_rotate_shift_left; }
   bool is_dynamic_shift_right() const { return val == Lnast_ntype_dynamic_shift_right; }
   bool is_dynamic_shift_left()  const { return val == Lnast_ntype_dynamic_shift_left; }
 
