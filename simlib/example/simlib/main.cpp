@@ -6,7 +6,8 @@
 
 int main(int argc, char **argv) {
   Simlib_checkpoint<Sample_stage> top("ckpt");
-  top.enable_trace(".");
+  //top.enable_trace(".");
+  top.enable_trace(getenv("SIMLIB_DUMPDIR"));//to dump the created files in scrap folder so as to not saturate the NFS
   top.advance_clock(100000000);
   // Replay last cycles:
   top.load_intermediate_checkpoint(3500000);

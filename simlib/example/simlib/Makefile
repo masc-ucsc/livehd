@@ -4,7 +4,7 @@ CXXFLAGS+=-O3
 CXXFLAGS+=-g
 CXXFLAGS+=-DSIMLIB_TRACE
 #CXXFLAGS+=-DSIMLIB_VCD
-
+export SIMLIB_DUMPDIR=${MADA_SCRAP}/simlib
 all: sample
 
 SIMLIB_OBJS=vcd_writer.o
@@ -27,3 +27,5 @@ clean:
 	@rm -f check_*.ckpt
 	@rm -f ckpt_*
 	@rm -f *.vcd
+	@rm -f ${SIMLIB_DUMPDIR}/ckpt*
+	@rm -f ${SIMLIB_DUMPDIR}/*.vcd

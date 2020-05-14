@@ -44,7 +44,7 @@ public:
     checkpoint_ncycles = -1; // Disable checkpoint by default
     next_checkpoint_ncycles = 1000000000;
     last_checkpoint_sec = 0.0;
-
+//    getenv("SIMLIB_DUMPDIR");//to dump the created files in scrap folder so as to not saturate the NFS.
     advance_reset(reset_ncycles);
 
     top.add_signature(signature);
