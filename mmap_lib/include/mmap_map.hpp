@@ -909,11 +909,12 @@ private:
 #endif
 		while (idx != insertion_idx) {
 			unsigned int prev_idx = (idx - 1) & *mMask;
-#if 0
-			::memcpy(&mKeyVals[idx],&mKeyVals[prev_idx],sizeof(Node));
+#if 1
+			std::memmove(&mKeyVals[idx],&mKeyVals[prev_idx],sizeof(Node));
 #else
 			if (mInfo[idx]) {
-				mKeyVals[idx] = std::move(mKeyVals[prev_idx]);
+				// mKeyVals[idx] = std::move(mKeyVals[prev_idx]);
+        std::memmove(&mKeyVals[idx], &mKeyVals[prev_idx], sizeof(Node));
 			} else {
 				::new (static_cast<void*>(mKeyVals + idx)) Node(std::move(mKeyVals[prev_idx]));
 			}
@@ -933,7 +934,8 @@ private:
 
 		while (mInfo[idx+1] >= 2 * *mInfoInc) {
 			mInfo[idx] = static_cast<uint8_t>(mInfo[idx+1] - *mInfoInc);
-			mKeyVals[idx] = std::move(mKeyVals[idx+1]);
+			//mKeyVals[idx] = std::move(mKeyVals[idx+1]);
+      std::memmove(&mKeyVals[idx], &mKeyVals[idx+1], sizeof(Node));
 			++idx;
 		}
 
@@ -943,7 +945,7 @@ private:
 		mKeyVals[idx].~Node();
 	}
 
-	inline bool equals(const Key k1, const Key k2) const {
+	inline bool equals(const Key &k1, const Key &k2) const {
 		return k1 == k2;
 	}
 
@@ -1021,10 +1023,12 @@ private:
 
 		auto& l = mKeyVals[insertion_idx];
 		if (idx == insertion_idx) {
-			::new (static_cast<void*>(&l)) Node(std::move(keyval));
+			//::new (static_cast<void*>(&l)) Node(std::move(keyval));
+      std::memmove(&l, &keyval, sizeof(Node));
 		} else {
 			shiftUp(idx, insertion_idx);
-			l = std::move(keyval);
+			//l = std::move(keyval);
+      std::memmove(&l, &keyval, sizeof(Node));
 		}
 
 		// put at empty spot
@@ -1177,15 +1181,19 @@ public:
 	}
 
 #if 1
-  [[nodiscard]] T get(key_type const& key) const {
+  template<typename T_ = T, typename = std::enable_if_t<std::is_same_v<T_, std::string_view>>>
+  [[nodiscard]] std::string_view get(key_type const& key) const {
     const auto idx = findIdx(key);
     assert(idx>=0);
 
-    if constexpr (using_val_sview) {
-      return get_sview(mKeyVals[idx].getSecond());
-    }else{
-      return mKeyVals[idx].getSecond();
-    }
+    return get_sview(mKeyVals[idx].getSecond());
+  }
+  template<typename T_ = T, typename = std::enable_if_t<!std::is_same_v<T_, std::string_view>>>
+  [[nodiscard]] const T &get(key_type const& key) const {
+    const auto idx = findIdx(key);
+    assert(idx>=0);
+
+    return mKeyVals[idx].getSecond();
   }
 #endif
 
@@ -1199,10 +1207,12 @@ public:
     return get_sview(it->second);
   }
 
+#if 0
 	[[nodiscard]] const T &get(const value_type& it) const {
     static_assert(!using_val_sview,"mmap_lib::map::get should not be called when 'value' is a string_view. Use get_sview instead.\n");
     return it.second;
 	}
+#endif
 
 	[[nodiscard]] const T &get(const const_iterator &it) const {
     static_assert(!using_val_sview,"mmap_lib::map::get should not be called when 'value' is a string_view. Use get_sview instead.\n");
@@ -1555,14 +1565,14 @@ private:
 					shiftUp(idx, insertion_idx);
 					if constexpr (using_key_sview) {
 						uint32_t key_pos = allocate_sview_id(key);
-						l = Node(*this, std::piecewise_construct,
+            ::new (&l) Node(*this, std::piecewise_construct,
 								std::forward_as_tuple(key_pos), std::forward_as_tuple(val));
           }else if constexpr (using_val_sview) {
 						uint32_t val_pos = allocate_sview_id(val);
-						l = Node(*this, std::piecewise_construct,
+            ::new (&l) Node(*this, std::piecewise_construct,
 								std::forward_as_tuple(std::forward<Arg>(key)), std::forward_as_tuple(val_pos));
 					}else{
-						l = Node(*this, std::piecewise_construct,
+            ::new (&l) Node(*this, std::piecewise_construct,
 								std::forward_as_tuple(std::forward<Arg>(key)), std::forward_as_tuple(val));
 					}
 				}
