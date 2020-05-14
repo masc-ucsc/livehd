@@ -150,7 +150,7 @@ void Inou_firrtl::CreateConditionNode(Lnast& lnast, const firrtl::FirrtlPB_Expre
         auto full_name = get_full_name(expr.reference().id());
         lnast.add_child(parent_node, Lnast_node::create_cond(lnast.add_string(full_name)));
       } else {
-        auto full_name = get_full_name(absl::StrCat(expr.reference().id(), ".", tail));
+        auto full_name = get_full_name(absl::StrCat(expr.reference().id(), "_", tail));
         lnast.add_child(parent_node, Lnast_node::create_cond(lnast.add_string(full_name)));
       }
       break;
@@ -509,9 +509,9 @@ void Inou_firrtl::create_io_list(const firrtl::FirrtlPB_Type& type, uint8_t dir,
           } else if (dir == 2) {
             new_dir = 1;
           }
-          create_io_list(btype.field(i).type(), new_dir, port_id + "." + btype.field(i).id(), vec);
+          create_io_list(btype.field(i).type(), new_dir, port_id + "_" + btype.field(i).id(), vec);
         } else {
-          create_io_list(btype.field(i).type(), dir, port_id + "." + btype.field(i).id(), vec);
+          create_io_list(btype.field(i).type(), dir, port_id + "_" + btype.field(i).id(), vec);
         }
       }
       break;
@@ -873,7 +873,7 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
         auto full_name = get_full_name(expr.reference().id());
         lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(full_name)));//expr.reference().id()));
       } else {
-        std::string full_name = get_full_name(absl::StrCat(expr.reference().id(), ".", tail));
+        std::string full_name = get_full_name(absl::StrCat(expr.reference().id(), "_", tail));
         lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(full_name)));
       }
       break;
@@ -951,7 +951,7 @@ void Inou_firrtl::AttachExprToOperator(Lnast& lnast, const firrtl::FirrtlPB_Expr
         auto expr_name = get_full_name(expr.reference().id());
         lnast.add_child(parent_node, Lnast_node::create_ref(lnast.add_string(expr_name)));//expr.reference().id()));
       } else {
-        std::string whole_name = expr.reference().id() + "." + tail;
+        std::string whole_name = expr.reference().id() + "_" + tail;
         auto expr_name = get_full_name(whole_name);
         lnast.add_child(parent_node, Lnast_node::create_ref(lnast.add_string(expr_name)));//lnast.add_string(full_name)));
       }
@@ -979,7 +979,7 @@ void Inou_firrtl::AttachExprToOperator(Lnast& lnast, const firrtl::FirrtlPB_Expr
 
     } case 7: { //SubField -- this is called when you're accessing a bundle's field (like io.var1)
       AttachExprToOperator(lnast, expr.sub_field().expression(), parent_node, expr.sub_field().field());
-      cout << "." << expr.sub_field().field();
+      cout << "_" << expr.sub_field().field();
       break;
 
     } case 8: { //SubIndex -- this is used when statically accessing an element of a vector-like object
@@ -1032,7 +1032,7 @@ std::string Inou_firrtl::ReturnExprString(const firrtl::FirrtlPB_Expression& exp
       break;
     } case 7: { //SubField
       std::string head_string = ReturnExprString(expr.sub_field().expression());
-      expr_string = head_string + "." + expr.sub_field().field();
+      expr_string = head_string + "_" + expr.sub_field().field();
       break;
     } case 11: { //FixedLiteral
       //FIXME: Unsure of how this should be.
