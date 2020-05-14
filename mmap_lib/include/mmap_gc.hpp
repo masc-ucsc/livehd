@@ -66,11 +66,6 @@ protected:
     int n_recycle_fds   = may_recycle_fds == 1 ? 1 : may_recycle_fds / 2;
     int n_recycle_mmaps = may_recycle_mmaps == 1 ? 1 : may_recycle_mmaps / 2;
 
-    if (may_recycle_mmaps == 0 && may_recycle_fds == 0) {
-      std::cerr << "OPS\n";
-      std::cerr << "OPS\n";
-    }
-
     if (n_open_fds < n_max_fds && may_recycle_fds > 4) n_recycle_fds = may_recycle_fds / 4;
     if (n_open_mmaps < n_max_mmaps && may_recycle_mmaps > 4) n_recycle_mmaps = may_recycle_mmaps / 4;
 
@@ -93,11 +88,11 @@ protected:
       }
     }
 
-    if (n_recycle_fds > sorted.size()) {
-      n_recycle_fds = sorted.size() / 2;
+    if (n_recycle_fds > sorted.size()/2) {
+      n_recycle_fds = 1+sorted.size() / 2;
     }
-    if (n_recycle_mmaps > sorted.size()) {
-      n_recycle_mmaps = sorted.size() / 2;
+    if (n_recycle_mmaps > sorted.size()/2) {
+      n_recycle_mmaps = 1+sorted.size() / 2;
     }
 #ifndef NDEBUG
     if (sorted.size() > 2) {
@@ -218,14 +213,14 @@ protected:
   }
 
 public:
+  /* LCOV_EXCL_START */
   static void dump() {
-    /* LCOV_EXCL_START */
     for (auto it : mmap_gc_pool) {
       std::cerr << "name:" << it.second.name << " base:" << it.first << " age:" << it.second.age << " fd:" << it.second.fd
                 << std::endl;
     }
-    /* LCOV_EXCL_STOP */
   }
+  /* LCOV_EXCL_STOP */
 
   static void delete_file(void *base) {
     auto it = mmap_gc_pool.find(base);
@@ -267,8 +262,10 @@ public:
       return fd;
     }
 
+    /* LCOV_EXCL_STOP */
     dump();  // We were not able to find fds to recycle
     assert(false);
+    /* LCOV_EXCL_START */
 
     return -1;
   }
