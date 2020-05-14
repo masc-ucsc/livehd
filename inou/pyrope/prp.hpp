@@ -99,7 +99,7 @@
 #endif
 
 #ifdef DEBUG_AST
-#define RULE_SUCCESS(message, rule)                                                                                     \
+#define RULE_SUCCESS(message, rule)    \
   fmt::print(message);                                                                                                  \
   rule_call_stack.pop_back();                                                                                           \
   print_rule_call_stack();                                                                                              \
@@ -115,8 +115,8 @@
 #else
 #define RULE_SUCCESS(message, rule)               \
   if (sub_cnt > 1) {                              \
-    loc_list.push_front(std::make_tuple(0, 0));   \
-    loc_list.push_back(std::make_tuple(rule, 0)); \
+    loc_list.emplace_front(0, 0);   \
+    loc_list.emplace_back(rule, 0); \
   }                                               \
   pass_list.splice(pass_list.end(), loc_list);    \
   return true
@@ -207,29 +207,6 @@ protected:
   absl::flat_hash_map<std::string, Token_id> pyrope_keyword;
   std::vector<std::string>                   rule_call_stack;
   uint64_t                                   term_token = 1;
-  
-  enum operators : uint8_t {
-    op_and = 1,
-    op_or,
-    op_lt,
-    op_gt,
-    op_ge,
-    op_le,
-    op_same,
-    op_diff,
-    op_is,
-    op_concat,
-    op_remove,
-    op_lshift,
-    op_rshit,
-    op_plus,
-    op_minus,
-    op_lrotate,
-    op_rrotate,
-    op_xor,
-    op_mult,
-    op_div
-  };
 
   void elaborate();
 
@@ -268,6 +245,7 @@ protected:
   uint8_t rule_rhs_expression_property(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
   uint8_t rule_rhs_expression(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
   uint8_t rule_identifier(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_reference(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
   uint8_t rule_constant(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
   uint8_t rule_assignment_operator(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
   uint8_t rule_tuple_dot_notation(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
@@ -397,6 +375,7 @@ public:
     Prp_rule_rhs_expression_property,
     Prp_rule_rhs_expression,
     Prp_rule_identifier,
+    Prp_rule_reference,
     Prp_rule_constant,
     Prp_rule_assignment_operator,
     Prp_rule_tuple_dot_notation,
