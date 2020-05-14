@@ -1,0 +1,8 @@
+add = ::{
+  %total = 0
+  for i in $ {
+    %total = %total + i
+  }
+}
+
+%o1 = add(a = 1, b = 2)

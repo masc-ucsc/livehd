@@ -6,7 +6,8 @@ function generate () {
 }
 
 generate simple_tuple
-generate function_call
+generate funcall
+generate funcall_tupio
 generate tuple
 generate tuple_if
 generate tuple_if2
