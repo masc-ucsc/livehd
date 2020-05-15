@@ -1090,7 +1090,7 @@ uint8_t Prp::rule_identifier(std::list<std::tuple<Rule_id, Token_entry>> &pass_l
     op = true;
   
   if (!(SCAN_IS_TOKEN(Token_id_register, Prp_rule_reference) || SCAN_IS_TOKEN(Token_id_input, Prp_rule_reference) ||
-        SCAN_IS_TOKEN(Token_id_output, Prp_rule_reference) || SCAN_IS_TOKEN(Token_id_alnum, Prp_rule_reference))) {
+        SCAN_IS_TOKEN(Token_id_output, Prp_rule_reference) || SCAN_IS_TOKEN(Token_id_alnum, Prp_rule_reference) || SCAN_IS_TOKEN(Token_id_percent, Prp_rule_reference) || SCAN_IS_TOKEN(Token_id_dollar, Prp_rule_reference))) {
     RULE_FAILED("Failed rule_identifier; couldn't find a name.\n");
   }
   
