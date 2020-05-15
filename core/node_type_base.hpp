@@ -436,7 +436,7 @@ public:
   };
 };
 
-// Y = $signed(A) >>> B
+// Y = $signed(A) >> B
 class Node_Type_ArithShiftRight : public Node_Type {
 public:
   Node_Type_ArithShiftRight() : Node_Type("ashr", ArithShiftRight_Op, false) {
@@ -447,6 +447,7 @@ public:
 };
 
 // Y = A[$signed(B) +: bit_width(A)]
+// Pyrope: y = a[[b..]]<<b  // b>=0
 class Node_Type_DynamicShiftRight : public Node_Type {
 public:
   Node_Type_DynamicShiftRight() : Node_Type("dshr", DynamicShiftRight_Op, false) {

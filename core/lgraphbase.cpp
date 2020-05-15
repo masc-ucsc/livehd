@@ -181,7 +181,7 @@ void LGraph_Base::print_stats() const {
   // bytes += node_delay.size()    * sizeof(Node_Delay);
 
   fmt::print("path:{} name:{}\n", path, name);
-  fmt::print("  size:{} kbytes:{} bytes/size:{}\n", node_internal.size(), bytes / 1024, bytes / node_internal.size());
+  fmt::print("  size:{} kbytes:{} bytes/node:{} bytes/edge:{}\n", node_internal.size(), bytes / 1024, bytes / (1+n_nodes), bytes / (1+ n_short_edges + n_long_edges));
   fmt::print("  total master:{} root:{} node:{} extra:{} root/ratio:{} extra/ratio:{}\n", n_master, n_roots, n_nodes, n_extra,
              n_roots / (1.0 + n_nodes + n_extra), n_extra / (1.0 + n_nodes + n_extra));
   fmt::print("  total bytes/master:{} bytes/root:{} bytes/node:{} bytes/extra:{}\n", bytes / n_master, bytes / n_roots,
