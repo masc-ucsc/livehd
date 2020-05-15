@@ -4,7 +4,7 @@ CXXFLAGS+=-O3
 CXXFLAGS+=-g
 CXXFLAGS+=-DSIMLIB_TRACE
 #CXXFLAGS+=-DSIMLIB_VCD
-export SIMLIB_DUMPDIR=${MADA_SCRAP}/simlib
+
 all: sample
 
 SIMLIB_OBJS=vcd_writer.o
@@ -12,6 +12,9 @@ GENERATED_OBJS=sample1_stage.o  sample2_stage.o  sample3_stage.o  sample_stage.o
 
 sample: livesim_types.hpp.gch $(SIMLIB_OBJS) $(GENERATED_OBJS) main.o
 	$(CXX) $(CXXFLAGS) -o $@ $(SIMLIB_OBJS) $(GENERATED_OBJS) main.o
+
+sample: export SIMLIB_DUMPDIR=${MADA_SCRAP}/simlib
+
 
 # simlib objects
 vcd_writer.o:../../vcd_writer.cpp
