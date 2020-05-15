@@ -121,7 +121,8 @@ struct VCDScalarVariable : public VCDVariable
     {}
     VarValue change_record(const VarValue &value) const
     {
-        char c = (value.size()) ? tolower(value[0]) : VCDValues::UNDEF;
+        //char c = (value.size()) ? tolower(value[0]) : VCDValues::UNDEF;
+        char c = (value.size()) ? tolower(value[0]) : VCDValues::ZERO;
         if (value.size() != 1 || (c != VCDValues::ONE   && c != VCDValues::ZERO
                                && c != VCDValues::UNDEF && c != VCDValues::HIGHV))
             throw VCDTypeException{ utils::format("Invalid scalar value '%c'", c) };
@@ -237,7 +238,7 @@ VarPtr VCDWriter::register_var(const std::string &scope, const std::string &name
 
         case VariableType::real:
             pvar = VarPtr(new VCDRealVariable(name, type, sz(64), *cur_scope, _next_var_id));
-            if (init_value.size() == 1 && init_value[0] == VCDValues::UNDEF)
+            if (init_value.size() == 1 && (init_value[0] == VCDValues::UNDEF || init_value[0] == VCDValues::ZERO))
                 init_value = "0.0";
             break;
 
@@ -256,16 +257,16 @@ VarPtr VCDWriter::register_var(const std::string &scope, const std::string &name
                     pvar = VarPtr(new VCDScalarVariable(name, type, 1, *cur_scope, _next_var_id));
                 else
                   pvar = VarPtr(new VCDVectorVariable(name, type, size, *cur_scope, _next_var_id));
-            if (init_value.size() == 1 && init_value[0] == VCDValues::UNDEF)
-                init_value = std::string(size, VCDValues::UNDEF);
+            if (init_value.size() == 1 && (init_value[0] == VCDValues::UNDEF || init_value[0] == VCDValues::ZERO))
+                init_value = std::string(size, VCDValues::ZERO);
             break;
         default:
             if (!size)
                  throw VCDTypeException{ utils::format("Must supply size for type '%s' of var '%s'",
                                                VCDVariable::VAR_TYPES[(int)type].c_str(), name.c_str()) };
                   pvar = VarPtr(new VCDVectorVariable(name, type, size, *cur_scope, _next_var_id));
-            if (init_value.size() == 1 && init_value[0] == VCDValues::UNDEF)
-                init_value = std::string(size, VCDValues::UNDEF);
+            if (init_value.size() == 1 && (init_value[0] == VCDValues::UNDEF|| init_value[0] == VCDValues::ZERO))
+                init_value = std::string(size, VCDValues::ZERO);
             break;
     }     
     if (type != VariableType::event)
@@ -537,7 +538,7 @@ VarValue VCDVectorVariable::change_record(const VarValue &value) const
             throw VCDTypeException{ utils::format("Invalid binary vector value '%s' size '%d'", val.c_str(), _size) };
     }
 
-    if (!val_sz) val = ('b' + std::string(_size, VCDValues::UNDEF) + ' ');
+    if (!val_sz) val = ('b' + std::string(_size, VCDValues::ZERO) + ' ');
 
     // align
     else if (val_sz < _size)

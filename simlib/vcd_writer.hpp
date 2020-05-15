@@ -138,7 +138,7 @@ public:
                         const std::string &name,                   // Human-readable variable idetifier
                         VariableType type = var_def_type,          // Verilog data type of variable
                         unsigned size = 0,                         // Size of variable, in bits
-                        const VarValue &init = {VCDValues::UNDEF}, // Initial value (optional)
+                        const VarValue &init = {VCDValues::ZERO}, // Initial value (optional)
                         bool duplicate_names_check = true);        // speed-up (optimisation)
 
     // Change variable's value in VCD stream.
