@@ -120,10 +120,12 @@ public:
     perf_start(name);
 
     const std::vector<int> evts{
+#ifdef __linux__
       PERF_COUNT_HW_CPU_CYCLES,
       PERF_COUNT_HW_INSTRUCTIONS,
       PERF_COUNT_HW_BRANCH_MISSES,
       PERF_COUNT_HW_CACHE_REFERENCES
+#endif
     };
     linux.setup(evts);
 
@@ -144,7 +146,7 @@ public:
   }
 
   void sample(const std::string &name) {
-    std::vector<size_t> stats(4);
+    std::vector<uint64_t> stats(4);
     linux.sample(stats);
 
     Time_Sample s;
@@ -201,7 +203,7 @@ public:
       prev     = s.tp;
       prev_mem = s.mem;
     }
-    std::vector<size_t> stats(4);
+    std::vector<uint64_t> stats(4);
     linux.stop(stats);
     linux.close();
 

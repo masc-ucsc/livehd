@@ -66,7 +66,7 @@ public:
     temp_result_vec.resize(num_events * 2 + 1);
   }
 
-  inline void close() {
+  void close() {
     if (fd == -1) return;
     ::close(fd);
     fd = -1;
@@ -133,6 +133,7 @@ private:
   }
 };
 #else
+#define PERF_TYPE_HARDWARE 0
 template <int TYPE = PERF_TYPE_HARDWARE>
 class LinuxEvents {
 public:
@@ -144,5 +145,7 @@ public:
   inline void stop(std::vector<uint64_t> &results) { }
 
   bool is_working() const { return false; }
+
+  inline void close() {}
 };
 #endif
