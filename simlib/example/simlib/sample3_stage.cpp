@@ -41,7 +41,7 @@ void Sample3_stage::vcd_cycle(UInt<1> s1_to3_cValid, UInt<32> s1_to3_c, UInt<1> 
       printf("memory[127] = %ud\n",memory[127]);
     }
     tmp2 = tmp2.addw(UInt<32>(1));
-    vcd_writer.change(vcd_tmp2, t , vcd::utils::format("%d",tmp2));
+    //vcd_writer.change(vcd_tmp2, t , vcd::utils::format("%d",tmp2));
   }
 
   to1_b = memory[(tmp&UInt<32>(0xff)).as_single_word()];
@@ -49,13 +49,13 @@ void Sample3_stage::vcd_cycle(UInt<1> s1_to3_cValid, UInt<32> s1_to3_c, UInt<1> 
 
   if (s1_to3_cValid && s2_to3_dValid) {
     UInt<32> tmp3 = s1_to3_c.addw(tmp);
-    vcd::VarPtr vcd_tmp3 = vcd_writer.register_var("SS3", "tmp3", vcd::VariableType::integer, sizeof(tmp3));
-    vcd_writer.change(vcd_tmp3, t,  vcd::utils::format("%d",tmp3));
+  //  vcd::VarPtr vcd_tmp3 = vcd_writer.register_var("SS3", "tmp3", vcd::VariableType::integer, sizeof(tmp3));
+  //  vcd_writer.change(vcd_tmp3, t,  vcd::utils::format("%d",tmp3));
     memory[(tmp3 & UInt<32>(0xff)).as_single_word()] = s2_to3_d;
   }
 
   tmp = tmp.addw(UInt<32>(7));
-  vcd_writer.change(vcd_tmp, t,  vcd::utils::format("%d",tmp));
+ // vcd_writer.change(vcd_tmp, t,  vcd::utils::format("%d",tmp));
 }
 #endif
 

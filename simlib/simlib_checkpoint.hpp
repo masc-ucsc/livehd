@@ -178,9 +178,12 @@ public:
       }
     }
 //if checkpoint is not already saved:
-    std::sort (myvector.begin(), myvector.end());
-    std::vector<int>::iterator low = std::lower_bound (myvector.begin(), myvector.end(), cycles);
-    int lower_cycles = myvector[low- myvector.begin()-1] ;//find the nearest checkpoint of lesser value
+    int lower_cycles=0;
+    if(!myvector.empty()){
+      std::sort (myvector.begin(), myvector.end());
+      std::vector<int>::iterator low = std::lower_bound (myvector.begin(), myvector.end(), cycles);
+      lower_cycles = myvector[low- myvector.begin()-1] ;//find the nearest checkpoint of lesser vailue
+    } 
     ncycles=lower_cycles;
     if(lower_cycles==0) {//if the nearest smaller checkpoint is 0
       advance_reset(reset_ncycles);
