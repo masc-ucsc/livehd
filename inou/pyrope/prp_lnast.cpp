@@ -1164,9 +1164,8 @@ Lnast_node Prp_lnast::gen_operator(mmap_lib::Tree_index idx, uint8_t *skip_sibs)
         if (scan_text(ast->get_data(ast->get_sibling_next(idx)).token_entry) == ">") {
           idx = ast->get_sibling_next(idx);
           if(scan_text(ast->get_data(ast->get_sibling_next(idx)).token_entry) == ">"){
-            fmt::print("!!!!!!!!!!!!\nWARNING: >>> operator not implemented; aliased as right shift.\n!!!!!!!!!!!!\n");
             *skip_sibs = 2;
-            return Lnast_node::create_shift_right(">>>");
+            return Lnast_node::create_rotate_shift_right("");
           }
           *skip_sibs = 1;
           return Lnast_node::create_shift_right("");
@@ -1180,9 +1179,8 @@ Lnast_node Prp_lnast::gen_operator(mmap_lib::Tree_index idx, uint8_t *skip_sibs)
         if (scan_text(ast->get_data(ast->get_sibling_next(idx)).token_entry) == "<") {
           idx = ast->get_sibling_next(idx);
           if (scan_text(ast->get_data(ast->get_sibling_next(idx)).token_entry) == "<") {
-            fmt::print("!!!!!!!!!!!!\nWARNING: <<< operator not implemented; aliased as left shift.\n!!!!!!!!!!!!\n");
             *skip_sibs = 2;
-            return Lnast_node::create_shift_left("<<<");
+            return Lnast_node::create_rotate_shift_left("");
           }
           *skip_sibs = 1;
           return Lnast_node::create_shift_left("");
@@ -1201,9 +1199,8 @@ Lnast_node Prp_lnast::gen_operator(mmap_lib::Tree_index idx, uint8_t *skip_sibs)
       return Lnast_node::create_plus("");
     case '-':
       if (scan_text(ast->get_data(ast->get_sibling_next(idx)).token_entry) == "-"){
-        fmt::print("!!!!!!!!!!!!\nWARNING: -- operator not implemented; aliased as arithmetic minus.\n!!!!!!!!!!!!\n");
         *skip_sibs = 1;
-        return Lnast_node::create_minus("--");
+        return Lnast_node::create_tuple_delete("");
       }
       return Lnast_node::create_minus("");
   }
