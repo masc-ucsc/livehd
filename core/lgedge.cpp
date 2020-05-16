@@ -13,8 +13,8 @@ static_assert(sizeof(LEdge) == sizeof(LEdge_Internal), "LEdge should be 6 bytes"
 static_assert(sizeof(SEdge) == 3, "SEdge should be 3 bytes");
 static_assert(sizeof(SEdge) == sizeof(SEdge_Internal), "SEdge should be 2 bytes");
 static_assert(sizeof(Edge_raw) == 3, "Edge_raw should be 3 bytes like SEdge");
-static_assert(sizeof(Node_Internal) == 64, "Node should be 64 bytes and 64 bytes aligned");
-static_assert(sizeof(Node_Internal_Page) == 64, "Node should 64 32 bytes and 64 bytes aligned");
+static_assert(sizeof(Node_Internal) == 32, "Node should be 32 bytes and 32 bytes aligned");
+static_assert(sizeof(Node_Internal_Page) == 32, "Node should 32 bytes and 32 bytes aligned");
 static_assert((1ULL << Index_bits) <= MMAPA_MAX_ENTRIES, "Max number of entries in Dense");
 
 Index_ID SEdge_Internal::get_page_idx() const { return Node_Internal_Page::get(this).get_idx(); }
@@ -95,7 +95,7 @@ Index_ID Edge_raw::get_self_idx() const {
   const auto &root_self = Node_Internal::get(this);
 
   SIndex_ID delta = &root_self - (const Node_Internal *)&root_page;  // Signed and bigger than Index_ID
-  I(delta < 64 && delta > 0);                                        // 64 entries between page aligned
+  I(delta < 4096/sizeof(Node_Internal) && delta > 0);
 
   SIndex_ID idx = delta + root_page.get_idx();
 
@@ -107,7 +107,7 @@ Index_ID Edge_raw::get_self_root_idx() const {
   const auto &root_self = Node_Internal::get(this);
 
   SIndex_ID delta = &root_self - (const Node_Internal *)&root_page;
-  I(delta < 64 && delta > 0);  // 64 entries between page aligned
+  I(delta < 4096/sizeof(Node_Internal) && delta > 0);
 
   SIndex_ID self_idx = delta + root_page.get_idx();
   if (root_self.is_root()) return static_cast<Index_ID>(self_idx);
@@ -302,7 +302,7 @@ void Node_Internal::try_recycle() {
 }
 
 void Node_Internal::del_input_int(const Edge_raw *inp_edge) {
-  I(((uint64_t)inp_edge) >> 6 == ((uint64_t)this) >> 6);
+  I(((uint64_t)inp_edge) >> 5 == ((uint64_t)this) >> 5); // 32 byte alignment
 
   int pos = (SEdge *)inp_edge - sedge;
 
@@ -337,7 +337,7 @@ void Node_Internal::del_input_int(const Edge_raw *inp_edge) {
 }
 
 void Node_Internal::del_output_int(const Edge_raw *out_edge) {
-  I(((uint64_t)out_edge) >> 6 == ((uint64_t)this) >> 6);
+  I(((uint64_t)out_edge) >> 5 == ((uint64_t)this) >> 5); // 32 byte alignment
 
   int pos = (SEdge *)out_edge - sedge;
 

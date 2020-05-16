@@ -199,7 +199,7 @@ struct __attribute__((packed)) Node_Internal_Page {
   uint32_t   free_idx;   // 4bytes 32bits to the first free node
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused"
-  uint8_t pad2[64 - 16];
+  uint8_t pad2[32 - 16];
 #pragma clang diagnostic pop
 
   Index_ID get_idx() const { return idx; }
@@ -242,25 +242,25 @@ class __attribute__((packed)) Node_Internal {
 private:
   // BEGIN 12 Bytes common payload
   Node_state state : 3;  // State must be the first thing (Node_Internal_Page)
-  uint16_t   inp_pos : 5;
-  uint16_t   driver_setup : 1;
-  uint16_t   sink_setup : 1;
-  uint16_t   out_pos : 5;
+  uint16_t   inp_long : 2;      // 6 bytes each. Just 9 at most
+  uint16_t   out_long : 2;
   uint32_t   bits : Bits_bits;
   uint64_t   nid : Index_bits;  // 31bits, 4 byte aligned
+  uint16_t   future_opcode:9;   // 9 bits to reduce type to have only in overflows
   uint16_t   root : 1;
+  Port_ID    dst_pid : Port_bits;  // 15bits
   // 8 bytes aligned
 public:
   // WARNING: This must be here not at the end of the structure. OTherwise the
   // iterator goes the 64byte boundary for the outputs
-  static constexpr int Num_SEdges = 17;
+  static constexpr int Num_SEdges = 7;
   SEdge                sedge[Num_SEdges]; // WARNING: Must not be the last field in struct or iterators fail
 private:
   // Start byte 8*17*3=59
-  uint16_t inp_long : 4;         // 6 bytes each. Just 9 at most
-  uint16_t out_long : 4;
-  Port_ID  dst_pid : Port_bits;  // 15bits
-  uint16_t future_opcode;        // 16 bits to reduce type to have only in overflows
+  uint16_t   driver_setup : 1;
+  uint16_t   sink_setup : 1;
+  uint16_t   inp_pos : 3;
+  uint16_t   out_pos : 3;
   // END 13 Bytes common payload
 
   void try_recycle();
@@ -411,8 +411,8 @@ public:
   inline static Node_Internal &get(const Edge_raw *ptr) {
     // WARNING: this belongs to a structure that it is cache aligned (32 bytes)
     uint64_t root_int = (uint64_t)ptr;
-    root_int          = root_int >> 6;
-    root_int          = root_int << 6;
+    root_int          = root_int >> 5; // 32 byte alignment
+    root_int          = root_int << 5; // 32 byte alignment
 
     Node_Internal *root_n = reinterpret_cast<Node_Internal *>(root_int);
     I(root_n->is_node_state());
