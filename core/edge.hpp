@@ -17,9 +17,9 @@ public:
     uint64_t sink_idx : Index_bits;
     uint16_t pad2 : 1;  // Just to improve alignment of
     uint32_t driver_pid : Port_bits;
-    uint16_t pad3 : 2;  // Just to improve alignment of
+    uint16_t pad3 : 1;  // Just to improve alignment of
     uint32_t sink_pid : Port_bits;
-    uint32_t pad4 : 2;  // Just to improve alignment of
+    uint32_t pad4 : 1;  // Just to improve alignment of
 
     Compact(const Index_ID &d_idx, const Port_ID &d_pid, const Index_ID &s_idx, const Port_ID &s_pid)
         : driver_idx(d_idx), pad1(0), sink_idx(s_idx), pad2(0), driver_pid(d_pid), pad3(0), sink_pid(s_pid), pad4(0){};

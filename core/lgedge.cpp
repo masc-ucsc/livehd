@@ -8,11 +8,11 @@
 #include "lgraph.hpp"
 #include "node_pin.hpp"
 
-static_assert(sizeof(LEdge) == 8, "LEdge should be 8 bytes");
-static_assert(sizeof(LEdge) == sizeof(LEdge_Internal), "LEdge should be 8 bytes");
-static_assert(sizeof(SEdge) == 2, "SEdge should be 2 bytes");
+static_assert(sizeof(LEdge) == 6, "LEdge should be 6 bytes");
+static_assert(sizeof(LEdge) == sizeof(LEdge_Internal), "LEdge should be 6 bytes");
+static_assert(sizeof(SEdge) == 3, "SEdge should be 3 bytes");
 static_assert(sizeof(SEdge) == sizeof(SEdge_Internal), "SEdge should be 2 bytes");
-static_assert(sizeof(Edge_raw) == 2, "Edge_raw should be 2 bytes like SEdge");
+static_assert(sizeof(Edge_raw) == 3, "Edge_raw should be 3 bytes like SEdge");
 static_assert(sizeof(Node_Internal) == 64, "Node should be 64 bytes and 64 bytes aligned");
 static_assert(sizeof(Node_Internal_Page) == 64, "Node should 64 32 bytes and 64 bytes aligned");
 static_assert((1ULL << Index_bits) <= MMAPA_MAX_ENTRIES, "Max number of entries in Dense");
@@ -24,16 +24,14 @@ Index_ID Edge_raw::get_page_idx() const { return Node_Internal_Page::get(this).g
 bool Edge_raw::is_last_input() const {
   const auto &node = Node_Internal::get(this);
 
-  int sz = 1;
-  if (!snode) sz = 4;
+  int sz = snode? 1:2;
 
   return ((this + sz) >= node.get_input_end());
 }
 
 bool Edge_raw::is_last_output() const {
   const auto &node = Node_Internal::get(this);
-  int         sz   = 1;
-  if (!snode) sz = 4;
+  int sz = snode? 1:2;
 
   return ((this + sz) >= node.get_output_end());
 }
@@ -46,7 +44,7 @@ const Edge_raw *Edge_raw::find_edge(const Edge_raw *bt, const Edge_raw *et, Inde
     if (eit->is_snode())
       eit++;
     else
-      eit += 4;
+      eit += 2;
   }
 
   return nullptr;
@@ -313,7 +311,7 @@ void Node_Internal::del_input_int(const Edge_raw *inp_edge) {
 
   int sz = 1;
   if (!inp_edge->is_snode()) {
-    sz = 4;
+    sz = 2;
     I(inp_long);
     inp_long--;
   }
@@ -331,11 +329,11 @@ void Node_Internal::del_input_int(const Edge_raw *inp_edge) {
     if (sedge[get_input_begin_pos_int() + i].is_snode()) {
       i++;
     } else {
-      i += 4;
+      i += 2;
     }
   }
 
-  I(inp_pos >= (4 * inp_long));
+  I(inp_pos >= (2 * inp_long));
 }
 
 void Node_Internal::del_output_int(const Edge_raw *out_edge) {
@@ -348,7 +346,7 @@ void Node_Internal::del_output_int(const Edge_raw *out_edge) {
 
   int sz = 1;
   if (!out_edge->is_snode()) {
-    sz = 4;
+    sz = 2;
     I(out_long > 0);
     out_long--;
   }
@@ -395,7 +393,7 @@ void Node_Internal::dump() const {
     if (out->is_snode())
       out++;
     else
-      out += 4;
+      out += 2;
   }
 
   out = get_input_begin();
@@ -404,7 +402,7 @@ void Node_Internal::dump() const {
     if (out->is_snode())
       out++;
     else
-      out += 4;
+      out += 2;
   }
 }
 // LCOV_EXCL_STOP
@@ -464,24 +462,22 @@ void Node_Internal::assimilate_edges(Node_Internal *other_ptr) {
           self_pos++;
           inc_inputs(false);
         } else {
-          if (self_pos >= (Num_SEdges - 4 - 2) || inp_long >= 3) break;
+          if (self_pos >= (Num_SEdges - 2 - 2) || inp_long >= 8) break;
 
           LEdge_Internal *ledge_i = (LEdge_Internal *)&sedge[self_pos];
           ledge_i->set(other.sedge[other_pos].get_idx(), other.sedge[other_pos].get_inp_pid(), true  // input
           );
 
-          self_pos += 4;
+          self_pos += 2;
           inc_inputs(true);
         }
         other_pos++;
         i += 1;
       } else {
-        if (self_pos >= (Num_SEdges - 4 - 2) || inp_long >= 3) break;
+        if (self_pos >= (Num_SEdges - 2 - 2) || inp_long >= 8) break;
         sedge[self_pos++] = other.sedge[other_pos++];
         sedge[self_pos++] = other.sedge[other_pos++];
-        sedge[self_pos++] = other.sedge[other_pos++];
-        sedge[self_pos++] = other.sedge[other_pos++];
-        i += 4;
+        i += 2;
         inc_inputs(true);
         other_inp_long_removed++;
       }
@@ -500,7 +496,7 @@ void Node_Internal::assimilate_edges(Node_Internal *other_ptr) {
     other.inp_pos -= (other_pos - original_start_pos);
     I(other_inp_long_removed <= other.inp_long);
     other.inp_long -= other_inp_long_removed;
-    I(other.inp_pos >= (4 * other.inp_long));
+    I(other.inp_pos >= (2 * other.inp_long));
   }
 
   if (!has_space_short()) return;
@@ -519,7 +515,7 @@ void Node_Internal::assimilate_edges(Node_Internal *other_ptr) {
       inc_outputs(false);
     } else {
       if (!has_space_long()) break;  // We need long space
-      self_pos -= (4 - 1);
+      self_pos -= (2 - 1);
       LEdge_Internal *ledge_i = (LEdge_Internal *)&sedge[self_pos];         // became an ledge
       ledge_i->set(other_out->get_idx(), other_out->get_inp_pid(), false);  // output
       inc_outputs(true);
@@ -528,8 +524,8 @@ void Node_Internal::assimilate_edges(Node_Internal *other_ptr) {
       I(other.out_pos > 0);
       other.out_pos -= 1;
     } else {
-      I(other.out_pos >= 4);
-      other.out_pos -= 4;
+      I(other.out_pos >= 2);
+      other.out_pos -= 2;
       I(other.out_long > 0);
       other.out_long--;
     }

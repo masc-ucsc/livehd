@@ -66,6 +66,8 @@ Index_ID LGraph_Base::create_node_space(const Index_ID last_idx, const Port_ID d
                                         const Index_ID root_idx) {
   Index_ID idx2 = create_node_int();
 
+  I(dst_pid<(1<<Port_bits));
+
   I(node_internal[master_nid].is_master_root());
   I(node_internal[last_idx].get_master_root_nid() == master_nid);
 
@@ -179,18 +181,20 @@ void LGraph_Base::print_stats() const {
   bytes += node_internal.size() * sizeof(Node_Internal);
   // bytes += node_type_op.size() * sizeof(Node_Type_Op);
   // bytes += node_delay.size()    * sizeof(Node_Delay);
+  auto n_edges = n_short_edges + n_long_edges;
 
   fmt::print("path:{} name:{}\n", path, name);
-  fmt::print("  size:{} kbytes:{} bytes/node:{} bytes/edge:{}\n", node_internal.size(), bytes / 1024, bytes / (1+n_nodes), bytes / (1+ n_short_edges + n_long_edges));
-  fmt::print("  total master:{} root:{} node:{} extra:{} root/ratio:{} extra/ratio:{}\n", n_master, n_roots, n_nodes, n_extra,
+  fmt::print("  size:{} kbytes:{} bytes/node:{:.2f} bytes/edge:{:.2f} edges/master:{:.2f}\n", node_internal.size(), bytes / 1024,
+             bytes / (1 + n_nodes), bytes / (1 + n_edges), (double)n_edges/(1+n_master));
+  fmt::print("  total master:{} root:{} node:{} extra:{} root/ratio:{:.2f} extra/ratio:{:.2f}\n", n_master, n_roots, n_nodes, n_extra,
              n_roots / (1.0 + n_nodes + n_extra), n_extra / (1.0 + n_nodes + n_extra));
-  fmt::print("  total bytes/master:{} bytes/root:{} bytes/node:{} bytes/extra:{}\n", bytes / n_master, bytes / n_roots,
+  fmt::print("  total bytes/master:{:.2f} bytes/root:{:.2f} bytes/node:{:.2f} bytes/extra:{:.2f}\n", bytes / n_master, bytes / n_roots,
              bytes / n_nodes, bytes / n_extra);
 
   bytes = node_internal.size() * sizeof(Node_Internal) + 1;
-  fmt::print("  edges bytes/root:{} bytes/node:{} bytes/extra:{}\n", bytes / n_roots, bytes / n_nodes, bytes / n_extra);
+  fmt::print("  edges bytes/root:{:.2f} bytes/node:{:.2f} bytes/extra:{:.2f}\n", bytes / n_roots, bytes / n_nodes, bytes / n_extra);
   bytes = n_nodes + 1;
-  fmt::print("  edges short/node:{} long/node:{} short/ratio:{}\n", n_short_edges / bytes, n_long_edges / bytes,
+  fmt::print("  edges short/node:{:.2f} long/node:{:.2f} short/ratio:{:.2f}\n", n_short_edges / bytes, n_long_edges / bytes,
              (n_short_edges) / (1.0 + n_short_edges + n_long_edges));
 }
 
@@ -402,7 +406,7 @@ Index_ID LGraph_Base::add_edge_int(const Index_ID dst_idx, const Port_ID inp_pid
     node_internal.ref(idx)->inc_outputs();
   } else {
     idx = get_space_output_pin(src_nid, idx, dst_pid, root_idx);
-    o   = node_internal.ref(idx)->next_free_output_pos() - (4 - 1);
+    o   = node_internal.ref(idx)->next_free_output_pos() - (2 - 1);
 
     ledge = (LEdge_Internal *)(&node_internal[idx].sedge[o]);
     ledge->set(dst_idx, inp_pid, false);
