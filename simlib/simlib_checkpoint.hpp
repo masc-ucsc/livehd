@@ -54,7 +54,9 @@ public:
     last_checkpoint_sec = 0.0;
 //    getenv("SIMLIB_DUMPDIR");//to dump the created files in scrap folder so as to not saturate the NFS.
     advance_reset(reset_ncycles);
-
+#ifdef SIMLIB_VCD
+    top.initialize_vcd_writer();
+#endif
     top.add_signature(signature);
   };
 

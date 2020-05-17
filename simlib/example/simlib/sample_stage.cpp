@@ -29,7 +29,7 @@ void Sample_stage::reset_cycle() {
 }
 */
 #ifdef SIMLIB_VCD
-  void Sample_stage::initialize_vcd_writer (){
+  void Sample_stage::initialize_vcd_writer(){
     clock_t t;// = clock();
     if (getenv("SIMLIB_DUMPDIR")) {
        std::string dump_directory = getenv("SIMLIB_DUMPDIR");
@@ -64,7 +64,7 @@ void Sample_stage::reset_cycle() {
     }
   }
 
-  initialize_vcd_writer();
+ // Sample_stage::initialize_vcd_writer();
   void Sample_stage::vcd_cycle() {
 
     auto s1_to2_aValid = s1.to2_aValid;
