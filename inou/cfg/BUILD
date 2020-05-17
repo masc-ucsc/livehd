@@ -13,25 +13,25 @@ cc_library(
 
 filegroup(
     name = "cfg_pts",
-    srcs = glob(["tests/*.cfg", "tests/verilog_gld/*.v"]),
+    srcs = glob(["tests/*.prp", "tests/*.cfg", "tests/verilog_gld/*.v", "tests/dot_gld/*.gld"]),
     visibility = ["//visibility:public"],
 )
 
 
-# sh_test(
-#     name = "pyrope.sh",
-#     srcs = ["tests/pyrope.sh"],
-#     # tags = ["manual"],
-#     tags = ["fixme"],
-#     data = [
-#         "//inou/yosys:liblgraph_yosys.so",
-#         "//main:lgshell",
-#         ":cfg_pts"
-#         ],
-#     deps = [
-#         "//inou/yosys:scripts",
-#     ]
-# )
+sh_test(
+    name = "lnast_cfg_test.sh",
+    srcs = ["tests/lnast_cfg_test.sh"],
+    # tags = ["manual"],
+    # tags = ["fixme"],
+    data = [
+        "//inou/yosys:liblgraph_yosys.so",
+        "//main:lgshell",
+        ":cfg_pts"
+        ],
+    deps = [
+        "//inou/yosys:scripts",
+    ]
+)
 
 
 

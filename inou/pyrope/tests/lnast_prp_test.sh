@@ -1,7 +1,7 @@
 #!/bin/bash
 rm -rf ./lgdb
 
-pts='if tuple_if tuple_if2 tuple_if3 tuple_if4 if2 if3_err nested_if_err ssa_rhs logic nested_if '
+pts='if tuple_if tuple_if2 if2 if3_err nested_if_err ssa_rhs logic nested_if '
 # pus='tuple_if2'
 # pts='tuple_if2 tuple_if ssa_rhs ssa_nested_if ssa_if nested_if tuple simple_tuple function_call tuple '
 # pts='ssa_rhs'

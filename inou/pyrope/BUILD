@@ -31,6 +31,23 @@ sh_test(
         ],
 )
 
+
+sh_test(
+    name = "lnast_prp_test.sh",
+    srcs = ["tests/lnast_prp_test.sh"],
+    # tags = ["manual"],
+    # tags = ["fixme"],
+    data = [
+        "//inou/yosys:liblgraph_yosys.so",
+        "//main:lgshell",
+        "//inou/cfg:cfg_pts"
+        ],
+    deps = [
+        "//inou/yosys:scripts",
+    ]
+)
+
+
 cc_binary(
     name = "prp_test",
     srcs = ["prp_test.cpp"],
