@@ -29,7 +29,15 @@ class Simlib_checkpoint {
   Simlib_signature signature;
 
   Lbench perf;
-
+#ifdef SIMLIB_VCD
+  void advance_reset(uint64_t n=1) {
+    for(auto i=0;i<n;++i) {
+      top.vcd_cycle();
+      top.reset_cycle();
+    }
+    ncycles += n;
+  };
+#else
   void advance_reset(uint64_t n=1) {
     for(auto i=0;i<n;++i) {
       top.cycle();
@@ -37,7 +45,7 @@ class Simlib_checkpoint {
     }
     ncycles += n;
   };
-
+#endif
 public:
   Simlib_checkpoint(std::string_view _name, uint64_t _reset_ncycles = 10000) : name(_name), top(0), perf(name), reset_ncycles(_reset_ncycles) {
     ncycles = 0;
@@ -206,8 +214,13 @@ public:
 
       n -= step;//SG: if step==n then this line will make n=0 thus making the possibility of n>0 unlikely.
       next_checkpoint_ncycles -= step;
-      for(auto i=0;i<step;++i)
-        top.cycle();
+      for(auto i=0;i<step;++i) {
+        #ifdef SIMLIB_VCD
+          top.vcd_cycle();
+        #else
+          top.cycle();
+        #endif
+      }
       ncycles += step;
         save_checkpoint();
     }while(unlikely(n>0));
@@ -261,6 +274,7 @@ public:
 #endif
   }
 
+
   void advance_clock(uint64_t n=1) {
     do {
       int step = n;
@@ -269,8 +283,13 @@ public:
 
       n -= step;//SG: if step==n then this line will make n=0 thus making the possibility of n>0 unlikely.
       next_checkpoint_ncycles -= step;
-      for(auto i=0;i<step;++i)
-        top.cycle();
+      for(auto i=0;i<step;++i) {
+        #ifdef SIMLIB_VCD
+          top.vcd_cycle();
+        #else
+          top.cycle();
+        #endif
+      }
       ncycles += step;
 
       if (unlikely(next_checkpoint_ncycles<=0)) {
@@ -278,26 +297,6 @@ public:
       }
     }while(unlikely(n>0));
   };
-
-#ifdef SIMLIB_VCD
-  void vcd_advance_clock(uint64_t n=1) {
-    do {
-      int step = n;
-      if (step> next_checkpoint_ncycles)
-        step = next_checkpoint_ncycles;
-
-      n -= step;//SG: if step==n then this line will make n=0 thus making the possibility of n>0 unlikely.
-      next_checkpoint_ncycles -= step;
-      for(auto i=0;i<step;++i)
-        top.vcd_cycle();
-      ncycles += step;
-
-      if (unlikely(next_checkpoint_ncycles<=0)) {
-        handle_checkpoint();
-      }
-    }while(unlikely(n>0));
-  };
-#endif
 
 };
 
