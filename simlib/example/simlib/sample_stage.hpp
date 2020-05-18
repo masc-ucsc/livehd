@@ -23,7 +23,6 @@ struct Sample_stage {
 #ifdef SIMLIB_VCD
   //to avoid NFS saturation:
   void initialize_vcd_writer();
- // void vcd_register_variables(vcd::VCDWriter vcd_writer);
   void vcd_cycle();
 #endif
 #ifdef SIMLIB_TRACE
