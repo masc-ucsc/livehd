@@ -2,7 +2,13 @@
 rm -rf ./lgdb
 rm -rf ./lgdb2
 
-pts='if if2 nested_if ssa_rhs not'
+pts='if if2 nested_if ssa_rhs logic' # tuple_if'
+#simple_tuple
+#tuple
+#tuple_if
+#tuple_if2
+#tuple_if5
+#tuple_nested_if
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck

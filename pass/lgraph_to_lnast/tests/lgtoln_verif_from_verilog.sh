@@ -2,7 +2,7 @@
 rm -rf ./lgdb
 rm -rf ./lgdb2
 
-pts='trivial trivial_and assigns compare trivial1 mux add'
+pts='trivial trivial_and assigns compare trivial1 mux' # latch add'
 #TO ADD LIST, but have bugs:
 #picker -- pick op not yet implemented in lnast2lg
 #simple_add -- output 'h' has 1 extra bit, happens in pass.bitwidth
@@ -11,6 +11,7 @@ pts='trivial trivial_and assigns compare trivial1 mux add'
 #arith -- same problem with minus, can't do %
 #compare2 -- lnast2lg doesn't yet support range/bit_sel/etc. for pick nodes
 #trivial2 -- subgraphs (try to test this)
+#consts -- don't have join->concat implemented yet
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck

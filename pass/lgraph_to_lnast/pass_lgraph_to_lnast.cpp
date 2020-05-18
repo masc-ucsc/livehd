@@ -881,6 +881,7 @@ std::string_view Pass_lgraph_to_lnast::get_driver_of_output(const Node_pin dpin)
   }
 
   I(false);//There should always be some driver.
+  return ""; //Here just so no warnings in compiler.
   //FIXME: Perhaps change this instead to just "0d0" (though the place this calls would have to be const not ref).
 }
 
