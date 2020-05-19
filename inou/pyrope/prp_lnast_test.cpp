@@ -22,7 +22,7 @@ int main(int argc, char **argv) {
   fmt::print("AST to LNAST output:\n\n");
 
   std::string rule_name;
-#ifdef OUTPUT_LN
+#if 1
   for (const auto &it : lnast->depth_preorder(lnast->get_root())) {
     auto        node = lnast->get_data(it);
     std::string indent{"  "};
