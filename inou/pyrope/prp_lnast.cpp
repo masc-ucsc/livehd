@@ -107,7 +107,7 @@ Lnast_node Prp_lnast::eval_rule(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tr
     case Prp_rule_tuple_notation_with_object: PRINT_DBG_LN("Prp_rule_tuple_notation_with_object\n"); break;
     case Prp_rule_range_notation:
       PRINT_DBG_LN("Prp_rule_range_notation\n");
-      eval_range_notation(idx_start_ast, idx_start_ln);
+      return eval_range_notation(idx_start_ast, idx_start_ln);
       break;
     case Prp_rule_bit_selection_bracket: PRINT_DBG_LN("Prp_rule_bit_selection_bracket\n"); break;
     case Prp_rule_bit_selection_notation:
@@ -223,6 +223,11 @@ void Prp_lnast::eval_fcall_arg_notation(mmap_lib::Tree_index idx_start_ast, mmap
 
   // skip the (
   idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast);
+  
+  // we are an empty function call
+  if(scan_text(ast->get_data(idx_nxt_ast).token_entry) == ")"){
+    return;
+  }
 
   Lnast_node lhs_arg;
   // add the first argument
@@ -579,18 +584,68 @@ void Prp_lnast::eval_assignment_expression(mmap_lib::Tree_index idx_start_ast, m
     auto tuple_node = eval_tuple(idx_start_ast, idx_nxt_ln);
 }
 
-void Prp_lnast::eval_range_notation(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln) {
+Lnast_node Prp_lnast::eval_range_notation(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln) {
   auto idx_next_ast = ast->get_child(idx_start_ast);
-
-  auto idx_assign1 = lnast->add_child(idx_start_ln, Lnast_node::create_assign(""));
-  lnast->add_child(idx_assign1, Lnast_node::create_ref("__range_begin"));
-  lnast->add_child(idx_assign1, create_const_node(idx_next_ast));
-
+  
+  mmap_lib::Tree_index idx_range_start = ast->invalid_index();
+  mmap_lib::Tree_index idx_range_end = ast->invalid_index();
+  bool start_is_expr = false;
+  bool end_is_expr = false;
+  Lnast_node start_node, end_node;
+  if(!(scan_text(ast->get_data(idx_next_ast).token_entry) == ".")){
+    idx_range_start = idx_next_ast;
+    if((start_is_expr = is_expr(idx_next_ast))){
+      start_node = eval_rule(idx_next_ast, idx_start_ln);
+    }
+    idx_next_ast = ast->get_sibling_next(idx_next_ast);
+  }
+  
   idx_next_ast = ast->get_sibling_next(idx_next_ast);
-
-  auto idx_assign2 = lnast->add_child(idx_start_ln, Lnast_node::create_assign(""));
+  idx_next_ast = ast->get_sibling_next(idx_next_ast);
+  
+  if(idx_next_ast != ast->invalid_index()){
+    idx_range_end = idx_next_ast;
+    if((end_is_expr = is_expr(idx_next_ast))){
+      end_node = eval_rule(idx_next_ast, idx_start_ln);
+    }
+  }
+  
+  auto idx_tup_root = lnast->add_child(idx_start_ln, Lnast_node::create_tuple(""));
+  auto lnast_temp = lnast->add_string(current_temp_var);
+  auto retnode    = Lnast_node::create_ref(lnast_temp);
+  lnast->add_child(idx_tup_root, retnode);
+  get_next_temp_var();
+  
+  
+  auto idx_assign1 = lnast->add_child(idx_tup_root, Lnast_node::create_assign(""));
+  lnast->add_child(idx_assign1, Lnast_node::create_ref("__range_begin"));
+  if(idx_range_start != ast->invalid_index()){
+    if(start_is_expr){
+      lnast->add_child(idx_assign1, start_node);
+    }
+    else{
+      eval_rule(idx_range_start, idx_assign1);
+    }
+  }
+  else{
+    lnast->add_child(idx_assign1, Lnast_node::create_ref("null"));
+  }
+  
+  auto idx_assign2 = lnast->add_child(idx_tup_root, Lnast_node::create_assign(""));
   lnast->add_child(idx_assign2, Lnast_node::create_ref("__range_end"));
-  lnast->add_child(idx_assign2, create_const_node(idx_next_ast));
+  if(idx_range_end != ast->invalid_index()){
+    if(end_is_expr){
+      lnast->add_child(idx_assign2, end_node);
+    }
+    else{
+      eval_rule(idx_range_end, idx_assign2);
+    }
+  }
+  else{
+    lnast->add_child(idx_assign2, Lnast_node::create_ref("null"));
+  }
+  
+  return retnode;
 }
 
 // this function requires that we pass to it the root of the assignment expression or the root of the tuple
@@ -607,13 +662,30 @@ Lnast_node Prp_lnast::eval_tuple(mmap_lib::Tree_index idx_start_ast, mmap_lib::T
     idx_tup_el_next = ast->get_child(idx_tup_el_next);
   }
 
+  Lnast_node              retnode;
+  
   // move to the first element of the tuple
   idx_tup_el_next = ast->get_sibling_next(idx_tup_el_next);
+  // we are an empty tuple
+  if(scan_text(ast->get_data(idx_tup_el_next).token_entry) == ")"){
+    auto idx_tup_root = lnast->add_child(idx_start_ln, Lnast_node::create_tuple(""));
+    if(root_rid == Prp_rule_assignment_expression){
+      retnode = Lnast_node::create_ref(scan_text(ast->get_data(ast->get_child(idx_start_ast)).token_entry));
+      lnast->add_child(idx_tup_root, retnode);
+    }
+    else{
+      auto lnast_temp = lnast->add_string(current_temp_var);
+      retnode         = Lnast_node::create_ref(lnast_temp);
+      lnast->add_child(idx_tup_root, retnode);
+      get_next_temp_var();
+    }
+    lnast->add_child(idx_tup_root, Lnast_node::create_ref("null"));
+    return retnode;
+  }
 
   std::vector<Lnast_node> expr_rhs;
   std::vector<uint8_t>    rhs_indexes;
   uint8_t                 cur_tuple_rhs_index = 0;
-  Lnast_node              retnode;
 
   auto idx_expr_next = idx_tup_el_next;
 
@@ -996,7 +1068,14 @@ Lnast_node Prp_lnast::eval_fcall_explicit(mmap_lib::Tree_index idx_start_ast, mm
   // whether we are an assignment expression or not, we idx_nxt_ast will equal fcall_explicit
 
   // evaluate the rhs of the function call (the fcall_arg_notation), but it has to be a tuple
-  auto arg_lhs = eval_tuple(ast->get_last_child(idx_nxt_ast), idx_start_ln);
+  Lnast_node arg_lhs;
+  auto idx_func_name = ast->get_child(idx_nxt_ast);
+  if(ast->get_data(ast->get_last_child(idx_nxt_ast)).rule_id == Prp_rule_fcall_arg_notation){
+    arg_lhs = eval_tuple(ast->get_last_child(idx_nxt_ast), idx_start_ln);
+  }
+  else{
+    arg_lhs = eval_tuple(ast->get_sibling_next(idx_func_name), idx_start_ln);
+  }
 
   Lnast_node lhs_node;
   if (root_rid == Prp_rule_assignment_expression) {
@@ -1369,7 +1448,7 @@ inline bool Prp_lnast::is_expr(mmap_lib::Tree_index idx) {
   auto token_entry = node.token_entry;
   if (rule_id == Prp_rule_logical_expression || rule_id == Prp_rule_relational_expression ||
       rule_id == Prp_rule_additive_expression || rule_id == Prp_rule_bitwise_expression ||
-      rule_id == Prp_rule_multiplicative_expression || rule_id == Prp_rule_unary_expression || rule_id == Prp_rule_tuple_notation ||
+      rule_id == Prp_rule_multiplicative_expression || rule_id == Prp_rule_unary_expression || rule_id == Prp_rule_tuple_notation || rule_id == Prp_rule_range_notation ||
       rule_id == Prp_rule_tuple_array_notation || rule_id == Prp_rule_identifier ||
       rule_id == Prp_rule_tuple_dot_notation || rule_id == Prp_rule_fcall_explicit || rule_id == Prp_rule_bit_selection_notation) {
     return true;

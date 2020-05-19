@@ -795,12 +795,9 @@ uint8_t Prp::rule_not_in_implicit(std::list<std::tuple<Rule_id, Token_entry>> &p
     RULE_SUCCESS("Matched rule_not_in_implicit; found an overload notation.\n", Prp_rule_not_in_implicit);
   }
 
-  if (SCAN_IS_TOKEN(Token_id_minus) || SCAN_IS_TOKEN(Token_id_mult) || SCAN_IS_TOKEN(Token_id_div) || SCAN_IS_TOKEN(Pyrope_id_or) ||
-      SCAN_IS_TOKEN(Pyrope_id_and) || SCAN_IS_TOKEN(Pyrope_id_xor) || SCAN_IS_TOKEN(Token_id_same) ||
-      SCAN_IS_TOKEN(Token_id_diff) || SCAN_IS_TOKEN(Pyrope_id_is) || SCAN_IS_TOKEN(Token_id_le) || SCAN_IS_TOKEN(Token_id_ge) ||
-      SCAN_IS_TOKEN(Token_id_lt) || SCAN_IS_TOKEN(Token_id_gt) || SCAN_IS_TOKEN(Pyrope_id_union) ||
-      SCAN_IS_TOKEN(Pyrope_id_intersect) || SCAN_IS_TOKEN(Pyrope_id_in) || SCAN_IS_TOKEN(Token_id_xor) ||
-      SCAN_IS_TOKEN(Token_id_and) || SCAN_IS_TOKEN(Token_id_pipe)) {
+  Token_id toks[] = {Token_id_minus, Token_id_mult, Token_id_div, Pyrope_id_or, Pyrope_id_and, Pyrope_id_xor, Token_id_same, Token_id_diff, Pyrope_id_is, Token_id_le, Token_id_ge, Token_id_lt, Token_id_gt, Pyrope_id_in, Token_id_xor, Token_id_and, Token_id_pipe};
+  
+  if (SCAN_IS_TOKENS(toks, 17)) {
     RULE_SUCCESS("Matched rule_not_in_implicit; found a single character token.\n", Prp_rule_not_in_implicit);
   }
 
@@ -969,10 +966,10 @@ uint8_t Prp::rule_range_notation(std::list<std::tuple<Rule_id, Token_entry>> &pa
   // optional
   CHECK_RULE(&Prp::rule_bit_selection_notation);
 
-  if (!SCAN_IS_TOKEN(Token_id_dot)) {
+  if (!SCAN_IS_TOKEN(Token_id_dot, Prp_rule_range_notation)) {
     RULE_FAILED("Failed rule_range_notation; couldn't find the first dot.\n");
   }
-  if (!SCAN_IS_TOKEN(Token_id_dot)) {
+  if (!SCAN_IS_TOKEN(Token_id_dot, Prp_rule_range_notation)) {
     RULE_FAILED("Failed rule_range_notation; couldn't find the second dot.\n");
   }
 
@@ -1092,8 +1089,8 @@ uint8_t Prp::rule_identifier(std::list<std::tuple<Rule_id, Token_entry>> &pass_l
   if(SCAN_IS_TOKEN(Token_id_bang, Prp_rule_identifier) || SCAN_IS_TOKEN(Pyrope_id_tilde, Prp_rule_identifier))
     op = true;
   
-  if (!(SCAN_IS_TOKEN(Token_id_register, Prp_rule_reference) || SCAN_IS_TOKEN(Token_id_input, Prp_rule_reference) ||
-        SCAN_IS_TOKEN(Token_id_output, Prp_rule_reference) || SCAN_IS_TOKEN(Token_id_alnum, Prp_rule_reference) || SCAN_IS_TOKEN(Token_id_percent, Prp_rule_reference) || SCAN_IS_TOKEN(Token_id_dollar, Prp_rule_reference))) {
+  Token_id toks[] = {Token_id_register, Token_id_input, Token_id_output, Token_id_alnum, Token_id_percent, Token_id_dollar};
+  if (!SCAN_IS_TOKENS(toks, 6, Prp_rule_reference)) {
     RULE_FAILED("Failed rule_identifier; couldn't find a name.\n");
   }
   
@@ -1117,18 +1114,24 @@ uint8_t Prp::rule_identifier(std::list<std::tuple<Rule_id, Token_entry>> &pass_l
 // some rules want there to not be a constant; in this case, we don't want AST changes or tokens consumed if the rule is matched.
 uint8_t Prp::rule_constant(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
   INIT_FUNCTION("rule_constant");
-
-  // option 1
+  
+  // option 1 - numerical constant
   if (CHECK_RULE(&Prp::rule_numerical_constant)) {
     RULE_SUCCESS("Matched rule_constant.\n", Prp_rule_constant);
   }
 
-  // option 2
-  if (!CHECK_RULE(&Prp::rule_string_constant)) {
-    RULE_FAILED("Failed rule_constant; couldn't find either a numerical or string constant.\n");
+  // option 2 - string constant
+  if (CHECK_RULE(&Prp::rule_string_constant)) {
+    RULE_SUCCESS("Matched rule_constant.\n", Prp_rule_constant);
+  }
+  
+  // option 3: true/false
+  Token_id toks[] = {Pyrope_id_TRUE, Pyrope_id_true, Pyrope_id_FALSE, Pyrope_id_false};
+  if(SCAN_IS_TOKENS(toks, 4, Prp_rule_constant)){
+    RULE_SUCCESS("Matched rule_constant.\n", Prp_rule_constant);
   }
 
-  RULE_SUCCESS("Matched rule_constant.\n", Prp_rule_constant);
+  RULE_FAILED("Failed rule_constant.\n", Prp_rule_constant);
 }
 
 uint8_t Prp::rule_numerical_constant(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
@@ -1318,11 +1321,8 @@ uint8_t Prp::rule_relational_expression(std::list<std::tuple<Rule_id, Token_entr
     if(eos){
       loc_list.push_back(std::tuple<Rule_id, Token_entry>(Prp_rule_sentinel, 1));
     }
-    if (SCAN_IS_TOKEN(Token_id_le, Prp_rule_relational_expression) || SCAN_IS_TOKEN(Token_id_ge, Prp_rule_relational_expression) ||
-        SCAN_IS_TOKEN(Token_id_lt, Prp_rule_relational_expression) || SCAN_IS_TOKEN(Token_id_gt, Prp_rule_relational_expression) ||
-        SCAN_IS_TOKEN(Token_id_same, Prp_rule_relational_expression) ||
-        SCAN_IS_TOKEN(Token_id_diff, Prp_rule_relational_expression) ||
-        SCAN_IS_TOKEN(Pyrope_id_is, Prp_rule_relational_expression)) {
+    Token_id toks[] = {Token_id_le, Token_id_ge, Token_id_lt, Token_id_gt, Token_id_same, Token_id_diff, Pyrope_id_is};
+    if (SCAN_IS_TOKENS(toks, 7, Prp_rule_relational_expression)) {
       if (!CHECK_RULE(&Prp::rule_additive_expression)) {
         RULE_FAILED("Failed Prp_rule_relational_expression; couldn't find an answering additive_expression.\n");
       }
@@ -1600,11 +1600,9 @@ uint8_t Prp::rule_overload_name(std::list<std::tuple<Rule_id, Token_entry>> &pas
 uint8_t Prp::rule_overload_exception(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
   INIT_FUNCTION("rule_overload_exception.\n");
 
-  if (SCAN_IS_TOKEN(Token_id_dot) || SCAN_IS_TOKEN(Token_id_pound) || SCAN_IS_TOKEN(Token_id_semicolon) ||
-      SCAN_IS_TOKEN(Token_id_comma) || SCAN_IS_TOKEN(Token_id_eq) || SCAN_IS_TOKEN(Token_id_op) || SCAN_IS_TOKEN(Token_id_cp) ||
-      SCAN_IS_TOKEN(Token_id_obr) || SCAN_IS_TOKEN(Token_id_cbr) || SCAN_IS_TOKEN(Token_id_ob) || SCAN_IS_TOKEN(Token_id_cb) ||
-      SCAN_IS_TOKEN(Token_id_backslash) || SCAN_IS_TOKEN(Token_id_qmark) || SCAN_IS_TOKEN(Token_id_bang) ||
-      SCAN_IS_TOKEN(Token_id_or) || SCAN_IS_TOKEN(Token_id_tick)) {
+  Token_id toks[] = {Token_id_dot, Token_id_pound, Token_id_semicolon, Token_id_comma, Pyrope_id_if, Token_id_eq, Token_id_op, Token_id_cp, Token_id_obr, Token_id_cbr, Token_id_ob, Token_id_cb, Token_id_backslash, Token_id_qmark, Token_id_bang, Token_id_or, Token_id_tick};
+  
+  if(SCAN_IS_TOKENS(toks, 17)){
     RULE_SUCCESS("Matched rule_overload_exception.\n", Prp_rule_overload_exception);
   }
 
@@ -1625,8 +1623,9 @@ uint8_t Prp::rule_rhs_expression(std::list<std::tuple<Rule_id, Token_entry>> &pa
 uint8_t Prp::rule_keyword(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
   INIT_FUNCTION("rule_keyword");
 
-  if (SCAN_IS_TOKEN(Pyrope_id_if) || SCAN_IS_TOKEN(Pyrope_id_else) || SCAN_IS_TOKEN(Pyrope_id_elif) ||
-      SCAN_IS_TOKEN(Pyrope_id_as) || SCAN_IS_TOKEN(Pyrope_id_is) || SCAN_IS_TOKEN(Pyrope_id_and) || SCAN_IS_TOKEN(Pyrope_id_or) || SCAN_IS_TOKEN(Pyrope_id_xor) || SCAN_IS_TOKEN(Pyrope_id_intersect) || SCAN_IS_TOKEN(Pyrope_id_union) || SCAN_IS_TOKEN(Pyrope_id_until) || SCAN_IS_TOKEN(Pyrope_id_default) || SCAN_IS_TOKEN(Pyrope_id_try) || SCAN_IS_TOKEN(Pyrope_id_punch) ||SCAN_IS_TOKEN(Pyrope_id_in) || SCAN_IS_TOKEN(Pyrope_id_for) || SCAN_IS_TOKEN(Pyrope_id_while) || SCAN_IS_TOKEN(Pyrope_id_by) || SCAN_IS_TOKEN(Pyrope_id_return) || SCAN_IS_TOKEN(Pyrope_id_false) || SCAN_IS_TOKEN(Pyrope_id_FALSE) || SCAN_IS_TOKEN(Pyrope_id_true) || SCAN_IS_TOKEN(Pyrope_id_TRUE) || SCAN_IS_TOKEN(Pyrope_id_unique) || SCAN_IS_TOKEN(Pyrope_id_when)) {
+  Token_id toks[] = {Pyrope_id_TRUE, Pyrope_id_true, Pyrope_id_FALSE, Pyrope_id_false, Pyrope_id_if, Pyrope_id_as, Pyrope_id_else, Pyrope_id_elif, Pyrope_id_is, Pyrope_id_and, Pyrope_id_or, Pyrope_id_xor, Pyrope_id_until, Pyrope_id_default, Pyrope_id_try, Pyrope_id_punch, Pyrope_id_in, Pyrope_id_for, Pyrope_id_unique, Pyrope_id_when};
+  
+  if(SCAN_IS_TOKENS(toks, 20)){
     RULE_SUCCESS("Matched rule_keyword.\n", Prp_rule_keyword);
   }
 
@@ -1832,6 +1831,43 @@ bool Prp::chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, std::lis
     loc_list.push_back(std::tuple<Rule_id, Token_entry>(rid, scan_token()));
     (*sub_cnt)++;
     PRINT_DBG_AST("chk_and_consume: incremented sub_cnt to {}\n", *sub_cnt);
+  }
+  PRINT_DBG_AST("Consuming token {} from rule {}.\n", scan_text(scan_token()), rule_id_to_string(rid));
+#ifdef DEBUG_AST
+  print_loc_list(loc_list);
+#endif
+  if (scan_line() == cur_line) {
+    if (tokens_consumed >= term_token) {
+      term_token++;
+      consume_token();
+      PRINT_DBG_AST("Incrementing term token to {}\n", term_token);
+      return true;
+    }
+    consume_token();
+    return true;
+  }
+  return false;
+}
+
+bool Prp::chk_and_consume_options(Token_id *toks, uint8_t tok_cnt, Rule_id rid, uint64_t *sub_cnt, std::list<std::tuple<Rule_id, Token_entry>> &loc_list) {
+  bool found = false;
+  int i;
+  for(i = 0; i<tok_cnt; i++){
+    if(scan_is_token(toks[i])){
+      found = true;
+      break;
+    }
+  }
+  if(!found)
+    return false;
+
+  if (toks[i] == Token_id_comma)
+    check_lb();
+
+  if (rid != Prp_invalid) {
+    loc_list.push_back(std::tuple<Rule_id, Token_entry>(rid, scan_token()));
+    (*sub_cnt)++;
+    PRINT_DBG_AST("chk_and_consume_options: incremented sub_cnt to {}\n", *sub_cnt);
   }
   PRINT_DBG_AST("Consuming token {} from rule {}.\n", scan_text(scan_token()), rule_id_to_string(rid));
 #ifdef DEBUG_AST

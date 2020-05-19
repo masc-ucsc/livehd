@@ -1,2 +1,2 @@
-a.__debug as ~b
-I(a+b==1)
+foo ::{ OK
+}
