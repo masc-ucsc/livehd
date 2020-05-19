@@ -1,15 +1,23 @@
 #include "livesim_types.hpp"
-
 #include "sample_stage.hpp"
 
-Sample_stage::Sample_stage(uint64_t _hidx)
+#ifdef SIMLIB_VCD
+Sample_stage::Sample_stage(uint64_t _hidx, vcd::VCDWriter &vcd_writer)//, std::string parent_name)
   : hidx(_hidx)
-  , s1(33)
+  , s1(33)//, concat(parent_name,".sample"))
   , s2(2123)
   , s3(122) {
   // FIXME: populate random reset (random per variable)
 }
-
+#else
+Sample_stage::Sample_stage(uint64_t _hidx)//, std::string parent_name)
+  : hidx(_hidx)
+  , s1(33)//, concat(parent_name,".sample"))
+  , s2(2123)
+  , s3(122) {
+  // FIXME: populate random reset (random per variable)
+}
+#endif
 void Sample_stage::reset_cycle() {
 
   s1.reset_cycle();

@@ -1,9 +1,8 @@
 #pragma once
-#include "vcd_writer.hpp"
 #include <time.h>
 struct Sample3_stage {
   uint64_t hidx;
-
+ // vcd::VCDWriter vcd_writer{my_vcd}
   UInt<32> to1_b;
 
   std::array<UInt<32>, 256> memory;
@@ -13,7 +12,7 @@ struct Sample3_stage {
   UInt<32> tmp2;
 
     Sample3_stage(uint64_t _hidx);
-
+  //  Sample3_stage(std::string my_vcd);
   void reset_cycle();
 
   #ifdef SIMLIB_VCD

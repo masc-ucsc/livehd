@@ -2,7 +2,7 @@
 
 #include "sample1_stage.hpp"
 
-Sample1_stage::Sample1_stage(uint64_t _hidx)
+Sample1_stage::Sample1_stage(uint64_t _hidx)//, const std::string &parent_name)
   : hidx(_hidx) {
 }
 
