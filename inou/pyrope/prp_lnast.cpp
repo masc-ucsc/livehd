@@ -162,7 +162,10 @@ Lnast_node Prp_lnast::eval_rule(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tr
     case Prp_rule_compile_check_statement: PRINT_DBG_LN("Prp_rule_compile_check_statement\n"); break;
     case Prp_rule_block_body: PRINT_DBG_LN("Prp_rule_block_body\n"); break;
     case Prp_rule_empty_scope_colon: PRINT_DBG_LN("Prp_rule_empty_scope_colon\n"); break;
-    case Prp_rule_assertion_statement: PRINT_DBG_LN("Prp_rule_assertion_statement\n"); break;
+    case Prp_rule_assertion_statement: 
+      PRINT_DBG_LN("Prp_rule_assertion_statement\n"); 
+      //eval_assertion_statement(idx_start_ast, idx_start_ln);
+      break;
     case Prp_rule_negation_statement: PRINT_DBG_LN("Prp_rule_negation_statement\n"); break;
     case Prp_rule_scope_colon: PRINT_DBG_LN("Prp_rule_scope_colon\n"); break;
     case Prp_rule_numerical_constant:
@@ -754,6 +757,20 @@ Lnast_node Prp_lnast::eval_tuple(mmap_lib::Tree_index idx_start_ast, mmap_lib::T
   }
   return retnode;
 }
+
+/*void Prp_lnast::eval_assertion_statement(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln){
+  auto idx_nxt_ast = idx_start_ast;
+  auto idx_assert_root = lnast->add_child(idx_start_ln, Lnast_node::create_assert(""));
+  
+  idx_nxt_ast = ast->get_last_child(idx_nxt_ast); // the first child is the I token
+  if(is_expr(idx_nxt_ast)){
+    auto rhs_node = eval_rule(idx_nxt_ast, idx_assert_root);
+    lnast->add_child(idx_assert_root, rhs_node);
+  }
+  else{
+    eval_rule(idx_nxt_ast, idx_assert_root);
+  }
+}*/
 
 Lnast_node Prp_lnast::eval_expression(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln) {
   mmap_lib::Tree_index idx_nxt_ln = cur_stmts;

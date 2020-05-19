@@ -316,9 +316,9 @@ public:
     pyrope_keyword["not"] = Pyrope_id_not;
     pyrope_keyword["xor"] = Pyrope_id_xor;
 
-    pyrope_keyword["C"]       = Pyrope_id_c;
-    pyrope_keyword["I"]       = Pyrope_id_assertion;
-    pyrope_keyword["N"]       = Pyrope_id_negation;
+    //pyrope_keyword["C"]       = Pyrope_id_c;
+    //pyrope_keyword["I"]       = Pyrope_id_assertion;
+    //pyrope_keyword["N"]       = Pyrope_id_negation;
     pyrope_keyword["yield"]   = Pyrope_id_yield;
     pyrope_keyword["waitfor"] = Pyrope_id_waitfor;
 

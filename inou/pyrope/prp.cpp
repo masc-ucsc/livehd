@@ -63,13 +63,13 @@ uint8_t Prp::rule_code_block_int(std::list<std::tuple<Rule_id, Token_entry>> &pa
     RULE_SUCCESS("Matched rule_code_block_int.\n", Prp_rule_code_block_int);
   } else if (CHECK_RULE(&Prp::rule_return_statement)) {
     RULE_SUCCESS("Matched rule_code_block_int.\n", Prp_rule_code_block_int);
-  } else if (CHECK_RULE(&Prp::rule_compile_check_statement)) {
+  } /*else if (CHECK_RULE(&Prp::rule_compile_check_statement)) {
     RULE_SUCCESS("Matched rule_code_block_int.\n", Prp_rule_code_block_int);
   } else if (CHECK_RULE(&Prp::rule_negation_statement)) {
     RULE_SUCCESS("Matched rule_code_block_int.\n", Prp_rule_code_block_int);
   } else if (CHECK_RULE(&Prp::rule_assertion_statement)) {
     RULE_SUCCESS("Matched rule_code_block_int.\n", Prp_rule_code_block_int);
-  }
+  }*/
 
   RULE_FAILED("Failed rule_code_block_int.\n");
 }
@@ -335,7 +335,7 @@ uint8_t Prp::rule_try_statement(std::list<std::tuple<Rule_id, Token_entry>> &pas
 }
 
 // TODO: check correctness of scanner with ASSERTION token ("I")
-uint8_t Prp::rule_assertion_statement(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+/*uint8_t Prp::rule_assertion_statement(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
   INIT_FUNCTION("rule_assertion_statement.");
 
   if (!SCAN_IS_TOKEN(Pyrope_id_assertion, Prp_rule_assertion_statement)) {
@@ -362,7 +362,7 @@ uint8_t Prp::rule_negation_statement(std::list<std::tuple<Rule_id, Token_entry>>
   }
 
   RULE_SUCCESS("Matched rule_logical_expression.\n", Prp_rule_negation_statement);
-}
+}*/
 
 uint8_t Prp::rule_empty_scope_colon(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
   INIT_FUNCTION("rule_empty_scope_colon.");
@@ -416,6 +416,9 @@ uint8_t Prp::rule_scope_body(std::list<std::tuple<Rule_id, Token_entry>> &pass_l
       if (!SCAN_IS_TOKEN(Token_id_cb, Prp_rule_scope_body)) {
         RULE_FAILED("Failed rule_scope_body (option 1); couldn't find a closing brace.\n");
       }
+      else{
+        RULE_SUCCESS("Matched rule_scope_body (option 1).\n", Prp_rule_scope_body);
+      }
     }
     check_lb();
     check_eos();
@@ -439,7 +442,7 @@ uint8_t Prp::rule_scope_body(std::list<std::tuple<Rule_id, Token_entry>> &pass_l
     RULE_FAILED("Failed rule_scope_body (option 3); couldn't find a closing bracket.");
   }
 
-  RULE_SUCCESS("Matched rule_scope_body.\n", Prp_rule_scope_body);
+  RULE_SUCCESS("Matched rule_scope_body (option 3).\n", Prp_rule_scope_body);
 }
 
 uint8_t Prp::rule_scope(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
@@ -854,7 +857,7 @@ uint8_t Prp::rule_return_statement(std::list<std::tuple<Rule_id, Token_entry>> &
   RULE_SUCCESS("Matched rule_return_statement.\n", Prp_rule_return_statement);
 }
 
-uint8_t Prp::rule_compile_check_statement(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+/*uint8_t Prp::rule_compile_check_statement(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
   INIT_FUNCTION("rule_compile_check_statement.");
 
   if (!scan_is_token(Token_id_pound)) {
@@ -865,7 +868,7 @@ uint8_t Prp::rule_compile_check_statement(std::list<std::tuple<Rule_id, Token_en
   }
 
   RULE_SUCCESS("Matched rule_compile_check_statement.\n", Prp_rule_compile_check_statement);
-}
+}*/
 
 uint8_t Prp::rule_block_body(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
   INIT_FUNCTION("rule_block_body.\n");
@@ -1623,15 +1626,7 @@ uint8_t Prp::rule_keyword(std::list<std::tuple<Rule_id, Token_entry>> &pass_list
   INIT_FUNCTION("rule_keyword");
 
   if (SCAN_IS_TOKEN(Pyrope_id_if) || SCAN_IS_TOKEN(Pyrope_id_else) || SCAN_IS_TOKEN(Pyrope_id_elif) ||
-      SCAN_IS_TOKEN(Pyrope_id_as) || SCAN_IS_TOKEN(Pyrope_id_is) || SCAN_IS_TOKEN(Pyrope_id_and) || SCAN_IS_TOKEN(Pyrope_id_or) ||
-      SCAN_IS_TOKEN(Pyrope_id_xor) || SCAN_IS_TOKEN(Pyrope_id_intersect) || SCAN_IS_TOKEN(Pyrope_id_union) ||
-      SCAN_IS_TOKEN(Pyrope_id_until) || SCAN_IS_TOKEN(Pyrope_id_default) || SCAN_IS_TOKEN(Pyrope_id_try) ||
-      SCAN_IS_TOKEN(Pyrope_id_punch) || SCAN_IS_TOKEN(Pyrope_id_c) || SCAN_IS_TOKEN(Pyrope_id_c) ||
-      SCAN_IS_TOKEN(Pyrope_id_assertion) || SCAN_IS_TOKEN(Pyrope_id_negation) || SCAN_IS_TOKEN(Pyrope_id_in) ||
-      SCAN_IS_TOKEN(Pyrope_id_for) || SCAN_IS_TOKEN(Pyrope_id_while) || SCAN_IS_TOKEN(Pyrope_id_by) ||
-      SCAN_IS_TOKEN(Pyrope_id_return) || SCAN_IS_TOKEN(Pyrope_id_false) || SCAN_IS_TOKEN(Pyrope_id_FALSE) ||
-      SCAN_IS_TOKEN(Pyrope_id_true) || SCAN_IS_TOKEN(Pyrope_id_TRUE) || SCAN_IS_TOKEN(Pyrope_id_unique) ||
-      SCAN_IS_TOKEN(Pyrope_id_when)) {
+      SCAN_IS_TOKEN(Pyrope_id_as) || SCAN_IS_TOKEN(Pyrope_id_is) || SCAN_IS_TOKEN(Pyrope_id_and) || SCAN_IS_TOKEN(Pyrope_id_or) || SCAN_IS_TOKEN(Pyrope_id_xor) || SCAN_IS_TOKEN(Pyrope_id_intersect) || SCAN_IS_TOKEN(Pyrope_id_union) || SCAN_IS_TOKEN(Pyrope_id_until) || SCAN_IS_TOKEN(Pyrope_id_default) || SCAN_IS_TOKEN(Pyrope_id_try) || SCAN_IS_TOKEN(Pyrope_id_punch) ||SCAN_IS_TOKEN(Pyrope_id_in) || SCAN_IS_TOKEN(Pyrope_id_for) || SCAN_IS_TOKEN(Pyrope_id_while) || SCAN_IS_TOKEN(Pyrope_id_by) || SCAN_IS_TOKEN(Pyrope_id_return) || SCAN_IS_TOKEN(Pyrope_id_false) || SCAN_IS_TOKEN(Pyrope_id_FALSE) || SCAN_IS_TOKEN(Pyrope_id_true) || SCAN_IS_TOKEN(Pyrope_id_TRUE) || SCAN_IS_TOKEN(Pyrope_id_unique) || SCAN_IS_TOKEN(Pyrope_id_when)) {
     RULE_SUCCESS("Matched rule_keyword.\n", Prp_rule_keyword);
   }
 
