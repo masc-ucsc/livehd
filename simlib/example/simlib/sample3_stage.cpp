@@ -29,7 +29,7 @@ void Sample3_stage::vcd_cycle(UInt<1> s1_to3_cValid, UInt<32> s1_to3_c, UInt<1> 
   
     to1_b = memory[(tmp&UInt<32>(0xff)).as_single_word()];
    //vcd_writer.change(vcd_to1_b, 5, vcd::utils::format("%d",to1_b));
-   vcd_writer.change(vcd_to1_b, 5, "1100110011001100");
+   //vcd_writer.change(vcd_to1_b, 5, "1100110011001100");
   
     if (s1_to3_cValid && s2_to3_dValid) {
       UInt<32> tmp3 = s1_to3_c.addw(tmp);

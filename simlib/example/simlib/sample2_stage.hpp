@@ -1,4 +1,5 @@
 #pragma once
+#include "vcd_writer.hpp"
 
 struct Sample2_stage {
   uint64_t hidx;
@@ -14,6 +15,20 @@ struct Sample2_stage {
 
   UInt<32> tmp;
 
+#ifdef SIMLIB_VCD
+  vcd::VCDWriter &vcd_writer = vcd::initialize_vcd_writer();
+  vcd::VarPtr vcd_clk = vcd_writer.register_var("sample.s2", "clk", vcd::VariableType::wire, 1);
+  vcd::VarPtr vcd_reset = vcd_writer.register_var("sample.s2", "reset", vcd::VariableType::wire, 1);
+  vcd::VarPtr vcd_to2_aValid = vcd_writer.register_var("sample.s2", "to2_aValid", vcd::VariableType::wire, 1);
+  vcd::VarPtr vcd_to2_a = vcd_writer.register_var("sample.s2", "to2_a[31:0]", vcd::VariableType::wire, 1);
+  vcd::VarPtr vcd_to2_b = vcd_writer.register_var("sample.s2", "to2_b[31:0]", vcd::VariableType::wire, 1);
+  vcd::VarPtr vcd_to1_aValid = vcd_writer.register_var("sample.s2", "to1_aValid", vcd::VariableType::wire, 1);
+  vcd::VarPtr vcd_to1_a = vcd_writer.register_var("sample.s2", "to1_a[31:0]", vcd::VariableType::wire, 1);
+  vcd::VarPtr vcd_to2_eValid = vcd_writer.register_var("sample.s2", "to2_eValid", vcd::VariableType::wire, 1);
+  vcd::VarPtr vcd_to2_e = vcd_writer.register_var("sample.s2", "to2_e[31:0]", vcd::VariableType::wire, 1);
+  vcd::VarPtr vcd_to3_dValid = vcd_writer.register_var("sample.s2", "to3_dValid", vcd::VariableType::wire, 1);
+  vcd::VarPtr vcd_to3_d = vcd_writer.register_var("sample.s2", "to3_d[31:0]", vcd::VariableType::wire, 1);
+#endif
   Sample2_stage(uint64_t _hidx);
 
   void reset_cycle();

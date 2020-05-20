@@ -16,22 +16,7 @@ Sample_stage::Sample_stage(uint64_t _hidx)//, std::string parent_name)
   , s2(2123)
   , s3(122) {
   // FIXME: populate random reset (random per variable)
-    
-    vcd::VarPtr vcd_to2_aValid = vcd_writer.register_var("sample","to2_aValid",vcd::VariableType::wire, 1 );
-    vcd::VarPtr vcd_to2_a = vcd_writer.register_var("sample","to2_a",vcd::VariableType::wire, 32 );
-    vcd::VarPtr vcd_to2_b = vcd_writer.register_var("sample","to2_b",vcd::VariableType::wire, 32 );
-    vcd::VarPtr vcd_to3_cValid = vcd_writer.register_var("sample","to3_cValid",vcd::VariableType::wire, 1 );
-    vcd::VarPtr vcd_to3_c = vcd_writer.register_var("sample","to3_c",vcd::VariableType::wire, 32 );
-    vcd::VarPtr vcd_to3_dValid = vcd_writer.register_var("sample","to3_dValid",vcd::VariableType::wire, 1 );
-    vcd::VarPtr vcd_to3_d = vcd_writer.register_var("sample","to3_d",vcd::VariableType::wire, 32 );
-    vcd::VarPtr vcd_to1_aValid = vcd_writer.register_var("sample","to1_aValid",vcd::VariableType::wire, 1 );
-    vcd::VarPtr vcd_to1_a = vcd_writer.register_var("sample","to1_a",vcd::VariableType::wire, 32 );
-    vcd::VarPtr vcd_to2_eValid = vcd_writer.register_var("sample","to2_eValid",vcd::VariableType::wire, 1 );
-    vcd::VarPtr vcd_to2_e = vcd_writer.register_var("sample","to2_e",vcd::VariableType::wire, 32 );
-    vcd::VarPtr vcd_to1_b = vcd_writer.register_var("sample","to1_b",vcd::VariableType::wire, 32 );
-    vcd::VarPtr vcd_clk = vcd_writer.register_var("sample","clk",vcd::VariableType::wire, 1 );
-    vcd::VarPtr vcd_reset = vcd_writer.register_var("sample","reset",vcd::VariableType::wire, 1 );
-  }
+   }
 //#endif
 void Sample_stage::reset_cycle() {
 
