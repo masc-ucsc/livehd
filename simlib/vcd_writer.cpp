@@ -571,4 +571,6 @@ VarValue VCDVectorVariable::change_record(const VarValue &value) const
     return writer;
   }
 //};
+//static VCDWriter& vcd_writer_m = initialize_vcd_writer();
 }
+

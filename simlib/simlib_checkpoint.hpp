@@ -48,7 +48,7 @@ class Simlib_checkpoint {
   };
 #endif
 public:
-#ifdef SIMLIB_VCD
+/*#ifdef SIMLIB_VCD
   Simlib_checkpoint(std::string_view _name, uint64_t _reset_ncycles = 10000) : name(_name), top(0,vcd::initialize_vcd_writer()), perf(name), reset_ncycles(_reset_ncycles) {
     ncycles = 0;
     checkpoint_ncycles = -1; // Disable checkpoint by default
@@ -64,7 +64,7 @@ public:
 //#endif
     top.add_signature(signature);
   };
-#else
+#else*/
   Simlib_checkpoint(std::string_view _name, uint64_t _reset_ncycles = 10000) : name(_name), top(0), perf(name), reset_ncycles(_reset_ncycles) {
     ncycles = 0;
     checkpoint_ncycles = -1; // Disable checkpoint by default
@@ -74,7 +74,7 @@ public:
     advance_reset(reset_ncycles);
     top.add_signature(signature);
   };
-#endif
+//#endif
 
   ~Simlib_checkpoint() {
     std::string ext;
