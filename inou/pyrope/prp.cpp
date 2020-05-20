@@ -759,8 +759,13 @@ uint8_t Prp::rule_fcall_implicit(std::list<std::tuple<Rule_id, Token_entry>> &pa
   else {
     // optional
     CHECK_RULE(&Prp::rule_function_pipe);
+    if (CHECK_RULE(&Prp::rule_not_in_implicit)) {
+      RULE_FAILED("Failed rule_fcall_implicit; found an answering not_in_implicit.\n");
+    }
   }
-
+  // WARNING: need to increment sub cnt to ensure that an fcall implicit subtree is always generated
+  sub_cnt++;
+  
   RULE_SUCCESS("Matched rule_fcall_implicit.\n", Prp_rule_fcall_implicit);
 }
 
@@ -832,8 +837,8 @@ uint8_t Prp::rule_assignment_expression(std::list<std::tuple<Rule_id, Token_entr
   }
 
   check_lb();
-  if (!CHECK_RULE(&Prp::rule_logical_expression)) {
-    if (!CHECK_RULE(&Prp::rule_fcall_implicit)) {
+  if (!CHECK_RULE(&Prp::rule_fcall_implicit)) {
+    if (!CHECK_RULE(&Prp::rule_logical_expression)) {
       RULE_FAILED("Failed rule_assignment_expression; couldn't find an fcall_implicit, or a logical_expression.\n");
     }
   }
@@ -1797,7 +1802,8 @@ void Prp::ast_builder(std::list<std::tuple<Rule_id, Token_entry>> &passed_list) 
       } else {
         ast->down();
         ast->add(rule_id, token_entry);
-        PRINT_DBG_AST("Added token {} from rule {}.\n", scan_text(std::get<1>(ast_op)), rule_id_to_string(std::get<0>(ast_op)));
+        PRINT_DBG_AST("Added token {} from rule {}.\n", scan_text(std::get<1>(ast_op)), 
+        rule_id_to_string(std::get<0>(ast_op)));
         ast->up(rule_id);
       }
     }

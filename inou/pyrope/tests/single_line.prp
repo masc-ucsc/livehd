@@ -1,2 +1,1 @@
-foo ::{ OK
-}
+if cond ::{ NOT }

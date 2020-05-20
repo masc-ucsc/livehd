@@ -16,10 +16,11 @@
 #include <set>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "ast.hpp"
 #include "elab_scanner.hpp"
 
-//#define OUTPUT_AST
+#define OUTPUT_AST
 //#define OUTPUT_LN
 
 //#define DEBUG_AST
@@ -329,8 +330,8 @@ public:
     //pyrope_keyword["C"]       = Pyrope_id_c;
     //pyrope_keyword["I"]       = Pyrope_id_assertion;
     //pyrope_keyword["N"]       = Pyrope_id_negation;
-    pyrope_keyword["yield"]   = Pyrope_id_yield;
-    pyrope_keyword["waitfor"] = Pyrope_id_waitfor;
+    //pyrope_keyword["yield"]   = Pyrope_id_yield;
+    //pyrope_keyword["waitfor"] = Pyrope_id_waitfor;
 
     pyrope_keyword["intersect"] = Pyrope_id_intersect;
     pyrope_keyword["union"]     = Pyrope_id_union;
