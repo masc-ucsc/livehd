@@ -2,7 +2,6 @@
 #include "livesim_types.hpp"
 #include "simlib_checkpoint.hpp"
 #include "sample_stage.hpp"
-#include "vcd_writer.hpp"
 
 int main(int argc, char **argv) {
   Simlib_checkpoint<Sample_stage> top("ckpt");

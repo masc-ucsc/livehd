@@ -6,7 +6,7 @@
 
 Sample3_stage::Sample3_stage(uint64_t _hidx)
   : hidx(_hidx) {
-}
+  }
 
 void Sample3_stage::reset_cycle() {
   tmp  = 0;
@@ -16,6 +16,8 @@ void Sample3_stage::reset_cycle() {
 	memory[reset_iterator] = 0;
 }
 #ifdef SIMLIB_VCD
+
+
 void Sample3_stage::vcd_cycle(UInt<1> s1_to3_cValid, UInt<32> s1_to3_c, UInt<1> s2_to3_dValid, UInt<32> s2_to3_d) {
   if (__builtin_expect(((tmp & UInt<32>(0xFFFF)) == UInt<32>(45339)),0)) {
     if ((tmp2 & UInt<32>(15)) == UInt<32>(0)) {
@@ -26,12 +28,13 @@ void Sample3_stage::vcd_cycle(UInt<1> s1_to3_cValid, UInt<32> s1_to3_c, UInt<1> 
   }
   
     to1_b = memory[(tmp&UInt<32>(0xff)).as_single_word()];
- //   vcd_writer.change(vcd_to1_b, ++t, vcd::utils::format("%d",to1_b));
+   //vcd_writer.change(vcd_to1_b, 5, vcd::utils::format("%d",to1_b));
+   vcd_writer.change(vcd_to1_b, 5, "1100110011001100");
   
     if (s1_to3_cValid && s2_to3_dValid) {
       UInt<32> tmp3 = s1_to3_c.addw(tmp);
     //  vcd::VarPtr vcd_tmp3 = vcd_writer.register_var("SS3", "tmp3", vcd::VariableType::integer, sizeof(tmp3));
-    //  vcd_writer.change(vcd_tmp3, t,  vcd::utils::format("%d",tmp3));
+   //   vcd_writer.change(vcd_tmp3, t,  vcd::utils::format("%d",tmp3));
       memory[(tmp3 & UInt<32>(0xff)).as_single_word()] = s2_to3_d;
     }
   

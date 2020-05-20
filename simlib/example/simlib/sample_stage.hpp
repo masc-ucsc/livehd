@@ -3,15 +3,22 @@
 #include "sample1_stage.hpp"
 #include "sample2_stage.hpp"
 #include "sample3_stage.hpp"
+#include "vcd_writer.hpp"
 
 struct Sample_stage {
   uint64_t hidx;
-
+vcd::VCDWriter &vcd_writer = vcd::initialize_vcd_writer();
   Sample1_stage s1;
   Sample2_stage s2;
   Sample3_stage s3;
 
+/*#ifdef SIMLIB_VCD
+ // vcd::VarPtr vcd_to2_aValid;
+//  vcd::VCDWriter &vcd_writer;
+  Sample_stage(uint64_t _hidx, vcd::VCDWriter &vcd_writer);
+#else*/
   Sample_stage(uint64_t _hidx);
+//#endif
 
   void reset_cycle();
 

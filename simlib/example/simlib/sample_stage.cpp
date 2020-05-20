@@ -1,15 +1,38 @@
 #include "livesim_types.hpp"
-
 #include "sample_stage.hpp"
 
-Sample_stage::Sample_stage(uint64_t _hidx)
+/*#ifdef SIMLIB_VCD
+Sample_stage::Sample_stage(uint64_t _hidx, vcd::VCDWriter &vcd_writer)//, std::string parent_name)
   : hidx(_hidx)
-  , s1(33)
+  , s1(33)//, concat(parent_name,".sample"))
   , s2(2123)
   , s3(122) {
   // FIXME: populate random reset (random per variable)
-}
-
+  }
+#else*/
+Sample_stage::Sample_stage(uint64_t _hidx)//, std::string parent_name)
+  : hidx(_hidx)
+  , s1(33)//, concat(parent_name,".sample"))
+  , s2(2123)
+  , s3(122) {
+  // FIXME: populate random reset (random per variable)
+    
+    vcd::VarPtr vcd_to2_aValid = vcd_writer.register_var("sample","to2_aValid",vcd::VariableType::wire, 1 );
+    vcd::VarPtr vcd_to2_a = vcd_writer.register_var("sample","to2_a",vcd::VariableType::wire, 32 );
+    vcd::VarPtr vcd_to2_b = vcd_writer.register_var("sample","to2_b",vcd::VariableType::wire, 32 );
+    vcd::VarPtr vcd_to3_cValid = vcd_writer.register_var("sample","to3_cValid",vcd::VariableType::wire, 1 );
+    vcd::VarPtr vcd_to3_c = vcd_writer.register_var("sample","to3_c",vcd::VariableType::wire, 32 );
+    vcd::VarPtr vcd_to3_dValid = vcd_writer.register_var("sample","to3_dValid",vcd::VariableType::wire, 1 );
+    vcd::VarPtr vcd_to3_d = vcd_writer.register_var("sample","to3_d",vcd::VariableType::wire, 32 );
+    vcd::VarPtr vcd_to1_aValid = vcd_writer.register_var("sample","to1_aValid",vcd::VariableType::wire, 1 );
+    vcd::VarPtr vcd_to1_a = vcd_writer.register_var("sample","to1_a",vcd::VariableType::wire, 32 );
+    vcd::VarPtr vcd_to2_eValid = vcd_writer.register_var("sample","to2_eValid",vcd::VariableType::wire, 1 );
+    vcd::VarPtr vcd_to2_e = vcd_writer.register_var("sample","to2_e",vcd::VariableType::wire, 32 );
+    vcd::VarPtr vcd_to1_b = vcd_writer.register_var("sample","to1_b",vcd::VariableType::wire, 32 );
+    vcd::VarPtr vcd_clk = vcd_writer.register_var("sample","clk",vcd::VariableType::wire, 1 );
+    vcd::VarPtr vcd_reset = vcd_writer.register_var("sample","reset",vcd::VariableType::wire, 1 );
+  }
+//#endif
 void Sample_stage::reset_cycle() {
 
   s1.reset_cycle();
@@ -26,13 +49,12 @@ void Sample_stage::reset_cycle() {
     auto s1_to3_cValid = s1.to3_cValid;
     auto s1_to3_c      = s1.to3_c;
     s1.vcd_cycle(s3.to1_b, s2.to1_aValid, s2.to1_a);
-
+    //vcd::VarPtr vcd_to2_a = vcd_writer.register_var("sample","to2_a",vcd::VariableType::wire, 32 );
     auto s2_to3_dValid = s2.to3_dValid;
     auto s2_to3_d      = s2.to3_d;
     s2.vcd_cycle(s1_to2_aValid, s1_to2_a, s1_to2_b);
 
     s3.vcd_cycle(s1_to3_cValid, s1_to3_c, s2_to3_dValid, s2_to3_d);
-
   }
 #else
   void Sample_stage::cycle() {
