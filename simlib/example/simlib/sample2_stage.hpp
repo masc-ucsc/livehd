@@ -59,6 +59,7 @@ struct Sample2_stage {
     to2_e = tmp3.addw(to1_a);
     vcd_writer.change(vcd_to2_e, t , "11");//to2_e.to_binary());
 
+  printf("%s\n", to2_e.to_string());
     //to1_aValid =  (tmp & UInt<32>(2)) == UInt<32>(2);
     to1_aValid =  tmp.bit<1>();
     vcd_writer.change(vcd_to1_aValid, t , "1");//to1_aValid.to_binary());

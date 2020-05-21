@@ -8,6 +8,7 @@
 #include <iostream>
 #include <random>
 #include <type_traits>
+#include <bitset>
 
 // Internal RNG
 namespace {
@@ -431,6 +432,27 @@ public:
     return words_[0];
   }
 
+  std::string to_string() const {
+    std::stringstream ss;
+
+    ss << "0x" << std::hex << std::setfill('0');
+    int top_nibble_width = (bits_in_top_word_ + 3) / 4;
+    ss << std::setw(top_nibble_width);
+    uint64_t top_word_mask = bits_in_top_word_ == kWordSize ? -1 :
+                               (1l << cap(bits_in_top_word_)) - 1;
+    ss << (static_cast<uint64_t>(words_[n_-1]) & top_word_mask);
+    for (int word=n_ - 2; word >= 0; word--) {
+     ss << std::hex << std::setfill('0') << std::setw(16) << words_[word];
+    }
+    return ss.str();
+  }
+/*
+  std::string to_binary_string() const {
+
+    std::string binaryStr = std::bitset<bits_in_top_word_>(int_value).to_string();
+    return binaryStr;
+  }
+*/
 protected:
   template<int other_w>
   friend class uint_wrapper_t;
