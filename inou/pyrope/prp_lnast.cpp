@@ -308,7 +308,6 @@ Lnast_node Prp_lnast::eval_scope_declaration(mmap_lib::Tree_index idx_start_ast,
   // add the name of the function
   Lnast_node retnode;
   if(!is_anon){
-    fmt::print("Hello\n");
     retnode = Lnast_node::create_ref(get_token(ast->get_data(idx_nxt_ast).token_entry));
     lnast->add_child(idx_func_root, retnode);
   }
@@ -764,7 +763,6 @@ Lnast_node Prp_lnast::eval_tuple(mmap_lib::Tree_index idx_start_ast, mmap_lib::T
   idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast); // move to any extra element of the tuple
   if(idx_nxt_ast != ast->invalid_index()){
     if(is_expr(idx_nxt_ast)){
-      fmt::print("we have an extra element on the end that will be added to the tuple.\n");
       expr_rhs.emplace_back(eval_rule(idx_nxt_ast, idx_start_ln));
       rhs_indexes.emplace_back(cur_tuple_rhs_index);
     }
