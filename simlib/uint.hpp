@@ -31,14 +31,20 @@ private:
   constexpr static int cmax(int wa, int wb) { return wa > wb ? wa : wb; }
 
 public:
-  UInt() {
-    for (int i=0; i < n_; i++)
+  constexpr UInt() : words_{} {
+   for (int i=0; i < n_; ++i)
       words_[i] = 0;
   }
 
-  UInt(uint64_t initial) : UInt() {
+  template<word_t...Limbs>
+  constexpr UInt(const std::integer_sequence<word_t, Limbs...>)
+    : words_{ Limbs... } {
+  }
+
+  constexpr UInt(word_t initial) : UInt() {
     words_[0] = initial;
-    mask_top_unused();
+    if constexpr (n_>1)
+      mask_top_unused();
   }
 
   UInt(std::string initial) {
@@ -83,7 +89,7 @@ public:
   }
 
   template<int other_w>
-  UInt<w_> operator=(const UInt<other_w> &other) {
+  constexpr UInt<w_> operator=(const UInt<other_w> &other) {
     if constexpr (other_w < w_) {
       for (int word=0; word < other_w; word++) {
         if (word < UInt<other_w>::NW)
@@ -113,7 +119,7 @@ public:
   }
 
   template<int other_w>
-  UInt<w_ + other_w> cat(const UInt<other_w> &other) const {
+  constexpr auto cat(const UInt<other_w> other) {
     UInt<w_ + other_w> to_return(other);
     const int offset = other_w % kWordSize;
     for (int i = 0; i < n_; i++) {
@@ -126,7 +132,7 @@ public:
     return to_return;
   }
 
-  UInt<w_ + 1> operator+(const UInt<w_> &other) const {
+  constexpr UInt<w_ + 1> operator+(const UInt<w_> &other) const {
     UInt<w_ + 1> result = core_add_sub<w_+1, false>(other);
     if ((kWordSize * n_ == w_) && (result.words_[n_-1] < words_[n_-1]))
       result.words_[word_index_c(w_ + 1)] = 1;
@@ -161,7 +167,7 @@ public:
     return SInt<w_+1>(pad<w_+1>()).subw(other.template pad<w_+1>());
   }
 
-  UInt<w_ + w_> operator*(const UInt<w_> &other) const {
+  constexpr UInt<w_ + w_> operator*(const UInt<w_> &other) const {
     UInt<w_ + w_> result(0);
     uint64_t carry = 0;
     for (int i=0; i < n_; i++) {
@@ -290,6 +296,12 @@ public:
     return result;
   }
 
+  template<int hi, int lo>
+  constexpr auto mbits() const {
+    constexpr UInt<hi - lo + 1> result = mcore_bits<hi,lo>();
+    return result;
+  }
+
   template<int hi>
   UInt<1> bit() const {
     constexpr int word_down = word_index_c(hi);
@@ -371,7 +383,7 @@ public:
     return result;
   }
 
-  UInt<1> operator<=(const UInt<w_> &other) const {
+  constexpr UInt<1> operator<=(const UInt<w_> &other) const {
     for (int i=n_-1; i >= 0; i--) {
       if (words_[i] < other.words_[i]) return UInt<1>(1);
       if (words_[i] > other.words_[i]) return UInt<1>(0);
@@ -395,7 +407,7 @@ public:
     return ~(*this <= other);
   }
 
-  UInt<1> operator==(const UInt<w_> &other) const {
+  constexpr UInt<1> operator==(const UInt<w_> &other) const {
     for (int i = 0; i < n_; i++) {
       if (words_[i] != other.words_[i])
         return UInt<1>(0);
@@ -407,7 +419,7 @@ public:
     return ~(*this == other);
   }
 
-  operator bool() const {
+  constexpr operator bool() const {
     static_assert(w_ == 1, "conversion to bool only allowed for width 1");
     return static_cast<bool>(words_[0]);
   }
@@ -432,37 +444,75 @@ public:
     return words_[0];
   }
 
+  std::string to_string_binary() const {
+    std::stringstream ss;
+    ss << "0b";
+    uint64_t top_word_mask = bits_in_top_word_ == kWordSize ? -1 :
+      (1ULL << cap(bits_in_top_word_)) - 1;
+    auto v = (static_cast<uint64_t>(words_[n_-1]) & top_word_mask);
+    uint64_t mask = 1ULL<<(bits_in_top_word_-1);
+    while (mask) {
+      ss << ((mask & v)?"1":"0");
+      mask >>= 1;
+    }
+    for (int word = n_ - 2; word >= 0; word--) {
+      auto v2 = words_[word];
+      uint64_t mask = 1ULL<<63;
+      while (mask) {
+        ss << ((mask & v2) ? "1" : "0");
+        mask >>= 1;
+      }
+    }
+
+    return ss.str();
+  }
+
   std::string to_string() const {
     std::stringstream ss;
 
-    ss << "0x" << std::hex << std::setfill('0');
+    if constexpr ((w_ % 4) == 0) {
+      ss << "0x" << std::hex << std::setfill('0');
+      int top_nibble_width = (bits_in_top_word_ + 3) / 4;
+      ss << std::setw(top_nibble_width);
+      uint64_t top_word_mask = bits_in_top_word_ == kWordSize ? -1 :
+        (1ULL << cap(bits_in_top_word_)) - 1;
+      ss << (static_cast<uint64_t>(words_[n_-1]) & top_word_mask);
+      for (int word = n_ - 2; word >= 0; word--) {
+        ss << std::hex << std::setfill('0') << std::setw(16) << words_[word];
+      }
+    } else {
+      return to_string_binary();
+    }
+
+    return ss.str();
+  }
+
+  std::string to_verilog() const {
+    std::stringstream ss;
+
+    ss << w_ << "'h" << std::hex << std::setfill('0');
     int top_nibble_width = (bits_in_top_word_ + 3) / 4;
     ss << std::setw(top_nibble_width);
     uint64_t top_word_mask = bits_in_top_word_ == kWordSize ? -1 :
-                               (1l << cap(bits_in_top_word_)) - 1;
+      (1l << cap(bits_in_top_word_)) - 1;
     ss << (static_cast<uint64_t>(words_[n_-1]) & top_word_mask);
     for (int word=n_ - 2; word >= 0; word--) {
-     ss << std::hex << std::setfill('0') << std::setw(16) << words_[word];
+      ss << std::hex << std::setfill('0') << std::setw(16) << words_[word];
     }
+
     return ss.str();
   }
-/*
-  std::string to_binary_string() const {
 
-    std::string binaryStr = std::bitset<bits_in_top_word_>(int_value).to_string();
-    return binaryStr;
-  }
-*/
 protected:
   template<int other_w>
   friend class uint_wrapper_t;
 
-  void raw_copy_in(uint64_t *src) {
+  void raw_copy_in(const uint64_t *src) {
     for (int word=0; word < n_; word++)
       words_[word] = *src++;
   }
 
-  void raw_copy_out(uint64_t *dst) {
+  void raw_copy_out(uint64_t *dst) const {
     for (int word=0; word < n_; word++)
       *dst++ = words_[word];
   }
@@ -474,11 +524,11 @@ private:
   // Access array word type
   typedef word_t WT;
   // Access array length
-  const static int NW = n_;
+  static constexpr int NW = n_;
   // Access array word type bit width
-  const static int WW = std::is_same<word_t,uint64_t>::value ? 64 : 8;
+  static constexpr int WW = std::is_same<word_t,uint64_t>::value ? 64 : 8;
 
-  const static int bits_in_top_word_ = w_ % WW == 0 ? WW : w_ % WW;
+  static constexpr int bits_in_top_word_ = w_ % WW == 0 ? WW : w_ % WW;
 
   // Friend Access
   template<int other_w, typename other_word_t, int other_n>
@@ -496,14 +546,14 @@ private:
   int static word_index(int bit_index) { return bit_index / kWordSize; }
   constexpr int static word_index_c(int bit_index) { return bit_index / kWordSize; }
 
-  uint64_t static upper(uint64_t i) { return i >> 32; }
-  uint64_t static lower(uint64_t i) { return i & 0x00000000ffffffffUL; }
+  static constexpr uint64_t upper(uint64_t i) { return i >> 32; }
+  static constexpr uint64_t lower(uint64_t i) { return i & 0x00000000ffffffffUL; }
 
   // Hack to prevent compiler warnings for shift amount being too large
-  int static cap(int s) { return s % kWordSize; }
+  static constexpr int cap(int s) { return s % kWordSize; }
 
   // Clean up high bits
-  void mask_top_unused() {
+  constexpr void mask_top_unused() {
     if (bits_in_top_word_ != WW) {
       words_[n_-1] = words_[n_-1] & ((1l << cap(bits_in_top_word_)) - 1l);
     }
@@ -511,7 +561,7 @@ private:
 
   // Reused math operators
   template<int out_w, bool subtract>
-  UInt<out_w> core_add_sub(const UInt<w_> &other) const {
+  constexpr UInt<out_w> core_add_sub(const UInt<w_> &other) const {
     UInt<out_w> result;
     uint64_t carry = subtract;
     for (int i = 0; i < n_; i++) {
@@ -556,6 +606,20 @@ private:
     return result;
   }
 
+  template<int hi, int lo>constexpr auto mcore_bits() const {
+    static_assert(hi < w_, "Bit extract hi bigger than width");
+    static_assert(hi >= lo, "Bit extract lo > hi");
+    static_assert(lo >= 0, "Bit extract lo is negative");
+    UInt<hi - lo + 1> result;
+    constexpr int word_down = word_index_c(lo);
+    constexpr int bits_down = lo % kWordSize;
+    for (int i=0; i < result.NW; i++) {
+      result.words_[i] = words_[i + word_down] >> bits_down;
+      if ((bits_down != 0) && (i + word_down + 1 < n_))
+        result.words_[i] |= words_[i + word_down + 1] << cap(kWordSize - bits_down);
+    }
+    return result;
+  }
 
   void print_to_stream(std::ostream& os) const {
     os << "0x" << std::hex << std::setfill('0');
@@ -571,12 +635,66 @@ private:
   }
 };
 
-
-
 template<int w>
 std::ostream& operator<<(std::ostream& os, const UInt<w>& ui) {
   ui.print_to_stream(os);
   os << "<U" << w << ">";
   return os;
+}
+
+constexpr size_t ctlog2(uint8_t n) {
+  return ( (n<2) ? 1 : 1+ctlog2(n/2));
+}
+
+template <char... Chars> constexpr auto operator"" _prp() {
+  constexpr int N=sizeof...(Chars);
+  constexpr std::array<char, N> seq{Chars...};
+
+  uint8_t scale_val=0;
+
+  std::size_t start_pos = 0;
+  if constexpr (seq.size()<3) {
+    scale_val = 10;
+  }else if constexpr (seq[0] == '0' && (seq[1] == 'd' || seq[1] == 'D')) {
+    start_pos = 2;
+    scale_val = 10;
+  }else if constexpr (seq[0] == '0' && (seq[1] == 'x' || seq[1] == 'X')) {
+    start_pos = 2;
+    scale_val = 16;
+  }else if constexpr (seq[0] == '0' && (seq[1] == 'b' || seq[1] == 'B')) {
+    start_pos = 2;
+    scale_val = 2;
+  }else if constexpr (seq[0] == '0') {
+    start_pos = 1;
+    scale_val = 8;
+  }else{
+    scale_val = 10;
+  }
+
+  constexpr std::size_t max_bits = (seq.size()>1 && seq[0] == '0' && (
+      seq[1] == 'b' || seq[1] == 'b'))? (seq.size()-2) : (
+        (seq.size()>1 && seq[0] == '0' && (seq[1] == 'x' || seq[1] == 'X')
+        ) ? (seq.size()-2)*4 : (
+          (seq.size()>0 && seq[0] == '0') ? (seq.size()-1)*3 : (1+ctlog2(2*seq.size()))
+          )
+        );
+
+  UInt<max_bits> value;
+  UInt<max_bits> scale(scale_val);
+
+  for (std::size_t i = start_pos; i < seq.size(); ++i) {
+    uint64_t v=0;
+    if (seq[i]>= 'A' && seq[i] <= 'Z')
+      v = 10+seq[i] - 'A';
+    else if (seq[i]>= 'a' && seq[i] <= 'z')
+      v = 10+seq[i] - 'a';
+    else if (seq[i]>= '0' && seq[i] <= '9')
+      v = seq[i] - '0';
+    else
+      continue;
+    value = value * scale;
+    value = value + UInt<max_bits>(v);
+  }
+  return value;
 }
 
