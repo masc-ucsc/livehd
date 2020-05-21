@@ -15,23 +15,6 @@ struct Sample2_stage {
 
   UInt<32> tmp;
 
-#ifdef SIMLIB_VCD
-  vcd::VCDWriter &vcd_writer = vcd::initialize_vcd_writer();
-  vcd::VarPtr vcd_clk = vcd_writer.register_var("sample.s2", "clk", vcd::VariableType::wire, 1);
-  vcd::VarPtr vcd_reset = vcd_writer.register_var("sample.s2", "reset", vcd::VariableType::wire, 1);
-  vcd::VarPtr vcd_to2_aValid = vcd_writer.register_var("sample.s2", "to2_aValid", vcd::VariableType::wire, 1);
-  vcd::VarPtr vcd_to2_a = vcd_writer.register_var("sample.s2", "to2_a[31:0]", vcd::VariableType::wire, 1);
-  vcd::VarPtr vcd_to2_b = vcd_writer.register_var("sample.s2", "to2_b[31:0]", vcd::VariableType::wire, 1);
-  vcd::VarPtr vcd_to1_aValid = vcd_writer.register_var("sample.s2", "to1_aValid", vcd::VariableType::wire, 1);
-  vcd::VarPtr vcd_to1_a = vcd_writer.register_var("sample.s2", "to1_a[31:0]", vcd::VariableType::wire, 1);
-  vcd::VarPtr vcd_to2_eValid = vcd_writer.register_var("sample.s2", "to2_eValid", vcd::VariableType::wire, 1);
-  vcd::VarPtr vcd_to2_e = vcd_writer.register_var("sample.s2", "to2_e[31:0]", vcd::VariableType::wire, 1);
-  vcd::VarPtr vcd_to3_dValid = vcd_writer.register_var("sample.s2", "to3_dValid", vcd::VariableType::wire, 1);
-  vcd::VarPtr vcd_to3_d = vcd_writer.register_var("sample.s2", "to3_d[31:0]", vcd::VariableType::wire, 1);
-#endif
-  Sample2_stage(uint64_t _hidx);
-
-  void reset_cycle();
 //  void cycle(UInt<1> s1_to2_aValid, UInt<32> s1_to2_a, UInt<32> s1_to2_b) {
 //    to3_dValid =  !(tmp.bit<0>());
 //    to3_d = tmp.addw(s1_to2_b);
@@ -48,22 +31,45 @@ struct Sample2_stage {
 //    tmp = tmp.addw(UInt<32>(13));
 //  }
 #ifdef SIMLIB_VCD
+    std::string scope_name;
+  vcd::VCDWriter &vcd_writer = vcd::initialize_vcd_writer();
+  vcd::VarPtr vcd_clk = vcd_writer.register_var(scope_name, "clk", vcd::VariableType::wire, 1);
+  vcd::VarPtr vcd_reset = vcd_writer.register_var(scope_name, "reset", vcd::VariableType::wire, 1);
+  vcd::VarPtr vcd_to2_aValid = vcd_writer.register_var(scope_name, "to2_aValid", vcd::VariableType::wire, 1);
+  vcd::VarPtr vcd_to2_a = vcd_writer.register_var(scope_name, "to2_a[31:0]", vcd::VariableType::wire, 32);
+  vcd::VarPtr vcd_to2_b = vcd_writer.register_var(scope_name, "to2_b[31:0]", vcd::VariableType::wire, 32);
+  vcd::VarPtr vcd_to1_aValid = vcd_writer.register_var(scope_name, "to1_aValid", vcd::VariableType::wire, 1);
+  vcd::VarPtr vcd_to1_a = vcd_writer.register_var(scope_name, "to1_a[31:0]", vcd::VariableType::wire, 32);
+  vcd::VarPtr vcd_to2_eValid = vcd_writer.register_var(scope_name, "to2_eValid", vcd::VariableType::wire, 1);
+  vcd::VarPtr vcd_to2_e = vcd_writer.register_var(scope_name, "to2_e[31:0]", vcd::VariableType::wire, 32);
+  vcd::VarPtr vcd_to3_dValid = vcd_writer.register_var(scope_name, "to3_dValid", vcd::VariableType::wire, 1);
+  vcd::VarPtr vcd_to3_d = vcd_writer.register_var(scope_name, "to3_d[31:0]", vcd::VariableType::wire, 32);
+  Sample2_stage(uint64_t _hidx, std::string &parent_name);
+  void vcd_reset_cycle();
   void vcd_cycle(UInt<1> s1_to2_aValid, UInt<32> s1_to2_a, UInt<32> s1_to2_b) {
     to3_dValid =  !(tmp.bit<0>());
+    vcd_writer.change(vcd_to3_dValid, t , "1");//to3_dValid.to_binary());
     to3_d = tmp.addw(s1_to2_b);
+    vcd_writer.change(vcd_to3_d, t , "11");//to3_d.to_binary());
 
     to2_eValid =  tmp.bit<0>() && s1_to2_aValid && to1_aValid;
+    vcd_writer.change(vcd_to2_eValid, t , "1");//to2_eValid.to_binary());
     UInt<32> tmp3 = tmp.addw(s1_to2_a);
 
     to2_e = tmp3.addw(to1_a);
+    vcd_writer.change(vcd_to2_e, t , "11");//to2_e.to_binary());
 
     //to1_aValid =  (tmp & UInt<32>(2)) == UInt<32>(2);
     to1_aValid =  tmp.bit<1>();
+    vcd_writer.change(vcd_to1_aValid, t , "1");//to1_aValid.to_binary());
     to1_a = tmp.addw(UInt<32>(3));
+    vcd_writer.change(vcd_to1_a, t , "11");//to1_a.to_binary());
 
     tmp = tmp.addw(UInt<32>(13));
   }
 #else
+  Sample2_stage(uint64_t _hidx);
+  void reset_cycle();
   void cycle(UInt<1> s1_to2_aValid, UInt<32> s1_to2_a, UInt<32> s1_to2_b) {
     to3_dValid =  !(tmp.bit<0>());
     to3_d = tmp.addw(s1_to2_b);

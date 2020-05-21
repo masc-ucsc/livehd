@@ -15,7 +15,7 @@
 #include <vector>
 #include <iterator>
 #include "vcd_writer.hpp"
-
+unsigned t=0;
 template<typename Top_struct>
 class Simlib_checkpoint {
   uint64_t ncycles;
@@ -33,8 +33,9 @@ class Simlib_checkpoint {
 #ifdef SIMLIB_VCD
   void advance_reset(uint64_t n=1) {
     for(auto i=0;i<n;++i) {
+      t++;
       top.vcd_cycle();
-      top.reset_cycle();
+      top.vcd_reset_cycle();
     }
     ncycles += n;
   };
@@ -48,8 +49,8 @@ class Simlib_checkpoint {
   };
 #endif
 public:
-/*#ifdef SIMLIB_VCD
-  Simlib_checkpoint(std::string_view _name, uint64_t _reset_ncycles = 10000) : name(_name), top(0,vcd::initialize_vcd_writer()), perf(name), reset_ncycles(_reset_ncycles) {
+#ifdef SIMLIB_VCD
+  Simlib_checkpoint(std::string_view _name, std::string parent_name = "top", uint64_t _reset_ncycles = 10000) : name(_name), top(0,parent_name), perf(name), reset_ncycles(_reset_ncycles) {
     ncycles = 0;
     checkpoint_ncycles = -1; // Disable checkpoint by default
     next_checkpoint_ncycles = 1000000000;
@@ -64,7 +65,7 @@ public:
 //#endif
     top.add_signature(signature);
   };
-#else*/
+#else
   Simlib_checkpoint(std::string_view _name, uint64_t _reset_ncycles = 10000) : name(_name), top(0), perf(name), reset_ncycles(_reset_ncycles) {
     ncycles = 0;
     checkpoint_ncycles = -1; // Disable checkpoint by default
@@ -74,7 +75,7 @@ public:
     advance_reset(reset_ncycles);
     top.add_signature(signature);
   };
-//#endif
+#endif
 
   ~Simlib_checkpoint() {
     std::string ext;
@@ -234,7 +235,8 @@ public:
       next_checkpoint_ncycles -= step;
       for(auto i=0;i<step;++i) {
         #ifdef SIMLIB_VCD
-          top.vcd_cycle();
+        t++;
+        top.vcd_cycle();
         #else
           top.cycle();
         #endif
@@ -303,7 +305,8 @@ public:
       next_checkpoint_ncycles -= step;
       for(auto i=0;i<step;++i) {
         #ifdef SIMLIB_VCD
-          top.vcd_cycle();
+         t++;
+         top.vcd_cycle();
         #else
           top.cycle();
         #endif

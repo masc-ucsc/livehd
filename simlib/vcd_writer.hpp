@@ -12,7 +12,6 @@
 #include <set>
 #include <map>
 
-
 namespace vcd {
 namespace utils {
 // -----------------------------
@@ -228,3 +227,4 @@ VCDWriter& initialize_vcd_writer();
 
 }
 
+extern unsigned t;

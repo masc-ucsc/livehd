@@ -9,7 +9,7 @@ Sample_stage::Sample_stage(uint64_t _hidx, vcd::VCDWriter &vcd_writer)//, std::s
   , s3(122) {
   // FIXME: populate random reset (random per variable)
   }
-#else*/
+#else
 Sample_stage::Sample_stage(uint64_t _hidx)//, std::string parent_name)
   : hidx(_hidx)
   , s1(33)//, concat(parent_name,".sample"))
@@ -17,15 +17,23 @@ Sample_stage::Sample_stage(uint64_t _hidx)//, std::string parent_name)
   , s3(122) {
   // FIXME: populate random reset (random per variable)
    }
-//#endif
-void Sample_stage::reset_cycle() {
+#endif*/
+#ifdef SIMLIB_VCD
+Sample_stage::Sample_stage(uint64_t _hidx, std::string &parent_name)
+  : hidx(_hidx)
+  , scope_name(parent_name.append(".sample"))
+  , s1(33, scope_name)
+  , s2(2123, scope_name)
+  , s3(122, scope_name) {
+  // FIXME: populate random reset (random per variable)
+   }
+void Sample_stage::vcd_reset_cycle() {
 
-  s1.reset_cycle();
-  s2.reset_cycle();
-  s3.reset_cycle();
+  s1.vcd_reset_cycle();
+  s2.vcd_reset_cycle();
+  s3.vcd_reset_cycle();
 }
 
-#ifdef SIMLIB_VCD
   void Sample_stage::vcd_cycle() {
 
     auto s1_to2_aValid = s1.to2_aValid;
@@ -42,6 +50,20 @@ void Sample_stage::reset_cycle() {
     s3.vcd_cycle(s1_to3_cValid, s1_to3_c, s2_to3_dValid, s2_to3_d);
   }
 #else
+Sample_stage::Sample_stage(uint64_t _hidx)
+  : hidx(_hidx)
+  , s1(33)
+  , s2(2123)
+  , s3(122) {
+  // FIXME: populate random reset (random per variable)
+   }
+void Sample_stage::reset_cycle() {
+
+  s1.reset_cycle();
+  s2.reset_cycle();
+  s3.reset_cycle();
+}
+
   void Sample_stage::cycle() {
 
     auto s1_to2_aValid = s1.to2_aValid;
