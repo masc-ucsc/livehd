@@ -63,7 +63,9 @@ public:
     // vcd::VarPtr vcd_to1_b = vcd_writer.register_var("sample.s3", "to1_b[31:0]", vcd::VariableType::wire, 32);
     // vcd_writer.change(vcd_to1_b, ++t, "11011001010");
 //#endif
+#ifdef SIMLIB_TRACE
     top.add_signature(signature);
+#endif
   };
 #else
   Simlib_checkpoint(std::string_view _name, uint64_t _reset_ncycles = 10000) : name(_name), top(0), perf(name), reset_ncycles(_reset_ncycles) {
@@ -73,7 +75,9 @@ public:
     last_checkpoint_sec = 0.0;
 //    getenv("SIMLIB_DUMPDIR");//to dump the created files in scrap folder so as to not saturate the NFS.
     advance_reset(reset_ncycles);
+#ifdef SIMLIB_TRACE
     top.add_signature(signature);
+#endif
   };
 #endif
 
