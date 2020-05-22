@@ -20,7 +20,7 @@ struct Sample3_stage {
     vcd::VarPtr vcd_to3_c = vcd_writer.register_var(scope_name, "to3_c[31:0]", vcd::VariableType::wire, 32);
     vcd::VarPtr vcd_to3_cValid = vcd_writer.register_var(scope_name, "to3_cValid", vcd::VariableType::wire, 1);
     vcd::VarPtr vcd_to3_dValid = vcd_writer.register_var(scope_name, "to3_dValid", vcd::VariableType::wire, 1);
-    vcd::VarPtr vcd_reset_iterator = vcd_writer.register_var(scope_name, "reset_iterator[7:0]", vcd::VariableType::reg, 8);
+    vcd::VarPtr vcd_reset_iterator = vcd_writer.register_var(scope_name, "reset_iterator[7:0]", vcd::VariableType::integer, 8);
     vcd::VarPtr vcd_clk = vcd_writer.register_var(scope_name, "clk", vcd::VariableType::wire, 1);
     vcd::VarPtr vcd_reset = vcd_writer.register_var(scope_name, "reset", vcd::VariableType::wire, 1);
     Sample3_stage(uint64_t _hidx, std::string &parent_name);

@@ -1,5 +1,5 @@
 #include "livesim_types.hpp"
-
+#include <bitset>
 #include <stdio.h>
 #include <chrono>
 #include "sample3_stage.hpp"
@@ -16,7 +16,7 @@ void Sample3_stage::vcd_reset_cycle() {
   tmp2 = 0;
 
 	reset_iterator = reset_iterator + 1;
-  vcd_writer.change(vcd_reset_iterator, t , "11");//reset_iterator.to_binary());
+  vcd_writer.change(vcd_reset_iterator, t ,'b'+ std::bitset<8>(reset_iterator).to_string());
 	memory[reset_iterator] = 0;
 }
 
@@ -29,7 +29,7 @@ void Sample3_stage::vcd_cycle(UInt<1> s1_to3_cValid, UInt<32> s1_to3_c, UInt<1> 
   }
   
     to1_b = memory[(tmp&UInt<32>(0xff)).as_single_word()];
-    vcd_writer.change(vcd_to1_b, t , "11");//to1_b.to_binary());
+    vcd_writer.change(vcd_to1_b, t , to1_b.to_string_binary());
   
     if (s1_to3_cValid && s2_to3_dValid) {
       UInt<32> tmp3 = s1_to3_c.addw(tmp);

@@ -48,23 +48,22 @@ struct Sample2_stage {
   void vcd_reset_cycle();
   void vcd_cycle(UInt<1> s1_to2_aValid, UInt<32> s1_to2_a, UInt<32> s1_to2_b) {
     to3_dValid =  !(tmp.bit<0>());
-    vcd_writer.change(vcd_to3_dValid, t , "1");//to3_dValid.to_binary());
+    vcd_writer.change(vcd_to3_dValid, t , to3_dValid.to_string_binary());
     to3_d = tmp.addw(s1_to2_b);
-    vcd_writer.change(vcd_to3_d, t , "11");//to3_d.to_binary());
+    vcd_writer.change(vcd_to3_d, t , to3_d.to_string_binary());
 
     to2_eValid =  tmp.bit<0>() && s1_to2_aValid && to1_aValid;
-    vcd_writer.change(vcd_to2_eValid, t , "1");//to2_eValid.to_binary());
+    vcd_writer.change(vcd_to2_eValid, t , to2_eValid.to_string_binary());
     UInt<32> tmp3 = tmp.addw(s1_to2_a);
 
     to2_e = tmp3.addw(to1_a);
-    vcd_writer.change(vcd_to2_e, t , "11");//to2_e.to_binary());
+    vcd_writer.change(vcd_to2_e, t , to2_e.to_string_binary());
 
-  printf("%s\n", to2_e.to_string());
     //to1_aValid =  (tmp & UInt<32>(2)) == UInt<32>(2);
     to1_aValid =  tmp.bit<1>();
-    vcd_writer.change(vcd_to1_aValid, t , "1");//to1_aValid.to_binary());
+    vcd_writer.change(vcd_to1_aValid, t , to1_aValid.to_string_binary());
     to1_a = tmp.addw(UInt<32>(3));
-    vcd_writer.change(vcd_to1_a, t , "11");//to1_a.to_binary());
+    vcd_writer.change(vcd_to1_a, t , to1_a.to_string_binary());
 
     tmp = tmp.addw(UInt<32>(13));
   }

@@ -446,7 +446,7 @@ public:
 
   std::string to_string_binary() const {
     std::stringstream ss;
-    ss << "0b";
+    ss << "b";
     uint64_t top_word_mask = bits_in_top_word_ == kWordSize ? -1 :
       (1ULL << cap(bits_in_top_word_)) - 1;
     auto v = (static_cast<uint64_t>(words_[n_-1]) & top_word_mask);

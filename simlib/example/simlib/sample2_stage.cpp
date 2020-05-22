@@ -1,5 +1,4 @@
 #include "livesim_types.hpp"
-
 #include "sample2_stage.hpp"
 
 #ifdef SIMLIB_VCD
@@ -11,11 +10,11 @@ Sample2_stage::Sample2_stage(uint64_t _hidx, std::string &parent_name)
 void Sample2_stage::vcd_reset_cycle() {
   tmp = 1;
   to3_dValid = false;
-    vcd_writer.change(vcd_to3_dValid, t , "1");//to3_dValid.to_binary());
+    vcd_writer.change(vcd_to3_dValid, t , to3_dValid.to_string_binary());
   to2_eValid = false;
-    vcd_writer.change(vcd_to2_eValid, t , "1");//to2_eValid.to_binary());
+    vcd_writer.change(vcd_to2_eValid, t , to2_eValid.to_string_binary());
   to1_aValid = false;
-    vcd_writer.change(vcd_to1_aValid, t , "1");//to1_aValid.to_binary());
+    vcd_writer.change(vcd_to1_aValid, t , to1_aValid.to_string_binary());
 }
 #else
 Sample2_stage::Sample2_stage(uint64_t _hidx)
