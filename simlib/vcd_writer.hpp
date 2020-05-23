@@ -223,7 +223,7 @@ protected:
 // -----------------------------
 using WriterPtr = std::shared_ptr<VCDWriter>;
 // -----------------------------
-VCDWriter& initialize_vcd_writer();
+VCDWriter* initialize_vcd_writer();
 
 }
 

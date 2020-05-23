@@ -1,30 +1,15 @@
 #include "livesim_types.hpp"
 #include "sample_stage.hpp"
 
-/*#ifdef SIMLIB_VCD
-Sample_stage::Sample_stage(uint64_t _hidx, vcd::VCDWriter &vcd_writer)//, std::string parent_name)
-  : hidx(_hidx)
-  , s1(33)//, concat(parent_name,".sample"))
-  , s2(2123)
-  , s3(122) {
-  // FIXME: populate random reset (random per variable)
-  }
-#else
-Sample_stage::Sample_stage(uint64_t _hidx)//, std::string parent_name)
-  : hidx(_hidx)
-  , s1(33)//, concat(parent_name,".sample"))
-  , s2(2123)
-  , s3(122) {
-  // FIXME: populate random reset (random per variable)
-   }
-#endif*/
 #ifdef SIMLIB_VCD
-Sample_stage::Sample_stage(uint64_t _hidx, std::string &parent_name)
+Sample_stage::Sample_stage(uint64_t _hidx, std::string &parent_name, vcd::VCDWriter* writer)
   : hidx(_hidx)
   , scope_name(parent_name.append(".sample"))
-  , s1(33, scope_name)
-  , s2(2123, scope_name)
-  , s3(122, scope_name) {
+    ,vcd_writer(writer)
+  , s1(33, scope_name, writer)
+  , s2(2123, scope_name, writer)
+  , s3(122, scope_name, writer) {
+   // this->vcd_writer=writer;
   // FIXME: populate random reset (random per variable)
    }
 void Sample_stage::vcd_reset_cycle() {
