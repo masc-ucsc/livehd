@@ -1954,6 +1954,7 @@ std::string Prp::rule_id_to_string(Rule_id rid) {
     case Prp_rule_scope_declaration: return "Scope declaration";
     case Prp_rule_scope_condition: return "Scope condition";
     case Prp_rule_fcall_explicit: return "Fcall explicit";
+    case Prp_rule_for_index: return "For index";
     default: return fmt::format("{}", rid);
   }
 }

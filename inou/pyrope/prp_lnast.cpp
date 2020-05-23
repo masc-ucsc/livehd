@@ -71,7 +71,10 @@ Lnast_node Prp_lnast::eval_rule(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tr
       PRINT_DBG_LN("Prp_rule_fcall_implicit\n");
       return eval_fcall_implicit(idx_start_ast, idx_start_ln);
       break;
-    case Prp_rule_for_index: PRINT_DBG_LN("Prp_rule_for_index\n"); break;
+    case Prp_rule_for_index:
+      PRINT_DBG_LN("Prp_rule_for_index\n");
+      eval_for_index(idx_start_ast, idx_start_ln);
+      break;
     case Prp_rule_assignment_expression:
       PRINT_DBG_LN("Prp_rule_assignment_expression\n");
       if(ast->get_data(ast->get_last_child(idx_start_ast)).rule_id == Prp_rule_scope_declaration){
@@ -261,6 +264,25 @@ void Prp_lnast::eval_fcall_arg_notation(mmap_lib::Tree_index idx_start_ast, mmap
   }
 }
 
+void Prp_lnast::eval_for_index(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln){
+  auto idx_nxt_ln = idx_start_ln;
+  auto idx_nxt_ast = idx_start_ast;
+  
+  bool next = true;
+  while(next){
+    // evaluate the first element
+    eval_rule(idx_nxt_ln, idx_nxt_ast);
+    // check if there are more elements
+    idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast);
+    if(idx_nxt_ast != ast->invalid_index()){ // are we on the ;?
+      idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast); // go to the next rule
+    }
+    else{
+      next = false;
+    }
+  }
+}
+
 // WARNING: can we always pass an assignment expression to this? nope!
 Lnast_node Prp_lnast::eval_scope_declaration(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln) {
   mmap_lib::Tree_index idx_nxt_ln = idx_start_ln;
@@ -399,50 +421,53 @@ void Prp_lnast::eval_while_statement(mmap_lib::Tree_index idx_start_ast, mmap_li
   cur_stmts = old_stmts;
 }
 
-// TODO: other things than for in notation?
 void Prp_lnast::eval_for_statement(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln) {
   mmap_lib::Tree_index idx_nxt_ln = idx_start_ln;
 
-  /*if (cur_stmts == lnast->invalid_index()) {
-    // create a statements node if we are the direct child of root
-    auto lnast_seq    = lnast->add_string("___SEQ" + std::to_string(current_seq++));
-    auto subtree_root = Lnast_node::create_stmts(lnast_seq);
-    idx_nxt_ln        = lnast->add_child(idx_nxt_ln, subtree_root);
-    cur_stmts         = idx_nxt_ln;
-  }*/
+  auto idx_for_index = ast->get_child(idx_start_ast);
+  auto idx_nxt_ast = idx_for_index;
 
-  auto idx_nxt_ast = ast->get_child(idx_start_ast);
-
+  // check if the current rule is a for_index; if so, we have multiple for ins
+  if(ast->get_data(idx_nxt_ast).rule_id == Prp_rule_for_index){
+    // go down to the for... in condition
+    PRINT_DBG_LN("Found a for index node.\n");
+    idx_nxt_ast = ast->get_child(idx_nxt_ast);
+  }
+  
+  bool next = true;
+  std::vector<Lnast_node> iterators;
+  std::vector<Lnast_node> iterator_range;
+    
+  while(next){
+    auto idx_for_in_root = idx_nxt_ast;
+    
+    auto idx_for_counter = ast->get_child(idx_nxt_ast);
+    
+    idx_nxt_ast = ast->get_sibling_next(idx_for_counter); // go to the in token
+    
+    auto idx_tuple = ast->get_sibling_next(idx_nxt_ast); // what is the value in?
+    
+    PRINT_DBG_LN("The for expression is rule {}.\n", rule_id_to_string(ast->get_data(idx_tuple).rule_id));
+    
+    iterators.push_back(Lnast_node::create_ref(get_token(ast->get_data(idx_for_counter).token_entry)));
+    
+    iterator_range.push_back(eval_rule(idx_tuple, idx_nxt_ln));
+    PRINT_DBG_LN("Evaluated a for..in rule.\n");
+    
+    idx_nxt_ast = ast->get_sibling_next(idx_for_in_root);
+    PRINT_DBG_LN("Moved past the the for in root");
+    if(ast->get_data(idx_nxt_ast).rule_id != Prp_rule_for_index){
+      next = false;
+    }
+    else{
+      idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast); // WARNING: trailing ; allowed?
+    }
+  }
   // evaluate the for conditon
   // this node is the root of the value at x: for in x
-  auto idx_tuple = ast->get_last_child(idx_nxt_ast);
-
-  PRINT_DBG_LN("The for expression is rule {}.\n", rule_id_to_string(ast->get_data(idx_tuple).rule_id));
-
-  auto idx_for_counter = ast->get_child(idx_nxt_ast);
-
-  // check whether the for index is a real tuple
-  auto rhs_ast_child  = ast->get_child(idx_tuple);
-  bool index_is_tuple = false;
-
-  /*while (rhs_ast_child != ast->invalid_index()) {
-    if (scan_text(ast->get_data(rhs_ast_child).token_entry) == "," ||
-        ast->get_data(rhs_ast_child).rule_id == Prp_rule_range_notation ||
-        ast->get_data(rhs_ast_child).rule_id == Prp_rule_assignment_expression) {
-      index_is_tuple = true;
-      break;
-    }
-    rhs_ast_child = ast->get_sibling_next(rhs_ast_child);
-  }*/
-
-  //Lnast_node rhs_for_index;
-  //if (index_is_tuple)
-    //rhs_for_index = eval_tuple(idx_tuple, idx_nxt_ln);
-  //else
-  auto rhs_for_index = eval_rule(idx_tuple, idx_nxt_ln);
 
   // skip the {
-  idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast);
+  idx_nxt_ast = ast->get_sibling_next(idx_for_index);
 
   // move to the block body
   idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast);
@@ -454,10 +479,10 @@ void Prp_lnast::eval_for_statement(mmap_lib::Tree_index idx_start_ast, mmap_lib:
   auto idx_stmts = lnast->add_child(idx_for_root, Lnast_node::create_stmts(lnast_seq));
 
   // add the name of our index tracking value
-  lnast->add_child(idx_for_root, Lnast_node::create_ref(get_token(ast->get_data(idx_for_counter).token_entry)));
-
-  // add the RHS of the index
-  lnast->add_child(idx_for_root, rhs_for_index);
+  for(uint16_t i = 0; i<iterators.size(); i++){
+    lnast->add_child(idx_for_root, iterators[i]);
+    lnast->add_child(idx_for_root, iterator_range[i]);
+  }
 
   auto old_stmts = cur_stmts;
   cur_stmts      = idx_stmts;

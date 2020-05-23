@@ -1,1 +1,2 @@
-if cond ::{ NOT }
+for a in (1..3) ; b in (4..6){
+}
