@@ -17,6 +17,7 @@ void Prp_lnast::print_ast_node(mmap_lib::Tree_index idx) {
 void Prp_lnast::get_next_temp_var() {
   int carry = 1;
   int pos   = current_temp_var.size() - 1;
+  last_temp_var = current_temp_var;
 
   while (current_temp_var[pos] != '_') {
     int headroom = 'z' - current_temp_var[pos];
@@ -119,7 +120,7 @@ Lnast_node Prp_lnast::eval_rule(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tr
     case Prp_rule_tuple_notation_with_object: PRINT_DBG_LN("Prp_rule_tuple_notation_with_object\n"); break;
     case Prp_rule_range_notation:
       PRINT_DBG_LN("Prp_rule_range_notation\n");
-      return eval_range_notation(idx_start_ast, idx_start_ln);
+      eval_range_notation(idx_start_ast, idx_start_ln);
       break;
     case Prp_rule_bit_selection_bracket: PRINT_DBG_LN("Prp_rule_bit_selection_bracket\n"); break;
     case Prp_rule_bit_selection_notation:
@@ -453,14 +454,22 @@ void Prp_lnast::eval_for_statement(mmap_lib::Tree_index idx_start_ast, mmap_lib:
     
     iterator_range.push_back(eval_rule(idx_tuple, idx_nxt_ln));
     PRINT_DBG_LN("Evaluated a for..in rule.\n");
-    
+    print_tree_index(idx_for_in_root);
     idx_nxt_ast = ast->get_sibling_next(idx_for_in_root);
-    PRINT_DBG_LN("Moved past the the for in root");
-    if(ast->get_data(idx_nxt_ast).rule_id != Prp_rule_for_index){
-      next = false;
+    PRINT_DBG_LN("Moved past the the for in root\n");
+    if(idx_nxt_ast != ast->invalid_index()){
+      PRINT_DBG_LN("The next index was not an invalid index.\n");
+      if(ast->get_data(idx_nxt_ast).rule_id != Prp_rule_for_index){
+        PRINT_DBG_LN("The next index was not an invalid index.\n");
+        next = false;
+      }
+      else{
+        PRINT_DBG_LN("Moving to next for...in.\n");
+        idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast);
+      }
     }
     else{
-      idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast); // WARNING: trailing ; allowed?
+      next = false;
     }
   }
   // evaluate the for conditon
@@ -639,7 +648,7 @@ void Prp_lnast::eval_assignment_expression(mmap_lib::Tree_index idx_start_ast, m
     auto tuple_node = eval_tuple(idx_start_ast, idx_nxt_ln);
 }
 
-Lnast_node Prp_lnast::eval_range_notation(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln) {
+void Prp_lnast::eval_range_notation(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln) {
   auto idx_next_ast = ast->get_child(idx_start_ast);
   
   mmap_lib::Tree_index idx_range_start = ast->invalid_index();
@@ -665,13 +674,13 @@ Lnast_node Prp_lnast::eval_range_notation(mmap_lib::Tree_index idx_start_ast, mm
     }
   }
   
-  auto idx_tup_root = lnast->add_child(idx_start_ln, Lnast_node::create_tuple(""));
+  /*auto idx_tup_root = lnast->add_child(idx_start_ln, Lnast_node::create_tuple(""));
   auto lnast_temp = lnast->add_string(current_temp_var);
   auto retnode    = Lnast_node::create_ref(lnast_temp);
   lnast->add_child(idx_tup_root, retnode);
-  get_next_temp_var();
+  get_next_temp_var();*/
   
-  auto idx_assign1 = lnast->add_child(idx_tup_root, Lnast_node::create_assign(""));
+  auto idx_assign1 = lnast->add_child(idx_start_ln, Lnast_node::create_assign(""));
   lnast->add_child(idx_assign1, Lnast_node::create_ref("__range_begin"));
   if(idx_range_start != ast->invalid_index()){
     if(start_is_expr){
@@ -685,7 +694,7 @@ Lnast_node Prp_lnast::eval_range_notation(mmap_lib::Tree_index idx_start_ast, mm
     lnast->add_child(idx_assign1, Lnast_node::create_ref("null"));
   }
   
-  auto idx_assign2 = lnast->add_child(idx_tup_root, Lnast_node::create_assign(""));
+  auto idx_assign2 = lnast->add_child(idx_start_ln, Lnast_node::create_assign(""));
   lnast->add_child(idx_assign2, Lnast_node::create_ref("__range_end"));
   if(idx_range_end != ast->invalid_index()){
     if(end_is_expr){
@@ -698,8 +707,6 @@ Lnast_node Prp_lnast::eval_range_notation(mmap_lib::Tree_index idx_start_ast, mm
   else{
     lnast->add_child(idx_assign2, Lnast_node::create_ref("null"));
   }
-  
-  return retnode;
 }
 
 // this function requires that we pass to it the root of the assignment expression or the root of the tuple
@@ -757,7 +764,7 @@ Lnast_node Prp_lnast::eval_tuple(mmap_lib::Tree_index idx_start_ast, mmap_lib::T
     // find an expression (if present) in the first element of the tuple and save the RHSs
     uint8_t is_expr_assign = 0;
     if ((is_expr_assign = maybe_child_expr(idx_tup_el_next)) == true) {
-      idx_expr_next = ast->get_last_child(idx_tup_el_next);  // TODO: only verified for (simple) assignment expressions so far
+      idx_expr_next = ast->get_last_child(idx_tup_el_next);
     }
     if (is_expr(idx_expr_next) || is_expr_assign == 2) {
       PRINT_DBG_LN("evaluating an expression outside the rhs checking loop.\n");
@@ -783,7 +790,7 @@ Lnast_node Prp_lnast::eval_tuple(mmap_lib::Tree_index idx_start_ast, mmap_lib::T
     }
   }
   
-  // there might be more that can be included as part of the tuple, such as  a scope declaration
+  // there might be more that can be included as part of the tuple, such as a scope declaration
   // NOTE: can there only be one extra?
   idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast); // move to any extra element of the tuple
   if(idx_nxt_ast != ast->invalid_index()){
@@ -1026,28 +1033,42 @@ Lnast_node Prp_lnast::eval_expression(mmap_lib::Tree_index idx_start_ast, mmap_l
         operand_stack.emplace_back(eval_expression(child_cur, idx_nxt_ln));
         break;
       } else {  // operator
+        bool sub_expr = false;
         uint8_t skip_sibs;
         auto    op_node = gen_operator(child_cur, &skip_sibs);
         if(last_op_valid){
-          auto pri_op_cur = priority_map[op_node.type.get_raw_ntype()];
-          if(pri_op_cur == priority_map[op_node_last.type.get_raw_ntype()]){
-            if(op_node.type.get_raw_ntype() != op_node_last.type.get_raw_ntype()){
-              bool op0_pm = op_node.type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_plus || op_node.type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_minus;
-              bool op1_pm = op_node_last.type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_plus || op_node_last.type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_minus;
-              if(!(op0_pm && op1_pm)){
-                fmt::print("Operator priority error in expression around line {}.\n", expr_line+1);
-                exit(1);
+          // first check if we are a mult, and the previous was as an add
+          if((op_node.type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_mult || op_node.type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_div) && (op_node_last.type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_plus || op_node_last.type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_minus)){
+            sub_expr = true;
+            auto mult_expr_start = ast->get_sibling_prev(child_cur);
+            operand_stack.push_back(eval_sub_expression(mult_expr_start, op_node));
+            child_cur = ast->get_sibling_next(child_cur); // skip the next operand
+          }
+        }
+        if(!sub_expr){
+          if(last_op_valid){
+            auto pri_op_cur = priority_map[op_node.type.get_raw_ntype()];
+            if(pri_op_cur == priority_map[op_node_last.type.get_raw_ntype()]){
+              if(op_node.type.get_raw_ntype() != op_node_last.type.get_raw_ntype()){
+                bool op0_pm = op_node.type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_plus || op_node.type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_minus;
+                bool op1_pm = op_node_last.type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_plus || op_node_last.type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_minus;
+                
+                bool op1_md = (op_node_last.type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_mult || op_node_last.type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_div);
+                if(!(op0_pm && op1_pm) && !(op0_pm && op1_md)){
+                  fmt::print("Operator priority error in expression around line {}.\n", expr_line+1);
+                  exit(1);
+                }
               }
             }
           }
+          for (int i = 0; i < skip_sibs; i++) child_cur = ast->get_sibling_next(child_cur);
+          op_node_last = op_node;
+          last_op_valid=true;
+          operator_stack.emplace_back(op_node);
         }
-        for (int i = 0; i < skip_sibs; i++) child_cur = ast->get_sibling_next(child_cur);
-        op_node_last = op_node;
-        last_op_valid=true;
-        operator_stack.emplace_back(op_node);
       }
     } else {
-      operand_stack.emplace_back(eval_rule(child_cur, idx_nxt_ln));
+        operand_stack.emplace_back(eval_rule(child_cur, idx_nxt_ln));
     }
     child_cur = ast->get_sibling_next(child_cur);
   }
@@ -1094,6 +1115,55 @@ Lnast_node Prp_lnast::eval_expression(mmap_lib::Tree_index idx_start_ast, mmap_l
   }
   // hopefully after this, the expression is correct
   return operand_stack.front();
+}
+
+Lnast_node Prp_lnast::eval_sub_expression(mmap_lib::Tree_index idx_start_ast, Lnast_node operator_node){
+  // evaluate a single binary expression op0 op op1. Assume that if op0 is an expression, it has already
+  // been added to the lnast
+  
+  auto idx_nxt_ast = idx_start_ast; // this points to the first operand
+  mmap_lib::Tree_index idx_nxt_ln = cur_stmts;
+  
+  auto op0_idx = idx_nxt_ast;
+  auto op0_data = ast->get_data(op0_idx);
+  
+  auto operator_idx = ast->get_sibling_next(op0_idx); // can only be + or -
+  
+  auto op1_idx = ast->get_sibling_next(operator_idx);
+  auto op1_data = ast->get_data(op1_idx);
+  
+  Lnast_node op0, op1;
+  bool op0_is_expr = false;
+  bool op1_is_expr = false;
+  
+  if(is_expr(op0_idx)){
+    auto lnast_temp = lnast->add_string(last_temp_var);
+    op0 = Lnast_node::create_ref(lnast_temp);;
+    op0_is_expr = true;
+  }
+  
+  if(is_expr(op1_idx)){
+    op1 = eval_rule(op1_idx, idx_nxt_ln);
+    op1_is_expr = true;
+  }
+  
+  auto expr_root = lnast->add_child(idx_nxt_ln, operator_node);
+  auto lnast_temp = lnast->add_string(current_temp_var);
+  auto lhs        = Lnast_node::create_ref(lnast_temp);
+  get_next_temp_var();
+  
+  lnast->add_child(expr_root, lhs);
+  if(op0_is_expr)
+    lnast->add_child(expr_root, op0);
+  else
+    eval_rule(op0_idx, expr_root);
+  
+  if(op1_is_expr)
+    lnast->add_child(expr_root, op1);
+  else
+    eval_rule(op1_idx, expr_root);
+  
+  return lhs;
 }
 
 Lnast_node Prp_lnast::eval_for_in_notation(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln) {
@@ -1347,7 +1417,6 @@ std::unique_ptr<Lnast> Prp_lnast::prp_ast_to_lnast(std::string_view module_name)
  * Translation helper functions
  */
 
-// TODO: support for question mark, -- and rotate operators
 Lnast_node Prp_lnast::gen_operator(mmap_lib::Tree_index idx, uint8_t *skip_sibs) {
   auto tid   = scan_text(ast->get_data(idx).token_entry);
   *skip_sibs = 0;
@@ -1481,25 +1550,39 @@ inline void Prp_lnast::generate_op_map() {
 }
 
 inline void Prp_lnast::generate_priority_map() {
-  priority_map[Lnast_ntype::Lnast_ntype_logical_and]  = 4;
-  priority_map[Lnast_ntype::Lnast_ntype_logical_or]   = 4;
-  priority_map[Lnast_ntype::Lnast_ntype_gt]           = 3;
-  priority_map[Lnast_ntype::Lnast_ntype_lt]           = 3;
-  priority_map[Lnast_ntype::Lnast_ntype_ge]           = 3;
-  priority_map[Lnast_ntype::Lnast_ntype_le]           = 3;
-  priority_map[Lnast_ntype::Lnast_ntype_same]         = 3;
-  priority_map[Lnast_ntype::Lnast_ntype_eq]           = 3;
-  priority_map[Lnast_ntype::Lnast_ntype_tuple_concat] = 2;
-  priority_map[Lnast_ntype::Lnast_ntype_shift_right]  = 2;
-  priority_map[Lnast_ntype::Lnast_ntype_shift_left]   = 2;
-  priority_map[Lnast_ntype::Lnast_ntype_minus]        = 2;
-  priority_map[Lnast_ntype::Lnast_ntype_plus]         = 2;
-  priority_map[Lnast_ntype::Lnast_ntype_xor]          = 1;
-  priority_map[Lnast_ntype::Lnast_ntype_or]           = 1;
-  priority_map[Lnast_ntype::Lnast_ntype_and]          = 1;
-  priority_map[Lnast_ntype::Lnast_ntype_div]          = 0;
-  priority_map[Lnast_ntype::Lnast_ntype_mult]         = 0;
+  priority_map[Lnast_ntype::Lnast_ntype_logical_and]        = 3;
+  priority_map[Lnast_ntype::Lnast_ntype_logical_or]         = 3;
+  priority_map[Lnast_ntype::Lnast_ntype_gt]                 = 2;
+  priority_map[Lnast_ntype::Lnast_ntype_lt]                 = 2;
+  priority_map[Lnast_ntype::Lnast_ntype_ge]                 = 2;
+  priority_map[Lnast_ntype::Lnast_ntype_le]                 = 2;
+  priority_map[Lnast_ntype::Lnast_ntype_same]               = 2;
+  priority_map[Lnast_ntype::Lnast_ntype_eq]                 = 2;
+  priority_map[Lnast_ntype::Lnast_ntype_tuple_concat]       = 1;
+  priority_map[Lnast_ntype::Lnast_ntype_shift_left]         = 1;
+  priority_map[Lnast_ntype::Lnast_ntype_shift_right]        = 1;
+  priority_map[Lnast_ntype::Lnast_ntype_rotate_shift_left]  = 1;
+  priority_map[Lnast_ntype::Lnast_ntype_rotate_shift_right] = 1;
+  priority_map[Lnast_ntype::Lnast_ntype_minus]              = 1;
+  priority_map[Lnast_ntype::Lnast_ntype_plus]               = 1;
+  priority_map[Lnast_ntype::Lnast_ntype_xor]                = 1;
+  priority_map[Lnast_ntype::Lnast_ntype_or]                 = 1;
+  priority_map[Lnast_ntype::Lnast_ntype_and]                = 1;
+  priority_map[Lnast_ntype::Lnast_ntype_div]                = 1;
+  priority_map[Lnast_ntype::Lnast_ntype_mult]               = 1;
 }
+
+/*
+inline void Prp_lnast::generate_priority_matrix() {
+  auto op_list[] = {Lnast_ntype::Lnast_ntype_logical_and, Lnast_ntype::Lnast_ntype_logical_or, Lnast_ntype::Lnast_ntype_gt, Lnast_ntype::Lnast_ntype_lt, Lnast_ntype::Lnast_ntype_ge, Lnast_ntype::Lnast_ntype_le, Lnast_ntype::Lnast_ntype_same, Lnast_ntype::Lnast_ntype_eq, Lnast_ntype::Lnast_ntype_tuple_concat, Lnast_ntype::Lnast_ntype_shift_left, Lnast_ntype::Lnast_ntype_shift_right, Lnast_ntype::Lnast_ntype_rotate_shift_left, Lnast_ntype::Lnast_ntype_rotate_shift_right, Lnast_ntype::Lnast_ntype_minus, Lnast_ntype::Lnast_ntype_plus, Lnast_ntype::Lnast_ntype_xor, Lnast_ntype::Lnast_ntype_or, Lnast_ntype::Lnast_ntype_and, Lnast_ntype::Lnast_ntype_div,Lnast_ntype::Lnast_ntype_mult};
+  
+  for(auto op0 : op_list){
+    for(auto op1 : op_list){
+      if(priority_map[op0] == priority_map)
+    }
+  }
+}
+*/
 
 inline void Prp_lnast::generate_expr_rules(){
   expr_rules.insert(Prp_rule_logical_expression);
@@ -1509,7 +1592,7 @@ inline void Prp_lnast::generate_expr_rules(){
   expr_rules.insert(Prp_rule_multiplicative_expression);
   expr_rules.insert(Prp_rule_unary_expression);
   expr_rules.insert(Prp_rule_tuple_notation);
-  expr_rules.insert(Prp_rule_range_notation);
+  //expr_rules.insert(Prp_rule_range_notation);
   expr_rules.insert(Prp_rule_tuple_array_notation);
   expr_rules.insert(Prp_rule_identifier);
   expr_rules.insert(Prp_rule_tuple_dot_notation);
@@ -1564,7 +1647,9 @@ std::string Prp_lnast::Lnast_type_to_string(Lnast_ntype type) {
     case Lnast_ntype::Lnast_ntype_not: return "bitwise not";
     case Lnast_ntype::Lnast_ntype_logical_not: return "logical not";
     case Lnast_ntype::Lnast_ntype_shift_left: return "left shift";
-    case Lnast_ntype::Lnast_ntype_shift_right: return "left shift";
+    case Lnast_ntype::Lnast_ntype_shift_right: return "right shift";
+    case Lnast_ntype::Lnast_ntype_rotate_shift_left: return "left rotate";
+    case Lnast_ntype::Lnast_ntype_rotate_shift_right: return "right rotate";
     default: return "unknown type";
   }
 };

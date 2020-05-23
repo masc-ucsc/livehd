@@ -1346,23 +1346,71 @@ uint8_t Prp::rule_relational_expression(std::list<std::tuple<Rule_id, Token_entr
 uint8_t Prp::rule_additive_expression(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
   INIT_FUNCTION("rule_additive_expression.");
 
-  if (!CHECK_RULE(&Prp::rule_bitwise_expression)) {
-    RULE_FAILED("Failed rule_additive_expression; couldn't find a bitwise expression.\n");
+  if (!CHECK_RULE(&Prp::rule_unary_expression)) {
+    RULE_FAILED("Failed rule_additive_expression; couldn't find a multiplicative expression.\n");
   }
   PRINT_DBG_AST("rule_additive_expression: just checked for first operand; sub_cnt = {}.\n", sub_cnt);
   bool next     = true;
   bool found_op = false;
+  bool op_failed = false;
+  uint8_t last_op; // 0 = none/other, 1 = p/m, 2=m/d
 
-  uint64_t cur_tokens;
-  uint64_t lines_start;
+  INIT_PSEUDO_FAIL();
 
   while (next) {
-    cur_tokens  = tokens_consumed;
-    lines_start = cur_line;
+    UPDATE_PSEUDO_FAIL();
     bool eos = check_eos();
     if(eos){
       loc_list.push_back(std::tuple<Rule_id, Token_entry>(Prp_rule_sentinel, 1));
     }
+    
+    Token_id single_tok_ops[] = {Token_id_xor, Token_id_and, Token_id_or, Token_id_mult, Token_id_div};
+    Token_id mult_tok_ops[] = {Token_id_mult, Token_id_div};
+    if(SCAN_IS_TOKENS(single_tok_ops, 3, Prp_rule_additive_expression)){
+      found_op = true;
+    }
+    else if(SCAN_IS_TOKENS(mult_tok_ops, 2, Prp_rule_additive_expression)){
+      found_op = true;
+    }
+    else if(SCAN_IS_TOKEN(Token_id_plus, Prp_rule_additive_expression)){
+      SCAN_IS_TOKEN(Token_id_plus, Prp_rule_additive_expression); // optional: ++ operator
+      found_op = true;
+    }
+    else if(SCAN_IS_TOKEN(Token_id_minus, Prp_rule_additive_expression)){
+      SCAN_IS_TOKEN(Token_id_minus, Prp_rule_additive_expression); // optional: -- operator
+      found_op = true;
+    }
+    else if(SCAN_IS_TOKEN(Token_id_lt, Prp_rule_additive_expression)){
+      if(SCAN_IS_TOKEN(Token_id_lt, Prp_rule_additive_expression)){
+        SCAN_IS_TOKEN(Token_id_lt, Prp_rule_additive_expression); // optional: <<< operator
+        found_op = true;
+      }
+      else{
+        op_failed = true;
+      }
+    }
+    else if(SCAN_IS_TOKEN(Token_id_gt, Prp_rule_additive_expression)){
+      if(SCAN_IS_TOKEN(Token_id_gt, Prp_rule_additive_expression)){
+        SCAN_IS_TOKEN(Token_id_gt, Prp_rule_additive_expression); // optional: >>> operator
+        found_op = true;
+      }
+      else{
+        op_failed = true;
+      }
+    }
+    
+    if(op_failed || !found_op){
+      PSEUDO_FAIL();
+      next     = false;
+    }
+    if(found_op){
+      if (!CHECK_RULE(&Prp::rule_unary_expression)) {
+        RULE_FAILED("Failed rule_additive_expression; couldn't find an answering multiplicative expression.\n");
+      }
+      PRINT_DBG_AST("rule_additive_expression: just checked for second operand; sub_cnt = {}.\n", sub_cnt);
+      found_op = false;
+    }
+    /*
     if (SCAN_IS_TOKEN(Token_id_plus, Prp_rule_additive_expression)) {  // can be + or ++
       // optional
       SCAN_IS_TOKEN(Token_id_plus, Prp_rule_additive_expression);
@@ -1418,18 +1466,16 @@ uint8_t Prp::rule_additive_expression(std::list<std::tuple<Rule_id, Token_entry>
       next     = false;
     }
     if (found_op) {
-      if (!CHECK_RULE(&Prp::rule_bitwise_expression)) {
+      if (!CHECK_RULE(&Prp::rule_multiplicative_expression)) {
         RULE_FAILED("Failed rule_additive_expression; couldn't find an answering bitwise expression.\n");
       }
       PRINT_DBG_AST("rule_additive_expression: just checked for second operand; sub_cnt = {}.\n", sub_cnt);
       found_op = false;
     }
+    */
   }
   // optional
-  cur_tokens             = tokens_consumed;
-  lines_start            = cur_line;
-  auto sub_cnt_start     = sub_cnt;
-  auto cur_loc_list_size = loc_list.size();
+  UPDATE_PSEUDO_FAIL();
 
   if (SCAN_IS_TOKEN(Token_id_dot, Prp_rule_additive_expression)) {
     if (!SCAN_IS_TOKEN(Token_id_dot, Prp_rule_additive_expression)) {
@@ -1955,6 +2001,7 @@ std::string Prp::rule_id_to_string(Rule_id rid) {
     case Prp_rule_scope_condition: return "Scope condition";
     case Prp_rule_fcall_explicit: return "Fcall explicit";
     case Prp_rule_for_index: return "For index";
+    case Prp_rule_sentinel: return "Sentinel (disregard token)";
     default: return fmt::format("{}", rid);
   }
 }
