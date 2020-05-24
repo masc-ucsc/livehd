@@ -45,7 +45,7 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
   err_var_undefined = add_child(top_sts_nid, Lnast_node(Lnast_ntype::create_err_flag(), Token(Token_id_alnum, 0, 0, 0, "err_var_undefined")));
 
   Phi_rtable top_phi_resolve_table;
-  phi_resolve_tables[get_name(top_sts_nid)] = top_phi_resolve_table;
+  phi_resolve_tables[top_sts_nid] = top_phi_resolve_table;
 
   fmt::print("\nStep-1: Analyze LHS or RHS of tuple dot/sel\n");
   analyze_dot_lrhs(top_sts_nid);
@@ -73,7 +73,7 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
 
 void Lnast::trans_tuple_opr(const Lnast_nid &psts_nid) {
   Tuple_var_table top_tuple_var_table;
-  tuple_var_tables[get_name(psts_nid)] = top_tuple_var_table;
+  tuple_var_tables[psts_nid] = top_tuple_var_table;
   for (const auto &opr_nid : children(psts_nid)) {
     if (get_type(opr_nid).is_func_def()) {
       continue;
@@ -81,7 +81,7 @@ void Lnast::trans_tuple_opr(const Lnast_nid &psts_nid) {
       trans_tuple_opr_if_subtree(opr_nid);
     } else if (get_type(opr_nid).is_tuple()) {
       auto tuple_name_nid = get_first_child(opr_nid);
-      auto &tuple_var_table = tuple_var_tables[get_name(psts_nid)];
+      auto &tuple_var_table = tuple_var_tables[psts_nid];
       tuple_var_table.insert(get_name(tuple_name_nid));
     } else if (is_bit_attr_setting(opr_nid)) { //note: should be extended to all Pyrope compiler paramters, ex. __posedge or __clk_pin
       auto dot_nid = opr_nid;
@@ -96,7 +96,7 @@ void Lnast::trans_tuple_opr_if_subtree(const Lnast_nid &if_nid) {
   for (const auto &itr_nid : children(if_nid)) {
     if (get_type(itr_nid).is_stmts() || get_type(itr_nid).is_cstmts()) {
       Tuple_var_table if_sts_tuple_var_table;
-      tuple_var_tables[get_name(itr_nid)] = if_sts_tuple_var_table;
+      tuple_var_tables[itr_nid] = if_sts_tuple_var_table;
 
       for (const auto &opr_nid : children(itr_nid)) {
         I(!get_type(opr_nid).is_func_def());
@@ -109,7 +109,7 @@ void Lnast::trans_tuple_opr_if_subtree(const Lnast_nid &if_nid) {
           trans_tuple_opr_handle_a_statement(itr_nid, opr_nid);
         } else if (get_type(opr_nid).is_tuple()) {
           auto tuple_name_nid = get_first_child(opr_nid);
-          auto &tuple_var_table = tuple_var_tables[get_name(itr_nid)];
+          auto &tuple_var_table = tuple_var_tables[itr_nid];
           tuple_var_table.insert(get_name(tuple_name_nid));
         } 
       }
@@ -149,7 +149,7 @@ bool Lnast::is_bit_attr_setting(const Lnast_nid &opr_nid) {
 
 
 void Lnast::dot_attr2tuple_add(const Lnast_nid &psts_nid, Lnast_nid &dot_nid) {
-  auto &dot_lrhs_table   = dot_lrhs_tables[get_name(psts_nid)];
+  auto &dot_lrhs_table   = dot_lrhs_tables[psts_nid];
   auto paired_assign_nid = dot_lrhs_table[dot_nid].second;
   
   auto c0_dot = get_first_child(dot_nid);
@@ -210,8 +210,8 @@ void Lnast::find_cond_nid(const Lnast_nid &psts_nid, Lnast_nid &cond_nid, bool &
 }
 
 void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid) {
-  auto &tuple_var_table = tuple_var_tables[get_name(psts_nid)];
-  auto &dot_lrhs_table  =  dot_lrhs_tables[get_name(psts_nid)];
+  auto &tuple_var_table = tuple_var_tables[psts_nid];
+  auto &dot_lrhs_table  =  dot_lrhs_tables[psts_nid];
   
 
   auto c0_dot      = get_first_child(dot_nid); //c0 = intermediate target
@@ -266,8 +266,7 @@ void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid)
 
 // FIXME->sh: need to add condition nid parameter
 void Lnast::dot2hier_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid, const Lnast_nid &cond_nid, bool is_else_sts) {
-  /* auto &tuple_var_table = tuple_var_tables[get_name(psts_nid)]; */
-  auto &dot_lrhs_table  =  dot_lrhs_tables[get_name(psts_nid)];
+  auto &dot_lrhs_table  =  dot_lrhs_tables[psts_nid];
 
   auto c0_dot      = get_first_child(dot_nid); //c0 = intermediate target
   auto c1_dot      = get_sibling_next(c0_dot);
@@ -338,7 +337,7 @@ void Lnast::dot2hier_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid, 
 
 bool Lnast::check_tuple_table_parents_chain(const Lnast_nid &psts_nid, std::string_view ref_name) {
   if (get_parent(psts_nid) == get_root()) {
-    auto &tuple_var_table = tuple_var_tables[get_name(psts_nid)];
+    auto &tuple_var_table = tuple_var_tables[psts_nid];
     fmt::print("hello\n");
     for (auto itr : tuple_var_table) {
       fmt::print("top tuple_var_table content:{}\n", itr);
@@ -355,7 +354,7 @@ bool Lnast::check_tuple_table_parents_chain(const Lnast_nid &psts_nid, std::stri
   } else {
     auto tmp_if_nid = get_parent(psts_nid);
     auto new_psts_nid = get_parent(tmp_if_nid);
-    auto &tuple_var_table = tuple_var_tables[get_name(new_psts_nid)];
+    auto &tuple_var_table = tuple_var_tables[new_psts_nid];
     if (tuple_var_table.find(ref_name)!= tuple_var_table.end()) {
       return true;
     } else {
@@ -367,7 +366,7 @@ bool Lnast::check_tuple_table_parents_chain(const Lnast_nid &psts_nid, std::stri
 
 void Lnast::analyze_dot_lrhs(const Lnast_nid &psts_nid) {
   Dot_lrhs_table  top_dot_lrhs_table;
-  dot_lrhs_tables[get_name(psts_nid)] = top_dot_lrhs_table;
+  dot_lrhs_tables[psts_nid] = top_dot_lrhs_table;
   for (const auto &opr_nid : children(psts_nid)) {
     if (get_type(opr_nid).is_func_def()) {
       continue;
@@ -381,7 +380,7 @@ void Lnast::analyze_dot_lrhs(const Lnast_nid &psts_nid) {
 
 void Lnast::analyze_dot_lrhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
   I(get_type(opr_nid).is_dot() || get_type(opr_nid).is_select());
-  auto &dot_lrhs_table = dot_lrhs_tables[get_name(psts_nid)];
+  auto &dot_lrhs_table = dot_lrhs_tables[psts_nid];
 
   /* if (get_type(opr_nid).is_dot() and has_attribute_bits(opr_nid)) { */
   /*   dot_lrhs_table[opr_nid].first = false; */
@@ -419,7 +418,7 @@ void Lnast::analyze_dot_lrhs_if_subtree(const Lnast_nid &if_nid) {
     if (get_type(itr_nid).is_stmts()) {
       Cnt_rtable if_sts_ssa_rhs_cnt_table;
       Dot_lrhs_table  if_sts_dot_lrhs_table;
-      dot_lrhs_tables[get_name(itr_nid)] = if_sts_dot_lrhs_table;
+      dot_lrhs_tables[itr_nid] = if_sts_dot_lrhs_table;
 
       for (const auto &opr_nid : children(itr_nid)) {
         I(!get_type(opr_nid).is_func_def());
@@ -445,7 +444,8 @@ void Lnast::analyze_dot_lrhs_if_subtree(const Lnast_nid &if_nid) {
 
 void Lnast::resolve_ssa_rhs_subs(const Lnast_nid &psts_nid) {
   Cnt_rtable top_ssa_rhs_cnt_table;
-  ssa_rhs_cnt_tables[get_name(psts_nid)] = top_ssa_rhs_cnt_table;
+  /* ssa_rhs_cnt_tables[get_name(psts_nid)] = top_ssa_rhs_cnt_table; */
+  ssa_rhs_cnt_tables[psts_nid] = top_ssa_rhs_cnt_table;
   for (const auto &opr_nid : children(psts_nid)) {
     if (get_type(opr_nid).is_func_def()) {
       continue;
@@ -461,7 +461,8 @@ void Lnast::ssa_rhs_if_subtree(const Lnast_nid &if_nid) {
   for (const auto &itr_nid : children(if_nid)) {
     if (get_type(itr_nid).is_stmts()) {
       Cnt_rtable if_sts_ssa_rhs_cnt_table;
-      ssa_rhs_cnt_tables[get_name(itr_nid)] = if_sts_ssa_rhs_cnt_table;
+      /* ssa_rhs_cnt_tables[get_name(itr_nid)] = if_sts_ssa_rhs_cnt_table; */
+      ssa_rhs_cnt_tables[itr_nid] = if_sts_ssa_rhs_cnt_table;
 
       for (const auto &opr_nid : children(itr_nid)) {
         I(!get_type(opr_nid).is_func_def());
@@ -526,7 +527,7 @@ void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
 //handle cases: A.foo = A[2] or A.foo = A[1] + A[2] + A.bar; where lhs rhs are both the struct elements;
 //the ssa should be: A_2.foo = A_1[2] or A_6.foo = A_5[1] + A_5[2] + A_5.bar
 bool Lnast::is_special_case_of_dot_rhs(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
-  auto &dot_lrhs_table = dot_lrhs_tables[get_name(psts_nid)];
+  auto &dot_lrhs_table = dot_lrhs_tables[psts_nid];
   I(!is_lhs(psts_nid, opr_nid));
 
   if (opr_nid == get_first_child(psts_nid))
@@ -547,7 +548,8 @@ bool Lnast::is_special_case_of_dot_rhs(const Lnast_nid &psts_nid, const Lnast_ni
 void Lnast::ssa_rhs_handle_a_operand_special(const Lnast_nid &gpsts_nid, const Lnast_nid &opd_nid) {
   //note: immediate struct self assignment: A.foo = A[2], which will leads to consecutive dot and sel,
   //the sel should follow the subscript before the dot increments it.
-  auto &ssa_rhs_cnt_table = ssa_rhs_cnt_tables[get_name(gpsts_nid)];
+  /* auto &ssa_rhs_cnt_table = ssa_rhs_cnt_tables[get_name(gpsts_nid)]; */
+  auto &ssa_rhs_cnt_table = ssa_rhs_cnt_tables[gpsts_nid];
   auto       opd_name  = get_name(opd_nid);
   const auto opd_type  = get_type(opd_nid);
   Token      ori_token = get_token(opd_nid);
@@ -560,7 +562,8 @@ void Lnast::ssa_rhs_handle_a_operand_special(const Lnast_nid &gpsts_nid, const L
 
 
 void Lnast::ssa_rhs_handle_a_operand(const Lnast_nid &gpsts_nid, const Lnast_nid &opd_nid) {
-  auto &ssa_rhs_cnt_table = ssa_rhs_cnt_tables[get_name(gpsts_nid)];
+  /* auto &ssa_rhs_cnt_table = ssa_rhs_cnt_tables[get_name(gpsts_nid)]; */
+  auto &ssa_rhs_cnt_table = ssa_rhs_cnt_tables[gpsts_nid];
   auto       opd_name  = get_name(opd_nid);
   const auto opd_type  = get_type(opd_nid);
   Token      ori_token = get_token(opd_nid);
@@ -584,7 +587,7 @@ void Lnast::ssa_if_subtree(const Lnast_nid &if_nid) {
   for (const auto &itr_nid : children(if_nid)) {
     if (get_type(itr_nid).is_stmts()) {
       Phi_rtable if_sts_phi_resolve_table;
-      phi_resolve_tables[get_name(itr_nid)] = if_sts_phi_resolve_table;
+      phi_resolve_tables[itr_nid] = if_sts_phi_resolve_table;
 
       for (const auto &opr_nid : children(itr_nid)) {
         I(!get_type(opr_nid).is_func_def());
@@ -613,20 +616,20 @@ void Lnast::ssa_handle_phi_nodes(const Lnast_nid &if_nid) {
     if (itr == if_stmts_vec.rbegin() && has_else_stmts(if_nid)) {
       continue;
     } else if (itr == if_stmts_vec.rbegin() && !has_else_stmts(if_nid)) {
-      Phi_rtable &true_table  = phi_resolve_tables[get_name(*itr)];
+      Phi_rtable &true_table  = phi_resolve_tables[*itr];
       Phi_rtable fake_false_table ; //for the case of if-elif-elif
       Lnast_nid condition_nid = get_sibling_prev(*itr);
       resolve_phi_nodes(condition_nid, true_table, fake_false_table);
 
     } else if (itr == if_stmts_vec.rbegin()+1 && has_else_stmts(if_nid)) {
-      Phi_rtable &true_table  = phi_resolve_tables[get_name(*itr)];
-      Phi_rtable &false_table = phi_resolve_tables[get_name(*if_stmts_vec.rbegin())];
+      Phi_rtable &true_table  = phi_resolve_tables[*itr];
+      Phi_rtable &false_table = phi_resolve_tables[*if_stmts_vec.rbegin()];
       Lnast_nid condition_nid = get_sibling_prev(*itr);
       resolve_phi_nodes(condition_nid, true_table, false_table);
 
     } else {
-      Phi_rtable &true_table  = phi_resolve_tables[get_name(*itr)];
-      Phi_rtable &false_table = new_added_phi_node_table;
+      Phi_rtable &true_table  = phi_resolve_tables[*itr];
+      Phi_rtable &false_table = new_added_phi_node_tables[get_parent(*itr)];
       Lnast_nid condition_nid = get_sibling_prev(*itr);
       resolve_phi_nodes(condition_nid, true_table, false_table);
 
@@ -678,6 +681,8 @@ void Lnast::resolve_phi_nodes(const Lnast_nid &cond_nid, Phi_rtable &true_table,
 
 
 Lnast_nid Lnast::get_complement_nid(std::string_view brother_name, const Lnast_nid &psts_nid, bool false_path) {
+  auto if_nid = get_parent(psts_nid);
+  Phi_rtable &new_added_phi_node_table = new_added_phi_node_tables[if_nid];
   if(false_path && new_added_phi_node_table.find(brother_name) != new_added_phi_node_table.end())
     return new_added_phi_node_table[brother_name];
   else
@@ -686,7 +691,7 @@ Lnast_nid Lnast::get_complement_nid(std::string_view brother_name, const Lnast_n
 
 
 Lnast_nid Lnast::check_phi_table_parents_chain(std::string_view target_name, const Lnast_nid &psts_nid, bool originate_from_csts) {
-  auto &parent_table = phi_resolve_tables[get_name(psts_nid)];
+  auto &parent_table = phi_resolve_tables[psts_nid];
 
   if(parent_table.find(target_name) != parent_table.end())
     return parent_table[target_name];
@@ -704,7 +709,10 @@ Lnast_nid Lnast::check_phi_table_parents_chain(std::string_view target_name, con
 
 
 Lnast_nid Lnast::add_phi_node(const Lnast_nid &cond_nid, const Lnast_nid &t_nid, const Lnast_nid &f_nid) {
-  auto new_phi_nid = add_child(get_parent(cond_nid), Lnast_node(Lnast_ntype::create_phi(), Token()));
+
+  auto if_nid = get_parent(cond_nid);
+  Phi_rtable &new_added_phi_node_table = new_added_phi_node_tables[if_nid];
+  auto new_phi_nid = add_child(if_nid, Lnast_node(Lnast_ntype::create_phi(), Token()));
   auto target_nid  = add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_ref(), get_token(t_nid), get_subs(t_nid)));
   update_global_lhs_ssa_cnt_table(target_nid);
   add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_cond(), get_token(cond_nid), get_subs(cond_nid)));
@@ -714,7 +722,7 @@ Lnast_nid Lnast::add_phi_node(const Lnast_nid &cond_nid, const Lnast_nid &t_nid,
   add_child(new_phi_nid, Lnast_node(get_type(f_nid),  get_token(f_nid), get_subs(f_nid)));
   new_added_phi_node_table[get_name(target_nid)] = target_nid;
 
-  auto psts_nid = get_parent(get_parent(cond_nid));
+  auto psts_nid = get_parent(if_nid);
   update_phi_resolve_table(psts_nid, target_nid);
   return target_nid;
 }
@@ -744,7 +752,7 @@ void Lnast::ssa_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &o
 }
 
 bool Lnast::is_lhs(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
-  auto &dot_lrhs_table = dot_lrhs_tables[get_name(psts_nid)];
+  auto &dot_lrhs_table = dot_lrhs_tables[psts_nid];
   I(get_type(opr_nid).is_dot() || get_type(opr_nid).is_select());
   if (dot_lrhs_table.find(opr_nid)!= dot_lrhs_table.end())
     return dot_lrhs_table[opr_nid].first;
@@ -765,13 +773,15 @@ void Lnast::update_global_lhs_ssa_cnt_table(const Lnast_nid &target_nid) {
 
 //note: the subs of the lhs of the operator has already handled clearly in first round ssa process, just copy into the rhs_ssa_cnt_table fine.
 void Lnast::update_rhs_ssa_cnt_table(const Lnast_nid &psts_nid, const Lnast_nid &target_key) {
-  auto &ssa_rhs_cnt_table = ssa_rhs_cnt_tables[get_name(psts_nid)];
+  /* auto &ssa_rhs_cnt_table = ssa_rhs_cnt_tables[get_name(psts_nid)]; */
+  auto &ssa_rhs_cnt_table = ssa_rhs_cnt_tables[psts_nid];
   const auto target_name = get_name(target_key);
   ssa_rhs_cnt_table[target_name] = ref_data(target_key)->subs;
 }
 
 int8_t Lnast::check_rhs_cnt_table_parents_chain(const Lnast_nid &psts_nid, const Lnast_nid &target_key) {
-  auto &ssa_rhs_cnt_table = ssa_rhs_cnt_tables[get_name(psts_nid)];
+  /* auto &ssa_rhs_cnt_table = ssa_rhs_cnt_tables[get_name(psts_nid)]; */
+  auto &ssa_rhs_cnt_table = ssa_rhs_cnt_tables[psts_nid];
   const auto  target_name = get_name(target_key);
   auto itr = ssa_rhs_cnt_table.find(target_name);
 
@@ -787,7 +797,7 @@ int8_t Lnast::check_rhs_cnt_table_parents_chain(const Lnast_nid &psts_nid, const
 }
 
 void Lnast::update_phi_resolve_table(const Lnast_nid &psts_nid, const Lnast_nid &target_nid) {
-  auto       &phi_resolve_table = phi_resolve_tables[get_name(psts_nid)];
+  auto       &phi_resolve_table = phi_resolve_tables[psts_nid];
   const auto  target_name       = get_name(target_nid);
   phi_resolve_table[target_name] = target_nid; //for a variable string, always update to latest Lnast_nid
 }

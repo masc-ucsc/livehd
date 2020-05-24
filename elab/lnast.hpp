@@ -141,13 +141,14 @@ private:
 
 
   // hierarchical statements node -> symbol table
-  absl::flat_hash_map<std::string_view, Phi_rtable>      phi_resolve_tables;
-  absl::flat_hash_map<std::string_view, Cnt_rtable>      ssa_rhs_cnt_tables;
-  absl::flat_hash_map<std::string_view, Dot_lrhs_table>  dot_lrhs_tables;
-  absl::flat_hash_map<std::string_view, Tuple_var_table> tuple_var_tables;   
-  absl::flat_hash_map<std::string_view, uint8_t>         global_ssa_lhs_cnt_table;
+  absl::flat_hash_map<Lnast_nid, Phi_rtable>      phi_resolve_tables;
+  absl::flat_hash_map<Lnast_nid, Cnt_rtable>      ssa_rhs_cnt_tables;
+  absl::flat_hash_map<Lnast_nid, Dot_lrhs_table>  dot_lrhs_tables;
+  absl::flat_hash_map<Lnast_nid, Tuple_var_table> tuple_var_tables;   
+  absl::flat_hash_map<Lnast_nid, Phi_rtable>      new_added_phi_node_tables; // for each if-subtree scope
 
-  Phi_rtable new_added_phi_node_table;
+  absl::flat_hash_map<std::string_view, uint8_t>  global_ssa_lhs_cnt_table;
+
   Lnast_nid  default_const_nid;
   Lnast_nid  err_var_undefined;
   uint32_t   tup_internal_cnt = 0;
