@@ -9,6 +9,8 @@ Sample1_stage::Sample1_stage(uint64_t _hidx, std::string &parent_name, vcd::VCDW
   , vcd_writer(writer) {
 }
 void Sample1_stage::vcd_reset_cycle() {
+  reset=!reset;
+  vcd_writer->change(vcd_reset, t, reset.to_string_binary());
   tmp = UInt<32>(0);
   to2_aValid = UInt<1>(0);
     vcd_writer->change(vcd_to2_aValid, t, to2_aValid.to_string_binary());
@@ -18,6 +20,8 @@ void Sample1_stage::vcd_reset_cycle() {
     vcd_writer->change(vcd_to3_c, t, to3_c.to_string_binary());
 }
  void Sample1_stage::vcd_cycle(UInt<32> s3_to1_b, UInt<1> s2_to1_aValid, UInt<32> s2_to1_a) {
+  clk=!clk;
+  vcd_writer->change(vcd_clk, t, clk.to_string_binary());
     to2_b = s3_to1_b.addw(UInt<32>(1));
     vcd_writer->change(vcd_to2_b, t , to2_b.to_string_binary());
 

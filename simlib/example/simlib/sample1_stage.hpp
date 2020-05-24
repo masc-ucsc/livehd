@@ -16,6 +16,8 @@ struct Sample1_stage {
 #ifdef SIMLIB_VCD
   std::string scope_name;
   vcd::VCDWriter* vcd_writer;
+  UInt<1> clk;
+  UInt<1> reset;
   //  vcd::VCDWriter* vcd_writer = vcd::initialize_vcd_writer();
   vcd::VarPtr vcd_clk = vcd_writer->register_var(scope_name, "clk", vcd::VariableType::wire, 1);
   vcd::VarPtr vcd_reset = vcd_writer->register_var(scope_name, "reset", vcd::VariableType::wire, 1);

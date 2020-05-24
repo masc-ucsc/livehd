@@ -22,6 +22,8 @@ void Sample_stage::vcd_reset_cycle() {
 
   void Sample_stage::vcd_cycle() {
 
+  clk = (!clk);
+  vcd_writer->change(vcd_clk, t,clk.to_string_binary());
     auto s1_to2_aValid = s1.to2_aValid;
     auto s1_to2_a      = s1.to2_a;
     auto s1_to2_b      = s1.to2_b;

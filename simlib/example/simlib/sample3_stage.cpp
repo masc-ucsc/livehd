@@ -13,6 +13,8 @@ Sample3_stage::Sample3_stage(uint64_t _hidx, std::string &parent_name, vcd::VCDW
   }
 
 void Sample3_stage::vcd_reset_cycle() {
+  reset=!reset;
+  vcd_writer->change(vcd_reset,t,reset.to_string_binary());
   tmp  = 0;
   tmp2 = 0;
 
@@ -22,6 +24,8 @@ void Sample3_stage::vcd_reset_cycle() {
 }
 
 void Sample3_stage::vcd_cycle(UInt<1> s1_to3_cValid, UInt<32> s1_to3_c, UInt<1> s2_to3_dValid, UInt<32> s2_to3_d) {
+  clk=!clk;
+  vcd_writer->change(vcd_clk, t, clk.to_string_binary());
   if (__builtin_expect(((tmp & UInt<32>(0xFFFF)) == UInt<32>(45339)),0)) {
     if ((tmp2 & UInt<32>(15)) == UInt<32>(0)) {
       printf("memory[127] = %ud\n",memory[127]);

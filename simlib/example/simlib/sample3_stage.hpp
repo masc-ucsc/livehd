@@ -14,6 +14,8 @@ struct Sample3_stage {
 //vcd::VarPtr vcd_to1_b;
   std::string scope_name;
   vcd::VCDWriter* vcd_writer; 
+  UInt<1> clk=false;
+  UInt<1> reset=false;
 //  vcd::VCDWriter* vcd_writer = vcd::initialize_vcd_writer();
   //mem part//  vcd::VarPtr vcd_memory_127 = vcd_writer->register_var(scope_name, "memory[127]", vcd::VariableType::reg, 32);
     vcd::VarPtr vcd_to1_b = vcd_writer->register_var(scope_name, "to1_b[31:0]", vcd::VariableType::wire, 32);

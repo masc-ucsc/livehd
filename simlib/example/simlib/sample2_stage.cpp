@@ -9,6 +9,8 @@ Sample2_stage::Sample2_stage(uint64_t _hidx, std::string &parent_name, vcd::VCDW
 }
 
 void Sample2_stage::vcd_reset_cycle() {
+  reset=!reset;
+  vcd_writer->change(vcd_reset, t, reset.to_string_binary());
   tmp = 1;
   to3_dValid = false;
     vcd_writer->change(vcd_to3_dValid, t , to3_dValid.to_string_binary());

@@ -33,6 +33,8 @@ struct Sample2_stage {
 #ifdef SIMLIB_VCD
     std::string scope_name;
     vcd::VCDWriter* vcd_writer;
+    UInt<1> clk;
+    UInt<1> reset;
  // vcd::VCDWriter* vcd_writer = vcd::initialize_vcd_writer();
   vcd::VarPtr vcd_clk = vcd_writer->register_var(scope_name, "clk", vcd::VariableType::wire, 1);
   vcd::VarPtr vcd_reset = vcd_writer->register_var(scope_name, "reset", vcd::VariableType::wire, 1);
@@ -48,6 +50,8 @@ struct Sample2_stage {
   Sample2_stage(uint64_t _hidx, std::string &parent_name, vcd::VCDWriter* writer);
   void vcd_reset_cycle();
   void vcd_cycle(UInt<1> s1_to2_aValid, UInt<32> s1_to2_a, UInt<32> s1_to2_b) {
+  clk=!clk;
+  vcd_writer->change(vcd_clk, t, clk.to_string_binary());
     to3_dValid =  !(tmp.bit<0>());
     vcd_writer->change(vcd_to3_dValid, t , to3_dValid.to_string_binary());
     to3_d = tmp.addw(s1_to2_b);
