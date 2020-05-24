@@ -1027,11 +1027,19 @@ Lnast_node Prp_lnast::eval_expression(mmap_lib::Tree_index idx_start_ast, mmap_l
         uint8_t skip_sibs;
         auto    op_node = gen_operator(sentinel_op_idx, &skip_sibs);
         for (int i = 0; i < skip_sibs; i++) child_cur = ast->get_sibling_next(child_cur);
-        operator_stack.emplace_back(op_node);
-        // evaluate the rest of the expression as though it were inside parentheses
-        child_cur = ast->get_sibling_next(child_cur);
-        operand_stack.emplace_back(eval_expression(child_cur, idx_nxt_ln));
+        // multiplication and division operators don't have their priority tracked by the parser
+        if(op_node.type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_mult || op_node.type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_div){
+          auto mult_expr_start = ast->get_sibling_prev(child_cur);
+          operand_stack.emplace_back(eval_sub_expression(mult_expr_start, op_node));
+          child_cur = ast->get_sibling_next(child_cur); // skip the next operand
+        }
+        else{
+          operator_stack.emplace_back(op_node);
+          // evaluate the rest of the expression as though it were inside parentheses
+          child_cur = ast->get_sibling_next(child_cur);
+          operand_stack.emplace_back(eval_expression(child_cur, idx_nxt_ln));
         break;
+        }
       } else {  // operator
         bool sub_expr = false;
         uint8_t skip_sibs;
@@ -1041,7 +1049,7 @@ Lnast_node Prp_lnast::eval_expression(mmap_lib::Tree_index idx_start_ast, mmap_l
           if((op_node.type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_mult || op_node.type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_div) && (op_node_last.type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_plus || op_node_last.type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_minus)){
             sub_expr = true;
             auto mult_expr_start = ast->get_sibling_prev(child_cur);
-            operand_stack.push_back(eval_sub_expression(mult_expr_start, op_node));
+            operand_stack.emplace_back(eval_sub_expression(mult_expr_start, op_node));
             child_cur = ast->get_sibling_next(child_cur); // skip the next operand
           }
         }
