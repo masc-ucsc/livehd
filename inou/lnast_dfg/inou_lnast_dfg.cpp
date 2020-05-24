@@ -556,7 +556,6 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
     node_dpin = dfg->add_graph_input(name.substr(1, name.size()-3), Port_invalid, 0);
     fmt::print("add graph inp:{}\n", name.substr(1, name.size()-3));
   } else if (is_register(name)) {
-    //FIXME->sh: need to extend to Fluid_flop, Async_flop etc...
     node_dpin = dfg->create_node(SFlop_Op).setup_driver_pin();
   } else if (is_const(name)) {
     node_dpin = resolve_constant(dfg, name).setup_driver_pin();

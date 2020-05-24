@@ -64,42 +64,10 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
     }
   }
 
+  //see Note I
   fmt::print("\nStep-4: RHS SSA\n");
   resolve_ssa_rhs_subs(top_sts_nid);
 
-  /*
-  Note I: if not handle ssa cnt on lhs and rhs separately, there will be a race condition in the
-        if-subtree between child-True and child-False. For example, in the following source code:
-  
-        A = 5
-        A = A + 4
-        if (condition)
-          A = A + 1
-          A = A + 2
-        else
-          A = A + 3
-        %out = A
-  
-        So the new ssa transformation has two main part. The first and original algorithm
-        focus on the lhs ssa cnt, phi-node resolving, and phi-node insertion. The lhs ssa
-        cnt only need a global count table and the cnt of lhs on every expression will be
-        handled correctly. The second algorithm focus on rhs assignment by using tree rhs
-        cnt tables.
-  
-        rhs assignment in 2nd algorithm:
-        - check current scope
-        - if exists
-            use the local count from local table
-          else
-            if not in parents chain
-              compile error
-            else
-              copy from parents to local tables and
-              use it as cnt
-        lhs assignment in 2nd algorithm:
-        - just copy the subs from the lnast nodes into the local table
-          as the lhs subs has been handled in 1st algorithm.
-  */
 }
 
 
@@ -669,7 +637,7 @@ void Lnast::ssa_handle_phi_nodes(const Lnast_nid &if_nid) {
 
 
 //FIXME->sh: what if the phi-tables are already empty?
-//FIXME->sh: is it a correct case? if yes, what action should be taken to avoid
+//           is it a correct case? if yes, what action should be taken to avoid
 void Lnast::resolve_phi_nodes(const Lnast_nid &cond_nid, Phi_rtable &true_table, Phi_rtable &false_table) {
   for (auto const&[key, val] : false_table) {
     if (true_table.find(key) != true_table.end()) {
@@ -755,7 +723,7 @@ Lnast_nid Lnast::add_phi_node(const Lnast_nid &cond_nid, const Lnast_nid &t_nid,
 bool Lnast::has_else_stmts(const Lnast_nid &if_nid) {
   Lnast_nid last_child = get_last_child(if_nid);
   Lnast_nid second_last_child = get_sibling_prev(last_child);
-  return (get_type(last_child).is_stmts() and get_type(second_last_child).is_stmts());
+  return (get_type(last_child).is_stmts() && get_type(second_last_child).is_stmts());
 }
 
 void Lnast::ssa_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
@@ -828,3 +796,38 @@ bool Lnast::has_attribute_bits(const Lnast_nid &opr_nid) {
   I(get_type(opr_nid).is_dot());
   return get_name(get_sibling_next(get_sibling_next(get_first_child(opr_nid)))).substr(0,6) == "__bits" ;
 }
+
+
+/*
+Note I: if not handle ssa cnt on lhs and rhs separately, there will be a race condition in the
+      if-subtree between child-True and child-False. For example, in the following source code:
+
+      A = 5
+      A = A + 4
+      if (condition)
+        A = A + 1
+        A = A + 2
+      else
+        A = A + 3
+      %out = A
+
+      So the new ssa transformation has two main part. The first and original algorithm
+      focus on the lhs ssa cnt, phi-node resolving, and phi-node insertion. The lhs ssa
+      cnt only need a global count table and the cnt of lhs on every expression will be
+      handled correctly. The second algorithm focus on rhs assignment by using tree rhs
+      cnt tables.
+
+      rhs assignment in 2nd algorithm:
+      - check current scope
+      - if exists
+          use the local count from local table
+        else
+          if not in parents chain
+            compile error
+          else
+            copy from parents to local tables and
+            use it as cnt
+      lhs assignment in 2nd algorithm:
+      - just copy the subs from the lnast nodes into the local table
+        as the lhs subs has been handled in 1st algorithm.
+*/

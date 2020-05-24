@@ -1,7 +1,0 @@
-$a as (__bits:1)
-$b as (__bits:1)
-%s as (__bits:1)
-%s = $a & $b
-
-
-

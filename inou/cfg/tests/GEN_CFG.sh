@@ -5,6 +5,9 @@ function generate () {
   ./prp $1.prp | sort -n > y && column -t y > x && rm -f y && mv x $1.cfg
 }
 
+generate bits_tg
+generate sync_cnt_nested_if
+generate sync_cnt
 generate simple_tuple
 generate funcall
 generate funcall_tupio
@@ -22,6 +25,7 @@ generate if
 generate if2
 generate if3_err
 generate nested_if
+generate nested_if2
 generate nested_if_err
 generate ssa_rhs
 generate logic
