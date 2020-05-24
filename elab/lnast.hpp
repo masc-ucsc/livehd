@@ -117,6 +117,7 @@ private:
   Lnast_nid check_phi_table_parents_chain (std::string_view brother_name, const Lnast_nid &psts_nid, bool originate_from_csts);
   void      resolve_ssa_rhs_subs                (const Lnast_nid &psts_nid);
   void      update_global_lhs_ssa_cnt_table     (const Lnast_nid &target_nid);
+  void      reg_ini_global_lhs_ssa_cnt_table    (const Lnast_nid &target_nid); //just initialize global reg when appeared in rhs
   int8_t    check_rhs_cnt_table_parents_chain   (const Lnast_nid &psts_nid, const Lnast_nid &target_key);
   void      update_rhs_ssa_cnt_table            (const Lnast_nid &psts_nid, const Lnast_nid &target_key);
   void      analyze_dot_lrhs                    (const Lnast_nid &psts_nid);
@@ -150,7 +151,8 @@ private:
   absl::flat_hash_map<std::string_view, uint8_t>  global_ssa_lhs_cnt_table;
 
   Lnast_nid  default_const_nid;
-  Lnast_nid  err_var_undefined;
+  Lnast_nid  err_var_undefined_nid;   
+  Lnast_nid  register_fwd_nid;
   uint32_t   tup_internal_cnt = 0;
 
   std::vector<std::string *> string_pool;
@@ -171,11 +173,12 @@ public:
   std::string_view get_top_module_name() const { return top_module_name; }
 
   bool             is_lhs    (const Lnast_nid &psts_nid, const Lnast_nid &opr_nid);
-  std::string_view get_name  (const Lnast_nid &nid) { return get_data(nid).token.get_text(); }
-  Lnast_ntype      get_type  (const Lnast_nid &nid) { return get_data(nid).type; }
-  uint8_t          get_subs  (const Lnast_nid &nid) { return get_data(nid).subs; }
-  Token            get_token (const Lnast_nid &nid) { return get_data(nid).token; }
-  std::string      get_sname (const Lnast_nid &nid) { //sname = ssa name
+  bool             is_reg    (std::string_view name) { return name.substr(0,1) == "#"; }
+  std::string_view get_name  (const Lnast_nid &nid)  { return get_data(nid).token.get_text(); }
+  Lnast_ntype      get_type  (const Lnast_nid &nid)  { return get_data(nid).type; }
+  uint8_t          get_subs  (const Lnast_nid &nid)  { return get_data(nid).subs; }
+  Token            get_token (const Lnast_nid &nid)  { return get_data(nid).token; }
+  std::string      get_sname (const Lnast_nid &nid)  { //sname = ssa name
     if(get_type(nid).is_const())
       return std::string(get_name(nid));
     // FIXME: sh: any better way to concate a string_view??

@@ -113,6 +113,9 @@ void Inou_lnast_dfg::process_ast_stmts(LGraph *dfg, const Lnast_nid &lnidx_stmts
     } else if (ntype.is_const()) {
       I(lnast->get_name(lnidx) == "default_const");
       continue;
+    } else if (ntype.is_reg_fwd()) {
+      I(lnast->get_name(lnidx) == "register_forwarding");
+      continue;
     } else if (ntype.is_err_flag()) {
       I(lnast->get_name(lnidx) == "err_var_undefined");
       continue;
@@ -152,7 +155,6 @@ void Inou_lnast_dfg::process_ast_phi_op(LGraph *dfg, const Lnast_nid &lnidx_phi)
 
   auto cond_dpin   = setup_ref_node_dpin(dfg, c1);
   auto true_dpin   = setup_ref_node_dpin(dfg, c2);
-  fmt::print("phi true name:{}\n", lnast->get_sname(c2));
   auto false_dpin  = setup_ref_node_dpin(dfg, c3);
 
   dfg->add_edge(cond_dpin, cond_spin);

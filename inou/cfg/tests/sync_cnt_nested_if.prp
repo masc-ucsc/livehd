@@ -1,12 +1,23 @@
 $c1.__bits = 1 
 $c2.__bits = 1
-#cnt.__bits = 4   
-#cnt = 0
+#cnt1.__bits = 4   
+#cnt2.__bits = 4
+
 if ($c1 == 1) {
-  #cnt = #cnt + 1
+  #cnt1 = #cnt1 + 1
   if ($c2 == 1) {
-    #cnt = #cnt + 2
+    #cnt1 = #cnt1 + 2
   } 
 } 
 
-%cnt_o = #cnt
+#cnt2 = 5
+if ($c1 == 1) {
+  #cnt2 = #cnt2 + 1
+  if ($c2 == 1) {
+    #cnt2 = #cnt2 + 2
+  } 
+} 
+
+
+%cnt1_o = #cnt1
+%cnt2_o = #cnt2

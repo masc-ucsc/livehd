@@ -258,4 +258,6 @@ digraph {
  10->218;
  219 [label=<error_flag, err_var_undefined>];
  10->219;
+ 220 [label=<reg_fwd, register_forwarding>];
+ 10->220;
 }
