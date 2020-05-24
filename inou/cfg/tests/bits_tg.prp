@@ -1,0 +1,6 @@
+$a.__bits = 3
+$b.__bits = 5
+
+%out.__bits = $a.__bits + $b.__bits
+
+%out = $a * $b

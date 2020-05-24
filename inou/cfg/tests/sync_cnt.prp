@@ -1,0 +1,10 @@
+$cond.__bits  = 2 
+#cnt.__bits = 4   //reg are implicit output when no explicit IO declaration
+if ($cond == 1) {
+  #cnt = #cnt + 1
+} elif ($cond == 2) {
+  #cnt = #cnt + 2
+} elif ($cond == 3) {
+  #cnt = #cnt + 3 
+}
+

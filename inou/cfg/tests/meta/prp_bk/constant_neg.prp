@@ -1,5 +1,0 @@
-$c.__bits = 3
-d.__bits = 3
-d = -3
-%out.__bits = 4
-%out = $c + d
