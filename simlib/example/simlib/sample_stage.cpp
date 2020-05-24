@@ -13,7 +13,8 @@ Sample_stage::Sample_stage(uint64_t _hidx, std::string &parent_name, vcd::VCDWri
   // FIXME: populate random reset (random per variable)
    }
 void Sample_stage::vcd_reset_cycle() {
-
+  reset = (!reset);
+  vcd_writer->change(vcd_reset, t,reset.to_string_binary());
   s1.vcd_reset_cycle();
   s2.vcd_reset_cycle();
   s3.vcd_reset_cycle();

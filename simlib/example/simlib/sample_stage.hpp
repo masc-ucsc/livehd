@@ -10,7 +10,8 @@ struct Sample_stage {
   #ifdef SIMLIB_VCD
     std::string scope_name;
     vcd::VCDWriter* vcd_writer;
-
+    UInt<1> clk= false;
+    UInt<1> reset=false;
   Sample_stage(uint64_t _hidx, std::string &parent_name, vcd::VCDWriter* writer);
   void vcd_reset_cycle();
   void vcd_cycle();
