@@ -227,6 +227,7 @@ protected:
 
   std::unique_ptr<Ast_parser>                ast;
   absl::flat_hash_map<std::string, Token_id> pyrope_keyword;
+  absl::flat_hash_map<Token_id, uint16_t> ws_map; // two uint8_ts 0 = no whitespace, 1 = whitespace, 2 = whitespace + comments, 3 = line break
   std::vector<std::string>                   rule_call_stack;
   uint64_t                                   term_token = 1;
 
@@ -299,6 +300,7 @@ protected:
   inline void check_lb();
   inline void check_ws();
   inline bool check_eos();
+  void gen_ws_map();
 
   inline bool unconsume_token();
   inline bool consume_token();
@@ -340,7 +342,7 @@ public:
     pyrope_keyword["xor"] = Pyrope_id_xor;
 
     //pyrope_keyword["C"]       = Pyrope_id_c;
-    //pyrope_keyword["I"]       = Pyrope_id_assertion;
+    pyrope_keyword["I"]       = Pyrope_id_assertion;
     //pyrope_keyword["N"]       = Pyrope_id_negation;
     //pyrope_keyword["yield"]   = Pyrope_id_yield;
     //pyrope_keyword["waitfor"] = Pyrope_id_waitfor;

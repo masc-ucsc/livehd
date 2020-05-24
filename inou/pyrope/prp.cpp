@@ -1685,6 +1685,9 @@ uint8_t Prp::rule_keyword(std::list<std::tuple<Rule_id, Token_entry>> &pass_list
 
 // corresponds to "__" rule in pegjs parser
 inline void Prp::check_lb() {
+  if(scan_is_end()){
+    return;
+  }
   bool next = true;
 
   while (next) {
@@ -1701,6 +1704,9 @@ inline void Prp::check_lb() {
 
 // corresponds to "_" rule in pegjs parser
 inline void Prp::check_ws(){
+  if(scan_is_end()){
+    return;
+  }
   bool next = true;
   while(next){
     cur_pos = get_token_pos();
@@ -1747,9 +1753,10 @@ void Prp::elaborate() {
   patch_pass(pyrope_keyword);
 
   PRINT_DBG_AST("RULE AND AST CALL TRACE \n\n");
-
+  
   ast = std::make_unique<Ast_parser>(get_memblock(), Prp_rule);
   std::list<std::tuple<Rule_id, Token_entry>> loc_list;
+  gen_ws_map();
 
   int      failed  = 0;
   uint64_t sub_cnt = 0;
@@ -1803,6 +1810,35 @@ void Prp::elaborate() {
   PRINT_DBG_AST(fmt::format("Number of ast->up() calls: {}\n", debug_stat.ast_up_calls));
   PRINT_DBG_AST(fmt::format("Number of ast->down() calls: {}\n", debug_stat.ast_down_calls));
   PRINT_DBG_AST(fmt::format("Number of ast_add() calls: {}\n", debug_stat.ast_add_calls));
+}
+
+void Prp::gen_ws_map(){
+  ws_map[Token_id_semicolon] = (true << 8) + true;
+  ws_map[Token_id_pipe] = (false << 8) + true;
+  ws_map[Token_id_obr] = (false << 8) + true;
+  ws_map[Token_id_cbr] = (true << 8) + false;
+  ws_map[Token_id_op] = (false << 8) + true;
+  ws_map[Token_id_cp] = (true << 8) + 2;
+  ws_map[Token_id_ob] = (false << 8) + true;
+  ws_map[Token_id_cb] = (true << 8) + false;
+  ws_map[Pyrope_id_is] = (false << 8) + true;
+  ws_map[Token_id_diff] = (false << 8) + true;
+  ws_map[Token_id_eq] = (false << 8) + true;
+  ws_map[Token_id_comma] = (3 << 8) + 2;
+  ws_map[Pyrope_id_as] = (false << 8) + true;
+  ws_map[Pyrope_id_in] = (true << 8) + true;
+  ws_map[Pyrope_id_by] = (true << 8) + true;
+  ws_map[Pyrope_id_if] = (false << 8) + true;
+  ws_map[Pyrope_id_unique] = (false << 8) + true;
+  ws_map[Pyrope_id_elif] = (false << 8) + true;
+  ws_map[Pyrope_id_else] = (false << 8) + true;
+  ws_map[Pyrope_id_for] = (false << 8) + true;
+  ws_map[Pyrope_id_while] = (false << 8) + true;
+  ws_map[Pyrope_id_try] = (false << 8) + true;
+  ws_map[Pyrope_id_when] = (false << 8) + true;
+  ws_map[Pyrope_id_assertion] = (false << 8) + true;
+  ws_map[Pyrope_id_return] = (false << 8) + true;
+  ws_map[Pyrope_id_punch] = (false << 8) + true;
 }
 
 /* Consumes a token and dumps the new one */
@@ -1890,17 +1926,32 @@ uint8_t Prp::check_function(uint8_t (Prp::*rule)(std::list<std::tuple<Rule_id, T
 }
 
 bool Prp::chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, std::list<std::tuple<Rule_id, Token_entry>> &loc_list) {
+  //PRINT_DBG_AST("Checking  token {} from rule {}.\n", scan_text(scan_token()), rule_id_to_string(rid));
   if(tok != TOKEN_ID_ANY){
     if (!scan_is_token(tok)) return false;
   }
-
-  bool allowed_ws_after = false;
-  if (tok == Token_id_comma){
-    allowed_ws_after = true;
-    check_lb();
+  
+  auto start_line = cur_line;
+  auto start_pos = cur_pos;
+  
+  uint8_t allowed_ws_before = false;
+  uint8_t allowed_ws_after = false;
+  if(ws_map.find(tok) != ws_map.end()){
+    allowed_ws_after = ws_map[tok];
+    allowed_ws_before = (ws_map[tok] >> 8);
+    PRINT_DBG_AST("Token {}: ws before = {}, ws after = {}.\n", scan_text(scan_token()), allowed_ws_before, allowed_ws_after);
   }
-  else if(tok == Pyrope_id_return || tok == Token_id_cp){
-    allowed_ws_after = true;
+  
+  if(allowed_ws_before){
+    if(allowed_ws_before == 1){
+      cur_pos = get_token_pos();
+    }
+    else if(allowed_ws_before == 2){
+      check_ws();
+    }
+    else if(allowed_ws_before == 3){
+      check_lb();
+    }
   }
   
 #ifdef DEBUG_AST
@@ -1909,6 +1960,7 @@ bool Prp::chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, std::lis
   auto cur_token = scan_token();
   if(cur_token != 1){
     if(get_token_pos() > (cur_pos + scan_text(cur_token-1).size())){
+      cur_line = start_line;
       return false;
     }
   }
@@ -1923,22 +1975,41 @@ bool Prp::chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, std::lis
     if (tokens_consumed >= term_token) {
       term_token++;
       consume_token();
-      if(allowed_ws_after){
-        check_ws();
+      if(allowed_ws_after && !scan_is_end()){
+        if(allowed_ws_after == 1){
+          cur_pos = get_token_pos();
+        }
+        else if(allowed_ws_after == 2){
+          check_ws();
+        }
+        else if(allowed_ws_after == 3){
+          check_lb();
+        }
       }
       PRINT_DBG_AST("Incrementing term token to {}\n", term_token);
       return true;
     }
     consume_token();
-    if(allowed_ws_after){
-      check_ws();
+    if(allowed_ws_after && !scan_is_end()){
+      if(allowed_ws_after == 1){
+        cur_pos = get_token_pos();
+      }
+      else if(allowed_ws_after == 2){
+        check_ws();
+      }
+      else if(allowed_ws_after == 3){
+        check_lb();
+      }
     }
     return true;
   }
+  cur_line = start_line;
+  cur_pos = start_pos;
   return false;
 }
 
 bool Prp::chk_and_consume_options(Token_id *toks, uint8_t tok_cnt, Rule_id rid, uint64_t *sub_cnt, std::list<std::tuple<Rule_id, Token_entry>> &loc_list) {
+  PRINT_DBG_AST("Checking many tokens from rule {}.\n", rule_id_to_string(rid));
   bool found = false;
   int i;
   for(i = 0; i<tok_cnt; i++){
@@ -1949,48 +2020,82 @@ bool Prp::chk_and_consume_options(Token_id *toks, uint8_t tok_cnt, Rule_id rid, 
   }
   if(!found)
     return false;
-
-  bool allowed_ws_after = false;
-  if (toks[i] == Token_id_comma){
-    allowed_ws_after = true;
-    check_lb();
+  
+  auto start_pos = cur_pos;
+  auto start_line = cur_line;
+  
+  uint8_t allowed_ws_before = false;
+  uint8_t allowed_ws_after = false;
+  if(ws_map.find(toks[i]) != ws_map.end()){
+    allowed_ws_after = ws_map[toks[i]];
+    allowed_ws_before = (ws_map[toks[i]] >> 8);
+    PRINT_DBG_AST("Token {}: ws before = {}, ws after = {}.\n", scan_text(scan_token()), allowed_ws_before, allowed_ws_after);
   }
-  else if(toks[i] == Pyrope_id_return || toks[i] == Token_id_cp){
-    allowed_ws_after = true;
+  
+  if(allowed_ws_before){
+    if(allowed_ws_before == 1){
+      cur_pos = get_token_pos();
+    }
+    else if(allowed_ws_before == 2){
+      check_ws();
+    }
+    else if(allowed_ws_before == 3){
+      check_lb();
+    }
   }
-
-  if (rid != Prp_invalid) {
-    loc_list.push_back(std::tuple<Rule_id, Token_entry>(rid, scan_token()));
-    (*sub_cnt)++;
-    PRINT_DBG_AST("chk_and_consume_options: incremented sub_cnt to {}\n", *sub_cnt);
-  }
-  PRINT_DBG_AST("Consuming token {} from rule {}.\n", scan_text(scan_token()), rule_id_to_string(rid));
+  
 #ifdef DEBUG_AST
   print_loc_list(loc_list);
 #endif
   auto cur_token = scan_token();
   if(cur_token != 1){
     if(get_token_pos() > (cur_pos + scan_text(cur_token-1).size())){
+      cur_line = start_line;
       return false;
     }
   }
   if (scan_line() == cur_line) {
+    if (rid != Prp_invalid) {
+      loc_list.push_back(std::tuple<Rule_id, Token_entry>(rid, scan_token()));
+      (*sub_cnt)++;
+      PRINT_DBG_AST("chk_and_consume_options: incremented sub_cnt to {}\n", *sub_cnt);
+    }
+    PRINT_DBG_AST("Consuming token {} from rule {}.\n", scan_text(scan_token()), rule_id_to_string(rid));
     cur_pos = get_token_pos();
     if (tokens_consumed >= term_token) {
       term_token++;
       consume_token();
-      if(allowed_ws_after){
-        check_ws();
+      if(allowed_ws_after && !scan_is_end()){
+        if(allowed_ws_after == 1){
+          cur_pos = get_token_pos();
+        }
+        else if(allowed_ws_after == 2){
+          check_ws();
+        }
+        else if(allowed_ws_after == 3){
+          check_lb();
+        }
       }
       PRINT_DBG_AST("Incrementing term token to {}\n", term_token);
       return true;
     }
     consume_token();
-    if(allowed_ws_after){
-      check_ws();
+    if(allowed_ws_after && !scan_is_end()){
+      if(allowed_ws_after == 1){
+        cur_pos = get_token_pos();
+      }
+      else if(allowed_ws_after == 2){
+        check_ws();
+      }
+      else if(allowed_ws_after == 3){
+        check_lb();
+      }
     }
     return true;
+    
   }
+  cur_line = start_line;
+  cur_pos = start_pos;
   return false;
 }
 

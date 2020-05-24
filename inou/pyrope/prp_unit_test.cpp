@@ -16,9 +16,10 @@ public:
   protected:
     void elaborate() {
       patch_pass(pyrope_keyword);
-
+      
       ast = std::make_unique<Ast_parser>(get_memblock(), Prp_rule);
       std::list<std::tuple<Rule_id, Token_entry>> loc_list;
+      gen_ws_map();
 
       int      failed  = 0;
       uint64_t sub_cnt = 0;
