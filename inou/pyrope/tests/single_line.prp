@@ -1,2 +1,1 @@
-a=b
-*c<<s
+..+.. = ::{ return my_cla_adder($0,$1) }

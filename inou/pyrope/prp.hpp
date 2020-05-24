@@ -76,12 +76,14 @@
   print_rule_call_stack();                                                       \
   auto                                        starting_tokens = tokens_consumed; \
   auto                                        starting_line   = cur_line;        \
+  auto                                        starting_pos    = cur_pos;         \
   uint64_t                                    sub_cnt         = 0;               \
   std::list<std::tuple<Rule_id, Token_entry>> loc_list
 #else
 #define INIT_FUNCTION(...)                                                       \
   auto                                        starting_tokens = tokens_consumed; \
   auto                                        starting_line   = cur_line;        \
+  auto                                        starting_pos    = cur_pos;         \
   uint64_t                                    sub_cnt         = 0;               \
   std::list<std::tuple<Rule_id, Token_entry>> loc_list
 #endif
@@ -99,12 +101,14 @@
   }                                                                             \
   go_back(tokens_consumed - starting_tokens);                                   \
   cur_line = starting_line;                                                     \
+  cur_pos = starting_pos;                                                       \
   debug_stat.rules_failed++;                                                    \
   return false
 #else
 #define RULE_FAILED(...)                      \
   go_back(tokens_consumed - starting_tokens); \
   cur_line = starting_line;                   \
+  cur_pos = starting_pos;                     \
   return false
 #endif
 
@@ -138,19 +142,23 @@
   uint64_t cur_tokens;        \
   uint64_t cur_loc_list_size; \
   uint64_t sub_cnt_start;     \
-  uint64_t lines_start
+  uint64_t lines_start; \
+  uint64_t pos_start
 
 #define UPDATE_PSEUDO_FAIL()           \
   cur_tokens        = tokens_consumed; \
   cur_loc_list_size = loc_list.size(); \
   sub_cnt_start     = sub_cnt;         \
-  lines_start       = cur_line
+  lines_start       = cur_line;        \
+  pos_start         = cur_pos
 
 #define PSEUDO_FAIL()                    \
+  PRINT_DBG_AST("Pseudo fail: tokens_consumed = {}, cur_tokens = {}\n", tokens_consumed, cur_tokens);                                       \
   go_back(tokens_consumed - cur_tokens); \
   loc_list.resize(cur_loc_list_size);    \
   sub_cnt = sub_cnt_start; \
-  cur_line = lines_start
+  cur_line = lines_start; \
+  cur_pos = pos_start
 
 // control
 constexpr Token_id Pyrope_id_if     = 128;
@@ -193,6 +201,9 @@ constexpr Token_id Pyrope_id_FALSE = 157;
 // default keyword
 constexpr Token_id Pyrope_id_default = 158;
 
+// any token
+#define TOKEN_ID_ANY 255
+
 class Prp : public Elab_scanner {
 protected:
   struct debug_statistics {
@@ -212,6 +223,7 @@ protected:
   uint64_t tokens_consumed = 0;
   uint64_t subtree_index   = 0;
   uint64_t cur_line        = 0;
+  uint64_t cur_pos         = 0;
 
   std::unique_ptr<Ast_parser>                ast;
   absl::flat_hash_map<std::string, Token_id> pyrope_keyword;
@@ -285,8 +297,8 @@ protected:
   uint8_t rule_keyword(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
 
   inline void check_lb();
+  inline void check_ws();
   inline bool check_eos();
-  inline bool inc_line_cnt();
 
   inline bool unconsume_token();
   inline bool consume_token();
