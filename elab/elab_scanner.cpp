@@ -46,7 +46,7 @@ void Elab_scanner::setup_translate() {
   translate['=']  = Translate_item(Token_id_eq, true);  // <= >= == :=
   translate['&']  = Token_id_and;
   translate['^']  = Token_id_xor;
-  translate['?']  = Token_id_qmark;
+  translate['?']  = Translate_item(Token_id_qmark, true); // 0b???
   translate['\''] = Token_id_tick;
 
   translate['@'] = Token_id_at;
@@ -98,6 +98,15 @@ void Elab_scanner::add_token(Token &t) {
       token_list.back().fuse_token(Token_id_coloneq, t);
       return;
     }
+  } else if (t.tok == Token_id_qmark) {
+    if (last_tok.tok == Token_id_alnum) {
+      if (last_tok.text[0] == '0') {
+        if (last_tok.text.size() > 2 && (last_tok.text[1] == 'b' || last_tok.text[1] == 'B')) {
+          token_list.back().fuse_token(Token_id_alnum, t);
+          return;
+        }
+      }
+    }
   } else if (t.tok == Token_id_alnum) {
     if (last_tok.tok == Token_id_pound) {  // #foo
       token_list.back().fuse_token(Token_id_register, t);
@@ -108,7 +117,7 @@ void Elab_scanner::add_token(Token &t) {
     } else if (last_tok.tok == Token_id_dollar) {   // $foo
       token_list.back().fuse_token(Token_id_input, t);
       return;
-    } else if (last_tok.tok == Token_id_at){        // @foo
+    } else if (last_tok.tok == Token_id_at) {        // @foo
       token_list.back().fuse_token(Token_id_reference, t);
       return;
     } else if (last_tok.tok == Token_id_alnum || last_tok.tok == Token_id_register || last_tok.tok == Token_id_output
@@ -123,17 +132,30 @@ void Elab_scanner::add_token(Token &t) {
 }
 
 void Elab_scanner::patch_pass(const absl::flat_hash_map<std::string, Token_id> &keywords) {
-  for (auto &t : token_list) {
+
+  for (size_t i=0;i<token_list.size();++i) {
+    auto &t = token_list[i];
     if (t.tok != Token_id_alnum) continue;
 
     I(t.get_text().size()>0); // at least a character
 
-    if (isdigit(t.get_text()[0])) {
+    std::string_view txt = t.get_text();
+
+    if (isdigit(txt[0])) {
       t.tok = Token_id_num;
+
+#ifndef NDEBUG
+      // binary accepts ? as part of the numeric constant
+      if (txt.size() > 2 && (txt[1] == 'b' || txt[1] == 'B')) {
+        if ((i+1)<token_list.size())
+          I(token_list[i+1].tok != Token_id_qmark);
+      }
+#endif
+
       continue;
     }
 
-    auto it = keywords.find(t.get_text());
+    auto it = keywords.find(txt);
     if (it == keywords.end()) continue;
 
     assert(it->second >= static_cast<Token_id>(Token_id_keyword_first));
