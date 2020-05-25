@@ -91,7 +91,6 @@ public:
     //! string representation of variable declartion in VCD
     std::string declartion() const;
     //! string representation of value change record in VCD
-//test//    virtual VarValue change_record(const VarValue &value) const = 0;
 
     friend class VCDWriter;//A friend class can access private and protected members of other class in which it is declared as friend. 
     friend struct VarPtrHash;
@@ -119,15 +118,6 @@ struct VCDScalarVariable : public VCDVariable
     VCDScalarVariable(const std::string &name, VariableType type, unsigned size, ScopePtr scope, unsigned next_var_id) :
         VCDVariable(name, type, size, scope, next_var_id)
     {}
-//test//    VarValue change_record(const VarValue &value) const
-/*    {
-        //char c = (value.size()) ? tolower(value[0]) : VCDValues::UNDEF;
-        char c = (value.size()) ? tolower(value[0]) : VCDValues::ZERO;
-        if (value.size() != 1 || (c != VCDValues::ONE   && c != VCDValues::ZERO
-                               && c != VCDValues::UNDEF && c != VCDValues::HIGHV))
-            throw VCDTypeException{ utils::format("Invalid scalar value '%c'", c) };
-        return {c};
-    }*/
 };
 
 // -----------------------------
@@ -138,12 +128,6 @@ struct VCDStringVariable : public VCDVariable
     VCDStringVariable(const std::string &name, VariableType type, unsigned size, ScopePtr scope, unsigned next_var_id) :
         VCDVariable(name, type, size, scope, next_var_id)
     {}
-//test//    VarValue change_record(const VarValue &value) const
-/*    {
-        if (value.find(' ') != std::string::npos)
-            throw VCDTypeException{ utils::format("Invalid string value '%s'", value.c_str()) };
-        return utils::format("s%s ", value.c_str());
-    }*/
 };
 
 // -----------------------------
@@ -153,8 +137,6 @@ struct VCDRealVariable : public VCDVariable
 {
     VCDRealVariable(const std::string &name, VariableType type, unsigned size, ScopePtr scope, unsigned next_var_id) :
         VCDVariable(name, type, size, scope, next_var_id) {}
-//test//    std::string change_record(const VarValue &value) const
-/*    { return utils::format("r%.16g ", stod(value)); }*/
 };
 
 // -----------------------------
@@ -164,7 +146,6 @@ struct VCDVectorVariable : public VCDVariable
 {
     VCDVectorVariable(const std::string &name, VariableType type, unsigned size, ScopePtr scope, unsigned next_var_id) :
         VCDVariable(name, type, size, scope, next_var_id) {}
-//test//    std::string change_record(const VarValue &value) const;
 };
 
 // -----------------------------
@@ -525,40 +506,6 @@ std::string VCDVariable::declartion() const
 // -----------------------------
 //  :Warning: *value* is string where all characters must be one of `VCDValues`.
 //  An empty  *value* is the same as `VCDValues::UNDEF`
-//test//
-/*VarValue VCDVectorVariable::change_record(const VarValue &value) const
-{
-    if (value.size() > _size)
-        throw VCDTypeException{ utils::format("Invalid binary vector value '%s' size '%d'", value.c_str(), _size) };
-
- //    std::string val = ('b' + value + ' ');
-  std::string val = ('b' + value );
-  auto val_sz = val.size();
-    
-    for (auto i = 1u; i < val_sz; ++i)
-    {
-        char &c = val[i];
-        c = tolower(val[i]);
-        if (c != VCDValues::ONE && c != VCDValues::ZERO && c != VCDValues::UNDEF && c != VCDValues::HIGHV)
-            throw VCDTypeException{ utils::format("Invalid binary vector value '%s' size '%d'", val.c_str(), _size) };
-    }
-
-  //no more required!  if (!val_sz) val = ('b' + std::string(_size, VCDValues::ZERO) + ' ');
-
-    // align
-    if (val_sz < _size)
-    {
-        val.resize(_size + 2);
-        auto k = (_size - (val_sz - 1));
-        for (auto i = (val_sz - 1); i >= 1; --i)
-            val[k + i] = val[i];
-        for (auto i = 1u; i <= k; ++i) {
-          //makes all the values 0 for intialization;
-          val[i] = VCDValues::ZERO;
-        }
-    }
-    return val;
-}*/
 //------------------------------
 //class initializer {
 //public:
