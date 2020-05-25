@@ -91,7 +91,7 @@ public:
     //! string representation of variable declartion in VCD
     std::string declartion() const;
     //! string representation of value change record in VCD
-    virtual VarValue change_record(const VarValue &value) const = 0;
+//test//    virtual VarValue change_record(const VarValue &value) const = 0;
 
     friend class VCDWriter;//A friend class can access private and protected members of other class in which it is declared as friend. 
     friend struct VarPtrHash;
@@ -119,15 +119,15 @@ struct VCDScalarVariable : public VCDVariable
     VCDScalarVariable(const std::string &name, VariableType type, unsigned size, ScopePtr scope, unsigned next_var_id) :
         VCDVariable(name, type, size, scope, next_var_id)
     {}
-    VarValue change_record(const VarValue &value) const
-    {
+//test//    VarValue change_record(const VarValue &value) const
+/*    {
         //char c = (value.size()) ? tolower(value[0]) : VCDValues::UNDEF;
         char c = (value.size()) ? tolower(value[0]) : VCDValues::ZERO;
         if (value.size() != 1 || (c != VCDValues::ONE   && c != VCDValues::ZERO
                                && c != VCDValues::UNDEF && c != VCDValues::HIGHV))
             throw VCDTypeException{ utils::format("Invalid scalar value '%c'", c) };
         return {c};
-    }
+    }*/
 };
 
 // -----------------------------
@@ -138,12 +138,12 @@ struct VCDStringVariable : public VCDVariable
     VCDStringVariable(const std::string &name, VariableType type, unsigned size, ScopePtr scope, unsigned next_var_id) :
         VCDVariable(name, type, size, scope, next_var_id)
     {}
-    VarValue change_record(const VarValue &value) const
-    {
+//test//    VarValue change_record(const VarValue &value) const
+/*    {
         if (value.find(' ') != std::string::npos)
             throw VCDTypeException{ utils::format("Invalid string value '%s'", value.c_str()) };
         return utils::format("s%s ", value.c_str());
-    }
+    }*/
 };
 
 // -----------------------------
@@ -153,8 +153,8 @@ struct VCDRealVariable : public VCDVariable
 {
     VCDRealVariable(const std::string &name, VariableType type, unsigned size, ScopePtr scope, unsigned next_var_id) :
         VCDVariable(name, type, size, scope, next_var_id) {}
-    std::string change_record(const VarValue &value) const
-    { return utils::format("r%.16g ", stod(value)); }
+//test//    std::string change_record(const VarValue &value) const
+/*    { return utils::format("r%.16g ", stod(value)); }*/
 };
 
 // -----------------------------
@@ -164,7 +164,7 @@ struct VCDVectorVariable : public VCDVariable
 {
     VCDVectorVariable(const std::string &name, VariableType type, unsigned size, ScopePtr scope, unsigned next_var_id) :
         VCDVariable(name, type, size, scope, next_var_id) {}
-    std::string change_record(const VarValue &value) const;
+//test//    std::string change_record(const VarValue &value) const;
 };
 
 // -----------------------------
@@ -234,13 +234,13 @@ VarPtr VCDWriter::register_var(const std::string &scope, const std::string &name
                 pvar = VarPtr(new VCDScalarVariable(name, type, 1, *cur_scope, _next_var_id));
             else
                 pvar = VarPtr(new VCDVectorVariable(name, type, sz(64), *cur_scope, _next_var_id));
-            if (init_value.size() == 1 && (init_value[0] == VCDValues::UNDEF ||init_value[0] == VCDValues::ZERO) && size>init_value.size())
+            if (init_value.size() == 1 && init_value[0] == VCDValues::ZERO && size>init_value.size())
                 init_value = "b"+std::string(size, VCDValues::ZERO);
             break;
 
         case VariableType::real:
             pvar = VarPtr(new VCDRealVariable(name, type, sz(64), *cur_scope, _next_var_id));
-            if (init_value.size() == 1 && (init_value[0] == VCDValues::UNDEF || init_value[0] == VCDValues::ZERO))
+            if (init_value.size() == 1 && init_value[0] == VCDValues::ZERO)
                 init_value = "0.0";
             break;
 
@@ -259,7 +259,7 @@ VarPtr VCDWriter::register_var(const std::string &scope, const std::string &name
                     pvar = VarPtr(new VCDScalarVariable(name, type, 1, *cur_scope, _next_var_id));
                 else
                   pvar = VarPtr(new VCDVectorVariable(name, type, size, *cur_scope, _next_var_id));
-            if (init_value.size() == 1 && (init_value[0] == VCDValues::UNDEF || init_value[0] == VCDValues::ZERO) && size>init_value.size())
+            if (init_value.size() == 1 && init_value[0] == VCDValues::ZERO && size>init_value.size())
                 init_value = "b"+std::string(size, VCDValues::ZERO);
             break;
         default:
@@ -525,7 +525,8 @@ std::string VCDVariable::declartion() const
 // -----------------------------
 //  :Warning: *value* is string where all characters must be one of `VCDValues`.
 //  An empty  *value* is the same as `VCDValues::UNDEF`
-VarValue VCDVectorVariable::change_record(const VarValue &value) const
+//test//
+/*VarValue VCDVectorVariable::change_record(const VarValue &value) const
 {
     if (value.size() > _size)
         throw VCDTypeException{ utils::format("Invalid binary vector value '%s' size '%d'", value.c_str(), _size) };
@@ -557,7 +558,7 @@ VarValue VCDVectorVariable::change_record(const VarValue &value) const
         }
     }
     return val;
-}
+}*/
 //------------------------------
 //class initializer {
 //public:
