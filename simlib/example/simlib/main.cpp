@@ -12,7 +12,7 @@ int main(int argc, char **argv) {
     top.enable_trace(".");
   }
 //  top.advance_clock(100000000);
-  top.advance_clock(1000);
+  top.advance_clock(2000000);
   // Replay last cycles:
 //  top.load_intermediate_checkpoint(3500000);
  // top.advance_clock(100000000-30000);
