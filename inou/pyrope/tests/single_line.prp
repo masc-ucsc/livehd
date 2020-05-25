@@ -1,1 +1,19 @@
-%out as (__bits=8)
+unique if cond {
+}
+
+// not parsing
+/*
+12 (function call doesn't allow constant at the start)
+17 (this one is tricky; it's hard to implement unless we allow "3" to be a valid statement outside a function call; otherwise, we may need another rule)
+19 (not sure about this one yet)
+20 (pending question regarding whether the scanner can help out here)
+*/
+
+// parses, but no lnast
+/*
+6 (haven't implemented overloads in the translation yet)
+9 (haven't implemented pipes in the translation yet)
+10 (unique keyword not implemented into translation)
+11 (haven't implemented pipes in the translation yet)
+21 (can be implemented using LNAST primitives)
+*/

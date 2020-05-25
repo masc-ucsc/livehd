@@ -200,6 +200,8 @@ constexpr Token_id Pyrope_id_false = 156;
 constexpr Token_id Pyrope_id_FALSE = 157;
 // default keyword
 constexpr Token_id Pyrope_id_default = 158;
+// then keyword
+constexpr Token_id Pyrope_id_then = 159;
 
 // any token
 #define TOKEN_ID_ANY 255
@@ -331,6 +333,7 @@ public:
     pyrope_keyword["return"] = Pyrope_id_return;
     pyrope_keyword["unique"] = Pyrope_id_unique;
     pyrope_keyword["when"]   = Pyrope_id_when;
+    pyrope_keyword["then"]   = Pyrope_id_then;
     pyrope_keyword["try"]    = Pyrope_id_try;
 
     pyrope_keyword["as"] = Pyrope_id_as;
@@ -342,7 +345,7 @@ public:
     pyrope_keyword["xor"] = Pyrope_id_xor;
 
     //pyrope_keyword["C"]       = Pyrope_id_c;
-    pyrope_keyword["I"]       = Pyrope_id_assertion;
+    //pyrope_keyword["I"]       = Pyrope_id_assertion;
     //pyrope_keyword["N"]       = Pyrope_id_negation;
     //pyrope_keyword["yield"]   = Pyrope_id_yield;
     //pyrope_keyword["waitfor"] = Pyrope_id_waitfor;
@@ -352,7 +355,7 @@ public:
     pyrope_keyword["until"]     = Pyrope_id_until;
     pyrope_keyword["in"]        = Pyrope_id_in;
     pyrope_keyword["by"]        = Pyrope_id_by;
-    pyrope_keyword["punch"]     = Pyrope_id_punch;
+    //pyrope_keyword["punch"]     = Pyrope_id_punch;
 
     pyrope_keyword["false"] = Pyrope_id_false;
     pyrope_keyword["FALSE"] = Pyrope_id_FALSE;

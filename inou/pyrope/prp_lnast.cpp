@@ -632,8 +632,15 @@ void Prp_lnast::eval_assignment_expression(mmap_lib::Tree_index idx_start_ast, m
     mmap_lib::Tree_index idx_assign;
     if (is_as)
       idx_assign = lnast->add_child(idx_nxt_ln, Lnast_node::create_as(""));
-    else
-      idx_assign = lnast->add_child(idx_nxt_ln, Lnast_node::create_assign(""));
+    else{
+      PRINT_DBG_LN("The assignment operator we are checking is {}.\n", scan_text(ast->get_data(idx_assign_op).token_entry));
+      if(scan_text(ast->get_data(idx_assign_op).token_entry) == ":="){
+        idx_assign = lnast->add_child(idx_nxt_ln, Lnast_node::create_dp_assign(""));
+      }
+      else{
+        idx_assign = lnast->add_child(idx_nxt_ln, Lnast_node::create_assign(""));
+      }
+    }
 
     if (lhs_is_expr)
       lnast->add_child(idx_assign, lhs_node);
@@ -1730,12 +1737,31 @@ inline Lnast_node Prp_lnast::create_const_node(mmap_lib::Tree_index idx) {
       return Lnast_node::create_const(new_token_view, cur_token.line, string_start, string_start + string_length + 1);
     }
   } else {  // we need to add the datatype to the token string if it's implicit (decimal only)
+    bool negative = false;
+    if(node.token_entry == 0){ // negative sign
+      negative = true;
+      auto idx_num = ast->get_last_child(idx);
+      node = ast->get_data(idx_num);
+    }
     auto token = get_token(node.token_entry);
     if (is_decimal(token.text)) {
-      auto ln_decimal_view = lnast->add_string(absl::StrCat("0d", token.text));
+      std::string decimal_string;
+      if(negative){
+        decimal_string.assign(absl::StrCat("-0d", token.text));
+      }
+      else{
+        decimal_string.assign(absl::StrCat("0d", token.text));
+      }
+      auto ln_decimal_view = lnast->add_string(decimal_string);
       return Lnast_node::create_const(ln_decimal_view, token.line, token.pos1, token.pos2);
     } else
-      return Lnast_node::create_const(token);
+      if(negative){
+        auto ln_decimal_view = lnast->add_string(absl::StrCat("-", token.text));
+        return Lnast_node::create_const(ln_decimal_view, token.line, token.pos1, token.pos2);
+      }
+      else{
+        return Lnast_node::create_const(token);
+      }
   }
 }
 
