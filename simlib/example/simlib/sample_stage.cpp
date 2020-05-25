@@ -4,7 +4,7 @@
 #ifdef SIMLIB_VCD
 Sample_stage::Sample_stage(uint64_t _hidx, std::string &parent_name, vcd::VCDWriter* writer)
   : hidx(_hidx)
-  , scope_name(parent_name.append(".sample"))
+  , scope_name(parent_name.append(parent_name==""?"sample":".sample"))
     ,vcd_writer(writer)
   , s1(33, scope_name, writer)
   , s2(2123, scope_name, writer)

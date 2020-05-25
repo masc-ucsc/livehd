@@ -121,4 +121,8 @@ TEST_F(Elab_test, token_dp_assign) {
   EXPECT_EQ(scanner.debug_token_list[0], "a");
   EXPECT_EQ(scanner.debug_token_list[1], ":=");
   EXPECT_EQ(scanner.debug_token_list[2], "3");
+
+  EXPECT_EQ(scanner.scan_get_token(0).tok, Token_id_alnum);
+  EXPECT_EQ(scanner.scan_get_token(1).tok, Token_id_coloneq);
+  EXPECT_EQ(scanner.scan_get_token(2).tok, Token_id_alnum);
 }
