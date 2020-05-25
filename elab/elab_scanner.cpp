@@ -43,7 +43,7 @@ void Elab_scanner::setup_translate() {
   translate['-']  = Token_id_minus;
   translate['!']  = Token_id_bang;
   translate['<']  = Token_id_lt;
-  translate['=']  = Translate_item(Token_id_eq, true);  // <= >= ==
+  translate['=']  = Translate_item(Token_id_eq, true);  // <= >= == :=
   translate['&']  = Token_id_and;
   translate['^']  = Token_id_xor;
   translate['?']  = Token_id_qmark;
@@ -95,7 +95,7 @@ void Elab_scanner::add_token(Token &t) {
       token_list.back().fuse_token(Token_id_diff, t);
       return;
     } else if (last_tok.tok == Token_id_colon) {  // :=
-      token_list.back().fuse_token(Token_id_colon, t);
+      token_list.back().fuse_token(Token_id_coloneq, t);
       return;
     }
   } else if (t.tok == Token_id_alnum) {
@@ -105,10 +105,10 @@ void Elab_scanner::add_token(Token &t) {
     } else if (last_tok.tok == Token_id_percent) {  // %foo
       token_list.back().fuse_token(Token_id_output, t);
       return;
-    } else if (last_tok.tok == Token_id_dollar) {  // $foo
+    } else if (last_tok.tok == Token_id_dollar) {   // $foo
       token_list.back().fuse_token(Token_id_input, t);
       return;
-    } else if (last_tok.tok == Token_id_backslash){ // \foo
+    } else if (last_tok.tok == Token_id_at){        // @foo
       token_list.back().fuse_token(Token_id_reference, t);
       return;
     } else if (last_tok.tok == Token_id_alnum || last_tok.tok == Token_id_register || last_tok.tok == Token_id_output

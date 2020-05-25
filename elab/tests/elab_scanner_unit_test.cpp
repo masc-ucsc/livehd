@@ -17,6 +17,7 @@ class Test_scanner : public Elab_scanner{
 public:
   std::vector<std::string> debug_token_list;
   void elaborate(){
+    debug_token_list.clear();
     while(!scan_is_end()){
       debug_token_list.emplace_back(scan_text());
       scan_next();
@@ -35,8 +36,6 @@ public:
 TEST_F(Elab_test, token_comp1){
   std::string_view txt1("<<\n++\n--\n==\n<=\n>=");
   scanner.parse_inline(txt1);
-  EXPECT_EQ(9, scanner.debug_token_list.size());
-  EXPECT_EQ(9, scanner.get_token_list().size());
 
   int tok_num = 0;
 
@@ -70,9 +69,10 @@ TEST_F(Elab_test, token_comp1){
         EXPECT_EQ(0, i->compare(">="));
         break;
     }
-    // std::cout << *i << std::endl;
+    //std::cout << *i << std::endl;
     tok_num++;
   }
+  EXPECT_EQ(9, scanner.debug_token_list.size());
 }
 
 TEST_F(Elab_test, token_comp2){
@@ -100,11 +100,11 @@ TEST_F(Elab_test, token_comp3){
 }
 
 TEST_F(Elab_test, token_comp4){
-  std::string_view txt1("\%in\n@out=a+b");
+  std::string_view txt1("%in\n@out=a+b");
   scanner.parse_inline(txt1);
   EXPECT_EQ(6, scanner.debug_token_list.size());
 
-  EXPECT_EQ(scanner.debug_token_list[0], "\%in");
+  EXPECT_EQ(scanner.debug_token_list[0], "%in");
   EXPECT_EQ(scanner.debug_token_list[1], "@out");
   EXPECT_EQ(scanner.debug_token_list[2], "=");
   EXPECT_EQ(scanner.debug_token_list[3], "a");
@@ -112,3 +112,13 @@ TEST_F(Elab_test, token_comp4){
   EXPECT_EQ(scanner.debug_token_list[5], "b");
 }
 
+TEST_F(Elab_test, token_dp_assign) {
+  std::string_view txt1(" a := 3 ");
+  scanner.parse_inline(txt1);
+
+  EXPECT_EQ(3, scanner.debug_token_list.size());
+
+  EXPECT_EQ(scanner.debug_token_list[0], "a");
+  EXPECT_EQ(scanner.debug_token_list[1], ":=");
+  EXPECT_EQ(scanner.debug_token_list[2], "3");
+}

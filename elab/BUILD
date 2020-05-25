@@ -47,7 +47,6 @@ cc_test(
 
 cc_test(
     name = "elab_scanner_unit_test",
-    tags = ["fixme"],
     srcs = ["tests/elab_scanner_unit_test.cpp"],
     deps = [
         ":elab",
