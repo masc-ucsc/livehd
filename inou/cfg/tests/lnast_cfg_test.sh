@@ -1,8 +1,8 @@
 #!/bin/bash
 rm -rf ./lgdb
 
-# pts='if tuple_if tuple_if2 if2 if3_err nested_if_err ssa_rhs logic nested_if '
-pts='nested_if tuple_if sync_cnt_nested_if tuple_if2 if2 if3_err nested_if_err ssa_rhs logic if'
+pts='if tuple_if tuple_if2 if2 if3_err nested_if_err ssa_rhs logic nested_if '
+# pts='nested_if tuple_if sync_cnt_nested_if tuple_if2 if2 if3_err nested_if_err ssa_rhs logic if'
 # sync_cnt_nested_if 
 
 LGSHELL=./bazel-bin/main/lgshell

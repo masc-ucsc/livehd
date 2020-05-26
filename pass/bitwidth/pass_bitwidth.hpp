@@ -27,6 +27,7 @@ protected:
   void iterate_join      (Node_pin &pin);
   void iterate_equals    (Node_pin &pin);
   void iterate_mux       (Node_pin &pin);
+  void iterate_flop      (Node_pin &pin);
 
   void iterate_driver_pin        (Node_pin &pin);
 
