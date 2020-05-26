@@ -11,14 +11,13 @@ func_xor = :($a, $b, $valid, %out) when $valid:{
 func_xor = :($a, $b, %out):{
   %out = $a ^ $b
 }
-
 my_xor = func_xor(a = $foo, b = $bar)
 %out = my_xor.out
 for i in (0..3) {
   tuple_foo[i] = tuple_bar[3-i]
 }
 if a > 10 {
-  b = 3 
+  b = 3
 } elif a < 1 {
   b = 2
 } else {
@@ -36,7 +35,7 @@ if a > 3 {
   b = a + 1
 }
 tup = (foo = 1, bar = cat + 2)
-tup = (foo = 1, bar = cat + 2) 
+tup = (foo = 1, bar = cat + 2)
 tup ++= (4, dog)
 %out = !$inp
 while (tup_foo[i] > 2) {

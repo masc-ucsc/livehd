@@ -223,6 +223,7 @@ protected:
   std::vector<std::string> ast_call_trace;
 
   uint64_t tokens_consumed = 0;
+  uint64_t base_token      = 0; // where do comments at the beginning end
   uint64_t subtree_index   = 0;
   uint64_t cur_line        = 0;
   uint64_t cur_pos         = 0;
@@ -302,6 +303,7 @@ protected:
   inline void check_lb();
   inline void check_ws();
   inline bool check_eos();
+  inline void eat_comments();
   void gen_ws_map();
 
   inline bool unconsume_token();

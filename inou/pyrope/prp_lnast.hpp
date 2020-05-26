@@ -36,19 +36,23 @@ protected:
   // rules that produce an RHS expression
   Lnast_node eval_expression(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln);
   Lnast_node eval_tuple(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln);
+  Lnast_node eval_tuple(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln, std::vector<Lnast_node> &extra_nodes, uint64_t nodes_at_end_idx=0);
   Lnast_node eval_for_in_notation(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln);
   Lnast_node eval_tuple_array_notation(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln);
-  Lnast_node eval_fcall_explicit(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln);
-  Lnast_node eval_fcall_implicit(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln);
+  Lnast_node eval_fcall_explicit(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln, Lnast_node piped_node=Lnast_node(), Lnast_node name_node = Lnast_node());
+  Lnast_node eval_fcall_implicit(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln, Lnast_node piped_node=Lnast_node(), Lnast_node name_node = Lnast_node());
   Lnast_node eval_tuple_dot_notation(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln);
   Lnast_node eval_bit_selection_notation(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln);
   Lnast_node eval_fluid_ref(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln);
   Lnast_node eval_scope_declaration(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln);
   Lnast_node eval_sub_expression(mmap_lib::Tree_index idx_start_ast, Lnast_node operator_node);
   // FIXME: support implicit function calls
+  
+  void add_extra_tuple_nodes(mmap_lib::Tree_index idx_start_ln, std::vector<Lnast_node> &extra_nodes, uint64_t nodes_total, uint64_t start_idx);
 
   Lnast_node  gen_operator(mmap_lib::Tree_index idx, uint8_t *skip_sibs);
   inline bool is_expr(mmap_lib::Tree_index idx);
+  inline bool is_expr_with_operators(mmap_lib::Tree_index idx);
   inline uint8_t maybe_child_expr(mmap_lib::Tree_index idx);
   inline void create_simple_lhs_expr(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln, Lnast_node rhs_node);
   inline Lnast_node create_const_node(mmap_lib::Tree_index idx);

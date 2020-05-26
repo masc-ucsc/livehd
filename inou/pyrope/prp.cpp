@@ -9,12 +9,21 @@
 
 #include "fmt/format.h"
 
+inline void Prp::eat_comments(){
+  while(scan_is_token(Token_id_comment)){
+    scan_next();
+  }
+}
+
 uint8_t Prp::rule_start(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
   INIT_FUNCTION("rule_start.");
 
+  eat_comments();
+  base_token = scan_token() - 1;
   if (!CHECK_RULE(&Prp::rule_code_blocks)) {
     RULE_FAILED("Failed rule_start.\n");
   }
+  eat_comments();
   if (!scan_is_end()) {
     RULE_FAILED("Failed rule_start; still input left.\n");
   }
@@ -30,10 +39,18 @@ uint8_t Prp::rule_code_blocks(std::list<std::tuple<Rule_id, Token_entry>> &pass_
 
   bool next = true;
   while (next) {
+    starting_line = cur_line;
+    starting_pos = cur_pos;
+    starting_tokens = tokens_consumed;
     if (!check_eos()) {
       next = false;
     } else {
-      if (!CHECK_RULE(&Prp::rule_code_block_int)) next = false;
+      if (!CHECK_RULE(&Prp::rule_code_block_int)){
+        cur_line = starting_line;
+        cur_pos = starting_pos;
+        go_back(tokens_consumed-starting_tokens);
+        next = false;
+      }
     }
   }
 
@@ -668,17 +685,13 @@ uint8_t Prp::rule_function_pipe(std::list<std::tuple<Rule_id, Token_entry>> &pas
 uint8_t Prp::rule_fcall_explicit(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
   INIT_FUNCTION("rule_fcall_explicit.");
 
-  if (CHECK_RULE(&Prp::rule_constant)) {
-    RULE_FAILED("Failed rule_fcall_explicit; found a constant.\n");
-  }
-
   INIT_PSEUDO_FAIL();
   UPDATE_PSEUDO_FAIL();
 
   // optional
 
   if (CHECK_RULE(&Prp::rule_tuple_notation)) {
-    if (!SCAN_IS_TOKEN(Token_id_dot)) {
+    if (!SCAN_IS_TOKEN(Token_id_dot, Prp_rule_fcall_explicit)) {
       PSEUDO_FAIL();
     }
     UPDATE_PSEUDO_FAIL();
@@ -699,7 +712,7 @@ uint8_t Prp::rule_fcall_explicit(std::list<std::tuple<Rule_id, Token_entry>> &pa
 
   while (next) {
     UPDATE_PSEUDO_FAIL();
-    if (SCAN_IS_TOKEN(Token_id_dot)) {
+    if (SCAN_IS_TOKEN(Token_id_dot, Prp_rule_fcall_explicit)) {
       if (!CHECK_RULE(&Prp::rule_fcall_explicit)) {
         if (!CHECK_RULE(&Prp::rule_tuple_dot_notation)) {
           next = false;
@@ -761,10 +774,6 @@ uint8_t Prp::rule_fcall_arg_notation(std::list<std::tuple<Rule_id, Token_entry>>
 
 uint8_t Prp::rule_fcall_implicit(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
   INIT_FUNCTION("rule_fcall_implicit.");
-
-  if (CHECK_RULE(&Prp::rule_constant)) {
-    RULE_FAILED("Failed rule_fcall_implicit; found a constant.\n");
-  }
   
   if(!CHECK_RULE(&Prp::rule_tuple_dot_notation)){
     RULE_FAILED("Failed rule_fcall_implicit; couldn't find a tuple_dot_notation.\n");
@@ -783,9 +792,6 @@ uint8_t Prp::rule_fcall_implicit(std::list<std::tuple<Rule_id, Token_entry>> &pa
       RULE_FAILED("Failed rule_fcall_implicit; found an answering not_in_implicit.\n");
     }
   }
-  
-  // WARNING: need to increment sub cnt to ensure that an fcall implicit subtree is always generated
-  sub_cnt++;
   
   RULE_SUCCESS("Matched rule_fcall_implicit.\n", Prp_rule_fcall_implicit);
 }
@@ -863,9 +869,19 @@ uint8_t Prp::rule_assignment_expression(std::list<std::tuple<Rule_id, Token_entr
   }
 
   check_lb();
-  if (!CHECK_RULE(&Prp::rule_fcall_implicit)) {
-    if (!CHECK_RULE(&Prp::rule_logical_expression)) {
-      RULE_FAILED("Failed rule_assignment_expression; couldn't find an fcall_implicit, or a logical_expression.\n");
+  INIT_PSEUDO_FAIL();
+  UPDATE_PSEUDO_FAIL();
+  if (!CHECK_RULE(&Prp::rule_logical_expression)) {
+    if (!CHECK_RULE(&Prp::rule_fcall_implicit)) {
+      RULE_FAILED("Failed rule_assignment_expression; couldn't find an fcall_implicit or a logical_expression.\n");
+    }
+  }
+  else{
+    if(SCAN_IS_TOKEN(Token_id_pipe)){
+      PSEUDO_FAIL();
+      if (!CHECK_RULE(&Prp::rule_fcall_implicit)) {
+        RULE_FAILED("Failed rule_assignment_expression; couldn't find an fcall_implicit or a logical_expression.\n");
+      }
     }
   }
 
@@ -1084,7 +1100,7 @@ uint8_t Prp::rule_lhs_var_name(std::list<std::tuple<Rule_id, Token_entry>> &pass
   if (!(CHECK_RULE(&Prp::rule_identifier) || CHECK_RULE(&Prp::rule_constant))) {
     RULE_FAILED("Failed rule_lhs_var_name; couldn't find an identifier or a constant.\n");
   }
-
+  
   RULE_SUCCESS("Matched rule_lhs_var_name.\n", Prp_rule_lhs_var_name);
 }
 
@@ -1469,10 +1485,13 @@ uint8_t Prp::rule_additive_expression(std::list<std::tuple<Rule_id, Token_entry>
     if(found_op){
       check_ws();
       if (!CHECK_RULE(&Prp::rule_unary_expression)) {
-        RULE_FAILED("Failed rule_additive_expression; couldn't find an answering multiplicative expression.\n");
+        PSEUDO_FAIL();
+        next     = false;
       }
-      PRINT_DBG_AST("rule_additive_expression: just checked for second operand; sub_cnt = {}.\n", sub_cnt);
-      found_op = false;
+      else{
+        PRINT_DBG_AST("rule_additive_expression: just checked for second operand; sub_cnt = {}.\n", sub_cnt);
+        found_op = false;
+      }
     }
   }
   // optional
@@ -1600,9 +1619,14 @@ uint8_t Prp::rule_factor(std::list<std::tuple<Rule_id, Token_entry>> &pass_list)
         PSEUDO_FAIL();
       }
       else{
-        // optional
-        CHECK_RULE(&Prp::rule_bit_selection_bracket);
-        RULE_SUCCESS("Matched rule_factor; option 1.\n", Prp_rule_factor);
+        if(SCAN_IS_TOKEN(Token_id_dot)){
+          PSEUDO_FAIL();
+        }
+        else{
+          // optional
+          CHECK_RULE(&Prp::rule_bit_selection_bracket);
+          RULE_SUCCESS("Matched rule_factor; option 1.\n", Prp_rule_factor);
+        }
       }
     }
   }
@@ -1816,7 +1840,7 @@ void Prp::elaborate() {
   }
 
   if (failed) {
-    fmt::print("Parsing error line {}. Unexpected token [{}].\n", get_token(term_token).line+1, scan_text(term_token));
+    fmt::print("Parsing error line {}. Unexpected token [{}].\n", get_token(term_token + base_token).line+1, scan_text(term_token + base_token));
     //parser_error("unexpected token {}.\n", scan_text(term_token));
     exit(1);
   } else {

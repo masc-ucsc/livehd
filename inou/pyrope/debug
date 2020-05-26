@@ -1,0 +1,1293 @@
+RULE AND AST CALL TRACE 
+
+Called check_function.
+rule_start. 
+Called check_function.
+rule_start. rule_code_blocks. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_if_statement. 
+Failed rule_if_statement; couldn't find a starting open brace (option 2).
+rule_start. rule_code_blocks. rule_code_block_int. 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_for_statement. 
+Failed rule_for_statement; couldn't find a for token.
+rule_start. rule_code_blocks. rule_code_block_int. 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_while_statement. 
+Failed rule_while_statement; couldn't find a while.
+rule_start. rule_code_blocks. rule_code_block_int. 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_try_statement. 
+Failed rule_try_statement; couldn't find a try token.
+rule_start. rule_code_blocks. rule_code_block_int. 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_constant 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_constant rule_numerical_constant. 
+Failed rule_numerical_constant; couldn't find a number.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_constant 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_constant rule_string_constant. 
+Failed rule_string_constant; couldn't find either a single tick or double tick string.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_constant 
+No problem; loc_list had nothing in it.
+Checking many tokens from rule Constant.
+Failed rule_constant.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_overload_notation. 
+Failed rule_overload_notation; couldn't find a starting dot.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. rule_keyword 
+Checking many tokens from rule Invalid.
+Failed rule_keyword.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. 
+No problem; loc_list had nothing in it.
+Checking many tokens from rule Reference.
+chk_and_consume_options: incremented sub_cnt to 1
+Consuming token a from rule Reference.
+Matched rule_identifier.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+Rule Identifier had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Matched rule_lhs_var_name.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Rule LHS variable name had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_tuple_array_bracket. 
+Matched rule_tuple_array_bracket.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Rule Tuple array bracket had a sub_cnt of 0.
+Matched rule_tuple_array_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. 
+Rule Tuple array notation had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_dot_dot. 
+Starting the loop in tuple_dot_dot.
+Couldn't find the first dot in tuple_dot_dot.
+Matched rule_tuple_dot_dot
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. 
+Rule Tuple dot dot had a sub_cnt of 0.
+Matched rule_tuple_dot_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. 
+Rule Tuple dot notation had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_bit_selection_bracket. 
+Matched rule_bit_selection_bracket.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. 
+Rule Bit selection bracket had a sub_cnt of 0.
+Matched rule_bit_selection_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. 
+Rule Bit selection notation had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Failed rule_range_notation; couldn't find the first dot.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. 
+tokens_consumed: 1.
+loc_list[0]:rule: Reference token: a.
+Going back 1 token(s); total token(s) consumed: 1.
+Unconsuming token: tok:4 pos1:670, pos2:670, line:44 text:a
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. rule_keyword 
+Checking many tokens from rule Invalid.
+Failed rule_keyword.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. 
+No problem; loc_list had nothing in it.
+Checking many tokens from rule Reference.
+chk_and_consume_options: incremented sub_cnt to 1
+Consuming token a from rule Reference.
+Matched rule_identifier.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+Rule Identifier had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Matched rule_lhs_var_name.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Rule LHS variable name had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_tuple_array_bracket. 
+Matched rule_tuple_array_bracket.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Rule Tuple array bracket had a sub_cnt of 0.
+Matched rule_tuple_array_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. 
+Rule Tuple array notation had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_dot_dot. 
+Starting the loop in tuple_dot_dot.
+Couldn't find the first dot in tuple_dot_dot.
+Matched rule_tuple_dot_dot
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. 
+Rule Tuple dot dot had a sub_cnt of 0.
+Matched rule_tuple_dot_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. 
+Rule Tuple dot notation had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_bit_selection_bracket. 
+Matched rule_bit_selection_bracket.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. 
+Rule Bit selection bracket had a sub_cnt of 0.
+Matched rule_bit_selection_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. 
+Rule Bit selection notation had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Matched rule_tuple_notation; fourth option.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. 
+Rule Tuple notation had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Matched rule_lhs_expression.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. 
+Rule LHS expression had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_assignment_operator. 
+The assignment operator token is: tok:32 pos1:672, pos2:672, line:44 text:=
+Checking many tokens from rule Assignment operator.
+Token =: ws before = 0, ws after = 1.
+chk_and_consume_options: incremented sub_cnt to 1
+Consuming token = from rule Assignment operator.
+Incrementing term token to 2
+Matched rule_assignment_operator; found an single token operator.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. 
+Rule Assignment operator had a sub_cnt of 1.
+check_function: incremented sub_cnt to 2.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. rule_keyword 
+Checking many tokens from rule Invalid.
+Failed rule_keyword.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. 
+No problem; loc_list had nothing in it.
+Checking many tokens from rule Reference.
+Failed rule_identifier; couldn't find a name.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant rule_numerical_constant. 
+chk_and_consume: incremented sub_cnt to 1
+Consuming token 5 from rule Numerical constant.
+Incrementing term token to 3
+Matched rule_numerical_constant.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant 
+Rule Numerical constant had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Matched rule_constant.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+Rule Constant had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Matched rule_lhs_var_name.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Rule LHS variable name had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_tuple_array_bracket. 
+Matched rule_tuple_array_bracket.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Rule Tuple array bracket had a sub_cnt of 0.
+Matched rule_tuple_array_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. 
+Rule Tuple array notation had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_dot_dot. 
+Starting the loop in tuple_dot_dot.
+Couldn't find the first dot in tuple_dot_dot.
+Matched rule_tuple_dot_dot
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. 
+Rule Tuple dot dot had a sub_cnt of 0.
+Matched rule_tuple_dot_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. 
+Rule Tuple dot notation had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_bit_selection_bracket. 
+Matched rule_bit_selection_bracket.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. 
+Rule Bit selection bracket had a sub_cnt of 0.
+Matched rule_bit_selection_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_notation. 
+Rule Bit selection notation had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Matched rule_tuple_notation; fourth option.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. 
+Rule Tuple notation had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Pseudo fail: tokens_consumed = 3, cur_tokens = 2
+Going back 1 token(s); total token(s) consumed: 3.
+Unconsuming token: tok:25 pos1:674, pos2:674, line:44 text:5
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_dot_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. rule_keyword 
+Checking many tokens from rule Invalid.
+Failed rule_keyword.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. 
+No problem; loc_list had nothing in it.
+Checking many tokens from rule Reference.
+Failed rule_identifier; couldn't find a name.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant rule_numerical_constant. 
+chk_and_consume: incremented sub_cnt to 1
+Consuming token 5 from rule Numerical constant.
+Matched rule_numerical_constant.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant 
+Rule Numerical constant had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Matched rule_constant.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+Rule Constant had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Matched rule_lhs_var_name.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Rule LHS variable name had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_tuple_array_bracket. 
+Matched rule_tuple_array_bracket.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Rule Tuple array bracket had a sub_cnt of 0.
+Matched rule_tuple_array_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_dot_notation. 
+Rule Tuple array notation had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_dot_dot. 
+Starting the loop in tuple_dot_dot.
+Couldn't find the first dot in tuple_dot_dot.
+Matched rule_tuple_dot_dot
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_tuple_dot_notation. 
+Rule Tuple dot dot had a sub_cnt of 0.
+Matched rule_tuple_dot_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. 
+Rule Tuple dot notation had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. rule_fcall_arg_notation. 
+Failed rule_fcall_arg_notation; couldn't find an opening parenthesis.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_fcall_explicit. 
+No problem; loc_list had nothing in it.
+Failed rule_fcall_explicit; couldn't find an fcall_arg_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. 
+tokens_consumed: 1.
+loc_list[0]:rule: Numerical constant token: 5.
+Going back 1 token(s); total token(s) consumed: 3.
+Unconsuming token: tok:25 pos1:674, pos2:674, line:44 text:5
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_range_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. rule_keyword 
+Checking many tokens from rule Invalid.
+Failed rule_keyword.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. 
+No problem; loc_list had nothing in it.
+Checking many tokens from rule Reference.
+Failed rule_identifier; couldn't find a name.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant rule_numerical_constant. 
+chk_and_consume: incremented sub_cnt to 1
+Consuming token 5 from rule Numerical constant.
+Matched rule_numerical_constant.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant 
+Rule Numerical constant had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Matched rule_constant.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+Rule Constant had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Matched rule_lhs_var_name.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Rule LHS variable name had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_tuple_array_bracket. 
+Matched rule_tuple_array_bracket.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Rule Tuple array bracket had a sub_cnt of 0.
+Matched rule_tuple_array_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. 
+Rule Tuple array notation had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_dot_dot. 
+Starting the loop in tuple_dot_dot.
+Couldn't find the first dot in tuple_dot_dot.
+Matched rule_tuple_dot_dot
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. 
+Rule Tuple dot dot had a sub_cnt of 0.
+Matched rule_tuple_dot_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. 
+Rule Tuple dot notation had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_bit_selection_bracket. 
+Matched rule_bit_selection_bracket.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. 
+Rule Bit selection bracket had a sub_cnt of 0.
+Matched rule_bit_selection_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_range_notation. 
+Rule Bit selection notation had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Failed rule_range_notation; couldn't find the first dot.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. 
+tokens_consumed: 1.
+loc_list[0]:rule: Numerical constant token: 5.
+Going back 1 token(s); total token(s) consumed: 3.
+Unconsuming token: tok:25 pos1:674, pos2:674, line:44 text:5
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_tuple_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. rule_keyword 
+Checking many tokens from rule Invalid.
+Failed rule_keyword.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. 
+No problem; loc_list had nothing in it.
+Checking many tokens from rule Reference.
+Failed rule_identifier; couldn't find a name.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant rule_numerical_constant. 
+chk_and_consume: incremented sub_cnt to 1
+Consuming token 5 from rule Numerical constant.
+Matched rule_numerical_constant.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant 
+Rule Numerical constant had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Matched rule_constant.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+Rule Constant had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Matched rule_lhs_var_name.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Rule LHS variable name had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_tuple_array_bracket. 
+Matched rule_tuple_array_bracket.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Rule Tuple array bracket had a sub_cnt of 0.
+Matched rule_tuple_array_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. 
+Rule Tuple array notation had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_dot_dot. 
+Starting the loop in tuple_dot_dot.
+Couldn't find the first dot in tuple_dot_dot.
+Matched rule_tuple_dot_dot
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. 
+Rule Tuple dot dot had a sub_cnt of 0.
+Matched rule_tuple_dot_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. 
+Rule Tuple dot notation had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_bit_selection_bracket. 
+Matched rule_bit_selection_bracket.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. 
+Rule Bit selection bracket had a sub_cnt of 0.
+Matched rule_bit_selection_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. rule_tuple_notation. 
+Rule Bit selection notation had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Matched rule_tuple_notation; fourth option.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. rule_lhs_expression. 
+Rule Tuple notation had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Matched rule_lhs_expression.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. rule_rhs_expression. 
+Rule LHS expression had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Matched rule_rhs_expression.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. rule_factor. 
+Rule RHS expression had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Matched rule_factor; option 2.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_unary_expression. 
+Rule Factor had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Matched rule_unary_expression, option 1.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. 
+Rule Unary expression had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+rule_additive_expression: just checked for first operand; sub_cnt = 1.
+About to check for a semicolon. Token = tok:3 pos1:676, pos2:676, line:44 text:|>
+The additive expression's operator is tok:3 pos1:676, pos2:676, line:44 text:|>
+Checking many tokens from rule Additive expression.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. rule_overload_notation. 
+Failed rule_overload_notation; couldn't find a starting dot.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. rule_additive_expression. 
+No problem; loc_list had nothing in it.
+Pseudo fail: tokens_consumed = 3, cur_tokens = 3
+Matched rule_additive_expression.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. rule_relational_expression. 
+Rule Additive expression had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+About to check for a semicolon. Token = tok:3 pos1:676, pos2:676, line:44 text:|>
+Checking many tokens from rule Relational expression.
+Matched rule_relational_expression.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_logical_expression. 
+Rule Relational expression had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+About to check for a semicolon. Token = tok:3 pos1:676, pos2:676, line:44 text:|>
+Matched rule_logical_expression.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. 
+Rule Logical expression had a sub_cnt of 1.
+check_function: incremented sub_cnt to 3.
+Token |>: ws before = 0, ws after = 1.
+loc_list[0]:rule: Reference token: a.
+loc_list[1]:rule: Assignment operator token: =.
+loc_list[2]:rule: Numerical constant token: 5.
+Consuming token |> from rule Invalid.
+Incrementing term token to 4
+Pseudo fail: tokens_consumed = 4, cur_tokens = 2
+Going back 2 token(s); total token(s) consumed: 4.
+Unconsuming token: tok:3 pos1:676, pos2:676, line:44 text:|>
+Unconsuming token: tok:25 pos1:674, pos2:674, line:44 text:5
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_tuple_dot_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. rule_keyword 
+Checking many tokens from rule Invalid.
+Failed rule_keyword.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. 
+No problem; loc_list had nothing in it.
+Checking many tokens from rule Reference.
+Failed rule_identifier; couldn't find a name.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant rule_numerical_constant. 
+chk_and_consume: incremented sub_cnt to 1
+Consuming token 5 from rule Numerical constant.
+Matched rule_numerical_constant.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant 
+Rule Numerical constant had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Matched rule_constant.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+Rule Constant had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Matched rule_lhs_var_name.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Rule LHS variable name had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_tuple_array_bracket. 
+Matched rule_tuple_array_bracket.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Rule Tuple array bracket had a sub_cnt of 0.
+Matched rule_tuple_array_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_tuple_dot_notation. 
+Rule Tuple array notation had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_dot_dot. 
+Starting the loop in tuple_dot_dot.
+Couldn't find the first dot in tuple_dot_dot.
+Matched rule_tuple_dot_dot
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_tuple_dot_notation. 
+Rule Tuple dot dot had a sub_cnt of 0.
+Matched rule_tuple_dot_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. 
+Rule Tuple dot notation had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_scope_declaration. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_scope_declaration. rule_scope. 
+Failed rule_scope; generic.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_scope_declaration. 
+No problem; loc_list had nothing in it.
+Failed rule_scope_declaration; couldn't find a scope.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. 
+Token |>: ws before = 0, ws after = 1.
+chk_and_consume: incremented sub_cnt to 1
+Consuming token |> from rule 11.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_implicit. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_implicit. rule_tuple_dot_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. rule_keyword 
+Checking many tokens from rule Invalid.
+Failed rule_keyword.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. 
+No problem; loc_list had nothing in it.
+Checking many tokens from rule Reference.
+chk_and_consume_options: incremented sub_cnt to 1
+Consuming token fcall from rule Reference.
+Incrementing term token to 5
+Matched rule_identifier.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+Rule Identifier had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Matched rule_lhs_var_name.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Rule LHS variable name had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_tuple_array_bracket. 
+Matched rule_tuple_array_bracket.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Rule Tuple array bracket had a sub_cnt of 0.
+Matched rule_tuple_array_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_implicit. rule_tuple_dot_notation. 
+Rule Tuple array notation had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_dot_dot. 
+Starting the loop in tuple_dot_dot.
+Couldn't find the first dot in tuple_dot_dot.
+Matched rule_tuple_dot_dot
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_implicit. rule_tuple_dot_notation. 
+Rule Tuple dot dot had a sub_cnt of 0.
+Matched rule_tuple_dot_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_implicit. 
+Rule Tuple dot notation had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_implicit. rule_scope_declaration. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_implicit. rule_scope_declaration. rule_scope. 
+Failed rule_scope; generic.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_implicit. rule_scope_declaration. 
+No problem; loc_list had nothing in it.
+Failed rule_scope_declaration; couldn't find a scope.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_implicit. 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_implicit. rule_function_pipe. 
+Failed rule_function_pipe; couldn't find a pipe token.rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_implicit. 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_implicit. rule_not_in_implicit 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_implicit. rule_not_in_implicit rule_assignment_operator. 
+The assignment operator token is: tok:21 pos1:684, pos2:684, line:44 text:(
+Checking many tokens from rule Assignment operator.
+Checking many tokens from rule Assignment operator.
+Failed rule_assignment_operator; couldn't find any of the operators.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_implicit. rule_not_in_implicit 
+No problem; loc_list had nothing in it.
+Token (: ws before = 0, ws after = 1.
+Consuming token ( from rule Invalid.
+Incrementing term token to 6
+Matched rule_not_in_implicit; found an open parenthesis.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_implicit. 
+Rule Not in implicit had a sub_cnt of 0.
+Failed rule_fcall_implicit; found an answering not_in_implicit.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. 
+tokens_consumed: 2.
+loc_list[0]:rule: Reference token: fcall.
+Going back 2 token(s); total token(s) consumed: 6.
+Unconsuming token: tok:21 pos1:684, pos2:684, line:44 text:(
+Unconsuming token: tok:4 pos1:679, pos2:679, line:44 text:fcall
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_tuple_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. rule_keyword 
+Checking many tokens from rule Invalid.
+Failed rule_keyword.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. 
+No problem; loc_list had nothing in it.
+Checking many tokens from rule Reference.
+chk_and_consume_options: incremented sub_cnt to 1
+Consuming token fcall from rule Reference.
+Matched rule_identifier.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+Rule Identifier had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Matched rule_lhs_var_name.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Rule LHS variable name had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_tuple_array_bracket. 
+Matched rule_tuple_array_bracket.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Rule Tuple array bracket had a sub_cnt of 0.
+Matched rule_tuple_array_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. 
+Rule Tuple array notation had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_dot_dot. 
+Starting the loop in tuple_dot_dot.
+Couldn't find the first dot in tuple_dot_dot.
+Matched rule_tuple_dot_dot
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. 
+Rule Tuple dot dot had a sub_cnt of 0.
+Matched rule_tuple_dot_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. 
+Rule Tuple dot notation had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_bit_selection_bracket. 
+Matched rule_bit_selection_bracket.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. 
+Rule Bit selection bracket had a sub_cnt of 0.
+Matched rule_bit_selection_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_tuple_notation. 
+Rule Bit selection notation had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Matched rule_tuple_notation; fourth option.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. 
+Rule Tuple notation had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Pseudo fail: tokens_consumed = 5, cur_tokens = 4
+Going back 1 token(s); total token(s) consumed: 5.
+Unconsuming token: tok:4 pos1:679, pos2:679, line:44 text:fcall
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_tuple_dot_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. rule_keyword 
+Checking many tokens from rule Invalid.
+Failed rule_keyword.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. 
+No problem; loc_list had nothing in it.
+Checking many tokens from rule Reference.
+chk_and_consume_options: incremented sub_cnt to 1
+Consuming token fcall from rule Reference.
+Matched rule_identifier.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+Rule Identifier had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Matched rule_lhs_var_name.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Rule LHS variable name had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_tuple_array_bracket. 
+Matched rule_tuple_array_bracket.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Rule Tuple array bracket had a sub_cnt of 0.
+Matched rule_tuple_array_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_tuple_dot_notation. 
+Rule Tuple array notation had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_dot_dot. 
+Starting the loop in tuple_dot_dot.
+Couldn't find the first dot in tuple_dot_dot.
+Matched rule_tuple_dot_dot
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_tuple_dot_notation. 
+Rule Tuple dot dot had a sub_cnt of 0.
+Matched rule_tuple_dot_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. 
+Rule Tuple dot notation had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_fcall_arg_notation. 
+Token (: ws before = 0, ws after = 1.
+chk_and_consume: incremented sub_cnt to 1
+Consuming token ( from rule Fcall arg notation.
+Token ): ws before = 1, ws after = 2.
+loc_list[0]:rule: Fcall arg notation token: (.
+chk_and_consume: incremented sub_cnt to 2
+Consuming token ) from rule Fcall arg notation.
+Incrementing term token to 7
+Matched rule_fcall_arg_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. 
+Rule Fcall arg notation had a sub_cnt of 2.
+Had a subtree of at least size two in rule Fcall arg notation it was of size 2.
+check_function: incremented sub_cnt to 2.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_scope_declaration. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_scope_declaration. rule_scope. 
+Failed rule_scope; generic.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_scope_declaration. 
+No problem; loc_list had nothing in it.
+Failed rule_scope_declaration; couldn't find a scope.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. rule_function_pipe. 
+Failed rule_function_pipe; couldn't find a pipe token.rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. rule_fcall_explicit. 
+No problem; loc_list had nothing in it.
+Matched rule_fcall_explicitrule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_function_pipe. 
+Rule Fcall explicit had a sub_cnt of 2.
+Had a subtree of at least size two in rule Fcall explicit it was of size 2.
+check_function: incremented sub_cnt to 2.
+Matched rule_function_pipe.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. 
+Rule 11 had a sub_cnt of 2.
+Had a subtree of at least size two in rule 11 it was of size 2.
+check_function: incremented sub_cnt to 2.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_not_in_implicit 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_not_in_implicit rule_assignment_operator. 
+The assignment operator token is: tok:0 pos1:0, pos2:0, line:0 text:
+Checking many tokens from rule Assignment operator.
+Checking many tokens from rule Assignment operator.
+Failed rule_assignment_operator; couldn't find any of the operators.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_not_in_implicit 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_not_in_implicit rule_overload_notation. 
+Failed rule_overload_notation; couldn't find a starting dot.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. rule_not_in_implicit 
+No problem; loc_list had nothing in it.
+Checking many tokens from rule Invalid.
+Failed rule_not_in_implicit.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_fcall_implicit. 
+No problem; loc_list had nothing in it.
+Matched rule_fcall_implicit.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. 
+Rule Fcall implicit had a sub_cnt of 2.
+Had a subtree of at least size two in rule Fcall implicit it was of size 2.
+check_function: incremented sub_cnt to 3.
+Matched rule_assignment_expression.
+rule_start. rule_code_blocks. rule_code_block_int. 
+Rule Assignment expression had a sub_cnt of 3.
+Had a subtree of at least size two in rule Assignment expression it was of size 3.
+check_function: incremented sub_cnt to 1.
+Matched rule_code_block_int.
+rule_start. rule_code_blocks. 
+Rule Code block int had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+About to check for a semicolon. Token = tok:0 pos1:0, pos2:0, line:0 text:
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_if_statement. 
+Failed rule_if_statement; couldn't find a starting open brace (option 2).
+rule_start. rule_code_blocks. rule_code_block_int. 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_for_statement. 
+Failed rule_for_statement; couldn't find a for token.
+rule_start. rule_code_blocks. rule_code_block_int. 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_while_statement. 
+Failed rule_while_statement; couldn't find a while.
+rule_start. rule_code_blocks. rule_code_block_int. 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_try_statement. 
+Failed rule_try_statement; couldn't find a try token.
+rule_start. rule_code_blocks. rule_code_block_int. 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_constant 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_constant rule_numerical_constant. 
+Failed rule_numerical_constant; couldn't find a number.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_constant 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_constant rule_string_constant. 
+Failed rule_string_constant; couldn't find either a single tick or double tick string.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_constant 
+No problem; loc_list had nothing in it.
+Checking many tokens from rule Constant.
+Failed rule_constant.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_overload_notation. 
+Failed rule_overload_notation; couldn't find a starting dot.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. rule_keyword 
+Checking many tokens from rule Invalid.
+Failed rule_keyword.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. 
+No problem; loc_list had nothing in it.
+Checking many tokens from rule Reference.
+Failed rule_identifier; couldn't find a name.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant rule_numerical_constant. 
+Failed rule_numerical_constant; couldn't find a number.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant rule_string_constant. 
+Failed rule_string_constant; couldn't find either a single tick or double tick string.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant 
+No problem; loc_list had nothing in it.
+Checking many tokens from rule Constant.
+Failed rule_constant.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+No problem; loc_list had nothing in it.
+Failed rule_lhs_var_name; couldn't find an identifier or a constant.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. 
+No problem; loc_list had nothing in it.
+Failed rule_tuple_array_notation; couldn't find an lhs_var_name.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. rule_tuple_dot_notation. 
+No problem; loc_list had nothing in it.
+Failed tuple_dot_notation; couldn't find a tuple_array_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. rule_bit_selection_notation. 
+No problem; loc_list had nothing in it.
+Failed rule_bit_selection_notation; couldn't find a tuple_dot_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_range_notation. 
+No problem; loc_list had nothing in it.
+Failed rule_range_notation; couldn't find the first dot.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. rule_keyword 
+Checking many tokens from rule Invalid.
+Failed rule_keyword.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. 
+No problem; loc_list had nothing in it.
+Checking many tokens from rule Reference.
+Failed rule_identifier; couldn't find a name.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant rule_numerical_constant. 
+Failed rule_numerical_constant; couldn't find a number.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant rule_string_constant. 
+Failed rule_string_constant; couldn't find either a single tick or double tick string.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant 
+No problem; loc_list had nothing in it.
+Checking many tokens from rule Constant.
+Failed rule_constant.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+No problem; loc_list had nothing in it.
+Failed rule_lhs_var_name; couldn't find an identifier or a constant.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. 
+No problem; loc_list had nothing in it.
+Failed rule_tuple_array_notation; couldn't find an lhs_var_name.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. 
+No problem; loc_list had nothing in it.
+Failed tuple_dot_notation; couldn't find a tuple_array_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. rule_bit_selection_notation. 
+No problem; loc_list had nothing in it.
+Failed rule_bit_selection_notation; couldn't find a tuple_dot_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. rule_tuple_notation. 
+No problem; loc_list had nothing in it.
+Failed rule_tuple_notation; couldn't match any options.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. rule_lhs_expression. 
+No problem; loc_list had nothing in it.
+Failed rule_lhs_expression; couldn't find either a range_notation or a tuple_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_assignment_expression. 
+No problem; loc_list had nothing in it.
+Failed rule_assignment_expression; couldn't find either an overload_notation or an lhs_expression.
+rule_start. rule_code_blocks. rule_code_block_int. 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_implicit. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_implicit. rule_tuple_dot_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. rule_keyword 
+Checking many tokens from rule Invalid.
+Failed rule_keyword.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. 
+No problem; loc_list had nothing in it.
+Checking many tokens from rule Reference.
+Failed rule_identifier; couldn't find a name.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant rule_numerical_constant. 
+Failed rule_numerical_constant; couldn't find a number.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant rule_string_constant. 
+Failed rule_string_constant; couldn't find either a single tick or double tick string.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant 
+No problem; loc_list had nothing in it.
+Checking many tokens from rule Constant.
+Failed rule_constant.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+No problem; loc_list had nothing in it.
+Failed rule_lhs_var_name; couldn't find an identifier or a constant.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_implicit. rule_tuple_dot_notation. rule_tuple_array_notation. 
+No problem; loc_list had nothing in it.
+Failed rule_tuple_array_notation; couldn't find an lhs_var_name.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_implicit. rule_tuple_dot_notation. 
+No problem; loc_list had nothing in it.
+Failed tuple_dot_notation; couldn't find a tuple_array_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_implicit. 
+No problem; loc_list had nothing in it.
+Failed rule_fcall_implicit; couldn't find a tuple_dot_notation.
+rule_start. rule_code_blocks. rule_code_block_int. 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. rule_keyword 
+Checking many tokens from rule Invalid.
+Failed rule_keyword.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. 
+No problem; loc_list had nothing in it.
+Checking many tokens from rule Reference.
+Failed rule_identifier; couldn't find a name.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant rule_numerical_constant. 
+Failed rule_numerical_constant; couldn't find a number.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant rule_string_constant. 
+Failed rule_string_constant; couldn't find either a single tick or double tick string.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant 
+No problem; loc_list had nothing in it.
+Checking many tokens from rule Constant.
+Failed rule_constant.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+No problem; loc_list had nothing in it.
+Failed rule_lhs_var_name; couldn't find an identifier or a constant.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. rule_tuple_array_notation. 
+No problem; loc_list had nothing in it.
+Failed rule_tuple_array_notation; couldn't find an lhs_var_name.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. rule_tuple_dot_notation. 
+No problem; loc_list had nothing in it.
+Failed tuple_dot_notation; couldn't find a tuple_array_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_notation. rule_bit_selection_notation. 
+No problem; loc_list had nothing in it.
+Failed rule_bit_selection_notation; couldn't find a tuple_dot_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_notation. 
+No problem; loc_list had nothing in it.
+Failed rule_tuple_notation; couldn't match any options.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_dot_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. rule_keyword 
+Checking many tokens from rule Invalid.
+Failed rule_keyword.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_identifier. 
+No problem; loc_list had nothing in it.
+Checking many tokens from rule Reference.
+Failed rule_identifier; couldn't find a name.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant 
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant rule_numerical_constant. 
+Failed rule_numerical_constant; couldn't find a number.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant rule_string_constant. 
+Failed rule_string_constant; couldn't find either a single tick or double tick string.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. rule_constant 
+No problem; loc_list had nothing in it.
+Checking many tokens from rule Constant.
+Failed rule_constant.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. rule_lhs_var_name. 
+No problem; loc_list had nothing in it.
+Failed rule_lhs_var_name; couldn't find an identifier or a constant.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_dot_notation. rule_tuple_array_notation. 
+No problem; loc_list had nothing in it.
+Failed rule_tuple_array_notation; couldn't find an lhs_var_name.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. rule_tuple_dot_notation. 
+No problem; loc_list had nothing in it.
+Failed tuple_dot_notation; couldn't find a tuple_array_notation.
+rule_start. rule_code_blocks. rule_code_block_int. rule_fcall_explicit. 
+No problem; loc_list had nothing in it.
+Failed rule_fcall_explicit; couldn't find a tuple_dot_notation.
+rule_start. rule_code_blocks. rule_code_block_int. 
+No problem; loc_list had nothing in it.
+Called check_function.
+rule_start. rule_code_blocks. rule_code_block_int. rule_return_statement. 
+Failed rule_return_statement; couldn't find a return token.
+rule_start. rule_code_blocks. rule_code_block_int. 
+No problem; loc_list had nothing in it.
+Failed rule_code_block_int.
+rule_start. rule_code_blocks. 
+No problem; loc_list had nothing in it.
+Matched rule_code_blocks.
+rule_start. 
+Rule Code blocks had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+Matched rule_start.
+
+Rule Top level had a sub_cnt of 1.
+check_function: incremented sub_cnt to 1.
+
+Parsing SUCCESSFUL!
+
+AST Call List
+
+Rule: Invalid, Token: 
+Rule: Reference, Token: a
+Rule: Assignment operator, Token: =
+Rule: Invalid, Token: 
+Rule: Numerical constant, Token: 5
+Rule: Invalid, Token: 
+Rule: 11, Token: |>
+Rule: Invalid, Token: 
+Rule: Reference, Token: fcall
+Rule: Invalid, Token: 
+Rule: Fcall arg notation, Token: (
+Rule: Fcall arg notation, Token: )
+Rule: Fcall arg notation, Token: 
+Rule: Fcall explicit, Token: 
+Rule: 11, Token: 
+Rule: Fcall implicit, Token: 
+Rule: Assignment expression, Token: 
+
+AST BUILD LOG
+
+Went down.
+Added token a from rule Reference.
+Added token = from rule Assignment operator.
+Went down.
+Added token 5 from rule Numerical constant.
+Went down.
+Added token |> from rule 11.
+Went down.
+Added token fcall from rule Reference.
+Went down.
+Added token ( from rule Fcall arg notation.
+Added token ) from rule Fcall arg notation.
+Went up with rule Fcall arg notation.
+Went up with rule Fcall explicit.
+Went up with rule 11.
+Went up with rule Fcall implicit.
+Went up with rule Assignment expression.
+
+AST PREORDER TRAVERSAL
+
+Rule name: Program, Token text: , Tree level: 0
+Rule name: Assignment expression, Token text: , Tree level: 1
+Rule name: Reference, Token text: a, Tree level: 2
+Rule name: Assignment operator, Token text: =, Tree level: 2
+Rule name: Fcall implicit, Token text: , Tree level: 2
+Rule name: Numerical constant, Token text: 5, Tree level: 3
+Rule name: 11, Token text: , Tree level: 3
+Rule name: 11, Token text: |>, Tree level: 4
+Rule name: Fcall explicit, Token text: , Tree level: 4
+Rule name: Reference, Token text: fcall, Tree level: 5
+Rule name: Fcall arg notation, Token text: , Tree level: 5
+Rule name: Fcall arg notation, Token text: (, Tree level: 6
+Rule name: Fcall arg notation, Token text: ), Tree level: 6
+
+STATISTICS
+
+Number of rules called: 200
+Number of rules matched: 99
+Number of rules failed: 101
+Number of tokens consumed: 0
+Number of tokens unconsumed: 9
+Number of ast->up() calls: 0
+Number of ast->down() calls: 0
+Number of ast_add() calls: 0
+AST to LNAST output:
+
+0                     top : 
+1                statements : ___SEQ0
