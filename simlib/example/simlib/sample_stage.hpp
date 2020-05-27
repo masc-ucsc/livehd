@@ -11,7 +11,7 @@ struct Sample_stage {
 #ifdef SIMLIB_VCD
   std::string     scope_name;
   vcd::VCDWriter* vcd_writer;
-  Sample_stage(uint64_t _hidx, const std::string& parent_name, vcd::VCDWriter* writer);
+  Sample_stage(uint64_t _hidx, const std::string &parent_name, vcd::VCDWriter* writer);
   void vcd_reset_cycle();
   void vcd_comb();
   void vcd_posedge();
@@ -41,6 +41,6 @@ struct Sample_stage {
   Sample3_stage s3;
 
 #ifdef SIMLIB_TRACE
-  void add_signature(Simlib_signature& sign);
+  void add_signature(Simlib_signature &sign);
 #endif
 };

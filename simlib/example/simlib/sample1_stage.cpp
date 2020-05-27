@@ -1,11 +1,14 @@
-#include "sample1_stage.hpp"
 
 #include "livesim_types.hpp"
+#include "sample1_stage.hpp"
+
 
 #ifdef SIMLIB_VCD
-Sample1_stage::Sample1_stage(uint64_t _hidx, const std::string &parent_name,
-                             vcd::VCDWriter *writer)  // const std::string &parent_name)
-    : hidx(_hidx), scope_name(parent_name + ".s1"), vcd_writer(writer) {}
+Sample1_stage::Sample1_stage(uint64_t _hidx, const std::string &parent_name, vcd::VCDWriter* writer)//const std::string &parent_name)
+  : hidx(_hidx)
+  , scope_name(parent_name+".s1")
+  , vcd_writer(writer) {
+}
 void Sample1_stage::vcd_reset_cycle() {
   vcd_writer->change(vcd_reset, "1");
   tmp        = UInt<32>(0);
@@ -42,8 +45,9 @@ void Sample1_stage::vcd_comb(UInt<32> s3_to1_b, UInt<1> s2_to1_aValid, UInt<32> 
   // vcd_writer->change(vcd_clk, t,"0");
 }
 #else
-Sample1_stage::Sample1_stage(uint64_t _hidx)  //, const std::string &parent_name)
-    : hidx(_hidx) {}
+Sample1_stage::Sample1_stage(uint64_t _hidx)//, const std::string &parent_name)
+  : hidx(_hidx) {
+}
 void Sample1_stage::reset_cycle() {
   tmp        = UInt<32>(0);
   to2_aValid = UInt<1>(0);

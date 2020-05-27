@@ -467,16 +467,15 @@ VCDWriter *initialize_vcd_writer() {
 //};
 // static VCDWriter& vcd_writer_m = initialize_vcd_writer();
 void advance_to_posedge() {
-  t += 5;
-  timestamp = t;
+  timestamp += 5;
 }
 void advance_to_negedge() {
-  t += 3;
-  timestamp = t;
+  timestamp += 3;
 }
 void advance_to_comb() {
-  t += 2;
-  timestamp = t;
+  timestamp += 2;
 }
 
 }  // namespace vcd
+
+

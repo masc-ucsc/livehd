@@ -1,9 +1,8 @@
+#include "livesim_types.hpp"
 #include "sample_stage.hpp"
 
-#include "livesim_types.hpp"
-
 #ifdef SIMLIB_VCD
-Sample_stage::Sample_stage(uint64_t _hidx, const std::string &parent_name, vcd::VCDWriter *writer)
+Sample_stage::Sample_stage(uint64_t _hidx, const std::string &parent_name, vcd::VCDWriter* writer)
     : hidx(_hidx)
     , scope_name(parent_name.empty() ? "sample" : parent_name + ".sample")
     , vcd_writer(writer)

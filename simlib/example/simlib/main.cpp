@@ -1,7 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "livesim_types.hpp"
-#include "sample_stage.hpp"
 #include "simlib_checkpoint.hpp"
+#include "sample_stage.hpp"
 
 int main(int argc, char **argv) {
   Simlib_checkpoint<Sample_stage> top("ckpt");

@@ -1,10 +1,11 @@
-#include "sample2_stage.hpp"
 
 #include "livesim_types.hpp"
+#include "sample2_stage.hpp"
 
 #ifdef SIMLIB_VCD
 Sample2_stage::Sample2_stage(uint64_t _hidx, const std::string &parent_name, vcd::VCDWriter *writer)
     : hidx(_hidx), scope_name(parent_name + ".s2"), vcd_writer(writer) {}
+
 void Sample2_stage::vcd_posedge() {
   vcd_writer->change(vcd_clk, "1");
   vcd_writer->change(vcd_reset, "0");

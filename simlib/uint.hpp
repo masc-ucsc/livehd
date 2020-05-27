@@ -445,34 +445,34 @@ public:
   }
 
   std::string to_string_binary() const {
-    constexpr std::string_view nibble_to_str[] = { "0000", "0001", "0010", "0011",
-                                                   "0100", "0101", "0110", "0111",
-                                                   "1000", "1001", "1010", "1011",
-                                                   "1100", "1101", "1110", "1111" };
-
-    if constexpr (n_<=64 && n_>8)  {
-      std::string result;
-      auto v = words_[0];
-      bool non_zero_found = false;
-      for(int i=64;i>0;i=i-4) {
-        auto x = v>>i;
-        if (!non_zero_found && x==0)
-          continue;
-        non_zero_found = true;
-        result.append(nibble_to_str[x & 0xF]);
-      }
-      return result;
-    }else if constexpr (n_<=8) {
-      auto v = words_[0];
-      std::string result;
-      if ((v>>4)&0xF)
-        result.append(nibble_to_str[(v>>4)&0xF]);
-
-      result.append(nibble_to_str[v&0xF]);
-      return result;
-    }else{
+//   constexpr std::string_view nibble_to_str[] = { "0000", "0001", "0010", "0011",
+//                                                   "0100", "0101", "0110", "0111",
+//                                                   "1000", "1001", "1010", "1011",
+//                                                   "1100", "1101", "1110", "1111" };
+//
+//    if constexpr (n_<=64 && n_>8)  {
+//      std::string result;
+//      auto v = words_[0];
+//      bool non_zero_found = false;
+//      for(int i=64;i>0;i=i-4) {
+//        auto x = v>>i;
+//        if (!non_zero_found && x==0)
+//          continue;
+//        non_zero_found = true;
+//        result.append(nibble_to_str[x & 0xF]);
+//      }
+//      return result;
+//    }else if constexpr (n_<=8) {
+//      auto v = words_[0];
+//      std::string result;
+//      if ((v>>4)&0xF)
+//        result.append(nibble_to_str[(v>>4)&0xF]);
+//
+//      result.append(nibble_to_str[v&0xF]);
+//      return result;
+//    }else{
       std::stringstream ss;
-      if(bits_in_top_word_/sizeof(uint8_t)>1){ss<<"b";}//we want "b" only in multi-bit variables 
+      if(bits_in_top_word_/sizeof(uint8_t)>1){ss<<"b";}//we want "b" only in multi-bit variables
       //ss << "b";
       uint64_t top_word_mask = bits_in_top_word_ == kWordSize ? -1 :
         (1ULL << cap(bits_in_top_word_)) - 1;
@@ -492,7 +492,7 @@ public:
       }
 
       return ss.str();
-    }
+//    }
   }
 
   std::string to_string() const {

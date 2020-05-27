@@ -11,7 +11,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
-extern unsigned t;
+//extern unsigned timestamp;
 namespace vcd {
 static unsigned timestamp;
 namespace utils {

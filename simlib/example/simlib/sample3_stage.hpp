@@ -24,7 +24,7 @@ struct Sample3_stage {
   vcd::VarPtr vcd_clk            = vcd_writer->register_var(scope_name, "clk", vcd::VariableType::wire, 1);
   vcd::VarPtr vcd_reset          = vcd_writer->register_var(scope_name, "reset", vcd::VariableType::wire, 1);
 
-  Sample3_stage(uint64_t _hidx, const std::string& parent_name, vcd::VCDWriter* writer);
+  Sample3_stage(uint64_t _hidx, const std::string &parent_name, vcd::VCDWriter* writer);
   void vcd_reset_cycle();
   void vcd_posedge();
   void vcd_negedge();
@@ -36,6 +36,6 @@ struct Sample3_stage {
 #endif
 
 #ifdef SIMLIB_TRACE
-  void add_signature(Simlib_signature& sign);
+  void add_signature(Simlib_signature &sign);
 #endif
 };

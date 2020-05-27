@@ -15,7 +15,7 @@
 #include "likely.hpp"
 #include "simlib_signature.hpp"
 #include "vcd_writer.hpp"
-unsigned t = 0;
+//unsigned t = 0;
 template <typename Top_struct>
 class Simlib_checkpoint {
   uint64_t          ncycles;
@@ -25,29 +25,22 @@ class Simlib_checkpoint {
   uint64_t          reset_ncycles;
   const std::string name;
   std::string       path;  // checkpoint enabled/path
-  // static inline std::string const checkpoint_file_initial = "ckpt_";
   Top_struct       top;
   Simlib_signature signature;
 
   Lbench perf;
 #ifdef SIMLIB_VCD
   void advance_reset(uint64_t n = 1) {
-    //    vcd_writer->change(vcd_reset, t, "1");
     for (auto i = 0; i < n; ++i) {
-      //      t++;
       vcd::advance_to_posedge();
-      // top.vcd_cycle();
       top.vcd_reset_cycle();
       vcd::advance_to_posedge();
-      //      t++;
     }
     ncycles += n;
-    //    vcd_writer->change(vcd_reset, t, "0");
   };
 #else
   void advance_reset(uint64_t n = 1) {
     for (auto i = 0; i < n; ++i) {
-      // top.cycle();
       top.reset_cycle();
     }
     ncycles += n;
@@ -62,14 +55,7 @@ public:
     checkpoint_ncycles      = -1;  // Disable checkpoint by default
     next_checkpoint_ncycles = 1000000000;
     last_checkpoint_sec     = 0.0;
-    //    getenv("SIMLIB_DUMPDIR");//to dump the created files in scrap folder so as to not saturate the NFS.
     advance_reset(reset_ncycles);
-//#ifdef SIMLIB_VCD
-// vcd::VCDWriter &vcd_writer = vcd::initialize_vcd_writer();
-// vcd::TimeStamp t=0;
-// vcd::VarPtr vcd_to1_b = vcd_writer.register_var("sample.s3", "to1_b[31:0]", vcd::VariableType::wire, 32);
-// vcd_writer.change(vcd_to1_b, ++t, "11011001010");
-//#endif
 #ifdef SIMLIB_TRACE
     top.add_signature(signature);
 #endif
@@ -81,7 +67,6 @@ public:
     checkpoint_ncycles      = -1;  // Disable checkpoint by default
     next_checkpoint_ncycles = 1000000000;
     last_checkpoint_sec     = 0.0;
-    //    getenv("SIMLIB_DUMPDIR");//to dump the created files in scrap folder so as to not saturate the NFS.
     advance_reset(reset_ncycles);
 #ifdef SIMLIB_TRACE
     top.add_signature(signature);
@@ -342,7 +327,7 @@ public:
       next_checkpoint_ncycles -= step;
       for (auto i = 0; i < step; ++i) {
 #ifdef SIMLIB_VCD
-        t++;
+        //t++;
         //         top.vcd_cycle();
         vcd::advance_to_posedge();
         top.vcd_posedge();
