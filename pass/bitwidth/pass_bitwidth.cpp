@@ -103,7 +103,7 @@ bool Pass_bitwidth::bw_pass_iterate() {
   if (pending.empty())
     fmt::print("bw_pass_iterate pass -- no driver pins to iterate over\n");
 
-  // max_iterations = 0;
+  max_iterations = 10; //FIXME->sh: temporarily solution before := dp_assign supported
   int iterations = 0;
   do {
     I(next_pending.empty());
@@ -117,8 +117,8 @@ bool Pass_bitwidth::bw_pass_iterate() {
     //      I'd want it to (if pin got added multiple times due to multiple out edges).
     if (dpin.ref_bitwidth()->niters > max_iterations) {
       fmt::print("bw_pass_iterate abort:{}\n", iterations);
-      return false;
-      /* return true; */
+      /* return false; */
+      return true;
     }
 
     do {

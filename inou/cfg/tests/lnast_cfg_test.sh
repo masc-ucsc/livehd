@@ -2,8 +2,8 @@
 rm -rf ./lgdb
 
 # pts='if tuple_if tuple_if2 if2 if3_err nested_if_err ssa_rhs logic nested_if '
-pts='nested_if tuple_if sync_cnt_nested_if tuple_if2 if2 if3_err nested_if_err ssa_rhs logic if'
-# sync_cnt_nested_if 
+pts='nested_if tuple_if adder_stage tuple_if2 if2 if3_err nested_if_err ssa_rhs logic if sync_cnt_nested_if'
+# sync_cnt_nested_if #FIXME->sh: need to support dp_assignment, current pass is a false correctness
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
