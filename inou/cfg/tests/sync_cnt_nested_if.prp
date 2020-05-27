@@ -5,6 +5,10 @@ $c2.__bits = 1
 
 %cnt1_o = #cnt1
 
+if (#cnt1 == 15) {
+  #cnt1 = 0
+} 
+
 if ($c1 == 1) {
   #cnt1 = #cnt1 + 1
   if ($c2 == 1) {

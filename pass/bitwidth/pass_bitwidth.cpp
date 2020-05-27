@@ -103,16 +103,13 @@ bool Pass_bitwidth::bw_pass_iterate() {
   if (pending.empty())
     fmt::print("bw_pass_iterate pass -- no driver pins to iterate over\n");
 
-  // dbg
   // max_iterations = 0;
   int iterations = 0;
   do {
     I(next_pending.empty());
     fmt::print("\nIteration:{}\n", iterations);
 
-    // auto dpin = pending.back();
     auto dpin = pending.front();
-    // pending.pop_back();
     pending.pop_front();
     dpin.ref_bitwidth()->niters++;
 
@@ -121,15 +118,14 @@ bool Pass_bitwidth::bw_pass_iterate() {
     if (dpin.ref_bitwidth()->niters > max_iterations) {
       fmt::print("bw_pass_iterate abort:{}\n", iterations);
       return false;
+      /* return true; */
     }
 
     do {
       iterate_driver_pin(dpin);
       if (pending.empty())
         break;
-      // dpin = pending.back();
       dpin = pending.front();
-      // pending.pop_back();
       pending.pop_front();
     } while (true);
     fmt::print("Iteration:{}, all dpin in pending vector visited!\n", iterations);
@@ -140,13 +136,6 @@ bool Pass_bitwidth::bw_pass_iterate() {
       return true;
     }
 
-    //note: faster move usage compared to A.insert(A.end(), B.begin(), B.end())
-    //FIXME->sh: something strange here....it duplicately insert some of the unset imp
-    // if (!initial_imp_unset.empty()) {
-    //   next_pending.insert(next_pending.end(),
-    //                       std::make_move_iterator(initial_imp_unset.begin()),
-    //                       std::make_move_iterator(initial_imp_unset.end()));
-    // }
 
     pending = std::move(next_pending);
     next_pending.clear(); // need to clear the moved container or it will be in a "valid, but undefined state"

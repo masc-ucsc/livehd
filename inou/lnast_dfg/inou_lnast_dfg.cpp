@@ -582,11 +582,13 @@ Node_pin Inou_lnast_dfg::setup_node_assign_and_lhs(LGraph *dfg, const Lnast_nid 
   //handle register as lhs
   if (is_register(lhs_name)) {
     //when #reg_0 at lhs, the register has not been created before
-    if (lhs_name.substr(lhs_name.size()-3) == "_0") {
+    fmt::print("lhs_name:{}\n", lhs_name);
+    if (lhs_name.substr(lhs_name.size()-2) == "_0") {
+      fmt::print("hello!!!\n");
       auto reg_qpin = setup_ref_node_dpin(dfg, lhs);
       return reg_qpin.get_node().setup_sink_pin("D");
     } else {
-      // (1) create Or_Op to represent #reg_N
+      // (1) create Or_Op to represent #reg_N except #reg_0, which has been represented as the #reg qpin
       auto equal_node =  dfg->create_node(Or_Op);
       name2dpin[lhs_name] = equal_node.setup_driver_pin(1); //reduced or output
       name2dpin[lhs_name].set_name(lhs_name);
@@ -598,6 +600,8 @@ Node_pin Inou_lnast_dfg::setup_node_assign_and_lhs(LGraph *dfg, const Lnast_nid 
 
       // (3) remove the previous D-pin edge from the #reg
       auto reg_node = reg_qpin.get_node();
+      fmt::print("reg_node debug_name:{}\n", reg_node.debug_name());
+      I(reg_node.get_type().op == SFlop_Op);
       I(reg_node.setup_sink_pin("D").inp_edges().size() <= 1);
       if (reg_node.setup_sink_pin("D").inp_edges().size() == 1) {
         reg_node.setup_sink_pin("D").inp_edges().begin()->del_edge();
@@ -647,7 +651,6 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
   } else if (is_default_const(name)) {
     node_dpin = resolve_constant(dfg, "0d0").setup_driver_pin();
   } else if (is_register(name)) {
-    fmt::print("REG debug, ref name:{}\n", name);
     node_dpin = dfg->create_node(SFlop_Op).setup_driver_pin();
 
     Node_pin clk_dpin;
@@ -658,18 +661,20 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
       clk_dpin = dfg->get_graph_input("clk");
     }
 
-    Node_pin rst_dpin;
-    if (!dfg->is_graph_input("rst")) {
-      rst_dpin = dfg->add_graph_input("rst", Port_invalid, 0);
-      rst_dpin.ref_bitwidth()->e.set_ubits(1);
-    } else {
-      rst_dpin = dfg->get_graph_input("rst");
-    }
-
     auto clk_spin = node_dpin.get_node().setup_sink_pin("C");
-    auto rst_spin = node_dpin.get_node().setup_sink_pin("CLR");
     dfg->add_edge (clk_dpin, clk_spin);
-    dfg->add_edge (rst_dpin, rst_spin);
+
+    // FIXME->sh: reset pin not supported in SFlop yet !!?
+    /* Node_pin rst_dpin; */
+    /* if (!dfg->is_graph_input("rst")) { */
+    /*   rst_dpin = dfg->add_graph_input("rst", Port_invalid, 0); */
+    /*   rst_dpin.ref_bitwidth()->e.set_ubits(1); */
+    /* } else { */
+    /*   rst_dpin = dfg->get_graph_input("rst"); */
+    /* } */
+    /* auto rst_spin = node_dpin.get_node().setup_sink_pin("CLR"); */
+    /* dfg->add_edge (rst_dpin, rst_spin); */
+
 
   } else if (is_err_var_undefined(name)) {
     node_dpin = dfg->create_node(CompileErr_Op).setup_driver_pin();
