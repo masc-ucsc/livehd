@@ -32,17 +32,19 @@ class Simlib_checkpoint {
   Lbench perf;
 #ifdef SIMLIB_VCD
   void advance_reset(uint64_t n=1) {
+//    vcd_writer->change(vcd_reset, t, "1");
     for(auto i=0;i<n;++i) {
-      t++;
-      top.vcd_cycle();
+      t++;t++;
+      //top.vcd_cycle();
       top.vcd_reset_cycle();
     }
     ncycles += n;
+//    vcd_writer->change(vcd_reset, t, "0");
   };
 #else
   void advance_reset(uint64_t n=1) {
     for(auto i=0;i<n;++i) {
-      top.cycle();
+      //top.cycle();
       top.reset_cycle();
     }
     ncycles += n;
@@ -238,13 +240,34 @@ public:
       n -= step;//SG: if step==n then this line will make n=0 thus making the possibility of n>0 unlikely.
       next_checkpoint_ncycles -= step;
       for(auto i=0;i<step;++i) {
-        #ifdef SIMLIB_VCD
+#ifdef SIMLIB_VCD
         t++;
-        top.vcd_cycle();
-        #else
-          top.cycle();
-        #endif
+//        top.vcd_cycle();
+//        vcd_writer->advance_to_negedge();
+        top.vcd_posedge();
+//        vcd_writer->advance_to_comb();
+        top.vcd_comb();
+//        vcd_writer->advance_to_posedge();
+        t++;top.vcd_negedge();
+#else
+        top.cycle();
+#endif
       }
+
+#if 0
+      // Potential path to have multiple clocks
+      for(auto i=0;i<nanosecond;++i) {
+        if (ns % cl1_nedged)
+          vcd_writer->advance_to_negedge_cl1();
+        if (ns % cl2_nedged)
+          vcd_writer->advance_to_negedge_cl2();
+        if (ns % cl1_posedge)
+          top.vcd_posedge_cl1();
+        if (ns % cl2_posedge)
+          top.vcd_posedge_cl2();
+        ...
+      }
+#endif
       ncycles += step;
         save_checkpoint();
     }while(unlikely(n>0));
@@ -310,7 +333,10 @@ public:
       for(auto i=0;i<step;++i) {
         #ifdef SIMLIB_VCD
          t++;
-         top.vcd_cycle();
+//         top.vcd_cycle();
+         top.vcd_posedge();
+         top.vcd_comb();
+         t++; top.vcd_negedge();
         #else
           top.cycle();
         #endif

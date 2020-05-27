@@ -2,9 +2,9 @@
 #include "sample_stage.hpp"
 
 #ifdef SIMLIB_VCD
-Sample_stage::Sample_stage(uint64_t _hidx, std::string &parent_name, vcd::VCDWriter* writer)
+Sample_stage::Sample_stage(uint64_t _hidx,const std::string &parent_name, vcd::VCDWriter* writer)
   : hidx(_hidx)
-  , scope_name(parent_name.append(parent_name==""?"sample":".sample"))
+  , scope_name(parent_name.empty()?"sample":parent_name+".sample")
     ,vcd_writer(writer)
   , s1(33, scope_name, writer)
   , s2(2123, scope_name, writer)
@@ -13,17 +13,22 @@ Sample_stage::Sample_stage(uint64_t _hidx, std::string &parent_name, vcd::VCDWri
   // FIXME: populate random reset (random per variable)
    }
 void Sample_stage::vcd_reset_cycle() {
-  reset = (!reset);
-  vcd_writer->change(vcd_reset, t,reset.to_string_binary());
+  vcd_writer->change(vcd_reset, t,"1");//as long as the reset is called, it would be 1
   s1.vcd_reset_cycle();
   s2.vcd_reset_cycle();
   s3.vcd_reset_cycle();
 }
 
-  void Sample_stage::vcd_cycle() {
+  void Sample_stage::vcd_negedge() {
+  vcd_writer->change(vcd_clk, t,"0");
+  }
 
-  clk = (!clk);
-  vcd_writer->change(vcd_clk, t,clk.to_string_binary());
+  void Sample_stage::vcd_posedge() {
+  vcd_writer->change(vcd_clk, t,"1");
+  vcd_writer->change(vcd_reset, t,"0");
+  }
+
+  void Sample_stage::vcd_comb() {
     auto s1_to2_aValid = s1.to2_aValid;
     auto s1_to2_a      = s1.to2_a;
     auto s1_to2_b      = s1.to2_b;

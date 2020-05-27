@@ -6,15 +6,14 @@
 
 #ifdef SIMLIB_VCD
 
-Sample3_stage::Sample3_stage(uint64_t _hidx, std::string &parent_name, vcd::VCDWriter* writer)
+Sample3_stage::Sample3_stage(uint64_t _hidx,const std::string &parent_name, vcd::VCDWriter* writer)
   : hidx(_hidx)
   , scope_name(parent_name+".s3")
   , vcd_writer(writer) {
   }
 
 void Sample3_stage::vcd_reset_cycle() {
-  reset=!reset;
-  vcd_writer->change(vcd_reset,t,reset.to_string_binary());
+  vcd_writer->change(vcd_reset,t,"1");
   tmp  = 0;
   tmp2 = 0;
 
@@ -24,8 +23,9 @@ void Sample3_stage::vcd_reset_cycle() {
 }
 
 void Sample3_stage::vcd_cycle(UInt<1> s1_to3_cValid, UInt<32> s1_to3_c, UInt<1> s2_to3_dValid, UInt<32> s2_to3_d) {
-  clk=!clk;
-  vcd_writer->change(vcd_clk, t, clk.to_string_binary());
+  vcd_writer->change(vcd_reset,t,"0");
+  vcd_writer->change(vcd_clk, t, "0");
+  vcd_writer->change(vcd_clk, t, "1");
   if (__builtin_expect(((tmp & UInt<32>(0xFFFF)) == UInt<32>(45339)),0)) {
     if ((tmp2 & UInt<32>(15)) == UInt<32>(0)) {
       printf("memory[127] = %ud\n",memory[127]);

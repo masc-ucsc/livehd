@@ -3,14 +3,13 @@
 #include "sample1_stage.hpp"
 
 #ifdef SIMLIB_VCD
-Sample1_stage::Sample1_stage(uint64_t _hidx, std::string &parent_name, vcd::VCDWriter* writer)//const std::string &parent_name)
+Sample1_stage::Sample1_stage(uint64_t _hidx, const std::string &parent_name, vcd::VCDWriter* writer)//const std::string &parent_name)
   : hidx(_hidx)
   , scope_name(parent_name+".s1")
   , vcd_writer(writer) {
 }
 void Sample1_stage::vcd_reset_cycle() {
-  reset=!reset;
-  vcd_writer->change(vcd_reset, t, reset.to_string_binary());
+  vcd_writer->change(vcd_reset, t, "1");
   tmp = UInt<32>(0);
   to2_aValid = UInt<1>(0);
     vcd_writer->change(vcd_to2_aValid, t, to2_aValid.to_string_binary());
@@ -20,8 +19,8 @@ void Sample1_stage::vcd_reset_cycle() {
     vcd_writer->change(vcd_to3_c, t, to3_c.to_string_binary());
 }
  void Sample1_stage::vcd_cycle(UInt<32> s3_to1_b, UInt<1> s2_to1_aValid, UInt<32> s2_to1_a) {
-  clk=!clk;
-  vcd_writer->change(vcd_clk, t, clk.to_string_binary());
+  vcd_writer->change(vcd_reset, t, "0");
+  vcd_writer->change(vcd_clk, t,"1");
     to2_b = s3_to1_b.addw(UInt<32>(1));
     vcd_writer->change(vcd_to2_b, t , to2_b.to_string_binary());
 
@@ -37,6 +36,7 @@ void Sample1_stage::vcd_reset_cycle() {
     vcd_writer->change(vcd_to3_c, t, to3_c.to_string_binary());
 
     tmp = tmp.addw(UInt<32>(23));
+  vcd_writer->change(vcd_clk, t,"0");
   }
 #else
 Sample1_stage::Sample1_stage(uint64_t _hidx)//, const std::string &parent_name)
