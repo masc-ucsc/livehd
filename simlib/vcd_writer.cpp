@@ -256,8 +256,7 @@ bool VCDWriter::_change(VarPtr var, const VarValue &value, bool reg) {
   }
 
   // if value changed
-  if (_vars_prevs.find(var) !=
-      _vars_prevs.end())  // not entered in 1st entry @ main:544 //_vars_prev is unordered_map of (varptr, str) pairs
+  if (_vars_prevs.find(var) != _vars_prevs.end())  // not entered in 1st entry @ main:544 //_vars_prev is unordered_map of (varptr, str) pairs
   {
     if (_vars_prevs[var] == change_value) return false;
     _vars_prevs[var] = change_value;  // entered for #0
