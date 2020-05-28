@@ -465,14 +465,23 @@ public:
       }
       return result;
     }else if constexpr (n_<=8) {
+      bool top_zeroes=true;
       auto v = words_[0];
+      auto v_casted = static_cast<uint64_t>(words_[0]);
       std::string result= (multibit?"b":"");
-      //auto for_debug = (v>>4)&0xF;
-      if ((v>>4)&0xF)
-        result.append(nibble_to_str[(v>>4)&0xF]);
 
-      result.append(nibble_to_str[v&0xF]);
-      if (!multibit) {result=result.back();}
+      if (!multibit) {
+        result.append(nibble_to_str[v&0xF]);
+        result=result.back();
+      } else {
+        for (int i=bits_in_top_word_;i>0;i=i-4) {
+          auto x= (v>>(i-4));
+          if ((top_zeroes && (x&0xF)) ||(i==4)){top_zeroes=false;}
+          if (!top_zeroes){
+            result.append(nibble_to_str[x&0xF]);
+          }
+        }
+      }
       return result;
     }else{
       std::stringstream ss;
