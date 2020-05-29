@@ -20,11 +20,11 @@
 #include "ast.hpp"
 #include "elab_scanner.hpp"
 
-//#define OUTPUT_AST
+#define OUTPUT_AST
 //#define OUTPUT_LN
 
-//#define DEBUG_AST
-//#define DEBUG_LN
+#define DEBUG_AST
+#define DEBUG_LN
 
 // variable argument number macro (adapted from stackoverflow.com/questions/3046889/optional-parameters-with-c-macros)
 #define GET_3RD_ARG(arg1, arg2, arg3, ...) arg3
@@ -247,6 +247,7 @@ protected:
   uint8_t rule_punch_format(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
   uint8_t rule_function_pipe(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
   uint8_t rule_fcall_explicit(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
+  uint8_t rule_fcall_implicit_start(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
   uint8_t rule_fcall_implicit(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
   uint8_t rule_for_index(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);
   uint8_t rule_assignment_expression(std::list<std::tuple<Rule_id, Token_entry>> &pass_list);

@@ -1,4 +1,5 @@
 #include <queue>
+#include <array>
 
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
@@ -22,7 +23,7 @@ protected:
 
   void       translate_code_blocks(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln,
                                    Rule_id term_rule = Prp_invalid);
-  Lnast_node eval_rule(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln);
+  Lnast_node eval_rule(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln, bool add_singles = false);
   
   // rules that don't produce an RHS expression
   void eval_assignment_expression(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln);
@@ -35,20 +36,20 @@ protected:
 
   // rules that produce an RHS expression
   Lnast_node eval_expression(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln);
-  Lnast_node eval_tuple(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln);
-  Lnast_node eval_tuple(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln, std::vector<Lnast_node> &extra_nodes, uint64_t nodes_at_end_idx=0);
+  Lnast_node eval_tuple(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln, mmap_lib::Tree_index idx_pre_tuple_vals=mmap_lib::Tree_index(-1,-1), mmap_lib::Tree_index idx_post_tuple_vals=mmap_lib::Tree_index(-1,-1), Lnast_node extra_node=Lnast_node());
   Lnast_node eval_for_in_notation(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln);
   Lnast_node eval_tuple_array_notation(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln);
-  Lnast_node eval_fcall_explicit(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln, Lnast_node piped_node=Lnast_node(), Lnast_node name_node = Lnast_node());
-  Lnast_node eval_fcall_implicit(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln, Lnast_node piped_node=Lnast_node(), Lnast_node name_node = Lnast_node());
+  Lnast_node eval_fcall_explicit(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln, mmap_lib::Tree_index idx_piped_val=mmap_lib::Tree_index(-1,-1), Lnast_node piped_node=Lnast_node(), Lnast_node name_node = Lnast_node());
+  Lnast_node eval_fcall_implicit(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln, mmap_lib::Tree_index idx_piped_val=mmap_lib::Tree_index(-1,-1), Lnast_node piped_node=Lnast_node(), Lnast_node name_node = Lnast_node());
   Lnast_node eval_tuple_dot_notation(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln);
   Lnast_node eval_bit_selection_notation(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln);
   Lnast_node eval_fluid_ref(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln);
-  Lnast_node eval_scope_declaration(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln);
+  Lnast_node eval_scope_declaration(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln, Lnast_node name_node=Lnast_node());
   Lnast_node eval_sub_expression(mmap_lib::Tree_index idx_start_ast, Lnast_node operator_node);
   // FIXME: support implicit function calls
   
-  void add_extra_tuple_nodes(mmap_lib::Tree_index idx_start_ln, std::vector<Lnast_node> &extra_nodes, uint64_t nodes_total, uint64_t start_idx);
+  void add_tuple_nodes(mmap_lib::Tree_index idx_start_ln, std::list<std::array<Lnast_node,3>> &tuple_nodes);
+  void evaluate_all_tuple_nodes(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_pre_tuple_vals, mmap_lib::Tree_index idx_post_tuple_vals, std::list<std::array<Lnast_node,3>> &tuple_nodes);
 
   Lnast_node  gen_operator(mmap_lib::Tree_index idx, uint8_t *skip_sibs);
   inline bool is_expr(mmap_lib::Tree_index idx);

@@ -74,7 +74,7 @@ uint8_t Prp::rule_code_block_int(std::list<std::tuple<Rule_id, Token_entry>> &pa
     RULE_SUCCESS("Matched rule_code_block_int.\n", Prp_rule_code_block_int);
   }*/ else if (CHECK_RULE(&Prp::rule_assignment_expression)) {
     RULE_SUCCESS("Matched rule_code_block_int.\n", Prp_rule_code_block_int);
-  } else if (CHECK_RULE(&Prp::rule_fcall_implicit)) {
+  } else if (CHECK_RULE(&Prp::rule_fcall_implicit_start)) {
     RULE_SUCCESS("Matched rule_code_block_int.\n", Prp_rule_code_block_int);
   } else if (CHECK_RULE(&Prp::rule_fcall_explicit)) {
     RULE_SUCCESS("Matched rule_code_block_int.\n", Prp_rule_code_block_int);
@@ -651,9 +651,7 @@ uint8_t Prp::rule_function_pipe(std::list<std::tuple<Rule_id, Token_entry>> &pas
   } else {
     if (!CHECK_RULE(&Prp::rule_fcall_implicit)) {
       if (!CHECK_RULE(&Prp::rule_fcall_explicit)) {
-        if(!CHECK_RULE(&Prp::rule_scope_declaration)){
-          RULE_FAILED("Failed rule_function_pipe; couldn't find a function call or function definition.\n");
-        }
+        RULE_FAILED("Failed rule_function_pipe; couldn't find a function call or function definition.\n");
       }
       check_ws();
     }
@@ -666,12 +664,9 @@ uint8_t Prp::rule_function_pipe(std::list<std::tuple<Rule_id, Token_entry>> &pas
       if (!SCAN_IS_TOKEN(Token_id_pipe, Prp_rule_function_pipe)) {
         next = false;
       } else {
-        if (!CHECK_RULE(&Prp::rule_fcall_implicit)) {
-          if (!CHECK_RULE(&Prp::rule_fcall_explicit)) {
-            if(!CHECK_RULE(&Prp::rule_scope_declaration)){
-              PSEUDO_FAIL();
-              next = false;
-            }
+        if(!CHECK_RULE(&Prp::rule_fcall_implicit)) {
+          if(!CHECK_RULE(&Prp::rule_fcall_explicit)) {
+            next = false;
           }
         }
       }
@@ -772,26 +767,97 @@ uint8_t Prp::rule_fcall_arg_notation(std::list<std::tuple<Rule_id, Token_entry>>
   RULE_SUCCESS("Matched rule_fcall_arg_notation.\n", Prp_rule_fcall_arg_notation);
 }
 
+uint8_t Prp::rule_fcall_implicit_start(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
+  INIT_FUNCTION("rule_fcall_implicit_start.");
+  
+  // option 1
+  INIT_PSEUDO_FAIL();
+  UPDATE_PSEUDO_FAIL();
+  
+  // optional
+  CHECK_RULE(&Prp::rule_tuple_dot_notation);
+  check_ws();
+  if(!CHECK_RULE(&Prp::rule_scope_declaration)){
+    PSEUDO_FAIL();
+  }
+  else{
+    // optional
+    CHECK_RULE(&Prp::rule_function_pipe);
+    if(CHECK_RULE(&Prp::rule_not_in_implicit)){
+      RULE_FAILED("Failed rule_fcall_implicit.\n");
+    }
+    sub_cnt++;
+    RULE_SUCCESS("Matched rule_fcall_implicit; first option.\n", Prp_rule_fcall_implicit);
+  }
+  
+  UPDATE_PSEUDO_FAIL();
+  if(CHECK_RULE(&Prp::rule_logical_expression)){
+    if(!CHECK_RULE(&Prp::rule_function_pipe)){
+      PSEUDO_FAIL();
+    }
+    else{
+      if(CHECK_RULE(&Prp::rule_not_in_implicit)){
+        RULE_FAILED("Failed rule_fcall_implicit_start.\n");
+      }
+      sub_cnt++;
+      RULE_SUCCESS("Matched rule_fcall_implicit; second option.\n", Prp_rule_fcall_implicit);
+    }
+  }
+  
+  if(CHECK_RULE(&Prp::rule_constant)){
+    RULE_FAILED("Failed rule_fcall_implicit_start; found a constant on the last option.\n");
+  }
+  
+  if(!CHECK_RULE(&Prp::rule_tuple_dot_notation)){
+    RULE_FAILED("Failed rule_fcall_implicit_start");
+  }
+  
+  CHECK_RULE(&Prp::rule_function_pipe);
+  
+  if(CHECK_RULE(&Prp::rule_not_in_implicit)){
+    RULE_FAILED("Failed rule_fcall_implicit.\n");
+  }
+  
+  // WARNING: need to do this to ensure that an fcall_implicit subtree is created
+  // sub_cnt++;
+  
+  RULE_SUCCESS("Matched rule_fcall_implicit.\n", Prp_rule_fcall_implicit);
+}
+
 uint8_t Prp::rule_fcall_implicit(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
   INIT_FUNCTION("rule_fcall_implicit.");
   
-  if(!CHECK_RULE(&Prp::rule_tuple_dot_notation)){
-    RULE_FAILED("Failed rule_fcall_implicit; couldn't find a tuple_dot_notation.\n");
+  if(CHECK_RULE(&Prp::rule_constant)){
+    RULE_FAILED("Failed rule_fcall_implicit; found a constant.\n");
   }
   
-  // option 1
+  INIT_PSEUDO_FAIL();
+  UPDATE_PSEUDO_FAIL();
+  
+  // optional
+  CHECK_RULE(&Prp::rule_tuple_dot_notation);
   check_ws();
-  if (CHECK_RULE(&Prp::rule_scope_declaration)) {
+  if(!CHECK_RULE(&Prp::rule_scope_declaration)){
+    PSEUDO_FAIL();
+  }
+  else{
     // optional
     CHECK_RULE(&Prp::rule_function_pipe);
+    RULE_SUCCESS("Matched rule_fcall_implicit; first option.\n", Prp_rule_fcall_implicit);
   }
-  else{ // option 2
-    // optional
-    CHECK_RULE(&Prp::rule_function_pipe);
-    if (CHECK_RULE(&Prp::rule_not_in_implicit)) {
-      RULE_FAILED("Failed rule_fcall_implicit; found an answering not_in_implicit.\n");
-    }
+  
+  if(!CHECK_RULE(&Prp::rule_tuple_dot_notation)){
+    RULE_FAILED("Failed rule_fcall_implicit.\n");
   }
+  
+  CHECK_RULE(&Prp::rule_function_pipe);
+  
+  if(CHECK_RULE(&Prp::rule_not_in_implicit)){
+    RULE_FAILED("Failed rule_fcall_implicit.\n");
+  }
+  
+  // WARNING: need to do this to ensure that an fcall_implicit subtree is created
+  // sub_cnt++;
   
   RULE_SUCCESS("Matched rule_fcall_implicit.\n", Prp_rule_fcall_implicit);
 }
@@ -872,14 +938,14 @@ uint8_t Prp::rule_assignment_expression(std::list<std::tuple<Rule_id, Token_entr
   INIT_PSEUDO_FAIL();
   UPDATE_PSEUDO_FAIL();
   if (!CHECK_RULE(&Prp::rule_logical_expression)) {
-    if (!CHECK_RULE(&Prp::rule_fcall_implicit)) {
+    if (!CHECK_RULE(&Prp::rule_fcall_implicit_start)) {
       RULE_FAILED("Failed rule_assignment_expression; couldn't find an fcall_implicit or a logical_expression.\n");
     }
   }
   else{
     if(SCAN_IS_TOKEN(Token_id_pipe)){
       PSEUDO_FAIL();
-      if (!CHECK_RULE(&Prp::rule_fcall_implicit)) {
+      if (!CHECK_RULE(&Prp::rule_fcall_implicit_start)) {
         RULE_FAILED("Failed rule_assignment_expression; couldn't find an fcall_implicit or a logical_expression.\n");
       }
     }
@@ -993,7 +1059,7 @@ uint8_t Prp::rule_tuple_notation(std::list<std::tuple<Rule_id, Token_entry>> &pa
         CHECK_RULE(&Prp::rule_bit_selection_bracket);
       }
       // optional
-      CHECK_RULE(&Prp::rule_function_pipe);
+      //CHECK_RULE(&Prp::rule_function_pipe);
       RULE_SUCCESS("Matched rule_tuple_notation; second option.\n", Prp_rule_tuple_notation);
     } else {
       RULE_FAILED("Failed rule_tuple_notation; couldn't match option 1 or 2.\n");
@@ -1138,7 +1204,7 @@ uint8_t Prp::rule_identifier(std::list<std::tuple<Rule_id, Token_entry>> &pass_l
   
   // optional
   bool op = false;
-  if(SCAN_IS_TOKEN(Token_id_bang, Prp_rule_identifier) || SCAN_IS_TOKEN(Pyrope_id_tilde, Prp_rule_identifier))
+  if(SCAN_IS_TOKEN(Token_id_bang, Prp_rule_identifier) || SCAN_IS_TOKEN(Token_id_tilde, Prp_rule_identifier))
     op = true;
   
   Token_id toks[] = {Token_id_register, Token_id_input, Token_id_output, Token_id_alnum, Token_id_percent, Token_id_dollar, Token_id_reference};
@@ -2239,6 +2305,7 @@ std::string Prp::rule_id_to_string(Rule_id rid) {
     case Prp_rule_sentinel: return "Sentinel (disregard token)";
     case Prp_rule_overload_notation: return "Overload notation";
     case Prp_rule_overload_name: return "Overload name";
+    case Prp_rule_function_pipe: return "Function pipe";
     default: return fmt::format("{}", rid);
   }
 }
