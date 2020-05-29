@@ -11,7 +11,7 @@
 void setup_pass_bitwidth() { Pass_bitwidth::setup(); }
 
 void Pass_bitwidth::setup() {
-  Eprp_method m1("pass.bitwidth", "MIT algorithm... FIXME", &Pass_bitwidth::trans);
+  Eprp_method m1("pass.bitwidth", "MIT algorithm for bitwidth optimization", &Pass_bitwidth::trans);
 
   m1.add_label_optional("max_iterations", "maximum number of iterations to try", "10");
 
@@ -69,7 +69,6 @@ void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
 
   fmt::print("\n");
 
-  //for (const auto &node : lg->fast()) {
   for (const auto &node : lg->fast()) {
     // Iterate over inputs to some node.
     for (const auto &out_edge : node.out_edges()) {
@@ -79,6 +78,10 @@ void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
       // in some cases. (If more than 1 edge has pin X as its driver)
       // FIXME->sh: why?
       if (dpin.has_bitwidth()) {
+        /* if(dpin.get_node().get_type().op == SFlop_Op) { */
+        /*   dpin.ref_bitwidth()->e.dump(); */
+        /*   I(false); */
+        /* } */
         dpin.ref_bitwidth()->set_implicit();
         pending.push_back(dpin);
       } else { // if don't has bitwidth initially, set bits 0 to avoid unnecessary trouble that bitwidth attribute table undefined for some dpin
@@ -100,16 +103,13 @@ bool Pass_bitwidth::bw_pass_iterate() {
   if (pending.empty())
     fmt::print("bw_pass_iterate pass -- no driver pins to iterate over\n");
 
-  // dbg
-  // max_iterations = 0;
+  max_iterations = 10; //FIXME->sh: temporarily solution before := dp_assign supported
   int iterations = 0;
   do {
     I(next_pending.empty());
     fmt::print("\nIteration:{}\n", iterations);
 
-    // auto dpin = pending.back();
     auto dpin = pending.front();
-    // pending.pop_back();
     pending.pop_front();
     dpin.ref_bitwidth()->niters++;
 
@@ -117,16 +117,15 @@ bool Pass_bitwidth::bw_pass_iterate() {
     //      I'd want it to (if pin got added multiple times due to multiple out edges).
     if (dpin.ref_bitwidth()->niters > max_iterations) {
       fmt::print("bw_pass_iterate abort:{}\n", iterations);
-      return false;
+      /* return false; */
+      return true;
     }
 
     do {
       iterate_driver_pin(dpin);
       if (pending.empty())
         break;
-      // dpin = pending.back();
       dpin = pending.front();
-      // pending.pop_back();
       pending.pop_front();
     } while (true);
     fmt::print("Iteration:{}, all dpin in pending vector visited!\n", iterations);
@@ -137,13 +136,6 @@ bool Pass_bitwidth::bw_pass_iterate() {
       return true;
     }
 
-    //note: faster move usage compared to A.insert(A.end(), B.begin(), B.end())
-    //FIXME->sh: something strange here....it duplicately insert some of the unset imp
-    // if (!initial_imp_unset.empty()) {
-    //   next_pending.insert(next_pending.end(),
-    //                       std::make_move_iterator(initial_imp_unset.begin()),
-    //                       std::make_move_iterator(initial_imp_unset.end()));
-    // }
 
     pending = std::move(next_pending);
     next_pending.clear(); // need to clear the moved container or it will be in a "valid, but undefined state"
@@ -479,17 +471,17 @@ void Pass_bitwidth::iterate_join(Node_pin &pin) {
   }
 }
 
-void Pass_bitwidth::iterate_pick(Node_pin &pin) {
+void Pass_bitwidth::iterate_pick(Node_pin &node_dpin) {
   //NOTE: Pick is used to choose a certain number of bits like A[3:1]
   //Y = A[i,j]... pid 0 = A, pid 1 = offset... j = offset, i = offset + y-bw
   // FIXME: Still in progress.
-  auto op = pin.get_node().get_type().op;
-  for (const auto &inp_edge : pin.get_node().inp_edges_ordered()) {
+  auto op = node_dpin.get_node().get_type().op;
+  for (const auto &inp_edge : node_dpin.get_node().inp_edges_ordered()) {
     auto spin = inp_edge.sink;
   }
 }
 
-void Pass_bitwidth::iterate_equals(Node_pin &pin) {
+void Pass_bitwidth::iterate_equals(Node_pin &node_dpin) {
   // FIXME: Is my understanding correct? Equals_Op is for comparison, not assigns? Read note below, this works for 2 inputs not
   // more. NOTE: When using Verilog, "assign d = a == b == c" does (a == b) == c... thus you compare the result
   //  of a == b (0 or 1) to c, not if all three (a, b, c) are equal.
@@ -498,8 +490,8 @@ void Pass_bitwidth::iterate_equals(Node_pin &pin) {
   int64_t                      check_min;
   int64_t                      check_max;
   Ann_bitwidth::Implicit_range imp;
-  auto op = pin.get_node().get_type().op;
-  for (const auto &inp_edge : pin.get_node().inp_edges_ordered()) {
+  auto op = node_dpin.get_node().get_type().op;
+  for (const auto &inp_edge : node_dpin.get_node().inp_edges_ordered()) {
     auto dpin = inp_edge.driver;
     if (first) {
       check_min = dpin.get_bitwidth().i.min;
@@ -522,10 +514,30 @@ void Pass_bitwidth::iterate_equals(Node_pin &pin) {
     }
   }
 
-  updated = pin.ref_bitwidth()->i.update(imp);
+  updated = node_dpin.ref_bitwidth()->i.update(imp);
 
   if (updated) {
-    mark_all_outputs(pin);
+    mark_all_outputs(node_dpin);
+  }
+}
+
+void Pass_bitwidth::iterate_flop(Node_pin &node_dpin) {
+  I(node_dpin.get_node().get_type().op == SFlop_Op);
+  fmt::print("Flop qpin ann_bits_dbg\n");
+  node_dpin.ref_bitwidth()->e.dump();
+  fmt::print("Flop qpin name:{}\n",    node_dpin.get_name());
+  Ann_bitwidth::Implicit_range imp;
+  bool updated = false;
+  auto flop = node_dpin.get_node();
+  auto flop_din_spin = flop.get_sink_pin("D");
+
+  I(flop_din_spin.inp_edges().size() == 1);
+  imp.max = flop_din_spin.inp_edges().begin()->driver.get_bitwidth().i.max;
+  imp.min = flop_din_spin.inp_edges().begin()->driver.get_bitwidth().i.min;
+
+  updated = node_dpin.ref_bitwidth()->i.update(imp);
+  if (updated) {
+    mark_all_outputs(node_dpin);
   }
 }
 
@@ -580,8 +592,7 @@ void Pass_bitwidth::iterate_mux(Node_pin &node_dpin) {
 
 
 void Pass_bitwidth::iterate_driver_pin(Node_pin &dpin) {
-  const auto node      = dpin.get_node();
-  const auto node_type = node.get_type().op;
+  const auto node_type = dpin.get_node().get_type().op;
 
   switch (node_type) {
     //FIXME->Hunter: GraphIO will never happen here, right? Maybe from subgraph nodes?
@@ -624,6 +635,9 @@ void Pass_bitwidth::iterate_driver_pin(Node_pin &dpin) {
       break;
     case Mux_Op:
       iterate_mux(dpin);
+      break;
+    case SFlop_Op:
+      iterate_flop(dpin);
       break;
     default: fmt::print("Op not yet supported in iterate_driver_pin\n");
   }

@@ -41,8 +41,9 @@ std::string_view Lnast::add_string(const std::string &str) {
 
 void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
   Lnast_nid top_sts_nid = get_first_child(top_nid);
-  default_const_nid = add_child(top_sts_nid, Lnast_node(Lnast_ntype::create_const(), Token(Token_id_alnum, 0, 0, 0, "default_const")));
-  err_var_undefined = add_child(top_sts_nid, Lnast_node(Lnast_ntype::create_err_flag(), Token(Token_id_alnum, 0, 0, 0, "err_var_undefined")));
+  default_const_nid     = add_child(top_sts_nid, Lnast_node(Lnast_ntype::create_const(),    Token(Token_id_alnum, 0, 0, 0, "default_const")));
+  err_var_undefined_nid = add_child(top_sts_nid, Lnast_node(Lnast_ntype::create_err_flag(), Token(Token_id_alnum, 0, 0, 0, "err_var_undefined")));
+  register_fwd_nid      = add_child(top_sts_nid, Lnast_node(Lnast_ntype::create_reg_fwd(),  Token(Token_id_alnum, 0, 0, 0, "register_forwarding")));
 
   Phi_rtable top_phi_resolve_table;
   phi_resolve_tables[top_sts_nid] = top_phi_resolve_table;
@@ -68,6 +69,8 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
   fmt::print("\nStep-4: RHS SSA\n");
   resolve_ssa_rhs_subs(top_sts_nid);
 
+  fmt::print("\nLNAST SSA Transformation Finished!\n");
+  fmt::print("==================================\n");
 }
 
 
@@ -699,7 +702,11 @@ Lnast_nid Lnast::check_phi_table_parents_chain(std::string_view target_name, con
   if (get_parent(psts_nid) == get_root() && originate_from_csts) {
     ; // do nothing for csts
   } else if (get_parent(psts_nid) == get_root() && !originate_from_csts){
-    return err_var_undefined;
+    if (is_reg(target_name)) {
+      return register_fwd_nid;
+    } else {
+      return err_var_undefined_nid;
+    }
   } else {
     auto tmp_if_nid = get_parent(psts_nid);
     auto new_psts_nid = get_parent(tmp_if_nid);
@@ -737,17 +744,26 @@ bool Lnast::has_else_stmts(const Lnast_nid &if_nid) {
 void Lnast::ssa_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
   //note: handle statement rhs in the 2nd part SSA
 
-  //handle statement lhs
+  //handle lhs of the statement 
   const auto type = get_type(opr_nid);
   if (type.is_assign() || type.is_as() || type.is_tuple()) {
-    const auto  target_nid  = get_first_child(opr_nid);
-    const auto  target_name = get_name(target_nid);
+    const auto  lhs_nid  = get_first_child(opr_nid);
+    const auto  lhs_name = get_name(lhs_nid);
 
-    if (target_name.substr(0,3) == "___") return;
+    if (lhs_name.substr(0,3) == "___") return;
 
-    update_global_lhs_ssa_cnt_table(target_nid);
-    update_phi_resolve_table(psts_nid, target_nid);
+    update_global_lhs_ssa_cnt_table(lhs_nid);
+    update_phi_resolve_table(psts_nid, lhs_nid);
     return;
+  } 
+
+  //handle rhs of the statement, only care about rhs register here
+  for (const auto &itr : children(opr_nid)) {
+    if (itr == get_first_child(opr_nid))  
+      continue;
+     
+    if (is_reg(get_name(itr)))  
+      reg_ini_global_lhs_ssa_cnt_table(itr);
   }
 }
 
@@ -759,14 +775,26 @@ bool Lnast::is_lhs(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
   I(false);
 }
 
-void Lnast::update_global_lhs_ssa_cnt_table(const Lnast_nid &target_nid) {
-  const auto  target_name = get_name(target_nid);
-  auto itr = global_ssa_lhs_cnt_table.find(target_name);
+void Lnast::reg_ini_global_lhs_ssa_cnt_table(const Lnast_nid &rhs_nid) {
+  //initialize global reg to zero when appeared in rhs
+  const auto  rhs_name = get_name(rhs_nid);
+  auto itr = global_ssa_lhs_cnt_table.find(rhs_name);
+  if (itr != global_ssa_lhs_cnt_table.end()) {
+    return;
+  } else {
+    global_ssa_lhs_cnt_table[rhs_name] = 0;
+  }
+}
+
+
+void Lnast::update_global_lhs_ssa_cnt_table(const Lnast_nid &lhs_nid) {
+  const auto  lhs_name = get_name(lhs_nid);
+  auto itr = global_ssa_lhs_cnt_table.find(lhs_name);
   if (itr != global_ssa_lhs_cnt_table.end()) {
     itr->second += 1;
-    ref_data(target_nid)->subs = itr->second;
+    ref_data(lhs_nid)->subs = itr->second;
   } else {
-    global_ssa_lhs_cnt_table[target_name] = 0;
+    global_ssa_lhs_cnt_table[lhs_name] = 0;
   }
 }
 

@@ -5,6 +5,7 @@ function generate () {
   ./prp $1.prp | sort -n > y && column -t y > x && rm -f y && mv x $1.cfg
 }
 
+generate adder_stage
 generate bits_tg
 generate sync_cnt_nested_if
 generate sync_cnt

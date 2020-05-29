@@ -70,6 +70,7 @@ public:
     //group: others
     Lnast_ntype_assert,       // I
     Lnast_ntype_err_flag,     // compile error flag
+    Lnast_ntype_reg_fwd,     // point to the corresponding reg_fwd in LGraph
 
     //group: compiler internal type
     Lnast_ntype_tuple_add,
@@ -143,6 +144,7 @@ protected:
     //group: others
     "assert",
     "error_flag",
+    "reg_fwd",
     //group: compiler internal type
     "tuple_add",
     "tuple_get",
@@ -261,6 +263,7 @@ protected:
     "attr",
     "assert",
     "error_flag",
+    "reg_fwd",
     "tuple_add",
     "tuple_get",
     "tuple_phi_add",
@@ -322,6 +325,7 @@ protected:
     "attr",
     "assert",
     "error_flag",
+    "reg_fwd",
     "tuple_add",
     "tuple_get",
     "tuple_phi_add",
@@ -383,6 +387,7 @@ protected:
     "attr",
     "assert",
     "error_flag",
+    "reg_fwd",
     "tuple_add",
     "tuple_get",
     "tuple_phi_add",
@@ -457,6 +462,7 @@ public:
 
   static Lnast_ntype create_assert()        { return Lnast_ntype(Lnast_ntype_assert); }
   static Lnast_ntype create_err_flag()      { return Lnast_ntype(Lnast_ntype_err_flag); }
+  static Lnast_ntype create_reg_fwd()      { return Lnast_ntype(Lnast_ntype_reg_fwd); }
 
   static Lnast_ntype create_tuple_add()     { return Lnast_ntype(Lnast_ntype_tuple_add);}
   static Lnast_ntype create_tuple_get()     { return Lnast_ntype(Lnast_ntype_tuple_get);}
@@ -525,6 +531,7 @@ public:
 
   bool is_assert()        const { return val == Lnast_ntype_assert; }
   bool is_err_flag()      const { return val == Lnast_ntype_err_flag; }
+  bool is_reg_fwd()       const { return val == Lnast_ntype_reg_fwd; }
 
   bool is_tuple_add()     const { return val == Lnast_ntype_tuple_add; }
   bool is_tuple_get()     const { return val == Lnast_ntype_tuple_get; }

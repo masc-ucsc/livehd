@@ -102,4 +102,6 @@ digraph {
  10->25;
  26 [label=<error_flag, err_var_undefined>];
  10->26;
+ 27 [label=<reg_fwd, register_forwarding>];
+ 10->27;
 }
