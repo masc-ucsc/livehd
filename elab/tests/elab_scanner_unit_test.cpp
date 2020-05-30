@@ -147,3 +147,36 @@ TEST_F(Elab_test, constants) {
   EXPECT_EQ(scanner.scan_get_token(4).tok, Token_id_alnum);
   EXPECT_EQ(scanner.scan_get_token(5).tok, Token_id_alnum);
 }
+
+TEST_F(Elab_test, token_io) {
+  std::string_view txt1(" %out $inp #reg ");
+  scanner.parse_inline(txt1);
+
+  EXPECT_EQ(3, scanner.debug_token_list.size());
+
+  EXPECT_EQ(scanner.debug_token_list[0], "%out");
+  EXPECT_EQ(scanner.debug_token_list[1], "$inp");
+  EXPECT_EQ(scanner.debug_token_list[2], "#reg");
+
+  EXPECT_EQ(scanner.scan_get_token(0).tok, Token_id_output);
+  EXPECT_EQ(scanner.scan_get_token(1).tok, Token_id_input);
+  EXPECT_EQ(scanner.scan_get_token(2).tok, Token_id_register);
+}
+
+TEST_F(Elab_test, token_refs) {
+  std::string_view txt1(" @ref @_ref_ @$inp @%out @% ");
+  scanner.parse_inline(txt1);
+
+  EXPECT_EQ(5, scanner.debug_token_list.size());
+
+  EXPECT_EQ(scanner.debug_token_list[0], "@ref");
+  EXPECT_EQ(scanner.debug_token_list[1], "@_ref_");
+  EXPECT_EQ(scanner.debug_token_list[2], "@$inp");
+  EXPECT_EQ(scanner.debug_token_list[3], "@%out");
+  EXPECT_EQ(scanner.debug_token_list[4], "@%");
+
+  for (auto i=0;i<scanner.debug_token_list.size();++i) {
+    EXPECT_EQ(scanner.scan_get_token(i).tok, Token_id_reference);
+  }
+}
+

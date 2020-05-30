@@ -34,7 +34,7 @@ void Elab_scanner::setup_translate() {
   translate[',']  = Token_id_comma;
   translate['(']  = Token_id_op;
   translate[')']  = Token_id_cp;
-  translate['#']  = Token_id_pound;
+  translate['#']  = Translate_item(Token_id_pound, true); // @#
   translate['>']  = Translate_item(Token_id_gt, true);  // Token_id_pipe
   translate['*']  = Token_id_mult;
   translate['/']  = Token_id_div;
@@ -51,8 +51,8 @@ void Elab_scanner::setup_translate() {
 
   translate['@'] = Token_id_at;
   translate['~'] = Token_id_tilde;
-  translate['$'] = Token_id_dollar;
-  translate['%'] = Token_id_percent;
+  translate['$'] = Translate_item(Token_id_dollar, true); // @$
+  translate['%'] = Translate_item(Token_id_percent, true); // @%
 
   translate['`'] = Token_id_backtick;
 
@@ -123,6 +123,17 @@ void Elab_scanner::add_token(Token &t) {
     } else if (last_tok.tok == Token_id_alnum || last_tok.tok == Token_id_register || last_tok.tok == Token_id_output
                                               || last_tok.tok == Token_id_input || last_tok.tok == Token_id_reference) {  // foo
       token_list.back().append_token(t);
+      return;
+    }
+  } else if (last_tok.tok == Token_id_at) {
+    if (t.tok == Token_id_dollar) {  // @$
+      token_list.back().fuse_token(Token_id_reference, t);
+      return;
+    } else if (t.tok == Token_id_pound) {  // @#
+      token_list.back().fuse_token(Token_id_reference, t);
+      return;
+    } else if (t.tok == Token_id_percent) {  // @%
+      token_list.back().fuse_token(Token_id_reference, t);
       return;
     }
   }
