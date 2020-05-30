@@ -128,20 +128,22 @@ TEST_F(Elab_test, token_dp_assign) {
 }
 
 TEST_F(Elab_test, constants) {
-  std::string_view txt1(" alnum 0d332? 0b1??1?10? foo");
+  std::string_view txt1(" alnum 0d332? 0b1??1?10?   0b?0_? foo");
   scanner.parse_inline(txt1);
 
-  EXPECT_EQ(5, scanner.debug_token_list.size());
+  EXPECT_EQ(6, scanner.debug_token_list.size());
 
   EXPECT_EQ(scanner.debug_token_list[0], "alnum");
   EXPECT_EQ(scanner.debug_token_list[1], "0d332");
   EXPECT_EQ(scanner.debug_token_list[2], "?");
   EXPECT_EQ(scanner.debug_token_list[3], "0b1??1?10?");
-  EXPECT_EQ(scanner.debug_token_list[4], "foo");
+  EXPECT_EQ(scanner.debug_token_list[4], "0b?0_?");
+  EXPECT_EQ(scanner.debug_token_list[5], "foo");
 
   EXPECT_EQ(scanner.scan_get_token(0).tok, Token_id_alnum);
   EXPECT_EQ(scanner.scan_get_token(1).tok, Token_id_alnum);
   EXPECT_EQ(scanner.scan_get_token(2).tok, Token_id_qmark);
   EXPECT_EQ(scanner.scan_get_token(3).tok, Token_id_alnum);
   EXPECT_EQ(scanner.scan_get_token(4).tok, Token_id_alnum);
+  EXPECT_EQ(scanner.scan_get_token(5).tok, Token_id_alnum);
 }

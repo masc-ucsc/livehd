@@ -101,7 +101,7 @@ void Elab_scanner::add_token(Token &t) {
   } else if (t.tok == Token_id_qmark) {
     if (last_tok.tok == Token_id_alnum) {
       if (last_tok.text[0] == '0') {
-        if (last_tok.text.size() > 2 && (last_tok.text[1] == 'b' || last_tok.text[1] == 'B')) {
+        if (last_tok.text.size() >= 2 && (last_tok.text[1] == 'b' || last_tok.text[1] == 'B')) {
           token_list.back().fuse_token(Token_id_alnum, t);
           return;
         }

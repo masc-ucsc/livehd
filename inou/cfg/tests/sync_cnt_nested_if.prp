@@ -10,9 +10,9 @@ if (#cnt1 == 15) {
 } 
 
 if ($c1 == 1) {
-  #cnt1 = #cnt1 + 1
+  #cnt1 := #cnt1 + 1
   if ($c2 == 1) {
-    #cnt1 = #cnt1 + 2
+    #cnt1 := #cnt1 + 2
   } 
 } 
 
