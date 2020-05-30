@@ -332,8 +332,8 @@ Lnast_node Prp_lnast::eval_scope_declaration(mmap_lib::Tree_index idx_start_ast,
       retnode    = Lnast_node::create_ref(lnast_temp);
       get_next_temp_var();
     }
-    lnast->add_child(idx_func_root, retnode);
   }
+  lnast->add_child(idx_func_root, retnode);
 
   // move to either fcall_arg_notation or scope_cond or just another colon
   if (ast->get_data(idx_fcall).rule_id == Prp_rule_scope_condition) {
@@ -956,7 +956,6 @@ Lnast_node Prp_lnast::eval_expression(mmap_lib::Tree_index idx_start_ast, mmap_l
   
   if(has_assign_op){
     operator_stack.emplace_back(assign_operator);
-    operand_stack.emplace_back(assign_operand);
   }
 
   for (auto it = operator_stack.begin(); it != operator_stack.end(); ++it) {
@@ -972,8 +971,15 @@ Lnast_node Prp_lnast::eval_expression(mmap_lib::Tree_index idx_start_ast, mmap_l
     lnast->add_child(idx_operator_ln, lhs);  // LHS node
     auto op1 = operand_stack.front();
     operand_stack.pop_front();
+    bool added_assign_op = false;
+    if(it == std::prev(operator_stack.end())){
+      if(assign_operand.type.get_raw_ntype() != Lnast_ntype::Lnast_ntype_invalid){
+        lnast->add_child(idx_operator_ln, assign_operand);
+        added_assign_op = true;
+      }
+    }
     lnast->add_child(idx_operator_ln, op1);  // first operand
-    if (!((*it).type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_not ||
+    if (!(added_assign_op || (*it).type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_not ||
           (*it).type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_logical_not)) {
       auto op2 = operand_stack.front();  // optional second operand
       operand_stack.pop_front();
@@ -983,9 +989,13 @@ Lnast_node Prp_lnast::eval_expression(mmap_lib::Tree_index idx_start_ast, mmap_l
       if (std::next(it, 1) != operator_stack.end()) {
         if ((*(std::next(it, 1))).type.get_raw_ntype() == (*it).type.get_raw_ntype()) {
           it++;
-          auto opn = operand_stack.front();
-          operand_stack.pop_front();
-          lnast->add_child(idx_operator_ln, opn);
+          if(it == std::prev(operator_stack.end())){
+            lnast->add_child(idx_operator_ln, assign_operand);
+          }
+          else{
+            lnast->add_child(idx_operator_ln, operand_stack.front());
+            operand_stack.pop_front();
+          }
         } else
           break;
       } else
@@ -1229,12 +1239,25 @@ Lnast_node Prp_lnast::eval_fcall_implicit(mmap_lib::Tree_index idx_start_ast, mm
   
   auto idx_func_name = ast->get_child(idx_nxt_ast);
   
-  Lnast_node piped_tuple_lhs;
   bool has_piped_value = idx_piped_val != ast->invalid_index() || piped_node.type.get_raw_ntype() != Lnast_ntype::Lnast_ntype_invalid;
   bool is_plain_value = false;
-  if(!has_piped_value){
-    if(ast->get_data(ast->get_sibling_next(idx_func_name)).rule_id != Prp_rule_scope_declaration){
-      is_plain_value = true;
+  
+  // no name, anonymous function
+  Lnast_node decl_func_name_node;
+  if(ast->get_data(idx_func_name).rule_id == Prp_rule_scope_declaration){
+    // create function declaration node
+    PRINT_DBG_LN("Found an inline anonymous function.\n");
+    decl_func_name_node = eval_scope_declaration(idx_func_name, idx_start_ln);
+  }
+  else{
+    if(!has_piped_value){
+      if(ast->get_data(ast->get_sibling_next(idx_func_name)).rule_id != Prp_rule_scope_declaration){
+        is_plain_value = true;
+      }
+      else{
+        auto idx_scope_dec = ast->get_sibling_next(idx_func_name);
+        decl_func_name_node = eval_scope_declaration(idx_scope_dec, idx_start_ln, Lnast_node::create_ref(get_token(ast->get_data(idx_func_name).token_entry)));
+      }
     }
   }
   
@@ -1259,8 +1282,14 @@ Lnast_node Prp_lnast::eval_fcall_implicit(mmap_lib::Tree_index idx_start_ast, mm
       get_next_temp_var();
       auto arg_tuple  = eval_tuple(idx_piped_val, idx_start_ln, ast->invalid_index(), ast->invalid_index(), piped_node);
       idx_fcall_root = lnast->add_child(cur_stmts, Lnast_node::create_func_call(""));
+      lnast->add_child(idx_fcall_root, piped_node_new);
+      if(decl_func_name_node.type.get_raw_ntype() != Lnast_ntype::Lnast_ntype_invalid){
+        lnast->add_child(idx_fcall_root, decl_func_name_node);
+      }
+      else{
+        lnast->add_child(idx_fcall_root, Lnast_node::create_ref(get_token(ast->get_data(idx_func_name).token_entry)));
+      }
       lnast->add_child(idx_fcall_root, arg_tuple);
-      lnast->add_child(idx_fcall_root, Lnast_node::create_ref(get_token(ast->get_data(idx_func_name).token_entry)));
     }
     auto idx_piped_fcall = ast->get_last_child(idx_pipe_maybe);
     if(ast->get_data(idx_piped_fcall).rule_id == Prp_rule_fcall_explicit){
@@ -1306,7 +1335,12 @@ Lnast_node Prp_lnast::eval_fcall_implicit(mmap_lib::Tree_index idx_start_ast, mm
   lnast->add_child(idx_fcall_root, retnode);
   
   // add the function name
-  lnast->add_child(idx_fcall_root, Lnast_node::create_ref(get_token(ast->get_data(idx_func_name).token_entry)));
+  if(decl_func_name_node.type.get_raw_ntype() != Lnast_ntype::Lnast_ntype_invalid){
+    lnast->add_child(idx_fcall_root, decl_func_name_node);
+  }
+  else{
+    lnast->add_child(idx_fcall_root, Lnast_node::create_ref(get_token(ast->get_data(idx_func_name).token_entry)));
+  }
   
   // add any piped arguments
   lnast->add_child(idx_fcall_root, arg_tuple);
@@ -1339,7 +1373,7 @@ Lnast_node Prp_lnast::eval_tuple_dot_notation(mmap_lib::Tree_index idx_start_ast
 
   while (scan_text(ast->get_data(idx_nxt_ast).token_entry) == ".") {
     idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast);
-    eval_rule(idx_nxt_ast, idx_dot_root);
+    lnast->add_child(idx_dot_root, eval_rule(idx_nxt_ast, idx_dot_root));
     idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast);
     if (idx_nxt_ast == ast->invalid_index()) break;
   }

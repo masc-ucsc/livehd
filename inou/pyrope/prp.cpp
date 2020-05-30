@@ -819,7 +819,7 @@ uint8_t Prp::rule_fcall_implicit_start(std::list<std::tuple<Rule_id, Token_entry
   }
   
   // WARNING: need to do this to ensure that an fcall_implicit subtree is created
-  // sub_cnt++;
+  sub_cnt++;
   
   RULE_SUCCESS("Matched rule_fcall_implicit.\n", Prp_rule_fcall_implicit);
 }
@@ -843,6 +843,7 @@ uint8_t Prp::rule_fcall_implicit(std::list<std::tuple<Rule_id, Token_entry>> &pa
   else{
     // optional
     CHECK_RULE(&Prp::rule_function_pipe);
+    sub_cnt++;
     RULE_SUCCESS("Matched rule_fcall_implicit; first option.\n", Prp_rule_fcall_implicit);
   }
   
@@ -857,7 +858,7 @@ uint8_t Prp::rule_fcall_implicit(std::list<std::tuple<Rule_id, Token_entry>> &pa
   }
   
   // WARNING: need to do this to ensure that an fcall_implicit subtree is created
-  // sub_cnt++;
+  sub_cnt++;
   
   RULE_SUCCESS("Matched rule_fcall_implicit.\n", Prp_rule_fcall_implicit);
 }

@@ -10,7 +10,7 @@ a := 3
 // 3 - good
 I(b.total==0)
 
-// 4 - close; problems with range in LNAST notation outstanding, parses
+// 4 - good
 a = 1..b
 a = 1..b.field
 for i in 1..b.field {
@@ -26,9 +26,9 @@ a = b | c
 a = waitfor(@foo)
 
 // 8 - good
- a = @foo
+a = @foo
 
-// 9 - parses only
+// 9 - almost good; problem with return statements that are only variables or constants
  a |> ::{ return $} |> s
 
 // 10 - good
