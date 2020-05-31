@@ -6,7 +6,7 @@ function generate () {
 }
 
 generate adder_stage
-generate bits_tg
+generate bits_rhs
 generate sync_cnt_nested_if
 generate sync_cnt
 generate simple_tuple
