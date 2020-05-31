@@ -92,6 +92,26 @@ void LGraph::each_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)> 
   }
 }
 
+void LGraph::each_sub_unique_fast(const std::function<bool(Node &, Lg_type_id)> fn) {
+  const auto &m = get_down_nodes_map();
+  std::set<Lg_type_id> visited;
+  for (auto it = m.begin(), end = m.end(); it != end; ++it) {
+    Index_ID cid = it->first.nid;
+    I(cid);
+    I(node_internal[cid].is_node_state());
+    I(node_internal[cid].is_master_root());
+
+    auto node = Node(this, it->first);
+
+    bool cont = true;
+    if (visited.find(it->second) == visited.end()) {
+      cont = fn(node, it->second);
+      visited.insert(it->second);
+    }
+    if (!cont) return;
+  }
+}
+
 void LGraph::each_root_fast_direct(std::function<bool(Node &)> f1) {
 
   for (const auto &ni : node_internal) {

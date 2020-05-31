@@ -9,23 +9,28 @@
 
 #include "pass.hpp"
 #include "rapidjson/document.h"
+#include "lgraph.hpp"
 
 class Inou_json : public Pass {
 private:
 protected:
-  absl::flat_hash_map<int, Node> json_remap;
+  //absl::flat_hash_map<int, Node> json_remap;
+  absl::flat_hash_map<int, Node::Compact_class> json_remap;
+  // for (auto ent: json_remap) {
+  //   auto node = Node(g, ent.second);
+  // }
 
   bool is_const_op(const std::string &s) const;
   bool is_int(const std::string &s) const;
 
   void from_json(LGraph *g, rapidjson::Document &document);
-  void to_json(const LGraph *g, const std::string &filename) const;
+  void to_json(LGraph *lg, const std::string &filename) const;
 
   static void tolg(Eprp_var &var);
   static void fromlg(Eprp_var &var);
 
 public:
-  Inou_json(){};
+  Inou_json(const Eprp_var &var);
 
   static void setup();
 };

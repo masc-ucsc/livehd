@@ -240,6 +240,7 @@ public:
   void each_output_edge_fast(std::function<void(XEdge &edge)> f1);
 
   void each_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)>);
+  void each_sub_unique_fast(const std::function<bool(Node &, Lg_type_id)> fn);
 
   template <typename FN>
   void each_sub_fast(const FN f1) {
