@@ -160,8 +160,7 @@ public:
 
   std::string_view get_input_match(Port_ID pid) const {
     size_t idx = static_cast<size_t>(pid);
-    if (idx >= inputs.size())
-      return std::string_view {};
+    I(idx < inputs.size());
 
     return inputs[idx];
   }
@@ -195,8 +194,7 @@ public:
 
   std::string_view get_output_match(Port_ID pid) const {
     size_t idx = static_cast<size_t>(pid);
-    if (idx >= outputs.size())
-      return std::string_view {};
+    I(idx < outputs.size());
 
     return outputs[idx];
   }

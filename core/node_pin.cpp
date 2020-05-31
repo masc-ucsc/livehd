@@ -175,6 +175,15 @@ Node_pin Node_pin::find_driver_pin(LGraph *top, std::string_view wname) {
   return Node_pin(top, ref->get_key(it));
 }
 
+std::string_view Node_pin::get_pin_name() const {
+  if (get_node().is_type_sub())
+    return get_type_sub_io_name();
+  if (is_driver())
+    return get_node().get_type().get_output_match(pid);
+  else
+    return get_node().get_type().get_input_match(pid);
+}
+
 void Node_pin::set_offset(uint16_t offset) {
   if (offset == 0) return;
 
