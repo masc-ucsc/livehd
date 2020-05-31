@@ -246,25 +246,25 @@ to LiveHD, please send us a notification, we are glad to add your paper.
 1. [LiveHD: A Productive Live Hardware Development Flow](doc/papers/LiveHD_IEEE_Micro20_submitted.pdf), Sheng-Hong Wang, Rafael T. Possignolo, Haven Skinner, and Jose Renau, IEEE Micro Special Issue on Agile and Open-Source Hardware, July/August 2020. 
 
 
-1. [LiveSim: A Fast Hot Reload Simulator for HDLs](docs/papers/LiveSim_ISPASS20.pdf), Haven Skinner, Rafael T. Possignolo, Sheng-Hong Wang, and Jose Renau, International Symposium on Performance Analysis of Systems and Software (ISPASS), April 2020. **(Best Paper Nomination)**
+2. [LiveSim: A Fast Hot Reload Simulator for HDLs](docs/papers/LiveSim_ISPASS20.pdf), Haven Skinner, Rafael T. Possignolo, Sheng-Hong Wang, and Jose Renau, International Symposium on Performance Analysis of Systems and Software (ISPASS), April 2020. **(Best Paper Nomination)**
 
-2. [SMatch: Structural Matching for Fast Resynthesis in FPGAs](docs/papers/SMatch_DAC19.pdf), Rafael T.
+3. [SMatch: Structural Matching for Fast Resynthesis in FPGAs](docs/papers/SMatch_DAC19.pdf), Rafael T.
    Possignolo and Jose Renau, Design Automation Conference (DAC), June 2019.
 
-2. [LiveSynth: Towards an Interactive Synthesis Flow](docs/papers/LiveSynth_DAC17.pdf), Rafael T. Possignolo, and
+4. [LiveSynth: Towards an Interactive Synthesis Flow](docs/papers/LiveSynth_DAC17.pdf), Rafael T. Possignolo, and
    Jose Renau, Design Automation Conference (DAC), June 2017.
 
 #### LGraph 
-3. [LGraph: A Unified Data Model and API for Productive Open-Source Hardware Design](docs/papers/LGraph_WOSET19.pdf), 
+5. [LGraph: A Unified Data Model and API for Productive Open-Source Hardware Design](docs/papers/LGraph_WOSET19.pdf), 
    Sheng-Hong Wang, Rafael T. Possignolo, Qian Chen, Rohan Ganpati, and
    Jose Renau, Second Workshop on Open-Source EDA Technology (WOSET), November 2019.
 
-4. [LGraph: A multi-language open-source database for VLSI](docs/papers/LGraph_WOSET18.pdf), Rafael T. Possignolo,
+6. [LGraph: A multi-language open-source database for VLSI](docs/papers/LGraph_WOSET18.pdf), Rafael T. Possignolo,
    Sheng-Hong Wang, Haven Skinner, and Jose Renau. First Workshop on Open-Source
    EDA Technology (WOSET), November 2018. **(Best Tool Nomination)**
 
 #### LNAST 
-5. [LNAST: A Language Neutral Intermediate Representation for Hardware Description Languages](docs/papers/LNAST_WOSET19.pdf), Sheng-Hong Wang, Akash Sridhar, and Jose Renau,
+7. [LNAST: A Language Neutral Intermediate Representation for Hardware Description Languages](docs/papers/LNAST_WOSET19.pdf), Sheng-Hong Wang, Akash Sridhar, and Jose Renau,
    Second Workshop on Open-Source EDA Technology (WOSET), 2019.
 
 
