@@ -264,6 +264,7 @@ static void tojson_debug_print_graph(LGraph *lg) {
 using PrettySbuffWriter = rapidjson::PrettyWriter<rapidjson::StringBuffer>;
 class Inou_Tojson {
   using IPair = std::pair<uint32_t, uint32_t>;
+  using Cells = std::vector<Node::Compact_class>;
   private:
     LGraph *toplg;
     PrettySbuffWriter &writer;
@@ -271,16 +272,112 @@ class Inou_Tojson {
     absl::flat_hash_map<Node_pin::Compact_class, uint32_t> pick_cache;
     ssize_t next_idx;
     ///
-    int GetPorts(LGraph *lg);
     void ResetIndices() {
       pick_cache.clear();
       indices.clear();
       next_idx = 2;
     }
+    // ipair.first: start idx, ipair.second: # of bits starting at start idx
+    //    -> if ipair.second == 0, then we've started the recursion
+    // precondition: call writer.StartArray() before calling this func
+    // postcondition: call writer.EndArray()
+    int BacktraceSinkPin(const Node_pin &spin, IPair ipair = {0, 0});
+    int BacktraceSinkPinWrapper(const Node_pin &spin) {
+      writer.StartArray();
+      int retval = BacktraceSinkPin(spin);
+      writer.EndArray();
+      return retval;
+    }
+    int GetPorts(LGraph *lg);
+    int GetCells(LGraph *lg, const Cells &cells);
   public:
     Inou_Tojson(LGraph *toplg_, PrettySbuffWriter &writer_): toplg(toplg_), writer(writer_) {}
     int DumpGraph(Lg_type_id lgid);
 };
+
+int Inou_Tojson::BacktraceSinkPin(const Node_pin &spin, IPair ipair) {
+  int retval = 0;
+  if (ipair.second == 0) {
+    for (auto &edge : spin.inp_edges()) {
+      ipair.second = edge.get_bits();
+    }
+    if (ipair.second == 0) {
+      fmt::print("ERROR: sink pin \"{}\" has zero bits??\n", spin.debug_name());
+      return -1;
+    }
+  }
+  fmt::print("hello {}:{}\n", ipair.first, ipair.second);
+  uint32_t num_edges = 0;
+  for (auto &edge : spin.inp_edges()) {
+    ++num_edges;
+    Node_pin driver = edge.driver;
+    Node dnode = driver.get_node();
+    Node_Type ntype = dnode.get_type();
+    //fmt::print("   offset name test: {}\n", ntype.get_output_match(driver.get_pid()));
+    if (dnode.is_type(Pick_Op)) {
+      Node_pin apin = dnode.get_sink_pin("A");
+      Node_pin offpin = dnode.get_sink_pin("OFFSET");
+      Node_pin::Compact_class npincc = offpin.get_compact_class();
+      auto iter = pick_cache.find(npincc);
+      if (iter == pick_cache.end()) {
+        fmt::print("ERROR: offset pin \"{}\" wasn't added to map??\n", offpin.debug_name());
+        return -1;
+      }
+      fmt::print(" --Pick_Op {}:{}\n", ipair.first + iter->second, ipair.second);
+      if (BacktraceSinkPin(apin, {ipair.first + iter->second, ipair.second}) < 0) { return -1; }
+    } else if (dnode.is_type(Join_Op)) {
+      // I'm going to assume that you iterate the Join_Op sink pins in order...
+      uint32_t curwidth = 0, done_bits = 0;
+      for (auto &inpin : dnode.inp_connected_pins()) {
+        if (curwidth >= (ipair.first + ipair.second)) { break; }
+        uint32_t bwidth = 0;
+        for (auto &edge : inpin.inp_edges()) {
+          bwidth = edge.get_bits();
+        }
+        if (bwidth == 0) {
+          fmt::print("WARN: connected in pin to Join_Op has bwidth of zero?\n");
+          continue;
+        }
+        uint32_t eidx = curwidth + bwidth - 1;
+        uint32_t diff_f, diff_s = ipair.second - done_bits;
+        if (curwidth < ipair.first && eidx >= ipair.first) {
+          diff_f = ipair.first - curwidth;
+        } else {
+          diff_f = 0;
+        }
+        if ((bwidth + curwidth) < (ipair.first + ipair.second)) {
+          diff_s = bwidth + curwidth - ipair.first;
+        }
+        fmt::print("curwidth = {}, bwidth = {}\n", curwidth, bwidth);
+        fmt::print(" --Join_Op {}:{}\n", diff_f, diff_s);
+        if (BacktraceSinkPin(inpin, {diff_f, diff_s}) < 0) { return -1; }
+        curwidth += bwidth;
+        done_bits += diff_s;
+      }
+    } else if (dnode.is_type(U32Const_Op)) {
+      // FIXME
+      fmt::print("ERROR: U32Const_Op not supported for backtrace\n");
+      return -1;
+    } else {
+      Node_pin::Compact_class npincc = driver.get_compact_class();
+      auto iter = indices.find(npincc);
+      if (iter == indices.end()) {
+        fmt::print("ERROR: driver pin \"{}\" wasn't added to map??\n", driver.debug_name());
+        return -1;
+      }
+      uint32_t startidx = iter->second.first + ipair.first;
+      uint32_t endidx = startidx + ipair.second;
+      for (uint32_t idx = startidx; idx < endidx; ++idx) {
+        writer.Uint64(idx);
+      }
+    }
+  }
+  if (num_edges > 1) {
+    fmt::print("WARN: BacktraceSinkPin found more than 1 ({}) edge for pin {}\n",
+                num_edges, spin.debug_name());
+  }
+  return retval;
+}
 
 int Inou_Tojson::GetPorts(LGraph *lg) {
   int retval = 0;
@@ -328,10 +425,46 @@ int Inou_Tojson::GetPorts(LGraph *lg) {
     writer.StartObject();
     writer.Key("direction");
     writer.String("output");
+    writer.Key("bits");
+    retval = BacktraceSinkPinWrapper(out_pin);
+    if (retval < 0) { return false; }
     writer.EndObject();
     return true;
   });
   writer.EndObject();
+  return retval;
+}
+
+int Inou_Tojson::GetCells(LGraph *lg, const Cells &cells) {
+  int retval = 0;
+  writer.Key("cells");
+  writer.StartObject();
+  for (Node::Compact_class ncc : cells) {
+    Node node = Node(lg, ncc);
+    Node_Type ntype = node.get_type();
+    uint32_t hide_name = 1;
+    if (node.has_name()) {
+      fmt::print("{}\n", node.get_name());
+      writer.Key(std::string(node.get_name()).c_str());
+      hide_name = 0;
+    } else {
+      fmt::print("{}\n", node.debug_name());
+      writer.Key(node.debug_name().c_str());
+    }
+    writer.StartObject();
+    writer.Key("hide_name");
+    writer.Uint64(hide_name);
+    writer.Key("connections");
+    writer.StartObject();
+    for (auto &pin : node.inp_connected_pins()) {
+      writer.Key(std::string(ntype.get_input_match(pin.get_pid())).c_str());
+      //writer.String("TODO");
+      if (BacktraceSinkPinWrapper(pin) < 0) { return -1; }
+    }
+    writer.EndObject(); // connections
+    writer.EndObject(); // cell name
+  }
+  writer.EndObject(); // cells
   return retval;
 }
 
@@ -357,6 +490,7 @@ int Inou_Tojson::DumpGraph(Lg_type_id lgid) {
     return true;
   });
   if (retval < 0) { return retval; }
+  Cells cells;
   for (const auto &node: lg->forward())  {
     // Skip "fake" cell "Pick_Op": (however, cache the Pick_Op selection bits):
     if (node.is_type(Pick_Op)) {
@@ -379,6 +513,7 @@ int Inou_Tojson::DumpGraph(Lg_type_id lgid) {
       indices[npincc] = {next_idx, bsize};
       next_idx += bsize;
     }
+    cells.push_back(node.get_compact_class());
     if (false) {
       fmt::print("Node type {} not supported by inou.json.fromlg\n", node.get_type().get_name());
       return -1;
@@ -391,8 +526,9 @@ int Inou_Tojson::DumpGraph(Lg_type_id lgid) {
   if (GetPorts(lg) < 0) {
     return -1;
   }
-  writer.Key("cells");
-  writer.String("TODO");
+  if (GetCells(lg, cells) < 0) {
+    return -1;
+  }
   writer.Key("netnames");
   writer.String("TODO");
   writer.EndObject();
@@ -412,7 +548,7 @@ void Inou_json::to_json(LGraph *lg, const std::string &filename) const {
   fmt::print("tojson (output fname: {}) - TODO\n", filename);
   tojson_debug_print_graph(lg);
 #endif
-#ifndef OLD_JSON_FROMLG
+
   writer.Key("creator");
   writer.String("lgraph fromlg");
   writer.Key("modules");
@@ -433,138 +569,9 @@ void Inou_json::to_json(LGraph *lg, const std::string &filename) const {
     }
   }
   writer.EndObject(); // "modules"
-#else
-  {
-    writer.Key("nodes");
-    writer.StartArray();
-
-    for (const auto &nid : g->fast()) {  // Forward would not pass flops
-      writer.StartObject();
-      /*first print out the node nid */
-      writer.Key("nid");
-      writer.Uint64(nid);
-#if 0
-      /*next print out input nodes*/
-      writer.Key("inputs");
-      writer.StartArray();
-      {
-        for(const auto &input_edge : g->inp_edges(nid)) {
-          writer.StartObject();
-          writer.Key("inp_nid ");
-          writer.Uint64((input_edge.get_idx()));
-          // writer.Key("inp_out_pid");
-          writer.Key("inp_dst_pid ");
-          writer.Uint64(input_edge.get_inp_pin().get_pid());
-          writer.EndObject();
-        }
-        writer.EndArray();
-      }
-#endif
-
-      writer.Key("op");
-      {
-        auto type = g->get_node(nid).get_type();
-        if (type.op == U32Const_Op) {
-          writer.Uint64(g->node_value_get(nid));
-        } else if (type.op == StrConst_Op) {
-          std::string tmp;
-          tmp.append("'");
-          tmp.append(g->node_const_value_get(nid));
-          tmp.append("'");
-          writer.String(tmp.c_str());
-        } else {
-          /*normal operations*/
-          if (type.op == TechMap_Op) { // New format: Subgraph
-            // Does nextpnr support hierarchy, or do we have to flatten?
-            // Try this out.
-            // yosys
-            //   help synth_ice40
-            //      (there is a -noflatten option, try this out)
-            auto cell_name = g->get_tlibrary().get_cell_name(g->tmap_id_get(nid));
-            writer.String(std::string(cell_name).c_str());
-          } else {
-            writer.String((g->node_type_get(nid).get_name().c_str()));
-          }
-        }
-      }
-
-      auto ni_name = g->get_node_instancename(nid);
-      if (!ni_name.empty()) {
-        writer.Key("instance_name");
-        writer.String(std::string(ni_name).c_str());  // rapidjson does not support string_view
-      }
-
-      writer.Key("outputs");
-      writer.StartArray();
-      {
-        for (const auto &out : g->out_edges(nid)) {
-          writer.StartObject();
-
-          auto wi_name = g->get_node_wirename(nid);
-          if (!wi_name.empty()) {
-            writer.Key("name");
-            writer.String(std::string(wi_name).c_str());
-          }
-
-          writer.Key("driver_idx");
-          writer.Uint64(out.get_out_pin().get_idx());
-          writer.Key("driver_pid");
-          writer.Uint64(out.get_out_pin().get_pid());
-          writer.Key("sink_idx");
-          writer.Uint64(out.get_idx());
-          // writer.Key("out_inp_pid");
-          writer.Key("sink_pid");
-          writer.Uint64(out.get_inp_pin().get_pid());
-          if (out.is_root()) {
-            auto  node       = g->get_dest_node(out);
-            float node_delay = node.get_delay();
-            int   node_width = g->get_bits(out.get_out_pin());
-            if (node_delay != 0) {
-              writer.Key("delay");
-              writer.Double(node_delay);
-            }
-            if (node_width != 0) {
-              writer.Key("bits");
-              writer.Uint(node_width);
-            }
-          }
-          writer.EndObject();
-        }
-      }
-      writer.EndArray();
-      writer.Key("inputs");
-      writer.StartArray();
-      {
-        for (const auto &inp : g->inp_edges(nid)) {
-          writer.StartObject();
-
-          auto wi_name = g->get_node_wirename(inp.get_inp_pin());
-          if (!wi_name.empty()) {
-            writer.Key("name");
-            writer.String(std::string(wi_name).c_str());
-          }
-
-          writer.Key("sink_idx");
-          writer.Uint64(inp.get_inp_pin().get_idx());
-          writer.Key("sink_pid");
-          writer.Uint64(inp.get_inp_pin().get_pid());
-          writer.Key("driver_idx");
-          writer.Uint64(inp.get_out_pin().get_idx());
-          writer.Key("driver_pid");
-          writer.Uint64(inp.get_out_pin().get_pid());
-
-          writer.EndObject();
-        }
-      }
-      writer.EndArray();
-      writer.EndObject();
-    }
-    writer.EndArray();
-  }
-#endif
+  
   writer.EndObject();
   std::ofstream fs;
-
   fs.open(filename, std::ios::out | std::ios::trunc);
   if (!fs.is_open()) {
     Pass::error("ERROR: could not open json file {}", filename);
