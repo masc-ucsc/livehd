@@ -220,26 +220,43 @@ void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid)
   auto c0_dot      = get_first_child(dot_nid); //c0 = intermediate target
   auto c1_dot      = get_sibling_next(c0_dot);
   auto c2_dot      = get_sibling_next(c1_dot);
-  auto c1_dot_name = get_name(c1_dot);
 
   if (is_lhs(psts_nid, dot_nid)) {
     auto paired_assign_nid = dot_lrhs_table[dot_nid].second;
     auto c0_assign = get_first_child(paired_assign_nid);
     auto c1_assign = get_sibling_next(c0_assign);
+    auto c2_assign = add_child(paired_assign_nid, Lnast_node(get_type(c1_assign), get_token(c1_assign), get_subs(c1_assign)));
 
     // change node semantic from dot/sel->tuple add; assign->invalid  
-    ref_data(dot_nid)->type = Lnast_ntype::create_tuple_add();
-    ref_data(c0_dot)->token = get_data(c1_dot).token;
-    ref_data(c1_dot)->token = get_data(c2_dot).token;
-    fmt::print("c1_dot name:{}\n", get_name(c1_dot));
-    if (get_name(c1_dot).substr(0,2) == "0d" || get_name(c1_dot).substr(0,3) == "-0d")
-      ref_data(c1_dot)->type = Lnast_ntype::create_const();
-    ref_data(c2_dot)->token = get_data(c1_assign).token;
-    ref_data(c2_dot)->type  = get_data(c1_assign).type;
+    ref_data(paired_assign_nid)->type = Lnast_ntype::create_tuple_add();
+    ref_data(c0_assign)->token = get_data(c1_dot).token;
+    ref_data(c1_assign)->token = get_data(c2_dot).token;
+    ref_data(c0_assign)->type = get_data(c1_dot).type;
+    ref_data(c1_assign)->type = get_data(c2_dot).type;
+    ref_data(c0_assign)->subs = get_data(c1_dot).subs;
+    ref_data(c1_assign)->subs = get_data(c2_dot).subs;
+    /* if (get_name(c2_dot).substr(0,2) == "0d" || get_name(c2_dot).substr(0,3) == "-0d") */
+    /*   ref_data(c1_assign)->type = Lnast_ntype::create_const(); */
 
-    ref_data(paired_assign_nid)->type = Lnast_ntype::create_invalid();
-    tuple_var_table.insert(c1_dot_name); //insert new tuple name
-    fmt::print("tuple name:{} insert to :{}\n", c1_dot_name, get_name(psts_nid));
+    ref_data(dot_nid)->type = Lnast_ntype::create_invalid();
+    auto c1_assign_name = get_name(c1_assign);
+    tuple_var_table.insert(c1_assign_name); //insert new tuple name
+    fmt::print("tuple name:{} insert to :{}\n", c1_assign_name, get_name(psts_nid));
+
+
+    /* // change node semantic from dot/sel->tuple add; assign->invalid */  
+    /* ref_data(dot_nid)->type = Lnast_ntype::create_tuple_add(); */
+    /* ref_data(c0_dot)->token = get_data(c1_dot).token; */
+    /* ref_data(c1_dot)->token = get_data(c2_dot).token; */
+    /* fmt::print("c1_dot name:{}\n", get_name(c1_dot)); */
+    /* if (get_name(c1_dot).substr(0,2) == "0d" || get_name(c1_dot).substr(0,3) == "-0d") */
+    /*   ref_data(c1_dot)->type = Lnast_ntype::create_const(); */
+    /* ref_data(c2_dot)->token = get_data(c1_assign).token; */
+    /* ref_data(c2_dot)->type  = get_data(c1_assign).type; */
+
+    /* ref_data(paired_assign_nid)->type = Lnast_ntype::create_invalid(); */
+    /* tuple_var_table.insert(c1_dot_name); //insert new tuple name */
+    /* fmt::print("tuple name:{} insert to :{}\n", c1_dot_name, get_name(psts_nid)); */
   } else { // is rhs
     // change node semantic from dot/set->tuple_get
     ref_data(dot_nid)->type = Lnast_ntype::create_tuple_get();
