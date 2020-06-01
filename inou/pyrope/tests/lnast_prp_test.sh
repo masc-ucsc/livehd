@@ -1,7 +1,8 @@
 #!/bin/bash
 rm -rf ./lgdb
 
-pts='tuple nested_if tuple_if tuple_if2 bits_rhs adder_stage if2 if3_err nested_if_err ssa_rhs logic if'
+# pts='nested_if tuple_if tuple_if2 adder_stage if2 if3_err nested_if_err ssa_rhs logic if bits_rhs '
+pts='nested_if tuple_if tuple_if2 adder_stage if2 if3_err nested_if_err ssa_rhs logic if'
 
 # pts='sync_cnt_nested_if '
 
