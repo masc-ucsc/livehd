@@ -1,14 +1,11 @@
 #!/bin/bash
 rm -rf ./lgdb
 
-pts='if tuple_if tuple_if2 if2 if3_err nested_if_err ssa_rhs nested_if logic '
-# pus='tuple_if2'
-# pts='tuple_if2 tuple_if ssa_rhs ssa_nested_if ssa_if nested_if tuple simple_tuple function_call tuple '
-# pts='ssa_rhs'
-# pts='tuple'
-# pts='trivial_bitwidth'
-# pts='ssa_no_else_if'
-# pts='function_call'
+pts='tuple nested_if tuple_if tuple_if2 bits_rhs adder_stage if2 if3_err nested_if_err ssa_rhs logic if'
+
+# pts='sync_cnt_nested_if '
+
+
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck

@@ -1,0 +1,8 @@
+$a.__bits = 3
+
+//x = 17
+
+//%out.__bits = $a.__bits + x.__bits
+%out.__bits = $a.__bits
+
+%out = $a
