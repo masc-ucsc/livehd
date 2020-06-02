@@ -25,6 +25,12 @@ Node_pin::Node_pin(LGraph *_g, Compact_driver comp)
   I(current_g->is_valid_node_pin(idx));
 }
 
+Node_pin::Node_pin(LGraph *_g, Compact_class comp)
+    : top_g(_g), hidx(Hierarchy_tree::root_index()), idx(comp.idx), pid(_g->get_dst_pid(comp.idx)), sink(comp.sink) {
+  current_g = top_g;  // top_g->ref_htree()->ref_lgraph(hid);
+  I(current_g->is_valid_node_pin(idx));
+}
+
 Node_pin::Node_pin(LGraph *_g, Compact_class_driver comp)
     : top_g(_g), hidx(Hierarchy_tree::root_index()), idx(comp.idx), pid(_g->get_dst_pid(comp.idx)), sink(false) {
   current_g = top_g;  // top_g->ref_htree()->ref_lgraph(hid);

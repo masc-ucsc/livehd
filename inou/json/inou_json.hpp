@@ -67,6 +67,7 @@ class Inou_Tojson {
     }
     int get_ports(LGraph *lg);
     int write_cells(LGraph *lg, const Cells &cells);
+    int write_netnames(LGraph *lg);
   public:
     Inou_Tojson(LGraph *toplg_, PrettySbuffWriter &writer_): toplg(toplg_), writer(writer_) {}
     int dump_graph(Lg_type_id lgid);

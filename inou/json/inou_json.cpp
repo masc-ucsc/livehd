@@ -21,10 +21,9 @@
 
  === TODO ===
 fromlg to_json:
-  1. Getting the “netnames” for each of the edges in LGraph.
-  2. Setting pin names for nodes that perform commutative operations (e.g. ADD, AND, etc.)
-  3. Setting attributes (e.g. “not_processed = true”)
-  4. TMapping.
+  1. Setting pin names for nodes that perform commutative operations (e.g. ADD, AND, etc.)
+  2. Setting attributes (e.g. “not_processed = true”, "src=module.v:87")
+  3. TMapping.
 tolg from_json:
   1. A LOT. I have to rewrite the whole entire function.
 
@@ -351,9 +350,16 @@ int Inou_Tojson::backtrace_edge(const XEdge &edge, IPair ipair) {
       done_bits += diff_s;
     }
   } else if (dnode.is_type(U32Const_Op)) {
-    // FIXME
-    fmt::print("ERROR: U32Const_Op not supported for backtrace\n");
-    return -1;
+    uint32_t const_val = dnode.get_type_const_value();
+    const_val = const_val >> ipair.first;
+    for (uint32_t idx = 0; idx < ipair.second; ++idx) {
+      if ((const_val & 0x1) == 0x1) {
+        writer.String("1");
+      } else {
+        writer.String("0");
+      }
+      const_val = const_val >> 1;
+    }
   } else {
     Node_pin::Compact_class npincc = driver.get_compact_class();
     auto iter = indices.find(npincc);
@@ -465,6 +471,41 @@ int Inou_Tojson::write_cells(LGraph *lg, const Cells &cells) {
   return retval;
 }
 
+int Inou_Tojson::write_netnames(LGraph *lg) {
+  int retval = 0;
+  writer.Key("netnames");
+  writer.StartObject();
+  for (auto &npcc_ipair : indices) {
+    Node_pin dpin {lg, npcc_ipair.first};
+    int hide_name = 1;
+    std::string dname;
+    if (dpin.has_name()) {
+      hide_name = 0;
+      dname = dpin.get_name();
+    } else {
+      dname = "___";
+      dname += dpin.debug_name();
+    }
+    writer.Key(dname.c_str());
+    writer.StartObject();
+    writer.Key("hide_name");
+    writer.Uint64(hide_name);
+    writer.Key("bits");
+    writer.StartArray();
+    IPair &ipair = npcc_ipair.second;
+    for (uint32_t idx = ipair.first; idx < (ipair.first + ipair.second); ++idx) {
+      writer.Uint64(idx);
+    }
+    writer.EndArray();  // bits
+    writer.Key("attributes");
+    writer.StartObject();
+    writer.EndObject(); // attributes
+    writer.EndObject(); // dname
+  }
+  writer.EndObject(); // netnames
+  return retval;
+}
+
 int Inou_Tojson::dump_graph(Lg_type_id lgid) {
   LGraph *lg = LGraph::open(toplg->get_path(), lgid);
   if (lg == nullptr) {
@@ -523,8 +564,9 @@ int Inou_Tojson::dump_graph(Lg_type_id lgid) {
   if (write_cells(lg, cells) < 0) {
     return -1;
   }
-  writer.Key("netnames");
-  writer.String("TODO");
+  if (write_netnames(lg) < 0) {
+    return -1;
+  }
   writer.EndObject();
   return 0;
 }
