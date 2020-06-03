@@ -555,7 +555,9 @@ public:
                                         (val == Lnast_ntype_lt) or
                                         (val == Lnast_ntype_le) or
                                         (val == Lnast_ntype_gt) or
-                                        (val == Lnast_ntype_ge); }
+                                        (val == Lnast_ntype_ge) or 
+                                        (val == Lnast_ntype_shift_left) or 
+                                        (val == Lnast_ntype_shift_right); }
 
   std::string_view debug_name() const { return namemap[val]; }
   std::string_view debug_name_cfg() const { return namemap_cfg[val]; }
