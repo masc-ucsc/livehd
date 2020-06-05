@@ -196,7 +196,6 @@ void Lnast::trans_tuple_opr_handle_a_statement(const Lnast_nid &psts_nid, const 
 }
 
 
-
 void Lnast::find_cond_nid(const Lnast_nid &psts_nid, Lnast_nid &cond_nid, bool &is_else_sts) {
   if (get_type(psts_nid).is_stmts()) {
     auto prev_sib_nid = get_sibling_prev(psts_nid);
@@ -283,6 +282,8 @@ void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid)
 //                                            c2 = tuple field
 //  To know more detail, see my note
 //  https://drive.google.com/open?id=16DSzAPf0GzuxYptxkZzdPKJDDP8DxnBz
+//  one thing different from the figure is that instead of 
+//  (dot->tupadd, assign->invalid), the final design change to (dot->invalid, assign->tupleadd)
 
 // FIXME->sh: need to add condition nid parameter
 void Lnast::dot2hier_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid, const Lnast_nid &cond_nid, bool is_else_sts) {

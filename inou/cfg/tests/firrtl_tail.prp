@@ -1,0 +1,5 @@
+a = 5
+b = 9
+tmp = a + b       //14, 4bits
+%out = tmp >> 1  //7, 3bits
+//%out := tmp1

@@ -334,11 +334,12 @@ void Pass_bitwidth::iterate_arith(Node_pin &pin) {
   }
 }
 
-void Pass_bitwidth::iterate_shift(Node_pin &pin) {
+void Pass_bitwidth::iterate_shift(Node_pin &dpin) {
   Ann_bitwidth::Implicit_range imp;
-  auto op = pin.get_node().get_type().op;
+  auto op = dpin.get_node().get_type().op;
+  auto node = dpin.get_node();
 
-  //bool updated = false;
+  bool updated = false;
   int64_t pos = 0;
 
   int64_t shift_by_min, shift_by_max;
@@ -346,30 +347,32 @@ void Pass_bitwidth::iterate_shift(Node_pin &pin) {
 
   //double bits = ceil(log2(inp_edge.driver.get_bitwidth().i.max + 1));
 
-  for (const auto &inp_edge : pin.get_node().inp_edges_ordered()) {
-    auto dpin = inp_edge.driver;
+  for (const auto &inp_edge : node.inp_edges_ordered()) {
+    auto edge_dpin = inp_edge.driver;
     if(pos == 0) { // "A" pin
-      imp.min = dpin.get_bitwidth().i.min;
-      imp.max = dpin.get_bitwidth().i.max;
-      pos++;
+      imp.min = edge_dpin.get_bitwidth().i.min;
+      imp.max = edge_dpin.get_bitwidth().i.max;
+      /* pos++; */
     } else if(pos == 1) { // "B" pin
-      shift_by_min = dpin.get_bitwidth().i.min;
-      shift_by_max = dpin.get_bitwidth().i.max;
-      pos++;
+      shift_by_min = edge_dpin.get_bitwidth().i.min;
+      shift_by_max = edge_dpin.get_bitwidth().i.max;
+      /* pos++; */
     } else if(pos == 2) { // "S" pin, if applicable
       // s_extend_pin_min = dpin.get_bitwidth().i.min;
       // s_extend_pin_max = dpin.get_bitwidth().i.max;
-      pos++;
+      /* pos++; */
     } else {
       //FIXME: This should never occur, I think?
       fmt::print("\tToo many pins connected to shift_op node.\n");
+      I(false);
     }
+    pos++;
   }
 
   //FIXME: The logic for shifts is pretty tough. Reconsider if this is right.
   //  The reason it's tough is because of how shifts can drop bits in explicit.
   //  So 4'b0110 << 2 has a new max of 4'b1000 (8) not 'b011000 (24).
-  //SOLUTION?: Maybe I should just do it so if explicit is set, don't touch.
+  //  SOLUTION?: Maybe I should just do it so if explicit is set, don't touch.
   //  As of now, I only do it as if everything is implicit.
   switch (op) {
     case LogicShiftRight_Op:
@@ -383,8 +386,33 @@ void Pass_bitwidth::iterate_shift(Node_pin &pin) {
       imp.min = imp.min << shift_by_min;
       imp.max = imp.max << shift_by_max;
       break;
-    case ShiftRight_Op:
+    case ShiftRight_Op: {
       //ShiftRight: A >> B [S == 1 sign extend, S == 2 B is signed]
+      bool handled = false;
+      for (const auto &e : node.inp_edges()) {
+        if (e.sink.get_pid() == 2) {
+          handled = true;
+          if (e.driver.get_node().get_type().op != U32Const_Op) I(false, "Error: Shift sign is not a constant.\n");
+
+          auto val = e.driver.get_node().get_type_const_value();
+          if (val % 2 == 1) {
+            ;//FIXME->sh: todo: handle arith shift right when S == 1
+          } else if (val == 2) {
+            ;//FIXME->sh: todo: handle signed number shift when S == 2
+          } else {
+            ;
+          }
+        }  
+      }
+
+      //Logical ShiftRight: A >> B, also drop the shifted MSB
+      if (!handled) {
+        imp.min = imp.min >> shift_by_max;
+        imp.max = imp.max >> shift_by_min;
+      }
+
+      break;
+    }
     case DynamicShiftLeft_Op:
       //DynamicShiftLeft: Y = A[$signed(B) -: bit_width(A)]
     case DynamicShiftRight_Op:
@@ -396,28 +424,33 @@ void Pass_bitwidth::iterate_shift(Node_pin &pin) {
     default:
       fmt::print("Unknown comparison operator used.\n");
   }
+  updated = dpin.ref_bitwidth()->i.update(imp);
+
+  if (updated) {
+    mark_all_outputs(dpin);
+  }
 }
 
-void Pass_bitwidth::iterate_comparison(Node_pin &pin) {
+void Pass_bitwidth::iterate_comparison(Node_pin &dpin) {
   // FIXME->sh: the comparison op only has boolean output and only connect to mux selection pin?
 
   Ann_bitwidth::Implicit_range imp;
   imp.min = 1;
   imp.max = 1;
-  pin.ref_bitwidth()->i.update(imp);
+  dpin.ref_bitwidth()->i.update(imp);
 }
 
-void Pass_bitwidth::iterate_join(Node_pin &pin) {
+void Pass_bitwidth::iterate_join(Node_pin &dpin) {
 
   Ann_bitwidth::Implicit_range imp;
   int64_t total_bits_min = 0;
   int64_t total_bits_max = 0;
-  auto op = pin.get_node().get_type().op;
+  auto op = dpin.get_node().get_type().op;
   bool ovfl = false;
   bool first = true;
   bool updated = false;
 
-  for (const auto &inp_edge : pin.get_node().inp_edges_ordered()) {
+  for (const auto &inp_edge : dpin.get_node().inp_edges_ordered()) {
     //FIXME->hunter: This will work for all non-negative numbers, I think. Figure out how to get working for negatives.
     //FIXME->hunter: My understanding is input 1 is A, input 2 is B, etc., the final output Y should be [...,C,B,A]
     auto dpin = inp_edge.driver;
@@ -464,10 +497,10 @@ void Pass_bitwidth::iterate_join(Node_pin &pin) {
       }
     }
   }
-  updated = pin.ref_bitwidth()->i.update(imp);
+  updated = dpin.ref_bitwidth()->i.update(imp);
 
   if (updated) {
-    mark_all_outputs(pin);
+    mark_all_outputs(dpin);
   }
 }
 

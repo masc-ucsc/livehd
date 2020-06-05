@@ -29,7 +29,7 @@ mkdir -p logs/yosys_log
 
 pts='trivial_offset trivial2a trivial trivial3 trivial_and
      dce1 gates trivial1 trivial_join compare cse_basic
-     simple_weird2 mt_basic_test reduce null_port
+     simple_weird2 mt_basic_test reduce null_port shift
      '
 
 

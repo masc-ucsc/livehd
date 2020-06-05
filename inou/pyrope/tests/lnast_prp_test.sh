@@ -1,10 +1,10 @@
 #!/bin/bash
 rm -rf ./lgdb
 
-# pts='nested_if tuple_if tuple_if2 adder_stage if2 if3_err nested_if_err ssa_rhs logic if bits_rhs '
-pts='nested_if tuple_if tuple_if2 adder_stage if2 if3_err nested_if_err ssa_rhs logic if'
+pts='nested_if tuple_if firrtl_tail tuple_if2 adder_stage if2 if3_err nested_if_err ssa_rhs logic if '
+# pts='nested_if tuple_if tuple_if2 adder_stage if2 if3_err nested_if_err ssa_rhs logic if'
 
-# pts='sync_cnt_nested_if '
+# pts='sync_cnt_nested_if bits_rhs'
 
 
 
@@ -44,10 +44,10 @@ do
     echo "Pyrope -> LNAST-SSA Graphviz debug"  
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "inou.pyrope.dbg_lnast_ssa files:${pt}.prp |> inou.graphviz.from"
+    ${LGSHELL} "inou.pyrope.dbg_lnast_ssa files:inou/cfg/tests/${pt}.prp |> inou.graphviz.from"
   
     if [ -f ${pt}.lnast.dot ]; then
-      echo "Successfully create a lnast from ${pt}.prp"
+      echo "Successfully create a lnast from inou/cfg/tests/${pt}.prp"
     else
       echo "ERROR: Pyrope compiler failed: LNAST generation, testcase: ${pt}.prp"
       exit 1
@@ -58,11 +58,11 @@ do
     echo "----------------------------------------------------"
     
     # ${LGSHELL} "inou.lnast_dfg.tolg files:${pt}.cfg"
-    ${LGSHELL} "inou.pyrope files:${pt}.prp |> inou.lnast_dfg.tolg"
+    ${LGSHELL} "inou.pyrope files:inou/cfg/tests/${pt}.prp |> inou.lnast_dfg.tolg"
     if [ $? -eq 0 ]; then
-      echo "Successfully create the inital LGraph: ${pt}.prp"
+      echo "Successfully create the inital LGraph: inou/cfg/tests/${pt}.prp"
     else
-      echo "ERROR: Pyrope compiler failed: LNAST -> LGraph, testcase: ${pt}.prp"
+      echo "ERROR: Pyrope compiler failed: LNAST -> LGraph, testcase: inou/cfg/tests/${pt}.prp"
       exit 1
 
     fi
@@ -80,9 +80,9 @@ do
     echo "----------------------------------------------------"
     ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.reduced_or_elimination"
     if [ $? -eq 0 ]; then
-      echo "Successfully eliminate all reduced_or_op: ${pt}.cfg"
+      echo "Successfully eliminate all reduced_or_op: inou/cfg/tests/${pt}.prp"
     else
-      echo "ERROR: Pyrope compiler failed: reduced_or_elimination, testcase: ${pt}.cfg"
+      echo "ERROR: Pyrope compiler failed: reduced_or_elimination, testcase: inou/cfg/tests/${pt}.prp"
       exit 1
     fi
 
@@ -98,9 +98,9 @@ do
     echo "----------------------------------------------------"
     ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.resolve_tuples"
     if [ $? -eq 0 ]; then
-      echo "Successfully resolve the tuple chain: ${pt}.cfg"
+      echo "Successfully resolve the tuple chain: inou/cfg/tests/${pt}.prp"
     else
-      echo "ERROR: Pyrope compiler failed: resolve tuples, testcase: ${pt}.cfg"
+      echo "ERROR: Pyrope compiler failed: resolve tuples, testcase: inou/cfg/tests/${pt}.prp"
       exit 1
     fi
 
@@ -111,14 +111,14 @@ do
     echo ""
     echo ""
     echo "----------------------------------------------------"
-    echo "Bitwidth Optimization(LGraph)"  
+    echo "Bitwidth Optimization(LGraph) Round-1"  
     echo "----------------------------------------------------"
 
     ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth"
     if [ $? -eq 0 ]; then
-      echo "Successfully optimize design bitwidth: ${pt}.v"
+      echo "Successfully optimize design bitwidth: inou/cfg/tests/${pt}.prp"
     else
-      echo "ERROR: Pyrope compiler failed: bitwidth optimization, testcase: ${pt}.cfg"
+      echo "ERROR: Pyrope compiler failed: bitwidth optimization, testcase: inou/cfg/tests/${pt}.prp"
       exit 1
     fi
 
@@ -132,7 +132,7 @@ do
     echo "----------------------------------------------------"
     echo "Todo ..."
 
-    # SUB='_err'
+
 
     if [[ ${pt} == *_err* ]]; then 
         echo "----------------------------------------------------"
@@ -151,7 +151,7 @@ do
           echo "Successfully generate Verilog: ${pt}.v"
           rm -f  yosys_script.*
         else
-          echo "ERROR: Pyrope compiler failed: verilog generation, testcase: ${pt}.cfg"
+          echo "ERROR: Pyrope compiler failed: verilog generation, testcase: inou/cfg/tests/${pt}.prp"
           exit 1
         fi
 

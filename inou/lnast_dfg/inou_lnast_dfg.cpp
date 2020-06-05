@@ -273,8 +273,7 @@ void Inou_lnast_dfg::process_ast_nary_op(LGraph *dfg, const Lnast_nid &lnidx_opr
   std::vector<Node_pin> opds;
   for (const auto &opr_child : lnast->children(lnidx_opr)) {
     Node_pin opd;
-    if (opr_child == lnast->get_first_child(lnidx_opr))
-      continue; // the lhs has been handled at setup_node_opr_and_lhs();
+    if (opr_child == lnast->get_first_child(lnidx_opr)) continue; // the lhs has been handled at setup_node_opr_and_lhs();
 
     opd = setup_ref_node_dpin(dfg, opr_child);
     opds.emplace_back(opd);
@@ -317,7 +316,7 @@ void Inou_lnast_dfg::nary_node_rhs_connections(LGraph *dfg, Node &opr_node, cons
     case Mult_Op: {
       bool is_first = true;
       for (const auto &opd : opds) {
-        if (is_subt & !is_first) { //note: hunter -- for subtraction
+        if (is_subt & !is_first) { //note: Hunter -- for subtraction
           dfg->add_edge(opd, opr_node.setup_sink_pin(3));
         } else {
           dfg->add_edge(opd, opr_node.setup_sink_pin(1));
@@ -339,6 +338,21 @@ void Inou_lnast_dfg::nary_node_rhs_connections(LGraph *dfg, Node &opr_node, cons
         }
         i++;
         I(i <= 2); 
+      }
+      break;
+    }
+    case ShiftRight_Op: {
+      auto i = 0;
+      for (const auto &opd : opds) {
+        if (i == 0) {
+          fmt::print("opd debug:{}\n", opd.debug_name());
+          fmt::print("opr_node debug:{}\n", opr_node.debug_name());
+          dfg->add_edge(opd, opr_node.setup_sink_pin(0));
+        } else {
+          dfg->add_edge(opd, opr_node.setup_sink_pin(1));
+        }
+        i++;
+        I(i <= 2);
       }
       break;
     }
@@ -728,7 +742,9 @@ void Inou_lnast_dfg::setup_lnast_to_lgraph_primitive_type_mapping() {
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_le]          = LessEqualThan_Op;
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_gt]          = GreaterThan_Op;
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_ge]          = GreaterEqualThan_Op;
-  // sh_fixme: to be extended ...
+  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_shift_right] = ShiftRight_Op;
+  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_shift_left]  = ShiftLeft_Op;
+  // FIXME->sh: to be extended ...
 }
 
 

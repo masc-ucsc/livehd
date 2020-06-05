@@ -483,8 +483,9 @@ public:
 };
 
 // Y = A >> B
-// S == 1: sign extension
-// S == 2: B is signed
+// S unconnected: logic shift right 
+// S == 1:        sign extension, arithmetic shift right
+// S == 2:        B is signed
 // FIX ME: should be superseded
 class Node_Type_ShiftRight : public Node_Type {
 public:
