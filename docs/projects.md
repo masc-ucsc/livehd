@@ -671,10 +671,14 @@ LiveHD compiles (it did) with OS X, but there are some issues with the mmap infr
 should be able to run (the mmap_remap does not exist in OS X, but a more costly alternative is implemented for OS X, just not tested
 and it seems faulty).
 
+The main issue is the creation of the dynamic library used with yosys interface. If it can not be easily fixed, the best solution would
+be to use the json interface instead.
+
 The main areas that need some attentions:
 
 * Fix mmap_lib tests to pass on OS X
 * Make sure that the lbench performance statistics gathering do not create issues (not available in OS X)
+* Can we handle the yosys liblgyosys.so library? If not, make the json more automatic/transparent for OS X flow
 
 Windows support is through WSL. It works fine.
 
