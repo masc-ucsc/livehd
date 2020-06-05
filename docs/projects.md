@@ -665,6 +665,19 @@ Create a pass that checks that the LGraph (and/or LNAST) is sementically correct
 
 Create a copy propagation pass that works with hierarchy.
 
+## OS X Support
+
+LiveHD compiles (it did) with OS X, but there are some issues with the mmap infrastructure inside mmap_lib. The code functionality
+should be able to run (the mmap_remap does not exist in OS X, but a more costly alternative is implemented for OS X, just not tested
+and it seems faulty).
+
+The main areas that need some attentions:
+
+* Fix mmap_lib tests to pass on OS X
+* Make sure that the lbench performance statistics gathering do not create issues (not available in OS X)
+
+Windows support is through WSL. It works fine.
+
 ## Smaller tasks
 
 For even smaller tasks check the [cleanup.md](cleanup.md) file
