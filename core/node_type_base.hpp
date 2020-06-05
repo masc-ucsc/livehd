@@ -295,8 +295,6 @@ public:
 };
 
 // Y = A[i,j]
-// pid 0 : A
-// pid 1 : offset
 // j = offset
 // i = offset + Y-bitwidth
 class Node_Type_Pick : public Node_Type {

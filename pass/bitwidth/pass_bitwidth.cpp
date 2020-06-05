@@ -58,9 +58,8 @@ void Pass_bitwidth::do_trans(LGraph *lg) {
 // MIT Algorithm
 void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
   fmt::print("Phase-I: bitwidth pass setup\n");
+  // FIXME->sh: should we force all input bitwidth set explicitly? it's not necessarily true for sub-graph
   lg->each_graph_input([this](const Node_pin &dpin) {
-    // FIXME->sh: should we force all input bitwidth set explicitly?
-    // FIXME->sh: it's not necessarily true for sub-graph
     I(dpin.has_bitwidth());
     auto editable_pin = dpin;
     editable_pin.ref_bitwidth()->set_implicit();
@@ -76,12 +75,7 @@ void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
 
       // currently, first iteration will iterate over same driver pins multiple times,
       // in some cases. (If more than 1 edge has pin X as its driver)
-      // FIXME->sh: why?
       if (dpin.has_bitwidth()) {
-        /* if(dpin.get_node().get_type().op == SFlop_Op) { */
-        /*   dpin.ref_bitwidth()->e.dump(); */
-        /*   I(false); */
-        /* } */
         dpin.ref_bitwidth()->set_implicit();
         pending.push_back(dpin);
       } else { // if don't has bitwidth initially, set bits 0 to avoid unnecessary trouble that bitwidth attribute table undefined for some dpin
@@ -89,10 +83,6 @@ void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
         dpin.ref_bitwidth()->set_implicit();
         ;
       }
-      // FIXME->sh: will lead to unset imp insert to pending vector duplicately, why am I doing this?
-      // else {
-      //   initial_imp_unset.push_back(dpin);
-      // }
     }
   }
 }
@@ -103,7 +93,7 @@ bool Pass_bitwidth::bw_pass_iterate() {
   if (pending.empty())
     fmt::print("bw_pass_iterate pass -- no driver pins to iterate over\n");
 
-  max_iterations = 10; //FIXME->sh: temporarily solution before := dp_assign supported
+  max_iterations = 1; //FIXME->sh: temporarily solution before := dp_assign supported
   int iterations = 0;
   do {
     I(next_pending.empty());
@@ -115,14 +105,15 @@ bool Pass_bitwidth::bw_pass_iterate() {
 
     //note: with using the current std::vector, this might fire off much earlier than
     //      I'd want it to (if pin got added multiple times due to multiple out edges).
-    if (dpin.ref_bitwidth()->niters > max_iterations) {
-      fmt::print("bw_pass_iterate abort:{}\n", iterations);
-      /* return false; */
-      return true;
-    }
+    /* if (dpin.ref_bitwidth()->niters > max_iterations) { */
+    /*   fmt::print("bw_pass_iterate abort:{}\n", iterations); */
+    /*   /1* return false; *1/ */
+    /*   return true; */
+    /* } */
 
     do {
       iterate_driver_pin(dpin);
+      fmt::print("dpin:{}\n", dpin.debug_name());
       if (pending.empty())
         break;
       dpin = pending.front();
@@ -130,7 +121,7 @@ bool Pass_bitwidth::bw_pass_iterate() {
     } while (true);
     fmt::print("Iteration:{}, all dpin in pending vector visited!\n", iterations);
 
-    assert(pending.empty());
+    I(pending.empty());
     if (next_pending.empty()) {
       fmt::print("bw_pass_iterate pass:{}\n", iterations);
       return true;
@@ -586,8 +577,7 @@ void Pass_bitwidth::iterate_mux(Node_pin &node_dpin) {
     auto dpin = inp_edge.driver;
     auto spin = inp_edge.sink;
     if (spin.get_pid() == 0) {
-      // Base bw off pins except "S" dpin
-      continue;
+      continue; // Base bw off pins except "S" dpin
     } else if (is_first_edge) {
       imp.min = dpin.get_bitwidth().i.min;
       imp.max = dpin.get_bitwidth().i.max;

@@ -1,7 +1,8 @@
 #!/bin/bash
 rm -rf ./lgdb
 
-pts='nested_if tuple_if firrtl_tail tuple_if2 adder_stage if2 if3_err nested_if_err ssa_rhs logic if '
+pts='out_ssa'
+# pts='nested_if tuple_if firrtl_tail adder_stage if2 if3_err nested_if_err ssa_rhs logic if tuple_if2 '
 # pts='nested_if tuple_if tuple_if2 adder_stage if2 if3_err nested_if_err ssa_rhs logic if'
 
 # pts='sync_cnt_nested_if bits_rhs'
@@ -173,7 +174,7 @@ do
         fi
     fi
 
-    rm -f ${pt}.v
+    # rm -f ${pt}.v
     rm -f ${pt}.prp
     rm -f lnast.dot.gld
     rm -f lnast.nodes
