@@ -119,14 +119,12 @@ void Inou_lnast_dfg::reduced_or_elimination(Eprp_var &var) {
 
 void Inou_lnast_dfg::do_reduced_or_elimination(LGraph *dfg) {
   absl::flat_hash_set<Node::Compact> to_be_deleted;
-  for (const auto &node : dfg->fast()) {
+  for (auto node : dfg->fast()) {
     if (node.get_type().op == Or_Op) {
-      bool is_reduced_or = false;
-      if (node.has_outputs() && node.out_edges().begin()->driver.get_pid() == 1)
-        is_reduced_or = true;
+      bool is_reduced_or = node.has_outputs() && node.out_edges().begin()->driver.get_pid() == 1;
 
       if (is_reduced_or) {
-        I(node.inp_edges().size() == 1);
+        // I(node.inp_edges().size() == 1);
         for (auto &out : node.out_edges()) {
           auto dpin = node.inp_edges().begin()->driver;
           if (!dpin.get_node().is_graph_input()) { // don't rename the graph inputs 
@@ -135,13 +133,14 @@ void Inou_lnast_dfg::do_reduced_or_elimination(LGraph *dfg) {
           auto spin = out.sink;
           dfg->add_edge(dpin, spin);
         }
-        to_be_deleted.insert(node.get_compact());
+        // to_be_deleted.insert(node.get_compact());
+        node.del_node();
       }
     }
   }
 
-  for (auto &itr : to_be_deleted) {
-    itr.get_node(dfg).del_node();
-  }
+  // for (auto &itr : to_be_deleted) {
+  //   itr.get_node(dfg).del_node();
+  // }
 }
 

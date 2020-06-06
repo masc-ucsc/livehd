@@ -359,7 +359,6 @@ void Lnast::dot2hier_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid, 
 bool Lnast::check_tuple_table_parents_chain(const Lnast_nid &psts_nid, std::string_view ref_name) {
   if (get_parent(psts_nid) == get_root()) {
     auto &tuple_var_table = tuple_var_tables[psts_nid];
-    fmt::print("hello\n");
     for (auto itr : tuple_var_table) {
       fmt::print("top tuple_var_table content:{}\n", itr);
     }

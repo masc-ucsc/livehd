@@ -6,7 +6,7 @@
 // Then all the files are distributed per pass as needed
 
 // TODO: We have attributes per node/pin/edge, we should have also per lgraph module (lef attributes)
-
+#include "ann_ssa.hpp"
 #include "ann_bitwidth.hpp"
 #include "ann_file_loc.hpp"
 #include "ann_place.hpp"
@@ -23,14 +23,15 @@ struct Ann_name {
   static constexpr char file_loc[]   = "file_loc";
   static constexpr char tree_pos[]   = "tree_pos";
   static constexpr char color[]      = "color";
+  static constexpr char ssa[]        = "ssa";
 };
 
 using Ann_node_pin_offset = Attribute<Ann_name::wireoffset, Node_pin, mmap_lib::map<Node_pin::Compact_class_driver, uint16_t> >;
 
-using Ann_node_pin_name =
-    Attribute<Ann_name::wirename, Node_pin, mmap_lib::bimap<Node_pin::Compact_class_driver, std::string_view> >;
+using Ann_node_pin_name = Attribute<Ann_name::wirename, Node_pin, mmap_lib::bimap<Node_pin::Compact_class_driver, std::string_view> >;
 
 using Ann_node_pin_bitwidth = Attribute<Ann_name::bitwidth, Node_pin, mmap_lib::map<Node_pin::Compact_driver, Ann_bitwidth> >;
+using Ann_node_pin_ssa      = Attribute<Ann_name::ssa,      Node_pin, mmap_lib::map<Node_pin::Compact_driver, Ann_ssa> >;
 
 using Ann_node_pin_delay = Attribute<Ann_name::delay, Node_pin, mmap_lib::map<Node_pin::Compact_driver, float> >;
 

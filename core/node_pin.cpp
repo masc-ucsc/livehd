@@ -210,6 +210,31 @@ Ann_bitwidth *Node_pin::ref_bitwidth() {
 
 bool Node_pin::has_bitwidth() const { return Ann_node_pin_bitwidth::ref(top_g)->has(get_compact_driver()); }
 
+
+const Ann_ssa &Node_pin::get_ssa() const {
+  const auto *data = Ann_node_pin_ssa::ref(top_g)->ref(get_compact_driver());
+  I(data);
+  return *data;
+}
+
+Ann_ssa *Node_pin::ref_ssa() {
+  auto *ref = Ann_node_pin_ssa::ref(top_g);
+
+  auto it = ref->find(get_compact_driver());
+  if (it != ref->end()) {
+    return ref->ref(it);
+  }
+
+  auto it2 = ref->set(get_compact_driver(), Ann_ssa());  // Empty
+  return ref->ref(it2);
+}
+
+bool Node_pin::has_ssa() const { return Ann_node_pin_ssa::ref(top_g)->has(get_compact_driver()); }
+
+
+
+
+
 bool Node_pin::is_connected() const {
   if (is_driver()) return current_g->has_outputs(*this);
 

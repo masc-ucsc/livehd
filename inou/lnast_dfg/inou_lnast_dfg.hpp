@@ -20,8 +20,11 @@ private:
 
   absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Node_Type_Op> primitive_type_lnast2lg;
 
-  absl::flat_hash_map<std::string, Node_pin>     name2dpin;
-  absl::flat_hash_map<std::string, std::string>  keyname2pos;
+
+  absl::flat_hash_map<std::string, Node_pin>      name2dpin;
+  absl::flat_hash_map<std::string_view, uint32_t> name2vid; //for de-ssa variable
+  absl::flat_hash_map<std::string, std::string>   keyname2pos;
+  uint32_t vid_cnt = 0;
   static constexpr uint8_t TN = 0;  // tuple name
   static constexpr uint8_t KN = 1;  // tuple element key name
   static constexpr uint8_t KP = 2;  // tuple element key position
@@ -35,7 +38,8 @@ protected:
   static void           do_resolve_tuples(LGraph *dfg);
   static void           do_reduced_or_elimination(LGraph *dfg);
 
-  void lnast2lgraph             (LGraph *dfg);
+  void lnast2lgraph                           (LGraph *dfg);
+  void setup_lgraph_outputs_and_final_var_name(LGraph *dfg);
   void process_ast_stmts        (LGraph *dfg, const Lnast_nid &lnidx_stmts);
   void process_ast_assign_op    (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_nary_op      (LGraph *dfg, const Lnast_nid &lnidx);
@@ -64,6 +68,7 @@ protected:
   Node_pin     setup_node_assign_and_lhs      (LGraph *dfg, const Lnast_nid &lnidx_opr);
   Node_pin     setup_ref_node_dpin            (LGraph *dfg, const Lnast_nid &lnidx);
   Node_Type_Op decode_lnast_op                (const Lnast_nid &lnidx_opr);
+  void         setup_dpin_ssa                 (Node_pin &dpin, std::string_view var_name, uint16_t subs);
   void         setup_lnast_to_lgraph_primitive_type_mapping();
   void         nary_node_rhs_connections      (LGraph *dfg, Node &opr_node, const std::vector<Node_pin> &opds, bool is_subt);
 
