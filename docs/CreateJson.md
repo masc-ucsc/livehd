@@ -4,7 +4,7 @@ This pass is intended to create a JSON file that can nextpnr can use to Place an
 
 # fromlg Translation Methodology
 
-## Main Challenges
+## Main Challenge 1: Translating from a Bus-based to a Net-based Circuit Architecture
 
 The main difference between LGraph and the output JSON file that Yosys expects is that LGraph relies on bus edges between Node_pins, but Yosys expects individual nets that connect independent circuit nodes.
 
@@ -12,11 +12,49 @@ To demonstrate the significance of the above, observe the following circuit:
 
 ![alt text](https://users.soe.ucsc.edu/~crhilber/net_v_edges.png)
 
-Above is a test picture.
+In the above circuit, we have input ports "Axx" and "Bxx", both which output 8-bit digital signals. These two signals feed two separate adders.
 
-## class Inou_Tojson
+In a net-based architecture, we have 16 nets: Axx[7:0] and Bxx[7:0].
 
-### Public Methods
+In a bus-based architecture, we have 4 edges:
+1. An edge connecting Axx to the top adder.
+2. Axx to the bottom adder.
+3. Bxx to the top adder.
+4. Bxx to the bottom adder.
+
+1 and 2 will have the same driver pin (same for 3 and 4), but 1 and 3 will have the same sink pin (same for 2 and 4).
+
+In addition to the above, if we either truncate or concatenate nets in Verilog, we must instantiate a Pick_Op or a Join_Op, respectively. Observe the following Verilog snippet:
+
+```v
+input [7:0] inpA;
+input [7:0] inpB;
+output reg [13:0] output;
+
+always @* begin
+  output = {2'b10, inpA[6:3], inpB};
+end
+```
+
+The above circuit in LGraph gets translated to the below diagram:
+
+![alt text](https://users.soe.ucsc.edu/~crhilber/lgraph_pick_join.png)
+
+Note that we truncate bits 3 thru 6 for inpA via the "Pick_Op". This is a "Node" within a particular LGraph that has the following properties:
+1. The number of bits we are truncating is given by the edge bit_width() of the output Node_pin of the Node.
+2. The bit position we are selecting is given by the OFFSET input, where we must connect a U32Const_Op whose value equals the selected position. Note that the edge bit_width() that connects the output of the constant and the offset pin is equal to floor(log_2(value)) + 1.
+
+For combining multiple edges into one edge, LGraph instantiates a "Join_Op" node that takes multiple edges and combines them into one. Thus, if we wanted to figure out where each index of "output" originated from (e.g. output[8] = inpA[3]), we would need to backtrace the "output" edge and smartly iterate over the input pins of the Join_Op.
+
+Furthermore, if we had an even more complicated truncation, such as "some_wire = {inpA[6:3], inpA[7]}", we would need to have two Pick_Ops and one Join_Op to instantiate the aforementioned Verilog line.
+
+Nevertheless, the complexities of LGraph's bus-based architecture are justified because we save on memory space and CPU operations. This property comes about since logical circuits follow a bus-based format as well; were we to operate on a per-net basis, we would spend much more memory and CPU cycles to describe connections that could simply be bundled instead.
+
+However, when synthesizing a circuit to be physically instantiated, we must describe each independent net separately so that the Placer and Router know which pins to connect to which other pins. To translate LGraph to this scheme, we use a C++ class named "Inou_Tojson" that handles the conversion from LGraph to Yosys-standard JSON.
+
+# class Inou_Tojson
+
+## Public Methods
 
 ```cpp
 Inou_Tojson(LGraph *toplg_, PrettySbuffWriter &writer_)
@@ -24,7 +62,9 @@ Inou_Tojson(LGraph *toplg_, PrettySbuffWriter &writer_)
 
 Creates the Inou_Tojson object. We use this object to store metadata for each LGraph that aids in tracking all the individual nets.
 
-### Private Fields
+## Private Fields
+
+TODO
 
 # LGraph API Functions Used
 

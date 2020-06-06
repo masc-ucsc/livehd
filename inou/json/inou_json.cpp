@@ -49,6 +49,8 @@ void Inou_json::from_json(LGraph *g, rapidjson::Document &document) {
   Node last_node, dst_node;
 
   json_remap.clear();
+  // TODO: Rewrite Inou_json::from_json
+  Pass::error("inou.json.tolg is currently under development; please do not use it right now");
 
   if (document.HasParseError()) {
     Pass::error("inou_json::from_json Error(offset {}): {}", static_cast<unsigned>(document.GetErrorOffset()),
