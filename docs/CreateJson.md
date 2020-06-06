@@ -29,10 +29,10 @@ In addition to the above, if we either truncate or concatenate nets in Verilog, 
 ```v
 input [7:0] inpA;
 input [7:0] inpB;
-output reg [13:0] output;
+output reg [13:0] outnet;
 
 always @* begin
-  output = {2'b10, inpA[6:3], inpB};
+  outnet = {2'b10, inpA[6:3], inpB};
 end
 ```
 
@@ -44,7 +44,7 @@ Note that we truncate bits 3 thru 6 for inpA via the "Pick_Op". This is a "Node"
 1. The number of bits we are truncating is given by the edge bit_width() of the output Node_pin of the Node.
 2. The bit position we are selecting is given by the OFFSET input, where we must connect a U32Const_Op whose value equals the selected position. Note that the edge bit_width() that connects the output of the constant and the offset pin is equal to floor(log_2(value)) + 1.
 
-For combining multiple edges into one edge, LGraph instantiates a "Join_Op" node that takes multiple edges and combines them into one. Thus, if we wanted to figure out where each index of "output" originated from (e.g. output[8] = inpA[3]), we would need to backtrace the "output" edge and smartly iterate over the input pins of the Join_Op.
+For combining multiple edges into one edge, LGraph instantiates a "Join_Op" node that takes multiple edges and combines them into one. Thus, if we wanted to figure out where each index of "outnet" originated from (e.g. outnet[8] = inpA[3]), we would need to backtrace the "outnet" edge and smartly iterate over the input pins of the Join_Op.
 
 Furthermore, if we had an even more complicated truncation, such as "some_wire = {inpA[6:3], inpA[7]}", we would need to have two Pick_Ops and one Join_Op to instantiate the aforementioned Verilog line.
 
