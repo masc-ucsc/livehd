@@ -20,6 +20,28 @@ livehd> lgraph.open name:${TOP_MOD_NAME} |> inou.json.fromlg odir:lgdb/
 
 This command will dump the top-level graph and all its subgraphs into a file named "${TOP_MOD_NAME}.json". This JSON file can then be parsed by Yosys; it could even be parsed by nextpnr if Mockturtle was used before inou.json.fromlg.
 
+# Expected Output
+
+We are attempting to replicate the JSON output of Yosys; we can obtain a baseline reference by performing the below command in a Unix terminal:
+
+```sh
+bash> MOD=${TOP_MOD_NAME}; yosys -p 'write_json '${MOD}.json ${PATH}/${MOD}.v
+```
+
+The above command synthesizes ${TOP_MOD_NAME}.v and dumps the result into a JSON file. Of note, this is a generic JSON output; we cannot input it into nextpnr. If we wanted to create a JSON for nextpnr, we would instead call:
+
+```sh
+bash> MOD=${TOP_MOD_NAME}; yosys -p 'synth_ice40 -noflatten -top '${MOD}' -json ${TOP_MOD_NAME}.json' ${MOD}.v
+```
+
+For designing inou.json.fromlg, I would study the output JSON of the first command and attempt to replicate the output within LiveHD.
+
+If one wants to compare the two flows, they may:
+1. Write or obtain an example Verilog module (along with any needed submodule(s)).
+2. Synthesize the design with Yosys to create one JSON file.
+3. Use the LiveHD flow to create another JSON file
+4. Compare output files.
+
 # fromlg Translation Methodology
 
 ## Translating from a Bus-based to a Net-based Circuit Architecture
@@ -109,14 +131,26 @@ Since we write each component of the JSON file sequentially (i.e. we never rewin
 
 ## Private Fields
 
-asdf
+To map LGraph to JSON, we need to obtain the following metadata per LGraph:
+1. A "set of set of nets". Recall the Verilog example posted under "fromlg Translation Methodology". In it, we have "inpA", "inpB", and "outnet". Each of these three names are a set of nets (with widths 8, 8, and 14 respectively). When dumping into JSON, we need to translate each individual net into an integer, then write those integers inside an array within the "connections" property of a given cell.
+2. A list of cells for a given graph.
+
+To track the integers required for (1), we use the following typedef:
 
 ```cpp
 using IPair = std::pair<uint32_t, uint32_t>;
+```
+
+1. IPair.first states the starting index of a net set.
+2. IPair.second states the width of that net.
+
+```cpp
 using Cells = std::vector<Node::Compact_class>;
 ```
 
-qwerty
+The above typedef short-hands writing code for recording each node in order to process later on via "write_cells()".
+
+TODO
 
 ## Public Methods
 
@@ -127,10 +161,10 @@ Inou_Tojson(LGraph *toplg_, PrettySbuffWriter &writer_);
 Creates the Inou_Tojson object; we keep a reference to the top-level graph and JSON writer object.
 
 ```cpp
-Inou_Tojson(LGraph *toplg_, PrettySbuffWriter &writer_);
+int dump_graph(Lg_type_id lgid);
 ```
 
-Creates the Inou_Tojson object. We use this object to store metadata for each LGraph that aids in tracking all the individual nets.
+For each LGraph, we obtain their lgid via toplg->get_id() (for the top level graph) or toplg->each_sub_unique_fast() (for the subgraphs). We call dump_graph() N times, one per lgid. Each dump_graph() call will write the entire "module"
 
 # LGraph API Functions Used
 
