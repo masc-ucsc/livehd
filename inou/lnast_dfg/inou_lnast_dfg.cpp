@@ -756,38 +756,38 @@ void Inou_lnast_dfg::setup_lnast_to_lgraph_primitive_type_mapping() {
 
 
 void Inou_lnast_dfg::setup_dpin_ssa(Node_pin &dpin, std::string_view var_name, uint16_t subs) {
-  if (name2vid.find(var_name) == name2vid.end()) {
-    vid_cnt ++;
-    dpin.ref_ssa()->set_ssa(vid_cnt, subs);
-    name2vid[var_name] = vid_cnt;
-  }
-  dpin.ref_ssa()->set_ssa(name2vid[var_name],subs);
+  // if (name2vid.find(var_name) == name2vid.end()) {
+  //   vid_cnt ++;
+  //   dpin.ref_ssa()->set_ssa(vid_cnt, subs);
+  //   name2vid[var_name] = vid_cnt;
+  // }
+  // dpin.ref_ssa()->set_ssa(name2vid[var_name],subs);
+  dpin.ref_ssa()->set_ssa(var_name,subs);
 }
 
 
 void Inou_lnast_dfg::setup_lgraph_outputs_and_final_var_name(LGraph *dfg) {
-  absl::flat_hash_map<uint32_t, Node_pin> vid2dpin; //Pyrope variable -> dpin with the largest ssa var subscription
+  absl::flat_hash_map<std::string_view, Node_pin> vname2dpin; //Pyrope variable -> dpin with the largest ssa var subscription
   for (auto node: dfg->fast()) {
     if (node.get_type().op == Or_Op && node.setup_driver_pin(1).has_name()) {  //FIXME->sh: this is the only way to detect unconnected reduced_or, tricky but ...
       auto dpin = node.get_driver_pin(1);
       I(dpin.has_ssa());
-      auto vid  = dpin.ref_ssa()->get_vid();
+      auto vname  = dpin.ref_ssa()->get_vname();
       auto subs = dpin.ref_ssa()->get_subs();
 
-      if(vid2dpin.find(vid) == vid2dpin.end()) {
-        vid2dpin[vid] = dpin;
+      if(vname2dpin.find(vname) == vname2dpin.end()) {
+        vname2dpin[vname] = dpin;
         continue;
       }
 
-      if (subs > vid2dpin[vid].get_ssa().get_subs()) {
-        vid2dpin[vid] = dpin;
+      if (subs > vname2dpin[vname].get_ssa().get_subs()) {
+        vname2dpin[vname] = dpin;
       }
-
     }
   }
 
   //based on the table, create graph outputs or set the final variable name
-  for (auto const&[vid, dpin] : vid2dpin) {
+  for (auto const&[vname, dpin] : vname2dpin) {
     auto dpin_name = dpin.get_name();
     if(is_output(dpin_name)) {
       auto out_spin = dfg->add_graph_output(dpin_name.substr(1, dpin_name.size()-3), Port_invalid, 0); // Port_invalid pos means do not care about position
@@ -799,5 +799,43 @@ void Inou_lnast_dfg::setup_lgraph_outputs_and_final_var_name(LGraph *dfg) {
       ;
     }
   }
+
+
+  // absl::flat_hash_map<uint32_t, Node_pin> vid2dpin; //Pyrope variable -> dpin with the largest ssa var subscription
+  // for (auto node: dfg->fast()) {
+  //   if (node.get_type().op == Or_Op && node.setup_driver_pin(1).has_name()) {  //FIXME->sh: this is the only way to detect unconnected reduced_or, tricky but ...
+  //     auto dpin = node.get_driver_pin(1);
+  //     I(dpin.has_ssa());
+  //     auto vid  = dpin.ref_ssa()->get_vid();
+  //     auto subs = dpin.ref_ssa()->get_subs();
+  //
+  //     if(vid2dpin.find(vid) == vid2dpin.end()) {
+  //       vid2dpin[vid] = dpin;
+  //       continue;
+  //     }
+  //
+  //     if (subs > vid2dpin[vid].get_ssa().get_subs()) {
+  //       vid2dpin[vid] = dpin;
+  //     }
+  //
+  //   }
+  // }
+  //
+  // //based on the table, create graph outputs or set the final variable name
+  // for (auto const&[vid, dpin] : vid2dpin) {
+  //   auto dpin_name = dpin.get_name();
+  //   if(is_output(dpin_name)) {
+  //     auto out_spin = dfg->add_graph_output(dpin_name.substr(1, dpin_name.size()-3), Port_invalid, 0); // Port_invalid pos means do not care about position
+  //     fmt::print("add graph out:{}\n", dpin_name.substr(1, dpin_name.size()-3));       // -3 means get rid of %, _0(ssa subscript)
+  //     dfg->add_edge(dpin, out_spin);
+  //   } else {
+  //     //normal variable, but without lnast index, don't know how to get rid of the subs substr from the dpin name now
+  //     //one solution is to record string_view of variable in SSA annotation instead of vid, a interger.
+  //     ;
+  //   }
+  // }
+
+
+
 };
 

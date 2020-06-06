@@ -1,5 +1,5 @@
 %out = 1
 tmp = %out
-%out = 3 
 %out.__bits = 3
-%out2 = %out + tmp 
+%out = 3
+%out2 = %out + tmp

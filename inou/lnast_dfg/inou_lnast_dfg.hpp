@@ -22,9 +22,9 @@ private:
 
 
   absl::flat_hash_map<std::string, Node_pin>      name2dpin;
-  absl::flat_hash_map<std::string_view, uint32_t> name2vid; //for de-ssa variable
+  // absl::flat_hash_map<std::string_view, uint32_t> name2vid; //for de-ssa variable
   absl::flat_hash_map<std::string, std::string>   keyname2pos;
-  uint32_t vid_cnt = 0;
+  // uint32_t vid_cnt = 0;
   static constexpr uint8_t TN = 0;  // tuple name
   static constexpr uint8_t KN = 1;  // tuple element key name
   static constexpr uint8_t KP = 2;  // tuple element key position
