@@ -6,7 +6,13 @@ This pass is intended to create a JSON file that can nextpnr can use to Place an
 
 ## Main Challenges
 
-LGraph 
+The main difference between LGraph and the output JSON file that Yosys expects is that LGraph relies on bus edges between Node_pins, but Yosys expects individual nets that connect independent circuit nodes.
+
+To demonstrate the significance of the above, observe the following circuit:
+
+![alt text](https://users.soe.ucsc.edu/~crhilber/net_v_edges.png)
+
+Above is a test picture.
 
 ## class Inou_Tojson
 
