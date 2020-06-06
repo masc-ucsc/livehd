@@ -2,9 +2,21 @@ This document describes the design, implementation, and reasoning behind the lat
 
 This pass is intended to create a JSON file that can nextpnr can use to Place and Route a netlist onto an ice40 FPGA (from Lattice). Currently, as described under section "Future Work", we cannot fully achieve this goal, so this inou pass remains a Work in Progress.
 
+# Invocation
+
+To invoke the pass "inou.json.fromlg", the following command is used within lgshell:
+
+```sh
+livehd> lgraph.open name:${TOP_MOD_NAME} |> inou.json.fromlg odir:lgdb/
+```
+
+Where you replace "${TOP_MOD_NAME}" with the name of the top graph of your design, and lgdb/ is the path that stores the LGraph.
+
+This command will dump the top-level graph and all its subgraphs into a file named "${TOP_MOD_NAME}.json". This JSON file can then be parsed by Yosys; it could even be parsed by nextpnr if Mockturtle was used before inou.json.fromlg.
+
 # fromlg Translation Methodology
 
-## Main Challenge 1: Translating from a Bus-based to a Net-based Circuit Architecture
+## Translating from a Bus-based to a Net-based Circuit Architecture
 
 The main difference between LGraph and the output JSON file that Yosys expects is that LGraph relies on bus edges between Node_pins, but Yosys expects individual nets that connect independent circuit nodes.
 
@@ -50,7 +62,15 @@ Furthermore, if we had an even more complicated truncation, such as "some_wire =
 
 Nevertheless, the complexities of LGraph's bus-based architecture are justified because we save on memory space and CPU operations. This property comes about since logical circuits follow a bus-based format as well; were we to operate on a per-net basis, we would spend much more memory and CPU cycles to describe connections that could simply be bundled instead.
 
-However, when synthesizing a circuit to be physically instantiated, we must describe each independent net separately so that the Placer and Router know which pins to connect to which other pins. To translate LGraph to this scheme, we use a C++ class named "Inou_Tojson" that handles the conversion from LGraph to Yosys-standard JSON.
+However, when synthesizing a circuit to be physically instantiated, we must describe each independent net separately so that the Placer and Router know which pins to connect to which other pins. To translate LGraph to this scheme, we use a C++ class named "Inou_Tojson" that handles the conversion from LGraph to Yosys-standard JSON (next section).
+
+## Operation Translations
+
+Unfortunately, inou.json.fromlg currently does not successfully translate most LGraph operations to their Yosys equivalents due to the following LGraph property:
+
+"For any given LGraph Node that performs a commutative operation (e.g. ADD, AND, OR, etc.), there exists only one input Node_pin, and all input edges connect to that single pin."
+
+More about this is described under "Future Work", and we hope to swiftly resolve this issue.
 
 # class Inou_Tojson
 
@@ -132,19 +152,19 @@ This function iterates on each of the "Node"s within a given subgraph (more on N
 
 ## Node
 
-
+TODO
 
 ## Node_type
 
-
+TODO
 
 ## Node_pin
 
-
+TODO
 
 ## Edge
 
-
+TODO
 
 # Future Work
 
@@ -161,4 +181,6 @@ As part of a stretch goal for this quarter, we did not prioritize rewriting inou
 ## TMapping
 
 In the Yosys tool, you can specify an FPGA chip to synthesize one's netlist for, then you can output a file that can be parsed by a PnR tool. Currently, we are roughly 90% complete in creating a JSON file that can be parsed by Yosys, and we have a pass named "Mockturtle" that translates most operations into sets of LUTs, but we need to further develop LiveHD to be able to synthesize arbitrary netlists into a form that can commence Place and Route for FPGAs.
+
+Note that this issue and "Operation Translations" are closely intertwined, since we have to know what physical chip or virtual circuit description to target in order to generate the correct corresponding output.
 
