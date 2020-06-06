@@ -446,6 +446,9 @@ int Inou_Tojson::write_cells(LGraph *lg, const Cells &cells) {
     writer.StartObject();
     writer.Key("hide_name");
     writer.Uint64(hide_name);
+    writer.Key("attributes");
+    writer.StartObject();
+    writer.EndObject();
     writer.Key("connections");
     writer.StartObject();
     for (auto &pin : node.inp_connected_pins()) {
@@ -557,7 +560,9 @@ int Inou_Tojson::dump_graph(Lg_type_id lgid) {
   writer.Key(std::string(lg->get_name()).c_str());
   writer.StartObject();
   writer.Key("attributes");
-  writer.String("TODO");
+  //writer.String("TODO");
+  writer.StartObject();
+  writer.EndObject();
   if (get_ports(lg) < 0) {
     return -1;
   }
