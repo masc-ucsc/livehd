@@ -4,13 +4,19 @@ This pass is intended to create a JSON file that can nextpnr can use to Place an
 
 # Invocation
 
-To invoke the pass "inou.json.fromlg", the following command is used within lgshell:
+Before executing the pass "inou.json.fromlg" on a given LGraph, you must first create the LGraph from the source Verilog file (if not done already):
+
+```sh
+livehd> inou.yosys.tolg files:./${VERILOG_PATH}/${TOP_MOD_NAME}.v top:${TOP_MOD_NAME}
+```
+
+Where you replace "${TOP_MOD_NAME}" with the name of the top graph of your design. As a reminder, by default, lgdb/ is the path that stores the LGraph.
+
+Once the LGraph gets created, to invoke the pass "inou.json.fromlg", the following command is used:
 
 ```sh
 livehd> lgraph.open name:${TOP_MOD_NAME} |> inou.json.fromlg odir:lgdb/
 ```
-
-Where you replace "${TOP_MOD_NAME}" with the name of the top graph of your design, and lgdb/ is the path that stores the LGraph.
 
 This command will dump the top-level graph and all its subgraphs into a file named "${TOP_MOD_NAME}.json". This JSON file can then be parsed by Yosys; it could even be parsed by nextpnr if Mockturtle was used before inou.json.fromlg.
 
@@ -74,17 +80,57 @@ More about this is described under "Future Work", and we hope to swiftly resolve
 
 # class Inou_Tojson
 
-## Public Methods
+In the entry function for the JSON dump pass, we instantiate an object from the "Inou_Tojson" class; we use this object to write the JSON representation of each graph for a given top-level module.
+
+Before reading this section, one should first review the basic API calls for the "LGraph" class under "LGraph API Functions Used". We have to write subgraphs sequentially and atomically to JSON, so we must do the following:
+1. We cannot recurse on subgraphs; if we encounter a Node that instantiates a module (where the Node_type == SubGraph_Op), we only write the instantiation information (e.g. the instantiation name, parameters, connectivity with the rest of the module, etc).
+2. We have to write one graph at a time (as we cannot begin writing one subgraph to JSON until we've completed writing all previous subgraphs), so we must create a vector uniquely listing all graphs.
+
+For example, let's say we have the following:
+1. We have three Verilog modules: A, B, and C.
+2. A is the top module and instantiates two instances of B and C and some miscellaneous boolean logic.
+3. Inside of B, there are four instantiations of C and some miscellaneous logic.
+4. Inside of C, there is only boolean logic.
+In this example, we have three graphs: A, B, and C. A is the top-level graph passed into the flow, and we must create a vector listing A, B, and C before creating the Inou_Tojson object. This is achieved via "lg->each_sub_unique_fast()".
+
+Note: were we not to initially track all the graphs at the start, we would have to use recursive data structures within the private fields. This would prove too complex and costly (memory/CPU wise).
+
+## rapidjson::PrettyWriter
 
 ```cpp
-Inou_Tojson(LGraph *toplg_, PrettySbuffWriter &writer_)
+using PrettySbuffWriter = rapidjson::PrettyWriter<rapidjson::StringBuffer>;
 ```
 
-Creates the Inou_Tojson object. We use this object to store metadata for each LGraph that aids in tracking all the individual nets.
+inou.json.fromlg uses the [rapidjson library](https://rapidjson.org/) to write the JSON dictionaries. The API functions are very self-explanatory; thus, we will exclude describing how to use this library.
+
+Nevertheless, to use this library, we maintain an object derived from the above type (which is typedef-ed via a "using" statement to ease development).
+
+Since we write each component of the JSON file sequentially (i.e. we never rewind to previous points of the JSON dump), we keep a sole reference to a single PrettySbuffWriter object within the Inou_Tojson class.
 
 ## Private Fields
 
-TODO
+asdf
+
+```cpp
+using IPair = std::pair<uint32_t, uint32_t>;
+using Cells = std::vector<Node::Compact_class>;
+```
+
+qwerty
+
+## Public Methods
+
+```cpp
+Inou_Tojson(LGraph *toplg_, PrettySbuffWriter &writer_);
+```
+
+Creates the Inou_Tojson object; we keep a reference to the top-level graph and JSON writer object.
+
+```cpp
+Inou_Tojson(LGraph *toplg_, PrettySbuffWriter &writer_);
+```
+
+Creates the Inou_Tojson object. We use this object to store metadata for each LGraph that aids in tracking all the individual nets.
 
 # LGraph API Functions Used
 
