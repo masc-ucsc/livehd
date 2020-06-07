@@ -1,0 +1,15 @@
+x.__bits = 2
+y.__bits = 3
+
+x = 2
+y = 7
+
+
+A = (x, foo = y)
+
+if (x == 2) {
+  A.foo = 10
+  x = A.foo     //compile error!! rhs.__bits > lhs.__bits, 10.__bits = 4, x.__bits = 2
+}
+
+%out1 = x

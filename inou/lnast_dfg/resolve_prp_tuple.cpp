@@ -17,33 +17,21 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
   absl::flat_hash_map<Node_pin, Node_pin> tg2actual_dpin; //record tuple_get to its actual reference dpin
   for (const auto &node : dfg->fast()) {
     if (node.get_type().op == TupAdd_Op) {
-      // I(node.get_sink_pin(TN).inp_edges().size() == 1); // not necessarily true when it's __bits assignment
       // I(node.get_sink_pin(KV).inp_edges().size() == 1); // not necessarily true, might get extra inp from TupGet
-
       to_be_deleted.insert(node.get_compact());
 
-      // // handle special case: bits attribute
-      // if (is_bit_attr_tuple_add(node)) {
-      //   auto bits = node.get_sink_pin(KV).inp_edges().begin()->driver.get_node().get_type_const_value(); // FIXME->sh: now I assume value pin is connected to constant node directly, but here is another copy propagation problem
-      //   auto target_name = node.get_driver_pin().get_name();
-      //   node.get_driver_pin().set_name("");//clean the name on TA dpin for correct dpin name search on LGraph
-      //   Node_pin target_dpin;
-      //
-      //   if (is_input(target_name) || is_output(target_name)) {
-      //     target_dpin = Node_pin::find_driver_pin(dfg, target_name.substr(1, target_name.size()-1));
-      //   } else {
-      //     target_dpin = Node_pin::find_driver_pin(dfg, std::string(target_name) + "_0"); //FIXME->sh: use absl
-      //     I(target_dpin.get_node().get_type().op != TupAdd_Op);
-      //   }
-      //
-      //   target_dpin.ref_bitwidth()->e.set_ubits(bits);
-      // }
     } else if (node.get_type().op == TupGet_Op and tuple_get_has_key_name(node)) {
       to_be_deleted.insert(node.get_compact());
       auto tup_get_target = node.get_sink_pin(KN).inp_edges().begin()->driver.get_name();
       auto chain_itr = node.get_sink_pin(TN).inp_edges().begin()->driver.get_node();
       while (chain_itr.get_type().op != TupRef_Op) {
-        I(chain_itr.get_type().op == TupAdd_Op);
+        Node next_itr;
+        if (chain_itr.get_type().op == Or_Op) { //it's ok to have Or_Op(aka assign_op) in the tuple_chain, just ignore it and continue to find target tuple_add
+          next_itr = chain_itr.get_sink_pin(0).inp_edges().begin()->driver.get_node();
+          chain_itr = next_itr;
+          continue;
+        }
+
         if (chain_itr.setup_sink_pin(KN).is_connected() and is_tup_get_target(chain_itr, tup_get_target)) {
           auto value_dpin = chain_itr.setup_sink_pin(KV).inp_edges().begin()->driver;
           if (value_dpin.get_node().get_type().op == TupGet_Op)
@@ -56,9 +44,27 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
           dfg->add_edge(value_dpin, value_spin);
           break;
         }
-        auto next_itr = chain_itr.setup_sink_pin(TN).inp_edges().begin()->driver.get_node();
+        next_itr = chain_itr.setup_sink_pin(TN).inp_edges().begin()->driver.get_node();
         chain_itr = next_itr;
       }
+
+      // while (chain_itr.get_type().op != TupRef_Op) {
+      //   I(chain_itr.get_type().op == TupAdd_Op);
+      //   if (chain_itr.setup_sink_pin(KN).is_connected() and is_tup_get_target(chain_itr, tup_get_target)) {
+      //     auto value_dpin = chain_itr.setup_sink_pin(KV).inp_edges().begin()->driver;
+      //     if (value_dpin.get_node().get_type().op == TupGet_Op)
+      //       value_dpin = tg2actual_dpin[value_dpin];
+      //     else
+      //       tg2actual_dpin[node.get_driver_pin()] = value_dpin;
+      //
+      //     // auto value_spin = node.get_sink_pin(TN).out_edges().begin()->sink;
+      //     auto value_spin = node.get_driver_pin().out_edges().begin()->sink;
+      //     dfg->add_edge(value_dpin, value_spin);
+      //     break;
+      //   }
+      //   auto next_itr = chain_itr.setup_sink_pin(TN).inp_edges().begin()->driver.get_node();
+      //   chain_itr = next_itr;
+      // }
 
     } else if (node.get_type().op == TupGet_Op and tuple_get_has_key_pos(node)) {
       to_be_deleted.insert(node.get_compact());
