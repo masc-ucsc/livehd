@@ -2,10 +2,10 @@
 rm -rf ./lgdb
 
 # pts='out_ssa'
- pts='out_ssa nested_if firrtl_tail adder_stage if2 if3_err nested_if_err ssa_rhs if logic tuple_if2 tuple_if'
+ pts='out_ssa if2 if nested_if if3_err nested_if_err logic ssa_rhs adder_stage tuple_if2 tuple_if'
 # pts='nested_if tuple_if tuple_if2 adder_stage if2 if3_err nested_if_err ssa_rhs logic if'
 
-# pts='sync_cnt_nested_if bits_rhs'
+# pts='sync_cnt_nested_if bits_rhs  firrtl_tail '
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck

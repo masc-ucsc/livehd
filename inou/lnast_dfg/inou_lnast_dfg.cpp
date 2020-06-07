@@ -490,16 +490,6 @@ void Inou_lnast_dfg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnid
     auto bits_dpin = setup_ref_node_dpin(dfg, c2_ta); //this dpin represents the bits value, might come from ConstOp or after some copy propagation
     vname2bits_dpin[lnast->get_name(c0_ta)] = bits_dpin; //node that vname is de-SSAed, a pure variable name
 
-    // // no need to connect to tuple_ref when __bits, meaningless
-    // setup_ref_node_dpin(dfg, c0_ta); // create corresponding io/reg if necessary
-    // auto kn_dpin = setup_tuple_key(dfg, key_name);
-    // dfg->add_edge(kn_dpin, kn_spin);
-    //
-    // auto value_dpin = setup_ref_node_dpin(dfg, c2_ta);
-    // dfg->add_edge(value_dpin, value_spin);
-    // auto dpin_name = lnast->get_sname(c0_ta).substr(0, lnast->get_sname(c0_ta).size()-2); // get rid of ssa name to avoid lgraph node search confliction
-    // tup_add.setup_driver_pin().set_name(dpin_name); // set name on driver_pin, but don't enter name2dpin table
-    // /* tup_add.setup_driver_pin().set_name(lnast->get_sname(c0_ta)); // set name on driver_pin, but don't enter name2dpin table */
   } else {
     auto tn_dpin = setup_tuple_ref(dfg, tup_name);
     dfg->add_edge(tn_dpin, tn_spin);
@@ -519,7 +509,6 @@ void Inou_lnast_dfg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnid
       dfg->add_edge(kn_dpin, kn_spin);
     }
 
-    
 
     std::string kp_str;
     if (is_const(key_name)) { // it is a key_pos, not a key_name
@@ -588,16 +577,6 @@ Node_pin Inou_lnast_dfg::setup_node_opr_and_lhs(LGraph *dfg, const Lnast_nid &ln
 Node_pin Inou_lnast_dfg::setup_node_assign_and_lhs(LGraph *dfg, const Lnast_nid &lnidx_opr) {
   auto lhs      = lnast->get_first_child(lnidx_opr);
   auto lhs_name = lnast->get_sname(lhs);
-  //handle output as lhs
-  //FIXME->sh: to be deprecated
-  // if (is_output(lhs_name)) {
-  //   if(dfg->is_graph_output(lhs_name.substr(1, lhs_name.size()-3))) {
-  //     return dfg->get_graph_output(lhs_name.substr(1, lhs_name.size()-3));  //get rid of '%' char
-  //   } else {
-  //     setup_ref_node_dpin(dfg, lhs);
-  //     return dfg->get_graph_output(lhs_name.substr(1, lhs_name.size()-3));
-  //   }
-  // }
 
   //handle register as lhs
   if (is_register(lhs_name)) {
@@ -669,6 +648,7 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
     ;
   } else if (is_input(name)) {
     node_dpin = dfg->add_graph_input(name.substr(1, name.size()-3), Port_invalid, 0);
+    // setup_dpin_ssa(node_dpin, name_no_ssa, 0);
     fmt::print("add graph inp:{}\n", name.substr(1, name.size()-3));
   } else if (is_const(name)) {
     node_dpin = resolve_constant(dfg, name).setup_driver_pin();
@@ -806,8 +786,18 @@ void Inou_lnast_dfg::setup_lgraph_outputs_and_final_var_name(LGraph *dfg) {
 void Inou_lnast_dfg::setup_explicit_bits_info(LGraph *dfg){
 
   //Todo:need to handle graph input bitwidth assignment
-  dfg->each_graph_input([dfg](const Node_pin &dpin) {
-    ;//balabala
+  dfg->each_graph_input([this](const Node_pin &inp_dpin) {
+    auto editable_inp_pin = inp_dpin;
+    auto vname = "$" + std::string(editable_inp_pin.get_name());
+    I (vname2bits_dpin.find(vname) != vname2bits_dpin.end());
+    auto bits_dpin = vname2bits_dpin[vname];
+    if (bits_dpin.get_node().get_type().op == U32Const_Op) {
+      auto bits = bits_dpin.get_node().get_type_const_value();
+      editable_inp_pin.ref_bitwidth()->e.set_ubits(bits);
+      editable_inp_pin.ref_bitwidth()->fixed = true;
+    } else {
+      I(false, "wait for copy-propagation"); //FIXME->sh: todo
+    }
   });
 
   for (const auto &node: dfg->fast()) {

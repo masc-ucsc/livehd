@@ -18,18 +18,20 @@ protected:
   std::deque<Node_pin> next_pending;
   // std::vector<Node_pin> initial_imp_unset;
 
-  void mark_all_outputs  (Node_pin &pin);
-  void iterate_logic     (Node_pin &pin);
-  void iterate_arith     (Node_pin &pin);
-  void iterate_comparison(Node_pin &pin);
-  void iterate_shift     (Node_pin &pin);
-  void iterate_pick      (Node_pin &pin);
-  void iterate_join      (Node_pin &pin);
-  void iterate_equals    (Node_pin &pin);
-  void iterate_mux       (Node_pin &pin);
-  void iterate_flop      (Node_pin &pin);
 
-  void iterate_driver_pin        (Node_pin &pin);
+  void mark_all_outputs             (const Node_pin &dpin);
+  void mark_all_outputs_initialize  (const Node_pin &dpin);
+  void iterate_logic     (Node_pin &dpin);
+  void iterate_arith     (Node_pin &dpin);
+  void iterate_comparison(Node_pin &dpin);
+  void iterate_shift     (Node_pin &dpin);
+  void iterate_pick      (Node_pin &dpin);
+  void iterate_join      (Node_pin &dpin);
+  void iterate_equals    (Node_pin &dpin);
+  void iterate_mux       (Node_pin &dpin);
+  void iterate_flop      (Node_pin &dpin);
+  void iterate_driver_pin        (Node_pin &dpin);
+
 
   void bw_pass_setup             (LGraph *lg);
   static void bw_pass_dump              (LGraph *lg);
