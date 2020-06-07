@@ -5,8 +5,7 @@
 #include "lgraph.hpp"
 
 void Ann_bitwidth::Explicit_range::dump() const {
-  fmt::print("max{}:{} min{}:{} sign{}:{} {}", max_set ? "_set" : "", max, min_set ? "_set" : "", min, sign_set ? "_set" : "", sign,
-             overflow ? "overflow" : "");
+  fmt::print("max{}:{} min{}:{} sign{}:{} {}", max_set ? "_set" : "", max, min_set ? "_set" : "", min, sign_set ? "_set" : "", sign, overflow ? "overflow" : "");
 }
 
 bool Ann_bitwidth::Explicit_range::is_unsigned() const { return !sign_set || (sign_set && !sign); }

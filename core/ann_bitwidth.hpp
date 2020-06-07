@@ -32,6 +32,8 @@ public:
     bool sign;
     bool overflow;
 
+
+
     Implicit_range() {
       max      = 0;
       min      = 0;
@@ -54,6 +56,7 @@ public:
   Implicit_range i;
   Explicit_range e;
   uint16_t       niters = 0;
+  bool           fixed;
 
   void set_implicit() {
     i.min = e.min;

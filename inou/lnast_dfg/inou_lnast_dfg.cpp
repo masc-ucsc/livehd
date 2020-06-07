@@ -60,12 +60,17 @@ std::vector<LGraph *> Inou_lnast_dfg::do_tolg(std::shared_ptr<Lnast> ln) {
 
 
 void Inou_lnast_dfg::lnast2lgraph(LGraph *dfg) {
-  fmt::print("============================= Phase-1: LNAST->LGraph Start ===================\n");
+
+  fmt::print("============================= Phase-1: LNAST->LGraph Start ===============================================\n");
   const auto top   = lnast->get_root();
   const auto stmts = lnast->get_first_child(top);
   process_ast_stmts(dfg, stmts);
+
   fmt::print("============================= Phase-2: Adding final Module Outputs and Final Dpin Name ===================\n");
   setup_lgraph_outputs_and_final_var_name(dfg);
+
+  fmt::print("============================= Phase-3: Setup Explicit Bits Information ===================================\n");
+  setup_explicit_bits_info(dfg);
 }
 
 void Inou_lnast_dfg::process_ast_stmts(LGraph *dfg, const Lnast_nid &lnidx_stmts) {
@@ -482,16 +487,19 @@ void Inou_lnast_dfg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnid
 
 
   if (key_name.size() >= 6 && key_name.substr(0,6) == "__bits") {
-    // no need to connect to tuple_ref when __bits, meaningless
-    setup_ref_node_dpin(dfg, c0_ta); // create corresponding io/reg if necessary
-    auto kn_dpin = setup_tuple_key(dfg, key_name);
-    dfg->add_edge(kn_dpin, kn_spin);
+    auto bits_dpin = setup_ref_node_dpin(dfg, c2_ta); //this dpin represents the bits value, might come from ConstOp or after some copy propagation
+    vname2bits_dpin[lnast->get_name(c0_ta)] = bits_dpin; //node that vname is de-SSAed, a pure variable name
 
-    auto value_dpin = setup_ref_node_dpin(dfg, c2_ta);
-    dfg->add_edge(value_dpin, value_spin);
-    auto dpin_name = lnast->get_sname(c0_ta).substr(0, lnast->get_sname(c0_ta).size()-2); // get rid of ssa name to avoid lgraph node search confliction
-    tup_add.setup_driver_pin().set_name(dpin_name); // set name on driver_pin, but don't enter name2dpin table
-    /* tup_add.setup_driver_pin().set_name(lnast->get_sname(c0_ta)); // set name on driver_pin, but don't enter name2dpin table */
+    // // no need to connect to tuple_ref when __bits, meaningless
+    // setup_ref_node_dpin(dfg, c0_ta); // create corresponding io/reg if necessary
+    // auto kn_dpin = setup_tuple_key(dfg, key_name);
+    // dfg->add_edge(kn_dpin, kn_spin);
+    //
+    // auto value_dpin = setup_ref_node_dpin(dfg, c2_ta);
+    // dfg->add_edge(value_dpin, value_spin);
+    // auto dpin_name = lnast->get_sname(c0_ta).substr(0, lnast->get_sname(c0_ta).size()-2); // get rid of ssa name to avoid lgraph node search confliction
+    // tup_add.setup_driver_pin().set_name(dpin_name); // set name on driver_pin, but don't enter name2dpin table
+    // /* tup_add.setup_driver_pin().set_name(lnast->get_sname(c0_ta)); // set name on driver_pin, but don't enter name2dpin table */
   } else {
     auto tn_dpin = setup_tuple_ref(dfg, tup_name);
     dfg->add_edge(tn_dpin, tn_spin);
@@ -756,12 +764,6 @@ void Inou_lnast_dfg::setup_lnast_to_lgraph_primitive_type_mapping() {
 
 
 void Inou_lnast_dfg::setup_dpin_ssa(Node_pin &dpin, std::string_view var_name, uint16_t subs) {
-  // if (name2vid.find(var_name) == name2vid.end()) {
-  //   vid_cnt ++;
-  //   dpin.ref_ssa()->set_ssa(vid_cnt, subs);
-  //   name2vid[var_name] = vid_cnt;
-  // }
-  // dpin.ref_ssa()->set_ssa(name2vid[var_name],subs);
   dpin.ref_ssa()->set_ssa(var_name,subs);
 }
 
@@ -799,43 +801,37 @@ void Inou_lnast_dfg::setup_lgraph_outputs_and_final_var_name(LGraph *dfg) {
       ;
     }
   }
-
-
-  // absl::flat_hash_map<uint32_t, Node_pin> vid2dpin; //Pyrope variable -> dpin with the largest ssa var subscription
-  // for (auto node: dfg->fast()) {
-  //   if (node.get_type().op == Or_Op && node.setup_driver_pin(1).has_name()) {  //FIXME->sh: this is the only way to detect unconnected reduced_or, tricky but ...
-  //     auto dpin = node.get_driver_pin(1);
-  //     I(dpin.has_ssa());
-  //     auto vid  = dpin.ref_ssa()->get_vid();
-  //     auto subs = dpin.ref_ssa()->get_subs();
-  //
-  //     if(vid2dpin.find(vid) == vid2dpin.end()) {
-  //       vid2dpin[vid] = dpin;
-  //       continue;
-  //     }
-  //
-  //     if (subs > vid2dpin[vid].get_ssa().get_subs()) {
-  //       vid2dpin[vid] = dpin;
-  //     }
-  //
-  //   }
-  // }
-  //
-  // //based on the table, create graph outputs or set the final variable name
-  // for (auto const&[vid, dpin] : vid2dpin) {
-  //   auto dpin_name = dpin.get_name();
-  //   if(is_output(dpin_name)) {
-  //     auto out_spin = dfg->add_graph_output(dpin_name.substr(1, dpin_name.size()-3), Port_invalid, 0); // Port_invalid pos means do not care about position
-  //     fmt::print("add graph out:{}\n", dpin_name.substr(1, dpin_name.size()-3));       // -3 means get rid of %, _0(ssa subscript)
-  //     dfg->add_edge(dpin, out_spin);
-  //   } else {
-  //     //normal variable, but without lnast index, don't know how to get rid of the subs substr from the dpin name now
-  //     //one solution is to record string_view of variable in SSA annotation instead of vid, a interger.
-  //     ;
-  //   }
-  // }
-
-
-
 };
 
+void Inou_lnast_dfg::setup_explicit_bits_info(LGraph *dfg){
+
+  //Todo:need to handle graph input bitwidth assignment
+  dfg->each_graph_input([dfg](const Node_pin &dpin) {
+    ;//balabala
+  });
+
+  for (const auto &node: dfg->fast()) {
+    for (const auto &out_edge : node.out_edges()) {
+      auto target_dpin = out_edge.driver;
+      if (target_dpin.has_ssa()) {
+        auto vname = target_dpin.get_ssa().get_vname();
+
+        if (vname2bits_dpin.find(vname) != vname2bits_dpin.end()) {
+          auto bits_dpin = vname2bits_dpin[vname];
+          fmt::print("vname:{}\n", vname);
+          fmt::print("bits_dpin dbg:{}\n", bits_dpin.debug_name());
+          fmt::print("bits_node dbg:{}\n", bits_dpin.get_node().debug_name());
+          if (bits_dpin.get_node().get_type().op == U32Const_Op) {
+            auto bits = bits_dpin.get_node().get_type_const_value();
+            fmt::print("bits:{}\n", bits);
+            fmt::print("target_dpin dbg:{}\n", target_dpin.debug_name());
+            target_dpin.ref_bitwidth()->e.set_ubits(bits);
+            target_dpin.ref_bitwidth()->fixed = true;
+          } else {
+            I(false, "wait for copy-propagation"); //FIXME->sh: todo
+          }
+        }
+      }
+    }
+  }
+};

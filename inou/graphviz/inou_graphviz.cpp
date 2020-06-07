@@ -179,6 +179,14 @@ void Inou_graphviz::populate_lg_data(LGraph *g) {
     }
   });
 
+
+  g->each_graph_output([&data](const Node_pin &pin) {
+    std::string_view dst_str = "virtual_dst_module";
+    auto dbits = pin.get_bits();
+    data += fmt::format(" {}->{}[label=<{}b>];\n", pin.get_name(), dst_str, dbits);
+  });
+
+
   data += "}\n";
 
   std::string file = absl::StrCat(odir, "/", g->get_name(), ".dot");

@@ -287,8 +287,8 @@ public:
   };
 };
 
-// Y = {A,B,C,D,E....} => previous expression might be wrong!!
-// Y = {...,E,D,C,B,A} => modified by SH
+// Y = {...,E,D,C,B,A}
+// note: need to set corrsponding pid correctly, A->pid_0, ..., E->pid_4, ...
 class Node_Type_Join : public Node_Type {
 public:
   Node_Type_Join() : Node_Type("join", Join_Op, false) { outputs.push_back("Y"); };

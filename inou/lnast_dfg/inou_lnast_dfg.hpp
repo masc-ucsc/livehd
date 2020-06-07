@@ -21,10 +21,11 @@ private:
   absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Node_Type_Op> primitive_type_lnast2lg;
 
 
-  absl::flat_hash_map<std::string, Node_pin>      name2dpin;
-  // absl::flat_hash_map<std::string_view, uint32_t> name2vid; //for de-ssa variable
-  absl::flat_hash_map<std::string, std::string>   keyname2pos;
-  // uint32_t vid_cnt = 0;
+  absl::flat_hash_map<std::string, Node_pin>        name2dpin;       //FIXME->sh: change to string_view??
+  absl::flat_hash_map<std::string, std::string>     keyname2pos;
+  absl::flat_hash_map<std::string_view, Node_pin>   vname2bits_dpin; //variable name (no ssa) to bitwidth
+
+
   static constexpr uint8_t TN = 0;  // tuple name
   static constexpr uint8_t KN = 1;  // tuple element key name
   static constexpr uint8_t KP = 2;  // tuple element key position
@@ -40,6 +41,7 @@ protected:
 
   void lnast2lgraph                           (LGraph *dfg);
   void setup_lgraph_outputs_and_final_var_name(LGraph *dfg);
+  void setup_explicit_bits_info               (LGraph *dfg);
   void process_ast_stmts        (LGraph *dfg, const Lnast_nid &lnidx_stmts);
   void process_ast_assign_op    (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_nary_op      (LGraph *dfg, const Lnast_nid &lnidx);
@@ -119,3 +121,4 @@ public:
 
   static void setup();
 };
+

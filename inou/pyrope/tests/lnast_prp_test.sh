@@ -2,7 +2,7 @@
 rm -rf ./lgdb
 
 # pts='out_ssa'
-pts='out_ssa tuple_if2 nested_if tuple_if firrtl_tail adder_stage if2 if3_err nested_if_err ssa_rhs if logic'
+ pts='out_ssa nested_if firrtl_tail adder_stage if2 if3_err nested_if_err ssa_rhs if logic tuple_if2 tuple_if'
 # pts='nested_if tuple_if tuple_if2 adder_stage if2 if3_err nested_if_err ssa_rhs logic if'
 
 # pts='sync_cnt_nested_if bits_rhs'
@@ -71,23 +71,6 @@ do
     mv ${pt}.dot ${pt}.no_bits.tuple.reduced_or.dot
 
 
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "Reduced_Or_Op Elimination(LGraph)"  
-    echo "----------------------------------------------------"
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.reduced_or_elimination"
-    if [ $? -eq 0 ]; then
-      echo "Successfully eliminate all reduced_or_op: inou/cfg/tests/${pt}.prp"
-    else
-      echo "ERROR: Pyrope compiler failed: reduced_or_elimination, testcase: inou/cfg/tests/${pt}.prp"
-      exit 1
-    fi
-
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.no_bits.tuple.dot
-
 
     echo ""
     echo ""
@@ -104,9 +87,7 @@ do
     fi
 
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.no_bits.dot
-
-
+    mv ${pt}.dot ${pt}.no_bits.reduced_or.dot
 
 
 
@@ -126,21 +107,38 @@ do
     fi
 
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+    mv ${pt}.dot ${pt}.reduced_or.dot
+
+
+    echo ""
+    echo ""
+    echo ""
+    echo "----------------------------------------------------"
+    echo "Reduced_Or_Op Elimination(LGraph)"
+    echo "----------------------------------------------------"
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.reduced_or_elimination"
+    if [ $? -eq 0 ]; then
+      echo "Successfully eliminate all reduced_or_op: inou/cfg/tests/${pt}.prp"
+    else
+      echo "ERROR: Pyrope compiler failed: reduced_or_elimination, testcase: inou/cfg/tests/${pt}.prp"
+      exit 1
+    fi
+
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
 
 
 
 
-
-    if [[ ${pt} == *_err* ]]; then 
+    if [[ ${pt} == *_err* ]]; then
         echo "----------------------------------------------------"
-        echo "Pass! This is a Compile Error Test, No Need to Generate Verilog Code "  
+        echo "Pass! This is a Compile Error Test, No Need to Generate Verilog Code "
         echo "----------------------------------------------------"
     else
         echo ""
         echo ""
         echo ""
         echo "----------------------------------------------------"
-        echo "LGraph -> Verilog"  
+        echo "LGraph -> Verilog"
         echo "----------------------------------------------------"
 
         ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg"
@@ -157,7 +155,7 @@ do
         echo ""
         echo ""
         echo "----------------------------------------------------"
-        echo "Logic Equivalence Check"  
+        echo "Logic Equivalence Check"
         echo "----------------------------------------------------"
 
         ${LGCHECK} --implementation=${pt}.v --reference=./inou/cfg/tests/verilog_gld/${pt}.gld.v

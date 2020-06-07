@@ -35,7 +35,8 @@ protected:
   static void bw_pass_dump              (LGraph *lg);
   static void bw_implicit_range_to_bits (LGraph *lg);
   bool bw_pass_iterate           ();
-  void bw_settle_graph_outputs   (LGraph *lg);
+  void bw_settle_graph_outputs     (LGraph *lg);
+  void bw_bits_extension_by_join   (LGraph *lg);
 
   static void trans(Eprp_var &var);
   void        do_trans(LGraph *orig);

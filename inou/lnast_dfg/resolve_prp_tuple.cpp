@@ -22,22 +22,22 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
 
       to_be_deleted.insert(node.get_compact());
 
-      // handle special case: bits attribute
-      if (is_bit_attr_tuple_add(node)) {
-        auto bits = node.get_sink_pin(KV).inp_edges().begin()->driver.get_node().get_type_const_value(); // FIXME->sh: now I assume value pin is connected to constant node directly, but here is another copy propagation problem
-        auto target_name = node.get_driver_pin().get_name();
-        node.get_driver_pin().set_name("");//clean the name on TA dpin for correct dpin name search on LGraph
-        Node_pin target_dpin;
-
-        if (is_input(target_name) || is_output(target_name)) { 
-          target_dpin = Node_pin::find_driver_pin(dfg, target_name.substr(1, target_name.size()-1));
-        } else {
-          target_dpin = Node_pin::find_driver_pin(dfg, std::string(target_name) + "_0"); //FIXME->sh: use absl
-          I(target_dpin.get_node().get_type().op != TupAdd_Op);
-        }
-
-        target_dpin.ref_bitwidth()->e.set_ubits(bits);
-      }
+      // // handle special case: bits attribute
+      // if (is_bit_attr_tuple_add(node)) {
+      //   auto bits = node.get_sink_pin(KV).inp_edges().begin()->driver.get_node().get_type_const_value(); // FIXME->sh: now I assume value pin is connected to constant node directly, but here is another copy propagation problem
+      //   auto target_name = node.get_driver_pin().get_name();
+      //   node.get_driver_pin().set_name("");//clean the name on TA dpin for correct dpin name search on LGraph
+      //   Node_pin target_dpin;
+      //
+      //   if (is_input(target_name) || is_output(target_name)) {
+      //     target_dpin = Node_pin::find_driver_pin(dfg, target_name.substr(1, target_name.size()-1));
+      //   } else {
+      //     target_dpin = Node_pin::find_driver_pin(dfg, std::string(target_name) + "_0"); //FIXME->sh: use absl
+      //     I(target_dpin.get_node().get_type().op != TupAdd_Op);
+      //   }
+      //
+      //   target_dpin.ref_bitwidth()->e.set_ubits(bits);
+      // }
     } else if (node.get_type().op == TupGet_Op and tuple_get_has_key_name(node)) {
       to_be_deleted.insert(node.get_compact());
       auto tup_get_target = node.get_sink_pin(KN).inp_edges().begin()->driver.get_name();
