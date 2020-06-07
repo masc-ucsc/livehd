@@ -648,7 +648,6 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
     ;
   } else if (is_input(name)) {
     node_dpin = dfg->add_graph_input(name.substr(1, name.size()-3), Port_invalid, 0);
-    // setup_dpin_ssa(node_dpin, name_no_ssa, 0);
     fmt::print("add graph inp:{}\n", name.substr(1, name.size()-3));
   } else if (is_const(name)) {
     node_dpin = resolve_constant(dfg, name).setup_driver_pin();
@@ -789,6 +788,9 @@ void Inou_lnast_dfg::setup_explicit_bits_info(LGraph *dfg){
   dfg->each_graph_input([this](const Node_pin &inp_dpin) {
     auto editable_inp_pin = inp_dpin;
     auto vname = "$" + std::string(editable_inp_pin.get_name());
+    if (vname == "$clk" || vname == "$rst")
+      return;
+
     I (vname2bits_dpin.find(vname) != vname2bits_dpin.end());
     auto bits_dpin = vname2bits_dpin[vname];
     if (bits_dpin.get_node().get_type().op == U32Const_Op) {
