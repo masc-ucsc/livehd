@@ -496,3 +496,13 @@ TEST_F(Setup_mmap_map_test, lots_of_strings) {
   }
 }
 
+static_assert( mmap_lib::is_array_serializable<std::string_view>::value);
+static_assert( mmap_lib::is_array_serializable<std::vector<int>>::value);
+static_assert(!mmap_lib::is_array_serializable<uint32_t>::value);
+static_assert(!mmap_lib::is_array_serializable<std::map<int,int>>::value);
+static_assert(!mmap_lib::is_array_serializable<std::string>::value);
+
+TEST_F(Setup_mmap_map_test, serializable) {
+
+
+}

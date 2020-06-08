@@ -145,13 +145,10 @@ protected:
   }
 
   bool is_sub(Index_ID nid) const {  // Very common function (shoud be fast)
-    I(nid < node_type_table.size());
     I(node_internal[nid].is_node_state());
     I(node_internal[nid].is_master_root());
 
-    Node_Type_Op op = node_type_table[nid];
-
-    return op >= SubGraphMin_Op && op <= SubGraphMax_Op;
+    return node_internal[nid].get_type() == SubGraph_Op;
   }
 
 public:

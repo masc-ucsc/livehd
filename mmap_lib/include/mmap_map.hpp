@@ -134,6 +134,37 @@
 
 // umul
 namespace mmap_lib {
+
+template <typename T>
+struct is_array_serializable {
+  template <typename U>
+    static constexpr
+    decltype(std::declval<U>().data(), bool())
+    test_data(int) {
+      return true;
+    }
+
+  template <typename U>
+    static constexpr bool test_data(...) {
+      return false;
+    }
+
+  template <typename U>
+    static constexpr
+    decltype(std::declval<U>().size(), bool())
+    test_size(int) {
+      return true;
+    }
+
+  template <typename U>
+    static constexpr bool test_size(...) {
+      return false;
+    }
+
+  // std::string can work too but it can easily do copies all over. Not worth it for performance reasons
+  static constexpr bool value = test_data<T>(int()) && test_size<T>(int()) && !std::is_same<T,std::string>::value;
+};
+
 namespace detail {
 #if defined(__SIZEOF_INT128__)
 #    define mmap_map_UMULH(a, b) \
@@ -382,11 +413,21 @@ inline size_t hash_bytes(void const* ptr, size_t const len) {
 }
 
 template <>
-struct hash<std::string> {
-	size_t operator()(std::string const& str) const noexcept {
+struct hash<std::string_view> {
+	size_t operator()(std::string_view str) const noexcept {
 		return hash_bytes(str.data(), str.size());
 	}
 };
+
+// std::enable_if_t<is_array_serializable<T>::value && !std::is_same_v<T,std::string_view>, int> = 0
+
+template<class T>
+struct hash<std::vector<T>> {
+	size_t operator()(const std::vector<T> &str) const noexcept {
+		return hash_bytes(str.data(), sizeof(T) * str.size());
+	}
+};
+
 
 namespace detail {
 
@@ -420,28 +461,17 @@ namespace detail {
 template <size_t MaxLoadFactor100, typename Key, typename T, typename Hash>
 class map
 : public Hash {
-public:
-	using key_type    = Key;
-	using mapped_type = typename std::conditional<std::is_same<T  , std::string_view>::value, uint32_t, T  >::type;
-	using value_type  = mmap_lib::pair<typename std::conditional<std::is_same<Key, std::string_view>::value, uint32_t, Key>::type
-                                    ,typename std::conditional<std::is_same<T  , std::string_view>::value, uint32_t, T  >::type>;
-	using size_type   = size_t;
-	using hasher      = Hash;
-	using Self        = map<MaxLoadFactor100, key_type, T, hasher>;
-
 private:
-  static_assert(std::is_trivially_destructible<Key>::value, "Objects in map should be simple without pointer (simple destruction)");
-	static_assert(!std::is_same<Key, std::string>::value     ,"mmap_lib::map uses string_view as key (not slow std::string)\n");
-	//static_assert(!std::is_same<Key, std::string_view>::value,"mmap_lib::map does not deal with strings or string_views (pointers). Use char_array\n");
-	static_assert(!std::is_same<T, std::string>::value       ,"mmap_lib::map uses string_view as value (not slow std::string)\n");
-	//static_assert(!std::is_same<T, std::string_view>::value  ,"mmap_lib::map does not deal with strings or string_views (pointers). Use char_array\n");
+  //static_assert(std::is_trivially_destructible<Key>::value, "Objects in map should be simple without pointer (simple destruction)");
+	static_assert(!std::is_same<Key, std::string>::value     ,"mmap_lib::map uses string_view as key (not slower std::string)\n");
+	static_assert(!std::is_same<T, std::string>::value       ,"mmap_lib::map uses string_view as value (not slower std::string)\n");
 
-	static_assert(!(std::is_same<Key, std::string_view>::value && std::is_same<T, std::string_view>::value)
-        ,"mmap_lib::map can not have std::string_view for key and value simultaneously\n");
+	static_assert(!(is_array_serializable<Key>::value && is_array_serializable<T>::value)
+        ,"mmap_lib::map can not have an array for for KEY and VALUE simultaneously\n");
 	static_assert(MaxLoadFactor100 > 10 && MaxLoadFactor100 < 100, "MaxLoadFactor100 needs to be >10 && < 100");
 
-  static constexpr bool    using_key_sview      = std::is_same<Key, std::string_view>::value;
-  static constexpr bool    using_val_sview      = std::is_same<T, std::string_view>::value;
+  static constexpr bool    using_key_sview      = is_array_serializable<Key>::value;
+  static constexpr bool    using_val_sview      = is_array_serializable<T>::value;
   static constexpr bool    using_sview          = using_key_sview || using_val_sview;
 	static constexpr size_t  InitialNumElements   = 1024;
 	static constexpr int     InitialInfoNumBits   = 5;
@@ -450,6 +480,17 @@ private:
 
 	// type needs to be wider than uint8_t.
 	using InfoType = int32_t;
+
+public:
+	using key_type    = Key;
+	using array_type  = typename std::conditional<is_array_serializable<Key>::value, Key, T>::type;
+	using value_type  = mmap_lib::pair<typename std::conditional<is_array_serializable<Key>::value, uint32_t, Key>::type
+                                    ,typename std::conditional<is_array_serializable<T  >::value, uint32_t, T  >::type>;
+	using size_type   = size_t;
+	using hasher      = Hash;
+	using Self        = map<MaxLoadFactor100, key_type, T, hasher>;
+
+private:
 
 	// DataNode ////////////////////////////////////////////////////////
 
@@ -856,7 +897,7 @@ private:
   }
 
         // highly performance relevant code.
-	// Lower bits are used for indexing into the array (2^n size)
+	// Lower bits are used for indexing into the vector (2^n size)
 	// The upper 1-5 bits need to be a reasonable good hash, to save comparisons.
 	void keyToIdx(const Key &key, int& idx, InfoType& info) const {
 		static constexpr size_t bad_hash_prevention =
@@ -949,7 +990,8 @@ private:
 		return k1 == k2;
 	}
 
-	inline bool equals(std::string_view k1, const uint32_t key_pos) const {
+  template<typename Key_ = Key, typename = std::enable_if_t<is_array_serializable<Key_>::value>>
+	inline bool equals(Key k1, const uint32_t key_pos) const {
     assert(using_sview);
 		auto txt = get_sview(key_pos);
 		return k1 == txt;
@@ -1169,53 +1211,54 @@ public:
 		return findIdx(key)>=0;
 	}
 
-	std::string_view get_sview(uint32_t key_pos) const {
+  // FIXME: enable_if T or Key is array_serializable
+	array_type get_sview(uint32_t key_pos) const {
     reload();
-    assert(using_sview);
-		if(key_pos>=mmap_txt_base[0]) {
-      std::string_view sview("");
+		if(MMAP_LIB_UNLIKELY(key_pos>=mmap_txt_base[0])) {
+      array_type sview;
       return sview;
     }
-		std::string_view sview(reinterpret_cast<const char *>(&mmap_txt_base[key_pos+1]),mmap_txt_base[key_pos]);
-		return sview;
+
+    using tt = typename array_type::value_type;
+    if constexpr (std::is_same_v<array_type,std::string_view>) {
+      array_type sview(reinterpret_cast<const tt *>(&mmap_txt_base[key_pos+1]),mmap_txt_base[key_pos]);
+      return sview;
+    }else{
+      array_type sview(reinterpret_cast<const tt *>(&mmap_txt_base[key_pos+1]),
+                       reinterpret_cast<const tt *>(((const char *)&mmap_txt_base[key_pos+1])+mmap_txt_base[key_pos]));
+      return sview;
+    }
 	}
 
-#if 1
-  template<typename T_ = T, typename = std::enable_if_t<std::is_same_v<T_, std::string_view>>>
-  [[nodiscard]] std::string_view get(key_type const& key) const {
+  template<typename T_ = T, typename = std::enable_if_t<is_array_serializable<T_>::value>>
+  [[nodiscard]] T get(key_type const& key) const {
     const auto idx = findIdx(key);
     assert(idx>=0);
 
     return get_sview(mKeyVals[idx].getSecond());
   }
-  template<typename T_ = T, typename = std::enable_if_t<!std::is_same_v<T_, std::string_view>>>
+  template<typename T_ = T, typename = std::enable_if_t<!is_array_serializable<T_>::value>>
   [[nodiscard]] const T &get(key_type const& key) const {
     const auto idx = findIdx(key);
     assert(idx>=0);
 
     return mKeyVals[idx].getSecond();
   }
-#endif
 
-	[[nodiscard]] std::string_view get_sview(const value_type& it) const {
-    static_assert(using_val_sview,"mmap_lib::map::get_sview should be called only when 'value' is a string_view\n");
+  template<typename T_ = T, typename = std::enable_if_t<is_array_serializable<T_>::value>>
+	[[nodiscard]] T get_sview(const value_type& it) const {
+    static_assert(using_val_sview,"mmap_lib::map::get_sview should be called only when 'value' is array_serializable\n");
     return get_sview(it.second);
 	}
 
-	[[nodiscard]] std::string_view get_sview(const const_iterator &it) const {
-    static_assert(using_val_sview,"mmap_lib::map::get_sview should be called only when 'value' is a string_view\n");
+  template<typename T_ = T, typename = std::enable_if_t<is_array_serializable<T_>::value>>
+	[[nodiscard]] T get_sview(const const_iterator &it) const {
+    static_assert(using_val_sview,"mmap_lib::map::get_sview should be called only when 'value' is array_serializable\n");
     return get_sview(it->second);
   }
 
-#if 0
-	[[nodiscard]] const T &get(const value_type& it) const {
-    static_assert(!using_val_sview,"mmap_lib::map::get should not be called when 'value' is a string_view. Use get_sview instead.\n");
-    return it.second;
-	}
-#endif
-
 	[[nodiscard]] const T &get(const const_iterator &it) const {
-    static_assert(!using_val_sview,"mmap_lib::map::get should not be called when 'value' is a string_view. Use get_sview instead.\n");
+    static_assert(!using_val_sview,"mmap_lib::map::get should not be called when 'value' is array_serializable. Use get_sview instead.\n");
     return it->second;
 	}
 
@@ -1235,7 +1278,7 @@ public:
 	}
 
 	[[nodiscard]] T *ref(key_type const &key) {
-    static_assert(!using_val_sview,"mmap_lib::map::ref can not be called for a string_view. Use get_sview instead.\n");
+    static_assert(!using_val_sview,"mmap_lib::map::ref can not be called for array_serializable. Use get_sview instead.\n");
 
 		auto idx = findIdx(key);
 		assert(idx>=0);
@@ -1244,13 +1287,13 @@ public:
 	}
 
 	[[nodiscard]] T *ref(const value_type& it) {
-    static_assert(!using_val_sview,"mmap_lib::map::ref can not be called for a string_view. Use get_sview instead.\n");
+    static_assert(!using_val_sview,"mmap_lib::map::ref can not be called for array_serializable. Use get_sview instead.\n");
 
     return &it.second;
 	}
 
 	[[nodiscard]] T *ref(iterator &it) {
-    static_assert(!using_val_sview,"mmap_lib::map::ref can not be called for a string_view. Use get_sview instead.\n");
+    static_assert(!using_val_sview,"mmap_lib::map::ref can not be called for array_serializable. Use get_sview instead.\n");
     return &it->second;
 	}
 
@@ -1459,7 +1502,7 @@ private:
 		return *mMask;
 	}
 
-	uint32_t allocate_sview_id(std::string_view txt) {
+	uint32_t allocate_sview_id(array_type txt) {
 
     reload();
 
@@ -1477,16 +1520,15 @@ private:
     assert(mmap_txt_size > (8*insert_point+txt.size()));
 
     char *ptr = reinterpret_cast<char *>(&mmap_txt_base[insert_point+1]);
-    size_t sz=0;
-    for(const auto c:txt) {
-      *ptr++ = c;
-      sz++;
-      assert(sz<4096); // IDs should not be so long
-    }
-    mmap_txt_base[insert_point] = sz;
-    assert(sz == txt.size());
-    *ptr=0;
-    auto bytes = sz+1;
+    std::memcpy(ptr, txt.data(), txt.size());
+    assert(txt.size()<4096); // Objects should not be insane (optimize otherwise)
+    mmap_txt_base[insert_point] = txt.size();
+#if 0
+    *(ptr+txt.size())=0;
+    auto bytes = txt.size()+1;
+#else
+    auto bytes = txt.size();
+#endif
     // Extra space from bytes&0xF to xtra_space
     // 0 -> 0
     // 1 -> 15

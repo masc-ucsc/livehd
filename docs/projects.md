@@ -650,6 +650,13 @@ https://github.com/azukaar/GuPM
 * Allow to specify a specific lgraph library
 * Allow to specify passes/commands in lgraph
 
+## LGraph and LNAST Wavedrom/duh bitfield
+
+Wavedrom and duh allows to dump bitfield information for structures. It would
+be interesting to explore to dump tables and bit fields for Lgraph IOs, and
+structs/fields inside the module. It may be a way to integrate with the
+documentation generation.
+
 ## LGraph and LNAST check pass
 
 Create a pass that checks that the LGraph (and/or LNAST) is sementically correct. Some checks:

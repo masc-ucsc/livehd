@@ -202,8 +202,7 @@ Node_pin Node::setup_driver_pin() const {
 const Node_Type &Node::get_type() const { return current_g->get_type(nid); }
 
 void Node::set_type(const Node_Type_Op op) {
-  I(op != SubGraph_Op && op != U32Const_Op && op != StrConst_Op &&
-    op != LUT_Op);  // do not set type directly, call set_type_const_value ....
+  I(op != SubGraph_Op && op != Const_Op && op != LUT_Op);  // do not set type directly, call set_type_const ....
   current_g->set_type(nid, op);
 }
 
@@ -264,31 +263,15 @@ bool Node::is_type_sub_present() const {
   return false;
 }
 
-void Node::set_type_lut(Lut_type_id lutid) { current_g->set_type_lut(nid, lutid); }
+void Node::set_type_lut(const Lconst &lutid) { current_g->set_type_lut(nid, lutid); }
 
-Lut_type_id Node::get_type_lut() const { return current_g->get_type_lut(nid); }
+const Lconst &Node::get_type_lut() const { return current_g->get_type_lut(nid); }
 
 const Sub_node &Node::get_type_sub_node() const { return current_g->get_type_sub_node(nid); }
 
 Sub_node *Node::ref_type_sub_node() const { return current_g->ref_type_sub_node(nid); }
 
-/* DEPRECATED
-void Node::set_type_const_value(std::string_view str) {
-  g->set_type_const_value(nid, str);
-}
-
-void Node::set_type_const_sview(std::string_view str) {
-  g->set_type_const_sview(nid, str);
-}
-
-void Node::set_type_const_value(uint32_t val) {
-  g->set_type_const_value(nid, val);
-}
-*/
-
-uint32_t Node::get_type_const_value() const { return current_g->get_type_const_value(nid); }
-
-std::string_view Node::get_type_const_sview() const { return current_g->get_type_const_sview(nid); }
+const Lconst &Node::get_type_const() const { return current_g->get_type_const(nid); }
 
 Node_pin Node::setup_driver_pin(std::string_view name) {
   auto type = get_type();

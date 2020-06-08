@@ -2,6 +2,7 @@
 #pragma once
 
 #include "lgraph_base_core.hpp"
+#include "lconst.hpp"
 #include "node_pin.hpp"
 #include "node_type_base.hpp"
 #include "sub_node.hpp"
@@ -188,8 +189,8 @@ public:
     return (nid != other.nid || hidx != other.hidx);
   };
 
-  void        set_type_lut(Lut_type_id lutid);
-  Lut_type_id get_type_lut() const;
+  void             set_type_lut(const Lconst &lutid);
+  const Lconst    &get_type_lut() const;
 
   const Node_Type &get_type() const;
   void             set_type(const Node_Type_Op op);
@@ -200,24 +201,19 @@ public:
   bool             is_type_io() const;
   bool             is_type_loop_breaker() const;
 
-  Hierarchy_index hierarchy_go_down() const;
-  Hierarchy_index hierarchy_go_up() const;
-  Node            get_up_node() const;
-  bool            is_root() const;
+  Hierarchy_index  hierarchy_go_down() const;
+  Hierarchy_index  hierarchy_go_up() const;
+  Node             get_up_node() const;
+  bool             is_root() const;
 
-  void            set_type_sub(Lg_type_id subid);
-  Lg_type_id      get_type_sub() const;
-  const Sub_node &get_type_sub_node() const;
-  Sub_node *      ref_type_sub_node() const;
-  LGraph *        ref_type_sub_lgraph() const;  // Slower than other get_type_sub
-  bool            is_type_sub_present() const;
+  void             set_type_sub(Lg_type_id subid);
+  Lg_type_id       get_type_sub() const;
+  const Sub_node  &get_type_sub_node() const;
+  Sub_node *       ref_type_sub_node() const;
+  LGraph *         ref_type_sub_lgraph() const;  // Slower than other get_type_sub
+  bool             is_type_sub_present() const;
 
-  // WARNING: Do not call this. Use create_node_const... to reuse node if already exists
-  // void              set_type_const_value(std::string_view str);
-  // void              set_type_const_sview(std::string_view str);
-  // void              set_type_const_value(uint32_t val);
-  uint32_t         get_type_const_value() const;
-  std::string_view get_type_const_sview() const;
+  const Lconst    &get_type_const() const;
 
   Node_pin setup_driver_pin(std::string_view name);
   Node_pin setup_driver_pin(Port_ID pid);

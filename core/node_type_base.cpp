@@ -4,7 +4,9 @@
 
 #include "lgraphbase.hpp"
 
-Node_Type *Node_Type::table[StrConst_Op + 1];
+Node_Type *Node_Type::table[Last_invalid_Op] = {
+    nullptr,
+};
 // std::map<std::string, Node_Type *> Node_Type::name2node;
 absl::flat_hash_map<std::string, Node_Type *> Node_Type::name2node;
 
@@ -53,28 +55,13 @@ Node_Type::_init::_init() {
   Node_Type::table[FFlop_Op]           = new Node_Type_FFlop();
   Node_Type::table[Memory_Op]          = new Node_Type_Memory();
   Node_Type::table[SubGraph_Op]        = new Node_Type_SubGraph();
-  Node_Type::table[U32Const_Op]        = new Node_Type_U32Const();
-  Node_Type::table[StrConst_Op]        = new Node_Type_StrConst();
+  Node_Type::table[Const_Op]           = new Node_Type_Const();
 
   I(Invalid_Op == 0);
   for (size_t i = Invalid_Op; i <= SubGraph_Op; i++) {
     I(table[i]);
     name2node[table[i]->get_name()] = table[i];
   }
-}
-
-Node_Type &Node_Type::get(Node_Type_Op op) {
-  if (op >= SubGraphMin_Op && op <= SubGraphMax_Op)
-    op = SubGraph_Op;
-  else if (op >= U32ConstMin_Op && op <= U32ConstMax_Op)
-    op = U32Const_Op;
-  else if (op >= StrConstMin_Op && op <= StrConstMax_Op)
-    op = StrConst_Op;
-  else if (op >= LUTMin_Op && op <= LUTMax_Op)
-    op = LUT_Op;
-
-  I(table[op] != nullptr);
-  return *table[op];
 }
 
 Node_Type_Op Node_Type::get(std::string_view opname) {

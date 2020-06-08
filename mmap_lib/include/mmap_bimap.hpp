@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include <string_view>
+
 #include "mmap_map.hpp"
 
 namespace mmap_lib {

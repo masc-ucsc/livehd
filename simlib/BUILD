@@ -7,7 +7,6 @@ cc_library(
     includes = ["."],
     deps = [
         "@iassert//:iassert",
-        "@com_google_absl//absl/container:flat_hash_map",
         ],
     )
 
@@ -17,16 +16,4 @@ cc_library(
     visibility = ["//visibility:public"],
     includes = ["."],
 )
-
-cc_test(
-    name = "simlib_number_test",
-    srcs = ["tests/simlib_number_test.cpp"],
-    deps = [
-        ":headers",
-        "@gtest//:gtest_main",
-        "@fmt//:fmt",
-        "//lbench:headers",
-        "//mmap_lib:headers",
-        ],
-    )
 

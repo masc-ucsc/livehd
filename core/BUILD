@@ -8,9 +8,11 @@ cc_library(
     deps = [
         "@rapidjson//:headers",
         "@iassert//:iassert",
+        "@boost//:multiprecision",
         "//eprp:eprp",
         "//mmap_lib:headers",
         "//lbench:headers",
+        "//lemu:lemu",
         ],
     )
 

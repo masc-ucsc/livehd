@@ -1,5 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <boost/multiprecision/cpp_int.hpp>
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 

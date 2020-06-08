@@ -12,7 +12,7 @@
 // nodetype should be at meta directory but the node type is needed all over in the base class. It may be good to integrate nodetype
 // as part of the lgnode itself to avoid extra cache misses
 
-enum Node_Type_Op : uint64_t {
+enum Node_Type_Op : uint8_t {
   Invalid_Op,
   // op_class: arith
   Sum_Op,
@@ -74,27 +74,15 @@ enum Node_Type_Op : uint64_t {
   // op_class: memory
   Memory_Op,
   SubGraph_Op,
-  U32Const_Op,
-  StrConst_Op,
-  // op_class: sub
-  SubGraphMin_Op,  // Each subgraph cell starts here
-  SubGraphMax_Op = SubGraphMin_Op + ((1ULL << 32) - 1),
-  // op_class: value
-  U32ConstMin_Op,
-  U32ConstMax_Op = U32ConstMin_Op + ((1ULL << 32) - 1),
-  // op_class: str
-  StrConstMin_Op,
-  StrConstMax_Op = StrConstMin_Op + ((1ULL << 32) - 1),
+  Const_Op,
   Loop_breaker_end,
   //------------------END PIPELINED (break LOOPS)
-  // op_class: lut
-  LUTMin_Op,
-  LUTMax_Op = LUTMin_Op + ((1ULL << (1ULL << LUT_input_bits)) - 1)
+  Last_invalid_Op
 };
 
 class Node_Type {
 private:
-  static Node_Type *                                   table[StrConst_Op + 1];
+  static Node_Type                                    *table[Last_invalid_Op];
   static absl::flat_hash_map<std::string, Node_Type *> name2node;
 
 protected:
@@ -129,7 +117,11 @@ public:
 
   bool has_may_gen_sign() const { return may_gen_sign; }
 
-  static Node_Type &  get(Node_Type_Op op);
+  static const Node_Type &get(Node_Type_Op op) {
+    I(op>Invalid_Op && op<Last_invalid_Op);
+    I(table[op] != nullptr);
+    return *table[op];
+  }
   static Node_Type_Op get(std::string_view opname);
   static bool         is_type(std::string_view opname);
 
@@ -643,14 +635,9 @@ public:
   Node_Type_SubGraph() : Node_Type("subgraph", SubGraph_Op, true){};
 };
 
-class Node_Type_U32Const : public Node_Type {
+class Node_Type_Const : public Node_Type {
 public:
-  Node_Type_U32Const() : Node_Type("u32const", U32Const_Op, true) { outputs.push_back("Y"); };
-};
-
-class Node_Type_StrConst : public Node_Type {
-public:
-  Node_Type_StrConst() : Node_Type("strconst", StrConst_Op, true) { outputs.push_back("Y"); };
+  Node_Type_Const() : Node_Type("const", Const_Op, true) { outputs.push_back("Y"); };
 };
 
 class Node_Type_LUT : public Node_Type {

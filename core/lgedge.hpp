@@ -241,14 +241,15 @@ struct __attribute__((packed)) Node_Internal_Page {
 class __attribute__((packed)) Node_Internal {
 private:
   // BEGIN 12 Bytes common payload
-  Node_state state : 3;  // State must be the first thing (Node_Internal_Page)
-  uint16_t   inp_long : 2;      // 6 bytes each. Just 9 at most
+  Node_state state : 3;           // State must be the first thing (Node_Internal_Page)
+  uint16_t   inp_long : 2;        // 6 bytes each. Just 9 at most
   uint16_t   out_long : 2;
   uint32_t   bits : Bits_bits;
-  uint64_t   nid : Index_bits;  // 31bits, 4 byte aligned
-  uint16_t   future_opcode:9;   // 9 bits to reduce type to have only in overflows
+  uint64_t   nid : Index_bits;    // 31bits, 4 byte aligned
+  uint16_t   type : 8;            // 8 bits for master_root type (could be used for something else in non master root)
+  uint16_t   sign : 1;            // 1 bit (reserved future) for sign extension attribute to simplify gates
   uint16_t   root : 1;
-  Port_ID    dst_pid : Port_bits;  // 15bits
+  Port_ID    dst_pid : Port_bits; // 15bits
   // 8 bytes aligned
 public:
   // WARNING: This must be here not at the end of the structure. OTherwise the
@@ -323,6 +324,12 @@ public:
     return n;
   }
 
+  uint8_t get_type() const { I(is_master_root()); return type; }
+  void set_type(uint8_t op) {
+    I(is_master_root());
+    type = op;
+  }
+
   int32_t get_node_num_inputs() const;
   int32_t get_node_num_outputs() const;
   bool    has_node_inputs() const;
@@ -343,7 +350,7 @@ public:
     inp_long     = 0;
     out_long     = 0;
     nid          = 0;
-    future_opcode = 0;
+    type         = 0;
   }
 
   bool is_deleted() const {

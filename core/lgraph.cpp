@@ -543,11 +543,9 @@ Node LGraph::create_node(const Node &old_node) {
     new_node.set_type_lut(old_node.get_type_lut());
   } else if (op == SubGraph_Op) {
     new_node = create_node_sub(old_node.get_type_sub());
-  } else if (op == U32Const_Op) {
+  } else if (op == Const_Op) {
     new_node = create_node_const(old_node.get_type_const_value(), old_node.get_driver_pin().get_bits());
     I(new_node.get_driver_pin().get_bits() == old_node.get_driver_pin().get_bits());
-  } else if (op == StrConst_Op) {
-    new_node = create_node_const(old_node.get_type_const_sview(), old_node.get_driver_pin().get_bits());
   } else {
     I(op != GraphIO_Op);  // Special case, must use add input/output API
     new_node = create_node(op);
@@ -615,21 +613,11 @@ const Sub_node &LGraph::get_self_sub_node() const { return library->get_sub(get_
 
 Sub_node *LGraph::ref_self_sub_node() { return library->ref_sub(get_lgid()); }
 
-#if 0
-Node LGraph::create_node_const(std::string_view value) {
-
-  auto nid = find_type_const_sview(value);
-  if (unlikely(nid)) {
-    nid = create_node_int();
-    set_type_const_sview(nid, value);
-  }
-
-  return Node(this, Hierarchy_tree::root_index(), nid);
-}
-#endif
-
 Node LGraph::create_node_const(std::string_view value, uint32_t bits) {
   auto nid = find_type_const_sview(value);
+
+  HERE!! Deal with the constant if bits are different!!
+    (use the new uint??)
 
   if (unlikely(nid == 0 || node_internal[nid].get_bits() != bits)) {
     nid = create_node_int();
