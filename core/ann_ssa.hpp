@@ -2,7 +2,6 @@
 
 #pragma once
 #include <string_view>
-#include <string>
 #include <utility>
 
 class __attribute__((packed)) Ann_ssa {
