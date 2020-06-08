@@ -19,7 +19,7 @@ protected:
   // std::vector<Node_pin> initial_imp_unset;
 
 
-  void mark_all_outputs             (const Node_pin &dpin);
+  void mark_all_outputs             (const Node_pin &dpin, bool ini_setup = false);
   void mark_all_outputs_initialize  (const Node_pin &dpin);
   void iterate_logic     (Node_pin &dpin);
   void iterate_arith     (Node_pin &dpin);

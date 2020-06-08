@@ -79,6 +79,8 @@ void Inou_lnast_dfg::process_ast_stmts(LGraph *dfg, const Lnast_nid &lnidx_stmts
     // FIXME->sh: how to use switch to gain performance?
     if (ntype.is_assign()) {
       process_ast_assign_op(dfg, lnidx);
+    } else if (ntype.is_dp_assign()) {
+      process_ast_dp_assign_op(dfg, lnidx);
     } else if (ntype.is_nary_op()) {
       process_ast_nary_op(dfg, lnidx);
     } else if (ntype.is_unary_op()) {
@@ -99,8 +101,6 @@ void Inou_lnast_dfg::process_ast_stmts(LGraph *dfg, const Lnast_nid &lnidx_stmts
       process_ast_as_op(dfg, lnidx);
     } else if (ntype.is_label()) {
       I(false); // no longer label in Pyrope
-    } else if (ntype.is_dp_assign()) {
-      process_ast_dp_assign_op(dfg, lnidx);
     } else if (ntype.is_tuple()) {
       process_ast_tuple_struct(dfg, lnidx);
     } else if (ntype.is_tuple_concat()) {
@@ -375,7 +375,7 @@ void Inou_lnast_dfg::nary_node_rhs_connections(LGraph *dfg, Node &opr_node, cons
 
 
 
-void Inou_lnast_dfg::process_ast_assign_op(LGraph *dfg, const Lnast_nid &lnidx_assign) {
+Node Inou_lnast_dfg::process_ast_assign_op(LGraph *dfg, const Lnast_nid &lnidx_assign) {
   auto c0 = lnast->get_first_child(lnidx_assign);
   auto c1 = lnast->get_sibling_next(c0);
   auto c0_name = lnast->get_sname(c0);
@@ -386,8 +386,15 @@ void Inou_lnast_dfg::process_ast_assign_op(LGraph *dfg, const Lnast_nid &lnidx_a
   GI(opd1.get_node().get_type().op != U32Const_Op, opd1.get_bits() == 0);
 
   dfg->add_edge(opd1, opr);
-
+  return opr.get_node();
 }
+
+
+void Inou_lnast_dfg::process_ast_dp_assign_op(LGraph *dfg, const Lnast_nid &lnidx_dp_assign) {
+  auto dp_assign_dpin = process_ast_assign_op(dfg, lnidx_dp_assign).setup_driver_pin(1);
+  dp_assign_dpin.ref_bitwidth()->dp_flag = true;
+};
+
 
 
 void Inou_lnast_dfg::process_ast_tuple_struct(LGraph *dfg, const Lnast_nid &lnidx_tup) {
@@ -715,7 +722,6 @@ void Inou_lnast_dfg::process_ast_func_def_op (LGraph *dfg, const Lnast_nid &lnid
 void Inou_lnast_dfg::process_ast_sub_op      (LGraph *dfg, const Lnast_nid &lnidx) { ; };
 void Inou_lnast_dfg::process_ast_for_op      (LGraph *dfg, const Lnast_nid &lnidx) { ; };
 void Inou_lnast_dfg::process_ast_while_op    (LGraph *dfg, const Lnast_nid &lnidx) { ; };
-void Inou_lnast_dfg::process_ast_dp_assign_op(LGraph *dfg, const Lnast_nid &lnidx) { ; };
 
 void Inou_lnast_dfg::setup_lnast_to_lgraph_primitive_type_mapping() {
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_invalid]     = Invalid_Op;
@@ -798,7 +804,7 @@ void Inou_lnast_dfg::setup_explicit_bits_info(LGraph *dfg){
       editable_inp_pin.ref_bitwidth()->e.set_ubits(bits);
       editable_inp_pin.ref_bitwidth()->fixed = true;
     } else {
-      I(false, "wait for copy-propagation"); //FIXME->sh: todo
+      I(false, "wait for copy-propagation"); //FIXME->sh: todo, something like foo.__bits = 3 + x will need this
     }
   });
 

@@ -68,7 +68,8 @@ void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
     auto editable_pin = dpin;
     editable_pin.ref_bitwidth()->set_implicit();
     pending.push_back(dpin);
-    mark_all_outputs_initialize(dpin);
+    mark_all_outputs(dpin, true);
+    // mark_all_outputs_initialize(dpin, true);
   });
 
   fmt::print("\n");
@@ -82,7 +83,8 @@ void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
       if (dpin.has_bitwidth()) {
         dpin.ref_bitwidth()->set_implicit();
         pending.push_back(dpin);
-        mark_all_outputs_initialize(dpin);
+        // mark_all_outputs_initialize(dpin);
+        mark_all_outputs(dpin, true);
       } else { // if don't has bitwidth initially, set bits 0 to avoid unnecessary trouble that bitwidth attribute table undefined for some dpins
         dpin.ref_bitwidth()->e.set_ubits(0);
         dpin.ref_bitwidth()->set_implicit();
@@ -197,56 +199,39 @@ void Pass_bitwidth::iterate_driver_pin(Node_pin &node_dpin) {
 }
 
 
-void Pass_bitwidth::mark_all_outputs(const Node_pin &dpin) {
+void Pass_bitwidth::mark_all_outputs(const Node_pin &dpin, bool ini_setup) {
   // Mark driver pins that need to change based off current driver pin.
-  Node cur_node = dpin.get_node(); //FIXME->sh: to be deprecated, no use
 
-  /* dpin.get_bitwidth().i.dump(); */
   for (const auto &out_edge : dpin.out_edges()) {
     auto spin          = out_edge.sink;
     auto affected_node = spin.get_node();
-    for (const auto &aff_out_edge : affected_node.out_edges()) {
-      if (std::find(next_pending.begin(), next_pending.end(), aff_out_edge.driver) == next_pending.end()) {
-        next_pending.push_back(aff_out_edge.driver);
+    if (ini_setup) {
+     for (const auto &aff_out_edge : affected_node.out_edges()) {
+       if (std::find(pending.begin(), pending.end(), aff_out_edge.driver) == pending.end())
+         pending.push_back(aff_out_edge.driver);
+     }
+    } else {
+      for (const auto &aff_out_edge : affected_node.out_edges()) {
+        if (std::find(next_pending.begin(), next_pending.end(), aff_out_edge.driver) == next_pending.end())
+          next_pending.push_back(aff_out_edge.driver);
       }
     }
   }
-  // for (const auto &out_edge : cur_node.out_edges()) {
-  //   auto spin          = out_edge.sink;
-  //   auto affected_node = spin.get_node();
-  //   for (const auto &aff_out_edge : affected_node.out_edges()) {
-  //     if (std::find(next_pending.begin(), next_pending.end(), aff_out_edge.driver) == next_pending.end()) {
-  //       next_pending.push_back(aff_out_edge.driver);
-  //     }
-  //   }
-  // }
 }
 
 
-void Pass_bitwidth::mark_all_outputs_initialize(const Node_pin &dpin) {
-  // Mark driver pins that need to change based off current driver pin.
-  Node cur_node = dpin.get_node(); //FIXME->sh: to be deprecated, no use
-
-  /* dpin.get_bitwidth().i.dump(); */
-  for (const auto &out_edge : dpin.out_edges()) {
-    auto spin          = out_edge.sink;
-    auto affected_node = spin.get_node();
-    for (const auto &aff_out_edge : affected_node.out_edges()) {
-      if (std::find(pending.begin(), pending.end(), aff_out_edge.driver) == pending.end()) {
-        pending.push_back(aff_out_edge.driver);
-      }
-    }
-  }
-  // for (const auto &out_edge : cur_node.out_edges()) {
-  //   auto spin          = out_edge.sink;
-  //   auto affected_node = spin.get_node();
-  //   for (const auto &aff_out_edge : affected_node.out_edges()) {
-  //     if (std::find(next_pending.begin(), next_pending.end(), aff_out_edge.driver) == next_pending.end()) {
-  //       next_pending.push_back(aff_out_edge.driver);
-  //     }
-  //   }
-  // }
-}
+// void Pass_bitwidth::mark_all_outputs_initialize(const Node_pin &dpin) {
+//   // Mark driver pins that need to change based off current driver pin.
+//   for (const auto &out_edge : dpin.out_edges()) {
+//     auto spin          = out_edge.sink;
+//     auto affected_node = spin.get_node();
+//     for (const auto &aff_out_edge : affected_node.out_edges()) {
+//       if (std::find(pending.begin(), pending.end(), aff_out_edge.driver) == pending.end()) {
+//         pending.push_back(aff_out_edge.driver);
+//       }
+//     }
+//   }
+// }
 
 
 void Pass_bitwidth::iterate_logic(Node_pin &node_dpin) {
@@ -789,7 +774,7 @@ void Pass_bitwidth::bw_bits_extension_by_join(LGraph *lg) {
         auto out_edge_bits = out_edge.driver.get_bits();
         if (inp_edge_bits > out_edge_bits) {
           if (node.get_driver_pin(1).get_bitwidth().fixed) I(false, "Compile Error: lhs bits is fixed, rhs bits larger than lhs bits but cannot propagate over it");
-          else                                             I(false, "Compile Error: rhs bits larger than lhs bits after bitwidth pass"); //FIXME->sh: merge these two assertions?
+          else                                                I(false, "Compile Error: rhs bits larger than lhs bits after bitwidth pass"); //FIXME->sh: merge these two assertions?
         } else if (inp_edge_bits < out_edge_bits) {
           uint16_t offset = out_edge_bits - inp_edge_bits;
           auto join_node = lg->create_node(Join_Op);

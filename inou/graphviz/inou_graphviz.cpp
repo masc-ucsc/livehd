@@ -180,6 +180,7 @@ void Inou_graphviz::populate_lg_data(LGraph *g) {
   });
 
 
+  //we need this to show outputs bits in graphviz
   g->each_graph_output([&data](const Node_pin &pin) {
     std::string_view dst_str = "virtual_dst_module";
     auto dbits = pin.get_bits();

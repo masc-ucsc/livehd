@@ -56,7 +56,8 @@ public:
   Implicit_range i;
   Explicit_range e;
   uint16_t       niters = 0;
-  bool           fixed;
+  bool           fixed; // var bitwidth is fixed by source code
+  bool           dp_flag;  // is a tail subset of another variable, it will be resolved during BW algorithm
 
   void set_implicit() {
     i.min = e.min;

@@ -763,7 +763,7 @@ void Lnast::ssa_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &o
 
   //handle lhs of the statement 
   const auto type = get_type(opr_nid);
-  if (type.is_assign() || type.is_as() || type.is_tuple()) {
+  if (type.is_assign() || type.is_dp_assign() || type.is_as() || type.is_tuple()) {
     const auto  lhs_nid  = get_first_child(opr_nid);
     const auto  lhs_name = get_name(lhs_nid);
 
