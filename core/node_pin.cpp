@@ -100,6 +100,9 @@ void Node_pin::set_delay(float val) { Ann_node_pin_delay::ref(top_g)->set(get_co
 
 void Node_pin::set_name(std::string_view wname) { Ann_node_pin_name::ref(current_g)->set(get_compact_class_driver(), wname); }
 
+//FIXME->sh: could be deprecated if ann_ssa could be mmapped for a std::string_view
+void Node_pin::set_prp_vname(std::string_view prp_vname) { Ann_node_pin_prp_vname::ref(current_g)->set(get_compact_class_driver(), prp_vname); }
+
 void Node_pin::nuke() {
   I(false);  // TODO:
 }
@@ -140,6 +143,19 @@ std::string_view Node_pin::get_name() const {
   return Ann_node_pin_name::ref(current_g)->get_val_sview(Compact_class_driver(idx));
 }
 
+
+//FIXME->sh: could be deprecated if ann_ssa could be mmapped for a std::string_view
+std::string_view Node_pin::get_prp_vname() const {
+#ifndef NDEBUG
+  if (!is_graph_io()) {
+    I(is_driver());
+    I(has_prp_vname());  // get_name should be called for named driver_pins
+  }
+#endif
+  // NOTE: Not the usual get_compact_class_driver() to handle IO change from driver/sink
+  return Ann_node_pin_prp_vname::ref(current_g)->get_val_sview(Compact_class_driver(idx));
+}
+
 std::string_view Node_pin::create_name() const {
   auto ref = Ann_node_pin_name::ref(current_g);
 
@@ -163,6 +179,9 @@ std::string_view Node_pin::create_name() const {
 }
 
 bool Node_pin::has_name() const { return Ann_node_pin_name::ref(current_g)->has_key(get_compact_class_driver()); }
+
+//FIXME->sh: could be deprecated if ann_ssa could be mmapped for a std::string_view
+bool Node_pin::has_prp_vname() const { return Ann_node_pin_prp_vname::ref(current_g)->has_key(get_compact_class_driver()); }
 
 Node_pin Node_pin::find_driver_pin(LGraph *top, std::string_view wname) {
 

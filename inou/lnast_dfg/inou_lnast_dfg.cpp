@@ -374,7 +374,6 @@ void Inou_lnast_dfg::nary_node_rhs_connections(LGraph *dfg, Node &opr_node, cons
 }
 
 
-
 Node Inou_lnast_dfg::process_ast_assign_op(LGraph *dfg, const Lnast_nid &lnidx_assign) {
   auto c0 = lnast->get_first_child(lnidx_assign);
   auto c1 = lnast->get_sibling_next(c0);
@@ -750,6 +749,7 @@ void Inou_lnast_dfg::setup_lnast_to_lgraph_primitive_type_mapping() {
 
 void Inou_lnast_dfg::setup_dpin_ssa(Node_pin &dpin, std::string_view var_name, uint16_t subs) {
   dpin.ref_ssa()->set_ssa(var_name,subs);
+  dpin.set_prp_vname(var_name);
 }
 
 

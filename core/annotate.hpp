@@ -16,6 +16,7 @@ struct Ann_name {
   static constexpr char delay[]      = "delay";
   static constexpr char wireoffset[] = "wireoffset";
   static constexpr char wirename[]   = "wirename";
+  static constexpr char prp_vname[]  = "prp_vname";
   static constexpr char nodename[]   = "nodename";
   static constexpr char nodeplace[]  = "nodeplace";
   static constexpr char cfgmeta[]    = "cfgmeta";
@@ -28,7 +29,10 @@ struct Ann_name {
 
 using Ann_node_pin_offset = Attribute<Ann_name::wireoffset, Node_pin, mmap_lib::map<Node_pin::Compact_class_driver, uint16_t> >;
 
-using Ann_node_pin_name = Attribute<Ann_name::wirename, Node_pin, mmap_lib::bimap<Node_pin::Compact_class_driver, std::string_view> >;
+using Ann_node_pin_name      = Attribute<Ann_name::wirename, Node_pin, mmap_lib::bimap<Node_pin::Compact_class_driver, std::string_view> >;
+
+//FIXME->sh: could be deprecated if ann_ssa could be mmapped for a std::string_view
+using Ann_node_pin_prp_vname = Attribute<Ann_name::prp_vname, Node_pin, mmap_lib::bimap<Node_pin::Compact_class_driver, std::string_view> >;
 
 using Ann_node_pin_bitwidth = Attribute<Ann_name::bitwidth, Node_pin, mmap_lib::map<Node_pin::Compact_driver, Ann_bitwidth> >;
 using Ann_node_pin_ssa      = Attribute<Ann_name::ssa,      Node_pin, mmap_lib::map<Node_pin::Compact_driver, Ann_ssa> >;

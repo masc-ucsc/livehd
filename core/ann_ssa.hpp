@@ -2,11 +2,12 @@
 
 #pragma once
 #include <string_view>
+#include <string>
+#include <utility>
 
 class __attribute__((packed)) Ann_ssa {
 private:
 protected:
-  // uint32_t vid;
   std::string_view vname; //variable name without ssa
   uint16_t subs;
   bool     final = false;
