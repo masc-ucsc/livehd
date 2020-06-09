@@ -1,7 +1,7 @@
 #!/bin/bash
 rm -rf ./lgdb
-  pts='test'
-#  pts='firrtl_tail tuple_if2 tuple_if adder_stage ssa_rhs out_ssa if2 if nested_if if3_err nested_if_err logic '
+#  pts='test'
+  pts='firrtl_tail tuple_if2 tuple_if adder_stage ssa_rhs out_ssa if2 if nested_if if3_err nested_if_err logic '
 #  pts='tuple_if2 tuple_if adder_stage ssa_rhs out_ssa if2 if nested_if if3_err nested_if_err logic '
 
 #  pts='sync_cnt_nested_if bits_rhs  firrtl_tail '
@@ -42,7 +42,7 @@ do
     echo "Pyrope -> LNAST-SSA Graphviz debug"  
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "inou.pyrope.dbg_lnast_ssa files:inou/cfg/tests/${pt}.prp |> inou.graphviz.from"
+    ${LGSHELL} "inou.pyrope files:inou/cfg/tests/${pt}.prp |> inou.lnast_dfg.dbg_lnast_ssa |> inou.graphviz.from"
   
     if [ -f ${pt}.lnast.dot ]; then
       echo "Successfully create a lnast from inou/cfg/tests/${pt}.prp"

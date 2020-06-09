@@ -24,6 +24,23 @@ do
     echo "Verify FIRRTL -> LNAST"
     echo "===================================================="
 
+
+    echo "----------------------------------------------------"
+    echo "FIRRTL -> LNAST-SSA Graphviz debug"  
+    echo "----------------------------------------------------"
+
+    ${LGSHELL} "inou.firrtl.tolnast files:inou/firrtl/tests/proto/${pt}_proto.data |> inou.lnast_dfg.dbg_lnast_ssa |> inou.graphviz.from"
+  
+    if [ -f ${pt}.lnast.dot ]; then
+      echo "Successfully create a ssa lnast for debug: ${pt}"
+    else
+      echo "ERROR: FIRRTL -> LNAST -> LNAST-SSA failed... testcase: ${pt}"
+      exit 1
+    fi
+
+
+
+
     echo "----------------------------------------------------"
     echo "FIRRTL (Proto) -> LNAST -> LGraph"
     echo "----------------------------------------------------"

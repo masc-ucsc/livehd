@@ -21,11 +21,23 @@ void Inou_lnast_dfg::setup() {
   m3.add_label_optional("path", "path to read the lgraph[s]", "lgdb");
   m3.add_label_optional("odir", "output directory for generated verilog files", ".");
   register_inou("lnast_dfg",m3);
+
+
+  Eprp_method m4("inou.lnast_dfg.dbg_lnast_ssa", " perform the LNAST SSA transformation, only for debug purpose", &Inou_lnast_dfg::dbg_lnast_ssa);
+  register_pass(m4);
 }
 
 Inou_lnast_dfg::Inou_lnast_dfg(const Eprp_var &var) : Pass("inou.lnast_dfg", var) {
   setup_lnast_to_lgraph_primitive_type_mapping();
 }
+
+
+void Inou_lnast_dfg::dbg_lnast_ssa(Eprp_var &var) {
+  for (const auto &lnast : var.lnasts) {
+    lnast->ssa_trans();
+  }
+}
+
 
 
 void Inou_lnast_dfg::tolg(Eprp_var &var) {

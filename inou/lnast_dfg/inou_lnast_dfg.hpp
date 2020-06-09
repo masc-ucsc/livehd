@@ -115,6 +115,7 @@ protected:
   static void tolg                  (Eprp_var &var);
   static void resolve_tuples        (Eprp_var &var);
   static void reduced_or_elimination(Eprp_var &var);
+  static void dbg_lnast_ssa         (Eprp_var &var);
 
 public:
   explicit Inou_lnast_dfg(const Eprp_var &var);

@@ -12,7 +12,6 @@ protected:
 
   // eprp callbacks
   static void parse_to_lnast(Eprp_var &var);
-  static void dbg_parse_to_lnast_ssa(Eprp_var &var);
 
 public:
   Inou_pyrope(const Eprp_var &var);
