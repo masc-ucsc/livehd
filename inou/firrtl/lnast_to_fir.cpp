@@ -226,7 +226,7 @@ bool Inou_firrtl::is_inp_outp_or_reg(const std::string_view str) {
 
 std::string Inou_firrtl::get_firrtl_name_format(Lnast &ln, const std::string_view str, const Lnast_nid &lnidx) {
   auto ntype = ln.get_type(lnidx);
-  if(ntype.is_ref()) {
+  if(ntype.is_ref() || ntype.is_cond()) {
     return strip_prefixes(str);
   } else if (ntype.is_const()) {
     return create_const_token(str);

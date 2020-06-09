@@ -1,7 +1,7 @@
 #!/bin/bash
 rm -rf ./lgdb
 
-pts='TrivialArith GCD SimpleBitOps'
+pts='GCD SimpleBitOps'  #'TrivialArith GCD SimpleBitOps'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -36,23 +36,6 @@ do
       exit 1
     fi
 
-
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "Reduced_Or_Op Elimination"
-    echo "----------------------------------------------------"
-
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.reduced_or_elimination"
-    if [ $? -eq 0 ]; then
-      echo "Successfully eliminate all reduced_or_op in new lg: ${pt}_proto.data"
-    else
-      echo "ERROR: Pyrope compiler failed on new lg: reduced_or_elimination, testcase: ${pt}_proto.data"
-      exit 1
-    fi
-
-
     echo ""
     echo ""
     echo ""
@@ -68,7 +51,6 @@ do
       exit 1
     fi
 
-
     echo ""
     echo ""
     echo ""
@@ -76,7 +58,6 @@ do
     echo "Bitwidth Optimization"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth"
     if [ $? -eq 0 ]; then
       echo "Successfully optimize design bitwidth on new lg: ${pt}_proto.data"
     else
@@ -86,6 +67,21 @@ do
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
     mv ${pt}.dot ${pt}.newlg.dot
 
+    echo ""
+    echo ""
+    echo ""
+    echo "----------------------------------------------------"
+    echo "Reduced_Or_Op Elimination"
+    echo "----------------------------------------------------"
+
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.reduced_or_elimination"
+    if [ $? -eq 0 ]; then
+      echo "Successfully eliminate all reduced_or_op in new lg: ${pt}_proto.data"
+    else
+      echo "ERROR: Pyrope compiler failed on new lg: reduced_or_elimination, testcase: ${pt}_proto.data"
+      exit 1
+    fi
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth |> lgraph.dump"
 
     echo ""
     echo ""
@@ -102,7 +98,6 @@ do
       echo "ERROR: Yosys failed: verilog generation, testcase: ${pt}_proto.data"
       exit 1
     fi
-
 
     echo ""
     echo ""

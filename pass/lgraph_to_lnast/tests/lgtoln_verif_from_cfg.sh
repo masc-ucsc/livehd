@@ -2,7 +2,7 @@
 rm -rf ./lgdb
 rm -rf ./lgdb2
 
-pts='if if2 nested_if ssa_rhs logic' # tuple_if'
+pts='if if2 nested_if ssa_rhs logic adder_stage ff_if' # tuple_if'
 #simple_tuple
 #tuple
 #tuple_if
@@ -32,10 +32,10 @@ do
     echo "===================================================="
 
     echo "----------------------------------------------------"
-    echo "CFG -> LNAST -> LGraph"
+    echo "Pyrope -> LNAST -> LGraph"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "inou.cfg files:inou/cfg/tests/${pt}.cfg |> inou.lnast_dfg.tolg"
+    ${LGSHELL} "inou.pyrope files:inou/cfg/tests/${pt}.prp |> inou.lnast_dfg.tolg"
     if [ $? -eq 0 ]; then
       echo "Successfully create the inital LGraph with tuples: ${pt}.cfg"
     else
@@ -45,25 +45,6 @@ do
 
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
     mv ${pt}.dot ${pt}.no_bits.tuple.reduced_or.dot
-
-
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "Reduced_Or_Op Elimination (on stable LGraph)"
-    echo "----------------------------------------------------"
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.reduced_or_elimination"
-    if [ $? -eq 0 ]; then
-      echo "Successfully eliminate all reduced_or_op: ${pt}.cfg"
-    else
-      echo "ERROR: Pyrope compiler failed: reduced_or_elimination, testcase: ${pt}.cfg"
-      exit 1
-    fi
-
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.no_bits.tuple.dot
-
 
     echo ""
     echo ""
@@ -80,7 +61,7 @@ do
     fi
 
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.no_bits.dot
+    mv ${pt}.dot ${pt}.no_bits.or.dot
 
     echo ""
     echo ""
@@ -98,7 +79,28 @@ do
     fi
 
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.bits.dot
+    mv ${pt}.dot ${pt}.or.dot
+
+    echo ""
+    echo ""
+    echo ""
+    echo "----------------------------------------------------"
+    echo "Reduced_Or_Op Elimination (on stable LGraph)"
+    echo "----------------------------------------------------"
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.reduced_or_elimination"
+    if [ $? -eq 0 ]; then
+      echo "Successfully eliminate all reduced_or_op: ${pt}.cfg"
+    else
+      echo "ERROR: Pyrope compiler failed: reduced_or_elimination, testcase: ${pt}.cfg"
+      exit 1
+    fi
+
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+    mv ${pt}.dot ${pt}.stable.dot
+
+    echo "TESTER------------------------------------"
+    ${LGSHELL} "lgraph.open name:${pt} path:lgdb |> lgraph.dump"
+    echo "TESTER------------------------------------"
 
 #############################################################
 
@@ -124,25 +126,6 @@ do
     ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
     mv ${pt}.dot ${pt}.newlg.no_bits.tuple.or.dot
 
-
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "Reduced_Or_Op Elimination (on new LGraph)"
-    echo "----------------------------------------------------"
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.lnast_dfg.reduced_or_elimination"
-    if [ $? -eq 0 ]; then
-      echo "Successfully eliminate all reduced_or_op in new lg: ${pt}.cfg"
-    else
-      echo "ERROR: Pyrope compiler failed on new lg: reduced_or_elimination, testcase: ${pt}.cfg"
-      exit 1
-    fi
-
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.newlg.no_bits.tuple.dot
-
-
     echo ""
     echo ""
     echo ""
@@ -158,7 +141,7 @@ do
     fi
 
     ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.newlg.no_bits.dot
+    mv ${pt}.dot ${pt}.newlg.no_bits.or.dot
 
     echo ""
     echo ""
@@ -172,6 +155,23 @@ do
       echo "Successfully optimize design bitwidth on new lg: ${pt}.v"
     else
       echo "ERROR: Pyrope compiler failed on new lg: bitwidth optimization, testcase: ${pt}.cfg"
+      exit 1
+    fi
+
+    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
+    mv ${pt}.dot ${pt}.newlg.or.dot
+
+    echo ""
+    echo ""
+    echo ""
+    echo "----------------------------------------------------"
+    echo "Reduced_Or_Op Elimination (on new LGraph)"
+    echo "----------------------------------------------------"
+    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.lnast_dfg.reduced_or_elimination"
+    if [ $? -eq 0 ]; then
+      echo "Successfully eliminate all reduced_or_op in new lg: ${pt}.cfg"
+    else
+      echo "ERROR: Pyrope compiler failed on new lg: reduced_or_elimination, testcase: ${pt}.cfg"
       exit 1
     fi
 
