@@ -73,7 +73,7 @@ void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
     auto editable_pin = dpin;
     editable_pin.ref_bitwidth()->set_implicit();
     pending.push_back(dpin);
-    mark_all_affected_dpins(dpin, true);
+    mark_descendant_dpins(dpin, true);
   });
 
   fmt::print("\n");
@@ -87,7 +87,7 @@ void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
       if (dpin.has_bitwidth()) {
         dpin.ref_bitwidth()->set_implicit();
         pending.push_back(dpin);
-        mark_all_affected_dpins(dpin, true);
+        mark_descendant_dpins(dpin, true);
 
       } else { //set bits 0 to avoid bitwidth attribute undefined issues
         dpin.ref_bitwidth()->e.set_ubits(0);
@@ -102,7 +102,6 @@ void Pass_bitwidth::bw_pass_setup(LGraph *lg) {
       auto dpin = editable_node.get_driver_pin(1);
       pending.push_back(dpin);
 
-      //dp assign related initialization phase-I
       if (dpin.ref_bitwidth()->dp_flag) {
         dp_flagged_dpins.insert(dpin);
       }
@@ -128,7 +127,7 @@ void Pass_bitwidth::dp_assign_initialization(LGraph *lg) {
     // auto key_vname = dp_flagged_dpin.get_ssa().get_vname();
     auto key_vname = dp_flagged_dpin.get_prp_vname(); //FIXME->sh: could be deprecated if ann_ssa could be mmapped for a std::string_view
     auto key_subs  = dp_flagged_dpin.get_ssa().get_subs();
-    I(key_subs > 0); // must have some elder_brother to infer from
+    I(key_subs > 0); // must have at least one elder_brother, foo_0, to infer from
     const auto &subset_dpins = vname2dpins[key_vname];
     for (const auto &itr : subset_dpins) {
       I(itr.get_prp_vname() == key_vname);
@@ -189,7 +188,7 @@ void Pass_bitwidth::iterate_driver_pin(Node_pin &node_dpin) {
   switch (node_type) {
     case GraphIO_Op:
       //FIXME->Hunter: GraphIO will never happen here, right? Maybe from subgraph nodes?
-      mark_all_affected_dpins(node_dpin);
+      mark_descendant_dpins(node_dpin);
       break;
     case And_Op:
     case Or_Op:
@@ -223,7 +222,7 @@ void Pass_bitwidth::iterate_driver_pin(Node_pin &node_dpin) {
       iterate_pick(node_dpin);
       break;
     case U32Const_Op:
-      mark_all_affected_dpins(node_dpin);
+      mark_descendant_dpins(node_dpin);
       break;
     case Mux_Op:
       iterate_mux(node_dpin);
@@ -236,7 +235,7 @@ void Pass_bitwidth::iterate_driver_pin(Node_pin &node_dpin) {
 }
 
 
-void Pass_bitwidth::mark_all_affected_dpins(const Node_pin &dpin, bool ini_setup) {
+void Pass_bitwidth::mark_descendant_dpins(const Node_pin &dpin, bool ini_setup) {
   // Mark driver pins that need to change based off current driver pin.
 
   for (const auto &out_edge : dpin.out_edges()) {
@@ -300,12 +299,12 @@ void Pass_bitwidth::iterate_logic(Node_pin &node_dpin) {
           first       = false;
 
           //Pyrope dp_assign stuff:
-          //whenever there is is a dp_assign node follower, pass the bitwidth information for it.
+          //whenever having a dp_assign node follower, pass the bitwidth information to it.
           if (node_dpin.get_pid() == 1 && dp_followed_by_table.find(node_dpin) != dp_followed_by_table.end()) {
             auto dp_node_dpin = dp_followed_by_table[node_dpin];
             updated = dp_node_dpin.ref_bitwidth()->i.update(imp);
             if (updated) {
-              mark_all_affected_dpins(dp_node_dpin);
+              mark_descendant_dpins(dp_node_dpin);
             }
           }
 
@@ -347,7 +346,7 @@ void Pass_bitwidth::iterate_logic(Node_pin &node_dpin) {
 
   updated = node_dpin.ref_bitwidth()->i.update(imp); //FIXME->sh: After the reduced_or, the imp is not changed????
   if (updated) {
-    mark_all_affected_dpins(node_dpin);
+    mark_descendant_dpins(node_dpin);
   }
 }
 
@@ -449,7 +448,7 @@ void Pass_bitwidth::iterate_arith(Node_pin &node_dpin) {
 
   updated = node_dpin.ref_bitwidth()->i.update(imp);
   if (updated) {
-    mark_all_affected_dpins(node_dpin);
+    mark_descendant_dpins(node_dpin);
   }
 }
 
@@ -546,7 +545,7 @@ void Pass_bitwidth::iterate_shift(Node_pin &node_dpin) {
   updated = node_dpin.ref_bitwidth()->i.update(imp);
 
   if (updated) {
-    mark_all_affected_dpins(node_dpin);
+    mark_descendant_dpins(node_dpin);
   }
 }
 
@@ -619,7 +618,7 @@ void Pass_bitwidth::iterate_join(Node_pin &node_dpin) {
   updated = node_dpin.ref_bitwidth()->i.update(imp);
 
   if (updated) {
-    mark_all_affected_dpins(node_dpin);
+    mark_descendant_dpins(node_dpin);
   }
 }
 
@@ -669,7 +668,7 @@ void Pass_bitwidth::iterate_equals(Node_pin &node_dpin) {
   updated = node_dpin.ref_bitwidth()->i.update(imp);
 
   if (updated) {
-    mark_all_affected_dpins(node_dpin);
+    mark_descendant_dpins(node_dpin);
   }
 }
 
@@ -689,7 +688,7 @@ void Pass_bitwidth::iterate_flop(Node_pin &node_dpin) {
 
   updated = node_dpin.ref_bitwidth()->i.update(imp);
   if (updated) {
-    mark_all_affected_dpins(node_dpin);
+    mark_descendant_dpins(node_dpin);
   }
 }
 
@@ -731,13 +730,13 @@ void Pass_bitwidth::iterate_mux(Node_pin &node_dpin) {
 
   updated = first_edge_dpin.ref_bitwidth()->i.update(imp);
   if (updated) {
-    mark_all_affected_dpins(first_edge_dpin);
+    mark_descendant_dpins(first_edge_dpin);
   }
 
 
   updated = node_dpin.ref_bitwidth()->i.update(imp);
   if (updated) {
-    mark_all_affected_dpins(node_dpin);
+    mark_descendant_dpins(node_dpin);
   }
 }
 

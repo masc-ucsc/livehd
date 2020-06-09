@@ -19,7 +19,7 @@ protected:
   absl::flat_hash_map<Node_pin, Node_pin> dp_followed_by_table; // foo_N-1 -> foo_N, foo_N-1's bitwidth should be followed by foo_N
   absl::flat_hash_map<std::string_view, std::vector<Node_pin>> vname2dpins; // a smaller searching subset instead of whole LG
 
-  void mark_all_affected_dpins  (const Node_pin &dpin, bool ini_setup = false);
+  void mark_descendant_dpins  (const Node_pin &dpin, bool ini_setup = false);
   void iterate_logic     (Node_pin &dpin);
   void iterate_arith     (Node_pin &dpin);
   void iterate_comparison(Node_pin &dpin);
