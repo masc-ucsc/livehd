@@ -34,7 +34,7 @@ protected:
       if ((i&0xFFF)==0) {
         top->create_node_sub(subs[rand()&1023]->get_lgid());
       }
-      top->create_node_const(i, 30);
+      top->create_node_const(Lconst(i, 30));
     }
 
   };

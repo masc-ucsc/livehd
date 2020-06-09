@@ -1348,6 +1348,7 @@ public:
 	}
 
 	[[nodiscard]] iterator end() {
+    reload();
 		// no need to supply valid info pointer: end() must not be dereferenced, and only node
 		// pointer is compared.
 		return iterator{this, reinterpret_cast<Node*>(&mKeyVals[*mMask+1]), nullptr};
@@ -1356,6 +1357,7 @@ public:
 		return cend();
 	}
 	[[nodiscard]] const_iterator cend() const {
+    reload();
 		return const_iterator{this, reinterpret_cast<Node*>(&mKeyVals[*mMask+1]), nullptr};
 	}
 

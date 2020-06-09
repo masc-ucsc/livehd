@@ -154,16 +154,6 @@ protected:
     return true;
   }
 
-  static void try_collect_fd() {
-    // std::cerr << "try_collect_fd\n";
-    if (n_open_fds < n_max_fds) {  // readjust max
-      n_max_fds = 1 + 3 * n_open_fds / 4;
-    } else {
-      n_max_fds = n_open_fds / 2;
-    }
-    recycle_older();
-  }
-
   static void try_collect_mmap() {
     // std::cerr << "try_collect_mmap\n";
     if (n_open_mmaps < n_max_mmaps) {  // readjust max
@@ -249,6 +239,10 @@ public:
       assert(e.second.name != name);  // No name duplicate (may be OK for multithreaded access)
     }
 #endif
+
+    if (n_open_fds > 500) {
+      recycle_older();
+    }
 
     int fd = ::open(name.c_str(), O_RDWR | O_CREAT, 0644);
     if (fd >= 0) {
@@ -385,6 +379,17 @@ public:
 
     return std::make_tuple(base, new_size);
   }
+
+  static void try_collect_fd() {
+    // std::cerr << "try_collect_fd\n";
+    if (n_open_fds < n_max_fds) {  // readjust max
+      n_max_fds = 1 + 3 * n_open_fds / 4;
+    } else {
+      n_max_fds = n_open_fds / 2;
+    }
+    recycle_older();
+  }
+
 };
 
 }  // namespace mmap_lib

@@ -72,7 +72,7 @@ public:
   virtual void clear();
   virtual void sync();
 
-  virtual void emplace_back();
+  void emplace_back();
 
 #if 1
   // WARNING: deprecated: Use get/set_bits(const Node_pin)

@@ -56,10 +56,21 @@ void LGraph_Base::emplace_back() {
   node_internal.emplace_back();
 
   Index_ID nid = node_internal.size() - 1;
-  if (!node_internal.back().is_page_align()) {
-    new (node_internal.ref(nid)) Node_Internal();  // call constructor
-    node_internal.ref(nid)->set_nid(nid);          // self by default
+  auto *ptr = node_internal.ref(nid);
+
+  if (ptr->is_page_align()) {
+    auto *page = (Node_Internal_Page *)ptr;
+
+    page->set_page(nid);
+    node_internal.emplace_back();
+    nid.value++;
+
+    ptr = node_internal.ref(nid);
   }
+
+  I(!ptr->is_page_align());
+  new (ptr) Node_Internal();  // call constructor
+  ptr->set_nid(nid);          // self by default
 }
 
 Index_ID LGraph_Base::create_node_space(const Index_ID last_idx, const Port_ID dst_pid, const Index_ID master_nid,

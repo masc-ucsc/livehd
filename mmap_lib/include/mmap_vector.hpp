@@ -279,18 +279,6 @@ public:
     return base[idx];
   }
 
-  [[nodiscard]] T &back() {
-    auto *base = ref_base();
-    assert(!empty());
-    return base[size() - 1];
-  }
-
-  const T &back() const {
-    const auto *base = ref_base();
-    assert(!empty());
-    return base[size() - 1];
-  }
-
   T *      begin() { return ref_base(); }
   const T *cbegin() const { return ref_base(); }
   const T *begin() const { return ref_base(); }

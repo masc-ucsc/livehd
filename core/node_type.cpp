@@ -64,6 +64,8 @@ void LGraph_Node_Type::set_type_sub(Index_ID nid, Lg_type_id subgraphid) {
 
   subid_map.set(Node::Compact_class(nid), subgraphid.value);
 
+  Ann_node_tree_pos::ref(static_cast<const LGraph *>(this))->set(Node::Compact_class(nid), subid_map.size());
+
   node_internal.ref(nid)->set_type(SubGraph_Op);
 }
 
@@ -120,6 +122,9 @@ void LGraph_Node_Type::set_type_const(Index_ID nid, const Lconst &value) {
   auto *ptr = node_internal.ref(nid);
   ptr->set_type(Const_Op);
   ptr->set_bits(value.get_bits());
+
+  I(value.is_explicit_bits()); // constants should be explicit bits to match
+  I(value.get_bits());
 }
 
 void LGraph_Node_Type::set_type_const(Index_ID nid, std::string_view sv) {

@@ -1124,6 +1124,20 @@ TEST_F(Lconst_test, string) {
   EXPECT_EQ(Lconst("0").get_num(), 0);
 }
 
+TEST_F(Lconst_test, binary) {
+  Lconst a("0b1100u4bits");
+  Lconst b("12u4bits");
+  a.dump();
+  b.dump();
+  EXPECT_TRUE(a == b);
+  EXPECT_EQ(a, b);
+
+  Lconst c("0b1?1?1");
+  EXPECT_EQ(c.to_string(), "0b1?1?1");
+
+  Lconst d("__-_0b1_1x1_");
+  EXPECT_EQ(d.to_string(), "-0b11x1");
+}
 
 TEST_F(Lconst_test, serialize) {
 

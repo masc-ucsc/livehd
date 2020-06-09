@@ -139,11 +139,6 @@ void LGraph::sync() {
   LGraph_Base::sync();  // last. Removes lock at the end
 }
 
-void LGraph::emplace_back() {
-  LGraph_Base::emplace_back();
-  LGraph_Node_Type::emplace_back();
-}
-
 Node_pin LGraph::get_graph_input(std::string_view str) {
   auto io_pid = get_self_sub_node().get_instance_pid(str);
 
@@ -221,7 +216,7 @@ Node_pin LGraph::add_graph_input(std::string_view str, Port_ID pos, uint32_t bit
   } else {
     inst_pid = ref_self_sub_node()->add_pin(str, Sub_node::Direction::Input, pos);
   }
-  I(node_type_table[Node::Hardcoded_input_nid] == GraphIO_Op);
+  I(node_internal[Node::Hardcoded_input_nid].get_type() == GraphIO_Op);
 
   I(!find_idx_from_pid(Node::Hardcoded_input_nid, inst_pid));  // Just added, so it should not be there
   Index_ID root_idx = 0;
@@ -247,7 +242,7 @@ Node_pin LGraph::add_graph_output(std::string_view str, Port_ID pos, uint32_t bi
   } else {
     inst_pid = ref_self_sub_node()->add_pin(str, Sub_node::Direction::Output, pos);
   }
-  I(node_type_table[Node::Hardcoded_output_nid] == GraphIO_Op);
+  I(node_internal[Node::Hardcoded_output_nid].get_type() == GraphIO_Op);
 
   I(!find_idx_from_pid(Node::Hardcoded_output_nid, inst_pid));  // Just added, so it should not be there
   Index_ID root_idx = 0;
@@ -544,7 +539,7 @@ Node LGraph::create_node(const Node &old_node) {
   } else if (op == SubGraph_Op) {
     new_node = create_node_sub(old_node.get_type_sub());
   } else if (op == Const_Op) {
-    new_node = create_node_const(old_node.get_type_const_value(), old_node.get_driver_pin().get_bits());
+    new_node = create_node_const(old_node.get_type_const());
     I(new_node.get_driver_pin().get_bits() == old_node.get_driver_pin().get_bits());
   } else {
     I(op != GraphIO_Op);  // Special case, must use add input/output API
@@ -577,11 +572,11 @@ Node LGraph::create_node(Node_Type_Op op, uint32_t bits) {
   return node;
 }
 
-Node LGraph::create_node_const(uint32_t value, uint16_t bits) {
-  auto nid = find_type_const_value(value, bits);
+Node LGraph::create_node_const(const Lconst &value) {
+  auto nid = find_type_const(value);
   if (nid == 0) {
     nid = create_node_int();
-    set_type_const_value(nid, value, bits);
+    set_type_const(nid, value);
   }
 
   I(node_internal[nid].get_dst_pid() == 0);
@@ -613,37 +608,11 @@ const Sub_node &LGraph::get_self_sub_node() const { return library->get_sub(get_
 
 Sub_node *LGraph::ref_self_sub_node() { return library->ref_sub(get_lgid()); }
 
-Node LGraph::create_node_const(std::string_view value, uint32_t bits) {
-  auto nid = find_type_const_sview(value);
-
-  HERE!! Deal with the constant if bits are different!!
-    (use the new uint??)
-
-  if (unlikely(nid == 0 || node_internal[nid].get_bits() != bits)) {
-    nid = create_node_int();
-    set_type_const_sview(nid, value);
-    set_bits(nid, bits);
-  }
-
-  I(node_internal[nid].get_dst_pid() == 0);
-  I(node_internal[nid].is_master_root());
-
-  return Node(this, Hierarchy_tree::root_index(), nid);
-}
-
 Index_ID LGraph::create_node_int() {
   get_lock();  // FIXME: change to Copy on Write permissions (mmap exception, and remap)
   emplace_back();
 
-  if (node_internal.back().is_page_align()) {
-    Node_Internal_Page *page = (Node_Internal_Page *)&node_internal.back();
-
-    page->set_page(node_internal.size() - 1);
-    emplace_back();
-  }
-
-  assert(node_internal[node_internal.size() - 1].get_dst_pid() == 0);
-
+  I(node_internal[node_internal.size() - 1].get_dst_pid() == 0);
   I(node_internal[node_internal.size() - 1].get_nid() == node_internal.size() - 1);
   return node_internal.size() - 1;
 }
@@ -669,11 +638,9 @@ void LGraph::dump() {
     auto node = Node(this, Node::Compact_class(i));  // NOTE: To remove once new iterators are finished
     fmt::print("nid:{} type:{} name:{}", node.nid, node.get_type().get_name(), node.debug_name());
     if (node.get_type().op == LUT_Op) {
-      fmt::print(" lut=0x{:x}\n", node.get_type_lut());
-    } else if (node.get_type().op == U32Const_Op) {
-      fmt::print(" u32=0x{:x}\n", node.get_type_const_value());
-    } else if (node.get_type().op == StrConst_Op) {
-      fmt::print(" str={}\n", node.get_type_const_sview());
+      fmt::print(" lut={}\n", node.get_type_lut().fmt());
+    } else if (node.get_type().op == Const_Op) {
+      fmt::print(" const={}\n", node.get_type_const().fmt());
     } else {
       fmt::print("\n");
     }
@@ -697,10 +664,16 @@ void LGraph::dump() {
     }
   }
 #endif
+
+  each_sub_fast([this](Node &node, Lg_type_id lgid) {
+      LGraph *child = LGraph::open(get_path(),node.get_type_sub());
+
+      fmt::print("node:{} lgid:{} sub:{}\n",node.debug_name(), lgid, child->get_name());
+    });
 }
 
 void LGraph::dump_down_nodes() {
-  for (auto &cnode : down_nodes) {
+  for (auto &cnode : subid_map) {
     fmt::print(" sub:{}\n", cnode.first.get_node(this).debug_name());
   }
 }

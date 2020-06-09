@@ -250,10 +250,6 @@ Ann_ssa *Node_pin::ref_ssa() {
 
 bool Node_pin::has_ssa() const { return Ann_node_pin_ssa::ref(top_g)->has(get_compact_driver()); }
 
-
-
-
-
 bool Node_pin::is_connected() const {
   if (is_driver()) return current_g->has_outputs(*this);
 

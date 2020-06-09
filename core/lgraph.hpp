@@ -193,7 +193,6 @@ public:
 
   void clear() override;
   void sync() override;
-  void emplace_back() override;
 
   Node_pin add_graph_input(std::string_view str, Port_ID pos, uint32_t bits);
   Node_pin add_graph_output(std::string_view str, Port_ID pos, uint32_t bits);
@@ -204,9 +203,7 @@ public:
 
   Node create_node(Node_Type_Op op);
   Node create_node(Node_Type_Op op, uint32_t bits);
-  Node create_node_const(uint32_t value, uint16_t bits);
-  // Node create_node_const(std::string_view value);
-  Node create_node_const(std::string_view value, uint32_t bits);
+  Node create_node_const(const Lconst &value);
   Node create_node_sub(Lg_type_id sub);
   Node create_node_sub(std::string_view sub_name);
 

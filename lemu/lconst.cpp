@@ -43,7 +43,7 @@ uint16_t Lconst::read_bits(std::string_view txt) {
   return tmp;
 }
 
-bool Lconst::process_ending(std::string_view txt, size_t pos) {
+void Lconst::process_ending(std::string_view txt, size_t pos) {
   bool u = (txt[pos] == 'u' || txt[pos] == 'U');
   bool s = (txt[pos] == 's' || txt[pos] == 'S');
 
@@ -59,9 +59,9 @@ bool Lconst::process_ending(std::string_view txt, size_t pos) {
       bits = read_bits(txt.substr(pos));
       explicit_bits = true;
     }
+  }else{
+    throw std::runtime_error(fmt::format("ERROR: {} invalid number format", txt));
   }
-
-  return explicit_sign;
 }
 
 Lconst::Container Lconst::serialize() const {
@@ -177,6 +177,39 @@ Lconst::Lconst(std::string_view txt) {
   }
 
   if (shift_mode) {
+    if (shift_mode==1) { // 0b binary
+      for(const auto ch:txt.substr(2)) {
+        if (ch == '0' || ch == '1' || ch == '_')
+          continue;
+        if (ch == 'u' || ch == 'U' || ch == 's' || ch == 'S')
+          break;
+
+        for (int i = txt.size() - 1; i >= 0; --i) {
+          if (txt[i] == '_') continue;
+
+          num <<= 8;
+          num  += txt[i];
+          bits++;
+        }
+        explicit_str  = true;
+        explicit_bits = true;
+
+#if 0
+        num <<=8;
+        num += (int)'b';
+
+        num <<=8;
+        num  += (int)'0';
+#endif
+
+        if (negative) {
+          num <<= 8;
+          num  += (int)'-';
+        }
+
+        return;
+      }
+    }
     I(shift_mode == 1 || shift_mode == 3 || shift_mode==4); // binary or octal or hexa
 
     for(auto i=2u;i<txt.size();++i) {
@@ -196,15 +229,8 @@ Lconst::Lconst(std::string_view txt) {
       }else{
         if (txt[i] == '_') continue;
 
-        auto us = process_ending(txt, i);
-
-        if (us) {
-          break;
-        }else if (shift_mode == 1 && txt[i] == '?') {
-          I(false); // support this case
-        }else{
-          throw std::runtime_error(fmt::format("ERROR: {} invalid number format", txt));
-        }
+        process_ending(txt, i);
+        break;
       }
     }
   }else if (std::isdigit(txt[0]) || txt[0] == '-' || txt[0] == '+') {
@@ -219,13 +245,8 @@ Lconst::Lconst(std::string_view txt) {
       } else {
         if (txt[i] == '_') continue;
 
-        auto us = process_ending(txt, i);
-
-        if (us) {
-          break;
-        }else{
-          throw std::runtime_error(fmt::format("ERROR: {} invalid number format", txt));
-        }
+        process_ending(txt, i);
+        break;
       }
     }
 
@@ -290,7 +311,7 @@ std::string Lconst::to_string() const {
 
   std::string str;
   Number tmp = num;
-  for(int i=0u;i<bits/8;++i) {
+  while(tmp) {
     unsigned char ch = static_cast<unsigned char>(tmp & 0xFF);
     str.append(1, ch);
     tmp >>= 8;

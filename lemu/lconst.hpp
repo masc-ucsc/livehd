@@ -1,3 +1,5 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#pragma once
 
 #include <vector>
 
@@ -62,7 +64,7 @@ private:
   };
 
   static uint16_t read_bits(std::string_view txt);
-  bool process_ending(std::string_view txt, size_t pos);
+  void process_ending(std::string_view txt, size_t pos);
 
 protected:
   using Number=boost::multiprecision::cpp_int;
@@ -88,6 +90,13 @@ protected:
       v++;
     return v;
   }
+  bool same_explicit_bits(const Lconst &o) const {
+    bool s1 = explicit_bits && o.explicit_bits && bits == o.bits;
+    bool s2 = !explicit_bits || !o.explicit_bits;
+
+    return s1 || s2;
+  }
+
 public:
   using Container=std::vector<unsigned char>;
 
@@ -132,11 +141,11 @@ public:
 
   bool operator==(const Lconst &other) const {
     auto b = std::max(bits,other.bits);
-    return get_num(b) == other.get_num(b);
+    return get_num(b) == other.get_num(b) && same_explicit_bits(other);
   }
   bool operator!=(const Lconst &other) const {
     auto b = std::max(bits,other.bits);
-    return get_num(b) != other.get_num(b);
+    return get_num(b) != other.get_num(b) || !same_explicit_bits(other);
   }
   bool operator<(const Lconst &other) const {
     auto b = std::max(bits,other.bits);
