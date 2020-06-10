@@ -1,7 +1,7 @@
 #!/bin/bash
 rm -rf ./lgdb
 
-pts='GCD SimpleBitOps'  #'TrivialArith GCD SimpleBitOps'
+pts='RegisterSimple Register GCD SimpleBitOps'  #'TrivialArith GCD SimpleBitOps'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -52,6 +52,8 @@ do
       echo "ERROR: FIRRTL -> LNAST -> LGraph failed... testcase: ${pt}"
       exit 1
     fi
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+    mv ${pt}.dot ${pt}.tuple.no_bits.or.dot
 
     echo ""
     echo ""
@@ -67,6 +69,8 @@ do
       echo "ERROR: Pyrope compiler failed on new lg: resolve tuples, testcase: ${pt}_proto.data"
       exit 1
     fi
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+    mv ${pt}.dot ${pt}.no_bits.or.dot
 
     echo ""
     echo ""
@@ -75,6 +79,7 @@ do
     echo "Bitwidth Optimization"
     echo "----------------------------------------------------"
 
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth |> lgraph.dump"
     if [ $? -eq 0 ]; then
       echo "Successfully optimize design bitwidth on new lg: ${pt}_proto.data"
     else
@@ -82,7 +87,7 @@ do
       exit 1
     fi
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.newlg.dot
+    mv ${pt}.dot ${pt}.or.dot
 
     echo ""
     echo ""
@@ -98,7 +103,8 @@ do
       echo "ERROR: Pyrope compiler failed on new lg: reduced_or_elimination, testcase: ${pt}_proto.data"
       exit 1
     fi
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth |> lgraph.dump"
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+    mv ${pt}.dot ${pt}.newlg.dot
 
     echo ""
     echo ""

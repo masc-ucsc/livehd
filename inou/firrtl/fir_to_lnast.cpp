@@ -379,12 +379,18 @@ void Inou_firrtl::HandleTailOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_P
    *    log_shr       :=
    *   /  |   \      /  \
    *  x  tmp  0d2   x   tmp */
-  auto idx_lshr = lnast.add_child(parent_node, Lnast_node::create_shift_right("lshr_tail"));
-  lnast.add_child(idx_lshr, Lnast_node::create_ref(lnast.add_string(lhs)));
+  auto lhs_str = lnast.add_string(lhs);
+
+  auto idx_shr = lnast.add_child(parent_node, Lnast_node::create_shift_right("shr_tail"));
+  lnast.add_child(idx_shr, Lnast_node::create_ref(lhs_str));
   I(op.arg_size() == 1);
-  AttachExprToOperator(lnast, op.arg(0), idx_lshr);
+  AttachExprToOperator(lnast, op.arg(0), idx_shr);
   I(op.const__size() == 1);
-  lnast.add_child(idx_lshr, Lnast_node::create_const(lnast.add_string(absl::StrCat("0d", op.const_(0).value()))));
+  lnast.add_child(idx_shr, Lnast_node::create_const(lnast.add_string(absl::StrCat("0d", op.const_(0).value()))));
+
+  auto idx_dp_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign("dpasg_tail"));
+  lnast.add_child(idx_dp_asg, Lnast_node::create_ref(lhs_str));
+  AttachExprToOperator(lnast, op.arg(0), idx_dp_asg);
 
   //auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign("asg_tail"));
   //lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs)));
@@ -902,10 +908,11 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
   switch(expr.expression_case()) {
     case 1: { //Reference
       Lnast_nid idx_asg;
+      //idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
       if (lhs.substr(0,1) == "%") {
-        idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
-      } else {
         idx_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign("dp_asg"));
+      } else {
+        idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
       }
       lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs)));
       if(tail == "") {
@@ -1174,6 +1181,7 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
 
     } case 7: { //When
       auto idx_when         = lnast.add_child(parent_node, Lnast_node::create_if("when"));
+      lnast.add_child(idx_when, Lnast_node::create_cstmts(""));//NOTE: Empty cstmts right now for SSA.
       CreateConditionNode(lnast, stmt.when().predicate(), idx_when);
       auto idx_stmts_ifTrue = lnast.add_child(idx_when, Lnast_node::create_stmts(get_new_seq_name(lnast)));
       //FIXME: I might have to conform to cstmts model. If that's the case, add those here/in this case block.
