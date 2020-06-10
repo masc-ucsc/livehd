@@ -127,6 +127,10 @@ void Pass_bitwidth::dp_assign_initialization(LGraph *lg) {
     // auto key_vname = dp_flagged_dpin.get_ssa().get_vname();
     auto key_vname = dp_flagged_dpin.get_prp_vname(); //FIXME->sh: could be deprecated if ann_ssa could be mmapped for a std::string_view
     auto key_subs  = dp_flagged_dpin.get_ssa().get_subs();
+    fmt::print("key_name:{}\n", key_vname);
+    if (key_subs == 0)
+      continue;
+
     I(key_subs > 0); // must have at least one elder_brother, foo_0, to infer from
     const auto &subset_dpins = vname2dpins[key_vname];
     for (const auto &itr : subset_dpins) {

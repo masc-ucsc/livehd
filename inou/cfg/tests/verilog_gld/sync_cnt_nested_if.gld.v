@@ -2,13 +2,13 @@ module sync_cnt_nested_if_gld (
   input clk,
   input c1,
   input c2,
-  output reg [5:0] cnt1_o
+  output reg [3:0] cnt_o
 );
 
 
-reg [5:0] cnt1_o_next;
+reg [3:0] cnt_o_next;
 always @ (*) begin
-  if (cnt1_o == 6'd15) begin
+  if (cnt_o >= 4'd15) begin
     cnt_o_next = 0;
   end
 
@@ -21,7 +21,7 @@ always @ (*) begin
 end
 
 always @ (posedge clk) begin
-  cnt1_o <= cnt1_o_next;  
+  cnt_o <= cnt_o_next;
 end
 
 

@@ -740,8 +740,6 @@ Lnast_nid Lnast::add_phi_node(const Lnast_nid &cond_nid, const Lnast_nid &t_nid,
   auto target_nid  = add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_ref(), get_token(t_nid), get_subs(t_nid)));
   update_global_lhs_ssa_cnt_table(target_nid);
   add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_cond(), get_token(cond_nid), get_subs(cond_nid)));
-  /* add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_ref(),  get_token(t_nid), get_subs(t_nid))); */
-  /* add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_ref(),  get_token(f_nid), get_subs(f_nid))); */
   add_child(new_phi_nid, Lnast_node(get_type(t_nid),  get_token(t_nid), get_subs(t_nid)));
   add_child(new_phi_nid, Lnast_node(get_type(f_nid),  get_token(f_nid), get_subs(f_nid)));
   new_added_phi_node_table[get_name(target_nid)] = target_nid;
