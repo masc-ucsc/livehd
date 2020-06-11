@@ -16,6 +16,8 @@ struct Sample3_stage {
   //  vcd::VCDWriter* vcd_writer = vcd::initialize_vcd_writer();
   // mem part//  vcd::VarPtr vcd_memory_127 = vcd_writer->register_var(scope_name, "memory[127]", vcd::VariableType::reg, 32);
   vcd::VarPtr vcd_to1_b          = vcd_writer->register_var(scope_name, "to1_b[31:0]", vcd::VariableType::wire, 32);
+  vcd::VarPtr vcd_tmp          = vcd_writer->register_var(scope_name, "tmp[31:0]", vcd::VariableType::wire, 32);
+  vcd::VarPtr vcd_tmp2          = vcd_writer->register_var(scope_name, "tmp2[31:0]", vcd::VariableType::wire, 32);
   vcd::VarPtr vcd_to3_d          = vcd_writer->register_var(scope_name, "to3_d[31:0]", vcd::VariableType::wire, 32);
   vcd::VarPtr vcd_to3_c          = vcd_writer->register_var(scope_name, "to3_c[31:0]", vcd::VariableType::wire, 32);
   vcd::VarPtr vcd_to3_cValid     = vcd_writer->register_var(scope_name, "to3_cValid", vcd::VariableType::wire, 1);

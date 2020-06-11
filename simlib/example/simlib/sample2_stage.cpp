@@ -15,6 +15,7 @@ void Sample2_stage::vcd_negedge() { vcd_writer->change(vcd_clk, "0"); }
 void Sample2_stage::vcd_reset_cycle() {
   vcd_writer->change(vcd_reset, "1");
   tmp        = 1;
+  vcd_writer->change(vcd_tmp, "1");
   to3_dValid = false;
   vcd_writer->change(vcd_to3_dValid, to3_dValid.to_string_binary());
   to2_eValid = false;

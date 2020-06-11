@@ -38,6 +38,7 @@ struct Sample2_stage {
   vcd::VarPtr vcd_reset      = vcd_writer->register_var(scope_name, "reset", vcd::VariableType::wire, 1);
   vcd::VarPtr vcd_to2_aValid = vcd_writer->register_var(scope_name, "to2_aValid", vcd::VariableType::wire, 1);
   vcd::VarPtr vcd_to2_a      = vcd_writer->register_var(scope_name, "to2_a[31:0]", vcd::VariableType::wire, 32);
+  vcd::VarPtr vcd_tmp      = vcd_writer->register_var(scope_name, "tmp[31:0]", vcd::VariableType::wire, 32);
   vcd::VarPtr vcd_to2_b      = vcd_writer->register_var(scope_name, "to2_b[31:0]", vcd::VariableType::wire, 32);
   vcd::VarPtr vcd_to1_aValid = vcd_writer->register_var(scope_name, "to1_aValid", vcd::VariableType::wire, 1);
   vcd::VarPtr vcd_to1_a      = vcd_writer->register_var(scope_name, "to1_a[31:0]", vcd::VariableType::wire, 32);
@@ -71,7 +72,7 @@ struct Sample2_stage {
     vcd_writer->change(vcd_to1_a, to1_a.to_string_binary());
 
     tmp = tmp.addw(UInt<32>(13));
-    //  vcd_writer->change(vcd_clk, t, "0");
+    vcd_writer->change(vcd_tmp, tmp.to_string_binary());
   }
 #else
   Sample2_stage(uint64_t _hidx);

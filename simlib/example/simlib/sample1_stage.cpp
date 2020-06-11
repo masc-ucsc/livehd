@@ -12,6 +12,7 @@ Sample1_stage::Sample1_stage(uint64_t _hidx, const std::string &parent_name, vcd
 void Sample1_stage::vcd_reset_cycle() {
   vcd_writer->change(vcd_reset, "1");
   tmp        = UInt<32>(0);
+  vcd_writer->change(vcd_tmp,tmp.to_string_binary());
   to2_aValid = UInt<1>(0);
   vcd_writer->change(vcd_to2_aValid, to2_aValid.to_string_binary());
   to3_cValid = UInt<1>(0);
@@ -42,7 +43,7 @@ void Sample1_stage::vcd_comb(UInt<32> s3_to1_b, UInt<1> s2_to1_aValid, UInt<32> 
   vcd_writer->change(vcd_to3_c, to3_c.to_string_binary());
 
   tmp = tmp.addw(UInt<32>(23));
-  // vcd_writer->change(vcd_clk, t,"0");
+  vcd_writer->change(vcd_tmp, tmp.to_string_binary());
 }
 #else
 Sample1_stage::Sample1_stage(uint64_t _hidx)//, const std::string &parent_name)
