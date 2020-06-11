@@ -33,8 +33,6 @@ private:
 
 
 protected:
-  void                  setup_memblock();
-  /* std::vector<LGraph *> do_tolg(); */
   std::vector<LGraph *> do_tolg(std::shared_ptr<Lnast> l);
   void                  do_resolve_tuples(LGraph *dfg);
   static void           do_reduced_or_elimination(LGraph *dfg);

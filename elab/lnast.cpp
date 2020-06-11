@@ -476,7 +476,6 @@ void Lnast::ssa_rhs_if_subtree(const Lnast_nid &if_nid) {
   for (const auto &itr_nid : children(if_nid)) {
     if (get_type(itr_nid).is_stmts()) {
       Cnt_rtable if_sts_ssa_rhs_cnt_table;
-      /* ssa_rhs_cnt_tables[get_name(itr_nid)] = if_sts_ssa_rhs_cnt_table; */
       ssa_rhs_cnt_tables[itr_nid] = if_sts_ssa_rhs_cnt_table;
 
       for (const auto &opr_nid : children(itr_nid)) {
@@ -528,7 +527,7 @@ void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
   }
 
   //handle statement lhs
-  if (type.is_assign() || type.is_as()) {
+  if (type.is_assign() || type.is_as() || type.is_dp_assign()) {
     const auto  target_nid  = get_first_child(opr_nid);
     const auto  target_name = get_name(target_nid);
 
@@ -577,7 +576,6 @@ void Lnast::ssa_rhs_handle_a_operand_special(const Lnast_nid &gpsts_nid, const L
 
 
 void Lnast::ssa_rhs_handle_a_operand(const Lnast_nid &gpsts_nid, const Lnast_nid &opd_nid) {
-  /* auto &ssa_rhs_cnt_table = ssa_rhs_cnt_tables[get_name(gpsts_nid)]; */
   auto &ssa_rhs_cnt_table = ssa_rhs_cnt_tables[gpsts_nid];
   auto       opd_name  = get_name(opd_nid);
   const auto opd_type  = get_type(opd_nid);
@@ -811,14 +809,12 @@ void Lnast::update_global_lhs_ssa_cnt_table(const Lnast_nid &lhs_nid) {
 
 //note: the subs of the lhs of the operator has already handled clearly in first round ssa process, just copy into the rhs_ssa_cnt_table fine.
 void Lnast::update_rhs_ssa_cnt_table(const Lnast_nid &psts_nid, const Lnast_nid &target_key) {
-  /* auto &ssa_rhs_cnt_table = ssa_rhs_cnt_tables[get_name(psts_nid)]; */
   auto &ssa_rhs_cnt_table = ssa_rhs_cnt_tables[psts_nid];
   const auto target_name = get_name(target_key);
   ssa_rhs_cnt_table[target_name] = ref_data(target_key)->subs;
 }
 
 int8_t Lnast::check_rhs_cnt_table_parents_chain(const Lnast_nid &psts_nid, const Lnast_nid &target_key) {
-  /* auto &ssa_rhs_cnt_table = ssa_rhs_cnt_tables[get_name(psts_nid)]; */
   auto &ssa_rhs_cnt_table = ssa_rhs_cnt_tables[psts_nid];
   const auto  target_name = get_name(target_key);
   auto itr = ssa_rhs_cnt_table.find(target_name);

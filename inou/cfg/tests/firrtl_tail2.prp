@@ -10,4 +10,4 @@ if ($en) {
   bar := foo
   #x = bar
 }
-%out := #x
+%out := #x.__q_pin

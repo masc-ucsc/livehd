@@ -642,7 +642,6 @@ Node_pin Inou_lnast_dfg::setup_node_assign_and_lhs(LGraph *dfg, const Lnast_nid 
 
       // (3) remove the previous D-pin edge from the #reg
       auto reg_node = reg_qpin.get_node();
-      fmt::print("reg_node debug_name:{}\n", reg_node.debug_name());
       I(reg_node.get_type().op == SFlop_Op);
       I(reg_node.setup_sink_pin("D").inp_edges().size() <= 1);
       if (reg_node.setup_sink_pin("D").inp_edges().size() == 1) {
@@ -687,7 +686,6 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
     ;
   } else if (is_input(name)) {
     node_dpin = dfg->add_graph_input(name.substr(1, name.size()-3), Port_invalid, 0);
-    fmt::print("add graph inp:{}\n", name.substr(1, name.size()-3));
   } else if (is_const(name)) {
     node_dpin = resolve_constant(dfg, Lconst(name)).setup_driver_pin();
   } else if (is_default_const(name)) {
