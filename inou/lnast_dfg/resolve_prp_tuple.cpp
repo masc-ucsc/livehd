@@ -134,6 +134,7 @@ void Inou_lnast_dfg::do_reduced_or_elimination(LGraph *dfg) {
     if (node.get_type().op == Or_Op) {
       bool is_reduced_or = node.has_outputs() && node.out_edges().begin()->driver.get_pid() == 1;
 
+      fmt::print("Or Node:{}\n", node.debug_name());
       if (is_reduced_or) {
         for (auto &out : node.out_edges()) {
           auto dpin = node.inp_edges().begin()->driver;

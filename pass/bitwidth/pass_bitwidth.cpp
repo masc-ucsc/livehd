@@ -842,16 +842,24 @@ void Pass_bitwidth::bw_replace_dp_node_by_pick(LGraph *lg) {
       auto dpin = node.get_driver_pin(1);
       auto bits = dpin.get_bits();
       auto ori_driver = node.inp_edges().begin()->driver;
-      auto ori_sink   = node.out_edges().begin()->sink;
 
       auto pick_node  = lg->create_node(Pick_Op);
       auto zero_dpin  = lg->create_node_const(Lconst(0,1)).get_driver_pin();
       pick_node.setup_driver_pin().set_bits(bits);
       lg->add_edge(ori_driver, pick_node.setup_sink_pin(0));
       lg->add_edge(zero_dpin, pick_node.setup_sink_pin(1));
-      lg->add_edge(pick_node.get_driver_pin(), ori_sink);
-      node.out_edges().begin()->del_edge();
+
+      for (auto & or_out_edge : node.out_edges()) {
+        auto ori_sink   = or_out_edge.sink;
+        lg->add_edge(pick_node.get_driver_pin(), ori_sink);
+        or_out_edge.del_edge();
+      }
       node.inp_edges().begin()->del_edge();
+
+      // auto ori_sink   = node.out_edges().begin()->sink;
+      // lg->add_edge(pick_node.get_driver_pin(), ori_sink);
+      // node.out_edges().begin()->del_edge();
+      // node.inp_edges().begin()->del_edge();
     }
   }
 }
