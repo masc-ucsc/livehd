@@ -2,8 +2,8 @@
 rm -rf ./lgdb
 #  pts='sync_cnt_nested_if'
 #  pts='firrtl_tail2'
-  pts='adder_stage reg__q_pin'
-#  pts='firrtl_tail tuple_if2 tuple_if ssa_rhs out_ssa if2 if nested_if if3_err nested_if_err logic '
+#  pts='adder_stage reg__q_pin'
+  pts='adder_stage reg__q_pin firrtl_tail tuple_if2 tuple_if ssa_rhs out_ssa if2 if nested_if if3_err nested_if_err logic '
 #  pts='tuple_if2 tuple_if adder_stage ssa_rhs out_ssa if2 if nested_if if3_err nested_if_err logic '
 
 #  pts='sync_cnt_nested_if bits_rhs  firrtl_tail '
