@@ -22,18 +22,18 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
 
     } else if (node.get_type().op == TupGet_Op and tuple_get_has_key_name(node)) {
       to_be_deleted.insert(node.get_compact());
-      auto tup_get_target = node.get_sink_pin(KN).inp_edges().begin()->driver.get_name();
-      auto chain_itr = node.get_sink_pin(TN).inp_edges().begin()->driver.get_node();
+      auto tup_get_target = node.get_sink_pin(KN).get_driver_pin().get_name();
+      auto chain_itr = node.get_sink_pin(TN).get_driver_node();
       while (chain_itr.get_type().op != TupRef_Op) {
         Node next_itr;
         if (chain_itr.get_type().op == Or_Op) { //it's ok to have Or_Op(aka assign_op) in the tuple_chain, just ignore it and continue to find target tuple_add
-          next_itr = chain_itr.get_sink_pin(0).inp_edges().begin()->driver.get_node();
+          next_itr = chain_itr.get_sink_pin(0).get_driver_node();
           chain_itr = next_itr;
           continue;
         }
 
-        if (chain_itr.setup_sink_pin(KN).is_connected() and is_tup_get_target(chain_itr, tup_get_target)) {
-          auto value_dpin = chain_itr.setup_sink_pin(KV).inp_edges().begin()->driver;
+        if (chain_itr.setup_sink_pin(KN).is_connected() && is_tup_get_target(chain_itr, tup_get_target)) {
+          auto value_dpin = chain_itr.setup_sink_pin(KV).get_driver_pin();
           if (value_dpin.get_node().get_type().op == TupGet_Op)
             value_dpin = tg2actual_dpin[value_dpin];
           else
@@ -43,18 +43,18 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
           dfg->add_edge(value_dpin, value_spin);
           break;
         }
-        next_itr = chain_itr.setup_sink_pin(TN).inp_edges().begin()->driver.get_node();
+        next_itr = chain_itr.setup_sink_pin(TN).get_driver_node();
         chain_itr = next_itr;
       }
 
     } else if (node.get_type().op == TupGet_Op and tuple_get_has_key_pos(node)) {
       to_be_deleted.insert(node.get_compact());
-      auto tup_get_target = node.get_sink_pin(KP).inp_edges().begin()->driver.get_node().get_type_const_value(); //FIXME->sh: need lgmem.prp
-      auto chain_itr = node.get_sink_pin(TN).inp_edges().begin()->driver.get_node();
+      auto tup_get_target = node.get_sink_pin(KP).get_driver_node().get_type_const().to_i(); //FIXME->sh: need lgmem.prp
+      auto chain_itr = node.get_sink_pin(TN).get_driver_node();
       while (chain_itr.get_type().op != TupRef_Op) {
         I(chain_itr.get_type().op == TupAdd_Op);
         if (chain_itr.setup_sink_pin(KP).is_connected() and is_tup_get_target(chain_itr, tup_get_target)) {
-          auto value_dpin = chain_itr.setup_sink_pin(KV).inp_edges().begin()->driver;
+          auto value_dpin = chain_itr.setup_sink_pin(KV).get_driver_pin();
           if (value_dpin.get_node().get_type().op == TupGet_Op)
             value_dpin = tg2actual_dpin[value_dpin];
           else
@@ -65,7 +65,7 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
           dfg->add_edge(value_dpin, value_spin);
           break;
         }
-        auto next_itr = chain_itr.setup_sink_pin(TN).inp_edges().begin()->driver.get_node();
+        auto next_itr = chain_itr.setup_sink_pin(TN).get_driver_node();
         chain_itr = next_itr;
       }
     }
@@ -85,12 +85,12 @@ bool Inou_lnast_dfg::tuple_get_has_key_pos(const Node &tup_get) {
 }
 
 bool Inou_lnast_dfg::is_tup_get_target(const Node &tup_add, std::string_view tup_get_target) {
-  auto tup_add_key_name = tup_add.get_sink_pin(KN).inp_edges().begin()->driver.get_name();
+  auto tup_add_key_name = tup_add.get_sink_pin(KN).get_driver_pin().get_name();
   return (tup_add_key_name == tup_get_target);
 }
 
 bool Inou_lnast_dfg::is_tup_get_target(const Node &tup_add, uint32_t tup_get_target) {
-  auto tup_add_key_pos = tup_add.get_sink_pin(KP).inp_edges().begin()->driver.get_node().get_type_const_value(); //FIXME->sh: need lgmem.prp
+  auto tup_add_key_pos = tup_add.get_sink_pin(KP).get_driver_node().get_type_const().to_i(); //FIXME->sh: need lgmem.prp
   return (tup_add_key_pos == tup_get_target);
 }
 

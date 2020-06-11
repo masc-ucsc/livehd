@@ -184,7 +184,7 @@ Node_pin Node::setup_driver_pin(Port_ID pid) {
     Lg_type_id  sub_lgid = current_g->get_type_sub(nid);
     const auto &sub      = current_g->get_library().get_sub(sub_lgid);
     I(sub.has_graph_pin(pid));
-    I(sub.is_output_from_graph_pos(pid), "ERROR: An input can not be a driver pin");
+    I(sub.is_output_from_instance_pid(pid), "ERROR: An input can not be a driver pin");
   }
 #endif
 
@@ -265,13 +265,13 @@ bool Node::is_type_sub_present() const {
 
 void Node::set_type_lut(const Lconst &lutid) { current_g->set_type_lut(nid, lutid); }
 
-const Lconst &Node::get_type_lut() const { return current_g->get_type_lut(nid); }
+Lconst Node::get_type_lut() const { return current_g->get_type_lut(nid); }
 
 const Sub_node &Node::get_type_sub_node() const { return current_g->get_type_sub_node(nid); }
 
 Sub_node *Node::ref_type_sub_node() const { return current_g->ref_type_sub_node(nid); }
 
-const Lconst &Node::get_type_const() const { return current_g->get_type_const(nid); }
+Lconst Node::get_type_const() const { return current_g->get_type_const(nid); }
 
 Node_pin Node::setup_driver_pin(std::string_view name) {
   auto type = get_type();
@@ -381,11 +381,11 @@ void Node::set_name(std::string_view iname) { Ann_node_name::ref(current_g)->set
 std::string_view Node::create_name() const {
   auto *     ref = Ann_node_name::ref(current_g);
   const auto it  = ref->find(get_compact_class());
-  if (it != ref->end()) return ref->get_val_sview(it);
+  if (it != ref->end()) return ref->get_val(it);
 
   std::string sig = absl::StrCat("lg_", get_type().get_name(), std::to_string(nid));
   const auto  it2 = ref->set(get_compact_class(), sig);
-  return ref->get_val_sview(it2);
+  return ref->get_val(it2);
 #if 0
   // FIXME: HERE. Does not scale for large designs (too much recursion)
 
@@ -412,7 +412,7 @@ std::string_view Node::create_name() const {
 #endif
 }
 
-std::string_view Node::get_name() const { return Ann_node_name::ref(current_g)->get_val_sview(get_compact_class()); }
+std::string_view Node::get_name() const { return Ann_node_name::ref(current_g)->get_val(get_compact_class()); }
 
 std::string Node::debug_name() const {
 #ifndef NDEBUG
@@ -425,7 +425,7 @@ std::string Node::debug_name() const {
   std::string name;
   const auto  it = ref->find(get_compact_class());
   if (it != ref->end()) {
-    name = ref->get_val_sview(it);
+    name = ref->get_val(it);
   }
   if (current_g->is_type_sub(nid)) {
     absl::StrAppend(&name, "_sub_", get_type_sub_node().get_name());
@@ -467,9 +467,10 @@ void Node::set_color(int new_color) {
 }
 
 int Node::get_color() const {
-  auto str = Ann_node_color::ref(current_g)->get_val_sview(get_compact_class());
+  auto str = Ann_node_color::ref(current_g)->get_val(get_compact_class());
   int color;
-  absl::SimpleAtoi(str, &color);
+  auto ok = absl::SimpleAtoi(str, &color);
+  I(ok);
   return color;
 }
 

@@ -3,6 +3,7 @@
 #include "boost/multiprecision/cpp_int.hpp"
 #include "absl/types/span.h"
 #include "absl/strings/numbers.h"
+#include "absl/strings/str_cat.h"
 
 #include "lbench.hpp"
 #include "lrand.hpp"
@@ -141,7 +142,7 @@ Lconst::Lconst(uint64_t v, uint16_t b) {
   I(calc_bits() <= bits);
 }
 
-Lconst::Lconst(std::string_view txt) {
+Lconst::Lconst(std::string_view orig_txt) {
 
   explicit_str  = false;
   explicit_sign = false;
@@ -150,10 +151,12 @@ Lconst::Lconst(std::string_view txt) {
   bits          = 0;
   num           = 0;
 
-  if (txt.empty())
+  if (orig_txt.empty())
     return;
 
   // Skip leading _ as needed
+
+  std::string_view txt { orig_txt };
 
   if (!txt.empty() && txt[0] == '_') {
     auto txt2 = skip_underscores(txt);
@@ -175,6 +178,10 @@ Lconst::Lconst(std::string_view txt) {
   if (txt.size() > 2 && txt[0] == '0') {
     shift_mode = char_to_shift_mode[(uint8_t)txt[1]];
   }
+  if (shift_mode == 1 && negative) {
+    shift_mode   = 0;  // string
+    explicit_str = true;
+  }
 
   if (shift_mode) {
     if (shift_mode==1) { // 0b binary
@@ -184,13 +191,31 @@ Lconst::Lconst(std::string_view txt) {
         if (ch == 'u' || ch == 'U' || ch == 's' || ch == 'S')
           break;
 
-        for (int i = txt.size() - 1; i >= 0; --i) {
-          if (txt[i] == '_') continue;
+        // handle binary with special characters ?xZ...
+        std::string bin;
+        for(auto i=2u;i<txt.size();++i) {
+          const auto ch = txt[i];
+          if (ch=='_')
+            continue;
+          if (ch == 'u' || ch == 'U' || ch == 's' || ch == 'S') {
+            process_ending(txt, i);
+            break;
+          }
+          bin.append(1, ch);
+        }
+
+        for (int i = bin.size() - 1; i >= 0; --i) {
+          if (bin[i] == '_') continue;
+          if (bin[i] == 'b') break; // delim for 0b reached
 
           num <<= 8;
-          num  += txt[i];
-          bits++;
+          num  += bin[i];
+          nbits_used++;
         }
+        if (bits==0)
+          bits = nbits_used;
+
+        I(nbits_used<=bits);
         explicit_str  = true;
         explicit_bits = true;
 
@@ -202,10 +227,7 @@ Lconst::Lconst(std::string_view txt) {
         num  += (int)'0';
 #endif
 
-        if (negative) {
-          num <<= 8;
-          num  += (int)'-';
-        }
+        I(!negative);
 
         return;
       }
@@ -233,7 +255,7 @@ Lconst::Lconst(std::string_view txt) {
         break;
       }
     }
-  }else if (std::isdigit(txt[0]) || txt[0] == '-' || txt[0] == '+') {
+  }else if (!explicit_str && (std::isdigit(txt[0]) || txt[0] == '-' || txt[0] == '+')) {
     auto start_i = 0u;
     if (txt.size() > 2 && txt[0] == '0' && (txt[1] == 'd' || txt[1] == 'D')) {
       start_i = 2;
@@ -253,11 +275,11 @@ Lconst::Lconst(std::string_view txt) {
     nbits_used = calc_bits();
   }else{
     // alnum string (not number, still convert to num)
-    for(int i=txt.size()-1; i>=0 ;--i) {
+    for(int i=orig_txt.size()-1; i>=0 ;--i) {
       num <<= 8;
-      num += txt[i];
+      num += orig_txt[i];
     }
-    bits          = txt.size() * 8;
+    bits          = orig_txt.size() * 8;
     explicit_str  = true;
     explicit_bits = true;
   }
@@ -267,7 +289,7 @@ Lconst::Lconst(std::string_view txt) {
         fmt::format("ERROR: {} bits set would truncate value {} which needs {} bits\n", bits, txt, nbits_used));
   }
 
-  if (negative) {
+  if (negative && !explicit_str) {
     num  = -num;
     if (!explicit_sign)
       sign = true;
@@ -320,10 +342,30 @@ std::string Lconst::to_string() const {
   return str;
 }
 
-std::string Lconst::fmt() const {
+void Lconst::pyrope_bits(std::string *str) const {
+  if (!explicit_sign && !explicit_bits) {
+    return;
+  }
+
+  absl::StrAppend(str, sign?"s":"u");
+
+  if (explicit_bits && bits>0) {
+    absl::StrAppend(str, bits, bits>1?"bits":"bit");
+  }
+}
+
+std::string Lconst::to_pyrope() const {
 
   if (explicit_str) {
-    return to_string();
+    // Either string or 0b with special characters like ?xz
+    auto str = to_string();
+    if (str.size()*8 == bits)
+      return absl::StrCat("'", str, "'");
+
+    I(str[0] != '-');
+    auto str2 = absl::StrCat("0b", str);
+    pyrope_bits(&str2);
+    return str2;
   }
 
   std::stringstream ss;
@@ -338,22 +380,69 @@ std::string Lconst::fmt() const {
   if (is_negative())
     str.append(1,'-');
 
-  str.append("0x");
-  str.append(ss.str());
+  absl::StrAppend(&str, "0x");
+  absl::StrAppend(&str, ss.str());
 
-  if (explicit_sign || explicit_bits) {
-    if (sign)
-      str.append(1,'s');
-    else
-      str.append(1,'u');
-    if (explicit_bits && bits>0) {
-      str.append(std::to_string(bits));
-      if (bits > 1)
-        str.append("bits");
-      else
-        str.append("bit");
-    }
+  pyrope_bits(&str);
+
+  return str;
+}
+
+bool Lconst::is_i() const {
+  return !explicit_str && bits <= 63;
+}
+
+int Lconst::to_i() const {
+  I(is_i());
+  return static_cast<int>(num);
+}
+
+std::string Lconst::to_yosys() const {
+
+  if (explicit_str) {
+    // Either string or 0b with special characters like ?xz
+    return to_string();
   }
+
+  const auto v = get_num(bits);
+  std::string str;
+  for (int i = bits-1; i >= 0; --i) {
+    str.append(1, bit_test(v, i) ? '1' : '0');
+  }
+
+  return str;
+}
+
+std::string Lconst::to_verilog() const {
+
+  if (explicit_str) {
+    // Either string or 0b with special characters like ?xz
+    auto str = to_string();
+    if (str.size()*8 == bits)
+      return absl::StrCat("\"", str, "\"");
+
+    I(str[0] != '-');
+    if (explicit_bits)
+      return absl::StrCat((int)bits, "'b", str);
+    return absl::StrCat("'b", str);
+  }
+
+  std::stringstream ss;
+  ss << std::hex;
+  const auto v = get_num(bits);
+  if (v<0)
+    ss << -v;
+  else
+    ss << v;
+
+  std::string str;
+  if (is_negative())
+    str.append(1,'-');
+
+  if (explicit_bits)
+    absl::StrAppend(&str, (int)bits);
+
+  absl::StrAppend(&str, "'h", ss.str());
 
   return str;
 }

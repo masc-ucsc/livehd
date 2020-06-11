@@ -3,6 +3,8 @@
 
 #include <cstdint>
 
+#include "lconst.hpp"
+
 class __attribute__((packed)) Ann_bitwidth {
 public:
   class __attribute__((packed)) Explicit_range {
@@ -18,8 +20,7 @@ public:
 
     void dump() const;
     bool is_unsigned() const;
-    void set_uconst(uint32_t value);
-    void set_sconst(uint32_t value);
+    void set_const(const Lconst &value);
     void set_ubits(uint16_t size); //FIXME->sh: why it's only 16 bits
     void set_sbits(uint16_t size);
   };

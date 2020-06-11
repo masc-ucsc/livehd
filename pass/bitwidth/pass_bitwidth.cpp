@@ -221,7 +221,7 @@ void Pass_bitwidth::iterate_driver_pin(Node_pin &node_dpin) {
     case Pick_Op:
       iterate_pick(node_dpin);
       break;
-    case U32Const_Op:
+    case Const_Op:
       mark_descendant_dpins(node_dpin);
       break;
     case Mux_Op:
@@ -510,9 +510,9 @@ void Pass_bitwidth::iterate_shift(Node_pin &node_dpin) {
       for (const auto &e : node.inp_edges()) {
         if (e.sink.get_pid() == 2) {
           handled = true;
-          if (e.driver.get_node().get_type().op != U32Const_Op) I(false, "Error: Shift sign is not a constant.\n");
+          if (e.driver.get_node().get_type().op != Const_Op) I(false, "Error: Shift sign is not a constant.\n");
 
-          auto val = e.driver.get_node().get_type_const_value();
+          auto val = e.driver.get_node().get_type_const().to_i();
           if (val % 2 == 1) {
             ;//FIXME->sh: todo: handle arith shift right when S == 1
           } else if (val == 2) {
@@ -772,7 +772,7 @@ void Pass_bitwidth::bw_implicit_range_to_bits(LGraph *lg) {
   }
 
   for (const auto& node: lg->fast()) {
-    /* if (node.get_type().op == U32Const_Op) */
+    /* if (node.get_type().op == Const_Op) */
     /*   continue; */
 
     for (auto& out:node.out_edges()) {
@@ -819,7 +819,7 @@ void Pass_bitwidth::bw_bits_extension_by_join(LGraph *lg) {
         } else if (inp_edge_bits < out_edge_bits) {
           uint16_t offset = out_edge_bits - inp_edge_bits;
           auto join_node = lg->create_node(Join_Op);
-          auto zero_ext_dpin = lg->create_node_const(0, offset).setup_driver_pin();
+          auto zero_ext_dpin = lg->create_node_const(Lconst(0, offset)).setup_driver_pin();
           lg->add_edge(zero_ext_dpin, join_node.setup_sink_pin(1));
           lg->add_edge(node.inp_edges().begin()->driver, join_node.setup_sink_pin(0));
           lg->add_edge(join_node.setup_driver_pin(), node.inp_edges().begin()->sink);
@@ -841,7 +841,7 @@ void Pass_bitwidth::bw_replace_dp_node_by_pick(LGraph *lg) {
       auto ori_sink   = node.out_edges().begin()->sink;
 
       auto pick_node  = lg->create_node(Pick_Op);
-      auto zero_dpin  = lg->create_node_const(0,1).get_driver_pin();
+      auto zero_dpin  = lg->create_node_const(Lconst(0,1)).get_driver_pin();
       pick_node.setup_driver_pin().set_bits(bits);
       lg->add_edge(ori_driver, pick_node.setup_sink_pin(0));
       lg->add_edge(zero_dpin, pick_node.setup_sink_pin(1));

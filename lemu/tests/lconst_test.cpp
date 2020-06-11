@@ -810,14 +810,6 @@ TEST_F(Lconst_test, Trivial) {
   print_method(v_10b);
 
   UInt<1>   a1u(0x1);
-  UInt<16>  a16u(0xcafe);
-  UInt<16>  b16u(0xbebe);
-  UInt<64>  a64u(0xe2bd5b4ff8b30fc8);
-  UInt<64>  b64u(0x2fc353e33c6938a7);
-  UInt<80>  a80u("0x987426c1f7cd7d4d693a");
-  UInt<80>  b80u("0x563a0757a07b7bd27485");
-  UInt<128> a128u("0xe903646a697fcaa344d2b2aa95e47b5d");
-  UInt<128> b128u("0x56fa570ecb04adca42405f12bf28b822");
 
   print_method(a1u);
   print_method(a16u);
@@ -827,16 +819,6 @@ TEST_F(Lconst_test, Trivial) {
   fmt::print("UInt<64> has sizeof {}\n", sizeof(a64u));
   fmt::print("UInt<80> has sizeof {}\n", sizeof(a80u));
   fmt::print("UInt<128> has sizeof {}\n", sizeof(a128u));
-
-  SInt<16>  a16s(0x6dba);
-  SInt<16>  b16s(0xccb2);
-  SInt<64>  a64s(0x71088d1c4a5c4a02);
-  SInt<64>  b64s(0xdefaa415d9062302);
-  SInt<80>  a80s("0x381c1fe6bca6875922fe");
-  SInt<80>  b80s("0xefbe8ae0d38ab7f36dda");
-  SInt<128> a128s("0x6e0939370acc19daec06e9c13db50674");
-  SInt<128> b128s("0xbeb828fdbac591dba8e38eeb433f563d");
-
 
   EXPECT_EQ( a16u.cat(b16u)   , UInt<32>(0xcafebebe) );
   EXPECT_EQ( a16u.cat(a64u)   , UInt<80>("0xcafee2bd5b4ff8b30fc8") );
@@ -1096,12 +1078,12 @@ TEST_F(Lconst_test, dec_check) {
     }
     EXPECT_EQ(a2.get_num(), c);
 
-    auto fmt_a = a1.fmt();
+    auto fmt_a = a1.to_pyrope();
     Lconst b(fmt_a);
 
     //fmt::print("orig:{}\n",rnd_list[i]);
-    //fmt::print("  a1:{}\n",a1.fmt());
-    //fmt::print("   b:{}\n",b.fmt());
+    //fmt::print("  a1:{}\n",a1.to_pyrope());
+    //fmt::print("   b:{}\n",b.to_pyrope());
 
     EXPECT_EQ(b.get_num(), c);
   }
@@ -1132,11 +1114,33 @@ TEST_F(Lconst_test, binary) {
   EXPECT_TRUE(a == b);
   EXPECT_EQ(a, b);
 
-  Lconst c("0b1?1?1");
-  EXPECT_EQ(c.to_string(), "0b1?1?1");
+  Lconst c("0b01?10?1");
+  EXPECT_EQ(c.to_string(), "01?10?1");
+  EXPECT_EQ(c.to_pyrope(), "0b01?10?1u7bits");
+  EXPECT_EQ(c.to_verilog(), "7'b01?10?1");
 
-  Lconst d("__-_0b1_1x1_");
-  EXPECT_EQ(d.to_string(), "-0b11x1");
+  Lconst d("___0b1_1x1_");
+  EXPECT_EQ(d.to_string(), "11x1");
+  EXPECT_EQ(d.to_pyrope(), "0b11x1u4bits");
+  EXPECT_EQ(d.to_verilog(), "4'b11x1");
+  EXPECT_EQ(d.to_yosys(),   "11x1");
+
+  Lconst e("_-__0b1_");
+  EXPECT_EQ(e.to_string(), "_-__0b1_");
+  EXPECT_EQ(e.to_pyrope(), "'_-__0b1_'");
+  EXPECT_EQ(e.to_verilog(), "\"_-__0b1_\"");
+
+  Lconst f("0b1_0100");
+  EXPECT_EQ(f.to_pyrope(), "0x14");
+  EXPECT_EQ(f.to_verilog(), "'h14");
+  EXPECT_EQ(f.to_yosys(), "10100");
+
+  Lconst g("0bxxxx_xxxx_u8bits");
+  EXPECT_EQ(g.to_pyrope(),   "0bxxxxxxxxu8bits");
+  EXPECT_EQ(g.to_verilog(), "8'bxxxxxxxx");
+  EXPECT_EQ(g.to_yosys()    , "xxxxxxxx");
+  Lconst h("0bxxxxxxxxu8bits");
+  EXPECT_EQ(h,g);
 }
 
 TEST_F(Lconst_test, serialize) {
@@ -1157,15 +1161,54 @@ TEST_F(Lconst_test, serialize) {
 
   b.dump();
   s_b.dump();
-  fmt::print("  a:{}\n",a.fmt());
-  fmt::print("s_a:{}\n",s_a.fmt());
-  fmt::print("  b:{}\n",b.fmt());
-  fmt::print("s_b:{}\n",s_b.fmt());
-  fmt::print("  c:{}\n",c.fmt());
-  fmt::print("s_c:{}\n",s_c.fmt());
+  fmt::print("  a:{}\n",a.to_pyrope());
+  fmt::print("s_a:{}\n",s_a.to_pyrope());
+  fmt::print("  b:{}\n",b.to_pyrope());
+  fmt::print("s_b:{}\n",s_b.to_pyrope());
+  fmt::print("  c:{}\n",c.to_pyrope());
+  fmt::print("s_c:{}\n",s_c.to_pyrope());
 
   EXPECT_EQ(a, s_a);
   EXPECT_EQ(b, s_b);
   EXPECT_EQ(c, s_c);
+}
+
+TEST_F(Lconst_test, serialize2a) {
+  {
+    unlink("tmp_lemu/const");
+    mmap_lib::map<uint32_t, Lconst::Container> map("tmp_lemu", "const");
+
+    Lconst a(255);
+    Lconst b("0xFFu_300bits");
+    Lconst c("0x1234567890abcdef1234567890abcdefu_300bits");
+
+    map.set(1, a.serialize());
+    map.set(2, b.serialize());
+    map.set(3, c.serialize());
+  }
+  {
+    mmap_lib::map<uint32_t, Lconst::Container> map("tmp_lemu","const");
+
+    Lconst s_a(map.get(1));
+    Lconst s_b(map.get(2));
+    Lconst s_c(map.get(3));
+
+    Lconst a(255);
+    Lconst b("0xFFu_300bits");
+    Lconst c("0x1234567890abcdef1234567890abcdefu_300bits");
+
+    b.dump();
+    s_b.dump();
+    fmt::print("  a:{}\n",a.to_pyrope());
+    fmt::print("s_a:{}\n",s_a.to_pyrope());
+    fmt::print("  b:{}\n",b.to_pyrope());
+    fmt::print("s_b:{}\n",s_b.to_pyrope());
+    fmt::print("  c:{}\n",c.to_pyrope());
+    fmt::print("s_c:{}\n", s_c.to_pyrope());
+
+    EXPECT_EQ(a, s_a);
+    EXPECT_EQ(b, s_b);
+    EXPECT_EQ(c, s_c);
+  }
 }
 

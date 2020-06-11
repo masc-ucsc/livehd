@@ -136,7 +136,7 @@ void Inou_graphviz::populate_lg_handle_xedge(const Node &node, const XEdge &out,
   auto  dbits   = out.driver.get_bits();
   auto  dp_name = out.driver.has_name() ? out.driver.get_name() : "";
 
-  if (node.get_type().op == U32Const_Op)
+  if (node.get_type().op == Const_Op)
     data += fmt::format(" {}->{}[label=<{}b:({},{})>];\n", dn_name, sn_name, dbits, dp_pid, sp_pid);
   else if (node.get_type().op == TupRef_Op)
     data += fmt::format(" {}->{}[label=<({},{}):<font color=\"#0000ff\">{}</font>>];\n", dn_name, sn_name, dp_pid, sp_pid, dp_name);
@@ -159,8 +159,8 @@ void Inou_graphviz::populate_lg_data(LGraph *g) {
       node_info = node.debug_name();
     }
 
-    if (node.get_type().op == U32Const_Op)
-      data += fmt::format(" {} [label=<{}:{}>];\n", node.debug_name(), node_info, node.get_type_const_value());
+    if (node.get_type().op == Const_Op)
+      data += fmt::format(" {} [label=<{}:{}>];\n", node.debug_name(), node_info, node.get_type_const().to_pyrope());
     else
       data += fmt::format(" {} [label=<{}>];\n", node.debug_name(), node_info);
 

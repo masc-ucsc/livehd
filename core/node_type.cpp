@@ -103,16 +103,16 @@ void LGraph_Node_Type::set_type_lut(Index_ID nid, const Lconst &lutid) {
   lut_map.set(Node::Compact_class(nid), lutid.serialize());
 }
 
-const Lconst &LGraph_Node_Type::get_type_lut(Index_ID nid) const {
+Lconst LGraph_Node_Type::get_type_lut(Index_ID nid) const {
   I(node_internal[nid].get_type() == LUT_Op);
 
-  return lut_map.get(Node::Compact_class(nid));
+  return Lconst(lut_map.get(Node::Compact_class(nid)));
 }
 
-const Lconst &LGraph_Node_Type::get_type_const(Index_ID nid) const {
+Lconst LGraph_Node_Type::get_type_const(Index_ID nid) const {
   I(node_internal[nid].is_master_root());
 
-  return const_bimap.get_val(Node::Compact_class(nid));
+  return Lconst(const_bimap.get_val(Node::Compact_class(nid)));
 }
 
 void LGraph_Node_Type::set_type_const(Index_ID nid, const Lconst &value) {

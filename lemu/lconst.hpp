@@ -77,6 +77,8 @@ protected:
   uint16_t bits;
   Number   num;
 
+  void pyrope_bits(std::string *str) const;
+
   std::string_view skip_underscores(std::string_view txt) const;
 
   Lconst(bool str, bool a, bool b, bool c, uint16_t d, Number n) : explicit_str(str), explicit_sign(a), explicit_bits(b), sign(c), bits(d), num(n) {}
@@ -114,6 +116,7 @@ public:
   Lconst add(const Lconst &o) const;
 
   bool     is_negative() const { return sign && num < 0; }
+  bool     is_explicit_sign() const { return explicit_sign; }
   bool     is_explicit_bits() const { return explicit_bits; }
   bool     is_string() const { return explicit_str; }
   uint16_t get_bits() const { return bits; }
@@ -133,15 +136,31 @@ public:
     }
   }
 
+  bool is_i() const;
+  int to_i() const; // must fit in int or exception raised
+
+  std::string to_yosys() const;
+  std::string to_verilog() const;
   std::string to_string() const;
-  std::string fmt() const;
+  std::string to_pyrope() const;
 
   // Operator list
   const Lconst operator+(const Lconst &other) const { return add(other); }
+  const Lconst operator+(uint64_t other) const { return add(Lconst(other)); }
 
   bool operator==(const Lconst &other) const {
     auto b = std::max(bits,other.bits);
     return get_num(b) == other.get_num(b) && same_explicit_bits(other);
+  }
+  bool operator==(int other) const {
+    if (bits>63)
+      return false;
+    return get_num(bits) == other;
+  }
+  bool operator!=(int other) const {
+    if (bits>63)
+      return true;
+    return get_num(bits) != other;
   }
   bool operator!=(const Lconst &other) const {
     auto b = std::max(bits,other.bits);

@@ -48,7 +48,7 @@ public:
   };
 
   bool full() const {
-    return (tail + 1) == head;
+    return (tail + 1) == head.load(std::memory_order_relaxed);
   }
   bool empty() const {
     return tail == head;

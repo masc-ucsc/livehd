@@ -266,6 +266,7 @@ public:
 
   Node get_node() const;
   Node get_driver_node() const;
+  Node_pin get_driver_pin() const;
 
   void connect_sink(Node_pin &dst);
   void connect_sink(Node_pin &&dst) { connect_sink(dst); }

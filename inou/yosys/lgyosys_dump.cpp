@@ -131,32 +131,32 @@ void Lgyosys_dump::create_memory(LGraph *g, RTLIL::Module *module, Node &node) {
       assert(clk);
 
     } else if (input_pin == LGRAPH_MEMOP_SIZE) {
-      memory->setParam("\\SIZE", RTLIL::Const(driver_node.get_type_const_value()));
+      memory->setParam("\\SIZE", RTLIL::Const(driver_node.get_type_const().to_i()));
 
     } else if (input_pin == LGRAPH_MEMOP_OFFSET) {
-      memory->setParam("\\OFFSET", RTLIL::Const(driver_node.get_type_const_value()));
+      memory->setParam("\\OFFSET", RTLIL::Const(driver_node.get_type_const().to_i()));
 
     } else if (input_pin == LGRAPH_MEMOP_ABITS) {
-      memory->setParam("\\ABITS", RTLIL::Const(driver_node.get_type_const_value()));
+      memory->setParam("\\ABITS", RTLIL::Const(driver_node.get_type_const().to_i()));
 
     } else if (input_pin == LGRAPH_MEMOP_WRPORT) {
-      memory->setParam("\\WR_PORTS", RTLIL::Const(driver_node.get_type_const_value()));
+      memory->setParam("\\WR_PORTS", RTLIL::Const(driver_node.get_type_const().to_i()));
 
     } else if (input_pin == LGRAPH_MEMOP_RDPORT) {
       assert(nrd_ports == 0);  // Do not double set
 
-      nrd_ports = driver_node.get_type_const_value();
+      nrd_ports = driver_node.get_type_const().to_i();
       memory->setParam("\\RD_PORTS", RTLIL::Const(nrd_ports));
 
     } else if (input_pin == LGRAPH_MEMOP_RDTRAN) {
-      transp = driver_node.get_type_const_value() ? RTLIL::State::S1 : RTLIL::State::S0;
+      transp = driver_node.get_type_const().to_i() ? RTLIL::State::S1 : RTLIL::State::S0;
 
     } else if (input_pin == LGRAPH_MEMOP_RDCLKPOL) {
-      rd_posedge = (driver_node.get_type_const_value() == 0) ? RTLIL::State::S1 : RTLIL::State::S0;
+      rd_posedge = (driver_node.get_type_const() == 0) ? RTLIL::State::S1 : RTLIL::State::S0;
       rd_clk     = true;
 
     } else if (input_pin == LGRAPH_MEMOP_WRCLKPOL) {
-      wr_posedge = (driver_node.get_type_const_value() == 0) ? RTLIL::State::S1 : RTLIL::State::S0;
+      wr_posedge = (driver_node.get_type_const() == 0) ? RTLIL::State::S1 : RTLIL::State::S0;
       wr_clk     = true;
 
     } else if (LGRAPH_MEMOP_ISWRADDR(input_pin)) {
@@ -284,25 +284,20 @@ void Lgyosys_dump::create_wires(LGraph *g, RTLIL::Module *module) {
   for (auto node : g->fast()) {
     if (node.get_type().op == GraphIO_Op) continue;  // handled before with each_output/each_input
 
-    if (node.get_type().op == U32Const_Op) {
+    if (node.get_type().op == Const_Op) {
       auto         dpin     = node.get_driver_pin();
       RTLIL::Wire *new_wire = add_wire(module, dpin);
 
-      // constants treated as inputs
-      module->connect(new_wire, RTLIL::SigSpec(node.get_type_const_value(), dpin.get_bits()));
+      auto lc = node.get_type_const();
+
+      if (lc.is_i()) {
+        I(lc.get_bits() == dpin.get_bits());
+        module->connect(new_wire, RTLIL::SigSpec(lc.to_i(), dpin.get_bits()));
+      } else {
+        module->connect(new_wire, RTLIL::SigSpec(RTLIL::Const::from_string(lc.to_yosys())));
+      }
       input_map[dpin.get_compact()] = new_wire;
       continue;
-
-    } else if (node.get_type().op == StrConst_Op) {
-      auto         const_val = node.get_type_const_sview();
-      RTLIL::Wire *new_wire  = module->addWire(absl::StrCat("\\", node.get_driver_pin().create_name()),
-                                              const_val.size());  // FIXME: This assumes that const are in base 2. OK always?
-
-      // constants treated as inputs
-      module->connect(new_wire, RTLIL::SigSpec(RTLIL::Const::from_string(std::string(const_val))));
-      input_map[node.get_driver_pin().get_compact()] = new_wire;
-      continue;
-
     } else if (node.get_type().op == SubGraph_Op) {
       create_subgraph_outputs(g, module, node);
       continue;
@@ -389,8 +384,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
 
     switch (op) {
       case GraphIO_Op:
-      case U32Const_Op:
-      case StrConst_Op: continue;
+      case Const_Op: continue;
 
       case Sum_Op: {
         std::vector<RTLIL::Wire *> add_unsigned;
@@ -591,8 +585,8 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
           switch (e.sink.get_pid()) {
             case 0: picked_wire = get_wire(e.driver); break;
             case 1:
-              if (e.driver.get_node().get_type().op != U32Const_Op) log_error("Internal Error: Pick range is not a constant.\n");
-              lower = e.driver.get_node().get_type_const_value();
+              if (e.driver.get_node().get_type().op != Const_Op) log_error("Internal Error: Pick range is not a constant.\n");
+              lower = e.driver.get_node().get_type_const().to_i();
               break;
             default: assert(0);  // pids > 1 not supported
           }
@@ -625,7 +619,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
 
         assert(cell_output_map.find(node.get_driver_pin().get_compact()) != cell_output_map.end());
 
-        uint64_t lut_code = node.get_type_lut();
+        auto lut_code = RTLIL::Const::from_string(node.get_type_lut().to_yosys());
 
         module->addLut(next_id(g), joined_inp_wires, cell_output_map[node.get_driver_pin().get_compact()], lut_code);
         break;
@@ -710,8 +704,8 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
             case 0: dWire = get_wire(e.driver); break;
             case 1: enWire = get_wire(e.driver); break;
             case 2: {
-              if (e.driver.get_node().get_type().op != U32Const_Op) log_error("Internal Error: polarity is not a constant.\n");
-              polarity = e.driver.get_node().get_type_const_value() != 0 ? true : false;
+              if (e.driver.get_node().get_type().op != Const_Op) log_error("Internal Error: polarity is not a constant.\n");
+              polarity = e.driver.get_node().get_type_const().to_i()? true : false;
             } break;
             default: log_error("DumpYosys: unrecognized wire connection pid=%d\n", e.sink.get_pid());
           }
@@ -738,8 +732,8 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
             case 3: rstWire = get_wire(e.driver); break;  // clr signal in yosys
             case 4: rstVal = get_wire(e.driver); break;   // set signal in yosys
             case 5: {
-              if (e.driver.get_node().get_type().op != U32Const_Op) log_error("Internal Error: polarity is not a constant.\n");
-              polarity = e.driver.get_node().get_type_const_value() != 0 ? true : false;
+              if (e.driver.get_node().get_type().op != Const_Op) log_error("Internal Error: polarity is not a constant.\n");
+              polarity = e.driver.get_node().get_type_const().to_i() ? true : false;
             }
             default: log("[WARNING] DumpYosys: unrecognized wire connection pid=%d\n", e.sink.get_pid());
           }
@@ -836,8 +830,8 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
               break;
             case 1:
               if (shift_amount.size() != 0) log_error("Internal Error: multiple wires assigned to same shift\n");
-              if (e.driver.get_node().get_type().op == U32Const_Op)
-                shift_amount = RTLIL::Const(e.driver.get_node().get_type_const_value());
+              if (e.driver.get_node().get_type().op == Const_Op)
+                shift_amount = RTLIL::Const(e.driver.get_node().get_type_const().to_i());
               else
                 shift_amount = get_wire(e.driver);
               break;
@@ -867,14 +861,14 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
               break;
             case 1:
               if (shift_amount.size() != 0) log_error("Internal Error: multiple wires assigned to same shift\n");
-              if (e.driver.get_node().get_type().op == U32Const_Op)
-                shift_amount = RTLIL::Const(e.driver.get_node().get_type_const_value());
+              if (e.driver.get_node().get_type().op == Const_Op)
+                shift_amount = RTLIL::Const(e.driver.get_node().get_type_const().to_i());
               else
                 shift_amount = get_wire(e.driver);
               break;
             case 2:
-              if (e.driver.get_node().get_type().op != U32Const_Op) log_error("Internal Error: Shift sign is not a constant.\n");
-              auto val = e.driver.get_node().get_type_const_value();
+              if (e.driver.get_node().get_type().op != Const_Op) log_error("Internal Error: Shift sign is not a constant.\n");
+              auto val = e.driver.get_node().get_type_const().to_i();
               sign     = (val) % 2 == 1;  // FIXME: Weird encoding
               b_sign   = (val) == 2;
               a_sign   = (val) > 2;

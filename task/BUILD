@@ -10,10 +10,11 @@ cc_library(
 
 cc_test(
     name = "thread_pool_test",
-    srcs = ["tests/thread_pool_test.cpp"],
+    srcs = ["tests/thread_pool_test.cpp", "tests/concurrentqueue.hpp"],
     # tags = ["long1"], # Run only with long1 set of tests
     deps = [
         "@gtest//:gtest_main",
+        "//lbench:headers",
         ":task",
     ],
 )

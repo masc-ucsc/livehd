@@ -64,14 +64,14 @@ LGraph *Inou_rand::do_tolg() {
   Lrand_range<uint16_t> rnd_bits1(1, 32);
   Lrand_range<uint16_t> rnd_bits2(1, 512);
   Lrand_range<uint8_t>  rnd_op(Sum_Op, SubGraph_Op - 1);
-  Lrand_range<uint32_t> rnd_u32op(0, (uint32_t)(U32ConstMax_Op - U32ConstMin_Op));
+  Lrand<uint32_t> rnd_u32op;
   Lrand_range<uint8_t>  rnd_const(0, 100);
 
   std::vector<Node> created;
 
   for (int i = 0; i < rand_size; i++) {
     if (rnd_const.any() < rand_crate) {
-      created.emplace_back(g->create_node_const(rnd_u32op.any(), rnd_bits2.any()));
+      created.emplace_back(g->create_node_const(Lconst(rnd_u32op.any(), rnd_bits2.any())));
     } else {
       created.emplace_back(g->create_node(static_cast<Node_Type_Op>(rnd_op.any())));
     }
@@ -93,7 +93,6 @@ LGraph *Inou_rand::do_tolg() {
     auto &sink_node = created[rnd_created.any()];
     auto  dst_type  = sink_node.get_type();
     // if constant, we don't allow inputs to sink_node
-    if (dst_type.op > U32Const_Op && dst_type.op <= U32ConstMax_Op) continue;
 
     auto spin = sink_node.setup_sink_pin(rnd_port.any() % dst_type.get_num_inputs());
     if (used_port.count(spin.get_compact())) continue;

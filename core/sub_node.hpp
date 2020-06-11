@@ -328,4 +328,6 @@ public:
     I(lgid);
     return &phys;
   }
+
+  void dump() const;
 };

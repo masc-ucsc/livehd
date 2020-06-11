@@ -240,7 +240,7 @@ void Inou_lnast_dfg::process_ast_phi_op(LGraph *dfg, const Lnast_nid &lnidx_phi)
 void Inou_lnast_dfg::process_ast_concat_op(LGraph *dfg, const Lnast_nid &lnidx_concat) {
   auto tup_add    = dfg->create_node(TupAdd_Op);
   auto tn_spin    = tup_add.setup_sink_pin(TN); //tuple name
-  auto kn_spin    = tup_add.setup_sink_pin(KN); //key name, unknown when concatenating
+  //auto kn_spin    = tup_add.setup_sink_pin(KN); //key name, unknown when concatenating
   auto kp_spin    = tup_add.setup_sink_pin(KP); //key pos
   auto value_spin = tup_add.setup_sink_pin(KV); //key->value
 
@@ -263,7 +263,7 @@ void Inou_lnast_dfg::process_ast_concat_op(LGraph *dfg, const Lnast_nid &lnidx_c
 
 
 Node_pin Inou_lnast_dfg::setup_tuple_chain_new_max_pos(LGraph *dfg, const Node_pin &tn_dpin) {
-  uint32_t max = 0;
+  Lconst max;
   auto chain_itr = tn_dpin.get_node();
   while (chain_itr.get_type().op != TupRef_Op) {
     if (chain_itr.get_type().op == TupAdd_Op) {
@@ -271,8 +271,7 @@ Node_pin Inou_lnast_dfg::setup_tuple_chain_new_max_pos(LGraph *dfg, const Node_p
       I(chain_itr.setup_sink_pin(KP).is_connected());
       auto dnode_of_kp_spin = chain_itr.setup_sink_pin(KP).inp_edges().begin()->driver.get_node();
       //FIXME->sh: constant propagation problem again!? now assume the dnode of kp_spin is always a well-defined constant
-      if (dnode_of_kp_spin.get_type_const_value() > max)
-        max = dnode_of_kp_spin.get_type_const_value();
+      max = std::max(max, dnode_of_kp_spin.get_type_const());
       auto next_itr = chain_itr.setup_sink_pin(TN).inp_edges().begin()->driver.get_node();
       chain_itr = next_itr;
     } else if (chain_itr.get_type().op == Or_Op) {
@@ -284,8 +283,7 @@ Node_pin Inou_lnast_dfg::setup_tuple_chain_new_max_pos(LGraph *dfg, const Node_p
     }
   }
 
-  auto new_pos_str = "0d" + std::to_string(max + 1);
-  return resolve_constant(dfg, new_pos_str).setup_driver_pin();
+  return resolve_constant(dfg, max + 1).setup_driver_pin();
 }
 
 
@@ -317,7 +315,7 @@ void Inou_lnast_dfg::process_ast_logical_op(LGraph *dfg, const Lnast_nid &lnidx_
 
     auto node_eq = dfg->create_node(Equals_Op);
     auto ori_opd = setup_ref_node_dpin(dfg, opr_child);
-    auto zero_dpin = dfg->create_node_const(0, 1).setup_driver_pin();
+    auto zero_dpin = dfg->create_node_const(Lconst(0, 1)).setup_driver_pin();
     dfg->add_edge(ori_opd, node_eq.setup_sink_pin(1));
     dfg->add_edge(zero_dpin, node_eq.setup_sink_pin(1));
 
@@ -394,7 +392,7 @@ Node Inou_lnast_dfg::process_ast_assign_op(LGraph *dfg, const Lnast_nid &lnidx_a
 
   Node_pin opr  = setup_node_assign_and_lhs(dfg, lnidx_assign);
   Node_pin opd1 = setup_ref_node_dpin(dfg, c1);
-  GI(opd1.get_node().get_type().op != U32Const_Op, opd1.get_bits() == 0);
+  GI(opd1.get_node().get_type().op != Const_Op, opd1.get_bits() == 0);
 
   dfg->add_edge(opd1, opr);
   return opr.get_node();
@@ -426,8 +424,8 @@ void Inou_lnast_dfg::process_ast_tuple_struct(LGraph *dfg, const Lnast_nid &lnid
 
       auto tn_dpin    = setup_tuple_ref(dfg, tup_name);
       auto kn_dpin    = setup_tuple_key(dfg, key_name);
-      keyname2pos[key_name] = "0d" + std::to_string(kp);
-      auto kp_dnode   = resolve_constant(dfg, "0d" + std::to_string(kp));
+      keyname2pos[key_name] = std::to_string(kp);
+      auto kp_dnode   = resolve_constant(dfg, Lconst(kp));
       auto kp_dpin    = kp_dnode.setup_driver_pin();
       auto value_dpin = setup_ref_node_dpin(dfg, c1);
 
@@ -533,9 +531,9 @@ void Inou_lnast_dfg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnid
       kp_str = key_name;
     } else {
       kp_str = keyname2pos[key_name];
-    } 
+    }
 
-    auto kp_dpin = resolve_constant(dfg, kp_str).setup_driver_pin();
+    auto kp_dpin = resolve_constant(dfg, Lconst(kp_str)).setup_driver_pin();
     dfg->add_edge(kp_dpin, kp_spin);
 
     auto value_dpin = setup_ref_node_dpin(dfg, c2_ta);
@@ -668,9 +666,9 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
     node_dpin = dfg->add_graph_input(name.substr(1, name.size()-3), Port_invalid, 0);
     fmt::print("add graph inp:{}\n", name.substr(1, name.size()-3));
   } else if (is_const(name)) {
-    node_dpin = resolve_constant(dfg, name).setup_driver_pin();
+    node_dpin = resolve_constant(dfg, Lconst(name)).setup_driver_pin();
   } else if (is_default_const(name)) {
-    node_dpin = resolve_constant(dfg, "0d0").setup_driver_pin();
+    node_dpin = resolve_constant(dfg, Lconst(0)).setup_driver_pin();
   } else if (is_register(name)) {
     node_dpin = dfg->create_node(SFlop_Op).setup_driver_pin();
     auto name_no_ssa = lnast->get_name(lnidx_opd);
@@ -811,8 +809,8 @@ void Inou_lnast_dfg::setup_explicit_bits_info(LGraph *dfg){
 
     I (vname2bits_dpin.find(vname) != vname2bits_dpin.end());
     auto bits_dpin = vname2bits_dpin[vname];
-    if (bits_dpin.get_node().get_type().op == U32Const_Op) {
-      auto bits = bits_dpin.get_node().get_type_const_value();
+    if (bits_dpin.get_node().get_type().op == Const_Op) {
+      auto bits = bits_dpin.get_node().get_type_const().to_i();
       editable_inp_pin.ref_bitwidth()->e.set_ubits(bits);
       editable_inp_pin.ref_bitwidth()->fixed = true;
     } else {
@@ -831,8 +829,8 @@ void Inou_lnast_dfg::setup_explicit_bits_info(LGraph *dfg){
           fmt::print("vname:{}\n", vname);
           fmt::print("bits_dpin dbg:{}\n", bits_dpin.debug_name());
           fmt::print("bits_node dbg:{}\n", bits_dpin.get_node().debug_name());
-          if (bits_dpin.get_node().get_type().op == U32Const_Op) {
-            auto bits = bits_dpin.get_node().get_type_const_value();
+          if (bits_dpin.get_node().get_type().op == Const_Op) {
+            auto bits = bits_dpin.get_node().get_type_const().to_i();
             fmt::print("bits:{}\n", bits);
             fmt::print("target_dpin dbg:{}\n", target_dpin.debug_name());
             target_dpin.ref_bitwidth()->e.set_ubits(bits);

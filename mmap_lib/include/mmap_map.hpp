@@ -1246,17 +1246,18 @@ public:
   }
 
   template<typename T_ = T, typename = std::enable_if_t<is_array_serializable<T_>::value>>
-	[[nodiscard]] T get_sview(const value_type& it) const {
+	[[nodiscard]] T get(const value_type& it) const {
     static_assert(using_val_sview,"mmap_lib::map::get_sview should be called only when 'value' is array_serializable\n");
     return get_sview(it.second);
 	}
 
   template<typename T_ = T, typename = std::enable_if_t<is_array_serializable<T_>::value>>
-	[[nodiscard]] T get_sview(const const_iterator &it) const {
+	[[nodiscard]] T get(const const_iterator &it) const {
     static_assert(using_val_sview,"mmap_lib::map::get_sview should be called only when 'value' is array_serializable\n");
     return get_sview(it->second);
   }
 
+  template<typename T_ = T, typename = std::enable_if_t<!is_array_serializable<T_>::value>>
 	[[nodiscard]] const T &get(const const_iterator &it) const {
     static_assert(!using_val_sview,"mmap_lib::map::get should not be called when 'value' is array_serializable. Use get_sview instead.\n");
     return it->second;

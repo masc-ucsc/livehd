@@ -190,7 +190,7 @@ public:
   };
 
   void             set_type_lut(const Lconst &lutid);
-  const Lconst    &get_type_lut() const;
+  Lconst           get_type_lut() const;
 
   const Node_Type &get_type() const;
   void             set_type(const Node_Type_Op op);
@@ -213,7 +213,7 @@ public:
   LGraph *         ref_type_sub_lgraph() const;  // Slower than other get_type_sub
   bool             is_type_sub_present() const;
 
-  const Lconst    &get_type_const() const;
+  Lconst           get_type_const() const;
 
   Node_pin setup_driver_pin(std::string_view name);
   Node_pin setup_driver_pin(Port_ID pid);

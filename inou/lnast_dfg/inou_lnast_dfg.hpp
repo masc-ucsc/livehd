@@ -78,7 +78,7 @@ protected:
   static bool is_register          (std::string_view name) {return name.substr(0, 1) == "#" ; }
   static bool is_input             (std::string_view name) {return name.substr(0, 1) == "$" ; }
   static bool is_output            (std::string_view name) {return name.substr(0, 1) == "%" ; }
-  static bool is_const             (std::string_view name) {return name.substr(0, 2) == "0d" or name.substr(0, 3) == "-0d"; }
+  static bool is_const             (std::string_view name) {return std::isdigit(name[0]); }
   static bool is_default_const     (std::string_view name) {return name.substr(0,13) == "default_const"; }
   static bool is_err_var_undefined (std::string_view name) {return name.substr(0,17) == "err_var_undefined"; }
   static bool is_attr_bits         (std::string_view name) {return name.substr(0,6)  == "__bits"; }
@@ -101,14 +101,7 @@ protected:
 
 
   // constant resolving
-  static Node         resolve_constant          (LGraph *g, std::string_view str_in);
-  static Node         process_bin_token         (LGraph *g, const std::string &token1st, uint16_t bit_width, bool is_signed);
-  static Node         process_bin_token_with_dc (LGraph *g, const std::string &token1st,bool is_signed);
-  static uint32_t     cal_bin_val_32b           (const std::string &);
-  static Node         create_const32_node       (LGraph *g, const std::string &, uint16_t node_bit_width, bool is_signed);
-  static Node         create_dontcare_node      (LGraph *g, uint16_t node_bit_width);
-  static std::string  hex_char_to_bin           (char c);
-  static std::string  hex_msb_char_to_bin       (char c);
+  static Node         resolve_constant       (LGraph *g, const Lconst &value);
 
 
   // eprp callbacks

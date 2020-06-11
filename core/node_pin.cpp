@@ -55,10 +55,15 @@ Node Node_pin::get_node() const {
 }
 
 Node Node_pin::get_driver_node() const {
+  return get_driver_pin().get_node();
+}
+
+Node_pin Node_pin::get_driver_pin() const {
+  I(is_sink());
   // TODO: Correct but inneficient. Create a faster call that avoids the slow inp_edges call (patch lgraph)
   auto xedge = current_g->inp_edges(*this);
   I(xedge.size()==1);
-  return xedge.front().driver.get_node();
+  return xedge.front().driver;
 }
 
 void Node_pin::connect_sink(Node_pin &spin) {
@@ -117,7 +122,7 @@ std::string Node_pin::debug_name() const {
   std::string name;
   if (!sink)
     if (Ann_node_pin_name::ref(current_g)->has_key(get_compact_class_driver()))
-      name = Ann_node_pin_name::ref(current_g)->get_val_sview(get_compact_class_driver());
+      name = Ann_node_pin_name::ref(current_g)->get_val(get_compact_class_driver());
 
   if (name.empty()) {
     const auto node = get_node();
@@ -140,7 +145,7 @@ std::string_view Node_pin::get_name() const {
   }
 #endif
   // NOTE: Not the usual get_compact_class_driver() to handle IO change from driver/sink
-  return Ann_node_pin_name::ref(current_g)->get_val_sview(Compact_class_driver(idx));
+  return Ann_node_pin_name::ref(current_g)->get_val(Compact_class_driver(idx));
 }
 
 
@@ -153,13 +158,13 @@ std::string_view Node_pin::get_prp_vname() const {
   }
 #endif
   // NOTE: Not the usual get_compact_class_driver() to handle IO change from driver/sink
-  return Ann_node_pin_prp_vname::ref(current_g)->get_val_sview(Compact_class_driver(idx));
+  return Ann_node_pin_prp_vname::ref(current_g)->get_val(Compact_class_driver(idx));
 }
 
 std::string_view Node_pin::create_name() const {
   auto ref = Ann_node_pin_name::ref(current_g);
 
-  if (ref->has_key(get_compact_class_driver())) return ref->get_val_sview(get_compact_class_driver());
+  if (ref->has_key(get_compact_class_driver())) return ref->get_val(get_compact_class_driver());
 
   std::string signature(get_node().create_name());
 
@@ -175,7 +180,7 @@ std::string_view Node_pin::create_name() const {
   }
 
   const auto it = ref->set(get_compact_class_driver(), signature);
-  return ref->get_val_sview(it);
+  return ref->get_val(it);
 }
 
 bool Node_pin::has_name() const { return Ann_node_pin_name::ref(current_g)->has_key(get_compact_class_driver()); }

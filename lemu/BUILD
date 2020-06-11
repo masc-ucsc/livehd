@@ -26,3 +26,13 @@ cc_test(
         ],
     )
 
+cc_test(
+    name = "lconst_dump",
+    srcs = ["tests/lconst_dump.cpp"],
+    deps = [
+        ":lemu",
+        "//simlib:headers",
+        "//mmap_lib:headers",
+        ],
+    )
+

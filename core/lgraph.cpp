@@ -638,9 +638,9 @@ void LGraph::dump() {
     auto node = Node(this, Node::Compact_class(i));  // NOTE: To remove once new iterators are finished
     fmt::print("nid:{} type:{} name:{}", node.nid, node.get_type().get_name(), node.debug_name());
     if (node.get_type().op == LUT_Op) {
-      fmt::print(" lut={}\n", node.get_type_lut().fmt());
+      fmt::print(" lut={}\n", node.get_type_lut().to_pyrope());
     } else if (node.get_type().op == Const_Op) {
-      fmt::print(" const={}\n", node.get_type_const().fmt());
+      fmt::print(" const={}\n", node.get_type_const().to_pyrope());
     } else {
       fmt::print("\n");
     }

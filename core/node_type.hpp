@@ -40,7 +40,7 @@ protected:
   Sub_node        *ref_type_sub_node(std::string_view sub_name);
 
   void             set_type_lut(Index_ID nid, const Lconst &lutid);
-  const Lconst    &get_type_lut(Index_ID nid) const;
+  Lconst           get_type_lut(Index_ID nid) const;
 
   void             set_type_const(Index_ID nid, const Lconst &value);
   void             set_type_const(Index_ID nid, std::string_view value);
@@ -50,7 +50,8 @@ protected:
   Index_ID         find_type_const(std::string_view value) const;
   Index_ID         find_type_const(uint32_t value, uint16_t bits) const;
 
-  const Lconst    &get_type_const(Index_ID nid) const;
+  // No const because Lconst created
+  Lconst           get_type_const(Index_ID nid) const;
 
 public:
   LGraph_Node_Type() = delete;
