@@ -24,14 +24,14 @@ Index_ID Edge_raw::get_page_idx() const { return Node_Internal_Page::get(this).g
 bool Edge_raw::is_last_input() const {
   const auto &node = Node_Internal::get(this);
 
-  int sz = snode? 1:2;
+  int sz = snode ? 1 : 2;
 
   return ((this + sz) >= node.get_input_end());
 }
 
 bool Edge_raw::is_last_output() const {
   const auto &node = Node_Internal::get(this);
-  int sz = snode? 1:2;
+  int         sz   = snode ? 1 : 2;
 
   return ((this + sz) >= node.get_output_end());
 }
@@ -95,7 +95,7 @@ Index_ID Edge_raw::get_self_idx() const {
   const auto &root_self = Node_Internal::get(this);
 
   SIndex_ID delta = &root_self - (const Node_Internal *)&root_page;  // Signed and bigger than Index_ID
-  I(delta < 4096/sizeof(Node_Internal) && delta > 0);
+  I(delta < 4096 / sizeof(Node_Internal) && delta > 0);
 
   SIndex_ID idx = delta + root_page.get_idx();
 
@@ -107,7 +107,7 @@ Index_ID Edge_raw::get_self_root_idx() const {
   const auto &root_self = Node_Internal::get(this);
 
   SIndex_ID delta = &root_self - (const Node_Internal *)&root_page;
-  I(delta < 4096/sizeof(Node_Internal) && delta > 0);
+  I(delta < 4096 / sizeof(Node_Internal) && delta > 0);
 
   SIndex_ID self_idx = delta + root_page.get_idx();
   if (root_self.is_root()) return static_cast<Index_ID>(self_idx);
@@ -302,7 +302,7 @@ void Node_Internal::try_recycle() {
 }
 
 void Node_Internal::del_input_int(const Edge_raw *inp_edge) {
-  I(((uint64_t)inp_edge) >> 5 == ((uint64_t)this) >> 5); // 32 byte alignment
+  I(((uint64_t)inp_edge) >> 5 == ((uint64_t)this) >> 5);  // 32 byte alignment
 
   int pos = (SEdge *)inp_edge - sedge;
 
@@ -337,7 +337,7 @@ void Node_Internal::del_input_int(const Edge_raw *inp_edge) {
 }
 
 void Node_Internal::del_output_int(const Edge_raw *out_edge) {
-  I(((uint64_t)out_edge) >> 5 == ((uint64_t)this) >> 5); // 32 byte alignment
+  I(((uint64_t)out_edge) >> 5 == ((uint64_t)this) >> 5);  // 32 byte alignment
 
   int pos = (SEdge *)out_edge - sedge;
 

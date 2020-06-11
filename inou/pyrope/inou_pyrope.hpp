@@ -2,7 +2,6 @@
 #pragma once
 
 #include "pass.hpp"
-#include "prp_lnast.hpp"
 
 class Inou_pyrope : public Pass {
 protected:

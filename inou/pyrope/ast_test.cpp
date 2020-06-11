@@ -1,9 +1,11 @@
-#include "ast.hpp"
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include <cstdio>
 
 #include "fmt/format.h"
 #include "gtest/gtest.h"
+
+#include "ast.hpp"
 
 class Test_scanner : public Elab_scanner {
 protected:

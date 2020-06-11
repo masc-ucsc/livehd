@@ -2,18 +2,9 @@
 
 #pragma once
 
-#include <fcntl.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-
-#include <fstream>
+#include <set>
 #include <string>
 #include <tuple>
-#include <set>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
@@ -101,19 +92,19 @@
   }                                                                             \
   go_back(tokens_consumed - starting_tokens);                                   \
   cur_line = starting_line;                                                     \
-  cur_pos = starting_pos;                                                       \
+  cur_pos  = starting_pos;                                                      \
   debug_stat.rules_failed++;                                                    \
   return false
 #else
 #define RULE_FAILED(...)                      \
   go_back(tokens_consumed - starting_tokens); \
   cur_line = starting_line;                   \
-  cur_pos = starting_pos;                     \
+  cur_pos  = starting_pos;                    \
   return false
 #endif
 
 #ifdef DEBUG_AST
-#define RULE_SUCCESS(message, rule)    \
+#define RULE_SUCCESS(message, rule)                                                                                     \
   fmt::print(message);                                                                                                  \
   rule_call_stack.pop_back();                                                                                           \
   print_rule_call_stack();                                                                                              \
@@ -127,12 +118,12 @@
   pass_list.splice(pass_list.end(), loc_list);                                                                          \
   return true
 #else
-#define RULE_SUCCESS(message, rule)               \
-  if (sub_cnt > 1) {                              \
-    loc_list.emplace_front(0, 0);   \
-    loc_list.emplace_back(rule, 0); \
-  }                                               \
-  pass_list.splice(pass_list.end(), loc_list);    \
+#define RULE_SUCCESS(message, rule)            \
+  if (sub_cnt > 1) {                           \
+    loc_list.emplace_front(0, 0);              \
+    loc_list.emplace_back(rule, 0);            \
+  }                                            \
+  pass_list.splice(pass_list.end(), loc_list); \
   return true
 #endif
 
@@ -142,7 +133,7 @@
   uint64_t cur_tokens;        \
   uint64_t cur_loc_list_size; \
   uint64_t sub_cnt_start;     \
-  uint64_t lines_start; \
+  uint64_t lines_start;       \
   uint64_t pos_start
 
 #define UPDATE_PSEUDO_FAIL()           \
@@ -152,13 +143,13 @@
   lines_start       = cur_line;        \
   pos_start         = cur_pos
 
-#define PSEUDO_FAIL()                    \
-  PRINT_DBG_AST("Pseudo fail: tokens_consumed = {}, cur_tokens = {}\n", tokens_consumed, cur_tokens);                                       \
-  go_back(tokens_consumed - cur_tokens); \
-  loc_list.resize(cur_loc_list_size);    \
-  sub_cnt = sub_cnt_start; \
-  cur_line = lines_start; \
-  cur_pos = pos_start
+#define PSEUDO_FAIL()                                                                                 \
+  PRINT_DBG_AST("Pseudo fail: tokens_consumed = {}, cur_tokens = {}\n", tokens_consumed, cur_tokens); \
+  go_back(tokens_consumed - cur_tokens);                                                              \
+  loc_list.resize(cur_loc_list_size);                                                                 \
+  sub_cnt  = sub_cnt_start;                                                                           \
+  cur_line = lines_start;                                                                             \
+  cur_pos  = pos_start
 
 // control
 constexpr Token_id Pyrope_id_if     = 128;
@@ -223,16 +214,17 @@ protected:
   std::vector<std::string> ast_call_trace;
 
   uint64_t tokens_consumed = 0;
-  uint64_t base_token      = 0; // where do comments at the beginning end
+  uint64_t base_token      = 0;  // where do comments at the beginning end
   uint64_t subtree_index   = 0;
   uint64_t cur_line        = 0;
   uint64_t cur_pos         = 0;
 
   std::unique_ptr<Ast_parser>                ast;
   absl::flat_hash_map<std::string, Token_id> pyrope_keyword;
-  absl::flat_hash_map<Token_id, uint16_t> ws_map; // two uint8_ts 0 = no whitespace, 1 = whitespace, 2 = whitespace + comments, 3 = line break
-  std::vector<std::string>                   rule_call_stack;
-  uint64_t                                   term_token = 1;
+  absl::flat_hash_map<Token_id, uint16_t>
+                           ws_map;  // two uint8_ts 0 = no whitespace, 1 = whitespace, 2 = whitespace + comments, 3 = line break
+  std::vector<std::string> rule_call_stack;
+  uint64_t                 term_token = 1;
 
   void elaborate();
 
@@ -305,7 +297,7 @@ protected:
   inline void check_ws();
   inline bool check_eos();
   inline void eat_comments();
-  void gen_ws_map();
+  void        gen_ws_map();
 
   inline bool unconsume_token();
   inline bool consume_token();
@@ -316,7 +308,8 @@ protected:
   uint8_t check_function(uint8_t (Prp::*rule)(std::list<std::tuple<Rule_id, Token_entry>> &), uint64_t *sub_cnt,
                          std::list<std::tuple<Rule_id, Token_entry>> &loc_list);
   bool    chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, std::list<std::tuple<Rule_id, Token_entry>> &loc_list);
-  bool chk_and_consume_options(Token_id *toks, uint8_t tok_cnt, Rule_id rid, uint64_t *sub_cnt, std::list<std::tuple<Rule_id, Token_entry>> &loc_list);
+  bool    chk_and_consume_options(Token_id *toks, uint8_t tok_cnt, Rule_id rid, uint64_t *sub_cnt,
+                                  std::list<std::tuple<Rule_id, Token_entry>> &loc_list);
 
   void ast_handler();
   void ast_builder(std::list<std::tuple<Rule_id, Token_entry>> &passed_list);
@@ -347,18 +340,18 @@ public:
     pyrope_keyword["not"] = Pyrope_id_not;
     pyrope_keyword["xor"] = Pyrope_id_xor;
 
-    //pyrope_keyword["C"]       = Pyrope_id_c;
-    //pyrope_keyword["I"]       = Pyrope_id_assertion;
-    //pyrope_keyword["N"]       = Pyrope_id_negation;
-    //pyrope_keyword["yield"]   = Pyrope_id_yield;
-    //pyrope_keyword["waitfor"] = Pyrope_id_waitfor;
+    // pyrope_keyword["C"]       = Pyrope_id_c;
+    // pyrope_keyword["I"]       = Pyrope_id_assertion;
+    // pyrope_keyword["N"]       = Pyrope_id_negation;
+    // pyrope_keyword["yield"]   = Pyrope_id_yield;
+    // pyrope_keyword["waitfor"] = Pyrope_id_waitfor;
 
     pyrope_keyword["intersect"] = Pyrope_id_intersect;
     pyrope_keyword["union"]     = Pyrope_id_union;
     pyrope_keyword["until"]     = Pyrope_id_until;
     pyrope_keyword["in"]        = Pyrope_id_in;
     pyrope_keyword["by"]        = Pyrope_id_by;
-    //pyrope_keyword["punch"]     = Pyrope_id_punch;
+    // pyrope_keyword["punch"]     = Pyrope_id_punch;
 
     pyrope_keyword["false"] = Pyrope_id_false;
     pyrope_keyword["FALSE"] = Pyrope_id_FALSE;
@@ -434,6 +427,6 @@ public:
     Prp_rule_for_in_notation,
     Prp_rule_not_in_implicit,
     Prp_rule_keyword,
-    Prp_rule_sentinel // last rule is a special one for communicating with the LNAST translator
+    Prp_rule_sentinel  // last rule is a special one for communicating with the LNAST translator
   };
 };

@@ -70,7 +70,6 @@ void Hierarchy_tree::regenerate() {
   set_root(data);
 
   regenerate_step(top, Hierarchy_tree::root_index());
-
 }
 
 Hierarchy_index Hierarchy_tree::go_down(const Node &node) const {
@@ -85,7 +84,7 @@ Hierarchy_index Hierarchy_tree::go_down(const Node &node) const {
 }
 
 void Hierarchy_tree::dump() const {
-  for(const auto &index:depth_preorder()) {
+  for (const auto &index : depth_preorder()) {
     std::string indent(index.level, ' ');
     const auto &index_data = get_data(index);
     fmt::print("{} l:{} p:{} lgid:{} nid:{}\n", indent, index.level, index.pos, index_data.lgid, index_data.up_nid);

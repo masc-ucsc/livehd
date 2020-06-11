@@ -6,7 +6,7 @@
 #include "graph_library.hpp"
 #include "pass.hpp"
 
-static_assert(Last_invalid_Op<512, "lgedge has 9 bits for type");
+static_assert(Last_invalid_Op < 512, "lgedge has 9 bits for type");
 
 LGraph_Node_Type::LGraph_Node_Type(std::string_view _path, std::string_view _name, Lg_type_id _lgid) noexcept
     : LGraph_Base(_path, _name, _lgid)
@@ -70,7 +70,7 @@ void LGraph_Node_Type::set_type_sub(Index_ID nid, Lg_type_id subgraphid) {
 }
 
 Lg_type_id LGraph_Node_Type::get_type_sub(Index_ID nid) const {
-  I(node_internal[nid].get_type()==SubGraph_Op);
+  I(node_internal[nid].get_type() == SubGraph_Op);
 
   return subid_map.get(Node::Compact_class(nid));
 }
@@ -98,7 +98,7 @@ Sub_node *LGraph_Node_Type::ref_type_sub_node(std::string_view sub_name) {
 }
 
 void LGraph_Node_Type::set_type_lut(Index_ID nid, const Lconst &lutid) {
-  I(node_internal[nid].get_type()==LUT_Op);
+  I(node_internal[nid].get_type() == LUT_Op);
 
   lut_map.set(Node::Compact_class(nid), lutid.serialize());
 }
@@ -126,13 +126,9 @@ void LGraph_Node_Type::set_type_const(Index_ID nid, const Lconst &value) {
   I(value.get_bits());
 }
 
-void LGraph_Node_Type::set_type_const(Index_ID nid, std::string_view sv) {
-  set_type_const(nid, Lconst(sv));
-}
+void LGraph_Node_Type::set_type_const(Index_ID nid, std::string_view sv) { set_type_const(nid, Lconst(sv)); }
 
-void LGraph_Node_Type::set_type_const(Index_ID nid, uint32_t value, uint16_t bits) {
-  set_type_const(nid, Lconst(value, bits));
-}
+void LGraph_Node_Type::set_type_const(Index_ID nid, uint32_t value, uint16_t bits) { set_type_const(nid, Lconst(value, bits)); }
 
 Index_ID LGraph_Node_Type::find_type_const(const Lconst &value) const {
   auto it = const_bimap.find_val(value.serialize());
@@ -141,11 +137,6 @@ Index_ID LGraph_Node_Type::find_type_const(const Lconst &value) const {
   return const_bimap.get_key(it).nid;
 }
 
-Index_ID LGraph_Node_Type::find_type_const(std::string_view value) const {
-  return find_type_const(Lconst(value));
-}
+Index_ID LGraph_Node_Type::find_type_const(std::string_view value) const { return find_type_const(Lconst(value)); }
 
-Index_ID LGraph_Node_Type::find_type_const(uint32_t value, uint16_t bits) const {
-  return find_type_const(Lconst(value, bits));
-}
-
+Index_ID LGraph_Node_Type::find_type_const(uint32_t value, uint16_t bits) const { return find_type_const(Lconst(value, bits)); }

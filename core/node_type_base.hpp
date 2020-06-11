@@ -82,7 +82,7 @@ enum Node_Type_Op : uint8_t {
 
 class Node_Type {
 private:
-  static Node_Type                                    *table[Last_invalid_Op];
+  static Node_Type *                                   table[Last_invalid_Op];
   static absl::flat_hash_map<std::string, Node_Type *> name2node;
 
 protected:
@@ -118,7 +118,7 @@ public:
   bool has_may_gen_sign() const { return may_gen_sign; }
 
   static const Node_Type &get(Node_Type_Op op) {
-    I(op>Invalid_Op && op<Last_invalid_Op);
+    I(op > Invalid_Op && op < Last_invalid_Op);
     I(table[op] != nullptr);
     return *table[op];
   }
@@ -460,7 +460,7 @@ public:
 };
 
 // Y = A >> B
-// S unconnected: logic shift right 
+// S unconnected: logic shift right
 // S == 1:        sign extension, arithmetic shift right
 // S == 2:        B is signed
 // FIX ME: should be superseded
@@ -596,12 +596,12 @@ public:
       inputs.push_back(wr + "_ADDR");
       inputs.push_back(wr + "_DATA");
       inputs.push_back(wr + "_EN");
-      //inputs.push_back(wr + "_SEQID");
+      // inputs.push_back(wr + "_SEQID");
 
       std::string rd = "RD" + std::to_string(i);
       inputs.push_back(rd + "_ADDR");
       inputs.push_back(rd + "_EN");
-      //inputs.push_back(wr + "_SEQID");
+      // inputs.push_back(wr + "_SEQID");
 
       outputs.push_back(rd + "_DATA");
     }
@@ -665,7 +665,6 @@ public:
   };
 };
 
-
 // TN = tuple precedence name, K = position or name, Y = value
 class Node_Type_TupGet : public Node_Type {
 public:
@@ -677,32 +676,23 @@ public:
   };
 };
 
-
 // Y = tuple root name
 class Node_Type_TupRef : public Node_Type {
 public:
-  Node_Type_TupRef() : Node_Type("tup_ref", TupRef_Op, true) {
-    outputs.push_back("Y");
-  };
+  Node_Type_TupRef() : Node_Type("tup_ref", TupRef_Op, true) { outputs.push_back("Y"); };
 };
 
 // Y = tuple key name
 class Node_Type_TupKey : public Node_Type {
 public:
-  Node_Type_TupKey() : Node_Type("tup_key", TupKey_Op, true) {
-    outputs.push_back("Y");
-  };
+  Node_Type_TupKey() : Node_Type("tup_key", TupKey_Op, true) { outputs.push_back("Y"); };
 };
-
 
 // Y = tuple root name
 class Node_Type_CompileErr : public Node_Type {
 public:
-  Node_Type_CompileErr() : Node_Type("compile_err", CompileErr_Op, true) {
-    outputs.push_back("Y");
-  };
+  Node_Type_CompileErr() : Node_Type("compile_err", CompileErr_Op, true) { outputs.push_back("Y"); };
 };
-
 
 class Node_Type_DontCare : public Node_Type {
 public:

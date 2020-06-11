@@ -54,15 +54,13 @@ Node Node_pin::get_node() const {
   return Node(top_g, current_g, hidx, nid);
 }
 
-Node Node_pin::get_driver_node() const {
-  return get_driver_pin().get_node();
-}
+Node Node_pin::get_driver_node() const { return get_driver_pin().get_node(); }
 
 Node_pin Node_pin::get_driver_pin() const {
   I(is_sink());
   // TODO: Correct but inneficient. Create a faster call that avoids the slow inp_edges call (patch lgraph)
   auto xedge = current_g->inp_edges(*this);
-  I(xedge.size()==1);
+  I(xedge.size() == 1);
   return xedge.front().driver;
 }
 
@@ -105,8 +103,10 @@ void Node_pin::set_delay(float val) { Ann_node_pin_delay::ref(top_g)->set(get_co
 
 void Node_pin::set_name(std::string_view wname) { Ann_node_pin_name::ref(current_g)->set(get_compact_class_driver(), wname); }
 
-//FIXME->sh: could be deprecated if ann_ssa could be mmapped for a std::string_view
-void Node_pin::set_prp_vname(std::string_view prp_vname) { Ann_node_pin_prp_vname::ref(current_g)->set(get_compact_class_driver(), prp_vname); }
+// FIXME->sh: could be deprecated if ann_ssa could be mmapped for a std::string_view
+void Node_pin::set_prp_vname(std::string_view prp_vname) {
+  Ann_node_pin_prp_vname::ref(current_g)->set(get_compact_class_driver(), prp_vname);
+}
 
 void Node_pin::nuke() {
   I(false);  // TODO:
@@ -133,8 +133,8 @@ std::string Node_pin::debug_name() const {
     }
   }
 
-  return absl::StrCat("node_pin_", "n", std::to_string(get_node().nid), "_", name, "_", sink ? "s" : "d", std::to_string(pid),  "_lg_",
-                      current_g->get_name());
+  return absl::StrCat("node_pin_", "n", std::to_string(get_node().nid), "_", name, "_", sink ? "s" : "d", std::to_string(pid),
+                      "_lg_", current_g->get_name());
 }
 
 std::string_view Node_pin::get_name() const {
@@ -148,8 +148,7 @@ std::string_view Node_pin::get_name() const {
   return Ann_node_pin_name::ref(current_g)->get_val(Compact_class_driver(idx));
 }
 
-
-//FIXME->sh: could be deprecated if ann_ssa could be mmapped for a std::string_view
+// FIXME->sh: could be deprecated if ann_ssa could be mmapped for a std::string_view
 std::string_view Node_pin::get_prp_vname() const {
 #ifndef NDEBUG
   if (!is_graph_io()) {
@@ -185,11 +184,10 @@ std::string_view Node_pin::create_name() const {
 
 bool Node_pin::has_name() const { return Ann_node_pin_name::ref(current_g)->has_key(get_compact_class_driver()); }
 
-//FIXME->sh: could be deprecated if ann_ssa could be mmapped for a std::string_view
+// FIXME->sh: could be deprecated if ann_ssa could be mmapped for a std::string_view
 bool Node_pin::has_prp_vname() const { return Ann_node_pin_prp_vname::ref(current_g)->has_key(get_compact_class_driver()); }
 
 Node_pin Node_pin::find_driver_pin(LGraph *top, std::string_view wname) {
-
   auto       ref = Ann_node_pin_name::ref(top);
   const auto it  = ref->find_val(wname);
   if (it == ref->end()) {
@@ -233,7 +231,6 @@ Ann_bitwidth *Node_pin::ref_bitwidth() {
 }
 
 bool Node_pin::has_bitwidth() const { return Ann_node_pin_bitwidth::ref(top_g)->has(get_compact_driver()); }
-
 
 const Ann_ssa &Node_pin::get_ssa() const {
   const auto *data = Ann_node_pin_ssa::ref(top_g)->ref(get_compact_driver());

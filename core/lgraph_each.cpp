@@ -47,7 +47,6 @@ void LGraph::each_graph_output(std::function<void(const Node_pin &pin)> f1) {
 }
 
 void LGraph::each_node_fast(std::function<void(const Node &node)> f1) {
-
   for (const auto &ni : node_internal) {
     if (!ni.is_node_state()) continue;
     if (!ni.is_master_root()) continue;
@@ -59,7 +58,6 @@ void LGraph::each_node_fast(std::function<void(const Node &node)> f1) {
 }
 
 void LGraph::each_output_edge_fast(std::function<void(XEdge &edge)> f1) {
-
   for (const auto &ni : node_internal) {
     if (!ni.is_node_state()) continue;
     if (!ni.is_root()) continue;
@@ -93,7 +91,6 @@ void LGraph::each_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)> 
 }
 
 void LGraph::each_root_fast_direct(std::function<bool(Node &)> f1) {
-
   for (const auto &ni : node_internal) {
     if (!ni.is_node_state()) continue;
     if (!ni.is_root()) continue;
@@ -105,4 +102,3 @@ void LGraph::each_root_fast_direct(std::function<bool(Node &)> f1) {
     if (!cont) return;
   }
 }
-

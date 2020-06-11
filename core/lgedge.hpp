@@ -14,10 +14,10 @@ protected:
 public:
   friend class Edge_raw;
 
-  bool     snode : 1;            // 1 bit
-  bool     input : 1;            // 1 bit
-  Port_ID  inp_pid : Port_bits;  // 15 bits abs
-  uint64_t raw_idx : Index_bits; // 31 bits abs
+  bool     snode : 1;             // 1 bit
+  bool     input : 1;             // 1 bit
+  Port_ID  inp_pid : Port_bits;   // 15 bits abs
+  uint64_t raw_idx : Index_bits;  // 31 bits abs
 
   bool     is_snode() const { return snode; }
   bool     is_input() const { return input; }
@@ -124,7 +124,7 @@ public:
   friend struct LEdge;
   friend struct SEdge;
 
-  int next_node_inc() const { return is_snode()? 1:2; }
+  int  next_node_inc() const { return is_snode() ? 1 : 2; }
   bool is_last_input() const;
   bool is_last_output() const;
 
@@ -174,7 +174,7 @@ private:  // all constructor&assignment should be marked as private
 
 struct __attribute__((packed)) LEdge : public Edge_raw {  // 6 bytes total
   LEdge() { snode = 0; };
-  uint64_t pad_match : 24; // 3bytes in edge_raw + 24/3 = 6bytes total
+  uint64_t pad_match : 24;  // 3bytes in edge_raw + 24/3 = 6bytes total
 };
 
 struct __attribute__((packed)) SEdge : public Edge_raw {  // 3 bytes total
@@ -241,27 +241,27 @@ struct __attribute__((packed)) Node_Internal_Page {
 class __attribute__((packed)) Node_Internal {
 private:
   // BEGIN 12 Bytes common payload
-  Node_state state : 3;           // State must be the first thing (Node_Internal_Page)
-  uint16_t   inp_long : 2;        // 6 bytes each. Just 9 at most
+  Node_state state : 3;     // State must be the first thing (Node_Internal_Page)
+  uint16_t   inp_long : 2;  // 6 bytes each. Just 9 at most
   uint16_t   out_long : 2;
   uint32_t   bits : Bits_bits;
-  uint64_t   nid : Index_bits;    // 31bits, 4 byte aligned
-  uint16_t   type : 8;            // 8 bits for master_root type (could be used for something else in non master root)
-  uint16_t   sign : 1;            // 1 bit (reserved future) for sign extension attribute to simplify gates
+  uint64_t   nid : Index_bits;  // 31bits, 4 byte aligned
+  uint16_t   type : 8;          // 8 bits for master_root type (could be used for something else in non master root)
+  uint16_t   sign : 1;          // 1 bit (reserved future) for sign extension attribute to simplify gates
   uint16_t   root : 1;
-  Port_ID    dst_pid : Port_bits; // 15bits
+  Port_ID    dst_pid : Port_bits;  // 15bits
   // 8 bytes aligned
 public:
   // WARNING: This must be here not at the end of the structure. OTherwise the
   // iterator goes the 64byte boundary for the outputs
   static constexpr int Num_SEdges = 7;
-  SEdge                sedge[Num_SEdges]; // WARNING: Must not be the last field in struct or iterators fail
+  SEdge                sedge[Num_SEdges];  // WARNING: Must not be the last field in struct or iterators fail
 private:
   // Start byte 8*17*3=59
-  uint16_t   driver_setup : 1;
-  uint16_t   sink_setup : 1;
-  uint16_t   inp_pos : 3;
-  uint16_t   out_pos : 3;
+  uint16_t driver_setup : 1;
+  uint16_t sink_setup : 1;
+  uint16_t inp_pos : 3;
+  uint16_t out_pos : 3;
   // END 13 Bytes common payload
 
   void try_recycle();
@@ -324,7 +324,10 @@ public:
     return n;
   }
 
-  uint8_t get_type() const { I(is_master_root()); return type; }
+  uint8_t get_type() const {
+    I(is_master_root());
+    return type;
+  }
   void set_type(uint8_t op) {
     I(is_master_root());
     type = op;
@@ -361,16 +364,14 @@ public:
     I(false);  // if a node is deleted it should be Free (todo after garbage collect) or Last
     return false;
   }
-  bool is_valid() const {
-    return nid && is_node_state();
-  }
+  bool is_valid() const { return nid && is_node_state(); }
 
   bool is_root() const {
     I(is_node_state());
     return root;
   }
   bool is_graph_io() const {
-    return nid == 1 || nid == 2; // hardcoded input or output
+    return nid == 1 || nid == 2;  // hardcoded input or output
   }
   bool is_master_root() const {
     I(is_node_state());
@@ -418,8 +419,8 @@ public:
   inline static Node_Internal &get(const Edge_raw *ptr) {
     // WARNING: this belongs to a structure that it is cache aligned (32 bytes)
     uint64_t root_int = (uint64_t)ptr;
-    root_int          = root_int >> 5; // 32 byte alignment
-    root_int          = root_int << 5; // 32 byte alignment
+    root_int          = root_int >> 5;  // 32 byte alignment
+    root_int          = root_int << 5;  // 32 byte alignment
 
     Node_Internal *root_n = reinterpret_cast<Node_Internal *>(root_int);
     I(root_n->is_node_state());
@@ -536,7 +537,7 @@ public:
   const SEdge *get_input_end() const { return &sedge[get_input_end_pos_int()]; }
 
   const SEdge *get_output_begin() const { return &sedge[get_output_begin_pos_int() + 1]; }
-  const SEdge *get_output_end() const { return &sedge[Num_SEdges]; } // WARNING: A position over the limit
+  const SEdge *get_output_end() const { return &sedge[Num_SEdges]; }  // WARNING: A position over the limit
 
   int next_free_input_pos() const {
     I(has_space_short());

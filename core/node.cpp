@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "node.hpp"
+
 #include "annotate.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
@@ -457,23 +458,18 @@ Ann_place *Node::ref_place() {
 
 bool Node::has_place() const { return Ann_node_place::ref(top_g)->has(get_compact()); }
 
-
 //----- Subject to changes in the future:
 #define WHITE 0
-#define GREY  1
+#define GREY 1
 #define BLACK 2
-void Node::set_color(int new_color) {
-  Ann_node_color::ref(current_g)->set(get_compact_class(), std::to_string(new_color));
-}
+void Node::set_color(int new_color) { Ann_node_color::ref(current_g)->set(get_compact_class(), std::to_string(new_color)); }
 
 int Node::get_color() const {
   auto str = Ann_node_color::ref(current_g)->get_val(get_compact_class());
-  int color;
+  int  color;
   auto ok = absl::SimpleAtoi(str, &color);
   I(ok);
   return color;
 }
 
-bool Node::has_color() const {
-  return Ann_node_color::ref(current_g)->has_key(get_compact_class());
-}
+bool Node::has_color() const { return Ann_node_color::ref(current_g)->has_key(get_compact_class()); }

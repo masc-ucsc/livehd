@@ -264,8 +264,8 @@ public:
     return !sink;
   }
 
-  Node get_node() const;
-  Node get_driver_node() const;
+  Node     get_node() const;
+  Node     get_driver_node() const;
   Node_pin get_driver_pin() const;
 
   void connect_sink(Node_pin &dst);
@@ -314,12 +314,10 @@ public:
   bool             has_name() const;
   static Node_pin  find_driver_pin(LGraph *top, std::string_view wname);
 
-
-  //FIXME->sh: could be deprecated if ann_ssa could be mmapped for a std::string_view
+  // FIXME->sh: could be deprecated if ann_ssa could be mmapped for a std::string_view
   void             set_prp_vname(std::string_view prp_vname);
   std::string_view get_prp_vname() const;
   bool             has_prp_vname() const;
-
 
   void  set_delay(float val);
   float get_delay() const;
@@ -336,7 +334,7 @@ public:
   const Ann_bitwidth &get_bitwidth() const;
   Ann_bitwidth *      ref_bitwidth();
   bool                has_bitwidth() const;
-  const Ann_ssa      &get_ssa() const;
+  const Ann_ssa &     get_ssa() const;
   Ann_ssa *           ref_ssa();
   bool                has_ssa() const;
   bool                is_connected() const;

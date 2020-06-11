@@ -166,7 +166,8 @@ public:
     I(dst.is_input());
     I(dst.get_class_lgraph() == src.get_class_lgraph());
     // Do not loop back unless pipelined or subgraph
-    GI(!dst.is_graph_io() && !src.is_graph_io() && src.get_node().get_nid() == dst.get_node().get_nid(), src.get_node().get_type().is_pipelined());
+    GI(!dst.is_graph_io() && !src.is_graph_io() && src.get_node().get_nid() == dst.get_node().get_nid(),
+       src.get_node().get_type().is_pipelined());
 
     return add_edge_int(dst.get_idx(), dst.get_pid(), src.get_idx(), src.get_pid());
   }

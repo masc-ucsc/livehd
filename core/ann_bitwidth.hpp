@@ -21,7 +21,7 @@ public:
     void dump() const;
     bool is_unsigned() const;
     void set_const(const Lconst &value);
-    void set_ubits(uint16_t size); //FIXME->sh: why it's only 16 bits
+    void set_ubits(uint16_t size);  // FIXME->sh: why it's only 16 bits
     void set_sbits(uint16_t size);
   };
 
@@ -32,8 +32,6 @@ public:
 
     bool sign;
     bool overflow;
-
-
 
     Implicit_range() {
       max      = 0;
@@ -57,7 +55,7 @@ public:
   Implicit_range i;
   Explicit_range e;
   uint16_t       niters = 0;
-  bool           fixed; // var bitwidth is fixed by source code
+  bool           fixed;    // var bitwidth is fixed by source code
   bool           dp_flag;  // is a tail subset of another variable, it will be resolved during BW algorithm
 
   void set_implicit() {

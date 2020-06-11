@@ -44,7 +44,7 @@ void Lgraph_base_core::get_lock() {
   int         err  = ::open(lock.c_str(), O_CREAT | O_EXCL, 420);  // 644
   if (err < 0) {
     mmap_lib::mmap_gc::try_collect_fd();
-    err  = ::open(lock.c_str(), O_CREAT | O_EXCL, 420);  // 644
+    err = ::open(lock.c_str(), O_CREAT | O_EXCL, 420);  // 644
     if (err < 0) {
       perror("Error: ");
       Pass::error("Could not get lock:{}. Already running? Unclear exit?", lock.c_str());

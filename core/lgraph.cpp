@@ -2,7 +2,6 @@
 
 #include "lgraph.hpp"
 
-#include <assert.h>
 #include <dirent.h>
 #include <sys/types.h>
 
@@ -57,7 +56,7 @@ LGraph *LGraph::clone_skeleton(std::string_view extended_name) {
   auto inp_node = Node(this, Hierarchy_tree::root_index(), Node::Hardcoded_input_nid);
   for (const auto &pin : inp_node.out_setup_pins()) {
     auto pos = get_self_sub_node().get_graph_pos_from_instance_pid(pin.get_pid());
-    assert(pin.is_graph_input());
+    I(pin.is_graph_input());
     auto dpin = new_lg->add_graph_input(pin.get_name(), pos, pin.get_bits());
     I(dpin.get_pid() == pin.get_pid());  // WARNING: pins created in same order should match
   }
@@ -65,7 +64,7 @@ LGraph *LGraph::clone_skeleton(std::string_view extended_name) {
   auto out_node = Node(this, Hierarchy_tree::root_index(), Node::Hardcoded_output_nid);
   for (const auto &pin : out_node.out_setup_pins()) {
     auto pos = get_self_sub_node().get_graph_pos_from_instance_pid(pin.get_pid());
-    assert(pin.is_graph_output());
+    I(pin.is_graph_output());
     auto dpin = new_lg->add_graph_output(pin.get_name(), pos, pin.get_bits());
     I(dpin.get_pid() == pin.get_pid());  // WARNING: pins created in same order should match
   }
@@ -666,10 +665,10 @@ void LGraph::dump() {
 #endif
 
   each_sub_fast([this](Node &node, Lg_type_id lgid) {
-      LGraph *child = LGraph::open(get_path(),node.get_type_sub());
+    LGraph *child = LGraph::open(get_path(), node.get_type_sub());
 
-      fmt::print("node:{} lgid:{} sub:{}\n",node.debug_name(), lgid, child->get_name());
-    });
+    fmt::print("node:{} lgid:{} sub:{}\n", node.debug_name(), lgid, child->get_name());
+  });
 }
 
 void LGraph::dump_down_nodes() {

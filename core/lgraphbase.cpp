@@ -56,7 +56,7 @@ void LGraph_Base::emplace_back() {
   node_internal.emplace_back();
 
   Index_ID nid = node_internal.size() - 1;
-  auto *ptr = node_internal.ref(nid);
+  auto *   ptr = node_internal.ref(nid);
 
   if (ptr->is_page_align()) {
     auto *page = (Node_Internal_Page *)ptr;
@@ -77,7 +77,7 @@ Index_ID LGraph_Base::create_node_space(const Index_ID last_idx, const Port_ID d
                                         const Index_ID root_idx) {
   Index_ID idx2 = create_node_int();
 
-  I(dst_pid<(1<<Port_bits));
+  I(dst_pid < (1 << Port_bits));
 
   I(node_internal[master_nid].is_master_root());
   I(node_internal[last_idx].get_master_root_nid() == master_nid);
@@ -196,11 +196,11 @@ void LGraph_Base::print_stats() const {
 
   fmt::print("path:{} name:{}\n", path, name);
   fmt::print("  size:{} kbytes:{} bytes/node:{:.2f} bytes/edge:{:.2f} edges/master:{:.2f}\n", node_internal.size(), bytes / 1024,
-             bytes / (1 + n_nodes), bytes / (1 + n_edges), (double)n_edges/(1+n_master));
-  fmt::print("  total master:{} root:{} node:{} extra:{} root/ratio:{:.2f} extra/ratio:{:.2f}\n", n_master, n_roots, n_nodes, n_extra,
-             n_roots / (1.0 + n_nodes + n_extra), n_extra / (1.0 + n_nodes + n_extra));
-  fmt::print("  total bytes/master:{:.2f} bytes/root:{:.2f} bytes/node:{:.2f} bytes/extra:{:.2f}\n", bytes / n_master, bytes / n_roots,
-             bytes / n_nodes, bytes / n_extra);
+             bytes / (1 + n_nodes), bytes / (1 + n_edges), (double)n_edges / (1 + n_master));
+  fmt::print("  total master:{} root:{} node:{} extra:{} root/ratio:{:.2f} extra/ratio:{:.2f}\n", n_master, n_roots, n_nodes,
+             n_extra, n_roots / (1.0 + n_nodes + n_extra), n_extra / (1.0 + n_nodes + n_extra));
+  fmt::print("  total bytes/master:{:.2f} bytes/root:{:.2f} bytes/node:{:.2f} bytes/extra:{:.2f}\n", bytes / n_master,
+             bytes / n_roots, bytes / n_nodes, bytes / n_extra);
 
   bytes = node_internal.size() * sizeof(Node_Internal) + 1;
   fmt::print("  edges bytes/root:{:.2f} bytes/node:{:.2f} bytes/extra:{:.2f}\n", bytes / n_roots, bytes / n_nodes, bytes / n_extra);
