@@ -402,11 +402,6 @@ void Lnast::analyze_dot_lrhs_handle_a_statement(const Lnast_nid &psts_nid, const
   I(get_type(opr_nid).is_dot() || get_type(opr_nid).is_select());
   auto &dot_lrhs_table = dot_lrhs_tables[psts_nid];
 
-  /* if (get_type(opr_nid).is_dot() and has_attribute_bits(opr_nid)) { */
-  /*   dot_lrhs_table[opr_nid].first = false; */
-  /*   fmt::print("dot/sel:{} is rhs\n", get_name(get_first_child(opr_nid))); */
-  /*   return; */
-  /* } */
 
   auto dot_nid     = opr_nid;
   auto c0_dot      = get_first_child(dot_nid); //c0 = intermediate target
@@ -843,11 +838,6 @@ void Lnast::update_phi_resolve_table(const Lnast_nid &psts_nid, const Lnast_nid 
   auto       &phi_resolve_table = phi_resolve_tables[psts_nid];
   const auto  target_name       = get_name(target_nid);
   phi_resolve_table[target_name] = target_nid; //for a variable string, always update to latest Lnast_nid
-}
-
-bool Lnast::has_attribute_bits(const Lnast_nid &opr_nid) {
-  I(get_type(opr_nid).is_dot());
-  return get_name(get_sibling_next(get_sibling_next(get_first_child(opr_nid)))).substr(0,6) == "__bits" ;
 }
 
 

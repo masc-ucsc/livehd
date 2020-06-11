@@ -2,8 +2,8 @@
 rm -rf ./lgdb
 #  pts='sync_cnt_nested_if'
 #  pts='firrtl_tail2'
-pts='test2'
-#  pts='firrtl_tail tuple_if2 tuple_if adder_stage ssa_rhs out_ssa if2 if nested_if if3_err nested_if_err logic '
+  pts='adder_stage reg__q_pin'
+#  pts='firrtl_tail tuple_if2 tuple_if ssa_rhs out_ssa if2 if nested_if if3_err nested_if_err logic '
 #  pts='tuple_if2 tuple_if adder_stage ssa_rhs out_ssa if2 if nested_if if3_err nested_if_err logic '
 
 #  pts='sync_cnt_nested_if bits_rhs  firrtl_tail '
@@ -126,6 +126,25 @@ do
     fi
 
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+    mv ${pt}.dot ${pt}.dce.dot
+
+
+    echo ""
+    echo ""
+    echo ""
+    echo "----------------------------------------------------"
+    echo "Dead Code Elimination(LGraph)"
+    echo "----------------------------------------------------"
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.dce"
+    if [ $? -eq 0 ]; then
+      echo "Successfully perform dead code elimination: inou/cfg/tests/${pt}.prp"
+    else
+      echo "ERROR: Pyrope compiler failed: dead code elimination, testcase: inou/cfg/tests/${pt}.prp"
+      exit 1
+    fi
+
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+
 
 
 

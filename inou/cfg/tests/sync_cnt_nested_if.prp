@@ -3,7 +3,6 @@ $c2.__bits = 1
 #cnt.__bits = 4
 
 
-%cnt_o = #cnt
 
 //if (#cnt == 15) {
 //  #cnt = 0
@@ -16,6 +15,7 @@ if ($c1 == 1) {
   } 
 } 
 
+%cnt_o = #cnt.__q_pin
 
 /* #cnt2.__bits = 4 */
 /* #cnt2 = 5 */

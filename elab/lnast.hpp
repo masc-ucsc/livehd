@@ -124,7 +124,6 @@ private:
   void      analyze_dot_lrhs_if_subtree         (const Lnast_nid &if_nid);
   void      analyze_dot_lrhs_handle_a_statement (const Lnast_nid &psts_nid, const Lnast_nid &opr_nid);
 
-  bool      has_attribute_bits               (const Lnast_nid &opr_nid);
   bool      is_special_case_of_dot_rhs       (const Lnast_nid &psts_nid,  const Lnast_nid &opr_nid);
   void      ssa_rhs_handle_a_operand         (const Lnast_nid &gpsts_nid, const Lnast_nid &opd_nid); //gpsts = grand parent
   void      ssa_rhs_handle_a_operand_special (const Lnast_nid &gpsts_nid, const Lnast_nid &opd_nid);

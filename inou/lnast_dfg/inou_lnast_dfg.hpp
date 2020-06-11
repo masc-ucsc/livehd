@@ -36,8 +36,9 @@ protected:
   void                  setup_memblock();
   /* std::vector<LGraph *> do_tolg(); */
   std::vector<LGraph *> do_tolg(std::shared_ptr<Lnast> l);
-  static void           do_resolve_tuples(LGraph *dfg);
+  void                  do_resolve_tuples(LGraph *dfg);
   static void           do_reduced_or_elimination(LGraph *dfg);
+  static void           do_dead_code_elimination(LGraph *dfg);
 
   void lnast2lgraph                           (LGraph *dfg);
   void setup_lgraph_outputs_and_final_var_name(LGraph *dfg);
@@ -46,7 +47,6 @@ protected:
   Node process_ast_assign_op        (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_dp_assign_op     (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_nary_op          (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_unary_op         (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_logical_op       (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_as_op            (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_label_op         (LGraph *dfg, const Lnast_nid &lnidx);
@@ -58,7 +58,6 @@ protected:
   void process_ast_sub_op           (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_for_op           (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_while_op         (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_dot_op           (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_tuple_struct     (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_concat_op        (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_tuple_add_op     (LGraph *dfg, const Lnast_nid &lnidx_ta);
@@ -73,6 +72,7 @@ protected:
   void         setup_dpin_ssa                 (Node_pin &dpin, std::string_view var_name, uint16_t subs);
   void         setup_lnast_to_lgraph_primitive_type_mapping();
   void         nary_node_rhs_connections      (LGraph *dfg, Node &opr_node, const std::vector<Node_pin> &opds, bool is_subt);
+  void         setup_clk                      (LGraph *dfg, Node &reg_node);
 
 
   static bool is_register          (std::string_view name) {return name.substr(0, 1) == "#" ; }
@@ -81,23 +81,19 @@ protected:
   static bool is_const             (std::string_view name) {return std::isdigit(name[0]); }
   static bool is_default_const     (std::string_view name) {return name.substr(0,13) == "default_const"; }
   static bool is_err_var_undefined (std::string_view name) {return name.substr(0,17) == "err_var_undefined"; }
-  static bool is_attr_bits         (std::string_view name) {return name.substr(0,6)  == "__bits"; }
 
-
-  static bool is_bit_attr_tuple_add(const Node &node) {
-    return (node.get_sink_pin(1).inp_edges().size() == 1) &&
-           (node.get_sink_pin(1).inp_edges().begin()->driver.get_name().substr(0,6) == "__bits");
-  }
 
 
   // tuple related
   Node_pin     setup_tuple_ref               (LGraph *dfg, std::string_view tup_name);
   Node_pin     setup_tuple_key               (LGraph *dfg, std::string_view key_name);
   Node_pin     setup_tuple_chain_new_max_pos (LGraph *dfg, const Node_pin &tn_dpin);
+  void         reconnect_to_ff_qpin          (LGraph *dfg, const Node &tg_node);
   static bool  tuple_get_has_key_name        (const Node &tup_get);
   static bool  tuple_get_has_key_pos         (const Node &tup_get);
   static bool  is_tup_get_target             (const Node &tup_add, std::string_view tup_get_target);
   static bool  is_tup_get_target             (const Node &tup_add, uint32_t         tup_get_target);
+
 
 
   // constant resolving
@@ -108,6 +104,7 @@ protected:
   static void tolg                  (Eprp_var &var);
   static void resolve_tuples        (Eprp_var &var);
   static void reduced_or_elimination(Eprp_var &var);
+  static void dce                   (Eprp_var &var);
   static void dbg_lnast_ssa         (Eprp_var &var);
 
 public:

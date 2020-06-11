@@ -19,11 +19,19 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
     if (node.get_type().op == TupAdd_Op) {
       // I(node.get_sink_pin(KV).inp_edges().size() == 1); // not necessarily true, might get extra inp from TupGet
       to_be_deleted.insert(node.get_compact());
+      continue;
+    }
 
-    } else if (node.get_type().op == TupGet_Op and tuple_get_has_key_name(node)) {
+    if (node.get_type().op == TupGet_Op and tuple_get_has_key_name(node)) {
       to_be_deleted.insert(node.get_compact());
-      auto tup_get_target = node.get_sink_pin(KN).get_driver_pin().get_name();
-      auto chain_itr = node.get_sink_pin(TN).get_driver_node();
+      auto tup_get_target = node.get_sink_pin(KN).inp_edges().begin()->driver.get_name();
+
+      if (tup_get_target.substr(0,7) == "__q_pin") {
+        reconnect_to_ff_qpin(dfg, node);
+        continue;
+      }
+
+      auto chain_itr = node.get_sink_pin(TN).inp_edges().begin()->driver.get_node();
       while (chain_itr.get_type().op != TupRef_Op) {
         Node next_itr;
         if (chain_itr.get_type().op == Or_Op) { //it's ok to have Or_Op(aka assign_op) in the tuple_chain, just ignore it and continue to find target tuple_add
@@ -94,6 +102,23 @@ bool Inou_lnast_dfg::is_tup_get_target(const Node &tup_add, uint32_t tup_get_tar
   return (tup_add_key_pos == tup_get_target);
 }
 
+void Inou_lnast_dfg::reconnect_to_ff_qpin(LGraph *dfg, const Node &tg_node) {
+  //get the input edge
+  auto tg_inp_driver_wname = tg_node.get_sink_pin(0).inp_edges().begin()->driver.get_name();
+  auto pos = tg_inp_driver_wname.find_last_of('_');
+  auto ori_size = tg_inp_driver_wname.size();
+  // auto target_ff_qpin_wname = std::string(tg_inp_driver_wname.substr(0, ori_size-pos+1)) + "0";
+  auto target_ff_qpin_wname = std::string(tg_inp_driver_wname.substr(0, pos));
+  auto target_ff_qpin = Node_pin::find_driver_pin(dfg, target_ff_qpin_wname);
+  fmt::print("target_ff_qpin wname:{}\n",target_ff_qpin_wname);
+  fmt::print("target_ff_qpin:{}\n",target_ff_qpin.debug_name());
+
+  auto tg_out_sink = tg_node.get_driver_pin().out_edges().begin()->sink;
+  dfg->add_edge(target_ff_qpin, tg_out_sink);
+}
+
+
+
 void Inou_lnast_dfg::reduced_or_elimination(Eprp_var &var) {
   Inou_lnast_dfg p(var);
   std::vector<LGraph *> lgs;
@@ -105,13 +130,11 @@ void Inou_lnast_dfg::reduced_or_elimination(Eprp_var &var) {
 
 
 void Inou_lnast_dfg::do_reduced_or_elimination(LGraph *dfg) {
-  absl::flat_hash_set<Node::Compact> to_be_deleted;
   for (auto node : dfg->fast()) {
     if (node.get_type().op == Or_Op) {
       bool is_reduced_or = node.has_outputs() && node.out_edges().begin()->driver.get_pid() == 1;
 
       if (is_reduced_or) {
-        // I(node.inp_edges().size() == 1);
         for (auto &out : node.out_edges()) {
           auto dpin = node.inp_edges().begin()->driver;
           if (!dpin.get_node().is_graph_input()) { // don't rename the graph inputs 
@@ -120,14 +143,31 @@ void Inou_lnast_dfg::do_reduced_or_elimination(LGraph *dfg) {
           auto spin = out.sink;
           dfg->add_edge(dpin, spin);
         }
-        // to_be_deleted.insert(node.get_compact());
+
         node.del_node();
       }
     }
   }
-
-  // for (auto &itr : to_be_deleted) {
-  //   itr.get_node(dfg).del_node();
-  // }
 }
 
+
+
+void Inou_lnast_dfg::dce(Eprp_var &var) {
+  Inou_lnast_dfg p(var);
+  std::vector<LGraph *> lgs;
+
+  for (const auto &l : var.lgs) {
+    p.do_dead_code_elimination(l);
+  }
+}
+
+
+
+void Inou_lnast_dfg::do_dead_code_elimination(LGraph *dfg) {
+  for (auto node : dfg->fast()) {
+    if(node.out_edges().size() == 0) {
+      fmt::print("node:{}\n", node.debug_name());
+      node.del_node();
+    }
+  }
+}

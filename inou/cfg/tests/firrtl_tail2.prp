@@ -1,0 +1,13 @@
+$en.__bits  = 1
+$inp.__bits    = 4
+%out.__bits   = 4
+
+if ($en) {
+  #x = $inp
+} else {
+  foo = #x - 1
+  bar = foo >> 1
+  bar := foo
+  #x = bar
+}
+%out := #x

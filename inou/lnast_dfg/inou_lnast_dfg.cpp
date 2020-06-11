@@ -11,7 +11,6 @@ void Inou_lnast_dfg::setup() {
   register_pass(m1);
 
 
-  //FIXME->sh: this pass might be deprecated due to some information in these reduced_or are necessary for pass/bitwidth
   Eprp_method m2("inou.lnast_dfg.reduced_or_elimination", "reduced_or_op elimination for clear algorithm", &Inou_lnast_dfg::reduced_or_elimination);
   m2.add_label_optional("path", "path to read the lgraph[s]", "lgdb");
   m2.add_label_optional("odir", "output directory for generated verilog files", ".");
@@ -23,8 +22,14 @@ void Inou_lnast_dfg::setup() {
   register_inou("lnast_dfg",m3);
 
 
-  Eprp_method m4("inou.lnast_dfg.dbg_lnast_ssa", " perform the LNAST SSA transformation, only for debug purpose", &Inou_lnast_dfg::dbg_lnast_ssa);
-  register_pass(m4);
+  Eprp_method m4("inou.lnast_dfg.dce", "dead code elimination", &Inou_lnast_dfg::dce);
+  m4.add_label_optional("path", "path to read the lgraph[s]", "lgdb");
+  m4.add_label_optional("odir", "output directory for generated verilog files", ".");
+  register_inou("lnast_dfg",m4);
+
+
+  Eprp_method m5("inou.lnast_dfg.dbg_lnast_ssa", " perform the LNAST SSA transformation, only for debug purpose", &Inou_lnast_dfg::dbg_lnast_ssa);
+  register_pass(m5);
 }
 
 Inou_lnast_dfg::Inou_lnast_dfg(const Eprp_var &var) : Pass("inou.lnast_dfg", var) {
@@ -37,7 +42,6 @@ void Inou_lnast_dfg::dbg_lnast_ssa(Eprp_var &var) {
     lnast->ssa_trans();
   }
 }
-
 
 
 void Inou_lnast_dfg::tolg(Eprp_var &var) {
@@ -93,10 +97,8 @@ void Inou_lnast_dfg::process_ast_stmts(LGraph *dfg, const Lnast_nid &lnidx_stmts
       process_ast_assign_op(dfg, lnidx);
     } else if (ntype.is_dp_assign()) {
       process_ast_dp_assign_op(dfg, lnidx);
-    } else if (ntype.is_nary_op()) {
+    } else if (ntype.is_nary_op() || ntype.is_unary_op()) {
       process_ast_nary_op(dfg, lnidx);
-    } else if (ntype.is_unary_op()) {
-      process_ast_nary_op(dfg, lnidx); // could be handled like unary
     } else if (ntype.is_tuple_add()) {
       process_ast_tuple_add_op(dfg, lnidx);
     } else if (ntype.is_tuple_get()) {
@@ -186,9 +188,14 @@ void Inou_lnast_dfg::process_ast_phi_op(LGraph *dfg, const Lnast_nid &lnidx_phi)
   if (c2_name == "register_forwarding_0") {
     // referece sibling's info to get the root reg qpin
     auto reg_name = c3_name.substr();
-    std::string reg_dpin_name = c3_name.substr(0,c3_name.size()-2) + "_0";
-    I(name2dpin[reg_dpin_name] != Node_pin());
-    auto reg_qpin = name2dpin[reg_dpin_name];
+
+    auto pos = reg_name.find_last_of('_');
+    // auto ori_size = reg_name.size();
+    // auto reg_qpin_name = lhs_name.substr(0,ori_size-pos);
+    auto reg_qpin_name = lhs_name.substr(0,pos);
+
+    I(name2dpin[reg_qpin_name] != Node_pin());
+    auto reg_qpin = name2dpin[reg_qpin_name];
     true_dpin = reg_qpin;
   } else {
     true_dpin = setup_ref_node_dpin(dfg, c2);
@@ -197,10 +204,12 @@ void Inou_lnast_dfg::process_ast_phi_op(LGraph *dfg, const Lnast_nid &lnidx_phi)
   if (c3_name == "register_forwarding_0") {
     // referece sibling's info to get the root reg qpin
     auto reg_name = c2_name.substr();
-    std::string reg_dpin_name = c2_name.substr(0,c2_name.size()-2) + "_0";
-    fmt::print("reg_dpin_name:{}\n", reg_dpin_name);
-    I(name2dpin[reg_dpin_name] != Node_pin());
-    auto reg_qpin = name2dpin[reg_dpin_name];
+    auto pos = reg_name.find_last_of('_');
+    // auto ori_size = reg_name.size();
+    // auto reg_qpin_name = lhs_name.substr(0,ori_size-pos);
+    auto reg_qpin_name = lhs_name.substr(0,pos);
+    I(name2dpin[reg_qpin_name] != Node_pin());
+    auto reg_qpin = name2dpin[reg_qpin_name];
     false_dpin = reg_qpin;
   } else {
     false_dpin  = setup_ref_node_dpin(dfg, c3);
@@ -212,10 +221,13 @@ void Inou_lnast_dfg::process_ast_phi_op(LGraph *dfg, const Lnast_nid &lnidx_phi)
 
 
   if (is_register(lhs_name)){
-    // (1) find the corresponding #reg and its qpin, #reg_0 
-    std::string reg_dpin_name = lhs_name.substr(0,lhs_name.size()-2) + "_0";
-    I(name2dpin[reg_dpin_name] != Node_pin());
-    auto reg_qpin = name2dpin[reg_dpin_name];
+    // (1) find the corresponding #reg and its qpin, wname = #reg
+    auto pos = lhs_name.find_last_of('_');
+    // auto ori_size = lhs_name.size();
+    // auto reg_qpin_name = lhs_name.substr(0,ori_size-pos);
+    auto reg_qpin_name = lhs_name.substr(0,pos);
+    I(name2dpin[reg_qpin_name] != Node_pin());
+    auto reg_qpin = name2dpin[reg_qpin_name];
 
     // (2) remove the previous D-pin edge from the #reg
     auto reg_node = reg_qpin.get_node();
@@ -364,8 +376,6 @@ void Inou_lnast_dfg::nary_node_rhs_connections(LGraph *dfg, Node &opr_node, cons
       auto i = 0;
       for (const auto &opd : opds) {
         if (i == 0) {
-          fmt::print("opd debug:{}\n", opd.debug_name());
-          fmt::print("opr_node debug:{}\n", opr_node.debug_name());
           dfg->add_edge(opd, opr_node.setup_sink_pin(0));
         } else {
           dfg->add_edge(opd, opr_node.setup_sink_pin(1));
@@ -598,10 +608,24 @@ Node_pin Inou_lnast_dfg::setup_node_assign_and_lhs(LGraph *dfg, const Lnast_nid 
   if (is_register(lhs_name)) {
     //when #reg_0 at lhs, the register has not been created before
     if (lhs_name.substr(lhs_name.size()-2) == "_0") {
+      // auto reg_qpin = setup_ref_node_dpin(dfg, lhs);
+      // return reg_qpin.get_node().setup_sink_pin("D");
       auto reg_qpin = setup_ref_node_dpin(dfg, lhs);
-      return reg_qpin.get_node().setup_sink_pin("D");
+      auto reg_data_pin = reg_qpin.get_node().setup_sink_pin("D");
+      auto equal_node = dfg->create_node(Or_Op);
+
+      //create an extra-Or_Op for #reg_0, return #reg_0 sink pin for rhs connection
+      name2dpin[lhs_name] = equal_node.setup_driver_pin(1); //reduced or output
+      name2dpin[lhs_name].set_name(lhs_name);
+      std::string_view lhs_name_no_ssa = lnast->get_name(lhs);
+      setup_dpin_ssa(name2dpin[lhs_name], lhs_name_no_ssa, lnast->get_subs(lhs));
+
+      //connect #reg_0 dpin -> #reg.data_pin
+      dfg->add_edge(name2dpin[lhs_name], reg_data_pin);
+
+      return equal_node.setup_sink_pin(0);
     } else {
-      // (1) create Or_Op to represent #reg_N except #reg_0, which has been represented as the #reg qpin
+      // (1) create Or_Op to represent #reg_N
       auto equal_node =  dfg->create_node(Or_Op);
       name2dpin[lhs_name] = equal_node.setup_driver_pin(1); //reduced or output
       name2dpin[lhs_name].set_name(lhs_name);
@@ -609,9 +633,12 @@ Node_pin Inou_lnast_dfg::setup_node_assign_and_lhs(LGraph *dfg, const Lnast_nid 
       setup_dpin_ssa(name2dpin[lhs_name], lhs_name_no_ssa, lnast->get_subs(lhs));
 
       // (2) find the corresponding #reg and its qpin, #reg_0 
-      std::string reg_dpin_name = lhs_name.substr(0,lhs_name.size()-2) + "_0";
-      I(name2dpin[reg_dpin_name] != Node_pin());
-      auto reg_qpin = name2dpin[reg_dpin_name];
+      auto pos = lhs_name.find_last_of('_');
+      // auto ori_size = lhs_name.size();
+      // auto reg_qpin_name = lhs_name.substr(0,ori_size-pos);
+      auto reg_qpin_name = lhs_name.substr(0,pos);
+      I(name2dpin[reg_qpin_name] != Node_pin());
+      auto reg_qpin = name2dpin[reg_qpin_name];
 
       // (3) remove the previous D-pin edge from the #reg
       auto reg_node = reg_qpin.get_node();
@@ -656,11 +683,7 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
 
   Node_pin node_dpin;
 
-  //FIXME->sh: to be deprecated
   if (is_output(name)) {
-    // dfg->add_graph_output(name.substr(1, name.size()-3), Port_invalid, 0); // Port_invalid pos means do not care about position
-    // fmt::print("add graph out:{}\n", name.substr(1, name.size()-3));       // -3 means get rid of %, _0(ssa subscript)
-    // node_dpin = dfg->get_graph_output_driver_pin(name.substr(1, name.size()-3));
     ;
   } else if (is_input(name)) {
     node_dpin = dfg->add_graph_input(name.substr(1, name.size()-3), Port_invalid, 0);
@@ -670,33 +693,17 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
   } else if (is_default_const(name)) {
     node_dpin = resolve_constant(dfg, Lconst(0)).setup_driver_pin();
   } else if (is_register(name)) {
-    node_dpin = dfg->create_node(SFlop_Op).setup_driver_pin();
+    auto reg_node = dfg->create_node(SFlop_Op);
+    node_dpin = reg_node.setup_driver_pin();
     auto name_no_ssa = lnast->get_name(lnidx_opd);
-    setup_dpin_ssa(node_dpin, name_no_ssa, lnast->get_subs(lnidx_opd));
+    // setup_dpin_ssa(node_dpin, name_no_ssa, lnast->get_subs(lnidx_opd));
+    setup_dpin_ssa(node_dpin, name_no_ssa, -1);
+    node_dpin.set_name(name_no_ssa); //record #reg instead of #reg_0
+    name2dpin[name_no_ssa] = node_dpin;
 
-    Node_pin clk_dpin;
-    if (!dfg->is_graph_input("clk")) {
-      clk_dpin = dfg->add_graph_input("clk", Port_invalid, 0);
-      clk_dpin.ref_bitwidth()->e.set_ubits(1);
-    } else {
-      clk_dpin = dfg->get_graph_input("clk");
-    }
+    setup_clk(dfg, reg_node);
 
-    auto clk_spin = node_dpin.get_node().setup_sink_pin("C");
-    dfg->add_edge (clk_dpin, clk_spin);
-
-    // FIXME->sh: reset pin not supported in SFlop yet !!?
-    /* Node_pin rst_dpin; */
-    /* if (!dfg->is_graph_input("rst")) { */
-    /*   rst_dpin = dfg->add_graph_input("rst", Port_invalid, 0); */
-    /*   rst_dpin.ref_bitwidth()->e.set_ubits(1); */
-    /* } else { */
-    /*   rst_dpin = dfg->get_graph_input("rst"); */
-    /* } */
-    /* auto rst_spin = node_dpin.get_node().setup_sink_pin("CLR"); */
-    /* dfg->add_edge (rst_dpin, rst_spin); */
-
-
+    return node_dpin;
   } else if (is_err_var_undefined(name)) {
     node_dpin = dfg->create_node(CompileErr_Op).setup_driver_pin();
   } else {
@@ -704,9 +711,6 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
   }
 
 
-
-  //FIXME->sh: to be deprecated
-  // if (is_output(name) || is_input(name)) {
   if (is_input(name)) {
     ;
   } else {
@@ -754,6 +758,19 @@ void Inou_lnast_dfg::setup_lnast_to_lgraph_primitive_type_mapping() {
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_shift_right] = ShiftRight_Op;
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_shift_left]  = ShiftLeft_Op;
   // FIXME->sh: to be extended ...
+}
+
+void Inou_lnast_dfg::setup_clk(LGraph *dfg, Node &reg_node) {
+  Node_pin clk_dpin;
+  if (!dfg->is_graph_input("clk")) {
+    clk_dpin = dfg->add_graph_input("clk", Port_invalid, 0);
+    clk_dpin.ref_bitwidth()->e.set_ubits(1);
+  } else {
+    clk_dpin = dfg->get_graph_input("clk");
+  }
+
+  auto clk_spin = reg_node.setup_sink_pin("C");
+  dfg->add_edge (clk_dpin, clk_spin);
 }
 
 
