@@ -123,7 +123,6 @@ void LGraph_Node_Type::set_type_const(Index_ID nid, const Lconst &value) {
   ptr->set_type(Const_Op);
   ptr->set_bits(value.get_bits());
 
-  I(value.is_explicit_bits()); // constants should be explicit bits to match
   I(value.get_bits());
 }
 
