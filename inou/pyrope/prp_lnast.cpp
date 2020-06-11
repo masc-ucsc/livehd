@@ -1824,24 +1824,14 @@ inline Lnast_node Prp_lnast::create_const_node(mmap_lib::Tree_index idx) {
       node = ast->get_data(idx_num);
     }
     auto token = get_token(node.token_entry);
-    if (is_decimal(token.text)) {
+    if (negative) {
       std::string decimal_string;
-      if(negative){
-        decimal_string.assign(absl::StrCat("-0d", token.text));
-      }
-      else{
-        decimal_string.assign(absl::StrCat("0d", token.text));
-      }
+      decimal_string.assign(absl::StrCat("-", token.text));
       auto ln_decimal_view = lnast->add_string(decimal_string);
       return Lnast_node::create_const(ln_decimal_view, token.line, token.pos1, token.pos2);
-    } else
-      if(negative){
-        auto ln_decimal_view = lnast->add_string(absl::StrCat("-", token.text));
-        return Lnast_node::create_const(ln_decimal_view, token.line, token.pos1, token.pos2);
-      }
-      else{
-        return Lnast_node::create_const(token);
-      }
+    } else {
+      return Lnast_node::create_const(token);
+    }
   }
 }
 
