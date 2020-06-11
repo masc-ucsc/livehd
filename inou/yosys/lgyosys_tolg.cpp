@@ -423,7 +423,7 @@ static void look_for_cell_outputs(RTLIL::Module *module, const std::string &path
           // hardcoded pin position
           int pos = atoi(pin_name.c_str());
 
-          if (!sub->has_graph_pin(pos)) {
+          if (!sub->has_instance_pin(pos)) {
             if (cell->output(conn.first)) {
               sub->add_pin(pin_name, Sub_node::Direction::Output, pos);
             } else if (cell->input(conn.first)) {
@@ -999,7 +999,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
         if (isdigit(name[0])) {
           // hardcoded pin position
           int pos = atoi(name.c_str());
-          if (!sub.has_graph_pin(pos)) {
+          if (!sub.has_instance_pin(pos)) {
             fprintf(stderr, "ERROR: could not figure out if pin %s in module %s is input or output\n", name.c_str(),
                     std::string(sub.get_name()).c_str());
             continue;

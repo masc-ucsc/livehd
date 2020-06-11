@@ -26,7 +26,7 @@ cc_test(
         ],
     )
 
-cc_test(
+cc_binary(
     name = "lconst_dump",
     srcs = ["tests/lconst_dump.cpp"],
     deps = [

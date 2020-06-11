@@ -61,9 +61,7 @@ TEST_F(Setup_mmap_map_test, string_data) {
       const auto &key = map.get_key(it);
       EXPECT_TRUE(map.has(key));
 
-      std::string_view val1 = map.get(it.second);
       std::string_view val  = map.get(it);
-      EXPECT_EQ(val1, val);
       EXPECT_EQ(val, std::to_string(it.first) + "foo");
       conta--;
     }

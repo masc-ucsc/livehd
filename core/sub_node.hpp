@@ -162,7 +162,7 @@ public:
 
     Port_ID instance_pid = name2id[io_name];
     I(io_pins[instance_pid].name == io_name);
-    I(io_pins[instance_pid].graph_io_pos == graph_pos || !has_graph_pin(graph_pos));
+    I(io_pins[instance_pid].graph_io_pos == graph_pos || !has_graph_pos_pin(graph_pos));
     io_pins[instance_pid].dir = dir;
 
     if (graph_pos != Port_invalid) {
@@ -177,7 +177,7 @@ public:
     I(lgid);
     return name2id.find(io_name) != name2id.end();
   }
-  bool has_graph_pin(Port_ID graph_pos) const {
+  bool has_graph_pos_pin(Port_ID graph_pos) const {
     I(lgid);
     return graph_pos2instance_pid.size() > graph_pos && graph_pos2instance_pid[graph_pos] != Port_invalid;
   }
@@ -197,12 +197,12 @@ public:
   }
 
   Port_ID get_instance_pid_from_graph_pos(Port_ID graph_pos) const {
-    I(has_graph_pin(graph_pos));
+    I(has_graph_pos_pin(graph_pos));
     return graph_pos2instance_pid[graph_pos];
   }
 
   const IO_pin &get_io_pin_from_graph_pos(Port_ID graph_pos) const {
-    I(has_graph_pin(graph_pos));
+    I(has_graph_pos_pin(graph_pos));
     return io_pins[graph_pos2instance_pid[graph_pos]];
   }
 
@@ -252,7 +252,7 @@ public:
   }
 
   std::string_view get_name_from_graph_pos(Port_ID graph_pos) const {
-    I(has_graph_pin(graph_pos));  // The pos does not seem to exist
+    I(has_graph_pos_pin(graph_pos));  // The pos does not seem to exist
     return io_pins[graph_pos2instance_pid[graph_pos]].name;
   }
 
@@ -262,7 +262,7 @@ public:
   }
 
   bool is_input_from_graph_pos(Port_ID graph_pos) const {
-    I(has_graph_pin(graph_pos));
+    I(has_graph_pos_pin(graph_pos));
     return io_pins[graph_pos2instance_pid[graph_pos]].dir == Direction::Input;
   }
 
@@ -280,7 +280,7 @@ public:
   }
 
   bool is_output_from_graph_pos(Port_ID graph_pos) const {
-    I(has_graph_pin(graph_pos));
+    I(has_graph_pos_pin(graph_pos));
     return io_pins[graph_pos2instance_pid[graph_pos]].dir == Direction::Output;
   }
 
@@ -303,7 +303,7 @@ public:
   }
 
   void add_phys_pin_from_graph_pos(Port_ID graph_pos, const Tech_pin &ppin) {
-    I(has_graph_pin(graph_pos));
+    I(has_graph_pos_pin(graph_pos));
     add_phys_pin_int(graph_pos2instance_pid[graph_pos], ppin);
   }
 
