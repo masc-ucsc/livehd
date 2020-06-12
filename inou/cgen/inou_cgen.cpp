@@ -21,88 +21,72 @@ void setup_inou_cgen() { Inou_cgen::setup(); }
 Inou_cgen::Inou_cgen(const Eprp_var &var) : Pass("inou_cgen", var) { lg = 0; }
 
 void Inou_cgen::setup() {
-  Eprp_method m2("inou.cgen.cfg.fromlnast", "parse cfg_test -> build lnast -> generate cfg_text", &Inou_cgen::to_cfg);
-  m2.add_label_required("files", "cfg_text files to process (comma separated)");
+  Eprp_method m2("inou.cgen.cfg", "parse cfg_test -> build lnast -> generate cfg_text", &Inou_cgen::to_cfg);
   m2.add_label_optional("odir", "path to put the cfg[s]", ".");
 
   register_inou("cgen", m2);
 
-  Eprp_method m3("inou.cgen.verilog.fromlnast", "parse cfg_test -> build lnast -> generate verilog", &Inou_cgen::to_verilog);
-  m3.add_label_required("files", "cfg_text files to process (comma separated)");
+  Eprp_method m3("inou.cgen.verilog", "parse cfg_test -> build lnast -> generate verilog", &Inou_cgen::to_verilog);
   m3.add_label_optional("odir", "path to put the verilog[s]", ".");
 
   register_inou("cgen", m3);
 
-  Eprp_method m4("inou.cgen.prp.fromlnast", "parse cfg_test -> build lnast -> generate pyrope", &Inou_cgen::to_prp);
-  m4.add_label_required("files", "cfg_text files to process (comma separated)");
+  Eprp_method m4("inou.cgen.prp", "parse cfg_test -> build lnast -> generate pyrope", &Inou_cgen::to_prp);
   m4.add_label_optional("odir", "path to put the pyrope[s]", ".");
 
   register_inou("cgen", m4);
 
-  Eprp_method m5("inou.cgen.cpp.fromlnast", "parse cfg_text -> build lnast -> generate cpp", &Inou_cgen::to_cpp);
-  m5.add_label_required("files", "cfg_text files to process (comma separated)");
+  Eprp_method m5("inou.cgen.cpp", "parse cfg_text -> build lnast -> generate cpp", &Inou_cgen::to_cpp);
   m5.add_label_optional("odir", "path to put the cpp[s}", ".");
 
   register_inou("cgen", m5);
 }
 
-void Inou_cgen::to_xxx(Cgen_type cgen_type) {
-  for (const auto &f : absl::StrSplit(files, ',')) {
-    Cfg_parser cfg_parser(f);
+void Inou_cgen::to_xxx(Cgen_type cgen_type, std::shared_ptr<Lnast> lnast) {
+  std::shared_ptr<Lnast_to_xxx> lnast_to;
 
-    auto lnast = cfg_parser.ref_lnast();
-    // needed??? lnast->ssa_trans();
-
-    std::unique_ptr<Lnast_to_xxx> lnast_to;
-
-    if (cgen_type == Cgen_type::Type_verilog) {
-      lnast_to = std::make_unique<Lnast_to_verilog_parser>(std::move(lnast), path);
-    } else if (cgen_type == Cgen_type::Type_prp) {
-      lnast_to = std::make_unique<Lnast_to_prp_parser>(std::move(lnast), path);
-    } else if (cgen_type == Cgen_type::Type_cfg) {
-      lnast_to = std::make_unique<Lnast_to_cfg_parser>(std::move(lnast), path);
-    } else if (cgen_type == Cgen_type::Type_cpp) {
-      lnast_to = std::make_unique<Lnast_to_cpp_parser>(std::move(lnast), path);
-    } else {
-      I(false);  // Invalid
-      lnast_to = std::make_unique<Lnast_to_prp_parser>(std::move(lnast), path);
-    }
-    lnast_to->generate();
-
-    /* if (cgen_type == Cgen_type::Type_verilog) { */
-    /*   lnast_to = std::make_unique<Lnast_to_verilog_parser>(lnast, path); */
-    /* } else if (cgen_type == Cgen_type::Type_prp) { */
-    /*   lnast_to = std::make_unique<Lnast_to_prp_parser>(lnast, path); */
-    /* } else if (cgen_type == Cgen_type::Type_cfg) { */
-    /*   lnast_to = std::make_unique<Lnast_to_cfg_parser>(lnast, path); */
-    /* } else if (cgen_type == Cgen_type::Type_cpp) { */
-    /*   lnast_to = std::make_unique<Lnast_to_cpp_parser>(lnast, path); */
-    /* } else { */
-    /*   I(false);  // Invalid */
-    /*   lnast_to = std::make_unique<Lnast_to_prp_parser>(lnast, path); */
-    /* } */
-    /* lnast_to->generate(); */
+  if (cgen_type == Cgen_type::Type_verilog) {
+    lnast_to = std::make_unique<Lnast_to_verilog_parser>(std::move(lnast), path);
+  } else if (cgen_type == Cgen_type::Type_prp) {
+    lnast_to = std::make_unique<Lnast_to_prp_parser>(std::move(lnast), path);
+  } else if (cgen_type == Cgen_type::Type_cfg) {
+    lnast_to = std::make_unique<Lnast_to_cfg_parser>(std::move(lnast), path);
+  } else if (cgen_type == Cgen_type::Type_cpp) {
+    lnast_to = std::make_unique<Lnast_to_cpp_parser>(std::move(lnast), path);
+  } else {
+    I(false);  // Invalid
+    lnast_to = std::make_unique<Lnast_to_prp_parser>(std::move(lnast), path);
   }
+
+  lnast_to->generate();
 }
 
 void Inou_cgen::to_verilog(Eprp_var &var) {
   Inou_cgen p(var);
-  p.to_xxx(Cgen_type::Type_verilog);
+  for (const auto &l : var.lnasts) {
+    p.to_xxx(Cgen_type::Type_verilog, l);
+  }
 }
 
 void Inou_cgen::to_prp(Eprp_var &var) {
   Inou_cgen p(var);
-  p.to_xxx(Cgen_type::Type_prp);
+  for (const auto &l : var.lnasts) {
+    p.to_xxx(Cgen_type::Type_prp, l);
+  }
 }
 
 void Inou_cgen::to_cfg(Eprp_var &var) {
   Inou_cgen p(var);
-  p.to_xxx(Cgen_type::Type_cfg);
+  for (const auto &l : var.lnasts) {
+    p.to_xxx(Cgen_type::Type_cfg, l);
+  }
 }
 
 void Inou_cgen::to_cpp(Eprp_var &var) {
   Inou_cgen p(var);
-  p.to_xxx(Cgen_type::Type_cpp);
+  for (const auto &l : var.lnasts) {
+    p.to_xxx(Cgen_type::Type_cpp, l);
+  }
 }
 
 void Inou_cgen::Declaration::format_raw(std::ostringstream &w) const {

@@ -34,7 +34,7 @@ private:
 
 public:
   /* Lnast_to_cfg_parser(std::shared_ptr<Lnast> _lnast, std::string_view _path) : Lnast_to_xxx(_lnast, _path){}; */
-  Lnast_to_cfg_parser(std::unique_ptr<Lnast> _lnast, std::string_view _path) : Lnast_to_xxx(std::move(_lnast), _path){};
+  Lnast_to_cfg_parser(std::shared_ptr<Lnast> _lnast, std::string_view _path) : Lnast_to_xxx(std::move(_lnast), _path){};
 
   void generate() final;
 };
