@@ -112,12 +112,18 @@ void Inou_firrtl::init_register_dots(Lnast& lnast, const firrtl::FirrtlPB_Statem
 
   // Since FIRRTL designs access register qpin, I need to do:
   // #reg_name.__q_pin. The name will always be ___reg_name__q_pin
+  auto qpin_var_name_temp = lnast.add_string(absl::StrCat("___", expr.id(), "__q_pin_t"));
   auto qpin_var_name = lnast.add_string(absl::StrCat("___", expr.id(), "__q_pin"));
 
   auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_dot("dot"));
-  lnast.add_child(idx_dot, Lnast_node::create_ref(qpin_var_name));
+  lnast.add_child(idx_dot, Lnast_node::create_ref(qpin_var_name_temp));
   lnast.add_child(idx_dot, Lnast_node::create_ref(reg_name));
   lnast.add_child(idx_dot, Lnast_node::create_ref("__q_pin"));
+
+  //Required to identify ___regname__q_pin as RHS.
+  auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
+  lnast.add_child(idx_asg, Lnast_node::create_ref(qpin_var_name));
+  lnast.add_child(idx_asg, Lnast_node::create_ref(qpin_var_name_temp));
 
 
   //auto res_name = lnast.add_string(get_full_name(ReturnExprString(expr.reset())));
