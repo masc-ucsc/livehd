@@ -658,6 +658,7 @@ void Pass_lgraph_to_lnast::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node,
   // Y = ~SA | SB
 
   auto if_node = lnast.add_child(parent_node, Lnast_node::create_if("mux"));
+  auto cst_node = lnast.add_child(if_node, Lnast_node::create_cstmts(""));
 
   std::vector<XEdge> mux_vals;
   for(const auto inp : pin.get_node().inp_edges()) {

@@ -110,6 +110,23 @@ do
     echo ""
     echo ""
     echo "----------------------------------------------------"
+    echo "Dead Code Elimination"
+    echo "----------------------------------------------------"
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.dce"
+    if [ $? -eq 0 ]; then
+      echo "Successfully perform dead code elimination: ${pt}_proto.data"
+    else
+      echo "ERROR: Pyrope compiler failed on new lg: dead code elimination, testcase: ${pt}_proto.data"
+      exit 1
+    fi
+
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+    mv ${pt}.dot ${pt}.newlg.dce.dot
+
+    echo ""
+    echo ""
+    echo ""
+    echo "----------------------------------------------------"
     echo "LGraph -> Verilog"
     echo "----------------------------------------------------"
 

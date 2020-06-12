@@ -67,6 +67,20 @@ std::string Inou_firrtl::get_full_name(std::string term) {
   } else if(std::find(output_names.begin(), output_names.end(), term) != output_names.end()) {
     return absl::StrCat("%", term);
   } else if(std::find(register_names.begin(), register_names.end(), term) != register_names.end()) {
+    return absl::StrCat("___", term, "__q_pin");
+  } else {
+    return term;
+  }
+}
+
+std::string Inou_firrtl::get_full_name_lhs(std::string term) {
+  //FIXME: Eventually add a list for registers, too.
+  if(std::find(input_names.begin(), input_names.end(), term) != input_names.end()) {
+    //string matching "term" was found to be an input to the module
+    return absl::StrCat("$", term);
+  } else if(std::find(output_names.begin(), output_names.end(), term) != output_names.end()) {
+    return absl::StrCat("%", term);
+  } else if(std::find(register_names.begin(), register_names.end(), term) != register_names.end()) {
     return absl::StrCat("#", term);
   } else {
     return term;
@@ -93,8 +107,19 @@ void Inou_firrtl::create_bitwidth_dot_node(Lnast& lnast, uint32_t bitwidth, Lnas
  * clock, reset, and init values using "dot" nodes in the LNAST.
  * This function creates all of those when a reg is first declared. */
 void Inou_firrtl::init_register_dots(Lnast& lnast, const firrtl::FirrtlPB_Statement_Register& expr, Lnast_nid& parent_node) {
-  auto reg_name = lnast.add_string(get_full_name(expr.id()));
+  auto reg_name = lnast.add_string(absl::StrCat("#", expr.id()));
   auto clk_name = lnast.add_string(get_full_name(ReturnExprString(expr.clock())));
+
+  // Since FIRRTL designs access register qpin, I need to do:
+  // #reg_name.__q_pin. The name will always be ___reg_name__q_pin
+  auto qpin_var_name = lnast.add_string(absl::StrCat("___", expr.id(), "__q_pin"));
+
+  auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_dot("dot"));
+  lnast.add_child(idx_dot, Lnast_node::create_ref(qpin_var_name));
+  lnast.add_child(idx_dot, Lnast_node::create_ref(reg_name));
+  lnast.add_child(idx_dot, Lnast_node::create_ref("__q_pin"));
+
+
   //auto res_name = lnast.add_string(get_full_name(ReturnExprString(expr.reset())));
   //auto init_name = lnast.add_string(get_full_name(ReturnExprString(expr.init())));
 
@@ -904,7 +929,7 @@ void Inou_firrtl::ListPrimOpInfo(Lnast& lnast, const firrtl::FirrtlPB_Expression
 /* */
 void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, std::string lhs_unaltered, std::string tail) {
   //Note: here, parent_node is the "stmt" node above where this expression will go.
-  auto lhs = get_full_name(lhs_unaltered);
+  auto lhs = get_full_name_lhs(lhs_unaltered);
   switch(expr.expression_case()) {
     case 1: { //Reference
       Lnast_nid idx_asg;

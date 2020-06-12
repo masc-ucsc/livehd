@@ -98,6 +98,23 @@ do
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
     mv ${pt}.dot ${pt}.stable.dot
 
+    echo ""
+    echo ""
+    echo ""
+    echo "----------------------------------------------------"
+    echo "Dead Code Elimination (on stable LGraph)"
+    echo "----------------------------------------------------"
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.dce"
+    if [ $? -eq 0 ]; then
+      echo "Successfully perform dead code elimination: ${pt}.cfg"
+    else
+      echo "ERROR: Pyrope compiler failed on new lg: dead code elimination, testcase: ${pt}.cfg"
+      exit 1
+    fi
+
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+    mv ${pt}.dot ${pt}.stable.dce.dot
+
     echo "TESTER------------------------------------"
     ${LGSHELL} "lgraph.open name:${pt} path:lgdb |> lgraph.dump"
     echo "TESTER------------------------------------"
@@ -177,6 +194,23 @@ do
 
     ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
     mv ${pt}.dot ${pt}.newlg.dot
+
+    echo ""
+    echo ""
+    echo ""
+    echo "----------------------------------------------------"
+    echo "Dead Code Elimination"
+    echo "----------------------------------------------------"
+    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.lnast_dfg.dce"
+    if [ $? -eq 0 ]; then
+      echo "Successfully perform dead code elimination: ${pt}.cfg"
+    else
+      echo "ERROR: Pyrope compiler failed on new lg: dead code elimination, testcase: ${pt}.cfg"
+      exit 1
+    fi
+
+    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
+    mv ${pt}.dot ${pt}.newlg.dce.dot
 
     #echo "TESTER------------------------------------"
     #${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> lgraph.dump"
