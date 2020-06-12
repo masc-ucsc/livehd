@@ -178,10 +178,20 @@ void Inou_lnast_dfg::do_dead_code_elimination(LGraph *dfg) {
         auto n = que.back();
         que.pop_back();
         visited.emplace_back(n);
-        to_be_deleted.emplace_back(n);
+        if (std::find(to_be_deleted.begin(), to_be_deleted.end(), n) == to_be_deleted.end())
+          to_be_deleted.emplace_back(n);
+
         for (const auto &inp_edge : n.inp_edges()) {
-          if (inp_edge.driver.get_node().out_edges().size() == 1) {
-            que.emplace_back(inp_edge.driver.get_node());
+          auto inp_dnode = inp_edge.driver.get_node();
+          if (inp_dnode.out_edges().size() == 1 ) {
+            que.emplace_back(inp_dnode);
+          } else if (inp_dnode.get_type().op == Mux_Op) {
+            //FIXME->sh: not necessary true, sometimes the mux selection pin is a constant bool, and never point to CompileErr_Op, in this case, need to replace the mux node with an assignment Or_Op
+            bool cond1 = inp_dnode.get_sink_pin("A").inp_edges().begin()->driver.get_node().get_type().op == CompileErr_Op;
+            bool cond2 = inp_dnode.get_sink_pin("B").inp_edges().begin()->driver.get_node().get_type().op == CompileErr_Op;
+            if((cond1 || cond2)) {
+              que.emplace_back(inp_dnode);
+            }
           }
         }
       }

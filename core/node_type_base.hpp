@@ -286,9 +286,9 @@ public:
   Node_Type_Join() : Node_Type("join", Join_Op, false) { outputs.push_back("Y"); };
 };
 
-// Y = A[i,j]
-// j = offset
-// i = offset + Y-bitwidth
+// Y = A[j,i]
+// i = offset
+// j = offset + Y-bitwidth
 class Node_Type_Pick : public Node_Type {
 public:
   Node_Type_Pick() : Node_Type("pick", Pick_Op, false) {

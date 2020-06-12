@@ -198,7 +198,7 @@ void Inou_lnast_dfg::process_ast_phi_op(LGraph *dfg, const Lnast_nid &lnidx_phi)
     auto reg_qpin = name2dpin[reg_qpin_name];
     true_dpin = reg_qpin;
   } else {
-    true_dpin = setup_ref_node_dpin(dfg, c2);
+    true_dpin = setup_ref_node_dpin(dfg, c2, true);
   }
 
   if (c3_name == "register_forwarding_0") {
@@ -212,7 +212,7 @@ void Inou_lnast_dfg::process_ast_phi_op(LGraph *dfg, const Lnast_nid &lnidx_phi)
     auto reg_qpin = name2dpin[reg_qpin_name];
     false_dpin = reg_qpin;
   } else {
-    false_dpin  = setup_ref_node_dpin(dfg, c3);
+    false_dpin  = setup_ref_node_dpin(dfg, c3, true);
   }
 
   dfg->add_edge(cond_dpin,  cond_spin);
@@ -608,17 +608,16 @@ Node_pin Inou_lnast_dfg::setup_node_assign_and_lhs(LGraph *dfg, const Lnast_nid 
   if (is_register(lhs_name)) {
     //when #reg_0 at lhs, the register has not been created before
     if (lhs_name.substr(lhs_name.size()-2) == "_0") {
-      // auto reg_qpin = setup_ref_node_dpin(dfg, lhs);
-      // return reg_qpin.get_node().setup_sink_pin("D");
       auto reg_qpin = setup_ref_node_dpin(dfg, lhs);
       auto reg_data_pin = reg_qpin.get_node().setup_sink_pin("D");
-      auto equal_node = dfg->create_node(Or_Op);
 
+      auto equal_node = dfg->create_node(Or_Op);
       //create an extra-Or_Op for #reg_0, return #reg_0 sink pin for rhs connection
       name2dpin[lhs_name] = equal_node.setup_driver_pin(1); //reduced or output
       name2dpin[lhs_name].set_name(lhs_name);
       std::string_view lhs_name_no_ssa = lnast->get_name(lhs);
       setup_dpin_ssa(name2dpin[lhs_name], lhs_name_no_ssa, lnast->get_subs(lhs));
+
 
       //connect #reg_0 dpin -> #reg.data_pin
       dfg->add_edge(name2dpin[lhs_name], reg_data_pin);
@@ -671,12 +670,15 @@ Node_pin Inou_lnast_dfg::setup_node_assign_and_lhs(LGraph *dfg, const Lnast_nid 
 
 // for both target and operands, except the new io, reg, and const, the node and its dpin
 // should already be in the table as the operand comes from existing operator output
-Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx_opd) {
+Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx_opd, bool from_phi) {
   auto name = lnast->get_sname(lnidx_opd);
   assert(!name.empty());
 
-  //special case for register, when #x_0 in rhs, return the reg_qpin, wname #x
-  if (is_register(name) && lnast->get_subs(lnidx_opd) == 0 && name2dpin.find(lnast->get_name(lnidx_opd)) != name2dpin.end()) {
+  // special case for register, when #x_0 in rhs, return the reg_qpin, wname #x.
+  // Note this is not true for a phi-node.
+  if (is_register(name) && lnast->get_subs(lnidx_opd) == 0
+                        && !from_phi
+                        && name2dpin.find(lnast->get_name(lnidx_opd)) != name2dpin.end()) {
     return name2dpin.find(lnast->get_name(lnidx_opd))->second;
   }
 

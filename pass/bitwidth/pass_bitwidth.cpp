@@ -158,7 +158,6 @@ bool Pass_bitwidth::bw_pass_iterate() {
     dpin.ref_bitwidth()->niters++;
 
     do {
-      fmt::print("dpin:{}\n", dpin.debug_name());
       iterate_driver_pin(dpin);
       if (pending.empty())
         break;
@@ -252,13 +251,17 @@ void Pass_bitwidth::mark_descendant_dpins(const Node_pin &dpin, bool ini_setup) 
       }
     } else {
       for (const auto &aff_out_edge : affected_node.out_edges()) {
+        if (aff_out_edge.driver.get_bitwidth().dp_flag) //don't need to update the dpin when its dp_flag is 1
+          continue;
+
         if (std::find(next_pending.begin(), next_pending.end(), aff_out_edge.driver) == next_pending.end())
           next_pending.push_back(aff_out_edge.driver);
       }
 
       // handle Or_Op specially as some Or_Op might have no fanout, but be inferred by some other dp_node
-      if (affected_node.get_type().op == Or_Op && affected_node.setup_driver_pin(1).has_name()) { // the only way to check whether the dpin has been set before or not ...
-        next_pending.push_back(affected_node.get_driver_pin(1));
+      if (affected_node.get_type().op == Or_Op && affected_node.setup_driver_pin(1).has_name()  ) { // the only way to check whether the dpin has been set before or not ...
+        if (!affected_node.get_driver_pin(1).get_bitwidth().dp_flag)  //don't need to update the dpin when its dp_flag is 1
+          next_pending.push_back(affected_node.get_driver_pin(1));
       }
     }
   }
@@ -285,13 +288,24 @@ void Pass_bitwidth::iterate_logic(Node_pin &node_dpin) {
           imp.max = inp_edge.driver.get_bitwidth().i.max;
         }
         break;
-      case Or_Op:
+      case Or_Op: {
         // Make bw = <min(inputs), 2^n - 1> where n is the largest bitwidth of inputs to this node.
         I(node_dpin.get_node().get_type().op == Or_Op);
 
+        bool flag = false;
         if (node_dpin.ref_bitwidth()->dp_flag) {
+          fmt::print("Dp_flag visited!!!!\n");
+          fmt::print("dp_node_dpin:{}\n", node_dpin.debug_name());
+          fmt::print("max:{}\n", node_dpin.get_bitwidth().i.max);
+          fmt::print("min:{}\n", node_dpin.get_bitwidth().i.min);
+          flag = true;
           break; //it's a dp_node, the bitwidth info should follow the target Or_Op. The target Or_Op is recorded in dp_followed_by_table
         }
+
+        if (flag == true) {
+          I(false);
+        }
+
 
         if (first) {
           imp.min     = inp_edge.driver.get_bitwidth().i.min;
@@ -306,8 +320,15 @@ void Pass_bitwidth::iterate_logic(Node_pin &node_dpin) {
           //whenever having a dp_assign node follower, pass the bitwidth information to it.
           if (node_dpin.get_pid() == 1 && dp_followed_by_table.find(node_dpin) != dp_followed_by_table.end()) {
             auto dp_node_dpin = dp_followed_by_table[node_dpin];
+            fmt::print("dp_node_dpin:{}\n", dp_node_dpin.debug_name());
+            fmt::print("imp.max:{}\n", imp.max);
+            fmt::print("imp.min:{}\n", imp.min);
             updated = dp_node_dpin.ref_bitwidth()->i.update(imp);
             if (updated) {
+              fmt::print("After updated\n");
+              fmt::print("max:{}\n", dp_node_dpin.get_bitwidth().i.max);
+              fmt::print("min:{}\n", dp_node_dpin.get_bitwidth().i.min);
+
               mark_descendant_dpins(dp_node_dpin);
             }
           }
@@ -322,6 +343,8 @@ void Pass_bitwidth::iterate_logic(Node_pin &node_dpin) {
           }
         }
         break;
+
+      }
       case Xor_Op:
         // Make bw = <0, 2^n - 1> where n is the largest bitwidth of inputs to this node.
         if (first) {
@@ -393,7 +416,6 @@ void Pass_bitwidth::iterate_arith(Node_pin &node_dpin) {
           } else {
             //Case 5: Neither is in ovfl mode, adding/sub'ing them together does not lead to overflow.
             if (spin.get_pid() == 0 || spin.get_pid() == 1) {
-              dpin.get_bitwidth().i.dump();
               imp.max += dpin.get_bitwidth().i.max;
               imp.min += dpin.get_bitwidth().i.min;
             } else {
@@ -678,9 +700,6 @@ void Pass_bitwidth::iterate_equals(Node_pin &node_dpin) {
 
 void Pass_bitwidth::iterate_flop(Node_pin &node_dpin) {
   I(node_dpin.get_node().get_type().op == SFlop_Op);
-  fmt::print("Flop qpin ann_bits_dbg\n");
-  node_dpin.ref_bitwidth()->e.dump();
-  fmt::print("Flop qpin name:{}\n",    node_dpin.get_name());
   Ann_bitwidth::Implicit_range imp;
   bool updated = false;
   auto flop = node_dpin.get_node();
@@ -780,6 +799,15 @@ void Pass_bitwidth::bw_implicit_range_to_bits(LGraph *lg) {
     /*   continue; */
 
     for (auto& out:node.out_edges()) {
+
+      if(out.driver.debug_name().substr(0,12) == "node_pin_n34") {
+        fmt::print("now at BW transformation\n");
+        fmt::print("dp_node_dpin:{}\n", out.driver.debug_name());
+        fmt::print("imp.max:{}\n", out.driver.get_bitwidth().i.max);
+        fmt::print("imp.min:{}\n", out.driver.get_bitwidth().i.min);
+      }
+
+
       if (out.driver.has_bitwidth()) {
         uint32_t bits;
         if (out.driver.get_bitwidth().i.max == 1 || out.driver.get_bitwidth().i.max == 0) {
@@ -862,11 +890,6 @@ void Pass_bitwidth::bw_replace_dp_node_by_pick(LGraph *lg) {
         or_out_edge.del_edge();
       }
       node.inp_edges().begin()->del_edge();
-
-      // auto ori_sink   = node.out_edges().begin()->sink;
-      // lg->add_edge(pick_node.get_driver_pin(), ori_sink);
-      // node.out_edges().begin()->del_edge();
-      // node.inp_edges().begin()->del_edge();
     }
   }
 }
