@@ -1,4 +1,5 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#include <queue>
 #include "inou_lnast_dfg.hpp"
 
 void Inou_lnast_dfg::resolve_tuples(Eprp_var &var) {
@@ -165,10 +166,30 @@ void Inou_lnast_dfg::dce(Eprp_var &var) {
 
 
 void Inou_lnast_dfg::do_dead_code_elimination(LGraph *dfg) {
+  std::vector<Node> to_be_deleted;
+  std::vector<Node> que;
+  std::vector<Node> visited;
+
   for (auto node : dfg->fast()) {
-    if(node.out_edges().size() == 0) {
-      fmt::print("node:{}\n", node.debug_name());
-      node.del_node();
+    if (node.out_edges().size() == 0 && std::find(visited.begin(), visited.end(), node) == visited.end()) {
+      //BFS approach
+      que.emplace_back(node);
+      while (!que.empty()) {
+        auto n = que.back();
+        que.pop_back();
+        visited.emplace_back(n);
+        to_be_deleted.emplace_back(n);
+        for (const auto &inp_edge : n.inp_edges()) {
+          if (inp_edge.driver.get_node().out_edges().size() == 1) {
+            que.emplace_back(inp_edge.driver.get_node());
+          }
+        }
+      }
     }
   }
+
+  for (auto itr : to_be_deleted) {
+    itr.del_node();
+  }
+
 }

@@ -1,6 +1,6 @@
 $en.__bits  = 1
-$inp.__bits    = 4
-%out.__bits   = 4
+$inp.__bits = 4
+%out.__bits = 4
 
 if ($en) {
   #x = $inp

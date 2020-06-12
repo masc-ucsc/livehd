@@ -675,13 +675,17 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
   auto name = lnast->get_sname(lnidx_opd);
   assert(!name.empty());
 
+  //special case for register, when #x_0 in rhs, return the reg_qpin, wname #x
+  if (is_register(name) && lnast->get_subs(lnidx_opd) == 0 && name2dpin.find(lnast->get_name(lnidx_opd)) != name2dpin.end()) {
+    return name2dpin.find(lnast->get_name(lnidx_opd))->second;
+  }
+
   const auto it = name2dpin.find(name);
   if (it != name2dpin.end()){
     return it->second;
   }
 
   Node_pin node_dpin;
-
   if (is_output(name)) {
     ;
   } else if (is_input(name)) {

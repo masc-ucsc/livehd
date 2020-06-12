@@ -828,6 +828,10 @@ void Pass_bitwidth::bw_bits_extension_by_join(LGraph *lg) {
           lg->add_edge(node.inp_edges().begin()->driver, join_node.setup_sink_pin(0));
           lg->add_edge(join_node.setup_driver_pin(), node.inp_edges().begin()->sink);
           join_node.get_driver_pin().set_bits(out_edge_bits);
+
+
+          fmt::print("inp_edge driver node:{}\n",node.inp_edges().begin()->driver.get_node().debug_name());
+          fmt::print("inp_edge sink node:{}\n",  node.inp_edges().begin()->sink.get_node().debug_name());
           node.inp_edges().begin()->del_edge();
           break; //only one of the output edge of the Or_Op is enough to insert a Join_Op
         }
@@ -839,14 +843,17 @@ void Pass_bitwidth::bw_bits_extension_by_join(LGraph *lg) {
 void Pass_bitwidth::bw_replace_dp_node_by_pick(LGraph *lg) {
   for (const auto & node : lg->fast()) {
     if (node.get_type().op == Or_Op && node.inp_edges().size() == 1 && node.get_driver_pin(1).get_bitwidth().dp_flag) {
-      auto dpin = node.get_driver_pin(1);
-      auto bits = dpin.get_bits();
-      auto ori_driver = node.inp_edges().begin()->driver;
+      auto or_dpin = node.get_driver_pin(1);
+      auto or_dpin_bits = or_dpin.get_bits();
+      auto original_driver = node.inp_edges().begin()->driver;
+      auto original_driver_bits = original_driver.get_bits();
+      if (or_dpin_bits >= original_driver_bits)  continue; //x := y but x.__bits >= y.__bits
+
 
       auto pick_node  = lg->create_node(Pick_Op);
       auto zero_dpin  = lg->create_node_const(Lconst(0,1)).get_driver_pin();
-      pick_node.setup_driver_pin().set_bits(bits);
-      lg->add_edge(ori_driver, pick_node.setup_sink_pin(0));
+      pick_node.setup_driver_pin().set_bits(or_dpin_bits);
+      lg->add_edge(original_driver, pick_node.setup_sink_pin(0));
       lg->add_edge(zero_dpin, pick_node.setup_sink_pin(1));
 
       for (auto & or_out_edge : node.out_edges()) {
