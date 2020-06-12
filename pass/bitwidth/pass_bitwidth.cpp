@@ -292,18 +292,8 @@ void Pass_bitwidth::iterate_logic(Node_pin &node_dpin) {
         // Make bw = <min(inputs), 2^n - 1> where n is the largest bitwidth of inputs to this node.
         I(node_dpin.get_node().get_type().op == Or_Op);
 
-        bool flag = false;
         if (node_dpin.ref_bitwidth()->dp_flag) {
-          fmt::print("Dp_flag visited!!!!\n");
-          fmt::print("dp_node_dpin:{}\n", node_dpin.debug_name());
-          fmt::print("max:{}\n", node_dpin.get_bitwidth().i.max);
-          fmt::print("min:{}\n", node_dpin.get_bitwidth().i.min);
-          flag = true;
           break; //it's a dp_node, the bitwidth info should follow the target Or_Op. The target Or_Op is recorded in dp_followed_by_table
-        }
-
-        if (flag == true) {
-          I(false);
         }
 
 
@@ -320,15 +310,8 @@ void Pass_bitwidth::iterate_logic(Node_pin &node_dpin) {
           //whenever having a dp_assign node follower, pass the bitwidth information to it.
           if (node_dpin.get_pid() == 1 && dp_followed_by_table.find(node_dpin) != dp_followed_by_table.end()) {
             auto dp_node_dpin = dp_followed_by_table[node_dpin];
-            fmt::print("dp_node_dpin:{}\n", dp_node_dpin.debug_name());
-            fmt::print("imp.max:{}\n", imp.max);
-            fmt::print("imp.min:{}\n", imp.min);
             updated = dp_node_dpin.ref_bitwidth()->i.update(imp);
             if (updated) {
-              fmt::print("After updated\n");
-              fmt::print("max:{}\n", dp_node_dpin.get_bitwidth().i.max);
-              fmt::print("min:{}\n", dp_node_dpin.get_bitwidth().i.min);
-
               mark_descendant_dpins(dp_node_dpin);
             }
           }
@@ -799,15 +782,6 @@ void Pass_bitwidth::bw_implicit_range_to_bits(LGraph *lg) {
     /*   continue; */
 
     for (auto& out:node.out_edges()) {
-
-      if(out.driver.debug_name().substr(0,12) == "node_pin_n34") {
-        fmt::print("now at BW transformation\n");
-        fmt::print("dp_node_dpin:{}\n", out.driver.debug_name());
-        fmt::print("imp.max:{}\n", out.driver.get_bitwidth().i.max);
-        fmt::print("imp.min:{}\n", out.driver.get_bitwidth().i.min);
-      }
-
-
       if (out.driver.has_bitwidth()) {
         uint32_t bits;
         if (out.driver.get_bitwidth().i.max == 1 || out.driver.get_bitwidth().i.max == 0) {
@@ -858,8 +832,6 @@ void Pass_bitwidth::bw_bits_extension_by_join(LGraph *lg) {
           join_node.get_driver_pin().set_bits(out_edge_bits);
 
 
-          fmt::print("inp_edge driver node:{}\n",node.inp_edges().begin()->driver.get_node().debug_name());
-          fmt::print("inp_edge sink node:{}\n",  node.inp_edges().begin()->sink.get_node().debug_name());
           node.inp_edges().begin()->del_edge();
           break; //only one of the output edge of the Or_Op is enough to insert a Join_Op
         }

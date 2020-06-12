@@ -14,17 +14,21 @@ void Inou_lnast_dfg::resolve_tuples(Eprp_var &var) {
 void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
 
   //resolve TupGet source and destination
-  absl::flat_hash_set<Node::Compact> to_be_deleted;
+  absl::flat_hash_set<Node> to_be_deleted;
   absl::flat_hash_map<Node_pin, Node_pin> tg2actual_dpin; //record tuple_get to its actual reference dpin
   for (const auto &node : dfg->fast()) {
     if (node.get_type().op == TupAdd_Op) {
       // I(node.get_sink_pin(KV).inp_edges().size() == 1); // not necessarily true, might get extra inp from TupGet
-      to_be_deleted.insert(node.get_compact());
-      continue;
+      if (std::find(to_be_deleted.begin(), to_be_deleted.end(), node) == to_be_deleted.end()) {
+        to_be_deleted.insert(node);
+        continue;
+      }
     }
 
     if (node.get_type().op == TupGet_Op and tuple_get_has_key_name(node)) {
-      to_be_deleted.insert(node.get_compact());
+      if (std::find(to_be_deleted.begin(), to_be_deleted.end(), node) == to_be_deleted.end())
+        to_be_deleted.insert(node);
+
       auto tup_get_target = node.get_sink_pin(KN).inp_edges().begin()->driver.get_name();
 
       if (tup_get_target.substr(0,7) == "__q_pin") {
@@ -55,9 +59,10 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
         next_itr = chain_itr.setup_sink_pin(TN).get_driver_node();
         chain_itr = next_itr;
       }
-
     } else if (node.get_type().op == TupGet_Op and tuple_get_has_key_pos(node)) {
-      to_be_deleted.insert(node.get_compact());
+      if (std::find(to_be_deleted.begin(), to_be_deleted.end(), node) == to_be_deleted.end())
+        to_be_deleted.insert(node);
+
       auto tup_get_target = node.get_sink_pin(KP).get_driver_node().get_type_const().to_i(); //FIXME->sh: need lgmem.prp
       auto chain_itr = node.get_sink_pin(TN).get_driver_node();
       while (chain_itr.get_type().op != TupRef_Op) {
@@ -80,8 +85,9 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
     }
   }
 
-  for (auto &itr : to_be_deleted) {
-    itr.get_node(dfg).del_node();
+  for (auto itr : to_be_deleted) {
+    fmt::print("itr:{}\n", itr.debug_name());
+    itr.del_node();
   }
 }
 
@@ -111,8 +117,6 @@ void Inou_lnast_dfg::reconnect_to_ff_qpin(LGraph *dfg, const Node &tg_node) {
   // auto target_ff_qpin_wname = std::string(tg_inp_driver_wname.substr(0, ori_size-pos+1)) + "0";
   auto target_ff_qpin_wname = std::string(tg_inp_driver_wname.substr(0, pos));
   auto target_ff_qpin = Node_pin::find_driver_pin(dfg, target_ff_qpin_wname);
-  fmt::print("target_ff_qpin wname:{}\n",target_ff_qpin_wname);
-  fmt::print("target_ff_qpin:{}\n",target_ff_qpin.debug_name());
 
   auto tg_out_sink = tg_node.get_driver_pin().out_edges().begin()->sink;
   dfg->add_edge(target_ff_qpin, tg_out_sink);

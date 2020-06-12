@@ -847,13 +847,8 @@ void Inou_lnast_dfg::setup_explicit_bits_info(LGraph *dfg){
 
         if (vname2bits_dpin.find(vname) != vname2bits_dpin.end()) {
           auto bits_dpin = vname2bits_dpin[vname];
-          fmt::print("vname:{}\n", vname);
-          fmt::print("bits_dpin dbg:{}\n", bits_dpin.debug_name());
-          fmt::print("bits_node dbg:{}\n", bits_dpin.get_node().debug_name());
           if (bits_dpin.get_node().get_type().op == Const_Op) {
             auto bits = bits_dpin.get_node().get_type_const().to_i();
-            fmt::print("bits:{}\n", bits);
-            fmt::print("target_dpin dbg:{}\n", target_dpin.debug_name());
             target_dpin.ref_bitwidth()->e.set_ubits(bits);
             target_dpin.ref_bitwidth()->fixed = true;
           } else {
