@@ -15,6 +15,7 @@ protected:
   std::string_view create_temp_var(Lnast& lnast);
   std::string_view get_new_seq_name(Lnast& lnast);
   std::string      get_full_name(std::string term);
+  std::string      get_full_name_lhs(std::string term);
 
   // Helper Functions (for handling specific cases)
   void create_bitwidth_dot_node(Lnast &lnast, uint32_t bw, Lnast_nid& parent_node, std::string port_id);
