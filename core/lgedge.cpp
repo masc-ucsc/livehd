@@ -51,15 +51,17 @@ const Edge_raw *Edge_raw::find_edge(const Edge_raw *bt, const Edge_raw *et, Inde
 }
 
 const Edge_raw *Edge_raw::get_reverse_for_deletion() const {
-  I(is_root());
+  //I(is_root());
   Node_Internal *ptr_node = &Node_Internal::get(this);
   SIndex_ID      ptr_idx  = ptr_node->get_self_idx();
 
   SIndex_ID            dst_idx  = get_idx();
-  Node_Internal *      ptr_inp2 = &ptr_node[dst_idx - ptr_idx];
+  Node_Internal       *ptr_inp2 = &ptr_node[dst_idx - ptr_idx];
   const Node_Internal *ptr_inp  = &(ptr_inp2->get_master_root());
+  ptr_idx = ptr_node->get_master_root_nid();
 
   I(ptr_inp->is_master_root());
+  I(ptr_inp->is_next_state() || ptr_inp->is_last_state());
 
   // Index_ID dst_pid = get_out_pin().get_pid();
   // Index_ID inp_pid = get_inp_pin().get_pid();
@@ -76,14 +78,15 @@ const Edge_raw *Edge_raw::get_reverse_for_deletion() const {
   do {
     const Edge_raw *eit = nullptr;
     if (input)
-      eit = find_edge(ptr_inp->get_output_begin(), ptr_inp->get_output_end(), ptr_idx, inp_pid, dst_pid);
-    else
       eit = find_edge(ptr_inp->get_input_begin(), ptr_inp->get_input_end(), ptr_idx, dst_pid, inp_pid);
+    else
+      eit = find_edge(ptr_inp->get_output_begin(), ptr_inp->get_output_end(), ptr_idx, inp_pid, dst_pid);
 
     if (eit) return eit;
-    I(!ptr_inp->is_last_state());  // Not found all over
+    I(ptr_inp->is_next_state());  // Not found all over
 
     ptr_inp = &ptr_node[ptr_inp->get_next() - ptr_idx];
+    I(ptr_inp->is_next_state() || ptr_inp->is_last_state());
   } while (true);
 
   I(false);

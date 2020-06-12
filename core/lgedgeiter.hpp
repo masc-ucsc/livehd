@@ -56,6 +56,8 @@ public:
     Index_ID        nid;
     const bool      visit_sub;
 
+    void go_next();
+
   public:
     Fast_iter(LGraph *_g, LGraph *_cg, const Hierarchy_index &_hidx, const Index_ID _nid, bool _visit_sub)
         : top_g(_g), current_g(_cg), hidx(_hidx), nid(_nid), visit_sub(_visit_sub) {}
@@ -72,6 +74,7 @@ public:
       return *this;
     }
 
+    void advance_if_deleted();
     Fast_iter &operator++();
 
     bool operator!=(const Fast_iter &other) const {

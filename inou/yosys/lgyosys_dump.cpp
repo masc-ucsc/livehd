@@ -42,27 +42,47 @@ RTLIL::Wire *Lgyosys_dump::add_wire(RTLIL::Module *module, const Node_pin &pin) 
   }
 }
 
-RTLIL::Wire *Lgyosys_dump::create_tree(LGraph *g, std::vector<RTLIL::Wire *> &wires, RTLIL::Module *mod, add_cell_fnc_sign add_fnc,
-                                       bool sign, RTLIL::Wire *result_wire) {
+RTLIL::Wire *Lgyosys_dump::create_tree(LGraph *g, const std::vector<RTLIL::Wire *> &wires, RTLIL::Module *mod, add_cell_fnc_sign add_fnc,
+                                       bool sign, RTLIL::Wire *result_wire, int width) {
+  assert(mod);
+
   if (wires.size() == 0) return nullptr;
 
-  if (wires.size() == 1) return wires[0];
-
-  std::vector<RTLIL::Wire *> next_level;
-  for (uint32_t current = 0; current < wires.size() / 2; current += 2) {
-    RTLIL::Wire *aWire = nullptr;
-    if (wires.size() > 2)
-      aWire = mod->addWire(next_id(g), result_wire->width);
-    else
-      aWire = result_wire;
-
-    auto name = next_id(g);
-    (mod->*add_fnc)(name, wires[current], wires[current + 1], aWire, sign, "");
-    next_level.push_back(aWire);
+  if (wires.size() == 1) {
+    if (result_wire) { // only in top level call
+      mod->connect(result_wire, wires[0]);
+      return result_wire;
+    }else{
+      return wires[0];
+    }
   }
-  if (wires.size() % 2 == 1) next_level.push_back(wires[wires.size() - 1]);
 
-  return create_tree(g, next_level, mod, add_fnc, sign, result_wire);
+  if (result_wire)
+    width = result_wire->width;
+
+  assert(width);
+
+  RTLIL::Wire *l;
+  RTLIL::Wire *r;
+
+  if (wires.size() == 2) {
+    l = wires[0];
+    r = wires[1];
+  }else{
+    std::vector<RTLIL::Wire *> l_wires(wires.begin(), wires.begin()+wires.size()/2);
+    std::vector<RTLIL::Wire *> r_wires(wires.begin()+wires.size()/2, wires.end());
+    assert(l_wires.size() + r_wires.size() == wires.size());
+
+    l = create_tree(g, l_wires, mod, add_fnc, sign, nullptr, width);
+    r = create_tree(g, r_wires, mod, add_fnc, sign, nullptr, width);
+  }
+
+  auto name = next_id(g);
+  if (result_wire==nullptr)
+    result_wire = mod->addWire(next_id(g), width);
+  (mod->*add_fnc)(name, l, r, result_wire, sign, "");
+
+  return result_wire;
 }
 
 RTLIL::Wire *Lgyosys_dump::create_io_wire(const Node_pin &pin, RTLIL::Module *module, Port_ID pos) {

@@ -306,26 +306,80 @@ void Lconst::dump() const {
     fmt::print("num:{} sign:{} bits:{} explicit_bits:{} explicit_sign:{}\n", num.str(), sign, bits, explicit_bits, explicit_sign);
 }
 
-Lconst Lconst::add(const Lconst &o) const {
+Lconst Lconst::add_op(const Lconst &o) const {
   auto max_bits = std::max(bits, o.bits);
 
-  Number res_sum = get_num(max_bits) + o.get_num(max_bits);
+  Number res_num = get_num(max_bits) + o.get_num(max_bits);
 
   uint16_t res_bits=0u;
-  if (res_sum<0)
-    res_bits = msb(-res_sum)+1;
+  if (res_num<0)
+    res_bits = msb(-res_num)+1;
   else
-    res_bits = msb(res_sum)+1;
+    res_bits = msb(res_num)+1;
 
   auto res_sign = sign && o.sign;
   if (res_sign)
     res_bits++;
 
   // explicit kept if both explicit and agree
+  auto res_explicit_str  = explicit_str && o.explicit_str;
   auto res_explicit_sign = explicit_sign && o.explicit_sign && sign == o.sign;
   bool res_explicit_bits = false;
 
-  return Lconst(false, res_explicit_sign, res_explicit_bits, res_sign, res_bits, res_sum);
+  return Lconst(res_explicit_str, res_explicit_sign, res_explicit_bits, res_sign, res_bits, res_num);
+}
+
+Lconst Lconst::sub_op(const Lconst &o) const {
+  auto max_bits = std::max(bits, o.bits);
+
+  Number res_num = get_num(max_bits) - o.get_num(max_bits);
+
+  uint16_t res_bits=0u;
+  if (res_num<0)
+    res_bits = msb(-res_num)+1;
+  else
+    res_bits = msb(res_num)+1;
+
+  auto res_sign = sign && o.sign;
+  if (res_sign)
+    res_bits++;
+
+  // explicit kept if both explicit and agree
+  auto res_explicit_str  = explicit_str && o.explicit_str;
+  auto res_explicit_sign = explicit_sign && o.explicit_sign && sign == o.sign;
+  bool res_explicit_bits = false;
+
+  return Lconst(res_explicit_str, res_explicit_sign, res_explicit_bits, res_sign, res_bits, res_num);
+}
+
+Lconst Lconst::lsh_op(uint16_t amount) const {
+  auto res_bits = bits + amount;
+  auto res_num  = num << amount;
+
+  return Lconst(explicit_str, explicit_sign, explicit_bits, sign, res_bits, res_num);
+}
+
+Lconst Lconst::or_op(const Lconst &o) const {
+  auto   res_bits = std::max(bits, o.bits);
+  Number res_num  = get_num(res_bits) | o.get_num(res_bits);
+
+  auto res_explicit_str  = explicit_str && o.explicit_str;
+  auto res_explicit_sign = explicit_sign && o.explicit_sign && sign == o.sign;
+  bool res_explicit_bits = explicit_bits && explicit_bits;
+  auto res_sign = sign && o.sign;
+
+  return Lconst(res_explicit_str, res_explicit_sign, res_explicit_bits, res_sign, res_bits, res_num);
+}
+
+
+Lconst Lconst::adjust_bits(uint16_t amount) const {
+
+  auto res_bits = amount;
+
+  Number r(1);
+  Number res_num = num & ((r<<amount)-1);
+
+  return Lconst(explicit_str, explicit_sign, true, sign, res_bits, res_num);
 }
 
 std::string Lconst::to_string() const {

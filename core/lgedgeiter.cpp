@@ -63,7 +63,15 @@ Edge_raw_iterator::CPod_iterator Edge_raw_iterator::CPod_iterator::operator++() 
   return i;
 }
 
-Fast_edge_iterator::Fast_iter &Fast_edge_iterator::Fast_iter::operator++() {
+void Fast_edge_iterator::Fast_iter::advance_if_deleted() {
+
+  if (likely(nid==0 || current_g->is_valid_node(nid)))
+    return;
+
+  go_next();
+}
+
+void Fast_edge_iterator::Fast_iter::go_next() {
   I(nid != 0);
 
   nid = current_g->fast_next(nid);
@@ -75,7 +83,7 @@ Fast_edge_iterator::Fast_iter &Fast_edge_iterator::Fast_iter::operator++() {
         hidx      = next_hidx;
         current_g = top_g->ref_htree()->ref_lgraph(hidx);
         nid       = current_g->fast_first();
-        if (!nid.is_invalid()) return *this;
+        if (!nid.is_invalid()) return;
         next_hidx = top_g->ref_htree()->get_depth_preorder_next(hidx);
       }
       current_g = top_g;
@@ -86,9 +94,13 @@ Fast_edge_iterator::Fast_iter &Fast_edge_iterator::Fast_iter::operator++() {
       hidx.invalidate();
     }
   }
+}
+
+Fast_edge_iterator::Fast_iter &Fast_edge_iterator::Fast_iter::operator++() {
+  go_next();
 
   return *this;
-};
+}
 
 Fast_edge_iterator::Fast_iter Fast_edge_iterator::begin() const {
   auto nid = top_g->fast_first();
@@ -152,6 +164,7 @@ void Fwd_edge_iterator::Fwd_iter::topo_add_chain_fwd(const Node_pin &dst_pin) {
 void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear(LGraph *top) {
   I(linear_phase);
 
+  global_it.advance_if_deleted();
   if (global_it.is_invalid()) {
     current_node.invalidate();
     linear_phase = false;
@@ -239,6 +252,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending() {
       }
     }
 
+    global_it.advance_if_deleted();
     if (global_it.is_invalid()) {
       current_node.invalidate();
       return;

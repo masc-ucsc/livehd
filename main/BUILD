@@ -30,6 +30,7 @@ cc_binary(
             "//pass/punch:pass_punch",
             "//pass/sample:pass_sample",
             "//pass/bitwidth:pass_bitwidth",
+            "//pass/cprop:pass_cprop",
             "//pass/mockturtle:pass_mockturtle",
             "//pass/lgraph_to_lnast:pass_lgraph_to_lnast",
 

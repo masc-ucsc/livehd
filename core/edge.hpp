@@ -57,6 +57,7 @@ public:
   Node_pin driver;
   Node_pin sink;
 
+  XEdge(LGraph *g, const Compact &c);
   XEdge(const Node_pin &src_, const Node_pin &dst_);
 
   constexpr bool is_invalid() const { return driver.is_invalid(); }

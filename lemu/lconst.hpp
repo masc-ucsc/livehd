@@ -113,7 +113,12 @@ public:
 
   void dump() const;
 
-  Lconst add(const Lconst &o) const;
+  [[nodiscard]] Lconst add_op(const Lconst &o) const;
+  [[nodiscard]] Lconst sub_op(const Lconst &o) const;
+  [[nodiscard]] Lconst lsh_op(uint16_t amount) const;
+  [[nodiscard]] Lconst or_op(const Lconst &o) const;
+
+  [[nodiscard]] Lconst adjust_bits(uint16_t amount) const;
 
   bool     is_negative() const { return sign && num < 0; }
   bool     is_explicit_sign() const { return explicit_sign; }
@@ -145,8 +150,17 @@ public:
   std::string to_pyrope() const;
 
   // Operator list
-  const Lconst operator+(const Lconst &other) const { return add(other); }
-  const Lconst operator+(uint64_t other) const { return add(Lconst(other)); }
+  [[nodiscard]] const Lconst operator+(const Lconst &other) const { return add_op(other); }
+  [[nodiscard]] const Lconst operator+(uint64_t other) const { return add_op(Lconst(other)); }
+
+  [[nodiscard]] const Lconst operator-(const Lconst &other) const { return sub_op(other); }
+  [[nodiscard]] const Lconst operator-(uint64_t other) const { return sub_op(Lconst(other)); }
+
+  [[nodiscard]] const Lconst operator<<(const Lconst &other) const { return lsh_op(other.to_i()); }
+  [[nodiscard]] const Lconst operator<<(uint16_t other) const { return lsh_op(other); }
+
+  [[nodiscard]] const Lconst operator|(const Lconst &other) const { return or_op(other); }
+  [[nodiscard]] const Lconst operator|(uint64_t other) const { return or_op(Lconst(other)); }
 
   bool operator==(const Lconst &other) const {
     auto b = std::max(bits,other.bits);
@@ -155,12 +169,12 @@ public:
   bool operator==(int other) const {
     if (bits>63)
       return false;
-    return get_num(bits) == other;
+    return get_num(bits) == other && !explicit_bits;
   }
   bool operator!=(int other) const {
     if (bits>63)
       return true;
-    return get_num(bits) != other;
+    return get_num(bits) != other || explicit_bits;
   }
   bool operator!=(const Lconst &other) const {
     auto b = std::max(bits,other.bits);

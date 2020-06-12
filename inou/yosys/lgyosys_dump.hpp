@@ -59,8 +59,8 @@ private:
   typedef RTLIL::Cell *(RTLIL::Module::*add_cell_fnc)(RTLIL::IdString, const RTLIL::SigSpec &, const RTLIL::SigSpec &, const RTLIL::SigSpec &,
                                                       const std::string &);
 
-  RTLIL::Wire *create_tree(LGraph *g, std::vector<RTLIL::Wire *> &wires, RTLIL::Module *mod, add_cell_fnc_sign add_cell, bool sign,
-                           RTLIL::Wire *result_wire);
+  RTLIL::Wire *create_tree(LGraph *g, const std::vector<RTLIL::Wire *> &wires, RTLIL::Module *mod, add_cell_fnc_sign add_cell, bool sign,
+                           RTLIL::Wire *result_wire, int width=0);
 
   RTLIL::Wire *create_io_wire(const Node_pin &pin, RTLIL::Module *module, Port_ID pos);
   void         create_wires(LGraph *g, RTLIL::Module *module);
