@@ -2,6 +2,7 @@
 #pragma once
 
 #include <string_view>
+#include <array>
 
 class Lnast_ntype {
 public:
@@ -79,7 +80,7 @@ public:
   };
 
 protected:
-  static inline std::string_view namemap[] = {
+  constexpr static std::array namemap{
     "invalid",
     //group: tree structure
     "top",
@@ -148,9 +149,9 @@ protected:
     //group: compiler internal type
     "tuple_add",
     "tuple_get",
-    "tuple_phi_add",
+    "tuple_phi_add"
   };
-  static inline std::string_view namemap_cfg[] = {
+  constexpr static std::array namemap_cfg{
     "invalid",
     "top",
     "sts",
@@ -206,9 +207,9 @@ protected:
     "I",
     "tuple_add",
     "tuple_get",
-    "tuple_phi_add",
+    "tuple_phi_add"
   };
-  static inline std::string_view namemap_pyrope[] = {
+  constexpr static std::array namemap_pyrope{
     "invalid",
     "top",
     "sts",
@@ -227,13 +228,14 @@ protected:
     "as",
     "=",
     ".",
-    "add",
+    "and",
     "or",
     "&",
     "|",
+    "!",
     "^",
     "+",
-    "+",
+    "-",
     "*",
     "/",
     "eq",
@@ -266,9 +268,9 @@ protected:
     "reg_fwd",
     "tuple_add",
     "tuple_get",
-    "tuple_phi_add",
+    "tuple_phi_add"
   };
-  static inline std::string_view namemap_verilog[] = {
+  constexpr static std::array namemap_verilog{
     "invalid",
     "top",
     "sts",
@@ -328,9 +330,9 @@ protected:
     "reg_fwd",
     "tuple_add",
     "tuple_get",
-    "tuple_phi_add",
+    "tuple_phi_add"
   };
-  static inline std::string_view namemap_cpp[] = {
+  constexpr static std::array namemap_cpp{
     "invalid",
     "top",
     "sts",
@@ -390,13 +392,14 @@ protected:
     "reg_fwd",
     "tuple_add",
     "tuple_get",
-    "tuple_phi_add",
+    "tuple_phi_add"
   };
 
   Lnast_ntype_int val;
   explicit Lnast_ntype(Lnast_ntype_int _val) : val(_val) {}
 public:
-  Lnast_ntype() : val(Lnast_ntype_invalid) {}
+  Lnast_ntype() : val(Lnast_ntype_invalid) {
+  }
 
   Lnast_ntype_int get_raw_ntype() const { return val; }
 
@@ -538,25 +541,25 @@ public:
   bool is_tuple_phi_add() const { return val == Lnast_ntype_tuple_phi_add; }
 
   // Super types
-  bool is_logical_op()   const { return (val == Lnast_ntype_logical_and) or
-                                        (val == Lnast_ntype_logical_or) or 
+  bool is_logical_op()   const { return (val == Lnast_ntype_logical_and) ||
+                                        (val == Lnast_ntype_logical_or) ||
                                         (val == Lnast_ntype_logical_not); }
 
   bool is_unary_op()     const { return (val == Lnast_ntype_not); }
 
-  bool is_nary_op()      const { return (val == Lnast_ntype_and) or
-                                        (val == Lnast_ntype_or) or
-                                        (val == Lnast_ntype_xor) or
-                                        (val == Lnast_ntype_plus) or
-                                        (val == Lnast_ntype_minus) or
-                                        (val == Lnast_ntype_mult) or
-                                        (val == Lnast_ntype_div) or
-                                        (val == Lnast_ntype_same) or
-                                        (val == Lnast_ntype_lt) or
-                                        (val == Lnast_ntype_le) or
-                                        (val == Lnast_ntype_gt) or
-                                        (val == Lnast_ntype_ge) or 
-                                        (val == Lnast_ntype_shift_left) or 
+  bool is_nary_op()      const { return (val == Lnast_ntype_and) ||
+                                        (val == Lnast_ntype_or) ||
+                                        (val == Lnast_ntype_xor) ||
+                                        (val == Lnast_ntype_plus) ||
+                                        (val == Lnast_ntype_minus) ||
+                                        (val == Lnast_ntype_mult) ||
+                                        (val == Lnast_ntype_div) ||
+                                        (val == Lnast_ntype_same) ||
+                                        (val == Lnast_ntype_lt) ||
+                                        (val == Lnast_ntype_le) ||
+                                        (val == Lnast_ntype_gt) ||
+                                        (val == Lnast_ntype_ge) || 
+                                        (val == Lnast_ntype_shift_left) || 
                                         (val == Lnast_ntype_shift_right); }
 
   std::string_view debug_name() const { return namemap[val]; }
@@ -564,5 +567,11 @@ public:
   std::string_view debug_name_pyrope() const { return namemap_pyrope[val]; }
   std::string_view debug_name_verilog() const { return namemap_verilog[val]; }
   std::string_view debug_name_cpp() const { return namemap_cpp[val]; }
+
+  // static_assert(namemap_cpp.size()==namemap.size());
+  // static_assert(namemap_cpp.size()==namemap_cfg.size());
+  // static_assert(namemap_cpp.size()==namemap_pyrope.size());
+  // static_assert(namemap_cpp.size()==namemap_verilog.size());
+  // static_assert(namemap_cpp.size()==Lnast_ntype_tuple_phi_add);
 };
 
