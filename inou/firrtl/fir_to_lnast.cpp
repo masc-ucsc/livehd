@@ -67,7 +67,7 @@ std::string Inou_firrtl::get_full_name(std::string term) {
   } else if(std::find(output_names.begin(), output_names.end(), term) != output_names.end()) {
     return absl::StrCat("%", term);
   } else if(std::find(register_names.begin(), register_names.end(), term) != register_names.end()) {
-    return absl::StrCat("___", term, "__q_pin");
+    return absl::StrCat(term, "__q_pin");
   } else {
     return term;
   }
@@ -113,7 +113,7 @@ void Inou_firrtl::init_register_dots(Lnast& lnast, const firrtl::FirrtlPB_Statem
   // Since FIRRTL designs access register qpin, I need to do:
   // #reg_name.__q_pin. The name will always be ___reg_name__q_pin
   auto qpin_var_name_temp = lnast.add_string(absl::StrCat("___", expr.id(), "__q_pin_t"));
-  auto qpin_var_name = lnast.add_string(absl::StrCat("___", expr.id(), "__q_pin"));
+  auto qpin_var_name = lnast.add_string(absl::StrCat(expr.id(), "__q_pin"));
 
   auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_dot("dot"));
   lnast.add_child(idx_dot, Lnast_node::create_ref(qpin_var_name_temp));
