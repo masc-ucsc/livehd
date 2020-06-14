@@ -115,6 +115,7 @@ private:
   Lnast_nid add_phi_node               (const Lnast_nid  &cond_nid, const Lnast_nid &t_nid, const Lnast_nid &f_nid);
   Lnast_nid get_complement_nid            (std::string_view brother_name, const Lnast_nid &psts_nid, bool false_path);
   Lnast_nid check_phi_table_parents_chain (std::string_view brother_name, const Lnast_nid &psts_nid, bool originate_from_csts);
+  void      resolve_ssa_lhs_subs                (const Lnast_nid &psts_nid);
   void      resolve_ssa_rhs_subs                (const Lnast_nid &psts_nid);
   void      update_global_lhs_ssa_cnt_table     (const Lnast_nid &target_nid);
   void      reg_ini_global_lhs_ssa_cnt_table    (const Lnast_nid &target_nid); //just initialize global reg when appeared in rhs

@@ -40,7 +40,15 @@ std::string_view Lnast::add_string(const std::string &str) {
 }
 
 void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
-  Lnast_nid top_sts_nid = get_first_child(top_nid);
+  Lnast_nid top_sts_nid;
+  if (get_type(top_nid).is_func_def()) {
+    auto c0 = get_first_child(top_nid);
+    auto c1 = get_sibling_next(c0);
+    top_sts_nid = get_sibling_next(c1);
+  } else {
+    top_sts_nid = get_first_child(top_nid);
+  }
+  /* Lnast_nid top_sts_nid = get_first_child(top_nid); */
   default_const_nid     = add_child(top_sts_nid, Lnast_node(Lnast_ntype::create_const(),    Token(Token_id_alnum, 0, 0, 0, "default_const")));
   err_var_undefined_nid = add_child(top_sts_nid, Lnast_node(Lnast_ntype::create_err_flag(), Token(Token_id_alnum, 0, 0, 0, "err_var_undefined")));
   register_fwd_nid      = add_child(top_sts_nid, Lnast_node(Lnast_ntype::create_reg_fwd(),  Token(Token_id_alnum, 0, 0, 0, "register_forwarding")));
@@ -55,15 +63,7 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
   trans_tuple_opr(top_sts_nid);
 
   fmt::print("\nStep-3: LHS SSA\n");
-  for (const auto &opr_nid : children(top_sts_nid)) {
-    if (get_type(opr_nid).is_if()) {
-      ssa_if_subtree(opr_nid);
-    } else if (get_type(opr_nid).is_func_def()) {
-      do_ssa_trans(opr_nid);
-    } else {
-      ssa_handle_a_statement(top_sts_nid, opr_nid);
-    }
-  }
+  resolve_ssa_lhs_subs(top_sts_nid);
 
   //see Note I
   fmt::print("\nStep-4: RHS SSA\n");
@@ -80,6 +80,9 @@ void Lnast::trans_tuple_opr(const Lnast_nid &psts_nid) {
   for (const auto &opr_nid : children(psts_nid)) {
     if (get_type(opr_nid).is_func_def()) {
       continue;
+      /* auto c0 = get_first_child(opr_nid); */
+      /* auto c1 = get_sibling_next(c0); */
+      /* trans_tuple_opr(c1); */
     } else if (get_type(opr_nid).is_if()) {
       trans_tuple_opr_if_subtree(opr_nid);
     } else if (get_type(opr_nid).is_tuple()) {
@@ -389,7 +392,8 @@ void Lnast::analyze_dot_lrhs(const Lnast_nid &psts_nid) {
   dot_lrhs_tables[psts_nid] = top_dot_lrhs_table;
   for (const auto &opr_nid : children(psts_nid)) {
     if (get_type(opr_nid).is_func_def()) {
-      continue;
+      /* analyze_dot_lrhs(c1); */
+      do_ssa_trans(opr_nid);
     } else if (get_type(opr_nid).is_if()) {
       analyze_dot_lrhs_if_subtree(opr_nid);
     } else if (get_type(opr_nid).is_dot() || get_type(opr_nid).is_select()) {
@@ -457,6 +461,23 @@ void Lnast::analyze_dot_lrhs_if_subtree(const Lnast_nid &if_nid) {
   }
 }
 
+
+void Lnast::resolve_ssa_lhs_subs(const Lnast_nid &psts_nid) {
+  for (const auto &opr_nid : children(psts_nid)) {
+    if (get_type(opr_nid).is_func_def()) {
+      continue;
+      /* auto c0 = get_first_child(opr_nid); */
+      /* auto c1 = get_sibling_next(c0); */
+      /* resolve_ssa_lhs_subs(c1); */
+    } else if (get_type(opr_nid).is_if()) {
+      ssa_rhs_if_subtree(opr_nid);
+    } else {
+      ssa_rhs_handle_a_statement(psts_nid, opr_nid);
+    }
+  }
+}
+
+
 void Lnast::resolve_ssa_rhs_subs(const Lnast_nid &psts_nid) {
   Cnt_rtable top_ssa_rhs_cnt_table;
   /* ssa_rhs_cnt_tables[get_name(psts_nid)] = top_ssa_rhs_cnt_table; */
@@ -464,6 +485,9 @@ void Lnast::resolve_ssa_rhs_subs(const Lnast_nid &psts_nid) {
   for (const auto &opr_nid : children(psts_nid)) {
     if (get_type(opr_nid).is_func_def()) {
       continue;
+      /* auto c0 = get_first_child(opr_nid); */
+      /* auto c1 = get_sibling_next(c0); */
+      /* resolve_ssa_rhs_subs(c1); */
     } else if (get_type(opr_nid).is_if()) {
       ssa_rhs_if_subtree(opr_nid);
     } else {

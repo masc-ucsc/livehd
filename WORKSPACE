@@ -79,10 +79,11 @@ new_git_repository(
 new_git_repository(
     name = "slang",
     build_file = "BUILD.slang",
-    commit = "f525b308e8c1c147639e91889fc8d801bc45169e", #April 12, 2020 0e2381c9b408cef18950f928e5c411ed58c54eb6", # Nov 23, 2019
+    commit = "823fc41d44d53797f0b5ddb1242028cc1fd51f18", #June 12, 2020 f525b308e8c1c147639e91889fc8d801bc45169e, #April 12, 2020 0e2381c9b408cef18950f928e5c411ed58c54eb6", # Nov 23, 2019
     remote = "https://github.com/MikePopoloski/slang.git",
     patches = ["//external:patch.slang"],
 )
+
 new_git_repository(
     name = "json",
     build_file = "BUILD.json",
