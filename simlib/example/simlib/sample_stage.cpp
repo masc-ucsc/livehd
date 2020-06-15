@@ -13,7 +13,7 @@ Sample_stage::Sample_stage(uint64_t _hidx, const std::string &parent_name, vcd::
   // FIXME: populate random reset (random per variable)
 }
 void Sample_stage::vcd_reset_cycle() {
-  vcd_writer->change(vcd_reset, "1");  // as long as the reset is called, it would be 1
+//  vcd_writer->change(vcd_reset, "1");  // as long as the reset is called, it would be 1
   vcd_writer->change(parent_vcd_reset, "1");
   s1.vcd_reset_cycle();
   s2.vcd_reset_cycle();
@@ -21,7 +21,7 @@ void Sample_stage::vcd_reset_cycle() {
 }
 
 void Sample_stage::vcd_negedge() {
-  vcd_writer->change(vcd_clk, "0");
+//  vcd_writer->change(vcd_clk, "0");
   vcd_writer->change(parent_vcd_clk, "0");
   s1.vcd_negedge();
   s2.vcd_negedge();
@@ -29,9 +29,9 @@ void Sample_stage::vcd_negedge() {
 }
 
 void Sample_stage::vcd_posedge() {
-  vcd_writer->change(vcd_clk, "1");
+//  vcd_writer->change(vcd_clk, "1");
   vcd_writer->change(parent_vcd_clk, "1");
-  vcd_writer->change(vcd_reset, "0");
+//  vcd_writer->change(vcd_reset, "0");
   vcd_writer->change(parent_vcd_reset, "0");
   s1.vcd_posedge();
   s2.vcd_posedge();
@@ -45,20 +45,20 @@ void Sample_stage::vcd_comb() {
   auto s1_to3_cValid = s1.to3_cValid;
   auto s1_to3_c      = s1.to3_c;
   s1.vcd_comb(s3.to1_b, s2.to1_aValid, s2.to1_a);
-  vcd_writer->change(vcd_to2_aValid, s1.to2_aValid.to_string_binary());
-  vcd_writer->change(vcd_to2_a, s1.to2_a.to_string_binary());
-  vcd_writer->change(vcd_to2_b, s1.to2_b.to_string_binary());
-  vcd_writer->change(vcd_to3_cValid, s1.to3_cValid.to_string_binary());
-  vcd_writer->change(vcd_to3_c, s1.to3_c.to_string_binary());
-  vcd_writer->change(vcd_to1_b, s3.to1_b.to_string_binary());
-  vcd_writer->change(vcd_to1_a, s2.to1_a.to_string_binary());
-  vcd_writer->change(vcd_to1_aValid, s2.to1_aValid.to_string_binary());
+//  vcd_writer->change(vcd_to2_aValid, s1.to2_aValid.to_string_binary());
+//  vcd_writer->change(vcd_to2_a, s1.to2_a.to_string_binary());
+//  vcd_writer->change(vcd_to2_b, s1.to2_b.to_string_binary());
+//  vcd_writer->change(vcd_to3_cValid, s1.to3_cValid.to_string_binary());
+//  vcd_writer->change(vcd_to3_c, s1.to3_c.to_string_binary());
+//  vcd_writer->change(vcd_to1_b, s3.to1_b.to_string_binary());
+//  vcd_writer->change(vcd_to1_a, s2.to1_a.to_string_binary());
+//  vcd_writer->change(vcd_to1_aValid, s2.to1_aValid.to_string_binary());
 
   auto s2_to3_dValid = s2.to3_dValid;
   auto s2_to3_d      = s2.to3_d;
   s2.vcd_comb(s1_to2_aValid, s1_to2_a, s1_to2_b);
-  vcd_writer->change(vcd_to3_dValid, s2.to3_dValid.to_string_binary());
-  vcd_writer->change(vcd_to3_d, s2.to3_d.to_string_binary());
+//  vcd_writer->change(vcd_to3_dValid, s2.to3_dValid.to_string_binary());
+//  vcd_writer->change(vcd_to3_d, s2.to3_d.to_string_binary());
 
   s3.vcd_comb(s1_to3_cValid, s1_to3_c, s2_to3_dValid, s2_to3_d);
 }

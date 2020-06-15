@@ -29,10 +29,10 @@ struct Sample_stage {
   vcd::VarPtr vcd_to2_eValid  = vcd_writer->register_var(scope_name, "to2_eValid", vcd::VariableType::wire, 1);
   vcd::VarPtr vcd_to2_e       = vcd_writer->register_var(scope_name, "to2_e[31:0]", vcd::VariableType::wire, 32);
   vcd::VarPtr vcd_to1_b       = vcd_writer->register_var(scope_name, "to1_b[31:0]", vcd::VariableType::wire, 32);
-  vcd::VarPtr vcd_clk         = vcd_writer->register_var(scope_name, "clk", vcd::VariableType::wire, 1);
-  vcd::VarPtr parent_vcd_clk  = vcd_writer->register_var("TOP", "clk", vcd::VariableType::wire, 1);
-  vcd::VarPtr vcd_reset       = vcd_writer->register_var(scope_name, "reset", vcd::VariableType::wire, 1);
   vcd::VarPtr parent_vcd_reset= vcd_writer->register_var("TOP", "reset", vcd::VariableType::wire, 1);
+  vcd::VarPtr parent_vcd_clk  = vcd_writer->register_var("TOP", "clk", vcd::VariableType::wire, 1);
+  vcd::VarPtr vcd_clk         = vcd_writer->register_passed_var(scope_name, "clk", vcd::VariableType::wire, 1);
+  vcd::VarPtr vcd_reset       = vcd_writer->register_passed_var(scope_name, "reset", vcd::VariableType::wire, 1);
 #else
   Sample_stage(uint64_t _hidx);
   void reset_cycle();
