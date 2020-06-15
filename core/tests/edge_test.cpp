@@ -5,7 +5,7 @@
 
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
-
+#include "lbench.hpp"
 #include "lrand.hpp"
 #include "mmap_map.hpp"
 
@@ -181,21 +181,15 @@ protected:
       EXPECT_TRUE(false);
     }
 
-    int conta=0;
     for(auto e:n1.out_edges()) {
       auto it = track_edge_count.find(e.get_compact());
       EXPECT_TRUE(it!=track_edge_count.end());
-      conta++;
     }
-    EXPECT_EQ(track_edge_count.size(), conta);
 
-    conta=0;
     for(auto e:n2.inp_edges()) {
       auto it = track_edge_count.find(e.get_compact());
       EXPECT_TRUE(it!=track_edge_count.end());
-      conta++;
     }
-    EXPECT_EQ(track_edge_count.size(), conta);
 
   }
 
@@ -285,16 +279,19 @@ TEST_F(Edge_test, trivial_delete) {
   EXPECT_EQ(n2.out_edges().size(), 0);
   EXPECT_EQ(n2.inp_edges().size(), 1);
 
+#if 0
   n2.del_node();
 
   EXPECT_EQ(n1.out_edges().size(), 0);
   EXPECT_EQ(n1.inp_edges().size(), 0);
+#endif
 }
 
 TEST_F(Edge_test, overflow_delete) {
 
   auto s1 = g->create_node(Sum_Op);
 
+  track_edge_count.clear();
   check_setup_pins();
   check_edges();
 
@@ -306,7 +303,7 @@ TEST_F(Edge_test, overflow_delete) {
     if (rbool.any())
       s = add_n2_setup_sink_pin("sink_pin" + std::to_string(i));
     if (rbool.any() && !d.is_invalid() && !s.is_invalid()) {
-      add_edge(d, s1.setup_sink_pin());
+      add_edge(d, s1.setup_sink_pin(0));
       add_edge(s1.setup_driver_pin(), s);
     }
   }
@@ -321,10 +318,129 @@ TEST_F(Edge_test, overflow_delete) {
   for (auto &e : all_edges) {
     XEdge edge(g, e);
 
-    check_edges();
     edge.del_edge();
     track_edge_count.erase(e);
+    check_edges();
   }
+
+  EXPECT_EQ(n1.out_edges().size(),0);
+  EXPECT_EQ(n2.inp_edges().size(),0);
+
+  EXPECT_EQ(s1.out_edges().size(),0);
+  EXPECT_EQ(s1.inp_edges().size(),0);
+}
+
+TEST_F(Edge_test, overflow_delete_node) {
+
+  auto s1 = g->create_node(Sum_Op);
+
+  track_edge_count.clear();
+  check_setup_pins();
+  check_edges();
+
+  for(int i=0;i<6000;++i) {
+    Node_pin d;
+    Node_pin s;
+    if (rbool.any())
+      d = add_n1_setup_driver_pin("driver_pin" + std::to_string(i));
+    if (rbool.any())
+      s = add_n2_setup_sink_pin("sink_pin" + std::to_string(i));
+    if (rbool.any() && !d.is_invalid() && !s.is_invalid()) {
+      add_edge(d, s1.setup_sink_pin(0));
+      add_edge(s1.setup_driver_pin(), s);
+    }
+  }
+
+  s1.del_node(); // Nuke the middle node with all the connections
+
+  EXPECT_EQ(n1.out_edges().size(),0);
+  EXPECT_EQ(n1.inp_edges().size(),0);
+
+  EXPECT_EQ(n1.out_edges().size(),0);
+  EXPECT_EQ(n2.inp_edges().size(),0);
+
+  EXPECT_EQ(s1.out_edges().size(),0);
+  EXPECT_EQ(s1.inp_edges().size(),0);
+}
+
+TEST_F(Edge_test, overflow_delete_del_edge_bench) {
+
+
+  auto s1 = g->create_node(Sum_Op);
+
+  for(int i=0;i<6000;++i) {
+    Node_pin d;
+    Node_pin s;
+    if (rbool.any())
+      d = add_n1_setup_driver_pin("driver_pin" + std::to_string(i));
+    if (rbool.any())
+      s = add_n2_setup_sink_pin("sink_pin" + std::to_string(i));
+    if (rbool.any() && !d.is_invalid() && !s.is_invalid()) {
+      add_edge(d, s1.setup_sink_pin(0));
+      add_edge(s1.setup_driver_pin(), s);
+    }
+  }
+
+
+  std::vector<XEdge::Compact> all_edges;
+  for (auto &b : track_edge_count) {
+    all_edges.push_back(b.first);
+  }
+
+  std::random_shuffle(all_edges.begin(), all_edges.end());
+
+  {
+    Lbench bench("overflow_delete del_node");
+
+    for (auto &e : all_edges) {
+      XEdge edge(g, e);
+      edge.del_edge();
+    }
+
+    double secs = bench.get_secs();
+    fmt::print("del_edge size:{} {}Kdels/sec\n", all_edges.size(), (all_edges.size() / 1000.0) / secs);
+  }
+
+  EXPECT_EQ(n1.out_edges().size(),0);
+  EXPECT_EQ(n2.inp_edges().size(),0);
+
+  EXPECT_EQ(s1.out_edges().size(),0);
+  EXPECT_EQ(s1.inp_edges().size(),0);
+}
+
+TEST_F(Edge_test, overflow_delete_del_node_bench) {
+
+  auto s1 = g->create_node(Sum_Op);
+
+  int all_edges=0;
+  for(int i=0;i<6000;++i) {
+    Node_pin d;
+    Node_pin s;
+    if (rbool.any())
+      d = add_n1_setup_driver_pin("driver_pin" + std::to_string(i));
+    if (rbool.any())
+      s = add_n2_setup_sink_pin("sink_pin" + std::to_string(i));
+    if (rbool.any() && !d.is_invalid() && !s.is_invalid()) {
+      add_edge(d, s1.setup_sink_pin(0));
+      add_edge(s1.setup_driver_pin(), s);
+      all_edges+=2;
+    }
+  }
+
+  {
+    Lbench bench("overflow_delete del_node");
+
+    s1.del_node();
+
+    double secs = bench.get_secs();
+    fmt::print("del_edge size:{} {}Kdels/sec\n", all_edges, (all_edges / 1000.0) / secs);
+  }
+
+  EXPECT_EQ(n1.out_edges().size(),0);
+  EXPECT_EQ(n2.inp_edges().size(),0);
+
+  EXPECT_EQ(s1.out_edges().size(),0);
+  EXPECT_EQ(s1.inp_edges().size(),0);
 }
 
 #if 0

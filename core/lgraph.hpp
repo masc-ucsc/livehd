@@ -21,7 +21,6 @@ protected:
   friend class Fwd_edge_iterator;
   friend class Bwd_edge_iterator;
   friend class Fast_edge_iterator;
-  friend class Edge_raw_iterator_base;
 
   Hierarchy_tree htree;
 
@@ -100,14 +99,11 @@ protected:
     return node_internal[pin.get_idx()].has_pin_inputs();
   }
 
-  bool del_edge(const Node_pin &src, const Node_pin &dst) {
-    I(node_internal.size() > src.get_idx());
-    I(node_internal.size() > dst.get_idx());
-    I(node_internal[src.get_idx()].is_root());
-    I(node_internal[dst.get_idx()].is_root());
+  bool del_edge_driver_int(const Node_pin &dpin, const Node_pin &spin);
+  bool del_edge_sink_int(const Node_pin &dpin, const Node_pin &spin);
 
-    return node_internal.ref(src.get_idx())->del(dst.get_idx(), dst.get_pid(), dst.is_input());
-  }
+  void del_node(const Node &node);
+  bool del_edge(const Node_pin &dpin, const Node_pin &spin);
 
   bool is_graph_io(Index_ID idx) const {
     I(static_cast<Index_ID>(node_internal.size()) > idx);
@@ -161,20 +157,20 @@ public:
 
   bool has_edge(const Node_pin &driver, const Node_pin &sink) const;
 
-  Index_ID add_edge(const Node_pin &src, const Node_pin &dst) {
-    I(!src.is_input());
-    I(dst.is_input());
-    I(dst.get_class_lgraph() == src.get_class_lgraph());
+  Index_ID add_edge(const Node_pin &dpin, const Node_pin &spin) {
+    I(dpin.is_driver());
+    I(spin.is_sink());
+    I(spin.get_class_lgraph() == dpin.get_class_lgraph());
     // Do not loop back unless pipelined or subgraph
-    GI(!dst.is_graph_io() && !src.is_graph_io() && src.get_node().get_nid() == dst.get_node().get_nid(),
-       src.get_node().get_type().is_pipelined());
+    GI(!spin.is_graph_io() && !dpin.is_graph_io() && dpin.get_node().get_nid() == spin.get_node().get_nid(),
+       dpin.get_node().get_type().is_pipelined());
 
-    return add_edge_int(dst.get_idx(), dst.get_pid(), src.get_idx(), src.get_pid());
+    return add_edge_int(spin.get_idx(), spin.get_pid(), dpin.get_idx(), dpin.get_pid());
   }
 
-  Index_ID add_edge(const Node_pin &src, const Node_pin &dst, uint32_t bits) {
-    Index_ID idx = add_edge(src, dst);
-    I(idx = src.get_idx());
+  Index_ID add_edge(const Node_pin &dpin, const Node_pin &spin, uint32_t bits) {
+    Index_ID idx = add_edge(dpin, spin);
+    I(idx = dpin.get_idx());
     GI(bits != get_bits(idx), !is_type_const(node_internal[idx].get_nid()));  // Do not overwrite bits in constants
     set_bits(idx, bits);
     return idx;

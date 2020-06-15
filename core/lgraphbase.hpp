@@ -11,7 +11,6 @@
 #include "lgraph_base_core.hpp"
 #include "mmap_vector.hpp"
 
-class Edge_raw_iterator;
 class Fwd_edge_iterator;
 class Bwd_edge_iterator;
 class Fast_edge_iterator;
@@ -35,8 +34,6 @@ protected:
 
   Port_ID recompute_io_ports(const Index_ID track_nid);
 
-  void del_int_node(const Index_ID idx);
-
   Index_ID find_idx_from_pid_int(const Index_ID idx, const Port_ID pid) const;
   Index_ID find_idx_from_pid(const Index_ID idx, const Port_ID pid) const {
     if (likely(node_internal[idx].get_dst_pid() == pid)) {  // Common case
@@ -55,9 +52,6 @@ protected:
     I(idx < node_internal.size());
     node_internal.ref(idx)->set_sink_setup();
   }
-
-  void del_node(Index_ID idx);
-  void del_edge(const Edge_raw *edge_raw);
 
   Index_ID get_master_nid(Index_ID idx) const { return node_internal[idx].get_master_root_nid(); }
 
@@ -104,9 +98,6 @@ public:
 
     add_edge_int(dst_idx, node_internal[dst_idx].get_dst_pid(), src_idx, node_internal[src_idx].get_dst_pid());
   }
-
-  Edge_raw_iterator inp_edges_raw(Index_ID nid) const;
-  Edge_raw_iterator out_edges_raw(Index_ID nid) const;
 
   void print_stats() const;
 

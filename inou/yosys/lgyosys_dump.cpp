@@ -302,7 +302,10 @@ void Lgyosys_dump::create_wires(LGraph *g, RTLIL::Module *module) {
   });
 
   for (auto node : g->fast()) {
-    if (node.get_type().op == GraphIO_Op) continue;  // handled before with each_output/each_input
+    I(node.get_type().op != GraphIO_Op);
+
+    if (!node.has_inputs() && !node.has_outputs())
+      continue; // DCE code
 
     if (node.get_type().op == Const_Op) {
       auto         dpin     = node.get_driver_pin();
@@ -395,8 +398,12 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
 
   // now create nodes and make connections
   for (auto node : g->fast()) {
+    I(node.get_type().op != GraphIO_Op);
+
+    if (!node.has_inputs() && !node.has_outputs())
+      continue; // DCE code
+
     auto op = node.get_type().op;
-    if (op == GraphIO_Op) continue;  // outputs already handled, inputs are not used
 
     if (op != Memory_Op && op != SubGraph_Op && !node.has_outputs()) continue;
 

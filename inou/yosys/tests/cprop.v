@@ -7,6 +7,7 @@ always @(a) begin
 
   c0 = a + 1 + res;
 
+  /*
   c0 = a + 1 + res;
   c0 = c0 + 60'h3;
   c0 = c0 + 67'hffff_ffff_0000;
@@ -14,6 +15,7 @@ always @(a) begin
   c1 = c0;
   c1 = c1<<10;
   c1 = c1 + c0;
+  */
 
 end
 endmodule

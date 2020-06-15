@@ -5,42 +5,6 @@
 #include "lgraph.hpp"
 #include "pass.hpp"
 
-class Edge_raw_iterator {
-protected:
-  const bool      inputs;
-  const Edge_raw *b;
-  const Edge_raw *e;
-
-public:
-  class CPod_iterator {
-  private:
-    const Edge_raw *ptr;
-    const Edge_raw *e;
-    const bool      inputs;
-
-  public:
-    CPod_iterator(const Edge_raw *_ptr, const Edge_raw *_e, bool _inputs) : ptr(_ptr), e(_e), inputs(_inputs) {}
-    CPod_iterator operator++();   // FIXME: CPod_iterator &operator++()
-    CPod_iterator operator--() {  // FIXME: CPod_iterator &operator--()
-      CPod_iterator i(ptr, e, inputs);
-      ptr -= ptr->next_node_inc();
-      return i;
-    }
-    bool            operator!=(const CPod_iterator &other) const noexcept { return ptr != other.ptr; }
-    const Edge_raw &operator*() const { return *ptr; }
-  };
-
-  Edge_raw_iterator() = delete;
-  explicit Edge_raw_iterator(const Edge_raw *_b, const Edge_raw *_e, bool _inputs) : inputs(_inputs) {
-    b = _b;
-    e = _e;
-    I(Node_Internal::get(e).is_node_state());
-  }
-
-  CPod_iterator begin() const { return CPod_iterator(b, e, inputs); }
-  CPod_iterator end() const { return CPod_iterator(e, e, inputs); }
-};
-
 class Fast_edge_iterator {
 protected:
   LGraph *   top_g;

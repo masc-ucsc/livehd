@@ -246,6 +246,8 @@ public:
 
   Node_pin get_sink_from_output() const;
 
+#if 0
+  // OLD API
   bool is_input() const {
     I(idx);
     return sink;
@@ -254,6 +256,7 @@ public:
     I(idx);
     return !sink;
   }
+#endif
 
   bool is_sink() const {
     I(idx);

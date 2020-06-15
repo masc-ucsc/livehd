@@ -50,49 +50,6 @@ const Edge_raw *Edge_raw::find_edge(const Edge_raw *bt, const Edge_raw *et, Inde
   return nullptr;
 }
 
-const Edge_raw *Edge_raw::get_reverse_for_deletion() const {
-  //I(is_root());
-  Node_Internal *ptr_node = &Node_Internal::get(this);
-  SIndex_ID      ptr_idx  = ptr_node->get_self_idx();
-
-  SIndex_ID            dst_idx  = get_idx();
-  Node_Internal       *ptr_inp2 = &ptr_node[dst_idx - ptr_idx];
-  const Node_Internal *ptr_inp  = &(ptr_inp2->get_master_root());
-  ptr_idx = ptr_node->get_master_root_nid();
-
-  I(ptr_inp->is_master_root());
-  I(ptr_inp->is_next_state() || ptr_inp->is_last_state());
-
-  // Index_ID dst_pid = get_out_pin().get_pid();
-  // Index_ID inp_pid = get_inp_pin().get_pid();
-  Index_ID dst_pid;
-  Index_ID inp_pid;
-  if (is_input()) {
-    dst_pid = get_inp_pid();
-    inp_pid = get_dst_pid();
-  } else {
-    dst_pid = get_dst_pid();
-    inp_pid = get_inp_pid();
-  }
-
-  do {
-    const Edge_raw *eit = nullptr;
-    if (input)
-      eit = find_edge(ptr_inp->get_input_begin(), ptr_inp->get_input_end(), ptr_idx, dst_pid, inp_pid);
-    else
-      eit = find_edge(ptr_inp->get_output_begin(), ptr_inp->get_output_end(), ptr_idx, inp_pid, dst_pid);
-
-    if (eit) return eit;
-    I(ptr_inp->is_next_state());  // Not found all over
-
-    ptr_inp = &ptr_node[ptr_inp->get_next() - ptr_idx];
-    I(ptr_inp->is_next_state() || ptr_inp->is_last_state());
-  } while (true);
-
-  I(false);
-  return ptr_inp->sedge;  // Any random thing
-}
-
 Index_ID Edge_raw::get_self_idx() const {
   const auto &root_page = Node_Internal_Page::get(this);
   const auto &root_self = Node_Internal::get(this);
@@ -269,16 +226,18 @@ const Node_Internal &Node_Internal::get_master_root() const {
 }
 
 void Node_Internal::try_recycle() {
-  if (out_pos != 0 || inp_pos != 0) return;
+
+  inp_pos  = 0;
+  out_pos  = 0;
+  inp_long = 0;
+  out_long = 0;
+
   I(!is_free_state());
 
-  // Recycle nid
-
-  if (is_root()) return;  // Keep node
+  if (is_root()) return;  // Keep node for attributes
 
   Node_Internal *root_ptr = (Node_Internal *)&get_root();
   Index_ID       root_idx = root_ptr->get_nid();
-  I(root_idx == root_ptr->get_self_idx());
 
   SIndex_ID self_idx = get_self_idx();
   SIndex_ID prev_idx = root_idx;
@@ -296,9 +255,8 @@ void Node_Internal::try_recycle() {
   }
 
   set_free_state();
-  I(root_ptr[-root_idx].is_page_state());
 
-  Node_Internal_Page master_page = Node_Internal_Page::get(root_ptr[-root_idx].sedge);
+  Node_Internal_Page master_page = Node_Internal_Page::get(root_ptr);
 
   nid                  = master_page.free_idx;
   master_page.free_idx = self_idx;
@@ -365,7 +323,8 @@ void Node_Internal::del_output_int(const Edge_raw *out_edge) {
   I(out_pos >= 0);
 }
 
-bool Node_Internal::del(Index_ID src_idx, Port_ID pid, bool input) {
+#if 0
+bool Node_Internal::xxx(Index_ID src_idx, Port_ID pid, bool input) {
   const Edge_raw *eit = nullptr;
   if (input)
     eit = Edge_raw::find_edge(get_output_begin(), get_output_end(), src_idx, pid, get_dst_pid());
@@ -379,12 +338,13 @@ bool Node_Internal::del(Index_ID src_idx, Port_ID pid, bool input) {
   return true;
 }
 
-void Node_Internal::del(const Edge_raw *edge_raw) {
+void Node_Internal::xxx(const Edge_raw *edge_raw) {
   if (edge_raw->is_input())
     del_input(edge_raw);
   else
     del_output(edge_raw);
 }
+#endif
 
 // LCOV_EXCL_START
 void Node_Internal::dump() const {

@@ -150,6 +150,8 @@ void Inou_graphviz::populate_lg_data(LGraph *g) {
   std::string data = "digraph {\n";
 
   g->each_node_fast([&data, this](const Node &node) {
+    if (!node.has_inputs() && !node.has_outputs())
+      return;
     std::string node_info;
     if (!verbose) {
       auto pos = node.debug_name().find("_lg_");

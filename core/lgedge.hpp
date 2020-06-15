@@ -112,8 +112,6 @@ protected:
 
   static const Edge_raw *find_edge(const Edge_raw *bt, const Edge_raw *et, Index_ID ptr_nid, Port_ID inp_pod, Port_ID dst_pid);
 
-  const Edge_raw *get_reverse_for_deletion() const;
-
   Index_ID get_self_idx() const;  // WARNING: it can point to overflow. Be careful!
   Index_ID get_self_root_idx() const;
 
@@ -268,38 +266,9 @@ private:
   void del_input_int(const Edge_raw *out_edge);
   void del_output_int(const Edge_raw *out_edge);
 
-  void del_output(const Edge_raw *out_edge) {
-    // Node_Internal *ptr_node = &Node_Internal::get(&out_edge);
-    // Index_ID       ptr_idx  = ptr_node->get_self_idx();
-    // Index_ID       ptr_nid  = ptr_node->get_nid();
-
-    const Edge_raw *inp_edge = out_edge->get_reverse_for_deletion();
-    I(inp_edge->is_input());
-    I(!out_edge->is_input());
-
-    Node_Internal::get(inp_edge).del_input_int(inp_edge);
-    del_output_int(out_edge);
-
-    try_recycle();
-  }
-
-  void del_input(const Edge_raw *inp_edge) {
-    // Node_Internal *ptr_node = &Node_Internal::get(&inp_edge);
-    // Index_ID       ptr_idx  = ptr_node->get_self_idx();
-    // Index_ID       ptr_nid  = ptr_node->get_nid();
-
-    const Edge_raw *out_edge = inp_edge->get_reverse_for_deletion();
-    I(inp_edge->is_input());
-    I(!out_edge->is_input());
-
-    Node_Internal::get(out_edge).del_output_int(out_edge);
-    del_input_int(inp_edge);
-
-    try_recycle();
-  }
-
 protected:
   friend class Edge_raw;
+  friend class LGraph;
   Index_ID get_self_idx() const;  // WARNING: It can point to overflow
 
 public:
@@ -472,9 +441,6 @@ public:
   bool is_page_align() const {
     return ((((uint64_t)this) & 0xFFF) == 0);  // page align.
   }
-
-  void del(const Edge_raw *edge_raw);
-  bool del(Index_ID src_idx, Port_ID pid, bool input);
 
   void inc_outputs(bool large = false) {
     if (large) {
