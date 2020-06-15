@@ -1506,7 +1506,7 @@ private:
 		return *mMask;
 	}
 
-  int recently_inserted(array_type txt) {
+  int recently_inserted(array_type txt) const {
     for (const auto &ent: last_sview_insert) {
       if (ent.second != txt.size()) continue;
 
@@ -1531,10 +1531,10 @@ private:
     assert(txt.size()<40000); // OK to go bigger but likely bug
 
     auto insert_point = mmap_txt_base[0]+1;
-    if (mmap_txt_size <= (8*insert_point+2*txt.size())) {
+    if (mmap_txt_size <= (8*insert_point+8*txt.size())) {
       auto new_size = mmap_txt_size*2;
-      if (new_size < 8*insert_point+2*txt.size())
-        new_size = 8*insert_point+2*txt.size();
+      if (new_size < 8*insert_point+8*txt.size())
+        new_size = 8*insert_point+8*txt.size();
       grow_txt_mmap(new_size);
     }
     assert(mmap_txt_size > (8*insert_point+txt.size()));
@@ -1559,11 +1559,11 @@ private:
     xtra_space = (~xtra_space)&0xF;
     mmap_txt_base[0] += 1+(bytes+xtra_space+7)/8; // +7 to cheaply round up, +1 for the strlen
 
+    if (last_sview_insert_pos>=last_sview_insert.size())
+      last_sview_insert_pos = 0;
     last_sview_insert[last_sview_insert_pos].first  = insert_point;
     last_sview_insert[last_sview_insert_pos].second = txt.size();
     last_sview_insert_pos++;
-    if (last_sview_insert_pos>=last_sview_insert.size())
-      last_sview_insert_pos = 0;
 
 		return insert_point;
 	}
