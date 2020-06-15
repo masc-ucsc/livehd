@@ -13,6 +13,8 @@ protected:
 
   void trans(LGraph *orig);
   void replace_node(Node &old_node, const Lconst &result);
+  void collapse_forward_same_op(Node &node);
+  void collapse_forward_always(Node &node);
   void try_collapse_forward(Node &node);
 
 public:

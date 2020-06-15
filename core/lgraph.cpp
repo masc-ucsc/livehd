@@ -824,6 +824,10 @@ void LGraph::dump() {
     if (!node_internal[i].is_node_state()) continue;
     if (!node_internal[i].is_master_root()) continue;
     auto node = Node(this, Node::Compact_class(i));  // NOTE: To remove once new iterators are finished
+
+    if (!node.has_inputs() && !node.has_outputs())
+      continue;
+
     fmt::print("nid:{} type:{} name:{}", node.nid, node.get_type().get_name(), node.debug_name());
     if (node.get_type().op == LUT_Op) {
       fmt::print(" lut={}\n", node.get_type_lut().to_pyrope());
