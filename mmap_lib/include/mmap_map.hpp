@@ -1520,7 +1520,7 @@ private:
 
     auto pos = recently_inserted(txt);
     if (pos >= 0) {
-      I(std::memcmp(get_sview(pos).data(), txt.data(), txt.size())==0);
+      assert(std::memcmp(get_sview(pos).data(), txt.data(), txt.size())==0);
       return pos;
     }
 
