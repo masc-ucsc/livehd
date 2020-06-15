@@ -9,6 +9,9 @@
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
+#define TRACE(x)
+//#define TRACE(x) x
+
 void setup_pass_cprop() { Pass_cprop::setup(); }
 
 void Pass_cprop::setup() {
@@ -36,10 +39,10 @@ void Pass_cprop::collapse_forward_same_op(Node &node) {
       continue;
 
     for (auto &inp : node.inp_edges()) {
-      fmt::print("cprop same_op pin:{} to pin:{}\n",inp.driver.debug_name(), out.sink.debug_name());
+      TRACE(fmt::print("cprop same_op pin:{} to pin:{}\n",inp.driver.debug_name(), out.sink.debug_name()));
       inp.driver.connect_sink(out.sink);
     }
-    fmt::print("cprop same_op del_edge pin:{} to pin:{}\n",out.driver.debug_name(), out.sink.debug_name());
+    TRACE(fmt::print("cprop same_op del_edge pin:{} to pin:{}\n",out.driver.debug_name(), out.sink.debug_name()));
     out.del_edge();
   }
 }
@@ -47,11 +50,11 @@ void Pass_cprop::collapse_forward_same_op(Node &node) {
 void Pass_cprop::collapse_forward_always(Node &node) {
   for (auto &out : node.out_edges()) {
     for (auto &inp : node.inp_edges()) {
-      fmt::print("cprop forward_always pin:{} to pin:{}\n",inp.driver.debug_name(), out.sink.debug_name());
+      TRACE(fmt::print("cprop forward_always pin:{} to pin:{}\n",inp.driver.debug_name(), out.sink.debug_name()));
       inp.driver.connect_sink(out.sink);
     }
   }
-  fmt::print("cprop forward_always del_node node:{}\n",node.debug_name());
+  TRACE(fmt::print("cprop forward_always del_node node:{}\n",node.debug_name()));
   node.del_node();
 }
 
@@ -84,7 +87,7 @@ void Pass_cprop::replace_node(Node &node, const Lconst &result) {
 
   for(auto &out:node.out_edges()) {
     if (dpin.get_bits() == out.driver.get_bits() || out.driver.get_bits()==0) {
-      fmt::print("cprop: const:{} to out.driver:{}\n", result.to_pyrope(), out.driver.debug_name());
+      TRACE(fmt::print("cprop: const:{} to out.driver:{}\n", result.to_pyrope(), out.driver.debug_name()));
       dpin.connect_sink(out.sink);
     }else{
       // create new const node to preserve bits
@@ -93,9 +96,9 @@ void Pass_cprop::replace_node(Node &node, const Lconst &result) {
       auto new_node2 = node.get_class_lgraph()->create_node_const(result2);
       auto dpin2     = new_node2.get_driver_pin();
 
-      fmt::print("creating const:{} {}bits {}  from const:{} {}bits\n"
+      TRACE(fmt::print("creating const:{} {}bits {}  from const:{} {}bits\n"
           , result2.to_pyrope(), out.driver.get_bits(), dpin2.get_bits()
-          , result.to_pyrope() , dpin.get_bits());
+          , result.to_pyrope() , dpin.get_bits()));
 
       dpin2.connect_sink(out.sink);
     }
@@ -136,8 +139,9 @@ void Pass_cprop::trans(LGraph *g) {
 
     bool all_inputs_constant = n_inputs == n_inputs_constant;
 
-    fmt::print("cprop: node:{} has {} constant inputs out of {} {}\n", node.debug_name(),
-        n_inputs_constant,n_inputs, all_inputs_constant?"(all the inputs)":"");
+    TRACE(fmt::print("cprop: node:{} has {} constant inputs out of {} {}\n",
+          node.debug_name(), n_inputs_constant,n_inputs,
+          all_inputs_constant?"(all the inputs)":""));
 
     auto op = node.get_type().op;
     if (op == Join_Op && all_inputs_constant) {
@@ -150,7 +154,7 @@ void Pass_cprop::trans(LGraph *g) {
       }
       result.adjust_bits(node.get_driver_pin().get_bits());
 
-      fmt::print("cprop: join to {}\n", result.to_pyrope());
+      TRACE(fmt::print("cprop: join to {}\n", result.to_pyrope()));
 
       replace_node(node, result);
 
@@ -161,7 +165,7 @@ void Pass_cprop::trans(LGraph *g) {
 
       Lconst result = val<<amt;
 
-      fmt::print("cprop: shl to {} ({}<<{})\n", result.to_pyrope(), val.to_pyrope(), amt.to_pyrope());
+      TRACE(fmt::print("cprop: shl to {} ({}<<{})\n", result.to_pyrope(), val.to_pyrope(), amt.to_pyrope()));
 
       replace_node(node, result);
     }else if (op == Sum_Op && all_inputs_constant) {
@@ -176,7 +180,7 @@ void Pass_cprop::trans(LGraph *g) {
         }
       }
 
-      fmt::print("cprop: add node:{} to {}\n", node.debug_name(), result.to_pyrope());
+      TRACE(fmt::print("cprop: add node:{} to {}\n", node.debug_name(), result.to_pyrope()));
 
       replace_node(node, result);
     }
