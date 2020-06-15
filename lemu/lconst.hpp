@@ -141,7 +141,7 @@ public:
     }
   }
 
-  bool is_i() const;
+  bool is_i() const { return !explicit_str && bits <= 63; }
   int to_i() const; // must fit in int or exception raised
 
   std::string to_yosys() const;

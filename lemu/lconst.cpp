@@ -442,10 +442,6 @@ std::string Lconst::to_pyrope() const {
   return str;
 }
 
-bool Lconst::is_i() const {
-  return !explicit_str && bits <= 63;
-}
-
 int Lconst::to_i() const {
   I(is_i());
   return static_cast<int>(num);

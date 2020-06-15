@@ -19,7 +19,6 @@ cc_library(
 cc_library(
     name = "tree_lgdb_test",
     hdrs = glob(["tests/tree_lgdb_setup.hpp"]),
-    visibility = ["//visibility:public"],
     includes = ["."],
     deps = [
         ":core",

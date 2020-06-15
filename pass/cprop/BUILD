@@ -2,12 +2,13 @@
 
 cc_library(
     name = "pass_cprop",
-    srcs = glob(["*.cpp"]),
+    srcs = glob(["*.cpp"],exclude=["*test*.cpp"]),
     hdrs = glob(["*.hpp"]),
     visibility = ["//visibility:public"],
     includes = ["."],
     deps = [
         "//core:core",
+        "//lemu:lemu",
     ]
 )
 
