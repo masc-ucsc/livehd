@@ -1,8 +1,8 @@
 #!/bin/bash
 rm -rf ./lgdb
-#  pts='counter counter_nested_if firrtl_tail2'
-  pts='funcall'
-#  pts=' firrtl_tail2 counter counter_nested_if ssa_rhs adder_stage reg__q_pin firrtl_tail tuple_if out_ssa if2 if nested_if if3_err nested_if_err logic '
+# pts='counter counter_nested_if firrtl_tail2'
+# pts='funcall'
+pts='firrtl_tail2 counter counter_nested_if ssa_rhs adder_stage reg__q_pin firrtl_tail tuple_if out_ssa if2 if nested_if if3_err nested_if_err logic '
 
 # pts='tuple_if2'
 

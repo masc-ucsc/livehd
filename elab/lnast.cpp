@@ -80,9 +80,6 @@ void Lnast::trans_tuple_opr(const Lnast_nid &psts_nid) {
   for (const auto &opr_nid : children(psts_nid)) {
     if (get_type(opr_nid).is_func_def()) {
       continue;
-      /* auto c0 = get_first_child(opr_nid); */
-      /* auto c1 = get_sibling_next(c0); */
-      /* trans_tuple_opr(c1); */
     } else if (get_type(opr_nid).is_if()) {
       trans_tuple_opr_if_subtree(opr_nid);
     } else if (get_type(opr_nid).is_tuple()) {
