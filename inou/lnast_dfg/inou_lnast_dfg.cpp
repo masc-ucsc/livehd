@@ -482,6 +482,11 @@ void Inou_lnast_dfg::process_ast_tuple_get_op(LGraph *dfg, const Lnast_nid &lnid
   auto kn_spin = tup_get.setup_sink_pin(KN); // key name
   auto kp_spin = tup_get.setup_sink_pin(KP); // key pos
 
+  if (is_register(lnast->get_name(c1_tg))) {
+    setup_ref_node_dpin(dfg, c1_tg); 
+  }
+
+
   auto tn_dpin = setup_tuple_ref(dfg, lnast->get_sname(c1_tg));
   dfg->add_edge(tn_dpin, tn_spin);
 
@@ -505,7 +510,7 @@ void Inou_lnast_dfg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnid
   auto kn_spin    = tup_add.setup_sink_pin(KN); //key name
   auto kp_spin    = tup_add.setup_sink_pin(KP); //key position of the key_name is recorded at tuple initialization
   auto value_spin = tup_add.setup_sink_pin(KV); //value
-  auto c0_ta   = lnast->get_first_child(lnidx_ta);  //c0: tuple name
+  auto c0_ta   = lnast->get_first_child(lnidx_ta); //c0: tuple name
   auto c1_ta   = lnast->get_sibling_next(c0_ta);   //c1: key name
   auto c2_ta   = lnast->get_sibling_next(c1_ta);   //c2: value
   auto tup_name = lnast->get_sname(c0_ta);
@@ -513,7 +518,7 @@ void Inou_lnast_dfg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnid
 
 
   if (key_name.size() >= 6 && key_name.substr(0,6) == "__bits") {
-    auto bits_dpin = setup_ref_node_dpin(dfg, c2_ta); //this dpin represents the bits value, might come from ConstOp or after some copy propagation
+    auto bits_dpin = setup_ref_node_dpin(dfg, c2_ta);    //this dpin represents the bits value, might come from ConstOp or after some copy propagation
     vname2bits_dpin[lnast->get_name(c0_ta)] = bits_dpin; //node that vname is de-SSAed, a pure variable name
 
   } else {
@@ -633,9 +638,9 @@ Node_pin Inou_lnast_dfg::setup_node_assign_and_lhs(LGraph *dfg, const Lnast_nid 
 
       // (2) find the corresponding #reg and its qpin, #reg_0 
       auto pos = lhs_name.find_last_of('_');
-      // auto ori_size = lhs_name.size();
-      // auto reg_qpin_name = lhs_name.substr(0,ori_size-pos);
       auto reg_qpin_name = lhs_name.substr(0,pos);
+
+      fmt::print("reg qpin name:{}\n", reg_qpin_name);
       I(name2dpin[reg_qpin_name] != Node_pin());
       auto reg_qpin = name2dpin[reg_qpin_name];
 

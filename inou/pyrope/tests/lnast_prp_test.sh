@@ -1,10 +1,12 @@
 #!/bin/bash
 rm -rf ./lgdb
+rm -f *.v
+rm -f *.prp
 # pts='counter counter_nested_if firrtl_tail2'
 # pts='funcall'
 # pts='firrtl_tail2 counter counter_nested_if ssa_rhs adder_stage reg__q_pin firrtl_tail tuple_if out_ssa if2 if nested_if if3_err nested_if_err logic '
-pts='test2'
-# pts='out_ssa nested_if firrtl_tail2 counter counter_nested_if ssa_rhs adder_stage reg__q_pin firrtl_tail tuple_if if2 if if3_err nested_if_err logic '
+# pts='test2'
+pts='firrtl_tail3 firrtl_tail2 out_ssa nested_if counter counter_nested_if ssa_rhs adder_stage reg__q_pin firrtl_tail tuple_if if2 if if3_err nested_if_err logic '
 
 # pts='tuple_if2'
 

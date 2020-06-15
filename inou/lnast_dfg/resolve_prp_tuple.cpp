@@ -113,7 +113,7 @@ void Inou_lnast_dfg::reconnect_to_ff_qpin(LGraph *dfg, const Node &tg_node) {
   //get the input edge
   auto tg_inp_driver_wname = tg_node.get_sink_pin(0).inp_edges().begin()->driver.get_name();
   auto pos = tg_inp_driver_wname.find_last_of('_');
-  auto ori_size = tg_inp_driver_wname.size();
+  /* auto ori_size = tg_inp_driver_wname.size(); */
   // auto target_ff_qpin_wname = std::string(tg_inp_driver_wname.substr(0, ori_size-pos+1)) + "0";
   auto target_ff_qpin_wname = std::string(tg_inp_driver_wname.substr(0, pos));
   auto target_ff_qpin = Node_pin::find_driver_pin(dfg, target_ff_qpin_wname);
@@ -190,7 +190,7 @@ void Inou_lnast_dfg::do_dead_code_elimination(LGraph *dfg) {
           if (inp_dnode.out_edges().size() == 1 ) {
             que.emplace_back(inp_dnode);
           } else if (inp_dnode.get_type().op == Mux_Op) {
-            //FIXME->sh: not necessary true, sometimes the mux selection pin is a constant bool, and never point to CompileErr_Op, in this case, need to replace the mux node with an assignment Or_Op
+            //FIXME->sh: not necessary true, sometimes the mux selection pin is a constant bool, and never point to CompileErr_Op. We only knows it after copy-propagation. In this case, need to replace the mux node with an assignment Or_Op
             bool cond1 = inp_dnode.get_sink_pin("A").inp_edges().begin()->driver.get_node().get_type().op == CompileErr_Op;
             bool cond2 = inp_dnode.get_sink_pin("B").inp_edges().begin()->driver.get_node().get_type().op == CompileErr_Op;
             if((cond1 || cond2)) {
