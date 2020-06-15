@@ -608,7 +608,11 @@ void Prp_lnast::eval_assignment_expression(mmap_lib::Tree_index idx_start_ast, m
   // first thing, create the lhs if it is an expression
   auto lhs_node = eval_rule(idx_lhs_ast, idx_start_ln);
 
-  bool is_as = scan_text(ast->get_data(ast->get_sibling_next(idx_lhs_ast)).token_entry) == "as";
+  auto assign_token_entry = ast->get_data(ast->get_sibling_next(idx_lhs_ast)).token_entry;
+  bool is_as = scan_is_token(Pyrope_id_as);
+  bool is_dp = scan_is_token(Token_id_coloneq);
+  GI(is_as, scan_text(assign_token_entry) == "as");
+  GI(is_dp, scan_text(assign_token_entry) == ":=");
 
   mmap_lib::Tree_index idx_assign;
 
@@ -621,40 +625,38 @@ void Prp_lnast::eval_assignment_expression(mmap_lib::Tree_index idx_start_ast, m
     rhs_node = eval_expression(idx_start_ast, idx_nxt_ln);
   } else {
     // if the tuple is assigned with equals, there is no assign or as node
-    if (!is_as) {
-      if (ast->get_data(rhs_ast).rule_id == Prp_rule_tuple_notation) {
-        rhs_node = eval_tuple(rhs_ast, idx_nxt_ln);
-      } else if (!rhs_is_leaf) {
-        rhs_node = eval_rule(rhs_ast, idx_nxt_ln);
-      }
-    }
-    // a tuple (or anything) assigned with as will be an RHS expression
-    else {
+    if (is_as) {
+      // a tuple (or anything) assigned with as will be an RHS expression
       if (!rhs_is_leaf) rhs_node = eval_rule(rhs_ast, idx_nxt_ln);
+    } else if (ast->get_data(rhs_ast).rule_id == Prp_rule_tuple_notation) {
+      rhs_node = eval_tuple(rhs_ast, idx_nxt_ln);
+    } else if (!rhs_is_leaf) {
+      rhs_node = eval_rule(rhs_ast, idx_nxt_ln);
     }
   }
 
   // finally, create the assign node itself, which is also a child of subtree root
-  if (!rhs_is_tuple) {
+  if (rhs_is_tuple) {
+    auto tuple_node = eval_tuple(idx_start_ast, idx_nxt_ln);
+  }else{
     mmap_lib::Tree_index idx_assign;
-    if (is_as)
+    if (is_as) {
       idx_assign = lnast->add_child(idx_nxt_ln, Lnast_node::create_as(""));
-    else {
+    } else if (is_dp) {
+      PRINT_DBG_LN("The dp assign operator we are checking is {}.\n", scan_text(ast->get_data(idx_assign_op).token_entry));
+      idx_assign = lnast->add_child(idx_nxt_ln, Lnast_node::create_dp_assign(""));
+    } else {
       PRINT_DBG_LN("The assignment operator we are checking is {}.\n", scan_text(ast->get_data(idx_assign_op).token_entry));
-      if (scan_text(ast->get_data(idx_assign_op).token_entry) == ":=") {
-        idx_assign = lnast->add_child(idx_nxt_ln, Lnast_node::create_dp_assign(""));
-      } else {
-        idx_assign = lnast->add_child(idx_nxt_ln, Lnast_node::create_assign(""));
-      }
+      idx_assign = lnast->add_child(idx_nxt_ln, Lnast_node::create_assign(""));
     }
     lnast->add_child(idx_assign, lhs_node);
 
-    if (!rhs_is_leaf || is_op_assign)
+    if (!rhs_is_leaf || is_op_assign) {
       auto idx_rhs = lnast->add_child(idx_assign, rhs_node);
-    else
+    } else {
       lnast->add_child(idx_assign, eval_rule(rhs_ast, idx_assign));
-  } else
-    auto tuple_node = eval_tuple(idx_start_ast, idx_nxt_ln);
+    }
+  }
 }
 
 Lnast_node Prp_lnast::eval_tuple(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln,
