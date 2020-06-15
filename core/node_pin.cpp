@@ -163,7 +163,7 @@ std::string_view Node_pin::get_prp_vname() const {
   }
 #endif
   // NOTE: Not the usual get_compact_class_driver() to handle IO change from driver/sink
-  return Ann_node_pin_prp_vname::ref(current_g)->get_val(Compact_class_driver(idx));
+  return Ann_node_pin_prp_vname::ref(current_g)->get(Compact_class_driver(idx));
 }
 
 std::string_view Node_pin::create_name() const {
@@ -191,7 +191,7 @@ std::string_view Node_pin::create_name() const {
 bool Node_pin::has_name() const { return Ann_node_pin_name::ref(current_g)->has_key(get_compact_class_driver()); }
 
 // FIXME->sh: could be deprecated if ann_ssa could be mmapped for a std::string_view
-bool Node_pin::has_prp_vname() const { return Ann_node_pin_prp_vname::ref(current_g)->has_key(get_compact_class_driver()); }
+bool Node_pin::has_prp_vname() const { return Ann_node_pin_prp_vname::ref(current_g)->has(get_compact_class_driver()); }
 
 Node_pin Node_pin::find_driver_pin(LGraph *top, std::string_view wname) {
   auto       ref = Ann_node_pin_name::ref(top);

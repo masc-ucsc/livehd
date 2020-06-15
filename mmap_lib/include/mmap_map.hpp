@@ -1501,11 +1501,28 @@ private:
 		// don't destroy old data: put it into the pool instead
     mmap_gc::recycle(old_mmap_base);
 	}
+
 	size_t mask() const {
 		return *mMask;
 	}
 
-	uint32_t allocate_sview_id(array_type txt) {
+  int recently_inserted(array_type txt) {
+    for (const auto &ent: last_sview_insert) {
+      if (ent.second != txt.size()) continue;
+
+      if (std::memcmp(get_sview(ent.first).data(), txt.data(), txt.size()) == 0) return ent.first;
+    }
+
+    return -1;
+  }
+
+  uint32_t allocate_sview_id(array_type txt) {
+
+    auto pos = recently_inserted(txt);
+    if (pos >= 0) {
+      I(std::memcmp(get_sview(pos).data(), txt.data(), txt.size())==0);
+      return pos;
+    }
 
     reload();
 
@@ -1541,6 +1558,12 @@ private:
     uint8_t xtra_space = bytes&0xF;
     xtra_space = (~xtra_space)&0xF;
     mmap_txt_base[0] += 1+(bytes+xtra_space+7)/8; // +7 to cheaply round up, +1 for the strlen
+
+    last_sview_insert[last_sview_insert_pos].first  = insert_point;
+    last_sview_insert[last_sview_insert_pos].second = txt.size();
+    last_sview_insert_pos++;
+    if (last_sview_insert_pos>=last_sview_insert.size())
+      last_sview_insert_pos = 0;
 
 		return insert_point;
 	}
@@ -1709,6 +1732,9 @@ private:
   }
 
 	// members are sorted so no padding occurs
+  std::array<std::pair<uint32_t,uint32_t>,4> last_sview_insert;
+  int                                        last_sview_insert_pos;
+
 	mutable Node      *mKeyVals = nullptr;
 	mutable uint8_t   *mInfo = nullptr;
 	mutable uint64_t  *mNumElements;
