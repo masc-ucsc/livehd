@@ -1,5 +1,5 @@
 module sync_cnt_nested_if_gld (
-  input clk,
+  input clock,
   input c1,
   input c2,
   output reg [3:0] cnt_o
@@ -20,7 +20,7 @@ always @ (*) begin
   end
 end
 
-always @ (posedge clk) begin
+always @ (posedge clock) begin
   cnt_o <= cnt_o_next[3:0];
 end
 

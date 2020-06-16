@@ -770,11 +770,11 @@ void Inou_lnast_dfg::setup_lnast_to_lgraph_primitive_type_mapping() {
 
 void Inou_lnast_dfg::setup_clk(LGraph *dfg, Node &reg_node) {
   Node_pin clk_dpin;
-  if (!dfg->is_graph_input("clk")) {
-    clk_dpin = dfg->add_graph_input("clk", Port_invalid, 0);
+  if (!dfg->is_graph_input("clock")) {
+    clk_dpin = dfg->add_graph_input("clock", Port_invalid, 0);
     clk_dpin.ref_bitwidth()->e.set_ubits(1);
   } else {
-    clk_dpin = dfg->get_graph_input("clk");
+    clk_dpin = dfg->get_graph_input("clock");
   }
 
   auto clk_spin = reg_node.setup_sink_pin("C");
@@ -829,7 +829,7 @@ void Inou_lnast_dfg::setup_explicit_bits_info(LGraph *dfg){
   dfg->each_graph_input([this](const Node_pin &inp_dpin) {
     auto editable_inp_pin = inp_dpin;
     auto vname = "$" + std::string(editable_inp_pin.get_name());
-    if (vname == "$clk" || vname == "$rst")
+    if (vname == "$clock" || vname == "$rst")
       return;
 
     I (vname2bits_dpin.find(vname) != vname2bits_dpin.end());
