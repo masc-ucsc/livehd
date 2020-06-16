@@ -87,11 +87,11 @@ do
     echo "----------------------------------------------------"
     echo "Reduced_Or_Op Elimination (on stable LGraph)"
     echo "----------------------------------------------------"
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.reduced_or_elimination"
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.assignment_or_elimination"
     if [ $? -eq 0 ]; then
       echo "Successfully eliminate all reduced_or_op: ${pt}.cfg"
     else
-      echo "ERROR: Pyrope compiler failed: reduced_or_elimination, testcase: ${pt}.cfg"
+      echo "ERROR: Pyrope compiler failed: assignment_or_elimination, testcase: ${pt}.cfg"
       exit 1
     fi
 
@@ -184,11 +184,11 @@ do
     echo "----------------------------------------------------"
     echo "Reduced_Or_Op Elimination (on new LGraph)"
     echo "----------------------------------------------------"
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.lnast_dfg.reduced_or_elimination"
+    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.lnast_dfg.assignment_or_elimination"
     if [ $? -eq 0 ]; then
       echo "Successfully eliminate all reduced_or_op in new lg: ${pt}.cfg"
     else
-      echo "ERROR: Pyrope compiler failed on new lg: reduced_or_elimination, testcase: ${pt}.cfg"
+      echo "ERROR: Pyrope compiler failed on new lg: assignment_or_elimination, testcase: ${pt}.cfg"
       exit 1
     fi
 

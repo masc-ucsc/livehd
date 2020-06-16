@@ -98,11 +98,11 @@ do
     echo "Reduced_Or_Op Elimination"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.lnast_dfg.reduced_or_elimination"
+    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.lnast_dfg.assignment_or_elimination"
     if [ $? -eq 0 ]; then
       echo "Successfully eliminate all reduced_or_op in new lg: ${pt}.v"
     else
-      echo "ERROR: Pyrope compiler failed on new lg: reduced_or_elimination, testcase: ${pt}.v"
+      echo "ERROR: Pyrope compiler failed on new lg: assignment_or_elimination, testcase: ${pt}.v"
       exit 1
     fi
 
