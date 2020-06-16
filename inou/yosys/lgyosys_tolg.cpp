@@ -1028,7 +1028,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
         } else if (entry_node.is_type(SFlop_Op) || entry_node.is_type(Mux_Op) || entry_node.is_type(ShiftRight_Op) ||
                    entry_node.is_type(ShiftLeft_Op)) {
           if (conn.first.str() == "\\CLK")
-            sink_pid = entry_node.get_type().get_input_match("C");
+            sink_pid = entry_node.get_type().get_input_match("CLK");
           else
             sink_pid = entry_node.get_type().get_input_match(&conn.first.c_str()[1]);
           I(sink_pid < Port_invalid);

@@ -495,7 +495,7 @@ public:
 class Node_Type_Flop : public Node_Type {
 public:
   Node_Type_Flop() : Node_Type("sflop", SFlop_Op, true) {
-    inputs.push_back("C");
+    inputs.push_back("CLK");
     inputs.push_back("D");
     inputs.push_back("EN");
     inputs.push_back("CLR");  // reset signal

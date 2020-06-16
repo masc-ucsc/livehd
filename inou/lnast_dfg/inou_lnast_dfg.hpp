@@ -35,7 +35,7 @@ private:
 protected:
   std::vector<LGraph *> do_tolg(std::shared_ptr<Lnast> l);
   void                  do_resolve_tuples(LGraph *dfg);
-  static void           do_reduced_or_elimination(LGraph *dfg);
+  static void           do_assignment_or_elimination(LGraph *dfg);
   static void           do_dead_code_elimination(LGraph *dfg);
 
   void lnast2lgraph                           (LGraph *dfg);
@@ -101,7 +101,7 @@ protected:
   // eprp callbacks
   static void tolg                  (Eprp_var &var);
   static void resolve_tuples        (Eprp_var &var);
-  static void reduced_or_elimination(Eprp_var &var);
+  static void assignment_or_elimination(Eprp_var &var);
   static void dce                   (Eprp_var &var);
   static void dbg_lnast_ssa         (Eprp_var &var);
 
