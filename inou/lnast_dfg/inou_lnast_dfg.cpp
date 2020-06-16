@@ -11,7 +11,7 @@ void Inou_lnast_dfg::setup() {
   register_pass(m1);
 
 
-  Eprp_method m2("inou.lnast_dfg.reduced_or_elimination", "reduced_or_op elimination for clear algorithm", &Inou_lnast_dfg::reduced_or_elimination);
+  Eprp_method m2("inou.lnast_dfg.assignment_or_elimination", "eliminate assignment or_op for clear algorithm", &Inou_lnast_dfg::assignment_or_elimination);
   m2.add_label_optional("path", "path to read the lgraph[s]", "lgdb");
   m2.add_label_optional("odir", "output directory for generated verilog files", ".");
   register_inou("lnast_dfg",m2);
@@ -287,8 +287,8 @@ Node_pin Inou_lnast_dfg::setup_tuple_chain_new_max_pos(LGraph *dfg, const Node_p
       auto next_itr = chain_itr.setup_sink_pin(TN).inp_edges().begin()->driver.get_node();
       chain_itr = next_itr;
     } else if (chain_itr.get_type().op == Or_Op) {
-      I(chain_itr.setup_sink_pin(TN).inp_edges().size() == 1);
-      auto next_itr = chain_itr.setup_sink_pin(TN).inp_edges().begin()->driver.get_node();
+      I(chain_itr.setup_sink_pin(0).inp_edges().size() == 1); // or as assign
+      auto next_itr = chain_itr.setup_sink_pin(0).inp_edges().begin()->driver.get_node();
       chain_itr = next_itr;
     } else {
       I(false, "Compile Error: tuple chain must only contains TupAdd_Op or Or_Op"); 
@@ -400,17 +400,17 @@ Node Inou_lnast_dfg::process_ast_assign_op(LGraph *dfg, const Lnast_nid &lnidx_a
   auto c0_name = lnast->get_sname(c0);
   auto c1_name = lnast->get_sname(c1);
 
-  Node_pin opr  = setup_node_assign_and_lhs(dfg, lnidx_assign);
+  Node_pin opr_spin  = setup_node_assign_and_lhs(dfg, lnidx_assign);
   Node_pin opd1 = setup_ref_node_dpin(dfg, c1);
   GI(opd1.get_node().get_type().op != Const_Op, opd1.get_bits() == 0);
 
-  dfg->add_edge(opd1, opr);
-  return opr.get_node();
+  dfg->add_edge(opd1, opr_spin);
+  return opr_spin.get_node();
 }
 
 
 void Inou_lnast_dfg::process_ast_dp_assign_op(LGraph *dfg, const Lnast_nid &lnidx_dp_assign) {
-  auto dp_assign_dpin = process_ast_assign_op(dfg, lnidx_dp_assign).setup_driver_pin(1);
+  auto dp_assign_dpin = process_ast_assign_op(dfg, lnidx_dp_assign).setup_driver_pin(0); //or as assign
   dp_assign_dpin.ref_bitwidth()->dp_flag = true;
 };
 
@@ -618,7 +618,7 @@ Node_pin Inou_lnast_dfg::setup_node_assign_and_lhs(LGraph *dfg, const Lnast_nid 
 
       auto equal_node = dfg->create_node(Or_Op);
       //create an extra-Or_Op for #reg_0, return #reg_0 sink pin for rhs connection
-      name2dpin[lhs_name] = equal_node.setup_driver_pin(1); //reduced or output
+      name2dpin[lhs_name] = equal_node.setup_driver_pin(0); //or as assign
       name2dpin[lhs_name].set_name(lhs_name);
       std::string_view lhs_name_no_ssa = lnast->get_name(lhs);
       setup_dpin_ssa(name2dpin[lhs_name], lhs_name_no_ssa, lnast->get_subs(lhs));
@@ -631,7 +631,7 @@ Node_pin Inou_lnast_dfg::setup_node_assign_and_lhs(LGraph *dfg, const Lnast_nid 
     } else {
       // (1) create Or_Op to represent #reg_N
       auto equal_node =  dfg->create_node(Or_Op);
-      name2dpin[lhs_name] = equal_node.setup_driver_pin(1); //reduced or output
+      name2dpin[lhs_name] = equal_node.setup_driver_pin(0); //or as assign
       name2dpin[lhs_name].set_name(lhs_name);
       std::string_view lhs_name_no_ssa = lnast->get_name(lhs);
       setup_dpin_ssa(name2dpin[lhs_name], lhs_name_no_ssa, lnast->get_subs(lhs));
@@ -653,7 +653,7 @@ Node_pin Inou_lnast_dfg::setup_node_assign_and_lhs(LGraph *dfg, const Lnast_nid 
       }
        
       // (4) actively connect the new created #reg_N to the #reg D-pin
-      auto dpin = equal_node.setup_driver_pin(1);
+      auto dpin = equal_node.setup_driver_pin(0); //or as assign
       auto spin = reg_node.setup_sink_pin("D");
       dfg->add_edge(dpin, spin);
 
@@ -662,9 +662,9 @@ Node_pin Inou_lnast_dfg::setup_node_assign_and_lhs(LGraph *dfg, const Lnast_nid 
     }
   } 
 
-  // create reduced_or for lhs of assign
+  // create "or as assign" for lhs of assign
   auto equal_node =  dfg->create_node(Or_Op);
-  name2dpin[lhs_name] = equal_node.setup_driver_pin(1); //reduced_or
+  name2dpin[lhs_name] = equal_node.setup_driver_pin(0); //or as assign
   name2dpin[lhs_name].set_name(lhs_name);
   std::string_view lhs_name_no_ssa = lnast->get_name(lhs);
   setup_dpin_ssa(name2dpin[lhs_name], lhs_name_no_ssa, lnast->get_subs(lhs));
@@ -791,8 +791,8 @@ void Inou_lnast_dfg::setup_dpin_ssa(Node_pin &dpin, std::string_view var_name, u
 void Inou_lnast_dfg::setup_lgraph_outputs_and_final_var_name(LGraph *dfg) {
   absl::flat_hash_map<std::string_view, Node_pin> vname2dpin; //Pyrope variable -> dpin with the largest ssa var subscription
   for (auto node: dfg->fast()) {
-    if (node.get_type().op == Or_Op && node.setup_driver_pin(1).has_name()) {  //FIXME->sh: this is the only way to detect unconnected reduced_or, tricky but ...
-      auto dpin = node.get_driver_pin(1);
+    if (node.get_type().op == Or_Op && node.inp_edges().size() == 1) { // or as assign
+      auto dpin = node.get_driver_pin(0); // or as assign
       I(dpin.has_ssa());
       auto vname  = dpin.get_prp_vname();
       auto subs = dpin.ref_ssa()->get_subs();
@@ -813,7 +813,7 @@ void Inou_lnast_dfg::setup_lgraph_outputs_and_final_var_name(LGraph *dfg) {
     auto dpin_name = dpin.get_name();
     if(is_output(dpin_name)) {
       auto out_spin = dfg->add_graph_output(dpin_name.substr(1, dpin_name.size()-3), Port_invalid, 0); // Port_invalid pos means do not care about position
-      fmt::print("add graph out:{}\n", dpin_name.substr(1, dpin_name.size()-3));       // -3 means get rid of %, _0(ssa subscript)
+      fmt::print("add graph out:{}\n", dpin_name.substr(1, dpin_name.size()-3));                       // -3 means get rid of %, _0(ssa subscript)
       dfg->add_edge(dpin, out_spin);
     } else {
       //normal variable, but without lnast index, don't know how to get rid of the subs substr from the dpin name now

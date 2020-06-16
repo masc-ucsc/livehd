@@ -5,7 +5,7 @@ rm -f *.prp
 # pts='counter counter_nested_if firrtl_tail2'
 # pts='funcall'
 # pts='firrtl_tail3'
-pts='firrtl_tail3 firrtl_tail2 out_ssa nested_if counter counter_nested_if ssa_rhs adder_stage reg__q_pin firrtl_tail tuple_if if2 if if3_err nested_if_err logic '
+pts='firrtl_tail3 firrtl_tail2 out_ssa nested_if counter counter_nested_if adder_stage tuple_if if2 if if3_err nested_if_err logic firrtl_tail ssa_rhs reg__q_pin '
 
 # pts='tuple_if2'
 
@@ -70,7 +70,7 @@ do
 
 
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.no_bits.tuple.reduced_or.dot
+    mv ${pt}.dot ${pt}.no_bits.tuple.assignment_or.dot
 
 
 
@@ -89,7 +89,7 @@ do
     fi
 
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.no_bits.reduced_or.dot
+    mv ${pt}.dot ${pt}.no_bits.assignmment_or.dot
 
 
 
@@ -109,20 +109,20 @@ do
     fi
 
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.reduced_or.dot
+    mv ${pt}.dot ${pt}.assignment_or.dot
 
 
     echo ""
     echo ""
     echo ""
     echo "----------------------------------------------------"
-    echo "Reduced_Or_Op Elimination(LGraph)"
+    echo "Assignment_Or_Op Elimination(LGraph)"
     echo "----------------------------------------------------"
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.reduced_or_elimination"
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.assignment_or_elimination"
     if [ $? -eq 0 ]; then
-      echo "Successfully eliminate all reduced_or_op: inou/cfg/tests/${pt}.prp"
+      echo "Successfully eliminate all assignment or_op: inou/cfg/tests/${pt}.prp"
     else
-      echo "ERROR: Pyrope compiler failed: reduced_or_elimination, testcase: inou/cfg/tests/${pt}.prp"
+      echo "ERROR: Pyrope compiler failed: assignment_or_elimination, testcase: inou/cfg/tests/${pt}.prp"
       exit 1
     fi
 

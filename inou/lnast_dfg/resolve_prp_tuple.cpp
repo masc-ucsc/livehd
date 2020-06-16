@@ -40,6 +40,7 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
       while (chain_itr.get_type().op != TupRef_Op) {
         Node next_itr;
         if (chain_itr.get_type().op == Or_Op) { //it's ok to have Or_Op(aka assign_op) in the tuple_chain, just ignore it and continue to find target tuple_add
+          I(chain_itr.inp_edges().size() == 1); //or as assign
           next_itr = chain_itr.get_sink_pin(0).get_driver_node();
           chain_itr = next_itr;
           continue;
@@ -124,32 +125,32 @@ void Inou_lnast_dfg::reconnect_to_ff_qpin(LGraph *dfg, const Node &tg_node) {
 
 
 
-void Inou_lnast_dfg::reduced_or_elimination(Eprp_var &var) {
+void Inou_lnast_dfg::assignment_or_elimination(Eprp_var &var) {
   Inou_lnast_dfg p(var);
   std::vector<LGraph *> lgs;
 
   for (const auto &l : var.lgs) {
-    p.do_reduced_or_elimination(l);
+    p.do_assignment_or_elimination(l);
   }
 }
 
 
-void Inou_lnast_dfg::do_reduced_or_elimination(LGraph *dfg) {
+void Inou_lnast_dfg::do_assignment_or_elimination(LGraph *dfg) {
   for (auto node : dfg->fast()) {
     if (node.get_type().op == Or_Op) {
-      bool is_reduced_or = node.has_outputs() && node.out_edges().begin()->driver.get_pid() == 1;
+      bool is_or_as_assign = node.has_outputs() && node.inp_edges().size() == 1; //or as assign
 
-      fmt::print("Or Node:{}\n", node.debug_name());
-      if (is_reduced_or) {
+      /* fmt::print("Or Node:{}\n", node.debug_name()); */
+      if (is_or_as_assign) {
         for (auto &out : node.out_edges()) {
           auto dpin = node.inp_edges().begin()->driver;
           if (!dpin.get_node().is_graph_input()) { // don't rename the graph inputs 
-            dpin.set_name(node.get_driver_pin(1).get_name());
+            /* dpin.set_name(node.get_driver_pin(1).get_name()); */
+            dpin.set_name(node.get_driver_pin(0).get_name()); //or as assign
           }
           auto spin = out.sink;
           dfg->add_edge(dpin, spin);
         }
-
         node.del_node();
       }
     }
