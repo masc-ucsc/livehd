@@ -18,20 +18,21 @@ filegroup(
 )
 
 
-sh_test(
-    name = "lnast_cfg_test.sh",
-    srcs = ["tests/lnast_cfg_test.sh"],
-    # tags = ["manual"],
-    # tags = ["fixme"],
-    data = [
-        "//inou/yosys:liblgraph_yosys.so",
-        "//main:lgshell",
-        ":cfg_pts"
-        ],
-    deps = [
-        "//inou/yosys:scripts",
-    ]
-)
+# JavaScript Pyrope cfg should be deprecated slowly...
+# sh_test(
+#     name = "lnast_cfg_test.sh",
+#     srcs = ["tests/lnast_cfg_test.sh"],
+#     # tags = ["manual"],
+#     # tags = ["fixme"],
+#     data = [
+#         "//inou/yosys:liblgraph_yosys.so",
+#         "//main:lgshell",
+#         ":cfg_pts"
+#         ],
+#     deps = [
+#         "//inou/yosys:scripts",
+#     ]
+# )
 
 
 
