@@ -1212,3 +1212,18 @@ TEST_F(Lconst_test, serialize2a) {
   }
 }
 
+TEST_F(Lconst_test, zerocase) {
+
+  Lconst zero;
+  EXPECT_EQ(zero.get_bits(), 1);
+  EXPECT_EQ(Lconst(0).get_bits(), 1);
+  EXPECT_EQ(Lconst(0,3).get_bits(), 3);
+
+  EXPECT_EQ(Lconst("0x0").get_bits(), 1);
+  EXPECT_EQ(Lconst("0").get_bits(), 1);
+  EXPECT_EQ(Lconst("0u7").get_bits(), 7);
+  EXPECT_EQ(Lconst("0s").get_bits(), 2);
+  EXPECT_EQ(Lconst("0s4").get_bits(), 4);
+
+}
+
