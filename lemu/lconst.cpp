@@ -119,7 +119,7 @@ Lconst::Lconst() {
   explicit_sign = false;
   explicit_bits = false;
   sign          = false;
-  bits          = 0;
+  bits          = 1;
   num           = 0;
 }
 
@@ -255,6 +255,8 @@ Lconst::Lconst(std::string_view orig_txt) {
         break;
       }
     }
+    if (nbits_used==0)
+      nbits_used=1;
   }else if (!explicit_str && (std::isdigit(txt[0]) || txt[0] == '-' || txt[0] == '+')) {
     auto start_i = 0u;
     if (txt.size() > 2 && txt[0] == '0' && (txt[1] == 'd' || txt[1] == 'D')) {
@@ -297,6 +299,8 @@ Lconst::Lconst(std::string_view orig_txt) {
 
   if (!explicit_bits)
     bits = nbits_used;
+
+  I(bits);
 }
 
 void Lconst::dump() const {
@@ -373,6 +377,7 @@ Lconst Lconst::or_op(const Lconst &o) const {
 
 
 Lconst Lconst::adjust_bits(uint16_t amount) const {
+  I(amount>0);
 
   auto res_bits = amount;
 

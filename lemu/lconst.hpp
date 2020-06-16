@@ -83,7 +83,7 @@ protected:
 
   Lconst(bool str, bool a, bool b, bool c, uint16_t d, Number n) : explicit_str(str), explicit_sign(a), explicit_bits(b), sign(c), bits(d), num(n) {}
 
-  uint16_t calc_bits() {
+  uint16_t calc_bits() const {
     uint16_t v=1;
     if (num) {
       v = msb(num)+1;
