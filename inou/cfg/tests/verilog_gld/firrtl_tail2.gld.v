@@ -1,5 +1,5 @@
 module firrtl_tail2 (
-  input        clk,
+  input        clock,
   input        en,
   input  [3:0] inp,
   output [3:0] out
@@ -15,7 +15,7 @@ always @ (*) begin
 end
 
 reg [3:0] x;
-always @ (posedge clk) begin
+always @ (posedge clock) begin
   x <= x_next;
 end
 

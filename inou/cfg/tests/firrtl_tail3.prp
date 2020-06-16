@@ -1,14 +1,15 @@
-$en.__bits  = 1
-$inp.__bits = 4
-%out.__bits = 4
+$clk.__bits = 1
+$inp.__bits = 16
+%out.__bits = 16
 
 x_q = #x.__q_pin
-if ($en) {
+
+cond = x_q == 0
+if (cond) {
   #x = $inp
 } else {
   foo = x_q - 1
   bar = foo >> 1
-  bar := 5 
   bar := foo
   #x = bar
 }
