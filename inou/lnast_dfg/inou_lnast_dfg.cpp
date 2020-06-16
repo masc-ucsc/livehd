@@ -777,7 +777,7 @@ void Inou_lnast_dfg::setup_clk(LGraph *dfg, Node &reg_node) {
     clk_dpin = dfg->get_graph_input("clock");
   }
 
-  auto clk_spin = reg_node.setup_sink_pin("C");
+  auto clk_spin = reg_node.setup_sink_pin("CLK");
   dfg->add_edge (clk_dpin, clk_spin);
 }
 
