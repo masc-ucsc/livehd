@@ -24,8 +24,8 @@ sh_test(
 )
 
 sh_test(
-    name = "lgtoln_verif_from_cfg.sh",
-    srcs = ["tests/lgtoln_verif_from_cfg.sh"],
+    name = "lgtoln_verif_from_pyrope.sh",
+    srcs = ["tests/lgtoln_verif_from_pyrope.sh"],
     data = [
         "//inou/yosys:liblgraph_yosys.so",
         "//inou/cfg:cfg_pts",
