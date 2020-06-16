@@ -705,7 +705,6 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
     auto reg_node = dfg->create_node(SFlop_Op);
     node_dpin = reg_node.setup_driver_pin();
     auto name_no_ssa = lnast->get_name(lnidx_opd);
-    // setup_dpin_ssa(node_dpin, name_no_ssa, lnast->get_subs(lnidx_opd));
     setup_dpin_ssa(node_dpin, name_no_ssa, -1);
     node_dpin.set_name(name_no_ssa); //record #reg instead of #reg_0
     name2dpin[name_no_ssa] = node_dpin;
@@ -784,7 +783,7 @@ void Inou_lnast_dfg::setup_clk(LGraph *dfg, Node &reg_node) {
 
 
 void Inou_lnast_dfg::setup_dpin_ssa(Node_pin &dpin, std::string_view var_name, uint16_t subs) {
-  dpin.ref_ssa()->set_ssa(var_name,subs);
+  dpin.ref_ssa()->set_ssa(subs);
   dpin.set_prp_vname(var_name);
 }
 
@@ -795,7 +794,7 @@ void Inou_lnast_dfg::setup_lgraph_outputs_and_final_var_name(LGraph *dfg) {
     if (node.get_type().op == Or_Op && node.setup_driver_pin(1).has_name()) {  //FIXME->sh: this is the only way to detect unconnected reduced_or, tricky but ...
       auto dpin = node.get_driver_pin(1);
       I(dpin.has_ssa());
-      auto vname  = dpin.ref_ssa()->get_vname();
+      auto vname  = dpin.get_prp_vname();
       auto subs = dpin.ref_ssa()->get_subs();
 
       if(vname2dpin.find(vname) == vname2dpin.end()) {
@@ -848,7 +847,7 @@ void Inou_lnast_dfg::setup_explicit_bits_info(LGraph *dfg){
     for (const auto &out_edge : node.out_edges()) {
       auto target_dpin = out_edge.driver;
       if (target_dpin.has_ssa()) {
-        auto vname = target_dpin.get_ssa().get_vname();
+        auto vname = target_dpin.get_prp_vname();
 
         if (vname2bits_dpin.find(vname) != vname2bits_dpin.end()) {
           auto bits_dpin = vname2bits_dpin[vname];
