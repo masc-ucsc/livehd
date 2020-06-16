@@ -35,7 +35,7 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
   } else if (ntype.is_nary_op()) {
     process_ln_nary_op(ln, lnidx);
   } else if (ntype.is_not()) {
-    process_ln_not_op(ln, lnidx);
+    process_ln_not_op(ln, lnidx, fstmt);
   /*} else if (ntype.is_tuple_add()) {
     process_ast_tuple_add_op(dfg, lnidx);
   } else if (ntype.is_tuple_get()) {
@@ -102,18 +102,7 @@ void Inou_firrtl::process_ln_assign_op(Lnast &ln, const Lnast_nid &lnidx_assign,
   } else if (ntype_c1.is_const()) {
     /* RHS is a number, so I need to make a UIntLiteral (which has the value
      * stored in an IntegerLiteral and the bitwidth stored in a Width). */
-    // FIXME: This only works for unsigned numbers right now.
-    firrtl::FirrtlPB_Expression_IntegerLiteral *ilit = new firrtl::FirrtlPB_Expression_IntegerLiteral();
-    ilit->set_value(get_const_val(ln.get_sname(c1)));
-
-    firrtl::FirrtlPB_Width *width = new firrtl::FirrtlPB_Width();
-    width->set_value(0);//Note + FIXME: Check and make sure that 0 in width means implicit.
-
-    firrtl::FirrtlPB_Expression_UIntLiteral *rhs_ulit = new firrtl::FirrtlPB_Expression_UIntLiteral();
-    rhs_ulit->set_allocated_value(ilit);
-    rhs_ulit->set_allocated_width(width);
-
-    rhs_expr->set_allocated_uint_literal(rhs_ulit);
+    create_integer_object(ln, c1, rhs_expr);
   } else {
       I(false); //FIXME: Should const and ref be only things allowed on RHS?
   }
@@ -139,24 +128,51 @@ void Inou_firrtl::process_ln_assign_op(Lnast &ln, const Lnast_nid &lnidx_assign,
   }
 }
 
-void Inou_firrtl::process_ln_not_op(Lnast &ln, const Lnast_nid &lnidx_op) {
-  bool first = true;
-  bool second = false;
-  std::string lhs, rhs;
-  for (const auto &lnchild_idx : ln.children(lnidx_op)) {
-    if (first) {
-      first = false;
-      second = true;
-      lhs = get_firrtl_name_format(ln, lnchild_idx);//FIXME: Should I use sname (comes with _#) or just name?
-    } else if (second) {
-      second = false;
-      rhs = absl::StrCat("not(", get_firrtl_name_format(ln, lnchild_idx), ")");
-    } else {
-      I(false); // There should only be 1 input and 1 output on a "not" node.
-    }
+void Inou_firrtl::process_ln_not_op(Lnast &ln, const Lnast_nid &lnidx_not, firrtl::FirrtlPB_Statement* fstmt) {
+  auto c0 = ln.get_first_child(lnidx_not);
+  auto c1 = ln.get_sibling_next(c0);
+  auto ntype_c0 = ln.get_type(c0);
+  I(ntype_c0.is_ref());
+  auto ntype_c1 = ln.get_type(c1);
+  I(ntype_c1.is_const() || ntype_c1.is_ref());//FIXME: May have to expand to other types.
+
+  // Form expression that holds RHS contents.
+  firrtl::FirrtlPB_Expression *rhs_expr = new firrtl::FirrtlPB_Expression();
+  firrtl::FirrtlPB_Expression_PrimOp *rhs_prim_op = new firrtl::FirrtlPB_Expression_PrimOp();
+  rhs_prim_op->set_op(firrtl::FirrtlPB_Expression_PrimOp_Op_OP_BIT_NOT);
+  firrtl::FirrtlPB_Expression *rhs_prim_expr = rhs_prim_op->add_arg();
+  if (ntype_c1.is_ref()) {
+    // RHS is a variable, so I need to make a Reference.
+    firrtl::FirrtlPB_Expression_Reference *rhs_ref = new firrtl::FirrtlPB_Expression_Reference();
+    rhs_ref->set_id(get_firrtl_name_format(ln, c1));
+    rhs_prim_expr->set_allocated_reference(rhs_ref);
+  } else if (ntype_c1.is_const()) {
+    /* RHS is a number, so I need to make a UIntLiteral (which has the value
+     * stored in an IntegerLiteral and the bitwidth stored in a Width). */
+    create_integer_object(ln, c1, rhs_prim_expr);
+  } else {
+      I(false); //FIXME: Should const and ref be only things allowed on RHS?
   }
 
-  fmt::print("{} = {}\n", lhs, rhs);
+  /* Now handle LHS. If LHS is an output or register then
+   * the statement should be a Connect. If it isn't, then the
+   * statement should be a Node. */
+  if (is_outp(ln.get_sname(c0)) || is_reg(ln.get_sname(c0))) {
+    create_connect_stmt(ln, c0, rhs_expr, fstmt);
+
+    #ifdef PRINT_DEBUG
+    fmt::print("{} <= not({})\n", get_firrtl_name_format(ln, c0), get_firrtl_name_format(ln, c1));
+    #endif
+
+  } else {
+    /* If I'm assigning to some wire/intermediate,
+     * I can make FIRRTL node statement. */
+    create_node_stmt(ln, c0, rhs_expr, fstmt);
+
+    #ifdef PRINT_DEBUG
+    fmt::print("node {} = not({})\n", get_firrtl_name_format(ln, c0), get_firrtl_name_format(ln, c1));
+    #endif
+  }
 }
 
 void Inou_firrtl::process_ln_nary_op(Lnast &ln, const Lnast_nid &lnidx_op) {
@@ -326,33 +342,6 @@ std::string Inou_firrtl::create_const_token(const std::string_view str) {
   }
 }
 
-std::string Inou_firrtl::get_const_val(std::string_view const_name) {
-  //FIXME: This only works for unsigned numbers.
-  std::string name = (std::string)const_name;
-  char base = 10; // 0 = decimal, 1 = hex, 2 = binary, 3 = octal
-  if (const_name.length() >= 2) {
-    if (name[0] == '0') {
-      if (name[1] == 'd') {
-        base = 10;
-        name = name.substr(2);
-      } else if (name[1] == 'h') {
-        base = 16;
-        name = name.substr(2);
-      } else if (name[1] == 'b') {
-        base = 2;
-        name = name.substr(2);
-      } else if (name[1] == 'o') {
-        base = 8;
-        name = name.substr(2);
-      } else {
-        //Assume base 10 since no base info provided.
-      }
-    }
-  }
-  auto decimal_val = stoi(name, nullptr, base);
-  return std::to_string(decimal_val);
-}
-
 /* If the LHS of some sort of statement that does assigning
  * is a register or an output, then the statement needs to
  * be treated as a FIRRTL "connect" statement. */
@@ -381,4 +370,30 @@ void Inou_firrtl::create_node_stmt(Lnast &ln, const Lnast_nid &lhs, firrtl::Firr
 
   // Have the generic statement of type "node".
   fstmt->set_allocated_node(node);
+}
+
+void Inou_firrtl::create_integer_object(Lnast &ln, const Lnast_nid &lnidx_const, firrtl::FirrtlPB_Expression* rhs_expr) {
+  auto const_value = ln.get_sname(lnidx_const);
+
+  firrtl::FirrtlPB_Expression_IntegerLiteral *ilit = new firrtl::FirrtlPB_Expression_IntegerLiteral();
+  auto lconst_holder = Lconst(ln.get_sname(lnidx_const));
+  auto lconst_str = lconst_holder.is_negative() ? absl::StrCat("-", lconst_holder.get_num().str()) : lconst_holder.get_num().str();
+  ilit->set_value(lconst_str);
+
+  firrtl::FirrtlPB_Width *width = new firrtl::FirrtlPB_Width();
+  width->set_value(lconst_holder.get_bits());
+
+  if (lconst_holder.to_pyrope().find("s") != std::string::npos) {
+    firrtl::FirrtlPB_Expression_SIntLiteral *rhs_slit = new firrtl::FirrtlPB_Expression_SIntLiteral();
+    rhs_slit->set_allocated_value(ilit);
+    rhs_slit->set_allocated_width(width);
+
+    rhs_expr->set_allocated_sint_literal(rhs_slit);
+  } else {
+    firrtl::FirrtlPB_Expression_UIntLiteral *rhs_ulit = new firrtl::FirrtlPB_Expression_UIntLiteral();
+    rhs_ulit->set_allocated_value(ilit);
+    rhs_ulit->set_allocated_width(width);
+
+    rhs_expr->set_allocated_uint_literal(rhs_ulit);
+  }
 }

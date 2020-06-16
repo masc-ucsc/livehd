@@ -6,6 +6,7 @@
 
 #include "pass.hpp"
 #include "lnast.hpp"
+#include "lconst.hpp"
 #include "mmap_tree.hpp"
 #include "firrtl.pb.h"
 
@@ -61,7 +62,7 @@ protected:
   void        process_ln_stmt     (Lnast &ln, const Lnast_nid &lnidx_smts, firrtl::FirrtlPB_Statement* fstmt);
   void        process_ln_assign_op(Lnast &ln, const Lnast_nid &lnidx_assign, firrtl::FirrtlPB_Statement* fstmt);
   void        process_ln_nary_op  (Lnast &ln, const Lnast_nid &lnidx_op);
-  void        process_ln_not_op   (Lnast &ln, const Lnast_nid &lnidx_op);
+  void        process_ln_not_op   (Lnast &ln, const Lnast_nid &lnidx_op, firrtl::FirrtlPB_Statement* fstmt);
   void        process_ln_if_op    (Lnast &ln, const Lnast_nid &lnidx_if);
   void        process_ln_phi_op   (Lnast &ln, const Lnast_nid &lnidx_phi);
 
@@ -75,10 +76,10 @@ protected:
                                      firrtl::FirrtlPB_Statement* fstmt);
   void        create_node_stmt      (Lnast &ln, const Lnast_nid &lhs, firrtl::FirrtlPB_Expression* rhs_expr,
                                      firrtl::FirrtlPB_Statement* fstmt);
+  void        create_integer_object (Lnast &ln, const Lnast_nid &lnidx_const, firrtl::FirrtlPB_Expression* rhs_expr);
   std::string get_firrtl_name_format(Lnast &ln, const Lnast_nid &lnidx);
   std::string strip_prefixes        (const std::string_view str);
   std::string create_const_token    (const std::string_view str);
-  std::string get_const_val         (std::string_view const_name);
 
 private:
   //----------- FOR toLNAST ----------
