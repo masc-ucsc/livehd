@@ -20,7 +20,7 @@ public:
     Lnast_ntype_while,
     Lnast_ntype_phi,
     Lnast_ntype_func_call,    // .()
-    Lnast_ntype_func_def,     // ::{   func_def = sub-graph in lgraph
+    Lnast_ntype_func_def,     // ::   func_def = sub-graph in lgraph
 
     //group: primitive operator
     Lnast_ntype_assign,       // =, pure assignment
@@ -226,13 +226,14 @@ protected:
     "=",
     ":=",
     "as",
-    "=",
+    ":",
     ".",
     "and",
     "or",
+    "!",
     "&",
     "|",
-    "!",
+    "~",
     "^",
     "+",
     "-",
