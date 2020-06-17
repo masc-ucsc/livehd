@@ -61,7 +61,7 @@ protected:
   void        do_tofirrtl         (std::shared_ptr<Lnast> ln);
   void        process_ln_stmt     (Lnast &ln, const Lnast_nid &lnidx_smts, firrtl::FirrtlPB_Statement* fstmt);
   void        process_ln_assign_op(Lnast &ln, const Lnast_nid &lnidx_assign, firrtl::FirrtlPB_Statement* fstmt);
-  void        process_ln_nary_op  (Lnast &ln, const Lnast_nid &lnidx_op);
+  void        process_ln_nary_op  (Lnast &ln, const Lnast_nid &lnidx_assign, firrtl::FirrtlPB_Statement* fstmt);
   void        process_ln_not_op   (Lnast &ln, const Lnast_nid &lnidx_op, firrtl::FirrtlPB_Statement* fstmt);
   void        process_ln_if_op    (Lnast &ln, const Lnast_nid &lnidx_if);
   void        process_ln_phi_op   (Lnast &ln, const Lnast_nid &lnidx_phi);
@@ -80,6 +80,8 @@ protected:
   std::string get_firrtl_name_format(Lnast &ln, const Lnast_nid &lnidx);
   std::string strip_prefixes        (const std::string_view str);
   std::string create_const_token    (const std::string_view str);
+  void        add_const_or_ref_to_primop (Lnast &ln, const Lnast_nid &lnidx, firrtl::FirrtlPB_Expression_PrimOp* prim_op);
+  firrtl::FirrtlPB_Expression_PrimOp_Op  get_firrtl_oper_code(const Lnast_ntype &op_type);
 
 private:
   //----------- FOR toLNAST ----------

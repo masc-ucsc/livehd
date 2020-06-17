@@ -33,7 +33,7 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
   if (ntype.is_assign()) {
     process_ln_assign_op(ln, lnidx, fstmt);
   } else if (ntype.is_nary_op()) {
-    process_ln_nary_op(ln, lnidx);
+    process_ln_nary_op(ln, lnidx, fstmt);
   } else if (ntype.is_not()) {
     process_ln_not_op(ln, lnidx, fstmt);
   /*} else if (ntype.is_tuple_add()) {
@@ -140,19 +140,25 @@ void Inou_firrtl::process_ln_not_op(Lnast &ln, const Lnast_nid &lnidx_not, firrt
   firrtl::FirrtlPB_Expression *rhs_expr = new firrtl::FirrtlPB_Expression();
   firrtl::FirrtlPB_Expression_PrimOp *rhs_prim_op = new firrtl::FirrtlPB_Expression_PrimOp();
   rhs_prim_op->set_op(firrtl::FirrtlPB_Expression_PrimOp_Op_OP_BIT_NOT);
-  firrtl::FirrtlPB_Expression *rhs_prim_expr = rhs_prim_op->add_arg();
-  if (ntype_c1.is_ref()) {
+
+  add_const_or_ref_to_primop(ln, c1, rhs_prim_op);
+  /*if (ntype_c1.is_ref()) {
     // RHS is a variable, so I need to make a Reference.
+    firrtl::FirrtlPB_Expression *rhs_prim_expr = rhs_prim_op->add_arg();
     firrtl::FirrtlPB_Expression_Reference *rhs_ref = new firrtl::FirrtlPB_Expression_Reference();
     rhs_ref->set_id(get_firrtl_name_format(ln, c1));
     rhs_prim_expr->set_allocated_reference(rhs_ref);
   } else if (ntype_c1.is_const()) {
-    /* RHS is a number, so I need to make a UIntLiteral (which has the value
-     * stored in an IntegerLiteral and the bitwidth stored in a Width). */
-    create_integer_object(ln, c1, rhs_prim_expr);
+    // RHS is a number, so I need to make an IntegerLiteral
+    firrtl::FirrtlPB_Expression_IntegerLiteral *rhs_prim_ilit = rhs_prim_op->add_const_();
+    auto lconst_holder = Lconst(ln.get_sname(c1));
+    auto lconst_str = lconst_holder.is_negative() ? absl::StrCat("-", lconst_holder.get_num().str()) : lconst_holder.get_num().str();
+    rhs_prim_ilit->set_value(lconst_str);
+
   } else {
       I(false); //FIXME: Should const and ref be only things allowed on RHS?
-  }
+  }*/
+  rhs_expr->set_allocated_prim_op(rhs_prim_op);
 
   /* Now handle LHS. If LHS is an output or register then
    * the statement should be a Connect. If it isn't, then the
@@ -175,44 +181,75 @@ void Inou_firrtl::process_ln_not_op(Lnast &ln, const Lnast_nid &lnidx_not, firrt
   }
 }
 
-void Inou_firrtl::process_ln_nary_op(Lnast &ln, const Lnast_nid &lnidx_op) {
-  const auto ntype = ln.get_data(lnidx_op).type;
-  std::string firrtl_op;
-  if (ntype.is_plus()) {
-    firrtl_op = "add";
-  } else if (ntype.is_minus()) {
-    firrtl_op = "sub";
-  } else if (ntype.is_mult()) {
-    firrtl_op = "mul";
-  } else if (ntype.is_div()) {
-    firrtl_op = "div";
-  /*} else if (ntype.is_rem()) { //FIXME: Modulo not yet implemented in LNAST
-    firrtl_op = "rem";*/
-  } else if (ntype.is_ge()) {
-    firrtl_op = "geq";
-  } else if (ntype.is_gt()) {
-    firrtl_op = "gt";
-  } else if (ntype.is_le()) {
-    firrtl_op = "leq";
-  } else if (ntype.is_lt()) {
-    firrtl_op = "lt";
-  } else if (ntype.is_same()) {//FIXME: Is this the best way to handle "same" node type?
-    firrtl_op = "eq";
-  } else if (ntype.is_and()) {
-    firrtl_op = "and";
-  } else if (ntype.is_or()) {
-    firrtl_op = "or";
-  } else if (ntype.is_xor()) {
-    firrtl_op = "xor";
-  } else {
-    I(false); //some nary op not yet supported
+void Inou_firrtl::process_ln_nary_op(Lnast &ln, const Lnast_nid &lnidx_op, firrtl::FirrtlPB_Statement* fstmt) {
+  bool first = true;
+  bool first_arg = true;
+  bool hunterc_test = false;
+  std::string lhs, rhs;
+  uint8_t child_count = 0;
+
+  auto firrtl_oper_code = get_firrtl_oper_code(ln.get_data(lnidx_op).type);
+
+  // Grab the LHS for later use. Also create PrimOP for RHS expr.
+  Lnast_nid lnidx_lhs;
+  firrtl::FirrtlPB_Expression_PrimOp *rhs_prim_op = NULL;
+  firrtl::FirrtlPB_Expression        *rhs_expr = NULL;
+  firrtl::FirrtlPB_Expression        *rhs_highest_expr = NULL;
+  for (const auto &lnchild_idx : ln.children(lnidx_op)) {
+    if (first) {
+      first = false;
+      lnidx_lhs = lnchild_idx;
+    } else if (lnchild_idx == ln.get_last_child(lnidx_op)) {
+      // If this is the last element, don't create another new operator.
+      // FIXME: ADD MORE!
+      hunterc_test = true;
+    } else {
+      // If this is not the last element, we'll need another operator to grab next element.
+
+      // This is pretty dense code so here's the concept:
+      // 1. Create new rhs_expr. (if first, create a holder so we don't lose it)
+      // 2. Create new prim_op (rhs_prim_op) underneath the new expression.
+      // 3. Attach const/ref arg to this (rhs_prim_op).
+      if (first_arg) {
+        first_arg = false;
+        rhs_expr = new firrtl::FirrtlPB_Expression();
+        rhs_highest_expr = rhs_expr;
+      } else {
+        rhs_expr = rhs_prim_op->add_arg();
+      }
+      rhs_prim_op = new firrtl::FirrtlPB_Expression_PrimOp();
+      rhs_prim_op->set_op(firrtl_oper_code);
+      rhs_expr->set_allocated_prim_op(rhs_prim_op);
+
+      // Add current child node as member of the primitive op (rhs_prim_op)
+      add_const_or_ref_to_primop(ln, lnchild_idx, rhs_prim_op);
+    }
+    child_count++;
   }
+  I(hunterc_test); //FIXME: remove this later, exists to make sure else-if case gets hit.
 
-  auto child_count = process_op_children(ln, lnidx_op, firrtl_op);
-
+  auto ntype = ln.get_data(lnidx_op).type;
   if (ntype.is_ge() || ntype.is_gt() || ntype.is_le() || ntype.is_lt()) {
-    I(child_count == 3); //There should only be 1 output and 2 input, I think?
+    I(child_count == 3); //I think there should only be 1 output + 2 inputs to a comp node.
   }
+
+  if (is_outp(ln.get_sname(lnidx_lhs)) || is_reg(ln.get_sname(lnidx_lhs))) {
+    create_connect_stmt(ln, lnidx_lhs, rhs_expr, fstmt);
+
+    #ifdef PRINT_DEBUG
+    fmt::print("{} <= nary_op...\n", get_firrtl_name_format(ln, lnidx_lhs));
+    #endif
+
+  } else {
+    /* If I'm assigning to some wire/intermediate,
+     * I can make FIRRTL node statement. */
+    create_node_stmt(ln, lnidx_lhs, rhs_expr, fstmt);
+
+    #ifdef PRINT_DEBUG
+    fmt::print("node {} = nary_op...\n", get_firrtl_name_format(ln, lnidx_lhs));
+    #endif
+  }
+
 }
 
 void Inou_firrtl::process_ln_if_op(Lnast &ln, const Lnast_nid &lnidx_if) {
@@ -259,33 +296,6 @@ void Inou_firrtl::process_ln_phi_op(Lnast &ln, const Lnast_nid &lnidx_phi) {
   }
 
   fmt::print("{} = {}\n", lhs, rhs);
-}
-
-/* This function will work if the FIRRTL expression takes two inputs.
- * As an example, if we have a + b + c in LNAST, it will convert to
- * add(add(a+b), c) */
-uint8_t Inou_firrtl::process_op_children(Lnast &ln, const Lnast_nid &lnidx_op, const std::string firrtl_op) {
-  bool first = true;
-  bool second = false;
-  std::string lhs, rhs;
-  uint8_t child_count = 0;
-  for (const auto &lnchild_idx : ln.children(lnidx_op)) {
-    if (first) {
-      first = false;
-      second = true;
-      lhs = get_firrtl_name_format(ln, lnchild_idx);//FIXME: Should I use sname (comes with _#) or just name?
-    } else if (second) {
-      second = false;
-      rhs = get_firrtl_name_format(ln, lnchild_idx);
-    } else {
-      rhs = absl::StrCat(firrtl_op, "(", rhs, ", ", get_firrtl_name_format(ln, lnchild_idx), ")");
-    }
-    child_count++;
-  }
-
-  fmt::print("{} = {}\n", lhs, rhs);
-  //Note: usually this output will be ignored, unless we want to make sure a certain # of children are present.
-  return child_count;
 }
 
 //----- Helper Functions -----
@@ -373,8 +383,6 @@ void Inou_firrtl::create_node_stmt(Lnast &ln, const Lnast_nid &lhs, firrtl::Firr
 }
 
 void Inou_firrtl::create_integer_object(Lnast &ln, const Lnast_nid &lnidx_const, firrtl::FirrtlPB_Expression* rhs_expr) {
-  auto const_value = ln.get_sname(lnidx_const);
-
   firrtl::FirrtlPB_Expression_IntegerLiteral *ilit = new firrtl::FirrtlPB_Expression_IntegerLiteral();
   auto lconst_holder = Lconst(ln.get_sname(lnidx_const));
   auto lconst_str = lconst_holder.is_negative() ? absl::StrCat("-", lconst_holder.get_num().str()) : lconst_holder.get_num().str();
@@ -397,3 +405,55 @@ void Inou_firrtl::create_integer_object(Lnast &ln, const Lnast_nid &lnidx_const,
     rhs_expr->set_allocated_uint_literal(rhs_ulit);
   }
 }
+
+firrtl::FirrtlPB_Expression_PrimOp_Op Inou_firrtl::get_firrtl_oper_code(const Lnast_ntype &ntype) {
+  if (ntype.is_plus()) {
+    return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_ADD;
+  } else if (ntype.is_minus()) {
+    return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_SUB;
+  } else if (ntype.is_mult()) {
+    return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_TIMES;
+  } else if (ntype.is_div()) {
+    return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_DIVIDE;
+  //} else if (ntype.is_rem()) { //FIXME: Modulo not yet implemented in LNAST
+  //  firrtl_op = "rem";
+  } else if (ntype.is_ge()) {
+    return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_GREATER_EQ;
+  } else if (ntype.is_gt()) {
+    return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_GREATER;
+  } else if (ntype.is_le()) {
+    return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_LESS_EQ;
+  } else if (ntype.is_lt()) {
+    return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_LESS;
+  } else if (ntype.is_same()) {//FIXME: Is this the best way to handle "same" node type?
+    return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_EQUAL;
+  } else if (ntype.is_and()) {
+    return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_BIT_AND;
+  } else if (ntype.is_or()) {
+    return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_BIT_OR;
+  } else if (ntype.is_xor()) {
+    return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_BIT_XOR;
+  } else {
+    I(false); //some nary op not yet supported
+    return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_UNKNOWN;
+  }
+}
+
+void Inou_firrtl::add_const_or_ref_to_primop(Lnast &ln, const Lnast_nid &lnidx, firrtl::FirrtlPB_Expression_PrimOp* prim_op) {
+  if (ln.get_data(lnidx).type.is_ref()) {
+    // Lnidx is a variable, so I need to make a Reference message.
+    firrtl::FirrtlPB_Expression *rhs_prim_expr = prim_op->add_arg();
+    firrtl::FirrtlPB_Expression_Reference *rhs_ref = new firrtl::FirrtlPB_Expression_Reference();
+    rhs_ref->set_id(get_firrtl_name_format(ln, lnidx));
+    rhs_prim_expr->set_allocated_reference(rhs_ref);
+  } else if (ln.get_data(lnidx).type.is_const()) {
+    // Lnidx is a number, so I need to make an IntegerLiteral message.
+    firrtl::FirrtlPB_Expression_IntegerLiteral *rhs_prim_ilit = prim_op->add_const_();
+    auto lconst_holder = Lconst(ln.get_sname(lnidx));
+    auto lconst_str = lconst_holder.is_negative() ? absl::StrCat("-", lconst_holder.get_num().str()) : lconst_holder.get_num().str();
+    rhs_prim_ilit->set_value(lconst_str);
+  } else {
+      I(false); //FIXME: Should const and ref be only things allowed on RHS?
+  }
+}
+
