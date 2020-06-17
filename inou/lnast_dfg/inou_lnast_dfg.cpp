@@ -385,6 +385,19 @@ void Inou_lnast_dfg::nary_node_rhs_connections(LGraph *dfg, Node &opr_node, cons
       }
       break;
     }
+    case ShiftLeft_Op: {
+      auto i = 0;
+      for (const auto &opd : opds) {
+        if (i == 0) {
+          dfg->add_edge(opd, opr_node.setup_sink_pin(0));
+        } else {
+          dfg->add_edge(opd, opr_node.setup_sink_pin(1));
+        }
+        i++;
+        I(i <= 2);
+      }
+      break;
+    }
     default: {
       for (const auto &opd : opds) {
         dfg->add_edge(opd, opr_node.setup_sink_pin(0));  

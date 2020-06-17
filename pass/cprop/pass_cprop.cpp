@@ -9,8 +9,8 @@
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
-#define TRACE(x)
-//#define TRACE(x) x
+//#define TRACE(x)
+#define TRACE(x) x
 
 void setup_pass_cprop() { Pass_cprop::setup(); }
 
@@ -82,6 +82,7 @@ void Pass_cprop::try_collapse_forward(Node &node) {
 }
 
 void Pass_cprop::replace_node(Node &node, const Lconst &result) {
+
   auto new_node = node.get_class_lgraph()->create_node_const(result);
   auto dpin     = new_node.get_driver_pin();
 
