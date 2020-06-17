@@ -202,7 +202,7 @@ struct __attribute__((packed)) Node_Internal_Page {
 
   Index_ID get_idx() const { return idx; }
 
-  static Node_Internal_Page &get(const SEdge_Internal *ptr) {
+  static const Node_Internal_Page &get(const SEdge_Internal *ptr) {
     // Every 1 Page a full Node is reserved for pointer keeping
     uint64_t root_int = (uint64_t)ptr;
     root_int          = root_int >> 12;
@@ -213,9 +213,9 @@ struct __attribute__((packed)) Node_Internal_Page {
 
     return *root;
   }
-  static Node_Internal_Page &get(const Edge_raw *ptr) { return get(reinterpret_cast<const SEdge_Internal *>(ptr)); }
+  static const Node_Internal_Page &get(const Edge_raw *ptr) { return get(reinterpret_cast<const SEdge_Internal *>(ptr)); }
 
-  static Node_Internal_Page &get(const Node_Internal *ptr) { return get(reinterpret_cast<const SEdge_Internal *>(ptr)); }
+  static const Node_Internal_Page &get(const Node_Internal *ptr) { return get(reinterpret_cast<const SEdge_Internal *>(ptr)); }
 
   bool is_page_align() const {
     return ((((uint64_t)this) & 0xFFF) == 0);  // page align.

@@ -9,8 +9,8 @@
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
-//#define TRACE(x)
-#define TRACE(x) x
+#define TRACE(x)
+//#define TRACE(x) x
 
 void setup_pass_cprop() { Pass_cprop::setup(); }
 
