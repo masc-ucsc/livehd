@@ -142,22 +142,6 @@ void Inou_firrtl::process_ln_not_op(Lnast &ln, const Lnast_nid &lnidx_not, firrt
   rhs_prim_op->set_op(firrtl::FirrtlPB_Expression_PrimOp_Op_OP_BIT_NOT);
 
   add_const_or_ref_to_primop(ln, c1, rhs_prim_op);
-  /*if (ntype_c1.is_ref()) {
-    // RHS is a variable, so I need to make a Reference.
-    firrtl::FirrtlPB_Expression *rhs_prim_expr = rhs_prim_op->add_arg();
-    firrtl::FirrtlPB_Expression_Reference *rhs_ref = new firrtl::FirrtlPB_Expression_Reference();
-    rhs_ref->set_id(get_firrtl_name_format(ln, c1));
-    rhs_prim_expr->set_allocated_reference(rhs_ref);
-  } else if (ntype_c1.is_const()) {
-    // RHS is a number, so I need to make an IntegerLiteral
-    firrtl::FirrtlPB_Expression_IntegerLiteral *rhs_prim_ilit = rhs_prim_op->add_const_();
-    auto lconst_holder = Lconst(ln.get_sname(c1));
-    auto lconst_str = lconst_holder.is_negative() ? absl::StrCat("-", lconst_holder.get_num().str()) : lconst_holder.get_num().str();
-    rhs_prim_ilit->set_value(lconst_str);
-
-  } else {
-      I(false); //FIXME: Should const and ref be only things allowed on RHS?
-  }*/
   rhs_expr->set_allocated_prim_op(rhs_prim_op);
 
   /* Now handle LHS. If LHS is an output or register then
