@@ -6,6 +6,8 @@
 #include <type_traits>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
+
 #include "iassert.hpp"
 #include "lgedge.hpp"
 #include "lgraph_base_core.hpp"
@@ -23,6 +25,8 @@ protected:
 
   static inline constexpr std::string_view unknown_io = "unknown";
   Graph_library *                          library;
+
+  absl::flat_hash_map<uint32_t, uint32_t> idx_insert_cache;
 
   Index_ID create_node_space(const Index_ID idx, const Port_ID dst_pid, const Index_ID master_nid, const Index_ID root_nid);
   Index_ID get_space_output_pin(const Index_ID idx, const Port_ID dst_pid, Index_ID &root_nid);
