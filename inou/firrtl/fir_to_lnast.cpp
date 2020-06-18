@@ -102,9 +102,54 @@ void Inou_firrtl::create_bitwidth_dot_node(Lnast& lnast, uint32_t bitwidth, Lnas
   lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(absl::StrCat("0d", bitwidth))));
 }
 
+int Inou_firrtl::get_bit_count(const firrtl::FirrtlPB_Type type) {
+  switch (type.type_case()) {
+    case 2: { //UInt type
+      return type.uint_type().width().value();
+    } case 3: { //SInt type
+      return type.sint_type().width().value();
+    } case 4: { //Clock type
+      return 1;
+    } case 5: { //Bundle type
+      I(false); //FIXME: Not yet supported. Should it even be?
+    } case 6: { //Vector type
+      I(false); //FIXME: Not yet supported. Should it even be?
+    } case 7: { //Fixed type
+      I(false); //FIXME: Not yet supported.
+    } case 8: { //Analog type
+      return type.analog_type().width().value();
+    } case 9: { //AsyncReset type
+      return 1;
+    } case 10: { //Reset type
+      return 1;
+    } default:
+      cout << "Unknown port type." << endl;
+      I(false);
+  }
+  return -1;
+}
+
+void Inou_firrtl::init_wire_dots(Lnast& lnast, const firrtl::FirrtlPB_Statement_Wire& expr, Lnast_nid& parent_node) {
+  auto wire_bits = get_bit_count(expr.type());
+  if (wire_bits <= 0) {
+    return;
+  }
+  auto temp_var_name = create_temp_var(lnast);
+
+  auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_dot("dot"));
+  lnast.add_child(idx_dot, Lnast_node::create_ref(temp_var_name));
+  lnast.add_child(idx_dot, Lnast_node::create_ref(lnast.add_string(expr.id())));
+  lnast.add_child(idx_dot, Lnast_node::create_ref("__bits"));
+
+  auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
+  lnast.add_child(idx_asg, Lnast_node::create_ref(temp_var_name));
+  lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(to_string(wire_bits))));
+}
+
 /* When creating a register, we have to set the register's
  * clock, reset, and init values using "dot" nodes in the LNAST.
  * This function creates all of those when a reg is first declared. */
+//FIXME: Eventually add in other "dot" nodes when supported.
 void Inou_firrtl::init_register_dots(Lnast& lnast, const firrtl::FirrtlPB_Statement_Register& expr, Lnast_nid& parent_node) {
   auto reg_name = lnast.add_string(absl::StrCat("#", expr.id()));
   auto clk_name = lnast.add_string(get_full_name(ReturnExprString(lnast, expr.clock(), parent_node)));
@@ -438,47 +483,33 @@ void Inou_firrtl::HandleTailOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_P
   auto idx_dp_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign("dpasg_tail"));
   lnast.add_child(idx_dp_asg, Lnast_node::create_ref(lhs_str));
   AttachExprToOperator(lnast, op.arg(0), idx_dp_asg);
+}
 
-  //auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign("asg_tail"));
-  //lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs)));
-  //AttachExprToOperator(lnast, op.arg(0), idx_asg);
-
-  /* x = tail(tmp)(2) should take graph form: (like x = tmp[tmp.__bits - 3 : 0])
-   *     dot                minus          range            bit_sel         asg
-   *  /   |   \           /   |   \      /   |    \        /   |   \      /     \
-   *___F0 tmp __bits  ___F1 ___F0  3  ___F2 ___F1  0   ___F3 tmp ___F2   x    ___F3 */
-
-  /*auto temp_var_name_f0 = create_temp_var(lnast);
+void Inou_firrtl::handle_concat_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, std::string lhs) {
+  /* x = concat(e1, e2) is the same as Verilog's x = {e1, e2}
+   * In LNAST this looks like x = (e1 << e2.__bits) | e2
+   *      dot              shl           or
+   *     / | \            / | \        /  |  \
+   * ___F0 e2 __bits  ___F1 e1 ___F0  x ___F1 e2  */
+  auto temp_var_name_f0 = create_temp_var(lnast);
   auto temp_var_name_f1 = create_temp_var(lnast);
-  auto temp_var_name_f2 = create_temp_var(lnast);
-  auto temp_var_name_f3 = create_temp_var(lnast);
 
-  auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_dot("dot_tail"));
+  I(op.arg_size() == 2); //FIXME: Right now I don't support either e1 or e2 being a IntLiteral
+
+  auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_dot("dot_concat"));
   lnast.add_child(idx_dot, Lnast_node::create_ref(temp_var_name_f0));
-  I(op.arg_size() == 1);
-  AttachExprToOperator(lnast, op.arg(0), idx_dot);
+  AttachExprToOperator(lnast, op.arg(1), idx_dot);
   lnast.add_child(idx_dot, Lnast_node::create_ref("__bits"));
 
-  auto idx_mns = lnast.add_child(parent_node, Lnast_node::create_minus("minus_tail"));
-  lnast.add_child(idx_mns, Lnast_node::create_ref(temp_var_name_f1));
-  lnast.add_child(idx_mns, Lnast_node::create_ref(temp_var_name_f0));
-  I(op.const__size() == 1);
-  int const_plus_one = stoi(op.const_(0).value()) + 1;//FIXME: If the const str is a # that overflows an int, this will be problems here.
-  lnast.add_child(idx_mns, Lnast_node::create_const(lnast.add_string(absl::StrCat("0d", const_plus_one))));
+  auto idx_shl = lnast.add_child(parent_node, Lnast_node::create_shift_left("shl_concat"));
+  lnast.add_child(idx_shl, Lnast_node::create_ref(temp_var_name_f1));
+  AttachExprToOperator(lnast, op.arg(0), idx_shl);
+  lnast.add_child(idx_shl, Lnast_node::create_ref(temp_var_name_f0));
 
-  auto idx_range = lnast.add_child(parent_node, Lnast_node::create_range("range_tail"));
-  lnast.add_child(idx_range, Lnast_node::create_ref(temp_var_name_f2));
-  lnast.add_child(idx_range, Lnast_node::create_ref(temp_var_name_f1));
-  lnast.add_child(idx_range, Lnast_node::create_const("0d0"));
-
-  auto idx_bit_sel = lnast.add_child(parent_node, Lnast_node::create_bit_select("bit_sel_tail"));
-  lnast.add_child(idx_bit_sel, Lnast_node::create_ref(temp_var_name_f3));
-  AttachExprToOperator(lnast, op.arg(0), idx_bit_sel);
-  lnast.add_child(idx_bit_sel, Lnast_node::create_ref(temp_var_name_f2));
-
-  auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg_tail"));
-  lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs)));
-  lnast.add_child(idx_asg, Lnast_node::create_ref(temp_var_name_f3));*/
+  auto idx_or = lnast.add_child(parent_node, Lnast_node::create_or("or_concat"));
+  lnast.add_child(idx_or, Lnast_node::create_ref(lnast.add_string(lhs)));
+  lnast.add_child(idx_or, Lnast_node::create_ref(temp_var_name_f1));
+  AttachExprToOperator(lnast, op.arg(1), idx_or);
 }
 
 void Inou_firrtl::HandlePadOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, std::string lhs) {
@@ -584,7 +615,7 @@ std::string Inou_firrtl::handle_subfield_acc(Lnast& ln, const firrtl::FirrtlPB_E
     auto temp_var_name = create_temp_var(ln);
     auto element_name = names.top();
     names.pop();
-    fmt::print("dot {} {} {}\n", temp_var_name, bundle_accessor, element_name);
+    fmt::print("dot: {} {} {}\n", temp_var_name, bundle_accessor, element_name);
     auto idx_dot = ln.add_child(parent_node, Lnast_node::create_dot(""));
     if (names.empty()) {
       ln.add_child(idx_dot, Lnast_node::create_ref(temp_var_name));
@@ -852,9 +883,10 @@ void Inou_firrtl::ListPrimOpInfo(Lnast& lnast, const firrtl::FirrtlPB_Expression
       break;
 
     } case 16: { //Op_Concat
-      cout << "Cat(";
+      handle_concat_op(lnast, op, parent_node, lhs);
+      /*cout << "Cat(";
       PrintPrimOp(lnast, op, ", ", parent_node);
-      cout << ");";
+      cout << ");";*/
       break;
 
     } case 17: { //Op_Less
@@ -1218,8 +1250,7 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
   //Print out statement
   switch(stmt.statement_case()) {
     case 1: { //Wire
-      //FIXME BIG: Need to make a new interface for wire, since I altered old one.
-      //ListTypeInfo(lnast, stmt.wire().type(), parent_node, stmt.wire().id());
+      init_wire_dots(lnast, stmt.wire(), parent_node);
       break;
 
     } case 2: { //Register
