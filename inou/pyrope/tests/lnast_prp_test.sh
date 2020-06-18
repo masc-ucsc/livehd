@@ -2,12 +2,9 @@
 rm -rf ./lgdb
 rm -f *.v
 rm -f *.prp
-# pts='counter counter_nested_if firrtl_tail2'
-# pts='funcall'
-# pts='firrtl_tail3'
-pts='firrtl_tail3 firrtl_tail2 out_ssa nested_if counter counter_nested_if adder_stage tuple_if if2 if if3_err nested_if_err logic firrtl_tail ssa_rhs reg__q_pin '
+# pts='test'
+pts='test firrtl_tail3 firrtl_tail2 out_ssa nested_if counter counter_nested_if adder_stage tuple_if if2 if if3_err nested_if_err logic firrtl_tail ssa_rhs reg__q_pin '
 
-# pts='tuple_if2'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -92,7 +89,6 @@ do
     mv ${pt}.dot ${pt}.no_bits.assignmment_or.dot
 
 
-
     echo ""
     echo ""
     echo ""
@@ -133,7 +129,7 @@ do
     echo ""
     echo ""
     echo "----------------------------------------------------"
-    echo "copy propagation optimization(LGraph)"
+    echo "Copy Propagation Optimization(LGraph)"
     echo "----------------------------------------------------"
     ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop"
     if [ $? -eq 0 ]; then

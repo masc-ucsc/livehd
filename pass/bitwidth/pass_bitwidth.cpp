@@ -56,12 +56,27 @@ void Pass_bitwidth::do_trans(LGraph *lg) {
   bw_implicit_range_to_bits(lg);
   bw_settle_graph_outputs(lg);
 
+
+  
+  //FIXME->sh: Phase IV, V, VI could be merged into a single pass 
   fmt::print("Phase-IV: Replace Dp_assign Or_Op by Pick_Op\n");
   bw_replace_dp_node_by_pick(lg);
 
-
   fmt::print("Phase-V: Bits Extension\n");
   bw_bits_extension_by_join(lg);
+
+  fmt::print("Phase-VI: Construct RHS Tuple_Get Bits Nodes for LHS\n");
+  auto to_execute_bw_again = bw_tg_bits_rhs_construction(lg);
+  
+  if (to_execute_bw_again) {
+    do_trans(lg);
+    /* bw_pass_iterate(); */
+    /* bw_implicit_range_to_bits(lg); */
+    /* bw_settle_graph_outputs(lg); */
+    /* bw_replace_dp_node_by_pick(lg); */
+    /* bw_bits_extension_by_join(lg); */
+  }
+
 }
 
 //------------------------------------------------------------------
@@ -840,6 +855,7 @@ void Pass_bitwidth::bw_bits_extension_by_join(LGraph *lg) {
   }
 }
 
+
 void Pass_bitwidth::bw_replace_dp_node_by_pick(LGraph *lg) {
   for (const auto & node : lg->fast()) {
     if (node.get_type().op == Or_Op && node.inp_edges().size() == 1 && node.get_driver_pin(0).get_bitwidth().dp_flag) { // or as assign
@@ -864,4 +880,26 @@ void Pass_bitwidth::bw_replace_dp_node_by_pick(LGraph *lg) {
       node.inp_edges().begin()->del_edge();
     }
   }
+}
+
+bool Pass_bitwidth::bw_tg_bits_rhs_construction (LGraph *lg) {
+  bool to_execute_bw_again = false;
+  for (const auto &node : lg->fast()) {
+    if (node.get_type().op == TupGet_Op) {
+      auto tg_node = node;
+      I(tg_node.get_sink_pin(1).inp_edges().begin()->driver.get_name().substr(0,6) == "__bits");
+
+      auto bits = tg_node.get_sink_pin(0).inp_edges().begin()->driver.get_bits(); //get bits from tuple_ref (now is an Or_node)
+      auto rhs_bits_node_dpin = lg->create_node_const(bits).setup_driver_pin();
+      
+      auto original_sink = tg_node.out_edges().begin()->sink;
+      lg->add_edge(rhs_bits_node_dpin, original_sink);
+
+      /* mark_descendant_dpins(rhs_bits_node_dpin); */
+
+      tg_node.del_node();
+      to_execute_bw_again = true;
+    }
+  }
+  return to_execute_bw_again;
 }

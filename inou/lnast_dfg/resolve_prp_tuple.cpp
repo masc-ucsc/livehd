@@ -18,7 +18,6 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
   absl::flat_hash_map<Node_pin, Node_pin> tg2actual_dpin; //record tuple_get to its actual reference dpin
   for (const auto &node : dfg->fast()) {
     if (node.get_type().op == TupAdd_Op) {
-      // I(node.get_sink_pin(KV).inp_edges().size() == 1); // not necessarily true, might get extra inp from TupGet
       if (std::find(to_be_deleted.begin(), to_be_deleted.end(), node) == to_be_deleted.end()) {
         to_be_deleted.insert(node);
         continue;
@@ -26,15 +25,23 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
     }
 
     if (node.get_type().op == TupGet_Op and tuple_get_has_key_name(node)) {
+
+      auto tup_get_target = node.get_sink_pin(KN).inp_edges().begin()->driver.get_name();
+
+      if (tup_get_target.substr(0,6) == "__bits") 
+        continue; // __bits @rhs, cannot know the bits information after the pass/bitwidh, keep this tuple_get and handle it until BW
+      
+
+
       if (std::find(to_be_deleted.begin(), to_be_deleted.end(), node) == to_be_deleted.end())
         to_be_deleted.insert(node);
 
-      auto tup_get_target = node.get_sink_pin(KN).inp_edges().begin()->driver.get_name();
 
       if (tup_get_target.substr(0,7) == "__q_pin") {
         reconnect_to_ff_qpin(dfg, node);
         continue;
       }
+
 
       auto chain_itr = node.get_sink_pin(TN).inp_edges().begin()->driver.get_node();
       while (chain_itr.get_type().op != TupRef_Op) {
@@ -60,6 +67,8 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
         next_itr = chain_itr.setup_sink_pin(TN).get_driver_node();
         chain_itr = next_itr;
       }
+
+
     } else if (node.get_type().op == TupGet_Op and tuple_get_has_key_pos(node)) {
       if (std::find(to_be_deleted.begin(), to_be_deleted.end(), node) == to_be_deleted.end())
         to_be_deleted.insert(node);

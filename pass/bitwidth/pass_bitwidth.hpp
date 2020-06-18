@@ -32,14 +32,15 @@ protected:
   void iterate_driver_pin        (Node_pin &dpin);
 
 
-  void        bw_pass_setup              (LGraph *lg);
-  void        dp_assign_initialization   (LGraph *lg);
-  bool        bw_pass_iterate            ();
-  void        bw_pass_dump               (LGraph *lg);
-  void        bw_settle_graph_outputs    (LGraph *lg);
-  void        bw_bits_extension_by_join  (LGraph *lg);
-  void        bw_replace_dp_node_by_pick (LGraph *lg);
-  static void bw_implicit_range_to_bits  (LGraph *lg);
+  void        bw_pass_setup               (LGraph *lg);
+  void        dp_assign_initialization    (LGraph *lg);
+  bool        bw_pass_iterate             ();
+  void        bw_pass_dump                (LGraph *lg);
+  void        bw_settle_graph_outputs     (LGraph *lg);
+  void        bw_bits_extension_by_join   (LGraph *lg);
+  void        bw_replace_dp_node_by_pick  (LGraph *lg);
+  bool        bw_tg_bits_rhs_construction (LGraph *lg);
+  static void bw_implicit_range_to_bits   (LGraph *lg);
   static void trans(Eprp_var &var);
   void        do_trans(LGraph *orig);
 

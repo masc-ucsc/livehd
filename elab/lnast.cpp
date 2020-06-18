@@ -126,7 +126,7 @@ bool Lnast::is_bit_attr_setting(const Lnast_nid &opr_nid) {
     auto c0_dot = get_first_child(opr_nid);
     auto c1_dot = get_sibling_next(c0_dot);
     auto c2_dot = get_sibling_next(c1_dot);
-    if (get_name(c2_dot) == "__bits") {
+    if (get_name(c2_dot) == "__bits" && is_lhs(get_parent(opr_nid), opr_nid)) {
       return true;
     }
   }
@@ -762,8 +762,8 @@ void Lnast::ssa_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &o
 }
 
 bool Lnast::is_lhs(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
-  auto &dot_lrhs_table = dot_lrhs_tables[psts_nid];
   I(get_type(opr_nid).is_dot() || get_type(opr_nid).is_select());
+  auto &dot_lrhs_table = dot_lrhs_tables[psts_nid];
   if (dot_lrhs_table.find(opr_nid)!= dot_lrhs_table.end())
     return dot_lrhs_table[opr_nid].first;
   I(false);
