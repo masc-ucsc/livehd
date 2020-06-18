@@ -261,19 +261,19 @@ public:
     return &base[idx];
   }
 
-  [[nodiscard]] const T *ref(size_t const &idx) const {
+  [[nodiscard]] inline const T *ref(size_t const &idx) const {
     const auto *base = ref_base();
     assert(idx < size());
     return &base[idx];
   }
 
-  [[nodiscard]] T *ref(size_t const &idx) {
+  [[nodiscard]] inline T *ref(size_t const &idx) {
     auto *base = ref_base();
     assert(idx < size());
     return &base[idx];
   }
 
-  [[nodiscard]] const T &operator[](const size_t idx) const {
+  [[nodiscard]] inline const T &operator[](const size_t idx) const {
     const auto *base = ref_base();
     assert(idx < size());
     return base[idx];

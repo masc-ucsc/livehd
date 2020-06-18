@@ -28,7 +28,7 @@ protected:
   Index_ID get_space_output_pin(const Index_ID idx, const Port_ID dst_pid, Index_ID &root_nid);
   Index_ID get_space_output_pin(const Index_ID master_nid, const Index_ID idx, const Port_ID dst_pid, const Index_ID root_nid);
   // Index_ID         get_space_input_pin(const Index_ID master_nid, const Index_ID idx, bool large = false);
-  virtual Index_ID create_node_int() = 0;
+  Index_ID create_node_int();
 
   Index_ID add_edge_int(Index_ID dst_nid, Port_ID dst_pid, Index_ID src_nid, Port_ID inp_pid);
 

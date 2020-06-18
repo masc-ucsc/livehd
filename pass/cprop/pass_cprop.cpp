@@ -47,6 +47,22 @@ void Pass_cprop::collapse_forward_same_op(Node &node) {
   }
 }
 
+#if 0
+void Pass_cprop::collapse_forward_shiftleft(Node &node) {
+  I(node.get_type().op==ShiftLeft_Op);
+
+  // a <<n | b -> join(a,b) if b.bits>=n
+  for (auto &out : node.out_edges()) {
+    auto sink_node = out.sink.get_node();
+    if (sink_node.get_type().op != Or_Op) continue;
+
+    if (!sink_node.get_driver_pin(0).has_outputs()) continue;
+
+    HERE
+  }
+}
+#endif
+
 void Pass_cprop::collapse_forward_always(Node &node) {
   for (auto &out : node.out_edges()) {
     for (auto &inp : node.inp_edges()) {
@@ -147,10 +163,10 @@ void Pass_cprop::trans(LGraph *g) {
     auto op = node.get_type().op;
     if (op == Join_Op && all_inputs_constant) {
       Lconst result;
-      for(auto &i:node.inp_edges_ordered()) {
+      for(auto &i:node.inp_edges_ordered_reverse()) {
         result = result << i.driver.get_bits();
         auto c = i.driver.get_node().get_type_const();
-        I(c<=i.driver.get_bits());
+        I(c.get_bits()<=i.driver.get_bits());
         result  = result | c;
       }
       result.adjust_bits(node.get_driver_pin().get_bits());

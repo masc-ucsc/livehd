@@ -27,7 +27,7 @@ echo ""
 echo ""
 echo ""
 echo "===================================================="
-echo "Pyrope Full Compilation (C++ Parser)"  
+echo "Pyrope Full Compilation (C++ Parser)"
 echo "===================================================="
 
 
@@ -37,16 +37,16 @@ do
       echo "ERROR: could not find ${pt}.prp in /inou/cfg/tests"
       exit !
     fi
-    
+
     ln -s inou/cfg/tests/${pt}.prp;
 
-   
+
     echo "----------------------------------------------------"
-    echo "Pyrope -> LNAST-SSA Graphviz debug"  
+    echo "Pyrope -> LNAST-SSA Graphviz debug"
     echo "----------------------------------------------------"
 
     ${LGSHELL} "inou.pyrope files:inou/cfg/tests/${pt}.prp |> inou.lnast_dfg.dbg_lnast_ssa |> inou.graphviz.from"
-  
+
     if [ -f ${pt}.lnast.dot ]; then
       echo "Successfully create a lnast from inou/cfg/tests/${pt}.prp"
     else
@@ -55,9 +55,9 @@ do
     fi
 
     echo "----------------------------------------------------"
-    echo "Pyrope -> LNAST -> LGraph"  
+    echo "Pyrope -> LNAST -> LGraph"
     echo "----------------------------------------------------"
-    
+
     # ${LGSHELL} "inou.lnast_dfg.tolg files:${pt}.cfg"
     ${LGSHELL} "inou.pyrope files:inou/cfg/tests/${pt}.prp |> inou.lnast_dfg.tolg"
     if [ $? -eq 0 ]; then
@@ -78,7 +78,7 @@ do
     echo ""
     echo ""
     echo "----------------------------------------------------"
-    echo "Tuple Chain Resolve(LGraph)"  
+    echo "Tuple Chain Resolve(LGraph)"
     echo "----------------------------------------------------"
     ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.resolve_tuples"
     if [ $? -eq 0 ]; then
@@ -97,7 +97,7 @@ do
     echo ""
     echo ""
     echo "----------------------------------------------------"
-    echo "Bitwidth Optimization(LGraph) Round-1"  
+    echo "Bitwidth Optimization(LGraph) Round-1"
     echo "----------------------------------------------------"
 
     ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth"
@@ -127,8 +127,24 @@ do
     fi
 
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.dce.dot
+    mv ${pt}.dot ${pt}.cprop.dot
 
+    echo ""
+    echo ""
+    echo ""
+    echo "----------------------------------------------------"
+    echo "copy propagation optimization(LGraph)"
+    echo "----------------------------------------------------"
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop"
+    if [ $? -eq 0 ]; then
+      echo "Successfully eliminate all assignment or_op: inou/cfg/tests/${pt}.prp"
+    else
+      echo "ERROR: Pyrope compiler failed: cprop, testcase: inou/cfg/tests/${pt}.prp"
+      exit 1
+    fi
+
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+    mv ${pt}.dot ${pt}.dce.dot
 
     echo ""
     echo ""

@@ -409,8 +409,6 @@ XEdge_iterator LGraph::out_edges(const Node &node) const {
   Index_ID master_idx = idx2;
   while (true) {
     auto            n = node_internal[idx2].get_num_local_outputs();
-    if (node_internal[idx2].is_root())
-      master_idx = idx2;
 
     if (n) {
       uint8_t         i;
@@ -428,6 +426,10 @@ XEdge_iterator LGraph::out_edges(const Node &node) const {
     Index_ID tmp = node_internal[idx2].get_next();
     I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
     idx2 = tmp;
+    if (node_internal[idx2].is_root())
+      master_idx = idx2;
+    else
+      master_idx = node_internal[idx2].get_nid();
   }
 
   return xiter;
@@ -443,8 +445,6 @@ XEdge_iterator LGraph::inp_edges(const Node &node) const {
   Index_ID master_idx = idx2;
   while (true) {
     auto            n = node_internal[idx2].get_num_local_inputs();
-    if (node_internal[idx2].is_root())
-      master_idx = idx2;
 
     if (n) {
       uint8_t         i;
@@ -462,6 +462,10 @@ XEdge_iterator LGraph::inp_edges(const Node &node) const {
     Index_ID tmp = node_internal[idx2].get_next();
     I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
     idx2 = tmp;
+    if (node_internal[idx2].is_root())
+      master_idx = idx2;
+    else
+      master_idx = node_internal[idx2].get_nid();
   }
 
   return xiter;
@@ -480,6 +484,23 @@ XEdge_iterator LGraph::out_edges_ordered(const Node &node) const {
 
   std::sort(iter.begin(), iter.end(),
             [](const XEdge &a, const XEdge &b) -> bool { return a.driver.get_pid() < b.driver.get_pid(); });
+
+  return iter;
+}
+
+XEdge_iterator LGraph::inp_edges_ordered_reverse(const Node &node) const {
+  auto iter = inp_edges(node);
+
+  std::sort(iter.begin(), iter.end(), [](const XEdge &a, const XEdge &b) -> bool { return a.sink.get_pid() > b.sink.get_pid(); });
+
+  return iter;
+}
+
+XEdge_iterator LGraph::out_edges_ordered_reverse(const Node &node) const {
+  auto iter = out_edges(node);
+
+  std::sort(iter.begin(), iter.end(),
+            [](const XEdge &a, const XEdge &b) -> bool { return a.driver.get_pid() > b.driver.get_pid(); });
 
   return iter;
 }
@@ -791,15 +812,6 @@ Node LGraph::create_node_sub(std::string_view sub_name) {
 const Sub_node &LGraph::get_self_sub_node() const { return library->get_sub(get_lgid()); }
 
 Sub_node *LGraph::ref_self_sub_node() { return library->ref_sub(get_lgid()); }
-
-Index_ID LGraph::create_node_int() {
-  get_lock();  // FIXME: change to Copy on Write permissions (mmap exception, and remap)
-  emplace_back();
-
-  I(node_internal[node_internal.size() - 1].get_dst_pid() == 0);
-  I(node_internal[node_internal.size() - 1].get_nid() == node_internal.size() - 1);
-  return node_internal.size() - 1;
-}
 
 Fwd_edge_iterator LGraph::forward(bool visit_sub) { return Fwd_edge_iterator(this, visit_sub); }
 Bwd_edge_iterator LGraph::backward(bool visit_sub) { return Bwd_edge_iterator(this, visit_sub); }

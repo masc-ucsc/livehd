@@ -29,8 +29,6 @@ protected:
     return &htree;
   }
 
-  Index_ID create_node_int() final;
-
   explicit LGraph(std::string_view _path, std::string_view _name, std::string_view _source);
 
   bool has_node_outputs(Index_ID idx) const {
@@ -84,6 +82,9 @@ protected:
 
   XEdge_iterator out_edges_ordered(const Node &node) const;
   XEdge_iterator inp_edges_ordered(const Node &node) const;
+
+  XEdge_iterator out_edges_ordered_reverse(const Node &node) const;
+  XEdge_iterator inp_edges_ordered_reverse(const Node &node) const;
 
   XEdge_iterator out_edges(const Node_pin &pin) const;
   XEdge_iterator inp_edges(const Node_pin &pin) const;

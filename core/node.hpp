@@ -237,6 +237,9 @@ public:
   XEdge_iterator out_edges_ordered() const;  // Slower than inp_edges, but edges ordered by driver.pid
   XEdge_iterator inp_edges_ordered() const;  // Slower than inp_edges, but edges ordered by sink.pid
 
+  XEdge_iterator out_edges_ordered_reverse() const;  // Slower than inp_edges, but edges ordered by driver.pid
+  XEdge_iterator inp_edges_ordered_reverse() const;  // Slower than inp_edges, but edges ordered by sink.pid
+
   bool is_graph_io() const { return nid == Hardcoded_input_nid || nid == Hardcoded_output_nid; }
   bool is_graph_input() const { return nid == Hardcoded_input_nid; }
   bool is_graph_output() const { return nid == Hardcoded_output_nid; }
