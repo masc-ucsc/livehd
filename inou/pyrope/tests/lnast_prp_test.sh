@@ -1,7 +1,5 @@
 #!/bin/bash
-rm -rf ./lgdb
-rm -f *.v
-rm -f *.prp
+# rm -rf ./lgdb
 # pts='test'
 pts='test firrtl_tail3 firrtl_tail2 out_ssa nested_if counter counter_nested_if adder_stage tuple_if if2 if if3_err nested_if_err logic firrtl_tail ssa_rhs reg__q_pin '
 

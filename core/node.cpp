@@ -379,7 +379,10 @@ Node_pin_iterator Node::out_connected_pins() const { return current_g->out_conne
 Node_pin_iterator Node::inp_setup_pins() const { return current_g->inp_setup_pins(*this); }
 Node_pin_iterator Node::out_setup_pins() const { return current_g->out_setup_pins(*this); }
 
-void Node::del_node() { current_g->del_node(*this); }
+void Node::del_node() {
+  current_g->del_node(*this);
+  nid = 0; // invalidate node after delete
+}
 
 void Node::set_name(std::string_view iname) { Ann_node_name::ref(current_g)->set(get_compact_class(), iname); }
 

@@ -234,6 +234,10 @@ void Node_Internal::try_recycle() {
 
   I(!is_free_state());
 
+  //TODO: recycle the node no matter what
+
+  nid = 0; // so that it will become invalid
+
   if (is_root()) return;  // Keep node for attributes
 
   Node_Internal *root_ptr = (Node_Internal *)&get_root();

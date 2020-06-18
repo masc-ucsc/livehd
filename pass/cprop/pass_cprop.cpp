@@ -137,9 +137,12 @@ void Pass_cprop::trans(LGraph *g) {
     }
 
     try_collapse_forward(node);
+    if (node.is_invalid()) {
+      continue;  // It got deleted
+    }
 
-    if (!node.has_outputs()) { // The node may have been deleted
-      continue;
+    if (!node.has_outputs()) {
+      continue; // edges got deleted
     }
 
     int  n_inputs_constant   = 0;

@@ -1,15 +1,15 @@
 
 module simple_rf2
     (input                    clk
-     ,input [7-1:0]           waddr0
-     ,input [13-1:0]          din0
-     ,input [7-1:0]           raddr0
+     ,input [3-1:0]           waddr0
+     ,input [6-1:0]          din0
+     ,input [3-1:0]           raddr0
 
-     ,output [13-1:0]         q0
+     ,output [6-1:0]         q0
 
      );
 
-   reg [13-1:0]                      rf[16-1:0]; // synthesis syn_ramstyle = "block_ram"
+   reg [6-1:0]                      rf[8-1:0]; // synthesis syn_ramstyle = "block_ram"
 
    always @(*) begin
      q0 = rf[raddr0];
