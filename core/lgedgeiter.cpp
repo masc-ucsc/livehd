@@ -81,7 +81,7 @@ void Fwd_edge_iterator::Fwd_iter::topo_add_chain_down(const Node_pin &dst_pin) {
 void Fwd_edge_iterator::Fwd_iter::topo_add_chain_fwd(const Node_pin &dst_pin) {
   const auto dst_node = dst_pin.get_node();
   if (visited.count(dst_node.get_compact())) return;
-  if (pending_stack_set.contains(dst_node.get_compact())) return;
+  //if (pending_stack_set.contains(dst_node.get_compact())) return;
 
   pending_stack_set.insert(dst_node.get_compact());
 
@@ -208,7 +208,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending() {
 
     I(!(*global_it).is_graph_io());  // NOTE: should we propagate IO for going up?
     if (!visited.count((*global_it).get_compact())) {
-      if (pending_stack_set.contains((*global_it).get_compact())) {
+      if (!pending_stack_set.contains((*global_it).get_compact())) {
         pending_stack_set.insert((*global_it).get_compact());
         pending_stack.push_back(*global_it);
         for (auto &edge2 : (*global_it).inp_edges()) {  // fwd

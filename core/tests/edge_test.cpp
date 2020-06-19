@@ -359,8 +359,7 @@ TEST_F(Edge_test, overflow_delete_node) {
   EXPECT_EQ(n1.out_edges().size(),0);
   EXPECT_EQ(n2.inp_edges().size(),0);
 
-  EXPECT_EQ(s1.out_edges().size(),0);
-  EXPECT_EQ(s1.inp_edges().size(),0);
+  EXPECT_TRUE(s1.is_invalid());
 }
 
 TEST_F(Edge_test, overflow_delete_del_edge_bench) {
@@ -439,8 +438,7 @@ TEST_F(Edge_test, overflow_delete_del_node_bench) {
   EXPECT_EQ(n1.out_edges().size(),0);
   EXPECT_EQ(n2.inp_edges().size(),0);
 
-  EXPECT_EQ(s1.out_edges().size(),0);
-  EXPECT_EQ(s1.inp_edges().size(),0);
+  EXPECT_TRUE(s1.is_invalid());
 }
 
 #if 0

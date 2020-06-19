@@ -574,7 +574,6 @@ void LGraph::del_node(const Node &node) {
     else
       self_master_idx = node_int_ptr->get_nid();
 
-    I(node_internal[self_master_idx].is_root());
     Node_pin self_sink  (this, this, Hierarchy_tree::root_index(), self_master_idx, node_int_ptr->get_dst_pid(), true);
     Node_pin self_driver(this, this, Hierarchy_tree::root_index(), self_master_idx, node_int_ptr->get_dst_pid(), false);
 
@@ -615,7 +614,6 @@ void LGraph::del_node(const Node &node) {
       return;
     }
     Index_ID tmp = node_internal[idx2].get_next();
-    I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
     node_int_ptr->try_recycle();
     idx2 = tmp;
   }

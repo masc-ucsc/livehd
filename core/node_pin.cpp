@@ -7,7 +7,6 @@
 
 Node_pin::Node_pin(LGraph *_g, LGraph *_c_g, const Hierarchy_index &_hidx, Index_ID _idx, Port_ID _pid, bool _sink)
     : top_g(_g), current_g(_c_g), hidx(_hidx), idx(_idx), pid(_pid), sink(_sink) {
-  I(current_g->is_valid_node_pin(idx));
   I(_g);
   I(_idx);
 }

@@ -1103,6 +1103,10 @@ private:
 		mMaxNumElementsAllowed = &static_mMaxNumElementsAllowed;
 		mInfoInc               = &static_InitialInfoInc;
 		mInfoHashShift         = &static_InitialInfoHashShift;
+
+    for(auto &ent:last_sview_insert) {
+      ent.first = 0; // clear to invalid possition
+    }
   }
 public:
 	using iterator = Iter<false>;
@@ -1507,10 +1511,13 @@ private:
 	}
 
   int recently_inserted(array_type txt) const {
-    for (const auto &ent: last_sview_insert) {
-      if (ent.second != txt.size()) continue;
+    uint32_t h = hash_bytes(txt.data(), txt.size());
+    const auto &ent = last_sview_insert[h%last_sview_insert.size()];
 
-      if (std::memcmp(get_sview(ent.first).data(), txt.data(), txt.size()) == 0) return ent.first;
+    if (ent.second == h && ent.first) {
+      // OK, check contents if there is a match
+      const auto *data = get_sview(ent.first).data(); // data is null if empty array
+      if (data && std::memcmp(data, txt.data(), txt.size()) == 0) return ent.first;
     }
 
     return -1;
@@ -1520,7 +1527,6 @@ private:
 
     auto pos = recently_inserted(txt);
     if (pos >= 0) {
-      assert(std::memcmp(get_sview(pos).data(), txt.data(), txt.size())==0);
       return pos;
     }
 
@@ -1559,11 +1565,12 @@ private:
     xtra_space = (~xtra_space)&0xF;
     mmap_txt_base[0] += 1+(bytes+xtra_space+7)/8; // +7 to cheaply round up, +1 for the strlen
 
-    if (last_sview_insert_pos>=last_sview_insert.size())
-      last_sview_insert_pos = 0;
-    last_sview_insert[last_sview_insert_pos].first  = insert_point;
-    last_sview_insert[last_sview_insert_pos].second = txt.size();
-    last_sview_insert_pos++;
+    {
+      uint32_t h = hash_bytes(txt.data(), txt.size());
+      auto &ent = last_sview_insert[h%last_sview_insert.size()];
+      ent.first = insert_point;
+      ent.second = h;
+    }
 
 		return insert_point;
 	}
@@ -1732,8 +1739,7 @@ private:
   }
 
 	// members are sorted so no padding occurs
-  std::array<std::pair<uint32_t,uint32_t>,4> last_sview_insert;
-  int                                        last_sview_insert_pos;
+  std::array<std::pair<uint32_t,uint32_t>,8> last_sview_insert;
 
 	mutable Node      *mKeyVals = nullptr;
 	mutable uint8_t   *mInfo = nullptr;
