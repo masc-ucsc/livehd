@@ -447,9 +447,9 @@ std::string Lconst::to_pyrope() const {
   return str;
 }
 
-int Lconst::to_i() const {
+long int Lconst::to_i() const {
   I(is_i());
-  return static_cast<int>(num);
+  return static_cast<long int>(num);
 }
 
 std::string Lconst::to_yosys() const {

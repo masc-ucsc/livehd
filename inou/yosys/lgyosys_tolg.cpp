@@ -679,11 +679,19 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
 
       entry_node = g->create_node(Or_Op);
 
-      exit_node.set_type(Not_Op);
-      auto &not_node = exit_node;
+      if (size>1) {
+        auto not_node = g->create_node(Not_Op, 1);
+        g->add_edge(entry_node.setup_driver_pin(1), not_node.setup_sink_pin(), 1);
 
-      g->add_edge(entry_node.setup_driver_pin(1), not_node.setup_sink_pin(), size);  // OR
-      not_node.setup_driver_pin().set_bits(size);                                    // NOT
+        exit_node.set_type(Join_Op, size);
+
+        auto zero_dpin = g->create_node_const(Lconst(0, size-1)).setup_driver_pin();
+        g->add_edge(not_node.get_driver_pin(), exit_node.setup_sink_pin(0), 1);
+        g->add_edge(zero_dpin                , exit_node.setup_sink_pin(1), size-1);
+      }else{
+        exit_node.set_type(Not_Op, 1);
+        g->add_edge(entry_node.setup_driver_pin(1), exit_node.setup_sink_pin(), 1);    // reduce_OR join op
+      }
 
     } else if (std::strncmp(cell->type.c_str(), "$or", 3) == 0 || std::strncmp(cell->type.c_str(), "$logic_or", 9) == 0 ||
                std::strncmp(cell->type.c_str(), "$reduce_or", 10) == 0 ||
@@ -700,12 +708,15 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
       if (cell->parameters.find("\\Y_WIDTH") != cell->parameters.end()) size = cell->parameters["\\Y_WIDTH"].as_int();
 
       entry_node = g->create_node(Xor_Op);
-      exit_node.set_type(Not_Op);
 
-      if (std::strncmp(cell->type.c_str(), "$xnor", 5) == 0)
-        g->add_edge(entry_node.setup_driver_pin(0), exit_node.setup_sink_pin());
-      else
-        g->add_edge(entry_node.setup_driver_pin(1), exit_node.setup_sink_pin(), size);
+      if (std::strncmp(cell->type.c_str(), "$xnor", 5) == 0) {
+        exit_node.set_type(Not_Op, size);
+        g->add_edge(entry_node.setup_driver_pin(0), exit_node.setup_sink_pin(), size);
+      }else {
+        // reduce xnor
+        exit_node.set_type(Not_Op, 1);
+        g->add_edge(entry_node.setup_driver_pin(1), exit_node.setup_sink_pin(), 1);
+      }
 
     } else if (std::strncmp(cell->type.c_str(), "$dff", 4) == 0) {
       if (cell->parameters.find("\\WIDTH") != cell->parameters.end()) size = cell->parameters["\\WIDTH"].as_int();

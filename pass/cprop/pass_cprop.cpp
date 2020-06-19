@@ -63,15 +63,28 @@ void Pass_cprop::collapse_forward_shiftleft(Node &node) {
 }
 #endif
 
-void Pass_cprop::collapse_forward_always(Node &node) {
+// Collase forward single node but only for pid!=0 (not reduction ops)
+void Pass_cprop::collapse_forward_always_pin0(Node &node) {
+  bool can_delete = true;
+
   for (auto &out : node.out_edges()) {
+    if (out.driver.get_pid()) {
+      can_delete = false;
+      continue;
+    }
+
     for (auto &inp : node.inp_edges()) {
+      if (inp.sink.get_pid()) {
+        can_delete = false;
+        continue;
+      }
       TRACE(fmt::print("cprop forward_always pin:{} to pin:{}\n",inp.driver.debug_name(), out.sink.debug_name()));
       inp.driver.connect_sink(out.sink);
     }
   }
   TRACE(fmt::print("cprop forward_always del_node node:{}\n",node.debug_name()));
-  node.del_node();
+  if (can_delete)
+    node.del_node();
 }
 
 void Pass_cprop::try_collapse_forward(Node &node) {
@@ -85,7 +98,7 @@ void Pass_cprop::try_collapse_forward(Node &node) {
   if (inp_edges.size()==1) {
     if (op == Sum_Op || op == Mult_Op || op == Div_Op || op == Mod_Op || op == Join_Op || op == And_Op || op == Or_Op ||
         op == Xor_Op) {
-      collapse_forward_always(node);
+      collapse_forward_always_pin0(node);
       return;
     }
   }
@@ -129,6 +142,7 @@ void Pass_cprop::replace_node(Node &node, const Lconst &result) {
 void Pass_cprop::trans(LGraph *g) {
 
   for (auto node : g->forward()) {
+    fmt::print("node {}\n",node.debug_name());
 
     if (!node.has_outputs()) {
       if (!node.is_type_sub()) // No subs (inside side-effets

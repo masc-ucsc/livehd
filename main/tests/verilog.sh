@@ -133,18 +133,13 @@ do
       fail_list+=" "$base
     fi
   else
-    if [[ $fixme == "true" ]]; then
-      ${LGCHECK} --implementation=tmp_yosys_mix/all_${base}.v --reference=${full_input} --top=${base}
-      if [ $? -eq 0 ]; then
-        echo "Successfully matched generated verilog with original verilog (${full_input})"
-      else
-        echo "FAIL: circuits are not equivalent (${full_input})"
-        ((fail++))
-        fail_list+=" "$base
-      fi
+    ${LGCHECK} --implementation=tmp_yosys_mix/all_${base}.v --reference=${full_input} --top=${base}
+    if [ $? -eq 0 ]; then
+      echo "Successfully matched generated verilog with original verilog (${full_input})"
     else
-      echo "PARALLEL yosys test"
-      ${LGCHECK} --implementation=tmp_yosys_mix/all_${base}.v --reference=${full_input} --top=${base} &
+      echo "FAIL: circuits are not equivalent (${full_input})"
+      ((fail++))
+      fail_list+=" "$base
     fi
   fi
 

@@ -13,8 +13,7 @@ module expression_00002(a0, a1, b0, b1, y);
   wire [5:0] y5;
 
   output [29:0] y;
-  //assign y = {y0,y1,y2,y3,y4,y5};
-  assign y = {y0,y0,y0,y0,y0,y0};
+  assign y = {y0,y1,y2,y3,y4,y0};
 
   localparam [3:0] p0 = (2'd1);
   localparam [5:0] p1 = {(3'd0),(3'd7)};
@@ -23,7 +22,7 @@ module expression_00002(a0, a1, b0, b1, y);
   localparam [3:0] p4 = (^((-5'sd0)<=(2'd2)));
   localparam [5:0] p5 = ((((5'sd15)|(4'd11))==((3'd0)?(3'd7):(-5'sd4)))&({4{(3'd2)}}=={1{((3'd5)?(4'd11):(4'd13))}}));
 
-  assign y0 = ((~a1)!=(a1<a0))!=((b0>>>a1)<=(^a1));
+  assign y0 = (((~a1)!=(a1<a0))!=((b0>>>a1)<=(^a1)))?1:0;
   assign y1 = (!(~{{3{(4'sd7)}},((p2<p3)=={p0,p2})}));
   assign y2 = {p3,b0};
   assign y3 = ({1{(a0<<p3)}}<=(p3^~a0));
