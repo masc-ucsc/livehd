@@ -228,6 +228,19 @@ void Inou_firrtl::CreateConditionNode(Lnast& lnast, const firrtl::FirrtlPB_Expre
       //CreateConditionNode(lnast, expr.sub_field().expression(), parent_node, expr.sub_field().field());
       break;
 
+    } case 8: { //SubIndex -- static access, vec[3]
+      std::string subindex_name = ReturnExprString(lnast, expr, stmts_node);
+      lnast.add_child(parent_node, Lnast_node::create_cond(lnast.add_string(subindex_name)));
+      break;
+    } case 9: { //SubAccess -- dynamic access, vec[n]
+      fmt::print("Error: SubAccesses not yet supported in CreateConditionNode.\n");
+      I(false);
+      break;
+    } case 10: {
+      std::string primop_tempvar_accessor = ReturnExprString(lnast, expr, stmts_node);
+      lnast.add_child(parent_node, Lnast_node::create_cond(lnast.add_string(primop_tempvar_accessor)));
+      fmt::print("Cond: {}\n", primop_tempvar_accessor);
+      break;
     } default:
       cout << "ERROR CreateConditionNode: Trying to create a condition node for an expression not yet supported or unknown.: " << expr.expression_case() << endl;
       assert(false);
@@ -254,7 +267,8 @@ void Inou_firrtl::HandleMuxAssign(Lnast& lnast, const firrtl::FirrtlPB_Expressio
   //I(parent_node.is_stmts() | parent.is_cstmts());
 
   auto idx_mux_if    = lnast.add_child(parent_node, Lnast_node::create_if("mux"));
-  CreateConditionNode(lnast, expr.mux().condition(), idx_mux_if, parent_node);
+  auto idx_cstmts    = lnast.add_child(idx_mux_if, Lnast_node::create_cstmts(get_new_seq_name(lnast)));
+  CreateConditionNode(lnast, expr.mux().condition(), idx_mux_if, idx_cstmts);
   auto idx_stmt_tr   = lnast.add_child(idx_mux_if, Lnast_node::create_stmts(get_new_seq_name(lnast)));
   auto idx_stmt_f    = lnast.add_child(idx_mux_if, Lnast_node::create_stmts(get_new_seq_name(lnast)));
 
@@ -277,7 +291,12 @@ void Inou_firrtl::HandleValidIfAssign(Lnast& lnast, const firrtl::FirrtlPB_Expre
   InitialExprAdd(lnast, expr.valid_if().value(), idx_stmt_tr, lhs_of_asg);
 
   //For validIf, if the condition is not met then what the LHS equals is undefined. We'll just use 0.
-  auto idx_asg_false = lnast.add_child(idx_stmt_f, Lnast_node::create_assign("assign"));
+  Lnast_nid idx_asg_false;
+  if(lhs_of_asg.substr(0,1) == "%") {
+    idx_asg_false = lnast.add_child(idx_stmt_f, Lnast_node::create_dp_assign("dp_asg"));
+  } else {
+    idx_asg_false = lnast.add_child(idx_stmt_f, Lnast_node::create_assign("assign"));
+  }
   lnast.add_child(idx_asg_false, Lnast_node::create_ref(lnast.add_string(lhs_of_asg)));
   lnast.add_child(idx_asg_false, Lnast_node::create_const("0d0"));
 }
@@ -1039,6 +1058,8 @@ void Inou_firrtl::ListPrimOpInfo(Lnast& lnast, const firrtl::FirrtlPB_Expression
  * SIntLiteral (make sure used correct syntax: #s(bits))
  * FixedLiteral
  * SubField (figure out how to include #/$/% if necessary)
+ * SubAccess
+ * SubIndex
  */
 
 /* */
@@ -1061,14 +1082,26 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
       break;
 
     } case 2: { //UIntLiteral
-      auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
+      Lnast_nid idx_asg;
+      if (lhs.substr(0,1) == "%") {
+        idx_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign("dp_asg"));
+      } else {
+        idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
+      }
+      //auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
       lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs)));
       auto str_val = absl::StrCat("0d", expr.uint_literal().value().value());// + "u" + to_string(expr.uint_literal().width().value());
       lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(str_val)));
       break;
 
     } case 3: { //SIntLiteral
-      auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
+      Lnast_nid idx_asg;
+      if (lhs.substr(0,1) == "%") {
+        idx_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign("dp_asg"));
+      } else {
+        idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
+      }
+      //auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
       lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs)));
       auto str_val = absl::StrCat("0d", expr.sint_literal().value().value());// + "s" + to_string(expr.sint_literal().width().value());
       lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(str_val)));
@@ -1085,7 +1118,12 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
     } case 7: { //SubField
       std::string rhs = handle_subfield_acc(lnast, expr.sub_field(), parent_node);
 
-      auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
+      Lnast_nid idx_asg;
+      if (lhs.substr(0,1) == "%") {
+        idx_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign("dp_asg"));
+      } else {
+        idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
+      }
       lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs)));
       lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(rhs)));
       break;
@@ -1220,6 +1258,11 @@ std::string Inou_firrtl::ReturnExprString(Lnast& lnast, const firrtl::FirrtlPB_E
       break;
     } case 7: { //SubField
       expr_string = handle_subfield_acc(lnast, expr.sub_field(), parent_node);
+      break;
+    } case 10: { //PrimOp
+      // This case is special. We need to create a set of nodes for it and return the lhs of that node.
+      expr_string = create_temp_var(lnast);
+      ListPrimOpInfo(lnast, expr.prim_op(), parent_node, expr_string);
       break;
     } case 11: { //FixedLiteral
       //FIXME: Unsure of how this should be.
