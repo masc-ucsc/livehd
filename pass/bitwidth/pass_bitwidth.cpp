@@ -891,6 +891,8 @@ bool Pass_bitwidth::bw_tg_bits_rhs_construction (LGraph *lg) {
 
       auto bits = tg_node.get_sink_pin(0).inp_edges().begin()->driver.get_bits(); //get bits from tuple_ref (now is an Or_node)
       auto rhs_bits_node_dpin = lg->create_node_const(bits).setup_driver_pin();
+      /* node.setup_driver_pin().ref_bitwidth()->e.set_const(val); // FIXME: I do not think that we need this */
+      rhs_bits_node_dpin.ref_bitwidth()->e.set_const(bits);
       
       auto original_sink = tg_node.out_edges().begin()->sink;
       lg->add_edge(rhs_bits_node_dpin, original_sink);

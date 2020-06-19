@@ -1,6 +1,6 @@
-t1 = 8
-t2 = 5
-a = t1
-b = t2
+a = 7
+b = 7
+c.__bits = a.__bits + 1
+c = a + b
 
-%out = (a << b.__bits) | b //{a,b}
+%out = c 
