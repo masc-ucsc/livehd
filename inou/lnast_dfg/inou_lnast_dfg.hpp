@@ -91,6 +91,7 @@ protected:
   static bool  tuple_get_has_key_pos         (const Node &tup_get);
   static bool  is_tup_get_target             (const Node &tup_add, std::string_view tup_get_target);
   static bool  is_tup_get_target             (const Node &tup_add, uint32_t         tup_get_target);
+  static void  collect_node_for_deleting     (const Node &node, absl::flat_hash_set<Node> &to_be_deleted);
 
 
 

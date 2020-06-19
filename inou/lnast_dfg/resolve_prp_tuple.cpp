@@ -18,10 +18,8 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
   absl::flat_hash_map<Node_pin, Node_pin> tg2actual_dpin; //record tuple_get to its actual reference dpin
   for (const auto &node : dfg->fast()) {
     if (node.get_type().op == TupAdd_Op) {
-      if (std::find(to_be_deleted.begin(), to_be_deleted.end(), node) == to_be_deleted.end()) {
-        to_be_deleted.insert(node);
-        continue;
-      }
+      collect_node_for_deleting(node, to_be_deleted);
+      continue;
     }
 
     if (node.get_type().op == TupGet_Op and tuple_get_has_key_name(node)) {
@@ -31,11 +29,7 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
       if (tup_get_target.substr(0,6) == "__bits") 
         continue; // __bits @rhs, cannot know the bits information after the pass/bitwidh, keep this tuple_get and handle it until BW
       
-
-
-      if (std::find(to_be_deleted.begin(), to_be_deleted.end(), node) == to_be_deleted.end())
-        to_be_deleted.insert(node);
-
+      collect_node_for_deleting(node, to_be_deleted);
 
       if (tup_get_target.substr(0,7) == "__q_pin") {
         reconnect_to_ff_qpin(dfg, node);
@@ -70,8 +64,7 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
 
 
     } else if (node.get_type().op == TupGet_Op and tuple_get_has_key_pos(node)) {
-      if (std::find(to_be_deleted.begin(), to_be_deleted.end(), node) == to_be_deleted.end())
-        to_be_deleted.insert(node);
+      collect_node_for_deleting (node, to_be_deleted);
 
       auto tup_get_target = node.get_sink_pin(KP).get_driver_node().get_type_const().to_i(); //FIXME->sh: need lgmem.prp
       auto chain_itr = node.get_sink_pin(TN).get_driver_node();
@@ -118,6 +111,14 @@ bool Inou_lnast_dfg::is_tup_get_target(const Node &tup_add, uint32_t tup_get_tar
   auto tup_add_key_pos = tup_add.get_sink_pin(KP).get_driver_node().get_type_const().to_i(); //FIXME->sh: need lgmem.prp
   return (tup_add_key_pos == tup_get_target);
 }
+
+
+
+void Inou_lnast_dfg::collect_node_for_deleting (const Node &node, absl::flat_hash_set<Node> &to_be_deleted ) {
+  if (std::find(to_be_deleted.begin(), to_be_deleted.end(), node) == to_be_deleted.end())  
+    to_be_deleted.insert(node);
+}
+
 
 void Inou_lnast_dfg::reconnect_to_ff_qpin(LGraph *dfg, const Node &tg_node) {
   //get the input edge
@@ -180,7 +181,7 @@ void Inou_lnast_dfg::dce(Eprp_var &var) {
 
 
 void Inou_lnast_dfg::do_dead_code_elimination(LGraph *dfg) {
-  std::vector<Node> to_be_deleted;
+  absl::flat_hash_set<Node> to_be_deleted;
   std::vector<Node> que;
   std::vector<Node> visited;
 
@@ -192,8 +193,7 @@ void Inou_lnast_dfg::do_dead_code_elimination(LGraph *dfg) {
         auto n = que.back();
         que.pop_back();
         visited.emplace_back(n);
-        if (std::find(to_be_deleted.begin(), to_be_deleted.end(), n) == to_be_deleted.end())
-          to_be_deleted.emplace_back(n);
+        collect_node_for_deleting(node, to_be_deleted);
 
         for (const auto &inp_edge : n.inp_edges()) {
           auto inp_dnode = inp_edge.driver.get_node();
