@@ -141,8 +141,8 @@ public:
     }
   }
 
-  bool is_i() const { return !explicit_str && bits <= 63; }
-  int to_i() const; // must fit in int or exception raised
+  bool is_i() const { return !explicit_str && bits <= 62; } // 62 to handle sign (int)
+  long int to_i() const; // must fit in int or exception raised
 
   std::string to_yosys() const;
   std::string to_verilog() const;

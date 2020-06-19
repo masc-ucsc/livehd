@@ -427,7 +427,6 @@ public:
   void set_last_state() { state = Last_node_state; }
   void set_free_state() {
     state = Free_node_state;
-    I(!root);  // For the moment
     nid = 0;
   }
   bool is_next_state() const { return state == Next_node_state; }

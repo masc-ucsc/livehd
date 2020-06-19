@@ -81,6 +81,9 @@ void Fwd_edge_iterator::Fwd_iter::topo_add_chain_down(const Node_pin &dst_pin) {
 void Fwd_edge_iterator::Fwd_iter::topo_add_chain_fwd(const Node_pin &dst_pin) {
   const auto dst_node = dst_pin.get_node();
   if (visited.count(dst_node.get_compact())) return;
+  //if (pending_stack_set.contains(dst_node.get_compact())) return;
+
+  pending_stack_set.insert(dst_node.get_compact());
 
   if (visit_sub) {
     if (dst_node.is_type_sub_present()) {  // DOWN??
@@ -116,14 +119,12 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear(LGraph *top) {
     return;
   }
 
-  while (true) {
+  while (linear_phase) {
     auto next_node = *global_it;
     ++global_it;
     if (global_it.is_invalid()) {
       global_it    = top->fast(visit_sub).begin();
       linear_phase = false;
-      current_node.invalidate();
-      return;
     }
 
     bool is_topo_sorted = true;
@@ -144,6 +145,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear(LGraph *top) {
       }
     }
 
+
     if (is_topo_sorted) {
       visited.insert(next_node.get_compact());
       current_node.update(next_node);
@@ -160,6 +162,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending() {
 #if 1
       if (visited.count(node.get_compact())) {
         pending_stack.pop_back();
+        pending_stack_set.erase(node.get_compact());
         continue;
       }
 #endif
@@ -189,6 +192,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending() {
       if (pending_stack.back() != node) continue;
       visited.insert(node.get_compact());
       pending_stack.pop_back();
+      pending_stack_set.erase(node.get_compact());
 
       if (can_be_visited) {
         current_node.update(node);
@@ -204,10 +208,13 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending() {
 
     I(!(*global_it).is_graph_io());  // NOTE: should we propagate IO for going up?
     if (!visited.count((*global_it).get_compact())) {
-      pending_stack.push_back(*global_it);
-      for (auto &edge2 : (*global_it).inp_edges()) {  // fwd
-        // fmt::print("chain  {} from {}\n",edge2.driver.get_node().debug_name(), (*global_it).debug_name());
-        topo_add_chain_fwd(edge2.driver);
+      if (!pending_stack_set.contains((*global_it).get_compact())) {
+        pending_stack_set.insert((*global_it).get_compact());
+        pending_stack.push_back(*global_it);
+        for (auto &edge2 : (*global_it).inp_edges()) {  // fwd
+          // fmt::print("chain  {} from {}\n",edge2.driver.get_node().debug_name(), (*global_it).debug_name());
+          topo_add_chain_fwd(edge2.driver);
+        }
       }
     }
 

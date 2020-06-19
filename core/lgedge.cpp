@@ -236,14 +236,14 @@ void Node_Internal::try_recycle() {
 
   //TODO: recycle the node no matter what
 
-  nid = 0; // so that it will become invalid
+  SIndex_ID self_idx = get_self_idx();
 
+#if 0
   if (is_root()) return;  // Keep node for attributes
 
   Node_Internal *root_ptr = (Node_Internal *)&get_root();
   Index_ID       root_idx = root_ptr->get_nid();
 
-  SIndex_ID self_idx = get_self_idx();
   SIndex_ID prev_idx = root_idx;
   I(prev_idx != self_idx);  // because it is not a root_ptr
 
@@ -257,10 +257,11 @@ void Node_Internal::try_recycle() {
   } else {
     root_ptr[prev_idx - root_idx].set_last_state();
   }
+#endif
 
   set_free_state();
 
-  Node_Internal_Page master_page = Node_Internal_Page::get(root_ptr);
+  Node_Internal_Page master_page = Node_Internal_Page::get(this);
 
   nid                  = master_page.free_idx;
   master_page.free_idx = self_idx;
