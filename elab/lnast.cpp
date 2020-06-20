@@ -90,11 +90,16 @@ void Lnast::trans_tuple_opr(const Lnast_nid &psts_nid) {
     } else if (is_bit_attr_setting(opr_nid)) { //note: should be extended to all Pyrope compiler paramters, ex. __posedge or __clk_pin
       auto dot_nid = opr_nid;
       dot_attr2tuple_add(psts_nid, dot_nid);
+    } else if (get_type(opr_nid).is_tuple_concat()) {
+      disable_tconcat_paired_assign(psts_nid, opr_nid);
     } else if (get_type(opr_nid).is_dot() || get_type(opr_nid).is_select()) {
       trans_tuple_opr_handle_a_statement(psts_nid, opr_nid);
     }
   }
 }
+
+
+
 
 void Lnast::trans_tuple_opr_if_subtree(const Lnast_nid &if_nid) {
   for (const auto &itr_nid : children(if_nid)) {
@@ -172,6 +177,14 @@ void Lnast::dot_attr2tuple_add(const Lnast_nid &psts_nid, Lnast_nid &dot_nid) {
     ref_data(dot_nid)->type = Lnast_ntype::create_tuple_add();
     ref_data(paired_assign_nid)->type = Lnast_ntype::create_invalid();
 } 
+
+
+void Lnast::disable_tconcat_paired_assign(const Lnast_nid &psts_nid, const Lnast_nid &concat_nid) {
+  auto &dot_lrhs_table   = dot_lrhs_tables[psts_nid];
+  auto paired_assign_nid = dot_lrhs_table[concat_nid].second;
+  ref_data(paired_assign_nid)->type = Lnast_ntype::create_invalid();
+}
+
 
 
 void Lnast::trans_tuple_opr_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
@@ -372,14 +385,14 @@ void Lnast::analyze_dot_lrhs(const Lnast_nid &psts_nid) {
       continue;
     } else if (get_type(opr_nid).is_if()) {
       analyze_dot_lrhs_if_subtree(opr_nid);
-    } else if (get_type(opr_nid).is_dot() || get_type(opr_nid).is_select()) {
+    } else if (get_type(opr_nid).is_dot() || get_type(opr_nid).is_select() || get_type(opr_nid).is_tuple_concat()) {
       analyze_dot_lrhs_handle_a_statement(psts_nid, opr_nid);
     }
   }
 }
 
 void Lnast::analyze_dot_lrhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
-  I(get_type(opr_nid).is_dot() || get_type(opr_nid).is_select());
+  I(get_type(opr_nid).is_dot() || get_type(opr_nid).is_select() || get_type(opr_nid).is_tuple_concat());
   auto &dot_lrhs_table = dot_lrhs_tables[psts_nid];
 
 
@@ -399,7 +412,11 @@ void Lnast::analyze_dot_lrhs_handle_a_statement(const Lnast_nid &psts_nid, const
       } else if (get_name(sib_child) == c0_dot_name){
         hit = true;
         dot_lrhs_table[dot_nid].first  = false;
-        dot_lrhs_table[dot_nid].second = Lnast_nid(-1, -1); // rhs dot doesn't need the corresponding assignment nid
+        if (get_type(opr_nid).is_tuple_concat()) {
+          dot_lrhs_table[dot_nid].second = sib_nid;
+        } else {
+          dot_lrhs_table[dot_nid].second = Lnast_nid(-1, -1); // rhs dot doesn't need the corresponding assignment nid
+        }
       }
     }
   } //note: practically, the assign/opr_op related to the dot/sel_op should be very close

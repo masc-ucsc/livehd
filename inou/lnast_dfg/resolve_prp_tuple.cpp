@@ -26,8 +26,9 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
 
       auto tup_get_target = node.get_sink_pin(KN).inp_edges().begin()->driver.get_name();
 
-      if (tup_get_target.substr(0,6) == "__bits") 
+      if (tup_get_target.substr(0,6) == "__bits") {
         continue; // __bits @rhs, cannot know the bits information after the pass/bitwidh, keep this tuple_get and handle it until BW
+      }
       
       collect_node_for_deleting(node, to_be_deleted);
 
@@ -68,7 +69,18 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
 
       auto tup_get_target = node.get_sink_pin(KP).get_driver_node().get_type_const().to_i(); //FIXME->sh: need lgmem.prp
       auto chain_itr = node.get_sink_pin(TN).get_driver_node();
+
       while (chain_itr.get_type().op != TupRef_Op) {
+        //this case occurs when the scalar variable is not yet turn into a tuple but some lhs try to access var[0] or var.0
+        if (tup_get_target == 0 && chain_itr.get_type().op != TupAdd_Op && chain_itr.inp_edges().begin()->driver.get_node().get_type().op != TupAdd_Op ) {  
+          I(chain_itr.get_type().op == Or_Op);
+          auto value_dpin = chain_itr.setup_driver_pin(0);
+          auto value_spin = node.get_driver_pin().out_edges().begin()->sink;
+          dfg->add_edge(value_dpin, value_spin);
+          break;
+        }
+
+
         I(chain_itr.get_type().op == TupAdd_Op);
         if (chain_itr.setup_sink_pin(KP).is_connected() and is_tup_get_target(chain_itr, tup_get_target)) {
           auto value_dpin = chain_itr.setup_sink_pin(KV).get_driver_pin();
@@ -85,11 +97,27 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
         auto next_itr = chain_itr.setup_sink_pin(TN).get_driver_node();
         chain_itr = next_itr;
       }
+      /* while (chain_itr.get_type().op != TupRef_Op) { */
+      /*   I(chain_itr.get_type().op == TupAdd_Op); */
+      /*   if (chain_itr.setup_sink_pin(KP).is_connected() and is_tup_get_target(chain_itr, tup_get_target)) { */
+      /*     auto value_dpin = chain_itr.setup_sink_pin(KV).get_driver_pin(); */
+      /*     if (value_dpin.get_node().get_type().op == TupGet_Op) */
+      /*       value_dpin = tg2actual_dpin[value_dpin]; */
+      /*     else */
+      /*       tg2actual_dpin[node.get_driver_pin()] = value_dpin; */
+
+      /*     // auto value_spin = node.get_sink_pin(TN).out_edges().begin()->sink; */
+      /*     auto value_spin = node.get_driver_pin().out_edges().begin()->sink; */
+      /*     dfg->add_edge(value_dpin, value_spin); */
+      /*     break; */
+      /*   } */
+      /*   auto next_itr = chain_itr.setup_sink_pin(TN).get_driver_node(); */
+      /*   chain_itr = next_itr; */
+      /* } */
     }
   }
 
   for (auto itr : to_be_deleted) {
-    fmt::print("itr:{}\n", itr.debug_name());
     itr.del_node();
   }
 }

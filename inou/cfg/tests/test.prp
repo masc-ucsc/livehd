@@ -2,8 +2,12 @@ a = 3             // scalar
 foo = a           // scalar, 3
 bar = a.0         // scalar, but a already turn into a tuple
 
+a = a ++ 4        // tuple, (3,4)
+a = a ++ 5        // tuple, (3,4,5)
 
-//a = a ++ 4        // tuple, (3,4)
+//b = (6,7)
+//a = a ++ b
 
-//%out = foo + a.1 + bar // 3 + 4 + 3 = 10
-%out = foo + bar // 3 + 3 = 6
+
+%out = foo + a.1 + bar + a.2 // 3 + 4 + 3 + 5 = 15
+//%out = foo + bar // 3 + 3 = 6

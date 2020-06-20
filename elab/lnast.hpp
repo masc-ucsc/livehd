@@ -136,6 +136,7 @@ private:
   bool      check_tuple_table_parents_chain    (const Lnast_nid &psts_nid, std::string_view ref_name);
   void      dot2local_tuple_chain              (const Lnast_nid &pats_nid, Lnast_nid &dot_nid);
   void      dot2hier_tuple_chain               (const Lnast_nid &psts_nid, Lnast_nid &dot_nid, const Lnast_nid &cond_nid, bool is_else_sts); 
+  void      disable_tconcat_paired_assign      (const Lnast_nid &psts_nid, const Lnast_nid &concat_nid);
   void      find_cond_nid                      (const Lnast_nid &psts_nid, Lnast_nid &cond_nid, bool &is_else_sts); 
   bool      is_bit_attr_setting                (const Lnast_nid &opr_nid);
   void      dot_attr2tuple_add                 (const Lnast_nid &psts_nid, Lnast_nid &opr_nid);
