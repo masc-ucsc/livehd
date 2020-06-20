@@ -16,31 +16,30 @@ protected:
   //----------- FOR toLNAST ----------
   std::string_view create_temp_var(Lnast& lnast);
   std::string_view get_new_seq_name(Lnast& lnast);
-  std::string      get_full_name(std::string term);
-  std::string      get_full_name_lhs(std::string term);
+  std::string      get_full_name(std::string term, const bool is_rhs);
 
   // Helper Functions (for handling specific cases)
   void create_bitwidth_dot_node(Lnast &lnast, uint32_t bw, Lnast_nid& parent_node, std::string port_id);
   int  get_bit_count      (const firrtl::FirrtlPB_Type type);
   void init_wire_dots     (Lnast &lnast, const firrtl::FirrtlPB_Statement_Wire& expr, Lnast_nid& parent_node);
   void init_register_dots (Lnast &lnast, const firrtl::FirrtlPB_Statement_Register& expr, Lnast_nid& parent_node);
-  void HandleMuxAssign    (Lnast &lnast, const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, std::string lhs_of_asg);
-  void HandleValidIfAssign(Lnast &lnast, const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, std::string lhs_of_asg);
-  //void CreateConditionNode(Lnast &lnast, const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node);
-  void CreateConditionNode(Lnast &lnast, const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, Lnast_nid& stmts_node);
-  //void CreateConditionNode(Lnast &lnast, const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, const std::string tail);
   void create_module_inst (Lnast &lnast, const firrtl::FirrtlPB_Statement_Instance& inst, Lnast_nid& parent_node);
-  void HandleNEQOp        (Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, std::string lhs);
-  void HandleUnaryOp      (Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, std::string lhs);
-  void HandleNegateOp     (Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, std::string lhs);
-  void HandleExtractBitsOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, std::string lhs);
-  void HandleHeadOp       (Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, std::string lhs);
-  void HandleTailOp       (Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, std::string lhs);
-  void handle_concat_op   (Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, std::string lhs);
-  void HandlePadOp        (Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, std::string lhs);
+  void HandleMuxAssign    (Lnast &lnast, const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, const std::string lhs_of_asg);
+  void HandleValidIfAssign(Lnast &lnast, const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, const std::string lhs_of_asg);
+  void HandleNEQOp        (Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs);
+  void HandleUnaryOp      (Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs);
+  void HandleNegateOp     (Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs);
+  void HandleExtractBitsOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs);
+  void HandleHeadOp       (Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs);
+  void HandleTailOp       (Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs);
+  void HandleConcatOp     (Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs);
+  void HandlePadOp        (Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs);
+  void HandleTwoExprPrimOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs);
+  void HandleStaticShiftOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs);
+  void AttachExprStrToNode(Lnast &lnast, const std::string_view access_str, Lnast_nid& parent_node);
 
-  std::string handle_subfield_acc(Lnast &lnast, const firrtl::FirrtlPB_Expression_SubField sub_field, Lnast_nid& parent_node);
-  void create_name_stack  (const firrtl::FirrtlPB_Expression_SubField sub_field, std::stack<std::string>& names);
+  std::string HandleSubfieldAcc(Lnast &lnast, const firrtl::FirrtlPB_Expression_SubField sub_field, Lnast_nid& parent_node);
+  void CreateNameStack    (const firrtl::FirrtlPB_Expression_SubField sub_field, std::stack<std::string>& names);
 
   // Deconstructing Protobuf Hierarchy
   void create_io_list(const firrtl::FirrtlPB_Type& type, uint8_t dir, std::string port_id,
@@ -49,10 +48,8 @@ protected:
 
   void PrintPrimOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, const std::string symbol, Lnast_nid& parent_node);
   void ListPrimOpInfo(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, std::string lhs);
-  void AttachExprToOperator(Lnast &lnast, const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node);
-  void AttachExprToOperator(Lnast &lnast, const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, std::string tail);
   void InitialExprAdd(Lnast &lnast, const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, std::string lhs_unalt);
-  std::string ReturnExprString(Lnast &lnast, const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node);
+  std::string ReturnExprString(Lnast &lnast, const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, const bool is_rhs);
 
 
   void ListStatementInfo(Lnast &lnast, const firrtl::FirrtlPB_Statement& stmt, Lnast_nid& parent_node);
