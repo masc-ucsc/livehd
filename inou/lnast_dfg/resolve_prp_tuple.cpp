@@ -24,7 +24,7 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
 
     if (node.get_type().op == TupGet_Op and tuple_get_has_key_name(node)) {
 
-      auto tup_get_target = node.get_sink_pin(KN).inp_edges().begin()->driver.get_name();
+      auto tup_get_target = node.get_sink_pin(KN).get_driver_pin().get_name();
 
       if (tup_get_target.substr(0,6) == "__bits") {
         continue; // __bits @rhs, cannot know the bits information after the pass/bitwidh, keep this tuple_get and handle it until BW
@@ -38,7 +38,7 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
       }
 
 
-      auto chain_itr = node.get_sink_pin(TN).inp_edges().begin()->driver.get_node();
+      auto chain_itr = node.get_sink_pin(TN).get_driver_node();
       while (chain_itr.get_type().op != TupRef_Op) {
         Node next_itr;
         if (chain_itr.get_type().op == Or_Op) { //it's ok to have Or_Op(aka assign_op) in the tuple_chain, just ignore it and continue to find target tuple_add
@@ -89,7 +89,6 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
           else
             tg2actual_dpin[node.get_driver_pin()] = value_dpin;
 
-          // auto value_spin = node.get_sink_pin(TN).out_edges().begin()->sink;
           auto value_spin = node.get_driver_pin().out_edges().begin()->sink;
           dfg->add_edge(value_dpin, value_spin);
           break;
@@ -97,23 +96,6 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
         auto next_itr = chain_itr.setup_sink_pin(TN).get_driver_node();
         chain_itr = next_itr;
       }
-      /* while (chain_itr.get_type().op != TupRef_Op) { */
-      /*   I(chain_itr.get_type().op == TupAdd_Op); */
-      /*   if (chain_itr.setup_sink_pin(KP).is_connected() and is_tup_get_target(chain_itr, tup_get_target)) { */
-      /*     auto value_dpin = chain_itr.setup_sink_pin(KV).get_driver_pin(); */
-      /*     if (value_dpin.get_node().get_type().op == TupGet_Op) */
-      /*       value_dpin = tg2actual_dpin[value_dpin]; */
-      /*     else */
-      /*       tg2actual_dpin[node.get_driver_pin()] = value_dpin; */
-
-      /*     // auto value_spin = node.get_sink_pin(TN).out_edges().begin()->sink; */
-      /*     auto value_spin = node.get_driver_pin().out_edges().begin()->sink; */
-      /*     dfg->add_edge(value_dpin, value_spin); */
-      /*     break; */
-      /*   } */
-      /*   auto next_itr = chain_itr.setup_sink_pin(TN).get_driver_node(); */
-      /*   chain_itr = next_itr; */
-      /* } */
     }
   }
 
@@ -150,10 +132,8 @@ void Inou_lnast_dfg::collect_node_for_deleting (const Node &node, absl::flat_has
 
 void Inou_lnast_dfg::reconnect_to_ff_qpin(LGraph *dfg, const Node &tg_node) {
   //get the input edge
-  auto tg_inp_driver_wname = tg_node.get_sink_pin(0).inp_edges().begin()->driver.get_name();
+  auto tg_inp_driver_wname = tg_node.get_sink_pin(0).get_driver_pin().get_name();
   auto pos = tg_inp_driver_wname.find_last_of('_');
-  /* auto ori_size = tg_inp_driver_wname.size(); */
-  // auto target_ff_qpin_wname = std::string(tg_inp_driver_wname.substr(0, ori_size-pos+1)) + "0";
   auto target_ff_qpin_wname = std::string(tg_inp_driver_wname.substr(0, pos));
   auto target_ff_qpin = Node_pin::find_driver_pin(dfg, target_ff_qpin_wname);
 
@@ -175,22 +155,22 @@ void Inou_lnast_dfg::assignment_or_elimination(Eprp_var &var) {
 
 void Inou_lnast_dfg::do_assignment_or_elimination(LGraph *dfg) {
   for (auto node : dfg->fast()) {
-    if (node.get_type().op == Or_Op) {
-      bool is_or_as_assign = node.has_outputs() && node.inp_edges().size() == 1; //or as assign
+    if (node.get_type().op != Or_Op)
+      continue;
 
-      /* fmt::print("Or Node:{}\n", node.debug_name()); */
-      if (is_or_as_assign) {
-        for (auto &out : node.out_edges()) {
-          auto dpin = node.inp_edges().begin()->driver;
-          if (!dpin.get_node().is_graph_input()) { // don't rename the graph inputs 
-            /* dpin.set_name(node.get_driver_pin(1).get_name()); */
-            dpin.set_name(node.get_driver_pin(0).get_name()); //or as assign
-          }
-          auto spin = out.sink;
-          dfg->add_edge(dpin, spin);
+    bool is_or_as_assign = node.has_outputs() && node.inp_edges().size() == 1; //or as assign
+
+    if (is_or_as_assign) {
+      for (auto &out : node.out_edges()) {
+        auto dpin = node.inp_edges().begin()->driver;
+        if (!dpin.get_node().is_graph_input()) { // don't rename the graph inputs 
+          /* dpin.set_name(node.get_driver_pin(1).get_name()); */
+          dpin.set_name(node.get_driver_pin(0).get_name()); //or as assign
         }
-        node.del_node();
+        auto spin = out.sink;
+        dfg->add_edge(dpin, spin);
       }
+      node.del_node();
     }
   }
 }
@@ -214,34 +194,36 @@ void Inou_lnast_dfg::do_dead_code_elimination(LGraph *dfg) {
   std::vector<Node> visited;
 
   for (auto node : dfg->fast()) {
-    if (node.out_edges().size() == 0 && std::find(visited.begin(), visited.end(), node) == visited.end()) {
-      //BFS approach
-      que.emplace_back(node);
-      while (!que.empty()) {
-        auto n = que.back();
-        que.pop_back();
-        visited.emplace_back(n);
-        collect_node_for_deleting(node, to_be_deleted);
+    if (node.out_edges().size() != 0) 
+      continue;
 
-        for (const auto &inp_edge : n.inp_edges()) {
-          auto inp_dnode = inp_edge.driver.get_node();
-          if (inp_dnode.out_edges().size() == 1 ) {
+    if (std::find(visited.begin(), visited.end(), node) != visited.end()) 
+      continue;
+    
+    //BFS approach
+    que.emplace_back(node);
+    while (!que.empty()) {
+      auto n = que.back();
+      que.pop_back();
+      visited.emplace_back(n);
+      collect_node_for_deleting(node, to_be_deleted);
+
+      for (const auto &inp_edge : n.inp_edges()) {
+        auto inp_dnode = inp_edge.driver.get_node();
+        if (inp_dnode.out_edges().size() == 1 ) {
+          que.emplace_back(inp_dnode);
+        } else if (inp_dnode.get_type().op == Mux_Op) {
+          //FIXME->sh: not necessary true, sometimes the mux selection pin is a constant bool, and never point to CompileErr_Op. We only knows it after copy-propagation. In this case, need to replace the mux node with an assignment Or_Op
+          bool cond1 = inp_dnode.get_sink_pin("A").inp_edges().begin()->driver.get_node().get_type().op == CompileErr_Op;
+          bool cond2 = inp_dnode.get_sink_pin("B").inp_edges().begin()->driver.get_node().get_type().op == CompileErr_Op;
+          if((cond1 || cond2)) {
             que.emplace_back(inp_dnode);
-          } else if (inp_dnode.get_type().op == Mux_Op) {
-            //FIXME->sh: not necessary true, sometimes the mux selection pin is a constant bool, and never point to CompileErr_Op. We only knows it after copy-propagation. In this case, need to replace the mux node with an assignment Or_Op
-            bool cond1 = inp_dnode.get_sink_pin("A").inp_edges().begin()->driver.get_node().get_type().op == CompileErr_Op;
-            bool cond2 = inp_dnode.get_sink_pin("B").inp_edges().begin()->driver.get_node().get_type().op == CompileErr_Op;
-            if((cond1 || cond2)) {
-              que.emplace_back(inp_dnode);
-            }
           }
         }
       }
     }
   }
 
-  for (auto itr : to_be_deleted) {
+  for (auto itr : to_be_deleted)  
     itr.del_node();
-  }
-
 }

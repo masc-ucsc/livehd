@@ -291,14 +291,14 @@ Node_pin Inou_lnast_dfg::setup_tuple_chain_new_max_pos(LGraph *dfg, const Node_p
     } else if (chain_itr.get_type().op == TupAdd_Op) {
       I(chain_itr.setup_sink_pin(TN).is_connected());
       I(chain_itr.setup_sink_pin(KP).is_connected());
-      auto dnode_of_kp_spin = chain_itr.setup_sink_pin(KP).inp_edges().begin()->driver.get_node();
+      auto dnode_of_kp_spin = chain_itr.setup_sink_pin(KP).get_driver_node();
       //FIXME->sh: constant propagation problem again!? now assume the dnode of kp_spin is always a well-defined constant
       cur_max = std::max(cur_max, dnode_of_kp_spin.get_type_const());
-      auto next_itr = chain_itr.setup_sink_pin(TN).inp_edges().begin()->driver.get_node();
+      auto next_itr = chain_itr.setup_sink_pin(TN).get_driver_node();
       chain_itr = next_itr;
     } else if (chain_itr.get_type().op == Or_Op && chain_itr.get_driver_pin(0).get_name().substr(0,3) == "___") {
       I(chain_itr.setup_sink_pin(0).inp_edges().size() == 1); // or as assign
-      auto next_itr = chain_itr.setup_sink_pin(0).inp_edges().begin()->driver.get_node();
+      auto next_itr = chain_itr.setup_sink_pin(0).get_driver_node();
       chain_itr = next_itr;
     } else {
       I(false, "Compile Error: tuple chain must only contains TupAdd_Op or Or_Op"); 
