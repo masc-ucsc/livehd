@@ -64,7 +64,7 @@ sh_test(
         "//inou/yosys:verilog_tests",
         ":lgshell",
         ],
-    args = ["long"], # give some extra time to the slow machines
+    size = "medium", # give some extra time to the slow machines
     deps = [
         "//inou/yosys:scripts",
     ]

@@ -81,8 +81,7 @@ void Fwd_edge_iterator::Fwd_iter::topo_add_chain_down(const Node_pin &dst_pin) {
 void Fwd_edge_iterator::Fwd_iter::topo_add_chain_fwd(const Node_pin &dst_pin) {
   const auto dst_node = dst_pin.get_node();
   if (visited.count(dst_node.get_compact())) return;
-  //if (pending_stack_set.contains(dst_node.get_compact())) return;
-
+  if (pending_stack_set.contains(dst_node.get_compact())) return;
   pending_stack_set.insert(dst_node.get_compact());
 
   if (visit_sub) {
