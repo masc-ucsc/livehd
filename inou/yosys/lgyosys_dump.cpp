@@ -314,7 +314,7 @@ void Lgyosys_dump::create_wires(LGraph *g, RTLIL::Module *module) {
       auto lc = node.get_type_const();
 
       if (lc.is_i()) {
-        I(lc.get_bits() == dpin.get_bits());
+        I(lc.get_bits() <= dpin.get_bits());
         module->connect(new_wire, RTLIL::SigSpec(lc.to_i(), dpin.get_bits()));
       } else {
         module->connect(new_wire, RTLIL::SigSpec(RTLIL::Const::from_string(lc.to_yosys())));
