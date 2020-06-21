@@ -5,9 +5,12 @@ bar = a.0         // scalar, but a already turn into a tuple
 a = a ++ 4        // tuple, (3,4)
 a = a ++ 5        // tuple, (3,4,5)
 
-//b = (6,7)
-//a = a ++ b
+b = 8
+b = b ++ 7
+b.0 = 6
+
+a = a ++ b
 
 
-%out = foo + a.1 + bar + a.2 // 3 + 4 + 3 + 5 = 15
+%out = foo + bar + a.1 + a.2 + a.3 + a.4// 3 + 3 + 4 + 5 + 6 + 7 = 28
 //%out = foo + bar // 3 + 3 = 6

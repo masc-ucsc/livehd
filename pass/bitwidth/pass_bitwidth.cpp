@@ -66,8 +66,9 @@ void Pass_bitwidth::do_trans(LGraph *lg) {
   bw_bits_extension_by_join(lg);
 
   fmt::print("Phase-VI: Construct RHS Tuple_Get Bits Nodes for LHS\n");
-  auto to_execute_bw_again = bw_tg_bits_rhs_construction(lg);
-  
+  bool to_execute_bw_again = bw_tg_bits_rhs_construction(lg);
+
+
   if (to_execute_bw_again) {
     do_trans(lg);
     /* bw_pass_iterate(); */
@@ -657,6 +658,7 @@ void Pass_bitwidth::iterate_pick(Node_pin &node_dpin) {
 }
 
 void Pass_bitwidth::iterate_equals(Node_pin &node_dpin) {
+  // FIXME->sh: no need BW for equals, always set imp.max = imp.min = 1, it must be a bool ouput
   // FIXME: Is my understanding correct? Equals_Op is for comparison, not assigns? Read note below, this works for 2 inputs not
   // more. NOTE: When using Verilog, "assign d = a == b == c" does (a == b) == c... thus you compare the result
   //  of a == b (0 or 1) to c, not if all three (a, b, c) are equal.
@@ -830,7 +832,8 @@ void Pass_bitwidth::bw_settle_graph_outputs(LGraph *lg) {
 
 void Pass_bitwidth::bw_bits_extension_by_join(LGraph *lg) {
   for (const auto & node : lg->fast()) {
-    if (node.get_type().op == Or_Op && node.inp_edges().size() == 1 && node.get_driver_pin(0).has_bitwidth()) { // or as assign
+    auto ntype = node.get_type().op;
+    if (ntype == Or_Op && node.inp_edges().size() == 1 && node.get_driver_pin(0).has_bitwidth()) { // or as assign
       auto inp_edge_bits = node.inp_edges().begin()->driver.get_bits();
       for (const auto & out_edge : node.out_edges()) {
         auto out_edge_bits = out_edge.driver.get_bits();
@@ -841,16 +844,79 @@ void Pass_bitwidth::bw_bits_extension_by_join(LGraph *lg) {
           uint16_t offset = out_edge_bits - inp_edge_bits;
           auto join_node = lg->create_node(Join_Op);
           auto zero_ext_dpin = lg->create_node_const(Lconst(0, offset)).setup_driver_pin();
+          auto original_sink = node.inp_edges().begin()->sink;      
           lg->add_edge(zero_ext_dpin, join_node.setup_sink_pin(1));
           lg->add_edge(node.inp_edges().begin()->driver, join_node.setup_sink_pin(0));
-          lg->add_edge(join_node.setup_driver_pin(), node.inp_edges().begin()->sink);
+          node.inp_edges().begin()->del_edge(); // remove original edge first, then add new edge to prevent bug
+          lg->add_edge(join_node.setup_driver_pin(), original_sink); 
+          
           join_node.get_driver_pin().set_bits(out_edge_bits);
+          auto original_driver_wname = node.get_driver_pin(0).get_name();
+          join_node.get_driver_pin().set_name(original_driver_wname);
 
-
-          node.inp_edges().begin()->del_edge();
           break; //only one of the output edge of the Or_Op is enough to insert a Join_Op
         }
       }
+    } else if (ntype == Equals_Op ) {
+      Node_pin inp1_driver, inp2_driver;
+      Node_pin inp1_sink, inp2_sink;
+      bool is_first = true;
+
+      for (auto & inp_edge : node.inp_edges()) {
+        if (is_first) {
+          inp1_driver = inp_edge.driver;
+          inp1_sink   = inp_edge.sink;
+          is_first = false;
+        } else {
+          inp2_driver = inp_edge.driver;
+          inp2_sink   = inp_edge.sink;
+        }
+      }
+      
+
+      auto inp1_dbits = inp1_driver.get_bits();
+      auto inp2_dbits = inp2_driver.get_bits();
+
+      if (inp1_dbits != inp2_dbits) {
+        for (auto & inp_edge : node.inp_edges()) {
+          inp_edge.del_edge();
+        }
+
+        if (inp1_dbits < inp2_dbits) {
+          uint16_t offset = inp2_dbits - inp1_dbits;
+          auto join_node = lg->create_node(Join_Op);
+          auto zero_ext_dpin = lg->create_node_const(Lconst(0, offset)).setup_driver_pin();
+          auto original_sink = inp1_sink;      
+          lg->add_edge(zero_ext_dpin, join_node.setup_sink_pin(1));
+          lg->add_edge(inp1_driver, join_node.setup_sink_pin(0));
+          lg->add_edge(join_node.setup_driver_pin(), original_sink); 
+          
+          join_node.get_driver_pin().set_bits(inp2_dbits);
+          if (inp1_driver.has_name()) {
+            auto original_driver_wname = inp1_driver.get_name();
+            join_node.get_driver_pin().set_name(original_driver_wname);
+          }
+          lg->add_edge(inp2_driver, inp2_sink);
+        } else {
+          uint16_t offset = inp1_dbits - inp2_dbits;
+          auto join_node = lg->create_node(Join_Op);
+          auto zero_ext_dpin = lg->create_node_const(Lconst(0, offset)).setup_driver_pin();
+          auto original_sink = inp2_sink;      
+          lg->add_edge(zero_ext_dpin, join_node.setup_sink_pin(1));
+          lg->add_edge(inp2_driver, join_node.setup_sink_pin(0));
+          lg->add_edge(join_node.setup_driver_pin(), original_sink); 
+          
+          join_node.get_driver_pin().set_bits(inp1_dbits);
+          if (inp2_driver.has_name()) {
+            auto original_driver_wname = inp2_driver.get_name();
+            join_node.get_driver_pin().set_name(original_driver_wname);
+          }
+          lg->add_edge(inp1_driver, inp1_sink);
+        }
+      }
+      
+    } else if (ntype == GreaterThan_Op || ntype == GreaterEqualThan_Op || ntype == LessThan_Op || ntype == LessEqualThan_Op) {
+      ;//FIXME->sh: todo
     }
   }
 }

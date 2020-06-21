@@ -79,20 +79,22 @@ void Lnast::trans_tuple_opr(const Lnast_nid &psts_nid) {
   Tuple_var_table top_tuple_var_table;
   tuple_var_tables[psts_nid] = top_tuple_var_table;
   for (const auto &opr_nid : children(psts_nid)) {
-    if (get_type(opr_nid).is_func_def()) {
+    auto type = get_type(opr_nid);
+    if (type.is_func_def()) {
       continue;
-    } else if (get_type(opr_nid).is_if()) {
+    } else if (type.is_if()) {
       trans_tuple_opr_if_subtree(opr_nid);
-    } else if (get_type(opr_nid).is_tuple()) {
+    } else if (type.is_tuple()) {
+      rename_to_real_tuple_name(psts_nid, opr_nid);
       auto tuple_name_nid = get_first_child(opr_nid);
       auto &tuple_var_table = tuple_var_tables[psts_nid];
       tuple_var_table.insert(get_name(tuple_name_nid));
     } else if (is_bit_attr_setting(opr_nid)) { //note: should be extended to all Pyrope compiler paramters, ex. __posedge or __clk_pin
       auto dot_nid = opr_nid;
       dot_attr2tuple_add(psts_nid, dot_nid);
-    } else if (get_type(opr_nid).is_tuple_concat()) {
+    } else if (type.is_tuple_concat()) {
       disable_tconcat_paired_assign(psts_nid, opr_nid);
-    } else if (get_type(opr_nid).is_dot() || get_type(opr_nid).is_select()) {
+    } else if (type.is_dot() || type.is_select()) {
       trans_tuple_opr_handle_a_statement(psts_nid, opr_nid);
     }
   }
@@ -185,6 +187,17 @@ void Lnast::disable_tconcat_paired_assign(const Lnast_nid &psts_nid, const Lnast
   ref_data(paired_assign_nid)->type = Lnast_ntype::create_invalid();
 }
 
+void Lnast::rename_to_real_tuple_name(const Lnast_nid &psts_nid, const Lnast_nid &tup_nid) {
+  auto &dot_lrhs_table   = dot_lrhs_tables[psts_nid];
+  auto paired_assign_nid = dot_lrhs_table[tup_nid].second;
+  auto c0_tup            = get_first_child(tup_nid);
+  auto c0_paired_assign  = get_first_child(paired_assign_nid);
+  ref_data(paired_assign_nid)->type = Lnast_ntype::create_invalid();
+
+  ref_data(c0_tup)->token = get_data(c0_paired_assign).token;
+  ref_data(c0_tup)->type  = get_data(c0_paired_assign).type;
+  ref_data(c0_tup)->subs  = get_data(c0_paired_assign).subs;
+}
 
 
 void Lnast::trans_tuple_opr_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
@@ -251,7 +264,6 @@ void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid)
     ref_data(dot_nid)->type = Lnast_ntype::create_invalid();
     auto c1_assign_name = get_name(c1_assign);
     tuple_var_table.insert(c1_assign_name); //insert new tuple name
-    fmt::print("tuple name:{} insert to :{}\n", c1_assign_name, get_name(psts_nid));
 
   } else { // is rhs
     // change node semantic from dot/set->tuple_get
@@ -355,13 +367,6 @@ void Lnast::dot2hier_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid, 
 bool Lnast::check_tuple_table_parents_chain(const Lnast_nid &psts_nid, std::string_view ref_name) {
   if (get_parent(psts_nid) == get_root()) {
     auto &tuple_var_table = tuple_var_tables[psts_nid];
-    for (auto itr : tuple_var_table) {
-      fmt::print("top tuple_var_table content:{}\n", itr);
-    }
-    if (tuple_var_table.find(ref_name)!= tuple_var_table.end()) {
-      fmt::print("found same tuple in top scope!\n");
-    }
-
     return tuple_var_table.find(ref_name)!= tuple_var_table.end();
 
   } else {
@@ -381,18 +386,20 @@ void Lnast::analyze_dot_lrhs(const Lnast_nid &psts_nid) {
   Dot_lrhs_table  top_dot_lrhs_table;
   dot_lrhs_tables[psts_nid] = top_dot_lrhs_table;
   for (const auto &opr_nid : children(psts_nid)) {
-    if (get_type(opr_nid).is_func_def()) {
+    auto type = get_type(opr_nid);
+    if (type.is_func_def()) {
       continue;
-    } else if (get_type(opr_nid).is_if()) {
+    } else if (type.is_if()) {
       analyze_dot_lrhs_if_subtree(opr_nid);
-    } else if (get_type(opr_nid).is_dot() || get_type(opr_nid).is_select() || get_type(opr_nid).is_tuple_concat()) {
+    } else if (type.is_dot() || type.is_select() || type.is_tuple_concat() || type.is_tuple()) {
       analyze_dot_lrhs_handle_a_statement(psts_nid, opr_nid);
     }
   }
 }
 
 void Lnast::analyze_dot_lrhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
-  I(get_type(opr_nid).is_dot() || get_type(opr_nid).is_select() || get_type(opr_nid).is_tuple_concat());
+  auto type = get_type(opr_nid);
+  I(type.is_dot() || type.is_select() || type.is_tuple_concat() || type.is_tuple());
   auto &dot_lrhs_table = dot_lrhs_tables[psts_nid];
 
 
@@ -412,7 +419,7 @@ void Lnast::analyze_dot_lrhs_handle_a_statement(const Lnast_nid &psts_nid, const
       } else if (get_name(sib_child) == c0_dot_name){
         hit = true;
         dot_lrhs_table[dot_nid].first  = false;
-        if (get_type(opr_nid).is_tuple_concat()) {
+        if (type.is_tuple_concat() || type.is_tuple()) {
           dot_lrhs_table[dot_nid].second = sib_nid;
         } else {
           dot_lrhs_table[dot_nid].second = Lnast_nid(-1, -1); // rhs dot doesn't need the corresponding assignment nid

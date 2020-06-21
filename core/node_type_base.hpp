@@ -409,8 +409,8 @@ class Node_Type_Mux : public Node_Type {
 public:
   Node_Type_Mux() : Node_Type("mux", Mux_Op, false) {
     inputs.push_back("S");
-    inputs.push_back("A");
-    inputs.push_back("B");
+    inputs.push_back("A");  // false path
+    inputs.push_back("B");  // true path
     inputs.push_back("C");
     inputs.push_back("D");
     inputs.push_back("E");  // Keeps going
