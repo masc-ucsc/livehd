@@ -74,12 +74,12 @@ public:
   [[nodiscard]] const_iterator cend() const { return key2val.cend(); }
 
   iterator erase(const_iterator pos) {
-    val2key.erase(pos.second);
+    val2key.erase(key2val.get(pos));
     return key2val.erase(pos);
   }
 
   iterator erase(iterator pos) {
-    val2key.erase(pos.second);
+    val2key.erase(key2val.get(pos));
     return key2val.erase(pos);
   }
 
@@ -87,8 +87,7 @@ public:
     auto it = key2val.find(key);
     if (it == key2val.end()) return 0;
 
-    val2key.erase(it.second);
-    key2val.erase(it);
+    erase(it);
 
     return 1;
   }
