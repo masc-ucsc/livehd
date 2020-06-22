@@ -157,6 +157,11 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending() {
   do {
     while (!pending_stack.empty()) {
       auto node = pending_stack.back();
+      if (!node.get_class_lgraph()->is_valid_node(node.get_nid())) {
+        // The iterator can delete nodes
+        pending_stack.pop_back();
+        continue;
+      }
 
 #if 1
       if (visited.count(node.get_compact())) {
@@ -194,6 +199,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending() {
       pending_stack_set.erase(node.get_compact());
 
       if (can_be_visited) {
+        I(node.get_class_lgraph()->is_valid_node(node.get_nid()));
         current_node.update(node);
         return;
       }
@@ -234,19 +240,21 @@ void Fwd_edge_iterator::Fwd_iter::fwd_first(LGraph *lg) {
   }
 
   I(!current_node.is_invalid());
+  I(current_node.get_class_lgraph()->is_valid_node(current_node.get_nid()));
 }
 
 void Fwd_edge_iterator::Fwd_iter::fwd_next() {
-  I(!current_node.is_invalid());
-
   if (linear_phase) {
     fwd_get_from_linear(current_node.get_top_lgraph());
     GI(current_node.is_invalid(), !linear_phase);
-    if (current_node.is_invalid()) fwd_get_from_pending();
+
+    if(current_node.is_invalid() || !current_node.get_class_lgraph()->is_valid_node(current_node.get_nid()))
+      fwd_get_from_pending();
     return;
   }
 
   fwd_get_from_pending();
+  GI(!current_node.is_invalid(), current_node.get_class_lgraph()->is_valid_node(current_node.get_nid()));
 }
 
 void Bwd_edge_iterator::Bwd_iter::bwd_first(LGraph *lg) {

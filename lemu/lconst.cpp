@@ -194,14 +194,14 @@ Lconst::Lconst(std::string_view orig_txt) {
         // handle binary with special characters ?xZ...
         std::string bin;
         for(auto i=2u;i<txt.size();++i) {
-          const auto ch = txt[i];
-          if (ch=='_')
+          const auto ch2 = txt[i];
+          if (ch2=='_')
             continue;
-          if (ch == 'u' || ch == 'U' || ch == 's' || ch == 'S') {
+          if (ch2 == 'u' || ch2 == 'U' || ch2 == 's' || ch2 == 'S') {
             process_ending(txt, i);
             break;
           }
-          bin.append(1, ch);
+          bin.append(1, ch2);
         }
 
         for (int i = bin.size() - 1; i >= 0; --i) {

@@ -393,6 +393,9 @@ public:
 };
 
 // Y = (As|Au) == (As|Au) == ...
+// Verilog == for multiple inputs.
+// Each input #bits is extended (sign or zero) to the maximum number of bits
+// then a simple unsigned == is used
 class Node_Type_Equals : public Node_Type {
 public:
   Node_Type_Equals() : Node_Type("equals", Equals_Op, false) {
@@ -409,10 +412,10 @@ class Node_Type_Mux : public Node_Type {
 public:
   Node_Type_Mux() : Node_Type("mux", Mux_Op, false) {
     inputs.push_back("S");
-    inputs.push_back("A");  // false path
-    inputs.push_back("B");  // true path
-    inputs.push_back("C");
-    inputs.push_back("D");
+    inputs.push_back("A");  // 0 false path
+    inputs.push_back("B");  // 1 true path
+    inputs.push_back("C");  // 2 
+    inputs.push_back("D");  // 3
     inputs.push_back("E");  // Keeps going
     outputs.push_back("Y");
   };

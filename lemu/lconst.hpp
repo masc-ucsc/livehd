@@ -162,6 +162,12 @@ public:
   [[nodiscard]] const Lconst operator|(const Lconst &other) const { return or_op(other); }
   [[nodiscard]] const Lconst operator|(uint64_t other) const { return or_op(Lconst(other)); }
 
+  bool equals_op(const Lconst &other) const {
+    // similar to ==, but ignore explicit bits
+    auto b = std::max(bits,other.bits);
+    return get_num(b) == other.get_num(b);
+  }
+
   bool operator==(const Lconst &other) const {
     auto b = std::max(bits,other.bits);
     return get_num(b) == other.get_num(b) && same_explicit_bits(other);
