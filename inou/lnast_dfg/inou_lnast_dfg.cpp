@@ -250,7 +250,6 @@ void Inou_lnast_dfg::process_ast_concat_op(LGraph *dfg, const Lnast_nid &lnidx_c
   if (tn2head_maxlen.find(tup_name) != tn2head_maxlen.end()) {
     //case I: handle tuple concatenate with tuple
     //2 cases tuple chain: (1) normal Op turn into a tuple (2) a tuple with a TupRef_Op head
-
     return;
   } else {
     //case II: handle tuple concatenate with scalar
@@ -262,7 +261,8 @@ void Inou_lnast_dfg::process_ast_concat_op(LGraph *dfg, const Lnast_nid &lnidx_c
     auto tn_dpin = setup_tuple_ref(dfg, tup_name);
     dfg->add_edge(tn_dpin, tn_spin);
 
-    auto kp_dpin = setup_tuple_chain_new_max_pos(dfg, tn_dpin);
+    tn2head_maxlen[tup_name].second ++; 
+    auto kp_dpin = resolve_constant(dfg, tn2head_maxlen[tup_name].second).setup_driver_pin();
     dfg->add_edge(kp_dpin, kp_spin);
 
     auto value_dpin = setup_ref_node_dpin(dfg, c2_concat);
@@ -270,41 +270,9 @@ void Inou_lnast_dfg::process_ast_concat_op(LGraph *dfg, const Lnast_nid &lnidx_c
 
     name2dpin[tup_name] = tup_add.setup_driver_pin();
     tup_add.setup_driver_pin().set_name(tup_name);  // tuple ref semantically move to here
-    tn2head_maxlen[tup_name].second ++; 
   }
 }
 
-
-Node_pin Inou_lnast_dfg::setup_tuple_chain_new_max_pos(LGraph *dfg, const Node_pin &tn_dpin) {
-  Lconst cur_max;
-  auto chain_itr = tn_dpin.get_node();
-  if (chain_itr.get_type().op == Or_Op) 
-    return resolve_constant(dfg, 1).setup_driver_pin(); //this is the case where the var is original scalar but turn into a tuple by ++ operator
-
-  while (chain_itr.get_type().op != TupRef_Op) {
-    if (chain_itr.get_type().op == Or_Op && chain_itr.get_driver_pin(0).get_name() == tn_dpin.get_name()) { // This Or_Op is originally a scalar variable but now become the new TupRef_Op,
-      return resolve_constant(dfg, cur_max + 1).setup_driver_pin();
-    } 
-
-    if (chain_itr.get_type().op == TupAdd_Op) {
-      I(chain_itr.setup_sink_pin(TN).is_connected());
-      I(chain_itr.setup_sink_pin(KP).is_connected());
-      auto dnode_of_kp_spin = chain_itr.setup_sink_pin(KP).get_driver_node();
-      //FIXME->sh: constant propagation problem again!? now assume the dnode of kp_spin is always a well-defined constant
-      cur_max = std::max(cur_max, dnode_of_kp_spin.get_type_const());
-      auto next_itr = chain_itr.setup_sink_pin(TN).get_driver_node();
-      chain_itr = next_itr;
-    } else if (chain_itr.get_type().op == Or_Op && chain_itr.get_driver_pin(0).get_name().substr(0,3) == "___") {
-      I(chain_itr.setup_sink_pin(0).inp_edges().size() == 1); // or as assign
-      auto next_itr = chain_itr.setup_sink_pin(0).get_driver_node();
-      chain_itr = next_itr;
-    } else {
-      I(false, "Compile Error: tuple chain must only contains TupAdd_Op or Or_Op"); 
-    }
-  }
-
-  return resolve_constant(dfg, cur_max + 1).setup_driver_pin();
-}
 
 
 void Inou_lnast_dfg::process_ast_nary_op(LGraph *dfg, const Lnast_nid &lnidx_opr) {

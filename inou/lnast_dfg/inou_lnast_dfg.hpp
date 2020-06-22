@@ -86,7 +86,6 @@ protected:
   // tuple related
   Node_pin     setup_tuple_ref               (LGraph *dfg, std::string_view tup_name);
   Node_pin     setup_tuple_key               (LGraph *dfg, std::string_view key_name);
-  Node_pin     setup_tuple_chain_new_max_pos (LGraph *dfg, const Node_pin &tn_dpin);
   void         reconnect_to_ff_qpin          (LGraph *dfg, const Node &tg_node);
   static bool  tuple_get_has_key_name        (const Node &tup_get);
   static bool  tuple_get_has_key_pos         (const Node &tup_get);
