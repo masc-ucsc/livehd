@@ -179,9 +179,6 @@ void Inou_lnast_dfg::process_ast_phi_op(LGraph *dfg, const Lnast_nid &lnidx_phi)
   auto c2_name = lnast->get_sname(c2);
   auto c3_name = lnast->get_sname(c3);
 
-  // fmt::print("c2_name:{}\n", c2_name);
-  // fmt::print("c3_name:{}\n", c3_name);
-
   auto cond_dpin   = setup_ref_node_dpin(dfg, c1);
   Node_pin true_dpin;
   Node_pin false_dpin;
@@ -190,8 +187,6 @@ void Inou_lnast_dfg::process_ast_phi_op(LGraph *dfg, const Lnast_nid &lnidx_phi)
     auto reg_name = c3_name.substr();
 
     auto pos = reg_name.find_last_of('_');
-    // auto ori_size = reg_name.size();
-    // auto reg_qpin_name = lhs_name.substr(0,ori_size-pos);
     auto reg_qpin_name = lhs_name.substr(0,pos);
 
     I(name2dpin[reg_qpin_name] != Node_pin());
@@ -205,8 +200,6 @@ void Inou_lnast_dfg::process_ast_phi_op(LGraph *dfg, const Lnast_nid &lnidx_phi)
     // referece sibling's info to get the root reg qpin
     auto reg_name = c2_name.substr();
     auto pos = reg_name.find_last_of('_');
-    // auto ori_size = reg_name.size();
-    // auto reg_qpin_name = lhs_name.substr(0,ori_size-pos);
     auto reg_qpin_name = lhs_name.substr(0,pos);
     I(name2dpin[reg_qpin_name] != Node_pin());
     auto reg_qpin = name2dpin[reg_qpin_name];
@@ -223,8 +216,6 @@ void Inou_lnast_dfg::process_ast_phi_op(LGraph *dfg, const Lnast_nid &lnidx_phi)
   if (is_register(lhs_name)){
     // (1) find the corresponding #reg and its qpin, wname = #reg
     auto pos = lhs_name.find_last_of('_');
-    // auto ori_size = lhs_name.size();
-    // auto reg_qpin_name = lhs_name.substr(0,ori_size-pos);
     auto reg_qpin_name = lhs_name.substr(0,pos);
     I(name2dpin[reg_qpin_name] != Node_pin());
     auto reg_qpin = name2dpin[reg_qpin_name];
@@ -253,7 +244,6 @@ void Inou_lnast_dfg::process_ast_concat_op(LGraph *dfg, const Lnast_nid &lnidx_c
   //FIXME->sh: how to support hierarchical tuple?
   auto tup_add    = dfg->create_node(TupAdd_Op);
   auto tn_spin    = tup_add.setup_sink_pin(TN); //tuple name
-  //auto kn_spin    = tup_add.setup_sink_pin(KN); //key name, unknown when concatenating
   auto kp_spin    = tup_add.setup_sink_pin(KP); //key pos
   auto value_spin = tup_add.setup_sink_pin(KV); //key->value
 
@@ -549,21 +539,14 @@ void Inou_lnast_dfg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnid
 
     Node_pin kn_dpin;
     if (is_const(key_name)) { // it is a key_pos, not a key_name
-       // find pos2key_name
+       // find pos2keyname
       for (auto &i : tup_keyname2pos) {
-        if (i.first.second == key_name) {
-          kn_dpin = setup_tuple_key(dfg, i.first.first);
+        if (i.first.first == tup_name && i.second == key_name) {
+          kn_dpin = setup_tuple_key(dfg, i.first.second);
           dfg->add_edge(kn_dpin, kn_spin);
           break;
         }
       }
-      /* for (auto &i : keyname2pos) { */
-      /*   if (i.second == key_name) { */
-      /*     kn_dpin = setup_tuple_key(dfg, i.first); */
-      /*     dfg->add_edge(kn_dpin, kn_spin); */
-      /*     break; */
-      /*   } */
-      /* } */
     } else {// it is a pure key_name
       kn_dpin = setup_tuple_key(dfg, lnast->get_sname(c1_ta));
       dfg->add_edge(kn_dpin, kn_spin);
@@ -575,8 +558,6 @@ void Inou_lnast_dfg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnid
       kp_str = key_name;
     } else {
       kp_str = tup_keyname2pos[std::make_pair(tup_name, key_name)];
-      fmt::print("kp_str:{}\n", kp_str);
-      /* kp_str = keyname2pos[key_name]; */
     }
 
     auto kp_dpin = resolve_constant(dfg, Lconst(kp_str)).setup_driver_pin();
