@@ -2,8 +2,6 @@
 
 #include "pass_cprop.hpp"
 
-#include <time.h>
-
 #include <string>
 
 #include "lgedgeiter.hpp"
@@ -192,6 +190,44 @@ void Pass_cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_
     TRACE(fmt::print("cprop: add node:{} to {}\n", node.debug_name(), result.to_pyrope()));
 
     replace_node(node, result);
+  }else if (op == Or_Op) {
+		uint16_t max_bits = 0;
+		for(auto &i:inp_edges_ordered) {
+			auto c = i.driver.get_node().get_type_const();
+			if (c.get_bits() > max_bits)
+				max_bits = c.get_bits();
+		}
+		Lconst result(0);
+		for(auto &i:inp_edges_ordered) {
+			auto c = i.driver.get_node().get_type_const();
+			result = result.or_op(c.adjust_bits(max_bits));
+		}
+
+    TRACE(fmt::print("cprop: and node:{} to {}\n", node.debug_name(), result.to_pyrope()));
+
+		Lconst result_reduced = result==0?0:1;
+
+    replace_logic_node(node, result, result_reduced);
+
+  }else if (op == And_Op) {
+		uint16_t max_bits = 0;
+		for(auto &i:inp_edges_ordered) {
+			auto c = i.driver.get_node().get_type_const();
+			if (c.get_bits() > max_bits)
+				max_bits = c.get_bits();
+		}
+		Lconst result("-1s");
+		for(auto &i:inp_edges_ordered) {
+			auto c = i.driver.get_node().get_type_const();
+			result = result.and_op(c.adjust_bits(max_bits));
+		}
+
+    TRACE(fmt::print("cprop: and node:{} to {}\n", node.debug_name(), result.to_pyrope()));
+
+		Lconst result_reduced = result==Lconst("-1s")?1:0;
+
+    replace_logic_node(node, result, result_reduced);
+
   }else if (op == Equals_Op) {
     bool eq=true;
     I(inp_edges_ordered.size()>1);
@@ -247,6 +283,30 @@ void Pass_cprop::replace_node(Node &node, const Lconst &result) {
 
     //out.del_edge();
   }
+
+  node.del_node();
+}
+
+void Pass_cprop::replace_logic_node(Node &node, const Lconst &result, const Lconst &result_reduced) {
+
+	Node_pin dpin_0;
+	Node_pin dpin_1;
+
+  for(auto &out:node.out_edges()) {
+		if (out.driver.get_pid()) {
+			// Reduction
+			if (dpin_1.is_invalid()) {
+				dpin_1   = node.get_class_lgraph()->create_node_const(result_reduced).get_driver_pin();
+			}
+			dpin_1.connect_sink(out.sink);
+		}else{
+			// bitwise op
+			if (dpin_0.is_invalid()) {
+				dpin_0   = node.get_class_lgraph()->create_node_const(result).get_driver_pin();
+			}
+			dpin_0.connect_sink(out.sink);
+		}
+	}
 
   node.del_node();
 }

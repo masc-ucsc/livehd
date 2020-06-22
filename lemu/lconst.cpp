@@ -375,6 +375,17 @@ Lconst Lconst::or_op(const Lconst &o) const {
   return Lconst(res_explicit_str, res_explicit_sign, res_explicit_bits, res_sign, res_bits, res_num);
 }
 
+Lconst Lconst::and_op(const Lconst &o) const {
+  auto   res_bits = std::max(bits, o.bits);
+  Number res_num  = get_num(res_bits) & o.get_num(res_bits);
+
+  auto res_explicit_str  = explicit_str && o.explicit_str;
+  auto res_explicit_sign = explicit_sign && o.explicit_sign && sign == o.sign;
+  bool res_explicit_bits = explicit_bits && explicit_bits;
+  auto res_sign = sign && o.sign;
+
+  return Lconst(res_explicit_str, res_explicit_sign, res_explicit_bits, res_sign, res_bits, res_num);
+}
 
 Lconst Lconst::adjust_bits(uint16_t amount) const {
   I(amount>0);

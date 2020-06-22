@@ -117,6 +117,7 @@ public:
   [[nodiscard]] Lconst sub_op(const Lconst &o) const;
   [[nodiscard]] Lconst lsh_op(uint16_t amount) const;
   [[nodiscard]] Lconst or_op(const Lconst &o) const;
+  [[nodiscard]] Lconst and_op(const Lconst &o) const;
 
   [[nodiscard]] Lconst adjust_bits(uint16_t amount) const;
 

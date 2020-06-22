@@ -18,6 +18,7 @@ protected:
   void replace_part_inputs_const(Node &node, XEdge_iterator &inp_edges_ordered);
   void replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_ordered);
   void replace_node(Node &node, const Lconst &result);
+	void replace_logic_node(Node &node, const Lconst &result, const Lconst &result_reduced);
 
   void trans(LGraph *orig);
 
