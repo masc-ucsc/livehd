@@ -21,9 +21,10 @@ private:
   absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Node_Type_Op> primitive_type_lnast2lg;
 
 
-  absl::flat_hash_map<std::string, Node_pin>                            name2dpin;       //FIXME->sh: change to string_view??
+  absl::flat_hash_map<std::string, Node_pin>                            name2dpin;       
   absl::flat_hash_map<std::string_view, Node_pin>                       vname2bits_dpin; //variable name (no ssa) to bitwidth
   absl::flat_hash_map<std::pair<std::string, std::string>, std::string> tup_keyname2pos;
+  absl::flat_hash_map<std::string, std::pair<Node_pin, uint16_t>>       tn2head_maxlen;  //map tuple name to chain head and max length
 
 
   static constexpr uint8_t TN = 0;  // tuple name
