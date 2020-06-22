@@ -26,6 +26,7 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
 
       auto tup_get_target = node.get_sink_pin(KN).get_driver_pin().get_name();
 
+
       if (tup_get_target.substr(0,6) == "__bits") {
         continue; // __bits @rhs, cannot know the bits information after the pass/bitwidh, keep this tuple_get and handle it until BW
       }

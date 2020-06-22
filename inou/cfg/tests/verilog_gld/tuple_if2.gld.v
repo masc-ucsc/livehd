@@ -1,8 +1,6 @@
 module tuple_if2_gld (
   output [4:0] out1,
   output [4:0] out2,
-  output [4:0] out3
-  /* output [4:0] out2, */
   /* output [4:0] out3 */
 );
 
@@ -12,10 +10,10 @@ assign out1 = bar + foo;
 
 wire [4:0] tmp = 3'd7 == 3'd7 ? 5'd17 : 3'd7;
 assign out2 = 3 + tmp;
-
-
-wire [4:0] x = 3'd7 == 3'd7 ? 5'd17 : 2'd2;
-assign out3 = x;
+//
+//
+//wire [4:0] x = 3'd7 == 3'd7 ? 5'd17 : 2'd2;
+//assign out3 = x;
 
 
 endmodule
