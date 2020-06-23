@@ -93,7 +93,7 @@ void Lnast::trans_tuple_opr(const Lnast_nid &psts_nid) {
       auto dot_nid = opr_nid;
       dot_attr2tuple_add(psts_nid, dot_nid);
     } else if (type.is_tuple_concat()) {
-      disable_tconcat_paired_assign(psts_nid, opr_nid);
+      merge_tconcat_paired_assign(psts_nid, opr_nid);
     } else if (type.is_dot() || type.is_select()) {
       trans_tuple_opr_handle_a_statement(psts_nid, opr_nid);
     }
@@ -181,11 +181,17 @@ void Lnast::dot_attr2tuple_add(const Lnast_nid &psts_nid, Lnast_nid &dot_nid) {
 } 
 
 
-void Lnast::disable_tconcat_paired_assign(const Lnast_nid &psts_nid, const Lnast_nid &concat_nid) {
+void Lnast::merge_tconcat_paired_assign(const Lnast_nid &psts_nid, const Lnast_nid &concat_nid) {
   auto &dot_lrhs_table   = dot_lrhs_tables[psts_nid];
+  auto c0_concat = get_first_child(concat_nid);
   auto paired_assign_nid = dot_lrhs_table[concat_nid].second;
+  auto c0_assign = get_first_child(paired_assign_nid);
+  ref_data(c0_concat)->token = get_data(c0_assign).token;
+  ref_data(c0_concat)->type  = get_data(c0_assign).type;
+  ref_data(c0_concat)->subs  = get_data(c0_assign).subs;
   ref_data(paired_assign_nid)->type = Lnast_ntype::create_invalid();
 }
+
 
 void Lnast::rename_to_real_tuple_name(const Lnast_nid &psts_nid, const Lnast_nid &tup_nid) {
   auto &dot_lrhs_table   = dot_lrhs_tables[psts_nid];

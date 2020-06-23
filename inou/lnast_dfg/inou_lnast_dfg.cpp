@@ -74,7 +74,6 @@ std::vector<LGraph *> Inou_lnast_dfg::do_tolg(std::shared_ptr<Lnast> ln) {
 }
 
 
-
 void Inou_lnast_dfg::lnast2lgraph(LGraph *dfg) {
 
   fmt::print("============================= Phase-1: LNAST->LGraph Start ===============================================\n");
@@ -89,6 +88,8 @@ void Inou_lnast_dfg::lnast2lgraph(LGraph *dfg) {
   setup_explicit_bits_info(dfg);
 }
 
+
+
 void Inou_lnast_dfg::process_ast_stmts(LGraph *dfg, const Lnast_nid &lnidx_stmts) {
   for (const auto &lnidx : lnast->children(lnidx_stmts)) {
     const auto ntype = lnast->get_data(lnidx).type;
@@ -102,7 +103,7 @@ void Inou_lnast_dfg::process_ast_stmts(LGraph *dfg, const Lnast_nid &lnidx_stmts
     } else if (ntype.is_tuple_add()) {
       process_ast_tuple_add_op(dfg, lnidx);
     } else if (ntype.is_tuple_get()) {
-      process_ast_tuple_get_op(dfg, lnidx);
+       process_ast_tuple_get_op(dfg, lnidx);
     } else if (ntype.is_tuple_phi_add()) {
       process_ast_tuple_phi_add_op(dfg, lnidx);
     } else if (ntype.is_dot()) {
@@ -241,35 +242,47 @@ void Inou_lnast_dfg::process_ast_phi_op(LGraph *dfg, const Lnast_nid &lnidx_phi)
 
 
 void Inou_lnast_dfg::process_ast_concat_op(LGraph *dfg, const Lnast_nid &lnidx_concat) {
-  //FIXME->sh: how to support hierarchical tuple?
-  auto c0_concat = lnast->get_first_child(lnidx_concat); //c0: target name for concat.
-  auto c1_concat = lnast->get_sibling_next(c0_concat);   //c1: tuple name
-  auto c2_concat = lnast->get_sibling_next(c1_concat);   //c2: tuple value
-  auto tup_name  = lnast->get_sname(c1_concat);
+  //FIXME->sh: how to support hierarchical tuple???
 
-  if (tn2head_maxlen.find(tup_name) != tn2head_maxlen.end()) {
-    //case I: handle tuple concatenate with tuple
-    //2 cases tuple chain: (1) normal Op turn into a tuple (2) a tuple with a TupRef_Op head
-    return;
-  } else {
-    //case II: handle tuple concatenate with scalar
-    auto tup_add    = dfg->create_node(TupAdd_Op);
-    auto tn_spin    = tup_add.setup_sink_pin(TN); // tuple name
-    auto kp_spin    = tup_add.setup_sink_pin(KP); // key pos
-    auto value_spin = tup_add.setup_sink_pin(KV); // key->value
+  auto lhs = lnast->get_first_child(lnidx_concat); //c0: target tuple name for concat.
+  auto opd1   = lnast->get_sibling_next(lhs);     //c1: tuple operand1, either scalar or tuple
+  auto opd2   = lnast->get_sibling_next(opd1);    //c2: tuple operand2, either scalar or tuple
+  auto lhs_name  = lnast->get_sname(lhs);
+  auto opd1_name = lnast->get_sname(opd1);
+  auto opd2_name = lnast->get_sname(opd2);
+  //tup = opd1 ++ opd2, both opd1 and opd2 could be either a scalar or a tuple
 
-    auto tn_dpin = setup_tuple_ref(dfg, tup_name);
-    dfg->add_edge(tn_dpin, tn_spin);
+  if (lhs_name == opd1_name) { // keep opd1 as main body, concat opd2 at the tail
+    auto lhs_dpin = setup_tuple_ref(dfg, lhs_name);
+    if (is_scalar(lhs_dpin)) 
+      tn2head_maxlen[lhs_name] = std::make_pair(lhs_dpin, 1);
+    
 
-    tn2head_maxlen[tup_name].second ++; 
-    auto kp_dpin = resolve_constant(dfg, tn2head_maxlen[tup_name].second).setup_driver_pin();
-    dfg->add_edge(kp_dpin, kp_spin);
+    auto opd2_dpin = setup_tuple_ref(dfg, opd2_name);
+    if (!is_scalar(opd2_dpin)) {
+      //case I: handle tuple concatenate with an tuple
+      //FIXME->sh: todo
+    } else {
+      //case II: handle tuple concatenate with scalar
+      auto tup_add    = dfg->create_node(TupAdd_Op);
+      auto tn_spin    = tup_add.setup_sink_pin(TN); // tuple name
+      auto kp_spin    = tup_add.setup_sink_pin(KP); // key pos
+      auto value_spin = tup_add.setup_sink_pin(KV); // key->value
 
-    auto value_dpin = setup_ref_node_dpin(dfg, c2_concat);
-    dfg->add_edge(value_dpin, value_spin);
+      dfg->add_edge(lhs_dpin, tn_spin);
 
-    name2dpin[tup_name] = tup_add.setup_driver_pin();
-    tup_add.setup_driver_pin().set_name(tup_name);  // tuple ref semantically move to here
+      tn2head_maxlen[lhs_name].second ++; //max_len ++
+      auto kp_dpin = resolve_constant(dfg, tn2head_maxlen[lhs_name].second).setup_driver_pin();
+      dfg->add_edge(kp_dpin, kp_spin);
+
+      auto value_dpin = setup_ref_node_dpin(dfg, opd2);
+      dfg->add_edge(value_dpin, value_spin);
+
+      name2dpin[lhs_name] = tup_add.setup_driver_pin();
+      tup_add.setup_driver_pin().set_name(lhs_name);  // tuple ref semantically move to here
+    } 
+  } else { // create new tuple-chain called tup_name and concat (opd1, opd2)
+    ;
   }
 }
 
@@ -410,7 +423,7 @@ void Inou_lnast_dfg::process_ast_tuple_struct(LGraph *dfg, const Lnast_nid &lnid
   std::string tup_name;
   uint16_t kp = 0;
 
-  //note: each new tuple element will be the new tuple chain tail and inherit the tuple name
+  // note: each new tuple element will be the new tuple chain tail and inherit the tuple name
   for (const auto &tup_child : lnast->children(lnidx_tup)) {
     if (tup_child == lnast->get_first_child(lnidx_tup)) {
       tup_name = lnast->get_sname(tup_child);
@@ -431,10 +444,10 @@ void Inou_lnast_dfg::process_ast_tuple_struct(LGraph *dfg, const Lnast_nid &lnid
     auto value_dpin = setup_ref_node_dpin(dfg, c1);
 
     auto tup_add    = dfg->create_node(TupAdd_Op);
-    auto tn_spin    = tup_add.setup_sink_pin(TN); //tuple name
-    auto kn_spin    = tup_add.setup_sink_pin(KN); //key name
-    auto kp_spin    = tup_add.setup_sink_pin(KP); //key position is unknown before tuple resolving
-    auto value_spin = tup_add.setup_sink_pin(KV); //value
+    auto tn_spin    = tup_add.setup_sink_pin(TN); // tuple name
+    auto kn_spin    = tup_add.setup_sink_pin(KN); // key name
+    auto kp_spin    = tup_add.setup_sink_pin(KP); // key position is unknown before tuple resolving
+    auto value_spin = tup_add.setup_sink_pin(KV); // value
 
     dfg->add_edge(tn_dpin, tn_spin);
     dfg->add_edge(kn_dpin, kn_spin);

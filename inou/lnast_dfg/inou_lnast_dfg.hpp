@@ -80,7 +80,7 @@ protected:
   static bool is_const             (std::string_view name) {return std::isdigit(name[0]); }
   static bool is_default_const     (std::string_view name) {return name.substr(0,13) == "default_const"; }
   static bool is_err_var_undefined (std::string_view name) {return name.substr(0,17) == "err_var_undefined"; }
-
+  static bool is_scalar            (Node_pin dpin) {return dpin.get_node().get_type().op != TupAdd_Op; }
 
 
   // tuple related
