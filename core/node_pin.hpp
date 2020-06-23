@@ -299,6 +299,7 @@ public:
   // static Node_pin get_out_pin(const Edge_raw *edge_raw);
   // static Node_pin get_inp_pin(const Edge_raw *edge_raw);
 
+  void invalidate() { idx = 0; }
   constexpr bool is_invalid() const { return idx == 0; }
 
   constexpr bool operator==(const Node_pin &other) const {

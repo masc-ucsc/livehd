@@ -7,6 +7,8 @@
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
+#include "lgtuple.hpp"
+
 #define TRACE(x)
 //#define TRACE(x) x
 
