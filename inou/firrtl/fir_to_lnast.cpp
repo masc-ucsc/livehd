@@ -59,14 +59,24 @@ std::string_view Inou_firrtl::get_new_seq_name(Lnast& lnast) {
 }
 
 std::string Inou_firrtl::get_full_name(const std::string term, const bool is_rhs) {
-  //FIXME: Eventually add a list for registers, too.
   if(std::find(input_names.begin(), input_names.end(), term) != input_names.end()) {
     //string matching "term" was found to be an input to the module
     I(is_rhs);
     return absl::StrCat("$", term);
+    /*auto subfield_loc = term.find(".");
+    if (subfield_loc != std::string::npos) {
+      return absl::StrCat("$inp_", term);
+    } else {
+      return absl::StrCat("$", term);
+    }*/
   } else if(std::find(output_names.begin(), output_names.end(), term) != output_names.end()) {
-    I(!is_rhs);
     return absl::StrCat("%", term);
+    /*auto subfield_loc = term.find(".");
+    if (subfield_loc != std::string::npos) {
+      return absl::StrCat("%out_", term);
+    } else {
+      return absl::StrCat("%", term);
+    }*/
   } else if(std::find(register_names.begin(), register_names.end(), term) != register_names.end()) {
     if (is_rhs) {
       return absl::StrCat(term, "__q_pin");
@@ -157,23 +167,23 @@ void Inou_firrtl::init_register_dots(Lnast& lnast, const firrtl::FirrtlPB_Statem
   lnast.add_child(idx_dot_qp, Lnast_node::create_ref("__q_pin"));
 
   //Required to identify ___regname__q_pin as RHS.
-  auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
-  lnast.add_child(idx_asg, Lnast_node::create_ref(qpin_var_name));
-  lnast.add_child(idx_asg, Lnast_node::create_ref(qpin_var_name_temp));
+  auto idx_asg_qp = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
+  lnast.add_child(idx_asg_qp, Lnast_node::create_ref(qpin_var_name));
+  lnast.add_child(idx_asg_qp, Lnast_node::create_ref(qpin_var_name_temp));
 
   // Specify __bits
-  auto wire_bits = get_bit_count(expr.type());
-  if (wire_bits <= 0) {
+  auto reg_bits = get_bit_count(expr.type());
+  if (reg_bits > 0) {
     auto temp_var_name = create_temp_var(lnast);
 
     auto idx_dot_b = lnast.add_child(parent_node, Lnast_node::create_dot("dot"));
     lnast.add_child(idx_dot_b, Lnast_node::create_ref(temp_var_name));
-    lnast.add_child(idx_dot_b, Lnast_node::create_ref(lnast.add_string(expr.id())));
+    lnast.add_child(idx_dot_b, Lnast_node::create_ref(reg_name));
     lnast.add_child(idx_dot_b, Lnast_node::create_ref("__bits"));
 
-    auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
-    lnast.add_child(idx_asg, Lnast_node::create_ref(temp_var_name));
-    lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(to_string(wire_bits))));
+    auto idx_asg_b = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
+    lnast.add_child(idx_asg_b, Lnast_node::create_ref(temp_var_name));
+    lnast.add_child(idx_asg_b, Lnast_node::create_ref(lnast.add_string(to_string(reg_bits))));
   }
 
 
@@ -317,6 +327,57 @@ void Inou_firrtl::HandleUnaryOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_
   AttachExprStrToNode(lnast, e1_str, idx_not);
 }
 
+void Inou_firrtl::HandleAndReducOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs) {
+  /* x = .andR(e1) is the same as e1 == -1
+   *   same
+   *  /  |  \
+   * x  e1  -1  */
+  I(lnast.get_data(parent_node).type.is_stmts() || lnast.get_data(parent_node).type.is_cstmts());
+  I(op.arg_size() == 1);
+
+  auto e1_str = lnast.add_string(ReturnExprString(lnast, op.arg(0), parent_node, true));
+  auto idx_eq = lnast.add_child(parent_node, Lnast_node::create_same("andr_same"));
+  lnast.add_child(idx_eq, Lnast_node::create_ref(lnast.add_string(lhs)));
+  AttachExprStrToNode(lnast, e1_str, idx_eq);
+  lnast.add_child(idx_eq, Lnast_node::create_const("-1"));
+}
+
+void Inou_firrtl::HandleOrReducOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs) {
+  /* x = .orR(e1) is the same as e1 != 0
+   *     same        ~
+   *    /  |  \     / \
+   *___F0  e1  0   x  ___F0*/
+  I(lnast.get_data(parent_node).type.is_stmts() || lnast.get_data(parent_node).type.is_cstmts());
+  I(op.arg_size() == 1);
+
+  auto temp_var_name = create_temp_var(lnast);
+  auto e1_str = lnast.add_string(ReturnExprString(lnast, op.arg(0), parent_node, true));
+
+  auto idx_eq = lnast.add_child(parent_node, Lnast_node::create_same("orr_same"));
+  lnast.add_child(idx_eq, Lnast_node::create_ref(temp_var_name));
+  AttachExprStrToNode(lnast, e1_str, idx_eq);
+  lnast.add_child(idx_eq, Lnast_node::create_const("0"));
+
+  auto idx_not = lnast.add_child(parent_node, Lnast_node::create_not("orr_not"));
+  lnast.add_child(idx_eq, Lnast_node::create_ref(lnast.add_string(lhs)));
+  lnast.add_child(idx_eq, Lnast_node::create_ref(temp_var_name));
+}
+
+void Inou_firrtl::HandleXorReducOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs) {
+  /* x = .xorR(e1)
+   *  parity_op
+   *  / \
+   * x  e1 */
+  //FIXME: Uncomment once node type is made
+  /*I(lnast.get_data(parent_node).type.is_stmts() || lnast.get_data(parent_node).type.is_cstmts());
+  I(op.arg_size() == 1);
+
+  auto e1_str = lnast.add_string(ReturnExprString(lnast, op.arg(0), parent_node, true));
+  auto idx_par = lnast.add_child(parent_node, Lnast_node::create_par("par_xorR"));
+  lnast.add_child(idx_eq, Lnast_node::create_ref(lnast.add_string(lhs)));
+  AttachExprStrToNode(lnast, e1_str, idx_par);*/
+}
+
 void Inou_firrtl::HandleNegateOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs) {
   /* x = negate(e1) should take graph form:
    *     minus
@@ -338,7 +399,7 @@ void Inou_firrtl::HandleNegateOp(Lnast& lnast, const firrtl::FirrtlPB_Expression
  * LNAST can properly handle it (see diagram below).*/
 void Inou_firrtl::HandleExtractBitsOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs) {
   /* x = bits(e1)(numH, numL) should take graph form:
-   *     range                 bit_sel                asg
+   *      range                 bit_sel               asg
    *    /   |   \             /   |   \             /     \
    *___F0 numH numL        ___F1  e1 ___F0         x    ___F1 */
   I(lnast.get_data(parent_node).type.is_stmts() || lnast.get_data(parent_node).type.is_cstmts());
@@ -368,73 +429,36 @@ void Inou_firrtl::HandleExtractBitsOp(Lnast &lnast, const firrtl::FirrtlPB_Expre
   lnast.add_child(idx_asg, Lnast_node::create_ref(temp_var_name_f1));
 }
 
-/* The Head primitive op requires special handling since
- * it is actually doing quite a lot. We have to break this
- * down into multiple statements so LNAST can properly
- * handle it (see diagram below).*/
+/* The Head primitive op returns the n most-significant bits
+ * from an expression. So if I had an 8-bit variable z and I
+ * called head(z)(3), what would return is (in Verilog) z[7:5]. */
 void Inou_firrtl::HandleHeadOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs) {
-  //I(parent_node.is_stmts() | parent_node.is_cstmts());
-  //
-  /* x = head(tmp)(4) should take graph form: (like x = tmp >> (tmp.__bits - 4))
-   *      dot               minus         log_shr
+  /* x = head(e1)(4) should take graph form: (like x = e1 >> (e1.__bits - 4))
+   * Note: the parameter (4) has to be non-negative and l.e.q. the bitwidth of e1 in FIRRTL.
+   *      dot               minus          shr
    *   /   |   \           /  |   \     /   |   \
-   * ___F0 tmp __bits ___F1 ___F0  4   x   tmp __F1 */
+   * ___F0 e1 __bits  ___F1 ___F0  4   x   e1  __F1 */
+  I(lnast.get_data(parent_node).type.is_stmts() || lnast.get_data(parent_node).type.is_cstmts());
+  I(op.arg_size() == 1 && op.const__size() == 1);
 
-  //FIXME: Not done!
-  I(false);
-
-  /*auto temp_var_name_f0 = create_temp_var(lnast);
+  auto e1_str = lnast.add_string(ReturnExprString(lnast, op.arg(0), parent_node, true));
+  auto temp_var_name_f0 = create_temp_var(lnast);
   auto temp_var_name_f1 = create_temp_var(lnast);
 
   auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_dot("dot_head"));
   lnast.add_child(idx_dot, Lnast_node::create_ref(temp_var_name_f0));
-  I(op.arg_size() == 1);
-  AttachExprToOperator(lnast, op.arg(0), idx_dot);
-  lnast.add_child(idx_dot, Lnast_node::create_ref("__bits"));*/
-
-
-
-  /* x = head(tmp)(4) should take graph form: (like x = tmp[tmp.__bits - 1 : tmp.__bits - 4])
-   *     dot                minus           minus           range            bit_sel           asg
-   *  /   |   \           /   |   \       /   |   \       /   |    \        /   |   \        /     \
-   *___F0 tmp __bits  ___F1 ___F0  1  ___F2 ___F0  4  ___F3 ___F1 ___F2   ___F4 tmp ___F3   x    ___F4 */
-
-  /*auto temp_var_name_f0 = create_temp_var(lnast);
-  auto temp_var_name_f1 = create_temp_var(lnast);
-  auto temp_var_name_f2 = create_temp_var(lnast);
-  auto temp_var_name_f3 = create_temp_var(lnast);
-  auto temp_var_name_f4 = create_temp_var(lnast);
-
-  auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_dot("dot_head"));
-  lnast.add_child(idx_dot, Lnast_node::create_ref(temp_var_name_f0));
-  I(op.arg_size() == 1);
-  AttachExprToOperator(lnast, op.arg(0), idx_dot);
+  AttachExprStrToNode(lnast, e1_str, idx_dot);
   lnast.add_child(idx_dot, Lnast_node::create_ref("__bits"));
 
-  auto idx_mns1 = lnast.add_child(parent_node, Lnast_node::create_minus("minus1_head"));
-  lnast.add_child(idx_mns1, Lnast_node::create_ref(temp_var_name_f1));
-  lnast.add_child(idx_mns1, Lnast_node::create_ref(temp_var_name_f0));
-  lnast.add_child(idx_mns1, Lnast_node::create_const("0d1"));
+  auto idx_mns = lnast.add_child(parent_node, Lnast_node::create_minus("minus_head"));
+  lnast.add_child(idx_mns, Lnast_node::create_ref(temp_var_name_f1));
+  lnast.add_child(idx_mns, Lnast_node::create_ref(temp_var_name_f0));
+  lnast.add_child(idx_mns, Lnast_node::create_const(lnast.add_string(op.const_(0).value())));
 
-  auto idx_mnsN = lnast.add_child(parent_node, Lnast_node::create_minus("minusN_head"));
-  lnast.add_child(idx_mnsN, Lnast_node::create_ref(temp_var_name_f2));
-  lnast.add_child(idx_mnsN, Lnast_node::create_ref(temp_var_name_f0));
-  I(op.const__size() == 1);
-  lnast.add_child(idx_mnsN, Lnast_node::create_const(lnast.add_string(absl::StrCat("0d", op.const_(0).value()))));
-
-  auto idx_range = lnast.add_child(parent_node, Lnast_node::create_range("range_head"));
-  lnast.add_child(idx_range, Lnast_node::create_ref(temp_var_name_f3));
-  lnast.add_child(idx_range, Lnast_node::create_ref(temp_var_name_f1));
-  lnast.add_child(idx_range, Lnast_node::create_ref(temp_var_name_f2));
-
-  auto idx_bit_sel = lnast.add_child(parent_node, Lnast_node::create_bit_select("bit_sel_head"));
-  lnast.add_child(idx_bit_sel, Lnast_node::create_ref(temp_var_name_f4));
-  AttachExprToOperator(lnast, op.arg(0), idx_bit_sel);
-  lnast.add_child(idx_bit_sel, Lnast_node::create_ref(temp_var_name_f3));
-
-  auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg_head"));
-  lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs)));
-  lnast.add_child(idx_asg, Lnast_node::create_ref(temp_var_name_f4));*/
+  auto idx_shr = lnast.add_child(parent_node, Lnast_node::create_shift_right("shr_head"));
+  lnast.add_child(idx_shr, Lnast_node::create_ref(lnast.add_string(lhs)));
+  AttachExprStrToNode(lnast, e1_str, idx_shr);
+  lnast.add_child(idx_shr, Lnast_node::create_ref(temp_var_name_f1));
 }
 
 void Inou_firrtl::HandleTailOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs) {
@@ -675,11 +699,13 @@ void Inou_firrtl::HandleStaticShiftOp(Lnast& lnast, const firrtl::FirrtlPB_Expre
  *        dot              dot
  *     /   |   \         /  |  \
  * ___F0 submod io  ___F1 ___F0 a
- * where ___F1 would be returned by this function. */
-std::string Inou_firrtl::HandleSubfieldAcc(Lnast& ln, const firrtl::FirrtlPB_Expression_SubField sub_field, Lnast_nid& parent_node) {
-  std::stack<std::string> names;
+ * where the string "___F1" would be returned by this function. */
+std::string Inou_firrtl::HandleSubfieldAcc(Lnast& ln, const firrtl::FirrtlPB_Expression_SubField sub_field, Lnast_nid& parent_node, const bool is_rhs) {
   //Create a list of each tuple + the element... So submoid.io.a becomes [submod, io, a]
-  CreateNameStack(sub_field, names);
+  std::stack<std::string> names;
+  auto flattened_str = CreateNameStack(sub_field, names);
+  auto full_str = get_full_name(flattened_str, is_rhs);
+  //fmt::print("HandleSubfieldAcc: {}\n", full_str);
 
   /*fmt::print("[");
   while(!names.empty()) {
@@ -689,13 +715,23 @@ std::string Inou_firrtl::HandleSubfieldAcc(Lnast& ln, const firrtl::FirrtlPB_Exp
   fmt::print("]\n");*/
 
   //Create each dot node
-  auto bundle_accessor = names.top();
+  bool first = true;
+  std::string bundle_accessor;
+  if (full_str.substr(0,1) == "$") {
+    bundle_accessor = absl::StrCat("$inp_", names.top());
+  } else if (full_str.substr(0,1) == "%") {
+    bundle_accessor = absl::StrCat("%out_", names.top());
+  } else {
+    bundle_accessor = names.top();
+  }
+  //fmt::print("Bundle accessor: {}\n", bundle_accessor);
   names.pop();
+
   do {
     auto temp_var_name = create_temp_var(ln);
     auto element_name = names.top();
     names.pop();
-    fmt::print("dot: {} {} {}\n", temp_var_name, bundle_accessor, element_name);
+    //fmt::print("dot: {} {} {}\n", temp_var_name, bundle_accessor, element_name);
     auto idx_dot = ln.add_child(parent_node, Lnast_node::create_dot(""));
     if (names.empty()) {
       ln.add_child(idx_dot, Lnast_node::create_ref(temp_var_name));
@@ -710,18 +746,20 @@ std::string Inou_firrtl::HandleSubfieldAcc(Lnast& ln, const firrtl::FirrtlPB_Exp
     bundle_accessor = temp_var_name;
   } while (!names.empty());
 
-  fmt::print("return {}\n", bundle_accessor);
+  //fmt::print("return {}\n", bundle_accessor);
   return bundle_accessor;
 }
 
-void Inou_firrtl::CreateNameStack(const firrtl::FirrtlPB_Expression_SubField sub_field, std::stack<std::string>& names) {
+std::string Inou_firrtl::CreateNameStack(const firrtl::FirrtlPB_Expression_SubField sub_field, std::stack<std::string>& names) {
   names.push(sub_field.field());
   if (sub_field.expression().has_sub_field()) {
-    CreateNameStack(sub_field.expression().sub_field(), names);
+    return absl::StrCat(CreateNameStack(sub_field.expression().sub_field(), names), ".", sub_field.field());
   } else if (sub_field.expression().has_reference()) {
     names.push(sub_field.expression().reference().id());
+    return absl::StrCat(sub_field.expression().reference().id(), ".", sub_field.field());
   } else {
     I(false);
+    return "";
   }
 }
 
@@ -769,6 +807,7 @@ void Inou_firrtl::create_io_list(const firrtl::FirrtlPB_Type& type, uint8_t dir,
       break;
 
     } case 6: { //Vector type
+      I(false);//FIXME: Not yet supported.
       //const firrtl::FirrtlPB_Type_VectorType vtype = type.vector_type();
       //cout << "FIXME: Vector[" << vtype.size()  << "]" << endl;
       //FIXME: How do we want to handle Vectors for LNAST? Should I flatten?
@@ -777,14 +816,17 @@ void Inou_firrtl::create_io_list(const firrtl::FirrtlPB_Type& type, uint8_t dir,
 
     } case 7: { //Fixed type
       //cout << "Fixed[" << type.fixed_type().width().value() << "." << type.fixed_type().point().value() << "]" << endl;
+      I(false);//FIXME: Not yet supported.
       break;
 
     } case 8: { //Analog type
       //cout << "Analog[" << type.uint_type().width().value() << "]" << endl;
+      I(false);//FIXME: Not yet supported.
       break;
 
     } case 9: { //AsyncReset type
       //cout << "AsyncReset" << endl;
+      vec.push_back(std::make_tuple(port_id, dir, 1));//FIXME: Anything else I need to do?
       break;
 
     } case 10: { //Reset type
@@ -793,7 +835,7 @@ void Inou_firrtl::create_io_list(const firrtl::FirrtlPB_Type& type, uint8_t dir,
 
     } default:
       cout << "Unknown port type." << endl;
-      return;
+      I(false);
   }
 }
 
@@ -927,11 +969,16 @@ void Inou_firrtl::ListPrimOpInfo(Lnast& lnast, const firrtl::FirrtlPB_Expression
       break;
 
 
-    } case 26: //Op_Xor_Reduce
-      case 33: //Op_And_Reduce
-      case 34: { //Op_Or_Reduce
-      cout << "primOp: " << op.op() << " not yet supported (And/Or/Xor Reduce)...\n";
-      I(false);
+    } case 26: { //Op_Xor_Reduce
+      HandleXorReducOp(lnast, op, parent_node, lhs);
+      break;
+
+    } case 33: { //Op_And_Reduce
+      HandleAndReducOp(lnast, op, parent_node, lhs);
+      break;
+
+    } case 34: { //Op_Or_Reduce
+      HandleOrReducOp(lnast, op, parent_node, lhs);
       break;
 
     } case 35: //Op_Increase_Precision
@@ -1016,7 +1063,7 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
       break;
 
     } case 7: { //SubField
-      std::string rhs = HandleSubfieldAcc(lnast, expr.sub_field(), parent_node);
+      std::string rhs = HandleSubfieldAcc(lnast, expr.sub_field(), parent_node, true);
 
       Lnast_nid idx_asg;
       if (lhs.substr(0,1) == "%") {
@@ -1095,7 +1142,7 @@ std::string Inou_firrtl::ReturnExprString(Lnast& lnast, const firrtl::FirrtlPB_E
       HandleMuxAssign(lnast, expr, parent_node, expr_string);
       break;
     } case 7: { //SubField
-      expr_string = HandleSubfieldAcc(lnast, expr.sub_field(), parent_node);
+      expr_string = HandleSubfieldAcc(lnast, expr.sub_field(), parent_node, is_rhs);
       break;
     } case 8: { //SubIndex
       I(false); //FIXME: Need to implement.
@@ -1112,9 +1159,11 @@ std::string Inou_firrtl::ReturnExprString(Lnast& lnast, const firrtl::FirrtlPB_E
       //FIXME: Unsure of how this should be.
       I(false);
       break;
-    } default:
+    } default: {
       //Error: I don't think this should occur if we're using Chisel's protobuf utility.
+      fmt::print("Failure: {}\n", expr.expression_case());
       I(false);
+    }
   }
   return expr_string;
 }
@@ -1223,36 +1272,26 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
       break;
 
     } case 6: { //Node -- nodes are simply named intermediates in a circuit
-      cout << "node " << stmt.node().id();
-      cout << " = ";
-
       InitialExprAdd(lnast, stmt.node().expression(), parent_node, stmt.node().id());
-
-      cout << "\n";
       break;
 
     } case 7: { //When -- FIXME
-      /*auto idx_when = lnast.add_child(parent_node, Lnast_node::create_if("when"));
-      lnast.add_child(idx_when, Lnast_node::create_cstmts(""));//NOTE: Empty cstmts right now for SSA.
-      CreateConditionNode(lnast, stmt.when().predicate(), idx_when, parent_node);
-      auto idx_stmts_ifTrue = lnast.add_child(idx_when, Lnast_node::create_stmts(get_new_seq_name(lnast)));
-      //FIXME: I might have to conform to cstmts model. If that's the case, add those here/in this case block.
+      auto idx_when = lnast.add_child(parent_node, Lnast_node::create_if("when"));
+      auto idx_csts = lnast.add_child(idx_when, Lnast_node::create_cstmts(get_new_seq_name(lnast)));
+      auto cond_str = lnast.add_string(ReturnExprString(lnast, stmt.when().predicate(), idx_csts, true));
+      lnast.add_child(idx_when, Lnast_node::create_cond(cond_str));
 
+      auto idx_stmts_t = lnast.add_child(idx_when, Lnast_node::create_stmts(get_new_seq_name(lnast)));
 
-      cout << "when(";
-      cout << ") {\n";
       for (int i = 0; i < stmt.when().consequent_size(); i++) {
-        ListStatementInfo(lnast, stmt.when().consequent(i), idx_stmts_ifTrue);
+        ListStatementInfo(lnast, stmt.when().consequent(i), idx_stmts_t);
       }
       if(stmt.when().otherwise_size() > 0) {
-        cout << "} .otherwise {\n";
-        auto idx_stmts_ifFalse = lnast.add_child(idx_when, Lnast_node::create_stmts(get_new_seq_name(lnast)));
+        auto idx_stmts_f = lnast.add_child(idx_when, Lnast_node::create_stmts(get_new_seq_name(lnast)));
         for (int j = 0; j < stmt.when().otherwise_size(); j++) {
-          ListStatementInfo(lnast, stmt.when().otherwise(j), idx_stmts_ifFalse);
+          ListStatementInfo(lnast, stmt.when().otherwise(j), idx_stmts_f);
         }
       }
-      cout << "}\n";*/
-      I(false);
       break;
 
     } case 8: { //Stop
