@@ -1,19 +1,12 @@
 #!/bin/bash
 rm -rf ./lgdb
 # pts='test'
-pts='tuple'
-# pts='tuple_if2 out_ssa  logic  tuple_if  bits_rhs  firrtl_tail3  firrtl_tail2 
-#      nested_if  counter  counter_nested_if 
-#      adder_stage  if2 if  if3_err 
-#      nested_if_err  firrtl_tail  ssa_rhs  reg__q_pin '
-
-pts_failbitwidth='tuple_if2  firrtl_tail3  firrtl_tail2 
-     out_ssa  counter  counter_nested_if '
-
-pts_failqreq='adder_stage'
-
-pts_future='if2 if  if3_err 
+# pts='tuple'
+pts='tuple_if2 out_ssa  logic  tuple_if  bits_rhs  firrtl_tail3  firrtl_tail2 
+     nested_if  counter  counter_nested_if 
+     adder_stage  if2 if  if3_err 
      nested_if_err  firrtl_tail  ssa_rhs  reg__q_pin '
+
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -87,7 +80,7 @@ do
     echo "Tuple Chain Resolve(LGraph)"
     echo "----------------------------------------------------"
     ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.resolve_tuples"
-    #${LGSHELL} "lgraph.open name:${pt} |> pass.cprop"
+    # ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop"
     if [ $? -eq 0 ]; then
       echo "Successfully resolve the tuple chain: inou/cfg/tests/${pt}.prp"
     else
