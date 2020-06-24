@@ -1,11 +1,11 @@
 #!/bin/bash
 rm -rf ./lgdb
 # pts='test'
-# pts='tuple'
-pts='tuple_if2 out_ssa  logic  tuple_if  bits_rhs  firrtl_tail3  firrtl_tail2 
-     nested_if  counter  counter_nested_if 
-     adder_stage  if2 if  if3_err 
-     nested_if_err  firrtl_tail  ssa_rhs  reg__q_pin '
+pts='tuple_if2'
+# pts='tuple_if2  logic  tuple_if  bits_rhs  firrtl_tail3  firrtl_tail2 
+#      out_ssa  nested_if  counter  counter_nested_if 
+#      adder_stage  if2 if  if3_err 
+#      nested_if_err  firrtl_tail  ssa_rhs  reg__q_pin '
 
 
 LGSHELL=./bazel-bin/main/lgshell
@@ -69,27 +69,45 @@ do
 
 
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.no_bits.tuple.assignment_or.dot
+    mv ${pt}.dot ${pt}.no_cprop.dot
 
+
+
+#     echo ""
+#     echo ""
+#     echo ""
+#     echo "----------------------------------------------------"
+#     echo "Tuple Chain Resolve(LGraph)"
+#     echo "----------------------------------------------------"
+#     ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.resolve_tuples"
+#     # ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop"
+#     if [ $? -eq 0 ]; then
+#       echo "Successfully resolve the tuple chain: inou/cfg/tests/${pt}.prp"
+#     else
+#       echo "ERROR: Pyrope compiler failed: resolve tuples, testcase: inou/cfg/tests/${pt}.prp"
+#       exit 1
+#     fi
+
+#     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+#     mv ${pt}.dot ${pt}.no_crop.dot
 
 
     echo ""
     echo ""
     echo ""
     echo "----------------------------------------------------"
-    echo "Tuple Chain Resolve(LGraph)"
+    echo "Copy Propagation Optimization(LGraph)"
     echo "----------------------------------------------------"
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.resolve_tuples"
-    # ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop"
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop"
     if [ $? -eq 0 ]; then
-      echo "Successfully resolve the tuple chain: inou/cfg/tests/${pt}.prp"
+      echo "Successfully eliminate all assignment or_op: inou/cfg/tests/${pt}.prp"
     else
-      echo "ERROR: Pyrope compiler failed: resolve tuples, testcase: inou/cfg/tests/${pt}.prp"
+      echo "ERROR: Pyrope compiler failed: cprop, testcase: inou/cfg/tests/${pt}.prp"
       exit 1
     fi
 
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.no_bits.assignmment_or.dot
+    mv ${pt}.dot ${pt}.no_bw.dot
 
 
     echo ""
@@ -108,58 +126,77 @@ do
     fi
 
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.assignment_or.dot
+    mv ${pt}.dot ${pt}.dot
 
 
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "Assignment_Or_Op Elimination(LGraph)"
-    echo "----------------------------------------------------"
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.assignment_or_elimination"
-    if [ $? -eq 0 ]; then
-      echo "Successfully eliminate all assignment or_op: inou/cfg/tests/${pt}.prp"
-    else
-      echo "ERROR: Pyrope compiler failed: assignment_or_elimination, testcase: inou/cfg/tests/${pt}.prp"
-      exit 1
-    fi
+    # echo ""
+    # echo ""
+    # echo ""
+    # echo "----------------------------------------------------"
+    # echo "Bitwidth Optimization(LGraph) Round-1"
+    # echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.cprop.dot
+    # ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth"
+    # if [ $? -eq 0 ]; then
+    #   echo "Successfully optimize design bitwidth: inou/cfg/tests/${pt}.prp"
+    # else
+    #   echo "ERROR: Pyrope compiler failed: bitwidth optimization, testcase: inou/cfg/tests/${pt}.prp"
+    #   exit 1
+    # fi
 
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "Copy Propagation Optimization(LGraph)"
-    echo "----------------------------------------------------"
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop"
-    if [ $? -eq 0 ]; then
-      echo "Successfully eliminate all assignment or_op: inou/cfg/tests/${pt}.prp"
-    else
-      echo "ERROR: Pyrope compiler failed: cprop, testcase: inou/cfg/tests/${pt}.prp"
-      exit 1
-    fi
+    # ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+    # mv ${pt}.dot ${pt}.assignment_or.dot
 
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.dce.dot
 
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "Dead Code Elimination(LGraph)"
-    echo "----------------------------------------------------"
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.dce"
-    if [ $? -eq 0 ]; then
-      echo "Successfully perform dead code elimination: inou/cfg/tests/${pt}.prp"
-    else
-      echo "ERROR: Pyrope compiler failed: dead code elimination, testcase: inou/cfg/tests/${pt}.prp"
-      exit 1
-    fi
+    # echo ""
+    # echo ""
+    # echo ""
+    # echo "----------------------------------------------------"
+    # echo "Assignment_Or_Op Elimination(LGraph)"
+    # echo "----------------------------------------------------"
+    # ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.assignment_or_elimination"
+    # if [ $? -eq 0 ]; then
+    #   echo "Successfully eliminate all assignment or_op: inou/cfg/tests/${pt}.prp"
+    # else
+    #   echo "ERROR: Pyrope compiler failed: assignment_or_elimination, testcase: inou/cfg/tests/${pt}.prp"
+    #   exit 1
+    # fi
 
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+    # ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+    # mv ${pt}.dot ${pt}.cprop.dot
+
+    # echo ""
+    # echo ""
+    # echo ""
+    # echo "----------------------------------------------------"
+    # echo "Copy Propagation Optimization(LGraph)"
+    # echo "----------------------------------------------------"
+    # ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop"
+    # if [ $? -eq 0 ]; then
+    #   echo "Successfully eliminate all assignment or_op: inou/cfg/tests/${pt}.prp"
+    # else
+    #   echo "ERROR: Pyrope compiler failed: cprop, testcase: inou/cfg/tests/${pt}.prp"
+    #   exit 1
+    # fi
+
+    # ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+    # mv ${pt}.dot ${pt}.dce.dot
+
+    # echo ""
+    # echo ""
+    # echo ""
+    # echo "----------------------------------------------------"
+    # echo "Dead Code Elimination(LGraph)"
+    # echo "----------------------------------------------------"
+    # ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.dce"
+    # if [ $? -eq 0 ]; then
+    #   echo "Successfully perform dead code elimination: inou/cfg/tests/${pt}.prp"
+    # else
+    #   echo "ERROR: Pyrope compiler failed: dead code elimination, testcase: inou/cfg/tests/${pt}.prp"
+    #   exit 1
+    # fi
+
+    # ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
 
 
 

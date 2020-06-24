@@ -149,6 +149,8 @@ private:
   absl::flat_hash_map<Lnast_nid, Dot_lrhs_table>  dot_lrhs_tables;
   absl::flat_hash_map<Lnast_nid, Tuple_var_table> tuple_var_tables;   
   absl::flat_hash_map<Lnast_nid, Phi_rtable>      new_added_phi_node_tables; // for each if-subtree scope
+  absl::flat_hash_set<std::string_view>           tuplized_table;
+  
 
   absl::flat_hash_map<std::string_view, uint8_t>  global_ssa_lhs_cnt_table;
 

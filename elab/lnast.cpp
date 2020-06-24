@@ -546,6 +546,8 @@ void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
       update_rhs_ssa_cnt_table(psts_nid, c1_opr);
   }
 
+
+
   //handle statement lhs
   if (type.is_assign() || type.is_as() || type.is_dp_assign()) {
     const auto  target_nid  = get_first_child(opr_nid);
@@ -600,8 +602,11 @@ void Lnast::ssa_rhs_handle_a_operand(const Lnast_nid &gpsts_nid, const Lnast_nid
   const auto opd_type  = get_type(opd_nid);
   Token      ori_token = get_token(opd_nid);
 
-  if (ssa_rhs_cnt_table.find(opd_name) != ssa_rhs_cnt_table.end()) {
+  if (tuplized_table.find(opd_name) != tuplized_table.end()) // if the variable has been tuplized, don't SSA it.
+    return;
 
+
+  if (ssa_rhs_cnt_table.find(opd_name) != ssa_rhs_cnt_table.end()) {
     auto  new_subs = ssa_rhs_cnt_table[opd_name];
     set_data(opd_nid, Lnast_node(opd_type, ori_token, new_subs));
   } else {
@@ -766,15 +771,28 @@ bool Lnast::has_else_stmts(const Lnast_nid &if_nid) {
 }
 
 void Lnast::ssa_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
-  //note: handle statement rhs in the 2nd part SSA
+  //handle lhs of the statement, handle statement rhs in the 2nd part SSA
 
-  //handle lhs of the statement 
   const auto type = get_type(opr_nid);
+
+  if (type.is_tuple_add() || type.is_tuple_concat()) {
+    auto c0_opr = get_first_child(opr_nid);
+    auto c1_opr = get_sibling_next(c0_opr);
+    if (get_name(c1_opr).substr(0,6) != "__bits") {
+      tuplized_table.insert(get_name(c0_opr));
+      return;
+    }
+  }
+
   if (type.is_assign() || type.is_dp_assign() || type.is_as() || type.is_tuple()) {
     const auto  lhs_nid  = get_first_child(opr_nid);
     const auto  lhs_name = get_name(lhs_nid);
+    
+    if (tuplized_table.find(lhs_name) != tuplized_table.end()) // if the variable has been tuplized, don't SSA it.
+      return;
 
-    if (lhs_name.substr(0,3) == "___") return;
+    if (lhs_name.substr(0,3) == "___") 
+      return;
 
     update_global_lhs_ssa_cnt_table(lhs_nid);
     update_phi_resolve_table(psts_nid, lhs_nid);
