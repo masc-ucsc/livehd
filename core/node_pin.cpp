@@ -124,6 +124,10 @@ std::string Node_pin::debug_name() const {
     fmt::print("WARNING: Node_pin::debug_name should not be called during release (Slowww!)\n");
   }
 #endif
+  if (current_g == nullptr) {  // legal for invalid node/pins
+    return "invalid_pin";
+  }
+
   std::string name;
   if (!sink)
     if (Ann_node_pin_name::ref(current_g)->has_key(get_compact_class_driver()))

@@ -313,6 +313,97 @@ void Pass_cprop::replace_logic_node(Node &node, const Lconst &result, const Lcon
   node.del_node();
 }
 
+absl::flat_hash_map<Node::Compact, std::shared_ptr<Lgtuple>> tuplemap;
+
+bool Pass_cprop::process_tuples(Node &node, XEdge_iterator &inp_edges_ordered) {
+
+   auto op = node.get_type().op;
+   if (op != TupAdd_Op && op != TupGet_Op)
+     return false;
+
+   I(inp_edges_ordered.size()>=1);
+
+   int pid=1;
+
+   // Either pos or name
+   Node_pin key_pos_dpin;
+   Node_pin key_name_dpin;
+
+   int key_pos = -1;
+   std::string key_name;
+
+#if 0
+   for (auto e : inp_edges_ordered) {
+     fmt::print("edge sink.pid:{} driver_node:{}\n",e.sink.get_pid(), e.driver.get_node().debug_name());
+   }
+#endif
+
+   if (inp_edges_ordered[pid].sink.get_pid() == 1) {
+     key_name_dpin = inp_edges_ordered[pid].driver;
+     I(key_name_dpin.get_node().get_type().op == TupKey_Op);
+     I(key_name_dpin.has_name());
+     key_name = key_name_dpin.get_name();
+     pid++;
+   }
+   if (inp_edges_ordered.size() > pid && inp_edges_ordered[pid].sink.get_pid() == 2) {
+     key_pos_dpin = inp_edges_ordered[pid].driver;
+     if (key_pos_dpin.get_node().is_type_const()) {
+       key_pos = key_pos_dpin.get_node().get_type_const().to_i();
+     }
+     pid++;
+   }
+   I(!key_pos_dpin.is_invalid() || !key_name_dpin.is_invalid());
+
+   auto parent_node = inp_edges_ordered[0].driver.get_node();
+   auto it = tuplemap.find(parent_node.get_compact());
+
+#if 0
+   for(auto e:tuplemap) {
+     fmt::print("parent_node:{}..\n", e.first.get_nid());
+     e.second->dump();
+   }
+#endif
+
+   if (op == TupAdd_Op) {
+     I(inp_edges_ordered.size()>=3);
+     auto val_dpin      = inp_edges_ordered[pid].driver;
+     pid++;
+
+     if (it == tuplemap.end()) {
+       // First tuple entry
+       std::shared_ptr<Lgtuple> tup = std::make_shared<Lgtuple>(); // No tuple root name?
+       tup->set(key_pos, key_name, val_dpin);
+
+       tuplemap[node.get_compact()] = tup;
+     } else {
+       // Make a copy of the current tup
+       auto tup = std::make_shared<Lgtuple>(*(it->second));
+       tup->set(key_pos, key_name, val_dpin);
+
+       tuplemap[node.get_compact()] = tup;
+     }
+
+     fmt::print("TupAdd node:{} pos:{} key:{} val:{}\n", node.debug_name(), key_pos, key_name, val_dpin.debug_name());
+
+   }else{
+     I(op == TupGet_Op);
+
+     I(it != tuplemap.end());
+
+     auto tup = it->second;
+
+     auto val_dpin = tup->get_driver_pin(key_pos, key_name);
+
+     if (!val_dpin.is_invalid()) {
+			 fmt::print("TupGet node:{} pos:{} key:{} val:{}\n", node.debug_name(), key_pos, key_name, val_dpin.debug_name());
+			 collapse_forward_for_pin(node, val_dpin);
+			 return true;
+     }
+   }
+
+	 return false;
+}
+
 void Pass_cprop::trans(LGraph *g) {
 
   for (auto node : g->forward()) {
@@ -334,6 +425,13 @@ void Pass_cprop::trans(LGraph *g) {
       if (e.driver.get_node().is_type_const())
         n_inputs_constant++;
     }
+
+    bool get_deleted = process_tuples(node, inp_edges_ordered);
+    if (get_deleted) {
+      I(node.is_invalid());
+      continue;
+    }
+		I(!node.is_invalid());
 
     if (n_inputs == n_inputs_constant && n_inputs) {
       replace_all_inputs_const(node, inp_edges_ordered);

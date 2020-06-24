@@ -1,0 +1,13 @@
+
+lnast optimizations:
+
+No ___x, use tree pos
+
+There are lots of ___x nodes to ref for tmps. It would be much better if an
+"integer" is created for the temps. The integer can be a "tree_pos" of the
+place that the temp gets assigned. THen, no need to have a map to find, or a
+string/map to find the tree pos were the assignment happens.
+
+This can reduce the size, speedup the process, reduce auxiliary tables
+
+

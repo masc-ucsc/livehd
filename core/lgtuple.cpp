@@ -4,25 +4,65 @@
 #include "lgraph.hpp"
 #include "lgtuple.hpp"
 
-std::shared_ptr<Lgtuple> Lgtuple::get(std::string_view key) {
+Node_pin Lgtuple::get_driver_pin(int pos, std::string_view key) const {
+  if (pos == 0 && is_scalar()) {
+    return dpin;
+  }
+  if (pos<0)
+    pos = get_key_pos(key);
+
+  I(pos<pos2tuple.size());
+  return pos2tuple[pos]->get_driver_pin();
+}
+
+std::shared_ptr<Lgtuple> Lgtuple::get_tuple(std::string_view key) {
   auto pos = get_key_pos(key);
 
   return pos2tuple[pos];
 }
 
-std::shared_ptr<Lgtuple> Lgtuple::get(size_t pos) {
+std::shared_ptr<Lgtuple> Lgtuple::get_tuple(size_t pos) {
   I(has_key_pos(pos));
+
+  if (pos == 0 && is_scalar())
+    return shared_from_this();
 
   return pos2tuple[pos];
 }
 
-size_t Lgtuple::get_or_create_pos(std::string_view key) {
+void Lgtuple::unscalarize_if_needed() {
   if (is_scalar() && !dpin.is_invalid()) {
-    named = false; // first did not have name
-    pos2tuple.emplace_back(std::make_shared<Lgtuple>(0)); // unname
+    named = false;                                         // first did not have name
+    pos2tuple.emplace_back(std::make_shared<Lgtuple>(0));  // unname
     pos2tuple[0]->set(dpin);
     dpin.invalidate();
   }
+}
+
+size_t Lgtuple::get_or_create_pos(size_t pos, std::string_view key) {
+  unscalarize_if_needed();
+
+  if (pos>pos2tuple.size()) {
+    pos2tuple.resize(pos+1);
+    pos2tuple[pos] = std::make_shared<Lgtuple>(pos, key);
+		key2pos[key] = pos;
+  }else if (pos == pos2tuple.size()) {
+    pos2tuple.emplace_back(std::make_shared<Lgtuple>(pos, key));
+		key2pos[key] = pos;
+  }else{
+    if (pos2tuple[pos]) {
+      I(pos2tuple[pos]->get_parent_key_name() == key);
+    } else {
+      pos2tuple[pos] = std::make_shared<Lgtuple>(pos, key);
+			key2pos[key] = pos;
+    }
+  }
+
+  return pos;
+}
+
+size_t Lgtuple::get_or_create_pos(std::string_view key) {
+  unscalarize_if_needed();
 
   auto pos = pos2tuple.size();
   bool new_entry = true;
@@ -35,19 +75,15 @@ size_t Lgtuple::get_or_create_pos(std::string_view key) {
       pos2tuple.emplace_back(std::make_shared<Lgtuple>(pos, key)); // ordered+named
     else
       pos2tuple.emplace_back(std::make_shared<Lgtuple>(key)); // named
+		key2pos[key] = pos;
   }
 
   return pos;
 }
 
 size_t Lgtuple::get_or_create_pos(size_t pos) {
-  if (is_scalar() && !dpin.is_invalid()) {
-    named = false; // first did not have name
-    // move scalar to entry (it should not be named)
-    pos2tuple.emplace_back(std::make_shared<Lgtuple>(0)); // unname
-    pos2tuple[0]->set(dpin);
-    dpin.invalidate();
-  }
+  unscalarize_if_needed();
+
   I(pos);
   bool new_entry = false;
   if (pos>pos2tuple.size()) {
@@ -71,6 +107,17 @@ size_t Lgtuple::get_or_create_pos(size_t pos) {
   }
 
   return pos;
+}
+
+void Lgtuple::set(int pos, std::string_view key, const Node_pin &_dpin) {
+  if (pos < 0) {
+    set(key, _dpin);
+  } else if (key.empty()) {
+    set(pos, _dpin);
+  }else {
+    auto pos2 = get_or_create_pos(pos, key);
+    pos2tuple[pos2]->set(_dpin);
+  }
 }
 
 void Lgtuple::set(std::string_view key, std::shared_ptr<Lgtuple> tup) {
@@ -157,3 +204,18 @@ void Lgtuple::set(const Node_pin &_dpin) {
 
   dpin = _dpin;
 }
+
+void Lgtuple::dump(std::string_view indent) const {
+  fmt::print("{}parent name:{} parent pos:{} {} {} dpin:{}\n", indent, parent_key_name, parent_key_pos, ordered ? "ordered" : "unordered",
+             named ? "named" : "unnamed", dpin.debug_name());
+
+  std::string indent2(indent);
+  indent2.append(2,' ');
+  for (auto i = 0; i < pos2tuple.size(); ++i) {
+    if (pos2tuple[i])
+      pos2tuple[i]->dump(indent2);
+    else
+      fmt::print("{}invalid pos:{}\n",indent2, i);
+  }
+}
+

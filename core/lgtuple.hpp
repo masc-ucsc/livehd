@@ -13,7 +13,7 @@
 #include "node.hpp"
 #include "node_pin.hpp"
 
-class Lgtuple {
+class Lgtuple : std::enable_shared_from_this<Lgtuple> {
 private:
 protected:
   std::string parent_key_name; // empty not set
@@ -33,6 +33,9 @@ protected:
     key2pos.clear();
     pos2tuple.clear();
   }
+
+  void unscalarize_if_needed();
+  size_t get_or_create_pos(size_t pos, std::string_view key);
   size_t get_or_create_pos(std::string_view key);
   size_t get_or_create_pos(size_t pos);
 
@@ -48,13 +51,15 @@ public:
     reset();
   }
 
-  Lgtuple(size_t ppos, std::string_view name)
+  // pos -1 -> invalid pos
+  Lgtuple(int ppos, std::string_view name)
     : parent_key_name  (name)
     , parent_key_pos   (ppos) {
     reset();
   }
 
-  Lgtuple(size_t ppos)
+  // pos -1 -> invalid pos
+  Lgtuple(int ppos)
     : parent_key_pos   (ppos) {
     reset();
   }
@@ -95,8 +100,11 @@ public:
     return pos2tuple[key]->get_parent_key_name();
   }
 
-  std::shared_ptr<Lgtuple> get(std::string_view key);
-  std::shared_ptr<Lgtuple> get(size_t  key);
+  Node_pin get_driver_pin(int pos, std::string_view key) const;
+  std::shared_ptr<Lgtuple> get_tuple(std::string_view key);
+  std::shared_ptr<Lgtuple> get_tuple(size_t  key);
+
+  void set(int pos, std::string_view key, const Node_pin &dpin); // int -> pos<0 invalid
 
   void set(std::string_view key, std::shared_ptr<Lgtuple> tup);
   void set(std::string_view key, LGraph *lg, const Lconst &constant);
@@ -120,6 +128,9 @@ public:
 
   void set(LGraph *lg, const Lconst &constant);
   void set(const Node_pin &dpin);
+
+  void dump() const { dump("  "); }
+  void dump(std::string_view indent) const;
 };
 
 

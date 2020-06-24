@@ -79,6 +79,7 @@ do
     echo "Tuple Chain Resolve(LGraph)"
     echo "----------------------------------------------------"
     ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.resolve_tuples"
+    # ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop"
     if [ $? -eq 0 ]; then
       echo "Successfully resolve the tuple chain: inou/cfg/tests/${pt}.prp"
     else
