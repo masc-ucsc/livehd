@@ -563,11 +563,8 @@ void Inou_lnast_dfg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnid
   dfg->add_edge(value_dpin, value_spin);
   name2dpin[tup_name] = tup_add.setup_driver_pin();
   tup_add.setup_driver_pin().set_name(tup_name); // tuple ref semantically move to here
+  //tuplize_table.insert()
 
-  if (is_const(key_name) && std::stoi(key_name) > tn2head_maxlen[tup_name].second) {
-    I(false, "Compile Error: tuple field out of range"); 
-    //tn2head_maxlen[tup_name].second ++; 
-  }
 }
 
 
@@ -700,7 +697,19 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
 
   const auto it = name2dpin.find(name);
   if (it != name2dpin.end()){
-    return it->second;
+    // return a connected TupGet if the ref node is a TupAdd, else, it's a scalar variable, just return the node pin
+    if (it->second.get_node().get_type().op != TupAdd_Op) 
+      return it->second;
+
+    auto tup_get = dfg->create_node(TupGet_Op);
+    auto tn_spin = tup_get.setup_sink_pin(TN); // tuple name
+    auto kp_spin = tup_get.setup_sink_pin(KP); // key pos
+    
+    auto tn_dpin = it->second;
+    auto kp_dpin = resolve_constant(dfg, Lconst(0)).setup_driver_pin(); //must be pos 0 as the case is "bar = a + 1", implicitly get a.0
+    dfg->add_edge(tn_dpin, tn_spin);
+    dfg->add_edge(kp_dpin, kp_spin);
+    return tup_get.setup_driver_pin();
   }
 
   Node_pin node_dpin;
