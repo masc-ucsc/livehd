@@ -1,6 +1,7 @@
 #!/bin/bash
 rm -rf ./lgdb
-pts='test'
+# pts='test'
+pts='tuple'
 # pts='tuple_if2  logic  tuple_if  bits_rhs  firrtl_tail3  firrtl_tail2 
 #      out_ssa  nested_if  counter  counter_nested_if 
 #      adder_stage  if2 if  if3_err 

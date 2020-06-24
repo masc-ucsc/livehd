@@ -13,10 +13,10 @@ if (A.foo == 7) {
   x = A.foo
 }                            
 
-%out1 = A[1] + A.bar
+%out1 = A[1] + A.bar // 17 + 13 = 30 = 0x1e
 
 A[0] = 3
-%out2 = A[0] + A.foo
+%out2 = A[0] + A.foo // 3 + 17 = 20 = 0x14
 
-%out3 = x
+%out3 = x            // 17 = 0x11
 
