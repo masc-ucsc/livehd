@@ -118,6 +118,7 @@ private:
   void      resolve_ssa_lhs_subs                (const Lnast_nid &psts_nid);
   void      resolve_ssa_rhs_subs                (const Lnast_nid &psts_nid);
   void      update_global_lhs_ssa_cnt_table     (const Lnast_nid &target_nid);
+  void      respect_latest_global_lhs_ssa       (const Lnast_nid &target_nid);
   void      reg_ini_global_lhs_ssa_cnt_table    (const Lnast_nid &target_nid); //just initialize global reg when appeared in rhs
   int8_t    check_rhs_cnt_table_parents_chain   (const Lnast_nid &psts_nid, const Lnast_nid &target_key);
   void      update_rhs_ssa_cnt_table            (const Lnast_nid &psts_nid, const Lnast_nid &target_key);

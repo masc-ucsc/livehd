@@ -602,8 +602,8 @@ void Lnast::ssa_rhs_handle_a_operand(const Lnast_nid &gpsts_nid, const Lnast_nid
   const auto opd_type  = get_type(opd_nid);
   Token      ori_token = get_token(opd_nid);
 
-  if (tuplized_table.find(opd_name) != tuplized_table.end()) // if the variable has been tuplized, don't SSA it.
-    return;
+  /* if (tuplized_table.find(opd_name) != tuplized_table.end()) // if the variable has been tuplized, don't SSA it. */
+  /*   return; */
 
 
   if (ssa_rhs_cnt_table.find(opd_name) != ssa_rhs_cnt_table.end()) {
@@ -773,24 +773,18 @@ bool Lnast::has_else_stmts(const Lnast_nid &if_nid) {
 void Lnast::ssa_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
   //handle lhs of the statement, handle statement rhs in the 2nd part SSA
 
-  const auto type = get_type(opr_nid);
+  const auto type     = get_type(opr_nid);
+  const auto lhs_nid  = get_first_child(opr_nid);
 
   if (type.is_tuple_add() || type.is_tuple_concat()) {
-    auto c0_opr = get_first_child(opr_nid);
-    auto c1_opr = get_sibling_next(c0_opr);
-    if (get_name(c1_opr).substr(0,6) != "__bits") {
-      tuplized_table.insert(get_name(c0_opr));
+    auto c1_opr_name = get_name(get_sibling_next(lhs_nid));
+    if (c1_opr_name.substr(0,6) == "__bits")
       return;
-    }
+    respect_latest_global_lhs_ssa(lhs_nid);
   }
 
   if (type.is_assign() || type.is_dp_assign() || type.is_as() || type.is_tuple()) {
-    const auto  lhs_nid  = get_first_child(opr_nid);
-    const auto  lhs_name = get_name(lhs_nid);
-    
-    if (tuplized_table.find(lhs_name) != tuplized_table.end()) // if the variable has been tuplized, don't SSA it.
-      return;
-
+    const auto lhs_name = get_name(lhs_nid);
     if (lhs_name.substr(0,3) == "___") 
       return;
 
@@ -828,6 +822,17 @@ void Lnast::reg_ini_global_lhs_ssa_cnt_table(const Lnast_nid &rhs_nid) {
   }
 }
 
+
+void Lnast::respect_latest_global_lhs_ssa(const Lnast_nid &lhs_nid) {
+  const auto  lhs_name = get_name(lhs_nid);
+  auto itr = global_ssa_lhs_cnt_table.find(lhs_name);
+  if (itr != global_ssa_lhs_cnt_table.end()) {
+    fmt::print("lhs_name:{}, subs:{}\n",lhs_name, itr->second);
+    ref_data(lhs_nid)->subs = itr->second;
+  } else {
+    global_ssa_lhs_cnt_table[lhs_name] = 0;
+  }
+}
 
 void Lnast::update_global_lhs_ssa_cnt_table(const Lnast_nid &lhs_nid) {
   const auto  lhs_name = get_name(lhs_nid);
