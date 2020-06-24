@@ -9,8 +9,8 @@
 
 #include "lgtuple.hpp"
 
-#define TRACE(x)
-//#define TRACE(x) x
+//#define TRACE(x)
+#define TRACE(x) x
 
 void setup_pass_cprop() { Pass_cprop::setup(); }
 
@@ -67,6 +67,10 @@ void Pass_cprop::collapse_forward_shiftleft(Node &node) {
 void Pass_cprop::collapse_forward_always_pin0(Node &node, XEdge_iterator &inp_edges_ordered) {
   bool can_delete = true;
 
+  fmt::print("trying forward node:{} size:{}\n", node.debug_name(), inp_edges_ordered.size());
+	node.get_class_lgraph()->dump();
+  fmt::print("trying forward node:{} size:{}\n", node.debug_name(), inp_edges_ordered.size());
+
   for (auto &out : node.out_edges()) {
     if (out.driver.get_pid()) {
       can_delete = false;
@@ -82,9 +86,13 @@ void Pass_cprop::collapse_forward_always_pin0(Node &node, XEdge_iterator &inp_ed
       out.sink.connect_driver(inp.driver);
     }
   }
-  TRACE(fmt::print("cprop forward_always del_node node:{}\n",node.debug_name()));
-  if (can_delete)
+
+  if (can_delete) {
+    TRACE(fmt::print("cprop forward_always del_node node:{}\n", node.debug_name()));
     node.del_node();
+  }
+	node.get_class_lgraph()->dump();
+  fmt::print("trying forward node:{} size:{}\n", node.debug_name(), inp_edges_ordered.size());
 }
 
 void Pass_cprop::collapse_forward_for_pin(Node &node, Node_pin &new_dpin) {
@@ -315,6 +323,20 @@ void Pass_cprop::replace_logic_node(Node &node, const Lconst &result, const Lcon
 
 absl::flat_hash_map<Node::Compact, std::shared_ptr<Lgtuple>> tuplemap;
 
+void Pass_cprop::process_tuple_q_pin(Node &node, Node_pin &parent_dpin) {
+	// Get variable name
+  auto driver_wname   = parent_dpin.get_name();
+
+  // remove the SSA from name
+  auto pos   = driver_wname.find_last_of('_');
+	auto wname = driver_wname.substr(0, pos);
+
+	// Find flop
+  auto target_ff_qpin = Node_pin::find_driver_pin(node.get_class_lgraph(), wname);
+
+  collapse_forward_for_pin(node, target_ff_qpin);
+}
+
 bool Pass_cprop::process_tuples(Node &node, XEdge_iterator &inp_edges_ordered) {
 
    auto op = node.get_type().op;
@@ -332,7 +354,7 @@ bool Pass_cprop::process_tuples(Node &node, XEdge_iterator &inp_edges_ordered) {
    int key_pos = -1;
    std::string key_name;
 
-#if 0
+#if 1
    for (auto e : inp_edges_ordered) {
      fmt::print("edge sink.pid:{} driver_node:{}\n",e.sink.get_pid(), e.driver.get_node().debug_name());
    }
@@ -348,13 +370,8 @@ bool Pass_cprop::process_tuples(Node &node, XEdge_iterator &inp_edges_ordered) {
      key_name = key_name_dpin.get_name();
      if (key_name.substr(0, 2) == "__") {
        if (key_name.substr(0, 7) == "__q_pin") {
-         fmt::print("node:{} pin:{} parent_name:{} parent_dpin:{} \n", node.debug_name(), node.get_driver_pin().debug_name(), parent_node.debug_name(), parent_dpin.debug_name());
-				 auto driver_wname = parent_dpin.get_name();
-				 auto pos = driver_wname.find_last_of('_');
-				 auto target_ff_qpin_wname = std::string(driver_wname.substr(0, pos));
-				 auto target_ff_qpin = Node_pin::find_driver_pin(node.get_class_lgraph(), target_ff_qpin_wname);
-
-				 collapse_forward_for_pin(node, target_ff_qpin);
+				 fmt::print("process_tuple_q_pin parent_dpin:{} node:{}\n", parent_dpin.debug_name(), node.debug_name());
+				 process_tuple_q_pin(node, parent_dpin);
 				 return true;
        }
        return false;  // do not deal with __XXX like __bits
@@ -392,7 +409,29 @@ bool Pass_cprop::process_tuples(Node &node, XEdge_iterator &inp_edges_ordered) {
 
        tuplemap[node.get_compact()] = tup;
      } else {
-			 bool parent_could_be_deleted = parent_dpin.out_edges().size()==1; // This is the only one
+			 auto parent_out_edges = parent_dpin.out_edges(); // This is the only one
+			 bool parent_could_be_deleted = parent_out_edges.size()==1; // This is the only one
+
+			 if (!parent_could_be_deleted) {
+				 // if all the parent out edges are tuple get AND ONLY this parent can be deleted
+				 bool loop_exit = false;
+				 for(auto e:parent_out_edges) {
+					 auto dest_node = e.sink.get_node();
+					 if (dest_node == node)
+						 continue; // this node
+					 if (dest_node.get_type().op == TupGet_Op) {
+						 // WARNING: no testing case, but it should work
+						 auto t = dest_node.inp_edges_ordered();
+						 bool deleted = process_tuples(dest_node, t);
+						 if (deleted)
+							 continue;
+					 }
+					 loop_exit = true;
+					 break;
+				 }
+				 if (!loop_exit)
+					 parent_could_be_deleted = true;
+			 }
 
 			 std::shared_ptr<Lgtuple> tup;
 			 if (parent_could_be_deleted) {
@@ -462,14 +501,22 @@ bool Pass_cprop::process_tuples(Node &node, XEdge_iterator &inp_edges_ordered) {
 void Pass_cprop::trans(LGraph *g) {
 
   for (auto node : g->forward()) {
-    fmt::print("node {}\n",node.debug_name());
 
-    if (!node.has_outputs()) {
-			// No subs (inside side-effects) or flops/mems that that get connected latter
-      if (!node.is_type_sub() && !node.get_type().is_pipelined())
-        node.del_node();
-      continue;
-    }
+		// No subs, inside side-effects, or flops/mems that that get connected latter
+		auto op = node.get_type().op;
+
+		if (op == SFlop_Op || op == AFlop_Op || op == Latch_Op || op == FFlop_Op ||
+				op == Memory_Op || op == SubGraph_Op) {
+			fmt::print("cprop skipping node:{}\n", node.debug_name());
+			continue;
+		}
+
+		if (!node.has_outputs()) {
+			fmt::print("cprop deleting node:{}\n", node.debug_name());
+			node.del_node();
+			continue;
+		}
+		fmt::print("cprop node:{}\n",node.debug_name());
 
     int  n_inputs_constant   = 0;
     int  n_inputs            = 0;
@@ -504,7 +551,7 @@ void Pass_cprop::trans(LGraph *g) {
 
   for(auto node:g->fast()) {
     if (!node.has_outputs()) {
-      if (!node.is_type_sub() && !node.get_type().is_pipelined())
+      if (!node.is_type_sub())
         node.del_node();
       continue;
     }
