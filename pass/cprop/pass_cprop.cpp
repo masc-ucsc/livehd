@@ -338,11 +338,27 @@ bool Pass_cprop::process_tuples(Node &node, XEdge_iterator &inp_edges_ordered) {
    }
 #endif
 
+   auto parent_dpin = inp_edges_ordered[0].driver;
+   auto parent_node = parent_dpin.get_node();
+
    if (inp_edges_ordered[pid].sink.get_pid() == 1) {
      key_name_dpin = inp_edges_ordered[pid].driver;
      I(key_name_dpin.get_node().get_type().op == TupKey_Op);
      I(key_name_dpin.has_name());
      key_name = key_name_dpin.get_name();
+     if (key_name.substr(0, 2) == "__") {
+       if (key_name.substr(0, 7) == "__q_pin") {
+         fmt::print("node:{} pin:{} parent_name:{} parent_dpin:{} \n", node.debug_name(), node.get_driver_pin().debug_name(), parent_node.debug_name(), parent_dpin.debug_name());
+				 auto driver_wname = parent_dpin.get_name();
+				 auto pos = driver_wname.find_last_of('_');
+				 auto target_ff_qpin_wname = std::string(driver_wname.substr(0, pos));
+				 auto target_ff_qpin = Node_pin::find_driver_pin(node.get_class_lgraph(), target_ff_qpin_wname);
+
+				 collapse_forward_for_pin(node, target_ff_qpin);
+				 return true;
+       }
+       return false;  // do not deal with __XXX like __bits
+     }
      pid++;
    }
    if (inp_edges_ordered.size() > pid && inp_edges_ordered[pid].sink.get_pid() == 2) {
@@ -354,8 +370,6 @@ bool Pass_cprop::process_tuples(Node &node, XEdge_iterator &inp_edges_ordered) {
    }
    I(!key_pos_dpin.is_invalid() || !key_name_dpin.is_invalid());
 
-   auto parent_dpin = inp_edges_ordered[0].driver;
-   auto parent_node = parent_dpin.get_node();
    auto it = tuplemap.find(parent_node.get_compact());
 
 #if 0
@@ -408,11 +422,14 @@ bool Pass_cprop::process_tuples(Node &node, XEdge_iterator &inp_edges_ordered) {
 			 if (tup->has_key_name(key_name)) {
 				 val_dpin = tup->get_driver_pin(key_pos, key_name);
 			 }else{
+
 				 std::string_view tup_name;
 				 if (parent_dpin.has_name())
 					 tup_name = parent_dpin.get_name();
 				 else
 					 tup_name = tup->get_parent_key_name(); // FIXME: we should have a better way to get tuple name for error reporting
+
+				 tup->dump();
 				 Pass::error("tuple {} does not have field {}\n", tup_name, key_name);
 				 return false;
 			 }
@@ -425,6 +442,8 @@ bool Pass_cprop::process_tuples(Node &node, XEdge_iterator &inp_edges_ordered) {
 					 tup_name = parent_dpin.get_name();
 				 else
 					 tup_name = tup->get_parent_key_name(); // FIXME: we should have a better way to get tuple name for error reporting
+
+				 tup->dump();
 				 Pass::error("tuple {} does not have field {}\n", tup_name, key_pos);
 				 return false;
 			 }
@@ -446,7 +465,8 @@ void Pass_cprop::trans(LGraph *g) {
     fmt::print("node {}\n",node.debug_name());
 
     if (!node.has_outputs()) {
-      if (!node.is_type_sub()) // No subs (inside side-effets
+			// No subs (inside side-effects) or flops/mems that that get connected latter
+      if (!node.is_type_sub() && !node.get_type().is_pipelined())
         node.del_node();
       continue;
     }
@@ -484,7 +504,7 @@ void Pass_cprop::trans(LGraph *g) {
 
   for(auto node:g->fast()) {
     if (!node.has_outputs()) {
-      if (!node.is_type_sub()) // No subs (inside side-effets
+      if (!node.is_type_sub() && !node.get_type().is_pipelined())
         node.del_node();
       continue;
     }

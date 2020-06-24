@@ -76,7 +76,7 @@ public:
   }
 
   bool has_key_pos(size_t key) const {
-    return (key == 0 || (ordered && key<pos2tuple.size()));
+    return (key == 0 || (ordered && key<pos2tuple.size() && pos2tuple[key]));
   }
 
   size_t get_key_pos(std::string_view key) const {

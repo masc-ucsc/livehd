@@ -67,14 +67,13 @@ size_t Lgtuple::get_or_create_pos(std::string_view key) {
   auto pos = pos2tuple.size();
   bool new_entry = true;
 
+	ordered = false;
+
   if (has_key_name(key)) {
     pos = get_key_pos(key);
     new_entry = false;
   }else{
-    if (ordered)
-      pos2tuple.emplace_back(std::make_shared<Lgtuple>(pos, key)); // ordered+named
-    else
-      pos2tuple.emplace_back(std::make_shared<Lgtuple>(key)); // named
+		pos2tuple.emplace_back(std::make_shared<Lgtuple>(key)); // named
 		key2pos[key] = pos;
   }
 
@@ -102,7 +101,6 @@ size_t Lgtuple::get_or_create_pos(size_t pos) {
 
   if (new_entry) {
     named          = false;
-    ordered        = false;
     pos2tuple[pos] = std::make_shared<Lgtuple>(); // unordered, unnamed
   }
 
