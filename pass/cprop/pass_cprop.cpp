@@ -354,7 +354,8 @@ bool Pass_cprop::process_tuples(Node &node, XEdge_iterator &inp_edges_ordered) {
    }
    I(!key_pos_dpin.is_invalid() || !key_name_dpin.is_invalid());
 
-   auto parent_node = inp_edges_ordered[0].driver.get_node();
+   auto parent_dpin = inp_edges_ordered[0].driver;
+   auto parent_node = parent_dpin.get_node();
    auto it = tuplemap.find(parent_node.get_compact());
 
 #if 0
@@ -369,6 +370,7 @@ bool Pass_cprop::process_tuples(Node &node, XEdge_iterator &inp_edges_ordered) {
      auto val_dpin      = inp_edges_ordered[pid].driver;
      pid++;
 
+
      if (it == tuplemap.end()) {
        // First tuple entry
        std::shared_ptr<Lgtuple> tup = std::make_shared<Lgtuple>(); // No tuple root name?
@@ -376,8 +378,16 @@ bool Pass_cprop::process_tuples(Node &node, XEdge_iterator &inp_edges_ordered) {
 
        tuplemap[node.get_compact()] = tup;
      } else {
-       // Make a copy of the current tup
-       auto tup = std::make_shared<Lgtuple>(*(it->second));
+			 bool parent_could_be_deleted = parent_dpin.out_edges().size()==1; // This is the only one
+
+			 std::shared_ptr<Lgtuple> tup;
+			 if (parent_could_be_deleted) {
+				 tup = it->second;
+				 tuplemap.erase(it);
+				 parent_node.del_node();
+			 } else {
+				 tup = std::make_shared<Lgtuple>(*(it->second));
+			 }
        tup->set(key_pos, key_name, val_dpin);
 
        tuplemap[node.get_compact()] = tup;
@@ -392,7 +402,33 @@ bool Pass_cprop::process_tuples(Node &node, XEdge_iterator &inp_edges_ordered) {
 
      auto tup = it->second;
 
-     auto val_dpin = tup->get_driver_pin(key_pos, key_name);
+		 Node_pin val_dpin;
+
+		 if (!key_name.empty()) {
+			 if (tup->has_key_name(key_name)) {
+				 val_dpin = tup->get_driver_pin(key_pos, key_name);
+			 }else{
+				 std::string_view tup_name;
+				 if (parent_dpin.has_name())
+					 tup_name = parent_dpin.get_name();
+				 else
+					 tup_name = tup->get_parent_key_name(); // FIXME: we should have a better way to get tuple name for error reporting
+				 Pass::error("tuple {} does not have field {}\n", tup_name, key_name);
+				 return false;
+			 }
+		 }else if (key_pos>=0) {
+			 if (tup->has_key_pos(key_pos)) {
+				 val_dpin = tup->get_driver_pin(key_pos, key_name);
+			 }else{
+				 std::string_view tup_name;
+				 if (parent_dpin.has_name())
+					 tup_name = parent_dpin.get_name();
+				 else
+					 tup_name = tup->get_parent_key_name(); // FIXME: we should have a better way to get tuple name for error reporting
+				 Pass::error("tuple {} does not have field {}\n", tup_name, key_pos);
+				 return false;
+			 }
+		 }
 
      if (!val_dpin.is_invalid()) {
 			 fmt::print("TupGet node:{} pos:{} key:{} val:{}\n", node.debug_name(), key_pos, key_name, val_dpin.debug_name());
