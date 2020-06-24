@@ -245,12 +245,12 @@ void Inou_lnast_dfg::process_ast_concat_op(LGraph *dfg, const Lnast_nid &lnidx_c
   //FIXME->sh: how to support hierarchical tuple???
 
   auto lhs = lnast->get_first_child(lnidx_concat); //c0: target tuple name for concat.
-  auto opd1   = lnast->get_sibling_next(lhs);     //c1: tuple operand1, either scalar or tuple
-  auto opd2   = lnast->get_sibling_next(opd1);    //c2: tuple operand2, either scalar or tuple
+  auto opd1   = lnast->get_sibling_next(lhs);      //c1: tuple operand1, either scalar or tuple
+  auto opd2   = lnast->get_sibling_next(opd1);     //c2: tuple operand2, either scalar or tuple
   auto lhs_name  = lnast->get_sname(lhs);
   auto opd1_name = lnast->get_sname(opd1);
   auto opd2_name = lnast->get_sname(opd2);
-  //tup = opd1 ++ opd2, both opd1 and opd2 could be either a scalar or a tuple
+  //lhs = opd1 ++ opd2, both opd1 and opd2 could be either a scalar or a tuple
 
   if (lhs_name == opd1_name) { // keep opd1 as main body, concat opd2 at the tail
     auto lhs_dpin = setup_tuple_ref(dfg, lhs_name);
@@ -593,7 +593,6 @@ Node_pin Inou_lnast_dfg::setup_tuple_key(LGraph *dfg, std::string_view key_name)
   }
   return name2dpin[key_name];
 }
-
 
 
 
