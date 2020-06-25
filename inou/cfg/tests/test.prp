@@ -1,12 +1,7 @@
-a = 3u6bits
-b = 3u3bits
-
-if a == b {
-  %out = 1
-}else{
-  %out = 0
-}
-
+t1 = (1,2)
+t2 = (3,4)
+d = t1 ++ t2
+%out4 = d.1
 
 //a = 3             // scalar
 //foo = a           // scalar, 3
