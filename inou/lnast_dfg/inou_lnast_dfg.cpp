@@ -471,22 +471,29 @@ void Inou_lnast_dfg::process_ast_tuple_get_op(LGraph *dfg, const Lnast_nid &lnid
   auto c1_tg = lnast->get_sibling_next(c0_tg);
   auto c2_tg = lnast->get_sibling_next(c1_tg);
 
-  auto c2_dot_name = lnast->get_sname(c2_tg);
+  auto c2_tg_name = lnast->get_sname(c2_tg);
 
   auto tup_get = dfg->create_node(TupGet_Op);
   auto tn_spin = tup_get.setup_sink_pin(TN); // tuple name
   auto kn_spin = tup_get.setup_sink_pin(KN); // key name
   auto kp_spin = tup_get.setup_sink_pin(KP); // key pos
 
+  //if (is_register(lnast->get_name(c1_tg))) {
+  //  setup_ref_node_dpin(dfg, c1_tg); 
+  //}
+  //auto tn_dpin = setup_tuple_ref(dfg, lnast->get_sname(c1_tg));
+
+  Node_pin tn_dpin;
   if (is_register(lnast->get_name(c1_tg))) {
-    setup_ref_node_dpin(dfg, c1_tg); 
+    tn_dpin = setup_ref_node_dpin(dfg, c1_tg); 
+  } else {
+    tn_dpin = setup_tuple_ref(dfg, lnast->get_sname(c1_tg));
   }
 
 
-  auto tn_dpin = setup_tuple_ref(dfg, lnast->get_sname(c1_tg));
   dfg->add_edge(tn_dpin, tn_spin);
 
-  if (is_const(c2_dot_name)) {
+  if (is_const(c2_tg_name)) {
     auto kp_dpin = setup_ref_node_dpin(dfg, c2_tg);
     dfg->add_edge(kp_dpin, kp_spin);
   } else {
