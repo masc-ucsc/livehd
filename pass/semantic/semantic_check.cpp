@@ -5,7 +5,7 @@
 #include "semantic_check.hpp"
 
 bool Semantic_pass::is_primitive_op(const Lnast_ntype node_type) {
-  if (node_type.is_logical_op() || node_type.is_unary_op() || node_type.is_nary_op() || node_type.is_assign() || node_type.is_dp_assign() ||  node_type.is_as() || node_type.is_eq() || node_type.is_select() || node_type.is_bit_select() || node_type.is_logic_shift_right() || node_type.is_arith_shift_right() || node_type.is_arith_shift_left() || node_type.is_rotate_shift_right() || node_type.is_rotate_shift_left() || node_type.is_dynamic_shift_left() || node_type.is_dynamic_shift_right() ||  node_type.is_dot() || node_type.is_tuple()) {
+  if (node_type.is_logical_op() || node_type.is_unary_op() || node_type.is_nary_op() || node_type.is_assign() || node_type.is_dp_assign() ||  node_type.is_as() || node_type.is_eq() || node_type.is_select() || node_type.is_bit_select() || node_type.is_logic_shift_right() || node_type.is_arith_shift_right() || node_type.is_arith_shift_left() || node_type.is_rotate_shift_right() || node_type.is_rotate_shift_left() || node_type.is_dynamic_shift_left() || node_type.is_dynamic_shift_right() ||  node_type.is_dot() || node_type.is_tuple() || node_type.is_tuple_concat()) {
     return true;
   } else {
     return false;
@@ -42,8 +42,33 @@ void Semantic_pass::check_for_temp_var(std::string_view node_name) {
     if (!in_temp_list(node_name)) {
       temp_list.push_back(node_name);
     } else {
-      Pass::error("Temporary Variable Error: A temporary variable must be written to only once\n");
+      Pass::error("Temporary Variable Error: {} must be written to only once\n", node_name);
     }
+  }
+}
+
+bool Semantic_pass::in_not_read_list(std::string_view node_name) {
+  for (int i = 0; i < not_read_list.size(); i++) {
+    if (not_read_list[i] == node_name) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void Semantic_pass::check_for_not_read(std::string_view node_name) {
+  if (in_not_read_list(node_name)) {
+    for (auto it = not_read_list.begin(); it != not_read_list.end(); ) {
+      if (*it == node_name && node_name[0] != '%') {
+        std::cout << "Deleted " << node_name << "\n";
+        not_read_list.erase(it);
+      } else {
+        it++;
+      }
+    }
+  } else {
+    std::cout << "Added " << node_name << "\n";
+    not_read_list.push_back(node_name);
   }
 }
 
@@ -62,9 +87,11 @@ void Semantic_pass::check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_opr
       if (!rhs_type.is_ref() && !rhs_type.is_const()) {
         Pass::error("Unary Operation Error: RHS Node must be Node type 'ref' or 'const'\n");
       }
-      // Check temp variable
       check_for_temp_var(lnast->get_name(lhs));
-      check_for_temp_var(lnast->get_name(rhs));
+      check_for_not_read(lnast->get_name(lhs));
+      if (rhs_type.is_ref()) {
+        check_for_not_read(lnast->get_name(rhs));
+      }
 
     // N-ary Operations (need to add tuple_concat)
     } else if (node_type.is_dot() || node_type.is_logical_and() || node_type.is_logical_or() || node_type.is_nary_op() || node_type.is_eq() || node_type.is_select() || node_type.is_bit_select() || node_type.is_logic_shift_right() || node_type.is_arith_shift_right() || node_type.is_arith_shift_left() || node_type.is_rotate_shift_right() || node_type.is_rotate_shift_left() || node_type.is_dynamic_shift_right() ||  node_type.is_dynamic_shift_left() || node_type.is_tuple_concat()) {
@@ -76,12 +103,14 @@ void Semantic_pass::check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_opr
             Pass::error("N-ary Operation Error: LHS Node must be Node type 'ref'\n");
           }
           check_for_temp_var(lnast->get_name(lnidx_opr_child));
+          check_for_not_read(lnast->get_name(lnidx_opr_child));
           continue;
         } else if (!node_type_child.is_ref() && !node_type_child.is_const()) {
           Pass::error("N-ary Operation Error!: RHS Node(s) must be Node type 'ref' or 'const'\n");
         }
-        // Check temp variable
-        check_for_temp_var(lnast->get_name(lnidx_opr_child));
+        if (node_type_child.is_ref()) {
+          check_for_not_read(lnast->get_name(lnidx_opr_child));
+        }
       }
     } else if (node_type.is_tuple()) {
       int num_of_ref = 0;
@@ -91,12 +120,12 @@ void Semantic_pass::check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_opr
 
         if (node_type_child.is_ref()) {      
           num_of_ref += 1;
+          check_for_temp_var(lnast->get_name(lnidx_opr_child));
+          check_for_not_read(lnast->get_name(lnidx_opr_child));
         } else if (node_type_child.is_assign()) {
           check_primitive_ops(lnast, lnidx_opr_child, node_type_child);
           num_of_assign += 1;
         }
-        // Check temp variable
-        check_for_temp_var(lnast->get_name(lnidx_opr_child));
       }
       if (num_of_ref != 1) {
         Pass::error("Tuple Operation Error: Missing Reference Node\n");
@@ -310,5 +339,13 @@ void Semantic_pass::semantic_check(Lnast* lnast) {
     } else if (ntype.is_func_def()) {
       check_func_def(lnast, stmt);
     }
+  }
+  if (not_read_list.size() != 0) {
+    std::cout << "Temporary Variable Error: " << not_read_list[0];
+
+    for (int i = 1; i < not_read_list.size(); i++) {
+       std::cout << ", " << not_read_list[i];
+    }
+     std::cout << " were written but never read\n";
   }
 }
