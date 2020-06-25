@@ -207,6 +207,8 @@ protected:
     "const",
     "attr",
     "I",
+    "error_flag",
+    "reg_fwd",
     "tuple_add",
     "tuple_get",
     "tuple_phi_add"
@@ -572,7 +574,7 @@ public:
   std::string_view debug_name_cpp() const { return namemap_cpp[val]; }
 
   static_assert(namemap_cpp.size()==namemap.size());
-  // static_assert(namemap_cpp.size()==namemap_cfg.size());
+  static_assert(namemap_cpp.size()==namemap_cfg.size());
   static_assert(namemap_cpp.size()==namemap_pyrope.size());
   static_assert(namemap_cpp.size()==namemap_verilog.size());
   //static_assert(namemap_cpp.size()==Lnast_ntype_tuple_phi_add);
