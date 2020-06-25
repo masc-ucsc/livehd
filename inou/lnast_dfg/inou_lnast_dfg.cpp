@@ -425,7 +425,6 @@ void Inou_lnast_dfg::process_ast_tuple_struct(LGraph *dfg, const Lnast_nid &lnid
     auto key_name = lnast->get_sname(c0);
 
     auto tn_dpin    = setup_tuple_ref(dfg, tup_name);
-    auto kn_dpin    = setup_tuple_key(dfg, key_name);
     tup_keyname2pos[std::make_pair(tup_name, key_name)] = std::to_string(kp);
     auto kp_dnode   = resolve_constant(dfg, Lconst(kp));
     auto kp_dpin    = kp_dnode.setup_driver_pin();
@@ -433,12 +432,17 @@ void Inou_lnast_dfg::process_ast_tuple_struct(LGraph *dfg, const Lnast_nid &lnid
 
     auto tup_add    = dfg->create_node(TupAdd_Op);
     auto tn_spin    = tup_add.setup_sink_pin(TN); // tuple name
-    auto kn_spin    = tup_add.setup_sink_pin(KN); // key name
     auto kp_spin    = tup_add.setup_sink_pin(KP); // key position is unknown before tuple resolving
     auto value_spin = tup_add.setup_sink_pin(KV); // value
 
+    if (key_name.substr(0,4) != "null") {
+      auto kn_dpin    = setup_tuple_key(dfg, key_name);
+      auto kn_spin    = tup_add.setup_sink_pin(KN); // key name
+      dfg->add_edge(kn_dpin, kn_spin);
+    }
+
+
     dfg->add_edge(tn_dpin, tn_spin);
-    dfg->add_edge(kn_dpin, kn_spin);
     dfg->add_edge(kp_dpin, kp_spin);
     dfg->add_edge(value_dpin, value_spin);
 
@@ -538,21 +542,27 @@ void Inou_lnast_dfg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnid
         break;
       }
     }
-  } else {// it is a pure key_name
+  } else if (key_name.substr(0,4) != "null") {// it is a pure key_name
+    fmt::print("key_name:{}\n", key_name);
     kn_dpin = setup_tuple_key(dfg, key_name);
     dfg->add_edge(kn_dpin, kn_spin);
   }
 
 
+  /* std::string kp_str; */
+  /* if (is_const(key_name)) { // it is a key_pos, not a key_name */
+  /*   kp_str = key_name; */
+  /* } else { */
+  /*   kp_str = tup_keyname2pos[std::make_pair(tup_name, key_name)]; */
+  /* } */
+
+
   std::string kp_str;
   if (is_const(key_name)) { // it is a key_pos, not a key_name
-    kp_str = key_name;
-  } else {
-    kp_str = tup_keyname2pos[std::make_pair(tup_name, key_name)];
+    auto kp_dpin = resolve_constant(dfg, Lconst(kp_str)).setup_driver_pin();
+    dfg->add_edge(kp_dpin, kp_spin);
   }
 
-  auto kp_dpin = resolve_constant(dfg, Lconst(kp_str)).setup_driver_pin();
-  dfg->add_edge(kp_dpin, kp_spin);
 
   auto value_dpin = setup_ref_node_dpin(dfg, c2_ta);
   dfg->add_edge(value_dpin, value_spin);
@@ -577,10 +587,12 @@ Node_pin Inou_lnast_dfg::setup_tuple_ref(LGraph *dfg, std::string_view ref_name)
 Node_pin Inou_lnast_dfg::setup_tuple_key(LGraph *dfg, std::string_view key_name) {
   if (name2dpin.find(key_name) == name2dpin.end()) {
     auto dpin = dfg->create_node(TupKey_Op).setup_driver_pin();
-    if (key_name.substr(0,4) == "null")
-      dpin.set_name(absl::StrCat("null", dpin.debug_name()));
-    else 
-      dpin.set_name(key_name);
+    /* if (key_name.substr(0,4) == "null") */
+    /*   dpin.set_name(absl::StrCat("null", dpin.debug_name())); */
+    /* else */ 
+    /*   dpin.set_name(key_name); */
+
+    dpin.set_name(key_name);
     name2dpin[key_name] = dpin;
   }
   return name2dpin[key_name];

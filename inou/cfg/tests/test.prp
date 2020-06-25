@@ -1,7 +1,21 @@
-t1 = (1,2)
-t2 = (3,4)
-d = t1 ++ t2
-%out4 = d.1
+//a = 2
+//a.b = 1
+//a.e =2
+//bar = a.b + a.e
+//%out = bar
+
+a = 2
+foo = a + 1
+a.b.c = 1
+a.e =2
+bar = a.b.c + a.e
+%out = bar
+
+
+//t1 = (1,2)
+//t2 = (3,4)
+//d = t1 ++ t2
+//%out4 = d.1
 
 //a = 3             // scalar
 //foo = a           // scalar, 3
