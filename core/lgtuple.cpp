@@ -177,6 +177,33 @@ size_t Lgtuple::add(const Node_pin &_dpin) {
   return pos;
 }
 
+bool Lgtuple::add(const std::shared_ptr<Lgtuple> tup2) {
+
+  for(auto e:tup2->key2pos) {
+    if (key2pos.count(e.first)) {
+      return false;  // label overlap
+    }
+  }
+
+  named   = named && tup2->named;
+  ordered = ordered && tup2->ordered;
+
+  if (tup2->is_scalar()) {
+    add(dpin);
+  } else {
+    auto shift = pos2tuple.size();
+    for (auto i = 0; i < tup2->pos2tuple.size(); ++i) {
+      pos2tuple.emplace_back(tup2->pos2tuple[i]);
+
+    }
+    for (auto e : tup2->key2pos) {
+      key2pos[e.first] = e.second + shift;
+    }
+  }
+
+  return true;
+}
+
 bool Lgtuple::is_constant() const {
   if (dpin.is_invalid())
     return false;
@@ -209,7 +236,7 @@ void Lgtuple::dump(std::string_view indent) const {
 
   std::string indent2(indent);
   indent2.append(2,' ');
-  for (auto i = 0; i < pos2tuple.size(); ++i) {
+  for (auto i = 0u; i < pos2tuple.size(); ++i) {
     if (pos2tuple[i])
       pos2tuple[i]->dump(indent2);
     else

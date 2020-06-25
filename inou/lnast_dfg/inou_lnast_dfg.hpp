@@ -21,11 +21,11 @@ private:
   absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Node_Type_Op> primitive_type_lnast2lg;
 
 
-  absl::flat_hash_map<std::string, Node_pin>                            name2dpin;       
-  absl::flat_hash_map<std::string_view, Node_pin>                       vname2bits_dpin; //variable name (no ssa) to bitwidth
+  absl::flat_hash_map<std::string, Node_pin>                            name2dpin;       // for scalar variable
+  absl::flat_hash_map<std::string_view, Node_pin>                       vname2bits_dpin; // variable name (no ssa) to bitwidth
   absl::flat_hash_map<std::pair<std::string, std::string>, std::string> tup_keyname2pos;
-  absl::flat_hash_map<std::string, std::pair<Node_pin, uint16_t>>       tn2head_maxlen;  //map tuple name to chain head and max length
-
+  absl::flat_hash_map<std::string, std::pair<Node_pin, uint16_t>>       tn2head_maxlen; 
+  
 
   static constexpr uint8_t TN = 0;  // tuple name
   static constexpr uint8_t KN = 1;  // tuple element key name
@@ -66,7 +66,7 @@ protected:
 
   Node_pin     setup_node_opr_and_lhs         (LGraph *dfg, const Lnast_nid &lnidx_opr);
   Node_pin     setup_node_assign_and_lhs      (LGraph *dfg, const Lnast_nid &lnidx_opr);
-  Node_pin     setup_ref_node_dpin            (LGraph *dfg, const Lnast_nid &lnidx, bool from_phi= false);
+  Node_pin     setup_ref_node_dpin            (LGraph *dfg, const Lnast_nid &lnidx, bool from_phi = false, bool from_concat = false);
   Node_Type_Op decode_lnast_op                (const Lnast_nid &lnidx_opr);
   void         setup_dpin_ssa                 (Node_pin &dpin, std::string_view var_name, uint16_t subs);
   void         setup_lnast_to_lgraph_primitive_type_mapping();

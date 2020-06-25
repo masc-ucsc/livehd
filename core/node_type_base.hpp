@@ -54,7 +54,7 @@ enum Node_Type_Op : uint8_t {
   TupAdd_Op,
   TupGet_Op,
   TupRef_Op,
-  TupKey_Op,
+  TupKey_Op, // FIXME: to delete. Not needed
   CompileErr_Op,
 // Add here, operators needed
 #if 1

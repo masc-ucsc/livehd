@@ -1,18 +1,24 @@
-a = 3             // scalar
-foo = a           // scalar, 3
-bar = a.0         // scalar, but a already turn into a tuple
+t1 = (1,2)
+t2 = (3,4)
+g  = t1 ++ t2
+%out6 = g.1 + g.3
 
-a = a ++ 4        // tuple, (3,4)
-a = a ++ 5        // tuple, (3,4,5)
-//c = a + 5       // compile error, tuple size mismatch
 
-b = 8
-b = b ++ 7        // tuple, (8,7)
-b.0 = 6           // tuple, (6,7)
-
-a = a ++ b
-
-//c = a ++ b
-
-%out = foo + bar + a.0 + a.1 + a.2 + a.3 + a.4// 3 + 3 + 3 + 4 + 5 + 6 + 7 = 31
-//%out = foo + bar + a.0 + a.1 + a.2 // 3 + 3 + 3 + 4 + 5
+//a = 3             // scalar
+//foo = a           // scalar, 3
+//bar = a.0         // scalar, but a already turn into a tuple
+//
+//a = a ++ 4        // tuple, (3,4)
+//a = a ++ 5        // tuple, (3,4,5)
+////c = a + 5       // compile error, tuple size mismatch
+//
+//b = 8
+//b = b ++ 7        // tuple, (8,7)
+//b.0 = 6           // tuple, (6,7)
+//
+//a = a ++ b
+//
+////c = a ++ b
+//
+//%out = foo + bar + a.0 + a.1 + a.2 + a.3 + a.4// 3 + 3 + 3 + 4 + 5 + 6 + 7 = 31
+////%out = foo + bar + a.0 + a.1 + a.2 // 3 + 3 + 3 + 4 + 5

@@ -20,6 +20,7 @@ protected:
   void replace_node(Node &node, const Lconst &result);
 	void replace_logic_node(Node &node, const Lconst &result, const Lconst &result_reduced);
 
+	void process_tuple_q_pin(Node &node, Node_pin &parent_dpin);
   bool process_tuples(Node &node, XEdge_iterator &inp_edges_ordered);
   void trans(LGraph *orig);
 
