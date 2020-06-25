@@ -468,7 +468,22 @@ bool Pass_cprop::process_tuples(Node &node, XEdge_iterator &inp_edges_ordered) {
    }else{
      I(op == TupGet_Op);
 
-     I(it != tuplemap.end());
+		 if (it == tuplemap.end()) {
+			 std::string_view tup_name;
+			 if (parent_dpin.has_name())
+				 tup_name = parent_dpin.get_name();
+			 else
+				 tup_name = "FIXME"; // maybe access vname
+
+			 std::string key;
+			 if (key_name.empty())
+				 key = std::to_string(key_pos);
+			 else
+				 key = key_name;
+
+			 Pass::error("there is no tuple in {}, so no valid field {}\n", tup_name, key);
+			 return false;
+		 }
 
      auto tup = it->second;
 
