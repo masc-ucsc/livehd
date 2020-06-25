@@ -812,7 +812,9 @@ void Inou_lnast_dfg::setup_dpin_ssa(Node_pin &dpin, std::string_view var_name, u
 void Inou_lnast_dfg::setup_lgraph_outputs_and_final_var_name(LGraph *dfg) {
   absl::flat_hash_map<std::string_view, Node_pin> vname2dpin; //Pyrope variable -> dpin with the largest ssa var subscription
   for (auto node: dfg->fast()) {
-    if (node.get_type().op == Or_Op && node.inp_edges().size() == 1) { // or as assign
+    auto op = node.get_type().op;
+    bool is_assign_op = (op == Or_Op && node.inp_edges().size() == 1);
+    if (is_assign_op || op == Mux_Op) { // or as assign
       auto dpin = node.get_driver_pin(0); // or as assign
       I(dpin.has_ssa());
       auto vname  = dpin.get_prp_vname();
