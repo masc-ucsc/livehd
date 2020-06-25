@@ -1,4 +1,6 @@
 
+#include <string_view>
+
 #include "pass.hpp"
 #include "semantic_check.hpp"
 
@@ -18,6 +20,33 @@ bool Semantic_pass::is_tree_structs(const Lnast_ntype node_type) {
   }
 }
 
+bool Semantic_pass::is_temp_var(std::string_view node_name) {
+  if (node_name[0] == '_' && node_name[1] == '_' && node_name[2] == '_') {
+    return true;
+  } else {
+    return false;
+  }
+}
+
+bool Semantic_pass::in_temp_list(std::string_view node_name) {
+  for (int i = 0; i < temp_list.size(); i++) {
+    if (temp_list[i] == node_name) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void Semantic_pass::check_for_temp_var(std::string_view node_name) {
+  if (is_temp_var(node_name)) {
+    if (!in_temp_list(node_name)) {
+      temp_list.push_back(node_name);
+    } else {
+      Pass::error("Temporary Variable Error: A temporary variable must be written to only once\n");
+    }
+  }
+}
+
 void Semantic_pass::check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_opr, const Lnast_ntype node_type) {
   if (!lnast->has_single_child(lnidx_opr)) {
     // Unary Operations
@@ -33,8 +62,12 @@ void Semantic_pass::check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_opr
       if (!rhs_type.is_ref() && !rhs_type.is_const()) {
         Pass::error("Unary Operation Error: RHS Node must be Node type 'ref' or 'const'\n");
       }
+      // Check temp variable
+      check_for_temp_var(lnast->get_name(lhs));
+      check_for_temp_var(lnast->get_name(rhs));
+
     // N-ary Operations (need to add tuple_concat)
-    } else if (node_type.is_dot() || node_type.is_logical_and() || node_type.is_logical_or() || node_type.is_nary_op() || node_type.is_eq() || node_type.is_select() || node_type.is_bit_select() || node_type.is_logic_shift_right() || node_type.is_arith_shift_right() || node_type.is_arith_shift_left() || node_type.is_rotate_shift_right() || node_type.is_rotate_shift_left() || node_type.is_dynamic_shift_right() ||  node_type.is_dynamic_shift_left()) {
+    } else if (node_type.is_dot() || node_type.is_logical_and() || node_type.is_logical_or() || node_type.is_nary_op() || node_type.is_eq() || node_type.is_select() || node_type.is_bit_select() || node_type.is_logic_shift_right() || node_type.is_arith_shift_right() || node_type.is_arith_shift_left() || node_type.is_rotate_shift_right() || node_type.is_rotate_shift_left() || node_type.is_dynamic_shift_right() ||  node_type.is_dynamic_shift_left() || node_type.is_tuple_concat()) {
       for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
         const auto node_type_child = lnast->get_data(lnidx_opr_child).type;
 
@@ -42,22 +75,28 @@ void Semantic_pass::check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_opr
           if (!node_type_child.is_ref()) {
             Pass::error("N-ary Operation Error: LHS Node must be Node type 'ref'\n");
           }
+          check_for_temp_var(lnast->get_name(lnidx_opr_child));
           continue;
         } else if (!node_type_child.is_ref() && !node_type_child.is_const()) {
           Pass::error("N-ary Operation Error!: RHS Node(s) must be Node type 'ref' or 'const'\n");
         }
+        // Check temp variable
+        check_for_temp_var(lnast->get_name(lnidx_opr_child));
       }
     } else if (node_type.is_tuple()) {
-      bool num_of_ref = 0;
-      bool num_of_assign = 0;
+      int num_of_ref = 0;
+      int num_of_assign = 0;
       for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
         const auto node_type_child = lnast->get_data(lnidx_opr_child).type;
 
-        if (node_type_child.is_ref()) {
+        if (node_type_child.is_ref()) {      
           num_of_ref += 1;
         } else if (node_type_child.is_assign()) {
+          check_primitive_ops(lnast, lnidx_opr_child, node_type_child);
           num_of_assign += 1;
         }
+        // Check temp variable
+        check_for_temp_var(lnast->get_name(lnidx_opr_child));
       }
       if (num_of_ref != 1) {
         Pass::error("Tuple Operation Error: Missing Reference Node\n");
