@@ -172,8 +172,10 @@ protected:
     ".",
     "add",
     "or",
+    "not",
     "&",
     "|",
+    "~",
     "^",
     "+",
     "-",
@@ -559,8 +561,8 @@ public:
                                         (val == Lnast_ntype_lt) ||
                                         (val == Lnast_ntype_le) ||
                                         (val == Lnast_ntype_gt) ||
-                                        (val == Lnast_ntype_ge) || 
-                                        (val == Lnast_ntype_shift_left) || 
+                                        (val == Lnast_ntype_ge) ||
+                                        (val == Lnast_ntype_shift_left) ||
                                         (val == Lnast_ntype_shift_right); }
 
   std::string_view debug_name() const { return namemap[val]; }
@@ -569,10 +571,10 @@ public:
   std::string_view debug_name_verilog() const { return namemap_verilog[val]; }
   std::string_view debug_name_cpp() const { return namemap_cpp[val]; }
 
-  // static_assert(namemap_cpp.size()==namemap.size());
+  static_assert(namemap_cpp.size()==namemap.size());
   // static_assert(namemap_cpp.size()==namemap_cfg.size());
-  // static_assert(namemap_cpp.size()==namemap_pyrope.size());
-  // static_assert(namemap_cpp.size()==namemap_verilog.size());
-  // static_assert(namemap_cpp.size()==Lnast_ntype_tuple_phi_add);
+  static_assert(namemap_cpp.size()==namemap_pyrope.size());
+  static_assert(namemap_cpp.size()==namemap_verilog.size());
+  //static_assert(namemap_cpp.size()==Lnast_ntype_tuple_phi_add);
 };
 
