@@ -114,9 +114,9 @@ public:
   void set(size_t pos, LGraph *lg, const Lconst &constant);
   void set(size_t pos, const Node_pin &dpin);
 
-  size_t add(std::shared_ptr<Lgtuple> tup);
   size_t add(LGraph *lg, const Lconst &constant);
   size_t add(const Node_pin &dpin);
+  bool add(const std::shared_ptr<Lgtuple> tup2);
 
   bool is_scalar() const { return pos2tuple.empty(); }
 

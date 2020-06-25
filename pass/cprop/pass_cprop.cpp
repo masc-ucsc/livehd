@@ -9,8 +9,8 @@
 
 #include "lgtuple.hpp"
 
-//#define TRACE(x)
-#define TRACE(x) x
+#define TRACE(x)
+//#define TRACE(x) x
 
 void setup_pass_cprop() { Pass_cprop::setup(); }
 
@@ -67,10 +67,6 @@ void Pass_cprop::collapse_forward_shiftleft(Node &node) {
 void Pass_cprop::collapse_forward_always_pin0(Node &node, XEdge_iterator &inp_edges_ordered) {
   bool can_delete = true;
 
-  fmt::print("trying forward node:{} size:{}\n", node.debug_name(), inp_edges_ordered.size());
-	node.get_class_lgraph()->dump();
-  fmt::print("trying forward node:{} size:{}\n", node.debug_name(), inp_edges_ordered.size());
-
   for (auto &out : node.out_edges()) {
     if (out.driver.get_pid()) {
       can_delete = false;
@@ -91,8 +87,6 @@ void Pass_cprop::collapse_forward_always_pin0(Node &node, XEdge_iterator &inp_ed
     TRACE(fmt::print("cprop forward_always del_node node:{}\n", node.debug_name()));
     node.del_node();
   }
-	node.get_class_lgraph()->dump();
-  fmt::print("trying forward node:{} size:{}\n", node.debug_name(), inp_edges_ordered.size());
 }
 
 void Pass_cprop::collapse_forward_for_pin(Node &node, Node_pin &new_dpin) {
@@ -401,11 +395,34 @@ bool Pass_cprop::process_tuples(Node &node, XEdge_iterator &inp_edges_ordered) {
      auto val_dpin      = inp_edges_ordered[pid].driver;
      pid++;
 
-
      if (it == tuplemap.end()) {
        // First tuple entry
        std::shared_ptr<Lgtuple> tup = std::make_shared<Lgtuple>(); // No tuple root name?
-       tup->set(key_pos, key_name, val_dpin);
+			 if (parent_node.get_type().op == TupRef_Op) {
+				 // First tuple
+				 tup->set(key_pos, key_name, val_dpin);
+			 } else {
+				 I(parent_node.get_type().op != TupAdd_Op); // A tuple add should not miss in tuplemap
+
+				 std::string unnamed;
+				 tup->set(0, unnamed, parent_dpin);
+				 if (key_pos < 0 && key_name.empty()) {
+					 if (val_dpin.get_node().get_type().op == TupAdd_Op) {
+						 auto it2 = tuplemap.find(parent_node.get_compact());
+						 I(it2 != tuplemap.end());
+						 bool ok = tup->add(it2->second);
+						 if (!ok) {
+							 Pass::error("tuples {} and {} can not be merged\n", "XX", "XX");
+							 tup->dump();
+							 it2->second->dump();
+						 }
+					 } else {
+						 tup->add(val_dpin);
+					 }
+				 } else {
+					 tup->set(key_pos, key_name, val_dpin);
+				 }
+			 }
 
        tuplemap[node.get_compact()] = tup;
      } else {
