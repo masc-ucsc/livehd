@@ -124,9 +124,10 @@ std::string Node_pin::debug_name() const {
     fmt::print("WARNING: Node_pin::debug_name should not be called during release (Slowww!)\n");
   }
 #endif
-  if (current_g == nullptr) {  // legal for invalid node/pins
+  if (idx == 0) {  // legal for invalid node/pins
     return "invalid_pin";
   }
+  I(current_g);
 
   std::string name;
   if (!sink)
