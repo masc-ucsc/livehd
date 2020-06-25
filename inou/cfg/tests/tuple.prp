@@ -1,4 +1,3 @@
-
 // case I
 a = 2            // a0 =
 foo = a + 1      // = a0
@@ -38,4 +37,19 @@ d = d.0 + 1      // d2 = d1.0 + 1 = 6
 horse = d + 1    // = d2
 
 %out4 = goat + horse  // 3 + 7 = 10
+
+
+// case V
+e = 1 
+e = e ++ 3
+f = e.1 + 4
+%out5 = f       // 7
+
+
+// case VI
+t1 = (1,2)
+t2 = (3,4)
+g  = t1 ++ t2
+%out6 = g.1 + g.3 //6
+
 

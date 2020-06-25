@@ -66,7 +66,7 @@ protected:
 
   Node_pin     setup_node_opr_and_lhs         (LGraph *dfg, const Lnast_nid &lnidx_opr);
   Node_pin     setup_node_assign_and_lhs      (LGraph *dfg, const Lnast_nid &lnidx_opr);
-  Node_pin     setup_ref_node_dpin            (LGraph *dfg, const Lnast_nid &lnidx, bool from_phi= false);
+  Node_pin     setup_ref_node_dpin            (LGraph *dfg, const Lnast_nid &lnidx, bool from_phi = false, bool from_concat = false);
   Node_Type_Op decode_lnast_op                (const Lnast_nid &lnidx_opr);
   void         setup_dpin_ssa                 (Node_pin &dpin, std::string_view var_name, uint16_t subs);
   void         setup_lnast_to_lgraph_primitive_type_mapping();

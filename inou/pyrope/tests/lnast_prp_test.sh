@@ -2,10 +2,10 @@
 rm -rf ./lgdb
 # pts='test'
 # pts='tuple'
-pts='tuple_if2 out_ssa  logic  tuple_if  bits_rhs  firrtl_tail3  firrtl_tail2 
-     nested_if  counter  counter_nested_if 
-     adder_stage  if2 if  if3_err 
-     nested_if_err  firrtl_tail  ssa_rhs  reg__q_pin '
+# pts='tuple_if2 out_ssa  logic  tuple_if  bits_rhs  firrtl_tail3  firrtl_tail2 
+#      nested_if  counter  counter_nested_if 
+#      adder_stage  if2 if  if3_err 
+#      nested_if_err  firrtl_tail  ssa_rhs  reg__q_pin '
 
 pts_failbitwidth='tuple_if2  firrtl_tail3  firrtl_tail2 
      out_ssa  counter  counter_nested_if '

@@ -244,45 +244,33 @@ void Inou_lnast_dfg::process_ast_phi_op(LGraph *dfg, const Lnast_nid &lnidx_phi)
 void Inou_lnast_dfg::process_ast_concat_op(LGraph *dfg, const Lnast_nid &lnidx_concat) {
   //FIXME->sh: how to support hierarchical tuple???
 
-  auto lhs = lnast->get_first_child(lnidx_concat); //c0: target tuple name for concat.
-  auto opd1   = lnast->get_sibling_next(lhs);      //c1: tuple operand1, either scalar or tuple
-  auto opd2   = lnast->get_sibling_next(opd1);     //c2: tuple operand2, either scalar or tuple
+  auto lhs  = lnast->get_first_child(lnidx_concat); //c0: target tuple name for concat.
+  auto opd1 = lnast->get_sibling_next(lhs);         //c1: tuple operand1, either scalar or tuple
+  auto opd2 = lnast->get_sibling_next(opd1);       //c2: tuple operand2, either scalar or tuple
   auto lhs_name  = lnast->get_sname(lhs);
   auto opd1_name = lnast->get_sname(opd1);
   auto opd2_name = lnast->get_sname(opd2);
   //lhs = opd1 ++ opd2, both opd1 and opd2 could be either a scalar or a tuple
 
-  if (lhs_name == opd1_name) { // keep opd1 as main body, concat opd2 at the tail
-    auto lhs_dpin = setup_tuple_ref(dfg, lhs_name);
-    if (is_scalar(lhs_dpin)) 
-      tn2head_maxlen[lhs_name] = std::make_pair(lhs_dpin, 1);
+
+  //create TupAdd, concat both tail of opd1 and opd2, name it with old opd1_name (a = a ++ b) or new lhs_name (c = a ++ b)
+    auto tup_add    = dfg->create_node(TupAdd_Op);
+    auto tn_spin    = tup_add.setup_sink_pin(TN); // tuple name
+    auto value_spin = tup_add.setup_sink_pin(KV); // key->value
+
+    auto tn_dpin    = setup_ref_node_dpin(dfg, opd1, false, true);
+    dfg->add_edge(tn_dpin, tn_spin);
+
+    auto value_dpin = setup_ref_node_dpin(dfg, opd2, false, true);
+    dfg->add_edge(value_dpin, value_spin);
     
 
-    auto opd2_dpin = setup_tuple_ref(dfg, opd2_name);
-    if (!is_scalar(opd2_dpin)) {
-      //case I: handle tuple concatenate with an tuple
-      //FIXME->sh: todo
-    } else {
-      //case II: handle tuple concatenate with scalar
-      auto tup_add    = dfg->create_node(TupAdd_Op);
-      auto tn_spin    = tup_add.setup_sink_pin(TN); // tuple name
-      auto kp_spin    = tup_add.setup_sink_pin(KP); // key pos
-      auto value_spin = tup_add.setup_sink_pin(KV); // key->value
-
-      dfg->add_edge(lhs_dpin, tn_spin);
-
-      tn2head_maxlen[lhs_name].second ++; //max_len ++
-      auto kp_dpin = resolve_constant(dfg, tn2head_maxlen[lhs_name].second).setup_driver_pin();
-      dfg->add_edge(kp_dpin, kp_spin);
-
-      auto value_dpin = setup_ref_node_dpin(dfg, opd2);
-      dfg->add_edge(value_dpin, value_spin);
-
-      name2dpin[lhs_name] = tup_add.setup_driver_pin();
-      tup_add.setup_driver_pin().set_name(lhs_name);  // tuple ref semantically move to here
-    } 
-  } else { // create new tuple-chain called tup_name and concat (opd1, opd2)
-    ;
+  if (lhs_name == opd1_name) {
+    name2dpin[opd1_name] = tup_add.setup_driver_pin();
+    tup_add.setup_driver_pin().set_name(opd1_name);
+  } else {
+    name2dpin[lhs_name] = tup_add.setup_driver_pin();
+    tup_add.setup_driver_pin().set_name(lhs_name);
   }
 }
 
@@ -683,7 +671,7 @@ Node_pin Inou_lnast_dfg::setup_node_assign_and_lhs(LGraph *dfg, const Lnast_nid 
 
 // for both target and operands, except the new io, reg, and const, the node and its dpin
 // should already be in the table as the operand comes from existing operator output
-Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx_opd, bool from_phi) {
+Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx_opd, bool from_phi, bool from_concat) {
   auto name = lnast->get_sname(lnidx_opd);
   assert(!name.empty());
 
@@ -697,10 +685,16 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
 
   const auto it = name2dpin.find(name);
   if (it != name2dpin.end()){
-    // return a connected TupGet if the ref node is a TupAdd, else, it's a scalar variable, just return the node pin
-    if (it->second.get_node().get_type().op != TupAdd_Op) 
+    auto op = it->second.get_node().get_type().op;
+
+    // it's a scalar variable, just return the node pin
+    if (op != TupAdd_Op) 
       return it->second;
 
+    if (op == TupAdd_Op && from_concat)
+      return it->second;
+
+    // return a connected TupGet if the ref node is a TupAdd and the operator is not concat
     auto tup_get = dfg->create_node(TupGet_Op);
     auto tn_spin = tup_get.setup_sink_pin(TN); // tuple name
     auto kp_spin = tup_get.setup_sink_pin(KP); // key pos
