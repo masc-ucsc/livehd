@@ -429,9 +429,11 @@ std::string Node::debug_name() const {
     fmt::print("WARNING: Node::debug_name should not be called during release (Slowww!)\n");
   }
 #endif
-  if (current_g == nullptr) {  // legal for invalid node/pins
+  if (nid == 0) {  // legal for invalid node/pins
     return "invalid_node";
   }
+  I(current_g);
+
   auto *      ref = Ann_node_name::ref(current_g);
   std::string name;
   const auto  it = ref->find(get_compact_class());
