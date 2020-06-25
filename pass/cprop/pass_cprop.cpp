@@ -331,6 +331,53 @@ void Pass_cprop::process_tuple_q_pin(Node &node, Node_pin &parent_dpin) {
   collapse_forward_for_pin(node, target_ff_qpin);
 }
 
+void Pass_cprop::merge_to_tuple(std::shared_ptr<Lgtuple> tup, Node &node, Node
+		&parent_node, Node_pin &parent_dpin, int key_pos, std::string_view
+		key_name, Node_pin &val_dpin) {
+
+	bool compile_error = false;
+
+	if (parent_node.get_type().op == TupRef_Op) {
+		// First tuple
+		bool ok = tup->set(key_pos, key_name, val_dpin);
+		if (!ok)
+			compile_error = true;
+	} else {
+		if (parent_node.get_type().op != TupAdd_Op) {
+			std::string unnamed;
+			bool ok = tup->set(0, unnamed, parent_dpin);
+			if (!ok)
+				compile_error = true;
+		}
+
+		if (key_pos < 0 && key_name.empty()) {
+			if (val_dpin.get_node().get_type().op == TupAdd_Op) {
+				auto it2 = tuplemap.find(val_dpin.get_node().get_compact());
+				I(it2 != tuplemap.end());
+				bool ok = tup->add(it2->second);
+				if (!ok) {
+					compile_error = true;
+					tup->dump();
+					it2->second->dump();
+					Pass::error("tuples {} and {} can not be merged\n", "XX", "XX");
+				}
+			} else {
+				tup->add(val_dpin);
+			}
+		} else {
+			bool ok = tup->set(key_pos, key_name, val_dpin);
+			if (!ok)
+				compile_error = true;
+		}
+	}
+
+	if (compile_error) {
+		Pass::error("tuples {} could not add field \n", "XX", "XX");
+	}
+
+	tuplemap[node.get_compact()] = tup;
+}
+
 bool Pass_cprop::process_tuples(Node &node, XEdge_iterator &inp_edges_ordered) {
 
    auto op = node.get_type().op;
@@ -379,7 +426,6 @@ bool Pass_cprop::process_tuples(Node &node, XEdge_iterator &inp_edges_ordered) {
      }
      pid++;
    }
-   I(!key_pos_dpin.is_invalid() || !key_name_dpin.is_invalid());
 
    auto it = tuplemap.find(parent_node.get_compact());
 
@@ -391,43 +437,16 @@ bool Pass_cprop::process_tuples(Node &node, XEdge_iterator &inp_edges_ordered) {
 #endif
 
    if (op == TupAdd_Op) {
-     I(inp_edges_ordered.size()>=3);
-     auto val_dpin      = inp_edges_ordered[pid].driver;
-     pid++;
+     I(inp_edges_ordered.size()>=2);
 
+		 std::shared_ptr<Lgtuple> tup;
+		 bool parent_could_be_deleted = false;
      if (it == tuplemap.end()) {
        // First tuple entry
-       std::shared_ptr<Lgtuple> tup = std::make_shared<Lgtuple>(); // No tuple root name?
-			 if (parent_node.get_type().op == TupRef_Op) {
-				 // First tuple
-				 tup->set(key_pos, key_name, val_dpin);
-			 } else {
-				 I(parent_node.get_type().op != TupAdd_Op); // A tuple add should not miss in tuplemap
-
-				 std::string unnamed;
-				 tup->set(0, unnamed, parent_dpin);
-				 if (key_pos < 0 && key_name.empty()) {
-					 if (val_dpin.get_node().get_type().op == TupAdd_Op) {
-						 auto it2 = tuplemap.find(parent_node.get_compact());
-						 I(it2 != tuplemap.end());
-						 bool ok = tup->add(it2->second);
-						 if (!ok) {
-							 Pass::error("tuples {} and {} can not be merged\n", "XX", "XX");
-							 tup->dump();
-							 it2->second->dump();
-						 }
-					 } else {
-						 tup->add(val_dpin);
-					 }
-				 } else {
-					 tup->set(key_pos, key_name, val_dpin);
-				 }
-			 }
-
-       tuplemap[node.get_compact()] = tup;
+       tup = std::make_shared<Lgtuple>(); // No tuple root name?
      } else {
 			 auto parent_out_edges = parent_dpin.out_edges(); // This is the only one
-			 bool parent_could_be_deleted = parent_out_edges.size()==1; // This is the only one
+			 parent_could_be_deleted = parent_out_edges.size()==1; // This is the only one
 
 			 if (!parent_could_be_deleted) {
 				 // if all the parent out edges are tuple get AND ONLY this parent can be deleted
@@ -443,6 +462,7 @@ bool Pass_cprop::process_tuples(Node &node, XEdge_iterator &inp_edges_ordered) {
 						 if (deleted)
 							 continue;
 					 }
+
 					 loop_exit = true;
 					 break;
 				 }
@@ -450,20 +470,24 @@ bool Pass_cprop::process_tuples(Node &node, XEdge_iterator &inp_edges_ordered) {
 					 parent_could_be_deleted = true;
 			 }
 
-			 std::shared_ptr<Lgtuple> tup;
 			 if (parent_could_be_deleted) {
 				 tup = it->second;
 				 tuplemap.erase(it);
-				 parent_node.del_node();
 			 } else {
 				 tup = std::make_shared<Lgtuple>(*(it->second));
 			 }
-       tup->set(key_pos, key_name, val_dpin);
-
-       tuplemap[node.get_compact()] = tup;
      }
 
+     auto val_dpin      = inp_edges_ordered[pid].driver;
+     pid++;
+		 I(pid == inp_edges_ordered.size());
+
+		 merge_to_tuple(tup, node, parent_node, parent_dpin, key_pos, key_name, val_dpin);
+
      fmt::print("TupAdd node:{} pos:{} key:{} val:{}\n", node.debug_name(), key_pos, key_name, val_dpin.debug_name());
+
+		 if (parent_could_be_deleted)
+			 parent_node.del_node();
 
    }else{
      I(op == TupGet_Op);

@@ -104,7 +104,7 @@ public:
   std::shared_ptr<Lgtuple> get_tuple(std::string_view key);
   std::shared_ptr<Lgtuple> get_tuple(size_t  key);
 
-  void set(int pos, std::string_view key, const Node_pin &dpin); // int -> pos<0 invalid
+  bool set(int pos, std::string_view key, const Node_pin &dpin); // int -> pos<0 invalid
 
   void set(std::string_view key, std::shared_ptr<Lgtuple> tup);
   void set(std::string_view key, LGraph *lg, const Lconst &constant);

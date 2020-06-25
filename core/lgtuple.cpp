@@ -83,13 +83,13 @@ size_t Lgtuple::get_or_create_pos(std::string_view key) {
 size_t Lgtuple::get_or_create_pos(size_t pos) {
   unscalarize_if_needed();
 
+  named = false;
   I(pos);
   bool new_entry = false;
   if (pos>pos2tuple.size()) {
     pos2tuple.resize(pos+1);
     new_entry = true;
   }else if (pos == pos2tuple.size()) {
-    named = false;
     pos2tuple.emplace_back(std::make_shared<Lgtuple>(pos)); // unname
   }else{
     if (pos2tuple[pos]) {
@@ -107,7 +107,13 @@ size_t Lgtuple::get_or_create_pos(size_t pos) {
   return pos;
 }
 
-void Lgtuple::set(int pos, std::string_view key, const Node_pin &_dpin) {
+bool Lgtuple::set(int pos, std::string_view key, const Node_pin &_dpin) {
+  if (!key.empty() && pos >= 0) {
+    auto it = key2pos.find(key);
+    if (it!=key2pos.end() && it->second != pos)
+      return false;
+  }
+
   if (pos < 0) {
     set(key, _dpin);
   } else if (key.empty()) {
@@ -116,6 +122,8 @@ void Lgtuple::set(int pos, std::string_view key, const Node_pin &_dpin) {
     auto pos2 = get_or_create_pos(pos, key);
     pos2tuple[pos2]->set(_dpin);
   }
+
+  return true;
 }
 
 void Lgtuple::set(std::string_view key, std::shared_ptr<Lgtuple> tup) {
@@ -135,8 +143,8 @@ void Lgtuple::set(std::string_view key, const Node_pin &_dpin) {
 }
 
 void Lgtuple::set(size_t pos, LGraph *lg, const Lconst &constant) {
+  named = false;
   if (pos == 0 && is_scalar()) {
-    named = false;
     set(lg, constant);
     return;
   }
@@ -148,6 +156,7 @@ void Lgtuple::set(size_t pos, LGraph *lg, const Lconst &constant) {
 }
 
 void Lgtuple::set(size_t pos, const Node_pin &_dpin) {
+  named = false;
   if (pos == 0 && is_scalar()) {
     set(_dpin);
     return;
