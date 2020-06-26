@@ -56,19 +56,31 @@ bool Semantic_pass::in_not_read_list(std::string_view node_name) {
   return false;
 }
 
+bool Semantic_pass::in_have_read_list(std::string_view node_name) {
+  for (int i = 0; i < have_read_list.size(); i++) {
+    if (have_read_list[i] == node_name) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void Semantic_pass::check_for_not_read(std::string_view node_name) {
   if (in_not_read_list(node_name)) {
     for (auto it = not_read_list.begin(); it != not_read_list.end(); ) {
-      if (*it == node_name && node_name[0] != '%') {
+      if (*it == node_name) {
         std::cout << "Deleted " << node_name << "\n";
         not_read_list.erase(it);
+        have_read_list.push_back(node_name);
       } else {
         it++;
       }
     }
   } else {
-    std::cout << "Added " << node_name << "\n";
-    not_read_list.push_back(node_name);
+    if (!in_have_read_list(node_name) && node_name[0] != '%') {
+      std::cout << "Added " << node_name << "\n";
+      not_read_list.push_back(node_name);
+    }
   }
 }
 
@@ -88,8 +100,10 @@ void Semantic_pass::check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_opr
         Pass::error("Unary Operation Error: RHS Node must be Node type 'ref' or 'const'\n");
       }
       check_for_temp_var(lnast->get_name(lhs));
-      check_for_not_read(lnast->get_name(lhs));
-      if (rhs_type.is_ref()) {
+      if (!in_not_read_list(lnast->get_name(lhs))) {
+        check_for_not_read(lnast->get_name(lhs));
+      }
+      if (in_not_read_list(lnast->get_name(rhs))) {
         check_for_not_read(lnast->get_name(rhs));
       }
 
@@ -103,12 +117,14 @@ void Semantic_pass::check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_opr
             Pass::error("N-ary Operation Error: LHS Node must be Node type 'ref'\n");
           }
           check_for_temp_var(lnast->get_name(lnidx_opr_child));
-          check_for_not_read(lnast->get_name(lnidx_opr_child));
+          if (!in_not_read_list(lnast->get_name(lnidx_opr_child))) {
+            check_for_not_read(lnast->get_name(lnidx_opr_child));
+          }
           continue;
         } else if (!node_type_child.is_ref() && !node_type_child.is_const()) {
           Pass::error("N-ary Operation Error!: RHS Node(s) must be Node type 'ref' or 'const'\n");
         }
-        if (node_type_child.is_ref()) {
+        if (in_not_read_list(lnast->get_name(lnidx_opr_child))) {
           check_for_not_read(lnast->get_name(lnidx_opr_child));
         }
       }
@@ -121,7 +137,9 @@ void Semantic_pass::check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_opr
         if (node_type_child.is_ref()) {      
           num_of_ref += 1;
           check_for_temp_var(lnast->get_name(lnidx_opr_child));
-          check_for_not_read(lnast->get_name(lnidx_opr_child));
+          if (!in_not_read_list(lnast->get_name(lnidx_opr_child))) {
+            check_for_not_read(lnast->get_name(lnidx_opr_child));
+          }
         } else if (node_type_child.is_assign()) {
           check_primitive_ops(lnast, lnidx_opr_child, node_type_child);
           num_of_assign += 1;
@@ -260,6 +278,13 @@ void Semantic_pass::check_func_def(Lnast* lnast, const Lnast_nid &lnidx_opr) {
   bool stmts = false;
   for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
     const auto ntype_child = lnast->get_data(lnidx_opr_child).type;
+
+    if (lnidx_opr_child == lnast->get_first_child(lnidx_opr)) {
+      num_of_refs += 1;
+      if (!in_not_read_list(lnast->get_name(lnidx_opr_child))) {
+        check_for_not_read(lnast->get_name(lnidx_opr_child));
+      }
+    }
     if (ntype_child.is_cstmts() | ntype_child.is_stmts()) {
       if (ntype_child.is_stmts()) {
         stmts = true;
@@ -305,7 +330,10 @@ void Semantic_pass::check_func_call(Lnast* lnast, const Lnast_nid &lnidx_opr) {
 
     if (ntype_child.is_ref()) {
       num_of_refs += 1;
-    } else if (ntype_child.is_ref()) {
+      if (in_not_read_list(lnast->get_name(lnidx_opr_child))) {
+        check_for_not_read(lnast->get_name(lnidx_opr_child));
+      }
+    } else if (!ntype_child.is_ref()) {
       Pass::error("Func Call Operation Error: Condition must be Node type 'ref'\n");
     } else {
       Pass::error("Func Call Operation Error: Not a Valid Node Type\n");
@@ -341,7 +369,7 @@ void Semantic_pass::semantic_check(Lnast* lnast) {
     }
   }
   if (not_read_list.size() != 0) {
-    std::cout << "Temporary Variable Error: " << not_read_list[0];
+    std::cout << "Temporary Variable Warning: " << not_read_list[0];
 
     for (int i = 1; i < not_read_list.size(); i++) {
        std::cout << ", " << not_read_list[i];
