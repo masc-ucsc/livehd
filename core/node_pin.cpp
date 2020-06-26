@@ -158,7 +158,6 @@ std::string_view Node_pin::get_name() const {
   return Ann_node_pin_name::ref(current_g)->get_val(Compact_class_driver(idx));
 }
 
-// FIXME->sh: could be deprecated if ann_ssa could be mmapped for a std::string_view
 std::string_view Node_pin::get_prp_vname() const {
 #ifndef NDEBUG
   if (!is_graph_io()) {

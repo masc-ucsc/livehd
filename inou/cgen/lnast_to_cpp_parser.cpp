@@ -191,9 +191,9 @@ void Lnast_to_cpp_parser::process_buffer() {
   } else if (type.is_ref()) {
     // is added to buffer
   } else if (type.is_const()) {
-    // is added to buffer
-  } else if (type.is_attr()) {
-    // is added to buffer
+    // is added to buffer -> Sheng: should be removed
+  /* } else if (type.is_attr()) { */
+  /*   // is added to buffer */
   } else if (type.is_assert()) {
     // check in for node configuration
   } else if (type.is_if()) {

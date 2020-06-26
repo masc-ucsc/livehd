@@ -173,8 +173,8 @@ void Lnast_to_prp_parser::process_buffer() {
     // is added to buffer
   } else if (type.is_const()) {
     // is added to buffer
-  } else if (type.is_attr()) {
-    // is added to buffer
+  /* } else if (type.is_attr()) { */ //Sheng: should be removed
+  /*   // is added to buffer */
   } else if (type.is_assert()) {
     // check in for node configuration
   } else if (type.is_if()) {

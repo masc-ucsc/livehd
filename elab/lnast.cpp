@@ -71,7 +71,7 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
   resolve_ssa_rhs_subs(top_sts_nid);
 
   fmt::print("\nLNAST SSA Transformation Finished!\n");
-  fmt::print("==================================\n");
+  fmt::print("====================================\n");
 }
 
 
@@ -89,9 +89,9 @@ void Lnast::trans_tuple_opr(const Lnast_nid &psts_nid) {
       auto tuple_name_nid = get_first_child(opr_nid);
       auto &tuple_var_table = tuple_var_tables[psts_nid];
       tuple_var_table.insert(get_name(tuple_name_nid));
-    } else if (is_bit_attr_setting(opr_nid)) { //note: should be extended to all Pyrope compiler paramters, ex. __posedge or __clk_pin
+    } else if (is_attribute_related(opr_nid)) { 
       auto dot_nid = opr_nid;
-      dot_attr2tuple_add(psts_nid, dot_nid);
+      dot2attr_set_get(psts_nid, dot_nid);
     } else if (type.is_tuple_concat()) {
       merge_tconcat_paired_assign(psts_nid, opr_nid);
     } else if (type.is_dot() || type.is_select()) {
@@ -113,9 +113,9 @@ void Lnast::trans_tuple_opr_if_subtree(const Lnast_nid &if_nid) {
         I(!get_type(opr_nid).is_func_def());
         if (get_type(opr_nid).is_if()) {
           trans_tuple_opr_if_subtree(opr_nid);
-        } else if (is_bit_attr_setting(opr_nid)) {
+        } else if (is_attribute_related(opr_nid)) {
           auto dot_nid = opr_nid;
-          dot_attr2tuple_add(itr_nid, dot_nid);
+          dot2attr_set_get(itr_nid, dot_nid);
         } else if (get_type(opr_nid).is_dot() || get_type(opr_nid).is_select()) {
           trans_tuple_opr_handle_a_statement(itr_nid, opr_nid);
         } else if (get_type(opr_nid).is_tuple()) {
@@ -128,23 +128,25 @@ void Lnast::trans_tuple_opr_if_subtree(const Lnast_nid &if_nid) {
   }
 }
 
-bool Lnast::is_bit_attr_setting(const Lnast_nid &opr_nid) {
+bool Lnast::is_attribute_related(const Lnast_nid &opr_nid) {
   if (get_type(opr_nid).is_dot()) {
-    auto c0_dot = get_first_child(opr_nid);
-    auto c1_dot = get_sibling_next(c0_dot);
-    auto c2_dot = get_sibling_next(c1_dot);
-    if (get_name(c2_dot) == "__bits" && is_lhs(get_parent(opr_nid), opr_nid)) {
+    auto c0_dot  = get_first_child(opr_nid);
+    auto c1_dot  = get_sibling_next(c0_dot);
+    auto c2_dot  = get_sibling_next(c1_dot);
+    auto c2_name = get_name(c2_dot);
+
+    /* if (c2_name.substr(0,2) == "__" && c2_name.substr(0,3) != "___" && is_lhs(get_parent(opr_nid), opr_nid)) */ 
+    if (c2_name.substr(0,2) == "__" && c2_name.substr(0,3) != "___" ) 
       return true;
-    }
   }
   return false;
 }
 
 
-//  LNAST attr_bits merge from dot and assign lnast nodes and create Tuple_Add node
+//  LNAST attr_bits merge from dot and assign lnast nodes and create Attr_set, if is dot but at rhs, just 
 //  
 //  original:
-//     dot               assign   
+//     dot               assign       
 //    / | \               /  \
 //   /  |  \             /    \
 //  /   |   \           /      \
@@ -152,14 +154,14 @@ bool Lnast::is_bit_attr_setting(const Lnast_nid &opr_nid) {
 //
 //
 // merged:
-//   Tuple_Add           invalid   
+//   Attr_set           invalid   
 //    / | \               /  \
 //   /  |  \             /    \
 //  /   |   \           /      \
 // $a __bits 0d4      ___t     0d4
 
 
-void Lnast::dot_attr2tuple_add(const Lnast_nid &psts_nid, Lnast_nid &dot_nid) {
+void Lnast::dot2attr_set_get(const Lnast_nid &psts_nid, Lnast_nid &dot_nid) {
   auto &dot_lrhs_table   = dot_lrhs_tables[psts_nid];
   auto paired_assign_nid = dot_lrhs_table[dot_nid].second;
   
@@ -167,17 +169,21 @@ void Lnast::dot_attr2tuple_add(const Lnast_nid &psts_nid, Lnast_nid &dot_nid) {
   auto c1_dot = get_sibling_next(c0_dot);
   auto c2_dot = get_sibling_next(c1_dot);
 
-  auto c0_assign = get_first_child(paired_assign_nid);
-  auto c1_assign = get_sibling_next(c0_assign);
 
-
-    // change node semantic from dot->dot with bits info.; assign->invalid  
+  if (is_lhs(psts_nid, dot_nid)) {
+    // change node semantic from dot->attr_set ; assign->invalid  
+    auto c0_assign = get_first_child(paired_assign_nid);
+    auto c1_assign = get_sibling_next(c0_assign);
     ref_data(c0_dot)->token = get_data(c1_dot).token;
     ref_data(c1_dot)->token = get_data(c2_dot).token;
     ref_data(c2_dot)->token = get_data(c1_assign).token;
     ref_data(c2_dot)->type  = get_data(c1_assign).type;
-    ref_data(dot_nid)->type = Lnast_ntype::create_tuple_add();
+    ref_data(dot_nid)->type = Lnast_ntype::create_attr_set();
     ref_data(paired_assign_nid)->type = Lnast_ntype::create_invalid();
+  } else { // is rhs
+    // change node semantic from dot->attr_get
+    ref_data(dot_nid)->type = Lnast_ntype::create_attr_get();
+  }
 } 
 
 
@@ -470,9 +476,9 @@ void Lnast::resolve_ssa_lhs_subs(const Lnast_nid &psts_nid) {
     if (get_type(opr_nid).is_func_def()) {
       continue;
     } else if (get_type(opr_nid).is_if()) {
-      ssa_if_subtree(opr_nid);
+      ssa_lhs_if_subtree(opr_nid);
     } else {
-      ssa_handle_a_statement(psts_nid, opr_nid);
+      ssa_lhs_handle_a_statement(psts_nid, opr_nid);
     }
   }
 }
@@ -521,6 +527,7 @@ void Lnast::ssa_rhs_if_subtree(const Lnast_nid &if_nid) {
 void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
   const auto type = get_type(opr_nid);
 
+  //FIXME->sh: a large portion of this code segment should be deprecated.
   if (type.is_dot() || type.is_select()) {
     //handle dot/set which is a rhs
     auto c0_opr      = get_first_child(opr_nid);
@@ -538,6 +545,7 @@ void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
     }
   }
 
+  //FIXME->sh: a large portion of this code segment should be deprecated.
   //handle dot/set which is a lhs
   if (type.is_dot() || type.is_select()) {
     auto c0_opr      = get_first_child(opr_nid);
@@ -549,7 +557,7 @@ void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
 
 
   //handle statement lhs
-  if (type.is_assign() || type.is_as() || type.is_dp_assign()) {
+  if (type.is_assign() || type.is_as() || type.is_dp_assign() || type.is_attr_set()) {
     const auto  target_nid  = get_first_child(opr_nid);
     const auto  target_name = get_name(target_nid);
 
@@ -602,10 +610,6 @@ void Lnast::ssa_rhs_handle_a_operand(const Lnast_nid &gpsts_nid, const Lnast_nid
   const auto opd_type  = get_type(opd_nid);
   Token      ori_token = get_token(opd_nid);
 
-  /* if (tuplized_table.find(opd_name) != tuplized_table.end()) // if the variable has been tuplized, don't SSA it. */
-  /*   return; */
-
-
   if (ssa_rhs_cnt_table.find(opd_name) != ssa_rhs_cnt_table.end()) {
     auto  new_subs = ssa_rhs_cnt_table[opd_name];
     set_data(opd_nid, Lnast_node(opd_type, ori_token, new_subs));
@@ -620,7 +624,7 @@ void Lnast::ssa_rhs_handle_a_operand(const Lnast_nid &gpsts_nid, const Lnast_nid
 }
 
 
-void Lnast::ssa_if_subtree(const Lnast_nid &if_nid) {
+void Lnast::ssa_lhs_if_subtree(const Lnast_nid &if_nid) {
   for (const auto &itr_nid : children(if_nid)) {
     if (get_type(itr_nid).is_stmts()) {
       Phi_rtable if_sts_phi_resolve_table;
@@ -629,9 +633,9 @@ void Lnast::ssa_if_subtree(const Lnast_nid &if_nid) {
       for (const auto &opr_nid : children(itr_nid)) {
         I(!get_type(opr_nid).is_func_def());
         if (get_type(opr_nid).is_if())
-          ssa_if_subtree(opr_nid);
+          ssa_lhs_if_subtree(opr_nid);
         else
-          ssa_handle_a_statement(itr_nid, opr_nid);
+          ssa_lhs_handle_a_statement(itr_nid, opr_nid);
       }
     } else { //condition node or csts
       continue;
@@ -675,9 +679,6 @@ void Lnast::ssa_handle_phi_nodes(const Lnast_nid &if_nid) {
 }
 
 
-
-//FIXME->sh: what if the phi-tables are already empty?
-//           is it a correct case? if yes, what action should be taken to avoid
 void Lnast::resolve_phi_nodes(const Lnast_nid &cond_nid, Phi_rtable &true_table, Phi_rtable &false_table) {
   for (auto const&[key, val] : false_table) {
     if (true_table.find(key) != true_table.end()) {
@@ -770,20 +771,17 @@ bool Lnast::has_else_stmts(const Lnast_nid &if_nid) {
   return (get_type(last_child).is_stmts() && get_type(second_last_child).is_stmts());
 }
 
-void Lnast::ssa_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
+void Lnast::ssa_lhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
   //handle lhs of the statement, handle statement rhs in the 2nd part SSA
 
   const auto type     = get_type(opr_nid);
   const auto lhs_nid  = get_first_child(opr_nid);
 
-  if (type.is_tuple_add() || type.is_tuple_concat()) {
-    auto c1_opr_name = get_name(get_sibling_next(lhs_nid));
-    if (c1_opr_name.substr(0,6) == "__bits")
-      return;
+  if (type.is_tuple_add() || type.is_tuple_concat()) 
     respect_latest_global_lhs_ssa(lhs_nid);
-  }
+  
 
-  if (type.is_assign() || type.is_dp_assign() || type.is_as() || type.is_tuple()) {
+  if (type.is_assign() || type.is_dp_assign() || type.is_as() || type.is_tuple() || type.is_attr_set()) {
     const auto lhs_name = get_name(lhs_nid);
     if (lhs_name.substr(0,3) == "___") 
       return;
@@ -793,7 +791,7 @@ void Lnast::ssa_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &o
     return;
   } 
 
-  //handle rhs of the statement, only care about rhs register here
+  //handle rhs of the statement, but only care about rhs register here
   for (const auto &itr : children(opr_nid)) {
     if (itr == get_first_child(opr_nid))  
       continue;

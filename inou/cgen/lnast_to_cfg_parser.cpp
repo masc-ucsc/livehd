@@ -206,8 +206,6 @@ void Lnast_to_cfg_parser::process_buffer() {
     // not processed from buffer
   } else if (type.is_const()) {
     // not processed from buffer
-  } else if (type.is_attr()) {
-    // not processed from buffer
   } else if (type.is_assert()) {
     // check in on node representation
   } else if (type.is_if()) {

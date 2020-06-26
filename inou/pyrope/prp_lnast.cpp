@@ -1736,7 +1736,7 @@ std::string Prp_lnast::Lnast_type_to_string(Lnast_ntype type) {
     case Lnast_ntype::Lnast_ntype_tuple_delete: return "tuple_delete";
     case Lnast_ntype::Lnast_ntype_ref: return "ref";
     case Lnast_ntype::Lnast_ntype_const: return "const";
-    case Lnast_ntype::Lnast_ntype_attr: return "attribute";
+    /* case Lnast_ntype::Lnast_ntype_attr: return "attribute"; */ //FIXME->sh: should be removed
     case Lnast_ntype::Lnast_ntype_assert: return "assert";
     case Lnast_ntype::Lnast_ntype_not: return "bitwise not";
     case Lnast_ntype::Lnast_ntype_logical_not: return "logical not";

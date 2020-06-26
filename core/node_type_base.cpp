@@ -45,6 +45,8 @@ Node_Type::_init::_init() {
   Node_Type::table[TupGet_Op]     = new Node_Type_TupGet();
   Node_Type::table[TupRef_Op]     = new Node_Type_TupRef();
   Node_Type::table[TupKey_Op]     = new Node_Type_TupKey();
+  Node_Type::table[AttrSet_Op]    = new Node_Type_AttrSet();
+  Node_Type::table[AttrGet_Op]    = new Node_Type_AttrGet();
   Node_Type::table[CompileErr_Op] = new Node_Type_CompileErr();
   Node_Type::table[DontCare_Op]   = new Node_Type_DontCare();
 

@@ -1,0 +1,6 @@
+a = 2
+a.__bits = 3
+
+b = a + 1
+a.__bits = 4
+c = a + a.__bits

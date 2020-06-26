@@ -55,6 +55,8 @@ enum Node_Type_Op : uint8_t {
   TupGet_Op,
   TupRef_Op,
   TupKey_Op, // FIXME: to delete. Not needed
+  AttrSet_Op,
+  AttrGet_Op,
   CompileErr_Op,
 // Add here, operators needed
 #if 1
@@ -656,7 +658,7 @@ public:
   };
 };
 
-// TN = tuple name, KP = key position , KN = key name, V = value
+// TN = tuple name, KN = key name, KP = key position ,V = value
 class Node_Type_TupAdd : public Node_Type {
 public:
   Node_Type_TupAdd() : Node_Type("tup_add", TupAdd_Op, false) {
@@ -690,6 +692,30 @@ class Node_Type_TupKey : public Node_Type {
 public:
   Node_Type_TupKey() : Node_Type("tup_key", TupKey_Op, true) { outputs.push_back("Y"); };
 };
+
+
+// VN = variable name, AN = attribute name, AV = attribute value
+class Node_Type_AttrSet : public Node_Type {
+public:
+  Node_Type_AttrSet() : Node_Type("attr_set", AttrSet_Op, false) {
+    inputs.push_back("VN");
+    inputs.push_back("AN");
+    inputs.push_back("AV");
+    outputs.push_back("Y");
+  };
+};
+
+// VN = variable name, AN = attribute name
+class Node_Type_AttrGet : public Node_Type {
+public:
+  Node_Type_AttrGet() : Node_Type("attr_get", AttrGet_Op, false) {
+    inputs.push_back("VN");
+    inputs.push_back("AN");
+    outputs.push_back("Y");
+  };
+};
+
+
 
 // Y = tuple root name
 class Node_Type_CompileErr : public Node_Type {
