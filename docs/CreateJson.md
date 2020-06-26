@@ -1,6 +1,6 @@
 This document describes the design, implementation, and reasoning behind the latest changes to the inou.json.fromlg command. This command can be invoked to generate a JSON representation file of a given LGraph netlist that Yosys can parse.
 
-This pass is intended to create a JSON file that can nextpnr can use to Place and Route a netlist onto an ice40 FPGA (from Lattice). Currently, as described under section "Future Work", we cannot fully achieve this goal, so this inou pass remains a Work in Progress.
+This pass is intended to create a JSON file that nextpnr can use to Place and Route a netlist onto an ice40 FPGA (from Lattice). Currently, as described under section "Future Work", we cannot fully achieve this goal, so this inou pass remains a Work in Progress.
 
 # Invocation
 
@@ -10,7 +10,7 @@ Before executing the pass "inou.json.fromlg" on a given LGraph, you must first c
 livehd> inou.yosys.tolg files:./${VERILOG_PATH}/${TOP_MOD_NAME}.v top:${TOP_MOD_NAME}
 ```
 
-Where you replace "${TOP_MOD_NAME}" with the name of the top graph of your design. As a reminder, by default, lgdb/ is the path that stores the LGraph.
+In the above command, replace "${TOP_MOD_NAME}" with the name of the top graph of your design. As a reminder, by default, lgdb/ is the path that stores the LGraph.
 
 Once the LGraph gets created, to invoke the pass "inou.json.fromlg", the following command is used:
 
@@ -18,17 +18,17 @@ Once the LGraph gets created, to invoke the pass "inou.json.fromlg", the followi
 livehd> lgraph.open name:${TOP_MOD_NAME} |> inou.json.fromlg odir:lgdb/
 ```
 
-This command will dump the top-level graph and all its subgraphs into a file named "${TOP_MOD_NAME}.json". This JSON file can then be parsed by Yosys; it could even be parsed by nextpnr if Mockturtle was used before inou.json.fromlg.
+This command will dump the top-level graph and all its subgraphs into a file named "${TOP_MOD_NAME}.json". This JSON file can then be parsed by Yosys; it could even be parsed by nextpnr if Mockturtle was used before calling inou.json.fromlg.
 
 # Expected Output
 
-We are attempting to replicate the JSON output of Yosys; we can obtain a baseline reference by performing the below command in a Unix terminal:
+We are attempting to replicate the JSON output of Yosys; to obtain a baseline reference, perform the below command in a Unix terminal:
 
 ```sh
 bash> MOD=${TOP_MOD_NAME}; yosys -p 'write_json '${MOD}.json ${PATH}/${MOD}.v
 ```
 
-The above command synthesizes ${TOP_MOD_NAME}.v and dumps the result into a JSON file. Of note, this is a generic JSON output; we cannot input it into nextpnr. If we wanted to create a JSON for nextpnr, we would instead call:
+The above command synthesizes ${TOP_MOD_NAME}.v by using Yosys and dumps the result into a JSON file. Of note, this is a generic JSON output; we cannot input it into nextpnr. If we wanted to create a JSON for nextpnr, we would instead call:
 
 ```sh
 bash> MOD=${TOP_MOD_NAME}; yosys -p 'synth_ice40 -noflatten -top '${MOD}' -json ${TOP_MOD_NAME}.json' ${MOD}.v
@@ -52,17 +52,15 @@ To demonstrate the significance of the above, observe the following circuit:
 
 ![alt text](https://users.soe.ucsc.edu/~crhilber/net_v_edges.png)
 
-In the above circuit, we have input ports "Axx" and "Bxx", both which output 8-bit digital signals. These two signals feed two separate adders.
+In the above circuit, we have input ports "Axx" and "Bxx", both of which output 8-bit digital signals. These two signals feed two separate adders.
 
-In a net-based architecture, we have 16 nets: Axx[7:0] and Bxx[7:0].
-
-In a bus-based architecture, we have 4 edges:
+In a net-based architecture, we have 16 nets: Axx[7:0] and Bxx[7:0]. However, In a bus-based architecture, we have 4 edges:
 1. An edge connecting Axx to the top adder.
 2. Axx to the bottom adder.
 3. Bxx to the top adder.
 4. Bxx to the bottom adder.
 
-1 and 2 will have the same driver pin (same for 3 and 4), but 1 and 3 will have the same sink pin (same for 2 and 4).
+1 and 2 will have the same driver pin (as would 3 and 4), but 1 and 3 will have the same sink pin (as would 2 and 4).
 
 In addition to the above, if we either truncate or concatenate nets in Verilog, we must instantiate a Pick_Op or a Join_Op, respectively. Observe the following Verilog snippet:
 
@@ -82,7 +80,7 @@ The above circuit in LGraph gets translated to the below diagram:
 
 Note that we truncate bits 3 thru 6 for inpA via the "Pick_Op". This is a "Node" within a particular LGraph that has the following properties:
 1. The number of bits we are truncating is given by the edge bit_width() of the output Node_pin of the Node.
-2. The bit position we are selecting is given by the OFFSET input, where we must connect a U32Const_Op whose value equals the selected position. Note that the edge bit_width() that connects the output of the constant and the offset pin is equal to floor(log_2(value)) + 1.
+2. The bit position we are selecting is given by the OFFSET input, where we must connect a U32Const_Op whose value equals the selected position. Note that the bit_width() of the edge that connects the output of the constant and the offset pin is equal to floor(log_2(value)) + 1.
 
 For combining multiple edges into one edge, LGraph instantiates a "Join_Op" node that takes multiple edges and combines them into one. Thus, if we wanted to figure out where each index of "outnet" originated from (e.g. outnet[8] = inpA[3]), we would need to backtrace the "outnet" edge and smartly iterate over the input pins of the Join_Op.
 
