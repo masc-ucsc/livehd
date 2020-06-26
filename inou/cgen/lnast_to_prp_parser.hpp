@@ -42,6 +42,8 @@ private:
   void process_func_def();
 
   void process_operator();
+  //void process_as_operator();
+  void process_tuple();
 
 public:
   /* Lnast_to_prp_parser(std::shared_ptr<Lnast> _lnast, std::string_view _path) : Lnast_to_xxx(_lnast, _path){}; */

@@ -134,6 +134,7 @@ void Lnast_to_prp_parser::process_buffer() {
     process_assign(":=");
   } else if (type.is_as()) {
     process_operator();
+    //process_as_operator();
     // process_as();
   } else if (type.is_label()) {
     process_label();
@@ -169,6 +170,7 @@ void Lnast_to_prp_parser::process_buffer() {
     process_operator();
   } else if (type.is_tuple()) {
     // add error that tuple is not supported
+    process_tuple();
   } else if (type.is_ref()) {
     // is added to buffer
   } else if (type.is_const()) {
@@ -330,6 +332,65 @@ void Lnast_to_prp_parser::process_label() {
     // this should never be possible
   }
 }
+void Lnast_to_prp_parser::process_tuple() {
+  auto it = node_buffer.begin();
+  const auto access_type = it->type;
+  it++;
+  std::string_view key = get_node_name(*it);
+  it++;
+  const auto ref = it->type;//get_node_name(*it);
+  //auto map_it = ref_map.find(ref);
+  //if (map_it != ref_map.end()) {
+  //  ref = map_it->second;
+  //}
+  it++;
+  std::string value = absl::StrCat("(", process_number(get_node_name(*it)), ref.debug_name_pyrope());
+  it++;
+  value = absl::StrCat(value, get_node_name(*it), ")");
+  fmt::print("process_label map:\tkey: {}\tvalue: {}\n", key, value);
+  if (is_ref(key)) {
+    ref_map.insert(std::pair<std::string_view, std::string>(key, value));
+  } else {
+    absl::StrAppend(&node_str_buffer, key, " saved as ", value, "\n");
+    // this should never be possible
+  }
+}
+// void Lnast_to_prp_parser::process_as_operator() {
+//   auto       it      = node_buffer.begin();
+//   const auto op_type = it->type;
+//   it++;
+//   std::string_view key = get_node_name(*it);
+//   it++;
+// 
+//   std::string value = "";
+//   while (it != node_buffer.end()) {
+//     std::string_view ref    = get_node_name(*it);
+//     auto             map_it = ref_map.find(ref);
+//     if (map_it != ref_map.end()) {
+//       if (std::count(map_it->second.begin(), map_it->second.end(), ' ')) {
+//         ref = absl::StrCat("(", map_it->second, ")");
+//       } else {
+//         ref = map_it->second;
+//       }
+//       fmt::print("map_it find: {} | {}\n", map_it->first, ref);
+//     } else if (is_number(ref)) {
+//       ref = process_number(ref);
+//     }
+//     // check if a number
+// 
+//     absl::StrAppend(&value, ref);//maybe it should be value, key pair
+//     if (++it != node_buffer.end()) {
+//       absl::StrAppend(&value, " ", op_type.debug_name_pyrope(), " ");
+//     }
+//   }
+// 
+//   fmt::print("process_{} map:\tkey: {}\tvalue: {}\n", op_type.debug_name_pyrope(), key, value);
+//   if (is_ref(key)) {
+//     ref_map.insert(std::pair<std::string_view, std::string>(key, value));
+//   } else {
+//     absl::StrAppend(&node_str_buffer, indent_buffer(), key, " ", op_type.debug_name_pyrope(), " ", value, "\n");
+//   }
+// }
 
 void Lnast_to_prp_parser::process_operator() {
   auto       it      = node_buffer.begin();
