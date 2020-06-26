@@ -438,9 +438,14 @@ std::string Lconst::to_pyrope() const {
     return str2;
   }
 
-  std::stringstream ss;
-  ss << std::hex;
   const auto v = get_num(bits);
+  std::stringstream ss;
+
+  bool print_hexa = explicit_bits || v > 6;
+  if (print_hexa) {
+    ss << std::hex;
+  }
+
   if (v<0)
     ss << -v;
   else
@@ -450,7 +455,8 @@ std::string Lconst::to_pyrope() const {
   if (is_negative())
     str.append(1,'-');
 
-  absl::StrAppend(&str, "0x");
+  if (print_hexa)
+    absl::StrAppend(&str, "0x");
   absl::StrAppend(&str, ss.str());
 
   pyrope_bits(&str);
