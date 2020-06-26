@@ -1,13 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include <fcntl.h>
-#include <stdio.h>
-#include <string.h>
-
 #include <cstdio>
 
 #include "fmt/format.h"
 #include "gtest/gtest.h"
+
 #include "prp.hpp"
 
 class Prp_test : public ::testing::Test {
@@ -16,7 +13,7 @@ public:
   protected:
     void elaborate() {
       patch_pass(pyrope_keyword);
-      
+
       ast = std::make_unique<Ast_parser>(get_memblock(), Prp_rule);
       std::list<std::tuple<Rule_id, Token_entry>> loc_list;
       gen_ws_map();

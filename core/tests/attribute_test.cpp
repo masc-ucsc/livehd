@@ -1,5 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <boost/multiprecision/cpp_int.hpp>
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
@@ -33,7 +34,7 @@ protected:
       if ((i&0xFFF)==0) {
         top->create_node_sub(subs[rand()&1023]->get_lgid());
       }
-      top->create_node_const(i, 30);
+      top->create_node_const(Lconst(i, 30));
     }
 
   };

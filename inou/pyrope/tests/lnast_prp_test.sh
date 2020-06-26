@@ -1,12 +1,18 @@
 #!/bin/bash
 rm -rf ./lgdb
+# pts='tuple'
+# pts='tuple_if2 out_ssa  logic  tuple_if  bits_rhs  firrtl_tail3  firrtl_tail2 
+#      nested_if  counter  counter_nested_if 
+#      adder_stage  if2 if  if3_err 
+#      nested_if_err  firrtl_tail  ssa_rhs  reg__q_pin '
 
-pts='nested_if tuple_if firrtl_tail tuple_if2 adder_stage if2 if3_err nested_if_err ssa_rhs logic if '
-# pts='nested_if tuple_if tuple_if2 adder_stage if2 if3_err nested_if_err ssa_rhs logic if'
+pts_failbitwidth='capricious_bits capricious_bits2 tuple_if2  firrtl_tail3  firrtl_tail2 
+     out_ssa  counter  counter_nested_if firrtl_tail ssa_rhs reg__q_pin'
 
-# pts='sync_cnt_nested_if bits_rhs'
-
-
+pts='logic  tuple_if  bits_rhs  
+     nested_if  
+     adder_stage  if2 if  if3_err 
+     nested_if_err'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -26,7 +32,7 @@ echo ""
 echo ""
 echo ""
 echo "===================================================="
-echo "Pyrope Full Compilation (C++ Parser)"  
+echo "Pyrope Full Compilation (C++ Parser)"
 echo "===================================================="
 
 
@@ -36,16 +42,16 @@ do
       echo "ERROR: could not find ${pt}.prp in /inou/cfg/tests"
       exit !
     fi
-    
+
     ln -s inou/cfg/tests/${pt}.prp;
 
-   
+
     echo "----------------------------------------------------"
-    echo "Pyrope -> LNAST-SSA Graphviz debug"  
+    echo "Pyrope -> LNAST-SSA Graphviz debug"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "inou.pyrope.dbg_lnast_ssa files:inou/cfg/tests/${pt}.prp |> inou.graphviz.from"
-  
+    ${LGSHELL} "inou.pyrope files:inou/cfg/tests/${pt}.prp |> inou.lnast_dfg.dbg_lnast_ssa |> inou.graphviz.from"
+
     if [ -f ${pt}.lnast.dot ]; then
       echo "Successfully create a lnast from inou/cfg/tests/${pt}.prp"
     else
@@ -54,9 +60,9 @@ do
     fi
 
     echo "----------------------------------------------------"
-    echo "Pyrope -> LNAST -> LGraph"  
+    echo "Pyrope -> LNAST -> LGraph"
     echo "----------------------------------------------------"
-    
+
     # ${LGSHELL} "inou.lnast_dfg.tolg files:${pt}.cfg"
     ${LGSHELL} "inou.pyrope files:inou/cfg/tests/${pt}.prp |> inou.lnast_dfg.tolg"
     if [ $? -eq 0 ]; then
@@ -69,34 +75,18 @@ do
 
 
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.no_bits.tuple.reduced_or.cpp.dot
+    mv ${pt}.dot ${pt}.no_bits.tuple.assignment_or.dot
 
-
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "Reduced_Or_Op Elimination(LGraph)"  
-    echo "----------------------------------------------------"
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.reduced_or_elimination"
-    if [ $? -eq 0 ]; then
-      echo "Successfully eliminate all reduced_or_op: inou/cfg/tests/${pt}.prp"
-    else
-      echo "ERROR: Pyrope compiler failed: reduced_or_elimination, testcase: inou/cfg/tests/${pt}.prp"
-      exit 1
-    fi
-
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.no_bits.tuple.cpp.dot
 
 
     echo ""
     echo ""
     echo ""
     echo "----------------------------------------------------"
-    echo "Tuple Chain Resolve(LGraph)"  
+    echo "Tuple Chain Resolve(LGraph)"
     echo "----------------------------------------------------"
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.resolve_tuples"
+    #${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.resolve_tuples"
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop"
     if [ $? -eq 0 ]; then
       echo "Successfully resolve the tuple chain: inou/cfg/tests/${pt}.prp"
     else
@@ -105,13 +95,14 @@ do
     fi
 
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.no_bits.cpp.dot
+    mv ${pt}.dot ${pt}.no_bits.assignmment_or.dot
+
 
     echo ""
     echo ""
     echo ""
     echo "----------------------------------------------------"
-    echo "Bitwidth Optimization(LGraph) Round-1"  
+    echo "Bitwidth Optimization(LGraph) Round-1"
     echo "----------------------------------------------------"
 
     ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth"
@@ -123,27 +114,73 @@ do
     fi
 
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+    mv ${pt}.dot ${pt}.assignment_or.dot
+
 
     echo ""
     echo ""
     echo ""
     echo "----------------------------------------------------"
-    echo "Dead Code Elimination(LGraph)"  
+    echo "Assignment_Or_Op Elimination(LGraph)"
     echo "----------------------------------------------------"
-    echo "Todo ..."
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.assignment_or_elimination"
+    if [ $? -eq 0 ]; then
+      echo "Successfully eliminate all assignment or_op: inou/cfg/tests/${pt}.prp"
+    else
+      echo "ERROR: Pyrope compiler failed: assignment_or_elimination, testcase: inou/cfg/tests/${pt}.prp"
+      exit 1
+    fi
+
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+    mv ${pt}.dot ${pt}.cprop.dot
+
+    echo ""
+    echo ""
+    echo ""
+    echo "----------------------------------------------------"
+    echo "Copy Propagation Optimization(LGraph)"
+    echo "----------------------------------------------------"
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop"
+    if [ $? -eq 0 ]; then
+      echo "Successfully eliminate all assignment or_op: inou/cfg/tests/${pt}.prp"
+    else
+      echo "ERROR: Pyrope compiler failed: cprop, testcase: inou/cfg/tests/${pt}.prp"
+      exit 1
+    fi
+
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+    mv ${pt}.dot ${pt}.dce.dot
+
+    echo ""
+    echo ""
+    echo ""
+    echo "----------------------------------------------------"
+    echo "Dead Code Elimination(LGraph)"
+    echo "----------------------------------------------------"
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.dce"
+    if [ $? -eq 0 ]; then
+      echo "Successfully perform dead code elimination: inou/cfg/tests/${pt}.prp"
+    else
+      echo "ERROR: Pyrope compiler failed: dead code elimination, testcase: inou/cfg/tests/${pt}.prp"
+      exit 1
+    fi
+
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
 
 
 
-    if [[ ${pt} == *_err* ]]; then 
+
+
+    if [[ ${pt} == *_err* ]]; then
         echo "----------------------------------------------------"
-        echo "Pass! This is a Compile Error Test, No Need to Generate Verilog Code "  
+        echo "Pass! This is a Compile Error Test, No Need to Generate Verilog Code "
         echo "----------------------------------------------------"
     else
         echo ""
         echo ""
         echo ""
         echo "----------------------------------------------------"
-        echo "LGraph -> Verilog"  
+        echo "LGraph -> Verilog"
         echo "----------------------------------------------------"
 
         ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg"
@@ -160,7 +197,7 @@ do
         echo ""
         echo ""
         echo "----------------------------------------------------"
-        echo "Logic Equivalence Check"  
+        echo "Logic Equivalence Check"
         echo "----------------------------------------------------"
 
         ${LGCHECK} --implementation=${pt}.v --reference=./inou/cfg/tests/verilog_gld/${pt}.gld.v

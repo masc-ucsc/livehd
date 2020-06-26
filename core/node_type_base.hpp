@@ -12,7 +12,7 @@
 // nodetype should be at meta directory but the node type is needed all over in the base class. It may be good to integrate nodetype
 // as part of the lgnode itself to avoid extra cache misses
 
-enum Node_Type_Op : uint64_t {
+enum Node_Type_Op : uint8_t {
   Invalid_Op,
   // op_class: arith
   Sum_Op,
@@ -54,7 +54,9 @@ enum Node_Type_Op : uint64_t {
   TupAdd_Op,
   TupGet_Op,
   TupRef_Op,
-  TupKey_Op,
+  TupKey_Op, // FIXME: to delete. Not needed
+  AttrSet_Op,
+  AttrGet_Op,
   CompileErr_Op,
 // Add here, operators needed
 #if 1
@@ -74,27 +76,15 @@ enum Node_Type_Op : uint64_t {
   // op_class: memory
   Memory_Op,
   SubGraph_Op,
-  U32Const_Op,
-  StrConst_Op,
-  // op_class: sub
-  SubGraphMin_Op,  // Each subgraph cell starts here
-  SubGraphMax_Op = SubGraphMin_Op + ((1ULL << 32) - 1),
-  // op_class: value
-  U32ConstMin_Op,
-  U32ConstMax_Op = U32ConstMin_Op + ((1ULL << 32) - 1),
-  // op_class: str
-  StrConstMin_Op,
-  StrConstMax_Op = StrConstMin_Op + ((1ULL << 32) - 1),
+  Const_Op,
   Loop_breaker_end,
   //------------------END PIPELINED (break LOOPS)
-  // op_class: lut
-  LUTMin_Op,
-  LUTMax_Op = LUTMin_Op + ((1ULL << (1ULL << LUT_input_bits)) - 1)
+  Last_invalid_Op
 };
 
 class Node_Type {
 private:
-  static Node_Type *                                   table[StrConst_Op + 1];
+  static Node_Type *                                   table[Last_invalid_Op];
   static absl::flat_hash_map<std::string, Node_Type *> name2node;
 
 protected:
@@ -129,7 +119,11 @@ public:
 
   bool has_may_gen_sign() const { return may_gen_sign; }
 
-  static Node_Type &  get(Node_Type_Op op);
+  static const Node_Type &get(Node_Type_Op op) {
+    I(op > Invalid_Op && op < Last_invalid_Op);
+    I(table[op] != nullptr);
+    return *table[op];
+  }
   static Node_Type_Op get(std::string_view opname);
   static bool         is_type(std::string_view opname);
 
@@ -301,18 +295,16 @@ public:
   };
 };
 
-// Y = {A,B,C,D,E....} => previous expression might be wrong!!
-// Y = {...,E,D,C,B,A} => modified by SH
+// Y = {...,E,D,C,B,A}
+// note: need to set corrsponding pid correctly, A->pid_0, ..., E->pid_4, ...
 class Node_Type_Join : public Node_Type {
 public:
   Node_Type_Join() : Node_Type("join", Join_Op, false) { outputs.push_back("Y"); };
 };
 
-// Y = A[i,j]
-// pid 0 : A
-// pid 1 : offset
-// j = offset
-// i = offset + Y-bitwidth
+// Y = A[j,i]
+// i = offset
+// j = offset + Y-bitwidth
 class Node_Type_Pick : public Node_Type {
 public:
   Node_Type_Pick() : Node_Type("pick", Pick_Op, false) {
@@ -417,6 +409,9 @@ public:
 };
 
 // Y = (As|Au) == (As|Au) == ...
+// Verilog == for multiple inputs.
+// Each input #bits is extended (sign or zero) to the maximum number of bits
+// then a simple unsigned == is used
 class Node_Type_Equals : public Node_Type {
 public:
   Node_Type_Equals() : Node_Type("equals", Equals_Op, false) {
@@ -433,10 +428,10 @@ class Node_Type_Mux : public Node_Type {
 public:
   Node_Type_Mux() : Node_Type("mux", Mux_Op, false) {
     inputs.push_back("S");
-    inputs.push_back("A");
-    inputs.push_back("B");
-    inputs.push_back("C");
-    inputs.push_back("D");
+    inputs.push_back("A");  // 0 false path
+    inputs.push_back("B");  // 1 true path
+    inputs.push_back("C");  // 2 
+    inputs.push_back("D");  // 3
     inputs.push_back("E");  // Keeps going
     outputs.push_back("Y");
   };
@@ -452,7 +447,7 @@ public:
   };
 };
 
-// Y = $signed(A) >>> B
+// Y = $signed(A) >> B
 class Node_Type_ArithShiftRight : public Node_Type {
 public:
   Node_Type_ArithShiftRight() : Node_Type("ashr", ArithShiftRight_Op, false) {
@@ -463,6 +458,7 @@ public:
 };
 
 // Y = A[$signed(B) +: bit_width(A)]
+// Pyrope: y = a[[b..]]<<b  // b>=0
 class Node_Type_DynamicShiftRight : public Node_Type {
 public:
   Node_Type_DynamicShiftRight() : Node_Type("dshr", DynamicShiftRight_Op, false) {
@@ -483,7 +479,7 @@ public:
 };
 
 // Y = A >> B
-// S unconnected: logic shift right 
+// S unconnected: logic shift right
 // S == 1:        sign extension, arithmetic shift right
 // S == 2:        B is signed
 // FIX ME: should be superseded
@@ -518,7 +514,7 @@ public:
 class Node_Type_Flop : public Node_Type {
 public:
   Node_Type_Flop() : Node_Type("sflop", SFlop_Op, true) {
-    inputs.push_back("C");
+    inputs.push_back("CLK");
     inputs.push_back("D");
     inputs.push_back("EN");
     inputs.push_back("CLR");  // reset signal
@@ -619,12 +615,12 @@ public:
       inputs.push_back(wr + "_ADDR");
       inputs.push_back(wr + "_DATA");
       inputs.push_back(wr + "_EN");
-      //inputs.push_back(wr + "_SEQID");
+      // inputs.push_back(wr + "_SEQID");
 
       std::string rd = "RD" + std::to_string(i);
       inputs.push_back(rd + "_ADDR");
       inputs.push_back(rd + "_EN");
-      //inputs.push_back(wr + "_SEQID");
+      // inputs.push_back(wr + "_SEQID");
 
       outputs.push_back(rd + "_DATA");
     }
@@ -658,14 +654,9 @@ public:
   Node_Type_SubGraph() : Node_Type("subgraph", SubGraph_Op, true){};
 };
 
-class Node_Type_U32Const : public Node_Type {
+class Node_Type_Const : public Node_Type {
 public:
-  Node_Type_U32Const() : Node_Type("u32const", U32Const_Op, true) { outputs.push_back("Y"); };
-};
-
-class Node_Type_StrConst : public Node_Type {
-public:
-  Node_Type_StrConst() : Node_Type("strconst", StrConst_Op, true) { outputs.push_back("Y"); };
+  Node_Type_Const() : Node_Type("const", Const_Op, true) { outputs.push_back("Y"); };
 };
 
 class Node_Type_LUT : public Node_Type {
@@ -681,7 +672,7 @@ public:
   };
 };
 
-// TN = tuple name, KP = key position , KN = key name, V = value
+// TN = tuple name, KN = key name, KP = key position ,V = value
 class Node_Type_TupAdd : public Node_Type {
 public:
   Node_Type_TupAdd() : Node_Type("tup_add", TupAdd_Op, false) {
@@ -692,7 +683,6 @@ public:
     outputs.push_back("Y");
   };
 };
-
 
 // TN = tuple precedence name, K = position or name, Y = value
 class Node_Type_TupGet : public Node_Type {
@@ -705,32 +695,47 @@ public:
   };
 };
 
-
 // Y = tuple root name
 class Node_Type_TupRef : public Node_Type {
 public:
-  Node_Type_TupRef() : Node_Type("tup_ref", TupRef_Op, true) {
-    outputs.push_back("Y");
-  };
+  Node_Type_TupRef() : Node_Type("tup_ref", TupRef_Op, true) { outputs.push_back("Y"); };
 };
 
 // Y = tuple key name
 class Node_Type_TupKey : public Node_Type {
 public:
-  Node_Type_TupKey() : Node_Type("tup_key", TupKey_Op, true) {
+  Node_Type_TupKey() : Node_Type("tup_key", TupKey_Op, true) { outputs.push_back("Y"); };
+};
+
+
+// VN = variable name, AN = attribute name, AV = attribute value
+class Node_Type_AttrSet : public Node_Type {
+public:
+  Node_Type_AttrSet() : Node_Type("attr_set", AttrSet_Op, false) {
+    inputs.push_back("VN");
+    inputs.push_back("AN");
+    inputs.push_back("AV");
     outputs.push_back("Y");
   };
 };
+
+// VN = variable name, AN = attribute name
+class Node_Type_AttrGet : public Node_Type {
+public:
+  Node_Type_AttrGet() : Node_Type("attr_get", AttrGet_Op, false) {
+    inputs.push_back("VN");
+    inputs.push_back("AN");
+    outputs.push_back("Y");
+  };
+};
+
 
 
 // Y = tuple root name
 class Node_Type_CompileErr : public Node_Type {
 public:
-  Node_Type_CompileErr() : Node_Type("compile_err", CompileErr_Op, true) {
-    outputs.push_back("Y");
-  };
+  Node_Type_CompileErr() : Node_Type("compile_err", CompileErr_Op, true) { outputs.push_back("Y"); };
 };
-
 
 class Node_Type_DontCare : public Node_Type {
 public:

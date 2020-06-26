@@ -7,63 +7,15 @@
 #include "lgedge.hpp"
 #include "lgraph.hpp"
 
-Edge_raw_iterator::CPod_iterator Edge_raw_iterator::CPod_iterator::operator++() {
-  CPod_iterator i(ptr, e, inputs);
-  I(Node_Internal::get(e).is_node_state());
-  I(Node_Internal::get(ptr).is_node_state());
+void Fast_edge_iterator::Fast_iter::advance_if_deleted() {
 
-  const auto &node = Node_Internal::get(ptr);
+  if (likely(nid==0 || current_g->is_valid_node(nid)))
+    return;
 
-  if ((inputs && !ptr->is_last_input()) || (!inputs && !ptr->is_last_output())) {
-    ptr += ptr->next_node_inc();
-    I(&node == &Node_Internal::get(ptr));
-    return i;
-  }
-
-  if (node.is_last_state()) {
-    ptr = e;
-    return i;
-  }
-
-  const Edge_raw *ptr2 = ptr;
-  while (true) {
-    const auto &         root_page = Node_Internal_Page::get(ptr2);
-    const Node_Internal *root      = (const Node_Internal *)&root_page;
-
-    Index_ID idx   = Node_Internal::get(ptr2).get_next();
-    Index_ID delta = idx - root_page.get_idx();
-
-    I(node.get_master_root_nid() == root[delta].get_master_root_nid());
-
-    I(root[delta].is_node_state());
-
-    if (inputs) {
-      ptr2 = root[delta].get_input_begin();
-      if (root[delta].has_local_inputs()) {
-        ptr = ptr2;
-        break;
-      }
-    } else {
-      ptr2 = root[delta].get_output_begin();
-      if (root[delta].has_local_outputs()) {
-        ptr = ptr2;
-        break;
-      }
-    }
-
-    if (root[delta].is_last_state()) {
-      ptr = e;
-      // if ((root[delta].has_local_outputs() && !inputs)
-      //   ||(root[delta].has_local_inputs() && inputs))
-      I(&node == &Node_Internal::get(ptr));
-      break;  // No more in this iterator
-    }
-  }
-
-  return i;
+  go_next();
 }
 
-Fast_edge_iterator::Fast_iter &Fast_edge_iterator::Fast_iter::operator++() {
+void Fast_edge_iterator::Fast_iter::go_next() {
   I(nid != 0);
 
   nid = current_g->fast_next(nid);
@@ -75,7 +27,7 @@ Fast_edge_iterator::Fast_iter &Fast_edge_iterator::Fast_iter::operator++() {
         hidx      = next_hidx;
         current_g = top_g->ref_htree()->ref_lgraph(hidx);
         nid       = current_g->fast_first();
-        if (!nid.is_invalid()) return *this;
+        if (!nid.is_invalid()) return;
         next_hidx = top_g->ref_htree()->get_depth_preorder_next(hidx);
       }
       current_g = top_g;
@@ -86,9 +38,13 @@ Fast_edge_iterator::Fast_iter &Fast_edge_iterator::Fast_iter::operator++() {
       hidx.invalidate();
     }
   }
+}
+
+Fast_edge_iterator::Fast_iter &Fast_edge_iterator::Fast_iter::operator++() {
+  go_next();
 
   return *this;
-};
+}
 
 Fast_edge_iterator::Fast_iter Fast_edge_iterator::begin() const {
   auto nid = top_g->fast_first();
@@ -125,6 +81,8 @@ void Fwd_edge_iterator::Fwd_iter::topo_add_chain_down(const Node_pin &dst_pin) {
 void Fwd_edge_iterator::Fwd_iter::topo_add_chain_fwd(const Node_pin &dst_pin) {
   const auto dst_node = dst_pin.get_node();
   if (visited.count(dst_node.get_compact())) return;
+  if (pending_stack_set.contains(dst_node.get_compact())) return;
+  pending_stack_set.insert(dst_node.get_compact());
 
   if (visit_sub) {
     if (dst_node.is_type_sub_present()) {  // DOWN??
@@ -152,6 +110,7 @@ void Fwd_edge_iterator::Fwd_iter::topo_add_chain_fwd(const Node_pin &dst_pin) {
 void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear(LGraph *top) {
   I(linear_phase);
 
+  global_it.advance_if_deleted();
   if (global_it.is_invalid()) {
     current_node.invalidate();
     linear_phase = false;
@@ -159,14 +118,12 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear(LGraph *top) {
     return;
   }
 
-  while (true) {
+  while (linear_phase) {
     auto next_node = *global_it;
     ++global_it;
     if (global_it.is_invalid()) {
       global_it    = top->fast(visit_sub).begin();
       linear_phase = false;
-      current_node.invalidate();
-      return;
     }
 
     bool is_topo_sorted = true;
@@ -187,6 +144,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear(LGraph *top) {
       }
     }
 
+
     if (is_topo_sorted) {
       visited.insert(next_node.get_compact());
       current_node.update(next_node);
@@ -199,10 +157,16 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending() {
   do {
     while (!pending_stack.empty()) {
       auto node = pending_stack.back();
+      if (!node.get_class_lgraph()->is_valid_node(node.get_nid())) {
+        // The iterator can delete nodes
+        pending_stack.pop_back();
+        continue;
+      }
 
 #if 1
       if (visited.count(node.get_compact())) {
         pending_stack.pop_back();
+        pending_stack_set.erase(node.get_compact());
         continue;
       }
 #endif
@@ -232,13 +196,16 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending() {
       if (pending_stack.back() != node) continue;
       visited.insert(node.get_compact());
       pending_stack.pop_back();
+      pending_stack_set.erase(node.get_compact());
 
       if (can_be_visited) {
+        I(node.get_class_lgraph()->is_valid_node(node.get_nid()));
         current_node.update(node);
         return;
       }
     }
 
+    global_it.advance_if_deleted();
     if (global_it.is_invalid()) {
       current_node.invalidate();
       return;
@@ -246,10 +213,13 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending() {
 
     I(!(*global_it).is_graph_io());  // NOTE: should we propagate IO for going up?
     if (!visited.count((*global_it).get_compact())) {
-      pending_stack.push_back(*global_it);
-      for (auto &edge2 : (*global_it).inp_edges()) {  // fwd
-        // fmt::print("chain  {} from {}\n",edge2.driver.get_node().debug_name(), (*global_it).debug_name());
-        topo_add_chain_fwd(edge2.driver);
+      if (!pending_stack_set.contains((*global_it).get_compact())) {
+        pending_stack_set.insert((*global_it).get_compact());
+        pending_stack.push_back(*global_it);
+        for (auto &edge2 : (*global_it).inp_edges()) {  // fwd
+          // fmt::print("chain  {} from {}\n",edge2.driver.get_node().debug_name(), (*global_it).debug_name());
+          topo_add_chain_fwd(edge2.driver);
+        }
       }
     }
 
@@ -270,19 +240,21 @@ void Fwd_edge_iterator::Fwd_iter::fwd_first(LGraph *lg) {
   }
 
   I(!current_node.is_invalid());
+  I(current_node.get_class_lgraph()->is_valid_node(current_node.get_nid()));
 }
 
 void Fwd_edge_iterator::Fwd_iter::fwd_next() {
-  I(!current_node.is_invalid());
-
   if (linear_phase) {
     fwd_get_from_linear(current_node.get_top_lgraph());
     GI(current_node.is_invalid(), !linear_phase);
-    if (current_node.is_invalid()) fwd_get_from_pending();
+
+    if(current_node.is_invalid() || !current_node.get_class_lgraph()->is_valid_node(current_node.get_nid()))
+      fwd_get_from_pending();
     return;
   }
 
   fwd_get_from_pending();
+  GI(!current_node.is_invalid(), current_node.get_class_lgraph()->is_valid_node(current_node.get_nid()));
 }
 
 void Bwd_edge_iterator::Bwd_iter::bwd_first(LGraph *lg) {

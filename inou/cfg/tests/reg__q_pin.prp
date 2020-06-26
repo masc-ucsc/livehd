@@ -1,0 +1,10 @@
+$inp.__bits = 1
+
+if ($inp) {
+  tmp = 4
+  #x = tmp + 1
+} else {
+  #x = 4
+}
+
+%out = #x.__q_pin

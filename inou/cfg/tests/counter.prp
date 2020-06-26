@@ -1,0 +1,8 @@
+$c1.__bits = 1
+#cnt.__bits = 4
+
+if ($c1 == 1) {
+  #cnt := #cnt + 1
+}
+
+%cnt_o = #cnt.__q_pin

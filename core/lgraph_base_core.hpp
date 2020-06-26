@@ -36,10 +36,10 @@ struct Index_ID_hash {
   size_t operator()(const Index_ID& obj) const { return obj.value; }
 };
 
-using Port_ID = uint32_t;  // ports have a set order (a-b != b-a)
+using Port_ID = uint16_t;  // ports have a set order (a-b != b-a)
 
 constexpr int     Index_bits     = 31;  // 31 bit to have Sink/Driver + Index in 32 bits
-constexpr int     Port_bits      = 28;
+constexpr int     Port_bits      = 15;
 constexpr int     Bits_bits      = 17;
 constexpr Port_ID Port_invalid   = ((1ULL << Port_bits) - 1);  // Max Port_bits allowed
 constexpr int     LUT_input_bits = 4;

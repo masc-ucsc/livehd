@@ -8,13 +8,13 @@
 #include "lgraph.hpp"
 #include "node_pin.hpp"
 
-static_assert(sizeof(LEdge) == 8, "LEdge should be 8 bytes");
-static_assert(sizeof(LEdge) == sizeof(LEdge_Internal), "LEdge should be 8 bytes");
-static_assert(sizeof(SEdge) == 2, "SEdge should be 2 bytes");
+static_assert(sizeof(LEdge) == 6, "LEdge should be 6 bytes");
+static_assert(sizeof(LEdge) == sizeof(LEdge_Internal), "LEdge should be 6 bytes");
+static_assert(sizeof(SEdge) == 3, "SEdge should be 3 bytes");
 static_assert(sizeof(SEdge) == sizeof(SEdge_Internal), "SEdge should be 2 bytes");
-static_assert(sizeof(Edge_raw) == 2, "Edge_raw should be 2 bytes like SEdge");
-static_assert(sizeof(Node_Internal) == 64, "Node should be 64 bytes and 64 bytes aligned");
-static_assert(sizeof(Node_Internal_Page) == 64, "Node should 64 32 bytes and 64 bytes aligned");
+static_assert(sizeof(Edge_raw) == 3, "Edge_raw should be 3 bytes like SEdge");
+static_assert(sizeof(Node_Internal) == 32, "Node should be 32 bytes and 32 bytes aligned");
+static_assert(sizeof(Node_Internal_Page) == 32, "Node should 32 bytes and 32 bytes aligned");
 static_assert((1ULL << Index_bits) <= MMAPA_MAX_ENTRIES, "Max number of entries in Dense");
 
 Index_ID SEdge_Internal::get_page_idx() const { return Node_Internal_Page::get(this).get_idx(); }
@@ -24,16 +24,14 @@ Index_ID Edge_raw::get_page_idx() const { return Node_Internal_Page::get(this).g
 bool Edge_raw::is_last_input() const {
   const auto &node = Node_Internal::get(this);
 
-  int sz = 1;
-  if (!snode) sz = 4;
+  int sz = snode ? 1 : 2;
 
   return ((this + sz) >= node.get_input_end());
 }
 
 bool Edge_raw::is_last_output() const {
   const auto &node = Node_Internal::get(this);
-  int         sz   = 1;
-  if (!snode) sz = 4;
+  int         sz   = snode ? 1 : 2;
 
   return ((this + sz) >= node.get_output_end());
 }
@@ -46,50 +44,10 @@ const Edge_raw *Edge_raw::find_edge(const Edge_raw *bt, const Edge_raw *et, Inde
     if (eit->is_snode())
       eit++;
     else
-      eit += 4;
+      eit += 2;
   }
 
   return nullptr;
-}
-
-const Edge_raw *Edge_raw::get_reverse_for_deletion() const {
-  I(is_root());
-  Node_Internal *ptr_node = &Node_Internal::get(this);
-  SIndex_ID      ptr_idx  = ptr_node->get_self_idx();
-
-  SIndex_ID            dst_idx  = get_idx();
-  Node_Internal *      ptr_inp2 = &ptr_node[dst_idx - ptr_idx];
-  const Node_Internal *ptr_inp  = &(ptr_inp2->get_master_root());
-
-  I(ptr_inp->is_master_root());
-
-  // Index_ID dst_pid = get_out_pin().get_pid();
-  // Index_ID inp_pid = get_inp_pin().get_pid();
-  Index_ID dst_pid;
-  Index_ID inp_pid;
-  if (is_input()) {
-    dst_pid = get_inp_pid();
-    inp_pid = get_dst_pid();
-  } else {
-    dst_pid = get_dst_pid();
-    inp_pid = get_inp_pid();
-  }
-
-  do {
-    const Edge_raw *eit = nullptr;
-    if (input)
-      eit = find_edge(ptr_inp->get_output_begin(), ptr_inp->get_output_end(), ptr_idx, inp_pid, dst_pid);
-    else
-      eit = find_edge(ptr_inp->get_input_begin(), ptr_inp->get_input_end(), ptr_idx, dst_pid, inp_pid);
-
-    if (eit) return eit;
-    I(!ptr_inp->is_last_state());  // Not found all over
-
-    ptr_inp = &ptr_node[ptr_inp->get_next() - ptr_idx];
-  } while (true);
-
-  I(false);
-  return ptr_inp->sedge;  // Any random thing
 }
 
 Index_ID Edge_raw::get_self_idx() const {
@@ -97,7 +55,7 @@ Index_ID Edge_raw::get_self_idx() const {
   const auto &root_self = Node_Internal::get(this);
 
   SIndex_ID delta = &root_self - (const Node_Internal *)&root_page;  // Signed and bigger than Index_ID
-  I(delta < 64 && delta > 0);                                        // 64 entries between page aligned
+  I(delta < 4096 / sizeof(Node_Internal) && delta > 0);
 
   SIndex_ID idx = delta + root_page.get_idx();
 
@@ -109,7 +67,7 @@ Index_ID Edge_raw::get_self_root_idx() const {
   const auto &root_self = Node_Internal::get(this);
 
   SIndex_ID delta = &root_self - (const Node_Internal *)&root_page;
-  I(delta < 64 && delta > 0);  // 64 entries between page aligned
+  I(delta < 4096 / sizeof(Node_Internal) && delta > 0);
 
   SIndex_ID self_idx = delta + root_page.get_idx();
   if (root_self.is_root()) return static_cast<Index_ID>(self_idx);
@@ -268,18 +226,24 @@ const Node_Internal &Node_Internal::get_master_root() const {
 }
 
 void Node_Internal::try_recycle() {
-  if (out_pos != 0 || inp_pos != 0) return;
+
+  inp_pos  = 0;
+  out_pos  = 0;
+  inp_long = 0;
+  out_long = 0;
+
   I(!is_free_state());
 
-  // Recycle nid
+  //TODO: recycle the node no matter what
 
-  if (is_root()) return;  // Keep node
+  SIndex_ID self_idx = get_self_idx();
+
+#if 0
+  if (is_root()) return;  // Keep node for attributes
 
   Node_Internal *root_ptr = (Node_Internal *)&get_root();
   Index_ID       root_idx = root_ptr->get_nid();
-  I(root_idx == root_ptr->get_self_idx());
 
-  SIndex_ID self_idx = get_self_idx();
   SIndex_ID prev_idx = root_idx;
   I(prev_idx != self_idx);  // because it is not a root_ptr
 
@@ -293,18 +257,18 @@ void Node_Internal::try_recycle() {
   } else {
     root_ptr[prev_idx - root_idx].set_last_state();
   }
+#endif
 
   set_free_state();
-  I(root_ptr[-root_idx].is_page_state());
 
-  Node_Internal_Page master_page = Node_Internal_Page::get(root_ptr[-root_idx].sedge);
+  Node_Internal_Page master_page = Node_Internal_Page::get(this);
 
   nid                  = master_page.free_idx;
   master_page.free_idx = self_idx;
 }
 
 void Node_Internal::del_input_int(const Edge_raw *inp_edge) {
-  I(((uint64_t)inp_edge) >> 6 == ((uint64_t)this) >> 6);
+  I(((uint64_t)inp_edge) >> 5 == ((uint64_t)this) >> 5);  // 32 byte alignment
 
   int pos = (SEdge *)inp_edge - sedge;
 
@@ -313,7 +277,7 @@ void Node_Internal::del_input_int(const Edge_raw *inp_edge) {
 
   int sz = 1;
   if (!inp_edge->is_snode()) {
-    sz = 4;
+    sz = 2;
     I(inp_long);
     inp_long--;
   }
@@ -331,15 +295,15 @@ void Node_Internal::del_input_int(const Edge_raw *inp_edge) {
     if (sedge[get_input_begin_pos_int() + i].is_snode()) {
       i++;
     } else {
-      i += 4;
+      i += 2;
     }
   }
 
-  I(inp_pos >= (4 * inp_long));
+  I(inp_pos >= (2 * inp_long));
 }
 
 void Node_Internal::del_output_int(const Edge_raw *out_edge) {
-  I(((uint64_t)out_edge) >> 6 == ((uint64_t)this) >> 6);
+  I(((uint64_t)out_edge) >> 5 == ((uint64_t)this) >> 5);  // 32 byte alignment
 
   int pos = (SEdge *)out_edge - sedge;
 
@@ -348,7 +312,7 @@ void Node_Internal::del_output_int(const Edge_raw *out_edge) {
 
   int sz = 1;
   if (!out_edge->is_snode()) {
-    sz = 4;
+    sz = 2;
     I(out_long > 0);
     out_long--;
   }
@@ -364,7 +328,8 @@ void Node_Internal::del_output_int(const Edge_raw *out_edge) {
   I(out_pos >= 0);
 }
 
-bool Node_Internal::del(Index_ID src_idx, Port_ID pid, bool input) {
+#if 0
+bool Node_Internal::xxx(Index_ID src_idx, Port_ID pid, bool input) {
   const Edge_raw *eit = nullptr;
   if (input)
     eit = Edge_raw::find_edge(get_output_begin(), get_output_end(), src_idx, pid, get_dst_pid());
@@ -378,12 +343,13 @@ bool Node_Internal::del(Index_ID src_idx, Port_ID pid, bool input) {
   return true;
 }
 
-void Node_Internal::del(const Edge_raw *edge_raw) {
+void Node_Internal::xxx(const Edge_raw *edge_raw) {
   if (edge_raw->is_input())
     del_input(edge_raw);
   else
     del_output(edge_raw);
 }
+#endif
 
 // LCOV_EXCL_START
 void Node_Internal::dump() const {
@@ -395,7 +361,7 @@ void Node_Internal::dump() const {
     if (out->is_snode())
       out++;
     else
-      out += 4;
+      out += 2;
   }
 
   out = get_input_begin();
@@ -404,7 +370,7 @@ void Node_Internal::dump() const {
     if (out->is_snode())
       out++;
     else
-      out += 4;
+      out += 2;
   }
 }
 // LCOV_EXCL_STOP
@@ -464,24 +430,22 @@ void Node_Internal::assimilate_edges(Node_Internal *other_ptr) {
           self_pos++;
           inc_inputs(false);
         } else {
-          if (self_pos >= (Num_SEdges - 4 - 2) || inp_long >= 3) break;
+          if (self_pos >= (Num_SEdges - 2 - 2) || inp_long >= 8) break;
 
           LEdge_Internal *ledge_i = (LEdge_Internal *)&sedge[self_pos];
           ledge_i->set(other.sedge[other_pos].get_idx(), other.sedge[other_pos].get_inp_pid(), true  // input
           );
 
-          self_pos += 4;
+          self_pos += 2;
           inc_inputs(true);
         }
         other_pos++;
         i += 1;
       } else {
-        if (self_pos >= (Num_SEdges - 4 - 2) || inp_long >= 3) break;
+        if (self_pos >= (Num_SEdges - 2 - 2) || inp_long >= 8) break;
         sedge[self_pos++] = other.sedge[other_pos++];
         sedge[self_pos++] = other.sedge[other_pos++];
-        sedge[self_pos++] = other.sedge[other_pos++];
-        sedge[self_pos++] = other.sedge[other_pos++];
-        i += 4;
+        i += 2;
         inc_inputs(true);
         other_inp_long_removed++;
       }
@@ -500,7 +464,7 @@ void Node_Internal::assimilate_edges(Node_Internal *other_ptr) {
     other.inp_pos -= (other_pos - original_start_pos);
     I(other_inp_long_removed <= other.inp_long);
     other.inp_long -= other_inp_long_removed;
-    I(other.inp_pos >= (4 * other.inp_long));
+    I(other.inp_pos >= (2 * other.inp_long));
   }
 
   if (!has_space_short()) return;
@@ -519,7 +483,7 @@ void Node_Internal::assimilate_edges(Node_Internal *other_ptr) {
       inc_outputs(false);
     } else {
       if (!has_space_long()) break;  // We need long space
-      self_pos -= (4 - 1);
+      self_pos -= (2 - 1);
       LEdge_Internal *ledge_i = (LEdge_Internal *)&sedge[self_pos];         // became an ledge
       ledge_i->set(other_out->get_idx(), other_out->get_inp_pid(), false);  // output
       inc_outputs(true);
@@ -528,8 +492,8 @@ void Node_Internal::assimilate_edges(Node_Internal *other_ptr) {
       I(other.out_pos > 0);
       other.out_pos -= 1;
     } else {
-      I(other.out_pos >= 4);
-      other.out_pos -= 4;
+      I(other.out_pos >= 2);
+      other.out_pos -= 2;
       I(other.out_long > 0);
       other.out_long--;
     }

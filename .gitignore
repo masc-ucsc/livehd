@@ -25,3 +25,5 @@ dist
 *.egg-info
 .gdb_history
 lbench.trace
+*.dot
+*.dot.pdf

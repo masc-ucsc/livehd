@@ -5,42 +5,6 @@
 #include "lgraph.hpp"
 #include "pass.hpp"
 
-class Edge_raw_iterator {
-protected:
-  const bool      inputs;
-  const Edge_raw *b;
-  const Edge_raw *e;
-
-public:
-  class CPod_iterator {
-  private:
-    const Edge_raw *ptr;
-    const Edge_raw *e;
-    const bool      inputs;
-
-  public:
-    CPod_iterator(const Edge_raw *_ptr, const Edge_raw *_e, bool _inputs) : ptr(_ptr), e(_e), inputs(_inputs) {}
-    CPod_iterator operator++();   // FIXME: CPod_iterator &operator++()
-    CPod_iterator operator--() {  // FIXME: CPod_iterator &operator--()
-      CPod_iterator i(ptr, e, inputs);
-      ptr -= ptr->next_node_inc();
-      return i;
-    }
-    bool            operator!=(const CPod_iterator &other) const noexcept { return ptr != other.ptr; }
-    const Edge_raw &operator*() const { return *ptr; }
-  };
-
-  Edge_raw_iterator() = delete;
-  explicit Edge_raw_iterator(const Edge_raw *_b, const Edge_raw *_e, bool _inputs) : inputs(_inputs) {
-    b = _b;
-    e = _e;
-    I(Node_Internal::get(e).is_node_state());
-  }
-
-  CPod_iterator begin() const { return CPod_iterator(b, e, inputs); }
-  CPod_iterator end() const { return CPod_iterator(e, e, inputs); }
-};
-
 class Fast_edge_iterator {
 protected:
   LGraph *   top_g;
@@ -55,6 +19,8 @@ public:
     Hierarchy_index hidx;
     Index_ID        nid;
     const bool      visit_sub;
+
+    void go_next();
 
   public:
     Fast_iter(LGraph *_g, LGraph *_cg, const Hierarchy_index &_hidx, const Index_ID _nid, bool _visit_sub)
@@ -72,6 +38,7 @@ public:
       return *this;
     }
 
+    void advance_if_deleted();
     Fast_iter &operator++();
 
     bool operator!=(const Fast_iter &other) const {
@@ -105,6 +72,7 @@ protected:
   const bool                         visit_sub;
   absl::flat_hash_set<Node::Compact> visited;
   std::vector<Node>                  pending_stack;
+  absl::flat_hash_set<Node::Compact> pending_stack_set; // to break comb loops
 
   Flow_base_iterator(LGraph *lg, bool _visit_sub);
   Flow_base_iterator(bool _visit_sub);

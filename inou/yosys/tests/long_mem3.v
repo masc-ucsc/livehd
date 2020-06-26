@@ -1,17 +1,16 @@
 
-
 module mem3
     (input                clk
-     ,input [7:0]         waddr0
+     ,input [2:0]         waddr0
      ,input               we0
      ,input         din0
-     ,input [7:0]         raddr1
+     ,input [2:0]         raddr1
      ,output reg    q1
-     ,input [7:0]         raddr2
+     ,input [2:0]         raddr2
      ,output reg    q2
      );
 
-   reg rf[255:0];
+   reg rf[9:0]; // a bit bigger than needed to test strange cases
 
    reg none;
 

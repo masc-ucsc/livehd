@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "node.hpp"
+
 #include "annotate.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
@@ -183,8 +184,8 @@ Node_pin Node::setup_driver_pin(Port_ID pid) {
   if (current_g->is_type_sub(nid)) {
     Lg_type_id  sub_lgid = current_g->get_type_sub(nid);
     const auto &sub      = current_g->get_library().get_sub(sub_lgid);
-    I(sub.has_graph_pin(pid));
-    I(sub.is_output_from_graph_pos(pid), "ERROR: An input can not be a driver pin");
+    I(sub.has_instance_pin(pid));
+    I(sub.is_output_from_instance_pid(pid), "ERROR: An input can not be a driver pin");
   }
 #endif
 
@@ -202,8 +203,7 @@ Node_pin Node::setup_driver_pin() const {
 const Node_Type &Node::get_type() const { return current_g->get_type(nid); }
 
 void Node::set_type(const Node_Type_Op op) {
-  I(op != SubGraph_Op && op != U32Const_Op && op != StrConst_Op &&
-    op != LUT_Op);  // do not set type directly, call set_type_const_value ....
+  I(op != SubGraph_Op && op != Const_Op && op != LUT_Op);  // do not set type directly, call set_type_const ....
   current_g->set_type(nid, op);
 }
 
@@ -264,31 +264,15 @@ bool Node::is_type_sub_present() const {
   return false;
 }
 
-void Node::set_type_lut(Lut_type_id lutid) { current_g->set_type_lut(nid, lutid); }
+void Node::set_type_lut(const Lconst &lutid) { current_g->set_type_lut(nid, lutid); }
 
-Lut_type_id Node::get_type_lut() const { return current_g->get_type_lut(nid); }
+Lconst Node::get_type_lut() const { return current_g->get_type_lut(nid); }
 
 const Sub_node &Node::get_type_sub_node() const { return current_g->get_type_sub_node(nid); }
 
 Sub_node *Node::ref_type_sub_node() const { return current_g->ref_type_sub_node(nid); }
 
-/* DEPRECATED
-void Node::set_type_const_value(std::string_view str) {
-  g->set_type_const_value(nid, str);
-}
-
-void Node::set_type_const_sview(std::string_view str) {
-  g->set_type_const_sview(nid, str);
-}
-
-void Node::set_type_const_value(uint32_t val) {
-  g->set_type_const_value(nid, val);
-}
-*/
-
-uint32_t Node::get_type_const_value() const { return current_g->get_type_const_value(nid); }
-
-std::string_view Node::get_type_const_sview() const { return current_g->get_type_const_sview(nid); }
+Lconst Node::get_type_const() const { return current_g->get_type_const(nid); }
 
 Node_pin Node::setup_driver_pin(std::string_view name) {
   auto type = get_type();
@@ -361,7 +345,7 @@ Node_pin Node::setup_sink_pin(Port_ID pid) {
   if (current_g->is_type_sub(nid)) {
     Lg_type_id  sub_lgid = current_g->get_type_sub(nid);
     const auto &sub      = current_g->get_library().get_sub(sub_lgid);
-    I(sub.has_graph_pin(pid));
+    I(sub.has_instance_pin(pid));
   }
 #endif
 
@@ -384,6 +368,10 @@ XEdge_iterator Node::inp_edges_ordered() const { return current_g->inp_edges_ord
 
 XEdge_iterator Node::out_edges_ordered() const { return current_g->out_edges_ordered(*this); }
 
+XEdge_iterator Node::inp_edges_ordered_reverse() const { return current_g->inp_edges_ordered_reverse(*this); }
+
+XEdge_iterator Node::out_edges_ordered_reverse() const { return current_g->out_edges_ordered_reverse(*this); }
+
 Node_pin_iterator Node::inp_connected_pins() const { return current_g->inp_connected_pins(*this); }
 
 Node_pin_iterator Node::out_connected_pins() const { return current_g->out_connected_pins(*this); }
@@ -391,18 +379,21 @@ Node_pin_iterator Node::out_connected_pins() const { return current_g->out_conne
 Node_pin_iterator Node::inp_setup_pins() const { return current_g->inp_setup_pins(*this); }
 Node_pin_iterator Node::out_setup_pins() const { return current_g->out_setup_pins(*this); }
 
-void Node::del_node() { current_g->del_node(nid); }
+void Node::del_node() {
+  current_g->del_node(*this);
+  nid = 0; // invalidate node after delete
+}
 
 void Node::set_name(std::string_view iname) { Ann_node_name::ref(current_g)->set(get_compact_class(), iname); }
 
 std::string_view Node::create_name() const {
   auto *     ref = Ann_node_name::ref(current_g);
   const auto it  = ref->find(get_compact_class());
-  if (it != ref->end()) return ref->get_val_sview(it);
+  if (it != ref->end()) return ref->get_val(it);
 
   std::string sig = absl::StrCat("lg_", get_type().get_name(), std::to_string(nid));
   const auto  it2 = ref->set(get_compact_class(), sig);
-  return ref->get_val_sview(it2);
+  return ref->get_val(it2);
 #if 0
   // FIXME: HERE. Does not scale for large designs (too much recursion)
 
@@ -429,7 +420,7 @@ std::string_view Node::create_name() const {
 #endif
 }
 
-std::string_view Node::get_name() const { return Ann_node_name::ref(current_g)->get_val_sview(get_compact_class()); }
+std::string_view Node::get_name() const { return Ann_node_name::ref(current_g)->get_val(get_compact_class()); }
 
 std::string Node::debug_name() const {
 #ifndef NDEBUG
@@ -438,11 +429,16 @@ std::string Node::debug_name() const {
     fmt::print("WARNING: Node::debug_name should not be called during release (Slowww!)\n");
   }
 #endif
+  if (nid == 0) {  // legal for invalid node/pins
+    return "invalid_node";
+  }
+  I(current_g);
+
   auto *      ref = Ann_node_name::ref(current_g);
   std::string name;
   const auto  it = ref->find(get_compact_class());
   if (it != ref->end()) {
-    name = ref->get_val_sview(it);
+    name = ref->get_val(it);
   }
   if (current_g->is_type_sub(nid)) {
     absl::StrAppend(&name, "_sub_", get_type_sub_node().get_name());
@@ -474,22 +470,26 @@ Ann_place *Node::ref_place() {
 
 bool Node::has_place() const { return Ann_node_place::ref(top_g)->has(get_compact()); }
 
-
 //----- Subject to changes in the future:
 #define WHITE 0
-#define GREY  1
+#define GREY 1
 #define BLACK 2
-void Node::set_color(int new_color) {
-  Ann_node_color::ref(current_g)->set(get_compact_class(), std::to_string(new_color));
-}
+void Node::set_color(int new_color) { Ann_node_color::ref(current_g)->set(get_compact_class(), std::to_string(new_color)); }
 
 int Node::get_color() const {
-  auto str = Ann_node_color::ref(current_g)->get_val_sview(get_compact_class());
-  int color;
-  absl::SimpleAtoi(str, &color);
+  auto str = Ann_node_color::ref(current_g)->get_val(get_compact_class());
+  int  color;
+  auto ok = absl::SimpleAtoi(str, &color);
+  I(ok);
   return color;
 }
 
-bool Node::has_color() const {
-  return Ann_node_color::ref(current_g)->has_key(get_compact_class());
-}
+bool Node::has_color() const { return Ann_node_color::ref(current_g)->has_key(get_compact_class()); }
+
+
+// Pyrope control flow counter 
+void     Node::set_cfcnt(uint32_t cfcnt) { Ann_node_cfcnt::ref(current_g)->set(get_compact_class(), cfcnt); }
+uint32_t Node::get_cfcnt() const { return Ann_node_cfcnt::ref(current_g)->get_val(get_compact_class()); }
+bool     Node::has_cfcnt() const { return Ann_node_cfcnt::ref(current_g)->has_key(get_compact_class()); }
+
+

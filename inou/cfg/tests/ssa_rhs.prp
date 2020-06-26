@@ -1,11 +1,12 @@
 A = 5            //A0
 A = A + 4        //A1 = A0 + 4
 
+
 if (A == 5) {    //A1
   A = A + 1      //A2 = A1 + 1
   A = A + 2      //A3 = A2 + 2
 } else {
   A = A + 3      //A4 = A1 + 3
-}                
+}
                  //A5 = phi(cond, A3, A4)
 %out = A         //A5 

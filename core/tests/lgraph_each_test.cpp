@@ -61,10 +61,10 @@ protected:
 
         }else if (io_pin.dir == Sub_node::Direction::Output) {
           if (!sub->has_pin(io_pin.name)) {
-            sub->add_pin(io_pin.name, Sub_node::Direction::Output, graph_pos);
+            auto instance_pid = sub->add_pin(io_pin.name, Sub_node::Direction::Output, graph_pos);
             auto spin = parent->get_graph_output(io_pin.name);
             if (!spin.get_node().has_inputs()) {
-              node.setup_driver_pin(graph_pos).connect_sink(spin);
+              node.setup_driver_pin(instance_pid).connect_sink(spin);
             }
           }
         }else if (io_pin.dir == Sub_node::Direction::Invalid) {

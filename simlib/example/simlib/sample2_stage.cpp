@@ -7,14 +7,17 @@ Sample2_stage::Sample2_stage(uint64_t _hidx, const std::string &parent_name, vcd
     : hidx(_hidx), scope_name(parent_name + ".s2"), vcd_writer(writer) {}
 
 void Sample2_stage::vcd_posedge() {
-  vcd_writer->change(vcd_clk, "1");
-  vcd_writer->change(vcd_reset, "0");
+//  vcd_writer->change(vcd_clk, "1");
+//  vcd_writer->change(vcd_reset, "0");
 }
-void Sample2_stage::vcd_negedge() { vcd_writer->change(vcd_clk, "0"); }
+void Sample2_stage::vcd_negedge() {
+//  vcd_writer->change(vcd_clk, "0");
+}
 
 void Sample2_stage::vcd_reset_cycle() {
-  vcd_writer->change(vcd_reset, "1");
+//  vcd_writer->change(vcd_reset, "1");
   tmp        = 1;
+  vcd_writer->change(vcd_tmp, "1");
   to3_dValid = false;
   vcd_writer->change(vcd_to3_dValid, to3_dValid.to_string_binary());
   to2_eValid = false;

@@ -48,7 +48,7 @@ class Simlib_checkpoint {
 #endif
 public:
 #ifdef SIMLIB_VCD
-  Simlib_checkpoint(std::string_view _name, std::string parent_name = "",
+  Simlib_checkpoint(std::string_view _name, std::string parent_name = "TOP",
                     vcd::VCDWriter* initializer_obj = vcd::initialize_vcd_writer(), uint64_t _reset_ncycles = 10000)
       : name(_name), top(0, parent_name, initializer_obj), perf(name), reset_ncycles(_reset_ncycles) {
     ncycles                 = 0;

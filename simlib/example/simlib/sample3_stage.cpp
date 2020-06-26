@@ -15,29 +15,30 @@ Sample3_stage::Sample3_stage(uint64_t _hidx,const std::string &parent_name, vcd:
   , vcd_writer(writer) {
   }
 void Sample3_stage::vcd_reset_cycle() {
-  vcd_writer->change(vcd_reset, "1");
+//  vcd_writer->change(vcd_reset, "1");
   tmp  = 0;
   tmp2 = 0;
-
+  vcd_writer->change(vcd_tmp, "0");
+  vcd_writer->change(vcd_tmp2, "0");
   reset_iterator = reset_iterator + 1;
   vcd_writer->change(vcd_reset_iterator, 'b' + std::bitset<8>(reset_iterator).to_string());
   memory[reset_iterator] = 0;
 }
 void Sample3_stage::vcd_posedge() {
-  vcd_writer->change(vcd_clk, "1");
-  vcd_writer->change(vcd_reset, "0");
+//  vcd_writer->change(vcd_clk, "1");
+//  vcd_writer->change(vcd_reset, "0");
 }
-void Sample3_stage::vcd_negedge() { vcd_writer->change(vcd_clk, "0"); }
+void Sample3_stage::vcd_negedge() {
+//  vcd_writer->change(vcd_clk, "0");
+}
 void Sample3_stage::vcd_comb(UInt<1> s1_to3_cValid, UInt<32> s1_to3_c, UInt<1> s2_to3_dValid, UInt<32> s2_to3_d) {
-  // vcd_writer->change(vcd_reset,t,"0");
-  //  vcd_writer->change(vcd_clk, t, "0");
-  // vcd_writer->change(vcd_clk, t, "1");
   if (__builtin_expect(((tmp & UInt<32>(0xFFFF)) == UInt<32>(45339)), 0)) {
     if ((tmp2 & UInt<32>(15)) == UInt<32>(0)) {
       printf("memory[127] = %ud\n", memory[127]);
       // mem part//    vcd_writer->change(vcd_memory_127,t,memory[127].to_string_binary());
     }
     tmp2 = tmp2.addw(UInt<32>(1));
+    vcd_writer->change(vcd_tmp2,tmp2.to_string_binary());
   }
 
   to1_b = memory[(tmp&UInt<32>(0xff)).as_single_word()];
@@ -50,6 +51,7 @@ void Sample3_stage::vcd_comb(UInt<1> s1_to3_cValid, UInt<32> s1_to3_c, UInt<1> s
   }
 
   tmp = tmp.addw(UInt<32>(7));
+  vcd_writer->change(vcd_tmp,tmp.to_string_binary());
 }
 #else
 Sample3_stage::Sample3_stage(uint64_t _hidx) : hidx(_hidx) {}

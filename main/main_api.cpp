@@ -15,6 +15,7 @@ std::string Main_api::main_path;
 
 void setu_pass_abc();
 void setup_pass_bitwidth();
+void setup_pass_cprop();
 void setup_pass_dce();
 void setup_pass_dfg();
 void setup_pass_lec();
@@ -48,6 +49,7 @@ void Main_api::init() {
   setup_pass_sample();
   setup_pass_mockturtle();
   /* setup_pass_abc(); */
+  setup_pass_cprop();
   setup_pass_bitwidth();
   setup_pass_lgraph_to_lnast();
 

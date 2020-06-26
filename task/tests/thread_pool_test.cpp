@@ -4,7 +4,11 @@
 
 #include "gtest/gtest.h"
 
+#include "lbench.hpp"
+#include "spmc.hpp"
+#include "mpmc.hpp"
 #include "thread_pool.hpp"
+#include "concurrentqueue.hpp"
 
 int control = 1023;
 
@@ -32,7 +36,7 @@ TEST_F(GTest1, interface) {
   total = 0;
 
   Thread_pool pool;
-  int         JOB_COUNT = 200000;
+  const int JOB_COUNT = 2000000;
 
   Test1 t1;
   t1.a = 0;
@@ -51,4 +55,41 @@ TEST_F(GTest1, interface) {
   EXPECT_EQ(total, JOB_COUNT);
 }
 
-// g++ --std=c++14 testpool.cpp -I ../subs/ThreadPool/ -lpthread
+TEST_F(GTest1, bench) {
+  {
+    Lbench bb("mpmc");
+
+    mpmc<int> queue(256);
+
+    for (int i = 0; i < 10000000; ++i) {
+      queue.enqueue(i);
+      int a;
+      queue.dequeue(a);
+      assert(a == i);
+    }
+  }
+  {
+    Lbench bb("spmc");
+
+    spmc256<int> queue;
+
+    for (int i = 0; i < 10000000; ++i) {
+      queue.enqueue(i);
+      int a;
+      queue.dequeue(a);
+      assert(a == i);
+    }
+  }
+  {
+    Lbench bb("concurrentqueue");
+    moodycamel::ConcurrentQueue<int> queue(256);
+
+    for (int i = 0; i < 10000000; ++i) {
+      queue.enqueue(i);
+      int a;
+      queue.try_dequeue(a);
+      assert(a == i);
+    }
+  }
+}
+

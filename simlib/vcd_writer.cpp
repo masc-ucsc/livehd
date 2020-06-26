@@ -237,6 +237,100 @@ VarPtr VCDWriter::register_var(const std::string &scope, const std::string &name
   return pvar;
 }
 
+
+// -----------------------------
+VarPtr VCDWriter::register_passed_var(const std::string &scope, const std::string &name, VariableType type, unsigned size,
+                               const VarValue &init, bool duplicate_names_check) {
+
+  const std::string parent_name = scope.substr(0,scope.find_last_of(_scope_sep));
+  /*for unique ident::
+   *if (scope has scope_sep)
+   * then {extract parent name}
+   */
+ unsigned int _unique_var_id;
+  VarPtr pvar;
+  if (_closed) throw VCDPhaseException{"Cannot register after close()"};
+  if (!_registering) throw VCDPhaseException{utils::format("Cannot register new var '%s', registering finished", name.c_str())};
+
+  if (scope.size() == 0 || name.size() == 0)
+    throw VCDTypeException{utils::format("Empty scope '%s' or name '%s'", scope.c_str(), name.c_str())};
+
+  _search->vcd_scope.name = scope;  //"a" goes to vcd_scope.name
+  auto cur_scope          = _scopes.find(_search->ptr_scope);
+  if (cur_scope == _scopes.end()) {
+    auto res = _scopes.insert(std::make_shared<VCDScope>(scope, _scope_def_type));
+    if (!res.second) throw VCDPhaseException{utils::format("Cannot insert scope '%s'", scope.c_str())};
+    cur_scope = res.first;  // first is the shared ptr of type VCD scope and second is a bool
+  }
+
+  auto sz = [&size](unsigned def) { return (size ? size : def); };
+  auto parent_scope = _scopes.begin();
+   for(auto e =_scopes.begin(); e!=_scopes.end(); e++) {
+
+       if ((*e)->name == parent_name) {
+           parent_scope=e;
+           break;
+       }
+   }
+
+   for (auto var_iter = (**parent_scope).vars.begin(); var_iter!=(**parent_scope).vars.end(); var_iter++) {
+       auto randm = *var_iter;
+       if(name== (*var_iter)->_name){
+           _unique_var_id =stoul((*var_iter)->_ident, 0, 16);
+       }
+   }
+  VarValue init_value(init);
+  switch (type) {
+    case VariableType::integer:
+    case VariableType::realtime:
+      if (sz(64) == 1)
+        pvar = VarPtr(new VCDScalarVariable(name, type, 1, *cur_scope, _unique_var_id));
+      else
+        pvar = VarPtr(new VCDVectorVariable(name, type, sz(64), *cur_scope, _unique_var_id));
+      if (init_value.size() == 1 && init_value[0] == VCDValues::ZERO && size > init_value.size())
+        init_value = "b" + std::string(size, VCDValues::ZERO);
+      break;
+
+    case VariableType::real:
+      pvar = VarPtr(new VCDRealVariable(name, type, sz(64), *cur_scope, _unique_var_id));
+      if (init_value.size() == 1 && init_value[0] == VCDValues::ZERO) init_value = "0.0";
+      break;
+
+    case VariableType::string: pvar = VarPtr(new VCDStringVariable(name, type, sz(1), *cur_scope, _unique_var_id)); break;
+    case VariableType::event: pvar = VarPtr(new VCDScalarVariable(name, type, 1, *cur_scope, _unique_var_id)); break;
+
+    case VariableType::wire:
+      if (!size)
+        throw VCDTypeException{
+            utils::format("Must supply size for type '%s' of var '%s'", VCDVariable::VAR_TYPES[(int)type].c_str(), name.c_str())};
+      if (sz(64) == 1)
+        pvar = VarPtr(new VCDScalarVariable(name, type, 1, *cur_scope, _unique_var_id));
+      else
+        pvar = VarPtr(new VCDVectorVariable(name, type, size, *cur_scope, _unique_var_id));
+      if (init_value.size() == 1 && init_value[0] == VCDValues::ZERO && size > init_value.size())
+        init_value = "b" + std::string(size, VCDValues::ZERO);
+      break;
+    default:
+      if (!size)
+        throw VCDTypeException{
+            utils::format("Must supply size for type '%s' of var '%s'", VCDVariable::VAR_TYPES[(int)type].c_str(), name.c_str())};
+      pvar = VarPtr(new VCDVectorVariable(name, type, size, *cur_scope, _unique_var_id));
+      if (init_value.size() == 1 && (init_value[0] == VCDValues::UNDEF || init_value[0] == VCDValues::ZERO) &&
+          size > init_value.size())
+        init_value = "b" + std::string(size, VCDValues::ZERO);
+      break;
+  }
+  if (type != VariableType::event) _change(pvar, init_value, true);
+
+  if (duplicate_names_check && _vars.find(pvar) != _vars.end())
+    throw VCDTypeException{utils::format("Duplicate var '%s' in scope '%s'", name.c_str(), scope.c_str())};
+
+  _vars.insert(pvar);
+  (**cur_scope).vars.push_back(pvar);
+  // Only alter state after change_func() succeeds
+ // _next_var_id++;
+  return pvar;
+}
 // -----------------------------
 bool VCDWriter::_change(VarPtr var, const VarValue &value, bool reg) {
   if (timestamp < _timestamp)

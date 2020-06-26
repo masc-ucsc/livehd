@@ -1,0 +1,18 @@
+
+Extra tests that we can add:
+
+
+ERRORS:
+
+-If there is a write to a temporal variable (___x or anything with 3 _), there should be only one write in the whole program.
+
+
+WARNINGS:
+
+-There could be a "warning" (no error) for innefficient LNAST. E.g: if the is a temporal (___x) and used only in an assignment (foo = ___x). The "foo" could be directly in the LNAST node.
+
+-If a variable is written and never read, you may want to issue a warning too (not if it is an output)
+
+-If there is a output variable in the function declaration, it should be written. Warning otherwise
+
+

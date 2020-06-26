@@ -30,6 +30,7 @@ cc_binary(
             "//pass/punch:pass_punch",
             "//pass/sample:pass_sample",
             "//pass/bitwidth:pass_bitwidth",
+            "//pass/cprop:pass_cprop",
             "//pass/mockturtle:pass_mockturtle",
             "//pass/lgraph_to_lnast:pass_lgraph_to_lnast",
 
@@ -63,7 +64,7 @@ sh_test(
         "//inou/yosys:verilog_tests",
         ":lgshell",
         ],
-    args = ["long"], # give some extra time to the slow machines
+    size = "medium", # give some extra time to the slow machines
     deps = [
         "//inou/yosys:scripts",
     ]

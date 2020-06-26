@@ -47,7 +47,7 @@ protected:
 
     auto c2_aaa = c2->add_graph_input("a1", 19, 10);
     auto c2_bbb = c2->add_graph_input("anotherinput", 29, 10);
-    auto c2_sss = c2->add_graph_output("Y", 300001, 1);
+    auto c2_sss = c2->add_graph_output("Y", 30001, 1);
 
     //---------------------------------------------------
     // populate top graph with cells and instances
@@ -69,7 +69,7 @@ protected:
     auto s2_sss = s2.setup_driver_pin("Y");
     I(s2_aaa.get_pid() == 19);
     I(s2_bbb.get_pid() == 29);
-    I(s2_sss.get_pid() == 300001);
+    I(s2_sss.get_pid() == 30001);
 
     auto sum_a = sum.setup_sink_pin("AU");
     auto sum_b = sum.setup_sink_pin("BU");

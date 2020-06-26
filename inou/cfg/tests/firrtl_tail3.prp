@@ -1,0 +1,17 @@
+$clk.__bits = 1
+$inp.__bits = 16
+%out.__bits = 16
+
+x_q = #x.__q_pin
+
+cond = x_q == 0
+if (cond) {
+  #x = $inp
+} else {
+  foo = x_q - 1
+  bar = foo >> 1
+  bar := foo
+  #x = bar
+}
+
+%out := x_q

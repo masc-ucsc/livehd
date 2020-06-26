@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include "lconst.hpp"
 #include "lgraph_base_core.hpp"
 #include "node_pin.hpp"
 #include "node_type_base.hpp"
@@ -188,8 +189,8 @@ public:
     return (nid != other.nid || hidx != other.hidx);
   };
 
-  void        set_type_lut(Lut_type_id lutid);
-  Lut_type_id get_type_lut() const;
+  void   set_type_lut(const Lconst &lutid);
+  Lconst get_type_lut() const;
 
   const Node_Type &get_type() const;
   void             set_type(const Node_Type_Op op);
@@ -212,12 +213,7 @@ public:
   LGraph *        ref_type_sub_lgraph() const;  // Slower than other get_type_sub
   bool            is_type_sub_present() const;
 
-  // WARNING: Do not call this. Use create_node_const... to reuse node if already exists
-  // void              set_type_const_value(std::string_view str);
-  // void              set_type_const_sview(std::string_view str);
-  // void              set_type_const_value(uint32_t val);
-  uint32_t         get_type_const_value() const;
-  std::string_view get_type_const_sview() const;
+  Lconst get_type_const() const;
 
   Node_pin setup_driver_pin(std::string_view name);
   Node_pin setup_driver_pin(Port_ID pid);
@@ -241,6 +237,9 @@ public:
   XEdge_iterator out_edges_ordered() const;  // Slower than inp_edges, but edges ordered by driver.pid
   XEdge_iterator inp_edges_ordered() const;  // Slower than inp_edges, but edges ordered by sink.pid
 
+  XEdge_iterator out_edges_ordered_reverse() const;  // Slower than inp_edges, but edges ordered by driver.pid
+  XEdge_iterator inp_edges_ordered_reverse() const;  // Slower than inp_edges, but edges ordered by sink.pid
+
   bool is_graph_io() const { return nid == Hardcoded_input_nid || nid == Hardcoded_output_nid; }
   bool is_graph_input() const { return nid == Hardcoded_input_nid; }
   bool is_graph_output() const { return nid == Hardcoded_output_nid; }
@@ -259,10 +258,13 @@ public:
   Ann_place *      ref_place();
   bool             has_place() const;
 
-  void             set_color(int color);
-  int              get_color() const;
-  bool             has_color() const;
+  void set_color(int color);
+  int  get_color() const;
+  bool has_color() const;
 
+  void     set_cfcnt(uint32_t cfcnt);
+  uint32_t get_cfcnt() const;
+  bool     has_cfcnt() const;
   // END ATTRIBUTE ACCESSORS
 };
 

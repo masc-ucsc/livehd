@@ -2,7 +2,7 @@
 rm -rf ./lgdb
 rm -rf ./lgdb2
 
-pts='trivial trivial_and assigns compare trivial1 mux' # latch add'
+pts='trivial trivial_and assigns compare trivial1 mux simple_flop' # latch add'
 #TO ADD LIST, but have bugs:
 #picker -- pick op not yet implemented in lnast2lg
 #simple_add -- output 'h' has 1 extra bit, happens in pass.bitwidth
@@ -27,13 +27,6 @@ fi
 
 for pt in $pts
 do
-    echo ""
-    echo ""
-    echo ""
-    echo "===================================================="
-    echo "Compilation to get stable LGraph"
-    echo "===================================================="
-
     echo "----------------------------------------------------"
     echo "Verilog -> LGraph"
     echo "----------------------------------------------------"
@@ -63,26 +56,6 @@ do
       exit 1
     fi
 
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.newlg.precomp.dot
-
-
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "Reduced_Or_Op Elimination"
-    echo "----------------------------------------------------"
-
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.lnast_dfg.reduced_or_elimination"
-    if [ $? -eq 0 ]; then
-      echo "Successfully eliminate all reduced_or_op in new lg: ${pt}.v"
-    else
-      echo "ERROR: Pyrope compiler failed on new lg: reduced_or_elimination, testcase: ${pt}.v"
-      exit 1
-    fi
-
-
     echo ""
     echo ""
     echo ""
@@ -90,7 +63,7 @@ do
     echo "Tuple Chain Resolve"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.lnast_dfg.resolve_tuples"
+    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.lnast_dfg.resolve_tuples |> lgraph.dump"
     if [ $? -eq 0 ]; then
       echo "Successfully resolve the tuple chain in new lg: ${pt}.v"
     else
@@ -98,7 +71,7 @@ do
       exit 1
     fi
     ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.newlg.prebw.dot
+    mv ${pt}.dot ${pt}.newlg.prebw.or.dot
 
 
     echo ""
@@ -108,7 +81,7 @@ do
     echo "Bitwidth Optimization"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> pass.bitwidth"
+    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> pass.bitwidth |> lgraph.dump"
     if [ $? -eq 0 ]; then
       echo "Successfully optimize design bitwidth on new lg: ${pt}.v"
     else
@@ -116,8 +89,42 @@ do
       exit 1
     fi
     ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
+    mv ${pt}.dot ${pt}.or.newlg.dot
+
+    echo ""
+    echo ""
+    echo ""
+    echo "----------------------------------------------------"
+    echo "Reduced_Or_Op Elimination"
+    echo "----------------------------------------------------"
+
+    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.lnast_dfg.assignment_or_elimination"
+    if [ $? -eq 0 ]; then
+      echo "Successfully eliminate all reduced_or_op in new lg: ${pt}.v"
+    else
+      echo "ERROR: Pyrope compiler failed on new lg: assignment_or_elimination, testcase: ${pt}.v"
+      exit 1
+    fi
+
+    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
     mv ${pt}.dot ${pt}.newlg.dot
 
+    echo ""
+    echo ""
+    echo ""
+    echo "----------------------------------------------------"
+    echo "Dead Code Elimination"
+    echo "----------------------------------------------------"
+    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.lnast_dfg.dce"
+    if [ $? -eq 0 ]; then
+      echo "Successfully perform dead code elimination: ${pt}.v"
+    else
+      echo "ERROR: Pyrope compiler failed on new lg: dead code elimination, testcase: ${pt}.v"
+      exit 1
+    fi
+
+    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
+    mv ${pt}.dot ${pt}.newlg.dce.dot
 
     echo ""
     echo ""
@@ -134,7 +141,6 @@ do
       echo "ERROR: Yosys failed: verilog generation, testcase: ${pt}.v"
       exit 1
     fi
-
 
     echo ""
     echo ""

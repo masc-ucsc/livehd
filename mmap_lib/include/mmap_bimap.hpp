@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include <string_view>
+
 #include "mmap_map.hpp"
 
 namespace mmap_lib {
@@ -44,8 +46,11 @@ public:
   [[nodiscard]] bool has_key(const Key &key) const { return key2val.has(key); }
   [[nodiscard]] bool has_val(const T &val) const { return val2key.has(val); }
 
-  [[nodiscard]] std::string_view get_val_sview(const Key &key) const { return key2val.get(key); }
+  template<typename T_ = T, typename = std::enable_if_t<!is_array_serializable<T_>::value>>
   [[nodiscard]] const T &        get_val(const Key &key) const { return key2val.get(key); }
+  template<typename T_ = T, typename = std::enable_if_t<is_array_serializable<T_>::value>>
+  [[nodiscard]] T                get_val(const Key &key) const { return key2val.get(key); }
+
   [[nodiscard]] Key              get_key(const T &val) const { return val2key.get(val); }
 
   [[nodiscard]] iterator       find(const Key &key) { return key2val.find(key); }
@@ -69,12 +74,12 @@ public:
   [[nodiscard]] const_iterator cend() const { return key2val.cend(); }
 
   iterator erase(const_iterator pos) {
-    val2key.erase(pos.second);
+    val2key.erase(key2val.get(pos));
     return key2val.erase(pos);
   }
 
   iterator erase(iterator pos) {
-    val2key.erase(pos.second);
+    val2key.erase(key2val.get(pos));
     return key2val.erase(pos);
   }
 
@@ -82,8 +87,7 @@ public:
     auto it = key2val.find(key);
     if (it == key2val.end()) return 0;
 
-    val2key.erase(it.second);
-    key2val.erase(it);
+    erase(it);
 
     return 1;
   }
@@ -100,9 +104,16 @@ public:
 
   [[nodiscard]] Key              get_key(const iterator &it) const { return key2val.get_key(it); }
   [[nodiscard]] Key              get_key(const const_iterator &it) const { return key2val.get_key(it); }
+
+  template<typename T_ = T, typename = std::enable_if_t<!is_array_serializable<T_>::value>>
   [[nodiscard]] const T &        get_val(const iterator &it) const { return key2val.get(it); }
+  template<typename T_ = T, typename = std::enable_if_t<!is_array_serializable<T_>::value>>
   [[nodiscard]] const T &        get_val(const const_iterator &it) const { return key2val.get(it); }
-  [[nodiscard]] std::string_view get_val_sview(const const_iterator &it) const { return key2val.get_sview(it); }
+
+  template<typename T_ = T, typename = std::enable_if_t<is_array_serializable<T_>::value>>
+  [[nodiscard]] T                get_val(const iterator &it) const { return key2val.get(it); }
+  template<typename T_ = T, typename = std::enable_if_t<is_array_serializable<T_>::value>>
+  [[nodiscard]] T                get_val(const const_iterator &it) const { return key2val.get(it); }
 };
 
 }  // namespace mmap_lib

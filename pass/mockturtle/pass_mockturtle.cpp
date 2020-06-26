@@ -489,17 +489,17 @@ void Pass_mockturtle::create_n_bit_k_input_mux(std::vector<std::vector<sig_type>
 template <typename ntk_type>
 void Pass_mockturtle::mapping_shift_cell_lg2mt(const bool &is_shift_right, const bool &sign_ext, ntk_type &mt_ntk, const Node &node,
                                                const unsigned int &group_id) {
-  XEdge opr_A_edge = node.inp_edges()[0].sink.get_pid() == 0 ? opr_A_edge = node.inp_edges()[0] : opr_A_edge = node.inp_edges()[1];
-  XEdge opr_B_edge = node.inp_edges()[0].sink.get_pid() == 1 ? opr_B_edge = node.inp_edges()[0] : opr_B_edge = node.inp_edges()[1];
+  XEdge opr_A_edge = node.inp_edges()[0].sink.get_pid() == 0 ? node.inp_edges()[0] : node.inp_edges()[1];
+  XEdge opr_B_edge = node.inp_edges()[0].sink.get_pid() == 1 ? node.inp_edges()[0] : node.inp_edges()[1];
 
   std::vector<typename ntk_type::signal> opr_A_sigs, out_sigs;
   // processing input signal
   ////fmt::print("opr_A_bit_width:{}\n",opr_A_edge.get_bits());
   ////fmt::print("opr_B_bit_width:{}\n",opr_B_edge.get_bits());
   setup_input_signals(group_id, opr_A_edge, opr_A_sigs, mt_ntk);
-  if (opr_B_edge.driver.get_node().get_type().op == U32Const_Op) {
+  if (opr_B_edge.driver.get_node().get_type().op == Const_Op) {
     // creating output signal for const shift
-    uint32_t offset = opr_B_edge.driver.get_node().get_type_const_value();
+    uint32_t offset = opr_B_edge.driver.get_node().get_type_const().to_i();
     shift_op(opr_A_sigs, is_shift_right, sign_ext, offset, out_sigs, mt_ntk);
   } else {
     std::vector<typename ntk_type::signal>              opr_B_sigs, temp_out;
@@ -558,11 +558,11 @@ void Pass_mockturtle::mapping_dynamic_shift_cell_lg2mt(const bool &is_shift_righ
   ////fmt::print("opr_A_bit_width:{}\n",opr_A_edge.get_bits());
   ////fmt::print("opr_B_bit_width:{}\n",opr_B_edge.get_bits());
   setup_input_signals(group_id, opr_A_edge, opr_A_sigs, mt_ntk);
-  if (opr_B_edge.driver.get_node().get_type().op == U32Const_Op) {
+  if (opr_B_edge.driver.get_node().get_type().op == Const_Op) {
     // creating output signal for const shift
     uint32_t ofs;
     bool     is_negative;
-    converting_uint32_to_signed_SMR(opr_B_edge.driver.get_node().get_type_const_value(), ofs, is_negative);
+    converting_uint32_to_signed_SMR(opr_B_edge.driver.get_node().get_type_const().to_i(), ofs, is_negative);
     if (is_negative) {
       shift_op(opr_A_sigs, !is_shift_right, false, ofs, out_sigs, mt_ntk);
     } else {
@@ -1078,7 +1078,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
           auto pick_node_sink_pin        = pick_node.setup_sink_pin(0);
           auto pick_node_offset_pin      = pick_node.setup_sink_pin(1);
           auto pick_node_driver_pin      = pick_node.setup_driver_pin();
-          auto const_node_for_bit_select = new_lg->create_node_const(i, bits);
+          auto const_node_for_bit_select = new_lg->create_node_const(Lconst(i, bits));
           auto bit_select_signal         = const_node_for_bit_select.get_driver_pin();
           pick_node_driver_pin.set_bits(1);
           new_lg->add_edge(bit_select_signal, pick_node_offset_pin);

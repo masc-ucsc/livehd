@@ -136,7 +136,7 @@ void Inou_graphviz::populate_lg_handle_xedge(const Node &node, const XEdge &out,
   auto  dbits   = out.driver.get_bits();
   auto  dp_name = out.driver.has_name() ? out.driver.get_name() : "";
 
-  if (node.get_type().op == U32Const_Op)
+  if (node.get_type().op == Const_Op)
     data += fmt::format(" {}->{}[label=<{}b:({},{})>];\n", dn_name, sn_name, dbits, dp_pid, sp_pid);
   else if (node.get_type().op == TupRef_Op)
     data += fmt::format(" {}->{}[label=<({},{}):<font color=\"#0000ff\">{}</font>>];\n", dn_name, sn_name, dp_pid, sp_pid, dp_name);
@@ -150,17 +150,22 @@ void Inou_graphviz::populate_lg_data(LGraph *g) {
   std::string data = "digraph {\n";
 
   g->each_node_fast([&data, this](const Node &node) {
+    if (!node.has_inputs() && !node.has_outputs())
+      return;
     std::string node_info;
     if (!verbose) {
-      auto pos = node.debug_name().find("_lg_");
+      auto pos  = node.debug_name().find("_lg_");
       node_info = node.debug_name().substr(0, pos); //get rid of the lgraph name
       node_info = std::regex_replace(node_info, std::regex("node_"), "n");
+
+      /* if (node.has_cfcnt()) // for temporarily dbg cfcnt*/
+      /*   node_info = node_info + "_" + std::to_string(node.get_cfcnt()); */
     } else {
       node_info = node.debug_name();
     }
 
-    if (node.get_type().op == U32Const_Op)
-      data += fmt::format(" {} [label=<{}:{}>];\n", node.debug_name(), node_info, node.get_type_const_value());
+    if (node.get_type().op == Const_Op)
+      data += fmt::format(" {} [label=<{}:{}>];\n", node.debug_name(), node_info, node.get_type_const().to_pyrope());
     else
       data += fmt::format(" {} [label=<{}>];\n", node.debug_name(), node_info);
 
@@ -178,6 +183,15 @@ void Inou_graphviz::populate_lg_data(LGraph *g) {
       populate_lg_handle_xedge(pin.get_node(), out, data);
     }
   });
+
+
+  //we need this to show outputs bits in graphviz
+  g->each_graph_output([&data](const Node_pin &pin) {
+    std::string_view dst_str = "virtual_dst_module";
+    auto dbits = pin.get_bits();
+    data += fmt::format(" {}->{}[label=<{}b>];\n", pin.get_name(), dst_str, dbits);
+  });
+
 
   data += "}\n";
 

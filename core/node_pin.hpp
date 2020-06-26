@@ -8,6 +8,7 @@ class Node;
 #include <vector>
 
 #include "ann_bitwidth.hpp"
+#include "ann_ssa.hpp"
 #include "lgedge.hpp"
 #include "mmap_map.hpp"
 
@@ -245,6 +246,8 @@ public:
 
   Node_pin get_sink_from_output() const;
 
+#if 0
+  // OLD API
   bool is_input() const {
     I(idx);
     return sink;
@@ -253,6 +256,7 @@ public:
     I(idx);
     return !sink;
   }
+#endif
 
   bool is_sink() const {
     I(idx);
@@ -263,8 +267,9 @@ public:
     return !sink;
   }
 
-  Node get_node() const;
-  Node get_driver_node() const;
+  Node     get_node() const;
+  Node     get_driver_node() const;
+  Node_pin get_driver_pin() const;
 
   void connect_sink(Node_pin &dst);
   void connect_sink(Node_pin &&dst) { connect_sink(dst); }
@@ -294,6 +299,7 @@ public:
   // static Node_pin get_out_pin(const Edge_raw *edge_raw);
   // static Node_pin get_inp_pin(const Edge_raw *edge_raw);
 
+  void invalidate() { idx = 0; }
   constexpr bool is_invalid() const { return idx == 0; }
 
   constexpr bool operator==(const Node_pin &other) const {
@@ -313,6 +319,11 @@ public:
   static Node_pin  find_driver_pin(LGraph *top, std::string_view wname);
   std::string_view get_pin_name() const;
 
+  // FIXME->sh: could be deprecated if ann_ssa could be mmapped for a std::string_view
+  void             set_prp_vname(std::string_view prp_vname);
+  std::string_view get_prp_vname() const;
+  bool             has_prp_vname() const;
+
   void  set_delay(float val);
   float get_delay() const;
 
@@ -328,6 +339,9 @@ public:
   const Ann_bitwidth &get_bitwidth() const;
   Ann_bitwidth *      ref_bitwidth();
   bool                has_bitwidth() const;
+  const Ann_ssa &     get_ssa() const;
+  Ann_ssa *           ref_ssa();
+  bool                has_ssa() const;
   bool                is_connected() const;
 
   // END ATTRIBUTE ACCESSORS

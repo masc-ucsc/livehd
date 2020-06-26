@@ -35,34 +35,54 @@ RTLIL::Wire *Lgyosys_dump::add_wire(RTLIL::Module *module, const Node_pin &pin) 
   assert(pin.is_driver());
   if (pin.has_name()) {
     auto name = absl::StrCat("\\", pin.get_name());
-    // printf("add wire [%s]\n", name.c_str());
+    //fmt::print("pin{} has name:{}\n", pin.debug_name(), name);
     return module->addWire(name, pin.get_bits());
   } else {
     return module->addWire(next_id(pin.get_class_lgraph()), pin.get_bits());
   }
 }
 
-RTLIL::Wire *Lgyosys_dump::create_tree(LGraph *g, std::vector<RTLIL::Wire *> &wires, RTLIL::Module *mod, add_cell_fnc_sign add_fnc,
-                                       bool sign, RTLIL::Wire *result_wire) {
+RTLIL::Wire *Lgyosys_dump::create_tree(LGraph *g, const std::vector<RTLIL::Wire *> &wires, RTLIL::Module *mod, add_cell_fnc_sign add_fnc,
+                                       bool sign, RTLIL::Wire *result_wire, int width) {
+  assert(mod);
+
   if (wires.size() == 0) return nullptr;
 
-  if (wires.size() == 1) return wires[0];
-
-  std::vector<RTLIL::Wire *> next_level;
-  for (uint32_t current = 0; current < wires.size() / 2; current += 2) {
-    RTLIL::Wire *aWire = nullptr;
-    if (wires.size() > 2)
-      aWire = mod->addWire(next_id(g), result_wire->width);
-    else
-      aWire = result_wire;
-
-    auto name = next_id(g);
-    (mod->*add_fnc)(name, wires[current], wires[current + 1], aWire, sign, "");
-    next_level.push_back(aWire);
+  if (wires.size() == 1) {
+    if (result_wire) { // only in top level call
+      mod->connect(result_wire, wires[0]);
+      return result_wire;
+    }else{
+      return wires[0];
+    }
   }
-  if (wires.size() % 2 == 1) next_level.push_back(wires[wires.size() - 1]);
 
-  return create_tree(g, next_level, mod, add_fnc, sign, result_wire);
+  if (result_wire)
+    width = result_wire->width;
+
+  assert(width);
+
+  RTLIL::Wire *l;
+  RTLIL::Wire *r;
+
+  if (wires.size() == 2) {
+    l = wires[0];
+    r = wires[1];
+  }else{
+    std::vector<RTLIL::Wire *> l_wires(wires.begin(), wires.begin()+wires.size()/2);
+    std::vector<RTLIL::Wire *> r_wires(wires.begin()+wires.size()/2, wires.end());
+    assert(l_wires.size() + r_wires.size() == wires.size());
+
+    l = create_tree(g, l_wires, mod, add_fnc, sign, nullptr, width);
+    r = create_tree(g, r_wires, mod, add_fnc, sign, nullptr, width);
+  }
+
+  auto name = next_id(g);
+  if (result_wire==nullptr)
+    result_wire = mod->addWire(next_id(g), width);
+  (mod->*add_fnc)(name, l, r, result_wire, sign, "");
+
+  return result_wire;
 }
 
 RTLIL::Wire *Lgyosys_dump::create_io_wire(const Node_pin &pin, RTLIL::Module *module, Port_ID pos) {
@@ -131,32 +151,32 @@ void Lgyosys_dump::create_memory(LGraph *g, RTLIL::Module *module, Node &node) {
       assert(clk);
 
     } else if (input_pin == LGRAPH_MEMOP_SIZE) {
-      memory->setParam("\\SIZE", RTLIL::Const(driver_node.get_type_const_value()));
+      memory->setParam("\\SIZE", RTLIL::Const(driver_node.get_type_const().to_i()));
 
     } else if (input_pin == LGRAPH_MEMOP_OFFSET) {
-      memory->setParam("\\OFFSET", RTLIL::Const(driver_node.get_type_const_value()));
+      memory->setParam("\\OFFSET", RTLIL::Const(driver_node.get_type_const().to_i()));
 
     } else if (input_pin == LGRAPH_MEMOP_ABITS) {
-      memory->setParam("\\ABITS", RTLIL::Const(driver_node.get_type_const_value()));
+      memory->setParam("\\ABITS", RTLIL::Const(driver_node.get_type_const().to_i()));
 
     } else if (input_pin == LGRAPH_MEMOP_WRPORT) {
-      memory->setParam("\\WR_PORTS", RTLIL::Const(driver_node.get_type_const_value()));
+      memory->setParam("\\WR_PORTS", RTLIL::Const(driver_node.get_type_const().to_i()));
 
     } else if (input_pin == LGRAPH_MEMOP_RDPORT) {
       assert(nrd_ports == 0);  // Do not double set
 
-      nrd_ports = driver_node.get_type_const_value();
+      nrd_ports = driver_node.get_type_const().to_i();
       memory->setParam("\\RD_PORTS", RTLIL::Const(nrd_ports));
 
     } else if (input_pin == LGRAPH_MEMOP_RDTRAN) {
-      transp = driver_node.get_type_const_value() ? RTLIL::State::S1 : RTLIL::State::S0;
+      transp = driver_node.get_type_const().to_i() ? RTLIL::State::S1 : RTLIL::State::S0;
 
     } else if (input_pin == LGRAPH_MEMOP_RDCLKPOL) {
-      rd_posedge = (driver_node.get_type_const_value() == 0) ? RTLIL::State::S1 : RTLIL::State::S0;
+      rd_posedge = (driver_node.get_type_const() == 0) ? RTLIL::State::S1 : RTLIL::State::S0;
       rd_clk     = true;
 
     } else if (input_pin == LGRAPH_MEMOP_WRCLKPOL) {
-      wr_posedge = (driver_node.get_type_const_value() == 0) ? RTLIL::State::S1 : RTLIL::State::S0;
+      wr_posedge = (driver_node.get_type_const() == 0) ? RTLIL::State::S1 : RTLIL::State::S0;
       wr_clk     = true;
 
     } else if (LGRAPH_MEMOP_ISWRADDR(input_pin)) {
@@ -282,27 +302,25 @@ void Lgyosys_dump::create_wires(LGraph *g, RTLIL::Module *module) {
   });
 
   for (auto node : g->fast()) {
-    if (node.get_type().op == GraphIO_Op) continue;  // handled before with each_output/each_input
+    I(node.get_type().op != GraphIO_Op);
 
-    if (node.get_type().op == U32Const_Op) {
+    if (!node.has_inputs() && !node.has_outputs())
+      continue; // DCE code
+
+    if (node.get_type().op == Const_Op) {
       auto         dpin     = node.get_driver_pin();
       RTLIL::Wire *new_wire = add_wire(module, dpin);
 
-      // constants treated as inputs
-      module->connect(new_wire, RTLIL::SigSpec(node.get_type_const_value(), dpin.get_bits()));
+      auto lc = node.get_type_const();
+
+      if (lc.is_i()) {
+        I(lc.get_bits() <= dpin.get_bits());
+        module->connect(new_wire, RTLIL::SigSpec(lc.to_i(), dpin.get_bits()));
+      } else {
+        module->connect(new_wire, RTLIL::SigSpec(RTLIL::Const::from_string(lc.to_yosys())));
+      }
       input_map[dpin.get_compact()] = new_wire;
       continue;
-
-    } else if (node.get_type().op == StrConst_Op) {
-      auto         const_val = node.get_type_const_sview();
-      RTLIL::Wire *new_wire  = module->addWire(absl::StrCat("\\", node.get_driver_pin().create_name()),
-                                              const_val.size());  // FIXME: This assumes that const are in base 2. OK always?
-
-      // constants treated as inputs
-      module->connect(new_wire, RTLIL::SigSpec(RTLIL::Const::from_string(std::string(const_val))));
-      input_map[node.get_driver_pin().get_compact()] = new_wire;
-      continue;
-
     } else if (node.get_type().op == SubGraph_Op) {
       create_subgraph_outputs(g, module, node);
       continue;
@@ -380,8 +398,12 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
 
   // now create nodes and make connections
   for (auto node : g->fast()) {
+    I(node.get_type().op != GraphIO_Op);
+
+    if (!node.has_inputs() && !node.has_outputs())
+      continue; // DCE code
+
     auto op = node.get_type().op;
-    if (op == GraphIO_Op) continue;  // outputs already handled, inputs are not used
 
     if (op != Memory_Op && op != SubGraph_Op && !node.has_outputs()) continue;
 
@@ -389,8 +411,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
 
     switch (op) {
       case GraphIO_Op:
-      case U32Const_Op:
-      case StrConst_Op: continue;
+      case Const_Op: continue;
 
       case Sum_Op: {
         std::vector<RTLIL::Wire *> add_unsigned;
@@ -591,8 +612,8 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
           switch (e.sink.get_pid()) {
             case 0: picked_wire = get_wire(e.driver); break;
             case 1:
-              if (e.driver.get_node().get_type().op != U32Const_Op) log_error("Internal Error: Pick range is not a constant.\n");
-              lower = e.driver.get_node().get_type_const_value();
+              if (e.driver.get_node().get_type().op != Const_Op) log_error("Internal Error: Pick range is not a constant.\n");
+              lower = e.driver.get_node().get_type_const().to_i();
               break;
             default: assert(0);  // pids > 1 not supported
           }
@@ -625,7 +646,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
 
         assert(cell_output_map.find(node.get_driver_pin().get_compact()) != cell_output_map.end());
 
-        uint64_t lut_code = node.get_type_lut();
+        auto lut_code = RTLIL::Const::from_string(node.get_type_lut().to_yosys());
 
         module->addLut(next_id(g), joined_inp_wires, cell_output_map[node.get_driver_pin().get_compact()], lut_code);
         break;
@@ -710,8 +731,8 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
             case 0: dWire = get_wire(e.driver); break;
             case 1: enWire = get_wire(e.driver); break;
             case 2: {
-              if (e.driver.get_node().get_type().op != U32Const_Op) log_error("Internal Error: polarity is not a constant.\n");
-              polarity = e.driver.get_node().get_type_const_value() != 0 ? true : false;
+              if (e.driver.get_node().get_type().op != Const_Op) log_error("Internal Error: polarity is not a constant.\n");
+              polarity = e.driver.get_node().get_type_const().to_i()? true : false;
             } break;
             default: log_error("DumpYosys: unrecognized wire connection pid=%d\n", e.sink.get_pid());
           }
@@ -738,8 +759,8 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
             case 3: rstWire = get_wire(e.driver); break;  // clr signal in yosys
             case 4: rstVal = get_wire(e.driver); break;   // set signal in yosys
             case 5: {
-              if (e.driver.get_node().get_type().op != U32Const_Op) log_error("Internal Error: polarity is not a constant.\n");
-              polarity = e.driver.get_node().get_type_const_value() != 0 ? true : false;
+              if (e.driver.get_node().get_type().op != Const_Op) log_error("Internal Error: polarity is not a constant.\n");
+              polarity = e.driver.get_node().get_type_const().to_i() ? true : false;
             }
             default: log("[WARNING] DumpYosys: unrecognized wire connection pid=%d\n", e.sink.get_pid());
           }
@@ -836,8 +857,8 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
               break;
             case 1:
               if (shift_amount.size() != 0) log_error("Internal Error: multiple wires assigned to same shift\n");
-              if (e.driver.get_node().get_type().op == U32Const_Op)
-                shift_amount = RTLIL::Const(e.driver.get_node().get_type_const_value());
+              if (e.driver.get_node().get_type().op == Const_Op)
+                shift_amount = RTLIL::Const(e.driver.get_node().get_type_const().to_i());
               else
                 shift_amount = get_wire(e.driver);
               break;
@@ -867,14 +888,14 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
               break;
             case 1:
               if (shift_amount.size() != 0) log_error("Internal Error: multiple wires assigned to same shift\n");
-              if (e.driver.get_node().get_type().op == U32Const_Op)
-                shift_amount = RTLIL::Const(e.driver.get_node().get_type_const_value());
+              if (e.driver.get_node().get_type().op == Const_Op)
+                shift_amount = RTLIL::Const(e.driver.get_node().get_type_const().to_i());
               else
                 shift_amount = get_wire(e.driver);
               break;
             case 2:
-              if (e.driver.get_node().get_type().op != U32Const_Op) log_error("Internal Error: Shift sign is not a constant.\n");
-              auto val = e.driver.get_node().get_type_const_value();
+              if (e.driver.get_node().get_type().op != Const_Op) log_error("Internal Error: Shift sign is not a constant.\n");
+              auto val = e.driver.get_node().get_type_const().to_i();
               sign     = (val) % 2 == 1;  // FIXME: Weird encoding
               b_sign   = (val) == 2;
               a_sign   = (val) > 2;

@@ -2,8 +2,6 @@ module tuple_if2_gld (
   output [4:0] out1,
   output [4:0] out2,
   output [4:0] out3
-  /* output [4:0] out2, */
-  /* output [4:0] out3 */
 );
 
 wire [3:0] bar = 3'd7 == 3'd7 ? 4'd13 : 3'd4;

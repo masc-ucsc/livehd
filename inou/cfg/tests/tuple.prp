@@ -1,18 +1,55 @@
-x.__bits = 2
-y.__bits = 3
+// case I
+a = 2            // a0 =
+foo = a + 1      // = a0
+a.0 = 3          // a0 =, TA
+bar = a + 1      // = a0, TG
 
-x = 3
-y = 7
+%out = foo + bar // 3 + 4 = 7
 
-A = (x, foo = y, bar = 4) // A0 = (3, 7, 4)
 
-A = A++3                  // A1 = A0++3 = (3, foo = 7, bar = 4, 3)
-A = A++5                  // A2 = A1++5 = (3, foo = 7, bar = 4, 3, 5)
+// case II
+b = 2            // b0 =
+cat = b + 1      // = b0
+b.0 = 3          // b0 =, TA
+b = 4            // b1 =
+dog = b + 1      // = b1
 
-A.foo = A[2]              // A3.foo = A2[2],         A = (3, foo = 4, bar = 4, 3, 5)
-A[2]  = 5                 // A4[2] = 5,              A = (3, foo = 4, bar = 5, 3, 5)
-A[3]  = A.foo + A[2]      // A5[3] = A4.foo + A4[2], A = (3, foo = 4, bar = 5, 9, 5)
+%out2 = cat + dog // 3 + 5 = 8
 
-%out1 = A[4] + A.foo      // A5; 5 + 4 = 9
-%out2 = A[2] + A[3]       // A5; 5 + 9 = 14
-%out3 = A[1] + A[2]       // A5; 4 + 5 = 9
+
+// case III
+c = 2            // c0 = 
+eagle = c + 1    // = c0
+c = 3            // c1 =
+c.0 = 5          // c1 =, TA 
+fox = c + 1      // = c1, TG
+
+%out3 = eagle + fox // 3 + 6 = 9
+
+
+// case IV
+d = 2            // d0 =
+goat = d + 1     // = d0
+d = 3            // d1 = 
+d.0 = 5          // d1 = 
+d = d ++ 6       // d1 = d1 
+d = d.0 + 1      // d2 = d1.0 + 1 = 6
+horse = d + 1    // = d2
+
+%out4 = goat + horse  // 3 + 7 = 10
+
+
+// case V
+e = 1 
+e = e ++ 3
+f = e.1 + 4
+%out5 = f       // 7
+
+
+// case VI
+t1 = (1,2)
+t2 = (3,4)
+g  = t1 ++ t2
+%out6 = g.1 + g.3 //6
+
+

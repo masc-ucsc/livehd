@@ -7,6 +7,9 @@ YOSYS=$(which yosys)
 CELLLIB=""
 OPT_TOP=""
 OPT_DEBUG=""
+LIST_SET=""
+GOLD=""
+GATE=""
 while true ; do
     case "$1" in
         -r|--reference)
@@ -38,6 +41,7 @@ while true ; do
           shift 1 ;
           OPT_DEBUG=1 ;;
         --)
+          LIST_SET="true"
           shift
           break
           ;;
@@ -48,9 +52,20 @@ while true ; do
     esac
 done
 
-if [ "${GOLD}" == "" ]; then
-  echo "reference circuit not provided"
-  exit 1
+if [ "${LIST_SET}" == "true" ]; then
+  for var in "$@"
+  do
+    if [ "${GOLD}" == "" ]; then
+      GOLD=$var
+      echo "setting GOLD:$GOLD"
+    elif [ "${GATE}" == "" ]; then
+      GATE=$var
+      echo "setting GATE:$GATE"
+    else
+      echo "Too many files to check"
+      exit 3
+    fi
+  done
 fi
 
 if [ "${GATE}" == "" ]; then
@@ -93,6 +108,8 @@ TOP_STR="-auto-top"
 if [ "${OPT_TOP}" != "" ]; then
   TOP_STR="-top $OPT_TOP"
 fi
+
+echo "checking GATE:$GATE vs GOLD:$GOLD with top:$OPT_TOP"
 
 if [ "${CELLLIB}" != "" ]; then
   if [ ! -f ${CELLLIB} ]; then

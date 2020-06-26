@@ -1,0 +1,102 @@
+
+
+--------
+
+If the same pin, drives 2 (or more) cells and those cells also have the same
+inputs, the cell can be simplified (redundant)
+
+convert:
+  tmp = $x + $y + 2
+  tmp2 =0
+  if $x + $y + 3 != $inp {
+    tmp2 = $x + 1
+    tmp2 = tmp2 + 1 + $y
+  }
+to
+  _t = $x + $y
+  tmp  = _t + 2
+  tmp2 = 0
+  if _t + 3 != $inp {
+    tmp2 = tmp
+  }
+
+--------
+Strength Reduction:
+
+convert
+ a - b CMP 0
+to
+ a CMP b
+
+convert
+ a + b CMP 0
+to
+ a CMP -b
+
+convert
+ a != 0
+to
+ or_reduction(a)
+
+convert
+ a == -1
+to
+ and_reduction(a)
+
+convert
+ a >> b  ; when b is constant and a.bits known to pick
+to
+ pick(a,a.__bits-b)
+
+convert
+ a <<b  ; when b is constant and a.bits known
+to
+ join(a,0u(b.__bits))
+
+convert:
+  tmp = $x + $y
+
+  if tmp - $z == 0 {
+  }
+to:
+  tmp = $x + $y
+  if tmp == $z {
+  }
+
+convert
+ a + a + c
+to
+ (a<<1) + c
+
+convert
+ a - a + c
+to
+ c
+
+// Maybe if number of add/sub decreases
+convert ?? (may make sense only before FPGA synthesis to do reverse)
+ (~a) + 1 + c
+to
+ -a + c
+
+convert
+ a + 0
+to
+ a
+
+convert
+ a * b when power of 2
+to
+ a << log2(b)
+
+convert
+ a * 0
+to
+ 0
+
+convert
+ a * 1
+to
+ a
+
+

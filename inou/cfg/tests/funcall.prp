@@ -1,19 +1,21 @@
-$a.__bits = 1 
-$b.__bits = 1
-%s = $a & $b
-
-func1 = :($a, $b, %o1, %o2):{
-  $a.__bits = 2  
-  $b.__bits = 2
-  %o1.__bits = 2
-  %o2.__bits = 2
-
-  %o1 = $a ^ $b
-  %o2 = $a & $b
+my_func::{
+  a = 3             // scalar
+  foo = a           // scalar, 3
+  
+  a = a ++ 4        // tuple, (3,4)
+  b = a             // tuple, (3,4)
+  
+  c = b.0
+  d = a[1] 
+  
+  %out = c + d      // scalar, 7
+  %out = %out ++ a  // tuple, (7, 3, 4)
+  %out2 = a ++ %out // tuple, (3, 4, 7, 3, 4)
+  %out3 = foo       // scalar, 3 
 }
 
-result = func1(a = 2, b = 3)
+result = my_func()  // hier-tuple, ((7, 3, 4), (3, 4, 7, 3, 4), 3)
 
-%s2.__bits = 3
-%s2 = result.o1 + result.o2
+%out = result.out.0 + result.out2.4 + result.out3 // 7 + 4 + 3 = 14
+
 

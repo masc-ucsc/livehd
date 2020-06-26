@@ -154,7 +154,7 @@ Sub_node &Graph_library::reset_sub(std::string_view name, std::string_view sourc
   Lg_type_id lgid = get_lgid(name);
   if (lgid) {
     if (attributes[lgid].source != source) {
-      //Pass::info("module {} changed source changed from {} to {}\n", name, attributes[lgid].source, source);
+      // Pass::info("module {} changed source changed from {} to {}\n", name, attributes[lgid].source, source);
       attributes[lgid].source = source;
     }
     auto &sub = sub_nodes[lgid];

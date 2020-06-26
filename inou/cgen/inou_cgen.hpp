@@ -31,7 +31,7 @@ private:
 
   void generate_prp(LGraph *g, std::string_view filename);
 
-  void to_xxx(Cgen_type cgen_type);
+  void to_xxx(Cgen_type cgen_type, std::shared_ptr<Lnast> lnast);
 
   // callback entry points
   static void to_verilog(Eprp_var &var);

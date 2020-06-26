@@ -152,6 +152,16 @@ public:
                       const VarValue &   init                  = {VCDValues::ZERO},  // Initial value (optional)
                       bool               duplicate_names_check = true);                            // speed-up (optimisation)
 
+  // Register a VCD variable and return its mark to change value further.
+   // Remember, all VCD variables must be registered prior to any value changes.
+   // Note, *size* may be `0`, some types ("int", "real", "event") have a default size
+   VarPtr register_passed_var(const std::string &scope,                  // Variable belongs within the hierarchical scope
+                              const std::string &name,                   // Human-readable variable idetifier
+                              VariableType type = var_def_type,          // Verilog data type of variable
+                              unsigned size = 0,                         // Size of variable, in bits
+                              const VarValue &init = {VCDValues::ZERO},  // Initial value (optional)
+                              bool duplicate_names_check = true);        // speed-up (optimisation)
+
   // Change variable's value in VCD stream.
   // Call this method, for all variables changed on this *timestamp*.
   // It is okay to call it multiple times with the same *timestamp*,

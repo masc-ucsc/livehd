@@ -74,9 +74,9 @@ void Pass_sample::do_wirecount(LGraph *g, int indent) {
   std::string space;
   for (int i = 0; i < indent; i++) space.append("  ");
 
-  fmt::print("{}module {} : inputs {} bits {} : outputs {} bits {} : nodes {} subs {} consts {} : wire {} bits {}\n", space,
+  fmt::print("{}module {} : inputs {} bits {} : outputs {} bits {} : nodes {} : wire {} bits {}\n", space,
              g->get_name(), i_num, i_bits, o_num, o_bits, n_nodes, g->get_down_nodes_map().size(),
-             g->get_const_value_map().size() + g->get_const_sview_map().size(), n_wire, n_wire_bits);
+             n_wire, n_wire_bits);
 
   g->each_sub_fast([this, indent, space](Node &node, Lg_type_id lgid) {
     (void)node;
@@ -186,7 +186,7 @@ void Pass_sample::create_sample_graph(LGraph *g) {
   // auto b_drv = b_const.setup_driver_pin(0);
   // b_drv.set_name("b_drv");
 
-  auto s_const = lg->create_node_const(2, 2);
+  auto s_const = lg->create_node_const(Lconst(2, 2));
   I(s_const.get_driver_pin().get_bits() == 2);  // Automatically set bits for const
   auto s_drv = s_const.setup_driver_pin(0);
   s_drv.set_name("s_drv");

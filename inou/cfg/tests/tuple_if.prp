@@ -1,4 +1,4 @@
-x.__bits = 2
+x.__bits = 4
 y.__bits = 3
 
 x = 2

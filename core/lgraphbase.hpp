@@ -6,12 +6,13 @@
 #include <type_traits>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
+
 #include "iassert.hpp"
 #include "lgedge.hpp"
 #include "lgraph_base_core.hpp"
 #include "mmap_vector.hpp"
 
-class Edge_raw_iterator;
 class Fwd_edge_iterator;
 class Bwd_edge_iterator;
 class Fast_edge_iterator;
@@ -25,17 +26,17 @@ protected:
   static inline constexpr std::string_view unknown_io = "unknown";
   Graph_library *                          library;
 
+  absl::flat_hash_map<uint32_t, uint32_t> idx_insert_cache;
+
   Index_ID create_node_space(const Index_ID idx, const Port_ID dst_pid, const Index_ID master_nid, const Index_ID root_nid);
   Index_ID get_space_output_pin(const Index_ID idx, const Port_ID dst_pid, Index_ID &root_nid);
   Index_ID get_space_output_pin(const Index_ID master_nid, const Index_ID idx, const Port_ID dst_pid, const Index_ID root_nid);
   // Index_ID         get_space_input_pin(const Index_ID master_nid, const Index_ID idx, bool large = false);
-  virtual Index_ID create_node_int() = 0;
+  Index_ID create_node_int();
 
   Index_ID add_edge_int(Index_ID dst_nid, Port_ID dst_pid, Index_ID src_nid, Port_ID inp_pid);
 
   Port_ID recompute_io_ports(const Index_ID track_nid);
-
-  void del_int_node(const Index_ID idx);
 
   Index_ID find_idx_from_pid_int(const Index_ID idx, const Port_ID pid) const;
   Index_ID find_idx_from_pid(const Index_ID idx, const Port_ID pid) const {
@@ -56,9 +57,6 @@ protected:
     node_internal.ref(idx)->set_sink_setup();
   }
 
-  void del_node(Index_ID idx);
-  void del_edge(const Edge_raw *edge_raw);
-
   Index_ID get_master_nid(Index_ID idx) const { return node_internal[idx].get_master_root_nid(); }
 
 public:
@@ -72,7 +70,7 @@ public:
   virtual void clear();
   virtual void sync();
 
-  virtual void emplace_back();
+  void emplace_back();
 
 #if 1
   // WARNING: deprecated: Use get/set_bits(const Node_pin)
@@ -104,9 +102,6 @@ public:
 
     add_edge_int(dst_idx, node_internal[dst_idx].get_dst_pid(), src_idx, node_internal[src_idx].get_dst_pid());
   }
-
-  Edge_raw_iterator inp_edges_raw(Index_ID nid) const;
-  Edge_raw_iterator out_edges_raw(Index_ID nid) const;
 
   void print_stats() const;
 

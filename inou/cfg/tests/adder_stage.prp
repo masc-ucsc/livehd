@@ -4,4 +4,4 @@ $b.__bits = 3
 
 #adder = $a + $b
 
-%out = #adder
+%out = #adder.__q_pin

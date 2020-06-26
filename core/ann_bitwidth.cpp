@@ -61,24 +61,21 @@ void Ann_bitwidth::Explicit_range::set_ubits(uint16_t size) {
     max      = pow(2, size) - 1;
   }
 }
-void Ann_bitwidth::Explicit_range::set_uconst(uint32_t val) {
-  sign_set = true;
-  sign     = false;
+void Ann_bitwidth::Explicit_range::set_const(const Lconst &val) {
+  sign_set = val.is_explicit_sign();
+  sign     = val.is_negative();
 
   max_set = true;
   min_set = true;
-  max     = val;
-  min     = val;
-}
-
-void Ann_bitwidth::Explicit_range::set_sconst(uint32_t val) {
-  sign_set = true;
-  sign     = true;
-
-  max_set = true;
-  min_set = true;
-  max     = static_cast<int32_t>(val);  // calculate 2's complement, ex. B = 1011 = -5
-  min     = static_cast<int32_t>(val);
+  if (val.is_i()) {
+    overflow = false;
+    max      = val.to_i();
+    min      = val.to_i();
+  } else {
+    overflow = true;
+    max      = val.get_bits();
+    min      = val.get_bits();
+  }
 }
 
 void Ann_bitwidth::Implicit_range::dump() const {

@@ -105,7 +105,8 @@ do
 
   #${YOSYS} -g${base} -h > ./yosys-test/log_to_yosys_${input} 2> ./yosys-test/err_to_yosys_${input}
 
-  echo "lgraph.match path:lgdb_yosys |> inou.yosys.fromlg odir:tmp_yosys" | ${LGSHELL} -q 2>tmp_yosys/${input}.err
+  echo "lgraph.match path:lgdb_yosys |> pass.cprop |> inou.yosys.fromlg odir:tmp_yosys" | ${LGSHELL} -q 2>tmp_yosys/${input}.err
+  #echo "lgraph.match path:lgdb_yosys |> inou.yosys.fromlg odir:tmp_yosys" | ${LGSHELL} -q 2>tmp_yosys/${input}.err
   LC=$(grep -iv Warning tmp_yosys/${input}.err | grep -v "recommended to use " | grep -v "IPC=" | wc -l | cut -d" " -f1)
   if [[ $LC -gt 0 ]]; then
     echo "FAIL: Faulty "$LC" err verilog file tmp_yosys/${input}.err"
@@ -133,18 +134,13 @@ do
       fail_list+=" "$base
     fi
   else
-    if [[ $fixme == "true" ]]; then
-      ${LGCHECK} --implementation=tmp_yosys_mix/all_${base}.v --reference=${full_input} --top=${base}
-      if [ $? -eq 0 ]; then
-        echo "Successfully matched generated verilog with original verilog (${full_input})"
-      else
-        echo "FAIL: circuits are not equivalent (${full_input})"
-        ((fail++))
-        fail_list+=" "$base
-      fi
+    ${LGCHECK} --implementation=tmp_yosys_mix/all_${base}.v --reference=${full_input} --top=${base}
+    if [ $? -eq 0 ]; then
+      echo "Successfully matched generated verilog with original verilog (${full_input})"
     else
-      echo "PARALLEL yosys test"
-      ${LGCHECK} --implementation=tmp_yosys_mix/all_${base}.v --reference=${full_input} --top=${base} &
+      echo "FAIL: circuits are not equivalent (${full_input})"
+      ((fail++))
+      fail_list+=" "$base
     fi
   fi
 

@@ -18,7 +18,7 @@ const std::string Pass::get_files(const Eprp_var &var) const {
     _files = "/INVALID";
   }
 
-  return _files;
+  return _files;//eg.: returns "inou/cfg/tests/nested_if.prp"
 }
 
 const std::string Pass::get_path(const Eprp_var &var) const {

@@ -650,6 +650,13 @@ https://github.com/azukaar/GuPM
 * Allow to specify a specific lgraph library
 * Allow to specify passes/commands in lgraph
 
+## LGraph and LNAST Wavedrom/duh bitfield
+
+Wavedrom and duh allows to dump bitfield information for structures. It would
+be interesting to explore to dump tables and bit fields for Lgraph IOs, and
+structs/fields inside the module. It may be a way to integrate with the
+documentation generation.
+
 ## LGraph and LNAST check pass
 
 Create a pass that checks that the LGraph (and/or LNAST) is sementically correct. Some checks:
@@ -664,6 +671,23 @@ Create a pass that checks that the LGraph (and/or LNAST) is sementically correct
 ## Copy Propagation Pass
 
 Create a copy propagation pass that works with hierarchy.
+
+## OS X Support
+
+LiveHD compiles (it did) with OS X, but there are some issues with the mmap infrastructure inside mmap_lib. The code functionality
+should be able to run (the mmap_remap does not exist in OS X, but a more costly alternative is implemented for OS X, just not tested
+and it seems faulty).
+
+The main issue is the creation of the dynamic library used with yosys interface. If it can not be easily fixed, the best solution would
+be to use the json interface instead.
+
+The main areas that need some attentions:
+
+* Fix mmap_lib tests to pass on OS X
+* Make sure that the lbench performance statistics gathering do not create issues (not available in OS X)
+* Can we handle the yosys liblgyosys.so library? If not, make the json more automatic/transparent for OS X flow
+
+Windows support is through WSL. It works fine.
 
 ## Smaller tasks
 

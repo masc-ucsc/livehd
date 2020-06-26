@@ -173,8 +173,8 @@ void Lnast_to_prp_parser::process_buffer() {
     // is added to buffer
   } else if (type.is_const()) {
     // is added to buffer
-  } else if (type.is_attr()) {
-    // is added to buffer
+  /* } else if (type.is_attr()) { */ //Sheng: should be removed
+  /*   // is added to buffer */
   } else if (type.is_assert()) {
     // check in for node configuration
   } else if (type.is_if()) {
@@ -200,7 +200,10 @@ void Lnast_to_prp_parser::process_buffer() {
     } else {
       fmt::print("{} ", name);
     }
-  }
+  }//for example1:
+  //prints: . ___b $b __bits
+  //corresponding to : $b.__bits=4 line
+  //after printing "process label map key:___b value:$b.__bits"
   fmt::print("\n");
 
   absl::StrAppend(&buffer, node_str_buffer);
@@ -294,7 +297,11 @@ void Lnast_to_prp_parser::process_assign(std::string_view assign_type) {
 
   fmt::print("assign map:\tkey: {}\tvalue: {}\n", key, ref);
   if (is_ref(key)) {
-    ref_map.insert(std::pair<std::string_view, std::string>(key, (std::string)ref));
+    auto ref_map_inst_res = ref_map.insert(std::pair<std::string_view, std::string>(key, (std::string)ref));
+    if (!ref_map_inst_res.second) {//process the value not inserted in map; if(map_it!=ref_map.end()){from around line 290;map_it=ref_map.find(ref)}; or; absl::StrAppend(&node_str_buffer, ref_map.find(ref).second, (std::string)ref, "\n");
+//      fmt::print("{}\n", ref_map.find(key)->second);
+      absl::StrAppend(&node_str_buffer, ref_map.find(key)->second, " ", assign_type , " ", (std::string)ref, "\n");
+    }
   } else {
     absl::StrAppend(&node_str_buffer, indent_buffer(), key, " ", assign_type, " ", (std::string)ref, "\n");
   }

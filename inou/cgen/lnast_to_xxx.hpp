@@ -5,7 +5,7 @@
 class Lnast_to_xxx {
 protected:
   /* std::shared_ptr<Lnast>             lnast; */
-  std::unique_ptr<Lnast>             lnast;
+  std::shared_ptr<Lnast>             lnast;
   std::string_view path;
 
   std::map<std::string, std::string> file_map;
@@ -13,6 +13,6 @@ protected:
 
 public:
   /* Lnast_to_xxx(std::shared_ptr<Lnast>_lnast, std::string_view _path); */
-  Lnast_to_xxx(std::unique_ptr<Lnast>_lnast, std::string_view _path);
+  Lnast_to_xxx(std::shared_ptr<Lnast>_lnast, std::string_view _path);
   virtual void generate() = 0;
 };

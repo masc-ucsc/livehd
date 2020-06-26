@@ -1,9 +1,6 @@
-$a.__bits = 3
+t1 = 8
+t2 = 5
+a = t1
+b = t2
 
-//x = 17
-//%out.__bits = $a.__bits + x.__bits
-%out.__bits = $a.__bits
-
-%out = $a
-
-x = foo + bar
+%out = (a << b.__bits) | b //{a,b}

@@ -179,16 +179,16 @@ void Pass_lgraph_to_lnast::handle_source_node(LGraph *lg, Node_pin& pin, Lnast& 
 */
 void Pass_lgraph_to_lnast::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node, const Node_pin &pin) {
   //Look at pin's node's type, then based off that figure out what type of node to add to LNAST.
-  fmt::print("LNAST {} :", pin.get_name());
+  fmt::print("LNAST {} :", dpin_get_name(pin));//pin.get_name());
   for(const auto inp : pin.get_node().inp_edges()) {
     auto dpin = inp.driver;
-    fmt::print(" {}", dpin.get_name());
+    fmt::print(" {}", dpin_get_name(dpin));//dpin.get_name());
   }
   fmt::print("\n");
 
   switch(pin.get_node().get_type().op) {//Future note to self: when doing src_pins, always check if sources to node are io inputs
     case GraphIO_Op:
-    case U32Const_Op:
+    case Const_Op:
       //Skip, nothing to do.
       break;
     case And_Op:
@@ -234,10 +234,6 @@ void Pass_lgraph_to_lnast::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node,
     case AFlop_Op:
       attach_flop_node(lnast, parent_node, pin);
       break;
-    case StrConst_Op:
-      //FIXME: Not sure what to do with this yet. Translate to const value? What about x's?
-      fmt::print("StrConst: {}\n", pin.get_node().get_type_const_sview());
-      break;
     case SubGraph_Op:
       attach_subgraph_node(lnast, parent_node, pin);
       break;
@@ -266,7 +262,7 @@ void Pass_lgraph_to_lnast::handle_io(LGraph *lg, Lnast_nid& parent_lnast_node, L
       auto idx_asg = lnast.add_child(parent_lnast_node, Lnast_node::create_assign("asg"));
       lnast.add_child(idx_asg, Lnast_node::create_ref(temp_name));
       //FIXME: Is the next line the best way to get driver bitwidth?
-      lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(absl::StrCat("0d" + std::to_string(edge.get_bits())))));
+      lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(std::to_string(edge.get_bits()))));
     }
   }
 
@@ -287,7 +283,7 @@ void Pass_lgraph_to_lnast::handle_io(LGraph *lg, Lnast_nid& parent_lnast_node, L
         auto idx_asg = lnast.add_child(parent_lnast_node, Lnast_node::create_assign("asg"));
         lnast.add_child(idx_asg, Lnast_node::create_ref(temp_name));
         //FIXME: Is the next line the best way to get driver bitwidth?
-        lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(absl::StrCat("0d" + std::to_string(edge.get_bits())))));
+        lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(std::to_string(edge.get_bits()))));
       }
     }
   });
@@ -366,7 +362,7 @@ void Pass_lgraph_to_lnast::attach_sum_node(Lnast& lnast, Lnast_nid& parent_node,
   Lnast_nid add_node, subt_node;
 
   //Determine if we're doing an add, sub, or both.
-  auto pin_name = lnast.add_string(pin.get_name());
+  auto pin_name = lnast.add_string(dpin_get_name(pin));
   for(const auto inp : pin.get_node().inp_edges()) {
     auto spin = inp.sink;
     if((spin.get_pid() == 0) || (spin.get_pid() == 1)) {
@@ -436,7 +432,7 @@ void Pass_lgraph_to_lnast::attach_binaryop_node(Lnast& lnast, Lnast_nid& parent_
       fmt::print("Error: attach_binaryop_node doesn't support given node type\n");
       I(false);
   }
-  lnast.add_child(bop_node, Lnast_node::create_ref(lnast.add_string(pin.get_name())));
+  lnast.add_child(bop_node, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));
 
   //Attach the name of each of the node's inputs to the Lnast operation node we just made.
   attach_children_to_node(lnast, bop_node, pin);
@@ -444,7 +440,7 @@ void Pass_lgraph_to_lnast::attach_binaryop_node(Lnast& lnast, Lnast_nid& parent_
 
 void Pass_lgraph_to_lnast::attach_not_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin &pin) {
   auto not_node = lnast.add_child(parent_node, Lnast_node::create_not("not"));
-  lnast.add_child(not_node, Lnast_node::create_ref(lnast.add_string(pin.get_name())));
+  lnast.add_child(not_node, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));
 
   attach_children_to_node(lnast, not_node, pin);
 }
@@ -465,7 +461,7 @@ void Pass_lgraph_to_lnast::attach_join_node(Lnast& lnast, Lnast_nid& parent_node
     //FIXME (BIG!): This is a temporary fix. This node type should be not "assign" but some concatenation node type.
     //  One currently does not exist in LNAST.
     auto join_node = lnast.add_child(parent_node, Lnast_node::create_assign("join"));
-    lnast.add_child(join_node, Lnast_node::create_ref(lnast.add_string(pin.get_name())));
+    lnast.add_child(join_node, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));
     //Attach each of the inputs to join with the first being added as the most significant and last as least sig.
     for(int i = dpins.size(); i > 0; i--) {
       attach_child(lnast, join_node, dpins.top());
@@ -499,7 +495,7 @@ void Pass_lgraph_to_lnast::attach_pick_node(Lnast& lnast, Lnast_nid& parent_node
   }
   I(have_offset & have_var);
 
-  auto pin_str = lnast.add_string(lnast.add_string(pin.get_name()));
+  auto pin_str = lnast.add_string(lnast.add_string(dpin_get_name(pin)));
   auto t0_str = lnast.add_string(absl::StrCat("T", temp_var_count));
   auto t1_str = lnast.add_string(absl::StrCat("T", temp_var_count+1));
   auto t2_str = lnast.add_string(absl::StrCat("T", temp_var_count+2));
@@ -520,7 +516,7 @@ void Pass_lgraph_to_lnast::attach_pick_node(Lnast& lnast, Lnast_nid& parent_node
   auto minus_node = lnast.add_child(parent_node, Lnast_node::create_minus("minus_pick"));
   lnast.add_child(minus_node, Lnast_node::create_ref(t2_str));
   lnast.add_child(minus_node, Lnast_node::create_ref(t1_str));
-  lnast.add_child(minus_node, Lnast_node::create_const("0d1"));
+  lnast.add_child(minus_node, Lnast_node::create_const("1"));
 
   auto range_node = lnast.add_child(parent_node, Lnast_node::create_range("range_pick"));
   lnast.add_child(range_node, Lnast_node::create_ref(t3_str));
@@ -574,7 +570,7 @@ void Pass_lgraph_to_lnast::attach_comparison_node(Lnast& lnast, Lnast_nid& paren
         fmt::print("Error: invalid node type in attach_comparison_node\n");
         I(false);
     }
-    lnast.add_child(comp_node, Lnast_node::create_ref(lnast.add_string(pin.get_name())));
+    lnast.add_child(comp_node, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));
     attach_child(lnast, comp_node, a_pins[0]);
     attach_child(lnast, comp_node, b_pins[0]);
 
@@ -609,7 +605,7 @@ void Pass_lgraph_to_lnast::attach_comparison_node(Lnast& lnast, Lnast_nid& paren
     }
 
     auto and_node = lnast.add_child(parent_node, Lnast_node::create_and("and"));
-    lnast.add_child(and_node, Lnast_node::create_ref(lnast.add_string(pin.get_name())));
+    lnast.add_child(and_node, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));
     for(int i = 1; i <= comparisons; i++) {
       lnast.add_child(and_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("T", temp_var_count-i))));
     }
@@ -650,7 +646,7 @@ void Pass_lgraph_to_lnast::attach_simple_node(Lnast& lnast, Lnast_nid& parent_no
       fmt::print("Error: attach_simple_node unknown node type provided\n");
       I(false);
   }
-  lnast.add_child(simple_node, Lnast_node::create_ref(lnast.add_string(pin.get_name())));
+  lnast.add_child(simple_node, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));
 
   //Attach the name of each of the node's inputs to the Lnast operation node we just made.
   attach_children_to_node(lnast, simple_node, pin);
@@ -662,6 +658,7 @@ void Pass_lgraph_to_lnast::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node,
   // Y = ~SA | SB
 
   auto if_node = lnast.add_child(parent_node, Lnast_node::create_if("mux"));
+  auto cst_node = lnast.add_child(if_node, Lnast_node::create_cstmts(""));
 
   std::vector<XEdge> mux_vals;
   for(const auto inp : pin.get_node().inp_edges()) {
@@ -679,7 +676,7 @@ void Pass_lgraph_to_lnast::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node,
     dpins[edge.sink.get_pid()] = edge.driver;
   }
 
-  auto pin_name = lnast.add_string(pin.get_name());
+  auto pin_name = lnast.add_string(dpin_get_name(pin));
 
   auto if_true_stmt_node = lnast.add_child(if_node, Lnast_node::create_stmts(get_new_seq_name(lnast)));
   auto if_false_stmt_node = lnast.add_child(if_node, Lnast_node::create_stmts(get_new_seq_name(lnast)));
@@ -740,13 +737,17 @@ void Pass_lgraph_to_lnast::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node
   I(has_din); //A flop at least has to have the input, others are optional/have defaults.
 
   std::string_view pin_name;
-  pin_name = lnast.add_string(absl::StrCat("#", pin.get_name()));
+  if(pin.get_name().substr(0,1) == "#") {
+    pin_name = lnast.add_string(pin.get_name());
+  } else {
+    pin_name = lnast.add_string(absl::StrCat("#", dpin_get_name(pin)));
+  }
 
   auto asg_node = lnast.add_child(parent_node, Lnast_node::create_assign("asg_flop"));
   lnast.add_child(asg_node, Lnast_node::create_ref(pin_name));
   attach_child(lnast, asg_node, din_pin);
 
-  if (has_clk) {
+  /*if (has_clk) {
     auto temp_var_name = lnast.add_string(absl::StrCat("T", temp_var_count));
     temp_var_count++;
 
@@ -757,8 +758,8 @@ void Pass_lgraph_to_lnast::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node
 
     auto asg_clk_node = lnast.add_child(parent_node, Lnast_node::create_assign("asg_flop_clk"));
     lnast.add_child(asg_clk_node, Lnast_node::create_ref(temp_var_name));
-    attach_child(lnast, asg_clk_node, clk_pin, "@"); //FIXME: Might change reference symbol to '\'
-  }
+    attach_child(lnast, asg_clk_node, clk_pin, "");//"@"); //FIXME: Might change reference symbol to '\'
+  }*/
 
   if (has_reset) {
     //FIXME: Add reset logic.
@@ -824,26 +825,29 @@ void Pass_lgraph_to_lnast::attach_children_to_node(Lnast& lnast, Lnast_nid& op_n
  * node that has the pin's name. If it is a module input,
  * add the "$" in front of it. */
 void Pass_lgraph_to_lnast::attach_child(Lnast& lnast, Lnast_nid& op_node, const Node_pin &dpin) {
-  attach_child(lnast, op_node, dpin, "");
-}
-
-void Pass_lgraph_to_lnast::attach_child(Lnast& lnast, Lnast_nid& op_node, const Node_pin &dpin, std::string prefix) {
   //The input "dpin" needs to be a driver pin.
 
   //FIXME: This will only work for var/wire names. This will mess up for constants, I think.
   if(dpin.get_node().is_graph_input()) {
     //If the input to the node is from a GraphIO node (it's a module input), add the $ in front.
-    lnast.add_child(op_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat(prefix, "$", dpin.get_name()))));
+    auto dpin_name = dpin_get_name(dpin);
+    lnast.add_child(op_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("$", dpin_name))));
   } else if(dpin.get_node().is_graph_output()) {
     auto out_driver_name = lnast.add_string(get_driver_of_output(dpin));
     lnast.add_child(op_node, Lnast_node::create_ref(out_driver_name));//lnast.add_string(absl::StrCat(prefix, "%", dpin.get_name()))));
   } else if((dpin.get_node().get_type().op == AFlop_Op) || (dpin.get_node().get_type().op == SFlop_Op)) {
-    lnast.add_child(op_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat(prefix, "#", dpin.get_name()))));
-  } else if(dpin.get_node().get_type().op == U32Const_Op) {
-    lnast.add_child(op_node, Lnast_node::create_const(
-                              lnast.add_string(absl::StrCat("0d", dpin.get_node().get_type_const_value()))));
+    auto dpin_name = dpin_get_name(dpin);
+    if(dpin_name.substr(0,1) == "#") {
+      // dpin_name is already persistent, no need to do add_string but cleaner
+      lnast.add_child(op_node, Lnast_node::create_ref(lnast.add_string(dpin_name)));
+    } else {
+      lnast.add_child(op_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("#", dpin_name))));
+    }
+  } else if(dpin.get_node().get_type().op == Const_Op) {
+    lnast.add_child(op_node, Lnast_node::create_const(lnast.add_string(dpin.get_node().get_type_const().to_pyrope())));
   } else {
-    lnast.add_child(op_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat(prefix, dpin.get_name()))));
+    auto dpin_name = dpin_get_name(dpin);
+    lnast.add_child(op_node, Lnast_node::create_ref(lnast.add_string(dpin_name)));
   }
 }
 
@@ -855,16 +859,23 @@ void Pass_lgraph_to_lnast::attach_cond_child(Lnast& lnast, Lnast_nid& op_node, c
   //FIXME: This will only work for var/wire names. This will mess up for constants, I think.
   if(dpin.get_node().is_graph_input()) {
     //If the input to the node is from a GraphIO node (it's a module input), add the $ in front.
-    lnast.add_child(op_node, Lnast_node::create_cond(lnast.add_string(absl::StrCat("$", dpin.get_name()))));
+    auto dpin_name = dpin_get_name(dpin);
+    lnast.add_child(op_node, Lnast_node::create_cond(lnast.add_string(absl::StrCat("$", dpin_name))));
   } else if(dpin.get_node().is_graph_output()) {
-    lnast.add_child(op_node, Lnast_node::create_cond(lnast.add_string(absl::StrCat("%", dpin.get_name()))));
+    auto dpin_name = dpin_get_name(dpin);
+    lnast.add_child(op_node, Lnast_node::create_cond(lnast.add_string(absl::StrCat("%", dpin_name))));
   } else if((dpin.get_node().get_type().op == AFlop_Op) || (dpin.get_node().get_type().op == SFlop_Op)) {
-    lnast.add_child(op_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("#", dpin.get_name()))));
-  } else if(dpin.get_node().get_type().op == U32Const_Op) {
-    lnast.add_child(op_node, Lnast_node::create_cond(
-                              lnast.add_string(absl::StrCat("0d", dpin.get_node().get_type_const_value()))));
+    auto dpin_name = dpin_get_name(dpin);
+    if(dpin_name.substr(0,1) == "#") {
+      lnast.add_child(op_node, Lnast_node::create_ref(lnast.add_string(dpin_name)));
+    } else {
+      lnast.add_child(op_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("#", dpin_name))));
+    }
+  } else if(dpin.get_node().get_type().op == Const_Op) {
+    lnast.add_child(op_node, Lnast_node::create_cond(lnast.add_string(dpin.get_node().get_type_const().to_pyrope())));
   } else {
-    lnast.add_child(op_node, Lnast_node::create_cond(lnast.add_string(dpin.get_name())));
+    auto dpin_name = dpin_get_name(dpin);
+    lnast.add_child(op_node, Lnast_node::create_cond(lnast.add_string(dpin_name)));
   }
 }
 
@@ -883,6 +894,17 @@ std::string_view Pass_lgraph_to_lnast::get_driver_of_output(const Node_pin dpin)
   I(false);//There should always be some driver.
   return ""; //Here just so no warnings in compiler.
   //FIXME: Perhaps change this instead to just "0d0" (though the place this calls would have to be const not ref).
+}
+
+/* If a driver pin's name includes a "%" and is not an output of the
+ * design, then it's an SSA variable. Thus, if it is an SSA variable
+ * I need to remove the "%". */
+std::string_view Pass_lgraph_to_lnast::dpin_get_name(const Node_pin dpin) {
+  if(dpin.get_name().substr(0,1) == "%") {
+    return dpin.get_name().substr(1);
+  } else {
+    return dpin.get_name();
+  }
 }
 
 std::string_view Pass_lgraph_to_lnast::get_new_seq_name(Lnast& lnast) {

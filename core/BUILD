@@ -8,16 +8,17 @@ cc_library(
     deps = [
         "@rapidjson//:headers",
         "@iassert//:iassert",
+        "@boost//:multiprecision",
         "//eprp:eprp",
         "//mmap_lib:headers",
         "//lbench:headers",
+        "//lemu:lemu",
         ],
     )
 
 cc_library(
     name = "tree_lgdb_test",
     hdrs = glob(["tests/tree_lgdb_setup.hpp"]),
-    visibility = ["//visibility:public"],
     includes = ["."],
     deps = [
         ":core",

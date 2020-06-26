@@ -97,3 +97,17 @@ void Sub_node::from_json(const rapidjson::Value &entry) {
     }
   }
 }
+
+void Sub_node::dump() const {
+  fmt::print("lgid:{} name:{} #iopins:{}\n", lgid, name, io_pins.size());
+
+  int pos = 0;
+  for (const auto &pin : io_pins) {
+    if (pos == 0) {
+      pos++;
+      continue;
+    }
+    fmt::print(" pin:{} name:{} pos:{} dir:{}\n", pos, pin.name, pin.graph_io_pos, pin.dir);
+    pos++;
+  }
+}

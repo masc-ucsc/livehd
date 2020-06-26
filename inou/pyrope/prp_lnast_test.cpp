@@ -1,8 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "prp_lnast.hpp"
-
 #include "lbench.hpp"
+
+#include "prp_lnast.hpp"
 
 int main(int argc, char **argv) {
   if (argc != 2) {

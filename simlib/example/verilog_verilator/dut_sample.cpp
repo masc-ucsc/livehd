@@ -46,7 +46,7 @@ int main() {
 
   sample.clk = 0;
   sample.reset = 1;
-  while(global_time<1000) {
+  while(global_time<10000) {
     advance_clock(&sample);
   }
   sample.reset = 0;
