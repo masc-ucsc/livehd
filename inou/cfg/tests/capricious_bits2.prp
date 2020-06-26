@@ -1,0 +1,14 @@
+a = 2              // a0 =
+a.__bits = 3       // a1 =
+b = a.__bits + 1   // = a1
+c = 0
+if (1 == 1) {
+  a = 4            // a2
+  a.__bits = 11    // a3
+} else {
+  a.__bits = 22    // a4
+  c = a.__bits + 5 // = a4
+  a = 6            // a5 = 
+}
+                   // a6 = (c, a3, a5) 
+%out = a + b + c + a.__bits  // 4 + 4 + 0 + 11 = 19 = 0x13

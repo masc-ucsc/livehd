@@ -262,6 +262,9 @@ public:
   int  get_color() const;
   bool has_color() const;
 
+  void     set_cfcnt(uint32_t cfcnt);
+  uint32_t get_cfcnt() const;
+  bool     has_cfcnt() const;
   // END ATTRIBUTE ACCESSORS
 };
 

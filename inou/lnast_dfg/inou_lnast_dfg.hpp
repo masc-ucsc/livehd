@@ -18,20 +18,22 @@ class Inou_lnast_dfg : public Pass {
 private:
   std::shared_ptr<Lnast> lnast;
 
-  absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Node_Type_Op> primitive_type_lnast2lg;
-
-
+  absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Node_Type_Op>       primitive_type_lnast2lg;
   absl::flat_hash_map<std::string, Node_pin>                            name2dpin;       // for scalar variable
   absl::flat_hash_map<std::string_view, Node_pin>                       vname2bits_dpin; // variable name (no ssa) to bitwidth
   absl::flat_hash_map<std::pair<std::string, std::string>, std::string> tup_keyname2pos;
   absl::flat_hash_map<std::string, std::pair<Node_pin, uint16_t>>       tn2head_maxlen; 
-  
+
+  uint32_t cfcnt = 0; //global control flow counter of a program
 
   static constexpr uint8_t TN = 0;  // tuple name
   static constexpr uint8_t KN = 1;  // tuple element key name
   static constexpr uint8_t KP = 2;  // tuple element key position
   static constexpr uint8_t KV = 3;  // tuple element key value
-
+  
+  static constexpr uint8_t VN = 0;  // variable name 
+  static constexpr uint8_t AN = 1;  // attribute name
+  static constexpr uint8_t AV = 2;  // attribute value
 
 protected:
   std::vector<LGraph *> do_tolg(std::shared_ptr<Lnast> l);
@@ -61,6 +63,8 @@ protected:
   void process_ast_concat_op        (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_tuple_add_op     (LGraph *dfg, const Lnast_nid &lnidx_ta);
   void process_ast_tuple_get_op     (LGraph *dfg, const Lnast_nid &lnidx_tg);
+  void process_ast_attr_set_op      (LGraph *dfg, const Lnast_nid &lnidx_aset);
+  void process_ast_attr_get_op      (LGraph *dfg, const Lnast_nid &lnidx_aget);
   void process_ast_tuple_phi_add_op (LGraph *dfg, const Lnast_nid &lnidx_tpa);
 
 
@@ -85,7 +89,7 @@ protected:
 
   // tuple related
   Node_pin     setup_tuple_ref               (LGraph *dfg, std::string_view tup_name);
-  Node_pin     setup_tuple_key               (LGraph *dfg, std::string_view key_name);
+  Node_pin     setup_key_dpin                (LGraph *dfg, std::string_view key_name);
   void         reconnect_to_ff_qpin          (LGraph *dfg, const Node &tg_node);
   static bool  tuple_get_has_key_name        (const Node &tup_get);
   static bool  tuple_get_has_key_pos         (const Node &tup_get);
@@ -96,7 +100,7 @@ protected:
 
 
   // constant resolving
-  static Node         resolve_constant       (LGraph *g, const Lconst &value);
+  Node         resolve_constant       (LGraph *g, const Lconst &value);
 
 
   // eprp callbacks

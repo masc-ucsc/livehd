@@ -1,15 +1,23 @@
+a = 2
+a.__bits = 3
+
+b = a + 1
+a.__bits = 4
+%out = a + a.__bits + b // 2 + 4 + 4
+
+
 //a = 2
 //a.b = 1
 //a.e =2
 //bar = a.b + a.e
 //%out = bar
 
-a = 2
-foo = a + 1
-a.b.c = 1
-a.e =2
-bar = a.b.c + a.e
-%out = bar
+//a = 2
+//foo = a + 1
+//a.b.c = 1
+//a.e =2
+//bar = a.b.c + a.e
+//%out = bar
 
 
 //t1 = (1,2)
