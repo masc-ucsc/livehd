@@ -1,7 +1,7 @@
 #!/bin/bash
 rm -rf ./lgdb
 
-pts='BundleConnect RegisterSimple Register GCD SimpleBitOps'  #'TrivialArith GCD SimpleBitOps'
+pts='MemoryController Test6 GCD Register BundleConnect RegisterSimple Register GCD SimpleBitOps'  #'TrivialArith GCD SimpleBitOps'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck

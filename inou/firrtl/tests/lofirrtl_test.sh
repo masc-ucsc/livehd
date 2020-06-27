@@ -1,9 +1,14 @@
 #!/bin/bash
 rm -rf ./lgdb
 
-pts='SimpleBitOps RegisterSimple Flop Test1 Test2 Test3 Test4 Test5'
+pts='SimpleBitOps Ops Test1 HwachaSequencer ICache' # RegisterSimple Flop Register
+#HwachaSequencer -- printf, pad, stop
+
 #SubModule BundleConnect -- submodules
-#TrivialArith -- pad op
+#TrivialArith, Test3 -- pad op
+#Test2 -- range, bit_sel op
+#Test4 -- as_... ops in FIRRTL
+#Test5 -- as_... ops in FIRRTL
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -133,6 +138,7 @@ do
     ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg"
     if [ $? -eq 0 ] && [ -f ${pt}.v ]; then
       echo "Successfully generate Verilog: ${pt}.v"
+      exit 1
       rm -f  yosys_script.*
     else
       echo "ERROR: Yosys failed: verilog generation, testcase: ${pt}.lo.pb"
