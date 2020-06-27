@@ -351,9 +351,11 @@ int Inou_Tojson::backtrace_edge(const XEdge &edge, IPair ipair) {
       curwidth += bwidth;
       done_bits += diff_s;
     }
-  } else if (dnode.is_type(U32Const_Op)) {
-    uint32_t const_val = dnode.get_type_const_value();
-    const_val = const_val >> ipair.first;
+  } else if (dnode.is_type(Const_Op)) {
+    size_t const_val;
+    Lconst lcnst = dnode.get_type_const();
+    I(lcnst.is_i());
+    const_val = lcnst.to_i() >> ipair.first;
     for (uint32_t idx = 0; idx < ipair.second; ++idx) {
       if ((const_val & 0x1) == 0x1) {
         writer.String("1");
@@ -538,14 +540,16 @@ int Inou_Tojson::dump_graph(Lg_type_id lgid) {
       Node_pin::Compact_class npincc = offpin.get_compact_class();
       for (auto &oedge : offpin.inp_edges()) {
         Node cnode = oedge.driver.get_node();
-        pick_cache[npincc] = cnode.get_type_const_value();
+        Lconst lcnst = cnode.get_type_const();
+        I(lcnst.is_i());
+        pick_cache[npincc] = lcnst.to_i();
       }
       continue;
     }
     // Skip "fake" cell "Join_Op":
     if (node.is_type(Join_Op)) { continue; }
     // Skip constants; they will be handled differently:
-    if (node.is_type(U32Const_Op)) { continue; }
+    if (node.is_type(Const_Op)) { continue; }
     for (auto &out_pin : node.out_connected_pins()) {
       uint32_t bsize = out_pin.get_bits();
       if (bsize == 0) { continue; }
