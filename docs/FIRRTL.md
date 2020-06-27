@@ -63,7 +63,7 @@ or if you instead want to get Verilog you can use:
 If you need help with the compiler commands, use `sbt --help` and it will tell you more.
 
 ### Getting Protobuf
-In this directory, I've added `WriteLowPB.scala` which is a way to get Protobuf from a FIRRTL file using their compiler. You'll want to add this file into the FIRRTL directory at `firrtl/src/main/scala/firrtl/transforms/` then run `sbt compile` and `sbt assembly`.
+In the `inou/firrtl` directory, I've added `WriteLowPB.scala` which is a way to get Protobuf from a FIRRTL file using their compiler. You'll want to add this file into the FIRRTL directory at `firrtl/src/main/scala/firrtl/transforms/` then run `sbt compile` and `sbt assembly`.
 
 You can use this functionality by doing the following command:
 ```

@@ -19,11 +19,18 @@ protected:
   std::string      get_full_name(std::string term, const bool is_rhs);
 
   // Helper Functions (for handling specific cases)
-  void create_bitwidth_dot_node(Lnast &lnast, uint32_t bw, Lnast_nid& parent_node, std::string port_id);
-  int  get_bit_count      (const firrtl::FirrtlPB_Type type);
-  void init_wire_dots     (Lnast &lnast, const firrtl::FirrtlPB_Statement_Wire& expr, Lnast_nid& parent_node);
-  void init_register_dots (Lnast &lnast, const firrtl::FirrtlPB_Statement_Register& expr, Lnast_nid& parent_node);
-  void create_module_inst (Lnast &lnast, const firrtl::FirrtlPB_Statement_Instance& inst, Lnast_nid& parent_node);
+  void     create_bitwidth_dot_node(Lnast &lnast, uint32_t bw, Lnast_nid& parent_node, std::string port_id);
+  uint32_t get_bit_count      (const firrtl::FirrtlPB_Type type);
+  void     init_wire_dots     (Lnast &lnast, const firrtl::FirrtlPB_Type& type, const std::string id, Lnast_nid& parent_node); //const firrtl::FirrtlPB_Statement_Wire& expr, Lnast_nid& parent_node);
+  void     init_reg_dots      (Lnast &lnast, const firrtl::FirrtlPB_Type& type, std::string id,
+                               const std::string_view clock, const std::string_view reset,
+                               const std::string_view init, Lnast_nid& parent_node);
+  void     init_reg_ref_dots  (Lnast &lnast, std::string id, const std::string_view clock,
+                               const std::string_view reset, const std::string_view init,
+                               uint32_t bitwidth, Lnast_nid& parent_node);
+  void     create_module_inst (Lnast &lnast, const firrtl::FirrtlPB_Statement_Instance& inst, Lnast_nid& parent_node);
+
+
   void HandleMuxAssign    (Lnast &lnast, const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, const std::string lhs_of_asg);
   void HandleValidIfAssign(Lnast &lnast, const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, const std::string lhs_of_asg);
   void HandleNEQOp        (Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs);
