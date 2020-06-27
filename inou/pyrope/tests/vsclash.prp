@@ -1,5 +1,5 @@
 // code/vsclash.prp file
-@upCounter as (__bits:8)
+@upCounter as (__bits=8)
 if $enable {
  @upCounter += 1
 }
