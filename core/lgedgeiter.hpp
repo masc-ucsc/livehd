@@ -3,7 +3,6 @@
 
 #include "lgedge.hpp"
 #include "lgraph.hpp"
-#include "pass.hpp"
 
 class Fast_edge_iterator {
 protected:

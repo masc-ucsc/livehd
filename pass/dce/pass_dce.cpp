@@ -1,15 +1,14 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "pass_dce.hpp"
 
 #include <time.h>
-
 #include <string>
 
+#include "pass_dce.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
-void setup_pass_dce() { Pass_dce::setup(); }
+static Pass_plugin sample("pass_dce", Pass_dce::setup);
 
 void Pass_dce::setup() {
   Eprp_method m1("pass.dce", "optimize an lgraph with a dce, gen _mapped", &Pass_dce::optimize);

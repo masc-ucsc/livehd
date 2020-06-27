@@ -6,6 +6,6 @@ cc_library(
     visibility = ["//visibility:public"],
     includes = ["."],
     deps = [
-      "//core:core",
+        "//pass/common:pass",
     ]
 )

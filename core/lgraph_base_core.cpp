@@ -47,8 +47,8 @@ void Lgraph_base_core::get_lock() {
     err = ::open(lock.c_str(), O_CREAT | O_EXCL, 420);  // 644
     if (err < 0) {
       perror("Error: ");
-      Pass::error("Could not get lock:{}. Already running? Unclear exit?", lock.c_str());
-      assert(false);  // ::error raises an exception
+      fmt::print("error: could not get lock:{}. Already running? Unclear exit?", lock.c_str());
+      throw std::runtime_error("unable to acquire lock");
     }
   }
   ::close(err);

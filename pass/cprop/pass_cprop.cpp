@@ -12,7 +12,7 @@
 #define TRACE(x)
 //#define TRACE(x) x
 
-void setup_pass_cprop() { Pass_cprop::setup(); }
+static Pass_plugin sample("pass_cprop", Pass_cprop::setup);
 
 void Pass_cprop::setup() {
   Eprp_method m1("pass.cprop", "in-place copy propagation", &Pass_cprop::optimize);

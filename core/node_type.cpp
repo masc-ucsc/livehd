@@ -4,7 +4,6 @@
 
 #include "annotate.hpp"
 #include "graph_library.hpp"
-#include "pass.hpp"
 
 static_assert(Last_invalid_Op < 512, "lgedge has 9 bits for type");
 

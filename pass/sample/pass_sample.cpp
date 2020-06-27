@@ -1,13 +1,12 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "pass_sample.hpp"
-
 #include "annotate.hpp"
 #include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
-void setup_pass_sample() { Pass_sample::setup(); }
+static Pass_plugin sample("pass_sample", Pass_sample::setup);
 
 void Pass_sample::setup() {
   Eprp_method m1("pass.sample", "counts number of nodes in an lgraph", &Pass_sample::work);

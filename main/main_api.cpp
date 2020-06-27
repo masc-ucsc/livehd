@@ -1,29 +1,12 @@
 
 #include "main_api.hpp"
-
 #include "top_api.hpp"
-
 #include "meta_api.hpp"
-
 #include "cloud_api.hpp"
-
 #include "inou_lef_api.hpp"
-
 #include "eprp_utils.hpp"
 
 std::string Main_api::main_path;
-
-void setu_pass_abc();
-void setup_pass_bitwidth();
-void setup_pass_cprop();
-void setup_pass_dce();
-void setup_pass_dfg();
-void setup_pass_lec();
-//void setup_pass_opentimer();
-void setup_pass_punch();
-void setup_pass_sample();
-void setup_pass_mockturtle();
-void setup_pass_lgraph_to_lnast();
 
 void setup_inou_cgen();
 void setup_inou_liveparse();
@@ -42,17 +25,11 @@ void setup_cops_live();
 // add new setup function prototypes here
 
 void Main_api::init() {
-  setup_pass_dce();
-  //setup_pass_opentimer();
-  setup_pass_lec();
-  setup_pass_punch();
-  setup_pass_sample();
-  setup_pass_mockturtle();
-  /* setup_pass_abc(); */
-  setup_pass_cprop();
-  setup_pass_bitwidth();
-  setup_pass_lgraph_to_lnast();
 
+  for(const auto &it:Pass_plugin::get_registry()) {
+    //fmt::print("function:{}\n", it.first);
+    it.second();
+  }
 
   setup_inou_cgen();
   setup_inou_liveparse();
@@ -67,18 +44,13 @@ void Main_api::init() {
   /* setup_inou_verific(); */
   /* setup_cops_live(); */
 
-
-  // call the new setup function here
-
-  // do not touch anything beyond this point
+  // FIXME beyond this point (to delete some of them)
 
   Top_api::setup(Pass::eprp);  // *
 
   Meta_api::setup(Pass::eprp);   // lgraph.*
   Cloud_api::setup(Pass::eprp);  // cloud.*
 
-  /* Inou_cfg_api::setup(Pass::eprp);    // inou.cfg.* */
-  /* Inou_lef_api::setup(Pass::eprp);    // inou.lef.* */
-
   main_path = Eprp_utils::get_exe_path();
 }
+

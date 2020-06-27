@@ -6,7 +6,7 @@ cc_library(
     visibility = ["//visibility:public"],
     includes = ["."],
     deps = [
-        "//core:core",
+        "//pass/common:pass",
         "//third_party/misc/ezsat:ezsat",
     ]
 )

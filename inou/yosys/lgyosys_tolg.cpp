@@ -300,7 +300,7 @@ static bool is_black_box_output(const RTLIL::Module *module, const RTLIL::Cell *
     return false;
   }
 
-  ::Pass::error("Could not find a definition for module {}, treating as a blackbox but could not determine whether {} is an output",
+  ::LGraph::error("Could not find a definition for module {}, treating as a blackbox but could not determine whether {} is an output",
                 cell->type.str(), port_name.str());
 
   log_error("output unknown port %s at module %s cell %s\n", port_name.c_str(), module->name.c_str(), cell->type.c_str());
@@ -333,7 +333,7 @@ static bool is_black_box_input(const RTLIL::Module *module, const RTLIL::Cell *c
     return true;
   }
 
-  ::Pass::error("Could not find a definition for module {}, treating as a blackbox but could not determine whether {} is an input",
+  ::LGraph::error("Could not find a definition for module {}, treating as a blackbox but could not determine whether {} is an input",
                 cell->type.str(), port_name.str());
 
   log_error("input unknown port %s at module %s cell %s\n", port_name.c_str(), module->name.c_str(), cell->type.c_str());
@@ -992,7 +992,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
 
     } else {
       // blackbox addition
-      ::Pass::info("Black box addition from yosys frontend, cell type {} not found instance {}", cell->type.c_str(),
+      ::LGraph::warn("Black box addition from yosys frontend, cell type {} not found instance {}", cell->type.c_str(),
                    cell->name.c_str());
       I(false);
     }
