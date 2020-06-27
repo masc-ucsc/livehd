@@ -84,6 +84,7 @@ void Semantic_pass::check_for_not_read(std::string_view node_name) {
   }
 }
 
+
 void Semantic_pass::check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_opr, const Lnast_ntype node_type) {
   if (!lnast->has_single_child(lnidx_opr)) {
     // Unary Operations
@@ -189,6 +190,9 @@ void Semantic_pass::check_if_op(Lnast* lnast, const Lnast_nid &lnidx_opr) {
         if (!ntype_child_child.is_ref()) {
           Pass::error("If Operation Error: Condition must be Node type 'ref'\n");
         }
+        if (in_not_read_list(lnast->get_name(lnidx_opr_child_child))) {
+          check_for_not_read(lnast->get_name(lnidx_opr_child_child));
+        }
       } else {
         Pass::error("If Operation Error: Missing Condition Node\n");
       }
@@ -223,6 +227,9 @@ void Semantic_pass::check_for_op(Lnast* lnast, const Lnast_nid &lnidx_opr) {
       }
     } else if (ntype_child.is_ref()) {
       num_of_ref += 1;
+      if (in_not_read_list(lnast->get_name(lnidx_opr_child))) {
+        check_for_not_read(lnast->get_name(lnidx_opr_child));
+      }
     } else {
       Pass::error("For Operation Error: Not a Valid Node Type\n");
     }
