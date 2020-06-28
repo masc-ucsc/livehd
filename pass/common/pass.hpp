@@ -32,7 +32,7 @@ protected:
   Pass(std::string_view _pass_name, const Eprp_var &var);
 
 public:
-  static Eprp eprp;
+  static inline Eprp eprp;
 
   static void error(std::string_view msg) { eprp.parser_error(msg); }
   static void warn(std::string_view msg) { eprp.parser_warn(msg); }

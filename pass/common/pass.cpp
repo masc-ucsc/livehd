@@ -2,7 +2,7 @@
 
 #include <sys/stat.h>
 
-Eprp Pass::eprp;
+//Eprp Pass::eprp;
 
 Pass_plugin::Map_setup Pass_plugin::registry;
 

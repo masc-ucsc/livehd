@@ -6,8 +6,8 @@
 
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
-
 #include "lgtuple.hpp"
+#include "lgcpp_plugin.hpp"
 
 #define TRACE(x)
 //#define TRACE(x) x
@@ -317,6 +317,26 @@ void Pass_cprop::replace_logic_node(Node &node, const Lconst &result, const Lcon
 
 absl::flat_hash_map<Node::Compact, std::shared_ptr<Lgtuple>> tuplemap;
 
+void Pass_cprop::process_subgraph(Node &node) {
+
+  if (node.is_type_sub_present())
+    return;
+
+  auto *sub = node.ref_type_sub_node();
+
+
+  const auto &reg = Lgcpp_plugin::get_registry();
+  auto it = reg.find(sub->get_name());
+  if (it == reg.end())
+    return;
+
+  fmt::print("cprop subgraph:{} is not present, found lgcpp...\n", sub->get_name());
+
+  std::shared_ptr<Lgtuple> inp;
+  std::shared_ptr<Lgtuple> out;
+  it->second(inp,out);
+}
+
 void Pass_cprop::process_tuple_q_pin(Node &node, Node_pin &parent_dpin) {
 	// Get variable name
   auto driver_wname   = parent_dpin.get_name();
@@ -559,9 +579,14 @@ void Pass_cprop::trans(LGraph *g) {
   for (auto node : g->forward()) {
 
 		// No subs, inside side-effects, or flops/mems that that get connected latter
-		auto op = node.get_type().op;
+    auto op = node.get_type().op;
 
-		if (op == SFlop_Op || op == AFlop_Op || op == Latch_Op || op == FFlop_Op ||
+    if (op == SubGraph_Op) {
+      process_subgraph(node);
+      continue;
+    }
+
+                if (op == SFlop_Op || op == AFlop_Op || op == Latch_Op || op == FFlop_Op ||
 				op == Memory_Op || op == SubGraph_Op) {
 			fmt::print("cprop skipping node:{}\n", node.debug_name());
 			continue;

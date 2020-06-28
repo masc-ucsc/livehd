@@ -9,6 +9,7 @@ cc_library(
     deps = [
         "//pass/common:pass",
         "//lemu:lemu",
+        "//lgcpp/common:lgcpp",
     ]
 )
 
