@@ -21,6 +21,7 @@ cc_binary(
             "//pass/common:pass",
 
             "//lgcpp/common:lgcpp",
+            "//lgcpp/prplib:prplib",
 
             "//pass/sample:pass_sample",
             "//pass/punch:pass_punch",
