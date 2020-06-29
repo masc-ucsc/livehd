@@ -282,7 +282,6 @@ public:
         return ti != other.ti;
       }
 
-      // FIXME->sh: check with Jose or learn to design an iterator throughly
       bool operator==(const CTree_sibling_iterator &other) {
         I(t == other.t);
         return ti == other.ti;

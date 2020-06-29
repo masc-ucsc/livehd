@@ -28,8 +28,8 @@ protected:
   std::vector<std::shared_ptr<Lgtuple>> pos2tuple;
 
   void reset() {
-    ordered   =true;
-    named     =true;
+    ordered = true;
+    named   = true;
     key2pos.clear();
     pos2tuple.clear();
   }
