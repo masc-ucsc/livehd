@@ -8,21 +8,17 @@ class Semantic_pass {
 private:
 protected:
 
-  std::vector<std::string_view> temp_list;
-  std::vector<std::string_view> not_read_list;
-  std::vector<std::string_view> have_read_list;
+  std::vector<std::string_view> write_list;
+  std::vector<std::string_view> read_list;
 
   bool is_primitive_op(const Lnast_ntype node_type);
   bool is_tree_structs(const Lnast_ntype node_type);
+  bool in_write_list(std::string_view node_name);
+  bool in_read_list(std::string_view node_name);
+  void add_to_write_list(std::string_view node_name);
+  void add_to_read_list(std::string_view node_name);
 
-  bool is_temp_var(std::string_view node_name);
-  bool in_temp_list(std::string_view node_name);
-  void check_for_temp_var(std::string_view node_name);
-
-  bool in_not_read_list(std::string_view node_name);
-  void check_for_not_read(std::string_view node_name);
-
-  bool in_have_read_list(std::string_view node_name);
+  void resolve_read_write_lists();
 
   void check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_opr, const Lnast_ntype node_type);
   void check_if_op(Lnast* lnast, const Lnast_nid &lnidx_opr);
