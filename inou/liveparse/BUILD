@@ -5,9 +5,10 @@ cc_library(
     hdrs = glob(["*.hpp"]),
     visibility = ["//visibility:public"],
     includes = ["."],
-    deps = [ "//elab:elab",
-             "//core:core",
-            ]
+    deps = [
+        "//elab:elab",
+        "//pass/common:pass",
+    ]
 )
 
 cc_test(

@@ -19,7 +19,7 @@
 // FIXME: exact needs percy package in WORKSPACE
 //#include <mockturtle/algorithms/node_resynthesis/exact.hpp>
 
-void setup_pass_mockturtle() { Pass_mockturtle::setup(); }
+static Pass_plugin sample("pass_mockturtle", Pass_mockturtle::setup);
 
 void Pass_mockturtle::setup() {
   Eprp_method m1("pass.mockturtle", "pass a lgraph using mockturtle", &Pass_mockturtle::work);

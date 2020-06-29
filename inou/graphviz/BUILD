@@ -8,7 +8,7 @@ cc_library(
     deps = [
         "//inou/firrtl:inou_firrtl_cpp",
         "//inou/cfg:inou_cfg",
-        "//core:core",
+        "//pass/common:pass",
     ],
 )
 

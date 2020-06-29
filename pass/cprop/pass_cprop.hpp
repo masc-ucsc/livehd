@@ -21,6 +21,8 @@ protected:
   void replace_node(Node &node, const Lconst &result);
 	void replace_logic_node(Node &node, const Lconst &result, const Lconst &result_reduced);
 
+  void process_subgraph(Node &node);
+
 	void process_tuple_q_pin(Node &node, Node_pin &parent_dpin);
   void merge_to_tuple(std::shared_ptr<Lgtuple> tup, Node &node, Node
       &parent_node, Node_pin &parent_dpin, int key_pos, std::string_view

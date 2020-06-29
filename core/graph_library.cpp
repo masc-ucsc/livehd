@@ -19,7 +19,6 @@
 
 #include "fmt/format.h"
 #include "lgraph.hpp"
-#include "pass.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/error/en.h"
 #include "rapidjson/filereadstream.h"
@@ -77,15 +76,15 @@ Lg_type_id Graph_library::reset_id(std::string_view name, std::string_view sourc
     attributes[it->second].version = max_next_version.value++;
     if (attributes[it->second].source != source) {
       if (source == "-") {
-        Pass::warn("keeping lgraph:{} source {}", name, attributes[it->second].source);  // LCOV_EXCL_LINE
+        LGraph::warn("keeping lgraph:{} source {}", name, attributes[it->second].source);  // LCOV_EXCL_LINE
       } else if (attributes[it->second].source.empty()) {
         // Blackbox with a newly populated. OK
         attributes[it->second].source = source;
       } else if (attributes[it->second].source == "-") {
-        // Pass::warn("overwrite lgraph:{} source from {} to {}", name, attributes[it->second].source, source);  // LCOV_EXCL_LINE
+        // LGraph::warn("overwrite lgraph:{} source from {} to {}", name, attributes[it->second].source, source);  // LCOV_EXCL_LINE
         attributes[it->second].source = source;
       } else {
-        Pass::error("No overwrite lgraph:{} because it changed source from {} to {} (LGraph::delete first)", name,
+        LGraph::error("No overwrite lgraph:{} because it changed source from {} to {} (LGraph::delete first)", name,
                     attributes[it->second].source, source);  // LCOV_EXCL_LINE
       }
     }
@@ -154,7 +153,7 @@ Sub_node &Graph_library::reset_sub(std::string_view name, std::string_view sourc
   Lg_type_id lgid = get_lgid(name);
   if (lgid) {
     if (attributes[lgid].source != source) {
-      // Pass::info("module {} changed source changed from {} to {}\n", name, attributes[lgid].source, source);
+      // LGraph::info("module {} changed source changed from {} to {}\n", name, attributes[lgid].source, source);
       attributes[lgid].source = source;
     }
     auto &sub = sub_nodes[lgid];
@@ -218,7 +217,7 @@ std::string Graph_library::get_lgraph_filename(std::string_view path, std::strin
 bool Graph_library::rename_name(std::string_view orig, std::string_view dest) {
   auto it = name2id.find(orig);
   if (it == name2id.end()) {
-    Pass::error("graph_library: file to rename {} does not exit", orig);
+    LGraph::error("graph_library: file to rename {} does not exit", orig);
     return false;
   }
   Lg_type_id id = it->second;
@@ -279,7 +278,7 @@ void Graph_library::reload() {
   }
   FILE *pFile = fopen(library_file.c_str(), "rb");
   if (pFile == 0) {
-    Pass::error("graph_library::reload could not open graph {} file", library_file);
+    LGraph::error("graph_library::reload could not open graph {} file", library_file);
     return;
   }
   char                      buffer[65536];
@@ -288,7 +287,7 @@ void Graph_library::reload() {
   document.ParseStream<0, rapidjson::UTF8<>, rapidjson::FileReadStream>(is);
 
   if (document.HasParseError()) {
-    Pass::error("graph_library::reload {} Error(offset {}): {}", library_file, static_cast<unsigned>(document.GetErrorOffset()),
+    LGraph::error("graph_library::reload {} Error(offset {}): {}", library_file, static_cast<unsigned>(document.GetErrorOffset()),
                 rapidjson::GetParseError_En(document.GetParseError()));
     return;
   }
@@ -368,7 +367,7 @@ void Graph_library::expunge(std::string_view name) {
 
   DIR *dr = opendir(path.c_str());
   if (dr == NULL) {
-    Pass::error("graph_library: unable to access path {}", path);
+    LGraph::error("graph_library: unable to access path {}", path);
     return;
   }
 
@@ -410,7 +409,7 @@ Lg_type_id Graph_library::copy_lgraph(std::string_view name, std::string_view ne
 
   DIR *dr = opendir(path.c_str());
   if (dr == NULL) {
-    Pass::error("graph_library: unable to access path {}", path);
+    LGraph::error("graph_library: unable to access path {}", path);
     return false;
   }
 
@@ -573,7 +572,7 @@ void Graph_library::clean_library() {
 
     fs.open(library_file, std::ios::out | std::ios::trunc);
     if (!fs.is_open()) {
-      Pass::error("graph_library::clean_library could not open graph_library file {}", library_file);
+      LGraph::error("graph_library::clean_library could not open graph_library file {}", library_file);
       return;
     }
     fs << s.GetString() << std::endl;

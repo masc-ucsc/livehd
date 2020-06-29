@@ -6,13 +6,13 @@
 
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
-
 #include "lgtuple.hpp"
+#include "lgcpp_plugin.hpp"
 
 #define TRACE(x)
 //#define TRACE(x) x
 
-void setup_pass_cprop() { Pass_cprop::setup(); }
+static Pass_plugin sample("pass_cprop", Pass_cprop::setup);
 
 void Pass_cprop::setup() {
   Eprp_method m1("pass.cprop", "in-place copy propagation", &Pass_cprop::optimize);
@@ -317,6 +317,63 @@ void Pass_cprop::replace_logic_node(Node &node, const Lconst &result, const Lcon
 
 absl::flat_hash_map<Node::Compact, std::shared_ptr<Lgtuple>> tuplemap;
 
+void Pass_cprop::process_subgraph(Node &node) {
+
+  if (node.is_type_sub_present())
+    return;
+
+  auto *sub = node.ref_type_sub_node();
+
+  const auto &reg = Lgcpp_plugin::get_registry();
+
+  auto it = reg.find(sub->get_name());
+  if (it == reg.end())
+    return;
+
+  fmt::print("cprop subgraph:{} is not present, found lgcpp...\n", sub->get_name());
+
+  std::shared_ptr<Lgtuple> inp;
+  std::shared_ptr<Lgtuple> out = std::make_shared<Lgtuple>();
+  it->second(node.get_class_lgraph(), inp, out);
+
+  fmt::print("cprop subgraph:{} has out\n", sub->get_name());
+  out->dump("  ");
+
+  for (auto dpin : node.out_connected_pins()) {
+    fmt::print("dpin:{} pid:{} testing...\n", dpin.debug_name(), dpin.get_pid());
+    if (dpin.has_name()) {
+      if (out->has_key_name(dpin.get_name())) {
+        fmt::print("replace dpin:{}\n", dpin.get_name());
+      } else {
+        fmt::print("dpin:{} disconnected. name Remove\n", dpin.get_name());
+      }
+    } else {
+      if (out->has_key_pos(dpin.get_pid())) {
+        fmt::print("replace dpin:{} pid:{}\n", dpin.debug_name(), dpin.get_pid());
+      } else {
+        fmt::print("dpin:{} disconnected. pos Remove\n", dpin.debug_name());
+      }
+    }
+  }
+
+#if 1
+  auto io_pins = sub->get_io_pins();
+  Port_ID instance_pid = 0;
+  for (const auto &io_pin : sub->get_io_pins()) {
+    instance_pid++;
+    if (io_pin.is_input())
+      continue;
+    if (out->has_key_name(io_pin.name)) {
+      fmt::print("replace io_pin:{}\n", io_pin.name);
+    } else {
+      fmt::print("disconnected io_pin:{}\n", io_pin.name);
+    }
+
+    fmt::print("iopin:{} pos:{} instance_pid:{}...\n", io_pin.name, io_pin.graph_io_pos, instance_pid);
+  }
+#endif
+}
+
 void Pass_cprop::process_tuple_q_pin(Node &node, Node_pin &parent_dpin) {
 	// Get variable name
   auto driver_wname   = parent_dpin.get_name();
@@ -559,9 +616,14 @@ void Pass_cprop::trans(LGraph *g) {
   for (auto node : g->forward()) {
 
 		// No subs, inside side-effects, or flops/mems that that get connected latter
-		auto op = node.get_type().op;
+    auto op = node.get_type().op;
 
-		if (op == SFlop_Op || op == AFlop_Op || op == Latch_Op || op == FFlop_Op ||
+    if (op == SubGraph_Op) {
+      process_subgraph(node);
+      continue;
+    }
+
+                if (op == SFlop_Op || op == AFlop_Op || op == Latch_Op || op == FFlop_Op ||
 				op == Memory_Op || op == SubGraph_Op) {
 			fmt::print("cprop skipping node:{}\n", node.debug_name());
 			continue;
