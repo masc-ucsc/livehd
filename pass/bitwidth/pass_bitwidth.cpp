@@ -8,7 +8,7 @@
 #include "lgraph.hpp"
 #include "pass_bitwidth.hpp"
 
-void setup_pass_bitwidth() { Pass_bitwidth::setup(); }
+static Pass_plugin sample("pass_bitwidth", Pass_bitwidth::setup);
 
 void Pass_bitwidth::setup() {
   Eprp_method m1("pass.bitwidth", "MIT algorithm for bitwidth optimization", &Pass_bitwidth::trans);

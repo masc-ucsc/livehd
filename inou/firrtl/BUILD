@@ -31,6 +31,6 @@ cc_library(
     includes = ["."],
     deps = [
         ":firrtl_cc_proto",
-        "//core:core",
+        "//pass/common:pass",
     ],
 )

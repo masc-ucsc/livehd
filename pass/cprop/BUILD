@@ -7,8 +7,9 @@ cc_library(
     visibility = ["//visibility:public"],
     includes = ["."],
     deps = [
-        "//core:core",
+        "//pass/common:pass",
         "//lemu:lemu",
+        "//lgcpp/common:lgcpp",
     ]
 )
 

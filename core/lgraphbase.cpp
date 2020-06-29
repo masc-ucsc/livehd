@@ -9,7 +9,6 @@
 #include "graph_library.hpp"
 #include "iassert.hpp"
 #include "lgedgeiter.hpp"
-#include "pass.hpp"
 
 // Checks internal invalid insertions. Worth only if the node_internal is patched
 // #define DEBUG_SLOW
@@ -562,3 +561,11 @@ Index_ID LGraph_Base::add_edge_int(const Index_ID dst_idx, const Port_ID inp_pid
   return root_idx;
 }
 
+void LGraph_Base::error(std::string_view text) {
+  fmt::print("error:{}\n", text);
+  throw std::runtime_error(std::string(text));
+}
+
+void LGraph_Base::warn(std::string_view text) {
+  fmt::print("warning:{}\n", text);
+}

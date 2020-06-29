@@ -2,7 +2,9 @@
 
 #include <sys/stat.h>
 
-Eprp Pass::eprp;
+//Eprp Pass::eprp;
+
+Pass_plugin::Map_setup Pass_plugin::registry;
 
 const std::string Pass::get_files(const Eprp_var &var) const {
   std::string _files;

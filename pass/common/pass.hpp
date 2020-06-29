@@ -1,12 +1,15 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-//#include <string>
+#include <functional>
+#include <string>
+#include <map>
 
 #include "absl/strings/substitute.h"
 #include "eprp.hpp"
 #include "fmt/format.h"
 #include "iassert.hpp"
+
 
 class Pass {
 protected:
@@ -29,7 +32,7 @@ protected:
   Pass(std::string_view _pass_name, const Eprp_var &var);
 
 public:
-  static Eprp eprp;
+  static inline Eprp eprp;
 
   static void error(std::string_view msg) { eprp.parser_error(msg); }
   static void warn(std::string_view msg) { eprp.parser_warn(msg); }
@@ -62,4 +65,24 @@ public:
     fmt::vformat_to(tmp, format, fargs);
     eprp.parser_info(std::string_view(tmp.data(), tmp.size()));
   }
+};
+
+class Pass_plugin {
+public:
+  using Setup_fn = std::function<void()>;
+  using Map_setup = std::map<std::string, Setup_fn>;
+protected:
+
+  static Map_setup registry;
+
+public:
+  Pass_plugin(const std::string &name, Setup_fn setup_fn) {
+    if (registry.find(name) != registry.end()) {
+      Pass::error("Pass_plugin: {} is already registered", name);
+      return;
+    }
+    registry[name] = setup_fn;
+  }
+
+  static const Map_setup &get_registry() { return registry; }
 };

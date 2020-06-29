@@ -14,7 +14,7 @@
 #define GREY  1
 #define BLACK 2
 
-void setup_pass_lgraph_to_lnast() { Pass_lgraph_to_lnast::setup(); }
+static Pass_plugin sample("pass_lgraph_to_lnast", Pass_lgraph_to_lnast::setup);
 
 void Pass_lgraph_to_lnast::setup() {
   Eprp_method m1("pass.lgraph_to_lnast", "translates LGraph to LNAST", &Pass_lgraph_to_lnast::trans);

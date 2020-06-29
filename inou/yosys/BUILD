@@ -8,7 +8,7 @@ cc_library(
     defines = ["_YOSYS_","YOSYS_ENABLE_PLUGINS"],
     visibility = ["//visibility:public"],
     deps = [
-        "//core:core",
+        "//pass/common:pass",
         "@yosys//:headers",
     ],
 )
@@ -19,7 +19,7 @@ cc_library(
     hdrs = glob(["inou*.hpp"]),
     visibility = ["//visibility:public"],
     deps = [
-        "//core:core",
+        "//pass/common:pass",
         "@mustache//:headers",
     ],
     data = ["inou_yosys_read.ys",

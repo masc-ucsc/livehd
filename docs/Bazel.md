@@ -16,6 +16,10 @@ to use Bazel in the LGraph project.
 
    bazel query "deps(//inou/lefdef:lglefdef)"
 
+## List all the passes that use core (those should be listed at main/BUILD deps)
+
+   bazel query "rdeps(//pass/..., //core:all)" | grep pass_
+
 ## Release vs fastbuild (default) vs debug
 
     # Debug

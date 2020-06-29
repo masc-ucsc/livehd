@@ -12,7 +12,6 @@
 #include "annotate.hpp"
 #include "graph_library.hpp"
 #include "lgedgeiter.hpp"
-#include "pass.hpp"
 
 LGraph::LGraph(std::string_view _path, std::string_view _name, std::string_view _source)
     : LGraph_Base(_path, _name, Graph_library::instance(_path)->register_lgraph(_name, _source, this))
@@ -108,9 +107,9 @@ LGraph *LGraph::open(std::string_view path, std::string_view name) {
 void LGraph::rename(std::string_view path, std::string_view orig, std::string_view dest) {
   bool valid = Graph_library::instance(path)->rename_name(orig, dest);
   if (valid)
-    Pass::warn("lgraph::rename find original graph {} in path {}", orig, path);
+    warn("lgraph::rename find original graph {} in path {}", orig, path);
   else
-    Pass::error("cannot find original graph {} in path {}", orig, path);
+    error("cannot find original graph {} in path {}", orig, path);
 }
 
 void LGraph::clear() {

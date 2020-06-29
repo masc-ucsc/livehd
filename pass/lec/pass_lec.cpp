@@ -7,7 +7,7 @@
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
-void setup_pass_lec() { Pass_lec::setup(); }
+static Pass_plugin sample("pass_lec", Pass_lec::setup);
 
 void Pass_lec::setup() {
   Eprp_method m1("pass.lec", "Checks if all the LGraph outputs are satisfiable", &Pass_lec::work);

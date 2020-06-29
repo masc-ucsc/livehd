@@ -7,7 +7,8 @@
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
-void setup_pass_punch() { Pass_punch::setup(); }
+static Pass_plugin sample("pass_punch", Pass_punch::setup);
+
 Pass_punch::Pass_punch(const Eprp_var &var) : Pass("pass.punch", var) {}
 
 void Pass_punch::setup() {

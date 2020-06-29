@@ -9,7 +9,7 @@ cc_library(
         "//pass/bitwidth:pass_bitwidth",
         "//pass/lgraph_to_lnast:pass_lgraph_to_lnast",
         "//inou/cfg:inou_cfg",
-        "//core:core",
+        "//pass/common:pass",
     ],
 )
 
