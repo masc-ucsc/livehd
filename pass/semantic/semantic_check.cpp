@@ -301,6 +301,7 @@ void Semantic_pass::check_func_def(Lnast* lnast, const Lnast_nid &lnidx_opr) {
         Pass::error("Func Def Operation Error: Missing Condition Node\n");
       }
     } else if (ntype_child.is_ref()) {
+      add_to_read_list(lnast->get_name(lnidx_opr_child));
       num_of_refs += 1;
     } else {
       Pass::error("Func Def Operation Error: Not a Valid Node Type\n");
