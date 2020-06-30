@@ -408,12 +408,14 @@ int Inou_Tojson::get_ports(LGraph *lg) {
     return true;
   });
   // === Output ports to lgraph:
-  lg->each_graph_output([&](const Node_pin &out_pin) {
-    if (!out_pin.has_name()) {
+  lg->each_graph_output([&](const Node_pin &outp) {
+    Node_pin out_pin = outp.get_sink_from_output();
+    I(out_pin.is_sink());
+    if (!outp.has_name()) {
       Pass::error("output pin \"{}\" for module {} has no name???\n",
-                  out_pin.debug_name(), lg->get_name());
+                  outp.debug_name(), lg->get_name());
     }
-    writer.Key(std::string(out_pin.get_name()).c_str());
+    writer.Key(std::string(outp.get_name()).c_str());
     writer.StartObject();
     writer.Key("direction");
     writer.String("output");
@@ -427,6 +429,124 @@ int Inou_Tojson::get_ports(LGraph *lg) {
   return retval;
 }
 
+int Inou_Tojson::write_cell_commutative(LGraph *lg, Node::Compact_class ncc, std::vector<XEdge::Compact> &edges) {
+  ssize_t num_edges = edges.size();
+  I(num_edges > 1);
+  int retval = 0;
+  Node node = Node(lg, ncc);
+  auto edge_itor = edges.begin();
+  XEdge test_edge = XEdge(lg, *edge_itor);
+  uint32_t bsize = test_edge.get_bits();
+  I(bsize > 0);
+  std::string node_name;
+  if (node.has_name()) {
+    node_name = node.get_name();
+  } else {
+    node_name = node.debug_name();
+  }
+  // There will always be (num_edges-1) 2-input gates
+  ssize_t num_gates = num_edges - 1, neg_num_1st_gates = 1, num_1st_conn = 2;
+  while (num_1st_conn < num_edges) {
+    neg_num_1st_gates *= 2;
+    num_1st_conn *= 2;
+  }
+  ssize_t num_1st_gates = num_edges - neg_num_1st_gates; // determine # of tier 0 gates
+  de_opt_vec.push_back({node_name, {}});
+  std::vector<IPair> &ipair_vec = de_opt_vec.rbegin()->second;
+  ssize_t tier_num = 0, tier = 0, prev_tier_count = 0, prev_tier_num = 0;
+  const char keys[2][2] = {"A", "B"};
+  ssize_t used_prev = 0;
+  for (ssize_t gate_idx = 0; gate_idx < num_gates; ) {
+    // gate_idx gets incremented after the main portion of the body...
+    std::string nname_app = node_name + "$" + std::to_string(gate_idx+2);
+    writer.Key(nname_app.c_str());
+    writer.StartObject();
+    writer.Key("hide_name");
+    writer.Uint64(1);
+    writer.Key("type");
+    writer.String("TODO");
+    writer.Key("parameters");
+    writer.StartObject();
+    // FIXME
+    writer.EndObject();
+    writer.Key("attributes");
+    writer.StartObject();
+    // FIXME
+    writer.EndObject();
+    writer.Key("port_directions");
+    writer.StartObject();
+    writer.Key("A");
+    writer.String("input");
+    writer.Key("B");
+    writer.String("input");
+    writer.Key("Y");
+    writer.String("output");
+    writer.EndObject(); // port_directions
+    writer.Key("connections");
+    writer.StartObject();
+    for (ssize_t idx = 0; idx < 2; ++idx) {
+      writer.Key(keys[idx]);
+      writer.StartArray();
+      if (used_prev == prev_tier_count) {
+        XEdge edge = XEdge(lg, *edge_itor++);
+        backtrace_edge(edge, {0, bsize});
+      } else {
+        I((used_prev + prev_tier_num) < ipair_vec.size());
+        uint32_t start_idx = ipair_vec[used_prev + prev_tier_num].first;
+        for (uint32_t idx = start_idx; idx < (start_idx + bsize); ++idx) {
+          writer.Uint64(idx);
+        }
+        ++used_prev;
+      }
+      writer.EndArray();
+    }
+    bool last_gate = ((gate_idx + 1) == num_gates);
+    if (last_gate) {
+      bool check_dup = false;
+      for (auto &pin : node.out_connected_pins()) {
+        I(check_dup == false);
+        check_dup = true;
+        writer.Key("Y");
+        Node_pin::Compact_class npincc = pin.get_compact_class();
+        auto iter = indices.find(npincc);
+        I(iter != indices.end()); // pin should have been added to the map
+        IPair &ipair = iter->second;
+        writer.StartArray();
+        for (uint32_t idx = ipair.first; idx < (ipair.first + ipair.second); ++idx) {
+          writer.Uint64(idx);
+        }
+        writer.EndArray();
+      }
+    } else {
+      uint32_t start_idx = next_idx;
+      ipair_vec.push_back({next_idx, bsize});
+      next_idx += bsize;
+      writer.Key("Y");
+      writer.StartArray();
+      for (uint32_t idx = start_idx; idx < (start_idx + bsize); ++idx) {
+        writer.Uint64(idx);
+      }
+      writer.EndArray();
+    }
+    writer.EndObject(); // connections
+    writer.EndObject(); // node_name_idx
+    
+    if (last_gate) { break; }
+    // determine tier and tier_num:
+    ++tier_num;
+    ++gate_idx;
+    ssize_t gates_left = num_gates - gate_idx;
+    if ((tier == 0 && tier_num == num_1st_gates) || (tier > 0 && (tier_num*2) > gates_left)) {
+      prev_tier_num = gate_idx - tier_num;
+      prev_tier_count = tier_num;
+      tier_num = 0;
+      used_prev = 0;
+      ++tier;
+    }
+  }
+  return retval;
+}
+
 int Inou_Tojson::write_cells(LGraph *lg, const Cells &cells) {
   int retval = 0;
   writer.Key("cells");
@@ -435,24 +555,73 @@ int Inou_Tojson::write_cells(LGraph *lg, const Cells &cells) {
     Node node = Node(lg, ncc);
     //Node_Type ntype = node.get_type();
     uint32_t hide_name = 1;
+    std::string node_name;
     if (node.has_name()) {
-#ifdef FROMLG_TOJSON_BACKTRACE_PRINT
-      fmt::print("{}\n", node.get_name());
-#endif
-      writer.Key(std::string(node.get_name()).c_str());
+      node_name = node.get_name();
       hide_name = 0;
     } else {
-#ifdef FROMLG_TOJSON_BACKTRACE_PRINT
-      fmt::print("{}\n", node.debug_name());
-#endif
-      writer.Key(node.debug_name().c_str());
+      node_name = node.debug_name();
     }
+#ifdef FROMLG_TOJSON_BACKTRACE_PRINT
+    fmt::print("{}\n", node_name);
+#endif
+    // First, check if we have a "commutative" node:
+    ssize_t num_inp_pins = 0, num_edges;
+    bool is_commutative = false;
+    std::vector<XEdge::Compact> edges;
+    for (auto &pin : node.inp_connected_pins()) {
+      (void) pin;
+      ++num_inp_pins;
+    }
+    for (auto &pin : node.inp_connected_pins()) {
+      ssize_t num_inp_edges = 0;
+      for (auto &oedge : pin.inp_edges()) {
+        ++num_inp_edges;
+        if (num_inp_pins == 1) { edges.push_back(oedge.get_compact()); }
+      }
+      I(num_inp_edges > 0);
+      if (num_inp_edges > 1) {
+        if (num_inp_pins > 1) {
+          Pass::error("Internal error: Node {} has multiple input Node_pins, but Node_pin "
+                      "{} has more than 1 input edge??\n", node_name, pin.get_pin_name());
+        }
+        is_commutative = true;
+        num_edges = num_inp_edges;
+      }
+    }
+    I(num_inp_pins);
+    if (is_commutative == true) {
+      // FIXME: Use return value.
+      write_cell_commutative(lg, node.get_compact_class(), edges);
+      continue;
+    }
+
+    // "non-commutative" node:
+    writer.Key(node_name.c_str());
     writer.StartObject();
     writer.Key("hide_name");
     writer.Uint64(hide_name);
+    writer.Key("type");
+    writer.String("TODO");
+    writer.Key("parameters");
+    writer.StartObject();
+    // FIXME
+    writer.EndObject();
     writer.Key("attributes");
     writer.StartObject();
+    // FIXME
     writer.EndObject();
+    writer.Key("port_directions");
+    writer.StartObject();
+    for (auto &pin : node.inp_connected_pins()) {
+      writer.Key(std::string(pin.get_pin_name()).c_str());
+      writer.String("input");
+    }
+    for (auto &pin : node.out_connected_pins()) {
+      writer.Key(std::string(pin.get_pin_name()).c_str());
+      writer.String("output");
+    }
+    writer.EndObject(); // port_directions
     writer.Key("connections");
     writer.StartObject();
     for (auto &pin : node.inp_connected_pins()) {
@@ -472,7 +641,7 @@ int Inou_Tojson::write_cells(LGraph *lg, const Cells &cells) {
       writer.EndArray();
     }
     writer.EndObject(); // connections
-    writer.EndObject(); // cell name
+    writer.EndObject(); // node_name
   }
   writer.EndObject(); // cells
   return retval;
@@ -508,6 +677,28 @@ int Inou_Tojson::write_netnames(LGraph *lg) {
     writer.StartObject();
     writer.EndObject(); // attributes
     writer.EndObject(); // dname
+  }
+  
+  // if we broke down commutative nodes, print out the nets here:
+  for (auto &de_opt_pair: de_opt_vec) {
+    ssize_t snode_idx = 2;
+    for (auto ipair: de_opt_pair.second) {
+      std::string dname = de_opt_pair.first + "$" + std::to_string(snode_idx++) + "_Y";
+      writer.Key(dname.c_str());
+      writer.StartObject();
+      writer.Key("hide_name");
+      writer.Uint64(1);
+      writer.Key("bits");
+      writer.StartArray();
+      for (uint32_t idx = ipair.first; idx < (ipair.first + ipair.second); ++idx) {
+        writer.Uint64(idx);
+      }
+      writer.EndArray();  // bits
+      writer.Key("attributes");
+      writer.StartObject();
+      writer.EndObject(); // attributes
+      writer.EndObject(); // dname
+    }
   }
   writer.EndObject(); // netnames
   return retval;

@@ -40,16 +40,19 @@ using PrettySbuffWriter = rapidjson::PrettyWriter<rapidjson::StringBuffer>;
 class Inou_Tojson {
   using IPair = std::pair<uint32_t, uint32_t>;
   using Cells = std::vector<Node::Compact_class>;
+  using DeOptPair = std::pair<std::string, std::vector<IPair>>;
   private:
     LGraph *toplg;
     PrettySbuffWriter &writer;
     absl::flat_hash_map<Node_pin::Compact_class, IPair> indices;
     absl::flat_hash_map<Node_pin::Compact_class, uint32_t> pick_cache;
+    std::vector<DeOptPair> de_opt_vec;
     ssize_t next_idx;
     ///
     void reset_indices() {
       pick_cache.clear();
       indices.clear();
+      de_opt_vec.clear();
       next_idx = 2;
     }
     // ipair.first: start idx, ipair.second: # of bits starting at start idx
@@ -66,6 +69,7 @@ class Inou_Tojson {
       return retval;
     }
     int get_ports(LGraph *lg);
+    int write_cell_commutative(LGraph *lg, Node::Compact_class ncc, std::vector<XEdge::Compact> &edges);
     int write_cells(LGraph *lg, const Cells &cells);
     int write_netnames(LGraph *lg);
   public:
