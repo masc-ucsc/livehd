@@ -40,6 +40,26 @@ bool Semantic_pass::in_read_list(std::string_view node_name) {
   return false;
 }
 
+bool Semantic_pass::in_assign_lhs_list(std::string_view node_name) {
+  int assign_lhs_list_size = (int) assign_lhs_list.size();
+  for (int i = 0; i < assign_lhs_list_size; i++) {
+    if (assign_lhs_list[i] == node_name) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool Semantic_pass::in_assign_rhs_list(std::string_view node_name) {
+  int assign_rhs_list_size = (int) assign_rhs_list.size();
+  for (int i = 0; i < assign_rhs_list_size; i++) {
+    if (assign_rhs_list[i] == node_name) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void Semantic_pass::add_to_write_list(std::string_view node_name) {
   if (!in_write_list(node_name)) {
     if (node_name[0] != '%') {
@@ -58,12 +78,36 @@ void Semantic_pass::add_to_read_list(std::string_view node_name) {
   }
 }
 
+void Semantic_pass::add_to_assign_lhs_list(std::string_view node_name) {
+  if (!in_assign_lhs_list(node_name)) {
+    assign_lhs_list.push_back(node_name);
+  }
+}
+
+void Semantic_pass::add_to_assign_rhs_list(std::string_view node_name) {
+  if (!in_assign_rhs_list(node_name)) {
+    assign_rhs_list.push_back(node_name);
+  }
+}
+  
 void Semantic_pass::resolve_read_write_lists() {
   for (auto it = write_list.begin(); it != write_list.end(); ) {
     if (in_read_list(*it)) {
       write_list.erase(it);
     } else {
       it++;
+    }
+  }
+}
+
+void resolve_assign_lhs_rhs_lists() {
+  int assign_lhs_list_size = (int) assign_lhs_list.size();
+  int assign_rhs_list_size = (int) assign_rhs_list.size();
+  for (int i = 0; i < assign_lhs_list_size; i++) {
+    for (int j = 0; j < assign_lhs_list_size;j++) {
+      if (j > i && assign_lhs_list[i] == assign_rhs_list[j]) {
+        // Inefficient LNAST
+      }
     }
   }
 }
@@ -88,8 +132,12 @@ void Semantic_pass::check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_opr
       if (rhs_type.is_ref()) {
         add_to_read_list(lnast->get_name(rhs));
       }
-    // N-ary Operations (need to add tuple_concat)
-    } else if (node_type.is_dot() || node_type.is_logical_and() || node_type.is_logical_or() || node_type.is_nary_op() || node_type.is_eq() || node_type.is_select() || node_type.is_bit_select() || node_type.is_logic_shift_right() || node_type.is_arith_shift_right() || node_type.is_arith_shift_left() || node_type.is_rotate_shift_right() || node_type.is_rotate_shift_left() || node_type.is_dynamic_shift_right() ||  node_type.is_dynamic_shift_left() || node_type.is_tuple_concat()) {
+      if (node_type.is_assign()) {
+        add_to_assign_lhs_list(lnast->get_name(lhs));
+        add_to_assign_rhs_list(lnast->get_name(rhs));
+      }
+    // N-ary Operations (need to add node_type.is_select())
+    } else if (node_type.is_dot() || node_type.is_logical_and() || node_type.is_logical_or() || node_type.is_nary_op() || node_type.is_eq() || node_type.is_bit_select() || node_type.is_logic_shift_right() || node_type.is_arith_shift_right() || node_type.is_arith_shift_left() || node_type.is_rotate_shift_right() || node_type.is_rotate_shift_left() || node_type.is_dynamic_shift_right() ||  node_type.is_dynamic_shift_left() || node_type.is_tuple_concat()) {
       for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
         const auto node_type_child = lnast->get_data(lnidx_opr_child).type;
 
@@ -127,6 +175,21 @@ void Semantic_pass::check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_opr
         Pass::error("Tuple Operation Error: Missing Reference Node\n");
       } else if (num_of_assign != 2) {
         Pass::error("Tuple Operation Error: Missing Assign Node(s)\n");
+      }
+    } else if (node_type.is_select()) {
+      int num_of_ref = 0;
+      for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
+        const auto node_type_child = lnast->get_data(lnidx_opr_child).type;
+
+        if (node_type_child.is_ref()) {      
+          num_of_ref += 1;
+          // Store type 'ref' variables
+          add_to_read_list(lnast->get_name(lnidx_opr_child));
+        }
+      }
+      if (num_of_ref != 3) {
+        std::cout << num_of_ref << "\n";
+        Pass::error("Select Operation Error: Missing Reference Node(s)\n");
       }
     } else {
       Pass::error("Primitive Operation Error: Not a Valid Node Type\n");
