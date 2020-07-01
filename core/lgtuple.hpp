@@ -22,10 +22,10 @@ protected:
   bool ordered;
   bool named;
 
-  Node_pin val_dpin; //FIXME->sh: rename to val_dpin
+  Node_pin val_dpin; 
 
   absl::flat_hash_map<std::string, int> key2pos;
-  std::vector<std::shared_ptr<Lgtuple>> pos2tuple;
+  std::vector<std::shared_ptr<Lgtuple>> pos2tuple; //pos to its corresponding most up-to-dated tuple chain (at old time)
 
   void reset() {
     ordered = true;
@@ -115,7 +115,7 @@ public:
 
   size_t add(LGraph *lg, const Lconst &constant);
   size_t add(const Node_pin &dpin);
-  bool add(const std::shared_ptr<Lgtuple> tup2);
+  bool   add(const std::shared_ptr<Lgtuple> tup2);
 
   bool is_scalar() const { return pos2tuple.empty();  }
   bool is_dpin()   const { return !val_dpin.is_invalid(); }

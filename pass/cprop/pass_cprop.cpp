@@ -401,15 +401,15 @@ void Pass_cprop::merge_to_tuple(std::shared_ptr<Lgtuple> ctup, Node &node, Node
 	} else {
 		if (parent_node.get_type().op != TupAdd_Op) {
 			std::string unnamed;
-			bool ok = ctup->set(0, unnamed, parent_dpin);
+			bool ok = ctup->set(0, unnamed, parent_dpin); // includes the parent into Lgtuple where the parent is not TupAdd 
 			if (!ok)
 				compile_error = true;
 		}
 
 		if (key_pos < 0 && key_name.empty()) {
 			if (val_dpin.get_node().get_type().op == TupAdd_Op) {
-				auto it2 = name2tuple.find(val_dpin.get_node().get_compact());
-				I(it2 != name2tuple.end());
+				auto it2 = node2tuple.find(val_dpin.get_node().get_compact());
+				I(it2 != node2tuple.end());
 				bool ok = ctup->add(it2->second);
 				if (!ok) {
 					compile_error = true;
@@ -431,7 +431,7 @@ void Pass_cprop::merge_to_tuple(std::shared_ptr<Lgtuple> ctup, Node &node, Node
 		Pass::error("tuples {} could not add field \n", "XX", "XX");
 	}
 
-	name2tuple[node.get_compact()] = ctup;
+	node2tuple[node.get_compact()] = ctup;
 }
 
 bool Pass_cprop::process_tuples(Node &node, XEdge_iterator &inp_edges_ordered) {
@@ -487,19 +487,19 @@ bool Pass_cprop::process_tuples(Node &node, XEdge_iterator &inp_edges_ordered) {
 
 
 #if 0
-   for(auto e:name2tuple) {
+   for(auto e:node2tuple) {
      fmt::print("parent_node:{}..\n", e.first.get_nid());
      e.second->dump();
    }
 #endif
 
-   auto ptup_it = name2tuple.find(parent_node.get_compact()); //ptup = tuple chain of the parent node
+   auto ptup_it = node2tuple.find(parent_node.get_compact()); //ptup = tuple chain of the parent node
    if (op == TupAdd_Op) {
      I(inp_edges_ordered.size() >= 2, "at least key_name or key_pos should be connected");
 
 		 std::shared_ptr<Lgtuple> ctup; //ctup = tuple chain of the current node
 		 bool parent_could_be_deleted = false;
-     if (ptup_it == name2tuple.end()) {
+     if (ptup_it == node2tuple.end()) {
        // First tuple entry
        ctup = std::make_shared<Lgtuple>(); // No tuple root name?
      } else {
@@ -532,7 +532,7 @@ bool Pass_cprop::process_tuples(Node &node, XEdge_iterator &inp_edges_ordered) {
 
 			 if (parent_could_be_deleted) {
 				 ctup = ptup_it->second;
-				 name2tuple.erase(ptup_it);
+				 node2tuple.erase(ptup_it);
 			 } else {
 				 ctup = std::make_shared<Lgtuple>(*(ptup_it->second)); 
 			 }
@@ -555,7 +555,7 @@ bool Pass_cprop::process_tuples(Node &node, XEdge_iterator &inp_edges_ordered) {
    } else {
      I(op == TupGet_Op);
 
-		 if (ptup_it == name2tuple.end()) { //ptup_it = parent_node 
+		 if (ptup_it == node2tuple.end()) { //ptup_it = parent_node 
 			 std::string_view tup_name;
 			 if (parent_dpin.has_name())
 				 tup_name = parent_dpin.get_name();

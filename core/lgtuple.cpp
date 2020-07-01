@@ -1,6 +1,5 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-
 #include "lgraph.hpp"
 #include "lgtuple.hpp"
 
@@ -107,20 +106,20 @@ size_t Lgtuple::get_or_create_pos(size_t pos) {
   return pos;
 }
 
-bool Lgtuple::set(int pos, std::string_view key, const Node_pin &_dpin) {
+bool Lgtuple::set(int pos, std::string_view key, const Node_pin &_val_dpin) {
   if (!key.empty() && pos >= 0) {
     auto it = key2pos.find(key);
-    if (it!=key2pos.end() && it->second != pos)
+    if (it != key2pos.end() && it->second != pos)
       return false;
   }
 
   if (pos < 0) {
-    set(key, _dpin);
+    set(key, _val_dpin);
   } else if (key.empty()) {
-    set(pos, _dpin);
-  }else {
+    set(pos, _val_dpin);
+  } else {
     auto pos2 = get_or_create_pos(pos, key);
-    pos2tuple[pos2]->set(_dpin);
+    pos2tuple[pos2]->set(_val_dpin);
   }
 
   return true;
