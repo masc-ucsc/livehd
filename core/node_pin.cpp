@@ -193,7 +193,6 @@ std::string_view Node_pin::create_name() const {
 
 bool Node_pin::has_name() const { return Ann_node_pin_name::ref(current_g)->has_key(get_compact_class_driver()); }
 
-// FIXME->sh: could be deprecated if ann_ssa could be mmapped for a std::string_view
 bool Node_pin::has_prp_vname() const { return Ann_node_pin_prp_vname::ref(current_g)->has(get_compact_class_driver()); }
 
 Node_pin Node_pin::find_driver_pin(LGraph *top, std::string_view wname) {

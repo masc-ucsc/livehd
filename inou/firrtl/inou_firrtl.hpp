@@ -4,6 +4,7 @@
 #include <string>
 #include <tuple>
 #include <stack>
+#include <unordered_map>
 
 #include "pass.hpp"
 #include "lnast.hpp"
@@ -46,6 +47,7 @@ protected:
   void HandlePadOp        (Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs);
   void HandleTwoExprPrimOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs);
   void HandleStaticShiftOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs);
+  void HandleTypeConvOp   (Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs);
   void AttachExprStrToNode(Lnast &lnast, const std::string_view access_str, Lnast_nid& parent_node);
 
   std::string HandleSubfieldAcc(Lnast &lnast, const firrtl::FirrtlPB_Expression_SubField sub_field, Lnast_nid& parent_node, const bool is_rhs);
@@ -63,6 +65,9 @@ protected:
 
 
   void ListStatementInfo(Lnast &lnast, const firrtl::FirrtlPB_Statement& stmt, Lnast_nid& parent_node);
+
+  void CreateModToIOMap(const firrtl::FirrtlPB_Circuit& circuit);
+  void AddPortToMap    (const std::string mod_id, const firrtl::FirrtlPB_Type& type, uint8_t dir, std::string port_id);
 
   void ListUserModuleInfo(Eprp_var &var, const firrtl::FirrtlPB_Module& module);
   void ListModuleInfo(Eprp_var &var, const firrtl::FirrtlPB_Module& module);
@@ -104,6 +109,11 @@ private:
   std::vector<std::string> input_names;
   std::vector<std::string> output_names;
   std::vector<std::string> register_names;
+
+  // Maps an instance name to the module name.
+  std::unordered_map<std::string, std::string> inst_to_mod_map;
+  // Maps (module name + I/O name) pair to direction of that I/O in that module.
+  std::map<std::pair<std::string, std::string>, uint8_t> mod_to_io_map;
 
   uint32_t temp_var_count;
   uint32_t seq_counter;
