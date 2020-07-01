@@ -1,4 +1,4 @@
-//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+// This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #pragma once
 
@@ -22,7 +22,7 @@ protected:
   bool ordered;
   bool named;
 
-  Node_pin dpin;
+  Node_pin val_dpin; //FIXME->sh: rename to val_dpin
 
   absl::flat_hash_map<std::string, int> key2pos;
   std::vector<std::shared_ptr<Lgtuple>> pos2tuple;
@@ -34,7 +34,7 @@ protected:
     pos2tuple.clear();
   }
 
-  void unscalarize_if_needed();
+  void   unscalarize_if_needed();
   size_t get_or_create_pos(size_t pos, std::string_view key);
   size_t get_or_create_pos(std::string_view key);
   size_t get_or_create_pos(size_t pos);
@@ -86,7 +86,7 @@ public:
   }
 
   bool has_key_name(size_t key) const {
-    bool raw=has_key_pos(key);
+    bool raw = has_key_pos(key);
     if (!raw)
       return false;
     auto has_name = pos2tuple[key]->has_parent_key_name();
@@ -100,7 +100,6 @@ public:
     return pos2tuple[key]->get_parent_key_name();
   }
 
-  Node_pin get_driver_pin(int pos, std::string_view key) const;
   std::shared_ptr<Lgtuple> get_tuple(std::string_view key);
   std::shared_ptr<Lgtuple> get_tuple(size_t  key);
 
@@ -118,10 +117,11 @@ public:
   size_t add(const Node_pin &dpin);
   bool add(const std::shared_ptr<Lgtuple> tup2);
 
-  bool is_scalar() const { return pos2tuple.empty(); }
+  bool is_scalar() const { return pos2tuple.empty();  }
+  bool is_dpin()   const { return !val_dpin.is_invalid(); }
 
-  bool is_dpin() const { return !dpin.is_invalid(); }
-  Node_pin get_driver_pin() const { return dpin; };
+  Node_pin get_value_dpin(int pos, std::string_view key) const; //get driver dpin of value field
+  Node_pin get_value_dpin() const { return val_dpin; };
 
   bool    is_constant() const;
   Lconst get_constant() const;

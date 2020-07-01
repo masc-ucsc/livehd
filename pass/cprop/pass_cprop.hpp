@@ -10,8 +10,9 @@
 class Pass_cprop : public Pass {
 private:
 protected:
-  static void optimize(Eprp_var &var);
+  absl::flat_hash_map<Node::Compact, std::shared_ptr<Lgtuple>> name2tuple; //node to most up-to-dated tuple chain
 
+  static void optimize(Eprp_var &var);
   void collapse_forward_same_op(Node &node, XEdge_iterator &inp_edges_ordered);
   void collapse_forward_always_pin0(Node &node, XEdge_iterator &inp_edges_ordered);
   void collapse_forward_for_pin(Node &node, Node_pin &new_dpin);
