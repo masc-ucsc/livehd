@@ -188,5 +188,10 @@ public:
     // FIXME: sh: any better way to concate a string_view??
     return absl::StrCat(std::string(get_name(nid)), "_", get_subs(nid));
   }
+
+  void dump(const Lnast_nid &it) const;
+  void dump() const { dump(get_root()); }
+
+  std::string lnast_type_to_string(Lnast_ntype type) const;
 };
 

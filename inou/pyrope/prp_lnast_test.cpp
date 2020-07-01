@@ -28,7 +28,7 @@ int main(int argc, char **argv) {
     std::string indent{"  "};
     for (int i = 0; i < it.level; ++i) indent += "  ";
 
-    fmt::print("{} {} {:>20} : {}\n", it.level, indent, converter.Lnast_type_to_string(node.type), node.token.text);
+    fmt::print("{} {} {:>20} : {}\n", it.level, indent, lnast->lnast_type_to_string(node.type), node.token.text);
   }
 #endif
 

@@ -1,15 +1,11 @@
-$a as (__bits:8)
-$b as (__bits:8)
-%out as (__bits:8)
 
-if ($a > 128){
-  %out = $a & $b
-  if (a == 254){
-    %out = $a | $b
-  }
+if ($a ){
+  if ($b ){
+    %out = $a
+}
 }
 else{
-  if (%a == 128){
-    %out = $a ^ $b
+  if ($c){
+    %out = $b
   }
 }
