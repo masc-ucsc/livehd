@@ -407,7 +407,7 @@ void Pass_cprop::merge_to_tuple(std::shared_ptr<Lgtuple> ctup, Node &node, Node
 		}
 
 		if (key_pos < 0 && key_name.empty()) {
-			if (val_dpin.get_node().get_type().op == TupAdd_Op) {
+			if (val_dpin.get_node().get_type().op == TupAdd_Op) { //hier-tuple 
 				auto it2 = node2tuple.find(val_dpin.get_node().get_compact());
 				I(it2 != node2tuple.end());
 				bool ok = ctup->add(it2->second);

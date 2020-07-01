@@ -45,10 +45,10 @@ size_t Lgtuple::get_or_create_pos(size_t pos, std::string_view key) {
     pos2tuple.resize(pos+1);
     pos2tuple[pos] = std::make_shared<Lgtuple>(pos, key);
 		key2pos[key] = pos;
-  }else if (pos == pos2tuple.size()) {
+  } else if (pos == pos2tuple.size()) {
     pos2tuple.emplace_back(std::make_shared<Lgtuple>(pos, key));
 		key2pos[key] = pos;
-  }else{
+  } else {
     if (pos2tuple[pos]) {
       I(pos2tuple[pos]->get_parent_key_name() == key);
     } else {
@@ -71,7 +71,7 @@ size_t Lgtuple::get_or_create_pos(std::string_view key) {
   if (has_key_name(key)) {
     pos = get_key_pos(key);
     new_entry = false;
-  }else{
+  } else {
 		pos2tuple.emplace_back(std::make_shared<Lgtuple>(key)); // named
 		key2pos[key] = pos;
   }
@@ -85,15 +85,15 @@ size_t Lgtuple::get_or_create_pos(size_t pos) {
   named = false;
   I(pos);
   bool new_entry = false;
-  if (pos>pos2tuple.size()) {
+  if (pos > pos2tuple.size()) {
     pos2tuple.resize(pos+1);
     new_entry = true;
-  }else if (pos == pos2tuple.size()) {
+  } else if (pos == pos2tuple.size()) {
     pos2tuple.emplace_back(std::make_shared<Lgtuple>(pos)); // unname
-  }else{
+  } else {
     if (pos2tuple[pos]) {
       named = named && pos2tuple[pos]->has_parent_key_name();
-    }else{
+    } else {
       new_entry = true;
     }
   }
@@ -154,16 +154,16 @@ void Lgtuple::set(size_t pos, LGraph *lg, const Lconst &constant) {
   pos2tuple[pos]->set(lg, constant);
 }
 
-void Lgtuple::set(size_t pos, const Node_pin &_dpin) {
+void Lgtuple::set(size_t pos, const Node_pin &_val_dpin) {
   named = false;
   if (pos == 0 && is_scalar()) {
-    set(_dpin);
+    set(_val_dpin);
     return;
   }
   auto pos2 = get_or_create_pos(pos);
   I(pos == pos2);
 
-  pos2tuple[pos]->set(_dpin);
+  pos2tuple[pos]->set(_val_dpin);
 }
 
 size_t Lgtuple::add(LGraph *lg, const Lconst &constant) {
@@ -175,13 +175,13 @@ size_t Lgtuple::add(LGraph *lg, const Lconst &constant) {
   return pos;
 }
 
-size_t Lgtuple::add(const Node_pin &_dpin) {
+size_t Lgtuple::add(const Node_pin &_val_dpin) {
   I(!_dpin.is_invalid());
   auto pos = pos2tuple.size();
   if (pos == 0 && !val_dpin.is_invalid())
     pos++;
 
-  set(pos, _dpin);
+  set(pos, _val_dpin);
   return pos;
 }
 
@@ -232,10 +232,10 @@ void Lgtuple::set(LGraph *lg, const Lconst &constant) {
   val_dpin = node.setup_driver_pin();
 }
 
-void Lgtuple::set(const Node_pin &_dpin) {
+void Lgtuple::set(const Node_pin &_val_dpin) {
   reset();
 
-  val_dpin = _dpin;
+  val_dpin = _val_dpin; //this means the val_dpin of final TupAdd node from the most-up-to-date tuple-chain
 }
 
 void Lgtuple::dump(std::string_view indent) const {
