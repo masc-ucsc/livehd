@@ -7,7 +7,6 @@ class Node;
 
 #include <vector>
 
-#include "ann_bitwidth.hpp"
 #include "ann_ssa.hpp"
 #include "lgedge.hpp"
 #include "mmap_map.hpp"
@@ -335,9 +334,6 @@ public:
   void     set_offset(uint16_t offset);
   uint16_t get_offset() const;
 
-  const Ann_bitwidth &get_bitwidth() const;
-  Ann_bitwidth *      ref_bitwidth();
-  bool                has_bitwidth() const;
   const Ann_ssa &     get_ssa() const;
   Ann_ssa *           ref_ssa();
   bool                has_ssa() const;

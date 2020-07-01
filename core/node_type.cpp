@@ -34,6 +34,12 @@ const Node_Type &LGraph_Node_Type::get_type(Index_ID nid) const {
   return Node_Type::get(static_cast<Node_Type_Op>(node_internal[nid].get_type()));
 }
 
+Node_Type_Op LGraph_Node_Type::get_type_op(Index_ID nid) const {
+  I(node_internal[nid].is_master_root());
+
+  return static_cast<Node_Type_Op>(node_internal[nid].get_type());
+}
+
 bool LGraph_Node_Type::is_type_const(Index_ID nid) const {
   I(node_internal[nid].is_node_state());
   I(node_internal[nid].is_master_root());

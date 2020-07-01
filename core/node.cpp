@@ -178,6 +178,36 @@ int Node::get_num_inputs() const { return current_g->get_num_inputs(nid); }
 
 int Node::get_num_outputs() const { return current_g->get_num_outputs(nid); }
 
+bool Node::has_driver_pin_connected(std::string_view pname) const {
+  auto pid = get_type().get_output_match(pname);
+  I(pid != Port_invalid);  // graph_pos must be valid if connected
+
+  return has_driver_pin_connected(pid);
+}
+
+bool Node::has_sink_pin_connected(std::string_view pname) const {
+  auto pid = get_type().get_input_match(pname);
+  I(pid != Port_invalid);  // graph_pos must be valid if connected
+
+  return has_sink_pin_connected(pid);
+}
+
+bool Node::has_driver_pin_connected(Port_ID pid) const {
+  Index_ID idx = current_g->find_idx_from_pid(nid, pid);
+  if (idx==0)
+    return false;
+  Node_pin dpin(top_g, current_g, hidx, idx, pid, false);
+  return current_g->has_outputs(dpin);
+}
+
+bool Node::has_sink_pin_connected(Port_ID pid) const {
+  Index_ID idx = current_g->find_idx_from_pid(nid, pid);
+  if (idx==0)
+    return false;
+  Node_pin dpin(top_g, current_g, hidx, idx, pid, true);
+  return current_g->has_inputs(dpin);
+}
+
 Node_pin Node::setup_driver_pin(Port_ID pid) {
   I(current_g->get_type(nid).has_output(pid));
 #ifndef NDEBUG
@@ -201,6 +231,8 @@ Node_pin Node::setup_driver_pin() const {
 }
 
 const Node_Type &Node::get_type() const { return current_g->get_type(nid); }
+
+Node_Type_Op Node::get_type_op() const { return current_g->get_type_op(nid); }
 
 void Node::set_type(const Node_Type_Op op) {
   I(op != SubGraph_Op && op != Const_Op && op != LUT_Op);  // do not set type directly, call set_type_const ....

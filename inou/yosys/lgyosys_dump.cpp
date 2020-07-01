@@ -48,19 +48,26 @@ RTLIL::Wire *Lgyosys_dump::create_tree(LGraph *g, const std::vector<RTLIL::Wire 
 
   if (wires.size() == 0) return nullptr;
 
+  if (result_wire)
+    width = result_wire->width;
+  assert(width);
+
   if (wires.size() == 1) {
     if (result_wire) { // only in top level call
-      mod->connect(result_wire, wires[0]);
+      if (wires[0]->width == width) {       // SIZE Match
+        mod->connect(result_wire, wires[0]);
+      } else if (wires[0]->width > width) {  // drop bits
+        mod->connect(result_wire, RTLIL::SigSpec(wires[0], 0, width));
+      } else {  // extend bits
+        auto w2 = RTLIL::SigSpec(wires[0]);
+        w2.extend_u0(width);  // unsigned extend
+        mod->connect(result_wire, w2);
+      }
       return result_wire;
     }else{
       return wires[0];
     }
   }
-
-  if (result_wire)
-    width = result_wire->width;
-
-  assert(width);
 
   RTLIL::Wire *l;
   RTLIL::Wire *r;
@@ -661,63 +668,45 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         }
 
         Port_ID pid = 0;
-        if (inps.size() == 1) {
+        if (cell_output_map.find(node.get_driver_pin(0).get_compact()) != cell_output_map.end())
+          pid = 0;
+        else if (cell_output_map.find(node.get_driver_pin(1).get_compact()) != cell_output_map.end())
           pid = 1;
-        } else {
-          if (cell_output_map.find(node.get_driver_pin(0).get_compact()) != cell_output_map.end())
-            pid = 0;
-          else if (cell_output_map.find(node.get_driver_pin(1).get_compact()) != cell_output_map.end())
-            pid = 1;
-          else
-            assert(false);
-        }
+        else
+          assert(false);
 
         assert(cell_output_map.find(node.get_driver_pin(pid).get_compact()) !=
                cell_output_map.end());  // single input and gate that is not used as a reduce and
-        if (inps.size() == 1) {
-          if (pid == 1) {  // REDUCE OP
-            if (node.get_type().op == And_Op)
-              module->addReduceAnd(next_id(g), inps[0], cell_output_map[node.get_driver_pin(pid).get_compact()]);
-            else if (node.get_type().op == Or_Op)
-              module->addReduceOr(next_id(g), inps[0], cell_output_map[node.get_driver_pin(pid).get_compact()]);
-            else if (node.get_type().op == Xor_Op)
-              module->addReduceXor(next_id(g), inps[0], cell_output_map[node.get_driver_pin(pid).get_compact()]);
-            else
-              assert(false);
-          } else {  // Just connect wire (one input)
-            module->connect(cell_output_map[node.get_driver_pin(pid).get_compact()], inps[0]);
-          }
+
+        if (pid == 1) {  // REDUCE OP
+          RTLIL::Wire *or_input_wires = module->addWire(next_id(g), inps[0]->width);
+          if (node.get_type().op == And_Op)
+            create_tree(g, inps, module, &RTLIL::Module::addAnd, false, or_input_wires);
+          else if (node.get_type().op == Or_Op)
+            create_tree(g, inps, module, &RTLIL::Module::addOr, false, or_input_wires);
+          else if (node.get_type().op == Xor_Op)
+            create_tree(g, inps, module, &RTLIL::Module::addXor, false, or_input_wires);
+          else
+            assert(false);
+
+          if (node.get_type().op == And_Op)
+            module->addReduceAnd(next_id(g), or_input_wires, cell_output_map[node.get_driver_pin(pid).get_compact()]);
+          else if (node.get_type().op == Or_Op)
+            module->addReduceOr(next_id(g), or_input_wires, cell_output_map[node.get_driver_pin(pid).get_compact()]);
+          else if (node.get_type().op == Xor_Op)
+            module->addReduceXor(next_id(g), or_input_wires, cell_output_map[node.get_driver_pin(pid).get_compact()]);
+          else
+            assert(false);
+
         } else {
-          if (pid == 1) {  // REDUCE OP
-            RTLIL::Wire *or_input_wires = module->addWire(next_id(g), inps[0]->width);
-            if (node.get_type().op == And_Op)
-              create_tree(g, inps, module, &RTLIL::Module::addAnd, false, or_input_wires);
-            else if (node.get_type().op == Or_Op)
-              create_tree(g, inps, module, &RTLIL::Module::addOr, false, or_input_wires);
-            else if (node.get_type().op == Xor_Op)
-              create_tree(g, inps, module, &RTLIL::Module::addXor, false, or_input_wires);
-            else
-              assert(false);
-
-            if (node.get_type().op == And_Op)
-              module->addReduceAnd(next_id(g), or_input_wires, cell_output_map[node.get_driver_pin(pid).get_compact()]);
-            else if (node.get_type().op == Or_Op)
-              module->addReduceOr(next_id(g), or_input_wires, cell_output_map[node.get_driver_pin(pid).get_compact()]);
-            else if (node.get_type().op == Xor_Op)
-              module->addReduceXor(next_id(g), or_input_wires, cell_output_map[node.get_driver_pin(pid).get_compact()]);
-            else
-              assert(false);
-
-          } else {
-            if (node.get_type().op == And_Op)
-              create_tree(g, inps, module, &RTLIL::Module::addAnd, false, cell_output_map[node.get_driver_pin(pid).get_compact()]);
-            else if (node.get_type().op == Or_Op)
-              create_tree(g, inps, module, &RTLIL::Module::addOr, false, cell_output_map[node.get_driver_pin(pid).get_compact()]);
-            else if (node.get_type().op == Xor_Op)
-              create_tree(g, inps, module, &RTLIL::Module::addXor, false, cell_output_map[node.get_driver_pin(pid).get_compact()]);
-            else
-              assert(false);
-          }
+          if (node.get_type().op == And_Op)
+            create_tree(g, inps, module, &RTLIL::Module::addAnd, false, cell_output_map[node.get_driver_pin(pid).get_compact()]);
+          else if (node.get_type().op == Or_Op)
+            create_tree(g, inps, module, &RTLIL::Module::addOr, false, cell_output_map[node.get_driver_pin(pid).get_compact()]);
+          else if (node.get_type().op == Xor_Op)
+            create_tree(g, inps, module, &RTLIL::Module::addXor, false, cell_output_map[node.get_driver_pin(pid).get_compact()]);
+          else
+            assert(false);
         }
         break;
       }
