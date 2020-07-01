@@ -44,10 +44,12 @@ void Pass_bitwidth::do_trans(LGraph *lg) {
 }
 
 void Pass_bitwidth::process_const(Node &node) {
-  bwmap.emplace(node.get_driver_pin().get_compact(), Bitwidth_range(node.get_type_const()));
+	auto dpin = node.get_driver_pin();
+  auto it = bwmap.emplace(dpin.get_compact(), Bitwidth_range(node.get_type_const()));
+	adjust_dpin_bits(dpin, it.first->second);
 }
 
-void Pass_bitwidth::process_logic(Node &node, XEdge_iterator &inp_edges) {
+void Pass_bitwidth::process_logic(Node &node, XEdge_iterator &inp_edges, bool and_op) {
   bool logic_op        = node.has_driver_pin_connected(0);
   bool logic_reduction = node.has_driver_pin_connected(1);
 
@@ -61,11 +63,27 @@ void Pass_bitwidth::process_logic(Node &node, XEdge_iterator &inp_edges) {
         for (size_t i = 1; i < inp_edges.size(); ++i) {
           auto it3 = bwmap.find(inp_edges[1].driver.get_compact());
           I(it3 != bwmap.end());
-          bw.expand(it3->second, true);
+          if (and_op) {
+            bw.and_op(it3->second);
+          }else{
+            bw.expand(it3->second, true);
+          }
+        }
+        if (and_op) {
+          for (auto e:inp_edges) {
+            if (e.driver.get_num_edges() > 1) {
+              must_perform_backward = must_perform_backward || e.driver.get_bits()==0;
+            } else {
+              auto bits = e.driver.get_bits();
+              if (bits == 0 || bits > bw.get_bits())
+                e.driver.set_bits(bw.get_bits());
+            }
+          }
         }
       }
     }
   }
+
   if (logic_reduction) {
     bwmap.emplace(node.get_driver_pin(1).get_compact(), Bitwidth_range(1));
   }
@@ -94,13 +112,20 @@ void Pass_bitwidth::garbage_collect_support_structures(XEdge_iterator &inp_edges
 
 void Pass_bitwidth::adjust_dpin_bits(Node_pin &dpin, Bitwidth_range &bw) {
   auto bw_bits = bw.get_bits();
-  if (dpin.get_bits() < bw_bits && bw_bits) {
-    fmt::print("bitwidth: set_bits:{} for dpin:{}\n", bw_bits, dpin.debug_name());
+  if (bw_bits && bw_bits != dpin.get_bits()) {
+    fmt::print("bitwidth: bits:{}->{} for dpin:{}\n", dpin.get_bits(), bw_bits, dpin.debug_name());
     dpin.set_bits(bw_bits);
   }
 }
 
 void Pass_bitwidth::bw_pass(LGraph *lg) {
+
+  must_perform_backward = false;
+
+  lg->each_graph_input([&](Node_pin &dpin) {
+    bwmap.emplace(dpin.get_compact(), Bitwidth_range(dpin.get_bits()));
+  });
+	outcountmap[lg->get_graph_input_node().get_compact()] = lg->get_graph_input_node().get_num_outputs();
 
   for (auto node : lg->forward()) {
 
@@ -113,7 +138,7 @@ void Pass_bitwidth::bw_pass(LGraph *lg) {
     if (op == Const_Op) {
       process_const(node);
     } else if (op == Or_Op || op == And_Op || op == Xor_Op) {
-      process_logic(node, inp_edges);
+      process_logic(node, inp_edges, op == And_Op);
     }
 
     garbage_collect_support_structures(inp_edges);
@@ -142,6 +167,10 @@ void Pass_bitwidth::bw_pass(LGraph *lg) {
 
   for(auto it:bwmap) {
     fmt::print("bwmap left bits:{}\n", it.second.get_bits());
+  }
+
+  if (must_perform_backward) {
+    fmt::print("pass_bitwidth: some nodes need to back propagate width\n");
   }
 }
 

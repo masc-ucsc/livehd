@@ -50,27 +50,38 @@ protected:
     return find_idx_from_pid(pin.get_idx(), pin.get_pid());
   }
 
-  int get_num_outputs(Index_ID nid) const {
+  Index_ID get_node_nid(Index_ID idx) const {
+    if (node_internal[idx].is_master_root()) return idx;
+
+    return node_internal[idx].get_nid();
+  }
+
+  int get_node_num_outputs(Index_ID nid) const {
     I(nid < node_internal.size());
     I(node_internal[nid].is_master_root());
     return node_internal[nid].get_node_num_outputs();
   }
 
-  int get_num_inputs(Index_ID nid) const {
+  int get_node_num_inputs(Index_ID nid) const {
     I(nid < node_internal.size());
     I(node_internal[nid].is_master_root());
     return node_internal[nid].get_node_num_inputs();
   }
 
-  Index_ID get_node_nid(Index_ID idx) {
-    I(node_internal.size() > idx);
+  int get_node_pin_num_outputs(Index_ID idx) const {
+    I(idx < node_internal.size());
     I(node_internal[idx].is_root());
-    if (node_internal[idx].is_master_root()) return idx;
-
-    idx = node_internal[idx].get_nid();
-    I(node_internal[idx].is_master_root());
-    return idx;
+    Index_ID nid = get_node_nid(idx);
+    return node_internal[nid].get_node_pin_num_outputs(idx);
   }
+
+  int get_node_pin_num_inputs(Index_ID idx) const {
+    I(idx < node_internal.size());
+    I(node_internal[idx].is_root());
+    Index_ID nid = get_node_nid(idx);
+    return node_internal[nid].get_node_pin_num_inputs(idx);
+  }
+
 
   Node_pin_iterator out_connected_pins(const Node &node) const;
   Node_pin_iterator inp_connected_pins(const Node &node) const;

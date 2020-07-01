@@ -11,6 +11,7 @@
 class Pass_bitwidth : public Pass {
 protected:
   int max_iterations;
+  bool must_perform_backward;
 
   absl::flat_hash_map<Node_pin::Compact, Bitwidth_range>  bwmap;
   absl::flat_hash_map<Node::Compact, uint32_t>            outcountmap;
@@ -19,7 +20,7 @@ protected:
   void        do_trans(LGraph *orig);
 
   void        process_const(Node &node);
-  void        process_logic(Node &node, XEdge_iterator &inp_edges);
+  void        process_logic(Node &node, XEdge_iterator &inp_edges, bool and_op);
 
   void        garbage_collect_support_structures(XEdge_iterator &inp_edges);
   void        adjust_dpin_bits(Node_pin &dpin, Bitwidth_range &bw);

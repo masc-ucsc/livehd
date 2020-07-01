@@ -304,6 +304,9 @@ public:
 
   int32_t get_node_num_inputs() const;
   int32_t get_node_num_outputs() const;
+  int32_t get_node_pin_num_inputs(Index_ID idx) const;
+  int32_t get_node_pin_num_outputs(Index_ID idx) const;
+
   bool    has_node_inputs() const;
   bool    has_node_outputs() const;
 

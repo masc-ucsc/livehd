@@ -278,6 +278,7 @@ public:
     I(dst.is_driver() && is_sink());
     return connect_driver(dst);
   }
+  int  get_num_edges() const;
 
 #if 0
   Node_pin &operator=(const Node_pin &obj) {

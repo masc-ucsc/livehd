@@ -83,6 +83,12 @@ void Node_pin::connect_driver(Node_pin &dpin) {
   current_g->add_edge(dpin, *this);
 }
 
+int Node_pin::get_num_edges() const {
+  if (is_sink()) return current_g->get_node_pin_num_inputs(idx);
+
+  return current_g->get_node_pin_num_outputs(idx);
+}
+
 uint32_t Node_pin::get_bits() const { return current_g->get_bits(idx); }
 
 void Node_pin::set_bits(uint32_t bits) {
