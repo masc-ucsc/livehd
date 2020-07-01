@@ -41,9 +41,8 @@ bool Semantic_pass::in_read_list(std::string_view node_name) {
 }
 
 bool Semantic_pass::in_assign_lhs_list(std::string_view node_name) {
-  int assign_lhs_list_size = (int) assign_lhs_list.size();
-  for (int i = 0; i < assign_lhs_list_size; i++) {
-    if (assign_lhs_list[i] == node_name) {
+  for(const auto &lhs:assign_lhs_list) {
+    if (lhs == node_name) {
       return true;
     }
   }
@@ -89,7 +88,7 @@ void Semantic_pass::add_to_assign_rhs_list(std::string_view node_name) {
     assign_rhs_list.push_back(node_name);
   }
 }
-  
+
 void Semantic_pass::resolve_read_write_lists() {
   for (auto it = write_list.begin(); it != write_list.end(); ) {
     if (in_read_list(*it)) {
@@ -100,12 +99,11 @@ void Semantic_pass::resolve_read_write_lists() {
   }
 }
 
-void resolve_assign_lhs_rhs_lists() {
-  int assign_lhs_list_size = (int) assign_lhs_list.size();
-  int assign_rhs_list_size = (int) assign_rhs_list.size();
-  for (int i = 0; i < assign_lhs_list_size; i++) {
-    for (int j = 0; j < assign_lhs_list_size;j++) {
-      if (j > i && assign_lhs_list[i] == assign_rhs_list[j]) {
+void Semantic_pass::resolve_assign_lhs_rhs_lists() {
+  auto assign_rhs_list_size = assign_rhs_list.size();
+  for (const auto &lhs:assign_lhs_list) {
+    for (auto j = 0u; j < assign_rhs_list_size; ++j) {
+      if (lhs == assign_rhs_list[j]) {
         // Inefficient LNAST
       }
     }
