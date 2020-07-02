@@ -6,7 +6,7 @@ int main(void) {
 
   int line_num, pos1, pos2 = 0;
   Lnast* lnast = new Lnast();
-  Semantic_pass s;
+  Semantic_check s;
 
   // Testing Assign Operations ========================================================================================
 
@@ -504,6 +504,6 @@ int main(void) {
 
   // ==================================================================================================================
 
-  s.semantic_check(lnast);
+  s.do_check(lnast);
   return 0;
 }
