@@ -53,16 +53,25 @@ void Pass_bitwidth::process_logic(Node &node, XEdge_iterator &inp_edges, bool an
   bool logic_op        = node.has_driver_pin_connected(0);
   bool logic_reduction = node.has_driver_pin_connected(1);
 
+  if (logic_reduction) {
+    bwmap.emplace(node.get_driver_pin(1).get_compact(), Bitwidth_range(1));
+  }
+
   if (logic_op) {
     if (inp_edges.size() >= 1) {
       auto it = bwmap.find(inp_edges[0].driver.get_compact());
-      I(it != bwmap.end());
+      if(it == bwmap.end())
+				return;
+
       auto it2 = bwmap.emplace(node.get_driver_pin(0).get_compact(), it->second);   // Just copy BW for 1 input
       auto &bw = it2.first->second;
       if (inp_edges.size() > 1) {
         for (size_t i = 1; i < inp_edges.size(); ++i) {
           auto it3 = bwmap.find(inp_edges[1].driver.get_compact());
-          I(it3 != bwmap.end());
+          if (it3 == bwmap.end()) {
+						bwmap.erase(it2.first);
+						return;
+          }
           if (and_op) {
             bw.and_op(it3->second);
           }else{
@@ -84,9 +93,6 @@ void Pass_bitwidth::process_logic(Node &node, XEdge_iterator &inp_edges, bool an
     }
   }
 
-  if (logic_reduction) {
-    bwmap.emplace(node.get_driver_pin(1).get_compact(), Bitwidth_range(1));
-  }
 }
 
 void Pass_bitwidth::process_attr_set(Node &node, XEdge_iterator &inp_edges) {
@@ -98,7 +104,7 @@ void Pass_bitwidth::process_attr_set(Node &node, XEdge_iterator &inp_edges) {
 
 	I(dpin_key.has_name());
 	auto key = dpin_key.get_name();
-	if (key!="__bits" && key!= "__max" && key!="__min")
+	if (key.substr(0,6) !="__bits" && key.substr(0,5) != "__max" && key.substr(0,5) !="__min")
 		return; // attr to be handled by someone else
 
 	auto dpin_val = node.get_sink_pin(2).get_driver_pin();
@@ -106,8 +112,6 @@ void Pass_bitwidth::process_attr_set(Node &node, XEdge_iterator &inp_edges) {
 		return; // Can not handle now
 
 	std::string_view dpin_name;
-	if (node.get_sink_pin(0).get_driver_pin().has_name())
-		dpin_name = node.get_sink_pin(0).get_driver_pin().get_name();
 
 	auto val = dpin_val.get_node().get_type_const();
 
