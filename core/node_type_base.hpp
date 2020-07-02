@@ -82,8 +82,27 @@ enum Node_Type_Op : uint8_t {
   Last_invalid_Op
 };
 
+#include "frozen/map.h"
+#include "frozen/string.h"
+
 class Node_Type {
+public:
+  constexpr static inline frozen::map<frozen::string, int, 4> nentries [] = {
+    { {"", 0}, {"", 0}, {"",0} , {"",0} },
+    { {"foo", 1}, {"bar", 2}, {"",0} , {"",0} },
+    { {"xx", 1}, {"yy", 2}, {"",0} , {"",0} }
+  };
+
+  static constexpr Port_ID get_pid(Node_Type_Op op, frozen::string str) { return nentries[op].at(str); }
+  static constexpr frozen::string get_name(Node_Type_Op op, Port_ID pid) {
+    for (const auto e : nentries[op]) {
+      if (e.second == pid) return e.first;
+    }
+    return "invalid";
+  }
+
 private:
+
   static Node_Type *                                   table[Last_invalid_Op];
   static absl::flat_hash_map<std::string, Node_Type *> name2node;
 

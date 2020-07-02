@@ -1,0 +1,7 @@
+#  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+cc_library(
+   name = "headers",
+   hdrs = glob(["include/frozen/bits/*.h","include/frozen/*.h"]),
+   includes = [ "include" ], # Needed because some includes use <foo.h>
+   visibility = ["//visibility:public"],
+)
