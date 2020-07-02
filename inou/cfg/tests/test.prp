@@ -1,7 +1,10 @@
+tmp = $inp
+%out = tmp & -1
 
-tmp = 2
-tmp.__bits = 4
-tmp = 5
-%out = tmp
+
+//tmp = 2
+//tmp.__bits = 4
+//tmp = 5
+//%out = tmp
 
 
