@@ -176,7 +176,7 @@ size_t Lgtuple::add(LGraph *lg, const Lconst &constant) {
 }
 
 size_t Lgtuple::add(const Node_pin &_val_dpin) {
-  I(!_dpin.is_invalid());
+  I(!_val_dpin.is_invalid());
   auto pos = pos2tuple.size();
   if (pos == 0 && !val_dpin.is_invalid())
     pos++;
