@@ -624,6 +624,9 @@ void Pass_cprop::trans(LGraph *g) {
 		// No subs, inside side-effects, or flops/mems that that get connected latter
     auto op = node.get_type().op;
 
+    if (op == AttrGet_Op || op==AttrSet_Op)
+      continue;
+
     if (op == SubGraph_Op) {
       process_subgraph(node);
       continue;
@@ -675,7 +678,7 @@ void Pass_cprop::trans(LGraph *g) {
 
   for(auto node:g->fast()) {
     if (!node.has_outputs()) {
-      if (!node.is_type_sub())
+      if (!node.is_type_sub() && !node.is_type_attr())
         node.del_node();
       continue;
     }

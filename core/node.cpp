@@ -255,6 +255,12 @@ bool Node::is_type_sub() const { return current_g->is_sub(nid); }
 
 bool Node::is_type_const() const { return current_g->is_type_const(nid); }
 
+bool Node::is_type_attr() const {
+	auto op = current_g->get_type_op(nid);
+
+	return op == AttrGet_Op || AttrSet_Op;
+}
+
 Hierarchy_index Node::hierarchy_go_down() const {
   I(current_g->is_sub(nid));
   return top_g->ref_htree()->go_down(*this);
@@ -519,7 +525,7 @@ int Node::get_color() const {
 bool Node::has_color() const { return Ann_node_color::ref(current_g)->has_key(get_compact_class()); }
 
 
-// Pyrope control flow counter 
+// Pyrope control flow counter
 void     Node::set_cfcnt(uint32_t cfcnt) { Ann_node_cfcnt::ref(current_g)->set(get_compact_class(), cfcnt); }
 uint32_t Node::get_cfcnt() const { return Ann_node_cfcnt::ref(current_g)->get_val(get_compact_class()); }
 bool     Node::has_cfcnt() const { return Ann_node_cfcnt::ref(current_g)->has_key(get_compact_class()); }

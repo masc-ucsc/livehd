@@ -21,6 +21,7 @@ protected:
 
   void        process_const(Node &node);
   void        process_logic(Node &node, XEdge_iterator &inp_edges, bool and_op);
+  void        process_attr_set(Node &node, XEdge_iterator &inp_edges);
 
   void        garbage_collect_support_structures(XEdge_iterator &inp_edges);
   void        adjust_dpin_bits(Node_pin &dpin, Bitwidth_range &bw);

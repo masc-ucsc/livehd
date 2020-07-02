@@ -89,6 +89,31 @@ void Pass_bitwidth::process_logic(Node &node, XEdge_iterator &inp_edges, bool an
   }
 }
 
+void Pass_bitwidth::process_attr_set(Node &node, XEdge_iterator &inp_edges) {
+
+
+	auto dpin_key = node.get_sink_pin(1).get_driver_pin();
+	if (!dpin_key.get_node().is_type(TupKey_Op))
+		return; // Can not handle now
+
+	I(dpin_key.has_name());
+	auto key = dpin_key.get_name();
+	if (key!="__bits" && key!= "__max" && key!="__min")
+		return; // attr to be handled by someone else
+
+	auto dpin_val = node.get_sink_pin(2).get_driver_pin();
+	if (!dpin_val.get_node().is_type_const())
+		return; // Can not handle now
+
+	std::string_view dpin_name;
+	if (node.get_sink_pin(0).get_driver_pin().has_name())
+		dpin_name = node.get_sink_pin(0).get_driver_pin().get_name();
+
+	auto val = dpin_val.get_node().get_type_const();
+
+	fmt::print("attr_set name:{} key:{} val:{}\n", dpin_name, key, val.to_pyrope());
+}
+
 void Pass_bitwidth::garbage_collect_support_structures(XEdge_iterator &inp_edges) {
   for (auto e : inp_edges) {
     auto it = outcountmap.find(e.driver.get_node().get_compact());
@@ -98,11 +123,10 @@ void Pass_bitwidth::garbage_collect_support_structures(XEdge_iterator &inp_edges
       outcountmap.erase(it);
       for (auto parent_dpin : e.driver.get_node().out_connected_pins()) {
         auto it = bwmap.find(parent_dpin.get_compact());
-        I(it!=bwmap.end());
-
-        adjust_dpin_bits(parent_dpin, it->second);
-
-        bwmap.erase(it);
+        if (it != bwmap.end()) {
+          adjust_dpin_bits(parent_dpin, it->second);
+          bwmap.erase(it);
+        }
       }
     } else {
       it->second = n - 1;
@@ -139,6 +163,12 @@ void Pass_bitwidth::bw_pass(LGraph *lg) {
       process_const(node);
     } else if (op == Or_Op || op == And_Op || op == Xor_Op) {
       process_logic(node, inp_edges, op == And_Op);
+    } else if (op == TupKey_Op || op == TupGet_Op || op == TupAdd_Op) {
+			// Nothing to do for this
+    } else if (op == AttrSet_Op) {
+			process_attr_set(node, inp_edges);
+    } else {
+			fmt::print("FIXME: node:{} still not handled by bitwidth\n", node.debug_name());
     }
 
     garbage_collect_support_structures(inp_edges);
