@@ -8,10 +8,12 @@ class Semantic_pass {
 private:
 protected:
 
-  std::vector<std::string_view> write_list;
-  std::vector<std::string_view> read_list;
-  std::vector<std::string_view> assign_rhs_list;
-  std::vector<std::string_view> assign_lhs_list;
+  absl::flat_hash_set<std::string_view> write_list;
+  absl::flat_hash_set<std::string_view> read_list;
+  absl::flat_hash_set<std::string_view> assign_lhs_list;
+  absl::flat_hash_set<std::string_view> assign_rhs_list;
+
+  absl::flat_hash_set<std::string_view> inefficient_LNAST;
 
   bool is_primitive_op(const Lnast_ntype node_type);
   bool is_tree_structs(const Lnast_ntype node_type);
@@ -24,6 +26,7 @@ protected:
   void add_to_read_list(std::string_view node_name);
   void add_to_assign_lhs_list(std::string_view node_name);
   void add_to_assign_rhs_list(std::string_view node_name);
+  void find_lhs_name(int index);
 
   void resolve_read_write_lists();
   void resolve_assign_lhs_rhs_lists();

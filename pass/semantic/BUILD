@@ -8,6 +8,7 @@ cc_library(
     deps = [
         "//pass/common:pass",
         "//elab:elab",
+        "@com_google_absl//absl/container:flat_hash_set",
     ]
 )
 

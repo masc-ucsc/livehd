@@ -21,49 +21,41 @@ bool Semantic_pass::is_tree_structs(const Lnast_ntype node_type) {
 }
 
 bool Semantic_pass::in_write_list(std::string_view node_name) {
-  int write_list_size = (int) write_list.size();
-  for (int i = 0; i < write_list_size; i++) {
-    if (write_list[i] == node_name) {
-      return true;
-    }
+  if (write_list.contains(node_name)) {
+    return true;
+  } else {
+    return false;
   }
-  return false;
 }
 
 bool Semantic_pass::in_read_list(std::string_view node_name) {
-  int read_list_size = (int) read_list.size();
-  for (int i = 0; i < read_list_size; i++) {
-    if (read_list[i] == node_name) {
-      return true;
-    }
+  if (read_list.contains(node_name)) {
+    return true;
+  } else {
+    return false;
   }
-  return false;
 }
 
 bool Semantic_pass::in_assign_lhs_list(std::string_view node_name) {
-  int assign_lhs_list_size = (int) assign_lhs_list.size();
-  for (int i = 0; i < assign_lhs_list_size; i++) {
-    if (assign_lhs_list[i] == node_name) {
-      return true;
-    }
+  if (assign_lhs_list.contains(node_name)) {
+    return true;
+  } else {
+    return false;
   }
-  return false;
 }
 
 bool Semantic_pass::in_assign_rhs_list(std::string_view node_name) {
-  int assign_rhs_list_size = (int) assign_rhs_list.size();
-  for (int i = 0; i < assign_rhs_list_size; i++) {
-    if (assign_rhs_list[i] == node_name) {
-      return true;
-    }
+  if (assign_rhs_list.contains(node_name)) {
+    return true;
+  } else {
+    return false;
   }
-  return false;
 }
 
 void Semantic_pass::add_to_write_list(std::string_view node_name) {
   if (!in_write_list(node_name)) {
     if (node_name[0] != '%') {
-      write_list.push_back(node_name);
+      write_list.insert(node_name);
     }
   } else {
     if (node_name[0] == '_' && node_name[1] == '_' && node_name[2] == '_') {
@@ -74,41 +66,80 @@ void Semantic_pass::add_to_write_list(std::string_view node_name) {
 
 void Semantic_pass::add_to_read_list(std::string_view node_name) {
   if (!in_read_list(node_name)) {
-    read_list.push_back(node_name);
+    read_list.insert(node_name);
   }
 }
 
 void Semantic_pass::add_to_assign_lhs_list(std::string_view node_name) {
   if (!in_assign_lhs_list(node_name)) {
-    assign_lhs_list.push_back(node_name);
+    std::cout << "Added to LHS " << node_name << "\n";
+    assign_lhs_list.insert(node_name);
   }
 }
 
 void Semantic_pass::add_to_assign_rhs_list(std::string_view node_name) {
   if (!in_assign_rhs_list(node_name)) {
-    assign_rhs_list.push_back(node_name);
+    std::cout << "Added to RHS " << node_name << "\n";
+    assign_rhs_list.insert(node_name);
   }
 }
-  
-void Semantic_pass::resolve_read_write_lists() {
-  for (auto it = write_list.begin(); it != write_list.end(); ) {
-    if (in_read_list(*it)) {
-      write_list.erase(it);
+
+void Semantic_pass::find_lhs_name(int index) {
+  int lhs_index = 0;
+  for (auto lhs_name : assign_lhs_list) {
+    if (lhs_index == index && !inefficient_LNAST.contains(lhs_name)) {
+      inefficient_LNAST.insert(lhs_name);
+      break;
     } else {
-      it++;
+      lhs_index += 1;
     }
   }
 }
 
-void resolve_assign_lhs_rhs_lists() {
-  int assign_lhs_list_size = (int) assign_lhs_list.size();
-  int assign_rhs_list_size = (int) assign_rhs_list.size();
-  for (int i = 0; i < assign_lhs_list_size; i++) {
-    for (int j = 0; j < assign_lhs_list_size;j++) {
-      if (j > i && assign_lhs_list[i] == assign_rhs_list[j]) {
-        // Inefficient LNAST
+void Semantic_pass::resolve_read_write_lists() {
+  for (auto it : write_list) {
+    if (in_read_list(it)) {
+      write_list.erase(it);
+    }
+  }
+  if (write_list.size() != 0) {
+    auto first = write_list.begin();
+    std::cout << "Temporary Variable Warning: " << *first;
+    for (auto name : write_list) {
+      if (name == *first) {
+        continue;
+      }
+      std::cout << ", " << name;
+    }
+    std::cout << " were written but never read\n";
+  }
+}
+
+void Semantic_pass::resolve_assign_lhs_rhs_lists() {
+  int index_lhs = 0;
+  for (auto lhs_name : assign_lhs_list) {
+    
+    int index_rhs = 0;
+    for (auto rhs_name : assign_rhs_list) {
+      if (rhs_name == lhs_name && index_rhs > index_lhs) {
+        std::cout << "Found one: " << index_rhs << "\n";
+        find_lhs_name(index_rhs);
+      } else {
+        index_rhs += 1;
       }
     }
+    index_lhs += 1;
+  }
+  if (inefficient_LNAST.size() != 0) {
+    auto first = inefficient_LNAST.begin();
+    std::cout << "Inefficient LNAST Warning: " << *first;
+    for (auto name : inefficient_LNAST) {
+      if (name == *first) {
+        continue;
+      }
+      std::cout << ", " << name;
+    }
+    std::cout << " may be unnecessary\n";
   }
 }
 
@@ -428,14 +459,6 @@ void Semantic_pass::semantic_check(Lnast* lnast) {
     }
   }
 
+  resolve_assign_lhs_rhs_lists();
   resolve_read_write_lists();
-
-  int write_list_size = (int) write_list.size();
-  if (write_list_size != 0) {
-    std::cout << "Temporary Variable Warning: " << write_list[0];
-    for (int i = 1; i < write_list_size; i++) {
-      std::cout << ", " << write_list[i];
-    }
-    std::cout << " were written but never read\n";
-  }
 }
