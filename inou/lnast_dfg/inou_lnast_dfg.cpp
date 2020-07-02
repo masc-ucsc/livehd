@@ -755,7 +755,8 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
     node_dpin = dfg->add_graph_input(name.substr(1, name.size()-3), Port_invalid, 0);
   } else if (is_const(name)) {
     node_dpin = resolve_constant(dfg, Lconst(name)).setup_driver_pin();
-    fmt::print("const = {}\n", node_dpin.get_node().get_type_const().to_pyrope());
+    fmt::print("name:{}\n", name);
+    fmt::print("const:{}\n", node_dpin.get_node().get_type_const().to_pyrope());
   } else if (is_default_const(name)) {
     node_dpin = resolve_constant(dfg, Lconst(0)).setup_driver_pin();
   } else if (is_register(name)) {
