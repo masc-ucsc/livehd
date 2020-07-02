@@ -26,6 +26,7 @@ protected:
 
   void             set_type(Index_ID nid, Node_Type_Op op);
   const Node_Type &get_type(Index_ID nid) const;
+  Node_Type_Op     get_type_op(Index_ID nid) const;
 
   bool is_type_const(Index_ID nid) const;
   bool is_type_sub(Index_ID nid) const;

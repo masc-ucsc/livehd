@@ -369,7 +369,7 @@ void Inou_firrtl::create_node_stmt(Lnast &ln, const Lnast_nid &lhs, firrtl::Firr
 void Inou_firrtl::create_integer_object(Lnast &ln, const Lnast_nid &lnidx_const, firrtl::FirrtlPB_Expression* rhs_expr) {
   firrtl::FirrtlPB_Expression_IntegerLiteral *ilit = new firrtl::FirrtlPB_Expression_IntegerLiteral();
   auto lconst_holder = Lconst(ln.get_sname(lnidx_const));
-  auto lconst_str = lconst_holder.is_negative() ? absl::StrCat("-", lconst_holder.get_num().str()) : lconst_holder.get_num().str();
+  auto lconst_str = lconst_holder.to_pyrope();
   ilit->set_value(lconst_str);
 
   firrtl::FirrtlPB_Width *width = new firrtl::FirrtlPB_Width();
@@ -434,7 +434,7 @@ void Inou_firrtl::add_const_or_ref_to_primop(Lnast &ln, const Lnast_nid &lnidx, 
     // Lnidx is a number, so I need to make an IntegerLiteral message.
     firrtl::FirrtlPB_Expression_IntegerLiteral *rhs_prim_ilit = prim_op->add_const_();
     auto lconst_holder = Lconst(ln.get_sname(lnidx));
-    auto lconst_str = lconst_holder.is_negative() ? absl::StrCat("-", lconst_holder.get_num().str()) : lconst_holder.get_num().str();
+    auto lconst_str = lconst_holder.to_pyrope();
     rhs_prim_ilit->set_value(lconst_str);
   } else {
       I(false); //FIXME: Should const and ref be only things allowed on RHS?

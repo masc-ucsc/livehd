@@ -407,7 +407,7 @@ void Pass_cprop::merge_to_tuple(std::shared_ptr<Lgtuple> ctup, Node &node, Node
 		}
 
 		if (key_pos < 0 && key_name.empty()) {
-			if (val_dpin.get_node().get_type().op == TupAdd_Op) {
+			if (val_dpin.get_node().get_type().op == TupAdd_Op) { //hier-tuple 
 				auto it2 = node2tuple.find(val_dpin.get_node().get_compact());
 				I(it2 != node2tuple.end());
 				bool ok = ctup->add(it2->second);
@@ -624,6 +624,9 @@ void Pass_cprop::trans(LGraph *g) {
 		// No subs, inside side-effects, or flops/mems that that get connected latter
     auto op = node.get_type().op;
 
+    if (op == AttrGet_Op || op==AttrSet_Op)
+      continue;
+
     if (op == SubGraph_Op) {
       process_subgraph(node);
       continue;
@@ -675,7 +678,7 @@ void Pass_cprop::trans(LGraph *g) {
 
   for(auto node:g->fast()) {
     if (!node.has_outputs()) {
-      if (!node.is_type_sub())
+      if (!node.is_type_sub() && !node.is_type_attr())
         node.del_node();
       continue;
     }

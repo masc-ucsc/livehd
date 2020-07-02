@@ -193,11 +193,13 @@ public:
   Lconst get_type_lut() const;
 
   const Node_Type &get_type() const;
+  Node_Type_Op     get_type_op() const;
   void             set_type(const Node_Type_Op op);
   void             set_type(const Node_Type_Op op, uint32_t bits);
   bool             is_type(const Node_Type_Op op) const;
   bool             is_type_sub() const;
   bool             is_type_const() const;
+  bool             is_type_attr() const;
   bool             is_type_io() const;
   bool             is_type_loop_breaker() const;
 
@@ -214,6 +216,12 @@ public:
   bool            is_type_sub_present() const;
 
   Lconst get_type_const() const;
+
+  bool     has_driver_pin_connected(std::string_view name) const;
+  bool     has_sink_pin_connected(std::string_view name) const;
+
+  bool     has_driver_pin_connected(Port_ID pid) const;
+  bool     has_sink_pin_connected(Port_ID pid) const;
 
   Node_pin setup_driver_pin(std::string_view name);
   Node_pin setup_driver_pin(Port_ID pid);

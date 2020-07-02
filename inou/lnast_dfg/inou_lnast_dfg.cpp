@@ -412,8 +412,8 @@ Node Inou_lnast_dfg::process_ast_assign_op(LGraph *dfg, const Lnast_nid &lnidx_a
 
 void Inou_lnast_dfg::process_ast_dp_assign_op(LGraph *dfg, const Lnast_nid &lnidx_dp_assign) {
   auto dp_assign_dpin = process_ast_assign_op(dfg, lnidx_dp_assign).setup_driver_pin(0); //or as assign
-  dp_assign_dpin.ref_bitwidth()->dp_flag = true;
-};
+  fmt::print("FIXME: mark (AttrSet_Op) pin:{} as DP\n",dp_assign_dpin.debug_name());
+}
 
 
 
@@ -755,6 +755,8 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
     node_dpin = dfg->add_graph_input(name.substr(1, name.size()-3), Port_invalid, 0);
   } else if (is_const(name)) {
     node_dpin = resolve_constant(dfg, Lconst(name)).setup_driver_pin();
+    fmt::print("name:{}\n", name);
+    fmt::print("const:{}\n", node_dpin.get_node().get_type_const().to_pyrope());
   } else if (is_default_const(name)) {
     node_dpin = resolve_constant(dfg, Lconst(0)).setup_driver_pin();
   } else if (is_register(name)) {
@@ -890,8 +892,7 @@ void Inou_lnast_dfg::setup_lnast_to_lgraph_primitive_type_mapping() {
 void Inou_lnast_dfg::setup_clk(LGraph *dfg, Node &reg_node) {
   Node_pin clk_dpin;
   if (!dfg->is_graph_input("clock")) {
-    clk_dpin = dfg->add_graph_input("clock", Port_invalid, 0);
-    clk_dpin.ref_bitwidth()->e.set_ubits(1);
+    clk_dpin = dfg->add_graph_input("clock", Port_invalid, 1);
   } else {
     clk_dpin = dfg->get_graph_input("clock");
   }
@@ -943,45 +944,8 @@ void Inou_lnast_dfg::setup_lgraph_outputs_and_final_var_name(LGraph *dfg) {
       ;
     }
   }
-};
+}
 
 void Inou_lnast_dfg::setup_explicit_bits_info(LGraph *dfg){
 
-  //Todo:need to handle graph input bitwidth assignment
-  dfg->each_graph_input([this](const Node_pin &inp_dpin) {
-    auto editable_inp_pin = inp_dpin;
-    auto vname = "$" + std::string(editable_inp_pin.get_name());
-    if (vname == "$clock" || vname == "$rst")
-      return;
-
-    I (vname2bits_dpin.find(vname) != vname2bits_dpin.end());
-    auto bits_dpin = vname2bits_dpin[vname];
-    if (bits_dpin.get_node().get_type().op == Const_Op) {
-      auto bits = bits_dpin.get_node().get_type_const().to_i();
-      editable_inp_pin.ref_bitwidth()->e.set_ubits(bits);
-      editable_inp_pin.ref_bitwidth()->fixed = true;
-    } else {
-      I(false, "wait for copy-propagation"); //FIXME->sh: todo, something like foo.__bits = 3 + x will need this
-    }
-  });
-
-  for (const auto &node: dfg->fast()) {
-    for (const auto &out_edge : node.out_edges()) {
-      auto target_dpin = out_edge.driver;
-      if (target_dpin.has_ssa()) {
-        auto vname = target_dpin.get_prp_vname();
-
-        if (vname2bits_dpin.find(vname) != vname2bits_dpin.end()) {
-          auto bits_dpin = vname2bits_dpin[vname];
-          if (bits_dpin.get_node().get_type().op == Const_Op) {
-            auto bits = bits_dpin.get_node().get_type_const().to_i();
-            target_dpin.ref_bitwidth()->e.set_ubits(bits);
-            target_dpin.ref_bitwidth()->fixed = true;
-          } else {
-            I(false, "wait for copy-propagation"); //FIXME->sh: todo
-          }
-        }
-      }
-    }
-  }
-};
+}

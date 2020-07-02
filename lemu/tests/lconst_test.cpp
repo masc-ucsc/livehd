@@ -939,6 +939,25 @@ TEST_F(Lconst_test, boost) {
   EXPECT_EQ(c_x.str(),b_c_recover.str());
 }
 
+TEST_F(Lconst_test, trivial_vals) {
+  Lconst p_1(1);
+  Lconst p_2(2);
+  Lconst n_1 = p_1 - p_2;
+
+  EXPECT_EQ(p_1.to_i(), 1);
+  EXPECT_EQ(p_2.to_i(), 2);
+  EXPECT_EQ(n_1.to_i(), -1);
+
+  EXPECT_EQ(Lconst("-2").to_i(), -2);
+  EXPECT_EQ(Lconst("0").to_i(), 0);
+  EXPECT_EQ(Lconst("1").to_i(), 1);
+  EXPECT_EQ(Lconst("3278").to_i(), 3278);
+  EXPECT_EQ(Lconst("-13278").to_i(), -13278);
+
+  EXPECT_EQ(Lconst("-2").to_pyrope(), "-2");
+  EXPECT_EQ(Lconst("0").to_pyrope(), "0");
+  EXPECT_EQ(Lconst("1").to_pyrope(), "1");
+}
 
 TEST_F(Lconst_test, hexa_check) {
 
@@ -997,7 +1016,7 @@ TEST_F(Lconst_test, hexa_check) {
     EXPECT_EQ(ss.str(), orig);
 
     Lconst a(rnd_list[i]);
-    EXPECT_EQ(a.get_num(), c);
+    EXPECT_EQ(a.get_raw_num(), c);
   }
 }
 
@@ -1005,11 +1024,11 @@ TEST_F(Lconst_test, dec_check) {
 
   boost::multiprecision::cpp_int b10("10");
   Lconst p10("10");
-  EXPECT_EQ(p10.get_num(), b10);
+  EXPECT_EQ(p10.get_raw_num(), b10);
 
   Lconst p123("123");
   boost::multiprecision::cpp_int b123("123");
-  EXPECT_EQ(p123.get_num(), b123);
+  EXPECT_EQ(p123.get_raw_num(), b123);
 
   Lrand<size_t> rnd;
   const size_t n_const = rnd.between(200,3000);
@@ -1069,14 +1088,14 @@ TEST_F(Lconst_test, dec_check) {
     }
 
     Lconst a1(rnd_list[i]);
-    EXPECT_EQ(a1.get_num(), c);
+    EXPECT_EQ(a1.get_raw_num(), c);
 
     Lconst a2(padded);
-    if (a2.get_num() != c) {
+    if (a2.get_raw_num() != c) {
       a2.dump();
       a1.dump();
     }
-    EXPECT_EQ(a2.get_num(), c);
+    EXPECT_EQ(a2.get_raw_num(), c);
 
     auto fmt_a = a1.to_pyrope();
     Lconst b(fmt_a);
@@ -1085,7 +1104,7 @@ TEST_F(Lconst_test, dec_check) {
     //fmt::print("  a1:{}\n",a1.to_pyrope());
     //fmt::print("   b:{}\n",b.to_pyrope());
 
-    EXPECT_EQ(b.get_num(), c);
+    EXPECT_EQ(b.get_raw_num(), c);
   }
 }
 
@@ -1103,7 +1122,7 @@ TEST_F(Lconst_test, string) {
   EXPECT_TRUE(Lconst("_").is_string());
   EXPECT_FALSE(Lconst("0").is_string());
 
-  EXPECT_EQ(Lconst("0").get_num(), 0);
+  EXPECT_EQ(Lconst("0").get_raw_num(), 0);
 }
 
 TEST_F(Lconst_test, binary) {

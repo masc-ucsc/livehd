@@ -7,7 +7,6 @@ class Node;
 
 #include <vector>
 
-#include "ann_bitwidth.hpp"
 #include "ann_ssa.hpp"
 #include "lgedge.hpp"
 #include "mmap_map.hpp"
@@ -279,6 +278,7 @@ public:
     I(dst.is_driver() && is_sink());
     return connect_driver(dst);
   }
+  int  get_num_edges() const;
 
 #if 0
   Node_pin &operator=(const Node_pin &obj) {
@@ -322,6 +322,7 @@ public:
   void             set_prp_vname(std::string_view prp_vname);
   std::string_view get_prp_vname() const;
   bool             has_prp_vname() const;
+	void             dump_all_prp_vname() const;
 
   void  set_delay(float val);
   float get_delay() const;
@@ -335,9 +336,6 @@ public:
   void     set_offset(uint16_t offset);
   uint16_t get_offset() const;
 
-  const Ann_bitwidth &get_bitwidth() const;
-  Ann_bitwidth *      ref_bitwidth();
-  bool                has_bitwidth() const;
   const Ann_ssa &     get_ssa() const;
   Ann_ssa *           ref_ssa();
   bool                has_ssa() const;

@@ -1,10 +1,10 @@
+tmp = $inp
+%out = tmp & -1
 
-$in1.__bits as 8
-$in2.__bits as 8
-$in3.__bits as 8
-$out1.__bits as 8
-$out2.__bits as 8
 
-%out1 = $in1 + ($in2 << 3) + ($in3 >> 4);
-%out2 = %out1
+//tmp = 2
+//tmp.__bits = 4
+//tmp = 5
+//%out = tmp
+
 
