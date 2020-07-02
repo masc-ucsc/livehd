@@ -120,7 +120,7 @@ void Pass_bitwidth::process_attr_set(Node &node, XEdge_iterator &inp_edges) {
 
 	fmt::print("attr_set name:{} key:{} val:{}\n", dpin_name, key, val.to_pyrope());
 
-
+	dpin_val.dump_all_prp_vname();
 }
 
 void Pass_bitwidth::garbage_collect_support_structures(XEdge_iterator &inp_edges) {

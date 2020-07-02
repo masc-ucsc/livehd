@@ -953,6 +953,10 @@ TEST_F(Lconst_test, trivial_vals) {
   EXPECT_EQ(Lconst("1").to_i(), 1);
   EXPECT_EQ(Lconst("3278").to_i(), 3278);
   EXPECT_EQ(Lconst("-13278").to_i(), -13278);
+
+  EXPECT_EQ(Lconst("-2").to_pyrope(), "-2");
+  EXPECT_EQ(Lconst("0").to_pyrope(), "0");
+  EXPECT_EQ(Lconst("1").to_pyrope(), "1");
 }
 
 TEST_F(Lconst_test, hexa_check) {

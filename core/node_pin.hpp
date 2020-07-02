@@ -322,6 +322,7 @@ public:
   void             set_prp_vname(std::string_view prp_vname);
   std::string_view get_prp_vname() const;
   bool             has_prp_vname() const;
+	void             dump_all_prp_vname() const;
 
   void  set_delay(float val);
   float get_delay() const;

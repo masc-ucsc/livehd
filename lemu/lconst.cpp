@@ -466,9 +466,6 @@ std::string Lconst::to_pyrope() const {
 
 long int Lconst::to_i() const {
   I(is_i());
-  if (is_negative())
-    return -static_cast<long int>(num);
-
   return static_cast<long int>(num);
 }
 
