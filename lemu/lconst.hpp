@@ -203,5 +203,7 @@ public:
     auto b = std::max(bits,other.bits);
     return get_num(b) >= other.get_num(b);
   }
+
+  Number get_raw_num() const { return num; } // for debugging mostly
 };
 

@@ -119,6 +119,16 @@ void Node_pin::set_prp_vname(std::string_view prp_vname) {
   Ann_node_pin_prp_vname::ref(current_g)->set(get_compact_class_driver(), prp_vname);
 }
 
+#if 0
+void Node_pin::dump_all_prp_vname() {
+  auto *ref = Ann_node_pin_prp_vname::ref(current_g);
+
+  for (auto it : *ref) {
+  }
+}
+#endif
+
+
 void Node_pin::nuke() {
   I(false);  // TODO:
 }

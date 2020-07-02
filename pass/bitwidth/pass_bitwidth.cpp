@@ -104,7 +104,10 @@ void Pass_bitwidth::process_attr_set(Node &node, XEdge_iterator &inp_edges) {
 
 	I(dpin_key.has_name());
 	auto key = dpin_key.get_name();
-	if (key.substr(0,6) !="__bits" && key.substr(0,5) != "__max" && key.substr(0,5) !="__min")
+	bool set_bits = key.substr(0,6) =="__bits";
+	bool set_max  = key.substr(0,5) == "__max";
+	bool set_min  = key.substr(0,5) == "__min";
+	if (!set_bits && !set_max && !set_min)
 		return; // attr to be handled by someone else
 
 	auto dpin_val = node.get_sink_pin(2).get_driver_pin();
@@ -116,6 +119,8 @@ void Pass_bitwidth::process_attr_set(Node &node, XEdge_iterator &inp_edges) {
 	auto val = dpin_val.get_node().get_type_const();
 
 	fmt::print("attr_set name:{} key:{} val:{}\n", dpin_name, key, val.to_pyrope());
+
+
 }
 
 void Pass_bitwidth::garbage_collect_support_structures(XEdge_iterator &inp_edges) {
