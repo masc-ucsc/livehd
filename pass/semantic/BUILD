@@ -1,6 +1,6 @@
 #  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 cc_library(
-    name = "semantic_pass",
+    name = "pass_semantic",
     srcs = glob(["*.cpp"],exclude=["*test*.cpp"]),
     hdrs = glob(["*.hpp"]),
     visibility = ["//visibility:public"],
@@ -16,6 +16,6 @@ cc_test(
     name = "lnast_semantic_test",
     srcs = ["tests/lnast_semantic_test.cpp",],
     deps = [
-        ":semantic_pass",
+        ":pass_semantic",
         ],
     )

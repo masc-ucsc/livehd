@@ -1,26 +1,32 @@
 
+#include "semantic_check.hpp"
+
 #include <string_view>
 
 #include "pass.hpp"
-#include "semantic_check.hpp"
 
-bool Semantic_pass::is_primitive_op(const Lnast_ntype node_type) {
-  if (node_type.is_logical_op() || node_type.is_unary_op() || node_type.is_nary_op() || node_type.is_assign() || node_type.is_dp_assign() ||  node_type.is_as() || node_type.is_eq() || node_type.is_select() || node_type.is_bit_select() || node_type.is_logic_shift_right() || node_type.is_arith_shift_right() || node_type.is_arith_shift_left() || node_type.is_rotate_shift_right() || node_type.is_rotate_shift_left() || node_type.is_dynamic_shift_left() || node_type.is_dynamic_shift_right() ||  node_type.is_dot() || node_type.is_tuple() || node_type.is_tuple_concat()) {
+bool Semantic_check::is_primitive_op(const Lnast_ntype node_type) {
+  if (node_type.is_logical_op() || node_type.is_unary_op() || node_type.is_nary_op() || node_type.is_assign() ||
+      node_type.is_dp_assign() || node_type.is_as() || node_type.is_eq() || node_type.is_select() || node_type.is_bit_select() ||
+      node_type.is_logic_shift_right() || node_type.is_arith_shift_right() || node_type.is_arith_shift_left() ||
+      node_type.is_rotate_shift_right() || node_type.is_rotate_shift_left() || node_type.is_dynamic_shift_left() ||
+      node_type.is_dynamic_shift_right() || node_type.is_dot() || node_type.is_tuple() || node_type.is_tuple_concat()) {
     return true;
   } else {
     return false;
   }
 }
 
-bool Semantic_pass::is_tree_structs(const Lnast_ntype node_type) {
-  if (node_type.is_stmts() || node_type.is_cstmts() || node_type.is_if() || node_type.is_cond() || node_type.is_uif() || node_type.is_elif() || node_type.is_for() || node_type.is_while() || node_type.is_func_call() || node_type.is_func_def()) {
+bool Semantic_check::is_tree_structs(const Lnast_ntype node_type) {
+  if (node_type.is_stmts() || node_type.is_cstmts() || node_type.is_if() || node_type.is_cond() || node_type.is_uif() ||
+      node_type.is_elif() || node_type.is_for() || node_type.is_while() || node_type.is_func_call() || node_type.is_func_def()) {
     return true;
   } else {
     return false;
   }
 }
 
-bool Semantic_pass::in_write_list(std::string_view node_name) {
+bool Semantic_check::in_write_list(std::string_view node_name) {
   if (write_list.contains(node_name)) {
     return true;
   } else {
@@ -28,7 +34,7 @@ bool Semantic_pass::in_write_list(std::string_view node_name) {
   }
 }
 
-bool Semantic_pass::in_read_list(std::string_view node_name) {
+bool Semantic_check::in_read_list(std::string_view node_name) {
   if (read_list.contains(node_name)) {
     return true;
   } else {
@@ -36,7 +42,7 @@ bool Semantic_pass::in_read_list(std::string_view node_name) {
   }
 }
 
-bool Semantic_pass::in_assign_lhs_list(std::string_view node_name) {
+bool Semantic_check::in_assign_lhs_list(std::string_view node_name) {
   if (assign_lhs_list.contains(node_name)) {
     return true;
   } else {
@@ -44,7 +50,7 @@ bool Semantic_pass::in_assign_lhs_list(std::string_view node_name) {
   }
 }
 
-bool Semantic_pass::in_assign_rhs_list(std::string_view node_name) {
+bool Semantic_check::in_assign_rhs_list(std::string_view node_name) {
   if (assign_rhs_list.contains(node_name)) {
     return true;
   } else {
@@ -52,7 +58,7 @@ bool Semantic_pass::in_assign_rhs_list(std::string_view node_name) {
   }
 }
 
-void Semantic_pass::add_to_write_list(std::string_view node_name) {
+void Semantic_check::add_to_write_list(std::string_view node_name) {
   if (!in_write_list(node_name)) {
     if (node_name[0] != '%') {
       write_list.insert(node_name);
@@ -64,27 +70,27 @@ void Semantic_pass::add_to_write_list(std::string_view node_name) {
   }
 }
 
-void Semantic_pass::add_to_read_list(std::string_view node_name) {
+void Semantic_check::add_to_read_list(std::string_view node_name) {
   if (!in_read_list(node_name)) {
     read_list.insert(node_name);
   }
 }
 
-void Semantic_pass::add_to_assign_lhs_list(std::string_view node_name) {
+void Semantic_check::add_to_assign_lhs_list(std::string_view node_name) {
   if (!in_assign_lhs_list(node_name)) {
     std::cout << "Added to LHS " << node_name << "\n";
     assign_lhs_list.insert(node_name);
   }
 }
 
-void Semantic_pass::add_to_assign_rhs_list(std::string_view node_name) {
+void Semantic_check::add_to_assign_rhs_list(std::string_view node_name) {
   if (!in_assign_rhs_list(node_name)) {
     std::cout << "Added to RHS " << node_name << "\n";
     assign_rhs_list.insert(node_name);
   }
 }
 
-void Semantic_pass::find_lhs_name(int index) {
+void Semantic_check::find_lhs_name(int index) {
   int lhs_index = 0;
   for (auto lhs_name : assign_lhs_list) {
     if (lhs_index == index && !inefficient_LNAST.contains(lhs_name)) {
@@ -96,7 +102,7 @@ void Semantic_pass::find_lhs_name(int index) {
   }
 }
 
-void Semantic_pass::resolve_read_write_lists() {
+void Semantic_check::resolve_read_write_lists() {
   for (auto it : write_list) {
     if (in_read_list(it)) {
       write_list.erase(it);
@@ -115,10 +121,9 @@ void Semantic_pass::resolve_read_write_lists() {
   }
 }
 
-void Semantic_pass::resolve_assign_lhs_rhs_lists() {
+void Semantic_check::resolve_assign_lhs_rhs_lists() {
   int index_lhs = 0;
   for (auto lhs_name : assign_lhs_list) {
-    
     int index_rhs = 0;
     for (auto rhs_name : assign_rhs_list) {
       if (rhs_name == lhs_name && index_rhs > index_lhs) {
@@ -143,13 +148,14 @@ void Semantic_pass::resolve_assign_lhs_rhs_lists() {
   }
 }
 
-void Semantic_pass::check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_opr, const Lnast_ntype node_type) {
+void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_opr, const Lnast_ntype node_type) {
   if (!lnast->has_single_child(lnidx_opr)) {
     // Unary Operations
-    if (node_type.is_assign() || node_type.is_dp_assign() || node_type.is_not() || node_type.is_logical_not() ||  node_type.is_as()) {
-      auto lhs = lnast->get_first_child(lnidx_opr);
+    if (node_type.is_assign() || node_type.is_dp_assign() || node_type.is_not() || node_type.is_logical_not() ||
+        node_type.is_as()) {
+      auto lhs      = lnast->get_first_child(lnidx_opr);
       auto lhs_type = lnast->get_data(lhs).type;
-      auto rhs = lnast->get_sibling_next(lhs);
+      auto rhs      = lnast->get_sibling_next(lhs);
       auto rhs_type = lnast->get_data(rhs).type;
 
       if (!lhs_type.is_ref()) {
@@ -167,8 +173,12 @@ void Semantic_pass::check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_opr
         add_to_assign_lhs_list(lnast->get_name(lhs));
         add_to_assign_rhs_list(lnast->get_name(rhs));
       }
-    // N-ary Operations (need to add node_type.is_select())
-    } else if (node_type.is_dot() || node_type.is_logical_and() || node_type.is_logical_or() || node_type.is_nary_op() || node_type.is_eq() || node_type.is_bit_select() || node_type.is_logic_shift_right() || node_type.is_arith_shift_right() || node_type.is_arith_shift_left() || node_type.is_rotate_shift_right() || node_type.is_rotate_shift_left() || node_type.is_dynamic_shift_right() ||  node_type.is_dynamic_shift_left() || node_type.is_tuple_concat()) {
+      // N-ary Operations (need to add node_type.is_select())
+    } else if (node_type.is_dot() || node_type.is_logical_and() || node_type.is_logical_or() || node_type.is_nary_op() ||
+               node_type.is_eq() || node_type.is_bit_select() || node_type.is_logic_shift_right() ||
+               node_type.is_arith_shift_right() || node_type.is_arith_shift_left() || node_type.is_rotate_shift_right() ||
+               node_type.is_rotate_shift_left() || node_type.is_dynamic_shift_right() || node_type.is_dynamic_shift_left() ||
+               node_type.is_tuple_concat()) {
       for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
         const auto node_type_child = lnast->get_data(lnidx_opr_child).type;
 
@@ -188,12 +198,12 @@ void Semantic_pass::check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_opr
         }
       }
     } else if (node_type.is_tuple()) {
-      int num_of_ref = 0;
+      int num_of_ref    = 0;
       int num_of_assign = 0;
       for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
         const auto node_type_child = lnast->get_data(lnidx_opr_child).type;
 
-        if (node_type_child.is_ref()) {      
+        if (node_type_child.is_ref()) {
           num_of_ref += 1;
           // Store type 'ref' variables
           add_to_write_list(lnast->get_name(lnidx_opr_child));
@@ -212,7 +222,7 @@ void Semantic_pass::check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_opr
       for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
         const auto node_type_child = lnast->get_data(lnidx_opr_child).type;
 
-        if (node_type_child.is_ref()) {      
+        if (node_type_child.is_ref()) {
           num_of_ref += 1;
           // Store type 'ref' variables
           add_to_read_list(lnast->get_name(lnidx_opr_child));
@@ -230,10 +240,10 @@ void Semantic_pass::check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_opr
   }
 }
 
-void Semantic_pass::check_if_op(Lnast* lnast, const Lnast_nid &lnidx_opr) {
+void Semantic_check::check_if_op(Lnast *lnast, const Lnast_nid &lnidx_opr) {
   bool is_cstmts = false;
-  bool is_cond = false;
-  bool is_stmts = false;
+  bool is_cond   = false;
+  bool is_stmts  = false;
   for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
     const auto ntype_child = lnast->get_data(lnidx_opr_child).type;
 
@@ -255,9 +265,9 @@ void Semantic_pass::check_if_op(Lnast* lnast, const Lnast_nid &lnidx_opr) {
       }
     } else if (ntype_child.is_cond()) {
       if (lnast->has_single_child(lnidx_opr_child)) {
-        is_cond = true;
-        const auto  lnidx_opr_child_child = lnast->get_first_child(lnidx_opr_child);
-        const auto ntype_child_child = lnast->get_data(lnidx_opr_child_child).type;
+        is_cond                          = true;
+        const auto lnidx_opr_child_child = lnast->get_first_child(lnidx_opr_child);
+        const auto ntype_child_child     = lnast->get_data(lnidx_opr_child_child).type;
         if (!ntype_child_child.is_ref()) {
           Pass::error("If Operation Error: Condition must be Node type 'ref'\n");
         }
@@ -281,9 +291,9 @@ void Semantic_pass::check_if_op(Lnast* lnast, const Lnast_nid &lnidx_opr) {
   }
 }
 
-void Semantic_pass::check_for_op(Lnast* lnast, const Lnast_nid &lnidx_opr) {
-  bool stmts = false;
-  int num_of_ref = 0;
+void Semantic_check::check_for_op(Lnast *lnast, const Lnast_nid &lnidx_opr) {
+  bool stmts      = false;
+  int  num_of_ref = 0;
   for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
     const auto ntype_child = lnast->get_data(lnidx_opr_child).type;
 
@@ -307,12 +317,12 @@ void Semantic_pass::check_for_op(Lnast* lnast, const Lnast_nid &lnidx_opr) {
   }
   if (num_of_ref < 2) {
     Pass::error("For Operation Error: Missing Reference Node(s)\n");
-  } else if(!stmts) {
+  } else if (!stmts) {
     Pass::error("For Operation Error: Missing Statements Node\n");
   }
 }
 
-void Semantic_pass::check_while_op(Lnast* lnast, const Lnast_nid &lnidx_opr) {
+void Semantic_check::check_while_op(Lnast *lnast, const Lnast_nid &lnidx_opr) {
   bool cond = false;
   bool stmt = false;
   for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
@@ -322,7 +332,7 @@ void Semantic_pass::check_while_op(Lnast* lnast, const Lnast_nid &lnidx_opr) {
       cond = true;
       if (lnast->has_single_child(lnidx_opr_child)) {
         auto lnidx_opr_child_child = lnast->get_first_child(lnidx_opr_child);
-        auto ntype_child_child = lnast->get_data(lnidx_opr_child_child).type;
+        auto ntype_child_child     = lnast->get_data(lnidx_opr_child_child).type;
         if (!ntype_child_child.is_ref()) {
           Pass::error("While Operation Error: Condition must be Node type 'ref'\n");
         }
@@ -354,10 +364,10 @@ void Semantic_pass::check_while_op(Lnast* lnast, const Lnast_nid &lnidx_opr) {
   }
 }
 
-void Semantic_pass::check_func_def(Lnast* lnast, const Lnast_nid &lnidx_opr) {
-  int num_of_refs = 0;
-  bool cond = false;
-  bool stmts = false;
+void Semantic_check::check_func_def(Lnast *lnast, const Lnast_nid &lnidx_opr) {
+  int  num_of_refs = 0;
+  bool cond        = false;
+  bool stmts       = false;
   for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
     const auto ntype_child = lnast->get_data(lnidx_opr_child).type;
 
@@ -381,9 +391,9 @@ void Semantic_pass::check_func_def(Lnast* lnast, const Lnast_nid &lnidx_opr) {
       }
     } else if (ntype_child.is_cond()) {
       if (lnast->has_single_child(lnidx_opr_child)) {
-        cond = true;
+        cond                       = true;
         auto lnidx_opr_child_child = lnast->get_first_child(lnidx_opr_child);
-        auto ntype_child_child = lnast->get_data(lnidx_opr_child_child).type;
+        auto ntype_child_child     = lnast->get_data(lnidx_opr_child_child).type;
         if (!ntype_child_child.is_const() && !ntype_child_child.is_ref()) {
           Pass::error("Func Def Operation Error: Condition must be Node type 'ref' or 'const'\n");
         }
@@ -410,7 +420,7 @@ void Semantic_pass::check_func_def(Lnast* lnast, const Lnast_nid &lnidx_opr) {
   }
 }
 
-void Semantic_pass::check_func_call(Lnast* lnast, const Lnast_nid &lnidx_opr) {
+void Semantic_check::check_func_call(Lnast *lnast, const Lnast_nid &lnidx_opr) {
   int num_of_refs = 0;
   for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
     const auto ntype_child = lnast->get_data(lnidx_opr_child).type;
@@ -435,7 +445,7 @@ void Semantic_pass::check_func_call(Lnast* lnast, const Lnast_nid &lnidx_opr) {
 }
 
 // NOTE: Test does no consider tuple operations yet
-void Semantic_pass::semantic_check(Lnast* lnast) {
+void Semantic_check::do_check(Lnast *lnast) {
   // Get Lnast Root
   const auto top = lnast->get_root();
   // Get Lnast top statements

@@ -757,6 +757,8 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
     node_dpin = resolve_constant(dfg, Lconst(name)).setup_driver_pin();
     fmt::print("name:{}\n", name);
     fmt::print("const:{}\n", node_dpin.get_node().get_type_const().to_pyrope());
+    fmt::print("const:{}\n", Lconst(name).to_pyrope());
+    fmt::print("eq:{}\n", Lconst(name) != Lconst(1));
   } else if (is_default_const(name)) {
     node_dpin = resolve_constant(dfg, Lconst(0)).setup_driver_pin();
   } else if (is_register(name)) {

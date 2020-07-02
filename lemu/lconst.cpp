@@ -85,7 +85,7 @@ Lconst::Lconst(absl::Span<unsigned char> v) {
   uint16_t c1 = v[1];
   uint16_t c2 = v[2];
 
-  explicit_str  = (c0 & 0x18)?true:false;
+  explicit_str  = (c0 & 0x10)?true:false;
   explicit_sign = (c0 & 0x08)?true:false;
   explicit_bits = (c0 & 0x04)?true:false;
   sign          = (c0 & 0x02)?true:false;

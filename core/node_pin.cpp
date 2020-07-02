@@ -125,7 +125,7 @@ void Node_pin::dump_all_prp_vname() const {
   for (auto it : *ref) {
 		if(current_g->is_valid_node_pin(it.first.idx)) {
 			Node_pin a(current_g, it.first);
-			fmt::print("prp_vname pin:{} vname:{}\n", a.debug_name(), it.second);
+			fmt::print("prp_vname pin:{} vname:{}\n", a.debug_name(), ref->get_sview(it.second));
 		}
   }
 }
