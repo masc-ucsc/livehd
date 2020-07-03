@@ -105,8 +105,10 @@ private:
   void      do_ssa_trans               (const Lnast_nid  &top_nid);
   void      ssa_lhs_handle_a_statement (const Lnast_nid  &psts_nid, const Lnast_nid &opr_nid);
   void      ssa_rhs_handle_a_statement (const Lnast_nid  &psts_nid, const Lnast_nid &opr_nid);
-  void      ssa_lhs_if_subtree             (const Lnast_nid  &if_nid);
+  void      ssa_lhs_if_subtree         (const Lnast_nid  &if_nid);
   void      ssa_rhs_if_subtree         (const Lnast_nid  &if_nid);
+  void      opr_lhs_merge_if_subtree   (const Lnast_nid  &if_nid);
+  void      opr_lhs_merge_handle_a_statement (const Lnast_nid  &psts_nid, const Lnast_nid &opr_nid);
   void      ssa_handle_phi_nodes       (const Lnast_nid  &if_nid);
   void      resolve_phi_nodes          (const Lnast_nid  &cond_nid, Phi_rtable &true_table, Phi_rtable &false_table);
   void      update_phi_resolve_table   (const Lnast_nid  &psts_nid, const Lnast_nid &target_nid);
@@ -116,6 +118,7 @@ private:
   Lnast_nid check_phi_table_parents_chain (std::string_view brother_name, const Lnast_nid &psts_nid, bool originate_from_csts);
   void      resolve_ssa_lhs_subs                (const Lnast_nid &psts_nid);
   void      resolve_ssa_rhs_subs                (const Lnast_nid &psts_nid);
+  void      opr_lhs_merge                       (const Lnast_nid &psts_nid);
   void      update_global_lhs_ssa_cnt_table     (const Lnast_nid &target_nid);
   void      respect_latest_global_lhs_ssa       (const Lnast_nid &target_nid);
   void      reg_ini_global_lhs_ssa_cnt_table    (const Lnast_nid &target_nid); //just initialize global reg when appeared in rhs
@@ -179,6 +182,7 @@ public:
   bool             is_lhs    (const Lnast_nid &psts_nid, const Lnast_nid &opr_nid);
   bool             is_reg    (std::string_view name) { return name.substr(0,1) == "#"; }
   std::string_view get_name  (const Lnast_nid &nid)  { return get_data(nid).token.get_text(); }
+  std::string_view get_vname (const Lnast_nid &nid)  { return get_data(nid).token.get_text(); } //better expression for LGraph passes
   Lnast_ntype      get_type  (const Lnast_nid &nid)  { return get_data(nid).type; }
   uint8_t          get_subs  (const Lnast_nid &nid)  { return get_data(nid).subs; }
   Token            get_token (const Lnast_nid &nid)  { return get_data(nid).token; }

@@ -713,14 +713,16 @@ public:
 };
 
 
-// VN = variable name, AN = attribute name, AV = attribute value
+// VN = variable name, AN = attribute name, AV = attribute value, ACI/O = attributes connection input/output
 class Node_Type_AttrSet : public Node_Type {
 public:
   Node_Type_AttrSet() : Node_Type("attr_set", AttrSet_Op, false) {
     inputs.push_back("VN");
     inputs.push_back("AN");
     inputs.push_back("AV");
+    inputs.push_back("ACI");
     outputs.push_back("Y");
+    outputs.push_back("ACO");
   };
 };
 

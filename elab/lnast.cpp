@@ -57,7 +57,7 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
   Phi_rtable top_phi_resolve_table;
   phi_resolve_tables[top_sts_nid] = top_phi_resolve_table;
 
-  fmt::print("\nStep-1: Analyze LHS or RHS of tuple dot/sel\n");
+  fmt::print("\nStep-1: Analyze LHS or RHS of Tuple Dot/Sel\n");
   analyze_dot_lrhs(top_sts_nid);
 
   fmt::print("\nStep-2: Tuple_Add/Tuple_Get Analysis\n");
@@ -69,6 +69,11 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
   //see Note I
   fmt::print("\nStep-4: RHS SSA\n");
   resolve_ssa_rhs_subs(top_sts_nid);
+
+
+  fmt::print("\nStep-5: Operator LHS Merge\n");
+  opr_lhs_merge(top_sts_nid);
+
 
   fmt::print("\nLNAST SSA Transformation Finished!\n");
   fmt::print("====================================\n");
@@ -566,6 +571,64 @@ void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
     update_rhs_ssa_cnt_table(psts_nid, target_nid);
   }
 }
+
+
+void Lnast::opr_lhs_merge(const Lnast_nid &psts_nid) {
+  for (const auto &opr_nid : children(psts_nid)) {
+    if (get_type(opr_nid).is_func_def()) {
+      continue;
+    } else if (get_type(opr_nid).is_if()) {
+      opr_lhs_merge_if_subtree(opr_nid);
+    } else if (get_type(opr_nid).is_assign()){
+      opr_lhs_merge_handle_a_statement(psts_nid, opr_nid);
+    }
+  }
+}
+
+
+void Lnast::opr_lhs_merge_if_subtree(const Lnast_nid &if_nid) {
+  for (const auto &itr_nid : children(if_nid)) {
+    if (get_type(itr_nid).is_stmts()) {
+      Cnt_rtable if_sts_ssa_rhs_cnt_table;
+      ssa_rhs_cnt_tables[itr_nid] = if_sts_ssa_rhs_cnt_table;
+
+      for (const auto &opr_nid : children(itr_nid)) {
+        I(!get_type(opr_nid).is_func_def());
+        if (get_type(opr_nid).is_if())
+          opr_lhs_merge_if_subtree(opr_nid);
+        else if (get_type(opr_nid).is_assign())
+          opr_lhs_merge_handle_a_statement(itr_nid, opr_nid);
+      }
+    } else if (get_type(itr_nid).is_cstmts()) {
+      for (const auto &opr_nid : children(itr_nid)){
+        if (get_type(opr_nid).is_assign())
+          opr_lhs_merge_handle_a_statement(itr_nid, opr_nid);
+      }
+    }
+  }
+}
+
+
+void Lnast::opr_lhs_merge_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &assign_nid) {
+  const auto  c0_assign      = get_first_child(assign_nid);
+  const auto  c0_assign_name = get_name(c0_assign);
+  const auto  c1_assign_name = get_name(get_sibling_next(c0_assign));
+  fmt::print("c0_assign_name:{}\n", c0_assign_name);
+  fmt::print("c1_assign_name:{}\n", c1_assign_name);
+
+  if (c1_assign_name.substr(0,3) == "___") {
+    auto opr_nid = get_sibling_prev(assign_nid);
+    auto c0_opr = get_first_child(opr_nid);
+    I(get_name(c0_opr) == c1_assign_name);
+    fmt::print("c0_opr_name:{}\n", get_name(c0_opr));
+    ref_data(c0_opr)->token = get_data(c0_assign).token;
+    ref_data(c0_opr)->type = get_data(c0_assign).type;
+    ref_data(c0_opr)->subs = get_data(c0_assign).subs;
+    ref_data(assign_nid)->type = Lnast_ntype::create_invalid();
+  }
+}
+
+
 
 
 //handle cases: A.foo = A[2] or A.foo = A[1] + A[2] + A.bar; where lhs rhs are both the struct elements;

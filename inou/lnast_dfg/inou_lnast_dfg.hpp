@@ -14,26 +14,19 @@
 #include "pass_bitwidth.hpp"
 #include "pass_lgraph_to_lnast.hpp"
 
+
 class Inou_lnast_dfg : public Pass {
 private:
   std::shared_ptr<Lnast> lnast;
 
+  absl::flat_hash_map<std::string_view, Node_pin>                       vname2attr_dpin; //for dummy attribute node construction, vn = variable non-ssa name, dpin = last attr dpin within "any" attributes
   absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Node_Type_Op>       primitive_type_lnast2lg;
   absl::flat_hash_map<std::string, Node_pin>                            name2dpin;       // for scalar variable
-  absl::flat_hash_map<std::string_view, Node_pin>                       vname2bits_dpin; // variable name (no ssa) to bitwidth
-  absl::flat_hash_map<std::pair<std::string, std::string>, std::string> tup_keyname2pos;
-  absl::flat_hash_map<std::string, std::pair<Node_pin, uint16_t>>       tn2head_maxlen; 
+  absl::flat_hash_map<std::string_view, Node_pin>                       vname2bits_dpin; // variable name (no ssa) to bitwidth //FIXME->sh: to be deprecated after new BW
+  absl::flat_hash_map<std::pair<std::string, std::string>, std::string> tup_keyname2pos; // FIXME->sh: should be able to be deprecated, check after the BW is working
+  absl::flat_hash_map<std::string, std::pair<Node_pin, uint16_t>>       tn2head_maxlen;  // FIXME->sh: should be able to be deprecated, check after the BW is working
 
   uint32_t cfcnt = 0; //global control flow counter of a program
-
-  static constexpr uint8_t TN = 0;  // tuple name
-  static constexpr uint8_t KN = 1;  // tuple element key name
-  static constexpr uint8_t KP = 2;  // tuple element key position
-  static constexpr uint8_t KV = 3;  // tuple element key value
-  
-  static constexpr uint8_t VN = 0;  // variable name 
-  static constexpr uint8_t AN = 1;  // attribute name
-  static constexpr uint8_t AV = 2;  // attribute value
 
 protected:
   std::vector<LGraph *> do_tolg(std::shared_ptr<Lnast> l);
@@ -68,7 +61,7 @@ protected:
   void process_ast_tuple_phi_add_op (LGraph *dfg, const Lnast_nid &lnidx_tpa);
 
 
-  Node_pin     setup_node_opr_and_lhs         (LGraph *dfg, const Lnast_nid &lnidx_opr);
+  Node         setup_node_opr_and_lhs         (LGraph *dfg, const Lnast_nid &lnidx_opr);
   Node_pin     setup_node_assign_and_lhs      (LGraph *dfg, const Lnast_nid &lnidx_opr);
   Node_pin     setup_ref_node_dpin            (LGraph *dfg, const Lnast_nid &lnidx, bool from_phi = false, bool from_concat = false);
   Node_Type_Op decode_lnast_op                (const Lnast_nid &lnidx_opr);
@@ -98,9 +91,12 @@ protected:
   static void  collect_node_for_deleting     (const Node &node, absl::flat_hash_set<Node> &to_be_deleted);
 
 
+  // attribute related
+  bool check_new_var_chain (const Lnast_nid &lnidx_opr);
+
 
   // constant resolving
-  Node         resolve_constant       (LGraph *g, const Lconst &value);
+  Node resolve_constant (LGraph *g, const Lconst &value);
 
 
   // eprp callbacks
