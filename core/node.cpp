@@ -258,7 +258,7 @@ bool Node::is_type_const() const { return current_g->is_type_const(nid); }
 bool Node::is_type_attr() const {
 	auto op = current_g->get_type_op(nid);
 
-	return op == AttrGet_Op || AttrSet_Op;
+	return op == AttrGet_Op || op == AttrSet_Op || op == TupKey_Op;
 }
 
 Hierarchy_index Node::hierarchy_go_down() const {

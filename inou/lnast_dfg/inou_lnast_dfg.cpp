@@ -976,7 +976,7 @@ void Inou_lnast_dfg::setup_lgraph_outputs_and_final_var_name(LGraph *dfg) {
   for (auto node: dfg->fast()) {
     auto dpin = node.get_driver_pin(0); 
     fmt::print("hello dpin:{}\n", dpin.debug_name());
-    if (dpin.has_ssa()) {
+    if (dpin.has_ssa() && dpin.has_prp_vname()) {
       auto vname = dpin.get_prp_vname();
       auto subs  = dpin.ref_ssa()->get_subs();
 
