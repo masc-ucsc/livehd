@@ -1,6 +1,6 @@
 #!/bin/bash
 rm -rf ./lgdb
-pts='counter firrtl_tail2 firrtl_tail3 counter_nested_if'
+pts='counter_nested_if firrtl_tail3 firrtl_tail2 counter '
 # pts='tuple_if2 out_ssa  logic  tuple_if  bits_rhs  firrtl_tail3  firrtl_tail2 
 #      nested_if  counter  counter_nested_if 
 #      adder_stage  if2 if  if3_err 
