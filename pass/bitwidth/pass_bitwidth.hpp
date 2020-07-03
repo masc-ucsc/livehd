@@ -13,6 +13,12 @@ protected:
   int max_iterations;
   bool must_perform_backward;
 
+  enum class Attr { Set_other, Set_bits, Set_max, Set_min };
+
+  static Attr get_key_attr(std::string_view key);
+
+  bool not_finished;
+
   absl::flat_hash_map<Node_pin::Compact, Bitwidth_range>  bwmap;
   absl::flat_hash_map<Node::Compact, uint32_t>            outcountmap;
 
@@ -32,6 +38,8 @@ protected:
   void        bw_pass(LGraph *lg);
 
 public:
+  bool is_finished() const { return !not_finished; }
+
   explicit    Pass_bitwidth(const Eprp_var &var);
   static void setup();
 };
