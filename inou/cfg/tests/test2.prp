@@ -1,19 +1,14 @@
-T = 3               // T0 = 
+$en.__bits  = 1
+$inp.__bits = 4
+%out.__bits = 4
 
-if (1 == 1) {
-  T = T + 4         // T1 =
-  T.__bits = 5      // T2 = 
-  T = T + 6         // T3 = 
+if ($en) {
+  #x = $inp
 } else {
-  T.__bits = 7      // T4 = 
-  T = 8             // T5 = ; new attr chain
-  T.__bits = 9      // T6
+  foo = #x - 1
+  bar = foo >> 1
+  bar := foo
+  #x = bar
 }
-                    // T7 = phi
-T = T + 10          // T8
-%out = T   
 
-T = 11              // T9 = ; new attr chain
-T.__bits = 12       // T10
-
-%out2 = T + T.__bits //23
+%out := #x.__q_pin
