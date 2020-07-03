@@ -20,7 +20,10 @@ protected:
   void        do_trans(LGraph *orig);
 
   void        process_const(Node &node);
+  void        process_sum(Node &node, XEdge_iterator &inp_edges);
   void        process_logic(Node &node, XEdge_iterator &inp_edges, bool and_op);
+  void        process_attr_set_new_attr(Node &node, XEdge_iterator &inp_edges);
+  void        process_attr_set_propagate(Node &node, XEdge_iterator &inp_edges);
   void        process_attr_set(Node &node, XEdge_iterator &inp_edges);
 
   void        garbage_collect_support_structures(XEdge_iterator &inp_edges);

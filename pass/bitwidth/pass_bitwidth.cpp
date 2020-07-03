@@ -49,6 +49,26 @@ void Pass_bitwidth::process_const(Node &node) {
 	adjust_dpin_bits(dpin, it.first->second);
 }
 
+void Pass_bitwidth::process_sum(Node &node, XEdge_iterator &inp_edges) {
+  I(inp_edges.size()); // Dangling sum??? (delete)
+
+  auto it = bwmap.find(inp_edges[0].driver.get_compact());
+  if(it == bwmap.end())
+    return;
+
+  auto it2 = bwmap.emplace(node.get_driver_pin(0).get_compact(), it->second);   // Just copy BW for 1 input
+  auto &bw = it2.first->second;
+
+  for (size_t i = 1; i < inp_edges.size(); ++i) {
+    auto it3 = bwmap.find(inp_edges[1].driver.get_compact());
+    if (it3 == bwmap.end()) {
+      bwmap.erase(it2.first);
+      return;
+    }
+    bw.expand(it3->second, false);
+  }
+}
+
 void Pass_bitwidth::process_logic(Node &node, XEdge_iterator &inp_edges, bool and_op) {
   bool logic_op        = node.has_driver_pin_connected(0);
   bool logic_reduction = node.has_driver_pin_connected(1);
@@ -95,10 +115,8 @@ void Pass_bitwidth::process_logic(Node &node, XEdge_iterator &inp_edges, bool an
 
 }
 
-void Pass_bitwidth::process_attr_set(Node &node, XEdge_iterator &inp_edges) {
-
-
-	auto dpin_key = node.get_sink_pin(1).get_driver_pin();
+void Pass_bitwidth::process_attr_set_new_attr(Node &node, XEdge_iterator &inp_edges) {
+	auto dpin_key = inp_edges[1].driver;
 	if (!dpin_key.get_node().is_type(TupKey_Op))
 		return; // Can not handle now
 
@@ -110,17 +128,106 @@ void Pass_bitwidth::process_attr_set(Node &node, XEdge_iterator &inp_edges) {
 	if (!set_bits && !set_max && !set_min)
 		return; // attr to be handled by someone else
 
-	auto dpin_val = node.get_sink_pin(2).get_driver_pin();
+	auto dpin_val = inp_edges[2].driver;
 	if (!dpin_val.get_node().is_type_const())
 		return; // Can not handle now
 
+  auto attr_dpin = node.get_driver_pin(0);
+
 	std::string_view dpin_name;
+  if (attr_dpin.has_name())
+    dpin_name = attr_dpin.get_name();
 
 	auto val = dpin_val.get_node().get_type_const();
 
-	fmt::print("attr_set name:{} key:{} val:{}\n", dpin_name, key, val.to_pyrope());
+  auto it = bwmap.find(inp_edges[0].driver.get_compact());
+  if (it == bwmap.end()) {
+    // Likely to not converge
+    fmt::print("attr_set unable to find bwmap to AttrSet name:{} key:{} val:{}\n", dpin_name, key, val.to_pyrope());
+    return;
+  }
+  auto &bw = it->second;
 
-	dpin_val.dump_all_prp_vname();
+  fmt::print("attr_set name:{} key:{} val:{} bw_bits:{}\n", dpin_name, key, val.to_pyrope(), bw.get_bits());
+
+  if (set_bits) {
+    if (bw.get_bits() && bw.get_bits() > val.to_i()) {
+      Pass::error("bitwidth missmatch. Variable {} needs {}bits, but constrained to {}bits\n", dpin_name, bw.get_bits(), val.to_i());
+    } else {
+      if (bw.is_always_positive())
+        bw.set_ubits(val.to_i());
+      else
+        bw.set_sbits(val.to_i());
+    }
+  }else if (set_max) {
+    I(false); // FIXME: todo
+  } else if (set_min) {
+    I(false);  // FIXME: todo
+  }
+
+  for (auto out_dpin : node.out_connected_pins()) {
+    out_dpin.set_bits(bw.get_bits());
+    auto it = bwmap.emplace(out_dpin.get_compact(), bw);
+  }
+
+  // dpin_val.dump_all_prp_vname();
+}
+
+void Pass_bitwidth::process_attr_set_propagate(Node &node, XEdge_iterator &inp_edges) {
+  I(inp_edges.size()==2);
+  I(inp_edges[0].sink.get_pid() == 0); // value
+  I(inp_edges[1].sink.get_pid() == 3); // parent AttrSet
+
+  auto attr_dpin = node.get_driver_pin(0);
+	std::string_view dpin_name;
+  if (attr_dpin.has_name())
+    dpin_name = attr_dpin.get_name();
+
+  auto data_dpin = inp_edges[0].driver;
+  auto parent_attr_dpin = inp_edges[1].driver;
+
+  auto data_it = bwmap.find(data_dpin.get_compact());
+  if (data_it == bwmap.end()) {
+    // Likely to not converge
+    fmt::print("attr_set propagate bwmap to AttrSet name:{}\n", dpin_name);
+    return;
+  }
+  auto &data_bw = data_it->second;
+
+  auto parent_attr_it = bwmap.find(parent_attr_dpin.get_compact());
+  if (parent_attr_it == bwmap.end()) {
+    // Likely to not converge
+    fmt::print("attr_set propagate bwmap to AttrSet name:{}\n", dpin_name);
+    return;
+  }
+  auto &parent_attr_bw = parent_attr_it->second;
+
+  fmt::print("attr_set name:{} parent_attr.bits:{} data_bw.bits:{}\n", dpin_name, parent_attr_bw.get_bits(), data_bw.get_bits());
+
+  if (parent_attr_bw.get_bits() && data_bw.get_bits()) {
+    if (parent_attr_bw.get_bits() < data_bw.get_bits()) {
+      Pass::error("bitwidth missmatch. Variable {} needs {}bits, but constrained to {}bits\n", dpin_name, data_bw.get_bits(), parent_attr_bw.get_bits());
+    }else if (parent_attr_bw.get_max() < data_bw.get_max()) {
+      Pass::error("bitwidth missmatch. Variable {} needs {}max, but constrained to {}max\n", dpin_name, data_bw.get_max().to_pyrope(), parent_attr_bw.get_max().to_pyrope());
+    } else if (parent_attr_bw.get_min() > data_bw.get_min()) {
+      Pass::error("bitwidth missmatch. Variable {} needs {}min, but constrained to {}min\n", dpin_name, data_bw.get_min().to_pyrope(), parent_attr_bw.get_min().to_pyrope());
+    }
+  }
+
+  for (auto out_dpin : node.out_connected_pins()) {
+    out_dpin.set_bits(parent_attr_bw.get_bits());
+    bwmap.emplace(out_dpin.get_compact(), parent_attr_bw);
+  }
+}
+
+void Pass_bitwidth::process_attr_set(Node &node, XEdge_iterator &inp_edges) {
+
+  if (node.has_sink_pin_connected(1)) {
+    process_attr_set_new_attr(node, inp_edges);
+  }else{
+    process_attr_set_propagate(node, inp_edges);
+  }
+
 }
 
 void Pass_bitwidth::garbage_collect_support_structures(XEdge_iterator &inp_edges) {
@@ -132,7 +239,7 @@ void Pass_bitwidth::garbage_collect_support_structures(XEdge_iterator &inp_edges
       outcountmap.erase(it);
       for (auto parent_dpin : e.driver.get_node().out_connected_pins()) {
         auto it = bwmap.find(parent_dpin.get_compact());
-        if (it != bwmap.end()) {
+        if (it != bwmap.end()) { // Not all the nodes create bwmap (impossible to infer do not)
           adjust_dpin_bits(parent_dpin, it->second);
           bwmap.erase(it);
         }
@@ -163,19 +270,26 @@ void Pass_bitwidth::bw_pass(LGraph *lg) {
   for (auto node : lg->forward()) {
 
     auto inp_edges = node.inp_edges();
+    auto op        = node.get_type_op();
+
+    if (inp_edges.empty() && (op!=Const_Op && op!=SubGraph_Op && op!=LUT_Op && op!=TupKey_Op)) {
+      fmt::print("pass.bitwidth: removing dangling node:{}\n",node.debug_name());
+      node.del_node();
+      continue;
+    }
 
     outcountmap[node.get_compact()] = node.get_num_outputs();
 
-    auto op = node.get_type_op();
-
     if (op == Const_Op) {
       process_const(node);
-    } else if (op == Or_Op || op == And_Op || op == Xor_Op) {
-      process_logic(node, inp_edges, op == And_Op);
     } else if (op == TupKey_Op || op == TupGet_Op || op == TupAdd_Op) {
 			// Nothing to do for this
+    } else if (op == Or_Op || op == And_Op || op == Xor_Op) {
+      process_logic(node, inp_edges, op == And_Op);
     } else if (op == AttrSet_Op) {
 			process_attr_set(node, inp_edges);
+    } else if (op == Sum_Op) {
+			process_sum(node, inp_edges);
     } else {
 			fmt::print("FIXME: node:{} still not handled by bitwidth\n", node.debug_name());
     }

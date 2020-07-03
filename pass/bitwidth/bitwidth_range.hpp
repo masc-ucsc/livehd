@@ -8,6 +8,7 @@
 class __attribute__((packed)) Bitwidth_range {
 protected:
   static int64_t round_power2(int64_t x);
+  static Lconst to_lconst(bool overflow, int64_t val);
 
 public:
   int64_t max = 0;
@@ -29,6 +30,8 @@ public:
   void    set_sbits(uint16_t size);
   void    set_ubits(uint16_t size);
   uint16_t get_bits() const;
+  Lconst   get_max() const { return to_lconst(overflow, max); };
+  Lconst  get_min() const { return to_lconst(overflow, min); };
 
   void    expand(const Bitwidth_range &i, bool round2);
 	void    and_op(const Bitwidth_range &range2);

@@ -22,6 +22,24 @@ int64_t Bitwidth_range::round_power2(int64_t x) {
   return -ux_r;
 }
 
+Lconst Bitwidth_range::to_lconst(bool overflow, int64_t val) {
+  if (val==0)
+    return Lconst(0);
+
+  if (overflow) {
+    if (val > 0) {
+      return Lconst(1).lsh_op(val) - 1;
+    } else {
+      return Lconst(0) - (Lconst(1).lsh_op(-val) - 1);
+    }
+  } else {
+    if (val>0)
+      return Lconst(val);
+    else
+      return Lconst(0) - Lconst(-val);
+  }
+}
+
 Bitwidth_range::Bitwidth_range(const Lconst &val) {
   if (val.is_i()) {
     overflow = false;
