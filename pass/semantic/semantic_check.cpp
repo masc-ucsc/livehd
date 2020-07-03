@@ -2,6 +2,8 @@
 #include "semantic_check.hpp"
 
 #include <string_view>
+#include <iostream>
+#include <algorithm>
 
 #include "pass.hpp"
 
@@ -43,19 +45,30 @@ bool Semantic_check::in_read_list(std::string_view node_name) {
 }
 
 bool Semantic_check::in_assign_lhs_list(std::string_view node_name) {
-  if (assign_lhs_list.contains(node_name)) {
-    return true;
-  } else {
-    return false;
+  for (auto name : assign_lhs_list) {
+    if (name == node_name) {
+      return true;
+    }
   }
+  return false;
 }
 
 bool Semantic_check::in_assign_rhs_list(std::string_view node_name) {
-  if (assign_rhs_list.contains(node_name)) {
-    return true;
-  } else {
-    return false;
+  for (auto name : assign_rhs_list) {
+    if (name == node_name) {
+      return true;
+    }
   }
+  return false;
+}
+
+bool Semantic_check::in_inefficient_LNAST(std::string_view node_name) {
+  for (auto name : inefficient_LNAST) {
+    if (name == node_name) {
+      return true;
+    }
+  }
+  return false;
 }
 
 void Semantic_check::add_to_write_list(std::string_view node_name) {
@@ -78,23 +91,23 @@ void Semantic_check::add_to_read_list(std::string_view node_name) {
 
 void Semantic_check::add_to_assign_lhs_list(std::string_view node_name) {
   if (!in_assign_lhs_list(node_name)) {
-    std::cout << "Added to LHS " << node_name << "\n";
-    assign_lhs_list.insert(node_name);
+    // std::cout << "Added to LHS " << node_name << "\n";
+    assign_lhs_list.push_back(node_name);
   }
 }
 
 void Semantic_check::add_to_assign_rhs_list(std::string_view node_name) {
   if (!in_assign_rhs_list(node_name)) {
-    std::cout << "Added to RHS " << node_name << "\n";
-    assign_rhs_list.insert(node_name);
+    // std::cout << "Added to RHS " << node_name << "\n";
+    assign_rhs_list.push_back(node_name);
   }
 }
 
 void Semantic_check::find_lhs_name(int index) {
   int lhs_index = 0;
   for (auto lhs_name : assign_lhs_list) {
-    if (lhs_index == index && !inefficient_LNAST.contains(lhs_name)) {
-      inefficient_LNAST.insert(lhs_name);
+    if (lhs_index == index && !in_inefficient_LNAST(lhs_name)) {
+      inefficient_LNAST.push_back(lhs_name);
       break;
     } else {
       lhs_index += 1;
@@ -127,7 +140,7 @@ void Semantic_check::resolve_assign_lhs_rhs_lists() {
     int index_rhs = 0;
     for (auto rhs_name : assign_rhs_list) {
       if (rhs_name == lhs_name && index_rhs > index_lhs) {
-        std::cout << "Found one: " << index_rhs << "\n";
+        // std::cout << "Found one: " << index_rhs << "\n";
         find_lhs_name(index_rhs);
       } else {
         index_rhs += 1;
@@ -229,7 +242,7 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
         }
       }
       if (num_of_ref != 3) {
-        std::cout << num_of_ref << "\n";
+        // std::cout << num_of_ref << "\n";
         Pass::error("Select Operation Error: Missing Reference Node(s)\n");
       }
     } else {

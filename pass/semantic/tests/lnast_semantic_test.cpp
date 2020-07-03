@@ -1,14 +1,16 @@
 
 #include "semantic_check.hpp"
 #include "lnast.hpp"
+#include <iostream>
 
 int main(void) {
 
   int line_num, pos1, pos2 = 0;
   Lnast* lnast = new Lnast();
+  std::cout << "Working\n";
   Semantic_check s;
 
-  // Testing Assign Operations ========================================================================================
+  // // Testing Assign Operations ========================================================================================
 
   // auto idx_root    = Lnast_node::create_top    ("top", line_num, pos1, pos2);
   // auto node_stmts  = Lnast_node::create_stmts  ("stmts0", line_num, pos1, pos2);
@@ -97,7 +99,7 @@ int main(void) {
 
   // No Warnings 
 
-  // Testing If Operation (inefficient)
+  // Testing If Operation (inefficient) ===============================================================================
 
   auto idx_root    = Lnast_node::create_top("top",  line_num, pos1, pos2);
   lnast->set_root(idx_root);
