@@ -318,6 +318,8 @@ Lconst Lconst::add_op(const Lconst &o) const {
   uint16_t res_bits=0u;
   if (res_num<0)
     res_bits = msb(-res_num)+1;
+  else if (res_num==0)
+    res_bits = 1;
   else
     res_bits = msb(res_num)+1;
 

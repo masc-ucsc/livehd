@@ -2,6 +2,7 @@
 
 #include "fmt/format.h"
 
+#include "iassert.hpp"
 #include "bitwidth_range.hpp"
 
 int64_t Bitwidth_range::round_power2(int64_t x) {
@@ -57,6 +58,39 @@ Bitwidth_range::Bitwidth_range(const Lconst &val) {
       min = bits;
     }
   }
+}
+
+Bitwidth_range::Bitwidth_range(const Lconst &min_val, const Lconst &max_val) {
+	I(max_val >= min_val);
+
+	if (max_val.is_i() && min_val.is_i()) {
+		overflow = false;
+		max      = max_val.to_i();
+		min      = min_val.to_i();
+	} else {
+		overflow = true;
+		if (max_val == 0) {
+			max = 0;
+		}else{
+			auto bits = max_val.get_bits();
+			if (max_val.is_negative()) {
+				max = -bits;
+			} else {
+				max = bits;
+			}
+		}
+
+		if (min_val == 0) {
+			min = 0;
+		}else{
+			auto bits = min_val.get_bits();
+			if (min_val.is_negative()) {
+				min = -bits;
+			} else {
+				min = bits;
+			}
+		}
+	}
 }
 
 Bitwidth_range::Bitwidth_range(uint16_t bits, bool _sign) {
@@ -127,48 +161,6 @@ uint16_t Bitwidth_range::get_bits() const {
     return 0;
 
 	return bits;
-}
-
-void Bitwidth_range::expand(const Bitwidth_range &range2, bool round2) {
-
-  if (!range2.overflow && overflow) {
-    // Nothing to do (!overflow is always smaller than overflow)
-  } else if (range2.overflow && !overflow) {
-    overflow = true;
-    max      = range2.max;
-    min      = range2.min;
-  } else {
-    if (round2) {
-			max = std::max(round_power2(max), round_power2(range2.max));
-    } else {
-			max = std::max(max, range2.max);
-    }
-
-    if (round2) {
-			min = std::min(round_power2(min), round_power2(range2.min));
-    } else {
-			min = std::min(min, range2.min);
-    }
-  }
-}
-
-void Bitwidth_range::and_op(const Bitwidth_range &range2) {
-
-  if (!range2.overflow && overflow) {
-		overflow = false;
-    max = range2.max;
-    min = range2.min;
-  } else if (range2.overflow && !overflow) {
-		// Keep the smallest
-  } else {
-    if (min < 0 || range2.min < 0) {
-      max = std::max(round_power2(max), round_power2(range2.max));
-      min = std::min(round_power2(min), round_power2(range2.min));
-    } else {
-      max = std::min(round_power2(max), round_power2(range2.max));
-      min = 0;
-    }
-  }
 }
 
 void Bitwidth_range::dump() const {

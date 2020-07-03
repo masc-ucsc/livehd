@@ -8,6 +8,9 @@
 #include "lgraph.hpp"
 #include "pass_bitwidth.hpp"
 
+// Useful for debug
+//#define PRESERVE_ATTR_NODE
+
 static Pass_plugin sample("pass_bitwidth", Pass_bitwidth::setup);
 
 void Pass_bitwidth::setup() {
@@ -49,36 +52,62 @@ void Pass_bitwidth::process_const(Node &node) {
 	adjust_dpin_bits(dpin, it.first->second);
 }
 
-void Pass_bitwidth::process_sum(Node &node, XEdge_iterator &inp_edges) {
+void Pass_bitwidth::process_mux(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size()); // Dangling sum??? (delete)
 
-  auto it = bwmap.find(inp_edges[0].driver.get_compact());
-  if (it == bwmap.end()) {
-		if (inp_edges[0].driver.has_name())
-			fmt::print("pass.bitwidth sum:{} has input pin:{} unconstrained\n", node.debug_name(), inp_edges[0].driver.get_name());
-		else
-			fmt::print("pass.bitwidth sum:{} has some inputs unconstrained\n", node.debug_name());
-    not_finished = true;
-    return;
-  }
+	Lconst max_val;
+	Lconst min_val;
+  for (auto e:inp_edges) {
+    auto it3 = bwmap.find(e.driver.get_compact());
+    if (it3 != bwmap.end()) {
+			if (max_val < it3->second.get_max())
+				max_val = it3->second.get_max();
 
-  auto it2 = bwmap.emplace(node.get_driver_pin(0).get_compact(), it->second);   // Just copy BW for 1 input
-  auto &bw = it2.first->second;
+			if (min_val == 0 || min_val > it3->second.get_min())
+				min_val = it3->second.get_min();
+    } else if (e.driver.get_bits()) {
+			Lconst b(1);
+			b = b.lsh_op(e.driver.get_bits());
+			if (b > max_val)
+				max_val = b;
 
-  for (size_t i = 1; i < inp_edges.size(); ++i) {
-    auto it3 = bwmap.find(inp_edges[i].driver.get_compact());
-    if (it3 == bwmap.end()) {
-      bwmap.erase(it2.first);
-			if (inp_edges[i].driver.has_name())
-				fmt::print("pass.bitwidth sum:{} has input pin:{} unconstrained\n", node.debug_name(), inp_edges[i].driver.get_name());
+			min_val = Lconst(0)-max_val;
+		}else{
+			if (e.driver.has_name())
+				fmt::print("pass.bitwidth sum:{} has input pin:{} unconstrained\n", node.debug_name(), e.driver.get_name());
 			else
 				fmt::print("pass.bitwidth sum:{} has some inputs unconstrained\n", node.debug_name());
       not_finished = true;
       return;
     }
-    bw.expand(it3->second, false);
   }
+
+  bwmap.emplace(node.get_driver_pin(0).get_compact(), Bitwidth_range(min_val, max_val));
 }
+
+void Pass_bitwidth::process_sum(Node &node, XEdge_iterator &inp_edges) {
+  I(inp_edges.size()); // Dangling sum??? (delete)
+
+	Lconst max_val;
+	Lconst min_val;
+  for (auto e:inp_edges) {
+    auto it3 = bwmap.find(e.driver.get_compact());
+    if (it3 == bwmap.end()) {
+			if (e.driver.has_name())
+				fmt::print("pass.bitwidth sum:{} has input pin:{} unconstrained\n", node.debug_name(), e.driver.get_name());
+			else
+				fmt::print("pass.bitwidth sum:{} has some inputs unconstrained\n", node.debug_name());
+      not_finished = true;
+      return;
+    }
+		max_val = max_val + it3->second.get_max();
+		min_val = min_val + it3->second.get_min();
+  }
+
+  bwmap.emplace(node.get_driver_pin(0).get_compact(), Bitwidth_range(min_val, max_val));
+}
+
+void Pass_bitwidth::process_comparator(Node &node) { bwmap.emplace(node.get_driver_pin(0).get_compact(), Bitwidth_range(1)); }
 
 void Pass_bitwidth::process_logic(Node &node, XEdge_iterator &inp_edges) {
 	bool logic_op        = node.has_driver_pin_connected(0);
@@ -111,7 +140,7 @@ void Pass_bitwidth::process_logic(Node &node, XEdge_iterator &inp_edges) {
 			if (bits > max_bits) max_bits = bits;
 		}
 
-		auto it2 = bwmap.emplace(node.get_driver_pin(0).get_compact(), Bitwidth_range(max_bits));
+		bwmap.emplace(node.get_driver_pin(0).get_compact(), Bitwidth_range(max_bits));
 	}
 }
 
@@ -142,7 +171,7 @@ void Pass_bitwidth::process_logic_and(Node &node, XEdge_iterator &inp_edges) {
 			return;
 		}
 
-		auto it2 = bwmap.emplace(node.get_driver_pin(0).get_compact(), Bitwidth_range(max_bits));
+		bwmap.emplace(node.get_driver_pin(0).get_compact(), Bitwidth_range(max_bits));
 
 		for (auto e:inp_edges) {
 			if (e.driver.get_num_edges() > 1) {
@@ -217,7 +246,7 @@ void Pass_bitwidth::process_attr_set_new_attr(Node &node, XEdge_iterator &inp_ed
 
   for (auto out_dpin : node.out_connected_pins()) {
     out_dpin.set_bits(bw.get_bits());
-    auto it = bwmap.emplace(out_dpin.get_compact(), bw);
+    bwmap.emplace(out_dpin.get_compact(), bw);
   }
 
   // dpin_val.dump_all_prp_vname();
@@ -288,10 +317,10 @@ void Pass_bitwidth::garbage_collect_support_structures(XEdge_iterator &inp_edges
     if (n <= 1) {
       outcountmap.erase(it);
       for (auto parent_dpin : e.driver.get_node().out_connected_pins()) {
-        auto it = bwmap.find(parent_dpin.get_compact());
-        if (it != bwmap.end()) { // Not all the nodes create bwmap (impossible to infer do not)
-          adjust_dpin_bits(parent_dpin, it->second);
-          bwmap.erase(it);
+        auto it2 = bwmap.find(parent_dpin.get_compact());
+        if (it2 != bwmap.end()) { // Not all the nodes create bwmap (impossible to infer do not)
+          adjust_dpin_bits(parent_dpin, it2->second);
+          bwmap.erase(it2);
         }
       }
     } else {
@@ -344,6 +373,10 @@ void Pass_bitwidth::bw_pass(LGraph *lg) {
 			process_attr_set(node, inp_edges);
     } else if (op == Sum_Op) {
 			process_sum(node, inp_edges);
+    } else if (op == Mux_Op) {
+			process_mux(node, inp_edges);
+    } else if (op == GreaterThan_Op || op == LessThan_Op || op == LessEqualThan_Op || op == Equals_Op || op == GreaterEqualThan_Op) {
+			process_comparator(node);
     } else {
 			fmt::print("FIXME: node:{} still not handled by bitwidth\n", node.debug_name());
     }
@@ -372,7 +405,7 @@ void Pass_bitwidth::bw_pass(LGraph *lg) {
 
   });
 
-#if 0
+#ifndef PRESERVE_ATTR_NODE
   if (not_finished) {
     fmt::print("pass_bitwidth: could not converge\n");
   } else {

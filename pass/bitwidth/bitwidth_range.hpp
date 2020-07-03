@@ -24,17 +24,15 @@ public:
   };
 
   Bitwidth_range(const Lconst &value);
+  Bitwidth_range(const Lconst &min_val, const Lconst &max_val);
   Bitwidth_range(uint16_t bits, bool sign);
   Bitwidth_range(uint16_t bits);
 
-  void    set_sbits(uint16_t size);
-  void    set_ubits(uint16_t size);
+  void     set_sbits(uint16_t size);
+  void     set_ubits(uint16_t size);
   uint16_t get_bits() const;
   Lconst   get_max() const { return to_lconst(overflow, max); };
-  Lconst  get_min() const { return to_lconst(overflow, min); };
-
-  void    expand(const Bitwidth_range &i, bool round2);
-	void    and_op(const Bitwidth_range &range2);
+  Lconst   get_min() const { return to_lconst(overflow, min); };
 
   bool    is_always_negative() const { return max <0; }
   bool    is_always_positive() const { return min >= 0; }
