@@ -47,6 +47,31 @@ void Pass_cprop::collapse_forward_same_op(Node &node, XEdge_iterator &inp_edges_
   }
 }
 
+void Pass_cprop::collapse_forward_sum(Node &node, XEdge_iterator &inp_edges_ordered) {
+  auto op = node.get_type().op;
+  I(op == Sum_Op);
+  bool all_edges_deleted = true;
+  for (auto &out : node.out_edges()) {
+    if (out.sink.get_node().get_type().op != Sum_Op) {
+      all_edges_deleted = false;
+      continue;
+    }
+
+    auto next_sum_node = out.sink.get_node();
+    for (auto &inp : inp_edges_ordered) {
+      TRACE(fmt::print("cprop same_op pin:{} to pin:{}\n",inp.driver.debug_name(), out.sink.debug_name()));
+      auto next_sum_spin = next_sum_node.setup_sink_pin(inp.sink.get_pid()); // Connect same PID
+      next_sum_spin.connect_driver(inp.driver);
+    }
+    TRACE(fmt::print("cprop same_op del_edge pin:{} to pin:{}\n",out.driver.debug_name(), out.sink.debug_name()));
+    out.del_edge();
+  }
+
+  if (all_edges_deleted)
+    node.del_node();
+}
+
+
 #if 0
 void Pass_cprop::collapse_forward_shiftleft(Node &node) {
   I(node.get_type().op==ShiftLeft_Op);
@@ -111,9 +136,9 @@ void Pass_cprop::try_collapse_forward(Node &node, XEdge_iterator &inp_edges_orde
     }
   }
 
-  if (op == Sum_Op || op == Mult_Op) {
-    collapse_forward_same_op(node, inp_edges_ordered);
-  } else if (op == And_Op || op == Or_Op || op == Xor_Op) {
+  if (op == Sum_Op) {
+    collapse_forward_sum(node, inp_edges_ordered);
+  } else if (op == Mult_Op || op == And_Op || op == Or_Op || op == Xor_Op) {
     collapse_forward_same_op(node, inp_edges_ordered);
   } else if (op == Mux_Op) {
     // If all the options are the same. Collapse forward
@@ -145,6 +170,33 @@ void Pass_cprop::replace_part_inputs_const(Node &node, XEdge_iterator &inp_edges
     }
 
     collapse_forward_for_pin(node, a_pin);
+  } else if (op == Sum_Op) {
+    int n_replace = 0;
+    for (auto &i : inp_edges_ordered) {
+      if (i.driver.get_node().is_type_const()) n_replace++;
+    }
+
+    if (n_replace>1) {
+      Lconst result;
+      for(auto &i:inp_edges_ordered) {
+        if (!i.driver.get_node().is_type_const()) continue;
+
+        auto c = i.driver.get_node().get_type_const();
+        if (i.sink.get_pid()==0 || i.sink.get_pid()==1) {
+          result = result + c;
+        } else {
+          result = result - c;
+        }
+        i.del_edge();
+      }
+      auto new_node = node.get_class_lgraph()->create_node_const(result);
+      auto dpin     = new_node.get_driver_pin();
+      if (result < 0) {
+        node.setup_sink_pin(1).connect_driver(dpin); // signed pin
+      } else {
+        node.setup_sink_pin(0).connect_driver(dpin);  // unsigned pin
+      }
+    }
   }
 }
 

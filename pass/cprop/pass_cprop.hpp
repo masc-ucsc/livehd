@@ -14,6 +14,7 @@ protected:
 
   static void optimize(Eprp_var &var);
   void collapse_forward_same_op(Node &node, XEdge_iterator &inp_edges_ordered);
+  void collapse_forward_sum(Node &node, XEdge_iterator &inp_edges_ordered);
   void collapse_forward_always_pin0(Node &node, XEdge_iterator &inp_edges_ordered);
   void collapse_forward_for_pin(Node &node, Node_pin &new_dpin);
   void try_collapse_forward(Node &node, XEdge_iterator &inp_edges_ordered);
