@@ -22,7 +22,6 @@ struct Ann_name {
   static constexpr char tree_pos[]   = "tree_pos";
   static constexpr char color[]      = "color";
   static constexpr char ssa[]        = "ssa";
-  static constexpr char cfcnt[]      = "cfcnt";
 };
 
 using Ann_node_pin_offset = Attribute<Ann_name::wireoffset, Node_pin, mmap_lib::map<Node_pin::Compact_class_driver, uint16_t> >;
@@ -47,7 +46,6 @@ using Ann_node_tree_pos = Attribute<Ann_name::tree_pos, Node, mmap_lib::map<Node
 
 using Ann_node_color = Attribute<Ann_name::color, Node, mmap_lib::bimap<Node::Compact_class, std::string_view> >;
 
-using Ann_node_cfcnt = Attribute<Ann_name::cfcnt, Node, mmap_lib::bimap<Node::Compact_class, uint32_t> >;
 
 struct Ann_support {
   // TODO: Change to object to register annotations, and have an "update" for incremental
@@ -63,6 +61,5 @@ struct Ann_support {
     Ann_node_file_loc::clear(lg);
     Ann_node_tree_pos::clear(lg);
     Ann_node_color::clear(lg);
-    Ann_node_cfcnt::clear(lg);
   };
 };

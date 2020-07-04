@@ -26,7 +26,6 @@ private:
   absl::flat_hash_map<std::pair<std::string, std::string>, std::string> tup_keyname2pos; // FIXME->sh: should be able to be deprecated, check after the BW is working
   absl::flat_hash_map<std::string, std::pair<Node_pin, uint16_t>>       tn2head_maxlen;  // FIXME->sh: should be able to be deprecated, check after the BW is working
 
-  uint32_t cfcnt = 0; //global control flow counter of a program
 
 protected:
   std::vector<LGraph *> do_tolg(std::shared_ptr<Lnast> l);

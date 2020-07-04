@@ -11,7 +11,7 @@ pts_failbitwidth='capricious_bits capricious_bits2 capricious_bits3 capricious_b
      tuple_if2  firrtl_tail3  firrtl_tail2 
      counter  counter_nested_if firrtl_tail ssa_rhs reg__q_pin'
 
- #pts='bits_rhs'
+#pts='bits_rhs'
 #pts='reg__q_pin'
 #      nested_if  
 #      adder_stage  if2 if  if3_err 
@@ -83,7 +83,7 @@ do
       echo ""
       echo ""
       echo "----------------------------------------------------"
-      echo "Tuple Chain Resolve(LGraph)"
+      echo "Copy-Propagation And Tuple Chain Resolve"
       echo "----------------------------------------------------"
       #${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.resolve_tuples"
       ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop"
@@ -95,7 +95,7 @@ do
       fi
 
       ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-      mv ${pt}.dot ${pt}.no_bits.assignmment_or.dot
+      mv ${pt}.dot ${pt}.no_bits.dot
 
 
       echo ""
@@ -120,7 +120,7 @@ do
       echo ""
       echo ""
       echo "----------------------------------------------------"
-      echo "Copy Propagation Optimization(LGraph)"
+      echo "Copy Propagation Optimization(DCE)"
       echo "----------------------------------------------------"
       ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop"
       if [ $? -eq 0 ]; then
@@ -131,23 +131,22 @@ do
       fi
 
       ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-      mv ${pt}.dot ${pt}.dce.dot
+      # mv ${pt}.dot ${pt}.dce.dot
+      # echo ""
+      # echo ""
+      # echo ""
+      # echo "----------------------------------------------------"
+      # echo "Dead Code Elimination(LGraph)"
+      # echo "----------------------------------------------------"
+      # ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.dce"
+      # if [ $? -eq 0 ]; then
+      #   echo "Successfully perform dead code elimination: inou/cfg/tests/${pt}.prp"
+      # else
+      #   echo "ERROR: Pyrope compiler failed: dead code elimination, testcase: inou/cfg/tests/${pt}.prp"
+      #   exit 1
+      # fi
 
-      echo ""
-      echo ""
-      echo ""
-      echo "----------------------------------------------------"
-      echo "Dead Code Elimination(LGraph)"
-      echo "----------------------------------------------------"
-      ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.dce"
-      if [ $? -eq 0 ]; then
-        echo "Successfully perform dead code elimination: inou/cfg/tests/${pt}.prp"
-      else
-        echo "ERROR: Pyrope compiler failed: dead code elimination, testcase: inou/cfg/tests/${pt}.prp"
-        exit 1
-      fi
-
-      ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+      # ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
 
       if [[ ${pt} == *_err* ]]; then
         echo "----------------------------------------------------"
