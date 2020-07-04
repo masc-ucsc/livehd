@@ -264,20 +264,64 @@ Pass_bitwidth::Attr Pass_bitwidth::get_key_attr(std::string_view key) {
   return Attr::Set_other;
 }
 
+void Pass_bitwidth::process_attr_get(Node &node) {
+
+	I(node.has_sink_pin_connected(1));
+	auto dpin_key = node.get_sink_pin(1).get_driver_pin();
+	I(dpin_key.get_node().is_type(TupKey_Op));
+
+	auto key  = dpin_key.get_name();
+  auto attr = get_key_attr(key);
+  if (attr == Attr::Set_other) {
+		not_finished = true;
+    return;
+  }
+
+	I(node.has_sink_pin_connected(0));
+	auto dpin_val = node.get_sink_pin(0).get_driver_pin();
+
+	auto it = bwmap.find(dpin_val.get_compact());
+	if (it == bwmap.end()) {
+		not_finished = true;
+		return;
+	}
+	auto &bw = it->second;
+
+	Lconst result;
+  if (attr == Attr::Set_bits) {
+		result = Lconst(bw.get_bits());
+  }else if (attr == Attr::Set_max) {
+		result = bw.get_max();
+  } else if (attr == Attr::Set_min) {
+    result = bw.get_min();
+  }
+
+  auto new_node = node.get_class_lgraph()->create_node_const(result);
+  auto new_dpin = new_node.get_driver_pin();
+  for (auto &out : node.out_edges()) {
+    new_dpin.connect_sink(out.sink);
+  }
+
+	node.del_node();
+}
+
 void Pass_bitwidth::process_attr_set_new_attr(Node &node) {
 
 	I(node.has_sink_pin_connected(1));
-
 	auto dpin_key = node.get_sink_pin(1).get_driver_pin();
 	auto key  = dpin_key.get_name();
   auto attr = get_key_attr(key);
-  if (attr==Attr::Set_other)
-    return;
+  if (attr == Attr::Set_other) {
+		not_finished = true;
+		return;
+	}
 
 	I(node.has_sink_pin_connected(2));
 	auto dpin_val = node.get_sink_pin(2).get_driver_pin();
-	if (!dpin_key.get_node().is_type(TupKey_Op))
-		return; // Can not handle now
+	if (!dpin_key.get_node().is_type(TupKey_Op)) {
+		not_finished = true;
+		return;  // Can not handle now
+	}
 
 	I(dpin_key.has_name());
 
@@ -459,6 +503,10 @@ void Pass_bitwidth::bw_pass(LGraph *lg) {
       process_logic_and(node, inp_edges);
     } else if (op == AttrSet_Op) {
 			process_attr_set(node);
+    } else if (op == AttrGet_Op) {
+			process_attr_get(node);
+			if (node.is_invalid())
+				continue;
     } else if (op == Sum_Op) {
 			process_sum(node, inp_edges);
     } else if (op == Not_Op) {
@@ -538,7 +586,7 @@ void Pass_bitwidth::bw_pass(LGraph *lg) {
 				}
         node.del_node();
       } else if (op == AttrGet_Op) {
-        I(false); // AttGet_Op should be gone if finished (if bits/max/min)
+        I(false); // should be deleted by now if solved
       }
     }
   }

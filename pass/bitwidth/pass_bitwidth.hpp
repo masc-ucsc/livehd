@@ -33,6 +33,7 @@ protected:
   void        process_comparator(Node &node);
   void        process_logic(Node &node, XEdge_iterator &inp_edges);
   void        process_logic_and(Node &node, XEdge_iterator &inp_edges);
+	void        process_attr_get(Node &node);
   void        process_attr_set_new_attr(Node &node);
   void        process_attr_set_propagate(Node &node);
   void        process_attr_set(Node &node);
