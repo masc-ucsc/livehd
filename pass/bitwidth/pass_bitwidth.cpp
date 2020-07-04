@@ -52,13 +52,10 @@ void Pass_bitwidth::process_const(Node &node) {
 	adjust_dpin_bits(dpin, it.first->second);
 }
 
-void Pass_bitwidth::process_flop(Node &node, XEdge_iterator &inp_edges) {
-	I(inp_edges.size()); // Dangling???
+void Pass_bitwidth::process_flop(Node &node) {
 
 	I(node.has_sink_pin_connected(1));
-	I(inp_edges[1].sink.get_pid()==1); // Clock must be connected at pin 0
-
-	auto d_dpin = inp_edges[1].driver;
+	auto d_dpin = node.get_sink_pin(1).get_driver_pin();
 
 	Lconst max_val;
 	Lconst min_val;
@@ -257,7 +254,6 @@ void Pass_bitwidth::process_logic_and(Node &node, XEdge_iterator &inp_edges) {
   }
 }
 
-
 Pass_bitwidth::Attr Pass_bitwidth::get_key_attr(std::string_view key) {
   if (key.substr(0, 6) == "__bits") return Attr::Set_bits;
 
@@ -268,20 +264,22 @@ Pass_bitwidth::Attr Pass_bitwidth::get_key_attr(std::string_view key) {
   return Attr::Set_other;
 }
 
-void Pass_bitwidth::process_attr_set_new_attr(Node &node, XEdge_iterator &inp_edges) {
-	auto dpin_key = inp_edges[1].driver;
-	if (!dpin_key.get_node().is_type(TupKey_Op))
-		return; // Can not handle now
+void Pass_bitwidth::process_attr_set_new_attr(Node &node) {
 
-	I(dpin_key.has_name());
+	I(node.has_sink_pin_connected(1));
+
+	auto dpin_key = node.get_sink_pin(1).get_driver_pin();
 	auto key  = dpin_key.get_name();
   auto attr = get_key_attr(key);
   if (attr==Attr::Set_other)
     return;
 
-	auto dpin_val = inp_edges[2].driver;
-	if (!dpin_val.get_node().is_type_const())
+	I(node.has_sink_pin_connected(2));
+	auto dpin_val = node.get_sink_pin(2).get_driver_pin();
+	if (!dpin_key.get_node().is_type(TupKey_Op))
 		return; // Can not handle now
+
+	I(dpin_key.has_name());
 
   auto attr_dpin = node.get_driver_pin(0);
 
@@ -291,13 +289,23 @@ void Pass_bitwidth::process_attr_set_new_attr(Node &node, XEdge_iterator &inp_ed
 
 	auto val = dpin_val.get_node().get_type_const();
 
-  auto it = bwmap.find(inp_edges[0].driver.get_compact());
-	Bitwidth_range *bw;
-  if (it == bwmap.end()) {
-		auto it2 = bwmap.emplace(inp_edges[0].driver.get_compact(), Bitwidth_range(0));
-		bw = &(it2.first->second);
-  } else {
-    bw = &(it->second);
+	Bitwidth_range *bw=nullptr;
+	if (node.has_sink_pin_connected(0)) {
+		auto through_dpin = node.get_sink_pin(0).get_driver_pin();
+		auto it = bwmap.find(through_dpin.get_compact());
+		if (it != bwmap.end()) {
+			bw = &(it->second);
+		} else {
+			auto it2 = bwmap.emplace(through_dpin.get_compact(), Bitwidth_range(0));
+			bw       = &(it2.first->second);
+		}
+	}
+
+	bool out_connected = false;
+	if (bw == nullptr) {
+		out_connected = true;
+		auto it2 = bwmap.emplace(node.get_driver_pin(0).get_compact(), Bitwidth_range(0));
+		bw       = &(it2.first->second);
   }
 
   fmt::print("attr_set name:{} key:{} val:{} bw_bits:{}\n", dpin_name, key, val.to_pyrope(), bw->get_bits());
@@ -317,26 +325,28 @@ void Pass_bitwidth::process_attr_set_new_attr(Node &node, XEdge_iterator &inp_ed
     I(false);  // FIXME: todo
   }
 
-  for (auto out_dpin : node.out_connected_pins()) {
-    out_dpin.set_bits(bw->get_bits());
-    bwmap.emplace(out_dpin.get_compact(), *bw);
-  }
+	for (auto out_dpin : node.out_connected_pins()) {
+		out_dpin.set_bits(bw->get_bits());
+		if (out_connected && out_dpin.get_pid()==0)
+			continue;
+		bwmap.emplace(out_dpin.get_compact(), *bw);
+	}
 
   // dpin_val.dump_all_prp_vname();
 }
 
-void Pass_bitwidth::process_attr_set_propagate(Node &node, XEdge_iterator &inp_edges) {
-  I(inp_edges.size()==2);
-  I(inp_edges[0].sink.get_pid() == 0); // value
-  I(inp_edges[1].sink.get_pid() == 3); // parent AttrSet
+void Pass_bitwidth::process_attr_set_propagate(Node &node) {
 
   auto attr_dpin = node.get_driver_pin(0);
 	std::string_view dpin_name;
   if (attr_dpin.has_name())
     dpin_name = attr_dpin.get_name();
 
-  auto data_dpin = inp_edges[0].driver;
-  auto parent_attr_dpin = inp_edges[1].driver;
+  I(node.has_sink_pin_connected(0));
+  auto data_dpin = node.get_sink_pin(0).get_driver_pin();
+
+  I(node.has_sink_pin_connected(3));
+  auto parent_attr_dpin = node.get_sink_pin(3).get_driver_pin();
 
   auto data_it = bwmap.find(data_dpin.get_compact());
   if (data_it == bwmap.end()) {
@@ -372,12 +382,12 @@ void Pass_bitwidth::process_attr_set_propagate(Node &node, XEdge_iterator &inp_e
   }
 }
 
-void Pass_bitwidth::process_attr_set(Node &node, XEdge_iterator &inp_edges) {
+void Pass_bitwidth::process_attr_set(Node &node) {
 
   if (node.has_sink_pin_connected(1)) {
-    process_attr_set_new_attr(node, inp_edges);
+    process_attr_set_new_attr(node);
   }else{
-    process_attr_set_propagate(node, inp_edges);
+    process_attr_set_propagate(node);
   }
 
 }
@@ -448,13 +458,13 @@ void Pass_bitwidth::bw_pass(LGraph *lg) {
     } else if (op == And_Op) {
       process_logic_and(node, inp_edges);
     } else if (op == AttrSet_Op) {
-			process_attr_set(node, inp_edges);
+			process_attr_set(node);
     } else if (op == Sum_Op) {
 			process_sum(node, inp_edges);
     } else if (op == Not_Op) {
 			process_not(node, inp_edges);
     } else if (op == SFlop_Op || op == AFlop_Op || op == FFlop_Op) {
-			process_flop(node, inp_edges);
+			process_flop(node);
     } else if (op == Mux_Op) {
 			process_mux(node, inp_edges);
     } else if (op == GreaterThan_Op || op == LessThan_Op || op == LessEqualThan_Op || op == Equals_Op || op == GreaterEqualThan_Op) {
@@ -517,13 +527,15 @@ void Pass_bitwidth::bw_pass(LGraph *lg) {
           if (attr == Attr::Set_other) continue;
         }
 
-        auto data_dpin = node.get_sink_pin(0).get_driver_pin();
+				if (node.has_sink_pin_connected(0)) {
+					auto data_dpin = node.get_sink_pin(0).get_driver_pin();
 
-        for (auto e : node.out_edges()) {
-          if (e.driver.get_pid() == 0) {
-            e.sink.connect_driver(data_dpin);
-          }
-        }
+					for (auto e : node.out_edges()) {
+						if (e.driver.get_pid() == 0) {
+							e.sink.connect_driver(data_dpin);
+						}
+					}
+				}
         node.del_node();
       } else if (op == AttrGet_Op) {
         I(false); // AttGet_Op should be gone if finished (if bits/max/min)

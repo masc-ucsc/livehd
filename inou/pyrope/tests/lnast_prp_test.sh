@@ -1,16 +1,17 @@
 #!/bin/bash
 rm -rf ./lgdb
-pts='logic counter_nested_if firrtl_tail3 firrtl_tail2 counter '
+pts='logic out_ssa if2 if ssa_rhs'
 # pts='tuple_if2 out_ssa  logic  tuple_if  bits_rhs  firrtl_tail3  firrtl_tail2 
 #      nested_if  counter  counter_nested_if 
 #      adder_stage  if2 if  if3_err 
 #      nested_if_err  firrtl_tail  ssa_rhs  reg__q_pin '
 
+ptr_dps='counter_nested_if firrtl_tail3 firrtl_tail2 counter '
 pts_failbitwidth='capricious_bits capricious_bits2 capricious_bits3 capricious_bits4
      tuple_if2  firrtl_tail3  firrtl_tail2 
-     out_ssa  counter  counter_nested_if firrtl_tail ssa_rhs reg__q_pin'
+     counter  counter_nested_if firrtl_tail ssa_rhs reg__q_pin'
 
-pts='out_ssa'
+pts='reg__q_pin'
 #      nested_if  
 #      adder_stage  if2 if  if3_err 
 #      nested_if_err'
@@ -74,11 +75,8 @@ do
 
     fi
 
-
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
     mv ${pt}.dot ${pt}.no_bits.tuple.assignment_or.dot
-
-
 
     echo ""
     echo ""
@@ -106,7 +104,7 @@ do
     echo "Bitwidth Optimization(LGraph) Round-1"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth"
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth |> pass.cprop |> pass.bitwidth"
     if [ $? -eq 0 ]; then
       echo "Successfully optimize design bitwidth: inou/cfg/tests/${pt}.prp"
     else
@@ -116,24 +114,6 @@ do
 
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
     mv ${pt}.dot ${pt}.assignment_or.dot
-
-
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "Assignment_Or_Op Elimination(LGraph)"
-    echo "----------------------------------------------------"
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.assignment_or_elimination"
-    if [ $? -eq 0 ]; then
-      echo "Successfully eliminate all assignment or_op: inou/cfg/tests/${pt}.prp"
-    else
-      echo "ERROR: Pyrope compiler failed: assignment_or_elimination, testcase: inou/cfg/tests/${pt}.prp"
-      exit 1
-    fi
-
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.cprop.dot
 
     echo ""
     echo ""

@@ -321,7 +321,6 @@ void Lgyosys_dump::create_wires(LGraph *g, RTLIL::Module *module) {
       auto lc = node.get_type_const();
 
       if (lc.is_i()) {
-        I(lc.get_bits() <= dpin.get_bits());
         module->connect(new_wire, RTLIL::SigSpec(lc.to_i(), dpin.get_bits()));
       } else {
         module->connect(new_wire, RTLIL::SigSpec(RTLIL::Const::from_string(lc.to_yosys())));
@@ -980,13 +979,28 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         if (aport == nullptr || bport == nullptr || sel == nullptr)
           log_error("Internal Error: did not find a wire to be shifted.\n");
 
-        if (aport->width != cell_output_map[node.get_driver_pin().get_compact()]->width ||
-            bport->width != cell_output_map[node.get_driver_pin().get_compact()]->width) {
-          log("ports size don't match a=%d, b=%d, y=%d\n", aport->width, bport->width,
-              cell_output_map[node.get_driver_pin().get_compact()]->width);
+        auto out_width = cell_output_map[node.get_driver_pin().get_compact()]->width;
+
+        if (aport->width > out_width || bport->width > out_width) {
+          log("ports size don't match a=%d, b=%d, y=%d\n", aport->width, bport->width, out_width);
         }
-        assert(aport->width <= (cell_output_map[node.get_driver_pin().get_compact()]->width));
-        assert(bport->width <= (cell_output_map[node.get_driver_pin().get_compact()]->width));
+        if (aport->width < out_width) {
+          auto w2 = RTLIL::SigSpec(aport);
+          w2.extend_u0(out_width);  // unsigned extend
+          auto *result_wire = module->addWire(next_id(g), out_width);
+          module->connect(result_wire, w2);
+          aport = result_wire;
+        }
+        if (bport->width < out_width) {
+          auto w2 = RTLIL::SigSpec(bport);
+          w2.extend_u0(out_width);  // unsigned extend
+          auto *result_wire = module->addWire(next_id(g), out_width);
+          module->connect(result_wire, w2);
+          bport = result_wire;
+        }
+
+        assert(aport->width == out_width);
+        assert(bport->width == out_width);
 
         module->addMux(next_id(g), aport, bport, sel, cell_output_map[node.get_driver_pin().get_compact()]);
         break;
