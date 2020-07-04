@@ -11,7 +11,7 @@ pts_failbitwidth='capricious_bits capricious_bits2 capricious_bits3 capricious_b
      tuple_if2  firrtl_tail3  firrtl_tail2 
      counter  counter_nested_if firrtl_tail ssa_rhs reg__q_pin'
 
-#pts='bits_rhs'
+# pts='firrtl_tail2'
 #pts='reg__q_pin'
 #      nested_if  
 #      adder_stage  if2 if  if3_err 

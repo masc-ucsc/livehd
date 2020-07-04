@@ -35,7 +35,6 @@ protected:
 
   void lnast2lgraph                           (LGraph *dfg);
   void setup_lgraph_outputs_and_final_var_name(LGraph *dfg);
-  void setup_explicit_bits_info               (LGraph *dfg);
   void process_ast_stmts            (LGraph *dfg, const Lnast_nid &lnidx_stmts);
   Node process_ast_assign_op        (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_dp_assign_op     (LGraph *dfg, const Lnast_nid &lnidx);
