@@ -457,7 +457,7 @@ void Semantic_check::check_func_call(Lnast *lnast, const Lnast_nid &lnidx_opr) {
   }
 }
 
-// NOTE: Test does no consider tuple operations yet
+// NOTE: Test does only consider tuple and tuple concat operations
 void Semantic_check::do_check(Lnast *lnast) {
   // Get Lnast Root
   const auto top = lnast->get_root();
