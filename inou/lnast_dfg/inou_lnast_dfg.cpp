@@ -646,11 +646,16 @@ Node Inou_lnast_dfg::setup_node_opr_and_lhs(LGraph *dfg, const Lnast_nid &lnidx_
 
   //when #reg_0 at lhs, the register has not been created before
   Node_pin reg_data_pin;
-  if (lhs_is_reg_sub0) {
-    auto reg_qpin = setup_ref_node_dpin(dfg, lhs);
+  Node_pin reg_qpin;
+  if (is_register(lhs_vname)) {
+    if (lnast->get_data(lhs).subs == 0) 
+      reg_qpin = setup_ref_node_dpin(dfg, lhs);
+    else 
+      reg_qpin = name2dpin[lhs_vname];
+    
     reg_data_pin = reg_qpin.get_node().setup_sink_pin("D");
-    //connect #reg_0 dpin -> #reg.data_pin
   }
+
 
   if (!is_new_var_chain) {
     fmt::print("is_new_var_chain:{}\n", is_new_var_chain);
@@ -659,7 +664,7 @@ Node Inou_lnast_dfg::setup_node_opr_and_lhs(LGraph *dfg, const Lnast_nid &lnidx_
     lg_opr_node.get_driver_pin(0).set_name(lhs_name);
     setup_dpin_ssa(name2dpin[lhs_name], lhs_vname, lnast->get_subs(lhs)); //FIXME->sh: dpin SSA could be deprecated if new BW working
 
-    if (lhs_is_reg_sub0) 
+    if (is_register(lhs_name)) 
       dfg->add_edge(name2dpin[lhs_name], reg_data_pin);
 
     return lg_opr_node;
@@ -681,6 +686,8 @@ Node Inou_lnast_dfg::setup_node_opr_and_lhs(LGraph *dfg, const Lnast_nid &lnidx_
     //aset_node.get_driver_pin(1).set_name(lhs_name); // for debug purpose
     setup_dpin_ssa(name2dpin[lhs_name], lhs_vname, lnast->get_subs(lhs));
     vname2attr_dpin[lhs_vname] = aset_node.setup_driver_pin(1);
+    if (is_register(lhs_name)) 
+      dfg->add_edge(name2dpin[lhs_name], reg_data_pin);
   } 
   return lg_opr_node;
 }
