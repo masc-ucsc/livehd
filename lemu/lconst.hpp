@@ -101,17 +101,12 @@ protected:
 
   Number get_num() const { return num; }
   Number get_num(uint16_t b) const {
-    if (num >= 0 || sign) {
+    if (num >= 0) {
       assert(b>=bits);
       return num;
     } else {
-      if (explicit_bits)
-        b = bits;
-      assert(!sign);
-      Number max(1);
-      max <<= b;
-      max += num;
-      return max;
+      assert(b>=bits);
+      return num;
     }
   }
 public:
