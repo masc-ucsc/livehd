@@ -665,7 +665,7 @@ Node Inou_lnast_dfg::setup_node_opr_and_lhs(LGraph *dfg, const Lnast_nid &lnidx_
     name2dpin[lhs_name] = aset_node.setup_driver_pin(0); // dummy_attr_set node now represent the latest variable
     lg_opr_node.get_driver_pin(0).set_name(lhs_name);
     aset_node.get_driver_pin(0).set_name(lhs_name);
-    aset_node.get_driver_pin(1).set_name(lhs_name); // for debug purpose
+    //aset_node.get_driver_pin(1).set_name(lhs_name); // for debug purpose
     setup_dpin_ssa(name2dpin[lhs_name], lhs_vname, lnast->get_subs(lhs));
     vname2attr_dpin[lhs_vname] = aset_node.setup_driver_pin(1);
   } 

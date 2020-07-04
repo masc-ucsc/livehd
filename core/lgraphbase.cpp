@@ -405,6 +405,8 @@ Index_ID LGraph_Base::add_edge_int(const Index_ID dst_idx, const Port_ID inp_pid
   // Do not point to intermediate nodes which can be remapped, just root nodes
   I(node_internal[dst_idx].is_root());
   I(node_internal[src_idx].is_root());
+  node_internal.ref(dst_idx)->set_sink_setup();
+  node_internal.ref(src_idx)->set_driver_setup();
 
   Index_ID root_idx = src_idx;
 
