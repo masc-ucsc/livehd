@@ -1,6 +1,6 @@
 #!/bin/bash
 rm -rf ./lgdb
-pts='reg__q_pin adder_stage logic out_ssa if2 if ssa_rhs bits_rhs counter counter_nested_if'
+pts='reg__q_pin logic out_ssa if2 if ssa_rhs bits_rhs counter counter_nested_if'
 # pts='tuple_if2 out_ssa  logic  tuple_if  bits_rhs  firrtl_tail3  firrtl_tail2 
 #      nested_if  counter  counter_nested_if 
 #      adder_stage  if2 if  if3_err 
