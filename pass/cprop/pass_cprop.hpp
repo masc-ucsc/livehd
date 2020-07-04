@@ -29,6 +29,7 @@ protected:
   void merge_to_tuple(std::shared_ptr<Lgtuple> tup, Node &node, Node
       &parent_node, Node_pin &parent_dpin, int key_pos, std::string_view
       key_name, Node_pin &val_dpin);
+  bool process_attr_get(Node &node);
   bool process_tuples(Node &node, XEdge_iterator &inp_edges_ordered);
   void trans(LGraph *orig);
 

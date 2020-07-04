@@ -26,6 +26,8 @@ protected:
   void        do_trans(LGraph *orig);
 
   void        process_const(Node &node);
+  void        process_not(Node &node, XEdge_iterator &inp_edges);
+	void        process_flop(Node &node, XEdge_iterator &inp_edges);
   void        process_mux(Node &node, XEdge_iterator &inp_edges);
   void        process_sum(Node &node, XEdge_iterator &inp_edges);
   void        process_comparator(Node &node);

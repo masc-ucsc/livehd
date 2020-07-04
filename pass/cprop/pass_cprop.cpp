@@ -312,6 +312,8 @@ void Pass_cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_
     }
 
     replace_node(node, result);
+  }else{
+    fmt::print("FIXME: cprop still does not copy prop node:{}\n", node.debug_name());
   }
 }
 
@@ -408,7 +410,6 @@ void Pass_cprop::process_subgraph(Node &node) {
   }
 
 #if 1
-  auto io_pins = sub->get_io_pins();
   Port_ID instance_pid = 0;
   for (const auto &io_pin : sub->get_io_pins()) {
     instance_pid++;
@@ -486,6 +487,35 @@ void Pass_cprop::merge_to_tuple(std::shared_ptr<Lgtuple> ctup, Node &node, Node
 	node2tuple[node.get_compact()] = ctup;
 }
 
+bool Pass_cprop::process_attr_get(Node &node) {
+
+  auto op = node.get_type().op;
+  if (op != AttrGet_Op)
+    return false;
+
+  if (!node.has_sink_pin_connected(0) || !node.has_sink_pin_connected(1))
+    return false;
+
+  // Either pos or name
+
+  auto parent_dpin = node.get_sink_pin(0).get_driver_pin();
+  auto parent_node = parent_dpin.get_node();
+
+  auto key_name_dpin = node.get_sink_pin(1).get_driver_pin();
+
+  I(key_name_dpin.get_node().get_type().op == TupKey_Op);
+  I(key_name_dpin.has_name());
+  auto key_name = key_name_dpin.get_name();
+  if (key_name.substr(0, 2) == "__") {
+    if (key_name.substr(0, 7) == "__q_pin") {
+      fmt::print("process_tuple_q_pin parent_dpin:{} node:{}\n", parent_dpin.debug_name(), node.debug_name());
+      process_tuple_q_pin(node, parent_dpin);
+      return true;
+    }
+  }
+  return false;
+}
+
 bool Pass_cprop::process_tuples(Node &node, XEdge_iterator &inp_edges_ordered) {
 
    auto op = node.get_type().op;
@@ -512,20 +542,7 @@ bool Pass_cprop::process_tuples(Node &node, XEdge_iterator &inp_edges_ordered) {
    auto parent_dpin = inp_edges_ordered[0].driver;
    auto parent_node = parent_dpin.get_node();
 
-
    if (inp_edges_ordered[pid].sink.get_pid() == 1) { // key name is connected
-     key_name_dpin = inp_edges_ordered[pid].driver;
-     I(key_name_dpin.get_node().get_type().op == TupKey_Op);
-     I(key_name_dpin.has_name());
-     key_name = key_name_dpin.get_name();
-     if (key_name.substr(0, 2) == "__") {
-       if (key_name.substr(0, 7) == "__q_pin") {
-				 fmt::print("process_tuple_q_pin parent_dpin:{} node:{}\n", parent_dpin.debug_name(), node.debug_name());
-				 process_tuple_q_pin(node, parent_dpin);
-				 return true;
-       }
-       return false;  // do not deal with __XXX like __bits
-     }
      pid++;
    }
 
@@ -676,8 +693,10 @@ void Pass_cprop::trans(LGraph *g) {
 		// No subs, inside side-effects, or flops/mems that that get connected latter
     auto op = node.get_type().op;
 
-    if (op == AttrGet_Op || op==AttrSet_Op)
+    if (op == AttrGet_Op || op==AttrSet_Op) {
+      process_attr_get(node);
       continue;
+    }
 
     if (op == SubGraph_Op) {
       process_subgraph(node);
@@ -707,6 +726,7 @@ void Pass_cprop::trans(LGraph *g) {
       if (e.driver.get_node().is_type_const())
         n_inputs_constant++;
     }
+
 
     bool get_deleted = process_tuples(node, inp_edges_ordered);
     if (get_deleted) {
