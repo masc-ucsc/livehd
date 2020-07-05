@@ -30,6 +30,7 @@ protected:
   void process_not(Node &node, XEdge_iterator &inp_edges);
 	void process_flop(Node &node);
   void process_mux(Node &node, XEdge_iterator &inp_edges);
+  void process_shr(Node &node, XEdge_iterator &inp_edges);
   void process_sum(Node &node, XEdge_iterator &inp_edges);
   void process_pick(Node &node);
   void process_comparator(Node &node);

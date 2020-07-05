@@ -114,6 +114,7 @@ public:
   Lconst(absl::Span<unsigned char> v);
   Lconst(const Container &v);
   Lconst(std::string_view txt);
+  Lconst(Number v);
   Lconst(uint64_t v);
   Lconst(uint64_t v, uint16_t bits);
   Lconst();

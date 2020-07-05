@@ -147,6 +147,53 @@ void Pass_bitwidth::process_mux(Node &node, XEdge_iterator &inp_edges) {
   bwmap.emplace(node.get_driver_pin(0).get_compact(), Bitwidth_range(min_val, max_val));
 }
 
+void Pass_bitwidth::process_shr(Node &node, XEdge_iterator &inp_edges) {
+  I(inp_edges.size()==2);
+
+  auto a_dpin = node.get_sink_pin(0).get_driver_pin();
+  auto n_dpin = node.get_sink_pin(1).get_driver_pin();
+
+  auto a_it = bwmap.find(a_dpin.get_compact());
+  auto n_it = bwmap.find(n_dpin.get_compact());
+
+  Bitwidth_range a_bw(0);
+  if (a_it == bwmap.end()) {
+    a_bw = Bitwidth_range(a_dpin.get_bits());
+  } else {
+    a_bw = a_it->second;
+  }
+
+  Bitwidth_range n_bw(0);
+  if (n_it == bwmap.end()) {
+    n_bw = Bitwidth_range(n_dpin.get_bits());
+  } else {
+    n_bw = n_it->second;
+  }
+
+  if (a_bw.get_bits() == 0 || n_bw.get_bits() == 0) {
+    if (node.get_driver_pin().has_name())
+      fmt::print("pass.bitwidth shr:{} has input pin:{} unconstrained\n", node.debug_name(), node.get_driver_pin().get_name());
+    else
+      fmt::print("pass.bitwidth shr:{} has some inputs unconstrained\n", node.debug_name());
+    return;
+  }
+
+  if (n_bw.get_min() > 0 && n_bw.get_min().is_i()) {
+    auto max = a_bw.get_max();
+    auto min = a_bw.get_min();
+    auto amount = n_bw.get_min().to_i();
+    max = Lconst(max.get_raw_num() >> amount);
+    min = Lconst(min.get_raw_num() >> amount);
+
+    Bitwidth_range bw(min, max);
+    bwmap.emplace(node.get_driver_pin().get_compact(), bw);
+    node.get_driver_pin().set_bits(bw.get_bits());
+  } else {
+    bwmap.emplace(node.get_driver_pin().get_compact(), a_bw);
+    node.get_driver_pin().set_bits(a_bw.get_bits());
+  }
+}
+
 void Pass_bitwidth::process_sum(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size()); // Dangling sum??? (delete)
 
@@ -179,7 +226,6 @@ void Pass_bitwidth::process_sum(Node &node, XEdge_iterator &inp_edges) {
 void Pass_bitwidth::process_pick(Node &node) {
 
   auto data_dpin   = node.get_sink_pin(0).get_driver_pin();
-  auto offset_dpin = node.get_sink_pin(1).get_driver_pin();
   auto out_dpin    = node.get_driver_pin();
 
   auto it3 = bwmap.find(data_dpin.get_compact());
@@ -604,6 +650,8 @@ void Pass_bitwidth::bw_pass(LGraph *lg) {
 				continue;
     } else if (op == Sum_Op) {
 			process_sum(node, inp_edges);
+    } else if (op == ShiftRight_Op) {
+			process_shr(node, inp_edges);
     } else if (op == Not_Op) {
 			process_not(node, inp_edges);
     } else if (op == SFlop_Op || op == AFlop_Op || op == FFlop_Op) {

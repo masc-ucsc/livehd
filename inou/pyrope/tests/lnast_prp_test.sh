@@ -11,6 +11,7 @@ pts_failbitwidth='capricious_bits4'
 pts_should_compile_error='capricous_bits3'
 
 pts='capricious_bits2 tuple_if2'
+pts='firrtl_tail'
 #      nested_if  
 #      adder_stage  if2 if  if3_err 
 #      nested_if_err'

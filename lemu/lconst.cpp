@@ -132,6 +132,15 @@ Lconst::Lconst(uint64_t v) {
   bits          = calc_bits();
 }
 
+Lconst::Lconst(Number v) {
+  explicit_str  = false;
+  explicit_sign = false;
+  explicit_bits = false;
+  sign          = v<0;
+  num           = v;
+  bits          = calc_bits();
+}
+
 Lconst::Lconst(uint64_t v, uint16_t b) {
   explicit_str  = false;
   explicit_sign = false;
