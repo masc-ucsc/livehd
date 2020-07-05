@@ -687,6 +687,8 @@ void Pass_cprop::trans(LGraph *g) {
       continue;
     } else if (op == SFlop_Op || op == AFlop_Op || op == Latch_Op || op == FFlop_Op || op == Memory_Op || op == SubGraph_Op) {
       fmt::print("cprop skipping node:{}\n", node.debug_name());
+      // FIXME: if flop feeds itself (no update, delete, replace for zero)
+      // FIXME: if flop is disconnected *after AttrGet processed*, the flop was not used. Delete
       continue;
     } else if (!node.has_outputs()) {
       fmt::print("cprop deleting node:{}\n", node.debug_name());

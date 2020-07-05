@@ -4,7 +4,7 @@ pts='firrtl_tail adder_stage nested_if capricious_bits2 capricious_bits4 caprici
 
 ptr_dps='firrtl_tail2 firrtl_tail3'
 
-pts='test'
+#pts='firrtl_tail3'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
