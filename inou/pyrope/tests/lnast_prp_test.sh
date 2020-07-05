@@ -1,10 +1,10 @@
 #!/bin/bash
 rm -rf ./lgdb
-pts='adder_stage nested_if capricious_bits2 capricious_bits4 capricious_bits tuple_if reg__q_pin logic out_ssa if2 if ssa_rhs bits_rhs counter counter_nested_if'
+pts='firrtl_tail adder_stage nested_if capricious_bits2 capricious_bits4 capricious_bits tuple_if reg__q_pin logic out_ssa if2 if ssa_rhs bits_rhs counter counter_nested_if'
 
-ptr_dps='firrtl_tail firrtl_tail2 firrtl_tail3'
+ptr_dps='firrtl_tail2 firrtl_tail3'
 
-# pts='nested_if'
+# pts='firrtl_tail3'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck

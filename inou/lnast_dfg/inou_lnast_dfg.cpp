@@ -425,6 +425,7 @@ void Inou_lnast_dfg::process_ast_dp_assign_op(LGraph *dfg, const Lnast_nid &lnid
 
   aset_node.setup_driver_pin(0).set_name(c0_dp_name);
   name2dpin[c0_dp_name] = aset_node.get_driver_pin(0);
+  setup_dpin_ssa(name2dpin[c0_dp_name], vname, lnast->get_subs(c0_dp));
 }
 
 
