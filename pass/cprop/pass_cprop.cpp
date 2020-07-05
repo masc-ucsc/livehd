@@ -4,6 +4,7 @@
 
 #include <string>
 
+#include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "lgtuple.hpp"
@@ -670,6 +671,7 @@ void Pass_cprop::process_tuple_add(Node &node) {
 }
 
 void Pass_cprop::trans(LGraph *g) {
+  Lbench b("pass.cprop");
 
   for (auto node : g->forward()) {
     auto op = node.get_type().op;

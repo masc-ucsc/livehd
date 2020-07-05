@@ -316,11 +316,14 @@ void Pass_bitwidth::process_logic_and(Node &node, XEdge_iterator &inp_edges) {
 		bwmap.emplace(node.get_driver_pin(0).get_compact(), Bitwidth_range(max_bits));
 
 		for (auto e:inp_edges) {
+      auto bits = e.driver.get_bits();
+      if (bits)
+        continue; // Only for unconstrained inputs
+
 			if (e.driver.get_num_edges() > 1) {
-				must_perform_backward = must_perform_backward || e.driver.get_bits()==0;
+				must_perform_backward = true;
 			} else {
-				auto bits = e.driver.get_bits();
-				if (bits == 0 || bits > max_bits)
+				if (bits > max_bits)
 					e.driver.set_bits(max_bits);
 			}
 		}
@@ -608,7 +611,7 @@ void Pass_bitwidth::garbage_collect_support_structures(XEdge_iterator &inp_edges
 void Pass_bitwidth::adjust_dpin_bits(Node_pin &dpin, Bitwidth_range &bw) {
   auto bw_bits = bw.get_bits();
   if (bw_bits && bw_bits != dpin.get_bits()) {
-    fmt::print("bitwidth: bits:{}->{} for dpin:{}\n", dpin.get_bits(), bw_bits, dpin.debug_name());
+    // fmt::print("bitwidth: bits:{}->{} for dpin:{}\n", dpin.get_bits(), bw_bits, dpin.debug_name());
     dpin.set_bits(bw_bits);
   }
 }
@@ -629,7 +632,7 @@ void Pass_bitwidth::bw_pass(LGraph *lg) {
     auto inp_edges = node.inp_edges();
     auto op        = node.get_type_op();
 
-		fmt::print("bitwidth node:{}\n",node.debug_name());
+		//fmt::print("bitwidth node:{}\n",node.debug_name());
 
     if (inp_edges.empty() && (op!=Const_Op && op!=SubGraph_Op && op!=LUT_Op && op!=TupKey_Op)) {
       fmt::print("pass.bitwidth: removing dangling node:{}\n",node.debug_name());
@@ -741,12 +744,6 @@ void Pass_bitwidth::bw_pass(LGraph *lg) {
         I(false); // should be deleted by now if solved
       }
     }
-  }
-#endif
-
-#ifndef NDEBUG
-  for(auto it:bwmap) {
-    fmt::print("bwmap left bits:{}\n", it.second.get_bits());
   }
 #endif
 
