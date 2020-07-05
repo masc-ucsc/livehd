@@ -1,20 +1,10 @@
 #!/bin/bash
 rm -rf ./lgdb
-pts='capricious_bits4 capricious_bits tuple_if adder_stage nested_if reg__q_pin adder_stage reg__q_pin logic out_ssa if2 if ssa_rhs bits_rhs counter counter_nested_if'
-# pts='tuple_if2 out_ssa  logic  tuple_if  bits_rhs  firrtl_tail3  firrtl_tail2 
-#      nested_if  counter  counter_nested_if 
-#      adder_stage  if2 if  if3_err 
-#      nested_if_err  firrtl_tail  ssa_rhs  reg__q_pin '
+pts='adder_stage nested_if capricious_bits2 capricious_bits4 capricious_bits tuple_if reg__q_pin logic out_ssa if2 if ssa_rhs bits_rhs counter counter_nested_if'
 
 ptr_dps='firrtl_tail firrtl_tail2 firrtl_tail3'
-pts_failbitwidth='capricious_bits4'
-pts_should_compile_error='capricous_bits3'
 
-pts='capricious_bits2 tuple_if2'
-pts='firrtl_tail'
-#      nested_if  
-#      adder_stage  if2 if  if3_err 
-#      nested_if_err'
+# pts='nested_if'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck

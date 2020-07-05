@@ -981,7 +981,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
 
         auto out_width = cell_output_map[node.get_driver_pin().get_compact()]->width;
 
-        if (aport->width > out_width || bport->width > out_width) {
+        if (aport->width != out_width || bport->width != out_width) {
           log("ports size don't match a=%d, b=%d, y=%d\n", aport->width, bport->width, out_width);
         }
         if (aport->width < out_width) {

@@ -144,6 +144,12 @@ void Pass_bitwidth::process_mux(Node &node, XEdge_iterator &inp_edges) {
     }
   }
 
+  auto sel_dpin = node.get_sink_pin(0).get_driver_pin();
+  if (sel_dpin.get_bits() == 0) {
+    Lconst  n_options(inp_edges.size()-1-1); // -1 for log and -1 for the select
+    sel_dpin.set_bits(n_options.get_bits());
+  }
+
   bwmap.emplace(node.get_driver_pin(0).get_compact(), Bitwidth_range(min_val, max_val));
 }
 
@@ -366,13 +372,17 @@ void Pass_bitwidth::process_attr_get(Node &node) {
     result = bw.get_min();
   }
 
+  fmt::print("attr_get key:{} dpin0:{} const:{} node:{}\n", key, dpin_val.debug_name(), result.to_pyrope(), node.debug_name());
+
   auto new_node = node.get_class_lgraph()->create_node_const(result);
   auto new_dpin = new_node.get_driver_pin();
   for (auto &out : node.out_edges()) {
     new_dpin.connect_sink(out.sink);
   }
 
+//#ifndef PRESERVE_ATTR_NODE
 	node.del_node();
+//#endif
 }
 
 void Pass_bitwidth::process_attr_set_dp_assign(Node &node) {
@@ -468,37 +478,30 @@ void Pass_bitwidth::process_attr_set_new_attr(Node &node) {
     dpin_name = attr_dpin.get_name();
 
 
-	Bitwidth_range *bw=nullptr;
+	Bitwidth_range bw(0);
+  bool parent_pending = false;
 	if (node.has_sink_pin_connected(0)) {
 		auto through_dpin = node.get_sink_pin(0).get_driver_pin();
 		auto it = bwmap.find(through_dpin.get_compact());
 		if (it != bwmap.end()) {
-			bw = &(it->second);
-		} else {
-			auto it2 = bwmap.emplace(through_dpin.get_compact(), Bitwidth_range(0));
-			bw       = &(it2.first->second);
-		}
-	}
-
-	bool out_connected = false;
-	if (bw == nullptr) {
-		out_connected = true;
-		auto it2 = bwmap.emplace(node.get_driver_pin(0).get_compact(), Bitwidth_range(0));
-		bw       = &(it2.first->second);
+			bw = it->second;
+    } else {
+      parent_pending = true;
+    }
   }
 
-  fmt::print("attr_set name:{} key:{} bw_bits:{}\n", dpin_name, key, bw->get_bits());
+  fmt::print("attr_set_new name:{} key:{} bw_bits:{} node:{}\n", dpin_name, key, bw.get_bits(), node.debug_name());
 
   if (attr == Attr::Set_bits) {
     I(dpin_val.get_node().is_type_const());
     auto val = dpin_val.get_node().get_type_const();
-    if (bw->get_bits() && bw->get_bits() > val.to_i()) {
-      Pass::error("bitwidth missmatch. Variable {} needs {}bits, but constrained to {}bits\n", dpin_name, bw->get_bits(), val.to_i());
+    if (bw.get_bits() && bw.get_bits() > val.to_i()) {
+      Pass::error("bitwidth missmatch. Variable {} needs {}bits, but constrained to {}bits\n", dpin_name, bw.get_bits(), val.to_i());
     } else {
-      if (bw->is_always_positive())
-        bw->set_ubits(val.to_i());
+      if (bw.is_always_positive())
+        bw.set_ubits(val.to_i());
       else
-        bw->set_sbits(val.to_i());
+        bw.set_sbits(val.to_i());
     }
   }else if (attr == Attr::Set_max) {
     I(false); // FIXME: todo
@@ -509,11 +512,15 @@ void Pass_bitwidth::process_attr_set_new_attr(Node &node) {
   }
 
   for (auto out_dpin : node.out_connected_pins()) {
-		out_dpin.set_bits(bw->get_bits());
-		if (out_connected && out_dpin.get_pid()==0)
-			continue;
-		bwmap.emplace(out_dpin.get_compact(), *bw);
+		out_dpin.set_bits(bw.get_bits());
+		bwmap.emplace(out_dpin.get_compact(), bw);
 	}
+
+  if (parent_pending) {
+		auto through_dpin = node.get_sink_pin(0).get_driver_pin();
+    through_dpin.set_bits(bw.get_bits());
+		auto it = bwmap.emplace(through_dpin.get_compact(), bw);
+  }
 
   // dpin_val.dump_all_prp_vname();
 }
@@ -547,7 +554,7 @@ void Pass_bitwidth::process_attr_set_propagate(Node &node) {
   }
   auto &parent_attr_bw = parent_attr_it->second;
 
-  fmt::print("attr_set name:{} parent_attr.bits:{} data_bw.bits:{}\n", dpin_name, parent_attr_bw.get_bits(), data_bw.get_bits());
+  fmt::print("attr_set_prop name:{} parent_attr.bits:{} data_bw.bits:{}\n", dpin_name, parent_attr_bw.get_bits(), data_bw.get_bits());
 
   if (parent_attr_bw.get_bits() && data_bw.get_bits()) {
     if (parent_attr_bw.get_bits() < data_bw.get_bits()) {
