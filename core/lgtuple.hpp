@@ -76,6 +76,7 @@ public:
   }
 
   bool has_key_pos(size_t key) const {
+    fmt::print("ordered:{}, pos2tuple.size:{}\n", ordered, pos2tuple.size());
     return (key == 0 || (ordered && key<pos2tuple.size() && pos2tuple[key]));
   }
 

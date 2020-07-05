@@ -569,7 +569,6 @@ bool Pass_cprop::process_tuple_get(Node &node) {
 		tup_name = node.debug_name();
 
 	if (ptup_it == node2tuple.end()) { //ptup_it = parent_node
-
 		std::string key;
 		if (key_name.empty())
 			key = std::to_string(key_pos);
@@ -579,6 +578,8 @@ bool Pass_cprop::process_tuple_get(Node &node) {
 		Pass::error("there is no tuple in {}, so no valid field {}\n", tup_name, key);
 		return false;
 	}
+
+  fmt::print("DBG TupGet: tup_name:{}, key_name:{}, key_pos:{}\n", tup_name, key_name, key_pos);
 
 	auto ctup = ptup_it->second;
 
@@ -677,7 +678,7 @@ void Pass_cprop::trans(LGraph *g) {
     if (op == AttrGet_Op) {
       process_attr_get(node);
       continue;
-		}else if (op == AttrSet_Op) {
+		} else if (op == AttrSet_Op) {
       continue;  // Nothing to do in cprop
     } else if (op == SubGraph_Op) {
       process_subgraph(node);

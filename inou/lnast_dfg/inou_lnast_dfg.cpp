@@ -573,9 +573,8 @@ void Inou_lnast_dfg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnid
   }
 
 
-  std::string kp_str;
   if (is_const(key_name)) { // it is a key_pos, not a key_name
-    auto kp_dpin = dfg->create_node_const(Lconst(kp_str)).setup_driver_pin();
+    auto kp_dpin = dfg->create_node_const(Lconst(key_name)).setup_driver_pin();
     dfg->add_edge(kp_dpin, kp_spin);
   }
 
@@ -584,8 +583,6 @@ void Inou_lnast_dfg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnid
   dfg->add_edge(value_dpin, value_spin);
   name2dpin[tup_name] = tup_add.setup_driver_pin();
   tup_add.setup_driver_pin().set_name(tup_name); // tuple ref semantically move to here
-  //tuplize_table.insert()
-
 }
 
 
