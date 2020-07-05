@@ -542,6 +542,11 @@ void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
     } else if (!is_lhs(psts_nid, opr_nid)) {
       ssa_rhs_handle_a_operand(psts_nid, c1_opr);
     }
+  } else if (type.is_tuple()) {
+    for (auto itr_opd : children(opr_nid)) {
+      if (itr_opd == get_first_child(opr_nid)) continue;
+      ssa_rhs_handle_a_statement(psts_nid, itr_opd);
+    }
   } else {
     //handle statement rhs of normal operators
     for (auto itr_opd : children(opr_nid)) {
