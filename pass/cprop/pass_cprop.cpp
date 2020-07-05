@@ -290,7 +290,7 @@ void Pass_cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_
     auto first = inp_edges_ordered[0].driver.get_node().get_type_const();
     for (auto i = 1u; i < inp_edges_ordered.size(); ++i) {
       auto c = inp_edges_ordered[i].driver.get_node().get_type_const();
-      eq     = eq && first.equals_op(c);
+      eq     = eq && first.eq_op(c);
     }
 
     Lconst result(eq?1:0);

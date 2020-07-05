@@ -3,6 +3,7 @@
 
 #include <vector>
 
+#include "iassert.hpp"
 #include "boost/multiprecision/cpp_int.hpp"
 #include "absl/types/span.h"
 
@@ -84,12 +85,10 @@ protected:
   Lconst(bool str, bool a, bool b, bool c, uint16_t d, Number n) : explicit_str(str), explicit_sign(a), explicit_bits(b), sign(c), bits(d), num(n) {}
 
   uint16_t calc_bits() const {
-    uint16_t v=1;
-    if (num) {
-      v = msb(num)+1;
+    if (num == 0) {
+      return 1;
     }
-    if (sign)
-      v++;
+    uint16_t v = msb(num)+1+(sign?1:0);
     return v;
   }
   bool same_explicit_bits(const Lconst &o) const {
@@ -129,8 +128,12 @@ public:
   [[nodiscard]] Lconst or_op(const Lconst &o) const;
   [[nodiscard]] Lconst and_op(const Lconst &o) const;
 
+  [[nodiscard]] bool   eq_op(const Lconst &o) const;
+
   [[nodiscard]] Lconst adjust_bits(uint16_t amount) const;
 
+  bool     is_unsigned() const { return !sign; }
+  // WARNING: unsigned can still be negative. It is a way to indicate as many 1s are needed
   bool     is_negative() const { return sign && num < 0; }
   bool     is_explicit_sign() const { return explicit_sign; }
   bool     is_explicit_bits() const { return explicit_bits; }
@@ -158,46 +161,36 @@ public:
   [[nodiscard]] const Lconst operator|(const Lconst &other) const { return or_op(other); }
   [[nodiscard]] const Lconst operator|(uint64_t other) const { return or_op(Lconst(other)); }
 
+#if 0
   bool equals_op(const Lconst &other) const {
     // similar to ==, but ignore explicit bits
     auto b = std::max(bits,other.bits);
     return get_num(b) == other.get_num(b);
   }
+#endif
 
   bool operator==(const Lconst &other) const {
-    auto b = std::max(bits,other.bits);
-    return get_num(b) == other.get_num(b) && same_explicit_bits(other);
+    return get_num() == other.get_num() && same_explicit_bits(other);
   }
+  bool operator!=(const Lconst &other) const {
+    return get_num() != other.get_num() || !same_explicit_bits(other);
+  }
+
   bool operator==(int other) const {
     if (bits>63)
       return false;
-    return get_num(bits) == other && !explicit_bits;
+    return get_num() == other && !explicit_bits;
   }
   bool operator!=(int other) const {
     if (bits>63)
       return true;
-    return get_num(bits) != other || explicit_bits;
+    return get_num() != other || explicit_bits;
   }
-  bool operator!=(const Lconst &other) const {
-    auto b = std::max(bits,other.bits);
-    return get_num(b) != other.get_num(b) || !same_explicit_bits(other);
-  }
-  bool operator<(const Lconst &other) const {
-    auto b = std::max(bits,other.bits);
-    return get_num(b) < other.get_num(b);
-  }
-  bool operator<=(const Lconst &other) const {
-    auto b = std::max(bits,other.bits);
-    return get_num(b) <= other.get_num(b);
-  }
-  bool operator>(const Lconst &other) const {
-    auto b = std::max(bits,other.bits);
-    return get_num(b) > other.get_num(b);
-  }
-  bool operator>=(const Lconst &other) const {
-    auto b = std::max(bits,other.bits);
-    return get_num(b) >= other.get_num(b);
-  }
+
+  bool operator<(const Lconst &other) const  { return num <  other.num; }
+  bool operator<=(const Lconst &other) const { return num <= other.num; }
+  bool operator>(const Lconst &other) const  { return num >  other.num; }
+  bool operator>=(const Lconst &other) const { return num >= other.num; }
 
   Number get_raw_num() const { return num; } // for debugging mostly
 };

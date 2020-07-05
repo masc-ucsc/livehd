@@ -297,8 +297,16 @@ Lconst::Lconst(std::string_view orig_txt) {
       sign = true;
   }
 
-  if (!explicit_bits)
+  if (explicit_bits) {
+    if (num < 0 && !sign && explicit_sign) {  // convert to positive
+      Number mask(1);
+      mask = (mask << bits) - 1;
+      num  = num & mask;
+      I(num>0);
+    }
+  } else {
     bits = nbits_used;
+  }
 
   I(bits);
 }
@@ -319,7 +327,7 @@ Lconst Lconst::add_op(const Lconst &o) const {
   if (res_num<0)
     res_bits = msb(-res_num)+1;
   else if (res_num==0)
-    res_bits = 1;
+    res_bits = 0;
   else
     res_bits = msb(res_num)+1;
 
@@ -387,6 +395,15 @@ Lconst Lconst::and_op(const Lconst &o) const {
   auto res_sign = sign && o.sign;
 
   return Lconst(res_explicit_str, res_explicit_sign, res_explicit_bits, res_sign, res_bits, res_num);
+}
+
+bool Lconst::eq_op(const Lconst &o) const {
+  auto b = num & o.num;  // zero-extend or drop bits from negative
+  if (num<0 && o.num>0)
+    return b == o.num;
+  if (num>0 && o.num<0)
+    return b == num;
+  return (b==num) && (b==o.num);
 }
 
 Lconst Lconst::adjust_bits(uint16_t amount) const {

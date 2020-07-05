@@ -118,23 +118,28 @@ void print_method(const UInt<N> v) {
 TEST_F(Lconst_test, lvar_sizes) {
 
   Lconst l1("-1u8"); // 0xFF
-  EXPECT_TRUE(l1 == Lconst("0xFF"));
+  EXPECT_TRUE(l1.eq_op(Lconst("0xFF")));
   EXPECT_EQ(l1.get_bits(), 8);
 
   auto s1 = l1 + Lconst("1");
-  EXPECT_TRUE(s1 == Lconst("0x100"));
+  fmt::print("s1:{} bits:{} unsign:{}\n", s1.to_pyrope(), s1.get_bits(), s1.is_unsigned());
+  EXPECT_TRUE(s1.eq_op(Lconst("0x100")));
   EXPECT_EQ(s1.get_bits(), 9);
 
+
   auto s2 = l1 + Lconst("-1s");
-  EXPECT_TRUE(s2 == Lconst("0xFE"));
+  fmt::print("s2:{} bits:{} unsign:{}\n", s2.to_pyrope(), s2.get_bits(), s2.is_unsigned());
+  EXPECT_TRUE(s2.eq_op(Lconst("0xFE")));
   EXPECT_EQ(s2.get_bits(), 8);
 
   auto s3 = l1 + Lconst("-1");
-  EXPECT_TRUE(s3 == Lconst("0xFE"));
+  fmt::print("s3:{} bits:{} unsign:{}\n", s3.to_pyrope(), s3.get_bits(), s3.is_unsigned());
+  EXPECT_TRUE(s3.eq_op(Lconst("0xFE")));
   EXPECT_EQ(s3.get_bits(), 8);
 
   auto s4 = l1 + Lconst("0x01Fs12");
-  EXPECT_TRUE(s4 == Lconst("0x11E"));
+  fmt::print("s4:{} bits:{} unsign:{}\n", s4.to_pyrope(), s4.get_bits(), s4.is_unsigned());
+  EXPECT_TRUE(s4.eq_op(Lconst("0x11E")));
   EXPECT_EQ(s4.get_bits(), 9);
   EXPECT_TRUE(l1.is_explicit_bits());
   EXPECT_FALSE(s4.is_explicit_bits());
@@ -1082,8 +1087,10 @@ TEST_F(Lconst_test, dec_check) {
         if (flip.any()) {
           nbits += num_digits.any();
         }
-        padded.append(std::to_string(nbits));
-        padded.append("bits");
+        if (is_sign) {
+          padded.append(std::to_string(nbits));
+          padded.append("bits");
+        }
       }
     }
 
@@ -1100,9 +1107,13 @@ TEST_F(Lconst_test, dec_check) {
     auto fmt_a = a1.to_pyrope();
     Lconst b(fmt_a);
 
-    //fmt::print("orig:{}\n",rnd_list[i]);
-    //fmt::print("  a1:{}\n",a1.to_pyrope());
-    //fmt::print("   b:{}\n",b.to_pyrope());
+#if 0
+    fmt::print("orig:{}\n",rnd_list[i]);
+    fmt::print("  a1:{}\n",a1.to_pyrope());
+    fmt::print("  a2:{}\n",a2.to_pyrope());
+    fmt::print("padd:{}\n",padded);
+    fmt::print("   b:{}\n",b.to_pyrope());
+#endif
 
     EXPECT_EQ(b.get_raw_num(), c);
   }
@@ -1241,8 +1252,114 @@ TEST_F(Lconst_test, zerocase) {
   EXPECT_EQ(Lconst("0x0").get_bits(), 1);
   EXPECT_EQ(Lconst("0").get_bits(), 1);
   EXPECT_EQ(Lconst("0u7").get_bits(), 7);
-  EXPECT_EQ(Lconst("0s").get_bits(), 2);
+  EXPECT_EQ(Lconst("0s").get_bits(), 1);
   EXPECT_EQ(Lconst("0s4").get_bits(), 4);
 
 }
 
+TEST_F(Lconst_test, cpp_int_vs_lconst) {
+
+  using boost::multiprecision::cpp_int;
+
+  cpp_int a(-1);
+  cpp_int b("0xFF");
+
+  cpp_int c_and = a & b;
+  cpp_int d_and = a & a;
+
+  auto a_not = a;
+  a_not = ~a;
+  auto b_not = b;
+  b_not = ~b;
+  fmt::print("{} s:{} p:{}\n", a.str(), a.sign(), a_not.str());
+  fmt::print("{} s:{} p:{}\n", b.str(), b.sign(), b_not.str());
+
+  auto c_and_not = c_and;
+  auto d_and_not = d_and;
+  c_and_not = ~c_and;
+  d_and_not = ~d_and;
+  fmt::print("{} = {} & {} s:{} ~:{}\n", c_and.str(), a.str(), b.str(), c_and.sign(), c_and_not.str());
+  fmt::print("{} = {} & {} s:{} ~:{}\n", d_and.str(), a.str(), a.str(), c_and.sign(), d_and_not.str());
+
+  cpp_int c_or = a | b;
+  cpp_int d_or = a | a;
+
+  auto c_or_not = c_or;
+  auto d_or_not = d_or;
+  c_or_not = ~c_or;
+  d_or_not = ~d_or;
+  fmt::print("{} = {} | {} s:{} ~:{}\n", c_or.str(), a.str(), b.str(), c_or.sign(), c_or_not.str());
+  fmt::print("{} = {} | {} s:{} ~:{}\n", d_or.str(), a.str(), a.str(), c_or.sign(), d_or_not.str());
+
+
+  Lconst l_a("-1");
+  Lconst l_b("0xFF");
+
+  Lconst l_c_and = l_a.and_op(l_b);
+  Lconst l_d_and = l_a.and_op(l_a);
+
+  EXPECT_EQ(l_c_and.to_i(), c_and.convert_to<int>());
+  EXPECT_EQ(l_d_and.to_i(), d_and.convert_to<int>());
+
+  Lconst l_c_or = l_a.or_op(l_b);
+  Lconst l_d_or = l_a.or_op(l_a);
+
+  EXPECT_EQ(l_c_or.to_i(), c_or.convert_to<int>());
+  EXPECT_EQ(l_d_or.to_i(), d_or.convert_to<int>());
+
+  // Same/diff are not the same
+
+  cpp_int c_eq = a == b;
+  cpp_int d_eq = a == a;
+
+  fmt::print("{} = {} == {} s:{}\n", c_eq.str(), a.str(), b.str(), c_eq.sign());
+  fmt::print("{} = {} == {} s:{}\n", d_eq.str(), a.str(), a.str(), c_eq.sign());
+
+  Lconst l_c_eq = l_a.eq_op(l_b);
+  Lconst l_d_eq = l_a.eq_op(l_a);
+
+  EXPECT_EQ(c_eq, 0);
+  EXPECT_EQ(d_eq, 1);
+
+  EXPECT_EQ(l_c_eq, 1); // Sign extended to match
+  EXPECT_EQ(l_d_eq, 1);
+}
+
+TEST_F(Lconst_test, lconst_add) {
+  {
+    auto a = Lconst("0xFF") + Lconst("-1");
+    EXPECT_TRUE(a.is_unsigned());
+    EXPECT_EQ(a.to_i(), 254);
+    EXPECT_EQ(a.get_bits(), 8);
+  }
+  {
+    auto a = Lconst("0xFFu") + Lconst("-1");
+    EXPECT_TRUE(a.is_unsigned());
+    EXPECT_EQ(a.to_i(), 254);
+    EXPECT_EQ(a.get_bits(), 8);
+  }
+  {
+    auto a = Lconst("0xFFu") + Lconst("-1s");
+    EXPECT_TRUE(a.is_unsigned());
+    EXPECT_EQ(a.to_i(), 254);
+    EXPECT_EQ(a.get_bits(), 8);
+  }
+  {
+    auto a = Lconst("0xFFs") + Lconst("-1");
+    EXPECT_TRUE(!a.is_unsigned()); // SIGNED
+    EXPECT_EQ(a.to_i(), 254);
+    EXPECT_EQ(a.get_bits(), 9);
+  }
+  {
+    auto a = Lconst("1s") + Lconst("-1");
+    EXPECT_TRUE(!a.is_unsigned());  // SIGNED
+    EXPECT_EQ(a.to_i(), 0);
+    EXPECT_EQ(a.get_bits(), 1);
+  }
+  {
+    auto a = Lconst("-1u") + Lconst("-1u");
+    EXPECT_TRUE(a.is_unsigned());
+    EXPECT_EQ(a.to_i(), -2);
+    EXPECT_EQ(a.get_bits(), 2);
+  }
+}
