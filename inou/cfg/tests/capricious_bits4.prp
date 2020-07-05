@@ -11,9 +11,9 @@ if (1 == 1) {
 }
                      // T7 = phi (T3, T6)
 T = T + 10           // T8
-%out = T   
+%out = T             // 23
 
 T = 11               // T9 = ; new attr chain
 T.__bits = 12        // T10
 
-%out2 = T + T.__bits //23
+%out2 = T + T.__bits // 23
