@@ -407,7 +407,7 @@ void Inou_lnast_dfg::process_ast_dp_assign_op(LGraph *dfg, const Lnast_nid &lnid
   auto c1_dp      = lnast->get_sibling_next(c0_dp);
   auto c0_dp_name = lnast->get_sname(c0_dp);  // ssa name
   auto attr_vname = "__dp_assign";  // no-ssa name
-  auto vname      = lnast->get_vname(c0_dp);  // no-ssa name
+  auto c0_dp_vname      = lnast->get_vname(c0_dp);  // no-ssa name
 
   auto vn_dpin = setup_ref_node_dpin(dfg, c1_dp);
   dfg->add_edge(vn_dpin, vn_spin);
@@ -416,7 +416,7 @@ void Inou_lnast_dfg::process_ast_dp_assign_op(LGraph *dfg, const Lnast_nid &lnid
 
 
   auto dp_ancestor_subs  = lnast->get_data(c0_dp).subs - 1;
-  auto dp_ancestor_name = std::string(vname) + "_" + std::to_string(dp_ancestor_subs);
+  auto dp_ancestor_name = std::string(c0_dp_vname) + "_" + std::to_string(dp_ancestor_subs);
   fmt::print("aset ancestor name:{}\n", dp_ancestor_name);
   I(name2dpin.find(dp_ancestor_name) != name2dpin.end());
 
@@ -425,7 +425,19 @@ void Inou_lnast_dfg::process_ast_dp_assign_op(LGraph *dfg, const Lnast_nid &lnid
 
   aset_node.setup_driver_pin(0).set_name(c0_dp_name);
   name2dpin[c0_dp_name] = aset_node.get_driver_pin(0);
-  setup_dpin_ssa(name2dpin[c0_dp_name], vname, lnast->get_subs(c0_dp));
+  setup_dpin_ssa(name2dpin[c0_dp_name], c0_dp_vname, lnast->get_subs(c0_dp));
+
+  if (is_register(c0_dp_name)) {
+    auto reg_node = name2dpin[c0_dp_vname].get_node();
+    I(reg_node.get_type().op == SFlop_Op);
+    I(reg_node.setup_sink_pin("D").inp_edges().size() <= 1);
+    if (reg_node.setup_sink_pin("D").inp_edges().size() == 1) {
+      reg_node.setup_sink_pin("D").inp_edges().begin()->del_edge();
+    }
+    auto dpin = aset_node.setup_driver_pin(0); 
+    auto spin = reg_node.setup_sink_pin("D");
+    dfg->add_edge(dpin, spin);
+  }
 }
 
 
@@ -723,8 +735,6 @@ Node_pin Inou_lnast_dfg::setup_node_assign_and_lhs(LGraph *dfg, const Lnast_nid 
       setup_dpin_ssa(name2dpin[lhs_name], lhs_vname, lnast->get_subs(lhs));
 
       // (2) find the corresponding #reg by its qpin_name, #reg 
-      fmt::print("reg qpin name:{}\n", lhs_vname);
-      fmt::print("lhs_name:{}\n", lhs_name);
       I(name2dpin[lhs_vname] != Node_pin());
       auto reg_qpin = name2dpin[lhs_vname];
 
@@ -791,8 +801,12 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
 
   // special case for register, when #x_0 in rhs, return the reg_qpin, wname #x. Note this is not true for a phi-node.
   bool reg_existed = name2dpin.find(vname) != name2dpin.end();
-  if (is_register(name) && lnast->get_subs(lnidx_opd) == 0 && !from_phi && reg_existed) {
-    return name2dpin.find(vname)->second;
+  if (is_register(name) &&  !from_phi && reg_existed) {
+    if (name2dpin.find(name) != name2dpin.end())
+      return name2dpin.find(name)->second;
+    else 
+      return name2dpin.find(vname)->second;
+
   }
 
   const auto it = name2dpin.find(name);

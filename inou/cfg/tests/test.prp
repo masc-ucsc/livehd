@@ -1,11 +1,10 @@
-$en.__bits = 1
-#cnt.__bits = 4
-
-if ($en == 1) {
-  #cnt := #cnt + 1
-}
-
-%cnt_o = #cnt.__q_pin
+#out2.__bits = 8
+#out3.__bits = 8
+%result = #out3 + #out2
+a = $in & 0xF
+a = a ^ 0xF
+#out2 := a
+#out3 := #out2 + a
 
 
 //tmp = $inp
