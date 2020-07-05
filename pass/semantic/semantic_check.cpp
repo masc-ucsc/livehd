@@ -187,7 +187,7 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
         add_to_assign_rhs_list(lnast->get_name(rhs));
       }
       // N-ary Operations (need to add node_type.is_select())
-    } else if (node_type.is_dot() || node_type.is_logical_and() || node_type.is_logical_or() || node_type.is_nary_op() ||
+    } else if (node_type.is_logical_and() || node_type.is_logical_or() || node_type.is_nary_op() ||
                node_type.is_eq() || node_type.is_bit_select() || node_type.is_logic_shift_right() ||
                node_type.is_arith_shift_right() || node_type.is_arith_shift_left() || node_type.is_rotate_shift_right() ||
                node_type.is_rotate_shift_left() || node_type.is_dynamic_shift_right() || node_type.is_dynamic_shift_left() ||
@@ -227,10 +227,10 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
       }
       if (num_of_ref != 1) {
         Pass::error("Tuple Operation Error: Missing Reference Node\n");
-      } else if (num_of_assign != 2) {
+      } else if (num_of_assign == 0) {
         Pass::error("Tuple Operation Error: Missing Assign Node(s)\n");
       }
-    } else if (node_type.is_select()) {
+    } else if (node_type.is_select() || node_type.is_dot()) {
       int num_of_ref = 0;
       for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
         const auto node_type_child = lnast->get_data(lnidx_opr_child).type;
@@ -277,20 +277,8 @@ void Semantic_check::check_if_op(Lnast *lnast, const Lnast_nid &lnidx_opr) {
         }
       }
     } else if (ntype_child.is_cond()) {
-      if (lnast->has_single_child(lnidx_opr_child)) {
-        is_cond                          = true;
-        const auto lnidx_opr_child_child = lnast->get_first_child(lnidx_opr_child);
-        const auto ntype_child_child     = lnast->get_data(lnidx_opr_child_child).type;
-        if (!ntype_child_child.is_ref()) {
-          Pass::error("If Operation Error: Condition must be Node type 'ref'\n");
-        }
-        // Store type 'ref' variables
-        if (ntype_child_child.is_ref()) {
-          add_to_read_list(lnast->get_name(lnidx_opr_child_child));
-        }
-      } else {
-        Pass::error("If Operation Error: Missing Condition Node\n");
-      }
+      is_cond = true;
+      add_to_read_list(lnast->get_name(lnidx_opr_child));
     } else {
       Pass::error("If Operation Error: Not a Valid Node Type\n");
     }
@@ -343,19 +331,7 @@ void Semantic_check::check_while_op(Lnast *lnast, const Lnast_nid &lnidx_opr) {
 
     if (ntype_child.is_cond()) {
       cond = true;
-      if (lnast->has_single_child(lnidx_opr_child)) {
-        auto lnidx_opr_child_child = lnast->get_first_child(lnidx_opr_child);
-        auto ntype_child_child     = lnast->get_data(lnidx_opr_child_child).type;
-        if (!ntype_child_child.is_ref()) {
-          Pass::error("While Operation Error: Condition must be Node type 'ref'\n");
-        }
-        // Store type 'ref' variables
-        if (ntype_child_child.is_ref()) {
-          add_to_read_list(lnast->get_name(lnidx_opr_child_child));
-        }
-      } else {
-        Pass::error("While Operation Error: Missing Condition Node\n");
-      }
+      add_to_read_list(lnast->get_name(lnidx_opr_child));
     } else if (ntype_child.is_stmts()) {
       stmt = true;
       for (const auto &lnidx_opr_child_child : lnast->children(lnidx_opr_child)) {
@@ -403,20 +379,22 @@ void Semantic_check::check_func_def(Lnast *lnast, const Lnast_nid &lnidx_opr) {
         }
       }
     } else if (ntype_child.is_cond()) {
-      if (lnast->has_single_child(lnidx_opr_child)) {
-        cond                       = true;
-        auto lnidx_opr_child_child = lnast->get_first_child(lnidx_opr_child);
-        auto ntype_child_child     = lnast->get_data(lnidx_opr_child_child).type;
-        if (!ntype_child_child.is_const() && !ntype_child_child.is_ref()) {
-          Pass::error("Func Def Operation Error: Condition must be Node type 'ref' or 'const'\n");
-        }
-        // Store type 'ref' variables
-        if (ntype_child_child.is_ref()) {
-          add_to_read_list(lnast->get_name(lnidx_opr_child_child));
-        }
-      } else {
-        Pass::error("Func Def Operation Error: Missing Condition Node\n");
-      }
+      // if (lnast->has_single_child(lnidx_opr_child)) {
+      //   cond                       = true;
+      //   auto lnidx_opr_child_child = lnast->get_first_child(lnidx_opr_child);
+      //   auto ntype_child_child     = lnast->get_data(lnidx_opr_child_child).type;
+      //   if (!ntype_child_child.is_const() && !ntype_child_child.is_ref()) {
+      //     Pass::error("Func Def Operation Error: Condition must be Node type 'ref' or 'const'\n");
+      //   }
+      //   // Store type 'ref' variables
+      //   if (ntype_child_child.is_ref()) {
+      //     add_to_read_list(lnast->get_name(lnidx_opr_child_child));
+      //   }
+      // } else {
+      //   Pass::error("Func Def Operation Error: Missing Condition Node\n");
+      // }
+      cond = true;
+       add_to_read_list(lnast->get_name(lnidx_opr_child));
     } else if (ntype_child.is_ref()) {
       add_to_read_list(lnast->get_name(lnidx_opr_child));
       num_of_refs += 1;
