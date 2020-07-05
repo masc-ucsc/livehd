@@ -569,6 +569,52 @@ int main(int argc, char** argv) {
     }
     break;
 
+    case 14: {
+
+    // Attribute Operation ============================================================================================
+
+    auto idx_root    = Lnast_node::create_top("top",  line_num, pos1, pos2);
+    lnast->set_root(idx_root);
+
+    auto idx_stmts   = lnast->add_child(lnast->get_root(), Lnast_node::create_stmts ("stmts0",  line_num, pos1, pos2));
+    
+    auto idx_dot     = lnast->add_child(idx_stmts,   Lnast_node::create_dot    ("stmts0",  line_num, pos1, pos2));
+    auto idx_lhs1    = lnast->add_child(idx_dot,     Lnast_node::create_ref    ("___a",  line_num, pos1, pos2));
+    auto idx_op1     = lnast->add_child(idx_dot,     Lnast_node::create_ref    ("foo",  line_num, pos1, pos2));
+    auto idx_op2     = lnast->add_child(idx_dot,     Lnast_node::create_ref    ("__bits",  line_num, pos1, pos2));
+
+    auto idx_assign1 = lnast->add_child(idx_stmts,   Lnast_node::create_assign("assign",  line_num, pos1, pos2));
+    auto idx_lhs2    = lnast->add_child(idx_assign1, Lnast_node::create_ref   ("___a",  line_num, pos1, pos2));
+    auto idx_op3     = lnast->add_child(idx_assign1, Lnast_node::create_const ("0d3",  line_num, pos1, pos2));
+
+
+    auto idx_assign2 = lnast->add_child(idx_stmts,   Lnast_node::create_assign("assign",  line_num, pos1, pos2));
+    auto idx_lhs3    = lnast->add_child(idx_assign2, Lnast_node::create_ref   ("foo",  line_num, pos1, pos2));
+    auto idx_op4     = lnast->add_child(idx_assign2, Lnast_node::create_const ("0d7",  line_num, pos1, pos2));
+
+    auto idx_tup     = lnast->add_child(idx_stmts,   Lnast_node::create_tuple ("tuple",  line_num, pos1, pos2));
+    auto idx_tname   = lnast->add_child(idx_tup,     Lnast_node::create_ref   ("___b",  line_num, pos1, pos2));
+
+    auto idx_assign3 = lnast->add_child(idx_tup,     Lnast_node::create_assign("assign",  line_num, pos1, pos2));
+    auto idx_lhs4    = lnast->add_child(idx_assign3, Lnast_node::create_ref   ("__bits",  line_num, pos1, pos2));
+    auto idx_op5     = lnast->add_child(idx_assign3, Lnast_node::create_const ("0d10",  line_num, pos1, pos2));
+
+
+    auto idx_as      = lnast->add_child(idx_stmts,   Lnast_node::create_as    ("as",  line_num, pos1, pos2));
+    auto idx_lhs5    = lnast->add_child(idx_as,      Lnast_node::create_ref   ("bar",  line_num, pos1, pos2));
+    auto idx_op6     = lnast->add_child(idx_as,      Lnast_node::create_ref   ("___b",  line_num, pos1, pos2));
+ 
+    auto idx_assign4 = lnast->add_child(idx_stmts,   Lnast_node::create_assign("assign",  line_num, pos1, pos2));
+    auto idx_lhs6    = lnast->add_child(idx_assign4, Lnast_node::create_ref   ("bar",  line_num, pos1, pos2));
+    auto idx_op7     = lnast->add_child(idx_assign4, Lnast_node::create_const ("0d123",  line_num, pos1, pos2));
+
+    // Warning: bar
+    
+    // ================================================================================================================
+    s.do_check(lnast);
+    }
+    break;
+
     default:
       std::cout << "Semantic Test Error: Number must be within 1 - 13 (inclusive)\n";
       break;
