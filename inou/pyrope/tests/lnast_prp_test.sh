@@ -91,7 +91,7 @@ do
       echo ""
       echo ""
       echo "----------------------------------------------------"
-      echo "Bitwidth Optimization(LGraph) Round-1"
+      echo "Bitwidth Optimization(LGraph)"
       echo "----------------------------------------------------"
 
       ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.bitwidth"
