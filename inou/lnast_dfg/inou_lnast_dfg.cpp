@@ -791,16 +791,20 @@ Node_pin Inou_lnast_dfg::setup_node_assign_and_lhs(LGraph *dfg, const Lnast_nid 
 Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx_opd, bool from_phi, bool from_concat) {
   auto name  = lnast->get_sname(lnidx_opd);
   auto vname = lnast->get_vname(lnidx_opd); 
+  auto subs  = lnast->get_subs(lnidx_opd);
   I(!name.empty());
 
   // special case for register, when #x_-1 in rhs, return the reg_qpin, wname #x. Note this is not true for a phi-node.
   bool reg_existed = name2dpin.find(vname) != name2dpin.end();
   if (is_register(name) &&  !from_phi && reg_existed) {
-    if (lnast->get_subs(lnidx_opd) == -1) {
+    if (subs == -1) {
       return name2dpin.find(vname)->second;
-    /* } else if (name2dpin.find(name) != name2dpin.end()) { */
-    } else {
+    } else if (subs != 0){ 
       return name2dpin.find(name)->second;
+    } else if (subs == 0 && name2dpin.find(name) != name2dpin.end()){ 
+      return name2dpin.find(name)->second;
+    } else {
+      ; //the subs == 0 and this must be in lhs case, handle later in this function
     }
   }
 
