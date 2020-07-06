@@ -93,10 +93,6 @@ protected:
   bool check_new_var_chain (const Lnast_nid &lnidx_opr);
 
 
-  // constant resolving
-  Node resolve_constant (LGraph *g, const Lconst &value);
-
-
   // eprp callbacks
   static void tolg                  (Eprp_var &var);
   static void resolve_tuples        (Eprp_var &var);

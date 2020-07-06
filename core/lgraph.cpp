@@ -561,12 +561,10 @@ XEdge_iterator LGraph::inp_edges(const Node_pin &pin) const {
 void LGraph::del_node(const Node &node) {
   auto idx2 = node.get_nid();
 
-  auto *node_int_ptr = node_internal.ref(idx2);
-
-  auto op = node_int_ptr->get_type();
+  auto op = node_internal[idx2].get_type();
 
   if (op == Const_Op) {
-    const_bimap.erase_key(node.get_compact_class());
+    const_map.erase(node.get_compact_class());
   } else if (op == GraphIO_Op) {
     I(false);  // add the case once we have a testing case
   } else if (op == LUT_Op) {
