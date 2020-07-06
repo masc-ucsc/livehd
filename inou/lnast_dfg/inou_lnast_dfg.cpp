@@ -517,11 +517,6 @@ void Inou_lnast_dfg::process_ast_tuple_get_op(LGraph *dfg, const Lnast_nid &lnid
   auto kn_spin = tup_get.setup_sink_pin("KN"); // key name
   auto kp_spin = tup_get.setup_sink_pin("KP"); // key pos
 
-  //if (is_register(lnast->get_name(c1_tg))) {
-  //  setup_ref_node_dpin(dfg, c1_tg); 
-  //}
-  //auto tn_dpin = setup_tuple_ref(dfg, lnast->get_sname(c1_tg));
-
   Node_pin tn_dpin;
   if (is_register(lnast->get_vname(c1_tg))) {
     tn_dpin = setup_ref_node_dpin(dfg, c1_tg); 
@@ -652,9 +647,8 @@ Node Inou_lnast_dfg::setup_node_opr_and_lhs(LGraph *dfg, const Lnast_nid &lnidx_
   auto lg_ntype_op = decode_lnast_op(lnidx_opr);
   auto lg_opr_node = dfg->create_node(lg_ntype_op);
   bool is_new_var_chain = check_new_var_chain(lnidx_opr);
-  bool lhs_is_reg_sub0  = is_register(lhs_name) && lnast->get_data(lhs).subs == 0;
 
-  //when #reg_0 at lhs, the register has not been created before
+  //when #reg_0 at lhs, the register has not been created before, create it
   Node_pin reg_data_pin;
   Node_pin reg_qpin;
   if (is_register(lhs_vname)) {
@@ -672,7 +666,7 @@ Node Inou_lnast_dfg::setup_node_opr_and_lhs(LGraph *dfg, const Lnast_nid &lnidx_
     fmt::print("lhs_name:{}\n", lhs_name);
     name2dpin[lhs_name] = lg_opr_node.setup_driver_pin(0);
     lg_opr_node.get_driver_pin(0).set_name(lhs_name);
-    setup_dpin_ssa(name2dpin[lhs_name], lhs_vname, lnast->get_subs(lhs)); //FIXME->sh: dpin SSA could be deprecated if new BW working
+    setup_dpin_ssa(name2dpin[lhs_name], lhs_vname, lnast->get_subs(lhs));
 
     if (is_register(lhs_name)) 
       dfg->add_edge(name2dpin[lhs_name], reg_data_pin);
@@ -799,15 +793,17 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
   auto vname = lnast->get_vname(lnidx_opd); 
   I(!name.empty());
 
-  // special case for register, when #x_0 in rhs, return the reg_qpin, wname #x. Note this is not true for a phi-node.
+  // special case for register, when #x_-1 in rhs, return the reg_qpin, wname #x. Note this is not true for a phi-node.
   bool reg_existed = name2dpin.find(vname) != name2dpin.end();
   if (is_register(name) &&  !from_phi && reg_existed) {
-    if (name2dpin.find(name) != name2dpin.end())
-      return name2dpin.find(name)->second;
-    else 
+    if (lnast->get_subs(lnidx_opd) == -1) {
       return name2dpin.find(vname)->second;
-
+    /* } else if (name2dpin.find(name) != name2dpin.end()) { */
+    } else {
+      return name2dpin.find(name)->second;
+    }
   }
+
 
   const auto it = name2dpin.find(name);
   if (it != name2dpin.end()) {
