@@ -120,6 +120,7 @@ public:
   Lconst();
 
   Container serialize() const;
+  uint64_t hash() const;
 
   void dump() const;
 

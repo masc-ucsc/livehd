@@ -121,7 +121,6 @@ Lconst LGraph_Node_Type::get_type_const(Index_ID nid) const {
 }
 
 void LGraph_Node_Type::set_type_const(Index_ID nid, const Lconst &value) {
-  I(!find_type_const(value));
 
   const_map.set(Node::Compact_class(nid), value.serialize());
   auto *ptr = node_internal.ref(nid);
@@ -135,13 +134,3 @@ void LGraph_Node_Type::set_type_const(Index_ID nid, std::string_view sv) { set_t
 
 void LGraph_Node_Type::set_type_const(Index_ID nid, uint32_t value, uint16_t bits) { set_type_const(nid, Lconst(value, bits)); }
 
-Index_ID LGraph_Node_Type::find_type_const(const Lconst &value) const {
-  // FIXME_renau: add a small non-persistent counter to reduce high frequency
-  // cases (but do not queue if too frequent to avoid a constant that it is way
-  // to big) - LNAST does not seem to trigger this
-  return 0;
-}
-
-Index_ID LGraph_Node_Type::find_type_const(std::string_view value) const { return find_type_const(Lconst(value)); }
-
-Index_ID LGraph_Node_Type::find_type_const(uint32_t value, uint16_t bits) const { return find_type_const(Lconst(value, bits)); }

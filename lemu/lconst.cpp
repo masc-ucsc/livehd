@@ -77,6 +77,23 @@ Lconst::Container Lconst::serialize() const {
   return v;
 }
 
+uint64_t Lconst::hash() const {
+
+  std::vector<uint64_t> v;
+  uint64_t c = (explicit_str?0x10:0) | (explicit_sign?0x8:0) | (explicit_bits?0x4:0) | (sign?0x2:0);
+  c = (c<<16) | bits;
+  v.emplace_back(c);
+
+  boost::multiprecision::export_bits(num, std::back_inserter(v), 64);
+
+  auto h=0;
+  for (auto e : v) {
+    h ^= e;
+  }
+
+  return h;
+}
+
 Lconst::Lconst(absl::Span<unsigned char> v) {
 
   I(v.size()>3); // invalid otherwise
