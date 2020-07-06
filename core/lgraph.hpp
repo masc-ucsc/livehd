@@ -22,6 +22,9 @@ protected:
   friend class Bwd_edge_iterator;
   friend class Fast_edge_iterator;
 
+  // Memoize tables that provide hints (not certainty because add/del operations)
+  std::array<Index_ID,8> memoize_const_hint;
+
   Hierarchy_tree htree;
 
   Hierarchy_tree *ref_htree() {

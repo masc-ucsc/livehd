@@ -129,6 +129,8 @@ void LGraph::clear() {
   set_type(nid2, GraphIO_Op);
 
   htree.clear();
+
+  std::fill(memoize_const_hint.begin(), memoize_const_hint.end(), 0); // Not needed but neat
 }
 
 void LGraph::sync() {
@@ -787,10 +789,14 @@ Node LGraph::create_node(Node_Type_Op op, uint32_t bits) {
 }
 
 Node LGraph::create_node_const(const Lconst &value) {
-  auto nid = find_type_const(value);
-  if (nid == 0) {
+  Index_ID nid = memoize_const_hint[value.hash() % memoize_const_hint.size()];
+  if (nid == 0
+      || nid >= node_internal.size()
+      || node_internal[nid].get_type() != Const_Op
+      || get_type_const(nid) != value) {
     nid = create_node_int();
     set_type_const(nid, value);
+    memoize_const_hint[value.hash() % memoize_const_hint.size()] = nid;
   }
 
   I(node_internal[nid].get_dst_pid() == 0);
