@@ -85,11 +85,11 @@ protected:
   Lconst(bool str, bool a, bool b, bool c, uint16_t d, Number n) : explicit_str(str), explicit_sign(a), explicit_bits(b), sign(c), bits(d), num(n) {}
 
   uint16_t calc_bits() const {
-    if (num == 0) {
+    if (num == 0)
       return 1;
-    }
-    uint16_t v = msb(num)+1+(sign?1:0);
-    return v;
+    if (num>0)
+      return msb(num)+1+(sign?1:0);
+    return msb(-num)+1+(sign?1:0);
   }
   bool same_explicit_bits(const Lconst &o) const {
     bool s1 = explicit_bits && o.explicit_bits && bits == o.bits;
@@ -120,6 +120,7 @@ public:
   Lconst();
 
   Container serialize() const;
+  uint64_t hash() const;
 
   void dump() const;
 

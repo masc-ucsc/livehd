@@ -25,7 +25,7 @@ using Tuple_var_table = absl::flat_hash_set<std::string_view>;
 struct Lnast_node {
   Lnast_ntype type;
   Token       token;
-  uint16_t    subs; //ssa subscript
+  int16_t     subs; //ssa subscript
 
   Lnast_node(): subs(0) { }
 
@@ -35,7 +35,7 @@ struct Lnast_node {
   Lnast_node(Lnast_ntype _type, const Token &_token)
     :type(_type), token(_token), subs(0) { I(!type.is_invalid());}
 
-  Lnast_node(Lnast_ntype _type, const Token &_token, uint16_t _subs)
+  Lnast_node(Lnast_ntype _type, const Token &_token, int16_t _subs)
     :type(_type), token(_token), subs(_subs) { I(!type.is_invalid());}
 
   void dump() const;
@@ -108,7 +108,7 @@ private:
   void      ssa_lhs_if_subtree         (const Lnast_nid  &if_nid);
   void      ssa_rhs_if_subtree         (const Lnast_nid  &if_nid);
   void      opr_lhs_merge_if_subtree   (const Lnast_nid  &if_nid);
-  void      opr_lhs_merge_handle_a_statement (const Lnast_nid  &psts_nid, const Lnast_nid &opr_nid);
+  void      opr_lhs_merge_handle_a_statement (const Lnast_nid &opr_nid);
   void      ssa_handle_phi_nodes       (const Lnast_nid  &if_nid);
   void      resolve_phi_nodes          (const Lnast_nid  &cond_nid, Phi_rtable &true_table, Phi_rtable &false_table);
   void      update_phi_resolve_table   (const Lnast_nid  &psts_nid, const Lnast_nid &target_nid);
@@ -155,7 +155,7 @@ private:
   absl::flat_hash_set<std::string_view>           tuplized_table;
   
 
-  absl::flat_hash_map<std::string_view, uint8_t>  global_ssa_lhs_cnt_table;
+  absl::flat_hash_map<std::string_view, int8_t>  global_ssa_lhs_cnt_table;
 
   Lnast_nid  default_const_nid;
   Lnast_nid  err_var_undefined_nid;   
@@ -184,7 +184,7 @@ public:
   std::string_view get_name  (const Lnast_nid &nid)  { return get_data(nid).token.get_text(); }
   std::string_view get_vname (const Lnast_nid &nid)  { return get_data(nid).token.get_text(); } //better expression for LGraph passes
   Lnast_ntype      get_type  (const Lnast_nid &nid)  { return get_data(nid).type; }
-  uint8_t          get_subs  (const Lnast_nid &nid)  { return get_data(nid).subs; }
+  int8_t           get_subs  (const Lnast_nid &nid)  { return get_data(nid).subs; }
   Token            get_token (const Lnast_nid &nid)  { return get_data(nid).token; }
   std::string      get_sname (const Lnast_nid &nid)  { //sname = ssa name
     if(get_type(nid).is_const())
