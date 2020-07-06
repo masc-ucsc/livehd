@@ -240,7 +240,7 @@ void Pass_bitwidth::process_sum(Node &node, XEdge_iterator &inp_edges) {
     }
   }
 
-  fmt::print("sum max:{} min:{}\n", max_val.to_pyrope(), min_val.to_pyrope());
+  // fmt::print("sum max:{} min:{}\n", max_val.to_pyrope(), min_val.to_pyrope());
 
   bwmap.emplace(node.get_driver_pin(0).get_compact(), Bitwidth_range(min_val, max_val));
 }

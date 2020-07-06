@@ -13,10 +13,10 @@ using Node_down_map = mmap_lib::map<Node::Compact_class, Lg_type_id>;
 
 class LGraph_Node_Type : virtual public LGraph_Base {
 protected:
-  using Node_value_bimap = mmap_lib::bimap<Node::Compact_class, Lconst::Container>;
-  using Node_lut_map     = mmap_lib::map<Node::Compact_class, Lconst::Container>;
+  using Node_value_map = mmap_lib::map<Node::Compact_class, Lconst::Container>;
+  using Node_lut_map   = mmap_lib::map<Node::Compact_class, Lconst::Container>;
 
-  Node_value_bimap const_bimap;  // bimap to avoid unnecessary constant replication
+  Node_value_map const_map;  // bimap to avoid unnecessary constant replication
 
   Node_down_map subid_map;
   Node_lut_map  lut_map;
