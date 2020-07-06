@@ -13,10 +13,10 @@ using Node_down_map = mmap_lib::map<Node::Compact_class, Lg_type_id>;
 
 class LGraph_Node_Type : virtual public LGraph_Base {
 protected:
-  using Node_value_bimap = mmap_lib::bimap<Node::Compact_class, Lconst::Container>;
-  using Node_lut_map     = mmap_lib::map<Node::Compact_class, Lconst::Container>;
+  using Node_value_map = mmap_lib::map<Node::Compact_class, Lconst::Container>;
+  using Node_lut_map   = mmap_lib::map<Node::Compact_class, Lconst::Container>;
 
-  Node_value_bimap const_bimap;  // bimap to avoid unnecessary constant replication
+  Node_value_map const_map;  // bimap to avoid unnecessary constant replication
 
   Node_down_map subid_map;
   Node_lut_map  lut_map;
@@ -47,10 +47,6 @@ protected:
   void set_type_const(Index_ID nid, const Lconst &value);
   void set_type_const(Index_ID nid, std::string_view value);
   void set_type_const(Index_ID nid, uint32_t value, uint16_t bits);
-
-  Index_ID find_type_const(const Lconst &value) const;
-  Index_ID find_type_const(std::string_view value) const;
-  Index_ID find_type_const(uint32_t value, uint16_t bits) const;
 
   // No const because Lconst created
   Lconst get_type_const(Index_ID nid) const;

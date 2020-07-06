@@ -66,6 +66,10 @@ void Pass_bitwidth::process_flop(Node &node) {
 	} else if (d_dpin.get_bits()) {
 		Lconst b(1);
 		max_val = b.lsh_op(d_dpin.get_bits()) - 1;
+	} else if (node.get_driver_pin(0).get_bits()) {
+    // At least propagate backward the width
+    d_dpin.set_bits(node.get_driver_pin(0).get_bits());
+    return;
 	}else{
 		if (d_dpin.has_name())
 			fmt::print("pass.bitwidth flop:{} has input pin:{} unconstrained\n", node.debug_name(), d_dpin.get_name());
@@ -208,14 +212,24 @@ void Pass_bitwidth::process_sum(Node &node, XEdge_iterator &inp_edges) {
   for (auto e:inp_edges) {
     auto it3 = bwmap.find(e.driver.get_compact());
     if (it3 != bwmap.end()) {
-      max_val = max_val + it3->second.get_max();
-      min_val = min_val + it3->second.get_min();
+      if (e.sink.get_pid() == 0 || e.sink.get_pid() == 1) {
+        max_val = max_val + it3->second.get_max();
+        min_val = min_val + it3->second.get_min();
+      } else {
+        max_val = max_val - it3->second.get_max();
+        min_val = min_val - it3->second.get_min();
+      }
     } else if (e.driver.get_bits()) {
 			Lconst b(1);
 			b = b.lsh_op(e.driver.get_bits()) - 1;
 
-      max_val = max_val + b;
-      min_val = min_val - b;
+      if (e.sink.get_pid() == 0 || e.sink.get_pid() == 1) {
+        max_val = max_val + b;
+        min_val = min_val + b;
+      } else {
+        max_val = max_val - b;
+        min_val = min_val - b;
+      }
     }else{
 			if (e.driver.has_name())
 				fmt::print("pass.bitwidth sum:{} has input pin:{} unconstrained\n", node.debug_name(), e.driver.get_name());
@@ -225,6 +239,8 @@ void Pass_bitwidth::process_sum(Node &node, XEdge_iterator &inp_edges) {
       return;
     }
   }
+
+  // fmt::print("sum max:{} min:{}\n", max_val.to_pyrope(), min_val.to_pyrope());
 
   bwmap.emplace(node.get_driver_pin(0).get_compact(), Bitwidth_range(min_val, max_val));
 }

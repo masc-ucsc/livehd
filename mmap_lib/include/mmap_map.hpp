@@ -1104,7 +1104,7 @@ private:
 		mInfoInc               = &static_InitialInfoInc;
 		mInfoHashShift         = &static_InitialInfoHashShift;
 
-    for(auto &ent:last_sview_insert) {
+    for(auto &ent:memoize_sview_insert) {
       ent.first = 0; // clear to invalid possition
     }
   }
@@ -1512,7 +1512,7 @@ private:
 
   int recently_inserted(array_type txt) const {
     uint32_t h = hash_bytes(txt.data(), txt.size());
-    const auto &ent = last_sview_insert[h%last_sview_insert.size()];
+    const auto &ent = memoize_sview_insert[h%memoize_sview_insert.size()];
 
     if (ent.second == h && ent.first) {
       // OK, check contents if there is a match
@@ -1567,7 +1567,7 @@ private:
 
     {
       uint32_t h = hash_bytes(txt.data(), txt.size());
-      auto &ent = last_sview_insert[h%last_sview_insert.size()];
+      auto &ent = memoize_sview_insert[h%memoize_sview_insert.size()];
       ent.first = insert_point;
       ent.second = h;
     }
@@ -1739,7 +1739,7 @@ private:
   }
 
 	// members are sorted so no padding occurs
-  std::array<std::pair<uint32_t,uint32_t>,8> last_sview_insert;
+  std::array<std::pair<uint32_t,uint32_t>,8> memoize_sview_insert;
 
 	mutable Node      *mKeyVals = nullptr;
 	mutable uint8_t   *mInfo = nullptr;

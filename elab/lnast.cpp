@@ -532,17 +532,10 @@ void Lnast::ssa_rhs_if_subtree(const Lnast_nid &if_nid) {
 void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
   const auto type = get_type(opr_nid);
 
-  //FIXME->sh: a large portion of this code segment should be deprecated.
-  if (type.is_dot() || type.is_select()) {
-    //handle dot/set which is a rhs
-    auto c0_opr      = get_first_child(opr_nid);
-    auto c1_opr      = get_sibling_next(c0_opr); // c1 of dot/sel is target_nid
-    if (!is_lhs(psts_nid, opr_nid) and is_special_case_of_dot_rhs(psts_nid, opr_nid)) {
-      ssa_rhs_handle_a_operand_special(psts_nid, c1_opr);
-    } else if (!is_lhs(psts_nid, opr_nid)) {
-      ssa_rhs_handle_a_operand(psts_nid, c1_opr);
-    }
-  } else if (type.is_tuple()) {
+  if (type.is_dot() || type.is_select()) 
+    I(false);
+
+  if (type.is_tuple()) {
     for (auto itr_opd : children(opr_nid)) {
       if (itr_opd == get_first_child(opr_nid)) continue;
       ssa_rhs_handle_a_statement(psts_nid, itr_opd);
@@ -554,17 +547,6 @@ void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
       ssa_rhs_handle_a_operand(psts_nid, itr_opd);
     }
   }
-
-  //FIXME->sh: a large portion of this code segment should be deprecated.
-  //handle dot/set which is a lhs
-  if (type.is_dot() || type.is_select()) {
-    auto c0_opr      = get_first_child(opr_nid);
-    auto c1_opr      = get_sibling_next(c0_opr); // c1 of dot/sel is target_nid
-    if (is_lhs(psts_nid, opr_nid))
-      update_rhs_ssa_cnt_table(psts_nid, c1_opr);
-  }
-
-
 
   //handle statement lhs
   if (type.is_assign() || type.is_as() || type.is_dp_assign() || type.is_attr_set()) {
@@ -585,7 +567,7 @@ void Lnast::opr_lhs_merge(const Lnast_nid &psts_nid) {
     } else if (get_type(opr_nid).is_if()) {
       opr_lhs_merge_if_subtree(opr_nid);
     } else if (get_type(opr_nid).is_assign()){
-      opr_lhs_merge_handle_a_statement(psts_nid, opr_nid);
+      opr_lhs_merge_handle_a_statement(opr_nid);
     }
   }
 }
@@ -602,30 +584,26 @@ void Lnast::opr_lhs_merge_if_subtree(const Lnast_nid &if_nid) {
         if (get_type(opr_nid).is_if())
           opr_lhs_merge_if_subtree(opr_nid);
         else if (get_type(opr_nid).is_assign())
-          opr_lhs_merge_handle_a_statement(itr_nid, opr_nid);
+          opr_lhs_merge_handle_a_statement(opr_nid);
       }
     } else if (get_type(itr_nid).is_cstmts()) {
       for (const auto &opr_nid : children(itr_nid)){
         if (get_type(opr_nid).is_assign())
-          opr_lhs_merge_handle_a_statement(itr_nid, opr_nid);
+          opr_lhs_merge_handle_a_statement(opr_nid);
       }
     }
   }
 }
 
 
-void Lnast::opr_lhs_merge_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &assign_nid) {
+void Lnast::opr_lhs_merge_handle_a_statement(const Lnast_nid &assign_nid) {
   const auto  c0_assign      = get_first_child(assign_nid);
-  const auto  c0_assign_name = get_name(c0_assign);
   const auto  c1_assign_name = get_name(get_sibling_next(c0_assign));
-  fmt::print("c0_assign_name:{}\n", c0_assign_name);
-  fmt::print("c1_assign_name:{}\n", c1_assign_name);
 
   if (c1_assign_name.substr(0,3) == "___") {
     auto opr_nid = get_sibling_prev(assign_nid);
     auto c0_opr = get_first_child(opr_nid);
     I(get_name(c0_opr) == c1_assign_name);
-    fmt::print("c0_opr_name:{}\n", get_name(c0_opr));
     ref_data(c0_opr)->token = get_data(c0_assign).token;
     ref_data(c0_opr)->type = get_data(c0_assign).type;
     ref_data(c0_opr)->subs = get_data(c0_assign).subs;
@@ -683,7 +661,7 @@ void Lnast::ssa_rhs_handle_a_operand(const Lnast_nid &gpsts_nid, const Lnast_nid
     set_data(opd_nid, Lnast_node(opd_type, ori_token, new_subs));
   } else {
     int8_t  new_subs = check_rhs_cnt_table_parents_chain(gpsts_nid, opd_nid);
-    if (new_subs == -1) {
+    if (new_subs == -1 && !is_reg(opd_name)) { //if the register opd_subs is -1, it is intentionally to do it to recognize reg qpin
       new_subs = 0; //FIXME->sh: actually, here is a good place to check undefined variable
     }
     ssa_rhs_cnt_table[opd_name] = new_subs;
@@ -884,7 +862,7 @@ void Lnast::reg_ini_global_lhs_ssa_cnt_table(const Lnast_nid &rhs_nid) {
   if (itr != global_ssa_lhs_cnt_table.end()) {
     return;
   } else {
-    global_ssa_lhs_cnt_table[rhs_name] = 0;
+    global_ssa_lhs_cnt_table[rhs_name] = -1; //FIXME->sh: no effect? check later
   }
 }
 
@@ -893,7 +871,6 @@ void Lnast::respect_latest_global_lhs_ssa(const Lnast_nid &lhs_nid) {
   const auto  lhs_name = get_name(lhs_nid);
   auto itr = global_ssa_lhs_cnt_table.find(lhs_name);
   if (itr != global_ssa_lhs_cnt_table.end()) {
-    fmt::print("lhs_name:{}, subs:{}\n",lhs_name, itr->second);
     ref_data(lhs_nid)->subs = itr->second;
   } else {
     global_ssa_lhs_cnt_table[lhs_name] = 0;
