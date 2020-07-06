@@ -268,15 +268,15 @@ void Pass_bitwidth::process_pick(Node &node) {
 void Pass_bitwidth::process_comparator(Node &node) { bwmap.emplace(node.get_driver_pin(0).get_compact(), Bitwidth_range(1)); }
 
 void Pass_bitwidth::process_logic(Node &node, XEdge_iterator &inp_edges) {
-	bool logic_op        = node.has_driver_pin_connected(0);
-	bool logic_reduction = node.has_driver_pin_connected(1);
+	bool is_logic_op        = node.has_driver_pin_connected(0);
+	bool is_logic_reduction = node.has_driver_pin_connected(1);
 
-	if (logic_reduction) {
+	if (is_logic_reduction) {
 		bwmap.emplace(node.get_driver_pin(1).get_compact(), Bitwidth_range(1));
 	}
 
-	if (logic_op && inp_edges.size() >= 1) {
-		uint16_t max_bits=0;
+	if (is_logic_op && inp_edges.size() >= 1) {
+		uint16_t max_bits = 0;
 
 		for (auto e : inp_edges) {
 			auto it = bwmap.find(e.driver.get_compact());
@@ -289,7 +289,7 @@ void Pass_bitwidth::process_logic(Node &node, XEdge_iterator &inp_edges) {
 			if (bits == 0) {
 				if (e.driver.has_name()) {
 					fmt::print("pass.bitwidth gate:{} has input pin:{} unconstrained\n", node.debug_name(), e.driver.get_name());
-				}else{
+				} else {
 					fmt::print("pass.bitwidth gate:{} has some inputs unconstrained\n", node.debug_name());
 				}
 				not_finished = true;
