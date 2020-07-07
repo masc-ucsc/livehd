@@ -102,8 +102,7 @@ int main(int argc, char** argv) {
     auto idx_op1    = lnast->add_child(idx_gt,     Lnast_node::create_ref   ("a",  line_num, pos1, pos2));
     auto idx_op2    = lnast->add_child(idx_gt,     Lnast_node::create_const ("0d3",  line_num, pos1, pos2));
 
-    auto idx_cond1  = lnast->add_child(idx_if,     Lnast_node::create_cond  ("cond",  line_num, pos1, pos2));
-    auto condition  = lnast->add_child(idx_cond1,  Lnast_node::create_ref   ("___a", line_num, pos1, pos2));
+    auto idx_cond1  = lnast->add_child(idx_if,     Lnast_node::create_cond  ("___a",  line_num, pos1, pos2));
 
     auto idx_stmts1 = lnast->add_child(idx_if,     Lnast_node::create_stmts ("stmts1",  line_num, pos1, pos2));
     auto idx_plus   = lnast->add_child(idx_stmts1, Lnast_node::create_plus  ("plus",  line_num, pos1, pos2));
@@ -137,8 +136,7 @@ int main(int argc, char** argv) {
     auto idx_op1     = lnast->add_child(idx_gt,      Lnast_node::create_ref   ("a",  line_num, pos1, pos2));
     auto idx_op2     = lnast->add_child(idx_gt,      Lnast_node::create_const ("0d3",  line_num, pos1, pos2));
 
-    auto idx_cond1   = lnast->add_child(idx_if,      Lnast_node::create_cond  ("cond",  line_num, pos1, pos2));
-    auto condition   = lnast->add_child(idx_cond1,   Lnast_node::create_ref   ("___a", line_num, pos1, pos2)); 
+    auto idx_cond1   = lnast->add_child(idx_if,      Lnast_node::create_cond  ("___a",  line_num, pos1, pos2));
 
     auto idx_stmts1  = lnast->add_child(idx_if,      Lnast_node::create_stmts ("stmts1",  line_num, pos1, pos2));
     
