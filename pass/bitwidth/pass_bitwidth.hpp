@@ -10,7 +10,7 @@
 
 class Pass_bitwidth : public Pass {
 protected:
-  int max_iterations;
+  int  max_iterations;
   bool must_perform_backward;
 
   enum class Attr { Set_other, Set_bits, Set_max, Set_min, Set_dp_assign };

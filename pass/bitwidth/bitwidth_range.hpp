@@ -34,7 +34,7 @@ public:
   Lconst   get_max() const { return to_lconst(overflow, max); };
   Lconst   get_min() const { return to_lconst(overflow, min); };
 
-  bool    is_always_negative() const { return max <0; }
+  bool    is_always_negative() const { return max < 0; }
   bool    is_always_positive() const { return min >= 0; }
   bool    is_2complement() const { return min < 0; }
 
