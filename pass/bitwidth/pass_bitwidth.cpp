@@ -268,15 +268,15 @@ void Pass_bitwidth::process_pick(Node &node) {
 void Pass_bitwidth::process_comparator(Node &node) { bwmap.emplace(node.get_driver_pin(0).get_compact(), Bitwidth_range(1)); }
 
 void Pass_bitwidth::process_logic(Node &node, XEdge_iterator &inp_edges) {
-	bool logic_op        = node.has_driver_pin_connected(0);
-	bool logic_reduction = node.has_driver_pin_connected(1);
+	bool is_logic_op        = node.has_driver_pin_connected(0);
+	bool is_logic_reduction = node.has_driver_pin_connected(1);
 
-	if (logic_reduction) {
+	if (is_logic_reduction) {
 		bwmap.emplace(node.get_driver_pin(1).get_compact(), Bitwidth_range(1));
 	}
 
-	if (logic_op && inp_edges.size() >= 1) {
-		uint16_t max_bits=0;
+	if (is_logic_op && inp_edges.size() >= 1) {
+		uint16_t max_bits = 0;
 
 		for (auto e : inp_edges) {
 			auto it = bwmap.find(e.driver.get_compact());
@@ -289,7 +289,7 @@ void Pass_bitwidth::process_logic(Node &node, XEdge_iterator &inp_edges) {
 			if (bits == 0) {
 				if (e.driver.has_name()) {
 					fmt::print("pass.bitwidth gate:{} has input pin:{} unconstrained\n", node.debug_name(), e.driver.get_name());
-				}else{
+				} else {
 					fmt::print("pass.bitwidth gate:{} has some inputs unconstrained\n", node.debug_name());
 				}
 				not_finished = true;
@@ -310,41 +310,43 @@ void Pass_bitwidth::process_logic_and(Node &node, XEdge_iterator &inp_edges) {
     bwmap.emplace(node.get_driver_pin(1).get_compact(), Bitwidth_range(1));
   }
 
+  // determine the min_bits among all inp_edges
   if (logic_op && inp_edges.size() >= 1) {
-		uint16_t max_bits=UINT16_MAX;
+		uint16_t min_bits = UINT16_MAX;
 
 		for (auto e : inp_edges) {
-			auto it = bwmap.find(e.driver.get_compact());
+			auto pit = bwmap.find(e.driver.get_compact());
 			uint16_t bits = 0;
-			if (it == bwmap.end()) {
+			if (pit == bwmap.end()) {
 				bits = e.driver.get_bits();
 			} else {
-				bits = it->second.get_bits();
+				bits = pit->second.get_bits();
 			}
-			if (bits && bits < max_bits) max_bits = bits;
+			if (bits && bits < min_bits) min_bits = bits;
 		}
-		if (max_bits == UINT16_MAX) {
+		if (min_bits == UINT16_MAX) {
 			fmt::print("pass.bitwidth and:{} does not have any constrained input\n", node.debug_name());
 			not_finished = true;
 			return;
 		}
 
-		bwmap.emplace(node.get_driver_pin(0).get_compact(), Bitwidth_range(max_bits));
+		bwmap.emplace(node.get_driver_pin(0).get_compact(), Bitwidth_range(min_bits));
 
-		for (auto e:inp_edges) {
+		for (auto e : inp_edges) {
       auto bits = e.driver.get_bits();
       if (bits)
-        continue; // Only for unconstrained inputs
+        continue; // only handle unconstrained inputs
 
 			if (e.driver.get_num_edges() > 1) {
 				must_perform_backward = true;
 			} else {
-				if (bits > max_bits)
-					e.driver.set_bits(max_bits);
+				if (bits > min_bits) // no other output, parent could follow the child
+					e.driver.set_bits(min_bits);
 			}
 		}
   }
 }
+
 
 Pass_bitwidth::Attr Pass_bitwidth::get_key_attr(std::string_view key) {
   if (key.substr(0, 6) == "__bits") return Attr::Set_bits;
@@ -385,7 +387,7 @@ void Pass_bitwidth::process_attr_get(Node &node) {
 	Lconst result;
   if (attr == Attr::Set_bits) {
 		result = Lconst(bw.get_bits());
-  }else if (attr == Attr::Set_max) {
+  } else if (attr == Attr::Set_max) {
 		result = bw.get_max();
   } else if (attr == Attr::Set_min) {
     result = bw.get_min();
@@ -449,7 +451,7 @@ void Pass_bitwidth::process_attr_set_dp_assign(Node &node) {
     else
       fmt::print("pass.bitwidth := is unconstrained (node:{})\n", node.debug_name());
     return;
-	}else {
+	} else {
 		if (bw_value.get_bits() == 0) {
 			fmt::print("pass.bitwidth := propagating bits:{} upwards to node:{}\n", bw_variable.get_bits(), dpin_value.debug_name());
 			dpin_value.set_bits(bw_variable.get_bits());
@@ -516,14 +518,14 @@ void Pass_bitwidth::process_attr_set_new_attr(Node &node) {
   if (attr_dpin.has_name())
     dpin_name = attr_dpin.get_name();
 
-
-	Bitwidth_range bw(0);
+ // copy parent's bw for some judgement and then update to attr_set value
+	Bitwidth_range bw(0); 
   bool parent_pending = false;
 	if (node.has_sink_pin_connected(0)) {
 		auto through_dpin = node.get_sink_pin(0).get_driver_pin();
 		auto it = bwmap.find(through_dpin.get_compact());
 		if (it != bwmap.end()) {
-			bw = it->second;
+			bw = it->second; 
     } else {
       parent_pending = true;
     }
@@ -542,8 +544,8 @@ void Pass_bitwidth::process_attr_set_new_attr(Node &node) {
       else
         bw.set_sbits(val.to_i());
     }
-  }else if (attr == Attr::Set_max) {
-    I(false); // FIXME: todo
+  } else if (attr == Attr::Set_max) {
+    I(false);  // FIXME: todo
   } else if (attr == Attr::Set_min) {
     I(false);  // FIXME: todo
   } else {
@@ -574,7 +576,7 @@ void Pass_bitwidth::process_attr_set_propagate(Node &node) {
   I(node.has_sink_pin_connected(0));
   auto data_dpin = node.get_sink_pin(0).get_driver_pin();
 
-  I(node.has_sink_pin_connected(3));
+  I(node.has_sink_pin_connected(3)); 
   auto parent_attr_dpin = node.get_sink_pin(3).get_driver_pin();
 
   auto data_it = bwmap.find(data_dpin.get_compact());
@@ -598,7 +600,7 @@ void Pass_bitwidth::process_attr_set_propagate(Node &node) {
   if (parent_attr_bw.get_bits() && data_bw.get_bits()) {
     if (parent_attr_bw.get_bits() < data_bw.get_bits()) {
       Pass::error("bitwidth missmatch. Variable {} needs {}bits, but constrained to {}bits\n", dpin_name, data_bw.get_bits(), parent_attr_bw.get_bits());
-    }else if (parent_attr_bw.get_max() < data_bw.get_max()) {
+    } else if (parent_attr_bw.get_max() < data_bw.get_max()) {
       Pass::error("bitwidth missmatch. Variable {} needs {}max, but constrained to {}max\n", dpin_name, data_bw.get_max().to_pyrope(), parent_attr_bw.get_max().to_pyrope());
     } else if (parent_attr_bw.get_min() > data_bw.get_min()) {
       Pass::error("bitwidth missmatch. Variable {} needs {}min, but constrained to {}min\n", dpin_name, data_bw.get_min().to_pyrope(), parent_attr_bw.get_min().to_pyrope());
@@ -615,22 +617,23 @@ void Pass_bitwidth::process_attr_set(Node &node) {
 
   if (node.has_sink_pin_connected(1)) {
     process_attr_set_new_attr(node);
-  }else{
+  } else {
     process_attr_set_propagate(node);
   }
 
 }
 
+//focusing on judging the parent is garbage or not
 void Pass_bitwidth::garbage_collect_support_structures(XEdge_iterator &inp_edges) {
   for (auto e : inp_edges) {
-    auto it = outcountmap.find(e.driver.get_node().get_compact());
-    if (it == outcountmap.end()) {
-      continue;
+    auto pit = outcountmap.find(e.driver.get_node().get_compact()); //pit = parent iterator
+    if (pit == outcountmap.end()) {
+      continue; //parent node not yet visited
     }
 
-    auto n = it->second;
-    if (n <= 1) {
-      outcountmap.erase(it);
+    auto n = pit->second;
+    if (n <= 1) { //I'm the only child, the parent bw_range object could be recycled
+      outcountmap.erase(pit);
       for (auto parent_dpin : e.driver.get_node().out_connected_pins()) {
         auto it2 = bwmap.find(parent_dpin.get_compact());
         if (it2 != bwmap.end()) { // Not all the nodes create bwmap (impossible to infer do not)
@@ -639,7 +642,7 @@ void Pass_bitwidth::garbage_collect_support_structures(XEdge_iterator &inp_edges
         }
       }
     } else {
-      it->second = n - 1;
+      pit->second = n - 1;
     }
   }
 }

@@ -153,8 +153,7 @@ uint16_t Bitwidth_range::get_bits() const {
     bits    = (sizeof(uint64_t) * 8 - __builtin_clzll(abs_max));
   }
 
-	// TODO: In theory, we could have an always negative number optimized to have
-	// 1 bit less
+	// TODO: In theory, we could have an always negative number optimized to have 1 bit less
 	if (min < 0) bits++;
 
   if (bits>=32768)
