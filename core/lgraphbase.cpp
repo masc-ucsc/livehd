@@ -96,6 +96,23 @@ Index_ID LGraph_Base::create_node_space(const Index_ID last_idx, const Port_ID d
   auto *nidx2 = node_internal.ref(idx2);
 
   if (root_idx) {
+    // There there are already 3 nodes, place after root (faster to find space in future checks)
+    auto *root_ptr = node_internal.ref(root_idx);
+    if (!root_ptr->is_last_state()) {
+      auto root_next_idx = root_ptr->get_next();
+
+      root_ptr->set_next_state(idx2);
+
+      I(nidx2->has_next_space());
+      nidx2->force_next_state(root_next_idx);
+      nidx2->clear_root();
+      nidx2->set_nid(root_idx);
+
+      return idx2;
+    }
+  }
+
+  if (root_idx) {
     I(node_internal[root_idx].is_root());
     nidx2->clear_root();
     nidx2->set_nid(root_idx);
@@ -256,14 +273,14 @@ Index_ID LGraph_Base::get_space_output_pin(const Index_ID master_nid, const Inde
   const auto *ptr = node_internal.ref(start_nid);
   if (ptr->get_dst_pid() == dst_pid && ptr->has_space_long()) {
 #if 0
-    auto end = get_cycles();
-    total_cycles_1+= (end-start);
-    total_1++;
-    static int conta=0;
-    if (conta++>10000) {
-      fmt::print("_1:{}/{} _2:{}/{} _3:{}/{}\n", total_cycles_1, total_1, total_cycles_2, total_2, total_cycles_3, total_3);
-      conta = 0;
-    }
+      auto end = get_cycles();
+      total_cycles_1+= (end-start);
+      total_1++;
+      static int conta=0;
+      if (conta++>1000) {
+        fmt::print("_1:{}/{} _2:{}/{} _3:{}/{}\n", total_cycles_1, total_1, total_cycles_2, total_2, total_cycles_3, total_3);
+        conta = 0;
+      }
 #endif
     return start_nid;
   }
@@ -271,12 +288,25 @@ Index_ID LGraph_Base::get_space_output_pin(const Index_ID master_nid, const Inde
   // Look for space
   Index_ID idx = start_nid;
 
+  // Trick to avoid checking frequently that there is extra space. Most of the
+  // time the list if full, no need to traverse. If traversed, it will find a
+  // node and set it to find.
+  if (node_internal[root_idx].is_next_state()) {
+    static int conta = 5;
+    if (conta > 0) {
+      conta--;
+      return create_node_space(idx, dst_pid, master_nid, root_idx);
+    } else {
+      conta = 5;
+    }
+  }
+
   while (true) {
     if (ptr->is_last_state()) {
 #if 0
-      auto end = get_cycles();
-      total_cycles_2 += (end - start);
-      total_2++;
+        auto end = get_cycles();
+        total_cycles_2 += (end - start);
+        total_2++;
 #endif
       return create_node_space(idx, dst_pid, master_nid, root_idx);
     }
@@ -474,8 +504,10 @@ Index_ID LGraph_Base::add_edge_int(const Index_ID dst_idx, const Port_ID inp_pid
       node_internal.ref(idx)->inc_outputs(true);  // WARNING: Before next_free_output_pos to reserve space (decreasing insert)
     }
 
+#if 1
     if (node_internal[idx].has_space_short())
       idx_insert_cache[src_idx] = idx;
+#endif
   }
 
   //-----------------------

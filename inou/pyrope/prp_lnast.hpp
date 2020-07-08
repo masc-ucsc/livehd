@@ -77,7 +77,5 @@ protected:
   void print_ast_node(mmap_lib::Tree_index idx);
 
 public:
-  std::string Lnast_type_to_string(Lnast_ntype type);
-
   std::unique_ptr<Lnast> prp_ast_to_lnast(std::string_view module_name);
 };

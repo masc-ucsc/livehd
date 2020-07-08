@@ -1695,59 +1695,6 @@ inline void Prp_lnast::generate_expr_rules() {
   expr_rules.insert(Prp_rule_scope_declaration);
 }
 
-std::string Prp_lnast::Lnast_type_to_string(Lnast_ntype type) {
-  switch (type.get_raw_ntype()) {
-    case Lnast_ntype::Lnast_ntype_invalid: return "invalid";
-    case Lnast_ntype::Lnast_ntype_top: return "top";
-    case Lnast_ntype::Lnast_ntype_stmts: return "statements";
-    case Lnast_ntype::Lnast_ntype_cstmts: return "cstmts";
-    case Lnast_ntype::Lnast_ntype_if: return "if";
-    case Lnast_ntype::Lnast_ntype_cond: return "condition";
-    case Lnast_ntype::Lnast_ntype_uif: return "unique if";
-    case Lnast_ntype::Lnast_ntype_elif: return "elif";
-    case Lnast_ntype::Lnast_ntype_for: return "for";
-    case Lnast_ntype::Lnast_ntype_while: return "while";
-    case Lnast_ntype::Lnast_ntype_func_call: return "func call";
-    case Lnast_ntype::Lnast_ntype_func_def: return "func def";
-    case Lnast_ntype::Lnast_ntype_select: return "select";
-    case Lnast_ntype::Lnast_ntype_bit_select: return "bit select";
-    case Lnast_ntype::Lnast_ntype_assign: return "assign";
-    case Lnast_ntype::Lnast_ntype_dp_assign: return "dp_assign";
-    case Lnast_ntype::Lnast_ntype_as: return "as";
-    case Lnast_ntype::Lnast_ntype_label: return "label";
-    case Lnast_ntype::Lnast_ntype_dot: return "dot";
-    case Lnast_ntype::Lnast_ntype_logical_and: return "logical and";
-    case Lnast_ntype::Lnast_ntype_logical_or: return "logical or";
-    case Lnast_ntype::Lnast_ntype_and: return "and";
-    case Lnast_ntype::Lnast_ntype_or: return "or";
-    case Lnast_ntype::Lnast_ntype_xor: return "xor";
-    case Lnast_ntype::Lnast_ntype_plus: return "plus";
-    case Lnast_ntype::Lnast_ntype_minus: return "minus";
-    case Lnast_ntype::Lnast_ntype_mult: return "mult";
-    case Lnast_ntype::Lnast_ntype_div: return "divide";
-    case Lnast_ntype::Lnast_ntype_eq: return "not equal";
-    case Lnast_ntype::Lnast_ntype_same: return "same";
-    case Lnast_ntype::Lnast_ntype_lt: return "less than";
-    case Lnast_ntype::Lnast_ntype_le: return "less or equal";
-    case Lnast_ntype::Lnast_ntype_gt: return "greater than";
-    case Lnast_ntype::Lnast_ntype_ge: return "greater or equal";
-    case Lnast_ntype::Lnast_ntype_tuple: return "tuple";
-    case Lnast_ntype::Lnast_ntype_tuple_concat: return "tuple_concat";
-    case Lnast_ntype::Lnast_ntype_tuple_delete: return "tuple_delete";
-    case Lnast_ntype::Lnast_ntype_ref: return "ref";
-    case Lnast_ntype::Lnast_ntype_const: return "const";
-    /* case Lnast_ntype::Lnast_ntype_attr: return "attribute"; */ //FIXME->sh: should be removed
-    case Lnast_ntype::Lnast_ntype_assert: return "assert";
-    case Lnast_ntype::Lnast_ntype_not: return "bitwise not";
-    case Lnast_ntype::Lnast_ntype_logical_not: return "logical not";
-    case Lnast_ntype::Lnast_ntype_shift_left: return "left shift";
-    case Lnast_ntype::Lnast_ntype_shift_right: return "right shift";
-    case Lnast_ntype::Lnast_ntype_rotate_shift_left: return "left rotate";
-    case Lnast_ntype::Lnast_ntype_rotate_shift_right: return "right rotate";
-    default: return "unknown type";
-  }
-};
-
 inline bool Prp_lnast::is_expr(mmap_lib::Tree_index idx) {
   PRINT_DBG_LN("Hello from is_expr\n");
   print_ast_node(idx);

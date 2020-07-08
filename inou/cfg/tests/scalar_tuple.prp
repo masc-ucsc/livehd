@@ -1,0 +1,4 @@
+d = 2
+d.0 = 3       // scalar -> tuple
+%out = d      // 3       
+%out2 = d.0   // 3
