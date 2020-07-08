@@ -16,3 +16,6 @@ WARNINGS:
 -If there is a output variable in the function declaration, it should be written. Warning otherwise
 
 
+Features:
+
+Modify Warning to add in line and position numbers for errors + warnings

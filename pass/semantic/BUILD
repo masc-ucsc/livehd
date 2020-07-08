@@ -9,6 +9,8 @@ cc_library(
         "//pass/common:pass",
         "//elab:elab",
         "@com_google_absl//absl/container:flat_hash_set",
+        "//inou/pyrope:inou_pyrope",
+        "//lbench:headers",
     ]
 )
 
@@ -22,6 +24,7 @@ cc_library(
         "//pass/common:pass",
         "//elab:elab",
         "@com_google_absl//absl/container:flat_hash_set",
+        "//inou/pyrope:inou_pyrope",
     ]
 )
 

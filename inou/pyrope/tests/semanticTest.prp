@@ -2,7 +2,7 @@
 // ./bazel-bin/inou/pyrope/prp_lnast_test inou/pyrope/tests/semanticTest.prp
 
 // Assign Statement
-// val = 1023u10bits
+val = 
 // Warning: val
 // ================================================
 

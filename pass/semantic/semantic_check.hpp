@@ -8,8 +8,6 @@
 class Semantic_check {
 private:
 protected:
-  // absl::flat_hash_set<std::string_view> write_list;
-  // absl::flat_hash_set<std::string_view> read_list;
 
   absl::flat_hash_map<std::string_view, std::string_view> write_dict;
   absl::flat_hash_map<std::string_view, std::string_view> read_dict;
@@ -22,35 +20,21 @@ protected:
 
   bool is_primitive_op(const Lnast_ntype node_type);
   bool is_tree_structs(const Lnast_ntype node_type);
-  // bool in_write_list(std::string_view node_name);
-  // bool in_read_list(std::string_view node_name);
-
   bool in_write_list(std::string_view node_name, std::string_view stmt_name);
   bool in_read_list(std::string_view node_name, std::string_view stmt_name);
-
   bool in_assign_lhs_list(std::string_view node_name);
   bool in_assign_rhs_list(std::string_view node_name);
   bool in_inefficient_LNAST(std::string_view node_name);
 
-  // void add_to_write_list(std::string_view node_name);
-  // void add_to_read_list(std::string_view node_name);
-
   void add_to_write_list(std::string_view node_name, std::string_view stmt_name);
   void add_to_read_list(std::string_view node_name, std::string_view stmt_name);
-
   void add_to_assign_lhs_list(std::string_view node_name);
   void add_to_assign_rhs_list(std::string_view node_name);
   void find_lhs_name(int index);
+  void error_print_lnast(Lnast* lnast, std::string_view error_node, std::string_view error_msg);
 
   void resolve_read_write_lists();
   void resolve_assign_lhs_rhs_lists();
-
-  // void check_primitive_ops(Lnast* lnast, const Lnast_nid& lnidx_opr, const Lnast_ntype node_type);
-  // void check_if_op(Lnast* lnast, const Lnast_nid& lnidx_opr);
-  // void check_for_op(Lnast* lnast, const Lnast_nid& lnidx_opr);
-  // void check_while_op(Lnast* lnast, const Lnast_nid& lnidx_opr);
-  // void check_func_def(Lnast* lnast, const Lnast_nid& lnidx_opr);
-  // void check_func_call(Lnast* lnast, const Lnast_nid& lnidx_opr);
 
   void check_primitive_ops(Lnast* lnast, const Lnast_nid& lnidx_opr, const Lnast_ntype node_type, std::string_view stmt_name);
   void check_if_op(Lnast* lnast, const Lnast_nid& lnidx_opr, std::string_view stmt_name);
