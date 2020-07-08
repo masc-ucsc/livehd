@@ -411,6 +411,11 @@ public:
     uint32_t *idx_upp = (uint32_t *)(&sedge[0]);
     *idx_upp          = _idx.value;
   }
+  void force_next_state(Index_ID _idx) {
+    state = Next_node_state;
+    uint32_t *idx_upp = (uint32_t *)(&sedge[0]);
+    *idx_upp          = _idx.value;
+  }
 
   void push_next_state(Index_ID _idx) {
     I(is_last_state());
