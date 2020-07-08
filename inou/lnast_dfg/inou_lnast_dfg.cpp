@@ -483,7 +483,9 @@ void Inou_lnast_dfg::process_ast_tuple_get_op(LGraph *dfg, const Lnast_nid &lnid
   auto c1_tg = lnast->get_sibling_next(c0_tg);
   auto c2_tg = lnast->get_sibling_next(c1_tg);
 
-  auto c2_tg_name = lnast->get_sname(c2_tg);
+  auto c0_tg_name  = lnast->get_sname(c0_tg);
+  auto c0_tg_vname = lnast->get_vname(c0_tg);
+  auto c2_tg_name  = lnast->get_sname(c2_tg);
 
   auto tup_get = dfg->create_node(TupGet_Op);
   auto tn_spin = tup_get.setup_sink_pin("TN"); // tuple name
@@ -509,8 +511,9 @@ void Inou_lnast_dfg::process_ast_tuple_get_op(LGraph *dfg, const Lnast_nid &lnid
   }
 
 
-  name2dpin[lnast->get_sname(c0_tg)] = tup_get.setup_driver_pin();
+  name2dpin[c0_tg_name] = tup_get.setup_driver_pin();
   tup_get.setup_driver_pin().set_name(lnast->get_sname(c0_tg));
+  setup_dpin_ssa(name2dpin[c0_tg_name], c0_tg_vname, lnast->get_subs(c0_tg));
 }
 
 
