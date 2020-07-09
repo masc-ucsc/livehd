@@ -26,12 +26,12 @@ protected:
   bool in_assign_rhs_list(std::string_view node_name);
   bool in_inefficient_LNAST(std::string_view node_name);
 
-  void add_to_write_list(std::string_view node_name, std::string_view stmt_name);
+  void add_to_write_list(Lnast* lnast, std::string_view node_name, std::string_view stmt_name);
   void add_to_read_list(std::string_view node_name, std::string_view stmt_name);
   void add_to_assign_lhs_list(std::string_view node_name);
   void add_to_assign_rhs_list(std::string_view node_name);
   void find_lhs_name(int index);
-  void error_print_lnast(Lnast* lnast, std::string_view error_node, std::string_view error_msg);
+  void error_print_lnast(Lnast* lnast, std::string_view error_name);
 
   void resolve_read_write_lists();
   void resolve_assign_lhs_rhs_lists();
