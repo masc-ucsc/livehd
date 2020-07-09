@@ -193,7 +193,7 @@ public:
     return absl::StrCat(std::string(get_name(nid)), "_", get_subs(nid));
   }
 
-  std::string_view Lnast_type_to_string(Lnast_ntype type) const ;
+  std::string_view type_to_string(Lnast_ntype type) const ;
 
   void dump() const;
 };

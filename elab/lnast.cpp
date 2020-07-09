@@ -918,7 +918,7 @@ void Lnast::update_phi_resolve_table(const Lnast_nid &psts_nid, const Lnast_nid 
   phi_resolve_table[target_name] = target_nid; //for a variable string, always update to latest Lnast_nid
 }
 
-std::string_view Lnast::Lnast_type_to_string(Lnast_ntype type) const {
+std::string_view Lnast::type_to_string(Lnast_ntype type) const {
   switch (type.get_raw_ntype()) {
     case Lnast_ntype::Lnast_ntype_invalid: return "invalid";
     case Lnast_ntype::Lnast_ntype_top: return "top";
@@ -977,7 +977,7 @@ void Lnast::dump() const {
     std::string indent{"  "};
     for (int i = 0; i < it.level; ++i) indent += "  ";
 
-    fmt::print("{} {} {:>20} : {}\n", it.level, indent, Lnast_type_to_string(node.type), node.token.text);
+    fmt::print("{} {} {:>20} : {}\n", it.level, indent, type_to_string(node.type), node.token.text);
   }
 }
 
