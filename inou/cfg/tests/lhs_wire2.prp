@@ -1,0 +1,14 @@
+
+foo.__wire = true    // 
+%out  = foo.a        // 
+%out2 = foo.b
+if (1 == 2) {
+  foo.a = 3          // 
+  foo.b = 4
+} else {
+  foo = (5, 6)
+}
+
+                       // foo_3 = phi (foo_1, foo_2)             
+
+%out3 = foo.a + foo.b  // = foo_"0"
