@@ -918,6 +918,21 @@ void Lnast::update_phi_resolve_table(const Lnast_nid &psts_nid, const Lnast_nid 
   phi_resolve_table[target_name] = target_nid; //for a variable string, always update to latest Lnast_nid
 }
 
+bool Lnast::is_in_bw_table(const std::string_view name) {
+  return from_lgraph_bw_table.contains((std::string)name);
+}
+
+uint32_t Lnast::get_bitwidth(const std::string_view name) {
+  fmt::print("get_bw: {}\n", name);
+  I(is_in_bw_table(name));
+  return from_lgraph_bw_table[(std::string)name];
+}
+
+void Lnast::set_bitwidth(const std::string_view name, const uint32_t bitwidth) {
+  I(bitwidth > 0);
+  from_lgraph_bw_table[(std::string)name] = bitwidth;
+}
+
 void Lnast::dump() const {
   for (const auto &it : depth_preorder(get_root())) {
     const auto &node = get_data(it);

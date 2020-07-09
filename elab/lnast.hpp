@@ -145,7 +145,6 @@ private:
   bool      is_attribute_related               (const Lnast_nid &opr_nid);
   void      dot2attr_set_get                   (const Lnast_nid &psts_nid, Lnast_nid &opr_nid);
 
-
   // hierarchical statements node -> symbol table
   absl::flat_hash_map<Lnast_nid, Phi_rtable>      phi_resolve_tables;
   absl::flat_hash_map<Lnast_nid, Cnt_rtable>      ssa_rhs_cnt_tables;
@@ -156,6 +155,9 @@ private:
 
 
   absl::flat_hash_map<std::string_view, int8_t>  global_ssa_lhs_cnt_table;
+
+  // populated during LG->LN pass, maps name -> bitwidth
+  absl::flat_hash_map<std::string, uint32_t> from_lgraph_bw_table;
 
   Lnast_nid  default_const_nid;
   Lnast_nid  err_var_undefined_nid;
@@ -192,6 +194,12 @@ public:
     // FIXME: sh: any better way to concate a string_view??
     return absl::StrCat(std::string(get_name(nid)), "_", get_subs(nid));
   }
+
+  // bitwidth table functions
+  bool      is_in_bw_table                     (const std::string_view name);
+  uint32_t  get_bitwidth                       (const std::string_view name);
+  void      set_bitwidth                       (const std::string_view name, const uint32_t bitwidth);
+
 
   void dump() const;
 };
