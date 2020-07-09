@@ -410,6 +410,8 @@ public:
   Lnast_ntype() : val(Lnast_ntype_invalid) {
   }
 
+  std::string_view to_s() const { return namemap[val]; }
+
   Lnast_ntype_int get_raw_ntype() const { return val; }
 
   static Lnast_ntype create_invalid()      { return Lnast_ntype(Lnast_ntype_invalid); }
