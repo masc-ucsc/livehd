@@ -161,15 +161,15 @@ void Semantic_check::error_print_lnast(Lnast* lnast, std::string_view error_node
     std::string indent{"  "};
     for (int i = 0; i < it.level; ++i) indent += "  ";
 
-    if (lnast->type_to_string(node.type) == error_node) {
+    if (node.type.to_s() == error_node) { // FIXME (Renau); This does not look right. It error_node shuld be a Tree_index
       error_level = it.level;
-      
+
     } else if (error_level != -1 && error_level+1 != it.level) {
       msg_printed = true;
       fmt::print("\n{}\n\n", error_msg);
       error_level = -1;
     }
-    fmt::print("{} {} {:>20} : {}\n", it.level, indent, lnast->type_to_string(node.type), node.token.text);
+    fmt::print("{} {} {:>20} : {}\n", it.level, indent, node.type.to_s(), node.token.text);
   }
   if (!msg_printed) {
     fmt::print("\n{}\n\n", error_msg);
