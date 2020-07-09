@@ -547,7 +547,7 @@ std::tuple<std::string_view, int> Pass_cprop::get_tuple_name_key(Node &node) {
 		}
 	}
 
-	I(!key_name.empty() || key_pos != -1);  // At least one defined
+	// I(!key_name.empty() || key_pos != -1);  // At least one defined // FIXME->sh: not necessarily true, could be resolved at later TupAdd merge step
 
 	return std::make_tuple(key_name, key_pos);
 }
@@ -620,10 +620,10 @@ void Pass_cprop::process_tuple_add(Node &node) {
   auto parent_dpin = node.get_sink_pin(0).get_driver_pin();
   auto parent_node = parent_dpin.get_node();
 
-  auto ptup_it = node2tuple.find(parent_node.get_compact());
-
 	bool parent_could_be_deleted = false;
   std::shared_ptr<Lgtuple> ctup;
+
+  auto ptup_it = node2tuple.find(parent_node.get_compact());
   if (ptup_it == node2tuple.end()) {
     ctup = std::make_shared<Lgtuple>();
   } else {
@@ -631,7 +631,7 @@ void Pass_cprop::process_tuple_add(Node &node) {
     parent_could_be_deleted = parent_out_edges.size() == 1;  // This is the only one child
 
     if (!parent_could_be_deleted) {
-      // if all the parent out edges are tuple get AND ONLY this parent can be deleted
+      // if all other parent out edges are tup_get, this parent can be deleted
       bool loop_exit = false;
       for (auto e : parent_out_edges) {
         auto dest_node = e.sink.get_node();

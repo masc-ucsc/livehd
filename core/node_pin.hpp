@@ -318,7 +318,6 @@ public:
   bool             has_name() const;
   static Node_pin  find_driver_pin(LGraph *top, std::string_view wname);
 
-  // FIXME->sh: could be deprecated if ann_ssa could be mmapped for a std::string_view
   void             set_prp_vname(std::string_view prp_vname);
   std::string_view get_prp_vname() const;
   bool             has_prp_vname() const;

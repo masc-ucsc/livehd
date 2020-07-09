@@ -40,7 +40,7 @@ do
       exit !
     fi
 
-    ln -s inou/cfg/tests/${pt}.prp;
+    # ln -s inou/cfg/tests/${pt}.prp;
 
     echo "----------------------------------------------------"
     echo "Pyrope -> LNAST-SSA Graphviz debug"
@@ -183,10 +183,8 @@ do
     fi
 
     rm -f ${pt}.v
-    rm -f ${pt}.prp
     rm -f lnast.dot.gld
     rm -f lnast.nodes
     rm -f lnast.nodes.gld
-    # rm -f lnast.dot
-    # rm -f *.dot
+    rm -f *.dot
 done #end of for

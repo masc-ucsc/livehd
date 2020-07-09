@@ -90,7 +90,6 @@ void Inou_lnast_dfg::lnast2lgraph(LGraph *dfg) {
 void Inou_lnast_dfg::process_ast_stmts(LGraph *dfg, const Lnast_nid &lnidx_stmts) {
   for (const auto &lnidx : lnast->children(lnidx_stmts)) {
     const auto ntype = lnast->get_data(lnidx).type;
-    // FIXME->sh: how to use switch to gain performance?
     if (ntype.is_assign()) {
       process_ast_assign_op(dfg, lnidx);
     } else if (ntype.is_dp_assign()) {
@@ -127,7 +126,7 @@ void Inou_lnast_dfg::process_ast_stmts(LGraph *dfg, const Lnast_nid &lnidx_stmts
       process_ast_for_op(dfg, lnidx);
     } else if (ntype.is_while()) {
       process_ast_while_op(dfg, lnidx);
-    } else if (ntype.is_invalid()) { // FIXME->sh: add ignore type in LNAST?
+    } else if (ntype.is_invalid()) { 
       continue;
     } else if (ntype.is_const()) {
       I(lnast->get_name(lnidx) == "default_const");
@@ -316,8 +315,7 @@ void Inou_lnast_dfg::process_ast_logical_op(LGraph *dfg, const Lnast_nid &lnidx_
 
 
 void Inou_lnast_dfg::nary_node_rhs_connections(LGraph *dfg, Node &opr_node, const std::vector<Node_pin> &opds, bool is_subt) {
-  // FIXME->sh: need to think about signed number handling and signed number copy-propagation analysis
-  // for now, assuming everything is unsigned number
+  // FIXME->sh: need to think about signed number handling and signed number copy-propagation analysis for now, assuming everything is unsigned number
   switch(opr_node.get_type().op) {
     case Sum_Op:
     case Mult_Op: { // FIXME: add could be + a b c (same mult)
@@ -433,7 +431,6 @@ void Inou_lnast_dfg::process_ast_tuple_struct(LGraph *dfg, const Lnast_nid &lnid
     auto key_name = lnast->get_sname(c0);
 
     auto tn_dpin    = setup_tuple_ref(dfg, tup_name);
-    tup_keyname2pos[std::make_pair(tup_name, key_name)] = std::to_string(kp);
     auto kp_dnode   = dfg->create_node_const(Lconst(kp));
     auto kp_dpin    = kp_dnode.setup_driver_pin();
     auto value_dpin = setup_ref_node_dpin(dfg, c1);
@@ -449,19 +446,12 @@ void Inou_lnast_dfg::process_ast_tuple_struct(LGraph *dfg, const Lnast_nid &lnid
       dfg->add_edge(kn_dpin, kn_spin);
     }
 
-
     dfg->add_edge(tn_dpin, tn_spin);
     dfg->add_edge(kp_dpin, kp_spin);
     dfg->add_edge(value_dpin, value_spin);
 
     name2dpin[tup_name] = tup_add.setup_driver_pin();
     tup_add.setup_driver_pin().set_name(tup_name);
-
-    if (kp == 0) {
-      tn2head_maxlen[tup_name] = std::make_pair(tup_add.get_driver_pin(), kp + 1);
-    } else {
-      tn2head_maxlen[tup_name].second = kp + 1;
-    }
 
     kp++;
   }
@@ -493,11 +483,11 @@ void Inou_lnast_dfg::process_ast_tuple_get_op(LGraph *dfg, const Lnast_nid &lnid
   auto kp_spin = tup_get.setup_sink_pin("KP"); // key pos
 
   Node_pin tn_dpin;
-  if (is_register(lnast->get_vname(c1_tg))) {
+  if (is_register(lnast->get_vname(c1_tg))) 
     tn_dpin = setup_ref_node_dpin(dfg, c1_tg);
-  } else {
+  else 
     tn_dpin = setup_tuple_ref(dfg, lnast->get_sname(c1_tg));
-  }
+  
 
 
   dfg->add_edge(tn_dpin, tn_spin);
@@ -509,7 +499,6 @@ void Inou_lnast_dfg::process_ast_tuple_get_op(LGraph *dfg, const Lnast_nid &lnid
     auto kn_dpin = setup_key_dpin(dfg, lnast->get_sname(c2_tg));
     dfg->add_edge(kn_dpin, kn_spin);
   }
-
 
   name2dpin[c0_tg_name] = tup_get.setup_driver_pin();
   tup_get.setup_driver_pin().set_name(lnast->get_sname(c0_tg));
@@ -531,34 +520,17 @@ void Inou_lnast_dfg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnid
   auto key_name = lnast->get_sname(c1_ta);
 
 
-  //FIXME->sh: to be deprecated, move to attribute handling
-  if (key_name.size() >= 6 && key_name.substr(0,6) == "__bits") {
-    auto bits_dpin = setup_ref_node_dpin(dfg, c2_ta);    //this dpin represents the bits value, might come from ConstOp or after some copy propagation
-    vname2bits_dpin[lnast->get_vname(c0_ta)] = bits_dpin; //node that vname is de-SSAed, a pure variable name
-    return;
-  }
-
   auto tn_dpin = setup_tuple_ref(dfg, tup_name);
   dfg->add_edge(tn_dpin, tn_spin);
 
   Node_pin kn_dpin;
-  if (is_const(key_name)) { // it is actually a key_pos, not a key_name
-    for (auto &i : tup_keyname2pos) { // find pos2keyname, FIXME->sh: use bi-map to avoid for loop search
-      if (i.first.first == tup_name && i.second == key_name) {
-        kn_dpin = setup_key_dpin(dfg, i.first.second);
-        dfg->add_edge(kn_dpin, kn_spin);
-        break;
-      }
-    }
+  if (is_const(key_name)) { // it is a key_pos, not a key_name
+    auto kp_dpin = dfg->create_node_const(Lconst(key_name)).setup_driver_pin();
+    dfg->add_edge(kp_dpin, kp_spin);
   } else if (key_name.substr(0,4) != "null") {// it is a pure key_name
     fmt::print("key_name:{}\n", key_name);
     kn_dpin = setup_key_dpin(dfg, key_name);
     dfg->add_edge(kn_dpin, kn_spin);
-  }
-
-  if (is_const(key_name)) { // it is a key_pos, not a key_name
-    auto kp_dpin = dfg->create_node_const(Lconst(key_name)).setup_driver_pin();
-    dfg->add_edge(kp_dpin, kp_spin);
   }
 
 
