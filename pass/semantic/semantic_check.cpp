@@ -3,6 +3,10 @@
 #include "pass.hpp"
 #include "prp_lnast.hpp"
 #include "lbench.hpp"
+#include "fmt/core.h"
+#include "fmt/format.h"
+#include "fmt/color.h"
+#include "fmt/printf.h"
 
 #include <string_view>
 #include <iostream>
@@ -150,6 +154,8 @@ void Semantic_check::find_lhs_name(int index) {
 void Semantic_check::error_print_lnast(Lnast* lnast, std::string_view error_node, std::string_view error_msg) {
   Prp_lnast converter;
   int error_level = -1;
+  bool msg_printed = false;
+  fmt::print("\n");
   for (const auto &it : lnast->depth_preorder(lnast->get_root())) {
     auto        node = lnast->get_data(it);
     std::string indent{"  "};
@@ -159,10 +165,14 @@ void Semantic_check::error_print_lnast(Lnast* lnast, std::string_view error_node
       error_level = it.level;
       
     } else if (error_level != -1 && error_level+1 != it.level) {
+      msg_printed = true;
       fmt::print("\n{}\n\n", error_msg);
       error_level = -1;
     }
     fmt::print("{} {} {:>20} : {}\n", it.level, indent, lnast->type_to_string(node.type), node.token.text);
+  }
+  if (!msg_printed) {
+    fmt::print("\n{}\n\n", error_msg);
   }
 }
 
@@ -176,14 +186,15 @@ void Semantic_check::resolve_read_write_lists() {
   }
   if (write_dict.size() != 0) {
     auto first_entry = write_dict.begin();
-    std::cout << "Variable Warning: " << first_entry->first;
+    fmt::print(fmt::fg(fmt::color::blue), "Variable Warning");
+    fmt::print(": {}", first_entry->first);
     for (auto node_name : write_dict) {
       if (node_name == *first_entry) {
         continue;
       }
-      std::cout << ", " << node_name.first;
+      fmt::print(", {}", node_name.first);
     }
-    std::cout << " were written but never read\n";
+    fmt::print(" were written but never read\n\n");
   }
 }
 
@@ -302,7 +313,10 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
       Pass::error("Primitive Operation Error: Not a Valid Node Type\n");
     }
   } else {
-    Pass::error("Primitive Operation Error: Requires at least 2 LNAST Nodes (lhs, rhs)\n");
+    std::string_view error_msg = "Primitive Operation Error: Requires at least 2 LNAST Nodes (lhs, rhs)";
+    std::string_view error_node = lnast->type_to_string(node_type);
+    error_print_lnast(lnast, error_node, error_msg);
+    // Pass::error("Primitive Operation Error: Requires at least 2 LNAST Nodes (lhs, rhs)\n");
   }
 }
 
@@ -402,15 +416,15 @@ void Semantic_check::check_while_op(Lnast *lnast, const Lnast_nid &lnidx_opr, st
     }
   }
   if (!cond) {
-    std::string_view error_msg = "While Operation Error: Missing Condition Node";
-    std::string_view error_node = "while";
-    error_print_lnast(lnast, error_node, error_msg);
-    // Pass::error("While Operation Error: Missing Condition Node\n");
+    // std::string_view error_msg = "While Operation Error: Missing Condition Node";
+    // std::string_view error_node = "while";
+    // error_print_lnast(lnast, error_node, error_msg);
+    Pass::error("While Operation Error: Missing Condition Node\n");
   } else if (!stmt) {
-    std::string_view error_msg = "While Operation Error: Missing Statement Node";
-    std::string_view error_node = "while";
-    error_print_lnast(lnast, error_node, error_msg);
-    //Pass::error("While Operation Error: Missing Statement Node\n");
+    // std::string_view error_msg = "While Operation Error: Missing Statement Node";
+    // std::string_view error_node = "while";
+    // error_print_lnast(lnast, error_node, error_msg);
+    Pass::error("While Operation Error: Missing Statement Node\n");
   }
 }
 
