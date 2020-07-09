@@ -330,6 +330,11 @@ public:
   uint32_t get_bits() const;
   void     set_bits(uint32_t bits);
 
+  bool     is_signed() const;
+  bool     is_unsigned() const;
+  void     set_signed();
+  void     set_unsigned();
+
   std::string_view get_type_sub_io_name() const;
   std::string_view get_type_sub_pin_name() const;
 

@@ -89,11 +89,24 @@ int Node_pin::get_num_edges() const {
   return current_g->get_node_pin_num_outputs(idx);
 }
 
-uint32_t Node_pin::get_bits() const { return current_g->get_bits(idx); }
+uint32_t Node_pin::get_bits() const { I(is_driver()); return current_g->get_bits(idx); }
 
 void Node_pin::set_bits(uint32_t bits) {
   I(is_driver());
   current_g->set_bits(idx, bits);
+}
+
+bool Node_pin::is_signed() const { I(is_driver()); return current_g->is_signed(idx); }
+bool Node_pin::is_unsigned() const { I(is_driver()); return current_g->is_unsigned(idx); }
+
+void Node_pin::set_signed() {
+  I(is_driver());
+  current_g->set_signed(idx);
+}
+
+void Node_pin::set_unsigned() {
+  I(is_driver());
+  current_g->set_unsigned(idx);
 }
 
 std::string_view Node_pin::get_type_sub_io_name() const {
