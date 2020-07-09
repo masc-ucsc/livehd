@@ -314,7 +314,7 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
     }
   } else {
     std::string_view error_msg = "Primitive Operation Error: Requires at least 2 LNAST Nodes (lhs, rhs)";
-    std::string_view error_node = lnast->type_to_string(node_type);
+    std::string_view error_node = node_type.to_s();
     error_print_lnast(lnast, error_node, error_msg);
     // Pass::error("Primitive Operation Error: Requires at least 2 LNAST Nodes (lhs, rhs)\n");
   }
