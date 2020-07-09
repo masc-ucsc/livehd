@@ -87,15 +87,56 @@ enum Node_Type_Op : uint8_t {
 
 class Node_Type {
 public:
-  constexpr static inline frozen::map<frozen::string, int, 4> nentries [] = {
-    { {"", 0}, {"", 0}, {"",0} , {"",0} },
-    { {"foo", 1}, {"bar", 2}, {"",0} , {"",0} },
-    { {"xx", 1}, {"yy", 2}, {"",0} , {"",0} }
+  constexpr static inline frozen::map<frozen::string, Port_ID, 6> sink_pidmap [] = {
+    { /* invalid */ {"",    0}, {""   , 0}, {""   ,0} , {""   ,0} , {"", 0} , {"", 0} },
+    { /* sum     */ {"ADD", 0}, {"SUB", 1}, {""   ,0} , {""   ,0} , {"", 0} , {"", 0} },
+    { /* mult    */ {"VAL", 0}, {""   , 0}, {""   ,0} , {""   ,0} , {"", 0} , {"", 0} },
+    { /* div     */ {"NUM", 0}, {"DEN", 1}, {""   ,0} , {""   ,0} , {"", 0} , {"", 0} },
+    { /* mod     */ {"NUM", 0}, {"DEN", 1}, {""   ,0} , {""   ,0} , {"", 0} , {"", 0} },
+    { /* not     */ {"VAL", 0}, {""   , 0}, {""   ,0} , {""   ,0} , {"", 0} , {"", 0} },
+    { /* join    */ {"V0" , 0}, {"V1" , 1}, {"V2" ,2} , {"V3" ,3} , {"V4", 4} , {"V5", 5} },
+    { /* pick    */ {"VAL", 0}, {"OFF", 1}, {""   ,0} , {""   ,0} , {"", 0} , {"", 0} },
+    { /* AND     */ {"VAL", 0}, {""   , 0}, {""   ,0} , {""   ,0} , {"", 0} , {"", 0} },
   };
 
-  static constexpr Port_ID get_pid(Node_Type_Op op, frozen::string str) { return nentries[op].at(str); }
+  constexpr static inline frozen::map<frozen::string, Port_ID, 2> driver_pidmap [] = {
+    { /* invalid */ {""   , 0}, {""   , 0}, },
+    { /* sum     */ {"Y"  , 0}, {""   , 0}, }, // Y = ADD+..+ADD-SUB..-SUB
+    { /* mult    */ {"Y"  , 0}, {""   , 0}, }, // Y = VAL*..*VAL
+    { /* div     */ {"Y"  , 0}, {""   , 0}, }, // Y = NUM/DEN
+    { /* mod     */ {"Y"  , 0}, {""   , 0}, }, // Y = NUM % DEN
+    { /* not     */ {"Y"  , 0}, {""   , 0}, }, // Y = ~VAL
+    { /* join    */ {"Y"  , 0}, {""   , 0}, }, // Y = ..,V3,V2,V1,V0
+    { /* pick    */ {"Y"  , 0}, {""   , 0}, }, // Y = VAL[[OFF..(OFF+Y.__bits)]]
+    { /* AND     */ {"Y"  , 0}, {"RED", 1}, }, // Y = VAL&..&VAL ; RED= &Y
+  };
+
+  // Sum_Op: add/substract
+  // Y = ADD+..+ADD-SUB..-SUB
+  //
+  // Mult_Op: multiply
+  // Y = VAL*..*VAL
+  //
+  // Div_Op: Divide
+  // Y = NUM/DEN
+  //
+  // Mod_Op: Modulo
+  // Y = NUM % DEN
+  //
+  // Bitwidt NOT (Y and VAL should match in bits)
+  // Y = ~VAL
+  //
+  // Join_Op: join or concatenate output  (Y.__bits == ...V1.__bits+V0.__bits)
+  // Y = ..,V3,V2,V1,V0
+  //
+  // Y = VAL[[OFF..(OFF+Y.__bits)]]}
+  // Y = VAL&..&VAL ; RED= &Y
+
+  static constexpr Port_ID get_pid(Node_Type_Op op, frozen::string str) {
+    return driver_pidmap[op].at(str);
+  }
   static constexpr frozen::string get_name(Node_Type_Op op, Port_ID pid) {
-    for (const auto e : nentries[op]) {
+    for (const auto e : driver_pidmap[op]) {
       if (e.second == pid) return e.first;
     }
     return "invalid";
