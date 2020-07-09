@@ -155,14 +155,14 @@ void Semantic_check::error_print_lnast(Lnast* lnast, std::string_view error_node
     std::string indent{"  "};
     for (int i = 0; i < it.level; ++i) indent += "  ";
 
-    if (converter.Lnast_type_to_string(node.type) == error_node) {
+    if (lnast->type_to_string(node.type) == error_node) {
       error_level = it.level;
       
     } else if (error_level != -1 && error_level+1 != it.level) {
       fmt::print("\n{}\n\n", error_msg);
       error_level = -1;
     }
-    fmt::print("{} {} {:>20} : {}\n", it.level, indent, converter.Lnast_type_to_string(node.type), node.token.text);
+    fmt::print("{} {} {:>20} : {}\n", it.level, indent, lnast->type_to_string(node.type), node.token.text);
   }
 }
 
