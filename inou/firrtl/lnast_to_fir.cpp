@@ -21,6 +21,8 @@ void Inou_firrtl::do_tofirrtl(std::shared_ptr<Lnast> ln) {//, firrtl::FirrtlPB_C
   //FIXME: I need to add a "top" message to Circuit.
   firrtl::FirrtlPB_Module *mod = circuit->add_module();
   firrtl::FirrtlPB_Module_UserModule *umod = new firrtl::FirrtlPB_Module_UserModule();
+  FindCircuitComps(*ln, umod);
+
   for (const auto &lnidx : ln->children(stmts)) {
     process_ln_stmt(*ln, lnidx, umod->add_statement());
   }

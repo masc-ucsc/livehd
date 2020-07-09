@@ -104,6 +104,13 @@ protected:
   void        add_const_or_ref_to_primop (Lnast &ln, const Lnast_nid &lnidx, firrtl::FirrtlPB_Expression_PrimOp* prim_op);
   firrtl::FirrtlPB_Expression_PrimOp_Op  get_firrtl_oper_code(const Lnast_ntype &op_type);
 
+  // Finding Circuit Components
+  void FindCircuitComps(Lnast &ln, firrtl::FirrtlPB_Module_UserModule *umod);
+  void SearchNode(Lnast &ln, const Lnast_nid &parent_node, firrtl::FirrtlPB_Module_UserModule *umod);
+  void CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::FirrtlPB_Module_UserModule *umod);
+  void CreateSubmodInstance(Lnast &ln, const Lnast_nid &fcall_node, firrtl::FirrtlPB_Module_UserModule *umod);
+  std::string_view ConvergeFCallNames(const std::string_view func_out, const std::string_view func_inp);
+
 private:
   //----------- FOR toLNAST ----------
   std::vector<std::string> input_names;
@@ -117,6 +124,13 @@ private:
 
   uint32_t temp_var_count;
   uint32_t seq_counter;
+
+  //----------- FOR toFIRRTL ---------
+  absl::flat_hash_map<std::string, firrtl::FirrtlPB_Port*>      io_map;
+  absl::flat_hash_map<std::string, firrtl::FirrtlPB_Statement*> reg_wire_map;
+  // Contains wires that need to be renamed when found (mainly due to func. calls)
+  absl::flat_hash_map<std::string, std::string> wire_rename_map;
+
 
 public:
   Inou_firrtl(const Eprp_var &var);
