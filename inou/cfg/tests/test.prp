@@ -1,19 +1,19 @@
-#out2.__bits = 8
-#out3.__bits = 8
-%result = #out3 + #out2
-a = $in & 0xF
-a = a ^ 0xF
-#out2 := a
-#out3 := #out2 + a
+$a.__bits = 8
+$clk.__bits = 1
+%o.__bits = 8
+#tmp.__bits = 8
+%o = #tmp.__q_pin
+#tmp = $a
 
 
-//tmp = $inp
-//%out = tmp & -1
 
 
-//tmp = 2
-//tmp.__bits = 4
-//tmp = 5
-//%out = tmp
+// #out2.__bits = 8
+// #out3.__bits = 8
+// %result = #out3 + #out2
+// a = $in & 0xF
+// a = a ^ 0xF
+// #out2 := a
+// #out3 := #out2 + a
 
 
