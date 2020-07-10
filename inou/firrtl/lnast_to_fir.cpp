@@ -1,5 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <iostream>
+#include <fstream>
+#include <google/protobuf/message.h>
+
 #include "inou_firrtl.hpp"
 
 #define PRINT_DEBUG
@@ -7,9 +11,9 @@
 void Inou_firrtl::toFIRRTL(Eprp_var &var) {
   Inou_firrtl p(var);
   for (const auto &lnast : var.lnasts) {
-    lnast->ssa_trans();
+    //lnast->ssa_trans();//FIXME: Do I need to do SSA?
 
-    firrtl::FirrtlPB_Circuit circuit;
+    //firrtl::FirrtlPB_Circuit circuit;
     p.do_tofirrtl(lnast);//, circuit);
   }
 }
@@ -17,26 +21,40 @@ void Inou_firrtl::toFIRRTL(Eprp_var &var) {
 void Inou_firrtl::do_tofirrtl(std::shared_ptr<Lnast> ln) {//, firrtl::FirrtlPB_Circuit& circuit) {
   const auto top   = ln->get_root();
   const auto stmts = ln->get_first_child(top);
-  firrtl::FirrtlPB_Circuit *circuit = new firrtl::FirrtlPB_Circuit();
+  firrtl::FirrtlPB fir_design;//firrtl::FirrtlPB()
+  firrtl::FirrtlPB_Circuit *circuit = fir_design.add_circuit();//new firrtl::FirrtlPB_Circuit();
   //FIXME: I need to add a "top" message to Circuit.
+  auto top_msg = circuit->add_top();
+  top_msg->set_name("Trivial");//FIXME: Placeholder for now
+
   firrtl::FirrtlPB_Module *mod = circuit->add_module();
   firrtl::FirrtlPB_Module_UserModule *umod = new firrtl::FirrtlPB_Module_UserModule();
   FindCircuitComps(*ln, umod);
 
   for (const auto &lnidx : ln->children(stmts)) {
-    process_ln_stmt(*ln, lnidx, umod->add_statement());
+    process_ln_stmt(*ln, lnidx, umod);
   }
   mod->set_allocated_user_module(umod);
+  fir_design.PrintDebugString();
+
+  std::fstream output("Trivial_testout.pb", std::ios::out | std::ios::trunc | std::ios::binary);
+  if (!fir_design.SerializeToOstream(&output)) {
+    fmt::print("Failed to write firrtl design\n");
+  }
+  //google::protobuf::ShutDownProtobufLibrary();
 }
 
-void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::FirrtlPB_Statement* fstmt) {
+void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::FirrtlPB_Module_UserModule *umod) {
   const auto ntype = ln.get_data(lnidx).type;
   // FIXME->sh: how to use switch to gain performance?
   if (ntype.is_assign()) {
+    auto fstmt = umod->add_statement();
     process_ln_assign_op(ln, lnidx, fstmt);
   } else if (ntype.is_nary_op()) {
+    auto fstmt = umod->add_statement();
     process_ln_nary_op(ln, lnidx, fstmt);
   } else if (ntype.is_not()) {
+    auto fstmt = umod->add_statement();
     process_ln_not_op(ln, lnidx, fstmt);
   /*} else if (ntype.is_tuple_add()) {
     process_ast_tuple_add_op(dfg, lnidx);
@@ -61,7 +79,7 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
   } else if (ntype.is_tuple_concat()) {
     process_ast_concat_op(dfg, lnidx);*/
   } else if (ntype.is_if()) {
-    process_ln_if_op(ln, lnidx);
+    //process_ln_if_op(ln, lnidx);
   /*} else if (ntype.is_uif()) {
     process_ast_uif_op(dfg, lnidx);
   } else if (ntype.is_func_call()) {
@@ -112,7 +130,7 @@ void Inou_firrtl::process_ln_assign_op(Lnast &ln, const Lnast_nid &lnidx_assign,
   /* Now handle LHS. If LHS is an output or register then
    * the statement should be a Connect. If it isn't, then the
    * statement should be a Node. */
-  if (is_outp(ln.get_sname(c0)) || is_reg(ln.get_sname(c0))) {
+  if (is_outp(ln.get_name(c0)) || is_reg(ln.get_name(c0)) || is_wire(ln.get_name(c0))) {
     create_connect_stmt(ln, c0, rhs_expr, fstmt);
 
     #ifdef PRINT_DEBUG
@@ -149,7 +167,7 @@ void Inou_firrtl::process_ln_not_op(Lnast &ln, const Lnast_nid &lnidx_not, firrt
   /* Now handle LHS. If LHS is an output or register then
    * the statement should be a Connect. If it isn't, then the
    * statement should be a Node. */
-  if (is_outp(ln.get_sname(c0)) || is_reg(ln.get_sname(c0))) {
+  if (is_outp(ln.get_name(c0)) || is_reg(ln.get_name(c0)) || is_wire(ln.get_name(c0))) {
     create_connect_stmt(ln, c0, rhs_expr, fstmt);
 
     #ifdef PRINT_DEBUG
@@ -174,6 +192,11 @@ void Inou_firrtl::process_ln_nary_op(Lnast &ln, const Lnast_nid &lnidx_op, firrt
   std::string lhs, rhs;
   uint8_t child_count = 0;
 
+  auto ntype = ln.get_data(lnidx_op).type;
+  if (ntype.is_ge() || ntype.is_gt() || ntype.is_le() || ntype.is_lt()) {
+    I(child_count == 3); //I think there should only be 1 output + 2 inputs to a comp node.
+  }
+
   auto firrtl_oper_code = get_firrtl_oper_code(ln.get_data(lnidx_op).type);
 
   // Grab the LHS for later use. Also create PrimOP for RHS expr.
@@ -187,8 +210,7 @@ void Inou_firrtl::process_ln_nary_op(Lnast &ln, const Lnast_nid &lnidx_op, firrt
       lnidx_lhs = lnchild_idx;
     } else if (lnchild_idx == ln.get_last_child(lnidx_op)) {
       // If this is the last element, don't create another new operator.
-      // FIXME: ADD MORE!
-      hunterc_test = true;
+      add_const_or_ref_to_primop(ln, lnchild_idx, rhs_prim_op);
     } else {
       // If this is not the last element, we'll need another operator to grab next element.
 
@@ -212,15 +234,9 @@ void Inou_firrtl::process_ln_nary_op(Lnast &ln, const Lnast_nid &lnidx_op, firrt
     }
     child_count++;
   }
-  I(hunterc_test); //FIXME: remove this later, exists to make sure else-if case gets hit.
 
-  auto ntype = ln.get_data(lnidx_op).type;
-  if (ntype.is_ge() || ntype.is_gt() || ntype.is_le() || ntype.is_lt()) {
-    I(child_count == 3); //I think there should only be 1 output + 2 inputs to a comp node.
-  }
-
-  if (is_outp(ln.get_sname(lnidx_lhs)) || is_reg(ln.get_sname(lnidx_lhs))) {
-    create_connect_stmt(ln, lnidx_lhs, rhs_expr, fstmt);
+  if (is_outp(ln.get_name(lnidx_lhs)) || is_reg(ln.get_name(lnidx_lhs)) || is_wire(ln.get_name(lnidx_lhs))) {
+    create_connect_stmt(ln, lnidx_lhs, rhs_highest_expr, fstmt);
 
     #ifdef PRINT_DEBUG
     fmt::print("{} <= nary_op...\n", get_firrtl_name_format(ln, lnidx_lhs));
@@ -229,7 +245,7 @@ void Inou_firrtl::process_ln_nary_op(Lnast &ln, const Lnast_nid &lnidx_op, firrt
   } else {
     /* If I'm assigning to some wire/intermediate,
      * I can make FIRRTL node statement. */
-    create_node_stmt(ln, lnidx_lhs, rhs_expr, fstmt);
+    create_node_stmt(ln, lnidx_lhs, rhs_highest_expr, fstmt);
 
     #ifdef PRINT_DEBUG
     fmt::print("node {} = nary_op...\n", get_firrtl_name_format(ln, lnidx_lhs));
@@ -239,7 +255,7 @@ void Inou_firrtl::process_ln_nary_op(Lnast &ln, const Lnast_nid &lnidx_op, firrt
 }
 
 void Inou_firrtl::process_ln_if_op(Lnast &ln, const Lnast_nid &lnidx_if) {
-  for (const auto &if_child : ln.children(lnidx_if)) {
+  /*for (const auto &if_child : ln.children(lnidx_if)) {
     auto ntype = ln.get_type(if_child);
     if (ntype.is_cstmts() || ntype.is_stmts()) {
       //process_ln_stmts(ln, if_child);
@@ -250,7 +266,7 @@ void Inou_firrtl::process_ln_if_op(Lnast &ln, const Lnast_nid &lnidx_if) {
     } else {
       I(false); //children of an if should only be cstmts/stmts/cond/phi nodes
     }
-  }
+  }*/
 }
 
 void Inou_firrtl::process_ln_phi_op(Lnast &ln, const Lnast_nid &lnidx_phi) {
@@ -297,9 +313,15 @@ bool Inou_firrtl::is_reg(const std::string_view str) {
   return str.substr(0,1) == "#";
 }
 
+bool Inou_firrtl::is_wire(const std::string_view str) {
+  // Anything that doesn't have a prefix
+  auto first_char = str.substr(0,1);
+  return !(str.substr(0,3) == "___") && !(first_char == "#") && !(first_char == "$") && !(first_char == "%");
+}
+
 std::string Inou_firrtl::get_firrtl_name_format(Lnast &ln, const Lnast_nid &lnidx) {
   auto ntype = ln.get_type(lnidx);
-  const std::string_view str = ln.get_sname(lnidx);
+  const std::string_view str = ln.get_name(lnidx);
   if(ntype.is_ref() || ntype.is_cond()) {
     return strip_prefixes(str);
   } else if (ntype.is_const()) {
@@ -315,6 +337,11 @@ std::string Inou_firrtl::strip_prefixes(const std::string_view str) {
   while((temp.substr(0,1) == "$") || (temp.substr(0,1) == "%") || (temp.substr(0,1) == "#")) {
     temp.replace(0, 1, ""); //Remove first char from a string
   }
+
+  if(temp.substr(0,3) == "_._") {
+    temp = temp.substr(2);
+  }
+
   return temp;
 }
 
@@ -361,7 +388,7 @@ void Inou_firrtl::create_connect_stmt(Lnast &ln, const Lnast_nid &lhs, firrtl::F
 //FIXME: Maybe it coudl also be a wire???
 void Inou_firrtl::create_node_stmt(Lnast &ln, const Lnast_nid &lhs, firrtl::FirrtlPB_Expression* rhs_expr, firrtl::FirrtlPB_Statement* fstmt) {
   firrtl::FirrtlPB_Statement_Node *node = new firrtl::FirrtlPB_Statement_Node();
-  node->set_id(ln.get_sname(lhs));
+  node->set_id((std::string)ln.get_name(lhs));
   node->set_allocated_expression(rhs_expr);
 
   // Have the generic statement of type "node".
@@ -370,7 +397,7 @@ void Inou_firrtl::create_node_stmt(Lnast &ln, const Lnast_nid &lhs, firrtl::Firr
 
 void Inou_firrtl::create_integer_object(Lnast &ln, const Lnast_nid &lnidx_const, firrtl::FirrtlPB_Expression* rhs_expr) {
   firrtl::FirrtlPB_Expression_IntegerLiteral *ilit = new firrtl::FirrtlPB_Expression_IntegerLiteral();
-  auto lconst_holder = Lconst(ln.get_sname(lnidx_const));
+  auto lconst_holder = Lconst(ln.get_name(lnidx_const));
   auto lconst_str = lconst_holder.to_pyrope();
   ilit->set_value(lconst_str);
 
@@ -435,7 +462,7 @@ void Inou_firrtl::add_const_or_ref_to_primop(Lnast &ln, const Lnast_nid &lnidx, 
   } else if (ln.get_data(lnidx).type.is_const()) {
     // Lnidx is a number, so I need to make an IntegerLiteral message.
     firrtl::FirrtlPB_Expression_IntegerLiteral *rhs_prim_ilit = prim_op->add_const_();
-    auto lconst_holder = Lconst(ln.get_sname(lnidx));
+    auto lconst_holder = Lconst(ln.get_name(lnidx));
     auto lconst_str = lconst_holder.to_pyrope();
     rhs_prim_ilit->set_value(lconst_str);
   } else {
