@@ -80,7 +80,7 @@ protected:
   //----------- FOR toFIRRTL ----------
   static void toFIRRTL            (Eprp_var &var);
   void        do_tofirrtl         (std::shared_ptr<Lnast> ln);
-  void        process_ln_stmt     (Lnast &ln, const Lnast_nid &lnidx_smts, firrtl::FirrtlPB_Statement* fstmt);
+  void        process_ln_stmt     (Lnast &ln, const Lnast_nid &lnidx_smts, firrtl::FirrtlPB_Module_UserModule* umod);
   void        process_ln_assign_op(Lnast &ln, const Lnast_nid &lnidx_assign, firrtl::FirrtlPB_Statement* fstmt);
   void        process_ln_nary_op  (Lnast &ln, const Lnast_nid &lnidx_assign, firrtl::FirrtlPB_Statement* fstmt);
   void        process_ln_not_op   (Lnast &ln, const Lnast_nid &lnidx_op, firrtl::FirrtlPB_Statement* fstmt);
@@ -93,6 +93,7 @@ protected:
   bool        is_inp                (const std::string_view str);
   bool        is_outp               (const std::string_view str);
   bool        is_reg                (const std::string_view str);
+  bool        is_wire               (const std::string_view str);
   void        create_connect_stmt   (Lnast &ln, const Lnast_nid &lhs, firrtl::FirrtlPB_Expression* rhs_expr,
                                      firrtl::FirrtlPB_Statement* fstmt);
   void        create_node_stmt      (Lnast &ln, const Lnast_nid &lhs, firrtl::FirrtlPB_Expression* rhs_expr,
@@ -108,6 +109,7 @@ protected:
   void FindCircuitComps(Lnast &ln, firrtl::FirrtlPB_Module_UserModule *umod);
   void SearchNode(Lnast &ln, const Lnast_nid &parent_node, firrtl::FirrtlPB_Module_UserModule *umod);
   void CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::FirrtlPB_Module_UserModule *umod);
+  firrtl::FirrtlPB_Type* CreateTypeObject(uint32_t bitwidth);
   void CreateSubmodInstance(Lnast &ln, const Lnast_nid &fcall_node, firrtl::FirrtlPB_Module_UserModule *umod);
   std::string_view ConvergeFCallNames(const std::string_view func_out, const std::string_view func_inp);
 

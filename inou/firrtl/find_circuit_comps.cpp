@@ -9,6 +9,7 @@
  * can be found in the LNAST. If found, add to
  * Firrtl Module. */
 void Inou_firrtl::FindCircuitComps(Lnast &ln, firrtl::FirrtlPB_Module_UserModule *umod) {
+  fmt::print("FindCircuitComps\n");
   const auto top   = ln.get_root();
   const auto stmts = ln.get_first_child(top);
   for (const auto &lnidx : ln.children(stmts)) {
@@ -47,32 +48,45 @@ void Inou_firrtl::SearchNode(Lnast &ln, const Lnast_nid &parent_node, firrtl::Fi
   }
 }
 
+/* This function creates the specified type
+ * and provides a pointer to that type. */
+// FIXME: This only works for UInt type right now
+firrtl::FirrtlPB_Type* Inou_firrtl::CreateTypeObject(uint32_t bitwidth) {
+  auto width = new firrtl::FirrtlPB_Width();
+  width->set_value(bitwidth);
+
+  auto uint_type = new firrtl::FirrtlPB_Type_UIntType();
+  uint_type->set_allocated_width(width);
+
+  auto type = new firrtl::FirrtlPB_Type();
+  type->set_allocated_uint_type(uint_type);
+
+  return type;
+}
+
 /* Check to see if ref could be a wire/reg/IO.
  * If it is, then check to see if it was already
- * added. If it hasn't been added yet, then add it .*/
+ * added. If it hasn't been added yet, then add it. */
 void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::FirrtlPB_Module_UserModule *umod) {
   auto name = ln.get_name(ref_node);
   if (name.substr(0, 2) == "__") {
     // __ = attribute, ___ = temp var
     return;
-  } else if (name.substr(0,1) == "$") {
+
+  } else if (name.substr(0,1) == "$" || name.substr(0,1) == "%") {
     // $ = input
     if(io_map.contains(name.substr(1)))
       return;
     auto port = umod->add_port();
     port->set_id((std::string)name.substr(1));
-    port->set_direction(firrtl::FirrtlPB_Port_Direction_PORT_DIRECTION_IN);
-    //note->hunter:Haven't set type yet
-    io_map[(std::string)name.substr(1)] = port;
+    auto type = CreateTypeObject(ln.get_bitwidth(name.substr(1)));
+    port->set_allocated_type(type);
 
-  } else if (name.substr(0,1) == "%") {
-    // % = output
-    if(io_map.contains(name.substr(1)))
-      return;
-    auto port = umod->add_port();
-    port->set_id((std::string)name.substr(1));
-    port->set_direction(firrtl::FirrtlPB_Port_Direction_PORT_DIRECTION_OUT);
-    //note->hunter:Haven't set type yet
+    if (name.substr(0,1) == "$")
+      port->set_direction(firrtl::FirrtlPB_Port_Direction_PORT_DIRECTION_IN);
+    else
+      port->set_direction(firrtl::FirrtlPB_Port_Direction_PORT_DIRECTION_OUT);
+
     io_map[(std::string)name.substr(1)] = port;
 
   } else if (name.substr(0,1) == "#") {
@@ -81,19 +95,25 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
       return;
     auto reg = new firrtl::FirrtlPB_Statement_Register();
     reg->set_id((std::string)name.substr(1));
-    //note->hunter:Haven't set type, clock, reset, or init yet
+
+    auto type = CreateTypeObject(ln.get_bitwidth(name.substr(1))); //FIXME: Just setting bits to implicit right now
+    reg->set_allocated_type(type);
+
     auto fstmt = umod->add_statement();
     fstmt->set_allocated_register_(reg);
     reg_wire_map[(std::string)name.substr(1)] = fstmt;
 
   } else if (name.substr(0,3) == "_._") {
     // _._ = wire //FIXME: but change front to something else? currently changes _._ to _
-    if(reg_wire_map.contains(name))
+    auto new_name = absl::StrCat("_", name.substr(3));
+    if(reg_wire_map.contains(new_name))
       return;
     auto wire = new firrtl::FirrtlPB_Statement_Wire();
-    auto new_name = absl::StrCat("_", name.substr(3));
     wire->set_id(new_name);
-    //note->hunter:Haven't set type yet
+
+    auto type = CreateTypeObject(ln.get_bitwidth(name)); //FIXME: Just setting bits to implicit right now
+    wire->set_allocated_type(type);
+
     auto fstmt = umod->add_statement();
     fstmt->set_allocated_wire(wire);
     reg_wire_map[new_name] = fstmt;
@@ -104,7 +124,10 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
       return;
     auto wire = new firrtl::FirrtlPB_Statement_Wire();
     wire->set_id((std::string)name);//FIXME: Figure out best way to use renaming map to fix submodule input tuple names
-    //note->hunter:Haven't set type yet
+
+    auto type = CreateTypeObject(ln.get_bitwidth(name)); //FIXME: Just setting bits to implicit right now
+    wire->set_allocated_type(type);
+
     auto fstmt = umod->add_statement();
     fstmt->set_allocated_wire(wire);
     reg_wire_map[(std::string)name] = fstmt;
