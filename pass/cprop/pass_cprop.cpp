@@ -558,6 +558,11 @@ bool Pass_cprop::process_tuple_get(Node &node) {
 
   auto parent_dpin = node.get_sink_pin(0).get_driver_pin();
   auto parent_node = parent_dpin.get_node();
+  if (parent_node.get_type_op() != TupAdd_Op && !parent_dpin.is_invalid()) {
+		collapse_forward_for_pin(node, parent_dpin);
+		return true;
+  }
+
 
   auto ptup_it = node2tuple.find(parent_node.get_compact());
 

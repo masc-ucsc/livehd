@@ -10,7 +10,7 @@
 class Pass_cprop : public Pass {
 private:
 protected:
-  absl::flat_hash_map<Node::Compact, std::shared_ptr<Lgtuple>> node2tuple; //node to most up-to-dated tuple chain
+  absl::flat_hash_map<Node::Compact, std::shared_ptr<Lgtuple>> node2tuple; //node to the most up-to-dated tuple chain
 
   static void optimize(Eprp_var &var);
   void collapse_forward_same_op(Node &node, XEdge_iterator &inp_edges_ordered);
