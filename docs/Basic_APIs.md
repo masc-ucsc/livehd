@@ -118,7 +118,7 @@ node.debug_name()
 node_pin.debug_name()
 ```
 * iterate output edges and get node/pin information from it
-```
+```cpp
 for (auto &out : node.out_edges()) {
   auto  dpin       = out.driver;
   auto  dpin_pid   = dpin.get_pid();  
@@ -132,4 +132,223 @@ for (auto &out : node.out_edges()) {
       , dnode_name, snode_name, dbits, dpin_pid, spin_pid, dpin_name);
 }
 ```
+## LGraph Node Type Semantics
+
+### Sum_Op
+
+Add/Substraction node
+
+```{.graph .center caption="Sum LGraph Node."}
+digraph Sum {
+    rankdir=LR;
+    size="2,1"
+
+    node [shape = circle]; Sum;
+    node [shape = point ]; q0
+    node [shape = point ]; q1
+    node [shape = point ]; q
+
+    q0 -> Sum [ label ="ADD" ];
+    q1 -> Sum [ label ="SUB" ];
+    Sum  -> q [ label = "Y" ];
+}
+```
+
+* $Y = \sum_{i=0}^{\infty} ADD_{i} - \sum_{i=0}^{\infty} SUB_{i}$
+* $Y.max = \sum_{i=0}^{\infty} ADD_{i}.max - \sum_{i=0}^{\infty} SUB_{i}.min$
+* $Y.min = \sum_{i=0}^{\infty} ADD_{i}.min - \sum_{i=0}^{\infty} SUB_{i}.max$
+* $Y.sign = Y.min<0$
+* A conservative back propagation is possible ($ADD.bits = Y.bits$) only if the ADD pin is connected and ADD.sign is known.
+
+If the inputs do not have the same size, they are extended (sign or unsigned)
+to all have the same length.
+
+Verilog NOTE: The Verilog to LiveHD translator MUST create Sum_Op operations
+where all the inputs have the same number of bits. In Verilog:
+
+```verilog
+logic signed [3:0] a = -1
+logic signed [4:0] c;
+
+assign c = a + 1'b1; 
+```
+
+The previous Verilog example extends everything to 5 bits (c), but unsigned
+extended because one of the inputs is unsigned (1b1 is unsigned in verilog, and
+2sb1 is signed +1). LGraph semantics are different.
+
+```verilog
+c = 5b01111 + 5b0001 // this is the Verilog semantics by matching size
+c == -16 (!!)
+```
+
+Once the inputs are zero/sign extended to match size. The Sum operator always
+generates the same result independent of the sign of the inputs.
+
+### Mult_Op
+
+Multiply operator
+
+```{.graph .center caption="Multiply LGraph Node."}
+digraph Mult {
+    rankdir=LR;
+    size="2,1"
+
+    node [shape = circle]; Mult;
+    node [shape = point ]; q0
+    node [shape = point ]; q
+
+    q0 -> Mult [ label ="VAL" ];
+    Mult  -> q [ label = "Y" ];
+}
+```
+
+* $Y = \prod_{i=0}^{\infty} VAL_{i}$
+* $Y.max = \prod_{i=0}^{\infty} \text{maxabs}(\text{VAL}_{i}.max, \text{VAL}_{i}.min)$
+* $Y.min = \begin{cases} -Y.max & Y.sign \ne 0 \\                                                                                                                                  \prod_{i=0}^{\infty} \text{minabs}(\text{VAL}_{i}.max, \text{VAL}_{i}.min) & \text{otherwise} \end{cases}$
+* $Y.sign = !\forall_{i=0}^{\infty} (VAL_{i}.min<0 and \text{VAL}_{i}.max<0) and !\forall_{i=0}^{\infty} (VAL_{i}.min>=0 and \text{VAL}_{i}.max>=0)$
+* Conservative back propagation is possible $VAL.bits = Y.bits$ when the VAL.sign is known.
+
+Verilog NOTE: Unlike the Sum_Op, the Verilog 2 LiveHD translation does not need
+to extend the inputs to have matching sizes.  Multiplying/dividing signed and
+unsigned numbers has the same result. The bit representation is the same if the
+result was signed or unsigned.
+
+LGraph Mult result (Y) number of bits can be more efficient than in Verilog.
+E.g: if the max value of VAL is 3 (2 bits) and 5 (3bits). If the result is
+unsigned, the maximum result is 15 (4 bits). In Verilog, the result will always
+be 5 bits. If the Verilog result was to an unsigned variable. Either all the inputs
+were unsigned, or there should be a Join_Op with 1bit zero to force the MSB as
+positive. This extra bit will be simplified but it will notify LGraph that the
+output is to be treated as unsigned.
+
+### Div_Op
+
+Division operator
+
+```{.graph .center caption="Division LGraph Node."}
+digraph Div {
+    rankdir=LR;
+    size="2,1"
+
+    node [shape = circle]; Div;
+    node [shape = point ]; q0
+    node [shape = point ]; q1
+    node [shape = point ]; q
+
+    q0 -> Div [ label ="NUM" ];
+    q1 -> Div [ label ="DEN" ];
+    Div  -> q [ label = "Y" ];
+}
+```
+
+* $Y = \frac{\text{NUM}}{\text{DEN}}$
+* $Y.max = \frac{\text{maxabs}(\text{NUM}.max,\text{NUM}.min)}{\text{minabs}(\text{DEN}.max,\text{DEN}.min)}$
+* $Y.min = \frac{\text{minabs}(\text{NUM}.max,\text{NUM}.min)}{\text{maxabs}(\text{DEN}.max,\text{DEN}.min)}$
+* $Y.sign = !(NUM.min<0 and NUM.max<0 and DEN.min<0 and DEN.max<0) and !(NUM.min>=0 and NUM.max>=0 and DEN.min>=0 and DEN.max>=0) $
+* No back propagation is possible.
+
+The result is unsigned if all the allowed values (min..max) are positive, or
+all the allowed values are negative. Otherwise, the result is signed.
+
+Verilog NOTE: The same considerations as in the multiplication should be applied.
+
+### Modulo_Op
+
+Modulo operator
+
+```{.graph .center caption="Modulo LGraph Node."}
+digraph Mod {
+    rankdir=LR;
+    size="2,1"
+
+    node [shape = circle]; Mod;
+    node [shape = point ]; q0
+    node [shape = point ]; q1
+    node [shape = point ]; q
+
+    q0 -> Mod [ label ="NUM" ];
+    q1 -> Mod [ label ="DEN" ];
+    Mod  -> q [ label = "Y" ];
+}
+```
+
+* $Y = \text{NUM} % \text{DEN}$
+* $Y.max = DEN.max-1$
+* $Y.min = 0$
+* $Y.sign = 0$
+* Back propagation to the DEN input is possible $DEN.max = Y.max+1$.
+
+The result is unsigned if all the allowed values (min..max) are positive, or
+all the allowed values are negative. Otherwise, the result is signed.
+
+Verilog NOTE: The result is always unsigned like in Verilog. The inputs do not
+need to be sign extended.
+
+### Not_Op
+
+Not operator
+
+```{.graph .center caption="Node LGraph Node."}
+digraph Mod {
+    rankdir=LR;
+    size="2,1"
+
+    node [shape = circle]; Not;
+    node [shape = point ]; q0
+    node [shape = point ]; q
+
+    q0 -> Not [ label ="VAL" ];
+    Not  -> q [ label = "Y" ];
+}
+```
+
+* $Y = \text{bitwise-not}(\text{VAL})$
+* $Y.max = (1<<VAL.bits)-1$
+* $Y.min = 0$
+* $Y.sign = 0$
+* Back propagation is possible by knowing the 2 of the 3 inputs bit sizes.
+
+Each bit in the input VAL is toggled. Y and VAL should have the same number of
+bits. The result is unsigned.
+
+
+### Join_Op
+
+Join or concatenate operator
+
+```{.graph .center caption="Join LGraph Node."}
+digraph Join {
+    rankdir=LR;
+    size="2,1"
+
+    node [shape = circle]; Join;
+    node [shape = point ]; q0
+    node [shape = point ]; q1
+    node [shape = point ]; q2
+    node [shape = point ]; q
+
+    q0 -> Join [ label ="P0" ];
+    q1 -> Join [ label ="P1" ];
+    q2 -> Join [ label ="P2" ];
+    Join  -> q [ label = "Y" ];
+}
+```
+
+* $Y = ... P_{2}<<(P_{1}.bits+P_{0}._bits) | P_{1}<<(P_{0}.bits) | P_{0}
+* $Y.max = (\text{absmax}(P_{n}.max, P_{n}.min)<<(P_{0}.bits+..+P_{n-1}.bits))-1$
+* $Y.min = 0$
+* $Y.sign = 0$
+* Back propagation is possible when only one input is unknown (and it is not the last one $P_{n}$). Only
+the bitwidth can be back propagated. Not the sign.
+
+
+Pick_Op: Pick some bits from the VAL input pin
+Y = VAL[[OFF..(OFF+Y.__bits)]]}
+
+And_Op: bitwise AND with 2 outputs single bit reduction (RED) or bitwise
+Y = VAL&..&VAL ; RED= &Y
+
+// To generate PDF:  pandoc -s Basic_APIs.md --mathjax --filter ^Cndoc-graphviz.py -o pp.pdf
+
 #### To be continued ...

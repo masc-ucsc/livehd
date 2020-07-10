@@ -111,27 +111,6 @@ public:
     { /* AND     */ {"Y"  , 0}, {"RED", 1}, }, // Y = VAL&..&VAL ; RED= &Y
   };
 
-  // Sum_Op: add/substract
-  // Y = ADD+..+ADD-SUB..-SUB
-  //
-  // Mult_Op: multiply
-  // Y = VAL*..*VAL
-  //
-  // Div_Op: Divide
-  // Y = NUM/DEN
-  //
-  // Mod_Op: Modulo
-  // Y = NUM % DEN
-  //
-  // Bitwidt NOT (Y and VAL should match in bits)
-  // Y = ~VAL
-  //
-  // Join_Op: join or concatenate output  (Y.__bits == ...V1.__bits+V0.__bits)
-  // Y = ..,V3,V2,V1,V0
-  //
-  // Y = VAL[[OFF..(OFF+Y.__bits)]]}
-  // Y = VAL&..&VAL ; RED= &Y
-
   static constexpr Port_ID get_pid(Node_Type_Op op, frozen::string str) {
     return driver_pidmap[op].at(str);
   }
