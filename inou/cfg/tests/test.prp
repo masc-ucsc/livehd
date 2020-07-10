@@ -1,10 +1,5 @@
-$a.__bits = 8
-$clk.__bits = 1
-%o.__bits = 8
-#tmp.__bits = 8
-%o = #tmp.__q_pin
-#tmp = $a
-
+a = 2
+%out = a.0
 
 
 

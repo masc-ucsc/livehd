@@ -58,3 +58,15 @@ h = 2
 h.0 = 3       // scalar -> tuple
 %out7 = h     // 3       
 %out8 = h.0   // 3
+
+
+// case VIII
+h = 2
+h.0 = 3       // scalar -> tuple
+h.1 = 4
+%out9 = h.0 + h.1     //7       
+
+
+// case IX
+i = 2 + 3
+%out10 = i.0
