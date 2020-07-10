@@ -259,7 +259,9 @@ void Pass_lgraph_to_lnast::handle_io(LGraph *lg, Lnast_nid& parent_lnast_node, L
       fmt::print("{} -> {}\n", edge.driver.get_name(), lnast.get_bitwidth(edge.driver.get_name()));
 
       // Create nodes //FIXME: Do I still need this? Table should work
-      auto idx_dot = lnast.add_child(parent_lnast_node, Lnast_node::create_dot("dot"));
+      // note->hunter: The below commented out code creates bw dot nodes for inputs.
+      //               It's unnecessary(?) with the existence of from_lgraph_bw_table
+      /*auto idx_dot = lnast.add_child(parent_lnast_node, Lnast_node::create_dot("dot"));
       auto temp_name = create_temp_var(lnast);
       lnast.add_child(idx_dot, Lnast_node::create_ref(temp_name));
       lnast.add_child(idx_dot, Lnast_node::create_ref(lnast.add_string(absl::StrCat("$", edge.driver.get_name()))));
@@ -268,7 +270,7 @@ void Pass_lgraph_to_lnast::handle_io(LGraph *lg, Lnast_nid& parent_lnast_node, L
       auto idx_asg = lnast.add_child(parent_lnast_node, Lnast_node::create_assign("asg"));
       lnast.add_child(idx_asg, Lnast_node::create_ref(temp_name));
       //FIXME: Is the next line the best way to get driver bitwidth?
-      lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(std::to_string(bits))));
+      lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(std::to_string(bits))));*/
     }
   }
 
