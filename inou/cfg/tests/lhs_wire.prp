@@ -1,13 +1,5 @@
-$inp.__bits = 4
-foo.__wire = true   // foo_0
-%out = foo + $inp   // = foo_0
-a = 7
-if ($inp == 15) {
-  foo = $inp && a   // foo_1
-} else {
-  foo = $inp || a   // foo_2 
-}
-
-                    // foo_3 = phi (foo_1, foo_2)             
-
-%out2 = foo         // = foo_"0"
+foo.__wire = true
+%out = foo
+foo = 2
+%out2 = foo
+foo = 3

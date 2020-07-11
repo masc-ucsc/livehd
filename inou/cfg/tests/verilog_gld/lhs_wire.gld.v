@@ -1,0 +1,9 @@
+module lhs_wire (
+  output [1:0] out,
+  output [1:0] out2
+);
+
+assign out  = 2'd3;
+assign out2 = 2'd2;
+
+endmodule 

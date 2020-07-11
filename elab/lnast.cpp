@@ -91,13 +91,11 @@ void Lnast::trans_tuple_opr(const Lnast_nid &psts_nid) {
       trans_tuple_opr_if_subtree(opr_nid);
     } else if (type.is_tuple()) {
       rename_to_real_tuple_name(psts_nid, opr_nid);
-      /* auto tuple_name_nid = get_first_child(opr_nid); */
-      /* auto &tuple_var_table = tuple_var_tables[psts_nid]; */
-      /* tuple_var_table.insert(get_name(tuple_name_nid)); */
       update_tuple_var_table(psts_nid, opr_nid);
     } else if (is_attribute_related(opr_nid)) {
       auto dot_nid = opr_nid;
       dot2attr_set_get(psts_nid, dot_nid);
+      update_tuple_var_table(psts_nid, opr_nid);
     } else if (type.is_tuple_concat()) {
       merge_tconcat_paired_assign(psts_nid, opr_nid);
     } else if (type.is_dot() || type.is_select()) {
@@ -106,22 +104,6 @@ void Lnast::trans_tuple_opr(const Lnast_nid &psts_nid) {
       update_tuple_var_table(psts_nid, opr_nid);
     }
   }
-}
-
-
-void Lnast::update_tuple_var_table(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
-  auto &tuple_var_table = tuple_var_tables[psts_nid];
-  auto type = get_type(opr_nid);
-
-  if (type.is_assign() || type.is_dp_assign() || type.is_as() || type.is_tuple() || type.is_attr_set())  {
-    auto lhs_nid = get_first_child(opr_nid);
-    const auto lhs_name = get_name(lhs_nid);
-    if (lhs_name.substr(0,3) == "___")
-      return;
-    tuple_var_table.insert(lhs_name);
-
-  }
-  return;
 }
 
 
@@ -139,20 +121,32 @@ void Lnast::trans_tuple_opr_if_subtree(const Lnast_nid &if_nid) {
         } else if (is_attribute_related(opr_nid)) {
           auto dot_nid = opr_nid;
           dot2attr_set_get(itr_nid, dot_nid);
+          update_tuple_var_table(itr_nid, opr_nid);
         } else if (type.is_dot() || type.is_select()) {
           trans_tuple_opr_handle_a_statement(itr_nid, opr_nid);
         } else if (type.is_tuple()) {
           rename_to_real_tuple_name(itr_nid, opr_nid);
           update_tuple_var_table(itr_nid, opr_nid);
-          /* auto tuple_name_nid = get_first_child(opr_nid); */
-          /* auto &tuple_var_table = tuple_var_tables[itr_nid]; */
-          /* tuple_var_table.insert(get_name(tuple_name_nid)); */
         } else {
           update_tuple_var_table(itr_nid, opr_nid);
         }
       }
     }
   }
+}
+
+void Lnast::update_tuple_var_table(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
+  auto &tuple_var_table = tuple_var_tables[psts_nid];
+  auto type = get_type(opr_nid);
+
+  if (type.is_assign() || type.is_dp_assign() || type.is_as() || type.is_tuple() || type.is_attr_set())  {
+    auto lhs_nid = get_first_child(opr_nid);
+    const auto lhs_name = get_name(lhs_nid);
+    if (lhs_name.substr(0,3) == "___")
+      return;
+    tuple_var_table.insert(lhs_name);
+  }
+  return;
 }
 
 bool Lnast::is_attribute_related(const Lnast_nid &opr_nid) {
@@ -195,7 +189,6 @@ void Lnast::dot2attr_set_get(const Lnast_nid &psts_nid, Lnast_nid &dot_nid) {
   auto c0_dot = get_first_child(dot_nid);
   auto c1_dot = get_sibling_next(c0_dot);
   auto c2_dot = get_sibling_next(c1_dot);
-
 
   if (is_lhs(psts_nid, dot_nid)) {
     // change node semantic from dot->attr_set ; assign->invalid
