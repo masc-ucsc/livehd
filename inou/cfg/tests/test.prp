@@ -1,14 +1,9 @@
-a = 2
-%out = a.0
+foo = 2 
+if ($en) {
+  foo.a = 3
+}
 
+%out = foo.a
 
-
-// #out2.__bits = 8
-// #out3.__bits = 8
-// %result = #out3 + #out2
-// a = $in & 0xF
-// a = a ^ 0xF
-// #out2 := a
-// #out3 := #out2 + a
 
 

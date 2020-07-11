@@ -9,7 +9,7 @@ pts='scalar_tuple
      logic out_ssa if2 if ssa_rhs bits_rhs counter counter_nested_if
      '
 
-pts='scalar_tuple2'
+# pts='test scalar_tuple2'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck

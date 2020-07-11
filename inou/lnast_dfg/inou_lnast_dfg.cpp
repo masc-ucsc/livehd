@@ -761,11 +761,9 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
     auto op = it->second.get_node().get_type().op;
 
     // it's a scalar variable, just return the node pin
-    if (op != TupAdd_Op)
-      return it->second;
+    if (op != TupAdd_Op) return it->second;
 
-    if (op == TupAdd_Op && from_concat)
-      return it->second;
+    if (op == TupAdd_Op && from_concat) return it->second;
 
     // return a connected TupGet if the ref node is a TupAdd and the operator is not concat
     auto tup_get = dfg->create_node(TupGet_Op);
@@ -776,6 +774,7 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
     auto kp_dpin = dfg->create_node_const(Lconst(0)).setup_driver_pin(); //must be pos 0 as the case is "bar = a + 1", implicitly get a.0
     dfg->add_edge(tn_dpin, tn_spin);
     dfg->add_edge(kp_dpin, kp_spin);
+
     return tup_get.setup_driver_pin();
   }
 
@@ -786,8 +785,6 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
     node_dpin = dfg->add_graph_input(name.substr(1, name.size()-3), Port_invalid, 0);
   } else if (is_const(name)) {
     node_dpin = dfg->create_node_const(Lconst(name)).setup_driver_pin();
-  } else if (is_default_const(name)) {
-    node_dpin = dfg->create_node_const(Lconst(0)).setup_driver_pin();
   } else if (is_register(name)) {
     auto reg_node = dfg->create_node(SFlop_Op);
     node_dpin = reg_node.setup_driver_pin();
@@ -801,6 +798,10 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
     return node_dpin;
   } else if (is_err_var_undefined(name)) {
     node_dpin = dfg->create_node(CompileErr_Op).setup_driver_pin();
+  } else if (is_bool_true(name)) {
+    node_dpin = dfg->create_node_const(Lconst(1)).setup_driver_pin();
+  } else if (is_bool_false(name)) {
+    node_dpin = dfg->create_node_const(Lconst(0)).setup_driver_pin();
   } else {
     return node_dpin; //return empty node_pin and trigger compile error
   }
