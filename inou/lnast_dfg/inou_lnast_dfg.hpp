@@ -22,6 +22,7 @@ private:
   absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Node_Type_Op>  primitive_type_lnast2lg;
   absl::flat_hash_map<std::string_view, Node_pin>                  vname2attr_dpin; // for dummy attribute node construction, vn = variable non-ssa name, dpin = last attr dpin within "any" attributes
   absl::flat_hash_map<std::string, Node_pin>                       name2dpin;       // for scalar variable
+  absl::flat_hash_map<std::string_view, Node>                      wire2node;       // for __wire = true variable
 
 
 protected:

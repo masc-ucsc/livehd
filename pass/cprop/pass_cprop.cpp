@@ -558,21 +558,25 @@ bool Pass_cprop::process_tuple_get(Node &node) {
 
   auto parent_dpin = node.get_sink_pin(0).get_driver_pin();
   auto parent_node = parent_dpin.get_node();
-  if (parent_node.get_type_op() != TupAdd_Op && !parent_dpin.is_invalid()) {
+
+
+  auto ptup_it = node2tuple.find(parent_node.get_compact());
+	auto [key_name, key_pos] = get_tuple_name_key(node);
+
+
+  // special case when TG try to get a scalar variable by accessing pos 0
+  if (parent_node.get_type_op() != TupAdd_Op && key_pos == 0 && !parent_dpin.is_invalid()) {
 		collapse_forward_for_pin(node, parent_dpin);
 		return true;
   }
 
 
-  auto ptup_it = node2tuple.find(parent_node.get_compact());
-
-	auto [key_name, key_pos] = get_tuple_name_key(node);
-
-	std::string_view tup_name;
-	if (node.get_driver_pin().has_name())
-		tup_name = node.get_driver_pin().get_name();
-	else
+  std::string tup_name;
+	if (parent_dpin.has_name()) {
+		tup_name = parent_dpin.get_name();
+  } else {
 		tup_name = node.debug_name();
+  }
 
 	if (ptup_it == node2tuple.end()) { //ptup_it = parent_node
 		std::string key;
@@ -586,6 +590,9 @@ bool Pass_cprop::process_tuple_get(Node &node) {
 	}
 
   fmt::print("DBG TupGet: tup_name:{}, key_name:{}, key_pos:{}\n", tup_name, key_name, key_pos);
+
+
+
 
 	auto ctup = ptup_it->second;
 

@@ -1,9 +1,9 @@
-foo = 2 
-if ($en) {
-  foo.a = 3
-}
+// foo.__wire = true
+// %out = foo.a 
+// if ($en) {
+//   foo.a = 3
+// }
 
-%out = foo.a
-
-
+a = 2 
+a.0 = 3
 
