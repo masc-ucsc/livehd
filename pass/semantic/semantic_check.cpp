@@ -141,19 +141,44 @@ void Semantic_check::find_lhs_name(int index) {
   }
 }
 
-void Semantic_check::error_print_lnast(Lnast* lnast, std::string_view error_name) {
+void Semantic_check::error_print_lnast(Lnast* lnast, std::string_view error_name, std::vector<std::string_view> error_names) {
+  bool use_vector = false;
+  bool use_string = false;
+  if (error_names.size() != 0 && error_name.size() == 0) {
+    use_vector = true;
+  } else if (error_names.size() == 0 && error_name.size() != 0) {
+    use_string = true;
+  } else {
+    Pass::error("Print LNAST Error: Cannot use a single node name and an array of node names together.\n");
+  }
+
   Prp_lnast converter;
   bool printed = false;
   fmt::print("\n");
+
   for (const auto &it : lnast->depth_preorder(lnast->get_root())) {
     auto        node = lnast->get_data(it);
     std::string indent{"  "};
     for (int i = 0; i < it.level; ++i) indent += "  ";
 
     fmt::print("{} {} {:>20} : {}", it.level, indent, node.type.to_s(), node.token.text);
-    if (node.token.text == error_name && !printed) {
+
+    if (use_string && node.token.text == error_name && !printed) {
       fmt::print(fmt::fg(fmt::color::red),"    <==========\n");
       printed = true;
+    } else if (use_vector && error_names.size() != 0) {
+      for (auto node_name = error_names.begin(); node_name != error_names.end(); *node_name++) {
+        if (*node_name == node.token.text) {
+          fmt::print(fmt::fg(fmt::color::red),"    <==========\n");
+          error_names.erase(node_name);
+          printed = true;
+          break;
+        }
+      }
+      if (!printed) {
+        fmt::print("\n");
+      }
+      printed = false;
     } else {
       fmt::print("\n");
     }
@@ -161,7 +186,7 @@ void Semantic_check::error_print_lnast(Lnast* lnast, std::string_view error_name
   fmt::print("\n");
 }
 
-void Semantic_check::resolve_read_write_lists() {
+void Semantic_check::resolve_read_write_lists(Lnast* lnast) {
   // New Implementation
   for (auto node_name : write_dict) {
     if (read_dict.contains(node_name.first)) {
@@ -170,6 +195,11 @@ void Semantic_check::resolve_read_write_lists() {
     }
   }
   if (write_dict.size() != 0) {
+    std::vector<std::string_view> error_names;
+    for (auto node_name : write_dict) {
+      error_names.push_back(node_name.first);
+    }
+    error_print_lnast(lnast, "", error_names);
     auto first_entry = write_dict.begin();
     fmt::print(fmt::fg(fmt::color::blue), "Variable Warning");
     fmt::print(": {}", first_entry->first);
@@ -567,5 +597,5 @@ void Semantic_check::do_check(Lnast *lnast) {
   //   // std::cout << node.first << " : " << node.second << "\n";
   // }
   resolve_assign_lhs_rhs_lists();
-  resolve_read_write_lists();
+  resolve_read_write_lists(lnast);
 }

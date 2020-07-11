@@ -31,9 +31,9 @@ protected:
   void add_to_assign_lhs_list(std::string_view node_name);
   void add_to_assign_rhs_list(std::string_view node_name);
   void find_lhs_name(int index);
-  void error_print_lnast(Lnast* lnast, std::string_view error_name);
+  void error_print_lnast(Lnast* lnast, std::string_view error_name = "", std::vector<std::string_view> error_names = {});
 
-  void resolve_read_write_lists();
+  void resolve_read_write_lists(Lnast* lnast);
   void resolve_assign_lhs_rhs_lists();
 
   void check_primitive_ops(Lnast* lnast, const Lnast_nid& lnidx_opr, const Lnast_ntype node_type, std::string_view stmt_name);
