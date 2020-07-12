@@ -15,7 +15,6 @@ public:
     Lnast_ntype_if,
     Lnast_ntype_cond,
     Lnast_ntype_uif,
-    Lnast_ntype_elif,
     Lnast_ntype_for,
     Lnast_ntype_while,
     Lnast_ntype_phi,
@@ -89,7 +88,6 @@ protected:
     "if",
     "cond",
     "uif",
-    "elif",
     "for",
     "while",
     "phi",
@@ -158,7 +156,6 @@ protected:
     "if",
     "cond",
     "uif",
-    "elif",
     "for",
     "while",
     "phi",
@@ -221,7 +218,6 @@ protected:
     "if",
     "cond",
     "uif",
-    "elif",
     "for",
     "while",
     "phi",
@@ -284,7 +280,6 @@ protected:
     "if",
     "cond",
     "uif",
-    "elif",
     "for",
     "while",
     "phi",
@@ -348,7 +343,6 @@ protected:
     "if",
     "cond",
     "uif",
-    "elif",
     "for",
     "while",
     "phi",
@@ -422,7 +416,6 @@ public:
   static constexpr Lnast_ntype create_if()           { return Lnast_ntype(Lnast_ntype_if); }
   static constexpr Lnast_ntype create_cond()         { return Lnast_ntype(Lnast_ntype_cond); }
   static constexpr Lnast_ntype create_uif()          { return Lnast_ntype(Lnast_ntype_uif); }
-  static constexpr Lnast_ntype create_elif()         { return Lnast_ntype(Lnast_ntype_elif); }
   static constexpr Lnast_ntype create_for()          { return Lnast_ntype(Lnast_ntype_for); }
   static constexpr Lnast_ntype create_while()        { return Lnast_ntype(Lnast_ntype_while); }
   static constexpr Lnast_ntype create_phi()          { return Lnast_ntype(Lnast_ntype_phi); }
@@ -489,7 +482,6 @@ public:
   bool constexpr is_if()           const { return val == Lnast_ntype_if; }
   bool constexpr is_cond()         const { return val == Lnast_ntype_cond; }
   bool constexpr is_uif()          const { return val == Lnast_ntype_uif; }
-  bool constexpr is_elif()         const { return val == Lnast_ntype_elif; }
   bool constexpr is_for()          const { return val == Lnast_ntype_for; }
   bool constexpr is_while()        const { return val == Lnast_ntype_while; }
   bool constexpr is_phi()          const { return val == Lnast_ntype_phi; }
