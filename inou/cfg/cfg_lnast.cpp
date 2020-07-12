@@ -169,10 +169,6 @@ Lnast_nid Cfg_parser::process_operator_node(const Lnast_nid& opr_parent_node, Ln
     buffer_if_condition = target_name;
     buffer_if_condition_used = false;
     return Lnast_nid(-1, -1);
-  } else if (type.is_elif()) {
-    buffer_if_condition = target_name;
-    buffer_if_condition_used = false;
-    return Lnast_nid(-1, -1);
   } else if (type.is_func_call()) {
     auto func_call_idx = lnast->add_child(opr_parent_node, Lnast_node::create_func_call(Token()));
     buffer_tmp_funcall_idx = func_call_idx;
@@ -414,8 +410,6 @@ Lnast_ntype Cfg_parser::operator_analysis() {
     type = Lnast_ntype::create_if();
   } else if (scan_is_token(Token_id_alnum) && scan_text() == "uif") {
     type = Lnast_ntype::create_uif();
-  } else if (scan_is_token(Token_id_alnum) && scan_text() == "elif"){
-    type = Lnast_ntype::create_elif();
   } else if (scan_is_token(Token_id_alnum) && scan_text() == "I") {
     type = Lnast_ntype::create_assert();
   } else if (scan_is_token(Token_id_alnum) && scan_text() == "and") {
