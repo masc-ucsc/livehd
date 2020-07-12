@@ -47,7 +47,6 @@ struct Lnast_node {
   CREATE_LNAST_NODE(_if)
   CREATE_LNAST_NODE(_cond)
   CREATE_LNAST_NODE(_uif)
-  CREATE_LNAST_NODE(_elif)
   CREATE_LNAST_NODE(_for)
   CREATE_LNAST_NODE(_while)
   CREATE_LNAST_NODE(_phi)

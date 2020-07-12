@@ -28,7 +28,7 @@ bool Semantic_check::is_primitive_op(const Lnast_ntype node_type) {
 
 bool Semantic_check::is_tree_structs(const Lnast_ntype node_type) {
   if (node_type.is_stmts() || node_type.is_cstmts() || node_type.is_if() || node_type.is_cond() || node_type.is_uif() ||
-      node_type.is_elif() || node_type.is_for() || node_type.is_while() || node_type.is_func_call() || node_type.is_func_def()) {
+      node_type.is_for() || node_type.is_while() || node_type.is_func_call() || node_type.is_func_def()) {
     return true;
   } else {
     return false;
