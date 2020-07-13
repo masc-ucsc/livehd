@@ -17,6 +17,7 @@ protected:
   std::vector<std::string_view> assign_rhs_list;
 
   std::vector<std::string_view> inefficient_LNAST;
+  // std::vector<std::string_view> output_vars;
 
   bool is_primitive_op(const Lnast_ntype node_type);
   bool is_tree_structs(const Lnast_ntype node_type);
@@ -25,6 +26,7 @@ protected:
   bool in_assign_lhs_list(std::string_view node_name);
   bool in_assign_rhs_list(std::string_view node_name);
   bool in_inefficient_LNAST(std::string_view node_name);
+  bool in_output_vars(std::string_view node_name);
 
   void add_to_write_list(Lnast* lnast, std::string_view node_name, std::string_view stmt_name);
   void add_to_read_list(std::string_view node_name, std::string_view stmt_name);
