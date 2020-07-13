@@ -866,7 +866,7 @@ void LGraph::dump() {
     for (const auto &spin : node.inp_setup_pins()) {
       if (spin.is_connected())  // Already printed
         continue;
-      fmt::print("  inp bits:{} pid:{} name:{} UNCONNECTED\n", spin.get_bits(), spin.get_pid(), spin.debug_name());
+      fmt::print("              pid:{} name:{} UNCONNECTED\n", spin.get_pid(), spin.debug_name());
     }
     for (const auto &edge : node.out_edges()) {
       fmt::print("  out bits:{} pid:{} name:{} to nid:{} pid:{}\n", edge.get_bits(), edge.driver.get_pid(),
