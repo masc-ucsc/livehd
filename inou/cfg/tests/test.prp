@@ -4,6 +4,6 @@
 //   foo.a = 3
 // }
 
-a = 2 
-a.0 = 3
+a.foo = 3
+%out = a.foo
 

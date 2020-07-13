@@ -9,7 +9,7 @@ pts='lhs_wire scalar_tuple
      logic out_ssa if2 if ssa_rhs bits_rhs counter counter_nested_if
      '
 
-# pts='test '
+pts='test '
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
