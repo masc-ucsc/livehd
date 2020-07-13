@@ -1005,7 +1005,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
       });
 
       auto encoding = std::stoul(kitty::to_hex(func), nullptr, 16);
-      auto new_node = new_lg->create_node();
+      auto new_node = new_lg->create_node(LUT_Op);
 
       new_node.set_type_lut(encoding);
       gid_klut_node2lg_node[std::make_pair(group_id, klut_ntk_node)] = new_node.get_compact();

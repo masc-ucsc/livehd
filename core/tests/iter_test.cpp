@@ -57,7 +57,7 @@ void do_fwd_traversal(LGraph *lg) {
 
   for (auto node : lg->forward(true)) {
     I(!node.is_graph_io());
-    //fmt::print("visiting {}\n", node.debug_name());
+    fmt::print("visiting {}\n", node.debug_name());
     I(test_order.find(node.get_compact()) == test_order.end());
     test_order[node.get_compact()] = test_order_sequence++;
   }

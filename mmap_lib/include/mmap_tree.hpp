@@ -96,16 +96,17 @@ protected:
   void adjust_to_level(Tree_level level);
 
   Tree_pos create_space(const Tree_index &parent, const X &data) {
-    auto pos = data_stack[parent.level + 1].size();
+    auto &dsp = data_stack[parent.level+1];
 
-    data_stack[parent.level + 1].emplace_back(data);
-    data_stack[parent.level + 1].emplace_back();
-    data_stack[parent.level + 1].emplace_back();
-    data_stack[parent.level + 1].emplace_back();
+    dsp.emplace_back(data);
+    dsp.emplace_back();
+    dsp.emplace_back();
+    dsp.emplace_back();
+
     assert((parent.pos >> 2) < pointers_stack[parent.level].size());
     pointers_stack[parent.level + 1].emplace_back(parent.pos);
 
-    return pos;
+    return dsp.size()-4;
   }
 
   const Tree_pos *ref_last_child_pos(const Tree_index &index) const {
@@ -466,13 +467,10 @@ tree<X>::tree() {
 
 template <typename X>
 const Tree_index tree<X>::add_child(const Tree_index &parent, const X &data) {
-  const auto parent_level = parent.level;
-  const auto parent_pos   = parent.pos;
+  I((int)data_stack.size() > parent.level);
+  I((int)data_stack[parent.level].size() > parent.pos);
 
-  I((int)data_stack.size() > parent_level);
-  I((int)data_stack[parent_level].size() > parent_pos);
-
-  auto child_level = parent_level + 1;
+  const auto child_level = parent.level + 1;
 
   adjust_to_level(child_level);
 

@@ -1,20 +1,22 @@
+# LGraph Internals
+
 ## LGraph APIs needed to know
 
 #### For LGraph developer(must read if you know the old LGraph):
 * src_pin/dst_pin have been renamed to driver_pin/sink_pin
 
-* the concept of node bitwidth has been removed, it’s wrong since  
-  every output edge of a node could have different bitwidth. 
+* the concept of node bitwidth has been removed, it’s wrong since
+  every output edge of a node could have different bitwidth.
   The edge bitwidth is defined on the driver_pin.
 
 * in the old LGraph, every graph input/output is represented as different nodes.
   However, in the new lgraph, all graph inputs are represented as a single graph
-  input node, each graph input is a pin of that node. Same as graph outputs.  
+  input node, each graph input is a pin of that node. Same as graph outputs.
 
 * The LGraph iterator such as for(auto node: g->forward()) no longer visit graph ios, the graph io should be handled separately, for example,
 
 ```
-// simple way using lambda 
+// simple way using lambda
 lg->each_graph_input([&](const Node_pin &pin){
 
   //your operation with graph_input node_pin;
@@ -90,7 +92,7 @@ driver_node = edge.driver.get_node()
 * use node as the index/key for a container
 ```
 absl::flat_hash_map<Node::Compact, int> my_map;
-my_map[node1.get_compact()] = 77; 
+my_map[node1.get_compact()] = 77;
 my_map[node2.get_compact()] = 42;
 ...
 ```
@@ -98,7 +100,7 @@ my_map[node2.get_compact()] = 42;
 * use node_pin as the index/key for a container
 ```
 absl::flat_hash_map<Node_pin::Compact, int> my_map;
-my_map[node_pin1.get_compact()] = 14; 
+my_map[node_pin1.get_compact()] = 14;
 my_map[node_pin2.get_compact()] = 58;
 ...
 ```
@@ -121,10 +123,10 @@ node_pin.debug_name()
 ```cpp
 for (auto &out : node.out_edges()) {
   auto  dpin       = out.driver;
-  auto  dpin_pid   = dpin.get_pid();  
+  auto  dpin_pid   = dpin.get_pid();
   auto  dnode_name = dpin.get_node().debug_name();
   auto  snode_name = out.sink.get_node().debug_name();
-  auto  spin_pid   = out.sink.get_pid();  
+  auto  spin_pid   = out.sink.get_pid();
   auto  dpin_name  = dpin.has_name() ? dpin.get_name() : "";
   auto  dbits      = dpin.get_bits();
 
@@ -154,23 +156,34 @@ digraph Sum {
 }
 ```
 
+If the inputs do not have the same size, they are extended (sign or unsigned)
+to all have the same length.
+
+#### Forward Propagation
+
 * $Y = \sum_{i=0}^{\infty} ADD_{i} - \sum_{i=0}^{\infty} SUB_{i}$
 * $Y.max = \sum_{i=0}^{\infty} ADD_{i}.max - \sum_{i=0}^{\infty} SUB_{i}.min$
 * $Y.min = \sum_{i=0}^{\infty} ADD_{i}.min - \sum_{i=0}^{\infty} SUB_{i}.max$
 * $Y.sign = Y.min<0$
-* A conservative back propagation is possible ($ADD.bits = Y.bits$) only if the ADD pin is connected and ADD.sign is known.
 
-If the inputs do not have the same size, they are extended (sign or unsigned)
-to all have the same length.
+#### Backward Propagation
 
-Verilog NOTE: The Verilog to LiveHD translator MUST create Sum_Op operations
-where all the inputs have the same number of bits. In Verilog:
+The Sum node allows a conservative back propagation ($ADD.bits = Y.bits$) only when:
+
+* $ADD.bits = Y.bits$, only if ADD pin is used and all the ADD pins are
+  unsigned (sign false).
+* Neither ADD.sign now SUB.sign can be backward propagated
+
+#### Verilog Considerations
+
+The Verilog to LiveHD translator MUST create Sum_Op operations where all the
+inputs have the same number of bits. In Verilog:
 
 ```verilog
 logic signed [3:0] a = -1
 logic signed [4:0] c;
 
-assign c = a + 1'b1; 
+assign c = a + 1'b1;
 ```
 
 The previous Verilog example extends everything to 5 bits (c), but unsigned
@@ -203,24 +216,32 @@ digraph Mult {
 }
 ```
 
+#### Forward Propagation
+
 * $Y = \prod_{i=0}^{\infty} VAL_{i}$
 * $Y.max = \prod_{i=0}^{\infty} \text{maxabs}(\text{VAL}_{i}.max, \text{VAL}_{i}.min)$
 * $Y.min = \begin{cases} -Y.max & Y.sign \ne 0 \\                                                                                                                                  \prod_{i=0}^{\infty} \text{minabs}(\text{VAL}_{i}.max, \text{VAL}_{i}.min) & \text{otherwise} \end{cases}$
 * $Y.sign = !\forall_{i=0}^{\infty} (VAL_{i}.min<0 and \text{VAL}_{i}.max<0) and !\forall_{i=0}^{\infty} (VAL_{i}.min>=0 and \text{VAL}_{i}.max>=0)$
-* Conservative back propagation is possible $VAL.bits = Y.bits$ when the VAL.sign is known.
 
-Verilog NOTE: Unlike the Sum_Op, the Verilog 2 LiveHD translation does not need
-to extend the inputs to have matching sizes.  Multiplying/dividing signed and
-unsigned numbers has the same result. The bit representation is the same if the
-result was signed or unsigned.
+#### Backward Propagation
 
-LGraph Mult result (Y) number of bits can be more efficient than in Verilog.
-E.g: if the max value of VAL is 3 (2 bits) and 5 (3bits). If the result is
-unsigned, the maximum result is 15 (4 bits). In Verilog, the result will always
-be 5 bits. If the Verilog result was to an unsigned variable. Either all the inputs
-were unsigned, or there should be a Join_Op with 1bit zero to force the MSB as
-positive. This extra bit will be simplified but it will notify LGraph that the
-output is to be treated as unsigned.
+* Conservative $VAL.bits = Y.bits$ is possible.
+* $VAL.sign$ can be set unsigned only when $Y.sign$ is known to be unsigned
+
+### Verilog Considerations
+
+Unlike the Sum_Op, the Verilog 2 LiveHD translation does not need to extend the
+inputs to have matching sizes.  Multiplying/dividing signed and unsigned
+numbers has the same result. The bit representation is the same if the result
+was signed or unsigned.
+
+LiveHD mult node result (Y) number of bits can be more efficient than in
+Verilog.  E.g: if the max value of VAL is 3 (2 bits) and 5 (3bits). If the
+result is unsigned, the maximum result is 15 (4 bits). In Verilog, the result
+will always be 5 bits. If the Verilog result was to an unsigned variable.
+Either all the inputs were unsigned, or there should be a Join_Op with 1bit
+zero to force the MSB as positive. This extra bit will be simplified but it
+will notify LGraph that the output is to be treated as unsigned.
 
 ### Div_Op
 
@@ -349,6 +370,8 @@ Y = VAL[[OFF..(OFF+Y.__bits)]]}
 And_Op: bitwise AND with 2 outputs single bit reduction (RED) or bitwise
 Y = VAL&..&VAL ; RED= &Y
 
-// To generate PDF:  pandoc -s Basic_APIs.md --mathjax --filter ^Cndoc-graphviz.py -o pp.pdf
+pandoc --pdf-engine=xelatex --toc -N GitHub-use.md Basic_APIs.md --mathjax --filter pandoc-graphviz.py -o ~/tmp/pp.pdf
+https://github.com/Wandmalfarbe/pandoc-latex-template
+https://pianomanfrazier.com/post/write-a-book-with-markdown/
 
 #### To be continued ...

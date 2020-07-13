@@ -94,6 +94,7 @@ Index_ID LGraph_Base::create_node_space(const Index_ID last_idx, const Port_ID d
   I(node_internal[last_idx].get_master_root_nid() == master_nid);
 
   auto *nidx2 = node_internal.ref(idx2);
+  nidx2->set_dst_pid(dst_pid);
 
   if (root_idx) {
     // There there are already 3 nodes, place after root (faster to find space in future checks)
@@ -121,8 +122,6 @@ Index_ID LGraph_Base::create_node_space(const Index_ID last_idx, const Port_ID d
     nidx2->set_nid(master_nid);
   }
   I(nidx2->get_master_root_nid() == master_nid);
-
-  nidx2->set_dst_pid(dst_pid);
 
   if (node_internal[last_idx].has_next_space()) {
     node_internal.ref(last_idx)->push_next_state(idx2);
@@ -504,10 +503,8 @@ Index_ID LGraph_Base::add_edge_int(const Index_ID dst_idx, const Port_ID inp_pid
       node_internal.ref(idx)->inc_outputs(true);  // WARNING: Before next_free_output_pos to reserve space (decreasing insert)
     }
 
-#if 1
     if (node_internal[idx].has_space_short())
       idx_insert_cache[src_idx] = idx;
-#endif
   }
 
   //-----------------------
