@@ -45,12 +45,6 @@ bool Semantic_check::in_write_list(std::string_view node_name, std::string_view 
 }
 
 bool Semantic_check::in_read_list(std::string_view node_name, std::string_view stmt_name) {
-  // if (read_list.contains(node_name)) {
-  //   return true;
-  // } else {
-  //   return false;
-  // }
-  // New Implementation
   for (auto node : read_dict) {
     if (node.first == node_name && node.second == stmt_name) {
       return true;
@@ -86,7 +80,6 @@ bool Semantic_check::in_inefficient_LNAST(std::string_view node_name) {
   return false;
 }
 
-#if 0
 bool Semantic_check::in_output_vars(std::string_view node_name) {
   for (auto name : output_vars) {
     if (name == node_name) {
@@ -95,11 +88,10 @@ bool Semantic_check::in_output_vars(std::string_view node_name) {
   }
   return false;
 }
-#endif
 
 void Semantic_check::add_to_write_list(Lnast* lnast, std::string_view node_name, std::string_view stmt_name) {
   if (!in_write_list(node_name, stmt_name)) {
-    if (node_name[0] != '%' && node_name != "null") {
+    if (node_name != "null") {
       write_dict[node_name] = stmt_name;
     }
   } else {
@@ -111,10 +103,6 @@ void Semantic_check::add_to_write_list(Lnast* lnast, std::string_view node_name,
 }
 
 void Semantic_check::add_to_read_list(std::string_view node_name, std::string_view stmt_name) {
-  // if (!in_read_list(node_name)) {
-  //   read_list.insert(node_name);
-  // }
-  // New Implementation
   if (!in_read_list(node_name, stmt_name)) {
     read_dict[node_name] = stmt_name;
   }
@@ -122,15 +110,19 @@ void Semantic_check::add_to_read_list(std::string_view node_name, std::string_vi
 
 void Semantic_check::add_to_assign_lhs_list(std::string_view node_name) {
   if (!in_assign_lhs_list(node_name)) {
-    // std::cout << "Added to LHS " << node_name << "\n";
     assign_lhs_list.push_back(node_name);
   }
 }
 
 void Semantic_check::add_to_assign_rhs_list(std::string_view node_name) {
   if (!in_assign_rhs_list(node_name)) {
-    // std::cout << "Added to RHS " << node_name << "\n";
     assign_rhs_list.push_back(node_name);
+  }
+}
+
+void Semantic_check::add_to_output_vars(std::string_view node_name) {
+  if (!in_output_vars(node_name)) {
+    output_vars.insert(node_name);
   }
 }
 
@@ -147,7 +139,7 @@ void Semantic_check::find_lhs_name(int index) {
 }
 
 void Semantic_check::error_print_lnast_by_name(Lnast* lnast, std::string_view error_name) {
-
+  // Print LNAST and indicate error based Node's Text Name
   Prp_lnast converter;
   bool printed = false;
   fmt::print("\n");
@@ -170,7 +162,7 @@ void Semantic_check::error_print_lnast_by_name(Lnast* lnast, std::string_view er
 }
 
 void Semantic_check::error_print_lnast_by_type(Lnast* lnast, std::string_view error_name) {
-
+  // Print LNAST and indicate error based Node's Type
   Prp_lnast converter;
   bool printed = false;
   fmt::print("\n");
@@ -193,6 +185,7 @@ void Semantic_check::error_print_lnast_by_type(Lnast* lnast, std::string_view er
 }
 
  void Semantic_check::error_print_lnast_var_warn(Lnast* lnast, std::vector<std::string_view> error_names) {
+  // Print LNAST and indicate error based a vector of variable warnings
   Prp_lnast converter;
   bool printed = false;
   fmt::print("\n");
@@ -226,18 +219,21 @@ void Semantic_check::error_print_lnast_by_type(Lnast* lnast, std::string_view er
 
 void Semantic_check::resolve_read_write_lists(Lnast* lnast) {
   for (auto node_name : write_dict) {
-    if (read_dict.contains(node_name.first)) {
+    // Resolve Write and Read Dicts
+    if (node_name.first[0] != '%' && read_dict.contains(node_name.first)) {
+      write_dict.erase(node_name.first);
+    // Make sure that if output variable is declared, it is written to
+    } else if (node_name.first[0] == '%' && in_output_vars(node_name.first)) {
+      for (auto output_var = output_vars.begin(); output_var != output_vars.end(); *output_var++) {
+        if (*output_var == node_name.first) {
+          output_vars.erase(output_var);
+          break;
+        }
+      }
       write_dict.erase(node_name.first);
     }
-    // if (in_output_vars(node_name.first)) {
-    //   write_dict.erase(node_name.first);
-    //   for (auto output_var = output_vars.begin(); output_var != output_vars.end(); *output_var++) {
-    //     if (*output_var == node_name.first) {
-    //       output_vars.erase(output_var);
-    //     }
-    //   }
-    // }
   }
+  // Variable Warning
   if (write_dict.size() != 0) {
     std::vector<std::string_view> error_names;
     for (auto node_name : write_dict) {
@@ -253,25 +249,26 @@ void Semantic_check::resolve_read_write_lists(Lnast* lnast) {
       }
       fmt::print(", {}", node_name.first);
     }
-    fmt::print(" were written but never read\n\n");
+    fmt::print(" were written but never read\n");
   }
-  // if (output_vars.size() != 0) {
-  //   std::vector<std::string_view> error_outputs;
-  //   for (auto node_name : output_vars) {
-  //     error_outputs.push_back(node_name);
-  //   }
-  //   error_print_lnast_var_warn(lnast, error_outputs);
-  //   auto first_entry = output_vars.begin();
-  //   fmt::print(fmt::fg(fmt::color::blue), "Variable Warning");
-  //   fmt::print(": {}", *first_entry);
-  //   for (auto node_name : output_vars) {
-  //     if (node_name == *first_entry) {
-  //       continue;
-  //     }
-  //     fmt::print(", {}", node_name);
-  //   }
-  //   fmt::print(" were written but never read\n\n");
-  // }
+  // Output Variable Warning --> only applies to Node type 'func def'
+  if (output_vars.size() != 0) {
+    std::vector<std::string_view> error_outputs;
+    for (auto node_name : output_vars) {
+      error_outputs.push_back(node_name);
+    }
+    error_print_lnast_var_warn(lnast, error_outputs);
+    auto first_entry = output_vars.begin();
+    fmt::print(fmt::fg(fmt::color::blue), "Output Variable Warning");
+    fmt::print(": {}", *first_entry);
+    for (auto node_name : output_vars) {
+      if (node_name == *first_entry) {
+        continue;
+      }
+      fmt::print(", {}", node_name);
+    }
+    fmt::print(" should be written since declared in the function\n");
+  }
 }
 
 void Semantic_check::resolve_assign_lhs_rhs_lists() {
@@ -368,10 +365,12 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
           check_primitive_ops(lnast, lnidx_opr_child, node_type_child, stmt_name);
           num_of_assign += 1;
         } else {
+          // Invalid Node Type
           error_print_lnast_by_name(lnast, lnast->get_name(lnidx_opr));
           Pass::error("Tuple Operation Error: Child Node(s) must be Node type 'ref' or 'assign'\n");
         }
       }
+      // Missing Nodes
       if (num_of_ref != 1) {
         error_print_lnast_by_type(lnast, node_type.to_s());
         Pass::error("Tuple Operation Error: Missing Reference Node\n");
@@ -394,10 +393,12 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
           // Store type 'ref' variables
           add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
         } else {
+          // Invalid Node Type
           error_print_lnast_by_name(lnast, lnast->get_name(lnidx_opr));
           Pass::error("Tuple Concatenation Operation Error: Child Node(s) must be Node type 'ref'\n");
         }
       }
+      // Missing Nodes
       if (num_of_ref != 3) {
         error_print_lnast_by_type(lnast,  node_type.to_s());
         Pass::error("Tuple Concatenation Operation Error: Missing Reference Node\n");
@@ -412,10 +413,12 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
           // Store type 'ref' variables
           add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
         } else {
+          // Invalid Node Type
           error_print_lnast_by_name(lnast, lnast->get_name(lnidx_opr));
           Pass::error("Select / Dot Operation Error: Child Node(s) must be Node type 'ref'\n");
         }
       }
+      // Missing Nodes
       if (num_of_ref != 3) {
         error_print_lnast_by_type(lnast, node_type.to_s());
         Pass::error("Select Operation Error: Missing Reference Node(s)\n");
@@ -430,6 +433,24 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
   }
 }
 
+void Semantic_check::check_tree_struct_ops(Lnast *lnast, const Lnast_nid &lnidx_opr, const Lnast_ntype node_type, std::string_view stmt_name) {
+  if (node_type.is_if()) {
+    check_if_op(lnast, lnidx_opr, stmt_name);
+  } else if (node_type.is_for()) {
+    check_for_op(lnast, lnidx_opr, stmt_name);
+  } else if (node_type.is_while()) {
+    check_while_op(lnast, lnidx_opr, stmt_name);
+  } else if (node_type.is_func_call()) {
+    check_func_call(lnast, lnidx_opr, stmt_name);
+  } else if (node_type.is_func_def()) {
+    check_func_def(lnast, lnidx_opr, stmt_name);
+  } else {
+    // Invalid Node Type
+    error_print_lnast_by_type(lnast, node_type.to_s());
+    Pass::error("Tree Structure Operation Error: Not a Valid Node Type\n");
+  }
+}
+
 void Semantic_check::check_if_op(Lnast *lnast, const Lnast_nid &lnidx_opr, std::string_view stmt_name) {
   int cstmts_count = 0;
   int cond_count   = 0;
@@ -438,7 +459,6 @@ void Semantic_check::check_if_op(Lnast *lnast, const Lnast_nid &lnidx_opr, std::
     const auto ntype_child = lnast->get_data(lnidx_opr_child).type;
 
     if (ntype_child.is_cstmts() || ntype_child.is_stmts()) {
-      // FIXME : Add feature to check if has any children. If none --> throw error
       std::string_view new_stmt_name = stmt_name;
       if (ntype_child.is_cstmts()) {
         cstmts_count += 1;
@@ -455,9 +475,10 @@ void Semantic_check::check_if_op(Lnast *lnast, const Lnast_nid &lnidx_opr, std::
           check_primitive_ops(lnast, lnidx_opr_child_child, ntype_child_child, new_stmt_name);
         } else if (is_tree_structs(ntype_child_child)) {
           count_child += 1;
-          check_if_op(lnast, lnidx_opr_child_child, new_stmt_name);
+          check_tree_struct_ops(lnast, lnidx_opr_child_child, ntype_child_child, new_stmt_name);
         }
       }
+      // Make sure Statement Node has children
       if (count_child == 0 && ntype_child.is_stmts()) {
         error_print_lnast_by_name(lnast, lnast->get_name(lnidx_opr_child));
         Pass::error("If Operation Error: Statement Node is empty\n");
@@ -469,10 +490,12 @@ void Semantic_check::check_if_op(Lnast *lnast, const Lnast_nid &lnidx_opr, std::
       cond_count += 1;
       add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
     } else {
+      // Invalid Node Type
       error_print_lnast_by_name(lnast, lnast->get_name(lnidx_opr));
       Pass::error("If Operation Error: Child Node(s) must be Node type 'cstmts', 'stmts', or 'condition'\n");
     }
   }
+  // Missing Nodes
   auto ntype = lnast->get_data(lnidx_opr).type;
   if (cstmts_count < cond_count) {
     error_print_lnast_by_type(lnast, ntype.to_s());
@@ -502,9 +525,10 @@ void Semantic_check::check_for_op(Lnast *lnast, const Lnast_nid &lnidx_opr, std:
           check_primitive_ops(lnast, lnidx_opr_child_child, ntype_child_child, lnast->get_name(lnidx_opr_child));
         } else if (is_tree_structs(ntype_child_child)) {
           count_child += 1;
-          check_if_op(lnast, lnidx_opr_child_child, lnast->get_name(lnidx_opr_child));
+          check_tree_struct_ops(lnast, lnidx_opr_child_child, ntype_child_child, lnast->get_name(lnidx_opr_child));
         }
       }
+      // Make sure Statement Node has children
       if (count_child == 0) {
         error_print_lnast_by_name(lnast, lnast->get_name(lnidx_opr_child));
         Pass::error("For Operation Error: Statement Node is empty\n");
@@ -514,10 +538,12 @@ void Semantic_check::check_for_op(Lnast *lnast, const Lnast_nid &lnidx_opr, std:
       // Store type 'ref' variables
       add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
     } else {
+      // Invalid Node Type
       error_print_lnast_by_name(lnast, lnast->get_name(lnidx_opr));
       Pass::error("For Operation Error: Child Node(s) must be Node type 'stmts', 'it_name', or 'tup'\n");
     }
   }
+  // Missing Nodes
   if (num_of_ref < 2) {
     error_print_lnast_by_type(lnast, lnast->get_data(lnidx_opr).type.to_s());
     Pass::error("For Operation Error: Missing Reference Node(s)\n");
@@ -546,18 +572,21 @@ void Semantic_check::check_while_op(Lnast *lnast, const Lnast_nid &lnidx_opr, st
           check_primitive_ops(lnast, lnidx_opr_child_child, ntype_child_child, lnast->get_name(lnidx_opr_child));
         } else if (is_tree_structs(ntype_child_child)) {
           count_child += 1;
-          check_if_op(lnast, lnidx_opr_child_child, lnast->get_name(lnidx_opr_child));
+          check_tree_struct_ops(lnast, lnidx_opr_child_child, ntype_child_child, lnast->get_name(lnidx_opr_child));
         }
       }
+      // Make sure Statement Node has children
       if (count_child == 0) {
         error_print_lnast_by_name(lnast, lnast->get_name(lnidx_opr_child));
         Pass::error("While Operation Error: Statement Node is empty\n");
       }
     } else {
+      // Invalid Node Type
       error_print_lnast_by_name(lnast, lnast->get_name(lnidx_opr));
       Pass::error("While Operation Error: Child Node(s) must be Node type 'condition' or 'stmts'\n");
     }
   }
+  // Missing Nodes
   if (!cond) {
     error_print_lnast_by_type(lnast, lnast->get_data(lnidx_opr).type.to_s());
     Pass::error("While Operation Error: Missing Condition Node\n");
@@ -595,9 +624,10 @@ void Semantic_check::check_func_def(Lnast *lnast, const Lnast_nid &lnidx_opr, st
           check_primitive_ops(lnast, lnidx_opr_child_child, ntype_child_child, new_stmt_name);
         } else if (is_tree_structs(ntype_child_child)) {
           count_child += 1;
-          check_if_op(lnast, lnidx_opr_child_child, new_stmt_name);
+          check_tree_struct_ops(lnast, lnidx_opr_child_child, ntype_child_child, new_stmt_name);
         }
       }
+      // Make sure Statement Node has children
       if (count_child == 0 && ntype_child.is_stmts()) {
         error_print_lnast_by_name(lnast, lnast->get_name(lnidx_opr_child));
         Pass::error("Func Def Operation Error: Statement Node is empty\n");
@@ -610,18 +640,18 @@ void Semantic_check::check_func_def(Lnast *lnast, const Lnast_nid &lnidx_opr, st
       add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
     } else if (ntype_child.is_ref()) {
       std::string_view ref_name = lnast->get_name(lnidx_opr_child);
-#if 0
       if (ref_name[0] == '%') {
-        output_vars.push_back(ref_name);
+        add_to_output_vars(ref_name);
       }
-#endif
       add_to_read_list(ref_name, stmt_name);
       num_of_refs += 1;
     } else {
+      // Invalid Node Type
       error_print_lnast_by_name(lnast, lnast->get_name(lnidx_opr));
       Pass::error("Func Def Operation Error: Child Node(s) must be Node type 'ref', 'cstmts', or 'stmts'\n");
     }
   }
+  // Missing Nodes
   if (num_of_refs < 1) {
     error_print_lnast_by_type(lnast, lnast->get_data(lnidx_opr).type.to_s());
     Pass::error("Func Def Operation Error: Missing Reference Node\n");
@@ -652,6 +682,7 @@ void Semantic_check::check_func_call(Lnast *lnast, const Lnast_nid &lnidx_opr, s
       Pass::error("Func Call Operation Error: Child Node(s) must be Node type 'ref'\n");
     }
   }
+  // Missing Nodes
   if (num_of_refs != 3) {
     error_print_lnast_by_type(lnast, lnast->get_data(lnidx_opr).type.to_s());
     Pass::error("Func Call Operation Error: Missing Reference Node(s)\n");
@@ -671,34 +702,12 @@ void Semantic_check::do_check(Lnast *lnast) {
 
     if (is_primitive_op(ntype)) {
       check_primitive_ops(lnast, stmt, ntype, stmt_name);
-      // check_primitive_ops(lnast, stmt, ntype);
-    } else if (ntype.is_if()) {
-      check_if_op(lnast, stmt, stmt_name);
-      // check_if_op(lnast, stmt);
-    } else if (ntype.is_for()) {
-      check_for_op(lnast, stmt, stmt_name);
-      // check_for_op(lnast, stmt);
-    } else if (ntype.is_while()) {
-      check_while_op(lnast, stmt, stmt_name);
-      // check_while_op(lnast, stmt);
-    } else if (ntype.is_func_call()) {
-      check_func_call(lnast, stmt, stmt_name);
-      // check_func_call(lnast, stmt);
-    } else if (ntype.is_func_def()) {
-      check_func_def(lnast, stmt, stmt_name);
-      // check_func_def(lnast, stmt);
+    } else if (is_tree_structs(ntype)) {
+      check_tree_struct_ops(lnast, stmt, ntype, stmt_name);
     }
   }
-  // for (auto node : write_dict) {
-  //   fmt::print("{} : {}\n", node.first, node.second);
-  //   // std::cout << node.first << " : " << node.second << "\n";
-  // }
-  // // std::cout << "\n";
-  // fmt::print("\n");
-  // for (auto node : read_dict) {
-  //   fmt::print("{} : {}\n", node.first, node.second);
-  //   // std::cout << node.first << " : " << node.second << "\n";
-  // }
+  // Find Errors!
   resolve_assign_lhs_rhs_lists();
   resolve_read_write_lists(lnast);
+  fmt::print("\n");
 }
