@@ -191,8 +191,7 @@ public:
   std::string      get_sname (const Lnast_nid &nid)  { //sname = ssa name
     if(get_type(nid).is_const())
       return std::string(get_name(nid));
-    // FIXME: sh: any better way to concate a string_view??
-    return absl::StrCat(std::string(get_name(nid)), "_", get_subs(nid));
+    return absl::StrCat(std::string(get_name(nid)), "_", get_subs(nid));  // FIXME->sh: any better way to concate a string_view??
   }
 
   // bitwidth table functions

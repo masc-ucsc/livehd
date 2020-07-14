@@ -1,0 +1,10 @@
+// case-1
+a = 2
+a.foo = 3
+%out = a.foo
+
+
+//// case-2
+//a = 2 
+//a.1 = 3
+//%out = a.1
