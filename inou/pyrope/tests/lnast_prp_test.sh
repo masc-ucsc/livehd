@@ -9,7 +9,7 @@ pts='lhs_wire scalar_tuple
      logic out_ssa if2 if ssa_rhs bits_rhs counter counter_nested_if
      '
 
-pts='test '
+pts='test'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -182,9 +182,10 @@ do
       fi
     fi
 
-    rm -f ${pt}.v
-    rm -f lnast.dot.gld
-    rm -f lnast.nodes
-    rm -f lnast.nodes.gld
-    rm -f *.dot
 done #end of for
+
+rm -f ${pt}.v
+rm -f lnast.dot.gld
+rm -f lnast.nodes
+rm -f lnast.nodes.gld
+rm -f *.dot

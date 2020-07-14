@@ -525,16 +525,23 @@ void Inou_lnast_dfg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnid
   auto tup_name = lnast->get_sname(c0_ta);
   auto key_name = lnast->get_sname(c1_ta);
 
-
   auto tn_dpin = setup_tuple_ref(dfg, tup_name);
+
+  // exclude invalid scalar->tuple cases
+  auto tn_ntype = tn_dpin.get_node().get_type().op;
+  bool is_scalar =  tn_ntype != TupAdd_Op && tn_ntype != TupRef_Op;
+  if (is_scalar && key_name != "0")
+		Pass::error("try to modify a non-exist tuple key field:{} in tuple:{}\n", key_name, tup_name);
+
+
   dfg->add_edge(tn_dpin, tn_spin);
+
 
   Node_pin kn_dpin;
   if (is_const(key_name)) { // it is a key_pos, not a key_name
     auto kp_dpin = dfg->create_node_const(Lconst(key_name)).setup_driver_pin();
     dfg->add_edge(kp_dpin, kp_spin);
   } else if (key_name.substr(0,4) != "null") {// it is a pure key_name
-    fmt::print("key_name:{}\n", key_name);
     kn_dpin = setup_key_dpin(dfg, key_name);
     dfg->add_edge(kn_dpin, kn_spin);
   }

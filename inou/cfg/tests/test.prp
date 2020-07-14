@@ -1,9 +1,7 @@
-// foo.__wire = true
-// %out = foo.a 
-// if ($en) {
-//   foo.a = 3
-// }
+foo.__wire = true
+%out = foo.a 
+if ($en) {
+  foo.a = 3
+}
 
-a.foo = 3
-%out = a.foo
 
