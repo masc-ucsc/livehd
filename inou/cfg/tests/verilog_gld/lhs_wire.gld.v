@@ -4,6 +4,6 @@ module lhs_wire (
 );
 
 assign out  = 2'd3;
-assign out2 = 2'd2;
+assign out2 = 2'd3;
 
 endmodule 
