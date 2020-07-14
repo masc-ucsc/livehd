@@ -533,9 +533,7 @@ void Inou_lnast_dfg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnid
   if (is_scalar && key_name != "0")
 		Pass::error("try to modify a non-exist tuple key field:{} in tuple:{}\n", key_name, tup_name);
 
-
   dfg->add_edge(tn_dpin, tn_spin);
-
 
   Node_pin kn_dpin;
   if (is_const(key_name)) { // it is a key_pos, not a key_name
@@ -766,6 +764,12 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
       ; //the subs == 0 and this must be in lhs case, handle later in this function
     }
   }
+
+  const auto it_wire = wire2node.find(vname);
+  if (it_wire != wire2node.end()) {
+    return it_wire->second.get_driver_pin(0);
+  }
+
 
 
   const auto it = name2dpin.find(name);
