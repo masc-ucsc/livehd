@@ -494,7 +494,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
           } else {
             a_result = cell_output_map[node.get_driver_pin().get_compact()];
           }
-          module->addAdd(next_id(g), addu_result, adds_result, false, a_result);
+          module->addAdd(next_id(g), addu_result, adds_result, a_result, false);
         } else if (addu_result != nullptr) {
           a_result = addu_result;
         } else if (adds_result != nullptr) {
@@ -504,7 +504,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         RTLIL::Wire *s_result = nullptr;
         if (subu_result != nullptr && subs_result != nullptr) {
           s_result = module->addWire(next_id(g), size);
-          module->addAdd(next_id(g), subu_result, subs_result, false, s_result);
+          module->addAdd(next_id(g), subu_result, subs_result, s_result, false);
         } else if (subu_result != nullptr) {
           s_result = subu_result;
         } else if (subs_result != nullptr) {
