@@ -846,12 +846,13 @@ void Inou_lnast_dfg::process_ast_attr_set_op (LGraph *dfg, const Lnast_nid &lnid
   auto vname        = lnast->get_vname(c0_aset);  // no-ssa name
 
   if (attr_vname == "__wire") {
-    auto or_node = dfg->create_node(Or_Op); 
+    /* auto or_node = dfg->create_node(Or_Op); */ 
+    auto ta_node = dfg->create_node(TupAdd_Op); 
 
-    name2dpin[c0_aset_name] = or_node.setup_driver_pin(0);
-    or_node.get_driver_pin(0).set_name(c0_aset_name);
+    name2dpin[c0_aset_name] = ta_node.setup_driver_pin(0);
+    ta_node.get_driver_pin(0).set_name(c0_aset_name);
     setup_dpin_ssa(name2dpin[c0_aset_name], vname, lnast->get_subs(c0_aset));
-    wire2node[vname] = or_node;
+    wire2node[vname] = ta_node;
     return;
   }
 
