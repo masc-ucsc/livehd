@@ -585,7 +585,7 @@ bool Pass_cprop::process_tuple_get(Node &node) {
 		else
 			key = key_name;
 
-		Pass::error("there is no tuple in {}, so no valid field {}\n", tup_name, key);
+		Pass::error("there is no tuple of {}, so no valid field {}\n", tup_name, key);
 		return false;
 	}
 
@@ -671,15 +671,18 @@ void Pass_cprop::process_tuple_add(Node &node) {
   }
 
 	auto [key_name, key_pos] = get_tuple_name_key(node);
+  
+	/* I(node.has_sink_pin_connected(3)); */
+  if (node.has_sink_pin_connected(3)) {
+	  auto val_dpin = node.get_sink_pin(3).get_driver_pin();
 
-	I(node.has_sink_pin_connected(3));
-	auto val_dpin = node.get_sink_pin(3).get_driver_pin();
+    merge_to_tuple(ctup, node, parent_node, parent_dpin, key_pos, key_name, val_dpin);
 
-  merge_to_tuple(ctup, node, parent_node, parent_dpin, key_pos, key_name, val_dpin);
+    fmt::print("TupAdd node:{} pos:{} key:{} val:{}\n", node.debug_name(), key_pos, key_name, val_dpin.debug_name());
+  }
 
-  fmt::print("TupAdd node:{} pos:{} key:{} val:{}\n", node.debug_name(), key_pos, key_name, val_dpin.debug_name());
-
-  if (parent_could_be_deleted) parent_node.del_node();
+  if (parent_could_be_deleted) 
+    parent_node.del_node();
 }
 
 void Pass_cprop::trans(LGraph *g) {
