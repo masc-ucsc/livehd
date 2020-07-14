@@ -417,6 +417,10 @@ Node_pin_iterator Node::out_connected_pins() const { return current_g->out_conne
 Node_pin_iterator Node::inp_setup_pins() const { return current_g->inp_setup_pins(*this); }
 Node_pin_iterator Node::out_setup_pins() const { return current_g->out_setup_pins(*this); }
 
+Node_pin_iterator Node::inp_drivers(const absl::flat_hash_set<Node::Compact> &exclude) const {
+  return current_g->inp_drivers(*this, exclude);
+}
+
 void Node::del_node() {
   current_g->del_node(*this);
   nid = 0; // invalidate node after delete

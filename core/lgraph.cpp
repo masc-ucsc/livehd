@@ -400,6 +400,46 @@ bool LGraph::has_edge(const Node_pin &driver, const Node_pin &sink) const {
   return false;
 }
 
+Node_pin_iterator LGraph::inp_drivers(const Node &node, const absl::flat_hash_set<Node::Compact> &exclude) const {
+
+  I(node.get_class_lgraph() == this);
+  Node_pin_iterator xiter;
+
+  Index_ID idx2 = node.get_nid();
+  I(node_internal[node.get_nid()].is_master_root());
+
+  while (true) {
+    auto            n = node_internal[idx2].get_num_local_inputs();
+
+    if (n) {
+      uint8_t         i;
+      const Edge_raw *redge;
+
+      for (i = 0, redge = node_internal[idx2].get_input_begin(); i < n; i++, redge += redge->next_node_inc()) {
+        I(redge->get_self_idx() == idx2);
+        I(redge->is_input());
+        auto driver_pin_idx = redge->get_idx();
+        auto driver_pin_pid = redge->get_inp_pid();
+        auto driver_master_nid = node_internal[driver_pin_idx].get_nid();
+        I(node_internal[driver_master_nid].is_master_root());
+
+        if (exclude.count(Node::Compact(node.get_hidx(), driver_master_nid)))
+          continue;
+
+        xiter.emplace_back(Node_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx(), driver_pin_idx, driver_pin_pid, false));
+        I(xiter.back() == redge->get_out_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx()));
+      }
+    }
+
+    if (node_internal[idx2].is_last_state()) break;
+    Index_ID tmp = node_internal[idx2].get_next();
+    I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
+    idx2 = tmp;
+  }
+
+  return xiter;
+}
+
 XEdge_iterator LGraph::out_edges(const Node &node) const {
   I(node.get_class_lgraph() == this);
   XEdge_iterator xiter;
@@ -435,6 +475,7 @@ XEdge_iterator LGraph::out_edges(const Node &node) const {
 
   return xiter;
 }
+
 
 XEdge_iterator LGraph::inp_edges(const Node &node) const {
   I(node.get_class_lgraph() == this);
