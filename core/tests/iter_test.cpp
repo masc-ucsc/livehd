@@ -57,7 +57,7 @@ void do_fwd_traversal(LGraph *lg) {
 
   for (auto node : lg->forward(true)) {
     I(!node.is_graph_io());
-    fmt::print("visiting {}\n", node.debug_name());
+    // fmt::print("visiting {}\n", node.debug_name());
     I(test_order.find(node.get_compact()) == test_order.end());
     test_order[node.get_compact()] = test_order_sequence++;
   }
@@ -137,6 +137,11 @@ void generate_graphs(int n) {
             continue;
           if (spin.is_graph_input())
             continue;
+
+          bool allow_comb_looop = false;
+          if (allow_comb_looop) {
+            break;
+          }
 
           if (i&1) {
             if (spin.get_node().get_compact().get_nid() > dpin.get_node().get_compact().get_nid())
