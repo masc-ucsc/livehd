@@ -86,6 +86,7 @@ bool Semantic_check::in_inefficient_LNAST(std::string_view node_name) {
   return false;
 }
 
+#if 0
 bool Semantic_check::in_output_vars(std::string_view node_name) {
   for (auto name : output_vars) {
     if (name == node_name) {
@@ -94,6 +95,7 @@ bool Semantic_check::in_output_vars(std::string_view node_name) {
   }
   return false;
 }
+#endif
 
 void Semantic_check::add_to_write_list(Lnast* lnast, std::string_view node_name, std::string_view stmt_name) {
   if (!in_write_list(node_name, stmt_name)) {
@@ -608,9 +610,11 @@ void Semantic_check::check_func_def(Lnast *lnast, const Lnast_nid &lnidx_opr, st
       add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
     } else if (ntype_child.is_ref()) {
       std::string_view ref_name = lnast->get_name(lnidx_opr_child);
+#if 0
       if (ref_name[0] == '%') {
         output_vars.push_back(ref_name);
       }
+#endif
       add_to_read_list(ref_name, stmt_name);
       num_of_refs += 1;
     } else {

@@ -26,7 +26,7 @@ protected:
   bool in_assign_lhs_list(std::string_view node_name);
   bool in_assign_rhs_list(std::string_view node_name);
   bool in_inefficient_LNAST(std::string_view node_name);
-  bool in_output_vars(std::string_view node_name);
+  //bool in_output_vars(std::string_view node_name);
 
   void add_to_write_list(Lnast* lnast, std::string_view node_name, std::string_view stmt_name);
   void add_to_read_list(std::string_view node_name, std::string_view stmt_name);
