@@ -1,0 +1,19 @@
+basic test tree hierarchy:
+
+           root------------------\------\
+           /  \                  |      |
+       mid1----mid2_______       |      |
+       /  \     /   \     \     mid3   mid4
+     lf1  lf2  lf3  lf4   lf5    |      |
+                                lf6    lf7
+
+test tree connection diagram:
+
+        900           10             5
+mid1----------mid2----------mid4----------mid3
+
+        30
+leaf3---------leaf5
+
+        15             25
+leaf1---------leaf2---------leaf7
