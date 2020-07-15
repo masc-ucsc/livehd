@@ -1,13 +1,15 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 //
-#include "inou_firrtl.hpp"
 
 #include <fstream>
-#include <google/protobuf/util/time_util.h>
 #include <iostream>
-#include <stdlib.h>
+
+#include "google/protobuf/util/time_util.h"
 
 #include "firrtl.pb.h"
+
+#include "lbench.hpp"
+#include "inou_firrtl.hpp"
 
 using namespace std;
 
@@ -20,6 +22,8 @@ using google::protobuf::util::TimeUtil;
  * github.com/freechipsproject/firrtl/blob/master/src/main/proto/firrtl.proto */
 
 void Inou_firrtl::toLNAST(Eprp_var &var) {
+  Lbench b("inou.firrtl.tolnast");
+
   Inou_firrtl p(var);
 
   if(var.has_label("files")) {
@@ -1632,9 +1636,11 @@ void Inou_firrtl::CreateModToIOMap(const firrtl::FirrtlPB_Circuit& circuit) {
     }
   }
 
+#ifndef NDEBUG
   for (auto map_elem : mod_to_io_map) {
     //fmt::print("Module: {}, io:{}, dir:{}\n", map_elem.first.first, map_elem.first.second, map_elem.second);
   }
+#endif
 }
 
 void Inou_firrtl::AddPortToMap(const std::string mod_id, const firrtl::FirrtlPB_Type& type, uint8_t dir, std::string port_id) {

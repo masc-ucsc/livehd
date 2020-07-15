@@ -442,8 +442,7 @@ void Pass_bitwidth::process_attr_set_dp_assign(Node &node) {
     return;
   }
 
-  fmt::print("attr_set_dp_assign name:{} variable_bits:{} bw_value:{} node:{}\n", dpin_variable.debug_name(), bw_variable.get_bits(), bw_value.get_bits(),
-             node.debug_name());
+  // fmt::print("attr_set_dp_assign name:{} variable_bits:{} bw_value:{} node:{}\n", dpin_variable.debug_name(), bw_variable.get_bits(), bw_value.get_bits(), node.debug_name());
 
   if (bw_value.get_bits() == 0 && bw_variable.get_bits() == 0) { // Can not solve now
     if (dpin_output.has_name())
@@ -531,7 +530,7 @@ void Pass_bitwidth::process_attr_set_new_attr(Node &node) {
     }
   }
 
-  fmt::print("attr_set_new name:{} key:{} bw_bits:{} node:{}\n", dpin_name, key, bw.get_bits(), node.debug_name());
+  //fmt::print("attr_set_new name:{} key:{} bw_bits:{} node:{}\n", dpin_name, key, bw.get_bits(), node.debug_name());
 
   if (attr == Attr::Set_bits) {
     I(dpin_val.get_node().is_type_const());

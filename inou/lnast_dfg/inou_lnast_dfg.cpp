@@ -711,7 +711,9 @@ Node_pin Inou_lnast_dfg::setup_node_assign_and_lhs(LGraph *dfg, const Lnast_nid 
   auto assign_node =  dfg->create_node(Or_Op);
 
   bool is_new_var_chain = check_new_var_chain(lnidx_opr);
+#ifndef NDEBUG
   fmt::print("is_new_var_chain:{}\n", is_new_var_chain);
+#endif
 
   if (!is_new_var_chain) {
     name2dpin[lhs_name] = assign_node.setup_driver_pin(0); //or as assign
@@ -864,7 +866,9 @@ void Inou_lnast_dfg::process_ast_attr_set_op (LGraph *dfg, const Lnast_nid &lnid
 
   auto aset_ancestor_subs  = lnast->get_data(c0_aset).subs - 1;
   auto aset_ancestor_name = std::string(vname) + "_" + std::to_string(aset_ancestor_subs);
+#ifndef NDEBUG
   fmt::print("aset ancestor name:{}\n", aset_ancestor_name);
+#endif
 
   bool is_reg_or_inp = is_register(c0_aset_name) || is_input(c0_aset_name);
   Node_pin vn_dpin;
