@@ -565,13 +565,19 @@ Node_pin Inou_lnast_dfg::setup_tuple_ref(LGraph *dfg, std::string_view ref_name)
 
 
 Node_pin Inou_lnast_dfg::setup_key_dpin(LGraph *dfg, std::string_view key_name) {
-  if (name2dpin.find(key_name) == name2dpin.end()) {
-    auto dpin = dfg->create_node(TupKey_Op).setup_driver_pin();
-
-    dpin.set_name(key_name);
-    name2dpin[key_name] = dpin;
+  auto it = name2dpin.find(key_name);
+  if (it != name2dpin.end()) {
+    I(!it->second.is_invalid());
+    return it->second;
   }
-  return name2dpin[key_name];
+
+  auto dpin = dfg->create_node(TupKey_Op).setup_driver_pin();
+  dpin.set_name(key_name);
+  name2dpin[key_name] = dpin;
+
+  I(!dpin.is_invalid());
+
+  return dpin;
 }
 
 bool Inou_lnast_dfg::check_new_var_chain(const Lnast_nid &lnidx_opr) {
