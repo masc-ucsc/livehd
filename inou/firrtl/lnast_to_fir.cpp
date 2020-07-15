@@ -44,6 +44,69 @@ void Inou_firrtl::do_tofirrtl(std::shared_ptr<Lnast> ln) {//, firrtl::FirrtlPB_C
   //google::protobuf::ShutDownProtobufLibrary();
 }
 
+void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::FirrtlPB_Statement_When *when, uint8_t pos_to_add_to) {
+  const auto ntype = ln.get_data(lnidx).type;
+  // FIXME->sh: how to use switch to gain performance?
+  if (ntype.is_assign()) {
+    auto fstmt = pos_to_add_to == 0 ? when->add_consequent() : when->add_otherwise();
+    process_ln_assign_op(ln, lnidx, fstmt);
+  } else if (ntype.is_nary_op()) {
+    auto fstmt = pos_to_add_to == 0 ? when->add_consequent() : when->add_otherwise();
+    process_ln_nary_op(ln, lnidx, fstmt);
+  } else if (ntype.is_not()) {
+    auto fstmt = pos_to_add_to == 0 ? when->add_consequent() : when->add_otherwise();
+    process_ln_not_op(ln, lnidx, fstmt);
+  /*} else if (ntype.is_tuple_add()) {
+    process_ast_tuple_add_op(dfg, lnidx);
+  } else if (ntype.is_tuple_get()) {
+    process_ast_tuple_get_op(dfg, lnidx);
+  } else if (ntype.is_tuple_phi_add()) {
+    process_ast_tuple_phi_add_op(dfg, lnidx);
+  } else if (ntype.is_dot()) {
+    I(false); // should has been converted to tuple chain 
+  } else if (ntype.is_select()) {
+    I(false); // should has been converted to tuple chain
+  } else if (ntype.is_logical_op()) {
+    process_ast_logical_op(dfg, lnidx);
+  } else if (ntype.is_as()) {
+    process_ast_as_op(dfg, lnidx);
+  } else if (ntype.is_label()) {
+    process_ast_label_op(dfg, lnidx);
+  } else if (ntype.is_dp_assign()) {
+    process_ast_dp_assign_op(dfg, lnidx);
+  } else if (ntype.is_tuple()) {
+    process_ast_tuple_struct(dfg, lnidx);
+  } else if (ntype.is_tuple_concat()) {
+    process_ast_concat_op(dfg, lnidx);*/
+  } else if (ntype.is_if()) {
+    add_cstmts(ln, lnidx, when, pos_to_add_to);
+    auto nested_when_stmt = process_ln_if_op(ln, lnidx);
+    auto fstmt = pos_to_add_to == 0 ? when->add_consequent() : when->add_otherwise();
+    fstmt->set_allocated_when(nested_when_stmt);
+  }/* else if (ntype.is_uif()) {
+    process_ast_uif_op(dfg, lnidx);
+  } else if (ntype.is_func_call()) {
+    process_ast_func_call_op(dfg, lnidx);
+  } else if (ntype.is_func_def()) {
+    process_ast_func_def_op(dfg, lnidx);
+  } else if (ntype.is_for()) {
+    process_ast_for_op(dfg, lnidx);
+  } else if (ntype.is_while()) {
+    process_ast_while_op(dfg, lnidx);
+  } else if (ntype.is_invalid()) { // FIXME->sh: add ignore type in LNAST?
+    continue;
+  }*/ else if (ntype.is_const()) {
+    I(ln.get_name(lnidx) == "default_const");
+    return;
+  } else if (ntype.is_err_flag()) {
+    I(ln.get_name(lnidx) == "err_var_undefined");
+    return;
+  } else {
+    //I(false);
+    //return;
+  }
+}
+
 void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::FirrtlPB_Module_UserModule *umod) {
   const auto ntype = ln.get_data(lnidx).type;
   // FIXME->sh: how to use switch to gain performance?
@@ -79,8 +142,11 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
   } else if (ntype.is_tuple_concat()) {
     process_ast_concat_op(dfg, lnidx);*/
   } else if (ntype.is_if()) {
-    //process_ln_if_op(ln, lnidx);
-  /*} else if (ntype.is_uif()) {
+    add_cstmts(ln, lnidx, umod);
+    auto when_stmt = process_ln_if_op(ln, lnidx);
+    auto fstmt = umod->add_statement();
+    fstmt->set_allocated_when(when_stmt);
+  }/* else if (ntype.is_uif()) {
     process_ast_uif_op(dfg, lnidx);
   } else if (ntype.is_func_call()) {
     process_ast_func_call_op(dfg, lnidx);
@@ -91,8 +157,8 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
   } else if (ntype.is_while()) {
     process_ast_while_op(dfg, lnidx);
   } else if (ntype.is_invalid()) { // FIXME->sh: add ignore type in LNAST?
-    continue;*/
-  } else if (ntype.is_const()) {
+    continue;
+  }*/ else if (ntype.is_const()) {
     I(ln.get_name(lnidx) == "default_const");
     return;
   } else if (ntype.is_err_flag()) {
@@ -188,7 +254,6 @@ void Inou_firrtl::process_ln_not_op(Lnast &ln, const Lnast_nid &lnidx_not, firrt
 void Inou_firrtl::process_ln_nary_op(Lnast &ln, const Lnast_nid &lnidx_op, firrtl::FirrtlPB_Statement* fstmt) {
   bool first = true;
   bool first_arg = true;
-  bool hunterc_test = false;
   std::string lhs, rhs;
   uint8_t child_count = 0;
 
@@ -254,19 +319,62 @@ void Inou_firrtl::process_ln_nary_op(Lnast &ln, const Lnast_nid &lnidx_op, firrt
 
 }
 
-void Inou_firrtl::process_ln_if_op(Lnast &ln, const Lnast_nid &lnidx_if) {
-  /*for (const auto &if_child : ln.children(lnidx_if)) {
-    auto ntype = ln.get_type(if_child);
-    if (ntype.is_cstmts() || ntype.is_stmts()) {
-      //process_ln_stmts(ln, if_child);
-    } else if (ntype.is_cond()) {
-      continue;//???
-    } else if (ntype.is_phi()) {
-      process_ln_phi_op(ln, if_child);
-    } else {
-      I(false); //children of an if should only be cstmts/stmts/cond/phi nodes
+void Inou_firrtl::add_cstmts(Lnast &ln, const Lnast_nid &lnidx_if, firrtl::FirrtlPB_Module_UserModule *umod) {
+  for (const auto &if_child : ln.children(lnidx_if)) {
+    const auto ntype = ln.get_data(if_child).type;
+    if (ntype.is_cstmts()) {
+      process_ln_stmt(ln, if_child, umod);
     }
-  }*/
+  }
+}
+
+void Inou_firrtl::add_cstmts(Lnast &ln, const Lnast_nid &lnidx_if, firrtl::FirrtlPB_Statement_When *when, uint8_t pos_to_add_to) {
+  for (const auto &if_child : ln.children(lnidx_if)) {
+    const auto ntype = ln.get_data(if_child).type;
+    if (ntype.is_cstmts()) {
+      process_ln_stmt(ln, if_child, when, pos_to_add_to);
+    }
+  }
+}
+
+firrtl::FirrtlPB_Statement_When* Inou_firrtl::process_ln_if_op(Lnast &ln, const Lnast_nid &lnidx_if) {
+  auto when_highest = new firrtl::FirrtlPB_Statement_When();
+  auto when_lowest = when_highest;
+  uint8_t pos_to_add_to = 0; //0 indicates add to when_lowest's consequent, 1 means add to otherwise
+  for (const auto &if_child : ln.children(lnidx_if)) {
+    const auto ntype = ln.get_data(if_child).type;
+    if (ntype.is_stmts()) {
+      process_ln_stmt(ln, if_child, when_lowest, pos_to_add_to);
+      pos_to_add_to++; // Set to 1 (or 2 if last stmt)
+    } else if (ntype.is_cond()) {
+      // A new cond has been found, meaning we need to create another when
+      if (pos_to_add_to == 1) {
+        auto new_when = new firrtl::FirrtlPB_Statement_When();
+        auto new_stmt = when_lowest->add_otherwise();
+        new_stmt->set_allocated_when(new_when);
+        when_lowest = new_when;
+        pos_to_add_to = 0;
+      }
+      // Specify the 'predicate' (condition)
+      auto predicate = new firrtl::FirrtlPB_Expression();
+      if (isdigit(ln.get_name(if_child)[0])) {
+        create_integer_object(ln, if_child, predicate);
+      } else {
+        auto ref = new firrtl::FirrtlPB_Expression_Reference();
+        ref->set_id(get_firrtl_name_format(ln, if_child));
+        predicate->set_allocated_reference(ref);
+      }
+      when_lowest->set_allocated_predicate(predicate);
+    } else if (ntype.is_cstmts()) {
+      continue;
+    } else {
+      I(false); //FIXME->hunter: Should phi or anything else be acceptable here?
+    }
+  }
+
+  return when_highest;
+  //auto fstmt = umod->add_statement();
+  //fstmt->set_allocated_when(when_stmt);
 }
 
 void Inou_firrtl::process_ln_phi_op(Lnast &ln, const Lnast_nid &lnidx_phi) {

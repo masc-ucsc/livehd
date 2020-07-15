@@ -1068,7 +1068,7 @@ void Inou_firrtl::ListPortInfo(Lnast &lnast, const firrtl::FirrtlPB_Port& port, 
   std::vector<std::tuple<std::string, uint8_t, uint32_t>> port_list;//Terms are as follows: name, direction, # of bits.
   create_io_list(port.type(), port.direction(), port.id(), port_list);
 
-  fmt::print("Port_list:\n");
+  //fmt::print("Port_list:\n");
   for(auto val : port_list) {
     auto subfield_loc = std::get<0>(val).find(".");
     if(std::get<1>(val) == 1) { //PORT_DIRECTION_IN
@@ -1092,7 +1092,7 @@ void Inou_firrtl::ListPortInfo(Lnast &lnast, const firrtl::FirrtlPB_Port& port, 
     } else {
       I(false);//FIXME: I'm not sure yet how to deal with PORT_DIRECTION_UNKNOWN
     }
-    fmt::print("\tname:{} dir:{} bits:{}\n", std::get<0>(val), std::get<1>(val), std::get<2>(val));
+    //fmt::print("\tname:{} dir:{} bits:{}\n", std::get<0>(val), std::get<1>(val), std::get<2>(val));
   }
 }
 
@@ -1599,7 +1599,7 @@ void Inou_firrtl::ListUserModuleInfo(Eprp_var &var, const firrtl::FirrtlPB_Modul
     ListStatementInfo(*lnast, stmt, idx_stmts);
     //lnast->dump();
   }
-  lnast->dump();
+  //lnast->dump();
   var.add(std::move(lnast));
 }
 
@@ -1633,7 +1633,7 @@ void Inou_firrtl::CreateModToIOMap(const firrtl::FirrtlPB_Circuit& circuit) {
   }
 
   for (auto map_elem : mod_to_io_map) {
-    fmt::print("Module: {}, io:{}, dir:{}\n", map_elem.first.first, map_elem.first.second, map_elem.second);
+    //fmt::print("Module: {}, io:{}, dir:{}\n", map_elem.first.first, map_elem.first.second, map_elem.second);
   }
 }
 
