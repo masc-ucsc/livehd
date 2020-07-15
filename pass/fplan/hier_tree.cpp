@@ -76,7 +76,7 @@ std::pair<cost_matrix, cost_matrix> Hier_tree::halve_matrix(const cost_matrix& o
   mb.reserve(new_size);
   
   for (size_t i = 0; i < old_matrix.size(); i++) {
-    cost_matrix_row new_row = { old_matrix[i].node, std::vector<int>(new_size, 1), 0xCAFE, true };
+    cost_matrix_row new_row = { old_matrix[i].node, std::vector<int>(new_size, 0), 0xCAFE, true };
     if (old_matrix[i].set == 0) {
       new_row.set = which_set_a;
       which_set_a ^= 1;

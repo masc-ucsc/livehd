@@ -1,2 +1,6 @@
 notes.txt
 .vimrc
+fp
+tests/hier_test.json
+tests/hier_test_diagram.txt
+tests/fp.cpp
