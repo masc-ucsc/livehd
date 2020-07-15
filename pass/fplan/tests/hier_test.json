@@ -1,0 +1,135 @@
+{
+  "modules": [
+    {
+      "name": "leaf1",
+      "parent": "mid1",
+      "connections": [
+        {
+          "name": "leaf2",
+          "weight": 15
+        }
+      ],
+      "area": 0.32
+    },
+    {
+      "name": "leaf2",
+      "parent": "mid1",
+      "connections": [
+        {
+          "name": "leaf1",
+          "weight": 15
+        },
+        {
+          "name": "leaf7",
+          "weight": 25
+        }
+      ],
+      "area": 0.16
+    },
+    {
+      "name": "mid1",
+      "parent": "root",
+      "connections": [
+        {
+          "name": "mid2",
+          "weight": 900
+        }
+      ],
+      "area": 0.19
+    },
+    {
+      "name": "leaf3",
+      "parent": "mid2",
+      "connections": [
+        {
+          "name": "leaf5",
+          "weight": 30
+        }
+      ],
+      "area": 0.21
+    },
+    {
+      "name": "leaf4",
+      "parent": "mid2",
+      "connections": [],
+      "area": 0.42
+    },
+    {
+      "name": "leaf5",
+      "parent": "mid2",
+      "connections": [
+        {
+          "name": "leaf3",
+          "weight": 30
+        }
+      ],
+      "area": 0.38
+    },
+    {
+      "name": "mid2",
+      "parent": "root",
+      "connections": [
+        {
+          "name": "mid1",
+          "weight": 900
+        },
+        {
+          "name": "mid4",
+          "weight": 10
+        }
+      ],
+      "area": 0.23
+    },
+    {
+      "name": "mid3",
+      "parent": "root",
+      "connections": [
+        {
+          "name": "mid4",
+          "weight": 5
+        }
+      ],
+      "area": 0.05
+    },
+    {
+      "name": "leaf6",
+      "parent": "mid3",
+      "connections": [],
+      "area": 0.03
+    },
+    {
+      "name": "root",
+      "connections": [],
+      "area": 0.88
+    },
+    {
+      "name": "mid4",
+      "parent": "root",
+      "connections": [
+        {
+          "name": "mid3",
+          "weight": 5
+        },
+        {
+          "name": "mid2",
+          "weight": 10
+        }
+      ],
+      "area": 0.23
+    },
+    {
+      "name": "leaf7",
+      "parent": "mid4",
+      "connections": [
+        {
+          "name": "leaf2",
+          "weight": 25
+        }
+      ],
+      "area": 0.11
+    }
+  ],
+  "area": 4.0,
+  "aspect_ratio": 1.5
+}
+
