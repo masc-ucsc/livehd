@@ -62,14 +62,14 @@ std::string_view Inou_firrtl::get_new_seq_name(Lnast& lnast) {
   return seq_name;
 }
 
-std::string Inou_firrtl::get_full_name(const std::string term, const bool is_rhs) {
-  if(std::find(input_names.begin(), input_names.end(), term) != input_names.end()) {
+std::string Inou_firrtl::get_full_name(const std::string &term, const bool is_rhs) {
+  if(input_names.count(term)) {
     //string matching "term" was found to be an input to the module
     I(is_rhs);
     return absl::StrCat("$", term);
-  } else if(std::find(output_names.begin(), output_names.end(), term) != output_names.end()) {
+  } else if(output_names.count(term)) {
     return absl::StrCat("%", term);
-  } else if(std::find(register_names.begin(), register_names.end(), term) != register_names.end()) {
+  } else if(register_names.count(term)) {
     if (is_rhs) {
       auto q_pin_str_version = term;
       replace(q_pin_str_version.begin(), q_pin_str_version.end(), '.', '_');
@@ -92,7 +92,9 @@ std::string Inou_firrtl::get_full_name(const std::string term, const bool is_rhs
 
 //If the bitwidth is specified, in LNAST we have to create a new variable which represents
 //  the number of bits that a variable will have.
-void Inou_firrtl::create_bitwidth_dot_node(Lnast& lnast, uint32_t bitwidth, Lnast_nid& parent_node, std::string port_id) {
+void Inou_firrtl::create_bitwidth_dot_node(Lnast& lnast, uint32_t bitwidth, Lnast_nid& parent_node, const std::string &_port_id) {
+	std::string port_id{_port_id}; // FIXME: Instead of erase, use a string_view and change lenght (much faster, not need to do mem)
+
   if (bitwidth <= 0) {
     /* No need to make a bitwidth node, 0 means implicit bitwidth.
      * If -1, then that's how I specify that the "port_id" is not an
@@ -187,7 +189,7 @@ uint32_t Inou_firrtl::get_bit_count(const firrtl::FirrtlPB_Type type) {
   return -1;
 }
 
-void Inou_firrtl::init_wire_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type, const std::string id, Lnast_nid& parent_node) {//const firrtl::FirrtlPB_Statement_Wire& expr, Lnast_nid& parent_node) {
+void Inou_firrtl::init_wire_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type, const std::string &id, Lnast_nid& parent_node) {//const firrtl::FirrtlPB_Statement_Wire& expr, Lnast_nid& parent_node) {
   switch (type.type_case()) {
     case 5: { //Bundle Type
       for (int i = 0; i < type.bundle_type().field_size(); i++) {
@@ -213,7 +215,7 @@ void Inou_firrtl::init_wire_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type
 /* When creating a register, we have to set the register's
  * clock, reset, and init values using "dot" nodes in the LNAST.
  * These functions create all of those when a reg is first declared. */
-void Inou_firrtl::init_reg_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type, std::string id, const std::string_view clock, const std::string_view reset, const std::string_view init, Lnast_nid& parent_node) {
+void Inou_firrtl::init_reg_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type, const std::string &id, const std::string_view clock, const std::string_view reset, const std::string_view init, Lnast_nid& parent_node) {
   //init_wire_dots(lnast, expr.type(), absl::StrCat("#", expr.id()), parent_node);
   switch (type.type_case()) {
     case 5: { //Bundle Type
@@ -240,10 +242,12 @@ void Inou_firrtl::init_reg_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type,
 }
 
 //FIXME: Eventually add in other "dot" nodes when supported.
-void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, std::string id, const std::string_view clock, const std::string_view reset, const std::string_view init, uint32_t bitwidth, Lnast_nid& parent_node) {
+void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string &_id, const std::string_view clock, const std::string_view reset, const std::string_view init, uint32_t bitwidth, Lnast_nid& parent_node) {
+
+	std::string id{_id};  // FIXME: isntead pass string_view, change lenght/start no need to realloc (much faster) Code can be shared with port_id
 
   //Add register's name to the global list.
-  register_names.push_back(id.substr(1,id.length()-1)); //Use substr to remove "#"
+  register_names.insert(id.substr(1,id.length()-1)); //Use substr to remove "#"
   fmt::print("put into register_names: {}\n", id.substr(1,id.length()-1));
 
   // Save 'id' for later use with qpin.
@@ -379,7 +383,7 @@ void Inou_firrtl::create_module_inst(Lnast& lnast, const firrtl::FirrtlPB_Statem
 /* No mux node type exists in LNAST. To support FIRRTL muxes, we instead
  * map a mux to an if-else statement whose condition is the same condition
  * as the first argument (the condition) of the mux. */
-void Inou_firrtl::HandleMuxAssign(Lnast& lnast, const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, const std::string lhs) {
+void Inou_firrtl::HandleMuxAssign(Lnast& lnast, const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, const std::string &lhs) {
   I(lnast.get_data(parent_node).type.is_stmts() || lnast.get_data(parent_node).type.is_cstmts());
 
   auto idx_mux_if    = lnast.add_child(parent_node, Lnast_node::create_if("mux"));
@@ -397,7 +401,7 @@ void Inou_firrtl::HandleMuxAssign(Lnast& lnast, const firrtl::FirrtlPB_Expressio
 /* ValidIfs get detected as the RHS of an assign statement and we can't have a child of
  * an assign be an if-typed node. Thus, we have to detect ahead of time if it is a validIf
  * if we're doing an assign. If that is the case, do this instead of using ListExprType().*/
-void Inou_firrtl::HandleValidIfAssign(Lnast& lnast, const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, const std::string lhs) {
+void Inou_firrtl::HandleValidIfAssign(Lnast& lnast, const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, const std::string &lhs) {
   I(lnast.get_data(parent_node).type.is_stmts() || lnast.get_data(parent_node).type.is_cstmts());
 
   auto idx_v_if      = lnast.add_child(parent_node, Lnast_node::create_if("validIf"));
@@ -424,7 +428,7 @@ void Inou_firrtl::HandleValidIfAssign(Lnast& lnast, const firrtl::FirrtlPB_Expre
 /* We have to handle NEQ operations different than any other primitive op.
  * This is because NEQ has to be broken down into two sub-operations:
  * checking equivalence and then performing the not. */
-void Inou_firrtl::HandleNEQOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs) {
+void Inou_firrtl::HandleNEQOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string &lhs) {
   /* x = neq(e1, e2) should take graph form:
    *     equal        ~
    *    /  |  \     /   \
@@ -448,7 +452,7 @@ void Inou_firrtl::HandleNEQOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_Pr
 /* Unary operations are handled in a way where (currently) there is no LNAST
  * node type that supports unary ops. Instead, we would want to have an assign
  * node and have the "rhs" child of the assign node be "[op]temp". */
-void Inou_firrtl::HandleUnaryOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs) {
+void Inou_firrtl::HandleUnaryOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string &lhs) {
   //FIXME: May have to change later to accomodate binary reduction op types.
   /* x = not(e1) should take graph form: (xor_/and_/or_reduce all look same just different op)
    *     ~
@@ -463,7 +467,7 @@ void Inou_firrtl::HandleUnaryOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_
   AttachExprStrToNode(lnast, e1_str, idx_not);
 }
 
-void Inou_firrtl::HandleAndReducOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs) {
+void Inou_firrtl::HandleAndReducOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string &lhs) {
   /* x = .andR(e1) is the same as e1 == -1
    *   same
    *  /  |  \
@@ -478,7 +482,7 @@ void Inou_firrtl::HandleAndReducOp(Lnast& lnast, const firrtl::FirrtlPB_Expressi
   lnast.add_child(idx_eq, Lnast_node::create_const("-1"));
 }
 
-void Inou_firrtl::HandleOrReducOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs) {
+void Inou_firrtl::HandleOrReducOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string &lhs) {
   /* x = .orR(e1) is the same as e1 != 0
    *     same        ~
    *    /  |  \     / \
@@ -499,7 +503,7 @@ void Inou_firrtl::HandleOrReducOp(Lnast& lnast, const firrtl::FirrtlPB_Expressio
   lnast.add_child(idx_not, Lnast_node::create_ref(temp_var_name));
 }
 
-void Inou_firrtl::HandleXorReducOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs) {
+void Inou_firrtl::HandleXorReducOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string &lhs) {
   /* x = .xorR(e1)
    *  parity_op
    *  / \
@@ -514,7 +518,7 @@ void Inou_firrtl::HandleXorReducOp(Lnast& lnast, const firrtl::FirrtlPB_Expressi
   AttachExprStrToNode(lnast, e1_str, idx_par);*/
 }
 
-void Inou_firrtl::HandleNegateOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs) {
+void Inou_firrtl::HandleNegateOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string &lhs) {
   /* x = negate(e1) should take graph form:
    *     minus
    *    /  |  \
@@ -533,7 +537,7 @@ void Inou_firrtl::HandleNegateOp(Lnast& lnast, const firrtl::FirrtlPB_Expression
  * and functions as you would expect in a language like Verilog.
  * We have to break this down into multiple statements so
  * LNAST can properly handle it (see diagram below).*/
-void Inou_firrtl::HandleExtractBitsOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs) {
+void Inou_firrtl::HandleExtractBitsOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string &lhs) {
   /* x = bits(e1)(numH, numL) should take graph form:
    *      range                 bit_sel               asg
    *    /   |   \             /   |   \             /     \
@@ -568,7 +572,7 @@ void Inou_firrtl::HandleExtractBitsOp(Lnast &lnast, const firrtl::FirrtlPB_Expre
 /* The Head primitive op returns the n most-significant bits
  * from an expression. So if I had an 8-bit variable z and I
  * called head(z)(3), what would return is (in Verilog) z[7:5]. */
-void Inou_firrtl::HandleHeadOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs) {
+void Inou_firrtl::HandleHeadOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string &lhs) {
   /* x = head(e1)(4) should take graph form: (like x = e1 >> (e1.__bits - 4))
    * Note: the parameter (4) has to be non-negative and l.e.q. the bitwidth of e1 in FIRRTL.
    *      dot               minus          shr
@@ -597,7 +601,7 @@ void Inou_firrtl::HandleHeadOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_P
   lnast.add_child(idx_shr, Lnast_node::create_ref(temp_var_name_f1));
 }
 
-void Inou_firrtl::HandleTailOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs) {
+void Inou_firrtl::HandleTailOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string &lhs) {
   /* x = tail(expr)(2) should take graph form:
    * NOTE: the shift right is only used to get correct # bits for :=
    *     shr         :=
@@ -626,7 +630,7 @@ void Inou_firrtl::HandleTailOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_P
   AttachExprStrToNode(lnast, expr_str, idx_dp_asg);
 }
 
-void Inou_firrtl::HandleConcatOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs) {
+void Inou_firrtl::HandleConcatOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string &lhs) {
   /* x = concat(e1, e2) is the same as Verilog's x = {e1, e2}
    * In LNAST this looks like x = (e1 << e2.__bits) | e2
    *      dot              shl           or
@@ -656,7 +660,7 @@ void Inou_firrtl::HandleConcatOp(Lnast &lnast, const firrtl::FirrtlPB_Expression
   AttachExprStrToNode(lnast, e2_str, idx_or);
 }
 
-void Inou_firrtl::HandlePadOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs) {
+void Inou_firrtl::HandlePadOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string &lhs) {
   //I(parent_node.is_stmts() | parent_node.is_cstmts());
 
   /* x = pad(e)(4) sets x = e and sets bw(x) = max(4, bw(e));
@@ -737,7 +741,7 @@ void Inou_firrtl::HandlePadOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_Pr
  * primitive operation which takes in two expression arguments
  * (dubbed as arguments in the FIRRTL spec, not parameters).
  * Note: NEQ is not handled here because no NEQ node exists in LNAST. */
-void Inou_firrtl::HandleTwoExprPrimOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs) {
+void Inou_firrtl::HandleTwoExprPrimOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string &lhs) {
   I(lnast.get_data(parent_node).type.is_stmts() || lnast.get_data(parent_node).type.is_cstmts());
   I(op.arg_size() == 2);
   auto e1_str = ReturnExprString(lnast, op.arg(0), parent_node, true);
@@ -802,7 +806,7 @@ void Inou_firrtl::HandleTwoExprPrimOp(Lnast& lnast, const firrtl::FirrtlPB_Expre
   AttachExprStrToNode(lnast, lnast.add_string(e2_str), idx_primop);
 }
 
-void Inou_firrtl::HandleStaticShiftOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs) {
+void Inou_firrtl::HandleStaticShiftOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string &lhs) {
   I(lnast.get_data(parent_node).type.is_stmts() || lnast.get_data(parent_node).type.is_cstmts());
   I(op.arg_size() == 1 || op.const__size() == 1);
   auto e1_str = ReturnExprString(lnast, op.arg(0), parent_node, true);
@@ -828,7 +832,7 @@ void Inou_firrtl::HandleStaticShiftOp(Lnast& lnast, const firrtl::FirrtlPB_Expre
 
 /* TODO:
  * May have to modify some of these? */
-void Inou_firrtl::HandleTypeConvOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string lhs) {
+void Inou_firrtl::HandleTypeConvOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string &lhs) {
   if (op.op() == firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_UINT ||
       op.op() == firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_UINT) {
     I(op.arg_size() == 1 && op.const__size() == 0);
@@ -997,7 +1001,7 @@ std::string Inou_firrtl::CreateNameStack(const firrtl::FirrtlPB_Expression_SubFi
  * This function returns a pair which holds the full name of a wire/output/input/register
  * and the bitwidth of it (if the bw is 0, that means the bitwidth will be inferred later.
  */
-void Inou_firrtl::create_io_list(const firrtl::FirrtlPB_Type& type, uint8_t dir, std::string port_id,
+void Inou_firrtl::create_io_list(const firrtl::FirrtlPB_Type& type, uint8_t dir, const std::string &port_id,
                                     std::vector<std::tuple<std::string, uint8_t, uint32_t>>& vec) {
   switch (type.type_case()) {
     case 2: { //UInt type
@@ -1076,7 +1080,7 @@ void Inou_firrtl::ListPortInfo(Lnast &lnast, const firrtl::FirrtlPB_Port& port, 
   for(auto val : port_list) {
     auto subfield_loc = std::get<0>(val).find(".");
     if(std::get<1>(val) == 1) { //PORT_DIRECTION_IN
-      input_names.push_back(std::get<0>(val));
+      input_names.insert(std::get<0>(val));
       if (std::get<2>(val) > 0) {
         if (subfield_loc != std::string::npos) {
           create_bitwidth_dot_node(lnast, std::get<2>(val), parent_node, absl::StrCat("$inp_", std::get<0>(val)));
@@ -1085,7 +1089,7 @@ void Inou_firrtl::ListPortInfo(Lnast &lnast, const firrtl::FirrtlPB_Port& port, 
         }
       }
     } else if (std::get<1>(val) == 2) { //PORT_DIRECTION_OUT
-      output_names.push_back(std::get<0>(val));
+      output_names.insert(std::get<0>(val));
       if(std::get<2>(val) > 0) {
         if (subfield_loc != std::string::npos) {
           create_bitwidth_dot_node(lnast, std::get<2>(val), parent_node, absl::StrCat("%out_", std::get<0>(val)));
@@ -1131,7 +1135,7 @@ void Inou_firrtl::ListPortInfo(Lnast &lnast, const firrtl::FirrtlPB_Port& port, 
  *   Set_Precision
  *   As_Fixed_Point
  */
-void Inou_firrtl::ListPrimOpInfo(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, std::string lhs) {
+void Inou_firrtl::ListPrimOpInfo(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string &lhs) {
   switch(op.op()) {
     case 1:  //Op_Add
     case 2:  //Op_Sub
@@ -1248,7 +1252,7 @@ void Inou_firrtl::ListPrimOpInfo(Lnast& lnast, const firrtl::FirrtlPB_Expression
  */
 
 /* */
-void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, std::string lhs_noprefixes) {
+void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, const std::string &lhs_noprefixes) {
   //Note: here, parent_node is the "stmt" node above where this expression will go.
   I(lnast.get_data(parent_node).type.is_stmts() || lnast.get_data(parent_node).type.is_cstmts());
   auto lhs = get_full_name(lhs_noprefixes, false);
@@ -1440,7 +1444,7 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
       break;
 
     } case 2: { //Register
-      register_names.push_back(stmt.register_().id());
+      register_names.insert(stmt.register_().id());
       auto clk_name  = lnast.add_string(ReturnExprString(lnast, stmt.register_().clock(), parent_node, true));
       auto rst_name  = lnast.add_string(ReturnExprString(lnast, stmt.register_().reset(), parent_node, true));
       auto init_name = lnast.add_string(ReturnExprString(lnast, stmt.register_().init(),  parent_node, true));
@@ -1643,7 +1647,7 @@ void Inou_firrtl::CreateModToIOMap(const firrtl::FirrtlPB_Circuit& circuit) {
 #endif
 }
 
-void Inou_firrtl::AddPortToMap(const std::string mod_id, const firrtl::FirrtlPB_Type& type, uint8_t dir, std::string port_id) {
+void Inou_firrtl::AddPortToMap(const std::string &mod_id, const firrtl::FirrtlPB_Type& type, uint8_t dir, const std::string &port_id) {
   switch (type.type_case()) {
     case 2: //UInt type
     case 3: //SInt type
