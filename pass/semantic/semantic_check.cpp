@@ -591,7 +591,6 @@ void Semantic_check::check_while_op(Lnast *lnast, const Lnast_nid &lnidx_opr, st
     error_print_lnast_by_type(lnast, lnast->get_data(lnidx_opr).type.to_s());
     Pass::error("While Operation Error: Missing Condition Node\n");
   } else if (!stmt) {
-    fmt::print("Should print out LNAST\n");
     error_print_lnast_by_type(lnast, lnast->get_data(lnidx_opr).type.to_s());
     Pass::error("While Operation Error: Missing Statement Node\n");
   }
