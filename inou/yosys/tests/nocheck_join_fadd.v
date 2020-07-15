@@ -1,4 +1,4 @@
-// no check: parameters do not work
+// no check: For some strange reason, yosys lgcheck fails with both but passes when one module at a time ??
 //==============================================================================
 //      File:           $URL$
 //      Version:        $Revision$
