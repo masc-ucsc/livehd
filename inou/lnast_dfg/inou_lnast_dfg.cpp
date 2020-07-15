@@ -555,27 +555,27 @@ void Inou_lnast_dfg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnid
 
 //either tuple root or tuple key(str) fit in this case
 Node_pin Inou_lnast_dfg::setup_tuple_ref(LGraph *dfg, std::string_view ref_name) {
-  if (name2dpin.find(ref_name) == name2dpin.end()) {
-    auto dpin = dfg->create_node(TupRef_Op).setup_driver_pin();
-    dpin.set_name(ref_name);
-    name2dpin[ref_name] = dpin;
+  auto it = name2dpin.find(ref_name);
+  if (it != name2dpin.end()) {
+    return it->second;
   }
-  return name2dpin[ref_name];
-}
 
+  auto dpin = dfg->create_node(TupRef_Op).setup_driver_pin();
+  dpin.set_name(ref_name);
+  name2dpin[ref_name] = dpin;
+
+  return dpin;
+}
 
 Node_pin Inou_lnast_dfg::setup_key_dpin(LGraph *dfg, std::string_view key_name) {
   auto it = name2dpin.find(key_name);
   if (it != name2dpin.end()) {
-    I(!it->second.is_invalid());
     return it->second;
   }
 
   auto dpin = dfg->create_node(TupKey_Op).setup_driver_pin();
   dpin.set_name(key_name);
   name2dpin[key_name] = dpin;
-
-  I(!dpin.is_invalid());
 
   return dpin;
 }
