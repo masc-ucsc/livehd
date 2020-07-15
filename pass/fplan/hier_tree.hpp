@@ -64,7 +64,11 @@ public:
 	Hier_tree& operator=(const Hier_tree& other) = delete;
   
   // moves defined since copies are deleted
-  Hier_tree(Hier_tree&& other) noexcept : root(other.root) { other.root.reset(); }
+  Hier_tree(Hier_tree&& other) noexcept : 
+    root(other.root), 
+    min_area(other.min_area),
+    num_components(other.num_components) { other.root.reset(); }
+
   Hier_tree& operator=(Hier_tree&& other) noexcept {
     std::swap(root, other.root);
     std::swap(min_area, other.min_area);

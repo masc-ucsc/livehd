@@ -8,8 +8,6 @@ cc_library(
     ),
     hdrs = glob(["*.hpp"]),
     includes = ["."],
-    linkopts = ["-lstdc++fs"],  # Needed for gcc 7-8
-    alwayslink=1,
     visibility = ["//visibility:public"],
     deps = [
          "//pass/common:pass",
