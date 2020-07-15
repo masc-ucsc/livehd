@@ -2,7 +2,7 @@
 
 #include "iassert.hpp"
 #include "json_inou.hpp"
-#include "tree.hpp"
+#include "hier_tree.hpp"
 
 // this is a mini-testbed, currently.
 

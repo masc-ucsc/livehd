@@ -13,7 +13,7 @@
 #include "rapidjson/document.h" // for json parsing
 #include "iassert.hpp"
 
-#include "tree.hpp"
+#include "hier_tree.hpp"
 
 class Json_inou_parser {
 public:
