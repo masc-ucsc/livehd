@@ -1,4 +1,4 @@
-#include "tree.hpp"
+#include "hier_tree.hpp"
 
 unsigned int Hier_tree::size(const std::shared_ptr<Hier_node> top) {
   if (top->size != 0) {
@@ -179,10 +179,12 @@ std::pair<std::vector<pnode>, std::vector<pnode>> Hier_tree::min_wire_cut(cost_m
       m[b_max_i].active = false;
 
       for (size_t i = 0; i < graph_size; i++) {
-        if (m[i].set == 0 && m[i].active) {
-          m[i].d_cost = m[i].d_cost + 2 * m[i].connect_cost[a_max_i] - 2 * m[i].connect_cost[b_max_i];
-        } else {
-          m[i].d_cost = m[i].d_cost + 2 * m[i].connect_cost[b_max_i] - 2 * m[i].connect_cost[a_max_i];
+        if (m[i].active) {
+          if (m[i].set == 0) {
+            m[i].d_cost = m[i].d_cost + 2 * m[i].connect_cost[a_max_i] - 2 * m[i].connect_cost[b_max_i];
+          } else {
+            m[i].d_cost = m[i].d_cost + 2 * m[i].connect_cost[b_max_i] - 2 * m[i].connect_cost[a_max_i];
+          }
         }
       }
     }
@@ -214,7 +216,7 @@ std::pair<std::vector<pnode>, std::vector<pnode>> Hier_tree::min_wire_cut(cost_m
 
     // if the maximum reduction has a higher external cost than internal cost, there's something we can do.
     if (best_decrease > 0) {
-      for (size_t i = 0; i <= decrease_index; i++) {
+      for (size_t i = 0; i < decrease_index; i++) {
         std::cout << "swapping " << m[av[i]].node->name << " with " << m[bv[i]].node->name << std::endl;
         std::swap(m[av[i]].set, m[bv[i]].set);
       }
