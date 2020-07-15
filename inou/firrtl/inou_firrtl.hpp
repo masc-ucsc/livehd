@@ -81,13 +81,17 @@ protected:
   static void toFIRRTL            (Eprp_var &var);
   void        do_tofirrtl         (std::shared_ptr<Lnast> ln);
   void        process_ln_stmt     (Lnast &ln, const Lnast_nid &lnidx_smts, firrtl::FirrtlPB_Module_UserModule* umod);
+  void        process_ln_stmt     (Lnast &ln, const Lnast_nid &lnidx_smts, firrtl::FirrtlPB_Statement_When* when, uint8_t pos_to_add_to);
+
   void        process_ln_assign_op(Lnast &ln, const Lnast_nid &lnidx_assign, firrtl::FirrtlPB_Statement* fstmt);
   void        process_ln_nary_op  (Lnast &ln, const Lnast_nid &lnidx_assign, firrtl::FirrtlPB_Statement* fstmt);
   void        process_ln_not_op   (Lnast &ln, const Lnast_nid &lnidx_op, firrtl::FirrtlPB_Statement* fstmt);
-  void        process_ln_if_op    (Lnast &ln, const Lnast_nid &lnidx_if);
   void        process_ln_phi_op   (Lnast &ln, const Lnast_nid &lnidx_phi);
+  firrtl::FirrtlPB_Statement_When* process_ln_if_op (Lnast &ln, const Lnast_nid &lnidx_if);
 
   uint8_t     process_op_children (Lnast &ln, const Lnast_nid &lnidx_if, const std::string firrtl_op);
+  void        add_cstmts          (Lnast &ln, const Lnast_nid &lnidx_if, firrtl::FirrtlPB_Module_UserModule *umod);
+  void        add_cstmts          (Lnast &ln, const Lnast_nid &lnidx_if, firrtl::FirrtlPB_Statement_When *when, uint8_t pos_to_add_to);
 
   // Helper Functions
   bool        is_inp                (const std::string_view str);
