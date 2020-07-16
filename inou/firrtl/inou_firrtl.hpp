@@ -81,7 +81,7 @@ protected:
 
   //----------- FOR toFIRRTL ----------
   static void toFIRRTL            (Eprp_var &var);
-  void        do_tofirrtl         (std::shared_ptr<Lnast> ln);
+  void        do_tofirrtl         (std::shared_ptr<Lnast> ln, firrtl::FirrtlPB_Circuit* circuit);
   void        process_ln_stmt     (Lnast &ln, const Lnast_nid &lnidx_smts, firrtl::FirrtlPB_Module_UserModule* umod);
   void        process_ln_stmt     (Lnast &ln, const Lnast_nid &lnidx_smts, firrtl::FirrtlPB_Statement_When* when, uint8_t pos_to_add_to);
 
@@ -104,11 +104,10 @@ protected:
                                      firrtl::FirrtlPB_Statement* fstmt);
   void        create_node_stmt      (Lnast &ln, const Lnast_nid &lhs, firrtl::FirrtlPB_Expression* rhs_expr,
                                      firrtl::FirrtlPB_Statement* fstmt);
-  void        create_integer_object (Lnast &ln, const Lnast_nid &lnidx_const, firrtl::FirrtlPB_Expression* rhs_expr);
   std::string get_firrtl_name_format(Lnast &ln, const Lnast_nid &lnidx);
   std::string strip_prefixes        (const std::string_view str);
-  std::string create_const_token    (const std::string_view str);
-  void        add_const_or_ref_to_primop (Lnast &ln, const Lnast_nid &lnidx, firrtl::FirrtlPB_Expression_PrimOp* prim_op);
+  void        add_refcon_as_expr    (Lnast &ln, const Lnast_nid &lnidx, firrtl::FirrtlPB_Expression* expr);
+  void        add_const_as_ilit       (Lnast &ln, const Lnast_nid &lnidx, firrtl::FirrtlPB_Expression_IntegerLiteral* ilit);
   firrtl::FirrtlPB_Expression_PrimOp_Op  get_firrtl_oper_code(const Lnast_ntype &op_type);
 
   // Finding Circuit Components

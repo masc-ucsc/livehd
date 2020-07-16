@@ -10,38 +10,39 @@
 
 void Inou_firrtl::toFIRRTL(Eprp_var &var) {
   Inou_firrtl p(var);
+
+  firrtl::FirrtlPB fir_design;
+  firrtl::FirrtlPB_Circuit *circuit = fir_design.add_circuit();
   for (const auto &lnast : var.lnasts) {
     //lnast->ssa_trans();//FIXME: Do I need to do SSA?
-
-    //firrtl::FirrtlPB_Circuit circuit;
-    p.do_tofirrtl(lnast);//, circuit);
+    p.do_tofirrtl(lnast, circuit);
   }
+
+  fir_design.PrintDebugString();
+  std::fstream output("Trivial_testout.pb", std::ios::out | std::ios::trunc | std::ios::binary);
+  if (!fir_design.SerializeToOstream(&output)) {
+    fmt::print("Failed to write firrtl design\n");
+  }
+  google::protobuf::ShutdownProtobufLibrary();
 }
 
-void Inou_firrtl::do_tofirrtl(std::shared_ptr<Lnast> ln) {//, firrtl::FirrtlPB_Circuit& circuit) {
+void Inou_firrtl::do_tofirrtl(std::shared_ptr<Lnast> ln, firrtl::FirrtlPB_Circuit* circuit) {
   const auto top   = ln->get_root();
   const auto stmts = ln->get_first_child(top);
-  firrtl::FirrtlPB fir_design;//firrtl::FirrtlPB()
-  firrtl::FirrtlPB_Circuit *circuit = fir_design.add_circuit();//new firrtl::FirrtlPB_Circuit();
+  const auto top_name = (std::string)ln->get_name(top);
   //FIXME: I need to add a "top" message to Circuit.
   auto top_msg = circuit->add_top();
-  top_msg->set_name("Trivial");//FIXME: Placeholder for now
+  top_msg->set_name(top_name);//FIXME: Placeholder for now, need to figure out which LNAST is "top"
 
   firrtl::FirrtlPB_Module *mod = circuit->add_module();
   firrtl::FirrtlPB_Module_UserModule *umod = new firrtl::FirrtlPB_Module_UserModule();
+  umod->set_id(top_name); //FIXME: Need to make sure top node has module name
   FindCircuitComps(*ln, umod);
 
   for (const auto &lnidx : ln->children(stmts)) {
     process_ln_stmt(*ln, lnidx, umod);
   }
   mod->set_allocated_user_module(umod);
-  fir_design.PrintDebugString();
-
-  std::fstream output("Trivial_testout.pb", std::ios::out | std::ios::trunc | std::ios::binary);
-  if (!fir_design.SerializeToOstream(&output)) {
-    fmt::print("Failed to write firrtl design\n");
-  }
-  //google::protobuf::ShutDownProtobufLibrary();
 }
 
 void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::FirrtlPB_Statement_When *when, uint8_t pos_to_add_to) {
@@ -180,18 +181,7 @@ void Inou_firrtl::process_ln_assign_op(Lnast &ln, const Lnast_nid &lnidx_assign,
 
   // Form expression that holds RHS contents.
   firrtl::FirrtlPB_Expression *rhs_expr = new firrtl::FirrtlPB_Expression();
-  if (ntype_c1.is_ref()) {
-    // RHS is a variable, so I need to make a Reference.
-    firrtl::FirrtlPB_Expression_Reference *rhs_ref = new firrtl::FirrtlPB_Expression_Reference();
-    rhs_ref->set_id(get_firrtl_name_format(ln, c1));
-    rhs_expr->set_allocated_reference(rhs_ref);
-  } else if (ntype_c1.is_const()) {
-    /* RHS is a number, so I need to make a UIntLiteral (which has the value
-     * stored in an IntegerLiteral and the bitwidth stored in a Width). */
-    create_integer_object(ln, c1, rhs_expr);
-  } else {
-      I(false); //FIXME: Should const and ref be only things allowed on RHS?
-  }
+  add_refcon_as_expr(ln, c1, rhs_expr);
 
   /* Now handle LHS. If LHS is an output or register then
    * the statement should be a Connect. If it isn't, then the
@@ -227,7 +217,7 @@ void Inou_firrtl::process_ln_not_op(Lnast &ln, const Lnast_nid &lnidx_not, firrt
   firrtl::FirrtlPB_Expression_PrimOp *rhs_prim_op = new firrtl::FirrtlPB_Expression_PrimOp();
   rhs_prim_op->set_op(firrtl::FirrtlPB_Expression_PrimOp_Op_OP_BIT_NOT);
 
-  add_const_or_ref_to_primop(ln, c1, rhs_prim_op);
+  add_refcon_as_expr(ln, c1, rhs_prim_op->add_arg());
   rhs_expr->set_allocated_prim_op(rhs_prim_op);
 
   /* Now handle LHS. If LHS is an output or register then
@@ -275,7 +265,7 @@ void Inou_firrtl::process_ln_nary_op(Lnast &ln, const Lnast_nid &lnidx_op, firrt
       lnidx_lhs = lnchild_idx;
     } else if (lnchild_idx == ln.get_last_child(lnidx_op)) {
       // If this is the last element, don't create another new operator.
-      add_const_or_ref_to_primop(ln, lnchild_idx, rhs_prim_op);
+      add_refcon_as_expr(ln, lnchild_idx, rhs_prim_op->add_arg());
     } else {
       // If this is not the last element, we'll need another operator to grab next element.
 
@@ -295,7 +285,7 @@ void Inou_firrtl::process_ln_nary_op(Lnast &ln, const Lnast_nid &lnidx_op, firrt
       rhs_expr->set_allocated_prim_op(rhs_prim_op);
 
       // Add current child node as member of the primitive op (rhs_prim_op)
-      add_const_or_ref_to_primop(ln, lnchild_idx, rhs_prim_op);
+      add_refcon_as_expr(ln, lnchild_idx, rhs_prim_op->add_arg());
     }
     child_count++;
   }
@@ -357,13 +347,7 @@ firrtl::FirrtlPB_Statement_When* Inou_firrtl::process_ln_if_op(Lnast &ln, const 
       }
       // Specify the 'predicate' (condition)
       auto predicate = new firrtl::FirrtlPB_Expression();
-      if (isdigit(ln.get_name(if_child)[0])) {
-        create_integer_object(ln, if_child, predicate);
-      } else {
-        auto ref = new firrtl::FirrtlPB_Expression_Reference();
-        ref->set_id(get_firrtl_name_format(ln, if_child));
-        predicate->set_allocated_reference(ref);
-      }
+      add_refcon_as_expr(ln, if_child, predicate);
       when_lowest->set_allocated_predicate(predicate);
     } else if (ntype.is_cstmts()) {
       continue;
@@ -373,39 +357,6 @@ firrtl::FirrtlPB_Statement_When* Inou_firrtl::process_ln_if_op(Lnast &ln, const 
   }
 
   return when_highest;
-  //auto fstmt = umod->add_statement();
-  //fstmt->set_allocated_when(when_stmt);
-}
-
-void Inou_firrtl::process_ln_phi_op(Lnast &ln, const Lnast_nid &lnidx_phi) {
-  bool first = true;
-  bool second = false;
-  bool third = false;
-  bool fourth = false;
-  std::string lhs, rhs;
-  for (const auto &lnchild_idx : ln.children(lnidx_phi)) {
-    if(first) { // lhs
-      first = false;
-      second = true;
-      lhs = get_firrtl_name_format(ln, lnchild_idx);
-    } else if (second) { // cond
-      second = false;
-      third = true;
-      lhs = absl::StrCat("mux(", get_firrtl_name_format(ln, lnchild_idx));
-    } else if (third) { // val - true
-      third = false;
-      fourth = true;
-      lhs = absl::StrCat(lhs, ", ", get_firrtl_name_format(ln, lnchild_idx));
-
-    } else if (fourth) { // val - false
-      fourth = false;
-      lhs = absl::StrCat(", ", get_firrtl_name_format(ln, lnchild_idx), ")");
-    } else {
-      I(false); //There should only be 3 input + 1 output.
-    }
-  }
-
-  fmt::print("{} = {}\n", lhs, rhs);
 }
 
 //----- Helper Functions -----
@@ -433,7 +384,8 @@ std::string Inou_firrtl::get_firrtl_name_format(Lnast &ln, const Lnast_nid &lnid
   if(ntype.is_ref() || ntype.is_cond()) {
     return strip_prefixes(str);
   } else if (ntype.is_const()) {
-    return create_const_token(str);
+    auto lconst_holder = Lconst(ln.get_name(lnidx));
+    return lconst_holder.to_firrtl();
   }
   fmt::print("{}\n", str);
   I(false); //When getting names, I would think we should only be checking those two node types.
@@ -451,26 +403,6 @@ std::string Inou_firrtl::strip_prefixes(const std::string_view str) {
   }
 
   return temp;
-}
-
-std::string Inou_firrtl::create_const_token(const std::string_view str) {
-  //FIXME?: I need to somehow get the number of bits (if taking min isn't good idea, though it might be).
-  //        Also, I don't handle everything as unsigned right now.
-  //Form should be like: 0d15 -> UInt(15) or UInt<#bits>(15)
-  //                     0h10 -> UInt("h10") or UInt<#bits>("h10")
-  std::string temp = (std::string)str;
-  if((temp.substr(0,2) == "0d")) {
-    //We need to drop the "0d" part of the string.
-    temp.replace(0, 2, "");
-    return absl::StrCat("UInt(", temp, ")");
-  } else if ((temp.substr(0,2) == "0h") || (temp.substr(0,2) == "0b") || (temp.substr(0,2) == "0o")) {
-    //We have to drop the 0 in front and then wrap the whole thing in quotes.
-    temp.replace(0, 1, "");
-    return absl::StrCat("UInt(\"", temp, "\")");
-  } else {
-    //If given just a number with no "0d" or the like preceding it, I'm assuming it's decimal.
-    return absl::StrCat("UInt(", temp, ")");
-  }
 }
 
 /* If the LHS of some sort of statement that does assigning
@@ -501,30 +433,6 @@ void Inou_firrtl::create_node_stmt(Lnast &ln, const Lnast_nid &lhs, firrtl::Firr
 
   // Have the generic statement of type "node".
   fstmt->set_allocated_node(node);
-}
-
-void Inou_firrtl::create_integer_object(Lnast &ln, const Lnast_nid &lnidx_const, firrtl::FirrtlPB_Expression* rhs_expr) {
-  firrtl::FirrtlPB_Expression_IntegerLiteral *ilit = new firrtl::FirrtlPB_Expression_IntegerLiteral();
-  auto lconst_holder = Lconst(ln.get_name(lnidx_const));
-  auto lconst_str = lconst_holder.to_pyrope();
-  ilit->set_value(lconst_str);
-
-  firrtl::FirrtlPB_Width *width = new firrtl::FirrtlPB_Width();
-  width->set_value(lconst_holder.get_bits());
-
-  if (lconst_holder.to_pyrope().find("s") != std::string::npos) {
-    firrtl::FirrtlPB_Expression_SIntLiteral *rhs_slit = new firrtl::FirrtlPB_Expression_SIntLiteral();
-    rhs_slit->set_allocated_value(ilit);
-    rhs_slit->set_allocated_width(width);
-
-    rhs_expr->set_allocated_sint_literal(rhs_slit);
-  } else {
-    firrtl::FirrtlPB_Expression_UIntLiteral *rhs_ulit = new firrtl::FirrtlPB_Expression_UIntLiteral();
-    rhs_ulit->set_allocated_value(ilit);
-    rhs_ulit->set_allocated_width(width);
-
-    rhs_expr->set_allocated_uint_literal(rhs_ulit);
-  }
 }
 
 firrtl::FirrtlPB_Expression_PrimOp_Op Inou_firrtl::get_firrtl_oper_code(const Lnast_ntype &ntype) {
@@ -560,21 +468,50 @@ firrtl::FirrtlPB_Expression_PrimOp_Op Inou_firrtl::get_firrtl_oper_code(const Ln
   }
 }
 
-void Inou_firrtl::add_const_or_ref_to_primop(Lnast &ln, const Lnast_nid &lnidx, firrtl::FirrtlPB_Expression_PrimOp* prim_op) {
+/* Provided some ref or const node and an expression pointer,
+ * this will form that ref/const in the expression pointer. */
+void Inou_firrtl::add_refcon_as_expr(Lnast &ln, const Lnast_nid &lnidx, firrtl::FirrtlPB_Expression* expr) {
   if (ln.get_data(lnidx).type.is_ref()) {
-    // Lnidx is a variable, so I need to make a Reference message.
-    firrtl::FirrtlPB_Expression *rhs_prim_expr = prim_op->add_arg();
+    // Lnidx is a variable, so I need to make a Reference argument.
+    auto str = get_firrtl_name_format(ln,lnidx);
     firrtl::FirrtlPB_Expression_Reference *rhs_ref = new firrtl::FirrtlPB_Expression_Reference();
-    rhs_ref->set_id(get_firrtl_name_format(ln, lnidx));
-    rhs_prim_expr->set_allocated_reference(rhs_ref);
+    rhs_ref->set_id(str);
+    expr->set_allocated_reference(rhs_ref);
+
   } else if (ln.get_data(lnidx).type.is_const()) {
-    // Lnidx is a number, so I need to make an IntegerLiteral message.
-    firrtl::FirrtlPB_Expression_IntegerLiteral *rhs_prim_ilit = prim_op->add_const_();
+    // Lnidx is a number, so I need to make a [U/S]IntLiteral argument.
     auto lconst_holder = Lconst(ln.get_name(lnidx));
-    auto lconst_str = lconst_holder.to_pyrope();
-    rhs_prim_ilit->set_value(lconst_str);
+    auto lconst_str = lconst_holder.to_firrtl();
+
+    firrtl::FirrtlPB_Expression_IntegerLiteral *num = new firrtl::FirrtlPB_Expression_IntegerLiteral();
+    num->set_value(lconst_str);
+    firrtl::FirrtlPB_Width *width = new firrtl::FirrtlPB_Width();
+    width->set_value(lconst_holder.get_bits());
+
+    if (lconst_holder.is_unsigned()) {
+      firrtl::FirrtlPB_Expression_UIntLiteral *ulit = new firrtl::FirrtlPB_Expression_UIntLiteral();
+      ulit->set_allocated_value(num);
+      ulit->set_allocated_width(width);
+      expr->set_allocated_uint_literal(ulit);
+    } else {
+      firrtl::FirrtlPB_Expression_SIntLiteral *slit = new firrtl::FirrtlPB_Expression_SIntLiteral();
+      slit->set_allocated_value(num);
+      slit->set_allocated_width(width);
+      expr->set_allocated_sint_literal(slit);
+    }
+
   } else {
-      I(false); //FIXME: Should const and ref be only things allowed on RHS?
+      I(false); //Should const and ref be only things allowed on RHS?
   }
 }
 
+/* Provided a const node and an IntegerLit pointer,
+ * this will form that const in the pointer. */
+void Inou_firrtl::add_const_as_ilit(Lnast &ln, const Lnast_nid &lnidx, firrtl::FirrtlPB_Expression_IntegerLiteral* ilit) {
+  I(ln.get_data(lnidx).type.is_const());
+
+  auto lconst_holder = Lconst(ln.get_name(lnidx));
+  auto lconst_str = lconst_holder.to_firrtl();
+
+  ilit->set_value(lconst_str);
+}
