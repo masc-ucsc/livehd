@@ -9,7 +9,7 @@ pts='scalar_tuple
      logic out_ssa if2 if ssa_rhs bits_rhs counter counter_nested_if
      '
 
-# pts='lhs_wire2 funcall lhs_wire'
+# pts='funcall lhs_wire2 lhs_wire'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -125,23 +125,12 @@ do
       fi
 
       ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-      # mv ${pt}.dot ${pt}.dce.dot
-      # echo ""
-      # echo ""
-      # echo ""
-      # echo "----------------------------------------------------"
-      # echo "Dead Code Elimination(LGraph)"
-      # echo "----------------------------------------------------"
-      # ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.dce"
-      # if [ $? -eq 0 ]; then
-      #   echo "Successfully perform dead code elimination: inou/cfg/tests/${pt}.prp"
-      # else
-      #   echo "ERROR: Pyrope compiler failed: dead code elimination, testcase: inou/cfg/tests/${pt}.prp"
-      #   exit 1
-      # fi
+    fi
+done #end of for
 
-      # ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
 
+for pt in $pts
+do
       if [[ ${pt} == *_err* ]]; then
         echo "----------------------------------------------------"
         echo "Pass! This is a Compile Error Test, No Need to Generate Verilog Code "
@@ -180,9 +169,7 @@ do
           exit 1
         fi
       fi
-    fi
-
-done #end of for
+done
 
 rm -f *.v
 rm -f lnast.dot.gld
