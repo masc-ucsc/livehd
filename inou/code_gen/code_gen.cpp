@@ -35,6 +35,8 @@ void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
       do_assign(curr_index);
     } else if (curr_node_data.type.is_or()) {
       do_op(curr_index);
+    } else if (curr_node_data.type.is_dot()) {
+      do_dot(curr_index);
     }
     curr_index = lnast->get_sibling_next(curr_index);
   }
@@ -91,6 +93,18 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
   key = op_str_vect.at(0);
   for (int i = 1; i < op_str_vect.size(); i++) {
     std::string_view ref = op_str_vect.at(i);
+    auto             map_it = ref_map.find(ref);
+    if (map_it != ref_map.end()) {
+      if (std::count(map_it->second.begin(), map_it->second.end(), ' ')) {
+        ref = absl::StrCat("(", map_it->second, ")");
+      } else {
+        ref = map_it->second;
+      }
+     // fmt::print("map_it find: {} | {}\n", map_it->first, ref);
+    } else if (is_number(ref)) {
+      ref = process_number(ref);
+    }
+    // check if a number
     absl::StrAppend(&val, ref);
     if ((i+1) != op_str_vect.size()) {
       absl::StrAppend(&val, " ", op_node_data.type.debug_name_pyrope(), " ");
@@ -100,10 +114,45 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
   if(is_temp_var(key)) {
     ref_map.insert(std::pair<std::string_view, std::string>(key, val));
   } else {
-    absl::StrAppend (&buffer_to_print, key, " ", op_node_data.type.debug_name_pyrope(), " ", val);//put stmt separator here;
+    absl::StrAppend (&buffer_to_print, key, " ", op_node_data.type.debug_name_pyrope(), " ", val, stmt_sep());//put stmt separator here;
   }
 
 }
+
+//processing dot operator
+void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index) {
+  auto curr_index = lnast->get_first_child(dot_node_index);
+  const auto& dot_node_data = lnast->get_data(dot_node_index);
+  std::vector<std::string_view> dot_str_vect;
+  std::string_view key;
+  std::string_view ref;
+
+  while(curr_index!=lnast->invalid_index()) {
+    const auto& curr_node_data = lnast->get_data(curr_index);
+    auto curlvl = curr_index.level;
+    fmt::print("Processing dot child {} at level {} \n",Code_gen::get_node_name(curr_node_data), curlvl);
+    dot_str_vect.push_back(Code_gen::get_node_name(curr_node_data));
+    curr_index = lnast->get_sibling_next(curr_index);
+  }
+  //dot_str_vect now has all the children of the operation "op"
+
+  key = dot_str_vect.at(0);
+  ref = dot_str_vect.at(1);
+  auto map_it = ref_map.find(ref);
+  if (map_it != ref_map.end()) {
+    ref = map_it->second;
+  }
+  std::string value = absl::StrCat(ref, dot_node_data.type.debug_name_pyrope(), process_number(dot_str_vect.at(2)));
+
+  if (is_temp_var(key)) {
+    ref_map.insert(std::pair<std::string_view, std::string>(key, value));
+  } else {
+    absl::StrAppend(&buffer_to_print, key, " saved as ", value, "\n");
+    // this should never be possible
+  }
+
+}
+
 //Get the textual value of node. Eg., get "$a" from the node "ref, $a":
 std::string_view Code_gen::get_node_name(Lnast_node node) { return node.token.get_text(); }
 
