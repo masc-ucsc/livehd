@@ -726,12 +726,13 @@ void Pass_cprop::trans(LGraph *g) {
     if (node.is_invalid())
       continue;  // It got deleted
 
-    if (inp_edges_ordered.size()>128) {
+    if (inp_edges_ordered.size()>64) {
 #ifndef NDEBUG
       fmt::print("node:{} is already quite large. Skipping cprop\n", node.debug_name());
 #endif
       continue;
     }
+		fmt::print("node:{} inp:{} out:{}\n",node.debug_name(), node.get_num_inputs(), node.get_num_outputs());
 
     try_collapse_forward(node, inp_edges_ordered);
   }

@@ -23,6 +23,12 @@ public:
     overflow = i.overflow;
   };
 
+  constexpr Bitwidth_range &operator=(const Bitwidth_range &r) {
+    max = r.max;
+    min = r.min;
+    overflow = r.overflow;
+  }
+
   Bitwidth_range(const Lconst &value);
   Bitwidth_range(const Lconst &min_val, const Lconst &max_val);
   Bitwidth_range(Bits_t bits, bool sign);
@@ -34,6 +40,7 @@ public:
   Bits_t   get_bits() const;
   Lconst   get_max() const { return to_lconst(overflow, max); };
   Lconst   get_min() const { return to_lconst(overflow, min); };
+  int      get_raw_max() const { return max; };
 
   bool    is_always_negative() const { return max < 0; }
   bool    is_always_positive() const { return min >= 0; }
