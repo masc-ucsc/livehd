@@ -558,8 +558,18 @@ bool Pass_cprop::process_tuple_get(Node &node) {
 
 	I(node.get_type_op() == TupGet_Op);
 
+ 
   auto parent_dpin = node.get_sink_pin(0).get_driver_pin();
   auto parent_node = parent_dpin.get_node();
+  if (parent_node.get_sink_pin(1).get_driver_pin().get_name() == "__wire") {
+    //this tuple_add is the dummy wire, get its parent to start analysis
+    fmt::print("parent_node:{}\n", parent_node.debug_name());
+    auto spin = parent_node.get_sink_pin(0);
+    fmt::print("inp size:{}\n", spin.inp_edges().size());
+
+    parent_dpin = parent_node.get_sink_pin(0).get_driver_pin();
+    parent_node = parent_dpin.get_node();
+  }
 
 
   auto ptup_it = node2tuple.find(parent_node.get_compact());
@@ -587,7 +597,7 @@ bool Pass_cprop::process_tuple_get(Node &node) {
 		else
 			key = key_name;
 
-		Pass::error("there is no tuple of {}, so no valid field {}\n", tup_name, key);
+		Pass::error("in tuple_get {}, there is no tuple of {}, so no valid field {}\n", node.debug_name(), tup_name, key);
 		return false;
 	}
 
