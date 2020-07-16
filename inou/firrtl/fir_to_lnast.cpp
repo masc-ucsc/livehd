@@ -656,9 +656,44 @@ void Inou_firrtl::HandleConcatOp(Lnast &lnast, const firrtl::FirrtlPB_Expression
   AttachExprStrToNode(lnast, e2_str, idx_or);
 }
 
+//FIXME: This function's "better" (bottom) solution doesn't work yet because
+// I think LN->LG requires a temp var has to be the LHS of the node that
+// comes immediately before its use. When this eventually works, use
+// bottom solution. For now, top solution works (and will for all cases
+// where bw(e) <= #.
 void Inou_firrtl::HandlePadOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string &lhs) {
-  //I(parent_node.is_stmts() | parent_node.is_cstmts());
+  /* temp solution: just ignore arg and use const # as bitwidth
+   *      dot          assign  assign
+   *     / | \           /\      /\
+   * ___F0 x __bits  ___F0 #    x  e */
+  I(lnast.get_data(parent_node).type.is_stmts() || lnast.get_data(parent_node).type.is_cstmts());
+  I(op.arg_size() == 1 && op.const__size() == 1);
 
+  auto temp_var_name = create_temp_var(lnast);
+  auto lhs_strv = lnast.add_string(lhs);
+  auto e_name = lnast.add_string(ReturnExprString(lnast, op.arg(0), parent_node, true));
+  auto c_name = lnast.add_string(op.const_(0).value());
+
+  auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_dot("pad"));
+  lnast.add_child(idx_dot, Lnast_node::create_ref(temp_var_name));
+  lnast.add_child(idx_dot, Lnast_node::create_ref(lhs_strv));
+  lnast.add_child(idx_dot, Lnast_node::create_ref("__bits"));
+
+  auto idx_asg1 = lnast.add_child(parent_node, Lnast_node::create_assign("pad_bwasg"));
+  lnast.add_child(idx_asg1, Lnast_node::create_ref(temp_var_name));
+  lnast.add_child(idx_asg1, Lnast_node::create_const(c_name));
+
+  Lnast_nid idx_asg2;
+  if (lhs.substr(0,1) == "%") {
+    idx_asg2 = lnast.add_child(parent_node, Lnast_node::create_dp_assign("pad_dpasg"));
+  } else {
+    idx_asg2 = lnast.add_child(parent_node, Lnast_node::create_assign("pad_asg"));
+  }
+  lnast.add_child(idx_asg2, Lnast_node::create_ref(lhs_strv));
+  lnast.add_child(idx_asg2, Lnast_node::create_ref(e_name));
+
+
+  //FIXME: Fully correct solution below! Keep until LN->LG can correctly handle it.
   /* x = pad(e)(4) sets x = e and sets bw(x) = max(4, bw(e));
    *               [___________________________if_________________________________]                         asg
    *               /               /           /                                 \                         /   \
@@ -667,11 +702,8 @@ void Inou_firrtl::HandlePadOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_Pr
    *      dot            lt, <           dot         asg          dot            dot           asg
    *    /  | \          /  |   \        / | \       /   \        / | \          / | \         /   \
    * ___F0 e __bits ___F1 ___F0 4   ___F2 x __bits ___F2 4   ___F3 x __bits ___F4 e __bits ___F3 ___F4 */
-  I(lnast.get_data(parent_node).type.is_stmts() || lnast.get_data(parent_node).type.is_cstmts());
+  /*I(lnast.get_data(parent_node).type.is_stmts() || lnast.get_data(parent_node).type.is_cstmts());
   I(op.arg_size() == 1 && op.const__size() == 1);
-
-  //FIXME: Is this the best possible solution?
-  //I(false);
 
   auto temp_var_name_f0 = create_temp_var(lnast);
   auto temp_var_name_f1 = create_temp_var(lnast);
@@ -730,7 +762,7 @@ void Inou_firrtl::HandlePadOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_Pr
 
   auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg_pad"));
   lnast.add_child(idx_asg, Lnast_node::create_ref(lhs_name));
-  AttachExprStrToNode(lnast, e_name, idx_asg);
+  AttachExprStrToNode(lnast, e_name, idx_asg);*/
 }
 
 /* This function creates the necessary LNAST nodes to express a
@@ -1002,7 +1034,6 @@ std::string Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB_Expr
   return bundle_accessor;
 }
 
-//FIXME: Remove CreateNameStack... doesn't work as intended (since not everything will be subfield/reference)
 std::string Inou_firrtl::CreateNameStack(Lnast& ln, Lnast_nid& parent_node, const firrtl::FirrtlPB_Expression& expr, std::stack<std::string>& names) {
   if (expr.has_sub_field()) {
     names.push(expr.sub_field().field());
@@ -1366,9 +1397,6 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
     } case 11: { //FixedLiteral
       //FIXME: FixedPointLiteral not yet supported in LNAST
       I(false);
-      //auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg_FP"));
-      //lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs)));
-      //...
       break;
 
     } default:
@@ -1418,7 +1446,7 @@ std::string Inou_firrtl::ReturnExprString(Lnast& lnast, const firrtl::FirrtlPB_E
       ListPrimOpInfo(lnast, expr.prim_op(), parent_node, expr_string);
       break;
     } case 11: { //FixedLiteral
-      //FIXME: Unsure of how this should be.
+      //FIXME: Not yet supported in LNAST.
       I(false);
       break;
     } default: {
@@ -1560,13 +1588,13 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
     } case 8: { //Stop
       //FIXME: Not fully implemented, I think.
       //cout << "stop(" << stmt.stop().return_value() << ")\n";
-      //I(false);
+      I(false);
       break;
 
     } case 10: { //Printf
       //FIXME: Not fully implemented, I think.
       //cout << "printf(" << stmt.printf().value() << ")\n";
-      //I(false);
+      I(false);
       break;
 
     } case 14: { //Skip
@@ -1730,8 +1758,12 @@ void Inou_firrtl::IterateModules(Eprp_var &var, const firrtl::FirrtlPB_Circuit& 
 
   // For each module, create an LNAST pointer
   for (int i = 0; i < circuit.module_size(); i++) {
-    //FIXME: I should empty input, output, and register lists
     ListModuleInfo(var, circuit.module(i));
+
+    // Between modules, empty out the input/output/register lists.
+    input_names.clear();
+    output_names.clear();
+    register_names.clear();
   }
 }
 
