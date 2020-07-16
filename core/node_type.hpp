@@ -46,7 +46,7 @@ protected:
 
   void set_type_const(Index_ID nid, const Lconst &value);
   void set_type_const(Index_ID nid, std::string_view value);
-  void set_type_const(Index_ID nid, uint32_t value, uint16_t bits);
+  void set_type_const(Index_ID nid, uint32_t value, Bits_t bits);
 
   // No const because Lconst created
   Lconst get_type_const(Index_ID nid) const;

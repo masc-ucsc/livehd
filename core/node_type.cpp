@@ -132,5 +132,5 @@ void LGraph_Node_Type::set_type_const(Index_ID nid, const Lconst &value) {
 
 void LGraph_Node_Type::set_type_const(Index_ID nid, std::string_view sv) { set_type_const(nid, Lconst(sv)); }
 
-void LGraph_Node_Type::set_type_const(Index_ID nid, uint32_t value, uint16_t bits) { set_type_const(nid, Lconst(value, bits)); }
+void LGraph_Node_Type::set_type_const(Index_ID nid, uint32_t value, Bits_t bits) { set_type_const(nid, Lconst(value, bits)); }
 

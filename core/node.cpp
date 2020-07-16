@@ -528,6 +528,32 @@ int Node::get_color() const {
 
 bool Node::has_color() const { return Ann_node_color::ref(current_g)->has_key(get_compact_class()); }
 
+void Node::dump() {
 
-
-
+  fmt::print("nid:{} type:{} name:{}", nid, get_type().get_name(), debug_name());
+  if (get_type().op == LUT_Op) {
+    fmt::print(" lut={}\n", get_type_lut().to_pyrope());
+  } else if (get_type().op == Const_Op) {
+    fmt::print(" const={}\n", get_type_const().to_pyrope());
+  } else {
+    fmt::print("\n");
+  }
+  for (const auto &edge : inp_edges()) {
+    fmt::print("  inp bits:{} pid:{} from nid:{} idx:{} pid:{} name:{}\n", edge.get_bits(), edge.sink.get_pid(),
+               edge.driver.get_node().nid, edge.driver.get_idx(), edge.driver.get_pid(), edge.driver.debug_name());
+  }
+  for (const auto &spin : inp_setup_pins()) {
+    if (spin.is_connected())  // Already printed
+      continue;
+    fmt::print("              pid:{} name:{} UNCONNECTED\n", spin.get_pid(), spin.debug_name());
+  }
+  for (const auto &edge : out_edges()) {
+    fmt::print("  out bits:{} pid:{} name:{} to nid:{} idx:{} pid:{}\n", edge.get_bits(), edge.driver.get_pid(),
+               edge.driver.debug_name(), edge.sink.get_node().nid, edge.sink.get_idx(), edge.sink.get_pid());
+  }
+  for (const auto &dpin : out_setup_pins()) {
+    if (dpin.is_connected())  // Already printed
+      continue;
+    fmt::print("  out bits:{} pid:{} name:{} UNCONNECTED\n", dpin.get_bits(), dpin.get_pid(), dpin.debug_name());
+  }
+}

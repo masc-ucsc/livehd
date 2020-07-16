@@ -235,13 +235,13 @@ Node_pin Node_pin::find_driver_pin(LGraph *top, std::string_view wname) {
   return Node_pin(top, ref->get_key(it));
 }
 
-void Node_pin::set_offset(uint16_t offset) {
+void Node_pin::set_offset(Bits_t offset) {
   if (offset == 0) return;
 
   Ann_node_pin_offset::ref(current_g)->set(get_compact_class_driver(), offset);
 }
 
-uint16_t Node_pin::get_offset() const {
+Bits_t Node_pin::get_offset() const {
   auto ref = Ann_node_pin_offset::ref(current_g);
   if (!ref->has(get_compact_class_driver())) return 0;
 

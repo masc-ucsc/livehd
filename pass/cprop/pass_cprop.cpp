@@ -32,6 +32,7 @@ void Pass_cprop::optimize(Eprp_var &var) {
 }
 
 void Pass_cprop::collapse_forward_same_op(Node &node, XEdge_iterator &inp_edges_ordered) {
+
   auto op = node.get_type().op;
   for (auto &out : node.out_edges()) {
     if (out.sink.get_node().get_type().op!=op)
@@ -68,8 +69,9 @@ void Pass_cprop::collapse_forward_sum(Node &node, XEdge_iterator &inp_edges_orde
     out.del_edge();
   }
 
-  if (all_edges_deleted)
+  if (all_edges_deleted) {
     node.del_node();
+  }
 }
 
 
@@ -265,7 +267,7 @@ void Pass_cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_
 
     replace_node(node, result);
   } else if (op == Or_Op) {
-		uint16_t max_bits = 0;
+		Bits_t max_bits = 0;
 		for(auto &i:inp_edges_ordered) {
 			auto c = i.driver.get_node().get_type_const();
 			if (c.get_bits() > max_bits)
@@ -284,7 +286,7 @@ void Pass_cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_
     replace_logic_node(node, result, result_reduced);
 
   } else if (op == And_Op) {
-		uint16_t max_bits = 0;
+		Bits_t max_bits = 0;
 		for(auto &i:inp_edges_ordered) {
 			auto c = i.driver.get_node().get_type_const();
 			if (c.get_bits() > max_bits)
@@ -719,11 +721,17 @@ void Pass_cprop::trans(LGraph *g) {
 
 		// Normal copy prop and strength reduction
     auto inp_edges_ordered = node.inp_edges_ordered();
-
-		try_constant_prop(node, inp_edges_ordered);
+    try_constant_prop(node, inp_edges_ordered);
 
     if (node.is_invalid())
       continue;  // It got deleted
+
+    if (inp_edges_ordered.size()>128) {
+#ifndef NDEBUG
+      fmt::print("node:{} is already quite large. Skipping cprop\n", node.debug_name());
+#endif
+      continue;
+    }
 
     try_collapse_forward(node, inp_edges_ordered);
   }

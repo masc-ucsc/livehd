@@ -240,7 +240,7 @@ void Pass_bitwidth::process_sum(Node &node, XEdge_iterator &inp_edges) {
     }
   }
 
-  // fmt::print("sum max:{} min:{}\n", max_val.to_pyrope(), min_val.to_pyrope());
+  //fmt::print("sum max:{} min:{}\n", max_val.to_pyrope(), min_val.to_pyrope());
 
   bwmap.emplace(node.get_driver_pin(0).get_compact(), Bitwidth_range(min_val, max_val));
 }
@@ -276,11 +276,11 @@ void Pass_bitwidth::process_logic(Node &node, XEdge_iterator &inp_edges) {
 	}
 
 	if (is_logic_op && inp_edges.size() >= 1) {
-		uint16_t max_bits = 0;
+		Bits_t max_bits = 0;
 
 		for (auto e : inp_edges) {
 			auto it = bwmap.find(e.driver.get_compact());
-			uint16_t bits = 0;
+			Bits_t bits = 0;
 			if (it == bwmap.end()) {
 				bits = e.driver.get_bits();
 			} else {
@@ -312,11 +312,11 @@ void Pass_bitwidth::process_logic_and(Node &node, XEdge_iterator &inp_edges) {
 
   // determine the min_bits among all inp_edges
   if (logic_op && inp_edges.size() >= 1) {
-		uint16_t min_bits = UINT16_MAX;
+		Bits_t min_bits = UINT16_MAX;
 
 		for (auto e : inp_edges) {
 			auto pit = bwmap.find(e.driver.get_compact());
-			uint16_t bits = 0;
+			Bits_t bits = 0;
 			if (pit == bwmap.end()) {
 				bits = e.driver.get_bits();
 			} else {
@@ -720,7 +720,12 @@ void Pass_bitwidth::bw_pass(LGraph *lg) {
 
 			auto bw_bits = it->second.get_bits();
 
-			if (dpin.get_bits() && dpin.get_bits() >= bw_bits)
+      if (bw_bits == 0 && it->second.is_overflow()) {
+        fmt::print("bitwidth: dpin:{} has over {}bits (simplify first!)\n", dpin.debug_name(), it->second.max);
+        continue;
+      }
+
+      if (dpin.get_bits() && dpin.get_bits() >= bw_bits)
 				continue;
 
 			dpin.set_bits(bw_bits);

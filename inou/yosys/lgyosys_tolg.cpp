@@ -128,7 +128,7 @@ static Node_pin &get_edge_pin(LGraph *g, const RTLIL::Wire *wire) {
 }
 
 static Node_pin connect_constant(LGraph *g, uint32_t value, Node &exit_node, Port_ID opid) {
-  uint16_t bits = (64 - __builtin_clzll(value));
+  Bits_t bits = (64 - __builtin_clzll(value));
   auto dpin = g->create_node_const(Lconst(value, bits)).setup_driver_pin();
   auto spin = exit_node.setup_sink_pin(opid);
 
@@ -803,7 +803,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
       entry_node = g->create_node(Equals_Op, 1);
 
       if (size > 1) {
-        uint16_t bits = size-1;
+        Bits_t bits = size-1;
         auto zero_pin = g->create_node_const(Lconst(0, bits)).setup_driver_pin();
         auto not_node = g->create_node(Not_Op, 1);
         g->add_edge(entry_node.setup_driver_pin(0), not_node.setup_sink_pin());

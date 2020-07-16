@@ -622,56 +622,126 @@ void LGraph::del_node(const Node &node) {
   while (true) {
     auto *node_int_ptr = node_internal.ref(idx2);
 
-    Index_ID self_master_idx;
-    if (node_int_ptr->is_root())
-      self_master_idx = idx2;
-    else
-      self_master_idx = node_int_ptr->get_nid();
-
-    Node_pin self_sink  (this, this, Hierarchy_tree::root_index(), self_master_idx, node_int_ptr->get_dst_pid(), true);
-    Node_pin self_driver(this, this, Hierarchy_tree::root_index(), self_master_idx, node_int_ptr->get_dst_pid(), false);
-
     {
+      absl::flat_hash_set<uint32_t> deleted;
+
       auto n = node_int_ptr->get_num_local_inputs();
       int  i;
       const Edge_raw *redge=nullptr;
       for (i = 0, redge = node_int_ptr->get_input_begin(); i < n; i++, redge += redge->next_node_inc()) {
         I(redge->get_self_idx() == idx2);
-        Node_pin other_driver(this, this, Hierarchy_tree::root_index(), redge->get_idx(), redge->get_inp_pid(), false);
-        I(other_driver == redge->get_out_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx()));
-        I(self_sink    == redge->get_inp_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx()));
-
         I(redge->is_input());
-        bool     del = del_edge_driver_int(other_driver, self_sink);
-        I(del);
+
+        auto other_nid = node_internal[redge->get_idx()].get_nid();
+        if (deleted.count(other_nid))
+          continue;
+        deleted.insert(other_nid);
+
+        Node other_driver(this, this, Hierarchy_tree::root_index(), other_nid);
+        del_driver2node_int(other_driver, node);
       }
     }
 
     {
+      absl::flat_hash_set<uint32_t> deleted;
+
       auto n = node_int_ptr->get_num_local_outputs();
       uint8_t         i;
       const Edge_raw *redge=nullptr;
       for (i = 0, redge = node_int_ptr->get_output_begin(); i < n; i++, redge += redge->next_node_inc()) {
         I(redge->get_self_idx() == idx2);
-        Node_pin other_sink(this, this, Hierarchy_tree::root_index(), redge->get_idx(), redge->get_inp_pid(), true);
-        I(other_sink  == redge->get_inp_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx()));
-        I(self_driver == redge->get_out_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx()));
-
         I(!redge->is_input());
-        bool     del = del_edge_sink_int(self_driver, other_sink);
-        I(del);
+
+        auto other_nid = node_internal[redge->get_idx()].get_nid();
+        if (deleted.count(other_nid))
+          continue;
+        deleted.insert(other_nid);
+
+        Node other_sink(this, this, Hierarchy_tree::root_index(), other_nid);
+        del_sink2node_int(node, other_sink);
       }
     }
 
-    if (node_internal[idx2].is_last_state()) {
+    if (node_int_ptr->is_last_state()) {
+      break;
+    }
+    idx2 = node_int_ptr->get_next();
+  }
+
+  idx2 = node.get_nid();
+  while (true) {
+    auto *node_int_ptr = node_internal.ref(idx2);
+    if (node_int_ptr->is_last_state()) {
       node_int_ptr->try_recycle();
       return;
     }
-    Index_ID tmp = node_internal[idx2].get_next();
+    idx2               = node_int_ptr->get_next();
     node_int_ptr->try_recycle();
-    idx2 = tmp;
   }
 }
+
+// sink node has been deleted. Anything in driver pointing to sink should be deleted
+void LGraph::del_driver2node_int(Node &driver, const Node &sink) {
+
+  // In hierarchy, not allowed to remove nodes (mark as deleted attribute?)
+  I(driver.get_class_lgraph() == driver.get_top_lgraph());
+  I(sink.get_class_lgraph()   == sink.get_top_lgraph());
+  I(sink.get_class_lgraph()   == driver.get_top_lgraph());
+
+  Index_ID idx2 = driver.get_nid();
+
+  while (true) {
+    auto *node_int_ptr = node_internal.ref(idx2);
+
+    auto            n = node_int_ptr->get_num_local_outputs();
+    uint8_t         i;
+    const Edge_raw *redge;
+    for (i = 0, redge = node_int_ptr->get_output_begin(); i < n; i++, redge += redge->next_node_inc()) {
+      I(redge->get_self_idx() == idx2);
+      auto master_nid = node_internal[redge->get_idx()].get_nid();
+      if (master_nid == sink.get_nid()) {
+        node_int_ptr->del_output_int(redge);
+      }
+      // NOTE: unlike inputs, the outputs are added to the end, no copy movement (advance pointer) at delete
+    }
+    if (node_int_ptr->is_last_state())
+      return;
+
+    idx2 = node_internal[idx2].get_next();
+  }
+}
+
+void LGraph::del_sink2node_int(const Node &driver, Node &sink) {
+
+  // In hierarchy, not allowed to remove nodes (mark as deleted attribute?)
+  I(driver.get_class_lgraph() == driver.get_top_lgraph());
+  I(sink.get_class_lgraph()   == sink.get_top_lgraph());
+  I(sink.get_class_lgraph()   == driver.get_top_lgraph());
+
+  Index_ID idx2 = sink.get_nid();
+
+  while (true) {
+    auto *node_int_ptr = node_internal.ref(idx2);
+
+    auto            n = node_int_ptr->get_num_local_inputs();
+    uint8_t         i;
+    const Edge_raw *redge;
+    for (i = 0, redge = node_int_ptr->get_input_begin(); i < n; i++) {
+      I(redge->get_self_idx() == idx2);
+      auto master_nid = node_internal[redge->get_idx()].get_nid();
+      if (master_nid == driver.get_nid()) {
+        node_int_ptr->del_input_int(redge);
+      } else {
+        redge += redge->next_node_inc(); // NOTE: delete copies data, sort of advances the pointer
+      }
+    }
+    if (node_int_ptr->is_last_state())
+      return;
+
+    idx2 = node_internal[idx2].get_next();
+  }
+}
+
 
 bool LGraph::del_edge_driver_int(const Node_pin &dpin, const Node_pin &spin) {
 
@@ -892,32 +962,7 @@ void LGraph::dump() {
     if (!node.has_inputs() && !node.has_outputs())
       continue;
 
-    fmt::print("nid:{} type:{} name:{}", node.nid, node.get_type().get_name(), node.debug_name());
-    if (node.get_type().op == LUT_Op) {
-      fmt::print(" lut={}\n", node.get_type_lut().to_pyrope());
-    } else if (node.get_type().op == Const_Op) {
-      fmt::print(" const={}\n", node.get_type_const().to_pyrope());
-    } else {
-      fmt::print("\n");
-    }
-    for (const auto &edge : node.inp_edges()) {
-      fmt::print("  inp bits:{} pid:{} from nid:{} pid:{} name:{}\n", edge.get_bits(), edge.sink.get_pid(),
-                 edge.driver.get_node().nid, edge.driver.get_pid(), edge.driver.debug_name());
-    }
-    for (const auto &spin : node.inp_setup_pins()) {
-      if (spin.is_connected())  // Already printed
-        continue;
-      fmt::print("              pid:{} name:{} UNCONNECTED\n", spin.get_pid(), spin.debug_name());
-    }
-    for (const auto &edge : node.out_edges()) {
-      fmt::print("  out bits:{} pid:{} name:{} to nid:{} pid:{}\n", edge.get_bits(), edge.driver.get_pid(),
-                 edge.driver.debug_name(), edge.sink.get_node().nid, edge.sink.get_pid());
-    }
-    for (const auto &dpin : node.out_setup_pins()) {
-      if (dpin.is_connected())  // Already printed
-        continue;
-      fmt::print("  out bits:{} pid:{} name:{} UNCONNECTED\n", dpin.get_bits(), dpin.get_pid(), dpin.debug_name());
-    }
+    node.dump();
   }
 #endif
 
