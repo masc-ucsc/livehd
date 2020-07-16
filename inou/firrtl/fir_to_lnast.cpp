@@ -170,10 +170,9 @@ uint32_t Inou_firrtl::get_bit_count(const firrtl::FirrtlPB_Type type) {
       return type.sint_type().width().value();
     } case 4: { //Clock type
       return 1;
-    } case 5: { //Bundle type
-      I(false); //FIXME: Not yet supported. Should it even be?
-    } case 6: { //Vector type
-      I(false); //FIXME: Not yet supported. Should it even be?
+    } case 5:   //Bundle type
+      case 6: { //Vector type
+      I(false); //get_bit_count should never be called on these (no sense)
     } case 7: { //Fixed type
       I(false); //FIXME: Not yet supported.
     } case 8: { //Analog type
@@ -233,8 +232,6 @@ void Inou_firrtl::init_reg_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type,
       break;
     } default: {
       /* UInt SInt Clock Analog AsyncReset Reset Types*/
-      /*auto wire_bits = get_bit_count(type);
-      create_bitwidth_dot_node(lnast, wire_bits, parent_node, id);*/
       auto reg_bits = get_bit_count(type);
       init_reg_ref_dots(lnast, id, clock, reset, init, reg_bits, parent_node);
     }
@@ -353,7 +350,7 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string &_id, const 
 /* When a module instance is created in FIRRTL, we need to do the same
  * in LNAST. Note that the instance command in FIRRTL does not hook
  * any input or outputs. */
-//FIXME: I don't think putting inp_inst_name will work since it's not specified beforehand...
+//FIXME: May have to specify both as wires?
 void Inou_firrtl::create_module_inst(Lnast& lnast, const firrtl::FirrtlPB_Statement_Instance& inst, Lnast_nid& parent_node) {
   /*            dot                   assign                    fn_call
    *      /      |        \            / \                   /     |     \
@@ -373,7 +370,7 @@ void Inou_firrtl::create_module_inst(Lnast& lnast, const firrtl::FirrtlPB_Statem
   auto idx_fncall = lnast.add_child(parent_node, Lnast_node::create_func_call("fn_call"));
   lnast.add_child(idx_fncall, Lnast_node::create_ref(lnast.add_string(absl::StrCat("out_", inst.id()))));
   lnast.add_child(idx_fncall, Lnast_node::create_ref(lnast.add_string(inst.module_id())));
-  lnast.add_child(idx_fncall, Lnast_node::create_ref(lnast.add_string(absl::StrCat("inp_", inst.id()))));//"null")); //FIXME: Is this correct way to show no inputs specified, but will be later?
+  lnast.add_child(idx_fncall, Lnast_node::create_ref(lnast.add_string(absl::StrCat("inp_", inst.id()))));
 
   /* Also, I need to record this module instance in
    * a map that maps instance name to module name. */
@@ -453,7 +450,6 @@ void Inou_firrtl::HandleNEQOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_Pr
  * node type that supports unary ops. Instead, we would want to have an assign
  * node and have the "rhs" child of the assign node be "[op]temp". */
 void Inou_firrtl::HandleUnaryOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string &lhs) {
-  //FIXME: May have to change later to accomodate binary reduction op types.
   /* x = not(e1) should take graph form: (xor_/and_/or_reduce all look same just different op)
    *     ~
    *   /   \
@@ -506,8 +502,8 @@ void Inou_firrtl::HandleOrReducOp(Lnast& lnast, const firrtl::FirrtlPB_Expressio
 void Inou_firrtl::HandleXorReducOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string &lhs) {
   /* x = .xorR(e1)
    *  parity_op
-   *  / \
-   * x  e1 */
+   *    / \
+   *   x  e1 */
   //FIXME: Uncomment once node type is made
   /*I(lnast.get_data(parent_node).type.is_stmts() || lnast.get_data(parent_node).type.is_cstmts());
   I(op.arg_size() == 1);
@@ -901,14 +897,52 @@ void Inou_firrtl::HandleTypeConvOp(Lnast& lnast, const firrtl::FirrtlPB_Expressi
  *     /   |   \         /  |  \
  * ___F0 submod io  ___F1 ___F0 a
  * where the string "___F1" would be returned by this function. */
-std::string Inou_firrtl::HandleSubfieldAcc(Lnast& ln, const firrtl::FirrtlPB_Expression_SubField sub_field, Lnast_nid& parent_node, const bool is_rhs) {
+std::string Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB_Expression expr, Lnast_nid& parent_node, const bool is_rhs) {
   //Create a list of each tuple + the element... So submoid.io.a becomes [submod, io, a]
   std::stack<std::string> names;
-  auto flattened_str = CreateNameStack(sub_field, names);
-  fmt::print("flattened_str: {}, {}\n", flattened_str, is_rhs);
-  auto full_str = get_full_name(flattened_str, is_rhs);
-  fmt::print("\tfull_str: {}\n", full_str);
-  //fmt::print("HandleSubfieldAcc: {}\n", full_str);
+  std::string full_str;
+
+  if (expr.has_sub_field()) {
+    auto sub_field = expr.sub_field();
+    names.push(sub_field.field());
+    auto flattened_str = absl::StrCat(CreateNameStack(ln, parent_node, sub_field.expression(), names), ".", sub_field.field());
+    fmt::print("sa: flattened_str: {}, {}\n", flattened_str, is_rhs);
+    full_str = get_full_name(flattened_str, is_rhs);
+    fmt::print("\tfull_str: {}\n", full_str);
+
+  } else if (expr.has_sub_index()) {
+    auto sub_idx = expr.sub_index();
+    names.push(sub_idx.index().value());
+    auto flattened_str = absl::StrCat(CreateNameStack(ln, parent_node, sub_idx.expression(), names), ".", sub_idx.index().value());
+    fmt::print("si: flattened_str: {}, {}\n", flattened_str, is_rhs);
+    full_str = get_full_name(flattened_str, is_rhs);
+    fmt::print("\tfull_str: {}\n", full_str);
+
+  } else if (expr.has_sub_access()) {
+    auto sub_access = expr.sub_access();
+    /* FIXME: This has a pretty deeply rooted and complex problem. Registers on the rhs
+     * are accessed as bundlename_fieldname__q_pin. If there was a vector of registers,
+     * this would be like vectorname_0__q_pin, vectorname_1__q_pin, ... . However, this
+     * won't work in here because we don't know the number (you know that for subindex,
+     * not sub access). The closest that can be achieved is just by adding the "#" to the
+     * front and hope that is close enough (it should be in MOST cases). */
+    auto bund_name = ReturnExprString(ln, sub_access.expression(), parent_node, is_rhs);
+    auto field_name = ReturnExprString(ln, sub_access.index(), parent_node, is_rhs);
+
+    auto temp_var_name = create_temp_var(ln);
+    auto idx_dot = ln.add_child(parent_node, Lnast_node::create_dot("tmp_hack")); //FIXME: Should this be dot or select?
+    ln.add_child(idx_dot, Lnast_node::create_ref(temp_var_name));
+    ln.add_child(idx_dot, Lnast_node::create_ref(bund_name));
+    if (isdigit(field_name[0])) {
+      ln.add_child(idx_dot, Lnast_node::create_const(field_name));
+    } else {
+      ln.add_child(idx_dot, Lnast_node::create_ref(field_name));
+    }
+    return (std::string)temp_var_name;
+
+  } else {
+    I(false);
+  }
 
   /*fmt::print("[");
   while(!names.empty()) {
@@ -918,7 +952,6 @@ std::string Inou_firrtl::HandleSubfieldAcc(Lnast& ln, const firrtl::FirrtlPB_Exp
   fmt::print("]\n");*/
 
   //Create each dot node
-  //bool first = true;
   std::string bundle_accessor;
   if (full_str.substr(0,1) == "$") {
     bundle_accessor = absl::StrCat("$inp_", names.top());
@@ -953,40 +986,41 @@ std::string Inou_firrtl::HandleSubfieldAcc(Lnast& ln, const firrtl::FirrtlPB_Exp
     names.pop();
     //fmt::print("dot: {} {} {}\n", temp_var_name, bundle_accessor, element_name);
     auto idx_dot = ln.add_child(parent_node, Lnast_node::create_dot(""));
-    if (names.empty()) {
-      ln.add_child(idx_dot, Lnast_node::create_ref(temp_var_name));
-      ln.add_child(idx_dot, Lnast_node::create_ref(ln.add_string(bundle_accessor)));
-      ln.add_child(idx_dot, Lnast_node::create_ref(ln.add_string(element_name)));
+    ln.add_child(idx_dot, Lnast_node::create_ref(temp_var_name));
+    ln.add_child(idx_dot, Lnast_node::create_ref(ln.add_string(bundle_accessor)));
+    if (isdigit(element_name[0])) {
+      ln.add_child(idx_dot, Lnast_node::create_const(ln.add_string(element_name)));
     } else {
-      ln.add_child(idx_dot, Lnast_node::create_ref(temp_var_name));
-      ln.add_child(idx_dot, Lnast_node::create_ref(ln.add_string(bundle_accessor)));
       ln.add_child(idx_dot, Lnast_node::create_ref(ln.add_string(element_name)));
     }
 
     bundle_accessor = temp_var_name;
   } while (!names.empty());
 
-  /*if ((full_str.length() > 7) && (full_str.substr(full_str.length()-7,7) == "__q_pin")) {
-    auto temp_var_name = create_temp_var(ln);
-    auto idx_dot_q = ln.add_child(parent_node, Lnast_node::create_dot("dot_q"));
-    ln.add_child(idx_dot_q, Lnast_node::create_ref(temp_var_name));
-    ln.add_child(idx_dot_q, Lnast_node::create_ref(bundle_accessor));
-    ln.add_child(idx_dot_q, Lnast_node::create_ref("__q_pin"));
-
-    bundle_accessor = temp_var_name;
-  }*/
 
   //fmt::print("return {}\n", bundle_accessor);
   return bundle_accessor;
 }
 
-std::string Inou_firrtl::CreateNameStack(const firrtl::FirrtlPB_Expression_SubField sub_field, std::stack<std::string>& names) {
-  names.push(sub_field.field());
-  if (sub_field.expression().has_sub_field()) {
-    return absl::StrCat(CreateNameStack(sub_field.expression().sub_field(), names), ".", sub_field.field());
-  } else if (sub_field.expression().has_reference()) {
-    names.push(sub_field.expression().reference().id());
-    return absl::StrCat(sub_field.expression().reference().id(), ".", sub_field.field());
+//FIXME: Remove CreateNameStack... doesn't work as intended (since not everything will be subfield/reference)
+std::string Inou_firrtl::CreateNameStack(Lnast& ln, Lnast_nid& parent_node, const firrtl::FirrtlPB_Expression& expr, std::stack<std::string>& names) {
+  if (expr.has_sub_field()) {
+    names.push(expr.sub_field().field());
+    return absl::StrCat(CreateNameStack(ln, parent_node, expr.sub_field().expression(), names), ".", expr.sub_field().field());
+
+  } else if (expr.has_sub_access()) {
+    auto idx_str = ReturnExprString(ln, expr.sub_access().index(), parent_node, true);
+    names.push(idx_str);
+    return absl::StrCat(CreateNameStack(ln, parent_node, expr.sub_access().expression(), names), ".", idx_str);
+
+  } else if (expr.has_sub_index()) {
+    names.push(expr.sub_index().index().value());
+    return absl::StrCat(CreateNameStack(ln, parent_node, expr.sub_index().expression(), names), ".", expr.sub_index().index().value());
+
+  } else if (expr.has_reference()) {
+    names.push(expr.reference().id());
+    return expr.reference().id();
+
   } else {
     I(false);
     return "";
@@ -1038,25 +1072,17 @@ void Inou_firrtl::create_io_list(const firrtl::FirrtlPB_Type& type, uint8_t dir,
         vec.push_back(std::make_tuple(port_id, dir, 0));
         create_io_list(type.vector_type().type(), dir, absl::StrCat(port_id, ".", i), vec);
       }
-      //I(false);//FIXME: Not yet supported.
-      //const firrtl::FirrtlPB_Type_VectorType vtype = type.vector_type();
-      //cout << "FIXME: Vector[" << vtype.size()  << "]" << endl;
-      //FIXME: How do we want to handle Vectors for LNAST? Should I flatten?
-      //ListTypeInfo(vtype.type(), parent_node, );//FIXME: Should this be parent_idx?
       break;
 
     } case 7: { //Fixed type
-      //cout << "Fixed[" << type.fixed_type().width().value() << "." << type.fixed_type().point().value() << "]" << endl;
       I(false);//FIXME: Not yet supported.
       break;
 
     } case 8: { //Analog type
-      //cout << "Analog[" << type.uint_type().width().value() << "]" << endl;
       I(false);//FIXME: Not yet supported.
       break;
 
     } case 9: { //AsyncReset type
-      //cout << "AsyncReset" << endl;
       vec.push_back(std::make_tuple(port_id, dir, 1));//FIXME: Anything else I need to do?
       break;
 
@@ -1098,7 +1124,7 @@ void Inou_firrtl::ListPortInfo(Lnast &lnast, const firrtl::FirrtlPB_Port& port, 
         }
       }
     } else {
-      I(false);//FIXME: I'm not sure yet how to deal with PORT_DIRECTION_UNKNOWN
+      I(false);//PORT_DIRECTION_UNKNOWN. Not supported by LNAST.
     }
     //fmt::print("\tname:{} dir:{} bits:{}\n", std::get<0>(val), std::get<1>(val), std::get<2>(val));
   }
@@ -1302,7 +1328,7 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
       break;
 
     } case 7: { //SubField
-      std::string rhs = HandleSubfieldAcc(lnast, expr.sub_field(), parent_node, true);
+      std::string rhs = HandleBundVecAcc(lnast, expr, parent_node, true);
 
       Lnast_nid idx_asg;
       if (lhs.substr(0,1) == "%") {
@@ -1338,9 +1364,11 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
       break;
 
     } case 11: { //FixedLiteral
-      auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg_FP"));
-      lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs)));
-      //FIXME: How do I represent a FixedPoint literal???
+      //FIXME: FixedPointLiteral not yet supported in LNAST
+      I(false);
+      //auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg_FP"));
+      //lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs)));
+      //...
       break;
 
     } default:
@@ -1355,7 +1383,7 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
 /* This function is used when I need the string to access something.
  * If it's a Reference or a Const, we format them as a string and return.
  * If it's a SubField, we have to create dot nodes and get the variable
- * name that points to the right bundle element (see HandleSubfieldAcc function). */
+ * name that points to the right bundle element (see HandleBundVecAcc function). */
 std::string Inou_firrtl::ReturnExprString(Lnast& lnast, const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, const bool is_rhs) {
   I(lnast.get_data(parent_node).type.is_stmts() || lnast.get_data(parent_node).type.is_cstmts());
 
@@ -1379,14 +1407,10 @@ std::string Inou_firrtl::ReturnExprString(Lnast& lnast, const firrtl::FirrtlPB_E
       expr_string = create_temp_var(lnast);
       HandleMuxAssign(lnast, expr, parent_node, expr_string);
       break;
-    } case 7: { //SubField
-      expr_string = HandleSubfieldAcc(lnast, expr.sub_field(), parent_node, is_rhs);
-      break;
-    } case 8: { //SubIndex
-      I(false); //FIXME: Need to implement.
-      break;
-    } case 9: { //SubAccess
-      I(false); //FIXME: Need to implement.
+    } case 7: //SubField
+      case 8: //SubIndex
+      case 9: { //SubAccess
+      expr_string = HandleBundVecAcc(lnast, expr, parent_node, is_rhs);
       break;
     } case 10: { //PrimOp
       // This case is special. We need to create a set of nodes for it and return the lhs of that node.

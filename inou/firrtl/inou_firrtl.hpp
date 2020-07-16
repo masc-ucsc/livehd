@@ -52,8 +52,8 @@ protected:
   void HandleTypeConvOp   (Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string &lhs);
   void AttachExprStrToNode(Lnast &lnast, const std::string_view access_str, Lnast_nid& parent_node);
 
-  std::string HandleSubfieldAcc(Lnast &lnast, const firrtl::FirrtlPB_Expression_SubField sub_field, Lnast_nid& parent_node, const bool is_rhs);
-  std::string CreateNameStack  (const firrtl::FirrtlPB_Expression_SubField sub_field, std::stack<std::string>& names);
+  std::string HandleBundVecAcc(Lnast &lnast, const firrtl::FirrtlPB_Expression expr, Lnast_nid& parent_node, const bool is_rhs);
+  std::string CreateNameStack  (Lnast&ln, Lnast_nid& parent_node, const firrtl::FirrtlPB_Expression& expr, std::stack<std::string>& names);
 
   // Deconstructing Protobuf Hierarchy
   void create_io_list(const firrtl::FirrtlPB_Type& type, uint8_t dir, const std::string &port_id,
