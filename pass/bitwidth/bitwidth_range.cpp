@@ -106,7 +106,7 @@ Bitwidth_range::Bitwidth_range(Bits_t bits) {
 
 
 void Bitwidth_range::set_sbits(Bits_t size) {
-  I(size<=Bits_bits); // Limit in bits
+  I(size<=(1UL<<Bits_bits)-1);
 
   if (size == 0) {
     overflow = true;
@@ -127,7 +127,7 @@ void Bitwidth_range::set_sbits(Bits_t size) {
 }
 
 void Bitwidth_range::set_ubits(Bits_t size) {
-  I(size<=Bits_bits); // Limit in bits
+  I(size<=(1UL<<Bits_bits)-1);
 
   if (size == 0) {
     overflow = true;
