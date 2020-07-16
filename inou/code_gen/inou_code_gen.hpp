@@ -4,7 +4,7 @@
 #include "lgraph.hpp"
 #include "pass.hpp"
 
-class Inou_cgen : public Pass {
+class Inou_code_gen : public Pass {
 private:
   enum class Cgen_type { Type_verilog, Type_prp, Type_cfg, Type_cpp };
 
@@ -40,7 +40,7 @@ private:
   static void to_cpp(Eprp_var &var);
 
 public:
-  Inou_cgen(const Eprp_var &var);
+  Inou_code_gen(const Eprp_var &var);
 
   static void setup();
 };
