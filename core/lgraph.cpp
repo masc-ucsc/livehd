@@ -903,6 +903,7 @@ Node LGraph::create_node_const(const Lconst &value) {
   Index_ID nid = memoize_const_hint[value.hash() % memoize_const_hint.size()];
   if (nid == 0
       || nid >= node_internal.size()
+      || !node_internal[nid].is_valid()
       || node_internal[nid].get_type() != Const_Op
       || get_type_const(nid) != value) {
     nid = create_node_int();
