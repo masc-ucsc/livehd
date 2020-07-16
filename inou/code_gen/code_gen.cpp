@@ -33,7 +33,7 @@ void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
     fmt::print("Processing stmt child {} at level {} \n",Code_gen::get_node_name(curr_node_data), curlvl);
     if (curr_node_data.type.is_assign()) {
       do_assign(curr_index);
-    } else if (curr_node_data.type.is_or()) {
+    } else if (curr_node_data.type.is_and() || curr_node_data.type.is_or() || curr_node_data.type.is_not() || curr_node_data.type.is_xor() || curr_node_data.type.is_logical_not() || curr_node_data.type.is_logical_and() || curr_node_data.type.is_logical_or()) {
       do_op(curr_index);
     } else if (curr_node_data.type.is_dot()) {
       do_dot(curr_index);
@@ -76,6 +76,7 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index) {
 
 //Process the operator (like and,or,etc.) node:
 void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
+  bool op_is_unary = false;
   auto curr_index = lnast->get_first_child(op_node_index);
   const auto& op_node_data = lnast->get_data(op_node_index);
   std::vector<std::string_view> op_str_vect;
@@ -91,6 +92,9 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
   }
   //op_str_vect now has all the children of the operation "op"
   key = op_str_vect.at(0);
+  if(is_temp_var(key) && op_str_vect.size()==2){
+    op_is_unary = true;
+  }
   for (int i = 1; i < op_str_vect.size(); i++) {
     std::string_view ref = op_str_vect.at(i);
     auto             map_it = ref_map.find(ref);
@@ -105,8 +109,9 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
       ref = process_number(ref);
     }
     // check if a number
+    if(op_is_unary) {absl::StrAppend(&val,op_node_data.type.debug_name_pyrope());}//TODO: change _pyrope to ye generic one!
     absl::StrAppend(&val, ref);
-    if ((i+1) != op_str_vect.size()) {
+    if ((i+1) != op_str_vect.size() && !op_is_unary) {
       absl::StrAppend(&val, " ", op_node_data.type.debug_name_pyrope(), " ");
     }
   }
@@ -114,7 +119,7 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
   if(is_temp_var(key)) {
     ref_map.insert(std::pair<std::string_view, std::string>(key, val));
   } else {
-    absl::StrAppend (&buffer_to_print, key, " ", op_node_data.type.debug_name_pyrope(), " ", val, stmt_sep());//put stmt separator here;
+    absl::StrAppend (&buffer_to_print, key, " ", op_node_data.type.debug_name_pyrope(), " ", val);//put stmt separator here;
   }
 
 }
