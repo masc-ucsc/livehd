@@ -413,7 +413,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
 
     if (op != Memory_Op && op != SubGraph_Op && !node.has_outputs()) continue;
 
-    uint16_t size = 0;
+    Bits_t size = 0;
 
     switch (op) {
       case GraphIO_Op:

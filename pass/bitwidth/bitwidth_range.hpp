@@ -25,12 +25,13 @@ public:
 
   Bitwidth_range(const Lconst &value);
   Bitwidth_range(const Lconst &min_val, const Lconst &max_val);
-  Bitwidth_range(uint16_t bits, bool sign);
-  Bitwidth_range(uint16_t bits);
+  Bitwidth_range(Bits_t bits, bool sign);
+  Bitwidth_range(Bits_t bits);
 
-  void     set_sbits(uint16_t size);
-  void     set_ubits(uint16_t size);
-  uint16_t get_bits() const;
+  bool     is_overflow() const { return overflow; };
+  void     set_sbits(Bits_t size);
+  void     set_ubits(Bits_t size);
+  Bits_t   get_bits() const;
   Lconst   get_max() const { return to_lconst(overflow, max); };
   Lconst   get_min() const { return to_lconst(overflow, min); };
 

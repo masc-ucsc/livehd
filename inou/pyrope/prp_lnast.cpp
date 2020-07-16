@@ -492,7 +492,7 @@ void Prp_lnast::eval_for_statement(mmap_lib::Tree_index idx_start_ast, mmap_lib:
   auto idx_stmts = lnast->add_child(idx_for_root, Lnast_node::create_stmts(lnast_seq));
 
   // add the name of our index tracking value
-  for (uint16_t i = 0; i < iterators.size(); i++) {
+  for (auto i = 0; i < iterators.size(); i++) {
     lnast->add_child(idx_for_root, iterators[i]);
     lnast->add_child(idx_for_root, iterator_range[i]);
   }

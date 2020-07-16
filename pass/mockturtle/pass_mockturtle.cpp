@@ -1063,7 +1063,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
       }
     } else {
       for (auto i = 0UL; i < bit_width; i++) {
-        uint16_t bits = (64 - __builtin_clzll(i));
+        Bits_t bits = (64 - __builtin_clzll(i));
         if (bits==0)
           bits=1;
 

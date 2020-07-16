@@ -93,19 +93,21 @@ Bitwidth_range::Bitwidth_range(const Lconst &min_val, const Lconst &max_val) {
 	}
 }
 
-Bitwidth_range::Bitwidth_range(uint16_t bits, bool _sign) {
+Bitwidth_range::Bitwidth_range(Bits_t bits, bool _sign) {
   if (_sign)
     set_sbits(bits);
   else
     set_ubits(bits);
 }
 
-Bitwidth_range::Bitwidth_range(uint16_t bits) {
+Bitwidth_range::Bitwidth_range(Bits_t bits) {
   set_ubits(bits);
 }
 
 
-void Bitwidth_range::set_sbits(uint16_t size) {
+void Bitwidth_range::set_sbits(Bits_t size) {
+  I(size<=Bits_bits); // Limit in bits
+
   if (size == 0) {
     overflow = true;
     max      = 326768;
@@ -124,7 +126,9 @@ void Bitwidth_range::set_sbits(uint16_t size) {
   }
 }
 
-void Bitwidth_range::set_ubits(uint16_t size) {
+void Bitwidth_range::set_ubits(Bits_t size) {
+  I(size<=Bits_bits); // Limit in bits
+
   if (size == 0) {
     overflow = true;
     max      = 326768;
@@ -144,20 +148,20 @@ void Bitwidth_range::set_ubits(uint16_t size) {
   }
 }
 
-uint16_t Bitwidth_range::get_bits() const {
-  uint16_t bits = 0;
+Bits_t Bitwidth_range::get_bits() const {
   if (overflow) {
-    bits = max;
-  } else {
-    auto abs_max = abs(max);
-    bits    = (sizeof(uint64_t) * 8 - __builtin_clzll(abs_max));
+    Bits_t bits = max;
+    if (min < 0) bits++;
+    if(bits>=(1UL<<Bits_bits)-1) // Limit in bits
+      return 0; // To indicate overflow (unable to compute)
+    return bits;
   }
 
-	// TODO: In theory, we could have an always negative number optimized to have 1 bit less
+  auto abs_max = abs(max);
+  Bits_t bits    = (sizeof(uint64_t) * 8 - __builtin_clzll(abs_max));
 	if (min < 0) bits++;
 
-  if (bits>=32768)
-    return 0;
+  I(bits<=(1UL<<Bits_bits)-1);
 
 	return bits;
 }

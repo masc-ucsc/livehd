@@ -7,6 +7,9 @@
 #include "boost/multiprecision/cpp_int.hpp"
 #include "absl/types/span.h"
 
+using Bits_t  = uint32_t;  // bits type (future use)
+constexpr int     Bits_bits      = 17;
+
 class Lconst {
 private:
   constexpr static int char_to_bits[256] = {
@@ -64,7 +67,7 @@ private:
     /* F0 */ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
   };
 
-  static uint16_t read_bits(std::string_view txt);
+  static Bits_t read_bits(std::string_view txt);
   void process_ending(std::string_view txt, size_t pos);
 
 protected:
@@ -75,16 +78,16 @@ protected:
   bool     explicit_bits;
   bool     sign;
 
-  uint16_t bits;
+  Bits_t bits;
   Number   num;
 
   void pyrope_bits(std::string *str) const;
 
   std::string_view skip_underscores(std::string_view txt) const;
 
-  Lconst(bool str, bool a, bool b, bool c, uint16_t d, Number n) : explicit_str(str), explicit_sign(a), explicit_bits(b), sign(c), bits(d), num(n) {}
+  Lconst(bool str, bool a, bool b, bool c, Bits_t d, Number n) : explicit_str(str), explicit_sign(a), explicit_bits(b), sign(c), bits(d), num(n) {}
 
-  uint16_t calc_bits() const {
+  Bits_t calc_bits() const {
     if (num == 0)
       return 1;
     if (num>0)
@@ -99,7 +102,7 @@ protected:
   }
 
   Number get_num() const { return num; }
-  Number get_num(uint16_t b) const {
+  Number get_num(Bits_t b) const {
     if (num >= 0) {
       assert(b>=bits);
       return num;
@@ -116,7 +119,7 @@ public:
   Lconst(std::string_view txt);
   Lconst(Number v);
   Lconst(uint64_t v);
-  Lconst(uint64_t v, uint16_t bits);
+  Lconst(uint64_t v, Bits_t bits);
   Lconst();
 
   Container serialize() const;
@@ -126,13 +129,13 @@ public:
 
   [[nodiscard]] Lconst add_op(const Lconst &o) const;
   [[nodiscard]] Lconst sub_op(const Lconst &o) const;
-  [[nodiscard]] Lconst lsh_op(uint16_t amount) const;
+  [[nodiscard]] Lconst lsh_op(Bits_t amount) const;
   [[nodiscard]] Lconst or_op(const Lconst &o) const;
   [[nodiscard]] Lconst and_op(const Lconst &o) const;
 
   [[nodiscard]] bool   eq_op(const Lconst &o) const;
 
-  [[nodiscard]] Lconst adjust_bits(uint16_t amount) const;
+  [[nodiscard]] Lconst adjust_bits(Bits_t amount) const;
 
   bool     is_unsigned() const { return !sign; }
   // WARNING: unsigned can still be negative. It is a way to indicate as many 1s are needed
@@ -140,7 +143,7 @@ public:
   bool     is_explicit_sign() const { return explicit_sign; }
   bool     is_explicit_bits() const { return explicit_bits; }
   bool     is_string() const { return explicit_str; }
-  uint16_t get_bits() const { return bits; }
+  Bits_t get_bits() const { return bits; }
 
   bool is_i() const { return !explicit_str && bits <= 62; } // 62 to handle sign (int)
   long int to_i() const; // must fit in int or exception raised
@@ -158,7 +161,7 @@ public:
   [[nodiscard]] const Lconst operator-(uint64_t other) const { return sub_op(Lconst(other)); }
 
   [[nodiscard]] const Lconst operator<<(const Lconst &other) const { return lsh_op(other.to_i()); }
-  [[nodiscard]] const Lconst operator<<(uint16_t other) const { return lsh_op(other); }
+  [[nodiscard]] const Lconst operator<<(Bits_t other) const { return lsh_op(other); }
 
   [[nodiscard]] const Lconst operator|(const Lconst &other) const { return or_op(other); }
   [[nodiscard]] const Lconst operator|(uint64_t other) const { return or_op(Lconst(other)); }

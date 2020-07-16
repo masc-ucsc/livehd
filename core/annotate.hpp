@@ -24,7 +24,7 @@ struct Ann_name {
   static constexpr char ssa[]        = "ssa";
 };
 
-using Ann_node_pin_offset = Attribute<Ann_name::wireoffset, Node_pin, mmap_lib::map<Node_pin::Compact_class_driver, uint16_t> >;
+using Ann_node_pin_offset = Attribute<Ann_name::wireoffset, Node_pin, mmap_lib::map<Node_pin::Compact_class_driver, Bits_t> >;
 
 using Ann_node_pin_name =
     Attribute<Ann_name::wirename, Node_pin, mmap_lib::bimap<Node_pin::Compact_class_driver, std::string_view> >;

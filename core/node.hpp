@@ -274,8 +274,9 @@ public:
   void set_color(int color);
   int  get_color() const;
   bool has_color() const;
-
   // END ATTRIBUTE ACCESSORS
+
+  void dump();
 };
 
 namespace mmap_lib {

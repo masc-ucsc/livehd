@@ -120,6 +120,9 @@ protected:
     return node_internal[pin.get_idx()].is_sink_setup() && node_internal[pin.get_idx()].has_pin_inputs();
   }
 
+  void del_driver2node_int(Node &driver, const Node &sink);
+  void del_sink2node_int(const Node &driver, Node &sink);
+
   bool del_edge_driver_int(const Node_pin &dpin, const Node_pin &spin);
   bool del_edge_sink_int(const Node_pin &dpin, const Node_pin &spin);
 

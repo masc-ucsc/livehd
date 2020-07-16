@@ -337,8 +337,8 @@ public:
   std::string_view get_type_sub_io_name() const;
   std::string_view get_type_sub_pin_name() const;
 
-  void     set_offset(uint16_t offset);
-  uint16_t get_offset() const;
+  void     set_offset(Bits_t offset);
+  Bits_t   get_offset() const;
 
   const Ann_ssa &     get_ssa() const;
   Ann_ssa *           ref_ssa();
