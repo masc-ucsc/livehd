@@ -9,8 +9,6 @@ void Code_gen::generate(){
   const auto& node_data = lnast->get_data(root_index);
   fmt::print("\n\nprocessing LNAST tree\n\n");
   if (node_data.type.is_top()) {
-    //never used//const auto& top_child_index = lnast->get_first_child(root_index);
-   // fmt::print("\n\nprocessing LNAST tree root: {} ", static_cast<Lnast_ntype::Lnast_ntype_int>(node_data.type.get_raw_ntype()));
     fmt::print("\nprocessing LNAST tree root text: {} ", node_data.token.text);
     fmt::print("processing root->child");
     do_stmts(lnast->get_child(root_index));
@@ -72,15 +70,6 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index) {
   } else {
     absl::StrAppend(&buffer_to_print, key, " ", "=", " ", (std::string)ref);//stmt sep here;
   }
-/*  if (assign_str_vect.size()==2) {
-    key = assign_str_vect.at(0);
-    val = assign_str_vect.at(1);
-  } else {
-    fmt::print("check vector.\n");
-  }
-//  absl::StrAppend(&buffer_to_print, assign_str);
-  absl::StrAppend(&buffer_to_print, key, " ", "=", " ", val);
-//  assign_str = "";*/
 }
 
 //Process the operator (like and,or,etc.) node:
