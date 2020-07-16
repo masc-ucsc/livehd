@@ -561,7 +561,7 @@ bool Pass_cprop::process_tuple_get(Node &node) {
  
   auto parent_dpin = node.get_sink_pin(0).get_driver_pin();
   auto parent_node = parent_dpin.get_node();
-  if (parent_node.get_sink_pin(1).get_driver_pin().get_name() == "__wire") {
+  if (parent_node.has_sink_pin_connected(1) && parent_node.get_sink_pin(1).get_driver_pin().get_name() == "__wire") {
     //this tuple_add is the dummy wire, get its parent to start analysis
     fmt::print("parent_node:{}\n", parent_node.debug_name());
     auto spin = parent_node.get_sink_pin(0);
