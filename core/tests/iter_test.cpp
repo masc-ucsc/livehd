@@ -269,7 +269,6 @@ bool bwd(int n) {
 
 void simple_line() {
 
-
   std::string gname = "top_0";
   LGraph *g0 = LGraph::create("lgdb_iter_test", "g0", "test");
   auto &sfuture = g0->ref_library()->setup_sub("future", "test");

@@ -1,21 +1,12 @@
-my_func::{
-  a = 3             // scalar
-  foo = a           // scalar, 3
-  
-  a = a ++ 4        // tuple, (3,4)
-  b = a             // tuple, (3,4)
-  
-  c = b.0
-  d = a[1] 
-  
-  %out = c + d      // scalar, 7
-  %out = %out ++ a  // tuple, (7, 3, 4)
-  %out2 = a ++ %out // tuple, (3, 4, 7, 3, 4)
-  %out3 = foo       // scalar, 3 
-}
-
-result = my_func()  // hier-tuple, ((7, 3, 4), (3, 4, 7, 3, 4), 3)
-
-%out = result.out.0 + result.out2.4 + result.out3 // 7 + 4 + 3 = 14
+ sum = ::{
+   %o1 = $a + $b
+   %o2 = $a - $b
+ }
+ 
+ i = (a = 3, b = 2)
+ tmp = sum(i)
+ %out1 = tmp.o1
+ %out2 = tmp.o2
 
 
+// func_xor::{}
