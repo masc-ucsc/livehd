@@ -105,6 +105,9 @@ private:
   // fill out the connections in an unfilled matrix
   void wire_matrix(cost_matrix& m);
   
+  // clear out any temp nodes, if they exist.
+  void prune_matrix(cost_matrix& m);
+  
   // make a partition of the graph minimizing the number of edges crossing the cut and keeping in mind area (modified kernighan-lin algorithm)
   std::pair<std::vector<pnode>, std::vector<pnode>> min_wire_cut(cost_matrix& m);
   

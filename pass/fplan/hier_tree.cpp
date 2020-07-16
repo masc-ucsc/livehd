@@ -35,7 +35,6 @@ void Hier_tree::wire_matrix(cost_matrix& m) {
 // creates a cost matrix for doing a min-cut on the root node
 cost_matrix Hier_tree::make_matrix(pnode root) {
   unsigned int root_size = size(root);
-  I(root_size % 2 == 0); // TODO: handle odd numbers of nodes
   
   cost_matrix matrix;
   matrix.reserve(root_size);
@@ -58,20 +57,52 @@ cost_matrix Hier_tree::make_matrix(pnode root) {
   
   alloc_matrix(root);
 
+  if (matrix.size() % 2) {
+    // insert a temp node with no connections to make the matrix even
+    // (we know that there are no temp nodes that need to be deleted since the matrix is new)
+
+    for (cost_matrix_row& r : matrix) {
+      r.connect_cost.push_back(0);
+    }
+
+    pnode temp = std::make_shared<Hier_node>();
+    temp->name = "_temp"; // give the temp node a unique name
+    matrix.push_back({ temp, std::vector<int>(matrix.size() + 1, 0), 0xCAFE, true, which_set });
+    
+    std::cout << "inserting temp node into set " << (which_set ? "b" : "a") << "." << std::endl;
+  }
+
   wire_matrix(matrix);
 
   return matrix;
 }
 
 // splits a cost matrix into two sub-matrices for a recursive min-cut call
+// if the split is not even, a temporary node is added at the end to make it even.
 std::pair<cost_matrix, cost_matrix> Hier_tree::halve_matrix(const cost_matrix& old_matrix) {
   cost_matrix ma, mb;
   
   unsigned int which_set_a = 0;
   unsigned int which_set_b = 0;
 
-  const unsigned int new_size = old_matrix.size() / 2;
+  unsigned int old_size = old_matrix.size();
+  unsigned int new_size = old_size / 2;
+
+  bool need_extra_row = false;
   
+  if (new_size % 2) {
+    // matrix is odd, so do something to make it even
+    if (old_matrix[old_matrix.size() - 1].node->name == "_temp") {
+      // matrix has a temp node, so remove it
+      old_size--;
+      new_size--;
+    } else {
+      // matrix doesn't have a temp node, so add one
+      new_size++;
+      need_extra_row = true;
+    }
+  }
+
   ma.reserve(new_size);
   mb.reserve(new_size);
   
@@ -88,18 +119,49 @@ std::pair<cost_matrix, cost_matrix> Hier_tree::halve_matrix(const cost_matrix& o
     }
   }
 
+  if (need_extra_row) {
+    pnode n = std::make_shared<Hier_node>();
+    n->name = "_temp";
+    cost_matrix_row temp_row = { n, std::vector<int>(new_size, 0), 0xCAFE, true };
+    
+    temp_row.set = which_set_a;
+    ma.push_back(temp_row);
+    
+    temp_row.set = which_set_b;
+    mb.push_back(temp_row);
+  }
+
   wire_matrix(ma);
   wire_matrix(mb);
   
   return std::pair(ma, mb);
 }
 
+void Hier_tree::prune_matrix(cost_matrix& m) {
+  if (m[m.size() - 1].node->name == "_temp") {
+    m.erase(m.cend() - 1);
+    for (cost_matrix_row& r : m) {
+      r.connect_cost.erase(r.connect_cost.cend() - 1);
+    }
+  }
+}
+
 std::pair<std::vector<pnode>, std::vector<pnode>> Hier_tree::min_wire_cut(cost_matrix& m) {
 
   const unsigned int graph_size = m.size();
   const unsigned int set_size = m.size() / 2;
+
+  I(graph_size % 2 == 0); // cost matrix should be symmetric!
   
   int best_decrease = 0;
+
+  if (m.size() <= 2) {
+    std::vector<pnode> a, b;
+    a.push_back(m[0].node);
+    b.push_back(m[1].node);
+    
+    return std::pair(a, b);
+  }
 
   do {
     // (re)calculate delta costs for each node
