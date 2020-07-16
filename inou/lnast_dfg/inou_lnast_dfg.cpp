@@ -779,7 +779,6 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
   }
 
 
-
   const auto it = name2dpin.find(name);
   if (it != name2dpin.end()) {
     auto op = it->second.get_node().get_type().op;
