@@ -721,7 +721,7 @@ void Pass_bitwidth::bw_pass(LGraph *lg) {
 			auto bw_bits = it->second.get_bits();
 
       if (bw_bits == 0 && it->second.is_overflow()) {
-        fmt::print("bitwidth: dpin:{} has over {}bits (simplify first!)\n", dpin.debug_name(), it->second.max);
+        fmt::print("bitwidth: dpin:{} has over {}bits (simplify first!)\n", dpin.debug_name(), it->second.get_raw_max());
         continue;
       }
 
