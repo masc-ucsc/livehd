@@ -27,6 +27,8 @@ public:
     max = r.max;
     min = r.min;
     overflow = r.overflow;
+
+    return *this;
   }
 
   Bitwidth_range(const Lconst &value);
