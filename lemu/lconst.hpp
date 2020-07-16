@@ -152,6 +152,7 @@ public:
   std::string to_verilog() const;
   std::string to_string() const;
   std::string to_pyrope() const;
+  std::string to_firrtl() const;
 
   // Operator list
   [[nodiscard]] const Lconst operator+(const Lconst &other) const { return add_op(other); }

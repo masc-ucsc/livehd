@@ -513,6 +513,39 @@ std::string Lconst::to_pyrope() const {
   return str;
 }
 
+std::string Lconst::to_firrtl() const {
+
+  /*Note->hunter: FIRRTL-Proto requires the string output
+   * here is a decimal value (no 0x or 0d allowed. Only #) */
+  /*if (explicit_str) {
+    // Either string or 0b with special characters like ?xz
+    auto str = to_string();
+    if (str.size()*8 == bits)
+      return absl::StrCat("'", str, "'");
+
+    I(str[0] != '-');
+    auto str2 = absl::StrCat("0b", str);
+    pyrope_bits(&str2);
+    return str2;
+  }*/
+
+  const auto v = get_num(bits);
+  std::stringstream ss;
+
+  if (v<0)
+    ss << -v;
+  else
+    ss << v;
+
+  std::string str;
+  if (is_negative())
+    str.append(1,'-');
+
+  absl::StrAppend(&str, ss.str());
+
+  return str;
+}
+
 long int Lconst::to_i() const {
   I(is_i());
   return static_cast<long int>(num);
