@@ -732,7 +732,7 @@ void Pass_cprop::trans(LGraph *g) {
 #endif
       continue;
     }
-		fmt::print("node:{} inp:{} out:{}\n",node.debug_name(), node.get_num_inputs(), node.get_num_outputs());
+		//fmt::print("node:{} inp:{} out:{}\n",node.debug_name(), node.get_num_inputs(), node.get_num_outputs());
 
     try_collapse_forward(node, inp_edges_ordered);
   }
