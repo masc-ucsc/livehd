@@ -30,7 +30,6 @@ void Inou_firrtl::do_tofirrtl(std::shared_ptr<Lnast> ln, firrtl::FirrtlPB_Circui
   const auto top   = ln->get_root();
   const auto stmts = ln->get_first_child(top);
   const auto top_name = (std::string)ln->get_name(top);
-  //FIXME: I need to add a "top" message to Circuit.
   auto top_msg = circuit->add_top();
   top_msg->set_name(top_name);//FIXME: Placeholder for now, need to figure out which LNAST is "top"
 
@@ -47,8 +46,7 @@ void Inou_firrtl::do_tofirrtl(std::shared_ptr<Lnast> ln, firrtl::FirrtlPB_Circui
 
 void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::FirrtlPB_Statement_When *when, uint8_t pos_to_add_to) {
   const auto ntype = ln.get_data(lnidx).type;
-  // FIXME->sh: how to use switch to gain performance?
-  if (ntype.is_assign()) {
+  if (ntype.is_assign() || ntype.is_dp_assign()) {
     auto fstmt = pos_to_add_to == 0 ? when->add_consequent() : when->add_otherwise();
     process_ln_assign_op(ln, lnidx, fstmt);
   } else if (ntype.is_nary_op()) {
@@ -73,8 +71,6 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
     process_ast_as_op(dfg, lnidx);
   } else if (ntype.is_label()) {
     process_ast_label_op(dfg, lnidx);
-  } else if (ntype.is_dp_assign()) {
-    process_ast_dp_assign_op(dfg, lnidx);
   } else if (ntype.is_tuple()) {
     process_ast_tuple_struct(dfg, lnidx);
   } else if (ntype.is_tuple_concat()) {
@@ -84,9 +80,13 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
     auto nested_when_stmt = process_ln_if_op(ln, lnidx);
     auto fstmt = pos_to_add_to == 0 ? when->add_consequent() : when->add_otherwise();
     fstmt->set_allocated_when(nested_when_stmt);
-  }/* else if (ntype.is_uif()) {
-    process_ast_uif_op(dfg, lnidx);
-  } else if (ntype.is_func_call()) {
+  } else if (ntype.is_range()) {
+    process_ln_range_op(ln, lnidx);
+  } else if (ntype.is_bit_select()) {
+    auto fstmt = pos_to_add_to == 0 ? when->add_consequent() : when->add_otherwise();
+    process_ln_bitsel_op(ln, lnidx, fstmt);
+  }
+  /*} else if (ntype.is_func_call()) {
     process_ast_func_call_op(dfg, lnidx);
   } else if (ntype.is_func_def()) {
     process_ast_func_def_op(dfg, lnidx);
@@ -94,7 +94,7 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
     process_ast_for_op(dfg, lnidx);
   } else if (ntype.is_while()) {
     process_ast_while_op(dfg, lnidx);
-  } else if (ntype.is_invalid()) { // FIXME->sh: add ignore type in LNAST?
+  } else if (ntype.is_invalid()) {
     continue;
   }*/ else if (ntype.is_const()) {
     I(ln.get_name(lnidx) == "default_const");
@@ -108,10 +108,15 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
   }
 }
 
+/* TODO:
+ *   dots (needed for signedness/subgraphs/pick)
+ *   nodes needed for join_op
+ *   nodes needed for pick_op: range_op bit_select
+ *   nodes needed for subgraphs
+ */
 void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::FirrtlPB_Module_UserModule *umod) {
   const auto ntype = ln.get_data(lnidx).type;
-  // FIXME->sh: how to use switch to gain performance?
-  if (ntype.is_assign()) {
+  if (ntype.is_assign() || ntype.is_dp_assign()) {
     auto fstmt = umod->add_statement();
     process_ln_assign_op(ln, lnidx, fstmt);
   } else if (ntype.is_nary_op()) {
@@ -136,8 +141,6 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
     process_ast_as_op(dfg, lnidx);
   } else if (ntype.is_label()) {
     process_ast_label_op(dfg, lnidx);
-  } else if (ntype.is_dp_assign()) {
-    process_ast_dp_assign_op(dfg, lnidx);
   } else if (ntype.is_tuple()) {
     process_ast_tuple_struct(dfg, lnidx);
   } else if (ntype.is_tuple_concat()) {
@@ -147,9 +150,13 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
     auto when_stmt = process_ln_if_op(ln, lnidx);
     auto fstmt = umod->add_statement();
     fstmt->set_allocated_when(when_stmt);
-  }/* else if (ntype.is_uif()) {
-    process_ast_uif_op(dfg, lnidx);
-  } else if (ntype.is_func_call()) {
+  } else if (ntype.is_range()) {
+    process_ln_range_op(ln, lnidx);
+  } else if (ntype.is_bit_select()) {
+    auto fstmt = umod->add_statement();
+    process_ln_bitsel_op(ln, lnidx, fstmt);
+  }
+  /*} else if (ntype.is_func_call()) {
     process_ast_func_call_op(dfg, lnidx);
   } else if (ntype.is_func_def()) {
     process_ast_func_def_op(dfg, lnidx);
@@ -157,7 +164,7 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
     process_ast_for_op(dfg, lnidx);
   } else if (ntype.is_while()) {
     process_ast_while_op(dfg, lnidx);
-  } else if (ntype.is_invalid()) { // FIXME->sh: add ignore type in LNAST?
+  } else if (ntype.is_invalid()) {
     continue;
   }*/ else if (ntype.is_const()) {
     I(ln.get_name(lnidx) == "default_const");
@@ -171,37 +178,57 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
   }
 }
 
+/* Since the range op only indicates that there is a
+ * value range from the low value to the high value,
+ * this is added to a map for later access. */
+//Note->hunter: This only accepts positive values, and not LNAST's negative range capability.
+void Inou_firrtl::process_ln_range_op(Lnast &ln, const Lnast_nid &lnidx_range) {
+  auto lhs_node = ln.get_first_child(lnidx_range);
+  auto range_lo = ln.get_sibling_next(lhs_node);
+  auto range_hi = ln.get_sibling_next(range_lo);
+
+  name_to_range_map[ln.get_name(lhs_node)] = {range_lo, range_hi};
+}
+
+void Inou_firrtl::process_ln_bitsel_op(Lnast &ln, const Lnast_nid &lnidx_bitsel, firrtl::FirrtlPB_Statement* fstmt) {
+  auto lhs_node  = ln.get_first_child(lnidx_bitsel);
+  auto elem_node = ln.get_sibling_next(lhs_node);
+  auto range_acc = ln.get_sibling_next(elem_node);
+
+  auto range_pair = name_to_range_map[ln.get_name(range_acc)];
+  // Note->hunter: FIRRTL requires range values to be constant numbers.
+  I(ln.get_data(range_pair.first).type.is_const() && ln.get_data(range_pair.second).type.is_const());
+
+  // Create rhs expr, make if a prim op of type "extract bits"
+  firrtl::FirrtlPB_Expression *rhs_expr = new firrtl::FirrtlPB_Expression();
+  auto firrtl_oper_code = get_firrtl_oper_code(ln.get_data(lnidx_bitsel).type);
+  firrtl::FirrtlPB_Expression_PrimOp *rhs_prim_op = new firrtl::FirrtlPB_Expression_PrimOp();
+  rhs_prim_op->set_op(firrtl_oper_code);
+
+  // Add arguments to "EXTRACT_BITS" op
+  add_refcon_as_expr(ln, elem_node, rhs_prim_op->add_arg());
+  add_const_as_ilit(ln, range_pair.second, rhs_prim_op->add_const_());
+  add_const_as_ilit(ln, range_pair.first, rhs_prim_op->add_const_());
+  rhs_expr->set_allocated_prim_op(rhs_prim_op);
+
+  // Now assign lhs to rhs.
+  make_assignment(ln, lhs_node, rhs_expr, fstmt);
+}
+
 void Inou_firrtl::process_ln_assign_op(Lnast &ln, const Lnast_nid &lnidx_assign, firrtl::FirrtlPB_Statement* fstmt) {
   auto c0 = ln.get_first_child(lnidx_assign);
   auto c1 = ln.get_sibling_next(c0);
   auto ntype_c0 = ln.get_type(c0);
   I(ntype_c0.is_ref());
   auto ntype_c1 = ln.get_type(c1);
-  I(ntype_c1.is_const() || ntype_c1.is_ref());//FIXME: May have to expand to other types.
+  I(ntype_c1.is_const() || ntype_c1.is_ref());
 
   // Form expression that holds RHS contents.
   firrtl::FirrtlPB_Expression *rhs_expr = new firrtl::FirrtlPB_Expression();
   add_refcon_as_expr(ln, c1, rhs_expr);
 
-  /* Now handle LHS. If LHS is an output or register then
-   * the statement should be a Connect. If it isn't, then the
-   * statement should be a Node. */
-  if (is_outp(ln.get_name(c0)) || is_reg(ln.get_name(c0)) || is_wire(ln.get_name(c0))) {
-    create_connect_stmt(ln, c0, rhs_expr, fstmt);
-
-    #ifdef PRINT_DEBUG
-    fmt::print("{} <= {}\n", get_firrtl_name_format(ln, c0), get_firrtl_name_format(ln, c1));
-    #endif
-
-  } else {
-    /* If I'm assigning to some wire/intermediate,
-     * I can make FIRRTL node statement. */
-    create_node_stmt(ln, c0, rhs_expr, fstmt);
-
-    #ifdef PRINT_DEBUG
-    fmt::print("node {} = {}\n", get_firrtl_name_format(ln, c0), get_firrtl_name_format(ln, c1));
-    #endif
-  }
+  // Now assign lhs to rhs.
+  make_assignment(ln, c0, rhs_expr, fstmt);
 }
 
 void Inou_firrtl::process_ln_not_op(Lnast &ln, const Lnast_nid &lnidx_not, firrtl::FirrtlPB_Statement* fstmt) {
@@ -210,7 +237,7 @@ void Inou_firrtl::process_ln_not_op(Lnast &ln, const Lnast_nid &lnidx_not, firrt
   auto ntype_c0 = ln.get_type(c0);
   I(ntype_c0.is_ref());
   auto ntype_c1 = ln.get_type(c1);
-  I(ntype_c1.is_const() || ntype_c1.is_ref());//FIXME: May have to expand to other types.
+  I(ntype_c1.is_const() || ntype_c1.is_ref());
 
   // Form expression that holds RHS contents.
   firrtl::FirrtlPB_Expression *rhs_expr = new firrtl::FirrtlPB_Expression();
@@ -220,25 +247,8 @@ void Inou_firrtl::process_ln_not_op(Lnast &ln, const Lnast_nid &lnidx_not, firrt
   add_refcon_as_expr(ln, c1, rhs_prim_op->add_arg());
   rhs_expr->set_allocated_prim_op(rhs_prim_op);
 
-  /* Now handle LHS. If LHS is an output or register then
-   * the statement should be a Connect. If it isn't, then the
-   * statement should be a Node. */
-  if (is_outp(ln.get_name(c0)) || is_reg(ln.get_name(c0)) || is_wire(ln.get_name(c0))) {
-    create_connect_stmt(ln, c0, rhs_expr, fstmt);
-
-    #ifdef PRINT_DEBUG
-    fmt::print("{} <= not({})\n", get_firrtl_name_format(ln, c0), get_firrtl_name_format(ln, c1));
-    #endif
-
-  } else {
-    /* If I'm assigning to some wire/intermediate,
-     * I can make FIRRTL node statement. */
-    create_node_stmt(ln, c0, rhs_expr, fstmt);
-
-    #ifdef PRINT_DEBUG
-    fmt::print("node {} = not({})\n", get_firrtl_name_format(ln, c0), get_firrtl_name_format(ln, c1));
-    #endif
-  }
+  // Now assign lhs to rhs.
+  make_assignment(ln, c0, rhs_expr, fstmt);
 }
 
 void Inou_firrtl::process_ln_nary_op(Lnast &ln, const Lnast_nid &lnidx_op, firrtl::FirrtlPB_Statement* fstmt) {
@@ -290,23 +300,22 @@ void Inou_firrtl::process_ln_nary_op(Lnast &ln, const Lnast_nid &lnidx_op, firrt
     child_count++;
   }
 
-  if (is_outp(ln.get_name(lnidx_lhs)) || is_reg(ln.get_name(lnidx_lhs)) || is_wire(ln.get_name(lnidx_lhs))) {
-    create_connect_stmt(ln, lnidx_lhs, rhs_highest_expr, fstmt);
+  // Now assign lhs to rhs.
+  make_assignment(ln, lnidx_lhs, rhs_highest_expr, fstmt);
+}
 
-    #ifdef PRINT_DEBUG
-    fmt::print("{} <= nary_op...\n", get_firrtl_name_format(ln, lnidx_lhs));
-    #endif
+/* Assign LHS to RHS Determines whether LHS is intermediate or not.
+ * If so, make assignment type: node. Otherwise, do normal connect. */
+void Inou_firrtl::make_assignment(Lnast &ln, const Lnast_nid &lnidx_lhs, firrtl::FirrtlPB_Expression* expr_rhs, firrtl::FirrtlPB_Statement* fstmt) {
+  if (is_outp(ln.get_name(lnidx_lhs)) || is_reg(ln.get_name(lnidx_lhs)) || is_wire(ln.get_name(lnidx_lhs))) {
+    create_connect_stmt(ln, lnidx_lhs, expr_rhs, fstmt);
 
   } else {
     /* If I'm assigning to some wire/intermediate,
-     * I can make FIRRTL node statement. */
-    create_node_stmt(ln, lnidx_lhs, rhs_highest_expr, fstmt);
+     * this should make FIRRTL node statement. */
+    create_node_stmt(ln, lnidx_lhs, expr_rhs, fstmt);
 
-    #ifdef PRINT_DEBUG
-    fmt::print("node {} = nary_op...\n", get_firrtl_name_format(ln, lnidx_lhs));
-    #endif
   }
-
 }
 
 void Inou_firrtl::add_cstmts(Lnast &ln, const Lnast_nid &lnidx_if, firrtl::FirrtlPB_Module_UserModule *umod) {
@@ -423,15 +432,13 @@ void Inou_firrtl::create_connect_stmt(Lnast &ln, const Lnast_nid &lhs, firrtl::F
 }
 
 /* If the LHS of some sort of statement that does assigning
- * is not a register or an output, then the statement needs
- * to be treated as a FIRRTL "node" statement. */
-//FIXME: Maybe it coudl also be a wire???
+ * is not a register or an output or a wire, then the statement
+ * needs to be treated as a FIRRTL "node" statement. */
 void Inou_firrtl::create_node_stmt(Lnast &ln, const Lnast_nid &lhs, firrtl::FirrtlPB_Expression* rhs_expr, firrtl::FirrtlPB_Statement* fstmt) {
   firrtl::FirrtlPB_Statement_Node *node = new firrtl::FirrtlPB_Statement_Node();
   node->set_id((std::string)ln.get_name(lhs));
   node->set_allocated_expression(rhs_expr);
 
-  // Have the generic statement of type "node".
   fstmt->set_allocated_node(node);
 }
 
@@ -454,7 +461,7 @@ firrtl::FirrtlPB_Expression_PrimOp_Op Inou_firrtl::get_firrtl_oper_code(const Ln
     return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_LESS_EQ;
   } else if (ntype.is_lt()) {
     return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_LESS;
-  } else if (ntype.is_same()) {//FIXME: Is this the best way to handle "same" node type?
+  } else if (ntype.is_same()) {
     return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_EQUAL;
   } else if (ntype.is_and()) {
     return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_BIT_AND;
@@ -462,7 +469,9 @@ firrtl::FirrtlPB_Expression_PrimOp_Op Inou_firrtl::get_firrtl_oper_code(const Ln
     return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_BIT_OR;
   } else if (ntype.is_xor()) {
     return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_BIT_XOR;
-  } else {
+  } else if (ntype.is_bit_select()) {
+    return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_EXTRACT_BITS;
+  }else {
     I(false); //some nary op not yet supported
     return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_UNKNOWN;
   }

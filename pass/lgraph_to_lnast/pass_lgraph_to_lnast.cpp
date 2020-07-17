@@ -425,65 +425,38 @@ void Pass_lgraph_to_lnast::attach_join_node(Lnast& lnast, Lnast_nid& parent_node
 }
 
 void Pass_lgraph_to_lnast::attach_pick_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin &pin) {
-  // PID: 0 = A, 1 = Offset... Y = A[Offset+(Y_Bitwidth-1) : Offset]
-  /* Y = pick(X, 3) in LGraph form turns into Lnast form as:
-   *   dot           plus      minus     range_op   bit_select   assign
-   *  / | \         / | \      / | \      / | \       / | \      /   \
-   * T0 Y __bits   T1 T0 0d3  T2 T1 0d1  T3 T2 0d3   T4 X T3    Y     T4 */
-  //FIXME: the above could possibly be wrong if Y's bitwidth was smaller than X's.
-  bool have_offset = false;
-  bool have_var = false;
+  // PID: 0 = A, 1 = Offset... Y = A[Offset+(Y_Bitwidth) : Offset]
+  /* Y = pick(X, off) in LGraph form turns into Lnast form as:
+   *   range_op   bit_select
+   *   / | \       / | \
+   * T0  lo hi    Y  X  T0
+   * where lo = offset, hi = offset + y.bits() - 1 */
   Node_pin offset_pin, var_pin;
   for(const auto inp : pin.get_node().inp_edges()) {
-    if(inp.sink.get_pid() == 0) { //A
-      I(!have_var);
-      have_var = true;
+    if(inp.sink.get_pid() == 0) {
       var_pin = inp.driver;
-    } else if(inp.sink.get_pid() == 1) { //Offset
-      I(!have_offset);
-      have_offset = true;
+    } else if(inp.sink.get_pid() == 1) {
       offset_pin = inp.driver;
     } else {
-      I(false); //Pick pins should only have 1 pick and 1 offset.
+      I(false); //No other sink pin id should be used.
     }
   }
-  I(have_offset & have_var);
 
   auto pin_str = lnast.add_string(lnast.add_string(dpin_get_name(pin)));
   auto t0_str = create_temp_var(lnast);
-  auto t1_str = create_temp_var(lnast);
-  auto t2_str = create_temp_var(lnast);
-  auto t3_str = create_temp_var(lnast);
-  auto t4_str = create_temp_var(lnast);
-
-  auto dot_node = lnast.add_child(parent_node, Lnast_node::create_dot("dot_pick"));
-  lnast.add_child(dot_node, Lnast_node::create_ref(t0_str));
-  lnast.add_child(dot_node, Lnast_node::create_ref(pin_str));
-  lnast.add_child(dot_node, Lnast_node::create_ref("__bits"));
-
-  auto plus_node = lnast.add_child(parent_node, Lnast_node::create_plus("plus_pick"));
-  lnast.add_child(plus_node, Lnast_node::create_ref(t1_str));
-  lnast.add_child(plus_node, Lnast_node::create_ref(t0_str));
-  attach_child(lnast, plus_node, offset_pin);
-
-  auto minus_node = lnast.add_child(parent_node, Lnast_node::create_minus("minus_pick"));
-  lnast.add_child(minus_node, Lnast_node::create_ref(t2_str));
-  lnast.add_child(minus_node, Lnast_node::create_ref(t1_str));
-  lnast.add_child(minus_node, Lnast_node::create_const("1"));
+  auto lo_str = lnast.add_string(offset_pin.get_node().get_type_const().to_pyrope());
+  auto hi_val = offset_pin.get_node().get_type_const() + Lconst(pin.get_bits() - 1);
+  auto hi_str = lnast.add_string(hi_val.to_pyrope());
 
   auto range_node = lnast.add_child(parent_node, Lnast_node::create_range("range_pick"));
-  lnast.add_child(range_node, Lnast_node::create_ref(t3_str));
-  lnast.add_child(range_node, Lnast_node::create_ref(t2_str));
-  attach_child(lnast, range_node, offset_pin);
+  lnast.add_child(range_node, Lnast_node::create_ref(t0_str));
+  lnast.add_child(range_node, Lnast_node::create_const(lo_str));
+  lnast.add_child(range_node, Lnast_node::create_const(hi_str));
 
   auto bitsel_node = lnast.add_child(parent_node, Lnast_node::create_bit_select("bitsel_pick"));
-  lnast.add_child(bitsel_node, Lnast_node::create_ref(t4_str));
+  lnast.add_child(bitsel_node, Lnast_node::create_ref(pin_str));
   attach_child(lnast, bitsel_node, var_pin);
-  lnast.add_child(bitsel_node, Lnast_node::create_ref(t3_str));
-
-  auto asg_node = lnast.add_child(parent_node, Lnast_node::create_assign("asg_pick"));
-  lnast.add_child(asg_node, Lnast_node::create_ref(pin_str));
-  lnast.add_child(asg_node, Lnast_node::create_ref(t4_str));
+  lnast.add_child(bitsel_node, Lnast_node::create_ref(t0_str));
 }
 
 void Pass_lgraph_to_lnast::attach_comparison_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin &pin) {
