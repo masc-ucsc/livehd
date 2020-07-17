@@ -1,4 +1,3 @@
-$clk.__bits = 1
 $inp.__bits = 16
 %out.__bits = 16
 

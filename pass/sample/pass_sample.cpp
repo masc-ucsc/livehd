@@ -21,10 +21,10 @@ void Pass_sample::setup() {
 Pass_sample::Pass_sample(const Eprp_var &var) : Pass("pass.sample", var) {}
 
 void Pass_sample::do_work(LGraph *g) {
-  compute_histogram(g);
+  //compute_histogram(g);
   compute_max_depth(g);
-  annotate_placement(g);
-  create_sample_graph(g);
+  //annotate_placement(g);
+  //create_sample_graph(g);
 }
 
 void Pass_sample::work(Eprp_var &var) {

@@ -113,6 +113,49 @@ int32_t Node_Internal::get_node_num_outputs() const {
   return total;
 }
 
+int32_t Node_Internal::get_node_pin_num_inputs(Index_ID idx) const {
+  I(false);
+  // This code is not right because inputs can map to any idx locally. Must
+  // traverse all the edges!!! (fix once test case happens)
+
+  I(is_master_root());
+
+  int32_t total = 0;
+  if (get_self_idx() == idx)
+    total = get_num_local_inputs();
+  if (is_last_state()) return total;
+
+  const Node_Internal *node = this;
+  do {
+    auto next_idx = node->get_next();
+    node = &get(next_idx);
+    if (get_nid() == idx || next_idx == idx)
+      total += node->get_num_local_inputs();
+  } while (!node->is_last_state());
+
+  return total;
+}
+
+
+int32_t Node_Internal::get_node_pin_num_outputs(Index_ID idx) const {
+  I(is_master_root());
+
+  int32_t total = 0;
+  if (get_self_idx() == idx)
+    total = get_num_local_outputs();
+  if (is_last_state()) return total;
+
+  const Node_Internal *node = this;
+  do {
+    auto next_idx = node->get_next();
+    node = &get(next_idx);
+    if (get_nid() == idx || next_idx == idx)
+      total += node->get_num_local_outputs();
+  } while (!node->is_last_state());
+
+  return total;
+}
+
 bool Node_Internal::has_node_inputs() const {
   I(is_master_root());
 

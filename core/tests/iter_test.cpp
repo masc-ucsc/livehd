@@ -2,6 +2,7 @@
 
 #include <set>
 
+#include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
@@ -54,15 +55,32 @@ void check_test_order(LGraph *top) {
 
 // performs Topological Sort on a given DAG
 void do_fwd_traversal(LGraph *lg) {
+  {
+    Lbench b("fast");
 
-  for (auto node : lg->forward(true)) {
-    I(!node.is_graph_io());
-    //fmt::print("visiting {}\n", node.debug_name());
-    I(test_order.find(node.get_compact()) == test_order.end());
-    test_order[node.get_compact()] = test_order_sequence++;
+    setup_test_order();
+    for (auto node : lg->fast(true)) {
+      I(!node.is_graph_io());
+      //fmt::print("visiting {}\n", node.debug_name());
+      I(test_order.find(node.get_compact()) == test_order.end());
+      test_order[node.get_compact()] = test_order_sequence++;
+    }
+  }
+  {
+    Lbench b("fwd");
+
+    setup_test_order();
+    for (auto node : lg->forward(true)) {
+      I(!node.is_graph_io());
+      //fmt::print("visiting {}\n", node.debug_name());
+      I(test_order.find(node.get_compact()) == test_order.end());
+      test_order[node.get_compact()] = test_order_sequence++;
+    }
   }
 }
 
+
+#define SIZE_BASE 100
 
 void generate_graphs(int n) {
 
@@ -74,20 +92,20 @@ void generate_graphs(int n) {
     std::vector<Node_pin::Compact> spins;
     std::vector<Node_pin::Compact> dpins;
 
-    int inps = 10 + rand_r(&rseed) % 100;
+    int inps = 10 + rand_r(&rseed) % SIZE_BASE;
     for(int j = 0; j < inps; j++) {
       auto pin = g->add_graph_input("i" + std::to_string(j), 1+j, 1);
       dpins.push_back(pin.get_compact());
     }
 
-    int outs = 10 + rand_r(&rseed) % 100;
+    int outs = 10 + rand_r(&rseed) % SIZE_BASE;
     for(int j = 0; j < outs; j++) {
       auto pin = g->add_graph_output("o" + std::to_string(j), 1+inps+j,1);
       spins.push_back(pin.get_compact());
       dpins.push_back(g->get_graph_output_driver_pin(("o" + std::to_string(j))).get_compact());
     }
 
-    int nnodes = 100 + rand_r(&rseed) % 1000;
+    int nnodes = SIZE_BASE + rand_r(&rseed) % (SIZE_BASE*10);
     for(int j = 0; j < nnodes; j++) { // Simple output nodes
       auto node = g->create_node();
       Node_Type_Op op  = (Node_Type_Op)(1+(rand_r(&rseed) % ShiftLeft_Op)); // regular node types range
@@ -96,13 +114,13 @@ void generate_graphs(int n) {
       spins.push_back(node.setup_sink_pin(0).get_compact());
     }
 
-    int const_nodes = 10 + rand_r(&rseed) % 100;
+    int const_nodes = SIZE_BASE/10 + rand_r(&rseed) % SIZE_BASE;
     for(int j = 0; j < const_nodes; j++) { // Simple output nodes
       auto node = g->create_node_const(Lconst(rand_r(&rseed) & 0xFF, 8));
       dpins.push_back(node.setup_driver_pin().get_compact());
     }
 
-    int cnodes = 100 + rand_r(&rseed) % 1000;
+    int cnodes = SIZE_BASE/10 + rand_r(&rseed) % (SIZE_BASE*10);
     for(int j = 0; j < cnodes; j++) { // complex nodes
       auto node = g->create_node(FFlop_Op);
       auto d1 = rand_r(&rseed)%3;
@@ -119,7 +137,7 @@ void generate_graphs(int n) {
       }
     }
 
-    int nedges = 1000 + rand_r(&rseed) % 8000;
+    int nedges = SIZE_BASE*4 + rand_r(&rseed) % (SIZE_BASE*8);
     absl::flat_hash_set<std::pair<Node_pin::Compact, Node_pin::Compact>> edges;
     for(int j = 0; j < nedges; j++) {
       int      counter = 0;
@@ -138,6 +156,11 @@ void generate_graphs(int n) {
           if (spin.is_graph_input())
             continue;
 
+          bool allow_comb_looop = false;
+          if (allow_comb_looop) {
+            break;
+          }
+
           if (i&1) {
             if (spin.get_node().get_compact().get_nid() > dpin.get_node().get_compact().get_nid())
               break;
@@ -148,9 +171,9 @@ void generate_graphs(int n) {
         }while (true);
 
         counter++;
-      } while(edges.find(std::make_pair(src, dst)) != edges.end() && counter < 1000);
+      } while(edges.find(std::make_pair(src, dst)) != edges.end() && counter < (SIZE_BASE*10));
 
-      if (counter>=1000)
+      if (counter>=(SIZE_BASE*10))
         break;
 
       if (edges.find(std::make_pair(src, dst)) != edges.end())
@@ -245,7 +268,6 @@ bool bwd(int n) {
 }
 
 void simple_line() {
-
 
   std::string gname = "top_0";
   LGraph *g0 = LGraph::create("lgdb_iter_test", "g0", "test");

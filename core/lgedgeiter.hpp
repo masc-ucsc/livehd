@@ -71,7 +71,7 @@ protected:
   const bool                         visit_sub;
   absl::flat_hash_set<Node::Compact> visited;
   std::vector<Node>                  pending_stack;
-  absl::flat_hash_set<Node::Compact> pending_stack_set; // to break comb loops
+  absl::flat_hash_map<Node::Compact, int> pending_loop_detect;
 
   Flow_base_iterator(LGraph *lg, bool _visit_sub);
   Flow_base_iterator(bool _visit_sub);

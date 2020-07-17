@@ -25,7 +25,7 @@ using Tuple_var_table = absl::flat_hash_set<std::string_view>;
 struct Lnast_node {
   Lnast_ntype type;
   Token       token;
-  uint16_t    subs; //ssa subscript
+  int16_t     subs; //ssa subscript
 
   Lnast_node(): subs(0) { }
 
@@ -35,7 +35,7 @@ struct Lnast_node {
   Lnast_node(Lnast_ntype _type, const Token &_token)
     :type(_type), token(_token), subs(0) { I(!type.is_invalid());}
 
-  Lnast_node(Lnast_ntype _type, const Token &_token, uint16_t _subs)
+  Lnast_node(Lnast_ntype _type, const Token &_token, int16_t _subs)
     :type(_type), token(_token), subs(_subs) { I(!type.is_invalid());}
 
   void dump() const;
@@ -47,7 +47,6 @@ struct Lnast_node {
   CREATE_LNAST_NODE(_if)
   CREATE_LNAST_NODE(_cond)
   CREATE_LNAST_NODE(_uif)
-  CREATE_LNAST_NODE(_elif)
   CREATE_LNAST_NODE(_for)
   CREATE_LNAST_NODE(_while)
   CREATE_LNAST_NODE(_phi)
@@ -105,8 +104,10 @@ private:
   void      do_ssa_trans               (const Lnast_nid  &top_nid);
   void      ssa_lhs_handle_a_statement (const Lnast_nid  &psts_nid, const Lnast_nid &opr_nid);
   void      ssa_rhs_handle_a_statement (const Lnast_nid  &psts_nid, const Lnast_nid &opr_nid);
-  void      ssa_lhs_if_subtree             (const Lnast_nid  &if_nid);
+  void      ssa_lhs_if_subtree         (const Lnast_nid  &if_nid);
   void      ssa_rhs_if_subtree         (const Lnast_nid  &if_nid);
+  void      opr_lhs_merge_if_subtree   (const Lnast_nid  &if_nid);
+  void      opr_lhs_merge_handle_a_statement (const Lnast_nid &opr_nid);
   void      ssa_handle_phi_nodes       (const Lnast_nid  &if_nid);
   void      resolve_phi_nodes          (const Lnast_nid  &cond_nid, Phi_rtable &true_table, Phi_rtable &false_table);
   void      update_phi_resolve_table   (const Lnast_nid  &psts_nid, const Lnast_nid &target_nid);
@@ -116,6 +117,7 @@ private:
   Lnast_nid check_phi_table_parents_chain (std::string_view brother_name, const Lnast_nid &psts_nid, bool originate_from_csts);
   void      resolve_ssa_lhs_subs                (const Lnast_nid &psts_nid);
   void      resolve_ssa_rhs_subs                (const Lnast_nid &psts_nid);
+  void      opr_lhs_merge                       (const Lnast_nid &psts_nid);
   void      update_global_lhs_ssa_cnt_table     (const Lnast_nid &target_nid);
   void      respect_latest_global_lhs_ssa       (const Lnast_nid &target_nid);
   void      reg_ini_global_lhs_ssa_cnt_table    (const Lnast_nid &target_nid); //just initialize global reg when appeared in rhs
@@ -131,31 +133,34 @@ private:
 
   // tuple operator process
   void      trans_tuple_opr                    (const Lnast_nid &pats_nid); // from dot/sel to tuple_add/get
-  void      trans_tuple_opr_if_subtree         (const Lnast_nid &if_nid); 
-  void      trans_tuple_opr_handle_a_statement (const Lnast_nid &pats_nid, const Lnast_nid &opr_nid); 
+  void      trans_tuple_opr_if_subtree         (const Lnast_nid &if_nid);
+  void      trans_tuple_opr_handle_a_statement (const Lnast_nid &pats_nid, const Lnast_nid &opr_nid);
   bool      check_tuple_table_parents_chain    (const Lnast_nid &psts_nid, std::string_view ref_name);
   void      dot2local_tuple_chain              (const Lnast_nid &pats_nid, Lnast_nid &dot_nid);
-  void      dot2hier_tuple_chain               (const Lnast_nid &psts_nid, Lnast_nid &dot_nid, const Lnast_nid &cond_nid, bool is_else_sts); 
+  void      dot2hier_tuple_chain               (const Lnast_nid &psts_nid, Lnast_nid &dot_nid, const Lnast_nid &cond_nid, bool is_else_sts);
   void      merge_tconcat_paired_assign        (const Lnast_nid &psts_nid, const Lnast_nid &concat_nid);
   void      rename_to_real_tuple_name          (const Lnast_nid &psts_nid, const Lnast_nid &tup_nid);
-  void      find_cond_nid                      (const Lnast_nid &psts_nid, Lnast_nid &cond_nid, bool &is_else_sts); 
+  void      find_cond_nid                      (const Lnast_nid &psts_nid, Lnast_nid &cond_nid, bool &is_else_sts);
   bool      is_attribute_related               (const Lnast_nid &opr_nid);
   void      dot2attr_set_get                   (const Lnast_nid &psts_nid, Lnast_nid &opr_nid);
-
+  void      update_tuple_var_table             (const Lnast_nid &psts_nid, const Lnast_nid &opr_nid);
 
   // hierarchical statements node -> symbol table
   absl::flat_hash_map<Lnast_nid, Phi_rtable>      phi_resolve_tables;
   absl::flat_hash_map<Lnast_nid, Cnt_rtable>      ssa_rhs_cnt_tables;
   absl::flat_hash_map<Lnast_nid, Dot_lrhs_table>  dot_lrhs_tables;
-  absl::flat_hash_map<Lnast_nid, Tuple_var_table> tuple_var_tables;   
+  absl::flat_hash_map<Lnast_nid, Tuple_var_table> tuple_var_tables;
   absl::flat_hash_map<Lnast_nid, Phi_rtable>      new_added_phi_node_tables; // for each if-subtree scope
   absl::flat_hash_set<std::string_view>           tuplized_table;
-  
 
-  absl::flat_hash_map<std::string_view, uint8_t>  global_ssa_lhs_cnt_table;
+
+  absl::flat_hash_map<std::string_view, int8_t>  global_ssa_lhs_cnt_table;
+
+  // populated during LG->LN pass, maps name -> bitwidth
+  absl::flat_hash_map<std::string, uint32_t> from_lgraph_bw_table;
 
   Lnast_nid  default_const_nid;
-  Lnast_nid  err_var_undefined_nid;   
+  Lnast_nid  err_var_undefined_nid;
   Lnast_nid  register_fwd_nid;
   uint32_t   tup_internal_cnt = 0;
 
@@ -179,19 +184,22 @@ public:
   bool             is_lhs    (const Lnast_nid &psts_nid, const Lnast_nid &opr_nid);
   bool             is_reg    (std::string_view name) { return name.substr(0,1) == "#"; }
   std::string_view get_name  (const Lnast_nid &nid)  { return get_data(nid).token.get_text(); }
+  std::string_view get_vname (const Lnast_nid &nid)  { return get_data(nid).token.get_text(); } //better expression for LGraph passes
   Lnast_ntype      get_type  (const Lnast_nid &nid)  { return get_data(nid).type; }
-  uint8_t          get_subs  (const Lnast_nid &nid)  { return get_data(nid).subs; }
+  int8_t           get_subs  (const Lnast_nid &nid)  { return get_data(nid).subs; }
   Token            get_token (const Lnast_nid &nid)  { return get_data(nid).token; }
   std::string      get_sname (const Lnast_nid &nid)  { //sname = ssa name
     if(get_type(nid).is_const())
       return std::string(get_name(nid));
-    // FIXME: sh: any better way to concate a string_view??
-    return absl::StrCat(std::string(get_name(nid)), "_", get_subs(nid));
+    return absl::StrCat(std::string(get_name(nid)), "_", get_subs(nid));  // FIXME->sh: any better way to concate a string_view??
   }
+  
+  // bitwidth table functions
+  bool      is_in_bw_table                     (const std::string_view name);
+  uint32_t  get_bitwidth                       (const std::string_view name);
+  void      set_bitwidth                       (const std::string_view name, const uint32_t bitwidth);
 
-  void dump(const Lnast_nid &it) const;
-  void dump() const { dump(get_root()); }
 
-  std::string lnast_type_to_string(Lnast_ntype type) const;
+  void dump() const;
 };
 

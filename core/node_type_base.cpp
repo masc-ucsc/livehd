@@ -4,6 +4,11 @@
 
 #include "lgraphbase.hpp"
 
+
+//static_assert(Node_Type::nentries[1].at("foo") == 1);
+//static_assert(Node_Type::get_pid(Sum_Op, "foo") == 1);
+//static_assert(Node_Type::get_name(Sum_Op, 1) == "foo");
+
 Node_Type *Node_Type::table[Last_invalid_Op] = {
     nullptr,
 };

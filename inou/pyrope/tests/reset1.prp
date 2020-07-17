@@ -1,15 +1,15 @@
 // code/reset1.prp
-@a as (__bits:3)
+@a as (__bits=3)
 @a.__init = 13
-@b as (__bits:3, __reset:false) // disable reset
-@mem0 as (__bits:4, __size:16)
+@b as (__bits=3, __reset:false) // disable reset
+@mem0 as (__bits=4, __size:16)
 @mem0.__init = ::{ 3 }
-@mem1 as (__bits:4, __reset:false, __size:16)
-@mem2 as (__bits:2 ,__size:32)
+@mem1 as (__bits=4, __reset:false, __size:16)
+@mem2 as (__bits=2 ,__size:32)
 // custom reset
 @mem2.__init = ::{
   // Called during reset or after clear (!!)
-  @_reset_pos as (__bits:log2.(@this.__size), __reset:false)
+  @_reset_pos as (__bits=log2.(@this.__size), __reset:false)
   @this[@_reset_pos] = @_reset_pos
   @_reset_pos += 1
 }

@@ -1,13 +1,14 @@
 $c1.__bits = 1 
 $c2.__bits = 1
-#cnt.__bits = 4
+#cnt.__bits = 4        //#cnt_0
 
 if ($c1 == 1) {
-  #cnt := #cnt + 1
+  #cnt := #cnt + 1     //#cnt_1 = #cnt_0 + 1
   if ($c2 == 1) {
-    #cnt := #cnt + 2
+    #cnt := #cnt + 2   //#cnt_2 = #cnt_1 + 2
   } 
+                       //#cnt_3 = (#cnt_2, #cnt_1)
 } 
-
+                       //#cnt_4 = (#cnt_3, #cnt_0)
 %cnt_o = #cnt.__q_pin
 

@@ -200,14 +200,14 @@ constexpr Token_id Pyrope_id_then = 159;
 class Prp : public Elab_scanner {
 protected:
   struct debug_statistics {
-    uint16_t rules_called;
-    uint16_t rules_matched;
-    uint16_t rules_failed;
-    uint16_t tokens_consumed;
-    uint16_t tokens_unconsumed;
-    uint16_t ast_up_calls;
-    uint16_t ast_down_calls;
-    uint16_t ast_add_calls;
+    uint32_t rules_called;
+    uint32_t rules_matched;
+    uint32_t rules_failed;
+    uint32_t tokens_consumed;
+    uint32_t tokens_unconsumed;
+    uint32_t ast_up_calls;
+    uint32_t ast_down_calls;
+    uint32_t ast_add_calls;
   };
 
   debug_statistics         debug_stat{0, 0, 0, 0, 0, 0, 0, 0};

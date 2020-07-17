@@ -22,9 +22,15 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
     #patches = ["//external:patch.opentimer"],  # For generated ot/config.hpp
 #)
 new_git_repository( # Open_timer user taskflow
+    name = "frozen",
+    build_file = "BUILD.frozen",
+    commit = "3d2b025ff2509f40424855e3f8640fc2fb6b90b9", # July 1, 2020
+    remote = "https://github.com/serge-sans-paille/frozen.git",
+)
+new_git_repository( # Open_timer user taskflow
     name = "taskflow",
     build_file = "BUILD.taskflow",
-    commit = "ef1e9916529ce52ca2968a20ac4f8accbd18cdf4", # April 29
+    commit = "ef1e9916529ce52ca2968a20ac4f8accbd18cdf4", # April 29, 2019
     remote = "https://github.com/cpp-taskflow/cpp-taskflow.git",
 )
 new_git_repository(

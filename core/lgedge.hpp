@@ -302,8 +302,16 @@ public:
     type = op;
   }
 
+  void set_signed() { sign = 1; }
+  void set_unsigned() { sign = 0; }
+  bool is_signed() const { return sign; }
+  bool is_unsigned() const { return !sign; }
+
   int32_t get_node_num_inputs() const;
   int32_t get_node_num_outputs() const;
+  int32_t get_node_pin_num_inputs(Index_ID idx) const;
+  int32_t get_node_pin_num_outputs(Index_ID idx) const;
+
   bool    has_node_inputs() const;
   bool    has_node_outputs() const;
 
@@ -322,6 +330,7 @@ public:
     inp_long     = 0;
     out_long     = 0;
     nid          = 0;
+    sign         = 0; // unsigned by default
     type         = 0;
   }
 
@@ -405,6 +414,11 @@ public:
 
   void set_next_state(Index_ID _idx) {
     I(is_next_state());
+    uint32_t *idx_upp = (uint32_t *)(&sedge[0]);
+    *idx_upp          = _idx.value;
+  }
+  void force_next_state(Index_ID _idx) {
+    state = Next_node_state;
     uint32_t *idx_upp = (uint32_t *)(&sedge[0]);
     *idx_upp          = _idx.value;
   }

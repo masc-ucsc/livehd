@@ -104,8 +104,7 @@ void Pass_lgraph_to_lnast::handle_source_node(LGraph *lg, Node_pin& pin, Lnast& 
   //If pin is a driver pin for an already handled node, just return driver pin's name.
   if(pin.get_node().get_color() == BLACK) {
     if(!pin.has_name()) {
-      pin.set_name(absl::StrCat("T", std::to_string(temp_var_count)));//FIXME: Will this ever collide with any var names?
-      temp_var_count++;
+      pin.set_name(create_temp_var(lnast));
     }
     return;
   }
@@ -126,8 +125,7 @@ void Pass_lgraph_to_lnast::handle_source_node(LGraph *lg, Node_pin& pin, Lnast& 
   }
 
   if(!pin.has_name()) {
-    pin.set_name(absl::StrCat("T", std::to_string(temp_var_count)));
-    temp_var_count++;
+    pin.set_name(create_temp_var(lnast));
   }
 
   pin.get_node().set_color(BLACK);
@@ -180,6 +178,9 @@ void Pass_lgraph_to_lnast::handle_source_node(LGraph *lg, Node_pin& pin, Lnast& 
 void Pass_lgraph_to_lnast::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node, const Node_pin &pin) {
   //Look at pin's node's type, then based off that figure out what type of node to add to LNAST.
   fmt::print("LNAST {} :", dpin_get_name(pin));//pin.get_name());
+  //note->hunterc: add dpin bits (if set) right here? ---
+  lnast.set_bitwidth(dpin_get_name(pin), pin.get_bits());//FIXME?: Do I want all wires in the map + is this best spot to put it in map?
+  //------------------------------------------------------
   for(const auto inp : pin.get_node().inp_edges()) {
     auto dpin = inp.driver;
     fmt::print(" {}", dpin_get_name(dpin));//dpin.get_name());
@@ -251,10 +252,17 @@ void Pass_lgraph_to_lnast::handle_io(LGraph *lg, Lnast_nid& parent_lnast_node, L
   auto inp_io_node = lg->get_graph_input_node();
   for(const auto edge : inp_io_node.out_edges()) {
     //fmt::print("Out bits:{} name:{}\n", edge.get_bits(), edge.driver.get_name());
-    if(edge.get_bits() > 0) {
-      auto idx_dot = lnast.add_child(parent_lnast_node, Lnast_node::create_dot("dot"));
-      auto temp_name = lnast.add_string(absl::StrCat("T", std::to_string(temp_var_count)));
-      temp_var_count++;
+    auto bits = edge.get_bits();
+    if (bits > 0) {
+      // Put input bitwidth info in from_lg_bw_table
+      lnast.set_bitwidth(edge.driver.get_name(), bits);
+      fmt::print("{} -> {}\n", edge.driver.get_name(), lnast.get_bitwidth(edge.driver.get_name()));
+
+      // Create nodes //FIXME: Do I still need this? Table should work
+      // note->hunter: The below commented out code creates bw dot nodes for inputs.
+      //               It's unnecessary(?) with the existence of from_lgraph_bw_table
+      /*auto idx_dot = lnast.add_child(parent_lnast_node, Lnast_node::create_dot("dot"));
+      auto temp_name = create_temp_var(lnast);
       lnast.add_child(idx_dot, Lnast_node::create_ref(temp_name));
       lnast.add_child(idx_dot, Lnast_node::create_ref(lnast.add_string(absl::StrCat("$", edge.driver.get_name()))));
       lnast.add_child(idx_dot, Lnast_node::create_ref("__bits"));
@@ -262,71 +270,18 @@ void Pass_lgraph_to_lnast::handle_io(LGraph *lg, Lnast_nid& parent_lnast_node, L
       auto idx_asg = lnast.add_child(parent_lnast_node, Lnast_node::create_assign("asg"));
       lnast.add_child(idx_asg, Lnast_node::create_ref(temp_name));
       //FIXME: Is the next line the best way to get driver bitwidth?
-      lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(std::to_string(edge.get_bits()))));
+      lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(std::to_string(bits))));*/
     }
   }
 
-  lg->each_graph_output([&](const Node_pin &pin) {//TODO: Make sure I have the capture list correct
-    //Note: pin is a driver pin.
-    //fmt::print("opin: {} pid: {}\n", pin.get_name(), pin.get_pid());
-    I(pin.get_node().get_type().op == GraphIO_Op);
-    //auto node = pin.get_node();
-    for(const auto edge : pin.get_node().inp_edges()) {
-      if(pin.get_pid() == edge.sink.get_pid()) {
-        auto idx_dot = lnast.add_child(parent_lnast_node, Lnast_node::create_dot("dot"));
-        auto temp_name = lnast.add_string(absl::StrCat("T", std::to_string(temp_var_count)));
-        temp_var_count++;
-        lnast.add_child(idx_dot, Lnast_node::create_ref(temp_name));
-        lnast.add_child(idx_dot, Lnast_node::create_ref(lnast.add_string(absl::StrCat("%", pin.get_name()))));
-        lnast.add_child(idx_dot, Lnast_node::create_ref("__bits"));
+  auto out_io_node = lg->get_graph_output_node();
+  for(const auto edge : out_io_node.inp_edges()) {
+    auto sink_pid    = edge.sink.get_pid();
+    auto out_pin     = edge.sink.get_node().get_driver_pin(sink_pid);
 
-        auto idx_asg = lnast.add_child(parent_lnast_node, Lnast_node::create_assign("asg"));
-        lnast.add_child(idx_asg, Lnast_node::create_ref(temp_name));
-        //FIXME: Is the next line the best way to get driver bitwidth?
-        lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(std::to_string(edge.get_bits()))));
-      }
-    }
-  });
-
-  /*auto out_io_node = lg->get_graph_output_node();
-  for(const auto in_edge : out_io_node.inp_edges()) {
-    //FIXME...
-    for(const auto out_edge : out_io_node.out_edges()) {
-
-    }
-    fmt::print("Output edge: {} {}\n", edge.driver.get_name(), edge.get_bits());
-  }*/
-
-  /*lg->each_graph_input([this, &lnast, lg, parent_lnast_node](const Node_pin &pin) {
-    //I(pin.has_bitwidth());//FIXME: Not necessarily true for subgraphs?
-    if(pin.has_bitwidth()) {
-      fmt::print("inp: {} {}\n", pin.get_name(), pin.get_bitwidth().e.max);
-      //TODO: Add a "dot" node to LNAST here, I just don't know how to get node's name yet.
-    } else {
-      fmt::print("input {} has no bitwidth\n", pin.get_name());
-    }
-  });
-
-  lg->each_graph_output([this, &lnast, lg, parent_lnast_node](const Node_pin &pin) {
-    //I(pin.has_bitwidth());//FIXME: Not necessarily true for subgraphs?
-    if(pin.has_bitwidth()) {
-      fmt::print("inp: {} {}\n", pin.get_name(), pin.get_bitwidth().e.max);
-      //TODO: Add a "dot" node to LNAST here, I just don't know how to get node's name yet.
-      auto idx_dot = lnast.add_child(parent_lnast_node, Lnast_node::create_dot("dot"));
-      lnast.add_child(idx_dot, Lnast_node::create_ref(""));
-      lnast.add_child(idx_dot, Lnast_node::create_ref(lnast.add_string(absl::StrCat("$", pin.get_name()))));
-      lnast.add_child(idx_dot, Lnast_node::create_ref("__bits"));
-
-      auto idx_asg = lnast.add_child(parent_lnast_node, Lnast_node::create_assign("asg"));
-      lnast.add_child(idx_asg, Lnast_node::create_ref(""));
-      if (pin.get_bitwidth().e.overflow) {
-        lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(std::to_string(pin.get_bitwidth().e.max))));
-      } else {
-        lnast.add_child(idx_asg, Lnast_node::create_const(
-                      lnast.add_string( "0d" + std::to_string((uint64_t)(floor(log2(pin.get_bitwidth().e.max))+1)) )));
-      }
-    }
-  });*/
+    lnast.set_bitwidth(out_pin.get_name(), edge.driver.get_bits());
+    fmt::print("{} -> {}\n", out_pin.get_name(), lnast.get_bitwidth(out_pin.get_name()));
+  }
 }
 
 // -------- How to convert each LGraph node type to LNAST -------------
@@ -393,8 +348,7 @@ void Pass_lgraph_to_lnast::attach_sum_node(Lnast& lnast, Lnast_nid& parent_node,
     add_node = lnast.add_child(parent_node, Lnast_node::create_plus("plus"));
     subt_node = lnast.add_child(parent_node, Lnast_node::create_minus("minus"));
 
-    auto intermediate_var_name = lnast.add_string(absl::StrCat("T", temp_var_count));
-    temp_var_count++;
+    auto intermediate_var_name = create_temp_var(lnast);
     lnast.add_child(add_node, Lnast_node::create_ref(intermediate_var_name));
     lnast.add_child(subt_node, Lnast_node::create_ref(pin_name));
     lnast.add_child(subt_node, Lnast_node::create_ref(intermediate_var_name));
@@ -471,66 +425,38 @@ void Pass_lgraph_to_lnast::attach_join_node(Lnast& lnast, Lnast_nid& parent_node
 }
 
 void Pass_lgraph_to_lnast::attach_pick_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin &pin) {
-  // PID: 0 = A, 1 = Offset... Y = A[Offset+(Y_Bitwidth-1) : Offset]
-  /* Y = pick(X, 3) in LGraph form turns into Lnast form as:
-   *   dot           plus      minus     range_op   bit_select   assign
-   *  / | \         / | \      / | \      / | \       / | \      /   \
-   * T0 Y __bits   T1 T0 0d3  T2 T1 0d1  T3 T2 0d3   T4 X T3    Y     T4 */
-  //FIXME: the above could possibly be wrong if Y's bitwidth was smaller than X's.
-  bool have_offset = false;
-  bool have_var = false;
+  // PID: 0 = A, 1 = Offset... Y = A[Offset+(Y_Bitwidth) : Offset]
+  /* Y = pick(X, off) in LGraph form turns into Lnast form as:
+   *   range_op   bit_select
+   *   / | \       / | \
+   * T0  lo hi    Y  X  T0
+   * where lo = offset, hi = offset + y.bits() - 1 */
   Node_pin offset_pin, var_pin;
   for(const auto inp : pin.get_node().inp_edges()) {
-    if(inp.sink.get_pid() == 0) { //A
-      I(!have_var);
-      have_var = true;
+    if(inp.sink.get_pid() == 0) {
       var_pin = inp.driver;
-    } else if(inp.sink.get_pid() == 1) { //Offset
-      I(!have_offset);
-      have_offset = true;
+    } else if(inp.sink.get_pid() == 1) {
       offset_pin = inp.driver;
     } else {
-      I(false); //Pick pins should only have 1 pick and 1 offset.
+      I(false); //No other sink pin id should be used.
     }
   }
-  I(have_offset & have_var);
 
   auto pin_str = lnast.add_string(lnast.add_string(dpin_get_name(pin)));
-  auto t0_str = lnast.add_string(absl::StrCat("T", temp_var_count));
-  auto t1_str = lnast.add_string(absl::StrCat("T", temp_var_count+1));
-  auto t2_str = lnast.add_string(absl::StrCat("T", temp_var_count+2));
-  auto t3_str = lnast.add_string(absl::StrCat("T", temp_var_count+3));
-  auto t4_str = lnast.add_string(absl::StrCat("T", temp_var_count+4));
-  temp_var_count += 5;
-
-  auto dot_node = lnast.add_child(parent_node, Lnast_node::create_dot("dot_pick"));
-  lnast.add_child(dot_node, Lnast_node::create_ref(t0_str));
-  lnast.add_child(dot_node, Lnast_node::create_ref(pin_str));
-  lnast.add_child(dot_node, Lnast_node::create_ref("__bits"));
-
-  auto plus_node = lnast.add_child(parent_node, Lnast_node::create_plus("plus_pick"));
-  lnast.add_child(plus_node, Lnast_node::create_ref(t1_str));
-  lnast.add_child(plus_node, Lnast_node::create_ref(t0_str));
-  attach_child(lnast, plus_node, offset_pin);
-
-  auto minus_node = lnast.add_child(parent_node, Lnast_node::create_minus("minus_pick"));
-  lnast.add_child(minus_node, Lnast_node::create_ref(t2_str));
-  lnast.add_child(minus_node, Lnast_node::create_ref(t1_str));
-  lnast.add_child(minus_node, Lnast_node::create_const("1"));
+  auto t0_str = create_temp_var(lnast);
+  auto lo_str = lnast.add_string(offset_pin.get_node().get_type_const().to_pyrope());
+  auto hi_val = offset_pin.get_node().get_type_const() + Lconst(pin.get_bits() - 1);
+  auto hi_str = lnast.add_string(hi_val.to_pyrope());
 
   auto range_node = lnast.add_child(parent_node, Lnast_node::create_range("range_pick"));
-  lnast.add_child(range_node, Lnast_node::create_ref(t3_str));
-  lnast.add_child(range_node, Lnast_node::create_ref(t2_str));
-  attach_child(lnast, range_node, offset_pin);
+  lnast.add_child(range_node, Lnast_node::create_ref(t0_str));
+  lnast.add_child(range_node, Lnast_node::create_const(lo_str));
+  lnast.add_child(range_node, Lnast_node::create_const(hi_str));
 
   auto bitsel_node = lnast.add_child(parent_node, Lnast_node::create_bit_select("bitsel_pick"));
-  lnast.add_child(bitsel_node, Lnast_node::create_ref(t4_str));
+  lnast.add_child(bitsel_node, Lnast_node::create_ref(pin_str));
   attach_child(lnast, bitsel_node, var_pin);
-  lnast.add_child(bitsel_node, Lnast_node::create_ref(t3_str));
-
-  auto asg_node = lnast.add_child(parent_node, Lnast_node::create_assign("asg_pick"));
-  lnast.add_child(asg_node, Lnast_node::create_ref(pin_str));
-  lnast.add_child(asg_node, Lnast_node::create_ref(t4_str));
+  lnast.add_child(bitsel_node, Lnast_node::create_ref(t0_str));
 }
 
 void Pass_lgraph_to_lnast::attach_comparison_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin &pin) {
@@ -597,8 +523,7 @@ void Pass_lgraph_to_lnast::attach_comparison_node(Lnast& lnast, Lnast_nid& paren
             fmt::print("Error: invalid node type in attach_comparison_node\n");
             I(false);
         }
-        lnast.add_child(comp_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("T", temp_var_count))));
-        temp_var_count++;
+        lnast.add_child(comp_node, Lnast_node::create_ref(create_temp_var(lnast)));
         attach_child(lnast, comp_node, apin);
         attach_child(lnast, comp_node, bpin);
       }
@@ -607,7 +532,8 @@ void Pass_lgraph_to_lnast::attach_comparison_node(Lnast& lnast, Lnast_nid& paren
     auto and_node = lnast.add_child(parent_node, Lnast_node::create_and("and"));
     lnast.add_child(and_node, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));
     for(int i = 1; i <= comparisons; i++) {
-      lnast.add_child(and_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("T", temp_var_count-i))));
+      //FIXME: Find a better way to do this (maybe create list of temp vars used?)
+      lnast.add_child(and_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("___L", temp_var_count-i))));
     }
   }
 }
@@ -779,36 +705,40 @@ void Pass_lgraph_to_lnast::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_
 
   //Create a tuple that contains all arguments.
   auto args_tup_node = lnast.add_child(parent_node, Lnast_node::create_tuple("args_tuple"));
-  //Tuple name
-  auto tuple_temp_holder = temp_var_count;
-  lnast.add_child(args_tup_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("T", temp_var_count))));
+  auto inp_tup_name = lnast.add_string(absl::StrCat("inp_submodule", temp_var_count));
+  lnast.add_child(args_tup_node, Lnast_node::create_ref(inp_tup_name));
+
+  //Create name for tuple that will hold outputs
+  auto out_tup_name = lnast.add_string(absl::StrCat("out_submodule", temp_var_count));
   temp_var_count++;
+
   //Set up each key-value of the arg tuple (key = name in submodule | null, value = name in calling module)
   for(const auto inp : pin.get_node().inp_edges()) {
     auto key_value_asg_node = lnast.add_child(args_tup_node, Lnast_node::create_assign("assign"));
     lnast.add_child(key_value_asg_node, Lnast_node::create_ref("null"));
     attach_child(lnast, key_value_asg_node, inp.driver);
+    fmt::print("inp: {} {}\n", inp.driver.get_name(), inp.sink.get_pid());
   }
 
   auto func_call_node = lnast.add_child(parent_node, Lnast_node::create_func_call("func_call"));
   //LHS
-  auto func_temp_holder = temp_var_count;
-  lnast.add_child(func_call_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("T", temp_var_count))));
-  temp_var_count++;
+  lnast.add_child(func_call_node, Lnast_node::create_ref(out_tup_name));
   //func_name
-  lnast.add_child(func_call_node, Lnast_node::create_ref(lnast.add_string(pin.get_node().debug_name())));//"FIXME_FNAME"));
+  lnast.add_child(func_call_node, Lnast_node::create_ref(lnast.add_string(pin.get_node().debug_name())));//FIXME: Is this the right name?
   //arguments (just use tuple created above)
-  //NOTE: Below, we do not use temp_var_count, we use tuple_temp_holder (so we can reference tuple name).
-  lnast.add_child(func_call_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("T", tuple_temp_holder))));
+  lnast.add_child(func_call_node, Lnast_node::create_ref(inp_tup_name));
 
-  //FIXME: Need a way to do the dot stuff. Below is incomplete but serves as proof of idea.
-  for(const auto out : pin.get_node().out_edges()) {
+  //FIXME: Need a way to do the dot stuff + outputs. Below is incomplete but serves as proof of idea.
+  /*for(const auto out : pin.get_node().out_edges()) {
     auto dot_node = lnast.add_child(parent_node, Lnast_node::create_dot("dot"));
     attach_child(lnast, dot_node, out.driver);
     //NOTE: Below, we do not use temp_var_count, we use tuple_temp_holder (so we can reference tuple name).
     lnast.add_child(dot_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("T", func_temp_holder))));
     //FIXME: Now how do I get the output pin's name from the submodule?
-  }
+    fmt::print("out: {} {}\n", out.driver.get_name(), out.driver.get_pid());
+  }*/
+  lnast.dump();
+  I(false);
 }
 
 //------------- Helper Functions ------------
@@ -911,4 +841,10 @@ std::string_view Pass_lgraph_to_lnast::get_new_seq_name(Lnast& lnast) {
   auto seq_name = lnast.add_string(absl::StrCat("SEQ", seq_count));
   seq_count++;
   return seq_name;
+}
+
+std::string_view Pass_lgraph_to_lnast::create_temp_var(Lnast& lnast) {
+  auto temp_var_name = lnast.add_string(absl::StrCat("___L", temp_var_count));
+  temp_var_count++;
+  return temp_var_name;
 }

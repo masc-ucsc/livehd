@@ -1,5 +1,5 @@
-%o as (__bits:3)
-$a as (__bits:3)
+%o as (__bits=3)
+$a as (__bits=3)
 accu = 0
 
 //dummy loop behavior but troublesome

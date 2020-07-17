@@ -1,3 +1,6 @@
+$a as (__bits=8)
+$b as (__bits=8)
+%out as (__bits=8)
 
 if ($a ){
   if ($b ){

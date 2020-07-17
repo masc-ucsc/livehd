@@ -1,33 +1,54 @@
 #pragma once
 
 #include <string_view>
+#include <vector>
 
 #include "lnast.hpp"
 
-class Semantic_pass {
+class Semantic_check {
 private:
 protected:
 
-  std::vector<std::string_view> write_list;
-  std::vector<std::string_view> read_list;
+  absl::flat_hash_map<std::string_view, std::string_view> write_dict;
+  absl::flat_hash_map<std::string_view, std::string_view> read_dict;
+  
+  std::vector<std::string_view> assign_lhs_list;
+  std::vector<std::string_view> assign_rhs_list;
+
+  std::vector<std::string_view> inefficient_LNAST;
+  absl::flat_hash_set<std::string_view> output_vars;
 
   bool is_primitive_op(const Lnast_ntype node_type);
   bool is_tree_structs(const Lnast_ntype node_type);
-  bool in_write_list(std::string_view node_name);
-  bool in_read_list(std::string_view node_name);
-  void add_to_write_list(std::string_view node_name);
-  void add_to_read_list(std::string_view node_name);
+  bool in_write_list(std::string_view node_name, std::string_view stmt_name);
+  bool in_read_list(std::string_view node_name, std::string_view stmt_name);
+  bool in_assign_lhs_list(std::string_view node_name);
+  bool in_assign_rhs_list(std::string_view node_name);
+  bool in_inefficient_LNAST(std::string_view node_name);
+  bool in_output_vars(std::string_view node_name);
 
-  void resolve_read_write_lists();
+  void add_to_write_list(Lnast* lnast, std::string_view node_name, std::string_view stmt_name);
+  void add_to_read_list(std::string_view node_name, std::string_view stmt_name);
+  void add_to_assign_lhs_list(std::string_view node_name);
+  void add_to_assign_rhs_list(std::string_view node_name);
+  void add_to_output_vars(std::string_view node_name);
+  void find_lhs_name(int index);
+  void error_print_lnast_by_name(Lnast* lnast, std::string_view error_name);
+  void error_print_lnast_by_type(Lnast* lnast, std::string_view error_name);
+  void error_print_lnast_var_warn(Lnast* lnast, std::vector<std::string_view> error_names);
 
-  void check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_opr, const Lnast_ntype node_type);
-  void check_if_op(Lnast* lnast, const Lnast_nid &lnidx_opr);
-  void check_for_op(Lnast* lnast, const Lnast_nid &lnidx_opr);
-  void check_while_op(Lnast* lnast, const Lnast_nid &lnidx_opr);
-  void check_func_def(Lnast* lnast, const Lnast_nid &lnidx_opr);
-  void check_func_call(Lnast* lnast, const Lnast_nid &lnidx_opr);
+  void resolve_read_write_lists(Lnast* lnast);
+  void resolve_assign_lhs_rhs_lists();
+
+  void check_primitive_ops(Lnast* lnast, const Lnast_nid& lnidx_opr, const Lnast_ntype node_type, std::string_view stmt_name);
+  void check_tree_struct_ops(Lnast *lnast, const Lnast_nid &lnidx_opr, const Lnast_ntype node_type, std::string_view stmt_name);
+  void check_if_op(Lnast* lnast, const Lnast_nid& lnidx_opr, std::string_view stmt_name);
+  void check_for_op(Lnast* lnast, const Lnast_nid& lnidx_opr, std::string_view stmt_name);
+  void check_while_op(Lnast* lnast, const Lnast_nid& lnidx_opr, std::string_view stmt_name);
+  void check_func_def(Lnast* lnast, const Lnast_nid& lnidx_opr, std::string_view stmt_name);
+  void check_func_call(Lnast* lnast, const Lnast_nid& lnidx_opr, std::string_view stmt_name);
 
 public:
   // NOTE: Only tuple operations implemented are for tuple assignment and tuple concatenation
-  void semantic_check(Lnast* lnast);
+  void do_check(Lnast* lnast);
 };

@@ -15,7 +15,6 @@ public:
     Lnast_ntype_if,
     Lnast_ntype_cond,
     Lnast_ntype_uif,
-    Lnast_ntype_elif,
     Lnast_ntype_for,
     Lnast_ntype_while,
     Lnast_ntype_phi,
@@ -89,7 +88,6 @@ protected:
     "if",
     "cond",
     "uif",
-    "elif",
     "for",
     "while",
     "phi",
@@ -158,7 +156,6 @@ protected:
     "if",
     "cond",
     "uif",
-    "elif",
     "for",
     "while",
     "phi",
@@ -221,7 +218,6 @@ protected:
     "if",
     "cond",
     "uif",
-    "elif",
     "for",
     "while",
     "phi",
@@ -284,7 +280,6 @@ protected:
     "if",
     "cond",
     "uif",
-    "elif",
     "for",
     "while",
     "phi",
@@ -348,7 +343,6 @@ protected:
     "if",
     "cond",
     "uif",
-    "elif",
     "for",
     "while",
     "phi",
@@ -405,158 +399,155 @@ protected:
   };
 
   Lnast_ntype_int val;
-  explicit Lnast_ntype(Lnast_ntype_int _val) : val(_val) {}
+  constexpr explicit Lnast_ntype(Lnast_ntype_int _val) : val(_val) {}
 public:
-  Lnast_ntype() : val(Lnast_ntype_invalid) {
+  constexpr Lnast_ntype() : val(Lnast_ntype_invalid) {
   }
+
+  std::string_view to_s() const { return namemap[val]; }
 
   Lnast_ntype_int get_raw_ntype() const { return val; }
 
-  static Lnast_ntype create_invalid()      { return Lnast_ntype(Lnast_ntype_invalid); }
-  static Lnast_ntype create_top()          { return Lnast_ntype(Lnast_ntype_top); }
+  static constexpr Lnast_ntype create_invalid()  { return Lnast_ntype(Lnast_ntype_invalid); }
+  static constexpr Lnast_ntype create_top()          { return Lnast_ntype(Lnast_ntype_top); }
 
-  static Lnast_ntype create_stmts()        { return Lnast_ntype(Lnast_ntype_stmts); }
-  static Lnast_ntype create_cstmts()       { return Lnast_ntype(Lnast_ntype_cstmts); }
-  static Lnast_ntype create_if()           { return Lnast_ntype(Lnast_ntype_if); }
-  static Lnast_ntype create_cond()         { return Lnast_ntype(Lnast_ntype_cond); }
-  static Lnast_ntype create_uif()          { return Lnast_ntype(Lnast_ntype_uif); }
-  static Lnast_ntype create_elif()         { return Lnast_ntype(Lnast_ntype_elif); }
-  static Lnast_ntype create_for()          { return Lnast_ntype(Lnast_ntype_for); }
-  static Lnast_ntype create_while()        { return Lnast_ntype(Lnast_ntype_while); }
-  static Lnast_ntype create_phi()          { return Lnast_ntype(Lnast_ntype_phi); }
-  static Lnast_ntype create_func_call()    { return Lnast_ntype(Lnast_ntype_func_call); }
-  static Lnast_ntype create_func_def()     { return Lnast_ntype(Lnast_ntype_func_def); }
+  static constexpr Lnast_ntype create_stmts()        { return Lnast_ntype(Lnast_ntype_stmts); }
+  static constexpr Lnast_ntype create_cstmts()       { return Lnast_ntype(Lnast_ntype_cstmts); }
+  static constexpr Lnast_ntype create_if()           { return Lnast_ntype(Lnast_ntype_if); }
+  static constexpr Lnast_ntype create_cond()         { return Lnast_ntype(Lnast_ntype_cond); }
+  static constexpr Lnast_ntype create_uif()          { return Lnast_ntype(Lnast_ntype_uif); }
+  static constexpr Lnast_ntype create_for()          { return Lnast_ntype(Lnast_ntype_for); }
+  static constexpr Lnast_ntype create_while()        { return Lnast_ntype(Lnast_ntype_while); }
+  static constexpr Lnast_ntype create_phi()          { return Lnast_ntype(Lnast_ntype_phi); }
+  static constexpr Lnast_ntype create_func_call()    { return Lnast_ntype(Lnast_ntype_func_call); }
+  static constexpr Lnast_ntype create_func_def()     { return Lnast_ntype(Lnast_ntype_func_def); }
 
-  static Lnast_ntype create_assign()       { return Lnast_ntype(Lnast_ntype_assign); }
-  static Lnast_ntype create_dp_assign()    { return Lnast_ntype(Lnast_ntype_dp_assign); }
-  static Lnast_ntype create_as()           { return Lnast_ntype(Lnast_ntype_as); }
-  static Lnast_ntype create_label()        { return Lnast_ntype(Lnast_ntype_label); }
-  static Lnast_ntype create_dot()          { return Lnast_ntype(Lnast_ntype_dot); }
-  static Lnast_ntype create_logical_and()  { return Lnast_ntype(Lnast_ntype_logical_and); }
-  static Lnast_ntype create_logical_or()   { return Lnast_ntype(Lnast_ntype_logical_or); }
-  static Lnast_ntype create_logical_not()  { return Lnast_ntype(Lnast_ntype_logical_not); }
-  static Lnast_ntype create_and()          { return Lnast_ntype(Lnast_ntype_and); }
-  static Lnast_ntype create_or()           { return Lnast_ntype(Lnast_ntype_or); }
-  static Lnast_ntype create_not()          { return Lnast_ntype(Lnast_ntype_not); }
-  static Lnast_ntype create_xor()          { return Lnast_ntype(Lnast_ntype_xor); }
-  static Lnast_ntype create_plus()         { return Lnast_ntype(Lnast_ntype_plus); }
-  static Lnast_ntype create_minus()        { return Lnast_ntype(Lnast_ntype_minus); }
-  static Lnast_ntype create_mult()         { return Lnast_ntype(Lnast_ntype_mult); }
-  static Lnast_ntype create_div()          { return Lnast_ntype(Lnast_ntype_div); }
-  static Lnast_ntype create_eq()           { return Lnast_ntype(Lnast_ntype_eq); }
-  static Lnast_ntype create_same()         { return Lnast_ntype(Lnast_ntype_same); }
-  static Lnast_ntype create_lt()           { return Lnast_ntype(Lnast_ntype_lt); }
-  static Lnast_ntype create_le()           { return Lnast_ntype(Lnast_ntype_le); }
-  static Lnast_ntype create_gt()           { return Lnast_ntype(Lnast_ntype_gt); }
-  static Lnast_ntype create_ge()           { return Lnast_ntype(Lnast_ntype_ge); }
-  static Lnast_ntype create_tuple()        { return Lnast_ntype(Lnast_ntype_tuple); }
-  static Lnast_ntype create_tuple_concat() { return Lnast_ntype(Lnast_ntype_tuple_concat); }
-  static Lnast_ntype create_tuple_delete() { return Lnast_ntype(Lnast_ntype_tuple_delete); }
-  static Lnast_ntype create_select()       { return Lnast_ntype(Lnast_ntype_select);}
-  static Lnast_ntype create_bit_select()   { return Lnast_ntype(Lnast_ntype_bit_select);}
-  static Lnast_ntype create_range()        { return Lnast_ntype(Lnast_ntype_range);}
+  static constexpr Lnast_ntype create_assign()       { return Lnast_ntype(Lnast_ntype_assign); }
+  static constexpr Lnast_ntype create_dp_assign()    { return Lnast_ntype(Lnast_ntype_dp_assign); }
+  static constexpr Lnast_ntype create_as()           { return Lnast_ntype(Lnast_ntype_as); }
+  static constexpr Lnast_ntype create_label()        { return Lnast_ntype(Lnast_ntype_label); }
+  static constexpr Lnast_ntype create_dot()          { return Lnast_ntype(Lnast_ntype_dot); }
+  static constexpr Lnast_ntype create_logical_and()  { return Lnast_ntype(Lnast_ntype_logical_and); }
+  static constexpr Lnast_ntype create_logical_or()   { return Lnast_ntype(Lnast_ntype_logical_or); }
+  static constexpr Lnast_ntype create_logical_not()  { return Lnast_ntype(Lnast_ntype_logical_not); }
+  static constexpr Lnast_ntype create_and()          { return Lnast_ntype(Lnast_ntype_and); }
+  static constexpr Lnast_ntype create_or()           { return Lnast_ntype(Lnast_ntype_or); }
+  static constexpr Lnast_ntype create_not()          { return Lnast_ntype(Lnast_ntype_not); }
+  static constexpr Lnast_ntype create_xor()          { return Lnast_ntype(Lnast_ntype_xor); }
+  static constexpr Lnast_ntype create_plus()         { return Lnast_ntype(Lnast_ntype_plus); }
+  static constexpr Lnast_ntype create_minus()        { return Lnast_ntype(Lnast_ntype_minus); }
+  static constexpr Lnast_ntype create_mult()         { return Lnast_ntype(Lnast_ntype_mult); }
+  static constexpr Lnast_ntype create_div()          { return Lnast_ntype(Lnast_ntype_div); }
+  static constexpr Lnast_ntype create_eq()           { return Lnast_ntype(Lnast_ntype_eq); }
+  static constexpr Lnast_ntype create_same()         { return Lnast_ntype(Lnast_ntype_same); }
+  static constexpr Lnast_ntype create_lt()           { return Lnast_ntype(Lnast_ntype_lt); }
+  static constexpr Lnast_ntype create_le()           { return Lnast_ntype(Lnast_ntype_le); }
+  static constexpr Lnast_ntype create_gt()           { return Lnast_ntype(Lnast_ntype_gt); }
+  static constexpr Lnast_ntype create_ge()           { return Lnast_ntype(Lnast_ntype_ge); }
+  static constexpr Lnast_ntype create_tuple()        { return Lnast_ntype(Lnast_ntype_tuple); }
+  static constexpr Lnast_ntype create_tuple_concat() { return Lnast_ntype(Lnast_ntype_tuple_concat); }
+  static constexpr Lnast_ntype create_tuple_delete() { return Lnast_ntype(Lnast_ntype_tuple_delete); }
+  static constexpr Lnast_ntype create_select()       { return Lnast_ntype(Lnast_ntype_select);}
+  static constexpr Lnast_ntype create_bit_select()   { return Lnast_ntype(Lnast_ntype_bit_select);}
+  static constexpr Lnast_ntype create_range()        { return Lnast_ntype(Lnast_ntype_range);}
 
-  static Lnast_ntype create_shift_right()         {return Lnast_ntype(Lnast_ntype_shift_right);}
-  static Lnast_ntype create_shift_left()          {return Lnast_ntype(Lnast_ntype_shift_left);}
-  static Lnast_ntype create_logic_shift_right()   {return Lnast_ntype(Lnast_ntype_logic_shift_right);}
-  static Lnast_ntype create_arith_shift_right()   {return Lnast_ntype(Lnast_ntype_arith_shift_right);}
-  static Lnast_ntype create_arith_shift_left()    {return Lnast_ntype(Lnast_ntype_arith_shift_left);}
-  static Lnast_ntype create_rotate_shift_right()  {return Lnast_ntype(Lnast_ntype_rotate_shift_right);}
-  static Lnast_ntype create_rotate_shift_left()   {return Lnast_ntype(Lnast_ntype_rotate_shift_left);}
-  static Lnast_ntype create_dynamic_shift_right() {return Lnast_ntype(Lnast_ntype_dynamic_shift_right);}
-  static Lnast_ntype create_dynamic_shift_left()  {return Lnast_ntype(Lnast_ntype_dynamic_shift_left);}
+  static constexpr Lnast_ntype create_shift_right()         {return Lnast_ntype(Lnast_ntype_shift_right);}
+  static constexpr Lnast_ntype create_shift_left()          {return Lnast_ntype(Lnast_ntype_shift_left);}
+  static constexpr Lnast_ntype create_logic_shift_right()   {return Lnast_ntype(Lnast_ntype_logic_shift_right);}
+  static constexpr Lnast_ntype create_arith_shift_right()   {return Lnast_ntype(Lnast_ntype_arith_shift_right);}
+  static constexpr Lnast_ntype create_arith_shift_left()    {return Lnast_ntype(Lnast_ntype_arith_shift_left);}
+  static constexpr Lnast_ntype create_rotate_shift_right()  {return Lnast_ntype(Lnast_ntype_rotate_shift_right);}
+  static constexpr Lnast_ntype create_rotate_shift_left()   {return Lnast_ntype(Lnast_ntype_rotate_shift_left);}
+  static constexpr Lnast_ntype create_dynamic_shift_right() {return Lnast_ntype(Lnast_ntype_dynamic_shift_right);}
+  static constexpr Lnast_ntype create_dynamic_shift_left()  {return Lnast_ntype(Lnast_ntype_dynamic_shift_left);}
 
+  static constexpr Lnast_ntype create_ref()           { return Lnast_ntype(Lnast_ntype_ref); }
+  static constexpr Lnast_ntype create_const()         { return Lnast_ntype(Lnast_ntype_const); }
 
-  static Lnast_ntype create_ref()           { return Lnast_ntype(Lnast_ntype_ref); }
-  static Lnast_ntype create_const()         { return Lnast_ntype(Lnast_ntype_const); }
+  static constexpr Lnast_ntype create_assert()        { return Lnast_ntype(Lnast_ntype_assert); }
+  static constexpr Lnast_ntype create_err_flag()      { return Lnast_ntype(Lnast_ntype_err_flag); }
+  static constexpr Lnast_ntype create_reg_fwd()       { return Lnast_ntype(Lnast_ntype_reg_fwd); }
 
-  static Lnast_ntype create_assert()        { return Lnast_ntype(Lnast_ntype_assert); }
-  static Lnast_ntype create_err_flag()      { return Lnast_ntype(Lnast_ntype_err_flag); }
-  static Lnast_ntype create_reg_fwd()       { return Lnast_ntype(Lnast_ntype_reg_fwd); }
+  static constexpr Lnast_ntype create_tuple_add()     { return Lnast_ntype(Lnast_ntype_tuple_add);}
+  static constexpr Lnast_ntype create_tuple_get()     { return Lnast_ntype(Lnast_ntype_tuple_get);}
+  static constexpr Lnast_ntype create_tuple_phi_add() { return Lnast_ntype(Lnast_ntype_tuple_phi_add) ;}
+  static constexpr Lnast_ntype create_attr_set()      { return Lnast_ntype(Lnast_ntype_attr_set) ;}
+  static constexpr Lnast_ntype create_attr_get()      { return Lnast_ntype(Lnast_ntype_attr_get) ;}
 
-  static Lnast_ntype create_tuple_add()     { return Lnast_ntype(Lnast_ntype_tuple_add);}
-  static Lnast_ntype create_tuple_get()     { return Lnast_ntype(Lnast_ntype_tuple_get);}
-  static Lnast_ntype create_tuple_phi_add() { return Lnast_ntype(Lnast_ntype_tuple_phi_add) ;}
-  static Lnast_ntype create_attr_set()      { return Lnast_ntype(Lnast_ntype_attr_set) ;}
-  static Lnast_ntype create_attr_get()      { return Lnast_ntype(Lnast_ntype_attr_get) ;}
+  bool constexpr is_invalid()      const { return val == Lnast_ntype_invalid; }
+  bool constexpr is_top()          const { return val == Lnast_ntype_top; }
 
-  bool is_invalid()      const { return val == Lnast_ntype_invalid; }
-  bool is_top()          const { return val == Lnast_ntype_top; }
+  bool constexpr is_stmts()        const { return val == Lnast_ntype_stmts; }
+  bool constexpr is_cstmts()       const { return val == Lnast_ntype_cstmts; }
+  bool constexpr is_if()           const { return val == Lnast_ntype_if; }
+  bool constexpr is_cond()         const { return val == Lnast_ntype_cond; }
+  bool constexpr is_uif()          const { return val == Lnast_ntype_uif; }
+  bool constexpr is_for()          const { return val == Lnast_ntype_for; }
+  bool constexpr is_while()        const { return val == Lnast_ntype_while; }
+  bool constexpr is_phi()          const { return val == Lnast_ntype_phi; }
+  bool constexpr is_func_call()    const { return val == Lnast_ntype_func_call; }
+  bool constexpr is_func_def()     const { return val == Lnast_ntype_func_def; }
 
-  bool is_stmts()        const { return val == Lnast_ntype_stmts; }
-  bool is_cstmts()       const { return val == Lnast_ntype_cstmts; }
-  bool is_if()           const { return val == Lnast_ntype_if; }
-  bool is_cond()         const { return val == Lnast_ntype_cond; }
-  bool is_uif()          const { return val == Lnast_ntype_uif; }
-  bool is_elif()         const { return val == Lnast_ntype_elif; }
-  bool is_for()          const { return val == Lnast_ntype_for; }
-  bool is_while()        const { return val == Lnast_ntype_while; }
-  bool is_phi()          const { return val == Lnast_ntype_phi; }
-  bool is_func_call()    const { return val == Lnast_ntype_func_call; }
-  bool is_func_def()     const { return val == Lnast_ntype_func_def; }
+  bool constexpr is_assign()       const { return val == Lnast_ntype_assign; }
+  bool constexpr is_dp_assign()    const { return val == Lnast_ntype_dp_assign; }
+  bool constexpr is_as()           const { return val == Lnast_ntype_as; }
+  bool constexpr is_label()        const { return val == Lnast_ntype_label; }
+  bool constexpr is_dot()          const { return val == Lnast_ntype_dot; }
+  bool constexpr is_logical_and()  const { return val == Lnast_ntype_logical_and; }
+  bool constexpr is_logical_or()   const { return val == Lnast_ntype_logical_or; }
+  bool constexpr is_logical_not()  const { return val == Lnast_ntype_logical_not; }
+  bool constexpr is_and()          const { return val == Lnast_ntype_and; }
+  bool constexpr is_or()           const { return val == Lnast_ntype_or; }
+  bool constexpr is_not()          const { return val == Lnast_ntype_not; }
+  bool constexpr is_xor()          const { return val == Lnast_ntype_xor; }
+  bool constexpr is_plus()         const { return val == Lnast_ntype_plus; }
+  bool constexpr is_minus()        const { return val == Lnast_ntype_minus; }
+  bool constexpr is_mult()         const { return val == Lnast_ntype_mult; }
+  bool constexpr is_div()          const { return val == Lnast_ntype_div; }
+  bool constexpr is_eq()           const { return val == Lnast_ntype_eq; }
+  bool constexpr is_same()         const { return val == Lnast_ntype_same; }
+  bool constexpr is_lt()           const { return val == Lnast_ntype_lt; }
+  bool constexpr is_le()           const { return val == Lnast_ntype_le; }
+  bool constexpr is_gt()           const { return val == Lnast_ntype_gt; }
+  bool constexpr is_ge()           const { return val == Lnast_ntype_ge; }
+  bool constexpr is_tuple()        const { return val == Lnast_ntype_tuple; }
+  bool constexpr is_tuple_concat() const { return val == Lnast_ntype_tuple_concat; }
+  bool constexpr is_tuple_delete() const { return val == Lnast_ntype_tuple_delete; }
+  bool constexpr is_select()       const { return val == Lnast_ntype_select; }
+  bool constexpr is_bit_select()   const { return val == Lnast_ntype_bit_select; }
+  bool constexpr is_range()        const { return val == Lnast_ntype_range; }
 
-  bool is_assign()       const { return val == Lnast_ntype_assign; }
-  bool is_dp_assign()    const { return val == Lnast_ntype_dp_assign; }
-  bool is_as()           const { return val == Lnast_ntype_as; }
-  bool is_label()        const { return val == Lnast_ntype_label; }
-  bool is_dot()          const { return val == Lnast_ntype_dot; }
-  bool is_logical_and()  const { return val == Lnast_ntype_logical_and; }
-  bool is_logical_or()   const { return val == Lnast_ntype_logical_or; }
-  bool is_logical_not()  const { return val == Lnast_ntype_logical_not; }
-  bool is_and()          const { return val == Lnast_ntype_and; }
-  bool is_or()           const { return val == Lnast_ntype_or; }
-  bool is_not()          const { return val == Lnast_ntype_not; }
-  bool is_xor()          const { return val == Lnast_ntype_xor; }
-  bool is_plus()         const { return val == Lnast_ntype_plus; }
-  bool is_minus()        const { return val == Lnast_ntype_minus; }
-  bool is_mult()         const { return val == Lnast_ntype_mult; }
-  bool is_div()          const { return val == Lnast_ntype_div; }
-  bool is_eq()           const { return val == Lnast_ntype_eq; }
-  bool is_same()         const { return val == Lnast_ntype_same; }
-  bool is_lt()           const { return val == Lnast_ntype_lt; }
-  bool is_le()           const { return val == Lnast_ntype_le; }
-  bool is_gt()           const { return val == Lnast_ntype_gt; }
-  bool is_ge()           const { return val == Lnast_ntype_ge; }
-  bool is_tuple()        const { return val == Lnast_ntype_tuple; }
-  bool is_tuple_concat() const { return val == Lnast_ntype_tuple_concat; }
-  bool is_tuple_delete() const { return val == Lnast_ntype_tuple_delete; }
-  bool is_select()       const { return val == Lnast_ntype_select; }
-  bool is_bit_select()   const { return val == Lnast_ntype_bit_select; }
-  bool is_range()        const { return val == Lnast_ntype_range; }
+  bool constexpr is_shift_right()         const { return val == Lnast_ntype_shift_right; }
+  bool constexpr is_shift_left()          const { return val == Lnast_ntype_shift_left; }
+  bool constexpr is_logic_shift_right()   const { return val == Lnast_ntype_logic_shift_right; }
+  bool constexpr is_arith_shift_right()   const { return val == Lnast_ntype_arith_shift_right; }
+  bool constexpr is_arith_shift_left()    const { return val == Lnast_ntype_arith_shift_left; }
+  bool constexpr is_rotate_shift_right()  const { return val == Lnast_ntype_rotate_shift_right; }
+  bool constexpr is_rotate_shift_left()   const { return val == Lnast_ntype_rotate_shift_left; }
+  bool constexpr is_dynamic_shift_right() const { return val == Lnast_ntype_dynamic_shift_right; }
+  bool constexpr is_dynamic_shift_left()  const { return val == Lnast_ntype_dynamic_shift_left; }
 
-  bool is_shift_right()         const { return val == Lnast_ntype_shift_right; }
-  bool is_shift_left()          const { return val == Lnast_ntype_shift_left; }
-  bool is_logic_shift_right()   const { return val == Lnast_ntype_logic_shift_right; }
-  bool is_arith_shift_right()   const { return val == Lnast_ntype_arith_shift_right; }
-  bool is_arith_shift_left()    const { return val == Lnast_ntype_arith_shift_left; }
-  bool is_rotate_shift_right()  const { return val == Lnast_ntype_rotate_shift_right; }
-  bool is_rotate_shift_left()   const { return val == Lnast_ntype_rotate_shift_left; }
-  bool is_dynamic_shift_right() const { return val == Lnast_ntype_dynamic_shift_right; }
-  bool is_dynamic_shift_left()  const { return val == Lnast_ntype_dynamic_shift_left; }
+  bool constexpr is_ref()           const { return val == Lnast_ntype_ref; }
+  bool constexpr is_const()         const { return val == Lnast_ntype_const; }
 
+  bool constexpr is_assert()        const { return val == Lnast_ntype_assert; }
+  bool constexpr is_err_flag()      const { return val == Lnast_ntype_err_flag; }
+  bool constexpr is_reg_fwd()       const { return val == Lnast_ntype_reg_fwd; }
 
-
-  bool is_ref()           const { return val == Lnast_ntype_ref; }
-  bool is_const()         const { return val == Lnast_ntype_const; }
-
-  bool is_assert()        const { return val == Lnast_ntype_assert; }
-  bool is_err_flag()      const { return val == Lnast_ntype_err_flag; }
-  bool is_reg_fwd()       const { return val == Lnast_ntype_reg_fwd; }
-
-  bool is_tuple_add()     const { return val == Lnast_ntype_tuple_add; }
-  bool is_tuple_get()     const { return val == Lnast_ntype_tuple_get; }
-  bool is_tuple_phi_add() const { return val == Lnast_ntype_tuple_phi_add; }
-  bool is_attr_set()      const { return val == Lnast_ntype_attr_set; }
-  bool is_attr_get()      const { return val == Lnast_ntype_attr_get; }
+  bool constexpr is_tuple_add()     const { return val == Lnast_ntype_tuple_add; }
+  bool constexpr is_tuple_get()     const { return val == Lnast_ntype_tuple_get; }
+  bool constexpr is_tuple_phi_add() const { return val == Lnast_ntype_tuple_phi_add; }
+  bool constexpr is_attr_set()      const { return val == Lnast_ntype_attr_set; }
+  bool constexpr is_attr_get()      const { return val == Lnast_ntype_attr_get; }
 
   // Super types
-  bool is_logical_op()   const { return (val == Lnast_ntype_logical_and) ||
+  bool constexpr is_logical_op()   const { return (val == Lnast_ntype_logical_and) ||
                                         (val == Lnast_ntype_logical_or) ||
                                         (val == Lnast_ntype_logical_not); }
 
-  bool is_unary_op()     const { return (val == Lnast_ntype_not); }
+  bool constexpr is_unary_op()     const { return (val == Lnast_ntype_not); }
 
-  bool is_nary_op()      const { return (val == Lnast_ntype_and) ||
+  bool constexpr is_nary_op()      const { return (val == Lnast_ntype_and) ||
                                         (val == Lnast_ntype_or) ||
                                         (val == Lnast_ntype_xor) ||
                                         (val == Lnast_ntype_plus) ||

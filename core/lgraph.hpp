@@ -22,6 +22,9 @@ protected:
   friend class Bwd_edge_iterator;
   friend class Fast_edge_iterator;
 
+  // Memoize tables that provide hints (not certainty because add/del operations)
+  std::array<Index_ID,8> memoize_const_hint;
+
   Hierarchy_tree htree;
 
   Hierarchy_tree *ref_htree() {
@@ -50,32 +53,45 @@ protected:
     return find_idx_from_pid(pin.get_idx(), pin.get_pid());
   }
 
-  int get_num_outputs(Index_ID nid) const {
+  Index_ID get_node_nid(Index_ID idx) const {
+    if (node_internal[idx].is_master_root()) return idx;
+
+    return node_internal[idx].get_nid();
+  }
+
+  int get_node_num_outputs(Index_ID nid) const {
     I(nid < node_internal.size());
     I(node_internal[nid].is_master_root());
     return node_internal[nid].get_node_num_outputs();
   }
 
-  int get_num_inputs(Index_ID nid) const {
+  int get_node_num_inputs(Index_ID nid) const {
     I(nid < node_internal.size());
     I(node_internal[nid].is_master_root());
     return node_internal[nid].get_node_num_inputs();
   }
 
-  Index_ID get_node_nid(Index_ID idx) {
-    I(node_internal.size() > idx);
+  int get_node_pin_num_outputs(Index_ID idx) const {
+    I(idx < node_internal.size());
     I(node_internal[idx].is_root());
-    if (node_internal[idx].is_master_root()) return idx;
-
-    idx = node_internal[idx].get_nid();
-    I(node_internal[idx].is_master_root());
-    return idx;
+    Index_ID nid = get_node_nid(idx);
+    return node_internal[nid].get_node_pin_num_outputs(idx);
   }
+
+  int get_node_pin_num_inputs(Index_ID idx) const {
+    I(idx < node_internal.size());
+    I(node_internal[idx].is_root());
+    Index_ID nid = get_node_nid(idx);
+    return node_internal[nid].get_node_pin_num_inputs(idx);
+  }
+
 
   Node_pin_iterator out_connected_pins(const Node &node) const;
   Node_pin_iterator inp_connected_pins(const Node &node) const;
   Node_pin_iterator out_setup_pins(const Node &node) const;
   Node_pin_iterator inp_setup_pins(const Node &node) const;
+
+  Node_pin_iterator inp_drivers(const Node &node, const absl::flat_hash_set<Node::Compact> &exclude) const;
 
   XEdge_iterator out_edges(const Node &node) const;
   XEdge_iterator inp_edges(const Node &node) const;
@@ -92,13 +108,20 @@ protected:
   bool has_outputs(const Node_pin &pin) const {
     I(pin.get_idx() < node_internal.size());
     I(node_internal[pin.get_idx()].is_root());
-    return node_internal[pin.get_idx()].has_pin_outputs();
+    GI(node_internal[pin.get_idx()].has_pin_outputs(), node_internal[pin.get_idx()].is_driver_setup());
+
+    return node_internal[pin.get_idx()].is_driver_setup() && node_internal[pin.get_idx()].has_pin_outputs();
   }
   bool has_inputs(const Node_pin &pin) const {
     I(pin.get_idx() < node_internal.size());
     I(node_internal[pin.get_idx()].is_root());
-    return node_internal[pin.get_idx()].has_pin_inputs();
+    GI(node_internal[pin.get_idx()].has_pin_inputs(), node_internal[pin.get_idx()].is_sink_setup());
+
+    return node_internal[pin.get_idx()].is_sink_setup() && node_internal[pin.get_idx()].has_pin_inputs();
   }
+
+  void del_driver2node_int(Node &driver, const Node &sink);
+  void del_sink2node_int(const Node &driver, Node &sink);
 
   bool del_edge_driver_int(const Node_pin &dpin, const Node_pin &spin);
   bool del_edge_sink_int(const Node_pin &dpin, const Node_pin &spin);
@@ -223,11 +246,11 @@ public:
 
   // Iterators defined in the lgraph_each.cpp
 
-  void each_sorted_graph_io(std::function<void(const Node_pin &pin, Port_ID pos)> f1);
-  void each_graph_input(std::function<void(const Node_pin &pin)> f1);
-  void each_graph_output(std::function<void(const Node_pin &pin)> f1);
+  void each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)> f1);
+  void each_graph_input(std::function<void(Node_pin &pin)> f1);
+  void each_graph_output(std::function<void(Node_pin &pin)> f1);
 
-  void each_node_fast(std::function<void(const Node &node)> f1);
+  void each_node_fast(std::function<void(Node &node)> f1);
 
   void each_output_edge_fast(std::function<void(XEdge &edge)> f1);
 

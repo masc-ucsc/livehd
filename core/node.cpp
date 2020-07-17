@@ -174,9 +174,39 @@ bool Node::has_inputs() const { return current_g->has_node_inputs(nid); }
 
 bool Node::has_outputs() const { return current_g->has_node_outputs(nid); }
 
-int Node::get_num_inputs() const { return current_g->get_num_inputs(nid); }
+int Node::get_num_inputs() const { return current_g->get_node_num_inputs(nid); }
 
-int Node::get_num_outputs() const { return current_g->get_num_outputs(nid); }
+int Node::get_num_outputs() const { return current_g->get_node_num_outputs(nid); }
+
+bool Node::has_driver_pin_connected(std::string_view pname) const {
+  auto pid = get_type().get_output_match(pname);
+  I(pid != Port_invalid);  // graph_pos must be valid if connected
+
+  return has_driver_pin_connected(pid);
+}
+
+bool Node::has_sink_pin_connected(std::string_view pname) const {
+  auto pid = get_type().get_input_match(pname);
+  I(pid != Port_invalid);  // graph_pos must be valid if connected
+
+  return has_sink_pin_connected(pid);
+}
+
+bool Node::has_driver_pin_connected(Port_ID pid) const {
+  Index_ID idx = current_g->find_idx_from_pid(nid, pid);
+  if (idx==0)
+    return false;
+  Node_pin dpin(top_g, current_g, hidx, idx, pid, false);
+  return current_g->has_outputs(dpin);
+}
+
+bool Node::has_sink_pin_connected(Port_ID pid) const {
+  Index_ID idx = current_g->find_idx_from_pid(nid, pid);
+  if (idx==0)
+    return false;
+  Node_pin dpin(top_g, current_g, hidx, idx, pid, true);
+  return current_g->has_inputs(dpin);
+}
 
 Node_pin Node::setup_driver_pin(Port_ID pid) {
   I(current_g->get_type(nid).has_output(pid));
@@ -202,6 +232,8 @@ Node_pin Node::setup_driver_pin() const {
 
 const Node_Type &Node::get_type() const { return current_g->get_type(nid); }
 
+Node_Type_Op Node::get_type_op() const { return current_g->get_type_op(nid); }
+
 void Node::set_type(const Node_Type_Op op) {
   I(op != SubGraph_Op && op != Const_Op && op != LUT_Op);  // do not set type directly, call set_type_const ....
   current_g->set_type(nid, op);
@@ -222,6 +254,12 @@ bool Node::is_type_loop_breaker() const { return current_g->is_type_loop_breaker
 bool Node::is_type_sub() const { return current_g->is_sub(nid); }
 
 bool Node::is_type_const() const { return current_g->is_type_const(nid); }
+
+bool Node::is_type_attr() const {
+	auto op = current_g->get_type_op(nid);
+
+	return op == AttrGet_Op || op == AttrSet_Op || op == TupKey_Op;
+}
 
 Hierarchy_index Node::hierarchy_go_down() const {
   I(current_g->is_sub(nid));
@@ -379,6 +417,10 @@ Node_pin_iterator Node::out_connected_pins() const { return current_g->out_conne
 Node_pin_iterator Node::inp_setup_pins() const { return current_g->inp_setup_pins(*this); }
 Node_pin_iterator Node::out_setup_pins() const { return current_g->out_setup_pins(*this); }
 
+Node_pin_iterator Node::inp_drivers(const absl::flat_hash_set<Node::Compact> &exclude) const {
+  return current_g->inp_drivers(*this, exclude);
+}
+
 void Node::del_node() {
   current_g->del_node(*this);
   nid = 0; // invalidate node after delete
@@ -486,10 +528,32 @@ int Node::get_color() const {
 
 bool Node::has_color() const { return Ann_node_color::ref(current_g)->has_key(get_compact_class()); }
 
+void Node::dump() {
 
-// Pyrope control flow counter 
-void     Node::set_cfcnt(uint32_t cfcnt) { Ann_node_cfcnt::ref(current_g)->set(get_compact_class(), cfcnt); }
-uint32_t Node::get_cfcnt() const { return Ann_node_cfcnt::ref(current_g)->get_val(get_compact_class()); }
-bool     Node::has_cfcnt() const { return Ann_node_cfcnt::ref(current_g)->has_key(get_compact_class()); }
-
-
+  fmt::print("nid:{} type:{} name:{}", nid, get_type().get_name(), debug_name());
+  if (get_type().op == LUT_Op) {
+    fmt::print(" lut={}\n", get_type_lut().to_pyrope());
+  } else if (get_type().op == Const_Op) {
+    fmt::print(" const={}\n", get_type_const().to_pyrope());
+  } else {
+    fmt::print("\n");
+  }
+  for (const auto &edge : inp_edges()) {
+    fmt::print("  inp bits:{} pid:{} from nid:{} idx:{} pid:{} name:{}\n", edge.get_bits(), edge.sink.get_pid(),
+               edge.driver.get_node().nid, edge.driver.get_idx(), edge.driver.get_pid(), edge.driver.debug_name());
+  }
+  for (const auto &spin : inp_setup_pins()) {
+    if (spin.is_connected())  // Already printed
+      continue;
+    fmt::print("              pid:{} name:{} UNCONNECTED\n", spin.get_pid(), spin.debug_name());
+  }
+  for (const auto &edge : out_edges()) {
+    fmt::print("  out bits:{} pid:{} name:{} to nid:{} idx:{} pid:{}\n", edge.get_bits(), edge.driver.get_pid(),
+               edge.driver.debug_name(), edge.sink.get_node().nid, edge.sink.get_idx(), edge.sink.get_pid());
+  }
+  for (const auto &dpin : out_setup_pins()) {
+    if (dpin.is_connected())  // Already printed
+      continue;
+    fmt::print("  out bits:{} pid:{} name:{} UNCONNECTED\n", dpin.get_bits(), dpin.get_pid(), dpin.debug_name());
+  }
+}

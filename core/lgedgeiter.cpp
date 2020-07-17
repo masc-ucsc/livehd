@@ -74,15 +74,16 @@ void Fwd_edge_iterator::Fwd_iter::topo_add_chain_down(const Node_pin &dst_pin) {
 
   for (auto &edge2 : down_pin.inp_edges()) {  // fwd
     I(edge2.sink.get_pid() == down_pin.get_pid());
+    if (visited.count(edge2.driver.get_node().get_compact()))
+      continue;
+
     topo_add_chain_fwd(edge2.driver);
   }
 }
 
 void Fwd_edge_iterator::Fwd_iter::topo_add_chain_fwd(const Node_pin &dst_pin) {
   const auto dst_node = dst_pin.get_node();
-  if (visited.count(dst_node.get_compact())) return;
-  if (pending_stack_set.contains(dst_node.get_compact())) return;
-  pending_stack_set.insert(dst_node.get_compact());
+  I(visited.count(dst_node.get_compact()) == 0);
 
   if (visit_sub) {
     if (dst_node.is_type_sub_present()) {  // DOWN??
@@ -97,6 +98,9 @@ void Fwd_edge_iterator::Fwd_iter::topo_add_chain_fwd(const Node_pin &dst_pin) {
 
         for (auto &edge2 : up_pin.inp_edges()) {  // fwd
           I(edge2.sink.get_pid() == up_pin.get_pid());
+          if (visited.count(edge2.driver.get_node().get_compact()))
+            continue;
+
           topo_add_chain_fwd(edge2.driver);
         }
       }
@@ -111,7 +115,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear(LGraph *top) {
   I(linear_phase);
 
   global_it.advance_if_deleted();
-  if (global_it.is_invalid()) {
+  if (unlikely(global_it.is_invalid())) {
     current_node.invalidate();
     linear_phase = false;
     global_it    = top->fast(visit_sub).begin();
@@ -131,11 +135,17 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear(LGraph *top) {
       if (visit_sub && next_node.is_type_sub()) is_topo_sorted = false;
     } else {
       for (const auto edge : next_node.inp_edges()) {
-        if (edge.driver.is_graph_input()) continue;  // If input while in linear mode, we are still in linear mode
-
         auto driver_node = edge.driver.get_node();
+
+        if (driver_node.is_graph_input()) continue;  // If input while in linear mode, we are still in linear mode
+
         // NOTE: For hierarchical, if the driver_node is an IO (input). It
         // could try to go up to see if the node is pipelined or not visited
+
+        if (driver_node.get_nid() > next_node.get_nid()) {
+          is_topo_sorted = false;
+          break;
+        }
 
         if (!visited.count(driver_node.get_compact())) {  // fwd
           is_topo_sorted = false;
@@ -143,7 +153,6 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear(LGraph *top) {
         }
       }
     }
-
 
     if (is_topo_sorted) {
       visited.insert(next_node.get_compact());
@@ -157,19 +166,18 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending() {
   do {
     while (!pending_stack.empty()) {
       auto node = pending_stack.back();
-      if (!node.get_class_lgraph()->is_valid_node(node.get_nid())) {
+
+      if (visited.count(node.get_compact())) {
+        pending_stack.pop_back();
+        continue;
+      }
+
+      if (unlikely(!node.get_class_lgraph()->is_valid_node(node.get_nid()))) {
         // The iterator can delete nodes
         pending_stack.pop_back();
         continue;
       }
 
-#if 1
-      if (visited.count(node.get_compact())) {
-        pending_stack.pop_back();
-        pending_stack_set.erase(node.get_compact());
-        continue;
-      }
-#endif
       //      if (node.debug_name() == "node_372_xor_lg_test_2")
       //        fmt::print("HERE\n");
       //
@@ -187,16 +195,33 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending() {
       bool can_be_visited = false;
       if (likely(!any_propagated && !node.is_graph_io() && (!visit_sub || !node.is_type_sub_present()))) {
         can_be_visited = true;
-        for (auto &edge2 : node.inp_edges()) {  // fwd
-          // fmt::print("adding {} from {}\n",edge2.driver.get_node().debug_name(), node.debug_name());
-          topo_add_chain_fwd(edge2.driver);
+
+        auto dpin_list = node.inp_drivers(visited);
+
+        if (!dpin_list.empty()) { // Something got added, track potential combinational loops
+          for (auto &dpin : dpin_list) {  // fwd
+            topo_add_chain_fwd(dpin);
+          }
+
+          auto it = pending_loop_detect.find(node.get_compact());
+          if (it == pending_loop_detect.end()) {
+            pending_loop_detect[node.get_compact()] = node.get_num_outputs();
+          } else {
+            it->second--;
+            if (it->second <= 0) {                    // Loop
+              pending_loop_detect.clear();
+              pending_stack.push_back(node);  // to force loop break
+            }
+          }
         }
       }
 
       if (pending_stack.back() != node) continue;
       visited.insert(node.get_compact());
       pending_stack.pop_back();
-      pending_stack_set.erase(node.get_compact());
+      if (pending_stack.size() <= 1 && !pending_loop_detect.empty()) {
+        pending_loop_detect.clear();
+      }
 
       if (can_be_visited) {
         I(node.get_class_lgraph()->is_valid_node(node.get_nid()));
@@ -213,13 +238,9 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending() {
 
     I(!(*global_it).is_graph_io());  // NOTE: should we propagate IO for going up?
     if (!visited.count((*global_it).get_compact())) {
-      if (!pending_stack_set.contains((*global_it).get_compact())) {
-        pending_stack_set.insert((*global_it).get_compact());
-        pending_stack.push_back(*global_it);
-        for (auto &edge2 : (*global_it).inp_edges()) {  // fwd
-          // fmt::print("chain  {} from {}\n",edge2.driver.get_node().debug_name(), (*global_it).debug_name());
-          topo_add_chain_fwd(edge2.driver);
-        }
+      pending_stack.push_back(*global_it);
+      for (auto &dpin : (*global_it).inp_drivers(visited)) {  // fwd
+        topo_add_chain_fwd(dpin);
       }
     }
 

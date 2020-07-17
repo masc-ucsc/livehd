@@ -1,6 +1,6 @@
 module out_ssa (
-  output [2:0] out,
-  output [3:0] out2
+  output [1:0] out,
+  output [2:0] out2
 );
 
 assign out = 3;

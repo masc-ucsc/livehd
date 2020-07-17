@@ -1,0 +1,133 @@
+// inou.pyrope files:inou/pyrope/tests/semanticTest.prp |> pass.semantic
+// ./bazel-bin/inou/pyrope/prp_lnast_test inou/pyrope/tests/semanticTest.prp
+
+// Assign Statement
+val = 
+// Warning: val
+// ================================================
+
+// Assign Simple Expression
+// x = 1
+// total := (x - 1) + 3 + 2
+// Warning: total
+// ================================================
+
+// Binary Not Operation
+// %out = ~$inp
+// Warning: None
+// ================================================
+
+// Logical Not Operation
+// %out = !$inp
+// Warning: None
+// ================================================
+
+// And Operation
+// a = 1;
+// b = 1;
+// c = 0;
+// out = a & b & c
+// Warning: out
+// ================================================
+
+// If Statement
+// a = 4
+// if a > 3 {
+//   b = a + 1
+// }
+// Warning: b
+// ================================================
+
+// If Statement Full Case
+// if a > 10 {
+//  b = 3 
+// } elif a < 1 {
+//   b = 2
+// } else {
+//   b = 1
+// }
+// Warning: b
+// ================================================
+
+// Tuple Statement
+// tup = (foo = 1, bar = cat + 2)
+// Warning: tup, foo, bar
+// ================================================
+
+// Tuple Concate Statement
+// tup = (foo = 1, bar = cat + 2) 
+// tup = tup ++ (4, dog)
+// Warning: foo, bar, null
+// ================================================
+
+// For Loop Statement
+// for i in (0..3) {
+//   tuple_foo[i] = tuple_bar[3-i]
+// }
+// Warning: ___range_begin, ___range_end, null
+// ================================================
+
+// While Loop Statement (FIXME)
+// a = 10
+// while (a > 0) {
+//   b = a + 1
+//   a = a - 1
+// }
+// Warning: total
+// ================================================
+
+// Basic Func Def
+// func_xor = :($a, $b, %out):{
+//   %out = $a ^ $b
+// }
+// Warning: func_xor
+// ================================================
+
+// Cond Func Def
+// func_xor = :($a, $b, $valid, %out) when $valid:{
+//   %out = $a ^ $b
+// }
+// Warning: func_xor
+// ================================================
+
+// Implicit Func Call
+// func_xor = :($a, $b, %out):{
+//   %out = $a ^ $b
+// }
+
+// my_xor = func_xor($foo, $bar)
+// %out = my_xor.out
+// Warning: null
+// ================================================
+
+
+// Explicit Func Call
+// func_xor = :($a, $b, %out):{
+//   %out = $a ^ $b
+// }
+
+// my_xor = func_xor(a = $foo, b = $bar)
+// %out = my_xor.out
+// Warning: a, b
+// ================================================
+
+// Attribute Statement
+// foo.__bits = 3
+// foo = 7
+
+// bar as (__bits = 10)
+// bar = 123
+// Warning: bar
+// ================================================
+
+// Other Tests
+// a = 10
+// if (a < 0) {
+//   b = -1 
+// } elif (a == 0) {
+//   b = 0
+// } else {
+//   b = 1
+// }
+// Warning: b
+// ================================================
