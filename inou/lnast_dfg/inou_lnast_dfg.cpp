@@ -427,7 +427,7 @@ void Inou_lnast_dfg::process_ast_tuple_struct(LGraph *dfg, const Lnast_nid &lnid
       tup_name = lnast->get_sname(tup_child);
       tup_vname = lnast->get_vname(tup_child);
       subs = lnast->get_subs(tup_child);
-      setup_tuple_ref(dfg, tup_name);
+      setup_tuple_ref(dfg, tup_name, true);
       continue;
     }
 
@@ -436,7 +436,7 @@ void Inou_lnast_dfg::process_ast_tuple_struct(LGraph *dfg, const Lnast_nid &lnid
     auto c1      = lnast->get_sibling_next(c0);
     auto key_name = lnast->get_sname(c0);
 
-    auto tn_dpin    = setup_tuple_ref(dfg, tup_name);
+    auto tn_dpin    = setup_tuple_ref(dfg, tup_name, true);
     auto kp_dnode   = dfg->create_node_const(Lconst(kp));
     auto kp_dpin    = kp_dnode.setup_driver_pin();
     auto value_dpin = setup_ref_node_dpin(dfg, c1);
@@ -525,10 +525,12 @@ void Inou_lnast_dfg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnid
   auto tup_name = lnast->get_sname(c0_ta);
   auto key_name = lnast->get_sname(c1_ta);
 
-  auto tn_dpin = setup_tuple_ref(dfg, tup_name);
+
+  auto tn_dpin = setup_tuple_ref(dfg, tup_name, true);
 
   // exclude invalid scalar->tuple cases
-  auto tn_ntype = tn_dpin.get_node().get_type().op;
+  auto tn_node = tn_dpin.get_node();
+  auto tn_ntype = tn_node.get_type().op;
   bool is_scalar =  tn_ntype != TupAdd_Op && tn_ntype != TupRef_Op;
   if (is_scalar && key_name != "0")
 		Pass::error("try to modify a non-exist tuple key field:{} in tuple:{}\n", key_name, tup_name);
@@ -554,13 +556,20 @@ void Inou_lnast_dfg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnid
 
 
 //either tuple root or tuple key(str) fit in this case
-Node_pin Inou_lnast_dfg::setup_tuple_ref(LGraph *dfg, std::string_view ref_name) {
+Node_pin Inou_lnast_dfg::setup_tuple_ref(LGraph *dfg, std::string_view ref_name, bool for_tuple_add) {
   auto it = name2dpin.find(ref_name);
+  Node_pin dpin;
   if (it != name2dpin.end()) {
-    return it->second;
+  // exclude the parrent of __wire node
+    auto tn_node = it->second.get_node();
+    auto tn_ntype = tn_node.get_type().op;
+    bool is_wire = for_tuple_add && tn_ntype == TupAdd_Op && tn_node.has_sink_pin_connected(1) 
+                   && tn_node.get_sink_pin(1).get_driver_pin().get_name() == "__wire";
+    if (!is_wire)
+      return dpin = it->second;
   }
 
-  auto dpin = dfg->create_node(TupRef_Op).setup_driver_pin();
+  dpin = dfg->create_node(TupRef_Op).setup_driver_pin();
   dpin.set_name(ref_name);
   name2dpin[ref_name] = dpin;
 

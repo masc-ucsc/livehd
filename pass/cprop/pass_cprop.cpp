@@ -469,40 +469,49 @@ void Pass_cprop::merge_to_tuple(std::shared_ptr<Lgtuple> ctup, Node &node, Node
 	if (parent_node.get_type().op == TupRef_Op) {
 		// First tuple
 		bool ok = ctup->set(key_pos, key_name, val_dpin);
-		if (!ok)
-			compile_error = true;
+	  if (!ok) 
+      compile_error = true;
 	} else {
-		if (parent_node.get_type().op != TupAdd_Op) {
-			std::string unnamed;
-			bool ok = ctup->set(0, unnamed, parent_dpin); // includes the parent into Lgtuple where the parent is not TupAdd
-			if (!ok)
-				compile_error = true;
-		}
+    if (parent_node.get_type().op != TupAdd_Op) {
+	  	std::string unnamed;
+	  	bool ok = ctup->set(0, unnamed, parent_dpin); // includes the parent into Lgtuple where the parent is not TupAdd
+	  	if (!ok)
+	  		compile_error = true;
+	  }
 
-		if (key_pos < 0 && key_name.empty()) {
-			if (val_dpin.get_node().get_type().op == TupAdd_Op) { //hier-tuple
-				auto it2 = node2tuple.find(val_dpin.get_node().get_compact());
-				I(it2 != node2tuple.end());
-				bool ok = ctup->add(it2->second);
-				if (!ok) {
-					compile_error = true;
-					ctup->dump();
-					it2->second->dump();
-					Pass::error("tuples {} and {} can not be merged\n", "XX", "XX");
-				}
-			} else {
-				ctup->add(val_dpin);
-			}
-		} else {
-			bool ok = ctup->set(key_pos, key_name, val_dpin);
-			if (!ok)
-				compile_error = true;
-		}
-	}
+    if (node.has_sink_pin_connected(1) && node.get_sink_pin(1).get_driver_pin().get_name() == "__wire") {
+      I(node.get_type().op == TupAdd_Op);
+	    node2tuple[node.get_compact()] = ctup;
+      return; //for the __wire tuple_add, there is no new tuple_chain element need to add, just inherit it's parent Lgtuple, i.e. ctup
+    }
 
-	if (compile_error) {
+
+	  if (key_pos < 0 && key_name.empty()) {
+	  	if (val_dpin.get_node().get_type().op == TupAdd_Op) { //hier-tuple
+	  		auto it2 = node2tuple.find(val_dpin.get_node().get_compact());
+	  		I(it2 != node2tuple.end());
+	  		bool ok = ctup->add(it2->second);
+	  		if (!ok) {
+	  			compile_error = true;
+	  			ctup->dump();
+	  			it2->second->dump();
+	  			Pass::error("tuples {} and {} can not be merged\n", "XX", "XX");
+	  		}
+	  	} else {
+	  		ctup->add(val_dpin);
+	  	}
+	  } else {
+	  	bool ok = ctup->set(key_pos, key_name, val_dpin);
+	  	if (!ok)
+	  		compile_error = true;
+	  }
+  }
+	
+
+
+	if (compile_error) 
 		Pass::error("tuples {} could not add field \n", "XX", "XX");
-	}
+
 
 	node2tuple[node.get_compact()] = ctup;
 }
@@ -554,22 +563,22 @@ std::tuple<std::string_view, int> Pass_cprop::get_tuple_name_key(Node &node) {
 	return std::make_tuple(key_name, key_pos);
 }
 
-bool Pass_cprop::process_tuple_get(Node &node) {
 
+bool Pass_cprop::process_tuple_get(Node &node) {
 	I(node.get_type_op() == TupGet_Op);
 
  
   auto parent_dpin = node.get_sink_pin(0).get_driver_pin();
   auto parent_node = parent_dpin.get_node();
-  if (parent_node.has_sink_pin_connected(1) && parent_node.get_sink_pin(1).get_driver_pin().get_name() == "__wire") {
-    //this tuple_add is the dummy wire, get its parent to start analysis
-    fmt::print("parent_node:{}\n", parent_node.debug_name());
-    auto spin = parent_node.get_sink_pin(0);
-    fmt::print("inp size:{}\n", spin.inp_edges().size());
+  /* if (parent_node.has_sink_pin_connected(1) && parent_node.get_sink_pin(1).get_driver_pin().get_name() == "__wire") { */
+  /*   //this tuple_add is the dummy wire, get its parent to start analysis */
+  /*   fmt::print("parent_node:{}\n", parent_node.debug_name()); */
+  /*   auto spin = parent_node.get_sink_pin(0); */
+  /*   fmt::print("inp size:{}\n", spin.inp_edges().size()); */
 
-    parent_dpin = parent_node.get_sink_pin(0).get_driver_pin();
-    parent_node = parent_dpin.get_node();
-  }
+  /*   parent_dpin = parent_node.get_sink_pin(0).get_driver_pin(); */
+  /*   parent_node = parent_dpin.get_node(); */
+  /* } */
 
 
   auto ptup_it = node2tuple.find(parent_node.get_compact());
@@ -597,7 +606,7 @@ bool Pass_cprop::process_tuple_get(Node &node) {
 		else
 			key = key_name;
 
-		Pass::error("in tuple_get {}, there is no tuple of {}, so no valid field {}\n", node.debug_name(), tup_name, key);
+		Pass::error("in tuple_get {} parent_node {}, there is no tuple of {}, so no valid field {}\n", node.debug_name(), parent_node.debug_name(), tup_name, key);
 		return false;
 	}
 
@@ -684,14 +693,15 @@ void Pass_cprop::process_tuple_add(Node &node) {
 
 	auto [key_name, key_pos] = get_tuple_name_key(node);
   
-	/* I(node.has_sink_pin_connected(3)); */
-  if (node.has_sink_pin_connected(3)) {
-	  auto val_dpin = node.get_sink_pin(3).get_driver_pin();
+  /* // not all tuple_add has value pin connected, for example, the __wire tuple_add node */
+  Node_pin val_dpin;
+  if (node.has_sink_pin_connected(3))
+	  val_dpin = node.get_sink_pin(3).get_driver_pin();
 
-    merge_to_tuple(ctup, node, parent_node, parent_dpin, key_pos, key_name, val_dpin);
+  merge_to_tuple(ctup, node, parent_node, parent_dpin, key_pos, key_name, val_dpin);
 
-    fmt::print("TupAdd node:{} pos:{} key:{} val:{}\n", node.debug_name(), key_pos, key_name, val_dpin.debug_name());
-  }
+  fmt::print("TupAdd node:{} pos:{} key:{} val:{}\n", node.debug_name(), key_pos, key_name, val_dpin.debug_name());
+  /* } */
 
   if (parent_could_be_deleted) 
     parent_node.del_node();
