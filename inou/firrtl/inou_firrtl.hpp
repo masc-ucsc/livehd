@@ -88,12 +88,14 @@ protected:
   void        process_ln_assign_op(Lnast &ln, const Lnast_nid &lnidx_assign, firrtl::FirrtlPB_Statement* fstmt);
   void        process_ln_nary_op  (Lnast &ln, const Lnast_nid &lnidx_assign, firrtl::FirrtlPB_Statement* fstmt);
   void        process_ln_not_op   (Lnast &ln, const Lnast_nid &lnidx_op, firrtl::FirrtlPB_Statement* fstmt);
-  void        process_ln_phi_op   (Lnast &ln, const Lnast_nid &lnidx_phi);
+  void        process_ln_range_op (Lnast &ln, const Lnast_nid &lnidx_op);
+  void        process_ln_bitsel_op(Lnast &ln, const Lnast_nid &lnidx_op, firrtl::FirrtlPB_Statement* fstmt);
   firrtl::FirrtlPB_Statement_When* process_ln_if_op (Lnast &ln, const Lnast_nid &lnidx_if);
 
   uint8_t     process_op_children (Lnast &ln, const Lnast_nid &lnidx_if, const std::string &firrtl_op);
   void        add_cstmts          (Lnast &ln, const Lnast_nid &lnidx_if, firrtl::FirrtlPB_Module_UserModule *umod);
   void        add_cstmts          (Lnast &ln, const Lnast_nid &lnidx_if, firrtl::FirrtlPB_Statement_When *when, uint8_t pos_to_add_to);
+  void        make_assignment     (Lnast &ln, const Lnast_nid &lnidx_lhs, firrtl::FirrtlPB_Expression *expr_rhs, firrtl::FirrtlPB_Statement *fstmt);
 
   // Helper Functions
   bool        is_inp                (const std::string_view str);
@@ -137,6 +139,10 @@ private:
   absl::flat_hash_map<std::string, firrtl::FirrtlPB_Statement*> reg_wire_map;
   // Contains wires that need to be renamed when found (mainly due to func. calls)
   absl::flat_hash_map<std::string, std::string> wire_rename_map;
+
+  /* Since range and bit_sel nodes are separated, this map is used to track
+   * the name used by the range node and then the low/high nodes. */
+  absl::flat_hash_map<std::string, std::pair<Lnast_nid, Lnast_nid>> name_to_range_map;
 
 
 public:

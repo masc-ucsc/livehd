@@ -535,34 +535,24 @@ void Inou_firrtl::HandleNegateOp(Lnast& lnast, const firrtl::FirrtlPB_Expression
  * LNAST can properly handle it (see diagram below).*/
 void Inou_firrtl::HandleExtractBitsOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const std::string &lhs) {
   /* x = bits(e1)(numH, numL) should take graph form:
-   *      range                 bit_sel               asg
-   *    /   |   \             /   |   \             /     \
-   *___F0 numH numL        ___F1  e1 ___F0         x    ___F1 */
+   *      range                 bit_sel
+   *    /   |   \             /   |   \
+   *___F0 numL numH          x   e1 ___F0  */
   I(lnast.get_data(parent_node).type.is_stmts() || lnast.get_data(parent_node).type.is_cstmts());
   I(op.arg_size() == 1 && op.const__size() == 2);
 
   auto e1_str = lnast.add_string(ReturnExprString(lnast, op.arg(0), parent_node, true));
   auto temp_var_name_f0 = create_temp_var(lnast);
-  auto temp_var_name_f1 = create_temp_var(lnast);
 
   auto idx_range = lnast.add_child(parent_node, Lnast_node::create_range("range_EB"));
   lnast.add_child(idx_range, Lnast_node::create_ref(temp_var_name_f0));
-  lnast.add_child(idx_range, Lnast_node::create_const(lnast.add_string(op.const_(0).value())));
   lnast.add_child(idx_range, Lnast_node::create_const(lnast.add_string(op.const_(1).value())));
+  lnast.add_child(idx_range, Lnast_node::create_const(lnast.add_string(op.const_(0).value())));
 
   auto idx_bit_sel = lnast.add_child(parent_node, Lnast_node::create_bit_select("bit_sel_EB"));
-  lnast.add_child(idx_bit_sel, Lnast_node::create_ref(temp_var_name_f1));
+  lnast.add_child(idx_bit_sel, Lnast_node::create_ref(lnast.add_string(lhs)));
   AttachExprStrToNode(lnast, e1_str, idx_bit_sel);
   lnast.add_child(idx_bit_sel, Lnast_node::create_ref(temp_var_name_f0));
-
-  Lnast_nid idx_asg;
-  if(lhs.substr(0,1) == "%") {
-    idx_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign("dp_asg_EB"));
-  } else {
-    idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("assign_EB"));
-  }
-  lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs)));
-  lnast.add_child(idx_asg, Lnast_node::create_ref(temp_var_name_f1));
 }
 
 /* The Head primitive op returns the n most-significant bits
