@@ -1,0 +1,5 @@
+foo.__wire = true
+%out = foo
+foo = 2
+%out2 = foo
+foo = 3

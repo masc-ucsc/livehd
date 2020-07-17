@@ -96,15 +96,15 @@ protected:
   }
 
   static void dump(Eprp_var &var) {
-    fmt::print("lgraph.dump labels:\n");
+    fmt::print("dump labels:\n");
     for (const auto &l : var.dict) {
       fmt::print("  {}:{}\n", l.first, l.second);
     }
-    fmt::print("lgraph.dump lgraphs:\n");
+    fmt::print("dump lgraphs:\n");
     for (const auto &l : var.lgs) {
       fmt::print("  {}/{}\n", l->get_path(), l->get_name());
     }
-    fmt::print("lgraph.dump lnast:\n");
+    fmt::print("dump lnast:\n");
     for (const auto &l : var.lnasts) {
       fmt::print("  {}\n", l->get_top_module_name());
     }
@@ -151,6 +151,14 @@ protected:
     }
   }
 
+  static void lnastdump(Eprp_var &var) {
+    fmt::print("lnast.dump lnast:\n");
+    for (const auto &l : var.lnasts) {
+      fmt::print("  {}\n", l->get_top_module_name());
+      l->dump();
+    }
+  }
+
   Meta_api() {}
 
 public:
@@ -174,10 +182,11 @@ public:
     eprp.register_method(m3);
 
     //---------------------
-    Eprp_method m4("lgraph.dump", "verbose insides for lgraph ", &Meta_api::lgdump);
+    Eprp_method m4a("lnast.dump", "verbose LNAST dump ", &Meta_api::lnastdump);
+    Eprp_method m4b("lgraph.dump", "verbose lgraph dump ", &Meta_api::lgdump);
 
-    eprp.register_method(m4);
-
+    eprp.register_method(m4a);
+    eprp.register_method(m4b);
     //---------------------
     Eprp_method m5("dump", "dump labels and lgraphs passed", &Meta_api::dump);
     eprp.register_method(m5);

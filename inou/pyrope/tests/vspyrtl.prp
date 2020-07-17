@@ -1,5 +1,5 @@
 // code/vspyrtl.prp file
-(@a, @b, @i) as (__bits:$bitwidth)
+(@a, @b, @i) as (__bits=$bitwidth)
 if $n? {  // new request
   (@a, @b, @i) = (0, 0, n)
 }else{

@@ -1,0 +1,5 @@
+foo.__wire = true
+%out = foo.a 
+if ($en) {
+  foo.a = 3
+}

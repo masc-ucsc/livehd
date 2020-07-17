@@ -83,11 +83,30 @@ void Node_pin::connect_driver(Node_pin &dpin) {
   current_g->add_edge(dpin, *this);
 }
 
-uint32_t Node_pin::get_bits() const { return current_g->get_bits(idx); }
+int Node_pin::get_num_edges() const {
+  if (is_sink()) return current_g->get_node_pin_num_inputs(idx);
+
+  return current_g->get_node_pin_num_outputs(idx);
+}
+
+uint32_t Node_pin::get_bits() const { I(is_driver()); return current_g->get_bits(idx); }
 
 void Node_pin::set_bits(uint32_t bits) {
   I(is_driver());
   current_g->set_bits(idx, bits);
+}
+
+bool Node_pin::is_signed() const { I(is_driver()); return current_g->is_signed(idx); }
+bool Node_pin::is_unsigned() const { I(is_driver()); return current_g->is_unsigned(idx); }
+
+void Node_pin::set_signed() {
+  I(is_driver());
+  current_g->set_signed(idx);
+}
+
+void Node_pin::set_unsigned() {
+  I(is_driver());
+  current_g->set_unsigned(idx);
 }
 
 std::string_view Node_pin::get_type_sub_io_name() const {
@@ -111,6 +130,17 @@ void Node_pin::set_name(std::string_view wname) { Ann_node_pin_name::ref(current
 // FIXME->sh: could be deprecated if ann_ssa could be mmapped for a std::string_view
 void Node_pin::set_prp_vname(std::string_view prp_vname) {
   Ann_node_pin_prp_vname::ref(current_g)->set(get_compact_class_driver(), prp_vname);
+}
+
+void Node_pin::dump_all_prp_vname() const {
+  auto *ref = Ann_node_pin_prp_vname::ref(current_g);
+
+  for (auto it : *ref) {
+		if(current_g->is_valid_node_pin(it.first.idx)) {
+			Node_pin a(current_g, it.first);
+			fmt::print("prp_vname pin:{} vname:{}\n", a.debug_name(), ref->get_sview(it.second));
+		}
+  }
 }
 
 void Node_pin::nuke() {
@@ -193,7 +223,6 @@ std::string_view Node_pin::create_name() const {
 
 bool Node_pin::has_name() const { return Ann_node_pin_name::ref(current_g)->has_key(get_compact_class_driver()); }
 
-// FIXME->sh: could be deprecated if ann_ssa could be mmapped for a std::string_view
 bool Node_pin::has_prp_vname() const { return Ann_node_pin_prp_vname::ref(current_g)->has(get_compact_class_driver()); }
 
 Node_pin Node_pin::find_driver_pin(LGraph *top, std::string_view wname) {
@@ -215,13 +244,13 @@ std::string_view Node_pin::get_pin_name() const {
     return get_node().get_type().get_input_match(pid);
 }
 
-void Node_pin::set_offset(uint16_t offset) {
+void Node_pin::set_offset(Bits_t offset) {
   if (offset == 0) return;
 
   Ann_node_pin_offset::ref(current_g)->set(get_compact_class_driver(), offset);
 }
 
-uint16_t Node_pin::get_offset() const {
+Bits_t Node_pin::get_offset() const {
   auto ref = Ann_node_pin_offset::ref(current_g);
   if (!ref->has(get_compact_class_driver())) return 0;
 
@@ -229,26 +258,6 @@ uint16_t Node_pin::get_offset() const {
   I(off);
   return off;
 }
-
-const Ann_bitwidth &Node_pin::get_bitwidth() const {
-  const auto *data = Ann_node_pin_bitwidth::ref(top_g)->ref(get_compact_driver());
-  I(data);
-  return *data;
-}
-
-Ann_bitwidth *Node_pin::ref_bitwidth() {
-  auto *ref = Ann_node_pin_bitwidth::ref(top_g);
-
-  auto it = ref->find(get_compact_driver());
-  if (it != ref->end()) {
-    return ref->ref(it);
-  }
-
-  auto it2 = ref->set(get_compact_driver(), Ann_bitwidth());  // Empty
-  return ref->ref(it2);
-}
-
-bool Node_pin::has_bitwidth() const { return Ann_node_pin_bitwidth::ref(top_g)->has(get_compact_driver()); }
 
 const Ann_ssa &Node_pin::get_ssa() const {
   const auto *data = Ann_node_pin_ssa::ref(top_g)->ref(get_compact_driver());

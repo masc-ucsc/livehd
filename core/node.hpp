@@ -1,6 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include "absl/container/flat_hash_set.h"
+
 #include "lconst.hpp"
 #include "lgraph_base_core.hpp"
 #include "node_pin.hpp"
@@ -8,6 +10,7 @@
 #include "sub_node.hpp"
 
 class Ann_place;
+using Node_iterator = std::vector<Node>;
 
 class Node {
 protected:
@@ -193,11 +196,13 @@ public:
   Lconst get_type_lut() const;
 
   const Node_Type &get_type() const;
+  Node_Type_Op     get_type_op() const;
   void             set_type(const Node_Type_Op op);
   void             set_type(const Node_Type_Op op, uint32_t bits);
   bool             is_type(const Node_Type_Op op) const;
   bool             is_type_sub() const;
   bool             is_type_const() const;
+  bool             is_type_attr() const;
   bool             is_type_io() const;
   bool             is_type_loop_breaker() const;
 
@@ -214,6 +219,12 @@ public:
   bool            is_type_sub_present() const;
 
   Lconst get_type_const() const;
+
+  bool     has_driver_pin_connected(std::string_view name) const;
+  bool     has_sink_pin_connected(std::string_view name) const;
+
+  bool     has_driver_pin_connected(Port_ID pid) const;
+  bool     has_sink_pin_connected(Port_ID pid) const;
 
   Node_pin setup_driver_pin(std::string_view name);
   Node_pin setup_driver_pin(Port_ID pid);
@@ -240,6 +251,8 @@ public:
   XEdge_iterator out_edges_ordered_reverse() const;  // Slower than inp_edges, but edges ordered by driver.pid
   XEdge_iterator inp_edges_ordered_reverse() const;  // Slower than inp_edges, but edges ordered by sink.pid
 
+  Node_pin_iterator  inp_drivers(const absl::flat_hash_set<Node::Compact> &exclude) const;
+
   bool is_graph_io() const { return nid == Hardcoded_input_nid || nid == Hardcoded_output_nid; }
   bool is_graph_input() const { return nid == Hardcoded_input_nid; }
   bool is_graph_output() const { return nid == Hardcoded_output_nid; }
@@ -261,11 +274,9 @@ public:
   void set_color(int color);
   int  get_color() const;
   bool has_color() const;
-
-  void     set_cfcnt(uint32_t cfcnt);
-  uint32_t get_cfcnt() const;
-  bool     has_cfcnt() const;
   // END ATTRIBUTE ACCESSORS
+
+  void dump();
 };
 
 namespace mmap_lib {

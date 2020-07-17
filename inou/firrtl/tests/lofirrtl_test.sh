@@ -1,7 +1,9 @@
 #!/bin/bash
 rm -rf ./lgdb
 
-pts='SimpleBitOps Ops Test1 HwachaSequencer ICache' # RegisterSimple Flop Register
+pts='RegTrivial NotAnd Trivial SimpleBitOps Test1 RegisterSimple Flop Register GCD RocketCore ICache' #Flop Register
+#Ops -- no rem op yet
+
 #HwachaSequencer -- printf, pad, stop
 
 #SubModule BundleConnect -- submodules
@@ -52,9 +54,9 @@ do
 
     ${LGSHELL} "inou.firrtl.tolnast files:inou/firrtl/tests/proto/${pt}.lo.pb |> inou.lnast_dfg.tolg"
     if [ $? -eq 0 ]; then
-      echo "Successfully translated FIRRTL to LNAST to LGraph: ${pt}"
+      echo "Successfully translated FIRRTL to LNAST to LGraph: ${pt}.lo.pb"
     else
-      echo "ERROR: FIRRTL -> LNAST -> LGraph failed... testcase: ${pt}"
+      echo "ERROR: FIRRTL -> LNAST -> LGraph failed... testcase: ${pt}.lo.pb"
       exit 1
     fi
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
@@ -64,10 +66,10 @@ do
     echo ""
     echo ""
     echo "----------------------------------------------------"
-    echo "Tuple Chain Resolve"
+    echo "Copy-Propagation and Tuple Chain Resolve"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.resolve_tuples"
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop"
     if [ $? -eq 0 ]; then
       echo "Successfully resolve the tuple chain in new lg: ${pt}.lo.pb"
     else
@@ -81,10 +83,10 @@ do
     echo ""
     echo ""
     echo "----------------------------------------------------"
-    echo "Bitwidth Optimization"
+    echo "Bitwidth Optimization (Round 1)"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth |> lgraph.dump"
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth"
     if [ $? -eq 0 ]; then
       echo "Successfully optimize design bitwidth on new lg: ${pt}.lo.pb"
     else
@@ -98,32 +100,32 @@ do
     echo ""
     echo ""
     echo "----------------------------------------------------"
-    echo "Reduced_Or_Op Elimination"
+    echo "Copy Propagation Optimization (DCE)"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.assignment_or_elimination"
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop"
     if [ $? -eq 0 ]; then
-      echo "Successfully eliminate all reduced_or_op in new lg: ${pt}.lo.pb"
+      echo "Successfully eliminate all assignment or_op: ${pt}.lo.pb"
     else
-      echo "ERROR: Pyrope compiler failed on new lg: assignment_or_elimination, testcase: ${pt}.lo.pb"
+      echo "ERROR: Pyrope compiler failed on new lg: cprop, testcase: ${pt}.lo.pb"
       exit 1
     fi
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
     mv ${pt}.dot ${pt}.newlg.dot
 
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "Dead Code Elimination"
-    echo "----------------------------------------------------"
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.dce"
-    if [ $? -eq 0 ]; then
-      echo "Successfully perform dead code elimination: ${pt}.lo.pb"
-    else
-      echo "ERROR: Pyrope compiler failed on new lg: dead code elimination, testcase: ${pt}.lo.pb"
-      exit 1
-    fi
+    #echo ""
+    #echo ""
+    #echo ""
+    #echo "----------------------------------------------------"
+    #echo "Dead Code Elimination"
+    #echo "----------------------------------------------------"
+    #${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.dce"
+    #if [ $? -eq 0 ]; then
+    #  echo "Successfully perform dead code elimination: ${pt}.lo.pb"
+    #else
+    #  echo "ERROR: Pyrope compiler failed on new lg: dead code elimination, testcase: ${pt}.lo.pb"
+    #  exit 1
+    #fi
 
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
     mv ${pt}.dot ${pt}.newlg.dce.dot
@@ -138,7 +140,6 @@ do
     ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg"
     if [ $? -eq 0 ] && [ -f ${pt}.v ]; then
       echo "Successfully generate Verilog: ${pt}.v"
-      exit 1
       rm -f  yosys_script.*
     else
       echo "ERROR: Yosys failed: verilog generation, testcase: ${pt}.lo.pb"

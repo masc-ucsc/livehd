@@ -7,6 +7,13 @@
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
+#include "node.hpp"
+#include "node_pin.hpp"
+#include "ezsat.hpp"
+#include "ezminisat.hpp"
+
+
+
 static Pass_plugin sample("pass_lec", Pass_lec::setup);
 
 void Pass_lec::setup() {
@@ -31,9 +38,47 @@ void Pass_lec::work(Eprp_var &var) {
 
 void Pass_lec::check_lec(LGraph *g) {
   fmt::print("TODO: implement LEC\n");
+  //-----------------------------------------------------------------------------------------------------
+  ezMiniSAT sat;
 
-  for (const auto node : g->forward()) {
-    fmt::print("node type:{}\n", node.get_type().get_name());
-  }
+  std::vector<int>  modelExpressions;
+  std::vector<bool> modelValues;
+
+  //determine no of inputs
+  int i_num = 0;
+  int i_bits = 0;
+
+  g->each_graph_input([this, &i_num, &i_bits](const Node_pin &pin){
+      i_num++;
+      i_bits +=pin.get_bits();
+      });
+
+  fmt::print("num of inputs: {},  no of Bits: {}\n", i_num, i_bits);
+
+ //fmt::print("Declaring input variables.\n");
+
+  //determine no of outputs
+  int o_num = 0;
+  int o_bits = 0;
+
+  g->each_graph_output([this, &o_num, &o_bits](const Node_pin &pin){
+      o_num++;
+      o_bits +=pin.get_bits();
+      });
+
+  fmt::print("num of outputs: {},  no of Bits: {}\n", o_num, o_bits);
+
+  //fmt::print("Declaring output variables.\n");
+
+  //Traverse graph
+  fmt::print("Begin forward traversal.\n");
+
+  for (const auto node : g->forward() ){
+
+   // sat.generate_model();
+    fmt::print("node type: {}\n", node.get_type().get_name() );
+
+  };
+
 }
 

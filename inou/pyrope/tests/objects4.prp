@@ -2,7 +2,7 @@
 a = 0x73
 I a == 0b111011
 I a == 0b?11?11
-c as (__bits:4)
+c as (__bits=4)
 I c.popcount <= 1 // Only 1 bit can be set
 unique if c == 0b???1 { // ? only in binaries
   onehot = 1

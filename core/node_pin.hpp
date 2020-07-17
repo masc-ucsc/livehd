@@ -7,7 +7,6 @@ class Node;
 
 #include <vector>
 
-#include "ann_bitwidth.hpp"
 #include "ann_ssa.hpp"
 #include "lgedge.hpp"
 #include "mmap_map.hpp"
@@ -279,6 +278,7 @@ public:
     I(dst.is_driver() && is_sink());
     return connect_driver(dst);
   }
+  int  get_num_edges() const;
 
 #if 0
   Node_pin &operator=(const Node_pin &obj) {
@@ -319,10 +319,10 @@ public:
   static Node_pin  find_driver_pin(LGraph *top, std::string_view wname);
   std::string_view get_pin_name() const;
 
-  // FIXME->sh: could be deprecated if ann_ssa could be mmapped for a std::string_view
   void             set_prp_vname(std::string_view prp_vname);
   std::string_view get_prp_vname() const;
   bool             has_prp_vname() const;
+	void             dump_all_prp_vname() const;
 
   void  set_delay(float val);
   float get_delay() const;
@@ -330,15 +330,17 @@ public:
   uint32_t get_bits() const;
   void     set_bits(uint32_t bits);
 
+  bool     is_signed() const;
+  bool     is_unsigned() const;
+  void     set_signed();
+  void     set_unsigned();
+
   std::string_view get_type_sub_io_name() const;
   std::string_view get_type_sub_pin_name() const;
 
-  void     set_offset(uint16_t offset);
-  uint16_t get_offset() const;
+  void     set_offset(Bits_t offset);
+  Bits_t   get_offset() const;
 
-  const Ann_bitwidth &get_bitwidth() const;
-  Ann_bitwidth *      ref_bitwidth();
-  bool                has_bitwidth() const;
   const Ann_ssa &     get_ssa() const;
   Ann_ssa *           ref_ssa();
   bool                has_ssa() const;

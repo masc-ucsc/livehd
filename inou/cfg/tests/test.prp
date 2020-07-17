@@ -1,10 +1,7 @@
+foo.__wire = true
+%out = foo.a 
+if ($en) {
+  foo.a = 3
+}
 
-$in1.__bits as 8
-$in2.__bits as 8
-$in3.__bits as 8
-$out1.__bits as 8
-$out2.__bits as 8
-
-%out1 = $in1 + ($in2 << 3) + ($in3 >> 4);
-%out2 = %out1
 

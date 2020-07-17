@@ -24,7 +24,7 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
 
     if (node.get_type().op == TupGet_Op and tuple_get_has_key_name(node)) {
 
-      auto tup_get_target = node.get_sink_pin(KN).get_driver_pin().get_name();
+      auto tup_get_target = node.get_sink_pin("KN").get_driver_pin().get_name();
 
       if (tup_get_target.substr(0,6) == "__bits") {
         continue; // __bits @rhs, cannot know the bits information after the pass/bitwidh, keep this tuple_get and handle it until BW
@@ -38,7 +38,7 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
       }
 
 
-      auto chain_itr = node.get_sink_pin(TN).get_driver_node();
+      auto chain_itr = node.get_sink_pin("TN").get_driver_node();
       while (chain_itr.get_type().op != TupRef_Op) {
         Node next_itr;
         if (chain_itr.get_type().op == Or_Op) { //it's ok to have Or_Op(aka assign_op) in the tuple_chain, just ignore it and continue to find target tuple_add
@@ -48,8 +48,8 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
           continue;
         }
 
-        if (chain_itr.setup_sink_pin(KN).is_connected() && is_tup_get_target(chain_itr, tup_get_target)) {
-          auto value_dpin = chain_itr.setup_sink_pin(KV).get_driver_pin();
+        if (chain_itr.setup_sink_pin("KN").is_connected() && is_tup_get_target(chain_itr, tup_get_target)) {
+          auto value_dpin = chain_itr.setup_sink_pin("KV").get_driver_pin();
           if (value_dpin.get_node().get_type().op == TupGet_Op)
             value_dpin = tg2actual_dpin[value_dpin];
           else
@@ -59,7 +59,7 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
           dfg->add_edge(value_dpin, value_spin);
           break;
         }
-        next_itr = chain_itr.setup_sink_pin(TN).get_driver_node();
+        next_itr = chain_itr.setup_sink_pin("TN").get_driver_node();
         chain_itr = next_itr;
       }
 
@@ -67,8 +67,8 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
     } else if (node.get_type().op == TupGet_Op and tuple_get_has_key_pos(node)) {
       collect_node_for_deleting (node, to_be_deleted);
 
-      auto tup_get_target = node.get_sink_pin(KP).get_driver_node().get_type_const().to_i(); //FIXME->sh: need lgmem.prp
-      auto chain_itr = node.get_sink_pin(TN).get_driver_node();
+      auto tup_get_target = node.get_sink_pin("KP").get_driver_node().get_type_const().to_i(); //FIXME->sh: need lgmem.prp
+      auto chain_itr = node.get_sink_pin("TN").get_driver_node();
 
       while (chain_itr.get_type().op != TupRef_Op) {
         //this case occurs when the scalar variable is not yet turn into a tuple but some lhs try to access var[0] or var.0
@@ -82,8 +82,8 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
 
 
         I(chain_itr.get_type().op == TupAdd_Op);
-        if (chain_itr.setup_sink_pin(KP).is_connected() and is_tup_get_target(chain_itr, tup_get_target)) {
-          auto value_dpin = chain_itr.setup_sink_pin(KV).get_driver_pin();
+        if (chain_itr.setup_sink_pin("KP").is_connected() and is_tup_get_target(chain_itr, tup_get_target)) {
+          auto value_dpin = chain_itr.setup_sink_pin("KV").get_driver_pin();
           if (value_dpin.get_node().get_type().op == TupGet_Op)
             value_dpin = tg2actual_dpin[value_dpin];
           else
@@ -93,7 +93,7 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
           dfg->add_edge(value_dpin, value_spin);
           break;
         }
-        auto next_itr = chain_itr.setup_sink_pin(TN).get_driver_node();
+        auto next_itr = chain_itr.setup_sink_pin("TN").get_driver_node();
         chain_itr = next_itr;
       }
     }
@@ -105,20 +105,20 @@ void Inou_lnast_dfg::do_resolve_tuples(LGraph *dfg) {
 }
 
 bool Inou_lnast_dfg::tuple_get_has_key_name(const Node &tup_get) {
-  return tup_get.get_sink_pin(KN).is_connected();
+  return tup_get.get_sink_pin("KN").is_connected();
 }
 
 bool Inou_lnast_dfg::tuple_get_has_key_pos(const Node &tup_get) {
-  return tup_get.get_sink_pin(KP).is_connected();
+  return tup_get.get_sink_pin("KP").is_connected();
 }
 
 bool Inou_lnast_dfg::is_tup_get_target(const Node &tup_add, std::string_view tup_get_target) {
-  auto tup_add_key_name = tup_add.get_sink_pin(KN).get_driver_pin().get_name();
+  auto tup_add_key_name = tup_add.get_sink_pin("KN").get_driver_pin().get_name();
   return (tup_add_key_name == tup_get_target);
 }
 
 bool Inou_lnast_dfg::is_tup_get_target(const Node &tup_add, uint32_t tup_get_target) {
-  auto tup_add_key_pos = tup_add.get_sink_pin(KP).get_driver_node().get_type_const().to_i(); //FIXME->sh: need lgmem.prp
+  auto tup_add_key_pos = tup_add.get_sink_pin("KP").get_driver_node().get_type_const().to_i(); //FIXME->sh: need lgmem.prp
   return (tup_add_key_pos == tup_get_target);
 }
 

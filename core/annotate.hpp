@@ -6,7 +6,6 @@
 // Then all the files are distributed per pass as needed
 
 // TODO: We have attributes per node/pin/edge, we should have also per lgraph module (lef attributes)
-#include "ann_bitwidth.hpp"
 #include "ann_file_loc.hpp"
 #include "ann_place.hpp"
 #include "ann_ssa.hpp"
@@ -19,15 +18,13 @@ struct Ann_name {
   static constexpr char prp_vname[]  = "prp_vname";
   static constexpr char nodename[]   = "nodename";
   static constexpr char nodeplace[]  = "nodeplace";
-  static constexpr char bitwidth[]   = "bitwidth";
   static constexpr char file_loc[]   = "file_loc";
   static constexpr char tree_pos[]   = "tree_pos";
   static constexpr char color[]      = "color";
   static constexpr char ssa[]        = "ssa";
-  static constexpr char cfcnt[]      = "cfcnt";
 };
 
-using Ann_node_pin_offset = Attribute<Ann_name::wireoffset, Node_pin, mmap_lib::map<Node_pin::Compact_class_driver, uint16_t> >;
+using Ann_node_pin_offset = Attribute<Ann_name::wireoffset, Node_pin, mmap_lib::map<Node_pin::Compact_class_driver, Bits_t> >;
 
 using Ann_node_pin_name =
     Attribute<Ann_name::wirename, Node_pin, mmap_lib::bimap<Node_pin::Compact_class_driver, std::string_view> >;
@@ -35,7 +32,6 @@ using Ann_node_pin_name =
 using Ann_node_pin_prp_vname =
     Attribute<Ann_name::prp_vname, Node_pin, mmap_lib::map<Node_pin::Compact_class_driver, std::string_view> >;
 
-using Ann_node_pin_bitwidth = Attribute<Ann_name::bitwidth, Node_pin, mmap_lib::map<Node_pin::Compact_driver, Ann_bitwidth> >;
 using Ann_node_pin_ssa      = Attribute<Ann_name::ssa, Node_pin, mmap_lib::map<Node_pin::Compact_driver, Ann_ssa> >;
 
 using Ann_node_pin_delay = Attribute<Ann_name::delay, Node_pin, mmap_lib::map<Node_pin::Compact_driver, float> >;
@@ -50,7 +46,6 @@ using Ann_node_tree_pos = Attribute<Ann_name::tree_pos, Node, mmap_lib::map<Node
 
 using Ann_node_color = Attribute<Ann_name::color, Node, mmap_lib::bimap<Node::Compact_class, std::string_view> >;
 
-using Ann_node_cfcnt = Attribute<Ann_name::cfcnt, Node, mmap_lib::bimap<Node::Compact_class, uint32_t> >;
 
 struct Ann_support {
   // TODO: Change to object to register annotations, and have an "update" for incremental
@@ -58,7 +53,6 @@ struct Ann_support {
     Ann_node_pin_offset::clear(lg);
     Ann_node_pin_delay::clear(lg);
     Ann_node_pin_name::clear(lg);
-    Ann_node_pin_bitwidth::clear(lg);
     Ann_node_pin_delay::clear(lg);
     Ann_node_pin_prp_vname::clear(lg);
 
@@ -67,6 +61,5 @@ struct Ann_support {
     Ann_node_file_loc::clear(lg);
     Ann_node_tree_pos::clear(lg);
     Ann_node_color::clear(lg);
-    Ann_node_cfcnt::clear(lg);
   };
 };

@@ -10,7 +10,7 @@ cc_binary(
             "//eprp:eprp",
             "//core:core",
 
-            "//inou/cgen:inou_cgen",
+            "//inou/code_gen:inou_code_gen",
             "//inou/liveparse:inou_liveparse",
             "//inou/json:inou_json",
             # "//inou/lef:inou_lef",
@@ -33,6 +33,7 @@ cc_binary(
             "//pass/cprop:pass_cprop",
             "//pass/lgraph_to_lnast:pass_lgraph_to_lnast",
             "//pass/bitwidth:pass_bitwidth",
+            "//pass/semantic:pass_semantic",
 
             #add dependencies to new passes here
     ],

@@ -1,0 +1,15 @@
+$en.__bits = 1 
+foo.__wire = true
+foo = ()
+%out  = foo.a           
+%out2 = foo.b           
+
+if ($en == 1) {
+  foo.a = 3
+  foo.b = 4
+} else {
+  foo.a = 5
+  foo.b = 6
+} 
+
+%out3 = foo.a + foo.b   

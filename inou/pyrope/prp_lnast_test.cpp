@@ -31,6 +31,7 @@ int main(int argc, char **argv) {
     fmt::print("{} {} {:>20} : {}\n", it.level, indent, lnast->lnast_type_to_string(node.type), node.token.text);
   }
 #endif
+  lnast->dump();
 
   return 0;
 }

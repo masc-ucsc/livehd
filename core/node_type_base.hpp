@@ -82,8 +82,47 @@ enum Node_Type_Op : uint8_t {
   Last_invalid_Op
 };
 
+#include "frozen/map.h"
+#include "frozen/string.h"
+
 class Node_Type {
+public:
+  constexpr static inline frozen::map<frozen::string, Port_ID, 6> sink_pidmap [] = {
+    { /* invalid */ {"",    0}, {""   , 0}, {""   ,0} , {""   ,0} , {"", 0} , {"", 0} },
+    { /* sum     */ {"ADD", 0}, {"SUB", 1}, {""   ,0} , {""   ,0} , {"", 0} , {"", 0} },
+    { /* mult    */ {"VAL", 0}, {""   , 0}, {""   ,0} , {""   ,0} , {"", 0} , {"", 0} },
+    { /* div     */ {"NUM", 0}, {"DEN", 1}, {""   ,0} , {""   ,0} , {"", 0} , {"", 0} },
+    { /* mod     */ {"NUM", 0}, {"DEN", 1}, {""   ,0} , {""   ,0} , {"", 0} , {"", 0} },
+    { /* not     */ {"VAL", 0}, {""   , 0}, {""   ,0} , {""   ,0} , {"", 0} , {"", 0} },
+    { /* join    */ {"V0" , 0}, {"V1" , 1}, {"V2" ,2} , {"V3" ,3} , {"V4", 4} , {"V5", 5} },
+    { /* pick    */ {"VAL", 0}, {"OFF", 1}, {""   ,0} , {""   ,0} , {"", 0} , {"", 0} },
+    { /* AND     */ {"VAL", 0}, {""   , 0}, {""   ,0} , {""   ,0} , {"", 0} , {"", 0} },
+  };
+
+  constexpr static inline frozen::map<frozen::string, Port_ID, 2> driver_pidmap [] = {
+    { /* invalid */ {""   , 0}, {""   , 0}, },
+    { /* sum     */ {"Y"  , 0}, {""   , 0}, }, // Y = ADD+..+ADD-SUB..-SUB
+    { /* mult    */ {"Y"  , 0}, {""   , 0}, }, // Y = VAL*..*VAL
+    { /* div     */ {"Y"  , 0}, {""   , 0}, }, // Y = NUM/DEN
+    { /* mod     */ {"Y"  , 0}, {""   , 0}, }, // Y = NUM % DEN
+    { /* not     */ {"Y"  , 0}, {""   , 0}, }, // Y = ~VAL
+    { /* join    */ {"Y"  , 0}, {""   , 0}, }, // Y = ..,V3,V2,V1,V0
+    { /* pick    */ {"Y"  , 0}, {""   , 0}, }, // Y = VAL[[OFF..(OFF+Y.__bits)]]
+    { /* AND     */ {"Y"  , 0}, {"RED", 1}, }, // Y = VAL&..&VAL ; RED= &Y
+  };
+
+  static constexpr Port_ID get_pid(Node_Type_Op op, frozen::string str) {
+    return driver_pidmap[op].at(str);
+  }
+  static constexpr frozen::string get_name(Node_Type_Op op, Port_ID pid) {
+    for (const auto e : driver_pidmap[op]) {
+      if (e.second == pid) return e.first;
+    }
+    return "invalid";
+  }
+
 private:
+
   static Node_Type *                                   table[Last_invalid_Op];
   static absl::flat_hash_map<std::string, Node_Type *> name2node;
 
@@ -708,14 +747,16 @@ public:
 };
 
 
-// VN = variable name, AN = attribute name, AV = attribute value
+// VN = variable name, AN = attribute name, AV = attribute value, ACI/O = attributes connection input/output
 class Node_Type_AttrSet : public Node_Type {
 public:
   Node_Type_AttrSet() : Node_Type("attr_set", AttrSet_Op, false) {
     inputs.push_back("VN");
     inputs.push_back("AN");
     inputs.push_back("AV");
+    inputs.push_back("ACI");
     outputs.push_back("Y");
+    outputs.push_back("ACO");
   };
 };
 

@@ -390,7 +390,7 @@ void Lnast_to_prp_parser::process_tuple() {
 //   it++;
 //   std::string_view key = get_node_name(*it);
 //   it++;
-// 
+//
 //   std::string value = "";
 //   while (it != node_buffer.end()) {
 //     std::string_view ref    = get_node_name(*it);
@@ -406,13 +406,13 @@ void Lnast_to_prp_parser::process_tuple() {
 //       ref = process_number(ref);
 //     }
 //     // check if a number
-// 
+//
 //     absl::StrAppend(&value, ref);//maybe it should be value, key pair
 //     if (++it != node_buffer.end()) {
 //       absl::StrAppend(&value, " ", op_type.debug_name_pyrope(), " ");
 //     }
 //   }
-// 
+//
 //   fmt::print("process_{} map:\tkey: {}\tvalue: {}\n", op_type.debug_name_pyrope(), key, value);
 //   if (is_ref(key)) {
 //     ref_map.insert(std::pair<std::string_view, std::string>(key, value));
@@ -454,7 +454,7 @@ void Lnast_to_prp_parser::process_operator() {
   if (is_ref(key)) {
     ref_map.insert(std::pair<std::string_view, std::string>(key, value));
   } else {
-    absl::StrAppend(&node_str_buffer, indent_buffer(), key, " ", op_type.debug_name_pyrope(), "  ", value, "\n");
+    absl::StrAppend(&node_str_buffer, indent_buffer(), key, " ", op_type.debug_name_pyrope(), " ", value, "\n");
   }
 }
 
