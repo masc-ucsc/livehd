@@ -20,7 +20,7 @@ Json_inou_parser::Json_inou_parser(const std::string& path) : d() {
   json_file.close();
 }
 
-Hier_tree Json_inou_parser::make_tree() const {
+Netl_hypertree Json_inou_parser::make_tree() const {
   I(d.HasMember("modules"));
   
   const rapidjson::Value& mods = d["modules"];
@@ -43,7 +43,7 @@ Hier_tree Json_inou_parser::make_tree() const {
       n = existing_pair->second;
     } else {
       // make a new node, put in the name, and load into map
-      n = std::make_shared<Hier_node>();
+      n = std::make_shared<Netl_node>();
 
       std::string new_name = mod["name"].GetString();
       n->name = new_name;
@@ -68,7 +68,7 @@ Hier_tree Json_inou_parser::make_tree() const {
         parent->second->children.push_back(n);
       } else {
         // parent does not exist, so make one.
-        auto new_parent = std::make_shared<Hier_node>();
+        auto new_parent = std::make_shared<Netl_node>();
         new_parent->name = parent_str;
         n->parent = new_parent;
         new_parent->children.push_back(n);
@@ -102,7 +102,7 @@ Hier_tree Json_inou_parser::make_tree() const {
         }
       } else {
         // not in map, so create a connection
-        auto new_conn = std::make_shared<Hier_node>();
+        auto new_conn = std::make_shared<Netl_node>();
         new_conn->name = connection_str;
 
         n->connect_list.push_back(std::pair<pnode, unsigned int>(new_conn, connection["weight"].GetInt()));

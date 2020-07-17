@@ -13,7 +13,7 @@
 #include "rapidjson/document.h" // for json parsing
 #include "iassert.hpp"
 
-#include "hier_tree.hpp"
+#include "netl_hypertree.hpp"
 
 class Json_inou_parser {
 public:
@@ -22,7 +22,7 @@ public:
   Json_inou_parser(const std::string& path);
   
   // load json hierarchy into tree for use in HiReg
-  Hier_tree make_tree() const;
+  Netl_hypertree make_tree() const;
   
   // get area for the whole design
   double get_area() const;
