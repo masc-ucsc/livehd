@@ -518,6 +518,7 @@ void Semantic_check::check_for_op(Lnast *lnast, const Lnast_nid &lnidx_opr, std:
     if (ntype_child.is_stmts()) {
       stmts = true;
       int count_child = 0;
+      // Iterate through statements
       for (const auto &lnidx_opr_child_child : lnast->children(lnidx_opr_child)) {
         const auto ntype_child_child = lnast->get_data(lnidx_opr_child_child).type;
         if (is_primitive_op(ntype_child_child)) {
@@ -565,6 +566,7 @@ void Semantic_check::check_while_op(Lnast *lnast, const Lnast_nid &lnidx_opr, st
     } else if (ntype_child.is_stmts()) {
       stmt = true;
       int count_child = 0;
+      // Iterate through statements
       for (const auto &lnidx_opr_child_child : lnast->children(lnidx_opr_child)) {
         const auto ntype_child_child = lnast->get_data(lnidx_opr_child_child).type;
         if (is_primitive_op(ntype_child_child)) {
@@ -603,6 +605,7 @@ void Semantic_check::check_func_def(Lnast *lnast, const Lnast_nid &lnidx_opr, st
   for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
     const auto ntype_child = lnast->get_data(lnidx_opr_child).type;
 
+    // First child is the func_name
     if (lnidx_opr_child == lnast->get_first_child(lnidx_opr)) {
       num_of_refs += 1;
       // Store type 'ref' variables
@@ -637,6 +640,7 @@ void Semantic_check::check_func_def(Lnast *lnast, const Lnast_nid &lnidx_opr, st
     } else if (ntype_child.is_cond()) {
       cond = true;
       add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
+    // Inputs and Outputs
     } else if (ntype_child.is_ref()) {
       std::string_view ref_name = lnast->get_name(lnidx_opr_child);
       if (ref_name[0] == '%') {
@@ -665,14 +669,17 @@ void Semantic_check::check_func_def(Lnast *lnast, const Lnast_nid &lnidx_opr, st
 
 void Semantic_check::check_func_call(Lnast *lnast, const Lnast_nid &lnidx_opr, std::string_view stmt_name) {
   int num_of_refs = 0;
+  // Iterate through children of func call node
   for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
     const auto ntype_child = lnast->get_data(lnidx_opr_child).type;
 
+    // First child hold the name of the func call
     if (lnidx_opr_child == lnast->get_first_child(lnidx_opr)) {
       num_of_refs += 1;
       add_to_write_list(lnast, lnast->get_name(lnidx_opr_child), stmt_name);
       continue;
     }
+    // Nodes are func_name and arguments
     if (ntype_child.is_ref()) {
       num_of_refs += 1;
       add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
