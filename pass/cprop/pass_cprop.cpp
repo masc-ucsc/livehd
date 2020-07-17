@@ -469,7 +469,7 @@ void Pass_cprop::merge_to_tuple(std::shared_ptr<Lgtuple> ctup, Node &node, Node
 	if (parent_node.get_type().op == TupRef_Op) {
 		// First tuple
 		bool ok = ctup->set(key_pos, key_name, val_dpin);
-	  if (!ok) 
+	  if (!ok)
       compile_error = true;
 	} else {
     if (parent_node.get_type().op != TupAdd_Op) {
@@ -506,10 +506,10 @@ void Pass_cprop::merge_to_tuple(std::shared_ptr<Lgtuple> ctup, Node &node, Node
 	  		compile_error = true;
 	  }
   }
-	
 
 
-	if (compile_error) 
+
+	if (compile_error)
 		Pass::error("tuples {} could not add field \n", "XX", "XX");
 
 
@@ -567,7 +567,7 @@ std::tuple<std::string_view, int> Pass_cprop::get_tuple_name_key(Node &node) {
 bool Pass_cprop::process_tuple_get(Node &node) {
 	I(node.get_type_op() == TupGet_Op);
 
- 
+
   auto parent_dpin = node.get_sink_pin(0).get_driver_pin();
   auto parent_node = parent_dpin.get_node();
   /* if (parent_node.has_sink_pin_connected(1) && parent_node.get_sink_pin(1).get_driver_pin().get_name() == "__wire") { */
@@ -591,7 +591,6 @@ bool Pass_cprop::process_tuple_get(Node &node) {
 		return true;
   }
 
-
   std::string tup_name;
 	if (parent_dpin.has_name()) {
 		tup_name = parent_dpin.get_name();
@@ -612,22 +611,18 @@ bool Pass_cprop::process_tuple_get(Node &node) {
 
   fmt::print("DBG TupGet: tup_name:{}, key_name:{}, key_pos:{}\n", tup_name, key_name, key_pos);
 
-
-
-
-	auto ctup = ptup_it->second;
-
 	Node_pin val_dpin;
-
 	if (!key_name.empty()) {
+    auto &ctup = ptup_it->second;
 		if (ctup->has_key_name(key_name)) {
 			val_dpin = ctup->get_value_dpin(key_pos, key_name);
-		} else {
-			ctup->dump();
+    }else{
+      ctup->dump();
 			Pass::error("tuple {} does not have field {}\n", tup_name, key_name);
 			return false;
 		}
 	} else if (key_pos >= 0) {
+    auto &ctup = ptup_it->second;
 		if (ctup->has_key_pos(key_pos)) {
 			val_dpin = ctup->get_value_dpin(key_pos, key_name);
 		} else {
@@ -638,7 +633,14 @@ bool Pass_cprop::process_tuple_get(Node &node) {
 	}
 
 	if (!val_dpin.is_invalid()) {
-		fmt::print("TupGet node:{} pos:{} key:{} val:{}\n", node.debug_name(), key_pos, key_name, val_dpin.debug_name());
+    for (auto &e : node.out_edges()) {
+      if (val_dpin.get_node() == e.sink.get_node()) {
+        Pass::error("tuple {} assignment loop detected", tup_name);
+        return false;
+      }
+    }
+
+    fmt::print("TupGet node:{} pos:{} key:{} val:{}\n", node.debug_name(), key_pos, key_name, val_dpin.debug_name());
 		collapse_forward_for_pin(node, val_dpin);
 		return true;
 	}
@@ -692,7 +694,7 @@ void Pass_cprop::process_tuple_add(Node &node) {
   }
 
 	auto [key_name, key_pos] = get_tuple_name_key(node);
-  
+
   /* // not all tuple_add has value pin connected, for example, the __wire tuple_add node */
   Node_pin val_dpin;
   if (node.has_sink_pin_connected(3))
@@ -703,7 +705,7 @@ void Pass_cprop::process_tuple_add(Node &node) {
   fmt::print("TupAdd node:{} pos:{} key:{} val:{}\n", node.debug_name(), key_pos, key_name, val_dpin.debug_name());
   /* } */
 
-  if (parent_could_be_deleted) 
+  if (parent_could_be_deleted)
     parent_node.del_node();
 }
 
@@ -712,8 +714,9 @@ void Pass_cprop::trans(LGraph *g) {
 
   for (auto node : g->forward()) {
     auto op = node.get_type().op;
+    //fmt::print("NEXT: node:{}\n",node.debug_name());
 
-		// Special cases to handle in cprop
+    // Special cases to handle in cprop
     if (op == AttrGet_Op) {
       process_attr_get(node);
       continue;
@@ -739,7 +742,7 @@ void Pass_cprop::trans(LGraph *g) {
       continue;
     }
 
-		// Normal copy prop and strength reduction
+                // Normal copy prop and strength reduction
     auto inp_edges_ordered = node.inp_edges_ordered();
     try_constant_prop(node, inp_edges_ordered);
 
