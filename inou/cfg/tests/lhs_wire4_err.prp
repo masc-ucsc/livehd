@@ -1,5 +1,23 @@
+// error case
 tmp = foo.__final_value
 if ($en) {
   foo.a = 3
 }
-%out = tmp.a
+%out = tmp.a // error, foo is a local tuple so tmp is never assigned
+
+
+// error case II
+tmp = foo.__final_value
+foo.b = 2
+if ($en) {
+  foo.a = 3  // error, tuple size should be known at compile time
+}
+
+// error case III
+tmp = foo.__final_value
+foo.b = 2
+if (1 == 2) {
+  foo.a = 3
+}
+
+%out = tmp.a // field a does not exit in tuple foo
