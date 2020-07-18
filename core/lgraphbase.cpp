@@ -60,7 +60,7 @@ void LGraph_Base::emplace_back() {
   auto *   ptr = node_internal.ref(nid);
 
   if (ptr->is_page_align()) {
-    auto *page = (Node_Internal_Page *)ptr;
+    auto *page = (Node_internal_Page *)ptr;
 
     page->set_page(nid);
     node_internal.emplace_back();
@@ -70,7 +70,7 @@ void LGraph_Base::emplace_back() {
   }
 
   I(!ptr->is_page_align());
-  new (ptr) Node_Internal();  // call constructor
+  new (ptr) Node_internal();  // call constructor
   ptr->set_nid(nid);          // self by default
 }
 
@@ -224,7 +224,7 @@ void LGraph_Base::print_stats() const {
     }
   }
 
-  bytes += node_internal.size() * sizeof(Node_Internal);
+  bytes += node_internal.size() * sizeof(Node_internal);
   // bytes += node_type_op.size() * sizeof(Node_Type_Op);
   // bytes += node_delay.size()    * sizeof(Node_Delay);
   auto n_edges = n_short_edges + n_long_edges;
@@ -249,7 +249,7 @@ void LGraph_Base::print_stats() const {
              bytes / n_nodes,
              bytes / n_extra);
 
-  bytes = node_internal.size() * sizeof(Node_Internal) + 1;
+  bytes = node_internal.size() * sizeof(Node_internal) + 1;
   fmt::print("  edges bytes/root:{:.2f} bytes/node:{:.2f} bytes/extra:{:.2f}\n", bytes / n_roots, bytes / n_nodes, bytes / n_extra);
   bytes = n_nodes + 1;
   fmt::print("  edges short/node:{:.2f} long/node:{:.2f} short/ratio:{:.2f}\n",
@@ -258,7 +258,9 @@ void LGraph_Base::print_stats() const {
              (n_short_edges) / (1.0 + n_short_edges + n_long_edges));
 }
 
-#if 0
+//#define PERF_OUTPUT_PIN
+
+#ifdef PERF_OUTPUT_PIN
 static inline unsigned long long get_cycles(void) {
   unsigned int low, high;
 
@@ -270,7 +272,7 @@ static inline unsigned long long get_cycles(void) {
 
 Index_ID LGraph_Base::get_space_output_pin(const Index_ID master_nid, const Index_ID start_nid, const Port_ID dst_pid,
                                            const Index_ID root_idx) {
-#if 0
+#ifdef PERF_OUTPUT_PIN
   auto start = get_cycles();
   static long long total_cycles_1 = 0;
   static long long total_1 = 0;
@@ -278,6 +280,9 @@ Index_ID LGraph_Base::get_space_output_pin(const Index_ID master_nid, const Inde
   static long long total_2 = 0;
   static long long total_cycles_3 = 0;
   static long long total_3 = 0;
+  static long long total_4 = 0;
+  static long long total_5 = 0;
+  static long long total_6 = 0;
 #endif
 
 #ifdef DEBUG_SLOW
@@ -286,13 +291,22 @@ Index_ID LGraph_Base::get_space_output_pin(const Index_ID master_nid, const Inde
 #endif
   const auto *ptr = node_internal.ref(start_nid);
   if (ptr->get_dst_pid() == dst_pid && ptr->has_space_long()) {
-#if 0
+#ifdef PERF_OUTPUT_PIN
       auto end = get_cycles();
       total_cycles_1+= (end-start);
       total_1++;
       static int conta=0;
       if (conta++>1000) {
-        fmt::print("_1:{}/{} _2:{}/{} _3:{}/{}\n", total_cycles_1, total_1, total_cycles_2, total_2, total_cycles_3, total_3);
+        fmt::print("_1:{}/{} _2:{}/{} _3:{}/{} _4:{} _5:{} _6:{}\n",
+                   total_cycles_1,
+                   total_1,
+                   total_cycles_2,
+                   total_2,
+                   total_cycles_3,
+                   total_3,
+                   total_4,
+                   total_5,
+                   total_6);
         conta = 0;
       }
 #endif
@@ -305,23 +319,24 @@ Index_ID LGraph_Base::get_space_output_pin(const Index_ID master_nid, const Inde
   // Trick to avoid checking frequently that there is extra space. Most of the
   // time the list if full, no need to traverse. If traversed, it will find a
   // node and set it to find.
-  if (node_internal[root_idx].is_next_state()) {
-    static int conta = 5;
-    if (conta > 0) {
-      conta--;
-      return create_node_space(idx, dst_pid, master_nid, root_idx);
-    } else {
-      conta = 5;
-    }
+  if (node_internal[root_idx].has_full_hint()) {
+#ifdef PERF_OUTPUT_PIN
+    total_4++;
+#endif
+    return create_node_space(idx, dst_pid, master_nid, root_idx);
   }
+#ifdef PERF_OUTPUT_PIN
+  total_5++;
+#endif
 
   while (true) {
     if (ptr->is_last_state()) {
-#if 0
-        auto end = get_cycles();
-        total_cycles_2 += (end - start);
-        total_2++;
+#ifdef PERF_OUTPUT_PIN
+      auto end = get_cycles();
+      total_cycles_2 += (end - start);
+      total_2++;
 #endif
+      node_internal.ref(root_idx)->set_full_hint();
       return create_node_space(idx, dst_pid, master_nid, root_idx);
     }
 
@@ -334,13 +349,16 @@ Index_ID LGraph_Base::get_space_output_pin(const Index_ID master_nid, const Inde
     ptr = node_internal.ref(idx);
 
     if (ptr->get_dst_pid() == dst_pid && ptr->has_space_long()) {
-#if 0
+#ifdef PERF_OUTPUT_PIN
       auto end = get_cycles();
       total_cycles_3 += (end - start);
       total_3++;
 #endif
       return idx;
     }
+#ifdef PERF_OUTPUT_PIN
+    total_6++;
+#endif
   }
 
   I(false);

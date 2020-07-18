@@ -452,7 +452,7 @@ Node_pin_iterator LGraph::inp_drivers(const Node &node, const absl::flat_hash_se
         auto driver_master_nid = node_internal[driver_pin_idx].get_nid();
         I(node_internal[driver_master_nid].is_master_root());
 
-        if (exclude.count(Node::Compact(node.get_hidx(), driver_master_nid)))
+        if (exclude.count(Node::Compact(node.get_hidx(), driver_master_nid))==0)
           continue;
 
         xiter.emplace_back(
@@ -730,10 +730,10 @@ void LGraph::del_driver2node_int(Node &driver, const Node &sink) {
   I(sink.get_class_lgraph() == driver.get_top_lgraph());
 
   Index_ID idx2 = driver.get_nid();
+  auto *node_int_ptr = node_internal.ref(idx2);
+  node_int_ptr->clear_full_hint();
 
   while (true) {
-    auto *node_int_ptr = node_internal.ref(idx2);
-
     auto            n = node_int_ptr->get_num_local_outputs();
     uint8_t         i;
     const Edge_raw *redge;
@@ -749,6 +749,7 @@ void LGraph::del_driver2node_int(Node &driver, const Node &sink) {
       return;
 
     idx2 = node_internal[idx2].get_next();
+    node_int_ptr = node_internal.ref(idx2);
   }
 }
 
@@ -759,9 +760,10 @@ void LGraph::del_sink2node_int(const Node &driver, Node &sink) {
   I(sink.get_class_lgraph() == driver.get_top_lgraph());
 
   Index_ID idx2 = sink.get_nid();
+  auto *node_int_ptr = node_internal.ref(idx2);
+  node_int_ptr->clear_full_hint();
 
   while (true) {
-    auto *node_int_ptr = node_internal.ref(idx2);
 
     auto            n = node_int_ptr->get_num_local_inputs();
     uint8_t         i;
@@ -779,6 +781,7 @@ void LGraph::del_sink2node_int(const Node &driver, Node &sink) {
       return;
 
     idx2 = node_internal[idx2].get_next();
+    node_int_ptr = node_internal.ref(idx2);
   }
 }
 
@@ -793,10 +796,10 @@ bool LGraph::del_edge_driver_int(const Node_pin &dpin, const Node_pin &spin) {
   I(spin.get_class_lgraph() == dpin.get_top_lgraph());
 
   Index_ID idx2 = dpin.get_idx();
-  I(node_internal[idx2].is_root());
+  auto *node_int_ptr = node_internal.ref(idx2);
+  node_int_ptr->clear_full_hint();
 
   while (true) {
-    auto *node_int_ptr = node_internal.ref(idx2);
 
     I(node_int_ptr->get_dst_pid() == dpin.get_pid());
 
@@ -822,6 +825,8 @@ bool LGraph::del_edge_driver_int(const Node_pin &dpin, const Node_pin &spin) {
       I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
       idx2 = tmp;
     } while (node_internal[idx2].get_dst_pid() != dpin.get_pid());
+
+    node_int_ptr = node_internal.ref(idx2);
   }
 
   return false;
@@ -837,11 +842,10 @@ bool LGraph::del_edge_sink_int(const Node_pin &dpin, const Node_pin &spin) {
   I(spin.get_class_lgraph() == dpin.get_top_lgraph());
 
   Index_ID idx2 = spin.get_idx();
-  I(node_internal[idx2].is_root());
+  auto *node_int_ptr = node_internal.ref(idx2);
+  node_int_ptr->clear_full_hint();
 
   while (true) {
-    auto *node_int_ptr = node_internal.ref(idx2);
-
     I(node_int_ptr->get_dst_pid() == spin.get_pid());
 
     auto            n = node_int_ptr->get_num_local_inputs();
@@ -866,6 +870,8 @@ bool LGraph::del_edge_sink_int(const Node_pin &dpin, const Node_pin &spin) {
       I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
       idx2 = tmp;
     } while (node_internal[idx2].get_dst_pid() != spin.get_pid());
+
+    node_int_ptr = node_internal.ref(idx2);
   }
 
   return false;

@@ -20,7 +20,7 @@ class Graph_library;
 class LGraph_Base : public Lgraph_base_core {
 private:
 protected:
-  mmap_lib::vector<Node_Internal> node_internal;
+  mmap_lib::vector<Node_internal> node_internal;
 
   static inline constexpr std::string_view unknown_io = "unknown";
   Graph_library *                          library;
@@ -126,13 +126,13 @@ public:
 
   void print_stats() const;
 
-  const Node_Internal &get_node_int(Index_ID idx) const {
+  const Node_internal &get_node_int(Index_ID idx) const {
     I(static_cast<Index_ID>(node_internal.size()) > idx);
     return node_internal[idx];
   }
 
   /*
-  Node_Internal &get_node_int(Index_ID idx) {
+  Node_internal &get_node_int(Index_ID idx) {
     I(static_cast<Index_ID>(node_internal.size()) > idx);
     return node_internal[idx];
   }

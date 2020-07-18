@@ -69,7 +69,7 @@ protected:
 
   // State built during iteration
   const bool                              visit_sub;
-  absl::flat_hash_set<Node::Compact>      visited;
+  absl::flat_hash_set<Node::Compact>      unvisited;
   std::vector<Node>                       pending_stack;
   absl::flat_hash_map<Node::Compact, int> pending_loop_detect;
 

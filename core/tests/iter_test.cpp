@@ -80,7 +80,7 @@ void do_fwd_traversal(LGraph *lg) {
 }
 
 
-#define SIZE_BASE 100
+#define SIZE_BASE 1000
 
 void generate_graphs(int n) {
 
