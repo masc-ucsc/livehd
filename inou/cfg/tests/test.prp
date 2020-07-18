@@ -1,7 +1,4 @@
-foo.__wire = true
-%out = foo.a 
-if ($en) {
-  foo.a = 3
+foo.b = 2
+if (1 == 1) {
+  foo.a = 3 
 }
-
-

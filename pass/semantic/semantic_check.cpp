@@ -1,25 +1,25 @@
 
 #include "semantic_check.hpp"
+
+#include <algorithm>
+#include <iostream>
+#include <string_view>
+
+#include "fmt/color.h"
+#include "fmt/core.h"
+#include "fmt/format.h"
+#include "fmt/printf.h"
+#include "lbench.hpp"
 #include "lnast_ntype.hpp"
 #include "pass.hpp"
 #include "prp_lnast.hpp"
-#include "lbench.hpp"
-#include "fmt/core.h"
-#include "fmt/format.h"
-#include "fmt/color.h"
-#include "fmt/printf.h"
-
-#include <string_view>
-#include <iostream>
-#include <algorithm>
-
 
 bool Semantic_check::is_primitive_op(const Lnast_ntype node_type) {
-  if (node_type.is_logical_op() || node_type.is_unary_op() || node_type.is_nary_op() || node_type.is_assign() ||
-      node_type.is_dp_assign() || node_type.is_as() || node_type.is_eq() || node_type.is_select() || node_type.is_bit_select() ||
-      node_type.is_logic_shift_right() || node_type.is_arith_shift_right() || node_type.is_arith_shift_left() ||
-      node_type.is_rotate_shift_right() || node_type.is_rotate_shift_left() || node_type.is_dynamic_shift_left() ||
-      node_type.is_dynamic_shift_right() || node_type.is_dot() || node_type.is_tuple() || node_type.is_tuple_concat()) {
+  if (node_type.is_logical_op() || node_type.is_unary_op() || node_type.is_nary_op() || node_type.is_assign()
+      || node_type.is_dp_assign() || node_type.is_as() || node_type.is_eq() || node_type.is_select() || node_type.is_bit_select()
+      || node_type.is_logic_shift_right() || node_type.is_arith_shift_right() || node_type.is_arith_shift_left()
+      || node_type.is_rotate_shift_right() || node_type.is_rotate_shift_left() || node_type.is_dynamic_shift_left()
+      || node_type.is_dynamic_shift_right() || node_type.is_dot() || node_type.is_tuple() || node_type.is_tuple_concat()) {
     return true;
   } else {
     return false;
@@ -27,8 +27,8 @@ bool Semantic_check::is_primitive_op(const Lnast_ntype node_type) {
 }
 
 bool Semantic_check::is_tree_structs(const Lnast_ntype node_type) {
-  if (node_type.is_stmts() || node_type.is_cstmts() || node_type.is_if() || node_type.is_cond() || node_type.is_uif() ||
-      node_type.is_for() || node_type.is_while() || node_type.is_func_call() || node_type.is_func_def()) {
+  if (node_type.is_stmts() || node_type.is_cstmts() || node_type.is_if() || node_type.is_cond() || node_type.is_uif()
+      || node_type.is_for() || node_type.is_while() || node_type.is_func_call() || node_type.is_func_def()) {
     return true;
   } else {
     return false;
@@ -111,7 +111,7 @@ bool Semantic_check::in_output_vars(std::string_view node_name) {
   return false;
 }
 
-void Semantic_check::add_to_write_list(Lnast* lnast, std::string_view node_name, std::string_view stmt_name) {
+void Semantic_check::add_to_write_list(Lnast *lnast, std::string_view node_name, std::string_view stmt_name) {
   if (!in_write_list(node_name, stmt_name)) {
     if (node_name != "null") {
       write_dict[node_name] = stmt_name;
@@ -170,10 +170,10 @@ void Semantic_check::find_lhs_name(int index) {
   }
 }
 
-void Semantic_check::error_print_lnast_by_name(Lnast* lnast, std::string_view error_name) {
+void Semantic_check::error_print_lnast_by_name(Lnast *lnast, std::string_view error_name) {
   // Print LNAST and indicate error based Node's Text Name
   Prp_lnast converter;
-  bool printed = false;
+  bool      printed = false;
   fmt::print("\n");
 
   for (const auto &it : lnast->depth_preorder(lnast->get_root())) {
@@ -184,7 +184,7 @@ void Semantic_check::error_print_lnast_by_name(Lnast* lnast, std::string_view er
     fmt::print("{} {} {:>20} : {}", it.level, indent, node.type.to_s(), node.token.text);
 
     if (node.token.text == error_name && !printed) {
-      fmt::print(fmt::fg(fmt::color::red),"    <==========\n");
+      fmt::print(fmt::fg(fmt::color::red), "    <==========\n");
       printed = true;
     } else {
       fmt::print("\n");
@@ -193,10 +193,10 @@ void Semantic_check::error_print_lnast_by_name(Lnast* lnast, std::string_view er
   fmt::print("\n");
 }
 
-void Semantic_check::error_print_lnast_by_type(Lnast* lnast, std::string_view error_name) {
+void Semantic_check::error_print_lnast_by_type(Lnast *lnast, std::string_view error_name) {
   // Print LNAST and indicate error based Node's Type
   Prp_lnast converter;
-  bool printed = false;
+  bool      printed = false;
   fmt::print("\n");
 
   for (const auto &it : lnast->depth_preorder(lnast->get_root())) {
@@ -207,7 +207,7 @@ void Semantic_check::error_print_lnast_by_type(Lnast* lnast, std::string_view er
     fmt::print("{} {} {:>20} : {}", it.level, indent, node.type.to_s(), node.token.text);
 
     if (node.type.to_s() == error_name && !printed) {
-      fmt::print(fmt::fg(fmt::color::red),"    <==========\n");
+      fmt::print(fmt::fg(fmt::color::red), "    <==========\n");
       printed = true;
     } else {
       fmt::print("\n");
@@ -216,10 +216,10 @@ void Semantic_check::error_print_lnast_by_type(Lnast* lnast, std::string_view er
   fmt::print("\n");
 }
 
- void Semantic_check::error_print_lnast_var_warn(Lnast* lnast, std::vector<std::string_view> error_names) {
+void Semantic_check::error_print_lnast_var_warn(Lnast *lnast, std::vector<std::string_view> error_names) {
   // Print LNAST and indicate error based a vector of variable warnings
   Prp_lnast converter;
-  bool printed = false;
+  bool      printed = false;
   fmt::print("\n");
 
   for (const auto &it : lnast->depth_preorder(lnast->get_root())) {
@@ -232,7 +232,7 @@ void Semantic_check::error_print_lnast_by_type(Lnast* lnast, std::string_view er
     if (error_names.size() != 0) {
       for (auto node_name = error_names.begin(); node_name != error_names.end(); *node_name++) {
         if (*node_name == node.token.text) {
-          fmt::print(fmt::fg(fmt::color::red),"    <==========\n");
+          fmt::print(fmt::fg(fmt::color::red), "    <==========\n");
           error_names.erase(node_name);
           printed = true;
           break;
@@ -249,12 +249,12 @@ void Semantic_check::error_print_lnast_by_type(Lnast* lnast, std::string_view er
   fmt::print("\n");
 }
 
-void Semantic_check::resolve_read_write_lists(Lnast* lnast) {
+void Semantic_check::resolve_read_write_lists(Lnast *lnast) {
   for (auto node_name : write_dict) {
     // Resolve Write and Read Dicts
     if (node_name.first[0] != '%' && read_dict.contains(node_name.first)) {
       write_dict.erase(node_name.first);
-    // Make sure that if output variable is declared, it is written to
+      // Make sure that if output variable is declared, it is written to
     } else if (node_name.first[0] == '%' && in_output_vars(node_name.first)) {
       for (auto output_var = output_vars.begin(); output_var != output_vars.end(); *output_var++) {
         if (*output_var == node_name.first) {
@@ -355,15 +355,16 @@ void Semantic_check::resolve_lhs_rhs_lists() {
   }
 }
 
-void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_opr, const Lnast_ntype node_type, std::string_view stmt_name) {
+void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_opr, const Lnast_ntype node_type,
+                                         std::string_view stmt_name) {
   if (!lnast->has_single_child(lnidx_opr)) {
 
     // Vector for add_to_rhs_list()
     std::vector<std::string_view> rhs_args;
 
     // Unary Operations
-    if (node_type.is_assign() || node_type.is_dp_assign() || node_type.is_not() || node_type.is_logical_not() ||
-        node_type.is_as()) {
+    if (node_type.is_assign() || node_type.is_dp_assign() || node_type.is_not() || node_type.is_logical_not()
+        || node_type.is_as()) {
       auto lhs      = lnast->get_first_child(lnidx_opr);
       auto lhs_type = lnast->get_data(lhs).type;
       auto rhs      = lnast->get_sibling_next(lhs);
@@ -390,10 +391,10 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
       rhs_args.push_back(lnast->get_name(rhs));
       add_to_rhs_list(rhs_args);
       // N-ary Operations (need to add node_type.is_select())
-    } else if (node_type.is_logical_and() || node_type.is_logical_or() || node_type.is_nary_op() ||
-               node_type.is_eq() || node_type.is_bit_select() || node_type.is_logic_shift_right() ||
-               node_type.is_arith_shift_right() || node_type.is_arith_shift_left() || node_type.is_rotate_shift_right() ||
-               node_type.is_rotate_shift_left() || node_type.is_dynamic_shift_right() || node_type.is_dynamic_shift_left()) {
+    } else if (node_type.is_logical_and() || node_type.is_logical_or() || node_type.is_nary_op() || node_type.is_eq()
+               || node_type.is_bit_select() || node_type.is_logic_shift_right() || node_type.is_arith_shift_right()
+               || node_type.is_arith_shift_left() || node_type.is_rotate_shift_right() || node_type.is_rotate_shift_left()
+               || node_type.is_dynamic_shift_right() || node_type.is_dynamic_shift_left()) {
       for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
         const auto node_type_child = lnast->get_data(lnidx_opr_child).type;
 
@@ -438,14 +439,14 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
         error_print_lnast_by_type(lnast, node_type.to_s());
         Pass::error("Tuple Operation Error: Missing Reference Node\n");
       } else if (num_of_assign == 0) {
-        error_print_lnast_by_type(lnast,  node_type.to_s());
+        error_print_lnast_by_type(lnast, node_type.to_s());
         Pass::error("Tuple Operation Error: Missing Assign Node(s)\n");
       }
     } else if (node_type.is_tuple_concat()) {
-      int num_of_ref    = 0;
+      int num_of_ref = 0;
       for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
         const auto node_type_child = lnast->get_data(lnidx_opr_child).type;
-        
+
         if (lnast->get_first_child(lnidx_opr) == lnidx_opr_child) {
           num_of_ref += 1;
           add_to_write_list(lnast, lnast->get_name(lnidx_opr_child), stmt_name);
@@ -463,7 +464,7 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
       }
       // Missing Nodes
       if (num_of_ref != 3) {
-        error_print_lnast_by_type(lnast,  node_type.to_s());
+        error_print_lnast_by_type(lnast, node_type.to_s());
         Pass::error("Tuple Concatenation Operation Error: Missing Reference Node\n");
       }
     } else if (node_type.is_select() || node_type.is_dot()) {
@@ -496,7 +497,8 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
   }
 }
 
-void Semantic_check::check_tree_struct_ops(Lnast *lnast, const Lnast_nid &lnidx_opr, const Lnast_ntype node_type, std::string_view stmt_name) {
+void Semantic_check::check_tree_struct_ops(Lnast *lnast, const Lnast_nid &lnidx_opr, const Lnast_ntype node_type,
+                                           std::string_view stmt_name) {
   if (node_type.is_if()) {
     check_if_op(lnast, lnidx_opr, stmt_name);
   } else if (node_type.is_for()) {
@@ -579,7 +581,7 @@ void Semantic_check::check_for_op(Lnast *lnast, const Lnast_nid &lnidx_opr, std:
     const auto ntype_child = lnast->get_data(lnidx_opr_child).type;
 
     if (ntype_child.is_stmts()) {
-      stmts = true;
+      stmts           = true;
       int count_child = 0;
       // Iterate through statements
       for (const auto &lnidx_opr_child_child : lnast->children(lnidx_opr_child)) {
@@ -627,7 +629,7 @@ void Semantic_check::check_while_op(Lnast *lnast, const Lnast_nid &lnidx_opr, st
       cond = true;
       add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
     } else if (ntype_child.is_stmts()) {
-      stmt = true;
+      stmt            = true;
       int count_child = 0;
       // Iterate through statements
       for (const auto &lnidx_opr_child_child : lnast->children(lnidx_opr_child)) {
@@ -679,7 +681,7 @@ void Semantic_check::check_func_def(Lnast *lnast, const Lnast_nid &lnidx_opr, st
     if (ntype_child.is_cstmts() | ntype_child.is_stmts()) {
       std::string_view new_stmt_name = stmt_name;
       if (ntype_child.is_stmts()) {
-        stmts = true;
+        stmts         = true;
         new_stmt_name = lnast->get_name(lnidx_opr_child);
       }
       int count_child = 0;
@@ -704,7 +706,7 @@ void Semantic_check::check_func_def(Lnast *lnast, const Lnast_nid &lnidx_opr, st
     } else if (ntype_child.is_cond()) {
       cond = true;
       add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
-    // Inputs and Outputs
+      // Inputs and Outputs
     } else if (ntype_child.is_ref()) {
       std::string_view ref_name = lnast->get_name(lnidx_opr_child);
       if (ref_name[0] == '%') {
@@ -767,7 +769,7 @@ void Semantic_check::do_check(Lnast *lnast) {
   const auto stmts = lnast->get_first_child(top);
   // Iterate through Lnast top statements
   for (const auto &stmt : lnast->children(stmts)) {
-    const auto ntype = lnast->get_data(stmt).type;
+    const auto ntype     = lnast->get_data(stmt).type;
     const auto stmt_name = lnast->get_name(stmts);
 
     if (is_primitive_op(ntype)) {

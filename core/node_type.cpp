@@ -121,7 +121,6 @@ Lconst LGraph_Node_Type::get_type_const(Index_ID nid) const {
 }
 
 void LGraph_Node_Type::set_type_const(Index_ID nid, const Lconst &value) {
-
   const_map.set(Node::Compact_class(nid), value.serialize());
   auto *ptr = node_internal.ref(nid);
   ptr->set_type(Const_Op);
@@ -133,4 +132,3 @@ void LGraph_Node_Type::set_type_const(Index_ID nid, const Lconst &value) {
 void LGraph_Node_Type::set_type_const(Index_ID nid, std::string_view sv) { set_type_const(nid, Lconst(sv)); }
 
 void LGraph_Node_Type::set_type_const(Index_ID nid, uint32_t value, Bits_t bits) { set_type_const(nid, Lconst(value, bits)); }
-

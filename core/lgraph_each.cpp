@@ -20,9 +20,12 @@ void LGraph::each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)
   }
 
   std::sort(pin_pair.begin(), pin_pair.end(), [](const std::pair<Node_pin, Port_ID> &a, const std::pair<Node_pin, Port_ID> &b) {
-    if (a.second == Port_invalid && b.second == Port_invalid) return a.first.get_pid() < b.first.get_pid();
-    if (a.second == Port_invalid) return true;
-    if (b.second == Port_invalid) return false;
+    if (a.second == Port_invalid && b.second == Port_invalid)
+      return a.first.get_pid() < b.first.get_pid();
+    if (a.second == Port_invalid)
+      return true;
+    if (b.second == Port_invalid)
+      return false;
 
     return a.second < b.second;
   });
@@ -48,9 +51,12 @@ void LGraph::each_graph_output(std::function<void(Node_pin &pin)> f1) {
 
 void LGraph::each_node_fast(std::function<void(Node &node)> f1) {
   for (auto &ni : node_internal) {
-    if (!ni.is_node_state()) continue;
-    if (!ni.is_master_root()) continue;
-    if (ni.is_graph_io()) continue;
+    if (!ni.is_node_state())
+      continue;
+    if (!ni.is_master_root())
+      continue;
+    if (ni.is_graph_io())
+      continue;
 
     Node node(this, Hierarchy_tree::root_index(), ni.get_nid());
     f1(node);
@@ -59,9 +65,12 @@ void LGraph::each_node_fast(std::function<void(Node &node)> f1) {
 
 void LGraph::each_output_edge_fast(std::function<void(XEdge &edge)> f1) {
   for (const auto &ni : node_internal) {
-    if (!ni.is_node_state()) continue;
-    if (!ni.is_root()) continue;
-    if (!ni.has_local_outputs()) continue;
+    if (!ni.is_node_state())
+      continue;
+    if (!ni.is_root())
+      continue;
+    if (!ni.has_local_outputs())
+      continue;
 
     auto dpin = Node_pin(this, this, Hierarchy_tree::root_index(), ni.get_nid(), ni.get_dst_pid(), false);
 
@@ -86,19 +95,24 @@ void LGraph::each_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)> 
     auto node = Node(this, it->first);
 
     bool cont = fn(node, it->second);
-    if (!cont) return;
+    if (!cont)
+      return;
   }
 }
 
 void LGraph::each_root_fast_direct(std::function<bool(Node &)> f1) {
   for (const auto &ni : node_internal) {
-    if (!ni.is_node_state()) continue;
-    if (!ni.is_root()) continue;
-    if (ni.is_graph_io()) continue;
+    if (!ni.is_node_state())
+      continue;
+    if (!ni.is_root())
+      continue;
+    if (ni.is_graph_io())
+      continue;
 
     auto node = Node(this, Hierarchy_tree::root_index(), ni.get_nid());
 
     bool cont = f1(node);
-    if (!cont) return;
+    if (!cont)
+      return;
   }
 }

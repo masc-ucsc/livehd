@@ -11,9 +11,7 @@ static_assert(sizeof(Node::Compact) == 12);
 static_assert(sizeof(Node::Compact_class) == 4);
 
 XEdge::XEdge(LGraph *g, const Compact &c)
-  : driver(g, Node_pin::Compact_class(c.driver_idx, false))
-  ,   sink(g, Node_pin::Compact_class(c.sink_idx  , true )) {
-
+    : driver(g, Node_pin::Compact_class(c.driver_idx, false)), sink(g, Node_pin::Compact_class(c.sink_idx, true)) {
   I(sink.is_sink());
   I(driver.is_driver());
 }
