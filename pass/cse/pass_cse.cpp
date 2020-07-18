@@ -98,7 +98,10 @@ public:
     std::vector<int> conflict_idx_vec;
     NPPair           last_pair = std::make_pair(dummy_node, -1);
     for (auto i = that_node.np_pair_vec.begin(); i != that_node.np_pair_vec.end(); ++i) {
-      fmt::print("j.nid:{}, i.nid:{}, j.pid:{}, i.pid:{}\n", j->first.get_nid(), i->first.get_nid(), j->first.get_pid(),
+      fmt::print("j.nid:{}, i.nid:{}, j.pid:{}, i.pid:{}\n",
+                 j->first.get_nid(),
+                 i->first.get_nid(),
+                 j->first.get_pid(),
                  i->first.get_pid());
       if (j->first.get_nid() == i->first.get_nid() && j->first.get_pid() == i->first.get_pid()) {
         // Replace could happen
@@ -114,8 +117,8 @@ public:
             conflict_idx_vec.push_back(j->second);
           }
         }
-        if (int_i > 0 && j->first.get_nid() == last_pair.first.get_nid() &&
-            j->first.get_pid() == last_pair.first.get_pid()) {  // consecutive repetitive nodes
+        if (int_i > 0 && j->first.get_nid() == last_pair.first.get_nid()
+            && j->first.get_pid() == last_pair.first.get_pid()) {  // consecutive repetitive nodes
           rep_count++;
         } else {
           rep_count = 0;
@@ -123,8 +126,8 @@ public:
         j++;
       } else {  // j i dont match
         if (cover_count > 0) {
-          if (cover_count == rep_count && int_i > 0 && j->first.get_nid() == last_pair.first.get_nid() &&
-              j->first.get_pid() == last_pair.first.get_pid()) {
+          if (cover_count == rep_count && int_i > 0 && j->first.get_nid() == last_pair.first.get_nid()
+              && j->first.get_pid() == last_pair.first.get_pid()) {
             // repeating from the beginning; dont inc any count, just continue
             // continue
           } else {
@@ -281,7 +284,9 @@ void Pass_cse::traverse(LGraph *g, std::map<int, and_node_for_comp> &and_node_fo
               // rm old edges
               new_node_for_comp.cover_by_np_map.erase(it);
               fmt::print("Removing edge from {} to {}.\n", in_edge.get_idx(), idx);
-              fmt::print("IN EDGE idx:{}, in_pid:{}, out_pid:{}\n", in_edge.get_idx(), in_edge.get_inp_pin().get_pid(),
+              fmt::print("IN EDGE idx:{}, in_pid:{}, out_pid:{}\n",
+                         in_edge.get_idx(),
+                         in_edge.get_inp_pin().get_pid(),
                          in_edge.get_out_pin().get_pid());
               g->del_edge(in_edge);
               fmt::print("Edge deleted\n");
@@ -302,7 +307,9 @@ void Pass_cse::traverse(LGraph *g, std::map<int, and_node_for_comp> &and_node_fo
       default: fmt::print("Undefined OP.\n");
     }  // end of switch
     for (const auto &in_edge : g->inp_edges(idx)) {
-      fmt::print("IN EDGE idx:{}, in_pid:{}, out_pid:{}\n", in_edge.get_idx(), in_edge.get_inp_pin().get_pid(),
+      fmt::print("IN EDGE idx:{}, in_pid:{}, out_pid:{}\n",
+                 in_edge.get_idx(),
+                 in_edge.get_inp_pin().get_pid(),
                  in_edge.get_out_pin().get_pid());
     }
   }  // end of for loop: for(auto idx:g->forward())

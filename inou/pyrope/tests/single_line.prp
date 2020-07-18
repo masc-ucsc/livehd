@@ -1,1 +1,3 @@
-a = b ..foo.. (c ..bar.. d)
+if "hello" {
+  %out = false
+}

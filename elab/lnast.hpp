@@ -199,7 +199,6 @@ public:
   uint32_t  get_bitwidth                       (const std::string_view name);
   void      set_bitwidth                       (const std::string_view name, const uint32_t bitwidth);
 
-
   void dump() const;
 };
 

@@ -2,14 +2,15 @@
 rm -rf ./lgdb
 
 
-pts='scalar_tuple 
+pts='lhs_wire lhs_wire2 scalar_tuple 
      firrtl_tail3 firrtl_tail2 firrtl_tail 
      adder_stage nested_if tuple_if reg__q_pin 
      capricious_bits2 capricious_bits4 capricious_bits 
      logic out_ssa if2 if ssa_rhs bits_rhs counter counter_nested_if
      '
 
-# pts='lhs_wire2 funcall lhs_wire'
+pts='lhs_wire sum funcall test lhs_wire2'
+pts='lhs_wire2 lhs_wire'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck

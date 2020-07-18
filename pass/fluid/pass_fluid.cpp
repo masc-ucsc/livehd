@@ -185,8 +185,11 @@ void Pass_fluid::add_fork(LGraph *g) {
     fmt::print("\n*****Visiting idx:{}\n", idx);
     fmt::print("{}\n", g->node_type_get(idx).get_name());
     for (const auto &out_edge : g->out_edges(idx)) {
-      fmt::print("Printing edge from nid{} pid{} to nid{} pid{}.\n", out_edge.get_self_nid(), out_edge.get_out_pin().get_pid(),
-                 out_edge.get_idx(), out_edge.get_inp_pin().get_pid());
+      fmt::print("Printing edge from nid{} pid{} to nid{} pid{}.\n",
+                 out_edge.get_self_nid(),
+                 out_edge.get_out_pin().get_pid(),
+                 out_edge.get_idx(),
+                 out_edge.get_inp_pin().get_pid());
     }
 
     if (g->node_type_get(idx).op == SFlop_Op) {
@@ -353,8 +356,11 @@ void Pass_fluid::add_fork(LGraph *g) {
     fmt::print("{}\n", g->node_type_get(idx).get_name());
 
     for (const auto &out_edge : g->out_edges(idx)) {
-      fmt::print("Printing edge from nid{} pid{} to nid{} pid{}.\n", out_edge.get_self_nid(), out_edge.get_out_pin().get_pid(),
-                 out_edge.get_idx(), out_edge.get_inp_pin().get_pid());
+      fmt::print("Printing edge from nid{} pid{} to nid{} pid{}.\n",
+                 out_edge.get_self_nid(),
+                 out_edge.get_out_pin().get_pid(),
+                 out_edge.get_idx(),
+                 out_edge.get_inp_pin().get_pid());
     }
   }
 
@@ -417,8 +423,11 @@ void Pass_fluid::add_fork_deadlock(LGraph *g) {
     fmt::print("\n*****Visiting idx:{}\n", idx);
     fmt::print("{}\n", g->node_type_get(idx).get_name());
     for (const auto &out_edge : g->out_edges(idx)) {
-      fmt::print("Printing edge from nid{} pid{} to nid{} pid{}.\n", out_edge.get_self_nid(), out_edge.get_out_pin().get_pid(),
-                 out_edge.get_idx(), out_edge.get_inp_pin().get_pid());
+      fmt::print("Printing edge from nid{} pid{} to nid{} pid{}.\n",
+                 out_edge.get_self_nid(),
+                 out_edge.get_out_pin().get_pid(),
+                 out_edge.get_idx(),
+                 out_edge.get_inp_pin().get_pid());
     }
 
     if (g->node_type_get(idx).op == SFlop_Op) {
@@ -516,8 +525,11 @@ void Pass_fluid::add_fork_deadlock(LGraph *g) {
     fmt::print("{}\n", g->node_type_get(idx).get_name());
 
     for (const auto &out_edge : g->out_edges(idx)) {
-      fmt::print("Printing edge from nid{} pid{} to nid{} pid{}.\n", out_edge.get_self_nid(), out_edge.get_out_pin().get_pid(),
-                 out_edge.get_idx(), out_edge.get_inp_pin().get_pid());
+      fmt::print("Printing edge from nid{} pid{} to nid{} pid{}.\n",
+                 out_edge.get_self_nid(),
+                 out_edge.get_out_pin().get_pid(),
+                 out_edge.get_idx(),
+                 out_edge.get_inp_pin().get_pid());
     }
   }
 

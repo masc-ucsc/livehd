@@ -1,6 +1,5 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-
 #include "lgcpp_plugin.hpp"
 
 static void lgcpp_test(LGraph *lg, const std::shared_ptr<Lgtuple> inp, std::shared_ptr<Lgtuple> out) {
@@ -10,4 +9,3 @@ static void lgcpp_test(LGraph *lg, const std::shared_ptr<Lgtuple> inp, std::shar
 }
 
 static Lgcpp_plugin sample("lgcpp_test", lgcpp_test);
-

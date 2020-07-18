@@ -72,7 +72,7 @@ void Inou_yosys_api::set_script_liblg(const Eprp_var &var, bool do_read) {
         script_file = script_file2;
       }
     }
-  }else{
+  } else {
     script_file = script;
   }
 
@@ -80,7 +80,6 @@ void Inou_yosys_api::set_script_liblg(const Eprp_var &var, bool do_read) {
     error("could not find the provided script:{} file", script_file);
     return;
   }
-
 }
 
 int Inou_yosys_api::create_lib(const std::string &lib_file, const std::string &lgdb) {
@@ -119,7 +118,8 @@ int Inou_yosys_api::create_lib(const std::string &lib_file, const std::string &l
 int Inou_yosys_api::call_yosys(mustache::data &vars) {
   std::ifstream inFile;
   inFile.open(std::string(script_file));
-  if (!inFile.good()) throw std::runtime_error(fmt::format("inou_yosys_api: could not open {}", script_file));
+  if (!inFile.good())
+    throw std::runtime_error(fmt::format("inou_yosys_api: could not open {}", script_file));
 
   std::stringstream strStream;
   strStream << inFile.rdbuf();  // read the whole file

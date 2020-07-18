@@ -73,14 +73,16 @@ LGraph *LGraph::clone_skeleton(std::string_view extended_name) {
 
 LGraph *LGraph::open(std::string_view path, Lg_type_id lgid) {
   auto *lib = Graph_library::instance(path);
-  if (unlikely(lib == nullptr)) return nullptr;
+  if (unlikely(lib == nullptr))
+    return nullptr;
 
   LGraph *lg = lib->try_find_lgraph(lgid);
   if (likely(lg != nullptr)) {
     return lg;
   }
 
-  if (!lib->exists(lgid)) return nullptr;
+  if (!lib->exists(lgid))
+    return nullptr;
 
   auto name   = lib->get_name(lgid);
   auto source = lib->get_source(lgid);
@@ -95,9 +97,11 @@ LGraph *LGraph::open(std::string_view path, std::string_view name) {
   }
 
   auto *lib = Graph_library::instance(path);
-  if (lib == nullptr) return nullptr;
+  if (lib == nullptr)
+    return nullptr;
 
-  if (unlikely(!lib->has_name(name))) return nullptr;
+  if (unlikely(!lib->has_name(name)))
+    return nullptr;
 
   auto source = lib->get_source(name);
 
@@ -130,7 +134,7 @@ void LGraph::clear() {
 
   htree.clear();
 
-  std::fill(memoize_const_hint.begin(), memoize_const_hint.end(), 0); // Not needed but neat
+  std::fill(memoize_const_hint.begin(), memoize_const_hint.end(), 0);  // Not needed but neat
 }
 
 void LGraph::sync() {
@@ -271,19 +275,28 @@ Node_pin_iterator LGraph::out_connected_pins(const Node &node) const {
     auto n = node_internal[idx2].get_num_local_outputs();
     if (n > 0) {
       if (node_internal[idx2].is_root()) {
-        xiter.emplace_back(Node_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx(), idx2,
-                                    node_internal[idx2].get_dst_pid(), false));
+        xiter.emplace_back(Node_pin(node.get_top_lgraph(),
+                                    node.get_class_lgraph(),
+                                    node.get_hidx(),
+                                    idx2,
+                                    node_internal[idx2].get_dst_pid(),
+                                    false));
         visited.insert(node_internal[idx2].get_dst_pid());
       } else {
         if (visited.find(node_internal[idx2].get_dst_pid()) == visited.end()) {
           auto master_nid = node_internal[idx2].get_nid();
-          xiter.emplace_back(Node_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx(), master_nid,
-                                      node_internal[idx2].get_dst_pid(), false));
+          xiter.emplace_back(Node_pin(node.get_top_lgraph(),
+                                      node.get_class_lgraph(),
+                                      node.get_hidx(),
+                                      master_nid,
+                                      node_internal[idx2].get_dst_pid(),
+                                      false));
         }
       }
     }
 
-    if (node_internal[idx2].is_last_state()) break;
+    if (node_internal[idx2].is_last_state())
+      break;
 
     Index_ID tmp = node_internal[idx2].get_next();
     I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
@@ -306,19 +319,28 @@ Node_pin_iterator LGraph::inp_connected_pins(const Node &node) const {
     auto n = node_internal[idx2].get_num_local_inputs();
     if (n > 0) {
       if (node_internal[idx2].is_root()) {
-        xiter.emplace_back(Node_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx(), idx2,
-                                    node_internal[idx2].get_dst_pid(), true));
+        xiter.emplace_back(Node_pin(node.get_top_lgraph(),
+                                    node.get_class_lgraph(),
+                                    node.get_hidx(),
+                                    idx2,
+                                    node_internal[idx2].get_dst_pid(),
+                                    true));
         visited.insert(node_internal[idx2].get_dst_pid());
       } else {
         if (visited.find(node_internal[idx2].get_dst_pid()) == visited.end()) {
           auto master_nid = node_internal[idx2].get_nid();
-          xiter.emplace_back(Node_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx(), master_nid,
-                                      node_internal[idx2].get_dst_pid(), true));
+          xiter.emplace_back(Node_pin(node.get_top_lgraph(),
+                                      node.get_class_lgraph(),
+                                      node.get_hidx(),
+                                      master_nid,
+                                      node_internal[idx2].get_dst_pid(),
+                                      true));
         }
       }
     }
 
-    if (node_internal[idx2].is_last_state()) break;
+    if (node_internal[idx2].is_last_state())
+      break;
 
     Index_ID tmp = node_internal[idx2].get_next();
     I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
@@ -337,10 +359,15 @@ Node_pin_iterator LGraph::out_setup_pins(const Node &node) const {
 
   while (true) {
     if (node_internal[idx2].is_root() && node_internal[idx2].is_driver_setup())
-      xiter.emplace_back(Node_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx(), idx2,
-                                  node_internal[idx2].get_dst_pid(), false));
+      xiter.emplace_back(Node_pin(node.get_top_lgraph(),
+                                  node.get_class_lgraph(),
+                                  node.get_hidx(),
+                                  idx2,
+                                  node_internal[idx2].get_dst_pid(),
+                                  false));
 
-    if (node_internal[idx2].is_last_state()) break;
+    if (node_internal[idx2].is_last_state())
+      break;
 
     Index_ID tmp = node_internal[idx2].get_next();
     I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
@@ -362,7 +389,8 @@ Node_pin_iterator LGraph::inp_setup_pins(const Node &node) const {
       xiter.emplace_back(
           Node_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx(), idx2, node_internal[idx2].get_dst_pid(), true));
 
-    if (node_internal[idx2].is_last_state()) break;
+    if (node_internal[idx2].is_last_state())
+      break;
 
     Index_ID tmp = node_internal[idx2].get_next();
     I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
@@ -388,10 +416,12 @@ bool LGraph::has_edge(const Node_pin &driver, const Node_pin &sink) const {
         I(redge->get_self_idx() == idx2);
         I(!redge->is_input());
 
-        if (redge->get_idx() == sink.get_idx() && redge->get_inp_pid() == sink.get_pid()) return true;
+        if (redge->get_idx() == sink.get_idx() && redge->get_inp_pid() == sink.get_pid())
+          return true;
       }
     }
-    if (node_internal[idx2].is_last_state()) break;
+    if (node_internal[idx2].is_last_state())
+      break;
     Index_ID tmp = node_internal[idx2].get_next();
     I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
     idx2 = tmp;
@@ -401,7 +431,6 @@ bool LGraph::has_edge(const Node_pin &driver, const Node_pin &sink) const {
 }
 
 Node_pin_iterator LGraph::inp_drivers(const Node &node, const absl::flat_hash_set<Node::Compact> &exclude) const {
-
   I(node.get_class_lgraph() == this);
   Node_pin_iterator xiter;
 
@@ -409,7 +438,7 @@ Node_pin_iterator LGraph::inp_drivers(const Node &node, const absl::flat_hash_se
   I(node_internal[node.get_nid()].is_master_root());
 
   while (true) {
-    auto            n = node_internal[idx2].get_num_local_inputs();
+    auto n = node_internal[idx2].get_num_local_inputs();
 
     if (n) {
       uint8_t         i;
@@ -418,20 +447,22 @@ Node_pin_iterator LGraph::inp_drivers(const Node &node, const absl::flat_hash_se
       for (i = 0, redge = node_internal[idx2].get_input_begin(); i < n; i++, redge += redge->next_node_inc()) {
         I(redge->get_self_idx() == idx2);
         I(redge->is_input());
-        auto driver_pin_idx = redge->get_idx();
-        auto driver_pin_pid = redge->get_inp_pid();
+        auto driver_pin_idx    = redge->get_idx();
+        auto driver_pin_pid    = redge->get_inp_pid();
         auto driver_master_nid = node_internal[driver_pin_idx].get_nid();
         I(node_internal[driver_master_nid].is_master_root());
 
-        if (exclude.count(Node::Compact(node.get_hidx(), driver_master_nid)))
+        if (exclude.count(Node::Compact(node.get_hidx(), driver_master_nid))==0)
           continue;
 
-        xiter.emplace_back(Node_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx(), driver_pin_idx, driver_pin_pid, false));
+        xiter.emplace_back(
+            Node_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx(), driver_pin_idx, driver_pin_pid, false));
         I(xiter.back() == redge->get_out_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx()));
       }
     }
 
-    if (node_internal[idx2].is_last_state()) break;
+    if (node_internal[idx2].is_last_state())
+      break;
     Index_ID tmp = node_internal[idx2].get_next();
     I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
     idx2 = tmp;
@@ -449,21 +480,26 @@ XEdge_iterator LGraph::out_edges(const Node &node) const {
 
   Index_ID master_idx = idx2;
   while (true) {
-    auto            n = node_internal[idx2].get_num_local_outputs();
+    auto n = node_internal[idx2].get_num_local_outputs();
 
     if (n) {
       uint8_t         i;
       const Edge_raw *redge;
-      Node_pin dpin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx(), master_idx, node_internal[idx2].get_dst_pid(), false);
+      Node_pin        dpin(node.get_top_lgraph(),
+                    node.get_class_lgraph(),
+                    node.get_hidx(),
+                    master_idx,
+                    node_internal[idx2].get_dst_pid(),
+                    false);
 
       for (i = 0, redge = node_internal[idx2].get_output_begin(); i < n; i++, redge += redge->next_node_inc()) {
         I(redge->get_self_idx() == idx2);
         I(dpin == redge->get_out_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx()));
-        xiter.emplace_back(dpin,
-                           redge->get_inp_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx()));
+        xiter.emplace_back(dpin, redge->get_inp_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx()));
       }
     }
-    if (node_internal[idx2].is_last_state()) break;
+    if (node_internal[idx2].is_last_state())
+      break;
     Index_ID tmp = node_internal[idx2].get_next();
     I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
     idx2 = tmp;
@@ -476,7 +512,6 @@ XEdge_iterator LGraph::out_edges(const Node &node) const {
   return xiter;
 }
 
-
 XEdge_iterator LGraph::inp_edges(const Node &node) const {
   I(node.get_class_lgraph() == this);
   XEdge_iterator xiter;
@@ -486,21 +521,26 @@ XEdge_iterator LGraph::inp_edges(const Node &node) const {
 
   Index_ID master_idx = idx2;
   while (true) {
-    auto            n = node_internal[idx2].get_num_local_inputs();
+    auto n = node_internal[idx2].get_num_local_inputs();
 
     if (n) {
       uint8_t         i;
       const Edge_raw *redge;
-      Node_pin spin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx(), master_idx, node_internal[idx2].get_dst_pid(), true);
+      Node_pin        spin(node.get_top_lgraph(),
+                    node.get_class_lgraph(),
+                    node.get_hidx(),
+                    master_idx,
+                    node_internal[idx2].get_dst_pid(),
+                    true);
 
       for (i = 0, redge = node_internal[idx2].get_input_begin(); i < n; i++, redge += redge->next_node_inc()) {
         I(redge->get_self_idx() == idx2);
         I(spin == redge->get_inp_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx()));
-        xiter.emplace_back(redge->get_out_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx()),
-                           spin);
+        xiter.emplace_back(redge->get_out_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx()), spin);
       }
     }
-    if (node_internal[idx2].is_last_state()) break;
+    if (node_internal[idx2].is_last_state())
+      break;
     Index_ID tmp = node_internal[idx2].get_next();
     I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
     idx2 = tmp;
@@ -524,8 +564,9 @@ XEdge_iterator LGraph::inp_edges_ordered(const Node &node) const {
 XEdge_iterator LGraph::out_edges_ordered(const Node &node) const {
   auto iter = out_edges(node);
 
-  std::sort(iter.begin(), iter.end(),
-            [](const XEdge &a, const XEdge &b) -> bool { return a.driver.get_pid() < b.driver.get_pid(); });
+  std::sort(iter.begin(), iter.end(), [](const XEdge &a, const XEdge &b) -> bool {
+    return a.driver.get_pid() < b.driver.get_pid();
+  });
 
   return iter;
 }
@@ -541,8 +582,9 @@ XEdge_iterator LGraph::inp_edges_ordered_reverse(const Node &node) const {
 XEdge_iterator LGraph::out_edges_ordered_reverse(const Node &node) const {
   auto iter = out_edges(node);
 
-  std::sort(iter.begin(), iter.end(),
-            [](const XEdge &a, const XEdge &b) -> bool { return a.driver.get_pid() > b.driver.get_pid(); });
+  std::sort(iter.begin(), iter.end(), [](const XEdge &a, const XEdge &b) -> bool {
+    return a.driver.get_pid() > b.driver.get_pid();
+  });
 
   return iter;
 }
@@ -561,11 +603,11 @@ XEdge_iterator LGraph::out_edges(const Node_pin &pin) const {
     if (pin.get_pid() == node_internal[idx2].get_dst_pid()) {  // Only add edges with same source
       for (i = 0, redge = node_internal[idx2].get_output_begin(); i < n; i++, redge += redge->next_node_inc()) {
         I(redge->get_self_idx() == idx2);
-        xiter.emplace_back(pin,
-                           redge->get_inp_pin(pin.get_top_lgraph(), pin.get_class_lgraph(), pin.get_hidx()));
+        xiter.emplace_back(pin, redge->get_inp_pin(pin.get_top_lgraph(), pin.get_class_lgraph(), pin.get_hidx()));
       }
     }
-    if (node_internal[idx2].is_last_state()) break;
+    if (node_internal[idx2].is_last_state())
+      break;
     Index_ID tmp = node_internal[idx2].get_next();
     I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
     idx2 = tmp;
@@ -588,11 +630,11 @@ XEdge_iterator LGraph::inp_edges(const Node_pin &pin) const {
     if (pin.get_pid() == node_internal[idx2].get_dst_pid()) {  // Only add edges with same source
       for (i = 0, redge = node_internal[idx2].get_input_begin(); i < n; i++, redge += redge->next_node_inc()) {
         I(redge->get_self_idx() == idx2);
-        xiter.emplace_back(redge->get_out_pin(pin.get_top_lgraph(), pin.get_class_lgraph(), pin.get_hidx()),
-                           pin);
+        xiter.emplace_back(redge->get_out_pin(pin.get_top_lgraph(), pin.get_class_lgraph(), pin.get_hidx()), pin);
       }
     }
-    if (node_internal[idx2].is_last_state()) break;
+    if (node_internal[idx2].is_last_state())
+      break;
     Index_ID tmp = node_internal[idx2].get_next();
     I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
     idx2 = tmp;
@@ -625,9 +667,9 @@ void LGraph::del_node(const Node &node) {
     {
       absl::flat_hash_set<uint32_t> deleted;
 
-      auto n = node_int_ptr->get_num_local_inputs();
-      int  i;
-      const Edge_raw *redge=nullptr;
+      auto            n = node_int_ptr->get_num_local_inputs();
+      int             i;
+      const Edge_raw *redge = nullptr;
       for (i = 0, redge = node_int_ptr->get_input_begin(); i < n; i++, redge += redge->next_node_inc()) {
         I(redge->get_self_idx() == idx2);
         I(redge->is_input());
@@ -645,9 +687,9 @@ void LGraph::del_node(const Node &node) {
     {
       absl::flat_hash_set<uint32_t> deleted;
 
-      auto n = node_int_ptr->get_num_local_outputs();
+      auto            n = node_int_ptr->get_num_local_outputs();
       uint8_t         i;
-      const Edge_raw *redge=nullptr;
+      const Edge_raw *redge = nullptr;
       for (i = 0, redge = node_int_ptr->get_output_begin(); i < n; i++, redge += redge->next_node_inc()) {
         I(redge->get_self_idx() == idx2);
         I(!redge->is_input());
@@ -675,24 +717,23 @@ void LGraph::del_node(const Node &node) {
       node_int_ptr->try_recycle();
       return;
     }
-    idx2               = node_int_ptr->get_next();
+    idx2 = node_int_ptr->get_next();
     node_int_ptr->try_recycle();
   }
 }
 
 // sink node has been deleted. Anything in driver pointing to sink should be deleted
 void LGraph::del_driver2node_int(Node &driver, const Node &sink) {
-
   // In hierarchy, not allowed to remove nodes (mark as deleted attribute?)
   I(driver.get_class_lgraph() == driver.get_top_lgraph());
-  I(sink.get_class_lgraph()   == sink.get_top_lgraph());
-  I(sink.get_class_lgraph()   == driver.get_top_lgraph());
+  I(sink.get_class_lgraph() == sink.get_top_lgraph());
+  I(sink.get_class_lgraph() == driver.get_top_lgraph());
 
   Index_ID idx2 = driver.get_nid();
+  auto *node_int_ptr = node_internal.ref(idx2);
+  node_int_ptr->clear_full_hint();
 
   while (true) {
-    auto *node_int_ptr = node_internal.ref(idx2);
-
     auto            n = node_int_ptr->get_num_local_outputs();
     uint8_t         i;
     const Edge_raw *redge;
@@ -708,20 +749,21 @@ void LGraph::del_driver2node_int(Node &driver, const Node &sink) {
       return;
 
     idx2 = node_internal[idx2].get_next();
+    node_int_ptr = node_internal.ref(idx2);
   }
 }
 
 void LGraph::del_sink2node_int(const Node &driver, Node &sink) {
-
   // In hierarchy, not allowed to remove nodes (mark as deleted attribute?)
   I(driver.get_class_lgraph() == driver.get_top_lgraph());
-  I(sink.get_class_lgraph()   == sink.get_top_lgraph());
-  I(sink.get_class_lgraph()   == driver.get_top_lgraph());
+  I(sink.get_class_lgraph() == sink.get_top_lgraph());
+  I(sink.get_class_lgraph() == driver.get_top_lgraph());
 
   Index_ID idx2 = sink.get_nid();
+  auto *node_int_ptr = node_internal.ref(idx2);
+  node_int_ptr->clear_full_hint();
 
   while (true) {
-    auto *node_int_ptr = node_internal.ref(idx2);
 
     auto            n = node_int_ptr->get_num_local_inputs();
     uint8_t         i;
@@ -732,19 +774,18 @@ void LGraph::del_sink2node_int(const Node &driver, Node &sink) {
       if (master_nid == driver.get_nid()) {
         node_int_ptr->del_input_int(redge);
       } else {
-        redge += redge->next_node_inc(); // NOTE: delete copies data, sort of advances the pointer
+        redge += redge->next_node_inc();  // NOTE: delete copies data, sort of advances the pointer
       }
     }
     if (node_int_ptr->is_last_state())
       return;
 
     idx2 = node_internal[idx2].get_next();
+    node_int_ptr = node_internal.ref(idx2);
   }
 }
 
-
 bool LGraph::del_edge_driver_int(const Node_pin &dpin, const Node_pin &spin) {
-
   // WARNING: The edge can be anywhere from get_node().nid to end BUT more
   // likely to find it early starting from idx. Start from idx, and go back to
   // start (nid) again once at the end. If idx again, then it is not anywhere.
@@ -755,10 +796,10 @@ bool LGraph::del_edge_driver_int(const Node_pin &dpin, const Node_pin &spin) {
   I(spin.get_class_lgraph() == dpin.get_top_lgraph());
 
   Index_ID idx2 = dpin.get_idx();
-  I(node_internal[idx2].is_root());
+  auto *node_int_ptr = node_internal.ref(idx2);
+  node_int_ptr->clear_full_hint();
 
   while (true) {
-    auto *node_int_ptr = node_internal.ref(idx2);
 
     I(node_int_ptr->get_dst_pid() == dpin.get_pid());
 
@@ -783,14 +824,15 @@ bool LGraph::del_edge_driver_int(const Node_pin &dpin, const Node_pin &spin) {
       }
       I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
       idx2 = tmp;
-    }while(node_internal[idx2].get_dst_pid() != dpin.get_pid());
+    } while (node_internal[idx2].get_dst_pid() != dpin.get_pid());
+
+    node_int_ptr = node_internal.ref(idx2);
   }
 
   return false;
 }
 
 bool LGraph::del_edge_sink_int(const Node_pin &dpin, const Node_pin &spin) {
-
   // WARNING: The edge can be anywhere from get_node().nid to end BUT more
   // likely to find it early starting from idx. Start from idx, and go back to
   // start (nid) again once at the end. If idx again, then it is not anywhere.
@@ -800,11 +842,10 @@ bool LGraph::del_edge_sink_int(const Node_pin &dpin, const Node_pin &spin) {
   I(spin.get_class_lgraph() == dpin.get_top_lgraph());
 
   Index_ID idx2 = spin.get_idx();
-  I(node_internal[idx2].is_root());
+  auto *node_int_ptr = node_internal.ref(idx2);
+  node_int_ptr->clear_full_hint();
 
   while (true) {
-    auto *node_int_ptr = node_internal.ref(idx2);
-
     I(node_int_ptr->get_dst_pid() == spin.get_pid());
 
     auto            n = node_int_ptr->get_num_local_inputs();
@@ -828,7 +869,9 @@ bool LGraph::del_edge_sink_int(const Node_pin &dpin, const Node_pin &spin) {
       }
       I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
       idx2 = tmp;
-    }while(node_internal[idx2].get_dst_pid() != spin.get_pid());
+    } while (node_internal[idx2].get_dst_pid() != spin.get_pid());
+
+    node_int_ptr = node_internal.ref(idx2);
   }
 
   return false;
@@ -901,10 +944,7 @@ Node LGraph::create_node(Node_Type_Op op, uint32_t bits) {
 
 Node LGraph::create_node_const(const Lconst &value) {
   Index_ID nid = memoize_const_hint[value.hash() % memoize_const_hint.size()];
-  if (nid == 0
-      || nid >= node_internal.size()
-      || !node_internal[nid].is_valid()
-      || node_internal[nid].get_type() != Const_Op
+  if (nid == 0 || nid >= node_internal.size() || !node_internal[nid].is_valid() || node_internal[nid].get_type() != Const_Op
       || get_type_const(nid) != value) {
     nid = create_node_int();
     set_type_const(nid, value);
@@ -950,14 +990,19 @@ void LGraph::dump() {
   fmt::print("lgraph name:{} size:{}\n", name, node_internal.size());
 
   for (const auto &io_pin : get_self_sub_node().get_io_pins()) {
-    fmt::print("io {} pos:{} pid:{} {}\n", io_pin.name, io_pin.graph_io_pos, get_self_sub_node().get_instance_pid(io_pin.name),
+    fmt::print("io {} pos:{} pid:{} {}\n",
+               io_pin.name,
+               io_pin.graph_io_pos,
+               get_self_sub_node().get_instance_pid(io_pin.name),
                io_pin.dir == Sub_node::Direction::Input ? "input" : "output");
   }
 
 #if 1
   for (size_t i = 0; i < node_internal.size(); ++i) {
-    if (!node_internal[i].is_node_state()) continue;
-    if (!node_internal[i].is_master_root()) continue;
+    if (!node_internal[i].is_node_state())
+      continue;
+    if (!node_internal[i].is_master_root())
+      continue;
     auto node = Node(this, Node::Compact_class(i));  // NOTE: To remove once new iterators are finished
 
     if (!node.has_inputs() && !node.has_outputs())
