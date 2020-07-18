@@ -139,13 +139,12 @@ void Lnast::update_tuple_var_table(const Lnast_nid &psts_nid, const Lnast_nid &o
   auto &tuple_var_table = tuple_var_tables[psts_nid];
   auto type = get_type(opr_nid);
 
-  if (type.is_assign() || type.is_dp_assign() || type.is_as() || type.is_tuple() || type.is_attr_set())  {
+  if (type.is_tuple()) {
     auto lhs_nid = get_first_child(opr_nid);
     const auto lhs_name = get_name(lhs_nid);
-    if (lhs_name.substr(0,3) == "___")
-      return;
     tuple_var_table.insert(lhs_name);
   }
+
   return;
 }
 
@@ -156,7 +155,6 @@ bool Lnast::is_attribute_related(const Lnast_nid &opr_nid) {
     auto c2_dot  = get_sibling_next(c1_dot);
     auto c2_name = get_name(c2_dot);
 
-    /* if (c2_name.substr(0,2) == "__" && c2_name.substr(0,3) != "___" && is_lhs(get_parent(opr_nid), opr_nid)) */
     if (c2_name.substr(0,2) == "__" && c2_name.substr(0,3) != "___" )
       return true;
   }
@@ -222,6 +220,9 @@ void Lnast::merge_tconcat_paired_assign(const Lnast_nid &psts_nid, const Lnast_n
 void Lnast::rename_to_real_tuple_name(const Lnast_nid &psts_nid, const Lnast_nid &tup_nid) {
   auto &dot_lrhs_table   = dot_lrhs_tables[psts_nid];
   auto paired_assign_nid = dot_lrhs_table[tup_nid].second;
+  if (get_type(paired_assign_nid).is_func_call())
+    return;
+
   auto c0_tup            = get_first_child(tup_nid);
   auto c0_paired_assign  = get_first_child(paired_assign_nid);
   ref_data(paired_assign_nid)->type = Lnast_ntype::create_invalid();

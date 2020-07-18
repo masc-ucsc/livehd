@@ -465,7 +465,6 @@ void Inou_lnast_dfg::process_ast_tuple_struct(LGraph *dfg, const Lnast_nid &lnid
 }
 
 
-
 void Inou_lnast_dfg::process_ast_tuple_phi_add_op(LGraph *dfg, const Lnast_nid &lnidx_tpa) {
   auto c0_tpa = lnast->get_first_child(lnidx_tpa);
   auto c1_tpa = lnast->get_sibling_next(c0_tpa);
