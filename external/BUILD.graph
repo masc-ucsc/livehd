@@ -2,10 +2,10 @@
 
 cc_library(
     name = "graph",
-    hdrs = glob(["**/*.hpp"]),
+    hdrs = glob(["@graph//:include/graph/*.hpp"]),
+	# includes = ["graph/include"],
+	# include_prefix = "graph",
+	# deps = [],
     visibility = ["//visibility:public"],
-	includes = ["."],
-	deps = [],
-	copts = ["--version"],
     )
 
