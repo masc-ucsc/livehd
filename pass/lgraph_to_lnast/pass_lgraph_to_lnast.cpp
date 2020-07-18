@@ -35,9 +35,8 @@ void Pass_lgraph_to_lnast::trans(Eprp_var &var) {
 
 void Pass_lgraph_to_lnast::do_trans(LGraph *lg, Eprp_var &var, std::string_view module_name) {
   fmt::print("iterate_over_lg\n");
-  //Lnast lnast("module_name_fixme");//FIXME: Get actual name.
   std::unique_ptr<Lnast> lnast = std::make_unique<Lnast>(module_name);
-  lnast->set_root(Lnast_node(Lnast_ntype::create_top(), Token(0, 0, 0, 0, "top")));
+  lnast->set_root(Lnast_node(Lnast_ntype::create_top(), Token(0, 0, 0, 0, lg->get_name())));
   auto idx_stmts = lnast->add_child(lnast->get_root(), Lnast_node::create_stmts(get_new_seq_name(*lnast)));
 
   handle_io(lg, idx_stmts, *lnast);
@@ -258,6 +257,10 @@ void Pass_lgraph_to_lnast::handle_io(LGraph *lg, Lnast_nid& parent_lnast_node, L
       lnast.set_bitwidth(edge.driver.get_name(), bits);
       fmt::print("{} -> {}\n", edge.driver.get_name(), lnast.get_bitwidth(edge.driver.get_name()));
 
+      if (edge.driver.is_signed()) {
+
+      }
+
       // Create nodes //FIXME: Do I still need this? Table should work
       // note->hunter: The below commented out code creates bw dot nodes for inputs.
       //               It's unnecessary(?) with the existence of from_lgraph_bw_table
@@ -400,28 +403,46 @@ void Pass_lgraph_to_lnast::attach_not_node(Lnast& lnast, Lnast_nid& parent_node,
 }
 
 void Pass_lgraph_to_lnast::attach_join_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin &pin) {
-  int inp_count = 0;
   std::stack<Node_pin> dpins;
+  auto bits_to_shift = 0;
   /*This stack method works because the inp_edges iterator goes from edges w/ lowest sink pid to highest
    *  and the highest sink pid correlates to the most significant part of the concatenation. */
   for(const auto inp : pin.get_node().inp_edges()) {
-    inp_count++;
     dpins.push(inp.driver);
-    fmt::print("\tjoin -- {}\n", inp.sink.get_pid());
+    bits_to_shift += inp.driver.get_bits();
+    fmt::print("\tjoin -- {} {}\n", inp.sink.get_pid(), bits_to_shift);
   }
-  if(inp_count == 0) {
-    pin.get_node().del_node();
-  } else {
-    //FIXME (BIG!): This is a temporary fix. This node type should be not "assign" but some concatenation node type.
-    //  One currently does not exist in LNAST.
-    auto join_node = lnast.add_child(parent_node, Lnast_node::create_assign("join"));
-    lnast.add_child(join_node, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));
-    //Attach each of the inputs to join with the first being added as the most significant and last as least sig.
-    for(int i = dpins.size(); i > 0; i--) {
-      attach_child(lnast, join_node, dpins.top());
-      dpins.pop();
-    }
+  I(dpins.size() >= 2);
+
+  absl::flat_hash_set<std::string_view> interm_names;
+  while (dpins.size() > 1) {
+    bits_to_shift -= dpins.top().get_bits();
+    auto interm_name = create_temp_var(lnast);
+    interm_names.insert(interm_name);
+
+    auto idx_sl = lnast.add_child(parent_node, Lnast_node::create_shift_left("join_sl"));
+    lnast.add_child(idx_sl, Lnast_node::create_ref(interm_name));
+    attach_child(lnast, idx_sl, dpins.top());
+    lnast.add_child(idx_sl, Lnast_node::create_const(lnast.add_string(std::to_string(bits_to_shift))));
+    dpins.pop();
   }
+
+  auto idx_or = lnast.add_child(parent_node, Lnast_node::create_or("join_or"));
+  lnast.add_child(idx_or, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));
+  for (auto &strv : interm_names) {
+    lnast.add_child(idx_or, Lnast_node::create_ref(strv));
+  }
+  attach_child(lnast, idx_or, dpins.top());
+
+  //FIXME (BIG!): This is a temporary fix. This node type should be not "assign" but some concatenation node type.
+  //  One currently does not exist in LNAST.
+  /*auto join_node = lnast.add_child(parent_node, Lnast_node::create_assign("join"));
+  lnast.add_child(join_node, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));
+  //Attach each of the inputs to join with the first being added as the most significant and last as least sig.
+  for(int i = dpins.size(); i > 0; i--) {
+    attach_child(lnast, join_node, dpins.top());
+    dpins.pop();
+  }*/
 }
 
 void Pass_lgraph_to_lnast::attach_pick_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin &pin) {
@@ -660,7 +681,7 @@ void Pass_lgraph_to_lnast::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node
       I(false); //There shouldn't be any other inputs to a flop.
     }
   }
-  I(has_din); //A flop at least has to have the input, others are optional/have defaults.
+  I(has_din && has_clk); //A flop at least has to have the input and clock, others are optional/have defaults.
 
   std::string_view pin_name;
   if(pin.get_name().substr(0,1) == "#") {
@@ -669,13 +690,8 @@ void Pass_lgraph_to_lnast::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node
     pin_name = lnast.add_string(absl::StrCat("#", dpin_get_name(pin)));
   }
 
-  auto asg_node = lnast.add_child(parent_node, Lnast_node::create_assign("asg_flop"));
-  lnast.add_child(asg_node, Lnast_node::create_ref(pin_name));
-  attach_child(lnast, asg_node, din_pin);
-
-  /*if (has_clk) {
-    auto temp_var_name = lnast.add_string(absl::StrCat("T", temp_var_count));
-    temp_var_count++;
+  if (has_clk) {
+    auto temp_var_name = create_temp_var(lnast);
 
     auto dot_clk_node = lnast.add_child(parent_node, Lnast_node::create_dot("dot_flop_clk"));
     lnast.add_child(dot_clk_node, Lnast_node::create_ref(temp_var_name));
@@ -684,8 +700,8 @@ void Pass_lgraph_to_lnast::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node
 
     auto asg_clk_node = lnast.add_child(parent_node, Lnast_node::create_assign("asg_flop_clk"));
     lnast.add_child(asg_clk_node, Lnast_node::create_ref(temp_var_name));
-    attach_child(lnast, asg_clk_node, clk_pin, "");//"@"); //FIXME: Might change reference symbol to '\'
-  }*/
+    attach_child(lnast, asg_clk_node, clk_pin);
+  }
 
   if (has_reset) {
     //FIXME: Add reset logic.
@@ -696,9 +712,30 @@ void Pass_lgraph_to_lnast::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node
   }
 
   if (has_pola) {
-    //FIXME: Add in how to handle polarity. Would need dot node using __posedge (true/false)
-    I(pin.get_node().get_type().op == AFlop_Op);
+    I(pin.get_node().get_type().op != AFlop_Op);
+    auto temp_var_name = create_temp_var(lnast);
+    auto dot_pol = lnast.add_child(parent_node, Lnast_node::create_dot("dot_flop_pol"));
+    lnast.add_child(dot_pol, Lnast_node::create_ref(temp_var_name));
+    lnast.add_child(dot_pol, Lnast_node::create_ref(pin_name));
+    lnast.add_child(dot_pol, Lnast_node::create_ref("__posedge"));
+
+    auto asg_pol = lnast.add_child(parent_node, Lnast_node::create_assign("asg_pol"));
+    lnast.add_child(asg_pol, Lnast_node::create_ref(temp_var_name));
+    if (pola_pin.get_node().get_type_op() == Const_Op) {
+      if (pola_pin.get_node().get_type_const().to_firrtl() == "1") {
+        lnast.add_child(asg_pol, Lnast_node::create_ref("true"));
+      } else {
+        lnast.add_child(asg_pol, Lnast_node::create_ref("false"));
+      }
+    } else {
+      lnast.add_child(asg_pol, Lnast_node::create_ref("false"));
+    }
   }
+
+  // Perform actual assignment
+  auto asg_node = lnast.add_child(parent_node, Lnast_node::create_assign("asg_flop"));
+  lnast.add_child(asg_node, Lnast_node::create_ref(pin_name));
+  attach_child(lnast, asg_node, din_pin);
 }
 
 void Pass_lgraph_to_lnast::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin &pin) {
