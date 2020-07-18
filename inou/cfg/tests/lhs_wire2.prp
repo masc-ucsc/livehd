@@ -1,9 +1,6 @@
 tmp = foo.__final_value
 
-foo.b = 2
-if (1 == 1) {
-  foo.a = 3 
-}
+foo = (a = 2, b = 3)
 
 %out = tmp.a
 %out2 = foo.a + foo.b //5

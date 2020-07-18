@@ -139,7 +139,7 @@ void Lnast::update_tuple_var_table(const Lnast_nid &psts_nid, const Lnast_nid &o
   auto &tuple_var_table = tuple_var_tables[psts_nid];
   auto type = get_type(opr_nid);
 
-  if (type.is_tuple()) {
+  if (type.is_tuple() || type.is_tuple_add()) {
     auto lhs_nid = get_first_child(opr_nid);
     const auto lhs_name = get_name(lhs_nid);
     tuple_var_table.insert(lhs_name);
