@@ -195,7 +195,9 @@ void Inou_firrtl::init_wire_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type
   switch (type.type_case()) {
     case firrtl::FirrtlPB_Type::kBundleType: {  // Bundle Type
       for (int i = 0; i < type.bundle_type().field_size(); i++) {
-        init_wire_dots(lnast, type.bundle_type().field(i).type(), absl::StrCat(id, ".", type.bundle_type().field(i).id()),
+        init_wire_dots(lnast,
+                       type.bundle_type().field(i).type(),
+                       absl::StrCat(id, ".", type.bundle_type().field(i).id()),
                        parent_node);
       }
       break;
@@ -228,8 +230,13 @@ void Inou_firrtl::init_reg_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type,
   switch (type.type_case()) {
     case firrtl::FirrtlPB_Type::kBundleType: {  // Bundle Type
       for (int i = 0; i < type.bundle_type().field_size(); i++) {
-        init_reg_dots(lnast, type.bundle_type().field(i).type(), absl::StrCat(id, ".", type.bundle_type().field(i).id()), clock,
-                      reset, init, parent_node);
+        init_reg_dots(lnast,
+                      type.bundle_type().field(i).type(),
+                      absl::StrCat(id, ".", type.bundle_type().field(i).id()),
+                      clock,
+                      reset,
+                      init,
+                      parent_node);
       }
       break;
     }
@@ -1081,7 +1088,8 @@ std::string Inou_firrtl::CreateNameStack(Lnast& ln, Lnast_nid& parent_node, cons
 
   } else if (expr.has_sub_index()) {
     names.push(expr.sub_index().index().value());
-    return absl::StrCat(CreateNameStack(ln, parent_node, expr.sub_index().expression(), names), ".",
+    return absl::StrCat(CreateNameStack(ln, parent_node, expr.sub_index().expression(), names),
+                        ".",
                         expr.sub_index().index().value());
 
   } else if (expr.has_reference()) {
@@ -1449,18 +1457,14 @@ std::string Inou_firrtl::ReturnExprString(Lnast& lnast, const firrtl::FirrtlPB_E
       expr_string = get_full_name(expr.reference().id(), is_rhs);
       break;
     }
-    case firrtl::FirrtlPB_Expression::kUintLiteral: {  // UIntLiteral
-      expr_string =
-          expr.uint_literal()
-              .value()
-              .value();  // absl::StrCat(expr.uint_literal().value().value(), "u", to_string(expr.uint_literal().width().value()));;
+    case firrtl::FirrtlPB_Expression::kUintLiteral: {     // UIntLiteral
+      expr_string = expr.uint_literal().value().value();  // absl::StrCat(expr.uint_literal().value().value(), "u",
+                                                          // to_string(expr.uint_literal().width().value()));;
       break;
     }
-    case firrtl::FirrtlPB_Expression::kSintLiteral: {  // SIntLiteral
-      expr_string =
-          expr.sint_literal()
-              .value()
-              .value();  // absl::StrCat(expr.uint_literal().value().value(), "s", to_string(expr.sint_literal().width().value()));;
+    case firrtl::FirrtlPB_Expression::kSintLiteral: {     // SIntLiteral
+      expr_string = expr.sint_literal().value().value();  // absl::StrCat(expr.uint_literal().value().value(), "s",
+                                                          // to_string(expr.sint_literal().width().value()));;
       // expr_string = expr.sint_literal().value().value();// + "s" + to_string(expr.sint_literal().width().value());
       break;
     }
@@ -1541,7 +1545,12 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
       auto clk_name  = lnast.add_string(ReturnExprString(lnast, stmt.register_().clock(), parent_node, true));
       auto rst_name  = lnast.add_string(ReturnExprString(lnast, stmt.register_().reset(), parent_node, true));
       auto init_name = lnast.add_string(ReturnExprString(lnast, stmt.register_().init(), parent_node, true));
-      init_reg_dots(lnast, stmt.register_().type(), absl::StrCat("#", stmt.register_().id()), clk_name, rst_name, init_name,
+      init_reg_dots(lnast,
+                    stmt.register_().type(),
+                    absl::StrCat("#", stmt.register_().id()),
+                    clk_name,
+                    rst_name,
+                    init_name,
                     parent_node);
       break;
     }

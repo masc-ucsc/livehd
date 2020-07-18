@@ -77,7 +77,8 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
 
   } else if (name.substr(0, 1) == "$" || name.substr(0, 1) == "%") {
     // $ = input
-    if (io_map.contains(name.substr(1))) return;
+    if (io_map.contains(name.substr(1)))
+      return;
     auto port = umod->add_port();
     port->set_id((std::string)name.substr(1));
     auto type = CreateTypeObject(ln.get_bitwidth(name.substr(1)));
@@ -92,7 +93,8 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
 
   } else if (name.substr(0, 1) == "#") {
     // # = register
-    if (reg_wire_map.contains(name.substr(1))) return;
+    if (reg_wire_map.contains(name.substr(1)))
+      return;
     auto reg = new firrtl::FirrtlPB_Statement_Register();
     reg->set_id((std::string)name.substr(1));
 
@@ -111,7 +113,8 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
   } else if (name.substr(0, 3) == "_._") {
     // _._ = wire //FIXME: but change front to something else? currently changes _._ to _
     auto new_name = absl::StrCat("_", name.substr(3));
-    if (reg_wire_map.contains(new_name)) return;
+    if (reg_wire_map.contains(new_name))
+      return;
     auto wire = new firrtl::FirrtlPB_Statement_Wire();
     wire->set_id(new_name);
 
@@ -124,7 +127,8 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
 
   } else {
     // otherwise = wire
-    if (reg_wire_map.contains(name)) return;
+    if (reg_wire_map.contains(name))
+      return;
     auto wire = new firrtl::FirrtlPB_Statement_Wire();
     wire->set_id((std::string)name);  // FIXME: Figure out best way to use renaming map to fix submodule input tuple names
 
