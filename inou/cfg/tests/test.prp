@@ -1,7 +1,4 @@
-foo.__wire = true
-%out = foo.a 
-if ($en) {
-  foo.a = 3
-}
-
+res = sum(a = 3, b = 2)
+%out1 = res.o1
+%out2 = res.o2
 

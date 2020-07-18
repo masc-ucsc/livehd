@@ -1,0 +1,8 @@
+tmp = foo.a.__final_value
+foo.b = 2
+if ($en) {
+  foo.a = 3
+}
+
+%out = tmp
+
