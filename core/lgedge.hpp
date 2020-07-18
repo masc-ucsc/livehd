@@ -89,7 +89,7 @@ class LGraph;
 class __attribute__((packed)) Edge_raw {  // 3 bytes total
 protected:
   friend class LGraph;
-  friend class Node_Internal;
+  friend class Node_internal;
   friend class Node_pin;
 
   uint64_t snode : 1;
@@ -117,8 +117,8 @@ protected:
   Index_ID get_self_root_idx() const;
 
 public:
-  friend struct Node_Internal_Page;
-  friend class Node_Internal;
+  friend struct Node_internal_Page;
+  friend class Node_internal;
   friend class LGraph_Base;
   friend struct LEdge;
   friend struct SEdge;
@@ -191,9 +191,9 @@ enum Node_state {
   Last_node_state = 7   // Entry in use, but it is an extension from another, and it is the last in the list
 };
 
-class Node_Internal;
+class Node_internal;
 
-struct __attribute__((packed)) Node_Internal_Page {
+struct __attribute__((packed)) Node_internal_Page {
   Node_state state : 3;  // 1byte
   uint8_t    pad1[7];    // 7bytes waste just to get Index_ID aligned
   uint32_t   idx;        // 4bytes 32bits but for speed
@@ -205,20 +205,20 @@ struct __attribute__((packed)) Node_Internal_Page {
 
   Index_ID get_idx() const { return idx; }
 
-  static const Node_Internal_Page &get(const SEdge_Internal *ptr) {
+  static const Node_internal_Page &get(const SEdge_Internal *ptr) {
     // Every 1 Page a full Node is reserved for pointer keeping
     uint64_t root_int = (uint64_t)ptr;
     root_int          = root_int >> 12;
     root_int          = root_int << 12;
 
-    Node_Internal_Page *root = (Node_Internal_Page *)root_int;
+    Node_internal_Page *root = (Node_internal_Page *)root_int;
     I(root->state == Page_node_state);
 
     return *root;
   }
-  static const Node_Internal_Page &get(const Edge_raw *ptr) { return get(reinterpret_cast<const SEdge_Internal *>(ptr)); }
+  static const Node_internal_Page &get(const Edge_raw *ptr) { return get(reinterpret_cast<const SEdge_Internal *>(ptr)); }
 
-  static const Node_Internal_Page &get(const Node_Internal *ptr) { return get(reinterpret_cast<const SEdge_Internal *>(ptr)); }
+  static const Node_internal_Page &get(const Node_internal *ptr) { return get(reinterpret_cast<const SEdge_Internal *>(ptr)); }
 
   bool is_page_align() const {
     return ((((uint64_t)this) & 0xFFF) == 0);  // page align.
@@ -239,10 +239,10 @@ struct __attribute__((packed)) Node_Internal_Page {
 // should split in subgraphs large netlist. The split is transparent in reading
 // and output.
 //
-class __attribute__((packed)) Node_Internal {
+class __attribute__((packed)) Node_internal {
 private:
   // BEGIN 12 Bytes common payload
-  Node_state state : 3;     // State must be the first thing (Node_Internal_Page)
+  Node_state state : 3;     // State must be the first thing (Node_internal_Page)
   uint16_t   inp_long : 2;  // 6 bytes each. Just 9 at most
   uint16_t   out_long : 2;
   uint32_t   bits : Bits_bits;
@@ -275,7 +275,7 @@ protected:
   Index_ID get_self_idx() const;  // WARNING: It can point to overflow
 
 public:
-  Node_Internal() { reset(); }
+  Node_internal() { reset(); }
 
   uint8_t get_num_local_short() const { return inp_pos + out_pos - 2 * inp_long - 2 * out_long; }
   uint8_t get_num_local_long() const { return inp_long + out_long; }
@@ -289,6 +289,31 @@ public:
     n -= (2 - 1) * inp_long;
     return n;
   }
+
+  void set_full_hint() {
+    I(is_root());
+    if (is_last_state())
+      return;  // No hint
+    uint8_t *raw_ptr = (uint8_t *)&sedge[0];
+    raw_ptr[5]       = 1;  // 4 bytes for next. Rest is clear
+  }
+
+  void clear_full_hint() {
+    I(is_root());
+    if (is_last_state())
+      return;  // No hint
+    uint8_t *raw_ptr = (uint8_t *)&sedge[0];
+    raw_ptr[5]       = 0;  // 4 bytes for next. Rest is clear
+  }
+
+  bool has_full_hint() const {
+    I(is_root());
+    if (is_last_state())
+      return false;  // No hint
+    uint8_t *raw_ptr = (uint8_t *)&sedge[0];
+    return raw_ptr[5] != 0;
+  }
+
   uint8_t get_num_local_outputs() const {
     uint8_t n = out_pos;
     I(out_long * (2) <= n);
@@ -388,8 +413,8 @@ public:
     return get_root().get_nid();  // No need to do get_master_root
   }
 
-  const Node_Internal &get_root() const;
-  const Node_Internal &get_master_root() const;
+  const Node_internal &get_root() const;
+  const Node_internal &get_master_root() const;
 
   void set_nid(Index_ID _nid) {
     I(_nid < (1LL << Index_bits));
@@ -397,18 +422,18 @@ public:
     GI(nid == get_self_idx().value, root);
   }
 
-  inline const Node_Internal &get(Index_ID idx2) const {
-    const Node_Internal *root_n = this;
+  inline const Node_internal &get(Index_ID idx2) const {
+    const Node_internal *root_n = this;
     return root_n[idx2.value - get_self_idx().value];
   }
 
-  inline static Node_Internal &get(const Edge_raw *ptr) {
+  inline static Node_internal &get(const Edge_raw *ptr) {
     // WARNING: this belongs to a structure that it is cache aligned (32 bytes)
     uint64_t root_int = (uint64_t)ptr;
     root_int          = root_int >> 5;  // 32 byte alignment
     root_int          = root_int << 5;  // 32 byte alignment
 
-    Node_Internal *root_n = reinterpret_cast<Node_Internal *>(root_int);
+    Node_internal *root_n = reinterpret_cast<Node_internal *>(root_int);
     I(root_n->is_node_state());
 
     return *root_n;
@@ -444,7 +469,7 @@ public:
     I(is_next_state());
   }
 
-  void assimilate_edges(Node_Internal *other);
+  void assimilate_edges(Node_internal *other);
 
   void set_last_state() { state = Last_node_state; }
   void set_free_state() {
