@@ -14,9 +14,9 @@
 #include "kernel/celltypes.h"
 #include "kernel/sigtools.h"
 #include "kernel/yosys.h"
+#include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
-#include "lbench.hpp"
 
 //#include "absl/container/node_hash_map.h"
 #include "absl/container/flat_hash_map.h"
@@ -71,12 +71,12 @@ static void look_for_wire(LGraph *g, const RTLIL::Wire *wire) {
     auto dpin = g->get_graph_output_driver_pin(&wire->name.c_str()[1]);
     I(dpin.get_bits() == wire->width);
     if (wire->start_offset) {
-      //auto dpin = g->get_graph_output_driver_pin(&wire->name.c_str()[1]);
-      //I(dpin.get_pid() == pin.get_pid());
+      // auto dpin = g->get_graph_output_driver_pin(&wire->name.c_str()[1]);
+      // I(dpin.get_pid() == pin.get_pid());
       dpin.set_offset(wire->start_offset);
     }
-    //auto node = g->create_node(Join_Op, wire->width);
-    //wire2pin[wire] = node.setup_driver_pin();
+    // auto node = g->create_node(Join_Op, wire->width);
+    // wire2pin[wire] = node.setup_driver_pin();
 
     wire2pin[wire] = dpin;
 
@@ -129,8 +129,8 @@ static Node_pin &get_edge_pin(LGraph *g, const RTLIL::Wire *wire) {
 
 static Node_pin connect_constant(LGraph *g, uint32_t value, Node &exit_node, Port_ID opid) {
   Bits_t bits = (64 - __builtin_clzll(value));
-  auto dpin = g->create_node_const(Lconst(value, bits)).setup_driver_pin();
-  auto spin = exit_node.setup_sink_pin(opid);
+  auto   dpin = g->create_node_const(Lconst(value, bits)).setup_driver_pin();
+  auto   spin = exit_node.setup_sink_pin(opid);
 
   spin.connect_driver(dpin);
 
@@ -300,8 +300,9 @@ static bool is_black_box_output(const RTLIL::Module *module, const RTLIL::Cell *
     return false;
   }
 
-  ::LGraph::error("Could not find a definition for module {}, treating as a blackbox but could not determine whether {} is an output",
-                cell->type.str(), port_name.str());
+  ::LGraph::error(
+      "Could not find a definition for module {}, treating as a blackbox but could not determine whether {} is an output",
+      cell->type.str(), port_name.str());
 
   log_error("output unknown port %s at module %s cell %s\n", port_name.c_str(), module->name.c_str(), cell->type.c_str());
   I(false);  // TODO: is it possible to resolve this case?
@@ -333,8 +334,9 @@ static bool is_black_box_input(const RTLIL::Module *module, const RTLIL::Cell *c
     return true;
   }
 
-  ::LGraph::error("Could not find a definition for module {}, treating as a blackbox but could not determine whether {} is an input",
-                cell->type.str(), port_name.str());
+  ::LGraph::error(
+      "Could not find a definition for module {}, treating as a blackbox but could not determine whether {} is an input",
+      cell->type.str(), port_name.str());
 
   log_error("input unknown port %s at module %s cell %s\n", port_name.c_str(), module->name.c_str(), cell->type.c_str());
   I(false);  // TODO: is it possible to resolve this case?
@@ -382,8 +384,8 @@ static Node_pin resolve_constant(LGraph *g, const std::vector<RTLIL::State> &dat
     return node.setup_driver_pin();
   }
 
-  val = absl::StrCat("0b", val, "u" , (int)data.size(), "bits");
-  //fmt::print("val:{} prp:{}\n", val, Lconst(val).to_pyrope());
+  val = absl::StrCat("0b", val, "u", (int)data.size(), "bits");
+  // fmt::print("val:{} prp:{}\n", val, Lconst(val).to_pyrope());
   auto node = g->create_node_const(Lconst(val));
   return node.setup_driver_pin();
 }
@@ -413,7 +415,7 @@ static void look_for_cell_outputs(RTLIL::Module *module, const std::string &path
     }
 
     for (const auto &conn : cell->connections()) {
-      Port_ID pid;
+      Port_ID      pid;
       Node_Type_Op node_type = Invalid_Op;
 
       if (sub) {
@@ -476,7 +478,7 @@ static void look_for_cell_outputs(RTLIL::Module *module, const std::string &path
         node_type = SubGraph_Op;
         node.set_type_sub(sub->get_lgid());
       } else {
-        node.set_type(Or_Op); // Any generic logic. It will change after
+        node.set_type(Or_Op);  // Any generic logic. It will change after
         if (cell->input(conn.first)) continue;
 
         if (std::strncmp(cell->type.c_str(), "$reduce_", 8) == 0 && cell->type.str() != "$reduce_xnor") {
@@ -553,7 +555,7 @@ static Node_pin create_join_operator(LGraph *g, const RTLIL::SigSpec &ss) {
   for (auto &chunk : ss.chunks()) {
     if (chunk.wire == nullptr) {
       inp_pins.emplace_back(resolve_constant(g, chunk.data));
-      //for (size_t i = dpin.get_bits(); i < chunk.data.size(); ++i) 
+      // for (size_t i = dpin.get_bits(); i < chunk.data.size(); ++i)
       //  inp_pins.push_back(g->create_node_const(0,1).setup_driver_pin());
     } else {
       inp_pins.push_back(create_pick_operator(g, chunk.wire, chunk.offset, chunk.width));
@@ -679,18 +681,18 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
 
       entry_node = g->create_node(Or_Op);
 
-      if (size>1) {
+      if (size > 1) {
         auto not_node = g->create_node(Not_Op, 1);
         g->add_edge(entry_node.setup_driver_pin(1), not_node.setup_sink_pin(), 1);
 
         exit_node.set_type(Join_Op, size);
 
-        auto zero_dpin = g->create_node_const(Lconst(0, size-1)).setup_driver_pin();
+        auto zero_dpin = g->create_node_const(Lconst(0, size - 1)).setup_driver_pin();
         g->add_edge(not_node.get_driver_pin(), exit_node.setup_sink_pin(0), 1);
-        g->add_edge(zero_dpin                , exit_node.setup_sink_pin(1), size-1);
-      }else{
+        g->add_edge(zero_dpin, exit_node.setup_sink_pin(1), size - 1);
+      } else {
         exit_node.set_type(Not_Op, 1);
-        g->add_edge(entry_node.setup_driver_pin(1), exit_node.setup_sink_pin(), 1);    // reduce_OR join op
+        g->add_edge(entry_node.setup_driver_pin(1), exit_node.setup_sink_pin(), 1);  // reduce_OR join op
       }
 
     } else if (std::strncmp(cell->type.c_str(), "$or", 3) == 0 || std::strncmp(cell->type.c_str(), "$logic_or", 9) == 0 ||
@@ -712,7 +714,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
       if (std::strncmp(cell->type.c_str(), "$xnor", 5) == 0) {
         exit_node.set_type(Not_Op, size);
         g->add_edge(entry_node.setup_driver_pin(0), exit_node.setup_sink_pin(), size);
-      }else {
+      } else {
         // reduce xnor
         exit_node.set_type(Not_Op, 1);
         g->add_edge(entry_node.setup_driver_pin(1), exit_node.setup_sink_pin(), 1);
@@ -803,9 +805,9 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
       entry_node = g->create_node(Equals_Op, 1);
 
       if (size > 1) {
-        Bits_t bits = size-1;
-        auto zero_pin = g->create_node_const(Lconst(0, bits)).setup_driver_pin();
-        auto not_node = g->create_node(Not_Op, 1);
+        Bits_t bits     = size - 1;
+        auto   zero_pin = g->create_node_const(Lconst(0, bits)).setup_driver_pin();
+        auto   not_node = g->create_node(Not_Op, 1);
         g->add_edge(entry_node.setup_driver_pin(0), not_node.setup_sink_pin());
 
         exit_node.set_type(Join_Op);
@@ -993,7 +995,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
     } else {
       // blackbox addition
       ::LGraph::warn("Black box addition from yosys frontend, cell type {} not found instance {}", cell->type.c_str(),
-                   cell->name.c_str());
+                     cell->name.c_str());
       I(false);
     }
 
@@ -1112,7 +1114,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
             for (uint32_t rdport = 0; rdport < rdports; rdport++) {
               Node_pin spin = entry_node.setup_sink_pin(LGRAPH_MEMOP_RDEN(rdport));
               if (ss.extract(rdport, 1)[0].data == RTLIL::State::Sx) {  // Yosys has Sx as enable sometimes, WEIRD. Fix it to 0
-                auto     node = g->create_node_const(Lconst(0,1));
+                auto     node = g->create_node_const(Lconst(0, 1));
                 Node_pin dpin = node.setup_driver_pin();
                 g->add_edge(dpin, spin);
               } else {
@@ -1165,7 +1167,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
         if (!current.is_invalid()) {
           dpin = current;
         } else {
-          auto all_x = absl::StrCat("0b", std::string(size, 'x') , "u", (int)size, "bits");
+          auto all_x = absl::StrCat("0b", std::string(size, 'x'), "u", (int)size, "bits");
           auto node  = g->create_node_const(Lconst(all_x));
           dpin       = node.setup_driver_pin();
         }
@@ -1185,7 +1187,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
     if (!current.is_invalid()) {
       dpin = current;
     } else {
-      auto all_x = absl::StrCat("0b", std::string(size, 'x') , "u", (int)size, "bits");
+      auto all_x = absl::StrCat("0b", std::string(size, 'x'), "u", (int)size, "bits");
       auto node  = g->create_node_const(Lconst(all_x));
       dpin       = node.setup_driver_pin();
     }

@@ -14,8 +14,8 @@
 
 #include "kernel/sigtools.h"
 #include "kernel/yosys.h"
-#include "lgyosys_dump.hpp"
 #include "lbench.hpp"
+#include "lgyosys_dump.hpp"
 
 USING_YOSYS_NAMESPACE
 PRIVATE_NAMESPACE_BEGIN

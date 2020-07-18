@@ -35,26 +35,25 @@ RTLIL::Wire *Lgyosys_dump::add_wire(RTLIL::Module *module, const Node_pin &pin) 
   assert(pin.is_driver());
   if (pin.has_name()) {
     auto name = absl::StrCat("\\", pin.get_name());
-    //fmt::print("pin{} has name:{}\n", pin.debug_name(), name);
+    // fmt::print("pin{} has name:{}\n", pin.debug_name(), name);
     return module->addWire(name, pin.get_bits());
   } else {
     return module->addWire(next_id(pin.get_class_lgraph()), pin.get_bits());
   }
 }
 
-RTLIL::Wire *Lgyosys_dump::create_tree(LGraph *g, const std::vector<RTLIL::Wire *> &wires, RTLIL::Module *mod, add_cell_fnc_sign add_fnc,
-                                       bool sign, RTLIL::Wire *result_wire, int width) {
+RTLIL::Wire *Lgyosys_dump::create_tree(LGraph *g, const std::vector<RTLIL::Wire *> &wires, RTLIL::Module *mod,
+                                       add_cell_fnc_sign add_fnc, bool sign, RTLIL::Wire *result_wire, int width) {
   assert(mod);
 
   if (wires.size() == 0) return nullptr;
 
-  if (result_wire)
-    width = result_wire->width;
+  if (result_wire) width = result_wire->width;
   assert(width);
 
   if (wires.size() == 1) {
-    if (result_wire) { // only in top level call
-      if (wires[0]->width == width) {       // SIZE Match
+    if (result_wire) {                 // only in top level call
+      if (wires[0]->width == width) {  // SIZE Match
         mod->connect(result_wire, wires[0]);
       } else if (wires[0]->width > width) {  // drop bits
         mod->connect(result_wire, RTLIL::SigSpec(wires[0], 0, width));
@@ -64,7 +63,7 @@ RTLIL::Wire *Lgyosys_dump::create_tree(LGraph *g, const std::vector<RTLIL::Wire 
         mod->connect(result_wire, w2);
       }
       return result_wire;
-    }else{
+    } else {
       return wires[0];
     }
   }
@@ -75,9 +74,9 @@ RTLIL::Wire *Lgyosys_dump::create_tree(LGraph *g, const std::vector<RTLIL::Wire 
   if (wires.size() == 2) {
     l = wires[0];
     r = wires[1];
-  }else{
-    std::vector<RTLIL::Wire *> l_wires(wires.begin(), wires.begin()+wires.size()/2);
-    std::vector<RTLIL::Wire *> r_wires(wires.begin()+wires.size()/2, wires.end());
+  } else {
+    std::vector<RTLIL::Wire *> l_wires(wires.begin(), wires.begin() + wires.size() / 2);
+    std::vector<RTLIL::Wire *> r_wires(wires.begin() + wires.size() / 2, wires.end());
     assert(l_wires.size() + r_wires.size() == wires.size());
 
     l = create_tree(g, l_wires, mod, add_fnc, sign, nullptr, width);
@@ -85,8 +84,7 @@ RTLIL::Wire *Lgyosys_dump::create_tree(LGraph *g, const std::vector<RTLIL::Wire 
   }
 
   auto name = next_id(g);
-  if (result_wire==nullptr)
-    result_wire = mod->addWire(next_id(g), width);
+  if (result_wire == nullptr) result_wire = mod->addWire(next_id(g), width);
   (mod->*add_fnc)(name, l, r, result_wire, sign, "");
 
   return result_wire;
@@ -311,8 +309,7 @@ void Lgyosys_dump::create_wires(LGraph *g, RTLIL::Module *module) {
   for (auto node : g->fast()) {
     I(node.get_type().op != GraphIO_Op);
 
-    if (!node.has_inputs() && !node.has_outputs())
-      continue; // DCE code
+    if (!node.has_inputs() && !node.has_outputs()) continue;  // DCE code
 
     if (node.get_type().op == Const_Op) {
       auto         dpin     = node.get_driver_pin();
@@ -406,8 +403,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
   for (auto node : g->fast()) {
     I(node.get_type().op != GraphIO_Op);
 
-    if (!node.has_inputs() && !node.has_outputs())
-      continue; // DCE code
+    if (!node.has_inputs() && !node.has_outputs()) continue;  // DCE code
 
     auto op = node.get_type().op;
 
@@ -720,7 +716,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
             case 1: enWire = get_wire(e.driver); break;
             case 2: {
               if (e.driver.get_node().get_type().op != Const_Op) log_error("Internal Error: polarity is not a constant.\n");
-              polarity = e.driver.get_node().get_type_const().to_i()? true : false;
+              polarity = e.driver.get_node().get_type_const().to_i() ? true : false;
             } break;
             default: log_error("DumpYosys: unrecognized wire connection pid=%d\n", e.sink.get_pid());
           }
