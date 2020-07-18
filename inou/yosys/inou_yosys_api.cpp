@@ -72,7 +72,7 @@ void Inou_yosys_api::set_script_liblg(const Eprp_var &var, bool do_read) {
         script_file = script_file2;
       }
     }
-  }else{
+  } else {
     script_file = script;
   }
 
@@ -80,7 +80,6 @@ void Inou_yosys_api::set_script_liblg(const Eprp_var &var, bool do_read) {
     error("could not find the provided script:{} file", script_file);
     return;
   }
-
 }
 
 int Inou_yosys_api::create_lib(const std::string &lib_file, const std::string &lgdb) {

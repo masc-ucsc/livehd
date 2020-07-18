@@ -4,7 +4,6 @@
 
 #include "fmt/format.h"
 #include "gtest/gtest.h"
-
 #include "prp.hpp"
 
 class Prp_test : public ::testing::Test {

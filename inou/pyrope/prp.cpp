@@ -1,12 +1,13 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include <algorithm>
+#include "prp.hpp"
+
 #include <ctype.h>
+
+#include <algorithm>
 #include <iostream>
 
 #include "fmt/format.h"
-
-#include "prp.hpp"
 
 inline void Prp::eat_comments() {
   while (scan_is_token(Token_id_comment)) {
@@ -1671,7 +1672,7 @@ uint8_t Prp::rule_factor(std::list<std::tuple<Rule_id, Token_entry>> &pass_list)
       } /*else {
         if (SCAN_IS_TOKEN(Token_id_dot)) {
           PSEUDO_FAIL();
-        }*/ 
+        }*/
       else {
         // optional
         CHECK_RULE(&Prp::rule_bit_selection_bracket);

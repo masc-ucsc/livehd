@@ -54,13 +54,13 @@ private:
   RTLIL::IdString next_id(LGraph *lg) { return RTLIL::IdString(absl::StrCat("\\", unique_name(lg, "lg"))); }
 
   // FIXME: any way of merging these two?
-  typedef RTLIL::Cell *(RTLIL::Module::*add_cell_fnc_sign)(RTLIL::IdString, const RTLIL::SigSpec &, const RTLIL::SigSpec &, const RTLIL::SigSpec &, bool,
-                                                           const std::string &);
-  typedef RTLIL::Cell *(RTLIL::Module::*add_cell_fnc)(RTLIL::IdString, const RTLIL::SigSpec &, const RTLIL::SigSpec &, const RTLIL::SigSpec &,
-                                                      const std::string &);
+  typedef RTLIL::Cell *(RTLIL::Module::*add_cell_fnc_sign)(RTLIL::IdString, const RTLIL::SigSpec &, const RTLIL::SigSpec &,
+                                                           const RTLIL::SigSpec &, bool, const std::string &);
+  typedef RTLIL::Cell *(RTLIL::Module::*add_cell_fnc)(RTLIL::IdString, const RTLIL::SigSpec &, const RTLIL::SigSpec &,
+                                                      const RTLIL::SigSpec &, const std::string &);
 
-  RTLIL::Wire *create_tree(LGraph *g, const std::vector<RTLIL::Wire *> &wires, RTLIL::Module *mod, add_cell_fnc_sign add_cell, bool sign,
-                           RTLIL::Wire *result_wire, int width=0);
+  RTLIL::Wire *create_tree(LGraph *g, const std::vector<RTLIL::Wire *> &wires, RTLIL::Module *mod, add_cell_fnc_sign add_cell,
+                           bool sign, RTLIL::Wire *result_wire, int width = 0);
 
   RTLIL::Wire *create_io_wire(const Node_pin &pin, RTLIL::Module *module, Port_ID pos);
   void         create_wires(LGraph *g, RTLIL::Module *module);
