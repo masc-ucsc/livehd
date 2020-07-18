@@ -2,7 +2,7 @@
 // ./bazel-bin/inou/pyrope/prp_lnast_test inou/pyrope/tests/semanticTest.prp
 
 // Assign Statement
-val = 
+// val = 0d1023u10
 // Warning: val
 // ================================================
 
@@ -57,17 +57,17 @@ val =
 // Tuple Concate Statement
 // tup = (foo = 1, bar = cat + 2) 
 // tup = tup ++ (4, dog)
-// Warning: foo, bar, null
+// Warning: foo, bar
 // ================================================
 
 // For Loop Statement
 // for i in (0..3) {
-//   tuple_foo[i] = tuple_bar[3-i]
+//  tuple_foo[i] = tuple_bar[3-i]
 // }
-// Warning: ___range_begin, ___range_end, null
+// Warning: ___range_begin, ___range_end
 // ================================================
 
-// While Loop Statement (FIXME)
+// While Loop Statement
 // a = 10
 // while (a > 0) {
 //   b = a + 1
@@ -97,7 +97,7 @@ val =
 
 // my_xor = func_xor($foo, $bar)
 // %out = my_xor.out
-// Warning: null
+// Warning:
 // ================================================
 
 
@@ -130,4 +130,16 @@ val =
 //   b = 1
 // }
 // Warning: b
+// ================================================
+
+// Inefficient LNAST Tests
+// a = 1
+// b = a
+// c = b + 1
+// Warning: Inefficient LNAST for variable b
+
+// tup = (foo = 1, bar = cat + 2)
+// bar = tup
+// tup = bar ++ (4, dog)
+// Warning: Inefficient LNAST for variable bar
 // ================================================
