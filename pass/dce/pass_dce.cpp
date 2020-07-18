@@ -1,10 +1,11 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "pass_dce.hpp"
 
 #include <time.h>
+
 #include <string>
 
-#include "pass_dce.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
@@ -39,14 +40,16 @@ void Pass_dce::trans(LGraph *g) {
     cell_used.insert(cur_node.get_compact());
 
     for (auto &inp : cur_node.inp_edges()) {
-      if (cell_used.count(inp.driver.get_node().get_compact())) continue;
+      if (cell_used.count(inp.driver.get_node().get_compact()))
+        continue;
 
       pending.insert(inp.driver.get_node());
     }
   }
 
   for (auto node : g->fast()) {
-    if (cell_used.count(node.get_compact())) continue;
+    if (cell_used.count(node.get_compact()))
+      continue;
     node.del_node();
   }
   g->sync();

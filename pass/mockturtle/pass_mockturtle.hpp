@@ -28,7 +28,7 @@
 #include "pass.hpp"
 
 #define LUTIFIED_NETWORK_NAME_SIGNATURE "_lutified"
-#define BIT_WIDTH_THRESHOLD 2
+#define BIT_WIDTH_THRESHOLD             2
 
 using mockturtle_network = mockturtle::mig_network;  // chose mig or xag
 
@@ -58,7 +58,7 @@ protected:
 
   std::vector<XEdge> bdinp_edges, bdout_edges;  // boundary_input/output_edges
   // absl::flat_hash_set<XEdge> bdinp_edges, bdout_edges;//boundary_input/output_edges
-  absl::flat_hash_map<Node::Compact, unsigned int> node2gid;  // gid == group id, nodes in node2gid should be lutified
+  absl::flat_hash_map<Node::Compact, unsigned int>            node2gid;  // gid == group id, nodes in node2gid should be lutified
   absl::flat_hash_map<unsigned int, mockturtle_network>       gid2mt;
   absl::flat_hash_map<unsigned int, mockturtle::klut_network> gid2klut;
   absl::flat_hash_map<XEdge, Ntk_sigs<mockturtle_network::signal>>
@@ -205,34 +205,39 @@ protected:
         // fmt::print("Node: ShiftLeft_Op\n");
         // check if Node_Pin "B" is a constant or of small bit_width
         for (const auto &in_edge : cell.inp_edges()) {
-          if (in_edge.sink.get_pid() == 1 && in_edge.get_bits() > BIT_WIDTH_THRESHOLD) return false;
+          if (in_edge.sink.get_pid() == 1 && in_edge.get_bits() > BIT_WIDTH_THRESHOLD)
+            return false;
         }
         break;
       case LogicShiftRight_Op: {
         // fmt::print("Node: LogicShiftRight_Op\n");
         for (const auto &in_edge : cell.inp_edges()) {
-          if (in_edge.sink.get_pid() == 1 && in_edge.get_bits() > BIT_WIDTH_THRESHOLD) return false;
+          if (in_edge.sink.get_pid() == 1 && in_edge.get_bits() > BIT_WIDTH_THRESHOLD)
+            return false;
         }
         break;
       }
       case ArithShiftRight_Op: {
         // fmt::print("Node: ArithShiftRight_Op\n");
         for (const auto &in_edge : cell.inp_edges()) {
-          if (in_edge.sink.get_pid() == 1 && in_edge.get_bits() > BIT_WIDTH_THRESHOLD) return false;
+          if (in_edge.sink.get_pid() == 1 && in_edge.get_bits() > BIT_WIDTH_THRESHOLD)
+            return false;
         }
         break;
       }
       case DynamicShiftRight_Op: {
         // fmt::print("Node: DynamicShiftRight_Op\n");
         for (const auto &in_edge : cell.inp_edges()) {
-          if (in_edge.sink.get_pid() == 1 && in_edge.get_bits() > BIT_WIDTH_THRESHOLD - 1) return false;
+          if (in_edge.sink.get_pid() == 1 && in_edge.get_bits() > BIT_WIDTH_THRESHOLD - 1)
+            return false;
         }
         break;
       }
       case DynamicShiftLeft_Op: {
         // fmt::print("Node: DynamicShiftLeft_Op\n");
         for (const auto &in_edge : cell.inp_edges()) {
-          if (in_edge.sink.get_pid() == 1 && in_edge.get_bits() > BIT_WIDTH_THRESHOLD - 1) return false;
+          if (in_edge.sink.get_pid() == 1 && in_edge.get_bits() > BIT_WIDTH_THRESHOLD - 1)
+            return false;
         }
         break;
       }

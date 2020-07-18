@@ -45,7 +45,9 @@ public:
           tree_traversal_tokens.push_back(token_text);
         }
         tree_traversal_rules.emplace_back(rule_id_to_string(node.rule_id));
-        fmt::print("Rule name: {}, Token text: {}, Tree level: {}\n", tree_traversal_rules.back(), scan_text(node.token_entry),
+        fmt::print("Rule name: {}, Token text: {}, Tree level: {}\n",
+                   tree_traversal_rules.back(),
+                   scan_text(node.token_entry),
                    it.level);
       }
     }

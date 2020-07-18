@@ -151,7 +151,8 @@ public:
     io_pins.emplace_back(io_name, dir, graph_pos);
     name2id[io_name] = instance_pid;
     I(io_pins[instance_pid].name == io_name);
-    if (graph_pos != Port_invalid) map_pin_int(instance_pid, graph_pos);
+    if (graph_pos != Port_invalid)
+      map_pin_int(instance_pid, graph_pos);
 
     return instance_pid;
   }

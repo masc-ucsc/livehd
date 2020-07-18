@@ -2,8 +2,8 @@
 #pragma once
 
 #include <string>
-#include "absl/container/flat_hash_map.h"
 
+#include "absl/container/flat_hash_map.h"
 #include "lgtuple.hpp"
 #include "pass.hpp"
 
@@ -12,9 +12,9 @@ class LGraph;
 class Lgcpp_plugin {
 public:
   using Comptime_fn = std::function<void(LGraph *lg, const std::shared_ptr<Lgtuple> inp, std::shared_ptr<Lgtuple> out)>;
-  using Map_setup = absl::flat_hash_map<std::string, Comptime_fn>;
-protected:
+  using Map_setup   = absl::flat_hash_map<std::string, Comptime_fn>;
 
+protected:
   static Map_setup registry;
 
 public:
@@ -28,4 +28,3 @@ public:
 
   static const Map_setup &get_registry() { return registry; }
 };
-

@@ -49,9 +49,11 @@ struct Tech_pin {
   uint8_t layer_id;
 
   bool overlap(const Tech_pin &o) const {
-    if (layer_id != o.layer_id) return false;
+    if (layer_id != o.layer_id)
+      return false;
 
-    if (o.x < x + xw && x < o.x + o.xw && o.y < y + yh) return y < o.y + o.yh;
+    if (o.x < x + xw && x < o.x + o.xw && o.y < y + yh)
+      return y < o.y + o.yh;
 
     return false;
   }

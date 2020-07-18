@@ -23,12 +23,13 @@ protected:
   friend class Fast_edge_iterator;
 
   // Memoize tables that provide hints (not certainty because add/del operations)
-  std::array<Index_ID,8> memoize_const_hint;
+  std::array<Index_ID, 8> memoize_const_hint;
 
   Hierarchy_tree htree;
 
   Hierarchy_tree *ref_htree() {
-    if (htree.empty()) htree.regenerate();
+    if (htree.empty())
+      htree.regenerate();
     return &htree;
   }
 
@@ -54,7 +55,8 @@ protected:
   }
 
   Index_ID get_node_nid(Index_ID idx) const {
-    if (node_internal[idx].is_master_root()) return idx;
+    if (node_internal[idx].is_master_root())
+      return idx;
 
     return node_internal[idx].get_nid();
   }
@@ -84,7 +86,6 @@ protected:
     Index_ID nid = get_node_nid(idx);
     return node_internal[nid].get_node_pin_num_inputs(idx);
   }
-
 
   Node_pin_iterator out_connected_pins(const Node &node) const;
   Node_pin_iterator inp_connected_pins(const Node &node) const;
@@ -150,10 +151,14 @@ protected:
   Index_ID fast_next(Index_ID nid) const {
     while (true) {
       nid.value++;
-      if (nid >= static_cast<Index_ID>(node_internal.size())) return 0;
-      if (!node_internal[nid].is_valid()) continue;
-      if (is_graph_io(nid)) continue;
-      if (node_internal[nid].is_master_root()) return nid;
+      if (nid >= static_cast<Index_ID>(node_internal.size()))
+        return 0;
+      if (!node_internal[nid].is_valid())
+        continue;
+      if (is_graph_io(nid))
+        continue;
+      if (node_internal[nid].is_master_root())
+        return nid;
     }
 
     return 0;
