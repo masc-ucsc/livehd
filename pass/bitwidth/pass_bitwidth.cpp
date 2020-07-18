@@ -132,11 +132,11 @@ void Pass_bitwidth::process_mux(Node &node, XEdge_iterator &inp_edges) {
         min_val = it->second.get_min();
     } else if (e.driver.get_bits()) {
       Lconst b(1);
-      b = b.lsh_op(e.driver.get_bits()) - 1;
+      b = b.lsh_op(e.driver.get_bits()) - 1; // TODO: sign handling
       if (b > max_val)
         max_val = b;
 
-      min_val = Lconst(0) - max_val;
+      min_val = Lconst(0);
     } else {
       if (e.driver.has_name())
         fmt::print("pass.bitwidth mux:{} has input pin:{} unconstrained\n", node.debug_name(), e.driver.get_name());
@@ -147,13 +147,12 @@ void Pass_bitwidth::process_mux(Node &node, XEdge_iterator &inp_edges) {
     }
   }
 
-  auto sel_dpin = node.get_sink_pin(0).get_driver_pin();
-  if (sel_dpin.get_bits() == 0) {
-    Lconst n_options(inp_edges.size() - 1 - 1);  // -1 for log and -1 for the select
-    sel_dpin.set_bits(n_options.get_bits());
-  }
+  Lconst n_options(inp_edges.size() - 1 - 1);  // -1 for log and -1 for the select
+  node.get_sink_pin(0).get_driver_pin().set_bits(n_options.get_bits());
 
-  bwmap.emplace(node.get_driver_pin(0).get_compact(), Bitwidth_range(min_val, max_val));
+  Bitwidth_range bw(min_val, max_val);
+  bwmap.emplace(node.get_driver_pin(0).get_compact(), bw);
+  node.get_driver_pin(0).set_bits(bw.get_bits());
 }
 
 void Pass_bitwidth::process_shr(Node &node, XEdge_iterator &inp_edges) {
