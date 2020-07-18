@@ -53,8 +53,26 @@ bool Semantic_check::in_read_list(std::string_view node_name, std::string_view s
   return false;
 }
 
-bool Semantic_check::in_assign_lhs_list(std::string_view node_name) {
-  for (auto name : assign_lhs_list) {
+// bool Semantic_check::in_assign_lhs_list(std::string_view node_name) {
+//   for (auto name : assign_lhs_list) {
+//     if (name == node_name) {
+//       return true;
+//     }
+//   }
+//   return false;
+// }
+
+// bool Semantic_check::in_assign_rhs_list(std::string_view node_name) {
+//   for (auto name : assign_rhs_list) {
+//     if (name == node_name) {
+//       return true;
+//     }
+//   }
+//   return false;
+// }
+
+bool Semantic_check::in_lhs_list(std::string_view node_name) {
+  for (auto name : lhs_list) {
     if (name == node_name) {
       return true;
     }
@@ -62,13 +80,17 @@ bool Semantic_check::in_assign_lhs_list(std::string_view node_name) {
   return false;
 }
 
-bool Semantic_check::in_assign_rhs_list(std::string_view node_name) {
-  for (auto name : assign_rhs_list) {
-    if (name == node_name) {
-      return true;
+int Semantic_check::in_rhs_list(std::string_view node_name, int lhs_index) {
+  int rhs_index = 0;
+  for (auto name : rhs_list) {
+    for (auto subname : name) {
+      if (subname == node_name && rhs_index > lhs_index) {
+        return rhs_index;
+      }
     }
+    rhs_index += 1;
   }
-  return false;
+  return -1;
 }
 
 bool Semantic_check::in_inefficient_LNAST(std::string_view node_name) {
@@ -108,16 +130,26 @@ void Semantic_check::add_to_read_list(std::string_view node_name, std::string_vi
   }
 }
 
-void Semantic_check::add_to_assign_lhs_list(std::string_view node_name) {
-  if (!in_assign_lhs_list(node_name)) {
-    assign_lhs_list.push_back(node_name);
+// void Semantic_check::add_to_assign_lhs_list(std::string_view node_name) {
+//   if (!in_assign_lhs_list(node_name)) {
+//     assign_lhs_list.push_back(node_name);
+//   }
+// }
+
+// void Semantic_check::add_to_assign_rhs_list(std::string_view node_name) {
+//   if (!in_assign_rhs_list(node_name)) {
+//     assign_rhs_list.push_back(node_name);
+//   }
+// }
+
+void Semantic_check::add_to_lhs_list(std::string_view node_name) {
+  if (!in_lhs_list(node_name)) {
+    lhs_list.push_back(node_name);
   }
 }
 
-void Semantic_check::add_to_assign_rhs_list(std::string_view node_name) {
-  if (!in_assign_rhs_list(node_name)) {
-    assign_rhs_list.push_back(node_name);
-  }
+void Semantic_check::add_to_rhs_list(std::vector<std::string_view> node_name) {
+  rhs_list.push_back(node_name);
 }
 
 void Semantic_check::add_to_output_vars(std::string_view node_name) {
@@ -128,7 +160,7 @@ void Semantic_check::add_to_output_vars(std::string_view node_name) {
 
 void Semantic_check::find_lhs_name(int index) {
   int lhs_index = 0;
-  for (auto lhs_name : assign_lhs_list) {
+  for (auto lhs_name : lhs_list) {
     if (lhs_index == index && !in_inefficient_LNAST(lhs_name)) {
       inefficient_LNAST.push_back(lhs_name);
       break;
@@ -271,24 +303,48 @@ void Semantic_check::resolve_read_write_lists(Lnast* lnast) {
   }
 }
 
-void Semantic_check::resolve_assign_lhs_rhs_lists() {
+// void Semantic_check::resolve_assign_lhs_rhs_lists() {
+//   // Only works for certain cases
+//   int index_lhs = 0;
+//   for (auto lhs_name : assign_lhs_list) {
+//     int index_rhs = 0;
+//     for (auto rhs_name : assign_rhs_list) {
+//       if (rhs_name == lhs_name && index_rhs > index_lhs) {
+//         // std::cout << "Found one: " << index_rhs << "\n";
+//         find_lhs_name(index_rhs);
+//       } else {
+//         index_rhs += 1;
+//       }
+//     }
+//     index_lhs += 1;
+//   }
+//   if (inefficient_LNAST.size() != 0) {
+//     auto first = inefficient_LNAST.begin();
+//     std::cout << "Inefficient LNAST Warning: " << *first;
+//     for (auto name : inefficient_LNAST) {
+//       if (name == *first) {
+//         continue;
+//       }
+//       std::cout << ", " << name;
+//     }
+//     std::cout << " may be unnecessary\n";
+//   }
+// }
+
+void Semantic_check::resolve_lhs_rhs_lists() {
   // Only works for certain cases
   int index_lhs = 0;
-  for (auto lhs_name : assign_lhs_list) {
-    int index_rhs = 0;
-    for (auto rhs_name : assign_rhs_list) {
-      if (rhs_name == lhs_name && index_rhs > index_lhs) {
-        // std::cout << "Found one: " << index_rhs << "\n";
-        find_lhs_name(index_rhs);
-      } else {
-        index_rhs += 1;
-      }
+  for (auto lhs_name : lhs_list) {
+    int rhs_index = in_rhs_list(lhs_name, index_lhs);
+    if (rhs_index != -1) {
+      find_lhs_name(rhs_index);
     }
     index_lhs += 1;
   }
   if (inefficient_LNAST.size() != 0) {
     auto first = inefficient_LNAST.begin();
-    std::cout << "Inefficient LNAST Warning: " << *first;
+    fmt::print(fmt::fg(fmt::color::blue),"\nInefficient LNAST Warning");
+    fmt::print(": {}", *first);
     for (auto name : inefficient_LNAST) {
       if (name == *first) {
         continue;
@@ -301,6 +357,10 @@ void Semantic_check::resolve_assign_lhs_rhs_lists() {
 
 void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_opr, const Lnast_ntype node_type, std::string_view stmt_name) {
   if (!lnast->has_single_child(lnidx_opr)) {
+
+    // Vector for add_to_rhs_list()
+    std::vector<std::string_view> rhs_args;
+
     // Unary Operations
     if (node_type.is_assign() || node_type.is_dp_assign() || node_type.is_not() || node_type.is_logical_not() ||
         node_type.is_as()) {
@@ -322,10 +382,13 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
       if (rhs_type.is_ref()) {
         add_to_read_list(lnast->get_name(rhs), stmt_name);
       }
-      if (node_type.is_assign()) {
-        add_to_assign_lhs_list(lnast->get_name(lhs));
-        add_to_assign_rhs_list(lnast->get_name(rhs));
-      }
+      // if (node_type.is_assign()) {
+      //   add_to_assign_lhs_list(lnast->get_name(lhs));
+      //   add_to_assign_rhs_list(lnast->get_name(rhs));
+      // }
+      add_to_lhs_list(lnast->get_name(lhs));
+      rhs_args.push_back(lnast->get_name(rhs));
+      add_to_rhs_list(rhs_args);
       // N-ary Operations (need to add node_type.is_select())
     } else if (node_type.is_logical_and() || node_type.is_logical_or() || node_type.is_nary_op() ||
                node_type.is_eq() || node_type.is_bit_select() || node_type.is_logic_shift_right() ||
@@ -602,6 +665,7 @@ void Semantic_check::check_func_def(Lnast *lnast, const Lnast_nid &lnidx_opr, st
   int  num_of_refs = 0;
   bool cond        = false;
   bool stmts       = false;
+  // Iterate through children of func def node
   for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
     const auto ntype_child = lnast->get_data(lnidx_opr_child).type;
 
@@ -713,7 +777,8 @@ void Semantic_check::do_check(Lnast *lnast) {
     }
   }
   // Find Errors!
-  resolve_assign_lhs_rhs_lists();
+  // resolve_assign_lhs_rhs_lists();
+  resolve_lhs_rhs_lists();
   resolve_read_write_lists(lnast);
   fmt::print("\n");
 }
