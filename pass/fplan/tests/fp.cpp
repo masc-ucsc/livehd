@@ -13,12 +13,12 @@ int main() {
   Json_inou_parser p("/home/kneil/code/real/fp/test/hier_test.json");
 	std::cout << "done." << std::endl;
 
-  Netl_hypertree t = p.make_tree();
-  t.set_num_components(1);
-  t.set_min_node_area(0.0); // don't collapse anything
+  //Hier_tree t = p.make_tree();
+  //t.set_num_components(1);
+  //t.set_min_node_area(0.0); // don't collapse anything
   
   std::cout << "discovering hierarchies...";
-  t.discover_hierarchy();
+  //t.discover_hierarchy();
   std::cout << "done." << std::endl;
 
   std::cout << "finished floorplan." << std::endl;

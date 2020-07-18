@@ -169,6 +169,12 @@ new_git_repository(
     #patches = ["//external:patch.verilator"],
     #strip_prefix = "include",
 )
+new_git_repository(
+    name = "graph",
+    build_file = "BUILD.graph",
+    commit = "b1e38e1084a0dff6f4eb4ed9a645ed63d3e83dd2",
+    remote = "https://github.com/cbbowen/graph",
+)
 
 # BOOST Libraries dependences
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
