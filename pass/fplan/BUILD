@@ -13,6 +13,7 @@ cc_library(
          "//pass/common:pass",
          "@iassert//:iassert",
          "@rapidjson//:headers",
+         "@graph//:graph",
 #        "//core",
          ],
     )

@@ -1,6 +1,6 @@
 #include "netl_hypertree.hpp"
 
-unsigned int Netl_hypertree::size(const std::shared_ptr<Netl_node> top) {
+unsigned int Hier_tree::size(const phier top) {
   if (top->size != 0) {
     return top->size;
   }
@@ -20,7 +20,7 @@ unsigned int Netl_hypertree::size(const std::shared_ptr<Netl_node> top) {
 }
 
 // fill out the connections in the matrix by examining every connection on every node... :/
-void Netl_hypertree::wire_matrix(cost_matrix& m) {
+void Hier_tree::wire_matrix(Cost_matrix& m) {
   for (size_t i = 0; i < m.size(); i++) {
     for (const auto& conn : m[i].node->connect_list) {
       for (size_t j = 0; j < m.size(); j++) {
@@ -32,8 +32,9 @@ void Netl_hypertree::wire_matrix(cost_matrix& m) {
   }
 }
 
+/*
 // creates a cost matrix for doing a min-cut on the root node
-cost_matrix Netl_hypertree::make_matrix(pnode root) {
+Cost_matrix Hier_tree::make_matrix(pnode root) {
   unsigned int root_size = size(root);
   
   cost_matrix matrix;
@@ -76,11 +77,12 @@ cost_matrix Netl_hypertree::make_matrix(pnode root) {
 
   return matrix;
 }
+*/
 
 // splits a cost matrix into two sub-matrices for a recursive min-cut call
 // if the split is not even, a temporary node is added at the end to make it even.
-std::pair<cost_matrix, cost_matrix> Netl_hypertree::halve_matrix(const cost_matrix& old_matrix) {
-  cost_matrix ma, mb;
+std::pair<Cost_matrix, Cost_matrix> Hier_tree::halve_matrix(const Cost_matrix& old_matrix) {
+  Cost_matrix ma, mb;
   
   unsigned int which_set_a = 0;
   unsigned int which_set_b = 0;
@@ -107,7 +109,7 @@ std::pair<cost_matrix, cost_matrix> Netl_hypertree::halve_matrix(const cost_matr
   mb.reserve(new_size);
   
   for (size_t i = 0; i < old_matrix.size(); i++) {
-    cost_matrix_row new_row = { old_matrix[i].node, std::vector<int>(new_size, 0), 0xCAFE, true };
+    Cost_matrix_row new_row = { old_matrix[i].node, std::vector<int>(new_size, 0), 0xCAFE, true };
     if (old_matrix[i].set == 0) {
       new_row.set = which_set_a;
       which_set_a ^= 1;
@@ -120,9 +122,9 @@ std::pair<cost_matrix, cost_matrix> Netl_hypertree::halve_matrix(const cost_matr
   }
 
   if (need_extra_row) {
-    pnode n = std::make_shared<Netl_node>();
+    pnetl n = std::make_shared<Netl_node>();
     n->name = "_temp";
-    cost_matrix_row temp_row = { n, std::vector<int>(new_size, 0), 0xCAFE, true };
+    Cost_matrix_row temp_row = { n, std::vector<int>(new_size, 0), 0xCAFE, true };
     
     temp_row.set = which_set_a;
     ma.push_back(temp_row);
@@ -137,16 +139,18 @@ std::pair<cost_matrix, cost_matrix> Netl_hypertree::halve_matrix(const cost_matr
   return std::pair(ma, mb);
 }
 
-void Netl_hypertree::prune_matrix(cost_matrix& m) {
+/*
+void Hier_tree::prune_matrix(Cost_matrix& m) {
   if (m[m.size() - 1].node->name == "_temp") {
     m.erase(m.cend() - 1);
-    for (cost_matrix_row& r : m) {
+    for (Cost_matrix_row& r : m) {
       r.connect_cost.erase(r.connect_cost.cend() - 1);
     }
   }
 }
+*/
 
-std::pair<std::vector<pnode>, std::vector<pnode>> Netl_hypertree::min_wire_cut(cost_matrix& m) {
+std::pair<std::vector<pnetl>, std::vector<pnetl>> Hier_tree::min_wire_cut(Cost_matrix& m) {
 
   const unsigned int graph_size = m.size();
   const unsigned int set_size = m.size() / 2;
@@ -156,7 +160,7 @@ std::pair<std::vector<pnode>, std::vector<pnode>> Netl_hypertree::min_wire_cut(c
   int best_decrease = 0;
 
   if (m.size() <= 2) {
-    std::vector<pnode> a, b;
+    std::vector<pnetl> a, b;
     a.push_back(m[0].node);
     b.push_back(m[1].node);
     
@@ -165,7 +169,7 @@ std::pair<std::vector<pnode>, std::vector<pnode>> Netl_hypertree::min_wire_cut(c
 
   do {
     // (re)calculate delta costs for each node
-    for (cost_matrix_row& r : m) {
+    for (Cost_matrix_row& r : m) {
       int exter = 0;
       int inter = 0;
       for (size_t i = 0; i < graph_size; i++) {
@@ -183,7 +187,7 @@ std::pair<std::vector<pnode>, std::vector<pnode>> Netl_hypertree::min_wire_cut(c
     std::cout << std::endl;
     std::cout << "connection matrix:" << std::endl;
     
-    for (const cost_matrix_row& r : m) {
+    for (const Cost_matrix_row& r : m) {
       std::cout << r.node->name << "\t" << ((r.set == 0) ? " (a): [ " : " (b): [ ");
       for (const auto& conn_cost : r.connect_cost) {
         std::cout << std::setfill(' ') << std::setw(5) << conn_cost << std::setfill(' ') << std::setw(5);
@@ -293,7 +297,7 @@ std::pair<std::vector<pnode>, std::vector<pnode>> Netl_hypertree::min_wire_cut(c
   } while (best_decrease > 0);
   
   // strip weight information and return vectors
-  std::vector<pnode> a_res, b_res;
+  std::vector<pnetl> a_res, b_res;
   
   a_res.reserve(set_size);
   b_res.reserve(set_size);
@@ -309,32 +313,27 @@ std::pair<std::vector<pnode>, std::vector<pnode>> Netl_hypertree::min_wire_cut(c
   return std::pair(a_res, b_res);
 }
 
-pnode Netl_hypertree::make_hier_tree(pnode t1, pnode t2) {
+phier Hier_tree::make_hier_tree(phier t1, phier t2) {
   static unsigned int temp_node_number = 0; // exact value doesn't really matter, as long as it's unique
   std::string name = "_hier_node_" + std::to_string(temp_node_number);
   temp_node_number++;
   
-  Netl_node hier_temp;
+  Hier_node hier_temp;
   hier_temp.name = name;
 
   hier_temp.children.push_back(t1);
   hier_temp.children.push_back(t2);
   
-  return std::make_shared<Netl_node>(hier_temp);
+  return std::make_shared<Hier_node>(hier_temp);
 }
 
-pnode Netl_hypertree::discover_hierarchy() {
-  cost_matrix m = make_matrix(root);
-  pnode p = discover_hierarchy(m);
-  return p;
-}
-
-pnode Netl_hypertree::discover_hierarchy(cost_matrix& m) {
+/*
+phier Hier_tree::discover_hierarchy(Cost_matrix& m) {
   if (m.size() <= num_components) {
-    return root;
+    return root; // TODO: bug here!
   }
   
-  std::pair<std::vector<pnode>, std::vector<pnode>> cut_pair = min_wire_cut(m);
+  std::pair<std::vector<pnetl>, std::vector<pnetl>> cut_pair = min_wire_cut(m);
   auto m_pair = halve_matrix(m);
   
 #ifndef NDEBUG
@@ -349,15 +348,16 @@ pnode Netl_hypertree::discover_hierarchy(cost_matrix& m) {
   }
 #endif
   
-  pnode t1 = discover_hierarchy(m_pair.first);
-  pnode t2 = discover_hierarchy(m_pair.second);
+  phier t1 = discover_hierarchy(m_pair.first);
+  phier t2 = discover_hierarchy(m_pair.second);
 
   // TODO: prune the hierarchy trees here
 
   return make_hier_tree(t1, t2);
 }
+*/
 
-void Netl_hypertree::collapse(const double area) {
+void Hier_tree::collapse() {
   
 }
 
