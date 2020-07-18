@@ -18,11 +18,9 @@ void Inou_cfg::setup() {
 
 Inou_cfg::Inou_cfg(const Eprp_var &var) : Pass("inou.cfg", var) {}
 
-
-void Inou_cfg::parse_to_lnast(Eprp_var &var){
-  Lbench b("inou.cfg");
+void Inou_cfg::parse_to_lnast(Eprp_var &var) {
+  Lbench   b("inou.cfg");
   Inou_cfg p(var);
-
 
   for (auto &itr_f : absl::StrSplit(p.files, ',')) {
     const auto f = std::string(itr_f);

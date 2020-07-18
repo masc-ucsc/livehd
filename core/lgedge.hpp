@@ -104,7 +104,8 @@ protected:
 
   Port_ID get_inp_pid() const {
     const SEdge_Internal *s = reinterpret_cast<const SEdge_Internal *>(this);
-    if (is_snode()) return s->get_inp_pid();
+    if (is_snode())
+      return s->get_inp_pid();
 
     const LEdge_Internal *l = reinterpret_cast<const LEdge_Internal *>(this);
     return l->get_inp_pid();
@@ -141,7 +142,8 @@ public:
   Index_ID get_self_nid() const;
   Index_ID get_idx() const {
     const SEdge_Internal *s = reinterpret_cast<const SEdge_Internal *>(this);
-    if (is_snode()) return s->get_idx(get_page_idx());
+    if (is_snode())
+      return s->get_idx(get_page_idx());
 
     const LEdge_Internal *l = reinterpret_cast<const LEdge_Internal *>(this);
     return l->get_idx();
@@ -149,7 +151,8 @@ public:
   void dump() const {
     const SEdge_Internal *s = reinterpret_cast<const SEdge_Internal *>(this);
     Index_ID              a = -1;
-    if (is_snode()) a = s->ridx;
+    if (is_snode())
+      a = s->ridx;
 
     fmt::print("snode:{} page_idx:{} a:{} addr:{:x}", is_snode(), get_page_idx(), a, (uint64_t)this);
   }
@@ -312,8 +315,8 @@ public:
   int32_t get_node_pin_num_inputs(Index_ID idx) const;
   int32_t get_node_pin_num_outputs(Index_ID idx) const;
 
-  bool    has_node_inputs() const;
-  bool    has_node_outputs() const;
+  bool has_node_inputs() const;
+  bool has_node_outputs() const;
 
   bool has_pin_inputs() const;
   bool has_pin_outputs() const;
@@ -330,14 +333,17 @@ public:
     inp_long     = 0;
     out_long     = 0;
     nid          = 0;
-    sign         = 0; // unsigned by default
+    sign         = 0;  // unsigned by default
     type         = 0;
   }
 
   bool is_deleted() const {
-    if (likely(nid)) return false;
-    if (state == Last_node_state) return true;
-    if (state == Free_node_state) return false;
+    if (likely(nid))
+      return false;
+    if (state == Last_node_state)
+      return true;
+    if (state == Free_node_state)
+      return false;
 
     I(false);  // if a node is deleted it should be Free (todo after garbage collect) or Last
     return false;
@@ -354,7 +360,8 @@ public:
   bool is_master_root() const {
     I(is_node_state());
     bool ms = nid == get_self_idx().value;
-    if (ms) I(root);
+    if (ms)
+      I(root);
 
     return ms;
   }
@@ -373,7 +380,8 @@ public:
   }
   Index_ID get_master_root_nid() const {
     I(nid);
-    if (likely(root)) return nid;
+    if (likely(root))
+      return nid;
 
     I(get_root().get_nid() == get_master_root().get_nid());
 
@@ -418,7 +426,7 @@ public:
     *idx_upp          = _idx.value;
   }
   void force_next_state(Index_ID _idx) {
-    state = Next_node_state;
+    state             = Next_node_state;
     uint32_t *idx_upp = (uint32_t *)(&sedge[0]);
     *idx_upp          = _idx.value;
   }
@@ -441,7 +449,7 @@ public:
   void set_last_state() { state = Last_node_state; }
   void set_free_state() {
     state = Free_node_state;
-    nid = 0;
+    nid   = 0;
   }
   bool is_next_state() const { return state == Next_node_state; }
   bool is_free_state() const { return state == Free_node_state; }
@@ -536,13 +544,15 @@ private:
     // if (inp_pos == 0) return get_input_begin_pos_int();
 
     int pos = inp_pos;
-    if (state != Last_node_state) pos += 2;
+    if (state != Last_node_state)
+      pos += 2;
 
     return pos;
   }
 
   int get_input_begin_pos_int() const {
-    if (state == Last_node_state) return 0;
+    if (state == Last_node_state)
+      return 0;
     return 2;
   }
   int get_output_begin_pos_int() const { return Num_SEdges - out_pos - 1; }

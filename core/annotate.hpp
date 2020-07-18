@@ -26,13 +26,13 @@ struct Ann_name {
 
 using Ann_node_pin_offset = Attribute<Ann_name::wireoffset, Node_pin, mmap_lib::map<Node_pin::Compact_class_driver, Bits_t> >;
 
-using Ann_node_pin_name =
-    Attribute<Ann_name::wirename, Node_pin, mmap_lib::bimap<Node_pin::Compact_class_driver, std::string_view> >;
+using Ann_node_pin_name
+    = Attribute<Ann_name::wirename, Node_pin, mmap_lib::bimap<Node_pin::Compact_class_driver, std::string_view> >;
 
-using Ann_node_pin_prp_vname =
-    Attribute<Ann_name::prp_vname, Node_pin, mmap_lib::map<Node_pin::Compact_class_driver, std::string_view> >;
+using Ann_node_pin_prp_vname
+    = Attribute<Ann_name::prp_vname, Node_pin, mmap_lib::map<Node_pin::Compact_class_driver, std::string_view> >;
 
-using Ann_node_pin_ssa      = Attribute<Ann_name::ssa, Node_pin, mmap_lib::map<Node_pin::Compact_driver, Ann_ssa> >;
+using Ann_node_pin_ssa = Attribute<Ann_name::ssa, Node_pin, mmap_lib::map<Node_pin::Compact_driver, Ann_ssa> >;
 
 using Ann_node_pin_delay = Attribute<Ann_name::delay, Node_pin, mmap_lib::map<Node_pin::Compact_driver, float> >;
 
@@ -45,7 +45,6 @@ using Ann_node_file_loc = Attribute<Ann_name::file_loc, Node, mmap_lib::map<Node
 using Ann_node_tree_pos = Attribute<Ann_name::tree_pos, Node, mmap_lib::map<Node::Compact_class, uint32_t> >;
 
 using Ann_node_color = Attribute<Ann_name::color, Node, mmap_lib::bimap<Node::Compact_class, std::string_view> >;
-
 
 struct Ann_support {
   // TODO: Change to object to register annotations, and have an "update" for incremental

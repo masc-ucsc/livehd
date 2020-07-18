@@ -84,20 +84,30 @@ void Node_pin::connect_driver(Node_pin &dpin) {
 }
 
 int Node_pin::get_num_edges() const {
-  if (is_sink()) return current_g->get_node_pin_num_inputs(idx);
+  if (is_sink())
+    return current_g->get_node_pin_num_inputs(idx);
 
   return current_g->get_node_pin_num_outputs(idx);
 }
 
-uint32_t Node_pin::get_bits() const { I(is_driver()); return current_g->get_bits(idx); }
+uint32_t Node_pin::get_bits() const {
+  I(is_driver());
+  return current_g->get_bits(idx);
+}
 
 void Node_pin::set_bits(uint32_t bits) {
   I(is_driver());
   current_g->set_bits(idx, bits);
 }
 
-bool Node_pin::is_signed() const { I(is_driver()); return current_g->is_signed(idx); }
-bool Node_pin::is_unsigned() const { I(is_driver()); return current_g->is_unsigned(idx); }
+bool Node_pin::is_signed() const {
+  I(is_driver());
+  return current_g->is_signed(idx);
+}
+bool Node_pin::is_unsigned() const {
+  I(is_driver());
+  return current_g->is_unsigned(idx);
+}
 
 void Node_pin::set_signed() {
   I(is_driver());
@@ -136,10 +146,10 @@ void Node_pin::dump_all_prp_vname() const {
   auto *ref = Ann_node_pin_prp_vname::ref(current_g);
 
   for (auto it : *ref) {
-		if(current_g->is_valid_node_pin(it.first.idx)) {
-			Node_pin a(current_g, it.first);
-			fmt::print("prp_vname pin:{} vname:{}\n", a.debug_name(), ref->get_sview(it.second));
-		}
+    if (current_g->is_valid_node_pin(it.first.idx)) {
+      Node_pin a(current_g, it.first);
+      fmt::print("prp_vname pin:{} vname:{}\n", a.debug_name(), ref->get_sview(it.second));
+    }
   }
 }
 
@@ -173,8 +183,16 @@ std::string Node_pin::debug_name() const {
     }
   }
 
-  return absl::StrCat("node_pin_", "n", std::to_string(get_node().nid), "_", name, "_", sink ? "s" : "d", std::to_string(pid),
-                      "_lg_", current_g->get_name());
+  return absl::StrCat("node_pin_",
+                      "n",
+                      std::to_string(get_node().nid),
+                      "_",
+                      name,
+                      "_",
+                      sink ? "s" : "d",
+                      std::to_string(pid),
+                      "_lg_",
+                      current_g->get_name());
 }
 
 std::string_view Node_pin::get_name() const {
@@ -202,7 +220,8 @@ std::string_view Node_pin::get_prp_vname() const {
 std::string_view Node_pin::create_name() const {
   auto ref = Ann_node_pin_name::ref(current_g);
 
-  if (ref->has_key(get_compact_class_driver())) return ref->get_val(get_compact_class_driver());
+  if (ref->has_key(get_compact_class_driver()))
+    return ref->get_val(get_compact_class_driver());
 
   std::string signature(get_node().create_name());
 
@@ -236,14 +255,16 @@ Node_pin Node_pin::find_driver_pin(LGraph *top, std::string_view wname) {
 }
 
 void Node_pin::set_offset(Bits_t offset) {
-  if (offset == 0) return;
+  if (offset == 0)
+    return;
 
   Ann_node_pin_offset::ref(current_g)->set(get_compact_class_driver(), offset);
 }
 
 Bits_t Node_pin::get_offset() const {
   auto ref = Ann_node_pin_offset::ref(current_g);
-  if (!ref->has(get_compact_class_driver())) return 0;
+  if (!ref->has(get_compact_class_driver()))
+    return 0;
 
   auto off = ref->get(get_compact_class_driver());
   I(off);
@@ -271,7 +292,8 @@ Ann_ssa *Node_pin::ref_ssa() {
 bool Node_pin::has_ssa() const { return Ann_node_pin_ssa::ref(top_g)->has(get_compact_driver()); }
 
 bool Node_pin::is_connected() const {
-  if (is_driver()) return current_g->has_outputs(*this);
+  if (is_driver())
+    return current_g->has_outputs(*this);
 
   return current_g->has_inputs(*this);
 }
@@ -298,8 +320,8 @@ Node_pin Node_pin::get_down_pin() const {
   auto *down_current_g = top_g->ref_htree()->ref_lgraph(down_hidx);
 
   // 4th: get down_idx
-  Index_ID down_idx =
-      down_current_g->find_idx_from_pid(is_driver() ? Node::Hardcoded_output_nid : Node::Hardcoded_input_nid, down_pid);
+  Index_ID down_idx
+      = down_current_g->find_idx_from_pid(is_driver() ? Node::Hardcoded_output_nid : Node::Hardcoded_input_nid, down_pid);
   I(down_idx);
 
   bool down_sink = is_driver();  // top driver goes to an down output which should be a sink
@@ -328,7 +350,8 @@ Node_pin Node_pin::get_up_pin() const {
 
   // 3rd: get up_idx
   Index_ID up_idx = up_node.get_class_lgraph()->find_idx_from_pid(up_node.get_nid(), up_pid);
-  if (up_idx.is_invalid()) return Node_pin();  // Invalid, the input is not connected
+  if (up_idx.is_invalid())
+    return Node_pin();  // Invalid, the input is not connected
 
   I(up_idx);
 

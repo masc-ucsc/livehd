@@ -44,8 +44,10 @@ private:
     while (true) {
       tmp = absl::StrCat(test, "_", std::to_string(ids++));
 
-      if (Ann_node_pin_name::ref(g)->has_val(tmp)) continue;
-      if (Ann_node_name::ref(g)->has_val(tmp)) continue;
+      if (Ann_node_pin_name::ref(g)->has_val(tmp))
+        continue;
+      if (Ann_node_name::ref(g)->has_val(tmp))
+        continue;
 
       return tmp;
     }

@@ -7,7 +7,6 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
-
 #include "iassert.hpp"
 #include "lgedge.hpp"
 #include "lgraph_base_core.hpp"
@@ -59,7 +58,6 @@ protected:
 
   Index_ID get_master_nid(Index_ID idx) const { return node_internal[idx].get_master_root_nid(); }
 
-
   uint32_t get_bits(Index_ID idx) const {
     I(idx < node_internal.size());
     I(node_internal[idx].is_root());
@@ -95,7 +93,6 @@ protected:
     I(node_internal[idx].is_root());
     return node_internal[idx].is_unsigned();
   }
-
 
 public:
   LGraph_Base() = delete;
@@ -142,12 +139,14 @@ public:
   */
 
   bool is_valid_node(Index_ID nid) const {
-    if (nid >= node_internal.size()) return false;
+    if (nid >= node_internal.size())
+      return false;
     return node_internal[nid].is_valid() && node_internal[nid].is_master_root();
   }
 
   bool is_valid_node_pin(Index_ID idx) const {
-    if (idx >= node_internal.size()) return false;
+    if (idx >= node_internal.size())
+      return false;
     return node_internal[idx].is_valid() && node_internal[idx].is_root();
   }
 
@@ -178,14 +177,14 @@ public:
 
   template <typename... Args>
   static void error(const char *format, const Args &... args) {
-    fmt::format_args fargs = fmt::make_format_args(args...);
+    fmt::format_args   fargs = fmt::make_format_args(args...);
     fmt::memory_buffer tmp;
     fmt::vformat_to(tmp, format, fargs);
     error(std::string_view(tmp.data(), tmp.size()));
   }
   template <typename... Args>
   static void warn(std::string_view format, const Args &... args) {
-    fmt::format_args fargs = fmt::make_format_args(args...);
+    fmt::format_args   fargs = fmt::make_format_args(args...);
     fmt::memory_buffer tmp;
     fmt::vformat_to(tmp, format, fargs);
     warn(std::string_view(tmp.data(), tmp.size()));
