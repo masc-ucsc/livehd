@@ -14,7 +14,7 @@ cc_library(
          "@iassert//:iassert",
          "@rapidjson//:headers",
          "@graph//:graph",
-#        "//core",
+         "@range-v3//:range-v3",
          ],
     )
 
