@@ -10,17 +10,11 @@ private:
 protected:
   absl::flat_hash_map<std::string_view, std::string_view> write_dict;
   absl::flat_hash_map<std::string_view, std::string_view> read_dict;
-<<<<<<< HEAD
   
   // std::vector<std::string_view> assign_lhs_list;
   // std::vector<std::string_view> assign_rhs_list;
   std::vector<std::string_view> lhs_list;
   std::vector<std::vector<std::string_view>> rhs_list;
-=======
-
-  std::vector<std::string_view> assign_lhs_list;
-  std::vector<std::string_view> assign_rhs_list;
->>>>>>> ef5ad00dfedc5fc05b1afd1df09a2fb1ca66b38b
 
   std::vector<std::string_view>         inefficient_LNAST;
   absl::flat_hash_set<std::string_view> output_vars;
