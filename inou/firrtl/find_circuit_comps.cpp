@@ -1,5 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <math.h>
 #include "inou_firrtl.hpp"
 
 #define PRINT_DEBUG
@@ -69,7 +70,7 @@ firrtl::FirrtlPB_Type* Inou_firrtl::CreateTypeObject(uint32_t bitwidth) {
  * added. If it hasn't been added yet, then add it. */
 void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::FirrtlPB_Module_UserModule *umod) {
   auto name = ln.get_name(ref_node);
-  if (name.substr(0, 2) == "__") {
+  if ((name.substr(0, 2) == "__") || (name.substr(0,5) == "false") || (name.substr(0,4) == "true")) {
     // __ = attribute, ___ = temp var
     return;
 
@@ -98,6 +99,11 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
 
     auto type = CreateTypeObject(ln.get_bitwidth(name.substr(1))); //FIXME: Just setting bits to implicit right now
     reg->set_allocated_type(type);
+
+    /* Specify register reset and init as UInt(0). Clock isn't
+     * specified here since a default doesn't work well. */
+    reg->set_allocated_reset(CreateULitExpr(0));
+    reg->set_allocated_init(CreateULitExpr(0));
 
     auto fstmt = umod->add_statement();
     fstmt->set_allocated_register_(reg);
@@ -132,6 +138,26 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
     fstmt->set_allocated_wire(wire);
     reg_wire_map[(std::string)name] = fstmt;
   }
+}
+
+firrtl::FirrtlPB_Expression* Inou_firrtl::CreateULitExpr(const uint32_t &val) {
+  firrtl::FirrtlPB_Expression_IntegerLiteral *num = new firrtl::FirrtlPB_Expression_IntegerLiteral();
+  num->set_value(std::to_string(val));
+  firrtl::FirrtlPB_Width *width = new firrtl::FirrtlPB_Width();
+  if (val == 0) {
+    width->set_value(1);
+  } else {
+    width->set_value(log2(val)+1);
+  }
+
+  firrtl::FirrtlPB_Expression_UIntLiteral *ulit = new firrtl::FirrtlPB_Expression_UIntLiteral();
+  ulit->set_allocated_value(num);
+  ulit->set_allocated_width(width);
+
+  firrtl::FirrtlPB_Expression *expr = new firrtl::FirrtlPB_Expression();
+  expr->set_allocated_uint_literal(ulit);
+
+  return expr;
 }
 
 void Inou_firrtl::CreateSubmodInstance(Lnast &ln, const Lnast_nid &fcall_node, firrtl::FirrtlPB_Module_UserModule *umod) {

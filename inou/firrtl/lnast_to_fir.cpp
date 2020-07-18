@@ -13,13 +13,15 @@ void Inou_firrtl::toFIRRTL(Eprp_var &var) {
 
   firrtl::FirrtlPB fir_design;
   firrtl::FirrtlPB_Circuit *circuit = fir_design.add_circuit();
+  auto top_msg = circuit->add_top();
   for (const auto &lnast : var.lnasts) {
     //lnast->ssa_trans();//FIXME: Do I need to do SSA?
     p.do_tofirrtl(lnast, circuit);
+    top_msg->set_name((std::string)lnast->get_name(lnast->get_root()));//FIXME: Placeholder for now, need to figure out which LNAST is "top"
   }
 
   fir_design.PrintDebugString();
-  std::fstream output("Trivial_testout.pb", std::ios::out | std::ios::trunc | std::ios::binary);
+  std::fstream output(absl::StrCat(top_msg->name(), ".pb"), std::ios::out | std::ios::trunc | std::ios::binary);
   if (!fir_design.SerializeToOstream(&output)) {
     fmt::print("Failed to write firrtl design\n");
   }
@@ -30,8 +32,6 @@ void Inou_firrtl::do_tofirrtl(std::shared_ptr<Lnast> ln, firrtl::FirrtlPB_Circui
   const auto top   = ln->get_root();
   const auto stmts = ln->get_first_child(top);
   const auto top_name = (std::string)ln->get_name(top);
-  auto top_msg = circuit->add_top();
-  top_msg->set_name(top_name);//FIXME: Placeholder for now, need to figure out which LNAST is "top"
 
   firrtl::FirrtlPB_Module *mod = circuit->add_module();
   firrtl::FirrtlPB_Module_UserModule *umod = new firrtl::FirrtlPB_Module_UserModule();
@@ -48,7 +48,16 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
   const auto ntype = ln.get_data(lnidx).type;
   if (ntype.is_assign() || ntype.is_dp_assign()) {
     auto fstmt = pos_to_add_to == 0 ? when->add_consequent() : when->add_otherwise();
-    process_ln_assign_op(ln, lnidx, fstmt);
+    auto stmt_needed = process_ln_assign_op(ln, lnidx, fstmt);
+    if (!stmt_needed) {
+      /*Note->hunter: If the assign returned false, then we
+       * didn't need that assign so erase that statement made.*/
+      if (pos_to_add_to == 0) {
+        when->mutable_consequent()->RemoveLast();
+      } else {
+        when->mutable_otherwise()->RemoveLast();
+      }
+    }
   } else if (ntype.is_nary_op()) {
     auto fstmt = pos_to_add_to == 0 ? when->add_consequent() : when->add_otherwise();
     process_ln_nary_op(ln, lnidx, fstmt);
@@ -61,8 +70,6 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
     process_ast_tuple_get_op(dfg, lnidx);
   } else if (ntype.is_tuple_phi_add()) {
     process_ast_tuple_phi_add_op(dfg, lnidx);
-  } else if (ntype.is_dot()) {
-    I(false); // should has been converted to tuple chain 
   } else if (ntype.is_select()) {
     I(false); // should has been converted to tuple chain
   } else if (ntype.is_logical_op()) {
@@ -85,6 +92,8 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
   } else if (ntype.is_bit_select()) {
     auto fstmt = pos_to_add_to == 0 ? when->add_consequent() : when->add_otherwise();
     process_ln_bitsel_op(ln, lnidx, fstmt);
+  } else if (ntype.is_dot()) {
+    process_ln_dot(ln, lnidx);
   }
   /*} else if (ntype.is_func_call()) {
     process_ast_func_call_op(dfg, lnidx);
@@ -94,17 +103,17 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
     process_ast_for_op(dfg, lnidx);
   } else if (ntype.is_while()) {
     process_ast_while_op(dfg, lnidx);
-  } else if (ntype.is_invalid()) {
-    continue;
-  }*/ else if (ntype.is_const()) {
+  }*/ else if (ntype.is_invalid()) {
+    return;
+  } else if (ntype.is_const()) {
     I(ln.get_name(lnidx) == "default_const");
     return;
   } else if (ntype.is_err_flag()) {
     I(ln.get_name(lnidx) == "err_var_undefined");
     return;
   } else {
-    //I(false);
-    //return;
+    I(false);
+    return;
   }
 }
 
@@ -118,7 +127,12 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
   const auto ntype = ln.get_data(lnidx).type;
   if (ntype.is_assign() || ntype.is_dp_assign()) {
     auto fstmt = umod->add_statement();
-    process_ln_assign_op(ln, lnidx, fstmt);
+    auto stmt_needed = process_ln_assign_op(ln, lnidx, fstmt);
+    if (!stmt_needed) {
+      /*Note->hunter: If the assign returned false, then we
+       * didn't need that assign so erase that statement made.*/
+      umod->mutable_statement()->RemoveLast();
+    }
   } else if (ntype.is_nary_op()) {
     auto fstmt = umod->add_statement();
     process_ln_nary_op(ln, lnidx, fstmt);
@@ -131,8 +145,6 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
     process_ast_tuple_get_op(dfg, lnidx);
   } else if (ntype.is_tuple_phi_add()) {
     process_ast_tuple_phi_add_op(dfg, lnidx);
-  } else if (ntype.is_dot()) {
-    I(false); // should has been converted to tuple chain 
   } else if (ntype.is_select()) {
     I(false); // should has been converted to tuple chain
   } else if (ntype.is_logical_op()) {
@@ -155,6 +167,9 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
   } else if (ntype.is_bit_select()) {
     auto fstmt = umod->add_statement();
     process_ln_bitsel_op(ln, lnidx, fstmt);
+  } else if (ntype.is_dot()) {
+    //FIXME: FILL
+    process_ln_dot(ln, lnidx);
   }
   /*} else if (ntype.is_func_call()) {
     process_ast_func_call_op(dfg, lnidx);
@@ -164,58 +179,21 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
     process_ast_for_op(dfg, lnidx);
   } else if (ntype.is_while()) {
     process_ast_while_op(dfg, lnidx);
-  } else if (ntype.is_invalid()) {
-    continue;
-  }*/ else if (ntype.is_const()) {
+  }*/ else if (ntype.is_invalid()) {
+    return;
+  } else if (ntype.is_const()) {
     I(ln.get_name(lnidx) == "default_const");
     return;
   } else if (ntype.is_err_flag()) {
     I(ln.get_name(lnidx) == "err_var_undefined");
     return;
   } else {
-    //I(false);
-    //return;
+    I(false);
+    return;
   }
 }
 
-/* Since the range op only indicates that there is a
- * value range from the low value to the high value,
- * this is added to a map for later access. */
-//Note->hunter: This only accepts positive values, and not LNAST's negative range capability.
-void Inou_firrtl::process_ln_range_op(Lnast &ln, const Lnast_nid &lnidx_range) {
-  auto lhs_node = ln.get_first_child(lnidx_range);
-  auto range_lo = ln.get_sibling_next(lhs_node);
-  auto range_hi = ln.get_sibling_next(range_lo);
-
-  name_to_range_map[ln.get_name(lhs_node)] = {range_lo, range_hi};
-}
-
-void Inou_firrtl::process_ln_bitsel_op(Lnast &ln, const Lnast_nid &lnidx_bitsel, firrtl::FirrtlPB_Statement* fstmt) {
-  auto lhs_node  = ln.get_first_child(lnidx_bitsel);
-  auto elem_node = ln.get_sibling_next(lhs_node);
-  auto range_acc = ln.get_sibling_next(elem_node);
-
-  auto range_pair = name_to_range_map[ln.get_name(range_acc)];
-  // Note->hunter: FIRRTL requires range values to be constant numbers.
-  I(ln.get_data(range_pair.first).type.is_const() && ln.get_data(range_pair.second).type.is_const());
-
-  // Create rhs expr, make if a prim op of type "extract bits"
-  firrtl::FirrtlPB_Expression *rhs_expr = new firrtl::FirrtlPB_Expression();
-  auto firrtl_oper_code = get_firrtl_oper_code(ln.get_data(lnidx_bitsel).type);
-  firrtl::FirrtlPB_Expression_PrimOp *rhs_prim_op = new firrtl::FirrtlPB_Expression_PrimOp();
-  rhs_prim_op->set_op(firrtl_oper_code);
-
-  // Add arguments to "EXTRACT_BITS" op
-  add_refcon_as_expr(ln, elem_node, rhs_prim_op->add_arg());
-  add_const_as_ilit(ln, range_pair.second, rhs_prim_op->add_const_());
-  add_const_as_ilit(ln, range_pair.first, rhs_prim_op->add_const_());
-  rhs_expr->set_allocated_prim_op(rhs_prim_op);
-
-  // Now assign lhs to rhs.
-  make_assignment(ln, lhs_node, rhs_expr, fstmt);
-}
-
-void Inou_firrtl::process_ln_assign_op(Lnast &ln, const Lnast_nid &lnidx_assign, firrtl::FirrtlPB_Statement* fstmt) {
+bool Inou_firrtl::process_ln_assign_op(Lnast &ln, const Lnast_nid &lnidx_assign, firrtl::FirrtlPB_Statement* fstmt) {
   auto c0 = ln.get_first_child(lnidx_assign);
   auto c1 = ln.get_sibling_next(c0);
   auto ntype_c0 = ln.get_type(c0);
@@ -223,12 +201,22 @@ void Inou_firrtl::process_ln_assign_op(Lnast &ln, const Lnast_nid &lnidx_assign,
   auto ntype_c1 = ln.get_type(c1);
   I(ntype_c1.is_const() || ntype_c1.is_ref());
 
+  if(dot_map.contains(ln.get_name(c0))) {
+    auto field_node = dot_map[ln.get_name(c0)].second;
+    if(ln.get_name(field_node).substr(0,2) == "__") {
+      // This isn't an actual assign, and is instead assigning an attribute.
+      handle_attr_assign(ln, c0, c1);
+      return false;
+    }
+  }
+
   // Form expression that holds RHS contents.
   firrtl::FirrtlPB_Expression *rhs_expr = new firrtl::FirrtlPB_Expression();
   add_refcon_as_expr(ln, c1, rhs_expr);
 
   // Now assign lhs to rhs.
   make_assignment(ln, c0, rhs_expr, fstmt);
+  return true;
 }
 
 void Inou_firrtl::process_ln_not_op(Lnast &ln, const Lnast_nid &lnidx_not, firrtl::FirrtlPB_Statement* fstmt) {
@@ -256,11 +244,6 @@ void Inou_firrtl::process_ln_nary_op(Lnast &ln, const Lnast_nid &lnidx_op, firrt
   bool first_arg = true;
   std::string lhs, rhs;
   uint8_t child_count = 0;
-
-  auto ntype = ln.get_data(lnidx_op).type;
-  if (ntype.is_ge() || ntype.is_gt() || ntype.is_le() || ntype.is_lt()) {
-    I(child_count == 3); //I think there should only be 1 output + 2 inputs to a comp node.
-  }
 
   auto firrtl_oper_code = get_firrtl_oper_code(ln.get_data(lnidx_op).type);
 
@@ -298,6 +281,11 @@ void Inou_firrtl::process_ln_nary_op(Lnast &ln, const Lnast_nid &lnidx_op, firrt
       add_refcon_as_expr(ln, lnchild_idx, rhs_prim_op->add_arg());
     }
     child_count++;
+  }
+
+  auto ntype = ln.get_data(lnidx_op).type;
+  if (ntype.is_ge() || ntype.is_gt() || ntype.is_le() || ntype.is_lt()) {
+    I(child_count == 3); //I think there should only be 1 output + 2 inputs to a comp node.
   }
 
   // Now assign lhs to rhs.
@@ -366,6 +354,118 @@ firrtl::FirrtlPB_Statement_When* Inou_firrtl::process_ln_if_op(Lnast &ln, const 
   }
 
   return when_highest;
+}
+
+/* Since the range op only indicates that there is a
+ * value range from the low value to the high value,
+ * this is added to a map for later access. */
+//Note->hunter: This only accepts positive values, and not LNAST's negative range capability.
+void Inou_firrtl::process_ln_range_op(Lnast &ln, const Lnast_nid &lnidx_range) {
+  auto lhs_node = ln.get_first_child(lnidx_range);
+  auto range_lo = ln.get_sibling_next(lhs_node);
+  auto range_hi = ln.get_sibling_next(range_lo);
+
+  name_to_range_map[ln.get_name(lhs_node)] = {range_lo, range_hi};
+}
+
+void Inou_firrtl::process_ln_bitsel_op(Lnast &ln, const Lnast_nid &lnidx_bitsel, firrtl::FirrtlPB_Statement* fstmt) {
+  auto lhs_node  = ln.get_first_child(lnidx_bitsel);
+  auto elem_node = ln.get_sibling_next(lhs_node);
+  auto range_acc = ln.get_sibling_next(elem_node);
+
+  auto range_pair = name_to_range_map[ln.get_name(range_acc)];
+  // Note->hunter: FIRRTL requires range values to be constant numbers.
+  I(ln.get_data(range_pair.first).type.is_const() && ln.get_data(range_pair.second).type.is_const());
+
+  // Create rhs expr, make if a prim op of type "extract bits"
+  firrtl::FirrtlPB_Expression *rhs_expr = new firrtl::FirrtlPB_Expression();
+  auto firrtl_oper_code = get_firrtl_oper_code(ln.get_data(lnidx_bitsel).type);
+  firrtl::FirrtlPB_Expression_PrimOp *rhs_prim_op = new firrtl::FirrtlPB_Expression_PrimOp();
+  rhs_prim_op->set_op(firrtl_oper_code);
+
+  // Add arguments to "EXTRACT_BITS" op
+  add_refcon_as_expr(ln, elem_node, rhs_prim_op->add_arg());
+  add_const_as_ilit(ln, range_pair.second, rhs_prim_op->add_const_());
+  add_const_as_ilit(ln, range_pair.first, rhs_prim_op->add_const_());
+  rhs_expr->set_allocated_prim_op(rhs_prim_op);
+
+  // Now assign lhs to rhs.
+  make_assignment(ln, lhs_node, rhs_expr, fstmt);
+}
+
+void Inou_firrtl::process_ln_dot(Lnast &ln, const Lnast_nid &lnidx_dot) {
+  auto lhs = ln.get_first_child(lnidx_dot);
+  auto tup = ln.get_sibling_next(lhs);
+  auto field = ln.get_sibling_next(tup);
+
+  dot_map[ln.get_name(lhs)] = {tup, field};
+}
+
+void Inou_firrtl::handle_attr_assign(Lnast &ln, const Lnast_nid &lhs, const Lnast_nid &rhs) {
+  auto pair = dot_map[ln.get_name(lhs)];
+  auto var = pair.first;
+  auto var_name = ln.get_name(var);
+  auto attr = pair.second;
+  auto attr_name = ln.get_name(attr);
+
+  //TODO: __signed __posedge ...
+  if (attr_name == "__clk_pin") {
+    handle_clock_attr(ln, var_name, rhs);
+  } else {
+    fmt::print("Error: attribute found, but it is either incorrect or not supported yet.\n");
+    //I(false);
+  }
+}
+
+void Inou_firrtl::handle_clock_attr(Lnast &ln, const std::string_view &var_name, const Lnast_nid &rhs) {
+  I(reg_wire_map.contains(var_name.substr(1)));
+  auto stmt = reg_wire_map[var_name.substr(1)];
+  I(stmt->has_register_());
+  auto reg = stmt->mutable_register_();
+
+  /* Now we need to set whatever is represented by var_name to have type Clock.
+   * If it's a circuit component, then just change the type to be clock. If it's
+   * not, then we have to create as asClock expression to convert the intermediate */
+  //FIXME: Perhaps I should add checks to make sure changing this to Clock won't break something else.
+  auto clk_name = ln.get_name(rhs);
+  if (io_map.contains(clk_name.substr(1))) {
+    auto port_ptr = io_map[clk_name.substr(1)];
+    auto clk_type = new firrtl::FirrtlPB_Type_ClockType();
+    auto type = new firrtl::FirrtlPB_Type();
+    type->set_allocated_clock_type(clk_type);
+    port_ptr->set_allocated_type(type);
+
+  } else if (reg_wire_map.contains(clk_name.substr(1))) {
+    auto stmt_ptr = reg_wire_map[clk_name.substr(1)];
+    auto clk_type = new firrtl::FirrtlPB_Type_ClockType();
+    auto type = new firrtl::FirrtlPB_Type();
+    type->set_allocated_clock_type(clk_type);
+    stmt_ptr->mutable_register_()->set_allocated_type(type);
+
+  } else if (reg_wire_map.contains(clk_name)) {
+    auto stmt_ptr = reg_wire_map[clk_name.substr(1)];
+    auto clk_type = new firrtl::FirrtlPB_Type_ClockType();
+    auto type = new firrtl::FirrtlPB_Type();
+    type->set_allocated_clock_type(clk_type);
+    stmt_ptr->mutable_wire()->set_allocated_type(type);
+
+  } else {
+    //FIXME: Create asClock here to change rhs name to clock (then use that as expr for clock field
+    firrtl::FirrtlPB_Expression_PrimOp *prim = new firrtl::FirrtlPB_Expression_PrimOp();
+    prim->set_op(firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_CLOCK);
+    auto arg = prim->add_arg();
+    add_refcon_as_expr(ln, rhs, arg);
+    firrtl::FirrtlPB_Expression *expr = new firrtl::FirrtlPB_Expression();
+    expr->set_allocated_prim_op(prim);
+
+    reg->set_allocated_clock(expr);
+    return; //Don't do final step, since we did actual assignment on previous line
+  }
+
+  // Set the register's clock.
+  firrtl::FirrtlPB_Expression *clk_expr = new firrtl::FirrtlPB_Expression();
+  add_refcon_as_expr(ln, rhs, clk_expr);
+  reg->set_allocated_clock(clk_expr);
 }
 
 //----- Helper Functions -----
@@ -471,6 +571,8 @@ firrtl::FirrtlPB_Expression_PrimOp_Op Inou_firrtl::get_firrtl_oper_code(const Ln
     return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_BIT_XOR;
   } else if (ntype.is_bit_select()) {
     return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_EXTRACT_BITS;
+  } else if (ntype.is_shift_left()) {
+    return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_DYNAMIC_SHIFT_LEFT;
   }else {
     I(false); //some nary op not yet supported
     return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_UNKNOWN;
