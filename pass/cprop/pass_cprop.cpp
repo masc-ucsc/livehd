@@ -556,15 +556,6 @@ bool Pass_cprop::process_tuple_get(Node &node) {
 
   auto parent_dpin = node.get_sink_pin(0).get_driver_pin();
   auto parent_node = parent_dpin.get_node();
-  /* if (parent_node.has_sink_pin_connected(1) && parent_node.get_sink_pin(1).get_driver_pin().get_name() == "__wire") { */
-  /*   //this tuple_add is the dummy wire, get its parent to start analysis */
-  /*   fmt::print("parent_node:{}\n", parent_node.debug_name()); */
-  /*   auto spin = parent_node.get_sink_pin(0); */
-  /*   fmt::print("inp size:{}\n", spin.inp_edges().size()); */
-
-  /*   parent_dpin = parent_node.get_sink_pin(0).get_driver_pin(); */
-  /*   parent_node = parent_dpin.get_node(); */
-  /* } */
 
   auto ptup_it             = node2tuple.find(parent_node.get_compact());
   auto [key_name, key_pos] = get_tuple_name_key(node);

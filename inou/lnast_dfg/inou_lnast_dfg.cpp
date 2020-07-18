@@ -557,18 +557,20 @@ void Inou_lnast_dfg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnid
 //either tuple root or tuple key(str) fit in this case
 Node_pin Inou_lnast_dfg::setup_tuple_ref(LGraph *dfg, std::string_view ref_name, bool for_tuple_add) {
   auto it = name2dpin.find(ref_name);
-  Node_pin dpin;
-  if (it != name2dpin.end()) {
-  // exclude the parrent of __wire node
-    auto tn_node = it->second.get_node();
-    auto tn_ntype = tn_node.get_type().op;
-    bool is_wire = for_tuple_add && tn_ntype == TupAdd_Op && tn_node.has_sink_pin_connected(1) 
-                   && tn_node.get_sink_pin(1).get_driver_pin().get_name() == "__wire";
-    if (!is_wire)
-      return dpin = it->second;
-  }
+  /* if (it != name2dpin.end()) { */
+  /* // exclude the parrent of __wire node */
+  /*   auto tn_node = it->second.get_node(); */
+  /*   auto tn_ntype = tn_node.get_type().op; */
+  /*   bool is_wire = for_tuple_add && tn_ntype == TupAdd_Op && tn_node.has_sink_pin_connected(1) */ 
+  /*                  && tn_node.get_sink_pin(1).get_driver_pin().get_name() == "__wire"; */
+  /*   if (!is_wire) */
+  /*     return dpin = it->second; */
+  /* } */
 
-  dpin = dfg->create_node(TupRef_Op).setup_driver_pin();
+  if (it != name2dpin.end()) 
+    return it->second;
+
+  auto dpin = dfg->create_node(TupRef_Op).setup_driver_pin();
   dpin.set_name(ref_name);
   name2dpin[ref_name] = dpin;
 
@@ -781,10 +783,10 @@ Node_pin Inou_lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx
     }
   }
 
-  const auto it_wire = wire2node.find(vname);
-  if (it_wire != wire2node.end()) {
-    return it_wire->second.get_driver_pin(0);
-  }
+  /* const auto it_wire = wire2node.find(vname); */
+  /* if (it_wire != wire2node.end()) { */
+  /*   return it_wire->second.get_driver_pin(0); */
+  /* } */
 
 
   const auto it = name2dpin.find(name);
@@ -857,23 +859,23 @@ void Inou_lnast_dfg::process_ast_attr_set_op (LGraph *dfg, const Lnast_nid &lnid
   auto c1_aset      = lnast->get_sibling_next(c0_aset);
   auto c2_aset      = lnast->get_sibling_next(c1_aset);
   auto c0_aset_name = lnast->get_sname(c0_aset);  // ssa name
-  auto c1_aset_vname = lnast->get_vname(c1_aset); // no-ssa name
+  /* auto c1_aset_vname = lnast->get_vname(c1_aset); // no-ssa name */
   auto attr_vname   = lnast->get_vname(c1_aset);  // no-ssa name
   auto vname        = lnast->get_vname(c0_aset);  // no-ssa name
 
-  if (attr_vname == "__wire") {
-    /* auto or_node = dfg->create_node(Or_Op); */ 
-    auto ta_node = dfg->create_node(TupAdd_Op); 
-    auto attr_key_spin = ta_node.setup_sink_pin("KN");
-    auto attr_key_dpin = setup_key_dpin(dfg, c1_aset_vname);
-    dfg->add_edge(attr_key_dpin, attr_key_spin);
+  /* if (attr_vname == "__wire") { */
+  /*   /1* auto or_node = dfg->create_node(Or_Op); *1/ */ 
+  /*   auto ta_node = dfg->create_node(TupAdd_Op); */ 
+  /*   auto attr_key_spin = ta_node.setup_sink_pin("KN"); */
+  /*   auto attr_key_dpin = setup_key_dpin(dfg, c1_aset_vname); */
+  /*   dfg->add_edge(attr_key_dpin, attr_key_spin); */
 
-    name2dpin[c0_aset_name] = ta_node.setup_driver_pin(0);
-    ta_node.get_driver_pin(0).set_name(c0_aset_name);
-    setup_dpin_ssa(name2dpin[c0_aset_name], vname, lnast->get_subs(c0_aset));
-    wire2node[vname] = ta_node;
-    return;
-  }
+  /*   name2dpin[c0_aset_name] = ta_node.setup_driver_pin(0); */
+  /*   ta_node.get_driver_pin(0).set_name(c0_aset_name); */
+  /*   setup_dpin_ssa(name2dpin[c0_aset_name], vname, lnast->get_subs(c0_aset)); */
+  /*   wire2node[vname] = ta_node; */
+  /*   return; */
+  /* } */
 
 
   auto aset_node = dfg->create_node(AttrSet_Op);
@@ -916,8 +918,16 @@ void Inou_lnast_dfg::process_ast_attr_get_op(LGraph *dfg, const Lnast_nid &lnidx
   auto c2_aget = lnast->get_sibling_next(c1_aget);
   auto c0_aget_name  = lnast->get_sname(c0_aget);
   auto c0_aget_vname = lnast->get_vname(c0_aget);
-  auto c1_aget_name = lnast->get_sname(c1_aget);
-  auto attr_name    = lnast->get_vname(c2_aget);
+  auto c1_aget_name  = lnast->get_sname(c1_aget);
+  auto driver_vname  = lnast->get_sname(c1_aget);
+  auto attr_name     = lnast->get_vname(c2_aget);
+
+  if (attr_name == "__final_value") {
+    auto wire_node = dfg->create_node();
+    name2dpin[c0_aget_name] = wire_node.setup_driver_pin();
+    setup_dpin_ssa(name2dpin[c0_aget_name], c0_aget_vname, lnast->get_subs(c0_aget));
+    driver_var2wire_node[driver_vname] = wire_node;
+  }
 
   auto aget_node = dfg->create_node(AttrGet_Op);
   auto vn_spin   = aget_node.setup_sink_pin("VN"); // variable name
@@ -1019,10 +1029,9 @@ void Inou_lnast_dfg::setup_lgraph_outputs_and_final_var_name(LGraph *dfg) {
       continue;
     } 
 
-    if (wire2node.find(vname) != wire2node.end()) {
-      I(wire2node[vname] != dpin.get_node());
-      fmt::print("dpin:{}\n", dpin.debug_name());
-      auto spin = wire2node[vname].get_sink_pin(0);
+    if (driver_var2wire_node.find(vname) != driver_var2wire_node.end()) {
+      I(driver_var2wire_node[vname] != dpin.get_node());
+      auto spin = driver_var2wire_node[vname].get_sink_pin(0);
       dfg->add_edge(dpin, spin);
       continue;
     }
