@@ -544,7 +544,8 @@ void Prp_lnast::eval_if_statement(mmap_lib::Tree_index idx_start_ast, mmap_lib::
         cur_ast = ast->get_data(idx_nxt_ast);
       }
       // find condition if it's present
-      if (is_expr(idx_nxt_ast) || cur_ast.rule_id == Prp_rule_reference || cur_ast.rule_id == Prp_rule_numerical_constant) {
+      PRINT_DBG_LN("about to check condition\n");
+      if (is_expr(idx_nxt_ast) || cur_ast.rule_id == Prp_rule_reference || cur_ast.rule_id == Prp_rule_numerical_constant || cur_ast.rule_id == Prp_rule_constant || cur_ast.rule_id == Prp_rule_string_constant) {
         auto idx_cond_ln = lnast->add_child(idx_nxt_ln, Lnast_node::create_cstmts(""));
         auto old_stmts   = cur_stmts;
         cur_stmts        = idx_cond_ln;
