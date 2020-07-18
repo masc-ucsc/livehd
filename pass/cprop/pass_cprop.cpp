@@ -471,7 +471,7 @@ void Pass_cprop::merge_to_tuple(std::shared_ptr<Lgtuple> ctup, Node &node, Node 
         compile_error = true;
     }
 
-    if (node.has_sink_pin_connected(1) && node.get_sink_pin(1).get_driver_pin().get_name() == "__wire") {
+    if (node.has_sink_pin_connected(1) && node.get_sink_pin(1).get_driver_pin().get_name() == "__final_value") {
       I(node.get_type().op == TupAdd_Op);
       node2tuple[node.get_compact()] = ctup;
       return;  // for the __wire tuple_add, there is no new tuple_chain element need to add, just inherit it's parent Lgtuple, i.e.
@@ -580,7 +580,7 @@ bool Pass_cprop::process_tuple_get(Node &node) {
     else
       key = key_name;
 
-    Pass::error("in tuple_get {} parent_node {}, there is no tuple of {}, so no valid field {}\n",
+    Pass::error("for tuple_get {} parent_node {}, there is no tuple of {}, so no valid field {}\n",
                 node.debug_name(),
                 parent_node.debug_name(),
                 tup_name,
@@ -595,6 +595,12 @@ bool Pass_cprop::process_tuple_get(Node &node) {
     auto &ctup = ptup_it->second;
     if (ctup->has_key_name(key_name)) {
       val_dpin = ctup->get_value_dpin(key_pos, key_name);
+    /* } else if (node.out_edges()[0].sink.get_node().get_type_op() == Mux_Op) { */
+    /*   I(node.get_driver_pin().out_edges().size() == 1); */
+    /*   // this is the case of tuple-if, where TG try to get upper scope tuple field but the target is not there. */
+    /*   // keep this TG and wait cprop to try to resolve the mux at compile time. */ 
+    /*   // If success, maybe never choose the TG path */
+    /*   return false; */
     } else {
       ctup->dump();
       Pass::error("tuple {} does not have field {}\n", tup_name, key_name);

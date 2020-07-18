@@ -1,4 +1,4 @@
-res = sum(a = 3, b = 2)
-%out1 = res.o1
-%out2 = res.o2
-
+foo.b = 2
+if (1 == 1) {
+  foo.a = 3 
+}
