@@ -27,6 +27,12 @@ new_git_repository( # Open_timer user taskflow
     commit = "3d2b025ff2509f40424855e3f8640fc2fb6b90b9", # July 1, 2020
     remote = "https://github.com/serge-sans-paille/frozen.git",
 )
+git_repository( # Open_timer user taskflow
+    name = "range-v3",
+    commit = "6dd1cb6a03a588031868b6ffb66286e6eaab6714", # July 18, 2020
+    remote = "https://github.com/ericniebler/range-v3.git",
+)
+
 new_git_repository( # Open_timer user taskflow
     name = "taskflow",
     build_file = "BUILD.taskflow",
