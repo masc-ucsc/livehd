@@ -930,8 +930,8 @@ void Inou_lnast_dfg::process_ast_func_call_op(LGraph *dfg, const Lnast_nid &lnid
 
     // start query subgraph io and construct TGs for connecting inputs, TAs for connecting outputs
     for (const auto &io_pin : sub->get_io_pins()) {
-      Port_ID pid = sub->get_graph_pos(io_pin.name);
-      fmt::print("io_name:{}, pid:{}\n", io_pin.name, pid);
+      Port_ID pos_pid = sub->get_graph_pos(io_pin.name);
+      fmt::print("io_name:{}, pos_pid:{}\n", io_pin.name, pos_pid);
       if (io_pin.is_input()) {
         auto tup_get = dfg->create_node(TupGet_Op);
         auto tn_spin = tup_get.setup_sink_pin("TN"); // tuple name
@@ -943,7 +943,7 @@ void Inou_lnast_dfg::process_ast_func_call_op(LGraph *dfg, const Lnast_nid &lnid
         auto kn_dpin = setup_key_dpin(dfg, io_pin.name);
         kn_dpin.connect_sink(kn_spin);
         
-        auto subg_spin = subg_node.setup_sink_pin(pid);
+        auto subg_spin = subg_node.setup_sink_pin(io_pin.name);
         tup_get.setup_driver_pin().connect_sink(subg_spin);
 
       } else {
@@ -958,7 +958,7 @@ void Inou_lnast_dfg::process_ast_func_call_op(LGraph *dfg, const Lnast_nid &lnid
         auto kn_dpin = setup_key_dpin(dfg, io_pin.name);
         kn_dpin.connect_sink(kn_spin);
 
-        auto subg_dpin = subg_node.setup_driver_pin(pid);
+        auto subg_dpin = subg_node.setup_driver_pin(io_pin.name);
         subg_dpin.connect_sink(value_spin);
       }
     }
