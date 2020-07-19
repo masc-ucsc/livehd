@@ -270,6 +270,15 @@ public:
   Node     get_driver_node() const;
   Node_pin get_driver_pin() const;
 
+  void del_driver(Node_pin &dst);
+  void del_sink(Node_pin &dst);
+  void del(Node_pin &dst) {
+    if (dst.is_sink() && is_driver())
+      return del_sink(dst);
+    I(dst.is_driver() && is_sink());
+    return del_driver(dst);
+  }
+
   void connect_sink(Node_pin &dst);
   void connect_sink(Node_pin &&dst) { connect_sink(dst); }
   void connect_driver(Node_pin &dst);

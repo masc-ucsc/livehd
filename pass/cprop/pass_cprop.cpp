@@ -33,6 +33,9 @@ void Pass_cprop::optimize(Eprp_var &var) {
 
 void Pass_cprop::collapse_forward_same_op(Node &node, XEdge_iterator &inp_edges_ordered) {
   auto op = node.get_type().op;
+
+	absl::flat_hash_map<Node_pin, int> repetitions;
+
   for (auto &out : node.out_edges()) {
     if (out.sink.get_node().get_type().op != op)
       continue;
@@ -41,7 +44,23 @@ void Pass_cprop::collapse_forward_same_op(Node &node, XEdge_iterator &inp_edges_
 
     for (auto &inp : inp_edges_ordered) {
       TRACE(fmt::print("cprop same_op pin:{} to pin:{}\n", inp.driver.debug_name(), out.sink.debug_name()));
-      out.sink.connect_driver(inp.driver);
+      auto it = repetitions.find(inp.driver);
+			if (it == repetitions.end()){
+				repetitions[inp.driver] = 1;
+				out.sink.connect_driver(inp.driver);
+			} else {
+				if (op == Xor_Op) {
+					fmt::print("cprop simplified forward xor pin:{}\n",inp.driver.debug_name());
+					out.sink.del_driver(inp.driver);
+				} else if (op == Or_Op || op == And_Op) {
+					fmt::print("cprop simplified forward or/and pin:{}\n",inp.driver.debug_name());
+				} else if (op == Sum_Op) {
+					fmt::print("cprop FIXME optimize sum pin:{}\n",inp.driver.debug_name());
+					out.sink.connect_driver(inp.driver);
+				} else {
+					out.sink.connect_driver(inp.driver);
+				}
+			}
     }
     TRACE(fmt::print("cprop same_op del_edge pin:{} to pin:{}\n", out.driver.debug_name(), out.sink.debug_name()));
     out.del_edge();
@@ -754,6 +773,4 @@ void Pass_cprop::trans(LGraph *g) {
       continue;
     }
   }
-
-  g->sync();
 }
