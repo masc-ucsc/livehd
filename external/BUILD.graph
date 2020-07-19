@@ -4,6 +4,9 @@ cc_library(
     name = "graph",
     hdrs = glob(["include/graph/*","include/graph/impl/*"]),
     visibility = ["//visibility:public"],
-    includes = ["include"],
+    includes = ["include/graph"],
+	deps = [
+		"@range-v3//:range-v3",
+	],
     )
 

@@ -178,8 +178,14 @@ new_git_repository(
 new_git_repository(
     name = "graph",
     build_file = "BUILD.graph",
-    commit = "b1e38e1084a0dff6f4eb4ed9a645ed63d3e83dd2",
+    commit = "b1e38e1084a0dff6f4eb4ed9a645ed63d3e83dd2", # latest commit as of 7/18/20
     remote = "https://github.com/cbbowen/graph",
+)
+new_git_repository(
+	name = "range-v3",
+	build_file = "BUILD.rangev3",
+	commit = "4f4beb45c5e56aca4233e4d4c760208e21fff2ec", # old commit required by graph
+	remote = "https://github.com/ericniebler/range-v3",
 )
 
 # BOOST Libraries dependences

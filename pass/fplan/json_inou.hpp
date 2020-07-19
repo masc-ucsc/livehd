@@ -11,11 +11,12 @@
 #include <iterator>
 
 #include "rapidjson/document.h" // for json parsing
+
+#include "Adjacency_list.hpp"
+#undef I // graph and iassert both declare "I" macros, but we only need the one from iassert
+
 #include "iassert.hpp"
-
-#include "graph/Adjacency_list.hpp"
-
-#include "netl_hypertree.hpp"
+#include "hier_tree.hpp"
 
 class Json_inou_parser {
 public:

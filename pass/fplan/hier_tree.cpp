@@ -1,4 +1,4 @@
-#include "netl_hypertree.hpp"
+#include "hier_tree.hpp"
 
 unsigned int Hier_tree::size(const phier top) {
   if (top->size != 0) {
@@ -356,6 +356,10 @@ phier Hier_tree::discover_hierarchy(Cost_matrix& m) {
   return make_hier_tree(t1, t2);
 }
 */
+
+Hier_tree::Hier_tree(const std::vector<pnetl> nl) {
+  // TODO: make a matrix out of the netlist
+}
 
 void Hier_tree::collapse() {
   

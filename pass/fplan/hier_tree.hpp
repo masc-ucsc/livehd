@@ -60,7 +60,7 @@ class Hier_tree {
 public:
   Hier_tree() { }
   
-  // take in a vector of all nodes in the netlist, and convert it to a hierarchy to store internally
+  // take in a vector of all nodes in the netlist, and convert it to a tree.
   Hier_tree(const std::vector<pnetl> nl);
   
   // copies require copying the entire tree and are very expensive.
