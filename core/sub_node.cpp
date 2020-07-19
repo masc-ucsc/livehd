@@ -112,3 +112,37 @@ void Sub_node::dump() const {
     pos++;
   }
 }
+
+void Sub_node::populate_graph_pos() {
+
+  // pins: INV, 1 2 3 (4 entries)
+  // pos : 0 1 2  (3 entries)
+
+  if (graph_pos2instance_pid.size() == io_pins.size()-1)
+    return; // all the pins are already populated
+
+  // FIXME: populate on alphabetical order if no pos assigned before
+
+  for (Port_ID instance_pid=1;instance_pid<io_pins.size();++instance_pid) {
+
+    auto &pin = io_pins[instance_pid];
+
+    if (pin.graph_io_pos != Port_invalid)
+      continue;
+
+    // Look for empty graph_pos
+    for(auto pos=0u;pos<graph_pos2instance_pid.size();++pos) {
+      if (graph_pos2instance_pid[pos] == Port_invalid) {
+        graph_pos2instance_pid[pos]        = instance_pid;
+        pin.graph_io_pos = pos;
+        break;
+      }
+    }
+    // Check if no empty, found add one
+    if (pin.graph_io_pos == Port_invalid) {
+      auto pos = graph_pos2instance_pid.size();
+      graph_pos2instance_pid.emplace_back(instance_pid);
+      pin.graph_io_pos = pos;
+    }
+  }
+}
