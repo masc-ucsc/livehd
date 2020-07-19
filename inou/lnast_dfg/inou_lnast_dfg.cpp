@@ -925,11 +925,66 @@ void Inou_lnast_dfg::process_ast_attr_get_op(LGraph *dfg, const Lnast_nid &lnidx
   setup_dpin_ssa(name2dpin[c0_aget_name], c0_aget_vname, lnast->get_subs(c0_aget));
 }
 
+void Inou_lnast_dfg::process_ast_func_call_op(LGraph *dfg, const Lnast_nid &lnidx_fc) {
+  auto c0_fc = lnast->get_first_child(lnidx_fc);
+  auto res_name  = lnast->get_sname(c0_fc);
+  auto func_name = lnast->get_vname(lnast->get_sibling_next(c0_fc));
+  auto tup_name  = lnast->get_sname(lnast->get_last_child(lnidx_fc));
+
+  if (name2dpin.find(func_name) == name2dpin.end()) {
+    fmt::print("function {} not defined in same prp file, query lgdb\n", func_name);
+    auto path = dfg->get_path();
+    auto *library = Graph_library::instance(path);
+    Lg_type_id lgid;
+    if (library->has_name(func_name)) {
+      lgid = library->get_lgid(func_name);
+    }
+    
+    auto *sub = library->ref_sub(lgid);
+    auto subg_node = dfg->create_node_sub(lgid);
+
+    // start query subgraph io and construct TGs for connecting inputs, TAs for connecting outputs
+    for (const auto &io_pin : sub->get_io_pins()) {
+      Port_ID pid = io_pin.get_graph_pos();
+      fmt::print("io_name:{}, pid:{}\n", io_pin.name, pid);
+      if (io_pin.is_input()) {
+        auto tup_get = dfg->create_node(TupGet_Op);
+        auto tn_spin = tup_get.setup_sink_pin("TN"); // tuple name
+        auto kn_spin = tup_get.setup_sink_pin("KN"); // key name
+
+        auto tn_dpin = setup_tuple_ref(dfg, tup_name);
+        tn_dpin.connect_sink(tn_spin);
+
+        auto kn_dpin = setup_key_dpin(dfg, io_pin.name);
+        kn_dpin.connect_sink(kn_spin);
+        
+        auto subg_spin = subg_node.setup_sink_pin(pid);
+        tup_get.setup_driver_pin().connect_sink(subg_spin);
+
+      } else {
+        auto tup_add    = dfg->create_node(TupAdd_Op);
+        auto tn_spin    = tup_add.setup_sink_pin("TN"); //tuple name
+        auto kn_spin    = tup_add.setup_sink_pin("KN"); //key name
+        auto value_spin = tup_add.setup_sink_pin("KV"); //value
+
+        auto tn_dpin = setup_tuple_ref(dfg, res_name, true);
+        tn_dpin.connect_sink(tn_spin);
+
+        auto kn_dpin = setup_key_dpin(dfg, io_pin.name);
+        kn_dpin.connect_sink(kn_spin);
+
+        auto subg_dpin = subg_node.setup_driver_pin(pid);
+        subg_dpin.connect_sink(value_spin);
+      }
+    }
+
+    return;
+  }
+};
 
 void Inou_lnast_dfg::process_ast_as_op       (LGraph *dfg, const Lnast_nid &lnidx) { ; };
 void Inou_lnast_dfg::process_ast_label_op    (LGraph *dfg, const Lnast_nid &lnidx) { ; };
 void Inou_lnast_dfg::process_ast_uif_op      (LGraph *dfg, const Lnast_nid &lnidx) { ; };
-void Inou_lnast_dfg::process_ast_func_call_op(LGraph *dfg, const Lnast_nid &lnidx) { ; };
 void Inou_lnast_dfg::process_ast_func_def_op (LGraph *dfg, const Lnast_nid &lnidx) { ; };
 void Inou_lnast_dfg::process_ast_sub_op      (LGraph *dfg, const Lnast_nid &lnidx) { ; };
 void Inou_lnast_dfg::process_ast_for_op      (LGraph *dfg, const Lnast_nid &lnidx) { ; };
