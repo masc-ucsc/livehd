@@ -10,26 +10,8 @@ void Inou_lnast_dfg::setup() {
   m1.add_label_optional("path", "path to output the lgraph[s] to", "lgdb");
   register_pass(m1);
 
-
-  Eprp_method m2("inou.lnast_dfg.assignment_or_elimination", "eliminate assignment or_op for clear algorithm", &Inou_lnast_dfg::assignment_or_elimination);
-  m2.add_label_optional("path", "path to read the lgraph[s]", "lgdb");
-  m2.add_label_optional("odir", "output directory for generated verilog files", ".");
-  register_inou("lnast_dfg",m2);
-
-  Eprp_method m3("inou.lnast_dfg.resolve_tuples", "resolve tuple chains for flattened lgraph", &Inou_lnast_dfg::resolve_tuples);
-  m3.add_label_optional("path", "path to read the lgraph[s]", "lgdb");
-  m3.add_label_optional("odir", "output directory for generated verilog files", ".");
-  register_inou("lnast_dfg",m3);
-
-
-  Eprp_method m4("inou.lnast_dfg.dce", "dead code elimination", &Inou_lnast_dfg::dce);
-  m4.add_label_optional("path", "path to read the lgraph[s]", "lgdb");
-  m4.add_label_optional("odir", "output directory for generated verilog files", ".");
-  register_inou("lnast_dfg",m4);
-
-
-  Eprp_method m5("inou.lnast_dfg.dbg_lnast_ssa", " perform the LNAST SSA transformation, only for debug purpose", &Inou_lnast_dfg::dbg_lnast_ssa);
-  register_pass(m5);
+  Eprp_method m2("inou.lnast_dfg.dbg_lnast_ssa", " perform the LNAST SSA transformation, only for debug purpose", &Inou_lnast_dfg::dbg_lnast_ssa);
+  register_pass(m2);
 }
 
 Inou_lnast_dfg::Inou_lnast_dfg(const Eprp_var &var) : Pass("inou.lnast_dfg", var) {
@@ -925,6 +907,7 @@ void Inou_lnast_dfg::process_ast_attr_get_op(LGraph *dfg, const Lnast_nid &lnidx
   setup_dpin_ssa(name2dpin[c0_aget_name], c0_aget_vname, lnast->get_subs(c0_aget));
 }
 
+
 void Inou_lnast_dfg::process_ast_func_call_op(LGraph *dfg, const Lnast_nid &lnidx_fc) {
   auto c0_fc = lnast->get_first_child(lnidx_fc);
   auto res_name  = lnast->get_sname(c0_fc);
@@ -945,7 +928,7 @@ void Inou_lnast_dfg::process_ast_func_call_op(LGraph *dfg, const Lnast_nid &lnid
 
     // start query subgraph io and construct TGs for connecting inputs, TAs for connecting outputs
     for (const auto &io_pin : sub->get_io_pins()) {
-      Port_ID pid = io_pin.get_graph_pos();
+      Port_ID pid = sub->get_graph_pos(io_pin.name);
       fmt::print("io_name:{}, pid:{}\n", io_pin.name, pid);
       if (io_pin.is_input()) {
         auto tup_get = dfg->create_node(TupGet_Op);
@@ -982,10 +965,24 @@ void Inou_lnast_dfg::process_ast_func_call_op(LGraph *dfg, const Lnast_nid &lnid
   }
 };
 
+void Inou_lnast_dfg::process_ast_func_def_op (LGraph *dfg, const Lnast_nid &lnidx) {
+  auto c0_fdef = lnast->get_first_child(lnidx);
+  auto c1_fdef = lnast->get_sibling_next(c0_fdef);
+  auto func_stmts = lnast->get_sibling_next(c1_fdef);
+  auto func_name = lnast->get_vname(c0_fdef);
+  LGraph *subg = LGraph::create(path, func_name, "inou.lnast_dfg.tolg");
+
+  fmt::print("============================= SubGraph Phase-1: LNAST->LGraph Start ===============================================\n");
+  process_ast_stmts(subg, func_stmts);
+
+  fmt::print("============================= SubGraph Phase-2: Adding final Module Outputs and Final Dpin Name ===================\n");
+  setup_lgraph_outputs_and_final_var_name(subg);
+
+};
+
 void Inou_lnast_dfg::process_ast_as_op       (LGraph *dfg, const Lnast_nid &lnidx) { ; };
 void Inou_lnast_dfg::process_ast_label_op    (LGraph *dfg, const Lnast_nid &lnidx) { ; };
 void Inou_lnast_dfg::process_ast_uif_op      (LGraph *dfg, const Lnast_nid &lnidx) { ; };
-void Inou_lnast_dfg::process_ast_func_def_op (LGraph *dfg, const Lnast_nid &lnidx) { ; };
 void Inou_lnast_dfg::process_ast_sub_op      (LGraph *dfg, const Lnast_nid &lnidx) { ; };
 void Inou_lnast_dfg::process_ast_for_op      (LGraph *dfg, const Lnast_nid &lnidx) { ; };
 void Inou_lnast_dfg::process_ast_while_op    (LGraph *dfg, const Lnast_nid &lnidx) { ; };
