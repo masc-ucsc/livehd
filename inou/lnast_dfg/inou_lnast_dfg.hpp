@@ -79,14 +79,14 @@ protected:
 
 
   // tuple related
-  Node_pin     setup_tuple_ref               (LGraph *dfg, std::string_view tup_name, bool for_tuple_add = 0);
-  Node_pin     setup_key_dpin                (LGraph *dfg, std::string_view key_name);
-  void         reconnect_to_ff_qpin          (LGraph *dfg, const Node &tg_node);
-  static bool  tuple_get_has_key_name        (const Node &tup_get);
-  static bool  tuple_get_has_key_pos         (const Node &tup_get);
-  static bool  is_tup_get_target             (const Node &tup_add, std::string_view tup_get_target);
-  static bool  is_tup_get_target             (const Node &tup_add, uint32_t         tup_get_target);
-  static void  collect_node_for_deleting     (const Node &node, absl::flat_hash_set<Node> &to_be_deleted);
+  Node_pin     setup_tuple_ref           (LGraph *dfg, std::string_view tup_name, bool for_tuple_add = 0);
+  Node_pin     setup_key_dpin            (LGraph *dfg, std::string_view key_name);
+  void         reconnect_to_ff_qpin      (LGraph *dfg, const Node &tg_node);
+  static bool  tuple_get_has_key_name    (const Node &tup_get);
+  static bool  tuple_get_has_key_pos     (const Node &tup_get);
+  static bool  is_tup_get_target         (const Node &tup_add, std::string_view tup_get_target);
+  static bool  is_tup_get_target         (const Node &tup_add, uint32_t         tup_get_target);
+  static void  collect_node_for_deleting (const Node &node, absl::flat_hash_set<Node> &to_be_deleted);
 
 
   // attribute related
@@ -94,11 +94,8 @@ protected:
 
 
   // eprp callbacks
-  static void tolg                  (Eprp_var &var);
-  static void resolve_tuples        (Eprp_var &var);
-  static void assignment_or_elimination(Eprp_var &var);
-  static void dce                   (Eprp_var &var);
-  static void dbg_lnast_ssa         (Eprp_var &var);
+  static void tolg                     (Eprp_var &var);
+  static void dbg_lnast_ssa            (Eprp_var &var);
 
 public:
   explicit Inou_lnast_dfg(const Eprp_var &var);
