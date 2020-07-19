@@ -1,0 +1,12 @@
+if (true) {
+  sum = ::{
+    %o = $a + $b
+  }
+} else {
+  sum = ::{
+    %o = $a - $b
+  }
+}
+
+res = sum(a = 2, b = 3)
+%out = res.o
