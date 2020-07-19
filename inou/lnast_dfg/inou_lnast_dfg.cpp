@@ -65,6 +65,8 @@ void Inou_lnast_dfg::lnast2lgraph(LGraph *dfg) {
 
   fmt::print("============================= Phase-2: Adding final Module Outputs and Final Dpin Name ===================\n");
   setup_lgraph_outputs_and_final_var_name(dfg);
+
+  dfg->ref_self_sub_node()->populate_graph_pos();
 }
 
 
