@@ -1,0 +1,8 @@
+cc_library (
+	name = "range-v3",
+	hdrs = glob([
+		"include/**/*.hpp",
+	]),
+	visibility = ["//visibility:public"],
+	includes = ["include"],
+)

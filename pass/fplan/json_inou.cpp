@@ -25,14 +25,16 @@ std::vector<pnetl> Json_inou_parser::make_tree() const {
   
   const rapidjson::Value& mods = d["modules"];
   I(mods.IsArray());
+  const auto mod_arr = mods.GetArray();
   
   // map to hold positions of known nodes
-  // the map is local because it wouldn't speed up actual tree operations since we don't refer to things by name.
   std::unordered_map<std::string, std::vector<pnetl>::iterator> m;
+  
   std::vector<pnetl> v;
+  v.reserve(mod_arr.Size()); // preload vector to avoid iterator invalidation
 
   // loop over all modules in the json file, wiring them up and adding them to our map as we go
-  for (const auto& mod : mods.GetArray()) {
+  for (const auto& mod : mod_arr) {
     I(mod["name"].IsString());
     const std::string name = mod["name"].GetString();
     
@@ -47,11 +49,10 @@ std::vector<pnetl> Json_inou_parser::make_tree() const {
       // make a new node, put in the name, and load into map
       n = std::make_shared<Netl_node>();
 
-      std::string new_name = mod["name"].GetString();
-      n->name = new_name;
+      n->name = name;
       v.push_back(n);
       
-      auto new_pair = std::pair(new_name, v.end() - 1);
+      auto new_pair = std::pair(name, v.end() - 1);
       m.insert(new_pair);
     }
 
@@ -82,7 +83,6 @@ std::vector<pnetl> Json_inou_parser::make_tree() const {
           (**(other_conn->second)).connect_list.push_back(std::pair(n, connection["weight"].GetInt()));
         }
       } else {
-        // TODO: break here, don't think stuff will hit this part...
         // not in map, so create a connection
         auto new_conn = std::make_shared<Netl_node>();
         new_conn->name = connection_str;
@@ -90,7 +90,8 @@ std::vector<pnetl> Json_inou_parser::make_tree() const {
         n->connect_list.push_back(std::pair<pnetl, unsigned int>(new_conn, connection["weight"].GetInt()));
         new_conn->connect_list.push_back(std::pair<pnetl, unsigned int>(n, connection["weight"].GetInt()));
         
-        //m.insert(std::pair(connection_str, new_conn));
+        v.push_back(new_conn);
+        m.insert(std::pair(connection_str, v.end() - 1));
       }
     }
   }
