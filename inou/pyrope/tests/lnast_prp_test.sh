@@ -25,7 +25,6 @@ if [ ! -f $LGSHELL ]; then
 fi
 
 
-
 echo ""
 echo ""
 echo ""

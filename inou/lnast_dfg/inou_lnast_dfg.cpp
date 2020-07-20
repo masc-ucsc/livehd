@@ -23,10 +23,19 @@ void Inou_lnast_dfg::dbg_lnast_ssa(Eprp_var &var) {
 
 
 void Inou_lnast_dfg::tolg(Eprp_var &var) {
-  Lnast_dfg p(var);
+  Lbench b1("inou.lnast_dfg.ssa");
+  for (const auto &lnast : var.lnasts) {
+    lnast->ssa_trans();
+  }
+
+  Lbench b2("inou.lnast_dfg.tolg");
   std::vector<LGraph *> lgs;
   for (const auto &ln : var.lnasts) {
-    lgs = p.do_tolg(ln);
+    auto module_name = ln->get_top_module_name();
+    const auto top = ln->get_root();
+    const auto top_stmts = ln->get_first_child(top);
+    Lnast_dfg p(var, module_name);
+    lgs = p.do_tolg(ln, top_stmts);
   }
 
   if (lgs.empty()) {
