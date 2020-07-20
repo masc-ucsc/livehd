@@ -3,8 +3,8 @@
 //   %o2 = $a - $b
 // }
 
-// same as res = sum (a = 2, b = 3)
-res = (a = 2, b = 3) |> sum
+res = (a = 2, b = 3) |> sum  // same as res = sum (a = 2, b = 3)
+
 %out  = res.o1
 %out2 = res.o2
 
