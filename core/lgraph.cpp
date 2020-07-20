@@ -271,7 +271,7 @@ Node_pin_iterator LGraph::out_connected_pins(const Node &node) const {
 
   absl::flat_hash_set<uint32_t> visited;
 
-  bool down_node = node.get_top_lgraph() != this;
+  bool down_node = node.is_down_node();
 
   while (true) {
     auto n = node_internal[idx2].get_num_local_outputs();
@@ -445,7 +445,7 @@ Node_pin_iterator LGraph::inp_drivers(const Node &node, const absl::flat_hash_se
   Index_ID idx2 = node.get_nid();
   I(node_internal[node.get_nid()].is_master_root());
 
-  bool down_node = node.get_top_lgraph() != this;
+  bool down_node = node.is_down_node();
 
   while (true) {
     auto n = node_internal[idx2].get_num_local_inputs();
@@ -498,7 +498,7 @@ XEdge_iterator LGraph::out_edges(const Node &node) const {
   Index_ID idx2 = node.get_nid();
   I(node_internal[node.get_nid()].is_master_root());
 
-  bool down_node = node.get_top_lgraph() != this;
+  bool down_node = node.is_down_node();
 
   Index_ID master_idx = idx2;
   while (true) {
@@ -550,7 +550,7 @@ XEdge_iterator LGraph::inp_edges(const Node &node) const {
   Index_ID idx2 = node.get_nid();
   I(node_internal[node.get_nid()].is_master_root());
 
-  bool down_node = node.get_top_lgraph() != this;
+  bool down_node = node.is_down_node();
 
   Index_ID master_idx = idx2;
   while (true) {
@@ -636,7 +636,7 @@ XEdge_iterator LGraph::out_edges(const Node_pin &dpin) const {
   I(dpin.get_class_lgraph() == this);
 
   Index_ID idx2 = dpin.get_idx();
-  bool down_node = dpin.get_top_lgraph() != this;
+  bool down_node = dpin.is_down_node();
 
   XEdge_iterator xiter;
   while (true) {
@@ -672,7 +672,7 @@ XEdge_iterator LGraph::inp_edges(const Node_pin &pin) const {
   I(pin.is_sink());
   I(pin.get_class_lgraph() == this);
 
-  bool down_node = pin.get_top_lgraph() != this;
+  bool down_node = pin.is_down_node();
   Index_ID idx2 = pin.get_idx();
 
   XEdge_iterator xiter;
