@@ -416,9 +416,9 @@ void Inou_lnast_dfg::process_ast_tuple_struct(LGraph *dfg, const Lnast_nid &lnid
     }
 
     I(lnast->get_type(tup_child).is_assign());
-    auto c0      = lnast->get_first_child(tup_child);
-    auto c1      = lnast->get_sibling_next(c0);
-    auto key_name = lnast->get_sname(c0);
+    auto c0       = lnast->get_first_child(tup_child);
+    auto c1       = lnast->get_sibling_next(c0);
+    auto key_name = lnast->get_vname(c0);
 
     auto tn_dpin    = setup_tuple_ref(dfg, tup_name, true);
     auto kp_dnode   = dfg->create_node_const(Lconst(kp));
@@ -485,7 +485,7 @@ void Inou_lnast_dfg::process_ast_tuple_get_op(LGraph *dfg, const Lnast_nid &lnid
     auto kp_dpin = setup_ref_node_dpin(dfg, c2_tg);
     dfg->add_edge(kp_dpin, kp_spin);
   } else {
-    auto kn_dpin = setup_key_dpin(dfg, lnast->get_sname(c2_tg));
+    auto kn_dpin = setup_key_dpin(dfg, lnast->get_vname(c2_tg));
     dfg->add_edge(kn_dpin, kn_spin);
   }
 
@@ -506,7 +506,7 @@ void Inou_lnast_dfg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnid
   auto c1_ta   = lnast->get_sibling_next(c0_ta);   //c1: key name
   auto c2_ta   = lnast->get_sibling_next(c1_ta);   //c2: value
   auto tup_name = lnast->get_sname(c0_ta);
-  auto key_name = lnast->get_sname(c1_ta);
+  auto key_name = lnast->get_vname(c1_ta);
 
 
   auto tn_dpin = setup_tuple_ref(dfg, tup_name, true);
