@@ -47,10 +47,10 @@ protected:
 
     n1_graph_pos_created.clear();
     n2_graph_pos_created.clear();
+    g->sync();
   }
 
   void TearDown() override {
-    g->sync();
   }
 
   Port_ID get_free_n1_graph_pos() {
@@ -76,6 +76,7 @@ protected:
   }
 
   void check_setup_pins() {
+    Graph_library::sync_all(); // To ease debug
 
     int n_hits;
 
@@ -171,6 +172,7 @@ protected:
   }
 
   void check_edges() {
+    g->sync(); // For debug in graph_library.yaml
 
     for(auto e:n1.inp_edges()) {
       (void)e;

@@ -1,7 +1,7 @@
 #!/bin/bash
 rm -rf ./lgdb
 
-
+pts_to_do='lhs_wire3'
 pts='lhs_wire lhs_wire2 scalar_tuple 
      firrtl_tail3 firrtl_tail2 firrtl_tail 
      adder_stage nested_if tuple_if reg__q_pin 
@@ -9,8 +9,8 @@ pts='lhs_wire lhs_wire2 scalar_tuple
      logic out_ssa if2 if ssa_rhs bits_rhs counter counter_nested_if
      '
 
-pts='lhs_wire sum funcall test lhs_wire2'
-pts='lhs_wire2 lhs_wire'
+# pts='sum funcall'
+# pts='funcall2 '
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -23,7 +23,6 @@ if [ ! -f $LGSHELL ]; then
         echo "ERROR: could not find lgshell binary in $(pwd)";
     fi
 fi
-
 
 
 echo ""

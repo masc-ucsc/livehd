@@ -208,14 +208,14 @@ void Pass_bitwidth::process_sum(Node &node, XEdge_iterator &inp_edges) {
   Lconst max_val;
   Lconst min_val;
   for (auto e : inp_edges) {
-    auto it3 = bwmap.find(e.driver.get_compact());
-    if (it3 != bwmap.end()) {
+    auto it = bwmap.find(e.driver.get_compact());
+    if (it != bwmap.end()) {
       if (e.sink.get_pid() == 0 || e.sink.get_pid() == 1) {
-        max_val = max_val + it3->second.get_max();
-        min_val = min_val + it3->second.get_min();
+        max_val = max_val + it->second.get_max();
+        min_val = min_val + it->second.get_min();
       } else {
-        max_val = max_val - it3->second.get_max();
-        min_val = min_val - it3->second.get_min();
+        max_val = max_val - it->second.get_max();
+        min_val = min_val - it->second.get_min();
       }
     } else if (e.driver.get_bits()) {
       Lconst b(1);
@@ -674,11 +674,11 @@ void Pass_bitwidth::bw_pass(LGraph *lg) {
   });
   outcountmap[lg->get_graph_input_node().get_compact()] = lg->get_graph_input_node().get_num_outputs();
 
-  for (auto node : lg->forward()) {
+  for (auto node : lg->forward(true)) {
     auto inp_edges = node.inp_edges();
     auto op        = node.get_type_op();
 
-    // fmt::print("bitwidth node:{}\n",node.debug_name());
+    // fmt::print("bitwidth node:{} lg:{}\n", node.debug_name(), node.get_class_lgraph()->get_name());
 
     if (inp_edges.empty() && (op != Const_Op && op != SubGraph_Op && op != LUT_Op && op != TupKey_Op)) {
       fmt::print("pass.bitwidth: removing dangling node:{}\n", node.debug_name());

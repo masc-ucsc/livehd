@@ -174,6 +174,8 @@ public:
     return instance_pid;
   }
 
+  void populate_graph_pos();
+
   bool has_pin(std::string_view io_name) const {
     I(lgid);
     return name2id.find(io_name) != name2id.end();

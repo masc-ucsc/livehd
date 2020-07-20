@@ -271,9 +271,13 @@ Node_pin_iterator LGraph::out_connected_pins(const Node &node) const {
 
   absl::flat_hash_set<uint32_t> visited;
 
+  bool down_node = node.is_down_node();
+
   while (true) {
     auto n = node_internal[idx2].get_num_local_outputs();
     if (n > 0) {
+      GI(down_node, !node_internal[idx2].is_graph_output()); // TODO: implement with testing case
+
       if (node_internal[idx2].is_root()) {
         xiter.emplace_back(Node_pin(node.get_top_lgraph(),
                                     node.get_class_lgraph(),
@@ -357,14 +361,18 @@ Node_pin_iterator LGraph::out_setup_pins(const Node &node) const {
   Index_ID idx2 = node.get_nid();
   I(node_internal[idx2].is_master_root());
 
+  bool down_node = node.is_down_node();
+
   while (true) {
-    if (node_internal[idx2].is_root() && node_internal[idx2].is_driver_setup())
+    if (node_internal[idx2].is_root() && node_internal[idx2].is_driver_setup()) {
+      GI(down_node, !node_internal[idx2].is_graph_output());  // TODO: implement with testing case
       xiter.emplace_back(Node_pin(node.get_top_lgraph(),
                                   node.get_class_lgraph(),
                                   node.get_hidx(),
                                   idx2,
                                   node_internal[idx2].get_dst_pid(),
                                   false));
+    }
 
     if (node_internal[idx2].is_last_state())
       break;
@@ -401,7 +409,7 @@ Node_pin_iterator LGraph::inp_setup_pins(const Node &node) const {
 }
 
 bool LGraph::has_edge(const Node_pin &driver, const Node_pin &sink) const {
-  I(driver.get_class_lgraph() == this);
+  I(driver.get_class_lgraph() == this); // TODO: We could get it working with hiearchy (testing case?)
   I(sink.get_class_lgraph() == this);
 
   Index_ID idx2 = driver.get_node().get_nid();
@@ -437,6 +445,8 @@ Node_pin_iterator LGraph::inp_drivers(const Node &node, const absl::flat_hash_se
   Index_ID idx2 = node.get_nid();
   I(node_internal[node.get_nid()].is_master_root());
 
+  bool down_node = node.is_down_node();
+
   while (true) {
     auto n = node_internal[idx2].get_num_local_inputs();
 
@@ -455,8 +465,18 @@ Node_pin_iterator LGraph::inp_drivers(const Node &node, const absl::flat_hash_se
         if (exclude.count(Node::Compact(node.get_hidx(), driver_master_nid))==0)
           continue;
 
-        xiter.emplace_back(
-            Node_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx(), driver_pin_idx, driver_pin_pid, false));
+        Node_pin dpin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx(), driver_pin_idx, driver_pin_pid, false);
+
+        if (down_node && dpin.is_graph_input()) {
+          auto up_spin = dpin.get_up_pin();
+          if (up_spin.is_connected()) {
+            auto up_dpin = up_spin.get_driver_pin();
+            GI(up_dpin.is_down_node(), !up_dpin.is_graph_input()); // FIXME: handle recursively
+            xiter.emplace_back(up_dpin);
+          }
+        } else {
+          xiter.emplace_back(dpin);
+        }
         I(xiter.back() == redge->get_out_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx()));
       }
     }
@@ -478,6 +498,8 @@ XEdge_iterator LGraph::out_edges(const Node &node) const {
   Index_ID idx2 = node.get_nid();
   I(node_internal[node.get_nid()].is_master_root());
 
+  bool down_node = node.is_down_node();
+
   Index_ID master_idx = idx2;
   while (true) {
     auto n = node_internal[idx2].get_num_local_outputs();
@@ -495,7 +517,16 @@ XEdge_iterator LGraph::out_edges(const Node &node) const {
       for (i = 0, redge = node_internal[idx2].get_output_begin(); i < n; i++, redge += redge->next_node_inc()) {
         I(redge->get_self_idx() == idx2);
         I(dpin == redge->get_out_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx()));
-        xiter.emplace_back(dpin, redge->get_inp_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx()));
+        auto spin = redge->get_inp_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx());
+        if (down_node && spin.is_graph_output()) {
+          auto up_dpin = spin.get_up_pin();
+          for (auto &e:up_dpin.out_edges()) {
+            GI(e.sink.is_down_node(), !e.sink.is_graph_output()); // FIXME: handle recursively
+            xiter.emplace_back(dpin, e.sink);
+          }
+        } else {
+          xiter.emplace_back(dpin, spin);
+        }
       }
     }
     if (node_internal[idx2].is_last_state())
@@ -519,6 +550,8 @@ XEdge_iterator LGraph::inp_edges(const Node &node) const {
   Index_ID idx2 = node.get_nid();
   I(node_internal[node.get_nid()].is_master_root());
 
+  bool down_node = node.is_down_node();
+
   Index_ID master_idx = idx2;
   while (true) {
     auto n = node_internal[idx2].get_num_local_inputs();
@@ -536,7 +569,16 @@ XEdge_iterator LGraph::inp_edges(const Node &node) const {
       for (i = 0, redge = node_internal[idx2].get_input_begin(); i < n; i++, redge += redge->next_node_inc()) {
         I(redge->get_self_idx() == idx2);
         I(spin == redge->get_inp_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx()));
-        xiter.emplace_back(redge->get_out_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx()), spin);
+        auto dpin = redge->get_out_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx());
+        if (down_node && dpin.is_graph_input()) {
+          auto up_spin = dpin.get_up_pin();
+          if (up_spin.is_connected()) {
+            xiter.emplace_back(up_spin.get_driver_pin(), spin);
+            I(!up_spin.is_graph_input()); // It may need to go up again (TODO) recursively
+          }
+        } else {
+          xiter.emplace_back(dpin, spin);
+        }
       }
     }
     if (node_internal[idx2].is_last_state())
@@ -589,21 +631,31 @@ XEdge_iterator LGraph::out_edges_ordered_reverse(const Node &node) const {
   return iter;
 }
 
-XEdge_iterator LGraph::out_edges(const Node_pin &pin) const {
-  I(pin.get_class_lgraph() == this);
+XEdge_iterator LGraph::out_edges(const Node_pin &dpin) const {
+  I(dpin.is_driver());
+  I(dpin.get_class_lgraph() == this);
+
+  Index_ID idx2 = dpin.get_idx();
+  bool down_node = dpin.is_down_node();
+
   XEdge_iterator xiter;
-
-  Index_ID idx2 = pin.get_idx();
-  I(node_internal[idx2].is_root());
-
   while (true) {
     auto            n = node_internal[idx2].get_num_local_outputs();
     uint8_t         i;
     const Edge_raw *redge;
-    if (pin.get_pid() == node_internal[idx2].get_dst_pid()) {  // Only add edges with same source
+    if (dpin.get_pid() == node_internal[idx2].get_dst_pid()) {  // Only add edges with same source
       for (i = 0, redge = node_internal[idx2].get_output_begin(); i < n; i++, redge += redge->next_node_inc()) {
         I(redge->get_self_idx() == idx2);
-        xiter.emplace_back(pin, redge->get_inp_pin(pin.get_top_lgraph(), pin.get_class_lgraph(), pin.get_hidx()));
+        auto spin = redge->get_inp_pin(dpin.get_top_lgraph(), dpin.get_class_lgraph(), dpin.get_hidx());
+        if (down_node && spin.is_graph_output()) {
+          auto up_dpin = spin.get_up_pin();
+          for (auto &e : out_edges(up_dpin)) {
+            GI(e.sink.is_down_node(), !e.sink.is_graph_output()); // FIXME: handle recursively
+            xiter.emplace_back(dpin, e.sink);
+          }
+        } else {
+          xiter.emplace_back(dpin, spin);
+        }
       }
     }
     if (node_internal[idx2].is_last_state())
@@ -617,12 +669,13 @@ XEdge_iterator LGraph::out_edges(const Node_pin &pin) const {
 }
 
 XEdge_iterator LGraph::inp_edges(const Node_pin &pin) const {
+  I(pin.is_sink());
   I(pin.get_class_lgraph() == this);
-  XEdge_iterator xiter;
 
+  bool down_node = pin.is_down_node();
   Index_ID idx2 = pin.get_idx();
-  I(node_internal[idx2].is_root());
 
+  XEdge_iterator xiter;
   while (true) {
     auto            n = node_internal[idx2].get_num_local_inputs();
     uint8_t         i;
@@ -630,7 +683,18 @@ XEdge_iterator LGraph::inp_edges(const Node_pin &pin) const {
     if (pin.get_pid() == node_internal[idx2].get_dst_pid()) {  // Only add edges with same source
       for (i = 0, redge = node_internal[idx2].get_input_begin(); i < n; i++, redge += redge->next_node_inc()) {
         I(redge->get_self_idx() == idx2);
-        xiter.emplace_back(redge->get_out_pin(pin.get_top_lgraph(), pin.get_class_lgraph(), pin.get_hidx()), pin);
+        auto dpin = redge->get_out_pin(pin.get_top_lgraph(), pin.get_class_lgraph(), pin.get_hidx());
+
+        if (down_node && dpin.is_graph_input()) {
+          auto up_spin = dpin.get_up_pin();
+          if (up_spin.is_connected()) {
+            auto up_dpin = up_spin.get_driver_pin();
+            GI(up_dpin.is_down_node(), !up_dpin.is_graph_input()); // FIXME: handle recursively
+            xiter.emplace_back(up_dpin, pin);
+          }
+        } else {
+          xiter.emplace_back(dpin, pin);
+        }
       }
     }
     if (node_internal[idx2].is_last_state())
