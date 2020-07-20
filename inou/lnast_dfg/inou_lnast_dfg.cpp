@@ -912,7 +912,7 @@ void Inou_lnast_dfg::process_ast_attr_get_op(LGraph *dfg, const Lnast_nid &lnidx
 
 void Inou_lnast_dfg::process_ast_func_call_op(LGraph *dfg, const Lnast_nid &lnidx_fc) {
   auto c0_fc = lnast->get_first_child(lnidx_fc);
-  auto res_name  = lnast->get_sname(c0_fc);
+  auto res_tup_name  = lnast->get_sname(c0_fc);
   auto func_name = lnast->get_vname(lnast->get_sibling_next(c0_fc));
   auto tup_name  = lnast->get_sname(lnast->get_last_child(lnidx_fc));
 
@@ -952,7 +952,7 @@ void Inou_lnast_dfg::process_ast_func_call_op(LGraph *dfg, const Lnast_nid &lnid
         auto kn_spin    = tup_add.setup_sink_pin("KN"); //key name
         auto value_spin = tup_add.setup_sink_pin("KV"); //value
 
-        auto tn_dpin = setup_tuple_ref(dfg, res_name, true);
+        auto tn_dpin = setup_tuple_ref(dfg, res_tup_name, true);
         tn_dpin.connect_sink(tn_spin);
 
         auto kn_dpin = setup_key_dpin(dfg, io_pin.name);
@@ -960,6 +960,9 @@ void Inou_lnast_dfg::process_ast_func_call_op(LGraph *dfg, const Lnast_nid &lnid
 
         auto subg_dpin = subg_node.setup_driver_pin(io_pin.name);
         subg_dpin.connect_sink(value_spin);
+     
+        name2dpin[res_tup_name] = tup_add.setup_driver_pin();
+        tup_add.setup_driver_pin().set_name(res_tup_name);
       }
     }
 
