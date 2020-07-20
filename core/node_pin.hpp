@@ -231,10 +231,7 @@ public:
   LGraph *        get_class_lgraph() const { return current_g; };
   Hierarchy_index get_hidx() const { return hidx; };
 
-  Port_ID get_pid() const {
-    I(idx);
-    return pid;
-  }
+  constexpr Port_ID get_pid() const { return pid; }
 
   bool has_inputs() const;
   bool has_outputs() const;
@@ -244,18 +241,6 @@ public:
   bool is_graph_output() const;
 
   Node_pin get_sink_from_output() const;
-
-#if 0
-  // OLD API
-  bool is_input() const {
-    I(idx);
-    return sink;
-  }
-  bool is_output() const {
-    I(idx);
-    return !sink;
-  }
-#endif
 
   bool is_sink() const {
     I(idx);
@@ -311,6 +296,7 @@ public:
 
   void           invalidate() { idx = 0; }
   constexpr bool is_invalid() const { return idx == 0; }
+  constexpr bool is_down_node() const { return top_g != current_g; }
 
   constexpr bool operator==(const Node_pin &other) const {
     return (top_g == other.top_g) && (idx == other.idx) && (pid == other.pid) && (sink == other.sink) && (hidx == other.hidx);
