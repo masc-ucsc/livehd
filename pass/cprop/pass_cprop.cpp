@@ -54,10 +54,8 @@ void Pass_cprop::collapse_forward_same_op(Node &node, XEdge_iterator &inp_edges_
 					out.sink.del_driver(inp.driver);
 				} else if (op == Or_Op || op == And_Op) {
 					fmt::print("cprop simplified forward or/and pin:{}\n",inp.driver.debug_name());
-				} else if (op == Sum_Op) {
-					fmt::print("cprop FIXME optimize sum pin:{}\n",inp.driver.debug_name());
-					out.sink.connect_driver(inp.driver);
 				} else {
+					I(op != Sum_Op); // handled at collapse_forward_sum
 					out.sink.connect_driver(inp.driver);
 				}
 			}
