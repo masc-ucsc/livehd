@@ -2,13 +2,10 @@
 //   %o1 = $a + $b
 //   %o2 = $a - $b
 // }
- 
 
+res = (a = 2, b = 3) |> sum  // same as res = sum (a = 2, b = 3)
 
-i = (a = 3, b = 2)
-res = sum(i)
-%out1 = res.o1
+%out  = res.o1
 %out2 = res.o2
 
 
-// func_xor::{}

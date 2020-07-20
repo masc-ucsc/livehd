@@ -156,9 +156,9 @@ void Inou_graphviz::populate_lg_handle_xedge(const Node &node, const XEdge &out,
 void Inou_graphviz::populate_lg_data(LGraph *g) {
   std::string data = "digraph {\n";
 
-  g->each_node_fast([&data, this](const Node &node) {
+  for(auto node:g->fast(false)) {
     if (!node.has_inputs() && !node.has_outputs())
-      return;
+      continue;
     std::string node_info;
     if (!verbose) {
       auto pos  = node.debug_name().find("_lg_");
@@ -179,7 +179,7 @@ void Inou_graphviz::populate_lg_data(LGraph *g) {
     for (const auto &out : node.out_edges()) {
       populate_lg_handle_xedge(node, out, data);
     }
-  });
+  }
 
   g->each_graph_input([&data](const Node_pin &pin) {
     std::string_view io_name = pin.get_name();

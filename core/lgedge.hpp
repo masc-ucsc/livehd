@@ -379,8 +379,14 @@ public:
     I(is_node_state());
     return root;
   }
-  bool is_graph_io() const {
-    return nid == 1 || nid == 2;  // hardcoded input or output
+  constexpr bool is_graph_output() const {
+    return nid == 2; // Hardcoded_output_nid
+  }
+  constexpr bool is_graph_input() const {
+    return nid == 1; // Hardcoded_input_nid
+  }
+  constexpr bool is_graph_io() const {
+    return is_graph_input() || is_graph_output();
   }
   bool is_master_root() const {
     I(is_node_state());

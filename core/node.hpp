@@ -178,6 +178,7 @@ public:
   int  get_num_outputs() const;
 
   constexpr bool is_invalid() const { return nid == 0; }
+  constexpr bool is_down_node() const { return top_g != current_g; }
 
   constexpr bool operator==(const Node &other) const {
     GI(nid == 0, hidx.is_invalid());

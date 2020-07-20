@@ -69,6 +69,20 @@ Node_pin Node_pin::get_driver_pin() const {
   return xedge.front().driver;
 }
 
+void Node_pin::del_sink(Node_pin &spin) {
+  I(spin.is_sink());
+  I(is_driver());
+  I(current_g == spin.current_g);  // Use punch otherwise
+  current_g->del_edge(*this, spin);
+}
+
+void Node_pin::del_driver(Node_pin &dpin) {
+  I(dpin.is_driver());
+  I(is_sink());
+  I(current_g == dpin.current_g);
+  current_g->del_edge(dpin, *this);
+}
+
 void Node_pin::connect_sink(Node_pin &spin) {
   I(spin.is_sink());
   I(is_driver());
