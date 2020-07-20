@@ -519,6 +519,8 @@ XEdge_iterator LGraph::inp_edges(const Node &node) const {
   Index_ID idx2 = node.get_nid();
   I(node_internal[node.get_nid()].is_master_root());
 
+  bool down_node = node.get_top_lgraph() != this;
+
   Index_ID master_idx = idx2;
   while (true) {
     auto n = node_internal[idx2].get_num_local_inputs();
@@ -536,7 +538,14 @@ XEdge_iterator LGraph::inp_edges(const Node &node) const {
       for (i = 0, redge = node_internal[idx2].get_input_begin(); i < n; i++, redge += redge->next_node_inc()) {
         I(redge->get_self_idx() == idx2);
         I(spin == redge->get_inp_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx()));
-        xiter.emplace_back(redge->get_out_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx()), spin);
+        auto dpin = redge->get_out_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx());
+        if (down_node && dpin.is_graph_input()) {
+          auto up_spin = dpin.get_up_pin();
+          if (up_spin.is_connected())
+            xiter.emplace_back(up_spin.get_driver_pin(), spin);
+        } else {
+          xiter.emplace_back(dpin, spin);
+        }
       }
     }
     if (node_internal[idx2].is_last_state())
