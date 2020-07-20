@@ -2,31 +2,27 @@
 #include "lnast_dfg.hpp"
 #include "pass.hpp"
 
-Lnast_dfg::Lnast_dfg(const Eprp_var &var) : Pass("inou.lnast_dfg", var) {
+Lnast_dfg::Lnast_dfg(const Eprp_var &_var, std::string_view _module_name) :  
+  Pass("inou.lnast_dfg", _var), eprp_var(_var), module_name(_module_name) {
   setup_lnast_to_lgraph_primitive_type_mapping();
 }
 
 
-std::vector<LGraph *> Lnast_dfg::do_tolg(std::shared_ptr<Lnast> ln) {
-    Lbench b("inou.lnast_dfg.tolg");
-
+std::vector<LGraph *> Lnast_dfg::do_tolg(std::shared_ptr<Lnast> ln, const Lnast_nid &top_stmts) {
     lnast = ln;
-    LGraph *dfg = LGraph::create(path, lnast->get_top_module_name(), "inou.lnast_dfg.tolg");
+    LGraph *dfg = LGraph::create(path, module_name, "inou.lnast_dfg.tolg");
     std::vector<LGraph *> lgs;
-    lnast->ssa_trans();
-    lnast2lgraph(dfg);
+    top_stmts2lgraph(dfg, top_stmts);
     lgs.push_back(dfg);
 
     return lgs;
 }
 
 
-void Lnast_dfg::lnast2lgraph(LGraph *dfg) {
+void Lnast_dfg::top_stmts2lgraph(LGraph *dfg, const Lnast_nid &lnidx_stmts) {
 
   fmt::print("============================= Phase-1: LNAST->LGraph Start ===============================================\n");
-  const auto top   = lnast->get_root();
-  const auto stmts = lnast->get_first_child(top);
-  process_ast_stmts(dfg, stmts);
+  process_ast_stmts(dfg, lnidx_stmts);
 
   fmt::print("============================= Phase-2: Adding final Module Outputs and Final Dpin Name ===================\n");
   setup_lgraph_outputs_and_final_var_name(dfg);
@@ -883,7 +879,7 @@ void Lnast_dfg::process_ast_func_call_op(LGraph *dfg, const Lnast_nid &lnidx_fc)
 
   if (name2dpin.find(func_name) == name2dpin.end()) {
     fmt::print("function {} not defined in same prp file, query lgdb\n", func_name);
-    auto path = dfg->get_path();
+    /* auto path = dfg->get_path(); */
     auto *library = Graph_library::instance(path);
     Lg_type_id lgid;
     if (library->has_name(func_name)) {
@@ -932,6 +928,13 @@ void Lnast_dfg::process_ast_func_call_op(LGraph *dfg, const Lnast_nid &lnidx_fc)
     }
 
     return;
+  } else {
+    // FIXME->sh: using lgid from TA node to open the subgraph.
+    auto ta_func_def = name2dpin[func_name].get_node();
+    I(ta_func_def.get_type_op() == TupAdd_Op);
+    I(ta_func_def.setup_sink_pin("KV").get_driver_node().get_type_op() == Const_Op);
+    /* Lg_type_id lgid = ta_func_def.setup_sink_pin("KV").get_driver_node().get_type_const(); */
+    fmt::print("TODO");
   }
 };
 
@@ -940,14 +943,35 @@ void Lnast_dfg::process_ast_func_def_op (LGraph *dfg, const Lnast_nid &lnidx) {
   auto c1_fdef = lnast->get_sibling_next(c0_fdef);
   auto func_stmts = lnast->get_sibling_next(c1_fdef);
   auto func_name = lnast->get_vname(c0_fdef);
-  LGraph *subg = LGraph::create(path, func_name, "inou.lnast_dfg.tolg");
+  auto subg_module_name = absl::StrCat(module_name, ".", func_name);
+  Lnast_dfg p(eprp_var, subg_module_name);
 
-  fmt::print("============================= SubGraph Phase-1: LNAST->LGraph Start ===============================================\n");
-  process_ast_stmts(subg, func_stmts);
+  fmt::print("============================= Sub-module: LNAST->LGraph Start ===============================================\n");
+  p.do_tolg(lnast, func_stmts);
+  fmt::print("============================= Sub-module: LNAST->LGraph End ===============================================\n");
 
-  fmt::print("============================= SubGraph Phase-2: Adding final Module Outputs and Final Dpin Name ===================\n");
-  setup_lgraph_outputs_and_final_var_name(subg);
+  auto tup_add    = dfg->create_node(TupAdd_Op);
+  auto kn_spin    = tup_add.setup_sink_pin("KN"); //key name
+  auto value_spin = tup_add.setup_sink_pin("KV"); //value
 
+
+  auto kn_dpin = setup_key_dpin(dfg, "__function_call");
+  kn_dpin.connect_sink(kn_spin);
+
+
+
+  auto *library = Graph_library::instance(path);
+  Lg_type_id lgid;
+  if (library->has_name(subg_module_name)) {
+    lgid = library->get_lgid(subg_module_name);
+  }
+
+  auto value_dpin = dfg->create_node_const(Lconst(lgid)).setup_driver_pin();
+  value_dpin.connect_sink(value_spin);
+
+  name2dpin[func_name] = tup_add.setup_driver_pin(); //note: record function_name only instead of top.function_name
+  tup_add.setup_driver_pin().set_name(func_name); 
+  /* setup_dpin_ssa(name2dpin[tup_name], lnast->get_vname(c0_ta), lnast->get_subs(c0_ta)); */
 };
 
 void Lnast_dfg::process_ast_as_op       (LGraph *dfg, const Lnast_nid &lnidx) { ; };

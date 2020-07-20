@@ -14,20 +14,22 @@
 
 class Lnast_dfg : public Pass {
 public:
-  explicit Lnast_dfg(const Eprp_var &var);
-  std::vector<LGraph *> do_tolg(std::shared_ptr<Lnast> l);
+  explicit Lnast_dfg(const Eprp_var &var, std::string_view _module_name);
+  std::vector<LGraph *> do_tolg(std::shared_ptr<Lnast> ln, const Lnast_nid &top_stmts);
+  
 
 
 private:
   std::shared_ptr<Lnast> lnast;
-
+  Eprp_var eprp_var;
+  std::string_view module_name;
   absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Node_Type_Op>  primitive_type_lnast2lg;
   absl::flat_hash_map<std::string_view, Node_pin>                  vname2attr_dpin;       // for dummy attribute node construction, vn = variable non-ssa name, dpin = last attr dpin within "any" attributes
   absl::flat_hash_map<std::string, Node_pin>                       name2dpin;             // for scalar variable
   absl::flat_hash_map<std::string_view, std::vector<Node>>         driver_var2wire_nodes; // for __final_value temporarily wire nodes
 
 protected:
-  void lnast2lgraph                           (LGraph *dfg);
+  void top_stmts2lgraph             (LGraph *dfg, const Lnast_nid &lnidx_stmts);
   void setup_lgraph_outputs_and_final_var_name(LGraph *dfg);
   void process_ast_stmts            (LGraph *dfg, const Lnast_nid &lnidx_stmts);
   Node process_ast_assign_op        (LGraph *dfg, const Lnast_nid &lnidx);
