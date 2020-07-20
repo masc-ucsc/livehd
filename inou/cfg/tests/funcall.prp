@@ -5,6 +5,7 @@
 
 // same as res = sum (a = 2, b = 3)
 res = (a = 2, b = 3) |> sum
-%out = res.o1 + res.o2
+%out  = res.o1
+%out2 = res.o2
 
 
