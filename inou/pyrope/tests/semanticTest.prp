@@ -138,8 +138,17 @@
 // c = b + 1
 // Warning: Inefficient LNAST for variable b
 
-// tup = (foo = 1, bar = cat + 2)
-// bar = tup
-// tup = bar ++ (4, dog)
+// tup = (foo = 1, bar = 2)
+// temp_tup = tup
+// tup = temp_tup ++ (4, dog)
 // Warning: Inefficient LNAST for variable bar
+
+// out = a & b
+// out = out & c
+// Warning: Inefficient LNAST for variable out
+
+// a = 1 + 4
+// a = a * 2
+// b = a
+// Warning: Inefficient LNAST for variable b
 // ================================================
