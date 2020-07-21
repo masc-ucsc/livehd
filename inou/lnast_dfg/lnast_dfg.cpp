@@ -933,7 +933,8 @@ void Lnast_dfg::process_ast_func_call_op(LGraph *dfg, const Lnast_nid &lnidx_fc)
     auto ta_func_def = name2dpin[func_name].get_node();
     I(ta_func_def.get_type_op() == TupAdd_Op);
     I(ta_func_def.setup_sink_pin("KV").get_driver_node().get_type_op() == Const_Op);
-    /* Lg_type_id lgid = ta_func_def.setup_sink_pin("KV").get_driver_node().get_type_const(); */
+    auto lgid_const = ta_func_def.setup_sink_pin("KV").get_driver_node().get_type_const();
+
     fmt::print("TODO");
   }
 };
@@ -958,8 +959,6 @@ void Lnast_dfg::process_ast_func_def_op (LGraph *dfg, const Lnast_nid &lnidx) {
   auto kn_dpin = setup_key_dpin(dfg, "__function_call");
   kn_dpin.connect_sink(kn_spin);
 
-
-
   auto *library = Graph_library::instance(path);
   Lg_type_id lgid;
   if (library->has_name(subg_module_name)) {
@@ -969,7 +968,7 @@ void Lnast_dfg::process_ast_func_def_op (LGraph *dfg, const Lnast_nid &lnidx) {
   auto value_dpin = dfg->create_node_const(Lconst(lgid)).setup_driver_pin();
   value_dpin.connect_sink(value_spin);
 
-  name2dpin[func_name] = tup_add.setup_driver_pin(); //note: record function_name only instead of top.function_name
+  name2dpin[func_name] = tup_add.setup_driver_pin(); //note: record only the function_name instead of top.function_name
   tup_add.setup_driver_pin().set_name(func_name); 
   /* setup_dpin_ssa(name2dpin[tup_name], lnast->get_vname(c0_ta), lnast->get_subs(c0_ta)); */
 };
