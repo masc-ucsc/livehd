@@ -54,7 +54,7 @@ enum Node_Type_Op : uint8_t {
   TupAdd_Op,
   TupGet_Op,
   TupRef_Op,
-  TupKey_Op,  // FIXME: to delete. Not needed
+  TupKey_Op,  
   AttrSet_Op,
   AttrGet_Op,
   CompileErr_Op,

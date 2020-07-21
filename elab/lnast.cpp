@@ -43,6 +43,7 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
 
   Lnast_nid top_sts_nid;
   if (get_type(top_nid).is_func_def()) {
+    fmt::print("\nStep-0: Handle Inline Function Definition\n");
     auto c0 = get_first_child(top_nid);
     auto c1 = get_sibling_next(c0);
     top_sts_nid = get_sibling_next(c1);
@@ -421,7 +422,8 @@ void Lnast::analyze_dot_lrhs(const Lnast_nid &psts_nid) {
   for (const auto &opr_nid : children(psts_nid)) {
     auto type = get_type(opr_nid);
     if (type.is_func_def()) {
-      continue;
+      do_ssa_trans(opr_nid);
+      /* continue; */
     } else if (type.is_if()) {
       analyze_dot_lrhs_if_subtree(opr_nid);
     } else if (type.is_dot() || type.is_select() || type.is_tuple_concat() || type.is_tuple()) {

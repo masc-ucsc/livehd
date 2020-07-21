@@ -674,7 +674,7 @@ void Pass_bitwidth::bw_pass(LGraph *lg) {
   });
   outcountmap[lg->get_graph_input_node().get_compact()] = lg->get_graph_input_node().get_num_outputs();
 
-  for (auto node : lg->forward(true)) {
+  for (auto node : lg->forward()) {
     auto inp_edges = node.inp_edges();
     auto op        = node.get_type_op();
 
@@ -689,6 +689,7 @@ void Pass_bitwidth::bw_pass(LGraph *lg) {
     outcountmap[node.get_compact()] = node.get_num_outputs();
 
     if (op == Const_Op) {
+      fmt::print("node:{}\n", node.debug_name());
       process_const(node);
     } else if (op == TupKey_Op || op == TupGet_Op || op == TupAdd_Op) {
       // Nothing to do for this
@@ -749,18 +750,27 @@ void Pass_bitwidth::bw_pass(LGraph *lg) {
     if (!spin.has_inputs())
       return;
 
-    auto d_pin = spin.get_driver_pin();
+    auto out_driver = spin.get_driver_pin();
 
-    I(!d_pin.is_invalid());
-    auto it = bwmap.find(d_pin.get_compact());
+    I(!out_driver.is_invalid());
+    auto it = bwmap.find(out_driver.get_compact());
     if (it != bwmap.end()) {
-      adjust_dpin_bits(d_pin, it->second);
+      adjust_dpin_bits(out_driver, it->second);
 
       bwmap.erase(it);
     }
 
-    if (d_pin.get_bits()) {
-      dpin.set_bits(d_pin.get_bits());
+    /* if (out_driver.get_bits()) { */
+    /*   dpin.set_bits(out_driver.get_bits()); */
+    /* } */
+
+    if (out_driver.get_bits()) {
+      if (dpin.get_bits()) {  // output has been attr set bits
+        if (dpin.get_bits() > out_driver.get_bits()) {
+          return; 
+        } 
+      }
+      dpin.set_bits(out_driver.get_bits());
     }
   });
 
