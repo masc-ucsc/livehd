@@ -124,7 +124,7 @@ void Semantic_check::add_to_rhs_list(std::vector<std::string_view> node_name) {
 
 void Semantic_check::add_to_output_vars(std::string_view node_name) {
   if (!in_output_vars(node_name)) {
-    output_vars.insert(node_name);
+    output_vars.push_back(node_name);
   }
 }
 
@@ -280,7 +280,7 @@ void Semantic_check::resolve_lhs_rhs_lists() {
     int rhs_index = in_rhs_list(lhs_name, index_lhs);
     if (rhs_index != -1) {
       find_lhs_name(rhs_index);
-      if (inefficient_LNAST.back() == lhs_name) {
+      if (inefficient_LNAST.size() > 0 && inefficient_LNAST.back() == lhs_name) {
         inefficient_LNAST.pop_back();
       }
     }
@@ -728,8 +728,14 @@ void Semantic_check::do_check(Lnast *lnast) {
       check_tree_struct_ops(lnast, stmt, ntype, stmt_name);
     }
   }
+  // for (auto name : write_dict) {
+  //   fmt::print("{} : {}\n", name.first, name.second);
+  // }
+  // fmt::print("\n");
+  // for (auto name : output_vars) {
+  //   fmt::print("{}\n", name);
+  // }
   // Find Errors!
-  // resolve_assign_lhs_rhs_lists();
   resolve_lhs_rhs_lists();
   resolve_read_write_lists(lnast);
   fmt::print("\n");
