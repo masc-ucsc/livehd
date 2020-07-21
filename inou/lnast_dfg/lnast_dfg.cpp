@@ -450,6 +450,31 @@ void Lnast_dfg::process_ast_tuple_get_op(LGraph *dfg, const Lnast_nid &lnidx_tg)
     dfg->add_edge(kn_dpin, kn_spin);
   }
 
+
+  if (vname2attr_dpin.find(c0_tg_vname) != vname2attr_dpin.end()) {
+    auto aset_node = dfg->create_node(AttrSet_Op);
+    auto aset_aci_spin = aset_node.setup_sink_pin("ACI");
+    auto aset_ancestor_dpin = vname2attr_dpin[c0_tg_vname];
+    dfg->add_edge(aset_ancestor_dpin, aset_aci_spin);
+
+    auto aset_vn_spin = aset_node.setup_sink_pin("VN");
+    auto aset_vn_dpin = tup_get.get_driver_pin(0);
+    dfg->add_edge(aset_vn_dpin, aset_vn_spin);
+
+    name2dpin[c0_tg_name] = aset_node.setup_driver_pin(0); // dummy_attr_set node now represent the latest variable
+    /* tup_get.get_driver_pin(0).set_name(c0_tg_name); */
+    aset_node.get_driver_pin(0).set_name(c0_tg_name);
+    //aset_node.get_driver_pin(1).set_name(c0_tg_name); // for debug purpose
+    setup_dpin_ssa(name2dpin[c0_tg_name], c0_tg_vname, lnast->get_subs(c0_tg));
+    vname2attr_dpin[c0_tg_vname] = aset_node.setup_driver_pin(1);
+    /* if (is_register(c0_tg_name)) */
+    /*   dfg->add_edge(name2dpin[c0_tg_name], reg_data_pin); */
+    return;
+  }
+
+
+
+
   name2dpin[c0_tg_name] = tup_get.setup_driver_pin();
   tup_get.setup_driver_pin().set_name(lnast->get_sname(c0_tg));
   setup_dpin_ssa(name2dpin[c0_tg_name], c0_tg_vname, lnast->get_subs(c0_tg));
@@ -877,10 +902,10 @@ void Lnast_dfg::process_ast_func_call_op(LGraph *dfg, const Lnast_nid &lnidx_fc)
   auto func_name = lnast->get_vname(lnast->get_sibling_next(c0_fc));
   auto tup_name  = lnast->get_sname(lnast->get_last_child(lnidx_fc));
 
+  auto *library = Graph_library::instance(path);
   if (name2dpin.find(func_name) == name2dpin.end()) {
     fmt::print("function {} not defined in same prp file, query lgdb\n", func_name);
     /* auto path = dfg->get_path(); */
-    auto *library = Graph_library::instance(path);
     Lg_type_id lgid;
     if (library->has_name(func_name)) {
       lgid = library->get_lgid(func_name);
@@ -929,13 +954,51 @@ void Lnast_dfg::process_ast_func_call_op(LGraph *dfg, const Lnast_nid &lnidx_fc)
 
     return;
   } else {
-    // FIXME->sh: using lgid from TA node to open the subgraph.
     auto ta_func_def = name2dpin[func_name].get_node();
     I(ta_func_def.get_type_op() == TupAdd_Op);
     I(ta_func_def.setup_sink_pin("KV").get_driver_node().get_type_op() == Const_Op);
-    auto lgid_const = ta_func_def.setup_sink_pin("KV").get_driver_node().get_type_const();
+    Lg_type_id lgid = ta_func_def.setup_sink_pin("KV").get_driver_node().get_type_const().to_i();
 
-    fmt::print("TODO");
+    auto *sub = library->ref_sub(lgid);
+    auto subg_node = dfg->create_node_sub(lgid);
+
+    // start query subgraph io and construct TGs for connecting inputs, TAs for connecting outputs
+    for (const auto &io_pin : sub->get_io_pins()) {
+      Port_ID pos_pid = sub->get_graph_pos(io_pin.name);
+      fmt::print("io_name:{}, pos_pid:{}\n", io_pin.name, pos_pid);
+      if (io_pin.is_input()) {
+        auto tup_get = dfg->create_node(TupGet_Op);
+        auto tn_spin = tup_get.setup_sink_pin("TN"); // tuple name
+        auto kn_spin = tup_get.setup_sink_pin("KN"); // key name
+
+        auto tn_dpin = setup_tuple_ref(dfg, tup_name);
+        tn_dpin.connect_sink(tn_spin);
+
+        auto kn_dpin = setup_key_dpin(dfg, io_pin.name);
+        kn_dpin.connect_sink(kn_spin);
+        
+        auto subg_spin = subg_node.setup_sink_pin(io_pin.name);
+        tup_get.setup_driver_pin().connect_sink(subg_spin);
+
+      } else {
+        auto tup_add    = dfg->create_node(TupAdd_Op);
+        auto tn_spin    = tup_add.setup_sink_pin("TN"); //tuple name
+        auto kn_spin    = tup_add.setup_sink_pin("KN"); //key name
+        auto value_spin = tup_add.setup_sink_pin("KV"); //value
+
+        auto tn_dpin = setup_tuple_ref(dfg, res_tup_name, true);
+        tn_dpin.connect_sink(tn_spin);
+
+        auto kn_dpin = setup_key_dpin(dfg, io_pin.name);
+        kn_dpin.connect_sink(kn_spin);
+
+        auto subg_dpin = subg_node.setup_driver_pin(io_pin.name);
+        subg_dpin.connect_sink(value_spin);
+     
+        name2dpin[res_tup_name] = tup_add.setup_driver_pin();
+        tup_add.setup_driver_pin().set_name(res_tup_name);
+      }
+    }
   }
 };
 
@@ -944,7 +1007,8 @@ void Lnast_dfg::process_ast_func_def_op (LGraph *dfg, const Lnast_nid &lnidx) {
   auto c1_fdef = lnast->get_sibling_next(c0_fdef);
   auto func_stmts = lnast->get_sibling_next(c1_fdef);
   auto func_name = lnast->get_vname(c0_fdef);
-  auto subg_module_name = absl::StrCat(module_name, ".", func_name);
+  // auto subg_module_name = absl::StrCat(module_name, ".", func_name); FIXME->sh: graphviz compains about "." hierarchy
+  auto subg_module_name = absl::StrCat(module_name, "_", func_name);
   Lnast_dfg p(eprp_var, subg_module_name);
 
   fmt::print("============================= Sub-module: LNAST->LGraph Start ===============================================\n");
