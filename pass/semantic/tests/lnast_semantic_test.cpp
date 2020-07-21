@@ -25,7 +25,7 @@ int main(int argc, char** argv) {
     auto idx_root    = Lnast_node::create_top    ("top", line_num, pos1, pos2);
     auto node_stmts  = Lnast_node::create_stmts  ("stmts0", line_num, pos1, pos2);
     auto node_assign = Lnast_node::create_assign ("assign", line_num, pos1, pos2);
-    auto node_target = Lnast_node::create_const    ("val", line_num, pos1, pos2);
+    auto node_target = Lnast_node::create_ref    ("val", line_num, pos1, pos2);
     auto node_const  = Lnast_node::create_const  ("0d1023u10", line_num, pos1, pos2);
 
     lnast->set_root(idx_root);
@@ -114,7 +114,8 @@ int main(int argc, char** argv) {
     auto idx_lhs3   = lnast->add_child(idx_assign, Lnast_node::create_ref   ("a",  line_num, pos1, pos2));
     auto idx_op5    = lnast->add_child(idx_assign, Lnast_node::create_ref   ("___b",  line_num, pos1, pos2));
 
-    // No Warnings 
+    // No Warnings
+    // Inefficient LNAST is too strict here
 
     // ================================================================================================================
     s.do_check(lnast);
@@ -158,6 +159,7 @@ int main(int argc, char** argv) {
     auto idx_op7     = lnast->add_child(idx_assign3, Lnast_node::create_ref   ("___d",  line_num, pos1, pos2));
 
     // Warning: ___c
+    // Inefficient LNAST is too strict here
 
     // ================================================================================================================
     s.do_check(lnast);
@@ -371,7 +373,7 @@ int main(int argc, char** argv) {
     auto idx_stmts1  = lnast->add_child(idx_func   , Lnast_node::create_stmts    ("stmts1",  line_num, pos1, pos2));
     auto idx_io1     = lnast->add_child(idx_func   , Lnast_node::create_ref      ("$a",  line_num, pos1, pos2));
     auto idx_io2     = lnast->add_child(idx_func   , Lnast_node::create_ref      ("$b",  line_num, pos1, pos2));
-    auto idx_io3     = lnast->add_child(idx_func   , Lnast_node::create_ref      ("$out",  line_num, pos1, pos2));
+    auto idx_io3     = lnast->add_child(idx_func   , Lnast_node::create_ref      ("%out",  line_num, pos1, pos2));
 
     auto idx_xor     = lnast->add_child(idx_stmts1 , Lnast_node::create_xor      ("xor",  line_num, pos1, pos2)); 
     auto idx_lhs1    = lnast->add_child(idx_xor    , Lnast_node::create_ref      ("___b",  line_num, pos1, pos2));
@@ -410,7 +412,7 @@ int main(int argc, char** argv) {
     auto idx_lhs8    = lnast->add_child(idx_assign5, Lnast_node::create_ref      ("%out",  line_num, pos1, pos2));
     auto idx_op9     = lnast->add_child(idx_assign5, Lnast_node::create_ref      ("___f",  line_num, pos1, pos2));
 
-    // Warning: null
+    // Inefficient LNAST is too strict here
 
     // ================================================================================================================
     s.do_check(lnast);
@@ -431,7 +433,7 @@ int main(int argc, char** argv) {
     auto idx_stmts1  = lnast->add_child(idx_func   , Lnast_node::create_stmts    ("stmts1",  line_num, pos1, pos2));
     auto idx_io1     = lnast->add_child(idx_func   , Lnast_node::create_ref      ("$a",  line_num, pos1, pos2));
     auto idx_io2     = lnast->add_child(idx_func   , Lnast_node::create_ref      ("$b",  line_num, pos1, pos2));
-    auto idx_io3     = lnast->add_child(idx_func   , Lnast_node::create_ref      ("$out",  line_num, pos1, pos2));
+    auto idx_io3     = lnast->add_child(idx_func   , Lnast_node::create_ref      ("%out",  line_num, pos1, pos2));
 
     auto idx_xor     = lnast->add_child(idx_stmts1 , Lnast_node::create_xor      ("xor",  line_num, pos1, pos2)); 
     auto idx_lhs1    = lnast->add_child(idx_xor    , Lnast_node::create_ref      ("___b",  line_num, pos1, pos2));
@@ -550,7 +552,7 @@ int main(int argc, char** argv) {
     auto idx_lhs6    = lnast->add_child(idx_assign5, Lnast_node::create_ref    ("tup",  line_num, pos1, pos2));
     auto idx_opb     = lnast->add_child(idx_assign5, Lnast_node::create_ref    ("___e",  line_num, pos1, pos2));
 
-    // Warning: foo, bar, null
+    // Warning: foo, bar
 
     // ================================================================================================================
     s.do_check(lnast);

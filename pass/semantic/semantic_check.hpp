@@ -15,7 +15,7 @@ protected:
   std::vector<std::vector<std::string_view>> rhs_list;
 
   std::vector<std::string_view>         inefficient_LNAST;
-  absl::flat_hash_set<std::string_view> output_vars;
+  std::vector<std::string_view> output_vars;
 
   bool is_primitive_op(const Lnast_ntype node_type);
   bool is_tree_structs(const Lnast_ntype node_type);
