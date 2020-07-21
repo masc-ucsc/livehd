@@ -47,8 +47,6 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index) {
   fmt::print("node:assign\n");
   auto curr_index = lnast->get_first_child(assign_node_index);
   std::vector<std::string_view> assign_str_vect;
-  std::string_view key;
-  std::string_view ref;
   while(curr_index!=lnast->invalid_index()) {
     const auto& curr_node_data = lnast->get_data(curr_index);
     auto curlvl = curr_index.level;
@@ -56,7 +54,9 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index) {
     assign_str_vect.push_back(Code_gen::get_node_name(curr_node_data));
     curr_index = lnast->get_sibling_next(curr_index);
   }//data of all the child nodes of assign are in assign_str_vect
+  std::string_view key;
   key = assign_str_vect.at(0);
+  std::string_view ref;
   ref = assign_str_vect.at(1);
   auto map_it = ref_map.find(ref);
   if (map_it != ref_map.end()) {
@@ -76,13 +76,9 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index) {
 
 //Process the operator (like and,or,etc.) node:
 void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
-  bool op_is_unary = false;
-  auto curr_index = lnast->get_first_child(op_node_index);
-  const auto& op_node_data = lnast->get_data(op_node_index);
-  std::vector<std::string_view> op_str_vect;
-  std::string_view key;
-  std::string val;
   //TODO: make a func to convert the subtree to vector of strings (as done in following while loop) and return the vect of strings
+  auto curr_index = lnast->get_first_child(op_node_index);
+  std::vector<std::string_view> op_str_vect;
   while(curr_index!=lnast->invalid_index()) {
     const auto& curr_node_data = lnast->get_data(curr_index);
     auto curlvl = curr_index.level;
@@ -91,10 +87,14 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
     curr_index = lnast->get_sibling_next(curr_index);
   }
   //op_str_vect now has all the children of the operation "op"
+  std::string_view key;
   key = op_str_vect.at(0);
+  bool op_is_unary = false;
   if(is_temp_var(key) && op_str_vect.size()==2){
     op_is_unary = true;
   }
+  const auto& op_node_data = lnast->get_data(op_node_index);
+  std::string val;
   for (int i = 1; i < op_str_vect.size(); i++) {
     std::string_view ref = op_str_vect.at(i);
     auto             map_it = ref_map.find(ref);
@@ -126,12 +126,9 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
 
 //processing dot operator
 void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index) {
-  auto curr_index = lnast->get_first_child(dot_node_index);
-  const auto& dot_node_data = lnast->get_data(dot_node_index);
-  std::vector<std::string_view> dot_str_vect;
-  std::string_view key;
-  std::string_view ref;
 
+  auto curr_index = lnast->get_first_child(dot_node_index);
+  std::vector<std::string_view> dot_str_vect;
   while(curr_index!=lnast->invalid_index()) {
     const auto& curr_node_data = lnast->get_data(curr_index);
     auto curlvl = curr_index.level;
@@ -141,12 +138,15 @@ void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index) {
   }
   //dot_str_vect now has all the children of the operation "op"
 
+  std::string_view key;
   key = dot_str_vect.at(0);
+  std::string_view ref;
   ref = dot_str_vect.at(1);
   auto map_it = ref_map.find(ref);
   if (map_it != ref_map.end()) {
     ref = map_it->second;
   }
+  const auto& dot_node_data = lnast->get_data(dot_node_index);
   std::string value = absl::StrCat(ref, dot_node_data.type.debug_name_pyrope(), process_number(dot_str_vect.at(2)));
 
   if (is_temp_var(key)) {
