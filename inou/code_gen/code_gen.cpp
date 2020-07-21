@@ -119,7 +119,7 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
   if(is_temp_var(key)) {
     ref_map.insert(std::pair<std::string_view, std::string>(key, val));
   } else {
-    absl::StrAppend (&buffer_to_print, key, " ", op_node_data.type.debug_name_pyrope(), " ", val);//put stmt separator here;
+    absl::StrAppend (&buffer_to_print, key, " ", op_node_data.type.debug_name_pyrope(), " ", val);//, parser_ptr->stmt_sep());//put stmt separator here;
   }
 
 }
