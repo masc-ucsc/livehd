@@ -151,6 +151,7 @@ public:
   std::string to_yosys() const;
   std::string to_verilog() const;
   std::string to_string() const;
+  std::string to_string_no_xz() const;
   std::string to_pyrope() const;
   std::string to_firrtl() const;
 

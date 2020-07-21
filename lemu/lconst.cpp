@@ -461,6 +461,24 @@ std::string Lconst::to_string() const {
   return str;
 }
 
+std::string Lconst::to_string_no_xz() const {
+  I(explicit_str);
+
+  std::string str;
+  Number tmp = num;
+  while(tmp) {
+    unsigned char ch = static_cast<unsigned char>(tmp & 0xFF);
+    if (ch == 'z' || ch == 'x')
+      str.append(1, '0');
+    else
+      str.append(1, ch);
+    tmp >>= 8;
+  }
+  fmt::print("to_string_firrtl: {}\n", str);
+
+  return str;
+}
+
 void Lconst::pyrope_bits(std::string *str) const {
   if (!explicit_sign && !explicit_bits) {
     return;
@@ -516,20 +534,22 @@ std::string Lconst::to_pyrope() const {
 std::string Lconst::to_firrtl() const {
 
   /*Note->hunter: FIRRTL-Proto requires the string output
-   * here is a decimal value (no 0x or 0d allowed. Only #) */
-  /*if (explicit_str) {
+   * here is a decimal value (no 0x or 0d allowed. Only #).
+   * Also means it can't have 'x' or 'z'. */
+  Number v;
+  if (explicit_str) {
     // Either string or 0b with special characters like ?xz
-    auto str = to_string();
+    auto str = to_string_no_xz();
     if (str.size()*8 == bits)
-      return absl::StrCat("'", str, "'");
+      return str;
 
     I(str[0] != '-');
-    auto str2 = absl::StrCat("0b", str);
-    pyrope_bits(&str2);
-    return str2;
-  }*/
-
-  const auto v = get_num(bits);
+    //Is in 0b form, need to convert from that.
+    auto temp_lconst = Lconst(str);
+    v = temp_lconst.get_num(bits);
+  } else {
+    v = get_num(bits);
+  }
   std::stringstream ss;
 
   if (v<0)
