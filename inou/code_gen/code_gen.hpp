@@ -1,8 +1,21 @@
 #pragma once
 
 #include "lnast.hpp"
+#include "inou_code_gen.hpp"
 
 class Code_gen {
+//class Code_gen : public Inou_code_gen {
+// private:
+// void to_code_gen(Inou_code_gen::Cgen_type cgen_type, std::shared_ptr<Lnast> lnast) {
+//   if (cgen_type == Cgen_type::Type_prp) {
+//     auto parser_ptr = std::make_unique<Prp_parser>(std::move(lnast), path);
+//   } else if (cgen_type == Cgen_type::Type_cpp) {
+//     auto parser_ptr = std::make_unique<Cpp_parser>(std::move(lnast), path);
+//   } else {
+//     I(false);  // Invalid
+//     auto parser_ptr = std::make_unique<Prp_parser>(std::move(lnast), path);
+//   }
+// }
 protected:
   //Lnast *top;
   std::shared_ptr<Lnast> lnast;
