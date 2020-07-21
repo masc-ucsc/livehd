@@ -30,7 +30,6 @@ private:
 
 protected:
   void top_stmts2lgraph             (LGraph *dfg, const Lnast_nid &lnidx_stmts);
-  void setup_lgraph_outputs_and_final_var_name(LGraph *dfg);
   void process_ast_stmts            (LGraph *dfg, const Lnast_nid &lnidx_stmts);
   Node process_ast_assign_op        (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_dp_assign_op     (LGraph *dfg, const Lnast_nid &lnidx);
@@ -53,6 +52,7 @@ protected:
   void process_ast_attr_set_op      (LGraph *dfg, const Lnast_nid &lnidx_aset);
   void process_ast_attr_get_op      (LGraph *dfg, const Lnast_nid &lnidx_aget);
   void process_ast_tuple_phi_add_op (LGraph *dfg, const Lnast_nid &lnidx_tpa);
+  void setup_lgraph_outputs_and_final_var_name(LGraph *dfg);
 
 
   Node         setup_node_opr_and_lhs         (LGraph *dfg, const Lnast_nid &lnidx_opr);
