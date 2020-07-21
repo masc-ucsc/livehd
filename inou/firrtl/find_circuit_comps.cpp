@@ -39,9 +39,12 @@ void Inou_firrtl::SearchNode(Lnast &ln, const Lnast_nid &parent_node, firrtl::Fi
     if (!isdigit(ln.get_name(parent_node)[0])) {
       CheckRefForComp(ln, parent_node, umod);
     }
+  } else if (ntype.is_tuple()) {
+    CheckTuple(ln, parent_node, umod);
   } else if (ntype.is_func_call()) {
     CreateSubmodInstance(ln, parent_node, umod);
-
+  } else if (ntype.is_dot()) {
+    return;
   } else {
     // If "regular" node
     for (const auto &lnidx : ln.children(parent_node)) {
@@ -64,6 +67,29 @@ firrtl::FirrtlPB_Type *Inou_firrtl::CreateTypeObject(uint32_t bitwidth) {
   type->set_allocated_uint_type(uint_type);
 
   return type;
+}
+
+/* I assume that this is going to be used as
+ * arguments to some func_call. Thus, ignore
+ * LHS of tuple and LHS of each key-val assign. */
+void Inou_firrtl::CheckTuple(Lnast &ln, const Lnast_nid &tup_node, firrtl::FirrtlPB_Module_UserModule *umod) {
+  bool first = true;
+  for (const auto &node : ln.children(tup_node)) {
+    auto ntype = ln.get_data(node).type;
+    if (first) {
+      I(ntype.is_ref());
+      first = false;
+    } else {
+      // Check each key-val assign node.
+      I(ntype.is_assign()); //Maybe this should also include dp_assign?
+      auto asg_lhs = ln.get_first_child(node);
+      auto asg_rhs = ln.get_sibling_next(asg_lhs);
+      if (ln.get_data(asg_rhs).type.is_ref()) {
+        // If RHS is a ref, check if its a circuit component.
+        CheckRefForComp(ln, asg_rhs, umod);
+      }
+    }
+  }
 }
 
 /* Check to see if ref could be a wire/reg/IO.
@@ -129,6 +155,8 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
     // otherwise = wire
     if (reg_wire_map.contains(name))
       return;
+    //if (wire_rename_map.contains(name)) // Ignore this, since it's a call to a submodule and not a wire.
+    //  return;
     auto wire = new firrtl::FirrtlPB_Statement_Wire();
     wire->set_id((std::string)name);  // FIXME: Figure out best way to use renaming map to fix submodule input tuple names
 
@@ -184,11 +212,12 @@ void Inou_firrtl::CreateSubmodInstance(Lnast &ln, const Lnast_nid &fcall_node, f
  * input tuple names to match output tuple when seen in LNAST). */
 // FIXME: This function needs some work...
 std::string_view Inou_firrtl::ConvergeFCallNames(const std::string_view func_out, const std::string_view func_inp) {
-  if (func_out.substr(0, 4) == "inp_" && func_out.substr(0, 4) == "out_") {
-    /* Specific case from FIRRTL->LNAST translation.
-     * FIXME: Not sure how to 100% handle yet, or if I even want to do this. Due to LGraph, this probably won't even come up */
-    I(false);  // decide on this later, per above fixme
-    return "";
+  if (func_inp.substr(0, 4) == "inp_" && func_out.substr(0, 4) == "out_" && func_inp.substr(4) == func_out.substr(4)) {
+    // Specific case from FIRRTL->LNAST translation.
+    // some function call like out_foo = submodule(inp_foo) will get its bundle name set to foo
+    wire_rename_map[(std::string)func_inp] = func_inp.substr(4);
+    wire_rename_map[(std::string)func_out] = func_out.substr(4);
+    return func_out.substr(4);;
   } else {
     // Change the map (which alters some wire names)
     wire_rename_map[(std::string)func_inp] = (std::string)func_out;
