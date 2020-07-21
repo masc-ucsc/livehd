@@ -21,7 +21,8 @@ protected:
   void attach_output_to_lnast(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& opin);
 
   void attach_sum_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  void attach_binaryop_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void attach_binaryop_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pid1_pin);
+  void attach_binary_reduc(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
   void attach_not_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
   void attach_join_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
   void attach_pick_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
