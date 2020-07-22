@@ -6,14 +6,14 @@
 
 class Inou_code_gen : public Pass {
 //protected:
-//  enum class Cgen_type { Type_verilog, Type_prp, Type_cfg, Type_cpp };
-
+//  enum class Code_gen_type { Type_verilog, Type_prp, Type_cfg, Type_cpp };
+public:
+  enum class Code_gen_type { Type_verilog, Type_prp, Type_cfg, Type_cpp };
 private:
-  enum class Cgen_type { Type_verilog, Type_prp, Type_cfg, Type_cpp };
 
   LGraph *lg;
 
-  void to_xxx(Cgen_type cgen_type, std::shared_ptr<Lnast> lnast);
+  void to_xxx(Code_gen_type code_gen_type, std::shared_ptr<Lnast> lnast);
 
   // callback entry points
   static void to_verilog(Eprp_var &var);

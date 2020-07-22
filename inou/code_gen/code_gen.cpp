@@ -1,7 +1,17 @@
 
 #include "code_gen.hpp"
 
-Code_gen::Code_gen(std::shared_ptr<Lnast> _lnast, std::string_view _path) : lnast(std::move(_lnast)), path(_path) {}
+Code_gen::Code_gen(Inou_code_gen::Code_gen_type code_gen_type, std::shared_ptr<Lnast> _lnast, std::string_view _path) : lnast(std::move(_lnast)), path(_path) {
+  //std::unique_ptr<Code_gen_all_lang> lnast_to;
+  if (code_gen_type == Inou_code_gen::Code_gen_type::Type_prp) {
+    lnast_to = std::make_unique<Prp_parser>();
+  } else if (code_gen_type == Inou_code_gen::Code_gen_type::Type_cpp) {
+    lnast_to = std::make_unique<Cpp_parser>();
+  } else {
+    I(false);  // Invalid
+    lnast_to = std::make_unique<Prp_parser>();
+  }
+}
 
 
 void Code_gen::generate(){
@@ -67,10 +77,10 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index) {
   if (is_temp_var(key)) {
     auto ref_map_inst_res = ref_map.insert(std::pair<std::string_view, std::string>(key, (std::string)ref));
     if(!ref_map_inst_res.second) {
-      absl::StrAppend(&buffer_to_print, ref_map.find(key)->second, " ", "=", " ", (std::string)ref);//insert stmt sep here
+      absl::StrAppend(&buffer_to_print, ref_map.find(key)->second, " ", "=", " ", (std::string)ref, lnast_to->stmt_sep());//insert stmt sep here
     }
   } else {
-    absl::StrAppend(&buffer_to_print, key, " ", "=", " ", (std::string)ref);//stmt sep here;
+    absl::StrAppend(&buffer_to_print, key, " ", "=", " ", (std::string)ref, lnast_to->stmt_sep());//stmt sep here;
   }
 }
 
@@ -119,7 +129,7 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
   if(is_temp_var(key)) {
     ref_map.insert(std::pair<std::string_view, std::string>(key, val));
   } else {
-    absl::StrAppend (&buffer_to_print, key, " ", op_node_data.type.debug_name_pyrope(), " ", val);//, parser_ptr->stmt_sep());//put stmt separator here;
+    absl::StrAppend (&buffer_to_print, key, " ", op_node_data.type.debug_name_pyrope(), " ", val, lnast_to->stmt_sep());//put stmt separator here;
   }
 
 }
