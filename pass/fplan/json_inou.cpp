@@ -1,5 +1,4 @@
 #include "json_inou.hpp"
-
 Json_inou_parser::Json_inou_parser(const std::string& path) : d() {
   std::ifstream json_file(path);
   
@@ -20,85 +19,105 @@ Json_inou_parser::Json_inou_parser(const std::string& path) : d() {
   json_file.close();
 }
 
-std::vector<pnetl> Json_inou_parser::make_tree() const {
+// TODO: this is global right now because I have no idea how to move maps.
+graph::Bi_adjacency_list g;
+
+auto g_name_map = g.vert_map<std::string>();
+auto g_area_map = g.vert_map<double>();
+
+auto edge_weights = g.edge_map<unsigned int>();
+
+void Json_inou_parser::make_tree() const {
   I(d.HasMember("modules"));
   
   const rapidjson::Value& mods = d["modules"];
   I(mods.IsArray());
   const auto mod_arr = mods.GetArray();
   
-  // map to hold positions of known nodes
-  std::unordered_map<std::string, std::vector<pnetl>::iterator> m;
+  // TODO: this is here because idk if accessing maps at known bad locations is ok...
+  auto created_verts = g.vert_set();
   
-  std::vector<pnetl> v;
-  v.reserve(mod_arr.Size()); // preload vector to avoid iterator invalidation
-
   // loop over all modules in the json file, wiring them up and adding them to our map as we go
   for (const auto& mod : mod_arr) {
     I(mod["name"].IsString());
     const std::string name = mod["name"].GetString();
     
-    pnetl n;
-    
-    // create or use a node in v to represent the module
-    const auto& existing_pair = m.find(name);
-    if (existing_pair != m.end()) {
-      // node was already created by something else, use that
-      n = *(existing_pair->second);
-    } else {
-      // make a new node, put in the name, and load into map
-      n = std::make_shared<Netl_node>();
-
-      n->name = name;
-      v.push_back(n);
-      
-      auto new_pair = std::pair(name, v.end() - 1);
-      m.insert(new_pair);
-    }
-
     // TODO: iassert prints default assert statement here?
     I(mod["area"].IsDouble());
-    n->area = mod["area"].GetDouble();
+    const double area = mod["area"].GetDouble();
     
-    // look for connections in map, or create them if they don't exist
+    auto v = g.null_vert();
+    for (const auto& vert : created_verts) {
+      if (g_name_map[vert] == name) {
+        v = vert;
+      }
+    }
+
+    if (g.is_null(v)) {
+      // vertex does not exist, so create it
+      // TODO: I _think_ the maps get preserved when new verts get added...
+      auto new_v = g.insert_vert();
+      g_name_map[new_v] = name;
+      
+      created_verts.insert(new_v);
+
+      v = new_v;
+    }
+
+    g_area_map[v] = area;
+    
+    // look for connections, and create them if they don't exist
     I(mod["connections"].IsArray());
     for (const auto& connection : mod["connections"].GetArray()) {
       I(connection.IsObject());
       I(connection["name"].IsString());
       I(connection["weight"].IsInt());
 
-      std::string connection_str = connection["name"].GetString();
-      const auto& other_conn = m.find(connection_str);
-      if (other_conn != m.end()) {
-        // other node already created and in map
-
-        const auto& other_conn_list = (**(other_conn->second)).connect_list;
-        auto find_other = [&n](const std::pair<pnetl, unsigned int>& s) -> bool {
-          return s.first->name == n->name;
-        };
-        
-        if (std::find_if(other_conn_list.cbegin(), other_conn_list.cend(), find_other) == other_conn_list.cend()) {
-          // nodes are supposed to be connected, but aren't yet
-          n->connect_list.push_back(std::pair(*(other_conn->second), connection["weight"].GetInt()));
-          (**(other_conn->second)).connect_list.push_back(std::pair(n, connection["weight"].GetInt()));
+      std::string other_name = connection["name"].GetString();
+      auto other_v = g.null_vert();
+      for (const auto& vert : created_verts) {
+        if (g_name_map[vert] == other_name) {
+          other_v = vert;
         }
-      } else {
-        // not in map, so create a connection
-        auto new_conn = std::make_shared<Netl_node>();
-        new_conn->name = connection_str;
+      }
 
-        n->connect_list.push_back(std::pair<pnetl, unsigned int>(new_conn, connection["weight"].GetInt()));
-        new_conn->connect_list.push_back(std::pair<pnetl, unsigned int>(n, connection["weight"].GetInt()));
+      if (other_v != g.null_vert()) {
+        // other node is already in map
         
-        v.push_back(new_conn);
-        m.insert(std::pair(connection_str, v.end() - 1));
+        bool new_connection = true;
+        for (const auto& edge : g.out_edges(v)) {
+          if (g.head(edge) == other_v) {
+            new_connection = false;
+          }
+        }
+
+        if (new_connection) {
+          // connection does not exist yet
+          auto new_e = g.insert_edge(v, other_v); // construct an edge from v -> other_v
+          edge_weights[new_e] = connection["weight"].GetInt();
+        }
+        
+        // other_v -> v edge gets created later.
+
+      } else {
+        // other node is not in the map, so create and wire it.
+        
+        auto new_v = g.insert_vert();
+        g_name_map[new_v] = other_name;
+        created_verts.insert(new_v);
+        
+        auto new_e = g.insert_edge(v, other_v);
+        edge_weights[new_e] = connection["weight"].GetInt();
       }
     }
   }
-  
-  // make a tree out of the root node.
-  return v;
-}
+
+#ifndef NDEBUG
+  // print out the graph in DOT format, with relevant information attached.
+  using namespace graph::attributes;
+  std::cout << g.dot_format("name"_of_vert = g_name_map, "weight"_of_edge = edge_weights) << std::endl;
+#endif
+} 
 
 double Json_inou_parser::get_area() const {
   I(d.HasMember("area"));
