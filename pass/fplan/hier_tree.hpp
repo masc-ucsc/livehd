@@ -17,24 +17,29 @@
 #include <iomanip>
 #endif
 
+#include "Adjacency_list.hpp" // graph support
+#include "range/v3/all.hpp" // range support, since C++20 won't be out for a while
+#undef I // graph and iassert both declare "I" macros, but we only need the one from iassert
+
 #include "iassert.hpp"
 
 // node coming off the netlist
+/*
 struct Netl_node {
   std::string name;
   std::vector<std::pair<std::shared_ptr<Netl_node>, unsigned int>> connect_list;
   double area;
 };
-
-typedef std::shared_ptr<Netl_node> pnetl;
+*/
 
 // A hierarchy node, containing parent / children pointers and a list of connections to other nodes.
+/*
 struct Hier_node {
   
   std::string name;
   
   // the corresponding node in the netlist
-  pnetl netl_node;
+  //pnetl netl_node;
 
   std::shared_ptr<Hier_node> parent;
   std::vector<std::shared_ptr<Hier_node>> children;
@@ -46,22 +51,20 @@ struct Hier_node {
 
 typedef std::shared_ptr<Hier_node> phier;
 
-struct Cost_matrix_row {
-  pnetl node; // the actual netl_node we're referring to
-  std::vector<int> connect_cost; // list of connection weights to all other nodes
+struct Min_cut_data {
+  //pnetl node; // the actual netl_node we're referring to
+  //std::vector<int> connect_cost; // list of connection weights to all other nodes
   int d_cost; // difference between the external and internal cost of the node
   bool active; // whether the node is being considered for a swap or not
   unsigned int set; // what set the node is in
 };
-
-typedef std::vector<Cost_matrix_row> Cost_matrix;
 
 class Hier_tree {
 public:
   Hier_tree() { }
   
   // take in a vector of all nodes in the netlist, and convert it to a tree.
-  Hier_tree(const std::vector<pnetl> nl);
+  Hier_tree(const Graph<??> nl);
   
   // copies require copying the entire tree and are very expensive.
   Hier_tree(const Hier_tree& other) = delete;
@@ -101,23 +104,24 @@ private:
   unsigned int size(const phier root);
   
   // split a cost matrix into two cost matrices
-  std::pair<Cost_matrix, Cost_matrix> halve_matrix(const Cost_matrix& old_matrix);
+  //std::pair<Cost_matrix, Cost_matrix> halve_matrix(const Cost_matrix& old_matrix);
 
   // fill out the connections in an unfilled matrix
-  void wire_matrix(Cost_matrix& m);
+  //void wire_matrix(Cost_matrix& m);
   
   // clear out any temp nodes, if they exist.
-  void prune_matrix(Cost_matrix& m);
+  //void prune_matrix(Cost_matrix& m);
   
   // make a partition of the graph minimizing the number of edges crossing the cut and keeping in mind area (modified kernighan-lin algorithm)
-  std::pair<std::vector<pnetl>, std::vector<pnetl>> min_wire_cut(Cost_matrix& m);
+  //std::pair<std::vector<pnetl>, std::vector<pnetl>> min_wire_cut(Cost_matrix& m);
   
   // create a hierarchy tree out of existing hierarchies
-  phier make_hier_tree(phier t1, phier t2);
+  //phier make_hier_tree(phier t1, phier t2);
   
   // do hierarchy discovery starting with a given cost matrix
-  phier discover_hierarchy(Cost_matrix& m);
+  //phier discover_hierarchy(Cost_matrix& m);
 
   double min_area;
   unsigned int num_components;
 };
+*/
