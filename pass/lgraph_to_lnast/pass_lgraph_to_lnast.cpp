@@ -111,6 +111,9 @@ void Pass_lgraph_to_lnast::handle_source_node(LGraph* lg, Node_pin& pin, Lnast& 
 
   if (!pin.has_name()) {
     pin.set_name(create_temp_var(lnast));
+    if (pin.get_node().get_type().op == Mux_Op) {
+      pin.set_name(pin.get_name().substr(3)); //Remove "___" in front
+    }
   }
 
   pin.get_node().set_color(BLACK);
@@ -627,7 +630,11 @@ void Pass_lgraph_to_lnast::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node,
     dpins[edge.sink.get_pid()] = edge.driver;
   }
 
-  auto pin_name = lnast.add_string(dpin_get_name(pin));
+  auto pin_name = dpin_get_name(pin);
+  if (pin_name.substr(0,3) == "___") {
+    // Having an intermediate var in multiple scopes doesn't work
+    pin_name = lnast.add_string(pin_name.substr(3));
+  }
 
   auto if_true_stmt_node  = lnast.add_child(if_node, Lnast_node::create_stmts(get_new_seq_name(lnast)));
   auto if_false_stmt_node = lnast.add_child(if_node, Lnast_node::create_stmts(get_new_seq_name(lnast)));
@@ -694,6 +701,20 @@ void Pass_lgraph_to_lnast::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node
     pin_name = lnast.add_string(absl::StrCat("#", dpin_get_name(pin)));
   }
 
+  // Specify if async reset
+  if (pin.get_node().get_type().op == AFlop_Op) {
+    auto temp_var_name = create_temp_var(lnast);
+
+    auto dot_asr_node = lnast.add_child(parent_node, Lnast_node::create_dot("dot_flop_async"));
+    lnast.add_child(dot_asr_node, Lnast_node::create_ref(temp_var_name));
+    lnast.add_child(dot_asr_node, Lnast_node::create_ref(pin_name));
+    lnast.add_child(dot_asr_node, Lnast_node::create_ref("__reset_async"));
+
+    auto asg_asr_node = lnast.add_child(parent_node, Lnast_node::create_assign("asg_flop_async"));
+    lnast.add_child(asg_asr_node, Lnast_node::create_ref(temp_var_name));
+    lnast.add_child(asg_asr_node, Lnast_node::create_ref("true"));
+  }
+
   if (has_clk) {
     auto temp_var_name = create_temp_var(lnast);
 
@@ -708,7 +729,16 @@ void Pass_lgraph_to_lnast::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node
   }
 
   if (has_reset) {
-    // FIXME: Add reset logic.
+    auto temp_var_name = create_temp_var(lnast);
+
+    auto dot_rst_node = lnast.add_child(parent_node, Lnast_node::create_dot("dot_flop_rst"));
+    lnast.add_child(dot_rst_node, Lnast_node::create_ref(temp_var_name));
+    lnast.add_child(dot_rst_node, Lnast_node::create_ref(pin_name));
+    lnast.add_child(dot_rst_node, Lnast_node::create_ref("__reset_pin"));
+
+    auto asg_rst_node = lnast.add_child(parent_node, Lnast_node::create_assign("asg_flop_rst"));
+    lnast.add_child(asg_rst_node, Lnast_node::create_ref(temp_var_name));
+    attach_child(lnast, asg_rst_node, reset_pin);
   }
 
   if (has_set_v) {
@@ -802,7 +832,8 @@ void Pass_lgraph_to_lnast::attach_child(Lnast& lnast, Lnast_nid& op_node, const 
     auto dpin_name = dpin_get_name(dpin);
     lnast.add_child(op_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("$", dpin_name))));
   } else if (dpin.get_node().is_graph_output()) {
-    auto out_driver_name = lnast.add_string(get_driver_of_output(dpin));
+    //auto out_driver_name = lnast.add_string(get_driver_of_output(dpin));
+    auto out_driver_name = lnast.add_string(absl::StrCat("%", dpin.get_name()));//FIXME: Check up on later. This used to cause problems with Yosys (see above line for what was used instead)
     lnast.add_child(op_node,
                     Lnast_node::create_ref(out_driver_name));  // lnast.add_string(absl::StrCat(prefix, "%", dpin.get_name()))));
   } else if ((dpin.get_node().get_type().op == AFlop_Op) || (dpin.get_node().get_type().op == SFlop_Op)) {
@@ -855,6 +886,9 @@ void Pass_lgraph_to_lnast::attach_cond_child(Lnast& lnast, Lnast_nid& op_node, c
  * above statement becomes "%x = T0 + a". This function returns
  * the name of the driver of %y in this case (T0). */
 std::string_view Pass_lgraph_to_lnast::get_driver_of_output(const Node_pin dpin) {
+  //auto out_pin = get_driver_pin(sink_pid);
+
+  //FIXME: using get_name in here was causing a failure on async.v
   for (const auto inp : dpin.get_node().inp_edges()) {
     if (inp.sink.get_pid() == dpin.get_pid()) {
       return inp.driver.get_name();

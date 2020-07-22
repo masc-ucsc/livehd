@@ -146,6 +146,7 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
     I(ln.get_name(lnidx) == "err_var_undefined");
     return;
   } else {
+    fmt::print("Error: node with token {} not yet supported\n", ln.get_name(lnidx));
     I(false);
     return;
   }
@@ -239,6 +240,7 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
     I(ln.get_name(lnidx) == "err_var_undefined");
     return;
   } else {
+    fmt::print("Error: node with token {} not yet supported\n", ln.get_name(lnidx));
     I(false);
     return;
   }
@@ -437,7 +439,9 @@ void Inou_firrtl::add_cstmts(Lnast &ln, const Lnast_nid &lnidx_if, firrtl::Firrt
   for (const auto &if_child : ln.children(lnidx_if)) {
     const auto ntype = ln.get_data(if_child).type;
     if (ntype.is_cstmts()) {
-      process_ln_stmt(ln, if_child, umod);
+      for (const auto &cst_child : ln.children(if_child)) {
+        process_ln_stmt(ln, cst_child, umod);
+      }
     }
   }
 }
@@ -458,7 +462,9 @@ firrtl::FirrtlPB_Statement_When *Inou_firrtl::process_ln_if_op(Lnast &ln, const 
   for (const auto &if_child : ln.children(lnidx_if)) {
     const auto ntype = ln.get_data(if_child).type;
     if (ntype.is_stmts()) {
-      process_ln_stmt(ln, if_child, when_lowest, pos_to_add_to);
+      for (const auto &stmt_child : ln.children(if_child)) {
+        process_ln_stmt(ln, stmt_child, when_lowest, pos_to_add_to);
+      }
       pos_to_add_to++;  // Set to 1 (or 2 if last stmt)
     } else if (ntype.is_cond()) {
       // A new cond has been found, meaning we need to create another when
@@ -560,6 +566,10 @@ void Inou_firrtl::handle_attr_assign(Lnast &ln, const Lnast_nid &lhs, const Lnas
   // TODO: __signed __posedge ...
   if (attr_name == "__clk_pin") {
     handle_clock_attr(ln, var_name, rhs);
+  } else if (attr_name == "__reset_pin") {
+    handle_reset_attr(ln, var_name, rhs);
+  } else if (attr_name == "__reset_async") {
+    handle_async_attr(ln, var_name, rhs);
   } else {
     fmt::print("Error: attribute found, but it is either incorrect or not supported yet.\n");
     // I(false);
@@ -599,7 +609,6 @@ void Inou_firrtl::handle_clock_attr(Lnast &ln, const std::string_view &var_name,
     stmt_ptr->mutable_wire()->set_allocated_type(type);
 
   } else {
-    // FIXME: Create asClock here to change rhs name to clock (then use that as expr for clock field
     firrtl::FirrtlPB_Expression_PrimOp *prim = new firrtl::FirrtlPB_Expression_PrimOp();
     prim->set_op(firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_CLOCK);
     auto arg = prim->add_arg();
@@ -612,9 +621,80 @@ void Inou_firrtl::handle_clock_attr(Lnast &ln, const std::string_view &var_name,
   }
 
   // Set the register's clock.
-  firrtl::FirrtlPB_Expression *clk_expr = new firrtl::FirrtlPB_Expression();
+  auto clk_expr = new firrtl::FirrtlPB_Expression();
   add_refcon_as_expr(ln, rhs, clk_expr);
   reg->set_allocated_clock(clk_expr);
+}
+
+// (See handle_clock_attr for description)
+// Note: __reseet_async has to come before __reset_pin
+void Inou_firrtl::handle_async_attr(Lnast &ln, const std::string_view &var_name, const Lnast_nid &rhs) {
+  if (ln.get_name(rhs) == "true") {
+    async_regs.insert(var_name.substr(1));
+    fmt::print("Adding to async_regs: {}\n", var_name.substr(1));
+  }
+}
+
+// (See handle_clock_attr for description)
+void Inou_firrtl::handle_reset_attr(Lnast &ln, const std::string_view &var_name, const Lnast_nid &rhs) {
+  I(reg_wire_map.contains(var_name.substr(1)));
+  auto stmt = reg_wire_map[var_name.substr(1)];
+  I(stmt->has_register_());
+  auto reg = stmt->mutable_register_();
+
+  auto reset_name = ln.get_name(rhs);
+  if (io_map.contains(reset_name.substr(1))) {
+    auto port_ptr = io_map[reset_name.substr(1)];
+    auto type     = new firrtl::FirrtlPB_Type();
+    if (async_regs.contains(var_name.substr(1))) {
+      auto areset_type = new firrtl::FirrtlPB_Type_AsyncResetType();
+      type->set_allocated_async_reset_type(areset_type);
+    } else {
+      auto reset_type = new firrtl::FirrtlPB_Type_ResetType();
+      type->set_allocated_reset_type(reset_type);
+    }
+    port_ptr->set_allocated_type(type);
+
+  } else if (reg_wire_map.contains(reset_name.substr(1))) {
+    auto stmt_ptr = reg_wire_map[reset_name.substr(1)];
+    auto type     = new firrtl::FirrtlPB_Type();
+    if (async_regs.contains(var_name.substr(1))) {
+      auto areset_type = new firrtl::FirrtlPB_Type_AsyncResetType();
+      type->set_allocated_async_reset_type(areset_type);
+    } else {
+      auto reset_type = new firrtl::FirrtlPB_Type_ResetType();
+      type->set_allocated_reset_type(reset_type);
+    }
+    stmt_ptr->mutable_register_()->set_allocated_type(type);
+
+  } else if (reg_wire_map.contains(reset_name)) {
+    auto stmt_ptr = reg_wire_map[reset_name.substr(1)];
+    auto type     = new firrtl::FirrtlPB_Type();
+    if (async_regs.contains(var_name.substr(1))) {
+      auto areset_type = new firrtl::FirrtlPB_Type_AsyncResetType();
+      type->set_allocated_async_reset_type(areset_type);
+    } else {
+      auto reset_type = new firrtl::FirrtlPB_Type_ResetType();
+      type->set_allocated_reset_type(reset_type);
+    }
+    stmt_ptr->mutable_wire()->set_allocated_type(type);
+
+  } else {
+    firrtl::FirrtlPB_Expression_PrimOp *prim = new firrtl::FirrtlPB_Expression_PrimOp();
+    prim->set_op(firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_UINT);
+    auto arg = prim->add_arg();
+    add_refcon_as_expr(ln, rhs, arg);
+    firrtl::FirrtlPB_Expression *expr = new firrtl::FirrtlPB_Expression();
+    expr->set_allocated_prim_op(prim);
+
+    reg->set_allocated_reset(expr);
+    return;  // Don't do final step, since we did actual assignment on previous line
+  }
+
+  // Set the register's clock.
+  auto reset_expr = new firrtl::FirrtlPB_Expression();
+  add_refcon_as_expr(ln, rhs, reset_expr);
+  reg->set_allocated_reset(reset_expr);
 }
 
 //----- Helper Functions -----
@@ -729,14 +809,14 @@ firrtl::FirrtlPB_Expression_PrimOp_Op Inou_firrtl::get_firrtl_oper_code(const Ln
 /* Provided some ref or const node and an expression pointer,
  * this will form that ref/const in the expression pointer. */
 void Inou_firrtl::add_refcon_as_expr(Lnast &ln, const Lnast_nid &lnidx, firrtl::FirrtlPB_Expression *expr) {
-  if (ln.get_data(lnidx).type.is_ref()) {
+  if (ln.get_data(lnidx).type.is_ref() || (ln.get_data(lnidx).type.is_cond() && (!isdigit(ln.get_name(lnidx)[0])))) {
     // Lnidx is a variable, so I need to make a Reference argument.
     auto                                   str     = get_firrtl_name_format(ln, lnidx);
     firrtl::FirrtlPB_Expression_Reference *rhs_ref = new firrtl::FirrtlPB_Expression_Reference();
     rhs_ref->set_id(str);
     expr->set_allocated_reference(rhs_ref);
 
-  } else if (ln.get_data(lnidx).type.is_const()) {
+  } else if (ln.get_data(lnidx).type.is_const() || (ln.get_data(lnidx).type.is_cond() && (isdigit(ln.get_name(lnidx)[0])))) {
     // Lnidx is a number, so I need to make a [U/S]IntLiteral argument.
     auto lconst_holder = Lconst(ln.get_name(lnidx));
     auto lconst_str    = lconst_holder.to_firrtl();
