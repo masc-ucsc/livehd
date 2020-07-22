@@ -5,6 +5,7 @@
 #include <cmath>
 #include <vector>
 
+#include "bitwidth_range.hpp"
 #include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
@@ -214,6 +215,8 @@ void Pass_bitwidth::process_sum(Node &node, XEdge_iterator &inp_edges) {
         max_val = max_val + it->second.get_max();
         min_val = min_val + it->second.get_min();
       } else {
+        fmt::print("max_val:{}, pmax_val:{}\n", max_val.to_i(), it->second.get_max().to_i());
+        fmt::print("min_val:{}, pmin_val:{}\n", min_val.to_i(), it->second.get_min().to_i());
         max_val = max_val - it->second.get_max();
         min_val = min_val - it->second.get_min();
       }
@@ -573,26 +576,26 @@ void Pass_bitwidth::process_attr_set_propagate(Node &node) {
     dpin_name = attr_dpin.get_name();
 
   I(node.has_sink_pin_connected(0));
+  bool parent_data_pending = false;
   auto data_dpin = node.get_sink_pin(0).get_driver_pin();
-  bool data_is_from_subg = data_dpin.get_node().get_type_op() == SubGraph_Op;
 
   I(node.has_sink_pin_connected(3));
   auto parent_attr_dpin = node.get_sink_pin(3).get_driver_pin();
 
+  Bitwidth_range data_bw(0);
   auto data_it = bwmap.find(data_dpin.get_compact());
+  if (data_it != bwmap.end()) {
+    data_bw = data_it->second;
+  } else {
+    parent_data_pending = true;
+  }
+
   /* if (data_it == bwmap.end()) { */
   /*   fmt::print("attr_set propagate bwmap to AttrSet name:{}\n", dpin_name); */
   /*   not_finished = true; */
   /*   return; */
   /* } */
-
-  if (data_it == bwmap.end() && !data_is_from_subg) { //FIXME->sh: temporary solution before hier-lgraph ready
-    fmt::print("attr_set propagate bwmap to AttrSet name:{}\n", dpin_name);
-    not_finished = true;
-    return;
-  } 
-
-  const auto &data_bw = !data_is_from_subg ? data_it->second : Bitwidth_range(0);
+  /* auto &data_bw = data_it->second; */
 
   auto parent_attr_it = bwmap.find(parent_attr_dpin.get_compact());
   if (parent_attr_it == bwmap.end()) {
@@ -602,12 +605,10 @@ void Pass_bitwidth::process_attr_set_propagate(Node &node) {
   }
   const auto &parent_attr_bw = parent_attr_it->second;
 
-  if (data_dpin.get_node().get_type_op() != SubGraph_Op) {
-    fmt::print("attr_set_prop name:{} parent_attr.bits:{} data_bw.bits:{}\n",
-               dpin_name,
-               parent_attr_bw.get_bits(),
-               data_bw.get_bits());
-  }
+  fmt::print("attr_set_prop name:{} parent_attr.bits:{} data_bw.bits:{}\n",
+             dpin_name,
+             parent_attr_bw.get_bits(),
+             data_bw.get_bits());
 
   if (parent_attr_bw.get_bits() && data_bw.get_bits()) {
     if (parent_attr_bw.get_bits() < data_bw.get_bits()) {
@@ -632,6 +633,12 @@ void Pass_bitwidth::process_attr_set_propagate(Node &node) {
     out_dpin.set_bits(parent_attr_bw.get_bits());
     bwmap.emplace(out_dpin.get_compact(), parent_attr_bw);
   }
+
+  if (parent_data_pending) {
+    data_dpin.set_bits(parent_attr_bw.get_bits());
+    bwmap.emplace(data_dpin.get_compact(), parent_attr_bw);
+  }
+
 }
 
 void Pass_bitwidth::process_attr_set(Node &node) {

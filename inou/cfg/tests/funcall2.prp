@@ -5,6 +5,6 @@ sum = ::{
   %o = $a + $b
 }
 
-res = sum(a = 2, b = 3)
 %out.__bits = 3
+res = sum(a = 2, b = 3)
 %out = res.o
