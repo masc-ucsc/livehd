@@ -19,23 +19,20 @@ Json_inou_parser::Json_inou_parser(const std::string& path) : d() {
   json_file.close();
 }
 
-// TODO: this is global right now because I have no idea how to move maps.
-graph::Bi_adjacency_list g;
+Graph_info Json_inou_parser::make_tree() const {
 
-auto g_name_map = g.vert_map<std::string>();
-auto g_area_map = g.vert_map<double>();
+  graph::Bi_adjacency_list g;
 
-auto edge_weights = g.edge_map<unsigned int>();
+  // TODO: I have no idea how to move these maps anywhere.
+  auto g_name_map = g.vert_map<std::string>();
+  auto g_area_map = g.vert_map<double>();
+  auto edge_weights = g.edge_map<unsigned int>();
 
-void Json_inou_parser::make_tree() const {
   I(d.HasMember("modules"));
   
   const rapidjson::Value& mods = d["modules"];
   I(mods.IsArray());
   const auto mod_arr = mods.GetArray();
-  
-  // TODO: this is here because idk if accessing maps at known bad locations is ok...
-  auto created_verts = g.vert_set();
   
   // loop over all modules in the json file, wiring them up and adding them to our map as we go
   for (const auto& mod : mod_arr) {
@@ -47,7 +44,7 @@ void Json_inou_parser::make_tree() const {
     const double area = mod["area"].GetDouble();
     
     auto v = g.null_vert();
-    for (const auto& vert : created_verts) {
+    for (const auto& vert : g.verts()) {
       if (g_name_map[vert] == name) {
         v = vert;
       }
@@ -55,12 +52,9 @@ void Json_inou_parser::make_tree() const {
 
     if (g.is_null(v)) {
       // vertex does not exist, so create it
-      // TODO: I _think_ the maps get preserved when new verts get added...
       auto new_v = g.insert_vert();
       g_name_map[new_v] = name;
       
-      created_verts.insert(new_v);
-
       v = new_v;
     }
 
@@ -75,7 +69,7 @@ void Json_inou_parser::make_tree() const {
 
       std::string other_name = connection["name"].GetString();
       auto other_v = g.null_vert();
-      for (const auto& vert : created_verts) {
+      for (const auto& vert : g.verts()) {
         if (g_name_map[vert] == other_name) {
           other_v = vert;
         }
@@ -91,11 +85,8 @@ void Json_inou_parser::make_tree() const {
           }
         }
 
-        if (new_connection) {
-          // connection does not exist yet
-          auto new_e = g.insert_edge(v, other_v); // construct an edge from v -> other_v
-          edge_weights[new_e] = connection["weight"].GetInt();
-        }
+        auto new_e = g.insert_edge(v, other_v); // construct an edge from v -> other_v
+        edge_weights[new_e] = connection["weight"].GetInt();
         
         // other_v -> v edge gets created later.
 
@@ -104,9 +95,8 @@ void Json_inou_parser::make_tree() const {
         
         auto new_v = g.insert_vert();
         g_name_map[new_v] = other_name;
-        created_verts.insert(new_v);
         
-        auto new_e = g.insert_edge(v, other_v);
+        auto new_e = g.insert_edge(v, new_v);
         edge_weights[new_e] = connection["weight"].GetInt();
       }
     }
@@ -117,6 +107,8 @@ void Json_inou_parser::make_tree() const {
   using namespace graph::attributes;
   std::cout << g.dot_format("name"_of_vert = g_name_map, "weight"_of_edge = edge_weights) << std::endl;
 #endif
+  
+  return Graph_info(std::move(g), std::move(g_name_map), std::move(g_area_map), std::move(edge_weights));
 } 
 
 double Json_inou_parser::get_area() const {

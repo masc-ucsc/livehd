@@ -17,32 +17,20 @@
 #include <iomanip>
 #endif
 
+#include "json_inou.hpp"
+
 #include "Adjacency_list.hpp" // graph support
-#include "range/v3/all.hpp" // range support, since C++20 won't be out for a while
 #undef I // graph and iassert both declare "I" macros, but we only need the one from iassert
 
 #include "iassert.hpp"
 
-// node coming off the netlist
-/*
-struct Netl_node {
-  std::string name;
-  std::vector<std::pair<std::shared_ptr<Netl_node>, unsigned int>> connect_list;
-  double area;
-};
-*/
-
-// A hierarchy node, containing parent / children pointers and a list of connections to other nodes.
-/*
 struct Hier_node {
   
   std::string name;
-  
-  // the corresponding node in the netlist
-  //pnetl netl_node;
+  double area; // area of the leaf or -1 if not a leaf.
 
   std::shared_ptr<Hier_node> parent;
-  std::vector<std::shared_ptr<Hier_node>> children;
+  std::shared_ptr<Hier_node> children[2];
 
   // size of the graph assuming this node is the root node
   // 0 indicates that the size of this subtree has not been calculated yet.
@@ -52,8 +40,6 @@ struct Hier_node {
 typedef std::shared_ptr<Hier_node> phier;
 
 struct Min_cut_data {
-  //pnetl node; // the actual netl_node we're referring to
-  //std::vector<int> connect_cost; // list of connection weights to all other nodes
   int d_cost; // difference between the external and internal cost of the node
   bool active; // whether the node is being considered for a swap or not
   unsigned int set; // what set the node is in
@@ -64,7 +50,7 @@ public:
   Hier_tree() { }
   
   // take in a vector of all nodes in the netlist, and convert it to a tree.
-  Hier_tree(const Graph<??> nl);
+  Hier_tree(const Graph_info && g);
   
   // copies require copying the entire tree and are very expensive.
   Hier_tree(const Hier_tree& other) = delete;
@@ -74,7 +60,8 @@ public:
   Hier_tree(Hier_tree&& other) noexcept : 
     root(other.root), 
     min_area(other.min_area),
-    num_components(other.num_components) { other.root.netl_node.reset(); }
+    num_components(other.num_components) { // TODO: delete stuff here? 
+    }
 
   Hier_tree& operator=(Hier_tree&& other) noexcept {
     std::swap(root, other.root);
@@ -89,22 +76,22 @@ public:
   
   // any node with a smaller area than min_area gets folded into a new node with area >= min_area
   void set_min_node_area(const double new_area) { min_area = new_area; }
-  
-  // walk the netlist, possibly modifying the hierarchy as we go (Algorithm 1 in HiReg)
-  void discover_hierarchy();
 
   // collapse tree to avoid enforcing too much hierarchy (Algorithm 2 in HiReg)
   // TODO: this should eventually output a list of DAGs
   void collapse();
 
 private:
-  Hier_node root;
+
+  // walk the netlist, possibly modifying the hierarchy as we go (Algorithm 1 in HiReg)
+  Hier_node discover_hierarchy();
 
   // gets the size of the hierarchy starting at root and caches it at the node for later
+  // TODO: maybe easy to calculate using the order from graph lib? idk
   unsigned int size(const phier root);
   
   // split a cost matrix into two cost matrices
-  //std::pair<Cost_matrix, Cost_matrix> halve_matrix(const Cost_matrix& old_matrix);
+  //std::pair<Graph_info, Graph_info> halve_matrix(const Cost_matrix& old_matrix);
 
   // fill out the connections in an unfilled matrix
   //void wire_matrix(Cost_matrix& m);
@@ -113,15 +100,16 @@ private:
   //void prune_matrix(Cost_matrix& m);
   
   // make a partition of the graph minimizing the number of edges crossing the cut and keeping in mind area (modified kernighan-lin algorithm)
-  //std::pair<std::vector<pnetl>, std::vector<pnetl>> min_wire_cut(Cost_matrix& m);
+  std::pair<Graph_info &&, Graph_info &&> min_wire_cut(const Graph_info && g) const;
   
   // create a hierarchy tree out of existing hierarchies
   //phier make_hier_tree(phier t1, phier t2);
   
   // do hierarchy discovery starting with a given cost matrix
-  //phier discover_hierarchy(Cost_matrix& m);
+  phier discover_hierarchy(const Graph_info && g);
+
+  std::shared_ptr<Hier_node> root;
 
   double min_area;
   unsigned int num_components;
 };
-*/
