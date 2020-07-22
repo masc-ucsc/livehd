@@ -12,7 +12,7 @@ protected:
 
   void do_trans(LGraph* g, Eprp_var& var, std::string_view module_name);
 
-  void initial_tree_coloring(LGraph* g);
+  void initial_tree_coloring(LGraph* g, Lnast &lnast);
   void begin_transformation(LGraph* g, Lnast& lnast, Lnast_nid& ln_node);
   void handle_output_node(LGraph* lg, Node_pin& pin, Lnast& lnast, Lnast_nid& ln_node);
   void handle_source_node(LGraph* lg, Node_pin& pin, Lnast& lnast, Lnast_nid& ln_node);

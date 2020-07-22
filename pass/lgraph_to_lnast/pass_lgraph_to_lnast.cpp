@@ -40,7 +40,7 @@ void Pass_lgraph_to_lnast::do_trans(LGraph* lg, Eprp_var& var, std::string_view 
   auto idx_stmts = lnast->add_child(lnast->get_root(), Lnast_node::create_stmts(get_new_seq_name(*lnast)));
 
   handle_io(lg, idx_stmts, *lnast);
-  initial_tree_coloring(lg);
+  initial_tree_coloring(lg, *lnast);
 
   begin_transformation(lg, *lnast, idx_stmts);
 
@@ -49,10 +49,21 @@ void Pass_lgraph_to_lnast::do_trans(LGraph* lg, Eprp_var& var, std::string_view 
   var.add(std::move(lnast));
 }
 
-void Pass_lgraph_to_lnast::initial_tree_coloring(LGraph* lg) {
+void Pass_lgraph_to_lnast::initial_tree_coloring(LGraph* lg, Lnast &lnast) {
   for (const auto& node : lg->fast()) {
     auto node_editable = node;
     node_editable.set_color(WHITE);
+
+    // Look at dpins for each node. If unnamed, give dpin a name.
+    for (const auto dpin : node_editable.out_connected_pins()) {
+      auto dpin_editable = dpin;
+      if (!dpin_editable.has_name()) {
+        dpin_editable.set_name(create_temp_var(lnast));
+        if (dpin_editable.get_node().get_type().op == Mux_Op) {
+          dpin_editable.set_name(dpin_editable.get_name().substr(3)); //Remove "___" in front
+        }
+      }
+    }
   }
 
   lg->get_graph_input_node().set_color(WHITE);
@@ -75,7 +86,7 @@ void Pass_lgraph_to_lnast::begin_transformation(LGraph* lg, Lnast& lnast, Lnast_
 }
 
 void Pass_lgraph_to_lnast::handle_output_node(LGraph* lg, Node_pin& pin, Lnast& lnast, Lnast_nid& ln_node) {
-  I(pin.has_name());  // Outputs of the graphs should have names, I would think.
+  I(pin.has_name());  // Outputs of the graphs should have names.
   for (const auto& inp : pin.get_node().inp_edges()) {
     auto editable_pin = inp.driver;
     handle_source_node(lg, editable_pin, lnast, ln_node);
@@ -85,15 +96,31 @@ void Pass_lgraph_to_lnast::handle_output_node(LGraph* lg, Node_pin& pin, Lnast& 
 }
 
 /* Purpose of this function is to serve as the recursive
- * call we will invoke constantly as we work up the
- * LGraph. At the end, regardless of if any work is
- * needed to be done, return the node's name. */
+ * call we will invoke constantly as we work up the LGraph */
 void Pass_lgraph_to_lnast::handle_source_node(LGraph* lg, Node_pin& pin, Lnast& lnast, Lnast_nid& ln_node) {
   // If pin is a driver pin for an already handled node, just return driver pin's name.
   if (pin.get_node().get_color() == BLACK) {
-    if (!pin.has_name()) {
-      pin.set_name(create_temp_var(lnast));
+    // Node is already in LNAST, nothing to do.
+    return;
+  } else if (pin.get_node().get_color() == GREY) {
+    /* We only enter here if a logical loop exists. This will be
+     * caused by a flop's q value being a part of what determines its
+     * din value (ex. x = x - 1). We will have to traverse through
+     * the grey nodes and forcibly insert them into the LNAST. (For
+     * examples of this, see inou/yosys/tests/loop.v and loop2.v)*/
+    for (const auto& inp : pin.get_node().inp_edges()) {
+      auto editable_pin = inp.driver;
+      if (editable_pin.get_node().get_color() == GREY || editable_pin.get_node().get_color() == WHITE) {
+        auto ntype = editable_pin.get_node().get_type().op;
+        if (ntype == AFlop_Op || ntype == SFlop_Op || ntype == FFlop_Op) {
+          continue;
+        }
+        handle_source_node(lg, editable_pin, lnast, ln_node);
+        I(editable_pin.get_node().get_color() == BLACK);
+      }
     }
+    pin.get_node().set_color(BLACK);
+    attach_to_lnast(lnast, ln_node, pin);
     return;
   }
 
@@ -103,19 +130,17 @@ void Pass_lgraph_to_lnast::handle_source_node(LGraph* lg, Node_pin& pin, Lnast& 
 
   for (const auto& inp : pin.get_node().inp_edges()) {
     auto editable_pin = inp.driver;
-    if (editable_pin.get_node().get_color() == WHITE) {
+    if (editable_pin.get_node().get_color() == WHITE || editable_pin.get_node().get_color() == GREY) {
       handle_source_node(lg, editable_pin, lnast, ln_node);
     }
     I(editable_pin.get_node().get_color() == BLACK);
   }
 
-  if (!pin.has_name()) {
-    pin.set_name(create_temp_var(lnast));
-    if (pin.get_node().get_type().op == Mux_Op) {
-      pin.set_name(pin.get_name().substr(3)); //Remove "___" in front
-    }
+  if (pin.get_node().get_color() == BLACK) {
+    /* A logic loop existed, so this was taken care of in
+     * GREY logic above Don't add this node twice to LNAST. */
+    return;
   }
-
   pin.get_node().set_color(BLACK);
   attach_to_lnast(lnast, ln_node, pin);
 }
@@ -251,7 +276,8 @@ void Pass_lgraph_to_lnast::attach_output_to_lnast(Lnast& lnast, Lnast_nid& paren
 
 void Pass_lgraph_to_lnast::attach_sum_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
   // PID: 0 = AS, 1 = AU, 2 = BS, 3 = BU, 4 = Y... Y = (AS+...+AS+AU+...+AU) - (BS+...+BS+BU+...+BU)
-  bool is_add, is_subt = false;
+  bool is_add = false;
+  bool is_subt = false;
   int  add_count = 0;
 
   Lnast_nid add_node, subt_node;
@@ -319,15 +345,9 @@ void Pass_lgraph_to_lnast::attach_binaryop_node(Lnast& lnast, Lnast_nid& parent_
     if (dpin.get_pid() == 0) {
       pid0_used = true;
       pid0_pin = dpin;
-      if (!pin.has_name()) {
-        pid0_pin.set_name(create_temp_var(lnast));
-      }
     } else {
       pid1_used = true;
       pid1_pin = dpin;
-      if (!pin.has_name()) {
-        pid1_pin.set_name(create_temp_var(lnast));
-      }
     }
 
     if (pid0_used && pid1_used) {
@@ -480,16 +500,6 @@ void Pass_lgraph_to_lnast::attach_join_node(Lnast& lnast, Lnast_nid& parent_node
     lnast.add_child(idx_or, Lnast_node::create_ref(strv));
   }
   attach_child(lnast, idx_or, dpins.top());
-
-  // FIXME (BIG!): This is a temporary fix. This node type should be not "assign" but some concatenation node type.
-  //  One currently does not exist in LNAST.
-  /*auto join_node = lnast.add_child(parent_node, Lnast_node::create_assign("join"));
-  lnast.add_child(join_node, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));
-  //Attach each of the inputs to join with the first being added as the most significant and last as least sig.
-  for(int i = dpins.size(); i > 0; i--) {
-    attach_child(lnast, join_node, dpins.top());
-    dpins.pop();
-  }*/
 }
 
 void Pass_lgraph_to_lnast::attach_pick_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
@@ -532,8 +542,7 @@ void Pass_lgraph_to_lnast::attach_comparison_node(Lnast& lnast, Lnast_nid& paren
   // If there are multiple pins like (lessthan A1, B1 B2) then this is the same as A1 < B1 & A1 < B2.
 
   /* For each A pin, we have to compare that against each B pin.
-   * We know which is which based off the inp_edge's sink pin pid.
-   * FIXME: This is n^2. Is there a clean O(n) way to do this?*/
+   * We know which is which based off the inp_edge's sink pin pid. */
   std::vector<Node_pin> a_pins, b_pins;
   for (const auto inp : pin.get_node().inp_edges()) {
     if ((inp.sink.get_pid() == 0) || (inp.sink.get_pid() == 1)) {
@@ -799,10 +808,6 @@ void Pass_lgraph_to_lnast::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_
   // Create output
   for (const auto dpin : pin.get_node().out_connected_pins()) {
     auto port_name = dpin.get_type_sub_io_name();
-    if (!dpin.has_name()) {
-      auto editable_dpin = dpin;
-      editable_dpin.set_name(create_temp_var(lnast));
-    }
     auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_dot("sb_out_set"));
     attach_child(lnast, idx_asg, dpin);
     lnast.add_child(idx_asg, Lnast_node::create_ref(out_tup_name));
@@ -826,7 +831,6 @@ void Pass_lgraph_to_lnast::attach_children_to_node(Lnast& lnast, Lnast_nid& op_n
 void Pass_lgraph_to_lnast::attach_child(Lnast& lnast, Lnast_nid& op_node, const Node_pin& dpin) {
   // The input "dpin" needs to be a driver pin.
 
-  // FIXME: This will only work for var/wire names. This will mess up for constants, I think.
   if (dpin.get_node().is_graph_input()) {
     // If the input to the node is from a GraphIO node (it's a module input), add the $ in front.
     auto dpin_name = dpin_get_name(dpin);
