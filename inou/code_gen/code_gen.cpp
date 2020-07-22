@@ -13,14 +13,15 @@ Code_gen::Code_gen(Inou_code_gen::Code_gen_type code_gen_type, std::shared_ptr<L
     lnast_to = std::make_unique<Cpp_parser>();
 //TODO  } else if (code_gen_type == Inou_code_gen::Code_gen_type::Type_cfg) {
 //TODO    lnast_to = std::make_unique<Cfg_parser>();
-//TODO  } else if (code_gen_type == Inou_code_gen::Code_gen_type::Type_verilog) {
-//TODO    lnast_to = std::make_unique<Ver_parser>();
+  } else if (code_gen_type == Inou_code_gen::Code_gen_type::Type_verilog) {
+    lnast_to = std::make_unique<Ver_parser>();
   } else {
     I(false);  // Invalid
     lnast_to = std::make_unique<Prp_parser>();
   }
 }
 
+//-------------------------------------------------------------------------------------
 
 void Code_gen::generate(){
   const auto& root_index = lnast->get_root();
@@ -36,14 +37,16 @@ void Code_gen::generate(){
     fmt::print("UNKNOWN NODE TYPE!");
   }
 
-  auto basename = absl::StrCat(lnast->get_top_module_name(), ".prp");//TODO generalise
+  auto lang_type = lnast_to->get_lang_type();
+  auto basename = absl::StrCat(lnast->get_top_module_name(), ".", lang_type);
 
-  fmt::print("lnast_to_prp_parser path:{} file:{}\n", path, basename);//TODO generalise
+  fmt::print("lnast_to_{}_parser path:{} file:{}\n", lang_type, path, basename);
 
   fmt::print("{}\n", buffer_to_print);
   fmt::print("<<EOF\n");
 }
 
+//-------------------------------------------------------------------------------------
 void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
   auto curr_index = lnast->get_first_child(stmt_node_index);
 
@@ -64,6 +67,7 @@ void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
   }
 }
 
+//-------------------------------------------------------------------------------------
 //Process the assign node:
 void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index) {
   fmt::print("node:assign\n");
@@ -99,6 +103,7 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index) {
   }
 }
 
+//-------------------------------------------------------------------------------------
 //Process the operator (like and,or,etc.) node:
 void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
   //TODO: make a func to convert the subtree to vector of strings (as done in following while loop) and return the vect of strings
@@ -136,21 +141,22 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
       ref = process_number(ref);
     }
     // check if a number
-    if(op_is_unary) {absl::StrAppend(&val,op_node_data.type.debug_name_pyrope());}//TODO: change _pyrope to ye generic one!
+    if(op_is_unary) {absl::StrAppend(&val,lnast_to->debug_name_lang(op_node_data.type));}
     absl::StrAppend(&val, ref);
     if ((i+1) != op_str_vect.size() && !op_is_unary) {
-      absl::StrAppend(&val, " ", op_node_data.type.debug_name_pyrope(), " ");
+      absl::StrAppend(&val, " ", lnast_to->debug_name_lang(op_node_data.type), " ");
     }
   }
 
   if(is_temp_var(key)) {
     ref_map.insert(std::pair<std::string_view, std::string>(key, val));
   } else {
-    absl::StrAppend (&buffer_to_print, key, " ", op_node_data.type.debug_name_pyrope(), " ", val, lnast_to->stmt_sep());
+    absl::StrAppend (&buffer_to_print, key, " ", lnast_to->debug_name_lang(op_node_data.type), " ", val, lnast_to->stmt_sep());
   }
 
 }
 
+//-------------------------------------------------------------------------------------
 //processing dot operator
 void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index) {
 
@@ -175,7 +181,7 @@ void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index) {
   }
 
   const auto& dot_node_data = lnast->get_data(dot_node_index);
-  std::string value = absl::StrCat(ref, dot_node_data.type.debug_name_pyrope(), process_number(dot_str_vect[2]));
+  std::string value = absl::StrCat(ref, lnast_to->debug_name_lang(dot_node_data.type), process_number(dot_str_vect[2]));
 
   if (is_temp_var(key)) {
     ref_map.insert(std::pair<std::string_view, std::string>(key, value));
@@ -186,15 +192,17 @@ void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index) {
 
 }
 
+//-------------------------------------------------------------------------------------
 //Get the textual value of node. Eg., get "$a" from the node "ref, $a":
 std::string_view Code_gen::get_node_name(Lnast_node node) { return node.token.get_text(); }
 
+//-------------------------------------------------------------------------------------
 //check if the node has "___"
 bool Code_gen::is_temp_var(std::string_view test_string) {
   return test_string.find("___")==0;
 }
 
-
+//-------------------------------------------------------------------------------------
 bool Code_gen::is_number(std::string_view test_string) {
   if (test_string.find("0d") == 0) {
     return true;
@@ -206,6 +214,7 @@ bool Code_gen::is_number(std::string_view test_string) {
   return false;
 }
 
+//-------------------------------------------------------------------------------------
 std::string_view Code_gen::process_number(std::string_view num_string) {
   if (num_string.find("0d") == 0) {
     return num_string.substr(2);
