@@ -18,7 +18,9 @@ unsigned int Hier_tree::size(const phier top) {
   top->size = total_size;
   return total_size;
 }
+*/
 
+/*
 // fill out the connections in the matrix by examining every connection on every node... :/
 void Hier_tree::wire_matrix(Cost_matrix& m) {
   for (size_t i = 0; i < m.size(); i++) {
@@ -31,7 +33,9 @@ void Hier_tree::wire_matrix(Cost_matrix& m) {
     }
   }
 }
+*/
 
+/*
 // creates a cost matrix for doing a min-cut on the root node
 Cost_matrix Hier_tree::make_matrix(pnode root) {
   unsigned int root_size = size(root);
@@ -76,7 +80,9 @@ Cost_matrix Hier_tree::make_matrix(pnode root) {
 
   return matrix;
 }
+*/
 
+/*
 // splits a cost matrix into two sub-matrices for a recursive min-cut call
 // if the split is not even, a temporary node is added at the end to make it even.
 std::pair<Cost_matrix, Cost_matrix> Hier_tree::halve_matrix(const Cost_matrix& old_matrix) {
@@ -136,7 +142,9 @@ std::pair<Cost_matrix, Cost_matrix> Hier_tree::halve_matrix(const Cost_matrix& o
   
   return std::pair(ma, mb);
 }
+*/
 
+/*
 void Hier_tree::prune_matrix(Cost_matrix& m) {
   if (m[m.size() - 1].node->name == "_temp") {
     m.erase(m.cend() - 1);
@@ -145,9 +153,10 @@ void Hier_tree::prune_matrix(Cost_matrix& m) {
     }
   }
 }
+*/
 
-std::pair<std::vector<pnetl>, std::vector<pnetl>> Hier_tree::min_wire_cut(Cost_matrix& m) {
-
+std::pair<Graph_info &&, Graph_info &&> Hier_tree::min_wire_cut(const Graph_info && g) const {
+/*
   const unsigned int graph_size = m.size();
   const unsigned int set_size = m.size() / 2;
 
@@ -307,99 +316,84 @@ std::pair<std::vector<pnetl>, std::vector<pnetl>> Hier_tree::min_wire_cut(Cost_m
   }
 
   return std::pair(a_res, b_res);
+  */
+  
+  // temp return statement
+  return std::pair<Graph_info&&, Graph_info&&>(std::move(const_cast<Graph_info&&>(g)), std::move(const_cast<Graph_info&&>(g)));
 }
 
+/*
 phier Hier_tree::make_hier_tree(phier t1, phier t2) {
   static unsigned int temp_node_number = 0; // exact value doesn't really matter, as long as it's unique
   std::string name = "_hier_node_" + std::to_string(temp_node_number);
   temp_node_number++;
-  
+
   Hier_node hier_temp;
   hier_temp.name = name;
 
   hier_temp.children.push_back(t1);
   hier_temp.children.push_back(t2);
-  
+
   return std::make_shared<Hier_node>(hier_temp);
 }
+*/
 
-phier Hier_tree::discover_hierarchy(Cost_matrix& m) {
-  if (m.size() <= num_components) {
-    return root; // TODO: bug here!
+phier Hier_tree::discover_hierarchy(const Graph_info && g) {
+  if (g.al.order() <= num_components) {
+    phier p;
+    return p; // TODO: ??
   }
-  
-  std::pair<std::vector<pnetl>, std::vector<pnetl>> cut_pair = min_wire_cut(m);
-  auto m_pair = halve_matrix(m);
-  
-#ifndef NDEBUG
+
+  auto [g1, g2] = min_wire_cut(std::move(g));
+  //auto m_pair = halve_matrix(m);
+
+  #ifndef NDEBUG
   std::cout << "A set contains:" << std::endl;
-  for (const auto& elem : cut_pair.first) {
-    std::cout << "\t" << elem->name << std::endl;
-  }
+  //for (const auto& elem : cut_pair.first) {
+    //std::cout << "\t" << elem->name << std::endl;
+  //}
 
   std::cout << std::endl << "B set contains:" << std::endl;
-  for (const auto& elem : cut_pair.second) {
-    std::cout << "\t" << elem->name << std::endl;
-  }
-#endif
-  
-  phier t1 = discover_hierarchy(m_pair.first);
-  phier t2 = discover_hierarchy(m_pair.second);
+  //for (const auto& elem : cut_pair.second) {
+    //std::cout << "\t" << elem->name << std::endl;
+  //}
+  #endif
+
+  //phier t1 = discover_hierarchy(m_pair.first);
+  //phier t2 = discover_hierarchy(m_pair.second);
 
   // TODO: prune the hierarchy trees here
 
-  return make_hier_tree(t1, t2);
+  phier p;
+  return p;
+  //return make_hier_tree(t1, t2);
 }
 
-Hier_tree::Hier_tree(const std::vector<pnetl> nl) {
-  // TODO: make a matrix out of the netlist
-  
-  graph::Bi_adjacency_list g;
-  
-  // insert verts
-  for (size_t i = 0; i < nl.size(); i++) {
-    g.insert_vert();
-  }
-  
+decltype(graph::Bi_adjacency_list().vert_map<Min_cut_data>()) && make_cost_map(graph::Bi_adjacency_list g) {
   auto cost_map = g.vert_map<Min_cut_data>();
-  auto nl_map = g.vert_map<std::vector<pnetl>::const_iterator>();
-  
+
   unsigned int which_set = 0;
-  
+
   // insert vert data
-  auto it = nl.cbegin();
   for (auto vert : g.verts()) {
-    cost_map[vert].node = *(it);
     cost_map[vert].d_cost = 0xCAFE;
     cost_map[vert].active = true;
     cost_map[vert].set = which_set;
 
-    nl_map[vert] = it;
-
     which_set ^= 1; // toggle between 0 and 1
-    it++;
   }
-  
-  // insert bidirectional vert connections
-  for (auto vert : g.verts()) {
-    auto conn_list = (*(nl_map[vert]))->connect_list;
-    
-    for (auto conn_pair : conn_list) {
-      pnetl other_vert = conn_pair.first;
-      // need a map of pnode -> vert
-      auto graph_vert = ?;
-    }
-  }
-  
-  auto weight_map = g.edge_map<int>();
 
-  // insert connection weights
-  for (auto vert : g.verts()) {
-    
-  }
+  return std::move(cost_map);
 }
 
+Hier_tree::Hier_tree(const Graph_info && g) {
+  root = discover_hierarchy(std::move(g));
+  // TODO: collapse the tree from root
+}
+
+/*
 void Hier_tree::collapse() {
-  
+
 }
 */
+

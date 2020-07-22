@@ -2,7 +2,7 @@
 
 #include "Adjacency_list.hpp"
 #include "json_inou.hpp"
-//#include "hier_tree.hpp"
+#include "hier_tree.hpp"
 
 // this is a mini-testbed, currently.
 
@@ -13,16 +13,14 @@ int main() {
   Json_inou_parser p("/home/kneil/code/real/fp/test/hier_test.json");
 	std::cout << "done." << std::endl;
   
-  p.make_tree();
-
-  //Graph_data d;
-  //Hier_tree t = p.make_tree();
-  //t.set_num_components(1);
-  //t.set_min_node_area(0.0); // don't collapse anything
-  
   std::cout << "discovering hierarchies...";
-  //t.discover_hierarchy();
+  Hier_tree t = p.make_tree();
   std::cout << "done." << std::endl;
+
+  t.set_num_components(1);
+  t.set_min_node_area(0.0); // don't collapse anything
+  
+  //t.discover_hierarchy();
 
   std::cout << "finished floorplan." << std::endl;
 }
