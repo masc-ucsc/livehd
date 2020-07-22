@@ -97,6 +97,8 @@ protected:
 
   void handle_attr_assign(Lnast &ln, const Lnast_nid &lhs, const Lnast_nid &rhs);
   void handle_clock_attr(Lnast &ln, const std::string_view &var_name, const Lnast_nid &rhs);
+  void handle_async_attr(Lnast &ln, const std::string_view &var_name, const Lnast_nid &rhs);
+  void handle_reset_attr(Lnast &ln, const std::string_view &var_name, const Lnast_nid &rhs);
   firrtl::FirrtlPB_Expression_SubField* make_subfield_expr(std::string name);
 
   uint8_t process_op_children(Lnast &ln, const Lnast_nid &lnidx_if, const std::string &firrtl_op);
@@ -155,6 +157,9 @@ private:
 
   // This tracks the LHS name used for a dot node then the two other children.
   absl::flat_hash_map<std::string, std::pair<Lnast_nid, Lnast_nid>> dot_map;
+
+  // This indicates which register have async reset (if not on here, it's sync)
+  absl::flat_hash_set<std::string_view> async_regs;
 
 public:
   Inou_firrtl(const Eprp_var &var);
