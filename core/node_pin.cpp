@@ -135,7 +135,7 @@ void Node_pin::set_unsigned() {
 
 std::string_view Node_pin::get_type_sub_io_name() const {
   auto &sub_node = get_node().get_type_sub_node();
-  return sub_node.get_name_from_instance_pid(pid);
+  return sub_node.get_name_from_graph_pos(pid);
 }
 
 std::string_view Node_pin::get_type_sub_pin_name() const {
