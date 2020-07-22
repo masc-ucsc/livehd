@@ -1008,7 +1008,7 @@ void Lnast_dfg::process_ast_func_def_op (LGraph *dfg, const Lnast_nid &lnidx) {
   auto func_stmts = lnast->get_sibling_next(c1_fdef);
   auto func_name = lnast->get_vname(c0_fdef);
   // auto subg_module_name = absl::StrCat(module_name, ".", func_name); FIXME->sh: graphviz compains about "." hierarchy
-  auto subg_module_name = absl::StrCat(module_name, "_", func_name);
+  auto subg_module_name = absl::StrCat(module_name, ":", func_name);
   Lnast_dfg p(eprp_var, subg_module_name);
 
   fmt::print("============================= Sub-module: LNAST->LGraph Start ===============================================\n");
