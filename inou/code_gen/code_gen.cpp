@@ -2,11 +2,14 @@
 #include "code_gen.hpp"
 
 Code_gen::Code_gen(Inou_code_gen::Code_gen_type code_gen_type, std::shared_ptr<Lnast> _lnast, std::string_view _path) : lnast(std::move(_lnast)), path(_path) {
-  //std::unique_ptr<Code_gen_all_lang> lnast_to;
   if (code_gen_type == Inou_code_gen::Code_gen_type::Type_prp) {
     lnast_to = std::make_unique<Prp_parser>();
   } else if (code_gen_type == Inou_code_gen::Code_gen_type::Type_cpp) {
     lnast_to = std::make_unique<Cpp_parser>();
+//TODO  } else if (code_gen_type == Inou_code_gen::Code_gen_type::Type_cfg) {
+//TODO    lnast_to = std::make_unique<Cfg_parser>();
+//TODO  } else if (code_gen_type == Inou_code_gen::Code_gen_type::Type_verilog) {
+//TODO    lnast_to = std::make_unique<Ver_parser>();
   } else {
     I(false);  // Invalid
     lnast_to = std::make_unique<Prp_parser>();

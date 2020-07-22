@@ -43,30 +43,7 @@ void Inou_code_gen::to_xxx(Code_gen_type code_gen_type, std::shared_ptr<Lnast> l
   std::unique_ptr<Code_gen> lnast_to;
   lnast_to = std::make_unique<Code_gen>(code_gen_type, std::move(lnast), path);
 
-/*  if (code_gen_type == Code_gen_type::Type_verilog) {
-    lnast_to = std::make_unique<Lnast_to_verilog_parser>(std::move(lnast), path);
-  } else if (code_gen_type == Code_gen_type::Type_prp) {
-    lnast_to = std::make_unique<Prp_parser>(std::move(lnast), path);
-  } else if (code_gen_type == Code_gen_type::Type_cfg) {
-    lnast_to = std::make_unique<Lnast_to_cfg_parser>(std::move(lnast), path);
-  } else if (code_gen_type == Code_gen_type::Type_cpp) {
-    lnast_to = std::make_unique<Cpp_parser>(std::move(lnast), path);
-  } else {
-    I(false);  // Invalid
-    lnast_to = std::make_unique<Prp_parser>(std::move(lnast), path);
-  }
-  if (code_gen_type == Code_gen_type::Type_prp) {
-    lnast_to = std::make_unique<Prp_parser>(std::move(lnast), path);
-  } else if (code_gen_type == Code_gen_type::Type_cpp) {
-    lnast_to = std::make_unique<Cpp_parser>(std::move(lnast), path);
-  } else {
-    I(false);  // Invalid
-    lnast_to = std::make_unique<Prp_parser>(std::move(lnast), path);
-  }
-
-*/
   lnast_to->generate();
- //   lnast_to->to_code_gen(code_gen_type, lnast);
 }
 
 void Inou_code_gen::to_verilog(Eprp_var &var) {
