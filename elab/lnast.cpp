@@ -941,7 +941,6 @@ bool Lnast::is_in_bw_table(const std::string_view name) {
 }
 
 uint32_t Lnast::get_bitwidth(const std::string_view name) {
-  fmt::print("get_bw: {}\n", name);
   I(is_in_bw_table(name));
   return from_lgraph_bw_table[(std::string)name];
 }
