@@ -800,8 +800,8 @@ Node_pin Lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx_opd,
     return node_dpin; //return empty node_pin and trigger compile error
   }
 
-  if (!is_input(name))
-    node_dpin.set_name(name);
+  //if (!is_input(name) && node_dpin.get_node().get_type_op() != Const_Op)
+  //  node_dpin.set_name(name);
 
   name2dpin[name] = node_dpin;  // for io and reg, the %$# identifier are still used in symbol table
   return node_dpin;
