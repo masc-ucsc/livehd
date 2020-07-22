@@ -1,9 +1,9 @@
 
 #include "code_gen.hpp"
 
-#ifndef NDEBUG
-#define NDEBUG
-#endif
+//#ifndef NDEBUG
+//#define NDEBUG
+//#endif
 #include <assert.h>
 
 Code_gen::Code_gen(Inou_code_gen::Code_gen_type code_gen_type, std::shared_ptr<Lnast> _lnast, std::string_view _path) : lnast(std::move(_lnast)), path(_path) {
@@ -54,7 +54,7 @@ void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
 
     if (curr_node_data.type.is_assign()) {
       do_assign(curr_index);
-    } else if (curr_node_data.type.is_and() || curr_node_data.type.is_or() || curr_node_data.type.is_not() || curr_node_data.type.is_xor() || curr_node_data.type.is_logical_not() || curr_node_data.type.is_logical_and() || curr_node_data.type.is_logical_or()) {
+    } else if (curr_node_data.type.is_and() || curr_node_data.type.is_or() || curr_node_data.type.is_not() || curr_node_data.type.is_xor() || curr_node_data.type.is_logical_not() || curr_node_data.type.is_logical_and() || curr_node_data.type.is_logical_or() || curr_node_data.type.is_same() || curr_node_data.type.is_as() || curr_node_data.type.is_plus() || curr_node_data.type.is_minus() || curr_node_data.type.is_mult() || curr_node_data.type.is_mult() || curr_node_data.type.is_div() || curr_node_data.type.is_lt() || curr_node_data.type.is_le() || curr_node_data.type.is_gt() || curr_node_data.type.is_ge()) {
       do_op(curr_index);
     } else if (curr_node_data.type.is_dot()) {
       do_dot(curr_index);
@@ -79,8 +79,8 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index) {
   }//data of all the child nodes of assign are in assign_str_vect
 
   assert(assign_str_vect.size()>1);
-  auto key = assign_str_vect[0];
-  auto ref = assign_str_vect[1];
+  auto key = assign_str_vect.front();//usually the ___b type of string
+  auto ref = assign_str_vect[1];//usually the const
 
   auto map_it = ref_map.find(ref);
   if (map_it != ref_map.end()) {
@@ -107,7 +107,7 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
 
   while(curr_index!=lnast->invalid_index()) {
     const auto& curr_node_data = lnast->get_data(curr_index);
-    auto curlvl = curr_index.level;
+    auto curlvl = curr_index.level;//for debugging message printing purposes only
     fmt::print("Processing assign child {} at level {} \n",Code_gen::get_node_name(curr_node_data), curlvl);
     op_str_vect.push_back(Code_gen::get_node_name(curr_node_data));
     curr_index = lnast->get_sibling_next(curr_index);
@@ -165,8 +165,8 @@ void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index) {
   }
   //dot_str_vect now has all the children of the operation "op"
 
-  assert(assign_str_vect.size()>2);
-  auto key = dot_str_vect[0];
+  assert(dot_str_vect.size()>2);
+  auto key = dot_str_vect.front();
   auto ref = dot_str_vect[1];
 
   auto map_it = ref_map.find(ref);
