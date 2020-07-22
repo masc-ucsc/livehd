@@ -1,6 +1,9 @@
 #pragma once
 
 #include "lnast.hpp"
+#include "inou_code_gen.hpp"
+#include "lnast_generic_parser.hpp"
+#include "code_gen_all_lang.hpp"
 
 class Code_gen {
 protected:
@@ -9,8 +12,11 @@ protected:
   std::string_view       path;
   std::string            buffer_to_print = "";
   std::map<std::string_view, std::string> ref_map;
+  //enum class Code_gen_type { Type_verilog, Type_prp, Type_cfg, Type_cpp };
+private:
+  std::unique_ptr<Code_gen_all_lang> lnast_to;
 public:
-  Code_gen(std::shared_ptr<Lnast>_lnast, std::string_view _path);
+  Code_gen(Inou_code_gen::Code_gen_type code_gen_type, std::shared_ptr<Lnast>_lnast, std::string_view _path);
   //virtual void generate() = 0;
   void generate();
   void do_stmts(const mmap_lib::Tree_index& stmt_node_index);
@@ -21,6 +27,6 @@ public:
   std::string_view get_node_name(Lnast_node node);//can go to private/protected section!?
   bool             is_number(std::string_view test_string);
   std::string_view process_number(std::string_view num_string);
-  virtual std::string_view stmt_sep() = 0;
+ // virtual std::string_view stmt_sep() = 0;
 };
 

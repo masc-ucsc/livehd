@@ -87,15 +87,19 @@ protected:
   void        process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx_smts, firrtl::FirrtlPB_Statement_When *when, uint8_t pos_to_add_to);
 
   bool process_ln_assign_op(Lnast &ln, const Lnast_nid &lnidx_assign, firrtl::FirrtlPB_Statement *fstmt);
+  void process_tup_asg(Lnast &ln, const Lnast_nid& lnidx_asg, const std::string_view &lhs, firrtl::FirrtlPB_Statement *fstmt);
   void process_ln_nary_op(Lnast &ln, const Lnast_nid &lnidx_assign, firrtl::FirrtlPB_Statement *fstmt);
   void process_ln_not_op(Lnast &ln, const Lnast_nid &lnidx_op, firrtl::FirrtlPB_Statement *fstmt);
   firrtl::FirrtlPB_Statement_When *process_ln_if_op(Lnast &ln, const Lnast_nid &lnidx_if);
   void                             process_ln_range_op(Lnast &ln, const Lnast_nid &lnidx_op);
   void                             process_ln_bitsel_op(Lnast &ln, const Lnast_nid &lnidx_op, firrtl::FirrtlPB_Statement *fstmt);
-  void                             process_ln_dot(Lnast &ln, const Lnast_nid &lnidx_op);
+  bool                             process_ln_dot(Lnast &ln, const Lnast_nid &lnidx_op, firrtl::FirrtlPB_Statement *fstmt);
 
   void handle_attr_assign(Lnast &ln, const Lnast_nid &lhs, const Lnast_nid &rhs);
   void handle_clock_attr(Lnast &ln, const std::string_view &var_name, const Lnast_nid &rhs);
+  void handle_async_attr(Lnast &ln, const std::string_view &var_name, const Lnast_nid &rhs);
+  void handle_reset_attr(Lnast &ln, const std::string_view &var_name, const Lnast_nid &rhs);
+  firrtl::FirrtlPB_Expression_SubField* make_subfield_expr(std::string name);
 
   uint8_t process_op_children(Lnast &ln, const Lnast_nid &lnidx_if, const std::string &firrtl_op);
   void    add_cstmts(Lnast &ln, const Lnast_nid &lnidx_if, firrtl::FirrtlPB_Module_UserModule *umod);
@@ -120,6 +124,7 @@ protected:
   // Finding Circuit Components
   void                         FindCircuitComps(Lnast &ln, firrtl::FirrtlPB_Module_UserModule *umod);
   void                         SearchNode(Lnast &ln, const Lnast_nid &parent_node, firrtl::FirrtlPB_Module_UserModule *umod);
+  void                         CheckTuple(Lnast &ln, const Lnast_nid &tup_node, firrtl::FirrtlPB_Module_UserModule *umod);
   void                         CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::FirrtlPB_Module_UserModule *umod);
   firrtl::FirrtlPB_Type *      CreateTypeObject(uint32_t bitwidth);
   firrtl::FirrtlPB_Expression *CreateULitExpr(const uint32_t &val);
@@ -152,6 +157,9 @@ private:
 
   // This tracks the LHS name used for a dot node then the two other children.
   absl::flat_hash_map<std::string, std::pair<Lnast_nid, Lnast_nid>> dot_map;
+
+  // This indicates which register have async reset (if not on here, it's sync)
+  absl::flat_hash_set<std::string_view> async_regs;
 
 public:
   Inou_firrtl(const Eprp_var &var);

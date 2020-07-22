@@ -1,7 +1,25 @@
 
 #include "code_gen.hpp"
 
-Code_gen::Code_gen(std::shared_ptr<Lnast> _lnast, std::string_view _path) : lnast(std::move(_lnast)), path(_path) {}
+//#ifndef NDEBUG
+//#define NDEBUG
+//#endif
+#include <assert.h>
+
+Code_gen::Code_gen(Inou_code_gen::Code_gen_type code_gen_type, std::shared_ptr<Lnast> _lnast, std::string_view _path) : lnast(std::move(_lnast)), path(_path) {
+  if (code_gen_type == Inou_code_gen::Code_gen_type::Type_prp) {
+    lnast_to = std::make_unique<Prp_parser>();
+  } else if (code_gen_type == Inou_code_gen::Code_gen_type::Type_cpp) {
+    lnast_to = std::make_unique<Cpp_parser>();
+//TODO  } else if (code_gen_type == Inou_code_gen::Code_gen_type::Type_cfg) {
+//TODO    lnast_to = std::make_unique<Cfg_parser>();
+//TODO  } else if (code_gen_type == Inou_code_gen::Code_gen_type::Type_verilog) {
+//TODO    lnast_to = std::make_unique<Ver_parser>();
+  } else {
+    I(false);  // Invalid
+    lnast_to = std::make_unique<Prp_parser>();
+  }
+}
 
 
 void Code_gen::generate(){
@@ -18,26 +36,30 @@ void Code_gen::generate(){
     fmt::print("UNKNOWN NODE TYPE!");
   }
 
-  auto basename = absl::StrCat(lnast->get_top_module_name(), ".prp");
+  auto basename = absl::StrCat(lnast->get_top_module_name(), ".prp");//TODO generalise
 
-  fmt::print("lnast_to_prp_parser path:{} file:{}\n", path, basename);
+  fmt::print("lnast_to_prp_parser path:{} file:{}\n", path, basename);//TODO generalise
+
   fmt::print("{}\n", buffer_to_print);
   fmt::print("<<EOF\n");
 }
 
 void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
   auto curr_index = lnast->get_first_child(stmt_node_index);
+
   while(curr_index!=lnast->invalid_index()) {
     const auto& curr_node_data = lnast->get_data(curr_index);
     auto curlvl = curr_index.level;
     fmt::print("Processing stmt child {} at level {} \n",Code_gen::get_node_name(curr_node_data), curlvl);
+
     if (curr_node_data.type.is_assign()) {
       do_assign(curr_index);
-    } else if (curr_node_data.type.is_and() || curr_node_data.type.is_or() || curr_node_data.type.is_not() || curr_node_data.type.is_xor() || curr_node_data.type.is_logical_not() || curr_node_data.type.is_logical_and() || curr_node_data.type.is_logical_or()) {
+    } else if (curr_node_data.type.is_and() || curr_node_data.type.is_or() || curr_node_data.type.is_not() || curr_node_data.type.is_xor() || curr_node_data.type.is_logical_not() || curr_node_data.type.is_logical_and() || curr_node_data.type.is_logical_or() || curr_node_data.type.is_same() || curr_node_data.type.is_as() || curr_node_data.type.is_plus() || curr_node_data.type.is_minus() || curr_node_data.type.is_mult() || curr_node_data.type.is_mult() || curr_node_data.type.is_div() || curr_node_data.type.is_lt() || curr_node_data.type.is_le() || curr_node_data.type.is_gt() || curr_node_data.type.is_ge()) {
       do_op(curr_index);
     } else if (curr_node_data.type.is_dot()) {
       do_dot(curr_index);
     }
+
     curr_index = lnast->get_sibling_next(curr_index);
   }
 }
@@ -47,8 +69,7 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index) {
   fmt::print("node:assign\n");
   auto curr_index = lnast->get_first_child(assign_node_index);
   std::vector<std::string_view> assign_str_vect;
-  std::string_view key;
-  std::string_view ref;
+
   while(curr_index!=lnast->invalid_index()) {
     const auto& curr_node_data = lnast->get_data(curr_index);
     auto curlvl = curr_index.level;
@@ -56,47 +77,53 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index) {
     assign_str_vect.push_back(Code_gen::get_node_name(curr_node_data));
     curr_index = lnast->get_sibling_next(curr_index);
   }//data of all the child nodes of assign are in assign_str_vect
-  key = assign_str_vect.at(0);
-  ref = assign_str_vect.at(1);
+
+  assert(assign_str_vect.size()>1);
+  auto key = assign_str_vect.front();//usually the ___b type of string
+  auto ref = assign_str_vect[1];//usually the const
+
   auto map_it = ref_map.find(ref);
   if (map_it != ref_map.end()) {
     ref = map_it->second;
   } else if (is_number(ref)) {
    ref = process_number(ref);
   }
+
   if (is_temp_var(key)) {
     auto ref_map_inst_res = ref_map.insert(std::pair<std::string_view, std::string>(key, (std::string)ref));
     if(!ref_map_inst_res.second) {
-      absl::StrAppend(&buffer_to_print, ref_map.find(key)->second, " ", "=", " ", (std::string)ref);//insert stmt sep here
+      absl::StrAppend(&buffer_to_print, ref_map.find(key)->second, " ", "=", " ", (std::string)ref, lnast_to->stmt_sep());
     }
   } else {
-    absl::StrAppend(&buffer_to_print, key, " ", "=", " ", (std::string)ref);//stmt sep here;
+    absl::StrAppend(&buffer_to_print, key, " ", "=", " ", (std::string)ref, lnast_to->stmt_sep());
   }
 }
 
 //Process the operator (like and,or,etc.) node:
 void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
-  bool op_is_unary = false;
-  auto curr_index = lnast->get_first_child(op_node_index);
-  const auto& op_node_data = lnast->get_data(op_node_index);
-  std::vector<std::string_view> op_str_vect;
-  std::string_view key;
-  std::string val;
   //TODO: make a func to convert the subtree to vector of strings (as done in following while loop) and return the vect of strings
+  auto curr_index = lnast->get_first_child(op_node_index);
+  std::vector<std::string_view> op_str_vect;
+
   while(curr_index!=lnast->invalid_index()) {
     const auto& curr_node_data = lnast->get_data(curr_index);
-    auto curlvl = curr_index.level;
+    auto curlvl = curr_index.level;//for debugging message printing purposes only
     fmt::print("Processing assign child {} at level {} \n",Code_gen::get_node_name(curr_node_data), curlvl);
     op_str_vect.push_back(Code_gen::get_node_name(curr_node_data));
     curr_index = lnast->get_sibling_next(curr_index);
   }
   //op_str_vect now has all the children of the operation "op"
-  key = op_str_vect.at(0);
+
+  auto key = op_str_vect.front();
+  bool op_is_unary = false;
   if(is_temp_var(key) && op_str_vect.size()==2){
     op_is_unary = true;
   }
-  for (int i = 1; i < op_str_vect.size(); i++) {
-    std::string_view ref = op_str_vect.at(i);
+
+  const auto& op_node_data = lnast->get_data(op_node_index);
+  std::string val;
+  for (unsigned i = 1; i < op_str_vect.size(); i++) {
+    auto ref = op_str_vect[i];
     auto             map_it = ref_map.find(ref);
     if (map_it != ref_map.end()) {
       if (std::count(map_it->second.begin(), map_it->second.end(), ' ')) {
@@ -119,19 +146,16 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
   if(is_temp_var(key)) {
     ref_map.insert(std::pair<std::string_view, std::string>(key, val));
   } else {
-    absl::StrAppend (&buffer_to_print, key, " ", op_node_data.type.debug_name_pyrope(), " ", val);//put stmt separator here;
+    absl::StrAppend (&buffer_to_print, key, " ", op_node_data.type.debug_name_pyrope(), " ", val, lnast_to->stmt_sep());
   }
 
 }
 
 //processing dot operator
 void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index) {
-  auto curr_index = lnast->get_first_child(dot_node_index);
-  const auto& dot_node_data = lnast->get_data(dot_node_index);
-  std::vector<std::string_view> dot_str_vect;
-  std::string_view key;
-  std::string_view ref;
 
+  auto curr_index = lnast->get_first_child(dot_node_index);
+  std::vector<std::string_view> dot_str_vect;
   while(curr_index!=lnast->invalid_index()) {
     const auto& curr_node_data = lnast->get_data(curr_index);
     auto curlvl = curr_index.level;
@@ -141,13 +165,17 @@ void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index) {
   }
   //dot_str_vect now has all the children of the operation "op"
 
-  key = dot_str_vect.at(0);
-  ref = dot_str_vect.at(1);
+  assert(dot_str_vect.size()>2);
+  auto key = dot_str_vect.front();
+  auto ref = dot_str_vect[1];
+
   auto map_it = ref_map.find(ref);
   if (map_it != ref_map.end()) {
     ref = map_it->second;
   }
-  std::string value = absl::StrCat(ref, dot_node_data.type.debug_name_pyrope(), process_number(dot_str_vect.at(2)));
+
+  const auto& dot_node_data = lnast->get_data(dot_node_index);
+  std::string value = absl::StrCat(ref, dot_node_data.type.debug_name_pyrope(), process_number(dot_str_vect[2]));
 
   if (is_temp_var(key)) {
     ref_map.insert(std::pair<std::string_view, std::string>(key, value));
