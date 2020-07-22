@@ -474,7 +474,6 @@ std::string Lconst::to_string_no_xz() const {
       str.append(1, ch);
     tmp >>= 8;
   }
-  fmt::print("to_string_firrtl: {}\n", str);
 
   return str;
 }
