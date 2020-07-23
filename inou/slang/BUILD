@@ -23,3 +23,11 @@ cc_binary(
         ":slang",
         ],
     )
+
+cc_binary(
+    name = "driver",
+    srcs = ["tests/driver.cpp"],
+    deps = [
+        ":slang",
+        ],
+    )
