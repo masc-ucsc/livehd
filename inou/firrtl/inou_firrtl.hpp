@@ -11,6 +11,7 @@
 #include "lconst.hpp"
 #include "lnast.hpp"
 #include "mmap_tree.hpp"
+#include "lgraph.hpp"
 #include "pass.hpp"
 
 class Inou_firrtl : public Pass {
@@ -70,13 +71,14 @@ protected:
 
   void ListStatementInfo(Lnast &lnast, const firrtl::FirrtlPB_Statement &stmt, Lnast_nid &parent_node);
 
-  void CreateModToIOMap(const firrtl::FirrtlPB_Circuit &circuit);
-  void AddPortToMap(const std::string &mod_id, const firrtl::FirrtlPB_Type &type, uint8_t dir, const std::string &port_id);
+  void PopulateAllModsIO(Eprp_var& var, const firrtl::FirrtlPB_Circuit &circuit, const std::string& file_name);
+  void AddPortToMap(const std::string &mod_id, const firrtl::FirrtlPB_Type &type, uint8_t dir, const std::string &port_id);//Sub_node& sub, uint64_t &inp_pos, uint64_t &out_pos);
+  Sub_node AddModToLibrary(Eprp_var& var, const std::string& mod_name, const std::string& file_name);
 
   void ListUserModuleInfo(Eprp_var &var, const firrtl::FirrtlPB_Module &module);
   void ListModuleInfo(Eprp_var &var, const firrtl::FirrtlPB_Module &module);
-  void IterateModules(Eprp_var &var, const firrtl::FirrtlPB_Circuit &circuit);
-  void IterateCircuits(Eprp_var &var, const firrtl::FirrtlPB &firrtl_input);
+  void IterateModules(Eprp_var &var, const firrtl::FirrtlPB_Circuit &circuit, const std::string& file_name);
+  void IterateCircuits(Eprp_var &var, const firrtl::FirrtlPB &firrtl_input, const std::string& file_name);
 
   static void toLNAST(Eprp_var &var);
 

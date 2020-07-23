@@ -36,7 +36,7 @@ void Inou_firrtl::toLNAST(Eprp_var& var) {
       }
       p.temp_var_count = 0;
       p.seq_counter    = 0;
-      p.IterateCircuits(var, firrtl_input);
+      p.IterateCircuits(var, firrtl_input, std::string(f));
     }
   } else {
     cout << "No file provided. This requires a file input.\n";
@@ -372,13 +372,31 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id, const 
  * any input or outputs. */
 // FIXME: May have to specify both as wires?
 void Inou_firrtl::create_module_inst(Lnast& lnast, const firrtl::FirrtlPB_Statement_Instance& inst, Lnast_nid& parent_node) {
-  /*            dot                   assign                    fn_call
-   *      /      |        \            / \                   /     |     \
-   * ___F0 inp_[inst_name] __wire  ___F0 true  out_[inst_name]  mod_name  inp_[inst_name] */
-  auto temp_var_name = create_temp_var(lnast);
-  auto inp_name      = lnast.add_string(absl::StrCat("inp_", inst.id()));
+  /*            dot                       assign                      fn_call
+   *      /      |        \                / \                     /     |     \
+   * ___F0 inp_[inst_name] __final_value  F1 ___F0  out_[inst_name] [mod_name]  F1 */
+  auto temp_var_name  = create_temp_var(lnast);
+  auto temp_var_name2 = lnast.add_string(absl::StrCat("F", std::to_string(temp_var_count)));
+  temp_var_count++;
+  auto inp_name       = lnast.add_string(absl::StrCat("inp_", inst.id()));
+  auto out_name       = lnast.add_string(absl::StrCat("out_", inst.id()));
 
   auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_dot(""));
+  lnast.add_child(idx_dot, Lnast_node::create_ref(temp_var_name));
+  lnast.add_child(idx_dot, Lnast_node::create_ref(inp_name));
+  lnast.add_child(idx_dot, Lnast_node::create_ref("__final_value"));
+
+  auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
+  lnast.add_child(idx_asg, Lnast_node::create_ref(temp_var_name2));
+  lnast.add_child(idx_asg, Lnast_node::create_ref(temp_var_name));
+
+  auto idx_fncall = lnast.add_child(parent_node, Lnast_node::create_func_call("fn_call"));
+  lnast.add_child(idx_fncall, Lnast_node::create_ref(out_name));
+  lnast.add_child(idx_fncall, Lnast_node::create_ref(lnast.add_string(inst.module_id())));
+  lnast.add_child(idx_fncall, Lnast_node::create_ref(temp_var_name2));
+
+
+  /*auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_dot(""));
   lnast.add_child(idx_dot, Lnast_node::create_ref(temp_var_name));
   lnast.add_child(idx_dot, Lnast_node::create_ref(inp_name));
   lnast.add_child(idx_dot, Lnast_node::create_ref("__wire"));
@@ -390,7 +408,7 @@ void Inou_firrtl::create_module_inst(Lnast& lnast, const firrtl::FirrtlPB_Statem
   auto idx_fncall = lnast.add_child(parent_node, Lnast_node::create_func_call("fn_call"));
   lnast.add_child(idx_fncall, Lnast_node::create_ref(lnast.add_string(absl::StrCat("out_", inst.id()))));
   lnast.add_child(idx_fncall, Lnast_node::create_ref(lnast.add_string(inst.module_id())));
-  lnast.add_child(idx_fncall, Lnast_node::create_ref(lnast.add_string(absl::StrCat("inp_", inst.id()))));
+  lnast.add_child(idx_fncall, Lnast_node::create_ref(lnast.add_string(absl::StrCat("inp_", inst.id()))));*/
 
   /* Also, I need to record this module instance in
    * a map that maps instance name to module name. */
@@ -536,7 +554,7 @@ void Inou_firrtl::HandleXorReducOp(Lnast& lnast, const firrtl::FirrtlPB_Expressi
   I(op.arg_size() == 1);
 
   auto e1_str = lnast.add_string(ReturnExprString(lnast, op.arg(0), parent_node, true));
-  auto idx_par = lnast.add_child(parent_node, Lnast_node::create_and("par_xorR"));
+  auto idx_par = lnast.add_child(parent_node, Lnast_node::create_parity("par_xorR"));
   lnast.add_child(idx_par, Lnast_node::create_ref(lnast.add_string(lhs)));
   AttachExprStrToNode(lnast, e1_str, idx_par);*/
 }
@@ -1129,7 +1147,7 @@ void Inou_firrtl::create_io_list(const firrtl::FirrtlPB_Type& type, uint8_t dir,
       for (int i = 0; i < type.bundle_type().field_size(); i++) {
         if (btype.field(i).is_flipped()) {
           uint8_t new_dir;
-          if (dir == 1) {
+          if (dir == 1) { // PORT_DIRECTION_IN
             new_dir = 2;
           } else if (dir == 2) {
             new_dir = 1;
@@ -1714,7 +1732,7 @@ void Inou_firrtl::ListUserModuleInfo(Eprp_var& var, const firrtl::FirrtlPB_Modul
 void Inou_firrtl::ListModuleInfo(Eprp_var& var, const firrtl::FirrtlPB_Module& module) {
   if (module.has_external_module()) {
     cout << "External module.\n";
-    I(false);  // not yet implemented
+    I(false);  // FIXME: not yet implemented
   } else if (module.has_user_module()) {
     ListUserModuleInfo(var, module);
   } else {
@@ -1723,15 +1741,19 @@ void Inou_firrtl::ListModuleInfo(Eprp_var& var, const firrtl::FirrtlPB_Module& m
   }
 }
 
-void Inou_firrtl::CreateModToIOMap(const firrtl::FirrtlPB_Circuit& circuit) {
+void Inou_firrtl::PopulateAllModsIO(Eprp_var& var, const firrtl::FirrtlPB_Circuit& circuit, const std::string& file_name) {
   for (int i = 0; i < circuit.module_size(); i++) {
     // std::vector<std::pair<std::string, uint8_t>> vec;
     if (circuit.module(i).has_external_module()) {
+      //FIXME: Support
       // mod_to_io_map[circuit.module(i).external_module().id()] = vec;
     } else if (circuit.module(i).has_user_module()) {
+      //auto sub = AddModToLibrary(var, circuit.module(i).user_module().id(), file_name);
+      //uint64_t inp_pos = 0;
+      //uint64_t out_pos = 0;
       for (int j = 0; j < circuit.module(i).user_module().port_size(); j++) {
         auto port = circuit.module(i).user_module().port(j);
-        AddPortToMap(circuit.module(i).user_module().id(), port.type(), port.direction(), port.id());
+        AddPortToMap(circuit.module(i).user_module().id(), port.type(), port.direction(), port.id());//, sub, inp_pos, out_pos);
       }
     } else {
       cout << "Module not set.\n";
@@ -1746,14 +1768,35 @@ void Inou_firrtl::CreateModToIOMap(const firrtl::FirrtlPB_Circuit& circuit) {
 #endif
 }
 
-void Inou_firrtl::AddPortToMap(const std::string& mod_id, const firrtl::FirrtlPB_Type& type, uint8_t dir,
-                               const std::string& port_id) {
+Sub_node Inou_firrtl::AddModToLibrary(Eprp_var& var, const std::string& mod_name, const std::string& file_name) {
+  std::string fpath;
+  if (var.has_label("path")) {
+    fpath = var.get("path");
+  } else {
+    fpath = "lgdb";
+    fmt::print("FIXME: Does this even happen ever due to having default?\n");
+  }
+
+  auto *library = Graph_library::instance(fpath);
+  auto &sub = library->reset_sub(mod_name, "inou.lnast_dfg.tolg");
+  return sub;
+}
+
+void Inou_firrtl::AddPortToMap(const std::string& mod_id, const firrtl::FirrtlPB_Type& type, uint8_t dir, const std::string& port_id) {//,
+                               //Sub_node& sub, const std::string& port_id, uint64_t& inp_pos, uint64_t& out_pos) {
   switch (type.type_case()) {
     case firrtl::FirrtlPB_Type::kUintType:        // UInt type
     case firrtl::FirrtlPB_Type::kSintType:        // SInt type
     case firrtl::FirrtlPB_Type::kClockType:       // Clock type
     case firrtl::FirrtlPB_Type::kAsyncResetType:  // AsyncReset type
     case firrtl::FirrtlPB_Type::kResetType: {     // Reset type
+      /*if (dir == 1) { // PORT_DIRECTION_IN
+        sub.add_input_pin(port_id);//, inp_pos);
+        inp_pos++;
+      } else {
+        sub.add_output_pin(port_id);//, out_pos);
+        out_pos++;
+      }*/
       mod_to_io_map[std::make_pair(mod_id, port_id)] = dir;
       break;
     }
@@ -1762,14 +1805,14 @@ void Inou_firrtl::AddPortToMap(const std::string& mod_id, const firrtl::FirrtlPB
       for (int i = 0; i < type.bundle_type().field_size(); i++) {
         if (btype.field(i).is_flipped()) {
           uint8_t new_dir;
-          if (dir == 1) {
+          if (dir == 1) { // PORT_DIRECTION_IN
             new_dir = 2;
           } else if (dir == 2) {
             new_dir = 1;
           }
-          AddPortToMap(mod_id, btype.field(i).type(), new_dir, port_id + "." + btype.field(i).id());
+          AddPortToMap(mod_id, btype.field(i).type(), new_dir, port_id + "." + btype.field(i).id());//, sub, inp_pos, out_pos);
         } else {
-          AddPortToMap(mod_id, btype.field(i).type(), dir, port_id + "." + btype.field(i).id());
+          AddPortToMap(mod_id, btype.field(i).type(), dir, port_id + "." + btype.field(i).id());//, sub, inp_pos, out_pos);
         }
       }
       break;
@@ -1777,7 +1820,7 @@ void Inou_firrtl::AddPortToMap(const std::string& mod_id, const firrtl::FirrtlPB
     case firrtl::FirrtlPB_Type::kVectorType: {  // Vector type
       mod_to_io_map[std::make_pair(mod_id, port_id)] = dir;
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
-        AddPortToMap(mod_id, type.vector_type().type(), dir, absl::StrCat(port_id, ".", i));
+        AddPortToMap(mod_id, type.vector_type().type(), dir, absl::StrCat(port_id, ".", i));//, sub, inp_pos, out_pos);
       }
       break;
     }
@@ -1793,14 +1836,14 @@ void Inou_firrtl::AddPortToMap(const std::string& mod_id, const firrtl::FirrtlPB
   }
 }
 
-void Inou_firrtl::IterateModules(Eprp_var& var, const firrtl::FirrtlPB_Circuit& circuit) {
+void Inou_firrtl::IterateModules(Eprp_var& var, const firrtl::FirrtlPB_Circuit& circuit, const std::string& file_name) {
   if (circuit.top_size() > 1) {
     cout << "ERROR: More than 1 top module?\n";
     I(false);
   }
 
   // Create ModuleName to I/O Pair List
-  CreateModToIOMap(circuit);
+  PopulateAllModsIO(var, circuit, file_name);
 
   // For each module, create an LNAST pointer
   for (int i = 0; i < circuit.module_size(); i++) {
@@ -1814,9 +1857,9 @@ void Inou_firrtl::IterateModules(Eprp_var& var, const firrtl::FirrtlPB_Circuit& 
 }
 
 // Iterate over every FIRRTL circuit (design), each circuit can contain multiple modules.
-void Inou_firrtl::IterateCircuits(Eprp_var& var, const firrtl::FirrtlPB& firrtl_input) {
+void Inou_firrtl::IterateCircuits(Eprp_var& var, const firrtl::FirrtlPB& firrtl_input, const std::string& file_name) {
   for (int i = 0; i < firrtl_input.circuit_size(); i++) {
     const firrtl::FirrtlPB_Circuit& circuit = firrtl_input.circuit(i);
-    IterateModules(var, circuit);
+    IterateModules(var, circuit, file_name);
   }
 }
