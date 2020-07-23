@@ -73,7 +73,7 @@ git_repository(
 new_git_repository(
     name = "fmt",
     build_file = "BUILD.fmt",
-    commit = "f94b7364b9409f05207c3af3fa4666730e11a854", # 6.1.2.0 APril 13, 2020 7512a55aa3ae309587ca89668ef9ec4074a51a1f", # 6.0.0 October 12, 2019
+    commit = "f19b1a521ee8b606dedcadfda69fd10ddf882753", # 7.0.1 June 23, 2020 f94b7364b9409f05207c3af3fa4666730e11a854", # 6.1.2.0 APril 13, 2020
     remote = "https://github.com/fmtlib/fmt.git",
     #strip_prefix = "include",
 )
@@ -85,7 +85,7 @@ new_git_repository(
 new_git_repository(
     name = "slang",
     build_file = "BUILD.slang",
-    commit = "823fc41d44d53797f0b5ddb1242028cc1fd51f18", #June 12, 2020 f525b308e8c1c147639e91889fc8d801bc45169e, #April 12, 2020 0e2381c9b408cef18950f928e5c411ed58c54eb6", # Nov 23, 2019
+    commit = "2a774123444a6152f40639296cf20e90dd7d55b0", # July 23, 2020 # 823fc41d44d53797f0b5ddb1242028cc1fd51f18", #June 12, 2020
     remote = "https://github.com/MikePopoloski/slang.git",
     patches = ["//external:patch.slang"],
 )
