@@ -246,8 +246,8 @@ protected:
     ">",
     ">=",
     "()",
-    "tuple_concat", // ++
-    "tuple_delete", // --
+    "++", //"tuple_concat", // ++
+    "--", //"tuple_delete", // --
     "select",  // []
     "bit_select", // [[]]
     "range",      // ..
