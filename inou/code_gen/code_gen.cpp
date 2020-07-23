@@ -6,6 +6,9 @@
 //#endif
 #include <assert.h>
 
+//-------------------------------------------------------------------------------------
+//Constructor:
+//
 Code_gen::Code_gen(Inou_code_gen::Code_gen_type code_gen_type, std::shared_ptr<Lnast> _lnast, std::string_view _path) : lnast(std::move(_lnast)), path(_path) {
   if (code_gen_type == Inou_code_gen::Code_gen_type::Type_prp) {
     lnast_to = std::make_unique<Prp_parser>();
@@ -22,7 +25,9 @@ Code_gen::Code_gen(Inou_code_gen::Code_gen_type code_gen_type, std::shared_ptr<L
 }
 
 //-------------------------------------------------------------------------------------
-
+//system starts here
+//this processes the node "top"
+//
 void Code_gen::generate(){
   const auto& root_index = lnast->get_root();
   const auto& node_data = lnast->get_data(root_index);
@@ -47,6 +52,9 @@ void Code_gen::generate(){
 }
 
 //-------------------------------------------------------------------------------------
+//the node "stmts" is processed here
+//and all other nodes are checked in this
+//
 void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
   auto curr_index = lnast->get_first_child(stmt_node_index);
 
@@ -57,6 +65,8 @@ void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
 
     if (curr_node_data.type.is_assign()) {
       do_assign(curr_index);
+    } else if (curr_node_data.type.is_if()) {
+      do_if(curr_index);
     } else if (curr_node_data.type.is_and() || curr_node_data.type.is_or() || curr_node_data.type.is_not() || curr_node_data.type.is_xor() || curr_node_data.type.is_logical_not() || curr_node_data.type.is_logical_and() || curr_node_data.type.is_logical_or() || curr_node_data.type.is_same() || curr_node_data.type.is_as() || curr_node_data.type.is_plus() || curr_node_data.type.is_minus() || curr_node_data.type.is_mult() || curr_node_data.type.is_mult() || curr_node_data.type.is_div() || curr_node_data.type.is_lt() || curr_node_data.type.is_le() || curr_node_data.type.is_gt() || curr_node_data.type.is_ge()) {
       do_op(curr_index);
     } else if (curr_node_data.type.is_dot()) {
@@ -93,16 +103,90 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index) {
    ref = process_number(ref);
   }
 
+  const auto& assign_node_data = lnast->get_data(assign_node_index);
   if (is_temp_var(key)) {
     auto ref_map_inst_res = ref_map.insert(std::pair<std::string_view, std::string>(key, (std::string)ref));
     if(!ref_map_inst_res.second) {
-      absl::StrAppend(&buffer_to_print, ref_map.find(key)->second, " ", "=", " ", (std::string)ref, lnast_to->stmt_sep());
+      absl::StrAppend(&buffer_to_print, indent(), ref_map.find(key)->second, " ", lnast_to->debug_name_lang(assign_node_data.type), " ", (std::string)ref, lnast_to->stmt_sep());
     }
   } else {
-    absl::StrAppend(&buffer_to_print, key, " ", "=", " ", (std::string)ref, lnast_to->stmt_sep());
+    absl::StrAppend(&buffer_to_print, indent(), key, " ", lnast_to->debug_name_lang(assign_node_data.type), " ", (std::string)ref, lnast_to->stmt_sep());
   }
 }
+//-------------------------------------------------------------------------------------
+//Process the operator (like and,or,etc.) node:
+void Code_gen::do_if(const mmap_lib::Tree_index& if_node_index) {
+  auto curr_index = lnast->get_first_child(if_node_index);
+  int node_num = 0;
 
+  //absl::StrAppend(&buffer_to_print, "lnast_to->start_if()\n");
+
+  while(curr_index!=lnast->invalid_index()) {
+    node_num++;
+    const auto& curr_node_data = lnast->get_data(curr_index);
+    auto curlvl = curr_index.level;//for debugging message printing purposes only
+    fmt::print("Processing assign child {} at level {} \n",Code_gen::get_node_name(curr_node_data), curlvl);
+
+    if(node_num>3) {
+      if(curr_node_data.type.is_cstmts()) {
+        //absl::StrAppend(&buffer_to_print, "xx1\n" );
+        //absl::StrAppend(&buffer_to_print, indent(), lnast_to->start_else_if() );
+        do_stmts(curr_index);
+        //absl::StrAppend(&buffer_to_print, lnast_to->end_else_if());
+      } else if (curr_node_data.type.is_cond()) {
+        absl::StrAppend(&buffer_to_print, indent(), lnast_to->start_else_if());
+        do_cond(curr_index);
+      } else if (curr_node_data.type.is_stmts()) {
+        //absl::StrAppend(&buffer_to_print, "xx2\n" );
+        //absl::StrAppend(&buffer_to_print, lnast_to->end_if_or_else());
+        bool prev_was_cond = (lnast->get_data(lnast->get_sibling_prev(curr_index))).type.is_cond();
+        if (!prev_was_cond) {
+          absl::StrAppend(&buffer_to_print, indent(), lnast_to->start_else());
+        }
+        indendation++;
+        do_stmts(curr_index);
+        indendation--;
+        if (!prev_was_cond) {
+          absl::StrAppend(&buffer_to_print, indent(), lnast_to->end_if_or_else());
+        }
+      }
+    } else {
+      if(curr_node_data.type.is_cstmts()) {
+        //absl::StrAppend(&buffer_to_print," do cstmts here \n");
+        do_stmts(curr_index);
+      } else if (curr_node_data.type.is_cond()) {
+        absl::StrAppend(&buffer_to_print, indent(), lnast_to->start_cond());
+        do_cond(curr_index);
+        //do_cond:
+      } else if (curr_node_data.type.is_stmts()) {
+        indendation++;
+        //absl::StrAppend(&buffer_to_print," starting stmts here \n");
+        do_stmts(curr_index);
+        //absl::StrAppend(&buffer_to_print," ending stmts here \n");
+        indendation--;
+      } else {
+        fmt::print("ERROR:\n\t\t------CHECK THE NODE TYPE IN THIS IF -----!!\n");
+      }
+    }
+
+    curr_index = lnast->get_sibling_next(curr_index);
+  }
+
+  if(node_num<=3) absl::StrAppend(&buffer_to_print, indent(), lnast_to->end_if_or_else());
+}
+
+//-------------------------------------------------------------------------------------
+//Process the operator (like and,or,etc.) node:
+void Code_gen::do_cond(const mmap_lib::Tree_index& cond_node_index) {
+  const auto& curr_node_data = lnast->get_data(cond_node_index);
+  std::string_view ref = get_node_name(curr_node_data);
+  auto map_it = ref_map.find(ref);
+  if(map_it != ref_map.end()) {
+    ref = map_it->second;
+  }
+  absl::StrAppend(&buffer_to_print, ref);
+  absl::StrAppend(&buffer_to_print, lnast_to->end_cond());
+}
 //-------------------------------------------------------------------------------------
 //Process the operator (like and,or,etc.) node:
 void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
@@ -151,7 +235,7 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
   if(is_temp_var(key)) {
     ref_map.insert(std::pair<std::string_view, std::string>(key, val));
   } else {
-    absl::StrAppend (&buffer_to_print, key, " ", lnast_to->debug_name_lang(op_node_data.type), " ", val, lnast_to->stmt_sep());
+    absl::StrAppend (&buffer_to_print, indent(), key, " ", lnast_to->debug_name_lang(op_node_data.type), " ", val, lnast_to->stmt_sep());
   }
 
 }
@@ -186,7 +270,7 @@ void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index) {
   if (is_temp_var(key)) {
     ref_map.insert(std::pair<std::string_view, std::string>(key, value));
   } else {
-    absl::StrAppend(&buffer_to_print, key, " saved as ", value, "\n");
+    absl::StrAppend(&buffer_to_print, indent(), key, " saved as ", value, "\n");
     // this should never be possible
   }
 
@@ -222,3 +306,7 @@ std::string_view Code_gen::process_number(std::string_view num_string) {
   return num_string;
 }
 
+//-------------------------------------------------------------------------------------
+std::string Code_gen::indent() { return std::string(indendation * 2, ' '); }
+
+//-------------------------------------------------------------------------------------

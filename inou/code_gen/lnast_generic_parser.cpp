@@ -33,4 +33,30 @@ std::string_view Ver_parser::debug_name_lang(Lnast_ntype node_type){
 }
 
 
+std::string_view Prp_parser::start_else_if(){
+  return ("} elif (");
+}
+std::string_view Cpp_parser::start_else_if(){
+  return ("} else if (");
+}
+std::string_view Ver_parser::start_else_if(){
+  return ("end else if (");
+}
+
+std::string_view Ver_parser::end_else_if(){
+  return ("end");
+}
+
+std::string_view Ver_parser::start_else(){
+  return ("end else begin");
+}
+
+
+std::string_view Ver_parser::end_cond(){
+  return (") begin");
+}
+
+std::string_view Ver_parser::end_if_or_else(){
+  return ("end\n");
+}
 

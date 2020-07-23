@@ -12,6 +12,7 @@ public:
   std::string_view stmt_sep() final;
   std::string_view get_lang_type() final;
   std::string_view debug_name_lang(Lnast_ntype node_type) final;
+  std::string_view start_else_if() final;
 };
 
 //-------------------------------------------------------------------------------------
@@ -25,6 +26,7 @@ public:
   std::string_view stmt_sep() final;
   std::string_view get_lang_type() final;
   std::string_view debug_name_lang(Lnast_ntype node_type) final;
+  std::string_view start_else_if() final;
 };
 
 //-------------------------------------------------------------------------------------
@@ -38,5 +40,10 @@ public:
   std::string_view stmt_sep() final;
   std::string_view get_lang_type() final;
   std::string_view debug_name_lang(Lnast_ntype node_type) final;
+  std::string_view start_else_if() final;
+  std::string_view end_else_if() final;
+  std::string_view start_else() final;
+  std::string_view end_cond() final;
+  std::string_view end_if_or_else() final;
 };
 
