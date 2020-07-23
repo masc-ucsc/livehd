@@ -621,40 +621,48 @@ void Pass_lgraph_to_lnast::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node,
   // Y = ~SA | SB
 
   auto if_node  = lnast.add_child(parent_node, Lnast_node::create_if("mux"));
-  auto cst_node = lnast.add_child(if_node, Lnast_node::create_cstmts(""));
 
-  std::vector<XEdge> mux_vals;
-  for (const auto inp : pin.get_node().inp_edges()) {
+  std::queue<XEdge> mux_vals;
+  Node_pin sel_pin;
+  for (const auto inp : pin.get_node().inp_edges_ordered()) {
     if (inp.sink.get_pid() == 0) {  // If mux selector S, create if's "condition"
-      attach_cond_child(lnast, if_node, inp.driver);
+      sel_pin = inp.driver;
+      //attach_cond_child(lnast, if_node, inp.driver);
     } else {
-      mux_vals.push_back(inp);
+      mux_vals.push(inp);
     }
   }
   I(mux_vals.size() >= 2);
 
-  Node_pin dpins[mux_vals.size() + 1];
-  // dpins[1] = driver of A, dpins[2] driver of B, etc... dpins[0] leave empty
-  for (const auto edge : mux_vals) {
-    dpins[edge.sink.get_pid()] = edge.driver;
+
+  // Create cstmt + cond + stmt for each mux val, except last.
+  uint32_t comp_val = 0;
+  while (mux_vals.size() > 1) {
+    auto temp_var = create_temp_var(lnast);
+    auto cstmt_idx = lnast.add_child(if_node, Lnast_node::create_cstmts(get_new_seq_name(lnast)));
+
+    auto eq_idx = lnast.add_child(cstmt_idx, Lnast_node::create_same(""));
+    lnast.add_child(eq_idx, Lnast_node::create_ref(temp_var));
+    attach_child(lnast, eq_idx, sel_pin);
+    lnast.add_child(eq_idx, Lnast_node::create_const(lnast.add_string(std::to_string(comp_val))));
+    comp_val++;
+
+    lnast.add_child(if_node, Lnast_node::create_cond(temp_var));
+
+    auto stmt_idx = lnast.add_child(if_node, Lnast_node::create_stmts(get_new_seq_name(lnast)));
+
+    auto asg_idx = lnast.add_child(stmt_idx, Lnast_node::create_assign(""));
+    lnast.add_child(asg_idx, Lnast_node::create_ref(dpin_get_name(pin)));
+    attach_child(lnast, asg_idx, mux_vals.front().driver);
+    mux_vals.pop();
   }
 
-  auto pin_name = dpin_get_name(pin);
-  if (pin_name.substr(0,3) == "___") {
-    // Having an intermediate var in multiple scopes doesn't work
-    pin_name = lnast.add_string(pin_name.substr(3));
-  }
+  // Attach last mux input, with no condition (since it is "else" case)
+  auto stmt_idx = lnast.add_child(if_node, Lnast_node::create_stmts(get_new_seq_name(lnast)));
 
-  auto if_true_stmt_node  = lnast.add_child(if_node, Lnast_node::create_stmts(get_new_seq_name(lnast)));
-  auto if_false_stmt_node = lnast.add_child(if_node, Lnast_node::create_stmts(get_new_seq_name(lnast)));
-
-  auto asg_node_false = lnast.add_child(if_false_stmt_node, Lnast_node::create_assign("assign_false"));
-  lnast.add_child(asg_node_false, Lnast_node::create_ref(pin_name));
-  attach_child(lnast, asg_node_false, dpins[1]);
-
-  auto asg_node_true = lnast.add_child(if_true_stmt_node, Lnast_node::create_assign("assign_true"));
-  lnast.add_child(asg_node_true, Lnast_node::create_ref(pin_name));
-  attach_child(lnast, asg_node_true, dpins[2]);
+  auto asg_idx = lnast.add_child(stmt_idx, Lnast_node::create_assign(""));
+  lnast.add_child(asg_idx, Lnast_node::create_ref(dpin_get_name(pin)));
+  attach_child(lnast, asg_idx, mux_vals.front().driver);
 }
 
 void Pass_lgraph_to_lnast::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
