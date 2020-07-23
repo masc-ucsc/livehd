@@ -15,6 +15,8 @@ protected:
   //enum class Code_gen_type { Type_verilog, Type_prp, Type_cfg, Type_cpp };
 private:
   std::unique_ptr<Code_gen_all_lang> lnast_to;
+  int indendation = 0;
+  std::string indent();
 public:
   Code_gen(Inou_code_gen::Code_gen_type code_gen_type, std::shared_ptr<Lnast>_lnast, std::string_view _path);
   //virtual void generate() = 0;
@@ -23,6 +25,8 @@ public:
   void do_assign(const mmap_lib::Tree_index& assign_node_index);
   void do_op(const mmap_lib::Tree_index& op_node_index);
   void do_dot(const mmap_lib::Tree_index& dot_node_index);
+  void do_if(const mmap_lib::Tree_index& dot_node_index);
+  void do_cond(const mmap_lib::Tree_index& cond_node_index);
   bool is_temp_var(std::string_view test_string);//can go to private/protected section!?
   std::string_view get_node_name(Lnast_node node);//can go to private/protected section!?
   bool             is_number(std::string_view test_string);
