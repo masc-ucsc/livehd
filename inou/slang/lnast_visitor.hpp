@@ -34,7 +34,8 @@ struct Lnast_visitor : public slang::ASTVisitor<Lnast_visitor, false, false> {
 
         if constexpr (std::is_same_v<slang::ParameterSymbol, T> ||
             std::is_same_v<slang::EnumValueSymbol, T>) {
-          symbol.getValue();
+          const auto &svint = symbol.getValue().integer();
+          fmt::print("parameter:{} value val:{} bits:{}\n", symbol.name, *svint.getRawPtr(), svint.getActiveBits());
         }
 
         for (auto attr : compilation.getAttributes(symbol))
@@ -59,6 +60,16 @@ struct Lnast_visitor : public slang::ASTVisitor<Lnast_visitor, false, false> {
       return;
     symbol.getPackage();
   }
+
+  void handle(const slang::IntegerLiteral& expr) {
+    const auto &svint = expr.getValue();
+    if (svint.isSingleWord())
+      fmt::print("value val:{} bits:{}\n", *svint.getRawPtr(), svint.getActiveBits());
+    else
+      fmt::print("value bits:{}\n", svint.getActiveBits());
+  }
+
+  void handle(const slang::VariableDeclStatement& stmt) { fmt::print("var decl:{}\n", stmt.symbol.name); }
 
   void handle(const slang::ContinuousAssignSymbol& symbol) {
     if (!handleDefault(symbol))
