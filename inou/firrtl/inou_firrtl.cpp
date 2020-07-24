@@ -13,6 +13,7 @@ void setup_inou_firrtl() { Inou_firrtl::setup(); }
 void Inou_firrtl::setup() {
   Eprp_method m1("inou.firrtl.tolnast", "Translate FIRRTL to LNAST (in progress)", &Inou_firrtl::toLNAST);
   m1.add_label_required("files", "protobuf data file[s] gotten from Chisel's toProto functionality");
+  m1.add_label_optional("path", "location to store subgraph nodes", "lgdb");
   register_inou("firrtl", m1);
 
   Eprp_method m2("inou.firrtl.tofirrtl", "LNAST to FIRRTL", &Inou_firrtl::toFIRRTL);
