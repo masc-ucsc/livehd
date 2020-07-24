@@ -19,10 +19,7 @@
 
 #include "json_inou.hpp"
 
-#include "Adjacency_list.hpp" // graph support
-#undef I // graph and iassert both declare "I" macros, but we only need the one from iassert
-
-#include "iassert.hpp"
+#include "i_resolve_header.hpp"
 
 struct Hier_node {
   
@@ -50,7 +47,7 @@ public:
   Hier_tree() { }
   
   // take in a vector of all nodes in the netlist, and convert it to a tree.
-  Hier_tree(const Graph_info && g);
+  Hier_tree(Graph_info && g);
   
   // copies require copying the entire tree and are very expensive.
   Hier_tree(const Hier_tree& other) = delete;
@@ -99,14 +96,17 @@ private:
   // clear out any temp nodes, if they exist.
   //void prune_matrix(Cost_matrix& m);
   
+  typedef decltype(graph::Bi_adjacency_list().vert_map<Min_cut_data>()) Min_cut_map;
+  void populate_cost_map(const graph::Bi_adjacency_list& g, Min_cut_map& m);
+
   // make a partition of the graph minimizing the number of edges crossing the cut and keeping in mind area (modified kernighan-lin algorithm)
-  std::pair<Graph_info &&, Graph_info &&> min_wire_cut(const Graph_info && g) const;
+  std::pair<Graph_info &&, Graph_info &&> min_wire_cut(Graph_info && info);
   
   // create a hierarchy tree out of existing hierarchies
   //phier make_hier_tree(phier t1, phier t2);
   
   // do hierarchy discovery starting with a given cost matrix
-  phier discover_hierarchy(const Graph_info && g);
+  phier discover_hierarchy(Graph_info && g);
 
   std::shared_ptr<Hier_node> root;
 

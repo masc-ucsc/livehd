@@ -12,10 +12,7 @@
 
 #include "rapidjson/document.h" // for json parsing
 
-#include "Adjacency_list.hpp" // graph support
-#undef I // graph and iassert both declare "I" macros, but we only need the one from iassert
-
-#include "iassert.hpp"
+#include "i_resolve_header.hpp"
 
 // this holds a graph and all the related map information.
 // it looks complicated because everything in the graph lib is a template and has copy constructors removed.
@@ -32,6 +29,13 @@ public:
     decltype(graph::Bi_adjacency_list().vert_map<double>()) && new_areas,
     decltype(graph::Bi_adjacency_list().edge_map<unsigned int>()) && new_weights
   ) : al(std::move(new_list)), names(std::move(new_names)), areas(std::move(new_areas)), weights(std::move(new_weights)) { }
+
+#ifndef NDEBUG
+  void print() {
+    using namespace graph::attributes;
+    std::cout << al.dot_format("name"_of_vert = names, "weight"_of_edge = weights) << std::endl;
+  }
+#endif
 
 };
 
