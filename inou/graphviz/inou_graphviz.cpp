@@ -15,6 +15,49 @@
 
 void setup_inou_graphviz() { Inou_graphviz::setup(); }
 
+void Inou_graphviz::populate_lg_handle_xedge(const Node &node, const XEdge &out, std::string &data) {
+  auto dp_pid  = out.driver.get_pid();
+  auto sp_pid  = out.sink.get_pid();
+  auto dn_name = graphviz_legalize_name(out.driver.get_node().debug_name());
+  if (out.driver.is_graph_io()) {
+    dn_name = graphviz_legalize_name(out.driver.get_name());
+  }
+  auto sn_name = graphviz_legalize_name(out.sink.get_node().debug_name());
+  if (out.sink.is_graph_io()) {
+    sn_name = graphviz_legalize_name(out.sink.get_name());
+  }
+  auto dbits   = out.driver.get_bits();
+  auto dp_name = out.driver.has_name() ? out.driver.get_name() : "";
+
+  if (node.get_type().op == Const_Op)
+    data += fmt::format(" {}->{}[label=<{}b:({},{})>];\n", dn_name, sn_name, dbits, dp_pid, sp_pid);
+  else if (node.get_type().op == TupRef_Op)
+    data += fmt::format(" {}->{}[label=<({},{}):<font color=\"#0000ff\">{}</font>>];\n", dn_name, sn_name, dp_pid, sp_pid, dp_name);
+  else if (node.get_type().op == TupAdd_Op)
+    data += fmt::format(" {}->{}[label=<{}b:({},{}):<font color=\"#0000ff\">{}</font>>];\n",
+                        dn_name,
+                        sn_name,
+                        dbits,
+                        dp_pid,
+                        sp_pid,
+                        dp_name);
+  else
+    data += fmt::format(" {}->{}[label=<{}b:({},{}):{}>];\n", dn_name, sn_name, dbits, dp_pid, sp_pid, dp_name);
+}
+
+std::string Inou_graphviz::graphviz_legalize_name(std::string_view name) {
+  std::string legal;
+
+  for (auto c : name) {
+    if (std::isalnum(c))
+      legal.append(1,c);
+    else
+      legal.append(1,'_');
+  }
+
+  return legal;
+}
+
 void Inou_graphviz::setup() {
   Eprp_method m1("inou.graphviz.from", "export lgraph/lnast to graphviz dot format", &Inou_graphviz::from);
 
@@ -93,7 +136,7 @@ void Inou_graphviz::do_hierarchy(LGraph *g) {
     // fmt::print("lg:{} node:{} type:{}\n", node.get_class_lgraph()->get_name(), node.debug_name(), node.get_type().get_name());
 
     const auto &child_sub = node.get_type_sub_node();
-    data += fmt::format(" {}->{};", node.get_class_lgraph()->get_name(), child_sub.get_name());
+    data += fmt::format(" {}->{};", graphviz_legalize_name(node.get_class_lgraph()->get_name()), graphviz_legalize_name(child_sub.get_name()));
   }
 
   data += "\n}\n";
@@ -123,36 +166,6 @@ void Inou_graphviz::do_from_lgraph(LGraph *lg_parent) {
   });
 }
 
-void Inou_graphviz::populate_lg_handle_xedge(const Node &node, const XEdge &out, std::string &data) {
-  auto dp_pid  = out.driver.get_pid();
-  auto sp_pid  = out.sink.get_pid();
-  auto dn_name = out.driver.get_node().debug_name();
-  if (out.driver.is_graph_io()) {
-    dn_name = out.driver.get_name();
-  }
-  auto sn_name = out.sink.get_node().debug_name();
-  if (out.sink.is_graph_io()) {
-    sn_name = out.sink.get_name();
-  }
-  auto dbits   = out.driver.get_bits();
-  auto dp_name = out.driver.has_name() ? out.driver.get_name() : "";
-
-  if (node.get_type().op == Const_Op)
-    data += fmt::format(" {}->{}[label=<{}b:({},{})>];\n", dn_name, sn_name, dbits, dp_pid, sp_pid);
-  else if (node.get_type().op == TupRef_Op)
-    data += fmt::format(" {}->{}[label=<({},{}):<font color=\"#0000ff\">{}</font>>];\n", dn_name, sn_name, dp_pid, sp_pid, dp_name);
-  else if (node.get_type().op == TupAdd_Op)
-    data += fmt::format(" {}->{}[label=<{}b:({},{}):<font color=\"#0000ff\">{}</font>>];\n",
-                        dn_name,
-                        sn_name,
-                        dbits,
-                        dp_pid,
-                        sp_pid,
-                        dp_name);
-  else
-    data += fmt::format(" {}->{}[label=<{}b:({},{}):{}>];\n", dn_name, sn_name, dbits, dp_pid, sp_pid, dp_name);
-}
-
 void Inou_graphviz::populate_lg_data(LGraph *g) {
   std::string data = "digraph {\n";
 
@@ -171,10 +184,11 @@ void Inou_graphviz::populate_lg_data(LGraph *g) {
       node_info = node.debug_name();
     }
 
+    auto gv_name = graphviz_legalize_name(node.debug_name());
     if (node.get_type().op == Const_Op)
-      data += fmt::format(" {} [label=<{}:{}>];\n", node.debug_name(), node_info, node.get_type_const().to_pyrope());
+      data += fmt::format(" {} [label=<{}:{}>];\n", gv_name, node_info, node.get_type_const().to_pyrope());
     else
-      data += fmt::format(" {} [label=<{}>];\n", node.debug_name(), node_info);
+      data += fmt::format(" {} [label=<{}>];\n", gv_name, node_info);
 
     for (const auto &out : node.out_edges()) {
       populate_lg_handle_xedge(node, out, data);
@@ -183,7 +197,7 @@ void Inou_graphviz::populate_lg_data(LGraph *g) {
 
   g->each_graph_input([&data](const Node_pin &pin) {
     std::string_view io_name = pin.get_name();
-    data += fmt::format(" {} [label=<{}>];\n", io_name, io_name);  // pin.debug_name());
+    data += fmt::format(" {} [label=<{}>];\n", graphviz_legalize_name(io_name), io_name);  // pin.debug_name());
 
     for (const auto &out : pin.out_edges()) {
       populate_lg_handle_xedge(pin.get_node(), out, data);
@@ -194,7 +208,7 @@ void Inou_graphviz::populate_lg_data(LGraph *g) {
   g->each_graph_output([&data](const Node_pin &pin) {
     std::string_view dst_str = "virtual_dst_module";
     auto             dbits   = pin.get_bits();
-    data += fmt::format(" {}->{}[label=<{}b>];\n", pin.get_name(), dst_str, dbits);
+    data += fmt::format(" {}->{}[label=<{}b>];\n", graphviz_legalize_name(pin.get_name()), dst_str, dbits);
   });
 
   data += "}\n";
