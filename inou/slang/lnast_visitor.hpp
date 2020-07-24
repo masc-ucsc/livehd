@@ -84,6 +84,10 @@ struct Lnast_visitor : public slang::ASTVisitor<Lnast_visitor, false, false> {
     const auto &def = symbol.getDefinition();
     fmt::print("definition:{}\n", def.name);
 
+    for (const auto& port : symbol.body.getPortList()) {
+			fmt::print("port:{}\n",port->name);
+    }
+
     symbol.resolvePortConnections();
     for (auto attr : compilation.getAttributes(symbol))
       attr->getValue();
