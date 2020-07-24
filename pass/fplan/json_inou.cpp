@@ -101,14 +101,14 @@ Graph_info Json_inou_parser::make_tree() const {
       }
     }
   }
-
+  
+  Graph_info info(std::move(g), std::move(g_name_map), std::move(g_area_map), std::move(edge_weights));
+  
 #ifndef NDEBUG
-  // print out the graph in DOT format, with relevant information attached.
-  using namespace graph::attributes;
-  std::cout << g.dot_format("name"_of_vert = g_name_map, "weight"_of_edge = edge_weights) << std::endl;
+  info.print();
 #endif
   
-  return Graph_info(std::move(g), std::move(g_name_map), std::move(g_area_map), std::move(edge_weights));
+  return info;
 } 
 
 double Json_inou_parser::get_area() const {
