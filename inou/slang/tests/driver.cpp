@@ -8,6 +8,8 @@
 #include <fstream>
 #include <iostream>
 
+#include "lnast_visitor.hpp"
+
 #include "slang/compilation/Compilation.h"
 #include "slang/diagnostics/DiagnosticEngine.h"
 #include "slang/diagnostics/TextDiagnosticClient.h"
@@ -140,6 +142,10 @@ bool runCompiler(SourceManager& sourceManager, const Bag& options,
 
         writeToFile(*astJsonFile, writer.view());
     }
+
+    Lnast_visitor lnast_visitor(compilation, 0, 0);
+
+    compilation.getRoot().visit(lnast_visitor);
 
     return diagEngine.getNumErrors() == 0;
 }
