@@ -73,6 +73,7 @@
 //   b = a + 1
 //   a = a - 1
 // }
+// Missing Statement Node
 // Warning: total
 // ================================================
 
@@ -97,7 +98,7 @@
 
 // my_xor = func_xor($foo, $bar)
 // %out = my_xor.out
-// Warning:
+// Warning: None
 // ================================================
 
 
@@ -136,12 +137,12 @@
 // a = 1
 // b = a
 // c = b + 1
-// Warning: Inefficient LNAST for variable b
+// Warning: Inefficient LNAST for variable b, c
 
 // tup = (foo = 1, bar = 2)
 // temp_tup = tup
 // temp_tup = temp_tup ++ (4, dog)
-// Warning: Inefficient LNAST for variable bar
+// Warning: Inefficient LNAST for variable temp_tup, foo + bar
 
 // a = 1 + 4
 // b = a
