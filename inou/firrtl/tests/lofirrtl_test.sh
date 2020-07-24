@@ -1,7 +1,7 @@
 #!/bin/bash
 rm -rf ./lgdb
 
-pts='FinalValTest FinalVal2Test NotAnd Trivial SimpleBitOps Test1 RegTrivial RegisterSimple Flop Register GCD RocketCore ICache' #Flop Register
+pts='FinalVal2Test FinalValTest NotAnd Trivial SimpleBitOps Test1 RegTrivial RegisterSimple Flop Register GCD RocketCore ICache' #Flop Register
 #Ops -- no rem op yet
 
 #HwachaSequencer -- printf, pad, stop
