@@ -10,6 +10,8 @@ class Inou_graphviz : public Pass {
 private:
   static void populate_lg_handle_xedge(const Node &node, const XEdge &out, std::string &data);
 
+  static std::string graphviz_legalize_name(std::string_view name);
+
 protected:
   // bits/verbose are optional arguments to Inou_graphviz pass
   bool bits;

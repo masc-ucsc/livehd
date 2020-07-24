@@ -20,6 +20,7 @@ public:
   virtual std::string_view end_if_or_else() { return "}\n";}
 
   std::string_view start_cond() {return "if (";}
+  std::string_view tuple_stmt_sep() {return ", ";}
 
 };
 
