@@ -27,6 +27,8 @@ public:
   void do_dot(const mmap_lib::Tree_index& dot_node_index);
   void do_if(const mmap_lib::Tree_index& dot_node_index);
   void do_cond(const mmap_lib::Tree_index& cond_node_index);
+  void do_tuple(const mmap_lib::Tree_index& tuple_node_index);
+  std::string_view resolve_tuple_assign(const mmap_lib::Tree_index& tuple_assign_index);
   bool is_temp_var(std::string_view test_string);//can go to private/protected section!?
   std::string_view get_node_name(Lnast_node node);//can go to private/protected section!?
   bool             is_number(std::string_view test_string);
