@@ -314,7 +314,7 @@ void Code_gen::do_tuple(const mmap_lib::Tree_index& tuple_node_index) {
 
 //-------------------------------------------------------------------------------------
 //function called to process the tuple:
-std::string_view Code_gen::resolve_tuple_assign(const mmap_lib::Tree_index& tuple_assign_index) {
+std::string Code_gen::resolve_tuple_assign(const mmap_lib::Tree_index& tuple_assign_index) {
 
   auto curr_index = lnast->get_first_child(tuple_assign_index);
   std::vector<std::string_view> op_str_vect;
@@ -329,7 +329,7 @@ std::string_view Code_gen::resolve_tuple_assign(const mmap_lib::Tree_index& tupl
   auto key = op_str_vect.front();
   bool is_const = false;
   std::string val = "";
-  const auto& op_node_data = lnast->get_data(tuple_assign_index);
+  const auto& op_node_data = lnast->get_data(tuple_assign_index); //the operator (assign or as)
 
   if (key == "null") {
     is_const = true;
@@ -369,7 +369,7 @@ std::string_view Code_gen::resolve_tuple_assign(const mmap_lib::Tree_index& tupl
   } else if (is_const) {
     return val;
   } else {
-    std::string_view ret_tup_str = absl::StrCat (indent(), key, " ", lnast_to->debug_name_lang(op_node_data.type), " ", val);
+    std::string ret_tup_str = absl::StrCat (indent(), key, " ", lnast_to->debug_name_lang(op_node_data.type), " ", val);
     return (ret_tup_str);
   }
 
