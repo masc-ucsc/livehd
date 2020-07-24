@@ -111,6 +111,23 @@ do
       exit 1
     fi
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+
+    echo ""
+    echo ""
+    echo ""
+    echo ""
+    echo "----------------------------------------------------"
+    echo "Rest of bw-cprop"
+    echo "----------------------------------------------------"
+
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.bitwidth"
+    if [ $? -eq 0 ]; then
+      echo "Successfully finished all bw-cprops: ${pt}.lo.pb"
+    else
+      echo "ERROR: Pyrope compiler failed on new lg: cprop-bw, testcase: ${pt}.lo.pb"
+      exit 1
+    fi
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
     mv ${pt}.dot ${pt}.newlg.dot
 
     #echo ""
