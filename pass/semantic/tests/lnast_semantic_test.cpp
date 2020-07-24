@@ -115,7 +115,6 @@ int main(int argc, char** argv) {
     auto idx_op5    = lnast->add_child(idx_assign, Lnast_node::create_ref   ("___b",  line_num, pos1, pos2));
 
     // No Warnings
-    // Inefficient LNAST is too strict here
 
     // ================================================================================================================
     s.do_check(lnast);
@@ -159,7 +158,6 @@ int main(int argc, char** argv) {
     auto idx_op7     = lnast->add_child(idx_assign3, Lnast_node::create_ref   ("___d",  line_num, pos1, pos2));
 
     // Warning: ___c
-    // Inefficient LNAST is too strict here
 
     // ================================================================================================================
     s.do_check(lnast);
