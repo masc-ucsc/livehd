@@ -1057,14 +1057,22 @@ Lnast_node Prp_lnast::eval_expression(mmap_lib::Tree_index idx_start_ast, mmap_l
       get_next_temp_var();
       lnast->add_child(idx_args_tuple, lhs_tuple);
 
+#if 1
+      lnast->add_child(idx_args_tuple, operand_stack.front());
+#else
       auto idx_assign_node_op1 = lnast->add_child(idx_args_tuple, Lnast_node::create_assign(""));
       lnast->add_child(idx_assign_node_op1, Lnast_node::create_ref("null"));
       lnast->add_child(idx_assign_node_op1, operand_stack.front());
+#endif
       operand_stack.pop_front();
 
+#if 1
+      lnast->add_child(idx_args_tuple, operand_stack.front());
+#else
       auto idx_assign_node_op2 = lnast->add_child(idx_args_tuple, Lnast_node::create_assign(""));
       lnast->add_child(idx_assign_node_op2, Lnast_node::create_ref("null"));
       lnast->add_child(idx_assign_node_op2, operand_stack.front());
+#endif
       operand_stack.pop_front();
 
       auto lnast_temp = lnast->add_string(current_temp_var);
