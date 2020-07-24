@@ -56,6 +56,8 @@ void Code_gen::generate(){
 //and all other nodes are checked in this
 //
 void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
+  if(lnast->is_leaf(stmt_node_index)) {return;} //check if no child node present
+
   auto curr_index = lnast->get_first_child(stmt_node_index);
 
   while(curr_index!=lnast->invalid_index()) {
@@ -63,14 +65,16 @@ void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
     auto curlvl = curr_index.level;
     fmt::print("Processing stmt child {} at level {} \n",Code_gen::get_node_name(curr_node_data), curlvl);
 
-    if (curr_node_data.type.is_assign()) {
+    if (curr_node_data.type.is_assign() || curr_node_data.type.is_dp_assign()) {
       do_assign(curr_index);
     } else if (curr_node_data.type.is_if()) {
       do_if(curr_index);
-    } else if (curr_node_data.type.is_and() || curr_node_data.type.is_or() || curr_node_data.type.is_not() || curr_node_data.type.is_xor() || curr_node_data.type.is_logical_not() || curr_node_data.type.is_logical_and() || curr_node_data.type.is_logical_or() || curr_node_data.type.is_same() || curr_node_data.type.is_as() || curr_node_data.type.is_plus() || curr_node_data.type.is_minus() || curr_node_data.type.is_mult() || curr_node_data.type.is_mult() || curr_node_data.type.is_div() || curr_node_data.type.is_lt() || curr_node_data.type.is_le() || curr_node_data.type.is_gt() || curr_node_data.type.is_ge()) {
+    } else if (curr_node_data.type.is_and() || curr_node_data.type.is_or() || curr_node_data.type.is_not() || curr_node_data.type.is_xor() || curr_node_data.type.is_logical_not() || curr_node_data.type.is_logical_and() || curr_node_data.type.is_logical_or() || curr_node_data.type.is_same() || curr_node_data.type.is_as() || curr_node_data.type.is_plus() || curr_node_data.type.is_minus() || curr_node_data.type.is_mult() || curr_node_data.type.is_mult() || curr_node_data.type.is_div() || curr_node_data.type.is_lt() || curr_node_data.type.is_le() || curr_node_data.type.is_gt() || curr_node_data.type.is_ge() || curr_node_data.type.is_tuple_concat() || curr_node_data.type.is_tuple_delete()) {
       do_op(curr_index);
     } else if (curr_node_data.type.is_dot()) {
       do_dot(curr_index);
+    } else if (curr_node_data.type.is_tuple()) {
+      do_tuple(curr_index);
     }
 
     curr_index = lnast->get_sibling_next(curr_index);
@@ -114,7 +118,7 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index) {
   }
 }
 //-------------------------------------------------------------------------------------
-//Process the operator (like and,or,etc.) node:
+//Process the "if" node:
 void Code_gen::do_if(const mmap_lib::Tree_index& if_node_index) {
   auto curr_index = lnast->get_first_child(if_node_index);
   int node_num = 0;
@@ -276,6 +280,100 @@ void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index) {
 
 }
 
+//-------------------------------------------------------------------------------------
+//processing tuple
+void Code_gen::do_tuple(const mmap_lib::Tree_index& tuple_node_index) {
+
+  //Process the first child node in key and move to the next node:
+  auto curr_index = lnast->get_first_child(tuple_node_index);
+  //std::vector<std::string_view> tuple_str_vect;
+  const auto& curr_node_data = lnast->get_data(curr_index);
+  std::string_view key = Code_gen::get_node_name(curr_node_data);
+  curr_index = lnast->get_sibling_next(curr_index);
+
+  //Process remaining nodes/sub-trees:
+  std::string tuple_value = "(";
+  while(curr_index!=lnast->invalid_index()) {
+    //curr_node_data = lnast->get_data(curr_index);
+    absl::StrAppend(&tuple_value, resolve_tuple_assign(curr_index), lnast_to->tuple_stmt_sep());
+    curr_index = lnast->get_sibling_next(curr_index);
+  }
+  tuple_value.pop_back();
+  tuple_value.pop_back();//to remove the extra (last) tuple stmt sep inserted 
+  absl::StrAppend(&tuple_value, ")");
+
+  //insert to map:
+  if(is_temp_var(key)) {
+    ref_map.insert(std::pair<std::string_view, std::string>(key, tuple_value));
+  } else {
+    absl::StrAppend(&buffer_to_print, key, " saved as ", tuple_value, "\n");
+    // this should never be possible
+  }
+
+}
+
+//-------------------------------------------------------------------------------------
+//function called to process the tuple:
+std::string_view Code_gen::resolve_tuple_assign(const mmap_lib::Tree_index& tuple_assign_index) {
+
+  auto curr_index = lnast->get_first_child(tuple_assign_index);
+  std::vector<std::string_view> op_str_vect;
+
+  while(curr_index!=lnast->invalid_index()) {
+    const auto& curr_node_data = lnast->get_data(curr_index);
+    op_str_vect.push_back(Code_gen::get_node_name(curr_node_data));
+    curr_index = lnast->get_sibling_next(curr_index);
+  }
+  //op_str_vect now has all the children of the operation "op"
+
+  auto key = op_str_vect.front();
+  bool is_const = false;
+  std::string val = "";
+  const auto& op_node_data = lnast->get_data(tuple_assign_index);
+
+  if (key == "null") {
+    is_const = true;
+    val = op_str_vect.back();
+    //val = op_str_vect[1];
+  } else {
+    bool op_is_unary = false;
+    if(is_temp_var(key) && op_str_vect.size()==2) {
+      op_is_unary = true;
+    }
+
+    for (unsigned i = 1; i < op_str_vect.size(); i++) {
+      auto ref = op_str_vect[i];
+      auto             map_it = ref_map.find(ref);
+      if (map_it != ref_map.end()) {
+        if (std::count(map_it->second.begin(), map_it->second.end(), ' ')) {
+          ref = absl::StrCat("(", map_it->second, ")");
+        } else {
+          ref = map_it->second;
+        }
+       // fmt::print("map_it find: {} | {}\n", map_it->first, ref);
+      } else if (is_number(ref)) {
+        ref = process_number(ref);
+      }
+      // check if a number
+      if(op_is_unary) {absl::StrAppend(&val,lnast_to->debug_name_lang(op_node_data.type));}
+      absl::StrAppend(&val, ref);
+      if ((i+1) != op_str_vect.size() && !op_is_unary) {
+        absl::StrAppend(&val, " ", lnast_to->debug_name_lang(op_node_data.type), " ");
+      }
+    }
+  }
+
+  if(is_temp_var(key)) {
+    ref_map.insert(std::pair<std::string_view, std::string>(key, val));
+    return ("\n\nERROR:\n\t----------------UNEXPECTED TUPLE VALUE!--------------------\n\n");
+  } else if (is_const) {
+    return val;
+  } else {
+    std::string_view ret_tup_str = absl::StrCat (indent(), key, " ", lnast_to->debug_name_lang(op_node_data.type), " ", val);
+    return (ret_tup_str);
+  }
+
+}
 //-------------------------------------------------------------------------------------
 //Get the textual value of node. Eg., get "$a" from the node "ref, $a":
 std::string_view Code_gen::get_node_name(Lnast_node node) { return node.token.get_text(); }
