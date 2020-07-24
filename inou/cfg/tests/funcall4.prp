@@ -1,0 +1,6 @@
+%out.__bits = 3
+i = subin.__final_value
+res = sum(i)
+subin = (a = 3, b = 3)
+%out = res.o1 + res.o2
+
