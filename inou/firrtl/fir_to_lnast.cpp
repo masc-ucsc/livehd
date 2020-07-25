@@ -334,31 +334,23 @@ void Inou_firrtl::create_module_inst(Lnast& lnast, const firrtl::FirrtlPB_Statem
     auto port_bw = std::get<1>(name_bw_tup);
     auto port_dir = std::get<2>(name_bw_tup);
 
-    auto temp_var_name_bw = create_temp_var(lnast);
-    auto idx_dot_bw = lnast.add_child(parent_node, Lnast_node::create_dot(""));
-    lnast.add_child(idx_dot_bw, Lnast_node::create_ref(temp_var_name_bw));
+    //auto temp_var_name_bw = create_temp_var(lnast);
+    //auto idx_dot_bw = lnast.add_child(parent_node, Lnast_node::create_dot(""));
+    //lnast.add_child(idx_dot_bw, Lnast_node::create_ref(temp_var_name_bw));
+    std::string io_name;
     if (port_dir == 1) { // PORT_DIRECTION_IN
-      lnast.add_child(idx_dot_bw, Lnast_node::create_ref(inp_name));
+      io_name = absl::StrCat(inp_name, ".", port_name);
     } else if (port_dir == 2) {
-      lnast.add_child(idx_dot_bw, Lnast_node::create_ref(out_name));
+      io_name = absl::StrCat(out_name, ".", port_name);
     } else {
       I(false);
     }
 
-    size_t last = 0;
-    size_t next = 0;
-    while ((next = port_name.find(".", last)) != std::string::npos) {
-      //FIXME: Add in checking for "[" to capture selects
-      auto field_name = lnast.add_string(port_name.substr(last,next-last));
-      lnast.add_child(idx_dot_bw, Lnast_node::create_ref(field_name));
-      last = next + 1;
-    }
-    lnast.add_child(idx_dot_bw, Lnast_node::create_ref(lnast.add_string(port_name.substr(last))));
-    lnast.add_child(idx_dot_bw, Lnast_node::create_ref("__bits"));
+    auto dot_node = CreateDotsSelsFromStr(lnast, parent_node, io_name);
+    auto acc_name = AddAttrToDotSelNode(lnast, parent_node, dot_node, "__bits");
 
-    // At this point, bund_name is how we can access this specific submod IO
     auto idx_asg_bw = lnast.add_child(parent_node, Lnast_node::create_assign(""));
-    lnast.add_child(idx_asg_bw, Lnast_node::create_ref(temp_var_name_bw));
+    lnast.add_child(idx_asg_bw, Lnast_node::create_ref(acc_name));
     lnast.add_child(idx_asg_bw, Lnast_node::create_const(lnast.add_string(std::to_string(port_bw))));
   }
 }
@@ -1012,7 +1004,7 @@ std::string Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB_Expr
     flattened_str = absl::StrCat("%out_", flattened_str);
   } else if (alter_full_str[0] == '#') {
     flattened_str = absl::StrCat("#", flattened_str);
-  } else if (alter_full_str.find("__q_pin")) {
+  } else if (alter_full_str.find("__q_pin") != std::string::npos) {
     flattened_str = absl::StrCat(flattened_str, ".__q_pin");
   } else if (inst_to_mod_map.count(alter_full_str.substr(0, alter_full_str.find(".")))) {
     auto inst_name        = alter_full_str.substr(0, alter_full_str.find("."));
