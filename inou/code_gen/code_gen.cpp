@@ -97,6 +97,8 @@ void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
       do_tuple(curr_index);
     } else if (curr_node_data.type.is_select()) {
       do_select(curr_index);
+    } else if (curr_node_data.type.is_func_def()) {
+      do_func_def(curr_index);
     }
 
 
@@ -139,6 +141,67 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index) {
   } else {
     absl::StrAppend(&buffer_to_print, indent(), key, " ", lnast_to->debug_name_lang(assign_node_data.type), " ", (std::string)ref, lnast_to->stmt_sep());
   }
+}
+//-------------------------------------------------------------------------------------
+//Process the "func_def" node:Eg.:
+//2                    func_def :
+//3                           ref : func_xor
+//3                          cond : $valid
+//3                         stmts : ___SEQ1
+//4                             xor :
+//5                               ref : ___a
+//5                               ref : $a
+//5                               ref : $b
+//4                          assign :
+//5                               ref : %out
+//5                               ref : ___a
+//3                           ref : $a
+//3                           ref : $b
+//3                           ref : $valid
+//3                           ref : %out
+void Code_gen::do_func_def(const mmap_lib::Tree_index& func_def_node_index) {
+  fmt::print("node:func_def\n");
+  auto curr_index = lnast->get_first_child(func_def_node_index);
+  std::string_view func_name = Code_gen::get_node_name(lnast->get_data(curr_index));
+
+  curr_index = lnast->get_sibling_next(curr_index);
+  std::string cond_val = resolve_func_cond(curr_index);
+
+  auto stmt_index = lnast->get_sibling_next(curr_index);
+
+  curr_index = lnast->get_sibling_next(stmt_index);
+  std::string parameters;
+  while (curr_index!=lnast->invalid_index()) {
+    absl::StrAppend(&parameters, Code_gen::get_node_name(lnast->get_data(curr_index)), lnast_to->func_param_sep());
+    curr_index = lnast->get_sibling_next(curr_index);
+  }
+  parameters.pop_back();
+  parameters.pop_back();
+
+  absl::StrAppend(&buffer_to_print, lnast_to->func_begin(), lnast_to->func_name(func_name), lnast_to->param_start(), parameters, lnast_to->param_end(), lnast_to->print_cond(cond_val), lnast_to->func_stmt_strt());
+  indendation++;
+  do_stmts(stmt_index);
+  indendation--;
+  absl::StrAppend(&buffer_to_print, lnast_to->func_stmt_end(), lnast_to->func_end());
+}
+//-------------------------------------------------------------------------------------
+//Process the func-cond node:
+//cond node is generally either "true" -> nothing to be printed, true by default
+//or it is like ___x -> value of ___x must be resolved and "when <reolved ___x>" must be printed
+//or it is just the variable which must be printed as is
+std::string Code_gen::resolve_func_cond(const mmap_lib::Tree_index& func_cond_index) {
+  fmt::print("node:function cond\n");
+  const auto& curr_node_data = lnast->get_data(func_cond_index);
+  auto ref = get_node_name(curr_node_data);
+  if(is_temp_var(ref)) {
+    auto map_it = ref_map.find(ref);
+    if(map_it != ref_map.end()) {
+      ref = map_it->second;
+    }
+  } else if (ref == "true") {
+    ref = "";
+  }
+  return std::string(ref);
 }
 //-------------------------------------------------------------------------------------
 //Process the "if" node:
@@ -202,7 +265,7 @@ void Code_gen::do_if(const mmap_lib::Tree_index& if_node_index) {
 }
 
 //-------------------------------------------------------------------------------------
-//Process the operator (like and,or,etc.) node:
+//Process the if-cond node:
 void Code_gen::do_cond(const mmap_lib::Tree_index& cond_node_index) {
   fmt::print("node:cond\n");
   const auto& curr_node_data = lnast->get_data(cond_node_index);
@@ -214,6 +277,7 @@ void Code_gen::do_cond(const mmap_lib::Tree_index& cond_node_index) {
   absl::StrAppend(&buffer_to_print, ref);
   absl::StrAppend(&buffer_to_print, lnast_to->end_cond());
 }
+
 //-------------------------------------------------------------------------------------
 //Process the operator (like and,or,etc.) node:
 void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
