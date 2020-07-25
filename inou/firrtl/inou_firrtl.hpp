@@ -31,6 +31,7 @@ protected:
   void     init_reg_ref_dots(Lnast &lnast, const std::string &id, const std::string_view clock, const std::string_view reset,
                              const std::string_view init, uint32_t bitwidth, Lnast_nid &parent_node);
   void     create_module_inst(Lnast &lnast, const firrtl::FirrtlPB_Statement_Instance &inst, Lnast_nid &parent_node);
+  std::string_view AddAttrToDotSelNode(Lnast& lnast, Lnast_nid& parent_node, Lnast_nid& dot_sel_node, std::string attr);
 
   void HandleMuxAssign(Lnast &lnast, const firrtl::FirrtlPB_Expression &expr, Lnast_nid &parent_node,
                        const std::string &lhs_of_asg);
@@ -57,8 +58,8 @@ protected:
   void AttachExprStrToNode(Lnast &lnast, const std::string_view access_str, Lnast_nid &parent_node);
 
   std::string HandleBundVecAcc(Lnast &lnast, const firrtl::FirrtlPB_Expression expr, Lnast_nid &parent_node, const bool is_rhs);
-  std::string CreateNameStack(Lnast &ln, Lnast_nid &parent_node, const firrtl::FirrtlPB_Expression &expr,
-                              std::stack<std::string> &names);
+  Lnast_nid CreateDotsSelsFromStr(Lnast& ln, Lnast_nid& parent_node, std::string& flattened_str);
+  std::string FlattenExpression(Lnast &ln, Lnast_nid &parent_node, const firrtl::FirrtlPB_Expression &expr);
 
   // Deconstructing Protobuf Hierarchy
   void create_io_list(const firrtl::FirrtlPB_Type &type, uint8_t dir, const std::string &port_id,
