@@ -17,7 +17,6 @@ void Inou_firrtl::toFIRRTL(Eprp_var &var) {
   auto                      top_msg = circuit->add_top();
   bool first = true;
   for (const auto &lnast : var.lnasts) {
-    // lnast->ssa_trans();//FIXME: Do I need to do SSA?
     p.do_tofirrtl(lnast, circuit);
     if (first) {
       top_msg->set_name(
@@ -76,24 +75,14 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
   } else if (ntype.is_not()) {
     auto fstmt = pos_to_add_to == 0 ? when->add_consequent() : when->add_otherwise();
     process_ln_not_op(ln, lnidx, fstmt);
-    /*} else if (ntype.is_tuple_add()) {
-      process_ast_tuple_add_op(dfg, lnidx);
-    } else if (ntype.is_tuple_get()) {
-      process_ast_tuple_get_op(dfg, lnidx);
-    } else if (ntype.is_tuple_phi_add()) {
-      process_ast_tuple_phi_add_op(dfg, lnidx);
-    } else if (ntype.is_select()) {
+    /*} else if (ntype.is_select()) {
       I(false); // should has been converted to tuple chain
     } else if (ntype.is_logical_op()) {
       process_ast_logical_op(dfg, lnidx);
     } else if (ntype.is_as()) {
       process_ast_as_op(dfg, lnidx);
-    } else if (ntype.is_label()) {
-      process_ast_label_op(dfg, lnidx);
     } else if (ntype.is_tuple()) {
-      process_ast_tuple_struct(dfg, lnidx);
-    } else if (ntype.is_tuple_concat()) {
-      process_ast_concat_op(dfg, lnidx);*/
+      process_ast_tuple_struct(dfg, lnidx);*/
   } else if (ntype.is_if()) {
     add_cstmts(ln, lnidx, when, pos_to_add_to);
     auto nested_when_stmt = process_ln_if_op(ln, lnidx);
@@ -130,14 +119,7 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
         process_tup_asg(ln, child, tup_name, fstmt);
       }
     }
-  } /*else if (ntype.is_func_def()) {
-    process_ast_func_def_op(dfg, lnidx);
-  } else if (ntype.is_for()) {
-    process_ast_for_op(dfg, lnidx);
-  } else if (ntype.is_while()) {
-    process_ast_while_op(dfg, lnidx);
-  }*/
-  else if (ntype.is_invalid()) {
+  } else if (ntype.is_invalid()) {
     return;
   } else if (ntype.is_const()) {
     I(ln.get_name(lnidx) == "default_const");
@@ -154,9 +136,6 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
 
 /* TODO:
  *   dots (needed for signedness/subgraphs/pick)
- *   nodes needed for join_op
- *   nodes needed for pick_op: range_op bit_select
- *   nodes needed for subgraphs
  */
 void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::FirrtlPB_Module_UserModule *umod) {
   const auto ntype = ln.get_data(lnidx).type;
@@ -174,24 +153,14 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
   } else if (ntype.is_not()) {
     auto fstmt = umod->add_statement();
     process_ln_not_op(ln, lnidx, fstmt);
-    /*} else if (ntype.is_tuple_add()) {
-      process_ast_tuple_add_op(dfg, lnidx);
-    } else if (ntype.is_tuple_get()) {
-      process_ast_tuple_get_op(dfg, lnidx);
-    } else if (ntype.is_tuple_phi_add()) {
-      process_ast_tuple_phi_add_op(dfg, lnidx);
-    } else if (ntype.is_select()) {
-      I(false); // should has been converted to tuple chain
-    } else if (ntype.is_logical_op()) {
-      process_ast_logical_op(dfg, lnidx);
-    } else if (ntype.is_as()) {
-      process_ast_as_op(dfg, lnidx);
-    } else if (ntype.is_label()) {
-      process_ast_label_op(dfg, lnidx);
-    } else if (ntype.is_tuple()) {
-      process_ast_tuple_struct(dfg, lnidx);
-    } else if (ntype.is_tuple_concat()) {
-      process_ast_concat_op(dfg, lnidx);*/
+  /*} else if (ntype.is_select()) {
+    I(false); // should has been converted to tuple chain
+  } else if (ntype.is_logical_op()) {
+    process_ast_logical_op(dfg, lnidx);
+  } else if (ntype.is_as()) {
+    process_ast_as_op(dfg, lnidx);
+  } else if (ntype.is_tuple()) {
+    process_ast_tuple_struct(dfg, lnidx);*/
   } else if (ntype.is_if()) {
     add_cstmts(ln, lnidx, umod);
     auto when_stmt = process_ln_if_op(ln, lnidx);
@@ -224,14 +193,7 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
         process_tup_asg(ln, child, tup_name, fstmt);
       }
     }
-  }/*else if (ntype.is_func_def()) {
-    process_ast_func_def_op(dfg, lnidx);
-  } else if (ntype.is_for()) {
-    process_ast_for_op(dfg, lnidx);
-  } else if (ntype.is_while()) {
-    process_ast_while_op(dfg, lnidx);
-  }*/
-  else if (ntype.is_invalid()) {
+  } else if (ntype.is_invalid()) {
     return;
   } else if (ntype.is_const()) {
     I(ln.get_name(lnidx) == "default_const");
@@ -262,21 +224,6 @@ bool Inou_firrtl::process_ln_assign_op(Lnast &ln, const Lnast_nid &lnidx_assign,
       return false;
     }
   }
-
-  /*if (dot_map.contains(ln.get_name(c1))) {
-    auto pair = dot_map[ln.get_name(c1)];
-    auto tup_name = ln.get_name(pair.first);
-    if (wire_rename_map.contains(tup_name)) {
-      tup_name = wire_rename_map[tup_name];
-    }
-    auto field_name = ln.get_name(pair.second);
-
-    auto subfield_expr = make_subfield_expr(absl::StrCat(tup_name, ".", field_name));
-    firrtl::FirrtlPB_Expression *expr = new firrtl::FirrtlPB_Expression();
-    expr->set_allocated_sub_field(subfield_expr);
-    make_assignment(ln, c0, expr, fstmt);
-    return true;
-  }*/
 
   // Form expression that holds RHS contents.
   firrtl::FirrtlPB_Expression *rhs_expr = new firrtl::FirrtlPB_Expression();
@@ -482,7 +429,7 @@ firrtl::FirrtlPB_Statement_When *Inou_firrtl::process_ln_if_op(Lnast &ln, const 
     } else if (ntype.is_cstmts()) {
       continue;
     } else {
-      I(false);  // FIXME->hunter: Should phi or anything else be acceptable here?
+      I(false);
     }
   }
 
