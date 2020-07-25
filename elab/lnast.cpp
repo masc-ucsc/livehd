@@ -276,28 +276,28 @@ void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid)
   auto &dot_lrhs_table  =  dot_lrhs_tables[psts_nid];
 
 
-  auto c0_dot      = get_first_child(dot_nid); //c0 = intermediate target
-  auto c1_dot      = get_sibling_next(c0_dot);
-  auto c2_dot      = get_sibling_next(c1_dot);
-
   if (is_lhs(psts_nid, dot_nid)) {
     auto paired_assign_nid = dot_lrhs_table[dot_nid].second;
+    ref_data(paired_assign_nid)->type = Lnast_ntype::create_invalid();
+    ref_data(dot_nid)->type = Lnast_ntype::create_tuple_add();
     auto c0_assign = get_first_child(paired_assign_nid);
     auto c1_assign = get_sibling_next(c0_assign);
-    auto c2_assign = add_child(paired_assign_nid, Lnast_node(get_type(c1_assign), get_token(c1_assign), get_subs(c1_assign)));
 
-    // change node semantic from dot/sel->tuple add; assign->invalid
-    ref_data(paired_assign_nid)->type = Lnast_ntype::create_tuple_add();
-    ref_data(c0_assign)->token = get_data(c1_dot).token;
-    ref_data(c1_assign)->token = get_data(c2_dot).token;
-    ref_data(c0_assign)->type  = get_data(c1_dot).type;
-    ref_data(c1_assign)->type  = get_data(c2_dot).type;
-    ref_data(c0_assign)->subs  = get_data(c1_dot).subs;
-    ref_data(c1_assign)->subs  = get_data(c2_dot).subs;
-
-    ref_data(dot_nid)->type = Lnast_ntype::create_invalid();
-    auto c1_assign_name = get_name(c1_assign);
-    tuple_var_table.insert(c1_assign_name); //insert new tuple name
+    for (auto child : children(dot_nid)) {
+      if (child == get_last_child(dot_nid)){
+        ref_data(child)->token = get_data(c1_assign).token;
+        ref_data(child)->type  = get_data(c1_assign).type;
+        ref_data(child)->subs  = get_data(c1_assign).subs;
+      } else {
+        auto child_sibling = get_sibling_next(child);
+        ref_data(child)->token = get_data(child_sibling).token;
+        ref_data(child)->type  = get_data(child_sibling).type;
+        ref_data(child)->subs  = get_data(child_sibling).subs;
+      }
+    }
+    
+    auto c0_dot_name = get_name(get_first_child(dot_nid));
+    tuple_var_table.insert(c0_dot_name); //insert new tuple name
 
   } else { // is rhs
     // change node semantic from dot/set->tuple_get
@@ -325,10 +325,8 @@ void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid)
 //                                            c2 = tuple field
 //  To know more detail, see my note
 //  https://drive.google.com/open?id=16DSzAPf0GzuxYptxkZzdPKJDDP8DxnBz
-//  one thing different from the figure is that instead of
-//  (dot->tupadd, assign->invalid), the final design change to (dot->invalid, assign->tupadd)
 
-// FIXME->sh: need to add condition nid parameter
+
 void Lnast::dot2hier_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid, const Lnast_nid &cond_nid, bool is_else_sts) {
   auto &dot_lrhs_table  =  dot_lrhs_tables[psts_nid];
 
