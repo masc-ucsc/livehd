@@ -10,10 +10,16 @@
 #include "slang/syntax/SyntaxPrinter.h"
 #include "slang/syntax/SyntaxTree.h"
 
-struct Lnast_visitor : public slang::ASTVisitor<Lnast_visitor, false, false> {
+class Lnast_visitor : public slang::ASTVisitor<Lnast_visitor, false, false> {
+protected:
+  slang::Compilation& compilation;
+  const size_t& numErrors;
+  flat_hash_set<const slang::InstanceBodySymbol*> visitedInstanceBodies;
+  uint32_t errorLimit;
+  uint32_t hierarchyDepth = 0;
 
-  Lnast_visitor(slang::Compilation& _compilation, const size_t& _numErrors, uint32_t _errorLimit) :
-    compilation(_compilation), numErrors(_numErrors), errorLimit(_errorLimit) {}
+public:
+  Lnast_visitor(slang::Compilation& _compilation, const size_t& _numErrors, uint32_t _errorLimit);
 
   template<typename T>
     void handle(const T& symbol) {
@@ -34,7 +40,8 @@ struct Lnast_visitor : public slang::ASTVisitor<Lnast_visitor, false, false> {
 
         if constexpr (std::is_same_v<slang::ParameterSymbol, T> ||
             std::is_same_v<slang::EnumValueSymbol, T>) {
-          symbol.getValue();
+          const auto &svint = symbol.getValue().integer();
+          fmt::print("parameter:{} value val:{} bits:{}\n", symbol.name, *svint.getRawPtr(), svint.getActiveBits());
         }
 
         for (auto attr : compilation.getAttributes(symbol))
@@ -48,63 +55,16 @@ struct Lnast_visitor : public slang::ASTVisitor<Lnast_visitor, false, false> {
       return true;
     }
 
-  void handle(const slang::ExplicitImportSymbol& symbol) {
-    if (!handleDefault(symbol))
-      return;
-    symbol.importedSymbol();
-  }
-
-  void handle(const slang::WildcardImportSymbol& symbol) {
-    if (!handleDefault(symbol))
-      return;
-    symbol.getPackage();
-  }
-
-  void handle(const slang::ContinuousAssignSymbol& symbol) {
-    if (!handleDefault(symbol))
-      return;
-    symbol.getAssignment();
-  }
-
-  void handle(const slang::InstanceSymbol& symbol) {
-    if (numErrors > errorLimit)
-      return;
-
-    const auto &def = symbol.getDefinition();
-    fmt::print("definition:{}\n", def.name);
-
-    symbol.resolvePortConnections();
-    for (auto attr : compilation.getAttributes(symbol))
-      attr->getValue();
-
-    // Instance bodies are all the same, so if we've visited this one
-    // already don't bother doing it again.
-    if (!visitedInstanceBodies.emplace(&symbol.body).second)
-      return;
-
-    // In order to avoid infinitely recursive instantiations, keep track
-    // of how deep we are in the hierarchy tree and report an error if we
-    // get too deep.
-    if (hierarchyDepth > 100) {
-      fmt::print("ERROR: recursive fcall\n");
-      return;
-    }
-
-    hierarchyDepth++;
-    visit(symbol.body);
-    hierarchyDepth--;
-  }
-
-  void handle(const slang::GenerateBlockSymbol& symbol) {
-    if (!symbol.isInstantiated)
-      return;
-    handleDefault(symbol);
-  }
-
-  slang::Compilation& compilation;
-  const size_t& numErrors;
-  flat_hash_set<const slang::InstanceBodySymbol*> visitedInstanceBodies;
-  uint32_t errorLimit;
-  uint32_t hierarchyDepth = 0;
+  void handle(const slang::ExplicitImportSymbol& symbol);
+  void handle(const slang::WildcardImportSymbol& symbol);
+  void handle(const slang::IntegerLiteral& expr);
+  void handle(const slang::VariableDeclStatement& stmt);
+  void handle(const slang::ContinuousAssignSymbol& symbol);
+	void handle(const slang::AssignmentExpression& expr);
+  void handle(const slang::ExpressionStatement& expr);
+	void handle(const slang::StatementBlockSymbol& symbol);
+	void handle(const slang::ProceduralBlockSymbol& expr);
+  void handle(const slang::InstanceSymbol& symbol);
+  void handle(const slang::GenerateBlockSymbol& symbol);
 };
 

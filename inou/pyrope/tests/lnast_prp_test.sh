@@ -9,10 +9,10 @@ pts='lhs_wire lhs_wire2 scalar_tuple attr_set
      logic out_ssa if2 if ssa_rhs bits_rhs counter counter_nested_if
      '
 
+#make sure to call Pyrope_compile() in the end of script
 pts_hier='sum funcall'
-# pt_hier2='sum2 funcall2' #make sure to call Pyrope_compile() in the end of script
-  
-# pts='funcall2'
+# pts_hier2='sum funcall4'   
+
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -216,7 +216,7 @@ Pyrope_compile () {
 
 Pyrope_compile "$pts" 
 Pyrope_compile "$pts_hier" "hier"
-# Pyrope_compile "$pts_hier2" ""
+# Pyrope_compile "$pts_hier2" "hier"
 
 
 rm -f *.v
