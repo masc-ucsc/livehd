@@ -48,7 +48,7 @@ do
     echo "LGraph -> LNAST -> LGraph"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.lgraph_to_lnast |> inou.lnast_dfg.tolg path:lgdb2"
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.lgraph_to_lnast |> lnast.dump |> inou.lnast_dfg.tolg path:lgdb2"
     if [ $? -eq 0 ]; then
       echo "Successfully went from LG -> LN -> LG: ${pt}.v"
     else
@@ -56,75 +56,22 @@ do
       exit 1
     fi
 
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "Tuple Chain Resolve"
-    echo "----------------------------------------------------"
+    #echo ""
+    #echo ""
+    #echo ""
+    #echo "----------------------------------------------------"
+    #echo "Compiler Optimizations"
+    #echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.lnast_dfg.resolve_tuples |> lgraph.dump"
-    if [ $? -eq 0 ]; then
-      echo "Successfully resolve the tuple chain in new lg: ${pt}.v"
-    else
-      echo "ERROR: Pyrope compiler failed on new lg: resolve tuples, testcase: ${pt}.v"
-      exit 1
-    fi
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.newlg.prebw.or.dot
-
-
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "Bitwidth Optimization"
-    echo "----------------------------------------------------"
-
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> pass.bitwidth |> lgraph.dump"
-    if [ $? -eq 0 ]; then
-      echo "Successfully optimize design bitwidth on new lg: ${pt}.v"
-    else
-      echo "ERROR: Pyrope compiler failed on new lg: bitwidth optimization, testcase: ${pt}.v"
-      exit 1
-    fi
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.or.newlg.dot
-
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "Reduced_Or_Op Elimination"
-    echo "----------------------------------------------------"
-
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.lnast_dfg.assignment_or_elimination"
-    if [ $? -eq 0 ]; then
-      echo "Successfully eliminate all reduced_or_op in new lg: ${pt}.v"
-    else
-      echo "ERROR: Pyrope compiler failed on new lg: assignment_or_elimination, testcase: ${pt}.v"
-      exit 1
-    fi
-
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.newlg.dot
-
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "Dead Code Elimination"
-    echo "----------------------------------------------------"
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.lnast_dfg.dce"
-    if [ $? -eq 0 ]; then
-      echo "Successfully perform dead code elimination: ${pt}.v"
-    else
-      echo "ERROR: Pyrope compiler failed on new lg: dead code elimination, testcase: ${pt}.v"
-      exit 1
-    fi
-
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.newlg.dce.dot
+    #${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> pass.cprop |> pass.bitwidth |> pass.cprop"
+    #if [ $? -eq 0 ]; then
+    #  echo "Successfully resolve the tuple chain in new lg: ${pt}.v"
+    #else
+    #  echo "ERROR: Pyrope compiler failed on new lg: resolve tuples, testcase: ${pt}.v"
+    #  exit 1
+    #fi
+    #${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
+    #mv ${pt}.dot ${pt}.newlg.dot
 
     echo ""
     echo ""
