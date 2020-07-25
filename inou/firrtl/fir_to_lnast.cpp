@@ -3,6 +3,7 @@
 
 #include <fstream>
 #include <iostream>
+#include <queue>
 
 #include "firrtl.pb.h"
 #include "google/protobuf/util/time_util.h"
@@ -88,8 +89,8 @@ std::string Inou_firrtl::get_full_name(const std::string& term, const bool is_rh
   }
 }
 
-// If the bitwidth is specified, in LNAST we have to create a new variable which represents
-//  the number of bits that a variable will have.
+/* If the bitwidth is specified, in LNAST we have to create a new variable
+ *  which represents the number of bits that a variable will have. */
 void Inou_firrtl::create_bitwidth_dot_node(Lnast& lnast, uint32_t bitwidth, Lnast_nid& parent_node, const std::string& _port_id) {
   std::string port_id{_port_id};  // FIXME: Instead of erase, use a string_view and change lenght (much faster, not need to do mem)
 
@@ -100,63 +101,26 @@ void Inou_firrtl::create_bitwidth_dot_node(Lnast& lnast, uint32_t bitwidth, Lnas
     return;
   }
 
-  if (port_id.find(".") == std::string::npos) {
-    // No tuple/bundles used in this port, so no need for extra dot nodes.
+  auto node = CreateDotsSelsFromStr(lnast, parent_node, port_id);
+
+  std::string_view bit_acc_name;
+  if (lnast.get_type(node).is_select()) {
+    auto access_name = lnast.get_name(lnast.get_first_child(node));
     auto temp_var_name = create_temp_var(lnast);
-
-    auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_dot("dot"));
+    auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_dot("new"));
     lnast.add_child(idx_dot, Lnast_node::create_ref(temp_var_name));
-    lnast.add_child(idx_dot, Lnast_node::create_ref(lnast.add_string(port_id)));
+    lnast.add_child(idx_dot, Lnast_node::create_ref(access_name));
     lnast.add_child(idx_dot, Lnast_node::create_ref("__bits"));
-
-    auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
-    lnast.add_child(idx_asg, Lnast_node::create_ref(temp_var_name));
-    lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(to_string(bitwidth))));
+    bit_acc_name = temp_var_name;
   } else {
-    /* This is a bundle so I need to create dot nodes to access the correct bundle member.
-     * So instead what we do is take the bundle name and the part we want to access and
-     * make a dot for that node, over and over until we finally reach an element, not a
-     * bundle (which we then assign the __bits to). */
-    auto tup_name = lnast.add_string(port_id.substr(0, port_id.find(".")));
-    port_id.erase(0, port_id.find(".") + 1);
-    std::string_view temp_var_name;
-    while (port_id.find(".") != std::string::npos) {
-      std::string tup_attr = port_id.substr(0, port_id.find("."));
-      port_id.erase(0, port_id.find(".") + 1);
-      temp_var_name = create_temp_var(lnast);
-
-      auto idx_dot_i = lnast.add_child(parent_node, Lnast_node::create_dot("dot"));
-      lnast.add_child(idx_dot_i, Lnast_node::create_ref(temp_var_name));
-      lnast.add_child(idx_dot_i, Lnast_node::create_ref(tup_name));
-      if (isdigit(tup_attr[0])) {
-        lnast.add_child(idx_dot_i, Lnast_node::create_const(lnast.add_string(tup_attr)));
-      } else {
-        lnast.add_child(idx_dot_i, Lnast_node::create_ref(lnast.add_string(tup_attr)));
-      }
-      tup_name = temp_var_name;
-    }
-
-    temp_var_name = create_temp_var(lnast);
-    auto idx_dot  = lnast.add_child(parent_node, Lnast_node::create_dot("dot"));
-    lnast.add_child(idx_dot, Lnast_node::create_ref(temp_var_name));
-    lnast.add_child(idx_dot, Lnast_node::create_ref(tup_name));
-    if (isdigit(port_id[0])) {
-      lnast.add_child(idx_dot, Lnast_node::create_const(lnast.add_string(port_id)));  // port_id is stripped down
-    } else {
-      lnast.add_child(idx_dot, Lnast_node::create_ref(lnast.add_string(port_id)));  // port_id is stripped down
-    }
-
-    // Now that we've gotten all the dot nodes to access the right thing, now we do the __bits.
-    auto temp_var_name_b = create_temp_var(lnast);
-    auto idx_dot_b       = lnast.add_child(parent_node, Lnast_node::create_dot("dot"));
-    lnast.add_child(idx_dot_b, Lnast_node::create_ref(temp_var_name_b));
-    lnast.add_child(idx_dot_b, Lnast_node::create_ref(temp_var_name));
-    lnast.add_child(idx_dot_b, Lnast_node::create_ref("__bits"));
-
-    auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
-    lnast.add_child(idx_asg, Lnast_node::create_ref(temp_var_name_b));
-    lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(to_string(bitwidth))));
+    //node.is_dot()
+    lnast.add_child(node, Lnast_node::create_ref("__bits"));
+    bit_acc_name = lnast.get_name(lnast.get_first_child(node));
   }
+
+  auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("new"));
+  lnast.add_child(idx_asg, Lnast_node::create_ref(bit_acc_name));
+  lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(to_string(bitwidth))));
 }
 
 uint32_t Inou_firrtl::get_bit_count(const firrtl::FirrtlPB_Type type) {
@@ -242,7 +206,7 @@ void Inou_firrtl::init_reg_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type,
     }
     case firrtl::FirrtlPB_Type::kVectorType: {  // Vector Type
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
-        init_reg_dots(lnast, type.vector_type().type(), absl::StrCat(id, ".", i), clock, reset, init, parent_node);
+        init_reg_dots(lnast, type.vector_type().type(), absl::StrCat(id, "[", i, "]"), clock, reset, init, parent_node);
       }
       break;
     }
@@ -273,46 +237,6 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id, const 
   std::string id_for_qpin = id.substr(1, id.length() - 1);
 
   // The first step is to get a string that allows us to access the register.
-  std::string_view accessor_name;
-  if (id.find(".") == std::string::npos) {
-    // No tuple/bundles used in this port, so no need for extra dot nodes.
-    accessor_name = lnast.add_string(id);
-  } else {
-    /* This is a bundle so I need to create dot nodes to access the correct bundle member.
-     * So instead what we do is take the bundle name and the part we want to access and
-     * make a dot for that node, over and over until we finally reach an element, not a
-     * bundle (which we then assign the __bits to). */
-    auto tup_name = lnast.add_string(id.substr(0, id.find(".")));
-    id.erase(0, id.find(".") + 1);
-    std::string_view temp_var_name;
-    while (id.find(".") != std::string::npos) {
-      std::string tup_attr = id.substr(0, id.find("."));
-      id.erase(0, id.find(".") + 1);
-      temp_var_name = create_temp_var(lnast);
-
-      auto idx_dot_i = lnast.add_child(parent_node, Lnast_node::create_dot("dot"));
-      lnast.add_child(idx_dot_i, Lnast_node::create_ref(temp_var_name));
-      lnast.add_child(idx_dot_i, Lnast_node::create_ref(tup_name));
-      if (isdigit(tup_attr[0])) {
-        lnast.add_child(idx_dot_i, Lnast_node::create_const(lnast.add_string(tup_attr)));
-      } else {
-        lnast.add_child(idx_dot_i, Lnast_node::create_ref(lnast.add_string(tup_attr)));
-      }
-      tup_name = temp_var_name;
-    }
-
-    temp_var_name = create_temp_var(lnast);
-    auto idx_dot  = lnast.add_child(parent_node, Lnast_node::create_dot("dot"));
-    lnast.add_child(idx_dot, Lnast_node::create_ref(temp_var_name));
-    lnast.add_child(idx_dot, Lnast_node::create_ref(tup_name));
-    if (isdigit(id[0])) {
-      lnast.add_child(idx_dot, Lnast_node::create_const(lnast.add_string(id)));  // id is stripped down
-    } else {
-      lnast.add_child(idx_dot, Lnast_node::create_ref(lnast.add_string(id)));  // id is stripped down
-    }
-
-    accessor_name = temp_var_name;
-  }
 
   /* Now that we have a name to access it by, we can create the
    * relevant dot nodes like: __clk_pin, __q_pin, __bits,
@@ -320,28 +244,20 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id, const 
 
   // Specify __clk_pin (all registers should have this set)
   /*I((std::string)clock != "");
-  auto temp_var_name_c = create_temp_var(lnast);
-
-  auto idx_dot_c = lnast.add_child(parent_node, Lnast_node::create_dot("dot"));
-  lnast.add_child(idx_dot_c, Lnast_node::create_ref(temp_var_name_c));
-  lnast.add_child(idx_dot_c, Lnast_node::create_ref(accessor_name));
-  lnast.add_child(idx_dot_c, Lnast_node::create_ref("__clk_pin"));
+  auto dot_node_c = CreateDotsSelsFromStr(lnast, parent_node, id);
+  auto acc_name_c = AddAttrToDotSelNode(lnast, parent_node, dot_node_c, "__clk_pin");
 
   auto idx_asg_c = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
-  lnast.add_child(idx_asg_c, Lnast_node::create_ref(temp_var_name_c));
+  lnast.add_child(idx_asg_c, Lnast_node::create_ref(acc_name_c));
   lnast.add_child(idx_asg_c, Lnast_node::create_ref(clock));*/
 
   // Specify __bits, if bitwidth is explicit
   if (bitwidth > 0) {
-    auto temp_var_name_b = create_temp_var(lnast);
-
-    auto idx_dot_b = lnast.add_child(parent_node, Lnast_node::create_dot("dot"));
-    lnast.add_child(idx_dot_b, Lnast_node::create_ref(temp_var_name_b));
-    lnast.add_child(idx_dot_b, Lnast_node::create_ref(accessor_name));
-    lnast.add_child(idx_dot_b, Lnast_node::create_ref("__bits"));
+    auto dot_node_bw = CreateDotsSelsFromStr(lnast, parent_node, id);
+    auto acc_name_bw = AddAttrToDotSelNode(lnast, parent_node, dot_node_bw, "__bits");
 
     auto idx_asg_b = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
-    lnast.add_child(idx_asg_b, Lnast_node::create_ref(temp_var_name_b));
+    lnast.add_child(idx_asg_b, Lnast_node::create_ref(acc_name_bw));
     lnast.add_child(idx_asg_b, Lnast_node::create_const(lnast.add_string(to_string(bitwidth))));
   }
 
@@ -352,19 +268,33 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id, const 
 
   /* Since FIRRTL designs access register qpin, I need to do:
    * #reg_name.__q_pin. The name will always be ___reg_name__q_pin */
-  auto qpin_var_name_temp = create_temp_var(lnast);
-  ;
   replace(id_for_qpin.begin(), id_for_qpin.end(), '.', '_');
+  auto dot_node_q = CreateDotsSelsFromStr(lnast, parent_node, id);
+  auto acc_name_q = AddAttrToDotSelNode(lnast, parent_node, dot_node_q, "__q_pin");
 
-  auto idx_dot_qp = lnast.add_child(parent_node, Lnast_node::create_dot("dot"));
-  lnast.add_child(idx_dot_qp, Lnast_node::create_ref(qpin_var_name_temp));
-  lnast.add_child(idx_dot_qp, Lnast_node::create_ref(accessor_name));
-  lnast.add_child(idx_dot_qp, Lnast_node::create_ref("__q_pin"));
-
-  // Required to identify ___regname__q_pin as RHS.
   auto idx_asg_qp = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
   lnast.add_child(idx_asg_qp, Lnast_node::create_ref(lnast.add_string(absl::StrCat("___", id_for_qpin, "__q_pin"))));
-  lnast.add_child(idx_asg_qp, Lnast_node::create_ref(qpin_var_name_temp));
+  lnast.add_child(idx_asg_qp, Lnast_node::create_ref(acc_name_q));
+}
+
+std::string_view Inou_firrtl::AddAttrToDotSelNode(Lnast& lnast, Lnast_nid& parent_node, Lnast_nid& dot_sel_node, std::string attr) {
+  auto ntype = lnast.get_type(dot_sel_node);
+  I(ntype.is_select() || ntype.is_dot());
+  std::string_view acc_name;
+  if (ntype.is_select()) {
+    auto interm_name = lnast.get_name(lnast.get_first_child(dot_sel_node));
+    auto temp_var_name = create_temp_var(lnast);
+    auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_dot("new"));
+    lnast.add_child(idx_dot, Lnast_node::create_ref(temp_var_name));
+    lnast.add_child(idx_dot, Lnast_node::create_ref(interm_name));
+    lnast.add_child(idx_dot, Lnast_node::create_ref(lnast.add_string(attr)));
+    acc_name = temp_var_name;
+  } else {
+    //node.is_dot()
+    lnast.add_child(dot_sel_node, Lnast_node::create_ref(lnast.add_string(attr)));
+    acc_name = lnast.get_name(lnast.get_first_child(dot_sel_node));
+  }
+  return acc_name;
 }
 
 /* When a module instance is created in FIRRTL, we need to do the same
@@ -373,7 +303,7 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id, const 
 void Inou_firrtl::create_module_inst(Lnast& lnast, const firrtl::FirrtlPB_Statement_Instance& inst, Lnast_nid& parent_node) {
   /*            dot                       assign                      fn_call
    *      /      |        \                / \                     /     |     \
-   * ___F0 inp_[inst_name] __final_value  F1 ___F0  out_[inst_name] [mod_name]  F1 */
+   * ___F0 inp_[inst_name] __last_value   F1 ___F0  out_[inst_name] [mod_name]  F1 */
   auto temp_var_name  = create_temp_var(lnast);
   auto temp_var_name2 = lnast.add_string(absl::StrCat("F", std::to_string(temp_var_count)));
   temp_var_count++;
@@ -383,7 +313,7 @@ void Inou_firrtl::create_module_inst(Lnast& lnast, const firrtl::FirrtlPB_Statem
   auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_dot(""));
   lnast.add_child(idx_dot, Lnast_node::create_ref(temp_var_name));
   lnast.add_child(idx_dot, Lnast_node::create_ref(inp_name));
-  lnast.add_child(idx_dot, Lnast_node::create_ref("__final_value"));
+  lnast.add_child(idx_dot, Lnast_node::create_ref("__last_value"));
 
   auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
   lnast.add_child(idx_asg, Lnast_node::create_ref(temp_var_name2));
@@ -404,67 +334,29 @@ void Inou_firrtl::create_module_inst(Lnast& lnast, const firrtl::FirrtlPB_Statem
     auto port_bw = std::get<1>(name_bw_tup);
     auto port_dir = std::get<2>(name_bw_tup);
 
-    /* Check to see if this specific submodule IO is a part of a
-     * bundle. If it is, we need to create DOT nodes to access
-     * that nested field. Otherwise, just use field name. */
-    std::string_view bund_name;
-    if (port_name.find(".") == std::string::npos) {
-      auto temp_var_name_i = create_temp_var(lnast);
-      auto field_name = lnast.add_string(port_name);
-
-      auto idx_dot_i = lnast.add_child(parent_node, Lnast_node::create_dot(""));
-      lnast.add_child(idx_dot_i, Lnast_node::create_ref(temp_var_name_i));
-      if (port_dir == 1) { // PORT_DIRECTION_IN
-        lnast.add_child(idx_dot_i, Lnast_node::create_ref(inp_name));
-      } else if (port_dir == 2) {
-        lnast.add_child(idx_dot_i, Lnast_node::create_ref(out_name));
-      } else {
-        I(false);
-      }
-      lnast.add_child(idx_dot_i, Lnast_node::create_ref(field_name));
-      bund_name = temp_var_name_i;
-
-    } else {
-      size_t last = 0;
-      size_t next = 0;
-      bool first = true;
-      while ((next = port_name.find(".", last)) != std::string::npos) {
-        auto field_name = lnast.add_string(port_name.substr(last,next-last));
-        auto temp_var_name_i = create_temp_var(lnast);
-        if (first) {
-          auto idx_dot_i = lnast.add_child(parent_node, Lnast_node::create_dot(""));
-          lnast.add_child(idx_dot_i, Lnast_node::create_ref(temp_var_name_i));
-          if (port_dir == 1) { // PORT_DIRECTION_IN
-            lnast.add_child(idx_dot_i, Lnast_node::create_ref(inp_name));
-          } else if (port_dir == 2) {
-            lnast.add_child(idx_dot_i, Lnast_node::create_ref(out_name));
-          } else {
-            I(false);
-          }
-          lnast.add_child(idx_dot_i, Lnast_node::create_ref(field_name));
-
-        } else {
-          auto idx_dot_i = lnast.add_child(parent_node, Lnast_node::create_dot(""));
-          lnast.add_child(idx_dot_i, Lnast_node::create_ref(temp_var_name_i));
-          lnast.add_child(idx_dot_i, Lnast_node::create_ref(bund_name));
-          if(isdigit(field_name[0])) {
-            lnast.add_child(idx_dot_i, Lnast_node::create_const(field_name));
-          } else {
-            lnast.add_child(idx_dot_i, Lnast_node::create_ref(field_name));
-          }
-        }
-        bund_name = temp_var_name_i;
-        last = next + 1;
-      }
-    }
-    // At this point, bund_name is how we can access this specific submod IO
-
     auto temp_var_name_bw = create_temp_var(lnast);
     auto idx_dot_bw = lnast.add_child(parent_node, Lnast_node::create_dot(""));
     lnast.add_child(idx_dot_bw, Lnast_node::create_ref(temp_var_name_bw));
-    lnast.add_child(idx_dot_bw, Lnast_node::create_ref(bund_name));
+    if (port_dir == 1) { // PORT_DIRECTION_IN
+      lnast.add_child(idx_dot_bw, Lnast_node::create_ref(inp_name));
+    } else if (port_dir == 2) {
+      lnast.add_child(idx_dot_bw, Lnast_node::create_ref(out_name));
+    } else {
+      I(false);
+    }
+
+    size_t last = 0;
+    size_t next = 0;
+    while ((next = port_name.find(".", last)) != std::string::npos) {
+      //FIXME: Add in checking for "[" to capture selects
+      auto field_name = lnast.add_string(port_name.substr(last,next-last));
+      lnast.add_child(idx_dot_bw, Lnast_node::create_ref(field_name));
+      last = next + 1;
+    }
+    lnast.add_child(idx_dot_bw, Lnast_node::create_ref(lnast.add_string(port_name.substr(last))));
     lnast.add_child(idx_dot_bw, Lnast_node::create_ref("__bits"));
 
+    // At this point, bund_name is how we can access this specific submod IO
     auto idx_asg_bw = lnast.add_child(parent_node, Lnast_node::create_assign(""));
     lnast.add_child(idx_asg_bw, Lnast_node::create_ref(temp_var_name_bw));
     lnast.add_child(idx_asg_bw, Lnast_node::create_const(lnast.add_string(std::to_string(port_bw))));
@@ -660,7 +552,7 @@ void Inou_firrtl::HandleConvOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_P
 
   auto idx_if = lnast.add_child(parent_node, Lnast_node::create_if("conv"));
 
-  auto idx_csts = lnast.add_child(idx_if, Lnast_node::create_cstmts(get_new_seq_name(lnast)));
+  lnast.add_child(idx_if, Lnast_node::create_cstmts(get_new_seq_name(lnast)));
   auto idx_dot2 = lnast.add_child(parent_node, Lnast_node::create_dot(""));
   lnast.add_child(idx_dot2, Lnast_node::create_ref(temp_var_name1));
   AttachExprStrToNode(lnast, e_str, idx_dot2);
@@ -1088,139 +980,156 @@ void Inou_firrtl::HandleTypeConvOp(Lnast& lnast, const firrtl::FirrtlPB_Expressi
 }
 
 /* A SubField access is equivalent to accessing an element
- * of a tuple in LNAST. We have to create the associated "dot"
- * node(s) to be able to access the correct element of the
- * correct tuple. This function returns the string needed
- * to access it
- * As an example, here's the LNAST for "submod.io.a":
- *        dot              dot
- *     /   |   \         /  |  \
- * ___F0 submod io  ___F1 ___F0 a
- * where the string "___F1" would be returned by this function. */
+ * of a tuple in LNAST. Just create a dot with each level
+ * of hierarchy as a child of the DOT node. SubAccess/Index
+ * instead rely upon a SELECT node. Sometimes, these three
+ * can exist inside one another (vector of bundles) which
+ * means we may need more than one DOT and/or SELECT node.
+ * NOTE: This return the DOT/SELECT LHS name to access expr */
 std::string Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB_Expression expr, Lnast_nid& parent_node,
                                           const bool is_rhs) {
-  // Create a list of each tuple + the element... So submoid.io.a becomes [submod, io, a]
-  std::stack<std::string> names;
-  std::string             full_str;
+  auto flattened_str = FlattenExpression(ln, parent_node, expr);
 
-  if (expr.has_sub_field()) {
-    auto sub_field = expr.sub_field();
-    names.push(sub_field.field());
-    auto flattened_str = absl::StrCat(CreateNameStack(ln, parent_node, sub_field.expression(), names), ".", sub_field.field());
-    fmt::print("sf: flattened_str: {}, {}\n", flattened_str, is_rhs);
-    full_str = get_full_name(flattened_str, is_rhs);
-    fmt::print("\tfull_str: {}\n", full_str);
-
-  } else if (expr.has_sub_index()) {
-    auto sub_idx = expr.sub_index();
-    names.push(sub_idx.index().value());
-    auto flattened_str = absl::StrCat(CreateNameStack(ln, parent_node, sub_idx.expression(), names), ".", sub_idx.index().value());
-    fmt::print("si: flattened_str: {}, {}\n", flattened_str, is_rhs);
-    full_str = get_full_name(flattened_str, is_rhs);
-    fmt::print("\tfull_str: {}\n", full_str);
-
-  } else if (expr.has_sub_access()) {
-    auto sub_access = expr.sub_access();
-    /* FIXME: This has a pretty deeply rooted and complex problem. Registers on the rhs
-     * are accessed as bundlename_fieldname__q_pin. If there was a vector of registers,
-     * this would be like vectorname_0__q_pin, vectorname_1__q_pin, ... . However, this
-     * won't work in here because we don't know the number (you know that for subindex,
-     * not sub access). The closest that can be achieved is just by adding the "#" to the
-     * front and hope that is close enough (it should be in MOST cases). */
-    auto bund_name  = ReturnExprString(ln, sub_access.expression(), parent_node, is_rhs);
-    auto field_name = ReturnExprString(ln, sub_access.index(), parent_node, is_rhs);
-
-    auto temp_var_name = create_temp_var(ln);
-    auto idx_dot       = ln.add_child(parent_node, Lnast_node::create_dot("tmp_hack"));  // FIXME: Should this be dot or select?
-    ln.add_child(idx_dot, Lnast_node::create_ref(temp_var_name));
-    ln.add_child(idx_dot, Lnast_node::create_ref(bund_name));
-    if (isdigit(field_name[0])) {
-      ln.add_child(idx_dot, Lnast_node::create_const(field_name));
-    } else {
-      ln.add_child(idx_dot, Lnast_node::create_ref(field_name));
-    }
-    return (std::string)temp_var_name;
-
-  } else {
-    I(false);
+  /* When storing info about IO and what not, a vector may be
+   * stored like vec[0], vec[1], ... . This can be a problem if
+   * we have a SubAccess like vec[tmp]; this interface won't recognize
+   * vec. Thus create a duplicate of the name and replace tmp with 0.
+   * This gets us the correct name format in the duplicate and we can
+   * just apply any changes to the duplicate (besides the 0) to the original. */
+  auto alter_flat_str = flattened_str;
+  size_t pos = 0;
+  size_t end_pos = 0;
+  while ((pos = alter_flat_str.find('[', end_pos)) != std::string::npos) {
+    end_pos = alter_flat_str.find(']', pos);
+    alter_flat_str.replace(pos+1, end_pos-pos-1, "0");
+    end_pos = pos + 2;
   }
 
-  /*fmt::print("[");
-  while(!names.empty()) {
-    fmt::print("{}, ", names.top());
-    names.pop();
-  }
-  fmt::print("]\n");*/
-
-  // Create each dot node
-  std::string bundle_accessor;
-  if (full_str.substr(0, 1) == "$") {
-    bundle_accessor = absl::StrCat("$inp_", names.top());
-  } else if (full_str.substr(0, 1) == "%") {
-    bundle_accessor = absl::StrCat("%out_", names.top());
-  } else if (full_str.substr(0, 1) == "#") {
-    bundle_accessor = absl::StrCat("#", names.top());
-  } else if (full_str.substr(full_str.length() - 7, 7) == "__q_pin") {
-    return full_str;
-  } else if (inst_to_mod_map.count(names.top())) {
-    // If wire is part of a module instance.
-    auto module_name      = inst_to_mod_map[names.top()];
-    auto str_without_inst = full_str.substr(full_str.find(".") + 1);
+  auto alter_full_str = get_full_name(alter_flat_str, is_rhs);
+  if (alter_full_str[0] == '$') {
+    flattened_str = absl::StrCat("$inp_", flattened_str);
+  } else if (alter_full_str[0] == '%') {
+    flattened_str = absl::StrCat("%out_", flattened_str);
+  } else if (alter_full_str[0] == '#') {
+    flattened_str = absl::StrCat("#", flattened_str);
+  } else if (alter_full_str.find("__q_pin")) {
+    flattened_str = absl::StrCat(flattened_str, ".__q_pin");
+  } else if (inst_to_mod_map.count(alter_full_str.substr(0, alter_full_str.find(".")))) {
+    auto inst_name        = alter_full_str.substr(0, alter_full_str.find("."));
+    auto str_without_inst = alter_full_str.substr(alter_full_str.find(".") + 1);
+    auto module_name      = inst_to_mod_map[inst_name];
     auto dir              = mod_to_io_dir_map[std::make_pair(module_name, str_without_inst)];
     if (dir == 1) {  // PORT_DIRECTION_IN
-      bundle_accessor = absl::StrCat("inp_", names.top());
+      flattened_str = absl::StrCat("inp_", flattened_str);
     } else if (dir == 2) {
-      bundle_accessor = absl::StrCat("out_", names.top());
+      flattened_str = absl::StrCat("out_", flattened_str);
     } else {
-      fmt::print("Error: direction unknown of {}\n", full_str);
+      fmt::print("Error: direction unknown of {}\n", flattened_str);
       I(false);
     }
-  } else {
-    bundle_accessor = names.top();
   }
-  // fmt::print("Bundle accessor: {}\n", bundle_accessor);
-  names.pop();
 
-  do {
-    auto temp_var_name = create_temp_var(ln);
-    auto element_name  = names.top();
-    names.pop();
-    // fmt::print("dot: {} {} {}\n", temp_var_name, bundle_accessor, element_name);
-    auto idx_dot = ln.add_child(parent_node, Lnast_node::create_dot(""));
-    ln.add_child(idx_dot, Lnast_node::create_ref(temp_var_name));
-    ln.add_child(idx_dot, Lnast_node::create_ref(ln.add_string(bundle_accessor)));
-    if (isdigit(element_name[0])) {
-      ln.add_child(idx_dot, Lnast_node::create_const(ln.add_string(element_name)));
-    } else {
-      ln.add_child(idx_dot, Lnast_node::create_ref(ln.add_string(element_name)));
-    }
-
-    bundle_accessor = temp_var_name;
-  } while (!names.empty());
-
-  // fmt::print("return {}\n", bundle_accessor);
-  return bundle_accessor;
+  I(flattened_str.find(".") || flattened_str.find("["));
+  auto node = CreateDotsSelsFromStr(ln, parent_node, flattened_str);
+  return (std::string)ln.get_name(ln.get_first_child(node));
 }
 
-std::string Inou_firrtl::CreateNameStack(Lnast& ln, Lnast_nid& parent_node, const firrtl::FirrtlPB_Expression& expr,
-                                         std::stack<std::string>& names) {
+/* Given a string with "."s and "["s in it, this
+ * function will be able to deconstruct it into
+ * DOT and SELECT nodes in an LNAST. */
+Lnast_nid Inou_firrtl::CreateDotsSelsFromStr(Lnast& ln, Lnast_nid& parent_node, std::string& flattened_str) {
+  if ((flattened_str.find(".") == std::string::npos) && (flattened_str.find("[") == std::string::npos)) {
+    /* Be careful invoking this function on something with no "." or "[".
+     * Where this function is called, another field must be added to this DOT. */
+    auto idx_dot = ln.add_child(parent_node, Lnast_node::create_dot("new_test"));
+    ln.add_child(idx_dot, Lnast_node::create_ref(create_temp_var(ln)));
+    ln.add_child(idx_dot, Lnast_node::create_ref(ln.add_string(flattened_str)));
+    return idx_dot;
+  }
+
+  size_t found = 0;
+  size_t last_found = 0;
+  std::queue<std::string> no_dot_queue;
+  // Separate name into separate parts, delimited by "."
+  while ((found = flattened_str.find(".", last_found)) != std::string::npos) {
+    no_dot_queue.push(flattened_str.substr(last_found, found-last_found));
+    last_found = found + 1;
+  }
+  no_dot_queue.push(flattened_str.substr(last_found));
+
+  std::queue<std::string> flat_queue;
+  while(no_dot_queue.size() > 0) {
+    auto elem = no_dot_queue.front();
+    if(elem.find('[') != std::string::npos) {
+      cout << "\t" << elem.substr(0, elem.find('[')) << "\n";
+      flat_queue.push(elem.substr(0, elem.find('[')));
+
+      while (elem.find('[') != std::string::npos) {
+        elem = elem.substr(elem.find('[') + 1);
+        cout << "\t n:" << elem.substr(0, elem.find(']')) << "\n";
+        flat_queue.push("[" + elem.substr(0, elem.find(']')) + "]");
+      }
+    } else {
+      flat_queue.push(elem);
+    }
+    no_dot_queue.pop();
+  }
+
+  Lnast_nid ln_node;
+  bool first = true;
+  bool sel_was_last = true;
+  std::string_view bund_name;
+  while (flat_queue.size() > 0) {
+    auto elem = flat_queue.front();
+    if (first) {
+      fmt::print("\t{}\n", elem);
+      bund_name = ln.add_string(elem);
+      first = false;
+    } else {
+      if (elem[0] == '[') {
+        auto temp_var_name = create_temp_var(ln);
+        auto sel_str = elem.substr(1,elem.length()-2);
+        ln_node = ln.add_child(parent_node, Lnast_node::create_select("new"));
+        ln.add_child(ln_node, Lnast_node::create_ref(temp_var_name));
+        ln.add_child(ln_node, Lnast_node::create_ref(bund_name));
+        auto elem_nobrack = ln.add_string(elem.substr(1, elem.length()-2));
+        if (isdigit(sel_str[0])) {
+          ln.add_child(ln_node, Lnast_node::create_const(elem_nobrack));
+        } else {
+          ln.add_child(ln_node, Lnast_node::create_ref(elem_nobrack));
+        }
+      } else if (sel_was_last) {
+        auto temp_var_name = create_temp_var(ln);
+        ln_node = ln.add_child(parent_node, Lnast_node::create_dot("new"));
+        ln.add_child(ln_node, Lnast_node::create_ref(temp_var_name));
+        ln.add_child(ln_node, Lnast_node::create_ref(bund_name));
+        ln.add_child(ln_node, Lnast_node::create_ref(ln.add_string(elem)));
+        bund_name = temp_var_name;
+        sel_was_last = false;
+      } else {
+        ln.add_child(ln_node, Lnast_node::create_ref(ln.add_string(elem)));
+      }
+    }
+    flat_queue.pop();
+  }
+
+  return ln_node;
+}
+
+/* Given an expression that may or may
+ * not have hierarchy, flatten it. */
+std::string Inou_firrtl::FlattenExpression(Lnast& ln, Lnast_nid& parent_node, const firrtl::FirrtlPB_Expression& expr) {
   if (expr.has_sub_field()) {
-    names.push(expr.sub_field().field());
-    return absl::StrCat(CreateNameStack(ln, parent_node, expr.sub_field().expression(), names), ".", expr.sub_field().field());
+    return absl::StrCat(FlattenExpression(ln, parent_node, expr.sub_field().expression()), ".", expr.sub_field().field());
 
   } else if (expr.has_sub_access()) {
     auto idx_str = ReturnExprString(ln, expr.sub_access().index(), parent_node, true);
-    names.push(idx_str);
-    return absl::StrCat(CreateNameStack(ln, parent_node, expr.sub_access().expression(), names), ".", idx_str);
+    return absl::StrCat(FlattenExpression(ln, parent_node, expr.sub_access().expression()), "[", idx_str, "]");
 
   } else if (expr.has_sub_index()) {
-    names.push(expr.sub_index().index().value());
-    return absl::StrCat(CreateNameStack(ln, parent_node, expr.sub_index().expression(), names),
-                        ".",
-                        expr.sub_index().index().value());
+    return absl::StrCat(FlattenExpression(ln, parent_node, expr.sub_index().expression()), "[", expr.sub_index().index().value(), "]");
 
   } else if (expr.has_reference()) {
-    names.push(expr.reference().id());
     return expr.reference().id();
 
   } else {
@@ -1271,7 +1180,7 @@ void Inou_firrtl::create_io_list(const firrtl::FirrtlPB_Type& type, uint8_t dir,
     case firrtl::FirrtlPB_Type::kVectorType: {  // Vector type
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
         vec.push_back(std::make_tuple(port_id, dir, 0));
-        create_io_list(type.vector_type().type(), dir, absl::StrCat(port_id, ".", i), vec);
+        create_io_list(type.vector_type().type(), dir, absl::StrCat(port_id, "[", i, "]"), vec);
       }
       break;
     }
@@ -1304,10 +1213,11 @@ void Inou_firrtl::ListPortInfo(Lnast& lnast, const firrtl::FirrtlPB_Port& port, 
   // fmt::print("Port_list:\n");
   for (auto val : port_list) {
     auto subfield_loc = std::get<0>(val).find(".");
+    auto subaccess_loc = std::get<0>(val).find("[");
     if (std::get<1>(val) == 1) {  // PORT_DIRECTION_IN
       input_names.insert(std::get<0>(val));
       if (std::get<2>(val) > 0) {
-        if (subfield_loc != std::string::npos) {
+        if (subfield_loc != std::string::npos || subaccess_loc != std::string::npos) {
           create_bitwidth_dot_node(lnast, std::get<2>(val), parent_node, absl::StrCat("$inp_", std::get<0>(val)));
         } else {
           create_bitwidth_dot_node(lnast, std::get<2>(val), parent_node, absl::StrCat("$", std::get<0>(val)));
@@ -1316,7 +1226,7 @@ void Inou_firrtl::ListPortInfo(Lnast& lnast, const firrtl::FirrtlPB_Port& port, 
     } else if (std::get<1>(val) == 2) {  // PORT_DIRECTION_OUT
       output_names.insert(std::get<0>(val));
       if (std::get<2>(val) > 0) {
-        if (subfield_loc != std::string::npos) {
+        if (subfield_loc != std::string::npos || subaccess_loc != std::string::npos) {
           create_bitwidth_dot_node(lnast, std::get<2>(val), parent_node, absl::StrCat("%out_", std::get<0>(val)));
         } else {
           create_bitwidth_dot_node(lnast, std::get<2>(val), parent_node, absl::StrCat("%", std::get<0>(val)));
@@ -1478,7 +1388,7 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
         idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
       }
       lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs)));
-      auto str_val = absl::StrCat(expr.uint_literal().value().value(), "u", expr.uint_literal().width().value(), "bits");
+      auto str_val = expr.uint_literal().value().value();//absl::StrCat(expr.uint_literal().value().value(), "u", expr.uint_literal().width().value(), "bits");
       lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(str_val)));
       break;
     }
@@ -1490,7 +1400,7 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
         idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
       }
       lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs)));
-      auto str_val = absl::StrCat(expr.sint_literal().value().value(), "s", expr.sint_literal().width().value(), "bits");
+      auto str_val = expr.sint_literal().value().value();//absl::StrCat(expr.sint_literal().value().value(), "s", expr.sint_literal().width().value(), "bits");
       lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(str_val)));
       break;
     }
@@ -1517,21 +1427,31 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
     }
     case firrtl::FirrtlPB_Expression::kSubIndex: {  // SubIndex
       auto expr_name = lnast.add_string(ReturnExprString(lnast, expr.sub_index().expression(), parent_node, true));
+      auto temp_var_name = create_temp_var(lnast);
 
       auto idx_select = lnast.add_child(parent_node, Lnast_node::create_select("selectSI"));
-      lnast.add_child(idx_select, Lnast_node::create_ref(lnast.add_string(lhs)));
+      lnast.add_child(idx_select, Lnast_node::create_ref(temp_var_name));
       AttachExprStrToNode(lnast, expr_name, idx_select);
       lnast.add_child(idx_select, Lnast_node::create_const(lnast.add_string(expr.sub_index().index().value())));
+
+      auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("selectSI_asg"));
+      lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs)));
+      lnast.add_child(idx_asg, Lnast_node::create_ref(temp_var_name));
       break;
     }
     case firrtl::FirrtlPB_Expression::kSubAccess: {  // SubAccess
       auto expr_name  = lnast.add_string(ReturnExprString(lnast, expr.sub_access().expression(), parent_node, true));
       auto index_name = lnast.add_string(ReturnExprString(lnast, expr.sub_access().index(), parent_node, true));
+      auto temp_var_name = create_temp_var(lnast);
 
       auto idx_select = lnast.add_child(parent_node, Lnast_node::create_select("selectSA"));
-      lnast.add_child(idx_select, Lnast_node::create_ref(lnast.add_string(lhs)));
+      lnast.add_child(idx_select, Lnast_node::create_ref(temp_var_name));
       AttachExprStrToNode(lnast, expr_name, idx_select);
       AttachExprStrToNode(lnast, index_name, idx_select);
+
+      auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("selectSA_asg"));
+      lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs)));
+      lnast.add_child(idx_asg, Lnast_node::create_ref(temp_var_name));
       break;
     }
     case firrtl::FirrtlPB_Expression::kPrimOp: {  // PrimOp
@@ -1562,11 +1482,11 @@ std::string Inou_firrtl::ReturnExprString(Lnast& lnast, const firrtl::FirrtlPB_E
       break;
     }
     case firrtl::FirrtlPB_Expression::kUintLiteral: {     // UIntLiteral
-      expr_string = absl::StrCat(expr.uint_literal().value().value(), "u", expr.uint_literal().width().value(), "bits");
+      expr_string = expr.uint_literal().value().value();//absl::StrCat(expr.uint_literal().value().value(), "u", expr.uint_literal().width().value(), "bits");
       break;
     }
     case firrtl::FirrtlPB_Expression::kSintLiteral: {     // SIntLiteral
-      expr_string = absl::StrCat(expr.sint_literal().value().value(), "s", expr.sint_literal().width().value(), "bits");
+      expr_string = expr.sint_literal().value().value();//absl::StrCat(expr.sint_literal().value().value(), "s", expr.sint_literal().width().value(), "bits");
       break;
     }
     case firrtl::FirrtlPB_Expression::kValidIf: {  // ValidIf
@@ -1917,7 +1837,7 @@ void Inou_firrtl::AddPortToMap(const std::string& mod_id, const firrtl::FirrtlPB
       //FIXME: How does mod_to_io_map interact with a vector?
       mod_to_io_dir_map[std::make_pair(mod_id, port_id)] = dir;
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
-        AddPortToMap(mod_id, type.vector_type().type(), dir, absl::StrCat(port_id, ".", i));//, sub, inp_pos, out_pos);
+        AddPortToMap(mod_id, type.vector_type().type(), dir, absl::StrCat(port_id, "[", i, "]"));//, sub, inp_pos, out_pos);
       }
       break;
     }
@@ -1947,6 +1867,7 @@ void Inou_firrtl::IterateModules(Eprp_var& var, const firrtl::FirrtlPB_Circuit& 
     ListModuleInfo(var, circuit.module(i), file_name);
 
     // Between modules, empty out the input/output/register lists.
+    temp_var_count = 0;
     input_names.clear();
     output_names.clear();
     register_names.clear();
