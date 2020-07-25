@@ -38,8 +38,8 @@ typedef std::shared_ptr<Hier_node> phier;
 
 struct Min_cut_data {
   int d_cost; // difference between the external and internal cost of the node
-  bool active; // whether the node is being considered for a swap or not
   unsigned int set; // what set the node is in
+  bool active; // whether the node is being considered for a swap or not
 };
 
 class Hier_tree {

@@ -1,7 +1,11 @@
 #include "json_inou.hpp"
 Json_inou_parser::Json_inou_parser(const std::string& path) : d() {
+  if (!std::filesystem::exists(path)) {
+    std::cerr << "Could not find input file " << path << "!" << std::endl;
+    throw std::invalid_argument("bad file path");
+  }
+
   std::ifstream json_file(path);
-  
   I(json_file);
   
   json_file.seekg(0, std::ios::end);
