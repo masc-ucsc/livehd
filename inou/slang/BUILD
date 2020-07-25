@@ -7,7 +7,7 @@ cc_library(
         exclude = ["*test*.cpp"],
     ),
     hdrs = glob(["*.hpp"]),
-    linkopts = ["-lstdc++fs"],  # Needed for gcc 7-8
+    #linkopts = ["-lstdc++fs"],  # Needed for gcc 7-8
     #alwayslink=1,
     visibility = ["//visibility:public"],
     includes = ["."],
