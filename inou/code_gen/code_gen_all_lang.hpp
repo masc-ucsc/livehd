@@ -22,5 +22,22 @@ public:
   std::string_view start_cond() {return "if (";}
   std::string_view tuple_stmt_sep() {return ", ";}
 
+  //TODO: func def related parameters: need to make language specific! currently as per pyrope:
+  std::string_view func_begin() {return "";}
+  std::string_view func_name(std::string_view func_name) {return func_name;}
+  std::string_view param_start() {return " = :(";}
+  std::string_view func_param_sep() {return ", ";}
+  std::string_view param_end() {return ")";}
+  std::string print_cond(std::string cond_val) {
+    if(cond_val != "")
+      return (absl::StrCat(" when ", cond_val));
+    else
+      return cond_val;
+  }
+  std::string_view func_stmt_strt() {return ":{\n";}
+  std::string_view func_stmt_end() {return "}\n";}
+  std::string_view func_end() {return "";}
+
+
 };
 
