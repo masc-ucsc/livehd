@@ -1,23 +1,15 @@
-module Register(
-  input         clock,
-  input         reset,
-  input  [15:0] io_inVal,
-  input         io_loadingValues,
-  output [15:0] io_outVal
+module RegTrivial(
+  input  [7:0] a,
+  input        clk,
+  output [7:0] o
 );
 `ifdef RANDOMIZE_REG_INIT
   reg [31:0] _RAND_0;
 `endif // RANDOMIZE_REG_INIT
-  reg [15:0] x;
-  wire  _T = x > 16'h0; // @[Register.scala 24:13]
-  wire [15:0] _T_2 = x - 16'h1; // @[Register.scala 25:14]
-  assign io_outVal = x; // @[Register.scala 29:13]
-  always @(posedge clock) begin
-    if (io_loadingValues) begin
-      x <= io_inVal;
-    end else if (_T) begin
-      x <= _T_2;
-    end
+  reg [7:0] tmp;
+  assign o = tmp;
+  always @(posedge clk) begin
+    tmp <= a;
   end
 // Register and memory initialization
 `ifdef RANDOMIZE_GARBAGE_ASSIGN
@@ -56,7 +48,7 @@ initial begin
     `endif
 `ifdef RANDOMIZE_REG_INIT
   _RAND_0 = {1{`RANDOM}};
-  x = _RAND_0[15:0];
+  tmp = _RAND_0[7:0];
 `endif // RANDOMIZE_REG_INIT
   `endif // RANDOMIZE
 end // initial
