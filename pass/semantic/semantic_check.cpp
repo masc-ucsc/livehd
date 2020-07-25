@@ -441,25 +441,14 @@ void Semantic_check::check_if_op(Lnast *lnast, const Lnast_nid &lnidx_opr, std::
         stmts_count += 1;
         new_stmt_name = lnast->get_name(lnidx_opr_child);
       }
-      int count_child = 0;
       for (const auto &lnidx_opr_child_child : lnast->children(lnidx_opr_child)) {
         const auto ntype_child_child = lnast->get_data(lnidx_opr_child_child).type;
 
         if (is_primitive_op(ntype_child_child)) {
-          count_child += 1;
           check_primitive_ops(lnast, lnidx_opr_child_child, ntype_child_child, new_stmt_name);
         } else if (is_tree_structs(ntype_child_child)) {
-          count_child += 1;
           check_tree_struct_ops(lnast, lnidx_opr_child_child, ntype_child_child, new_stmt_name);
         }
-      }
-      // Make sure Statement Node has children
-      if (count_child == 0 && ntype_child.is_stmts()) {
-        error_print_lnast_by_name(lnast, lnast->get_name(lnidx_opr_child));
-        Pass::error("If Operation Error: Statement Node is empty\n");
-      } else if (count_child == 0 && ntype_child.is_cstmts()) {
-        error_print_lnast_by_name(lnast, lnast->get_name(lnidx_opr_child));
-        Pass::error("If Operation Error: Conditional Statement Node is empty\n");
       }
     } else if (ntype_child.is_cond()) {
       cond_count += 1;
@@ -492,22 +481,14 @@ void Semantic_check::check_for_op(Lnast *lnast, const Lnast_nid &lnidx_opr, std:
 
     if (ntype_child.is_stmts()) {
       stmts           = true;
-      int count_child = 0;
       // Iterate through statements
       for (const auto &lnidx_opr_child_child : lnast->children(lnidx_opr_child)) {
         const auto ntype_child_child = lnast->get_data(lnidx_opr_child_child).type;
         if (is_primitive_op(ntype_child_child)) {
-          count_child += 1;
           check_primitive_ops(lnast, lnidx_opr_child_child, ntype_child_child, lnast->get_name(lnidx_opr_child));
         } else if (is_tree_structs(ntype_child_child)) {
-          count_child += 1;
           check_tree_struct_ops(lnast, lnidx_opr_child_child, ntype_child_child, lnast->get_name(lnidx_opr_child));
         }
-      }
-      // Make sure Statement Node has children
-      if (count_child == 0) {
-        error_print_lnast_by_name(lnast, lnast->get_name(lnidx_opr_child));
-        Pass::error("For Operation Error: Statement Node is empty\n");
       }
     } else if (ntype_child.is_ref()) {
       num_of_ref += 1;
@@ -540,22 +521,14 @@ void Semantic_check::check_while_op(Lnast *lnast, const Lnast_nid &lnidx_opr, st
       add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
     } else if (ntype_child.is_stmts()) {
       stmt            = true;
-      int count_child = 0;
       // Iterate through statements
       for (const auto &lnidx_opr_child_child : lnast->children(lnidx_opr_child)) {
         const auto ntype_child_child = lnast->get_data(lnidx_opr_child_child).type;
         if (is_primitive_op(ntype_child_child)) {
-          count_child += 1;
           check_primitive_ops(lnast, lnidx_opr_child_child, ntype_child_child, lnast->get_name(lnidx_opr_child));
         } else if (is_tree_structs(ntype_child_child)) {
-          count_child += 1;
           check_tree_struct_ops(lnast, lnidx_opr_child_child, ntype_child_child, lnast->get_name(lnidx_opr_child));
         }
-      }
-      // Make sure Statement Node has children
-      if (count_child == 0) {
-        error_print_lnast_by_name(lnast, lnast->get_name(lnidx_opr_child));
-        Pass::error("While Operation Error: Statement Node is empty\n");
       }
     } else {
       // Invalid Node Type
@@ -594,24 +567,13 @@ void Semantic_check::check_func_def(Lnast *lnast, const Lnast_nid &lnidx_opr, st
         stmts         = true;
         new_stmt_name = lnast->get_name(lnidx_opr_child);
       }
-      int count_child = 0;
       for (const auto &lnidx_opr_child_child : lnast->children(lnidx_opr_child)) {
         const auto ntype_child_child = lnast->get_data(lnidx_opr_child_child).type;
         if (is_primitive_op(ntype_child_child)) {
-          count_child += 1;
           check_primitive_ops(lnast, lnidx_opr_child_child, ntype_child_child, new_stmt_name);
         } else if (is_tree_structs(ntype_child_child)) {
-          count_child += 1;
           check_tree_struct_ops(lnast, lnidx_opr_child_child, ntype_child_child, new_stmt_name);
         }
-      }
-      // Make sure Statement Node has children
-      if (count_child == 0 && ntype_child.is_stmts()) {
-        error_print_lnast_by_name(lnast, lnast->get_name(lnidx_opr_child));
-        Pass::error("Func Def Operation Error: Statement Node is empty\n");
-      } else if (count_child == 0 && ntype_child.is_cstmts()) {
-        error_print_lnast_by_name(lnast, lnast->get_name(lnidx_opr_child));
-        Pass::error("Func Def Operation Error: Conditional Statement Node is empty\n");
       }
     } else if (ntype_child.is_cond()) {
       cond = true;
