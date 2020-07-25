@@ -184,9 +184,10 @@ std::pair<Graph_info &&, Graph_info &&> Hier_tree::min_wire_cut(Graph_info && ri
     for (const auto& v : g.verts()) {
       int exter = 0;
       int inter = 0;
+      cmap[v].active = true; // set element to active if it wasn't before
       for (const auto& e : g.out_edges(v)) {
         auto other_v = g.head(e);
-        if (cmap[other_v].set != cmap[v].set) {
+        if (cmap(other_v).set != cmap(v).set) {
           exter += info.weights[e];
         } else {
           inter += info.weights[e];
@@ -199,9 +200,9 @@ std::pair<Graph_info &&, Graph_info &&> Hier_tree::min_wire_cut(Graph_info && ri
     std::cout << std::endl;
     std::cout << "connection list:" << std::endl;
     for (const auto& v : g.verts()) {
-      std::cout << info.names[v] << "\t" << ((cmap[v].set == 0) ? "(a" : "(b") << ", d: " << cmap[v].d_cost << ") [";
+      std::cout << info.names(v) << "\t" << ((cmap(v).set == 0) ? "(a" : "(b") << ", d: " << cmap(v).d_cost << ") [";
       for (const auto& e : g.out_edges(v)) {
-        std::cout << info.names[g.head(e)] << ", ";
+        std::cout << info.names(g.head(e)) << ", ";
       }
       std::cout << "]" << std::endl;
     }
@@ -222,13 +223,13 @@ std::pair<Graph_info &&, Graph_info &&> Hier_tree::min_wire_cut(Graph_info && ri
       auto b_max = g.null_vert();
       
       for (const auto& v : g.verts()) {
-        if (cmap[v].active) {
+        if (cmap(v).active) {
           // row is in the "a" set and hasn't been deleted
           for (const auto& e : g.out_edges(v)) {
             auto other_v = g.head(e);
-            if (cmap[other_v].set != cmap[v].set && cmap[other_v].active) {
+            if (cmap(other_v).set != cmap(v).set && cmap(other_v).active) {
               // only select nodes in the other set
-              int new_cost = cmap[v].d_cost + cmap[other_v].d_cost - 2 * info.weights[e];
+              int new_cost = cmap(v).d_cost + cmap(other_v).d_cost - 2 * info.weights(e);
               if (new_cost > cost) {
                 cost = new_cost;
                 a_max = v;
@@ -253,17 +254,18 @@ std::pair<Graph_info &&, Graph_info &&> Hier_tree::min_wire_cut(Graph_info && ri
       av.insert(a_max);
       bv.insert(b_max);
 
-      std::cout << "adding " << info.names[a_max] << " to a, " << info.names[b_max] << " to b, cost " << cost << std::endl;
+      std::cout << "adding " << info.names(a_max) << " to a, " << info.names(b_max) << " to b, cost " << cost << std::endl;
       
       cmap[a_max].active = false;
       cmap[b_max].active = false;
       
-      // find a connection cost in the graph given two verts
-      auto find_edge = [&g, &cmap](decltype(g.insert_vert()) src, decltype(g.insert_vert()) dst) -> decltype(g.insert_edge(g.insert_vert(), g.insert_vert())) {
-        for (const auto& e : g.out_edges(src)) {
-          auto other_v = g.head(e);
-          if (other_v == dst && cmap[other_v].active) {
-            return e;
+      auto find_edge_to_max = [&g, &cmap](decltype(g.insert_vert()) v, decltype(g.insert_vert()) max) -> decltype(g.insert_edge(g.insert_vert(), g.insert_vert())) {
+        if (cmap[v].active) {
+          for (const auto& e : g.out_edges(v)) {
+            auto other_v = g.head(e);
+            if (other_v == max) { // no checking if other_v is active since the maxes were just deactivated
+              return e;
+            }
           }
         }
         return g.null_edge();
@@ -271,12 +273,10 @@ std::pair<Graph_info &&, Graph_info &&> Hier_tree::min_wire_cut(Graph_info && ri
 
       // recalculate costs considering a_max and b_max swapped
       for (const auto& v : g.verts()) {
-        if (cmap[v].active) {
-          if (cmap[v].set == 0) {
-            cmap[v].d_cost = cmap[v].d_cost + 2 * info.weights[find_edge(v, a_max)] - 2 * info.weights[find_edge(v, b_max)];
-          } else {
-            cmap[v].d_cost = cmap[v].d_cost + 2 * info.weights[find_edge(v, b_max)] - 2 * info.weights[find_edge(v, a_max)];
-          }
+        if (cmap(v).set == 0) {
+          cmap[v].d_cost = cmap(v).d_cost + 2 * info.weights(find_edge_to_max(v, a_max)) - 2 * info.weights(find_edge_to_max(v, b_max));
+        } else {
+          cmap[v].d_cost = cmap(v).d_cost + 2 * info.weights(find_edge_to_max(v, b_max)) - 2 * info.weights(find_edge_to_max(v, a_max));
         }
       }
     }
@@ -366,7 +366,7 @@ void Hier_tree::populate_cost_map(const graph::Bi_adjacency_list& g, Min_cut_map
 
   // insert vert data
   for (auto vert : g.verts()) {
-    m[vert].d_cost = 0xCAFE;
+    m[vert].d_cost = 0xCAFE; // illegal value
     m[vert].active = true;
     m[vert].set = which_set;
 

@@ -1,4 +1,5 @@
 #include "json_inou.hpp"
+
 Json_inou_parser::Json_inou_parser(const std::string& path) : d() {
   if (!std::filesystem::exists(path)) {
     std::cerr << "Could not find input file " << path << "!" << std::endl;
@@ -27,7 +28,6 @@ Graph_info Json_inou_parser::make_tree() const {
 
   graph::Bi_adjacency_list g;
 
-  // TODO: I have no idea how to move these maps anywhere.
   auto g_name_map = g.vert_map<std::string>();
   auto g_area_map = g.vert_map<double>();
   auto edge_weights = g.edge_map<unsigned int>();
@@ -63,6 +63,8 @@ Graph_info Json_inou_parser::make_tree() const {
     }
 
     g_area_map[v] = area;
+
+    auto existing_edges = g.edge_set();
     
     // look for connections, and create them if they don't exist
     I(mod["connections"].IsArray());
@@ -70,6 +72,7 @@ Graph_info Json_inou_parser::make_tree() const {
       I(connection.IsObject());
       I(connection["name"].IsString());
       I(connection["weight"].IsInt());
+      I(connection["weight"].GetInt() != 0); // weight has to be non-zero for ker-lin algorithm to work
 
       std::string other_name = connection["name"].GetString();
       auto other_v = g.null_vert();
@@ -79,29 +82,32 @@ Graph_info Json_inou_parser::make_tree() const {
         }
       }
 
-      if (other_v != g.null_vert()) {
-        // other node is already in map
-        
-        bool new_connection = true;
-        for (const auto& edge : g.out_edges(v)) {
-          if (g.head(edge) == other_v) {
-            new_connection = false;
-          }
+      if (other_v == g.null_vert()) {
+        // other node is not in the map, so create it.
+        other_v = g.insert_vert();
+        g_name_map[other_v] = other_name;
+      }
+
+      auto new_e = g.insert_edge(v, other_v);
+      edge_weights[new_e] = connection["weight"].GetInt();
+      existing_edges.insert(new_e);
+    }
+  }
+  
+  // if the graph is not fully connected, ker-lin fails to work.
+  // TODO: eventually replace this with an adjacency matrix, since it's significantly cheaper than this.
+  for (const auto& v : g.verts()) {
+    for (const auto& other_v : g.verts()) {
+      bool found = false;
+      for (const auto& e : g.out_edges(v)) {
+        if (g.head(e) == other_v && g.tail(e) == v) {
+          found = true;
+          break;
         }
-
-        auto new_e = g.insert_edge(v, other_v); // construct an edge from v -> other_v
-        edge_weights[new_e] = connection["weight"].GetInt();
-        
-        // other_v -> v edge gets created later.
-
-      } else {
-        // other node is not in the map, so create and wire it.
-        
-        auto new_v = g.insert_vert();
-        g_name_map[new_v] = other_name;
-        
-        auto new_e = g.insert_edge(v, new_v);
-        edge_weights[new_e] = connection["weight"].GetInt();
+      }
+      if (!found) {
+        auto temp_e = g.insert_edge(v, other_v);
+        edge_weights[temp_e] = 0;
       }
     }
   }
