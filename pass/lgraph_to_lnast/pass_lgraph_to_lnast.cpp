@@ -34,7 +34,6 @@ void Pass_lgraph_to_lnast::trans(Eprp_var& var) {
 }
 
 void Pass_lgraph_to_lnast::do_trans(LGraph* lg, Eprp_var& var, std::string_view module_name) {
-  fmt::print("iterate_over_lg\n");
   std::unique_ptr<Lnast> lnast = std::make_unique<Lnast>(module_name);
   lnast->set_root(Lnast_node(Lnast_ntype::create_top(), Token(0, 0, 0, 0, lg->get_name())));
   auto idx_stmts = lnast->add_child(lnast->get_root(), Lnast_node::create_stmts(get_new_seq_name(*lnast)));
@@ -74,12 +73,11 @@ void Pass_lgraph_to_lnast::begin_transformation(LGraph* lg, Lnast& lnast, Lnast_
   // note: in graph out node, spin_pid == dpin_pid is always true
 
   lg->get_graph_output_node().set_color(BLACK);
-  lg->each_graph_output([&](const Node_pin& pin) {  // TODO: Make sure I have the capture list correct
+  lg->each_graph_output([&](const Node_pin& pin) {
     I(pin.get_node().get_color() == BLACK);
     // Note: pin is a driver pin.
     //fmt::print("opin: {} pid: {}\n", pin.get_name(), pin.get_pid());
     I(pin.get_node().get_type().op == GraphIO_Op);
-    // auto node = pin.get_node();
     auto editable_pin = pin;
     handle_output_node(lg, editable_pin, lnast, ln_node);
   });
@@ -148,25 +146,9 @@ void Pass_lgraph_to_lnast::handle_source_node(LGraph* lg, Node_pin& pin, Lnast& 
 /* TODO:
   Invalid_Op,
   Mod_Op,
-  // op_class: LUT
   LUT_Op,
-  // op_class: wire
   DontCare_Op,
-  // op_class: Tuple
-  TupAdd_Op,
-  TupGet_Op,
-  TupRef_Op,
-  TupKey_Op,
-  //------------------BEGIN PIPELINED (break LOOPS)
-  Loop_breaker_begin,
-  // op_class: register
-  SFlop_Op,  // sync reset flop
-  AFlop_Op,  // async reset flop
-  Latch_Op,
-  FFlop_Op,
-  // op_class: memory
   Memory_Op,
-  SubGraph_Op,
 */
 void Pass_lgraph_to_lnast::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
   // Specify bitwidth in LNAST table (for code gen purposes)
@@ -570,6 +552,7 @@ void Pass_lgraph_to_lnast::attach_comparison_node(Lnast& lnast, Lnast_nid& paren
   } else {
     /*If there is more than 1 comparison that needs to be done, then we have create each
         separate comparison then & them all together. */
+    std::vector<std::string_view> temp_var_list;
     for (const auto apin : a_pins) {
       for (const auto bpin : b_pins) {
         Lnast_nid comp_node;
@@ -580,7 +563,10 @@ void Pass_lgraph_to_lnast::attach_comparison_node(Lnast& lnast, Lnast_nid& paren
           case GreaterEqualThan_Op: comp_node = lnast.add_child(parent_node, Lnast_node::create_ge("gte_i")); break;
           default: fmt::print("Error: invalid node type in attach_comparison_node\n"); I(false);
         }
-        lnast.add_child(comp_node, Lnast_node::create_ref(create_temp_var(lnast)));
+        auto temp_var_name = create_temp_var(lnast);
+        temp_var_list.push_back(temp_var_name);
+        lnast.add_child(comp_node, Lnast_node::create_ref(temp_var_name));
+
         attach_child(lnast, comp_node, apin);
         attach_child(lnast, comp_node, bpin);
       }
@@ -588,9 +574,8 @@ void Pass_lgraph_to_lnast::attach_comparison_node(Lnast& lnast, Lnast_nid& paren
 
     auto and_node = lnast.add_child(parent_node, Lnast_node::create_and("and"));
     lnast.add_child(and_node, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));
-    for (int i = 1; i <= comparisons; i++) {
-      // FIXME: Find a better way to do this (maybe create list of temp vars used?)
-      lnast.add_child(and_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("___L", temp_var_count - i))));
+    for (const auto& temp_var : temp_var_list) {
+      lnast.add_child(and_node, Lnast_node::create_ref(temp_var));
     }
   }
 }
@@ -616,7 +601,6 @@ void Pass_lgraph_to_lnast::attach_simple_node(Lnast& lnast, Lnast_nid& parent_no
 }
 
 void Pass_lgraph_to_lnast::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
-  // FIXME: Currently, this will only support a mux that has 1 cond + 2 vals. Eventually handle more.
   // PID: 0 = S, 1 = A, 2 = B, ...
   // Y = ~SA | SB
 
@@ -868,8 +852,6 @@ void Pass_lgraph_to_lnast::attach_child(Lnast& lnast, Lnast_nid& op_node, const 
  * we instead make cond nodes. */
 void Pass_lgraph_to_lnast::attach_cond_child(Lnast& lnast, Lnast_nid& op_node, const Node_pin& dpin) {
   // The input "dpin" needs to be a driver pin.
-
-  // FIXME: This will only work for var/wire names. This will mess up for constants, I think.
   if (dpin.get_node().is_graph_input()) {
     // If the input to the node is from a GraphIO node (it's a module input), add the $ in front.
     auto dpin_name = dpin_get_name(dpin);
@@ -880,9 +862,9 @@ void Pass_lgraph_to_lnast::attach_cond_child(Lnast& lnast, Lnast_nid& op_node, c
   } else if ((dpin.get_node().get_type().op == AFlop_Op) || (dpin.get_node().get_type().op == SFlop_Op)) {
     auto dpin_name = dpin_get_name(dpin);
     if (dpin_name.substr(0, 1) == "#") {
-      lnast.add_child(op_node, Lnast_node::create_ref(lnast.add_string(dpin_name)));
+      lnast.add_child(op_node, Lnast_node::create_cond(lnast.add_string(dpin_name)));
     } else {
-      lnast.add_child(op_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("#", dpin_name))));
+      lnast.add_child(op_node, Lnast_node::create_cond(lnast.add_string(absl::StrCat("#", dpin_name))));
     }
   } else if (dpin.get_node().get_type().op == Const_Op) {
     lnast.add_child(op_node, Lnast_node::create_cond(lnast.add_string(dpin.get_node().get_type_const().to_pyrope())));
