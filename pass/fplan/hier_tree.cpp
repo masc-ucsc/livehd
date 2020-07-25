@@ -158,7 +158,7 @@ void Hier_tree::prune_matrix(Cost_matrix& m) {
 std::pair<Graph_info &&, Graph_info &&> Hier_tree::min_wire_cut(Graph_info && rinfo) {
   
   auto info = std::move(rinfo);
-  const auto& g = info.al;
+  auto& g = info.al;
   
   const unsigned int graph_size = g.order();
   const unsigned int set_size = graph_size / 2;
@@ -185,8 +185,8 @@ std::pair<Graph_info &&, Graph_info &&> Hier_tree::min_wire_cut(Graph_info && ri
       int exter = 0;
       int inter = 0;
       for (const auto& e : g.out_edges(v)) {
-        auto vtarget = g.head(e);
-        if (cmap[vtarget].set != cmap[v].set) {
+        auto other_v = g.head(e);
+        if (cmap[other_v].set != cmap[v].set) {
           exter += info.weights[e];
         } else {
           inter += info.weights[e];
@@ -198,81 +198,100 @@ std::pair<Graph_info &&, Graph_info &&> Hier_tree::min_wire_cut(Graph_info && ri
 #ifndef NDEBUG
     std::cout << std::endl;
     std::cout << "connection list:" << std::endl;
-    
-    info.print();
+    for (const auto& v : g.verts()) {
+      std::cout << info.names[v] << "\t" << ((cmap[v].set == 0) ? "(a" : "(b") << ", d: " << cmap[v].d_cost << ") [";
+      for (const auto& e : g.out_edges(v)) {
+        std::cout << info.names[g.head(e)] << ", ";
+      }
+      std::cout << "]" << std::endl;
+    }
 #endif
     
     auto av = g.vert_set();
     auto bv = g.vert_set();
 
-    std::vector<int> gv;
-    gv.reserve(set_size);
+    std::vector<int> cv;
     
-    volatile int x;
-    x = 1;
-
-    /*
-
-    // for each node in the set of nodes in a and b:
-    // remove the node pair with the highest global reduction in cost, and add it to gv.
-    // also add the nodes to av and bv, respectively.
+    // remove the node pair with the highest global reduction in cost, and add it to cv.
+    // also add the nodes used in the reduction to av and bv, respectively.
     for (unsigned int n = 1; n <= set_size; n++) {
       
-      int g = std::numeric_limits<int>::min();
+      int cost = std::numeric_limits<int>::min();
 
-      int a_max_i = -1;
-      int b_max_i = -1;
+      auto a_max = g.null_vert();
+      auto b_max = g.null_vert();
       
-      for (size_t i = 0; i < graph_size; i++) {
-        if (m[i].set == 0 && m[i].active) {
+      for (const auto& v : g.verts()) {
+        if (cmap[v].active) {
           // row is in the "a" set and hasn't been deleted
-          for (size_t j = 0; j < graph_size; j++) {
-            if (m[j].set != m[i].set && m[j].active) {
+          for (const auto& e : g.out_edges(v)) {
+            auto other_v = g.head(e);
+            if (cmap[other_v].set != cmap[v].set && cmap[other_v].active) {
               // only select nodes in the other set
-              int new_g = m[i].d_cost + m[j].d_cost - 2 * m[i].connect_cost[j];
-              if (new_g > g) {
-                g = new_g;
-                a_max_i = i;
-                b_max_i = j;
+              int new_cost = cmap[v].d_cost + cmap[other_v].d_cost - 2 * info.weights[e];
+              if (new_cost > cost) {
+                cost = new_cost;
+                a_max = v;
+                b_max = other_v;
               }
             }
           }
         }
       }
       
-      I(a_max_i != -1); // these should be written with legal indices
-      I(b_max_i != -1);
-      I(g != std::numeric_limits<int>::min());
-      
-      // at this point, g should contain the highest reduction cost
-      gv.push_back(g);
-      
-      av.push_back(a_max_i);
-      bv.push_back(b_max_i);
-      
-      m[a_max_i].active = false;
-      m[b_max_i].active = false;
+      if (cost == std::numeric_limits<int>::min()) {
+        // if nothing in our adjacency list is connected to anything else anymore, no point in going on.
+        break;
+      }
 
-      for (size_t i = 0; i < graph_size; i++) {
-        if (m[i].active) {
-          if (m[i].set == 0) {
-            m[i].d_cost = m[i].d_cost + 2 * m[i].connect_cost[a_max_i] - 2 * m[i].connect_cost[b_max_i];
+      I(a_max != g.null_vert()); // these should be written with legal indices
+      I(b_max != g.null_vert());
+      
+      // at this point, cost should contain the highest reduction cost
+      cv.push_back(cost);
+      
+      av.insert(a_max);
+      bv.insert(b_max);
+
+      std::cout << "adding " << info.names[a_max] << " to a, " << info.names[b_max] << " to b, cost " << cost << std::endl;
+      
+      cmap[a_max].active = false;
+      cmap[b_max].active = false;
+      
+      // find a connection cost in the graph given two verts
+      auto find_edge = [&g, &cmap](decltype(g.insert_vert()) src, decltype(g.insert_vert()) dst) -> decltype(g.insert_edge(g.insert_vert(), g.insert_vert())) {
+        for (const auto& e : g.out_edges(src)) {
+          auto other_v = g.head(e);
+          if (other_v == dst && cmap[other_v].active) {
+            return e;
+          }
+        }
+        return g.null_edge();
+      };
+
+      // recalculate costs considering a_max and b_max swapped
+      for (const auto& v : g.verts()) {
+        if (cmap[v].active) {
+          if (cmap[v].set == 0) {
+            cmap[v].d_cost = cmap[v].d_cost + 2 * info.weights[find_edge(v, a_max)] - 2 * info.weights[find_edge(v, b_max)];
           } else {
-            m[i].d_cost = m[i].d_cost + 2 * m[i].connect_cost[b_max_i] - 2 * m[i].connect_cost[a_max_i];
+            cmap[v].d_cost = cmap[v].d_cost + 2 * info.weights[find_edge(v, b_max)] - 2 * info.weights[find_edge(v, a_max)];
           }
         }
       }
     }
-
-    auto check_sum = [&gv]() -> bool {
+    
+    auto check_sum = [&cv]() -> bool {
       int total = 0;
-      for (const auto& g : gv) {
-        total += g;
+      for (const auto& c : cv) {
+        total += c;
       }
       return total == 0;
     };
     
-    I(check_sum()); // moving all elements from one set to the other should have no effect
+    I(check_sum()); // applying all swaps (aka swapping the sets) should have no effect
+    
+    /*
 
     // calculate the maximum benefit reduction out of all reductions possible in this iteration
     best_decrease = 0;
