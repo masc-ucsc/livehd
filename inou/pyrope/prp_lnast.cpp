@@ -1190,10 +1190,17 @@ Lnast_node Prp_lnast::eval_tuple_array_notation(mmap_lib::Tree_index idx_start_a
   // go to the actual select expression in that node
   ast_nxt_idx = ast->get_sibling_next(ast_nxt_idx);
 
-  // first evaluate the select expression
-  Lnast_node sel_rhs = eval_rule(ast_nxt_idx, idx_nxt_ln);
-  ;
-
+  std::vector<Lnast_node> index_nodes;
+  while(1){
+    // assume we're starting on the first actual node
+    index_nodes.push_back(eval_rule(ast_nxt_idx, idx_start_ln));
+    ast_nxt_idx = ast->get_sibling_next(ast_nxt_idx); // goes to the close bracket
+    ast_nxt_idx = ast->get_sibling_next(ast_nxt_idx); // goes to the open bracket
+    if(ast_nxt_idx == ast->invalid_index())
+      break;
+    ast_nxt_idx = ast->get_sibling_next(ast_nxt_idx); // go to the next element
+  }
+  
   // create sel node
   auto idx_sel_root = lnast->add_child(idx_nxt_ln, Lnast_node::create_select(""));
 
@@ -1205,9 +1212,11 @@ Lnast_node Prp_lnast::eval_tuple_array_notation(mmap_lib::Tree_index idx_start_a
 
   // add the identifier of the tuple being selected
   lnast->add_child(idx_sel_root, Lnast_node::create_ref(get_token(ast->get_data(ast->get_child(idx_start_ast)).token_entry)));
-
-  // add the rhs value of the select expression
-  lnast->add_child(idx_sel_root, sel_rhs);
+  
+  // add all the select indexes
+  for(auto node:index_nodes){
+    lnast->add_child(idx_sel_root, node);
+  }
 
   return retnode;
 }
@@ -1466,41 +1475,77 @@ Lnast_node Prp_lnast::eval_fcall_implicit(mmap_lib::Tree_index idx_start_ast, mm
 Lnast_node Prp_lnast::eval_tuple_dot_notation(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln) {
   mmap_lib::Tree_index idx_nxt_ln = cur_stmts;
   // root is a tuple_dot_notation node
-
-  // create the lhs temp variable
-  auto lnast_temp = lnast->add_string(current_temp_var);
-  auto lhs_node   = Lnast_node::create_ref(lnast_temp);
-  get_next_temp_var();
-
-  // evaluate any expressions on the LHS
-  auto idx_lhs = ast->get_child(idx_start_ast);
-  auto lhs_ast_node = eval_rule(idx_lhs, idx_nxt_ln);
-
-  // go to the tuple_dot_dot root
-  auto idx_nxt_ast = ast->get_last_child(idx_start_ast);
-
-  // go down to the first dot
+  
+  // move to the first element whose attribute is being accessed
+  auto idx_nxt_ast = ast->get_child(idx_start_ast);
+  
+  // evaluate that first element on its own
+  auto accessed_el = eval_rule(idx_nxt_ast, idx_start_ln);
+  
+  idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast);
   idx_nxt_ast = ast->get_child(idx_nxt_ast);
-
-  std::vector<Lnast_node> dot_chain_nodes;
   
-  while (scan_text(ast->get_data(idx_nxt_ast).token_entry) == ".") {
+  while (idx_nxt_ast != ast->invalid_index()) {
+    // need three things: the LHS (temp variable)
+    // the element whose attribute is being accessed
+    // the attribute that is being accessed
+    idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast); // move past the dot
+    // TODO: more special cases?
+    // evaluate the attribute being accessed, but there is a special case for tuple_array_notation
+    auto attribute_node = ast->get_data(idx_nxt_ast);
+    
+    Lnast_node accessed_attribute;
+    bool attribute_is_sel = false;
+    if(attribute_node.rule_id == Prp_rule_tuple_array_notation){
+      // need to select the resolved attribute, not the name of the attribute
+      auto idx_attribute = ast->get_child(idx_nxt_ast);
+      accessed_attribute = eval_rule(idx_attribute, idx_start_ln);
+      attribute_is_sel = true;
+    }
+    else{
+      accessed_attribute = eval_rule(idx_nxt_ast, idx_start_ln);
+    }
+    
+    auto lnast_temp = lnast->add_string(current_temp_var);
+    auto dot_lhs    = Lnast_node::create_ref(lnast_temp);
+    get_next_temp_var();
+    
+    // create the dot and all of its children
+    auto idx_dot_root = lnast->add_child(cur_stmts, Lnast_node::create_dot(""));
+    lnast->add_child(idx_dot_root, dot_lhs);
+    lnast->add_child(idx_dot_root, accessed_el);
+    lnast->add_child(idx_dot_root, accessed_attribute);
+    
+    if(attribute_is_sel){
+      // create a select node
+      auto sel_root = Lnast_node::create_select("");
+      auto idx_attribute = ast->get_child(idx_nxt_ast);
+      auto idx_tuple_array_brack = ast->get_sibling_next(idx_attribute);
+      auto idx_first_brack = ast->get_child(idx_tuple_array_brack);
+      auto idx_sel_idx_ast = ast->get_sibling_next(idx_first_brack);
+      
+      lnast_temp = lnast->add_string(current_temp_var);
+      auto sel_rhs = Lnast_node::create_ref(lnast_temp);
+      get_next_temp_var();
+      
+      // evaluate the select expression
+      auto sel_index = eval_rule(idx_sel_idx_ast, idx_start_ln);
+      
+      auto idx_sel_root = lnast->add_child(cur_stmts, sel_root);
+      lnast->add_child(idx_sel_root, sel_rhs);
+      lnast->add_child(idx_sel_root, dot_lhs);
+      lnast->add_child(idx_sel_root, sel_index);
+      accessed_el = sel_rhs;
+    }
+    else{
+      accessed_el = dot_lhs;
+    }
+    
+    // go to the next dot, or to invalid index
     idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast);
-    dot_chain_nodes.push_back(eval_rule(idx_nxt_ast, idx_start_ln));
-    idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast);
-    if (idx_nxt_ast == ast->invalid_index())
-      break;
-  }
-  
-  auto idx_dot_root = lnast->add_child(idx_nxt_ln, Lnast_node::create_dot(""));
-  
-  lnast->add_child(idx_dot_root, lhs_node);
-  lnast->add_child(idx_dot_root, lhs_ast_node);
-  for(auto node : dot_chain_nodes){
-    lnast->add_child(idx_dot_root, node);
   }
 
-  return lhs_node;
+  return accessed_el; 
 }
 
 Lnast_node Prp_lnast::eval_bit_selection_notation(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln) {
