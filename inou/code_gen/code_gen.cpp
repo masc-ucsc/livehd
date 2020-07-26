@@ -384,8 +384,15 @@ void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index) {
     ref = map_it->second;
   }
 
-  const auto& dot_node_data = lnast->get_data(dot_node_index);
-  std::string value = absl::StrCat(ref, lnast_to->debug_name_lang(dot_node_data.type), process_number(dot_str_vect[2]));
+  std::string value ;
+  if (dot_str_vect[2]=="__valid") {
+    value = absl::StrCat(ref, "?");
+  } else if (dot_str_vect[2]=="__retry") {
+    value = absl::StrCat(ref, "!");
+  } else {
+    const auto& dot_node_data = lnast->get_data(dot_node_index);
+    value = absl::StrCat(ref, lnast_to->debug_name_lang(dot_node_data.type), process_number(dot_str_vect[2]));
+  }
 
   if (is_temp_var(key)) {
     ref_map.insert(std::pair<std::string_view, std::string>(key, value));
@@ -434,21 +441,23 @@ void Code_gen::do_tuple(const mmap_lib::Tree_index& tuple_node_index) {
   auto curr_index = lnast->get_first_child(tuple_node_index);
   //const auto& curr_node_data = lnast->get_data(curr_index);
   std::string_view key = lnast->get_name(curr_index);
-  curr_index = lnast->get_sibling_next(curr_index);
 
   //Process remaining nodes/sub-trees:
+  curr_index = lnast->get_sibling_next(curr_index);
   std::string tuple_value = "";
   while(curr_index!=lnast->invalid_index()) {
     absl::StrAppend(&tuple_value, resolve_tuple_assign(curr_index));
     curr_index = lnast->get_sibling_next(curr_index);
   }
 
-  if (tuple_value.substr(tuple_value.length()-2) == lnast_to->tuple_stmt_sep()) {
-    tuple_value = absl::StrCat("(", tuple_value);
-    tuple_value.pop_back();
-    tuple_value.pop_back();//to remove the extra (last) tuple stmt sep inserted
-    absl::StrAppend(&tuple_value, ")");
-  }
+  if (tuple_value.length()>2) {
+    if (tuple_value.substr(tuple_value.length()-2) == lnast_to->tuple_stmt_sep()) {
+      tuple_value = absl::StrCat(lnast_to->tuple_begin(), tuple_value);
+      tuple_value.pop_back();
+      tuple_value.pop_back();//to remove the extra (last) tuple stmt sep inserted
+      absl::StrAppend(&tuple_value, lnast_to->tuple_end());
+    }
+  } else if (tuple_value=="") { tuple_value = absl::StrCat(tuple_begin(), tuple_end()) ;}//to cater to scenario like: out = () :in ring.prp
 
   //insert to map:
   if(is_temp_var(key)) {
@@ -556,7 +565,7 @@ bool Code_gen::is_number(std::string_view test_string) {
 std::string_view Code_gen::process_number(std::string_view num_string) {
   if (num_string.find("0d") == 0) {
     return num_string.substr(2);
-  }
+  } 
   return num_string;
 }
 
