@@ -405,7 +405,6 @@ void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index) {
   auto curr_index = lnast->get_first_child(dot_node_index);
   std::vector<std::string_view> dot_str_vect;
   while(curr_index!=lnast->invalid_index()) {
-    //const auto& curr_node_data = lnast->get_data(curr_index);
     auto curlvl = curr_index.level;
     fmt::print("Processing dot child {} at level {} \n",lnast->get_name(curr_index), curlvl);
     dot_str_vect.push_back(lnast->get_name(curr_index));
@@ -415,22 +414,28 @@ void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index) {
 
   assert(dot_str_vect.size()>2);
   auto key = dot_str_vect.front();
-  auto ref = dot_str_vect[1];
 
-  auto map_it = ref_map.find(ref);
-  if (map_it != ref_map.end()) {
-    ref = map_it->second;
+  int i = 1;
+  std::string value;
+  const auto& dot_node_data = lnast->get_data(dot_node_index);
+  while (i<dot_str_vect.size()) {
+    auto ref = std::string(dot_str_vect[i]);
+    auto map_it = ref_map.find(ref);
+    if (map_it != ref_map.end()) {
+      ref = map_it->second;
+    }
+    absl::StrAppend(&value, ref);
+    if (ref=="__valid") {
+      absl::StrAppend(&value, "?");
+    } else if (ref=="__retry") {
+      absl::StrAppend(&value, "!");
+    } else if (is_number(ref)) {
+      absl::StrAppend(&value, process_number(ref));
+    }
+    absl::StrAppend(&value, lnast_to->debug_name_lang(dot_node_data.type));
+    i++;
   }
-
-  std::string value ;
-  if (dot_str_vect[2]=="__valid") {
-    value = absl::StrCat(ref, "?");
-  } else if (dot_str_vect[2]=="__retry") {
-    value = absl::StrCat(ref, "!");
-  } else {
-    const auto& dot_node_data = lnast->get_data(dot_node_index);
-    value = absl::StrCat(ref, lnast_to->debug_name_lang(dot_node_data.type), process_number(dot_str_vect[2]));
-  }
+  value.pop_back();
 
   if (is_temp_var(key)) {
     ref_map.insert(std::pair<std::string_view, std::string>(key, value));
