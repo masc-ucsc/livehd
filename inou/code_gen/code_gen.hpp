@@ -23,6 +23,7 @@ public:
   void generate();
   void do_stmts(const mmap_lib::Tree_index& stmt_node_index);
   void do_assign(const mmap_lib::Tree_index& assign_node_index);
+  void do_for(const mmap_lib::Tree_index& assign_node_index);
   void do_op(const mmap_lib::Tree_index& op_node_index);
   void do_dot(const mmap_lib::Tree_index& dot_node_index);
   void do_if(const mmap_lib::Tree_index& dot_node_index);
