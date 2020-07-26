@@ -155,9 +155,8 @@ void Hier_tree::prune_matrix(Cost_matrix& m) {
 }
 */
 
-std::pair<Graph_info &&, Graph_info &&> Hier_tree::min_wire_cut(Graph_info && rinfo) {
+void Hier_tree::min_wire_cut(Graph_info& info) {
   
-  auto info = std::move(rinfo);
   auto& g = info.al;
   
   const unsigned int graph_size = g.order();
@@ -181,11 +180,10 @@ std::pair<Graph_info &&, Graph_info &&> Hier_tree::min_wire_cut(Graph_info && ri
 
   do {
     // (re)calculate delta costs for each node
-    for (const auto& v : g.verts()) {
+    for (const vertex& v : g.verts()) {
       int exter = 0;
       int inter = 0;
-      cmap[v].active = true; // set element to active if it wasn't before
-      for (const auto& e : g.out_edges(v)) {
+      for (const edge& e : g.out_edges(v)) {
         auto other_v = g.head(e);
         if (cmap(other_v).set != cmap(v).set) {
           exter += info.weights[e];
@@ -199,18 +197,19 @@ std::pair<Graph_info &&, Graph_info &&> Hier_tree::min_wire_cut(Graph_info && ri
 #ifndef NDEBUG
     std::cout << std::endl;
     std::cout << "connection list:" << std::endl;
-    for (const auto& v : g.verts()) {
-      std::cout << info.names(v) << "\t" << ((cmap(v).set == 0) ? "(a" : "(b") << ", d: " << cmap(v).d_cost << ") [";
-      for (const auto& e : g.out_edges(v)) {
-        std::cout << info.names(g.head(e)) << ", ";
+    for (const vertex& v : g.verts()) {
+      std::cout << info.names(v) << "\t" << ((cmap(v).set == 0) ? "(set a" : "(set b") << ", cost: " << cmap(v).d_cost << ") [";
+      for (const edge& e : g.out_edges(v)) {
+        if (info.weights(e) != 0) {
+          // don't print connections with no weight, as they don't matter.
+          std::cout << info.names(g.head(e)) << ", ";
+        }
       }
       std::cout << "]" << std::endl;
     }
 #endif
     
-    auto av = g.vert_set();
-    auto bv = g.vert_set();
-
+    std::vector<vertex> av, bv;
     std::vector<int> cv;
     
     // remove the node pair with the highest global reduction in cost, and add it to cv.
@@ -222,10 +221,10 @@ std::pair<Graph_info &&, Graph_info &&> Hier_tree::min_wire_cut(Graph_info && ri
       auto a_max = g.null_vert();
       auto b_max = g.null_vert();
       
-      for (const auto& v : g.verts()) {
+      for (const vertex& v : g.verts()) {
         if (cmap(v).active) {
           // row is in the "a" set and hasn't been deleted
-          for (const auto& e : g.out_edges(v)) {
+          for (const edge& e : g.out_edges(v)) {
             auto other_v = g.head(e);
             if (cmap(v).set == 0 && cmap(other_v).set == 1 && cmap(other_v).active) {
               // only select nodes in the other set
@@ -251,18 +250,16 @@ std::pair<Graph_info &&, Graph_info &&> Hier_tree::min_wire_cut(Graph_info && ri
       // at this point, cost should contain the highest reduction cost
       cv.push_back(cost);
       
-      av.insert(a_max);
-      bv.insert(b_max);
+      av.push_back(a_max);
+      bv.push_back(b_max);
 
-      std::cout << "adding " << info.names(a_max) << " to a, " << info.names(b_max) << " to b, cost " << cost << std::endl;
-      
       cmap[a_max].active = false;
       cmap[b_max].active = false;
       
-      auto find_edge_to_max = [&g, &cmap](decltype(g.insert_vert()) v, decltype(g.insert_vert()) max) -> decltype(g.insert_edge(g.insert_vert(), g.insert_vert())) {
+      auto find_edge_to_max = [&g, &cmap](vertex v, vertex max) -> edge {
         if (cmap[v].active) {
-          for (const auto& e : g.out_edges(v)) {
-            auto other_v = g.head(e);
+          for (const edge& e : g.out_edges(v)) {
+            vertex other_v = g.head(e);
             if (other_v == max) { // no checking if other_v is active since the maxes were just deactivated
               return e;
             }
@@ -272,7 +269,7 @@ std::pair<Graph_info &&, Graph_info &&> Hier_tree::min_wire_cut(Graph_info && ri
       };
 
       // recalculate costs considering a_max and b_max swapped
-      for (const auto& v : g.verts()) {
+      for (const vertex& v : g.verts()) {
         if (cmap(v).set == 0) {
           cmap[v].d_cost = cmap(v).d_cost + 2 * info.weights(find_edge_to_max(v, a_max)) - 2 * info.weights(find_edge_to_max(v, b_max));
         } else {
@@ -283,7 +280,7 @@ std::pair<Graph_info &&, Graph_info &&> Hier_tree::min_wire_cut(Graph_info && ri
     
     auto check_sum = [&cv]() -> bool {
       int total = 0;
-      for (const auto& c : cv) {
+      for (const unsigned int c : cv) {
         total += c;
       }
       return total == 0;
@@ -291,58 +288,35 @@ std::pair<Graph_info &&, Graph_info &&> Hier_tree::min_wire_cut(Graph_info && ri
     
     I(check_sum()); // applying all swaps (aka swapping the sets) should have no effect
     
-    /*
-
     // calculate the maximum benefit reduction out of all reductions possible in this iteration
     best_decrease = 0;
-
     size_t decrease_index = 0;
-    for (size_t k = 0; k < gv.size(); k++) {
+    
+    for (size_t k = 0; k < cv.size(); k++) {
       int trial_decrease = 0;
       for (size_t i = 0; i < k; i++) {
-        trial_decrease += gv[i];
+        trial_decrease += cv[i];
       }
       if (trial_decrease > best_decrease) {
         best_decrease = trial_decrease;
         decrease_index = k;
       }
     }
-
+    
     // if the maximum reduction has a higher external cost than internal cost, there's something we can do.
     if (best_decrease > 0) {
       for (size_t i = 0; i < decrease_index; i++) {
-        std::cout << "swapping " << m[av[i]].node->name << " with " << m[bv[i]].node->name << std::endl;
-        std::swap(m[av[i]].set, m[bv[i]].set);
+        std::cout << "swapping " << info.names(av[i]) << " with " << info.names(bv[i]) << std::endl;
+        std::swap(cmap[av[i]].set, cmap[bv[i]].set);
       }
     }
 
-    for (size_t i = 0; i < graph_size; i++) {
-      m[i].active = true;
+    for (const vertex& v : g.verts()) {
+      cmap[v].active = true;
     }
 
     // use the better sets as inputs to the algorithm, and run another iteration if there looks to be a better decrease
-    */
   } while (best_decrease > 0);
-  
-  /*
-  // strip weight information and return vectors
-  std::vector<pnetl> a_res, b_res;
-  
-  a_res.reserve(set_size);
-  b_res.reserve(set_size);
-
-  for (size_t i = 0; i < graph_size; i++) {
-    if (m[i].set == 0) {
-      a_res.push_back(m[i].node);
-    } else {
-      b_res.push_back(m[i].node);
-    }
-  }
-
-  return std::pair(a_res, b_res);
-  */
-  // temp return
-  return std::pair(std::move(info), std::move(info));
 }
 
 /*
@@ -380,20 +354,14 @@ phier Hier_tree::discover_hierarchy(Graph_info && info) {
     return p; // TODO: ??
   }
   
-  auto [i1, i2] = min_wire_cut(std::move(info));
-  //auto m_pair = halve_matrix(m);
-
-  #ifndef NDEBUG
-  std::cout << "A set contains:" << std::endl;
-  //for (const auto& elem : cut_pair.first) {
-    //std::cout << "\t" << elem->name << std::endl;
-  //}
-
-  std::cout << std::endl << "B set contains:" << std::endl;
-  //for (const auto& elem : cut_pair.second) {
-    //std::cout << "\t" << elem->name << std::endl;
-  //}
-  #endif
+  min_wire_cut(info);
+  
+#ifndef NDEBUG
+  std::cout << "a set:" << std::endl;
+  std::cout << std::endl << "b set:" << std::endl;
+#endif
+  
+  // TODO: not sure how to run discovery on incomplete graphs...?
 
   //phier t1 = discover_hierarchy(m_pair.first);
   //phier t2 = discover_hierarchy(m_pair.second);
