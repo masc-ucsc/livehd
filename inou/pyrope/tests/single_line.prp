@@ -1,3 +1,1 @@
-if "hello" {
-  %out = false
-}
+x = (a=2, 3)
