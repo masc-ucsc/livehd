@@ -101,9 +101,9 @@ void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
       do_func_def(curr_index);
     } else if (curr_node_type.is_func_call()) {
       do_func_call(curr_index);
+    } else if (curr_node_type.is_for()) {
+      do_for(curr_index);
     }
-
-
 
     curr_index = lnast->get_sibling_next(curr_index);
   }
@@ -144,6 +144,37 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index) {
   } else {
     absl::StrAppend(&buffer_to_print, indent(), key, " ", lnast_to->debug_name_lang(assign_node_data.type), " ", (std::string)ref, lnast_to->stmt_sep());
   }
+}
+//-------------------------------------------------------------------------------------
+//Process the for node:
+//pattern: for -> stmts , ref "i" , ref "___a"
+//example: for i in 0..3 {//stmts}
+//0..3 is resolved as ___a as tuple already.
+void Code_gen::do_for(const mmap_lib::Tree_index& for_node_index) {
+  fmt::print("node:for\n");
+  absl::StrAppend(&buffer_to_print, indent(),  "for");
+
+  auto stmt_index = lnast->get_first_child(for_node_index);
+
+  auto curr_index = lnast->get_sibling_next(stmt_index);
+  absl::StrAppend(&buffer_to_print, lnast_to->for_cond_beg(), lnast->get_name(curr_index), " in ");
+
+  curr_index = lnast->get_sibling_next(curr_index);
+  auto ref = lnast->get_name(curr_index);
+  if(is_temp_var(ref)) {
+    auto map_it = ref_map.find(ref);
+    if(map_it != ref_map.end()) {
+      ref = map_it->second;
+    }
+  }
+  absl::StrAppend(&buffer_to_print, ref, lnast_to->for_cond_end());
+
+  absl::StrAppend(&buffer_to_print, lnast_to->for_stmt_beg());
+  indendation++;
+  do_stmts(stmt_index);
+  indendation--;
+  absl::StrAppend(&buffer_to_print, lnast_to->for_stmt_end());
+
 }
 //-------------------------------------------------------------------------------------
 //Process the "func_def" node:Eg.:
@@ -217,7 +248,14 @@ void Code_gen::do_func_call(const mmap_lib::Tree_index& func_call_node_index) {
   fmt::print("node:func_call\n");
   auto curr_index = lnast->get_first_child(func_call_node_index);
   //const auto& curr_node_data = lnast->get_data(func_cond_index);//returns the entire node contents.
-  absl::StrAppend(&buffer_to_print, indent(), lnast->get_name(curr_index), " = ");//lhs and assignment op to further assign the func name and arguments to lhs
+  auto lhs = lnast->get_name(curr_index);
+  if (is_temp_var(lhs)) {
+    auto map_it = ref_map.find(lhs);
+    if(map_it != ref_map.end()) {
+      lhs = map_it->second;
+    }
+  }
+  absl::StrAppend(&buffer_to_print, indent(), lhs, " = ");//lhs and assignment op to further assign the func name and arguments to lhs
 
   curr_index = lnast->get_sibling_next(curr_index);
   absl::StrAppend(&buffer_to_print, lnast->get_name(curr_index));//printitng the func name(the func called)
@@ -457,7 +495,7 @@ void Code_gen::do_tuple(const mmap_lib::Tree_index& tuple_node_index) {
       tuple_value.pop_back();//to remove the extra (last) tuple stmt sep inserted
       absl::StrAppend(&tuple_value, lnast_to->tuple_end());
     }
-  } else if (tuple_value=="") { tuple_value = absl::StrCat(tuple_begin(), tuple_end()) ;}//to cater to scenario like: out = () :in ring.prp
+  } else if (tuple_value=="") { tuple_value = absl::StrCat(lnast_to->tuple_begin(), lnast_to->tuple_end()) ;}//to cater to scenario like: out = () :in ring.prp
 
   //insert to map:
   if(is_temp_var(key)) {
