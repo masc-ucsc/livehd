@@ -95,7 +95,7 @@ Graph_info Json_inou_parser::make_tree() const {
   }
   
   // if the graph is not fully connected, ker-lin fails to work.
-  // TODO: eventually replace this with an adjacency matrix, since it's significantly cheaper than this.
+  // TODO: eventually replace this with an adjacency matrix, since it's probably faster.
   for (const auto& v : g.verts()) {
     for (const auto& other_v : g.verts()) {
       bool found = false;

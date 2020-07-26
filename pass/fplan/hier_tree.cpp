@@ -227,7 +227,7 @@ std::pair<Graph_info &&, Graph_info &&> Hier_tree::min_wire_cut(Graph_info && ri
           // row is in the "a" set and hasn't been deleted
           for (const auto& e : g.out_edges(v)) {
             auto other_v = g.head(e);
-            if (cmap(other_v).set != cmap(v).set && cmap(other_v).active) {
+            if (cmap(v).set == 0 && cmap(other_v).set == 1 && cmap(other_v).active) {
               // only select nodes in the other set
               int new_cost = cmap(v).d_cost + cmap(other_v).d_cost - 2 * info.weights(e);
               if (new_cost > cost) {
