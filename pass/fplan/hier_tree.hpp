@@ -84,7 +84,6 @@ private:
   Hier_node discover_hierarchy();
 
   // gets the size of the hierarchy starting at root and caches it at the node for later
-  // TODO: maybe easy to calculate using the order from graph lib? idk
   unsigned int size(const phier root);
   
   // split a cost matrix into two cost matrices
@@ -97,10 +96,13 @@ private:
   //void prune_matrix(Cost_matrix& m);
   
   typedef decltype(graph::Bi_adjacency_list().vert_map<Min_cut_data>()) Min_cut_map;
+  typedef decltype(graph::Bi_adjacency_list().insert_vert()) vertex;
+  typedef decltype(graph::Bi_adjacency_list().insert_edge(graph::Bi_adjacency_list().insert_vert(), graph::Bi_adjacency_list().insert_vert())) edge;
+
   void populate_cost_map(const graph::Bi_adjacency_list& g, Min_cut_map& m);
 
   // make a partition of the graph minimizing the number of edges crossing the cut and keeping in mind area (modified kernighan-lin algorithm)
-  std::pair<Graph_info &&, Graph_info &&> min_wire_cut(Graph_info && info);
+  void min_wire_cut(Graph_info& info);
   
   // create a hierarchy tree out of existing hierarchies
   //phier make_hier_tree(phier t1, phier t2);

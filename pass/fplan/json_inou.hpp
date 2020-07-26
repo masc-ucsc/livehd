@@ -30,7 +30,7 @@ public:
     decltype(graph::Bi_adjacency_list().vert_map<double>()) && new_areas,
     decltype(graph::Bi_adjacency_list().edge_map<unsigned int>()) && new_weights
   ) : al(std::move(new_list)), names(std::move(new_names)), areas(std::move(new_areas)), weights(std::move(new_weights)) { }
-
+  
 #ifndef NDEBUG
   void print() {
     using namespace graph::attributes;
