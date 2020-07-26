@@ -1472,13 +1472,9 @@ Lnast_node Prp_lnast::eval_tuple_dot_notation(mmap_lib::Tree_index idx_start_ast
   auto lhs_node   = Lnast_node::create_ref(lnast_temp);
   get_next_temp_var();
 
-  auto idx_dot_root = lnast->add_child(idx_nxt_ln, Lnast_node::create_dot(""));
-
-  // add the LHS node
-  lnast->add_child(idx_dot_root, lhs_node);
-
-  // add the top level identifier
-  lnast->add_child(idx_dot_root, Lnast_node::create_ref(get_token(ast->get_data(ast->get_child(idx_start_ast)).token_entry)));
+  // evaluate any expressions on the LHS
+  auto idx_lhs = ast->get_child(idx_start_ast);
+  auto lhs_ast_node = eval_rule(idx_lhs, idx_nxt_ln);
 
   // go to the tuple_dot_dot root
   auto idx_nxt_ast = ast->get_last_child(idx_start_ast);
@@ -1486,12 +1482,22 @@ Lnast_node Prp_lnast::eval_tuple_dot_notation(mmap_lib::Tree_index idx_start_ast
   // go down to the first dot
   idx_nxt_ast = ast->get_child(idx_nxt_ast);
 
+  std::vector<Lnast_node> dot_chain_nodes;
+  
   while (scan_text(ast->get_data(idx_nxt_ast).token_entry) == ".") {
     idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast);
-    lnast->add_child(idx_dot_root, eval_rule(idx_nxt_ast, idx_dot_root));
+    dot_chain_nodes.push_back(eval_rule(idx_nxt_ast, idx_start_ln));
     idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast);
     if (idx_nxt_ast == ast->invalid_index())
       break;
+  }
+  
+  auto idx_dot_root = lnast->add_child(idx_nxt_ln, Lnast_node::create_dot(""));
+  
+  lnast->add_child(idx_dot_root, lhs_node);
+  lnast->add_child(idx_dot_root, lhs_ast_node);
+  for(auto node : dot_chain_nodes){
+    lnast->add_child(idx_dot_root, node);
   }
 
   return lhs_node;
