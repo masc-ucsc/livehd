@@ -21,6 +21,8 @@ public:
 
   std::string_view start_cond() {return "if (";}
   std::string_view tuple_stmt_sep() {return ", ";}
+  std::string_view tuple_begin() {return "(";}
+  std::string_view tuple_end() {return ")";}
 
   //TODO: func def related parameters: need to make language specific! currently as per pyrope:
   std::string_view func_begin() {return "";}
