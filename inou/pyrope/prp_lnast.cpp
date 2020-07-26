@@ -458,7 +458,7 @@ void Prp_lnast::eval_while_statement(mmap_lib::Tree_index idx_start_ast, mmap_li
 
   // create statements node
   auto lnast_seq = lnast->add_string("___SEQ" + std::to_string(current_seq++));
-  auto idx_stmts = lnast->add_child(idx_nxt_ln, Lnast_node::create_stmts(lnast_seq));
+  auto idx_stmts = lnast->add_child(idx_while_root, Lnast_node::create_stmts(lnast_seq));
 
   // evaluate the block inside the while
   auto old_stmts = cur_stmts;
