@@ -1,6 +1,5 @@
 notes.txt
 .vimrc
 makefile
-tests/hier_test.json
-tests/hier_test_diagram.txt
+tests/hier_test*
 tests/fp.cpp
