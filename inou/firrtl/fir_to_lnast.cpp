@@ -102,21 +102,7 @@ void Inou_firrtl::create_bitwidth_dot_node(Lnast& lnast, uint32_t bitwidth, Lnas
   }
 
   auto node = CreateDotsSelsFromStr(lnast, parent_node, port_id);
-
-  std::string_view bit_acc_name;
-  if (lnast.get_type(node).is_select()) {
-    auto access_name = lnast.get_name(lnast.get_first_child(node));
-    auto temp_var_name = create_temp_var(lnast);
-    auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_dot("new"));
-    lnast.add_child(idx_dot, Lnast_node::create_ref(temp_var_name));
-    lnast.add_child(idx_dot, Lnast_node::create_ref(access_name));
-    lnast.add_child(idx_dot, Lnast_node::create_ref("__bits"));
-    bit_acc_name = temp_var_name;
-  } else {
-    //node.is_dot()
-    lnast.add_child(node, Lnast_node::create_ref("__bits"));
-    bit_acc_name = lnast.get_name(lnast.get_first_child(node));
-  }
+  auto bit_acc_name = AddAttrToDotSelNode(lnast, parent_node, node, "__bits");
 
   auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("new"));
   lnast.add_child(idx_asg, Lnast_node::create_ref(bit_acc_name));
@@ -1735,9 +1721,9 @@ void Inou_firrtl::PopulateAllModsIO(Eprp_var& var, const firrtl::FirrtlPB_Circui
       //FIXME: Support
       // mod_to_io_map[circuit.module(i).external_module().id()] = vec;
     } else if (circuit.module(i).has_user_module()) {
-      //auto sub = AddModToLibrary(var, circuit.module(i).user_module().id(), file_name);
-      //uint64_t inp_pos = 0;
-      //uint64_t out_pos = 0;
+      auto sub = AddModToLibrary(var, circuit.module(i).user_module().id(), file_name);
+      uint64_t inp_pos = 0;
+      uint64_t out_pos = 0;
       for (int j = 0; j < circuit.module(i).user_module().port_size(); j++) {
         auto port = circuit.module(i).user_module().port(j);
         AddPortToMap(circuit.module(i).user_module().id(), port.type(), port.direction(), port.id());//, sub, inp_pos, out_pos);
@@ -1759,7 +1745,7 @@ Sub_node Inou_firrtl::AddModToLibrary(Eprp_var& var, const std::string& mod_name
   }
 
   auto *library = Graph_library::instance(fpath);
-  auto &sub = library->reset_sub(mod_name, "inou.lnast_dfg.tolg");//FIXME: change file name to file_name
+  auto &sub = library->reset_sub(mod_name, file_name);//FIXME: change file name to file_name
   return sub;
 }
 
