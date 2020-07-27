@@ -56,6 +56,7 @@ void Code_gen::generate(){
 //and all other nodes are checked in this
 //
 void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
+  fmt::print("node:stmts\n");
   if(lnast->is_leaf(stmt_node_index)) {return;} //check if no child node present
 
   auto curr_index = lnast->get_first_child(stmt_node_index);
@@ -536,7 +537,6 @@ void Code_gen::do_tuple(const mmap_lib::Tree_index& tuple_node_index) {
   std::string tuple_value = "";
   while(curr_index!=lnast->invalid_index() ) {
     if (lnast->is_leaf(curr_index)) {
-      fmt::print("\nHERE-----\n\t\ttuple_value:{}\n",tuple_value);
       absl::StrAppend(&tuple_value, std::string(lnast->get_name(curr_index)), lnast_to->tuple_stmt_sep());
     } else {
       absl::StrAppend(&tuple_value, resolve_tuple_assign(curr_index));
@@ -544,11 +544,8 @@ void Code_gen::do_tuple(const mmap_lib::Tree_index& tuple_node_index) {
     curr_index = lnast->get_sibling_next(curr_index);
   }
 
-      fmt::print("\nHERE1-----\n\t\ttuple_value:{}\n", tuple_value);
   if (tuple_value.length()>2) {
-      fmt::print("\nHERE2-----\n\t\ttuple_value:{}\n", tuple_value);
     if (tuple_value.substr(tuple_value.length()-2) == lnast_to->tuple_stmt_sep()) {
-      fmt::print("\nHERE3-----\n\t\ttuple_value:{}\n", tuple_value);
       tuple_value = absl::StrCat(lnast_to->tuple_begin(), tuple_value);
       tuple_value.pop_back();
       tuple_value.pop_back();//to remove the extra (last) tuple stmt sep inserted
@@ -558,7 +555,6 @@ void Code_gen::do_tuple(const mmap_lib::Tree_index& tuple_node_index) {
 
   //insert to map:
   if(is_temp_var(key)) {
-    fmt::print("\nHERE4-----\n\t\ttuple_value:{}\n", tuple_value);
     ref_map.insert(std::pair<std::string_view, std::string>(key, tuple_value));
   } else {
     absl::StrAppend(&buffer_to_print, key, " saved as ", tuple_value, "\n");
@@ -637,9 +633,6 @@ std::string Code_gen::resolve_tuple_assign(const mmap_lib::Tree_index& tuple_ass
     return (ret_tup_str);
   }
 }
-//-------------------------------------------------------------------------------------
-//Get the textual value of node. Eg., get "$a" from the node "ref, $a":
-//no more required//std::string_view Code_gen::get_node_name(Lnast_node node) { return node.token.get_text(); }
 
 //-------------------------------------------------------------------------------------
 //check if the node has "___"
@@ -663,7 +656,7 @@ bool Code_gen::is_number(std::string_view test_string) {
 std::string_view Code_gen::process_number(std::string_view num_string) {
   if (num_string.find("0d") == 0) {
     return num_string.substr(2);
-  } 
+  }
   return num_string;
 }
 
