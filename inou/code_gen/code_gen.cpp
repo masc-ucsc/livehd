@@ -96,7 +96,9 @@ void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
     } else if (curr_node_type.is_tuple()) {
       do_tuple(curr_index);
     } else if (curr_node_type.is_select()) {
-      do_select(curr_index);
+      do_select(curr_index, "select");
+    } else if (curr_node_type.is_bit_select()) {
+      do_select(curr_index, "bit");
     } else if (curr_node_type.is_func_def()) {
       do_func_def(curr_index);
     } else if (curr_node_type.is_func_call()) {
@@ -481,7 +483,7 @@ void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index) {
 //-------------------------------------------------------------------------------------
 //Process the select node:
 //ref LNAST subtree: select,""  ->  ref,"___l" , ref,"A" , const,"0"
-void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index) {
+void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index, std::string select_type) {
   fmt::print("node:select\n");
   auto curr_index = lnast->get_first_child(select_node_index);
   std::vector<std::string_view> sel_str_vect;
@@ -491,11 +493,14 @@ void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index) {
     curr_index = lnast->get_sibling_next(curr_index);
   }
 
-  assert(sel_str_vect.size()>=3);
+  if (select_type=="bit") { assert(sel_str_vect.size()>=2); } else { assert(sel_str_vect.size()>=3);}
   auto key = sel_str_vect.front();
   std::string value = std::string(sel_str_vect[1]);
 
   int i = 2;
+  if (i==sel_str_vect.size()) {
+    absl::StrAppend(&value, lnast_to->select_init(select_type), lnast_to->select_end(select_type));
+  }
   while (i < sel_str_vect.size()) {
     auto ref = sel_str_vect[i];
 
@@ -504,9 +509,10 @@ void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index) {
       ref = map_it->second;
     }
 
-    absl::StrAppend(&value, "[", ref, "]");
+    absl::StrAppend(&value, lnast_to->select_init(select_type), ref, lnast_to->select_end(select_type));
     i++;
   }
+
   if (is_temp_var(key)) {
    // std::string value = absl::StrCat(sel_str_vect[1], "[", ref, "]");
     ref_map.insert(std::pair<std::string_view, std::string>(key, value));
