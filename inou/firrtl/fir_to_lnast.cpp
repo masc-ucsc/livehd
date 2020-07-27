@@ -1745,7 +1745,7 @@ Sub_node Inou_firrtl::AddModToLibrary(Eprp_var& var, const std::string& mod_name
   }
 
   auto *library = Graph_library::instance(fpath);
-  auto &sub = library->reset_sub(mod_name, file_name);//FIXME: change file name to file_name
+  auto &sub = library->reset_sub(mod_name, file_name);
   return sub;
 }
 
