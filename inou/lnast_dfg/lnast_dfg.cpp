@@ -10,7 +10,7 @@ Lnast_dfg::Lnast_dfg(const Eprp_var &_var, std::string_view _module_name) :
 
 std::vector<LGraph *> Lnast_dfg::do_tolg(std::shared_ptr<Lnast> ln, const Lnast_nid &top_stmts) {
     lnast = ln;
-    LGraph *dfg = LGraph::create(path, module_name, "inou.lnast_dfg.tolg");
+    LGraph *dfg = LGraph::create(path, module_name, lnast->get_source());//nou.lnast_dfg.tolg");
     std::vector<LGraph *> lgs;
     top_stmts2lgraph(dfg, top_stmts);
     lgs.push_back(dfg);
