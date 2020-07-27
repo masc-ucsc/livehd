@@ -49,5 +49,19 @@ public:
   //TODO: while related parameters: need to make language specific! currently as per pyrope:
   std::string_view while_cond_beg() {return "(";}
   std::string_view while_cond_end() {return ") ";}
+
+  //TODO: select related parameters: need to make language specific! currently as per pyrope:
+  std::string_view select_init(std::string select_type) {
+    if (select_type=="bit")
+      return "[[";
+    else
+      return "[";
+  }
+  std::string_view select_end(std::string select_type) {
+    if (select_type=="bit")
+      return "]]";
+else
+      return "]";
+  }
 };
 
