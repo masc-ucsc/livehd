@@ -57,8 +57,8 @@ protected:
   void HandleTypeConvOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, const std::string &lhs);
   void AttachExprStrToNode(Lnast &lnast, const std::string_view access_str, Lnast_nid &parent_node);
 
-  std::string HandleBundVecAcc(Lnast &lnast, const firrtl::FirrtlPB_Expression expr, Lnast_nid &parent_node, const bool is_rhs);
-  Lnast_nid CreateDotsSelsFromStr(Lnast& ln, Lnast_nid& parent_node, std::string& flattened_str);
+  Lnast_nid HandleBundVecAcc(Lnast &lnast, const firrtl::FirrtlPB_Expression expr, Lnast_nid &parent_node, const bool is_rhs);
+  Lnast_nid CreateDotsSelsFromStr(Lnast& ln, Lnast_nid& parent_node, const std::string& flattened_str);
   std::string FlattenExpression(Lnast &ln, Lnast_nid &parent_node, const firrtl::FirrtlPB_Expression &expr);
 
   // Deconstructing Protobuf Hierarchy
@@ -74,11 +74,14 @@ protected:
   void ListStatementInfo(Lnast &lnast, const firrtl::FirrtlPB_Statement &stmt, Lnast_nid &parent_node);
 
   void PopulateAllModsIO(Eprp_var& var, const firrtl::FirrtlPB_Circuit &circuit, const std::string& file_name);
-  void AddPortToMap(const std::string &mod_id, const firrtl::FirrtlPB_Type &type, uint8_t dir, const std::string &port_id);//Sub_node& sub, uint64_t &inp_pos, uint64_t &out_pos);
+  void AddPortToMap(const std::string &mod_id, const firrtl::FirrtlPB_Type &type, uint8_t dir, const std::string &port_id, Sub_node& sub, uint64_t &inp_pos, uint64_t &out_pos);
   void AddPortToSub(Sub_node& sub, uint64_t &inp_pos, uint64_t &out_pos, const std::string& port_id, const uint8_t& dir);
   Sub_node AddModToLibrary(Eprp_var& var, const std::string& mod_name, const std::string& file_name);
 
+  std::string ConvertBigIntToStr(const firrtl::FirrtlPB_BigInt& bigint);
+
   void ListUserModuleInfo(Eprp_var &var, const firrtl::FirrtlPB_Module &module, const std::string& file_name);
+  void GrabExtModuleInfo(const firrtl::FirrtlPB_Module_ExternalModule& emod);
   void ListModuleInfo(Eprp_var &var, const firrtl::FirrtlPB_Module &module, const std::string& file_name);
   void IterateModules(Eprp_var &var, const firrtl::FirrtlPB_Circuit &circuit, const std::string& file_name);
   void IterateCircuits(Eprp_var &var, const firrtl::FirrtlPB &firrtl_input, const std::string& file_name);
@@ -149,6 +152,8 @@ private:
   /* Maps module name to list of tuples of (signal name + signal biwdith + signal dir).
    * Used when a submodule inst is created, have to specify bw of all IO in module. */
   absl::flat_hash_map<std::string, absl::flat_hash_set<std::tuple<std::string, uint32_t, uint8_t>>> mod_to_io_map;
+  // Map used by external modules to indicate parameters names + values.
+  absl::flat_hash_map<std::string, absl::flat_hash_set<std::pair<std::string, std::string>>> emod_to_param_map;
 
   uint32_t temp_var_count;
   uint32_t seq_counter;

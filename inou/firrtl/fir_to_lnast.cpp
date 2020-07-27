@@ -314,15 +314,33 @@ void Inou_firrtl::create_module_inst(Lnast& lnast, const firrtl::FirrtlPB_Statem
    * a map that maps instance name to module name. */
   inst_to_mod_map[inst.id()] = inst.module_id();
 
+  // If any parameters exist (for ext module), specify those.
+  // NOTE->hunter: We currently specify parameters the same way as inputs.
+  for (const auto& param : emod_to_param_map[inst.module_id()]) {
+    auto temp_var_name_p  = create_temp_var(lnast);
+    auto idx_dot_p = lnast.add_child(parent_node, Lnast_node::create_dot("param"));
+    lnast.add_child(idx_dot_p, Lnast_node::create_ref(temp_var_name_p));
+    lnast.add_child(idx_dot_p, Lnast_node::create_ref(inp_name));
+    lnast.add_child(idx_dot_p, Lnast_node::create_ref(lnast.add_string(param.first)));
+
+    auto idx_asg_p = lnast.add_child(parent_node, Lnast_node::create_assign("param"));
+    lnast.add_child(idx_asg_p, Lnast_node::create_ref(temp_var_name_p));
+    if (isdigit(param.second[0])) {
+      lnast.add_child(idx_asg_p, Lnast_node::create_const(lnast.add_string(param.second)));
+    } else {
+      lnast.add_child(idx_asg_p, Lnast_node::create_ref(lnast.add_string(param.second)));
+    }
+  }
+
   // Specify the bitwidth of all IO of the submodule.
   for (const auto& name_bw_tup : mod_to_io_map[inst.module_id()]) {
-    auto port_name = std::get<0>(name_bw_tup);
     auto port_bw = std::get<1>(name_bw_tup);
+    if (port_bw <= 0) {
+      continue;
+    }
+    auto port_name = std::get<0>(name_bw_tup);
     auto port_dir = std::get<2>(name_bw_tup);
 
-    //auto temp_var_name_bw = create_temp_var(lnast);
-    //auto idx_dot_bw = lnast.add_child(parent_node, Lnast_node::create_dot(""));
-    //lnast.add_child(idx_dot_bw, Lnast_node::create_ref(temp_var_name_bw));
     std::string io_name;
     if (port_dir == 1) { // PORT_DIRECTION_IN
       io_name = absl::StrCat(inp_name, ".", port_name);
@@ -517,7 +535,8 @@ void Inou_firrtl::HandleConvOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_P
   auto temp_var_name0 = create_temp_var(lnast);
   auto temp_var_name1 = create_temp_var(lnast);
   auto lhs_sv = lnast.add_string(lhs);
-  auto e_str  = lnast.add_string(ReturnExprString(lnast, op.arg(0), parent_node, true));
+  auto eL_str  = lnast.add_string(ReturnExprString(lnast, op.arg(0), parent_node, false));
+  auto eR_str  = lnast.add_string(ReturnExprString(lnast, op.arg(0), parent_node, true));
 
   auto idx_dot1 = lnast.add_child(parent_node, Lnast_node::create_dot(""));
   lnast.add_child(idx_dot1, Lnast_node::create_ref(temp_var_name0));
@@ -530,10 +549,10 @@ void Inou_firrtl::HandleConvOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_P
 
   auto idx_if = lnast.add_child(parent_node, Lnast_node::create_if("conv"));
 
-  lnast.add_child(idx_if, Lnast_node::create_cstmts(get_new_seq_name(lnast)));
-  auto idx_dot2 = lnast.add_child(parent_node, Lnast_node::create_dot(""));
+  auto cstmts_idx = lnast.add_child(idx_if, Lnast_node::create_cstmts(get_new_seq_name(lnast)));
+  auto idx_dot2 = lnast.add_child(cstmts_idx, Lnast_node::create_dot(""));
   lnast.add_child(idx_dot2, Lnast_node::create_ref(temp_var_name1));
-  AttachExprStrToNode(lnast, e_str, idx_dot2);
+  AttachExprStrToNode(lnast, eL_str, idx_dot2);
   lnast.add_child(idx_dot2, Lnast_node::create_ref("__sign"));
 
   lnast.add_child(idx_if, Lnast_node::create_cond(temp_var_name1));
@@ -541,17 +560,17 @@ void Inou_firrtl::HandleConvOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_P
   auto idx_sts1 = lnast.add_child(idx_if, Lnast_node::create_stmts(get_new_seq_name(lnast)));
   auto idx_asg2 = lnast.add_child(idx_sts1, Lnast_node::create_assign(""));
   lnast.add_child(idx_asg2, Lnast_node::create_ref(lhs_sv));
-  AttachExprStrToNode(lnast, e_str, idx_asg2);
+  AttachExprStrToNode(lnast, eR_str, idx_asg2);
 
   auto idx_sts2 = lnast.add_child(idx_if, Lnast_node::create_stmts(get_new_seq_name(lnast)));
   auto idx_shl = lnast.add_child(idx_sts2, Lnast_node::create_shift_left(""));
   lnast.add_child(idx_shl, Lnast_node::create_ref(lhs_sv));
-  AttachExprStrToNode(lnast, e_str, idx_shl);
+  AttachExprStrToNode(lnast, eR_str, idx_shl);
   lnast.add_child(idx_shl, Lnast_node::create_const("1"));
 
   auto idx_asg3 = lnast.add_child(idx_sts2, Lnast_node::create_dp_assign(""));
   lnast.add_child(idx_asg3, Lnast_node::create_ref(lhs_sv));
-  AttachExprStrToNode(lnast, e_str, idx_asg3);
+  AttachExprStrToNode(lnast, eR_str, idx_asg3);
 }
 
 /* The Extract Bits primitive op is invoked on some variable
@@ -594,13 +613,14 @@ void Inou_firrtl::HandleHeadOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_P
   I(lnast.get_data(parent_node).type.is_stmts() || lnast.get_data(parent_node).type.is_cstmts());
   I(op.arg_size() == 1 && op.const__size() == 1);
 
-  auto e1_str           = lnast.add_string(ReturnExprString(lnast, op.arg(0), parent_node, true));
+  auto e1L_str          = lnast.add_string(ReturnExprString(lnast, op.arg(0), parent_node, false));
+  auto e1R_str          = lnast.add_string(ReturnExprString(lnast, op.arg(0), parent_node, true));
   auto temp_var_name_f0 = create_temp_var(lnast);
   auto temp_var_name_f1 = create_temp_var(lnast);
 
   auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_dot("dot_head"));
   lnast.add_child(idx_dot, Lnast_node::create_ref(temp_var_name_f0));
-  AttachExprStrToNode(lnast, e1_str, idx_dot);
+  AttachExprStrToNode(lnast, e1L_str, idx_dot);
   lnast.add_child(idx_dot, Lnast_node::create_ref("__bits"));
 
   auto idx_mns = lnast.add_child(parent_node, Lnast_node::create_minus("minus_head"));
@@ -610,7 +630,7 @@ void Inou_firrtl::HandleHeadOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_P
 
   auto idx_shr = lnast.add_child(parent_node, Lnast_node::create_shift_right("shr_head"));
   lnast.add_child(idx_shr, Lnast_node::create_ref(lnast.add_string(lhs)));
-  AttachExprStrToNode(lnast, e1_str, idx_shr);
+  AttachExprStrToNode(lnast, e1R_str, idx_shr);
   lnast.add_child(idx_shr, Lnast_node::create_ref(temp_var_name_f1));
 }
 
@@ -963,8 +983,8 @@ void Inou_firrtl::HandleTypeConvOp(Lnast& lnast, const firrtl::FirrtlPB_Expressi
  * instead rely upon a SELECT node. Sometimes, these three
  * can exist inside one another (vector of bundles) which
  * means we may need more than one DOT and/or SELECT node.
- * NOTE: This return the DOT/SELECT LHS name to access expr */
-std::string Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB_Expression expr, Lnast_nid& parent_node,
+ * NOTE: This return the final DOT/SELECT node made. */
+Lnast_nid Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB_Expression expr, Lnast_nid& parent_node,
                                           const bool is_rhs) {
   auto flattened_str = FlattenExpression(ln, parent_node, expr);
 
@@ -1008,14 +1028,13 @@ std::string Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB_Expr
   }
 
   I(flattened_str.find(".") || flattened_str.find("["));
-  auto node = CreateDotsSelsFromStr(ln, parent_node, flattened_str);
-  return (std::string)ln.get_name(ln.get_first_child(node));
+  return CreateDotsSelsFromStr(ln, parent_node, flattened_str);
 }
 
 /* Given a string with "."s and "["s in it, this
  * function will be able to deconstruct it into
  * DOT and SELECT nodes in an LNAST. */
-Lnast_nid Inou_firrtl::CreateDotsSelsFromStr(Lnast& ln, Lnast_nid& parent_node, std::string& flattened_str) {
+Lnast_nid Inou_firrtl::CreateDotsSelsFromStr(Lnast& ln, Lnast_nid& parent_node, const std::string& flattened_str) {
   if ((flattened_str.find(".") == std::string::npos) && (flattened_str.find("[") == std::string::npos)) {
     /* Be careful invoking this function on something with no "." or "[".
      * Where this function is called, another field must be added to this DOT. */
@@ -1391,7 +1410,8 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
       break;
     }
     case firrtl::FirrtlPB_Expression::kSubField: {  // SubField
-      std::string rhs = HandleBundVecAcc(lnast, expr, parent_node, true);
+      auto node = HandleBundVecAcc(lnast, expr, parent_node, true);
+      auto rhs  = (std::string)lnast.get_name(lnast.get_first_child((node)));
 
       Lnast_nid idx_asg;
       if (lhs.substr(0, 1) == "%") {
@@ -1480,7 +1500,8 @@ std::string Inou_firrtl::ReturnExprString(Lnast& lnast, const firrtl::FirrtlPB_E
     case firrtl::FirrtlPB_Expression::kSubField:     // SubField
     case firrtl::FirrtlPB_Expression::kSubIndex:     // SubIndex
     case firrtl::FirrtlPB_Expression::kSubAccess: {  // SubAccess
-      expr_string = HandleBundVecAcc(lnast, expr, parent_node, is_rhs);
+      auto node = HandleBundVecAcc(lnast, expr, parent_node, is_rhs);
+      expr_string = lnast.get_name(lnast.get_first_child(node));
       break;
     }
     case firrtl::FirrtlPB_Expression::kPrimOp: {  // PrimOp
@@ -1651,8 +1672,8 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
       break;
     }
     case firrtl::FirrtlPB_Statement::kIsInvalid: {  // IsInvalid
-      //TODO
-      I(false);
+      //TODO?
+      //I(false);
       break;
     }
     case firrtl::FirrtlPB_Statement::kMemoryPort: {  // MemoryPort
@@ -1701,11 +1722,9 @@ void Inou_firrtl::ListUserModuleInfo(Eprp_var& var, const firrtl::FirrtlPB_Modul
   var.add(std::move(lnast));
 }
 
-// TODO: External module handling.
 void Inou_firrtl::ListModuleInfo(Eprp_var& var, const firrtl::FirrtlPB_Module& module, const std::string& file_name) {
   if (module.has_external_module()) {
-    cout << "External module.\n";
-    I(false);  // FIXME: not yet implemented
+    GrabExtModuleInfo(module.external_module());
   } else if (module.has_user_module()) {
     ListUserModuleInfo(var, module, file_name);
   } else {
@@ -1718,15 +1737,17 @@ void Inou_firrtl::PopulateAllModsIO(Eprp_var& var, const firrtl::FirrtlPB_Circui
   for (int i = 0; i < circuit.module_size(); i++) {
     // std::vector<std::pair<std::string, uint8_t>> vec;
     if (circuit.module(i).has_external_module()) {
-      //FIXME: Support
-      // mod_to_io_map[circuit.module(i).external_module().id()] = vec;
+      // This means Verilog blackbox. Don't let us instantiate that sub_node, let either V->LG or V->LN->LG.
+      /* NOTE->hunter: This is a Verilog blackbox. If we want to link it, it'd have to go through either V->LG
+       * or V->LN->LG. I will create a Sub_Node in case the Verilog isn't provided. */
+      continue;
     } else if (circuit.module(i).has_user_module()) {
       auto sub = AddModToLibrary(var, circuit.module(i).user_module().id(), file_name);
       uint64_t inp_pos = 0;
       uint64_t out_pos = 0;
       for (int j = 0; j < circuit.module(i).user_module().port_size(); j++) {
         auto port = circuit.module(i).user_module().port(j);
-        AddPortToMap(circuit.module(i).user_module().id(), port.type(), port.direction(), port.id());//, sub, inp_pos, out_pos);
+        AddPortToMap(circuit.module(i).user_module().id(), port.type(), port.direction(), port.id(), sub, inp_pos, out_pos);
       }
     } else {
       cout << "Module not set.\n";
@@ -1761,35 +1782,34 @@ void Inou_firrtl::AddPortToSub(Sub_node& sub, uint64_t& inp_pos, uint64_t& out_p
  }
 }
 
-void Inou_firrtl::AddPortToMap(const std::string& mod_id, const firrtl::FirrtlPB_Type& type, uint8_t dir, const std::string& port_id) {//,
-                               //Sub_node& sub, const std::string& port_id, uint64_t& inp_pos, uint64_t& out_pos) {
+void Inou_firrtl::AddPortToMap(const std::string& mod_id, const firrtl::FirrtlPB_Type& type, uint8_t dir, const std::string& port_id, Sub_node& sub, uint64_t& inp_pos, uint64_t& out_pos) {
   switch (type.type_case()) {
     case firrtl::FirrtlPB_Type::kUintType: { // UInt type
-      //AddPortToSub(sub, inp_pos, out_pos, port_id, dir);
+      AddPortToSub(sub, inp_pos, out_pos, port_id, dir);
       mod_to_io_dir_map[std::make_pair(mod_id, port_id)] = dir;
       mod_to_io_map[mod_id].insert({port_id, type.uint_type().width().value(), dir});
       break;
     }
     case firrtl::FirrtlPB_Type::kSintType: { // SInt type
-      //AddPortToSub(sub, inp_pos, out_pos, port_id, dir);
+      AddPortToSub(sub, inp_pos, out_pos, port_id, dir);
       mod_to_io_dir_map[std::make_pair(mod_id, port_id)] = dir;
       mod_to_io_map[mod_id].insert({port_id, type.sint_type().width().value(), dir});
       break;
     }
     case firrtl::FirrtlPB_Type::kClockType: { // Clock type
-      //AddPortToSub(sub, inp_pos, out_pos, port_id, dir);
+      AddPortToSub(sub, inp_pos, out_pos, port_id, dir);
       mod_to_io_dir_map[std::make_pair(mod_id, port_id)] = dir;
       mod_to_io_map[mod_id].insert({port_id, 1, dir});
       break;
     }
     case firrtl::FirrtlPB_Type::kAsyncResetType: { // AsyncReset type
-      //AddPortToSub(sub, inp_pos, out_pos, port_id, dir);
+      AddPortToSub(sub, inp_pos, out_pos, port_id, dir);
       mod_to_io_dir_map[std::make_pair(mod_id, port_id)] = dir;
       mod_to_io_map[mod_id].insert({port_id, 1, dir});
       break;
     }
     case firrtl::FirrtlPB_Type::kResetType: { // Reset type
-      //AddPortToSub(sub, inp_pos, out_pos, port_id, dir);
+      AddPortToSub(sub, inp_pos, out_pos, port_id, dir);
       mod_to_io_dir_map[std::make_pair(mod_id, port_id)] = dir;
       mod_to_io_map[mod_id].insert({port_id, 1, dir});
       break;
@@ -1804,9 +1824,9 @@ void Inou_firrtl::AddPortToMap(const std::string& mod_id, const firrtl::FirrtlPB
           } else if (dir == 2) {
             new_dir = 1;
           }
-          AddPortToMap(mod_id, btype.field(i).type(), new_dir, port_id + "." + btype.field(i).id());//, sub, inp_pos, out_pos);
+          AddPortToMap(mod_id, btype.field(i).type(), new_dir, port_id + "." + btype.field(i).id(), sub, inp_pos, out_pos);
         } else {
-          AddPortToMap(mod_id, btype.field(i).type(), dir, port_id + "." + btype.field(i).id());//, sub, inp_pos, out_pos);
+          AddPortToMap(mod_id, btype.field(i).type(), dir, port_id + "." + btype.field(i).id(), sub, inp_pos, out_pos);
         }
       }
       break;
@@ -1815,7 +1835,7 @@ void Inou_firrtl::AddPortToMap(const std::string& mod_id, const firrtl::FirrtlPB
       //FIXME: How does mod_to_io_map interact with a vector?
       mod_to_io_dir_map[std::make_pair(mod_id, port_id)] = dir;
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
-        AddPortToMap(mod_id, type.vector_type().type(), dir, absl::StrCat(port_id, "[", i, "]"));//, sub, inp_pos, out_pos);
+        AddPortToMap(mod_id, type.vector_type().type(), dir, absl::StrCat(port_id, "[", i, "]"), sub, inp_pos, out_pos);
       }
       break;
     }
@@ -1828,6 +1848,55 @@ void Inou_firrtl::AddPortToMap(const std::string& mod_id, const firrtl::FirrtlPB
       break;
     }
     default: cout << "Unknown port type." << endl; I(false);
+  }
+}
+
+/* Not much to do here since this is just a Verilog
+ * module that FIRRTL is going to use. Will have to
+ * rely upon some Verilog pass to get the actual
+ * contents of this into LGraph form. */
+void Inou_firrtl::GrabExtModuleInfo(const firrtl::FirrtlPB_Module_ExternalModule& emod) {
+  // Figure out all of mods IO and their respective bw + dir.
+  std::vector<std::tuple<std::string, uint8_t, uint32_t>> port_list;  // Terms are as follows: name, direction, # of bits.
+  for (int i = 0; i < emod.port_size(); i++) {
+    auto port = emod.port(i);
+    create_io_list(port.type(), port.direction(), port.id(), port_list);
+  }
+
+  // Figure out what the value for each parameter is, add to map.
+  for (int j = 0; j < emod.parameter_size(); j++) {
+    std::string param_str = "";
+    switch (emod.parameter(j).value_case()) {
+      case firrtl::FirrtlPB_Module_ExternalModule_Parameter::kInteger:
+        param_str = ConvertBigIntToStr(emod.parameter(j).integer());
+        break;
+      case firrtl::FirrtlPB_Module_ExternalModule_Parameter::kDouble:
+        param_str = std::to_string(emod.parameter(j).double_());
+        break;
+      case firrtl::FirrtlPB_Module_ExternalModule_Parameter::kString:
+        param_str = emod.parameter(j).string();
+        break;
+      case firrtl::FirrtlPB_Module_ExternalModule_Parameter::kRawString:
+        param_str = emod.parameter(j).raw_string();
+        break;
+      default:
+        I(false);
+    }
+    emod_to_param_map[emod.defined_name()].insert({emod.parameter(j).id(), param_str});
+  }
+
+  // Add them to the map to let us know what ports exist in this module.
+  for (const auto& elem : port_list) {
+    mod_to_io_dir_map[std::make_pair(emod.defined_name(), std::get<0>(elem))] = std::get<1>(elem);
+    mod_to_io_map[emod.defined_name()].insert({std::get<0>(elem), std::get<2>(elem), std::get<1>(elem)});
+  }
+}
+
+std::string Inou_firrtl::ConvertBigIntToStr(const firrtl::FirrtlPB_BigInt& bigint) {
+  if (bigint.value().length() > 1) {
+    return absl::StrCat("0b", bigint.value(), "s1bit");
+  } else {
+    return absl::StrCat("0b", bigint.value(), "s", bigint.value().length(), "bits");
   }
 }
 
