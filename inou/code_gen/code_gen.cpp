@@ -103,7 +103,10 @@ void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
       do_func_call(curr_index);
     } else if (curr_node_type.is_for()) {
       do_for(curr_index);
+    } else if (curr_node_type.is_while()) {
+      do_while(curr_index);
     }
+
 
     curr_index = lnast->get_sibling_next(curr_index);
   }
@@ -144,6 +147,30 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index) {
   } else {
     absl::StrAppend(&buffer_to_print, indent(), key, " ", lnast_to->debug_name_lang(assign_node_data.type), " ", (std::string)ref, lnast_to->stmt_sep());
   }
+}
+//-------------------------------------------------------------------------------------
+//Process the while node:
+//pattern: while -> cond , stmts
+void Code_gen::do_while(const mmap_lib::Tree_index& while_node_index) {
+  fmt::print("node:while\n");
+  absl::StrAppend(&buffer_to_print, indent(),  "while");
+
+  auto curr_index = lnast->get_first_child(while_node_index);
+  auto ref = lnast->get_name(curr_index);
+  if(is_temp_var(ref)) {
+    auto map_it = ref_map.find(ref);
+    if(map_it != ref_map.end()) {
+      ref = map_it->second;
+    }
+  }
+  absl::StrAppend(&buffer_to_print, lnast_to->while_cond_beg(), ref, lnast_to->while_cond_end(), lnast_to->for_stmt_beg());
+
+  curr_index = lnast->get_sibling_next(curr_index);
+  indendation++;
+  do_stmts(curr_index);
+  indendation--;
+  absl::StrAppend(&buffer_to_print, lnast_to->for_stmt_end());
+
 }
 //-------------------------------------------------------------------------------------
 //Process the for node:

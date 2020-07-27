@@ -45,5 +45,9 @@ public:
   std::string_view for_cond_end() {return " ";}
   std::string_view for_stmt_beg() {return "{\n";}
   std::string_view for_stmt_end() {return "}\n";}
+
+  //TODO: while related parameters: need to make language specific! currently as per pyrope:
+  std::string_view while_cond_beg() {return "(";}
+  std::string_view while_cond_end() {return ") ";}
 };
 
