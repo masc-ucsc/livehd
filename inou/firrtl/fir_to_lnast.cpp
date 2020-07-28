@@ -1355,10 +1355,7 @@ void Inou_firrtl::ListPrimOpInfo(Lnast& lnast, const firrtl::FirrtlPB_Expression
 
 //--------------Expressions-----------------------
 /*TODO:
- * FixedLiteral
- */
-
-/* */
+ * FixedLiteral */
 void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node,
                                  const std::string& lhs_noprefixes) {
   // Note: here, parent_node is the "stmt" node above where this expression will go.
@@ -1544,8 +1541,6 @@ void Inou_firrtl::AttachExprStrToNode(Lnast& lnast, const std::string_view acces
 /*TODO:
  * Memory
  * CMemory
- * Stop
- * Printf
  * PartialConnect
  * IsInvalid
  * MemoryPort
@@ -1646,21 +1641,51 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
       break;
     }
     case firrtl::FirrtlPB_Statement::kStop: {  // Stop
-      //TODO
-      I(false);
+      // Translate to: if (cond) then stop(clk, return val)
+      std::string stop_cond  = ReturnExprString(lnast, stmt.stop().en(), parent_node, true);
+      std::string stop_clk   = ReturnExprString(lnast, stmt.stop().clk(), parent_node, true);
+
+      auto idx_if = lnast.add_child(parent_node, Lnast_node::create_if("stop"));
+      lnast.add_child(idx_if, Lnast_node::create_cstmts(""));
+      lnast.add_child(idx_if, Lnast_node::create_cond(lnast.add_string(stop_cond)));
+      auto idx_stmts = lnast.add_child(idx_if, Lnast_node::create_if("stop"));
+
+      auto idx_fncall = lnast.add_child(idx_stmts, Lnast_node::create_func_call("stop"));
+      lnast.add_child(idx_fncall, Lnast_node::create_ref("null"));
+      lnast.add_child(idx_fncall, Lnast_node::create_ref("stop"));
+      lnast.add_child(idx_fncall, Lnast_node::create_ref(lnast.add_string(stop_clk)));
+      lnast.add_child(idx_fncall, Lnast_node::create_ref(lnast.add_string(std::to_string(stmt.stop().return_value()))));
       break;
     }
     case firrtl::FirrtlPB_Statement::kPrintf: {  // Printf
-      //TODO
-      I(false);
+      // Translate to: if (cond) then printf(clk, str, vals)
+      std::string printf_cond  = ReturnExprString(lnast, stmt.printf().en(), parent_node, true);
+      std::string printf_clk   = ReturnExprString(lnast, stmt.printf().clk(), parent_node, true);
+      std::vector<std::string> arg_list;
+      for (int i = 0; i < stmt.printf().arg_size(); i++) {
+        arg_list.push_back(ReturnExprString(lnast, stmt.printf().arg(i), parent_node, true));
+      }
+
+      auto idx_if = lnast.add_child(parent_node, Lnast_node::create_if("printf"));
+      lnast.add_child(idx_if, Lnast_node::create_cstmts(""));
+      lnast.add_child(idx_if, Lnast_node::create_cond(lnast.add_string(printf_cond)));
+      auto idx_stmts = lnast.add_child(idx_if, Lnast_node::create_if("printf"));
+
+      auto idx_fncall = lnast.add_child(idx_stmts, Lnast_node::create_func_call("printf"));
+      lnast.add_child(idx_fncall, Lnast_node::create_ref("null"));
+      lnast.add_child(idx_fncall, Lnast_node::create_ref("printf"));
+      lnast.add_child(idx_fncall, Lnast_node::create_ref(lnast.add_string(printf_clk)));
+      lnast.add_child(idx_fncall, Lnast_node::create_ref(lnast.add_string(stmt.printf().value())));
+      for (const auto& arg_str : arg_list) {
+        lnast.add_child(idx_fncall, Lnast_node::create_ref(lnast.add_string(arg_str)));
+      }
       break;
     }
     case firrtl::FirrtlPB_Statement::kSkip: {  // Skip
-      cout << "skip;\n";
+      // Nothing to do.
       break;
     }
-    case firrtl::FirrtlPB_Statement::kConnect: {  // Connect -- Must have form (female/bi-gender expression) <=
-                                                  // (male/bi-gender/passive expression)
+    case firrtl::FirrtlPB_Statement::kConnect: {  // Connect
       std::string lhs_string = ReturnExprString(lnast, stmt.connect().location(), parent_node, false);
       InitialExprAdd(lnast, stmt.connect().expression(), parent_node, lhs_string);
 
@@ -1737,9 +1762,15 @@ void Inou_firrtl::PopulateAllModsIO(Eprp_var& var, const firrtl::FirrtlPB_Circui
   for (int i = 0; i < circuit.module_size(); i++) {
     // std::vector<std::pair<std::string, uint8_t>> vec;
     if (circuit.module(i).has_external_module()) {
-      // This means Verilog blackbox. Don't let us instantiate that sub_node, let either V->LG or V->LN->LG.
       /* NOTE->hunter: This is a Verilog blackbox. If we want to link it, it'd have to go through either V->LG
        * or V->LN->LG. I will create a Sub_Node in case the Verilog isn't provided. */
+      auto sub = AddModToLibrary(var, circuit.module(i).external_module().id(), file_name);
+      uint64_t inp_pos = 0;
+      uint64_t out_pos = 0;
+      for (int j = 0; j < circuit.module(i).external_module().port_size(); j++) {
+        auto port = circuit.module(i).external_module().port(j);
+        AddPortToMap(circuit.module(i).external_module().id(), port.type(), port.direction(), port.id(), sub, inp_pos, out_pos);
+      }
       continue;
     } else if (circuit.module(i).has_user_module()) {
       auto sub = AddModToLibrary(var, circuit.module(i).user_module().id(), file_name);
@@ -1909,21 +1940,25 @@ void Inou_firrtl::IterateModules(Eprp_var& var, const firrtl::FirrtlPB_Circuit& 
   // Create ModuleName to I/O Pair List
   PopulateAllModsIO(var, circuit, file_name);
 
-  // For each module, create an LNAST pointer
   for (int i = 0; i < circuit.module_size(); i++) {
-    ListModuleInfo(var, circuit.module(i), file_name);
-
     // Between modules, empty out the input/output/register lists.
     temp_var_count = 0;
     input_names.clear();
     output_names.clear();
     register_names.clear();
+    inst_to_mod_map.clear();
+
+    ListModuleInfo(var, circuit.module(i), file_name);
   }
 }
 
 // Iterate over every FIRRTL circuit (design), each circuit can contain multiple modules.
 void Inou_firrtl::IterateCircuits(Eprp_var& var, const firrtl::FirrtlPB& firrtl_input, const std::string& file_name) {
   for (int i = 0; i < firrtl_input.circuit_size(); i++) {
+    mod_to_io_dir_map.clear();
+    mod_to_io_map.clear();
+    emod_to_param_map.clear();
+
     const firrtl::FirrtlPB_Circuit& circuit = firrtl_input.circuit(i);
     IterateModules(var, circuit, file_name);
   }
