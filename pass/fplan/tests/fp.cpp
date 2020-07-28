@@ -13,13 +13,9 @@ int main() {
 	std::cout << "done." << std::endl;
   
   std::cout << "discovering hierarchies...";
-  Hier_tree t = p.make_tree();
+  Graph_info&& gi = p.make_tree();
+  Hier_tree t(gi, 1, 0.0);
   std::cout << "done." << std::endl;
-
-  t.set_num_components(1);
-  t.set_min_node_area(0.0); // don't collapse anything
-  
-  //t.discover_hierarchy();
 
   std::cout << "finished floorplan." << std::endl;
 }

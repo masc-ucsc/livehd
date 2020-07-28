@@ -20,142 +20,38 @@ unsigned int Hier_tree::size(const phier top) {
 }
 */
 
-/*
-// fill out the connections in the matrix by examining every connection on every node... :/
-void Hier_tree::wire_matrix(Cost_matrix& m) {
-  for (size_t i = 0; i < m.size(); i++) {
-    for (const auto& conn : m[i].node->connect_list) {
-      for (size_t j = 0; j < m.size(); j++) {
-        if (conn.first == m[j].node) {
-          m[i].connect_cost[j] = conn.second;
-        }
-      }
-    }
-  }
-}
-*/
-
-/*
-// creates a cost matrix for doing a min-cut on the root node
-Cost_matrix Hier_tree::make_matrix(pnode root) {
-  unsigned int root_size = size(root);
+// since the graph can't actually be split, nodes get assigned to sets.
+// this function populates a Min_cut_map with the proper data, assuming the data in start_set is to be split.
+// it returns a pair of values indicating the sets it created.
+std::pair<int, int> Hier_tree::populate_set_map(const graph::Bi_adjacency_list& g, Set_map& smap) {
+  static int set_counter = 1;
+  unsigned int set_inc = 0;
   
-  cost_matrix matrix;
-  matrix.reserve(root_size);
-
-  unsigned int which_set = 0;
-
-  // create a cost matrix from the hierarchy
-  std::function<void(pnode)> alloc_matrix;
-  
-  alloc_matrix = [&](pnode node) {
-    cost_matrix_row new_row = { node, std::vector<int>(root_size, 0), 0xCAFE, true, which_set };
-    matrix.push_back(new_row);
+  // insert vert data, with both new sets getting unique set values to refer to them by
+  for (auto vert : g.verts()) {
+    smap[vert] = set_counter + set_inc;
     
-    which_set ^= 1; // toggle between 1 and 0
-    
-    for (pnode child : node->children) {
-      alloc_matrix(child);
-    }
-  };
-  
-  alloc_matrix(root);
-
-  if (matrix.size() % 2) {
-    // insert a temp node with no connections to make the matrix even
-    // (we know that there are no temp nodes that need to be deleted since the matrix is new)
-
-    for (cost_matrix_row& r : matrix) {
-      r.connect_cost.push_back(0);
-    }
-
-    pnode temp = std::make_shared<Netl_node>();
-    temp->name = "_temp"; // give the temp node a unique name
-    matrix.push_back({ temp, std::vector<int>(matrix.size() + 1, 0), 0xCAFE, true, which_set });
-    
-    std::cout << "inserting temp node into set " << (which_set ? "b" : "a") << "." << std::endl;
-  }
-
-  wire_matrix(matrix);
-
-  return matrix;
-}
-*/
-
-/*
-// splits a cost matrix into two sub-matrices for a recursive min-cut call
-// if the split is not even, a temporary node is added at the end to make it even.
-std::pair<Cost_matrix, Cost_matrix> Hier_tree::halve_matrix(const Cost_matrix& old_matrix) {
-  Cost_matrix ma, mb;
-  
-  unsigned int which_set_a = 0;
-  unsigned int which_set_b = 0;
-
-  unsigned int old_size = old_matrix.size();
-  unsigned int new_size = old_size / 2;
-
-  bool need_extra_row = false;
-  
-  if (new_size % 2) {
-    // matrix is odd, so do something to make it even
-    if (old_matrix[old_matrix.size() - 1].node->name == "_temp") {
-      // matrix has a temp node, so remove it
-      old_size--;
-      new_size--;
+    if (set_inc == 1) {
+      set_inc = 0;
     } else {
-      // matrix doesn't have a temp node, so add one
-      new_size++;
-      need_extra_row = true;
+      set_inc = 1;
     }
   }
 
-  ma.reserve(new_size);
-  mb.reserve(new_size);
-  
-  for (size_t i = 0; i < old_matrix.size(); i++) {
-    Cost_matrix_row new_row = { old_matrix[i].node, std::vector<int>(new_size, 0), 0xCAFE, true };
-    if (old_matrix[i].set == 0) {
-      new_row.set = which_set_a;
-      which_set_a ^= 1;
-      ma.push_back(new_row);
-    } else {
-      new_row.set = which_set_b;
-      which_set_b ^= 1;
-      mb.push_back(new_row);
-    }
-  }
-
-  if (need_extra_row) {
-    pnetl n = std::make_shared<Netl_node>();
-    n->name = "_temp";
-    Cost_matrix_row temp_row = { n, std::vector<int>(new_size, 0), 0xCAFE, true };
-    
-    temp_row.set = which_set_a;
-    ma.push_back(temp_row);
-    
-    temp_row.set = which_set_b;
-    mb.push_back(temp_row);
-  }
-
-  wire_matrix(ma);
-  wire_matrix(mb);
-  
-  return std::pair(ma, mb);
+  auto ret_pair = std::pair(set_counter, set_counter + 1);
+  set_counter += 2;
+  return ret_pair;
 }
-*/
 
-/*
-void Hier_tree::prune_matrix(Cost_matrix& m) {
-  if (m[m.size() - 1].node->name == "_temp") {
-    m.erase(m.cend() - 1);
-    for (Cost_matrix_row& r : m) {
-      r.connect_cost.erase(r.connect_cost.cend() - 1);
-    }
+
+void Hier_tree::populate_cost_map(const graph::Bi_adjacency_list& g, Min_cut_map& cmap) {
+  for (const auto& vert : g.verts()) {
+    cmap[vert].d_cost = 0xCAFE;
+    cmap[vert].active = true;
   }
 }
-*/
 
-void Hier_tree::min_wire_cut(Graph_info& info) {
+void Hier_tree::min_wire_cut(Graph_info& info, Set_map& smap) {
   
   auto& g = info.al;
   
@@ -166,8 +62,11 @@ void Hier_tree::min_wire_cut(Graph_info& info) {
 
   auto cmap = info.al.vert_map<Min_cut_data>();
   populate_cost_map(info.al, cmap);
+  auto valid_sets = populate_set_map(info.al, smap);
   
   int best_decrease = 0;
+  
+  // shouldn't need to ret early if the size is <= 2...?
 /*
   if (m.size() <= 2) {
     std::vector<pnetl> a, b;
@@ -178,6 +77,27 @@ void Hier_tree::min_wire_cut(Graph_info& info) {
   }
 */
 
+  auto is_valid_set = [&smap, valid_sets](vertex v) -> bool {
+    int set = smap(v);
+    return set == valid_sets.first || set == valid_sets.second;
+  };
+
+  auto is_in_a = [&smap, valid_sets, &is_valid_set](vertex v) -> bool {
+    I(is_valid_set(v));
+    return smap(v) % 2 == valid_sets.first;
+  };
+
+  auto is_in_b = [&smap, valid_sets, &is_valid_set](vertex v) -> bool {
+    I(is_valid_set(v));
+    return smap(v) % 2 == valid_sets.second;
+  };
+
+  auto same_set = [&smap, &is_valid_set](vertex v1, vertex v2) -> bool {
+    I(is_valid_set(v1));
+    I(is_valid_set(v2));
+    return smap(v1) == smap(v2);
+  };
+
   do {
     // (re)calculate delta costs for each node
     for (const vertex& v : g.verts()) {
@@ -185,7 +105,7 @@ void Hier_tree::min_wire_cut(Graph_info& info) {
       int inter = 0;
       for (const edge& e : g.out_edges(v)) {
         auto other_v = g.head(e);
-        if (cmap(other_v).set != cmap(v).set) {
+        if (!same_set(v, other_v)) {
           exter += info.weights[e];
         } else {
           inter += info.weights[e];
@@ -193,21 +113,6 @@ void Hier_tree::min_wire_cut(Graph_info& info) {
       }
       cmap[v].d_cost = exter - inter;
     }
-    
-#ifndef NDEBUG
-    std::cout << std::endl;
-    std::cout << "connection list:" << std::endl;
-    for (const vertex& v : g.verts()) {
-      std::cout << info.names(v) << "\t" << ((cmap(v).set == 0) ? "(set a" : "(set b") << ", cost: " << cmap(v).d_cost << ") [";
-      for (const edge& e : g.out_edges(v)) {
-        if (info.weights(e) != 0) {
-          // don't print connections with no weight, as they don't matter.
-          std::cout << info.names(g.head(e)) << ", ";
-        }
-      }
-      std::cout << "]" << std::endl;
-    }
-#endif
     
     std::vector<vertex> av, bv;
     std::vector<int> cv;
@@ -226,7 +131,7 @@ void Hier_tree::min_wire_cut(Graph_info& info) {
           // row is in the "a" set and hasn't been deleted
           for (const edge& e : g.out_edges(v)) {
             auto other_v = g.head(e);
-            if (cmap(v).set == 0 && cmap(other_v).set == 1 && cmap(other_v).active) {
+            if (is_in_a(v) && is_in_b(other_v) && cmap(other_v).active) {
               // only select nodes in the other set
               int new_cost = cmap(v).d_cost + cmap(other_v).d_cost - 2 * info.weights(e);
               if (new_cost > cost) {
@@ -270,7 +175,7 @@ void Hier_tree::min_wire_cut(Graph_info& info) {
 
       // recalculate costs considering a_max and b_max swapped
       for (const vertex& v : g.verts()) {
-        if (cmap(v).set == 0) {
+        if (is_in_a(v)) {
           cmap[v].d_cost = cmap(v).d_cost + 2 * info.weights(find_edge_to_max(v, a_max)) - 2 * info.weights(find_edge_to_max(v, b_max));
         } else {
           cmap[v].d_cost = cmap(v).d_cost + 2 * info.weights(find_edge_to_max(v, b_max)) - 2 * info.weights(find_edge_to_max(v, a_max));
@@ -307,7 +212,7 @@ void Hier_tree::min_wire_cut(Graph_info& info) {
     if (best_decrease > 0) {
       for (size_t i = 0; i < decrease_index; i++) {
         std::cout << "swapping " << info.names(av[i]) << " with " << info.names(bv[i]) << std::endl;
-        std::swap(cmap[av[i]].set, cmap[bv[i]].set);
+        std::swap(smap[av[i]], smap[bv[i]]);
       }
     }
 
@@ -317,6 +222,16 @@ void Hier_tree::min_wire_cut(Graph_info& info) {
 
     // use the better sets as inputs to the algorithm, and run another iteration if there looks to be a better decrease
   } while (best_decrease > 0);
+
+#ifndef NDEBUG
+  std::cout << std::endl;
+  std::cout << "best partition:" << std::endl;
+  for (const vertex& v : info.al.verts()) {
+    std::cout << info.names(v) << ":\t";
+    std::cout << (is_in_a(v) ? "a" : "b") << " (aka " << (is_in_a(v) ? valid_sets.first : valid_sets.second);
+    std::cout << "), cost " << cmap(v).d_cost << std::endl;
+  }
+#endif
 }
 
 /*
@@ -335,47 +250,33 @@ phier Hier_tree::make_hier_tree(phier t1, phier t2) {
 }
 */
 
-void Hier_tree::populate_cost_map(const graph::Bi_adjacency_list& g, Min_cut_map& m) {
-  unsigned int which_set = 0;
-
-  // insert vert data
-  for (auto vert : g.verts()) {
-    m[vert].d_cost = 0xCAFE; // illegal value
-    m[vert].active = true;
-    m[vert].set = which_set;
-
-    which_set ^= 1; // toggle between 0 and 1
-  }
-}
-
-phier Hier_tree::discover_hierarchy(Graph_info && info) {
-  if (info.al.order() <= num_components) {
-    phier p;
-    return p; // TODO: ??
+phier Hier_tree::discover_hierarchy(Graph_info& info, Set_map& smap, int start_set) {
+  
+  // figure out the number of verts in the set
+  unsigned int set_size = 0;
+  for (const auto& v : info.al.verts()) {
+    if (smap(v) == start_set) {
+      set_size++;
+    }
   }
   
-  min_wire_cut(info);
+  if (set_size <= num_components) {
+    phier p = std::make_shared<Hier_node>();
+    p->name = "stuff";
+    p->area = -1;
+    p->graph_subset = -1; // TODO: grab this from a graph element or something
+    return p;
+  }
   
-#ifndef NDEBUG
-  std::cout << "a set:" << std::endl;
-  std::cout << std::endl << "b set:" << std::endl;
-#endif
+  min_wire_cut(info, smap);
+
+  // TODO: check this
+  //phier t1 = discover_hierarchy(info, smap, start_set + 1);
+  //phier t2 = discover_hierarchy(info, smap, start_set + 2);
   
-  // TODO: not sure how to run discovery on incomplete graphs...?
-
-  //phier t1 = discover_hierarchy(m_pair.first);
-  //phier t2 = discover_hierarchy(m_pair.second);
-
-  // TODO: prune the hierarchy trees here
-
   phier p;
   return p;
   //return make_hier_tree(t1, t2);
-}
-
-Hier_tree::Hier_tree(Graph_info && info) {
-  root = discover_hierarchy(std::move(info));
-  // TODO: collapse the tree from root
 }
 
 /*
@@ -383,4 +284,11 @@ void Hier_tree::collapse() {
 
 }
 */
+
+Hier_tree::Hier_tree(Graph_info& info, unsigned int min_num_components, double min_area)
+  : area(min_area), num_components(min_num_components) {
+  Set_map smap = info.al.vert_map<int>();
+  root = discover_hierarchy(info, smap, 0);
+  // TODO: collapse the tree from root
+}
 
