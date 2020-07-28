@@ -1,1 +1,2 @@
-inp=a.c.d.foo
+foo.a.__bits = 3
+%out = foo.a.__bits

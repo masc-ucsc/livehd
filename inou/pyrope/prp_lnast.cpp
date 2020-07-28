@@ -1487,7 +1487,7 @@ Lnast_node Prp_lnast::eval_tuple_dot_notation(mmap_lib::Tree_index idx_start_ast
   
   bool last_attribute_was_sel = true;
   mmap_lib::Tree_index idx_dot_root;
-  
+  Lnast_node dot_lhs;
   while (idx_nxt_ast != ast->invalid_index()) {
     // need three things: the LHS (temp variable)
     // the element whose attribute is being accessed
@@ -1509,13 +1509,12 @@ Lnast_node Prp_lnast::eval_tuple_dot_notation(mmap_lib::Tree_index idx_start_ast
       accessed_attribute = eval_rule(idx_nxt_ast, idx_start_ln);
     }
     
-    auto lnast_temp = lnast->add_string(current_temp_var);
-    auto dot_lhs    = Lnast_node::create_ref(lnast_temp);
-    get_next_temp_var();
-    
     // create the dot and all of its children
     if(last_attribute_was_sel){
       idx_dot_root = lnast->add_child(cur_stmts, Lnast_node::create_dot(""));
+      auto lnast_temp = lnast->add_string(current_temp_var);
+      dot_lhs    = Lnast_node::create_ref(lnast_temp);
+      get_next_temp_var();
       lnast->add_child(idx_dot_root, dot_lhs);
       lnast->add_child(idx_dot_root, accessed_el);
     }
@@ -1529,7 +1528,7 @@ Lnast_node Prp_lnast::eval_tuple_dot_notation(mmap_lib::Tree_index idx_start_ast
       auto idx_first_brack = ast->get_child(idx_tuple_array_brack);
       auto idx_sel_idx_ast = ast->get_sibling_next(idx_first_brack);
       
-      lnast_temp = lnast->add_string(current_temp_var);
+      auto lnast_temp = lnast->add_string(current_temp_var);
       auto sel_rhs = Lnast_node::create_ref(lnast_temp);
       get_next_temp_var();
       
