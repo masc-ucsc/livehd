@@ -1,4 +1,2 @@
 foo.a.__bits = 3
 %out = foo.a.__bits
-foo.a = 5
-%out2 = foo.a
