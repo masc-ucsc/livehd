@@ -235,14 +235,17 @@ void Code_gen::do_func_def(const mmap_lib::Tree_index& func_def_node_index) {
 
   curr_index = lnast->get_sibling_next(stmt_index);
   std::string parameters;
-  while (curr_index!=lnast->invalid_index()) {
-    absl::StrAppend(&parameters, lnast->get_name(curr_index), lnast_to->func_param_sep());
-    curr_index = lnast->get_sibling_next(curr_index);
-  }
-  parameters.pop_back();
-  parameters.pop_back();
+  bool param_exist = true;
+  if(curr_index!=lnast->invalid_index()) {
+    while (curr_index!=lnast->invalid_index()) {
+      absl::StrAppend(&parameters, lnast->get_name(curr_index), lnast_to->func_param_sep());
+      curr_index = lnast->get_sibling_next(curr_index);
+    }
+    parameters.pop_back();
+    parameters.pop_back();
+  } else { param_exist = false;}
 
-  absl::StrAppend(&buffer_to_print, lnast_to->func_begin(), lnast_to->func_name(func_name), lnast_to->param_start(), parameters, lnast_to->param_end(), lnast_to->print_cond(cond_val), lnast_to->func_stmt_strt());
+  absl::StrAppend(&buffer_to_print, lnast_to->func_begin(), lnast_to->func_name(func_name), lnast_to->param_start(param_exist), parameters, lnast_to->param_end(param_exist), lnast_to->print_cond(cond_val), lnast_to->func_stmt_strt());
   indendation++;
   do_stmts(stmt_index);
   indendation--;
@@ -400,7 +403,7 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
   const auto& op_node_data = lnast->get_data(op_node_index);
   std::string val;
   for (unsigned i = 1; i < op_str_vect.size(); i++) {
-    auto ref = op_str_vect[i];
+    auto ref = std::string(op_str_vect[i]);
     auto             map_it = ref_map.find(ref);
     if (map_it != ref_map.end()) {
       if (std::count(map_it->second.begin(), map_it->second.end(), ' ')) {
