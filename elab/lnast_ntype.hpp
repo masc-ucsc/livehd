@@ -356,20 +356,20 @@ protected:
     "&&", // logical_and
     "||", // logical_or
     "!",  // logical_not
-    "operator&", // and
-    "operator|", // or
-    "operator~", // not
-    "operator^",
-    "operator+",
-    "operator-",
-    "operator*",
-    "operator/",
+    "&", // and
+    "|", // or
+    "~", // not
+    "^",
+    "+",
+    "-",
+    "*",
+    "/",
     "eq",
-    "operator==",
-    "operator<",
-    "operator<=",
-    "operator>",
-    "operator>=",
+    "==",
+    "<",
+    "<=",
+    ">",
+    ">=",
     "()",
     "tuple_concat", // ++
     "tuple_delete", // --
