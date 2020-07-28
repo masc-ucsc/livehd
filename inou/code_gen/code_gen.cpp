@@ -172,7 +172,7 @@ void Code_gen::do_while(const mmap_lib::Tree_index& while_node_index) {
   indendation++;
   do_stmts(curr_index);
   indendation--;
-  absl::StrAppend(&buffer_to_print, lnast_to->for_stmt_end());
+  absl::StrAppend(&buffer_to_print, indent(), lnast_to->for_stmt_end());
 
 }
 //-------------------------------------------------------------------------------------
@@ -203,7 +203,7 @@ void Code_gen::do_for(const mmap_lib::Tree_index& for_node_index) {
   indendation++;
   do_stmts(stmt_index);
   indendation--;
-  absl::StrAppend(&buffer_to_print, lnast_to->for_stmt_end());
+  absl::StrAppend(&buffer_to_print, indent(),  lnast_to->for_stmt_end());
 
 }
 //-------------------------------------------------------------------------------------
@@ -245,11 +245,11 @@ void Code_gen::do_func_def(const mmap_lib::Tree_index& func_def_node_index) {
     parameters.pop_back();
   } else { param_exist = false;}
 
-  absl::StrAppend(&buffer_to_print, lnast_to->func_begin(), lnast_to->func_name(func_name), lnast_to->param_start(param_exist), parameters, lnast_to->param_end(param_exist), lnast_to->print_cond(cond_val), lnast_to->func_stmt_strt());
+  absl::StrAppend(&buffer_to_print, indent(), lnast_to->func_begin(), lnast_to->func_name(func_name), lnast_to->param_start(param_exist), parameters, lnast_to->param_end(param_exist), lnast_to->print_cond(cond_val), lnast_to->func_stmt_strt());
   indendation++;
   do_stmts(stmt_index);
   indendation--;
-  absl::StrAppend(&buffer_to_print, lnast_to->func_stmt_end(), lnast_to->func_end());
+  absl::StrAppend(&buffer_to_print, indent(), lnast_to->func_stmt_end(), lnast_to->func_end());
 }
 //-------------------------------------------------------------------------------------
 //Process the func-cond node:
