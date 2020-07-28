@@ -27,9 +27,9 @@ public:
   //TODO: func def related parameters: need to make language specific! currently as per pyrope:
   std::string_view func_begin() {return "";}
   std::string_view func_name(std::string_view func_name) {return func_name;}
-  std::string_view param_start() {return " = :(";}
+  std::string_view param_start(bool param_exist) {if (param_exist) return " = :("; else return "= :";}
   std::string_view func_param_sep() {return ", ";}
-  std::string_view param_end() {return ")";}
+  std::string_view param_end(bool param_exist) {if (param_exist) return ")"; else return "";}
   std::string print_cond(std::string cond_val) {
     if(cond_val != "")
       return (absl::StrCat(" when ", cond_val));

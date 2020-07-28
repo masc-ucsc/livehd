@@ -251,8 +251,8 @@ protected:
     "select",  // []
     "bit_select", // [[]]
     "range",      // ..
-    "shift_right",
-    "shift_left",
+    ">>",
+    "<<",
     "logic_shift_right",
     "arith_shift_right",
     "arith_shift_left",
