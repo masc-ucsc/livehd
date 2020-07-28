@@ -1485,6 +1485,9 @@ Lnast_node Prp_lnast::eval_tuple_dot_notation(mmap_lib::Tree_index idx_start_ast
   idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast);
   idx_nxt_ast = ast->get_child(idx_nxt_ast);
   
+  bool last_attribute_was_sel = true;
+  mmap_lib::Tree_index idx_dot_root;
+  
   while (idx_nxt_ast != ast->invalid_index()) {
     // need three things: the LHS (temp variable)
     // the element whose attribute is being accessed
@@ -1511,9 +1514,11 @@ Lnast_node Prp_lnast::eval_tuple_dot_notation(mmap_lib::Tree_index idx_start_ast
     get_next_temp_var();
     
     // create the dot and all of its children
-    auto idx_dot_root = lnast->add_child(cur_stmts, Lnast_node::create_dot(""));
-    lnast->add_child(idx_dot_root, dot_lhs);
-    lnast->add_child(idx_dot_root, accessed_el);
+    if(last_attribute_was_sel){
+      idx_dot_root = lnast->add_child(cur_stmts, Lnast_node::create_dot(""));
+      lnast->add_child(idx_dot_root, dot_lhs);
+      lnast->add_child(idx_dot_root, accessed_el);
+    }
     lnast->add_child(idx_dot_root, accessed_attribute);
     
     if(attribute_is_sel){
@@ -1543,6 +1548,7 @@ Lnast_node Prp_lnast::eval_tuple_dot_notation(mmap_lib::Tree_index idx_start_ast
     
     // go to the next dot, or to invalid index
     idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast);
+    last_attribute_was_sel = attribute_is_sel;
   }
 
   return accessed_el; 
