@@ -54,7 +54,7 @@ void Lnast_dfg::process_ast_stmts(LGraph *dfg, const Lnast_nid &lnidx_stmts) {
     } else if (ntype.is_tuple_add()) {
       process_ast_tuple_add_op(dfg, lnidx);
     } else if (ntype.is_tuple_get()) {
-       process_ast_tuple_get_op(dfg, lnidx);
+      process_ast_tuple_get_op(dfg, lnidx);
     } else if (ntype.is_tuple_phi_add()) {
       process_ast_tuple_phi_add_op(dfg, lnidx);
     } else if (ntype.is_logical_op()) {
@@ -511,6 +511,63 @@ void Lnast_dfg::process_ast_tuple_get_op(LGraph *dfg, const Lnast_nid &lnidx_tg)
 
 
 void Lnast_dfg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnidx_ta) {
+  int i = 0;
+  std::vector<Node> ta_vec;
+  for (const auto & child : lnast->children(lnidx_ta)) {
+    if (i == 0) {
+      auto tup_add  = dfg->create_node(TupAdd_Op);
+      ta_vec.resize(i+1);
+      ta_vec[i] = tup_add;
+      auto tn_spin  = tup_add.setup_sink_pin("TN");
+      auto tup_name = lnast->get_sname(child);
+      auto tn_dpin = setup_tuple_ref(dfg, tup_name, true);
+
+      // exclude invalid scalar->tuple cases
+      auto tn_node  = tn_dpin.get_node();
+      auto tn_ntype = tn_node.get_type().op;
+      bool is_scalar =  tn_ntype != TupAdd_Op && tn_ntype != TupRef_Op;
+      auto key_name = lnast->get_vname(lnast->get_sibling_next(child)); // peep for key_name ...
+      if (is_scalar && key_name != "0")
+	    	Pass::error("try to modify a non-exist tuple key field:{} in tuple:{}\n", key_name, tup_name);
+
+      dfg->add_edge(tn_dpin, tn_spin);
+
+      name2dpin[tup_name] = tup_add.setup_driver_pin();
+      tup_add.setup_driver_pin().set_name(tup_name); // tuple ref semantically move to here
+      setup_dpin_ssa(name2dpin[tup_name], lnast->get_vname(child), lnast->get_subs(child));
+      i++ ;
+      continue;
+    }
+
+    if (i == 1) {
+      auto tup_add = ta_vec[i-1];
+      auto kn_spin = tup_add.setup_sink_pin("KN"); //key name
+      auto kp_spin = tup_add.setup_sink_pin("KP"); //key name
+      auto key_name = lnast->get_vname(child);
+      Node_pin kn_dpin;
+      if (is_const(key_name)) { // it is a key_pos, not a key_name
+        auto kp_dpin = dfg->create_node_const(Lconst(key_name)).setup_driver_pin();
+        dfg->add_edge(kp_dpin, kp_spin);
+      } else if (key_name.substr(0,4) != "null") {// it is a pure key_name
+        kn_dpin = setup_key_dpin(dfg, key_name);
+        dfg->add_edge(kn_dpin, kn_spin);
+      }
+      i++ ;
+      continue;
+    }
+
+    // non-hier tuple case
+    if (child == lnast->get_last_child(lnidx_ta)) {
+      auto tup_add = ta_vec[i-2];
+      auto value_spin = tup_add.setup_sink_pin("KV"); //value
+
+      auto value_dpin = setup_ref_node_dpin(dfg, child);
+      dfg->add_edge(value_dpin, value_spin);
+      i++ ;
+    }
+  }
+}
+void Lnast_dfg::process_ast_tuple_add_op_bk(LGraph *dfg, const Lnast_nid &lnidx_ta) {
   auto tup_add    = dfg->create_node(TupAdd_Op);
   auto tn_spin    = tup_add.setup_sink_pin("TN"); //tuple name
   auto kn_spin    = tup_add.setup_sink_pin("KN"); //key name
@@ -527,7 +584,7 @@ void Lnast_dfg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnidx_ta)
   auto tn_dpin = setup_tuple_ref(dfg, tup_name, true);
 
   // exclude invalid scalar->tuple cases
-  auto tn_node = tn_dpin.get_node();
+  auto tn_node  = tn_dpin.get_node();
   auto tn_ntype = tn_node.get_type().op;
   bool is_scalar =  tn_ntype != TupAdd_Op && tn_ntype != TupRef_Op;
   if (is_scalar && key_name != "0")
@@ -547,6 +604,7 @@ void Lnast_dfg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnidx_ta)
 
   auto value_dpin = setup_ref_node_dpin(dfg, c2_ta);
   dfg->add_edge(value_dpin, value_spin);
+
   name2dpin[tup_name] = tup_add.setup_driver_pin();
   tup_add.setup_driver_pin().set_name(tup_name); // tuple ref semantically move to here
   setup_dpin_ssa(name2dpin[tup_name], lnast->get_vname(c0_ta), lnast->get_subs(c0_ta));
