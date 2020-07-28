@@ -1,2 +1,2 @@
-foo.a.__bits = 3
-%out = foo.a.__bits
+foo.a.b.__bits = 3
+%out = foo.a.b.__bits
