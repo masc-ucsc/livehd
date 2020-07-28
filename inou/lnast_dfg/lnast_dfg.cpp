@@ -10,7 +10,13 @@ Lnast_dfg::Lnast_dfg(const Eprp_var &_var, std::string_view _module_name) :
 
 std::vector<LGraph *> Lnast_dfg::do_tolg(std::shared_ptr<Lnast> ln, const Lnast_nid &top_stmts) {
     lnast = ln;
-    LGraph *dfg = LGraph::create(path, module_name, lnast->get_source());
+    /* LGraph *dfg = LGraph::create(path, module_name, lnast->get_source()); */
+    LGraph *dfg;
+    if (lnast->get_source() != "") {
+      dfg = LGraph::create(path, module_name, lnast->get_source()); 
+    } else {
+      dfg = LGraph::create(path, module_name, module_name);
+    }
     std::vector<LGraph *> lgs;
     top_stmts2lgraph(dfg, top_stmts);
     lgs.push_back(dfg);
@@ -376,27 +382,50 @@ void Lnast_dfg::process_ast_tuple_struct(LGraph *dfg, const Lnast_nid &lnidx_tup
       continue;
     }
 
-    I(lnast->get_type(tup_child).is_assign());
-    auto c0       = lnast->get_first_child(tup_child);
-    auto c1       = lnast->get_sibling_next(c0);
-    auto key_name = lnast->get_vname(c0);
+    // the case with key name well-defined
+    if (lnast->get_type(tup_child).is_assign()) {
+      auto c0       = lnast->get_first_child(tup_child);
+      auto c1       = lnast->get_sibling_next(c0);
+      auto key_name = lnast->get_vname(c0);
 
+      auto tn_dpin    = setup_tuple_ref(dfg, tup_name, true);
+      auto kp_dnode   = dfg->create_node_const(Lconst(kp));
+      auto kp_dpin    = kp_dnode.setup_driver_pin();
+      auto value_dpin = setup_ref_node_dpin(dfg, c1);
+
+      auto tup_add    = dfg->create_node(TupAdd_Op);
+      auto tn_spin    = tup_add.setup_sink_pin("TN"); // tuple name
+      auto kp_spin    = tup_add.setup_sink_pin("KP"); // key position is unknown before tuple resolving
+      auto value_spin = tup_add.setup_sink_pin("KV"); // value
+
+      if (key_name.substr(0,4) != "null") {
+        auto kn_dpin    = setup_key_dpin(dfg, key_name);
+        auto kn_spin    = tup_add.setup_sink_pin("KN"); // key name
+        dfg->add_edge(kn_dpin, kn_spin);
+      }
+
+      dfg->add_edge(tn_dpin, tn_spin);
+      dfg->add_edge(kp_dpin, kp_spin);
+      dfg->add_edge(value_dpin, value_spin);
+
+      name2dpin[tup_name] = tup_add.setup_driver_pin();
+      tup_add.setup_driver_pin().set_name(tup_name);
+      setup_dpin_ssa(name2dpin[tup_name], tup_vname, subs);
+
+      kp++;
+      continue;
+    }
+    
     auto tn_dpin    = setup_tuple_ref(dfg, tup_name, true);
     auto kp_dnode   = dfg->create_node_const(Lconst(kp));
     auto kp_dpin    = kp_dnode.setup_driver_pin();
-    auto value_dpin = setup_ref_node_dpin(dfg, c1);
+    auto value_dpin = setup_ref_node_dpin(dfg, tup_child);
 
     auto tup_add    = dfg->create_node(TupAdd_Op);
     auto tn_spin    = tup_add.setup_sink_pin("TN"); // tuple name
     auto kp_spin    = tup_add.setup_sink_pin("KP"); // key position is unknown before tuple resolving
     auto value_spin = tup_add.setup_sink_pin("KV"); // value
-
-    if (key_name.substr(0,4) != "null") {
-      auto kn_dpin    = setup_key_dpin(dfg, key_name);
-      auto kn_spin    = tup_add.setup_sink_pin("KN"); // key name
-      dfg->add_edge(kn_dpin, kn_spin);
-    }
-
+    
     dfg->add_edge(tn_dpin, tn_spin);
     dfg->add_edge(kp_dpin, kp_spin);
     dfg->add_edge(value_dpin, value_spin);
@@ -404,8 +433,8 @@ void Lnast_dfg::process_ast_tuple_struct(LGraph *dfg, const Lnast_nid &lnidx_tup
     name2dpin[tup_name] = tup_add.setup_driver_pin();
     tup_add.setup_driver_pin().set_name(tup_name);
     setup_dpin_ssa(name2dpin[tup_name], tup_vname, subs);
-
     kp++;
+    
   }
 }
 
