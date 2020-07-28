@@ -242,7 +242,7 @@ void Semantic_check::resolve_read_write_lists(Lnast *lnast) {
 void Semantic_check::resolve_lhs_rhs_lists(Lnast *lnast) {
   int lhs_list_size = (int) lhs_list.size();
   for (int i = 0; i < lhs_list_size; i++) {
-    auto lhs_type = lnast->get_data(lhs_list[i]).type;
+    // auto lhs_type = lnast->get_data(lhs_list[i]).type;
     auto lhs_name = lnast->get_name(lhs_list[i]);
     if (lhs_name[0] != '_' && lhs_name[1] != '_' && lhs_name[2] != '_' && rhs_list[i].size() == 1 && lhs_name != "null") {
       auto rhs_type = lnast->get_data(rhs_list[i][0]).type;
@@ -328,16 +328,26 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
     } else if (node_type.is_tuple()) {
       int num_of_ref    = 0;
       int num_of_assign = 0;
+      int num_of_const  = 0;
       for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
         const auto node_type_child = lnast->get_data(lnidx_opr_child).type;
 
-        if (node_type_child.is_ref()) {
+        if (lnast->get_first_child(lnidx_opr) == lnidx_opr_child) {
           num_of_ref += 1;
           // Store type 'ref' variables
           add_to_write_list(lnast, lnast->get_name(lnidx_opr_child), stmt_name);
+          continue;
+        }
+        if (node_type_child.is_ref()) {
+          num_of_ref += 1;
+          // Store type 'ref' variables
+          add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
+        } else if (node_type_child.is_const()) {
+          num_of_const += 1;
+          add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
         } else if (node_type_child.is_assign()) {
-          check_primitive_ops(lnast, lnidx_opr_child, node_type_child, stmt_name);
           num_of_assign += 1;
+          check_primitive_ops(lnast, lnidx_opr_child, node_type_child, stmt_name);
         } else {
           // Invalid Node Type
           error_print_lnast_by_name(lnast, lnast->get_name(lnidx_opr));
@@ -345,13 +355,14 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
         }
       }
       // Missing Nodes
-      if (num_of_ref != 1) {
+      if (num_of_ref == 0) {
         error_print_lnast_by_type(lnast, node_type.to_s());
         Pass::error("Tuple Operation Error: Missing Reference Node\n");
-      } else if (num_of_assign == 0) {
-        error_print_lnast_by_type(lnast, node_type.to_s());
-        Pass::error("Tuple Operation Error: Missing Assign Node(s)\n");
       }
+      // } else if (num_of_assign == 0 && num_of_const == 0) {
+      //   error_print_lnast_by_type(lnast, node_type.to_s());
+      //   Pass::error("Tuple Operation Error: Missing Assign or Const Node(s)\n");
+      // }
     } else if (node_type.is_tuple_concat()) {
       int num_of_ref = 0;
       for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
