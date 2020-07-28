@@ -73,8 +73,7 @@
 //   b = a + 1
 //   a = a - 1
 // }
-// Missing Statement Node
-// Warning: total
+// Warning: b
 // ================================================
 
 // Basic Func Def
