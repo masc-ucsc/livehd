@@ -31,6 +31,7 @@ protected:
   void     init_reg_ref_dots(Lnast &lnast, const std::string &id, const std::string_view clock, const std::string_view reset,
                              const std::string_view init, uint32_t bitwidth, Lnast_nid &parent_node);
   void     InitMemory   (Lnast &lnast, Lnast_nid& parent_node, const firrtl::FirrtlPB_Statement_Memory& mem);
+  void     InitCMemory  (Lnast &lnast, Lnast_nid& parent_node, const firrtl::FirrtlPB_Statement_CMemory& cmem);
   void     create_module_inst(Lnast &lnast, const firrtl::FirrtlPB_Statement_Instance &inst, Lnast_nid &parent_node);
   std::string_view AddAttrToDotSelNode(Lnast& lnast, Lnast_nid& parent_node, Lnast_nid& dot_sel_node, std::string attr);
 
