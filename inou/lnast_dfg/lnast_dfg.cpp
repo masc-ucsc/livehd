@@ -194,7 +194,7 @@ void Lnast_dfg::process_ast_concat_op(LGraph *dfg, const Lnast_nid &lnidx_concat
   auto lhs  = lnast->get_first_child(lnidx_concat); //c0: target tuple name for concat.
   auto opd1 = lnast->get_sibling_next(lhs);         //c1: tuple operand1, either scalar or tuple
   auto opd2 = lnast->get_sibling_next(opd1);        //c2: tuple operand2, either scalar or tuple
-  auto lhs_name  = lnast->get_sname(lhs);
+  auto lhs_name  = lnast->get_sname(lhs); 
   auto opd1_name = lnast->get_sname(opd1);
   auto opd2_name = lnast->get_sname(opd2);
   //lhs = opd1 ++ opd2, both opd1 and opd2 could be either a scalar or a tuple
@@ -386,7 +386,7 @@ void Lnast_dfg::process_ast_tuple_struct(LGraph *dfg, const Lnast_nid &lnidx_tup
     if (lnast->get_type(tup_child).is_assign()) {
       auto c0       = lnast->get_first_child(tup_child);
       auto c1       = lnast->get_sibling_next(c0);
-      auto key_name = lnast->get_vname(c0);
+      auto key_name = lnast->get_sname(c0);
 
       auto tn_dpin    = setup_tuple_ref(dfg, tup_name, true);
       auto kp_dnode   = dfg->create_node_const(Lconst(kp));
@@ -475,7 +475,7 @@ void Lnast_dfg::process_ast_tuple_get_op(LGraph *dfg, const Lnast_nid &lnidx_tg)
     auto kp_dpin = setup_ref_node_dpin(dfg, c2_tg);
     dfg->add_edge(kp_dpin, kp_spin);
   } else {
-    auto kn_dpin = setup_key_dpin(dfg, lnast->get_vname(c2_tg));
+    auto kn_dpin = setup_key_dpin(dfg, lnast->get_sname(c2_tg));
     dfg->add_edge(kn_dpin, kn_spin);
   }
 
@@ -512,12 +512,11 @@ void Lnast_dfg::process_ast_tuple_get_op(LGraph *dfg, const Lnast_nid &lnidx_tg)
 
 void Lnast_dfg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnidx_ta) {
   int i = 0;
-  std::vector<Node> ta_vec;
+  absl::flat_hash_map<int, Node> ta_map;
+  absl::flat_hash_map<int, std::string_view> ta_name;
   for (const auto & child : lnast->children(lnidx_ta)) {
     if (i == 0) {
       auto tup_add  = dfg->create_node(TupAdd_Op);
-      ta_vec.resize(i+1);
-      ta_vec[i] = tup_add;
       auto tn_spin  = tup_add.setup_sink_pin("TN");
       auto tup_name = lnast->get_sname(child);
       auto tn_dpin = setup_tuple_ref(dfg, tup_name, true);
@@ -526,7 +525,7 @@ void Lnast_dfg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnidx_ta)
       auto tn_node  = tn_dpin.get_node();
       auto tn_ntype = tn_node.get_type().op;
       bool is_scalar =  tn_ntype != TupAdd_Op && tn_ntype != TupRef_Op;
-      auto key_name = lnast->get_vname(lnast->get_sibling_next(child)); // peep for key_name ...
+      auto key_name = lnast->get_sname(lnast->get_sibling_next(child)); // peep for key_name ...
       if (is_scalar && key_name != "0")
 	    	Pass::error("try to modify a non-exist tuple key field:{} in tuple:{}\n", key_name, tup_name);
 
@@ -535,15 +534,18 @@ void Lnast_dfg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnidx_ta)
       name2dpin[tup_name] = tup_add.setup_driver_pin();
       tup_add.setup_driver_pin().set_name(tup_name); // tuple ref semantically move to here
       setup_dpin_ssa(name2dpin[tup_name], lnast->get_vname(child), lnast->get_subs(child));
+
+      ta_map[i]  = tup_add;
+      ta_name[i] = tup_name; 
       i++ ;
       continue;
     }
 
     if (i == 1) {
-      auto tup_add = ta_vec[i-1];
+      auto tup_add = ta_map[i-1];
       auto kn_spin = tup_add.setup_sink_pin("KN"); //key name
       auto kp_spin = tup_add.setup_sink_pin("KP"); //key name
-      auto key_name = lnast->get_vname(child);
+      auto key_name = lnast->get_sname(child);
       Node_pin kn_dpin;
       if (is_const(key_name)) { // it is a key_pos, not a key_name
         auto kp_dpin = dfg->create_node_const(Lconst(key_name)).setup_driver_pin();
@@ -552,21 +554,58 @@ void Lnast_dfg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnidx_ta)
         kn_dpin = setup_key_dpin(dfg, key_name);
         dfg->add_edge(kn_dpin, kn_spin);
       }
+      ta_name[i] = lnast->get_sname(child); 
       i++ ;
       continue;
     }
 
-    // non-hier tuple case
+    // i >= 2
     if (child == lnast->get_last_child(lnidx_ta)) {
-      auto tup_add = ta_vec[i-2];
+      // non-hier tuple case
+      auto tup_add = ta_map[i-2];
       auto value_spin = tup_add.setup_sink_pin("KV"); //value
-
       auto value_dpin = setup_ref_node_dpin(dfg, child);
       dfg->add_edge(value_dpin, value_spin);
+      i++ ;
+    } else {
+      // hier tuple case
+      // create a new tuple chain
+      auto tup_add  = dfg->create_node(TupAdd_Op);
+      ta_map[i-1]   = tup_add;
+      auto tn_spin  = tup_add.setup_sink_pin("TN");
+      auto tup_name = ta_name[i-1];
+      auto tn_dpin  = setup_tuple_ref(dfg, tup_name, true);
+      dfg->add_edge(tn_dpin, tn_spin);
+
+      name2dpin[tup_name] = tup_add.setup_driver_pin();
+      tup_add.setup_driver_pin().set_name(tup_name); // tuple ref semantically move to here
+      setup_dpin_ssa(name2dpin[tup_name], lnast->get_vname(child), lnast->get_subs(child));
+
+      // take the new tuple-chain as the original tuple-chain value-dpin -> hierarchical tuple now!
+      auto tup_add_parent = ta_map[i-2];
+      auto value_spin_parent = tup_add_parent.setup_sink_pin("KV");
+      auto value_dpin_parent = tup_add.setup_driver_pin();
+      dfg->add_edge(value_dpin_parent, value_spin_parent);  
+
+      // setup key for the new tuple chain head
+      auto kn_spin = tup_add.setup_sink_pin("KN"); //key name
+      auto kp_spin = tup_add.setup_sink_pin("KP"); //key name
+      auto key_name = lnast->get_sname(child);
+      Node_pin kn_dpin;
+      if (is_const(key_name)) { // it is a key_pos, not a key_name
+        auto kp_dpin = dfg->create_node_const(Lconst(key_name)).setup_driver_pin();
+        dfg->add_edge(kp_dpin, kp_spin);
+      } else if (key_name.substr(0,4) != "null") {// it is a pure key_name
+        kn_dpin = setup_key_dpin(dfg, key_name);
+        dfg->add_edge(kn_dpin, kn_spin);
+      }
+      ta_name[i] = lnast->get_sname(child); 
       i++ ;
     }
   }
 }
+
+
 void Lnast_dfg::process_ast_tuple_add_op_bk(LGraph *dfg, const Lnast_nid &lnidx_ta) {
   auto tup_add    = dfg->create_node(TupAdd_Op);
   auto tn_spin    = tup_add.setup_sink_pin("TN"); //tuple name
