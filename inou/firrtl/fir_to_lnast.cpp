@@ -263,6 +263,70 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id, const 
   lnast.add_child(idx_asg_qp, Lnast_node::create_ref(acc_name_q));
 }
 
+// Set up any of the parameters related to a Memory block.
+// FIXME: Until memory blocks have been discussed further in LNAST, this solution may be subject to change.
+void Inou_firrtl::InitMemory(Lnast& lnast, Lnast_nid& parent_node, const firrtl::FirrtlPB_Statement_Memory& mem) {
+  std::string_view mem_name = lnast.add_string(mem.id());
+
+  // Set __size
+  std::string_view depth;
+  switch (mem.depth_case()) {
+    case firrtl::FirrtlPB_Statement_Memory::kUintDepth: {
+      depth = lnast.add_string(std::to_string(mem.uint_depth()));
+      break;
+    } case firrtl::FirrtlPB_Statement_Memory::kBigintDepth: {
+      depth = lnast.add_string(ConvertBigIntToStr(mem.bigint_depth()));
+      break;
+    } default: {
+      fmt::print("Memory depth error\n");
+      I(false);
+    }
+  }
+  auto temp_var_d = create_temp_var(lnast);
+  auto idx_dot_d = lnast.add_child(parent_node, Lnast_node::create_dot("mem"));
+  lnast.add_child(idx_dot_d, Lnast_node::create_ref(temp_var_d));
+  lnast.add_child(idx_dot_d, Lnast_node::create_ref(mem_name));
+  lnast.add_child(idx_dot_d, Lnast_node::create_ref("__size"));
+  auto idx_asg_d = lnast.add_child(parent_node, Lnast_node::create_assign("mem"));
+  lnast.add_child(idx_asg_d, Lnast_node::create_ref(temp_var_d));
+  lnast.add_child(idx_dot_d, Lnast_node::create_const(depth));
+
+  // Set __rd_latency
+  auto temp_var_rl = create_temp_var(lnast);
+  auto idx_dot_rl = lnast.add_child(parent_node, Lnast_node::create_dot("mem"));
+  lnast.add_child(idx_dot_rl, Lnast_node::create_ref(temp_var_rl));
+  lnast.add_child(idx_dot_rl, Lnast_node::create_ref(mem_name));
+  lnast.add_child(idx_dot_rl, Lnast_node::create_ref("__rd_latency"));
+  auto idx_asg_rl = lnast.add_child(parent_node, Lnast_node::create_assign("mem"));
+  lnast.add_child(idx_asg_rl, Lnast_node::create_ref(temp_var_rl));
+  lnast.add_child(idx_dot_rl, Lnast_node::create_const(lnast.add_string(std::to_string(mem.read_latency()))));
+
+  // Set __wr_latency
+  auto temp_var_wr = create_temp_var(lnast);
+  auto idx_dot_wr = lnast.add_child(parent_node, Lnast_node::create_dot("mem"));
+  lnast.add_child(idx_dot_wr, Lnast_node::create_ref(temp_var_wr));
+  lnast.add_child(idx_dot_wr, Lnast_node::create_ref(mem_name));
+  lnast.add_child(idx_dot_wr, Lnast_node::create_ref("__wr_latency"));
+  auto idx_asg_wr = lnast.add_child(parent_node, Lnast_node::create_assign("mem"));
+  lnast.add_child(idx_asg_wr, Lnast_node::create_ref(temp_var_wr));
+  lnast.add_child(idx_dot_wr, Lnast_node::create_const(lnast.add_string(std::to_string(mem.write_latency()))));
+
+  //TODO: How to handle reader ports and writer ports.
+  // Probably setting __rd_ports and __wr_ports, along with somehow
+  // rd/wr port name with LNAST mem syntax?
+      for (int i = 0; i < mem.reader_id_size(); i++) {
+        cout << "\treader => " << mem.reader_id(i) << "\n";
+      }
+      for (int j = 0; j < mem.writer_id_size(); j++) {
+        cout << "\twriter => " << mem.writer_id(j) << "\n";
+      }
+
+  if (mem.readwriter_id_size() > 0) {
+    fmt::print("Error: read-writer ports not supported yet in LNAST due to bidirectionality.\n");
+    I(false);
+  }
+}
+
 std::string_view Inou_firrtl::AddAttrToDotSelNode(Lnast& lnast, Lnast_nid& parent_node, Lnast_nid& dot_sel_node, std::string attr) {
   auto ntype = lnast.get_type(dot_sel_node);
   I(ntype.is_select() || ntype.is_dot());
@@ -1568,44 +1632,7 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
       break;
     }
     case firrtl::FirrtlPB_Statement::kMemory: {  // Memory
-      cout << "mem " << stmt.memory().id() << " :\n\t";
-      // ListTypeInfo(
-      cout << "\tdepth => ";
-      switch (stmt.memory().depth_case()) {
-        case 0: {
-          cout << "Depth not set, ERROR\n";
-          break;
-        }
-        case 3: {
-          cout << stmt.memory().uint_depth() << "\n";
-          break;
-        }
-        case 9: {
-          // FIXME: Not sure this case will work properly... More testing needed.
-          std::string depth = stmt.memory().bigint_depth().value();  // 2s complement binary rep.
-          cout << depth << "\n";
-          break;
-        }
-        default: cout << "Memory depth error\n";
-      }
-      cout << "\tread-latency => " << stmt.memory().read_latency() << "\n";
-      cout << "\twrite-latency => " << stmt.memory().write_latency() << "\n";
-      for (int i = 0; i < stmt.memory().reader_id_size(); i++) {
-        cout << "\treader => " << stmt.memory().reader_id(i) << "\n";
-      }
-      for (int j = 0; j < stmt.memory().writer_id_size(); j++) {
-        cout << "\twriter => " << stmt.memory().writer_id(j) << "\n";
-      }
-      for (int k = 0; k < stmt.memory().readwriter_id_size(); k++) {
-        cout << "\tread-writer => " << stmt.memory().readwriter_id(k) << "\n";
-      }
-      cout << "\tread-under-write <= ";
-      switch (stmt.memory().read_under_write()) {
-        case 0: cout << "undefined\n"; break;
-        case 1: cout << "old\n"; break;
-        case 2: cout << "new\n"; break;
-        default: cout << "RUW Error...\n";
-      }
+      InitMemory(lnast, parent_node, stmt.memory());
       I(false);  // TODO: Memory not yet supported.
       break;
     }
