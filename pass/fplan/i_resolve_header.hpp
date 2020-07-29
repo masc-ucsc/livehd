@@ -6,6 +6,9 @@
 
 #pragma once
 #include "Adjacency_list.hpp"
+#include "range/v3/all.hpp"
+#include "range/v3/algorithm.hpp"
+#include "range/v3/view.hpp"
 #undef I
 
 #include "iassert.hpp"

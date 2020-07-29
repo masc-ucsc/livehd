@@ -77,18 +77,17 @@ private:
   // gets the size of the hierarchy starting at root and caches it at the node for later
   //unsigned int size(const phier root);
   
-  typedef decltype(graph::Bi_adjacency_list().vert_map<Min_cut_data>()) Min_cut_map;
-  typedef decltype(graph::Bi_adjacency_list().vert_map<int>()) Set_map;
   typedef decltype(graph::Bi_adjacency_list().insert_vert()) vertex;
   typedef decltype(graph::Bi_adjacency_list().insert_edge(graph::Bi_adjacency_list().insert_vert(), graph::Bi_adjacency_list().insert_vert())) edge;
 
-  std::pair<int, int> populate_cost_map(const graph::Bi_adjacency_list& g, Min_cut_map& m, Set_map& smap);
+  typedef decltype(graph::Bi_adjacency_list().vert_map<Min_cut_data>()) Min_cut_map;
+  typedef decltype(graph::Bi_adjacency_list().vert_map<int>()) Set_map;
 
   std::pair<int, int> populate_set_map(const graph::Bi_adjacency_list& g, Set_map& smap);
   void populate_cost_map(const graph::Bi_adjacency_list& g, Min_cut_map& cmap);
 
   // make a partition of the graph minimizing the number of edges crossing the cut and keeping in mind area (modified kernighan-lin algorithm)
-  void min_wire_cut(Graph_info& info, Set_map& smap);
+  std::pair<int, int> min_wire_cut(Graph_info& info, Set_map& smap, int cut_set);
   
   // create a hierarchy tree out of existing hierarchies
   //phier make_hier_tree(phier t1, phier t2);
