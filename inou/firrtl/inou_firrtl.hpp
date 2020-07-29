@@ -30,6 +30,7 @@ protected:
                          const std::string_view reset, const std::string_view init, Lnast_nid &parent_node);
   void     init_reg_ref_dots(Lnast &lnast, const std::string &id, const std::string_view clock, const std::string_view reset,
                              const std::string_view init, uint32_t bitwidth, Lnast_nid &parent_node);
+  void     InitMemory   (Lnast &lnast, Lnast_nid& parent_node, const firrtl::FirrtlPB_Statement_Memory& mem);
   void     create_module_inst(Lnast &lnast, const firrtl::FirrtlPB_Statement_Instance &inst, Lnast_nid &parent_node);
   std::string_view AddAttrToDotSelNode(Lnast& lnast, Lnast_nid& parent_node, Lnast_nid& dot_sel_node, std::string attr);
 
@@ -104,9 +105,10 @@ protected:
   bool                             process_ln_dot(Lnast &ln, const Lnast_nid &lnidx_op, firrtl::FirrtlPB_Statement *fstmt);
 
   void handle_attr_assign(Lnast &ln, const Lnast_nid &lhs, const Lnast_nid &rhs);
-  void handle_clock_attr(Lnast &ln, const std::string_view &var_name, const Lnast_nid &rhs);
-  void handle_async_attr(Lnast &ln, const std::string_view &var_name, const Lnast_nid &rhs);
-  void handle_reset_attr(Lnast &ln, const std::string_view &var_name, const Lnast_nid &rhs);
+  void handle_sign_attr  (Lnast &ln, const std::string_view &var_name, const Lnast_nid &rhs);
+  void handle_clock_attr (Lnast &ln, const std::string_view &var_name, const Lnast_nid &rhs);
+  void handle_async_attr (Lnast &ln, const std::string_view &var_name, const Lnast_nid &rhs);
+  void handle_reset_attr (Lnast &ln, const std::string_view &var_name, const Lnast_nid &rhs);
   firrtl::FirrtlPB_Expression_SubField* make_subfield_expr(std::string name);
 
   uint8_t process_op_children(Lnast &ln, const Lnast_nid &lnidx_if, const std::string &firrtl_op);
