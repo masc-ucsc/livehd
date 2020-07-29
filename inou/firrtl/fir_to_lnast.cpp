@@ -154,7 +154,7 @@ void Inou_firrtl::init_wire_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type
     }
     case firrtl::FirrtlPB_Type::kVectorType: {  // Vector Type
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
-        init_wire_dots(lnast, type.vector_type().type(), absl::StrCat(id, ".", i), parent_node);
+        init_wire_dots(lnast, type.vector_type().type(), absl::StrCat(id, "[", i, "]"), parent_node);
       }
       break;
     }
@@ -266,7 +266,7 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id, const 
 // Set up any of the parameters related to a Memory block.
 // FIXME: Until memory blocks have been discussed further in LNAST, this solution may be subject to change.
 void Inou_firrtl::InitMemory(Lnast& lnast, Lnast_nid& parent_node, const firrtl::FirrtlPB_Statement_Memory& mem) {
-  std::string_view mem_name = lnast.add_string(mem.id());
+  auto mem_name = lnast.add_string(absl::StrCat("#", mem.id()));
 
   // Set __size
   std::string_view depth;
@@ -325,6 +325,38 @@ void Inou_firrtl::InitMemory(Lnast& lnast, Lnast_nid& parent_node, const firrtl:
     fmt::print("Error: read-writer ports not supported yet in LNAST due to bidirectionality.\n");
     I(false);
   }
+}
+
+void Inou_firrtl::InitCMemory(Lnast& lnast, Lnast_nid& parent_node, const firrtl::FirrtlPB_Statement_CMemory& cmem) {
+  /* CMemory is Chirrtl's version of FIRRTL Memory (where a cmemory statements
+   * specifies memory data type and depth), but no ports. If using CMemory,
+   * the Chirrtl later specifies read/write/read-write ports using MemoryPort
+   * statement. Put simply, a CMemory is just a vector??? */
+  auto cmem_name = lnast.add_string(absl::StrCat("#", cmem.id()));
+
+  // Specify __bits and __size
+  std::string_view depth_str;
+  firrtl::FirrtlPB_Type type;
+  if (cmem.type_case() == firrtl::FirrtlPB_Statement_CMemory::kVectorType) {
+    depth_str = lnast.add_string(std::to_string(cmem.vector_type().size()));
+    type = cmem.vector_type().type();
+  } else if (cmem.type_case() == firrtl::FirrtlPB_Statement_CMemory::kTypeAndDepth) {
+    depth_str = ConvertBigIntToStr(cmem.type_and_depth().depth());
+    type = cmem.type_and_depth().data_type();
+  } else {
+    I(false);
+  }
+
+  auto idx_dot_s = lnast.add_child(parent_node, Lnast_node::create_dot("cmem"));
+  lnast.add_child(idx_dot_s, Lnast_node::create_ref(temp_var_s));
+  lnast.add_child(idx_dot_s, Lnast_node::create_ref(cmem_name));
+  lnast.add_child(idx_dot_s, Lnast_node::create_ref("__size"));
+  auto idx_asg_s = lnast.add_child(parent_node, Lnast_node::create_assign("cmem"));
+  lnast.add_child(idx_asg_s, Lnast_node::create_ref(temp_var_s));
+  lnast.add_child(idx_asg_s, Lnast_node::create_const(depth_str));
+
+  // To save space in LNAST, only specify __bits info for 0th element of CMem (same for others).
+  init_wire_dots(lnast, type, absl::StrCat(cmem_name, "[0]"), parent_node);
 }
 
 std::string_view Inou_firrtl::AddAttrToDotSelNode(Lnast& lnast, Lnast_nid& parent_node, Lnast_nid& dot_sel_node, std::string attr) {
@@ -1632,11 +1664,14 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
       break;
     }
     case firrtl::FirrtlPB_Statement::kMemory: {  // Memory
+      register_names.insert(stmt.memory().id());
       InitMemory(lnast, parent_node, stmt.memory());
       I(false);  // TODO: Memory not yet supported.
       break;
     }
     case firrtl::FirrtlPB_Statement::kCmemory: {  // CMemory
+      register_names.insert(stmt.cmemory().id());
+      InitCMemory(lnast, parent_node, stmt.cmemory());
       I(false);                                   // TODO: Memory not yet supported.
       break;
     }
