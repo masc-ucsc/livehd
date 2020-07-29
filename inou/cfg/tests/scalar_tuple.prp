@@ -63,7 +63,7 @@ h.0 = 3       // scalar -> tuple
 // case VIII
 // i = 2
 // i.0 = 3       // scalar -> tuple
-// i.1 = 4
+// i.1 = 4       // should be compile-error
 // %out9 = i.0 + i.1     //7       
 
 
