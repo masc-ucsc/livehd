@@ -114,10 +114,6 @@ Graph_info Json_inou_parser::make_tree() const {
   
   Graph_info info(std::move(g), std::move(g_name_map), std::move(g_area_map), std::move(edge_weights));
   
-#ifndef NDEBUG
-  info.print();
-#endif
-  
   return info;
 } 
 

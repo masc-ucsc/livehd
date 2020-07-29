@@ -184,7 +184,7 @@ new_git_repository(
 new_git_repository(
 	name = "range-v3",
 	build_file = "BUILD.rangev3",
-	commit = "4f4beb45c5e56aca4233e4d4c760208e21fff2ec", # old commit required by graph
+	commit = "4f4beb45c5e56aca4233e4d4c760208e21fff2ec", # specific commit used by graph, made on Jan 11 2019
 	remote = "https://github.com/ericniebler/range-v3",
 )
 
