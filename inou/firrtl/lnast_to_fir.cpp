@@ -25,7 +25,7 @@ void Inou_firrtl::toFIRRTL(Eprp_var &var) {
     }
   }
 
-  fir_design.PrintDebugString();
+  //fir_design.PrintDebugString();
   std::fstream output(absl::StrCat(top_msg->name(), ".pb"), std::ios::out | std::ios::trunc | std::ios::binary);
   if (!fir_design.SerializeToOstream(&output)) {
     fmt::print("Failed to write firrtl design\n");
@@ -517,9 +517,75 @@ void Inou_firrtl::handle_attr_assign(Lnast &ln, const Lnast_nid &lhs, const Lnas
     handle_reset_attr(ln, var_name, rhs);
   } else if (attr_name == "__reset_async") {
     handle_async_attr(ln, var_name, rhs);
+  } else if (attr_name == "__sign") {
+    handle_sign_attr(ln, var_name, rhs);
   } else {
     fmt::print("Error: attribute found, but it is either incorrect or not supported yet.\n");
     // I(false);
+  }
+}
+
+void Inou_firrtl::handle_sign_attr(Lnast &ln, const std::string_view &var_name, const Lnast_nid &rhs) {
+  if (ln.get_name(rhs) != "true") {
+    // If the sign is being set to not true, then it's a UInt (which is already the default).
+    return;
+  }
+
+  if (io_map.contains(var_name.substr(1))) {
+    auto port_ptr  = io_map[var_name.substr(1)];
+    if (port_ptr->type().has_sint_type()) {
+      return;
+    } else if (port_ptr->type().has_uint_type()) {
+      auto sint_type = new firrtl::FirrtlPB_Type_SIntType();
+      auto width     = new firrtl::FirrtlPB_Width();
+      width->set_value(port_ptr->type().uint_type().width().value());
+      sint_type->set_allocated_width(width);
+      auto type      = new firrtl::FirrtlPB_Type();
+      type->set_allocated_sint_type(sint_type);
+      port_ptr->set_allocated_type(type);
+    } else {
+      // FIXME: Unsure of how to deal with conflicting types.
+      I(false);
+    }
+  } else if (reg_wire_map.contains(var_name.substr(1))) {
+    I(reg_wire_map[var_name.substr(1)]->has_register_());
+    auto reg_ptr = reg_wire_map[var_name.substr(1)]->mutable_register_();
+    if (reg_ptr->type().has_sint_type()) {
+      return;
+    } else if (reg_ptr->type().has_uint_type()) {
+      auto sint_type = new firrtl::FirrtlPB_Type_SIntType();
+      auto width     = new firrtl::FirrtlPB_Width();
+      width->set_value(reg_ptr->type().uint_type().width().value());
+      sint_type->set_allocated_width(width);
+      auto type      = new firrtl::FirrtlPB_Type();
+      type->set_allocated_sint_type(sint_type);
+      reg_ptr->set_allocated_type(type);
+    } else {
+      // FIXME: Unsure of how to deal with conflicting types.
+      I(false);
+    }
+  } else if (reg_wire_map.contains(var_name)) {
+    I(reg_wire_map[var_name]->has_wire());
+    auto wire_ptr = reg_wire_map[var_name.substr(1)]->mutable_wire();
+    if (wire_ptr->type().has_sint_type()) {
+      return;
+    } else if (wire_ptr->type().has_uint_type()) {
+      auto sint_type = new firrtl::FirrtlPB_Type_SIntType();
+      auto width     = new firrtl::FirrtlPB_Width();
+      width->set_value(wire_ptr->type().uint_type().width().value());
+      sint_type->set_allocated_width(width);
+      auto type      = new firrtl::FirrtlPB_Type();
+      type->set_allocated_sint_type(sint_type);
+      wire_ptr->set_allocated_type(type);
+    } else {
+      // FIXME: Unsure of how to deal with conflicting types.
+      I(false);
+    }
+  } else {
+    /* A temporary variable was declared as signed...
+     * In theory (if this makes sense), FIRRTL's type
+     * inference should take care of this. */
+    return;
   }
 }
 
@@ -549,7 +615,7 @@ void Inou_firrtl::handle_clock_attr(Lnast &ln, const std::string_view &var_name,
     stmt_ptr->mutable_register_()->set_allocated_type(type);
 
   } else if (reg_wire_map.contains(clk_name)) {
-    auto stmt_ptr = reg_wire_map[clk_name.substr(1)];
+    auto stmt_ptr = reg_wire_map[clk_name];
     auto clk_type = new firrtl::FirrtlPB_Type_ClockType();
     auto type     = new firrtl::FirrtlPB_Type();
     type->set_allocated_clock_type(clk_type);
@@ -615,7 +681,7 @@ void Inou_firrtl::handle_reset_attr(Lnast &ln, const std::string_view &var_name,
     stmt_ptr->mutable_register_()->set_allocated_type(type);
 
   } else if (reg_wire_map.contains(reset_name)) {
-    auto stmt_ptr = reg_wire_map[reset_name.substr(1)];
+    auto stmt_ptr = reg_wire_map[reset_name];
     auto type     = new firrtl::FirrtlPB_Type();
     if (async_regs.contains(var_name.substr(1))) {
       auto areset_type = new firrtl::FirrtlPB_Type_AsyncResetType();
