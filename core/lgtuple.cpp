@@ -1,7 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "lgraph.hpp"
 #include "lgtuple.hpp"
+
+#include "lgraph.hpp"
 
 Node_pin Lgtuple::get_value_dpin(int pos, std::string_view key) const {
   if (pos == 0 && is_scalar()) {
@@ -42,18 +43,18 @@ size_t Lgtuple::get_or_create_pos(size_t pos, std::string_view key) {
   unscalarize_if_needed();
 
   if (pos > pos2tuple.size()) {
-    pos2tuple.resize(pos+1);
+    pos2tuple.resize(pos + 1);
     pos2tuple[pos] = std::make_shared<Lgtuple>(pos, key);
-		key2pos[key] = pos;
+    key2pos[key]   = pos;
   } else if (pos == pos2tuple.size()) {
     pos2tuple.emplace_back(std::make_shared<Lgtuple>(pos, key));
-		key2pos[key] = pos;
+    key2pos[key] = pos;
   } else {
     if (pos2tuple[pos]) {
       I(pos2tuple[pos]->get_parent_key_name() == key);
     } else {
       pos2tuple[pos] = std::make_shared<Lgtuple>(pos, key);
-			key2pos[key] = pos;
+      key2pos[key]   = pos;
     }
   }
 
@@ -63,17 +64,17 @@ size_t Lgtuple::get_or_create_pos(size_t pos, std::string_view key) {
 size_t Lgtuple::get_or_create_pos(std::string_view key) {
   unscalarize_if_needed();
 
-  auto pos = pos2tuple.size();
+  auto pos       = pos2tuple.size();
   bool new_entry = true;
 
-	ordered = false;
+  ordered = false;
 
   if (has_key_name(key)) {
-    pos = get_key_pos(key);
+    pos       = get_key_pos(key);
     new_entry = false;
   } else {
-		pos2tuple.emplace_back(std::make_shared<Lgtuple>(key)); // named
-		key2pos[key] = pos;
+    pos2tuple.emplace_back(std::make_shared<Lgtuple>(key));  // named
+    key2pos[key] = pos;
   }
 
   return pos;
@@ -86,10 +87,10 @@ size_t Lgtuple::get_or_create_pos(size_t pos) {
   I(pos);
   bool new_entry = false;
   if (pos > pos2tuple.size()) {
-    pos2tuple.resize(pos+1);
+    pos2tuple.resize(pos + 1);
     new_entry = true;
   } else if (pos == pos2tuple.size()) {
-    pos2tuple.emplace_back(std::make_shared<Lgtuple>(pos)); // unname
+    pos2tuple.emplace_back(std::make_shared<Lgtuple>(pos));  // unname
   } else {
     if (pos2tuple[pos]) {
       named = named && pos2tuple[pos]->has_parent_key_name();
@@ -100,7 +101,7 @@ size_t Lgtuple::get_or_create_pos(size_t pos) {
 
   if (new_entry) {
     named          = false;
-    pos2tuple[pos] = std::make_shared<Lgtuple>(); // unordered, unnamed
+    pos2tuple[pos] = std::make_shared<Lgtuple>();  // unordered, unnamed
   }
 
   return pos;
@@ -126,7 +127,7 @@ bool Lgtuple::set(int pos, std::string_view key, const Node_pin &_val_dpin) {
 }
 
 void Lgtuple::set(std::string_view key, std::shared_ptr<Lgtuple> tup) {
-  I(false); // handle copy of tuple recursively
+  I(false);  // handle copy of tuple recursively
 }
 
 void Lgtuple::set(std::string_view key, LGraph *lg, const Lconst &constant) {
@@ -186,8 +187,7 @@ size_t Lgtuple::add(const Node_pin &_val_dpin) {
 }
 
 bool Lgtuple::add(const std::shared_ptr<Lgtuple> tup2) {
-
-  for(auto e:tup2->key2pos) {
+  for (auto e : tup2->key2pos) {
     if (key2pos.count(e.first)) {
       return false;  // label overlap
     }
@@ -202,7 +202,6 @@ bool Lgtuple::add(const std::shared_ptr<Lgtuple> tup2) {
     auto shift = pos2tuple.size();
     for (auto i = 0; i < tup2->pos2tuple.size(); ++i) {
       pos2tuple.emplace_back(tup2->pos2tuple[i]);
-
     }
     for (auto e : tup2->key2pos) {
       key2pos[e.first] = e.second + shift;
@@ -229,26 +228,30 @@ void Lgtuple::set(LGraph *lg, const Lconst &constant) {
   reset();
 
   auto node = lg->create_node_const(constant);
-  val_dpin = node.setup_driver_pin();
+  val_dpin  = node.setup_driver_pin();
 }
 
 void Lgtuple::set(const Node_pin &_val_dpin) {
   reset();
 
-  val_dpin = _val_dpin; //this means the val_dpin of final TupAdd node from the most-up-to-date tuple-chain
+  val_dpin = _val_dpin;  // this means the val_dpin of final TupAdd node from the most-up-to-date tuple-chain
 }
 
 void Lgtuple::dump(std::string_view indent) const {
-  fmt::print("{}parent name:{} parent pos:{} {} {} val_dpin:{}\n", indent, parent_key_name, parent_key_pos, ordered ? "ordered" : "unordered",
-             named ? "named" : "unnamed", val_dpin.debug_name());
+  fmt::print("{}parent name:{} parent pos:{} {} {} val_dpin:{}\n",
+             indent,
+             parent_key_name,
+             parent_key_pos,
+             ordered ? "ordered" : "unordered",
+             named ? "named" : "unnamed",
+             val_dpin.debug_name());
 
   std::string indent2(indent);
-  indent2.append(2,' ');
+  indent2.append(2, ' ');
   for (auto i = 0u; i < pos2tuple.size(); ++i) {
     if (pos2tuple[i])
       pos2tuple[i]->dump(indent2);
     else
-      fmt::print("{}invalid pos:{}\n",indent2, i);
+      fmt::print("{}invalid pos:{}\n", indent2, i);
   }
 }
-

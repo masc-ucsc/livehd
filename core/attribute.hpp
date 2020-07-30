@@ -33,7 +33,8 @@ class Attribute {
       return;
     }
 
-    if (pos >= table.size()) table.resize(pos + 1);
+    if (pos >= table.size())
+      table.resize(pos + 1);
     I(table[pos] == 0);
     last_attr  = new Attr_data(lg->get_path(), get_filename(lg->get_lgid()));
     table[pos] = last_attr;
@@ -43,11 +44,13 @@ class Attribute {
 
 public:
   static Attr_data *ref(const Base &obj) {
-    if (unlikely(obj.get_top_lgraph() != last_lg)) setup_table(obj.get_top_lgraph());
+    if (unlikely(obj.get_top_lgraph() != last_lg))
+      setup_table(obj.get_top_lgraph());
     return last_attr;
   }
   static Attr_data *ref(const LGraph *lg) {
-    if (unlikely(lg != last_lg)) setup_table(lg);
+    if (unlikely(lg != last_lg))
+      setup_table(lg);
     return last_attr;
   }
 

@@ -86,10 +86,12 @@ LGraph *Pass_abc::regen(const LGraph *lg) {
   LGraph *mapped = LGraph::create(lg->get_path(), absl::StrCat(lg->get_name(), "_mapped"), source);
   from_abc(mapped, lg, to_abc(lg));
   mapped->sync();
-  if (opack.verbose) mapped->print_stats();
+  if (opack.verbose)
+    mapped->print_stats();
   clear();
 
-  if (!opack.blif_file.empty()) dump_blif(mapped, opack.blif_file);
+  if (!opack.blif_file.empty())
+    dump_blif(mapped, opack.blif_file);
 
   return mapped;
 }
@@ -126,7 +128,8 @@ void Pass_abc::find_latch_conn(const LGraph *g) {
   for (const auto &idx : graph_info->latch_id) {
     graph_topology::topology_info topo;
     const Tech_cell *             tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
-    if (opack.verbose) fmt::print("\nLatch_Op_ID NodeID:{} has direct input from Node: \n", idx);
+    if (opack.verbose)
+      fmt::print("\nLatch_Op_ID NodeID:{} has direct input from Node: \n", idx);
     std::string trig_pin = tcell->pin_name_exist("C") ? "C" : "E";
     for (const auto &input : g->inp_edges(idx)) {
       if (input.get_inp_pin().get_pid() == tcell->get_pin_id("D")) {
@@ -218,7 +221,8 @@ void Pass_abc::find_graphio_output_conn(const LGraph *g) {
 
 void Pass_abc::find_sub_conn(const LGraph *g) {
   for (const auto &idx : graph_info->subgraph_id) {
-    if (opack.verbose) fmt::print("\nSubGraph_Op NodeID:{} has direct input from Node: \n", idx);
+    if (opack.verbose)
+      fmt::print("\nSubGraph_Op NodeID:{} has direct input from Node: \n", idx);
 
     absl::flat_hash_map<Port_ID, const Edge *>                  inp_edges;
     absl::flat_hash_map<Port_ID, graph_topology::topology_info> subgraph_pid;
@@ -229,7 +233,8 @@ void Pass_abc::find_sub_conn(const LGraph *g) {
     }
 
     for (const auto &input : inp_edges) {
-      if (opack.verbose) fmt::print("\n------------------------------------------------ \n", idx);
+      if (opack.verbose)
+        fmt::print("\n------------------------------------------------ \n", idx);
       graph_topology::topology_info topo;
       auto                          node_idx = input.second->get_idx();
       auto                          width    = g->get_bits(node_idx);
@@ -251,7 +256,8 @@ void Pass_abc::find_sub_conn(const LGraph *g) {
 
 void Pass_abc::find_memory_conn(const LGraph *g) {
   for (const auto &idx : graph_info->memory_id) {
-    if (opack.verbose) fmt::print("\nMemory_Op NodeID:{} has direct input from Node: \n", idx);
+    if (opack.verbose)
+      fmt::print("\nMemory_Op NodeID:{} has direct input from Node: \n", idx);
 
     absl::flat_hash_map<Port_ID, const Edge *>                  inp_edges;
     absl::flat_hash_map<Port_ID, graph_topology::topology_info> memory_pid;
@@ -265,7 +271,8 @@ void Pass_abc::find_memory_conn(const LGraph *g) {
     }
     for (const auto &input : inp_edges) {
       Port_ID input_id = input.second->get_inp_pin().get_pid();
-      if (opack.verbose) fmt::print("\n-------------------{}---------------------- \n", input_id);
+      if (opack.verbose)
+        fmt::print("\n-------------------{}---------------------- \n", input_id);
       graph_topology::topology_info topo;
       auto                          node_idx = input.second->get_idx();
       auto                          width    = g->get_bits(node_idx);
@@ -332,14 +339,20 @@ void Pass_abc::recursive_find(const LGraph *g, const Edge_raw *input, graph_topo
   Node_Type_Op this_node_type = g->get_node(this_idx).get_type().op;
   if (this_node_type == U32Const_Op) {
     if (opack.verbose)
-      fmt::print("\t U32Const_Op_NodeID:{},bit [{}:{}] portid : {} \n", input->get_idx(), bit_addr[0], bit_addr[1],
+      fmt::print("\t U32Const_Op_NodeID:{},bit [{}:{}] portid : {} \n",
+                 input->get_idx(),
+                 bit_addr[0],
+                 bit_addr[1],
                  input->get_out_pin().get_pid());
 
     index_offset info = {this_idx, input->get_out_pin().get_pid(), {bit_addr[0], bit_addr[1]}};
     topo.push_back(info);
   } else if (this_node_type == StrConst_Op) {
     if (opack.verbose)
-      fmt::print("\t StrConst_Op_NodeID:{},bit [{}:{}]  portid : {} \n", this_idx, bit_addr[0], bit_addr[1],
+      fmt::print("\t StrConst_Op_NodeID:{},bit [{}:{}]  portid : {} \n",
+                 this_idx,
+                 bit_addr[0],
+                 bit_addr[1],
                  input->get_out_pin().get_pid());
 
     index_offset info = {this_idx, input->get_out_pin().get_pid(), {bit_addr[0], bit_addr[1]}};
@@ -351,7 +364,10 @@ void Pass_abc::recursive_find(const LGraph *g, const Edge_raw *input, graph_topo
       }
     } else {
       if (opack.verbose)
-        fmt::print("\t GraphIO_Op_NodeID:{},bit [{}:{}] portid : {} \n", this_idx, bit_addr[0], bit_addr[1],
+        fmt::print("\t GraphIO_Op_NodeID:{},bit [{}:{}] portid : {} \n",
+                   this_idx,
+                   bit_addr[0],
+                   bit_addr[1],
                    input->get_out_pin().get_pid());
       index_offset info = {this_idx, input->get_out_pin().get_pid(), {bit_addr[0], bit_addr[1]}};
       topo.push_back(info);
@@ -369,7 +385,10 @@ void Pass_abc::recursive_find(const LGraph *g, const Edge_raw *input, graph_topo
     }
   } else if (this_node_type == SubGraph_Op) {
     if (opack.verbose)
-      fmt::print("\t SubGraph_Op:{},bit [{}:{}] portid : {} \n", this_idx, bit_addr[0], bit_addr[1],
+      fmt::print("\t SubGraph_Op:{},bit [{}:{}] portid : {} \n",
+                 this_idx,
+                 bit_addr[0],
+                 bit_addr[1],
                  input->get_out_pin().get_pid());
     index_offset info = {this_idx, input->get_out_pin().get_pid(), {bit_addr[0], bit_addr[1]}};
     topo.push_back(info);
@@ -381,7 +400,8 @@ void Pass_abc::recursive_find(const LGraph *g, const Edge_raw *input, graph_topo
       graph_info->subgraph_generated_output_wire[info] = namebuffer;
     }
   } else if (this_node_type == TechMap_Op) {
-    if (opack.verbose) fmt::print("\t NodeID:{},bit [{}:{}] portid : {} \n", this_idx, 0, 0, input->get_out_pin().get_pid());
+    if (opack.verbose)
+      fmt::print("\t NodeID:{},bit [{}:{}] portid : {} \n", this_idx, 0, 0, input->get_out_pin().get_pid());
 
     const Tech_cell *tcell      = g->get_tlibrary().get_const_cell(g->tmap_id_get(this_idx));
     auto             tcell_name = tcell->get_name();
@@ -402,7 +422,8 @@ void Pass_abc::recursive_find(const LGraph *g, const Edge_raw *input, graph_topo
       Join[pre_inp.get_inp_pin().get_pid()] = &pre_inp;
     }
     for (Port_ID i = 0; i < Join_width; i++) {
-      if (Join[i] == nullptr) break;
+      if (Join[i] == nullptr)
+        break;
       width_pre = width;
       width += g->get_bits(Join[i]->get_idx());
       if (bit_addr[0] + 1 <= width) {
@@ -467,7 +488,8 @@ bool Pass_abc::setup_techmap(const LGraph *g) {
           graph_info->latch_id.push_back(idx);
         } else {
           auto tcell_name = tcell->get_name();
-          if (tcell_name != "$_BUF_") graph_info->combinational_id.push_back(idx);
+          if (tcell_name != "$_BUF_")
+            graph_info->combinational_id.push_back(idx);
         }
         break;
       }
@@ -510,8 +532,10 @@ bool Pass_abc::setup_techmap(const LGraph *g) {
               case TechMap_Op: {
                 const auto *tcell     = g->get_tlibrary().get_const_cell(g->tmap_id_get(out.get_idx()));
                 auto        cell_name = tcell->get_name();
-                Pass::error("nodeID:{} type:Join_Op has output to idx:{} cell_name: {}; mismatch in data width!", idx,
-                            out.get_idx(), cell_name);
+                Pass::error("nodeID:{} type:Join_Op has output to idx:{} cell_name: {}; mismatch in data width!",
+                            idx,
+                            out.get_idx(),
+                            cell_name);
                 is_valid_input = false;
                 break;
               }
@@ -584,7 +608,8 @@ bool Pass_abc::setup_techmap(const LGraph *g) {
 Abc_Ntk_t *Pass_abc::to_abc(const LGraph *g) {
   Abc_Start();
 
-  if (pAbc == 0) pAbc = Abc_FrameGetGlobalFrame();
+  if (pAbc == 0)
+    pAbc = Abc_FrameGetGlobalFrame();
   Abc_Ntk_t *pAig = Abc_NtkAlloc(ABC_NTK_NETLIST, ABC_FUNC_AIG, 1);
 
   pAig->pName = Extra_UtilStrsav(std::string(g->get_name()).c_str());
@@ -1379,7 +1404,8 @@ void Pass_abc::conn_clock(const LGraph *g, Abc_Ntk_t *pAig) {
 
 void Pass_abc::gen_generic_lib(const std::string &buffer) const {
   FILE *f = fopen(buffer.c_str(), "wt");
-  if (f == NULL) Pass::error("Opening {} for writing failed: {}", buffer.c_str(), strerror(errno));
+  if (f == NULL)
+    Pass::error("Opening {} for writing failed: {}", buffer.c_str(), strerror(errno));
 
   fprintf(f, "GATE ZERO    1 Y=CONST0;\n");
   fprintf(f, "GATE ONE     1 Y=CONST1;\n");

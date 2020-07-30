@@ -21,9 +21,10 @@ protected:
   std::string last_temp_var    = "___a";
   uint64_t    current_seq      = 0;
   void        get_next_temp_var();
+  Lnast_node  current_return_node = Lnast_node();
 
   void       translate_code_blocks(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln,
-                                   Rule_id term_rule = Prp_invalid);
+                                   Rule_id term_rule = Prp_invalid, bool check_return_stmt=false);
   Lnast_node eval_rule(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln);
 
   // rules that don't produce an RHS expression

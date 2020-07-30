@@ -7,7 +7,7 @@ module scalar_tuple (
   output [2:0] out6,
   output [1:0] out7,
   output [1:0] out8,
-  output [2:0] out9,
+  /* output [2:0] out9, */
   output [2:0] out10
 );
 
@@ -19,7 +19,7 @@ assign out5  = 3'd7;
 assign out6  = 3'd6;
 assign out7  = 2'd3;
 assign out8  = 2'd3;
-assign out9  = 3'd7;
+/* assign out9  = 3'd7; */
 assign out10 = 3'd5;
 
 endmodule

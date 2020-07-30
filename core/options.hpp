@@ -9,7 +9,8 @@
 class Options_base {
 protected:
   bool is_opt(std::string const &s1, std::string const &s2) const {
-    if (s1.length() != s2.length()) return false;
+    if (s1.length() != s2.length())
+      return false;
     return strcasecmp(s1.c_str(), s2.c_str()) == 0;
   }
 

@@ -1,0 +1,10 @@
+sum = ::{
+  $a.__bits = 2
+  $b.__bits = 2
+  %o.__bits = 3
+  %o = $a + $b
+}
+
+%out.__bits = 3
+res = sum(a = 2, b = 3)
+%out = res.o

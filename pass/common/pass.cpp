@@ -2,7 +2,7 @@
 
 #include <sys/stat.h>
 
-//Eprp Pass::eprp;
+// Eprp Pass::eprp;
 
 Pass_plugin::Map_setup Pass_plugin::registry;
 
@@ -20,7 +20,7 @@ const std::string Pass::get_files(const Eprp_var &var) const {
     _files = "/INVALID";
   }
 
-  return _files;//eg.: returns "inou/cfg/tests/nested_if.prp"
+  return _files;  // eg.: returns "inou/cfg/tests/nested_if.prp"
 }
 
 const std::string Pass::get_path(const Eprp_var &var) const {
@@ -62,8 +62,8 @@ void Pass::register_pass(Eprp_method &method) {
   eprp.register_method(method);
 
   // All the passses should start with pass.*
-  assert(method.get_name().substr(0, 5) == "pass." || method.get_name().substr(0, 5) == "live." ||
-         method.get_name().substr(0, 5) == "inou.");
+  assert(method.get_name().substr(0, 5) == "pass." || method.get_name().substr(0, 5) == "live."
+         || method.get_name().substr(0, 5) == "inou.");
 }
 
 void Pass::register_inou(std::string_view _pname, Eprp_method &method) {
@@ -95,13 +95,15 @@ void Pass::register_inou(std::string_view _pname, Eprp_method &method) {
 }
 
 bool Pass::setup_directory(std::string_view dir) const {
-  if (dir == ".") return true;
+  if (dir == ".")
+    return true;
 
   struct stat sb;
 
   std::string sdir(dir);
 
-  if (stat(sdir.c_str(), &sb) == 0 && S_ISDIR(sb.st_mode)) return true;
+  if (stat(sdir.c_str(), &sb) == 0 && S_ISDIR(sb.st_mode))
+    return true;
 
   int e = mkdir(sdir.c_str(), 0755);
   if (e < 0) {

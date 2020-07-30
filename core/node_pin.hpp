@@ -231,10 +231,7 @@ public:
   LGraph *        get_class_lgraph() const { return current_g; };
   Hierarchy_index get_hidx() const { return hidx; };
 
-  Port_ID get_pid() const {
-    I(idx);
-    return pid;
-  }
+  constexpr Port_ID get_pid() const { return pid; }
 
   bool has_inputs() const;
   bool has_outputs() const;
@@ -244,18 +241,6 @@ public:
   bool is_graph_output() const;
 
   Node_pin get_sink_from_output() const;
-
-#if 0
-  // OLD API
-  bool is_input() const {
-    I(idx);
-    return sink;
-  }
-  bool is_output() const {
-    I(idx);
-    return !sink;
-  }
-#endif
 
   bool is_sink() const {
     I(idx);
@@ -270,15 +255,25 @@ public:
   Node     get_driver_node() const;
   Node_pin get_driver_pin() const;
 
+  void del_driver(Node_pin &dst);
+  void del_sink(Node_pin &dst);
+  void del(Node_pin &dst) {
+    if (dst.is_sink() && is_driver())
+      return del_sink(dst);
+    I(dst.is_driver() && is_sink());
+    return del_driver(dst);
+  }
+
   void connect_sink(Node_pin &dst);
   void connect_sink(Node_pin &&dst) { connect_sink(dst); }
   void connect_driver(Node_pin &dst);
   void connect(Node_pin &dst) {
-    if (dst.is_sink() && is_driver()) return connect_sink(dst);
+    if (dst.is_sink() && is_driver())
+      return connect_sink(dst);
     I(dst.is_driver() && is_sink());
     return connect_driver(dst);
   }
-  int  get_num_edges() const;
+  int get_num_edges() const;
 
 #if 0
   Node_pin &operator=(const Node_pin &obj) {
@@ -299,8 +294,9 @@ public:
   // static Node_pin get_out_pin(const Edge_raw *edge_raw);
   // static Node_pin get_inp_pin(const Edge_raw *edge_raw);
 
-  void invalidate() { idx = 0; }
+  void           invalidate() { idx = 0; }
   constexpr bool is_invalid() const { return idx == 0; }
+  constexpr bool is_down_node() const { return top_g != current_g; }
 
   constexpr bool operator==(const Node_pin &other) const {
     return (top_g == other.top_g) && (idx == other.idx) && (pid == other.pid) && (sink == other.sink) && (hidx == other.hidx);
@@ -322,7 +318,7 @@ public:
   void             set_prp_vname(std::string_view prp_vname);
   std::string_view get_prp_vname() const;
   bool             has_prp_vname() const;
-	void             dump_all_prp_vname() const;
+  void             dump_all_prp_vname() const;
 
   void  set_delay(float val);
   float get_delay() const;
@@ -330,21 +326,21 @@ public:
   uint32_t get_bits() const;
   void     set_bits(uint32_t bits);
 
-  bool     is_signed() const;
-  bool     is_unsigned() const;
-  void     set_signed();
-  void     set_unsigned();
+  bool is_signed() const;
+  bool is_unsigned() const;
+  void set_signed();
+  void set_unsigned();
 
   std::string_view get_type_sub_io_name() const;
   std::string_view get_type_sub_pin_name() const;
 
-  void     set_offset(Bits_t offset);
-  Bits_t   get_offset() const;
+  void   set_offset(Bits_t offset);
+  Bits_t get_offset() const;
 
-  const Ann_ssa &     get_ssa() const;
-  Ann_ssa *           ref_ssa();
-  bool                has_ssa() const;
-  bool                is_connected() const;
+  const Ann_ssa &get_ssa() const;
+  Ann_ssa *      ref_ssa();
+  bool           has_ssa() const;
+  bool           is_connected() const;
 
   // END ATTRIBUTE ACCESSORS
   XEdge_iterator out_edges() const;

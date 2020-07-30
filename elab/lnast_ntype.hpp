@@ -246,13 +246,13 @@ protected:
     ">",
     ">=",
     "()",
-    "tuple_concat", // ++
-    "tuple_delete", // --
+    "++", //"tuple_concat", // ++
+    "--", //"tuple_delete", // --
     "select",  // []
     "bit_select", // [[]]
     "range",      // ..
-    "shift_right",
-    "shift_left",
+    ">>",
+    "<<",
     "logic_shift_right",
     "arith_shift_right",
     "arith_shift_left",
@@ -356,20 +356,20 @@ protected:
     "&&", // logical_and
     "||", // logical_or
     "!",  // logical_not
-    "operator&", // and
-    "operator|", // or
-    "operator~", // not
-    "operator^",
-    "operator+",
-    "operator-",
-    "operator*",
-    "operator/",
+    "&", // and
+    "|", // or
+    "~", // not
+    "^",
+    "+",
+    "-",
+    "*",
+    "/",
     "eq",
-    "operator==",
-    "operator<",
-    "operator<=",
-    "operator>",
-    "operator>=",
+    "==",
+    "<",
+    "<=",
+    ">",
+    ">=",
     "()",
     "tuple_concat", // ++
     "tuple_delete", // --
