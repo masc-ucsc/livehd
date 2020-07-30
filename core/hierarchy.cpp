@@ -47,7 +47,8 @@ void Hierarchy_tree::regenerate_step(LGraph *lg, const Hierarchy_index &parent) 
   for (auto it : *tree_pos) {
     auto node = it.first.get_node(lg);
     I(node.is_type_sub());
-    if (!node.is_type_sub_present()) continue;
+    if (!node.is_type_sub_present())
+      continue;
 
     tree_pos->set(it.first, conta);
 

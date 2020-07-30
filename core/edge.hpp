@@ -17,8 +17,7 @@ public:
     uint64_t sink_idx : Index_bits;
     uint16_t pad2 : 1;  // Just to improve alignment of
 
-    Compact(const Index_ID &d_idx, const Index_ID &s_idx)
-        : driver_idx(d_idx), pad1(0), sink_idx(s_idx), pad2(0) {}
+    Compact(const Index_ID &d_idx, const Index_ID &s_idx) : driver_idx(d_idx), pad1(0), sink_idx(s_idx), pad2(0) {}
     Compact() : driver_idx(0), pad1(0), sink_idx(0), pad2(0) {}
 
     Compact &operator=(const Compact &obj) {
@@ -76,7 +75,7 @@ template <>
 struct hash<XEdge::Compact> {
   size_t operator()(XEdge::Compact const &o) const {
     uint64_t h = o.driver_idx;
-    h <<=32;
+    h <<= 32;
     h |= o.sink_idx;
     return hash<uint64_t>{}(h);
   }

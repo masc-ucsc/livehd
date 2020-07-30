@@ -84,8 +84,10 @@ Lg_type_id Graph_library::reset_id(std::string_view name, std::string_view sourc
         // LGraph::warn("overwrite lgraph:{} source from {} to {}", name, attributes[it->second].source, source);  // LCOV_EXCL_LINE
         attributes[it->second].source = source;
       } else {
-        LGraph::error("No overwrite lgraph:{} because it changed source from {} to {} (LGraph::delete first)", name,
-                    attributes[it->second].source, source);  // LCOV_EXCL_LINE
+        LGraph::error("No overwrite lgraph:{} because it changed source from {} to {} (LGraph::delete first)",
+                      name,
+                      attributes[it->second].source,
+                      source);  // LCOV_EXCL_LINE
       }
     }
     return it->second;
@@ -124,7 +126,8 @@ LGraph *Graph_library::try_find_lgraph(std::string_view name) const {
 }
 
 LGraph *Graph_library::try_find_lgraph(Lg_type_id lgid) const {
-  if (lgid >= attributes.size()) return nullptr;
+  if (lgid >= attributes.size())
+    return nullptr;
 
   LGraph *lg = attributes[lgid].lg;
 
@@ -250,7 +253,8 @@ bool Graph_library::rename_name(std::string_view orig, std::string_view dest) {
 void Graph_library::update(Lg_type_id lgid) {
   I(lgid < attributes.size());
 
-  if (attributes[lgid].version == (max_next_version - 1)) return;
+  if (attributes[lgid].version == (max_next_version - 1))
+    return;
 
   graph_library_clean      = false;
   attributes[lgid].version = max_next_version.value++;
@@ -287,8 +291,10 @@ void Graph_library::reload() {
   document.ParseStream<0, rapidjson::UTF8<>, rapidjson::FileReadStream>(is);
 
   if (document.HasParseError()) {
-    LGraph::error("graph_library::reload {} Error(offset {}): {}", library_file, static_cast<unsigned>(document.GetErrorOffset()),
-                rapidjson::GetParseError_En(document.GetParseError()));
+    LGraph::error("graph_library::reload {} Error(offset {}): {}",
+                  library_file,
+                  static_cast<unsigned>(document.GetErrorOffset()),
+                  rapidjson::GetParseError_En(document.GetParseError()));
     return;
   }
 
@@ -311,7 +317,8 @@ void Graph_library::reload() {
     auto version = lg_entry["version"].GetUint64();
     ;
     if (version != 0) {
-      if (max_next_version < version) max_next_version = version;
+      if (max_next_version < version)
+        max_next_version = version;
 
       I(lg_entry.HasMember("source"));
       attributes[id].source = lg_entry["source"].GetString();
@@ -335,7 +342,8 @@ Graph_library::Graph_library(std::string_view _path) : path(_path), library_file
 }
 
 Lg_type_id Graph_library::try_get_recycled_id() {
-  if (recycled_id.empty()) return 0;
+  if (recycled_id.empty())
+    return 0;
 
   auto       it   = recycled_id.begin();
   Lg_type_id lgid = *it;
@@ -489,7 +497,8 @@ void Graph_library::unregister(std::string_view name, Lg_type_id lgid, LGraph *l
     I(it == global_name2lgraph[path].end());
   }
 
-  if (sub_nodes[lgid].is_invalid()) expunge(name);
+  if (sub_nodes[lgid].is_invalid())
+    expunge(name);
 }
 
 void Graph_library::sync_all() {
@@ -504,7 +513,8 @@ void Graph_library::sync_all() {
 }
 
 void Graph_library::clean_library() {
-  if (graph_library_clean) return;
+  if (graph_library_clean)
+    return;
 
   rapidjson::StringBuffer                          s;
   rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(s);
@@ -594,7 +604,8 @@ void Graph_library::each_lgraph(std::string_view match, std::function<void(Lg_ty
 
   for (const auto [name, id] : name2id) {
     const std::string line(name);
-    if (!std::regex_search(line, txt_regex)) continue;
+    if (!std::regex_search(line, txt_regex))
+      continue;
 
     f1(id, name);
   }

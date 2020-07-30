@@ -14,7 +14,7 @@ public:
   constexpr Ann_ssa() : subs(0){};
   Ann_ssa(uint16_t s) : subs(s){};
 
-  void set_ssa(uint16_t s) { subs  = s;}
+  void set_ssa(uint16_t s) { subs = s; }
 
   void set_final() { final = true; }
 

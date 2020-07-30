@@ -1,9 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "prp.hpp"
+
 #include <stdio.h>
 
 #include "lbench.hpp"
-#include "prp.hpp"
 
 int main(int argc, char **argv) {
   if (argc != 2) {
@@ -13,7 +14,7 @@ int main(int argc, char **argv) {
 
   Lbench bench("prp_test");
 
-  Prp  scanner;
+  Prp scanner;
 
   scanner.parse_file(argv[1]);
 

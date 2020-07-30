@@ -120,8 +120,8 @@ public:
     Pick_ID(Node_pin driver, int offset, int width) : driver(driver), offset(offset), width(width) {}
 
     bool operator!=(const Pick_ID other) const {
-      return (driver != other.driver) || (driver == other.driver && offset != other.offset) ||
-             (driver == other.driver && offset == other.offset && width != other.width);
+      return (driver != other.driver) || (driver == other.driver && offset != other.offset)
+             || (driver == other.driver && offset == other.offset && width != other.width);
     }
     template <typename H>
     friend H AbslHashValue(H h, const Pick_ID &s) {

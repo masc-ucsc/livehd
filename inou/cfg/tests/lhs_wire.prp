@@ -1,5 +1,4 @@
-foo.__wire = true
-%out = foo
+%out  = foo.__final_value
 foo = 2
-%out2 = foo
+%out2 = foo.__final_value
 foo = 3

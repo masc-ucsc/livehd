@@ -43,6 +43,7 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
 
   Lnast_nid top_sts_nid;
   if (get_type(top_nid).is_func_def()) {
+    fmt::print("\nStep-0: Handle Inline Function Definition\n");
     auto c0 = get_first_child(top_nid);
     auto c1 = get_sibling_next(c0);
     top_sts_nid = get_sibling_next(c1);
@@ -139,13 +140,12 @@ void Lnast::update_tuple_var_table(const Lnast_nid &psts_nid, const Lnast_nid &o
   auto &tuple_var_table = tuple_var_tables[psts_nid];
   auto type = get_type(opr_nid);
 
-  if (type.is_assign() || type.is_dp_assign() || type.is_as() || type.is_tuple() || type.is_attr_set())  {
+  if (type.is_tuple() || type.is_tuple_add()) {
     auto lhs_nid = get_first_child(opr_nid);
     const auto lhs_name = get_name(lhs_nid);
-    if (lhs_name.substr(0,3) == "___")
-      return;
     tuple_var_table.insert(lhs_name);
   }
+
   return;
 }
 
@@ -156,7 +156,6 @@ bool Lnast::is_attribute_related(const Lnast_nid &opr_nid) {
     auto c2_dot  = get_sibling_next(c1_dot);
     auto c2_name = get_name(c2_dot);
 
-    /* if (c2_name.substr(0,2) == "__" && c2_name.substr(0,3) != "___" && is_lhs(get_parent(opr_nid), opr_nid)) */
     if (c2_name.substr(0,2) == "__" && c2_name.substr(0,3) != "___" )
       return true;
   }
@@ -222,6 +221,9 @@ void Lnast::merge_tconcat_paired_assign(const Lnast_nid &psts_nid, const Lnast_n
 void Lnast::rename_to_real_tuple_name(const Lnast_nid &psts_nid, const Lnast_nid &tup_nid) {
   auto &dot_lrhs_table   = dot_lrhs_tables[psts_nid];
   auto paired_assign_nid = dot_lrhs_table[tup_nid].second;
+  if (get_type(paired_assign_nid).is_func_call())
+    return;
+
   auto c0_tup            = get_first_child(tup_nid);
   auto c0_paired_assign  = get_first_child(paired_assign_nid);
   ref_data(paired_assign_nid)->type = Lnast_ntype::create_invalid();
@@ -274,28 +276,28 @@ void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid)
   auto &dot_lrhs_table  =  dot_lrhs_tables[psts_nid];
 
 
-  auto c0_dot      = get_first_child(dot_nid); //c0 = intermediate target
-  auto c1_dot      = get_sibling_next(c0_dot);
-  auto c2_dot      = get_sibling_next(c1_dot);
-
   if (is_lhs(psts_nid, dot_nid)) {
     auto paired_assign_nid = dot_lrhs_table[dot_nid].second;
+    ref_data(paired_assign_nid)->type = Lnast_ntype::create_invalid();
+    ref_data(dot_nid)->type = Lnast_ntype::create_tuple_add();
     auto c0_assign = get_first_child(paired_assign_nid);
     auto c1_assign = get_sibling_next(c0_assign);
-    auto c2_assign = add_child(paired_assign_nid, Lnast_node(get_type(c1_assign), get_token(c1_assign), get_subs(c1_assign)));
 
-    // change node semantic from dot/sel->tuple add; assign->invalid
-    ref_data(paired_assign_nid)->type = Lnast_ntype::create_tuple_add();
-    ref_data(c0_assign)->token = get_data(c1_dot).token;
-    ref_data(c1_assign)->token = get_data(c2_dot).token;
-    ref_data(c0_assign)->type  = get_data(c1_dot).type;
-    ref_data(c1_assign)->type  = get_data(c2_dot).type;
-    ref_data(c0_assign)->subs  = get_data(c1_dot).subs;
-    ref_data(c1_assign)->subs  = get_data(c2_dot).subs;
-
-    ref_data(dot_nid)->type = Lnast_ntype::create_invalid();
-    auto c1_assign_name = get_name(c1_assign);
-    tuple_var_table.insert(c1_assign_name); //insert new tuple name
+    for (auto child : children(dot_nid)) {
+      if (child == get_last_child(dot_nid)){
+        ref_data(child)->token = get_data(c1_assign).token;
+        ref_data(child)->type  = get_data(c1_assign).type;
+        ref_data(child)->subs  = get_data(c1_assign).subs;
+      } else {
+        auto child_sibling = get_sibling_next(child);
+        ref_data(child)->token = get_data(child_sibling).token;
+        ref_data(child)->type  = get_data(child_sibling).type;
+        ref_data(child)->subs  = get_data(child_sibling).subs;
+      }
+    }
+    
+    auto c0_dot_name = get_name(get_first_child(dot_nid));
+    tuple_var_table.insert(c0_dot_name); //insert new tuple name
 
   } else { // is rhs
     // change node semantic from dot/set->tuple_get
@@ -323,10 +325,8 @@ void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid)
 //                                            c2 = tuple field
 //  To know more detail, see my note
 //  https://drive.google.com/open?id=16DSzAPf0GzuxYptxkZzdPKJDDP8DxnBz
-//  one thing different from the figure is that instead of
-//  (dot->tupadd, assign->invalid), the final design change to (dot->invalid, assign->tupadd)
 
-// FIXME->sh: need to add condition nid parameter
+
 void Lnast::dot2hier_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid, const Lnast_nid &cond_nid, bool is_else_sts) {
   auto &dot_lrhs_table  =  dot_lrhs_tables[psts_nid];
 
@@ -420,7 +420,8 @@ void Lnast::analyze_dot_lrhs(const Lnast_nid &psts_nid) {
   for (const auto &opr_nid : children(psts_nid)) {
     auto type = get_type(opr_nid);
     if (type.is_func_def()) {
-      continue;
+      do_ssa_trans(opr_nid);
+      /* continue; */
     } else if (type.is_if()) {
       analyze_dot_lrhs_if_subtree(opr_nid);
     } else if (type.is_dot() || type.is_select() || type.is_tuple_concat() || type.is_tuple()) {
@@ -938,7 +939,6 @@ bool Lnast::is_in_bw_table(const std::string_view name) {
 }
 
 uint32_t Lnast::get_bitwidth(const std::string_view name) {
-  fmt::print("get_bw: {}\n", name);
   I(is_in_bw_table(name));
   return from_lgraph_bw_table[(std::string)name];
 }

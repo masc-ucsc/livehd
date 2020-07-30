@@ -1,7 +1,5 @@
-foo.__wire = true
-%out = foo.a 
-if ($en) {
-  foo.a = 3
-}
-
-
+foo.a.b.__bits = 3
+foo.a.b.c = 4
+foo.a.b.__bits = 5
+// foo.a.b = 6 // ??
+%out = foo.a.b.__bits
