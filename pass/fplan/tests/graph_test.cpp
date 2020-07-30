@@ -27,7 +27,7 @@ int main() {
   
   auto &smapref = smap;
   
-  auto not_in_set = [&smapref, valid_set](decltype(g.insert_vert()) v) -> bool {
+  auto not_in_set = [&smapref, &valid_set](decltype(g.insert_vert()) v) -> bool {
     return smapref(v) != valid_set;
   };
 
@@ -37,10 +37,11 @@ int main() {
     cout << names[v] << endl;
   }
   
-  static int set_counter = 1;
   for (auto v : vset) {
-    smapref[v] = set_counter + 42; // test modification
+    smapref[v] = 42; // test modification
   }
+
+  valid_set = 42;
   
   for (auto v : vset) {
     cout << names[v] << endl; // only prints "v1" if smapref is captured by reference in the lambda

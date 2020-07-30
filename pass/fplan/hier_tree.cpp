@@ -27,16 +27,16 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, Set_map& smap, int
   auto& g = info.al;
   
   // TODO: why does smap need to be captured by value?
-  auto not_in_cut_set = [&smap, cut_set](vertex v) -> bool {
+  auto not_in_cut_set = [&smap, &cut_set](vertex v) -> bool {
     return smap(v) != cut_set;
   };
   
-  auto vert_set = g.verts() | view::remove_if(not_in_cut_set);
+  auto cut_verts = g.verts() | view::remove_if(not_in_cut_set);
 
   // TODO: graph lib needs a specific version of range-v3, and that version doesn't have size or conversion utilities yet.
   // as far as I know, there isn't really a better way to do this.
   unsigned int graph_size = 0;
-  for ([[maybe_unused]] const auto& v : vert_set) {
+  for ([[maybe_unused]] const auto& v : cut_verts) {
     graph_size++;
   }
   
@@ -48,7 +48,7 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, Set_map& smap, int
   // if there are only two elements in the graph, we can exit early.
   if (graph_size == 2) {
     int which_vert = 0;
-    for (const auto& v : vert_set) {
+    for (const auto& v : cut_verts) {
       if (which_vert == 0) {
         smap[v] = new_sets.first;
         which_vert++;
@@ -63,7 +63,7 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, Set_map& smap, int
   vertex temp_vertex = g.null_vert();
   if (graph_size % 2 == 1) {
     temp_vertex = g.insert_vert();
-    info.names[temp_vertex] = "temp_node";
+    info.names[temp_vertex] = "temp";
     info.areas[temp_vertex] = 0.0f;
     
     for (const auto& other_v : g.verts()) {
@@ -75,25 +75,12 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, Set_map& smap, int
     }
     
     smap[temp_vertex] = cut_set;
-    
-    // re-generate vert_set since we changed the underlying graph
-    vert_set = g.verts() | view::remove_if(not_in_cut_set);
-
-    for (const auto& v : vert_set) {
-      std::cout << info.names(v) << std::endl;
-    }
-
     graph_size++;
   }
 
   // make new set numbers
   unsigned int set_inc = 0;
-  
-  for (auto v : vert_set) {
-    std::cout << "vertex " << info.names(v) << ": " << smap(v) << std::endl;
-  }
-
-  for (auto v : vert_set) {
+  for (auto v : cut_verts) {
     smap[v] = set_counter + set_inc;
     
     if (set_inc == 1) {
@@ -103,9 +90,20 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, Set_map& smap, int
     }
   }
 
-  for (auto v : vert_set) {
-    std::cout << "vertex " << info.names(v) << ": " << smap(v) << std::endl;
-  }
+  auto not_in_new_sets = [&smap, &new_sets](vertex v) -> bool {
+    return smap(v) != new_sets.first && smap(v) != new_sets.second;
+  };
+  
+  /* 
+    The reason why I'm using a new variable here is because views carry no state of their own,
+    so the view recomputes what should be contained in it every time we access the view.
+    
+    In this case, after we adjust the smap values, the original view decides that nothing should
+    be in the cut_verts view anymore and removes everything.
+
+    To resolve this, a new view should be created with the correct condition.
+  */
+  auto vert_set = g.verts() | view::remove_if(not_in_new_sets);
 
   set_counter += 2;
 
@@ -154,6 +152,10 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, Set_map& smap, int
     
     std::vector<vertex> av, bv;
     std::vector<int> cv;
+
+    for (const auto& v : vert_set) {
+      std::cout << info.names(v) << std::endl;
+    }
     
     // remove the node pair with the highest global reduction in cost, and add it to cv.
     // also add the nodes used in the reduction to av and bv, respectively.
@@ -182,7 +184,6 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, Set_map& smap, int
         }
       }
       
-      // TODO: cost never gets written if the graph contains disconnected subgraphs with odd numbers of elements, fix.
       I(cost != std::numeric_limits<int>::min()); // there should always be some kind of min cost
       I(a_max != g.null_vert()); // these should be written with legal indices
       I(b_max != g.null_vert());
