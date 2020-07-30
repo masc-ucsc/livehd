@@ -216,6 +216,13 @@ public:
     return Port_invalid;
   }
 
+  std::string_view get_input_match(Port_ID pid) const {
+    size_t idx = static_cast<size_t>(pid);
+    I(idx < inputs.size());
+
+    return inputs[idx];
+  }
+
   Port_ID get_output_match(std::string_view str) const {
     if (outputs.empty())  // blackbox, subgraph...
       return Port_invalid;
@@ -244,6 +251,13 @@ public:
 #endif
 
     return Port_invalid;
+  }
+
+  std::string_view get_output_match(Port_ID pid) const {
+    size_t idx = static_cast<size_t>(pid);
+    I(idx < outputs.size());
+
+    return outputs[idx];
   }
 
   bool is_input_signed(Port_ID pid) const {
