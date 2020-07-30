@@ -50,6 +50,7 @@ protected:
   void process_ast_tuple_add_op     (LGraph *dfg, const Lnast_nid &lnidx_ta);
   void process_ast_tuple_add_op_bk  (LGraph *dfg, const Lnast_nid &lnidx_ta);
   void process_ast_tuple_get_op     (LGraph *dfg, const Lnast_nid &lnidx_tg);
+  void process_ast_tuple_get_op_bk  (LGraph *dfg, const Lnast_nid &lnidx_tg);
   void process_ast_attr_set_op      (LGraph *dfg, const Lnast_nid &lnidx_aset);
   void process_ast_attr_get_op      (LGraph *dfg, const Lnast_nid &lnidx_aget);
   void process_ast_tuple_phi_add_op (LGraph *dfg, const Lnast_nid &lnidx_tpa);

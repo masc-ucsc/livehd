@@ -446,8 +446,88 @@ void Lnast_dfg::process_ast_tuple_phi_add_op(LGraph *dfg, const Lnast_nid &lnidx
   process_ast_tuple_add_op(dfg, c1_tpa);
 }
 
-
 void Lnast_dfg::process_ast_tuple_get_op(LGraph *dfg, const Lnast_nid &lnidx_tg) {
+  int i = 0;
+  absl::flat_hash_map<int, Node> tg_map;
+  /* absl::flat_hash_map<int, std::string_view> tg_name; */
+  std::string_view c0_tg_name;
+  std::string_view c0_tg_vname;
+  int8_t           c0_tg_subs;
+  
+  for (const auto & child : lnast->children(lnidx_tg)) {
+    if (i == 0) {
+      const auto &c0_tg = child;
+      c0_tg_name  = lnast->get_sname(c0_tg);
+      c0_tg_vname = lnast->get_vname(c0_tg);
+      c0_tg_subs  = lnast->get_subs(c0_tg);
+      i++;
+      continue;
+    }
+
+    if (i == 1) {
+      const auto &c1_tg = child;
+      auto tup_get = dfg->create_node(TupGet_Op);
+      tg_map[i] = tup_get;
+      
+      auto tn_spin = tup_get.setup_sink_pin("TN");
+
+      Node_pin tn_dpin;
+      if (is_register(lnast->get_vname(c1_tg))) 
+        tn_dpin = setup_ref_node_dpin(dfg, c1_tg);
+      else 
+        tn_dpin = setup_tuple_ref(dfg, lnast->get_sname(c1_tg));
+      
+      dfg->add_edge(tn_dpin, tn_spin);
+      i++;
+      continue;
+    }
+
+    // i >= 2
+    if (child == lnast->get_last_child(lnidx_tg)) {
+      const auto& cn_tg = child;
+      auto cn_tg_name = lnast->get_sname(cn_tg);
+      auto tup_get = tg_map[i-1];
+      auto kn_spin = tup_get.setup_sink_pin("KN");
+      auto kp_spin = tup_get.setup_sink_pin("KP");
+
+      if (is_const(cn_tg_name)) {
+        auto kp_dpin = setup_ref_node_dpin(dfg, cn_tg);
+        dfg->add_edge(kp_dpin, kp_spin);
+      } else {
+        auto kn_dpin = setup_key_dpin(dfg, cn_tg_name);
+        dfg->add_edge(kn_dpin, kn_spin);
+      }
+
+      if (vname2attr_dpin.find(c0_tg_vname) != vname2attr_dpin.end()) {
+        auto aset_node = dfg->create_node(AttrSet_Op);
+        auto aset_aci_spin = aset_node.setup_sink_pin("ACI");
+        auto aset_ancestor_dpin = vname2attr_dpin[c0_tg_vname];
+        dfg->add_edge(aset_ancestor_dpin, aset_aci_spin);
+
+        auto aset_vn_spin = aset_node.setup_sink_pin("VN");
+        auto aset_vn_dpin = tup_get.get_driver_pin(0);
+        dfg->add_edge(aset_vn_dpin, aset_vn_spin);
+
+        name2dpin[c0_tg_name] = aset_node.setup_driver_pin(0); // dummy_attr_set node now represent the latest variable
+        aset_node.get_driver_pin(0).set_name(c0_tg_name);
+        setup_dpin_ssa(name2dpin[c0_tg_name], c0_tg_vname, c0_tg_subs);
+        vname2attr_dpin[c0_tg_vname] = aset_node.setup_driver_pin(1);
+        return;
+      }
+
+      name2dpin[c0_tg_name] = tup_get.setup_driver_pin();
+      fmt::print("c0_tg_name:{}, tg_debug:{}\n", c0_tg_name, tup_get.debug_name());
+      tup_get.setup_driver_pin().set_name(c0_tg_name);
+      setup_dpin_ssa(name2dpin[c0_tg_name], c0_tg_vname, c0_tg_subs);
+
+    } else {
+      i++;
+      continue;//todo
+    }
+  }
+}
+
+void Lnast_dfg::process_ast_tuple_get_op_bk(LGraph *dfg, const Lnast_nid &lnidx_tg) {
   //lnidx_opr = dot or sel
   auto c0_tg = lnast->get_first_child(lnidx_tg);
   auto c1_tg = lnast->get_sibling_next(c0_tg);
@@ -491,18 +571,11 @@ void Lnast_dfg::process_ast_tuple_get_op(LGraph *dfg, const Lnast_nid &lnidx_tg)
     dfg->add_edge(aset_vn_dpin, aset_vn_spin);
 
     name2dpin[c0_tg_name] = aset_node.setup_driver_pin(0); // dummy_attr_set node now represent the latest variable
-    /* tup_get.get_driver_pin(0).set_name(c0_tg_name); */
     aset_node.get_driver_pin(0).set_name(c0_tg_name);
-    //aset_node.get_driver_pin(1).set_name(c0_tg_name); // for debug purpose
     setup_dpin_ssa(name2dpin[c0_tg_name], c0_tg_vname, lnast->get_subs(c0_tg));
     vname2attr_dpin[c0_tg_vname] = aset_node.setup_driver_pin(1);
-    /* if (is_register(c0_tg_name)) */
-    /*   dfg->add_edge(name2dpin[c0_tg_name], reg_data_pin); */
     return;
   }
-
-
-
 
   name2dpin[c0_tg_name] = tup_get.setup_driver_pin();
   tup_get.setup_driver_pin().set_name(lnast->get_sname(c0_tg));
