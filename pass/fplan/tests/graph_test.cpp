@@ -38,18 +38,11 @@ int main() {
   }
   
   static int set_counter = 1;
-  unsigned int set_inc = 0;
   for (auto v : vset) {
-    smapref[v] = set_counter + set_inc;
-    
-    if (set_inc == 1) {
-      set_inc = 0;
-    } else {
-      set_inc = 1;
-    }
+    smapref[v] = set_counter + 42; // test modification
   }
   
   for (auto v : vset) {
-    cout << names[v] << endl;
+    cout << names[v] << endl; // only prints "v1" if smapref is captured by reference in the lambda
   }
 }
