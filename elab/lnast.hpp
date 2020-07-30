@@ -199,7 +199,7 @@ public:
       return std::string(get_name(nid));
     return absl::StrCat(std::string(get_name(nid)), "_", get_subs(nid));  // FIXME->sh: any better way to concate a string_view??
   }
-
+  
   // bitwidth table functions
   bool      is_in_bw_table                     (const std::string_view name);
   uint32_t  get_bitwidth                       (const std::string_view name);

@@ -100,7 +100,7 @@ void Semantic_check::add_to_rhs_list(std::vector<Lnast_nid> node_name) {
 
 void Semantic_check::add_to_output_vars(std::string_view node_name) {
   if (!in_output_vars(node_name)) {
-    output_vars.push_back(node_name);
+    output_vars.insert(node_name);
   }
 }
 
@@ -184,18 +184,13 @@ void Semantic_check::error_print_lnast_var_warn(Lnast *lnast, std::vector<std::s
 }
 
 void Semantic_check::resolve_read_write_lists(Lnast *lnast) {
+  // Fixme: May separate arrays just for func_def to make sure catch non-written output variables
   for (auto node_name : write_dict) {
     // Resolve Write and Read Dicts
     if (node_name.first[0] != '%' && read_dict.contains(node_name.first)) {
       write_dict.erase(node_name.first);
-      // Make sure that if output variable is declared, it is written to
+    // Make sure that if output variable is declared, it is written to
     } else if (node_name.first[0] == '%' && in_output_vars(node_name.first)) {
-      for (auto output_var = output_vars.begin(); output_var != output_vars.end(); *output_var++) {
-        if (*output_var == node_name.first) {
-          output_vars.erase(output_var);
-          break;
-        }
-      }
       write_dict.erase(node_name.first);
     } else if (node_name.first[0] == '%') {
       write_dict.erase(node_name.first);
@@ -219,36 +214,27 @@ void Semantic_check::resolve_read_write_lists(Lnast *lnast) {
     }
     fmt::print(" were written but never read\n");
   }
-  // Output Variable Warning --> only applies to Node type 'func def'
-  if (output_vars.size() != 0) {
-    std::vector<std::string_view> error_outputs;
-    for (auto node_name : output_vars) {
-      error_outputs.push_back(node_name);
-    }
-    error_print_lnast_var_warn(lnast, error_outputs);
-    auto first_entry = output_vars.begin();
-    fmt::print(fmt::fg(fmt::color::blue), "Output Variable Warning");
-    fmt::print(": {}", *first_entry);
-    for (auto node_name : output_vars) {
-      if (node_name == *first_entry) {
-        continue;
-      }
-      fmt::print(", {}", node_name);
-    }
-    fmt::print(" should be written since declared in the function definition\n");
-  }
 }
 
 void Semantic_check::resolve_lhs_rhs_lists(Lnast *lnast) {
+  // for (auto node : lhs_list) {
+  //   fmt::print("{}, ", lnast->get_name(node));
+  // }
+  // fmt::print("\n");
+  // for (auto node : rhs_list) {
+  //   for (auto inner : node) {
+  //     fmt::print("{}, ", lnast->get_name(inner));
+  //   }
+  // }
   int lhs_list_size = (int) lhs_list.size();
   for (int i = 0; i < lhs_list_size; i++) {
     // auto lhs_type = lnast->get_data(lhs_list[i]).type;
     auto lhs_name = lnast->get_name(lhs_list[i]);
-    if (lhs_name[0] != '_' && lhs_name[1] != '_' && lhs_name[2] != '_' && rhs_list[i].size() == 1 && lhs_name != "null") {
+    if (lhs_name[0] != '_' && lhs_name[1] != '_' && lhs_name[2] != '_' && rhs_list[i].size() == 1 && lhs_name != "null" && lhs_name[0] != '$') {
       auto rhs_type = lnast->get_data(rhs_list[i][0]).type;
       auto rhs_name = lnast->get_name(rhs_list[i][0]);
-      if (rhs_name[0] != '_' && rhs_name[1] != '_' && rhs_name[2] != '_' && rhs_type.is_ref()) {
-        inefficient_LNAST.push_back(lhs_name);
+      if (rhs_name[0] != '_' && rhs_name[1] != '_' && rhs_name[2] != '_' && rhs_name[0] != '$' && rhs_type.is_ref()) {
+        inefficient_LNAST.insert(lhs_name);
       }
     }
   }
@@ -614,6 +600,36 @@ void Semantic_check::check_func_def(Lnast *lnast, const Lnast_nid &lnidx_opr, st
     error_print_lnast_by_type(lnast, lnast->get_data(lnidx_opr).type.to_s());
     Pass::error("Func Def Operation Error: Missing Statement Node\n");
   }
+  // From resolve_read_write_lists()
+  for (auto node_name : write_dict) {
+    // Resolve Write and Read Dicts
+    if (node_name.first[0] == '%' && in_output_vars(node_name.first)) {
+      for (auto output_var = output_vars.begin(); output_var != output_vars.end(); *output_var++) {
+        if (*output_var == node_name.first) {
+          output_vars.erase(output_var);
+          break;
+        }
+      }
+    }
+  }
+  // Output Variable Warning --> only applies to Node type 'func def'
+  if (output_vars.size() != 0) {
+    std::vector<std::string_view> error_outputs;
+    for (auto node_name : output_vars) {
+      error_outputs.push_back(node_name);
+    }
+    error_print_lnast_var_warn(lnast, error_outputs);
+    auto first_entry = output_vars.begin();
+    fmt::print(fmt::fg(fmt::color::blue), "Output Variable Warning");
+    fmt::print(": {}", *first_entry);
+    for (auto node_name : output_vars) {
+      if (node_name == *first_entry) {
+        continue;
+      }
+      fmt::print(", {}", node_name);
+    }
+    fmt::print(" should be written since declared in the function definition\n");
+  }
 }
 
 void Semantic_check::check_func_call(Lnast *lnast, const Lnast_nid &lnidx_opr, std::string_view stmt_name) {
@@ -661,10 +677,17 @@ void Semantic_check::do_check(Lnast *lnast) {
       check_tree_struct_ops(lnast, stmt, ntype, stmt_name);
     }
   }
+  // fmt::print("Write Dict\n");
   // for (auto name : write_dict) {
   //   fmt::print("{} : {}\n", name.first, name.second);
   // }
   // fmt::print("\n");
+  // fmt::print("Read Dict\n");
+  // for (auto name : read_dict) {
+  //   fmt::print("{} : {}\n", name.first, name.second);
+  // }
+  // fmt::print("\n");
+  // fmt::print("Output Vars\n");
   // for (auto name : output_vars) {
   //   fmt::print("{}\n", name);
   // }

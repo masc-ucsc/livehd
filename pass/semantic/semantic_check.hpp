@@ -10,12 +10,12 @@ private:
 protected:
   absl::flat_hash_map<std::string_view, std::string_view> write_dict;
   absl::flat_hash_map<std::string_view, std::string_view> read_dict;
-  
+
+  absl::flat_hash_set<std::string_view> inefficient_LNAST;
+  absl::flat_hash_set<std::string_view> output_vars;
+
   std::vector<Lnast_nid> lhs_list;
   std::vector<std::vector<Lnast_nid>> rhs_list;
-
-  std::vector<std::string_view> inefficient_LNAST;
-  std::vector<std::string_view> output_vars;
 
   bool is_primitive_op(const Lnast_ntype node_type);
   bool is_tree_structs(const Lnast_ntype node_type);

@@ -39,7 +39,7 @@ void Main_api::init() {
   setup_inou_lnast_dfg();
   setup_inou_yosys();
   setup_inou_firrtl();
-  /* setup_inou_json(); */
+  setup_inou_json();
   /* setup_inou_rand(); */
   /* setup_inou_verific(); */
   /* setup_cops_live(); */
