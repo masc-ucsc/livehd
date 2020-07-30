@@ -10,7 +10,7 @@ pts='lhs_wire lhs_wire2 scalar_tuple attr_set
      '
 
 #make sure to call Pyrope_compile() in the end of script
-pts='test'
+# pts='test'
 # pts='test2'
 # pts='scalar_tuple'
 # pts_hier='sum funcall'
