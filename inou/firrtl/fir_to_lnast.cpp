@@ -262,7 +262,6 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id, const 
 }
 
 // Set up any of the parameters related to a Memory block.
-// FIXME: Until memory blocks have been discussed further in LNAST, this solution may be subject to change.
 void Inou_firrtl::InitMemory(Lnast& lnast, Lnast_nid& parent_node, const firrtl::FirrtlPB_Statement_Memory& mem) {
   auto mem_name = lnast.add_string(absl::StrCat("#", mem.id()));
 
@@ -293,7 +292,12 @@ void Inou_firrtl::InitMemory(Lnast& lnast, Lnast_nid& parent_node, const firrtl:
   auto rd_lat = lnast.add_string(std::to_string(mem.read_latency()));
   auto wr_lat = lnast.add_string(std::to_string(mem.write_latency()));
 
-  // TODO: Handle reader ports and writer ports entirely
+  // Specify ReadUnderWrite policy (do writes get forwarded to reads of same addr on same cycle)
+  bool fwd = false;
+  if (mem.read_under_write() == firrtl::FirrtlPB_Statement_ReadUnderWrite::FirrtlPB_Statement_ReadUnderWrite_NEW) {
+    fwd = true;
+  }
+
   /* For each port, instantiate something to the effect of:
    * (id = ( __latency = r/w_lat))
    * Then pull all of those together into one single tuple.
@@ -309,6 +313,12 @@ void Inou_firrtl::InitMemory(Lnast& lnast, Lnast_nid& parent_node, const firrtl:
     lnast.add_child(idx_asg_l, Lnast_node::create_ref("__latency"));
     lnast.add_child(idx_asg_l, Lnast_node::create_const(rd_lat));
 
+    if (fwd) {
+      auto idx_asg_ruw = lnast.add_child(idx_tup, Lnast_node::create_assign("mem_ruw"));
+      lnast.add_child(idx_asg_ruw, Lnast_node::create_ref(temp_var_ruw));
+      lnast.add_child(idx_asg_ruw, Lnast_node::create_ref("true"));
+    }
+
     tup_ids.push_back({mem.reader_id(i), temp_var_t});
   }
 
@@ -320,6 +330,12 @@ void Inou_firrtl::InitMemory(Lnast& lnast, Lnast_nid& parent_node, const firrtl:
     auto idx_asg_l  = lnast.add_child(idx_tup, Lnast_node::create_assign("mem_w"));
     lnast.add_child(idx_asg_l, Lnast_node::create_ref("__latency"));
     lnast.add_child(idx_asg_l, Lnast_node::create_const(wr_lat));
+
+    if (fwd) {
+      auto idx_asg_ruw = lnast.add_child(idx_tup, Lnast_node::create_assign("mem_ruw"));
+      lnast.add_child(idx_asg_ruw, Lnast_node::create_ref(temp_var_ruw));
+      lnast.add_child(idx_asg_ruw, Lnast_node::create_ref("true"));
+    }
 
     tup_ids.push_back({mem.writer_id(j), temp_var_t});
   }
@@ -334,6 +350,12 @@ void Inou_firrtl::InitMemory(Lnast& lnast, Lnast_nid& parent_node, const firrtl:
     auto idx_asg_l  = lnast.add_child(idx_tup, Lnast_node::create_assign("mem_b"));
     lnast.add_child(idx_asg_l, Lnast_node::create_ref("__latency"));
     lnast.add_child(idx_asg_l, Lnast_node::create_const(wr_lat));
+
+    if (fwd) {
+      auto idx_asg_ruw = lnast.add_child(idx_tup, Lnast_node::create_assign("mem_ruw"));
+      lnast.add_child(idx_asg_ruw, Lnast_node::create_ref(temp_var_ruw));
+      lnast.add_child(idx_asg_ruw, Lnast_node::create_ref("true"));
+    }
 
     tup_ids.push_back({mem.readwriter_id(k), temp_var_t});
   }
@@ -357,19 +379,6 @@ void Inou_firrtl::InitMemory(Lnast& lnast, Lnast_nid& parent_node, const firrtl:
   auto idx_asg_f = lnast.add_child(parent_node, Lnast_node::create_assign(""));
   lnast.add_child(idx_asg_f, Lnast_node::create_ref(temp_var_lhs));
   lnast.add_child(idx_asg_f, Lnast_node::create_ref(temp_var_t));
-
-  // Specify ReadUnderWrite policy (do writes get forwarded to reads of same addr on same cycle)
-  if (mem.read_under_write() == firrtl::FirrtlPB_Statement_ReadUnderWrite::FirrtlPB_Statement_ReadUnderWrite_NEW) {
-    auto temp_var_ruw = create_temp_var(lnast);
-    auto idx_dot_ruw = lnast.add_child(parent_node, Lnast_node::create_dot("mem_ruw"));
-    lnast.add_child(idx_dot_ruw, Lnast_node::create_ref(temp_var_ruw));
-    lnast.add_child(idx_dot_ruw, Lnast_node::create_ref(mem_name));
-    lnast.add_child(idx_dot_ruw, Lnast_node::create_ref("__fwd"));
-
-    auto idx_asg_ruw = lnast.add_child(parent_node, Lnast_node::create_assign("mem_ruw"));
-    lnast.add_child(idx_asg_ruw, Lnast_node::create_ref(temp_var_ruw));
-    lnast.add_child(idx_asg_ruw, Lnast_node::create_ref("true"));
-  }
 }
 
 void Inou_firrtl::InitCMemory(Lnast& lnast, Lnast_nid& parent_node, const firrtl::FirrtlPB_Statement_CMemory& cmem) {
@@ -1199,7 +1208,7 @@ Lnast_nid Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB_Expres
     if (field_name == "addr") {
       return CreateDotsSelsFromStr(ln, parent_node, absl::StrCat(mem_name, ".", port_name, ".__addr"));
     } else if (field_name == "en") {
-      return CreateDotsSelsFromStr(ln, parent_node, absl::StrCat(mem_name, ".", port_name, ".__en"));
+      return CreateDotsSelsFromStr(ln, parent_node, absl::StrCat(mem_name, ".", port_name, ".__enable"));
     } else if (field_name == "clk") {
       return CreateDotsSelsFromStr(ln, parent_node, absl::StrCat(mem_name, ".", port_name, ".__clk_pin"));
     } else if (field_name.substr(0,4) == "data") {
