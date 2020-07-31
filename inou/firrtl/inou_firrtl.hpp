@@ -161,6 +161,8 @@ private:
   absl::flat_hash_map<std::string, absl::flat_hash_set<std::pair<std::string, std::string>>> emod_to_param_map;
   // Map name of memory to tuple of (__fwd true/false, read latency, write latency)
   absl::flat_hash_map<std::string, std::tuple<bool, std::string_view, std::string_view>> mem_props_map;
+  // Map of memory port ids made in Memory Port statements to memory block name.
+  absl::flat_hash_map<std::string, std::string> dangling_ports_map;
 
   uint32_t temp_var_count;
   uint32_t seq_counter;
