@@ -159,6 +159,8 @@ private:
   absl::flat_hash_map<std::string, absl::flat_hash_set<std::tuple<std::string, uint32_t, uint8_t>>> mod_to_io_map;
   // Map used by external modules to indicate parameters names + values.
   absl::flat_hash_map<std::string, absl::flat_hash_set<std::pair<std::string, std::string>>> emod_to_param_map;
+  // Map name of memory to tuple of (__fwd true/false, read latency, write latency)
+  absl::flat_hash_map<std::string, std::tuple<bool, std::string_view, std::string_view>> mem_props_map;
 
   uint32_t temp_var_count;
   uint32_t seq_counter;
