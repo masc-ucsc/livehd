@@ -18,6 +18,7 @@ cc_library(
          ],
     )
 
+# test file for fplan
 cc_binary(
 	  name = "fp",
 	  srcs = ["tests/fp.cpp"],
@@ -26,11 +27,3 @@ cc_binary(
 	      ],
     )
 
-cc_binary(
-	  name = "gtest",
-	  srcs = glob(["*.hpp", "tests/graph_test.cpp"]),
-	  deps = [
-         "@graph//:graph",
-         "@range-v3//:range-v3",
-         ],
-    )

@@ -1,32 +1,10 @@
 #include "hier_tree.hpp"
 
-/*
-unsigned int Hier_tree::size(const phier top) {
-  if (top->size != 0) {
-    return top->size;
-  }
-
-  if (top->children.size() == 0) {
-    top->size = 1;
-    return 1;
-  }
-
-  unsigned int total_size = 1;
-  for (const auto& child : top->children) {
-    total_size += size(child);
-  }
-
-  top->size = total_size;
-  return total_size;
-}
-*/
-
 std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, Set_map& smap, int cut_set) {
   using namespace ranges;
 
   auto& g = info.al;
   
-  // TODO: why does smap need to be captured by value?
   auto not_in_cut_set = [&smap, &cut_set](vertex v) -> bool {
     return smap(v) != cut_set;
   };
@@ -56,6 +34,7 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, Set_map& smap, int
         smap[v] = new_sets.second;
       }
     }
+    set_counter += 2;
     return new_sets;
   }
   
@@ -153,10 +132,6 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, Set_map& smap, int
     std::vector<vertex> av, bv;
     std::vector<int> cv;
 
-    for (const auto& v : vert_set) {
-      std::cout << info.names(v) << std::endl;
-    }
-    
     // remove the node pair with the highest global reduction in cost, and add it to cv.
     // also add the nodes used in the reduction to av and bv, respectively.
     for (unsigned int n = 1; n <= set_size; n++) {
@@ -248,7 +223,9 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, Set_map& smap, int
     // if the maximum reduction has a higher external cost than internal cost, there's something we can do.
     if (best_decrease > 0) {
       for (size_t i = 0; i < decrease_index; i++) {
+#ifndef NDEBUG
         std::cout << "swapping " << info.names(av[i]) << " with " << info.names(bv[i]) << std::endl;
+#endif
         std::swap(smap[av[i]], smap[bv[i]]);
       }
     }
@@ -277,21 +254,35 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, Set_map& smap, int
   return new_sets;
 }
 
-/*
-phier Hier_tree::make_hier_tree(phier t1, phier t2) {
-  static unsigned int temp_node_number = 0; // exact value doesn't really matter, as long as it's unique
-  std::string name = "_hier_node_" + std::to_string(temp_node_number);
-  temp_node_number++;
+unsigned int node_number = 0;
 
-  Hier_node hier_temp;
-  hier_temp.name = name;
+phier Hier_tree::make_hier_tree(phier& t1, phier& t2) {
+  auto pnode = std::make_shared<Hier_node>();
+  pnode->name = "node_" + std::to_string(node_number);
+  pnode->area = -1.0;
+  pnode->graph_subset = -1;
+  
+  pnode->children[0] = t1;
+  t1->parent = pnode;
 
-  hier_temp.children.push_back(t1);
-  hier_temp.children.push_back(t2);
+  pnode->children[1] = t2;
+  t2->parent = pnode;
 
-  return std::make_shared<Hier_node>(hier_temp);
+  node_number++;
+
+  return pnode;
 }
-*/
+
+phier Hier_tree::make_hier_node(const int set) {
+  phier pnode = std::make_shared<Hier_node>();
+  pnode->name = "leaf_node_" + std::to_string(node_number);
+  pnode->area = 0.0; // TODO: write something to this
+  pnode->graph_subset = set;
+
+  node_number++;
+  
+  return pnode;
+}
 
 phier Hier_tree::discover_hierarchy(Graph_info& info, Set_map& smap, int start_set) {
   
@@ -307,11 +298,7 @@ phier Hier_tree::discover_hierarchy(Graph_info& info, Set_map& smap, int start_s
   
   if (set_size <= num_components) {
     // set contains less than the minimum number of components, so treat it as a leaf node
-    phier p = std::make_shared<Hier_node>();
-    p->name = "stuff";
-    p->area = -1;
-    p->graph_subset = -1; // TODO: grab this from a graph element or something
-    return p;
+    return make_hier_node(start_set);
   }
   
   auto [a, b] = min_wire_cut(info, smap, start_set);
@@ -319,23 +306,15 @@ phier Hier_tree::discover_hierarchy(Graph_info& info, Set_map& smap, int start_s
   phier t1 = discover_hierarchy(info, smap, a);
   phier t2 = discover_hierarchy(info, smap, b);
   
-  phier p = std::make_shared<Hier_node>();
-  return p;
-  //return make_hier_tree(t1, t2);
+  return make_hier_tree(t1, t2);
 }
 
-/*
-void Hier_tree::collapse() {
-
-}
-*/
-
-Hier_tree::Hier_tree(Graph_info& info, unsigned int min_num_components, double min_area)
+Hier_tree::Hier_tree(Graph_info&& info, unsigned int min_num_components, double min_area)
   : area(min_area), num_components(min_num_components) {
   
   I(num_components >= 1);
   I(area >= 0.0);
-
+  
   Set_map smap = info.al.vert_map<int>();
   for (const auto& v : info.al.verts()) {
     smap[v] = 0; // everything starts in set 0
@@ -345,3 +324,21 @@ Hier_tree::Hier_tree(Graph_info& info, unsigned int min_num_components, double m
   // TODO: collapse the tree from root
 }
 
+void Hier_tree::print_node(const phier& node) {
+  std::cout << node->name << ": area = " << node->area;
+  if (node->area == -1.0) {
+    std::cout << ", children = (" << node->children[0]->name << ", " << node->children[1]->name << ")" << std::endl;
+    print_node(node->children[0]);
+    print_node(node->children[1]);
+  } else {
+    std::cout << ", leaf." << std::endl;
+  }
+}
+
+void Hier_tree::print() {
+  print_node(root);
+}
+
+void Hier_tree::collapse() {
+  
+}
