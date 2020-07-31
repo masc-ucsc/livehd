@@ -32,6 +32,7 @@ protected:
                              const std::string_view init, uint32_t bitwidth, Lnast_nid &parent_node);
   void     InitMemory   (Lnast &lnast, Lnast_nid& parent_node, const firrtl::FirrtlPB_Statement_Memory& mem);
   void     InitCMemory  (Lnast &lnast, Lnast_nid& parent_node, const firrtl::FirrtlPB_Statement_CMemory& cmem);
+  void     HandleMemPort(Lnast &lnast, Lnast_nid& parent_node, const firrtl::FirrtlPB_Statement_MemoryPort& mport);
   void     create_module_inst(Lnast &lnast, const firrtl::FirrtlPB_Statement_Instance &inst, Lnast_nid &parent_node);
   std::string_view AddAttrToDotSelNode(Lnast& lnast, Lnast_nid& parent_node, Lnast_nid& dot_sel_node, std::string attr);
 
@@ -147,6 +148,7 @@ private:
   absl::flat_hash_set<std::string> input_names;
   absl::flat_hash_set<std::string> output_names;
   absl::flat_hash_set<std::string> register_names;
+  absl::flat_hash_set<std::string> memory_names;
 
   // Maps an instance name to the module name.
   absl::flat_hash_map<std::string, std::string> inst_to_mod_map;
