@@ -81,7 +81,7 @@ protected:
   Bits_t bits;
   Number   num;
 
-  void pyrope_bits(std::string *str) const;
+  void add_pyrope_bits(std::string *str) const;
 
   std::string_view skip_underscores(std::string_view txt) const;
 
