@@ -2,7 +2,8 @@
 rm -rf ./lgdb
 
 pts_to_do='lhs_wire3'
-pts='lhs_wire lhs_wire2 scalar_tuple attr_set
+pts='hier_tuple 
+     lhs_wire lhs_wire2 scalar_tuple attr_set
      firrtl_tail3 firrtl_tail2 firrtl_tail 
      adder_stage nested_if tuple_if reg__q_pin 
      capricious_bits2 capricious_bits4 capricious_bits 
@@ -10,9 +11,7 @@ pts='lhs_wire lhs_wire2 scalar_tuple attr_set
      '
 
 #make sure to call Pyrope_compile() in the end of script
-# pts='test'
 # pts='test2'
-# pts='scalar_tuple'
 # pts_hier='sum funcall'
 # pts_hier2='sum funcall4'   
 
