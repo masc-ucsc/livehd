@@ -706,7 +706,6 @@ void Pass_bitwidth::bw_pass(LGraph *lg) {
     outcountmap[node.get_compact()] = node.get_num_outputs();
 
     if (op == Const_Op) {
-      fmt::print("node:{}\n", node.debug_name());
       process_const(node);
     } else if (op == TupKey_Op || op == TupGet_Op || op == TupAdd_Op) {
       // Nothing to do for this

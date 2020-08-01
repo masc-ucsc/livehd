@@ -1,5 +1,9 @@
 foo.a.b.__bits = 3
-foo.a.b.c = 4
-foo.a.b.__bits = 5
-// foo.a.b = 6 // ??
-%out = foo.a.b.__bits
+foo.a.b = 5
+
+c = 3
+foo.c = 6
+
+%out1 = foo.a.b.__bits
+%out2 = foo.a.b
+%out3 = foo.c

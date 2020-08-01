@@ -1,2 +1,4 @@
-foo = (a = 2, b = 3)
-%out = foo.a + foo.b
+c = 3
+foo.c = 6
+%out = foo.c
+

@@ -327,11 +327,11 @@ void Lnast_dfg::process_ast_dp_assign_op(LGraph *dfg, const Lnast_nid &lnidx_dp_
   auto an_spin   = aset_node.setup_sink_pin("AN"); // attribute name
   auto av_spin   = aset_node.setup_sink_pin("AV"); // attribute value
 
-  auto c0_dp      = lnast->get_first_child(lnidx_dp_assign);
-  auto c1_dp      = lnast->get_sibling_next(c0_dp);
-  auto c0_dp_name = lnast->get_sname(c0_dp);  // ssa name
-  auto attr_vname = "__dp_assign";  // no-ssa name
-  auto c0_dp_vname      = lnast->get_vname(c0_dp);  // no-ssa name
+  auto c0_dp       = lnast->get_first_child(lnidx_dp_assign);
+  auto c1_dp       = lnast->get_sibling_next(c0_dp);
+  auto c0_dp_name  = lnast->get_sname(c0_dp);  // ssa name
+  auto attr_vname  = "__dp_assign";  // no-ssa name
+  auto c0_dp_vname = lnast->get_vname(c0_dp);  // no-ssa name
 
   auto vn_dpin = setup_ref_node_dpin(dfg, c1_dp);
   dfg->add_edge(vn_dpin, vn_spin);
@@ -341,7 +341,7 @@ void Lnast_dfg::process_ast_dp_assign_op(LGraph *dfg, const Lnast_nid &lnidx_dp_
 
   auto dp_ancestor_subs  = lnast->get_data(c0_dp).subs - 1;
   auto dp_ancestor_name = std::string(c0_dp_vname) + "_" + std::to_string(dp_ancestor_subs);
-  fmt::print("aset ancestor name:{}\n", dp_ancestor_name);
+  /* fmt::print("aset ancestor name:{}\n", dp_ancestor_name); */
   I(name2dpin.find(dp_ancestor_name) != name2dpin.end());
 
   auto av_dpin = name2dpin[dp_ancestor_name];
@@ -913,9 +913,7 @@ Node_pin Lnast_dfg::setup_node_assign_and_lhs(LGraph *dfg, const Lnast_nid &lnid
   auto assign_node =  dfg->create_node(Or_Op);
 
   bool is_new_var_chain = check_new_var_chain(lnidx_opr);
-#ifndef NDEBUG
-  fmt::print("is_new_var_chain:{}\n", is_new_var_chain);
-#endif
+  /* fmt::print("is_new_var_chain:{}\n", is_new_var_chain); */
 
   if (!is_new_var_chain) {
     name2dpin[lhs_name] = assign_node.setup_driver_pin(0); //or as assign
