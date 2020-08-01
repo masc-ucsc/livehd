@@ -66,6 +66,7 @@ void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
     auto curlvl = curr_index.level;
     fmt::print("Processing stmt child {} at level {} \n",lnast->get_name(curr_index), curlvl);
 
+    assert(!curr_node_type.is_invalid());
     if (curr_node_type.is_assign() || curr_node_type.is_dp_assign()) {
       do_assign(curr_index);
     } else if (curr_node_type.is_if()) {
@@ -110,11 +111,17 @@ void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
       do_while(curr_index);
     }
 
-
     curr_index = lnast->get_sibling_next(curr_index);
   }
 }
 
+//-------------------------------------------------------------------------------------
+/*
+void Code_gen::invalid_node() {
+  fmt::print("INVALID NODE TYPE FOUND!");
+  exit(1);
+}
+*/
 //-------------------------------------------------------------------------------------
 //Process the assign node:
 void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index) {
@@ -123,6 +130,7 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index) {
   std::vector<std::string_view> assign_str_vect;
 
   while(curr_index!=lnast->invalid_index()) {
+    assert (!(lnast->get_type(curr_index)).is_invalid());
     //const auto& curr_node_data = lnast->get_data(curr_index);
     auto curlvl = curr_index.level;
     fmt::print("Processing assign child {} at level {} \n",lnast->get_name(curr_index), curlvl);
@@ -238,6 +246,7 @@ void Code_gen::do_func_def(const mmap_lib::Tree_index& func_def_node_index) {
   bool param_exist = true;
   if(curr_index!=lnast->invalid_index()) {
     while (curr_index!=lnast->invalid_index()) {
+      assert(!(lnast->get_type(curr_index)).is_invalid());
       absl::StrAppend(&parameters, lnast->get_name(curr_index), lnast_to->func_param_sep());
       curr_index = lnast->get_sibling_next(curr_index);
     }
@@ -313,6 +322,7 @@ void Code_gen::do_if(const mmap_lib::Tree_index& if_node_index) {
   //absl::StrAppend(&buffer_to_print, "lnast_to->start_if()\n");
 
   while(curr_index!=lnast->invalid_index()) {
+    assert(!(lnast->get_type(curr_index)).is_invalid());
     node_num++;
     const auto& curr_node_type = lnast->get_type(curr_index);
     auto curlvl = curr_index.level;//for debugging message printing purposes only
@@ -386,6 +396,7 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
   std::vector<std::string_view> op_str_vect;
 
   while(curr_index!=lnast->invalid_index()) {
+    assert(!(lnast->get_type(curr_index)).is_invalid());
     //const auto& curr_node_data = lnast->get_data(curr_index);
     auto curlvl = curr_index.level;//for debugging message printing purposes only
     fmt::print("Processing op child {} at level {} \n",lnast->get_name(curr_index), curlvl);
@@ -439,6 +450,7 @@ void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index) {
   auto curr_index = lnast->get_first_child(dot_node_index);
   std::vector<std::string_view> dot_str_vect;
   while(curr_index!=lnast->invalid_index()) {
+    assert(!(lnast->get_type(curr_index)).is_invalid());
     //auto curlvl = curr_index.level;
     //fmt::print("Processing dot child {} at level {} \n",lnast->get_name(curr_index), curlvl);
     dot_str_vect.push_back(lnast->get_name(curr_index));
@@ -492,6 +504,7 @@ void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index, std::str
   auto curr_index = lnast->get_first_child(select_node_index);
   std::vector<std::string_view> sel_str_vect;
   while(curr_index!=lnast->invalid_index()) {
+    assert(!(lnast->get_type(curr_index)).is_invalid());
     //const auto& curr_node_data = lnast->get_data(curr_index);
     sel_str_vect.push_back(lnast->get_name(curr_index));
     curr_index = lnast->get_sibling_next(curr_index);
@@ -539,6 +552,7 @@ void Code_gen::do_tuple(const mmap_lib::Tree_index& tuple_node_index) {
   curr_index = lnast->get_sibling_next(curr_index);
   std::string tuple_value = "";
   while(curr_index!=lnast->invalid_index() ) {
+    assert(!(lnast->get_type(curr_index)).is_invalid());
     if (lnast->is_leaf(curr_index)) {
       absl::StrAppend(&tuple_value, std::string(lnast->get_name(curr_index)), lnast_to->tuple_stmt_sep());
     } else {
@@ -574,6 +588,7 @@ std::string Code_gen::resolve_tuple_assign(const mmap_lib::Tree_index& tuple_ass
   std::vector<std::string_view> op_str_vect;
 
   while(curr_index!=lnast->invalid_index()) {
+    assert(!(lnast->get_type(curr_index)).is_invalid());
     //const auto& curr_node_data = lnast->get_data(curr_index);
     op_str_vect.push_back(lnast->get_name(curr_index));
     curr_index = lnast->get_sibling_next(curr_index);
