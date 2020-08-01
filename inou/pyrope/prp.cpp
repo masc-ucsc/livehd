@@ -107,29 +107,6 @@ uint8_t Prp::rule_if_statement(std::list<std::tuple<Rule_id, Token_entry>> &pass
     RULE_SUCCESS("Matched rule_if_statement (no condition or if).\n", Prp_rule_if_statement);
   }
 
-  bool next = true;
-  INIT_PSEUDO_FAIL();
-
-  while (next) {
-    UPDATE_PSEUDO_FAIL();
-    check_ws();
-    if (!CHECK_RULE(&Prp::rule_assignment_expression)) {
-      next = false;
-    } else {
-      check_ws();
-      bool next_prime = false;
-      do {
-        if (SCAN_IS_TOKEN(Token_id_semicolon, Prp_rule_if_statement)) {
-          next_prime = true;
-        }
-      } while (SCAN_IS_TOKEN(Token_id_semicolon, Prp_rule_if_statement));
-      if (!next_prime) {
-        next = false;
-        PSEUDO_FAIL();
-      }
-    }
-  }
-
   if (!CHECK_RULE(&Prp::rule_logical_expression)) {
     RULE_FAILED("Failed rule_if_statement; couldn't find a logical_expression.\n");
   }
@@ -140,6 +117,7 @@ uint8_t Prp::rule_if_statement(std::list<std::tuple<Rule_id, Token_entry>> &pass
     RULE_FAILED("Failed rule_if_statement; couldn't find a block_body.\n");
   }
 
+  INIT_PSEUDO_FAIL();
   UPDATE_PSEUDO_FAIL();
 
   // optional
@@ -157,29 +135,6 @@ uint8_t Prp::rule_for_statement(std::list<std::tuple<Rule_id, Token_entry>> &pas
 
   if (!SCAN_IS_TOKEN(Pyrope_id_for)) {
     RULE_FAILED("Failed rule_for_statement; couldn't find a for token.\n");
-  }
-
-  bool next = true;
-  INIT_PSEUDO_FAIL();
-
-  while (next) {
-    UPDATE_PSEUDO_FAIL();
-    check_ws();
-    if (!CHECK_RULE(&Prp::rule_assignment_expression)) {
-      next = false;
-    } else {
-      check_ws();
-      bool next_prime = false;
-      do {
-        if (SCAN_IS_TOKEN(Token_id_semicolon, Prp_rule_for_index)) {
-          next_prime = true;
-        }
-      } while (SCAN_IS_TOKEN(Token_id_semicolon, Prp_rule_for_index));
-      if (!next_prime) {
-        next = false;
-        PSEUDO_FAIL();
-      }
-    }
   }
 
   if (!CHECK_RULE(&Prp::rule_for_index)) {
@@ -296,29 +251,6 @@ uint8_t Prp::rule_while_statement(std::list<std::tuple<Rule_id, Token_entry>> &p
 
   if (!SCAN_IS_TOKEN(Pyrope_id_while)) {
     RULE_FAILED("Failed rule_while_statement; couldn't find a while.\n");
-  }
-
-  bool next = true;
-  INIT_PSEUDO_FAIL();
-
-  while (next) {
-    UPDATE_PSEUDO_FAIL();
-    check_ws();
-    if (!CHECK_RULE(&Prp::rule_assignment_expression)) {
-      next = false;
-    } else {
-      check_ws();
-      bool next_prime = false;
-      do {
-        if (SCAN_IS_TOKEN(Token_id_semicolon, Prp_rule_for_index)) {
-          next_prime = true;
-        }
-      } while (SCAN_IS_TOKEN(Token_id_semicolon, Prp_rule_for_index));
-      if (!next_prime) {
-        next = false;
-        PSEUDO_FAIL();
-      }
-    }
   }
 
   if (!CHECK_RULE(&Prp::rule_logical_expression)) {
@@ -497,12 +429,6 @@ uint8_t Prp::rule_scope_condition(std::list<std::tuple<Rule_id, Token_entry>> &p
 
   // optional
   CHECK_RULE(&Prp::rule_scope_argument);
-
-  if (SCAN_IS_TOKEN(Pyrope_id_when, Prp_rule_scope_condition)) {
-    if (!CHECK_RULE(&Prp::rule_logical_expression)) {
-      RULE_FAILED("Failed rule_scope_condition; couldn't find an answering logical expression.\n");
-    }
-  }
 
   RULE_SUCCESS("Matched rule_scope_condition.\n", Prp_rule_scope_condition);
 }
@@ -1917,15 +1843,17 @@ void Prp::elaborate() {
     exit(0);
   */
 
-  if (!CHECK_RULE(&Prp::rule_start)) {
+  if (!CHECK_RULE(&Prp::rule_start)){
     failed = 1;
   }
 
   if (failed) {
-    fmt::print("Parsing error line {}. Unexpected token [{}].\n",
+    //fmt::print("Parsing error line {}. Unexpected token [{}].\n",
+               //get_token(term_token + base_token).line + 1,
+               //scan_text(term_token + base_token));
+    parser_error("Parsing error line {}. Unexpected token [{}].\n",
                get_token(term_token + base_token).line + 1,
                scan_text(term_token + base_token));
-    // parser_error("unexpected token {}.\n", scan_text(term_token));
   } else {
     fmt::print("\nParsing SUCCESSFUL!\n");
   }
