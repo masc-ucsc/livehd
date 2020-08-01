@@ -70,7 +70,7 @@ void Lnast_to_prp_parser::process_node(const mmap_lib::Tree_index& it) {
     add_to_buffer(node_data);
   } else {
     fmt::print("Adding other...\n");
-    lnast->dump(it);
+    /* lnast->dump(it); */ // FIXME->sh: compile error ...
     add_to_buffer(node_data);
     fmt::print("...Adding other\n");
   }
