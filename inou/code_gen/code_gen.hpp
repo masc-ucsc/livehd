@@ -37,7 +37,8 @@ public:
   std::string resolve_func_cond(const mmap_lib::Tree_index& func_cond_index);
   bool is_temp_var(std::string_view test_string);//can go to private/protected section!?
   //std::string_view get_node_name(Lnast_node node);//can go to private/protected section!?
-  bool             is_number(std::string_view test_string);
+  bool is_number(std::string_view test_string);
+//  void invalid_node();
   std::string_view process_number(std::string_view num_string);
  // virtual std::string_view stmt_sep() = 0;
 };
