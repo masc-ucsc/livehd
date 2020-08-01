@@ -1,2 +1,6 @@
-foo.a.__bits = 3
-%out = foo.a.__bits
+a = 1
+if x+1 == 2 {
+  b = 2
+  a = b + 1
+}
+%out = a

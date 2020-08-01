@@ -561,10 +561,28 @@ void Prp_lnast::eval_if_statement(mmap_lib::Tree_index idx_start_ast, mmap_lib::
   if (cur_ast.rule_id == Prp_rule_if_statement) {  // conditioned if
     if (scan_text(cur_ast.token_entry) == "if") {  // if
       idx_nxt_ln = lnast->add_child(idx_nxt_ln, Lnast_node::create_if(get_token(cur_ast.token_entry)));
-    } else {  // unique ifs
+    } else if (scan_text(cur_ast.token_entry) == "uif") {  // unique ifs
       idx_nxt_ln  = lnast->add_child(idx_nxt_ln, Lnast_node::create_uif(get_token(cur_ast.token_entry)));
       idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast);
     }
+    else{ // just a block of code with no condition
+      idx_nxt_ln = lnast->add_child(idx_nxt_ln, Lnast_node::create_if(""));
+      auto idx_cond_ln = lnast->add_child(idx_nxt_ln, Lnast_node::create_cstmts(""));
+      lnast->add_child(idx_cond_ln, Lnast_node::create_cond("true"));
+      idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast);
+      
+      auto lnast_seq = lnast->add_string("___SEQ" + std::to_string(current_seq++));
+      auto idx_stmts = lnast->add_child(idx_nxt_ln, Lnast_node::create_stmts(lnast_seq));
+      auto old_stmts = cur_stmts;
+      cur_stmts      = idx_stmts;
+      
+      translate_code_blocks(idx_nxt_ast, idx_stmts, Prp_rule_block_body);
+      idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast);
+      
+      cur_stmts   = old_stmts;
+      return;
+    }
+    
     idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast);
     // second step: condition statement pairs
     while (idx_nxt_ast != ast->invalid_index()) {
@@ -585,7 +603,7 @@ void Prp_lnast::eval_if_statement(mmap_lib::Tree_index idx_start_ast, mmap_lib::
         auto old_stmts   = cur_stmts;
         cur_stmts        = idx_cond_ln;
         auto cond_lhs    = eval_rule(idx_nxt_ast, idx_cond_ln);
-        lnast->add_child(idx_nxt_ln, Lnast_node::create_cond(cond_lhs.token));
+        lnast->add_child(idx_cond_ln, Lnast_node::create_cond(cond_lhs.token));
         cur_stmts = old_stmts;
         // go past expression token
         idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast);
