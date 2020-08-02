@@ -555,10 +555,10 @@ bool Pass_cprop::process_tuple_get(Node &tg_node, LGraph *lg) {
   }
 
   
-
   Node_pin val_dpin;
+  auto &ctup = ptup_it->second;
+
   if (!key_name.empty()) {
-    auto &ctup = ptup_it->second;
     if (ctup->has_key_name(key_name)) {
       val_dpin = ctup->get_value_dpin(key_pos, key_name);
     /*// FIXME->sh*/
@@ -586,7 +586,7 @@ bool Pass_cprop::process_tuple_get(Node &tg_node, LGraph *lg) {
   }
 
 
-  // case of accessing __bits from a hier-tg-chain
+  // case of accessing __bits from a hier-tg-chain, ex: x = foo.a.b.__bits
   bool followed_by_a_tg = false;
   Node follower_tg_node;
   for (auto &out : tg_node.out_edges()) {
@@ -611,7 +611,6 @@ bool Pass_cprop::process_tuple_get(Node &tg_node, LGraph *lg) {
         return false;
       }  
       
-
       //construct attr-set/get sub-struct
       auto attr_set_node  = lg->create_node(AttrSet_Op);      
       auto attr_set_an_spin = attr_set_node.setup_sink_pin(1);
@@ -621,7 +620,8 @@ bool Pass_cprop::process_tuple_get(Node &tg_node, LGraph *lg) {
       attr_set_an_dpin.connect_sink(attr_set_an_spin);
 
 
-      //search in lgraph chain to get where __bits value defined. note: you cannot avoid this iteration even with lgtuple, but theoretically, the __bits node won't be defined too far
+      // search in lgraph chain to get where __bits value defined. note: you cannot avoid this 
+      // iteration even with lgtuple, but theoretically, the __bits node won't be defined too far
       Node_pin attr_set_av_dpin;
       auto gp_node = parent_node.setup_sink_pin(0).get_driver_node(); // grand_parent_node
       while (gp_node.get_type_op()== TupAdd_Op) {
@@ -638,7 +638,6 @@ bool Pass_cprop::process_tuple_get(Node &tg_node, LGraph *lg) {
         }
       }
       attr_set_av_dpin.connect_sink(attr_set_av_spin);
-
 
       auto attr_get_node = lg->create_node(AttrGet_Op);      
       auto attr_get_vn_spin = attr_get_node.setup_sink_pin(0);
@@ -667,9 +666,34 @@ bool Pass_cprop::process_tuple_get(Node &tg_node, LGraph *lg) {
       }
     }
 
-    fmt::print("TupGet node:{} pos:{} key:{} val:{}\n", tg_node.debug_name(), key_pos, key_name, val_dpin.debug_name());
-    collapse_forward_for_pin(tg_node, val_dpin);
-    return true;
+
+    auto attr_bits = ctup->get_bits_from_key(key_name);
+    if (val_dpin.get_node().get_type_op() != TupAdd_Op && attr_bits != -1) { // is scalar and bits has been set
+    // when access scalar, check if corresponding attr is set -> yes -> insert attr_set in between
+      
+      auto attr_set_node  = lg->create_node(AttrSet_Op);      
+      auto attr_set_node_dpin = attr_set_node.setup_driver_pin(0);
+
+      auto attr_set_vn_spin = attr_set_node.setup_sink_pin(0);
+      auto attr_set_vn_dpin = val_dpin;
+      attr_set_vn_dpin.connect_sink(attr_set_vn_spin);
+
+
+      auto attr_set_an_spin = attr_set_node.setup_sink_pin(1);
+      auto attr_set_an_dpin = lg->create_node(TupKey_Op).setup_driver_pin();
+      attr_set_an_dpin.set_name("__bits");
+      attr_set_an_dpin.connect_sink(attr_set_an_spin);
+      
+      auto attr_set_av_spin  = attr_set_node.setup_sink_pin(2);
+      auto attr_set_av_dpin  = lg->create_node_const(attr_bits).setup_driver_pin();
+      attr_set_av_dpin.connect_sink(attr_set_av_spin);
+
+      collapse_forward_for_pin(tg_node, attr_set_node_dpin);
+    } else {
+      fmt::print("TupGet node:{} pos:{} key:{} val:{}\n", tg_node.debug_name(), key_pos, key_name, val_dpin.debug_name());
+      collapse_forward_for_pin(tg_node, val_dpin);
+      return true;
+    }  
   }
   return false;
 }
@@ -732,16 +756,20 @@ void Pass_cprop::process_tuple_add(Node &node, LGraph *lg) {
 
 
   bool is_attr_set = false;
+  int  attr_bits = -1;
   if (!val_dpin.is_invalid()) {
     auto val_dnode = val_dpin.get_node();
     if (val_dnode.get_type_op() == TupAdd_Op && 
         val_dnode.has_sink_pin_connected(1)  && 
         val_dnode.setup_sink_pin(1).get_driver_pin().get_name().substr(0,6) == "__bits") {
+
       is_attr_set = true;
+      I(val_dnode.setup_sink_pin(3).get_driver_node().is_type_const());
+      attr_bits = val_dnode.setup_sink_pin(3).get_driver_node().get_type_const().to_i();
     }
   }
 
-  merge_to_tuple(ctup, node, parent_node, parent_dpin, key_pos, key_name, val_dpin, is_attr_set);
+  merge_to_tuple(ctup, node, parent_node, parent_dpin, key_pos, key_name, val_dpin, is_attr_set, attr_bits);
 
   fmt::print("TupAdd node:{} pos:{} key:{} val:{}\n", node.debug_name(), key_pos, key_name, val_dpin.debug_name());
   /* } */
@@ -752,11 +780,12 @@ void Pass_cprop::process_tuple_add(Node &node, LGraph *lg) {
 
 
 void Pass_cprop::merge_to_tuple(std::shared_ptr<Lgtuple> ctup, Node &node, Node &parent_node, Node_pin &parent_dpin, int key_pos,
-                                std::string_view key_name, Node_pin &val_dpin, bool is_attr_set) {
+                                std::string_view key_name, Node_pin &val_dpin, bool is_attr_set, int attr_bits) {
   bool compile_error = false;
 
   if (is_attr_set) {
-    node2tuple[node.get_compact()] = ctup;
+    ctup->set_key2bits(key_name, attr_bits);
+    node2tuple[node.get_compact()] = ctup; //notice in this case, ctup = parent tup
     return;
   }
   
