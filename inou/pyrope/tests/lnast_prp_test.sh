@@ -2,7 +2,7 @@
 rm -rf ./lgdb
 
 pts_to_do='lhs_wire3'
-pts='hier_tuple 
+pts='hier_tuple hier_tuple2
      lhs_wire lhs_wire2 scalar_tuple attr_set
      firrtl_tail3 firrtl_tail2 firrtl_tail 
      adder_stage nested_if tuple_if reg__q_pin 
@@ -108,23 +108,6 @@ Pyrope_compile () {
         echo "Successfully optimize design bitwidth: inou/cfg/tests/${pt}.prp"
       else
         echo "ERROR: Pyrope compiler failed: bitwidth optimization, testcase: inou/cfg/tests/${pt}.prp"
-        exit 1
-      fi
-  
-      ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-      mv ${pt}.dot ${pt}.with_bits.dot
-  
-      echo ""
-      echo ""
-      echo ""
-      echo "----------------------------------------------------"
-      echo "Copy Propagation Optimization(DCE)"
-      echo "----------------------------------------------------"
-      ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop"
-      if [ $? -eq 0 ]; then
-        echo "Successfully eliminate all assignment or_op: inou/cfg/tests/${pt}.prp"
-      else
-        echo "ERROR: Pyrope compiler failed: cprop, testcase: inou/cfg/tests/${pt}.prp"
         exit 1
       fi
   

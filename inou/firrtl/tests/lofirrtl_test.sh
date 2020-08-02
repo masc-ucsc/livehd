@@ -2,6 +2,7 @@
 rm -rf ./lgdb
 
 pts='FinalVal2Test FinalValTest NotAnd Trivial SimpleBitOps Test1 RegTrivial RegisterSimple Flop Register GCD RocketCore ICache' #Flop Register
+# pts='FinalVal2Test' 
 #Ops -- no rem op yet
 
 #HwachaSequencer -- printf, pad, stop
@@ -60,7 +61,7 @@ do
       exit 1
     fi
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.tuple.no_bits.or.dot
+    mv ${pt}.dot ${pt}.raw.dot
 
     echo ""
     echo ""
@@ -77,16 +78,18 @@ do
       exit 1
     fi
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.no_bits.or.dot
+    # mv ${pt}.dot ${pt}.no_bits.or.dot
+    mv ${pt}.dot ${pt}.no_bits.dot
 
     echo ""
     echo ""
     echo ""
     echo "----------------------------------------------------"
-    echo "Bitwidth Optimization (Round 1)"
+    echo "Bitwidth Optimization"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth"
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.bitwidth"
+    # ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth"
     if [ $? -eq 0 ]; then
       echo "Successfully optimize design bitwidth on new lg: ${pt}.lo.pb"
     else
@@ -94,41 +97,41 @@ do
       exit 1
     fi
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.or.dot
+    # mv ${pt}.dot ${pt}.or.dot
 
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "Copy Propagation Optimization (DCE)"
-    echo "----------------------------------------------------"
+    # echo ""
+    # echo ""
+    # echo ""
+    # echo "----------------------------------------------------"
+    # echo "Copy Propagation Optimization (DCE)"
+    # echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop"
-    if [ $? -eq 0 ]; then
-      echo "Successfully eliminate all assignment or_op: ${pt}.lo.pb"
-    else
-      echo "ERROR: Pyrope compiler failed on new lg: cprop, testcase: ${pt}.lo.pb"
-      exit 1
-    fi
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+    # ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop"
+    # if [ $? -eq 0 ]; then
+    #   echo "Successfully eliminate all assignment or_op: ${pt}.lo.pb"
+    # else
+    #   echo "ERROR: Pyrope compiler failed on new lg: cprop, testcase: ${pt}.lo.pb"
+    #   exit 1
+    # fi
+    # ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
 
-    echo ""
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "Rest of bw-cprop"
-    echo "----------------------------------------------------"
+    # echo ""
+    # echo ""
+    # echo ""
+    # echo ""
+    # echo "----------------------------------------------------"
+    # echo "Rest of bw-cprop"
+    # echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.bitwidth"
-    if [ $? -eq 0 ]; then
-      echo "Successfully finished all bw-cprops: ${pt}.lo.pb"
-    else
-      echo "ERROR: Pyrope compiler failed on new lg: cprop-bw, testcase: ${pt}.lo.pb"
-      exit 1
-    fi
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.newlg.dot
+    # ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.bitwidth"
+    # if [ $? -eq 0 ]; then
+    #   echo "Successfully finished all bw-cprops: ${pt}.lo.pb"
+    # else
+    #   echo "ERROR: Pyrope compiler failed on new lg: cprop-bw, testcase: ${pt}.lo.pb"
+    #   exit 1
+    # fi
+    # ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+    # mv ${pt}.dot ${pt}.newlg.dot
 
     #echo ""
     #echo ""
@@ -144,8 +147,8 @@ do
     #  exit 1
     #fi
 
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.newlg.dce.dot
+    # ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+    # mv ${pt}.dot ${pt}.newlg.dce.dot
 
     echo ""
     echo ""

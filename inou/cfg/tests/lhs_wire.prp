@@ -1,4 +1,4 @@
-%out  = foo.__final_value
+%out  = foo.__last_value
 foo = 2
-%out2 = foo.__final_value
+%out2 = foo.__last_value
 foo = 3
