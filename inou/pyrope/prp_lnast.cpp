@@ -547,17 +547,18 @@ void Prp_lnast::eval_if_statement(mmap_lib::Tree_index idx_start_ast, mmap_lib::
   auto idx_nxt_ast = ast->get_child(idx_start_ast);
 
   auto cur_ast = ast->get_data(idx_nxt_ast);
-
+  
+  Lnast_node root_if_node;
+  
   if (cur_ast.rule_id == Prp_rule_if_statement) {  // conditioned if
     if (scan_text(cur_ast.token_entry) == "if") {  // if
-      idx_nxt_ln = lnast->add_child(idx_nxt_ln, Lnast_node::create_if(get_token(cur_ast.token_entry)));
+      root_if_node = Lnast_node::create_if(get_token(cur_ast.token_entry));
     } else if (scan_text(cur_ast.token_entry) == "uif") {  // unique ifs
-      idx_nxt_ln  = lnast->add_child(idx_nxt_ln, Lnast_node::create_uif(get_token(cur_ast.token_entry)));
+      root_if_node = Lnast_node::create_uif(get_token(cur_ast.token_entry));
       idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast);
     }
     else{ // just a block of code with no condition
       idx_nxt_ln = lnast->add_child(idx_nxt_ln, Lnast_node::create_if(""));
-      auto idx_cond_ln = lnast->add_child(idx_nxt_ln, Lnast_node::create_cstmts(""));
       lnast->add_child(idx_nxt_ln, Lnast_node::create_cond("true"));
       idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast);
       
@@ -567,14 +568,42 @@ void Prp_lnast::eval_if_statement(mmap_lib::Tree_index idx_start_ast, mmap_lib::
       cur_stmts      = idx_stmts;
       
       translate_code_blocks(idx_nxt_ast, idx_stmts, Prp_rule_block_body);
-      idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast);
       
       cur_stmts   = old_stmts;
       return;
     }
     
+    std::list<Lnast_node> cond_nodes;
+    // loop over the if tree and evaluate conditions
+    
     idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast);
-    // second step: condition statement pairs
+    auto lookahead_idx_ast = idx_nxt_ast;
+    
+    // first step: evaluate all conditions
+    while(lookahead_idx_ast != ast->invalid_index()){
+      cur_ast = ast->get_data(lookahead_idx_ast);
+      if (cur_ast.rule_id
+          == Prp_rule_else_statement) {  // we need to set the index to the same spot as it would be for the first if
+        lookahead_idx_ast = ast->get_child(lookahead_idx_ast);
+        lookahead_idx_ast = ast->get_sibling_next(lookahead_idx_ast);  // now at either condition or brace (for elif and else respectively)
+        cur_ast = ast->get_data(lookahead_idx_ast);
+      }
+      PRINT_DBG_LN("checking condition expression in lookahead.\n");
+      if (cur_ast.rule_id != Prp_rule_empty_scope_colon){
+        cond_nodes.push_back(Lnast_node::create_cond(eval_rule(lookahead_idx_ast, idx_nxt_ln).token));
+        lookahead_idx_ast = ast->get_sibling_next(lookahead_idx_ast);
+      }
+      else{
+        break;
+      }
+      
+      lookahead_idx_ast = ast->get_sibling_next(lookahead_idx_ast);
+      lookahead_idx_ast = ast->get_sibling_next(lookahead_idx_ast);
+    }
+    
+    idx_nxt_ln = lnast->add_child(idx_nxt_ln, root_if_node);
+    
+    // second step: evaluate the statements
     while (idx_nxt_ast != ast->invalid_index()) {
       cur_ast = ast->get_data(idx_nxt_ast);
       // check if we're looking at an else or an elif first
@@ -586,18 +615,13 @@ void Prp_lnast::eval_if_statement(mmap_lib::Tree_index idx_start_ast, mmap_lib::
         PRINT_DBG_LN("After rule: {}.\n", rule_id_to_string(ast->get_data(idx_nxt_ast).rule_id));
         cur_ast = ast->get_data(idx_nxt_ast);
       }
-      // find condition if it's present
-      PRINT_DBG_LN("about to check condition\n");
-      if (is_expr(idx_nxt_ast) || cur_ast.rule_id == Prp_rule_reference || cur_ast.rule_id == Prp_rule_numerical_constant || cur_ast.rule_id == Prp_rule_constant || cur_ast.rule_id == Prp_rule_string_constant) {
-        auto idx_cond_ln = lnast->add_child(idx_nxt_ln, Lnast_node::create_cstmts(""));
-        auto old_stmts   = cur_stmts;
-        cur_stmts        = idx_cond_ln;
-        auto cond_lhs    = eval_rule(idx_nxt_ast, idx_cond_ln);
-        lnast->add_child(idx_nxt_ln, Lnast_node::create_cond(cond_lhs.token));
-        cur_stmts = old_stmts;
-        // go past expression token
+      
+      if(cur_ast.rule_id != Prp_rule_empty_scope_colon){
+        lnast->add_child(idx_nxt_ln, cond_nodes.front());
+        cond_nodes.pop_front();
         idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast);
       }
+      
       // eval statements
       // add statements node
       auto lnast_seq = lnast->add_string("___SEQ" + std::to_string(current_seq++));

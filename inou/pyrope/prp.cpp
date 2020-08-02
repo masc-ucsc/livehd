@@ -1851,9 +1851,12 @@ void Prp::elaborate() {
     //fmt::print("Parsing error line {}. Unexpected token [{}].\n",
                //get_token(term_token + base_token).line + 1,
                //scan_text(term_token + base_token));
-    parser_error("Parsing error line {}. Unexpected token [{}].\n",
+    PRINT_DBG_AST("base token: {}, term token: {}\n", base_token, term_token);
+    PRINT_DBG_AST("terminal token: {}\n", scan_text(term_token + base_token));
+    fmt::print("Parsing error line {}. Unexpected token [{}].\n",
                get_token(term_token + base_token).line + 1,
                scan_text(term_token + base_token));
+    exit(1);
   } else {
     fmt::print("\nParsing SUCCESSFUL!\n");
   }

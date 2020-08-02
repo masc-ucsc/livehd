@@ -1,4 +1,13 @@
-{
-a = b
-b = 2
+if a==1{
+x += 4
+b=1
+}
+elif a==2{
+b=2
+}
+elif xx{
+b=5
+}
+else{
+b=3
 }
