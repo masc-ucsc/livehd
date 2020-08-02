@@ -76,7 +76,7 @@ void Ast_parser::add(Rule_id rule_id, Token_entry te) {
   I(down_added+1>=level);
 
   if (down_added == level) {
-    auto child_index = add_next_sibling(last_added.back(), Ast_parser_node(rule_id, te));
+    auto child_index = append_sibling(last_added.back(), Ast_parser_node(rule_id, te));
     add_track_parent(child_index);
   }else{
     auto child_index = add_child(last_added.back(), Ast_parser_node(rule_id, te));
