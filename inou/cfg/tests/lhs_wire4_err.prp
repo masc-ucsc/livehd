@@ -1,5 +1,5 @@
 // error case
-tmp = foo.__final_value
+tmp = foo.__last_value
 if ($en) {
   foo.a = 3
 }
@@ -7,14 +7,14 @@ if ($en) {
 
 
 // error case II
-tmp = foo.__final_value
+tmp = foo.__last_value
 foo.b = 2
 if ($en) {
   foo.a = 3  // error, tuple size should be known at compile time
 }
 
 // error case III
-tmp = foo.__final_value
+tmp = foo.__last_value
 foo.b = 2
 if (1 == 2) {
   foo.a = 3

@@ -2,7 +2,7 @@
 rm -rf ./lgdb
 
 pts_to_do='lhs_wire3'
-pts='hier_tuple 
+pts='hier_tuple hier_tuple2
      lhs_wire lhs_wire2 scalar_tuple attr_set
      firrtl_tail3 firrtl_tail2 firrtl_tail 
      adder_stage nested_if tuple_if reg__q_pin 

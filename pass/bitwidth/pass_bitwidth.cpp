@@ -505,6 +505,7 @@ void Pass_bitwidth::process_attr_set_new_attr(Node &node) {
 
   I(node.has_sink_pin_connected(2));
   auto dpin_val = node.get_sink_pin(2).get_driver_pin();
+
   if (!dpin_key.get_node().is_type(TupKey_Op)) {
     not_finished = true;
     return;  // Can not handle now
@@ -560,6 +561,7 @@ void Pass_bitwidth::process_attr_set_new_attr(Node &node) {
     bwmap.emplace(out_dpin.get_compact(), bw);
   }
 
+  // upwards propagate for one step node
   if (parent_pending) {
     auto through_dpin = node.get_sink_pin(0).get_driver_pin();
     through_dpin.set_bits(bw.get_bits());
