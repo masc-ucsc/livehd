@@ -112,23 +112,6 @@ Pyrope_compile () {
       fi
   
       ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-      mv ${pt}.dot ${pt}.with_bits.dot
-  
-      echo ""
-      echo ""
-      echo ""
-      echo "----------------------------------------------------"
-      echo "Copy Propagation Optimization(DCE)"
-      echo "----------------------------------------------------"
-      ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop"
-      if [ $? -eq 0 ]; then
-        echo "Successfully eliminate all assignment or_op: inou/cfg/tests/${pt}.prp"
-      else
-        echo "ERROR: Pyrope compiler failed: cprop, testcase: inou/cfg/tests/${pt}.prp"
-        exit 1
-      fi
-  
-      ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
     fi
   done #end of for
   
