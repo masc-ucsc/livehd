@@ -61,7 +61,7 @@ do
       exit 1
     fi
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.tuple.no_bits.or.dot
+    mv ${pt}.dot ${pt}.raw.dot
 
     echo ""
     echo ""
