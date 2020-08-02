@@ -66,7 +66,7 @@ template <typename X>
 class tree {
 protected:
   struct Tree_pointers {
-    Tree_pointers(Tree_pos p) : parent(p), next_sibling(0) {
+    Tree_pointers(Tree_pos p) : parent(p), next_sibling(1) {
       for (int i = 0; i < 4; ++i) {
         first_child[i] = -1;
         last_child[i]  = -1;
@@ -80,7 +80,7 @@ protected:
     }
 
     const Tree_pos parent;        // Parent can never change
-    Tree_pos       next_sibling;  // 0 -> 1 child[0], 1 -> 2 child[0..1], 2 -> 3 child[0..2], 3 -> 4 child[0..3] (no external child)
+    Tree_pos       next_sibling;  // 0 -> 4 children, 1 -> 1 children, 2 -> 2 children, 3 -> 3 children
 
     Tree_pos first_child[4];
     Tree_pos last_child[4];
@@ -106,7 +106,20 @@ protected:
     assert((parent.pos >> 2) < pointers_stack[parent.level].size());
     pointers_stack[parent.level + 1].emplace_back(parent.pos);
 
+    I(pointers_stack[parent.level+1].back().next_sibling==1);
+
     return dsp.size()-4;
+  }
+
+  void make_space_after(Tree_index sibling) {
+    auto &ptrs             = pointers_stack[sibling.level][sibling.pos>>2];
+
+    for(int i=3;i>(sibling.pos&3);--i) {
+      data_stack[sibling.level][((sibling.pos>>2)<<2)+i]=data_stack[sibling.level][((sibling.pos>>2)<<2)+i-1];
+
+      ptrs.first_child[i] = ptrs.first_child[i-1];
+      ptrs.last_child[i]  = ptrs.last_child[i-1];
+    }
   }
 
   const Tree_pos *ref_last_child_pos(const Tree_index &index) const {
@@ -174,9 +187,8 @@ protected:
     I(pointers_stack[sibling.level].size() > (size_t)sibling.pos >> 2);
 
     const auto next_sibling = get_next_sibling_pos(sibling);
-    if ((next_sibling >> 2) != 0) return false;
 
-    return next_sibling < 3;  // next_sibling points to the last inserted (not next)
+    return (next_sibling&3)!=0;
   }
 
 public:
@@ -196,14 +208,19 @@ public:
 
   Tree_index get_sibling_next(const Tree_index &sibling) const {
     const auto next_bucket_pos = get_next_sibling_pos(sibling);
+    const auto next_offset     = next_bucket_pos&3;
+    const auto sibling_offset  = sibling.pos&3;
 
-    if ((sibling.pos & 3) == next_bucket_pos) {
+    if (next_offset == 0 && sibling_offset != 3)
+      return Tree_index(sibling.level, sibling.pos + 1);
+
+    if (next_offset != 0 && next_offset > (sibling_offset+1))
+      return Tree_index(sibling.level, sibling.pos + 1);
+
+    if ((next_bucket_pos>>2)==0)
       return invalid_index();  // No more siblings
-    } else if ((sibling.pos & 3) == 3) {
-      return Tree_index(sibling.level, next_bucket_pos);  // Last in bucket
-    }
 
-    return Tree_index(sibling.level, sibling.pos + 1);
+    return Tree_index(sibling.level, (next_bucket_pos>>2)<<2);
   }
 
   Tree_index get_sibling_prev(const Tree_index &sibling) const {
@@ -217,8 +234,7 @@ public:
     while (true) {
       if (index == sibling) return prev;  // Returns invalid if first chipd ast for prev
 
-      prev.level = index.level;
-      prev.pos   = 3;  // Last position
+      prev = index;
 
       index.pos = get_next_sibling_pos(index);
     }
@@ -325,7 +341,8 @@ public:
 
   // WARNING: can not return Tree_index & because future additions can move the pointer (vector realloc)
   const Tree_index add_child(const Tree_index &parent, const X &data);
-  const Tree_index add_next_sibling(const Tree_index &sibling, const X &data);
+  const Tree_index append_sibling(const Tree_index &sibling, const X &data);
+  const Tree_index insert_next_sibling(const Tree_index &sibling, const X &data);
   size_t           get_tree_width(const Tree_level &level) const {
     if (level >= data_stack.size()) return 0;
 
@@ -351,6 +368,7 @@ public:
 
     return data_stack[leaf.level][leaf.pos];
   }
+
 
   const Tree_index get_depth_preorder_next(const Tree_index &child) const;
 
@@ -477,7 +495,7 @@ const Tree_index tree<X>::add_child(const Tree_index &parent, const X &data) {
   auto *parent_lc_pos = ref_last_child_pos(parent);
   if (*parent_lc_pos != -1) {
     Tree_index sibling(child_level, *parent_lc_pos);
-    return add_next_sibling(sibling, data);
+    return append_sibling(sibling, data);
   }
 
   auto  child_pos     = create_space(parent, data);
@@ -489,6 +507,7 @@ const Tree_index tree<X>::add_child(const Tree_index &parent, const X &data) {
   I(pending_child != child_level);
 
   Tree_index child(child_level, child_pos);
+  I(get_next_sibling_pos(child)==1);
 
   I(get_last_child(parent) == child);
   I(is_leaf(child));
@@ -499,40 +518,114 @@ const Tree_index tree<X>::add_child(const Tree_index &parent, const X &data) {
 };
 
 template <typename X>
-const Tree_index tree<X>::add_next_sibling(const Tree_index &sibling, const X &data) {
-  const auto sibling_level = sibling.level;
-  const auto sibling_pos   = sibling.pos;
-
-  I(sibling_level > 0);  // No siblings to root
+const Tree_index tree<X>::append_sibling(const Tree_index &sibling, const X &data) {
+  I(sibling.level > 0);  // No siblings to root
 
   auto  parent        = get_parent(sibling);
   auto *parent_lc_pos = ref_last_child_pos(parent);
 
-  Tree_index child(sibling_level, -1);
+  Tree_index child(sibling.level, -1);
 
   if (has_next_sibling_space(sibling)) {
     I(is_last_next_sibling_chunk(sibling));
     auto *next_sibling = ref_next_sibling_pos(sibling);
-    (*next_sibling)++;
 
     assert(((*next_sibling) >> 2) == 0);
     child.pos = ((sibling.pos >> 2) << 2) + *next_sibling;
 
+    if (*next_sibling == 3) {
+      (*next_sibling) = ((*next_sibling)>>2)<<2;
+    } else {
+      (*next_sibling)++;
+    }
+
     set_data(child, data);
   } else {
     child.pos = create_space(parent, data);
-    auto *next_sibling =
-        ref_next_sibling_pos(sibling);  // Warning. Get it after create_space (potential dangling pointer otherwise)
+    auto *next_sibling = ref_next_sibling_pos(sibling);
     *next_sibling = child.pos;
+    I(((*next_sibling)&3) == 0);
 
     I(!is_leaf(parent));  // Add sibling, so already has child
   }
 
   I(!child.is_invalid());
   I(is_leaf(child));
-  if (*parent_lc_pos == sibling_pos) {  // new child is the youngest now
+  if (*parent_lc_pos == sibling.pos) {  // new child is the youngest now
     *parent_lc_pos = child.pos;
   }
+
+  return child;
+}
+
+template <typename X>
+const Tree_index tree<X>::insert_next_sibling(const Tree_index &sibling, const X &data) {
+  I(sibling.level > 0);  // No siblings to root
+
+  auto  parent        = get_parent(sibling);
+  auto *parent_lc_pos = ref_last_child_pos(parent);
+
+  Tree_index child(sibling.level, -1);
+
+  if (has_next_sibling_space(sibling)) {
+    I((sibling.pos&3)!=3); // sibling can not be the last if there is space
+    I(is_last_next_sibling_chunk(sibling));
+
+    auto *next_sibling = ref_next_sibling_pos(sibling);
+    if (*next_sibling==3)
+      (*next_sibling) = ((*next_sibling)>>2)<<2;
+    else
+      (*next_sibling)++;
+
+    I(data_stack[sibling.level].size() > sibling.pos);
+
+    make_space_after(sibling);
+
+    child.pos = sibling.pos + 1;
+    set_data(child, data);
+    if (*parent_lc_pos>>2 == sibling.pos>>2) {  // new child is the youngest now
+      *parent_lc_pos = ((child.pos>>2)<<2) | *next_sibling;
+    }
+
+  } else {
+    if ((sibling.pos&3)==3) { // last sibling in bucket
+      child.pos = create_space(parent, data);
+
+      auto *next_sibling = ref_next_sibling_pos(sibling);
+      I(((*next_sibling)&3)==0);
+      auto *next_next_sibling = ref_next_sibling_pos(child);
+      *next_next_sibling |= *next_sibling;
+      *next_sibling = child.pos;
+
+      if (*parent_lc_pos == sibling.pos) {  // new child is the youngest now
+        *parent_lc_pos = child.pos;
+      }
+    }else{
+      Tree_index created_next_sibling(sibling.level,-1);
+      created_next_sibling.pos = create_space(parent, data_stack[sibling.level][sibling.pos|3]);
+
+      // insert created in the next chain (if last *next_sibling>>2 is zero)
+      auto *next_sibling = ref_next_sibling_pos(sibling);
+      I(((*next_sibling)&3)==0);
+      auto *next_next_sibling = ref_next_sibling_pos(created_next_sibling);
+      *next_next_sibling |= *next_sibling;
+      *next_sibling = created_next_sibling.pos;
+
+      make_space_after(sibling);
+
+      child.pos = sibling.pos + 1;
+
+      set_data(child, data);
+      if ((*parent_lc_pos)>>2 == sibling.pos>>2) {  // new child is the youngest now
+        *parent_lc_pos = created_next_sibling.pos;
+      }
+    }
+
+    I(!is_leaf(parent));  // Add sibling, so already has child
+  }
+
+  I(!child.is_invalid());
+  I(is_leaf(child));
 
   return child;
 }

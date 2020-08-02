@@ -265,7 +265,7 @@ protected:
       //fmt::print("leaf_ratio:{} {} {}\n", leaf_ratio,n_leafs, i);
 
       if (leaf_ratio < leaf_ratio_goal && index.level) { // Not to root
-        tree.add_next_sibling(index, data);
+        tree.append_sibling(index, data);
         n_leafs++;
       }else{
         //index.pos = tree.get_tree_width(index.level)-1; // Add child at the end
