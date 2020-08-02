@@ -500,22 +500,14 @@ std::tuple<std::string_view, int> Pass_cprop::get_tuple_name_key(Node &node) {
   int key_pos = -1;
   if (node.has_sink_pin_connected(1)) {
     auto node2 = node.get_sink_pin(1).get_driver_node();
-
-    if (node2.is_type_const()) { 
-      key_pos = node2.get_type_const().to_i();
-      return std::make_tuple(key_name, key_pos);
-    }
-
-    auto node2_type = node2.get_type_op();
-    if (node2_type == TupKey_Op || node2_type == TupAdd_Op) 
+    if (node2.get_type_op() == TupKey_Op) 
       key_name = node2.get_driver_pin().get_name();
   }
 
   if (node.has_sink_pin_connected(2)) {
     auto node2 = node.get_sink_pin(2).get_driver_node();
-    if (node2.is_type_const()) {
+    if (node2.is_type_const()) 
       key_pos = node2.get_type_const().to_i();
-    }
   }
 
   // I(!key_name.empty() || key_pos != -1);  // At least one defined // FIXME->sh: not necessarily true, could be resolved at later
@@ -611,19 +603,13 @@ bool Pass_cprop::process_tuple_get(Node &tg_node, LGraph *lg) {
     if (follower_key_name.substr(0,6) == "__bits") // extend to other attribute
       follower_want_attr = true;
     
-    
-    Node_pin hier_tuple_chain_dpin;  
-    if (tg_node.has_sink_pin_connected(1)) 
-      hier_tuple_chain_dpin = tg_node.get_sink_pin(1).get_driver_pin();
-
-    I(hier_tuple_chain_dpin.get_node().get_type_op() == TupAdd_Op);
-
     // case of accessing a attribute field in hier tg chain
     if (follower_want_attr) {
       if (val_dpin.get_node().get_type_op() == TupAdd_Op) {
         Pass::error("access __bits attribute from a tuple chain. Follower tg:{}, current_tg:{}\n", follower_tg_node.debug_name(), tg_node.debug_name());
         return false;
       }  
+      
 
       //construct attr-set/get sub-struct
       auto attr_set_node  = lg->create_node(AttrSet_Op);      
@@ -633,7 +619,23 @@ bool Pass_cprop::process_tuple_get(Node &tg_node, LGraph *lg) {
       attr_set_an_dpin.set_name(follower_key_name);
       attr_set_an_dpin.connect_sink(attr_set_an_spin);
 
-      auto attr_set_av_dpin = hier_tuple_chain_dpin.get_node().setup_sink_pin(3).get_driver_pin();
+
+      //search in lgraph chain to get where __bits value defined. note: you cannot avoid this iteration
+      Node_pin attr_set_av_dpin;
+      auto gp_node = parent_node.setup_sink_pin(0).get_driver_node(); // grand_parent_node
+      while (gp_node.get_type_op()== TupAdd_Op) {
+        auto gp_node_key_dpin = gp_node.setup_sink_pin(1).get_driver_pin();
+        if (gp_node_key_dpin.has_name() && gp_node_key_dpin.get_name() == key_name) {
+          auto node2 = gp_node.setup_sink_pin(3).get_driver_node();
+          auto node2_key_dpin = node2.setup_sink_pin(1).get_driver_pin();
+          if (node2_key_dpin.get_name() != follower_key_name) {
+            Pass::error("trying to access scalar attribute from a tuple\n");
+          }
+          attr_set_av_dpin = node2.setup_sink_pin(3).get_driver_pin();
+          node2.del_node();
+          break;
+        }
+      }
       attr_set_av_dpin.connect_sink(attr_set_av_spin);
 
 
@@ -653,15 +655,9 @@ bool Pass_cprop::process_tuple_get(Node &tg_node, LGraph *lg) {
       tg_node.del_node();
       return true;
     }
-
-    // case of accessing a normal field in hier tg chain
-    // re-connect key dpin to the follower_tg_node becasue key-dpin represents the hierarchical tuple-chain
-    collapse_forward_for_pin(tg_node, hier_tuple_chain_dpin);
-    return true;
   }
 
-
-  // case of accessing a normal field in non-hier tg chain
+  // case of accessing a normal field in both hier/non-hier tg chain
   if (!val_dpin.is_invalid()) {
     for (auto &e : tg_node.out_edges()) {
       if (val_dpin.get_node() == e.sink.get_node()) {
@@ -674,9 +670,9 @@ bool Pass_cprop::process_tuple_get(Node &tg_node, LGraph *lg) {
     collapse_forward_for_pin(tg_node, val_dpin);
     return true;
   }
-
   return false;
 }
+
 
 void Pass_cprop::process_tuple_add(Node &node, LGraph *lg) {
   I(node.get_type_op() == TupAdd_Op);

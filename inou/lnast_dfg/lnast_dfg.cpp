@@ -764,14 +764,15 @@ Node_pin Lnast_dfg::setup_tuple_ref(LGraph *dfg, std::string_view ref_name, bool
 }
 
 Node_pin Lnast_dfg::setup_key_dpin(LGraph *dfg, std::string_view key_name) {
-  auto it = name2dpin.find(key_name);
-  if (it != name2dpin.end()) {
+  // FIXME->sh: create new table:key2dpin 2020/8/1
+  auto it = key2dpin.find(key_name);
+  if (it != key2dpin.end()) {
     return it->second;
   }
 
   auto dpin = dfg->create_node(TupKey_Op).setup_driver_pin();
   dpin.set_name(key_name);
-  name2dpin[key_name] = dpin;
+  key2dpin[key_name] = dpin;
 
   return dpin;
 }
