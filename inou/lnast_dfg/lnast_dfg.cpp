@@ -1092,7 +1092,7 @@ void Lnast_dfg::process_ast_attr_get_op(LGraph *dfg, const Lnast_nid &lnidx_aget
   auto driver_vname  = lnast->get_vname(c1_aget);
   auto attr_name     = lnast->get_vname(c2_aget);
 
-  if (attr_name == "__final_value") {
+  if (attr_name == "__last_value") {
     auto wire_node = dfg->create_node(Or_Op); // might need to change to other type according to the real driver
     wire_node.get_driver_pin(0).set_name(c0_aget_name);
     name2dpin[c0_aget_name] = wire_node.setup_driver_pin(0);
@@ -1150,7 +1150,8 @@ void Lnast_dfg::process_ast_func_call_op(LGraph *dfg, const Lnast_nid &lnidx_fc)
         auto tn_dpin = setup_tuple_ref(dfg, tup_name);
         tn_dpin.connect_sink(tn_spin);
 
-        auto kn_dpin = setup_key_dpin(dfg, io_pin.name);
+        auto io_name_ssa = absl::StrCat(io_pin.name, "_0");
+        auto kn_dpin = setup_key_dpin(dfg, io_name_ssa);
         kn_dpin.connect_sink(kn_spin);
         
         auto subg_spin = subg_node.setup_sink_pin(io_pin.name);
@@ -1165,7 +1166,8 @@ void Lnast_dfg::process_ast_func_call_op(LGraph *dfg, const Lnast_nid &lnidx_fc)
         auto tn_dpin = setup_tuple_ref(dfg, res_tup_name, true);
         tn_dpin.connect_sink(tn_spin);
 
-        auto kn_dpin = setup_key_dpin(dfg, io_pin.name);
+        auto io_name_ssa = absl::StrCat(io_pin.name, "_0");
+        auto kn_dpin = setup_key_dpin(dfg, io_name_ssa);
         kn_dpin.connect_sink(kn_spin);
 
         auto subg_dpin = subg_node.setup_driver_pin(io_pin.name);
@@ -1345,7 +1347,7 @@ void Lnast_dfg::setup_lgraph_outputs_and_final_var_name(LGraph *dfg) {
       for (auto &it : driver_var2wire_nodes[vname]) {
         if (driver_ntype == TupAdd_Op) {
           it.set_type(TupAdd_Op); // change wire_node type from Or_Op to dummy TupAdd_Op
-          auto attr_key_dpin = setup_key_dpin(dfg, "__final_value");
+          auto attr_key_dpin = setup_key_dpin(dfg, "__last_value");
           auto attr_key_spin = it.setup_sink_pin(1);
           dfg->add_edge(attr_key_dpin, attr_key_spin);
           auto wire_spin = it.get_sink_pin(0);

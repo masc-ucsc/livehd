@@ -27,7 +27,7 @@ private:
   absl::flat_hash_map<std::string_view, Node_pin>                  vname2attr_dpin;       // for dummy attribute node construction, vn = variable non-ssa name, dpin = last attr dpin within "any" attributes
   absl::flat_hash_map<std::string, Node_pin>                       name2dpin;             // for scalar variable
   absl::flat_hash_map<std::string, Node_pin>                       key2dpin;
-  absl::flat_hash_map<std::string_view, std::vector<Node>>         driver_var2wire_nodes; // for __final_value temporarily wire nodes
+  absl::flat_hash_map<std::string_view, std::vector<Node>>         driver_var2wire_nodes; // for __last_value temporarily wire nodes
 
 protected:
   void top_stmts2lgraph             (LGraph *dfg, const Lnast_nid &lnidx_stmts);
