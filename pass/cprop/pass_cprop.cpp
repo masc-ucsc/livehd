@@ -622,6 +622,7 @@ bool Pass_cprop::process_tuple_get(Node &tg_node, LGraph *lg) {
 
       // search in lgraph chain to get where __bits value defined. note: you cannot avoid this 
       // iteration even with lgtuple, but theoretically, the __bits node won't be defined too far
+      // FIXME->sh: instead of iterate lgraph, try to leverage the new key2bits table in Lgtuple
       Node_pin attr_set_av_dpin;
       auto gp_node = parent_node.setup_sink_pin(0).get_driver_node(); // grand_parent_node
       while (gp_node.get_type_op()== TupAdd_Op) {
