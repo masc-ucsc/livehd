@@ -554,6 +554,10 @@ void Code_gen::do_tuple(const mmap_lib::Tree_index& tuple_node_index) {
     assert(!(lnast->get_type(curr_index)).is_invalid());
     if (lnast->is_leaf(curr_index)) {
       auto ref = std::string(lnast->get_name(curr_index));
+      //For case like:
+      //tuple :
+      //    ref : ___b
+      //    ref : ___a
       if(is_temp_var(ref)) {
         auto map_it = ref_map.find(ref);
         if(map_it != ref_map.end()) {
