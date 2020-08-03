@@ -4,10 +4,10 @@
 // if this trick is used more than once, annoying header problems start coming up because each header
 // should only define "I" once.
 
+// anything coming from the graph lib or the ranges library that graph includes should be from here.
+
 #pragma once
 #include "Adjacency_list.hpp"
-#include "range/v3/all.hpp"
-#include "range/v3/algorithm.hpp"
 #include "range/v3/view.hpp"
 #undef I
 

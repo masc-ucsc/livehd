@@ -9,7 +9,7 @@ int main() {
   
   std::cout << "loading netlist and organizing hierarchy...";
   Json_inou_parser p("/home/kneil/code/real/livehd/pass/fplan/tests/hier_test.json");
-  Graph_info&& gi = p.make_tree();
+  auto gi = p.make_tree();
 	std::cout << "done." << std::endl;
   
   std::cout << "discovering hierarchies...";
