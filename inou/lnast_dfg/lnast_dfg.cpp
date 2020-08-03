@@ -450,17 +450,18 @@ void Lnast_dfg::process_ast_tuple_get_op(LGraph *dfg, const Lnast_nid &lnidx_tg)
   int i = 0;
   absl::flat_hash_map<int, Node> tg_map;
   /* absl::flat_hash_map<int, std::string_view> tg_name; */
-  std::string_view c0_tg_name;
+  std::string c0_tg_name;
   std::string_view c0_tg_vname;
   int8_t           c0_tg_subs;
   
-  for (const auto & child : lnast->children(lnidx_tg)) {
+  for (const auto &child : lnast->children(lnidx_tg)) {
     if (i == 0) {
       const auto &c0_tg = child;
       c0_tg_name  = lnast->get_sname(c0_tg);
       c0_tg_vname = lnast->get_vname(c0_tg);
       c0_tg_subs  = lnast->get_subs(c0_tg);
       i++;
+      fmt::print("DBG: i == 0, c0_tg_name:{}, c0_tg_vname:{}\n", c0_tg_name, c0_tg_vname);
       continue;
     }
 
@@ -515,6 +516,7 @@ void Lnast_dfg::process_ast_tuple_get_op(LGraph *dfg, const Lnast_nid &lnidx_tg)
         return;
       }
 
+      fmt::print("DBG: i == {}, c0_tg_name:{}, c0_tg_vname:{}\n", i, c0_tg_name, c0_tg_vname);
       name2dpin[c0_tg_name] = tup_get.setup_driver_pin();
       fmt::print("c0_tg_name:{}, tg_debug:{}\n", c0_tg_name, tup_get.debug_name());
       tup_get.setup_driver_pin().set_name(c0_tg_name);
