@@ -40,11 +40,12 @@ public:
   std::string_view func_stmt_end() {return "}\n";}
   std::string_view func_end() {return "";}
 
-  //TODO: for related parameters: need to make language specific! currently as per pyrope:
-  std::string_view for_cond_beg() {return " ";}
-  std::string_view for_cond_end() {return " ";}
-  std::string_view for_stmt_beg() {return "{\n";}
-  std::string_view for_stmt_end() {return "}\n";}
+  //for related parameters:
+  virtual std::string_view for_cond_beg() = 0;
+  virtual std::string_view for_cond_mid() = 0;
+  virtual std::string_view for_cond_end() = 0;
+  virtual std::string_view for_stmt_beg() {return "{\n";}
+  virtual std::string_view for_stmt_end() {return "}\n";}
 
   //TODO: while related parameters: need to make language specific! currently as per pyrope:
   std::string_view while_cond_beg() {return "(";}
