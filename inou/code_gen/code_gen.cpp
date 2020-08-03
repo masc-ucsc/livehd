@@ -195,7 +195,7 @@ void Code_gen::do_for(const mmap_lib::Tree_index& for_node_index) {
   auto stmt_index = lnast->get_first_child(for_node_index);
 
   auto curr_index = lnast->get_sibling_next(stmt_index);
-  absl::StrAppend(&buffer_to_print, lnast_to->for_cond_beg(), lnast->get_name(curr_index), " in ");
+  absl::StrAppend(&buffer_to_print, lnast_to->for_cond_beg(), lnast->get_name(curr_index), lnast_to->for_cond_mid());
 
   curr_index = lnast->get_sibling_next(curr_index);
   auto ref = lnast->get_name(curr_index);
@@ -545,7 +545,6 @@ void Code_gen::do_tuple(const mmap_lib::Tree_index& tuple_node_index) {
 
   //Process the first child node in key and move to the next node:
   auto curr_index = lnast->get_first_child(tuple_node_index);
-  //const auto& curr_node_data = lnast->get_data(curr_index);
   std::string_view key = lnast->get_name(curr_index);
 
   //Process remaining nodes/sub-trees:
@@ -554,13 +553,21 @@ void Code_gen::do_tuple(const mmap_lib::Tree_index& tuple_node_index) {
   while(curr_index!=lnast->invalid_index() ) {
     assert(!(lnast->get_type(curr_index)).is_invalid());
     if (lnast->is_leaf(curr_index)) {
-      absl::StrAppend(&tuple_value, std::string(lnast->get_name(curr_index)), lnast_to->tuple_stmt_sep());
+      auto ref = std::string(lnast->get_name(curr_index));
+      if(is_temp_var(ref)) {
+        auto map_it = ref_map.find(ref);
+        if(map_it != ref_map.end()) {
+          ref = map_it->second;
+        }
+      }
+      absl::StrAppend(&tuple_value, ref, lnast_to->tuple_stmt_sep());
     } else {
       absl::StrAppend(&tuple_value, resolve_tuple_assign(curr_index));
     }
     curr_index = lnast->get_sibling_next(curr_index);
   }
 
+  //for formatting purposes:
   if (tuple_value.length()>2) {
     if (tuple_value.substr(tuple_value.length()-2) == lnast_to->tuple_stmt_sep()) {
       tuple_value = absl::StrCat(lnast_to->tuple_begin(), tuple_value);

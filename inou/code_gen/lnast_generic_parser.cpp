@@ -60,3 +60,38 @@ std::string_view Ver_parser::end_if_or_else(){
   return ("end\n");
 }
 
+std::string_view Ver_parser::for_stmt_beg() {return "begin\n";}
+std::string_view Ver_parser::for_stmt_end() {return "end\n";}
+
+std::string_view Prp_parser::for_cond_mid(){
+  return " in ";
+}
+std::string_view Cpp_parser::for_cond_mid(){
+  return ": ";
+}
+std::string_view Ver_parser::for_cond_mid(){
+  return ": ";//TODO
+}
+
+
+std::string_view Prp_parser::for_cond_beg(){
+  return " ";
+}
+std::string_view Cpp_parser::for_cond_beg(){
+  return " ( auto ";
+}
+std::string_view Ver_parser::for_cond_beg(){
+  return " ( auto ";//TODO
+}
+
+
+
+std::string_view Prp_parser::for_cond_end(){
+  return " ";
+}
+std::string_view Cpp_parser::for_cond_end(){
+  return ") ";
+}
+std::string_view Ver_parser::for_cond_end(){
+  return ") ";//TODO
+}
