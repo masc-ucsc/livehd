@@ -61,7 +61,10 @@ std::string_view Inou_firrtl::get_new_seq_name(Lnast& lnast) {
   return seq_name;
 }
 
-std::string Inou_firrtl::get_full_name(const std::string& term, const bool is_rhs) {
+/* Determine if 'term' refers to any IO/reg/etc... If it does,
+ * add the appropriate symbol or (in case of a register on RHS)
+ * create a DOT node to access the correct value. */
+std::string Inou_firrtl::get_full_name(Lnast &lnast, Lnast_nid &parent_node, const std::string& term, const bool is_rhs) {
   if (input_names.count(term)) {
     I(is_rhs);
     return absl::StrCat("$", term);
@@ -69,17 +72,13 @@ std::string Inou_firrtl::get_full_name(const std::string& term, const bool is_rh
     return absl::StrCat("%", term);
   } else if (register_names.count(term)) {
     if (is_rhs) {
-      auto q_pin_str_version = term;
-      replace(q_pin_str_version.begin(), q_pin_str_version.end(), '.', '_');
-      return absl::StrCat("___", q_pin_str_version, "__q_pin");
+      // Have to create a dot node to get the .__q_pin of register
+      auto node = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat("#", term, ".__q_pin"));
+      return (std::string)lnast.get_name(lnast.get_first_child(node));
     } else {
       return absl::StrCat("#", term);
     }
   } else if (dangling_ports_map.count(term)) {
-    /* FIXME: This will cause an issue is a port is declared in a scope
-     * (i.e. with name _T_5) then in a different scope _T_5 is to name
-     * something else. It will catch both and treat as memory but that
-     * isn't correct. */
     return term;
   } else {
     // We add _. in front of temporary names
@@ -129,7 +128,7 @@ uint32_t Inou_firrtl::get_bit_count(const firrtl::FirrtlPB_Type type) {
       I(false);                                 // get_bit_count should never be called on these (no sense)
     }
     case firrtl::FirrtlPB_Type::kFixedType: {  // Fixed type
-      I(false);                                // FIXME: Not yet supported.
+      I(false);                                // TODO: Not yet supported.
     }
     case firrtl::FirrtlPB_Type::kAnalogType: {  // Analog type
       return type.analog_type().width().value();
@@ -163,7 +162,7 @@ void Inou_firrtl::init_wire_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type
       break;
     }
     case firrtl::FirrtlPB_Type::kFixedType: {  // Fixed Point Type
-      I(false);                                // FIXME: Unsure how to implement
+      I(false);                                // TODO: LNAST does not support fixed point yet.
       break;
     }
     default: {
@@ -257,13 +256,13 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id, const 
 
   /* Since FIRRTL designs access register qpin, I need to do:
    * #reg_name.__q_pin. The name will always be ___reg_name__q_pin */
-  replace(id_for_qpin.begin(), id_for_qpin.end(), '.', '_');
+  /*replace(id_for_qpin.begin(), id_for_qpin.end(), '.', '_');
   auto dot_node_q = CreateDotsSelsFromStr(lnast, parent_node, id);
   auto acc_name_q = AddAttrToDotSelNode(lnast, parent_node, dot_node_q, "__q_pin");
 
   auto idx_asg_qp = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
   lnast.add_child(idx_asg_qp, Lnast_node::create_ref(lnast.add_string(absl::StrCat("___", id_for_qpin, "__q_pin"))));
-  lnast.add_child(idx_asg_qp, Lnast_node::create_ref(acc_name_q));
+  lnast.add_child(idx_asg_qp, Lnast_node::create_ref(acc_name_q));*/
 }
 
 // Set up any of the parameters related to a Memory block.
@@ -351,7 +350,7 @@ void Inou_firrtl::InitMemory(Lnast& lnast, Lnast_nid& parent_node, const firrtl:
     lnast.add_child(idx_tup, Lnast_node::create_ref(temp_var_t));
 
     /* FIXME: The read and write latencies shouldn't be same for this port,
-     * but we setthat way since we only have one __latency attribute. */
+     * but we set that way since we only have one __latency attribute. */
     auto idx_asg_l  = lnast.add_child(idx_tup, Lnast_node::create_assign("mem_b"));
     lnast.add_child(idx_asg_l, Lnast_node::create_ref("__latency"));
     lnast.add_child(idx_asg_l, Lnast_node::create_const(wr_lat));
@@ -1193,7 +1192,7 @@ void Inou_firrtl::HandleStaticShiftOp(Lnast& lnast, const firrtl::FirrtlPB_Expre
  * May have to modify some of these? */
 void Inou_firrtl::HandleTypeConvOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node,
                                    const std::string& lhs) {
-  if (op.op() == firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_UINT || op.op() == firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_UINT) {
+  if (op.op() == firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_UINT || op.op() == firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_SINT) {
     I(op.arg_size() == 1 && op.const__size() == 0);
     // Set lhs.__sign, then lhs = rhs
     auto lhs_ref       = lnast.add_string(lhs);
@@ -1287,7 +1286,7 @@ Lnast_nid Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB_Expres
     alter_full_str = absl::StrCat(mem_name, ".", por_name, ".__data", alter_flat_str.substr(delim_loc));
   } else {
     // Otherwise just invoke get_full_name to get any extra LNAST-necessary symbols
-    alter_full_str = get_full_name(alter_flat_str, is_rhs);
+    alter_full_str = get_full_name(ln, parent_node, alter_flat_str, false);//Note: I put false here so if reg I get the "#"
   }
 
   if (alter_full_str[0] == '$') {
@@ -1295,9 +1294,11 @@ Lnast_nid Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB_Expres
   } else if (alter_full_str[0] == '%') {
     flattened_str = absl::StrCat("%out_", flattened_str);
   } else if (alter_full_str[0] == '#') {
-    flattened_str = absl::StrCat("#", flattened_str);
-  } else if (alter_full_str.find("__q_pin") != std::string::npos) {
-    flattened_str = absl::StrCat(flattened_str, ".__q_pin");
+    if (is_rhs) {
+      flattened_str = absl::StrCat(flattened_str, ".__q_pin");
+    } else {
+      flattened_str = absl::StrCat("#", flattened_str);
+    }
   } else if (memory_names.count(alter_full_str.substr(0, alter_full_str.find(".")))) {
     // We found an access to some memory port.
     auto per1 = alter_full_str.find(".");
@@ -1307,16 +1308,18 @@ Lnast_nid Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB_Expres
     auto field_name = alter_full_str.substr(per2+1);
 
     if (field_name == "addr") {
-      flattened_str = absl::StrCat("#", mem_name, ".", port_name, ".__addr");
+      flattened_str = absl::StrCat(mem_name, ".", port_name, ".__addr");
     } else if (field_name == "en") {
-      flattened_str = absl::StrCat("#", mem_name, ".", port_name, ".__enable");
+      flattened_str = absl::StrCat(mem_name, ".", port_name, ".__enable");
     } else if (field_name == "clk") {
-      flattened_str = absl::StrCat("#", mem_name, ".", port_name, ".__clk_pin");
+      flattened_str = absl::StrCat(mem_name, ".", port_name, ".__clk_pin");
     } else if (field_name.substr(0,4) == "data" || field_name.substr(1,5) == "data") {
       //May need to change field_name with actual person, since it may have replaced vector idx with 0
-      flattened_str = absl::StrCat("#", mem_name, ".", port_name, ".__", field_name);
+      flattened_str = absl::StrCat(mem_name, ".", port_name, ".__", field_name);
     } else if (field_name == "mask" || field_name == "wmask") {
-      flattened_str = absl::StrCat("#", mem_name, ".", port_name, ".__wrmask");
+      flattened_str = absl::StrCat(mem_name, ".", port_name, ".__wrmask");
+    } else if (field_name == "wmode") {
+      // With current LNAST parameters, nothing to do.
     } else {
       I(false);
     }
@@ -1367,12 +1370,10 @@ Lnast_nid Inou_firrtl::CreateDotsSelsFromStr(Lnast& ln, Lnast_nid& parent_node, 
   while(no_dot_queue.size() > 0) {
     auto elem = no_dot_queue.front();
     if(elem.find('[') != std::string::npos) {
-      cout << "\t" << elem.substr(0, elem.find('[')) << "\n";
       flat_queue.push(elem.substr(0, elem.find('[')));
 
       while (elem.find('[') != std::string::npos) {
         elem = elem.substr(elem.find('[') + 1);
-        cout << "\t n:" << elem.substr(0, elem.find(']')) << "\n";
         flat_queue.push("[" + elem.substr(0, elem.find(']')) + "]");
       }
     } else {
@@ -1388,7 +1389,6 @@ Lnast_nid Inou_firrtl::CreateDotsSelsFromStr(Lnast& ln, Lnast_nid& parent_node, 
   while (flat_queue.size() > 0) {
     auto elem = flat_queue.front();
     if (first) {
-      fmt::print("\t{}\n", elem);
       bund_name = ln.add_string(elem);
       first = false;
     } else {
@@ -1628,7 +1628,6 @@ void Inou_firrtl::ListPrimOpInfo(Lnast& lnast, const firrtl::FirrtlPB_Expression
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_FIXED_POINT:
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_ASYNC_RESET: {
       HandleTypeConvOp(lnast, op, parent_node, lhs);
-      I(false);
       break;
     }
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_XOR_REDUCE: {
@@ -1669,7 +1668,7 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
                                  const std::string& lhs_noprefixes) {
   // Note: here, parent_node is the "stmt" node above where this expression will go.
   I(lnast.get_data(parent_node).type.is_stmts() || lnast.get_data(parent_node).type.is_cstmts());
-  auto lhs = get_full_name(lhs_noprefixes, false);
+  auto lhs = get_full_name(lnast, parent_node, lhs_noprefixes, false);
   switch (expr.expression_case()) {
     case firrtl::FirrtlPB_Expression::kReference: {  // Reference
       std::string_view expr_string = expr.reference().id();
@@ -1681,7 +1680,7 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
         auto dot_da   = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat("#", mem_name, ".", expr_string, ".__data"));
         expr_string = lnast.get_name(lnast.get_first_child(dot_da));
       } else {
-        expr_string = get_full_name(expr.reference().id(), true);
+        expr_string = lnast.add_string(get_full_name(lnast, parent_node, expr.reference().id(), true));
       }
 
       Lnast_nid idx_asg;
@@ -1793,7 +1792,7 @@ std::string Inou_firrtl::ReturnExprString(Lnast& lnast, const firrtl::FirrtlPB_E
   std::string expr_string = "";
   switch (expr.expression_case()) {
     case firrtl::FirrtlPB_Expression::kReference: {  // Reference
-      expr_string = get_full_name(expr.reference().id(), is_rhs);
+      expr_string = get_full_name(lnast, parent_node, expr.reference().id(), is_rhs);
       if (dangling_ports_map.count(expr_string)) {
         /* If its a memory port created after the memory, the name found will
          * just be the port id (i.e. "r"). This needs to be changed to
@@ -1893,7 +1892,8 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
       register_names.insert(stmt.register_().id());
       auto clk_name  = lnast.add_string(ReturnExprString(lnast, stmt.register_().clock(), parent_node, true));
       auto rst_name  = lnast.add_string(ReturnExprString(lnast, stmt.register_().reset(), parent_node, true));
-      auto init_name = lnast.add_string(ReturnExprString(lnast, stmt.register_().init(), parent_node, true));
+      //auto init_name = lnast.add_string(ReturnExprString(lnast, stmt.register_().init(), parent_node, true));
+      auto init_name = "fixme";
       init_reg_dots(lnast,
                     stmt.register_().type(),
                     absl::StrCat("#", stmt.register_().id()),
@@ -1909,7 +1909,6 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
       break;
     }
     case firrtl::FirrtlPB_Statement::kCmemory: {  // CMemory
-      //TODO
       memory_names.insert(stmt.cmemory().id());
       InitCMemory(lnast, parent_node, stmt.cmemory());
       break;
@@ -2093,7 +2092,6 @@ Sub_node Inou_firrtl::AddModToLibrary(Eprp_var& var, const std::string& mod_name
     fpath = var.get("path");
   } else {
     fpath = "lgdb";
-    fmt::print("FIXME: Does this even happen ever due to having default?\n");
   }
 
   auto *library = Graph_library::instance(fpath);
@@ -2171,11 +2169,11 @@ void Inou_firrtl::AddPortToMap(const std::string& mod_id, const firrtl::FirrtlPB
       break;
     }
     case firrtl::FirrtlPB_Type::kFixedType: {  // Fixed type
-      I(false);                                // FIXME: Not yet supported.
+      I(false);                                // TODO: Not yet supported.
       break;
     }
     case firrtl::FirrtlPB_Type::kAnalogType: {  // Analog type
-      I(false);                                 // FIXME: Not yet supported.
+      I(false);                                 // TODO: Not yet supported.
       break;
     }
     default: cout << "Unknown port type." << endl; I(false);
