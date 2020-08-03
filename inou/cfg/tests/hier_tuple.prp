@@ -1,0 +1,9 @@
+foo.a.b.__bits = 3
+foo.a.b = 5
+
+%out  = foo.a.b.__bits
+%out2 = foo.a.b
+
+c = 3
+foo.c = 6  // note: c is a key under the tuple scope, not 3
+%out3 = foo.c

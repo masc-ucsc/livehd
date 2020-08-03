@@ -1,0 +1,5 @@
+foo = (a = 3, b = 9)
+foo.a.__bits = 2
+foo.b.__bits = 4
+
+%out = foo.a + foo.b
