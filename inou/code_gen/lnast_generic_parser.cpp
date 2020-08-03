@@ -48,12 +48,12 @@ std::string_view Ver_parser::end_else_if(){
 }
 
 std::string_view Ver_parser::start_else(){
-  return ("end else begin");
+  return ("end else begin\n");
 }
 
 
 std::string_view Ver_parser::end_cond(){
-  return (") begin");
+  return (") begin\n");
 }
 
 std::string_view Ver_parser::end_if_or_else(){
