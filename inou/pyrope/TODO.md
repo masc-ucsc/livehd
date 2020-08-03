@@ -1,6 +1,9 @@
 
 Test cases with issues:
 
+
+
+
 1-method call for ..foo.. syntax (correctness)
 
 This is a code example
@@ -74,6 +77,93 @@ Most of the "assign" statements (not the := or "as") could be removed.
 ```
 2                      assign :
 3                           ref : a
+3                           ref : ___a
+```
+
+
+3-incorrect arguments in fcall
+
+This example
+```
+a |> fcall(c,d)
+```
+
+Incorrectly generates:
+```
+2                       tuple :
+3                           ref : ___a
+3                           ref : c
+3                           ref : d
+3                           ref : a
+2                   func_call :
+3                           ref : ___b
+3                           ref : fcall
+3                           ref : ___a
+```
+
+It should be:
+
+```
+2                       tuple :
+3                           ref : ___a
+3                           ref : c
+3                           ref : d
+2                tuple_concat :
+3                           ref : ___b
+3                           ref : a
+3                           ref : ___a
+2                   func_call :
+3                           ref : ___c
+3                           ref : fcall
+3                           ref : ___b
+```
+
+There is a connected/correlated problem. The following code should generate the
+same code as the previous snipped (with the exception of the x created
+variable)
+```
+x = a ++ (c,d)
+x|>fcall
+```
+
+But it generates:
+```
+2                       tuple :
+3                           ref : ___a
+3                           ref : c
+3                           ref : d
+2                tuple_concat :
+3                           ref : ___b
+3                           ref : a
+3                           ref : ___a
+2                      assign :
+3                           ref : x
+3                           ref : ___b
+2                       tuple :                 <--- this tuple node should not exist when calling a |> fcall, just for fcall(a)
+3                           ref : ___d
+3                           ref : x
+2                   func_call :
+3                           ref : ___c
+3                           ref : fcall
+3                           ref : ___d
+```
+
+This example works correctly, (even saves the concat which is great)
+```
+(a,b) |> fcall(c,d)
+```
+
+It generates:
+```
+2                       tuple :
+3                           ref : ___a
+3                           ref : c
+3                           ref : d
+3                           ref : a
+3                           ref : b
+2                   func_call :
+3                           ref : ___b
+3                           ref : fcall
 3                           ref : ___a
 ```
 
