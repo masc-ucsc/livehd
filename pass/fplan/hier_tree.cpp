@@ -1,18 +1,17 @@
 #include "hier_tree.hpp"
 
 std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, Set_map& smap, int cut_set) {
-  using namespace ranges;
-
+  
   auto& g = info.al;
   
-  auto not_in_cut_set = [&smap, &cut_set](vertex v) -> bool {
+  auto not_in_cut_set = [&smap, &cut_set](vertex_t v) -> bool {
     return smap(v) != cut_set;
   };
   
-  auto cut_verts = g.verts() | view::remove_if(not_in_cut_set);
+  auto cut_verts = g.verts() | ranges::view::remove_if(not_in_cut_set);
 
   // TODO: graph lib needs a specific version of range-v3, and that version doesn't have size or conversion utilities yet.
-  // as far as I know, there isn't really a better way to do this.
+  // this method isn't pretty, but it works and is clear
   unsigned int graph_size = 0;
   for ([[maybe_unused]] const auto& v : cut_verts) {
     graph_size++;
@@ -20,6 +19,7 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, Set_map& smap, int
   
   I(graph_size >= 2);
   
+  // counter to generate unique set names
   static int set_counter = 1;
   auto new_sets = std::pair(set_counter, set_counter + 1);
   
@@ -34,23 +34,24 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, Set_map& smap, int
         smap[v] = new_sets.second;
       }
     }
+
     set_counter += 2;
     return new_sets;
   }
   
   // if there are an odd number of elements, we need to insert one to make the graph size even.
-  vertex temp_vertex = g.null_vert();
+  vertex_t temp_vertex = g.null_vert();
   if (graph_size % 2 == 1) {
     temp_vertex = g.insert_vert();
     info.names[temp_vertex] = "temp";
     info.areas[temp_vertex] = 0.0f;
     
     for (const auto& other_v : g.verts()) {
-      edge temp_edge = g.insert_edge(temp_vertex, other_v);
-      info.weights[temp_edge] = 0;
+      edge_t temp_edge_t = g.insert_edge(temp_vertex, other_v);
+      info.weights[temp_edge_t] = 0;
 
-      temp_edge = g.insert_edge(other_v, temp_vertex);
-      info.weights[temp_edge] = 0;
+      temp_edge_t = g.insert_edge(other_v, temp_vertex);
+      info.weights[temp_edge_t] = 0;
     }
     
     smap[temp_vertex] = cut_set;
@@ -69,12 +70,10 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, Set_map& smap, int
     }
   }
 
-  auto not_in_new_sets = [&smap, &new_sets](vertex v) -> bool {
-    return smap(v) != new_sets.first && smap(v) != new_sets.second;
-  };
-  
+  set_counter += 2;
+
   /* 
-    The reason why I'm using a new variable here is because views carry no state of their own,
+    The reason why I made vert_set a new variable is because views carry no state of their own,
     so the view recomputes what should be contained in it every time we access the view.
     
     In this case, after we adjust the smap values, the original view decides that nothing should
@@ -82,25 +81,24 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, Set_map& smap, int
 
     To resolve this, a new view should be created with the correct condition.
   */
-  auto vert_set = g.verts() | view::remove_if(not_in_new_sets);
 
-  set_counter += 2;
-
-  const unsigned int set_size = graph_size / 2;
-
-  auto is_valid_set = [&smap, new_sets](vertex v) -> bool {
+  auto is_valid_set = [&smap, new_sets](vertex_t v) -> bool {
     return smap(v) == new_sets.first || smap(v) == new_sets.second;
   };
 
-  auto is_in_a = [&smap, new_sets](vertex v) -> bool {
+  auto vert_set = g.verts() | ranges::view::remove_if([=](vertex_t v) { return !is_valid_set(v); });
+
+  const unsigned int set_size = graph_size / 2;
+
+  auto is_in_a = [&smap, new_sets](vertex_t v) -> bool {
     return smap(v) == new_sets.first;
   };
 
-  auto is_in_b = [&smap, new_sets](vertex v) -> bool {
+  auto is_in_b = [&smap, new_sets](vertex_t v) -> bool {
     return smap(v) == new_sets.second;
   };
 
-  auto same_set = [&smap, &is_valid_set](vertex v1, vertex v2) -> bool {
+  auto same_set = [&smap, &is_valid_set](vertex_t v1, vertex_t v2) -> bool {
     I(is_valid_set(v1));
     I(is_valid_set(v2));
     return smap(v1) == smap(v2);
@@ -108,14 +106,15 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, Set_map& smap, int
 
   auto cmap = g.vert_map<Min_cut_data>();
   
+  // track the best possible decrease in cost between the two sets, so that we can return when there is no more work to do
   int best_decrease = 0;
 
   do {
     // (re)calculate delta costs for each node
-    for (const vertex& v : vert_set) {
+    for (const vertex_t& v : vert_set) {
       int exter = 0;
       int inter = 0;
-      for (const edge& e : g.out_edges(v)) {
+      for (const edge_t& e : g.out_edges(v)) {
         auto other_v = g.head(e);
         if (is_valid_set(other_v)) {
           if (!same_set(v, other_v)) {
@@ -129,7 +128,7 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, Set_map& smap, int
       cmap[v].active = true;
     }
     
-    std::vector<vertex> av, bv;
+    std::vector<vertex_t> av, bv;
     std::vector<int> cv;
 
     // remove the node pair with the highest global reduction in cost, and add it to cv.
@@ -141,10 +140,10 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, Set_map& smap, int
       auto a_max = g.null_vert();
       auto b_max = g.null_vert();
       
-      for (const vertex& v : vert_set) {
+      for (const vertex_t& v : vert_set) {
         if (cmap(v).active) {
           // row is in the "a" set and hasn't been deleted
-          for (const edge& e : g.out_edges(v)) {
+          for (const edge_t& e : g.out_edges(v)) {
             auto other_v = g.head(e);
             if (is_in_a(v) && is_in_b(other_v) && cmap(other_v).active) {
               // only select nodes in the other set
@@ -163,7 +162,7 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, Set_map& smap, int
       I(a_max != g.null_vert()); // these should be written with legal indices
       I(b_max != g.null_vert());
       
-      // at this point, cost should contain the highest reduction cost
+      // save the best swap and mark the swapped nodes as unavailable for future potential swaps
       cv.push_back(cost);
       
       av.push_back(a_max);
@@ -172,10 +171,10 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, Set_map& smap, int
       cmap[a_max].active = false;
       cmap[b_max].active = false;
       
-      auto find_edge_to_max = [&g, &cmap](vertex v, vertex max) -> edge {
+      auto find_edge_to_max = [&g, &cmap](vertex_t v, vertex_t max) -> edge_t {
         if (cmap[v].active) {
-          for (const edge& e : g.out_edges(v)) {
-            vertex other_v = g.head(e);
+          for (const edge_t& e : g.out_edges(v)) {
+            vertex_t other_v = g.head(e);
             if (other_v == max) { // no checking if other_v is active since the maxes were just deactivated
               return e;
             }
@@ -185,7 +184,7 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, Set_map& smap, int
       };
 
       // recalculate costs considering a_max and b_max swapped
-      for (const vertex& v : vert_set) {
+      for (const vertex_t& v : vert_set) {
         if (is_in_a(v)) {
           cmap[v].d_cost = cmap(v).d_cost + 2 * info.weights(find_edge_to_max(v, a_max)) - 2 * info.weights(find_edge_to_max(v, b_max));
         } else {
@@ -194,6 +193,9 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, Set_map& smap, int
       }
     }
     
+    // there should be set_size swaps possible
+    I(cv.size() == set_size);
+
     auto check_sum = [&cv]() -> bool {
       int total = 0;
       for (const unsigned int c : cv) {
@@ -201,9 +203,9 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, Set_map& smap, int
       }
       return total == 0;
     };
-    
-    I(cv.size() == set_size);
-    I(check_sum()); // applying all swaps (aka swapping the sets) should have no effect
+
+    // applying all swaps (aka swapping the sets) should have no effect
+    I(check_sum());
     
     // calculate the maximum benefit reduction out of all reductions possible in this iteration
     best_decrease = 0;
@@ -230,7 +232,7 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, Set_map& smap, int
       }
     }
 
-    for (const vertex& v : vert_set) {
+    for (const vertex_t& v : vert_set) {
       cmap[v].active = true;
     }
 
@@ -240,7 +242,7 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, Set_map& smap, int
 #ifndef NDEBUG
   std::cout << std::endl;
   std::cout << "best partition:" << std::endl;
-  for (const vertex& v : vert_set) {
+  for (const vertex_t& v : vert_set) {
     std::cout << info.names(v) << ":\t";
     std::cout << (is_in_a(v) ? "a" : "b") << " (aka " << (is_in_a(v) ? new_sets.first : new_sets.second);
     std::cout << "), cost " << cmap(v).d_cost << std::endl;
@@ -254,13 +256,10 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, Set_map& smap, int
   return new_sets;
 }
 
-unsigned int node_number = 0;
-
 phier Hier_tree::make_hier_tree(phier& t1, phier& t2) {
   auto pnode = std::make_shared<Hier_node>();
   pnode->name = "node_" + std::to_string(node_number);
-  pnode->area = -1.0;
-  pnode->graph_subset = -1;
+  pnode->graph_subset = Hier_node::Null_subset;
   
   pnode->children[0] = t1;
   t1->parent = pnode;
@@ -274,6 +273,8 @@ phier Hier_tree::make_hier_tree(phier& t1, phier& t2) {
 }
 
 phier Hier_tree::make_hier_node(const int set) {
+  I(set != Hier_node::Null_subset);
+
   phier pnode = std::make_shared<Hier_node>();
   pnode->name = "leaf_node_" + std::to_string(node_number);
   pnode->area = 0.0; // TODO: write something to this
@@ -286,11 +287,9 @@ phier Hier_tree::make_hier_node(const int set) {
 
 phier Hier_tree::discover_hierarchy(Graph_info& info, Set_map& smap, int start_set) {
   
-  std::cout << "splitting set " << start_set << std::endl;
-
   // figure out the number of verts in the set
   unsigned int set_size = 0;
-  for (const auto& v : info.al.verts()) {
+  for (const vertex_t& v : info.al.verts()) {
     if (smap(v) == start_set) {
       set_size++;
     }
@@ -309,33 +308,39 @@ phier Hier_tree::discover_hierarchy(Graph_info& info, Set_map& smap, int start_s
   return make_hier_tree(t1, t2);
 }
 
-Hier_tree::Hier_tree(Graph_info&& info, unsigned int min_num_components, double min_area)
-  : area(min_area), num_components(min_num_components) {
+Hier_tree::Hier_tree(Graph_info&& json_info, unsigned int min_num_components, double min_area)
+  : area(min_area), num_components(min_num_components), ginfo(std::move(json_info)) {
   
   I(num_components >= 1);
   I(area >= 0.0);
   
-  Set_map smap = info.al.vert_map<int>();
-  for (const auto& v : info.al.verts()) {
+  Set_map smap = ginfo.al.vert_map<int>();
+  for (const auto& v : ginfo.al.verts()) {
     smap[v] = 0; // everything starts in set 0
   }
   
-  root = discover_hierarchy(info, smap, 0);
-  // TODO: collapse the tree from root
+  root = discover_hierarchy(ginfo, smap, 0);
+  
+  collapse();
 }
 
-void Hier_tree::print_node(const phier& node) {
+void Hier_tree::print_node(const phier& node) const {
+  if (node->parent == nullptr) {
+    std::cout << "root node ";
+  }
+
   std::cout << node->name << ": area = " << node->area;
-  if (node->area == -1.0) {
+  
+  if (node->graph_subset == Hier_node::Null_subset) {
     std::cout << ", children = (" << node->children[0]->name << ", " << node->children[1]->name << ")" << std::endl;
     print_node(node->children[0]);
     print_node(node->children[1]);
   } else {
-    std::cout << ", leaf." << std::endl;
+    std::cout << ", containing set " << node->graph_subset << std::endl;
   }
 }
 
-void Hier_tree::print() {
+void Hier_tree::print() const {
   print_node(root);
 }
 
