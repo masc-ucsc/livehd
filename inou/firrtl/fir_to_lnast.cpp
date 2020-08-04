@@ -66,7 +66,6 @@ std::string_view Inou_firrtl::get_new_seq_name(Lnast& lnast) {
  * create a DOT node to access the correct value. */
 std::string Inou_firrtl::get_full_name(Lnast &lnast, Lnast_nid &parent_node, const std::string& term, const bool is_rhs) {
   if (input_names.count(term)) {
-    I(is_rhs);
     return absl::StrCat("$", term);
   } else if (output_names.count(term)) {
     return absl::StrCat("%", term);
@@ -2006,12 +2005,12 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
       break;
     }
     case firrtl::FirrtlPB_Statement::kAttach: {  // Attach
-      cout << "Attach\n";
+      fmt::print("Error: Attach statement not yet supported due to bidirectionality.\n");
       I(false);
       break;
     }
     default:
-      cout << "Unknown statement type." << endl;
+      fmt::print("Error: Unknown statement type.\n");
       I(false);
       return;
   }
