@@ -777,17 +777,16 @@ void Inou_firrtl::HandleOrReducOp(Lnast& lnast, const firrtl::FirrtlPB_Expressio
 void Inou_firrtl::HandleXorReducOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node,
                                    const std::string& lhs) {
   /* x = .xorR(e1)
-   *  parity_op
+   *   parity
    *    / \
    *   x  e1 */
-  // FIXME: Uncomment once node type is made
-  /*I(lnast.get_data(parent_node).type.is_stmts() || lnast.get_data(parent_node).type.is_cstmts());
+  I(lnast.get_data(parent_node).type.is_stmts() || lnast.get_data(parent_node).type.is_cstmts());
   I(op.arg_size() == 1);
 
   auto e1_str = lnast.add_string(ReturnExprString(lnast, op.arg(0), parent_node, true));
-  auto idx_par = lnast.add_child(parent_node, Lnast_node::create_parity("par_xorR"));
+  auto idx_par = lnast.add_child(parent_node, Lnast_node::create_parity("xorR"));
   lnast.add_child(idx_par, Lnast_node::create_ref(lnast.add_string(lhs)));
-  AttachExprStrToNode(lnast, e1_str, idx_par);*/
+  AttachExprStrToNode(lnast, e1_str, idx_par);
 }
 
 void Inou_firrtl::HandleNegateOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node,
@@ -1121,8 +1120,7 @@ void Inou_firrtl::HandleTwoExprPrimOp(Lnast& lnast, const firrtl::FirrtlPB_Expre
       break;
     }
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_REM: {
-      fmt::print("Error: Op_Rem not yet supported in LNAST.\n");  // FIXME...
-      I(false);
+      idx_primop = lnast.add_child(parent_node, Lnast_node::create_mod("rem"));
       break;
     }
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_DYNAMIC_SHIFT_LEFT: {
