@@ -34,7 +34,6 @@ protected:
   void     InitCMemory  (Lnast &lnast, Lnast_nid& parent_node, const firrtl::FirrtlPB_Statement_CMemory& cmem);
   void     HandleMemPort(Lnast &lnast, Lnast_nid& parent_node, const firrtl::FirrtlPB_Statement_MemoryPort& mport);
   void     create_module_inst(Lnast &lnast, const firrtl::FirrtlPB_Statement_Instance &inst, Lnast_nid &parent_node);
-  std::string_view AddAttrToDotSelNode(Lnast& lnast, Lnast_nid& parent_node, Lnast_nid& dot_sel_node, std::string attr);
 
   void HandleMuxAssign(Lnast &lnast, const firrtl::FirrtlPB_Expression &expr, Lnast_nid &parent_node,
                        const std::string &lhs_of_asg);
@@ -60,8 +59,8 @@ protected:
   void HandleTypeConvOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, const std::string &lhs);
   void AttachExprStrToNode(Lnast &lnast, const std::string_view access_str, Lnast_nid &parent_node);
 
-  Lnast_nid HandleBundVecAcc(Lnast &lnast, const firrtl::FirrtlPB_Expression expr, Lnast_nid &parent_node, const bool is_rhs);
-  Lnast_nid CreateDotsSelsFromStr(Lnast& ln, Lnast_nid& parent_node, const std::string& flattened_str);
+  std::string_view HandleBundVecAcc(Lnast &lnast, const firrtl::FirrtlPB_Expression expr, Lnast_nid &parent_node, const bool is_rhs);
+  std::string_view CreateDotsSelsFromStr(Lnast& ln, Lnast_nid& parent_node, const std::string& flattened_str);
   std::string FlattenExpression(Lnast &ln, Lnast_nid &parent_node, const firrtl::FirrtlPB_Expression &expr);
 
   // Deconstructing Protobuf Hierarchy
@@ -75,6 +74,7 @@ protected:
   std::string ReturnExprString(Lnast &lnast, const firrtl::FirrtlPB_Expression &expr, Lnast_nid &parent_node, const bool is_rhs);
 
   void ListStatementInfo(Lnast &lnast, const firrtl::FirrtlPB_Statement &stmt, Lnast_nid &parent_node);
+  void PerformLateMemAssigns(Lnast &lnast, Lnast_nid& parent_node);
 
   void PopulateAllModsIO(Eprp_var& var, const firrtl::FirrtlPB_Circuit &circuit, const std::string& file_name);
   void AddPortToMap(const std::string &mod_id, const firrtl::FirrtlPB_Type &type, uint8_t dir, const std::string &port_id, Sub_node& sub, uint64_t &inp_pos, uint64_t &out_pos);
@@ -163,6 +163,10 @@ private:
   absl::flat_hash_map<std::string, std::tuple<bool, std::string_view, std::string_view>> mem_props_map;
   // Map of memory port ids made in Memory Port statements to memory block name.
   absl::flat_hash_map<std::string, std::string> dangling_ports_map;
+  // Vector which holds all of the ports that need late assigns (and their direction).
+  enum MPORT_DIR { INFER, READ, WRITE, READ_WRITE };
+  absl::flat_hash_set<std::pair<std::string, MPORT_DIR>> late_assign_ports;
+
 
   uint32_t temp_var_count;
   uint32_t seq_counter;
