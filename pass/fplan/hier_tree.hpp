@@ -10,10 +10,7 @@
 #include <memory> // for shared_ptr
 #include <vector>
 #include <limits> // for most negative value in min cut
-
-#ifndef NDEBUG
 #include <iostream> // include printing facilities if we're debugging things
-#endif
 
 #include "i_resolve_header.hpp"
 
@@ -23,7 +20,7 @@
 struct Hier_node {
   std::string name;
   
-  double area; // area of the leaf if node is a leaf
+  double area = 0.0; // area of the leaf if node is a leaf
 
   std::shared_ptr<Hier_node> parent = {nullptr};
   std::shared_ptr<Hier_node> children[2] = {nullptr, nullptr};
@@ -76,10 +73,9 @@ private:
   };
 
   typedef decltype(graph::Bi_adjacency_list().vert_map<Min_cut_data>()) Min_cut_map;
-  typedef decltype(graph::Bi_adjacency_list().vert_map<int>()) Set_map;
   
   // make a partition of the graph minimizing the number of edges crossing the cut and keeping in mind area (modified kernighan-lin algorithm)
-  std::pair<int, int> min_wire_cut(Graph_info& info, Set_map& smap, int cut_set);
+  std::pair<int, int> min_wire_cut(Graph_info& info, int cut_set);
   
   // make a node for insertion into the hierarchy
   phier make_hier_node(const int set);
@@ -88,7 +84,7 @@ private:
   phier make_hier_tree(phier& t1, phier& t2);
   
   // perform hierarchy discovery
-  phier discover_hierarchy(Graph_info& g, Set_map& m, int start_set);
+  phier discover_hierarchy(Graph_info& g, int start_set);
   
   void print_node(const phier& node) const;
   
