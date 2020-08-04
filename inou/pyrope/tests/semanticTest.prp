@@ -78,7 +78,7 @@
 
 // Basic Func Def
 // func_xor = :($a, $b, %out):{
-//   %out = $a ^ $b
+//   %out = param1 ^ param2
 // }
 // Warning: func_xor
 // ================================================

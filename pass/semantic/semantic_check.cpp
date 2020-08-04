@@ -233,7 +233,8 @@ void Semantic_check::resolve_lhs_rhs_lists(Lnast *lnast) {
     if (lhs_name[0] != '_' && lhs_name[1] != '_' && lhs_name[2] != '_' && rhs_list[i].size() == 1 && lhs_name != "null" && lhs_name[0] != '$') {
       auto rhs_type = lnast->get_data(rhs_list[i][0]).type;
       auto rhs_name = lnast->get_name(rhs_list[i][0]);
-      if (rhs_name[0] != '_' && rhs_name[1] != '_' && rhs_name[2] != '_' && rhs_name[0] != '$' && rhs_type.is_ref()) {
+      if (rhs_name[0] != '_' && rhs_name[1] != '_' && rhs_name[2] != '_' && rhs_type.is_ref()) {
+      // if (rhs_name[0] != '_' && rhs_name[1] != '_' && rhs_name[2] != '_' && rhs_name[0] != '$' && rhs_type.is_ref()) {
         inefficient_LNAST.insert(lhs_name);
       }
     }
@@ -457,17 +458,17 @@ void Semantic_check::check_if_op(Lnast *lnast, const Lnast_nid &lnidx_opr, std::
     }
   }
   // Missing Nodes
-  auto ntype = lnast->get_data(lnidx_opr).type;
-  if (cstmts_count < cond_count) {
-    error_print_lnast_by_type(lnast, ntype.to_s());
-    Pass::error("If Operation Error: Missing Conditional Statments and/or Condition Node\n");
-  } else if (cstmts_count > cond_count) {
-    error_print_lnast_by_type(lnast, ntype.to_s());
-    Pass::error("If Operation Error: Missing Condition Node\n");
-  } else if (stmts_count < cstmts_count) {
-    error_print_lnast_by_type(lnast, ntype.to_s());
-    Pass::error("If Operation Error: Missing Statements Node\n");
-  }
+  // auto ntype = lnast->get_data(lnidx_opr).type;
+  // if (cstmts_count < cond_count) {
+  //   error_print_lnast_by_type(lnast, ntype.to_s());
+  //   Pass::error("If Operation Error: Missing Conditional Statments and/or Condition Node\n");
+  // } else if (cstmts_count > cond_count) {
+  //   error_print_lnast_by_type(lnast, ntype.to_s());
+  //   Pass::error("If Operation Error: Missing Condition Node\n");
+  // } else if (stmts_count < cstmts_count) {
+  //   error_print_lnast_by_type(lnast, ntype.to_s());
+  //   Pass::error("If Operation Error: Missing Statements Node\n");
+  // }
 }
 
 void Semantic_check::check_for_op(Lnast *lnast, const Lnast_nid &lnidx_opr, std::string_view stmt_name) {
