@@ -58,7 +58,7 @@ void Node::update(LGraph *_g, const Node::Compact &comp) {
     return;
   top_g = _g;
   hidx  = comp.hidx;
-  if (hidx == Hierarchy_tree::root_index()) {
+  if (hidx.is_root() || hidx.is_invalid()) { // invalid->no hierarchy
     current_g = top_g;
     return;
   }
@@ -81,21 +81,11 @@ void Node::update(const Node::Compact &comp) {
   I(current_g->is_valid_node(nid));
 }
 
-#if 0
-Node::Node(LGraph *_g)
-  :top_g(_g)
-  ,current_g(_g)
-  ,hidx(Hierarchy_tree::root_index())
-  ,nid(0) {
-  I(top_g);
-}
-#endif
-
 Node::Node(LGraph *_g, const Hierarchy_index &_hidx, const Compact_class &comp)
     : top_g(_g), current_g(0), hidx(_hidx), nid(comp.nid) {
   I(nid);
   I(top_g);
-  if (hidx.is_root())
+  if (hidx.is_root() || hidx.is_invalid())
     current_g = top_g;
   else
     current_g = top_g->ref_htree()->ref_lgraph(hidx);
@@ -104,7 +94,7 @@ Node::Node(LGraph *_g, const Hierarchy_index &_hidx, const Compact_class &comp)
   // I(top_g->get_hierarchy_class_lgid(hidx) == current_g->get_lgid());
 }
 
-Node::Node(LGraph *_g, const Compact_class &comp) : top_g(_g), current_g(0), hidx(Hierarchy_tree::root_index()), nid(comp.nid) {
+Node::Node(LGraph *_g, const Compact_class &comp) : top_g(_g), current_g(0), hidx(Hierarchy_tree::invalid_index()), nid(comp.nid) {
   I(nid);
   I(top_g);
 
@@ -124,7 +114,7 @@ Node::Node(LGraph *_g, LGraph *_c_g, const Hierarchy_index &_hidx, Index_ID _nid
 }
 
 Node_pin Node::get_driver_pin() const {
-  I(top_g->get_type(nid).has_single_output());
+  I(current_g->get_type(nid).has_single_output());
   return Node_pin(top_g, current_g, hidx, nid, 0, false);
 }
 
@@ -276,12 +266,12 @@ Hierarchy_index Node::hierarchy_go_up() const {
 
 bool Node::is_root() const {
   bool ans = top_g == current_g;
-  I(top_g->ref_htree()->is_root(*this) == ans);
   return ans;
 }
 
 Node Node::get_up_node() const {
   I(!is_root());
+  I(!hidx.is_invalid());
   auto up_node = top_g->ref_htree()->get_instance_up_node(hidx);
 
   return up_node;

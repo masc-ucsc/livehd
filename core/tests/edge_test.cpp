@@ -198,7 +198,7 @@ protected:
   void add_edge(Node_pin dpin, Node_pin spin) {
     XEdge edge(dpin, spin);
     auto it = track_edge_count.find(edge.get_compact());
-    if (g->has_edge(dpin,spin)) {
+    if (spin.is_connected(dpin)) {
       EXPECT_TRUE(it != track_edge_count.end());
       return;
     }

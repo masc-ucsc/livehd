@@ -313,7 +313,8 @@ void Lgyosys_dump::create_wires(LGraph *g, RTLIL::Module *module) {
     }
   });
 
-  for (auto node : g->fast()) {
+  for (auto node : g->fast(true)) { // FIXME: add this as an option -flatten
+    I(!node.is_invalid());
     I(node.get_type().op != GraphIO_Op);
 
     if (!node.has_inputs() && !node.has_outputs())
@@ -409,7 +410,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
   });
 
   // now create nodes and make connections
-  for (auto node : g->fast()) {
+  for (auto node : g->fast(true)) {  //FIXME: add this as an option -flatten
     I(node.get_type().op != GraphIO_Op);
 
     if (!node.has_inputs() && !node.has_outputs())
@@ -420,6 +421,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
     if (op != Memory_Op && op != SubGraph_Op && !node.has_outputs())
       continue;
 
+    fmt::print("node:{}\n",node.debug_name());
     Bits_t size = 0;
 
     switch (op) {

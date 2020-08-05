@@ -67,7 +67,7 @@ protected:
 #else
 #endif
       std::string txt = fmt::format("name:{} lg:{} debug:{}", node.get_name(), node.get_class_lgraph()->get_name(), node.debug_name());
-      fmt::print("iterator_order: {}\n",txt);
+      //fmt::print("iterator_order: {}\n",txt);
       iterator_order.push_back(txt);
 
       //EXPECT_EQ(fwd_pos,pos);

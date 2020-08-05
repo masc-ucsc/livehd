@@ -20,8 +20,8 @@ public:
   Tree_level level;
   Tree_pos   pos;
 
-  Tree_index() { invalidate(); };
-  Tree_index(Tree_level l, Tree_pos i) : level(l), pos(i) {}
+  constexpr Tree_index() :level(-1), pos(-1) { };
+  constexpr Tree_index(Tree_level l, Tree_pos i) : level(l), pos(i) {}
 
   Tree_index &operator=(const Tree_index &o) {
     level = o.level;
@@ -32,12 +32,12 @@ public:
   constexpr bool operator==(const Tree_index &i) const { return level == i.level && pos == i.pos; }
   constexpr bool operator!=(const Tree_index &i) const { return level != i.level || pos != i.pos; }
 
-  bool is_invalid() const { return level == -1 || pos == -1; }
+  constexpr bool is_invalid() const { return level == -1 || pos == -1; }
   void invalidate() {
     level = -1;
     pos   = -1;
   }
-  bool is_root() const { return level == 0; }
+  constexpr bool is_root() const { return level == 0; }
 
   template <typename H>
   friend H AbslHashValue(H h, const Tree_index &s) {

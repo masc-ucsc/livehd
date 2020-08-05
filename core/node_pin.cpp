@@ -13,6 +13,7 @@ Node_pin::Node_pin(LGraph *_g, LGraph *_c_g, const Hierarchy_index &_hidx, Index
 
 Node_pin::Node_pin(LGraph *_g, Compact comp)
     : top_g(_g), hidx(comp.hidx), idx(comp.idx), pid(_g->get_dst_pid(comp.idx)), sink(comp.sink) {
+  I(!comp.hidx.is_invalid()); // Why to Compact. Use Compact_class
   current_g = top_g->ref_htree()->ref_lgraph(hidx);
   I(current_g->is_valid_node_pin(idx));
 }
@@ -25,15 +26,29 @@ Node_pin::Node_pin(LGraph *_g, Compact_driver comp)
 }
 
 Node_pin::Node_pin(LGraph *_g, Compact_class comp)
-    : top_g(_g), hidx(Hierarchy_tree::root_index()), idx(comp.idx), pid(_g->get_dst_pid(comp.idx)), sink(comp.sink) {
+    : top_g(_g), hidx(Hierarchy_tree::invalid_index()), idx(comp.idx), pid(_g->get_dst_pid(comp.idx)), sink(comp.sink) {
   current_g = top_g;  // top_g->ref_htree()->ref_lgraph(hid);
   I(current_g->is_valid_node_pin(idx));
 }
 
 Node_pin::Node_pin(LGraph *_g, Compact_class_driver comp)
-    : top_g(_g), hidx(Hierarchy_tree::root_index()), idx(comp.idx), pid(_g->get_dst_pid(comp.idx)), sink(false) {
+    : top_g(_g), hidx(Hierarchy_tree::invalid_index()), idx(comp.idx), pid(_g->get_dst_pid(comp.idx)), sink(false) {
   current_g = top_g;  // top_g->ref_htree()->ref_lgraph(hid);
   I(current_g->is_valid_node_pin(idx));
+}
+
+
+Node_pin::Compact Node_pin::get_compact() const {
+  if(hidx.is_invalid())
+    return Compact(Hierarchy_tree::root_index(), idx, sink);
+  return Compact(hidx, idx, sink);
+}
+
+Node_pin::Compact_driver Node_pin::get_compact_driver() const {
+  I(!sink);
+  if(hidx.is_invalid())
+    return Compact_driver(Hierarchy_tree::root_index(), idx);
+  return Compact_driver(hidx, idx);
 }
 
 bool Node_pin::has_inputs() const { return current_g->has_inputs(*this); }
@@ -48,9 +63,18 @@ bool Node_pin::is_graph_output() const { return current_g->is_graph_output(idx);
 
 Node_pin Node_pin::get_sink_from_output() const {
   I(is_graph_output());
-  I(is_driver());
+  if(is_sink())
+    return *this;
 
   return Node_pin(top_g, current_g, hidx, idx, pid, true);
+}
+
+Node_pin Node_pin::get_driver_from_output() const {
+  I(is_graph_output());
+  if (is_driver())
+    return *this;
+
+  return Node_pin(top_g, current_g, hidx, idx, pid, false);
 }
 
 Node Node_pin::get_node() const {
@@ -62,11 +86,17 @@ Node Node_pin::get_node() const {
 Node Node_pin::get_driver_node() const { return get_driver_pin().get_node(); }
 
 Node_pin Node_pin::get_driver_pin() const {
-  I(is_sink());
-  // TODO: Correct but inneficient. Create a faster call that avoids the slow inp_edges call (patch lgraph)
-  auto xedge = current_g->inp_edges(*this);
-  I(xedge.size() == 1);
-  return xedge.front().driver;
+  I(is_sink() || is_graph_output());
+  auto piter = current_g->inp_driver(*this);
+  if (piter.empty())
+    return Node_pin(); // disconnected driver
+  I(piter.size()==1); // If there can be many drivers, use the inp_driver iterator
+  return piter.back();
+}
+
+Node_pin_iterator Node_pin::inp_driver() const {
+  I(is_sink() || is_graph_output());
+  return current_g->inp_driver(*this);
 }
 
 void Node_pin::del_sink(Node_pin &spin) {
@@ -315,10 +345,31 @@ Ann_ssa *Node_pin::ref_ssa() {
 bool Node_pin::has_ssa() const { return Ann_node_pin_ssa::ref(top_g)->has(get_compact_class_driver()); }
 
 bool Node_pin::is_connected() const {
+  if (is_invalid())
+    return false;
+
   if (is_driver())
     return current_g->has_outputs(*this);
 
   return current_g->has_inputs(*this);
+}
+
+bool Node_pin::is_connected(const Node_pin &pin) const {
+  if (pin.is_driver()) {
+    for (auto &other : inp_driver()) {
+      if (other == pin)
+        return true;
+    }
+    return false;
+  }
+  if (likely(is_driver())) { // sink can not be connected to another sink
+    for (auto &other : pin.inp_driver()) {
+      if (other == *this)
+        return true;
+    }
+  }
+
+  return false;
 }
 
 Node_pin Node_pin::get_down_pin() const {
