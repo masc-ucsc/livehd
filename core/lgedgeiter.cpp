@@ -18,6 +18,15 @@ void Fast_edge_iterator::Fast_iter::go_next() {
   I(nid != 0);
 
   nid = current_g->fast_next(nid);
+  if (visit_sub) {
+    while(!nid.is_invalid()) { // Skip SubGraph present
+      Node node(current_g, current_g, Hierarchy_tree::root_index(), nid);
+      if (!node.is_type_sub_present())
+        break;
+
+      nid = current_g->fast_next(nid);
+    }
+  }
 
   if (nid.is_invalid()) {
     if (visit_sub) {
@@ -26,6 +35,11 @@ void Fast_edge_iterator::Fast_iter::go_next() {
         hidx      = next_hidx;
         current_g = top_g->ref_htree()->ref_lgraph(hidx);
         nid       = current_g->fast_first();
+        if (!nid.is_invalid()) {
+          Node node(current_g, current_g, Hierarchy_tree::root_index(), nid);
+          if (node.is_type_sub_present())
+            go_next();
+        }
         if (!nid.is_invalid())
           return;
         next_hidx = top_g->ref_htree()->get_depth_preorder_next(hidx);
@@ -35,7 +49,7 @@ void Fast_edge_iterator::Fast_iter::go_next() {
       hidx.invalidate();
     } else {
       I(nid == 0);
-      hidx.invalidate();
+      I(hidx.is_invalid()); // no hierarhical, it should be already invalid
     }
   }
 }
@@ -49,8 +63,15 @@ Fast_edge_iterator::Fast_iter &Fast_edge_iterator::Fast_iter::operator++() {
 Fast_edge_iterator::Fast_iter Fast_edge_iterator::begin() const {
   auto nid = top_g->fast_first();
 
-  if (nid)
-    return Fast_edge_iterator::Fast_iter(top_g, top_g, Hierarchy_tree::root_index(), nid, visit_sub);
+  if (nid) {
+    auto it = Fast_edge_iterator::Fast_iter(top_g, top_g, visit_sub?Hierarchy_tree::root_index():Hierarchy_tree::invalid_index(), nid, visit_sub);
+    if (visit_sub) {
+      Node node(top_g, top_g, Hierarchy_tree::root_index(), nid);
+      if (node.is_type_sub_present())
+        ++it;
+    }
+    return it;
+  }
 
   return end();
 }
@@ -66,6 +87,7 @@ Flow_base_iterator::Flow_base_iterator(LGraph *lg, bool _visit_sub)
 }
 
 void Fwd_edge_iterator::Fwd_iter::topo_add_chain_down(const Node_pin &dst_pin) {
+  I(dst_pin.is_hierarchical());
   I(dst_pin.get_node().is_type_sub_present());
 
   auto down_pin = dst_pin.get_down_pin();
@@ -116,21 +138,12 @@ void Fwd_edge_iterator::Fwd_iter::topo_add_chain_fwd(const Node_pin &dst_pin) {
 void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear(LGraph *top) {
   I(linear_phase);
 
+  current_node.invalidate();
   global_it.advance_if_deleted();
-  if (unlikely(global_it.is_invalid())) {
-    current_node.invalidate();
-    linear_phase = false;
-    global_it    = top->fast(visit_sub).begin();
-    return;
-  }
 
-  while (linear_phase) {
+  while (linear_phase && !global_it.is_invalid()) {
     auto next_node = *global_it;
     ++global_it;
-    if (global_it.is_invalid()) {
-      global_it    = top->fast(visit_sub).begin();
-      linear_phase = false;
-    }
 
     bool is_topo_sorted = true;
     if (next_node.is_type_loop_breaker()) {
@@ -146,7 +159,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear(LGraph *top) {
         // NOTE: For hierarchical, if the driver_node is an IO (input). It
         // could try to go up to see if the node is pipelined or not visited
 
-        if (driver_node.get_nid() > next_node.get_nid()) {
+        if (driver_node.is_down_node() || driver_node.get_nid() > next_node.get_nid()) {
           is_topo_sorted = false;
           break;
         }
@@ -164,6 +177,11 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear(LGraph *top) {
     } else {
       unvisited.insert(next_node.get_compact());
     }
+  }
+
+  if (current_node.is_invalid()) {
+    linear_phase = false;
+    global_it    = top->fast(visit_sub).begin();
   }
 }
 

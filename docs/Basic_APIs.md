@@ -168,16 +168,29 @@ to all have the same length.
 
 #### Backward Propagation
 
-The Sum node allows a conservative back propagation ($ADD.bits = Y.bits$) only when:
+If and all the inputs but one ADD ($ADD_{0}$) are known:
 
-* $ADD.bits = Y.bits$, only if ADD pin is used and all the ADD pins are
-  unsigned (sign false).
-* Neither ADD.sign now SUB.sign can be backward propagated
+* $ADD_{0}.max = Y.max - \sum{i=1}^{\infty} ADD_{i}.max + \sum_{i=0}^{\infty} SUB_{i}.min$
+* $ADD_{0}.min = Y.min - \sum{i=1}^{\infty} ADD_{i}.min + \sum_{i=0}^{\infty} SUB_{i}.max$
+* $ADD_{0}.sign = $ADD_{0}.min<0$
+
+If and all the inputs but one SUB ($SUB_{0}$) are known:
+
+* $SUB_{0}.max = \sum{i=0}^{\infty} ADD_{i}.max - \sum_{i=1}^{\infty} SUB_{i}.min - Y.max$
+* $SUB_{0}.min = \sum{i=0}^{\infty} ADD_{i}.min - \sum_{i=1}^{\infty} SUB_{i}.max - Y.min$
+* $SUB_{0}.sign = $SUB_{0}.min<0$
 
 #### Verilog Considerations
 
-The Verilog to LiveHD translator MUST create Sum_Op operations where all the
-inputs have the same number of bits. In Verilog:
+In Verilog, the addition is unsigned if any of the inputs is unsigned. If any
+input is unsigned. all the inputs will be "unsigned extended" to match the
+largest value. This is different from Sum_Op semantics were each input is
+signed or unsigned extended independent of the other inputs. To match the
+semantics, when mixing signed and unsigned, the signed inputs connected to
+Sum_Op with less than the maximum number of bits should be 1 bit zero extended.
+An easy way to zero extend a number if with the Join_Op (Join_Op has an
+unsigned output if the last input is unsigned).
+
 
 ```verilog
 logic signed [3:0] a = -1
@@ -194,9 +207,6 @@ extended because one of the inputs is unsigned (1b1 is unsigned in verilog, and
 c = 5b01111 + 5b0001 // this is the Verilog semantics by matching size
 c == -16 (!!)
 ```
-
-Once the inputs are zero/sign extended to match size. The Sum operator always
-generates the same result independent of the sign of the inputs.
 
 ### Mult_Op
 
@@ -333,10 +343,50 @@ digraph Mod {
 Each bit in the input VAL is toggled. Y and VAL should have the same number of
 bits. The result is unsigned.
 
+### Sext_Op
+
+This operatator sign extends the input picking the POS bit as most significant or sign bit.
+
+```{.graph .center caption="Sext LGraph Node."}
+digraph Sext {
+    rankdir=LR;
+    size="2,1"
+
+    node [shape = circle]; cell;
+    node [shape = point ]; q0
+    node [shape = point ]; q1
+    node [shape = point ]; q
+
+    q0 -> cell [ label ="VAL" ];
+    q1 -> cell [ label ="SZ" ];
+    cell  -> q [ label = "Y" ];
+}
+```
+
+#### Forward Propagation
+
+* $Y = \left\{\begin{matrix} VAL\&((1\ll SZ)-1) & \text{if}\ VAL[SZ]==0 \\ -(((\neg VAL)\& ((1\ll SZ)-1))+1) & \text{otherwise} \end{matrix}\right.$
+* $Y.max = (P_{n}.max<<(P_{0}.bits+..+P_{n-1}.bits))-1$
+* $Y.min = (P_{n}.min<<(P_{0}.bits+..+P_{n-1}.bits))$
+* $Y.sign = 1$
+
+#### Backward Propagation
+
+If the driver to Sext_Op only drives this node, the same Y.max and Y.min can be
+propagated to the VAL.max and VAL.min.  The reason is that the upper dropped
+bits were not used anyway, so no need to have all those bits computed.
+
+ VAL.min = 0
+
+#### Other Considerations
+
+The Sext_Op is similar to the Pick_Op when OFF is zero and SZ is the same. The
+difference is the sign extension. For Pick_Op, the result is always unsigned,
+for Sext_Op, the result is always signed.
 
 ### Join_Op
 
-Join or concatenate operator
+Join or concatenate operator. The output keeps the sign of the most last or most significant input.
 
 ```{.graph .center caption="Join LGraph Node."}
 digraph Join {
@@ -356,12 +406,28 @@ digraph Join {
 }
 ```
 
-* $Y = ... P_{2}<<(P_{1}.bits+P_{0}._bits) | P_{1}<<(P_{0}.bits) | P_{0}
-* $Y.max = (\text{absmax}(P_{n}.max, P_{n}.min)<<(P_{0}.bits+..+P_{n-1}.bits))-1$
-* $Y.min = 0$
-* $Y.sign = 0$
+#### Forward Propagation
+
+* $Y = ... P_{2}<<(P_{1}.bits+P_{0}._bits) | P_{1}<<(P_{0}.bits) | P_{0}$
+* $Y.max = (P_{n}.max<<(P_{0}.bits+..+P_{n-1}.bits))-1$
+* $Y.min = (P_{n}.min<<(P_{0}.bits+..+P_{n-1}.bits))$
+* $Y.sign = P_{n}.sign$
+
+#### Backward Propagation
+
 * Back propagation is possible when only one input is unknown (and it is not the last one $P_{n}$). Only
 the bitwidth can be back propagated. Not the sign.
+
+#### Other Considerations
+
+Join_Op has two uses besides concatenating values. It is the way to implement a left shift
+and it is the way to create an unsigned value out of a signed value.
+
+Join_Op(xx,0u3bits) is a left shift by adding as many zeros as the $P_{0}$ has.
+
+Join_Op(0,xx) will result in the same number as xx, but unsigned. Join_Op can
+be used to unsigned extend by adding a zero to the last input. The new $Y.max =
+P_{0}.max - P_{0}.min$ if min was negative and max was positive.
 
 
 Pick_Op: Pick some bits from the VAL input pin
@@ -369,6 +435,35 @@ Y = VAL[[OFF..(OFF+Y.__bits)]]}
 
 And_Op: bitwise AND with 2 outputs single bit reduction (RED) or bitwise
 Y = VAL&..&VAL ; RED= &Y
+
+### ArithShiftRight_Op
+
+The right shift is the equivalent of arithmetic right shift if the input is signed. If the input is unsigned, RightShift_Op behaves like an simple right shift.
+
+
+#### Other Considerations
+
+The Pick_Op operation performs unsigned right shift even for signed inputs $Y = Pick_Op(VAL, OFF, 0)$ behaves like a $Y=VAL>>OFF$.
+
+
+### Pick_Op
+
+Pick selects some bits from the source (VAL). It can be used as an unsigned right shift. The Pick_Op result is always unsigned.
+
+
+#### Forward Propagation
+
+* $Y = \left\{\begin{matrix} VAL>>OFF & SZ==0 \\ (VAL>>OFF) \& (1<<SZ)-1) & otherwise \end{matrix}\right.$
+* $Y.max = \left\{\begin{matrix} VAL.max>>OFF & SZ==0 \\ (VAL.max>>OFF) \& (1<<SZ)-1) & otherwise \end{matrix}\right.$
+* $Y.min = 0$
+* $Y.sign = 0$
+
+#### Backward Propagation
+
+The sign can not be backward propagated because Pick_Op removes the sign no matter the input sign.
+
+
+# Generate PDF
 
 pandoc --pdf-engine=xelatex --toc -N GitHub-use.md Basic_APIs.md --mathjax --filter pandoc-graphviz.py -o ~/tmp/pp.pdf
 https://github.com/Wandmalfarbe/pandoc-latex-template

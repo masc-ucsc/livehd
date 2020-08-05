@@ -193,10 +193,36 @@ TEST_F(Setup_graphs_test, annotated) {
 
 TEST_F(Setup_graphs_test, annotate2) {
 
-  absl::flat_hash_map<Node_pin::Compact, int>  my_map2;
+  absl::flat_hash_map<Node_pin::Compact_class, int>  my_map2;
 
   int total = 0;
   for(const auto node:top->forward()) {
+
+    for(const auto &e:node.out_edges()) {
+      my_map2[e.driver.get_compact_class()] = total;
+      total++;
+    }
+  }
+
+  std::vector<bool> used(total);
+  used.clear();
+  used.resize(total);
+
+  for(const auto &it:my_map2) {
+    auto dpin = Node_pin(top,it.first);
+    EXPECT_TRUE(dpin.is_driver());
+    EXPECT_FALSE(used[it.second]);
+    used[it.second] = true;
+  }
+
+}
+
+TEST_F(Setup_graphs_test, annotate2_hier) {
+
+  absl::flat_hash_map<Node_pin::Compact, int>  my_map2;
+
+  int total = 0;
+  for(const auto node:top->forward(true)) {
 
     for(const auto &e:node.out_edges()) {
       my_map2[e.driver.get_compact()] = total;

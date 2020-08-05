@@ -61,7 +61,7 @@ void do_fwd_traversal(LGraph *lg) {
     setup_test_order();
     for (auto node : lg->fast(true)) {
       I(!node.is_graph_io());
-      //fmt::print("visiting {}\n", node.debug_name());
+      //fmt::print("fast visiting {}\n", node.debug_name());
       I(test_order.find(node.get_compact()) == test_order.end());
       test_order[node.get_compact()] = test_order_sequence++;
     }
@@ -72,7 +72,7 @@ void do_fwd_traversal(LGraph *lg) {
     setup_test_order();
     for (auto node : lg->forward(true)) {
       I(!node.is_graph_io());
-      //fmt::print("visiting {}\n", node.debug_name());
+      //fmt::print("fwd  visiting {}\n", node.debug_name());
       I(test_order.find(node.get_compact()) == test_order.end());
       test_order[node.get_compact()] = test_order_sequence++;
     }
@@ -185,9 +185,9 @@ void generate_graphs(int n) {
         continue; // No self-loops
 
       edges.insert(std::make_pair(src, dst));
-      I(!g->has_edge(dpin, spin));
+      I(!spin.is_connected(dpin)); // no edge
       g->add_edge(dpin, spin);
-      I(g->has_edge(dpin, spin));
+      I( spin.is_connected(dpin)); //    edge
     }
 
     g->sync();

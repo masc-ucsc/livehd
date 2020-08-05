@@ -217,8 +217,8 @@ void Pass_bitwidth::process_sum(Node &node, XEdge_iterator &inp_edges) {
       } else {
         fmt::print("max_val:{}, pmax_val:{}\n", max_val.to_i(), it->second.get_max().to_i());
         fmt::print("min_val:{}, pmin_val:{}\n", min_val.to_i(), it->second.get_min().to_i());
-        max_val = max_val - it->second.get_max();
-        min_val = min_val - it->second.get_min();
+        max_val = max_val - it->second.get_min();
+        min_val = min_val - it->second.get_max();
       }
     } else if (e.driver.get_bits()) {
       Lconst b(1);

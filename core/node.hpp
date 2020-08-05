@@ -155,8 +155,14 @@ public:
   };
 #endif
 
-  inline Compact       get_compact() const { return Compact(hidx, nid); }
-  inline Compact_class get_compact_class() const { return Compact_class(nid); }
+  inline Compact       get_compact() const {
+    return Compact(hidx, nid);
+  }
+
+  inline Compact_class get_compact_class() const {
+    // OK to pick a hierarchical to avoid replication of info like names
+    return Compact_class(nid);
+  }
 
   LGraph *get_top_lgraph() const { return top_g; }
   LGraph *get_class_lgraph() const { return current_g; }
@@ -179,6 +185,7 @@ public:
 
   constexpr bool is_invalid() const { return nid == 0; }
   constexpr bool is_down_node() const { return top_g != current_g; }
+  constexpr bool is_hierarchical() const { return !hidx.is_invalid(); }
 
   constexpr bool operator==(const Node &other) const {
     GI(nid == 0, hidx.is_invalid());
