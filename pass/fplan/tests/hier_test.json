@@ -9,7 +9,7 @@
           "weight": 15
         }
       ],
-      "area": 0.32
+      "area": 0.01
     },
     {
       "name": "leaf2",
@@ -24,7 +24,7 @@
           "weight": 25
         }
       ],
-      "area": 0.16
+      "area": 0.02
     },
     {
       "name": "mid1",
@@ -35,7 +35,7 @@
           "weight": 900
         }
       ],
-      "area": 0.19
+      "area": 0.001
     },
     {
       "name": "leaf3",
@@ -46,13 +46,13 @@
           "weight": 30
         }
       ],
-      "area": 0.21
+      "area": 0.03
     },
     {
       "name": "leaf4",
       "parent": "mid2",
       "connections": [],
-      "area": 0.42
+      "area": 0.04
     },
     {
       "name": "leaf5",
@@ -63,7 +63,7 @@
           "weight": 30
         }
       ],
-      "area": 0.38
+      "area": 0.05
     },
     {
       "name": "mid2",
@@ -78,7 +78,7 @@
           "weight": 10
         }
       ],
-      "area": 0.23
+      "area": 0.002
     },
     {
       "name": "mid3",
@@ -89,18 +89,13 @@
           "weight": 5
         }
       ],
-      "area": 0.05
+      "area": 0.003
     },
     {
       "name": "leaf6",
       "parent": "mid3",
       "connections": [],
-      "area": 0.03
-    },
-    {
-      "name": "root",
-      "connections": [],
-      "area": 0.88
+      "area": 0.06
     },
     {
       "name": "mid4",
@@ -115,7 +110,7 @@
           "weight": 10
         }
       ],
-      "area": 0.23
+      "area": 0.004
     },
     {
       "name": "leaf7",
@@ -126,10 +121,15 @@
           "weight": 25
         }
       ],
-      "area": 0.11
+      "area": 0.07
+    },
+    {
+      "name": "root",
+      "connections": [],
+      "area": 0.88
     }
   ],
-  "area": 4.0,
+  "area": 42.0,
   "aspect_ratio": 1.5
 }
 

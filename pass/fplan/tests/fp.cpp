@@ -13,9 +13,12 @@ int main() {
 	std::cout << "done." << std::endl;
   
   std::cout << "discovering hierarchies...";
-  Hier_tree t(std::move(gi), 1, 0.0);
+  Hier_tree t(std::move(gi), 1);
   std::cout << "done." << std::endl;
-
+  
+  std::cout << "collapsing trees...";
+  t.collapse(0.01);
+  std::cout << "done." << std::endl;
   t.print();
 
   std::cout << "finished floorplan." << std::endl;

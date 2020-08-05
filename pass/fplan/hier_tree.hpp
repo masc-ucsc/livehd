@@ -8,7 +8,7 @@
 
 #include <string> // for strings
 #include <memory> // for shared_ptr
-#include <vector>
+#include <vector> // for min cut
 #include <limits> // for most negative value in min cut
 #include <iostream> // include printing facilities if we're debugging things
 
@@ -36,7 +36,7 @@ public:
   // take in a vector of all nodes in the netlist, and convert it to a tree.
   // min_num_components sets the minimum number of components required to trigger analysis of the hierarchy
   // any node with a smaller area than min_area gets folded into a new supernode with area >= min_area
-  Hier_tree(Graph_info&& g, unsigned int min_num_components, double min_area);
+  Hier_tree(Graph_info&& g, unsigned int num_components);
   
   // copies require copying the entire tree and are very expensive.
   Hier_tree(const Hier_tree& other) = delete;
@@ -45,25 +45,20 @@ public:
   // moves defined since copies are deleted
   Hier_tree(Hier_tree&& other) noexcept : 
     root(other.root), 
-    area(other.area),
-    num_components(other.num_components),
     ginfo(std::move(other.ginfo)) { // TODO: delete stuff here? 
-    }
-
+  }
+  
   Hier_tree& operator=(Hier_tree&& other) noexcept {
-    std::swap(root, other.root);
-    std::swap(area, other.area);
-    std::swap(num_components, other.num_components);
-    //ginfo = std::move(other.ginfo);
+    // TODO: write this
+    I(false);
     return *this;
   }
   
   // print the hierarchy
   void print() const;
 
-  // collapse tree to avoid enforcing too much hierarchy (Algorithm 2 in HiReg)
-  // TODO: this should eventually output a list of DAGs
-  void collapse();
+  // returns a new tree with small leaf nodes collapsed together (Algorithm 2 in HiReg)
+  void collapse(double threshold_area);
 
 private:
   // data used by min_cut
@@ -81,23 +76,27 @@ private:
   phier make_hier_node(const int set);
 
   // create a hierarchy tree out of existing hierarchies
-  phier make_hier_tree(phier& t1, phier& t2);
+  phier make_hier_tree(phier t1, phier t2);
   
   // perform hierarchy discovery
-  phier discover_hierarchy(Graph_info& g, int start_set);
+  phier discover_hierarchy(Graph_info& g, int start_set, unsigned int num_components);
   
   void print_node(const phier& node) const;
+
+  phier collapse(phier node, double threshold_area);
   
   // generator used to make unique node names
   unsigned int node_number = 0;
 
-  // root node of hierarchy tree
-  std::shared_ptr<Hier_node> root;
-  
-  // constraints for hierarchy discovery and tree collapsing
-  double area;
-  unsigned int num_components;
+  // generator used to make unique set names
+  unsigned int set_number = 1;
 
+  // root node of hierarchy tree
+  phier root;
+
+  // vector of altered hierarchy trees with nodes collapsed
+  std::vector<phier> collapsed_hiers;
+  
   // graph containing the divided netlist
   Graph_info&& ginfo;
 };
