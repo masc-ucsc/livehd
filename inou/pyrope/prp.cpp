@@ -1605,7 +1605,10 @@ uint8_t Prp::rule_factor(std::list<std::tuple<Rule_id, Token_entry>> &pass_list)
   UPDATE_PSEUDO_FAIL();
   if (SCAN_IS_TOKEN(Token_id_op)) {
     check_lb();
-    if (!CHECK_RULE(&Prp::rule_logical_expression)) {
+    if (CHECK_RULE(&Prp::rule_range_notation)) {
+      PSEUDO_FAIL();
+    }
+    else if (!CHECK_RULE(&Prp::rule_logical_expression)) {
       PSEUDO_FAIL();
     } else {
       check_lb();
@@ -1620,7 +1623,6 @@ uint8_t Prp::rule_factor(std::list<std::tuple<Rule_id, Token_entry>> &pass_list)
         CHECK_RULE(&Prp::rule_bit_selection_bracket);
         RULE_SUCCESS("Matched rule_factor; option 1.\n", Prp_rule_factor);
       }
-      //}
     }
   }
   // option 2

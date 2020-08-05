@@ -1261,7 +1261,14 @@ Lnast_node Prp_lnast::eval_fcall_explicit(mmap_lib::Tree_index idx_start_ast, mm
   if (root_rid == Prp_rule_assignment_expression) {
     idx_nxt_ast = ast->get_last_child(idx_nxt_ast);
   }
-
+  
+  if(piped_node.type.get_raw_ntype() != Lnast_ntype::Lnast_ntype_invalid){
+    fmt::print("(explicit) The piped lnast node's text is {}\n", piped_node.token.text);
+  }
+  if(idx_piped_val != ast->invalid_index()){
+    fmt::print("(explicit) The piped index's token text is {}\n", scan_text(ast->get_data(idx_piped_val).token_entry));
+  }
+  
   // whether we are an assignment expression or not, idx_nxt_ast will equal fcall_explicit
 
   // evaluate the rhs of the function call (the fcall_arg_notation), but it has to be a tuple
@@ -1389,6 +1396,13 @@ Lnast_node Prp_lnast::eval_fcall_implicit(mmap_lib::Tree_index idx_start_ast, mm
   auto root_rid    = ast->get_data(idx_start_ast).rule_id;
   auto idx_nxt_ast = idx_root;
 
+  if(piped_node.type.get_raw_ntype() != Lnast_ntype::Lnast_ntype_invalid){
+    fmt::print("(implicit) The piped lnast node's text is {}\n", piped_node.token.text);
+  }
+  if(idx_piped_val != ast->invalid_index()){
+    fmt::print("(implicit) The piped index's token text is {}\n", scan_text(ast->get_data(idx_piped_val).token_entry));
+  }
+  
   if (root_rid == Prp_rule_assignment_expression) {
     PRINT_DBG_LN("Found an assignment expression in the fcall implicit.\n");
     idx_nxt_ast = ast->get_last_child(idx_root);
