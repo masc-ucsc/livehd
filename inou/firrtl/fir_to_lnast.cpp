@@ -497,6 +497,7 @@ void Inou_firrtl::HandleMemPort(Lnast& lnast, Lnast_nid& parent_node, const firr
   fmt::print("try1\n");
   auto idx_tup = lnast.insert_next_sibling(node, Lnast_node::create_tuple("mport"));
   fmt::print("try2\n");
+  lnast.dump();
   node = idx_tup;
   lnast.add_child(idx_tup, Lnast_node::create_ref(temp_var_T));
 
