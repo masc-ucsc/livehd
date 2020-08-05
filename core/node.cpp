@@ -329,7 +329,7 @@ Node_pin Node::setup_driver_pin(std::string_view name) {
   I(sub.has_pin(name));
   I(sub.is_output(name));
 
-  pid = sub.get_graph_pos(name);
+  pid = sub.get_instance_pid(name);
   I(pid != Port_invalid);  // graph_pos must be valid if connected
 
   Index_ID idx = current_g->setup_idx_from_pid(nid, pid);
@@ -366,7 +366,7 @@ Node_pin Node::setup_sink_pin(std::string_view name) {
   I(sub.has_pin(name));
   I(sub.is_input(name));
 
-  auto pid = sub.get_graph_pos(name);
+  auto pid = sub.get_instance_pid(name);
   I(pid != Port_invalid);  // graph_pos must be valid if connected
 
   Index_ID idx = current_g->setup_idx_from_pid(nid, pid);

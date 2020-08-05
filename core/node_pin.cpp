@@ -165,14 +165,14 @@ void Node_pin::set_unsigned() {
 
 std::string_view Node_pin::get_type_sub_io_name() const {
   auto &sub_node = get_node().get_type_sub_node();
-  return sub_node.get_name_from_graph_pos(pid);
+  return sub_node.get_name_from_instance_pid(pid);
 }
 
 std::string_view Node_pin::get_type_sub_pin_name() const {
   auto node = get_node();
   I(node.is_type_sub());
 
-  return node.get_type_sub_node().get_name_from_graph_pos(pid);
+  return node.get_type_sub_node().get_name_from_instance_pid(pid);
 }
 
 float Node_pin::get_delay() const { return Ann_node_pin_delay::ref(top_g)->get(get_compact_driver()); }
@@ -221,7 +221,7 @@ std::string Node_pin::debug_name() const {
   if (name.empty()) {
     const auto node = get_node();
     if (node.is_type_sub()) {
-      name = node.get_type_sub_node().get_name_from_graph_pos(pid);
+      name = node.get_type_sub_node().get_name_from_instance_pid(pid);
     } else if (node.has_name()) {
       name = node.get_name();
     }
@@ -387,7 +387,8 @@ Node_pin Node_pin::get_down_pin() const {
 
   // 2nd: get down_pid
   I(pid != Port_invalid);
-  auto down_pid = node.get_type_sub_node().get_instance_pid_from_graph_pos(pid);
+  I(node.get_type_sub_node().has_instance_pin(pid));
+  auto down_pid = pid;
   I(down_pid != Port_invalid);
 
   // 3rd: get down_current_g
@@ -416,7 +417,7 @@ Node_pin Node_pin::get_up_pin() const {
     return Node_pin();  // Invalid, the input is not connected
   }
 
-  auto up_pid = io_pin.get_graph_pos();
+  auto up_pid = pid;
   I(up_pid != Port_invalid);
 
   // 2nd: get up_current_g

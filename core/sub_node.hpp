@@ -3,9 +3,13 @@
 
 // NOTE:
 //
-// instace_pid is the PID used inside the lgraph to connect the input/output
+// instace_pid is the PID used inside and outside the lgraph to connect the input/output.
+// Both the subgraph and the calling graph have the same PID
 //
-// graph_pos is the PID used by the connecting module
+// graph_pos is the "optional" IO position needed when a module is called
+// without names, just by position. Each language should specify the way to
+// populate graph_pos for verilog interoperativity. E.g: alphabetical order, or
+// declaration order or ??
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/types/span.h"
@@ -166,6 +170,11 @@ public:
     I(io_pins[instance_pid].graph_io_pos == graph_pos || !has_graph_pos_pin(graph_pos));
     io_pins[instance_pid].dir = dir;
 
+    if (io_pins[instance_pid].graph_io_pos == Port_invalid) {
+      I(graph_pos2instance_pid.size()> io_pins[instance_pid].graph_io_pos);
+      graph_pos2instance_pid[io_pins[instance_pid].graph_io_pos] = Port_invalid;
+    }
+
     if (graph_pos != Port_invalid) {
       io_pins[instance_pid].graph_io_pos = graph_pos;
       map_pin_int(instance_pid, graph_pos);
@@ -316,6 +325,8 @@ public:
     I(io_pins.size() >= 1);
     return absl::MakeSpan(io_pins).subspan(1);
   }
+
+  std::vector<IO_pin> get_sorted_io_pins() const;
 
   void set_phys(const Physical_cell &&cphys) {
     I(lgid);
