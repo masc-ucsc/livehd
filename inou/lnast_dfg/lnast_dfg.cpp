@@ -548,60 +548,6 @@ void Lnast_dfg::process_ast_tuple_get_op(LGraph *dfg, const Lnast_nid &lnidx_tg)
   }
 }
 
-void Lnast_dfg::process_ast_tuple_get_op_bk(LGraph *dfg, const Lnast_nid &lnidx_tg) {
-  //lnidx_opr = dot or sel
-  auto c0_tg = lnast->get_first_child(lnidx_tg);
-  auto c1_tg = lnast->get_sibling_next(c0_tg);
-  auto c2_tg = lnast->get_sibling_next(c1_tg);
-
-  auto c0_tg_name  = lnast->get_sname(c0_tg);
-  auto c0_tg_vname = lnast->get_vname(c0_tg);
-  auto c2_tg_name  = lnast->get_sname(c2_tg);
-
-  auto tup_get = dfg->create_node(TupGet_Op);
-  auto tn_spin = tup_get.setup_sink_pin("TN"); // tuple name
-  auto kn_spin = tup_get.setup_sink_pin("KN"); // key name
-  auto kp_spin = tup_get.setup_sink_pin("KP"); // key pos
-
-  Node_pin tn_dpin;
-  if (is_register(lnast->get_vname(c1_tg))) 
-    tn_dpin = setup_ref_node_dpin(dfg, c1_tg);
-  else 
-    tn_dpin = setup_tuple_ref(dfg, lnast->get_sname(c1_tg));
-  
-
-  dfg->add_edge(tn_dpin, tn_spin);
-
-  if (is_const(c2_tg_name)) {
-    auto kp_dpin = setup_ref_node_dpin(dfg, c2_tg);
-    dfg->add_edge(kp_dpin, kp_spin);
-  } else {
-    auto kn_dpin = setup_key_dpin(dfg, lnast->get_sname(c2_tg));
-    dfg->add_edge(kn_dpin, kn_spin);
-  }
-
-
-  if (vname2attr_dpin.find(c0_tg_vname) != vname2attr_dpin.end()) {
-    auto aset_node = dfg->create_node(AttrSet_Op);
-    auto aset_aci_spin = aset_node.setup_sink_pin("ACI");
-    auto aset_ancestor_dpin = vname2attr_dpin[c0_tg_vname];
-    dfg->add_edge(aset_ancestor_dpin, aset_aci_spin);
-
-    auto aset_vn_spin = aset_node.setup_sink_pin("VN");
-    auto aset_vn_dpin = tup_get.get_driver_pin(0);
-    dfg->add_edge(aset_vn_dpin, aset_vn_spin);
-
-    name2dpin[c0_tg_name] = aset_node.setup_driver_pin(0); // dummy_attr_set node now represent the latest variable
-    aset_node.get_driver_pin(0).set_name(c0_tg_name);
-    setup_dpin_ssa(name2dpin[c0_tg_name], c0_tg_vname, lnast->get_subs(c0_tg));
-    vname2attr_dpin[c0_tg_vname] = aset_node.setup_driver_pin(1);
-    return;
-  }
-
-  name2dpin[c0_tg_name] = tup_get.setup_driver_pin();
-  tup_get.setup_driver_pin().set_name(lnast->get_sname(c0_tg));
-  setup_dpin_ssa(name2dpin[c0_tg_name], c0_tg_vname, lnast->get_subs(c0_tg));
-}
 
 
 void Lnast_dfg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnidx_ta) {
@@ -703,49 +649,6 @@ void Lnast_dfg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnidx_ta)
   }
 }
 
-
-void Lnast_dfg::process_ast_tuple_add_op_bk(LGraph *dfg, const Lnast_nid &lnidx_ta) {
-  auto tup_add    = dfg->create_node(TupAdd_Op);
-  auto tn_spin    = tup_add.setup_sink_pin("TN"); //tuple name
-  auto kn_spin    = tup_add.setup_sink_pin("KN"); //key name
-  auto kp_spin    = tup_add.setup_sink_pin("KP"); //key position of the key_name is recorded at tuple initialization
-  auto value_spin = tup_add.setup_sink_pin("KV"); //value
-
-  auto c0_ta   = lnast->get_first_child(lnidx_ta); //c0: tuple name
-  auto c1_ta   = lnast->get_sibling_next(c0_ta);   //c1: key name
-  auto c2_ta   = lnast->get_sibling_next(c1_ta);   //c2: value
-  auto tup_name = lnast->get_sname(c0_ta);
-  auto key_name = lnast->get_vname(c1_ta);
-
-
-  auto tn_dpin = setup_tuple_ref(dfg, tup_name, true);
-
-  // exclude invalid scalar->tuple cases
-  auto tn_node  = tn_dpin.get_node();
-  auto tn_ntype = tn_node.get_type().op;
-  bool is_scalar =  tn_ntype != TupAdd_Op && tn_ntype != TupRef_Op;
-  if (is_scalar && key_name != "0")
-		Pass::error("try to modify a non-exist tuple key field:{} in tuple:{}\n", key_name, tup_name);
-
-  dfg->add_edge(tn_dpin, tn_spin);
-
-  Node_pin kn_dpin;
-  if (is_const(key_name)) { // it is a key_pos, not a key_name
-    auto kp_dpin = dfg->create_node_const(Lconst(key_name)).setup_driver_pin();
-    dfg->add_edge(kp_dpin, kp_spin);
-  } else if (key_name.substr(0,4) != "null") {// it is a pure key_name
-    kn_dpin = setup_key_dpin(dfg, key_name);
-    dfg->add_edge(kn_dpin, kn_spin);
-  }
-
-
-  auto value_dpin = setup_ref_node_dpin(dfg, c2_ta);
-  dfg->add_edge(value_dpin, value_spin);
-
-  name2dpin[tup_name] = tup_add.setup_driver_pin();
-  tup_add.setup_driver_pin().set_name(tup_name); // tuple ref semantically move to here
-  setup_dpin_ssa(name2dpin[tup_name], lnast->get_vname(c0_ta), lnast->get_subs(c0_ta));
-}
 
 
 //either tuple root or tuple key(str) fit in this case
