@@ -114,7 +114,7 @@ protected:
   void make_space_after(const Tree_index &sibling) {
     auto &ptrs             = pointers_stack[sibling.level][sibling.pos>>2];
 
-    for(int i=3;i>(sibling.pos&3);--i) {
+    for(int i=3;i>(sibling.pos&3)+1;--i) {
       data_stack[sibling.level][((sibling.pos>>2)<<2)+i]=data_stack[sibling.level][((sibling.pos>>2)<<2)+i-1];
 
       ptrs.first_child[i] = ptrs.first_child[i-1];
@@ -635,6 +635,11 @@ const Tree_index tree<X>::insert_next_sibling(const Tree_index &sibling, const X
       child.pos = created_next_sibling.pos;
     }else{
       created_next_sibling.pos = create_space(parent, data_stack[sibling.level][sibling.pos|3]);
+      auto &l = pointers_stack[created_next_sibling.level];
+      l[created_next_sibling.pos>>2].first_child[0] = l[sibling.pos>>2].first_child[3];
+      l[created_next_sibling.pos>>2].last_child[0]  = l[sibling.pos>>2].last_child[3];
+      l[sibling.pos>>2].first_child[3] = -1;
+      l[sibling.pos>>2].last_child[3] = -1;
 
       make_space_after(sibling);
       // NOTE: no need to call increase_size. Already max out
