@@ -475,7 +475,9 @@ void Inou_firrtl::InitCMemory(Lnast& lnast, Lnast_nid& parent_node, const firrtl
 }
 
 void Inou_firrtl::HandleMemPort(Lnast& lnast, Lnast_nid& parent_node, const firrtl::FirrtlPB_Statement_MemoryPort& mport) {
-  /* Need to concatenate this new port onto #mem_name.__port
+  //auto stmt_node = lnast.get_first_child(lnast.get_root());
+  //auto node = lnast.get_sibling_prev(lnast.get_last_child(stmt_node));
+  /* Need to concatenate this new port onto #mem_name.__port at highest scope.
    * Start by gathering all relevant port attribute info. */
   dangling_ports_map[mport.id()] = mport.memory_id();
   auto mem_name  = lnast.add_string(absl::StrCat("#", mport.memory_id()));
@@ -486,17 +488,17 @@ void Inou_firrtl::HandleMemPort(Lnast& lnast, Lnast_nid& parent_node, const firr
   auto dir_case  = mport.direction();
 
   // Now build new port's tuple.
+  // This has to be put at the highest scope (otherwise we may do a tuple concat to __port in an if-else statement)
   auto temp_var_T = create_temp_var(lnast);
-  auto idx_tup = lnast.add_child(parent_node, Lnast_node::create_tuple("mport"));
+  auto stmt_node = lnast.get_first_child(lnast.get_root());
+  I(lnast.get_type(stmt_node).is_stmts());
+  auto node = lnast.get_sibling_prev(lnast.get_last_child(stmt_node));
+  lnast.dump();
+  fmt::print("try1\n");
+  auto idx_tup = lnast.insert_next_sibling(node, Lnast_node::create_tuple("mport"));
+  fmt::print("try2\n");
+  node = idx_tup;
   lnast.add_child(idx_tup, Lnast_node::create_ref(temp_var_T));
-
-  auto idx_asg_c = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
-  lnast.add_child(idx_asg_c, Lnast_node::create_assign("__clk_pin"));
-  lnast.add_child(idx_asg_c, Lnast_node::create_assign(clk_str));
-
-  auto idx_asg_a = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
-  lnast.add_child(idx_asg_a, Lnast_node::create_assign("__addr"));
-  lnast.add_child(idx_asg_a, Lnast_node::create_const(idx_str));
 
   if (std::get<0>(mem_props) == true) {
     auto idx_asg_f = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
@@ -504,9 +506,20 @@ void Inou_firrtl::HandleMemPort(Lnast& lnast, Lnast_nid& parent_node, const firr
     lnast.add_child(idx_asg_f, Lnast_node::create_assign("true"));
   }
 
+  //auto idx_asg_c = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
+  //lnast.add_child(idx_asg_c, Lnast_node::create_assign("__clk_pin"));
+  //lnast.add_child(idx_asg_c, Lnast_node::create_assign(clk_str));
+
+  //auto idx_asg_a = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
+  //lnast.add_child(idx_asg_a, Lnast_node::create_assign("__addr"));
+  //lnast.add_child(idx_asg_a, Lnast_node::create_const(idx_str));
+
+
   // Handle LATENCY and other attributes specific to port type
   if (dir_case == firrtl::FirrtlPB_Statement_MemoryPort_Direction::FirrtlPB_Statement_MemoryPort_Direction_MEMORY_PORT_DIRECTION_READ) {
     // if READ port
+    late_assign_ports.insert({absl::StrCat(mport.memory_id(), ".", mport.id()), READP});
+
     auto idx_asg_e = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
     lnast.add_child(idx_asg_e, Lnast_node::create_assign("__enable"));
     //FIXME: When FIRRTL-Proto implements enable signal on memory port, put here (or if not present, keep as "1")
@@ -516,12 +529,13 @@ void Inou_firrtl::HandleMemPort(Lnast& lnast, Lnast_nid& parent_node, const firr
     lnast.add_child(idx_asg_l, Lnast_node::create_assign("__latency"));
     lnast.add_child(idx_asg_l, Lnast_node::create_const(std::get<1>(mem_props)));
 
-
   } else if (dir_case == firrtl::FirrtlPB_Statement_MemoryPort_Direction::FirrtlPB_Statement_MemoryPort_Direction_MEMORY_PORT_DIRECTION_WRITE) {
     // if WRITE port
-    auto idx_asg_e = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
-    lnast.add_child(idx_asg_e, Lnast_node::create_assign("__enable"));
-    lnast.add_child(idx_asg_e, Lnast_node::create_const("0"));
+    late_assign_ports.insert({absl::StrCat(mport.memory_id(), ".", mport.id()), WRITEP});
+
+    //auto idx_asg_e = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
+    //lnast.add_child(idx_asg_e, Lnast_node::create_assign("__enable"));
+    //lnast.add_child(idx_asg_e, Lnast_node::create_const("0"));
     //NOTE->hunter: The enable is set to 0 here, but whenever a write occurs the enable is set to 1.
 
     auto idx_asg_m = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
@@ -534,11 +548,13 @@ void Inou_firrtl::HandleMemPort(Lnast& lnast, Lnast_nid& parent_node, const firr
 
   } else if (dir_case == firrtl::FirrtlPB_Statement_MemoryPort_Direction::FirrtlPB_Statement_MemoryPort_Direction_MEMORY_PORT_DIRECTION_READ_WRITE) {
     // if READ-WRITE port
+    late_assign_ports.insert({absl::StrCat(mport.memory_id(), ".", mport.id()), READ_WRITEP});
     //TODO... Currently no easy way to handle the enable signal...
     I(false);
 
   } else if (dir_case == firrtl::FirrtlPB_Statement_MemoryPort_Direction::FirrtlPB_Statement_MemoryPort_Direction_MEMORY_PORT_DIRECTION_INFER) {
     // if port dir needs to be inferred
+    late_assign_ports.insert({absl::StrCat(mport.memory_id(), ".", mport.id()), INFER});
     //TODO... Currently no easy way to infer port directionality...
     I(false);
 
@@ -547,28 +563,61 @@ void Inou_firrtl::HandleMemPort(Lnast& lnast, Lnast_nid& parent_node, const firr
   }
 
   auto temp_var_T2 = create_temp_var(lnast);
-  auto idx_tup2 = lnast.add_child(parent_node, Lnast_node::create_tuple(""));
+
+  auto idx_tup2 = lnast.insert_next_sibling(node, Lnast_node::create_tuple(""));
+  node = idx_tup2;
   lnast.add_child(idx_tup2, Lnast_node::create_ref(temp_var_T2));
-  auto idx_asg2 = lnast.add_child(parent_node, Lnast_node::create_assign(""));
+  auto idx_asg2 = lnast.add_child(idx_tup2, Lnast_node::create_assign(""));
   lnast.add_child(idx_asg2, Lnast_node::create_ref(port_name));
   lnast.add_child(idx_asg2, Lnast_node::create_ref(temp_var_T));
 
   auto temp_var_L = create_temp_var(lnast);
-  auto idx_dotLHS = lnast.add_child(parent_node, Lnast_node::create_dot("mport"));
+  auto idx_dotLHS = lnast.insert_next_sibling(node, Lnast_node::create_dot("mport"));
+  node = idx_dotLHS;
   lnast.add_child(idx_dotLHS, Lnast_node::create_ref(temp_var_L));
   lnast.add_child(idx_dotLHS, Lnast_node::create_ref(mem_name));
   lnast.add_child(idx_dotLHS, Lnast_node::create_ref("__port"));
 
   auto temp_var_R = create_temp_var(lnast);
-  auto idx_dotRHS = lnast.add_child(parent_node, Lnast_node::create_dot("mport"));
+  auto idx_dotRHS = lnast.insert_next_sibling(node, Lnast_node::create_dot("mport"));
+  node = idx_dotRHS;
   lnast.add_child(idx_dotRHS, Lnast_node::create_ref(temp_var_R));
   lnast.add_child(idx_dotRHS, Lnast_node::create_ref(mem_name));
   lnast.add_child(idx_dotRHS, Lnast_node::create_ref("__port"));
 
-  auto idx_concat = lnast.add_child(parent_node, Lnast_node::create_tuple_concat(""));
+  auto idx_concat = lnast.insert_next_sibling(node, Lnast_node::create_tuple_concat(""));
+  node = idx_concat;
   lnast.add_child(idx_concat, Lnast_node::create_ref(temp_var_L));
   lnast.add_child(idx_concat, Lnast_node::create_ref(temp_var_R));
   lnast.add_child(idx_concat, Lnast_node::create_ref(temp_var_T2));
+
+  auto lhs_prefix = absl::StrCat(mport.memory_id(), "_", mport.id());
+  if (dir_case == firrtl::FirrtlPB_Statement_MemoryPort_Direction::FirrtlPB_Statement_MemoryPort_Direction_MEMORY_PORT_DIRECTION_READ) {
+    // Things to set to 0 at highest scope: addr, clk
+    auto idx_asg_ag = lnast.insert_next_sibling(node, Lnast_node::create_assign(""));
+    node = idx_asg_ag;
+    lnast.add_child(idx_asg_ag, Lnast_node::create_ref(lnast.add_string(absl::StrCat(lhs_prefix, "_addr"))));
+    lnast.add_child(idx_asg_ag, Lnast_node::create_const("0"));
+    auto idx_asg_cg = lnast.insert_next_sibling(node, Lnast_node::create_assign(""));
+    node = idx_asg_cg;
+    lnast.add_child(idx_asg_cg, Lnast_node::create_ref(lnast.add_string(absl::StrCat(lhs_prefix, "_clk_pin"))));
+    lnast.add_child(idx_asg_cg, Lnast_node::create_const("0"));
+
+    // Set to actual value in mport's scope
+    auto idx_asg_al = lnast.add_child(parent_node, Lnast_node::create_assign(""));
+    lnast.add_child(idx_asg_al, Lnast_node::create_ref(lnast.add_string(absl::StrCat(lhs_prefix, "_addr"))));
+    AttachExprStrToNode(lnast, idx_str, idx_asg_al);
+    auto idx_asg_cl = lnast.add_child(parent_node, Lnast_node::create_assign(""));
+    lnast.add_child(idx_asg_cl, Lnast_node::create_ref(lnast.add_string(absl::StrCat(lhs_prefix, "_clk_pin"))));
+    AttachExprStrToNode(lnast, clk_str, idx_asg_cl);
+
+
+  } else if (dir_case == firrtl::FirrtlPB_Statement_MemoryPort_Direction::FirrtlPB_Statement_MemoryPort_Direction_MEMORY_PORT_DIRECTION_WRITE) {
+    // Things to set to 0 at highest scope: addr, en, clk, data
+  } else if (dir_case == firrtl::FirrtlPB_Statement_MemoryPort_Direction::FirrtlPB_Statement_MemoryPort_Direction_MEMORY_PORT_DIRECTION_READ_WRITE) {
+  } else if (dir_case == firrtl::FirrtlPB_Statement_MemoryPort_Direction::FirrtlPB_Statement_MemoryPort_Direction_MEMORY_PORT_DIRECTION_INFER) {
+  } else {
+  }
 }
 
 /* When a module instance is created in FIRRTL, we need to do the same
@@ -1293,10 +1342,14 @@ std::string_view Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB
   if (dangling_ports_map.contains(alter_flat_str.substr(0, delim_loc))) {
     /* If this is a sub-access to a memory port declared in a Memory Port
      * statement, then I need to change name from (if port name is "r") r.a
-     * to #mem_name.r.__data.a */
+     * to #mem_name.r.__data.a (if on RHS) or mem_name_r_data.a (if on LHS). */
     auto por_name = alter_flat_str.substr(0, delim_loc);
     auto mem_name = dangling_ports_map[por_name];
-    alter_full_str = absl::StrCat(mem_name, ".", por_name, ".__data", alter_flat_str.substr(delim_loc));
+    if (is_rhs) {
+      alter_full_str = absl::StrCat(mem_name, ".", por_name, ".__data", alter_flat_str.substr(delim_loc));
+    } else {
+      alter_full_str = absl::StrCat(mem_name.substr(1), "_", por_name, "_data", alter_flat_str.substr(delim_loc));
+    }
   } else {
     // Otherwise just invoke get_full_name to get any extra LNAST-necessary symbols
     alter_full_str = get_full_name(ln, parent_node, alter_flat_str, false);//Note: I put false here so if reg I get the "#"
@@ -1374,6 +1427,7 @@ std::string_view Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB
  * function will be able to deconstruct it into
  * DOT and SELECT nodes in an LNAST. */
 std::string_view Inou_firrtl::CreateDotsSelsFromStr(Lnast& ln, Lnast_nid& parent_node, const std::string& flattened_str) {
+  fmt::print("{}\n", flattened_str);
   I((flattened_str.find(".") != std::string::npos) || (flattened_str.find("[") != std::string::npos));
 
   size_t found = 0;
@@ -1812,19 +1866,22 @@ std::string Inou_firrtl::ReturnExprString(Lnast& lnast, const firrtl::FirrtlPB_E
     case firrtl::FirrtlPB_Expression::kReference: {  // Reference
       expr_string = get_full_name(lnast, parent_node, expr.reference().id(), is_rhs);
       if (dangling_ports_map.count(expr_string)) {
-        /* If its a memory port created after the memory, the name found will
+        /* If it's a memory port created after the memory, the name found will
          * just be the port id (i.e. "r"). This needs to be changed to
-         * mem_name.r.__data . If this is on the LHS, we also need to set
-         * the mem_name.r.__enable = 1. */
+         * mem_name.r.__data if on RHS. If this is on the LHS, we need to set
+         * the mem_name_r_enable = 1 then mem_name_r_data = ... . */
         auto mem_name = dangling_ports_map[expr_string];
         if (!is_rhs) {
-          auto en_str   = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat("#", mem_name, ".", expr_string, ".__enable"));
+          auto en_str   = lnast.add_string(absl::StrCat(mem_name, "_", expr_string, "_en"));
           auto idx_asg  = lnast.add_child(parent_node, Lnast_node::create_assign("dpo"));
           lnast.add_child(idx_asg, Lnast_node::create_ref(en_str));
           lnast.add_child(idx_asg, Lnast_node::create_const("1"));
-        }
 
-        expr_string = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat("#", mem_name, ".", expr_string, ".__data"));
+          expr_string = lnast.add_string(absl::StrCat(mem_name, "_", expr_string, "_data"));
+        } else {
+          // FIXME: For iread-write ports, may have to make it so I set enable=1 here too (even though this is redundant for reads)
+          expr_string = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat("#", mem_name, ".", expr_string, ".__data"));
+        }
       }
       break;
     }
@@ -2041,46 +2098,59 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
  * for each of the input attributes to each port. */
 void Inou_firrtl::PerformLateMemAssigns(Lnast& lnast, Lnast_nid& parent_node) {
   for (const auto& mem_port : late_assign_ports) {
-    fmt::print("{} ... {}\n", mem_port.first, mem_port.second);
     auto port_name = absl::StrCat("#", mem_port.first);
     auto rstr_prefix = port_name.substr(1);
     replace(rstr_prefix.begin(), rstr_prefix.end(), '.', '_');
     //rstr_prefix = absl::StrCat("___", rstr_prefix);
 
-    auto idx_asg_1 = lnast.add_child(parent_node, Lnast_node::create_assign("mem_l"));
-    lnast.add_child(idx_asg_1, Lnast_node::create_ref(lnast.add_string(absl::StrCat(port_name, ".__addr"))));
-    lnast.add_child(idx_asg_1, Lnast_node::create_ref(lnast.add_string(absl::StrCat(rstr_prefix, "_addr"))));
-    auto idx_asg_2 = lnast.add_child(parent_node, Lnast_node::create_assign("mem_l"));
-    lnast.add_child(idx_asg_2, Lnast_node::create_ref(lnast.add_string(absl::StrCat(port_name, ".__clk_pin"))));
-    lnast.add_child(idx_asg_2, Lnast_node::create_ref(lnast.add_string(absl::StrCat(rstr_prefix, "_clk"))));
-    auto idx_asg_3 = lnast.add_child(parent_node, Lnast_node::create_assign("mem_l"));
-    lnast.add_child(idx_asg_3, Lnast_node::create_ref(lnast.add_string(absl::StrCat(port_name, ".__enable"))));
-    lnast.add_child(idx_asg_3, Lnast_node::create_ref(lnast.add_string(absl::StrCat(rstr_prefix, "_en"))));
+    if ((mem_port.second == READ) || (mem_port.second == WRITE) || (mem_port.second == READ_WRITE)) {
+      auto idx_asg_1 = lnast.add_child(parent_node, Lnast_node::create_assign("mem_l"));
+      lnast.add_child(idx_asg_1, Lnast_node::create_ref(lnast.add_string(absl::StrCat(port_name, ".__addr"))));
+      lnast.add_child(idx_asg_1, Lnast_node::create_ref(lnast.add_string(absl::StrCat(rstr_prefix, "_addr"))));
+      auto idx_asg_2 = lnast.add_child(parent_node, Lnast_node::create_assign("mem_l"));
+      lnast.add_child(idx_asg_2, Lnast_node::create_ref(lnast.add_string(absl::StrCat(port_name, ".__clk_pin"))));
+      lnast.add_child(idx_asg_2, Lnast_node::create_ref(lnast.add_string(absl::StrCat(rstr_prefix, "_clk"))));
+      auto idx_asg_3 = lnast.add_child(parent_node, Lnast_node::create_assign("mem_l"));
+      lnast.add_child(idx_asg_3, Lnast_node::create_ref(lnast.add_string(absl::StrCat(port_name, ".__enable"))));
+      lnast.add_child(idx_asg_3, Lnast_node::create_ref(lnast.add_string(absl::StrCat(rstr_prefix, "_en"))));
 
-    if (mem_port.second == READ) {
-      // Attributes needing late assigns: addr, en, clk
-      continue;
+      if (mem_port.second == READ) {
+        // Attributes needing late assigns: addr, en, clk
+        continue;
 
-    } else if (mem_port.second == WRITE) {
-      // Attributes needing late assigns: addr, en, clk, data, mask
-      auto idx_asg_4 = lnast.add_child(parent_node, Lnast_node::create_assign("mem_wl"));
-      lnast.add_child(idx_asg_4, Lnast_node::create_ref(lnast.add_string(absl::StrCat(port_name, ".__data"))));
-      lnast.add_child(idx_asg_4, Lnast_node::create_ref(lnast.add_string(absl::StrCat(rstr_prefix, "_data"))));
-      auto idx_asg_5 = lnast.add_child(parent_node, Lnast_node::create_assign("mem_wl"));
-      lnast.add_child(idx_asg_5, Lnast_node::create_ref(lnast.add_string(absl::StrCat(port_name, ".__wrmask"))));
-      lnast.add_child(idx_asg_5, Lnast_node::create_ref(lnast.add_string(absl::StrCat(rstr_prefix, "_mask"))));
+      } else if (mem_port.second == WRITE) {
+        // Attributes needing late assigns: addr, en, clk, data, mask
+        auto idx_asg_4 = lnast.add_child(parent_node, Lnast_node::create_assign("mem_wl"));
+        lnast.add_child(idx_asg_4, Lnast_node::create_ref(lnast.add_string(absl::StrCat(port_name, ".__data"))));
+        lnast.add_child(idx_asg_4, Lnast_node::create_ref(lnast.add_string(absl::StrCat(rstr_prefix, "_data"))));
+        auto idx_asg_5 = lnast.add_child(parent_node, Lnast_node::create_assign("mem_wl"));
+        lnast.add_child(idx_asg_5, Lnast_node::create_ref(lnast.add_string(absl::StrCat(port_name, ".__wrmask"))));
+        lnast.add_child(idx_asg_5, Lnast_node::create_ref(lnast.add_string(absl::StrCat(rstr_prefix, "_mask"))));
 
-    } else if (mem_port.second == READ-WRITE) {
-      // Attributes needing late assigns: addr, en, clk, wdata, wmask (may have to do wmode later?)
-      auto idx_asg_4 = lnast.add_child(parent_node, Lnast_node::create_assign("mem_rwl"));
-      lnast.add_child(idx_asg_4, Lnast_node::create_ref(lnast.add_string(absl::StrCat(port_name, ".__data"))));
-      lnast.add_child(idx_asg_4, Lnast_node::create_ref(lnast.add_string(absl::StrCat(rstr_prefix, "_wdata"))));
-      auto idx_asg_5 = lnast.add_child(parent_node, Lnast_node::create_assign("mem_rwl"));
-      lnast.add_child(idx_asg_5, Lnast_node::create_ref(lnast.add_string(absl::StrCat(port_name, ".__wrmask"))));
-      lnast.add_child(idx_asg_5, Lnast_node::create_ref(lnast.add_string(absl::StrCat(rstr_prefix, "_wmask"))));
-
+      } else if (mem_port.second == READ_WRITE) {
+        // Attributes needing late assigns: addr, en, clk, wdata, wmask (may have to do wmode later?)
+        auto idx_asg_4 = lnast.add_child(parent_node, Lnast_node::create_assign("mem_rwl"));
+        lnast.add_child(idx_asg_4, Lnast_node::create_ref(lnast.add_string(absl::StrCat(port_name, ".__data"))));
+        lnast.add_child(idx_asg_4, Lnast_node::create_ref(lnast.add_string(absl::StrCat(rstr_prefix, "_wdata"))));
+        auto idx_asg_5 = lnast.add_child(parent_node, Lnast_node::create_assign("mem_rwl"));
+        lnast.add_child(idx_asg_5, Lnast_node::create_ref(lnast.add_string(absl::StrCat(port_name, ".__wrmask"))));
+        lnast.add_child(idx_asg_5, Lnast_node::create_ref(lnast.add_string(absl::StrCat(rstr_prefix, "_wmask"))));
+      }
     } else if (mem_port.second == INFER) {
       // FIXME: Unsure of how to handle...
+
+    } else if (mem_port.second == READP) {
+      // Everything already set.
+      continue;
+
+    } else if ((mem_port.second == WRITEP) || (mem_port.second == READ_WRITEP)) {
+      // Attributes needing late assigns: en, data... FIXME: Subject to change/need to review for r-w port
+      auto idx_asg_1 = lnast.add_child(parent_node, Lnast_node::create_assign("mem_pl"));
+      lnast.add_child(idx_asg_1, Lnast_node::create_ref(lnast.add_string(absl::StrCat(port_name, ".__enable"))));
+      lnast.add_child(idx_asg_1, Lnast_node::create_ref(lnast.add_string(absl::StrCat(rstr_prefix, "_en"))));
+      auto idx_asg_2 = lnast.add_child(parent_node, Lnast_node::create_assign("mem_pl"));
+      lnast.add_child(idx_asg_2, Lnast_node::create_ref(lnast.add_string(absl::StrCat(port_name, ".__data"))));
+      lnast.add_child(idx_asg_2, Lnast_node::create_ref(lnast.add_string(absl::StrCat(rstr_prefix, "_data"))));
     }
   }
 }

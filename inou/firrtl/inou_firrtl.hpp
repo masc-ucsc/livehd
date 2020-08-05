@@ -164,7 +164,7 @@ private:
   // Map of memory port ids made in Memory Port statements to memory block name.
   absl::flat_hash_map<std::string, std::string> dangling_ports_map;
   // Vector which holds all of the ports that need late assigns (and their direction).
-  enum MPORT_DIR { INFER, READ, WRITE, READ_WRITE };
+  enum MPORT_DIR { INFER, READ, WRITE, READ_WRITE, READP, WRITEP, READ_WRITEP };
   absl::flat_hash_set<std::pair<std::string, MPORT_DIR>> late_assign_ports;
 
 
