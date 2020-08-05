@@ -221,8 +221,12 @@ void Lnast::merge_tconcat_paired_assign(const Lnast_nid &psts_nid, const Lnast_n
 void Lnast::rename_to_real_tuple_name(const Lnast_nid &psts_nid, const Lnast_nid &tup_nid) {
   auto &dot_lrhs_table   = dot_lrhs_tables[psts_nid];
   auto paired_assign_nid = dot_lrhs_table[tup_nid].second;
+  if (paired_assign_nid == Lnast_nid(-1, -1))
+    return;
+
   if (get_type(paired_assign_nid).is_func_call())
     return;
+
 
   auto c0_tup            = get_first_child(tup_nid);
   auto c0_paired_assign  = get_first_child(paired_assign_nid);
@@ -442,12 +446,37 @@ void Lnast::analyze_dot_lrhs_handle_a_statement(const Lnast_nid &psts_nid, const
       return;
     
     sib_nid = get_sibling_next(sib_nid);
+    
+    // hier-tuple case
+    if (get_type(sib_nid).is_tuple()) {
+      for (auto sib_child : children(sib_nid)) {
+        if (sib_child == get_first_child(sib_nid)) 
+          continue;
+        
+        if (!get_type(sib_child).is_assign())
+          continue;
+         
+        auto c0_assign = get_first_child(sib_child);
+        auto c1_assign = get_sibling_next(c0_assign);
+        if (get_name(c1_assign) == c0_dot_name) {
+          hit = true;
+          dot_lrhs_table[dot_nid].first  = false;
+          dot_lrhs_table[dot_nid].second = Lnast_nid(-1, -1);
+        }
+      }
+      
+      if (hit)
+        continue;
+    }
 
+
+    // normal case
     for (auto sib_child : children(sib_nid)) {
       if (sib_child == get_first_child(sib_nid) && get_name(sib_child) == c0_dot_name) {
         hit = true;
         dot_lrhs_table[dot_nid].first = true;
         dot_lrhs_table[dot_nid].second = sib_nid;
+        break;
       } else if (get_name(sib_child) == c0_dot_name){
         hit = true;
         dot_lrhs_table[dot_nid].first  = false;
@@ -456,6 +485,7 @@ void Lnast::analyze_dot_lrhs_handle_a_statement(const Lnast_nid &psts_nid, const
         } else {
           dot_lrhs_table[dot_nid].second = Lnast_nid(-1, -1); // rhs dot doesn't need the corresponding assignment nid
         }
+        break;
       }
     }
   } //note: practically, the assign/opr_op related to the dot/sel_op should be very close
@@ -611,8 +641,6 @@ void Lnast::opr_lhs_merge_handle_a_statement(const Lnast_nid &assign_nid) {
     ref_data(assign_nid)->type = Lnast_ntype::create_invalid();
   }
 }
-
-
 
 
 //handle cases: A.foo = A[2] or A.foo = A[1] + A[2] + A.bar; where lhs rhs are both the struct elements;
