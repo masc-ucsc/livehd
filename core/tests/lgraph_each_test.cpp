@@ -52,11 +52,11 @@ protected:
 
         if (io_pin.dir == Sub_node::Direction::Input) {
           if (!sub->has_pin(io_pin.name)) {
-            sub->add_pin(io_pin.name, Sub_node::Direction::Input, graph_pos);
+            auto instance_pid = sub->add_pin(io_pin.name, Sub_node::Direction::Input, graph_pos);
 
             auto dpin = parent->get_graph_input(io_pin.name);
 
-            dpin.connect_sink(node.setup_sink_pin(graph_pos));
+            dpin.connect_sink(node.setup_sink_pin(instance_pid));
           }
 
         }else if (io_pin.dir == Sub_node::Direction::Output) {

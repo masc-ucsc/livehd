@@ -493,6 +493,8 @@ static void look_for_cell_outputs(RTLIL::Module *module, const std::string &path
             continue;
 
           pid = sub->get_instance_pid(pin_name);
+
+          printf("module %s submodule %s has pin_name %s instance_pid %d\n", module->name.c_str(), cell->type.c_str(), pin_name.c_str(), pid);
         }
 
         node_type = SubGraph_Op;

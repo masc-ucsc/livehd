@@ -119,7 +119,8 @@ void Lgyosys_dump::create_blackbox(const Sub_node &sub, RTLIL::Design *design) {
   design->add(mod);
 
   int port_id = 0;
-  for (const auto &io_pin : sub.get_io_pins()) {
+  for (const auto &io_pin : sub.get_io_pins()) { // no need to be sorted if pins are named
+    //fmt::print("bbox:{} name:{}\n", sub.get_name(), io_pin.name);
     std::string  name = absl::StrCat("\\", io_pin.name);
     RTLIL::Wire *wire = mod->addWire(name);  // , pin.get_bits());
     wire->port_id     = port_id++;
@@ -271,17 +272,17 @@ void Lgyosys_dump::create_subgraph(LGraph *g, RTLIL::Module *module, Node &node)
   RTLIL::Cell *new_cell = module->addCell(absl::StrCat("\\", node.create_name()), absl::StrCat("\\", sub.get_name()));
 
   fmt::print("inou_yosys instance_name:{}, subgraph->get_name():{}\n", node.get_name(), sub.get_name());
-  for (const auto &e : node.inp_edges()) {
+  for (const auto &e : node.inp_edges_ordered()) {
     auto port_name = e.sink.get_type_sub_io_name();
     // auto  port_name = e.sink.get_type_sub_pin_name();
-    fmt::print("input:{}\n", port_name);
+    fmt::print("input:{} pin:{}\n", port_name, e.driver.debug_name());
     RTLIL::Wire *input = get_wire(e.driver);
     new_cell->setPort(absl::StrCat("\\", port_name).c_str(), input);
   }
   for (const auto &dpin : node.out_connected_pins()) {
     auto port_name = dpin.get_type_sub_io_name();
     // auto  port_name = dpin.get_type_sub_pin_name();
-    fmt::print("output:{}\n", port_name);
+    fmt::print("output:{} pin:{}\n", port_name, dpin.debug_name());
     RTLIL::Wire *output = get_wire(dpin);
     new_cell->setPort(absl::StrCat("\\", port_name).c_str(), output);
   }

@@ -120,9 +120,10 @@ protected:
     if (it == track_n1_out_setup_pins.end()) {
       EXPECT_FALSE(n1_sub->has_pin(pname));
 
-      n1_sub->add_output_pin(pname, get_free_n1_graph_pos());
+      auto instance_pid = n1_sub->add_output_pin(pname, get_free_n1_graph_pos());
 
       auto dpin = n1.setup_driver_pin(pname);
+      I(dpin.get_pid() == instance_pid);
       track_n1_out_setup_pins.set(pname, dpin);
       return dpin;
     }
@@ -148,9 +149,10 @@ protected:
     const auto &it = track_n2_inp_setup_pins.find(pname);
     if (it == track_n2_inp_setup_pins.end()) {
       EXPECT_FALSE(n2_sub->has_pin(pname));
-      n2_sub->add_input_pin(pname, get_free_n2_graph_pos());
+      auto instance_pid = n2_sub->add_input_pin(pname, get_free_n2_graph_pos());
 
       auto spin = n2.setup_sink_pin(pname);
+      I(spin.get_pid() == instance_pid);
       track_n2_inp_setup_pins.set(pname, spin);
       return spin;
     }

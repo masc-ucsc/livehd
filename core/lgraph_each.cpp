@@ -10,12 +10,14 @@ void LGraph::each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)
   auto out = Node(this, Hierarchy_tree::invalid_index(), Node::Hardcoded_output_nid);
   for (auto &o_pin : out.out_setup_pins()) {
     auto pos = get_self_sub_node().get_graph_pos_from_instance_pid(o_pin.get_pid());
+    fmt::print("1.name:{} pos:{} pid:{}\n",o_pin.get_name(), pos, o_pin.get_pid());
     pin_pair.emplace_back(std::make_pair(o_pin, pos));
   }
 
   auto inp = Node(this, Hierarchy_tree::invalid_index(), Node::Hardcoded_input_nid);
   for (auto &i_pin : inp.out_setup_pins()) {
     auto pos = get_self_sub_node().get_graph_pos_from_instance_pid(i_pin.get_pid());
+    fmt::print("2.name:{} pos:{} pid:{}\n",i_pin.get_name(), pos, i_pin.get_pid());
     pin_pair.emplace_back(std::make_pair(i_pin, pos));
   }
 
@@ -31,6 +33,7 @@ void LGraph::each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)
   });
 
   for (auto &pp : pin_pair) {
+    fmt::print("3.name:{} pos:{} pid:{}\n", pp.first.get_name(), pp.second, pp.first.get_pid());
     f1(pp.first, pp.second);
   }
 }
