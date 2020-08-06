@@ -1,3 +1,9 @@
+#include <vector> // for min cut
+#include <limits> // for most negative value in min cut
+#include <iostream> // include printing facilities if we're debugging things
+
+#include "i_resolve_header.hpp"
+
 #include "hier_tree.hpp"
 
 // temporary bool for printing out tons of debug information

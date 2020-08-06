@@ -3,18 +3,9 @@
 */
 #pragma once
 
-#include <filesystem>
-#include <fstream>
-#include <string>
-
-#include <unordered_map>
-#include <algorithm>
-#include <iterator>
-
 #include "rapidjson/document.h" // for json parsing
-#include "graph_info.hpp"
 
-#include "i_resolve_header.hpp"
+#include "graph_info.hpp"
 
 class Json_inou_parser {
 public:

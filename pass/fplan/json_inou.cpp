@@ -1,3 +1,9 @@
+#include <filesystem>
+#include <fstream>
+#include <string>
+
+#include "i_resolve_header.hpp"
+
 #include "json_inou.hpp"
 
 Json_inou_parser::Json_inou_parser(const std::string& path) : d() {
