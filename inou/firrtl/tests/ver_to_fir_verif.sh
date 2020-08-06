@@ -1,7 +1,20 @@
 #!/bin/bash
 rm -rf ./lgdb
 
-pts='loop_in_lg loop_in_lg2 gcd_small async mux flop assigns pick compare2 compare gates'
+pts='gates consts loop_in_lg loop_in_lg2 compare2 gcd_small async mux mux2 assigns pick gates'
+#Working with local versions: long_gcd, flop
+#Failing:
+#  fails because some IO is removed due to DCE:
+#     cse_basic
+#  need to figure out which is actually "top":
+#     hierarchy
+#  nodes that have no inputs
+#     kogg_stone_64(join)
+#     long_BTBsa(join)
+#  need to lookg more into
+#     long_iwls_adder(seems like yosys issue)
+#
+
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -23,6 +36,7 @@ fi
 
 for pt in $pts
 do
+    rm -rf ./lgdb
     echo ""
     echo ""
     echo ""
@@ -30,27 +44,14 @@ do
     echo "Verify LNAST -> FIRRTL"
     echo "===================================================="
 
-
-    echo "----------------------------------------------------"
-    echo "Verilog -> LGraph"
-    echo "----------------------------------------------------"
-
-    ${LGSHELL} "inou.yosys.tolg files:inou/yosys/tests/${pt}.v"
-    if [ $? -eq 0 ]; then
-      echo "Successfully translated Verilog to LGraph: ${pt}"
-    else
-      echo "ERROR: Verilog -> LG failed... testcase: ${pt}"
-      exit 1
-    fi
-
     echo ""
     echo ""
     echo ""
     echo "----------------------------------------------------"
-    echo "LGraph -> LNAST -> FIRRTL (Proto)"
+    echo "Verilog -> LGraph -> LNAST -> FIRRTL (Proto)"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.lgraph_to_lnast |> inou.firrtl.tofirrtl"
+    ${LGSHELL} "inou.yosys.tolg files:inou/yosys/tests/${pt}.v |> pass.lgraph_to_lnast bw_in_ln:false |> inou.firrtl.tofirrtl"
     if [ $? -eq 0 ]; then
       echo "Successfully generated FIRRTL (Proto): ${pt}"
     else
@@ -66,7 +67,7 @@ do
     echo "----------------------------------------------------"
 
     cd ../firrtl/.
-    ./utils/bin/firrtl -i ../livehd/${pt}.pb -X verilog
+    ./utils/bin/firrtl -i ../livehd/${pt}.pb -X mverilog
     if [ $? -eq 0 ]; then
       echo "Successfully generated Verilog in FIRRTL compiler: ${pt}"
     else

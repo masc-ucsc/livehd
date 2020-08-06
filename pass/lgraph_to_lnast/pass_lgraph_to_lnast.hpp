@@ -9,6 +9,7 @@ class Pass_lgraph_to_lnast : public Pass {
 protected:
   uint64_t temp_var_count = 0;
   uint64_t seq_count      = 0;
+  bool     put_bw_in_ln   = true;
 
   void do_trans(LGraph* g, Eprp_var& var, std::string_view module_name);
 
@@ -38,6 +39,7 @@ protected:
   void attach_cond_child(Lnast& lnast, Lnast_nid& op_node, const Node_pin& dpin);
 
   void handle_io(LGraph* g, Lnast_nid& parent_lnast_node, Lnast& lnast);
+  void add_bw_in_ln(Lnast& lnast, Lnast_nid& parent_node, const std::string_view& pin_name, const uint32_t& bits);
 
   std::string_view create_temp_var(Lnast& lnast);
 

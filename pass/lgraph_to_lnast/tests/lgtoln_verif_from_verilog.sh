@@ -77,6 +77,22 @@ do
     echo ""
     echo ""
     echo "----------------------------------------------------"
+    echo "LGraph Optimization"
+    echo "----------------------------------------------------"
+
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.bitwidth"
+    if [ $? -eq 0 ]; then
+      echo "Successfully optimize design on new lg: ${pt}.v"
+    else
+      echo "ERROR: Failed to optimize design on new lg, testcase: ${pt}.v"
+      exit 1
+    fi
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+
+    echo ""
+    echo ""
+    echo ""
+    echo "----------------------------------------------------"
     echo "LGraph -> Verilog"
     echo "----------------------------------------------------"
 

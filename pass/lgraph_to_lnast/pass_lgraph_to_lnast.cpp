@@ -18,6 +18,8 @@ static Pass_plugin sample("pass_lgraph_to_lnast", Pass_lgraph_to_lnast::setup);
 
 void Pass_lgraph_to_lnast::setup() {
   Eprp_method m1("pass.lgraph_to_lnast", "translates LGraph to LNAST", &Pass_lgraph_to_lnast::trans);
+  // For bw_in_ln, if __bits are not put in the LNAST then they can be accessed using bw_table in LNAST.
+  m1.add_label_optional("bw_in_ln", "true/false: put __bits nodes in LNAST?", "true");
   register_pass(m1);
 }
 
@@ -34,6 +36,12 @@ void Pass_lgraph_to_lnast::trans(Eprp_var& var) {
 }
 
 void Pass_lgraph_to_lnast::do_trans(LGraph* lg, Eprp_var& var, std::string_view module_name) {
+  if (var.has_label("bw_in_ln")) {
+    if (var.get("bw_in_ln") == "false") {
+      put_bw_in_ln = false;
+    }
+  }
+
   std::unique_ptr<Lnast> lnast = std::make_unique<Lnast>(module_name);
   lnast->set_root(Lnast_node(Lnast_ntype::create_top(), Token(0, 0, 0, 0, lg->get_name())));
   auto idx_stmts = lnast->add_child(lnast->get_root(), Lnast_node::create_stmts(get_new_seq_name(*lnast)));
@@ -105,7 +113,7 @@ void Pass_lgraph_to_lnast::handle_source_node(LGraph* lg, Node_pin& pin, Lnast& 
      * caused by a flop's q value being a part of what determines its
      * din value (ex. x = x - 1). We will have to traverse through
      * the grey nodes and forcibly insert them into the LNAST. (For
-     * examples of this, see inou/yosys/tests/loop.v and loop2.v)*/
+     * examples of this, see inou/yosys/tests/loop_in_lg.v and loop2_in_lg2.v)*/
     for (const auto& inp : pin.get_node().inp_edges()) {
       auto editable_pin = inp.driver;
       if (editable_pin.get_node().get_color() == GREY || editable_pin.get_node().get_color() == WHITE) {
@@ -143,6 +151,8 @@ void Pass_lgraph_to_lnast::handle_source_node(LGraph* lg, Node_pin& pin, Lnast& 
   attach_to_lnast(lnast, ln_node, pin);
 }
 
+
+
 /* TODO:
   Invalid_Op,
   LUT_Op,
@@ -151,9 +161,28 @@ void Pass_lgraph_to_lnast::handle_source_node(LGraph* lg, Node_pin& pin, Lnast& 
 */
 void Pass_lgraph_to_lnast::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
   // Specify bitwidth in LNAST table (for code gen purposes)
-  if (pin.get_bits() > 0) {
-    lnast.set_bitwidth(dpin_get_name(pin),
-                       pin.get_bits());  // FIXME?: Do I want all wires in the map + is this best spot to put it in map?
+  std::string_view name;
+  auto bw = pin.get_bits();
+  if (bw > 0) {
+    // FIXME?: Do I want all wires in the map + is this best spot to put it in map?
+    switch (pin.get_node().get_type().op) {
+      case GraphIO_Op:
+      case Const_Op:
+        return;
+        break;
+      case SFlop_Op:
+      case AFlop_Op:
+        attach_flop_node(lnast, parent_node, pin);
+        name = absl::StrCat("#", dpin_get_name(pin));
+        lnast.set_bitwidth(name.substr(1), bw);
+        break;
+      default:
+        name = dpin_get_name(pin);
+        lnast.set_bitwidth(name, bw);
+    }
+    if (put_bw_in_ln) {
+      add_bw_in_ln(lnast, parent_node, name, bw);
+    }
   }
 
   // Look at pin's node's type, then based off that figure out what type of node to add to LNAST.
@@ -192,6 +221,18 @@ void Pass_lgraph_to_lnast::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node,
   }
 }
 
+void Pass_lgraph_to_lnast::add_bw_in_ln(Lnast& lnast, Lnast_nid& parent_node, const std::string_view& pin_name, const uint32_t& bits) {
+  auto tmp_var = create_temp_var(lnast);
+  auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_dot(""));
+  lnast.add_child(idx_dot, Lnast_node::create_ref(tmp_var));
+  lnast.add_child(idx_dot, Lnast_node::create_ref(pin_name));
+  lnast.add_child(idx_dot, Lnast_node::create_ref("__bits"));
+
+  auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
+  lnast.add_child(idx_asg, Lnast_node::create_ref(tmp_var));
+  lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(std::to_string(bits))));
+}
+
 void Pass_lgraph_to_lnast::handle_io(LGraph* lg, Lnast_nid& parent_lnast_node, Lnast& lnast) {
   /* Any input or output that has its bitwidth specified should add info to the LNAST.
    * As an example, if we had an input x that was 7 bits wide, this would be added:
@@ -206,6 +247,10 @@ void Pass_lgraph_to_lnast::handle_io(LGraph* lg, Lnast_nid& parent_lnast_node, L
     if (bits > 0) {
       // Put input bitwidth info in from_lg_bw_table
       lnast.set_bitwidth(pin_name, bits);
+      if (put_bw_in_ln) {
+        add_bw_in_ln(lnast, parent_lnast_node,
+            lnast.add_string(absl::StrCat("$", pin_name)), bits);
+      }
     }
 
     //if (edge.driver.get_node().get_type().is_input_signed(edge.driver.get_pid())) {
@@ -232,7 +277,12 @@ void Pass_lgraph_to_lnast::handle_io(LGraph* lg, Lnast_nid& parent_lnast_node, L
     auto bits = edge.get_bits();
     if (bits > 0) {
       // Put output bitwidth info in from_lg_bw_table
-      lnast.set_bitwidth(out_pin.get_name(), bits);
+      auto name = out_pin.get_name();
+      lnast.set_bitwidth(name, bits);
+      if (put_bw_in_ln) {
+        add_bw_in_ln(lnast, parent_lnast_node,
+            lnast.add_string(absl::StrCat("%", name)), bits);
+      }
     }
     if (edge.driver.is_signed()) {
       //FIXME: Make sure this has the correct "sign"
@@ -629,8 +679,6 @@ void Pass_lgraph_to_lnast::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node,
   // PID: 0 = S, 1 = A, 2 = B, ...
   // Y = ~SA | SB
 
-  auto if_node  = lnast.add_child(parent_node, Lnast_node::create_if("mux"));
-
   std::queue<XEdge> mux_vals;
   Node_pin sel_pin;
   for (const auto inp : pin.get_node().inp_edges_ordered()) {
@@ -643,20 +691,23 @@ void Pass_lgraph_to_lnast::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node,
   }
   I(mux_vals.size() >= 2);
 
-
-  // Create cstmt + cond + stmt for each mux val, except last.
-  uint32_t comp_val = 0;
-  while (mux_vals.size() > 1) {
+  // Set up each cond value
+  std::queue<std::string_view> temp_vars;
+  for (long unsigned int i = 0; i < mux_vals.size() - 1; i++) {
     auto temp_var = create_temp_var(lnast);
-    auto cstmt_idx = lnast.add_child(if_node, Lnast_node::create_cstmts(get_new_seq_name(lnast)));
+    temp_vars.push(temp_var);
 
-    auto eq_idx = lnast.add_child(cstmt_idx, Lnast_node::create_same(""));
+    auto eq_idx = lnast.add_child(parent_node, Lnast_node::create_same(""));
     lnast.add_child(eq_idx, Lnast_node::create_ref(temp_var));
     attach_child(lnast, eq_idx, sel_pin);
-    lnast.add_child(eq_idx, Lnast_node::create_const(lnast.add_string(std::to_string(comp_val))));
-    comp_val++;
+    lnast.add_child(eq_idx, Lnast_node::create_const(lnast.add_string(std::to_string(i))));
+  }
 
-    lnast.add_child(if_node, Lnast_node::create_cond(temp_var));
+  // Specify cond + create stmt for each mux val, except last.
+  auto if_node  = lnast.add_child(parent_node, Lnast_node::create_if("mux"));
+  while (mux_vals.size() > 1) {
+    lnast.add_child(if_node, Lnast_node::create_cond(temp_vars.front()));
+    temp_vars.pop();
 
     auto stmt_idx = lnast.add_child(if_node, Lnast_node::create_stmts(get_new_seq_name(lnast)));
 

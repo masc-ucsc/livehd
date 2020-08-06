@@ -75,6 +75,9 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
   } else if (ntype.is_not()) {
     auto fstmt = pos_to_add_to == 0 ? when->add_consequent() : when->add_otherwise();
     process_ln_not_op(ln, lnidx, fstmt);
+  } else if (ntype.is_parity()) {
+    auto fstmt = pos_to_add_to == 0 ? when->add_consequent() : when->add_otherwise();
+    process_ln_par_op(ln, lnidx, fstmt);
     /*} else if (ntype.is_select()) {
       I(false); // should has been converted to tuple chain
     } else if (ntype.is_logical_op()) {
@@ -153,6 +156,9 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
   } else if (ntype.is_not()) {
     auto fstmt = umod->add_statement();
     process_ln_not_op(ln, lnidx, fstmt);
+  } else if (ntype.is_parity()) {
+    auto fstmt = umod->add_statement();
+    process_ln_par_op(ln, lnidx, fstmt);
   /*} else if (ntype.is_select()) {
     I(false); // should has been converted to tuple chain
   } else if (ntype.is_logical_op()) {
@@ -307,6 +313,26 @@ void Inou_firrtl::process_ln_not_op(Lnast &ln, const Lnast_nid &lnidx_not, firrt
   firrtl::FirrtlPB_Expression *       rhs_expr    = new firrtl::FirrtlPB_Expression();
   firrtl::FirrtlPB_Expression_PrimOp *rhs_prim_op = new firrtl::FirrtlPB_Expression_PrimOp();
   rhs_prim_op->set_op(firrtl::FirrtlPB_Expression_PrimOp_Op_OP_BIT_NOT);
+
+  add_refcon_as_expr(ln, c1, rhs_prim_op->add_arg());
+  rhs_expr->set_allocated_prim_op(rhs_prim_op);
+
+  // Now assign lhs to rhs.
+  make_assignment(ln, c0, rhs_expr, fstmt);
+}
+
+void Inou_firrtl::process_ln_par_op(Lnast &ln, const Lnast_nid &lnidx_par, firrtl::FirrtlPB_Statement *fstmt) {
+  auto c0       = ln.get_first_child(lnidx_par);
+  auto c1       = ln.get_sibling_next(c0);
+  auto ntype_c0 = ln.get_type(c0);
+  I(ntype_c0.is_ref());
+  auto ntype_c1 = ln.get_type(c1);
+  I(ntype_c1.is_const() || ntype_c1.is_ref());
+
+  // Form expression that holds RHS contents.
+  firrtl::FirrtlPB_Expression *       rhs_expr    = new firrtl::FirrtlPB_Expression();
+  firrtl::FirrtlPB_Expression_PrimOp *rhs_prim_op = new firrtl::FirrtlPB_Expression_PrimOp();
+  rhs_prim_op->set_op(firrtl::FirrtlPB_Expression_PrimOp_Op_OP_XOR_REDUCE);
 
   add_refcon_as_expr(ln, c1, rhs_prim_op->add_arg());
   rhs_expr->set_allocated_prim_op(rhs_prim_op);
