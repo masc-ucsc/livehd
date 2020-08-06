@@ -651,8 +651,6 @@ template <typename X>
 const Tree_index tree<X>::insert_next_sibling(const Tree_index &sibling, const X &data) {
   I(sibling.level > 0);  // No siblings to root
 
-  check();
-
   auto  parent        = get_parent(sibling);
   auto *parent_lc_pos = ref_last_child_pos(parent);
 
@@ -700,7 +698,6 @@ const Tree_index tree<X>::insert_next_sibling(const Tree_index &sibling, const X
         if ((*parent_lc_pos) >> 2 == next_bucket_child.pos >> 2) {
           *parent_lc_pos = last_child_pos;
         }
-        check();
 
         return child;
       }
@@ -743,8 +740,6 @@ const Tree_index tree<X>::insert_next_sibling(const Tree_index &sibling, const X
 
   I(!child.is_invalid());
   I(is_leaf(child));
-
-  check();
 
   return child;
 }
