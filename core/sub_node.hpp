@@ -170,7 +170,7 @@ public:
     I(io_pins[instance_pid].graph_io_pos == graph_pos || !has_graph_pos_pin(graph_pos));
     io_pins[instance_pid].dir = dir;
 
-    if (io_pins[instance_pid].graph_io_pos == Port_invalid) {
+    if (io_pins[instance_pid].graph_io_pos != Port_invalid) {
       I(graph_pos2instance_pid.size()> io_pins[instance_pid].graph_io_pos);
       graph_pos2instance_pid[io_pins[instance_pid].graph_io_pos] = Port_invalid;
     }
