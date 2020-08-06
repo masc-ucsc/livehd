@@ -534,11 +534,6 @@ void Inou_firrtl::HandleMemPortPre(Lnast& lnast, Lnast_nid& parent_node, const f
     // if READ port
     late_assign_ports.insert({absl::StrCat(mport.memory_id(), ".", mport.id()), READP});
 
-    //FIXME: When FIRRTL-Proto implements enable signal on memory port, will have to move this to be late assignment.
-    auto idx_asg_e = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
-    lnast.add_child(idx_asg_e, Lnast_node::create_assign("__enable"));
-    lnast.add_child(idx_asg_e, Lnast_node::create_const("1"));
-
     auto idx_asg_l = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
     lnast.add_child(idx_asg_l, Lnast_node::create_assign("__latency"));
     lnast.add_child(idx_asg_l, Lnast_node::create_const(std::get<1>(mem_props)));
@@ -558,8 +553,16 @@ void Inou_firrtl::HandleMemPortPre(Lnast& lnast, Lnast_nid& parent_node, const f
   } else if (dir_case == firrtl::FirrtlPB_Statement_MemoryPort_Direction::FirrtlPB_Statement_MemoryPort_Direction_MEMORY_PORT_DIRECTION_READ_WRITE) {
     // if READ-WRITE port
     late_assign_ports.insert({absl::StrCat(mport.memory_id(), ".", mport.id()), READ_WRITEP});
-    //TODO... Currently no easy way to handle the enable signal...
-    I(false);
+
+    auto idx_asg_m = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
+    lnast.add_child(idx_asg_m, Lnast_node::create_assign("__wrmask"));
+    lnast.add_child(idx_asg_m, Lnast_node::create_const("-1u")); //Sets to all 1s
+
+    auto idx_asg_l = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
+    lnast.add_child(idx_asg_l, Lnast_node::create_assign("__latency"));
+    lnast.add_child(idx_asg_l, Lnast_node::create_const(std::get<2>(mem_props)));//FIXME: Can only provide 1 latency, so go with write lat
+
+
 
   } else if (dir_case == firrtl::FirrtlPB_Statement_MemoryPort_Direction::FirrtlPB_Statement_MemoryPort_Direction_MEMORY_PORT_DIRECTION_INFER) {
     // if port dir needs to be inferred
@@ -596,14 +599,15 @@ void Inou_firrtl::HandleMemPortPre(Lnast& lnast, Lnast_nid& parent_node, const f
   std::vector<std::string> suffix_list;
   suffix_list.emplace_back("addr");
   suffix_list.emplace_back("clk");
+  suffix_list.emplace_back("en");
   if (dir_case == firrtl::FirrtlPB_Statement_MemoryPort_Direction::FirrtlPB_Statement_MemoryPort_Direction_MEMORY_PORT_DIRECTION_READ) {
-    // Things to set to 0 at highest scope: addr, clk
+    // Things to set to 0 at highest scope: addr, en, clk
   } else if (dir_case == firrtl::FirrtlPB_Statement_MemoryPort_Direction::FirrtlPB_Statement_MemoryPort_Direction_MEMORY_PORT_DIRECTION_WRITE) {
     // Things to set to 0 at highest scope: addr, en, clk, data
-    suffix_list.emplace_back("en");
     suffix_list.emplace_back("data");
   } else if (dir_case == firrtl::FirrtlPB_Statement_MemoryPort_Direction::FirrtlPB_Statement_MemoryPort_Direction_MEMORY_PORT_DIRECTION_READ_WRITE) {
-    //TODO
+    // Things to set to 0 at highest scope: addr, en, clk, data
+    suffix_list.emplace_back("data");
   } else if (dir_case == firrtl::FirrtlPB_Statement_MemoryPort_Direction::FirrtlPB_Statement_MemoryPort_Direction_MEMORY_PORT_DIRECTION_INFER) {
     //TODO
   } else {
@@ -1360,9 +1364,16 @@ std::string_view Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB
   if (dangling_ports_map.contains(alter_flat_str.substr(0, delim_loc))) {
     /* If this is a sub-access to a memory port declared in a Memory Port
      * statement, then I need to change name from (if port name is "r") r.a
-     * to #mem_name.r.__data.a (if on RHS) or mem_name_r_data.a (if on LHS). */
+     * to #mem_name.r.__data.a (if on RHS) or mem_name_r_data.a (if on LHS).
+     * Also set enable to be 1 (since default is 0, only sets to 1 when used). */
     auto por_name = alter_flat_str.substr(0, delim_loc);
     auto mem_name = dangling_ports_map[por_name];
+
+    auto en_str   = ln.add_string(absl::StrCat(mem_name.substr(1), "_", por_name, "_en"));
+    auto idx_asg  = ln.add_child(parent_node, Lnast_node::create_assign("dpo"));
+    ln.add_child(idx_asg, Lnast_node::create_ref(en_str));
+    ln.add_child(idx_asg, Lnast_node::create_const("1"));
+
     if (is_rhs) {
       alter_full_str = absl::StrCat("#", mem_name, ".", por_name, ".__data", alter_flat_str.substr(delim_loc));
     } else {
@@ -1767,8 +1778,15 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
       if (dangling_ports_map.count(expr_string)) {
         /* If its a memory port created after the memory, the name found will
          * just be the port id (i.e. "r"). This needs to be changed to
-         * #mem_name.r.__data . */
+         * #mem_name.r.__data . Also set the mem_name_r_en to be 1 (since memory
+         * ports I have set up to have a default enable of 0). */
+
         auto mem_name = dangling_ports_map[expr_string];
+        auto en_str   = lnast.add_string(absl::StrCat(mem_name, "_", expr_string, "_en"));
+        auto idx_asg  = lnast.add_child(parent_node, Lnast_node::create_assign("dpo"));
+        lnast.add_child(idx_asg, Lnast_node::create_ref(en_str));
+        lnast.add_child(idx_asg, Lnast_node::create_const("1"));
+
         expr_string = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat("#", mem_name, ".", expr_string, ".__data"));
       } else {
         expr_string = lnast.add_string(get_full_name(lnast, parent_node, expr.reference().id(), true));
@@ -1889,12 +1907,13 @@ std::string Inou_firrtl::ReturnExprString(Lnast& lnast, const firrtl::FirrtlPB_E
          * #mem_name.r.__data if on RHS. If this is on the LHS, we need to set
          * the mem_name_r_enable = 1 then mem_name_r_data = ... . */
         auto mem_name = dangling_ports_map[expr_string];
-        if (!is_rhs) {
-          auto en_str   = lnast.add_string(absl::StrCat(mem_name, "_", expr_string, "_en"));
-          auto idx_asg  = lnast.add_child(parent_node, Lnast_node::create_assign("dpo"));
-          lnast.add_child(idx_asg, Lnast_node::create_ref(en_str));
-          lnast.add_child(idx_asg, Lnast_node::create_const("1"));
 
+        auto en_str   = lnast.add_string(absl::StrCat(mem_name, "_", expr_string, "_en"));
+        auto idx_asg  = lnast.add_child(parent_node, Lnast_node::create_assign("dpo"));
+        lnast.add_child(idx_asg, Lnast_node::create_ref(en_str));
+        lnast.add_child(idx_asg, Lnast_node::create_const("1"));
+
+        if (!is_rhs) {
           expr_string = lnast.add_string(absl::StrCat(mem_name, "_", expr_string, "_data"));
         } else {
           // FIXME: For iread-write ports, may have to make it so I set enable=1 here too (even though this is redundant for reads)
@@ -2087,7 +2106,6 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
       break;
     }
     case firrtl::FirrtlPB_Statement::kMemoryPort: {  // MemoryPort
-      //TODO
       HandleMemPort(lnast, parent_node, stmt.memory_port());
       break;
     }
@@ -2143,6 +2161,7 @@ void Inou_firrtl::PerformLateMemAssigns(Lnast& lnast, Lnast_nid& parent_node) {
 
     } else if (mem_port.second == READP) {
       // Attributes needing late assigns: addr, clk
+      assign_pairs.push_back({absl::StrCat(port_name, ".__enable"), absl::StrCat(rstr_prefix, "en")});
 
     } else if ((mem_port.second == WRITEP) || (mem_port.second == READ_WRITEP)) {
       // Attributes needing late assigns: addr, clk en, data,... FIXME: Subject to change/need to review for r-w port
