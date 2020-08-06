@@ -714,6 +714,10 @@ const Tree_index tree<X>::insert_next_sibling(const Tree_index &sibling, const X
       auto &l = pointers_stack[created_next_sibling.level];
       l[created_next_sibling.pos>>2].first_child[0] = l[sibling.pos>>2].first_child[3];
       l[created_next_sibling.pos>>2].last_child[0]  = l[sibling.pos>>2].last_child[3];
+			auto fc = l[sibling.pos>>2].first_child[3];
+			if (fc!=-1) {
+				adjust_parent_pointer(Tree_index(sibling.level+1,fc), sibling.pos|3, created_next_sibling.pos);
+			}
 
       make_space_after(sibling);
 
