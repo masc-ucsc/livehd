@@ -358,12 +358,15 @@ void Hier_tree::print_node(const phier& node) const {
 }
 
 void Hier_tree::print() const {
+
+  std::cout << std::endl;
   print_node(root);
   std::cout << std::endl;
   
   for (size_t i = 0; i < collapsed_hiers.size(); i++) {
     std::cout << "printing collapsed hierarchy " << i << ":" << std::endl;
     print_node(collapsed_hiers[i]);
+    std::cout << std::endl;
   }
 }
 
@@ -395,6 +398,8 @@ phier Hier_tree::collapse(phier node, double threshold_area) {
       return make_hier_node(node->graph_subset);
     }
     
+    // I believe the HiReg paper states that child nodes can have areas less than the thresold,
+    // as long as the total area between the child nodes is greater than the threshold
     auto n1 = copy_subtree(node->children[0]);
     auto n2 = copy_subtree(node->children[1]);
     
@@ -405,7 +410,6 @@ phier Hier_tree::collapse(phier node, double threshold_area) {
   // this lambda assumes that set_number currently contains a unique set
   std::function<void(phier)> collapse_subtree = [&, this](phier node) {
     if (node->is_leaf()) {
-      std::cout << "collapsing leaf node " << node->area << std::endl;
       for (auto v : ginfo.al.verts()) {
         if (ginfo.sets(v) == node->graph_subset) {
           ginfo.sets[v] = set_number;
@@ -420,8 +424,6 @@ phier Hier_tree::collapse(phier node, double threshold_area) {
   auto new_subtree = copy_subtree(node);
   set_number++;
   collapse_subtree(new_subtree);
-  
-  std::cout << "making new set " << set_number << std::endl;
   
   new_subtree->area = find_area(new_subtree);
   new_subtree->graph_subset = set_number;
