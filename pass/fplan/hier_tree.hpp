@@ -82,15 +82,14 @@ private:
   // perform hierarchy discovery
   phier discover_hierarchy(Graph_info& g, int start_set, unsigned int num_components);
   
+  double find_area(phier node) const;
+  
   void print_node(const phier& node) const;
 
   phier collapse(phier node, double threshold_area);
   
   // generator used to make unique node names
   unsigned int node_number = 0;
-
-  // generator used to make unique set names
-  unsigned int set_number = 1;
 
   // root node of hierarchy tree
   phier root;
