@@ -64,5 +64,27 @@ public:
 else
       return "]";
   }
+
+  //this func is to truncate the %/$/# during cpp or verilog conversion
+  bool has_prefix(std::string_view test_string) {
+    return (test_string.find("$")==0 || test_string.find("#") ==0 || test_string.find("%") == 0);
+  }
+  virtual std::string ref_name(std::string_view prp_term) {
+    if(Code_gen_all_lang::has_prefix(prp_term)) {
+      std::string _prp_term = std::string(prp_term);
+      return _prp_term.substr(1);
+    } else
+      return std::string(prp_term);
+  }
+
+  virtual std::string ref_name(std::string prp_term) {
+    if(Code_gen_all_lang::has_prefix(prp_term)) {
+      return prp_term.substr(1);
+    } else
+      return prp_term;
+  }
+
+
+
 };
 
