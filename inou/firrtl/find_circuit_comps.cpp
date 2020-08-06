@@ -57,11 +57,13 @@ void Inou_firrtl::SearchNode(Lnast &ln, const Lnast_nid &parent_node, firrtl::Fi
  * and provides a pointer to that type. */
 // FIXME: This only works for UInt type right now
 firrtl::FirrtlPB_Type *Inou_firrtl::CreateTypeObject(uint32_t bitwidth) {
-  auto width = new firrtl::FirrtlPB_Width();
-  width->set_value(bitwidth);
-
   auto uint_type = new firrtl::FirrtlPB_Type_UIntType();
-  uint_type->set_allocated_width(width);
+  if (bitwidth > 0) {
+    auto width = new firrtl::FirrtlPB_Width();
+    width->set_value(bitwidth);
+
+    uint_type->set_allocated_width(width);
+  }
 
   auto type = new firrtl::FirrtlPB_Type();
   type->set_allocated_uint_type(uint_type);
@@ -107,7 +109,15 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
       return;
     auto port = umod->add_port();
     port->set_id((std::string)name.substr(1));
-    auto type = CreateTypeObject(ln.get_bitwidth(name.substr(1)));
+    //auto type = CreateTypeObject(ln.get_bitwidth(name.substr(1)));
+    firrtl::FirrtlPB_Type *type;
+    if (ln.is_in_bw_table(name.substr(1))) {
+      type = CreateTypeObject(ln.get_bitwidth(name.substr(1)));
+    } else {
+      fmt::print("{}\n", name);
+      I(!(name.substr(0,1) == "$")); // Inputs HAVE to have bw
+      type = CreateTypeObject(0);
+    }
     port->set_allocated_type(type);
 
     if (name.substr(0, 1) == "$")
@@ -124,7 +134,13 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
     auto reg = new firrtl::FirrtlPB_Statement_Register();
     reg->set_id((std::string)name.substr(1));
 
-    auto type = CreateTypeObject(ln.get_bitwidth(name.substr(1)));  // FIXME: Just setting bits to implicit right now
+    //auto type = CreateTypeObject(ln.get_bitwidth(name.substr(1)));  // FIXME: Just setting bits to implicit right now
+    firrtl::FirrtlPB_Type *type;
+    if (ln.is_in_bw_table(name.substr(1))) {
+      type = CreateTypeObject(ln.get_bitwidth(name.substr(1)));
+    } else {
+      type = CreateTypeObject(0);
+    }
     reg->set_allocated_type(type);
 
     /* Specify register reset and init as UInt(0). Clock isn't
@@ -144,7 +160,13 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
     auto wire = new firrtl::FirrtlPB_Statement_Wire();
     wire->set_id(new_name);
 
-    auto type = CreateTypeObject(ln.get_bitwidth(name));  // FIXME: Just setting bits to implicit right now
+    //auto type = CreateTypeObject(ln.get_bitwidth(name));  // FIXME: Just setting bits to implicit right now
+    firrtl::FirrtlPB_Type *type;
+    if (ln.is_in_bw_table(name)) {
+      type = CreateTypeObject(ln.get_bitwidth(name));
+    } else {
+      type = CreateTypeObject(0);
+    }
     wire->set_allocated_type(type);
 
     auto fstmt = umod->add_statement();
@@ -160,7 +182,13 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
     auto wire = new firrtl::FirrtlPB_Statement_Wire();
     wire->set_id((std::string)name);  // FIXME: Figure out best way to use renaming map to fix submodule input tuple names
 
-    auto type = CreateTypeObject(ln.get_bitwidth(name));  // FIXME: Just setting bits to implicit right now
+    //auto type = CreateTypeObject(ln.get_bitwidth(name));  // FIXME: Just setting bits to implicit right now
+    firrtl::FirrtlPB_Type *type;
+    if (ln.is_in_bw_table(name)) {
+      type = CreateTypeObject(ln.get_bitwidth(name));
+    } else {
+      type = CreateTypeObject(0);
+    }
     wire->set_allocated_type(type);
 
     auto fstmt = umod->add_statement();

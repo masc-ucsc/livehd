@@ -163,31 +163,21 @@ void Pass_lgraph_to_lnast::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node,
   // Specify bitwidth in LNAST table (for code gen purposes)
   std::string_view name;
   auto bw = pin.get_bits();
-  if (bw > 0) {
-    // FIXME?: Do I want all wires in the map + is this best spot to put it in map?
-    switch (pin.get_node().get_type().op) {
-      case GraphIO_Op:
-      case Const_Op:
-        return;
-        break;
-      case SFlop_Op:
-      case AFlop_Op:
-        attach_flop_node(lnast, parent_node, pin);
-        name = absl::StrCat("#", dpin_get_name(pin));
-        lnast.set_bitwidth(name.substr(1), bw);
-        break;
-      default:
-        name = dpin_get_name(pin);
-        lnast.set_bitwidth(name, bw);
-    }
-    if (put_bw_in_ln) {
-      add_bw_in_ln(lnast, parent_node, name, bw);
+  auto ntype = pin.get_node().get_type().op;
+  if (bw > 0 & (pin.get_name().substr(0,3) != "___")) {
+    /* NOTE->hunter: I decided to only specify reg and IO bw (not
+     * wires). If more is needed just widen below condition. */
+    if (ntype == SFlop_Op || ntype == AFlop_Op) {
+      name = absl::StrCat("#", dpin_get_name(pin));
+      lnast.set_bitwidth(name.substr(1), bw);
+      if (put_bw_in_ln) {
+        add_bw_in_ln(lnast, parent_node, name, bw);
+      }
     }
   }
 
   // Look at pin's node's type, then based off that figure out what type of node to add to LNAST.
-  switch (pin.get_node().get_type().op) {  // Future note to self: when doing src_pins, always check if sources to node are io
-                                           // inputs
+  switch (ntype) {  // Future note to self: when doing src_pins, always check if sources to node are io inputs
     case GraphIO_Op:
     case Const_Op:
       // Skip, nothing to do.
@@ -527,6 +517,7 @@ void Pass_lgraph_to_lnast::attach_join_node(Lnast& lnast, Lnast_nid& parent_node
     //fmt::print("\tjoin -- {} {}\n", inp.sink.get_pid(), bits_to_shift);
   }
 
+  I(dpins.size() != 0);
   if (dpins.size() < 2) {
     // If this join node only has 1 input, it's really just an assign.
     auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
@@ -534,8 +525,6 @@ void Pass_lgraph_to_lnast::attach_join_node(Lnast& lnast, Lnast_nid& parent_node
     attach_child(lnast, idx_asg, dpins.top());
     return;
   }
-  I(dpins.size() != 0);
-  I(dpins.size() >= 2);
 
   absl::flat_hash_set<std::string_view> interm_names;
   while (dpins.size() > 1) {
