@@ -600,7 +600,10 @@ bool Pass_cprop::process_tuple_get(Node &tg_node, LGraph *lg) {
 
   if (followed_by_a_tg) {
     bool follower_want_attr = false;
-    auto follower_key_name = follower_tg_node.setup_sink_pin(1).get_driver_pin().get_name();
+    std::string_view follower_key_name;
+    if (follower_tg_node.has_sink_pin_connected(1)) 
+      follower_key_name = follower_tg_node.setup_sink_pin(1).get_driver_pin().get_name();
+    
     if (follower_key_name.substr(0,6) == "__bits") // extend to other attribute
       follower_want_attr = true;
     

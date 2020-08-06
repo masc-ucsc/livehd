@@ -391,7 +391,7 @@ void Lnast_dfg::process_ast_tuple_struct(LGraph *dfg, const Lnast_nid &lnidx_tup
       auto tn_dpin    = setup_tuple_ref(dfg, tup_name, true);
       auto kp_dnode   = dfg->create_node_const(Lconst(kp));
       auto kp_dpin    = kp_dnode.setup_driver_pin();
-      auto value_dpin = setup_ref_node_dpin(dfg, c1);
+      auto value_dpin = setup_ref_node_dpin(dfg, c1, 0, 0, 1);
 
       auto tup_add    = dfg->create_node(TupAdd_Op);
       auto tn_spin    = tup_add.setup_sink_pin("TN"); // tuple name
@@ -419,7 +419,7 @@ void Lnast_dfg::process_ast_tuple_struct(LGraph *dfg, const Lnast_nid &lnidx_tup
     auto tn_dpin    = setup_tuple_ref(dfg, tup_name, true);
     auto kp_dnode   = dfg->create_node_const(Lconst(kp));
     auto kp_dpin    = kp_dnode.setup_driver_pin();
-    auto value_dpin = setup_ref_node_dpin(dfg, tup_child);
+    auto value_dpin = setup_ref_node_dpin(dfg, tup_child, 0, 0, 1);
 
     auto tup_add    = dfg->create_node(TupAdd_Op);
     auto tn_spin    = tup_add.setup_sink_pin("TN"); // tuple name
@@ -850,7 +850,7 @@ Node_pin Lnast_dfg::setup_node_assign_and_lhs(LGraph *dfg, const Lnast_nid &lnid
 
 // for both target and operands, except the new io, reg, and const, the node and its dpin
 // should already be in the table as the operand comes from existing operator output
-Node_pin Lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx_opd, bool from_phi, bool from_concat) {
+Node_pin Lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx_opd, bool from_phi, bool from_concat, bool from_tupstrc) {
   auto name  = lnast->get_sname(lnidx_opd);
   auto vname = lnast->get_vname(lnidx_opd);
   auto subs  = lnast->get_subs(lnidx_opd);
@@ -870,20 +870,20 @@ Node_pin Lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx_opd,
     }
   }
 
-  /* const auto it_wire = wire2node.find(vname); */
-  /* if (it_wire != wire2node.end()) { */
-  /*   return it_wire->second.get_driver_pin(0); */
-  /* } */
-
 
   const auto it = name2dpin.find(name);
   if (it != name2dpin.end()) {
     auto op = it->second.get_node().get_type().op;
 
     // it's a scalar variable, just return the node pin
-    if (op != TupAdd_Op) return it->second;
+    if (op != TupAdd_Op) 
+      return it->second;
 
-    if (op == TupAdd_Op && from_concat) return it->second;
+    if (op == TupAdd_Op && from_concat)  
+      return it->second;
+
+    if (op == TupAdd_Op && from_tupstrc) 
+      return it->second;
 
     // return a connected TupGet if the ref node is a TupAdd and the operator is not concat
     auto tup_get = dfg->create_node(TupGet_Op);
