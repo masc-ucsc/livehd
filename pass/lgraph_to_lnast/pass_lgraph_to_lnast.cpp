@@ -145,7 +145,6 @@ void Pass_lgraph_to_lnast::handle_source_node(LGraph* lg, Node_pin& pin, Lnast& 
 
 /* TODO:
   Invalid_Op,
-  Mod_Op,
   LUT_Op,
   DontCare_Op,
   Memory_Op,
@@ -169,8 +168,6 @@ void Pass_lgraph_to_lnast::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node,
     case Xor_Op: attach_binaryop_node(lnast, parent_node, pin); break;
     case Not_Op: attach_not_node(lnast, parent_node, pin); break;
     case Sum_Op: attach_sum_node(lnast, parent_node, pin); break;
-    /*case Mod_Op:
-      break;*/
     case LessThan_Op:
     case GreaterThan_Op:
     case LessEqualThan_Op:
@@ -178,6 +175,7 @@ void Pass_lgraph_to_lnast::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node,
     case Equals_Op:
     case Mult_Op:
     case Div_Op:
+    case Mod_Op:
     case LogicShiftRight_Op:
     case ArithShiftRight_Op:
     case DynamicShiftRight_Op:
@@ -204,13 +202,24 @@ void Pass_lgraph_to_lnast::handle_io(LGraph* lg, Lnast_nid& parent_lnast_node, L
   auto inp_io_node = lg->get_graph_input_node();
   for (const auto edge : inp_io_node.out_edges()) {
     auto bits = edge.get_bits();
+    auto pin_name = edge.driver.get_name();
     if (bits > 0) {
       // Put input bitwidth info in from_lg_bw_table
-      lnast.set_bitwidth(edge.driver.get_name(), bits);
+      lnast.set_bitwidth(pin_name, bits);
     }
 
+    //if (edge.driver.get_node().get_type().is_input_signed(edge.driver.get_pid())) {
     if (edge.driver.is_signed()) {
-        //FIXME: Add code to add dot node for signed
+      //FIXME: Make sure this has the correct "sign"
+      auto temp_var_name = create_temp_var(lnast);
+
+      auto idx_dot = lnast.add_child(parent_lnast_node, Lnast_node::create_dot("sign"));
+      lnast.add_child(idx_dot, Lnast_node::create_ref(temp_var_name));
+      lnast.add_child(idx_dot, Lnast_node::create_ref(pin_name));
+      lnast.add_child(idx_dot, Lnast_node::create_ref("__sign"));
+      auto idx_asg = lnast.add_child(parent_lnast_node, Lnast_node::create_assign("sign"));
+      lnast.add_child(idx_asg, Lnast_node::create_ref(temp_var_name));
+      lnast.add_child(idx_asg, Lnast_node::create_ref("true"));
     }
   }
 
@@ -218,15 +227,24 @@ void Pass_lgraph_to_lnast::handle_io(LGraph* lg, Lnast_nid& parent_lnast_node, L
   for (const auto edge : out_io_node.inp_edges()) {
     auto sink_pid = edge.sink.get_pid();
     auto out_pin = edge.sink.get_node().get_driver_pin(sink_pid);
+    auto pin_name = out_pin.get_name();
 
     auto bits = edge.get_bits();
     if (bits > 0) {
       // Put output bitwidth info in from_lg_bw_table
       lnast.set_bitwidth(out_pin.get_name(), bits);
     }
-
     if (edge.driver.is_signed()) {
-      //FIXME: Add code to add dot node for signed
+      //FIXME: Make sure this has the correct "sign"
+      auto temp_var_name = create_temp_var(lnast);
+
+      auto idx_dot = lnast.add_child(parent_lnast_node, Lnast_node::create_dot("sign"));
+      lnast.add_child(idx_dot, Lnast_node::create_ref(temp_var_name));
+      lnast.add_child(idx_dot, Lnast_node::create_ref(pin_name));
+      lnast.add_child(idx_dot, Lnast_node::create_ref("__sign"));
+      auto idx_asg = lnast.add_child(parent_lnast_node, Lnast_node::create_assign("sign"));
+      lnast.add_child(idx_asg, Lnast_node::create_ref(temp_var_name));
+      lnast.add_child(idx_asg, Lnast_node::create_ref("true"));
     }
   }
 }
@@ -317,7 +335,6 @@ void Pass_lgraph_to_lnast::attach_sum_node(Lnast& lnast, Lnast_nid& parent_node,
 
 void Pass_lgraph_to_lnast::attach_binaryop_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
   // PID: 0 = A, 0 = Y, 1 = YReduce
-  // FIXME: Not yet sure to handle YReduce portion of this
 
   // Check to see if output PID 0 and PID 1 are used.
   bool pid0_used = false;
@@ -429,15 +446,13 @@ void Pass_lgraph_to_lnast::attach_binary_reduc(Lnast& lnast, Lnast_nid& parent_n
     lnast.add_child(not_idx, Lnast_node::create_ref(temp_eq_name));
 
   } else if (pid1_pin.get_node().get_type().op == Xor_Op) {
-    //FIXME: Parity node type does not exist yet in LNAST
-    I(false);
-    /*auto par_idx = lnast.add_child(parent_node, Lnast_node::create_parity("yred_par"));
+    auto par_idx = lnast.add_child(parent_node, Lnast_node::create_parity("yred_par"));
     lnast.add_child(par_idx, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pid1_pin))));
     if (only_one_pin) {
-      attach_child(lnast, eq_idx, dpins.front());
+      attach_child(lnast, par_idx, dpins.front());
     } else {
-      lnast.add_child(eq_idx, Lnast_node::create_ref(concat_name));
-    }*/
+      lnast.add_child(par_idx, Lnast_node::create_ref(concat_name));
+    }
   } else {
     fmt::print("Error: attach_binaryop_node doesn't support given node type\n");
     I(false);
@@ -461,6 +476,15 @@ void Pass_lgraph_to_lnast::attach_join_node(Lnast& lnast, Lnast_nid& parent_node
     bits_to_shift += inp.driver.get_bits();
     //fmt::print("\tjoin -- {} {}\n", inp.sink.get_pid(), bits_to_shift);
   }
+
+  if (dpins.size() < 2) {
+    // If this join node only has 1 input, it's really just an assign.
+    auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
+    lnast.add_child(idx_asg, Lnast_node::create_ref(dpin_get_name(pin)));
+    attach_child(lnast, idx_asg, dpins.top());
+    return;
+  }
+  I(dpins.size() != 0);
   I(dpins.size() >= 2);
 
   absl::flat_hash_set<std::string_view> interm_names;
@@ -586,6 +610,7 @@ void Pass_lgraph_to_lnast::attach_simple_node(Lnast& lnast, Lnast_nid& parent_no
     case Equals_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_same("==")); break;
     case Mult_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_mult("mult")); break;
     case Div_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_div("div")); break;
+    case Mod_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_mod("mod")); break;
     case LogicShiftRight_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_logic_shift_right("l_shr")); break;
     case ArithShiftRight_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_arith_shift_right("a_shr")); break;
     case DynamicShiftRight_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_dynamic_shift_right("d_shr")); break;

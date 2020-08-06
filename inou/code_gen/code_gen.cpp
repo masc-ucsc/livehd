@@ -314,12 +314,14 @@ void Code_gen::do_func_call(const mmap_lib::Tree_index& func_call_node_index) {
 }
 //-------------------------------------------------------------------------------------
 //Process the "if" node:
+//pattern:
+//if ->
+//   cond (like ___a)
+//   stmts
 void Code_gen::do_if(const mmap_lib::Tree_index& if_node_index) {
   fmt::print("node:if\n");
   auto curr_index = lnast->get_first_child(if_node_index);
   int node_num = 0;
-
-  //absl::StrAppend(&buffer_to_print, "lnast_to->start_if()\n");
 
   while(curr_index!=lnast->invalid_index()) {
     assert(!(lnast->get_type(curr_index)).is_invalid());
@@ -328,18 +330,14 @@ void Code_gen::do_if(const mmap_lib::Tree_index& if_node_index) {
     auto curlvl = curr_index.level;//for debugging message printing purposes only
     fmt::print("Processing assign child {} at level {} \n",lnast->get_name(curr_index), curlvl);
 
-    if(node_num>3) {
-      if(curr_node_type.is_cstmts()) {
-        //absl::StrAppend(&buffer_to_print, "xx1\n" );
-        //absl::StrAppend(&buffer_to_print, indent(), lnast_to->start_else_if() );
-        do_stmts(curr_index);
-        //absl::StrAppend(&buffer_to_print, lnast_to->end_else_if());
-      } else if (curr_node_type.is_cond()) {
+    if(node_num>2) {
+      //if(curr_node_type.is_cstmts()) {
+      //  do_stmts(curr_index);
+      //} else
+      if (curr_node_type.is_cond()) {
         absl::StrAppend(&buffer_to_print, indent(), lnast_to->start_else_if());
         do_cond(curr_index);
       } else if (curr_node_type.is_stmts()) {
-        //absl::StrAppend(&buffer_to_print, "xx2\n" );
-        //absl::StrAppend(&buffer_to_print, lnast_to->end_if_or_else());
         bool prev_was_cond = (lnast->get_data(lnast->get_sibling_prev(curr_index))).type.is_cond();
         if (!prev_was_cond) {
           absl::StrAppend(&buffer_to_print, indent(), lnast_to->start_else());
@@ -352,13 +350,12 @@ void Code_gen::do_if(const mmap_lib::Tree_index& if_node_index) {
         }
       }
     } else {
-      if(curr_node_type.is_cstmts()) {
-        //absl::StrAppend(&buffer_to_print," do cstmts here \n");
-        do_stmts(curr_index);
-      } else if (curr_node_type.is_cond()) {
+      //if(curr_node_type.is_cstmts()) {
+      //  do_stmts(curr_index);
+      //} else
+      if (curr_node_type.is_cond()) {
         absl::StrAppend(&buffer_to_print, indent(), lnast_to->start_cond());
         do_cond(curr_index);
-        //do_cond:
       } else if (curr_node_type.is_stmts()) {
         indendation++;
         do_stmts(curr_index);
@@ -371,7 +368,7 @@ void Code_gen::do_if(const mmap_lib::Tree_index& if_node_index) {
     curr_index = lnast->get_sibling_next(curr_index);
   }
 
-  if(node_num<=3) absl::StrAppend(&buffer_to_print, indent(), lnast_to->end_if_or_else());
+  if(node_num<=2) absl::StrAppend(&buffer_to_print, indent(), lnast_to->end_if_or_else());
 }
 
 //-------------------------------------------------------------------------------------
@@ -666,7 +663,7 @@ std::string Code_gen::resolve_tuple_assign(const mmap_lib::Tree_index& tuple_ass
 //-------------------------------------------------------------------------------------
 //check if the node has "___"
 bool Code_gen::is_temp_var(std::string_view test_string) {
-  return test_string.find("___")==0;
+  return (test_string.find("___")==0 || test_string.find("_._")==0) ;
 }
 
 //-------------------------------------------------------------------------------------
