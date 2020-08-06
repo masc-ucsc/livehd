@@ -274,9 +274,9 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
 }
 
 phier Hier_tree::make_hier_tree(phier t1, phier t2) {
+
   auto pnode = std::make_shared<Hier_node>();
   pnode->name = "node_" + std::to_string(node_number);
-  pnode->graph_subset = Hier_node::Null_subset;
   
   pnode->children[0] = t1;
   t1->parent = pnode;
@@ -290,7 +290,7 @@ phier Hier_tree::make_hier_tree(phier t1, phier t2) {
 }
 
 phier Hier_tree::make_hier_node(const int set) {
-  I(set != Hier_node::Null_subset);
+  I(set >= 0);
 
   phier pnode = std::make_shared<Hier_node>();
   pnode->name = "leaf_node_" + std::to_string(node_number);
@@ -348,17 +348,18 @@ void Hier_tree::print_node(const phier& node) const {
 
   std::cout << node->name << ": area = " << node->area;
   
-  if (node->graph_subset == Hier_node::Null_subset) {
+  if (node->is_leaf()) {
+    std::cout << ", containing set " << node->graph_subset << std::endl;
+  } else {
     std::cout << ", children = (" << node->children[0]->name << ", " << node->children[1]->name << ")" << std::endl;
     print_node(node->children[0]);
     print_node(node->children[1]);
-  } else {
-    std::cout << ", containing set " << node->graph_subset << std::endl;
   }
 }
 
 void Hier_tree::print() const {
   print_node(root);
+  std::cout << std::endl;
   
   for (size_t i = 0; i < collapsed_hiers.size(); i++) {
     std::cout << "printing collapsed hierarchy " << i << ":" << std::endl;
@@ -368,42 +369,76 @@ void Hier_tree::print() const {
 
 phier Hier_tree::collapse(phier node, double threshold_area) {
   
+  // add up the total area of all the leaves in the subtree
   std::function<double(phier)> find_area = [&](phier node) -> double {
-    if (node->children[0] == nullptr && node->children[1] == nullptr) {
+    if (node->is_leaf()) {
       return node->area;
     }
 
     return find_area(node->children[0]) + find_area(node->children[1]);
   };
   
-  if (find_area(root) > threshold_area) {
-    auto t1 = collapse(root->children[0], threshold_area);
-    auto t2 = collapse(root->children[1], threshold_area);
+  if (find_area(node) >= threshold_area) {
+    if (!node->is_leaf()) {
+      auto n1 = collapse(node->children[0], threshold_area);
+      auto n2 = collapse(node->children[1], threshold_area);
+      
+      return make_hier_tree(n1, n2);
+    }
     
-    return make_hier_tree(t1, t2);
-  } else {
-    set_number++;
-
-    std::function<void(phier)> change_set = [&, this](phier node) {
-      if (node->children[0] == nullptr && node->children[1] == nullptr) {
-        node->graph_subset = set_number;
-      } else {
-        change_set(root->children[0]);
-        change_set(root->children[1]);
-      }
-    };
-
-    change_set(root);
-
-    return root;
+    return make_hier_node(node->graph_subset);
   }
+  
+  // create a new subtree from an existing subtree
+  std::function<phier(phier)> copy_subtree = [&, this](phier node) -> phier {
+    if (node->is_leaf()) {
+      return make_hier_node(node->graph_subset);
+    }
+    
+    auto n1 = copy_subtree(node->children[0]);
+    auto n2 = copy_subtree(node->children[1]);
+    
+    return make_hier_tree(n1, n2);
+  };
+  
+  // make all nodes belong to the same set
+  // this lambda assumes that set_number currently contains a unique set
+  std::function<void(phier)> collapse_subtree = [&, this](phier node) {
+    if (node->is_leaf()) {
+      std::cout << "collapsing leaf node " << node->area << std::endl;
+      for (auto v : ginfo.al.verts()) {
+        if (ginfo.sets(v) == node->graph_subset) {
+          ginfo.sets[v] = set_number;
+        }
+      }
+    } else {
+      collapse_subtree(node->children[0]);
+      collapse_subtree(node->children[1]);
+    }
+  };
+
+  auto new_subtree = copy_subtree(node);
+  set_number++;
+  collapse_subtree(new_subtree);
+  
+  std::cout << "making new set " << set_number << std::endl;
+  
+  new_subtree->area = find_area(new_subtree);
+  new_subtree->graph_subset = set_number;
+
+  // delete child nodes once everything is moved over
+  new_subtree->children[0] = nullptr;
+  new_subtree->children[1] = nullptr;
+
+  return new_subtree;
 }
 
 void Hier_tree::collapse(double threshold_area) {
 
   I(threshold_area >= 0.0);
   
-  // if the minimum area is zero, the full hierarchy is kept
+  // if the minimum area is zero, the full hierarchy is kept so we don't need to do anything
+  
   if (threshold_area > 0.0) {
     auto new_tree = collapse(root, threshold_area);
     collapsed_hiers.push_back(new_tree);

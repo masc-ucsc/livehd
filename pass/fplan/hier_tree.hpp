@@ -20,13 +20,14 @@
 struct Hier_node {
   std::string name;
   
-  double area = 0.0; // area of the leaf if node is a leaf
+  double area = 0.0; // area of the leaf (if node is a leaf)
 
   std::shared_ptr<Hier_node> parent = {nullptr};
   std::shared_ptr<Hier_node> children[2] = {nullptr, nullptr};
 
-  static constexpr int Null_subset = -1;
-  int graph_subset; // which part of the graph the node is responsible for, or Null_subset
+  int graph_subset; // which part of the graph the leaf is responsible for (if node is a leaf)
+
+  bool is_leaf() const { return children[0] == nullptr && children[1] == nullptr; }
 };
 
 typedef std::shared_ptr<Hier_node> phier;
