@@ -6,13 +6,8 @@
 
 #pragma once
 
-#include <string> // for strings
 #include <memory> // for shared_ptr
-#include <vector> // for min cut
-#include <limits> // for most negative value in min cut
-#include <iostream> // include printing facilities if we're debugging things
-
-#include "i_resolve_header.hpp"
+#include <string> // for strings
 
 #include "graph_info.hpp"
 
