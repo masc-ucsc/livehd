@@ -61,15 +61,15 @@ protected:
     auto s1_aaa = s1.setup_sink_pin("an_input");
     auto s1_sss = s1.setup_driver_pin("s1_output");
 
-    I(s1_aaa.get_pid() == 13);
-    I(s1_sss.get_pid() == 17);
+    I(s1_aaa.get_pid() == c1_aaa.get_pid());
+    I(s1_sss.get_pid() == c1_sss.get_pid());
 
     auto s2_aaa = s2.setup_sink_pin("a1");
     auto s2_bbb = s2.setup_sink_pin("anotherinput");
     auto s2_sss = s2.setup_driver_pin("Y");
-    I(s2_aaa.get_pid() == 19);
-    I(s2_bbb.get_pid() == 29);
-    I(s2_sss.get_pid() == 30001);
+    I(s2_aaa.get_pid() == c2_aaa.get_pid());
+    I(s2_bbb.get_pid() == c2_bbb.get_pid());
+    I(s2_sss.get_pid() == c2_sss.get_pid());
 
     auto sum_a = sum.setup_sink_pin("AU");
     auto sum_b = sum.setup_sink_pin("BU");
