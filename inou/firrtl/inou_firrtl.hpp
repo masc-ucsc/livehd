@@ -30,8 +30,10 @@ protected:
                          const std::string_view reset, const std::string_view init, Lnast_nid &parent_node);
   void     init_reg_ref_dots(Lnast &lnast, const std::string &id, const std::string_view clock, const std::string_view reset,
                              const std::string_view init, uint32_t bitwidth, Lnast_nid &parent_node);
+  void     PreCheckForMem(Lnast &lnast, Lnast_nid &stmt_node, const firrtl::FirrtlPB_Statement& stmt);
   void     InitMemory   (Lnast &lnast, Lnast_nid& parent_node, const firrtl::FirrtlPB_Statement_Memory& mem);
   void     InitCMemory  (Lnast &lnast, Lnast_nid& parent_node, const firrtl::FirrtlPB_Statement_CMemory& cmem);
+  void     HandleMemPortPre(Lnast &lnast, Lnast_nid& parent_node, const firrtl::FirrtlPB_Statement_MemoryPort& mport);
   void     HandleMemPort(Lnast &lnast, Lnast_nid& parent_node, const firrtl::FirrtlPB_Statement_MemoryPort& mport);
   void     create_module_inst(Lnast &lnast, const firrtl::FirrtlPB_Statement_Instance &inst, Lnast_nid &parent_node);
 
@@ -114,8 +116,8 @@ protected:
   firrtl::FirrtlPB_Expression_SubField* make_subfield_expr(std::string name);
 
   uint8_t process_op_children(Lnast &ln, const Lnast_nid &lnidx_if, const std::string &firrtl_op);
-  void    add_cstmts(Lnast &ln, const Lnast_nid &lnidx_if, firrtl::FirrtlPB_Module_UserModule *umod);
-  void    add_cstmts(Lnast &ln, const Lnast_nid &lnidx_if, firrtl::FirrtlPB_Statement_When *when, uint8_t pos_to_add_to);
+  //void    add_cstmts(Lnast &ln, const Lnast_nid &lnidx_if, firrtl::FirrtlPB_Module_UserModule *umod);
+  //void    add_cstmts(Lnast &ln, const Lnast_nid &lnidx_if, firrtl::FirrtlPB_Statement_When *when, uint8_t pos_to_add_to);
   void    make_assignment(Lnast &ln, const Lnast_nid &lnidx_lhs, firrtl::FirrtlPB_Expression *expr_rhs,
                           firrtl::FirrtlPB_Statement *fstmt);
 
