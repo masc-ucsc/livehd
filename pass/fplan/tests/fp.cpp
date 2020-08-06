@@ -17,25 +17,26 @@ int main() {
   auto gi = p.make_tree();
   
   auto t2 = high_resolution_clock::now();
-	std::cout << "done (" << duration_cast<milliseconds>(t2 - t1).count() << " ms)." << std::endl;
+	std::cout << " done (" << duration_cast<milliseconds>(t2 - t1).count() << " ms)." << std::endl;
   
-  std::cout << "discovering hierarchies...";
+  int m_size = 1;
+  std::cout << "discovering hierarchies (minimum component size " << m_size << ")...";
   t1 = high_resolution_clock::now();
   
-  Hier_tree t(std::move(gi), 1);
+  Hier_tree t(std::move(gi), m_size);
   
   t2 = high_resolution_clock::now();
-	std::cout << "done (" << duration_cast<milliseconds>(t2 - t1).count() << " ms)." << std::endl;
+	std::cout << " done (" << duration_cast<milliseconds>(t2 - t1).count() << " ms)." << std::endl;
   
-  std::cout << "collapsing trees...";
-  t1 = high_resolution_clock::now();
-  
-  for (double thresh = 0.0; thresh <= 0.08; thresh += 0.02) {
+  for (double thresh = 0.01; thresh <= 2.0; thresh *= 2.0) {
+    std::cout << "collapsing tree (minimum area " << thresh << " mm^2)...";
+    t1 = high_resolution_clock::now();
+
     t.collapse(thresh);
+
+    t2 = high_resolution_clock::now();
+    std::cout << " done (" << duration_cast<milliseconds>(t2 - t1).count() << " ms)." << std::endl;
   }
-  
-  t2 = high_resolution_clock::now();
-	std::cout << "done (" << duration_cast<milliseconds>(t2 - t1).count() << " ms)." << std::endl;
   
   t.print();
 

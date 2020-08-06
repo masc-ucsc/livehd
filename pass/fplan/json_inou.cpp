@@ -31,7 +31,7 @@ Graph_info Json_inou_parser::make_tree() const {
   auto g_name_map = g.vert_map<std::string>();
   auto g_area_map = g.vert_map<double>();
   auto g_edge_weights = g.edge_map<unsigned int>();
-  auto g_set_map = g.vert_map<int>();
+  auto g_set = g.vert_set();
 
   I(d.HasMember("modules"));
   
@@ -64,7 +64,7 @@ Graph_info Json_inou_parser::make_tree() const {
     }
 
     g_area_map[v] = area;
-    g_set_map[v] = 0; // all verts start in set zero, and get dividied up during hierarchy discovery
+    g_set.insert(v); // all verts start in set zero, and get dividied up during hierarchy discovery
 
     auto existing_edges = g.edge_set();
     
@@ -114,7 +114,7 @@ Graph_info Json_inou_parser::make_tree() const {
     }
   }
   
-  Graph_info info(std::move(g), std::move(g_name_map), std::move(g_area_map), std::move(g_edge_weights), std::move(g_set_map));
+  Graph_info info(std::move(g), std::move(g_name_map), std::move(g_area_map), std::move(g_edge_weights), std::move(g_set));
   
   return info;
 } 
