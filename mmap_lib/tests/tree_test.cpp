@@ -67,6 +67,15 @@ public:
     s = ast.insert_next_sibling(s, "child1.0.1.4");
     s = ast.insert_next_sibling(s, "child1.0.1.5");
     s = ast.add_child(c112, "child1.0.1.7");
+    ast.insert_next_sibling(s, "child1.0.1.16");
+    s = ast.insert_next_sibling(s, "child1.0.1.8");
+    ast.insert_next_sibling(s, "child1.0.1.15");
+    ast.insert_next_sibling(s, "child1.0.1.14");
+    s = ast.insert_next_sibling(s, "child1.0.1.9");
+    ast.insert_next_sibling(s, "child1.0.1.13");
+    ast.insert_next_sibling(s, "child1.0.1.12");
+    ast.insert_next_sibling(s, "child1.0.1.11");
+    s = ast.insert_next_sibling(s, "child1.0.1.10");
 
     auto c114 = ast.insert_next_sibling(c113, "child1.0.4");
     ast.add_child(c113, "child1.0.3.3");
@@ -154,6 +163,15 @@ TEST_F(Elab_test, Preorder_traversal_check) {
   ast_preorder_traversal_golden.push_back("child1.0.1.5");
   ast_preorder_traversal_golden.push_back("child1.0.1.6");
   ast_preorder_traversal_golden.push_back("child1.0.1.7");
+  ast_preorder_traversal_golden.push_back("child1.0.1.8");
+  ast_preorder_traversal_golden.push_back("child1.0.1.9");
+  ast_preorder_traversal_golden.push_back("child1.0.1.10");
+  ast_preorder_traversal_golden.push_back("child1.0.1.11");
+  ast_preorder_traversal_golden.push_back("child1.0.1.12");
+  ast_preorder_traversal_golden.push_back("child1.0.1.13");
+  ast_preorder_traversal_golden.push_back("child1.0.1.14");
+  ast_preorder_traversal_golden.push_back("child1.0.1.15");
+  ast_preorder_traversal_golden.push_back("child1.0.1.16");
   ast_preorder_traversal_golden.push_back("child1.0.2");
   ast_preorder_traversal_golden.push_back("child1.0.3");
   ast_preorder_traversal_golden.push_back("child1.0.3.0");
