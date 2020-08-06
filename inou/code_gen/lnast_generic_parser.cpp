@@ -1,6 +1,14 @@
 
 #include "lnast_generic_parser.hpp"
 
+std::string Prp_parser::ref_name(std::string prp_term){
+    return prp_term;
+}
+
+std::string Prp_parser::ref_name(std::string_view prp_term){
+    return std::string(prp_term);
+}
+
 std::string_view Prp_parser::stmt_sep(){
   return stmt_separator;
 }

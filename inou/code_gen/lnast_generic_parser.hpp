@@ -16,6 +16,8 @@ public:
   std::string_view for_cond_mid() final;
   std::string_view for_cond_beg() final;
   std::string_view for_cond_end() final;
+  std::string ref_name(std::string prp_term) final;
+  std::string ref_name(std::string_view prp_term) final;
 };
 
 //-------------------------------------------------------------------------------------
@@ -33,6 +35,7 @@ public:
   std::string_view for_cond_mid() final;
   std::string_view for_cond_beg() final;
   std::string_view for_cond_end() final;
+
 };
 
 //-------------------------------------------------------------------------------------
