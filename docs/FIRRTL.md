@@ -63,17 +63,17 @@ or if you instead want to get Verilog you can use:
 If you need help with the compiler commands, use `sbt --help` and it will tell you more.
 
 ### Getting Protobuf
-In the `inou/firrtl` directory, I've added `WriteLowPB.scala` which is a way to get Protobuf from a FIRRTL file using their compiler. You'll want to add this file into the FIRRTL directory at `firrtl/src/main/scala/firrtl/transforms/` then run `sbt compile` and `sbt assembly`.
+In the `inou/firrtl` directory, I've added `WritePB.scala` which is a way to get Protobuf from a FIRRTL file using their compiler. You'll want to add this file into the FIRRTL directory at `firrtl/src/main/scala/firrtl/transforms/` then run `sbt compile` and `sbt assembly`.
 
 You can use this functionality by doing the following command:
 ```
 ./utils/bin/firrtl -i GCD.fir -X low --custom-transforms firrtl.transforms.WriteLowPB
 ```
 
-Note that it currently only accepts LoFIRRTL as input into the transform, so you'll have to modify it for yourself if you want to allow any kind of FIRRTL to write to Protobuf.
+Note that this command will create FIRRTL-Protobuf file with the extension of `.lo.pb`. You can instead create HiFIRRTL or CHIRRTL by replacing `WriteLowPB` with either `WriteHighPB` or `WriteChPB`.
 
 ## Relevant LiveHD commands
-`firrtl_verif.sh` in this directory has the commands needed to go from Protobuf to LNAST to LGraph to Verilog.
+`tests/lofirrtl_verif.sh` in this directory has the commands needed to go from Protobuf to LNAST to LGraph to Verilog. `tests/ver_to_fir_verif.sh` has the commands necessary to go from Verilog to FIRRTL-Protobuf.
 
 After building the LiveHD repo, you can go from Protobuf to Verilog by entering in our shell:
 ```
@@ -93,4 +93,4 @@ You can check and see if the generated `SimpleBitOps.v` matches the Chisel/FIRRT
 ./lgcheck -implementation=SimpleBitOps.v --reference=[insert_path_to_orig].v
 ```
 
-Note: The FIRRTL->LNAST is still really being worked on and may not work right now. Try to stick to LoFIRRTL Protobufs for better success...
+Note: The FIRRTL interface with LNAST is still really being worked on and may not work right now. Try to stick to LoFIRRTL Protobufs for better success...

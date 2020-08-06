@@ -1,7 +1,6 @@
 #!/bin/bash
 rm -rf ./lgdb
-
-pts='gates consts loop_in_lg loop_in_lg2 compare2 gcd_small async mux mux2 assigns pick gates'
+pts='consts loop_in_lg loop_in_lg2 compare2 gcd_small async mux mux2 assigns pick gates submodule'
 #Working with local versions: long_gcd, flop
 #Failing:
 #  fails because some IO is removed due to DCE:
