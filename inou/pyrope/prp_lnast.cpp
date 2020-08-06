@@ -1262,13 +1262,6 @@ Lnast_node Prp_lnast::eval_fcall_explicit(mmap_lib::Tree_index idx_start_ast, mm
     idx_nxt_ast = ast->get_last_child(idx_nxt_ast);
   }
   
-  if(piped_node.type.get_raw_ntype() != Lnast_ntype::Lnast_ntype_invalid){
-    fmt::print("(explicit) The piped lnast node's text is {}\n", piped_node.token.text);
-  }
-  if(idx_piped_val != ast->invalid_index()){
-    fmt::print("(explicit) The piped index's token text is {}\n", scan_text(ast->get_data(idx_piped_val).token_entry));
-  }
-  
   // whether we are an assignment expression or not, idx_nxt_ast will equal fcall_explicit
 
   // evaluate the rhs of the function call (the fcall_arg_notation), but it has to be a tuple
@@ -1301,10 +1294,43 @@ Lnast_node Prp_lnast::eval_fcall_explicit(mmap_lib::Tree_index idx_start_ast, mm
   auto idx_fcall_args = idx_nxt_ast;
   if (ast->get_data(ast->get_last_child(idx_nxt_ast)).rule_id == Prp_rule_fcall_arg_notation) {
     idx_fcall_args = ast->get_last_child(idx_nxt_ast);
-    arg_lhs        = eval_tuple(idx_fcall_args, idx_start_ln, idx_uniform_call_els, idx_piped_val, piped_node);
+    if(idx_piped_val != ast->invalid_index()){
+      if(ast->get_data(idx_piped_val).rule_id == Prp_rule_tuple_notation){
+        arg_lhs        = eval_tuple(idx_fcall_args, idx_start_ln, idx_uniform_call_els, idx_piped_val);
+      }
+      else{
+        arg_lhs        = eval_tuple(idx_fcall_args, idx_start_ln, idx_uniform_call_els);
+        auto lnast_temp  = lnast->add_string(current_temp_var);
+        auto tuple_concat_lhs = Lnast_node::create_ref(lnast_temp);
+        get_next_temp_var();
+        
+        auto concat_el = eval_rule(idx_piped_val, idx_start_ln);
+        auto idx_tuple_concat = lnast->add_child(cur_stmts, Lnast_node::create_tuple_concat(""));
+        lnast->add_child(idx_tuple_concat, tuple_concat_lhs);
+        lnast->add_child(idx_tuple_concat, arg_lhs);
+        lnast->add_child(idx_tuple_concat, concat_el);
+        arg_lhs = tuple_concat_lhs;
+      }
+    }
+    else{
+      arg_lhs        = eval_tuple(idx_fcall_args, idx_start_ln, idx_uniform_call_els);
+    }
+    if(piped_node.type.get_raw_ntype() != Lnast_ntype::Lnast_ntype_invalid){
+      auto lnast_temp  = lnast->add_string(current_temp_var);
+      auto tuple_concat_lhs = Lnast_node::create_ref(lnast_temp);
+      get_next_temp_var();
+      
+      auto idx_tuple_concat = lnast->add_child(cur_stmts, Lnast_node::create_tuple_concat(""));
+      lnast->add_child(idx_tuple_concat, tuple_concat_lhs);
+      lnast->add_child(idx_tuple_concat, arg_lhs);
+      lnast->add_child(idx_tuple_concat, piped_node);
+      
+      arg_lhs = tuple_concat_lhs;
+    }
+    
   } else {
     idx_fcall_args = ast->get_sibling_next(idx_func_lhs);
-    arg_lhs        = eval_tuple(idx_fcall_args, idx_start_ln, idx_uniform_call_els, idx_piped_val, piped_node);
+    arg_lhs        = eval_tuple(idx_fcall_args, idx_start_ln, idx_uniform_call_els, idx_piped_val);
   }
 
   // check for scope declaration
@@ -1457,7 +1483,14 @@ Lnast_node Prp_lnast::eval_fcall_implicit(mmap_lib::Tree_index idx_start_ast, mm
       auto lnast_temp = lnast->add_string(current_temp_var);
       piped_node_new  = Lnast_node::create_ref(lnast_temp);
       get_next_temp_var();
-      auto arg_tuple = eval_tuple(idx_piped_val, idx_start_ln, ast->invalid_index(), ast->invalid_index(), piped_node);
+      //auto arg_tuple = eval_tuple(idx_piped_val, idx_start_ln, ast->invalid_index(), ast->invalid_index(), piped_node);
+      Lnast_node arg_tuple;
+      if(piped_node.type.get_raw_ntype() != Lnast_ntype::Lnast_ntype_invalid){
+        arg_tuple = piped_node;
+      }
+      else if(idx_piped_val != ast->invalid_index()){
+        arg_tuple = eval_rule(idx_piped_val, idx_start_ln);
+      }
       idx_fcall_root = lnast->add_child(cur_stmts, Lnast_node::create_func_call(""));
       lnast->add_child(idx_fcall_root, piped_node_new);
       if (decl_func_name_node.type.get_raw_ntype() != Lnast_ntype::Lnast_ntype_invalid) {
@@ -1497,7 +1530,13 @@ Lnast_node Prp_lnast::eval_fcall_implicit(mmap_lib::Tree_index idx_start_ast, mm
   }
 
   // evaluate any piped values
-  auto arg_tuple = eval_tuple(idx_piped_val, idx_start_ln, ast->invalid_index(), ast->invalid_index(), piped_node);
+    Lnast_node arg_tuple;
+    if(piped_node.type.get_raw_ntype() != Lnast_ntype::Lnast_ntype_invalid){
+      arg_tuple = piped_node;
+    }
+    else if(idx_piped_val != ast->invalid_index()){
+      arg_tuple = eval_rule(idx_piped_val, idx_start_ln);
+    }
 
   // create the function call root
   idx_fcall_root = lnast->add_child(cur_stmts, Lnast_node::create_func_call(""));
