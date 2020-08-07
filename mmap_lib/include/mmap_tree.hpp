@@ -510,6 +510,7 @@ public:
     return potential_parent == child_parent_chain;
   }
 
+  /* LCOV_EXCL_START */
   void dump() const {
     for (const auto &index : depth_preorder()) {
       std::string indent(index.level, ' ');
@@ -540,6 +541,7 @@ public:
       }
     }
   }
+  /* LCOV_EXCL_STOP */
 };
 
 //--------------------- Template Implementation ----
