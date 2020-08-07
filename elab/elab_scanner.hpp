@@ -77,7 +77,7 @@ constexpr Token_id Token_id_cbr           = 93;  // ]
 constexpr Token_id Token_id_backslash     = 92;  // \ back slash
 constexpr Token_id Token_id_reference     = 13;  // \foo
 constexpr Token_id Token_id_keyword_first = 14;
-constexpr Token_id Token_id_keyword_last  = 15;
+constexpr Token_id Token_id_keyword_last  = 254;
 
 class Token {
 public:
