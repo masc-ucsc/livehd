@@ -37,6 +37,7 @@ void Inou_firrtl::toLNAST(Eprp_var& var) {
       }
       p.temp_var_count = 0;
       p.seq_counter    = 0;
+      //firrtl_input.PrintDebugString();
       p.IterateCircuits(var, firrtl_input, std::string(f));
     }
   } else {
@@ -76,7 +77,9 @@ std::string Inou_firrtl::get_full_name(Lnast &lnast, Lnast_nid &parent_node, con
     } else {
       return absl::StrCat("#", term);
     }
-  } else if (dangling_ports_map.count(term)) {
+  } else if (dangling_ports_map.contains(term)) {
+    auto mem_name = dangling_ports_map[term];
+    PortDirInference(term, mem_name, is_rhs);
     return term;
   } else {
     // We add _. in front of temporary names
@@ -86,6 +89,24 @@ std::string Inou_firrtl::get_full_name(Lnast &lnast, Lnast_nid &parent_node, con
       return absl::StrCat("_.", term);
     } else {
       return term;
+    }
+  }
+}
+
+void Inou_firrtl::PortDirInference(const std::string& port_name, const std::string& mem_name, const bool is_rhs) {
+  if (is_rhs) {
+    // Performing a read to a memory port (if type is INFER, do inference)
+    if (late_assign_ports[absl::StrCat(mem_name, ".", port_name)] == INFER) {
+      late_assign_ports[absl::StrCat(mem_name, ".", port_name)] = READI;
+    } else if (late_assign_ports[absl::StrCat(mem_name, ".", port_name)] == WRITEI) {
+      late_assign_ports[absl::StrCat(mem_name, ".", port_name)] = READ_WRITEI;
+    }
+  } else {
+    // Performing a write to a memory port (if type is INFER, do inference)
+    if (late_assign_ports[absl::StrCat(mem_name, ".", port_name)] == INFER) {
+      late_assign_ports[absl::StrCat(mem_name, ".", port_name)] = WRITEI;
+    } else if (late_assign_ports[absl::StrCat(mem_name, ".", port_name)] == READI) {
+      late_assign_ports[absl::StrCat(mem_name, ".", port_name)] = READ_WRITEI;
     }
   }
 }
@@ -216,7 +237,6 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id, const 
 
   // Add register's name to the global list.
   register_names.insert(id.substr(1, id.length() - 1));  // Use substr to remove "#"
-  fmt::print("put into register_names: {}\n", id.substr(1, id.length() - 1));
 
   // Save 'id' for later use with qpin.
   std::string id_for_qpin = id.substr(1, id.length() - 1);
@@ -264,7 +284,7 @@ void Inou_firrtl::InitMemory(Lnast& lnast, Lnast_nid& parent_node, const firrtl:
       depth = lnast.add_string(ConvertBigIntToStr(mem.bigint_depth()));
       break;
     } default: {
-      fmt::print("Error: Unspecified/incorrectly specified memory depth\n");
+      Pass::error("Unspecified/incorrectly specified memory depth");
       I(false);
     }
   }
@@ -309,7 +329,7 @@ void Inou_firrtl::InitMemory(Lnast& lnast, Lnast_nid& parent_node, const firrtl:
     }
 
     // Setup for late assigns: addr, en, clk
-    late_assign_ports.insert({absl::StrCat(mem.id(), ".", mem.reader_id(i)), READ});
+    late_assign_ports[absl::StrCat(mem.id(), ".", mem.reader_id(i))] = READ;
     auto str_prefix = absl::StrCat(/*"___",*/ mem.id(), "_", mem.reader_id(i));
     auto idx_asg_1 = lnast.add_child(parent_node, Lnast_node::create_assign("mem_ra"));
     lnast.add_child(idx_asg_1, Lnast_node::create_ref(lnast.add_string(absl::StrCat(str_prefix, "_addr"))));
@@ -321,7 +341,7 @@ void Inou_firrtl::InitMemory(Lnast& lnast, Lnast_nid& parent_node, const firrtl:
     lnast.add_child(idx_asg_3, Lnast_node::create_ref(lnast.add_string(absl::StrCat(str_prefix, "_en"))));
     lnast.add_child(idx_asg_3, Lnast_node::create_const("0"));
 
-    tup_ids.push_back({mem.reader_id(i), temp_var_t});
+    tup_ids.emplace_back(mem.reader_id(i), temp_var_t);
   }
 
   for (int j = 0; j < mem.writer_id_size(); j++) {
@@ -340,7 +360,7 @@ void Inou_firrtl::InitMemory(Lnast& lnast, Lnast_nid& parent_node, const firrtl:
     }
 
     // Setup for late assigns: addr, en, clk, data, mask
-    late_assign_ports.insert({absl::StrCat(mem.id(), ".", mem.writer_id(j)), WRITE});
+    late_assign_ports[absl::StrCat(mem.id(), ".", mem.writer_id(j))] = WRITE;
     auto str_prefix = absl::StrCat(/*"___",*/ mem.id(), "_", mem.writer_id(j));
     auto idx_asg_1 = lnast.add_child(parent_node, Lnast_node::create_assign("mem_wa"));
     lnast.add_child(idx_asg_1, Lnast_node::create_ref(lnast.add_string(absl::StrCat(str_prefix, "_addr"))));
@@ -358,7 +378,7 @@ void Inou_firrtl::InitMemory(Lnast& lnast, Lnast_nid& parent_node, const firrtl:
     lnast.add_child(idx_asg_5, Lnast_node::create_ref(lnast.add_string(absl::StrCat(str_prefix, "_mask"))));
     lnast.add_child(idx_asg_5, Lnast_node::create_const("0"));
 
-    tup_ids.push_back({mem.writer_id(j), temp_var_t});
+    tup_ids.emplace_back(mem.writer_id(j), temp_var_t);
   }
 
   for (int k = 0; k < mem.readwriter_id_size(); k++) {
@@ -379,7 +399,7 @@ void Inou_firrtl::InitMemory(Lnast& lnast, Lnast_nid& parent_node, const firrtl:
     }
 
     // Setup for late assigns: addr, en, clk, wdata, wmask (may have to do wmode later?)
-    late_assign_ports.insert({absl::StrCat(mem.id(), ".", mem.readwriter_id(k)), READ_WRITE});
+    late_assign_ports[absl::StrCat(mem.id(), ".", mem.readwriter_id(k))] = READ_WRITE;
     auto str_prefix = absl::StrCat(/*"___",*/ mem.id(), "_", mem.readwriter_id(k));
     auto idx_asg_1 = lnast.add_child(parent_node, Lnast_node::create_assign("mem_rwa"));
     lnast.add_child(idx_asg_1, Lnast_node::create_ref(lnast.add_string(absl::StrCat(str_prefix, "_addr"))));
@@ -397,7 +417,7 @@ void Inou_firrtl::InitMemory(Lnast& lnast, Lnast_nid& parent_node, const firrtl:
     lnast.add_child(idx_asg_5, Lnast_node::create_ref(lnast.add_string(absl::StrCat(str_prefix, "_wmask"))));
     lnast.add_child(idx_asg_5, Lnast_node::create_const("0"));
 
-    tup_ids.push_back({mem.readwriter_id(k), temp_var_t});
+    tup_ids.emplace_back(mem.readwriter_id(k), temp_var_t);
   }
 
   auto temp_var_lhs = create_temp_var(lnast);
@@ -523,16 +543,18 @@ void Inou_firrtl::HandleMemPortPre(Lnast& lnast, Lnast_nid& parent_node, const f
   auto idx_tup = lnast.add_child(parent_node, Lnast_node::create_tuple("mport"));
   lnast.add_child(idx_tup, Lnast_node::create_ref(port_name));
 
+  auto idx_asg_f = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
+  lnast.add_child(idx_asg_f, Lnast_node::create_assign("__fwd"));
   if (std::get<0>(mem_props) == true) {
-    auto idx_asg_f = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
-    lnast.add_child(idx_asg_f, Lnast_node::create_assign("__fwd"));
     lnast.add_child(idx_asg_f, Lnast_node::create_assign("true"));
+  } else {
+    lnast.add_child(idx_asg_f, Lnast_node::create_assign("false"));
   }
 
   // Specify port-specific attributes in this tuple.
   if (dir_case == firrtl::FirrtlPB_Statement_MemoryPort_Direction::FirrtlPB_Statement_MemoryPort_Direction_MEMORY_PORT_DIRECTION_READ) {
     // if READ port
-    late_assign_ports.insert({absl::StrCat(mport.memory_id(), ".", mport.id()), READP});
+    late_assign_ports[absl::StrCat(mport.memory_id(), ".", mport.id())] = READP;
 
     auto idx_asg_l = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
     lnast.add_child(idx_asg_l, Lnast_node::create_assign("__latency"));
@@ -540,7 +562,7 @@ void Inou_firrtl::HandleMemPortPre(Lnast& lnast, Lnast_nid& parent_node, const f
 
   } else if (dir_case == firrtl::FirrtlPB_Statement_MemoryPort_Direction::FirrtlPB_Statement_MemoryPort_Direction_MEMORY_PORT_DIRECTION_WRITE) {
     // if WRITE port
-    late_assign_ports.insert({absl::StrCat(mport.memory_id(), ".", mport.id()), WRITEP});
+    late_assign_ports[absl::StrCat(mport.memory_id(), ".", mport.id())] = WRITEP;
 
     auto idx_asg_m = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
     lnast.add_child(idx_asg_m, Lnast_node::create_assign("__wrmask"));
@@ -552,7 +574,7 @@ void Inou_firrtl::HandleMemPortPre(Lnast& lnast, Lnast_nid& parent_node, const f
 
   } else if (dir_case == firrtl::FirrtlPB_Statement_MemoryPort_Direction::FirrtlPB_Statement_MemoryPort_Direction_MEMORY_PORT_DIRECTION_READ_WRITE) {
     // if READ-WRITE port
-    late_assign_ports.insert({absl::StrCat(mport.memory_id(), ".", mport.id()), READ_WRITEP});
+    late_assign_ports[absl::StrCat(mport.memory_id(), ".", mport.id())] = READ_WRITEP;
 
     auto idx_asg_m = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
     lnast.add_child(idx_asg_m, Lnast_node::create_assign("__wrmask"));
@@ -560,15 +582,12 @@ void Inou_firrtl::HandleMemPortPre(Lnast& lnast, Lnast_nid& parent_node, const f
 
     auto idx_asg_l = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
     lnast.add_child(idx_asg_l, Lnast_node::create_assign("__latency"));
-    lnast.add_child(idx_asg_l, Lnast_node::create_const(std::get<2>(mem_props)));//FIXME: Can only provide 1 latency, so go with write lat
-
-
+    //FIXME: Can only provide 1 latency, so go with write lat
+    lnast.add_child(idx_asg_l, Lnast_node::create_const(std::get<2>(mem_props)));
 
   } else if (dir_case == firrtl::FirrtlPB_Statement_MemoryPort_Direction::FirrtlPB_Statement_MemoryPort_Direction_MEMORY_PORT_DIRECTION_INFER) {
     // if port dir needs to be inferred
-    late_assign_ports.insert({absl::StrCat(mport.memory_id(), ".", mport.id()), INFER});
-    //TODO... Currently no easy way to infer port directionality...
-    I(false);
+    late_assign_ports[absl::StrCat(mport.memory_id(), ".", mport.id())] = INFER;
 
   } else {
     I(false);
@@ -609,7 +628,10 @@ void Inou_firrtl::HandleMemPortPre(Lnast& lnast, Lnast_nid& parent_node, const f
     // Things to set to 0 at highest scope: addr, en, clk, data
     suffix_list.emplace_back("data");
   } else if (dir_case == firrtl::FirrtlPB_Statement_MemoryPort_Direction::FirrtlPB_Statement_MemoryPort_Direction_MEMORY_PORT_DIRECTION_INFER) {
-    //TODO
+    /* Assume worst case (read-write) and specify everything like that.
+     * If it turns out this is inferred to read, the data will just never
+     * be used or set (can be DCE'd). */
+    suffix_list.emplace_back("data");
   } else {
     I(false);
   }
@@ -1235,7 +1257,7 @@ void Inou_firrtl::HandleTwoExprPrimOp(Lnast& lnast, const firrtl::FirrtlPB_Expre
       break;
     }
     default: {
-      fmt::print("Error: expression directed into HandleTwoExprPrimOp that shouldn't have been.\n");
+      Pass::error("expression directed into HandleTwoExprPrimOp that shouldn't have been.");
       I(false);
     }
   }
@@ -1262,7 +1284,7 @@ void Inou_firrtl::HandleStaticShiftOp(Lnast& lnast, const firrtl::FirrtlPB_Expre
       break;
     }
     default: {
-      fmt::print("Error: expression directed into HandleStaticShiftOp that shouldn't have been.\n");
+      Pass::error("expression directed into HandleStaticShiftOp that shouldn't have been.");
       I(false);
     }
   }
@@ -1311,7 +1333,7 @@ void Inou_firrtl::HandleTypeConvOp(Lnast& lnast, const firrtl::FirrtlPB_Expressi
     lnast.add_child(idx_asg, Lnast_node::create_ref(e1_str));
 
   } else if (op.op() == firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_FIXED_POINT) {
-    fmt::print("Error: fixed point not yet supported\n");
+    Pass::error("fixed point not yet supported");
     I(false);
 
   } else if (op.op() == firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_ASYNC_RESET) {
@@ -1325,10 +1347,10 @@ void Inou_firrtl::HandleTypeConvOp(Lnast& lnast, const firrtl::FirrtlPB_Expressi
     lnast.add_child(idx_asg, Lnast_node::create_ref(e1_str));
 
   } else if (op.op() == firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_INTERVAL) {
-    fmt::print("Error: intervals not yet supported\n");
+    Pass::error("intervals not yet supported");
     I(false);
   } else {
-    fmt::print("Error: unknown type conversion op in HandleTypeConvOp\n");
+    Pass::error("unknown type conversion op in HandleTypeConvOp");
     I(false);
   }
 }
@@ -1374,6 +1396,7 @@ std::string_view Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB
     ln.add_child(idx_asg, Lnast_node::create_ref(en_str));
     ln.add_child(idx_asg, Lnast_node::create_const("1"));
 
+    PortDirInference(por_name, mem_name, is_rhs);
     if (is_rhs) {
       alter_full_str = absl::StrCat("#", mem_name, ".", por_name, ".__data", alter_flat_str.substr(delim_loc));
     } else {
@@ -1404,34 +1427,12 @@ std::string_view Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB
 
     if ((field_name.substr(0,4) == "data") && is_rhs) {
       flattened_str = absl::StrCat(mem_name, ".", port_name, ".__data");
-      fmt::print("1: {}\n", flattened_str);
     } else if ((field_name.substr(0,5) == "rdata") && is_rhs) {
       flattened_str = absl::StrCat(mem_name, ".", port_name, ".__data");
-      fmt::print("2: {}\n", flattened_str);
     } else {
       replace(flattened_str.begin(), flattened_str.end(), '.', '_');
       return ln.add_string(flattened_str);//absl::StrCat("___", flattened_str));
     }
-
-    /*if (field_name == "addr") {
-      flattened_str = absl::StrCat("___", mem_name.substr(1), "_", port_name, "_addr");
-      return ln.add_string(flattened_str);
-    } else if (field_name == "en") {
-      flattened_str = absl::StrCat("___", mem_name.substr(1), "_", port_name, "_en");
-      return ln.add_string(flattened_str);
-    } else if (field_name == "clk") {
-      flattened_str = absl::StrCat("___", mem_name.substr(1), "_", port_name, "_clk");
-      return ln.add_string(flattened_str);
-    } else if (field_name.substr(0,4) == "data" || field_name.substr(1,5) == "data") {
-      //May need to change field_name with actual person, since it may have replaced vector idx with 0
-      flattened_str = absl::StrCat(mem_name, ".", port_name, ".__", field_name);
-    } else if (field_name == "mask" || field_name == "wmask") {
-      flattened_str = absl::StrCat(mem_name, ".", port_name, ".__wrmask");
-    } else if (field_name == "wmode") {
-      // With current LNAST parameters, nothing to do.
-    } else {
-      I(false);
-    }*/
 
   } else if (inst_to_mod_map.count(alter_full_str.substr(0, alter_full_str.find(".")))) {
     auto inst_name        = alter_full_str.substr(0, alter_full_str.find("."));
@@ -1443,7 +1444,7 @@ std::string_view Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB
     } else if (dir == 2) {
       flattened_str = absl::StrCat("out_", flattened_str);
     } else {
-      fmt::print("Error: direction unknown of {}\n", flattened_str);
+      Pass::error("direction unknown of {}\n", flattened_str);
       I(false);
     }
   }
@@ -1456,7 +1457,6 @@ std::string_view Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB
  * function will be able to deconstruct it into
  * DOT and SELECT nodes in an LNAST. */
 std::string_view Inou_firrtl::CreateDotsSelsFromStr(Lnast& ln, Lnast_nid& parent_node, const std::string& flattened_str) {
-  fmt::print("{}\n", flattened_str);
   I((flattened_str.find(".") != std::string::npos) || (flattened_str.find("[") != std::string::npos));
 
   size_t found = 0;
@@ -1558,15 +1558,15 @@ void Inou_firrtl::create_io_list(const firrtl::FirrtlPB_Type& type, uint8_t dir,
                                  std::vector<std::tuple<std::string, uint8_t, uint32_t>>& vec) {
   switch (type.type_case()) {
     case firrtl::FirrtlPB_Type::kUintType: {  // UInt type
-      vec.push_back(std::make_tuple(port_id, dir, type.uint_type().width().value()));
+      vec.emplace_back(port_id, dir, type.uint_type().width().value());
       break;
     }
     case firrtl::FirrtlPB_Type::kSintType: {  // SInt type
-      vec.push_back(std::make_tuple(port_id, dir, type.sint_type().width().value()));
+      vec.emplace_back(port_id, dir, type.sint_type().width().value());
       break;
     }
     case firrtl::FirrtlPB_Type::kClockType: {  // Clock type
-      vec.push_back(std::make_tuple(port_id, dir, 1));
+      vec.emplace_back(port_id, dir, 1);
       break;
     }
     case firrtl::FirrtlPB_Type::kBundleType: {  // Bundle type
@@ -1588,7 +1588,7 @@ void Inou_firrtl::create_io_list(const firrtl::FirrtlPB_Type& type, uint8_t dir,
     }
     case firrtl::FirrtlPB_Type::kVectorType: {  // Vector type
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
-        vec.push_back(std::make_tuple(port_id, dir, 0));
+        vec.emplace_back(port_id, dir, 0);
         create_io_list(type.vector_type().type(), dir, absl::StrCat(port_id, "[", i, "]"), vec);
       }
       break;
@@ -1602,11 +1602,11 @@ void Inou_firrtl::create_io_list(const firrtl::FirrtlPB_Type& type, uint8_t dir,
       break;
     }
     case firrtl::FirrtlPB_Type::kAsyncResetType: {      // AsyncReset type
-      vec.push_back(std::make_tuple(port_id, dir, 1));  // FIXME: Anything else I need to do?
+      vec.emplace_back(port_id, dir, 1);  // FIXME: Anything else I need to do?
       break;
     }
     case firrtl::FirrtlPB_Type::kResetType: {  // Reset type
-      vec.push_back(std::make_tuple(port_id, dir, 1));
+      vec.emplace_back(port_id, dir, 1);
       break;
     }
     default: cout << "Unknown port type." << endl; I(false);
@@ -1619,7 +1619,6 @@ void Inou_firrtl::ListPortInfo(Lnast& lnast, const firrtl::FirrtlPB_Port& port, 
   std::vector<std::tuple<std::string, uint8_t, uint32_t>> port_list;  // Terms are as follows: name, direction, # of bits.
   create_io_list(port.type(), port.direction(), port.id(), port_list);
 
-  // fmt::print("Port_list:\n");
   for (auto val : port_list) {
     auto subfield_loc = std::get<0>(val).find(".");
     auto subaccess_loc = std::get<0>(val).find("[");
@@ -1644,7 +1643,6 @@ void Inou_firrtl::ListPortInfo(Lnast& lnast, const firrtl::FirrtlPB_Port& port, 
     } else {
       I(false);  // PORT_DIRECTION_UNKNOWN. Not supported by LNAST.
     }
-    // fmt::print("\tname:{} dir:{} bits:{}\n", std::get<0>(val), std::get<1>(val), std::get<2>(val));
   }
 }
 
@@ -1775,7 +1773,7 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
   switch (expr.expression_case()) {
     case firrtl::FirrtlPB_Expression::kReference: {  // Reference
       std::string_view expr_string = expr.reference().id();
-      if (dangling_ports_map.count(expr_string)) {
+      if (dangling_ports_map.contains(expr_string)) {
         /* If its a memory port created after the memory, the name found will
          * just be the port id (i.e. "r"). This needs to be changed to
          * #mem_name.r.__data . Also set the mem_name_r_en to be 1 (since memory
@@ -1786,6 +1784,9 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
         auto idx_asg  = lnast.add_child(parent_node, Lnast_node::create_assign("dpo"));
         lnast.add_child(idx_asg, Lnast_node::create_ref(en_str));
         lnast.add_child(idx_asg, Lnast_node::create_const("1"));
+
+        // If port type was INFER, then we can perform inference here.
+        PortDirInference((std::string)expr_string, mem_name, true);
 
         expr_string = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat("#", mem_name, ".", expr_string, ".__data"));
       } else {
@@ -1901,7 +1902,7 @@ std::string Inou_firrtl::ReturnExprString(Lnast& lnast, const firrtl::FirrtlPB_E
   switch (expr.expression_case()) {
     case firrtl::FirrtlPB_Expression::kReference: {  // Reference
       expr_string = get_full_name(lnast, parent_node, expr.reference().id(), is_rhs);
-      if (dangling_ports_map.count(expr_string)) {
+      if (dangling_ports_map.contains(expr_string)) {
         /* If it's a memory port created after the memory, the name found will
          * just be the port id (i.e. "r"). This needs to be changed to
          * #mem_name.r.__data if on RHS. If this is on the LHS, we need to set
@@ -1913,10 +1914,10 @@ std::string Inou_firrtl::ReturnExprString(Lnast& lnast, const firrtl::FirrtlPB_E
         lnast.add_child(idx_asg, Lnast_node::create_ref(en_str));
         lnast.add_child(idx_asg, Lnast_node::create_const("1"));
 
+        PortDirInference(expr_string, mem_name, is_rhs);
         if (!is_rhs) {
           expr_string = lnast.add_string(absl::StrCat(mem_name, "_", expr_string, "_data"));
         } else {
-          // FIXME: For iread-write ports, may have to make it so I set enable=1 here too (even though this is redundant for reads)
           expr_string = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat("#", mem_name, ".", expr_string, ".__data"));
         }
       }
@@ -1959,7 +1960,7 @@ std::string Inou_firrtl::ReturnExprString(Lnast& lnast, const firrtl::FirrtlPB_E
     }
     default: {
       // Error: I don't think this should occur if we're using Chisel's protobuf utility.
-      fmt::print("Failure: {}\n", expr.expression_case());
+     Pass::error("provided invalid expression number: {}", expr.expression_case());
       I(false);
     }
   }
@@ -2069,7 +2070,7 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
       std::string printf_clk   = ReturnExprString(lnast, stmt.printf().clk(), parent_node, true);
       std::vector<std::string> arg_list;
       for (int i = 0; i < stmt.printf().arg_size(); i++) {
-        arg_list.push_back(ReturnExprString(lnast, stmt.printf().arg(i), parent_node, true));
+        arg_list.emplace_back(ReturnExprString(lnast, stmt.printf().arg(i), parent_node, true));
       }
 
       auto idx_if = lnast.add_child(parent_node, Lnast_node::create_if("printf"));
@@ -2096,7 +2097,7 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
       break;
     }
     case firrtl::FirrtlPB_Statement::kPartialConnect: {  // PartialConnect
-      fmt::print("Error: PartialConnect not supported on FIRRTL interface, consider not using PartialConnect semantics.\n");
+      Pass::error("PartialConnect not supported on FIRRTL interface, consider not using PartialConnect semantics.");
       I(false);
       break;
     }
@@ -2110,12 +2111,12 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
       break;
     }
     case firrtl::FirrtlPB_Statement::kAttach: {  // Attach
-      fmt::print("Error: Attach statement not yet supported due to bidirectionality.\n");
+      Pass::error("Attach statement not yet supported due to bidirectionality.");
       I(false);
       break;
     }
     default:
-      fmt::print("Error: Unknown statement type.\n");
+      Pass::error("Unknown statement type: {}.", stmt.statement_case());
       I(false);
       return;
   }
@@ -2129,6 +2130,7 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
  * for each of the input attributes to each port. */
 void Inou_firrtl::PerformLateMemAssigns(Lnast& lnast, Lnast_nid& parent_node) {
   for (const auto& mem_port : late_assign_ports) {
+    auto mem_props = mem_props_map[mem_port.first.substr(0, mem_port.first.find('.'))];
     auto port_name = absl::StrCat("#", mem_port.first);
     auto rstr_prefix = absl::StrCat(port_name.substr(1), "_");
     replace(rstr_prefix.begin(), rstr_prefix.end(), '.', '_');
@@ -2136,37 +2138,44 @@ void Inou_firrtl::PerformLateMemAssigns(Lnast& lnast, Lnast_nid& parent_node) {
 
     // Specify what attributes need to be assigned to what for this port.
     std::vector<std::pair<std::string, std::string>> assign_pairs;
-    assign_pairs.push_back({absl::StrCat(port_name, ".__addr"), absl::StrCat(rstr_prefix, "addr")});
-    assign_pairs.push_back({absl::StrCat(port_name, ".__clk_pin"), absl::StrCat(rstr_prefix, "clk")});
+    assign_pairs.emplace_back(absl::StrCat(port_name, ".__addr"), absl::StrCat(rstr_prefix, "addr"));
+    assign_pairs.emplace_back(absl::StrCat(port_name, ".__clk_pin"), absl::StrCat(rstr_prefix, "clk"));
 
-    if ((mem_port.second == READ) || (mem_port.second == WRITE) || (mem_port.second == READ_WRITE)) {
-      assign_pairs.push_back({absl::StrCat(port_name, ".__enable"), absl::StrCat(rstr_prefix, "en")});
-
-      if (mem_port.second == READ) {
-        // Attributes needing late assigns: addr, en, clk
-
-      } else if (mem_port.second == WRITE) {
-        // Attributes needing late assigns: addr, en, clk, data, mask
-        assign_pairs.push_back({absl::StrCat(port_name, ".__data"), absl::StrCat(rstr_prefix, "data")});
-        assign_pairs.push_back({absl::StrCat(port_name, ".__wrmask"), absl::StrCat(rstr_prefix, "mask")});
-
-      } else if (mem_port.second == READ_WRITE) {
-        // Attributes needing late assigns: addr, en, clk, wdata, wmask (may have to do wmode later?)
-        assign_pairs.push_back({absl::StrCat(port_name, ".__data"), absl::StrCat(rstr_prefix, "wdata")});
-        assign_pairs.push_back({absl::StrCat(port_name, ".__wrmask"), absl::StrCat(rstr_prefix, "wmask")});
-
-      }
-    } else if (mem_port.second == INFER) {
-      // FIXME: Unsure of how to handle...
-
-    } else if (mem_port.second == READP) {
-      // Attributes needing late assigns: addr, clk
-      assign_pairs.push_back({absl::StrCat(port_name, ".__enable"), absl::StrCat(rstr_prefix, "en")});
-
-    } else if ((mem_port.second == WRITEP) || (mem_port.second == READ_WRITEP)) {
-      // Attributes needing late assigns: addr, clk en, data,... FIXME: Subject to change/need to review for r-w port
-      assign_pairs.push_back({absl::StrCat(port_name, ".__enable"), absl::StrCat(rstr_prefix, "en")});
-      assign_pairs.push_back({absl::StrCat(port_name, ".__data"), absl::StrCat(rstr_prefix, "data")});
+    switch (mem_port.second) {
+      case READ: {
+        assign_pairs.emplace_back(absl::StrCat(port_name, ".__enable"), absl::StrCat(rstr_prefix, "en"));
+        break;
+      } case WRITE: {
+        assign_pairs.emplace_back(absl::StrCat(port_name, ".__enable"), absl::StrCat(rstr_prefix, "en"));
+        assign_pairs.emplace_back(absl::StrCat(port_name, ".__data"), absl::StrCat(rstr_prefix, "data"));
+        assign_pairs.emplace_back(absl::StrCat(port_name, ".__wrmask"), absl::StrCat(rstr_prefix, "mask"));
+        break;
+      } case READ_WRITE: {
+        assign_pairs.emplace_back(absl::StrCat(port_name, ".__enable"), absl::StrCat(rstr_prefix, "en"));
+        assign_pairs.emplace_back(absl::StrCat(port_name, ".__data"), absl::StrCat(rstr_prefix, "wdata"));
+        assign_pairs.emplace_back(absl::StrCat(port_name, ".__wrmask"), absl::StrCat(rstr_prefix, "wmask"));
+        break;
+      } case READP: {
+        assign_pairs.emplace_back(absl::StrCat(port_name, ".__enable"), absl::StrCat(rstr_prefix, "en"));
+        break;
+      } case WRITEP:
+      case READ_WRITEP: {
+        assign_pairs.emplace_back(absl::StrCat(port_name, ".__enable"), absl::StrCat(rstr_prefix, "en"));
+        assign_pairs.emplace_back(absl::StrCat(port_name, ".__data"), absl::StrCat(rstr_prefix, "data"));
+        break;
+      } case READI: {
+        assign_pairs.emplace_back(absl::StrCat(port_name, ".__enable"), absl::StrCat(rstr_prefix, "en"));
+        assign_pairs.emplace_back(absl::StrCat(port_name, ".__latency"), (std::string)std::get<1>(mem_props));
+        break;
+      } case WRITEI:
+      case READ_WRITEI: {
+        assign_pairs.emplace_back(absl::StrCat(port_name, ".__enable"), absl::StrCat(rstr_prefix, "en"));
+        assign_pairs.emplace_back(absl::StrCat(port_name, ".__data"), absl::StrCat(rstr_prefix, "data"));
+        assign_pairs.emplace_back(absl::StrCat(port_name, ".__wrmask"), "-1u");
+        assign_pairs.emplace_back(absl::StrCat(port_name, ".__latency"), (std::string)std::get<2>(mem_props));
+        break;
+      } default:
+        Pass::warn("Memory port {} was given INFER direction, but was never used so unable to infer.", port_name);
     }
 
     // Actually create all of the assigns based off what was specified.
@@ -2175,7 +2184,11 @@ void Inou_firrtl::PerformLateMemAssigns(Lnast& lnast, Lnast_nid& parent_node) {
       auto rhs_str = lnast.add_string(assign_pair.second);
       auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
       lnast.add_child(idx_asg, Lnast_node::create_ref(lhs_str));
-      lnast.add_child(idx_asg, Lnast_node::create_ref(rhs_str));
+      if (isdigit(rhs_str[0]) || (rhs_str.substr(0,2) == "-1")) {
+        lnast.add_child(idx_asg, Lnast_node::create_const(rhs_str));
+      } else {
+        lnast.add_child(idx_asg, Lnast_node::create_ref(rhs_str));
+      }
     }
   }
 }

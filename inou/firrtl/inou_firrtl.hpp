@@ -35,6 +35,7 @@ protected:
   void     InitCMemory  (Lnast &lnast, Lnast_nid& parent_node, const firrtl::FirrtlPB_Statement_CMemory& cmem);
   void     HandleMemPortPre(Lnast &lnast, Lnast_nid& parent_node, const firrtl::FirrtlPB_Statement_MemoryPort& mport);
   void     HandleMemPort(Lnast &lnast, Lnast_nid& parent_node, const firrtl::FirrtlPB_Statement_MemoryPort& mport);
+  void     PortDirInference(const std::string& port_name, const std::string& mem_name, const bool is_rhs);
   void     create_module_inst(Lnast &lnast, const firrtl::FirrtlPB_Statement_Instance &inst, Lnast_nid &parent_node);
 
   void HandleMuxAssign(Lnast &lnast, const firrtl::FirrtlPB_Expression &expr, Lnast_nid &parent_node,
@@ -166,9 +167,11 @@ private:
   absl::flat_hash_map<std::string, std::tuple<bool, std::string_view, std::string_view>> mem_props_map;
   // Map of memory port ids made in Memory Port statements to memory block name.
   absl::flat_hash_map<std::string, std::string> dangling_ports_map;
-  // Vector which holds all of the ports that need late assigns (and their direction).
-  enum MPORT_DIR { INFER, READ, WRITE, READ_WRITE, READP, WRITEP, READ_WRITEP };
-  absl::flat_hash_set<std::pair<std::string, MPORT_DIR>> late_assign_ports;
+  // Map which holds all of the ports that need late assigns (and their direction).
+  enum MPORT_DIR { READ, WRITE, READ_WRITE,
+                   READP, WRITEP, READ_WRITEP,
+                   READI, WRITEI, READ_WRITEI, INFER };
+  absl::flat_hash_map<std::string, MPORT_DIR> late_assign_ports;
 
 
   uint32_t temp_var_count;
