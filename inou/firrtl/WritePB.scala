@@ -29,7 +29,7 @@ class WriteLowPB extends Transform with DependencyAPIMigration {
     val ostream = new java.io.ByteArrayOutputStream()
     val protobuf = ToProto.writeToStream(ostream, circuit)
 
-    val proto_file_name = circuit.main + "_proto.data";
+    val proto_file_name = circuit.main + ".lo.pb";
     val outputStream = new java.io.FileOutputStream(proto_file_name)
     ostream.writeTo(outputStream);
 
