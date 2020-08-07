@@ -80,7 +80,7 @@ do
     echo "LGraph Optimization"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.bitwidth"
+    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.bitwidth"
     if [ $? -eq 0 ]; then
       echo "Successfully optimize design on new lg: ${pt}.v"
     else
