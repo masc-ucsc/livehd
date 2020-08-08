@@ -51,7 +51,7 @@ void Pass_lgraph_to_lnast::do_trans(LGraph* lg, Eprp_var& var, std::string_view 
 
   begin_transformation(lg, *lnast, idx_stmts);
 
-  lnast->dump();
+  //lnast->dump();
 
   var.add(std::move(lnast));
 }
@@ -691,6 +691,11 @@ void Pass_lgraph_to_lnast::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node,
     attach_child(lnast, eq_idx, sel_pin);
     lnast.add_child(eq_idx, Lnast_node::create_const(lnast.add_string(std::to_string(i))));
   }
+
+  // Specify var being assigned to is in upper scope (not in if-else scope)
+  auto asg_idx_i = lnast.add_child(parent_node, Lnast_node::create_assign(""));
+  lnast.add_child(asg_idx_i, Lnast_node::create_ref(dpin_get_name(pin)));
+  lnast.add_child(asg_idx_i, Lnast_node::create_const("0b"));
 
   // Specify cond + create stmt for each mux val, except last.
   auto if_node  = lnast.add_child(parent_node, Lnast_node::create_if("mux"));
