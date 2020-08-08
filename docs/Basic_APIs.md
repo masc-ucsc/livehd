@@ -136,22 +136,44 @@ for (auto &out : node.out_edges()) {
 ```
 ## LGraph Node Type Semantics
 
+
+For each LGraph node, there is a specific semantic. This section explains the
+operation to perform for each node. It includes a precise way to compute the
+maximum and minimum value for the output. In most cases, if the minimum value
+can not be negative, the result is unsigned.
+
+
+The document also explains corner cases in relationship to Verilog and how to
+convert to/from Verilog semantics. In general the nodes have a single output
+with the exception of complex nodes like subgraphs or memories.
+
+
+Cells with single output, have 'Y' as output. The inputs are single characters
+'A', 'B'... For most inputs, there can be many drivers. E.g: a single Sum cell
+can do `Y=3+20+a0+a3` where `A_{0} = 3`, `A_{1} = 20`, `A_{2} = a0`, and `A_{3}
+= a3`.
+
+If an input can not have multiple drivers, a lower case name is used ('a',
+'b'...). E.g: the right shift cell is `Y=a>>b` because only one driver can
+connect to 'a' and 'b'.
+
 ### Sum_Op
 
-Add/Substraction node
+Addition and substraction node is a single node that performs 2-complement
+additions and substractions with unlimited precision.
 
 ```{.graph .center caption="Sum LGraph Node."}
 digraph Sum {
     rankdir=LR;
-    size="2,1"
+    size="1,0.5"
 
     node [shape = circle]; Sum;
     node [shape = point ]; q0
     node [shape = point ]; q1
     node [shape = point ]; q
 
-    q0 -> Sum [ label ="ADD" ];
-    q1 -> Sum [ label ="SUB" ];
+    q0 -> Sum [ label ="A" ];
+    q1 -> Sum [ label ="B" ];
     Sum  -> q [ label = "Y" ];
 }
 ```
@@ -161,24 +183,28 @@ to all have the same length.
 
 #### Forward Propagation
 
-* $Y = \sum_{i=0}^{\infty} ADD_{i} - \sum_{i=0}^{\infty} SUB_{i}$
-* $Y.max = \sum_{i=0}^{\infty} ADD_{i}.max - \sum_{i=0}^{\infty} SUB_{i}.min$
-* $Y.min = \sum_{i=0}^{\infty} ADD_{i}.min - \sum_{i=0}^{\infty} SUB_{i}.max$
+* $Y = \sum_{i=0}^{\infty} A_{i} - \sum_{i=0}^{\infty} B_{i}$
+* $Y.max = \sum_{i=0}^{\infty} A_{i}.max - \sum_{i=0}^{\infty} B_{i}.min$
+* $Y.min = \sum_{i=0}^{\infty} A_{i}.min - \sum_{i=0}^{\infty} B_{i}.max$
 * $Y.sign = Y.min<0$
 
 #### Backward Propagation
 
-If and all the inputs but one ADD ($ADD_{0}$) are known:
+Backward propagation is possible when all the inputs but one are known. If all
+the inputs have known size. The algorithm can check and look for the inputs
+that have more precision than needed and reduce the max/min backwards.
 
-* $ADD_{0}.max = Y.max - \sum{i=1}^{\infty} ADD_{i}.max + \sum_{i=0}^{\infty} SUB_{i}.min$
-* $ADD_{0}.min = Y.min - \sum{i=1}^{\infty} ADD_{i}.min + \sum_{i=0}^{\infty} SUB_{i}.max$
-* $ADD_{0}.sign = $ADD_{0}.min<0$
+For example, if and all the inputs but one A ($A_{0}$) are known:
 
-If and all the inputs but one SUB ($SUB_{0}$) are known:
+* $A_{0}.max = Y.max - \sum{i=1}^{\infty} A_{i}.min + \sum_{i=0}^{\infty} B_{i}.max$
+* $A_{0}.min = Y.min - \sum{i=1}^{\infty} A_{i}.max + \sum_{i=0}^{\infty} B_{i}.min$
+* $A_{0}.sign = $A_{0}.min<0$
 
-* $SUB_{0}.max = \sum{i=0}^{\infty} ADD_{i}.max - \sum_{i=1}^{\infty} SUB_{i}.min - Y.max$
-* $SUB_{0}.min = \sum{i=0}^{\infty} ADD_{i}.min - \sum_{i=1}^{\infty} SUB_{i}.max - Y.min$
-* $SUB_{0}.sign = $SUB_{0}.min<0$
+If and all the inputs but one B ($B_{0}$) are known:
+
+* $B_{0}.max = \sum{i=0}^{\infty} A_{i}.max - \sum_{i=1}^{\infty} B_{i}.min - Y.min$
+* $B_{0}.min = \sum{i=0}^{\infty} A_{i}.min - \sum_{i=1}^{\infty} B_{i}.max - Y.max$
+* $B_{0}.sign = $B_{0}.min<0$
 
 #### Verilog Considerations
 
@@ -189,7 +215,7 @@ signed or unsigned extended independent of the other inputs. To match the
 semantics, when mixing signed and unsigned, the signed inputs connected to
 Sum_Op with less than the maximum number of bits should be 1 bit zero extended.
 An easy way to zero extend a number if with the Join_Op (Join_Op has an
-unsigned output if the last input is unsigned).
+unsigned output if the last input is unsigned or zero).
 
 
 ```verilog
@@ -210,33 +236,47 @@ c == -16 (!!)
 
 ### Mult_Op
 
-Multiply operator
+Multiply operator.
 
 ```{.graph .center caption="Multiply LGraph Node."}
 digraph Mult {
     rankdir=LR;
-    size="2,1"
+    size="1,0.5"
 
     node [shape = circle]; Mult;
     node [shape = point ]; q0
     node [shape = point ]; q
 
-    q0 -> Mult [ label ="VAL" ];
+    q0 -> Mult [ label ="A" ];
     Mult  -> q [ label = "Y" ];
 }
 ```
 
 #### Forward Propagation
 
-* $Y = \prod_{i=0}^{\infty} VAL_{i}$
-* $Y.max = \prod_{i=0}^{\infty} \text{maxabs}(\text{VAL}_{i}.max, \text{VAL}_{i}.min)$
-* $Y.min = \begin{cases} -Y.max & Y.sign \ne 0 \\                                                                                                                                  \prod_{i=0}^{\infty} \text{minabs}(\text{VAL}_{i}.max, \text{VAL}_{i}.min) & \text{otherwise} \end{cases}$
-* $Y.sign = !\forall_{i=0}^{\infty} (VAL_{i}.min<0 and \text{VAL}_{i}.max<0) and !\forall_{i=0}^{\infty} (VAL_{i}.min>=0 and \text{VAL}_{i}.max>=0)$
+* $Y = \prod_{i=0}^{\infty} A_{i}$
+* $Y.max = \prod_{i=0}^{\infty} \text{maxabs}(A_{i}.max, A_{i}.min)$
+* $Y.min = \begin{cases} -Y.max & Y.sign \ne 0 \\
+           \prod_{i=0}^{\infty} \text{minabs}(A_{i}.max, A_{i}.min) & \text{otherwise} \end{cases}$
+* $Y.sign = \begin{cases} \prod_{i=0}^{\infty} A_{i}.sign & \forall_{i=0}^{\infty} (A_{i}.max \leq 0 \lor A_{i}.min \geq 0) \\
+           1 & \text{otherwise} \end{cases}$
+
+The sign computation is conservative. The result is unsigned only if each of
+the inputs as a decided positive or negative range.  Then, the product of the
+signs decided the output sign.
 
 #### Backward Propagation
 
-* Conservative $VAL.bits = Y.bits$ is possible.
-* $VAL.sign$ can be set unsigned only when $Y.sign$ is known to be unsigned
+If only one input is missing, it is possible to infer the max/min from the output and the other inputs.
+
+* $A_{0}.max = \frac{\prod_{i=1}^{\infty} \text{maxabs}(A_{i}.max, A_{i}.min)}{Y.min}$
+* $A_{0}.min = \begin{cases} -A.max & A.sign \ne 0 \\
+\frac{\prod_{i=1}^{\infty} \text{minabs}(A_{i}.max, A_{i}.min)}{Y.max} & \text{otherwise} \end{cases}$
+* $A_{0}.sign = \begin{cases} 
+  Y.sign \times \prod_{i=1}^{\infty} A_{i}.sign & (Y.max \leq 0 \lor Y.min \geq 0) \land \forall_{i=1}^{\infty} (A_{i}.max \leq 0 \lor A_{i}.min \geq 0) \\
+           1 & \text{otherwise} \end{cases}$
+
+
 
 ### Verilog Considerations
 
