@@ -30,8 +30,8 @@ std::vector<LGraph *> Lnast_dfg::do_tolg(std::shared_ptr<Lnast> ln, const Lnast_
 
       dfg = LGraph::create(path, module_name, module_name);
       fmt::print("in place lnast dump for debug II\n");
-      for (const auto &it : ln->depth_preorder(ln->get_root())) {
-        const auto &node = ln->get_data(it);
+      for (const auto &it : lnast->depth_preorder(lnast->get_root())) {
+        const auto &node = lnast->get_data(it);
         std::string indent{"  "};
         for (int i = 0; i < it.level; ++i) indent += "  ";
 
