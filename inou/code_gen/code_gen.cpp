@@ -412,7 +412,7 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
   const auto& op_node_data = lnast->get_data(op_node_index);
   std::string val;
   for (unsigned i = 1; i < op_str_vect.size(); i++) {
-    auto ref = op_str_vect[i];
+    auto ref = std::string(op_str_vect[i]);
     auto map_it = ref_map.find(ref);
     if (map_it != ref_map.end()) {
       if (std::count(map_it->second.begin(), map_it->second.end(), ' ')) {
@@ -441,7 +441,7 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
 
 //-------------------------------------------------------------------------------------
 //processing dot operator
-//best testing case: cfg/tets/ring.prp
+//best testing case: cfg/tests/ring.prp
 void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index) {
   fmt::print("node:dot\n");
 
