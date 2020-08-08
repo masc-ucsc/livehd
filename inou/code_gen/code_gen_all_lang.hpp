@@ -84,6 +84,8 @@ else
       return prp_term;
   }
 
+  //in verilog, assign stmt starts with assign keyword. thus this function.
+  virtual std::string_view assign_node_strt() {return "";}
 
 
 };

@@ -59,5 +59,6 @@ public:
   std::string_view for_cond_mid() final;
   std::string_view for_cond_beg() final;
   std::string_view for_cond_end() final;
+  std::string_view assign_node_strt() final;
 };
 

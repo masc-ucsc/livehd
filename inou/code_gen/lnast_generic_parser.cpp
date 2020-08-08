@@ -103,3 +103,7 @@ std::string_view Cpp_parser::for_cond_end(){
 std::string_view Ver_parser::for_cond_end(){
   return ") ";//TODO
 }
+
+std::string_view Ver_parser::assign_node_strt() {
+  return "assign ";
+}
