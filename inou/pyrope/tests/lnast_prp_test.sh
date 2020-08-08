@@ -11,7 +11,7 @@ pts='hier_tuple hier_tuple2 hier_tuple3
      '
 
 #make sure to call Pyrope_compile() in the end of script
-# pts='hier_tuple3'
+pts='hier_tuple3'
 # pts_hier='sum funcall'
 # pts_hier2='sum funcall4'   
 
