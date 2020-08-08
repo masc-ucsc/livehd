@@ -1,17 +1,8 @@
 #!/bin/bash
 rm -rf ./lgdb
 
-pts_to_do='lhs_wire3 logic '
-pts='hier_tuple hier_tuple2 hier_tuple3
-     lhs_wire lhs_wire2 scalar_tuple attr_set
-     firrtl_tail3 firrtl_tail2 firrtl_tail 
-     adder_stage nested_if tuple_if reg__q_pin 
-     capricious_bits2 capricious_bits4 capricious_bits 
-     out_ssa if2 if ssa_rhs bits_rhs counter counter_nested_if
-     '
-
 #make sure to call Pyrope_compile() in the end of script
-# pts='test'
+pts='test'
 # pts_hier='sum funcall'
 # pts_hier2='sum funcall4'   
 
@@ -145,38 +136,7 @@ Pyrope_compile () {
 
 
   if [[ $2 == "hier" ]]; then
-    #get the last pattern of pts_hier
-    top_module=$(echo $1 | awk '{print $NF}') 
-    echo $top_module
-
-    #concatenate every submodule under top_module.v
-    for pt in $1
-    do
-     if [[ pt != $top_module ]]; then 
-      $(cat ${pt}.v >> ${top_module}.v)
-     fi
-    done
-    
-
     echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "Logic Equivalence Check: Hierarchical Design"
-    echo "----------------------------------------------------"
-    
-    ${LGCHECK} --top=$top_module --implementation=${top_module}.v --reference=./inou/cfg/tests/verilog_gld/${top_module}.gld.v
-    
-    if [ $? -eq 0 ]; then
-      echo "Successfully pass logic equivilence check!"
-    else
-      echo "FAIL: "${top_module}".v !== "${top_module}".gld.v"
-      exit 1
-    fi
-
-
-
-
   else
     for pt in $1
     do
@@ -184,17 +144,72 @@ Pyrope_compile () {
       echo ""
       echo ""
       echo "----------------------------------------------------"
-      echo "Logic Equivalence Check"
+      echo "LGraph -> LNAST"
       echo "----------------------------------------------------"
     
-      ${LGCHECK} --implementation=${pt}.v --reference=./inou/cfg/tests/verilog_gld/${pt}.gld.v
+      ${LGSHELL} "lgraph.open name:${pt} |> pass.lgraph_to_lnast"
     
       if [ $? -eq 0 ]; then
-        echo "Successfully pass logic equivilence check!"
+        echo "Successfully generate lnast from lgraph! :${pt}.prp"
       else
-        echo "FAIL: "${pt}".v !== "${pt}".gld.v"
+        echo "cannot generate lnast from lgraph :${pt}.prp"
         exit 1
       fi
+
+      echo ""
+      echo ""
+      echo ""
+      echo "----------------------------------------------------"
+      echo "LGraph -> LNAST -> DOT"
+      echo "----------------------------------------------------"
+    
+      ${LGSHELL} "lgraph.open name:${pt} |> pass.lgraph_to_lnast |> inou.graphviz.from"
+    
+
+      if [ $? -eq 0 ]; then
+        echo "Successfully generate lnast from lgraph! :${pt}.prp"
+      else
+        echo "cannot generate lnast from lgraph :${pt}.prp"
+        exit 1
+      fi
+      mv ${pt}.lnast.dot ${pt}.lnast.dot.itr2
+
+
+      echo ""
+      echo ""
+      echo ""
+      echo "----------------------------------------------------"
+      echo "LGraph -> LNAST -> SSA -> DOT"
+      echo "----------------------------------------------------"
+    
+      ${LGSHELL} "lgraph.open name:${pt} |> pass.lgraph_to_lnast |> inou.lnast_dfg.dbg_lnast_ssa |> lnast.dump"
+    
+
+      if [ $? -eq 0 ]; then
+        echo "Successfully generate lnast from lgraph! :${pt}.prp"
+      else
+        echo "cannot generate lnast from lgraph :${pt}.prp"
+        exit 1
+      fi
+      mv ${pt}.lnast.dot ${pt}.lnast.dot.itr2.ssa
+
+      echo ""
+      echo ""
+      echo ""
+      echo "----------------------------------------------------"
+      echo "LGraph -> LNAST -> LGraph"
+      echo "----------------------------------------------------"
+    
+      ${LGSHELL} "lgraph.open name:${pt} |> pass.lgraph_to_lnast |> inou.lnast_dfg.tolg" 
+    
+
+      if [ $? -eq 0 ]; then
+        echo "Successfully generate lgraph from lnast! :${pt}.prp"
+      else
+        echo "cannot generate lgraph from lnast :${pt}.prp"
+        exit 1
+      fi
+
     done
   fi
 }

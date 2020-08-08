@@ -1,4 +1,4 @@
-$inp.__bits = 1 // I put bits to avoid unrelated problem
+// $inp.__bits = 1 // I put bits to avoid unrelated problem
 x = 3
 if $inp & 1 {
     x = 4

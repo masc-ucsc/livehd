@@ -10,14 +10,40 @@ Lnast_dfg::Lnast_dfg(const Eprp_var &_var, std::string_view _module_name) :
 
 std::vector<LGraph *> Lnast_dfg::do_tolg(std::shared_ptr<Lnast> ln, const Lnast_nid &top_stmts) {
     lnast = ln;
-    /* LGraph *dfg = LGraph::create(path, module_name, lnast->get_source()); */
+
+    fmt::print("in place lnast dump for debug\n");
+    for (const auto &it : lnast->depth_preorder(lnast->get_root())) {
+      const auto &node = lnast->get_data(it);
+      std::string indent{"  "};
+      for (int i = 0; i < it.level; ++i) indent += "  ";
+
+      fmt::print("{} {} {:>20} : {}\n", it.level, indent, node.type.to_s(), node.token.get_text());
+    }
+
+
     LGraph *dfg;
     if (lnast->get_source() != "") {
+
+
       dfg = LGraph::create(path, module_name, lnast->get_source()); 
     } else {
+
       dfg = LGraph::create(path, module_name, module_name);
+      fmt::print("in place lnast dump for debug II\n");
+      for (const auto &it : ln->depth_preorder(ln->get_root())) {
+        const auto &node = ln->get_data(it);
+        std::string indent{"  "};
+        for (int i = 0; i < it.level; ++i) indent += "  ";
+
+        fmt::print("{} {} {:>20} : {}\n", it.level, indent, node.type.to_s(), node.token.get_text());
+      }
+
     }
+
     std::vector<LGraph *> lgs;
+
+
+
     top_stmts2lgraph(dfg, top_stmts);
     lgs.push_back(dfg);
 
@@ -26,6 +52,15 @@ std::vector<LGraph *> Lnast_dfg::do_tolg(std::shared_ptr<Lnast> ln, const Lnast_
 
 
 void Lnast_dfg::top_stmts2lgraph(LGraph *dfg, const Lnast_nid &lnidx_stmts) {
+
+  /* for (const auto &it : lnast->depth_preorder(lnidx_stmts)) { */
+  /*   const auto &node = lnast->get_data(it); */
+  /*   std::string indent{"  "}; */
+  /*   for (int i = 0; i < it.level; ++i) indent += "  "; */
+
+  /*   fmt::print("{} {} {:>20} : {}\n", it.level, indent, node.type.to_s(), node.token.get_text()); */
+  /* } */
+
 
   fmt::print("============================= Phase-1: LNAST->LGraph Start ===============================================\n");
   process_ast_stmts(dfg, lnidx_stmts);
@@ -127,6 +162,20 @@ void Lnast_dfg::process_ast_phi_op(LGraph *dfg, const Lnast_nid &lnidx_phi) {
   auto c2_name = lnast->get_sname(c2);
   auto c3_name = lnast->get_sname(c3);
 
+  auto c0_name = lnast->get_sname(lhs);
+  auto c1_name = lnast->get_sname(c1);
+  //DBG
+  fmt::print("c0_ssa_name:{}\n", c0_name);
+  fmt::print("c1_ssa_name:{}\n", c1_name);
+  fmt::print("c2_ssa_name:{}\n", c2_name);
+  fmt::print("c3_ssa_name:{}\n", c3_name);
+
+  fmt::print("c0_token_name:{}\n", lnast->get_name(lhs));
+  fmt::print("c1_token_name:{}\n", lnast->get_name(c1));
+  fmt::print("c2_token_name:{}\n", lnast->get_name(c2));
+  fmt::print("c3_token_name:{}\n", lnast->get_name(c3));
+
+
   auto cond_dpin   = setup_ref_node_dpin(dfg, c1);
   Node_pin true_dpin;
   Node_pin false_dpin;
@@ -226,6 +275,15 @@ void Lnast_dfg::process_ast_concat_op(LGraph *dfg, const Lnast_nid &lnidx_concat
 
 
 void Lnast_dfg::process_ast_nary_op(LGraph *dfg, const Lnast_nid &lnidx_opr) {
+  auto c0 = lnast->get_first_child(lnidx_opr);
+  auto c1 = lnast->get_sibling_next(c0);
+  auto c2 = lnast->get_sibling_next(c1);
+  //DBG
+  fmt::print("nary c0_name:{}\n", lnast->get_sname(c0));
+  fmt::print("nary c1_name:{}\n", lnast->get_sname(c1));
+  fmt::print("nary c2_name:{}\n", lnast->get_sname(c2));
+  
+
   auto opr_node = setup_node_opr_and_lhs(dfg, lnidx_opr);
 
   std::vector<Node_pin> opds;
@@ -310,8 +368,10 @@ void Lnast_dfg::nary_node_rhs_connections(LGraph *dfg, Node &opr_node, const std
 Node Lnast_dfg::process_ast_assign_op(LGraph *dfg, const Lnast_nid &lnidx_assign) {
   auto c0 = lnast->get_first_child(lnidx_assign);
   auto c1 = lnast->get_sibling_next(c0);
-  auto c0_name = lnast->get_sname(c0);
-  auto c1_name = lnast->get_sname(c1);
+  auto c0_name = lnast->get_name(c0);
+  auto c1_name = lnast->get_name(c1);
+  fmt::print("assign c0_name:{}\n", c0_name);
+  fmt::print("assign c1_name:{}\n", c1_name);
 
   Node_pin opr_spin  = setup_node_assign_and_lhs(dfg, lnidx_assign);
   Node_pin opd1 = setup_ref_node_dpin(dfg, c1);
@@ -945,6 +1005,14 @@ void Lnast_dfg::process_ast_attr_set_op (LGraph *dfg, const Lnast_nid &lnidx_ase
   auto c0_aset      = lnast->get_first_child(lnidx_aset);
   auto c1_aset      = lnast->get_sibling_next(c0_aset);
   auto c2_aset      = lnast->get_sibling_next(c1_aset);
+  
+  //DBG
+  fmt::print("c0_aset_name:{}\n", lnast->get_sname(c0_aset));
+  fmt::print("c1_aset_name:{}\n", lnast->get_sname(c1_aset));
+  fmt::print("c2_aset_name:{}\n", lnast->get_sname(c2_aset));
+
+
+
   auto c0_aset_name = lnast->get_sname(c0_aset);  // ssa name
   /* auto c1_aset_vname = lnast->get_vname(c1_aset); // no-ssa name */
   auto attr_vname   = lnast->get_vname(c1_aset);  // no-ssa name
