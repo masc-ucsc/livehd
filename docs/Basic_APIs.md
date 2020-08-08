@@ -312,7 +312,7 @@ numbers has the same result. The bit representation is the same if the result
 was signed or unsigned.
 
 LiveHD mult node result (Y) number of bits can be more efficient than in
-Verilog.  E.g: if the max value of VAL is 3 (2 bits) and 5 (3bits). If the
+Verilog.  E.g: if the max value of A0 is 3 (2 bits) and A1 is 5 (3bits). If the
 result is unsigned, the maximum result is 15 (4 bits). In Verilog, the result
 will always be 5 bits. If the Verilog result was to an unsigned variable.
 Either all the inputs were unsigned, or there should be a Join_Op with 1bit
