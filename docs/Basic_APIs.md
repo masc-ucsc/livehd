@@ -157,6 +157,16 @@ If an input can not have multiple drivers, a lower case name is used ('a',
 'b'...). E.g: the right shift cell is `Y=a>>b` because only one driver can
 connect to 'a' and 'b'.
 
+
+The section includes description on how to compute the maximum (`max`) and
+minimum (`min`) allowed result range. This is used by the bitwidth inference
+pass. To easy the explanation, a `sign` value means that the result may be
+negative (`sign = result.min<0`). `known` is true if the result sign is known
+(`known = result.max<0 or result.min>=0`), either positive or negative (`neg`).
+
+For any value (`val`), the number of bits required (`bits`) is `val.bits =
+log2(absmax(val.max,val.min))+val.sign?1:0`.
+
 ### Sum_Op
 
 Addition and substraction node is a single node that performs 2-complement
@@ -186,7 +196,6 @@ to all have the same length.
 * $Y = \sum_{i=0}^{\infty} A_{i} - \sum_{i=0}^{\infty} B_{i}$
 * $Y.max = \sum_{i=0}^{\infty} A_{i}.max - \sum_{i=0}^{\infty} B_{i}.min$
 * $Y.min = \sum_{i=0}^{\infty} A_{i}.min - \sum_{i=0}^{\infty} B_{i}.max$
-* $Y.sign = Y.min<0$
 
 #### Backward Propagation
 
@@ -198,13 +207,11 @@ For example, if and all the inputs but one A ($A_{0}$) are known:
 
 * $A_{0}.max = Y.max - \sum{i=1}^{\infty} A_{i}.min + \sum_{i=0}^{\infty} B_{i}.max$
 * $A_{0}.min = Y.min - \sum{i=1}^{\infty} A_{i}.max + \sum_{i=0}^{\infty} B_{i}.min$
-* $A_{0}.sign = $A_{0}.min<0$
 
 If and all the inputs but one B ($B_{0}$) are known:
 
 * $B_{0}.max = \sum{i=0}^{\infty} A_{i}.max - \sum_{i=1}^{\infty} B_{i}.min - Y.min$
 * $B_{0}.min = \sum{i=0}^{\infty} A_{i}.min - \sum_{i=1}^{\infty} B_{i}.max - Y.max$
-* $B_{0}.sign = $B_{0}.min<0$
 
 #### Verilog Considerations
 
@@ -234,9 +241,21 @@ c = 5b01111 + 5b0001 // this is the Verilog semantics by matching size
 c == -16 (!!)
 ```
 
+#### Peephole optimizations
+
+* `Y = x-0+0+...` becomes `Y = x+...`
+* `Y = x-x+...` becomes `Y = ...`
+* `Y = x+x+...` becomes `Y = (x<<1)+...`
+* `Y = (x<<n)+(y<<m)` where m>n becomes `Y = (x+y<<(m-n)<<n`
+* `Y = (~x)+1+...` becomes `Y = ...-x`
+* If every x,y... lower bit is zero `Y=x+y+...` becomes Y=((x>>1)+(y>>1)+..)<<1
+
+
 ### Mult_Op
 
-Multiply operator.
+Multiply operator. There is no Prod_Op that combines multiplication and
+division because unlike in Sum_Op, in integer operations the order matters
+(`a*(b/c) != (a*b)/c`).
 
 ```{.graph .center caption="Multiply LGraph Node."}
 digraph Mult {
@@ -255,27 +274,34 @@ digraph Mult {
 #### Forward Propagation
 
 * $Y = \prod_{i=0}^{\infty} A_{i}$
-* $Y.max = \prod_{i=0}^{\infty} \text{maxabs}(A_{i}.max, A_{i}.min)$
-* $Y.min = \begin{cases} -Y.max & Y.sign \ne 0 \\
-           \prod_{i=0}^{\infty} \text{minabs}(A_{i}.max, A_{i}.min) & \text{otherwise} \end{cases}$
-* $Y.sign = \begin{cases} \prod_{i=0}^{\infty} A_{i}.sign & \forall_{i=0}^{\infty} (A_{i}.max \leq 0 \lor A_{i}.min \geq 0) \\
-           1 & \text{otherwise} \end{cases}$
+* $Tmax = \prod_{i=0}^{\infty} \text{maxabs}(A_{i}.max, A_{i}.min)$
+* $Tmin = \prod_{i=0}^{\infty} \text{minabs}(A_{i}.max, A_{i}.min)$
+* $neg  = \prod_{i=0}^{\infty} A_{i}.sign$
+* $known = \forall_{i=0}^{\infty} A_{i}.known$
 
-The sign computation is conservative. The result is unsigned only if each of
-the inputs as a decided positive or negative range.  Then, the product of the
-signs decided the output sign.
+* $Y.max = \begin{cases} -Tmin &      neg  \land known \\
+                          Tmax & \text{otherwise} \end{cases}$
+
+* $Y.min = \begin{cases}  Tmin & \overline{neg}  \land known \\
+                         -Tmax & \text{otherwise} \end{cases}$
+
+When the result sign is not known, the max/min is conservatively computed.
 
 #### Backward Propagation
 
-If only one input is missing, it is possible to infer the max/min from the output and the other inputs.
+If only one input is missing, it is possible to infer the max/min from the
+output and the other inputs. As usual, if all the inputs and outputs are known,
+it is possible to backward propagate to further constraint the inputs.
 
-* $A_{0}.max = \frac{\prod_{i=1}^{\infty} \text{maxabs}(A_{i}.max, A_{i}.min)}{Y.min}$
-* $A_{0}.min = \begin{cases} -A.max & A.sign \ne 0 \\
-\frac{\prod_{i=1}^{\infty} \text{minabs}(A_{i}.max, A_{i}.min)}{Y.max} & \text{otherwise} \end{cases}$
-* $A_{0}.sign = \begin{cases} 
-  Y.sign \times \prod_{i=1}^{\infty} A_{i}.sign & (Y.max \leq 0 \lor Y.min \geq 0) \land \forall_{i=1}^{\infty} (A_{i}.max \leq 0 \lor A_{i}.min \geq 0) \\
-           1 & \text{otherwise} \end{cases}$
 
+* $Tmax = \frac{\prod_{i=1}^{\infty} \text{maxabs}(A_{i}.max, A_{i}.min)}{Y.min}$
+* $Tmin = \frac{\prod_{i=1}^{\infty} \text{minabs}(A_{i}.max, A_{i}.min)}{Y.max}$
+* $neg  = Y.sign \times \prod_{i=1}^{\infty} A_{i}.sign$
+* $known = Y.known \land \forall_{i=1}^{\infty} A_{i}.known$
+* $A_{0}.max = \begin{cases} -Tmin &      neg  \land known \\
+                              Tmax & \text{otherwise} \end{cases}$
+* $A_{0}.min = \begin{cases}  Tmin & \overline{neg}  \land known \\
+                             -Tmax & \text{otherwise} \end{cases}$
 
 
 ### Verilog Considerations
@@ -293,36 +319,65 @@ Either all the inputs were unsigned, or there should be a Join_Op with 1bit
 zero to force the MSB as positive. This extra bit will be simplified but it
 will notify LGraph that the output is to be treated as unsigned.
 
+#### Peephole optimizations
+
+* `Y = a*1*...` becomes `Y=a*...`
+* `Y = a*0*...` becomes `Y=0`
+* `Y = power2a*...` becomes `Y=(...)<<log2(power2a)`
+* `Y = (power2a+power2b)*...` becomes `tmp=... ; Y = (tmp+tmp<<power2b)<<(power2a-power2b)` when power2a>power2b
+* `Y = (power2a-power2b)*...` becomes `tmp=... ; Y = (tmp-tmp<<power2b)<<(power2a-power2b)` when power2a>power2b
+
 ### Div_Op
 
-Division operator
+Division operator. The division operation is quite similar to the inverse of the multiplication, but a key difference is that only one driver is allowed for each input ('a' vs 'A').
 
 ```{.graph .center caption="Division LGraph Node."}
 digraph Div {
     rankdir=LR;
-    size="2,1"
+    size="1,0.5"
 
     node [shape = circle]; Div;
     node [shape = point ]; q0
     node [shape = point ]; q1
     node [shape = point ]; q
 
-    q0 -> Div [ label ="NUM" ];
-    q1 -> Div [ label ="DEN" ];
+    q0 -> Div [ label ="a" ];
+    q1 -> Div [ label ="b" ];
     Div  -> q [ label = "Y" ];
 }
 ```
 
-* $Y = \frac{\text{NUM}}{\text{DEN}}$
-* $Y.max = \frac{\text{maxabs}(\text{NUM}.max,\text{NUM}.min)}{\text{minabs}(\text{DEN}.max,\text{DEN}.min)}$
-* $Y.min = \frac{\text{minabs}(\text{NUM}.max,\text{NUM}.min)}{\text{maxabs}(\text{DEN}.max,\text{DEN}.min)}$
-* $Y.sign = !(NUM.min<0 and NUM.max<0 and DEN.min<0 and DEN.max<0) and !(NUM.min>=0 and NUM.max>=0 and DEN.min>=0 and DEN.max>=0) $
-* No back propagation is possible.
+#### Forward Propagation
 
-The result is unsigned if all the allowed values (min..max) are positive, or
-all the allowed values are negative. Otherwise, the result is signed.
+* $Y = \frac{a}{b}$
+* $Tmax = \frac{\text{maxabs}(a.max,a.min)}{\text{minabs}(b.max,b.min)}$
+* $Tmin = \frac{\text{minabs}(a.max,a.min)}{\text{maxabs}(b.max,b.min)}$
+* $known = a.known \land \b.known$
+* $neg   = a.sign \times b.sign$
+* $Y.max = \begin{cases} -Tmin &      neg  \land known \\
+                          Tmax & \text{otherwise} \end{cases}$
+* $Y.min = \begin{cases}  Tmin & \overline{neg}  \land known \\
+                         -Tmax & \text{otherwise} \end{cases}$
 
-Verilog NOTE: The same considerations as in the multiplication should be applied.
+#### Backward Propagation
+
+The backward propagation from the division can extracted from the forward
+propagation. It is a simpler case of multiplication backward propagation.
+
+### Verilog Considerations
+
+The same considerations as in the multiplication should be applied.
+
+#### Peephole optimizations
+
+* `Y = a/1` becomes `Y=a`
+* `Y = 0/b` becomes `Y=0`
+* `Y = a/power2b` becomes `Y=a>>log2(power2b)` if `Y.known and !Y.neg`
+* `Y = a/power2b` becomes `Y=1+~(a>>log2(power2b))` if `Y.known and Y.neg`
+* `Y = (x*c)/a` if c.bits>a.bits becomes `Y = x * (c/a)` which should be a smaller division.
+* If b is a constant and `Y.known and !Y.neg`. From the hackers delight, we know that the division can be changed for a multiplication `Y=(a*(((1<<(a.__bits+2)))/b+1))>>(a.__bits+2)`
+* If a is not known. Then `Y = Y.neg? (~Y_unsigned+1):Y_unsigned`
+
 
 ### Modulo_Op
 
@@ -338,13 +393,15 @@ digraph Mod {
     node [shape = point ]; q1
     node [shape = point ]; q
 
-    q0 -> Mod [ label ="NUM" ];
-    q1 -> Mod [ label ="DEN" ];
+    q0 -> Mod [ label ="a" ];
+    q1 -> Mod [ label ="b" ];
     Mod  -> q [ label = "Y" ];
 }
 ```
 
-* $Y = \text{NUM} % \text{DEN}$
+#### Forward Propagation
+
+* $Y = \text{a} % \text{b}$
 * $Y.max = DEN.max-1$
 * $Y.min = 0$
 * $Y.sign = 0$
