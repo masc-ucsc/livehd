@@ -1,9 +1,9 @@
-foo.a.b.__bits = 3
-foo.a.b = 5
+$inp.__bits = 1 // I put bits to avoid unrelated problem
+x = 3
+if $inp & 1 {
+    x = 4
+} else {
+    x = 5
+}
+%out = x
 
-c = 3
-foo.c = 6
-
-%out1 = foo.a.b.__bits
-%out2 = foo.a.b
-%out3 = foo.c
