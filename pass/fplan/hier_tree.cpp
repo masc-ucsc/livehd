@@ -458,10 +458,13 @@ void Hier_tree::collapse(double threshold_area) {
 
   I(threshold_area >= 0.0);
   
-  // if the minimum area is zero, the full hierarchy is kept so we don't need to do anything
-  
   if (threshold_area > 0.0) {
     auto new_tree = collapse(root, threshold_area);
     collapsed_hiers.push_back(new_tree);
   }
 }
+
+void Hier_tree::discover_regularity() {
+  
+}
+

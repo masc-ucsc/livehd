@@ -40,8 +40,7 @@ public:
   
   // moves defined since copies are deleted
   Hier_tree(Hier_tree&& other) noexcept : 
-    root(other.root), 
-    ginfo(std::move(other.ginfo)) { // TODO: delete stuff here? 
+    ginfo(std::move(other.ginfo)), root(other.root) { // TODO: delete stuff here?
   }
   
   Hier_tree& operator=(Hier_tree&& other) noexcept {
@@ -56,7 +55,13 @@ public:
   // returns a new tree with small leaf nodes collapsed together (Algorithm 2 in HiReg)
   void collapse(double threshold_area);
 
+  // discover similar subgraphs in the collapsed hierarchy
+  void discover_regularity();
+
 private:
+  // graph containing the divided netlist
+  Graph_info&& ginfo;
+  
   // data used by min_cut
   struct Min_cut_data {
     int d_cost; // difference between the external and internal cost of the node
@@ -92,6 +97,7 @@ private:
   // vector of altered hierarchy trees with nodes collapsed
   std::vector<phier> collapsed_hiers;
   
-  // graph containing the divided netlist
-  Graph_info&& ginfo;
+  // find patterns in the collapsed hierarchy
+  void find_most_freq_pattern();
+  
 };
