@@ -156,7 +156,7 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index) {
       absl::StrAppend(&buffer_to_print, indent(), lnast_to->ref_name(ref_map.find(key)->second), " ", lnast_to->debug_name_lang(assign_node_data.type), " ", lnast_to->ref_name(ref), lnast_to->stmt_sep());
     }
   } else {
-    absl::StrAppend(&buffer_to_print, indent(), lnast_to->ref_name(key), " ", lnast_to->debug_name_lang(assign_node_data.type), " ", lnast_to->ref_name(ref), lnast_to->stmt_sep());
+    absl::StrAppend(&buffer_to_print, indent(), lnast_to->assign_node_strt(), lnast_to->ref_name(key), " ", lnast_to->debug_name_lang(assign_node_data.type), " ", lnast_to->ref_name(ref), lnast_to->stmt_sep());
   }
 }
 //-------------------------------------------------------------------------------------
