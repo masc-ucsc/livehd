@@ -26,10 +26,12 @@ protected:
   uint32_t get_bit_count(const firrtl::FirrtlPB_Type type);
   void     init_wire_dots(Lnast &lnast, const firrtl::FirrtlPB_Type &type, const std::string &id,
                           Lnast_nid &parent_node);  // const firrtl::FirrtlPB_Statement_Wire& expr, Lnast_nid& parent_node);
-  void     init_reg_dots(Lnast &lnast, const firrtl::FirrtlPB_Type &type, const std::string &id, const std::string_view clock,
-                         const std::string_view reset, const std::string_view init, Lnast_nid &parent_node);
-  void     init_reg_ref_dots(Lnast &lnast, const std::string &id, const std::string_view clock, const std::string_view reset,
-                             const std::string_view init, uint32_t bitwidth, Lnast_nid &parent_node);
+  void     init_reg_dots(Lnast &lnast, const firrtl::FirrtlPB_Type &type, const std::string &id,
+                         const firrtl::FirrtlPB_Expression& clock, const firrtl::FirrtlPB_Expression& reset,
+                         const firrtl::FirrtlPB_Expression& init,  Lnast_nid& parent_node);
+  void     init_reg_ref_dots(Lnast &lnast, const std::string &id, const firrtl::FirrtlPB_Expression& clock,
+                             const firrtl::FirrtlPB_Expression& reset, const firrtl::FirrtlPB_Expression& init,
+                             uint32_t bitwidth, Lnast_nid& parent_node);
   void     PreCheckForMem(Lnast &lnast, Lnast_nid &stmt_node, const firrtl::FirrtlPB_Statement& stmt);
   void     InitMemory   (Lnast &lnast, Lnast_nid& parent_node, const firrtl::FirrtlPB_Statement_Memory& mem);
   void     InitCMemory  (Lnast &lnast, Lnast_nid& parent_node, const firrtl::FirrtlPB_Statement_CMemory& cmem);
@@ -118,8 +120,6 @@ protected:
   firrtl::FirrtlPB_Expression_SubField* make_subfield_expr(std::string name);
 
   uint8_t process_op_children(Lnast &ln, const Lnast_nid &lnidx_if, const std::string &firrtl_op);
-  //void    add_cstmts(Lnast &ln, const Lnast_nid &lnidx_if, firrtl::FirrtlPB_Module_UserModule *umod);
-  //void    add_cstmts(Lnast &ln, const Lnast_nid &lnidx_if, firrtl::FirrtlPB_Statement_When *when, uint8_t pos_to_add_to);
   void    make_assignment(Lnast &ln, const Lnast_nid &lnidx_lhs, firrtl::FirrtlPB_Expression *expr_rhs,
                           firrtl::FirrtlPB_Statement *fstmt);
 
@@ -153,6 +153,7 @@ private:
   absl::flat_hash_set<std::string> output_names;
   absl::flat_hash_set<std::string> register_names;
   absl::flat_hash_set<std::string> memory_names;
+  absl::flat_hash_set<std::string> async_rst_names;
 
   // Maps an instance name to the module name.
   absl::flat_hash_map<std::string, std::string> inst_to_mod_map;

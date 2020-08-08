@@ -183,8 +183,14 @@ void Inou_firrtl::init_wire_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type
       I(false);                                // TODO: LNAST does not support fixed point yet.
       break;
     }
+    case firrtl::FirrtlPB_Type::kAsyncResetType: { // AsyncReset
+      auto wire_bits = get_bit_count(type);
+      create_bitwidth_dot_node(lnast, wire_bits, parent_node, id);
+      async_rst_names.insert(id);
+      break;
+    }
     default: {
-      /* UInt SInt Clock Analog AsyncReset Reset Types*/
+      /* UInt SInt Clock Analog Reset Types*/
       auto wire_bits = get_bit_count(type);
       create_bitwidth_dot_node(lnast, wire_bits, parent_node, id);
     }
@@ -195,18 +201,13 @@ void Inou_firrtl::init_wire_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type
  * clock, reset, and init values using "dot" nodes in the LNAST.
  * These functions create all of those when a reg is first declared. */
 void Inou_firrtl::init_reg_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type, const std::string& id,
-                                const std::string_view clock, const std::string_view reset, const std::string_view init,
-                                Lnast_nid& parent_node) {
+                                const firrtl::FirrtlPB_Expression& clock, const firrtl::FirrtlPB_Expression& reset,
+                                const firrtl::FirrtlPB_Expression& init, Lnast_nid& parent_node) {
   switch (type.type_case()) {
     case firrtl::FirrtlPB_Type::kBundleType: {  // Bundle Type
       for (int i = 0; i < type.bundle_type().field_size(); i++) {
-        init_reg_dots(lnast,
-                      type.bundle_type().field(i).type(),
-                      absl::StrCat(id, ".", type.bundle_type().field(i).id()),
-                      clock,
-                      reset,
-                      init,
-                      parent_node);
+        init_reg_dots(lnast, type.bundle_type().field(i).type(), absl::StrCat(id, ".", type.bundle_type().field(i).id()),
+                      clock, reset, init, parent_node);
       }
       break;
     }
@@ -220,8 +221,15 @@ void Inou_firrtl::init_reg_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type,
       I(false);                                // FIXME: Unsure how to implement
       break;
     }
+    case firrtl::FirrtlPB_Type::kAsyncResetType: {  // AsyncReset
+      auto reg_bits = get_bit_count(type);
+      init_reg_ref_dots(lnast, id, clock, reset, init, reg_bits, parent_node);
+      async_rst_names.insert(id.substr(1));
+      break;
+    }
+
     default: {
-      /* UInt SInt Clock Analog AsyncReset Reset Types*/
+      /* UInt SInt Clock Analog Reset Types*/
       auto reg_bits = get_bit_count(type);
       init_reg_ref_dots(lnast, id, clock, reset, init, reg_bits, parent_node);
     }
@@ -229,11 +237,16 @@ void Inou_firrtl::init_reg_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type,
 }
 
 // FIXME: Eventually add in other "dot" nodes when supported.
-void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id, const std::string_view clock,
-                                    const std::string_view reset, const std::string_view init, uint32_t bitwidth,
-                                    Lnast_nid& parent_node) {
+void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id, const firrtl::FirrtlPB_Expression& clocke,
+                                    const firrtl::FirrtlPB_Expression& resete, const firrtl::FirrtlPB_Expression& inite,
+                                    uint32_t bitwidth, Lnast_nid& parent_node) {
   std::string id{_id};  // FIXME: isntead pass string_view, change lenght/start no need to realloc (much faster) Code can be shared
                         // with port_id
+
+  auto clk  = lnast.add_string(ReturnExprString(lnast, clocke, parent_node, true));
+  auto rst  = lnast.add_string(ReturnExprString(lnast, resete, parent_node, true));
+  auto init = lnast.add_string(ReturnExprString(lnast, inite, parent_node, true));
+  //auto init = "fixme";
 
   // Add register's name to the global list.
   register_names.insert(id.substr(1, id.length() - 1));  // Use substr to remove "#"
@@ -244,11 +257,11 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id, const 
   // The first step is to get a string that allows us to access the register.
 
   /* Now that we have a name to access it by, we can create the
-   * relevant dot nodes like: __clk_pin, __q_pin, __bits,
+   * relevant dot nodes like: __clk_pin, __bits, __reset_async
    * __reset_pin, and (init... how to implement?) */
 
   // Specify __clk_pin (all registers should have this set)
-  /*I((std::string)clock != "");
+  /*I(clock != "");
   auto acc_name_c = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(id, ".__clk_pin"));
 
   auto idx_asg_c = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
@@ -259,15 +272,43 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id, const 
   if (bitwidth > 0) {
     auto acc_name_bw = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(id, ".__bits"));
 
-    auto idx_asg_b = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
-    lnast.add_child(idx_asg_b, Lnast_node::create_ref(acc_name_bw));
-    lnast.add_child(idx_asg_b, Lnast_node::create_const(lnast.add_string(to_string(bitwidth))));
+    auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
+    lnast.add_child(idx_asg, Lnast_node::create_ref(acc_name_bw));
+    lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(to_string(bitwidth))));
   }
 
+  // Specify __reset_async
+  if (resete.has_reference() || resete.has_sub_field() ||
+      resete.has_sub_index() || resete.has_sub_access() || resete.has_prim_op()) {
+    bool is_reset_async = false;
+    if (resete.has_prim_op()) {
+      auto op = resete.prim_op().op();
+      if (op == firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_ASYNC_RESET) {
+        is_reset_async = true;
+      }
+    } else if (async_rst_names.contains(FlattenExpression(lnast, parent_node, resete))) {
+      is_reset_async = true;
+    }
+
+    if (is_reset_async) {
+      auto acc_name_sy = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(id, ".__reset_async"));
+
+      auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
+      lnast.add_child(idx_asg, Lnast_node::create_ref(acc_name_sy));
+      lnast.add_child(idx_asg, Lnast_node::create_ref("true"));
+    }
+  }
+
+  // Specify __reset_pin
+  /*I(reset != "");
+  auto acc_name_r = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(id, ".__reset_pin"));
+
+  auto idx_asg_r = lnast.add_child(parent_node, Lnast_node::create_assign(""));
+  lnast.add_child(idx_asg_r, Lnast_node::create_ref(acc_name_r));
+  lnast.add_child(idx_asg_r, Lnast_node::create_ref(rst));*/
+
   // Specify init.. (how to?)
-  // FIXME: Add this eventually... might have to use __reset (code to run when reset occurs)
-  //
-  //
+  // FIXME: Add this eventually...
 }
 
 // Set up any of the parameters related to a Memory block.
@@ -1602,7 +1643,8 @@ void Inou_firrtl::create_io_list(const firrtl::FirrtlPB_Type& type, uint8_t dir,
       break;
     }
     case firrtl::FirrtlPB_Type::kAsyncResetType: {      // AsyncReset type
-      vec.emplace_back(port_id, dir, 1);  // FIXME: Anything else I need to do?
+      vec.emplace_back(port_id, dir, 1);
+      async_rst_names.insert(port_id);
       break;
     }
     case firrtl::FirrtlPB_Type::kResetType: {  // Reset type
@@ -2001,17 +2043,13 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
     }
     case firrtl::FirrtlPB_Statement::kRegister: {  // Register
       register_names.insert(stmt.register_().id());
-      auto clk_name  = lnast.add_string(ReturnExprString(lnast, stmt.register_().clock(), parent_node, true));
-      auto rst_name  = lnast.add_string(ReturnExprString(lnast, stmt.register_().reset(), parent_node, true));
+      //auto clk_name  = lnast.add_string(ReturnExprString(lnast, stmt.register_().clock(), parent_node, true));
+      //auto rst_name  = lnast.add_string(ReturnExprString(lnast, stmt.register_().reset(), parent_node, true));
       //auto init_name = lnast.add_string(ReturnExprString(lnast, stmt.register_().init(), parent_node, true));
-      auto init_name = "fixme";
-      init_reg_dots(lnast,
-                    stmt.register_().type(),
-                    absl::StrCat("#", stmt.register_().id()),
-                    clk_name,
-                    rst_name,
-                    init_name,
-                    parent_node);
+      //auto init_name = "fixme";
+      init_reg_dots(lnast, stmt.register_().type(), absl::StrCat("#", stmt.register_().id()),
+                    stmt.register_().clock(), stmt.register_().reset(),
+                    stmt.register_().init(), parent_node);
       break;
     }
     case firrtl::FirrtlPB_Statement::kMemory: {  // Memory
@@ -2311,6 +2349,7 @@ void Inou_firrtl::AddPortToMap(const std::string& mod_id, const firrtl::FirrtlPB
       AddPortToSub(sub, inp_pos, out_pos, port_id, dir);
       mod_to_io_dir_map[std::make_pair(mod_id, port_id)] = dir;
       mod_to_io_map[mod_id].insert({port_id, 1, dir});
+      async_rst_names.insert(port_id);
       break;
     }
     case firrtl::FirrtlPB_Type::kResetType: { // Reset type
