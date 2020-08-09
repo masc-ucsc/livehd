@@ -49,7 +49,7 @@ git clone https://github.com/YosysHQ/yosys
 cd yosys
 git checkout `grep -C2 BUILD.yosys **PATH_TO_LIVEHD**/WORKSPACE  | grep commit | cut -d\" -f2`
 make config-gcc
-make install
+sudo make install
 ```
 
 ## Build/clone
