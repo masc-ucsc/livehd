@@ -64,7 +64,8 @@ void Pass_lgraph_to_lnast::initial_tree_coloring(LGraph* lg, Lnast &lnast) {
     // Look at dpins for each node. If unnamed, give dpin a name.
     for (const auto dpin : node_editable.out_connected_pins()) {
       auto dpin_editable = dpin;
-      if (!dpin_editable.has_name()) {
+      auto ntype = dpin.get_node().get_type().op;
+      if (!dpin_editable.has_name() && !((ntype == GraphIO_Op) || (ntype == Const_Op))) {
         dpin_editable.set_name(create_temp_var(lnast));
         if (dpin_editable.get_node().get_type().op == Mux_Op) {
           dpin_editable.set_name(dpin_editable.get_name().substr(3)); //Remove "___" in front
@@ -164,7 +165,12 @@ void Pass_lgraph_to_lnast::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node,
   std::string_view name;
   auto bw = pin.get_bits();
   auto ntype = pin.get_node().get_type().op;
-  if (bw > 0 & (pin.get_name().substr(0,3) != "___")) {
+  if (ntype == GraphIO_Op || ntype == Const_Op) {
+    // Nothing to do, and don't specify bitwidth.
+    return;
+  }
+
+  if ((bw > 0) & (pin.get_name().substr(0,3) != "___")) {
     /* NOTE->hunter: I decided to only specify reg and IO bw (not
      * wires). If more is needed just widen below condition. */
     if (ntype == SFlop_Op || ntype == AFlop_Op) {
@@ -178,10 +184,6 @@ void Pass_lgraph_to_lnast::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node,
 
   // Look at pin's node's type, then based off that figure out what type of node to add to LNAST.
   switch (ntype) {  // Future note to self: when doing src_pins, always check if sources to node are io inputs
-    case GraphIO_Op:
-    case Const_Op:
-      // Skip, nothing to do.
-      break;
     case And_Op:
     case Or_Op:
     case Xor_Op: attach_binaryop_node(lnast, parent_node, pin); break;
@@ -231,9 +233,14 @@ void Pass_lgraph_to_lnast::handle_io(LGraph* lg, Lnast_nid& parent_lnast_node, L
    *  T0 $x __bits    T0    0d7    (note that the $ would be % if it was an output)*/
 
   auto inp_io_node = lg->get_graph_input_node();
+  absl::flat_hash_set<std::string_view> inps_visited;
   for (const auto edge : inp_io_node.out_edges()) {
-    auto bits = edge.get_bits();
     auto pin_name = edge.driver.get_name();
+    if (inps_visited.contains(pin_name)) {
+      continue;
+    }
+    inps_visited.insert(pin_name);
+    auto bits = edge.get_bits();
     if (bits > 0) {
       // Put input bitwidth info in from_lg_bw_table
       lnast.set_bitwidth(pin_name, bits);
@@ -695,7 +702,7 @@ void Pass_lgraph_to_lnast::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node,
   // Specify var being assigned to is in upper scope (not in if-else scope)
   auto asg_idx_i = lnast.add_child(parent_node, Lnast_node::create_assign(""));
   lnast.add_child(asg_idx_i, Lnast_node::create_ref(dpin_get_name(pin)));
-  lnast.add_child(asg_idx_i, Lnast_node::create_const("0b"));
+  lnast.add_child(asg_idx_i, Lnast_node::create_const("0b?"));
 
   // Specify cond + create stmt for each mux val, except last.
   auto if_node  = lnast.add_child(parent_node, Lnast_node::create_if("mux"));
