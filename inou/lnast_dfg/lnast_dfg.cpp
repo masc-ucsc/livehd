@@ -281,7 +281,8 @@ void Lnast_dfg::process_ast_nary_op(LGraph *dfg, const Lnast_nid &lnidx_opr) {
   //DBG
   fmt::print("nary c0_name:{}\n", lnast->get_sname(c0));
   fmt::print("nary c1_name:{}\n", lnast->get_sname(c1));
-  fmt::print("nary c2_name:{}\n", lnast->get_sname(c2));
+  if (c2 != mmap_lib::Tree_index(-1,-1))
+    fmt::print("nary c2_name:{}\n", lnast->get_sname(c2));
   
 
   auto opr_node = setup_node_opr_and_lhs(dfg, lnidx_opr);
