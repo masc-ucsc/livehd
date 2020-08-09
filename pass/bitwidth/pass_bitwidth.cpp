@@ -341,9 +341,9 @@ void Pass_bitwidth::process_logic_and(Node &node, XEdge_iterator &inp_edges) {
 
       if (e.driver.get_num_edges() > 1) {
         must_perform_backward = true;
-      } else {
-        if (bits > min_bits)  // no other output, parent could follow the child
-          e.driver.set_bits(min_bits);
+      } else if (bits==0 || bits > min_bits) {
+        // no other output, parent could follow the child
+        e.driver.set_bits(min_bits);
       }
     }
   }
