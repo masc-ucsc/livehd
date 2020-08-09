@@ -33,7 +33,7 @@ void Code_gen::generate(){
   const auto& node_data = lnast->get_data(root_index);
   fmt::print("\n\nprocessing LNAST tree\n\n");
   if (node_data.type.is_top()) {
-    fmt::print("\nprocessing LNAST tree root text: {} ", node_data.token.text);
+    fmt::print("\nprocessing LNAST tree root text: {} ", node_data.token.get_text());
     fmt::print("processing root->child");
     do_stmts(lnast->get_child(root_index));
   } else if (node_data.type.is_invalid()) {
@@ -459,7 +459,7 @@ void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index) {
   assert(dot_str_vect.size()>2);
   auto key = dot_str_vect.front();
 
-  int i = 1;
+  auto i = 1u;
   std::string value;
   const auto& dot_node_data = lnast->get_data(dot_node_index);
   while (i<dot_str_vect.size()) {
@@ -512,7 +512,7 @@ void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index, std::str
   auto key = sel_str_vect.front();
   std::string value = std::string(sel_str_vect[1]);
 
-  int i = 2;
+  auto i = 2u;
   if (i==sel_str_vect.size()) {
     absl::StrAppend(&value, lnast_to->select_init(select_type), lnast_to->select_end(select_type));
   }
