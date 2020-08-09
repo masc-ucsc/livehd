@@ -80,6 +80,8 @@ constexpr Token_id Token_id_keyword_first = 14;
 constexpr Token_id Token_id_keyword_last  = 254;
 
 class Token {
+protected:
+  std::string_view text;
 public:
   Token() {
     tok   = Token_id_nop;
@@ -131,10 +133,9 @@ public:
   }
 
   Token_id tok;  // Token (identifier, if, while...)
-  uint64_t pos1;  // start position in original memblock for debugging
-  uint64_t pos2;  // end position in original memblock for debugging
+  uint64_t pos1; // start position in original memblock for debugging
+  uint64_t pos2; // end position in original memblock for debugging
   uint32_t line; // line of code
-  std::string_view text;
 
   std::string_view get_text() const { return text; }
 };

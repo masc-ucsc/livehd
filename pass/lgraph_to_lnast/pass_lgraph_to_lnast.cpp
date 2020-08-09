@@ -528,7 +528,7 @@ void Pass_lgraph_to_lnast::attach_join_node(Lnast& lnast, Lnast_nid& parent_node
   if (dpins.size() < 2) {
     // If this join node only has 1 input, it's really just an assign.
     auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
-    lnast.add_child(idx_asg, Lnast_node::create_ref(dpin_get_name(pin)));
+    lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));
     attach_child(lnast, idx_asg, dpins.top());
     return;
   }
@@ -701,7 +701,7 @@ void Pass_lgraph_to_lnast::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node,
 
   // Specify var being assigned to is in upper scope (not in if-else scope)
   auto asg_idx_i = lnast.add_child(parent_node, Lnast_node::create_assign(""));
-  lnast.add_child(asg_idx_i, Lnast_node::create_ref(dpin_get_name(pin)));
+  lnast.add_child(asg_idx_i, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));
   lnast.add_child(asg_idx_i, Lnast_node::create_const("0b?"));
 
   // Specify cond + create stmt for each mux val, except last.
@@ -713,7 +713,7 @@ void Pass_lgraph_to_lnast::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node,
     auto stmt_idx = lnast.add_child(if_node, Lnast_node::create_stmts(get_new_seq_name(lnast)));
 
     auto asg_idx = lnast.add_child(stmt_idx, Lnast_node::create_assign(""));
-    lnast.add_child(asg_idx, Lnast_node::create_ref(dpin_get_name(pin)));
+    lnast.add_child(asg_idx, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));
     attach_child(lnast, asg_idx, mux_vals.front().driver);
     mux_vals.pop();
   }
@@ -722,7 +722,7 @@ void Pass_lgraph_to_lnast::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node,
   auto stmt_idx = lnast.add_child(if_node, Lnast_node::create_stmts(get_new_seq_name(lnast)));
 
   auto asg_idx = lnast.add_child(stmt_idx, Lnast_node::create_assign(""));
-  lnast.add_child(asg_idx, Lnast_node::create_ref(dpin_get_name(pin)));
+  lnast.add_child(asg_idx, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));
   attach_child(lnast, asg_idx, mux_vals.front().driver);
 }
 
