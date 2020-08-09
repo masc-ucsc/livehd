@@ -167,7 +167,7 @@ negative (`sign = result.min<0`). `known` is true if the result sign is known
 For any value (`val`), the number of bits required (`bits`) is `val.bits =
 log2(absmax(val.max,val.min))+val.sign?1:0`.
 
-### Sum_Op
+### Sum_op
 
 Addition and substraction node is a single node that performs 2-complement
 additions and substractions with unlimited precision.
@@ -248,10 +248,11 @@ c == -16 (!!)
 * `Y = x+x+...` becomes `Y = (x<<1)+...`
 * `Y = (x<<n)+(y<<m)` where m>n becomes `Y = (x+y<<(m-n)<<n`
 * `Y = (~x)+1+...` becomes `Y = ...-x`
+* `Y = a + (b<<n)` becomes `Y = {(a>>n)+b, a&((1<<n)-1)}`
+* `Y = a - (b<<n)` becomes `Y = {(a>>n)-b, a&((1<<n)-1)}`
 * If every x,y... lower bit is zero `Y=x+y+...` becomes Y=((x>>1)+(y>>1)+..)<<1
 
-
-### Mult_Op
+### Mult_op
 
 Multiply operator. There is no Prod_Op that combines multiplication and
 division because unlike in Sum_Op, in integer operations the order matters
@@ -327,7 +328,7 @@ will notify LGraph that the output is to be treated as unsigned.
 * `Y = (power2a+power2b)*...` becomes `tmp=... ; Y = (tmp+tmp<<power2b)<<(power2a-power2b)` when power2a>power2b
 * `Y = (power2a-power2b)*...` becomes `tmp=... ; Y = (tmp-tmp<<power2b)<<(power2a-power2b)` when power2a>power2b
 
-### Div_Op
+### Div_op
 
 Division operator. The division operation is quite similar to the inverse of the multiplication, but a key difference is that only one driver is allowed for each input ('a' vs 'A').
 
@@ -376,96 +377,105 @@ The same considerations as in the multiplication should be applied.
 * `Y = a/power2b` becomes `Y=1+~(a>>log2(power2b))` if `Y.known and Y.neg`
 * `Y = (x*c)/a` if c.bits>a.bits becomes `Y = x * (c/a)` which should be a smaller division.
 * If b is a constant and `Y.known and !Y.neg`. From the hackers delight, we know that the division can be changed for a multiplication `Y=(a*(((1<<(a.__bits+2)))/b+1))>>(a.__bits+2)`
-* If a is not known. Then `Y = Y.neg? (~Y_unsigned+1):Y_unsigned`
+* If a sign is not `known`. Then `Y = Y.neg? (~Y_unsigned+1):Y_unsigned`
 
 
-### Modulo_Op
+#### Modulo
 
-Modulo operator
+There is no module cell in LGraph. The reason is that a modulo different from a
+power of 2 is very rare in hardware. If the language supports modulo
+operations, they must be translated to division/multiplication.
 
-```{.graph .center caption="Modulo LGraph Node."}
-digraph Mod {
-    rankdir=LR;
-    size="2,1"
 
-    node [shape = circle]; Mod;
-    node [shape = point ]; q0
-    node [shape = point ]; q1
-    node [shape = point ]; q
-
-    q0 -> Mod [ label ="a" ];
-    q1 -> Mod [ label ="b" ];
-    Mod  -> q [ label = "Y" ];
-}
+```
+ y = a mod b
 ```
 
-#### Forward Propagation
+It is the same as:
 
-* $Y = \text{a} % \text{b}$
-* $Y.max = DEN.max-1$
-* $Y.min = 0$
-* $Y.sign = 0$
-* Back propagation to the DEN input is possible $DEN.max = Y.max+1$.
+```
+ y = a-b*(a/b)
+```
 
-The result is unsigned if all the allowed values (min..max) are positive, or
-all the allowed values are negative. Otherwise, the result is signed.
+If b is a power of 2, the division optimization will transform the modulo operation to:
 
-Verilog NOTE: The result is always unsigned like in Verilog. The inputs do not
-need to be sign extended.
+```
+y = a - (a>>n)<<n
+```
 
-### Not_Op
+The add optimization should reduce it to:
 
-Not operator
+```
+y = a & ((1<<n)-1)
+```
+
+### Not_op
+
+Bitwise Not operator
 
 ```{.graph .center caption="Node LGraph Node."}
 digraph Mod {
     rankdir=LR;
-    size="2,1"
+    size="1,0.5"
 
     node [shape = circle]; Not;
     node [shape = point ]; q0
     node [shape = point ]; q
 
-    q0 -> Not [ label ="VAL" ];
+    q0 -> Not [ label ="a" ];
     Not  -> q [ label = "Y" ];
 }
 ```
 
-* $Y = \text{bitwise-not}(\text{VAL})$
-* $Y.max = (1<<VAL.bits)-1$
-* $Y.min = 0$
-* $Y.sign = 0$
-* Back propagation is possible by knowing the 2 of the 3 inputs bit sizes.
+#### Forward Propagation
 
-Each bit in the input VAL is toggled. Y and VAL should have the same number of
-bits. The result is unsigned.
+* $Y = \text{bitwise-not}(\text{a})$
+* $Y.max = \text{max}(~a.max,~a.min)$
+* $Y.min = \text{min}(~a.max,~a.min)$
 
-### Sext_Op
+#### Backward Propagation
 
-This operatator sign extends the input picking the POS bit as most significant or sign bit.
+* $a.max = \text{max}(~Y.max,~Y.min)$
+* $a.min = \text{min}(~Y.max,~Y.min)$
+
+### Verilog Considerations
+
+Same semantics as verilog
+
+
+#### Peephole optimizations
+
+No optimizations by itself, it has a single input. Other operations like Sum_Op can optimize when combined with Not_Op.
+
+
+### Sext_op
+
+This operatator sign extends the input picking the 'b' bit as most significant
+or sign bit. If the input has more bits, all the upper bits are cleared or set
+depending on the sign extension.
 
 ```{.graph .center caption="Sext LGraph Node."}
 digraph Sext {
     rankdir=LR;
-    size="2,1"
+    size="1,0.5"
 
     node [shape = circle]; cell;
     node [shape = point ]; q0
     node [shape = point ]; q1
     node [shape = point ]; q
 
-    q0 -> cell [ label ="VAL" ];
-    q1 -> cell [ label ="SZ" ];
+    q0 -> cell [ label ="a" ];
+    q1 -> cell [ label ="b" ];
     cell  -> q [ label = "Y" ];
 }
 ```
 
 #### Forward Propagation
 
-* $Y = \left\{\begin{matrix} VAL\&((1\ll SZ)-1) & \text{if}\ VAL[SZ]==0 \\ -(((\neg VAL)\& ((1\ll SZ)-1))+1) & \text{otherwise} \end{matrix}\right.$
-* $Y.max = (P_{n}.max<<(P_{0}.bits+..+P_{n-1}.bits))-1$
-* $Y.min = (P_{n}.min<<(P_{0}.bits+..+P_{n-1}.bits))$
-* $Y.sign = 1$
+* $Y = \begin{cases} a\&((1\ll b)-1)  & \text{if}\ a[b]==0 \\ 
+                           -(a\&((1\ll b)-1)) & \text{otherwise} \end{cases}$
+* $Y.max = \text{min}(a.max,(1<<b)-1)$
+* $Y.min = \text{max}(a.min,-(1<<b)$
 
 #### Backward Propagation
 
@@ -473,17 +483,27 @@ If the driver to Sext_Op only drives this node, the same Y.max and Y.min can be
 propagated to the VAL.max and VAL.min.  The reason is that the upper dropped
 bits were not used anyway, so no need to have all those bits computed.
 
- VAL.min = 0
+* $a.max = Y.max$
+* $a.min = Y.min$
 
 #### Other Considerations
 
-The Sext_Op is similar to the Pick_Op when OFF is zero and SZ is the same. The
+The Sext_Op is similar to the Pick_Op when `b` is zero and `b` is the same. The
 difference is the sign extension. For Pick_Op, the result is always unsigned,
-for Sext_Op, the result is always signed.
+for Sext_Op, the result can be signed.
 
-### Join_Op
 
-Join or concatenate operator. The output keeps the sign of the most last or most significant input.
+#### Peephole optimizations
+
+* `Y = sext(a,b)` if `maxabs(a.max,a.min) < (1<<b)` becomes `Y=a`
+* `Y = sext(a,b)` if `a.min>=0` becomes `Y=a&(1<<b)-1`
+
+
+### Join_op
+
+Join or concatenate operator. The output keeps the sign of the most last or
+most significant input.  This means that if the upper value is negative, the
+result is negative.
 
 ```{.graph .center caption="Join LGraph Node."}
 digraph Join {
@@ -496,56 +516,98 @@ digraph Join {
     node [shape = point ]; q2
     node [shape = point ]; q
 
-    q0 -> Join [ label ="P0" ];
-    q1 -> Join [ label ="P1" ];
-    q2 -> Join [ label ="P2" ];
+    q0 -> Join [ label ="a" ];
+    q1 -> Join [ label ="b" ];
+    q2 -> Join [ label ="c" ];
     Join  -> q [ label = "Y" ];
 }
 ```
 
 #### Forward Propagation
 
-* $Y = ... P_{2}<<(P_{1}.bits+P_{0}._bits) | P_{1}<<(P_{0}.bits) | P_{0}$
-* $Y.max = (P_{n}.max<<(P_{0}.bits+..+P_{n-1}.bits))-1$
-* $Y.min = (P_{n}.min<<(P_{0}.bits+..+P_{n-1}.bits))$
-* $Y.sign = P_{n}.sign$
+* $Y = ... c<<(b.bits+a._bits) | b<<(a.bits) | a$
+* $Y.max = \begin{cases} c.max<<(b.bits+a.bits) & c.max \ne 0 \\
+                         b.max<<(a.bits)        & b.max \be 0 \\
+                         a.max                  & otherwise \end{cases}$
+* $Y.min = \begin{cases} c.min<<(b.bits+a.bits) & c.min \ne 0 \\
+                         b.min<<(a.bits)        & b.min \be 0 \\
+                         a.min                  & otherwise \end{cases}$
 
 #### Backward Propagation
 
-* Back propagation is possible when only one input is unknown (and it is not the last one $P_{n}$). Only
-the bitwidth can be back propagated. Not the sign.
+Back propagation is possible when only one input is unknown. It is conservative
+because the max/min for the intermediate values are gone.
+
+* $b.max =  \frac{Y.max}{c.max<<(a.bits)}$ if b is not the highest value
+* $b.min = -\frac{Y.min}{c.min<<(a.bits)}$ if b is not the highest value
+
+* $c.max =  \frac{Y.max}{1<<(a.bits+b.bits)}$ if c is the highest value
+* $c.min =  \frac{Y.min}{1<<(a.bits+b.bits)}$ if c is the highest value
+
 
 #### Other Considerations
 
 Join_Op has two uses besides concatenating values. It is the way to implement a left shift
 and it is the way to create an unsigned value out of a signed value.
 
-Join_Op(xx,0u3bits) is a left shift by adding as many zeros as the $P_{0}$ has.
+Join_Op(xx,0u3bits) is a left shift by adding as many zeros as the `a` has.
 
-Join_Op(0,xx) will result in the same number as xx, but unsigned. Join_Op can
-be used to unsigned extend by adding a zero to the last input. The new $Y.max =
-P_{0}.max - P_{0}.min$ if min was negative and max was positive.
+Join_Op can not be used to created an unsigned value. Join_Op(0,x) is the same as x.
 
 
-Pick_Op: Pick some bits from the VAL input pin
+#### Peephole optimizations
+
+* `Y = Join(0,a,b)` becomes `Y= Join(a,b)`
+* `Y = Join(a,0)` is the implementation for `a<<n` where `n=0.bits`
+
+### Pick_op
+
+Pick some bits from the VAL input pin
 Y = VAL[[OFF..(OFF+Y.__bits)]]}
-
-And_Op: bitwise AND with 2 outputs single bit reduction (RED) or bitwise
-Y = VAL&..&VAL ; RED= &Y
-
-### ArithShiftRight_Op
-
-The right shift is the equivalent of arithmetic right shift if the input is signed. If the input is unsigned, RightShift_Op behaves like an simple right shift.
-
 
 #### Other Considerations
 
 The Pick_Op operation performs unsigned right shift even for signed inputs $Y = Pick_Op(VAL, OFF, 0)$ behaves like a $Y=VAL>>OFF$.
 
-
-### Pick_Op
-
 Pick selects some bits from the source (VAL). It can be used as an unsigned right shift. The Pick_Op result is always unsigned.
+
+### ShiftRigt_op
+
+Logical or sign extension shift right.
+
+### Mux_op
+
+### LUT_op
+
+### And_op
+
+reduce AND `a =u= -1` // unsigned equal
+
+### Or_op
+
+reduce OR `a != 0` 
+
+### Xor_op
+
+reduce xor is a chain of XORs.
+
+### Const_op
+
+### SFlop_op
+
+### AFlop_op
+
+### FFlop_op
+
+### Latch_op
+
+### Memory_op
+
+### SubGraph_op
+
+
+And_Op: bitwise AND with 2 outputs single bit reduction (RED) or bitwise
+Y = VAL&..&VAL ; RED= &Y
 
 
 #### Forward Propagation
