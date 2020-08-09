@@ -19,6 +19,7 @@ void setup_inou_verific();
 void setup_inou_lnast_dfg();
 void setup_inou_yosys();
 void setup_inou_firrtl();
+void setup_pass_fplan();
 
 void setup_cops_live();
 
@@ -39,6 +40,7 @@ void Main_api::init() {
   setup_inou_lnast_dfg();
   setup_inou_yosys();
   setup_inou_firrtl();
+  setup_pass_fplan();
   /* setup_inou_json(); */
   /* setup_inou_rand(); */
   /* setup_inou_verific(); */

@@ -3,3 +3,5 @@ notes.txt
 makefile
 tests/hier_test*
 tests/fp.cpp
+space.code-workspace
+.vscode
