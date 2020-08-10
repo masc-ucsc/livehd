@@ -12,9 +12,9 @@ pts='logic
      '
 
 #make sure to call Pyrope_compile() in the end of script
-# pts='attr_set'
-# pts_hier='sum funcall'
-# pts_hier2='sum funcall4'   
+# pts='test'
+pts_hier='sum funcall'
+pts_hier2='sum2 funcall2'   
 
 
 LGSHELL=./bazel-bin/main/lgshell
@@ -201,12 +201,12 @@ Pyrope_compile () {
 }
 
 Pyrope_compile "$pts" 
-# Pyrope_compile "$pts_hier" "hier"
-# Pyrope_compile "$pts_hier2" "hier"
+Pyrope_compile "$pts_hier" "hier"
+Pyrope_compile "$pts_hier2" "hier"
 
 
-rm -f *.v
-rm -f lnast.dot.gld
-rm -f lnast.nodes
-rm -f lnast.nodes.gld
-rm -f *.dot
+# rm -f *.v
+# rm -f lnast.dot.gld
+# rm -f lnast.nodes
+# rm -f lnast.nodes.gld
+# rm -f *.dot

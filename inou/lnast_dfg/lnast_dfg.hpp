@@ -70,15 +70,17 @@ protected:
   void         setup_clk                      (LGraph *dfg, Node &reg_node);
 
 
-  static bool is_register          (std::string_view name) {return name.substr(0, 1) == "#" ; }
-  static bool is_input             (std::string_view name) {return name.substr(0, 1) == "$" ; }
-  static bool is_output            (std::string_view name) {return name.substr(0, 1) == "%" ; }
-  static bool is_const             (std::string_view name) {return (std::isdigit(name[0]) || name.at(0) == '-'); }
-  static bool is_bool_true         (std::string_view name) {return name == "true"; }
-  static bool is_bool_false        (std::string_view name) {return name == "false"; }
-  static bool is_err_var_undefined (std::string_view name) {return name.substr(0,17) == "err_var_undefined"; }
-  static bool is_scalar            (Node_pin dpin) {return dpin.get_node().get_type().op != TupAdd_Op; }
+  static bool is_register               (std::string_view name) {return name.substr(0, 1) == "#" ; }
+  static bool is_input                  (std::string_view name) {return name.substr(0, 1) == "$" ; }
+  static bool is_output                 (std::string_view name) {return name.substr(0, 1) == "%" ; }
+  static bool is_const                  (std::string_view name) {return (std::isdigit(name[0]) || name.at(0) == '-'); }
+  static bool is_bool_true              (std::string_view name) {return name == "true"; }
+  static bool is_bool_false             (std::string_view name) {return name == "false"; }
+  static bool is_err_var_undefined      (std::string_view name) {return name.substr(0,17) == "err_var_undefined"; }
+  static bool is_scalar                 (Node_pin dpin) {return dpin.get_node().get_type().op != TupAdd_Op; }
+  bool        subgraph_outp_is_tuple    (Sub_node* sub);
 
+  void        subgraph_io_connection    (LGraph *dfg, Sub_node* sub, std::string_view arg_tup_name, std::string_view res_name, Node subg_node);
 
   // tuple related
   Node_pin     setup_tuple_ref           (LGraph *dfg, std::string_view tup_name, bool for_tuple_add = 0);

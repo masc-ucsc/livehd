@@ -1,9 +1,10 @@
-// $inp.__bits = 1 // I put bits to avoid unrelated problem
-x = 3
-if $inp & 1 {
-    x = 4
-} else {
-    x = 5
+sum = ::{
+  $a.__bits = 2
+  $b.__bits = 2
+  %out.__bits = 3
+  %out = $a + $b
 }
-%out = x
+%out.__bits = 3
 
+%out = sum(a = 2, b = 3)
+// %out += sum(sub_inp)
