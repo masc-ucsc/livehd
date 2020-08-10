@@ -88,7 +88,6 @@ int Semantic_check::in_rhs_list(Lnast *lnast, std::string_view node_name) {
     index += 1;
     for (auto name : node) {
       if (lnast->get_name(name) == node_name) {
-        std::cout << index << "\n";
         return index;
       }
     }
@@ -268,18 +267,18 @@ void Semantic_check::resolve_read_write_lists(Lnast *lnast) {
 }
 
 void Semantic_check::resolve_lhs_rhs_lists(Lnast *lnast) {
-  for (auto node : lhs_list) {
-    fmt::print("{}, ", lnast->get_name(node));
-  }
-  fmt::print("\n");
-  for (auto node : rhs_list) {
-    fmt::print("[");
-    for (auto inner : node) {
-      fmt::print("{} , ", lnast->get_name(inner));
-    }
-    fmt::print("]");
-  }
-  fmt::print("\n");
+  // for (auto node : lhs_list) {
+  //   fmt::print("{}, ", lnast->get_name(node));
+  // }
+  // fmt::print("\n");
+  // for (auto node : rhs_list) {
+  //   fmt::print("[");
+  //   for (auto inner : node) {
+  //     fmt::print("{} , ", lnast->get_name(inner));
+  //   }
+  //   fmt::print("]");
+  // }
+  // fmt::print("\n");
   // int lhs_list_size = (int) lhs_list.size();
   // for (int i = 0; i < lhs_list_size; i++) {
   //   // auto lhs_type = lnast->get_data(lhs_list[i]).type;
@@ -293,32 +292,36 @@ void Semantic_check::resolve_lhs_rhs_lists(Lnast *lnast) {
   //     }
   //   }
   for (auto lhs_node : lhs_list) {
-    auto lhs_name = lnast->get_name(lhs_node);
+    std::string_view lhs_name = lnast->get_name(lhs_node);
+    // Skip if is temporary node
     if (lhs_name[0] == '_' && lhs_name[1] == '_' && lhs_name[2] == '_') {
       continue;
     }
-    // TODO - Make sure to keep searching for an index when node name has '___' in it
     int lhs_index = in_rhs_list(lnast, lhs_name); // Look for index where lhs_name is found in rhs_list
     if (lhs_index == -1) {
       continue;
     }
     int rhs_index = in_rhs_list(lnast, lnast->get_name(lhs_list[lhs_index])); 
-    // Look for index where lhs_name is found in rhs_list (to determine if lhs_name at lhs_index is unnecessary)
-    if (rhs_index == -1) {
+    // index where lhs_name is found in rhs_list (to determine if lhs node at lhs_index is unnecessary)
+    if (rhs_index == -1) { // Node at lhs_index is necessary
       continue;
     }
-    while (lhs_list[lhs_index][0] == '_' && lhs_list[lhs_index][1] == '_' && lhs_list[lhs_index][2] == '_') {
-      lhs_index = in_rhs_list(lnast, lhs_list[lhs_index]); // Look for index where lhs_name is found in rhs_list
+    bool rhs_not_temp = false;
+    // lhs_node is a temporary variable so keep searching for a non-temporary variable
+    while (!rhs_not_temp && (lnast->get_name(lhs_list[lhs_index])[0] == '_' && lnast->get_name(lhs_list[lhs_index])[1] == '_' && lnast->get_name(lhs_list[lhs_index])[2] == '_')) {
+      lhs_index = in_rhs_list(lnast, lnast->get_name(lhs_list[lhs_index])); // Look for index where temporary variable is found in rhs_list
       if (lhs_index == -1) {
         break;
       }
-      rhs_index = in_rhs_list(lnast, lnast->get_name(lhs_list[lhs_index])); 
-      // Look for index where lhs_name is found in rhs_list (to determine if lhs_name at lhs_index is unnecessary)
-      if (rhs_index == -1) {
-        break;
+      for (auto rhs_name : rhs_list[lhs_index]) {
+        std::string_view temp = lnast->get_name(rhs_name);
+        if (temp[0] != '_' && temp[1] != '_' && temp[2] != '_') {
+          rhs_not_temp = true;
+          break;
+        }
       }
     }
-    if (lhs_index == -1 || rhs_index == -1) {
+    if (lhs_index == -1) {
       continue;
     }
     if (!in_inefficient_LNAST(lnast->get_name(lhs_list[lhs_index]))) {
@@ -333,9 +336,9 @@ void Semantic_check::resolve_lhs_rhs_lists(Lnast *lnast) {
       if (name == *first) {
         continue;
       }
-      std::cout << ", " << name;
+      fmt::print(", {}",name);
     }
-    std::cout << " may be unnecessary\n";
+    fmt::print(" may be unnecessary\n");
   }
 }
 
