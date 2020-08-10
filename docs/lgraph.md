@@ -1,19 +1,30 @@
 # LGraph Internals
 
+LGraph is the graph-based data structure used inside LiveHD. Together with
+LNAST, it is one of the key data structures.
+
+The LGraph can be built directly with passes like Yosys, or through LNAST to
+LGraph translations. The LNAST builds a gated-SSA which is translated to
+LGraph.
+
+Understanding the LGraph is needed if you want to build a LiveHD pass.
+
 ## LGraph APIs needed to know
 
-#### For LGraph developer(must read if you know the old LGraph):
+### For LGraph developer(must read if you know the old LGraph):
 * src_pin/dst_pin have been renamed to driver_pin/sink_pin
 
 * the concept of node bitwidth has been removed, it’s wrong since
   every output edge of a node could have different bitwidth.
   The edge bitwidth is defined on the driver_pin.
 
-* in the old LGraph, every graph input/output is represented as different nodes.
-  However, in the new lgraph, all graph inputs are represented as a single graph
-  input node, each graph input is a pin of that node. Same as graph outputs.
+* in the old LGraph, every graph input/output is represented as different
+  nodes.  However, in the new lgraph, all graph inputs are represented as a
+  single graph input node, each graph input is a pin of that node. Same as graph
+  outputs.
 
-* The LGraph iterator such as for(auto node: g->forward()) no longer visit graph ios, the graph io should be handled separately, for example,
+* The LGraph iterator such as for(auto node: g->forward()) no longer visit
+  graph ios, the graph io should be handled separately, for example,
 
 ```
 // simple way using lambda
@@ -34,10 +45,10 @@ for (const auto &out_edge : ginp_node.out_edges()) {
   Node_pin sink_pin = out_edge.sink;
 
   Node sink_node = out_edge.sink.get_node();
-
 }
 ```
-#### APIs
+
+### APIs
 * create node
 ```
 new_node = lg->create_node()
@@ -241,7 +252,7 @@ c = 5b01111 + 5b0001 // this is the Verilog semantics by matching size
 c == -16 (!!)
 ```
 
-#### Peephole optimizations
+#### Peephole Optimizations
 
 * `Y = x-0+0+...` becomes `Y = x+...`
 * `Y = x-x+...` becomes `Y = ...`
@@ -320,7 +331,7 @@ Either all the inputs were unsigned, or there should be a Join_Op with 1bit
 zero to force the MSB as positive. This extra bit will be simplified but it
 will notify LGraph that the output is to be treated as unsigned.
 
-#### Peephole optimizations
+#### Peephole Optimizations
 
 * `Y = a*1*...` becomes `Y=a*...`
 * `Y = a*0*...` becomes `Y=0`
@@ -369,7 +380,7 @@ propagation. It is a simpler case of multiplication backward propagation.
 
 The same considerations as in the multiplication should be applied.
 
-#### Peephole optimizations
+#### Peephole Optimizations
 
 * `Y = a/1` becomes `Y=a`
 * `Y = 0/b` becomes `Y=0`
@@ -443,7 +454,7 @@ digraph Mod {
 Same semantics as verilog
 
 
-#### Peephole optimizations
+#### Peephole Optimizations
 
 No optimizations by itself, it has a single input. Other operations like Sum_Op can optimize when combined with Not_Op.
 
@@ -493,7 +504,7 @@ difference is the sign extension. For Pick_Op, the result is always unsigned,
 for Sext_Op, the result can be signed.
 
 
-#### Peephole optimizations
+#### Peephole Optimizations
 
 * `Y = sext(a,b)` if `maxabs(a.max,a.min) < (1<<b)` becomes `Y=a`
 * `Y = sext(a,b)` if `a.min>=0` becomes `Y=a&(1<<b)-1`
@@ -555,7 +566,7 @@ Join_Op(xx,0u3bits) is a left shift by adding as many zeros as the `a` has.
 Join_Op can not be used to created an unsigned value. Join_Op(0,x) is the same as x.
 
 
-#### Peephole optimizations
+#### Peephole Optimizations
 
 * `Y = Join(0,a,b)` becomes `Y= Join(a,b)`
 * `Y = Join(a,0)` is the implementation for `a<<n` where `n=0.bits`
@@ -602,6 +613,63 @@ reduce xor is a chain of XORs.
 ### Latch_op
 
 ### Memory_op
+
+Memory is the basic block to represent SRAM-like structures. Any large storage will benefit of using memory arrays instead of slower to simulate set of flops. The memories are highly configurable.
+
+
+```{.graph .center caption="Memory LGraph Node."}
+digraph Join {
+    rankdir=LR;
+    size="2,1"
+
+    node [shape = circle]; Memory;
+    node [shape = point ]; q0
+    node [shape = point ]; q1
+    node [shape = point ]; q2
+    node [shape = point ]; q
+
+    q0 -> Join [ label ="s" ];
+    q1 -> Join [ label ="b" ];
+    q2 -> Join [ label ="p" ];
+    Join  -> q [ label = "Y" ];
+}
+```
+
+* `s` is for the array size in number of entries
+* `b` is the number of bits per entry
+* `r` is the read or read/write ports connecting to the memory
+* `w` is the write-only ports connecting to the memory
+* `q` is the read data out of the memory for the read ports
+
+Both `r`, `w', and `q` are arrays to support multiported memories. The order of
+the ports do not change semantics. The size of `q` and `r` should match.
+
+Each port `w` has the following entries:
+* `__clk_pin` points to the clock driver pin
+* `__posedge` points to a 1/0 constant driver pin
+* `__we`      points to the driver pin controlling the write enable (single bit)
+* `__nwmask`  Points to the write mask (0 == write, 1==no write). The mask bust be a big as the number of bits per entry (`b`)
+* `__latency` points to an integer constant driver pin. For writes `__latency>=1`
+* `__addr`    points to the driver pin for the address. The address bits should match the array size (`s`)
+* `__data`    points to the write data driver pin
+
+
+Each `r` port can handle read and writes. Therefore, it has the same ports as the write, but it also has:
+* `__fwd`     points to a 0/1 constant driver pin to indicate if writes forward value. Effectively, it means zero cycles read latency when enabled
+* `__enable`  points to the driver pin for read enable. If the port is read-only, the wenable points to a 0 constant.
+
+A readony port does not use the `__data` or `__nwmask`, but they still need to
+be populated with the correct sizes.  All the ports must be populated. It not
+used point to a zero constant with the correct number of bits. E.g: a 8bit per
+entry (`b`) array needs a 8 bit zero `__nwmask` (`__nwmask = 0u8bits`)
+
+#### Forward Propagation
+
+#### Backward Propagation
+
+#### Other Considerations
+
+#### Peephole Optimizations
 
 ### SubGraph_op
 
