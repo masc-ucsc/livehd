@@ -303,7 +303,6 @@ protected:
   inline bool consume_token();
   bool        go_back(uint64_t num_tok);
   std::string rule_id_to_string(Rule_id rid);
-  std::string tok_id_to_string(Token_id tok);
 
   uint8_t check_function(uint8_t (Prp::*rule)(std::list<std::tuple<Rule_id, Token_entry>> &), uint64_t *sub_cnt,
                          std::list<std::tuple<Rule_id, Token_entry>> &loc_list);
