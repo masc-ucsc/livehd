@@ -133,7 +133,7 @@ $ less trivial.json
   yosys> memory_collect
   yosys> yosys2lg
   ```
-- To create a Verilog file from LGraph
+- To create a Verilog file from LGraph:
   ```
   yosys -m ./bazel-bin/inou/yosys/liblgraph_yosys.so
   yosys> lg2yosys -name trivial
