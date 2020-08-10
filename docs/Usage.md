@@ -1,182 +1,150 @@
 # Usage
 
-This is a high level description of how to compile LiveHD and use it
+This is a high level description of how to compile LiveHD and use it.
 
 ## Requirements
 
-LiveHD is heavily tested with the latest arch and Kali (debian based) linux
-distributions. In general, you need to install YOSYS with the required packages
-by yosys, and the capacity to compile c++ with static libraries for gcc or
-clang version 8 or newer.
+Although LiveHD should run on most common Linux distributions, it is heavily tested on both Arch and Kali (Debian based).
 
-A simple hello.cpp program like the following will check if your gcc/clang is
-new enough with needed libraries: 
+The following programs are assumed to be present when building LiveHD:
+ - GCC 8+ or Clang 8+* (C++17 support is required**)
+ - Yosys***
+ - Bazel
 
-```cpp
-#include <string_view>
-#include <filesystem>
-#include <iostream>
+The following programs are optional:
+ - pandoc (for better viewing of markdown documentation)
 
-int main() {
-  std::string_view file{"a.out"};
+It is also assumed that bash is used to compile LiveHD.
 
-  if (std::filesystem::exists(file))
-    std::cout << "Hello a.out\n";
-  else
-    std::cout << "Where is the a.out?\n";
+\* gcc can have better compile times, but clang offers better warnings and execution speed.  
+\*\* If you're unsure if your copy of gcc or clang is new enough, you can check the version by typing 
+  ```$ g++ --version```
+  or
+  ```$ clang++ --version```  
+\*\*\* LiveHD requires a specific commit of Yosys which needs to be built from source.
 
-  return 0;
-}
-```
+## Installation
 
-The previous code should compile correctly with (or clang++):
+1. **Download LiveHD source**  
+  ```$ git clone https://github.com/masc-ucsc/livehd```
+2. **Build Yosys from source**  
+  LiveHD requires a specific commit of Yosys in order to function properly.  Versions of Yosys installed through apt, pacman, etc. will not work.  
+  When building Yosys from source, it will pull in additional dependancies it needs.  Check https://github.com/YosysHQ/yosys/#setup for more information.
 
-```bash
-g++ -std=c++17 -static hello.cpp
-```
+  - Download the Yosys source (the exact directory doesn't matter as long as it's not inside LiveHD)  
+      ```$ git clone https://github.com/YosysHQ/yosys```  
+      ```$ cd yosys```
+  - Find the Yosys commit LiveHD uses and check out that commit  
+      ```git checkout `$ grep -C2 BUILD.yosys <absolute path to LiveHD>/WORKSPACE  | grep commit | cut -d\" -f2` ```
+  - Tell Yosys that we'll use gcc to compile it  
+      ```$ make config-gcc```
+  - Install Yosys  
+      ```$ sudo make install```
+3. **Install Bazel**
+  - ```$ sudo pacman -Syu bazel``` (Arch)
+  - ```$ sudo apt-get install bazel``` (Kali/Debian/Ubuntu)
+4. **Build LiveHD**  
+  LiveHD has both release and debug build options.  Release is for regular users, and debug is for those who want to contribute to LiveHD.  See [Bazel.md](Bazel.md) for more information.
 
-## Install the correct Yosys version
+  - Build LiveHD  
+      ```$ bazel build //main:all``` (release mode)  
+      ```$ bazel build //main:all -c dbg``` (debug mode)  
+    (A binary will be created in `livehd/bazel-bin/main/lgshell`)
 
-To read/write verilog through the yosys platform, you need to install the
-correct yosys version.  Notice that Yosys requires more packages to install.
-Check https://github.com/YosysHQ/yosys/#setup for a more detailed list of
-packages.
-
-```bash
-cd livehd
-cd ../
-git clone https://github.com/YosysHQ/yosys
-cd yosys
-git checkout `grep -C2 BUILD.yosys **PATH_TO_LIVEHD**/WORKSPACE  | grep commit | cut -d\" -f2`
-make config-gcc
-make install
-```
-
-## Build/clone
-
-```bash
-# Clone the directory the first time
-git clone  git@github.com:masc-ucsc/livehd.git
-```
-
-You need either debug or release, if you are developing, use the debug option.
-
-See Bazel.md for more details
-
-For a simple release build, simply type:
-
-```
-bazel build //main:all
-```
-
-A binary will be created in:
-
-```
-$ ls ./bazel-bin/main/lgshell
-```
+5. **Install pandoc (optional)**
+  - ```$ sudo pacman -Syu pandoc``` (Arch)  
+  - ```$ sudo apt-get install pandoc``` (Kali/Debian/Ubuntu)
 
 ## Sample usage
 
-Some sample usages for the various functions implemented.
+Below are some sample usages of the LiveHD shell.  A bash prompt is indicated by `$`, a LiveHD prompt is indicated by `livehd>`, and a Yosys prompt is indicated by a `yosys>`.  The LiveHD shell supports color output and autocompletion using the tab key.
 
-In this section we differentiate between the bash prompt ($) and the LiveHD prompt (livehd>).
+### Starting and exiting the shell
 
-### To use the lgshell comand line
-
-```bash
-./bazel-bin/main/lgshell
+```
+$ ./bazel-bin/main/lgshell
 livehd> help
-```
-
-### Read and Write verilog files in/out of LiveHD
-
-To read a verilog with yosys and create an LGraph
-
-```bash
-$ ./bazel-bin/main/lgshell
-livehd> inou.yosys.tolg files:./inou/yosys/tests/simple_add.v
+  ...
 livehd> exit
-$ ls lgdb
 ```
 
-To dump an lgraph (and submodules) to verilog
-```bash
-$ ./bazel-bin/main/lgshell
-livehd> lgraph.open name:simple_add |> inou.yosys.fromlg odir:lgdb
-livehd> exit
-$ ls lgdb/*.v
+### Reading and writing verilog files with of LiveHD
+
+- To read a Verilog file with Yosys and create an LGraph:
+  ```
+  $ ./bazel-bin/main/lgshell
+  livehd> inou.yosys.tolg files:./inou/yosys/tests/simple_add.v
+  livehd> exit
+  $ ls lgdb
+  ```
+- To dump an LGraph (and submodules) to Verilog:
+  ```
+  $ ./bazel-bin/main/lgshell
+  livehd> lgraph.open name:simple_add |> inou.yosys.fromlg odir:lgdb
+  livehd> exit
+  $ ls lgdb/*.v
+  ```
+
+### Generating json file from an LGraph
+
 ```
-
-### Generating json file from a graph
-
-```bash
 $ ./bazel-bin/main/lgshell
 livehd> inou.yosys.tolg files:./inou/yosys/tests/trivial.v |> @a
 livehd> @a |> inou.json.fromlg output:trivial.json
 livehd> exit
-
-$ ls trivial.json
+$ less trivial.json
 ```
 
 ### RocketChip example pass
 
-Load RocketChip to the DB for the first time
-```bash
-$ ./bazel-bin/main/lgshell
-livehd> files path:projects/rocketchip/ |> inou.liveparse
-livehd> inou.yosys.tolg files:lgdb/parse/file_freechips.rocketchip.system.DefaultConfig.v
-livehd> lgraph.open name:RocketTile |> pass.sample.wirecount
-```
-
-Perform a pass over RocketTile (top level module in RocketChip)
-```bash
-$ ./bazel-bin/main/lgshell
-livehd> lgraph.open name:RocketTile |> pass.sample.wirecount
-```
+- Load RocketChip to the DB for the first time
+  ```
+  $ ./bazel-bin/main/lgshell
+  livehd> files path:projects/rocketchip/ |> inou.liveparse
+  livehd> inou.yosys.tolg files:lgdb/parse/file_freechips.rocketchip.system.DefaultConfig.v
+  livehd> lgraph.open name:RocketTile |> pass.sample.wirecount
+  ```
+- Perform a pass over RocketTile (the top level module in RocketChip)
+  ```
+  $ ./bazel-bin/main/lgshell
+  livehd> lgraph.open name:RocketTile |> pass.sample.wirecount
+  ```
 
 ### Low level directed build
 
-To compile an individual pass:
-
-```bash
-bazel build -c dbg //pass/sample:pass_sample
-bazel build -c dbg //inou/yosys:all
-```
-
-To build yosys module:
-
-```bash
-bazel build -c dbg //inou/yosys:all
-```
-
-To read a module with yosys directly
-
-```bash
-yosys -m ./bazel-bin/inou/yosys/liblgraph_yosys.so
->read_verilog -sv ./inou/yosys/tests/trivial.v ; proc ; opt -fast ; pmuxtree ; memory_dff ; memory_share ; memory_collect
->yosys2lg
-```
-
-To create a verilog from LGraph
-
-```bash
-yosys -m ./bazel-bin/inou/yosys/liblgraph_yosys.so
->lg2yosys -name trivial
->write_verilog trivial.v
-```
-
+- To compile an individual pass:
+  ```
+  $ bazel build -c dbg //pass/sample:pass_sample
+  $ bazel build -c dbg //inou/yosys:all
+  ```
+- To build a Yosys module:
+  ```
+  $ bazel build -c dbg //inou/yosys:all
+  ```
+- To read a module with Yosys directly:
+  ```
+  $ yosys -m ./bazel-bin/inou/yosys/liblgraph_yosys.so
+  yosys> read_verilog -sv ./inou/yosys/tests/trivial.v
+  yosys> proc
+  yosys> opt -fast
+  yosys> pmuxtree
+  yosys> memory_dff
+  yosys> memory_share
+  yosys> memory_collect
+  yosys> yosys2lg
+  ```
+- To create a Verilog file from LGraph:
+  ```
+  yosys -m ./bazel-bin/inou/yosys/liblgraph_yosys.so
+  yosys> lg2yosys -name trivial
+  yosys> write_verilog trivial.v
+  ```
 
 ## Documentation
 
-The documentation is written in markdown. To generate PDFs any markdown converter
-can be used. We recommend pandoc, to install pandoc:
+LiveHD uses Markdown for documentation.  You can view the documentation in GitHub or in any viewer that supports Markdown.  If you would like to generate a pdf of the documentation, we recommend using pandoc (see the Installation section for installation details)
 
-```bash
-pacman -S pandoc
+To generate PDFs, run
 ```
-
-To generate PDFs:
-
-```bash
-pandoc -S -N -V geometry:margin=1in ./docs/Usage.md -o ./docs/Usage.pdf
+$ pandoc -S -N -V geometry:margin=1in ./docs/Usage.md -o ./docs/Usage.pdf
 ```
