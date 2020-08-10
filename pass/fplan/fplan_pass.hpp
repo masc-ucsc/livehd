@@ -8,10 +8,14 @@
 
 class Livehd_parser : public Pass {
 public:
+
   // creates the parser and registers it with LGraph...?
-  Livehd_parser(const Eprp_var &var);
+  Livehd_parser(const Eprp_var &var) : Pass("pass.fplan", var) { }
 
   static void setup();
 
-  static void tofp(Eprp_var &v);
+  static void pass(Eprp_var &v);
+
+private:
+  void makefp(LGraph *l);
 };

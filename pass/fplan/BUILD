@@ -10,6 +10,7 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
+         "//core:core",
          "//pass/common:pass",
          "@iassert//:iassert",
          "@rapidjson//:headers",

@@ -2,10 +2,10 @@ basic test tree hierarchy:
 
            root------------------\------\
            /  \                  |      |
-       mid1----mid2_______       |      |
-       /  \     /   \     \     mid3   mid4
-     lf1  lf2  lf3  lf4   lf5    |      |
-                                lf6    lf7
+  ------mid1----mid2_______       |      |
+  |    /  \     /   \     \     mid3   mid4
+ lf7 lf1  lf2  lf3  lf4   lf5    |
+                                lf6
 
 test tree connection diagram:
 
