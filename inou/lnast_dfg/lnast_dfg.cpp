@@ -19,9 +19,6 @@ std::vector<LGraph *> Lnast_dfg::do_tolg(std::shared_ptr<Lnast> ln, const Lnast_
     }
 
     std::vector<LGraph *> lgs;
-
-
-
     top_stmts2lgraph(dfg, top_stmts);
     lgs.push_back(dfg);
 
@@ -30,16 +27,6 @@ std::vector<LGraph *> Lnast_dfg::do_tolg(std::shared_ptr<Lnast> ln, const Lnast_
 
 
 void Lnast_dfg::top_stmts2lgraph(LGraph *dfg, const Lnast_nid &lnidx_stmts) {
-
-  /* for (const auto &it : lnast->depth_preorder(lnidx_stmts)) { */
-  /*   const auto &node = lnast->get_data(it); */
-  /*   std::string indent{"  "}; */
-  /*   for (int i = 0; i < it.level; ++i) indent += "  "; */
-
-  /*   fmt::print("{} {} {:>20} : {}\n", it.level, indent, node.type.to_s(), node.token.get_text()); */
-  /* } */
-
-
   fmt::print("============================= Phase-1: LNAST->LGraph Start ===============================================\n");
   process_ast_stmts(dfg, lnidx_stmts);
 
@@ -711,7 +698,6 @@ bool Lnast_dfg::check_new_var_chain(const Lnast_nid &lnidx_opr) {
 
     if (lnast->get_vname(itr_ch) == vname_1st_child)
       one_of_rhs_is_lhs = true;
-
   }
   return !one_of_rhs_is_lhs;
 }
@@ -1086,7 +1072,24 @@ void Lnast_dfg::subgraph_io_connection(LGraph *dfg, Sub_node* sub, std::string_v
       scalar_dpin.set_name(res_name);
       auto pos = res_name.find_last_of('_');
       auto res_vname = res_name.substr(0,pos);
+      auto res_sub   = std::stoi(std::string(res_name.substr(pos+1)));
       setup_dpin_ssa(scalar_dpin, res_vname, 0);
+
+      if (vname2attr_dpin.find(res_vname) != vname2attr_dpin.end()) {
+        auto aset_node = dfg->create_node(AttrSet_Op);
+        auto aset_aci_spin = aset_node.setup_sink_pin("ACI");
+        auto aset_ancestor_dpin = vname2attr_dpin[res_vname];
+        dfg->add_edge(aset_ancestor_dpin, aset_aci_spin);
+
+        auto aset_vn_spin = aset_node.setup_sink_pin("VN");
+        auto aset_vn_dpin = scalar_dpin;
+        dfg->add_edge(aset_vn_dpin, aset_vn_spin);
+
+        name2dpin[res_name] = aset_node.setup_driver_pin(0); // dummy_attr_set node now represent the latest variable
+        aset_node.get_driver_pin(0).set_name(res_name);
+        setup_dpin_ssa(name2dpin[res_name], res_vname, res_sub);
+        vname2attr_dpin[res_vname] = aset_node.setup_driver_pin(1);
+      }
 
     } else {
       auto tup_add    = dfg->create_node(TupAdd_Op);
