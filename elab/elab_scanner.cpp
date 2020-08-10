@@ -171,9 +171,6 @@ void Elab_scanner::patch_pass(const absl::flat_hash_map<std::string, Token_id> &
     auto it = keywords.find(txt);
     if (it == keywords.end()) continue;
 
-    assert(it->second >= static_cast<Token_id>(Token_id_keyword_first));
-    assert(it->second <= static_cast<Token_id>(Token_id_keyword_last));
-
     t.tok = it->second;
   }
 }
