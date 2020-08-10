@@ -16,13 +16,11 @@ The following programs are optional:
 
 It is also assumed that bash is used to compile LiveHD.
 
-\* gcc can have better compile times, but clang offers better warnings and execution speed.
-
+\* gcc can have better compile times, but clang offers better warnings and execution speed.  
 \*\* If you're unsure if your copy of gcc or clang is new enough, you can check the version by typing 
   ```$ g++ --version```
   or
-  ```$ clang++ --version```
-
+  ```$ clang++ --version```  
 \*\*\* LiveHD requires a specific commit of Yosys which needs to be built from source.
 
 ## Installation
@@ -30,8 +28,7 @@ It is also assumed that bash is used to compile LiveHD.
 1. **Download LiveHD source**  
   ```$ git clone https://github.com/masc-ucsc/livehd```
 2. **Build Yosys from source**  
-  LiveHD requires a specific commit of Yosys in order to function properly.  Versions of Yosys installed through apt, pacman, etc. will not work.
-
+  LiveHD requires a specific commit of Yosys in order to function properly.  Versions of Yosys installed through apt, pacman, etc. will not work.  
   When building Yosys from source, it will pull in additional dependancies it needs.  Check https://github.com/YosysHQ/yosys/#setup for more information.
 
   - Download the Yosys source (the exact directory doesn't matter as long as it's not inside LiveHD)  
@@ -50,17 +47,17 @@ It is also assumed that bash is used to compile LiveHD.
   LiveHD has both release and debug build options.  Release is for regular users, and debug is for those who want to contribute to LiveHD.  See [Bazel.md](Bazel.md) for more information.
 
   - Build LiveHD  
-      ```$ bazel build //main:all``` (release mode)
-      ```$ bazel build //main:all -c dbg``` (debug mode)
-
-  A binary will be created in `livehd/bazel-bin/main/lgshell`
+      ```$ bazel build //main:all``` (release mode)  
+      ```$ bazel build //main:all -c dbg``` (debug mode)  
+    (A binary will be created in `livehd/bazel-bin/main/lgshell`)
 
 5. **Install pandoc (optional)**
-  - ```$ sudo pacman -Syu pandoc```
+  - ```$ sudo pacman -Syu pandoc``` (Arch)  
+  - ```$ sudo apt-get install pandoc``` (Kali/Debian/Ubuntu)
 
 ## Sample usage
 
-Below are some sample usages of the LiveHD shell.  A bash prompt is indicated by `$ `, a LiveHD prompt is indicated by `livehd> `, and a Yosys prompt is indicated by a `yosys> `.  The livehd shell supports color output and autocompletion using the tab key.
+Below are some sample usages of the LiveHD shell.  A bash prompt is indicated by `$`, a LiveHD prompt is indicated by `livehd>`, and a Yosys prompt is indicated by a `yosys>`.  The LiveHD shell supports color output and autocompletion using the tab key.
 
 ### Starting and exiting the shell
 
@@ -107,7 +104,7 @@ $ less trivial.json
   livehd> inou.yosys.tolg files:lgdb/parse/file_freechips.rocketchip.system.DefaultConfig.v
   livehd> lgraph.open name:RocketTile |> pass.sample.wirecount
   ```
-- Perform a pass over RocketTile (top level module in RocketChip)
+- Perform a pass over RocketTile (the top level module in RocketChip)
   ```
   $ ./bazel-bin/main/lgshell
   livehd> lgraph.open name:RocketTile |> pass.sample.wirecount
@@ -120,11 +117,11 @@ $ less trivial.json
   $ bazel build -c dbg //pass/sample:pass_sample
   $ bazel build -c dbg //inou/yosys:all
   ```
-- To build yosys module:
+- To build a Yosys module:
   ```
   $ bazel build -c dbg //inou/yosys:all
   ```
-- To read a module with yosys directly:
+- To read a module with Yosys directly:
   ```
   $ yosys -m ./bazel-bin/inou/yosys/liblgraph_yosys.so
   yosys> read_verilog -sv ./inou/yosys/tests/trivial.v
@@ -136,7 +133,7 @@ $ less trivial.json
   yosys> memory_collect
   yosys> yosys2lg
   ```
-- To create a verilog from LGraph
+- To create a Verilog file from LGraph
   ```
   yosys -m ./bazel-bin/inou/yosys/liblgraph_yosys.so
   yosys> lg2yosys -name trivial
