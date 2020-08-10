@@ -1026,7 +1026,7 @@ Lnast_node Prp_lnast::eval_expression(mmap_lib::Tree_index idx_start_ast, mmap_l
         if (!sub_expr) {
           if (last_op_valid) {
             if (op_node_last.type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_ref) {
-              if (last_op_overload_name != op_node.token.text) {
+              if (last_op_overload_name != op_node.token.get_text()) {
                 fmt::print("Operator priority error in expression around line {}.\n", expr_line + 1);
                 exit(1);
               }
@@ -1052,7 +1052,7 @@ Lnast_node Prp_lnast::eval_expression(mmap_lib::Tree_index idx_start_ast, mmap_l
           for (int i = 0; i < skip_sibs; i++) child_cur = ast->get_sibling_next(child_cur);
           op_node_last = op_node;
           if (op_node.type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_ref) {
-            last_op_overload_name = op_node.token.text;
+            last_op_overload_name = op_node.token.get_text();
           } else {
             last_op_overload_name.clear();
           }
@@ -1423,7 +1423,7 @@ Lnast_node Prp_lnast::eval_fcall_implicit(mmap_lib::Tree_index idx_start_ast, mm
   auto idx_nxt_ast = idx_root;
 
   if(piped_node.type.get_raw_ntype() != Lnast_ntype::Lnast_ntype_invalid){
-    fmt::print("(implicit) The piped lnast node's text is {}\n", piped_node.token.text);
+    fmt::print("(implicit) The piped lnast node's text is {}\n", piped_node.token.get_text());
   }
   if(idx_piped_val != ast->invalid_index()){
     fmt::print("(implicit) The piped index's token text is {}\n", scan_text(ast->get_data(idx_piped_val).token_entry));
@@ -1960,8 +1960,8 @@ inline Lnast_node Prp_lnast::create_const_node(mmap_lib::Tree_index idx) {
           auto spaces_needed = cur_token.pos1 - (string_start + string_length);
           new_token_text.append(spaces_needed, ' ');
         }
-        string_length += cur_token.text.size();
-        absl::StrAppend(&new_token_text, std::string(cur_token.text));
+        string_length += cur_token.get_text().size();
+        absl::StrAppend(&new_token_text, std::string(cur_token.get_text()));
         idx_cur_string = ast->get_sibling_next(idx_cur_string);
         cur_node       = ast->get_data(idx_cur_string);
         cur_token      = get_token(cur_node.token_entry);
@@ -1979,7 +1979,7 @@ inline Lnast_node Prp_lnast::create_const_node(mmap_lib::Tree_index idx) {
     auto token = get_token(node.token_entry);
     if (negative) {
       std::string decimal_string;
-      decimal_string.assign(absl::StrCat("-", token.text));
+      decimal_string.assign(absl::StrCat("-", token.get_text()));
       auto ln_decimal_view = lnast->add_string(decimal_string);
       return Lnast_node::create_const(ln_decimal_view, token.line, token.pos1, token.pos2);
     } else {

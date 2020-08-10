@@ -299,7 +299,7 @@ void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid)
         ref_data(child)->subs  = get_data(child_sibling).subs;
       }
     }
-    
+
     auto c0_dot_name = get_name(get_first_child(dot_nid));
     tuple_var_table.insert(c0_dot_name); //insert new tuple name
 
@@ -444,18 +444,18 @@ void Lnast::analyze_dot_lrhs_handle_a_statement(const Lnast_nid &psts_nid, const
   while (!hit) {
     if (sib_nid == get_last_child(psts_nid))
       return;
-    
+
     sib_nid = get_sibling_next(sib_nid);
-    
+
     // hier-tuple case
     if (get_type(sib_nid).is_tuple()) {
       for (auto sib_child : children(sib_nid)) {
-        if (sib_child == get_first_child(sib_nid)) 
+        if (sib_child == get_first_child(sib_nid))
           continue;
-        
+
         if (!get_type(sib_child).is_assign())
           continue;
-         
+
         auto c0_assign = get_first_child(sib_child);
         auto c1_assign = get_sibling_next(c0_assign);
         if (get_name(c1_assign) == c0_dot_name) {
@@ -464,7 +464,7 @@ void Lnast::analyze_dot_lrhs_handle_a_statement(const Lnast_nid &psts_nid, const
           dot_lrhs_table[dot_nid].second = Lnast_nid(-1, -1);
         }
       }
-      
+
       if (hit)
         continue;
     }
@@ -622,7 +622,7 @@ void Lnast::opr_lhs_merge_if_subtree(const Lnast_nid &if_nid) {
         else if (get_type(opr_nid).is_assign())
           opr_lhs_merge_handle_a_statement(opr_nid);
       }
-    } 
+    }
   }
 }
 
@@ -967,7 +967,7 @@ void Lnast::dump() const {
     std::string indent{"  "};
     for (int i = 0; i < it.level; ++i) indent += "  ";
 
-    fmt::print("{} {} {:>20} : {}\n", it.level, indent, node.type.to_s(), node.token.text);
+    fmt::print("{} {} {:>20} : {}\n", it.level, indent, node.type.to_s(), node.token.get_text());
   }
 }
 
