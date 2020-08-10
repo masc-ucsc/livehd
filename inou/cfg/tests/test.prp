@@ -1,10 +1,6 @@
-sum = ::{
-  $a.__bits = 2
-  $b.__bits = 2
-  %out.__bits = 3
-  %out = $a + $b
-}
-%out.__bits = 3
+a = 3
+b = 7
+%out.__bits = 4
 
-%out = sum(a = 2, b = 3)
+%out = a + b
 // %out += sum(sub_inp)

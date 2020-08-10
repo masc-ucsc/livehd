@@ -856,7 +856,8 @@ void Lnast::ssa_lhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
     respect_latest_global_lhs_ssa(lhs_nid);
 
 
-  if (type.is_assign() || type.is_dp_assign() || type.is_as() || type.is_tuple() || type.is_attr_set()) {
+  if (type.is_assign() || type.is_dp_assign() || type.is_as() || 
+      type.is_tuple()  || type.is_attr_set()  || type.is_func_call()) {
     const auto lhs_name = get_name(lhs_nid);
     if (lhs_name.substr(0,3) == "___")
       return;
