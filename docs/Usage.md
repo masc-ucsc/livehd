@@ -4,24 +4,36 @@ This is a high level description of how to compile LiveHD and use it
 
 ## Requirements
 
-Although LiveHD should run on most common Linux distributions, it is heavily tested on both Arch and Kali (Debian based).
+LiveHD is heavily tested with the latest arch and Kali (debian based) linux
+distributions. In general, you need to install YOSYS with the required packages
+by yosys, and the capacity to compile c++ with static libraries for gcc or
+clang version 8 or newer.
 
-The following programs are assumed to be present when building LiveHD:
- - GCC 8+ or Clang 8+ (c++17 support is required*)
- - Bash
- - Yosys**
- - Bazel
+A simple hello.cpp program like the following will check if your gcc/clang is
+new enough with needed libraries: 
 
-\* If you're unsure if your copy of gcc or clang is new enough, you can check the version by typing 
-```bash
-$ g++ --version
+```cpp
+#include <string_view>
+#include <filesystem>
+#include <iostream>
+
+int main() {
+  std::string_view file{"a.out"};
+
+  if (std::filesystem::exists(file))
+    std::cout << "Hello a.out\n";
+  else
+    std::cout << "Where is the a.out?\n";
+
+  return 0;
+}
 ```
-or
-```bash
-$ clang++ --version
-```
 
-\*\* LiveHD requires a specific commit of Yosys which needs to be built from source.
+The previous code should compile correctly with (or clang++):
+
+```bash
+g++ -std=c++17 -static hello.cpp
+```
 
 ## Install the correct Yosys version
 
