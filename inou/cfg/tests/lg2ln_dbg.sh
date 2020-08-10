@@ -210,6 +210,62 @@ Pyrope_compile () {
         exit 1
       fi
 
+      mv ${pt}.dot ${pt}.raw.dot.itr2
+      echo ""
+      echo ""
+      echo ""
+      echo "----------------------------------------------------"
+      echo "Copy-Propagation And Tuple Chain Resolve"
+      echo "----------------------------------------------------"
+      #${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.resolve_tuples"
+      ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop"
+      if [ $? -eq 0 ]; then
+        echo "Successfully resolve the tuple chain: inou/cfg/tests/${pt}.prp"
+      else
+        echo "ERROR: Pyrope compiler failed: resolve tuples, testcase: inou/cfg/tests/${pt}.prp"
+        exit 1
+      fi
+  
+      ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+      mv ${pt}.dot ${pt}.no_bits.dot.itr2
+  
+  
+      echo ""
+      echo ""
+      echo ""
+      echo "----------------------------------------------------"
+      echo "Bitwidth Optimization(LGraph)"
+      echo "----------------------------------------------------"
+  
+      ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.bitwidth"
+      if [ $? -eq 0 ]; then
+        echo "Successfully optimize design bitwidth: inou/cfg/tests/${pt}.prp"
+      else
+        echo "ERROR: Pyrope compiler failed: bitwidth optimization, testcase: inou/cfg/tests/${pt}.prp"
+        exit 1
+      fi
+  
+      ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+      mv ${pt}.dot ${pt}.dot.itr2
+
+
+      echo ""
+      echo ""
+      echo ""
+      echo "----------------------------------------------------"
+      echo "LGraph -> Verilog"
+      echo "----------------------------------------------------"
+  
+      ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg"
+      if [ $? -eq 0 ] && [ -f ${pt}.v ]; then
+        echo "Successfully generate Verilog: ${pt}.v"
+        rm -f  yosys_script.*
+      else
+        echo "ERROR: Pyrope compiler failed: verilog generation, testcase: inou/cfg/tests/${pt}.prp"
+        exit 1
+      fi
+
+
     done
   fi
 }
@@ -219,8 +275,8 @@ Pyrope_compile "$pts"
 # Pyrope_compile "$pts_hier2" "hier"
 
 
-rm -f *.v
-rm -f lnast.dot.gld
-rm -f lnast.nodes
-rm -f lnast.nodes.gld
-rm -f *.dot
+# rm -f *.v
+# rm -f lnast.dot.gld
+# rm -f lnast.nodes
+# rm -f lnast.nodes.gld
+# rm -f *.dot

@@ -12,7 +12,7 @@ pts='logic
      '
 
 #make sure to call Pyrope_compile() in the end of script
-# pts='test'
+# pts='attr_set'
 # pts_hier='sum funcall'
 # pts_hier2='sum funcall4'   
 
