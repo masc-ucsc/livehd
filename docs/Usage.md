@@ -39,7 +39,7 @@ It is also assumed that bash is used to compile LiveHD.
   - Tell Yosys the compiler we want to compile it  
       ```$ make config-gcc``` (if using gcc)  
       ```$ make config-clang``` (if using clang)
-  - Make Yosys
+  - Make Yosys  
       ```$ make -j<number of CPU cores * 2>```
   - Install Yosys  
       ```$ sudo make install```
