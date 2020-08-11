@@ -11,6 +11,7 @@ void Livehd_parser::setup() {
 }
 
 void Livehd_parser::makefp(LGraph *l) {
+  std::cout << "making fplan..." << std::endl;
   l->each_node_fast([&](const Node &n) {
     std::cout << n.get_name() << std::endl;
   });
@@ -18,7 +19,7 @@ void Livehd_parser::makefp(LGraph *l) {
 
 void Livehd_parser::pass(Eprp_var &var) {
   Livehd_parser p(var);
-  std::cout << "Hi!" << std::endl;
+  std::cout << "running pass..." << std::endl;
   // loop over each lgraph
   for (auto l : var.lgs) {
     p.makefp(l);
