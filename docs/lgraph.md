@@ -707,31 +707,35 @@ digraph Join {
 
 * `s` is for the array size in number of entries
 * `b` is the number of bits per entry
-* `r` is the read or read/write ports connecting to the memory
-* `w` is the write-only ports connecting to the memory
+* `p` is the read, write, or read/write ports connecting to the memory
 * `q` is the read data out of the memory for the read ports
 
 Both `r`, `w', and `q` are arrays to support multiported memories. The order of
 the ports do not change semantics. The size of `q` and `r` should match.
 
 Each port `w` has the following entries:
-* `__clk_pin` points to the clock driver pin
-* `__posedge` points to a 1/0 constant driver pin
-* `__we`      points to the driver pin controlling the write enable (single bit)
-* `__nwmask`  Points to the write mask (0 == write, 1==no write). The mask bust be a big as the number of bits per entry (`b`)
-* `__latency` points to an integer constant driver pin. For writes `__latency>=1`
-* `__addr`    points to the driver pin for the address. The address bits should match the array size (`s`)
-* `__data`    points to the write data driver pin
+* `clk_pin` points to the clock driver pin
+* `posedge` points to a 1/0 constant driver pin
+* `enable`  points to the driver pin for read/write enable.
+* `latency` points to an integer constant driver pin (2 bits). For writes `latency from 1 to 3`, for reads `latency from 0 to 3`
+* `nwmask`  Points to the write mask (0 == write, 1==no write). The mask bust be a big as the number of bits per entry (`b`)
+* `wmode`   points to the driver pin or switching between read and write mode (single bit)
+* `addr`    points to the driver pin for the address. The address bits should match the array size (`s`)
+* `data`    points to the write data driver pin (read result is in `q` port). Connected to `0b0` for read-only ports
+* `fwd`   points to a 0/1 constant driver pin to indicate if writes forward
+  value (`0b0` for write-only ports). Effectively, it means zero cycles read
+latency when enabled. `fwd` is more than just setting `latency=0`. Even with
+latency zero, the write delay affects until the result is visible. With `fwd`
+enabled, the write latency does not matter to observe the results. This
+requires a costly forwarding logic.
 
+All the ports must be populated with the correct size. This is important
+because some modules access the field by bit position.  It not used point to a
+zero constant with the correct number of bits. E.g: a 8bit per entry (`b`)
+array needs a 8 bit zero `nwmask` (`nwmask = 0u8bits`). Setting wmask to `0b0`
+will mean a 1 bit zero, and the memory will be incorrectly operated. `clk_pin`
+is the least significant bit of the `p` configuration.
 
-Each `r` port can handle read and writes. Therefore, it has the same ports as the write, but it also has:
-* `__fwd`     points to a 0/1 constant driver pin to indicate if writes forward value. Effectively, it means zero cycles read latency when enabled
-* `__enable`  points to the driver pin for read enable. If the port is read-only, the wenable points to a 0 constant.
-
-A readony port does not use the `__data` or `__nwmask`, but they still need to
-be populated with the correct sizes.  All the ports must be populated. It not
-used point to a zero constant with the correct number of bits. E.g: a 8bit per
-entry (`b`) array needs a 8 bit zero `__nwmask` (`__nwmask = 0u8bits`)
 
 #### Forward Propagation
 
