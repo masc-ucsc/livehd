@@ -36,8 +36,11 @@ It is also assumed that bash is used to compile LiveHD.
       ```$ cd yosys```
   - Find the Yosys commit LiveHD uses and check out that commit  
       ```git checkout `$ grep -C2 BUILD.yosys <absolute path to LiveHD>/WORKSPACE  | grep commit | cut -d\" -f2` ```
-  - Tell Yosys that we'll use gcc to compile it  
-      ```$ make config-gcc```
+  - Tell Yosys the compiler we want to compile it  
+      ```$ make config-gcc``` (if using gcc)  
+      ```$ make config-clang``` (if using clang)
+  - Make Yosys
+      ```$ make -j<number of CPU cores * 2>```
   - Install Yosys  
       ```$ sudo make install```
 3. **Install Bazel**
