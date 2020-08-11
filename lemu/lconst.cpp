@@ -645,9 +645,9 @@ std::string Lconst::to_firrtl() const {
     I(str[0] != '-');
     //Is in 0b form, need to convert from that.
     auto temp_lconst = Lconst(str);
-    v = temp_lconst.get_num(bits);
+    v = temp_lconst.get_num();
   } else {
-    v = get_num(bits);
+    v = get_num();
   }
   std::stringstream ss;
 

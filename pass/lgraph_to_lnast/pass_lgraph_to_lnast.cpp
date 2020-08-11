@@ -69,6 +69,17 @@ void Pass_lgraph_to_lnast::initial_tree_coloring(LGraph* lg, Lnast &lnast) {
         dpin_editable.set_name(create_temp_var(lnast));
         if (dpin_editable.get_node().get_type().op == Mux_Op) {
           dpin_editable.set_name(dpin_editable.get_name().substr(3)); //Remove "___" in front
+        } else  if ((ntype == SFlop_Op) || (ntype == AFlop_Op) || (ntype == FFlop_Op)) {
+          dpin_editable.set_name(absl::StrCat("#", dpin_editable.get_name()));
+        }
+      } else if (dpin_editable.has_name() && (dpin_editable.get_name()[0] == '#')) {
+        if(!((ntype == SFlop_Op) || (ntype == AFlop_Op) || (ntype == FFlop_Op))) {
+          // If a pin's name starts with "#" but it isn't a register, remove that "#". (ssa can cause this)
+          dpin_editable.set_name(dpin_editable.get_name().substr(1));
+        }
+      } else  if ((ntype == SFlop_Op) || (ntype == AFlop_Op) || (ntype == FFlop_Op)) {
+        if (dpin_editable.get_name()[0] != '#') {
+          dpin_editable.set_name(absl::StrCat("#", dpin_get_name(dpin_editable)));
         }
       }
     }
@@ -81,25 +92,23 @@ void Pass_lgraph_to_lnast::initial_tree_coloring(LGraph* lg, Lnast &lnast) {
 void Pass_lgraph_to_lnast::begin_transformation(LGraph* lg, Lnast& lnast, Lnast_nid& ln_node) {
   // note: in graph out node, spin_pid == dpin_pid is always true
 
-  lg->get_graph_output_node().set_color(BLACK);
-  lg->each_graph_output([&](const Node_pin& pin) {
-    I(pin.get_node().get_color() == BLACK);
-    // Note: pin is a driver pin.
-    //fmt::print("opin: {} pid: {}\n", pin.get_name(), pin.get_pid());
-    I(pin.get_node().get_type().op == GraphIO_Op);
-    auto editable_pin = pin;
-    handle_output_node(lg, editable_pin, lnast, ln_node);
-  });
-}
+  auto out_node = lg->get_graph_output_node();
+  out_node.set_color(BLACK);
+  for (const auto& inp : out_node.inp_edges()) {
+    auto gpio_dpin = out_node.get_driver_pin(inp.sink.get_pid());
+    I(gpio_dpin.has_name());
 
-void Pass_lgraph_to_lnast::handle_output_node(LGraph* lg, Node_pin& pin, Lnast& lnast, Lnast_nid& ln_node) {
-  I(pin.has_name());  // Outputs of the graphs should have names.
-  for (const auto& inp : pin.get_node().inp_edges()) {
-    auto editable_pin = inp.driver;
-    handle_source_node(lg, editable_pin, lnast, ln_node);
+    auto edge_dpin = inp.driver;
+    handle_source_node(lg, edge_dpin, lnast, ln_node);
+
+    auto asg_node = lnast.add_child(ln_node, Lnast_node::create_assign("asg"));
+    if (gpio_dpin.get_name()[0] == '%') {
+      lnast.add_child(asg_node, Lnast_node::create_ref(lnast.add_string(gpio_dpin.get_name())));
+    } else {
+      lnast.add_child(asg_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("%", gpio_dpin.get_name()))));
+    }
+    attach_child(lnast, asg_node, inp.driver);
   }
-
-  attach_output_to_lnast(lnast, ln_node, pin);
 }
 
 /* Purpose of this function is to serve as the recursive
@@ -174,7 +183,7 @@ void Pass_lgraph_to_lnast::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node,
     /* NOTE->hunter: I decided to only specify reg and IO bw (not
      * wires). If more is needed just widen below condition. */
     if (ntype == SFlop_Op || ntype == AFlop_Op) {
-      name = absl::StrCat("#", dpin_get_name(pin));
+      name = lnast.add_string(pin.get_name());
       lnast.set_bitwidth(name.substr(1), bw);
       if (put_bw_in_ln) {
         add_bw_in_ln(lnast, parent_node, name, bw);
@@ -183,7 +192,7 @@ void Pass_lgraph_to_lnast::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node,
   }
 
   // Look at pin's node's type, then based off that figure out what type of node to add to LNAST.
-  switch (ntype) {  // Future note to self: when doing src_pins, always check if sources to node are io inputs
+  switch (ntype) {
     case And_Op:
     case Or_Op:
     case Xor_Op: attach_binaryop_node(lnast, parent_node, pin); break;
@@ -297,30 +306,6 @@ void Pass_lgraph_to_lnast::handle_io(LGraph* lg, Lnast_nid& parent_lnast_node, L
 }
 
 // -------- How to convert each LGraph node type to LNAST -------------
-void Pass_lgraph_to_lnast::attach_output_to_lnast(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& opin) {
-  int count = 0;
-  for (const auto& inp : opin.get_node().inp_edges()) {
-    if (inp.sink.get_pid() == opin.get_pid()) {
-      // We have found the sink pin associated with the output pin. Assign the output to the sink pin's edge.
-      I(count == 0);
-      auto asg_node = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
-      lnast.add_child(asg_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("%", opin.get_name()))));
-      attach_child(lnast, asg_node, inp.driver);
-      count++;
-    }
-  }
-
-  /*if(count == 0) {
-    //There was no inp edge, therefore we set the output to 0.
-    auto asg_node = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
-    lnast.add_child(asg_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("%", opin.get_name()))));
-    lnast.add_child(asg_node, Lnast_node::create_const("0d0"));
-    count++;
-  }*/
-
-  I(count <= 1);  // There shouldn't be multiple edges leading to a single sink pid on a GraphIO.
-}
-
 void Pass_lgraph_to_lnast::attach_sum_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
   // PID: 0 = AS, 1 = AU, 2 = BS, 3 = BU, 4 = Y... Y = (AS+...+AS+AU+...+AU) - (BS+...+BS+BU+...+BU)
   bool is_add = false;
@@ -700,9 +685,9 @@ void Pass_lgraph_to_lnast::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node,
   }
 
   // Specify var being assigned to is in upper scope (not in if-else scope)
-  auto asg_idx_i = lnast.add_child(parent_node, Lnast_node::create_assign(""));
-  lnast.add_child(asg_idx_i, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));
-  lnast.add_child(asg_idx_i, Lnast_node::create_const("0b?"));
+  //auto asg_idx_i = lnast.add_child(parent_node, Lnast_node::create_assign(""));
+  //lnast.add_child(asg_idx_i, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));
+  //lnast.add_child(asg_idx_i, Lnast_node::create_const("0b?"));
 
   // Specify cond + create stmt for each mux val, except last.
   auto if_node  = lnast.add_child(parent_node, Lnast_node::create_if("mux"));
@@ -772,12 +757,7 @@ void Pass_lgraph_to_lnast::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node
   }
   I(has_din && has_clk);  // A flop at least has to have the input and clock, others are optional/have defaults.
 
-  std::string_view pin_name;
-  if (pin.get_name().substr(0, 1) == "#") {
-    pin_name = lnast.add_string(pin.get_name());
-  } else {
-    pin_name = lnast.add_string(absl::StrCat("#", dpin_get_name(pin)));
-  }
+  std::string_view pin_name = lnast.add_string(pin.get_name());
 
   // Specify if async reset
   if (pin.get_node().get_type().op == AFlop_Op) {
@@ -910,13 +890,8 @@ void Pass_lgraph_to_lnast::attach_child(Lnast& lnast, Lnast_nid& op_node, const 
     lnast.add_child(op_node,
                     Lnast_node::create_ref(out_driver_name));  // lnast.add_string(absl::StrCat(prefix, "%", dpin.get_name()))));
   } else if ((dpin.get_node().get_type().op == AFlop_Op) || (dpin.get_node().get_type().op == SFlop_Op)) {
-    auto dpin_name = dpin_get_name(dpin);
-    if (dpin_name.substr(0, 1) == "#") {
-      // dpin_name is already persistent, no need to do add_string but cleaner
-      lnast.add_child(op_node, Lnast_node::create_ref(lnast.add_string(dpin_name)));
-    } else {
-      lnast.add_child(op_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("#", dpin_name))));
-    }
+    // dpin_name is already persistent, no need to do add_string but cleaner
+    lnast.add_child(op_node, Lnast_node::create_ref(lnast.add_string(dpin.get_name())));
   } else if (dpin.get_node().get_type().op == Const_Op) {
     lnast.add_child(op_node, Lnast_node::create_const(lnast.add_string(dpin.get_node().get_type_const().to_pyrope())));
   } else {
@@ -937,12 +912,7 @@ void Pass_lgraph_to_lnast::attach_cond_child(Lnast& lnast, Lnast_nid& op_node, c
     auto dpin_name = dpin_get_name(dpin);
     lnast.add_child(op_node, Lnast_node::create_cond(lnast.add_string(absl::StrCat("%", dpin_name))));
   } else if ((dpin.get_node().get_type().op == AFlop_Op) || (dpin.get_node().get_type().op == SFlop_Op)) {
-    auto dpin_name = dpin_get_name(dpin);
-    if (dpin_name.substr(0, 1) == "#") {
-      lnast.add_child(op_node, Lnast_node::create_cond(lnast.add_string(dpin_name)));
-    } else {
-      lnast.add_child(op_node, Lnast_node::create_cond(lnast.add_string(absl::StrCat("#", dpin_name))));
-    }
+    lnast.add_child(op_node, Lnast_node::create_cond(lnast.add_string(dpin.get_name())));
   } else if (dpin.get_node().get_type().op == Const_Op) {
     lnast.add_child(op_node, Lnast_node::create_cond(lnast.add_string(dpin.get_node().get_type_const().to_pyrope())));
   } else {

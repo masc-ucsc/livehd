@@ -15,11 +15,9 @@ protected:
 
   void initial_tree_coloring(LGraph* g, Lnast &lnast);
   void begin_transformation(LGraph* g, Lnast& lnast, Lnast_nid& ln_node);
-  void handle_output_node(LGraph* lg, Node_pin& pin, Lnast& lnast, Lnast_nid& ln_node);
   void handle_source_node(LGraph* lg, Node_pin& pin, Lnast& lnast, Lnast_nid& ln_node);
 
   void attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  void attach_output_to_lnast(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& opin);
 
   void attach_sum_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
   void attach_binaryop_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pid1_pin);
