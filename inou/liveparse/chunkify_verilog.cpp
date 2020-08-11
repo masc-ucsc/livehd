@@ -181,6 +181,7 @@ void Chunkify_verilog::elaborate() {
     bool endmodule_found = false;
     if (scan_is_token(Token_id_alnum)) {
       auto txt = scan_text();
+      //fmt::print("T:{}\n",txt);
       if (txt == "module") {
         if (in_module) {
           scan_error(fmt::format("unexpected nested modules"));
