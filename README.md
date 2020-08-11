@@ -49,117 +49,14 @@ For a simple release build:
 $ bazel build //main:lgshell
 ```
 
-## LGraph Structure
+## LiveHD Data Structures
 
-A single LGraph represents a single netlist module. LGraph is composed of nodes,
-node pins, edges and tables of attributes. An LGraph node is affiliated with a
-node type and each type defines different amounts of input and output node pins.
-For example, a node can have 3 input ports and 2 output pins. Each of the
-input/output pins can have many edges to other graph nodes. Every node pin has
-an affiliated node pid. In the code, every node_pin has a `Port_ID`. 
+LiveHD has several custom data structures, the two more important are
+[LGraph](docs/lgraph.md) and [LNAST](https://masc.soe.ucsc.edu/lnast-doc).
 
-A pair of driver pin and sink pin constitutes an edge. In the
-following API example, an edge is connected from a driver pin (pid1) to a sink
-pin (pid3). The bitwidth of the driver pin determines the edge bitwidth.
-
-
-### Node, Node_pin, and Edge Construction 
-```cpp
-auto node = lg->create_node(Node_Type_Op);
-
-auto dpin = node.setup_driver_pin(1);
-
-dpin.set_bits(8);
-
-auto spin = node2.setup_sink_pin(3);
-
-dpin.connect(spin);
-```
-
-
-### Non-Hierarchical Traversal Iterators
-
-LGraph allows forward and backward traversals in the nodes (bidirectional
-graph). The reason is that some algorithms need a forward and some a backward
-traversal, being bidirectional would help. Whenever possible, the fast iterator
-should be used.
-
-```cpp
-for (const auto &node:lg->fast())     {...} // unordered but very fast traversal
-
-for (const auto &node:lg->forward())  {...} // propagates forward from each input/constant
-
-for (const auto &node:lg->backward()) {...} // propagates backward from each output
-```
-
-
-### Hierarchical Traversal Iterators
-
-LGraph supports hierarchical traversal. Each sub-module of a hierarchical
-design will be transformed into a new LGraph and represented as a sub-graph node
-in the parent module. If the hierarchical traversal is used, every time the
-iterator encounters a sub-graph node, it will load the sub-graph persistent
-tables to the memory and traverse the subgraph recursively, ignoring the
-sub-graph input/outputs.  This cross-module traversal treats the hierarchical
-netlist just like a flattened design. In this way, all integrated third-party
-tools could automatically achieve global design optimization or analysis by
-leveraging the LGraph hierarchical traversal feature.
-
-```cpp
-for (const auto &node:lg->forward_hier()) {...}
-```
-
-
-### Edge Iterators
-
-To iterate over the input edges of node, simply call:
-
-```cpp
-for (const auto &inp_edge : node.inp_edges()) {...}
-```
-
-And for output edges:
-
-```cpp
-for (const auto &out_edge : node.out_edges()) {...}
-```
-
-
-## LGraph Attribute Design
-Design attribute stands for the characteristic given to a LGraph node or node
-pin. For instance, the characteristic of a node name and node physical
-placement. Despite a single LGraph stands for a particular module, it could be
-instantiated multiple times. In this case, same module could have different
-attribute at different hierarchy of the netlist. A good design of attribute
-structure should be able to represent both non-hierarchical and hierarchical
-characteristic.
-
-
-### Non-Hierarchical Attribute
-Non-hierarchical LGraph attributes include pin name, node name and line of
-source code. Such properties should be the same across different LGraph
-instantia- tions. Two instantiations of the same LGraph module will have the
-exact same user-defined node name on every node. For example, instantiations of
-a subgraph-2 in both top and subgraph-1 would maintain the same non-hierarchical
-attribute table.  
-
-```cpp
-node.set_name(std::string_view name);
-```
-
-
-### Hierarchical Attribute
-LGraph also support hierarchical attribute. It is achieved by using a tree data
-structure to record the design hierarchy. In LGraph, every graph has a unique
-id (lg_id), every instantiation of a graph would form some nodes in the tree and
-every tree node is indexed by a unique hierarchical id (hid). We are able to
-identify a unique instantiation of a graph and generate its own hierarchical
-attribute table. An example of hierarchical attribute is wire-delay.
-
-```cpp
-node_pin.set_delay(float delay);
-```
-
+LGraph (Live hardware Graph) is the graph-like data structure and associated
+API inside LiveHD. LNAST (Language Neutral AST) is the tree-like structure and
+associated API to easily create new input languages to LiveHD.
 
 ## InOu
 
@@ -177,17 +74,6 @@ passes over LNAST, but for the moment, we just have LGraph passes. A pass will
 read an LGraph and make changes to it. Usually this is done for optimizations.
 Examples of passes can be found in `pass/sample`, which compute the histogram
 and count wire numbers of a LGraph.
-
-
-## LNAST vs LGraph
-
-LGraph (Live hardware Graph) is the graph-like data structure and associated
-API inside LiveHD. LNAST (Language Neutral AST) is the tree-like structure and
-associated API to easily create new input languages to LiveHD.
-
-LNAST has a separated [documentation](https://masc.soe.ucsc.edu/lnast-doc).
-
-# Coding Style and Organization
 
 ## Style
 
@@ -235,14 +121,12 @@ If you are not one of the code owners, you need to create a pull request as
 indicated in [CONTRIBUTING.md](docs/CONTRIBUTING.md) and [GitHub-use.md](docs/GitHub-use.md).
 
 
-
-
 # Publications
 For more detailed information and paper reference, please refer to 
 the following publications. If you are doing research or projects corresponding
 to LiveHD, please send us a notification, we are glad to add your paper.
 
-#### Live techniques 
+## Live techniques 
 1. [LiveHD: A Productive Live Hardware Development Flow](docs/papers/LiveHD_IEEE_Micro20.pdf), Sheng-Hong Wang, Rafael T. Possignolo, Haven Skinner, and Jose Renau, IEEE Micro Special Issue on Agile and Open-Source Hardware, July/August 2020. 
 
 
@@ -254,7 +138,7 @@ to LiveHD, please send us a notification, we are glad to add your paper.
 4. [LiveSynth: Towards an Interactive Synthesis Flow](docs/papers/LiveSynth_DAC17.pdf), Rafael T. Possignolo, and
    Jose Renau, Design Automation Conference (DAC), June 2017.
 
-#### LGraph 
+## LGraph 
 5. [LGraph: A Unified Data Model and API for Productive Open-Source Hardware Design](docs/papers/LGraph_WOSET19.pdf), 
    Sheng-Hong Wang, Rafael T. Possignolo, Qian Chen, Rohan Ganpati, and
    Jose Renau, Second Workshop on Open-Source EDA Technology (WOSET), November 2019.
@@ -263,7 +147,7 @@ to LiveHD, please send us a notification, we are glad to add your paper.
    Sheng-Hong Wang, Haven Skinner, and Jose Renau. First Workshop on Open-Source
    EDA Technology (WOSET), November 2018. **(Best Tool Nomination)**
 
-#### LNAST 
+## LNAST 
 7. [LNAST: A Language Neutral Intermediate Representation for Hardware Description Languages](docs/papers/LNAST_WOSET19.pdf), Sheng-Hong Wang, Akash Sridhar, and Jose Renau,
    Second Workshop on Open-Source EDA Technology (WOSET), 2019.
 

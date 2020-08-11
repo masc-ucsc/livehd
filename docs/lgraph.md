@@ -5,50 +5,24 @@ LNAST, it is one of the key data structures.
 
 The LGraph can be built directly with passes like Yosys, or through LNAST to
 LGraph translations. The LNAST builds a gated-SSA which is translated to
-LGraph.
+LGraph. Understanding the LGraph is needed if you want to build a LiveHD pass.
 
-Understanding the LGraph is needed if you want to build a LiveHD pass.
+## LGraph API
 
-## LGraph APIs needed to know
+A single LGraph represents a single netlist module. LGraph is composed of nodes,
+node pins, edges and tables of attributes. An LGraph node is affiliated with a
+node type and each type defines different amounts of input and output node pins.
+For example, a node can have 3 input ports and 2 output pins. Each of the
+input/output pins can have many edges to other graph nodes. Every node pin has
+an affiliated node pid. In the code, every node_pin has a `Port_ID`. 
 
-### For LGraph developer(must read if you know the old LGraph):
-* src_pin/dst_pin have been renamed to driver_pin/sink_pin
+A pair of driver pin and sink pin constitutes an edge. In the
+following API example, an edge is connected from a driver pin (pid1) to a sink
+pin (pid3). The bitwidth of the driver pin determines the edge bitwidth.
 
-* the concept of node bitwidth has been removed, it’s wrong since
-  every output edge of a node could have different bitwidth.
-  The edge bitwidth is defined on the driver_pin.
 
-* in the old LGraph, every graph input/output is represented as different
-  nodes.  However, in the new lgraph, all graph inputs are represented as a
-  single graph input node, each graph input is a pin of that node. Same as graph
-  outputs.
+### Node, Node_pin, and Edge Construction 
 
-* The LGraph iterator such as for(auto node: g->forward()) no longer visit
-  graph ios, the graph io should be handled separately, for example,
-
-```
-// simple way using lambda
-lg->each_graph_input([&](const Node_pin &pin){
-
-  //your operation with graph_input node_pin;
-
-});
-```
-```
-// hard approach
-ginp_node = lg->get_graph_input_node();
-
-for (const auto &out_edge : ginp_node.out_edges()) {
-
-  Node_pin driver_pin = out_edge.driver;
-
-  Node_pin sink_pin = out_edge.sink;
-
-  Node sink_node = out_edge.sink.get_node();
-}
-```
-
-### APIs
 * create node
 ```
 new_node = lg->create_node()
@@ -61,7 +35,7 @@ new_node = lg->create_node(Node_type_Op)
 ```
 * create a constant node
 ```
-new_node = lg->create_node_const(uint32_t)
+new_node = lg->create_node_const(value)
 //note: recommended way to create a const node
 ```
 
@@ -91,7 +65,7 @@ node_pin.get_pid()
 
 * add an edge between driver_pin and sink_pin
 ```
-lg->add_edge(driver_pin, sink_pin)
+driver_pin.connect(sink_pin);
 ```
 
 * get the driver node of an edge
@@ -145,6 +119,102 @@ for (auto &out : node.out_edges()) {
       , dnode_name, snode_name, dbits, dpin_pid, spin_pid, dpin_name);
 }
 ```
+
+### Non-Hierarchical Traversal Iterators
+
+LGraph allows forward and backward traversals in the nodes (bidirectional
+graph). The reason is that some algorithms need a forward and some a backward
+traversal, being bidirectional would help. Whenever possible, the fast iterator
+should be used.
+
+```cpp
+for (const auto &node:lg->fast())     {...} // unordered but very fast traversal
+
+for (const auto &node:lg->forward())  {...} // propagates forward from each input/constant
+
+for (const auto &node:lg->backward()) {...} // propagates backward from each output
+```
+
+The LGraph iterator such as `for(auto node: g->forward())` do not visit graph
+input and outputs.
+
+```
+// simple way using lambda
+lg->each_graph_input([&](const Node_pin &pin){
+
+  //your operation with graph_input node_pin;
+
+});
+```
+
+### Hierarchical Traversal Iterators
+
+LGraph supports hierarchical traversal. Each sub-module of a hierarchical
+design will be transformed into a new LGraph and represented as a sub-graph node
+in the parent module. If the hierarchical traversal is used, every time the
+iterator encounters a sub-graph node, it will load the sub-graph persistent
+tables to the memory and traverse the subgraph recursively, ignoring the
+sub-graph input/outputs.  This cross-module traversal treats the hierarchical
+netlist just like a flattened design. In this way, all integrated third-party
+tools could automatically achieve global design optimization or analysis by
+leveraging the LGraph hierarchical traversal feature.
+
+```cpp
+for (const auto &node:lg->forward_hier()) {...}
+```
+
+
+### Edge Iterators
+
+To iterate over the input edges of node, simply call:
+
+```cpp
+for (const auto &inp_edge : node.inp_edges()) {...}
+```
+
+And for output edges:
+
+```cpp
+for (const auto &out_edge : node.out_edges()) {...}
+```
+
+
+## LGraph Attribute Design
+Design attribute stands for the characteristic given to a LGraph node or node
+pin. For instance, the characteristic of a node name and node physical
+placement. Despite a single LGraph stands for a particular module, it could be
+instantiated multiple times. In this case, same module could have different
+attribute at different hierarchy of the netlist. A good design of attribute
+structure should be able to represent both non-hierarchical and hierarchical
+characteristic.
+
+
+### Non-Hierarchical Attribute
+Non-hierarchical LGraph attributes include pin name, node name and line of
+source code. Such properties should be the same across different LGraph
+instantia- tions. Two instantiations of the same LGraph module will have the
+exact same user-defined node name on every node. For example, instantiations of
+a subgraph-2 in both top and subgraph-1 would maintain the same non-hierarchical
+attribute table.  
+
+```cpp
+node.set_name(std::string_view name);
+```
+
+
+### Hierarchical Attribute
+LGraph also support hierarchical attribute. It is achieved by using a tree data
+structure to record the design hierarchy. In LGraph, every graph has a unique
+id (lg_id), every instantiation of a graph would form some nodes in the tree and
+every tree node is indexed by a unique hierarchical id (hid). We are able to
+identify a unique instantiation of a graph and generate its own hierarchical
+attribute table. An example of hierarchical attribute is wire-delay.
+
+```cpp
+node_pin.set_delay(float delay);
+```
+
+
 ## LGraph Node Type Semantics
 
 
