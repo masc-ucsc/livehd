@@ -710,10 +710,11 @@ digraph Join {
 * `p` is the read, write, or read/write ports connecting to the memory
 * `q` is the read data out of the memory for the read ports
 
-Both `r`, `w', and `q` are arrays to support multiported memories. The order of
-the ports do not change semantics. The size of `q` and `r` should match.
+Both `p` and `q` are arrays to support multiported memories. The order of the
+ports do not change semantics.
 
-Each port `w` has the following entries:
+Each port `p` has the following entries (all entries must be populated):
+
 * `clk_pin` points to the clock driver pin
 * `posedge` points to a 1/0 constant driver pin
 * `enable`  points to the driver pin for read/write enable.
