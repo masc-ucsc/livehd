@@ -310,13 +310,16 @@ void Lnast_dfg::nary_node_rhs_connections(LGraph *dfg, Node &opr_node, const std
 Node Lnast_dfg::process_ast_assign_op(LGraph *dfg, const Lnast_nid &lnidx_assign) {
   auto c0 = lnast->get_first_child(lnidx_assign);
   auto c1 = lnast->get_sibling_next(c0);
-  auto c0_name = lnast->get_name(c0);
-  auto c1_name = lnast->get_name(c1);
-  fmt::print("assign c0_name:{}\n", c0_name);
-  fmt::print("assign c1_name:{}\n", c1_name);
 
-  Node_pin opr_spin  = setup_node_assign_and_lhs(dfg, lnidx_assign);
-  Node_pin opd1 = setup_ref_node_dpin(dfg, c1);
+  Node_pin opd1 = setup_ref_node_dpin(dfg, c1, false, false, false, true);
+  Node     opd1_node = opd1.get_node();
+
+  Node_pin opr_spin;
+  if (opd1_node.get_type_op() == TupAdd_Op) {
+    opr_spin  = setup_tuple_assignment(dfg, lnidx_assign);
+  } else {
+    opr_spin  = setup_node_assign_and_lhs(dfg, lnidx_assign);
+  }
 
   dfg->add_edge(opd1, opr_spin);
   return opr_spin.get_node();
@@ -551,7 +554,6 @@ void Lnast_dfg::process_ast_tuple_get_op(LGraph *dfg, const Lnast_nid &lnidx_tg)
 }
 
 
-
 void Lnast_dfg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnidx_ta) {
   int i = 0;
   absl::flat_hash_map<int, Node> ta_map;
@@ -760,6 +762,20 @@ Node Lnast_dfg::setup_node_opr_and_lhs(LGraph *dfg, const Lnast_nid &lnidx_opr) 
 }
 
 
+Node_pin Lnast_dfg::setup_tuple_assignment(LGraph *dfg, const Lnast_nid &lnidx_opr) {
+  auto lhs       = lnast->get_first_child(lnidx_opr);
+  auto tup_name  = lnast->get_sname(lhs);
+  auto tup_vname = lnast->get_vname(lhs);
+
+  auto tup_add =  dfg->create_node(TupAdd_Op);
+
+  name2dpin[tup_name] = tup_add.setup_driver_pin();
+  tup_add.setup_driver_pin().set_name(tup_name);
+  setup_dpin_ssa(name2dpin[tup_name], tup_vname, lnast->get_subs(lhs));
+
+  return tup_add.setup_sink_pin(0);
+
+}
 
 Node_pin Lnast_dfg::setup_node_assign_and_lhs(LGraph *dfg, const Lnast_nid &lnidx_opr) {
   auto lhs       = lnast->get_first_child(lnidx_opr);
@@ -851,7 +867,9 @@ Node_pin Lnast_dfg::setup_node_assign_and_lhs(LGraph *dfg, const Lnast_nid &lnid
 
 // for both target and operands, except the new io, reg, and const, the node and its dpin
 // should already be in the table as the operand comes from existing operator output
-Node_pin Lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx_opd, bool from_phi, bool from_concat, bool from_tupstrc) {
+Node_pin Lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx_opd, 
+                                                     bool from_phi, bool from_concat, 
+                                                     bool from_tupstrc, bool from_assign) {
   auto name  = lnast->get_sname(lnidx_opd);
   auto vname = lnast->get_vname(lnidx_opd);
   auto subs  = lnast->get_subs(lnidx_opd);
@@ -874,6 +892,7 @@ Node_pin Lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx_opd,
 
   const auto it = name2dpin.find(name);
   if (it != name2dpin.end()) {
+    auto node = it->second.get_node();
     auto op = it->second.get_node().get_type().op;
 
     // it's a scalar variable, just return the node pin
@@ -886,7 +905,13 @@ Node_pin Lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx_opd,
     if (op == TupAdd_Op && from_tupstrc)
       return it->second;
 
-    // return a connected TupGet if the ref node is a TupAdd and the operator is not concat
+    // when it's a tuple chain with multiple field -> not a scalar -> return the tuple chain for it
+    if (op == TupAdd_Op && from_assign) {
+      if (node.setup_sink_pin(0).get_driver_node().get_type_op() == TupAdd_Op)
+        return it->second;
+    }
+
+    // return a connected TupGet if the ref node is a TupAdd but also a tuple-chain of a scalar
     auto tup_get = dfg->create_node(TupGet_Op);
     auto tn_spin = tup_get.setup_sink_pin("TN"); // tuple name
     auto kp_spin = tup_get.setup_sink_pin("KP"); // key pos
@@ -927,8 +952,6 @@ Node_pin Lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx_opd,
     return node_dpin; //return empty node_pin and trigger compile error
   }
 
-  //if (!is_input(name) && node_dpin.get_node().get_type_op() != Const_Op)
-  //  node_dpin.set_name(name);
 
   name2dpin[name] = node_dpin;  // for io and reg, the %$# identifier are still used in symbol table
   return node_dpin;
@@ -1065,8 +1088,6 @@ void Lnast_dfg::subgraph_io_connection(LGraph *dfg, Sub_node* sub, std::string_v
       auto scalar_node = dfg->create_node(Or_Op);
       auto scalar_dpin = scalar_node.setup_driver_pin(0);
       subg_dpin.connect_sink(scalar_node.setup_sink_pin(0));
-      
-
 
       name2dpin[res_name] = scalar_dpin;  
       scalar_dpin.set_name(res_name);
@@ -1075,6 +1096,7 @@ void Lnast_dfg::subgraph_io_connection(LGraph *dfg, Sub_node* sub, std::string_v
       auto res_sub   = std::stoi(std::string(res_name.substr(pos+1)));
       setup_dpin_ssa(scalar_dpin, res_vname, 0);
 
+      // note: the function call scalar return must be a "new_var_chain"
       if (vname2attr_dpin.find(res_vname) != vname2attr_dpin.end()) {
         auto aset_node = dfg->create_node(AttrSet_Op);
         auto aset_aci_spin = aset_node.setup_sink_pin("ACI");
