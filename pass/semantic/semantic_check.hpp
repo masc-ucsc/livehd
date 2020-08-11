@@ -19,6 +19,7 @@ protected:
 
   bool is_primitive_op(const Lnast_ntype node_type);
   bool is_tree_structs(const Lnast_ntype node_type);
+  bool is_temp_var(std::string_view node_name);
   bool in_write_list(std::string_view node_name, std::string_view stmt_name);
   bool in_read_list(std::string_view node_name, std::string_view stmt_name);
   bool in_lhs_list(Lnast_nid node_name);

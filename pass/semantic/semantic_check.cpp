@@ -35,6 +35,14 @@ bool Semantic_check::is_tree_structs(const Lnast_ntype node_type) {
   }
 }
 
+bool Semantic_check::is_temp_var(std::string_view node_name) {
+  if (node_name[0] == '_' && node_name[1] == '_' && node_name[2] == '_') {
+    return true;
+  } else {
+    return false;
+  }
+}
+
 bool Semantic_check::in_write_list(std::string_view node_name, std::string_view stmt_name) {
   for (auto node : write_dict) {
     if (node.first == node_name && node.second == stmt_name) {
@@ -279,43 +287,45 @@ void Semantic_check::resolve_lhs_rhs_lists(Lnast *lnast) {
   //   fmt::print("]");
   // }
   // fmt::print("\n");
-  // int lhs_list_size = (int) lhs_list.size();
-  // for (int i = 0; i < lhs_list_size; i++) {
-  //   // auto lhs_type = lnast->get_data(lhs_list[i]).type;
-  //   auto lhs_name = lnast->get_name(lhs_list[i]);
-  //   if (lhs_name[0] != '_' && lhs_name[1] != '_' && lhs_name[2] != '_' && rhs_list[i].size() == 1 && lhs_name != "null" && lhs_name[0] != '$') {
-  //     auto rhs_type = lnast->get_data(rhs_list[i][0]).type;
-  //     auto rhs_name = lnast->get_name(rhs_list[i][0]);
-  //     if (rhs_name[0] != '_' && rhs_name[1] != '_' && rhs_name[2] != '_' && rhs_type.is_ref()) {
-  //     // if (rhs_name[0] != '_' && rhs_name[1] != '_' && rhs_name[2] != '_' && rhs_name[0] != '$' && rhs_type.is_ref()) {
-  //       inefficient_LNAST.insert(lhs_name);
-  //     }
-  //   }
   for (auto lhs_node : lhs_list) {
     std::string_view lhs_name = lnast->get_name(lhs_node);
-    // Skip if is temporary node
-    if (lhs_name[0] == '_' && lhs_name[1] == '_' && lhs_name[2] == '_') {
+
+    // Skip if lhs_name is a temporary node
+    if (is_temp_var(lhs_name)) {
       continue;
     }
-    int lhs_index = in_rhs_list(lnast, lhs_name); // Look for index where lhs_name is found in rhs_list
+    // Get index for where lhs_name is found in rhs_list
+    int lhs_index = in_rhs_list(lnast, lhs_name);
     if (lhs_index == -1) {
       continue;
     }
+    // If node name at lhs_list[lhs_index] exists in rhs_list --> node name is unneccesary
     int rhs_index = in_rhs_list(lnast, lnast->get_name(lhs_list[lhs_index])); 
-    // index where lhs_name is found in rhs_list (to determine if lhs node at lhs_index is unnecessary)
-    if (rhs_index == -1) { // Node at lhs_index is necessary
+    if (rhs_index == -1) {
       continue;
     }
+    // Check to make sure that node name at lhs_list[lhs_index] and at least one rhs_list[lhs_index] is not a temp var
     bool rhs_not_temp = false;
-    // lhs_node is a temporary variable so keep searching for a non-temporary variable
-    while (!rhs_not_temp && (lnast->get_name(lhs_list[lhs_index])[0] == '_' && lnast->get_name(lhs_list[lhs_index])[1] == '_' && lnast->get_name(lhs_list[lhs_index])[2] == '_')) {
-      lhs_index = in_rhs_list(lnast, lnast->get_name(lhs_list[lhs_index])); // Look for index where temporary variable is found in rhs_list
+    bool lhs_not_temp = false;
+    if (!is_temp_var(lnast->get_name(lhs_list[lhs_index]))) {
+      lhs_not_temp = true;
+    }
+    if (lhs_not_temp) {
+      for (auto rhs_name : rhs_list[lhs_index]) {
+        if (!is_temp_var(lnast->get_name(rhs_name))) {
+          rhs_not_temp = true;
+          break;
+        }
+      }
+    }
+    while (!is_temp_var(lnast->get_name(lhs_list[lhs_index])) && !rhs_not_temp) {
+      // Look for index where temporary variable is found in rhs_list
+      lhs_index = in_rhs_list(lnast, lnast->get_name(lhs_list[lhs_index]));
       if (lhs_index == -1) {
         break;
       }
       for (auto rhs_name : rhs_list[lhs_index]) {
-        std::string_view temp = lnast->get_name(rhs_name);
-        if (temp[0] != '_' && temp[1] != '_' && temp[2] != '_') {
+        if (!is_temp_var(lnast->get_name(rhs_name))) {
           rhs_not_temp = true;
           break;
         }
@@ -324,7 +334,7 @@ void Semantic_check::resolve_lhs_rhs_lists(Lnast *lnast) {
     if (lhs_index == -1) {
       continue;
     }
-    if (!in_inefficient_LNAST(lnast->get_name(lhs_list[lhs_index]))) {
+    if (rhs_not_temp && lhs_not_temp && !in_inefficient_LNAST(lnast->get_name(lhs_list[lhs_index]))) {
       inefficient_LNAST.insert(lnast->get_name(lhs_list[lhs_index]));
     }
   }
@@ -412,15 +422,18 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
           num_of_ref += 1;
           // Store type 'ref' variables
           add_to_write_list(lnast, lnast->get_name(lnidx_opr_child), stmt_name);
+          add_to_lhs_list(lnidx_opr_child);
           continue;
         }
         if (node_type_child.is_ref()) {
           num_of_ref += 1;
           // Store type 'ref' variables
           add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
+          rhs_args.push_back(lnidx_opr_child);
         } else if (node_type_child.is_const()) {
           num_of_const += 1;
           add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
+          rhs_args.push_back(lnidx_opr_child);
         } else if (node_type_child.is_assign()) {
           num_of_assign += 1;
           check_primitive_ops(lnast, lnidx_opr_child, node_type_child, stmt_name);
@@ -430,6 +443,7 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
           Pass::error("Tuple Operation Error: Child Node(s) must be Node type 'ref' or 'assign'\n");
         }
       }
+      add_to_rhs_list(rhs_args);
       // Missing Nodes
       if (num_of_ref == 0) {
         error_print_lnast_by_type(lnast, node_type.to_s());
@@ -447,18 +461,21 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
         if (lnast->get_first_child(lnidx_opr) == lnidx_opr_child) {
           num_of_ref += 1;
           add_to_write_list(lnast, lnast->get_name(lnidx_opr_child), stmt_name);
+          add_to_lhs_list(lnidx_opr_child);
           continue;
         }
         if (node_type_child.is_ref()) {
           num_of_ref += 1;
           // Store type 'ref' variables
           add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
+          rhs_args.push_back(lnidx_opr_child);
         } else {
           // Invalid Node Type
           error_print_lnast_by_name(lnast, lnast->get_name(lnidx_opr));
           Pass::error("Tuple Concatenation Operation Error: Child Node(s) must be Node type 'ref'\n");
         }
       }
+      add_to_rhs_list(rhs_args);
       // Missing Nodes
       if (num_of_ref != 3) {
         error_print_lnast_by_type(lnast, node_type.to_s());
