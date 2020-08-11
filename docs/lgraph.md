@@ -494,8 +494,8 @@ y = a & ((1<<n)-1)
 
 Bitwise Not operator
 
-```{.graph .center caption="Node LGraph Node."}
-digraph Mod {
+```{.graph .center caption="Not LGraph Node."}
+digraph Not {
     rankdir=LR;
     size="1,0.5"
 
@@ -589,7 +589,7 @@ result is negative.
 ```{.graph .center caption="Join LGraph Node."}
 digraph Join {
     rankdir=LR;
-    size="2,1"
+    size="1,0.5"
 
     node [shape = circle]; Join;
     node [shape = point ]; q0
@@ -698,7 +698,7 @@ Memory is the basic block to represent SRAM-like structures. Any large storage w
 
 
 ```{.graph .center caption="Memory LGraph Node."}
-digraph Join {
+digraph Memory {
     rankdir=LR;
     size="2,1"
 
@@ -706,49 +706,68 @@ digraph Join {
     node [shape = point ]; q0
     node [shape = point ]; q1
     node [shape = point ]; q2
+    node [shape = point ]; q3
+    node [shape = point ]; q4
+    node [shape = point ]; q5
+    node [shape = point ]; q6
+    node [shape = point ]; q7
+    node [shape = point ]; q8
+    node [shape = point ]; q9
+    node [shape = point ]; q10
     node [shape = point ]; q
 
-    q0 -> Join [ label ="s" ];
-    q1 -> Join [ label ="b" ];
-    q2 -> Join [ label ="p" ];
-    Join  -> q [ label = "Y" ];
+    q0 -> Memory [ label ="a (addr)" ];
+    q1 -> Memory [ label ="b (bits)" ];
+    q2 -> Memory [ label ="c (clock)" ];
+    q3 -> Memory [ label ="d (data in)" ];
+    q4 -> Memory [ label ="e (enable)" ];
+    q5 -> Memory [ label ="f (fwd)" ];
+    q6 -> Memory [ label ="l (latency)" ];
+    q7 -> Memory [ label ="m (wmask)" ];
+    q8 -> Memory [ label ="p (posedge)" ];
+    q9 -> Memory [ label ="s" (size) ];
+    q10 -> Memory [ label ="w (wmode)" ];
+    Memory  -> q [ label ="q (data out)" ];
 }
 ```
 
 * `s` is for the array size in number of entries
 * `b` is the number of bits per entry
-* `c`,`d`,`e`... is the read, write, or read/write ports connecting to the memory
-* `q` is the read data out of the memory for the read ports
+* `c`,`d`,`e`,'q'... are the memory configuration, data, address ports
 
-Result `q` is an array to support multiported memories. The order of the ports
-do not change semantics.
+Ports ('c'...'w') are arrays/vectors to support multiported memories. If a single instance
+exists in a port, the same is used across all the ports. E.g: if clock ('c') is populated:
+
+```
+mem1.c = clk1 // clk for all the memory ports
+
+mem2.c[0] = clk1 // clock for memory port 0
+mem2.c[1] = clk2 // clock for memory port 1
+mem2.c[2] = clk2 // clock for memory port 2
+```
 
 Each port `c`,`d`,`e`... has the following entries. All the entries but the wmask 
 must be populated. If the wrmask is not set a full write size is expected. Read-only
 ports do not have `data` and `wrmask` fields.
 
-* `clk_pin` points to the clock driver pin
-* `posedge` points to a 1/0 constant driver pin
-* `enable`  points to the driver pin for read/write enable.
-* `fwd`   points to a 0/1 constant driver pin to indicate if writes forward
-  value (`0b0` for write-only ports). Effectively, it means zero cycles read
-latency when enabled. `fwd` is more than just setting `latency=0`. Even with
-latency zero, the write delay affects until the result is visible. With `fwd`
-enabled, the write latency does not matter to observe the results. This
-requires a costly forwarding logic.
-* `latency` points to an integer constant driver pin (2 bits). For writes `latency from 1 to 3`, for reads `latency from 0 to 3`
-* `wmode`   points to the driver pin or switching between read and write mode (single bit)
-* `addr`    points to the driver pin for the address. The address bits should match the array size (`ceil(log2(s))`)
-* `data`    points to the write data driver pin (read result is in `q` port).
-* `wmask`   Points to the write mask (1 == write, 0==no write). The mask bust be a big as the number of bits per entry (`b`)
+* `c` (`clk_pin`) points to the clock driver pin
+* `p` (`posedge`) points to a 1/0 constant driver pin
+* `e` (`enable`)  points to the driver pin for read/write enable.
+* `f` (`fwd`)     points to a 0/1 constant driver pin to indicate if writes forward value (`0b0` for write-only ports). Effectively, it means zero cycles read latency when enabled. `fwd` is more than just setting `latency=0`. Even with latency zero, the write delay affects until the result is visible. With `fwd` enabled, the write latency does not matter to observe the results. This requires a costly forwarding logic.
+* 'l' (`latency`) points to an integer constant driver pin (2 bits). For writes `latency from 1 to 3`, for reads `latency from 0 to 3`
+* 'w' (`wmode`)   points to the driver pin or switching between read and write mode (single bit)
+* 'a' (`addr`)    points to the driver pin for the address. The address bits should match the array size (`ceil(log2(s))`)
+* `d` (`data in`)   points to the write data driver pin (read result is in `q` port).
+* `q` (`data out`)  is a driver pin with the data read from the memory
+* 'm' (`wmask`)   Points to the write mask (1 == write, 0==no write). The mask bust be a big as the number of bits per entry (`b`). The `wmask` pin can be disconnected which means no write mask (a write will write all the bits).
 
 
 All the ports must be populated with the correct size. This is important
-because some modules access the field by bit position.  It not used point to a
-zero constant with the correct number of bits. E.g: a 8bit per entry (`b`)
-array needs a 8 bit zero `wmask` (`wmask = -1u8bits`). Setting wmask to `0b1`
-will mean a 1 bit zero, and the memory will be incorrectly operated. `clk_pin`
-is the least significant bit of the `p` configuration.
+because some modules access the field by bit position. 
+It not used point to a zero constant with the correct number of bits. E.g: a
+8bit per entry (`b`) array needs a 8 bit zero `wmask` (`wmask = 0xFF`).
+Setting wmask to `0b1` will mean a 1 bit zero, and the memory will be
+incorrectly operated.
 
 The memory usually has power of two sizes. If the size is not a power of 2, the
 address is rounded up. Writes to the invalid addresses will generated random
