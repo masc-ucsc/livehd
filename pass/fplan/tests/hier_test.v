@@ -1,32 +1,32 @@
-module leaf1(inout [14:0] a)
-    
+module leaf1(inout [14:0] a);
+  assign a[1] = a[0];
 endmodule
 
-module leaf2(inout [14:0] a, inout [24:0] b)
-
-endmodule
-
-module leaf3(inout [29:0] c)
+module leaf2(inout [14:0] a, inout [24:0] b);
 
 endmodule
 
-module leaf4()
+module leaf3(inout [29:0] c);
 
 endmodule
 
-module leaf5(inout [29:0] c)
+module leaf4();
 
 endmodule
 
-module leaf6()
+module leaf5(inout [29:0] c);
 
 endmodule
 
-module leaf7(inout [24:0] b)
+module leaf6();
 
 endmodule
 
-module mid1(inout [899:0] d)
+module leaf7(inout [24:0] b);
+
+endmodule
+
+module mid1(inout [899:0] d);
   wire [14:0] wa;
   wire [24:0] wb;
 
@@ -36,7 +36,7 @@ module mid1(inout [899:0] d)
 
 endmodule
 
-module mid2(inout [899:0] d, inout [9:0] e)
+module mid2(inout [899:0] d, inout [9:0] e);
   wire [29:0] wc;
   
   leaf3 l3(.c(wc));
@@ -44,15 +44,15 @@ module mid2(inout [899:0] d, inout [9:0] e)
   leaf5 l5(.c(wc));
 endmodule
 
-module mid4(inout [9:0] e, inout [4:0] f)
+module mid4(inout [9:0] e, inout [4:0] f);
 
 endmodule
 
-module mid3(inout [4:0] f)
+module mid3(inout [4:0] f);
   leaf6 l6();
 endmodule
 
-module root()
+module root(inout wd0);
   wire [899:0] wd;
   wire [9:0] we;
   wire [4:0] wf;
