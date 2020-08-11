@@ -694,7 +694,7 @@ reduce xor is a chain of XORs.
 
 ### Memory_op
 
-Memory is the basic block to represent SRAM-like structures. Any large storage will benefit of using memory arrays instead of slower to simulate set of flops. The memories are highly configurable.
+Memory is the basic block to represent SRAM-like structures. Any large storage will benefit from using memory arrays instead of flops, which are slower to simulate. These memories are highly configurable.
 
 
 ```{.graph .center caption="Memory LGraph Node."}
@@ -735,7 +735,7 @@ digraph Memory {
 * `b` is the number of bits per entry
 * `c`,`d`,`e`,'q'... are the memory configuration, data, address ports
 
-Ports ('c'...'w') are arrays/vectors to support multiported memories. If a single instance
+Ports ('a','c'...'w') are arrays/vectors to support multiported memories. If a single instance
 exists in a port, the same is used across all the ports. E.g: if clock ('c') is populated:
 
 ```
@@ -746,28 +746,28 @@ mem2.c[1] = clk2 // clock for memory port 1
 mem2.c[2] = clk2 // clock for memory port 2
 ```
 
-Each port `c`,`d`,`e`... has the following entries. All the entries but the wmask 
-must be populated. If the wrmask is not set a full write size is expected. Read-only
-ports do not have `data` and `wrmask` fields.
+Each memory port has the following entries. All the entries but the `wmask`
+must be populated. If the `wmask` is not set, a full write size is expected.
+Read-only ports do not have `data` and `wmask` fields.
 
+* 'a' (`addr`)    points to the driver pin for the address. The address bits should match the array size (`ceil(log2(s))`)
 * `c` (`clk_pin`) points to the clock driver pin
-* `p` (`posedge`) points to a 1/0 constant driver pin
+* `d` (`data in`)   points to the write data driver pin (read result is in `q` port).
 * `e` (`enable`)  points to the driver pin for read/write enable.
 * `f` (`fwd`)     points to a 0/1 constant driver pin to indicate if writes forward value (`0b0` for write-only ports). Effectively, it means zero cycles read latency when enabled. `fwd` is more than just setting `latency=0`. Even with latency zero, the write delay affects until the result is visible. With `fwd` enabled, the write latency does not matter to observe the results. This requires a costly forwarding logic.
 * 'l' (`latency`) points to an integer constant driver pin (2 bits). For writes `latency from 1 to 3`, for reads `latency from 0 to 3`
-* 'w' (`wmode`)   points to the driver pin or switching between read and write mode (single bit)
-* 'a' (`addr`)    points to the driver pin for the address. The address bits should match the array size (`ceil(log2(s))`)
-* `d` (`data in`)   points to the write data driver pin (read result is in `q` port).
-* `q` (`data out`)  is a driver pin with the data read from the memory
 * 'm' (`wmask`)   Points to the write mask (1 == write, 0==no write). The mask bust be a big as the number of bits per entry (`b`). The `wmask` pin can be disconnected which means no write mask (a write will write all the bits).
+* `p` (`posedge`) points to a 1/0 constant driver pin
+* 'w' (`wmode`)   points to the driver pin or switching between read and write mode (single bit)
+* `q` (`data out`)  is a driver pin with the data read from the memory
 
 
 All the ports must be populated with the correct size. This is important
 because some modules access the field by bit position. 
-It not used point to a zero constant with the correct number of bits. E.g: a
-8bit per entry (`b`) array needs a 8 bit zero `wmask` (`wmask = 0xFF`).
-Setting wmask to `0b1` will mean a 1 bit zero, and the memory will be
-incorrectly operated.
+If it is not used, it will point to a zero constant with the correct number of bits.
+The exception to this is `wmask` which, if `b` indicates 8 bits per entry,
+will be equivalent to `0xFF`. Setting wmask to `0b1` will mean a 1 bit zero,
+and the memory will be incorrectly operated.
 
 The memory usually has power of two sizes. If the size is not a power of 2, the
 address is rounded up. Writes to the invalid addresses will generated random
