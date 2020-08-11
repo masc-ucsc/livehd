@@ -725,7 +725,7 @@ digraph Memory {
     q6 -> Memory [ label ="l (latency)" ];
     q7 -> Memory [ label ="m (wmask)" ];
     q8 -> Memory [ label ="p (posedge)" ];
-    q9 -> Memory [ label ="s" (size) ];
+    q9 -> Memory [ label ="s (size)" ];
     q10 -> Memory [ label ="w (wmode)" ];
     Memory  -> q [ label ="q (data out)" ];
 }
