@@ -1,4 +1,2 @@
 %out.__bits = 3
-// res = sum2(a = 2, b = 3)
-// %out = res
 %out = sum2(a = 2, b = 3)

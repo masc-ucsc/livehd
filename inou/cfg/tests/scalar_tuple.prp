@@ -61,12 +61,12 @@ h.0 = 3       // scalar -> tuple
 
 
 // case VIII
-// i = 2
-// i.0 = 3       // scalar -> tuple
-// i.1 = 4       // should be compile-error
-// %out9 = i.0 + i.1     //7       
+i = 2
+i.0 = 3       // scalar -> tuple
+i.1 = 4        
+%out9 = i.0 + i.1  //7       
 
 
 // case IX
 j = 2 + 3
-%out10 = j.0
+%out10 = j.0 //5
