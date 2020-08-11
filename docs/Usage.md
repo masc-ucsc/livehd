@@ -36,10 +36,10 @@ It is also assumed that bash is used to compile LiveHD.
       ```$ cd yosys```
   - Find the Yosys commit LiveHD uses and check out that commit  
       ```git checkout `$ grep -C2 BUILD.yosys <absolute path to LiveHD>/WORKSPACE  | grep commit | cut -d\" -f2` ```
-  - Tell Yosys the compiler we want to compile it  
+  - Tell Yosys the compiler we want to use  
       ```$ make config-gcc``` (if using gcc)  
       ```$ make config-clang``` (if using clang)
-  - Make Yosys  
+  - Build Yosys  
       ```$ make -j<number of CPU cores * 2>```
   - Install Yosys  
       ```$ sudo make install```
@@ -60,7 +60,15 @@ It is also assumed that bash is used to compile LiveHD.
 
 ## Sample usage
 
-Below are some sample usages of the LiveHD shell.  A bash prompt is indicated by `$`, a LiveHD prompt is indicated by `livehd>`, and a Yosys prompt is indicated by a `yosys>`.  The LiveHD shell supports color output and autocompletion using the tab key.
+Below are some sample usages of the LiveHD shell (lgshell).  A bash prompt is indicated by `$`, an lgshell prompt is indicated by `livehd>`, and a Yosys prompt is indicated by a `yosys>`.  Lgshell supports color output and autocompletion using the tab key.
+
+### General concepts
+
+TODO: clean this up
+ - In lgshell, pipes (`|>`) are used to move data between LiveHD passes.
+ - When Verilog files are imported with `inou.yosys.tolg`, the LGraph(s) are stored in the lgdb directory.
+  - This directory (and thus the LGraphs) persist across shells
+ - LiveHD only accepts synthesizable Verilog/SystemVerilog
 
 ### Starting and exiting the shell
 
@@ -73,13 +81,27 @@ livehd> exit
 
 ### Reading and writing verilog files with of LiveHD
 
-- To read a Verilog file with Yosys and create an LGraph:
+- To read a single-module Verilog file with Yosys and create an LGraph:
   ```
   $ ./bazel-bin/main/lgshell
   livehd> inou.yosys.tolg files:./inou/yosys/tests/simple_add.v
   livehd> exit
   $ ls lgdb
   ```
+- To read a Verilog file with more than one module:
+  ```
+  $ ./bazel-bin/main/lgshell
+  livehd> inou.yosys.tolg files:./inou/yosys/tests/hierarchy.v top:<top module name>
+  livehd> exit
+  $ ls lgdb
+  ```
+- Print information about an existing LGraph:
+  ```
+  $ ./bazel-bin/main/lgshell
+  livehd> inou.yosys.tolg files:./inou/yosys/tests/trivial.v
+  livehd> lgraph.match |> lgraph.stats
+  ```
+
 - To dump an LGraph (and submodules) to Verilog:
   ```
   $ ./bazel-bin/main/lgshell
@@ -88,12 +110,19 @@ livehd> exit
   $ ls lgdb/*.v
   ```
 
+### Running a custom pass
+
+```
+$ ./bazel-bin/main/lgshell
+livehd> inou.yosys.tolg files:./inou/yosys/tests/trivial.v
+livehd> lgraph.match |> <pass name>
+```
+
 ### Generating json file from an LGraph
 
 ```
 $ ./bazel-bin/main/lgshell
-livehd> inou.yosys.tolg files:./inou/yosys/tests/trivial.v |> @a
-livehd> @a |> inou.json.fromlg output:trivial.json
+livehd> inou.yosys.tolg files:./inou/yosys/tests/trivial.v |> inou.json.fromlg output:trivial.json
 livehd> exit
 $ less trivial.json
 ```
