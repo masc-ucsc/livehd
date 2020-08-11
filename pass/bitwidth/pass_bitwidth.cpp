@@ -693,7 +693,7 @@ void Pass_bitwidth::bw_pass(LGraph *lg) {
   });
   outcountmap[lg->get_graph_input_node().get_compact()] = lg->get_graph_input_node().get_num_outputs();
 
-  for (auto node : lg->forward()) {
+  for (auto node : lg->forward(true)) {
     auto inp_edges = node.inp_edges();
     auto op        = node.get_type_op();
 
