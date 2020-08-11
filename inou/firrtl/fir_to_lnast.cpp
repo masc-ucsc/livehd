@@ -245,16 +245,11 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id, const 
 
   auto clk  = lnast.add_string(ReturnExprString(lnast, clocke, parent_node, true));
   auto rst  = lnast.add_string(ReturnExprString(lnast, resete, parent_node, true));
-  auto init = lnast.add_string(ReturnExprString(lnast, inite, parent_node, true));
-  //auto init = "fixme";
+  //auto init = lnast.add_string(ReturnExprString(lnast, inite, parent_node, true));
+  auto init = "fixme";
 
   // Add register's name to the global list.
   register_names.insert(id.substr(1, id.length() - 1));  // Use substr to remove "#"
-
-  // Save 'id' for later use with qpin.
-  std::string id_for_qpin = id.substr(1, id.length() - 1);
-
-  // The first step is to get a string that allows us to access the register.
 
   /* Now that we have a name to access it by, we can create the
    * relevant dot nodes like: __clk_pin, __bits, __reset_async
@@ -607,7 +602,7 @@ void Inou_firrtl::HandleMemPortPre(Lnast& lnast, Lnast_nid& parent_node, const f
 
     auto idx_asg_m = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
     lnast.add_child(idx_asg_m, Lnast_node::create_assign("__wrmask"));
-    lnast.add_child(idx_asg_m, Lnast_node::create_const("-1u")); //Sets to all 1s
+    lnast.add_child(idx_asg_m, Lnast_node::create_const("0u"));
 
     auto idx_asg_l = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
     lnast.add_child(idx_asg_l, Lnast_node::create_assign("__latency"));
@@ -619,7 +614,7 @@ void Inou_firrtl::HandleMemPortPre(Lnast& lnast, Lnast_nid& parent_node, const f
 
     auto idx_asg_m = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
     lnast.add_child(idx_asg_m, Lnast_node::create_assign("__wrmask"));
-    lnast.add_child(idx_asg_m, Lnast_node::create_const("-1u")); //Sets to all 1s
+    lnast.add_child(idx_asg_m, Lnast_node::create_const("0u"));
 
     auto idx_asg_l = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
     lnast.add_child(idx_asg_l, Lnast_node::create_assign("__latency"));
@@ -718,8 +713,12 @@ void Inou_firrtl::create_module_inst(Lnast& lnast, const firrtl::FirrtlPB_Statem
   auto temp_var_name  = create_temp_var(lnast);
   auto temp_var_name2 = lnast.add_string(absl::StrCat("F", std::to_string(temp_var_count)));
   temp_var_count++;
-  auto inp_name       = lnast.add_string(absl::StrCat("inp_", inst.id()));
-  auto out_name       = lnast.add_string(absl::StrCat("out_", inst.id()));
+  auto inst_name = inst.id();
+  if (inst.id().substr(0,2) == "_T") {
+    inst_name = absl::StrCat("_.", inst_name);
+  }
+  auto inp_name       = lnast.add_string(absl::StrCat("inp_", inst_name));
+  auto out_name       = lnast.add_string(absl::StrCat("out_", inst_name));
 
   auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_dot(""));
   lnast.add_child(idx_dot, Lnast_node::create_ref(temp_var_name));
@@ -1477,6 +1476,9 @@ std::string_view Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB
 
   } else if (inst_to_mod_map.count(alter_full_str.substr(0, alter_full_str.find(".")))) {
     auto inst_name        = alter_full_str.substr(0, alter_full_str.find("."));
+    if (inst_name.substr(0,2) == "_T") {
+      inst_name = absl::StrCat("_.", inst_name);
+    }
     auto str_without_inst = alter_full_str.substr(alter_full_str.find(".") + 1);
     auto module_name      = inst_to_mod_map[inst_name];
     auto dir              = mod_to_io_dir_map[std::make_pair(module_name, str_without_inst)];
@@ -1532,6 +1534,10 @@ std::string_view Inou_firrtl::CreateDotsSelsFromStr(Lnast& ln, Lnast_nid& parent
   std::string_view bund_name;
   while (flat_queue.size() > 0) {
     auto elem = flat_queue.front();
+    if (elem.substr(0,2) == "_T" && !dangling_ports_map.contains(elem)) {
+      elem = absl::StrCat("_.", elem);
+    }
+
     if (first) {
       bund_name = ln.add_string(elem);
       first = false;
@@ -1548,6 +1554,8 @@ std::string_view Inou_firrtl::CreateDotsSelsFromStr(Lnast& ln, Lnast_nid& parent
         } else {
           ln.add_child(ln_node, Lnast_node::create_ref(elem_nobrack));
         }
+        bund_name = temp_var_name;
+        sel_was_last = true;
       } else if (sel_was_last) {
         auto temp_var_name = create_temp_var(ln);
         ln_node = ln.add_child(parent_node, Lnast_node::create_dot("new"));
@@ -2027,11 +2035,8 @@ void Inou_firrtl::AttachExprStrToNode(Lnast& lnast, const std::string_view acces
 
 //------------Statements----------------------
 /*TODO:
- * Memory
- * CMemory
  * PartialConnect
  * IsInvalid
- * MemoryPort
  * Attach
  */
 void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Statement& stmt, Lnast_nid& parent_node) {
@@ -2043,10 +2048,6 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
     }
     case firrtl::FirrtlPB_Statement::kRegister: {  // Register
       register_names.insert(stmt.register_().id());
-      //auto clk_name  = lnast.add_string(ReturnExprString(lnast, stmt.register_().clock(), parent_node, true));
-      //auto rst_name  = lnast.add_string(ReturnExprString(lnast, stmt.register_().reset(), parent_node, true));
-      //auto init_name = lnast.add_string(ReturnExprString(lnast, stmt.register_().init(), parent_node, true));
-      //auto init_name = "fixme";
       init_reg_dots(lnast, stmt.register_().type(), absl::StrCat("#", stmt.register_().id()),
                     stmt.register_().clock(), stmt.register_().reset(),
                     stmt.register_().init(), parent_node);
@@ -2135,13 +2136,15 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
       break;
     }
     case firrtl::FirrtlPB_Statement::kPartialConnect: {  // PartialConnect
-      Pass::error("PartialConnect not supported on FIRRTL interface, consider not using PartialConnect semantics.");
-      I(false);
+      /* Note->hunter: Partial connects are treated same as full Connect. It's difficult to
+       * track the exact subfields that need to be assigned. FIXME: Do as future work. */
+      Pass::warn("FIRRTL partial connects are error-prone on this interface. Be careful using them.\n");
+      std::string lhs_string = ReturnExprString(lnast, stmt.partial_connect().location(), parent_node, false);
+      InitialExprAdd(lnast, stmt.partial_connect().expression(), parent_node, lhs_string);
       break;
     }
     case firrtl::FirrtlPB_Statement::kIsInvalid: {  // IsInvalid
-      //TODO?
-      //I(false);
+      // Nothing to do.
       break;
     }
     case firrtl::FirrtlPB_Statement::kMemoryPort: {  // MemoryPort
@@ -2209,7 +2212,7 @@ void Inou_firrtl::PerformLateMemAssigns(Lnast& lnast, Lnast_nid& parent_node) {
       case READ_WRITEI: {
         assign_pairs.emplace_back(absl::StrCat(port_name, ".__enable"), absl::StrCat(rstr_prefix, "en"));
         assign_pairs.emplace_back(absl::StrCat(port_name, ".__data"), absl::StrCat(rstr_prefix, "data"));
-        assign_pairs.emplace_back(absl::StrCat(port_name, ".__wrmask"), "-1u");
+        assign_pairs.emplace_back(absl::StrCat(port_name, ".__wrmask"), "0u");
         assign_pairs.emplace_back(absl::StrCat(port_name, ".__latency"), (std::string)std::get<2>(mem_props));
         break;
       } default:
