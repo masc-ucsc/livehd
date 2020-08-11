@@ -746,9 +746,7 @@ mem2.c[1] = clk2 // clock for memory port 1
 mem2.c[2] = clk2 // clock for memory port 2
 ```
 
-Each memory port has the following entries. All the entries but the `wmask`
-must be populated. If the `wmask` is not set, a full write size is expected.
-Read-only ports do not have `data` and `wmask` fields.
+Each memory has the following ports: 
 
 * 'a' (`addr`)    points to the driver pin for the address. The address bits should match the array size (`ceil(log2(s))`)
 * `c` (`clk_pin`) points to the clock driver pin
@@ -761,6 +759,13 @@ Read-only ports do not have `data` and `wmask` fields.
 * 'w' (`wmode`)   points to the driver pin or switching between read and write mode (single bit)
 * `q` (`data out`)  is a driver pin with the data read from the memory
 
+All the entries but the `wmask` must be populated. If the `wmask` is not set, a
+full write size is expected.  Read-only ports do not have `data` and `wmask`
+fields if the write use the low ports (0,1...).  By placing the read-only ports
+to the high numbers, we can avoid populating the wmask (`m`) and data out (`q`)
+ports. If the read ports use low port numbers those fields must be populated to
+allow the correct matching between write port (`a[n]`) and write result
+(`q[n]`).
 
 All the ports must be populated with the correct size. This is important
 because some modules access the field by bit position. 
@@ -768,6 +773,7 @@ If it is not used, it will point to a zero constant with the correct number of b
 The exception to this is `wmask` which, if `b` indicates 8 bits per entry,
 will be equivalent to `0xFF`. Setting wmask to `0b1` will mean a 1 bit zero,
 and the memory will be incorrectly operated.
+
 
 The memory usually has power of two sizes. If the size is not a power of 2, the
 address is rounded up. Writes to the invalid addresses will generated random
