@@ -640,6 +640,7 @@ Join_Op can not be used to created an unsigned value. Join_Op(0,x) is the same a
 
 * `Y = Join(0,a,b)` becomes `Y= Join(a,b)`
 * `Y = Join(a,0)` is the implementation for `a<<n` where `n=0.bits`
+* `Y = Join(0,a)` becomes `Y=a` when `a.min>=0` 
 
 ### Pick_op
 
@@ -655,6 +656,15 @@ Pick selects some bits from the source (VAL). It can be used as an unsigned righ
 ### ShiftRigt_op
 
 Logical or sign extension shift right.
+
+#### Verilog Considerations
+
+Verilog has 2 types of shift `>>` and `>>>`. The first is unsigned right shift,
+the 2nd is arithmetic right shift. LGraph only has arithmetic right shift
+(ShiftRigt_op). The verilog translation should make the value unsigned
+(`ShiftRigt(Join(0,a),b)`) before calling the shift operation. Conversely, for
+a `>>>` if the input is unsigned, the Sign Extend should be called first
+(`ShiftRigt(Sext(a),b)`)
 
 ### Mux_op
 
@@ -707,13 +717,15 @@ digraph Join {
 
 * `s` is for the array size in number of entries
 * `b` is the number of bits per entry
-* `p` is the read, write, or read/write ports connecting to the memory
+* `c`,`d`,`e`... is the read, write, or read/write ports connecting to the memory
 * `q` is the read data out of the memory for the read ports
 
-Both `p` and `q` are arrays to support multiported memories. The order of the
-ports do not change semantics.
+Result `q` is an array to support multiported memories. The order of the ports
+do not change semantics.
 
-Each port `p` has the following entries (all entries must be populated):
+Each port `c`,`d`,`e`... has the following entries. All the entries but the wmask 
+must be populated. If the wrmask is not set a full write size is expected. Read-only
+ports do not have `data` and `wrmask` fields.
 
 * `clk_pin` points to the clock driver pin
 * `posedge` points to a 1/0 constant driver pin
@@ -725,15 +737,16 @@ latency zero, the write delay affects until the result is visible. With `fwd`
 enabled, the write latency does not matter to observe the results. This
 requires a costly forwarding logic.
 * `latency` points to an integer constant driver pin (2 bits). For writes `latency from 1 to 3`, for reads `latency from 0 to 3`
-* `nwmask`  Points to the write mask (0 == write, 1==no write). The mask bust be a big as the number of bits per entry (`b`)
 * `wmode`   points to the driver pin or switching between read and write mode (single bit)
 * `addr`    points to the driver pin for the address. The address bits should match the array size (`ceil(log2(s))`)
-* `data`    points to the write data driver pin (read result is in `q` port). Connected to `0b0` for read-only ports
+* `data`    points to the write data driver pin (read result is in `q` port).
+* `wmask`   Points to the write mask (1 == write, 0==no write). The mask bust be a big as the number of bits per entry (`b`)
+
 
 All the ports must be populated with the correct size. This is important
 because some modules access the field by bit position.  It not used point to a
 zero constant with the correct number of bits. E.g: a 8bit per entry (`b`)
-array needs a 8 bit zero `nwmask` (`nwmask = 0u8bits`). Setting wmask to `0b0`
+array needs a 8 bit zero `wmask` (`wmask = -1u8bits`). Setting wmask to `0b1`
 will mean a 1 bit zero, and the memory will be incorrectly operated. `clk_pin`
 is the least significant bit of the `p` configuration.
 
