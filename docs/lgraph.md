@@ -718,17 +718,17 @@ Each port `p` has the following entries (all entries must be populated):
 * `clk_pin` points to the clock driver pin
 * `posedge` points to a 1/0 constant driver pin
 * `enable`  points to the driver pin for read/write enable.
-* `latency` points to an integer constant driver pin (2 bits). For writes `latency from 1 to 3`, for reads `latency from 0 to 3`
-* `nwmask`  Points to the write mask (0 == write, 1==no write). The mask bust be a big as the number of bits per entry (`b`)
-* `wmode`   points to the driver pin or switching between read and write mode (single bit)
-* `addr`    points to the driver pin for the address. The address bits should match the array size (`s`)
-* `data`    points to the write data driver pin (read result is in `q` port). Connected to `0b0` for read-only ports
 * `fwd`   points to a 0/1 constant driver pin to indicate if writes forward
   value (`0b0` for write-only ports). Effectively, it means zero cycles read
 latency when enabled. `fwd` is more than just setting `latency=0`. Even with
 latency zero, the write delay affects until the result is visible. With `fwd`
 enabled, the write latency does not matter to observe the results. This
 requires a costly forwarding logic.
+* `latency` points to an integer constant driver pin (2 bits). For writes `latency from 1 to 3`, for reads `latency from 0 to 3`
+* `nwmask`  Points to the write mask (0 == write, 1==no write). The mask bust be a big as the number of bits per entry (`b`)
+* `wmode`   points to the driver pin or switching between read and write mode (single bit)
+* `addr`    points to the driver pin for the address. The address bits should match the array size (`ceil(log2(s))`)
+* `data`    points to the write data driver pin (read result is in `q` port). Connected to `0b0` for read-only ports
 
 All the ports must be populated with the correct size. This is important
 because some modules access the field by bit position.  It not used point to a
@@ -737,6 +737,9 @@ array needs a 8 bit zero `nwmask` (`nwmask = 0u8bits`). Setting wmask to `0b0`
 will mean a 1 bit zero, and the memory will be incorrectly operated. `clk_pin`
 is the least significant bit of the `p` configuration.
 
+The memory usually has power of two sizes. If the size is not a power of 2, the
+address is rounded up. Writes to the invalid addresses will generated random
+memory updates. Reads should read random data.
 
 #### Forward Propagation
 
