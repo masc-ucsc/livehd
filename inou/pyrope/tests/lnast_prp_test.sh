@@ -12,7 +12,8 @@ pts='tuple_copy logic
      '
 
 #make sure to call Pyrope_compile() in the end of script
-# pts='tuple_copy'
+pts='tuple_copy'
+pts_hier4='funcall4'   
 pts_hier='sum funcall'
 pts_hier2='sum2 funcall2'   
 
@@ -201,7 +202,8 @@ Pyrope_compile () {
 }
 
 Pyrope_compile "$pts" 
-Pyrope_compile "$pts_hier" "hier"
+Pyrope_compile "$pts_hier4" "hier"
+Pyrope_compile "$pts_hier"  "hier"
 Pyrope_compile "$pts_hier2" "hier"
 
 

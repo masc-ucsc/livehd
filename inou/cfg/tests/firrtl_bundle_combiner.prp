@@ -1,0 +1,9 @@
+inp_io.bund1.a.__bits = 8
+inp_io.bund1.b.__bits = 8
+inp_io.bund2.a.__bits = 8
+inp_io.bund2.b.__bits = 8
+out_io.bund3.a.__bits = 8
+out_io.bund3.b.__bits = 8
+
+out_io.bund3.a = inp_io.bund1.a & inp_io.bund2.a
+out_io.bund3.b = inp_io.bund1.b & inp_io.bund2.b
