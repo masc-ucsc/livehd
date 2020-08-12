@@ -244,8 +244,8 @@ public:
   void dump();
   void dump_down_nodes();
 
-  Node get_graph_input_node();
-  Node get_graph_output_node();
+  Node get_graph_input_node(bool hier=false);
+  Node get_graph_output_node(bool hier=false);
 
   Node_pin get_graph_input(std::string_view str);
   Node_pin get_graph_output(std::string_view str);
