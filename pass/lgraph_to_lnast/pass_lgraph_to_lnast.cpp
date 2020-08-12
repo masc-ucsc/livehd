@@ -99,9 +99,11 @@ void Pass_lgraph_to_lnast::begin_transformation(LGraph* lg, Lnast& lnast, Lnast_
     I(gpio_dpin.has_name());
 
     auto edge_dpin = inp.driver;
+    fmt::print("\t{} <- {}\n", out_node.debug_name(), edge_dpin.get_node().debug_name());
+    I(!edge_dpin.get_node().is_hierarchical());
     handle_source_node(lg, edge_dpin, lnast, ln_node);
 
-    auto asg_node = lnast.add_child(ln_node, Lnast_node::create_assign("asg"));
+    auto asg_node = lnast.add_child(ln_node, Lnast_node::create_dp_assign("out_dpasg"));
     if (gpio_dpin.get_name()[0] == '%') {
       lnast.add_child(asg_node, Lnast_node::create_ref(lnast.add_string(gpio_dpin.get_name())));
     } else {
@@ -146,6 +148,8 @@ void Pass_lgraph_to_lnast::handle_source_node(LGraph* lg, Node_pin& pin, Lnast& 
 
   for (const auto& inp : pin.get_node().inp_edges()) {
     auto editable_pin = inp.driver;
+    fmt::print("\t{} <- {}\n", pin.get_node().debug_name(), editable_pin.get_node().debug_name());
+    I(!inp.driver.get_node().is_hierarchical());
     if (editable_pin.get_node().get_color() == WHITE || editable_pin.get_node().get_color() == GREY) {
       handle_source_node(lg, editable_pin, lnast, ln_node);
     }
@@ -244,6 +248,7 @@ void Pass_lgraph_to_lnast::handle_io(LGraph* lg, Lnast_nid& parent_lnast_node, L
   auto inp_io_node = lg->get_graph_input_node();
   absl::flat_hash_set<std::string_view> inps_visited;
   for (const auto edge : inp_io_node.out_edges()) {
+    I(edge.driver.has_name());
     auto pin_name = edge.driver.get_name();
     if (inps_visited.contains(pin_name)) {
       continue;
@@ -278,16 +283,16 @@ void Pass_lgraph_to_lnast::handle_io(LGraph* lg, Lnast_nid& parent_lnast_node, L
   for (const auto edge : out_io_node.inp_edges()) {
     auto sink_pid = edge.sink.get_pid();
     auto out_pin = edge.sink.get_node().get_driver_pin(sink_pid);
+    I(out_pin.has_name());
     auto pin_name = out_pin.get_name();
 
     auto bits = edge.get_bits();
     if (bits > 0) {
       // Put output bitwidth info in from_lg_bw_table
-      auto name = out_pin.get_name();
-      lnast.set_bitwidth(name, bits);
+      lnast.set_bitwidth(pin_name, bits);
       if (put_bw_in_ln) {
         add_bw_in_ln(lnast, parent_lnast_node,
-            lnast.add_string(absl::StrCat("%", name)), bits);
+            lnast.add_string(absl::StrCat("%", pin_name)), bits);
       }
     }
     if (edge.driver.is_signed()) {
@@ -825,7 +830,7 @@ void Pass_lgraph_to_lnast::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node
   }
 
   // Perform actual assignment
-  auto asg_node = lnast.add_child(parent_node, Lnast_node::create_assign("asg_flop"));
+  auto asg_node = lnast.add_child(parent_node, Lnast_node::create_dp_assign("flop_dpasg"));
   lnast.add_child(asg_node, Lnast_node::create_ref(pin_name));
   attach_child(lnast, asg_node, din_pin);
 }
