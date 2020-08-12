@@ -1073,6 +1073,16 @@ void LGraph::dump_down_nodes() {
   }
 }
 
-Node LGraph::get_graph_input_node() { return Node(this, Hierarchy_tree::root_index(), Node::Hardcoded_input_nid); }
+Node LGraph::get_graph_input_node(bool hier) {
+  if (hier)
+    return Node(this, Hierarchy_tree::root_index(), Node::Hardcoded_input_nid);
+  else
+    return Node(this, Hierarchy_tree::invalid_index(), Node::Hardcoded_input_nid);
+}
 
-Node LGraph::get_graph_output_node() { return Node(this, Hierarchy_tree::root_index(), Node::Hardcoded_output_nid); }
+Node LGraph::get_graph_output_node(bool hier) {
+  if (hier)
+    return Node(this, Hierarchy_tree::root_index(), Node::Hardcoded_output_nid);
+  else
+    return Node(this, Hierarchy_tree::invalid_index(), Node::Hardcoded_output_nid);
+}
