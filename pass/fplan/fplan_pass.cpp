@@ -11,7 +11,7 @@ void Livehd_parser::setup() {
 }
 
 void Livehd_parser::makefp(LGraph *l) {
-  std::cout << l->get_name() << std::endl;
+  std::cout << "LGraph: " << l->get_name() << std::endl;
 
   graph::Bi_adjacency_list g;
 
@@ -43,17 +43,21 @@ void Livehd_parser::makefp(LGraph *l) {
   g_set.insert(v); // all verts start in set zero, and get dividied up during hierarchy discovery
 
   auto existing_edges = g.edge_set();
-  
-  l->each_graph_output([this, &g](const Node_pin p) {
-    const unsigned int weight = p.get_bits();
-    // TODO: get iassert working in lambda?
-    assert(weight != 0);
 
-    //std::string other_name = p.get_sink_from_output().get_node().get_name().data();
-    for (auto e : p.out_edges()) {
-      std::cout << "oe: " << e.sink.get_node().get_name() << std::endl;
+  // TODO: use get_down_nodes_map() to list all IOs and submodules
+
+  for (auto node : l->fast()) {
+    // TODO: this won't compile
+  }
+  
+  /*
+  // TODO: won't compile...?
+  for (auto node : l->fast()) {
+    for (auto e : node.out_edges()) {
+      std::cout << "lg: " << node.get_name() << std::endl;
     }
-  });
+  }
+  */
 
   /*
       std::string other_name = connection["name"].GetString();
