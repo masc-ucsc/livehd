@@ -638,6 +638,8 @@ void Pass_bitwidth::process_attr_set_propagate(Node &node) {
 
   if (parent_data_pending) {
     data_dpin.set_bits(parent_attr_bw.get_bits());
+    fmt::print("data_dpin:{}\n", data_dpin.debug_name());
+    fmt::print("data_dpin bits:{}\n", data_dpin.get_bits());
     bwmap.emplace(data_dpin.get_compact(), parent_attr_bw);
   }
 
