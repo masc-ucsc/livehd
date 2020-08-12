@@ -4,6 +4,8 @@
 #include "lgraph.hpp"
 #include "graph_info.hpp"
 
+#include "i_resolve_header.hpp"
+
 // not sure if we're an inou or a pass.  Assuming a pass for now.
 
 class Livehd_parser : public Pass {
