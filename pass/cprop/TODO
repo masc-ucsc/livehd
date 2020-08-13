@@ -69,6 +69,21 @@ to
  (a<<1) + c
 
 convert
+ a<<n + c<<m   // m>n
+to
+ (a+c<<(m-n))<<n | 0
+
+convert
+ a*(power2a+power2b)  // power2a>power2b
+to
+ (a+a<<power2b)>>(power2a-power2b)
+
+convert
+ a*(power2a-power2b)  // power2a>power2b
+to
+ (a-a<<power2b)>>(power2a-power2b)
+
+convert
  a - a + c
 to
  c

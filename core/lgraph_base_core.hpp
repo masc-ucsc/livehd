@@ -8,6 +8,7 @@
 #include "explicit_type.hpp"
 #include "fmt/format.h"
 #include "iassert.hpp"
+#include "lconst.hpp"
 #include "likely.hpp"
 #include "mmap_tree.hpp"
 
@@ -38,9 +39,9 @@ struct Index_ID_hash {
 
 using Port_ID = uint16_t;  // ports have a set order (a-b != b-a)
 
-constexpr int     Index_bits     = 31;  // 31 bit to have Sink/Driver + Index in 32 bits
-constexpr int     Port_bits      = 15;
-constexpr int     Bits_bits      = 17;
+constexpr int Index_bits = 31;  // 31 bit to have Sink/Driver + Index in 32 bits
+constexpr int Port_bits  = 15;
+// NOTE: Bits_bits defined in lconst.hpp
 constexpr Port_ID Port_invalid   = ((1ULL << Port_bits) - 1);  // Max Port_bits allowed
 constexpr int     LUT_input_bits = 4;
 

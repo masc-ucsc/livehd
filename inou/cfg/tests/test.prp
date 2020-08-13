@@ -1,7 +1,6 @@
-foo.__wire = true
-%out = foo.a 
-if ($en) {
-  foo.a = 3
-}
+a = 3
+b = 7
+%out.__bits = 4
 
-
+%out = a + b
+// %out += sum(sub_inp)

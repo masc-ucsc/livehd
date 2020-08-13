@@ -144,18 +144,18 @@ if [ $? -eq 0 ]; then
   exit 0
 fi
 
-${YOSYS} -p " read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}; opt ; prep; memory; rename -top gold; design -stash gold;
-              read_verilog -sv ${GATE}; hierarchy ${TOP_STR}; opt ; prep; memory; rename -top gate; design -stash gate;
-              design -copy-from gold -as gold gold
-              design -copy-from gate -as gate gate
-
-              miter -equiv -make_assert -make_outcmp -flatten gold gate equiv
-              hierarchy -top equiv
-              sat -prove-asserts -tempinduct -timeout 60 -ignore_unknown_cells -verify -set-init-undef equiv"
-if [ $? -eq 0 ]; then
-  echo "Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
-  exit 0
-fi
+#${YOSYS} -p " read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}; opt ; prep; memory; rename -top gold; design -stash gold;
+              #read_verilog -sv ${GATE}; hierarchy ${TOP_STR}; opt ; prep; memory; rename -top gate; design -stash gate;
+              #design -copy-from gold -as gold gold
+              #design -copy-from gate -as gate gate
+#
+              #miter -equiv -make_assert -make_outcmp -flatten gold gate equiv
+              #hierarchy -top equiv
+              #sat -prove-asserts -tempinduct -timeout 30 -ignore_unknown_cells -verify -set-init-undef equiv"
+#if [ $? -eq 0 ]; then
+  #echo "Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
+  #exit 0
+#fi
 
 ${YOSYS} -p " read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}; opt ; prep; memory; rename -top gold; design -stash gold;
               read_verilog -sv ${GATE}; hierarchy ${TOP_STR}; opt ; prep; memory; rename -top gate; design -stash gate;

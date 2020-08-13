@@ -2,14 +2,13 @@
 #pragma once
 
 #include <functional>
-#include <string>
 #include <map>
+#include <string>
 
 #include "absl/strings/substitute.h"
 #include "eprp.hpp"
 #include "fmt/format.h"
 #include "iassert.hpp"
-
 
 class Pass {
 protected:
@@ -69,10 +68,10 @@ public:
 
 class Pass_plugin {
 public:
-  using Setup_fn = std::function<void()>;
+  using Setup_fn  = std::function<void()>;
   using Map_setup = std::map<std::string, Setup_fn>;
-protected:
 
+protected:
   static Map_setup registry;
 
 public:

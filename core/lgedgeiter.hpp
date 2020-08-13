@@ -37,7 +37,7 @@ public:
       return *this;
     }
 
-    void advance_if_deleted();
+    void       advance_if_deleted();
     Fast_iter &operator++();
 
     bool operator!=(const Fast_iter &other) const {
@@ -68,9 +68,9 @@ protected:
   Fast_edge_iterator::Fast_iter global_it;
 
   // State built during iteration
-  const bool                         visit_sub;
-  absl::flat_hash_set<Node::Compact> visited;
-  std::vector<Node>                  pending_stack;
+  const bool                              visit_sub;
+  absl::flat_hash_set<Node::Compact>      unvisited;
+  std::vector<Node>                       pending_stack;
   absl::flat_hash_map<Node::Compact, int> pending_loop_detect;
 
   Flow_base_iterator(LGraph *lg, bool _visit_sub);
@@ -117,7 +117,8 @@ public:
   explicit Fwd_edge_iterator(LGraph *_g, bool _visit_sub) : top_g(_g), visit_sub(_visit_sub) {}
 
   Fwd_iter begin() const {
-    if (top_g->is_empty()) return end();
+    if (top_g->is_empty())
+      return end();
     return Fwd_iter(top_g, visit_sub);
   }
 

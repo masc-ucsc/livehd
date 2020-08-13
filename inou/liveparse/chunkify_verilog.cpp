@@ -33,11 +33,13 @@ int Chunkify_verilog::open_write_file(std::string_view filename) const {
 }
 
 bool Chunkify_verilog::is_same_file(std::string_view module, std::string_view text1, std::string_view text2) const {
-  if (elab_path.empty()) return false;
+  if (elab_path.empty())
+    return false;
 
   const std::string elab_filename = elab_chunk_dir + "/" + std::string(module) + ".v";
   int               fd            = open(elab_filename.c_str(), O_RDONLY);
-  if (fd < 0) return false;
+  if (fd < 0)
+    return false;
 
   struct stat sb;
   fstat(fd, &sb);
@@ -68,7 +70,8 @@ bool Chunkify_verilog::is_same_file(std::string_view module, std::string_view te
 
 void Chunkify_verilog::write_file(std::string_view filename, std::string_view text1, std::string_view text2) const {
   int fd = open_write_file(filename);
-  if (fd < 0) return;
+  if (fd < 0)
+    return;
 
   size_t sz = write(fd, text1.data(), text1.size());
   if (sz != text1.size()) {
@@ -86,7 +89,8 @@ void Chunkify_verilog::write_file(std::string_view filename, std::string_view te
 
 void Chunkify_verilog::write_file(std::string_view filename, std::string_view text) const {
   auto fd = open_write_file(filename);
-  if (fd < 0) return;
+  if (fd < 0)
+    return;
 
   size_t sz2 = write(fd, text.data(), text.size());
   if (sz2 != text.size()) {
@@ -110,7 +114,6 @@ void Chunkify_verilog::add_io(Sub_node *sub, bool input, std::string_view io_nam
 }
 
 void Chunkify_verilog::elaborate() {
-
   std::string parse_path = absl::StrCat(path, "/parse/");  // Keep trailing /
   if (access(parse_path.c_str(), F_OK) != 0) {
     std::string spath(path);
@@ -135,7 +138,8 @@ void Chunkify_verilog::elaborate() {
     format_name = get_filename();
 
     for (size_t i = 0; i < format_name.size(); i++) {
-      if (format_name[i] == '/') format_name[i] = '.';
+      if (format_name[i] == '/')
+        format_name[i] = '.';
     }
   }
   Lbench bench("live.parse " + format_name);
@@ -177,6 +181,7 @@ void Chunkify_verilog::elaborate() {
     bool endmodule_found = false;
     if (scan_is_token(Token_id_alnum)) {
       auto txt = scan_text();
+      //fmt::print("T:{}\n",txt);
       if (txt == "module") {
         if (in_module) {
           scan_error(fmt::format("unexpected nested modules"));
@@ -204,16 +209,16 @@ void Chunkify_verilog::elaborate() {
         } else {
           scan_error(fmt::format("found endmodule without corresponding module"));
         }
-      } else if (txt == "task" || txt =="function") {
+      } else if (txt == "task" || txt == "function") {
         inside_task_function++;
       } else if (txt == "endtask" || txt == "endfunction") {
         inside_task_function--;
       }
 
-    } else if (scan_is_token(Token_id_comma) || scan_is_token(Token_id_semicolon) || scan_is_token(Token_id_cp) ||
-               scan_is_token(Token_id_comment)) {  // Before Token_id_comma
+    } else if (scan_is_token(Token_id_comma) || scan_is_token(Token_id_semicolon) || scan_is_token(Token_id_cp)
+               || scan_is_token(Token_id_comment)) {  // Before Token_id_comma
       if (last_input || last_output) {
-        if (in_module && scan_is_prev_token(Token_id_alnum) && inside_task_function==0) {
+        if (in_module && scan_is_prev_token(Token_id_alnum) && inside_task_function == 0) {
 #if 1
           // FIXME: bug in char_array prevents to use sview. Delete this once we move to LGraph 0.2 (mmap_map/mmap_bimap)
           std::string label{scan_prev_text()};

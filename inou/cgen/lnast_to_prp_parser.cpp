@@ -1,6 +1,31 @@
 
 #include "lnast_to_prp_parser.hpp"
 
+#if 0
+
+  process_top(lnast->get_root());
+
+  process_top() {
+
+    p_sequence(it->child);
+  }
+
+  p_sequence()
+
+    for_each_child(xx)
+      p_sequence_statement(xx.child)
+
+  p_sequence_statement()
+
+    if (xx==if_type)
+      p_if_stmt(xx.child)
+    else if (xx==fcall)
+      p_fcall(xx.child)
+    else
+      I(invalid/unexpecte node in sequence)
+
+#endif
+
 void Lnast_to_prp_parser::generate() {
   fmt::print("\nstart Lnast_to_prp_parser::generate {}\n", lnast->get_top_module_name());
 
@@ -18,6 +43,7 @@ void Lnast_to_prp_parser::generate() {
 
 void Lnast_to_prp_parser::process_node(const mmap_lib::Tree_index& it) {
   const auto& node_data = lnast->get_data(it);
+  fmt::print("standard process_node: level{} curr_statement_level:{}\n", it.level, curr_statement_level);
 
   // add while to see pop_statement and to add buffer
   if (it.level < curr_statement_level) {
@@ -43,7 +69,10 @@ void Lnast_to_prp_parser::process_node(const mmap_lib::Tree_index& it) {
     process_buffer();
     add_to_buffer(node_data);
   } else {
+    fmt::print("Adding other...\n");
+    /* lnast->dump(it); */ // FIXME->sh: compile error ...
     add_to_buffer(node_data);
+    fmt::print("...Adding other\n");
   }
 }
 

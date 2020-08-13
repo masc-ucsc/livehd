@@ -32,54 +32,56 @@ using Token_entry = Explicit_type<uint32_t, struct Token_entry_struct, 0>;
 //
 constexpr Token_id Token_id_nop           = 0;   // invalid token
 constexpr Token_id Token_id_comment       = 1;   // c-like comments
-constexpr Token_id Token_id_register      = 2;   // #asd #_asd
-constexpr Token_id Token_id_pipe          = 3;   // |>
-constexpr Token_id Token_id_alnum         = 4;   // a..z..0..9.._
-constexpr Token_id Token_id_ob            = 5;   // {
-constexpr Token_id Token_id_cb            = 6;   // }
-constexpr Token_id Token_id_colon         = 7;   // :
-constexpr Token_id Token_id_gt            = 8;   // >
-constexpr Token_id Token_id_or            = 9;   // |
-constexpr Token_id Token_id_at            = 10;  // @
-constexpr Token_id Token_id_tilde         = 11;  // ~
-constexpr Token_id Token_id_output        = 12;  // %outasd
-constexpr Token_id Token_id_input         = 13;  // $asd
-constexpr Token_id Token_id_dollar        = 14;  // $
-constexpr Token_id Token_id_percent       = 15;  // %
-constexpr Token_id Token_id_dot           = 16;  // .
-constexpr Token_id Token_id_div           = 17;  // /
-constexpr Token_id Token_id_string        = 18;  // "asd23*.v" string (double quote)
-constexpr Token_id Token_id_semicolon     = 19;  // ;
-constexpr Token_id Token_id_comma         = 20;  // ,
-constexpr Token_id Token_id_op            = 21;  // (
-constexpr Token_id Token_id_cp            = 22;  // )
-constexpr Token_id Token_id_pound         = 23;  // #
-constexpr Token_id Token_id_mult          = 24;  // *
-constexpr Token_id Token_id_num           = 25;  // 0123123 or 123123 or 0123ubits
-constexpr Token_id Token_id_backtick      = 26;  // `ifdef
-constexpr Token_id Token_id_synopsys      = 27;  // synopsys... directive in comment
-constexpr Token_id Token_id_plus          = 28;  // +
-constexpr Token_id Token_id_minus         = 29;  // -
-constexpr Token_id Token_id_bang          = 30;  // !
-constexpr Token_id Token_id_lt            = 31;  // <
-constexpr Token_id Token_id_eq            = 32;  // =
-constexpr Token_id Token_id_same          = 33;  // ==
-constexpr Token_id Token_id_diff          = 34;  // !=
-constexpr Token_id Token_id_coloneq       = 35;  // :=
-constexpr Token_id Token_id_ge            = 37;  // >=
-constexpr Token_id Token_id_le            = 38;  // <=
-constexpr Token_id Token_id_and           = 39;  // &
-constexpr Token_id Token_id_xor           = 40;  // ^
-constexpr Token_id Token_id_qmark         = 41;  // ?
-constexpr Token_id Token_id_tick          = 42;  // '
-constexpr Token_id Token_id_obr           = 43;  // [
-constexpr Token_id Token_id_cbr           = 44;  // ]
-constexpr Token_id Token_id_backslash     = 45;  // \ back slash
-constexpr Token_id Token_id_reference     = 46;  // \foo
-constexpr Token_id Token_id_keyword_first = 64;
+constexpr Token_id Token_id_register      = 16;   // #asd #_asd
+constexpr Token_id Token_id_pipe          = 2;   // |>
+constexpr Token_id Token_id_alnum         = 3;   // a..z..0..9.._
+constexpr Token_id Token_id_ob            = 123;   // {
+constexpr Token_id Token_id_cb            = 125;   // }
+constexpr Token_id Token_id_colon         = 58;   // :
+constexpr Token_id Token_id_gt            = 62;   // >
+constexpr Token_id Token_id_or            = 124;   // |
+constexpr Token_id Token_id_at            = 64;  // @
+constexpr Token_id Token_id_tilde         = 126;  // ~
+constexpr Token_id Token_id_output        = 4;  // %outasd
+constexpr Token_id Token_id_input         = 5;  // $asd
+constexpr Token_id Token_id_dollar        = 36;  // $
+constexpr Token_id Token_id_percent       = 37;  // %
+constexpr Token_id Token_id_dot           = 46;  // .
+constexpr Token_id Token_id_div           = 47;  // /
+constexpr Token_id Token_id_string        = 34;  // "asd23*.v" string (double quote)
+constexpr Token_id Token_id_semicolon     = 59;  // ;
+constexpr Token_id Token_id_comma         = 44;  // ,
+constexpr Token_id Token_id_op            = 40;  // (
+constexpr Token_id Token_id_cp            = 41;  // )
+constexpr Token_id Token_id_pound         = 35;  // #
+constexpr Token_id Token_id_mult          = 42;  // *
+constexpr Token_id Token_id_num           = 6;  // 0123123 or 123123 or 0123ubits
+constexpr Token_id Token_id_backtick      = 96;  // `ifdef
+constexpr Token_id Token_id_synopsys      = 7;  // synopsys... directive in comment
+constexpr Token_id Token_id_plus          = 43;  // +
+constexpr Token_id Token_id_minus         = 45;  // -
+constexpr Token_id Token_id_bang          = 33;  // !
+constexpr Token_id Token_id_lt            = 60;  // <
+constexpr Token_id Token_id_eq            = 61;  // =
+constexpr Token_id Token_id_same          = 8;  // ==
+constexpr Token_id Token_id_diff          = 9;  // !=
+constexpr Token_id Token_id_coloneq       = 10;  // :=
+constexpr Token_id Token_id_ge            = 11;  // >=
+constexpr Token_id Token_id_le            = 12;  // <=
+constexpr Token_id Token_id_and           = 38;  // &
+constexpr Token_id Token_id_xor           = 94;  // ^
+constexpr Token_id Token_id_qmark         = 63;  // ?
+constexpr Token_id Token_id_tick          = 39;  // '
+constexpr Token_id Token_id_obr           = 91;  // [
+constexpr Token_id Token_id_cbr           = 93;  // ]
+constexpr Token_id Token_id_backslash     = 92;  // \ back slash
+constexpr Token_id Token_id_reference     = 13;  // \foo
+constexpr Token_id Token_id_keyword_first = 14;
 constexpr Token_id Token_id_keyword_last  = 254;
 
 class Token {
+protected:
+  std::string_view text;
 public:
   Token() {
     tok   = Token_id_nop;
@@ -131,10 +133,9 @@ public:
   }
 
   Token_id tok;  // Token (identifier, if, while...)
-  uint64_t pos1;  // start position in original memblock for debugging
-  uint64_t pos2;  // end position in original memblock for debugging
+  uint64_t pos1; // start position in original memblock for debugging
+  uint64_t pos2; // end position in original memblock for debugging
   uint32_t line; // line of code
-  std::string_view text;
 
   std::string_view get_text() const { return text; }
 };

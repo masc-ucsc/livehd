@@ -62,7 +62,7 @@ public:
     // constexpr operator size_t() const { I(0); return idx|(sink<<31); }
 
     Compact(const Compact &obj) : hidx(obj.hidx), idx(obj.idx), sink(obj.sink) {}
-    Compact(const Hierarchy_index _hidx, Index_ID _idx, bool _sink) : hidx(_hidx), idx(_idx), sink(_sink){};
+    Compact(const Hierarchy_index _hidx, Index_ID _idx, bool _sink) : hidx(_hidx), idx(_idx), sink(_sink){ I(!hidx.is_invalid()); };
     Compact() : idx(0), sink(0){};
     Compact &operator=(const Compact &obj) {
       I(this != &obj);
@@ -103,7 +103,7 @@ public:
     // constexpr operator size_t() const { I(0); return idx|(sink<<31); }
 
     Compact_driver(const Compact_driver &obj) : hidx(obj.hidx), idx(obj.idx) {}
-    Compact_driver(const Hierarchy_index _hidx, Index_ID _idx) : hidx(_hidx), idx(_idx){};
+    Compact_driver(const Hierarchy_index _hidx, Index_ID _idx) : hidx(_hidx), idx(_idx){ I(!hidx.is_invalid()); };
     Compact_driver() : idx(0){};
     Compact_driver &operator=(const Compact_driver &obj) {
       I(this != &obj);
@@ -213,16 +213,15 @@ public:
   Node_pin(LGraph *_g, Compact_class comp);
   Node_pin(LGraph *_g, Compact_class_driver comp);
 
-  Compact get_compact() const { return Compact(hidx, idx, sink); }
-
-  Compact_driver get_compact_driver() const {
-    I(!sink);
-    return Compact_driver(hidx, idx);
+  Compact        get_compact() const;
+  Compact_driver get_compact_driver() const;
+  Compact_class  get_compact_class() const {
+    // OK to pick a hierarchical to avoid replication of info like names
+    return Compact_class(idx, sink);
   }
 
-  Compact_class get_compact_class() const { return Compact_class(idx, sink); }
-
   Compact_class_driver get_compact_class_driver() const {
+    // OK to pick a hierarchical to avoid replication of info like names
     I(!sink);  // Only driver pin allowed
     return Compact_class_driver(idx);
   }
@@ -231,10 +230,7 @@ public:
   LGraph *        get_class_lgraph() const { return current_g; };
   Hierarchy_index get_hidx() const { return hidx; };
 
-  Port_ID get_pid() const {
-    I(idx);
-    return pid;
-  }
+  constexpr Port_ID get_pid() const { return pid; }
 
   bool has_inputs() const;
   bool has_outputs() const;
@@ -244,18 +240,7 @@ public:
   bool is_graph_output() const;
 
   Node_pin get_sink_from_output() const;
-
-#if 0
-  // OLD API
-  bool is_input() const {
-    I(idx);
-    return sink;
-  }
-  bool is_output() const {
-    I(idx);
-    return !sink;
-  }
-#endif
+  Node_pin get_driver_from_output() const;
 
   bool is_sink() const {
     I(idx);
@@ -267,18 +252,30 @@ public:
   }
 
   Node     get_node() const;
-  Node     get_driver_node() const;
-  Node_pin get_driver_pin() const;
+
+  Node              get_driver_node() const; // common 0 or 1 driver case
+  Node_pin          get_driver_pin() const;  // common 0 or 1 driver case
+  Node_pin_iterator inp_driver() const; // handle 0 to inf driver case
+
+  void del_driver(Node_pin &dst);
+  void del_sink(Node_pin &dst);
+  void del(Node_pin &dst) {
+    if (dst.is_sink() && is_driver())
+      return del_sink(dst);
+    I(dst.is_driver() && is_sink());
+    return del_driver(dst);
+  }
 
   void connect_sink(Node_pin &dst);
   void connect_sink(Node_pin &&dst) { connect_sink(dst); }
   void connect_driver(Node_pin &dst);
   void connect(Node_pin &dst) {
-    if (dst.is_sink() && is_driver()) return connect_sink(dst);
+    if (dst.is_sink() && is_driver())
+      return connect_sink(dst);
     I(dst.is_driver() && is_sink());
     return connect_driver(dst);
   }
-  int  get_num_edges() const;
+  int get_num_edges() const;
 
 #if 0
   Node_pin &operator=(const Node_pin &obj) {
@@ -299,8 +296,11 @@ public:
   // static Node_pin get_out_pin(const Edge_raw *edge_raw);
   // static Node_pin get_inp_pin(const Edge_raw *edge_raw);
 
-  void invalidate() { idx = 0; }
+  void           invalidate() { idx = 0; }
   constexpr bool is_invalid() const { return idx == 0; }
+  constexpr bool is_down_node() const { return top_g != current_g; }
+  constexpr bool is_hierarchical() const { return !hidx.is_invalid(); }
+  Node_pin       get_non_hierarchical() const;
 
   constexpr bool operator==(const Node_pin &other) const {
     return (top_g == other.top_g) && (idx == other.idx) && (pid == other.pid) && (sink == other.sink) && (hidx == other.hidx);
@@ -317,11 +317,12 @@ public:
   std::string_view get_name() const;
   bool             has_name() const;
   static Node_pin  find_driver_pin(LGraph *top, std::string_view wname);
+  std::string_view get_pin_name() const;
 
   void             set_prp_vname(std::string_view prp_vname);
   std::string_view get_prp_vname() const;
   bool             has_prp_vname() const;
-	void             dump_all_prp_vname() const;
+  void             dump_all_prp_vname() const;
 
   void  set_delay(float val);
   float get_delay() const;
@@ -329,21 +330,22 @@ public:
   uint32_t get_bits() const;
   void     set_bits(uint32_t bits);
 
-  bool     is_signed() const;
-  bool     is_unsigned() const;
-  void     set_signed();
-  void     set_unsigned();
+  bool is_signed() const;
+  bool is_unsigned() const;
+  void set_signed();
+  void set_unsigned();
 
   std::string_view get_type_sub_io_name() const;
   std::string_view get_type_sub_pin_name() const;
 
-  void     set_offset(uint16_t offset);
-  uint16_t get_offset() const;
+  void   set_offset(Bits_t offset);
+  Bits_t get_offset() const;
 
-  const Ann_ssa &     get_ssa() const;
-  Ann_ssa *           ref_ssa();
-  bool                has_ssa() const;
-  bool                is_connected() const;
+  const Ann_ssa &get_ssa() const;
+  Ann_ssa *      ref_ssa();
+  bool           has_ssa() const;
+  bool           is_connected() const;
+  bool           is_connected(const Node_pin &pin) const;
 
   // END ATTRIBUTE ACCESSORS
   XEdge_iterator out_edges() const;

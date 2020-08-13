@@ -1,0 +1,6 @@
+foo = (a = (1,2), b = (3,4))
+%out = foo.a.0 + foo.b.1 // 5
+
+// bar = (a = (10,20))
+// bar.a = bar.a ++ 30
+// %out2 = bar.a.1 + bar.a.2  //50

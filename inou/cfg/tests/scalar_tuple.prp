@@ -61,12 +61,12 @@ h.0 = 3       // scalar -> tuple
 
 
 // case VIII
-h = 2
-h.0 = 3       // scalar -> tuple
-h.1 = 4
-%out9 = h.0 + h.1     //7       
+i = 2
+i.0 = 3       // scalar -> tuple
+i.1 = 4        
+%out9 = i.0 + i.1  //7       
 
 
 // case IX
-i = 2 + 3
-%out10 = i.0
+j = 2 + 3
+%out10 = j.0 //5

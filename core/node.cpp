@@ -58,7 +58,7 @@ void Node::update(LGraph *_g, const Node::Compact &comp) {
     return;
   top_g = _g;
   hidx  = comp.hidx;
-  if (hidx == Hierarchy_tree::root_index()) {
+  if (hidx.is_root() || hidx.is_invalid()) { // invalid->no hierarchy
     current_g = top_g;
     return;
   }
@@ -73,28 +73,19 @@ void Node::update(const Node::Compact &comp) {
   I(top_g);
 
   nid = comp.nid;
-  if (hidx == comp.hidx) return;
+  if (hidx == comp.hidx)
+    return;
   hidx      = comp.hidx;
   current_g = top_g->ref_htree()->ref_lgraph(hidx);
 
   I(current_g->is_valid_node(nid));
 }
 
-#if 0
-Node::Node(LGraph *_g)
-  :top_g(_g)
-  ,current_g(_g)
-  ,hidx(Hierarchy_tree::root_index())
-  ,nid(0) {
-  I(top_g);
-}
-#endif
-
 Node::Node(LGraph *_g, const Hierarchy_index &_hidx, const Compact_class &comp)
     : top_g(_g), current_g(0), hidx(_hidx), nid(comp.nid) {
   I(nid);
   I(top_g);
-  if (hidx.is_root())
+  if (hidx.is_root() || hidx.is_invalid())
     current_g = top_g;
   else
     current_g = top_g->ref_htree()->ref_lgraph(hidx);
@@ -103,7 +94,7 @@ Node::Node(LGraph *_g, const Hierarchy_index &_hidx, const Compact_class &comp)
   // I(top_g->get_hierarchy_class_lgid(hidx) == current_g->get_lgid());
 }
 
-Node::Node(LGraph *_g, const Compact_class &comp) : top_g(_g), current_g(0), hidx(Hierarchy_tree::root_index()), nid(comp.nid) {
+Node::Node(LGraph *_g, const Compact_class &comp) : top_g(_g), current_g(0), hidx(Hierarchy_tree::invalid_index()), nid(comp.nid) {
   I(nid);
   I(top_g);
 
@@ -123,7 +114,7 @@ Node::Node(LGraph *_g, LGraph *_c_g, const Hierarchy_index &_hidx, Index_ID _nid
 }
 
 Node_pin Node::get_driver_pin() const {
-  I(top_g->get_type(nid).has_single_output());
+  I(current_g->get_type(nid).has_single_output());
   return Node_pin(top_g, current_g, hidx, nid, 0, false);
 }
 
@@ -154,7 +145,8 @@ Node_pin Node::get_driver_pin(std::string_view pname) const {
   I(pid != Port_invalid);  // graph_pos must be valid if connected
 
   auto idx = nid;
-  if (pid) idx = current_g->setup_idx_from_pid(nid, pid);
+  if (pid)
+    idx = current_g->setup_idx_from_pid(nid, pid);
   return Node_pin(top_g, current_g, hidx, idx, pid, false);
 }
 
@@ -166,7 +158,8 @@ Node_pin Node::get_sink_pin(std::string_view pname) const {
   I(pid != Port_invalid);  // graph_pos must be valid if connected
 
   auto idx = nid;
-  if (pid) idx = current_g->setup_idx_from_pid(nid, pid);
+  if (pid)
+    idx = current_g->setup_idx_from_pid(nid, pid);
   return Node_pin(top_g, current_g, hidx, idx, pid, true);
 }
 
@@ -194,7 +187,7 @@ bool Node::has_sink_pin_connected(std::string_view pname) const {
 
 bool Node::has_driver_pin_connected(Port_ID pid) const {
   Index_ID idx = current_g->find_idx_from_pid(nid, pid);
-  if (idx==0)
+  if (idx == 0)
     return false;
   Node_pin dpin(top_g, current_g, hidx, idx, pid, false);
   return current_g->has_outputs(dpin);
@@ -202,7 +195,7 @@ bool Node::has_driver_pin_connected(Port_ID pid) const {
 
 bool Node::has_sink_pin_connected(Port_ID pid) const {
   Index_ID idx = current_g->find_idx_from_pid(nid, pid);
-  if (idx==0)
+  if (idx == 0)
     return false;
   Node_pin dpin(top_g, current_g, hidx, idx, pid, true);
   return current_g->has_inputs(dpin);
@@ -256,9 +249,9 @@ bool Node::is_type_sub() const { return current_g->is_sub(nid); }
 bool Node::is_type_const() const { return current_g->is_type_const(nid); }
 
 bool Node::is_type_attr() const {
-	auto op = current_g->get_type_op(nid);
+  auto op = current_g->get_type_op(nid);
 
-	return op == AttrGet_Op || op == AttrSet_Op || op == TupKey_Op;
+  return op == AttrGet_Op || op == AttrSet_Op || op == TupKey_Op;
 }
 
 Hierarchy_index Node::hierarchy_go_down() const {
@@ -273,12 +266,12 @@ Hierarchy_index Node::hierarchy_go_up() const {
 
 bool Node::is_root() const {
   bool ans = top_g == current_g;
-  I(top_g->ref_htree()->is_root(*this) == ans);
   return ans;
 }
 
 Node Node::get_up_node() const {
   I(!is_root());
+  I(!hidx.is_invalid());
   auto up_node = top_g->ref_htree()->get_instance_up_node(hidx);
 
   return up_node;
@@ -294,10 +287,12 @@ LGraph *Node::ref_type_sub_lgraph() const {
 }
 
 bool Node::is_type_sub_present() const {
-  if (!current_g->is_type_sub(nid)) return false;
+  if (!current_g->is_type_sub(nid))
+    return false;
 
   auto *sub_lg = ref_type_sub_lgraph();
-  if (sub_lg) return !sub_lg->is_empty();
+  if (sub_lg)
+    return !sub_lg->is_empty();
 
   return false;
 }
@@ -319,7 +314,8 @@ Node_pin Node::setup_driver_pin(std::string_view name) {
   auto pid = type.get_output_match(name);
   if (pid != Port_invalid) {
     auto idx = nid;
-    if (pid) idx = current_g->setup_idx_from_pid(nid, pid);
+    if (pid)
+      idx = current_g->setup_idx_from_pid(nid, pid);
     current_g->setup_driver(idx);
     return Node_pin(top_g, current_g, hidx, idx, pid, false);
   }
@@ -333,7 +329,7 @@ Node_pin Node::setup_driver_pin(std::string_view name) {
   I(sub.has_pin(name));
   I(sub.is_output(name));
 
-  pid = sub.get_graph_pos(name);
+  pid = sub.get_instance_pid(name);
   I(pid != Port_invalid);  // graph_pos must be valid if connected
 
   Index_ID idx = current_g->setup_idx_from_pid(nid, pid);
@@ -353,7 +349,8 @@ Node_pin Node::setup_sink_pin(std::string_view name) {
     auto pid = type.get_input_match(name);
     if (pid != Port_invalid) {
       auto idx = nid;
-      if (pid) idx = current_g->setup_idx_from_pid(nid, pid);
+      if (pid)
+        idx = current_g->setup_idx_from_pid(nid, pid);
       current_g->setup_sink(idx);
       return Node_pin(top_g, current_g, hidx, idx, pid, true);
     }
@@ -369,7 +366,7 @@ Node_pin Node::setup_sink_pin(std::string_view name) {
   I(sub.has_pin(name));
   I(sub.is_input(name));
 
-  auto pid = sub.get_graph_pos(name);
+  auto pid = sub.get_instance_pid(name);
   I(pid != Port_invalid);  // graph_pos must be valid if connected
 
   Index_ID idx = current_g->setup_idx_from_pid(nid, pid);
@@ -423,7 +420,7 @@ Node_pin_iterator Node::inp_drivers(const absl::flat_hash_set<Node::Compact> &ex
 
 void Node::del_node() {
   current_g->del_node(*this);
-  nid = 0; // invalidate node after delete
+  nid = 0;  // invalidate node after delete
 }
 
 void Node::set_name(std::string_view iname) { Ann_node_name::ref(current_g)->set(get_compact_class(), iname); }
@@ -431,7 +428,8 @@ void Node::set_name(std::string_view iname) { Ann_node_name::ref(current_g)->set
 std::string_view Node::create_name() const {
   auto *     ref = Ann_node_name::ref(current_g);
   const auto it  = ref->find(get_compact_class());
-  if (it != ref->end()) return ref->get_val(it);
+  if (it != ref->end())
+    return ref->get_val(it);
 
   std::string sig = absl::StrCat("lg_", get_type().get_name(), std::to_string(nid));
   const auto  it2 = ref->set(get_compact_class(), sig);
@@ -486,7 +484,8 @@ std::string Node::debug_name() const {
     absl::StrAppend(&name, "_sub_", get_type_sub_node().get_name());
   }
 
-  if (name.empty()) return absl::StrCat("node_", std::to_string(nid), "_", get_type().get_name(), "_lg_", current_g->get_name());
+  if (name.empty())
+    return absl::StrCat("node_", std::to_string(nid), "_", get_type().get_name(), "_lg_", current_g->get_name());
   return absl::StrCat("node_", std::to_string(nid), "_", get_type().get_name(), "_", name, "_lg_", current_g->get_name());
 }
 
@@ -514,7 +513,7 @@ bool Node::has_place() const { return Ann_node_place::ref(top_g)->has(get_compac
 
 //----- Subject to changes in the future:
 #define WHITE 0
-#define GREY 1
+#define GREY  1
 #define BLACK 2
 void Node::set_color(int new_color) { Ann_node_color::ref(current_g)->set(get_compact_class(), std::to_string(new_color)); }
 
@@ -528,6 +527,41 @@ int Node::get_color() const {
 
 bool Node::has_color() const { return Ann_node_color::ref(current_g)->has_key(get_compact_class()); }
 
-
-
-
+void Node::dump() {
+  fmt::print("nid:{} type:{} name:{}", nid, get_type().get_name(), debug_name());
+  if (get_type().op == LUT_Op) {
+    fmt::print(" lut={}\n", get_type_lut().to_pyrope());
+  } else if (get_type().op == Const_Op) {
+    fmt::print(" const={}\n", get_type_const().to_pyrope());
+  } else {
+    fmt::print("\n");
+  }
+  for (const auto &edge : inp_edges()) {
+    fmt::print("  inp bits:{} pid:{} from nid:{} idx:{} pid:{} name:{}\n",
+               edge.get_bits(),
+               edge.sink.get_pid(),
+               edge.driver.get_node().nid,
+               edge.driver.get_idx(),
+               edge.driver.get_pid(),
+               edge.driver.debug_name());
+  }
+  for (const auto &spin : inp_setup_pins()) {
+    if (spin.is_connected())  // Already printed
+      continue;
+    fmt::print("              pid:{} name:{} UNCONNECTED\n", spin.get_pid(), spin.debug_name());
+  }
+  for (const auto &edge : out_edges()) {
+    fmt::print("  out bits:{} pid:{} name:{} to nid:{} idx:{} pid:{}\n",
+               edge.get_bits(),
+               edge.driver.get_pid(),
+               edge.driver.debug_name(),
+               edge.sink.get_node().nid,
+               edge.sink.get_idx(),
+               edge.sink.get_pid());
+  }
+  for (const auto &dpin : out_setup_pins()) {
+    if (dpin.is_connected())  // Already printed
+      continue;
+    fmt::print("  out bits:{} pid:{} name:{} UNCONNECTED\n", dpin.get_bits(), dpin.get_pid(), dpin.debug_name());
+  }
+}

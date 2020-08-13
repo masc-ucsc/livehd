@@ -2,7 +2,7 @@
 rm -rf ./lgdb
 rm -rf ./lgdb2
 
-pts='if if2 nested_if ssa_rhs logic adder_stage ff_if' # tuple_if'
+pts='if if2 nested_if ssa_rhs adder_stage ff_if' # tuple_if' logic
 #simple_tuple
 #tuple
 #tuple_if
@@ -37,92 +37,29 @@ do
 
     ${LGSHELL} "inou.pyrope files:inou/cfg/tests/${pt}.prp |> inou.lnast_dfg.tolg"
     if [ $? -eq 0 ]; then
-      echo "Successfully create the inital LGraph with tuples: ${pt}.cfg"
+      echo "Successfully created optimized LGraph: ${pt}"
     else
-      echo "ERROR: Pyrope compiler failed: LNAST -> LGraph, testcase: ${pt}.cfg"
+      echo "ERROR: Pyrope compiler failed on Pyrope -> LNAST -> LGraph, testcase: ${pt}"
       exit 1
     fi
 
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.no_bits.tuple.reduced_or.dot
-
-    echo ""
-    echo ""
     echo ""
     echo "----------------------------------------------------"
-    echo "Tuple Chain Resolve (on stable LGraph)"
-    echo "----------------------------------------------------"
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.resolve_tuples"
-    if [ $? -eq 0 ]; then
-      echo "Successfully resolve the tuple chain: ${pt}.cfg"
-    else
-      echo "ERROR: Pyrope compiler failed: resolve tuples, testcase: ${pt}.cfg"
-      exit 1
-    fi
-
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.no_bits.or.dot
-
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "Bitwidth Optimization (to get golden LGraph)"
+    echo "LGraph optimization"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth"
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.bitwidth"
     if [ $? -eq 0 ]; then
       echo "Successfully optimize design bitwidth: ${pt}.v"
     else
-      echo "ERROR: Pyrope compiler failed: bitwidth optimization, testcase: ${pt}.cfg"
+      echo "ERROR: Pyrope compiler failed: bitwidth optimization, testcase: ${pt}"
       exit 1
     fi
-
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.or.dot
-
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "Reduced_Or_Op Elimination (on stable LGraph)"
-    echo "----------------------------------------------------"
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.assignment_or_elimination"
-    if [ $? -eq 0 ]; then
-      echo "Successfully eliminate all reduced_or_op: ${pt}.cfg"
-    else
-      echo "ERROR: Pyrope compiler failed: assignment_or_elimination, testcase: ${pt}.cfg"
-      exit 1
-    fi
-
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.stable.dot
-
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "Dead Code Elimination (on stable LGraph)"
-    echo "----------------------------------------------------"
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.dce"
-    if [ $? -eq 0 ]; then
-      echo "Successfully perform dead code elimination: ${pt}.cfg"
-    else
-      echo "ERROR: Pyrope compiler failed on new lg: dead code elimination, testcase: ${pt}.cfg"
-      exit 1
-    fi
-
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.stable.dce.dot
-
-    echo "TESTER------------------------------------"
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb |> lgraph.dump"
-    echo "TESTER------------------------------------"
+    mv ${pt}.dot ${pt}.oldlg.dot
 
 #############################################################
 
-    echo ""
-    echo ""
     echo ""
     echo "===================================================="
     echo "LG-LNAST interface verification"
@@ -132,139 +69,58 @@ do
     echo "LGraph (golden) -> LNAST -> LGraph (new)"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.lgraph_to_lnast |> inou.lnast_dfg.tolg path:lgdb2"
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.lgraph_to_lnast |> lnast.dump |> inou.lnast_dfg.tolg path:lgdb2"
     if [ $? -eq 0 ]; then
-      echo "Successfully create the new LG: ${pt}.cfg"
+      echo "Successfully create the new LG: ${pt}"
     else
-      echo "ERROR: Tester failed: LG -> LNAST -> LGraph, testcase: ${pt}.cfg"
+      echo "ERROR: Tester failed: LG -> LNAST -> LGraph, testcase: ${pt}"
       exit 1
     fi
 
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.newlg.no_bits.tuple.or.dot
+    echo ""
+    echo "----------------------------------------------------"
+    echo "LGraph Optimization (newlg)"
+    echo "----------------------------------------------------"
 
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "Tuple Chain Resolve(on new LGraph)"
-    echo "----------------------------------------------------"
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.lnast_dfg.resolve_tuples"
+    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.bitwidth"
     if [ $? -eq 0 ]; then
-      echo "Successfully resolve the tuple chain in new lg: ${pt}.cfg"
+      echo "Successfully optimized newlg: ${pt}.v"
     else
-      echo "ERROR: Pyrope compiler failed on new lg: resolve tuples, testcase: ${pt}.cfg"
+      echo "ERROR: Failed optimizations on newlg, testcase: ${pt}"
       exit 1
     fi
-
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.newlg.no_bits.or.dot
-
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "Bitwidth Optimization(LGraph)"
-    echo "----------------------------------------------------"
-
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> pass.bitwidth"
-    if [ $? -eq 0 ]; then
-      echo "Successfully optimize design bitwidth on new lg: ${pt}.v"
-    else
-      echo "ERROR: Pyrope compiler failed on new lg: bitwidth optimization, testcase: ${pt}.cfg"
-      exit 1
-    fi
-
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.newlg.or.dot
-
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "Reduced_Or_Op Elimination (on new LGraph)"
-    echo "----------------------------------------------------"
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.lnast_dfg.assignment_or_elimination"
-    if [ $? -eq 0 ]; then
-      echo "Successfully eliminate all reduced_or_op in new lg: ${pt}.cfg"
-    else
-      echo "ERROR: Pyrope compiler failed on new lg: assignment_or_elimination, testcase: ${pt}.cfg"
-      exit 1
-    fi
-
     ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
     mv ${pt}.dot ${pt}.newlg.dot
 
     echo ""
-    echo ""
-    echo ""
     echo "----------------------------------------------------"
-    echo "Dead Code Elimination"
+    echo "LGraph -> Verilog"
     echo "----------------------------------------------------"
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.lnast_dfg.dce"
-    if [ $? -eq 0 ]; then
-      echo "Successfully perform dead code elimination: ${pt}.cfg"
+
+    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.yosys.fromlg"
+    if [ $? -eq 0 ] && [ -f ${pt}.v ]; then
+      echo "Successfully generate Verilog: ${pt}.v"
+      rm -f  yosys_script.*
     else
-      echo "ERROR: Pyrope compiler failed on new lg: dead code elimination, testcase: ${pt}.cfg"
+      echo "ERROR: Verilog generation failed, testcase: ${pt}"
       exit 1
     fi
 
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.newlg.dce.dot
+    echo ""
+    echo "----------------------------------------------------"
+    echo "Logic Equivalence Check"
+    echo "----------------------------------------------------"
 
-    #echo "TESTER------------------------------------"
-    #${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> lgraph.dump"
-    #echo "TESTER------------------------------------"
+    ${LGCHECK} --implementation=${pt}.v --reference=./inou/cfg/tests/verilog_gld/${pt}.gld.v
 
-
-    if [[ ${pt} == *_err* ]]; then
-        echo "----------------------------------------------------"
-        echo "Pass! This is a Compile Error Test, No Need to Generate Verilog Code "
-        echo "----------------------------------------------------"
+    if [ $? -eq 0 ]; then
+      echo "Successfully pass logic equivilence check!"
     else
-        echo ""
-        echo ""
-        echo ""
-        echo "----------------------------------------------------"
-        echo "LGraph -> Verilog"
-        echo "----------------------------------------------------"
-
-        ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.yosys.fromlg"
-        if [ $? -eq 0 ] && [ -f ${pt}.v ]; then
-          echo "Successfully generate Verilog: ${pt}.v"
-          rm -f  yosys_script.*
-        else
-          echo "ERROR: Pyrope compiler failed: verilog generation, testcase: ${pt}.cfg"
-          exit 1
-        fi
-
-
-        echo ""
-        echo ""
-        echo ""
-        echo "----------------------------------------------------"
-        echo "Logic Equivalence Check"
-        echo "----------------------------------------------------"
-
-        ${LGCHECK} --implementation=${pt}.v --reference=./inou/cfg/tests/verilog_gld/${pt}.gld.v
-
-        if [ $? -eq 0 ]; then
-          echo "Successfully pass logic equivilence check!"
-        else
-          echo "FAIL: "${pt}".v !== "${pt}".gld.v"
-          exit 1
-        fi
+      echo "FAIL: "${pt}".v !== "${pt}".gld.v"
+      exit 1
     fi
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
 
-
-    #rm -f ${pt}.v
-    rm -f ${pt}.cfg
-    rm -f lnast.dot
-    rm -f lnast.dot.gld
-    rm -f lnast.nodes
-    rm -f lnast.nodes.gld
+    rm -f ${pt}.v
+    rm -f ${pt}.oldlg.dot
+    rm -f ${pt}.newlg.dot
 done #end of for
-
-
-

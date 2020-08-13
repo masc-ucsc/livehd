@@ -10,6 +10,8 @@ Hierarchy_tree::Hierarchy_tree(LGraph *_top)
     : mmap_lib::tree<Hierarchy_data>(_top->get_path(), absl::StrCat(_top->get_name(), "_htree")), top(_top) {}
 
 LGraph *Hierarchy_tree::ref_lgraph(const Hierarchy_index &hidx) const {
+  I(!hidx.is_invalid()); // no hierarchical should not call this
+
   // NOTE: if this becomes a bottleneck, we can memorize the LGraph *
   const auto &data = get_data(hidx);
 
@@ -47,7 +49,8 @@ void Hierarchy_tree::regenerate_step(LGraph *lg, const Hierarchy_index &parent) 
   for (auto it : *tree_pos) {
     auto node = it.first.get_node(lg);
     I(node.is_type_sub());
-    if (!node.is_type_sub_present()) continue;
+    if (!node.is_type_sub_present())
+      continue;
 
     tree_pos->set(it.first, conta);
 
