@@ -1,31 +1,37 @@
-#include "fplan_pass.hpp"
 
-void setup_pass_fplan() {
-  Livehd_parser::setup();
-}
+#include "pass_fplan.hpp"
 
-void Livehd_parser::setup() {
+#include "lgedgeiter.hpp"
+#include "lgraph.hpp"
+
+#undef I
+#include "graph_info.hpp"
+#include "i_resolve_header.hpp"
+
+void setup_pass_fplan() { Pass_fplan::setup(); }
+
+void Pass_fplan::setup() {
   // register the method with lgraph in order to use it
-  auto m = Eprp_method("pass.fplan.makefp", "generate a floorplan from an LGraph", &Livehd_parser::pass);
+  auto m = Eprp_method("pass.fplan.makefp", "generate a floorplan from an LGraph", &Pass_fplan::pass);
   register_pass(m);
 }
 
-void Livehd_parser::makefp(LGraph *l) {
+void Pass_fplan::makefp(LGraph *l) {
   std::cout << "LGraph: " << l->get_name() << std::endl;
 
   graph::Bi_adjacency_list g;
 
-  auto g_name_map = g.vert_map<std::string>();
-  auto g_area_map = g.vert_map<double>();
+  auto g_name_map     = g.vert_map<std::string>();
+  auto g_area_map     = g.vert_map<double>();
   auto g_edge_weights = g.edge_map<unsigned int>();
-  auto g_set = g.vert_set();
-  
+  auto g_set          = g.vert_set();
+
   // TODO: use string_views instead of strings
   const std::string name = l->get_name().data();
-  const double area = l->get_down_nodes_map().size();
-    
+  const double      area = l->get_down_nodes_map().size();
+
   auto v = g.null_vert();
-  for (const auto& vert : g.verts()) {
+  for (const auto &vert : g.verts()) {
     if (g_name_map[vert] == name) {
       v = vert;
     }
@@ -33,14 +39,14 @@ void Livehd_parser::makefp(LGraph *l) {
 
   if (g.is_null(v)) {
     // vertex does not exist, so create it
-    auto new_v = g.insert_vert();
+    auto new_v        = g.insert_vert();
     g_name_map[new_v] = name;
-    
+
     v = new_v;
   }
 
   g_area_map[v] = area;
-  g_set.insert(v); // all verts start in set zero, and get dividied up during hierarchy discovery
+  g_set.insert(v);  // all verts start in set zero, and get dividied up during hierarchy discovery
 
   auto existing_edges = g.edge_set();
 
@@ -49,7 +55,7 @@ void Livehd_parser::makefp(LGraph *l) {
   for (auto node : l->fast()) {
     // TODO: this won't compile
   }
-  
+
   /*
   // TODO: won't compile...?
   for (auto node : l->fast()) {
@@ -79,7 +85,7 @@ void Livehd_parser::makefp(LGraph *l) {
       existing_edges.insert(new_e);
     }
   }
-  
+
   // if the graph is not fully connected, ker-lin fails to work.
   // TODO: eventually replace this with an adjacency matrix, since it's probably faster.
   for (const auto& v : g.verts()) {
@@ -97,13 +103,13 @@ void Livehd_parser::makefp(LGraph *l) {
       }
     }
   }
-  
+
   Graph_info info(std::move(g), std::move(g_name_map), std::move(g_area_map), std::move(g_edge_weights), std::move(g_set));
   */
 }
 
-void Livehd_parser::pass(Eprp_var &var) {
-  Livehd_parser p(var);
+void Pass_fplan::pass(Eprp_var &var) {
+  Pass_fplan p(var);
   std::cout << "running pass..." << std::endl;
   // loop over each lgraph
   for (auto l : var.lgs) {
@@ -115,5 +121,4 @@ void Livehd_parser::pass(Eprp_var &var) {
   // 2. write node information into a Graph_info struct and run code on that
   // 3. <finish HiReg>
   // 4. write code to use the existing hierarchy instead of throwing it away
-
 }

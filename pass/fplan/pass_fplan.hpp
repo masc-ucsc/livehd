@@ -1,18 +1,13 @@
 #pragma once
 
 #include "pass.hpp"
-#include "lgraph.hpp"
-#include "graph_info.hpp"
-
-#include "i_resolve_header.hpp"
 
 // not sure if we're an inou or a pass.  Assuming a pass for now.
 
-class Livehd_parser : public Pass {
+class Pass_fplan : public Pass {
 public:
-
   // creates the parser and registers it with LGraph...?
-  Livehd_parser(const Eprp_var &var) : Pass("pass.fplan", var) { }
+  Pass_fplan(const Eprp_var &var) : Pass("pass.fplan", var) {}
 
   static void setup();
 
