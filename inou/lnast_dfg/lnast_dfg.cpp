@@ -868,16 +868,16 @@ Node_pin Lnast_dfg::setup_node_assign_and_lhs(LGraph *dfg, const Lnast_nid &lnid
 // for both target and operands, except the new io, reg, and const, the node and its dpin
 // should already be in the table as the operand comes from existing operator output
 Node_pin Lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx_opd, 
-                                                     bool from_phi, bool from_concat, 
+                                                     bool from_phi,     bool from_concat, 
                                                      bool from_tupstrc, bool from_assign) {
-  auto name  = lnast->get_sname(lnidx_opd);
+  auto name  = lnast->get_sname(lnidx_opd); //name = ssa_name
   auto vname = lnast->get_vname(lnidx_opd);
   auto subs  = lnast->get_subs(lnidx_opd);
   I(!name.empty());
 
   // special case for register, when #x_-1 in rhs, return the reg_qpin, wname #x. Note this is not true for a phi-node.
   bool reg_existed = name2dpin.find(vname) != name2dpin.end();
-  if (is_register(name) &&  !from_phi && reg_existed) {
+  if (is_register(name) && !from_phi && reg_existed) {
     if (subs == -1) {
       return name2dpin.find(vname)->second;
     } else if (subs != 0){
@@ -986,9 +986,27 @@ void Lnast_dfg::process_ast_attr_set_op (LGraph *dfg, const Lnast_nid &lnidx_ase
   /* fmt::print("aset ancestor name:{}\n", aset_ancestor_name); */
 #endif
 
-  bool is_reg_or_inp = is_register(c0_aset_name) || is_input(c0_aset_name);
   Node_pin vn_dpin;
-  if (aset_ancestor_subs == -1 && is_reg_or_inp) { //create corresponding reg and input first
+
+  /* bool is_reg_or_inp = is_register(c0_aset_name) || is_input(c0_aset_name); */
+  /* if (aset_ancestor_subs == -1 && is_reg_or_inp ) { //create corresponding reg and input first */
+  /*   vn_dpin = setup_ref_node_dpin(dfg, c0_aset); */
+  /*   dfg->add_edge(vn_dpin, vn_spin); */
+  /* } else if (name2dpin.find(aset_ancestor_name) != name2dpin.end()) { */
+  /*   vn_dpin = name2dpin[aset_ancestor_name]; */
+  /*   dfg->add_edge(vn_dpin, vn_spin); */
+  /* } */
+
+  if (is_register(c0_aset_name)) {
+    bool reg_existed = name2dpin.find(vname) != name2dpin.end();
+    if (!reg_existed) {
+      vn_dpin = setup_ref_node_dpin(dfg, c0_aset);
+      dfg->add_edge(vn_dpin, vn_spin);
+    } else {
+      vn_dpin = name2dpin[vname];
+      dfg->add_edge(vn_dpin, vn_spin);
+    }
+  } else if (is_input(c0_aset_name)) {
     vn_dpin = setup_ref_node_dpin(dfg, c0_aset);
     dfg->add_edge(vn_dpin, vn_spin);
   } else if (name2dpin.find(aset_ancestor_name) != name2dpin.end()) {
@@ -997,6 +1015,8 @@ void Lnast_dfg::process_ast_attr_set_op (LGraph *dfg, const Lnast_nid &lnidx_ase
   }
 
 
+
+  
   auto an_dpin = setup_key_dpin(dfg, attr_vname);
   dfg->add_edge(an_dpin, an_spin);
 

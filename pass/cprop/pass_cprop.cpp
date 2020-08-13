@@ -32,6 +32,7 @@ void Pass_cprop::optimize(Eprp_var &var) {
 }
 
 void Pass_cprop::collapse_forward_same_op(Node &node, XEdge_iterator &inp_edges_ordered) {
+
   auto op = node.get_type().op;
 
 	absl::flat_hash_map<Node_pin, int> repetitions;
@@ -54,6 +55,7 @@ void Pass_cprop::collapse_forward_same_op(Node &node, XEdge_iterator &inp_edges_
 					out.sink.del_driver(inp.driver);
 				} else if (op == Or_Op || op == And_Op) {
 					fmt::print("cprop simplified forward or/and pin:{}\n",inp.driver.debug_name());
+					out.sink.connect_driver(inp.driver);
 				} else {
 					I(op != Sum_Op); // handled at collapse_forward_sum
 					out.sink.connect_driver(inp.driver);
@@ -853,7 +855,7 @@ void Pass_cprop::trans(LGraph *lg) {
 
   for (auto node : lg->forward()) {
     auto op = node.get_type().op;
-    // fmt::print("NEXT: node:{}\n",node.debug_name());
+    //fmt::print("NEXT: node:{}\n",node.debug_name());
 
     // Special cases to handle in cprop
     if (op == AttrGet_Op) {
