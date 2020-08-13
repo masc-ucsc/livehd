@@ -19,21 +19,21 @@ protected:
 
   void attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
 
-  void attach_sum_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void attach_sum_node     (Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
   void attach_binaryop_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pid1_pin);
-  void attach_binary_reduc(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  void attach_not_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  void attach_join_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  void attach_pick_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  void attach_comparison_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  void attach_simple_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  void attach_mux_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  void attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void attach_binary_reduc (Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void attach_not_node     (Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void attach_join_node    (Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void attach_pick_node    (Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void attach_compar_node  (Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void attach_simple_node  (Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void attach_mux_node     (Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void attach_flop_node    (Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void attach_latch_node   (Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
   void attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
 
   void attach_children_to_node(Lnast& lnast, Lnast_nid& op_node, const Node_pin& pin);
   void attach_child(Lnast& lnast, Lnast_nid& op_node, const Node_pin& dpin);
-  // void        attach_child(Lnast& lnast, Lnast_nid& op_node, const Node_pin &dpin, std::string prefix);
   void attach_cond_child(Lnast& lnast, Lnast_nid& op_node, const Node_pin& dpin);
 
   void handle_io(LGraph* g, Lnast_nid& parent_lnast_node, Lnast& lnast);

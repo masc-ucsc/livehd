@@ -2,16 +2,18 @@
 rm -rf ./lgdb
 rm -rf ./lgdb2
 
-pts='trivial simple_add add trivial_and assigns compare simple_flop' # trivial1 mux latch add'
+pts='trivial2 trivial3 logic_bitwise_op_gld reduce common_sub operators loop_in_lg loop_in_lg2 mux mux2 trivial kogg_stone_64 simple_add trivial_and assigns compare simple_flop latch' # trivial1 mux latch add'
 #TO ADD LIST, but have bugs:
 #pick -- pick op not yet implemented in lnast2lg
-#simple_add -- output 'h' has 1 extra bit, happens in pass.bitwidth
 #simple_flop, shift, cse_basic -- problems arise with flops somewhere??
-#add -- limitation in lnast2lg
+#add -- sign isn't working yet
 #arith -- same problem with minus, can't do %
 #compare2 -- lnast2lg doesn't yet support range/bit_sel/etc. for pick nodes
-#trivial2 -- subgraphs (try to test this)
+#trivial2 -- subgraphs broke due to inp_edges going into subgraph
 #consts -- don't have join->concat implemented yet
+#submodule
+#satsmall, satlarge -- mult not supported in bitwidth pass
+#long_gcd -- lnast2lg does not handle ___ variables being used away from declaration
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -31,30 +33,16 @@ do
     rm -rf ./lgdb2
 
     echo "----------------------------------------------------"
-    echo "Verilog -> LGraph"
+    echo "Verilog -> LGraph -> LNAST -> LGraph"
     echo "----------------------------------------------------"
-    ${LGSHELL} "inou.yosys.tolg files:inou/yosys/tests/${pt}.v"
+    ${LGSHELL} "inou.yosys.tolg files:inou/yosys/tests/${pt}.v top:${pt} |> pass.cprop |> pass.cprop |> inou.graphviz.from |> pass.lgraph_to_lnast |> lnast.dump |> inou.lnast_dfg.tolg path:lgdb2"
     if [ $? -eq 0 ]; then
       echo "Successfully created the inital LGraph using Yosys: ${pt}.v"
     else
       echo "ERROR: Verilog -> LGraph failed... testcase: ${pt}.v"
       exit 1
     fi
-    ${LGSHELL} "lgraph.match |> inou.graphviz.from verbose:false"
     mv ${pt}.dot ${pt}.origlg.dot
-
-
-    echo ""
-    echo "----------------------------------------------------"
-    echo "LGraph -> LNAST -> LGraph"
-    echo "----------------------------------------------------"
-    ${LGSHELL} "lgraph.match |> pass.lgraph_to_lnast |> lnast.dump |> inou.lnast_dfg.tolg path:lgdb2"
-    if [ $? -eq 0 ]; then
-      echo "Successfully went from LG -> LN -> LG: ${pt}.v"
-    else
-      echo "ERROR: LGraph -> LNAST -> LGraph failed... testcase: ${pt}.v"
-      exit 1
-    fi
 
     echo ""
     echo "----------------------------------------------------"
