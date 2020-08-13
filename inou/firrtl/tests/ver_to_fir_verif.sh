@@ -1,18 +1,24 @@
 #!/bin/bash
 rm -rf ./lgdb
-pts='consts loop_in_lg loop_in_lg2 compare2 gcd_small async mux mux2 assigns pick gates submodule'
+pts='compare trivial_offset trivial_and trivial_join logic_bitwise_op_gld trivial trivial2 consts loop_in_lg loop_in_lg2 gcd_small async mux mux2 assigns pick gates submodule'
 #Working with local versions: long_gcd, flop
 #Failing:
 #  fails because some IO is removed due to DCE:
 #     cse_basic
+#     flop
+#     satsmall
+#     satlarge
+#     satpick
 #  need to figure out which is actually "top":
 #     hierarchy
 #  nodes that have no inputs
 #     kogg_stone_64(join)
 #     long_BTBsa(join)
-#  need to lookg more into
+#  Use of System-Verilog doesn't allow for lgcheck usage:
 #     long_iwls_adder(seems like yosys issue)
-#
+#     trivial3
+#  out_connected_pins() gives incorrect iterator:
+#     compare2
 
 
 LGSHELL=./bazel-bin/main/lgshell
@@ -50,7 +56,7 @@ do
     echo "Verilog -> LGraph -> LNAST -> FIRRTL (Proto)"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "inou.yosys.tolg files:inou/yosys/tests/${pt}.v |> pass.lgraph_to_lnast bw_in_ln:false |> inou.firrtl.tofirrtl"
+    ${LGSHELL} "inou.yosys.tolg files:inou/yosys/tests/${pt}.v top:${pt} |> pass.cprop |> pass.cprop |> inou.graphviz.from |> pass.lgraph_to_lnast bw_in_ln:false |> lnast.dump |> inou.firrtl.tofirrtl"
     if [ $? -eq 0 ]; then
       echo "Successfully generated FIRRTL (Proto): ${pt}"
     else

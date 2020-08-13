@@ -17,12 +17,12 @@ void Inou_firrtl::FindCircuitComps(Lnast &ln, firrtl::FirrtlPB_Module_UserModule
   for (const auto &lnidx : ln.children(stmts)) {
     SearchNode(ln, lnidx, umod);
   }
-  for (auto iter = io_map.begin(); iter != io_map.end(); iter++) {
+  /*for (auto iter = io_map.begin(); iter != io_map.end(); iter++) {
     fmt::print("io: {}\n", iter->first);
   }
   for (auto iter = reg_wire_map.begin(); iter != reg_wire_map.end(); iter++) {
     fmt::print("ri: {}\n", iter->first);
-  }
+  }*/
 }
 
 /* Look at a specific LNAST node and search it plus
