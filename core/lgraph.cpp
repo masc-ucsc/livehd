@@ -1018,7 +1018,7 @@ void LGraph::trace_back2driver(Node_pin_iterator &xiter, Node_pin dpin) const {
 Node_pin_iterator LGraph::trace_forward2sink(Node_pin spin) const {
   I(spin.get_class_lgraph() == this);
   I(spin.is_hierarchical());
-  I(spin.is_driver());
+  I(spin.is_sink());
   I(spin.is_graph_input());
 
   Node_pin_iterator xiter;
