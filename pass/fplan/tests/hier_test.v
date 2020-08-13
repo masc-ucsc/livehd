@@ -57,10 +57,8 @@ module mid3(output [4:0] f);
   assign f[4:3] = ~f[3:4];
 endmodule
 
-module root();
+module hier_test( output [9:0] we, output [4:0] wf);
   wire [899:0] wd;
-  wire [9:0] we;
-  wire [4:0] wf;
 
   mid1 m1(.d(wd));
   mid2 m2(.d(wd), .e(we));
