@@ -13,9 +13,9 @@ pts='tuple_copy logic
 
 #make sure to call Pyrope_compile() in the end of script
 # pts='test'
-pts_hier4='funcall4'   
 pts_hier='sum funcall'
 pts_hier2='sum2 funcall2'   
+pts_hier4='funcall4'   
 
 
 LGSHELL=./bazel-bin/main/lgshell
@@ -201,9 +201,9 @@ Pyrope_compile () {
   fi
 }
 
+Pyrope_compile "$pts" 
 Pyrope_compile "$pts_hier"  "hier"
 Pyrope_compile "$pts_hier2" "hier"
-Pyrope_compile "$pts" 
 # Pyrope_compile "$pts_hier4" "hier"
 
 

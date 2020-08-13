@@ -76,8 +76,8 @@ protected:
   static bool is_input                  (std::string_view name) {return name.substr(0, 1) == "$" ; }
   static bool is_output                 (std::string_view name) {return name.substr(0, 1) == "%" ; }
   static bool is_const                  (std::string_view name) {return (std::isdigit(name[0]) || name.at(0) == '-'); }
-  static bool is_bool_true              (std::string_view name) {return name == "true"; }
-  static bool is_bool_false             (std::string_view name) {return name == "false"; }
+  static bool is_bool_true              (std::string_view name) {return name.substr(0,4) == "true"; }
+  static bool is_bool_false             (std::string_view name) {return name.substr(0,5) == "false"; }
   static bool is_err_var_undefined      (std::string_view name) {return name.substr(0,17) == "err_var_undefined"; }
   static bool is_scalar                 (Node_pin dpin) {return dpin.get_node().get_type().op != TupAdd_Op; }
   bool        subgraph_outp_is_tuple    (Sub_node* sub);
