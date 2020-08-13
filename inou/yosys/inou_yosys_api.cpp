@@ -31,24 +31,32 @@ void Inou_yosys_api::set_script_liblg(const Eprp_var &var, bool do_read) {
 
   auto main_path = Eprp_utils::get_exe_path();
 
+  std::vector<std::string> alt_paths{
+		  "/../pass/mockturtle/mt_test.sh.runfiles/livehd/inou/yosys/"
+		  ,"/../pass/lgraph_to_lnast/lgtoln_verif_from_verilog.sh.runfiles/livehd/inou/yosys/"
+		  ,"/../pass/lgraph_to_lnast/lgtoln_verif_from_pyrope.sh.runfiles/livehd/inou/yosys/"
+		  ,"/../pass/sample/sample_test1.sh.runfiles/livehd/inou/yosys/"
+		  ,"/main_test.runfiles/livehd/inou/yosys/"
+		  ,"/verilog.sh.runfiles/livehd/inou/yosys/"
+		  ,"/verilog.sh-long.runfiles/livehd/inou/yosys/"
+		  ,"/lgshell.runfiles/livehd/inou/yosys/"
+		  ,"/../inou/pyrope/lnast_prp_test.sh.runfiles/livehd/inou/yosys/"
+		  ,"/../share/livehd/inou/yosys/"
+		  ,"/../inou/yosys/"
+		  ,"/inou/yosys/"};
+
   if (liblg.empty()) {
-    liblg = main_path + "/lgshell.runfiles/livehd/inou/yosys/liblgraph_yosys.so";
-    if (access(liblg.c_str(), X_OK) == -1) {
-      // Maybe it is installed in /usr/local/bin/livehd and /usr/local/share/livehd/inou/yosys/liblgrapth...
-      const std::string liblg2 = main_path + "/../share/livehd/inou/yosys/liblgraph_yosys.so";
-      if (access(liblg2.c_str(), X_OK) == -1) {
-        // sandbox path
-        const std::string liblg3 = main_path + "/inou/yosys/liblgraph_yosys.so";
-        if (access(liblg3.c_str(), X_OK) != -1) {
-          liblg = liblg3;
-        }
-      } else {
-        liblg = liblg2;
-      }
-    }
+	  for(const auto e:alt_paths) {
+		  auto test = main_path + e + "liblgraph_yosys.so";
+		  if (access(test.c_str(), X_OK) != -1) {
+			  liblg = test;
+			  break;
+		  }
+	  }
   }
+
   if (access(liblg.c_str(), X_OK) == -1) {
-    error(fmt::format("could not find liblgraph_yosys.so, the {} is not executable\n", liblg));
+    error("could not find an executable liblgraph_yosys.so at {}\n", liblg);
     return;
   }
 
@@ -59,27 +67,20 @@ void Inou_yosys_api::set_script_liblg(const Eprp_var &var, bool do_read) {
     else
       do_read_str = "inou_yosys_write.ys";
 
-    script_file = main_path + "/lgshell.runfiles/livehd/inou/yosys/" + do_read_str;
-    if (access(script_file.c_str(), R_OK) == -1) {
-      // Maybe it is installed in /usr/local/bin/livehd and /usr/local/share/livehd/inou/yosys/liblgrapth...
-      const std::string script_file2 = main_path + "/../share/livehd/inou/yosys/" + do_read_str;
-      if (access(script_file2.c_str(), R_OK) == -1) {
-        const std::string script_file3 = main_path + "/inou/yosys/" + do_read_str;
-        if (access(script_file3.c_str(), R_OK) != -1) {
-          script_file = script_file3;
-        }
-      } else {
-        script_file = script_file2;
-      }
-    }
-  } else {
-    script_file = script;
+	  for(const auto e:alt_paths) {
+		  auto test = main_path + e + do_read_str;
+		  if (access(test.c_str(), R_OK) != -1) {
+			  script_file = test;
+			  break;
+		  }
+	  }
   }
 
   if (access(std::string(script_file).c_str(), R_OK) != F_OK) {
-    error("could not find the provided script:{} file", script_file);
+    error("yosys setup could not find the provided script:{} file", script_file);
     return;
   }
+
 }
 
 int Inou_yosys_api::create_lib(const std::string &lib_file, const std::string &lgdb) {
@@ -170,15 +171,15 @@ int Inou_yosys_api::call_yosys(mustache::data &vars) {
     close(fd_err);
     close(fd_out);
 
-    char *argv[] = {strdup(std::string(yosys).c_str()),
+    char *argv[] = {strdup(yosys.c_str()),
                     strdup("-q"),
                     strdup("-m"),
-                    strdup(std::string(liblg).c_str()),
+                    strdup(liblg.c_str()),
                     strdup("-s"),
                     strdup(filename),
                     0};
 
-    if (execvp(std::string(yosys).c_str(), argv) < 0) {
+    if (execvp(yosys.c_str(), argv) < 0) {
       error("execvp fail with {}", strerror(errno));
       exit(-3);
     }
