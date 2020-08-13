@@ -53,8 +53,10 @@ void Pass_opentimer::work(Eprp_var &var) {
 }
 
 void Pass_opentimer::read_files() {
-  if (opt_lib_max != opt_lib) timer.read_celllib(opt_lib_max, ot::MAX);
-  if (opt_lib_min != opt_lib) timer.read_celllib(opt_lib_min, ot::MIN);
+  if (opt_lib_max != opt_lib)
+    timer.read_celllib(opt_lib_max, ot::MAX);
+  if (opt_lib_min != opt_lib)
+    timer.read_celllib(opt_lib_min, ot::MIN);
 
   timer.read_celllib(opt_lib);
   timer.read_spef(opt_spef);
@@ -177,7 +179,8 @@ void Pass_opentimer::build_circuit(LGraph *g) {  // Enhance this for build_circu
 
     if (op != SubGraph_Op) {
       if (op != GraphIO_Op)
-        Pass::error("opentimer pass needs the lgraph to be tmap, found cell {} with type {}\n", node.debug_name(),
+        Pass::error("opentimer pass needs the lgraph to be tmap, found cell {} with type {}\n",
+                    node.debug_name(),
                     node.get_type().get_name());
       continue;
     }

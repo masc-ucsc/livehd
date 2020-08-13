@@ -2,12 +2,12 @@
 rm -rf ./lgdb
 rm -rf ./lgdb2
 
-pts='trivial trivial_and assigns compare trivial1 mux simple_flop' # latch add'
+pts='trivial simple_add add trivial_and assigns compare simple_flop' # trivial1 mux latch add'
 #TO ADD LIST, but have bugs:
-#picker -- pick op not yet implemented in lnast2lg
+#pick -- pick op not yet implemented in lnast2lg
 #simple_add -- output 'h' has 1 extra bit, happens in pass.bitwidth
 #simple_flop, shift, cse_basic -- problems arise with flops somewhere??
-#add -- encountering problems with minus
+#add -- limitation in lnast2lg
 #arith -- same problem with minus, can't do %
 #compare2 -- lnast2lg doesn't yet support range/bit_sel/etc. for pick nodes
 #trivial2 -- subgraphs (try to test this)
@@ -27,10 +27,12 @@ fi
 
 for pt in $pts
 do
+    rm -rf ./lgdb
+    rm -rf ./lgdb2
+
     echo "----------------------------------------------------"
     echo "Verilog -> LGraph"
     echo "----------------------------------------------------"
-
     ${LGSHELL} "inou.yosys.tolg files:inou/yosys/tests/${pt}.v"
     if [ $? -eq 0 ]; then
       echo "Successfully created the inital LGraph using Yosys: ${pt}.v"
@@ -38,17 +40,15 @@ do
       echo "ERROR: Verilog -> LGraph failed... testcase: ${pt}.v"
       exit 1
     fi
-
-
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+    ${LGSHELL} "lgraph.match |> inou.graphviz.from verbose:false"
     mv ${pt}.dot ${pt}.origlg.dot
 
 
+    echo ""
     echo "----------------------------------------------------"
     echo "LGraph -> LNAST -> LGraph"
     echo "----------------------------------------------------"
-
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.lgraph_to_lnast |> inou.lnast_dfg.tolg path:lgdb2"
+    ${LGSHELL} "lgraph.match |> pass.lgraph_to_lnast |> lnast.dump |> inou.lnast_dfg.tolg path:lgdb2"
     if [ $? -eq 0 ]; then
       echo "Successfully went from LG -> LN -> LG: ${pt}.v"
     else
@@ -57,83 +57,25 @@ do
     fi
 
     echo ""
-    echo ""
-    echo ""
     echo "----------------------------------------------------"
-    echo "Tuple Chain Resolve"
+    echo "LGraph Optimization"
     echo "----------------------------------------------------"
-
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.lnast_dfg.resolve_tuples |> lgraph.dump"
+    ${LGSHELL} "lgraph.match path:lgdb2 |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.bitwidth"
     if [ $? -eq 0 ]; then
-      echo "Successfully resolve the tuple chain in new lg: ${pt}.v"
+      echo "Successfully optimize design on new lg: ${pt}.v"
     else
-      echo "ERROR: Pyrope compiler failed on new lg: resolve tuples, testcase: ${pt}.v"
+      echo "ERROR: Failed to optimize design on new lg, testcase: ${pt}.v"
       exit 1
     fi
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.newlg.prebw.or.dot
-
-
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "Bitwidth Optimization"
-    echo "----------------------------------------------------"
-
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> pass.bitwidth |> lgraph.dump"
-    if [ $? -eq 0 ]; then
-      echo "Successfully optimize design bitwidth on new lg: ${pt}.v"
-    else
-      echo "ERROR: Pyrope compiler failed on new lg: bitwidth optimization, testcase: ${pt}.v"
-      exit 1
-    fi
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.or.newlg.dot
-
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "Reduced_Or_Op Elimination"
-    echo "----------------------------------------------------"
-
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.lnast_dfg.assignment_or_elimination"
-    if [ $? -eq 0 ]; then
-      echo "Successfully eliminate all reduced_or_op in new lg: ${pt}.v"
-    else
-      echo "ERROR: Pyrope compiler failed on new lg: assignment_or_elimination, testcase: ${pt}.v"
-      exit 1
-    fi
-
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
+    ${LGSHELL} "lgraph.match path:lgdb2 |> inou.graphviz.from verbose:false"
     mv ${pt}.dot ${pt}.newlg.dot
 
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "Dead Code Elimination"
-    echo "----------------------------------------------------"
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.lnast_dfg.dce"
-    if [ $? -eq 0 ]; then
-      echo "Successfully perform dead code elimination: ${pt}.v"
-    else
-      echo "ERROR: Pyrope compiler failed on new lg: dead code elimination, testcase: ${pt}.v"
-      exit 1
-    fi
-
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.newlg.dce.dot
-
-    echo ""
-    echo ""
     echo ""
     echo "----------------------------------------------------"
     echo "LGraph -> Verilog"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.yosys.fromlg"
+    ${LGSHELL} "lgraph.match path:lgdb2 |> inou.yosys.fromlg"
     if [ $? -eq 0 ] && [ -f ${pt}.v ]; then
       echo "Successfully generate Verilog: ${pt}.v"
       rm -f  yosys_script.*
@@ -143,20 +85,16 @@ do
     fi
 
     echo ""
-    echo ""
-    echo ""
     echo "----------------------------------------------------"
     echo "Logic Equivalence Check"
     echo "----------------------------------------------------"
-
     ${LGCHECK} --implementation=${pt}.v --reference=./inou/yosys/tests/${pt}.v
-
     if [ $? -eq 0 ]; then
       echo "Successfully pass logic equivilence check!"
     else
       echo "FAIL: "${pt}".v !== "${pt}".gld.v"
       exit 1
     fi
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
+    ${LGSHELL} "lgraph.match path:lgdb2 |> inou.graphviz.from verbose:false"
 
 done #end of for

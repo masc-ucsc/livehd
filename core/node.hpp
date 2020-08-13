@@ -2,7 +2,6 @@
 #pragma once
 
 #include "absl/container/flat_hash_set.h"
-
 #include "lconst.hpp"
 #include "lgraph_base_core.hpp"
 #include "node_pin.hpp"
@@ -156,8 +155,14 @@ public:
   };
 #endif
 
-  inline Compact       get_compact() const { return Compact(hidx, nid); }
-  inline Compact_class get_compact_class() const { return Compact_class(nid); }
+  inline Compact       get_compact() const {
+    return Compact(hidx, nid);
+  }
+
+  inline Compact_class get_compact_class() const {
+    // OK to pick a hierarchical to avoid replication of info like names
+    return Compact_class(nid);
+  }
 
   LGraph *get_top_lgraph() const { return top_g; }
   LGraph *get_class_lgraph() const { return current_g; }
@@ -179,6 +184,8 @@ public:
   int  get_num_outputs() const;
 
   constexpr bool is_invalid() const { return nid == 0; }
+  constexpr bool is_down_node() const { return top_g != current_g; }
+  constexpr bool is_hierarchical() const { return !hidx.is_invalid(); }
 
   constexpr bool operator==(const Node &other) const {
     GI(nid == 0, hidx.is_invalid());
@@ -220,11 +227,11 @@ public:
 
   Lconst get_type_const() const;
 
-  bool     has_driver_pin_connected(std::string_view name) const;
-  bool     has_sink_pin_connected(std::string_view name) const;
+  bool has_driver_pin_connected(std::string_view name) const;
+  bool has_sink_pin_connected(std::string_view name) const;
 
-  bool     has_driver_pin_connected(Port_ID pid) const;
-  bool     has_sink_pin_connected(Port_ID pid) const;
+  bool has_driver_pin_connected(Port_ID pid) const;
+  bool has_sink_pin_connected(Port_ID pid) const;
 
   Node_pin setup_driver_pin(std::string_view name);
   Node_pin setup_driver_pin(Port_ID pid);
@@ -251,7 +258,7 @@ public:
   XEdge_iterator out_edges_ordered_reverse() const;  // Slower than inp_edges, but edges ordered by driver.pid
   XEdge_iterator inp_edges_ordered_reverse() const;  // Slower than inp_edges, but edges ordered by sink.pid
 
-  Node_pin_iterator  inp_drivers(const absl::flat_hash_set<Node::Compact> &exclude) const;
+  Node_pin_iterator inp_drivers(const absl::flat_hash_set<Node::Compact> &exclude) const;
 
   bool is_graph_io() const { return nid == Hardcoded_input_nid || nid == Hardcoded_output_nid; }
   bool is_graph_input() const { return nid == Hardcoded_input_nid; }
@@ -274,8 +281,9 @@ public:
   void set_color(int color);
   int  get_color() const;
   bool has_color() const;
-
   // END ATTRIBUTE ACCESSORS
+
+  void dump();
 };
 
 namespace mmap_lib {

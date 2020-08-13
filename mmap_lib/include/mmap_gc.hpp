@@ -256,10 +256,10 @@ public:
       return fd;
     }
 
-    /* LCOV_EXCL_STOP */
+    /* LCOV_EXCL_START */
     dump();  // We were not able to find fds to recycle
     assert(false);
-    /* LCOV_EXCL_START */
+    /* LCOV_EXCL_STOP */
 
     return -1;
   }

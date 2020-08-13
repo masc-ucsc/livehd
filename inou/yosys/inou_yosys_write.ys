@@ -2,7 +2,8 @@
 
 lg2yosys -path {{path}} -name {{name}}
 
-#opt
+# OPT fails with hierarchy. Yosys looses hierarchy
+# opt
 
 write_verilog {{file}}
 

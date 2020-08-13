@@ -1,8 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include "pass.hpp"
 #include "cfg_lnast.hpp"
+#include "pass.hpp"
 
 class Inou_cfg : public Pass {
 protected:

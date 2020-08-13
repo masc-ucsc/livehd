@@ -23,12 +23,13 @@ protected:
   friend class Fast_edge_iterator;
 
   // Memoize tables that provide hints (not certainty because add/del operations)
-  std::array<Index_ID,8> memoize_const_hint;
+  std::array<Index_ID, 8> memoize_const_hint;
 
   Hierarchy_tree htree;
 
   Hierarchy_tree *ref_htree() {
-    if (htree.empty()) htree.regenerate();
+    if (htree.empty())
+      htree.regenerate();
     return &htree;
   }
 
@@ -54,7 +55,8 @@ protected:
   }
 
   Index_ID get_node_nid(Index_ID idx) const {
-    if (node_internal[idx].is_master_root()) return idx;
+    if (node_internal[idx].is_master_root())
+      return idx;
 
     return node_internal[idx].get_nid();
   }
@@ -85,7 +87,6 @@ protected:
     return node_internal[nid].get_node_pin_num_inputs(idx);
   }
 
-
   Node_pin_iterator out_connected_pins(const Node &node) const;
   Node_pin_iterator inp_connected_pins(const Node &node) const;
   Node_pin_iterator out_setup_pins(const Node &node) const;
@@ -105,7 +106,10 @@ protected:
   XEdge_iterator out_edges(const Node_pin &pin) const;
   XEdge_iterator inp_edges(const Node_pin &pin) const;
 
+  Node_pin_iterator inp_driver(const Node_pin &spin) const; // 1 or 0 drivers allowed for correct graphs
+
   bool has_outputs(const Node_pin &pin) const {
+    I(!pin.is_invalid());
     I(pin.get_idx() < node_internal.size());
     I(node_internal[pin.get_idx()].is_root());
     GI(node_internal[pin.get_idx()].has_pin_outputs(), node_internal[pin.get_idx()].is_driver_setup());
@@ -113,12 +117,16 @@ protected:
     return node_internal[pin.get_idx()].is_driver_setup() && node_internal[pin.get_idx()].has_pin_outputs();
   }
   bool has_inputs(const Node_pin &pin) const {
+    I(!pin.is_invalid());
     I(pin.get_idx() < node_internal.size());
     I(node_internal[pin.get_idx()].is_root());
     GI(node_internal[pin.get_idx()].has_pin_inputs(), node_internal[pin.get_idx()].is_sink_setup());
 
     return node_internal[pin.get_idx()].is_sink_setup() && node_internal[pin.get_idx()].has_pin_inputs();
   }
+
+  void del_driver2node_int(Node &driver, const Node &sink);
+  void del_sink2node_int(const Node &driver, Node &sink);
 
   bool del_edge_driver_int(const Node_pin &dpin, const Node_pin &spin);
   bool del_edge_sink_int(const Node_pin &dpin, const Node_pin &spin);
@@ -147,10 +155,14 @@ protected:
   Index_ID fast_next(Index_ID nid) const {
     while (true) {
       nid.value++;
-      if (nid >= static_cast<Index_ID>(node_internal.size())) return 0;
-      if (!node_internal[nid].is_valid()) continue;
-      if (is_graph_io(nid)) continue;
-      if (node_internal[nid].is_master_root()) return nid;
+      if (nid >= static_cast<Index_ID>(node_internal.size()))
+        return 0;
+      if (!node_internal[nid].is_valid())
+        continue;
+      if (is_graph_io(nid))
+        continue;
+      if (node_internal[nid].is_master_root())
+        return nid;
     }
 
     return 0;
@@ -168,6 +180,9 @@ protected:
     return node_internal[nid].get_type() == SubGraph_Op;
   }
 
+  void trace_back2driver(Node_pin_iterator &xiter, Node_pin dpin) const;
+  Node_pin_iterator trace_forward2sink(Node_pin pin) const;
+
 public:
   LGraph()               = delete;
   LGraph(const LGraph &) = delete;
@@ -175,8 +190,6 @@ public:
   virtual ~LGraph();
 
   bool is_empty() const { return fast_first() == 0; }
-
-  bool has_edge(const Node_pin &driver, const Node_pin &sink) const;
 
   Index_ID add_edge(const Node_pin &dpin, const Node_pin &spin) {
     I(dpin.is_driver());
@@ -231,8 +244,8 @@ public:
   void dump();
   void dump_down_nodes();
 
-  Node get_graph_input_node();
-  Node get_graph_output_node();
+  Node get_graph_input_node(bool hier=false);
+  Node get_graph_output_node(bool hier=false);
 
   Node_pin get_graph_input(std::string_view str);
   Node_pin get_graph_output(std::string_view str);
@@ -243,6 +256,7 @@ public:
 
   // Iterators defined in the lgraph_each.cpp
 
+  void each_pin(const Node_pin &dpin, std::function<bool(Index_ID idx)> f1) const;
   void each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)> f1);
   void each_graph_input(std::function<void(Node_pin &pin)> f1);
   void each_graph_output(std::function<void(Node_pin &pin)> f1);
@@ -252,6 +266,7 @@ public:
   void each_output_edge_fast(std::function<void(XEdge &edge)> f1);
 
   void each_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)>);
+  void each_sub_unique_fast(const std::function<bool(Node &, Lg_type_id)> fn);
 
   template <typename FN>
   void each_sub_fast(const FN f1) {

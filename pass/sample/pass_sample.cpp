@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "pass_sample.hpp"
+
 #include "annotate.hpp"
 #include "lbench.hpp"
 #include "lgedgeiter.hpp"
@@ -21,10 +22,10 @@ void Pass_sample::setup() {
 Pass_sample::Pass_sample(const Eprp_var &var) : Pass("pass.sample", var) {}
 
 void Pass_sample::do_work(LGraph *g) {
-  compute_histogram(g);
+  // compute_histogram(g);
   compute_max_depth(g);
-  annotate_placement(g);
-  create_sample_graph(g);
+  // annotate_placement(g);
+  // create_sample_graph(g);
 }
 
 void Pass_sample::work(Eprp_var &var) {
@@ -73,21 +74,32 @@ void Pass_sample::do_wirecount(LGraph *g, int indent) {
   std::string space;
   for (int i = 0; i < indent; i++) space.append("  ");
 
-  fmt::print("{}module {} : inputs {} bits {} : outputs {} bits {} : nodes {} : wire {} bits {}\n", space,
-             g->get_name(), i_num, i_bits, o_num, o_bits, n_nodes, g->get_down_nodes_map().size(),
-             n_wire, n_wire_bits);
+  fmt::print("{}module {} : inputs {} bits {} : outputs {} bits {} : nodes {} : wire {} bits {}\n",
+             space,
+             g->get_name(),
+             i_num,
+             i_bits,
+             o_num,
+             o_bits,
+             n_nodes,
+             g->get_down_nodes_map().size(),
+             n_wire,
+             n_wire_bits);
 
   g->each_sub_fast([this, indent, space](Node &node, Lg_type_id lgid) {
     (void)node;
 
     LGraph *sub_lg = LGraph::open(path, lgid);
-    if (!sub_lg) return;
+    if (!sub_lg)
+      return;
     if (sub_lg->is_empty()) {
       int n_inp = 0;
       int n_out = 0;
       for (auto io_pin : sub_lg->get_self_sub_node().get_io_pins()) {
-        if (io_pin.is_input()) n_inp++;
-        if (io_pin.is_output()) n_out++;
+        if (io_pin.is_input())
+          n_inp++;
+        if (io_pin.is_output())
+          n_out++;
       }
       fmt::print("{}  module {} BBOX : inputs {} outputs {}\n", space, sub_lg->get_name(), n_inp, n_out);
 
@@ -134,7 +146,8 @@ void Pass_sample::compute_max_depth(LGraph *g) {
     int local_max = 0;
     for (const auto &edge : node.inp_edges()) {
       int d = depth[edge.driver.get_node().get_compact()];
-      if (local_max <= d) local_max = d + 1;
+      if (local_max <= d)
+        local_max = d + 1;
     }
     fmt::print("{} {}\n", node.debug_name(), local_max);
     depth[node.get_compact()] = local_max;

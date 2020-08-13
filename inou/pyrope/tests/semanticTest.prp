@@ -2,7 +2,7 @@
 // ./bazel-bin/inou/pyrope/prp_lnast_test inou/pyrope/tests/semanticTest.prp
 
 // Assign Statement
-val = 
+// val = 0d1023u10
 // Warning: val
 // ================================================
 
@@ -57,28 +57,28 @@ val =
 // Tuple Concate Statement
 // tup = (foo = 1, bar = cat + 2) 
 // tup = tup ++ (4, dog)
-// Warning: foo, bar, null
+// Warning: foo, bar
 // ================================================
 
 // For Loop Statement
 // for i in (0..3) {
-//   tuple_foo[i] = tuple_bar[3-i]
+//  tuple_foo[i] = tuple_bar[3-i]
 // }
-// Warning: ___range_begin, ___range_end, null
+// Warning: ___range_begin, ___range_end
 // ================================================
 
-// While Loop Statement (FIXME)
+// While Loop Statement
 // a = 10
 // while (a > 0) {
 //   b = a + 1
 //   a = a - 1
 // }
-// Warning: total
+// Warning: b
 // ================================================
 
 // Basic Func Def
 // func_xor = :($a, $b, %out):{
-//   %out = $a ^ $b
+//   %out = param1 ^ param2
 // }
 // Warning: func_xor
 // ================================================
@@ -97,7 +97,7 @@ val =
 
 // my_xor = func_xor($foo, $bar)
 // %out = my_xor.out
-// Warning: null
+// Warning: None
 // ================================================
 
 
@@ -112,10 +112,10 @@ val =
 // ================================================
 
 // Attribute Statement
-// foo.__bits = 3
+// foo.___bits = 3
 // foo = 7
 
-// bar as (__bits = 10)
+// bar as (___bits = 10)
 // bar = 123
 // Warning: bar
 // ================================================
@@ -130,4 +130,27 @@ val =
 //   b = 1
 // }
 // Warning: b
+// ================================================
+
+// Inefficient LNAST Tests
+// a = 1
+// b = a
+// c = b + 1
+// Warning: Inefficient LNAST for variable b, c
+
+// tup = (foo = 1, bar = 2)
+// temp_tup = tup
+// temp_tup = temp_tup ++ (4, dog)
+// Warning: Inefficient LNAST for variable temp_tup, foo + bar
+
+// a = 1 + 4
+// b = a
+// b = b * 2
+// Warning: Inefficient LNAST for variable b
+
+// a = 1 + 4
+// a = a * 3
+// b = a
+// a = a / 3
+// Warning: Inefficient LNAST for variable b
 // ================================================

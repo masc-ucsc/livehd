@@ -100,8 +100,10 @@ void Elab_scanner::add_token(Token &t) {
     }
   } else if (t.tok == Token_id_qmark) {
     if (last_tok.tok == Token_id_alnum) {
-      if (last_tok.text[0] == '0') {
-        if (last_tok.text.size() >= 2 && (last_tok.text[1] == 'b' || last_tok.text[1] == 'B')) {
+      auto txt = last_tok.get_text();
+      if (txt.size() && txt[0] == '0') {
+        auto last_txt = last_tok.get_text();
+        if (last_txt.size() >= 2 && (last_txt[1] == 'b' || last_txt[1] == 'B')) {
           token_list.back().fuse_token(Token_id_alnum, t);
           return;
         }
@@ -168,9 +170,6 @@ void Elab_scanner::patch_pass(const absl::flat_hash_map<std::string, Token_id> &
 
     auto it = keywords.find(txt);
     if (it == keywords.end()) continue;
-
-    assert(it->second >= static_cast<Token_id>(Token_id_keyword_first));
-    assert(it->second <= static_cast<Token_id>(Token_id_keyword_last));
 
     t.tok = it->second;
   }
@@ -534,5 +533,5 @@ void Elab_scanner::dump_token() const {
   if (pos >= token_list.size()) pos = token_list.size();
 
   auto &t = token_list[pos];
-  fmt::print("tok:{} pos1:{}, pos2:{}, line:{} text:{}\n", t.tok, t.pos1, t.pos2, t.line, t.text);
+  fmt::print("tok:{} pos1:{}, pos2:{}, line:{} text:{}\n", t.tok, t.pos1, t.pos2, t.line, t.get_text());
 }

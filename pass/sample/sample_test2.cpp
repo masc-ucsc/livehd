@@ -4,10 +4,9 @@
 
 #include <string>
 
+#include "eprp_utils.hpp"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
-
-#include "eprp_utils.hpp"
 #include "lgraph.hpp"
 #include "pass_sample.hpp"
 

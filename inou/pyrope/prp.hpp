@@ -18,17 +18,17 @@
 //#define DEBUG_LN
 
 // variable argument number macro (adapted from stackoverflow.com/questions/3046889/optional-parameters-with-c-macros)
-#define GET_3RD_ARG(arg1, arg2, arg3, ...) arg3
+#define GET_3RD_ARG(arg1, arg2, arg3, ...)       arg3
 #define GET_4TH_ARG(arg1, arg2, arg3, arg4, ...) arg4
 
-#define SCAN_IS_TOKEN_1_ARGS(tok) chk_and_consume(tok, Prp_invalid, &sub_cnt, loc_list)
+#define SCAN_IS_TOKEN_1_ARGS(tok)      chk_and_consume(tok, Prp_invalid, &sub_cnt, loc_list)
 #define SCAN_IS_TOKEN_2_ARGS(tok, rid) chk_and_consume(tok, rid, &sub_cnt, loc_list)
 
 #define SCAN_IS_TOKEN_MACRO_CHOOSER(...) GET_3RD_ARG(__VA_ARGS__, SCAN_IS_TOKEN_2_ARGS, SCAN_IS_TOKEN_1_ARGS)
 
 #define SCAN_IS_TOKEN(...) SCAN_IS_TOKEN_MACRO_CHOOSER(__VA_ARGS__)(__VA_ARGS__)
 
-#define SCAN_IS_TOKENS_2_ARGS(toks, cnt) chk_and_consume_options(toks, cnt, Prp_invalid, &sub_cnt, loc_list)
+#define SCAN_IS_TOKENS_2_ARGS(toks, cnt)      chk_and_consume_options(toks, cnt, Prp_invalid, &sub_cnt, loc_list)
 #define SCAN_IS_TOKENS_3_ARGS(toks, cnt, rid) chk_and_consume_options(toks, cnt, rid, &sub_cnt, loc_list)
 
 #define SCAN_IS_TOKENS_MACRO_CHOOSER(...) GET_4TH_ARG(__VA_ARGS__, SCAN_IS_TOKENS_3_ARGS, SCAN_IS_TOKENS_2_ARGS)
@@ -200,14 +200,14 @@ constexpr Token_id Pyrope_id_then = 159;
 class Prp : public Elab_scanner {
 protected:
   struct debug_statistics {
-    uint16_t rules_called;
-    uint16_t rules_matched;
-    uint16_t rules_failed;
-    uint16_t tokens_consumed;
-    uint16_t tokens_unconsumed;
-    uint16_t ast_up_calls;
-    uint16_t ast_down_calls;
-    uint16_t ast_add_calls;
+    uint32_t rules_called;
+    uint32_t rules_matched;
+    uint32_t rules_failed;
+    uint32_t tokens_consumed;
+    uint32_t tokens_unconsumed;
+    uint32_t ast_up_calls;
+    uint32_t ast_down_calls;
+    uint32_t ast_add_calls;
   };
 
   debug_statistics         debug_stat{0, 0, 0, 0, 0, 0, 0, 0};
@@ -303,7 +303,6 @@ protected:
   inline bool consume_token();
   bool        go_back(uint64_t num_tok);
   std::string rule_id_to_string(Rule_id rid);
-  std::string tok_id_to_string(Token_id tok);
 
   uint8_t check_function(uint8_t (Prp::*rule)(std::list<std::tuple<Rule_id, Token_entry>> &), uint64_t *sub_cnt,
                          std::list<std::tuple<Rule_id, Token_entry>> &loc_list);

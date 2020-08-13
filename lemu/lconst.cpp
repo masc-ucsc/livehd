@@ -23,13 +23,13 @@ std::string_view Lconst::skip_underscores(std::string_view txt) const {
   return txt; // orig if only underscores
 }
 
-uint16_t Lconst::read_bits(std::string_view txt) {
+Bits_t Lconst::read_bits(std::string_view txt) {
   if (txt.empty())
     return 0;
   if (!std::isdigit(txt[0]))
     return 0;
 
-  int tmp=0;
+  unsigned int tmp=0;
   bool ok = absl::SimpleAtoi(txt, &tmp);
   if (!ok && tmp==0) {
     throw std::runtime_error(fmt::format("ERROR: {} should have the number of bits in decimal after u", txt));
@@ -37,7 +37,7 @@ uint16_t Lconst::read_bits(std::string_view txt) {
   if (tmp <= 0) {
     throw std::runtime_error(fmt::format("ERROR: {} the number of bits should be positive not {}", txt, tmp));
   }
-  if (tmp > 32768) {
+  if (tmp >= ((1UL<<Bits_bits)-1)) {
     throw std::runtime_error(fmt::format("ERROR: {} the number of bits is too big {}", txt, tmp));
   }
 
@@ -70,8 +70,10 @@ Lconst::Container Lconst::serialize() const {
   Container v;
   unsigned char c = (explicit_str?0x10:0) | (explicit_sign?0x8:0) | (explicit_bits?0x4:0) | (sign?0x2:0);
   v.emplace_back(c);
-  v.emplace_back(bits>>8);
-  v.emplace_back(bits & 0xFF);
+  v.emplace_back(bits>>16);
+  v.emplace_back(bits>>8 );
+  v.emplace_back(bits    );
+
   boost::multiprecision::export_bits(num, std::back_inserter(v), 8);
 
   return v;
@@ -81,7 +83,7 @@ uint64_t Lconst::hash() const {
 
   std::vector<uint64_t> v;
   uint64_t c = (explicit_str?0x10:0) | (explicit_sign?0x8:0) | (explicit_bits?0x4:0) | (sign?0x2:0);
-  c = (c<<16) | bits;
+  c = (c<<32) | bits;
   v.emplace_back(c);
 
   boost::multiprecision::export_bits(num, std::back_inserter(v), 64);
@@ -99,36 +101,38 @@ Lconst::Lconst(absl::Span<unsigned char> v) {
   I(v.size()>3); // invalid otherwise
 
   uint8_t c0  = v[0];
-  uint16_t c1 = v[1];
-  uint16_t c2 = v[2];
+  uint32_t c1 = v[1];
+  uint32_t c2 = v[2];
+  uint32_t c3 = v[3];
 
   explicit_str  = (c0 & 0x10)?true:false;
   explicit_sign = (c0 & 0x08)?true:false;
   explicit_bits = (c0 & 0x04)?true:false;
   sign          = (c0 & 0x02)?true:false;
 
-  bits = (c1<<8) | c2;
+  bits = (c1<<16) | (c2<<8) | c3;
 
-  auto s = v.subspan(3);
+  auto s = v.subspan(4);
   boost::multiprecision::import_bits(num,s.begin(),s.end());
 }
 
 Lconst::Lconst(const Container &v) {
 
-  I(v.size()>3); // invalid otherwise
+  I(v.size()>4); // invalid otherwise
 
   uint8_t c0  = v[0];
-  uint16_t c1 = v[1];
-  uint16_t c2 = v[2];
+  uint32_t c1 = v[1];
+  uint32_t c2 = v[2];
+  uint32_t c3 = v[3];
 
   explicit_str  = (c0 & 0x10)?true:false;
   explicit_sign = (c0 & 0x08)?true:false;
   explicit_bits = (c0 & 0x04)?true:false;
   sign          = (c0 & 0x02)?true:false;
 
-  bits = (c1<<8) | c2;
+  bits = (c1<<16) | (c2<<8) | c3;
 
-  boost::multiprecision::import_bits(num,v.begin()+3,v.end());
+  boost::multiprecision::import_bits(num,v.begin()+4,v.end());
 }
 
 Lconst::Lconst() {
@@ -158,7 +162,7 @@ Lconst::Lconst(Number v) {
   bits          = calc_bits();
 }
 
-Lconst::Lconst(uint64_t v, uint16_t b) {
+Lconst::Lconst(uint64_t v, Bits_t b) {
   explicit_str  = false;
   explicit_sign = false;
   explicit_bits = true;
@@ -198,7 +202,7 @@ Lconst::Lconst(std::string_view orig_txt) {
     txt = skip_underscores(txt.substr(1)); // skip -
   }
 
-  uint16_t nbits_used = 0;
+  Bits_t nbits_used = 0;
 
   int shift_mode = 0;
   if (txt.size() > 2 && txt[0] == '0') {
@@ -345,11 +349,28 @@ void Lconst::dump() const {
 }
 
 Lconst Lconst::add_op(const Lconst &o) const {
+
   auto max_bits = std::max(bits, o.bits);
+
+  if (explicit_str || o.explicit_str) {
+    std::string str;
+    std::string o_str;
+    if (explicit_str)
+      str = to_string();
+    if (o.explicit_str)
+      o_str = o.to_string();
+
+    if (str.size()*8==bits && o_str.size()*8==o.bits) { // Both strings (concat)
+      return Lconst(absl::StrCat(str, o_str));
+    }
+    std::string qmarks("0b");
+    qmarks.append(max_bits, '?');
+    return Lconst(qmarks);
+  }
 
   Number res_num = get_num(max_bits) + o.get_num(max_bits);
 
-  uint16_t res_bits=0u;
+  Bits_t res_bits=0u;
   if (res_num<0)
     res_bits = msb(-res_num)+1;
   else if (res_num==0)
@@ -372,11 +393,19 @@ Lconst Lconst::add_op(const Lconst &o) const {
 Lconst Lconst::sub_op(const Lconst &o) const {
   auto max_bits = std::max(bits, o.bits);
 
+  if (explicit_str || o.explicit_str) {
+    std::string qmarks("0b");
+    qmarks.append(max_bits, '?');
+    return Lconst(qmarks);
+  }
+
   Number res_num = get_num(max_bits) - o.get_num(max_bits);
 
-  uint16_t res_bits=0u;
+  Bits_t res_bits=0u;
   if (res_num<0)
     res_bits = msb(-res_num)+1;
+  else if (res_num==0)
+    res_bits = 0;
   else
     res_bits = msb(res_num)+1;
 
@@ -392,8 +421,15 @@ Lconst Lconst::sub_op(const Lconst &o) const {
   return Lconst(res_explicit_str, res_explicit_sign, res_explicit_bits, res_sign, res_bits, res_num);
 }
 
-Lconst Lconst::lsh_op(uint16_t amount) const {
+Lconst Lconst::lsh_op(Bits_t amount) const {
   auto res_bits = bits + amount;
+
+  if (explicit_str) {
+    auto qmarks = to_string();
+    qmarks.append(amount, '0');
+    return Lconst(qmarks);
+  }
+
   auto res_num  = num << amount;
 
   return Lconst(explicit_str, explicit_sign, explicit_bits, sign, res_bits, res_num);
@@ -401,6 +437,38 @@ Lconst Lconst::lsh_op(uint16_t amount) const {
 
 Lconst Lconst::or_op(const Lconst &o) const {
   auto   res_bits = std::max(bits, o.bits);
+
+  if (unlikely(explicit_str || o.explicit_str)) {
+    std::string str;
+    std::string o_str;
+    if (explicit_str)
+      str = to_string();
+    if (o.explicit_str)
+      o_str = o.to_string();
+    if (explicit_str && o.explicit_str) {
+      std::string max_str;
+      std::string_view min_str;
+      if (str.size()>o_str.size()) {
+        max_str = str;
+        min_str = o_str;
+      }else{
+        max_str = o_str;
+        min_str = str;
+      }
+      for(auto i= 0u;i<min_str.size();++i) {
+        if (o_str[i] == '1' || str[i] == '1')
+          max_str[i] = '1';
+        else if (o_str[i] == '?' || str[i] == '?')
+          max_str[i] = '?';
+      }
+
+      return Lconst(absl::StrCat("0b",max_str));
+    }
+    std::string qmarks("0b");
+    qmarks.append(res_bits, '?');
+    return Lconst(qmarks);
+  }
+
   Number res_num  = get_num(res_bits) | o.get_num(res_bits);
 
   auto res_explicit_str  = explicit_str && o.explicit_str;
@@ -413,6 +481,37 @@ Lconst Lconst::or_op(const Lconst &o) const {
 
 Lconst Lconst::and_op(const Lconst &o) const {
   auto   res_bits = std::max(bits, o.bits);
+
+  if (unlikely(explicit_str || o.explicit_str)) {
+    std::string str;
+    std::string o_str;
+    if (explicit_str)
+      str = to_string();
+    if (o.explicit_str)
+      o_str = o.to_string();
+    if (explicit_str && o.explicit_str) {
+      std::string max_str;
+      std::string_view min_str;
+      if (str.size()>o_str.size()) {
+        max_str = str;
+        min_str = o_str;
+      }else{
+        max_str = o_str;
+        min_str = str;
+      }
+      for(auto i= 0u;i<min_str.size();++i) {
+        if (o_str[i] == '0' || str[i] == '0')
+          max_str[i] = '0';
+        else if (o_str[i] == '?' || str[i] == '?')
+          max_str[i] = '?';
+      }
+
+      return Lconst(absl::StrCat("0b",max_str));
+    }
+    std::string qmarks("0b");
+    qmarks.append(res_bits, '?');
+    return Lconst(qmarks);
+  }
   Number res_num  = get_num(res_bits) & o.get_num(res_bits);
 
   auto res_explicit_str  = explicit_str && o.explicit_str;
@@ -425,6 +524,11 @@ Lconst Lconst::and_op(const Lconst &o) const {
 
 bool Lconst::eq_op(const Lconst &o) const {
   auto b = num & o.num;  // zero-extend or drop bits from negative
+
+  if (unlikely(explicit_str || o.explicit_str)) {
+    I(false); // if any of them has ??, it can not be computed at compile time. Runtime random answer
+  }
+
   if (num<0 && o.num>0)
     return b == o.num;
   if (num>0 && o.num<0)
@@ -432,7 +536,7 @@ bool Lconst::eq_op(const Lconst &o) const {
   return (b==num) && (b==o.num);
 }
 
-Lconst Lconst::adjust_bits(uint16_t amount) const {
+Lconst Lconst::adjust_bits(Bits_t amount) const {
   I(amount>0);
 
   auto res_bits = amount;
@@ -457,7 +561,24 @@ std::string Lconst::to_string() const {
   return str;
 }
 
-void Lconst::pyrope_bits(std::string *str) const {
+std::string Lconst::to_string_no_xz() const {
+  I(explicit_str);
+
+  std::string str;
+  Number tmp = num;
+  while(tmp) {
+    unsigned char ch = static_cast<unsigned char>(tmp & 0xFF);
+    if (ch == 'z' || ch == 'x')
+      str.append(1, '0');
+    else
+      str.append(1, ch);
+    tmp >>= 8;
+  }
+
+  return str;
+}
+
+void Lconst::add_pyrope_bits(std::string *str) const {
   if (!explicit_sign && !explicit_bits) {
     return;
   }
@@ -479,7 +600,7 @@ std::string Lconst::to_pyrope() const {
 
     I(str[0] != '-');
     auto str2 = absl::StrCat("0b", str);
-    pyrope_bits(&str2);
+    add_pyrope_bits(&str2);
     return str2;
   }
 
@@ -504,7 +625,42 @@ std::string Lconst::to_pyrope() const {
     absl::StrAppend(&str, "0x");
   absl::StrAppend(&str, ss.str());
 
-  pyrope_bits(&str);
+  add_pyrope_bits(&str);
+
+  return str;
+}
+
+std::string Lconst::to_firrtl() const {
+
+  /*Note->hunter: FIRRTL-Proto requires the string output
+   * here is a decimal value (no 0x or 0d allowed. Only #).
+   * Also means it can't have 'x' or 'z'. */
+  Number v;
+  if (explicit_str) {
+    // Either string or 0b with special characters like ?xz
+    auto str = to_string_no_xz();
+    if (str.size()*8 == bits)
+      return str;
+
+    I(str[0] != '-');
+    //Is in 0b form, need to convert from that.
+    auto temp_lconst = Lconst(str);
+    v = temp_lconst.get_num();
+  } else {
+    v = get_num();
+  }
+  std::stringstream ss;
+
+  if (v<0)
+    ss << -v;
+  else
+    ss << v;
+
+  std::string str;
+  if (is_negative())
+    str.append(1,'-');
+
+  absl::StrAppend(&str, ss.str());
 
   return str;
 }

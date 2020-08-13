@@ -61,15 +61,15 @@ protected:
     auto s1_aaa = s1.setup_sink_pin("an_input");
     auto s1_sss = s1.setup_driver_pin("s1_output");
 
-    I(s1_aaa.get_pid() == 13);
-    I(s1_sss.get_pid() == 17);
+    I(s1_aaa.get_pid() == c1_aaa.get_pid());
+    I(s1_sss.get_pid() == c1_sss.get_pid());
 
     auto s2_aaa = s2.setup_sink_pin("a1");
     auto s2_bbb = s2.setup_sink_pin("anotherinput");
     auto s2_sss = s2.setup_driver_pin("Y");
-    I(s2_aaa.get_pid() == 19);
-    I(s2_bbb.get_pid() == 29);
-    I(s2_sss.get_pid() == 30001);
+    I(s2_aaa.get_pid() == c2_aaa.get_pid());
+    I(s2_bbb.get_pid() == c2_bbb.get_pid());
+    I(s2_sss.get_pid() == c2_sss.get_pid());
 
     auto sum_a = sum.setup_sink_pin("AU");
     auto sum_b = sum.setup_sink_pin("BU");
@@ -193,10 +193,36 @@ TEST_F(Setup_graphs_test, annotated) {
 
 TEST_F(Setup_graphs_test, annotate2) {
 
-  absl::flat_hash_map<Node_pin::Compact, int>  my_map2;
+  absl::flat_hash_map<Node_pin::Compact_class, int>  my_map2;
 
   int total = 0;
   for(const auto node:top->forward()) {
+
+    for(const auto &e:node.out_edges()) {
+      my_map2[e.driver.get_compact_class()] = total;
+      total++;
+    }
+  }
+
+  std::vector<bool> used(total);
+  used.clear();
+  used.resize(total);
+
+  for(const auto &it:my_map2) {
+    auto dpin = Node_pin(top,it.first);
+    EXPECT_TRUE(dpin.is_driver());
+    EXPECT_FALSE(used[it.second]);
+    used[it.second] = true;
+  }
+
+}
+
+TEST_F(Setup_graphs_test, annotate2_hier) {
+
+  absl::flat_hash_map<Node_pin::Compact, int>  my_map2;
+
+  int total = 0;
+  for(const auto node:top->forward(true)) {
 
     for(const auto &e:node.out_edges()) {
       my_map2[e.driver.get_compact()] = total;

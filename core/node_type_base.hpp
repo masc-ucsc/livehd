@@ -54,7 +54,7 @@ enum Node_Type_Op : uint8_t {
   TupAdd_Op,
   TupGet_Op,
   TupRef_Op,
-  TupKey_Op, // FIXME: to delete. Not needed
+  TupKey_Op,  
   AttrSet_Op,
   AttrGet_Op,
   CompileErr_Op,
@@ -87,42 +87,67 @@ enum Node_Type_Op : uint8_t {
 
 class Node_Type {
 public:
-  constexpr static inline frozen::map<frozen::string, Port_ID, 6> sink_pidmap [] = {
-    { /* invalid */ {"",    0}, {""   , 0}, {""   ,0} , {""   ,0} , {"", 0} , {"", 0} },
-    { /* sum     */ {"ADD", 0}, {"SUB", 1}, {""   ,0} , {""   ,0} , {"", 0} , {"", 0} },
-    { /* mult    */ {"VAL", 0}, {""   , 0}, {""   ,0} , {""   ,0} , {"", 0} , {"", 0} },
-    { /* div     */ {"NUM", 0}, {"DEN", 1}, {""   ,0} , {""   ,0} , {"", 0} , {"", 0} },
-    { /* mod     */ {"NUM", 0}, {"DEN", 1}, {""   ,0} , {""   ,0} , {"", 0} , {"", 0} },
-    { /* not     */ {"VAL", 0}, {""   , 0}, {""   ,0} , {""   ,0} , {"", 0} , {"", 0} },
-    { /* join    */ {"V0" , 0}, {"V1" , 1}, {"V2" ,2} , {"V3" ,3} , {"V4", 4} , {"V5", 5} },
-    { /* pick    */ {"VAL", 0}, {"OFF", 1}, {""   ,0} , {""   ,0} , {"", 0} , {"", 0} },
-    { /* AND     */ {"VAL", 0}, {""   , 0}, {""   ,0} , {""   ,0} , {"", 0} , {"", 0} },
+  constexpr static inline frozen::map<frozen::string, Port_ID, 6> sink_pidmap[] = {
+      {/* invalid */ {"", 0}, {"", 0}, {"", 0}, {"", 0}, {"", 0}, {"", 0}},
+      {/* sum     */ {"ADD", 0}, {"SUB", 1}, {"", 0}, {"", 0}, {"", 0}, {"", 0}},
+      {/* mult    */ {"VAL", 0}, {"", 0}, {"", 0}, {"", 0}, {"", 0}, {"", 0}},
+      {/* div     */ {"NUM", 0}, {"DEN", 1}, {"", 0}, {"", 0}, {"", 0}, {"", 0}},
+      {/* mod     */ {"NUM", 0}, {"DEN", 1}, {"", 0}, {"", 0}, {"", 0}, {"", 0}},
+      {/* not     */ {"VAL", 0}, {"", 0}, {"", 0}, {"", 0}, {"", 0}, {"", 0}},
+      {/* join    */ {"V0", 0}, {"V1", 1}, {"V2", 2}, {"V3", 3}, {"V4", 4}, {"V5", 5}},
+      {/* pick    */ {"VAL", 0}, {"OFF", 1}, {"", 0}, {"", 0}, {"", 0}, {"", 0}},
+      {/* AND     */ {"VAL", 0}, {"", 0}, {"", 0}, {"", 0}, {"", 0}, {"", 0}},
   };
 
-  constexpr static inline frozen::map<frozen::string, Port_ID, 2> driver_pidmap [] = {
-    { /* invalid */ {""   , 0}, {""   , 0}, },
-    { /* sum     */ {"Y"  , 0}, {""   , 0}, }, // Y = ADD+..+ADD-SUB..-SUB
-    { /* mult    */ {"Y"  , 0}, {""   , 0}, }, // Y = VAL*..*VAL
-    { /* div     */ {"Y"  , 0}, {""   , 0}, }, // Y = NUM/DEN
-    { /* mod     */ {"Y"  , 0}, {""   , 0}, }, // Y = NUM % DEN
-    { /* not     */ {"Y"  , 0}, {""   , 0}, }, // Y = ~VAL
-    { /* join    */ {"Y"  , 0}, {""   , 0}, }, // Y = ..,V3,V2,V1,V0
-    { /* pick    */ {"Y"  , 0}, {""   , 0}, }, // Y = VAL[[OFF..(OFF+Y.__bits)]]
-    { /* AND     */ {"Y"  , 0}, {"RED", 1}, }, // Y = VAL&..&VAL ; RED= &Y
+  constexpr static inline frozen::map<frozen::string, Port_ID, 2> driver_pidmap[] = {
+      {
+          /* invalid */ {"", 0},
+          {"", 0},
+      },
+      {
+          /* sum     */ {"Y", 0},
+          {"", 0},
+      },  // Y = ADD+..+ADD-SUB..-SUB
+      {
+          /* mult    */ {"Y", 0},
+          {"", 0},
+      },  // Y = VAL*..*VAL
+      {
+          /* div     */ {"Y", 0},
+          {"", 0},
+      },  // Y = NUM/DEN
+      {
+          /* mod     */ {"Y", 0},
+          {"", 0},
+      },  // Y = NUM % DEN
+      {
+          /* not     */ {"Y", 0},
+          {"", 0},
+      },  // Y = ~VAL
+      {
+          /* join    */ {"Y", 0},
+          {"", 0},
+      },  // Y = ..,V3,V2,V1,V0
+      {
+          /* pick    */ {"Y", 0},
+          {"", 0},
+      },  // Y = VAL[[OFF..(OFF+Y.__bits)]]
+      {
+          /* AND     */ {"Y", 0},
+          {"RED", 1},
+      },  // Y = VAL&..&VAL ; RED= &Y
   };
 
-  static constexpr Port_ID get_pid(Node_Type_Op op, frozen::string str) {
-    return driver_pidmap[op].at(str);
-  }
+  static constexpr Port_ID        get_pid(Node_Type_Op op, frozen::string str) { return driver_pidmap[op].at(str); }
   static constexpr frozen::string get_name(Node_Type_Op op, Port_ID pid) {
     for (const auto e : driver_pidmap[op]) {
-      if (e.second == pid) return e.first;
+      if (e.second == pid)
+        return e.first;
     }
     return "invalid";
   }
 
 private:
-
   static Node_Type *                                   table[Last_invalid_Op];
   static absl::flat_hash_map<std::string, Node_Type *> name2node;
 
@@ -191,13 +216,23 @@ public:
     return Port_invalid;
   }
 
+  std::string_view get_input_match(Port_ID pid) const {
+    size_t idx = static_cast<size_t>(pid);
+    I(idx < inputs.size());
+
+    return inputs[idx];
+  }
+
   Port_ID get_output_match(std::string_view str) const {
     if (outputs.empty())  // blackbox, subgraph...
       return Port_invalid;
 
-    if (str == "Y" && outputs[0] == "Y") return 0;
-    if (str == "Q" && outputs[0] == "Q") return 0;
-    if (str == "YREDUCE" && outputs[1] == "YREDUCE") return 1;
+    if (str == "Y" && outputs[0] == "Y")
+      return 0;
+    if (str == "Q" && outputs[0] == "Q")
+      return 0;
+    if (str == "YREDUCE" && outputs[1] == "YREDUCE")
+      return 1;
 
     std::string data(str);
     std::transform(data.begin(), data.end(), data.begin(), ::toupper);
@@ -218,17 +253,27 @@ public:
     return Port_invalid;
   }
 
+  std::string_view get_output_match(Port_ID pid) const {
+    size_t idx = static_cast<size_t>(pid);
+    I(idx < outputs.size());
+
+    return outputs[idx];
+  }
+
   bool is_input_signed(Port_ID pid) const {
-    if (inputs_sign.size() < pid) return inputs_sign[pid];
+    if (inputs_sign.size() < pid)
+      return inputs_sign[pid];
     return false;
   }
 
   size_t get_num_inputs() const {
-    if (inputs.size()) return inputs.size();
+    if (inputs.size())
+      return inputs.size();
     return (1 << Port_bits) - 1;
   }
   size_t get_num_outputs() const {
-    if (outputs.size()) return outputs.size();
+    if (outputs.size())
+      return outputs.size();
     return (1 << Port_bits) - 1;
   }
 
@@ -455,7 +500,7 @@ public:
     inputs.push_back("S");
     inputs.push_back("A");  // 0 false path
     inputs.push_back("B");  // 1 true path
-    inputs.push_back("C");  // 2 
+    inputs.push_back("C");  // 2
     inputs.push_back("D");  // 3
     inputs.push_back("E");  // Keeps going
     outputs.push_back("Y");
@@ -532,8 +577,8 @@ class Node_Type_GraphIO : public Node_Type {
 public:
   Node_Type_GraphIO()
       : Node_Type("graphio", GraphIO_Op, false){
-            // No pins because there are many pids (one per IO)
-        };
+          // No pins because there are many pids (one per IO)
+      };
 };
 
 class Node_Type_Flop : public Node_Type {
@@ -587,35 +632,35 @@ public:
 };
 
 // Parameters
-#define LGRAPH_MEMOP_SIZE 0
-#define LGRAPH_MEMOP_OFFSET 1
-#define LGRAPH_MEMOP_ABITS 2
-#define LGRAPH_MEMOP_WRPORT 3
-#define LGRAPH_MEMOP_RDPORT 4
+#define LGRAPH_MEMOP_SIZE     0
+#define LGRAPH_MEMOP_OFFSET   1
+#define LGRAPH_MEMOP_ABITS    2
+#define LGRAPH_MEMOP_WRPORT   3
+#define LGRAPH_MEMOP_RDPORT   4
 #define LGRAPH_MEMOP_RDCLKPOL 5
 #define LGRAPH_MEMOP_WRCLKPOL 6
-#define LGRAPH_MEMOP_RDTRAN 7
+#define LGRAPH_MEMOP_RDTRAN   7
 
 // Shared signals
 #define LGRAPH_MEMOP_CLK 8
-#define LGRAPH_MEMOP_CE 9
+#define LGRAPH_MEMOP_CE  9
 
 // Port specific signals
 #define LGRAPH_MEMOP_POFFSET (LGRAPH_MEMOP_CE + 1)
-#define LGRAPH_MEMOP_PIDS 5
+#define LGRAPH_MEMOP_PIDS    5
 
 #define LGRAPH_MEMOP_WRADDR(_n) (LGRAPH_MEMOP_POFFSET + 0 + _n * (LGRAPH_MEMOP_PIDS))
 #define LGRAPH_MEMOP_WRDATA(_n) (LGRAPH_MEMOP_POFFSET + 1 + _n * (LGRAPH_MEMOP_PIDS))
-#define LGRAPH_MEMOP_WREN(_n) (LGRAPH_MEMOP_POFFSET + 2 + _n * (LGRAPH_MEMOP_PIDS))
+#define LGRAPH_MEMOP_WREN(_n)   (LGRAPH_MEMOP_POFFSET + 2 + _n * (LGRAPH_MEMOP_PIDS))
 
 #define LGRAPH_MEMOP_RDADDR(_n) (LGRAPH_MEMOP_POFFSET + 3 + _n * (LGRAPH_MEMOP_PIDS))
-#define LGRAPH_MEMOP_RDEN(_n) (LGRAPH_MEMOP_POFFSET + 4 + _n * (LGRAPH_MEMOP_PIDS))
+#define LGRAPH_MEMOP_RDEN(_n)   (LGRAPH_MEMOP_POFFSET + 4 + _n * (LGRAPH_MEMOP_PIDS))
 
 #define LGRAPH_MEMOP_ISWRADDR(_pid) (((_pid - LGRAPH_MEMOP_POFFSET) % (LGRAPH_MEMOP_PIDS)) == 0)
 #define LGRAPH_MEMOP_ISWRDATA(_pid) (((_pid - LGRAPH_MEMOP_POFFSET) % (LGRAPH_MEMOP_PIDS)) == 1)
-#define LGRAPH_MEMOP_ISWREN(_pid) (((_pid - LGRAPH_MEMOP_POFFSET) % (LGRAPH_MEMOP_PIDS)) == 2)
+#define LGRAPH_MEMOP_ISWREN(_pid)   (((_pid - LGRAPH_MEMOP_POFFSET) % (LGRAPH_MEMOP_PIDS)) == 2)
 #define LGRAPH_MEMOP_ISRDADDR(_pid) (((_pid - LGRAPH_MEMOP_POFFSET) % (LGRAPH_MEMOP_PIDS)) == 3)
-#define LGRAPH_MEMOP_ISRDEN(_pid) (((_pid - LGRAPH_MEMOP_POFFSET) % (LGRAPH_MEMOP_PIDS)) == 4)
+#define LGRAPH_MEMOP_ISRDEN(_pid)   (((_pid - LGRAPH_MEMOP_POFFSET) % (LGRAPH_MEMOP_PIDS)) == 4)
 
 // generic multiported memory object
 class Node_Type_Memory : public Node_Type {
@@ -732,7 +777,6 @@ public:
   Node_Type_TupKey() : Node_Type("tup_key", TupKey_Op, true) { outputs.push_back("Y"); };
 };
 
-
 // VN = variable name, AN = attribute name, AV = attribute value, ACI/O = attributes connection input/output
 class Node_Type_AttrSet : public Node_Type {
 public:
@@ -755,8 +799,6 @@ public:
     outputs.push_back("Y");
   };
 };
-
-
 
 // Y = tuple root name
 class Node_Type_CompileErr : public Node_Type {

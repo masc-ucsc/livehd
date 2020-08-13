@@ -16,7 +16,8 @@ static_assert(sizeof(Hierarchy_index) == 8);
 std::string Lgraph_base_core::Setup_path::last_path = "";
 
 Lgraph_base_core::Setup_path::Setup_path(std::string_view path) {
-  if (last_path == path) return;
+  if (last_path == path)
+    return;
   last_path = path;
 
   struct stat info;
@@ -24,7 +25,8 @@ Lgraph_base_core::Setup_path::Setup_path(std::string_view path) {
   std::string spath(path);
 
   if (stat(spath.c_str(), &info) == 0) {
-    if ((info.st_mode & S_IFDIR)) return;
+    if ((info.st_mode & S_IFDIR))
+      return;
 
     unlink(spath.c_str());
   }
@@ -38,7 +40,8 @@ Lgraph_base_core::Lgraph_base_core(std::string_view _path, std::string_view _nam
 }
 
 void Lgraph_base_core::get_lock() {
-  if (locked) return;
+  if (locked)
+    return;
 
   std::string lock = absl::StrCat(path, "/", std::to_string(lgid), ".lock");
   int         err  = ::open(lock.c_str(), O_CREAT | O_EXCL, 420);  // 644
@@ -67,7 +70,8 @@ void Lgraph_base_core::clear() {
 }
 
 void Lgraph_base_core::sync() {
-  if (!locked) return;
+  if (!locked)
+    return;
 
   std::string lock = absl::StrCat(path, "/", std::to_string(lgid), ".lock");
   unlink(lock.c_str());

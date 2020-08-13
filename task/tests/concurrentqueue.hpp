@@ -27,7 +27,7 @@
 // TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
 // EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-
+/* LCOV_EXCL_START */ /* this is an external project for benchmark. No coverage */
 #pragma once
 
 #if defined(__GNUC__)
@@ -3710,3 +3710,4 @@ inline void swap(typename ConcurrentQueue<T, Traits>::ImplicitProducerKVP& a, ty
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop
 #endif
+/* LCOV_EXCL_STOP */

@@ -96,12 +96,20 @@ Just a typical git pull should suffice:
 
     git pull
 
-### Infrequent Contributor Flow
+### Infrequent Contributor Flow (ADVANCED USERS)
+
+These are instructions for advanced users, more likely other university/company
+institutions with a team working on this project. The larger team may want to
+have some private repository with internal development and some pushes/pulls to
+the main LiveHD repo. For single external users, I would suggest to just fork
+the repository and do pull requests.
+
 
 If you work outside UCSC and/or you are an infrequent contributor, you have two
 main options: fork or private clone. The fork approach requires you to have
 your repository public, if you have publications or work-in-progress that you
 do not want to share the best option is to have a private repo (livehd-private).
+
 
 The simplest way to contribute to LiveHD is to create a public repo or a public
 fork, and a pull request. Most git guides use the origin/master (in fork or

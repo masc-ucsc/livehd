@@ -8,7 +8,7 @@
 
 std::string Main_api::main_path;
 
-void setup_inou_cgen();
+void setup_inou_code_gen();
 void setup_inou_liveparse();
 void setup_inou_graphviz();
 void setup_inou_json();
@@ -32,7 +32,7 @@ void Main_api::init() {
     it.second();
   }
 
-  setup_inou_cgen();
+  setup_inou_code_gen();
   setup_inou_liveparse();
   setup_inou_graphviz();
   setup_inou_pyrope();
@@ -42,6 +42,7 @@ void Main_api::init() {
   setup_inou_firrtl();
   setup_pass_fplan();
   /* setup_inou_json(); */
+  setup_inou_json();
   /* setup_inou_rand(); */
   /* setup_inou_verific(); */
   /* setup_cops_live(); */

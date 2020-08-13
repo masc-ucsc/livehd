@@ -64,10 +64,12 @@ struct Lnast_node {
   CREATE_LNAST_NODE(_or)
   CREATE_LNAST_NODE(_not)
   CREATE_LNAST_NODE(_xor)
+  CREATE_LNAST_NODE(_parity)
   CREATE_LNAST_NODE(_plus)
   CREATE_LNAST_NODE(_minus)
   CREATE_LNAST_NODE(_mult)
   CREATE_LNAST_NODE(_div)
+  CREATE_LNAST_NODE(_mod)
   CREATE_LNAST_NODE(_eq)
   CREATE_LNAST_NODE(_same)
   CREATE_LNAST_NODE(_lt)
@@ -98,6 +100,7 @@ struct Lnast_node {
 class Lnast : public mmap_lib::tree<Lnast_node> {
 private:
   std::string      top_module_name;
+  std::string      source_filename;
   std::string_view memblock;
   int              memblock_fd;
 
@@ -169,8 +172,12 @@ private:
 public:
   Lnast() = default;
   ~Lnast();
-  explicit Lnast(std::string_view _module_name): top_module_name(_module_name), memblock_fd(-1) { }
-  explicit Lnast(std::string_view _module_name, std::pair<std::string_view, int> o): top_module_name(_module_name), memblock(o.first), memblock_fd(o.second) { }
+  explicit Lnast(std::string_view _module_name): top_module_name(_module_name), source_filename(""), memblock_fd(-1) { }
+  explicit Lnast(std::string_view _module_name, std::string_view _file_name): top_module_name(_module_name), source_filename(_file_name), memblock_fd(-1) { }
+  explicit Lnast(std::string_view _module_name, std::pair<std::string_view, int> o):
+    top_module_name(_module_name), source_filename(""), memblock(o.first), memblock_fd(o.second) { }
+  explicit Lnast(std::string_view _module_name, std::string_view _file_name, std::pair<std::string_view, int> o):
+    top_module_name(_module_name), source_filename(_file_name), memblock(o.first), memblock_fd(o.second) { }
 
   void ssa_trans() {
     do_ssa_trans(get_root());
@@ -180,6 +187,7 @@ public:
   std::string_view add_string(const std::string &str);
 
   std::string_view get_top_module_name() const { return top_module_name; }
+  std::string_view get_source() const { return source_filename; }
 
   bool             is_lhs    (const Lnast_nid &psts_nid, const Lnast_nid &opr_nid);
   bool             is_reg    (std::string_view name) { return name.substr(0,1) == "#"; }
@@ -198,7 +206,6 @@ public:
   bool      is_in_bw_table                     (const std::string_view name);
   uint32_t  get_bitwidth                       (const std::string_view name);
   void      set_bitwidth                       (const std::string_view name, const uint32_t bitwidth);
-
 
   void dump() const;
 };

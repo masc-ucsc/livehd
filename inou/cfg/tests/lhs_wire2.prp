@@ -1,5 +1,6 @@
-foo.__wire = true
-%out = foo.a 
-if ($en) {
-  foo.a = 3
-}
+tmp = foo.__last_value
+
+foo = (a = 2, b = 3)
+
+%out = tmp.a
+%out2 = foo.a + foo.b //5

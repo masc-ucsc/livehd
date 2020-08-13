@@ -10,8 +10,10 @@ cc_binary(
             "//eprp:eprp",
             "//core:core",
 
-            "//inou/code_gen:inou_cgen",
+            "//inou/code_gen:inou_code_gen",
             "//inou/liveparse:inou_liveparse",
+            "//inou/json:inou_json",
+            # "//inou/lef:inou_lef",
             "//inou/pyrope:inou_pyrope",
             "//inou/graphviz:inou_graphviz",
             "//inou/lnast_dfg:inou_lnast_dfg",
