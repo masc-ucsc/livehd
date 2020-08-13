@@ -727,7 +727,7 @@ digraph Memory {
     q8 -> Memory [ label ="p (posedge)" ];
     q9 -> Memory [ label ="s (size)" ];
     q10 -> Memory [ label ="w (wmode)" ];
-    Memory  -> q [ label ="q (data out)" ];
+    Memory  -> q [ label ="Q (data out)" ];
 }
 ```
 
@@ -757,7 +757,7 @@ Each memory has the following ports:
 * 'm' (`wmask`)   Points to the write mask (1 == write, 0==no write). The mask bust be a big as the number of bits per entry (`b`). The `wmask` pin can be disconnected which means no write mask (a write will write all the bits).
 * `p` (`posedge`) points to a 1/0 constant driver pin
 * 'w' (`wmode`)   points to the driver pin or switching between read and write mode (single bit)
-* `q` (`data out`)  is a driver pin with the data read from the memory
+* `Q` (`data out`)  is a driver pin with the data read from the memory
 
 All the entries but the `wmask` must be populated. If the `wmask` is not set, a
 full write size is expected.  Read-only ports do not have `data` and `wmask`

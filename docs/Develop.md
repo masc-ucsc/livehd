@@ -43,3 +43,35 @@ Sometimes the failure is yosys/lgraph bridge. In this case, you need to gdb yosy
      gdb `which gdb`
      (gdb) r -m ./bazel-bin/inou/yosys/liblgraph_yosys.so 
 
+
+# Debug a broken docker image
+
+The travis/azure regressions run several docker images. To debug the issue, run the same as the failing
+docker image. c++ OPT with archlinux-masc image
+
+1. Create some directory to share data in/out the docker run (to avoid
+   mistakes/issues, I would not share home directory unless you have done it
+   several times before)
+
+```
+mkdir $HOME/docker
+```
+
+2. Run the docker image (in some masc docker images you can change the user to not being root)
+
+```
+docker run --rm --cap-add SYS_ADMIN -it  -e LOCAL_USER_ID=$(id -u $USER) -v ${HOME}/docker:/home/user mascucsc/archlinux-masc                                                                                                                         
+# Once inside docker image. Create local "user" at /home/user with your userid
+/usr/local/bin/entrypoint.sh
+```
+
+3. If the docker image did not have the livehd repo, clone it
+```
+git clone https://github.com/masc-ucsc/livehd.git
+```
+
+4. Build with the failing options and debug
+```
+CXX=g++ CC=gcc bazel build -c opt //...
+```
+
