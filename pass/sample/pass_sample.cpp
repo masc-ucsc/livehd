@@ -74,7 +74,7 @@ void Pass_sample::do_wirecount(LGraph *g, int indent) {
   std::string space;
   for (int i = 0; i < indent; i++) space.append("  ");
 
-  fmt::print("{}module {} : inputs {} bits {} : outputs {} bits {} : nodes {} : wire {} bits {}\n",
+  fmt::print("{}module {} : inputs {} bits {} : outputs {} bits {} : nodes {} : submodules {} : wire {} bits {}\n",
              space,
              g->get_name(),
              i_num,
