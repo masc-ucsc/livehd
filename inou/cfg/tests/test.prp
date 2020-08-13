@@ -1,5 +1,5 @@
 a = 2
-if (true) {
+if true {
   a = 3
 }
 

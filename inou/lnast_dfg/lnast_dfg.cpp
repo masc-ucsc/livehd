@@ -937,7 +937,6 @@ Node_pin Lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx_opd,
     setup_dpin_ssa(node_dpin, vname, -1);
     node_dpin.set_name(vname); //record #reg instead of #reg_0
     name2dpin[vname] = node_dpin;
-    fmt::print("vname:{}\n", vname);
 
     setup_clk(dfg, reg_node);
 
@@ -984,7 +983,7 @@ void Lnast_dfg::process_ast_attr_set_op (LGraph *dfg, const Lnast_nid &lnidx_ase
   auto aset_ancestor_subs  = lnast->get_data(c0_aset).subs - 1;
   auto aset_ancestor_name = std::string(vname) + "_" + std::to_string(aset_ancestor_subs);
 #ifndef NDEBUG
-  fmt::print("aset ancestor name:{}\n", aset_ancestor_name);
+  /* fmt::print("aset ancestor name:{}\n", aset_ancestor_name); */
 #endif
 
   bool is_reg_or_inp = is_register(c0_aset_name) || is_input(c0_aset_name);
@@ -1066,7 +1065,7 @@ void Lnast_dfg::subgraph_io_connection(LGraph *dfg, Sub_node* sub, std::string_v
   // start query subgraph io and construct TGs for connecting inputs, TAs/scalar for connecting outputs
   for (const auto &io_pin : sub->get_io_pins()) {
     Port_ID pos_pid = sub->get_graph_pos(io_pin.name);
-    fmt::print("io_name:{}, pos_pid:{}\n", io_pin.name, pos_pid);
+    /* fmt::print("io_name:{}, pos_pid:{}\n", io_pin.name, pos_pid); */
     if (io_pin.is_input()) {
       auto tup_get = dfg->create_node(TupGet_Op);
       auto tn_spin = tup_get.setup_sink_pin("TN"); // tuple name
@@ -1278,7 +1277,7 @@ void Lnast_dfg::setup_lgraph_outputs_and_final_var_name(LGraph *dfg) {
     auto dpin_name = vname_dpin.get_name();
     if (is_output(dpin_name)) {
       auto out_spin = dfg->add_graph_output(dpin_name.substr(1, dpin_name.size() - 3), Port_invalid, 0); // Port_invalid pos means do not care about position
-      fmt::print("add graph out:{}\n", dpin_name.substr(1, dpin_name.size() - 3));                       // -3 means get rid of %, _0(ssa subscript)
+      /* fmt::print("add graph out:{}\n", dpin_name.substr(1, dpin_name.size() - 3));                       // -3 means get rid of %, _0(ssa subscript) */
       dfg->add_edge(vname_dpin, out_spin);
       continue;
     }
