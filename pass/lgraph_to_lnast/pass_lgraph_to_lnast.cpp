@@ -549,10 +549,14 @@ void Pass_lgraph_to_lnast::attach_join_node(Lnast& lnast, Lnast_nid& parent_node
 void Pass_lgraph_to_lnast::attach_pick_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
   // PID: 0 = A, 1 = Offset... Y = A[Offset+(Y_Bitwidth) : Offset]
   /* Y = pick(X, off) in LGraph form turns into Lnast form as:
-   *  range_op   bit_select
-   *   / | \       / | \
-   * T0  lo hi    Y  X  T0
-   * where lo = offset, hi = offset + y.bits() - 1 */
+   * IMPROVED/FUTURE TRANS:   |||  WORKING TRANS:
+   *  range_op   bit_select   |||     shr        and
+   *   / | \       / | \      |||    / | \      / | \
+   * T0  lo hi    Y  X  T0    |||  T0  X off   Y T0 xyz
+   *                          |||
+   * where lo = offset,       |||  where xyz = 0b111...1 where
+   * hi = offset + y.bits()-1 |||  the # of 1s = y.bits() */
+
   Node_pin offset_pin, var_pin;
   for (const auto inp : pin.get_node().inp_edges()) {
     if (inp.sink.get_pid() == 0) {
@@ -564,6 +568,31 @@ void Pass_lgraph_to_lnast::attach_pick_node(Lnast& lnast, Lnast_nid& parent_node
     }
   }
 
+/* FIXME: Currently range and bit_select nodes are not supported
+ * on the LN->LG interface. So for now, we can mimic their
+ * functionality by using a shift right and AND node. Once range
+ * and bit_select work on that interface, go back to that translation. */
+#if 1
+  std::string bit_str = "0b";
+  for (auto i = 0; i < pin.get_bits(); i++) {
+    bit_str = absl::StrCat(bit_str, "1");
+  }
+  bit_str = absl::StrCat(bit_str, "u");
+
+  auto pin_str = lnast.add_string(lnast.add_string(dpin_get_name(pin)));
+  auto t0_str  = create_temp_var(lnast);
+
+  auto shr_idx = lnast.add_child(parent_node, Lnast_node::create_shift_right(""));
+  lnast.add_child(shr_idx, Lnast_node::create_ref(t0_str));
+  attach_child(lnast, shr_idx, var_pin);
+  attach_child(lnast, shr_idx, offset_pin);
+
+  auto and_idx = lnast.add_child(parent_node, Lnast_node::create_and(""));
+  lnast.add_child(and_idx, Lnast_node::create_ref(pin_str));
+  lnast.add_child(and_idx, Lnast_node::create_ref(t0_str));
+  lnast.add_child(and_idx, Lnast_node::create_const(lnast.add_string(bit_str)));
+#endif
+#if 0
   auto pin_str = lnast.add_string(lnast.add_string(dpin_get_name(pin)));
   auto t0_str  = create_temp_var(lnast);
   auto lo_str  = lnast.add_string(offset_pin.get_node().get_type_const().to_pyrope());
@@ -579,6 +608,7 @@ void Pass_lgraph_to_lnast::attach_pick_node(Lnast& lnast, Lnast_nid& parent_node
   lnast.add_child(bitsel_node, Lnast_node::create_ref(pin_str));
   attach_child(lnast, bitsel_node, var_pin);
   lnast.add_child(bitsel_node, Lnast_node::create_ref(t0_str));
+#endif
 }
 
 void Pass_lgraph_to_lnast::attach_compar_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
