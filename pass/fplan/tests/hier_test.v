@@ -1,68 +1,85 @@
-module leaf1(output [14:0] a);
-  assign a[1] = ~a[0];
+module leaf1(input [14:0] ai, output [14:0] ao);
+  assign ao = ~ai;
 endmodule
 
-module leaf2(output [14:0] a, output [24:0] b);
-  assign a[4:3] = b[1:0] ^ ~b[7:6] ^ a[12:11];
+module leaf2(input [14:0] ai, output [14:0] ao, input [24:0] bi, output [24:0] bo);
+  // longer temp expression to get some variability in the area of the leaves
+  assign ao = bi ^ ~{bi[15:0], bi[24:16]} / ai;
+  assign bo = bi * 7;
 endmodule
 
-module leaf3(output [29:0] c);
-  assign c[29:28] = ~c[28:29];
+module leaf3(input [29:0] ci, output [29:0] co);
+  assign co = ~ci;
 endmodule
 
-module leaf4();
-
+module leaf4(input tempi, output tempo);
+  assign tempo = ~tempi;
 endmodule
 
-module leaf5(output [29:0] c);
-  assign c[27:26] = ~c[26:27];
+module leaf5(input [29:0] ci, output [29:0] co);
+  assign co = ~ci;
 endmodule
 
-module leaf6();
-
+module leaf6(input tempi, output tempo);
+  assign tempo = ~tempi;
 endmodule
 
-module leaf7(output [24:0] b);
-  assign b[24:23] = ~b[23:24];
+module leaf7(input [24:0] bi, output [24:0] bo);
+  assign bo = ~bi;
 endmodule
 
-module mid1(output [899:0] d);
-  wire [14:0] wa;
-  wire [24:0] wb;
+module mid1(input [899:0] di, output [899:0] dout);
+  wire [14:0] w_1_to_2;
+  wire [14:0] w_2_to_1;
 
-  leaf1 l1(.a(wa));
-  leaf2 l2(.a(wa), .b(wb));
-  leaf7 l7(.b(wb));
+  wire [24:0] w_2_to_7;
+  wire [24:0] w_7_to_2;
 
-  assign d[899:898] = ~d[898:899];
+  leaf1 l1(.ai(w_2_to_1), .ao(w_1_to_2));
+  leaf2 l2(.ai(w_1_to_2), .ao(w_2_to_1), .bi(w_7_to_2), .bo(w_2_to_7));
+  leaf7 l7(.bi(w_2_to_7), .bo(w_7_to_2));
+
+  assign dout = ~{di[899:38], w_1_to_2, w_2_to_7};
 endmodule
 
-module mid2(output [899:0] d, output [9:0] e);
-  wire [29:0] wc;
+module mid2(input [899:0] di, output [899:0] dout, input [9:0] ei, output [9:0] eo);
+  wire [29:0] w_3_to_5;
+  wire [29:0] w_5_to_3;
   
-  leaf3 l3(.c(wc));
-  leaf4 l4();
-  leaf5 l5(.c(wc));
+  leaf3 l3(.ci(w_5_to_3), .co(w_3_to_5));
+  leaf4 l4(.tempi(w_3_to_5[12]), .tempo(w_3_to_5[13])); // might get 'X' on bits 12/13 but whatever
+  leaf5 l5(.ci(w_3_to_5), .co(w_5_to_3));
 
-  assign d[897:896] = ~d[896:897];
-  assign e[9:8] = ~e[8:9];
+  assign dout = ~{di[899:30], w_3_to_5};
+  assign eo = ~{ei[9:1], w_5_to_3[0]};
 endmodule
 
-module mid4(output [9:0] e, output [4:0] f);
-  assign e[7:6] = ~e[6:7];
+module mid4(input [9:0] ei, output [9:0] eo, input [4:0] fi, output [4:0] fo);
+  assign eo = ~ei;
+  assign fo = ~fi;
 endmodule
 
-module mid3(output [4:0] f);
-  leaf6 l6();
-  assign f[4:3] = ~f[3:4];
+module mid3(input [4:0] fi, output [4:0] fo);
+  wire w;
+  leaf6 l6(.tempi(fi[3]), .tempo(w));
+  assign fo = ~{fi[4:1], w};
 endmodule
 
-module hier_test( output [9:0] we, output [4:0] wf);
-  wire [899:0] wd;
+module hier_test(input [913:0] testi, output [913:0] testo);
+  wire [899:0] w_1_to_2;
+  wire [899:0] w_2_to_1;
 
-  mid1 m1(.d(wd));
-  mid2 m2(.d(wd), .e(we));
-  mid3 m3(.f(wf));
-  mid4 m4(.e(we), .f(wf));
+  wire [9:0] w_2_to_4;
+  wire [9:0] w_4_to_2;
+
+  wire [4:0] w_4_to_3;
+  wire [4:0] w_3_to_4;
+
+  mid1 m1(.di(w_2_to_1), .dout(w_1_to_2));
+  mid2 m2(.di(w_1_to_2), .dout(w_2_to_1), .ei(w_2_to_4), .eo(w_4_to_2));
+  mid3 m3(.fi(w_4_to_3), .fo(w_3_to_4));
+  mid4 m4(.ei(w_4_to_2), .eo(w_2_to_4), .fi(w_3_to_4), .fo(w_4_to_3));
+
+  assign testo = ~{testi[0], w_2_to_1, w_2_to_4, w_3_to_4};
   
 endmodule
