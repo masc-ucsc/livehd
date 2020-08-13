@@ -51,19 +51,18 @@ void Pass_fplan::makefp(LGraph *l) {
   auto existing_edges = g.edge_set();
 
   // TODO: use get_down_nodes_map() to list all IOs and submodules
-
+/*
   for (auto node : l->fast()) {
-    // TODO: this won't compile
+    std::cout << node.debug_name() << std::endl;
+    std::cout << "inputs: " << node.has_inputs() << std::endl;
+    std::cout << "outputs: " << node.has_outputs() << std::endl;
   }
+*/
 
-  /*
-  // TODO: won't compile...?
-  for (auto node : l->fast()) {
-    for (auto e : node.out_edges()) {
-      std::cout << "lg: " << node.get_name() << std::endl;
-    }
+  // TODO: this prints nothing
+  for (auto n : l->get_down_nodes_map()) {
+    std::cout << n.first.get_nid() << std::endl;
   }
-  */
 
   /*
       std::string other_name = connection["name"].GetString();
