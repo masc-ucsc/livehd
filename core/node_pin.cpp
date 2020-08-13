@@ -61,6 +61,10 @@ bool Node_pin::is_graph_input() const { return current_g->is_graph_input(idx); }
 
 bool Node_pin::is_graph_output() const { return current_g->is_graph_output(idx); }
 
+Node_pin Node_pin::get_non_hierarchical() const {
+  return Node_pin(current_g, current_g, Hierarchy_tree::invalid_index(), idx, pid, sink);
+}
+
 Node_pin Node_pin::get_sink_from_output() const {
   I(is_graph_output());
   if(is_sink())
