@@ -12,7 +12,7 @@ pts='tuple_copy logic
      '
 
 #make sure to call Pyrope_compile() in the end of script
-pts='tuple_copy'
+pts='test'
 pts_hier4='funcall4'   
 pts_hier='sum funcall'
 pts_hier2='sum2 funcall2'   
