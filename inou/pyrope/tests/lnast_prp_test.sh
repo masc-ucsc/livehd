@@ -2,7 +2,7 @@
 rm -rf ./lgdb
 
 pts_to_do='lhs_wire3 tuple'
-pts='tuple_copy logic
+pts='reg_bits_set tuple_copy logic
      hier_tuple hier_tuple2 hier_tuple3 
      lhs_wire lhs_wire2 scalar_tuple attr_set
      firrtl_tail3 firrtl_tail2 firrtl_tail 
@@ -12,7 +12,7 @@ pts='tuple_copy logic
      '
 
 #make sure to call Pyrope_compile() in the end of script
-# pts='test'
+# pts='reg__q_pin'
 pts_hier='sum funcall'
 pts_hier2='sum2 funcall2'   
 pts_hier4='funcall4'   
@@ -207,8 +207,8 @@ Pyrope_compile "$pts_hier2" "hier"
 # Pyrope_compile "$pts_hier4" "hier"
 
 
-rm -f *.v
-rm -f lnast.dot.gld
-rm -f lnast.nodes
-rm -f lnast.nodes.gld
-rm -f *.dot
+# rm -f *.v
+# rm -f lnast.dot.gld
+# rm -f lnast.nodes
+# rm -f lnast.nodes.gld
+# rm -f *.dot
