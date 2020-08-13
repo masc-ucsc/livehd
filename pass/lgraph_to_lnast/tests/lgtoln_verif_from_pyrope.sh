@@ -2,7 +2,14 @@
 rm -rf ./lgdb
 rm -rf ./lgdb2
 
-pts='if if2 nested_if ssa_rhs adder_stage ff_if' # tuple_if' logic
+pts='logic hier_tuple hier_tuple2 hier_tuple3 lhs_wire lhs_wire2 scalar_tuple attr_set
+     firrtl_tail nested_if tuple_if capricious_bits2 capricious_bits4 capricious_bits
+     out_ssa if2 if ssa_rhs bits_rhs'
+
+#firrtl_tail3
+#firrtl_tail2 -- problems with ___ in ln->lg
+
+#logic firrtl_tail if if2 nested_if ssa_rhs adder_stage ff_if' # tuple_if' logic
 #simple_tuple
 #tuple
 #tuple_if
