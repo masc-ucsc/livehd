@@ -2,7 +2,7 @@
 rm -rf ./lgdb
 rm -rf ./lgdb2
 
-pts='trivial2 trivial3 logic_bitwise_op_gld reduce common_sub operators loop_in_lg loop_in_lg2 mux mux2 trivial kogg_stone_64 simple_add trivial_and assigns compare simple_flop latch' # trivial1 mux latch add'
+pts='trivial3 logic_bitwise_op_gld common_sub operators mux mux2 trivial simple_add trivial_and assigns compare loop_in_lg loop_in_lg2 trivial2' # loop_in_lg loop_in_lg2 latch' # trivial1 mux latch add'
 #TO ADD LIST, but have bugs:
 #pick -- pick op not yet implemented in lnast2lg
 #simple_flop, shift, cse_basic -- problems arise with flops somewhere??

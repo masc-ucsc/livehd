@@ -280,11 +280,15 @@ void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid)
   auto &dot_lrhs_table  =  dot_lrhs_tables[psts_nid];
 
 
-  if (is_lhs(psts_nid, dot_nid)) {
-    auto paired_assign_nid = dot_lrhs_table[dot_nid].second;
-    ref_data(paired_assign_nid)->type = Lnast_ntype::create_invalid();
+  auto paired_nid = dot_lrhs_table[dot_nid].second;
+  Lnast_ntype paired_type;
+  if (!paired_nid.is_invalid())
+    paired_type = get_type(paired_nid);
+
+  if (is_lhs(psts_nid, dot_nid) && paired_type.is_assign()) {
+    ref_data(paired_nid)->type = Lnast_ntype::create_invalid();
     ref_data(dot_nid)->type = Lnast_ntype::create_tuple_add();
-    auto c0_assign = get_first_child(paired_assign_nid);
+    auto c0_assign = get_first_child(paired_nid);
     auto c1_assign = get_sibling_next(c0_assign);
 
     for (auto child : children(dot_nid)) {
@@ -302,11 +306,37 @@ void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid)
 
     auto c0_dot_name = get_name(get_first_child(dot_nid));
     tuple_var_table.insert(c0_dot_name); //insert new tuple name
+    return;
+  } 
 
-  } else { // is rhs
-    // change node semantic from dot/set->tuple_get
-    ref_data(dot_nid)->type = Lnast_ntype::create_tuple_get();
-  }
+  if (is_lhs(psts_nid, dot_nid) && !paired_type.is_assign()) {
+    ref_data(dot_nid)->type = Lnast_ntype::create_tuple_add();
+    auto c0_paired = get_first_child(paired_nid);
+
+    auto new_tup_add = insert_next_sibling(paired_nid, get_data(dot_nid));
+    
+
+    for (auto dot_child : children(dot_nid)) {
+      if (dot_child == get_first_child(dot_nid)){
+        continue;
+      } else {
+        add_child(new_tup_add, get_data(dot_child));
+      }
+    }
+    add_child(new_tup_add, get_data(c0_paired)); //add final child of the new tup_add
+
+    ref_data(dot_nid)->type = Lnast_ntype::create_invalid();
+
+    auto c0_dot_name = get_name(get_first_child(dot_nid));
+    tuple_var_table.insert(c0_dot_name); //insert new tuple name
+    return;
+  } 
+  
+  // is rhs
+  // change node semantic from dot/set->tuple_get
+  ref_data(dot_nid)->type = Lnast_ntype::create_tuple_get();
+  
+
 }
 
 
@@ -474,7 +504,7 @@ void Lnast::analyze_dot_lrhs_handle_a_statement(const Lnast_nid &psts_nid, const
     for (auto sib_child : children(sib_nid)) {
       if (sib_child == get_first_child(sib_nid) && get_name(sib_child) == c0_dot_name) {
         hit = true;
-        dot_lrhs_table[dot_nid].first = true;
+        dot_lrhs_table[dot_nid].first = true; //is lhs
         dot_lrhs_table[dot_nid].second = sib_nid;
         break;
       } else if (get_name(sib_child) == c0_dot_name){
