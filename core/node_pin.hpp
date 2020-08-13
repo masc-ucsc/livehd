@@ -300,6 +300,7 @@ public:
   constexpr bool is_invalid() const { return idx == 0; }
   constexpr bool is_down_node() const { return top_g != current_g; }
   constexpr bool is_hierarchical() const { return !hidx.is_invalid(); }
+  Node_pin       get_non_hierarchical() const;
 
   constexpr bool operator==(const Node_pin &other) const {
     return (top_g == other.top_g) && (idx == other.idx) && (pid == other.pid) && (sink == other.sink) && (hidx == other.hidx);

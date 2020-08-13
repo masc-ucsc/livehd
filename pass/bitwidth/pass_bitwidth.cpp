@@ -19,12 +19,19 @@ void Pass_bitwidth::setup() {
   Eprp_method m1("pass.bitwidth", "MIT algorithm for bitwidth optimization", &Pass_bitwidth::trans);
 
   m1.add_label_optional("max_iterations", "maximum number of iterations to try", "10");
+  m1.add_label_optional("hier", "hierarchical bitwidth", "false");
 
   register_pass(m1);
 }
 
 Pass_bitwidth::Pass_bitwidth(const Eprp_var &var) : Pass("pass.bitwidth", var) {
   auto miters = var.get("max_iterations");
+  auto hier_txt = var.get("hier");
+
+  if (hier_txt != "false" && hier_txt != "0")
+    hier = true;
+  else
+    hier = false;
 
   bool ok = absl::SimpleAtoi(miters, &max_iterations);
   if (!ok || max_iterations > 100 || max_iterations <= 0) {
@@ -50,7 +57,7 @@ void Pass_bitwidth::do_trans(LGraph *lg) {
 void Pass_bitwidth::process_const(Node &node) {
   auto dpin = node.get_driver_pin();
   auto it   = bwmap.emplace(dpin.get_compact(), Bitwidth_range(node.get_type_const()));
-  adjust_dpin_bits(dpin, it.first->second);
+  forward_adjust_dpin(dpin, it.first->second);
 }
 
 void Pass_bitwidth::process_flop(Node &node) {
@@ -68,7 +75,8 @@ void Pass_bitwidth::process_flop(Node &node) {
     max_val = b.lsh_op(d_dpin.get_bits()) - 1;
   } else if (node.get_driver_pin(0).get_bits()) {
     // At least propagate backward the width
-    d_dpin.set_bits(node.get_driver_pin(0).get_bits());
+    if (d_dpin.get_bits()==0 || d_dpin.get_bits() > node.get_driver_pin(0).get_bits())
+      d_dpin.set_bits(node.get_driver_pin(0).get_bits());
     return;
   } else {
     if (d_dpin.has_name())
@@ -667,7 +675,7 @@ void Pass_bitwidth::garbage_collect_support_structures(XEdge_iterator &inp_edges
       for (auto parent_dpin : e.driver.get_node().out_connected_pins()) {
         auto it2 = bwmap.find(parent_dpin.get_compact());
         if (it2 != bwmap.end()) {  // Not all the nodes create bwmap (impossible to infer do not)
-          adjust_dpin_bits(parent_dpin, it2->second);
+          forward_adjust_dpin(parent_dpin, it2->second);
           bwmap.erase(it2);
         }
       }
@@ -677,11 +685,28 @@ void Pass_bitwidth::garbage_collect_support_structures(XEdge_iterator &inp_edges
   }
 }
 
-void Pass_bitwidth::adjust_dpin_bits(Node_pin &dpin, Bitwidth_range &bw) {
+void Pass_bitwidth::forward_adjust_dpin(Node_pin &dpin, Bitwidth_range &bw) {
   auto bw_bits = bw.get_bits();
-  if (bw_bits && bw_bits != dpin.get_bits()) {
+  if (bw_bits && bw_bits < dpin.get_bits()) {
     // fmt::print("bitwidth: bits:{}->{} for dpin:{}\n", dpin.get_bits(), bw_bits, dpin.debug_name());
     dpin.set_bits(bw_bits);
+  }
+}
+
+void Pass_bitwidth::set_graph_boundary(Node_pin &dpin, Node_pin &spin) {
+  I(hier); // do not call unless hierarchy is set
+
+  if (dpin.get_class_lgraph() == spin.get_class_lgraph())
+    return;
+
+  I(dpin.get_hidx() != spin.get_hidx());
+
+  auto same_level_spin = spin.get_non_hierarchical();
+  for (auto dpin_sub:same_level_spin.inp_driver()) {
+    if (!dpin_sub.get_node().is_type(SubGraph_Op))
+      continue;
+    if (dpin_sub.get_bits()==0 || dpin_sub.get_bits() > dpin.get_bits())
+      dpin_sub.set_bits(dpin.get_bits());
   }
 }
 
@@ -689,17 +714,18 @@ void Pass_bitwidth::bw_pass(LGraph *lg) {
   must_perform_backward = false;
   not_finished          = false;
 
-  lg->each_graph_input([&](Node_pin &dpin) {
+  for(auto dpin:lg->get_graph_input_node(hier).out_setup_pins()) {
     if (dpin.get_bits())
       bwmap.emplace(dpin.get_compact(), Bitwidth_range(dpin.get_bits()));
-  });
-  outcountmap[lg->get_graph_input_node(true).get_compact()] = lg->get_graph_input_node(true).get_num_outputs();
+  }
 
-  for (auto node : lg->forward(true)) {
+  outcountmap[lg->get_graph_input_node(hier).get_compact()] = lg->get_graph_input_node(hier).get_num_outputs();
+
+  for (auto node : lg->forward(hier)) {
     auto inp_edges = node.inp_edges();
     auto op        = node.get_type_op();
 
-    // fmt::print("bitwidth node:{} lg:{}\n", node.debug_name(), node.get_class_lgraph()->get_name());
+    //fmt::print("bitwidth node:{} lg:{}\n", node.debug_name(), node.get_class_lgraph()->get_name());
 
     if (inp_edges.empty() && (op != Const_Op && op != SubGraph_Op && op != LUT_Op && op != TupKey_Op)) {
       fmt::print("pass.bitwidth: removing dangling node:{}\n", node.debug_name());
@@ -744,6 +770,12 @@ void Pass_bitwidth::bw_pass(LGraph *lg) {
       fmt::print("FIXME: node:{} still not handled by bitwidth\n", node.debug_name());
     }
 
+    if (hier) {
+      for (auto e:inp_edges) {
+        set_graph_boundary(e.driver, e.sink);
+      }
+    }
+
     for (auto dpin : node.out_connected_pins()) {
       auto it = bwmap.find(dpin.get_compact());
       if (it == bwmap.end())
@@ -765,23 +797,25 @@ void Pass_bitwidth::bw_pass(LGraph *lg) {
     garbage_collect_support_structures(inp_edges);
   }
 
-  lg->each_graph_output([&](Node_pin &dpin) {
+  for(auto dpin:lg->get_graph_output_node(hier).out_setup_pins()) {
     auto spin = dpin.get_sink_from_output();
     if (!spin.has_inputs())
-      return;
+      continue;
 
     auto out_driver = spin.get_driver_pin();
 
     I(!out_driver.is_invalid());
     auto it = bwmap.find(out_driver.get_compact());
     if (it != bwmap.end()) {
-      adjust_dpin_bits(out_driver, it->second);
+      forward_adjust_dpin(out_driver, it->second);
 
       bwmap.erase(it);
     }
 
     if (out_driver.get_bits()) {
       dpin.set_bits(out_driver.get_bits());
+      if (hier)
+        set_graph_boundary(out_driver, spin);
     }
 
     /* if (out_driver.get_bits()) { */
@@ -792,7 +826,7 @@ void Pass_bitwidth::bw_pass(LGraph *lg) {
     /*   } */
     /*   dpin.set_bits(out_driver.get_bits()); */
     /* } */
-  });
+  }
 
 #ifndef PRESERVE_ATTR_NODE
   if (not_finished) {
