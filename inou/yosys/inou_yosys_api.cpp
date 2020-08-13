@@ -197,6 +197,16 @@ int Inou_yosys_api::call_yosys(mustache::data &vars) {
 
     if (WIFEXITED(wstatus)) {
       printf("exited, status=%d\n", WEXITSTATUS(wstatus));
+      if (wstatus != 0) {
+        std::string errpath = filename;
+        errpath.append(".err");
+        std::ifstream errfile;
+        errfile.open(errpath, std::ios::in);
+        std::string errtext;
+        getline(errfile, errtext);
+        std::cout << "\nyosys output: " << errtext << std::endl;
+        errfile.close();
+      }
     } else if (WIFSIGNALED(wstatus)) {
       printf("killed by signal %d\n", WTERMSIG(wstatus));
     } else if (WIFSTOPPED(wstatus)) {
