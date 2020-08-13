@@ -27,6 +27,12 @@ new_git_repository( # Open_timer user taskflow
     commit = "3d2b025ff2509f40424855e3f8640fc2fb6b90b9", # July 1, 2020
     remote = "https://github.com/serge-sans-paille/frozen.git",
 )
+git_repository( # Open_timer user taskflow
+    name = "range-v3",
+    commit = "6dd1cb6a03a588031868b6ffb66286e6eaab6714", # July 18, 2020
+    remote = "https://github.com/ericniebler/range-v3.git",
+)
+
 new_git_repository( # Open_timer user taskflow
     name = "taskflow",
     build_file = "BUILD.taskflow",
@@ -168,6 +174,18 @@ new_git_repository(
     remote = "https://git.savannah.gnu.org/git/bison.git",
     #patches = ["//external:patch.verilator"],
     #strip_prefix = "include",
+)
+new_git_repository(
+    name = "graph",
+    build_file = "BUILD.graph",
+    commit = "b1e38e1084a0dff6f4eb4ed9a645ed63d3e83dd2", # latest commit as of 7/18/20
+    remote = "https://github.com/cbbowen/graph",
+)
+new_git_repository(
+	name = "range-v3",
+	build_file = "BUILD.rangev3",
+	commit = "4f4beb45c5e56aca4233e4d4c760208e21fff2ec", # specific commit used by graph, made on Jan 11 2019
+	remote = "https://github.com/ericniebler/range-v3",
 )
 
 # BOOST Libraries dependences
