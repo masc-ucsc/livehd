@@ -2,18 +2,31 @@
 rm -rf ./lgdb
 rm -rf ./lgdb2
 
-pts='trivial3 logic_bitwise_op_gld common_sub operators mux mux2 trivial simple_add trivial_and assigns compare loop_in_lg loop_in_lg2 trivial2' # loop_in_lg loop_in_lg2 latch' # trivial1 mux latch add'
+pts='trivial3 logic_bitwise_op_gld common_sub
+     operators mux mux2 trivial simple_add
+     trivial_and assigns compare trivial1'
+
 #TO ADD LIST, but have bugs:
-#pick -- pick op not yet implemented in lnast2lg
-#simple_flop, shift, cse_basic -- problems arise with flops somewhere??
-#add -- sign isn't working yet
-#arith -- same problem with minus, can't do %
-#compare2 -- lnast2lg doesn't yet support range/bit_sel/etc. for pick nodes
-#trivial2 -- subgraphs broke due to inp_edges going into subgraph
-#consts -- don't have join->concat implemented yet
-#submodule
-#satsmall, satlarge -- mult not supported in bitwidth pass
-#long_gcd -- lnast2lg does not handle ___ variables being used away from declaration
+#  Sign isn't working yet:
+#     - add
+#  0b0u1bit << 2 is treated as a 1 bit number (causes bw problems):
+#     - pick
+#  Node not yet handled in some other pass:
+#     - consts (shift_left not yet handled in pass.bw)
+#     - satsmall, satlarge (mult not supported in pass.bw)
+#     - arith (mod op not yet suppoted in inou.lnast_dfg.tolg)
+#  Problems with registers:
+#     - simple_flop
+#     - cse_basic
+#     - shift
+#     - loop_in_lg, loop_in_lg2
+#  inou.lnast_dfg.tolg requires temp vars to be used immediately after being set:
+#     - long_gcd
+#  Submodules failing
+#     - submodule
+#     - trivial2
+#  There's an error in out_connected_pins()... returns 0 pins for a node that has an output
+#     - compare2
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
