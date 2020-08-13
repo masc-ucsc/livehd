@@ -207,8 +207,8 @@ Pyrope_compile "$pts_hier2" "hier"
 # Pyrope_compile "$pts_hier4" "hier"
 
 
-# rm -f *.v
-# rm -f lnast.dot.gld
-# rm -f lnast.nodes
-# rm -f lnast.nodes.gld
-# rm -f *.dot
+rm -f *.v
+rm -f lnast.dot.gld
+rm -f lnast.nodes
+rm -f lnast.nodes.gld
+rm -f *.dot
