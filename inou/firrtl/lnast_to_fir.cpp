@@ -18,11 +18,11 @@ void Inou_firrtl::toFIRRTL(Eprp_var &var) {
   bool first = true;
   for (const auto &lnast : var.lnasts) {
     p.do_tofirrtl(lnast, circuit);
-    if (first) {
+    //if (first) {
       top_msg->set_name(
           (std::string)lnast->get_name(lnast->get_root()));  // FIXME: Placeholder for now, need to figure out which LNAST is "top"
       first = false;
-    }
+    //}
   }
 
   //fir_design.PrintDebugString();
@@ -545,8 +545,19 @@ void Inou_firrtl::handle_attr_assign(Lnast &ln, const Lnast_nid &lhs, const Lnas
     handle_async_attr(ln, var_name, rhs);
   } else if (attr_name == "__sign") {
     handle_sign_attr(ln, var_name, rhs);
+  } else if (attr_name == "__fwd") {
+    // Can be ignored.
+  } else if (attr_name == "__posedge") {
+    if (ln.get_name(rhs) == "false") {
+      Pass::warn("Attribute __posedge was set to false, but currently FIRRTL does not support negedge-triggered registers. Will ignore.");
+    }
+  } else if (attr_name == "__latch") {
+    if (ln.get_name(rhs) == "true") {
+      Pass::error("A latch is in your design, but latches are not supported in FIRRTL. Cannot translate.");
+      I(false);
+    }
   } else {
-    fmt::print("Error: attribute found, but it is either incorrect or not supported yet.\n");
+    fmt::print("Error: compiler attribute \"{}\" found, but it is either incorrect or not supported yet.\n", attr_name);
     // I(false);
   }
 }
@@ -862,7 +873,6 @@ void Inou_firrtl::add_refcon_as_expr(Lnast &ln, const Lnast_nid &lnidx, firrtl::
 
     firrtl::FirrtlPB_Expression_IntegerLiteral *num = new firrtl::FirrtlPB_Expression_IntegerLiteral();
     num->set_value(lconst_str);
-    //fmt::print("ULit: {} {}\n", lconst_str, lconst_holder.to_pyrope());
     firrtl::FirrtlPB_Width *width = new firrtl::FirrtlPB_Width();
     width->set_value(lconst_holder.get_bits());
 

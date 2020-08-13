@@ -290,7 +290,7 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id, const 
 
       auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
       lnast.add_child(idx_asg, Lnast_node::create_ref(acc_name_sy));
-      lnast.add_child(idx_asg, Lnast_node::create_ref("true"));
+      lnast.add_child(idx_asg, Lnast_node::create_const("true"));
     }
   }
 
@@ -361,7 +361,7 @@ void Inou_firrtl::InitMemory(Lnast& lnast, Lnast_nid& parent_node, const firrtl:
     if (fwd) {
       auto idx_asg_ruw = lnast.add_child(idx_tup, Lnast_node::create_assign("mem_ruw"));
       lnast.add_child(idx_asg_ruw, Lnast_node::create_ref("__fwd"));
-      lnast.add_child(idx_asg_ruw, Lnast_node::create_ref("true"));
+      lnast.add_child(idx_asg_ruw, Lnast_node::create_const("true"));
     }
 
     // Setup for late assigns: addr, en, clk
@@ -392,7 +392,7 @@ void Inou_firrtl::InitMemory(Lnast& lnast, Lnast_nid& parent_node, const firrtl:
     if (fwd) {
       auto idx_asg_ruw = lnast.add_child(idx_tup, Lnast_node::create_assign("mem_ruw"));
       lnast.add_child(idx_asg_ruw, Lnast_node::create_ref("__fwd"));
-      lnast.add_child(idx_asg_ruw, Lnast_node::create_ref("true"));
+      lnast.add_child(idx_asg_ruw, Lnast_node::create_const("true"));
     }
 
     // Setup for late assigns: addr, en, clk, data, mask
@@ -431,7 +431,7 @@ void Inou_firrtl::InitMemory(Lnast& lnast, Lnast_nid& parent_node, const firrtl:
     if (fwd) {
       auto idx_asg_ruw = lnast.add_child(idx_tup, Lnast_node::create_assign("mem_ruw"));
       lnast.add_child(idx_asg_ruw, Lnast_node::create_ref("__fwd"));
-      lnast.add_child(idx_asg_ruw, Lnast_node::create_ref("true"));
+      lnast.add_child(idx_asg_ruw, Lnast_node::create_const("true"));
     }
 
     // Setup for late assigns: addr, en, clk, wdata, wmask (may have to do wmode later?)
@@ -580,11 +580,11 @@ void Inou_firrtl::HandleMemPortPre(Lnast& lnast, Lnast_nid& parent_node, const f
   lnast.add_child(idx_tup, Lnast_node::create_ref(port_name));
 
   auto idx_asg_f = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
-  lnast.add_child(idx_asg_f, Lnast_node::create_assign("__fwd"));
+  lnast.add_child(idx_asg_f, Lnast_node::create_ref("__fwd"));
   if (std::get<0>(mem_props) == true) {
-    lnast.add_child(idx_asg_f, Lnast_node::create_assign("true"));
+    lnast.add_child(idx_asg_f, Lnast_node::create_const("true"));
   } else {
-    lnast.add_child(idx_asg_f, Lnast_node::create_assign("false"));
+    lnast.add_child(idx_asg_f, Lnast_node::create_const("false"));
   }
 
   // Specify port-specific attributes in this tuple.
@@ -593,7 +593,7 @@ void Inou_firrtl::HandleMemPortPre(Lnast& lnast, Lnast_nid& parent_node, const f
     late_assign_ports[absl::StrCat(mport.memory_id(), ".", mport.id())] = READP;
 
     auto idx_asg_l = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
-    lnast.add_child(idx_asg_l, Lnast_node::create_assign("__latency"));
+    lnast.add_child(idx_asg_l, Lnast_node::create_ref("__latency"));
     lnast.add_child(idx_asg_l, Lnast_node::create_const(std::get<1>(mem_props)));
 
   } else if (dir_case == firrtl::FirrtlPB_Statement_MemoryPort_Direction::FirrtlPB_Statement_MemoryPort_Direction_MEMORY_PORT_DIRECTION_WRITE) {
@@ -601,11 +601,11 @@ void Inou_firrtl::HandleMemPortPre(Lnast& lnast, Lnast_nid& parent_node, const f
     late_assign_ports[absl::StrCat(mport.memory_id(), ".", mport.id())] = WRITEP;
 
     auto idx_asg_m = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
-    lnast.add_child(idx_asg_m, Lnast_node::create_assign("__wrmask"));
+    lnast.add_child(idx_asg_m, Lnast_node::create_ref("__wrmask"));
     lnast.add_child(idx_asg_m, Lnast_node::create_const("0u"));
 
     auto idx_asg_l = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
-    lnast.add_child(idx_asg_l, Lnast_node::create_assign("__latency"));
+    lnast.add_child(idx_asg_l, Lnast_node::create_ref("__latency"));
     lnast.add_child(idx_asg_l, Lnast_node::create_const(std::get<2>(mem_props)));
 
   } else if (dir_case == firrtl::FirrtlPB_Statement_MemoryPort_Direction::FirrtlPB_Statement_MemoryPort_Direction_MEMORY_PORT_DIRECTION_READ_WRITE) {
@@ -613,11 +613,11 @@ void Inou_firrtl::HandleMemPortPre(Lnast& lnast, Lnast_nid& parent_node, const f
     late_assign_ports[absl::StrCat(mport.memory_id(), ".", mport.id())] = READ_WRITEP;
 
     auto idx_asg_m = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
-    lnast.add_child(idx_asg_m, Lnast_node::create_assign("__wrmask"));
+    lnast.add_child(idx_asg_m, Lnast_node::create_ref("__wrmask"));
     lnast.add_child(idx_asg_m, Lnast_node::create_const("0u"));
 
     auto idx_asg_l = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
-    lnast.add_child(idx_asg_l, Lnast_node::create_assign("__latency"));
+    lnast.add_child(idx_asg_l, Lnast_node::create_ref("__latency"));
     //FIXME: Can only provide 1 latency, so go with write lat
     lnast.add_child(idx_asg_l, Lnast_node::create_const(std::get<2>(mem_props)));
 
@@ -965,7 +965,7 @@ void Inou_firrtl::HandleConvOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_P
 
   auto idx_asg1 = lnast.add_child(parent_node, Lnast_node::create_assign(""));
   lnast.add_child(idx_asg1, Lnast_node::create_ref(temp_var_name0));
-  lnast.add_child(idx_asg1, Lnast_node::create_ref("true"));
+  lnast.add_child(idx_asg1, Lnast_node::create_const("true"));
 
   auto idx_dot2 = lnast.add_child(parent_node, Lnast_node::create_dot(""));
   lnast.add_child(idx_dot2, Lnast_node::create_ref(temp_var_name1));
@@ -1353,9 +1353,9 @@ void Inou_firrtl::HandleTypeConvOp(Lnast& lnast, const firrtl::FirrtlPB_Expressi
     auto idx_dot_a = lnast.add_child(parent_node, Lnast_node::create_assign("asg_d"));
     lnast.add_child(idx_dot_a, Lnast_node::create_ref(temp_var_name));
     if (op.op() == firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_UINT) {
-      lnast.add_child(idx_dot_a, Lnast_node::create_ref("false"));
+      lnast.add_child(idx_dot_a, Lnast_node::create_const("false"));
     } else {
-      lnast.add_child(idx_dot_a, Lnast_node::create_ref("true"));
+      lnast.add_child(idx_dot_a, Lnast_node::create_const("true"));
     }
 
     auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
