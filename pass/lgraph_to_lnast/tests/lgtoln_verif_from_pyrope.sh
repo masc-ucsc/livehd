@@ -10,6 +10,9 @@ pts='tuple_copy logic
      capricious_bits2 capricious_bits4 capricious_bits
      out_ssa if2 if ssa_rhs bits_rhs'
 
+pts_hier='sum funcall'
+pts_hier2='sum2 funcall2'
+
 #TO ADD, BUT BUGS:
 #  Problems with registers (attr specified into ln during lg->ln don't all work yet in ln->lg)
 #     - reg_bits_set
@@ -32,8 +35,9 @@ if [ ! -f $LGSHELL ]; then
     fi
 fi
 
-for pt in $pts
-do
+lgtoln_verif() {
+  for pt in $1
+  do
     if [ -f ${pt}.v ]; then rm ${pt}.v; fi
     echo ""
     echo ""
@@ -93,7 +97,7 @@ do
     echo "LGraph Optimization (newlg)"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.bitwidth"
+    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.bitwidth"
     if [ $? -eq 0 ]; then
       echo "Successfully optimized newlg: ${pt}.v"
     else
@@ -117,24 +121,61 @@ do
       exit 1
     fi
 
+    # If not hierarchical test, then just do lgcheck after each file.
+    if [[ $2 != "hier" ]]; then
+      echo ""
+      echo "----------------------------------------------------"
+      echo "Logic Equivalence Check"
+      echo "----------------------------------------------------"
+
+      ${LGCHECK} --implementation=${pt}.v --reference=./inou/pyrope/tests/compiler/verilog_gld/${pt}.gld.v
+
+      if [ $? -eq 0 ]; then
+        echo "Successfully pass logic equivilence check!"
+      else
+        echo "FAIL: "${pt}".v !== "${pt}".gld.v"
+        exit 1
+      fi
+
+      rm -f *.v
+      rm -f *.dot
+    fi
+  done
+
+  # If doing hierarchical, then we have to do all files and then lgcheck after.
+  if [[ $2 == "hier" ]]; then
+    top_module=$(echo $1 | awk '{print $NF}')
+    echo $top_module
+
+    for pt in $1
+    do
+      if [[ pt != $top_module ]]; then
+        $(cat ${pt}.v >> ${top_module}.v)
+      fi
+    done
+
     echo ""
     echo "----------------------------------------------------"
     echo "Logic Equivalence Check"
     echo "----------------------------------------------------"
 
-    ${LGCHECK} --implementation=${pt}.v --reference=./inou/pyrope/tests/compiler/verilog_gld/${pt}.gld.v
+    ${LGCHECK} --implementation=${top_module}.v --reference=./inou/pyrope/tests/compiler/verilog_gld/${top_module}.gld.v
 
     if [ $? -eq 0 ]; then
       echo "Successfully pass logic equivilence check!"
     else
-      echo "FAIL: "${pt}".v !== "${pt}".gld.v"
+      echo "FAIL: "${top_module}".v !== "${top_module}".gld.v"
       exit 1
     fi
 
-    rm -f ${pt}.v
-    rm -f ${pt}.oldlg.dot
-    rm -f ${pt}.newlg.dot
-done #end of for
+    rm -f *.v
+    rm -f *.dot
+  fi
 
-rm -rf ./lgdb
-rm -rf ./lgdb2
+  rm -rf ./lgdb
+  rm -rf ./lgdb2
+}
+
+lgtoln_verif "$pts"
+lgtoln_verif "$pts_hier" "hier"
+lgtoln_verif "$pts_hier2" "hier"

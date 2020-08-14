@@ -881,7 +881,7 @@ void Inou_firrtl::HandleAndReducOp(Lnast& lnast, const firrtl::FirrtlPB_Expressi
   auto idx_eq = lnast.add_child(parent_node, Lnast_node::create_same("andr_same"));
   lnast.add_child(idx_eq, Lnast_node::create_ref(lnast.add_string(lhs)));
   AttachExprStrToNode(lnast, e1_str, idx_eq);
-  lnast.add_child(idx_eq, Lnast_node::create_const("-1"));
+  lnast.add_child(idx_eq, Lnast_node::create_const("-1u"));
 }
 
 void Inou_firrtl::HandleOrReducOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node,
@@ -1113,7 +1113,7 @@ void Inou_firrtl::HandleConcatOp(Lnast& lnast, const firrtl::FirrtlPB_Expression
 void Inou_firrtl::HandlePadOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node,
                               const std::string& lhs) {
   /* temp solution: just ignore arg and use const # as bitwidth
-   *      dot          assign  assign
+   *      dot          assign dp_assign
    *     / | \           /\      /\
    * ___F0 x __bits  ___F0 #    x  e */
   I(lnast.get_data(parent_node).type.is_stmts());
@@ -1133,12 +1133,7 @@ void Inou_firrtl::HandlePadOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_Pr
   lnast.add_child(idx_asg1, Lnast_node::create_ref(temp_var_name));
   lnast.add_child(idx_asg1, Lnast_node::create_const(c_name));
 
-  Lnast_nid idx_asg2;
-  if (lhs.substr(0, 1) == "%") {
-    idx_asg2 = lnast.add_child(parent_node, Lnast_node::create_dp_assign("pad_dpasg"));
-  } else {
-    idx_asg2 = lnast.add_child(parent_node, Lnast_node::create_assign("pad_asg"));
-  }
+  auto idx_asg2 = lnast.add_child(parent_node, Lnast_node::create_dp_assign("pad_dpasg"));
   lnast.add_child(idx_asg2, Lnast_node::create_ref(lhs_strv));
   lnast.add_child(idx_asg2, Lnast_node::create_ref(e_name));
 

@@ -937,6 +937,8 @@ void Pass_lgraph_to_lnast::attach_latch_node(Lnast& lnast, Lnast_nid& parent_nod
 
 void Pass_lgraph_to_lnast::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
   const auto &sub = pin.get_node().get_type_sub_node();
+  if (!pin.get_node().has_name())
+    pin.get_node().set_name(create_temp_var(lnast));
   fmt::print("instance_name:{}, subgraph->get_name():{}\n", pin.get_node().get_name(), sub.get_name());
 
   // Create tuple names for submodule IO.
@@ -955,17 +957,26 @@ void Pass_lgraph_to_lnast::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_
 
   // Create actual call to submodule.
   auto func_call_node = lnast.add_child(parent_node, Lnast_node::create_func_call("func_call"));
-  lnast.add_child(func_call_node, Lnast_node::create_ref(out_tup_name));
+  if (pin.get_node().out_connected_pins().size() == 1) {
+    for (const auto dpin : pin.get_node().out_connected_pins()) {
+      // will only do 1 iteration
+      attach_child(lnast, func_call_node, dpin);
+    }
+  } else {
+    lnast.add_child(func_call_node, Lnast_node::create_ref(out_tup_name));
+  }
   lnast.add_child(func_call_node, Lnast_node::create_ref(sub.get_name()));
   lnast.add_child(func_call_node, Lnast_node::create_ref(inp_tup_name));
 
   // Create output
-  for (const auto dpin : pin.get_node().out_connected_pins()) {
-    auto port_name = dpin.get_type_sub_io_name();
-    auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_dot("sb_out_set"));
-    attach_child(lnast, idx_asg, dpin);
-    lnast.add_child(idx_asg, Lnast_node::create_ref(out_tup_name));
-    lnast.add_child(idx_asg, Lnast_node::create_ref(port_name));
+  if (pin.get_node().out_connected_pins().size() > 1) {
+    for (const auto dpin : pin.get_node().out_connected_pins()) {
+      auto port_name = dpin.get_type_sub_io_name();
+      auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_dot("sb_out_set"));
+      attach_child(lnast, idx_asg, dpin);
+      lnast.add_child(idx_asg, Lnast_node::create_ref(out_tup_name));
+      lnast.add_child(idx_asg, Lnast_node::create_ref(port_name));
+    }
   }
 }
 
