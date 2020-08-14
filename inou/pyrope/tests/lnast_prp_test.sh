@@ -41,21 +41,21 @@ Pyrope_compile () {
   
   for pt in $1
   do
-    if [ ! -f inou/cfg/tests/${pt}.prp ]; then
-      echo "ERROR: could not find ${pt}.prp in /inou/cfg/tests"
+    if [ ! -f inou/pyrope/tests/compiler/${pt}.prp ]; then
+      echo "ERROR: could not find ${pt}.prp in /inou/pyrope/tests/compiler"
       exit 2
     fi
   
-    # ln -s inou/cfg/tests/${pt}.prp;
+    # ln -s inou/pyrope/tests/compiler/${pt}.prp;
   
     echo "----------------------------------------------------"
     echo "Pyrope -> LNAST-SSA Graphviz debug"
     echo "----------------------------------------------------"
   
-    ${LGSHELL} "inou.pyrope files:inou/cfg/tests/${pt}.prp |> inou.lnast_dfg.dbg_lnast_ssa |> inou.graphviz.from"
+    ${LGSHELL} "inou.pyrope files:inou/pyrope/tests/compiler/${pt}.prp |> pass.lnast_dfg.dbg_lnast_ssa |> inou.graphviz.from"
   
     if [ -f ${pt}.lnast.dot ]; then
-      echo "Successfully create a lnast from inou/cfg/tests/${pt}.prp"
+      echo "Successfully create a lnast from inou/pyrope/tests/compiler/${pt}.prp"
     else
       echo "ERROR: Pyrope compiler failed: LNAST generation, testcase: ${pt}.prp"
       exit 1
@@ -66,12 +66,12 @@ Pyrope_compile () {
       echo "Pyrope -> LNAST -> LGraph"
       echo "----------------------------------------------------"
   
-      # ${LGSHELL} "inou.lnast_dfg.tolg files:${pt}.cfg"
-      ${LGSHELL} "inou.pyrope files:inou/cfg/tests/${pt}.prp |> inou.lnast_dfg.tolg"
+      # ${LGSHELL} "pass.lnast_dfg files:${pt}.cfg"
+      ${LGSHELL} "inou.pyrope files:inou/pyrope/tests/compiler/${pt}.prp |> pass.lnast_dfg"
       if [ $? -eq 0 ]; then
-        echo "Successfully create the inital LGraph: inou/cfg/tests/${pt}.prp"
+        echo "Successfully create the inital LGraph: inou/pyrope/tests/compiler/${pt}.prp"
       else
-        echo "ERROR: Pyrope compiler failed: LNAST -> LGraph, testcase: inou/cfg/tests/${pt}.prp"
+        echo "ERROR: Pyrope compiler failed: LNAST -> LGraph, testcase: inou/pyrope/tests/compiler/${pt}.prp"
         exit 1
   
       fi
@@ -85,12 +85,12 @@ Pyrope_compile () {
       echo "----------------------------------------------------"
       echo "Copy-Propagation And Tuple Chain Resolve"
       echo "----------------------------------------------------"
-      #${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.resolve_tuples"
+      #${LGSHELL} "lgraph.open name:${pt} |> pass.lnast_dfg.resolve_tuples"
       ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop"
       if [ $? -eq 0 ]; then
-        echo "Successfully resolve the tuple chain: inou/cfg/tests/${pt}.prp"
+        echo "Successfully resolve the tuple chain: inou/pyrope/tests/compiler/${pt}.prp"
       else
-        echo "ERROR: Pyrope compiler failed: resolve tuples, testcase: inou/cfg/tests/${pt}.prp"
+        echo "ERROR: Pyrope compiler failed: resolve tuples, testcase: inou/pyrope/tests/compiler/${pt}.prp"
         exit 1
       fi
   
@@ -107,9 +107,9 @@ Pyrope_compile () {
   
       ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.bitwidth"
       if [ $? -eq 0 ]; then
-        echo "Successfully optimize design bitwidth: inou/cfg/tests/${pt}.prp"
+        echo "Successfully optimize design bitwidth: inou/pyrope/tests/compiler/${pt}.prp"
       else
-        echo "ERROR: Pyrope compiler failed: bitwidth optimization, testcase: inou/cfg/tests/${pt}.prp"
+        echo "ERROR: Pyrope compiler failed: bitwidth optimization, testcase: inou/pyrope/tests/compiler/${pt}.prp"
         exit 1
       fi
   
@@ -138,7 +138,7 @@ Pyrope_compile () {
         echo "Successfully generate Verilog: ${pt}.v"
         rm -f  yosys_script.*
       else
-        echo "ERROR: Pyrope compiler failed: verilog generation, testcase: inou/cfg/tests/${pt}.prp"
+        echo "ERROR: Pyrope compiler failed: verilog generation, testcase: inou/pyrope/tests/compiler/${pt}.prp"
         exit 1
       fi
     fi
@@ -167,7 +167,7 @@ Pyrope_compile () {
     echo "Logic Equivalence Check: Hierarchical Design"
     echo "----------------------------------------------------"
     
-    ${LGCHECK} --top=$top_module --implementation=${top_module}.v --reference=./inou/cfg/tests/verilog_gld/${top_module}.gld.v
+    ${LGCHECK} --top=$top_module --implementation=${top_module}.v --reference=./inou/pyrope/tests/compiler/verilog_gld/${top_module}.gld.v
     
     if [ $? -eq 0 ]; then
       echo "Successfully pass logic equivilence check!"
@@ -189,7 +189,7 @@ Pyrope_compile () {
       echo "Logic Equivalence Check"
       echo "----------------------------------------------------"
     
-      ${LGCHECK} --implementation=${pt}.v --reference=./inou/cfg/tests/verilog_gld/${pt}.gld.v
+      ${LGCHECK} --implementation=${pt}.v --reference=./inou/pyrope/tests/compiler/verilog_gld/${pt}.gld.v
     
       if [ $? -eq 0 ]; then
         echo "Successfully pass logic equivilence check!"
