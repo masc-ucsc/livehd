@@ -35,7 +35,7 @@ Lgraph_base_core::Setup_path::Setup_path(std::string_view path) {
 }
 
 Lgraph_base_core::Lgraph_base_core(std::string_view _path, std::string_view _name, Lg_type_id _lgid)
-    : p(_path), path(_path), name(_name), unique_name(absl::StrCat(_path,_lgid.value)), long_name(absl::StrCat("lgraph_", _name)), lgid(_lgid), locked(false) {
+    : p(_path), path(_path), name(_name), unique_name(absl::StrCat(_path,"/",_lgid.value)), long_name(absl::StrCat("lgraph_", _name)), lgid(_lgid), locked(false) {
   assert(lgid);
 }
 
