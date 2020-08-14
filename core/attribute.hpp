@@ -62,6 +62,7 @@ public:
     lg2attr.erase(key);
 
     last_attr->clear();
+    delete last_attr;  // Delete does not clear
 
     last_lg   = nullptr;
     last_attr = nullptr;

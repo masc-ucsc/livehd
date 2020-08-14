@@ -7,6 +7,20 @@ test --test_tag_filters "-long1,-long2,-long3,-long4,-long5,-long6,-long7,-long8
 coverage --test_tag_filters "-long1,-long2,-long3,-long4,-long5,-long6,-long7,-long8,-manual,-fixme"
 coverage --cache_test_results=no
 
+build:asan --strip=never
+build:asan --copt -fsanitize=address
+build:asan --copt -DADDRESS_SANITIZER
+build:asan --copt -O1
+build:asan --copt -g
+build:asan --copt -fno-omit-frame-pointer
+build:asan --cxxopt -fsanitize=address
+build:asan --cxxopt -DADDRESS_SANITIZER
+build:asan --cxxopt -O1
+build:asan --cxxopt -std=c++17
+build:asan --cxxopt -g
+build:asan --cxxopt -fno-omit-frame-pointer
+build:asan --linkopt -fsanitize=address
+
 # mada local (no GCP build) but with remote cache
 #build --remote_cache=http://mada2.cse.ucsc.edu:8082 --remote_timeout=5
 

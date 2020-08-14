@@ -174,6 +174,7 @@ protected:
 
     if (fd < 0) {
       void *base = ::mmap(0, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, fd, 0);  // superpages
+      // Allowed to fail. Then new step afterwards
       return {base, size};
     }
 
@@ -198,8 +199,9 @@ protected:
     }
 
     void *base = ::mmap(0, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);  // no superpages
+    // allowed to fail: step called again if needed
 
-    return std::make_tuple(base, size);
+    return {base, size};
   }
 
 public:
@@ -236,7 +238,7 @@ public:
 #ifndef NDEBUG
     for (const auto &e : mmap_gc_pool) {
       if (e.second.fd < 0) continue;
-      assert(e.second.name != name);  // No name duplicate (may be OK for multithreaded access)
+      if (e.second.name == name);  // No name duplicate (may be OK for multithreaded access)
     }
 #endif
 
@@ -344,13 +346,19 @@ public:
       base = ::mmap(0, new_size, PROT_READ | PROT_WRITE, MAP_SHARED, it->second.fd, 0);  // no superpages
       /* LCOV_EXCL_START */
       if (base == MAP_FAILED) {
-        std::cerr << "ERROR: OS X could not allocate" << mmap_name << "txt with " << new_size << "bytes\n";
+        std::cerr << "ERROR: OS X 1 could not allocate" << mmap_name << "txt with " << new_size/1024 << "KB\n";
         exit(-1);
       }
       /* LCOV_EXCL_STOP */
     } else {
       // Painful new allocation, and then copy
       base = ::mmap(0, new_size, PROT_READ | PROT_WRITE, MAP_SHARED, it->second.fd, 0);  // no superpages
+      /* LCOV_EXCL_START */
+      if (base == MAP_FAILED) {
+        std::cerr << "ERROR: OS X 2 could not allocate" << mmap_name << "txt with " << new_size/1024 << "KB\n";
+        exit(-1);
+      }
+      /* LCOV_EXCL_STOP */
       memcpy(base, mmap_old_base, old_size);
       munmap(mmap_old_base, old_size);
     }

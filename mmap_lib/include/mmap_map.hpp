@@ -1104,9 +1104,11 @@ private:
 		mInfoInc               = &static_InitialInfoInc;
 		mInfoHashShift         = &static_InitialInfoHashShift;
 
+#if 0
     for(auto &ent:memoize_sview_insert) {
       ent.first = 0; // clear to invalid possition
     }
+#endif
   }
 public:
 	using iterator = Iter<false>;
@@ -1510,6 +1512,7 @@ private:
 		return *mMask;
 	}
 
+#if 0
   int recently_inserted(array_type txt) const {
     uint32_t h = hash_bytes(txt.data(), txt.size());
     const auto &ent = memoize_sview_insert[h%memoize_sview_insert.size()];
@@ -1522,13 +1525,15 @@ private:
 
     return -1;
   }
+#endif
 
   uint32_t allocate_sview_id(array_type txt) {
-
+#if 0
     auto pos = recently_inserted(txt);
     if (pos >= 0) {
       return pos;
     }
+#endif
 
     reload();
 
@@ -1549,12 +1554,8 @@ private:
     std::memcpy(ptr, txt.data(), txt.size());
     assert(txt.size()<4096); // Objects should not be insane (optimize otherwise)
     mmap_txt_base[insert_point] = txt.size();
-#if 0
-    *(ptr+txt.size())=0;
-    auto bytes = txt.size()+1;
-#else
     auto bytes = txt.size();
-#endif
+
     // Extra space from bytes&0xF to xtra_space
     // 0 -> 0
     // 1 -> 15
@@ -1565,12 +1566,14 @@ private:
     xtra_space = (~xtra_space)&0xF;
     mmap_txt_base[0] += 1+(bytes+xtra_space+7)/8; // +7 to cheaply round up, +1 for the strlen
 
+#if 0
     {
       uint32_t h = hash_bytes(txt.data(), txt.size());
       auto &ent = memoize_sview_insert[h%memoize_sview_insert.size()];
       ent.first = insert_point;
       ent.second = h;
     }
+#endif
 
 		return insert_point;
 	}
@@ -1738,8 +1741,10 @@ private:
     }
   }
 
+#if 0
 	// members are sorted so no padding occurs
   std::array<std::pair<uint32_t,uint32_t>,8> memoize_sview_insert;
+#endif
 
 	mutable Node      *mKeyVals = nullptr;
 	mutable uint8_t   *mInfo = nullptr;
