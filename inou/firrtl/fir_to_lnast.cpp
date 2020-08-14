@@ -10,8 +10,6 @@
 #include "inou_firrtl.hpp"
 #include "lbench.hpp"
 
-using namespace std;
-
 using google::protobuf::util::TimeUtil;
 
 /* For help understanding FIRRTL/Protobuf:
@@ -28,11 +26,11 @@ void Inou_firrtl::toLNAST(Eprp_var& var) {
   if (var.has_label("files")) {
     auto files = var.get("files");
     for (const auto& f : absl::StrSplit(files, ",")) {
-      cout << "FILE: " << f << "\n";
+      fmt::print("FILE: {}\n", f);
       firrtl::FirrtlPB firrtl_input;
-      fstream          input(std::string(f).c_str(), ios::in | ios::binary);
+      std::fstream     input(std::string(f).c_str(), std::ios::in | std::ios::binary);
       if (!firrtl_input.ParseFromIstream(&input)) {
-        cerr << "Failed to parse FIRRTL from protobuf format." << endl;
+        Pass::error("Failed to parse FIRRTL from protobuf format: {}", f);
         return;
       }
       p.temp_var_count = 0;
@@ -41,7 +39,7 @@ void Inou_firrtl::toLNAST(Eprp_var& var) {
       p.IterateCircuits(var, firrtl_input, std::string(f));
     }
   } else {
-    cout << "No file provided. This requires a file input.\n";
+    fmt::print("No file provided. This requires a file input.\n");
     return;
   }
 
@@ -127,7 +125,7 @@ void Inou_firrtl::create_bitwidth_dot_node(Lnast& lnast, uint32_t bitwidth, Lnas
 
   auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("new"));
   lnast.add_child(idx_asg, Lnast_node::create_ref(bit_acc_name));
-  lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(to_string(bitwidth))));
+  lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(std::to_string(bitwidth))));
 }
 
 uint32_t Inou_firrtl::get_bit_count(const firrtl::FirrtlPB_Type type) {
@@ -157,7 +155,7 @@ uint32_t Inou_firrtl::get_bit_count(const firrtl::FirrtlPB_Type type) {
     case firrtl::FirrtlPB_Type::kResetType: {  // Reset type
       return 1;
     }
-    default: cout << "Unknown port type." << endl; I(false);
+    default: Pass::error("Unknown port type.");
   }
   return -1;
 }
@@ -269,7 +267,7 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id, const 
 
     auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
     lnast.add_child(idx_asg, Lnast_node::create_ref(acc_name_bw));
-    lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(to_string(bitwidth))));
+    lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(std::to_string(bitwidth))));
   }
 
   // Specify __reset_async
@@ -1066,17 +1064,10 @@ void Inou_firrtl::HandleTailOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_P
   auto expr_str = lnast.add_string(ReturnExprString(lnast, op.arg(0), parent_node, true));
 
   auto idx_shr = lnast.add_child(parent_node, Lnast_node::create_shift_right("shr_tail"));
-  // lnast.add_child(idx_shr, Lnast_node::create_ref(lhs_str));
-  auto temp_var_name_f1 = create_temp_var(lnast);                      // FIXME: REMOVE ONCE DUMMY ASSIGNS
-  lnast.add_child(idx_shr, Lnast_node::create_ref(temp_var_name_f1));  // FIXME: REMOVE ONCE DUMMY ASSIGNS
+  lnast.add_child(idx_shr, Lnast_node::create_ref(lhs_str));
   AttachExprStrToNode(lnast, expr_str, idx_shr);
   lnast.add_child(idx_shr, Lnast_node::create_const(lnast.add_string(op.const_(0).value())));
 
-  // FIXME: REMOVE ONCE DUMMY ASSIGNS ARE DEALT WITH-----------------------------------
-  auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg_tail"));
-  lnast.add_child(idx_asg, Lnast_node::create_ref(lhs_str));
-  lnast.add_child(idx_asg, Lnast_node::create_ref(temp_var_name_f1));
-  // FIXME: REMOVE ONCE DUMMY ASSIGNS ARE DEALT WITH-----------------------------------
 
   auto idx_dp_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign("dpasg_tail"));
   lnast.add_child(idx_dp_asg, Lnast_node::create_ref(lhs_str));
@@ -1334,8 +1325,6 @@ void Inou_firrtl::HandleStaticShiftOp(Lnast& lnast, const firrtl::FirrtlPB_Expre
   lnast.add_child(idx_shift, Lnast_node::create_const(lnast.add_string(op.const_(0).value())));
 }
 
-/* TODO:
- * May have to modify some of these? */
 void Inou_firrtl::HandleTypeConvOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node,
                                    const std::string& lhs) {
   if (op.op() == firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_UINT || op.op() == firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_SINT) {
@@ -1363,8 +1352,8 @@ void Inou_firrtl::HandleTypeConvOp(Lnast& lnast, const firrtl::FirrtlPB_Expressi
     lnast.add_child(idx_asg, Lnast_node::create_ref(e1_str));
 
   } else if (op.op() == firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_CLOCK) {
-    // FIXME?: Does anything need to be done here? Other than set lhs = rhs
     I(op.arg_size() == 1 && op.const__size() == 0);
+    async_rst_names.insert(lhs);
     auto lhs_ref = lnast.add_string(lhs);
     auto e1_str  = lnast.add_string(ReturnExprString(lnast, op.arg(0), parent_node, true));
 
@@ -1650,16 +1639,16 @@ void Inou_firrtl::create_io_list(const firrtl::FirrtlPB_Type& type, uint8_t dir,
       I(false);                                 // FIXME: Not yet supported.
       break;
     }
-    case firrtl::FirrtlPB_Type::kAsyncResetType: {      // AsyncReset type
+    case firrtl::FirrtlPB_Type::kAsyncResetType: { // AsyncReset type
       vec.emplace_back(port_id, dir, 1);
       async_rst_names.insert(port_id);
       break;
     }
-    case firrtl::FirrtlPB_Type::kResetType: {  // Reset type
+    case firrtl::FirrtlPB_Type::kResetType: { // Reset type
       vec.emplace_back(port_id, dir, 1);
       break;
     }
-    default: cout << "Unknown port type." << endl; I(false);
+    default: Pass::error("Unknown port type.");
   }
 }
 
@@ -1698,8 +1687,6 @@ void Inou_firrtl::ListPortInfo(Lnast& lnast, const firrtl::FirrtlPB_Port& port, 
 
 //-----------Primitive Operations---------------------
 /* TODO:
- * Not yet implemented node types (?):
- *   Rem
  * Rely upon intervals:
  *   Wrap
  *   Clip
@@ -1796,19 +1783,17 @@ void Inou_firrtl::ListPrimOpInfo(Lnast& lnast, const firrtl::FirrtlPB_Expression
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_INCREASE_PRECISION:
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_DECREASE_PRECISION:
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_SET_PRECISION: {
-      cout << "primOp: " << op.op() << " not yet supported (FloatingPoint)...\n";
-      I(false);
+      Pass::error("PrimOp: {} not yet supported (related to FloatingPoint type)", op.op());
       break;
     }
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_WRAP:
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_CLIP:
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_SQUEEZE:
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_INTERVAL: {
-      cout << "primOp: " << op.op() << " not yet supported (Intervals)...\n";
-      I(false);
+      Pass::error("PrimOp: {} not yet supported (related to Interavls)", op.op());
       break;
     }
-    default: cout << "Unknown PrimaryOp\n"; I(false);
+    default: Pass::error("Unknown PrimaryOp");
   }
 }
 
@@ -1936,7 +1921,7 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
       I(false);
       break;
     }
-    default: cout << "ERROR in InitialExprAdd ... unknown expression type: " << expr.expression_case() << endl; assert(false);
+    default: Pass::error("In InitialExprAdd, found unknown expression type: {}", expr.expression_case());
   }
 }
 
@@ -2035,8 +2020,6 @@ void Inou_firrtl::AttachExprStrToNode(Lnast& lnast, const std::string_view acces
 
 //------------Statements----------------------
 /*TODO:
- * PartialConnect
- * IsInvalid
  * Attach
  */
 void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Statement& stmt, Lnast_nid& parent_node) {
@@ -2237,7 +2220,7 @@ void Inou_firrtl::PerformLateMemAssigns(Lnast& lnast, Lnast_nid& parent_node) {
 //--------------Modules/Circuits--------------------
 // Create basis of LNAST tree. Set root to "top" and have "stmts" be top's child.
 void Inou_firrtl::ListUserModuleInfo(Eprp_var& var, const firrtl::FirrtlPB_Module& module, const std::string& file_name) {
-  cout << "Module (user): " << module.user_module().id() << endl;
+  fmt::print("Module (user): {}\n", module.user_module().id());
   std::unique_ptr<Lnast> lnast = std::make_unique<Lnast>(module.user_module().id(), file_name);
 
   const firrtl::FirrtlPB_Module_UserModule& user_module = module.user_module();
@@ -2256,10 +2239,8 @@ void Inou_firrtl::ListUserModuleInfo(Eprp_var& var, const firrtl::FirrtlPB_Modul
     const firrtl::FirrtlPB_Statement& stmt = user_module.statement(j);
     PreCheckForMem(*lnast, idx_stmts, stmt);
     ListStatementInfo(*lnast, stmt, idx_stmts);
-    // lnast->dump();
   }
   PerformLateMemAssigns(*lnast, idx_stmts);
-  // lnast->dump();
   var.add(std::move(lnast));
 }
 
@@ -2269,8 +2250,7 @@ void Inou_firrtl::ListModuleInfo(Eprp_var& var, const firrtl::FirrtlPB_Module& m
   } else if (module.has_user_module()) {
     ListUserModuleInfo(var, module, file_name);
   } else {
-    cout << "Module not set.\n";
-    I(false);
+    Pass::error("Module not set.");
   }
 }
 
@@ -2297,8 +2277,7 @@ void Inou_firrtl::PopulateAllModsIO(Eprp_var& var, const firrtl::FirrtlPB_Circui
         AddPortToMap(circuit.module(i).user_module().id(), port.type(), port.direction(), port.id(), sub, inp_pos, out_pos);
       }
     } else {
-      cout << "Module not set.\n";
-      I(false);
+      Pass::error("Module not set.");
     }
   }
 }
@@ -2394,7 +2373,7 @@ void Inou_firrtl::AddPortToMap(const std::string& mod_id, const firrtl::FirrtlPB
       I(false);                                 // TODO: Not yet supported.
       break;
     }
-    default: cout << "Unknown port type." << endl; I(false);
+    default: Pass::error("Unknown port type.");
   }
 }
 
@@ -2463,7 +2442,7 @@ std::string Inou_firrtl::ConvertBigIntToStr(const firrtl::FirrtlPB_BigInt& bigin
 
 void Inou_firrtl::IterateModules(Eprp_var& var, const firrtl::FirrtlPB_Circuit& circuit, const std::string& file_name) {
   if (circuit.top_size() > 1) {
-    cout << "ERROR: More than 1 top module?\n";
+    Pass::error("More than 1 top module specified.");
     I(false);
   }
 
@@ -2471,12 +2450,17 @@ void Inou_firrtl::IterateModules(Eprp_var& var, const firrtl::FirrtlPB_Circuit& 
   PopulateAllModsIO(var, circuit, file_name);
 
   for (int i = 0; i < circuit.module_size(); i++) {
-    // Between modules, empty out the input/output/register lists.
+    // Between modules, module specific lists.
     temp_var_count = 0;
     input_names.clear();
     output_names.clear();
     register_names.clear();
+    memory_names.clear();
+    async_rst_names.clear();
     inst_to_mod_map.clear();
+    mem_props_map.clear();
+    dangling_ports_map.clear();
+    late_assign_ports.clear();
 
     ListModuleInfo(var, circuit.module(i), file_name);
   }

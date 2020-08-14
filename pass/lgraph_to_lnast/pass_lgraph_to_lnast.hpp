@@ -41,7 +41,6 @@ protected:
 
   std::string_view create_temp_var(Lnast& lnast);
 
-  std::string_view get_driver_of_output(const Node_pin dpin);
   std::string_view dpin_get_name(const Node_pin dpin);
   std::string_view get_new_seq_name(Lnast& lnast);
 
