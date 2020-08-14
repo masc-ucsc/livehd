@@ -326,9 +326,13 @@ Node_pin_iterator LGraph::inp_connected_pins(const Node &node) const {
 
 Node_pin_iterator LGraph::out_setup_pins(const Node &node) const {
   I(node.get_class_lgraph() == this);
+
   Node_pin_iterator xiter;
 
+  fmt::print("node:{}\n", node.debug_name());
+
   Index_ID idx2 = node.get_nid();
+  I(node_internal.size() > idx2);
   I(node_internal[idx2].is_master_root());
 
   while (true) {
@@ -354,9 +358,11 @@ Node_pin_iterator LGraph::out_setup_pins(const Node &node) const {
 
 Node_pin_iterator LGraph::inp_setup_pins(const Node &node) const {
   I(node.get_class_lgraph() == this);
+
   Node_pin_iterator xiter;
 
   Index_ID idx2 = node.get_nid();
+  I(node_internal.size() > idx2);
   I(node_internal[idx2].is_master_root());
 
   while (true) {
@@ -377,6 +383,7 @@ Node_pin_iterator LGraph::inp_setup_pins(const Node &node) const {
 
 Node_pin_iterator LGraph::inp_drivers(const Node &node, const absl::flat_hash_set<Node::Compact> &exclude) const {
   I(node.get_class_lgraph() == this);
+
   Node_pin_iterator xiter;
 
   Index_ID idx2 = node.get_nid();
@@ -429,6 +436,7 @@ Node_pin_iterator LGraph::inp_drivers(const Node &node, const absl::flat_hash_se
 
 XEdge_iterator LGraph::out_edges(const Node &node) const {
   I(node.get_class_lgraph() == this);
+
   XEdge_iterator xiter;
 
   Index_ID idx2 = node.get_nid();
@@ -481,6 +489,7 @@ XEdge_iterator LGraph::out_edges(const Node &node) const {
 
 XEdge_iterator LGraph::inp_edges(const Node &node) const {
   I(node.get_class_lgraph() == this);
+
   XEdge_iterator xiter;
 
   Index_ID idx2 = node.get_nid();
@@ -654,6 +663,7 @@ Node_pin_iterator LGraph::inp_driver(const Node_pin &spin) const {
 
 void LGraph::del_node(const Node &node) {
   auto idx2 = node.get_nid();
+  I(node_internal.size()>idx2);
 
   auto op = node_internal[idx2].get_type();
 

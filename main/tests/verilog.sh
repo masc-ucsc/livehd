@@ -45,6 +45,7 @@ mkdir -p tmp_yosys_mix
 for full_input in ${inputs}
 do
   STARTTIME=$SECONDS
+  #echo "starting test "${input}" at "$(/usr/bin/date)
   input=$(basename ${full_input})
   echo ${YOSYS} ./inou/yosys/tests/${input}
   base=${input%.*}
@@ -107,7 +108,6 @@ do
   #${YOSYS} -g${base} -h > ./yosys-test/log_to_yosys_${input} 2> ./yosys-test/err_to_yosys_${input}
 
   echo "lgraph.match path:lgdb_yosys |> pass.cprop |> inou.yosys.fromlg odir:tmp_yosys" | ${LGSHELL} -q 2>tmp_yosys/${input}.err
-  #echo "lgraph.match path:lgdb_yosys |> inou.yosys.fromlg odir:tmp_yosys" | ${LGSHELL} -q 2>tmp_yosys/${input}.err
   LC=$(grep -iv Warning tmp_yosys/${input}.err | grep -v "recommended to use " | grep -v "IPC=" | wc -l | cut -d" " -f1)
   if [[ $LC -gt 0 ]]; then
     echo "FAIL: Faulty "$LC" err verilog file tmp_yosys/${input}.err"
