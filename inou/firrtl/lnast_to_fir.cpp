@@ -536,7 +536,6 @@ void Inou_firrtl::handle_attr_assign(Lnast &ln, const Lnast_nid &lhs, const Lnas
   auto attr      = pair.second;
   auto attr_name = ln.get_name(attr);
 
-  // TODO: __signed __posedge ...
   if (attr_name == "__clk_pin") {
     handle_clock_attr(ln, var_name, rhs);
   } else if (attr_name == "__reset_pin") {
@@ -551,14 +550,14 @@ void Inou_firrtl::handle_attr_assign(Lnast &ln, const Lnast_nid &lhs, const Lnas
     if (ln.get_name(rhs) == "false") {
       Pass::warn("Attribute __posedge was set to false, but currently FIRRTL does not support negedge-triggered registers. Will ignore.");
     }
+  } else if (attr_name == "__bits") {
+    // Ignore. Should have only been specified in bw_table attribute of LNAST.
   } else if (attr_name == "__latch") {
     if (ln.get_name(rhs) == "true") {
       Pass::error("A latch is in your design, but latches are not supported in FIRRTL. Cannot translate.");
-      I(false);
     }
   } else {
     fmt::print("Error: compiler attribute \"{}\" found, but it is either incorrect or not supported yet.\n", attr_name);
-    // I(false);
   }
 }
 
