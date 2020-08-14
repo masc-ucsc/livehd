@@ -44,6 +44,7 @@ for pt in $pts
 do
     rm -rf ./lgdb
     rm -rf ./lgdb2
+    if [ -f ${pt}.v ]; then rm ${pt}.v; fi
 
     echo "----------------------------------------------------"
     echo "Verilog -> LGraph -> LNAST -> LGraph"

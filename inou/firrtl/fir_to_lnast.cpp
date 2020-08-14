@@ -1276,7 +1276,7 @@ void Inou_firrtl::HandleTwoExprPrimOp(Lnast& lnast, const firrtl::FirrtlPB_Expre
       break;
     }
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_GREATER: {
-      idx_primop = lnast.add_child(parent_node, Lnast_node::create_lt("gt"));
+      idx_primop = lnast.add_child(parent_node, Lnast_node::create_gt("gt"));
       break;
     }
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_GREATER_EQ: {

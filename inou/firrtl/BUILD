@@ -23,15 +23,23 @@ cc_library(
         "inou_firrtl.hpp",
     ],
     hdrs = ["inou_firrtl.hpp"],
-    #FIXME: The .pb.* files above have to be manually copied into
-    # the inou/firrtl/ directory. To get them, in the livehd directory
-    # run "bazel build //inou/firrtl:firrtl_cc_proto". Then copy
-    # the two .pb files from livehd/bazel-bin/inou/firrtl/ into the
-    # livehd/inou/firrtl/ directory.
     visibility = ["//visibility:public"],
     includes = ["."],
     deps = [
         ":firrtl_cc_proto",
         "//pass/common:pass",
     ],
+)
+
+sh_test(
+    name = "firrtl_test_livehd.sh",
+    srcs = ["tests/firrtl_test_livehd.sh"],
+    data = [
+        "//inou/yosys:liblgraph_yosys.so",
+        "//inou/yosys:verilog_tests",
+        "//main:lgshell",
+    ],
+    deps = [
+        "//inou/yosys:scripts"
+    ]
 )
