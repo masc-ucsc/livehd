@@ -1,6 +1,9 @@
 #!/bin/bash
 rm -rf ./lgdb
-pts='compare trivial_offset trivial_and trivial_join logic_bitwise_op_gld trivial trivial2 consts loop_in_lg loop_in_lg2 gcd_small async mux mux2 assigns pick gates submodule'
+pts='compare trivial_offset trivial_and trivial_join
+     logic_bitwise_op_gld trivial trivial2 consts
+     loop_in_lg loop_in_lg2 async mux mux2
+     assigns pick gates submodule'
 #Working with local versions: long_gcd, flop
 #Failing:
 #  fails because some IO is removed due to DCE:
@@ -19,6 +22,8 @@ pts='compare trivial_offset trivial_and trivial_join logic_bitwise_op_gld trivia
 #     trivial3
 #  out_connected_pins() gives incorrect iterator:
 #     compare2
+#  module name does not match file name
+#     long_gcd_small
 
 
 LGSHELL=./bazel-bin/main/lgshell
@@ -42,15 +47,12 @@ fi
 for pt in $pts
 do
     rm -rf ./lgdb
-    echo ""
-    echo ""
-    echo ""
-    echo "===================================================="
-    echo "Verify LNAST -> FIRRTL"
-    echo "===================================================="
 
     echo ""
-    echo ""
+    echo "===================================================="
+    echo "Verify FIRRTL Interface"
+    echo "===================================================="
+
     echo ""
     echo "----------------------------------------------------"
     echo "Verilog -> LGraph -> LNAST -> FIRRTL (Proto)"
@@ -64,8 +66,6 @@ do
       exit 1
     fi
 
-    echo ""
-    echo ""
     echo ""
     echo "----------------------------------------------------"
     echo "FIRRTL Compiler: FIRRTL (Proto) -> Verilog"
@@ -82,8 +82,6 @@ do
     cd ../livehd/.
 
     echo ""
-    echo ""
-    echo ""
     echo "----------------------------------------------------"
     echo "Logic Equivalence Check"
     echo "----------------------------------------------------"
@@ -96,4 +94,8 @@ do
       echo "FAIL: "${pt}".v !== "${pt}".gld.v"
       exit 1
     fi
+
+    rm -f ${pt}.pb
+    rm -f ${pt}.dot
+    rm -f ../firrtl/${pt}.v
 done #end of for

@@ -456,8 +456,10 @@ void Pass_lgraph_to_lnast::attach_binary_reduc(Lnast& lnast, Lnast_nid& parent_n
   auto ntype = pid1_pin.get_node().get_type().op;
   if (ntype == And_Op) {
     // AndReduc is same as ConcatVal == 2^(bw(ConcatVal)) - 1
-    int eq_const = pow(2, total_bits) - 1;
-    //FIXME: Doing the above way doesn't work for >63 bits or for signed nums
+    std::string rhs_2pow = "0b";
+    for (uint32_t i = 0; i < total_bits; i++) {
+      rhs_2pow = absl::StrCat(rhs_2pow, "1");
+    }
 
     auto eq_idx = lnast.add_child(parent_node, Lnast_node::create_same("yred_same"));
     lnast.add_child(eq_idx, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pid1_pin))));
@@ -466,7 +468,7 @@ void Pass_lgraph_to_lnast::attach_binary_reduc(Lnast& lnast, Lnast_nid& parent_n
     } else {
       lnast.add_child(eq_idx, Lnast_node::create_ref(concat_name));
     }
-    lnast.add_child(eq_idx, Lnast_node::create_const(lnast.add_string(std::to_string(eq_const))));
+    lnast.add_child(eq_idx, Lnast_node::create_const(lnast.add_string(rhs_2pow)));
 
   } else if (ntype == Or_Op) {
     // OrReduc is same as ConcatVal != 0
@@ -493,7 +495,7 @@ void Pass_lgraph_to_lnast::attach_binary_reduc(Lnast& lnast, Lnast_nid& parent_n
       lnast.add_child(par_idx, Lnast_node::create_ref(concat_name));
     }
   } else {
-    Pass::error("Error: attach_binaryop_node doesn't support given node type");
+    Pass::error("attach_binaryop_node doesn't support given node: {}", pid1_pin.get_node().debug_name());
   }
 }
 
