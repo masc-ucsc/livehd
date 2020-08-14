@@ -27,7 +27,9 @@ class Attribute {
   static void setup_table(const LGraph *lg) {
     last_lg  = lg;
 
-    const auto &key = lg->get_unique_name();
+    const auto key = absl::StrCat(lg->get_unique_name(), Name);
+    //fmt::print("key:{} attr:{} lg:{}\n", key, Name, (void *)lg);
+
     auto it = lg2attr.find(key);
     if (likely(it != lg2attr.end())) {
       last_attr = it->second;
@@ -56,7 +58,8 @@ public:
 
     I(last_lg == lg); // setup table forces this
 
-    lg2attr.erase(lg->get_unique_name());
+    const auto key = absl::StrCat(lg->get_unique_name(), Name);
+    lg2attr.erase(key);
 
     last_attr->clear();
 
