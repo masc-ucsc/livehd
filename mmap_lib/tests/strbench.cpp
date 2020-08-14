@@ -10,7 +10,7 @@ char *mem;
 
 int main() {
 
-  mem = (char *)malloc(1024*1024*10);
+  mem = (char *)malloc(1024*1024*10+4);
 
   int pos =0;
   for(int i=0;i<1024*1024*10;++i) {

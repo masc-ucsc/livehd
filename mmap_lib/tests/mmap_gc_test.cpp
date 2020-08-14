@@ -9,6 +9,11 @@
 #include "lrand.hpp"
 
 #include "mmap_gc.hpp"
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define DOING_ASAN_TEST 1
+#endif
+#endif
 
 using testing::HasSubstr;
 
@@ -33,25 +38,38 @@ std::vector<track_entry> open_tracks;
 
 static bool trigger_clean(void *base, bool force_recycle) {
   bool found = false;
+  bool ignore_call = (rand() & 0x3) == 0;
   for (auto e : open_tracks) {
     if (e.base != base)
       continue;
+    EXPECT_FALSE(found); // only one
     found = true;
     EXPECT_TRUE(e.fd>=0); // Can not recycle without mmap
+    assert(e.fd != -1); // only mmap with fd can be recycled
+    if (!ignore_call)
+      e.base = 0;
   }
   EXPECT_TRUE(found);
 
   clean_called++;
-  return false;
+  if (ignore_call)
+    return true;  // abort GC
+  else
+    return false;
 }
 
 static bool trigger_clean2(void *base, bool force_recycle) {
+  for (auto e : open_tracks) {
+    if (e.base != base)
+      continue;
+    assert(e.fd != -1); // only mmap with fd can be recycled
+    e.base = 0;
+  }
   clean_called++;
   return false;
 }
 
 TEST_F(Setup_mmap_gc_test, mmap_limit) {
-#if 1
     struct rlimit rval;
 
     struct rusage rusage;
@@ -65,8 +83,10 @@ TEST_F(Setup_mmap_gc_test, mmap_limit) {
     rval.rlim_cur = sz+16*1024*4096;
     rval.rlim_max = sz+16*1024*4096;
 
+#ifdef DOING_ASAN_TEST
+    std::cout << "ASAN needs mmaps, and it fails when it should not in this case\n";
+#else
     std::cout << "Current memory usage " << sz/1024 << "KB limit to " << rval.rlim_max/1024 << "KB\n";
-
     int err = setrlimit(RLIMIT_AS, &rval);
     ASSERT_EQ(err,0);
 #endif
@@ -103,13 +123,10 @@ TEST_F(Setup_mmap_gc_test, mmap_limit) {
   }
   for (auto e : open_tracks) {
     // Check that it is persistent
-    if (e.fd >= 0) {
-      e.fd = mmap_lib::mmap_gc::open(e.name);
-    }
     void *base;
     size_t size;
-
-    if (e.fd>=0) {
+    if (e.base == 0) { // Got recycled
+      assert(e.fd>=0);
       std::tie(base, size) = mmap_lib::mmap_gc::mmap(e.name, e.fd, 4096 * 1024, trigger_clean);
     } else {
       base = e.base; // without fd, the pointer should be stable
@@ -120,7 +137,9 @@ TEST_F(Setup_mmap_gc_test, mmap_limit) {
     }
   }
 
+#ifndef DOING_ASAN_TEST
   EXPECT_GE(clean_called, 10); // ulimit was set to 18
+#endif
 }
 
 TEST_F(Setup_mmap_gc_test, fd_limit) {
