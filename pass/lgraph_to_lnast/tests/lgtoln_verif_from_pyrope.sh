@@ -46,7 +46,7 @@ do
     echo "Pyrope -> LNAST -> LGraph"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "inou.pyrope files:inou/cfg/tests/${pt}.prp |> inou.lnast_dfg.tolg"
+    ${LGSHELL} "inou.pyrope files:inou/pyrope/tests/compiler/${pt}.prp |> pass.lnast_dfg"
     if [ $? -eq 0 ]; then
       echo "Successfully created optimized LGraph: ${pt}"
     else
@@ -80,7 +80,7 @@ do
     echo "LGraph (golden) -> LNAST -> LGraph (new)"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.lgraph_to_lnast |> lnast.dump |> inou.lnast_dfg.tolg path:lgdb2"
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.lgraph_to_lnast |> lnast.dump |> pass.lnast_dfg path:lgdb2"
     if [ $? -eq 0 ]; then
       echo "Successfully create the new LG: ${pt}"
     else
@@ -122,7 +122,7 @@ do
     echo "Logic Equivalence Check"
     echo "----------------------------------------------------"
 
-    ${LGCHECK} --implementation=${pt}.v --reference=./inou/cfg/tests/verilog_gld/${pt}.gld.v
+    ${LGCHECK} --implementation=${pt}.v --reference=./inou/pyrope/tests/compiler/verilog_gld/${pt}.gld.v
 
     if [ $? -eq 0 ]; then
       echo "Successfully pass logic equivilence check!"

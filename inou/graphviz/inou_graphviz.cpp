@@ -7,7 +7,6 @@
 #include <fstream>
 #include <regex>
 
-#include "cfg_lnast.hpp"
 #include "eprp_utils.hpp"
 #include "lbench.hpp"
 #include "lgedgeiter.hpp"
@@ -63,22 +62,11 @@ void Inou_graphviz::setup() {
 
   m1.add_label_optional("bits", "dump bits (true/false)", "false");
   m1.add_label_optional("verbose", "dump bits and wirename (true/false)", "false");
-  // m1.add_label_optional("odir",    "path to put the dot", ".");
-
   register_inou("graphviz", m1);
 
-  Eprp_method m2("inou.graphviz.fromlnast", "export lnast cfg to graphviz dot format", &Inou_graphviz::fromlnast);
 
-  // m2.add_label_required("files",  "cfg_text files to process (comma separated)");
-  // m2.add_label_optional("odir",   "path to put the dot", ".");
-
+  Eprp_method m2("inou.graphviz.fromlg.hierarchy", "export lgraph hierarchy to graphviz dot format", &Inou_graphviz::hierarchy);
   register_inou("graphviz", m2);
-
-  Eprp_method m3("inou.graphviz.fromlg.hierarchy", "export lgraph hierarchy to graphviz dot format", &Inou_graphviz::hierarchy);
-
-  // m3.add_label_optional("odir",   "path to put the dot", ".");
-
-  register_inou("graphviz", m3);
 }
 
 Inou_graphviz::Inou_graphviz(const Eprp_var &var) : Pass("inou.graphviz", var) {
@@ -112,18 +100,6 @@ void Inou_graphviz::hierarchy(Eprp_var &var) {
   }
 }
 
-void Inou_graphviz::fromlnast(Eprp_var &var) {
-  Inou_graphviz p(var);
-
-  for (const auto &f : absl::StrSplit(p.files, ',')) {
-    Cfg_parser cfg_parser(f);
-
-    std::shared_ptr<Lnast> lnast{cfg_parser.ref_lnast()};
-    lnast->ssa_trans();
-
-    p.do_from_lnast(lnast);
-  }
-}
 
 void Inou_graphviz::do_hierarchy(LGraph *g) {
   std::string data = "digraph {\n";

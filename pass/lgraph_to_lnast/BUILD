@@ -28,7 +28,7 @@ sh_test(
     srcs = ["tests/lgtoln_verif_from_pyrope.sh"],
     data = [
         "//inou/yosys:liblgraph_yosys.so",
-        "//inou/cfg:cfg_pts",
+        "//inou/pyrope:pyrope_tests",
         "//main:lgshell",
     ],
     deps = [

@@ -15,15 +15,7 @@ cc_library(
 filegroup(
     name = "pyrope_tests",
     srcs = glob([
-        "tests/*.prp",
-    ]),
-    visibility = ["//visibility:public"],
-)
-
-filegroup(
-    name = "pyrope_compiler_tests",
-    srcs = glob([
-        "tests/compiler/*.prp", "tests/compiler/verilog_gld/*.v"
+        "tests/*.prp", "tests/compiler/*.prp", "tests/compiler/verilog_gld/*.v"
     ]),
     visibility = ["//visibility:public"],
 )
@@ -50,7 +42,7 @@ sh_test(
     data = [
         "//inou/yosys:liblgraph_yosys.so",
         "//main:lgshell",
-        ":pyrope_compiler_tests"
+        ":pyrope_tests"
         ],
     deps = [
         "//inou/yosys:scripts",

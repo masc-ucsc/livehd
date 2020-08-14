@@ -15,7 +15,6 @@ cc_binary(
             "//inou/json:inou_json",
             "//inou/pyrope:inou_pyrope",
             "//inou/graphviz:inou_graphviz",
-            "//inou/lnast_dfg:inou_lnast_dfg",
             "//inou/yosys:lgyosys-api",
             "//inou/firrtl:inou_firrtl_cpp",
 
