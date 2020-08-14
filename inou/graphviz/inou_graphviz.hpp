@@ -25,7 +25,6 @@ protected:
 
   // eprp callback methods
   static void from(Eprp_var &var);
-  static void fromlnast(Eprp_var &var);
   static void hierarchy(Eprp_var &var);
 
 public:

@@ -14,9 +14,9 @@ void setup_inou_liveparse();
 void setup_inou_graphviz();
 void setup_inou_json();
 void setup_inou_pyrope();
-void setup_inou_cfg();
+/* void setup_inou_cfg(); */
 void setup_inou_verific();
-void setup_inou_lnast_dfg();
+/* void setup_inou_lnast_dfg(); */
 void setup_inou_yosys();
 void setup_inou_firrtl();
 void setup_pass_fplan();
@@ -36,8 +36,8 @@ void Main_api::init() {
   setup_inou_liveparse();
   setup_inou_graphviz();
   setup_inou_pyrope();
-  setup_inou_cfg();
-  setup_inou_lnast_dfg();
+  /* setup_inou_cfg(); */
+  /* setup_inou_lnast_dfg(); */
   setup_inou_yosys();
   setup_inou_firrtl();
   setup_pass_fplan();

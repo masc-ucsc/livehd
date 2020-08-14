@@ -10,7 +10,6 @@
 
 #include "eprp_utils.hpp"
 #include "lgedgeiter.hpp"
-#include "cfg_lnast.hpp"
 #include "lnast_to_cfg_parser.hpp"
 #include "lnast_to_cpp_parser.hpp"
 #include "lnast_to_prp_parser.hpp"
