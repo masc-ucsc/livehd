@@ -12,10 +12,10 @@ Lnast_dfg::Lnast_dfg(const Eprp_var &_var, std::string_view _module_name) :
 std::vector<LGraph *> Lnast_dfg::do_tolg(std::shared_ptr<Lnast> ln, const Lnast_nid &top_stmts) {
     lnast = ln;
     LGraph *dfg;
-    if (lnast->get_source() != "") {
-      dfg = LGraph::create(path, module_name, lnast->get_source());
+    if (lnast->get_source().empty()) {
+      dfg = LGraph::create(path, module_name, "-");
     } else {
-      dfg = LGraph::create(path, module_name, module_name);
+      dfg = LGraph::create(path, module_name, lnast->get_source());
     }
 
     std::vector<LGraph *> lgs;
