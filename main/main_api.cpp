@@ -1,10 +1,11 @@
 
 #include "main_api.hpp"
-#include "top_api.hpp"
-#include "meta_api.hpp"
+
 #include "cloud_api.hpp"
-#include "inou_lef_api.hpp"
 #include "eprp_utils.hpp"
+#include "inou_lef_api.hpp"
+#include "meta_api.hpp"
+#include "top_api.hpp"
 
 std::string Main_api::main_path;
 
@@ -26,9 +27,8 @@ void setup_cops_live();
 // add new setup function prototypes here
 
 void Main_api::init() {
-
-  for(const auto &it:Pass_plugin::get_registry()) {
-    //fmt::print("function:{}\n", it.first);
+  for (const auto &it : Pass_plugin::get_registry()) {
+    // fmt::print("function:{}\n", it.first);
     it.second();
   }
 
@@ -56,4 +56,3 @@ void Main_api::init() {
 
   main_path = Eprp_utils::get_exe_path();
 }
-

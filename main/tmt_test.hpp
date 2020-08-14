@@ -38,103 +38,96 @@
 #endif
 
 /**** INPUT SEQUENCES */
-#define TMT_KEY_UP             "\033[A"
-#define TMT_KEY_DOWN           "\033[B"
-#define TMT_KEY_RIGHT          "\033[C"
-#define TMT_KEY_LEFT           "\033[D"
-#define TMT_KEY_HOME           "\033[H"
-#define TMT_KEY_END            "\033[Y"
-#define TMT_KEY_INSERT         "\033[L"
-#define TMT_KEY_BACKSPACE      "\x08"
-#define TMT_KEY_ESCAPE         "\x1b"
-#define TMT_KEY_BACK_TAB       "\033[Z"
-#define TMT_KEY_PAGE_UP        "\033[V"
-#define TMT_KEY_PAGE_DOWN      "\033[U"
-#define TMT_KEY_F1             "\033OP"
-#define TMT_KEY_F2             "\033OQ"
-#define TMT_KEY_F3             "\033OR"
-#define TMT_KEY_F4             "\033OS"
-#define TMT_KEY_F5             "\033OT"
-#define TMT_KEY_F6             "\033OU"
-#define TMT_KEY_F7             "\033OV"
-#define TMT_KEY_F8             "\033OW"
-#define TMT_KEY_F9             "\033OX"
-#define TMT_KEY_F10            "\033OY"
+#define TMT_KEY_UP        "\033[A"
+#define TMT_KEY_DOWN      "\033[B"
+#define TMT_KEY_RIGHT     "\033[C"
+#define TMT_KEY_LEFT      "\033[D"
+#define TMT_KEY_HOME      "\033[H"
+#define TMT_KEY_END       "\033[Y"
+#define TMT_KEY_INSERT    "\033[L"
+#define TMT_KEY_BACKSPACE "\x08"
+#define TMT_KEY_ESCAPE    "\x1b"
+#define TMT_KEY_BACK_TAB  "\033[Z"
+#define TMT_KEY_PAGE_UP   "\033[V"
+#define TMT_KEY_PAGE_DOWN "\033[U"
+#define TMT_KEY_F1        "\033OP"
+#define TMT_KEY_F2        "\033OQ"
+#define TMT_KEY_F3        "\033OR"
+#define TMT_KEY_F4        "\033OS"
+#define TMT_KEY_F5        "\033OT"
+#define TMT_KEY_F6        "\033OU"
+#define TMT_KEY_F7        "\033OV"
+#define TMT_KEY_F8        "\033OW"
+#define TMT_KEY_F9        "\033OX"
+#define TMT_KEY_F10       "\033OY"
 
 /**** BASIC DATA STRUCTURES */
 typedef struct TMT TMT;
 
-typedef enum{
-    TMT_COLOR_DEFAULT = -1,
-    TMT_COLOR_BLACK = 1,
-    TMT_COLOR_RED,
-    TMT_COLOR_GREEN,
-    TMT_COLOR_YELLOW,
-    TMT_COLOR_BLUE,
-    TMT_COLOR_MAGENTA,
-    TMT_COLOR_CYAN,
-    TMT_COLOR_WHITE,
-    TMT_COLOR_MAX
+typedef enum {
+  TMT_COLOR_DEFAULT = -1,
+  TMT_COLOR_BLACK   = 1,
+  TMT_COLOR_RED,
+  TMT_COLOR_GREEN,
+  TMT_COLOR_YELLOW,
+  TMT_COLOR_BLUE,
+  TMT_COLOR_MAGENTA,
+  TMT_COLOR_CYAN,
+  TMT_COLOR_WHITE,
+  TMT_COLOR_MAX
 } tmt_color_t;
 
 typedef struct TMTATTRS TMTATTRS;
-struct TMTATTRS{
-    bool bold;
-    bool dim;
-    bool underline;
-    bool blink;
-    bool reverse;
-    bool invisible;
-    tmt_color_t fg;
-    tmt_color_t bg;
+struct TMTATTRS {
+  bool        bold;
+  bool        dim;
+  bool        underline;
+  bool        blink;
+  bool        reverse;
+  bool        invisible;
+  tmt_color_t fg;
+  tmt_color_t bg;
 };
 
 typedef struct TMTCHAR TMTCHAR;
-struct TMTCHAR{
-    wchar_t c;
-    TMTATTRS a;
+struct TMTCHAR {
+  wchar_t  c;
+  TMTATTRS a;
 };
 
 typedef struct TMTPOINT TMTPOINT;
-struct TMTPOINT{
-    size_t r;
-    size_t c;
+struct TMTPOINT {
+  size_t r;
+  size_t c;
 };
 
 typedef struct TMTLINE TMTLINE;
-struct TMTLINE{
-    bool dirty;
-    TMTCHAR chars[];
+struct TMTLINE {
+  bool    dirty;
+  TMTCHAR chars[];
 };
 
 typedef struct TMTSCREEN TMTSCREEN;
-struct TMTSCREEN{
-    size_t nline;
-    size_t ncol;
+struct TMTSCREEN {
+  size_t nline;
+  size_t ncol;
 
-    TMTLINE **lines;
+  TMTLINE **lines;
 };
 
 /**** CALLBACK SUPPORT */
-typedef enum{
-    TMT_MSG_MOVED,
-    TMT_MSG_UPDATE,
-    TMT_MSG_ANSWER,
-    TMT_MSG_BELL,
-    TMT_MSG_CURSOR
-} tmt_msg_t;
+typedef enum { TMT_MSG_MOVED, TMT_MSG_UPDATE, TMT_MSG_ANSWER, TMT_MSG_BELL, TMT_MSG_CURSOR } tmt_msg_t;
 
 typedef void (*TMTCALLBACK)(tmt_msg_t m, struct TMT *v, const void *r, void *p);
 
 /**** PUBLIC FUNCTIONS */
-TMT *tmt_open(size_t nline, size_t ncol, TMTCALLBACK cb, void *p,
-              const wchar_t *acs);
-void tmt_close(TMT *vt);
-bool tmt_resize(TMT *vt, size_t nline, size_t ncol);
-void tmt_write(TMT *vt, const char *s, size_t n);
+TMT *            tmt_open(size_t nline, size_t ncol, TMTCALLBACK cb, void *p, const wchar_t *acs);
+void             tmt_close(TMT *vt);
+bool             tmt_resize(TMT *vt, size_t nline, size_t ncol);
+void             tmt_write(TMT *vt, const char *s, size_t n);
 const TMTSCREEN *tmt_screen(const TMT *vt);
-const TMTPOINT *tmt_cursor(const TMT *vt);
-void tmt_clean(TMT *vt);
-void tmt_reset(TMT *vt);
+const TMTPOINT * tmt_cursor(const TMT *vt);
+void             tmt_clean(TMT *vt);
+void             tmt_reset(TMT *vt);
 
 #endif
