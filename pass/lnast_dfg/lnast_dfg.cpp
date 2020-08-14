@@ -1,12 +1,10 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-
-#include <cstdint>
-
 #include "lnast_dfg.hpp"
+#include <bits/stdint-uintn.h>
 #include "pass.hpp"
 
 Lnast_dfg::Lnast_dfg(const Eprp_var &_var, std::string_view _module_name) :
-  Pass("inou.lnast_dfg", _var), eprp_var(_var), module_name(_module_name) {
+  Pass("pass.lnast_dfg", _var), eprp_var(_var), module_name(_module_name) {
   setup_lnast_to_lgraph_primitive_type_mapping();
 }
 
