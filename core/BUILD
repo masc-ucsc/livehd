@@ -5,6 +5,7 @@ cc_library(
     hdrs = glob(["*.hpp"]),
     visibility = ["//visibility:public"],
     includes = ["."],
+    linkopts = ["-lstdc++fs"],  # for gcc-8 or older
     deps = [
         "@rapidjson//:headers",
         "@iassert//:iassert",
