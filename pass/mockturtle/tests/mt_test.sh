@@ -32,7 +32,7 @@ pts='trivial_offset trivial2a trivial trivial3 trivial_and
      simple_weird2 mt_basic_test reduce null_port
      '
 
-pts_failing='shift'
+pts_fixme='shift'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck

@@ -180,8 +180,8 @@ protected:
     return node_internal[nid].get_type() == SubGraph_Op;
   }
 
-  void trace_back2driver(Node_pin_iterator &xiter, Node_pin dpin) const;
-  Node_pin_iterator trace_forward2sink(Node_pin pin) const;
+  void trace_back2driver(Node_pin_iterator &xiter, const Node_pin &dpin) const;
+  void trace_forward2sink(XEdge_iterator &xiter, const Node_pin &dpin, const Node_pin &spin) const;
 
 public:
   LGraph()               = delete;
@@ -235,6 +235,7 @@ public:
   Node create_node(Node_Type_Op op);
   Node create_node(Node_Type_Op op, uint32_t bits);
   Node create_node_const(const Lconst &value);
+  Node create_node_lut(const Lconst &value);
   Node create_node_sub(Lg_type_id sub);
   Node create_node_sub(std::string_view sub_name);
 

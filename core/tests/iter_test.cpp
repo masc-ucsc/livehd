@@ -47,7 +47,12 @@ void check_test_order(LGraph *top) {
       max_input_pin = edge.driver;
     }
     if (max_input>it_node->second) {
-      fmt::print("ERROR: wrong order node:{} is earlier than pin:{}\n",node.debug_name(), max_input_pin.debug_name());
+      fmt::print("ERROR: wrong order node:{} l:{} p:{} is earlier than pin:{} of node:{} l:{} p:{}\n"
+          ,node.debug_name() ,node.get_hidx().level ,node.get_hidx().pos
+          ,max_input_pin.debug_name()
+          ,max_input_pin.get_node().debug_name()
+          ,max_input_pin.get_node().get_hidx().level
+          ,max_input_pin.get_node().get_hidx().pos);
       I(false);
     }
   }
@@ -61,7 +66,8 @@ void do_fwd_traversal(LGraph *lg) {
     setup_test_order();
     for (auto node : lg->fast(true)) {
       I(!node.is_graph_io());
-      //fmt::print("fast visiting {}\n", node.debug_name());
+      //fmt::print("fast visiting {} l:{} p:{}\n", node.debug_name(),node.get_hidx().level,node.get_hidx().pos);
+      //node.dump();
       I(test_order.find(node.get_compact()) == test_order.end());
       test_order[node.get_compact()] = test_order_sequence++;
     }
@@ -72,7 +78,7 @@ void do_fwd_traversal(LGraph *lg) {
     setup_test_order();
     for (auto node : lg->forward(true)) {
       I(!node.is_graph_io());
-      //fmt::print("fwd  visiting {}\n", node.debug_name());
+      //fmt::print("fwd  visiting {} l:{} p:{}\n", node.debug_name(),node.get_hidx().level,node.get_hidx().pos);
       I(test_order.find(node.get_compact()) == test_order.end());
       test_order[node.get_compact()] = test_order_sequence++;
     }
