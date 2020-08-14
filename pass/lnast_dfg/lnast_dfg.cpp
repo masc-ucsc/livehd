@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#include <cstdint>
+
 #include "lnast_dfg.hpp"
-#include <bits/stdint-uintn.h>
 #include "pass.hpp"
 
 Lnast_dfg::Lnast_dfg(const Eprp_var &_var, std::string_view _module_name) :
