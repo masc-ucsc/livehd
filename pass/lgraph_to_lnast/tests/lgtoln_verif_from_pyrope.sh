@@ -2,20 +2,23 @@
 rm -rf ./lgdb
 rm -rf ./lgdb2
 
-pts='logic hier_tuple hier_tuple2 hier_tuple3 lhs_wire lhs_wire2 scalar_tuple attr_set
-     firrtl_tail nested_if tuple_if capricious_bits2 capricious_bits4 capricious_bits
+pts='tuple_copy logic
+     hier_tuple hier_tuple2 hier_tuple3
+     lhs_wire lhs_wire2 scalar_tuple attr_set
+     firrtl_tail
+     nested_if tuple_if
+     capricious_bits2 capricious_bits4 capricious_bits
      out_ssa if2 if ssa_rhs bits_rhs'
 
-#firrtl_tail3
-#firrtl_tail2 -- problems with ___ in ln->lg
-
-#logic firrtl_tail if if2 nested_if ssa_rhs adder_stage ff_if' # tuple_if' logic
-#simple_tuple
-#tuple
-#tuple_if
-#tuple_if2
-#tuple_if5
-#tuple_nested_if
+#TO ADD, BUT BUGS:
+#  Problems with registers (attr specified into ln during lg->ln don't all work yet in ln->lg)
+#     - reg_bits_set
+#     - firrtl_tail3
+#     - firrtl_tail2 (also has problems with temp vars in ln->lg)
+#     - adder_stage
+#     - reg__q_pin
+#     - counter
+#     - counter_nested_if
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -31,6 +34,7 @@ fi
 
 for pt in $pts
 do
+    if [ -f ${pt}.v ]; then rm ${pt}.v; fi
     echo ""
     echo ""
     echo ""
@@ -131,3 +135,6 @@ do
     rm -f ${pt}.oldlg.dot
     rm -f ${pt}.newlg.dot
 done #end of for
+
+rm -rf ./lgdb
+rm -rf ./lgdb2

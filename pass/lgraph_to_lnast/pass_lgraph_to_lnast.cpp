@@ -221,7 +221,7 @@ void Pass_lgraph_to_lnast::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node,
     case AFlop_Op: attach_flop_node(lnast, parent_node, pin); break;
     case Latch_Op: attach_latch_node(lnast, parent_node, pin); break;
     case SubGraph_Op: attach_subgraph_node(lnast, parent_node, pin); break;
-    default: fmt::print("Op not yet supported in attach_to_lnast\n");
+    default: Pass::error("Found node {} with op not yet supported in attach_to_lnast", pin.get_node().debug_name());
   }
 }
 
@@ -378,7 +378,7 @@ void Pass_lgraph_to_lnast::attach_binaryop_node(Lnast& lnast, Lnast_nid& parent_
   Node_pin pid0_pin, pid1_pin;
   //fmt::print("{}\n", pin.get_node().debug_name());
   for (const auto& dpin : pin.get_node().out_connected_pins()) {
-    fmt::print("{}\n", dpin.get_pid());
+    //fmt::print("{}\n", dpin.get_pid());
     if (dpin.get_pid() == 0) {
       pid0_used = true;
       pid0_pin = dpin;
@@ -398,7 +398,7 @@ void Pass_lgraph_to_lnast::attach_binaryop_node(Lnast& lnast, Lnast_nid& parent_
       case And_Op: bop_node = lnast.add_child(parent_node, Lnast_node::create_and("and")); break; //fmt::print("\t{}\n", pid0_pin.get_node().debug_name()); break;
       case Or_Op: bop_node = lnast.add_child(parent_node, Lnast_node::create_or("or")); break;
       case Xor_Op: bop_node = lnast.add_child(parent_node, Lnast_node::create_xor("xor")); break;
-      default: fmt::print("Error: attach_binaryop_node doesn't support given node type\n"); I(false);
+      default: Pass::error("attach_binaryop_node doesn't support given node type");
     }
     lnast.add_child(bop_node, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pid0_pin))));
 
@@ -453,7 +453,8 @@ void Pass_lgraph_to_lnast::attach_binary_reduc(Lnast& lnast, Lnast_nid& parent_n
     concat_name = temp_or_name;
   }
 
-  if (pid1_pin.get_node().get_type().op == And_Op) {
+  auto ntype = pid1_pin.get_node().get_type().op;
+  if (ntype == And_Op) {
     // AndReduc is same as ConcatVal == 2^(bw(ConcatVal)) - 1
     int eq_const = pow(2, total_bits) - 1;
     //FIXME: Doing the above way doesn't work for >63 bits or for signed nums
@@ -467,7 +468,7 @@ void Pass_lgraph_to_lnast::attach_binary_reduc(Lnast& lnast, Lnast_nid& parent_n
     }
     lnast.add_child(eq_idx, Lnast_node::create_const(lnast.add_string(std::to_string(eq_const))));
 
-  } else if (pid1_pin.get_node().get_type().op == Or_Op) {
+  } else if (ntype == Or_Op) {
     // OrReduc is same as ConcatVal != 0
     auto temp_eq_name = create_temp_var(lnast);
     auto eq_idx = lnast.add_child(parent_node, Lnast_node::create_same("yred_same"));
@@ -483,7 +484,7 @@ void Pass_lgraph_to_lnast::attach_binary_reduc(Lnast& lnast, Lnast_nid& parent_n
     lnast.add_child(not_idx, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pid1_pin))));
     lnast.add_child(not_idx, Lnast_node::create_ref(temp_eq_name));
 
-  } else if (pid1_pin.get_node().get_type().op == Xor_Op) {
+  } else if (ntype == Xor_Op) {
     auto par_idx = lnast.add_child(parent_node, Lnast_node::create_parity("yred_par"));
     lnast.add_child(par_idx, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pid1_pin))));
     if (only_one_pin) {
@@ -492,8 +493,7 @@ void Pass_lgraph_to_lnast::attach_binary_reduc(Lnast& lnast, Lnast_nid& parent_n
       lnast.add_child(par_idx, Lnast_node::create_ref(concat_name));
     }
   } else {
-    fmt::print("Error: attach_binaryop_node doesn't support given node type\n");
-    I(false);
+    Pass::error("Error: attach_binaryop_node doesn't support given node type");
   }
 }
 
@@ -507,15 +507,13 @@ void Pass_lgraph_to_lnast::attach_not_node(Lnast& lnast, Lnast_nid& parent_node,
 void Pass_lgraph_to_lnast::attach_join_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
   std::stack<Node_pin> dpins;
   auto                 bits_to_shift = 0;
-  /*This stack method works because the inp_edges iterator goes from edges w/ lowest sink pid to highest
-   *  and the highest sink pid correlates to the most significant part of the concatenation. */
+  /* This stack method works because the inp_edges iterator goes from edges w/ lowest sink pid to highest
+   * and the highest sink pid correlates to the most significant part of the concatenation. */
   for (const auto inp : pin.get_node().inp_edges_ordered()) {
     dpins.push(inp.driver);
     bits_to_shift += inp.driver.get_bits();
-    //fmt::print("\tjoin -- {} {}\n", inp.sink.get_pid(), bits_to_shift);
   }
 
-  fmt::print("{}\n", pin.get_node().debug_name());
   I(dpins.size() != 0);
   if (dpins.size() < 2) {
     // If this join node only has 1 input, it's really just an assign.
@@ -574,7 +572,7 @@ void Pass_lgraph_to_lnast::attach_pick_node(Lnast& lnast, Lnast_nid& parent_node
  * and bit_select work on that interface, go back to that translation. */
 #if 1
   std::string bit_str = "0b";
-  for (auto i = 0; i < pin.get_bits(); i++) {
+  for (uint32_t i = 0; i < pin.get_bits(); i++) {
     bit_str = absl::StrCat(bit_str, "1");
   }
   bit_str = absl::StrCat(bit_str, "u");
@@ -635,7 +633,7 @@ void Pass_lgraph_to_lnast::attach_compar_node(Lnast& lnast, Lnast_nid& parent_no
       case LessEqualThan_Op: comp_node = lnast.add_child(parent_node, Lnast_node::create_le("lte")); break;
       case GreaterThan_Op: comp_node = lnast.add_child(parent_node, Lnast_node::create_gt("gt")); break;
       case GreaterEqualThan_Op: comp_node = lnast.add_child(parent_node, Lnast_node::create_ge("gte")); break;
-      default: fmt::print("Error: invalid node type in attach_compar_node\n"); I(false);
+      default: Pass::error("Error: invalid node type in attach_compar_node");
     }
     lnast.add_child(comp_node, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));
     attach_child(lnast, comp_node, a_pins[0]);
@@ -653,7 +651,7 @@ void Pass_lgraph_to_lnast::attach_compar_node(Lnast& lnast, Lnast_nid& parent_no
           case LessEqualThan_Op: comp_node = lnast.add_child(parent_node, Lnast_node::create_le("lte_i")); break;
           case GreaterThan_Op: comp_node = lnast.add_child(parent_node, Lnast_node::create_gt("gt_i")); break;
           case GreaterEqualThan_Op: comp_node = lnast.add_child(parent_node, Lnast_node::create_ge("gte_i")); break;
-          default: fmt::print("Error: invalid node type in attach_compar_node\n"); I(false);
+          default: Pass::error("Error: invalid node type in attach_compar_node");
         }
         auto temp_var_name = create_temp_var(lnast);
         temp_var_list.push_back(temp_var_name);
@@ -685,7 +683,7 @@ void Pass_lgraph_to_lnast::attach_simple_node(Lnast& lnast, Lnast_nid& parent_no
     case DynamicShiftLeft_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_dynamic_shift_left("d_shl")); break;
     case ShiftRight_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_shift_right("shr")); break;
     case ShiftLeft_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_shift_left("shl")); break;
-    default: fmt::print("Error: attach_simple_node unknown node type provided\n"); I(false);
+    default: Pass::error("Error: attach_simple_node unknown node type provided");
   }
   lnast.add_child(simple_node, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));
 
@@ -767,7 +765,7 @@ void Pass_lgraph_to_lnast::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node
       has_din = true;
       din_pin = inp.driver;
 
-    } else if (inp.sink.get_pid() == 2) { //FIXME: Not using en right now.
+    } else if (inp.sink.get_pid() == 2) {
       I(!has_en);
       has_en = true;
       en_pin = inp.driver;
@@ -989,8 +987,7 @@ void Pass_lgraph_to_lnast::attach_child(Lnast& lnast, Lnast_nid& op_node, const 
     auto dpin_name = dpin_get_name(dpin);
     lnast.add_child(op_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("$", dpin_name))));
   } else if (dpin.get_node().is_graph_output()) {
-    //auto out_driver_name = lnast.add_string(get_driver_of_output(dpin));
-    auto out_driver_name = lnast.add_string(absl::StrCat("%", dpin.get_name()));//FIXME: Check up on later. This used to cause problems with Yosys (see above line for what was used instead)
+    auto out_driver_name = lnast.add_string(absl::StrCat("%", dpin.get_name()));
     lnast.add_child(op_node,
                     Lnast_node::create_ref(out_driver_name));  // lnast.add_string(absl::StrCat(prefix, "%", dpin.get_name()))));
   } else if ((dpin.get_node().get_type().op == AFlop_Op) || (dpin.get_node().get_type().op == SFlop_Op)) {
@@ -1023,26 +1020,6 @@ void Pass_lgraph_to_lnast::attach_cond_child(Lnast& lnast, Lnast_nid& op_node, c
     auto dpin_name = dpin_get_name(dpin);
     lnast.add_child(op_node, Lnast_node::create_cond(lnast.add_string(dpin_name)));
   }
-}
-
-/* Since having statements like "%x = %y + a" causes problems in
- * Yosys Verilog generation, we instead return the name of the
- * thing that drives %y. So in the case where some %y = T0, the
- * above statement becomes "%x = T0 + a". This function returns
- * the name of the driver of %y in this case (T0). */
-std::string_view Pass_lgraph_to_lnast::get_driver_of_output(const Node_pin dpin) {
-  //auto out_pin = get_driver_pin(sink_pid);
-
-  //FIXME: using get_name in here was causing a failure on async.v
-  for (const auto inp : dpin.get_node().inp_edges()) {
-    if (inp.sink.get_pid() == dpin.get_pid()) {
-      return inp.driver.get_name();
-    }
-  }
-
-  I(false);   // There should always be some driver.
-  return "";  // Here just so no warnings in compiler.
-  // FIXME: Perhaps change this instead to just "0d0" (though the place this calls would have to be const not ref).
 }
 
 /* If a driver pin's name includes a "%" and is not an output of the

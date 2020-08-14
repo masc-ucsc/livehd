@@ -153,7 +153,7 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
     reg_wire_map[(std::string)name.substr(1)] = fstmt;
 
   } else if (name.substr(0, 3) == "_._") {
-    // _._ = wire //FIXME: but change front to something else? currently changes _._ to _
+    // _._ = wire
     auto new_name = absl::StrCat("_", name.substr(3));
     if (reg_wire_map.contains(new_name))
       return;
@@ -238,7 +238,6 @@ void Inou_firrtl::CreateSubmodInstance(Lnast &ln, const Lnast_nid &fcall_node, f
  * Thus, we must specify what name we will use. In general, take
  * output tuple name and make that the standard (means changing
  * input tuple names to match output tuple when seen in LNAST). */
-// FIXME: This function needs some work...
 std::string_view Inou_firrtl::ConvergeFCallNames(const std::string_view func_out, const std::string_view func_inp) {
   if (func_inp.substr(0, 4) == "inp_" && func_out.substr(0, 4) == "out_" && func_inp.substr(4) == func_out.substr(4)) {
     // Specific case from FIRRTL->LNAST translation.
