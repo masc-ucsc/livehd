@@ -5,6 +5,9 @@
 #include "sub_node.hpp"
 
 void LGraph::each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)> f1) {
+  if (node_internal.size() < Node::Hardcoded_output_nid)
+    return;
+
   std::vector<std::pair<Node_pin, Port_ID>> pin_pair;
 
   auto out = Node(this, Hierarchy_tree::invalid_index(), Node::Hardcoded_output_nid);
@@ -63,6 +66,9 @@ void LGraph::each_pin(const Node_pin &dpin, std::function<bool(Index_ID idx)> f1
 }
 
 void LGraph::each_graph_input(std::function<void(Node_pin &pin)> f1) {
+  if (node_internal.size() < Node::Hardcoded_output_nid)
+    return;
+
   auto node = Node(this, Hierarchy_tree::invalid_index(), Node::Hardcoded_input_nid);
   for (auto &pin : node.out_setup_pins()) {
     f1(pin);
@@ -70,6 +76,9 @@ void LGraph::each_graph_input(std::function<void(Node_pin &pin)> f1) {
 }
 
 void LGraph::each_graph_output(std::function<void(Node_pin &pin)> f1) {
+  if (node_internal.size() < Node::Hardcoded_output_nid)
+    return;
+
   auto node = Node(this, Hierarchy_tree::invalid_index(), Node::Hardcoded_output_nid);
   for (auto &pin : node.out_setup_pins()) {
     f1(pin);
