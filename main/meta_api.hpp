@@ -3,8 +3,8 @@
 #include <regex>
 #include <string>
 
-#include "lgraph.hpp"
 #include "graph_library.hpp"
+#include "lgraph.hpp"
 #include "main_api.hpp"
 
 class Meta_api {
@@ -79,8 +79,9 @@ protected:
         }
       });
     } catch (const std::regex_error &e) {
-      Main_api::error(fmt::format(
-          "invalid match:{} regex. It is a FULL regex unlike bash. To test, try: `ls path | grep -E \"match\"`", match));
+      Main_api::error(
+          fmt::format("invalid match:{} regex. It is a FULL regex unlike bash. To test, try: `ls path | grep -E \"match\"`",
+                      match));
     }
 
     for (LGraph *lg : lgs) {
@@ -111,8 +112,8 @@ protected:
   }
 
   static void liberty(Eprp_var &var) {
-    auto files   = var.get("files");
-    auto path    = var.get("path");
+    auto files = var.get("files");
+    auto path  = var.get("path");
     fmt::print("lgraph.liberty path:{} ", path);
     for (const auto &f : absl::StrSplit(files, ',')) {
       I(!files.empty());
@@ -122,8 +123,8 @@ protected:
   }
 
   static void sdc(Eprp_var &var) {
-    auto files   = var.get("files");
-    auto path    = var.get("path");
+    auto files = var.get("files");
+    auto path  = var.get("path");
     fmt::print("lgraph.sdc path:{} ", path);
     for (const auto &f : absl::StrSplit(files, ',')) {
       I(!files.empty());
@@ -133,8 +134,8 @@ protected:
   }
 
   static void spef(Eprp_var &var) {
-    auto files   = var.get("files");
-    auto path    = var.get("path");
+    auto files = var.get("files");
+    auto path  = var.get("path");
     fmt::print("lgraph.spef path:{} ", path);
     for (const auto &f : absl::StrSplit(files, ',')) {
       I(!files.empty());

@@ -44,6 +44,7 @@ rm -rf tmp_yosys_mix
 mkdir -p tmp_yosys_mix
 for full_input in ${inputs}
 do
+  STARTTIME=$SECONDS
   input=$(basename ${full_input})
   echo ${YOSYS} ./inou/yosys/tests/${input}
   base=${input%.*}
@@ -145,6 +146,9 @@ do
   fi
 
   ((pass++))
+
+  ENDTIME=$SECONDS
+  echo "perf: takes $(($ENDTIME - $STARTTIME)) for top:"${base}
 done
 
 FAIL=$fail
