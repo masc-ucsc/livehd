@@ -708,6 +708,7 @@ bool Pass_cprop::process_tuple_get(Node &tg_node, LGraph *lg) {
 void Pass_cprop::process_tuple_add(Node &node, LGraph *lg) {
   I(node.get_type_op() == TupAdd_Op);
 
+  I(node.get_sink_pin(0).is_connected());
   auto parent_dpin = node.get_sink_pin(0).get_driver_pin();
   auto parent_node = parent_dpin.get_node();
 
