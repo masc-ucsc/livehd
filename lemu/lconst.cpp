@@ -167,8 +167,11 @@ Lconst::Lconst(uint64_t v, Bits_t b) {
   explicit_sign = false;
   explicit_bits = true;
   sign          = false;
-  num           = (v & ((1ULL<<b)-1)); // clear upper bits if present
   bits          = b;
+  if(b<64)
+    num = (v & ((1ULL<<b)-1)); // clear upper bits if present
+  else
+    num = v;
   I(calc_bits() <= bits);
 }
 

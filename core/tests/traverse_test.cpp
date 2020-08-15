@@ -44,7 +44,7 @@ protected:
 
     std::vector<std::string> fwd_order;
     for(size_t i=0;i<full_fwd_order.size();++i) {
-      fmt::print("full_fwd_order: {}\n",full_fwd_order[i]);
+      // fmt::print("full_fwd_order: {}\n",full_fwd_order[i]);
       if (full_fwd_order[i].rfind("name:leaf")!=std::string::npos)
         fwd_order.emplace_back(full_fwd_order[i]);
     }
@@ -108,6 +108,8 @@ TEST_F(Setup_traverse, check_attributes) {
     EXPECT_EQ(fwd_pos,absl_fwd_pos[node.get_compact()]);
     EXPECT_EQ(bwd_pos,absl_bwd_pos[node.get_compact()]);
   }
+
+  Graph_library::shutdown();
 }
 
 TEST_F(Setup_traverse, simple_check_fwd) {
@@ -117,6 +119,7 @@ TEST_F(Setup_traverse, simple_check_fwd) {
   Graph_library::sync_all();
 
   check_lgraph_fwd();
+  Graph_library::shutdown();
 }
 
 
@@ -131,6 +134,7 @@ TEST_F(Setup_traverse, check_fwd) {
 
       check_lgraph_fwd();
     }
+    Graph_library::shutdown();
   }
 }
 

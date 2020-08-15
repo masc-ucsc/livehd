@@ -56,6 +56,8 @@ protected:
     std::vector<mmap_gc_entry> sorted;
     for (auto it : mmap_gc_pool) {
       if (it.second.fd < 0) continue;
+      if (it.second.base == nullptr) continue; // just open, no mmap
+
       may_recycle_fds++;
       if (it.second.base) may_recycle_mmaps++;
 
@@ -183,6 +185,7 @@ protected:
     /* LCOV_EXCL_START */
     if (status < 0) {
       std::cerr << "mmap_map::reload ERROR Could not check file status " << name << std::endl;
+      perror("mmap_map fstat:");
       exit(-3);
     }
     /* LCOV_EXCL_STOP */
@@ -191,6 +194,7 @@ protected:
       /* LCOV_EXCL_START */
       if (ret < 0) {
         std::cerr << "mmap_map::reload ERROR ftruncate could not resize " << name << " to " << size << "\n";
+        perror("mmap_map ftruncate:");
         exit(-1);
       }
       /* LCOV_EXCL_STOP */
@@ -238,7 +242,7 @@ public:
 #ifndef NDEBUG
     for (const auto &e : mmap_gc_pool) {
       if (e.second.fd < 0) continue;
-      if (e.second.name == name);  // No name duplicate (may be OK for multithreaded access)
+      assert(e.second.name != name); // No name duplicate (may be OK for multithreaded access)
     }
 #endif
 

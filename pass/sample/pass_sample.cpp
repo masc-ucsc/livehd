@@ -180,7 +180,7 @@ void Pass_sample::annotate_placement(LGraph *g) {
 
 void Pass_sample::create_sample_graph(LGraph *g) {
   auto lg_path   = g->get_path();
-  auto lg_source = g->get_library().get_source(g->get_lgid());
+  std::string lg_source{g->get_library().get_source(g->get_lgid())}; // must be string because create can free it
 
   LGraph *lg = LGraph::create(lg_path, "pass_sample", lg_source);
   fmt::print("Creating new sample LGraph...\n");

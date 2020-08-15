@@ -70,7 +70,7 @@ protected:
 
   void clean_library();
 
-  ~Graph_library() { clean_library(); }
+  ~Graph_library() { }
 
   Lg_type_id reset_id(std::string_view name, std::string_view source);
 
@@ -192,6 +192,7 @@ public:
   void sync() { clean_library(); }
 
   static void sync_all();  // Called when running out of mmaps
+  static void shutdown();  // Called on program exit to clean pointers (asan)
 
   absl::Span<const Sub_node> get_sub_nodes() const {
     I(sub_nodes.size() >= 1);

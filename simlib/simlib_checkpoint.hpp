@@ -191,6 +191,7 @@ public:
         myvector.push_back(mydata);
       }
     }
+    closedir(dr);
     for (const auto e : myvector) {
       if (e == cycles) {
         load_checkpoint(cycles);  // checkpoint already available, so load it and return

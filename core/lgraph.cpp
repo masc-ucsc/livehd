@@ -41,7 +41,7 @@ LGraph *LGraph::create(std::string_view path, std::string_view name, std::string
 }
 
 LGraph *LGraph::clone_skeleton(std::string_view extended_name) {
-  auto    lg_source = get_library().get_source(get_lgid());
+  std::string  lg_source{get_library().get_source(get_lgid())}; // string, create can free it
   auto    lg_name   = absl::StrCat(get_name(), extended_name);
   LGraph *new_lg    = LGraph::create(get_path(), lg_name, lg_source);
 
@@ -85,7 +85,7 @@ LGraph *LGraph::open(std::string_view path, Lg_type_id lgid) {
     return nullptr;
 
   auto name   = lib->get_name(lgid);
-  auto source = lib->get_source(lgid);
+  std::string source{lib->get_source(lgid)};
 
   return new LGraph(path, name, source);
 }
@@ -103,7 +103,7 @@ LGraph *LGraph::open(std::string_view path, std::string_view name) {
   if (unlikely(!lib->has_name(name)))
     return nullptr;
 
-  auto source = lib->get_source(name);
+  std::string source{lib->get_source(name)};
 
   return new LGraph(path, name, source);
 }
@@ -138,6 +138,8 @@ void LGraph::clear() {
 }
 
 void LGraph::sync() {
+  Ann_support::sync(this);
+
   LGraph_Node_Type::sync();
 
   LGraph_Base::sync();  // last. Removes lock at the end
@@ -968,6 +970,16 @@ Node LGraph::create_node_const(const Lconst &value) {
   I(node_internal[nid].is_master_root());
 
   return Node(this, Hierarchy_tree::root_index(), nid);
+}
+
+Node LGraph::create_node_const(uint64_t val) {
+  Lconst lc(val);
+  return create_node_const(lc);
+}
+
+Node LGraph::create_node_const(uint64_t val, Bits_t bits) {
+  Lconst lc(val, bits);
+  return create_node_const(lc);
 }
 
 Node LGraph::create_node_lut(const Lconst &lut) {
