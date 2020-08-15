@@ -5,23 +5,6 @@
 #include "fmt/format.h"
 #include "iassert.hpp"
 
-int64_t Bitwidth_range::round_power2(int64_t x) {
-  if (x == 0 || (x & (x - 1)) == 0) {
-    return x;  // already power of 2
-  }
-
-  uint64_t ux = abs(x);
-
-  // This finds the number of bits in "ux" minus the number of leading 0s.
-  uint64_t ux_r = 1ULL << (sizeof(uint64_t) * 8 - __builtin_clzll(ux));
-
-  if (x > 0) {
-    return ux_r - 1;  // I need to subtract one since 4 bits gives us 0 to 15, not 0 to 2^4.
-  }
-
-  return -ux_r;
-}
-
 Lconst Bitwidth_range::to_lconst(bool overflow, int64_t val) {
   if (val == 0)
     return Lconst(0);

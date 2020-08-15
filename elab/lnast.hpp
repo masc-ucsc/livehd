@@ -170,7 +170,7 @@ private:
   std::vector<std::string *> string_pool;
 
 public:
-  Lnast() = default;
+  explicit Lnast(): top_module_name("noname"), source_filename(""), memblock_fd(-1) { }
   ~Lnast();
   explicit Lnast(std::string_view _module_name): top_module_name(_module_name), source_filename(""), memblock_fd(-1) { }
   explicit Lnast(std::string_view _module_name, std::string_view _file_name): top_module_name(_module_name), source_filename(_file_name), memblock_fd(-1) { }
