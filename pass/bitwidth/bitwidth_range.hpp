@@ -7,7 +7,6 @@
 
 class __attribute__((packed)) Bitwidth_range {
 protected:
-  static int64_t round_power2(int64_t x);
   static Lconst  to_lconst(bool overflow, int64_t val);
 
 public:
