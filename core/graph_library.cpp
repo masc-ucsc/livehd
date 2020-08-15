@@ -32,12 +32,124 @@ class Cleanup_graph_library {
 public:
   Cleanup_graph_library(){};
   ~Cleanup_graph_library() {
-    // fmt::print("Shutting down...\n");
     Graph_library::sync_all();
+    Graph_library::shutdown();
   };
 };
 
 static Cleanup_graph_library private_instance;
+
+void Graph_library::shutdown() {
+  for (auto &it : global_name2lgraph) {
+    for (auto &it2 : it.second) {
+      delete it2.second; // delete lgraphs
+    }
+  }
+  global_name2lgraph.clear();
+
+  // The same graph library is inserted TWICE (full and short path)
+  while(!global_instances.empty()) {
+    auto *gl = global_instances.begin()->second;
+    for(auto it=global_instances.begin();it!=global_instances.end();++it) {
+      if (it->second == gl)
+        global_instances.erase(it);
+    }
+    delete gl;
+  }
+  global_instances.clear();
+}
+
+void Graph_library::sync_all() {
+  for (auto &it : global_name2lgraph) {
+    for (auto &it2 : it.second) {
+      it2.second->sync();
+    }
+  }
+  for (auto &it : global_instances) {
+    it.second->clean_library();
+  }
+}
+
+void Graph_library::clean_library() {
+  if (graph_library_clean)
+    return;
+
+  rapidjson::StringBuffer                          s;
+  rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(s);
+
+  writer.StartObject();
+
+  writer.Key("lgraph");
+  writer.StartArray();
+  // NOTE: insert in reverse order to reduce number of resizes when loading
+  for (size_t i = attributes.size() - 1; i >= 1; --i) {  // Not position zero
+    const auto &it = attributes[i];
+    writer.StartObject();
+
+    writer.Key("version");
+    writer.Uint64(it.version);
+
+    writer.Key("source");
+    writer.String(it.source.c_str());
+
+    sub_nodes[i].to_json(writer);
+
+    writer.EndObject();
+  }
+  writer.EndArray();
+
+  writer.Key("liberty");
+  writer.StartArray();
+  for (const auto lib : liberty_list) {
+    writer.StartObject();
+
+    writer.Key("file");
+    writer.String(lib.c_str());
+
+    writer.EndObject();
+  }
+  writer.EndArray();
+
+  writer.Key("sdc");
+  writer.StartArray();
+  for (const auto lib : sdc_list) {
+    writer.StartObject();
+
+    writer.Key("file");
+    writer.String(lib.c_str());
+
+    writer.EndObject();
+  }
+  writer.EndArray();
+
+  writer.Key("spef");
+  writer.StartArray();
+  for (const auto lib : spef_list) {
+    writer.StartObject();
+
+    writer.Key("file");
+    writer.String(lib.c_str());
+
+    writer.EndObject();
+  }
+  writer.EndArray();
+  writer.EndObject();
+
+  {
+    std::ofstream fs;
+
+    fs.open(library_file, std::ios::out | std::ios::trunc);
+    if (!fs.is_open()) {
+      LGraph::error("graph_library::clean_library could not open graph_library file {}", library_file);
+      return;
+    }
+    fs << s.GetString() << std::endl;
+    fs.close();
+  }
+
+  graph_library_clean = true;
+}
+
 
 Graph_library *Graph_library::instance(std::string_view path) {
   auto it1 = Graph_library::global_instances.find(path);
@@ -499,97 +611,6 @@ void Graph_library::unregister(std::string_view name, Lg_type_id lgid, LGraph *l
 
   if (sub_nodes[lgid].is_invalid())
     expunge(name);
-}
-
-void Graph_library::sync_all() {
-  for (auto &it : global_name2lgraph) {
-    for (auto &it2 : it.second) {
-      it2.second->sync();
-    }
-  }
-  for (auto &it : global_instances) {
-    it.second->clean_library();
-  }
-}
-
-void Graph_library::clean_library() {
-  if (graph_library_clean)
-    return;
-
-  rapidjson::StringBuffer                          s;
-  rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(s);
-
-  writer.StartObject();
-
-  writer.Key("lgraph");
-  writer.StartArray();
-  // NOTE: insert in reverse order to reduce number of resizes when loading
-  for (size_t i = attributes.size() - 1; i >= 1; --i) {  // Not position zero
-    const auto &it = attributes[i];
-    writer.StartObject();
-
-    writer.Key("version");
-    writer.Uint64(it.version);
-
-    writer.Key("source");
-    writer.String(it.source.c_str());
-
-    sub_nodes[i].to_json(writer);
-
-    writer.EndObject();
-  }
-  writer.EndArray();
-
-  writer.Key("liberty");
-  writer.StartArray();
-  for (const auto lib : liberty_list) {
-    writer.StartObject();
-
-    writer.Key("file");
-    writer.String(lib.c_str());
-
-    writer.EndObject();
-  }
-  writer.EndArray();
-
-  writer.Key("sdc");
-  writer.StartArray();
-  for (const auto lib : sdc_list) {
-    writer.StartObject();
-
-    writer.Key("file");
-    writer.String(lib.c_str());
-
-    writer.EndObject();
-  }
-  writer.EndArray();
-
-  writer.Key("spef");
-  writer.StartArray();
-  for (const auto lib : spef_list) {
-    writer.StartObject();
-
-    writer.Key("file");
-    writer.String(lib.c_str());
-
-    writer.EndObject();
-  }
-  writer.EndArray();
-  writer.EndObject();
-
-  {
-    std::ofstream fs;
-
-    fs.open(library_file, std::ios::out | std::ios::trunc);
-    if (!fs.is_open()) {
-      LGraph::error("graph_library::clean_library could not open graph_library file {}", library_file);
-      return;
-    }
-    fs << s.GetString() << std::endl;
-    fs.close();
-  }
-
-  graph_library_clean = true;
 }
 
 void Graph_library::each_lgraph(std::function<void(Lg_type_id lgid, std::string_view name)> f1) const {

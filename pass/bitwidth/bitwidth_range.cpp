@@ -154,8 +154,11 @@ Bits_t Bitwidth_range::get_bits() const {
     return bits;
   }
 
-  auto   abs_max = abs(max);
-  Bits_t bits    = (sizeof(uint64_t) * 8 - __builtin_clzll(abs_max));
+  Bits_t bits    = 1;
+  if (max) {
+    auto   abs_max = abs(max);
+    bits    = (sizeof(uint64_t) * 8 - __builtin_clzll(abs_max));
+  }
   if (min < 0)
     bits++;
 

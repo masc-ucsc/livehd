@@ -43,6 +43,24 @@ Sometimes the failure is yosys/lgraph bridge. In this case, you need to gdb yosy
      gdb `which gdb`
      (gdb) r -m ./bazel-bin/inou/yosys/liblgraph_yosys.so 
 
+# Address Sanitizer
+
+LiveHD has the option to run it with address sanitizer to detect memory leaks.
+
+```
+bazel build -c dbg --config asan //...
+```
+
+An issue is that YOSYS needs the libasan.a linked against statitcally. To enable this, you mist edit the tools/linkso.bzl
+from:
+
+```
+  args = [output.path] + [compiler_executable] + [ar_executable] + [f.path for f in src_libs2] + ["-Wl,-Bstatic"] + ["-lstdc++"] + ["-Wl,-Bdynamic"] + ["-lrt", "-lgcov", "-lpthread"]
+```
+to:
+```
+  args = [output.path] + [compiler_executable] + [ar_executable] + [f.path for f in src_libs2] + ["-Wl,-Bstatic"] + ["-lstdc++", "-lasan"] + ["-Wl,-Bdynamic"] + ["-lrt", "-lgcov", "-lpthread"]
+```
 
 # Debug a broken docker image
 
@@ -73,5 +91,10 @@ git clone https://github.com/masc-ucsc/livehd.git
 4. Build with the failing options and debug
 ```
 CXX=g++ CC=gcc bazel build -c opt //...
+```
+
+A docker distro that specially fails (address randomizing and muslc vs libc) is alpine. The command line to debug it:
+```
+ docker run --rm --cap-add SYS_ADMIN -it -e LOCAL_USER_ID=$(id -u $USER) -v $HOME:/home/user -v/local/scrap:/local/scrap mascucsc/alpine-masc
 ```
 

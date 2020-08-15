@@ -613,7 +613,7 @@ void Pass_bitwidth::process_attr_set_propagate(Node &node) {
     not_finished = true;
     return;
   }
-  const auto &parent_attr_bw = parent_attr_it->second;
+  const auto parent_attr_bw = parent_attr_it->second;
 
   fmt::print("attr_set_prop name:{} parent_attr.bits:{} data_bw.bits:{}\n",
              dpin_name,

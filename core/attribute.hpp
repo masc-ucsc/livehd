@@ -59,6 +59,7 @@ public:
     I(last_lg == lg); // setup table forces this
 
     const auto key = absl::StrCat(lg->get_unique_name(), Name);
+    I(lg2attr[key] == last_attr);
     lg2attr.erase(key);
 
     last_attr->clear();
@@ -66,5 +67,19 @@ public:
 
     last_lg   = nullptr;
     last_attr = nullptr;
+  }
+
+  static void sync(const LGraph *lg) {
+    if (last_lg == lg) {
+      last_lg   = nullptr;
+      last_attr = nullptr;
+    }
+
+    const auto key = absl::StrCat(lg->get_unique_name(), Name);
+    auto it = lg2attr.find(key);
+    if (it == lg2attr.end())
+      return;
+    delete it->second;
+    lg2attr.erase(it);
   }
 };

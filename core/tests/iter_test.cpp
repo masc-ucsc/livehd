@@ -56,6 +56,9 @@ void check_test_order(LGraph *top) {
       I(false);
     }
   }
+
+  top->sync();
+  delete top;
 }
 
 // performs Topological Sort on a given DAG
@@ -195,8 +198,6 @@ void generate_graphs(int n) {
       g->add_edge(dpin, spin);
       I( spin.is_connected(dpin)); //    edge
     }
-
-    g->sync();
   }
 }
 
@@ -344,6 +345,10 @@ void simple_line() {
   do_fwd_traversal(g0);
 
   check_test_order(g0);
+
+  delete s0;
+  delete s1;
+  delete s2;
 }
 
 void simple() {
@@ -487,6 +492,9 @@ void simple() {
   do_fwd_traversal(g);
 
   check_test_order(g);
+
+  sub_g->sync();
+  delete sub_g;
 }
 
 int main() {

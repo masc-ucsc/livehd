@@ -131,9 +131,12 @@ static Node_pin &get_edge_pin(LGraph *g, const RTLIL::Wire *wire) {
   return wire2pin[wire];
 }
 
-static Node_pin connect_constant(LGraph *g, uint32_t value, Node &exit_node, Port_ID opid) {
-  Bits_t bits = (64 - __builtin_clzll(value));
-  auto   dpin = g->create_node_const(Lconst(value, bits)).setup_driver_pin();
+static Node_pin connect_constant(LGraph *g, uint64_t value, Node &exit_node, Port_ID opid) {
+  Bits_t bits = 1;
+  if (value)
+    bits = (64 - __builtin_clzll(value));
+
+  auto   dpin = g->create_node_const(value, bits).setup_driver_pin();
   auto   spin = exit_node.setup_sink_pin(opid);
 
   spin.connect_driver(dpin);

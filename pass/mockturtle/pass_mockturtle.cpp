@@ -1082,9 +1082,9 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
       }
     } else {
       for (auto i = 0UL; i < bit_width; i++) {
-        Bits_t bits = (64 - __builtin_clzll(i));
-        if (bits == 0)
-          bits = 1;
+        Bits_t bits = 1;
+        if (i)
+          bits = (64 - __builtin_clzll(i));
 
         const auto &vec_klut_node_and_lg_pid = gid_pi2sink_node_lg_pid[std::make_pair(group_id, sigs[i])];
         for (const auto &klut_node_and_lg_pid : vec_klut_node_and_lg_pid) {
