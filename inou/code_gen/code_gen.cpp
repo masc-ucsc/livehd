@@ -35,7 +35,7 @@ void Code_gen::generate(){
   if (node_data.type.is_top()) {
     fmt::print("\nprocessing LNAST tree root text: {} ", node_data.token.get_text());
     fmt::print("processing root->child");
-    absl::StrAppend(&buffer_to_print, lnast_to->starter(lnast->get_top_module_name()));
+  //for CPP:  absl::StrAppend(&buffer_to_print, lnast_to->starter(lnast->get_top_module_name()));
     do_stmts(lnast->get_child(root_index));
   } else if (node_data.type.is_invalid()) {
     fmt::print("INVALID NODE!");
