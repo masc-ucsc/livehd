@@ -10,4 +10,6 @@ void Pass_lnastfmt::setup() {
   register_pass(m1);
 }
 
-
+void Pass_lnastfmt::fmt_begin(Eprp_var& var) {
+  fmt::print("beginning LNAST formatting pass\n");
+}
