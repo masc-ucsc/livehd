@@ -33,12 +33,12 @@ git_repository( # Open_timer user taskflow
     remote = "https://github.com/ericniebler/range-v3.git",
 )
 
-new_git_repository( # Open_timer user taskflow
-    name = "taskflow",
-    build_file = "BUILD.taskflow",
-    commit = "ef1e9916529ce52ca2968a20ac4f8accbd18cdf4", # April 29, 2019
-    remote = "https://github.com/cpp-taskflow/cpp-taskflow.git",
-)
+#new_git_repository( # Open_timer user taskflow
+    #name = "taskflow",
+    #build_file = "BUILD.taskflow",
+    #commit = "ef1e9916529ce52ca2968a20ac4f8accbd18cdf4", # April 29, 2019
+    #remote = "https://github.com/cpp-taskflow/cpp-taskflow.git",
+#)
 new_git_repository(
     name = "abc",
     build_file = "BUILD.abc", # relative to external path
@@ -56,26 +56,24 @@ new_git_repository(
 new_git_repository(
     name = "mustache",
     build_file = "BUILD.mustache", # relative to external path
-    commit = "40ddfe9daecc699eca319f1c739b0cfc7e5f3ae5", # April 6 2019
+    commit = "a7eebc9bec92676c1931eddfff7637d7e819f2d2", # August 10, 2020 "40ddfe9daecc699eca319f1c739b0cfc7e5f3ae5", # April 6 2019
     remote = "https://github.com/kainjow/Mustache.git",
     #strip_prefix = "kernel",
 )
-# Needed for bazel abseil package
+
 http_archive(
     name = "rules_cc",
-    sha256 = "9a446e9dd9c1bb180c86977a8dc1e9e659550ae732ae58bd2e8fd51e15b2c91d",
+    urls = ["https://github.com/bazelbuild/rules_cc/archive/262ebec3c2296296526740db4aefce68c80de7fa.zip"],
     strip_prefix = "rules_cc-262ebec3c2296296526740db4aefce68c80de7fa",
-    urls = [
-        "https://mirror.bazel.build/github.com/bazelbuild/rules_cc/archive/262ebec3c2296296526740db4aefce68c80de7fa.zip",
-        "https://github.com/bazelbuild/rules_cc/archive/262ebec3c2296296526740db4aefce68c80de7fa.zip",
-    ],
-)
+    )
 git_repository(
     name = "com_google_absl",
     #build_file = "BUILD.abseil", # relative to external path
-    commit = "bf86cfe165ef7d70dfe68f0b8fc0c018bc79a577", # December 16, 2019 e9f9000c7c80993cb589d011616b7a8016e42f4a", # October 11, 2019 a0d1e098c2f99694fa399b175a7ccf920762030e"
+    #commit = "d0c433455801e1c1fb6f486f0b447e22f946ab52", # August, 16 2020 (fails because Yosys)
+    commit = "bf86cfe165ef7d70dfe68f0b8fc0c018bc79a577", # December 16, 2019
     remote = "https://github.com/abseil/abseil-cpp.git",
 )
+
 new_git_repository(
     name = "fmt",
     build_file = "BUILD.fmt",
@@ -139,9 +137,8 @@ new_git_repository(
 new_git_repository(
     name = "gtest",
     build_file = "BUILD.gtest",
-    commit = "37f322783175a66c11785d17fc153477b0777753", # October 24, 2019
+    commit = "adeef192947fbc0f68fa14a6c494c8df32177508", # August 15, 2020 "37f322783175a66c11785d17fc153477b0777753", # October 24, 2019
     remote = "https://github.com/google/googletest",
-    #tag = "release-1.8.0",
 )
 new_git_repository(
     name = "verilator",

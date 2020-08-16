@@ -40,21 +40,30 @@ public:
 static Cleanup_graph_library private_instance;
 
 void Graph_library::shutdown() {
-  for (auto &it : global_name2lgraph) {
-    for (auto &it2 : it.second) {
-      delete it2.second; // delete lgraphs
+  absl::flat_hash_set<LGraph *> lg_deleted;
+
+  for (auto it : global_name2lgraph) {
+    for (auto it2 : it.second) {
+      if (lg_deleted.contains(it2.second))
+        continue;
+      lg_deleted.insert(it2.second);
+
+      delete it2.second; // delete lgraphs (may be inserted many times different paths)
     }
   }
   global_name2lgraph.clear();
 
+
+  absl::flat_hash_set<Graph_library *> gl_deleted;
+
   // The same graph library is inserted TWICE (full and short path)
-  while(!global_instances.empty()) {
-    auto *gl = global_instances.begin()->second;
-    for(auto it=global_instances.begin();it!=global_instances.end();++it) {
-      if (it->second == gl)
-        global_instances.erase(it);
-    }
-    delete gl;
+  for(auto it : global_instances) {
+    if (gl_deleted.contains(it.second))
+      continue;
+
+    gl_deleted.insert(it.second);
+
+    delete it.second;
   }
   global_instances.clear();
 }
@@ -159,13 +168,14 @@ Graph_library *Graph_library::instance(std::string_view path) {
 
   std::string spath(path);
 
-  char  full_path[PATH_MAX + 1];
-  char *ptr = realpath(spath.c_str(), full_path);
+  char  full_path_char[PATH_MAX + 1];
+  char *ptr = realpath(spath.c_str(), full_path_char);
   if (ptr == nullptr) {
     mkdir(spath.c_str(), 0755);  // At least make sure directory exists for future
-    ptr = realpath(spath.c_str(), full_path);
+    ptr = realpath(spath.c_str(), full_path_char);
     I(ptr);
   }
+  std::string full_path(full_path_char);
 
   auto it = Graph_library::global_instances.find(full_path);
   if (it != Graph_library::global_instances.end()) {

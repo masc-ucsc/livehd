@@ -116,6 +116,20 @@ protected:
         n_gc++;
       }
     }
+    if (n_gc==0) { // try with force
+      for (const auto e : sorted) {
+        if (n_recycle_fds == 0 && n_recycle_mmaps == 0) break;
+        auto it = mmap_gc_pool.find(e.base);
+        assert(it != mmap_gc_pool.end());
+        bool done = mmap_gc::recycle_int(it, true); // force (do not give an option)
+        assert(done);
+        if (e.base) n_recycle_mmaps--;
+        n_recycle_fds--;
+        mmap_gc_pool.erase(it);
+        n_gc++;
+      }
+    }
+
 #if 0
     std::cerr << "gc:" << n_gc
       << " n_open_mmaps:" << n_open_mmaps << " n_max_mmaps:" << n_max_mmaps

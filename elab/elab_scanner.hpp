@@ -8,7 +8,6 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
-#include "absl/strings/substitute.h"
 
 #include "explicit_type.hpp"
 #include "fmt/format.h"

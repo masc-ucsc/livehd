@@ -2,7 +2,6 @@
 
 #include "hierarchy.hpp"
 
-#include "absl/strings/substitute.h"
 #include "annotate.hpp"
 #include "lgraph.hpp"
 
