@@ -40,14 +40,14 @@ std::vector<track_entry> open_tracks;
 int global_fd = -1;
 
 static bool trigger_clean(void *base, bool force_recycle) {
-  printf("1.trigger_clean %p\n",base);
+  //printf("1.trigger_clean %p\n",base);
   bool found = false;
   bool ignore_call = ((rand() & 0x3) == 0) & !force_recycle;
   for (auto &e : open_tracks) {
     if (e.base != base)
       continue;
 
-    printf("2.trigger_clean %p %d %s\n",e.base,e.fd, ignore_call?"abort":"cont");
+    //printf("2.trigger_clean %p %d %s\n",e.base,e.fd, ignore_call?"abort":"cont");
 
     EXPECT_FALSE(found); // only one
     found = true;
@@ -129,7 +129,7 @@ TEST_F(Setup_mmap_gc_test, mmap_limit) {
 
     global_fd = entry.fd;
     entry.base = 0;
-    printf("1.alloc %p %d [%s]\n",entry.base, entry.fd, entry.name.c_str());
+    //printf("1.alloc %p %d [%s]\n",entry.base, entry.fd, entry.name.c_str());
 
     std::tie(base, size) = mmap_lib::mmap_gc::mmap(entry.name, entry.fd, 4096*1024, trigger_clean);
     int *value = (int *)base;
@@ -139,7 +139,7 @@ TEST_F(Setup_mmap_gc_test, mmap_limit) {
     }
     entry.base = base;
 
-    printf("2.alloc %p %d\n",entry.base, entry.fd);
+    //printf("2.alloc %p %d\n",entry.base, entry.fd);
     open_tracks.emplace_back(entry);
 
     global_fd = -1;

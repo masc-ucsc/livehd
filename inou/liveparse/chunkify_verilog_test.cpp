@@ -73,11 +73,6 @@ TEST_F(VTest1, interface) {
 TEST_F(VTest1, noaccess) {
   std::string test2_verilog = "";
 
-  try {
-    Chunkify_verilog chunker("/proc");
-    chunker.parse_inline(test2_verilog.c_str());
-    EXPECT_TRUE(false);  // it if did not creep out, it is fine
-  } catch (...) {
-    EXPECT_TRUE(true);  // it if did not creep out, it is fine
-  }
+  Chunkify_verilog chunker("/proc");
+  ASSERT_THROW(chunker.parse_inline(test2_verilog.c_str()),std::runtime_error);
 }

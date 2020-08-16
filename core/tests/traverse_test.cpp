@@ -88,6 +88,7 @@ protected:
 
   void TearDown() override {
     //Graph_library::sync_all();
+    Graph_library::shutdown();
   }
 };
 
@@ -108,8 +109,6 @@ TEST_F(Setup_traverse, check_attributes) {
     EXPECT_EQ(fwd_pos,absl_fwd_pos[node.get_compact()]);
     EXPECT_EQ(bwd_pos,absl_bwd_pos[node.get_compact()]);
   }
-
-  Graph_library::shutdown();
 }
 
 TEST_F(Setup_traverse, simple_check_fwd) {
@@ -119,7 +118,6 @@ TEST_F(Setup_traverse, simple_check_fwd) {
   Graph_library::sync_all();
 
   check_lgraph_fwd();
-  Graph_library::shutdown();
 }
 
 
