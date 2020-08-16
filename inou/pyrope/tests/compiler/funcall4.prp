@@ -3,7 +3,7 @@ sum = ::{
   %o2 = $a + $b + 1
 }
 
-res = (a = 3, b = 3) |> sum  // same as res = sum (a = 3, b = 3)
+res = (a = 4, b = 3) |> sum  // same as res = sum (a = 3, b = 3)
 %out  = res.o1 + res.o2 //7
 
 
