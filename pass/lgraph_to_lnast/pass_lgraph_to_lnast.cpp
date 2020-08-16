@@ -31,7 +31,7 @@ void Pass_lgraph_to_lnast::trans(Eprp_var& var) {
   Pass_lgraph_to_lnast p(var);
 
   for (const auto& l : var.lgs) {
-    p.do_trans(l, var, l->get_name());
+    p.do_trans(l, var, l->get_name());//l->get_name gives the name of the top module (generally same as that of file name)
   }
 }
 

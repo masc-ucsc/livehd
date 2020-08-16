@@ -33,6 +33,7 @@ cc_binary(
             "//pass/bitwidth:pass_bitwidth",
             "//pass/semantic:pass_semantic",
             "//pass/lnast_dfg:pass_lnast_dfg",
+            "//pass/lnastfmt:pass_lnastfmt",
 
             #add dependencies to new passes here
     ],
