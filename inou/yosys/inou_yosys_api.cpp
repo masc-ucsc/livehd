@@ -326,6 +326,13 @@ void Inou_yosys_api::fromlg(Eprp_var &var) {
     vars.set("file", std::string(file));
     vars.set("name", std::string(lg->get_name()));
 
+    auto hier = var.get("hier");
+    if (!hier.empty() && (hier == "1" || hier == "true")) {
+      vars.set("hier", mustache::data::type::bool_true);
+    }else{
+      vars.set("hier", mustache::data::type::bool_false);
+    }
+
     p.call_yosys(vars);
   }
 }
@@ -358,6 +365,7 @@ void Inou_yosys_api::setup() {
   m2.add_label_optional("odir", "output directory for generated verilog files", ".");
   m2.add_label_optional("script", "alternative custom inou_yosys_write.ys command");
   m2.add_label_optional("yosys", "path for yosys command", yosys);
+  m2.add_label_optional("hier", "hierarchy pass in LiveHD (like flat in yosys)");
 
   register_inou("yosys", m2);
 }
