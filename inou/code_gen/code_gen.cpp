@@ -35,6 +35,7 @@ void Code_gen::generate(){
   if (node_data.type.is_top()) {
     fmt::print("\nprocessing LNAST tree root text: {} ", node_data.token.get_text());
     fmt::print("processing root->child");
+    absl::StrAppend(&buffer_to_print, lnast_to->starter(lnast->get_top_module_name()));
     do_stmts(lnast->get_child(root_index));
   } else if (node_data.type.is_invalid()) {
     fmt::print("INVALID NODE!");
@@ -426,15 +427,16 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
     // check if a number
     if(op_is_unary) {absl::StrAppend(&val,lnast_to->debug_name_lang(op_node_data.type));}
     absl::StrAppend(&val, lnast_to->ref_name(ref));
-    if ((i+1) != op_str_vect.size() && !op_is_unary) {
+    if ((i+1) != op_str_vect.size() && !op_is_unary) {//check that another entry is left in op_str_vect && it is a binary operation
       absl::StrAppend(&val, " ", lnast_to->debug_name_lang(op_node_data.type), " ");
     }
   }
 
-  if(is_temp_var(key)) {
+  if(is_temp_var(key) ) { //|| !op_is_unary) {
     ref_map.insert(std::pair<std::string_view, std::string>(key, lnast_to->ref_name(val)));
   } else {
-    absl::StrAppend (&buffer_to_print, indent(), lnast_to->ref_name(key), " ", lnast_to->debug_name_lang(op_node_data.type), " ", lnast_to->ref_name(val), lnast_to->stmt_sep());
+    //absl::StrAppend (&buffer_to_print, indent(), lnast_to->ref_name(key), " ", lnast_to->debug_name_lang(op_node_data.type), " ", lnast_to->ref_name(val), lnast_to->stmt_sep());
+    absl::StrAppend (&buffer_to_print, indent(), lnast_to->ref_name(key), " ", "=", " ", lnast_to->ref_name(val), lnast_to->stmt_sep());
   }
 
 }
