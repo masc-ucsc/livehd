@@ -83,7 +83,7 @@
 // Warning: func_xor
 // ================================================
 
-// Cond Func Def
+// Cond Func Def (Doesn't work for some reason?)
 // func_xor = :($a, $b, $valid, %out) when $valid:{
 //   %out = $a ^ $b
 // }
@@ -152,5 +152,18 @@
 // a = a * 3
 // b = a
 // a = a / 3
-// Warning: Inefficient LNAST for variable b
+// Warning: None
+
+// %foo = 4
+// %out = %foo
+// %out = %foo + 4
+// %bar = (4 * 5) / 2
+// %valid = %bar
+// %valid = %valid + %out
+// Warning: Inefficient LNASt for variable %out and %valid
+
+// x = 3
+// x = 3 * (x + 3)
+// y = 4
+// y = ((y + 3) * 7) / 7
 // ================================================

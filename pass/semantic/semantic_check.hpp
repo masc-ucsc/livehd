@@ -13,6 +13,7 @@ protected:
 
   absl::flat_hash_set<std::string_view> inefficient_LNAST;
   absl::flat_hash_set<std::string_view> output_vars;
+  absl::flat_hash_set<std::string_view> never_read;
 
   std::vector<Lnast_nid> lhs_list;
   std::vector<std::vector<Lnast_nid>> rhs_list;
