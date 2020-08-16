@@ -12,11 +12,10 @@ pts='reg_bits_set tuple_copy logic
      '
 
 #make sure to call Pyrope_compile() in the end of script
-# pts='reg__q_pin'
+pts_hier4='funcall4'   
 pts_hier='sum funcall'
 pts_hier2='sum2 funcall2'   
-pts_hier4='funcall4'   
-
+pts_hier5='sum3 funcall5'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -102,7 +101,7 @@ Pyrope_compile () {
       echo ""
       echo ""
       echo "----------------------------------------------------"
-      echo "Bitwidth Optimization(LGraph)"
+      echo "Local Bitwidth Optimization(LGraph)"
       echo "----------------------------------------------------"
   
       ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.bitwidth"
@@ -114,11 +113,39 @@ Pyrope_compile () {
       fi
   
       ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+
     fi
   done #end of for
   
   
+  if [[ $2 == "hier" ]]; then
+    #get the last pattern of pts_hier as the top module
+    top_module=$(echo $1 | awk '{print $NF}') 
+    echo $top_module
+
+    echo ""
+    echo ""
+    echo ""
+    echo "----------------------------------------------------"
+    echo "Hierarchical Bitwidth Optimization(LGraph)"
+    echo "----------------------------------------------------"
   
+    ${LGSHELL} "lgraph.open name:${top_module} |> pass.bitwidth hier:true"
+    if [ $? -eq 0 ]; then
+      echo "Successfully optimize hier-design bitwidth: inou/pyrope/tests/compiler/${top_module}.prp"
+    else
+      echo "ERROR: Pyrope compiler failed: hier-bitwidth optimization, testcase: inou/pyrope/tests/compiler/${top_module}.prp"
+      exit 1
+    fi
+
+    ${LGSHELL} "lgraph.open name:${top_module} |> inou.graphviz.from verbose:false"
+    mv ${top_module}.dot ${top_module}.hier.dot
+  fi # end of hier bits
+
+
+
+
+    
   for pt in $1
   do
     if [[ ${pt} == *_err* ]]; then
@@ -145,7 +172,7 @@ Pyrope_compile () {
   done
 
 
-
+  # Logic Equivalence Check
   if [[ $2 == "hier" ]]; then
     #get the last pattern of pts_hier
     top_module=$(echo $1 | awk '{print $NF}') 
@@ -176,9 +203,6 @@ Pyrope_compile () {
       exit 1
     fi
 
-
-
-
   else
     for pt in $1
     do
@@ -201,10 +225,14 @@ Pyrope_compile () {
   fi
 }
 
+
+
+
+Pyrope_compile "$pts_hier4" "hier"
 Pyrope_compile "$pts" 
-Pyrope_compile "$pts_hier"  "hier"
-Pyrope_compile "$pts_hier2" "hier"
-# Pyrope_compile "$pts_hier4" "hier"
+# Pyrope_compile "$pts_hier"  "hier"
+# Pyrope_compile "$pts_hier2" "hier"
+# Pyrope_compile "$pts_hier5" "hier"
 
 
 rm -f *.v
