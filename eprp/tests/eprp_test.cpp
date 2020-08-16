@@ -1,6 +1,7 @@
 
 #include "fmt/format.h"
 #include "absl/strings/str_split.h"
+#include "absl/strings/substitute.h"
 
 #include "gtest/gtest.h"
 

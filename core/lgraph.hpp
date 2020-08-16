@@ -260,13 +260,13 @@ public:
   // Iterators defined in the lgraph_each.cpp
 
   void each_pin(const Node_pin &dpin, std::function<bool(Index_ID idx)> f1) const;
-  void each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)> f1);
-  void each_graph_input(std::function<void(Node_pin &pin)> f1);
-  void each_graph_output(std::function<void(Node_pin &pin)> f1);
+  void each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)> f1, bool hierarchical=false);
+  void each_graph_input(std::function<void(Node_pin &pin)> f1, bool hierarchical=false);
+  void each_graph_output(std::function<void(Node_pin &pin)> f1, bool hierarchical=false);
 
-  void each_node_fast(std::function<void(Node &node)> f1);
+  void each_top_node_fast(std::function<void(Node &node)> f1, bool hierarchical=false);
 
-  void each_output_edge_fast(std::function<void(XEdge &edge)> f1);
+  void each_top_output_edge_fast(std::function<void(XEdge &edge)> f1, bool hierarchical=false);
 
   void each_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)>);
   void each_sub_unique_fast(const std::function<bool(Node &, Lg_type_id)> fn);
@@ -287,20 +287,4 @@ public:
     }
   };
 
-  void each_root_fast_direct(std::function<bool(Node &)> f1);
-  template <typename FN>
-  void each_root_fast(const FN f1) {
-    if constexpr (std::is_invocable_r_v<bool, FN &, Node &>) {  // WARNING: bool must be before void
-      each_root_direct(f1);
-    } else if constexpr (std::is_invocable_r_v<void, FN &, Node &>) {
-      auto f2 = [&f1](Node &node) {
-        f1(node);
-        return true;
-      };
-      each_root_direct(f2);
-    } else {
-      I(false);
-      each_root_direct(f1);  // Better error message if I keep this
-    }
-  };
 };

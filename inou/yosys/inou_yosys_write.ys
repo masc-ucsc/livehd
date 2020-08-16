@@ -1,9 +1,11 @@
 # default lg2yosys script inou_yosys_write.ys
 
-lg2yosys -path {{path}} -name {{name}}
+lg2yosys -path {{path}} -name {{name}} {{#hier}} -hierarchy {{/hier}}
 
-# OPT fails with hierarchy. Yosys looses hierarchy
-# opt
+{{#hier}}
+# OPT fails without hierarchy (flatten). Yosys looses hierarchy
+opt
+{{/hier}}
 
 write_verilog {{file}}
 

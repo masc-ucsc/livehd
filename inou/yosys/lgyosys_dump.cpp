@@ -312,9 +312,9 @@ void Lgyosys_dump::create_wires(LGraph *g, RTLIL::Module *module) {
       input_map[pin.get_compact()]->port_input  = true;
       input_map[pin.get_compact()]->port_output = false;
     }
-  });
+  }, hierarchy);
 
-  for (auto node : g->fast()) { // FIXME: add this as an option -flatten
+  for (auto node : g->fast(hierarchy)) { // FIXME: add this as an option -flatten
     I(!node.is_invalid());
     I(node.get_type().op != GraphIO_Op);
 
@@ -408,10 +408,10 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         module->connect(RTLIL::SigSpec(lhs.as_wire(), 0, rhs.size()), rhs);
       }
     }
-  });
+  }, hierarchy);
 
   // now create nodes and make connections
-  for (auto node : g->fast()) {  //FIXME: add this as an option -flatten
+  for (auto node : g->fast(hierarchy)) {
     I(node.get_type().op != GraphIO_Op);
 
     if (!node.has_inputs() && !node.has_outputs())

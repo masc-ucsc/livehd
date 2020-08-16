@@ -4,20 +4,22 @@
 #include "lgraph.hpp"
 #include "sub_node.hpp"
 
-void LGraph::each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)> f1) {
+void LGraph::each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)> f1, bool hierarchical) {
   if (node_internal.size() < Node::Hardcoded_output_nid)
     return;
 
   std::vector<std::pair<Node_pin, Port_ID>> pin_pair;
 
-  auto out = Node(this, Hierarchy_tree::invalid_index(), Node::Hardcoded_output_nid);
+  auto hidx = hierarchical? Hierarchy_tree::root_index() : Hierarchy_tree::invalid_index();
+
+  auto out = Node(this, hidx, Node::Hardcoded_output_nid);
   for (auto &o_pin : out.out_setup_pins()) {
     auto pos = get_self_sub_node().get_graph_pos_from_instance_pid(o_pin.get_pid());
     fmt::print("1.name:{} pos:{} pid:{}\n",o_pin.get_name(), pos, o_pin.get_pid());
     pin_pair.emplace_back(std::make_pair(o_pin, pos));
   }
 
-  auto inp = Node(this, Hierarchy_tree::invalid_index(), Node::Hardcoded_input_nid);
+  auto inp = Node(this, hidx, Node::Hardcoded_input_nid);
   for (auto &i_pin : inp.out_setup_pins()) {
     auto pos = get_self_sub_node().get_graph_pos_from_instance_pid(i_pin.get_pid());
     fmt::print("2.name:{} pos:{} pid:{}\n",i_pin.get_name(), pos, i_pin.get_pid());
@@ -65,27 +67,33 @@ void LGraph::each_pin(const Node_pin &dpin, std::function<bool(Index_ID idx)> f1
   }
 }
 
-void LGraph::each_graph_input(std::function<void(Node_pin &pin)> f1) {
+void LGraph::each_graph_input(std::function<void(Node_pin &pin)> f1, bool hierarchical) {
   if (node_internal.size() < Node::Hardcoded_output_nid)
     return;
 
-  auto node = Node(this, Hierarchy_tree::invalid_index(), Node::Hardcoded_input_nid);
+  auto hidx = hierarchical? Hierarchy_tree::root_index() : Hierarchy_tree::invalid_index();
+
+  auto node = Node(this, hidx, Node::Hardcoded_input_nid);
   for (auto &pin : node.out_setup_pins()) {
     f1(pin);
   }
 }
 
-void LGraph::each_graph_output(std::function<void(Node_pin &pin)> f1) {
+void LGraph::each_graph_output(std::function<void(Node_pin &pin)> f1, bool hierarchical) {
   if (node_internal.size() < Node::Hardcoded_output_nid)
     return;
 
-  auto node = Node(this, Hierarchy_tree::invalid_index(), Node::Hardcoded_output_nid);
+  auto hidx = hierarchical? Hierarchy_tree::root_index() : Hierarchy_tree::invalid_index();
+
+  auto node = Node(this, hidx, Node::Hardcoded_output_nid);
   for (auto &pin : node.out_setup_pins()) {
     f1(pin);
   }
 }
 
-void LGraph::each_node_fast(std::function<void(Node &node)> f1) {
+void LGraph::each_top_node_fast(std::function<void(Node &node)> f1, bool hierarchical) {
+  auto hidx = hierarchical? Hierarchy_tree::root_index() : Hierarchy_tree::invalid_index();
+
   for (auto &ni : node_internal) {
     if (!ni.is_node_state())
       continue;
@@ -94,12 +102,14 @@ void LGraph::each_node_fast(std::function<void(Node &node)> f1) {
     if (ni.is_graph_io())
       continue;
 
-    Node node(this, Hierarchy_tree::invalid_index(), ni.get_nid());
+    Node node(this, hidx, ni.get_nid());
     f1(node);
   }
 }
 
-void LGraph::each_output_edge_fast(std::function<void(XEdge &edge)> f1) {
+void LGraph::each_top_output_edge_fast(std::function<void(XEdge &edge)> f1, bool hierarchical) {
+  auto hidx = hierarchical? Hierarchy_tree::root_index() : Hierarchy_tree::invalid_index();
+
   for (const auto &ni : node_internal) {
     if (!ni.is_node_state())
       continue;
@@ -108,11 +118,11 @@ void LGraph::each_output_edge_fast(std::function<void(XEdge &edge)> f1) {
     if (!ni.has_local_outputs())
       continue;
 
-    auto dpin = Node_pin(this, this, Hierarchy_tree::invalid_index(), ni.get_nid(), ni.get_dst_pid(), false);
+    auto dpin = Node_pin(this, this, hidx, ni.get_nid(), ni.get_dst_pid(), false);
 
     const Edge_raw *edge_raw = ni.get_output_begin();
     do {
-      XEdge edge(dpin, Node_pin(this, this, Hierarchy_tree::invalid_index(), edge_raw->get_idx(), edge_raw->get_inp_pid(), true));
+      XEdge edge(dpin, Node_pin(this, this, hidx, edge_raw->get_idx(), edge_raw->get_inp_pid(), true));
 
       f1(edge);
       edge_raw += edge_raw->next_node_inc();
@@ -156,19 +166,3 @@ void LGraph::each_sub_unique_fast(const std::function<bool(Node &, Lg_type_id)> 
   }
 }
 
-void LGraph::each_root_fast_direct(std::function<bool(Node &)> f1) {
-  for (const auto &ni : node_internal) {
-    if (!ni.is_node_state())
-      continue;
-    if (!ni.is_root())
-      continue;
-    if (ni.is_graph_io())
-      continue;
-
-    auto node = Node(this, Hierarchy_tree::invalid_index(), ni.get_nid());
-
-    bool cont = f1(node);
-    if (!cont)
-      return;
-  }
-}
