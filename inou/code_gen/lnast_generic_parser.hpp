@@ -1,6 +1,7 @@
 
 #pragma once
 
+#include <string_view>
 #include "code_gen.hpp"
 #include "code_gen_all_lang.hpp"
 
@@ -25,6 +26,7 @@ public:
 class Cpp_parser: public Code_gen_all_lang {
   std::string_view stmt_separator = " ;\n";
   std::string_view lang_type = "cpp";
+  std::string supp_ftype = "hpp";
 
 public:
   Cpp_parser(){};
@@ -35,6 +37,11 @@ public:
   std::string_view for_cond_mid() final;
   std::string_view for_cond_beg() final;
   std::string_view for_cond_end() final;
+  std::string starter(std::string_view filename) final;
+//header related functions:
+  std::string_view supporting_ftype() final;
+  std::string supporting_fstart(std::string basename_s) final;
+  std::string supporting_fend(std::string basename_s) final;
 
 };
 

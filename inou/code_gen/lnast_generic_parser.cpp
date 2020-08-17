@@ -1,5 +1,6 @@
 
 #include "lnast_generic_parser.hpp"
+#include <cstring>
 
 std::string Prp_parser::ref_name(std::string prp_term){
     return prp_term;
@@ -81,7 +82,6 @@ std::string_view Ver_parser::for_cond_mid(){
   return ": ";//TODO
 }
 
-
 std::string_view Prp_parser::for_cond_beg(){
   return " ";
 }
@@ -91,8 +91,6 @@ std::string_view Cpp_parser::for_cond_beg(){
 std::string_view Ver_parser::for_cond_beg(){
   return " ( auto ";//TODO
 }
-
-
 
 std::string_view Prp_parser::for_cond_end(){
   return " ";
@@ -106,4 +104,20 @@ std::string_view Ver_parser::for_cond_end(){
 
 std::string_view Ver_parser::assign_node_strt() {
   return "assign ";
+}
+
+std::string Cpp_parser::starter(std::string_view filename){
+  std::string _filename = std::string (filename);
+  return absl::StrCat("void ", _filename, "::cycle(");
+}
+
+//header related functions:
+std::string_view Cpp_parser::supporting_ftype(){
+  return supp_ftype;
+}
+std::string Cpp_parser::supporting_fstart(std::string basename_s){
+  return absl::StrCat("file: ", basename_s);
+}
+std::string Cpp_parser::supporting_fend(std::string basename_s){
+  return absl::StrCat("<<EOF ", basename_s);
 }
