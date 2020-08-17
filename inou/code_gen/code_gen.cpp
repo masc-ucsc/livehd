@@ -53,7 +53,7 @@ void Code_gen::generate(){
   fmt::print("{}\n", lnast_to->supporting_fend(basename_s));
 
   auto basename = absl::StrCat(lnast->get_top_module_name(), ".", lang_type);
-  fmt::print("file:{}\n\n", basename);
+  fmt::print("{}\n", lnast_to->main_fstart(basename, basename_s));
   fmt::print("{}\n", buffer_to_print);
   fmt::print("<<EOF\n");
 }
@@ -158,6 +158,7 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index) {
 
   const auto& assign_node_data = lnast->get_data(assign_node_index);
   if (is_temp_var(key)) {
+    lnast_to->cpp_check_var_inst(key, ref);//for getting UInt<3> a from $a.___bits=3
     auto ref_map_inst_res = ref_map.insert(std::pair<std::string_view, std::string>(key, lnast_to->ref_name(ref)));
     if(!ref_map_inst_res.second) {
       absl::StrAppend(&buffer_to_print, indent(), lnast_to->ref_name(ref_map.find(key)->second), " ", lnast_to->debug_name_lang(assign_node_data.type), " ", lnast_to->ref_name(ref), lnast_to->stmt_sep());
@@ -166,6 +167,8 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index) {
     absl::StrAppend(&buffer_to_print, indent(), lnast_to->assign_node_strt(), lnast_to->ref_name(key), " ", lnast_to->debug_name_lang(assign_node_data.type), " ", lnast_to->ref_name(ref), lnast_to->stmt_sep());
   }
 }
+//-------------------------------------------------------------------------------------
+//to obtain 
 //-------------------------------------------------------------------------------------
 //Process the while node:
 //pattern: while -> cond , stmts
@@ -591,6 +594,7 @@ void Code_gen::do_tuple(const mmap_lib::Tree_index& tuple_node_index) {
   if(is_temp_var(key)) {
     ref_map.insert(std::pair<std::string_view, std::string>(key, tuple_value));
   } else {
+    fmt::print("key: {}\n tuple_value:{}\n", key, tuple_value);
     absl::StrAppend(&buffer_to_print, key, " saved as ", tuple_value, "\n");
     // this should never be possible
   }

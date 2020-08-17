@@ -1,6 +1,7 @@
 
 #pragma once
 
+#include <string>
 #include <string_view>
 #include "code_gen.hpp"
 #include "code_gen_all_lang.hpp"
@@ -19,6 +20,7 @@ public:
   std::string_view for_cond_end() final;
   std::string ref_name(std::string prp_term) final;
   std::string ref_name(std::string_view prp_term) final;
+
 };
 
 //-------------------------------------------------------------------------------------
@@ -42,7 +44,8 @@ public:
   std::string_view supporting_ftype() final;
   std::string supporting_fstart(std::string basename_s) final;
   std::string supporting_fend(std::string basename_s) final;
-
+  
+  std::string main_fstart(std::string basename, std::string basename_s) final;
 };
 
 //-------------------------------------------------------------------------------------
