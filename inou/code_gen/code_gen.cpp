@@ -44,10 +44,16 @@ void Code_gen::generate(){
   }
 
   auto lang_type = lnast_to->get_lang_type();
+
+  fmt::print("lnast_to_{}_parser path:{} \n", lang_type, path);
+
+  auto basename_s = absl::StrCat(lnast->get_top_module_name(), ".", lnast_to->supporting_ftype());
+  fmt::print("{}\n", lnast_to->supporting_fstart(basename_s));
+  fmt::print("{}\n", lnast_to->supp_buffer_to_print());
+  fmt::print("{}\n", lnast_to->supporting_fend(basename_s));
+
   auto basename = absl::StrCat(lnast->get_top_module_name(), ".", lang_type);
-
-  fmt::print("lnast_to_{}_parser path:{} file:{}\n", lang_type, path, basename);
-
+  fmt::print("file:{}\n\n", basename);
   fmt::print("{}\n", buffer_to_print);
   fmt::print("<<EOF\n");
 }

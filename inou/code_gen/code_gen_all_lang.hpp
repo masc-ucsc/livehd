@@ -1,6 +1,8 @@
 
 #pragma once
 
+#include <string>
+#include <string_view>
 #include "code_gen.hpp"
 
 class Code_gen_all_lang {
@@ -87,6 +89,12 @@ else
   //in verilog, assign stmt starts with assign keyword. thus this function.
   virtual std::string_view assign_node_strt() {return "";}
 
+  virtual std::string starter(std::string_view filename) {return "";} ;
+
+  virtual std::string supporting_fend(std::string basename_s) {return "";} ;
+  virtual std::string supporting_fstart(std::string basename_s) {return "";} ;
+  virtual std::string_view supporting_ftype() {return "";};
+  virtual std::string_view supp_buffer_to_print() {return "";};
 
 };
 

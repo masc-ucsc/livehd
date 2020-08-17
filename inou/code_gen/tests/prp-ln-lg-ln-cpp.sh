@@ -93,7 +93,7 @@ do
     echo "LG->LN completed"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.lgraph_to_lnast |> inou.code_gen.prp"
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.lgraph_to_lnast |> inou.code_gen.cpp"
     if [ $? -eq 0 ]; then
       echo "Successful code generation: ${pt}.prp"
     else
