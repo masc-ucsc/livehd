@@ -91,10 +91,14 @@ else
 
   virtual std::string starter(std::string_view filename) {return "";} ;
 
+  //for header file:
   virtual std::string supporting_fend(std::string basename_s) {return "";} ;
   virtual std::string supporting_fstart(std::string basename_s) {return "";} ;
   virtual std::string_view supporting_ftype() {return "";};
   virtual std::string_view supp_buffer_to_print() {return "";};
+
+  virtual std::string main_fstart(std::string basename, std::string basename_s) {return absl::StrCat("file: ", basename, "\n");} ;
+  virtual void cpp_check_var_inst(std::string_view key, std::string_view ref) {;};
 
 };
 

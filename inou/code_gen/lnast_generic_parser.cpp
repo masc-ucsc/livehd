@@ -1,6 +1,7 @@
 
 #include "lnast_generic_parser.hpp"
 #include <cstring>
+#include <string>
 
 std::string Prp_parser::ref_name(std::string prp_term){
     return prp_term;
@@ -116,8 +117,13 @@ std::string_view Cpp_parser::supporting_ftype(){
   return supp_ftype;
 }
 std::string Cpp_parser::supporting_fstart(std::string basename_s){
-  return absl::StrCat("file: ", basename_s);
+  return absl::StrCat("file: ", basename_s, "\n#pragma once");
 }
 std::string Cpp_parser::supporting_fend(std::string basename_s){
   return absl::StrCat("<<EOF ", basename_s);
 }
+
+std::string Cpp_parser::main_fstart(std::string basename, std::string basename_s) {
+  return absl::StrCat("file: ", basename, "\n#include \"", basename_s, "\"\n");
+}
+
