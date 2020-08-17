@@ -254,12 +254,10 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id, const 
    * __reset_pin, and (init... how to implement?) */
 
   // Specify __clk_pin (all registers should have this set)
-  /*I(clock != "");
-  auto acc_name_c = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(id, ".__clk_pin"));
-
-  auto idx_asg_c = lnast.add_child(parent_node, Lnast_node::create_assign("asg"));
+  /*auto acc_name_c = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(id, ".__clk_pin"));
+  auto idx_asg_c = lnast.add_child(parent_node, Lnast_node::create_assign(""));
   lnast.add_child(idx_asg_c, Lnast_node::create_ref(acc_name_c));
-  lnast.add_child(idx_asg_c, Lnast_node::create_ref(clock));*/
+  AttachExprStrToNode(lnast, clk, idx_asg_c);*/
 
   // Specify __bits, if bitwidth is explicit
   if (bitwidth > 0) {
@@ -293,12 +291,10 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id, const 
   }
 
   // Specify __reset_pin
-  /*I(reset != "");
-  auto acc_name_r = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(id, ".__reset_pin"));
-
+  /*auto acc_name_r = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(id, ".__reset_pin"));
   auto idx_asg_r = lnast.add_child(parent_node, Lnast_node::create_assign(""));
   lnast.add_child(idx_asg_r, Lnast_node::create_ref(acc_name_r));
-  lnast.add_child(idx_asg_r, Lnast_node::create_ref(rst));*/
+  AttachExprStrToNode(lnast, rst, idx_asg_r);*/
 
   // Specify init.. (how to?)
   // FIXME: Add this eventually...
@@ -757,9 +753,6 @@ void Inou_firrtl::create_module_inst(Lnast& lnast, const firrtl::FirrtlPB_Statem
   // Specify the bitwidth of all IO of the submodule.
   for (const auto& name_bw_tup : mod_to_io_map[inst.module_id()]) {
     auto port_bw = std::get<1>(name_bw_tup);
-    if (port_bw <= 0) {
-      continue;
-    }
     auto port_name = std::get<0>(name_bw_tup);
     auto port_dir = std::get<2>(name_bw_tup);
 
@@ -772,11 +765,19 @@ void Inou_firrtl::create_module_inst(Lnast& lnast, const firrtl::FirrtlPB_Statem
       I(false);
     }
 
-    auto acc_name = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(io_name, ".__bits"));
+    if (port_bw > 0) {
+      auto acc_name_bw = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(io_name, ".__bits"));
+      auto idx_asg_bw = lnast.add_child(parent_node, Lnast_node::create_assign(""));
+      lnast.add_child(idx_asg_bw, Lnast_node::create_ref(acc_name_bw));
+      lnast.add_child(idx_asg_bw, Lnast_node::create_const(lnast.add_string(std::to_string(port_bw))));
+    }
 
-    auto idx_asg_bw = lnast.add_child(parent_node, Lnast_node::create_assign(""));
-    lnast.add_child(idx_asg_bw, Lnast_node::create_ref(acc_name));
-    lnast.add_child(idx_asg_bw, Lnast_node::create_const(lnast.add_string(std::to_string(port_bw))));
+    if (std::get<3>(name_bw_tup) == true) { // __sign = true
+      auto acc_name_s = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(io_name, ".__sign"));
+      auto idx_asg_s = lnast.add_child(parent_node, Lnast_node::create_assign(""));
+      lnast.add_child(idx_asg_s, Lnast_node::create_ref(acc_name_s));
+      lnast.add_child(idx_asg_s, Lnast_node::create_const(lnast.add_string(std::to_string(port_bw))));
+    }
   }
 }
 
@@ -999,13 +1000,47 @@ void Inou_firrtl::HandleExtractBitsOp(Lnast& lnast, const firrtl::FirrtlPB_Expre
   /* x = bits(e1)(numH, numL) should take graph form:
    *      range                 bit_sel
    *    /   |   \             /   |   \
-   *___F0 numL numH          x   e1 ___F0  */
+   *___F0 numL numH          x   e1 ___F0
+   *
+   * OR ----------------------------------
+   * FIXME: This bottom is a substitute for the above translation. It does the
+   * same thing, but uses only currently supported LN->LG node types. When range
+   * and bit_sel gain support on that interface, use the above translation.
+   *
+   *       shr          and
+   *      / | \       /  |  \
+   * ___F0 e1 numL   x ___F0 diff
+   * where diff = 2 ^ {numH - numL + 1} - 1
+   */
   I(lnast.get_data(parent_node).type.is_stmts());
   I(op.arg_size() == 1 && op.const__size() == 2);
 
   auto e1_str           = lnast.add_string(ReturnExprString(lnast, op.arg(0), parent_node, true));
   auto temp_var_name_f0 = create_temp_var(lnast);
+  // FIXME: Read previous FIXME about later removing this compiler ifs.
+#if 1
+  auto numH             = std::stoi(op.const_(0).value());
+  auto numL             = std::stoi(op.const_(1).value());
+  I((numH >= numL) && (numL >= 0));
 
+  //Create const diff str
+  auto diff             = numH - numL + 1;
+  std::string diffs = "0b";
+  for (int i = 0; i < diff; i++) {
+    diffs = absl::StrCat(diffs, "1");
+  }
+
+  auto idx_shr = lnast.add_child(parent_node, Lnast_node::create_shift_right(""));
+  lnast.add_child(idx_shr, Lnast_node::create_ref(temp_var_name_f0));
+  AttachExprStrToNode(lnast, e1_str, idx_shr);
+  lnast.add_child(idx_shr, Lnast_node::create_const(lnast.add_string(op.const_(1).value())));
+
+  auto idx_and = lnast.add_child(parent_node, Lnast_node::create_and(""));
+  lnast.add_child(idx_and, Lnast_node::create_ref(lnast.add_string(lhs)));
+  lnast.add_child(idx_and, Lnast_node::create_ref(temp_var_name_f0));
+  lnast.add_child(idx_and, Lnast_node::create_const(lnast.add_string(diffs)));
+#endif
+#if 0
   auto idx_range = lnast.add_child(parent_node, Lnast_node::create_range("range_EB"));
   lnast.add_child(idx_range, Lnast_node::create_ref(temp_var_name_f0));
   lnast.add_child(idx_range, Lnast_node::create_const(lnast.add_string(op.const_(1).value())));
@@ -1015,6 +1050,7 @@ void Inou_firrtl::HandleExtractBitsOp(Lnast& lnast, const firrtl::FirrtlPB_Expre
   lnast.add_child(idx_bit_sel, Lnast_node::create_ref(lnast.add_string(lhs)));
   AttachExprStrToNode(lnast, e1_str, idx_bit_sel);
   lnast.add_child(idx_bit_sel, Lnast_node::create_ref(temp_var_name_f0));
+#endif
 }
 
 /* The Head primitive op returns the n most-significant bits
@@ -1588,18 +1624,18 @@ std::string Inou_firrtl::FlattenExpression(Lnast& ln, Lnast_nid& parent_node, co
  * and the bitwidth of it (if the bw is 0, that means the bitwidth will be inferred later.
  */
 void Inou_firrtl::create_io_list(const firrtl::FirrtlPB_Type& type, uint8_t dir, const std::string& port_id,
-                                 std::vector<std::tuple<std::string, uint8_t, uint32_t>>& vec) {
+                                 std::vector<std::tuple<std::string, uint8_t, uint32_t, bool>>& vec) {
   switch (type.type_case()) {
     case firrtl::FirrtlPB_Type::kUintType: {  // UInt type
-      vec.emplace_back(port_id, dir, type.uint_type().width().value());
+      vec.emplace_back(port_id, dir, type.uint_type().width().value(), false);
       break;
     }
     case firrtl::FirrtlPB_Type::kSintType: {  // SInt type
-      vec.emplace_back(port_id, dir, type.sint_type().width().value());
+      vec.emplace_back(port_id, dir, type.sint_type().width().value(), true);
       break;
     }
     case firrtl::FirrtlPB_Type::kClockType: {  // Clock type
-      vec.emplace_back(port_id, dir, 1);
+      vec.emplace_back(port_id, dir, 1, false);
       break;
     }
     case firrtl::FirrtlPB_Type::kBundleType: {  // Bundle type
@@ -1621,7 +1657,7 @@ void Inou_firrtl::create_io_list(const firrtl::FirrtlPB_Type& type, uint8_t dir,
     }
     case firrtl::FirrtlPB_Type::kVectorType: {  // Vector type
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
-        vec.emplace_back(port_id, dir, 0);
+        vec.emplace_back(port_id, dir, 0, false);
         create_io_list(type.vector_type().type(), dir, absl::StrCat(port_id, "[", i, "]"), vec);
       }
       break;
@@ -1635,47 +1671,62 @@ void Inou_firrtl::create_io_list(const firrtl::FirrtlPB_Type& type, uint8_t dir,
       break;
     }
     case firrtl::FirrtlPB_Type::kAsyncResetType: { // AsyncReset type
-      vec.emplace_back(port_id, dir, 1);
+      vec.emplace_back(port_id, dir, 1, false);
       async_rst_names.insert(port_id);
       break;
     }
     case firrtl::FirrtlPB_Type::kResetType: { // Reset type
-      vec.emplace_back(port_id, dir, 1);
+      vec.emplace_back(port_id, dir, 1, false);
       break;
     }
     default: Pass::error("Unknown port type.");
   }
 }
 
-/* This function iterates over the IO of a module and
- * sets the bitwidth of each using a dot node in LNAST. */
+/* This function iterates over the IO of a module and sets
+ * the bitwidth + sign of each using a dot node in LNAST. */
 void Inou_firrtl::ListPortInfo(Lnast& lnast, const firrtl::FirrtlPB_Port& port, Lnast_nid parent_node) {
-  std::vector<std::tuple<std::string, uint8_t, uint32_t>> port_list;  // Terms are as follows: name, direction, # of bits.
+   // Terms in port_list as follows: name, direction, # of bits, sign.
+  std::vector<std::tuple<std::string, uint8_t, uint32_t, bool>> port_list;
   create_io_list(port.type(), port.direction(), port.id(), port_list);
 
   for (auto val : port_list) {
-    auto subfield_loc = std::get<0>(val).find(".");
-    auto subaccess_loc = std::get<0>(val).find("[");
-    if (std::get<1>(val) == 1) {  // PORT_DIRECTION_IN
-      input_names.insert(std::get<0>(val));
-      if (std::get<2>(val) > 0) {
-        if (subfield_loc != std::string::npos || subaccess_loc != std::string::npos) {
-          create_bitwidth_dot_node(lnast, std::get<2>(val), parent_node, absl::StrCat("$inp_", std::get<0>(val)));
-        } else {
-          create_bitwidth_dot_node(lnast, std::get<2>(val), parent_node, absl::StrCat("$", std::get<0>(val)));
-        }
+    auto port_name = std::get<0>(val);
+    auto port_dir  = std::get<1>(val);
+    auto port_bits = std::get<2>(val);
+    auto port_sign = std::get<3>(val);
+
+    std::string full_port_name;
+    if (port_dir == firrtl::FirrtlPB_Port_Direction::FirrtlPB_Port_Direction_PORT_DIRECTION_IN) {
+      input_names.insert(port_name);
+      if (port_name.find_first_of("[.") != std::string::npos) {
+        full_port_name = absl::StrCat("$inp_", port_name);
+      } else {
+        full_port_name = absl::StrCat("$", port_name);
       }
-    } else if (std::get<1>(val) == 2) {  // PORT_DIRECTION_OUT
-      output_names.insert(std::get<0>(val));
-      if (std::get<2>(val) > 0) {
-        if (subfield_loc != std::string::npos || subaccess_loc != std::string::npos) {
-          create_bitwidth_dot_node(lnast, std::get<2>(val), parent_node, absl::StrCat("%out_", std::get<0>(val)));
-        } else {
-          create_bitwidth_dot_node(lnast, std::get<2>(val), parent_node, absl::StrCat("%", std::get<0>(val)));
-        }
+    } else if (port_dir == firrtl::FirrtlPB_Port_Direction::FirrtlPB_Port_Direction_PORT_DIRECTION_OUT) {
+      output_names.insert(port_name);
+      if (port_name.find_first_of("[.") != std::string::npos) {
+        full_port_name = absl::StrCat("%out_", port_name);
+      } else {
+        full_port_name = absl::StrCat("%", port_name);
       }
     } else {
-      I(false);  // PORT_DIRECTION_UNKNOWN. Not supported by LNAST.
+      Pass::error("Found IO port {} specified with unknown direction in Protobuf message.", port_name);
+    }
+
+    if (port_bits > 0) { // Specify __bits
+      auto bit_acc_name = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(full_port_name, ".__bits"));
+      auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
+      lnast.add_child(idx_asg, Lnast_node::create_ref(bit_acc_name));
+      lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(std::to_string(port_bits))));
+    }
+
+    if (port_sign == true) { // Specify __sign
+      auto sign_acc_name = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(full_port_name, ".__sign"));
+      auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
+      lnast.add_child(idx_asg, Lnast_node::create_ref(sign_acc_name));
+      lnast.add_child(idx_asg, Lnast_node::create_const("true"));
     }
   }
 }
@@ -2307,32 +2358,32 @@ void Inou_firrtl::AddPortToMap(const std::string& mod_id, const firrtl::FirrtlPB
     case firrtl::FirrtlPB_Type::kUintType: { // UInt type
       AddPortToSub(sub, inp_pos, out_pos, port_id, dir);
       mod_to_io_dir_map[std::make_pair(mod_id, port_id)] = dir;
-      mod_to_io_map[mod_id].insert({port_id, type.uint_type().width().value(), dir});
+      mod_to_io_map[mod_id].insert({port_id, type.uint_type().width().value(), dir, false});
       break;
     }
     case firrtl::FirrtlPB_Type::kSintType: { // SInt type
       AddPortToSub(sub, inp_pos, out_pos, port_id, dir);
       mod_to_io_dir_map[std::make_pair(mod_id, port_id)] = dir;
-      mod_to_io_map[mod_id].insert({port_id, type.sint_type().width().value(), dir});
+      mod_to_io_map[mod_id].insert({port_id, type.sint_type().width().value(), dir, true});
       break;
     }
     case firrtl::FirrtlPB_Type::kClockType: { // Clock type
       AddPortToSub(sub, inp_pos, out_pos, port_id, dir);
       mod_to_io_dir_map[std::make_pair(mod_id, port_id)] = dir;
-      mod_to_io_map[mod_id].insert({port_id, 1, dir});
+      mod_to_io_map[mod_id].insert({port_id, 1, dir, false});
       break;
     }
     case firrtl::FirrtlPB_Type::kAsyncResetType: { // AsyncReset type
       AddPortToSub(sub, inp_pos, out_pos, port_id, dir);
       mod_to_io_dir_map[std::make_pair(mod_id, port_id)] = dir;
-      mod_to_io_map[mod_id].insert({port_id, 1, dir});
+      mod_to_io_map[mod_id].insert({port_id, 1, dir, false});
       async_rst_names.insert(port_id);
       break;
     }
     case firrtl::FirrtlPB_Type::kResetType: { // Reset type
       AddPortToSub(sub, inp_pos, out_pos, port_id, dir);
       mod_to_io_dir_map[std::make_pair(mod_id, port_id)] = dir;
-      mod_to_io_map[mod_id].insert({port_id, 1, dir});
+      mod_to_io_map[mod_id].insert({port_id, 1, dir, false});
       break;
     }
     case firrtl::FirrtlPB_Type::kBundleType: {  // Bundle type
@@ -2378,7 +2429,7 @@ void Inou_firrtl::AddPortToMap(const std::string& mod_id, const firrtl::FirrtlPB
  * contents of this into LGraph form. */
 void Inou_firrtl::GrabExtModuleInfo(const firrtl::FirrtlPB_Module_ExternalModule& emod) {
   // Figure out all of mods IO and their respective bw + dir.
-  std::vector<std::tuple<std::string, uint8_t, uint32_t>> port_list;  // Terms are as follows: name, direction, # of bits.
+  std::vector<std::tuple<std::string, uint8_t, uint32_t, bool>> port_list;  // Terms are as follows: name, direction, # of bits, sign.
   for (int i = 0; i < emod.port_size(); i++) {
     auto port = emod.port(i);
     create_io_list(port.type(), port.direction(), port.id(), port_list);
@@ -2409,7 +2460,7 @@ void Inou_firrtl::GrabExtModuleInfo(const firrtl::FirrtlPB_Module_ExternalModule
   // Add them to the map to let us know what ports exist in this module.
   for (const auto& elem : port_list) {
     mod_to_io_dir_map[std::make_pair(emod.defined_name(), std::get<0>(elem))] = std::get<1>(elem);
-    mod_to_io_map[emod.defined_name()].insert({std::get<0>(elem), std::get<2>(elem), std::get<1>(elem)});
+    mod_to_io_map[emod.defined_name()].insert({std::get<0>(elem), std::get<2>(elem), std::get<1>(elem), std::get<3>(elem)});
   }
 }
 
