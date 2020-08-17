@@ -41,10 +41,12 @@ protected:
   using Bwd_pos_attr  = Attribute<bwd_name,Node ,mmap_lib::map<Node::Compact, uint64_t> >;
 
   void map_tree_to_lgraph() {
+    Lbench bench("map_tree_to_lgraph");
+
     std::vector<mmap_lib::Tree_index> index_order;
 
     tree.each_top_down_fast([&index_order](const mmap_lib::Tree_index &index, const Node_data &node) {
-      fmt::print(" level:{} pos:{} create_pos:{} fwd:{} bwd:{} leaf:{}\n", index.level, index.pos, node.create_pos, node.fwd_pos, node.bwd_pos, node.leaf);
+      //fmt::print(" level:{} pos:{} create_pos:{} fwd:{} bwd:{} leaf:{}\n", index.level, index.pos, node.create_pos, node.fwd_pos, node.bwd_pos, node.leaf);
 
       if (index.level || index.pos)
         index_order.emplace_back(index);
@@ -151,8 +153,8 @@ protected:
       auto &curr_node = node_order[i];
       auto &prev_node = node_order[i-1];
 
-      fmt::print("prev   {} class {}\n", prev_node.debug_name(), prev_node.get_class_lgraph()->get_name());
-      fmt::print("curr   {} class {}\n", curr_node.debug_name(), curr_node.get_class_lgraph()->get_name());
+      //fmt::print("prev   {} class {}\n", prev_node.debug_name(), prev_node.get_class_lgraph()->get_name());
+      //fmt::print("curr   {} class {}\n", curr_node.debug_name(), curr_node.get_class_lgraph()->get_name());
 
       Node_pin dpin;
       if (prev_node.get_type().op == Sum_Op) {

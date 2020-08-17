@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 
+#include "lbench.hpp"
 #include "lrand.hpp"
 #include "mmap_tree.hpp"
 
@@ -20,6 +21,8 @@ using testing::HasSubstr;
 class Setup_traverse : public Tree_lgdb_setup {
 protected:
   void check_lgraph_fwd() {
+    Lbench bench("check_lgraph_fwd");
+
     I(lg_root);
 
     int pos = 1;
