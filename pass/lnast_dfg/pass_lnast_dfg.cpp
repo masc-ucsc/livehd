@@ -36,14 +36,10 @@ void Pass_lnast_dfg::tolg(Eprp_var &var) {
     const auto top_stmts = ln->get_first_child(top);
     Lnast_dfg p(var, module_name);
     lgs = p.do_tolg(ln, top_stmts);
+    var.add(lgs);
   }
 
   if (lgs.empty()) {
     error("failed to generate any lgraph from lnast");
-  } else {
-    var.add(lgs);
   }
 }
-
-
-
