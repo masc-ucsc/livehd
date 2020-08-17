@@ -248,6 +248,12 @@ negative (`sign = result.min<0`). `known` is true if the result sign is known
 For any value (`val`), the number of bits required (`bits`) is `val.bits =
 log2(absmax(val.max,val.min))+val.sign?1:0`.
 
+
+In LGraph, the cells operate like having unlimited precision with signed
+numbers. Most HDLs focus on unsigned, but LiveHD handles the superset (sign and
+unlimited precision). The preciion is reduced only explicitly with few
+operations like and-gate with masks or Shifts.
+
 ### Sum_op
 
 Addition and substraction node is a single node that performs 2-complement
