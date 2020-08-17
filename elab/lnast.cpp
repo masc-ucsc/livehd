@@ -957,6 +957,7 @@ void Lnast::update_rhs_ssa_cnt_table(const Lnast_nid &psts_nid, const Lnast_nid 
 }
 
 int8_t Lnast::check_rhs_cnt_table_parents_chain(const Lnast_nid &psts_nid, const Lnast_nid &target_key) {
+
   auto &ssa_rhs_cnt_table = ssa_rhs_cnt_tables[psts_nid];
   const auto  target_name = get_name(target_key);
   auto itr = ssa_rhs_cnt_table.find(target_name);
@@ -964,6 +965,8 @@ int8_t Lnast::check_rhs_cnt_table_parents_chain(const Lnast_nid &psts_nid, const
   if (itr != ssa_rhs_cnt_table.end()) {
     return ssa_rhs_cnt_table[target_name];
   } else if (get_parent(psts_nid) == get_root()) {
+    return -1;
+  } else if (get_type(get_parent(psts_nid)).is_func_def()) {
     return -1;
   } else {
     auto tmp_if_nid = get_parent(psts_nid);

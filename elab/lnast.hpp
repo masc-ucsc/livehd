@@ -15,6 +15,9 @@ using Cnt_rtable      = absl::flat_hash_map<std::string_view, int8_t>;
 using Dot_lrhs_table  = absl::flat_hash_map<Lnast_nid, std::pair<bool, Lnast_nid>>;  // for both dot and selection, dot -> (lrhs, paired opr node)
 using Tuple_var_table = absl::flat_hash_set<std::string_view>;
 
+
+
+
 //tricky old C macro to avoid redundant code from function overloadings
 #define CREATE_LNAST_NODE(type) \
         static Lnast_node create##type(std::string_view sview){return Lnast_node(Lnast_ntype::create##type(), Token(0, 0, 0, 0, sview));}\
