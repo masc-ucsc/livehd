@@ -49,7 +49,7 @@ do
     echo "----------------------------------------------------"
     echo "Verilog -> LGraph -> LNAST -> LGraph"
     echo "----------------------------------------------------"
-    ${LGSHELL} "inou.yosys.tolg files:inou/yosys/tests/${pt}.v top:${pt} |> pass.cprop |> pass.cprop |> inou.graphviz.from |> pass.lgraph_to_lnast |> lnast.dump |> pass.lnast_dfg path:lgdb2"
+    ${LGSHELL} "inou.yosys.tolg files:inou/yosys/tests/${pt}.v top:${pt} |> pass.cprop |> pass.cprop |> inou.graphviz.from |> pass.lnast_fromlg |> lnast.dump |> pass.lnast_dfg path:lgdb2"
     if [ $? -eq 0 ]; then
       echo "Successfully created the inital LGraph using Yosys: ${pt}.v"
     else

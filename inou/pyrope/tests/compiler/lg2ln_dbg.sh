@@ -147,7 +147,7 @@ Pyrope_compile () {
       echo "LGraph -> LNAST"
       echo "----------------------------------------------------"
     
-      ${LGSHELL} "lgraph.open name:${pt} |> pass.lgraph_to_lnast"
+      ${LGSHELL} "lgraph.open name:${pt} |> pass.lnast_fromlg"
     
       if [ $? -eq 0 ]; then
         echo "Successfully generate lnast from lgraph! :${pt}.prp"
@@ -163,7 +163,7 @@ Pyrope_compile () {
       echo "LGraph -> LNAST -> DOT"
       echo "----------------------------------------------------"
     
-      ${LGSHELL} "lgraph.open name:${pt} |> pass.lgraph_to_lnast |> inou.graphviz.from"
+      ${LGSHELL} "lgraph.open name:${pt} |> pass.lnast_fromlg |> inou.graphviz.from"
     
 
       if [ $? -eq 0 ]; then
@@ -182,7 +182,7 @@ Pyrope_compile () {
       echo "LGraph -> LNAST -> SSA -> DOT"
       echo "----------------------------------------------------"
     
-      ${LGSHELL} "lgraph.open name:${pt} |> pass.lgraph_to_lnast |> inou.lnast_dfg.dbg_lnast_ssa |> lnast.dump"
+      ${LGSHELL} "lgraph.open name:${pt} |> pass.lnast_fromlg |> inou.lnast_dfg.dbg_lnast_ssa |> lnast.dump"
     
 
       if [ $? -eq 0 ]; then
@@ -200,7 +200,7 @@ Pyrope_compile () {
       echo "LGraph -> LNAST -> LGraph"
       echo "----------------------------------------------------"
     
-      ${LGSHELL} "lgraph.open name:${pt} |> pass.lgraph_to_lnast |> inou.lnast_dfg.tolg" 
+      ${LGSHELL} "lgraph.open name:${pt} |> pass.lnast_fromlg |> inou.lnast_dfg.tolg" 
     
 
       if [ $? -eq 0 ]; then

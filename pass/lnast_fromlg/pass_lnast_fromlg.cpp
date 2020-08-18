@@ -1,6 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "pass_lgraph_to_lnast.hpp"
+#include "pass_lnast_fromlg.hpp"
 
 #include <queue>
 #include <stack>
@@ -14,28 +14,28 @@
 #define GREY  1
 #define BLACK 2
 
-static Pass_plugin sample("pass_lgraph_to_lnast", Pass_lgraph_to_lnast::setup);
+static Pass_plugin sample("pass_lnast_fromlg", Pass_lnast_fromlg::setup);
 
-void Pass_lgraph_to_lnast::setup() {
-  Eprp_method m1("pass.lgraph_to_lnast", "translates LGraph to LNAST", &Pass_lgraph_to_lnast::trans);
+void Pass_lnast_fromlg::setup() {
+  Eprp_method m1("pass.lnast_fromlg", "translates LGraph to LNAST", &Pass_lnast_fromlg::trans);
   // For bw_in_ln, if __bits are not put in the LNAST then they can be accessed using bw_table in LNAST.
   m1.add_label_optional("bw_in_ln", "true/false: put __bits nodes in LNAST?", "true");
   register_pass(m1);
 }
 
-Pass_lgraph_to_lnast::Pass_lgraph_to_lnast(const Eprp_var& var) : Pass("pass.lgraph_to_lnast", var) {}
+Pass_lnast_fromlg::Pass_lnast_fromlg(const Eprp_var& var) : Pass("pass.lnast_fromlg", var) {}
 
-void Pass_lgraph_to_lnast::trans(Eprp_var& var) {
-  Lbench b("pass.lgraph_to_lnast");
+void Pass_lnast_fromlg::trans(Eprp_var& var) {
+  Lbench b("pass.lnast_fromlg");
 
-  Pass_lgraph_to_lnast p(var);
+  Pass_lnast_fromlg p(var);
 
   for (const auto& l : var.lgs) {
     p.do_trans(l, var, l->get_name());//l->get_name gives the name of the top module (generally same as that of file name)
   }
 }
 
-void Pass_lgraph_to_lnast::do_trans(LGraph* lg, Eprp_var& var, std::string_view module_name) {
+void Pass_lnast_fromlg::do_trans(LGraph* lg, Eprp_var& var, std::string_view module_name) {
   if (var.has_label("bw_in_ln")) {
     if (var.get("bw_in_ln") == "false") {
       put_bw_in_ln = false;
@@ -56,7 +56,7 @@ void Pass_lgraph_to_lnast::do_trans(LGraph* lg, Eprp_var& var, std::string_view 
   var.add(std::move(lnast));
 }
 
-void Pass_lgraph_to_lnast::initial_tree_coloring(LGraph* lg, Lnast &lnast) {
+void Pass_lnast_fromlg::initial_tree_coloring(LGraph* lg, Lnast &lnast) {
   for (const auto& node : lg->fast()) {
     auto node_editable = node;
     node_editable.set_color(WHITE);
@@ -89,7 +89,7 @@ void Pass_lgraph_to_lnast::initial_tree_coloring(LGraph* lg, Lnast &lnast) {
   lg->get_graph_output_node().set_color(WHITE);
 }
 
-void Pass_lgraph_to_lnast::begin_transformation(LGraph* lg, Lnast& lnast, Lnast_nid& ln_node) {
+void Pass_lnast_fromlg::begin_transformation(LGraph* lg, Lnast& lnast, Lnast_nid& ln_node) {
   // note: in graph out node, spin_pid == dpin_pid is always true
 
   auto out_node = lg->get_graph_output_node();
@@ -114,7 +114,7 @@ void Pass_lgraph_to_lnast::begin_transformation(LGraph* lg, Lnast& lnast, Lnast_
 
 /* Purpose of this function is to serve as the recursive
  * call we will invoke constantly as we work up the LGraph */
-void Pass_lgraph_to_lnast::handle_source_node(LGraph* lg, Node_pin& pin, Lnast& lnast, Lnast_nid& ln_node) {
+void Pass_lnast_fromlg::handle_source_node(LGraph* lg, Node_pin& pin, Lnast& lnast, Lnast_nid& ln_node) {
   // If pin is a driver pin for an already handled node, just return driver pin's name.
   if (pin.get_node().get_color() == BLACK) {
     // Node is already in LNAST, nothing to do.
@@ -171,7 +171,7 @@ void Pass_lgraph_to_lnast::handle_source_node(LGraph* lg, Node_pin& pin, Lnast& 
   DontCare_Op,
   Memory_Op,
 */
-void Pass_lgraph_to_lnast::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
+void Pass_lnast_fromlg::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
   // Specify bitwidth in LNAST table (for code gen purposes)
   std::string_view name;
   auto bw = pin.get_bits();
@@ -225,7 +225,7 @@ void Pass_lgraph_to_lnast::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node,
   }
 }
 
-void Pass_lgraph_to_lnast::add_bw_in_ln(Lnast& lnast, Lnast_nid& parent_node, const std::string_view& pin_name, const uint32_t& bits) {
+void Pass_lnast_fromlg::add_bw_in_ln(Lnast& lnast, Lnast_nid& parent_node, const std::string_view& pin_name, const uint32_t& bits) {
   auto tmp_var = create_temp_var(lnast);
   auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_dot(""));
   lnast.add_child(idx_dot, Lnast_node::create_ref(tmp_var));
@@ -237,7 +237,7 @@ void Pass_lgraph_to_lnast::add_bw_in_ln(Lnast& lnast, Lnast_nid& parent_node, co
   lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(std::to_string(bits))));
 }
 
-void Pass_lgraph_to_lnast::handle_io(LGraph* lg, Lnast_nid& parent_lnast_node, Lnast& lnast) {
+void Pass_lnast_fromlg::handle_io(LGraph* lg, Lnast_nid& parent_lnast_node, Lnast& lnast) {
   /* Any input or output that has its bitwidth specified should add info to the LNAST.
    * As an example, if we had an input x that was 7 bits wide, this would be added:
    *     dot             asg
@@ -310,7 +310,7 @@ void Pass_lgraph_to_lnast::handle_io(LGraph* lg, Lnast_nid& parent_lnast_node, L
 }
 
 // -------- How to convert each LGraph node type to LNAST -------------
-void Pass_lgraph_to_lnast::attach_sum_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
+void Pass_lnast_fromlg::attach_sum_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
   // PID: 0 = AS, 1 = AU, 2 = BS, 3 = BU, 4 = Y... Y = (AS+...+AS+AU+...+AU) - (BS+...+BS+BU+...+BU)
   bool is_add = false;
   bool is_subt = false;
@@ -369,7 +369,7 @@ void Pass_lgraph_to_lnast::attach_sum_node(Lnast& lnast, Lnast_nid& parent_node,
   }
 }
 
-void Pass_lgraph_to_lnast::attach_binaryop_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
+void Pass_lnast_fromlg::attach_binaryop_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
   // PID: 0 = A, 0 = Y, 1 = YReduce
 
   // Check to see if output PID 0 and PID 1 are used.
@@ -411,7 +411,7 @@ void Pass_lgraph_to_lnast::attach_binaryop_node(Lnast& lnast, Lnast_nid& parent_
   }
 }
 
-void Pass_lgraph_to_lnast::attach_binary_reduc(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pid1_pin) {
+void Pass_lnast_fromlg::attach_binary_reduc(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pid1_pin) {
   // First, concatenate everything together {A0, A1, ...}
   std::queue<Node_pin> dpins;
   auto                 bits_to_shift = 0;
@@ -499,14 +499,14 @@ void Pass_lgraph_to_lnast::attach_binary_reduc(Lnast& lnast, Lnast_nid& parent_n
   }
 }
 
-void Pass_lgraph_to_lnast::attach_not_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
+void Pass_lnast_fromlg::attach_not_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
   auto not_node = lnast.add_child(parent_node, Lnast_node::create_not("not"));
   lnast.add_child(not_node, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));
 
   attach_children_to_node(lnast, not_node, pin);
 }
 
-void Pass_lgraph_to_lnast::attach_join_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
+void Pass_lnast_fromlg::attach_join_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
   std::stack<Node_pin> dpins;
   auto                 bits_to_shift = 0;
   /* This stack method works because the inp_edges iterator goes from edges w/ lowest sink pid to highest
@@ -546,7 +546,7 @@ void Pass_lgraph_to_lnast::attach_join_node(Lnast& lnast, Lnast_nid& parent_node
   attach_child(lnast, idx_or, dpins.top());
 }
 
-void Pass_lgraph_to_lnast::attach_pick_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
+void Pass_lnast_fromlg::attach_pick_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
   // PID: 0 = A, 1 = Offset... Y = A[Offset+(Y_Bitwidth) : Offset]
   /* Y = pick(X, off) in LGraph form turns into Lnast form as:
    * IMPROVED/FUTURE TRANS:   |||  WORKING TRANS:
@@ -611,7 +611,7 @@ void Pass_lgraph_to_lnast::attach_pick_node(Lnast& lnast, Lnast_nid& parent_node
 #endif
 }
 
-void Pass_lgraph_to_lnast::attach_compar_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
+void Pass_lnast_fromlg::attach_compar_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
   // Y = (As|Au) [comparator] (Bs|Bu)... Note: the | means one or the other, can't have both.
   // If there are multiple pins like (lessthan A1, B1 B2) then this is the same as A1 < B1 & A1 < B2.
 
@@ -672,7 +672,7 @@ void Pass_lgraph_to_lnast::attach_compar_node(Lnast& lnast, Lnast_nid& parent_no
   }
 }
 
-void Pass_lgraph_to_lnast::attach_simple_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
+void Pass_lnast_fromlg::attach_simple_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
   Lnast_nid simple_node;
   switch (pin.get_node().get_type().op) {
     case Equals_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_same("==")); break;
@@ -693,7 +693,7 @@ void Pass_lgraph_to_lnast::attach_simple_node(Lnast& lnast, Lnast_nid& parent_no
   attach_children_to_node(lnast, simple_node, pin);
 }
 
-void Pass_lgraph_to_lnast::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
+void Pass_lnast_fromlg::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
   // PID: 0 = S, 1 = A, 2 = B, ...
   // Y = ~SA | SB
 
@@ -747,7 +747,7 @@ void Pass_lgraph_to_lnast::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node,
   attach_child(lnast, asg_idx, mux_vals.front().driver);
 }
 
-void Pass_lgraph_to_lnast::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
+void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
   // PID: 0 = CLK, 1 = Din, 2 = En, 3 = Reset, 4 = Set Val, 5 = Clk Polarity (5 is not used for AFlop)
   bool     has_clk   = false;
   bool     has_din   = false;
@@ -884,7 +884,7 @@ void Pass_lgraph_to_lnast::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node
   attach_child(lnast, idx_asg, din_pin);
 }
 
-void Pass_lgraph_to_lnast::attach_latch_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
+void Pass_lnast_fromlg::attach_latch_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
   // PID: 0 = Din, 1 = En, 2 = ???
   bool     has_din   = false;
   bool     has_en    = false;
@@ -935,7 +935,7 @@ void Pass_lgraph_to_lnast::attach_latch_node(Lnast& lnast, Lnast_nid& parent_nod
   attach_child(lnast, idx_asg, din_pin);
 }
 
-void Pass_lgraph_to_lnast::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
+void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
   const auto &sub = pin.get_node().get_type_sub_node();
   if (!pin.get_node().has_name())
     pin.get_node().set_name(create_temp_var(lnast));
@@ -981,7 +981,7 @@ void Pass_lgraph_to_lnast::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_
 }
 
 //------------- Helper Functions ------------
-void Pass_lgraph_to_lnast::attach_children_to_node(Lnast& lnast, Lnast_nid& op_node, const Node_pin& pin) {
+void Pass_lnast_fromlg::attach_children_to_node(Lnast& lnast, Lnast_nid& op_node, const Node_pin& pin) {
   for (const auto inp : pin.get_node().inp_edges()) {
     auto dpin = inp.driver;
     attach_child(lnast, op_node, dpin);
@@ -993,7 +993,7 @@ void Pass_lgraph_to_lnast::attach_children_to_node(Lnast& lnast, Lnast_nid& op_n
  * a module input. If it is not a module input, just add a
  * node that has the pin's name. If it is a module input,
  * add the "$" in front of it. */
-void Pass_lgraph_to_lnast::attach_child(Lnast& lnast, Lnast_nid& op_node, const Node_pin& dpin) {
+void Pass_lnast_fromlg::attach_child(Lnast& lnast, Lnast_nid& op_node, const Node_pin& dpin) {
   // The input "dpin" needs to be a driver pin.
   if (dpin.get_node().is_graph_input()) {
     // If the input to the node is from a GraphIO node (it's a module input), add the $ in front.
@@ -1016,7 +1016,7 @@ void Pass_lgraph_to_lnast::attach_child(Lnast& lnast, Lnast_nid& op_node, const 
 
 /* This is the same as above, but instead of making ref/const nodes,
  * we instead make cond nodes. */
-void Pass_lgraph_to_lnast::attach_cond_child(Lnast& lnast, Lnast_nid& op_node, const Node_pin& dpin) {
+void Pass_lnast_fromlg::attach_cond_child(Lnast& lnast, Lnast_nid& op_node, const Node_pin& dpin) {
   // The input "dpin" needs to be a driver pin.
   if (dpin.get_node().is_graph_input()) {
     // If the input to the node is from a GraphIO node (it's a module input), add the $ in front.
@@ -1038,7 +1038,7 @@ void Pass_lgraph_to_lnast::attach_cond_child(Lnast& lnast, Lnast_nid& op_node, c
 /* If a driver pin's name includes a "%" and is not an output of the
  * design, then it's an SSA variable. Thus, if it is an SSA variable
  * I need to remove the "%". */
-std::string_view Pass_lgraph_to_lnast::dpin_get_name(const Node_pin dpin) {
+std::string_view Pass_lnast_fromlg::dpin_get_name(const Node_pin dpin) {
   if (dpin.get_name().substr(0, 1) == "%") {
     return dpin.get_name().substr(1);
   } else {
@@ -1046,13 +1046,13 @@ std::string_view Pass_lgraph_to_lnast::dpin_get_name(const Node_pin dpin) {
   }
 }
 
-std::string_view Pass_lgraph_to_lnast::get_new_seq_name(Lnast& lnast) {
+std::string_view Pass_lnast_fromlg::get_new_seq_name(Lnast& lnast) {
   auto seq_name = lnast.add_string(absl::StrCat("SEQ", seq_count));
   seq_count++;
   return seq_name;
 }
 
-std::string_view Pass_lgraph_to_lnast::create_temp_var(Lnast& lnast) {
+std::string_view Pass_lnast_fromlg::create_temp_var(Lnast& lnast) {
   auto temp_var_name = lnast.add_string(absl::StrCat("___L", temp_var_count));
   temp_var_count++;
   return temp_var_name;

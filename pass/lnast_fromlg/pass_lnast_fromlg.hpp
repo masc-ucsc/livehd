@@ -5,7 +5,7 @@
 #include "lnast.hpp"
 #include "pass.hpp"
 
-class Pass_lgraph_to_lnast : public Pass {
+class Pass_lnast_fromlg : public Pass {
 protected:
   uint64_t temp_var_count = 0;
   uint64_t seq_count      = 0;
@@ -47,7 +47,7 @@ protected:
 public:
   static void trans(Eprp_var& var);
 
-  Pass_lgraph_to_lnast(const Eprp_var& var);
+  Pass_lnast_fromlg(const Eprp_var& var);
 
   static void setup();
 };
