@@ -46,6 +46,9 @@ public:
   std::string supporting_fend(std::string basename_s) final;
   
   std::string main_fstart(std::string basename, std::string basename_s) final;
+  void cpp_check_var_inst(std::string_view key, std::string_view ref) final;
+
+  std::string outline_cpp(std::string modname) final;
 };
 
 //-------------------------------------------------------------------------------------

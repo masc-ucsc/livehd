@@ -97,8 +97,12 @@ else
   virtual std::string_view supporting_ftype() {return "";};
   virtual std::string_view supp_buffer_to_print() {return "";};
 
+  //for main file (cpp file)
   virtual std::string main_fstart(std::string basename, std::string basename_s) {return absl::StrCat("file: ", basename, "\n");} ;
   virtual void cpp_check_var_inst(std::string_view key, std::string_view ref) {;};
+
+  //for cpp constructor:
+  virtual std::string outline_cpp(std::string modname) {return "";};
 
 };
 
