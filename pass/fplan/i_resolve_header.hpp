@@ -12,3 +12,15 @@
 #undef I
 
 #include "iassert.hpp"
+
+// redefine "I" in case iassert was already included
+#define I(...) \
+  do{ _Pragma("GCC diagnostic push"); _Pragma("GCC diagnostic ignored \"-Wsign-compare\""); \
+    IX_X(,##__VA_ARGS__,\
+        I_3(__VA_ARGS__),\
+        I_2(__VA_ARGS__),\
+        I_1(__VA_ARGS__),\
+        I_0(__VA_ARGS__)\
+        ); \
+    _Pragma("GCC diagnostic pop"); }while(0)
+
