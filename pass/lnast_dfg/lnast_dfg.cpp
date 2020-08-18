@@ -930,7 +930,8 @@ Node_pin Lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx_opd,
   } else if (is_input(name)) {
     node_dpin = dfg->add_graph_input(name.substr(1, name.size()-3), Port_invalid, 0);
   } else if (is_const(name)) {
-    node_dpin = dfg->create_node_const(Lconst(name)).setup_driver_pin();
+    // Note->hunter: Changing from name to vname since cond nodes would get named #_0 (causing LConst to think 0 bits)
+    node_dpin = dfg->create_node_const(Lconst(vname)).setup_driver_pin();
   } else if (is_register(name)) {
     auto reg_node = dfg->create_node(SFlop_Op);
     node_dpin = reg_node.setup_driver_pin();
