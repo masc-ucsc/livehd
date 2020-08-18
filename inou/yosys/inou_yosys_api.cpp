@@ -33,8 +33,8 @@ void Inou_yosys_api::set_script_liblg(const Eprp_var &var, bool do_read) {
 
   std::vector<std::string> alt_paths{
 		  "/../pass/mockturtle/mt_test.sh.runfiles/livehd/inou/yosys/"
-		  ,"/../pass/lgraph_to_lnast/lgtoln_verif_from_verilog.sh.runfiles/livehd/inou/yosys/"
-		  ,"/../pass/lgraph_to_lnast/lgtoln_verif_from_pyrope.sh.runfiles/livehd/inou/yosys/"
+		  ,"/../pass/lnast_fromlg/lgtoln_verif_from_verilog.sh.runfiles/livehd/inou/yosys/"
+		  ,"/../pass/lnast_fromlg/lgtoln_verif_from_pyrope.sh.runfiles/livehd/inou/yosys/"
 		  ,"/../pass/sample/sample_test1.sh.runfiles/livehd/inou/yosys/"
 		  ,"/main_test.runfiles/livehd/inou/yosys/"
 		  ,"/verilog.sh.runfiles/livehd/inou/yosys/"

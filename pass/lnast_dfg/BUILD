@@ -7,7 +7,7 @@ cc_library(
     includes = ["."],
     deps = [
         "//pass/bitwidth:pass_bitwidth",
-        "//pass/lgraph_to_lnast:pass_lgraph_to_lnast",
+        "//pass/lnast_fromlg:pass_lnast_fromlg",
         "//pass/common:pass",
     ],
 )
