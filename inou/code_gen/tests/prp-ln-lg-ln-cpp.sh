@@ -79,21 +79,21 @@ do
     echo "----------------------------------------------------"
     echo "LG->LN starting..."
     echo "----------------------------------------------------"
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.lgraph_to_lnast |> inou.graphviz.from"
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.lnast_fromlg |> inou.graphviz.from"
     if [ $? -eq 0 ]; then
       echo "Successfully converted LGraph to LNAST: ${pt}.prp"
     else
       echo "ERROR: LG -> LN pass failed: ${pt}.prp"
       exit 1
     fi
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.lgraph_to_lnast |> lnast.dump"
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.lnast_fromlg |> lnast.dump"
     dot -Tpdf -o ${pt}.lnast.dot.pdf ${pt}.lnast.dot
     echo ""
     echo "----------------------------------------------------"
     echo "LG->LN completed"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.lgraph_to_lnast |> inou.code_gen.cpp"
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.lnast_fromlg |> inou.code_gen.cpp"
     if [ $? -eq 0 ]; then
       echo "Successful code generation: ${pt}.prp"
     else

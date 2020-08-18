@@ -29,7 +29,7 @@ cc_binary(
             "//pass/mockturtle:pass_mockturtle",
             "//pass/lec:pass_lec",
             "//pass/cprop:pass_cprop",
-            "//pass/lgraph_to_lnast:pass_lgraph_to_lnast",
+            "//pass/lnast_fromlg:pass_lnast_fromlg",
             "//pass/bitwidth:pass_bitwidth",
             "//pass/semantic:pass_semantic",
             "//pass/lnast_dfg:pass_lnast_dfg",

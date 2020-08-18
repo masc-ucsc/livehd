@@ -84,7 +84,7 @@ lgtoln_verif() {
     echo "LGraph (golden) -> LNAST -> LGraph (new)"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.lgraph_to_lnast |> lnast.dump |> pass.lnast_dfg path:lgdb2"
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.lnast_fromlg |> lnast.dump |> pass.lnast_dfg path:lgdb2"
     if [ $? -eq 0 ]; then
       echo "Successfully create the new LG: ${pt}"
     else
