@@ -153,6 +153,7 @@ In the pass\_<my_pass>.cpp file:
     if (var.has_label("label name")) {
       fmt::print("entered label name: {}\n", var.get("label name"));
     }
+    ...
   }
 ```
 
