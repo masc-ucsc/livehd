@@ -2,6 +2,7 @@
 #include "lnast_generic_parser.hpp"
 #include <cstring>
 #include <string>
+#include <vector>
 
 std::string Prp_parser::ref_name(std::string prp_term){
     return prp_term;
@@ -124,6 +125,20 @@ std::string Cpp_parser::supporting_fend(std::string basename_s){
 }
 
 std::string Cpp_parser::main_fstart(std::string basename, std::string basename_s) {
-  return absl::StrCat("file: ", basename, "\n#include \"", basename_s, "\"\n");
+  return absl::StrCat("file: ", basename, "\n#include \"livesim_types.hpp\"\n#include \"", basename_s, "\"\n");
 }
 
+void Cpp_parser::cpp_check_var_inst(std::string_view key, std::string_view ref) {
+//TODO
+}
+
+std::string Cpp_parser::outline_cpp(std::string modname) {
+  //constructor
+  std::vector<std::string> name_split = absl::StrSplit(modname, "_");
+  std::string constructor_vcd = modname + "::" + modname + "(uint64_t _hidx, const std::string &parent_name, vcd::VCDWriter* writer)\n\t: hidx(_hidx)\n\t, scope_name(parent_name+\"." + name_split[1] + "\")\n\t, vcd_writer(writer) {\n}\n";
+  std::string constructor = modname + "::" + modname + "(uint64_t _hidx)\n\t: hidx(_hidx) {\n}\n";
+
+  //reset function
+  //main code part function
+  return absl::StrCat(constructor_vcd, "\n", constructor);
+}
