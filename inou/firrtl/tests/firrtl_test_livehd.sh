@@ -47,7 +47,7 @@ do
     echo "----------------------------------------------------"
     echo "Verilog -> LGraph -> LNAST -> FIRRTL (Proto)"
     echo "----------------------------------------------------"
-    ${LGSHELL} "inou.yosys.tolg files:inou/yosys/tests/${pt}.v top:${pt} |> pass.cprop |> pass.cprop |> inou.graphviz.from |> pass.lgraph_to_lnast bw_in_ln:false |> lnast.dump |> inou.firrtl.tofirrtl"
+    ${LGSHELL} "inou.yosys.tolg files:inou/yosys/tests/${pt}.v top:${pt} |> pass.cprop |> pass.cprop |> inou.graphviz.from |> pass.lnast_fromlg bw_in_ln:false |> lnast.dump |> inou.firrtl.tofirrtl"
     if [ $? -eq 0 ]; then
       echo "Successfully generated FIRRTL (Proto): ${pt}"
     else
