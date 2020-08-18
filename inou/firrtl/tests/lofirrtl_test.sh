@@ -4,8 +4,8 @@ rm -rf ./lgdb
 
 pts='Trivial TrivialArith TrivialAdd NotAnd
      Test1 Test2
-     BundleCombiner
-     RegisterSimple RegTrivial RegisterSimple Flop Register GCD
+     BundleCombiner Flop MemoryController Tail
+     RegisterSimple Register GCD
      Rob MemoryController ICache HwachaSequencer'
 pts_hier='FinalVal2Test'
 pts_hier2='FinalValTest'
@@ -22,7 +22,6 @@ pts_hier9='RocketCore'
 #SubModule BundleConnect -- submodules
 #Test3 -- fails because of DCE
 #Test4 -- as_... ops in FIRRTL
-#Test5 -- as_... ops in FIRRTL
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -39,9 +38,9 @@ fi
 lofirrtl_test() {
   for pt in $1
   do
-    if [ -f ${pt}.v ]; then rm ${pt}.v; fi
-    if [ -f ${pt}.dot ]; then rm ${pt}.dot; fi
-    if [ -d lgdb ]; then rm lgdb/*; fi
+    rm -f ${pt}.v
+    rm -f ${pt}.dot
+    rm -f lgdb/*
 
     echo ""
     echo "===================================================="

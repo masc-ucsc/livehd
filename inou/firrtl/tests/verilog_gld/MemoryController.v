@@ -15,11 +15,11 @@ module MemoryController(
   assign io_ddr3_rasN = 1'h1; // @[MemoryController.scala 36:11]
   assign io_ddr3_ba = nextDDR3Cmd_ba; // @[MemoryController.scala 36:11]
   always @(posedge clock) begin
-    nextDDR3Cmd_casN <= reset;
-    if (reset) begin
-      nextDDR3Cmd_ba <= 3'h0;
+    nextDDR3Cmd_casN <= reset; // @[MemoryController.scala 27:28 MemoryController.scala 27:28]
+    if (reset) begin // @[MemoryController.scala 27:28]
+      nextDDR3Cmd_ba <= 3'h0; // @[MemoryController.scala 27:28]
     end else begin
-      nextDDR3Cmd_ba <= 3'h3;
+      nextDDR3Cmd_ba <= 3'h5;
     end
   end
 // Register and memory initialization

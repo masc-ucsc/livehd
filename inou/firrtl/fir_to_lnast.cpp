@@ -1097,13 +1097,18 @@ void Inou_firrtl::HandleTailOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_P
   I(lnast.get_data(parent_node).type.is_stmts());
   I(op.arg_size() == 1 && op.const__size() == 1);
   auto lhs_str  = lnast.add_string(lhs);
+  auto temp_var = create_temp_var(lnast);
   auto expr_str = lnast.add_string(ReturnExprString(lnast, op.arg(0), parent_node, true));
 
   auto idx_shr = lnast.add_child(parent_node, Lnast_node::create_shift_right("shr_tail"));
-  lnast.add_child(idx_shr, Lnast_node::create_ref(lhs_str));
+  lnast.add_child(idx_shr, Lnast_node::create_ref(temp_var));
   AttachExprStrToNode(lnast, expr_str, idx_shr);
   lnast.add_child(idx_shr, Lnast_node::create_const(lnast.add_string(op.const_(0).value())));
 
+  // Note->hunter: We could simplify this by removing this (and merging with shr) but compiler needs this for now.
+  auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg_tail"));
+  lnast.add_child(idx_asg, Lnast_node::create_ref(lhs_str));
+  lnast.add_child(idx_asg, Lnast_node::create_ref(temp_var));
 
   auto idx_dp_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign("dpasg_tail"));
   lnast.add_child(idx_dp_asg, Lnast_node::create_ref(lhs_str));
