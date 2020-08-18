@@ -4,7 +4,7 @@
   number.
   2. Tree collapsing, where nodes with small areas get combined into supernodes with larger areas.
 */
-
+/*
 #pragma once
 
 #include <memory>  // for shared_ptr
@@ -101,3 +101,4 @@ private:
   // find patterns in the collapsed hierarchy
   void find_most_freq_pattern();
 };
+*/

@@ -4,7 +4,6 @@
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
-#undef I
 #include "graph_info.hpp"
 #include "i_resolve_header.hpp"
 
@@ -13,78 +12,102 @@ void setup_pass_fplan() { Pass_fplan::setup(); }
 void Pass_fplan::setup() {
   // register the method with lgraph in order to use it
   auto m = Eprp_method("pass.fplan.makefp", "generate a floorplan from an LGraph", &Pass_fplan::pass);
+  
   register_pass(m);
 }
 
-void Pass_fplan::makefp(LGraph *l) {
-  std::cout << "LGraph: " << l->get_name() << std::endl;
+// TODO: make this a part of the pass
+// best solution would be to patch iassert so that if "I" or "GI" is already defined, a longer name is used.
+static void makefp(Eprp_var &var, Graph_info& gi) {
 
-  graph::Bi_adjacency_list g;
+  std::cout << "Running node creation pass..." << std::endl;
 
-  auto g_name_map     = g.vert_map<std::string>();
-  auto g_area_map     = g.vert_map<double>();
-  auto g_edge_weights = g.edge_map<unsigned int>();
-  auto g_set          = g.vert_set();
-
-  // TODO: use string_views instead of strings
-  const std::string name = l->get_name().data();
-  const double      area = l->get_down_nodes_map().size();
-
-  auto v = g.null_vert();
-  for (const auto &vert : g.verts()) {
-    if (g_name_map[vert] == name) {
-      v = vert;
-    }
-  }
-
-  if (g.is_null(v)) {
-    // vertex does not exist, so create it
-    auto new_v        = g.insert_vert();
-    g_name_map[new_v] = name;
-
-    v = new_v;
-  }
-
-  g_area_map[v] = area;
-  g_set.insert(v);  // all verts start in set zero, and get dividied up during hierarchy discovery
-
-  auto existing_edges = g.edge_set();
-
-  // TODO: use get_down_nodes_map() to list all IOs and submodules
-/*
-  for (auto node : l->fast()) {
-    std::cout << node.debug_name() << std::endl;
-    std::cout << "inputs: " << node.has_inputs() << std::endl;
-    std::cout << "outputs: " << node.has_outputs() << std::endl;
-  }
-*/
-
-  // TODO: this prints nothing
-  for (auto n : l->get_down_nodes_map()) {
-    std::cout << n.first.get_nid() << std::endl;
-  }
-
-  /*
-      std::string other_name = connection["name"].GetString();
-      auto other_v = g.null_vert();
-      for (const auto& vert : g.verts()) {
-        if (g_name_map[vert] == other_name) {
-          other_v = vert;
+  // create nodes without any connections between them, and fill in as much information as we can.
+  for (auto lg : var.lgs) {
+    for (auto cn : lg->get_down_nodes_map()) {
+      auto n = cn.first.get_node(lg);
+      bool found = false;
+      for (auto v : gi.al.verts()) {
+        if (gi.ids[v] == n.get_hidx()) {
+          found = true;
+          break;
         }
       }
 
-      if (other_v == g.null_vert()) {
-        // other node is not in the map, so create it.
-        other_v = g.insert_vert();
-        g_name_map[other_v] = other_name;
+      // node does not already exist, so make a new one
+      if (!found) {
+        auto new_v = gi.al.insert_vert();
+        gi.ids[new_v] = n.get_hidx();
+        gi.debug_names[new_v] = n.debug_name();
+        // TODO: find an actual area of a node
+        gi.areas[new_v] = n.get_num_outputs() + n.get_num_inputs();
+        gi.sets[0].insert(new_v);  // all verts start in set zero, and get dividied up during hierarchy discovery
       }
+    }    
+  }
 
-      auto new_e = g.insert_edge(v, other_v);
-      g_edge_weights[new_e] = connection["weight"].GetInt();
-      existing_edges.insert(new_e);
+  auto existing_edges = gi.al.edge_set();
+
+  std::cout << "Running node connection pass..." << std::endl;
+
+  auto find_name = [&](Hierarchy_index id) -> vertex_t {
+    for (auto v : gi.al.verts()) {
+      if (gi.ids(v) == id) {
+        return v;
+      }
+    }
+
+    return gi.al.null_vert();
+  };
+
+  // wire up nodes with connections between them
+  // obviously, only nodes that are in the same level of hierarchy can be connected to each other.
+  for (auto lg : var.lgs) {
+
+    // TODO: size always returns zero?
+    std::cout << "LGraph: " << lg->get_name() << ", size: " << lg->get_down_nodes_map().size() << std::endl;
+
+    for (auto cn : lg->get_down_nodes_map()) {
+      auto n = cn.first.get_node(lg);
+
+      std::cout << "name of node: " << n.get_name() << std::endl;
+      std::cout << "node inputs: " << n.get_num_inputs() << std::endl;
+      std::cout << "node has inputs: " << n.has_inputs() << std::endl;
+
+      for (auto p : n.inp_connected_pins()) {
+        auto hidx = p.get_hidx();
+        std::cout << "got hidx" << std::endl;
+
+        for (auto lg2 : var.lgs) {
+          for (auto cn2 : lg2->get_down_nodes_map()) {
+            auto n2 = cn2.first.get_node(lg2);
+            if (cn2.first.get_node(lg2).has_outputs()) {
+              for (auto p2 : cn2.first.get_node(lg2).out_connected_pins()) {
+                if (p.get_hidx() == p2.get_hidx()) {
+                  auto v1 = find_name(p.get_hidx());
+                  auto v2 = find_name(p2.get_hidx());
+                
+                
+                  auto new_e = gi.al.insert_edge(v1, v2);
+                  gi.weights[new_e] = p.get_bits();
+                  existing_edges.insert(new_e);
+                }
+              }
+            } else {
+              std::cout << "node has no outputs, skipping." << std::endl;
+            }
+            
+          }
+        }
+
+      }
     }
   }
 
+  //using namespace graph::attributes;
+  //std::cout << gi.al.dot_format("weight"_of_edge = gi.weights, "name"_of_vert = gi.names) << std::endl;
+
+  /*
   // if the graph is not fully connected, ker-lin fails to work.
   // TODO: eventually replace this with an adjacency matrix, since it's probably faster.
   for (const auto& v : g.verts()) {
@@ -108,16 +131,13 @@ void Pass_fplan::makefp(LGraph *l) {
 }
 
 void Pass_fplan::pass(Eprp_var &var) {
-  Pass_fplan p(var);
   std::cout << "running pass..." << std::endl;
-  // loop over each lgraph
-  for (auto l : var.lgs) {
-    p.makefp(l);
-  }
 
-  // make a graph_info thing and call every alg on it
-  // 1. print out node information
-  // 2. write node information into a Graph_info struct and run code on that
+  Graph_info gi;
+
+  makefp(var, gi);
+
   // 3. <finish HiReg>
   // 4. write code to use the existing hierarchy instead of throwing it away
+
 }

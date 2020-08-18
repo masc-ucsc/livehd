@@ -1,3 +1,4 @@
+/*
 #include "json_inou.hpp"
 
 //#include <filesystem>
@@ -131,3 +132,4 @@ double Json_inou_parser::get_aspect_ratio() const {
   I(d.HasMember("aspect_ratio"));
   return d["aspect_ratio"].GetDouble();
 }
+*/

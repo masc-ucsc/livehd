@@ -1,6 +1,7 @@
 /*
   This class converts a json file representing a hierarchical netlist into a Hier_tree data structure.
 */
+/*
 #pragma once
 
 #include "graph_info.hpp"
@@ -23,3 +24,4 @@ public:
 private:
   rapidjson::Document d;
 };
+*/

@@ -1,3 +1,4 @@
+/*
 #include "hier_tree.hpp"
 
 #include <iostream>  // include printing facilities if we're debugging things
@@ -77,15 +78,15 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
     graph_size++;
   }
 
-  /*
-    The reason why I made vert_set a new variable is because views carry no state of their own,
-    so the view recomputes what should be contained in it every time we access the view.
+  
+  //  The reason why I made vert_set a new variable is because views carry no state of their own,
+  //  so the view recomputes what should be contained in it every time we access the view.
 
-    In this case, after we adjust the smap values, the original view decides that nothing should
-    be in the cut_verts view anymore and removes everything.
+  //  In this case, after we adjust the smap values, the original view decides that nothing should
+  //  be in the cut_verts view anymore and removes everything.
 
-    To resolve this, a new view should be created with the correct condition.
-  */
+  //  To resolve this, a new view should be created with the correct condition.
+  
 
   auto new_sets = std::pair(sets.size(), sets.size() + 1);
   sets.push_back(g.vert_set());
@@ -451,3 +452,4 @@ void Hier_tree::collapse(double threshold_area) {
 }
 
 void Hier_tree::discover_regularity() {}
+*/
