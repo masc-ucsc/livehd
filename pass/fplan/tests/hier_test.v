@@ -60,9 +60,9 @@ module mid4(input [9:0] ei, output [9:0] eo, input [4:0] fi, output [4:0] fo);
 endmodule
 
 module mid3(input [4:0] fi, output [4:0] fo);
-  wire w;
-  leaf6 l6(.tempi(fi[3]), .tempo(w));
-  assign fo = ~{fi[4:1], w};
+  wire w_o_6;
+  leaf6 l6(.tempi(fi[3]), .tempo(w_o_6));
+  assign fo = ~{fi[4:1], w_o_6};
 endmodule
 
 module hier_test(input [913:0] testi, output [913:0] testo);
