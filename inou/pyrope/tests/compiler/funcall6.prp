@@ -1,8 +1,8 @@
-add = ::{
+sum6 = ::{
   %total = 0
   for i in $ {
     %total = %total + i
   }
 }
 
-%o1 = add(a = 1, b = 2)
+%out = sum6(a = 1, b = 2)
