@@ -19,7 +19,7 @@ cc_binary(
             "//inou/firrtl:inou_firrtl_cpp",
 
             "//pass/common:pass",
-            #"//pass/fplan:fplan",
+            "//pass/fplan:fplan",
 
             "//lgcpp/common:lgcpp",
             "//lgcpp/prplib:prplib",

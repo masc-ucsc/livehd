@@ -70,13 +70,9 @@ static void makefp(Eprp_var &var, Graph_info& gi) {
     for (auto cn : lg->get_down_nodes_map()) {
       auto n = cn.first.get_node(lg);
 
-      std::cout << "name of node: " << n.get_name() << std::endl;
-      std::cout << "node inputs: " << n.get_num_inputs() << std::endl;
-      std::cout << "node has inputs: " << n.has_inputs() << std::endl;
-
       for (auto p : n.inp_connected_pins()) {
         auto hidx = p.get_hidx();
-        std::cout << "got hidx" << std::endl;
+        fmt::print("{} {}\n", n.get_hidx().get_hash(), p.get_hidx().get_hash());
 
         for (auto lg2 : var.lgs) {
           for (auto cn2 : lg2->get_down_nodes_map()) {
@@ -87,9 +83,8 @@ static void makefp(Eprp_var &var, Graph_info& gi) {
                   auto v1 = find_name(p.get_hidx());
                   auto v2 = find_name(p2.get_hidx());
                 
-                
                   auto new_e = gi.al.insert_edge(v1, v2);
-                  gi.weights[new_e] = p.get_bits();
+                  gi.weights[new_e] = p2.get_bits(); // TODO: only driver pins can call get_bits()?
                   existing_edges.insert(new_e);
                 }
               }
@@ -103,9 +98,9 @@ static void makefp(Eprp_var &var, Graph_info& gi) {
       }
     }
   }
-
+  
   //using namespace graph::attributes;
-  //std::cout << gi.al.dot_format("weight"_of_edge = gi.weights, "name"_of_vert = gi.names) << std::endl;
+  //std::cout << gi.al.dot_format("weight"_of_edge = gi.weights, "name"_of_vert = gi.debug_names) << std::endl;
 
   /*
   // if the graph is not fully connected, ker-lin fails to work.
