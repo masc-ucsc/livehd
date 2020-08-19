@@ -71,15 +71,14 @@ static void makefp(Eprp_var &var, Graph_info& gi) {
       auto n = cn.first.get_node(lg);
 
       for (auto p : n.inp_connected_pins()) {
-        auto hidx = p.get_hidx();
         fmt::print("{} {}\n", n.get_hidx().get_hash(), p.get_hidx().get_hash());
 
         for (auto lg2 : var.lgs) {
           for (auto cn2 : lg2->get_down_nodes_map()) {
             auto n2 = cn2.first.get_node(lg2);
-            if (cn2.first.get_node(lg2).has_outputs()) {
-              for (auto p2 : cn2.first.get_node(lg2).out_connected_pins()) {
-                if (p.get_hidx() == p2.get_hidx()) {
+            if (n2.has_outputs()) {
+              for (auto p2 : n2.out_connected_pins()) {
+                if (p2.get_hidx() == p.get_hidx()) {
                   auto v1 = find_name(p.get_hidx());
                   auto v2 = find_name(p2.get_hidx());
                 
