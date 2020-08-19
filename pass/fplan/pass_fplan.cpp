@@ -30,15 +30,17 @@ static void makefp(Eprp_var &var, Graph_info& gi) {
       for (auto v : gi.al.verts()) {
         if (gi.ids[v] == n.get_hidx()) {
           found = true;
+          std::cout << "Already found node " << n.get_name() << std::endl;
           break;
         }
       }
 
       // node does not already exist, so make a new one
       if (!found) {
+        std::cout << "Making new node " << n.get_name() << std::endl;
         auto new_v = gi.al.insert_vert();
         gi.ids[new_v] = n.get_hidx();
-        gi.debug_names[new_v] = n.debug_name();
+        gi.debug_names[new_v] = n.get_name();
         // TODO: find an actual area of a node
         gi.areas[new_v] = n.get_num_outputs() + n.get_num_inputs();
         gi.sets[0].insert(new_v);  // all verts start in set zero, and get dividied up during hierarchy discovery
@@ -63,43 +65,50 @@ static void makefp(Eprp_var &var, Graph_info& gi) {
   // wire up nodes with connections between them
   // obviously, only nodes that are in the same level of hierarchy can be connected to each other.
   for (auto lg : var.lgs) {
-
-    // TODO: size always returns zero?
-    std::cout << "LGraph: " << lg->get_name() << ", size: " << lg->get_down_nodes_map().size() << std::endl;
-
     for (auto cn : lg->get_down_nodes_map()) {
+
       auto n = cn.first.get_node(lg);
 
-      for (auto p : n.inp_connected_pins()) {
-        fmt::print("{} {}\n", n.get_hidx().get_hash(), p.get_hidx().get_hash());
+      std::cout << "Node: " << n.get_name() << std::endl;
 
-        for (auto lg2 : var.lgs) {
-          for (auto cn2 : lg2->get_down_nodes_map()) {
-            auto n2 = cn2.first.get_node(lg2);
-            if (n2.has_outputs()) {
-              for (auto p2 : n2.out_connected_pins()) {
-                if (p2.get_hidx() == p.get_hidx()) {
-                  auto v1 = find_name(p.get_hidx());
-                  auto v2 = find_name(p2.get_hidx());
-                
-                  auto new_e = gi.al.insert_edge(v1, v2);
-                  gi.weights[new_e] = p2.get_bits(); // TODO: only driver pins can call get_bits()?
-                  existing_edges.insert(new_e);
-                }
-              }
-            } else {
-              std::cout << "node has no outputs, skipping." << std::endl;
-            }
-            
-          }
+      for (auto p : n.inp_connected_pins()) {
+        for (auto other_p : p.inp_driver()) {
+          auto v1 = find_name(p.get_hidx());
+          auto v2 = find_name(other_p.get_hidx());
+              
+          auto new_e = gi.al.insert_edge(v1, v2);
+          gi.weights[new_e] = other_p.get_bits(); // TODO: only driver pins can call get_bits()?
+          existing_edges.insert(new_e);
         }
+
+        /*
+        for (auto cn2 : lg->get_down_nodes_map()) {
+          auto n2 = cn2.first.get_node(lg);
+          if (n2.has_outputs()) {
+            for (auto p2 : n2.out_connected_pins()) { // this is wrong - gets outputs of the same node
+              
+              if (p2.get_hidx() == p.get_hidx()) {
+                auto v1 = find_name(p.get_hidx());
+                auto v2 = find_name(p2.get_hidx());
+              
+                auto new_e = gi.al.insert_edge(v1, v2);
+                gi.weights[new_e] = p2.get_bits(); // TODO: only driver pins can call get_bits()?
+                existing_edges.insert(new_e);
+              }
+            }
+          } else {
+            std::cout << "node has no outputs, skipping." << std::endl;
+          }
+          
+        }
+        */
 
       }
     }
   }
   
-  //using namespace graph::attributes;
-  //std::cout << gi.al.dot_format("weight"_of_edge = gi.weights, "name"_of_vert = gi.debug_names) << std::endl;
+  using namespace graph::attributes;
+  std::cout << gi.al.dot_format("weight"_of_edge = gi.weights, "name"_of_vert = gi.debug_names) << std::endl;
 
   /*
   // if the graph is not fully connected, ker-lin fails to work.
