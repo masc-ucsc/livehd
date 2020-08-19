@@ -4,7 +4,8 @@ rm -rf ./lgdb2
 
 pts='trivial3 logic_bitwise_op_gld common_sub
      operators mux mux2 trivial simple_add
-     trivial_and assigns compare trivial1'
+     trivial_and assigns compare trivial1
+     loop_in_lg loop_in_lg2'
 
 #TO ADD LIST, but have bugs:
 #  Sign isn't working yet:
@@ -19,7 +20,6 @@ pts='trivial3 logic_bitwise_op_gld common_sub
 #     - simple_flop
 #     - cse_basic
 #     - shift
-#     - loop_in_lg, loop_in_lg2
 #  pass.lnast_dfg requires temp vars to be used immediately after being set:
 #     - long_gcd
 #  Submodules failing

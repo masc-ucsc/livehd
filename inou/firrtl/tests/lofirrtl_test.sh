@@ -4,20 +4,20 @@ rm -rf ./lgdb
 
 pts='Trivial TrivialArith TrivialAdd NotAnd
      Test1 Test2
-     BundleCombiner Flop MemoryController Tail
-     RegisterSimple Register
-     GCD Rob MemoryController ICache HwachaSequencer'
-#pts='RegXor Decrementer GCD regex'
+     BundleCombiner MemoryController Tail
+     RegisterSimple Register RegXor Decrementer
+     GCD Flop Rob MemoryController ICache HwachaSequencer'
+#pts='GCD Flop regex'
 
 pts_hier='FinalVal2Test'
 pts_hier2='FinalValTest'
 pts_hier3='SubModule'
 pts_hier4='BundleConnect'
 
-pts_hier ='FPU'
 pts_hier9='RocketCore'
 
 #SimpleBitOps Ops -- parity and mod op not in lnast_dfg
+#Flop -- seems to break when I do HandleMuxAssign pre assign, but works without
 
 #HwachaSequencer -- printf, pad, stop
 

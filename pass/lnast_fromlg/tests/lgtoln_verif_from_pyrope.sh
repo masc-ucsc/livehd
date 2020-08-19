@@ -6,10 +6,10 @@ pts='tuple_copy logic
      hier_tuple hier_tuple2 hier_tuple3
      lhs_wire lhs_wire2 attr_set
      firrtl_tail
+     reg__q_pin adder_stage
      nested_if tuple_if
      capricious_bits2 capricious_bits4 capricious_bits
      out_ssa if2 if ssa_rhs bits_rhs'
-#pts='adder_stage'
 
 pts_hier='sum funcall'
 pts_hier2='sum2 funcall2'

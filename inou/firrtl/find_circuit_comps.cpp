@@ -143,8 +143,13 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
     }
     reg->set_allocated_type(type);
 
-    /* Specify register reset and init as UInt(0). Clock isn't
-     * specified here since a default doesn't work well. */
+    /* Specify register reset and init as UInt(0) as defaults.
+     * Clock is given default value of "clock". */
+    auto ref = new firrtl::FirrtlPB_Expression_Reference();
+    ref->set_id("clock");
+    auto clk_expr = new firrtl::FirrtlPB_Expression();
+    clk_expr->set_allocated_reference(ref);
+    reg->set_allocated_clock(clk_expr);
     reg->set_allocated_reset(CreateULitExpr(0));
     reg->set_allocated_init(CreateULitExpr(0));
 

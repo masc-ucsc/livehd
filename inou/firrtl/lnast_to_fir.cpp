@@ -87,7 +87,6 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
     } else if (ntype.is_tuple()) {
       process_ast_tuple_struct(dfg, lnidx);*/
   } else if (ntype.is_if()) {
-    //add_cstmts(ln, lnidx, when, pos_to_add_to);
     auto nested_when_stmt = process_ln_if_op(ln, lnidx);
     auto fstmt            = pos_to_add_to == 0 ? when->add_consequent() : when->add_otherwise();
     fstmt->set_allocated_when(nested_when_stmt);
@@ -168,7 +167,6 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
   } else if (ntype.is_tuple()) {
     process_ast_tuple_struct(dfg, lnidx);*/
   } else if (ntype.is_if()) {
-    //add_cstmts(ln, lnidx, umod);
     auto when_stmt = process_ln_if_op(ln, lnidx);
     auto fstmt     = umod->add_statement();
     fstmt->set_allocated_when(when_stmt);
@@ -408,26 +406,6 @@ void Inou_firrtl::make_assignment(Lnast &ln, const Lnast_nid &lnidx_lhs, firrtl:
   }
 }
 
-/*void Inou_firrtl::add_cstmts(Lnast &ln, const Lnast_nid &lnidx_if, firrtl::FirrtlPB_Module_UserModule *umod) {
-  for (const auto &if_child : ln.children(lnidx_if)) {
-    const auto ntype = ln.get_data(if_child).type;
-    if (ntype.is_cstmts()) {
-      for (const auto &cst_child : ln.children(if_child)) {
-        process_ln_stmt(ln, cst_child, umod);
-      }
-    }
-  }
-}
-
-void Inou_firrtl::add_cstmts(Lnast &ln, const Lnast_nid &lnidx_if, firrtl::FirrtlPB_Statement_When *when, uint8_t pos_to_add_to) {
-  for (const auto &if_child : ln.children(lnidx_if)) {
-    const auto ntype = ln.get_data(if_child).type;
-    if (ntype.is_cstmts()) {
-      process_ln_stmt(ln, if_child, when, pos_to_add_to);
-    }
-  }
-}*/
-
 firrtl::FirrtlPB_Statement_When *Inou_firrtl::process_ln_if_op(Lnast &ln, const Lnast_nid &lnidx_if) {
   auto    when_highest  = new firrtl::FirrtlPB_Statement_When();
   auto    when_lowest   = when_highest;
@@ -521,6 +499,14 @@ bool Inou_firrtl::process_ln_dot(Lnast &ln, const Lnast_nid &lnidx_dot, firrtl::
     auto expr = new firrtl::FirrtlPB_Expression();
     expr->set_allocated_sub_field(subfield_expr);
 
+    make_assignment(ln, lhs, expr, fstmt);
+    return true;
+  } else if (ln.get_name(field) == "__q_pin") {
+    // For FIRRTL, this is just the same lhs = tup
+    firrtl::FirrtlPB_Expression_Reference *rhs_ref = new firrtl::FirrtlPB_Expression_Reference();
+    rhs_ref->set_id((std::string)ln.get_name(tup).substr(1)); // Remove 1st char since it's a '#'
+    auto expr = new firrtl::FirrtlPB_Expression();
+    expr->set_allocated_reference(rhs_ref);
     make_assignment(ln, lhs, expr, fstmt);
     return true;
   } else {
