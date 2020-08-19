@@ -2,6 +2,7 @@
 #include "lnast_generic_parser.hpp"
 #include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 std::string Prp_parser::ref_name(std::string prp_term){
@@ -128,10 +129,41 @@ std::string Cpp_parser::main_fstart(std::string basename, std::string basename_s
   return absl::StrCat("file: ", basename, "\n#include \"livesim_types.hpp\"\n#include \"", basename_s, "\"\n");
 }
 
-void Cpp_parser::cpp_check_var_inst(std::string_view key, std::string_view ref) {
-//TODO
+bool Cpp_parser::convert_parameters(std::string key, std::string ref) {
+  //convert parameters to cpp format 
+  //currently supports .__bits only
+  assert(key.size()>=1);
+  if(key.find("$")==0) {//it is i/p
+    std::vector<std::string> _key = absl::StrSplit(key, absl::ByAnyChar("$."));
+    inp_bw.insert(std::pair<std::string, std::string>(_key[1], ref));
+  } else if (key.find("%")==0) {//it is o/p
+    std::vector<std::string> _key = absl::StrSplit(key, absl::ByAnyChar("%."));
+    outp_bw.insert(std::pair<std::string, std::string>(_key[1], ref));
+  } else if(key.find("#")==0){//it is register
+    std::vector<std::string> _key = absl::StrSplit(key, absl::ByAnyChar("#."));
+    reg_bw.insert(std::pair<std::string, std::string>(_key[1], ref));
+  } else {//TODO: print error!
+    return false;
+  }
+  return true;
 }
 
+void Cpp_parser::get_maps() {
+  fmt::print("printing I/P bitwidth values:\n");
+  for (auto elem : inp_bw)
+    fmt::print("\tkey: {}, value: {}\n", elem.first, elem.second);
+
+  fmt::print("printing O/P bitwidth values:\n");                      
+  for (auto elem : outp_bw)                                            
+    fmt::print("\tkey: {}, value: {}\n", elem.first, elem.second);    
+
+  fmt::print("printing reg bitwidth values:\n");                      
+  for (auto elem : reg_bw)                                            
+    fmt::print("\tkey: {}, value: {}\n", elem.first, elem.second);    
+}
+void Cpp_parser::call_get_maps() {
+  Cpp_parser::get_maps();
+}
 std::string Cpp_parser::outline_cpp(std::string modname) {
   //constructor
   std::vector<std::string> name_split = absl::StrSplit(modname, "_");
