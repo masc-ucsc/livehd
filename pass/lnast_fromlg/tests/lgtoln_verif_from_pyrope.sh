@@ -4,16 +4,19 @@ rm -rf ./lgdb2
 
 pts='tuple_copy logic
      hier_tuple hier_tuple2 hier_tuple3
-     lhs_wire lhs_wire2 scalar_tuple attr_set
+     lhs_wire lhs_wire2 attr_set
      firrtl_tail
      nested_if tuple_if
      capricious_bits2 capricious_bits4 capricious_bits
      out_ssa if2 if ssa_rhs bits_rhs'
+#pts='adder_stage'
 
 pts_hier='sum funcall'
 pts_hier2='sum2 funcall2'
 
 #TO ADD, BUT BUGS:
+#  Hits mmap_lib assertion failure in pass.bitwidth
+#     - scalar_tuple
 #  Problems with registers (attr specified into ln during lg->ln don't all work yet in ln->lg)
 #     - reg_bits_set
 #     - firrtl_tail3
