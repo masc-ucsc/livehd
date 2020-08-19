@@ -721,9 +721,11 @@ void Pass_lnast_fromlg::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node, co
   }
 
   // Specify var being assigned to is in upper scope (not in if-else scope)
-  //auto asg_idx_i = lnast.add_child(parent_node, Lnast_node::create_assign(""));
-  //lnast.add_child(asg_idx_i, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));
-  //lnast.add_child(asg_idx_i, Lnast_node::create_const("0b0")); //FIXME: Better to use 0b? but causes problems on FIRRTL interface
+  auto bits = pin.get_bits();
+  auto const_str = pin.get_bits() == 1 ? "0u1bit" : absl::StrCat("0u", bits, "bits");
+  auto asg_idx_i = lnast.add_child(parent_node, Lnast_node::create_assign(""));
+  lnast.add_child(asg_idx_i, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));
+  lnast.add_child(asg_idx_i, Lnast_node::create_const(lnast.add_string(const_str)));
 
   // Specify cond + create stmt for each mux val, except last.
   auto if_node  = lnast.add_child(parent_node, Lnast_node::create_if("mux"));
