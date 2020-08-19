@@ -272,16 +272,18 @@ Node_pin_iterator LGraph::out_connected_pins(const Node &node) const {
   I(node_internal[idx2].is_master_root());
 
   while (true) {
-    if (node_internal[idx2].is_root()) {
-      auto n = node_internal[idx2].get_num_local_outputs();
-      if (n > 0) {
-        xiter.emplace_back(Node_pin(node.get_top_lgraph(),
-                                    node.get_class_lgraph(),
-                                    node.get_hidx(),
-                                    idx2,
-                                    node_internal[idx2].get_dst_pid(),
-                                    false));
-      }
+    auto n = node_internal[idx2].get_num_local_outputs();
+    if (n > 0) {
+      auto root_idx = idx2;
+      if (!node_internal[idx2].is_root())
+        root_idx = node_internal[idx2].get_nid();
+
+      xiter.emplace_back(Node_pin(node.get_top_lgraph(),
+            node.get_class_lgraph(),
+            node.get_hidx(),
+            root_idx,
+            node_internal[idx2].get_dst_pid(),
+            false));
     }
 
     if (node_internal[idx2].is_last_state())
@@ -303,16 +305,18 @@ Node_pin_iterator LGraph::inp_connected_pins(const Node &node) const {
   I(node_internal[idx2].is_master_root());
 
   while (true) {
-    if (node_internal[idx2].is_root()) {
-      auto n = node_internal[idx2].get_num_local_inputs();
-      if (n > 0) {
-        xiter.emplace_back(Node_pin(node.get_top_lgraph(),
-                                    node.get_class_lgraph(),
-                                    node.get_hidx(),
-                                    idx2,
-                                    node_internal[idx2].get_dst_pid(),
-                                    true));
-      }
+    auto n = node_internal[idx2].get_num_local_inputs();
+    if (n > 0) {
+      auto root_idx = idx2;
+      if (!node_internal[idx2].is_root())
+        root_idx = node_internal[idx2].get_nid();
+
+      xiter.emplace_back(Node_pin(node.get_top_lgraph(),
+            node.get_class_lgraph(),
+            node.get_hidx(),
+            root_idx,
+            node_internal[idx2].get_dst_pid(),
+            true));
     }
 
     if (node_internal[idx2].is_last_state())
