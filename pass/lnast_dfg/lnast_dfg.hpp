@@ -37,13 +37,11 @@ protected:
   void process_ast_nary_op          (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_logical_op       (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_as_op            (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_label_op         (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_if_op            (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_phi_op           (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_uif_op           (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_func_call_op     (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_func_def_op      (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_sub_op           (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_for_op           (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_while_op         (LGraph *dfg, const Lnast_nid &lnidx);
   void process_ast_tuple_struct     (LGraph *dfg, const Lnast_nid &lnidx);

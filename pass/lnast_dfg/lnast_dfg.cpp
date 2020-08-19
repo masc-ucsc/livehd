@@ -724,6 +724,8 @@ Node Lnast_dfg::setup_node_opr_and_lhs(LGraph *dfg, const Lnast_nid &lnidx_opr) 
     else
       reg_qpin = name2dpin[lhs_vname];
 
+    fmt::print("DBG:reg:{}\n", reg_qpin.get_node().debug_name());
+    fmt::print("DBG:reg_qpin:{}\n", reg_qpin.debug_name());
     reg_data_pin = reg_qpin.get_node().setup_sink_pin("D");
   }
 
@@ -1225,9 +1227,7 @@ void Lnast_dfg::process_ast_func_def_op (LGraph *dfg, const Lnast_nid &lnidx) {
 };
 
 void Lnast_dfg::process_ast_as_op       (LGraph *dfg, const Lnast_nid &lnidx) { ; };
-void Lnast_dfg::process_ast_label_op    (LGraph *dfg, const Lnast_nid &lnidx) { ; };
 void Lnast_dfg::process_ast_uif_op      (LGraph *dfg, const Lnast_nid &lnidx) { ; };
-void Lnast_dfg::process_ast_sub_op      (LGraph *dfg, const Lnast_nid &lnidx) { ; };
 void Lnast_dfg::process_ast_for_op      (LGraph *dfg, const Lnast_nid &lnidx) { ; };
 void Lnast_dfg::process_ast_while_op    (LGraph *dfg, const Lnast_nid &lnidx) { ; };
 
