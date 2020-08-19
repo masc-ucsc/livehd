@@ -5,8 +5,10 @@ rm -rf ./lgdb
 pts='Trivial TrivialArith TrivialAdd NotAnd
      Test1 Test2
      BundleCombiner Flop MemoryController Tail
-     RegisterSimple Register GCD
-     Rob MemoryController ICache HwachaSequencer'
+     RegisterSimple Register
+     GCD Rob MemoryController ICache HwachaSequencer'
+#pts='RegXor Decrementer GCD regex'
+
 pts_hier='FinalVal2Test'
 pts_hier2='FinalValTest'
 pts_hier3='SubModule'
