@@ -14,7 +14,7 @@
 //#define OUTPUT_AST
 //#define OUTPUT_LN
 
-#define DEBUG_AST
+//#define DEBUG_AST
 //#define DEBUG_LN
 
 // variable argument number macro (adapted from stackoverflow.com/questions/3046889/optional-parameters-with-c-macros)
