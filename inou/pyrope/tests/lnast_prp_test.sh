@@ -228,10 +228,10 @@ Pyrope_compile () {
 
 
 
-# Pyrope_compile "$pts"
+Pyrope_compile "$pts"
 # Pyrope_compile "$pts_hier"  "hier"
 # Pyrope_compile "$pts_hier2" "hier"
-Pyrope_compile "$pts_hier5" "hier"
+# Pyrope_compile "$pts_hier5" "hier"
 Pyrope_compile "$pts_hier4" "hier"
 
 
