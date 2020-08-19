@@ -415,7 +415,7 @@ void Pass_lnast_fromlg::attach_binary_reduc(Lnast& lnast, Lnast_nid& parent_node
   // First, concatenate everything together {A0, A1, ...}
   std::queue<Node_pin> dpins;
   auto                 bits_to_shift = 0;
-  auto                 total_bits = 0;
+  uint32_t             total_bits = 0;
   for (auto &inp_edge : pid1_pin.get_node().inp_edges()) {
     dpins.push(inp_edge.driver);
     bits_to_shift += inp_edge.driver.get_bits();
@@ -797,15 +797,20 @@ void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, c
 
   std::string_view pin_name = lnast.add_string(pin.get_name());
 
-  // Set __fwd = false
-  auto temp_var_namefw = create_temp_var(lnast);
-  auto dot_fw_node = lnast.add_child(parent_node, Lnast_node::create_dot("dot_flop_fwd"));
-  lnast.add_child(dot_fw_node, Lnast_node::create_ref(temp_var_namefw));
-  lnast.add_child(dot_fw_node, Lnast_node::create_ref(pin_name));
-  lnast.add_child(dot_fw_node, Lnast_node::create_ref("__fwd"));
-  auto asg_fw_node = lnast.add_child(parent_node, Lnast_node::create_assign("asg_flop_fwd"));
-  lnast.add_child(asg_fw_node, Lnast_node::create_ref(temp_var_namefw));
-  lnast.add_child(asg_fw_node, Lnast_node::create_const("false"));
+  // Set __clk_pin
+  /* FIXME: Currently, this is commented out since LN->LG does not support __clk_pin attribute.
+   * (It always set clk pin to "clock". Once implemented on LN->LG, this code snippet needs to be put back in. */
+#if 0
+  auto temp_var_c = create_temp_var(lnast);
+  auto dot_clk_node = lnast.add_child(parent_node, Lnast_node::create_dot("dot_flop_clk"));
+  lnast.add_child(dot_clk_node, Lnast_node::create_ref(temp_var_c));
+  lnast.add_child(dot_clk_node, Lnast_node::create_ref(pin_name));
+  lnast.add_child(dot_clk_node, Lnast_node::create_ref("__clk_pin"));
+
+  auto asg_clk_node = lnast.add_child(parent_node, Lnast_node::create_assign("asg_flop_clk"));
+  lnast.add_child(asg_clk_node, Lnast_node::create_ref(temp_var_c));
+  attach_child(lnast, asg_clk_node, clk_pin);
+#endif
 
   // Specify if async reset
   if (pin.get_node().get_type().op == AFlop_Op) {
@@ -819,19 +824,6 @@ void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, c
     auto asg_asr_node = lnast.add_child(parent_node, Lnast_node::create_assign("asg_flop_async"));
     lnast.add_child(asg_asr_node, Lnast_node::create_ref(temp_var_name));
     lnast.add_child(asg_asr_node, Lnast_node::create_const("true"));
-  }
-
-  if (has_clk) {
-    auto temp_var_name = create_temp_var(lnast);
-
-    auto dot_clk_node = lnast.add_child(parent_node, Lnast_node::create_dot("dot_flop_clk"));
-    lnast.add_child(dot_clk_node, Lnast_node::create_ref(temp_var_name));
-    lnast.add_child(dot_clk_node, Lnast_node::create_ref(pin_name));
-    lnast.add_child(dot_clk_node, Lnast_node::create_ref("__clk_pin"));
-
-    auto asg_clk_node = lnast.add_child(parent_node, Lnast_node::create_assign("asg_flop_clk"));
-    lnast.add_child(asg_clk_node, Lnast_node::create_ref(temp_var_name));
-    attach_child(lnast, asg_clk_node, clk_pin);
   }
 
   if (has_reset) {
@@ -884,6 +876,19 @@ void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, c
   }
   lnast.add_child(idx_asg, Lnast_node::create_ref(pin_name));
   attach_child(lnast, idx_asg, din_pin);
+
+  /* Create a dot node that points to reg's qpin. Then change name of reg pin in
+   * LGraph to match the LHS of that dot node (so all future references to that
+   * register are actually referencing the __q_pin).
+   * FIXME: In the future, it may just be better to set reg __fwd = false and not do this. */
+  auto tmp_var_q = create_temp_var(lnast);
+  auto idx_dot_q = lnast.add_child(parent_node, Lnast_node::create_dot(""));
+  lnast.add_child(idx_dot_q, Lnast_node::create_ref(tmp_var_q));
+  lnast.add_child(idx_dot_q, Lnast_node::create_ref(pin_name));
+  lnast.add_child(idx_dot_q, Lnast_node::create_ref("__q_pin"));
+
+  auto editable_pin = pin;
+  editable_pin.set_name(tmp_var_q);
 }
 
 void Pass_lnast_fromlg::attach_latch_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
@@ -908,16 +913,6 @@ void Pass_lnast_fromlg::attach_latch_node(Lnast& lnast, Lnast_nid& parent_node, 
 
   std::string_view pin_name = lnast.add_string(pin.get_name());
 
-  // Set __fwd = false
-  auto temp_var_namefw = create_temp_var(lnast);
-  auto dot_fw_node = lnast.add_child(parent_node, Lnast_node::create_dot("dot_latch_fwd"));
-  lnast.add_child(dot_fw_node, Lnast_node::create_ref(temp_var_namefw));
-  lnast.add_child(dot_fw_node, Lnast_node::create_ref(pin_name));
-  lnast.add_child(dot_fw_node, Lnast_node::create_ref("__fwd"));
-  auto asg_fw_node = lnast.add_child(parent_node, Lnast_node::create_assign("asg_latch_fwd"));
-  lnast.add_child(asg_fw_node, Lnast_node::create_ref(temp_var_namefw));
-  lnast.add_child(asg_fw_node, Lnast_node::create_const("false"));
-
   // Set __latch = true
   auto tmp_var = create_temp_var(lnast);
   auto idx_dotl = lnast.add_child(parent_node, Lnast_node::create_dot(""));
@@ -935,6 +930,19 @@ void Pass_lnast_fromlg::attach_latch_node(Lnast& lnast, Lnast_nid& parent_node, 
   auto idx_asg = lnast.add_child(idx_stmt, Lnast_node::create_dp_assign(""));
   lnast.add_child(idx_asg, Lnast_node::create_ref(pin_name));
   attach_child(lnast, idx_asg, din_pin);
+
+  /* Create a dot node that points to reg's qpin. Then change name of reg pin in
+   * LGraph to match the LHS of that dot node (so all future references to that
+   * register are actually referencing the __q_pin).
+   * FIXME: In the future, it may just be better to set reg __fwd = false and not do this. */
+  auto tmp_var_q = create_temp_var(lnast);
+  auto idx_dot_q = lnast.add_child(parent_node, Lnast_node::create_dot(""));
+  lnast.add_child(idx_dot_q, Lnast_node::create_ref(tmp_var_q));
+  lnast.add_child(idx_dot_q, Lnast_node::create_ref(pin_name));
+  lnast.add_child(idx_dot_q, Lnast_node::create_ref("__q_pin"));
+
+  auto editable_pin = pin;
+  editable_pin.set_name(tmp_var_q);
 }
 
 void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
