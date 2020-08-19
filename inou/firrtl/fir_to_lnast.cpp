@@ -1030,14 +1030,21 @@ void Inou_firrtl::HandleExtractBitsOp(Lnast& lnast, const firrtl::FirrtlPB_Expre
     diffs = absl::StrCat(diffs, "1");
   }
 
-  auto idx_shr = lnast.add_child(parent_node, Lnast_node::create_shift_right(""));
-  lnast.add_child(idx_shr, Lnast_node::create_ref(temp_var_name_f0));
-  AttachExprStrToNode(lnast, e1_str, idx_shr);
-  lnast.add_child(idx_shr, Lnast_node::create_const(lnast.add_string(op.const_(1).value())));
+  // If we'd shift by 0, then don't do shift at all.
+  if (numL > 0) {
+    auto idx_shr = lnast.add_child(parent_node, Lnast_node::create_shift_right(""));
+    lnast.add_child(idx_shr, Lnast_node::create_ref(temp_var_name_f0));
+    AttachExprStrToNode(lnast, e1_str, idx_shr);
+    lnast.add_child(idx_shr, Lnast_node::create_const(lnast.add_string(op.const_(1).value())));
+  }
 
   auto idx_and = lnast.add_child(parent_node, Lnast_node::create_and(""));
   lnast.add_child(idx_and, Lnast_node::create_ref(lnast.add_string(lhs)));
-  lnast.add_child(idx_and, Lnast_node::create_ref(temp_var_name_f0));
+  if (numL > 0) {
+    lnast.add_child(idx_and, Lnast_node::create_ref(temp_var_name_f0));
+  } else {
+    AttachExprStrToNode(lnast, e1_str, idx_and);
+  }
   lnast.add_child(idx_and, Lnast_node::create_const(lnast.add_string(diffs)));
 #endif
 #if 0
@@ -1154,7 +1161,7 @@ void Inou_firrtl::HandleConcatOp(Lnast& lnast, const firrtl::FirrtlPB_Expression
 void Inou_firrtl::HandlePadOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node,
                               const std::string& lhs) {
   /* temp solution: just ignore arg and use const # as bitwidth
-   *      dot          assign dp_assign
+   *      dot          assign   assign
    *     / | \           /\      /\
    * ___F0 x __bits  ___F0 #    x  e */
   I(lnast.get_data(parent_node).type.is_stmts());
@@ -1174,7 +1181,8 @@ void Inou_firrtl::HandlePadOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_Pr
   lnast.add_child(idx_asg1, Lnast_node::create_ref(temp_var_name));
   lnast.add_child(idx_asg1, Lnast_node::create_const(c_name));
 
-  auto idx_asg2 = lnast.add_child(parent_node, Lnast_node::create_dp_assign("pad_dpasg"));
+  //auto idx_asg2 = lnast.add_child(parent_node, Lnast_node::create_dp_assign("pad_dpasg"));
+  auto idx_asg2 = lnast.add_child(parent_node, Lnast_node::create_assign("pad_asg"));
   lnast.add_child(idx_asg2, Lnast_node::create_ref(lhs_strv));
   lnast.add_child(idx_asg2, Lnast_node::create_ref(e_name));
 
