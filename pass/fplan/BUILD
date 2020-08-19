@@ -19,12 +19,3 @@ cc_library(
          ],
     )
 
-# test file for fplan
-cc_binary(
-	  name = "fp",
-	  srcs = ["tests/fp.cpp"],
-	  deps = [
-		    ":fplan",
-	      ],
-    )
-
