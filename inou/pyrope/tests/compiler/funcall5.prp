@@ -1,0 +1,13 @@
+sum5 = ::{
+  // basic
+  %out = $inp.a + $inp.b + $c
+
+  // advanced
+  // res1 = $inp.a + $inp.b 
+  // res2 = $inp.a + $inp.b + $c
+  // %out.o1 = res1
+  // %out.o2 = res2
+}
+
+subinp = (a = 3, b = 4)
+%out = sum5(subinp, c = 5)
