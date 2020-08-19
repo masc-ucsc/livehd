@@ -29,7 +29,10 @@ class Cpp_parser: public Code_gen_all_lang {
   std::string_view stmt_separator = " ;\n";
   std::string_view lang_type = "cpp";
   std::string supp_ftype = "hpp";
-
+  
+  std::map<std::string, std::string> inp_bw;//first->input port name, second->UInt<bw>
+  std::map<std::string, std::string> outp_bw;//first->o/p port name, sec->UInt<bw>
+  std::map<std::string, std::string> reg_bw;//first->register name, sec->UInt<bw>    
 public:
   Cpp_parser(){};
   std::string_view stmt_sep() final;
@@ -46,7 +49,9 @@ public:
   std::string supporting_fend(std::string basename_s) final;
   
   std::string main_fstart(std::string basename, std::string basename_s) final;
-  void cpp_check_var_inst(std::string_view key, std::string_view ref) final;
+  bool convert_parameters(std::string key, std::string ref) final;
+  void get_maps();//for debugging only
+  void call_get_maps() final;
 
   std::string outline_cpp(std::string modname) final;
 };

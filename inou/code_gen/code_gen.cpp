@@ -43,9 +43,11 @@ void Code_gen::generate(){
     fmt::print("UNKNOWN NODE TYPE!");
   }
 
-  //which lang is it? prp/cpp/verilog
-  auto lang_type = lnast_to->get_lang_type();
+  auto lang_type = lnast_to->get_lang_type();//which lang is it? prp/cpp/verilog
   auto modname = lnast->get_top_module_name();//this is of type const
+
+  //for debugging purposes only:
+  lnast_to->call_get_maps();
 
   fmt::print("lnast_to_{}_parser path:{} \n", lang_type, path);
 
@@ -152,10 +154,11 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index) {
     curr_index = lnast->get_sibling_next(curr_index);
   }//data of all the child nodes of assign are in assign_str_vect
 
-  assert(assign_str_vect.size()>1);
-  auto key = assign_str_vect.front();//usually the ___b type of string
-  auto ref = assign_str_vect[1];//usually the const
+  assert(assign_str_vect.size()>1);//assign has 2 child nodes
+  auto key = assign_str_vect.front();//usually the ___b type of string_view//1st child node of assign
+  auto ref = assign_str_vect[1];//usually the const//2nd child node of assign
 
+  //resolve the second child node of assign (ref)
   auto map_it = ref_map.find(ref);
   if (map_it != ref_map.end()) {
     ref = map_it->second;
@@ -165,10 +168,16 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index) {
 
   const auto& assign_node_data = lnast->get_data(assign_node_index);
   if (is_temp_var(key)) {
-    lnast_to->cpp_check_var_inst(key, ref);//for getting UInt<3> a from $a.___bits=3
-    auto ref_map_inst_res = ref_map.insert(std::pair<std::string_view, std::string>(key, lnast_to->ref_name(ref)));
-    if(!ref_map_inst_res.second) {
-      absl::StrAppend(&buffer_to_print, indent(), lnast_to->ref_name(ref_map.find(key)->second), " ", lnast_to->debug_name_lang(assign_node_data.type), " ", lnast_to->ref_name(ref), lnast_to->stmt_sep());
+    bool param_converted = false ;
+    if((ref_map.find(key)->second).find(".__bits") != std::string::npos) {
+      param_converted = lnast_to->convert_parameters(ref_map.find(key)->second, std::string(ref));//for getting UInt<3> a from $a.___bits=3
+    }
+    if (!param_converted) {
+      auto ref_map_inst_res = ref_map.insert(std::pair<std::string_view, std::string>(key, lnast_to->ref_name(ref)));//The pair::second element in the pair is set to true if a new element was inserted or false if an equivalent key already existed.
+      if(!ref_map_inst_res.second) {//this means an equivalent key already exists.
+        //so append to main buffer:  key value, assign op, ref value
+        absl::StrAppend(&buffer_to_print, indent(), lnast_to->ref_name(ref_map.find(key)->second), " ", lnast_to->debug_name_lang(assign_node_data.type), " ", lnast_to->ref_name(ref), lnast_to->stmt_sep());
+      }
     }
   } else {
     absl::StrAppend(&buffer_to_print, indent(), lnast_to->assign_node_strt(), lnast_to->ref_name(key), " ", lnast_to->debug_name_lang(assign_node_data.type), " ", lnast_to->ref_name(ref), lnast_to->stmt_sep());
@@ -505,7 +514,9 @@ void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index) {
   value.pop_back();
 
   if (is_temp_var(key)) {
-    ref_map.insert(std::pair<std::string_view, std::string>(key, lnast_to->ref_name(value)));
+    //ref_map.insert(std::pair<std::string_view, std::string>(key, lnast_to->ref_name(value)));
+    //this value is preserved with "$"/"%"/"#" so that during "convert_parameters()", we have the char to decide i/p or o/p or reg
+    ref_map.insert(std::pair<std::string_view, std::string>(key, value));
   } else {
     absl::StrAppend(&buffer_to_print, indent(), key, " saved as ", lnast_to->ref_name(value), "\n");
     // this should never be possible

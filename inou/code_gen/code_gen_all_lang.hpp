@@ -99,10 +99,10 @@ else
 
   //for main file (cpp file)
   virtual std::string main_fstart(std::string basename, std::string basename_s) {return absl::StrCat("file: ", basename, "\n");} ;
-  virtual void cpp_check_var_inst(std::string_view key, std::string_view ref) {;};
+  virtual bool convert_parameters(std::string key, std::string ref) {return false;};
 
   //for cpp constructor:
   virtual std::string outline_cpp(std::string modname) {return "";};
-
+  virtual void call_get_maps() {;};//for debugging only
 };
 
