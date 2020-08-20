@@ -103,28 +103,28 @@ Node_pin_iterator Node_pin::inp_driver() const {
   return current_g->inp_driver(*this);
 }
 
-void Node_pin::del_sink(Node_pin &spin) {
+bool Node_pin::del_sink(Node_pin &spin) {
   I(spin.is_sink());
   I(is_driver());
   I(current_g == spin.current_g);  // Use punch otherwise
-  current_g->del_edge(*this, spin);
+  return current_g->del_edge(*this, spin);
 }
 
-void Node_pin::del_driver(Node_pin &dpin) {
+bool Node_pin::del_driver(Node_pin &dpin) {
   I(dpin.is_driver());
   I(is_sink());
   I(current_g == dpin.current_g);
-  current_g->del_edge(dpin, *this);
+  return current_g->del_edge(dpin, *this);
 }
 
-void Node_pin::connect_sink(Node_pin &spin) {
+void Node_pin::connect_sink(const Node_pin &spin) {
   I(spin.is_sink());
   I(is_driver());
   I(current_g == spin.current_g);  // Use punch otherwise
   current_g->add_edge(*this, spin);
 }
 
-void Node_pin::connect_driver(Node_pin &dpin) {
+void Node_pin::connect_driver(const Node_pin &dpin) {
   I(dpin.is_driver());
   I(is_sink());
   I(current_g == dpin.current_g);

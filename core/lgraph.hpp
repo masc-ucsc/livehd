@@ -67,6 +67,12 @@ protected:
     return node_internal[nid].get_node_num_outputs();
   }
 
+  int get_node_num_edges(Index_ID nid) const {
+    I(nid < node_internal.size());
+    I(node_internal[nid].is_master_root());
+    return node_internal[nid].get_node_num_edges();
+  }
+
   int get_node_num_inputs(Index_ID nid) const {
     I(nid < node_internal.size());
     I(node_internal[nid].is_master_root());
@@ -128,6 +134,7 @@ protected:
   void del_driver2node_int(Node &driver, const Node &sink);
   void del_sink2node_int(const Node &driver, Node &sink);
 
+  void try_del_node_int(Index_ID last_idx, Index_ID idx);
   bool del_edge_driver_int(const Node_pin &dpin, const Node_pin &spin);
   bool del_edge_sink_int(const Node_pin &dpin, const Node_pin &spin);
 

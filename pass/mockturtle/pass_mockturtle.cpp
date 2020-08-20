@@ -503,7 +503,7 @@ void Pass_mockturtle::mapping_shift_cell_lg2mt(const bool &is_shift_right, const
   ////fmt::print("opr_A_bit_width:{}\n",opr_A_edge.get_bits());
   ////fmt::print("opr_B_bit_width:{}\n",opr_B_edge.get_bits());
   setup_input_signals(group_id, opr_A_edge, opr_A_sigs, mt_ntk);
-  if (opr_B_edge.driver.get_node().get_type().op == Const_Op) {
+  if (opr_B_edge.driver.get_node().get_type_op() == Const_Op) {
     // creating output signal for const shift
     uint32_t offset = opr_B_edge.driver.get_node().get_type_const().to_i();
     shift_op(opr_A_sigs, is_shift_right, sign_ext, offset, out_sigs, mt_ntk);
@@ -564,7 +564,7 @@ void Pass_mockturtle::mapping_dynamic_shift_cell_lg2mt(const bool &is_shift_righ
   ////fmt::print("opr_A_bit_width:{}\n",opr_A_edge.get_bits());
   ////fmt::print("opr_B_bit_width:{}\n",opr_B_edge.get_bits());
   setup_input_signals(group_id, opr_A_edge, opr_A_sigs, mt_ntk);
-  if (opr_B_edge.driver.get_node().get_type().op == Const_Op) {
+  if (opr_B_edge.driver.get_node().get_type_op() == Const_Op) {
     // creating output signal for const shift
     uint32_t ofs;
     bool     is_negative;
@@ -616,7 +616,7 @@ void Pass_mockturtle::create_mockturtle_network(LGraph *g) {
 
     auto &mt_ntk = gid2mt[group_id];
 
-    switch (node.get_type().op) {
+    switch (node.get_type_op()) {
       case Not_Op: {
         // Note: Don't need to check the node_pin pid since Not_Op has only one sink pin and one driver pin
         fmt::print("Not_Op in gid:{}\n", group_id);
@@ -956,7 +956,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
 
     // create edges which connect unchanged parts in lgraph
     for (const auto &inp_edge : old_node.inp_edges_ordered()) {
-      if (old_node.get_type().op == GraphIO_Op)
+      if (old_node.get_type_op() == GraphIO_Op)
         fmt::print("hit!\n");
       if (edge2mt_sigs.find(inp_edge) == edge2mt_sigs.end()) {
         auto peer_driver_node = inp_edge.driver.get_node();

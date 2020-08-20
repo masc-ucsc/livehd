@@ -18,7 +18,7 @@ int resolve_bit(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID pin, 
     }
     I(picked.is_valid());
     I(offset.is_valid());
-    I(offset.get_node().get_type().op == U32Const_Op);
+    I(offset.get_node().get_type_op() == U32Const_Op);
     I(graph->node_value_get(offset) + current_bit <= graph->get_bits(picked));
     bits.insert(graph->node_value_get(offset) + current_bit);
     return 0;

@@ -77,7 +77,7 @@ protected:
   static bool is_bool_true              (std::string_view name) {return name.substr(0,4) == "true"; }
   static bool is_bool_false             (std::string_view name) {return name.substr(0,5) == "false"; }
   static bool is_err_var_undefined      (std::string_view name) {return name.substr(0,17) == "err_var_undefined"; }
-  static bool is_scalar                 (Node_pin dpin) {return dpin.get_node().get_type().op != TupAdd_Op; }
+  static bool is_scalar                 (Node_pin dpin) {return dpin.get_node().get_type_op() != TupAdd_Op; }
   bool        subgraph_outp_is_tuple    (Sub_node* sub);
 
   void        subgraph_io_connection    (LGraph *dfg, Sub_node* sub, std::string_view arg_tup_name, std::string_view res_name, Node subg_node);

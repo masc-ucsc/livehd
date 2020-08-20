@@ -171,6 +171,8 @@ int Node::get_num_inputs() const { return current_g->get_node_num_inputs(nid); }
 
 int Node::get_num_outputs() const { return current_g->get_node_num_outputs(nid); }
 
+int Node::get_num_edges() const { return current_g->get_node_num_edges(nid); }
+
 bool Node::has_driver_pin_connected(std::string_view pname) const {
   auto pid = get_type().get_output_match(pname);
   I(pid != Port_invalid);  // graph_pos must be valid if connected
@@ -437,9 +439,9 @@ std::string_view Node::create_name() const {
 #if 0
   // FIXME: HERE. Does not scale for large designs (too much recursion)
 
-  if (get_type().op == GraphIO_Op) {
+  if (get_type_op() == GraphIO_Op) {
     absl::StrAppend(&signature, "_io");
-	}else if (get_type().op == SubGraph_Op) {
+	}else if (get_type_op() == SubGraph_Op) {
     absl::StrAppend(&signature, "_", get_type_sub_node().get_name());
   }
 
@@ -529,9 +531,9 @@ bool Node::has_color() const { return Ann_node_color::ref(current_g)->has_key(ge
 
 void Node::dump() {
   fmt::print("nid:{} type:{} name:{}", nid, get_type().get_name(), debug_name());
-  if (get_type().op == LUT_Op) {
+  if (get_type_op() == LUT_Op) {
     fmt::print(" lut={}\n", get_type_lut().to_pyrope());
-  } else if (get_type().op == Const_Op) {
+  } else if (get_type_op() == Const_Op) {
     fmt::print(" const={}\n", get_type_const().to_pyrope());
   } else {
     fmt::print("\n");

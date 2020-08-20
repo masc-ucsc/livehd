@@ -337,6 +337,7 @@ public:
 
   int32_t get_node_num_inputs() const;
   int32_t get_node_num_outputs() const;
+  int32_t get_node_num_edges() const;
   int32_t get_node_pin_num_inputs(Index_ID idx) const;
   int32_t get_node_pin_num_outputs(Index_ID idx) const;
 
@@ -516,6 +517,7 @@ public:
       inp_pos++;
     }
   }
+  bool has_edges() const { return inp_pos>0 || out_pos>0; }
   bool has_local_inputs() const { return inp_pos > 0; }
   bool has_local_outputs() const { return out_pos > 0; }
   int  get_space_available() const {
