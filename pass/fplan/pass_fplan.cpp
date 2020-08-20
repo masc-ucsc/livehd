@@ -22,13 +22,24 @@ static void makefp(Eprp_var &var, Graph_info& gi) {
 
   std::cout << "Running node creation pass..." << std::endl;
 
+  for (auto lg : var.lgs) {
+    for (auto cn : lg->get_down_nodes_map()) {
+      
+      // root node is not printed
+      fmt::print("name: {}\n idx: {}\n hidx: {}\n", cn.first.get_node(lg).get_name(), cn.first.get_nid().value, cn.first.get_node(lg).get_hidx().get_hash());
+
+    }
+  }
+
+  return;
+
   // create nodes without any connections between them, and fill in as much information as we can.
   for (auto lg : var.lgs) {
     for (auto cn : lg->get_down_nodes_map()) {
       auto n = cn.first.get_node(lg);
       bool found = false;
       for (auto v : gi.al.verts()) {
-        if (gi.ids[v] == n.get_hidx()) {
+        if (gi.ids[v] == cn.first.get_nid()) {
           found = true;
           std::cout << "Already found node " << n.get_name() << std::endl;
           break;
@@ -39,7 +50,7 @@ static void makefp(Eprp_var &var, Graph_info& gi) {
       if (!found) {
         std::cout << "Making new node " << n.get_name() << std::endl;
         auto new_v = gi.al.insert_vert();
-        gi.ids[new_v] = n.get_hidx();
+        gi.ids[new_v] = cn.first.get_nid();
         gi.debug_names[new_v] = n.get_name();
         // TODO: find an actual area of a node
         gi.areas[new_v] = n.get_num_outputs() + n.get_num_inputs();
@@ -52,7 +63,7 @@ static void makefp(Eprp_var &var, Graph_info& gi) {
 
   std::cout << "Running node connection pass..." << std::endl;
 
-  auto find_name = [&](Hierarchy_index id) -> vertex_t {
+  auto find_name = [&](Index_ID id) -> vertex_t {
     for (auto v : gi.al.verts()) {
       if (gi.ids(v) == id) {
         return v;
@@ -73,12 +84,12 @@ static void makefp(Eprp_var &var, Graph_info& gi) {
 
       for (auto p : n.inp_connected_pins()) {
         for (auto other_p : p.inp_driver()) {
-          auto v1 = find_name(p.get_hidx());
-          auto v2 = find_name(other_p.get_hidx());
+          //auto v1 = find_name();
+          //auto v2 = find_name(other_p.get_hidx());
               
-          auto new_e = gi.al.insert_edge(v1, v2);
-          gi.weights[new_e] = other_p.get_bits(); // TODO: only driver pins can call get_bits()?
-          existing_edges.insert(new_e);
+          //auto new_e = gi.al.insert_edge(v1, v2);
+          //gi.weights[new_e] = other_p.get_bits(); // TODO: only driver pins can call get_bits()?
+          //existing_edges.insert(new_e);
         }
 
         /*
