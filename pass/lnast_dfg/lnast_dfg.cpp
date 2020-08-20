@@ -724,8 +724,6 @@ Node Lnast_dfg::setup_node_opr_and_lhs(LGraph *dfg, const Lnast_nid &lnidx_opr) 
     else
       reg_qpin = name2dpin[lhs_vname];
 
-    fmt::print("DBG:reg:{}\n", reg_qpin.get_node().debug_name());
-    fmt::print("DBG:reg_qpin:{}\n", reg_qpin.debug_name());
     reg_data_pin = reg_qpin.get_node().setup_sink_pin("D");
   }
 
