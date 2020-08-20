@@ -967,26 +967,17 @@ void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_nod
 
   // Create actual call to submodule.
   auto func_call_node = lnast.add_child(parent_node, Lnast_node::create_func_call("func_call"));
-  if (pin.get_node().out_connected_pins().size() == 1) {
-    for (const auto dpin : pin.get_node().out_connected_pins()) {
-      // will only do 1 iteration
-      attach_child(lnast, func_call_node, dpin);
-    }
-  } else {
-    lnast.add_child(func_call_node, Lnast_node::create_ref(out_tup_name));
-  }
+  lnast.add_child(func_call_node, Lnast_node::create_ref(out_tup_name));
   lnast.add_child(func_call_node, Lnast_node::create_ref(sub.get_name()));
   lnast.add_child(func_call_node, Lnast_node::create_ref(inp_tup_name));
 
   // Create output
-  if (pin.get_node().out_connected_pins().size() > 1) {
-    for (const auto dpin : pin.get_node().out_connected_pins()) {
-      auto port_name = dpin.get_type_sub_io_name();
-      auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_dot("sb_out_set"));
-      attach_child(lnast, idx_asg, dpin);
-      lnast.add_child(idx_asg, Lnast_node::create_ref(out_tup_name));
-      lnast.add_child(idx_asg, Lnast_node::create_ref(port_name));
-    }
+  for (const auto dpin : pin.get_node().out_connected_pins()) {
+    auto port_name = dpin.get_type_sub_io_name();
+    auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_dot("sb_out_set"));
+    attach_child(lnast, idx_asg, dpin);
+    lnast.add_child(idx_asg, Lnast_node::create_ref(out_tup_name));
+    lnast.add_child(idx_asg, Lnast_node::create_ref(port_name));
   }
 }
 
