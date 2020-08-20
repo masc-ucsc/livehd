@@ -18,6 +18,9 @@ protected:
   std::vector<Lnast_nid> lhs_list;
   std::vector<std::vector<Lnast_nid>> rhs_list;
 
+  std::vector<absl::flat_hash_map<std::string_view, std::string_view>> in_scope_stack;
+  std::vector<absl::flat_hash_map<std::string_view, std::string_view>> out_of_scope_stack;
+
   bool is_primitive_op(const Lnast_ntype node_type);
   bool is_tree_structs(const Lnast_ntype node_type);
   bool is_temp_var(std::string_view node_name);

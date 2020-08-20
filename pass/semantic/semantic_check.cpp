@@ -553,6 +553,10 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
 
 void Semantic_check::check_tree_struct_ops(Lnast *lnast, const Lnast_nid &lnidx_opr, const Lnast_ntype node_type,
                                            std::string_view stmt_name) {
+  // in_scope_stack.push_back(write_dict);
+  // in_scope_stack.push_back(read_dict);
+  // write_dict.clear();
+  // read_dict.clear();
   if (node_type.is_if()) {
     check_if_op(lnast, lnidx_opr, stmt_name);
   } else if (node_type.is_for()) {
@@ -568,6 +572,24 @@ void Semantic_check::check_tree_struct_ops(Lnast *lnast, const Lnast_nid &lnidx_
     error_print_lnast_by_type(lnast, node_type.to_s());
     Pass::error("Tree Structure Operation Error: Not a Valid Node Type\n");
   }
+  // fmt::print("Write Dict\n");
+  // for (auto name : write_dict) {
+  //   fmt::print("{} : {}\n", name.first, name.second);
+  // }
+  // fmt::print("\n");
+  // fmt::print("Read Dict\n");
+  // for (auto name : read_dict) {
+  //   fmt::print("{} : {}\n", name.first, name.second);
+  // }
+  // fmt::print("\n");
+  // out_of_scope_stack.push_back(write_dict);
+  // out_of_scope_stack.push_back(read_dict);
+  // write_dict.clear();
+  // read_dict.clear();
+  // read_dict = in_scope_stack.back();
+  // in_scope_stack.pop_back();
+  // write_dict = in_scope_stack.back();
+  // in_scope_stack.pop_back();
 }
 
 void Semantic_check::check_if_op(Lnast *lnast, const Lnast_nid &lnidx_opr, std::string_view stmt_name) {
@@ -812,20 +834,31 @@ void Semantic_check::do_check(Lnast *lnast) {
       check_tree_struct_ops(lnast, stmt, ntype, stmt_name);
     }
   }
-  // fmt::print("Write Dict\n");
-  // for (auto name : write_dict) {
-  //   fmt::print("{} : {}\n", name.first, name.second);
-  // }
-  // fmt::print("\n");
-  // fmt::print("Read Dict\n");
-  // for (auto name : read_dict) {
-  //   fmt::print("{} : {}\n", name.first, name.second);
-  // }
-  // fmt::print("\n");
+  fmt::print("Write Dict\n");
+  for (auto name : write_dict) {
+    fmt::print("{} : {}\n", name.first, name.second);
+  }
+  fmt::print("\n");
+  fmt::print("Read Dict\n");
+  for (auto name : read_dict) {
+    fmt::print("{} : {}\n", name.first, name.second);
+  }
+  fmt::print("\n");
   // fmt::print("Output Vars\n");
   // for (auto name : output_vars) {
   //   fmt::print("{}\n", name);
   // }
+  // fmt::print("\n");
+  // fmt::print("LHS + RHS List\n");
+  // for (int i = 0; i < lhs_list.size(); i++) {
+  //   fmt::print("{} : \n", lnast->get_name(lhs_list[i]));
+  //   fmt::print("[");
+  //   for (int j = 0; j < rhs_list[i].size(); j++)  {
+  //     fmt::print("{}, ", lnast->get_name(rhs_list[i][j]));
+  //   }
+  //   fmt::print("]\n");
+  // }
+  // fmt::print("\n")
   // Find Errors!
   resolve_read_write_lists(lnast);
   resolve_lhs_rhs_lists(lnast);
