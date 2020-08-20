@@ -335,7 +335,7 @@ Node_pin_iterator LGraph::out_setup_pins(const Node &node) const {
 
   Node_pin_iterator xiter;
 
-  fmt::print("node:{}\n", node.debug_name());
+  //fmt::print("node:{}\n", node.debug_name());
 
   Index_ID idx2 = node.get_nid();
   I(node_internal.size() > idx2);
@@ -835,7 +835,7 @@ void LGraph::del_sink2node_int(const Node &driver, Node &sink) {
 void LGraph::try_del_node_int(Index_ID last_idx, Index_ID idx) {
   return;
   auto *idx_ptr = node_internal.ref(idx);
-  if (idx == last_idx || idx_ptr->has_edges() || idx_ptr->is_root())
+  if (idx == last_idx || idx_ptr->has_local_edges() || idx_ptr->is_root())
     return; // nothing to do
 
   auto *last_ptr = node_internal.ref(last_idx);
@@ -1162,7 +1162,7 @@ void LGraph::dump() {
   each_sub_fast([this](Node &node, Lg_type_id lgid) {
     LGraph *child = LGraph::open(get_path(), node.get_type_sub());
 
-    fmt::print("node:{} lgid:{} sub:{}\n", node.debug_name(), lgid, child->get_name());
+    fmt::print("  lgid:{} sub:{}\n", node.debug_name(), lgid, child->get_name());
   });
 }
 

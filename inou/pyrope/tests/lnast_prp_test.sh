@@ -85,7 +85,7 @@ Pyrope_compile () {
       echo "Copy-Propagation And Tuple Chain Resolve"
       echo "----------------------------------------------------"
       #${LGSHELL} "lgraph.open name:${pt} |> pass.lnast_dfg.resolve_tuples"
-      ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop"
+      ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop |> pass.cprop |> pass.cprop |> pass.cprop"
       if [ $? -eq 0 ]; then
         echo "Successfully resolve the tuple chain: inou/pyrope/tests/compiler/${pt}.prp"
       else

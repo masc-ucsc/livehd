@@ -517,7 +517,7 @@ public:
       inp_pos++;
     }
   }
-  bool has_edges() const { return inp_pos>0 || out_pos>0; }
+  bool has_local_edges() const { return inp_pos>0 || out_pos>0; }
   bool has_local_inputs() const { return inp_pos > 0; }
   bool has_local_outputs() const { return out_pos > 0; }
   int  get_space_available() const {
