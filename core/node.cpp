@@ -256,6 +256,12 @@ bool Node::is_type_attr() const {
   return op == AttrGet_Op || op == AttrSet_Op || op == TupKey_Op;
 }
 
+bool Node::is_type_tup() const {
+  auto op = current_g->get_type_op(nid);
+
+  return op == TupAdd_Op || op == TupGet_Op;
+}
+
 Hierarchy_index Node::hierarchy_go_down() const {
   I(current_g->is_sub(nid));
   return top_g->ref_htree()->go_down(*this);
@@ -530,7 +536,7 @@ int Node::get_color() const {
 bool Node::has_color() const { return Ann_node_color::ref(current_g)->has_key(get_compact_class()); }
 
 void Node::dump() {
-  fmt::print("nid:{} type:{} name:{}", nid, get_type().get_name(), debug_name());
+  fmt::print("node:{} nid:{} type:{} ", debug_name(), nid, get_type().get_name());
   if (get_type_op() == LUT_Op) {
     fmt::print(" lut={}\n", get_type_lut().to_pyrope());
   } else if (get_type_op() == Const_Op) {

@@ -211,6 +211,7 @@ public:
   bool             is_type_sub() const;
   bool             is_type_const() const;
   bool             is_type_attr() const;
+  bool             is_type_tup() const;
   bool             is_type_io() const;
   bool             is_type_loop_breaker() const;
 

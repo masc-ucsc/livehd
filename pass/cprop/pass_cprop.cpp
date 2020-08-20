@@ -656,7 +656,7 @@ bool Pass_cprop::process_tuple_get(Node &tg_node, LGraph *lg) {
             Pass::error("trying to access scalar attribute from a tuple\n");
           }
           attr_set_av_dpin = node2.setup_sink_pin(3).get_driver_pin();
-          node2.del_node();
+          //node2.del_node(); -- TupAdd can not be removed unless all the TupGet are gone
           break;
         }
       }
@@ -732,7 +732,6 @@ void Pass_cprop::process_tuple_add(Node &node, LGraph *lg) {
   bool                     parent_could_be_deleted = false;
   std::shared_ptr<Lgtuple> ctup;
 
-
   auto ptup_it = node2tuple.find(parent_node.get_compact());
   if (ptup_it == node2tuple.end()) {
     ctup = std::make_shared<Lgtuple>();
@@ -778,7 +777,6 @@ void Pass_cprop::process_tuple_add(Node &node, LGraph *lg) {
   if (node.has_sink_pin_connected(3))
     val_dpin = node.get_sink_pin(3).get_driver_pin();
 
-
   bool is_attr_set = false;
   int  attr_bits = -1;
   if (!val_dpin.is_invalid()) {
@@ -795,11 +793,12 @@ void Pass_cprop::process_tuple_add(Node &node, LGraph *lg) {
 
   merge_to_tuple(ctup, node, parent_node, parent_dpin, key_pos, key_name, val_dpin, is_attr_set, attr_bits);
 
-  fmt::print("TupAdd node:{} pos:{} key:{} val:{}\n", node.debug_name(), key_pos, key_name, val_dpin.debug_name());
-  /* } */
+  fmt::print("TupAdd node:{} pos:{} key:{} val:{} del:{} #out:{}\n", node.debug_name(), key_pos, key_name, val_dpin.debug_name(), parent_could_be_deleted, parent_node.get_num_outputs());
 
+#if 0
   if (parent_could_be_deleted)
     parent_node.del_node();
+#endif
 }
 
 
@@ -871,6 +870,8 @@ void Pass_cprop::merge_to_tuple(std::shared_ptr<Lgtuple> ctup, Node &node, Node 
 void Pass_cprop::trans(LGraph *lg) {
   Lbench b("pass.cprop");
 
+  bool tup_get_left=false;
+
   for (auto node : lg->forward()) {
     auto op = node.get_type_op();
     //fmt::print("NEXT: node:{}\n",node.debug_name());
@@ -898,6 +899,8 @@ void Pass_cprop::trans(LGraph *lg) {
       continue;
     } else if (op == TupGet_Op) {
       process_tuple_get(node, lg);
+      if (!node.is_invalid())
+        tup_get_left = true;
       continue;
     }
 
@@ -919,15 +922,19 @@ void Pass_cprop::trans(LGraph *lg) {
     try_collapse_forward(node, inp_edges_ordered);
   }
 
-#if 0
   fmt::print("starting final GC pass...\n");
 
   for (auto node : lg->fast()) {
-    if (!node.has_outputs()) {
-      if (!node.is_type_sub() && !node.is_type_attr())
-        node.del_node();
+    if(!tup_get_left && node.is_type_tup()) {
+      node.del_node();
       continue;
     }
+
+    if (!node.has_outputs()) {
+      if (!node.is_type_sub() && !node.is_type_attr() && !node.is_type_tup()) {
+        node.del_node();
+        continue;
+      }
+    }
   }
-#endif
 }
