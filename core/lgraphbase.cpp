@@ -205,6 +205,7 @@ void LGraph_Base::print_stats() const {
 
   size_t n_nodes       = 1;
   size_t n_extra       = 1;
+  size_t n_deleted     = 0;
   size_t n_master      = 1;
   size_t n_roots       = 1;
   size_t n_long_edges  = 1;
@@ -219,6 +220,8 @@ void LGraph_Base::print_stats() const {
         if (node_internal[i].is_master_root())
           n_master++;
       }
+    }else if (node_internal[i].is_free_state()) {
+      n_deleted++;
     } else {
       n_extra++;
     }
@@ -230,19 +233,21 @@ void LGraph_Base::print_stats() const {
   auto n_edges = n_short_edges + n_long_edges;
 
   fmt::print("path:{} name:{}\n", path, name);
-  fmt::print("  size:{} kbytes:{} bytes/node:{:.2f} bytes/edge:{:.2f} edges/master:{:.2f}\n",
+  fmt::print("  size:{} kbytes:{} bytes/node:{:.2f} bytes/edge:{:.2f} edges/master:{:.2f} deleted:{:.1f}%\n",
              node_internal.size(),
              bytes / 1024,
              bytes / (1 + n_nodes),
              bytes / (1 + n_edges),
-             (double)n_edges / (1 + n_master));
+             (double)n_edges / (1 + n_master),
+             100.0*n_deleted/(1+n_nodes+n_deleted+n_extra)
+             );
   fmt::print("  total master:{} root:{} node:{} extra:{} root/ratio:{:.2f} extra/ratio:{:.2f}\n",
              n_master,
              n_roots,
              n_nodes,
              n_extra,
-             n_roots / (1.0 + n_nodes + n_extra),
-             n_extra / (1.0 + n_nodes + n_extra));
+             n_roots / (1.0 + n_nodes + n_extra+n_deleted),
+             n_extra / (1.0 + n_nodes + n_extra+n_deleted));
   fmt::print("  total bytes/master:{:.2f} bytes/root:{:.2f} bytes/node:{:.2f} bytes/extra:{:.2f}\n",
              bytes / n_master,
              bytes / n_roots,
@@ -537,6 +542,7 @@ Index_ID LGraph_Base::add_edge_int(const Index_ID dst_idx, const Port_ID inp_pid
 
       node_internal.ref(idx)->inc_outputs(true);  // WARNING: Before next_free_output_pos to reserve space (decreasing insert)
     }
+    I(node_internal[idx].get_dst_pid() == dst_pid);
 
     if (node_internal[idx].has_space_short())
       idx_insert_cache[src_idx] = idx;
@@ -598,6 +604,7 @@ Index_ID LGraph_Base::add_edge_int(const Index_ID dst_idx, const Port_ID inp_pid
 
       node_internal.ref(idx)->inc_inputs(true);  // WARNING: after next_free_input_pos (increasing insert)
     }
+    I(node_internal[idx].get_dst_pid() == inp_pid);
 
     if (node_internal[idx].has_space_short())
       idx_insert_cache[dst_idx] = idx;

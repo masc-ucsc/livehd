@@ -245,7 +245,7 @@ static Node resolve_memory(LGraph *g, RTLIL::Cell *cell) {
             g->add_edge(dpin, join_dpin.get_sink_from_output());
           } else {
             auto join_node = join_dpin.get_node();
-            I(join_node.get_type().op == Join_Op);
+            I(join_node.get_type_op() == Join_Op);
             I(join_node.inp_connected_pins().size() == 0);
 
             auto spin_join = join_node.setup_sink_pin(0);
@@ -1245,7 +1245,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
 
     auto join_dpin = wire2pin[wire];
     auto join_node = join_dpin.get_node();
-    I(join_node.get_type().op == Join_Op);
+    I(join_node.get_type_op() == Join_Op);
     Port_ID join_pid = 0;
 
     set_bits_wirename(join_dpin, wire);

@@ -165,7 +165,7 @@ protected:
   }
 
   bool eligible_cell_op(const Node &cell) {
-    switch (cell.get_type().op) {
+    switch (cell.get_type_op()) {
       // case GraphIO_Op:
       //  //fmt::print("Node: GraphIO_Op");
       //  break;

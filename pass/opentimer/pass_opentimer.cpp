@@ -175,7 +175,7 @@ void Pass_opentimer::build_circuit(LGraph *g) {  // Enhance this for build_circu
   });
 
   for (const auto node : g->forward()) {  // TODO: Do we really need a slow forward. Why not just fast??
-    auto op = node.get_type().op;
+    auto op = node.get_type_op();
 
     if (op != SubGraph_Op) {
       if (op != GraphIO_Op)

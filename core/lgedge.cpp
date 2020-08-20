@@ -117,6 +117,22 @@ int32_t Node_internal::get_node_num_outputs() const {
   return total;
 }
 
+int32_t Node_internal::get_node_num_edges() const {
+  I(is_master_root());
+
+  int32_t total = get_num_local_inputs() + get_num_local_outputs();
+  if (is_last_state())
+    return total;
+
+  const Node_internal *node = this;
+  do {
+    node = &get(node->get_next());
+    total += node->get_num_local_inputs() + node->get_num_local_outputs();
+  } while (!node->is_last_state());
+
+  return total;
+}
+
 int32_t Node_internal::get_node_pin_num_inputs(Index_ID idx) const {
   I(false);
   // This code is not right because inputs can map to any idx locally. Must

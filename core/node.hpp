@@ -182,6 +182,7 @@ public:
   bool has_outputs() const;
   int  get_num_inputs() const;
   int  get_num_outputs() const;
+  int  get_num_edges() const;
 
   constexpr bool is_invalid() const { return nid == 0; }
   constexpr bool is_down_node() const { return top_g != current_g; }

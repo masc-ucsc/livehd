@@ -269,7 +269,7 @@ void Lnast_dfg::process_ast_logical_op(LGraph *dfg, const Lnast_nid &lnidx_opr) 
 
 void Lnast_dfg::nary_node_rhs_connections(LGraph *dfg, Node &opr_node, const std::vector<Node_pin> &opds, bool is_subt) {
   // FIXME->sh: need to think about signed number handling and signed number copy-propagation analysis for now, assuming everything is unsigned number
-  switch(opr_node.get_type().op) {
+  switch(opr_node.get_type_op()) {
     case Sum_Op:
     case Mult_Op: { // FIXME: add could be + a b c (same mult)
       bool is_first = true;
@@ -358,7 +358,7 @@ void Lnast_dfg::process_ast_dp_assign_op(LGraph *dfg, const Lnast_nid &lnidx_dp_
 
   if (is_register(c0_dp_name)) {
     auto reg_node = name2dpin[c0_dp_vname].get_node();
-    I(reg_node.get_type().op == SFlop_Op);
+    I(reg_node.get_type_op() == SFlop_Op);
     I(reg_node.setup_sink_pin("D").inp_edges().size() <= 1);
     if (reg_node.setup_sink_pin("D").inp_edges().size() == 1) {
       reg_node.setup_sink_pin("D").inp_edges().begin()->del_edge();
@@ -568,7 +568,7 @@ void Lnast_dfg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnidx_ta)
 
       // exclude invalid scalar->tuple cases
       auto tn_node  = tn_dpin.get_node();
-      auto tn_ntype = tn_node.get_type().op;
+      auto tn_ntype = tn_node.get_type_op();
       bool is_scalar =  tn_ntype != TupAdd_Op && tn_ntype != TupRef_Op;
       auto key_name = lnast->get_sname(lnast->get_sibling_next(c0_ta)); // peep for key_name ...
       if (is_scalar && key_name != "0")
@@ -813,7 +813,7 @@ Node_pin Lnast_dfg::setup_node_assign_and_lhs(LGraph *dfg, const Lnast_nid &lnid
 
       // (3) remove the previous D-pin edge from the #reg
       auto reg_node = reg_qpin.get_node();
-      I(reg_node.get_type().op == SFlop_Op);
+      I(reg_node.get_type_op() == SFlop_Op);
       I(reg_node.setup_sink_pin("D").inp_edges().size() <= 1);
       if (reg_node.setup_sink_pin("D").inp_edges().size() == 1) {
         reg_node.setup_sink_pin("D").inp_edges().begin()->del_edge();
@@ -893,7 +893,7 @@ Node_pin Lnast_dfg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx_opd,
   const auto it = name2dpin.find(name);
   if (it != name2dpin.end()) {
     auto node = it->second.get_node();
-    auto op = it->second.get_node().get_type().op;
+    auto op = it->second.get_node().get_type_op();
 
     // it's a scalar variable, just return the node pin
     if (op != TupAdd_Op)
@@ -1302,7 +1302,7 @@ void Lnast_dfg::setup_lgraph_outputs_and_final_var_name(LGraph *dfg) {
     }
 
     if (driver_var2wire_nodes.find(vname) != driver_var2wire_nodes.end()) {
-      auto driver_ntype = vname_dpin.get_node().get_type().op;
+      auto driver_ntype = vname_dpin.get_node().get_type_op();
       for (auto &it : driver_var2wire_nodes[vname]) {
         if (driver_ntype == TupAdd_Op) {
           it.set_type(TupAdd_Op); // change wire_node type from Or_Op to dummy TupAdd_Op

@@ -235,10 +235,10 @@ bool bwd(int n) {
 
       visited.insert(node.get_compact());
 
-      if (!node.get_type().is_pipelined() && node.get_type().op != GraphIO_Op) {
+      if (!node.get_type().is_pipelined() && node.get_type_op() != GraphIO_Op) {
         // check if all incoming edges were visited
         for(auto &out : node.out_edges()) {
-          if (!out.sink.get_node().get_type().is_pipelined() && out.sink.get_node().get_type().op != GraphIO_Op) {
+          if (!out.sink.get_node().get_type().is_pipelined() && out.sink.get_node().get_type_op() != GraphIO_Op) {
             if(visited.find(out.sink.get_node().get_compact()) == visited.end()) {
               fmt::print("bwd failed for lgraph node:{} bwd:{}\n", node.debug_name(), out.sink.get_node().debug_name());
               I(false);
@@ -255,10 +255,10 @@ bool bwd(int n) {
 
       visited.insert(node.get_compact());
 
-      if (!node.get_type().is_pipelined() && node.get_type().op != GraphIO_Op) {
+      if (!node.get_type().is_pipelined() && node.get_type_op() != GraphIO_Op) {
         // check if all incoming edges were visited
         for(auto &out : node.out_edges()) {
-          if (!out.sink.get_node().get_type().is_pipelined() && out.sink.get_node().get_type().op != GraphIO_Op) {
+          if (!out.sink.get_node().get_type().is_pipelined() && out.sink.get_node().get_type_op() != GraphIO_Op) {
             if(visited.find(out.sink.get_node().get_compact()) == visited.end()) {
               fmt::print("bwd failed for lgraph node:{} bwd:{}\n", node.debug_name(), out.sink.get_node().debug_name());
               I(false);

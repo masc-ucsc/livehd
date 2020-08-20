@@ -133,7 +133,7 @@ protected:
   //    fmt::print("curr   {} class {}\n", prev_node.debug_name(), prev_node.get_class_lgraph()->get_name());
 
       Node_pin dpin;
-      if (prev_node.get_type().op == Sum_Op) {
+      if (prev_node.get_type_op() == Sum_Op) {
         I(prev_data.leaf);
         dpin = prev_node.setup_driver_pin(0);
       }else{
@@ -141,11 +141,11 @@ protected:
         I(prev_node.get_class_lgraph() != prev_lg);
         auto d_pid = prev_node.get_class_lgraph()->get_self_sub_node().get_instance_pid("o0");
         dpin = prev_node.setup_driver_pin(d_pid);
-        I(prev_node.get_type().op == SubGraph_Op);
+        I(prev_node.get_type_op() == SubGraph_Op);
       }
 
       Node_pin spin;
-      if (curr_node.get_type().op == Sum_Op) {
+      if (curr_node.get_type_op() == Sum_Op) {
         I(curr_data.leaf);
         spin = curr_node.setup_sink_pin(0);
       }else{
@@ -153,7 +153,7 @@ protected:
         I(curr_node.get_class_lgraph() != curr_lg);
         auto s_pid = curr_node.get_class_lgraph()->get_self_sub_node().get_instance_pid("i0");
         spin = curr_node.setup_sink_pin(s_pid);
-        I(curr_node.get_type().op == SubGraph_Op);
+        I(curr_node.get_type_op() == SubGraph_Op);
       }
 
       bool connect_inp = rbool.any();
@@ -208,13 +208,13 @@ protected:
 
           auto spin = lg->get_graph_output("o0");
           Node_pin dpin;
-          if (last_node.get_type().op == Sum_Op) {
+          if (last_node.get_type_op() == Sum_Op) {
             dpin = last_node.setup_driver_pin(0);
           } else {
             I(last_node.get_class_lgraph() == lg);
             auto d_pid = last_node.get_class_lgraph()->get_self_sub_node().get_instance_pid("o0");
             dpin       = last_node.setup_driver_pin(d_pid);
-            I(last_node.get_type().op == SubGraph_Op);
+            I(last_node.get_type_op() == SubGraph_Op);
           }
           spin.connect_driver(dpin);
         }
