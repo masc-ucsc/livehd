@@ -1,0 +1,54 @@
+// firrtl_gcd.prp
+$clock.__bits = 1
+$reset.__bits = 1
+
+$io_value1.__bits = 16
+$io_value2.__bits = 16
+$io_loading_values.__bits = 1
+$io_output_gcd.__bits = 16
+$io_output_valid.__bits = 1
+#x.__bits = 16
+#y.__bits = 16
+
+_._T    = #x.__q_pin > #y.__q_pin
+_._T_1  = #x.__q_pin - #y.__q_pin
+_._T_2  = _._T_1 >> 1
+_._T_2 := _._T_1
+
+
+_._T_3  = #y.__q_pin - #x.__q_pin
+_._T_4  = _._T_3 >> 1
+_._T_4 := _._T_3
+
+if (_._T) {
+  _._GEN_0 = _._T_2
+} else {
+  _._GEN_0 = #x.__q_pin
+}
+
+if (_._T) {
+  _._GEN_1 = #y.__q_pin
+} else {
+  _._GEN_1 = _._T_4
+}
+
+if ($io_loading_values) {
+  _._GEN_2 = $io_value1
+} else {
+  _._GEN_2 = _._GEN_0
+}
+
+
+if ($io_loading_values) {
+  _._GEN_3 = $io_value2
+} else {
+  _._GEN_3 = _._GEN_1
+}
+
+_._T_5 = #y.__q_pin == 0
+
+%io_ooutput_gcd = #x.__q_pin
+%io_output_valid = _._T_5
+#x = _._GEN_2
+#y = _._GEN_3
+
