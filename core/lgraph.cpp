@@ -1035,7 +1035,8 @@ bool LGraph::del_edge_driver_int(const Node_pin &dpin, const Node_pin &spin) {
     do {
       // Just look for next idx2 with same pid
       if (node_int_ptr->is_last_state()) {
-        idx2 = node_internal[idx2].get_master_root_nid();
+        idx2 = node_internal[idx2].get_nid();
+        //idx2 = node_internal[idx2].get_nid();
         I(idx2==dpin.get_node().get_nid());
         last_idx = idx2;
       }
@@ -1044,7 +1045,6 @@ bool LGraph::del_edge_driver_int(const Node_pin &dpin, const Node_pin &spin) {
         return false;
       }
       last_idx = idx2;
-      I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
       idx2 = tmp;
     } while (node_internal[idx2].get_dst_pid() != dpin.get_pid());
 
