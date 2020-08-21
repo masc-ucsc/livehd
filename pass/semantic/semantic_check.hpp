@@ -44,6 +44,7 @@ protected:
 
   void resolve_read_write_lists(Lnast* lnast);
   void resolve_lhs_rhs_lists(Lnast* lnast);
+  void resolve_out_of_scope(Lnast *lnast);
 
   void check_primitive_ops(Lnast* lnast, const Lnast_nid& lnidx_opr, const Lnast_ntype node_type, std::string_view
                            stmt_name);
