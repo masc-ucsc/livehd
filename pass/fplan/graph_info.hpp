@@ -7,7 +7,7 @@ typedef decltype(graph::Bi_adjacency_list().insert_edge(graph::Bi_adjacency_list
                                                         graph::Bi_adjacency_list().insert_vert())) edge_t;
 
 typedef decltype(graph::Bi_adjacency_list().vert_map<std::string>()) name_map_t;
-typedef decltype(graph::Bi_adjacency_list().vert_map<Index_ID>())  hidx_map_t;
+typedef decltype(graph::Bi_adjacency_list().vert_map<Index_ID>())  id_map_t;
 typedef decltype(graph::Bi_adjacency_list().vert_map<double>())       area_map_t;
 typedef decltype(graph::Bi_adjacency_list().edge_map<unsigned int>()) weight_map_t;
 
@@ -20,7 +20,7 @@ class Graph_info {
 public:
   graph::Bi_adjacency_list al;
   name_map_t               debug_names;
-  hidx_map_t               ids;
+  id_map_t                 ids;
   area_map_t               areas;
   weight_map_t             weights;
   set_vec_t                sets;

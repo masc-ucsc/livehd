@@ -4,7 +4,7 @@
   number.
   2. Tree collapsing, where nodes with small areas get combined into supernodes with larger areas.
 */
-/*
+
 #pragma once
 
 #include <memory>  // for shared_ptr
@@ -30,10 +30,10 @@ typedef std::shared_ptr<Hier_node> phier;
 
 class Hier_tree {
 public:
-  // take in a vector of all nodes in the netlist, and convert it to a tree.
+  // take in a graph of all nodes in the netlist, and convert it to a tree.
   // min_num_components sets the minimum number of components required to trigger analysis of the hierarchy
   // any node with a smaller area than min_area gets folded into a new supernode with area >= min_area
-  Hier_tree(Graph_info&& g, unsigned int num_components);
+  Hier_tree(Graph_info&& g, unsigned int min_num_components);
 
   // copies require copying the entire tree and are very expensive.
   Hier_tree(const Hier_tree& other) = delete;
@@ -81,7 +81,7 @@ private:
   phier make_hier_tree(phier t1, phier t2);
 
   // perform hierarchy discovery
-  phier discover_hierarchy(Graph_info& g, int start_set, unsigned int num_components);
+  phier discover_hierarchy(Graph_info& g, int start_set, unsigned int min_num_components);
 
   double find_area(phier node) const;
 
@@ -101,4 +101,3 @@ private:
   // find patterns in the collapsed hierarchy
   void find_most_freq_pattern();
 };
-*/

@@ -1,4 +1,4 @@
-/*
+
 #include "hier_tree.hpp"
 
 #include <iostream>  // include printing facilities if we're debugging things
@@ -49,10 +49,10 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
     if (dbg_verbose) {
       std::cout << "trivial partition:" << std::endl;
 
-      std::cout << info.names(v1) << ":\t";
+      std::cout << info.debug_names(v1) << ":\t";
       std::cout << "a (aka " << triv_sets.first << ")" << std::endl;
 
-      std::cout << info.names(v2) << ":\t";
+      std::cout << info.debug_names(v2) << ":\t";
       std::cout << "b (aka " << triv_sets.second << ")" << std::endl;
     }
 
@@ -63,7 +63,14 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
   vertex_t temp_vertex = g.null_vert();
   if (graph_size % 2 == 1) {
     temp_vertex             = g.insert_vert();
-    info.names[temp_vertex] = "temp";
+    
+    uint64_t max_id = 0;
+    for (auto v : g.verts()) {
+      if (info.ids(v) > max_id) {
+        max_id = info.ids(v);
+      }
+    }
+    info.ids[temp_vertex] = max_id + 1; // choose an id that hasn't been used before
     info.areas[temp_vertex] = 0.0f;
 
     for (auto other_v : g.verts()) {
@@ -255,7 +262,7 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
     if (best_decrease > 0) {
       for (size_t i = 0; i < decrease_index; i++) {
         if (dbg_verbose) {
-          std::cout << "swapping " << info.names(av[i]) << " with " << info.names(bv[i]) << std::endl;
+          std::cout << "swapping " << info.debug_names(av[i]) << " with " << info.debug_names(bv[i]) << std::endl;
         }
 
         sets[new_sets.first].erase(av[i]);
@@ -277,7 +284,7 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
     std::cout << std::endl;
     std::cout << "best partition:" << std::endl;
     for (auto v : vert_set) {
-      std::cout << info.names(v) << ":\t";
+      std::cout << info.debug_names(v) << ":\t";
       std::cout << (is_in_a(v) ? "a" : "b") << " (aka " << (is_in_a(v) ? new_sets.first : new_sets.second);
       std::cout << "), cost " << cmap(v).d_cost << std::endl;
     }
@@ -452,4 +459,3 @@ void Hier_tree::collapse(double threshold_area) {
 }
 
 void Hier_tree::discover_regularity() {}
-*/
