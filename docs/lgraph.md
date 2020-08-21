@@ -739,10 +739,10 @@ digraph Memory {
 
 * `s` is for the array size in number of entries
 * `b` is the number of bits per entry
-* `c`,`d`,`e`,'q'... are the memory configuration, data, address ports
+* `c`,`d`,`e`,`q`... are the memory configuration, data, address ports
 
-Ports ('a','c'...'w') are arrays/vectors to support multiported memories. If a single instance
-exists in a port, the same is used across all the ports. E.g: if clock ('c') is populated:
+Ports (`a`,`c`...`p`,`w`) are arrays/vectors to support multiported memories. If a single instance
+exists in a port, the same is used across all the ports. E.g: if clock (`c`) is populated:
 
 ```
 mem1.c = clk1 // clk for all the memory ports
@@ -752,17 +752,17 @@ mem2.c[1] = clk2 // clock for memory port 1
 mem2.c[2] = clk2 // clock for memory port 2
 ```
 
-Each memory has the following ports: 
+Each memory has the following ports:
 
-* 'a' (`addr`)    points to the driver pin for the address. The address bits should match the array size (`ceil(log2(s))`)
+* `a` (`addr`)    points to the driver pin for the address. The address bits should match the array size (`ceil(log2(s))`)
 * `c` (`clk_pin`) points to the clock driver pin
 * `d` (`data in`)   points to the write data driver pin (read result is in `q` port).
 * `e` (`enable`)  points to the driver pin for read/write enable.
 * `f` (`fwd`)     points to a 0/1 constant driver pin to indicate if writes forward value (`0b0` for write-only ports). Effectively, it means zero cycles read latency when enabled. `fwd` is more than just setting `latency=0`. Even with latency zero, the write delay affects until the result is visible. With `fwd` enabled, the write latency does not matter to observe the results. This requires a costly forwarding logic.
-* 'l' (`latency`) points to an integer constant driver pin (2 bits). For writes `latency from 1 to 3`, for reads `latency from 0 to 3`
-* 'm' (`wmask`)   Points to the write mask (1 == write, 0==no write). The mask bust be a big as the number of bits per entry (`b`). The `wmask` pin can be disconnected which means no write mask (a write will write all the bits).
+* `l` (`latency`) points to an integer constant driver pin (2 bits). For writes `latency from 1 to 3`, for reads `latency from 0 to 3`
+* `m` (`wmask`)   Points to the write mask (1 == write, 0==no write). The mask bust be a big as the number of bits per entry (`b`). The `wmask` pin can be disconnected which means no write mask (a write will write all the bits).
 * `p` (`posedge`) points to a 1/0 constant driver pin
-* 'w' (`wmode`)   points to the driver pin or switching between read and write mode (single bit)
+* `w` (`wmode`)   points to the driver pin or switching between read and write mode (single bit)
 * `Q` (`data out`)  is a driver pin with the data read from the memory
 
 All the entries but the `wmask` must be populated. If the `wmask` is not set, a

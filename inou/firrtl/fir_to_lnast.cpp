@@ -558,7 +558,7 @@ void Inou_firrtl::PreCheckForMem(Lnast &lnast, Lnast_nid& stmt_node, const firrt
  * any memory ports to pull out of nested scopes. What this
  * will do is ignore the scope the memory port is currently
  * in then instead redefine it at the highest possible scope.
- * It will tuple concat this onto its #[mem_name].__ports
+ * It will tuple concat this onto its #[mem_name].__port
  * with its attributes, then any attributes that can't
  * necessarily be defined globally will be just set to 0
  * (where they will just be handled later). */

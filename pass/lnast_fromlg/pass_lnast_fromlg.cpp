@@ -223,6 +223,7 @@ void Pass_lnast_fromlg::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node, co
     case AFlop_Op: attach_flop_node(lnast, parent_node, pin); break;
     case Latch_Op: attach_latch_node(lnast, parent_node, pin); break;
     case SubGraph_Op: attach_subgraph_node(lnast, parent_node, pin); break;
+    case Memory_Op: attach_memory_node(lnast, parent_node, pin); break;
     default: Pass::error("Found node {} with op not yet supported in attach_to_lnast", pin.get_node().debug_name());
   }
 }
@@ -994,6 +995,137 @@ void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_nod
       lnast.add_child(idx_asg_bw, Lnast_node::create_const(lnast.add_string(std::to_string(port_bw))));
     }
   }
+}
+
+// FIXME: NOT WORKING, IN PROGRESS
+void Pass_lnast_fromlg::attach_memory_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
+  std::queue<Node_pin> addr_q, clk_q, din_q, en_q, fwd_q, lat_q, wmask_q, pose_q, wmode_q;
+  bool is_one_addr  = false, is_one_clk  = false, is_one_din   = false,
+       is_one_en    = false, is_one_fwd  = false, is_one_lat   = false,
+       is_one_wmask = false, is_one_pose = false, is_one_wmode = false;
+  Node_pin size_dpin, bits_dpin;
+  for (const auto& inp : pin.get_node().inp_edges_ordered()) {
+    switch (inp.sink.get_pid()) {
+      case 0:  // addr
+        addr_q.push(inp.driver);
+        break;
+      case 1:  // bits
+        // Do I need to specify the .__bits per port?
+        bits_dpin = inp.driver;
+        break;
+      case 2:  // clock
+        clk_q.push(inp.driver);
+        break;
+      case 3:  // data in
+        din_q.push(inp.driver);
+        break;
+      case 4:  // enable
+        en_q.push(inp.driver);
+        break;
+      case 5:  // fwd
+        fwd_q.push(inp.driver);
+        break;
+      case 6:  // latency
+        lat_q.push(inp.driver);
+        break;
+      case 7:  // wmask
+        wmask_q.push(inp.driver);
+        break;
+      case 8:  // posedge
+        pose_q.push(inp.driver);
+        break;
+      case 9:  // size
+        size_dpin = inp.driver;
+        break;
+      case 10: // wmode
+        wmode_q.push(inp.driver);
+        break;
+      default:
+        Pass::error("bad input edge into memory node {} with sink pid {}", pin.get_node().debug_name(), inp.sink.get_pid());
+    }
+  }
+  if (addr_q.size()  == 1) is_one_addr  = true;
+  if (clk_q.size()   == 1) is_one_clk   = true;
+  if (din_q.size()   == 1) is_one_din   = true;
+  if (en_q.size()    == 1) is_one_en    = true;
+  if (fwd_q.size()   == 1) is_one_fwd   = true;
+  if (lat_q.size()   == 1) is_one_lat   = true;
+  if (wmask_q.size() == 1) is_one_wmask = true;
+  if (pose_q.size()  == 1) is_one_pose  = true;
+  if (wmode_q.size() == 1) is_one_wmode = true;
+
+  auto port_count = std::max({addr_q.size(), clk_q.size(), din_q.size(), fwd_q.size(),
+                              lat_q.size(), wmask_q.size(), pose_q.size(), wmode_q.size()});
+
+  // Create a tuple for each memory port.
+  absl::flat_hash_set<std::pair<std::string_view, std::string_view>> port_temp_name_list;
+  for (uint64_t i = 0; i < port_count; i++) {
+    auto idx_tuple = lnast.add_child(parent_node, Lnast_node::create_tuple(""));
+    auto temp_var_name = create_temp_var(lnast);
+    port_temp_name_list.insert({"FIXME:GET_DPIN_NAME", temp_var_name});
+    lnast.add_child(idx_tuple, Lnast_node::create_ref(temp_var_name)); //FIXME: how to get port name?
+
+    auto idx_asg_addr = lnast.add_child(idx_tuple, Lnast_node::create_assign(""));
+    lnast.add_child(idx_asg_addr, Lnast_node::create_ref("__addr"));
+    attach_child(lnast, idx_asg_addr, addr_q.front());
+    if (!is_one_addr) addr_q.pop();
+
+    auto idx_asg_clk = lnast.add_child(idx_tuple, Lnast_node::create_assign(""));
+    lnast.add_child(idx_asg_clk, Lnast_node::create_ref("__clk_pin"));
+    attach_child(lnast, idx_asg_clk, clk_q.front());
+    if (!is_one_clk) clk_q.pop();
+
+    //FIXME: How to handle __data? (din)
+
+    auto idx_asg_en = lnast.add_child(idx_tuple, Lnast_node::create_assign(""));
+    lnast.add_child(idx_asg_en, Lnast_node::create_ref("__enable"));
+    attach_child(lnast, idx_asg_en, en_q.front());
+    if (!is_one_en) en_q.pop();
+
+    auto idx_asg_fwd = lnast.add_child(idx_tuple, Lnast_node::create_assign(""));
+    lnast.add_child(idx_asg_fwd, Lnast_node::create_ref("__fwd"));
+    attach_child(lnast, idx_asg_fwd, fwd_q.front());
+    if (!is_one_fwd) fwd_q.pop();
+
+    auto idx_asg_lat = lnast.add_child(idx_tuple, Lnast_node::create_assign(""));
+    lnast.add_child(idx_asg_lat, Lnast_node::create_ref("__latency"));
+    attach_child(lnast, idx_asg_lat, lat_q.front());
+    if (!is_one_lat) lat_q.pop();
+
+    auto idx_asg_wmask = lnast.add_child(idx_tuple, Lnast_node::create_assign(""));
+    lnast.add_child(idx_asg_wmask, Lnast_node::create_ref("__wrmask"));
+    attach_child(lnast, idx_asg_wmask, wmask_q.front());
+    if (!is_one_wmask) wmask_q.pop();
+
+    auto idx_asg_pose = lnast.add_child(idx_tuple, Lnast_node::create_assign(""));
+    lnast.add_child(idx_asg_pose, Lnast_node::create_ref("__posedge"));
+    attach_child(lnast, idx_asg_pose, pose_q.front());
+    if (!is_one_wmask) wmask_q.pop();
+
+    //FIXME: How to handle wmode?
+  }
+
+  // Create a single tuple with each memory port instantiated in.
+  auto idx_port_tuple = lnast.add_child(parent_node, Lnast_node::create_tuple(""));
+  auto temp_var_name = create_temp_var(lnast);
+  lnast.add_child(idx_port_tuple, Lnast_node::create_ref(temp_var_name));
+  for (const auto& it : port_temp_name_list) {
+    auto idx_asg = lnast.add_child(idx_port_tuple, Lnast_node::create_assign(""));
+    lnast.add_child(idx_asg, Lnast_node::create_ref(it.first));
+    lnast.add_child(idx_asg, Lnast_node::create_ref(it.second));
+  }
+
+  // Specify all the attributes of this memory (.__port, .__size, ...)
+  auto idx_mem_tuple = lnast.add_child(parent_node, Lnast_node::create_tuple(""));
+  lnast.add_child(idx_mem_tuple, Lnast_node::create_ref("FIXME:MEM_NAME"));
+
+  auto idx_asg_port = lnast.add_child(idx_mem_tuple, Lnast_node::create_assign(""));
+  lnast.add_child(idx_asg_port, Lnast_node::create_ref("__port"));
+  lnast.add_child(idx_asg_port, Lnast_node::create_ref(temp_var_name));
+
+  auto idx_asg_size = lnast.add_child(idx_mem_tuple, Lnast_node::create_assign(""));
+  lnast.add_child(idx_asg_size, Lnast_node::create_ref("__size"));
+  attach_child(lnast, idx_asg_size, size_dpin);
 }
 
 //------------- Helper Functions ------------
