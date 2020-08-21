@@ -220,6 +220,7 @@ void Semantic_check::error_print_lnast_var_warn(Lnast *lnast, std::vector<std::s
 }
 
 void Semantic_check::resolve_read_write_lists(Lnast *lnast) {
+  // Check to look for variables that are never read
   for (auto node_name : read_dict) {
     std::string_view read_node_name = node_name.first;
     if (is_temp_var(read_node_name)) {
@@ -260,8 +261,8 @@ void Semantic_check::resolve_read_write_lists(Lnast *lnast) {
     }
     fmt::print(" is/are never read\n");
   }
-  
-
+  // Check to look for variables that are written to but never read
+  // Check also to look for output variables are not written to that should be written to
   for (auto node_name : write_dict) {
     // Resolve Write and Read Dicts
     if (node_name.first[0] != '%' && read_dict.contains(node_name.first)) {
@@ -317,18 +318,7 @@ void Semantic_check::resolve_read_write_lists(Lnast *lnast) {
 }
 
 void Semantic_check::resolve_lhs_rhs_lists(Lnast *lnast) {
-  // for (auto node : lhs_list) {
-  //   fmt::print("{}, ", lnast->get_name(node));
-  // }
-  // fmt::print("\n");
-  // for (auto node : rhs_list) {
-  //   fmt::print("[");
-  //   for (auto inner : node) {
-  //     fmt::print("{} , ", lnast->get_name(inner));
-  //   }
-  //   fmt::print("]");
-  // }
-  // fmt::print("\n");
+  // Check for variables are considered unnecessary causing an inefficient LNAST
   for (auto lhs_node : lhs_list) {
     std::string_view lhs_name = lnast->get_name(lhs_node);
 
@@ -391,6 +381,18 @@ void Semantic_check::resolve_lhs_rhs_lists(Lnast *lnast) {
       fmt::print(", {}",name);
     }
     fmt::print(" may be unnecessary\n");
+  }
+}
+
+void Semantic_check::resolve_out_of_scope(Lnast *lnast) {
+  std::vector<std::string_view> out_of_scope_vars;
+  for (auto entry : read_dict) {
+    if (!in_write_list(entry.first, entry.second)) {
+      out_of_scope_vars.push_back(entry.first);
+    }
+  }
+  if (out_of_scope_vars.size() != 0) {
+    error_print_lnast_var_warn(lnast, out_of_scope_vars);
   }
 }
 
@@ -553,10 +555,10 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
 
 void Semantic_check::check_tree_struct_ops(Lnast *lnast, const Lnast_nid &lnidx_opr, const Lnast_ntype node_type,
                                            std::string_view stmt_name) {
-  // in_scope_stack.push_back(write_dict);
-  // in_scope_stack.push_back(read_dict);
-  // write_dict.clear();
-  // read_dict.clear();
+  in_scope_stack.push_back(write_dict);
+  in_scope_stack.push_back(read_dict);
+  write_dict.clear();
+  read_dict.clear();
   if (node_type.is_if()) {
     check_if_op(lnast, lnidx_opr, stmt_name);
   } else if (node_type.is_for()) {
@@ -582,14 +584,14 @@ void Semantic_check::check_tree_struct_ops(Lnast *lnast, const Lnast_nid &lnidx_
   //   fmt::print("{} : {}\n", name.first, name.second);
   // }
   // fmt::print("\n");
-  // out_of_scope_stack.push_back(write_dict);
-  // out_of_scope_stack.push_back(read_dict);
-  // write_dict.clear();
-  // read_dict.clear();
-  // read_dict = in_scope_stack.back();
-  // in_scope_stack.pop_back();
-  // write_dict = in_scope_stack.back();
-  // in_scope_stack.pop_back();
+  out_of_scope_stack.push_back(write_dict);
+  out_of_scope_stack.push_back(read_dict);
+  write_dict.clear();
+  read_dict.clear();
+  read_dict = in_scope_stack.back();
+  in_scope_stack.pop_back();
+  write_dict = in_scope_stack.back();
+  in_scope_stack.pop_back();
 }
 
 void Semantic_check::check_if_op(Lnast *lnast, const Lnast_nid &lnidx_opr, std::string_view stmt_name) {
@@ -834,16 +836,16 @@ void Semantic_check::do_check(Lnast *lnast) {
       check_tree_struct_ops(lnast, stmt, ntype, stmt_name);
     }
   }
-  fmt::print("Write Dict\n");
-  for (auto name : write_dict) {
-    fmt::print("{} : {}\n", name.first, name.second);
-  }
-  fmt::print("\n");
-  fmt::print("Read Dict\n");
-  for (auto name : read_dict) {
-    fmt::print("{} : {}\n", name.first, name.second);
-  }
-  fmt::print("\n");
+  // fmt::print("Write Dict\n");
+  // for (auto name : write_dict) {
+  //   fmt::print("{} : {}\n", name.first, name.second);
+  // }
+  // fmt::print("\n");
+  // fmt::print("Read Dict\n");
+  // for (auto name : read_dict) {
+  //   fmt::print("{} : {}\n", name.first, name.second);
+  // }
+  // fmt::print("\n");
   // fmt::print("Output Vars\n");
   // for (auto name : output_vars) {
   //   fmt::print("{}\n", name);
