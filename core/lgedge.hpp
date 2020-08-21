@@ -124,8 +124,6 @@ public:
   friend struct SEdge;
 
   int  next_node_inc() const { return is_snode() ? 1 : 2; }
-  bool is_last_input() const;
-  bool is_last_output() const;
 
   bool is_input() const { return input; }
 
@@ -156,9 +154,6 @@ public:
 
     fmt::print("snode:{} page_idx:{} a:{} addr:{:x}", is_snode(), get_page_idx(), a, (uint64_t)this);
   }
-
-  uint32_t get_bits() const;
-  bool     is_root() const;
 
   bool is_page_align() const {
     return ((((uint64_t)this) & 0xFFF) == 0);  // page align.
