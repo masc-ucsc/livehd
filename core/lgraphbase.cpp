@@ -128,12 +128,6 @@ Index_ID LGraph_Base::create_node_space(const Index_ID last_idx, const Port_ID d
     return idx2;
   }
 
-#ifdef DEBUG_SLOW
-  const auto &dbg_master = node_internal[last_idx].get_master_root();
-  int32_t     dbg_ni     = dbg_master.get_node_num_inputs();
-  int32_t     dbg_no     = dbg_master.get_node_num_outputs();
-#endif
-
   if (node_internal[last_idx].get_dst_pid() == dst_pid) {
     I(root_idx);
     // Nove stuff to idx2, legal
@@ -145,11 +139,6 @@ Index_ID LGraph_Base::create_node_space(const Index_ID last_idx, const Port_ID d
     I(node_internal[idx2].get_master_root_nid() == master_nid);
 
     node_internal.ref(last_idx)->push_next_state(idx2);
-
-#ifdef DEBUG_SLOW
-    I(dbg_master.get_node_num_inputs() == dbg_ni);
-    I(dbg_master.get_node_num_outputs() == dbg_no);
-#endif
 
     if (!node_internal[last_idx].has_space_long()) {
       if (node_internal[idx2].has_space_long())
@@ -190,11 +179,6 @@ Index_ID LGraph_Base::create_node_space(const Index_ID last_idx, const Port_ID d
   I(node_internal[last_idx].get_master_root_nid() == master_nid);
   I(node_internal[idx3].get_master_root_nid() == master_nid);
   I(node_internal[idx2].get_master_root_nid() == master_nid);
-
-#ifdef DEBUG_SLOW
-  I(node_internal[last_idx].get_master_root().get_node_num_inputs() == dbg_ni);
-  I(node_internal[last_idx].get_master_root().get_node_num_outputs() == dbg_no);
-#endif
 
   I(node_internal[idx2].has_space_long());
   return idx2;

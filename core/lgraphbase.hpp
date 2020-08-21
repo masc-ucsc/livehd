@@ -70,30 +70,6 @@ protected:
     node_internal.ref(idx)->set_bits(bits);
   }
 
-  void set_unsigned(Index_ID idx) {
-    I(idx < node_internal.size());
-    I(node_internal[idx].is_root());
-    node_internal.ref(idx)->set_unsigned();
-  }
-
-  void set_signed(Index_ID idx) {
-    I(idx < node_internal.size());
-    I(node_internal[idx].is_root());
-    node_internal.ref(idx)->set_signed();
-  }
-
-  bool is_signed(Index_ID idx) const {
-    I(idx < node_internal.size());
-    I(node_internal[idx].is_root());
-    return node_internal[idx].is_signed();
-  }
-
-  bool is_unsigned(Index_ID idx) const {
-    I(idx < node_internal.size());
-    I(node_internal[idx].is_root());
-    return node_internal[idx].is_unsigned();
-  }
-
 public:
   LGraph_Base() = delete;
 

@@ -136,8 +136,8 @@ public:
     I(snode == reinterpret_cast<const SEdge_Internal *>(this)->is_snode());
   }
 
-  Node_pin get_out_pin(LGraph *g, LGraph *cg, const Hierarchy_index &hidx) const;
-  Node_pin get_inp_pin(LGraph *g, LGraph *cg, const Hierarchy_index &hidx) const;
+  Node_pin get_out_pin(LGraph *g, LGraph *cg, const Hierarchy_index &hidx, Index_ID idx) const;
+  Node_pin get_inp_pin(LGraph *g, LGraph *cg, const Hierarchy_index &hidx, Index_ID idx) const;
 
   Index_ID get_self_nid() const;
   Index_ID get_idx() const {
@@ -248,7 +248,7 @@ private:
   uint32_t   bits : Bits_bits;
   uint64_t   nid : Index_bits;  // 31bits, 4 byte aligned
   uint16_t   type : 8;          // 8 bits for master_root type (could be used for something else in non master root)
-  uint16_t   sign : 1;          // 1 bit (reserved future) for sign extension attribute to simplify gates
+  uint16_t   unused_too : 1;    // 1 bit (reserved future) for sign extension attribute to simplify gates
   uint16_t   root : 1;
   Port_ID    dst_pid : Port_bits;  // 15bits
   // 8 bytes aligned
@@ -321,6 +321,10 @@ public:
     return n;
   }
 
+  uint8_t get_num_local_edges() const {
+    return get_num_local_inputs() + get_num_local_outputs();
+  }
+
   uint8_t get_type() const {
     I(is_master_root());
     return type;
@@ -329,17 +333,6 @@ public:
     I(is_master_root());
     type = op;
   }
-
-  void set_signed() { sign = 1; }
-  void set_unsigned() { sign = 0; }
-  bool is_signed() const { return sign; }
-  bool is_unsigned() const { return !sign; }
-
-  int32_t get_node_num_inputs() const;
-  int32_t get_node_num_outputs() const;
-  int32_t get_node_num_edges() const;
-  int32_t get_node_pin_num_inputs(Index_ID idx) const;
-  int32_t get_node_pin_num_outputs(Index_ID idx) const;
 
   bool has_node_inputs() const;
   bool has_node_outputs() const;
@@ -359,7 +352,6 @@ public:
     inp_long     = 0;
     out_long     = 0;
     nid          = 0;
-    sign         = 0;  // unsigned by default
     type         = 0;
   }
 

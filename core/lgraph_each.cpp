@@ -45,25 +45,35 @@ void LGraph::each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)
 
 void LGraph::each_pin(const Node_pin &dpin, std::function<bool(Index_ID idx)> f1) const {
 
-  // NOTE: start at idx. More likely to hit first the node. If end reached.
-  // Start from nid
-  Index_ID idx2 = dpin.get_idx();
-  I(node_internal[idx2].is_root());
+  Index_ID root_idx2 = dpin.get_root_idx();
+  Index_ID idx2 = root_idx2;
+
+  bool should_not_find = false;
 
   while (true) {
     if (node_internal[idx2].get_dst_pid() == dpin.get_pid()) {
+      I(!should_not_find);
       bool cont = f1(idx2);
       if (!cont)
         return;
     }
+#ifndef NDEBUG
     if (node_internal[idx2].is_last_state()) {
       idx2 = dpin.get_node().get_nid();
+      should_not_find = true; // loop and try the others (should not have it before root)
     } else {
       idx2 = node_internal[idx2].get_next();
     }
-    if (idx2 == dpin.get_idx()) {  // already visited
+    if (idx2 == root_idx2) {  // already visited
       return;
     }
+#else
+    if (node_internal[idx2].is_last_state()) {
+      return;
+    }
+    idx2 = node_internal[idx2].get_next();
+    I(idx2 != root_idx2);
+#endif
   }
 }
 
