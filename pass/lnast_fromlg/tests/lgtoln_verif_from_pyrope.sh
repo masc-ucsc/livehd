@@ -180,5 +180,5 @@ lgtoln_verif() {
 }
 
 lgtoln_verif "$pts"
-#lgtoln_verif "$pts_hier" "hier"
+lgtoln_verif "$pts_hier" "hier"
 #lgtoln_verif "$pts_hier2" "hier"
