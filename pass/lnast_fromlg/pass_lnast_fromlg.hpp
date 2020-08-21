@@ -31,6 +31,7 @@ protected:
   void attach_flop_node    (Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
   void attach_latch_node   (Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
   void attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void attach_memory_node  (Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
 
   void attach_children_to_node(Lnast& lnast, Lnast_nid& op_node, const Node_pin& pin);
   void attach_child(Lnast& lnast, Lnast_nid& op_node, const Node_pin& dpin);
