@@ -163,9 +163,9 @@ Node_pin Node::get_sink_pin(std::string_view pname) const {
   return Node_pin(top_g, current_g, hidx, idx, pid, true);
 }
 
-bool Node::has_inputs() const { return current_g->has_node_inputs(nid); }
+bool Node::has_inputs() const { return current_g->has_inputs(*this); }
 
-bool Node::has_outputs() const { return current_g->has_node_outputs(nid); }
+bool Node::has_outputs() const { return current_g->has_outputs(*this); }
 
 int Node::get_num_inputs() const { return current_g->get_node_num_inputs(nid); }
 

@@ -37,6 +37,10 @@ Node_pin::Node_pin(LGraph *_g, Compact_class_driver comp)
   I(current_g->is_valid_node_pin(idx));
 }
 
+const Index_ID Node_pin::get_root_idx() const {
+  return current_g->get_root_idx(idx);
+}
+
 
 Node_pin::Compact Node_pin::get_compact() const {
   if(hidx.is_invalid())

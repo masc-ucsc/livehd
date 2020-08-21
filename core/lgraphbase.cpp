@@ -371,11 +371,11 @@ Index_ID LGraph_Base::get_space_output_pin(const Index_ID master_nid, const Inde
   return 0;
 }
 
-Index_ID LGraph_Base::find_idx_from_pid_int(const Index_ID idx, const Port_ID pid) const {
-  I(node_internal[idx].get_dst_pid() != pid);
-  Index_ID nid  = node_internal[idx].get_master_root_nid();
-  Index_ID idx2 = nid;
+Index_ID LGraph_Base::find_idx_from_pid_int(const Index_ID nid, const Port_ID pid) const {
+  I(node_internal[nid].get_dst_pid() != pid); // short-cut for common case
+  I(node_internal[nid].is_master_root());
 
+  Index_ID idx2  = nid;
   while (true) {
     if (node_internal[idx2].get_dst_pid() == pid && node_internal[idx2].is_root()) {
       return idx2;
@@ -386,7 +386,6 @@ Index_ID LGraph_Base::find_idx_from_pid_int(const Index_ID idx, const Port_ID pi
     }
 
     idx2 = node_internal[idx2].get_next();
-    I(node_internal[idx2].get_master_root_nid() == nid);
   }
 
   I(false);

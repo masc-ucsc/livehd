@@ -39,6 +39,7 @@ protected:
     I(idx);
     return idx;
   }
+  const Index_ID get_root_idx() const;
 
 public:
   class __attribute__((packed)) Compact {
