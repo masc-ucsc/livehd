@@ -164,14 +164,11 @@ Node_pin Node::get_sink_pin(std::string_view pname) const {
 }
 
 bool Node::has_inputs() const { return current_g->has_inputs(*this); }
-
 bool Node::has_outputs() const { return current_g->has_outputs(*this); }
 
-int Node::get_num_inputs() const { return current_g->get_node_num_inputs(nid); }
-
-int Node::get_num_outputs() const { return current_g->get_node_num_outputs(nid); }
-
-int Node::get_num_edges() const { return current_g->get_node_num_edges(nid); }
+int Node::get_num_inputs() const { return current_g->get_num_inputs(*this); }
+int Node::get_num_outputs() const { return current_g->get_num_outputs(*this); }
+int Node::get_num_edges() const { return current_g->get_num_edges(*this); }
 
 bool Node::has_driver_pin_connected(std::string_view pname) const {
   auto pid = get_type().get_output_match(pname);

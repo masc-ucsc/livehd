@@ -266,19 +266,6 @@ void Pass_lnast_fromlg::handle_io(LGraph* lg, Lnast_nid& parent_lnast_node, Lnas
       }
     }
 
-    //if (edge.driver.get_node().get_type().is_input_signed(edge.driver.get_pid())) {
-    if (edge.driver.is_signed()) {
-      //FIXME: Make sure this has the correct "sign"
-      auto temp_var_name = create_temp_var(lnast);
-
-      auto idx_dot = lnast.add_child(parent_lnast_node, Lnast_node::create_dot("sign"));
-      lnast.add_child(idx_dot, Lnast_node::create_ref(temp_var_name));
-      lnast.add_child(idx_dot, Lnast_node::create_ref(pin_name));
-      lnast.add_child(idx_dot, Lnast_node::create_ref("__sign"));
-      auto idx_asg = lnast.add_child(parent_lnast_node, Lnast_node::create_assign("sign"));
-      lnast.add_child(idx_asg, Lnast_node::create_ref(temp_var_name));
-      lnast.add_child(idx_asg, Lnast_node::create_const("true"));
-    }
   }
 
   auto out_io_node = lg->get_graph_output_node();
@@ -296,18 +283,6 @@ void Pass_lnast_fromlg::handle_io(LGraph* lg, Lnast_nid& parent_lnast_node, Lnas
         add_bw_in_ln(lnast, parent_lnast_node,
             lnast.add_string(absl::StrCat("%", pin_name)), bits);
       }
-    }
-    if (edge.driver.is_signed()) {
-      //FIXME: Make sure this has the correct "sign"
-      auto temp_var_name = create_temp_var(lnast);
-
-      auto idx_dot = lnast.add_child(parent_lnast_node, Lnast_node::create_dot("sign"));
-      lnast.add_child(idx_dot, Lnast_node::create_ref(temp_var_name));
-      lnast.add_child(idx_dot, Lnast_node::create_ref(pin_name));
-      lnast.add_child(idx_dot, Lnast_node::create_ref("__sign"));
-      auto idx_asg = lnast.add_child(parent_lnast_node, Lnast_node::create_assign("sign"));
-      lnast.add_child(idx_asg, Lnast_node::create_ref(temp_var_name));
-      lnast.add_child(idx_asg, Lnast_node::create_const("true"));
     }
   }
 }

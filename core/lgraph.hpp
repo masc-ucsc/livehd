@@ -42,43 +42,13 @@ protected:
   }
 
   Index_ID get_node_nid(Index_ID idx) const {
+    I(node_internal[idx].is_root());
     if (node_internal[idx].is_master_root())
       return idx;
 
     return node_internal[idx].get_nid();
   }
 
-  int get_node_num_outputs(Index_ID nid) const {
-    I(nid < node_internal.size());
-    I(node_internal[nid].is_master_root());
-    return node_internal[nid].get_node_num_outputs();
-  }
-
-  int get_node_num_edges(Index_ID nid) const {
-    I(nid < node_internal.size());
-    I(node_internal[nid].is_master_root());
-    return node_internal[nid].get_node_num_edges();
-  }
-
-  int get_node_num_inputs(Index_ID nid) const {
-    I(nid < node_internal.size());
-    I(node_internal[nid].is_master_root());
-    return node_internal[nid].get_node_num_inputs();
-  }
-
-  int get_node_pin_num_outputs(Index_ID idx) const {
-    I(idx < node_internal.size());
-    I(node_internal[idx].is_root());
-    Index_ID nid = get_node_nid(idx);
-    return node_internal[nid].get_node_pin_num_outputs(idx);
-  }
-
-  int get_node_pin_num_inputs(Index_ID idx) const {
-    I(idx < node_internal.size());
-    I(node_internal[idx].is_root());
-    Index_ID nid = get_node_nid(idx);
-    return node_internal[nid].get_node_pin_num_inputs(idx);
-  }
 
   Node_pin_iterator out_connected_pins(const Node &node) const;
   Node_pin_iterator inp_connected_pins(const Node &node) const;
@@ -106,6 +76,12 @@ protected:
   bool has_outputs(const Node_pin &pin) const;
   bool has_inputs(const Node_pin &pin) const;
 
+  int get_num_outputs(const Node &node) const;
+  int get_num_inputs(const Node &node) const;
+  int get_num_edges(const Node &node) const;
+  int get_num_outputs(const Node_pin &pin) const;
+  int get_num_inputs(const Node_pin &pin) const;
+
   void del_driver2node_int(Node &driver, const Node &sink);
   void del_sink2node_int(const Node &driver, Node &sink);
 
@@ -119,18 +95,21 @@ protected:
   bool is_graph_io(Index_ID idx) const {
     I(static_cast<Index_ID>(node_internal.size()) > idx);
     auto nid = node_internal[idx].get_nid();
+    nid = node_internal[nid].get_nid();
     return nid == Node::Hardcoded_input_nid || nid == Node::Hardcoded_output_nid;
   }
 
   bool is_graph_input(Index_ID idx) const {
     I(static_cast<Index_ID>(node_internal.size()) > idx);
     auto nid = node_internal[idx].get_nid();
+    nid = node_internal[nid].get_nid();
     return nid == Node::Hardcoded_input_nid;
   }
 
   bool is_graph_output(Index_ID idx) const {
     I(static_cast<Index_ID>(node_internal.size()) > idx);
     auto nid = node_internal[idx].get_nid();
+    nid = node_internal[nid].get_nid();
     return nid == Node::Hardcoded_output_nid;
   }
 

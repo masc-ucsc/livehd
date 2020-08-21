@@ -224,7 +224,7 @@ public:
   Compact_class_driver get_compact_class_driver() const {
     // OK to pick a hierarchical to avoid replication of info like names
     I(!sink);  // Only driver pin allowed
-    return Compact_class_driver(idx);
+    return Compact_class_driver(get_root_idx());
   }
 
   LGraph *        get_top_lgraph() const { return top_g; };
@@ -278,24 +278,7 @@ public:
   }
   int get_num_edges() const;
 
-#if 0
-  Node_pin &operator=(const Node_pin &obj) {
-    I(this != &obj); // Do not assign object to itself. works but wastefull
-    top_g     = obj.top_g;
-    current_g = obj.current_g;
-    idx       = obj.idx;
-    pid       = obj.pid;
-    hidx      = obj.hidx;
-    sink      = obj.sink;
-
-    return *this;
-  };
-#endif
-
   // NOTE: No operator<() needed for std::set std::map to avoid their use. Use flat_map_set for speed
-
-  // static Node_pin get_out_pin(const Edge_raw *edge_raw);
-  // static Node_pin get_inp_pin(const Edge_raw *edge_raw);
 
   void           invalidate() { idx = 0; }
   constexpr bool is_invalid() const { return idx == 0; }
@@ -330,11 +313,6 @@ public:
 
   uint32_t get_bits() const;
   void     set_bits(uint32_t bits);
-
-  bool is_signed() const;
-  bool is_unsigned() const;
-  void set_signed();
-  void set_unsigned();
 
   std::string_view get_type_sub_io_name() const;
   std::string_view get_type_sub_pin_name() const;
