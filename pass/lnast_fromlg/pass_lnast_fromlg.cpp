@@ -41,6 +41,8 @@ void Pass_lnast_fromlg::do_trans(LGraph* lg, Eprp_var& var, std::string_view mod
       put_bw_in_ln = false;
     }
   }
+  temp_var_count = 0;
+  seq_count = 0;
 
   std::unique_ptr<Lnast> lnast = std::make_unique<Lnast>(module_name);
   lnast->set_root(Lnast_node(Lnast_ntype::create_top(), Token(0, 0, 0, 0, lg->get_name())));
@@ -974,10 +976,23 @@ void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_nod
   // Create output
   for (const auto dpin : pin.get_node().out_connected_pins()) {
     auto port_name = dpin.get_type_sub_io_name();
-    auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_dot("sb_out_set"));
-    attach_child(lnast, idx_asg, dpin);
-    lnast.add_child(idx_asg, Lnast_node::create_ref(out_tup_name));
-    lnast.add_child(idx_asg, Lnast_node::create_ref(port_name));
+    auto idx_dotasg = lnast.add_child(parent_node, Lnast_node::create_dot("sb_out_set"));
+    attach_child(lnast, idx_dotasg, dpin);
+    lnast.add_child(idx_dotasg, Lnast_node::create_ref(out_tup_name));
+    lnast.add_child(idx_dotasg, Lnast_node::create_ref(port_name));
+
+    // Specify output's bw -- NOTE: shouldn't be necessary, but useful for bw pass for now
+    if (put_bw_in_ln) {
+      auto port_bw   = dpin.get_bits();
+      auto temp_var_bw = create_temp_var(lnast);
+      auto idx_dot_bw = lnast.add_child(parent_node, Lnast_node::create_dot("sb_out_bwd"));
+      lnast.add_child(idx_dot_bw, Lnast_node::create_ref(temp_var_bw));
+      lnast.add_child(idx_dot_bw, Lnast_node::create_ref(out_tup_name));
+      lnast.add_child(idx_dot_bw, Lnast_node::create_ref(port_name));
+      auto idx_asg_bw = lnast.add_child(parent_node, Lnast_node::create_assign("sb_out_bwa"));
+      lnast.add_child(idx_asg_bw, Lnast_node::create_ref(temp_var_bw));
+      lnast.add_child(idx_asg_bw, Lnast_node::create_const(lnast.add_string(std::to_string(port_bw))));
+    }
   }
 }
 
