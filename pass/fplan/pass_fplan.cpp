@@ -7,6 +7,8 @@
 #include "graph_info.hpp"
 #include "i_resolve_header.hpp"
 
+#include "hier_tree.hpp"
+
 void setup_pass_fplan() { Pass_fplan::setup(); }
 
 void Pass_fplan::setup() {
@@ -16,22 +18,19 @@ void Pass_fplan::setup() {
   register_pass(m);
 }
 
-// TODO: make this a part of the pass
-// best solution would be to patch iassert so that if "I" or "GI" is already defined, a longer name is used.
-static void makefp(Eprp_var &var, Graph_info& gi) {
+void Pass_fplan::make_graph(Eprp_var &var) {
 
   std::cout << "Running node creation pass..." << std::endl;
 
   for (auto lg : var.lgs) {
+    fmt::print("LGraph: {}\n", lg->get_name());
     for (auto cn : lg->get_down_nodes_map()) {
       
       // root node is not printed
-      fmt::print("name: {}\n idx: {}\n hidx: {}\n", cn.first.get_node(lg).get_name(), cn.first.get_nid().value, cn.first.get_node(lg).get_hidx().get_hash());
+      fmt::print("name: {}\n nid: {}\n hidx: {}\n", cn.first.get_node(lg).get_name(), cn.first.get_nid().value, cn.first.get_node(lg).get_hidx().get_hash());
 
     }
   }
-
-  return;
 
   // create nodes without any connections between them, and fill in as much information as we can.
   for (auto lg : var.lgs) {
@@ -41,14 +40,14 @@ static void makefp(Eprp_var &var, Graph_info& gi) {
       for (auto v : gi.al.verts()) {
         if (gi.ids[v] == cn.first.get_nid()) {
           found = true;
-          std::cout << "Already found node " << n.get_name() << std::endl;
+          std::cout << "Already found node " << n.get_name() << " with nid " << n.get_compact().get_nid() << std::endl;
           break;
         }
       }
 
       // node does not already exist, so make a new one
       if (!found) {
-        std::cout << "Making new node " << n.get_name() << std::endl;
+        std::cout << "Making new node " << n.get_name() << " with nid " << n.get_compact().get_nid() << std::endl;
         auto new_v = gi.al.insert_vert();
         gi.ids[new_v] = cn.first.get_nid();
         gi.debug_names[new_v] = n.get_name();
@@ -80,39 +79,16 @@ static void makefp(Eprp_var &var, Graph_info& gi) {
 
       auto n = cn.first.get_node(lg);
 
-      std::cout << "Node: " << n.get_name() << std::endl;
-
       for (auto p : n.inp_connected_pins()) {
         for (auto other_p : p.inp_driver()) {
-          //auto v1 = find_name();
-          //auto v2 = find_name(other_p.get_hidx());
-              
-          //auto new_e = gi.al.insert_edge(v1, v2);
-          //gi.weights[new_e] = other_p.get_bits(); // TODO: only driver pins can call get_bits()?
-          //existing_edges.insert(new_e);
-        }
-
-        /*
-        for (auto cn2 : lg->get_down_nodes_map()) {
-          auto n2 = cn2.first.get_node(lg);
-          if (n2.has_outputs()) {
-            for (auto p2 : n2.out_connected_pins()) { // this is wrong - gets outputs of the same node
-              
-              if (p2.get_hidx() == p.get_hidx()) {
-                auto v1 = find_name(p.get_hidx());
-                auto v2 = find_name(p2.get_hidx());
-              
-                auto new_e = gi.al.insert_edge(v1, v2);
-                gi.weights[new_e] = p2.get_bits(); // TODO: only driver pins can call get_bits()?
-                existing_edges.insert(new_e);
-              }
-            }
-          } else {
-            std::cout << "node has no outputs, skipping." << std::endl;
-          }
           
+          auto v1 = find_name(n.get_compact().get_nid());
+          auto v2 = find_name(other_p.get_node().get_compact().get_nid());
+              
+          auto new_e = gi.al.insert_edge(v1, v2);
+          gi.weights[new_e] = other_p.get_bits(); // TODO: only driver pins can call get_bits()?
+          existing_edges.insert(new_e);
         }
-        */
 
       }
     }
@@ -121,37 +97,38 @@ static void makefp(Eprp_var &var, Graph_info& gi) {
   using namespace graph::attributes;
   std::cout << gi.al.dot_format("weight"_of_edge = gi.weights, "name"_of_vert = gi.debug_names) << std::endl;
 
-  /*
   // if the graph is not fully connected, ker-lin fails to work.
   // TODO: eventually replace this with an adjacency matrix, since it's probably faster.
-  for (const auto& v : g.verts()) {
-    for (const auto& other_v : g.verts()) {
+  for (const auto& v : gi.al.verts()) {
+    for (const auto& other_v : gi.al.verts()) {
       bool found = false;
-      for (const auto& e : g.out_edges(v)) {
-        if (g.head(e) == other_v && g.tail(e) == v) {
+      for (const auto& e : gi.al.out_edges(v)) {
+        if (gi.al.head(e) == other_v && gi.al.tail(e) == v) {
           found = true;
           break;
         }
       }
       if (!found) {
-        auto temp_e = g.insert_edge(v, other_v);
-        g_edge_weights[temp_e] = 0;
+        auto temp_e = gi.al.insert_edge(v, other_v);
+        gi.weights[temp_e] = 0;
       }
     }
   }
-
-  Graph_info info(std::move(g), std::move(g_name_map), std::move(g_area_map), std::move(g_edge_weights), std::move(g_set));
-  */
 }
 
 void Pass_fplan::pass(Eprp_var &var) {
   std::cout << "running pass..." << std::endl;
+  Pass_fplan p(var);
 
-  Graph_info gi;
-
-  makefp(var, gi);
+  p.make_graph(var);
+  
+  Hier_tree h(std::move(p.gi), 1);
+  h.collapse(0.0);
+  h.discover_regularity();
 
   // 3. <finish HiReg>
-  // 4. write code to use the existing hierarchy instead of throwing it away
+  // 4. write code to use the existing hierarchy instead of throwing it away...?
+  // HiReg specifies area requirements that a normal LGraph may not fill
 
+  std::cout << "pass completed." << std::endl;
 }
