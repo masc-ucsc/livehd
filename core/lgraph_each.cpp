@@ -45,35 +45,31 @@ void LGraph::each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)
 
 void LGraph::each_pin(const Node_pin &dpin, std::function<bool(Index_ID idx)> f1) const {
 
-  Index_ID root_idx2 = dpin.get_root_idx();
-  Index_ID idx2 = root_idx2;
+  Index_ID first_idx2 = dpin.get_idx();
+  Index_ID idx2 = first_idx2;
 
   bool should_not_find = false;
 
   while (true) {
-    if (node_internal[idx2].get_dst_pid() == dpin.get_pid()) {
-      I(!should_not_find);
-      bool cont = f1(idx2);
-      if (!cont)
-        return;
-    }
+    I(!should_not_find);
+    bool cont = f1(idx2);
+    if (!cont)
+      return;
+
+    do{
+      if (node_internal[idx2].is_last_state()) {
 #ifndef NDEBUG
-    if (node_internal[idx2].is_last_state()) {
-      idx2 = dpin.get_node().get_nid();
-      should_not_find = true; // loop and try the others (should not have it before root)
-    } else {
-      idx2 = node_internal[idx2].get_next();
-    }
-    if (idx2 == root_idx2) {  // already visited
-      return;
-    }
+        idx2 = dpin.get_node().get_nid();
+        should_not_find = true; // loop and try the others (should not have it before root)
 #else
-    if (node_internal[idx2].is_last_state()) {
-      return;
-    }
-    idx2 = node_internal[idx2].get_next();
-    I(idx2 != root_idx2);
+        idx2 = node_internal[idx2].get_nid();
 #endif
+      }else{
+        idx2 = node_internal[idx2].get_next();
+      }
+      if (idx2==first_idx2)
+        return;
+    } while (node_internal[idx2].get_dst_pid() != dpin.get_pid());
   }
 }
 
