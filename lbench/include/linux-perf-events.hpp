@@ -53,8 +53,7 @@ public:
       attribs.config = config;
       fd = static_cast<int>(syscall(__NR_perf_event_open, &attribs, pid, cpu, group, flags));
       if (fd == -1) {
-        std::cerr << "i:" << i << " val:" << config << "\n";
-        report_error("perf_event_open");
+        std::cerr << "perf_event_open failed (no perf counters)\n";
       }
       ioctl(fd, PERF_EVENT_IOC_ID, &ids[i++]);
       if (group == -1) {
