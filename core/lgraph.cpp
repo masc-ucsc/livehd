@@ -661,6 +661,71 @@ Node_pin_iterator LGraph::inp_driver(const Node_pin &spin) const {
   return piter;
 }
 
+bool LGraph::has_outputs(const Node &node) const {
+  auto idx2 = node.get_nid();
+  while (true) {
+    if (node_internal[idx2].has_local_outputs())
+      return true;
+
+    if (node_internal[idx2].is_last_state())
+      return false;
+
+    idx2 = node_internal[idx2].get_next();
+  }
+}
+
+bool LGraph::has_inputs(const Node &node) const {
+  auto idx2 = node.get_nid();
+  while (true) {
+    if (node_internal[idx2].has_local_inputs())
+      return true;
+
+    if (node_internal[idx2].is_last_state())
+      return false;
+
+    idx2 = node_internal[idx2].get_next();
+  }
+}
+
+bool LGraph::has_outputs(const Node_pin &pin) const {
+  I(pin.is_driver());
+  auto idx = pin.get_root_idx();
+  if (!node_internal[idx].is_driver_setup())
+    return false;
+
+  auto idx2 = pin.get_root_idx();
+  while (true) {
+    if (node_internal[idx2].get_dst_pid() == pin.get_pid())
+      if (node_internal[idx2].has_local_outputs())
+        return true;
+
+    if (node_internal[idx2].is_last_state())
+      return false;
+
+    idx2 = node_internal[idx2].get_next();
+  }
+}
+
+bool LGraph::has_inputs(const Node_pin &pin) const {
+  I(pin.is_sink());
+
+  auto idx = pin.get_root_idx();
+  if (!node_internal[idx].is_sink_setup())
+    return false;
+
+  auto idx2 = pin.get_root_idx();
+  while (true) {
+    if (node_internal[idx2].get_dst_pid() == pin.get_pid())
+      if (node_internal[idx2].has_local_inputs())
+        return true;
+
+    if (node_internal[idx2].is_last_state())
+      return false;
+
+    idx2 = node_internal[idx2].get_next();
+  }
+}
+
 void LGraph::del_node(const Node &node) {
   auto idx2 = node.get_nid();
   I(node_internal.size()>idx2);

@@ -37,12 +37,12 @@ protected:
 
   Port_ID recompute_io_ports(const Index_ID track_nid);
 
-  Index_ID find_idx_from_pid_int(const Index_ID idx, const Port_ID pid) const;
-  Index_ID find_idx_from_pid(const Index_ID idx, const Port_ID pid) const {
-    if (likely(node_internal[idx].get_dst_pid() == pid)) {  // Common case
-      return idx;
+  Index_ID find_idx_from_pid_int(const Index_ID nid, const Port_ID pid) const;
+  Index_ID find_idx_from_pid(const Index_ID nid, const Port_ID pid) const {
+    if (likely(node_internal[nid].get_dst_pid() == pid)) {  // Common case
+      return nid;
     }
-    return find_idx_from_pid_int(idx, pid);
+    return find_idx_from_pid_int(nid, pid);
   }
 
   Index_ID setup_idx_from_pid(const Index_ID nid, const Port_ID pid);

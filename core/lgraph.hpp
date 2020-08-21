@@ -35,23 +35,10 @@ protected:
 
   explicit LGraph(std::string_view _path, std::string_view _name, std::string_view _source);
 
-  bool has_node_outputs(Index_ID idx) const {
-    I(idx < node_internal.size());
-    I(node_internal[idx].is_root());
-    return node_internal[idx].has_node_outputs();
-  }
-
-  bool has_node_inputs(Index_ID idx) const {
-    I(idx < node_internal.size());
-    I(node_internal[idx].is_root());
-    return node_internal[idx].has_node_inputs();
-  }
-
-  Index_ID find_idx(const Node_pin &pin) const {
-    if (likely(node_internal[pin.get_idx()].get_dst_pid() == pin.get_pid())) {  // Common case
-      return pin.get_idx();
-    }
-    return find_idx_from_pid(pin.get_idx(), pin.get_pid());
+  Index_ID get_root_idx(Index_ID idx) const {
+    if (node_internal[idx].is_root())
+      return idx;
+    return node_internal[idx].get_nid();
   }
 
   Index_ID get_node_nid(Index_ID idx) const {
@@ -114,22 +101,10 @@ protected:
 
   Node_pin_iterator inp_driver(const Node_pin &spin) const; // 1 or 0 drivers allowed for correct graphs
 
-  bool has_outputs(const Node_pin &pin) const {
-    I(!pin.is_invalid());
-    I(pin.get_idx() < node_internal.size());
-    I(node_internal[pin.get_idx()].is_root());
-    GI(node_internal[pin.get_idx()].has_pin_outputs(), node_internal[pin.get_idx()].is_driver_setup());
-
-    return node_internal[pin.get_idx()].is_driver_setup() && node_internal[pin.get_idx()].has_pin_outputs();
-  }
-  bool has_inputs(const Node_pin &pin) const {
-    I(!pin.is_invalid());
-    I(pin.get_idx() < node_internal.size());
-    I(node_internal[pin.get_idx()].is_root());
-    GI(node_internal[pin.get_idx()].has_pin_inputs(), node_internal[pin.get_idx()].is_sink_setup());
-
-    return node_internal[pin.get_idx()].is_sink_setup() && node_internal[pin.get_idx()].has_pin_inputs();
-  }
+  bool has_outputs(const Node &node) const;
+  bool has_inputs(const Node &node) const;
+  bool has_outputs(const Node_pin &pin) const;
+  bool has_inputs(const Node_pin &pin) const;
 
   void del_driver2node_int(Node &driver, const Node &sink);
   void del_sink2node_int(const Node &driver, Node &sink);
@@ -206,13 +181,13 @@ public:
     GI(!spin.is_graph_io() && !dpin.is_graph_io() && dpin.get_node().get_nid() == spin.get_node().get_nid(),
        dpin.get_node().get_type().is_pipelined());
 
-    return add_edge_int(spin.get_idx(), spin.get_pid(), dpin.get_idx(), dpin.get_pid());
+    return add_edge_int(spin.get_root_idx(), spin.get_pid(), dpin.get_root_idx(), dpin.get_pid());
   }
 
   Index_ID add_edge(const Node_pin &dpin, const Node_pin &spin, uint32_t bits) {
     Index_ID idx = add_edge(dpin, spin);
-    I(idx = dpin.get_idx());
     GI(bits != get_bits(idx), !is_type_const(node_internal[idx].get_nid()));  // Do not overwrite bits in constants
+    I(node_internal[idx].is_root()); // add_edge returns the root
     set_bits(idx, bits);
     return idx;
   }
