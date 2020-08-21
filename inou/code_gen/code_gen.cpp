@@ -168,15 +168,16 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index) {
 
   const auto& assign_node_data = lnast->get_data(assign_node_index);
   if (is_temp_var(key)) {
+    std::string key_sec = ref_map.find(key)->second;
     bool param_converted = false ;
-    if((ref_map.find(key)->second).find(".__bits") != std::string::npos) {
-      param_converted = lnast_to->convert_parameters(ref_map.find(key)->second, std::string(ref));//for getting UInt<3> a from $a.___bits=3
+    if(key_sec.find(".__bits") != std::string::npos) {
+      param_converted = lnast_to->convert_parameters(key_sec, std::string(ref));//for getting UInt<3> a from $a.___bits=3
     }
     if (!param_converted) {
       auto ref_map_inst_res = ref_map.insert(std::pair<std::string_view, std::string>(key, lnast_to->ref_name(ref)));//The pair::second element in the pair is set to true if a new element was inserted or false if an equivalent key already existed.
       if(!ref_map_inst_res.second) {//this means an equivalent key already exists.
         //so append to main buffer:  key value, assign op, ref value
-        absl::StrAppend(&buffer_to_print, indent(), lnast_to->ref_name(ref_map.find(key)->second), " ", lnast_to->debug_name_lang(assign_node_data.type), " ", lnast_to->ref_name(ref), lnast_to->stmt_sep());
+        absl::StrAppend(&buffer_to_print, indent(), lnast_to->ref_name(key_sec), " ", lnast_to->debug_name_lang(assign_node_data.type), " ", lnast_to->ref_name(ref), lnast_to->stmt_sep());
       }
     }
   } else {
