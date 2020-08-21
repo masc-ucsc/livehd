@@ -21,26 +21,13 @@ Index_ID SEdge_Internal::get_page_idx() const { return Node_internal_Page::get(t
 
 Index_ID Edge_raw::get_page_idx() const { return Node_internal_Page::get(this).get_idx(); }
 
-bool Edge_raw::is_last_input() const {
-  const auto &node = Node_internal::get(this);
-
-  int sz = snode ? 1 : 2;
-
-  return ((this + sz) >= node.get_input_end());
-}
-
-bool Edge_raw::is_last_output() const {
-  const auto &node = Node_internal::get(this);
-  int         sz   = snode ? 1 : 2;
-
-  return ((this + sz) >= node.get_output_end());
-}
-
 const Edge_raw *Edge_raw::find_edge(const Edge_raw *bt, const Edge_raw *et, Index_ID ptr_idx, Port_ID inp_pid, Port_ID dst_pid) {
   const Edge_raw *eit = bt;
   while (eit != et) {
-    if (eit->get_idx() == ptr_idx && eit->get_inp_pid() == inp_pid && eit->get_dst_pid() == dst_pid)
+    if (eit->get_idx() == ptr_idx && eit->get_dst_pid() == dst_pid) {
+      I(eit->get_inp_pid() == inp_pid);
       return eit;
+    }
 
     if (eit->is_snode())
       eit++;
@@ -514,13 +501,3 @@ Node_pin Edge_raw::get_inp_pin(LGraph *g, LGraph *cg, const Hierarchy_index &hid
 
 Index_ID Edge_raw::get_self_nid() const { return Node_internal::get(this).get_nid(); }
 
-uint32_t Edge_raw::get_bits() const {
-  const auto &node = Node_internal::get(this);
-
-  if (node.is_root())
-    return node.get_bits();
-
-  return node.get_root().get_bits();
-}
-
-bool Edge_raw::is_root() const { return Node_internal::get(this).is_root(); }
