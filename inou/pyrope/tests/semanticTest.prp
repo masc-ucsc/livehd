@@ -166,4 +166,16 @@
 // x = 3 * (x + 3)
 // y = 4
 // y = ((y + 3) * 7) / 7
+// Read Variable Warning: x, y
+
+// a = 3
+// b = c
+// a = a + 3
+
+a = 3
+if true {
+  b = 3
+}
+foo = b
+// Warning: b is out of scope
 // ================================================
