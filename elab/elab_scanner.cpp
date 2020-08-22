@@ -370,7 +370,7 @@ void Elab_scanner::parse_step() {
 Elab_scanner::Elab_scanner() {
   setup_translate();
   max_errors   = 1;
-  max_warnings = 0; // Unlimited 1024;
+  max_warnings = 1024;
   n_errors     = 0;
   n_warnings   = 0;
 

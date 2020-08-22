@@ -36,6 +36,7 @@ SHELL_ODIR=./shell_test/
 rm -rf ${SHELL_ODIR}
 mkdir ${SHELL_ODIR}
 
+rm -rf mlgdb
 mkdir -p mlgdb
 
 declare -a inputs=("trivial.v" "mux.v" "hierarchy.v")
@@ -67,7 +68,7 @@ do
     exit 3
   fi
 
-  echo "lgraph.open name:${base} path:mlgdb |> dump |> inou.yosys.fromlg odir:${SHELL_ODIR} |> inou.graphviz.fromlg" | ${LGSHELL}
+  echo "lgraph.open name:${base} path:mlgdb |> dump |> inou.yosys.fromlg odir:${SHELL_ODIR} |> inou.graphviz.from" | ${LGSHELL}
 
   if [ $? -eq 0 ] && [ -f ${SHELL_ODIR}/${base}.v ]; then
     echo "Successfully created verilog from graph ${file}"
@@ -77,9 +78,21 @@ do
   fi
 done
 
-echo "lgraph.open name:trivial path:mlgdb |> lgraph.stats" | ${LGSHELL}
+echo "lgraph.open name:trivial path:mlgdb |> lgraph.stats" | ${LGSHELL} | sed -es/trivial/potato/g >potato1.log
 if [ $? -ne 0 ]; then
   echo "FAIL: it should open trivial"
+  exit 1
+fi
+
+echo "lgraph.rename name:trivial path:mlgdb dest:potato" | ${LGSHELL}
+echo "lgraph.open name:potato path:mlgdb |> lgraph.stats" | ${LGSHELL} >potato2.log
+if [ $? -ne 0 ]; then
+  echo "FAIL: it could not rename to potato"
+  exit 1
+fi
+$(/usr/bin/diff potato1.log potato2.log)
+if [ $? -ne 0 ]; then
+  echo "FAIL: the diff for potato should match"
   exit 1
 fi
 

@@ -327,18 +327,6 @@ Lg_type_id Graph_library::add_name(std::string_view name, std::string_view sourc
   return id;
 }
 
-std::string Graph_library::get_lgraph_filename(std::string_view path, std::string_view name, std::string_view ext) {
-  std::string f;
-
-  f.append(path);
-  f.append("/lgraph_");
-  f.append(name);
-  f.append("_");
-  f.append(ext);
-
-  return f;
-}
-
 bool Graph_library::rename_name(std::string_view orig, std::string_view dest) {
   auto it = name2id.find(orig);
   if (it == name2id.end()) {
