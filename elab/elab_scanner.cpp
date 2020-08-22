@@ -436,29 +436,29 @@ void Elab_scanner::lex_error(std::string_view text) {
   n_errors++;
   throw std::runtime_error(std::string(text));
 }
-void Elab_scanner::scan_error(std::string_view text) const {
+void Elab_scanner::scan_error_int(std::string_view text) const {
   scan_raw_msg("error", text, true);
   n_errors++;
   throw std::runtime_error(std::string(text));
 }
 
-void Elab_scanner::scan_warn(std::string_view text) const {
+void Elab_scanner::scan_warn_int(std::string_view text) const {
   scan_raw_msg("warning", text, true);
   n_warnings++;
   if (n_warnings > max_warnings)
     throw std::runtime_error("too many warnings");
 }
 
-void Elab_scanner::parser_info(std::string_view text) const { scan_raw_msg("info", text, true); }
+void Elab_scanner::parser_info_int(std::string_view text) const { scan_raw_msg("info", text, true); }
 
-void Elab_scanner::parser_error(std::string_view text) const {
+void Elab_scanner::parser_error_int(std::string_view text) const {
   scan_raw_msg("error", text, false);
   n_errors++;
   //if (n_errors > max_errors) exit(-3);
   throw std::runtime_error(std::string(text));
 }
 
-void Elab_scanner::parser_warn(std::string_view text) const {
+void Elab_scanner::parser_warn_int(std::string_view text) const {
   scan_raw_msg("warning", text, false);
   n_warnings++;
   if (max_warnings && n_warnings > max_warnings)
