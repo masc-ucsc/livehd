@@ -114,7 +114,6 @@ protected:
   static const Edge_raw *find_edge(const Edge_raw *bt, const Edge_raw *et, Index_ID ptr_nid, Port_ID inp_pod, Port_ID dst_pid);
 
   Index_ID get_self_idx() const;  // WARNING: it can point to overflow. Be careful!
-  Index_ID get_self_root_idx() const;
 
 public:
   friend struct Node_internal_Page;

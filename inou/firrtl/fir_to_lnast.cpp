@@ -243,8 +243,6 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id, const 
 
   auto clk  = lnast.add_string(ReturnExprString(lnast, clocke, parent_node, true));
   auto rst  = lnast.add_string(ReturnExprString(lnast, resete, parent_node, true));
-  //auto init = lnast.add_string(ReturnExprString(lnast, inite, parent_node, true));
-  auto init = "fixme";
 
   // Add register's name to the global list.
   register_names.insert(id.substr(1, id.length() - 1));  // Use substr to remove "#"
@@ -291,13 +289,23 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id, const 
   }
 
   // Specify __reset_pin
-  /*auto acc_name_r = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(id, ".__reset_pin"));
-  auto idx_asg_r = lnast.add_child(parent_node, Lnast_node::create_assign(""));
-  lnast.add_child(idx_asg_r, Lnast_node::create_ref(acc_name_r));
-  AttachExprStrToNode(lnast, rst, idx_asg_r);*/
+#if 0
+  auto acc_name_rp = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(id, ".__reset_pin"));
+  auto idx_asg_rp  = lnast.add_child(parent_node, Lnast_node::create_assign(""));
+  lnast.add_child(idx_asg_rp, Lnast_node::create_ref(acc_name_rp));
+  AttachExprStrToNode(lnast, rst, idx_asg_rp);
 
-  // Specify init.. (how to?)
-  // FIXME: Add this eventually...
+  // Specify init value
+  auto acc_name_r = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(id, ".__reset"));
+  auto idx_fdef   = lnast.add_child(parent_node, Lnast_node::create_func_def(""));
+  lnast.add_child(idx_fdef, Lnast_node::create_ref(acc_name_r));
+  lnast.add_child(idx_fdef, Lnast_node::create_const("true"));
+  auto idx_fstmts = lnast.add_child(idx_fdef, Lnast_node::create_stmts(""));
+  auto init = lnast.add_string(ReturnExprString(lnast, inite, idx_fstmts, true));
+  auto idx_asg_r  = lnast.add_child(idx_fstmts, Lnast_node::create_assign(""));
+  lnast.add_child(idx_asg_r, Lnast_node::create_ref("this"));
+  AttachExprStrToNode(lnast, init, idx_asg_r);
+#endif
 }
 
 // Set up any of the parameters related to a Memory block.

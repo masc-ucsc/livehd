@@ -15,14 +15,14 @@ class Attribute {
 
   static std::string_view get_base() {
     if constexpr (std::is_same<Base, Node>::value) {
-      return "lg_data_node";
+      return "_node_";
     } else if constexpr (std::is_same<Base, Node_pin>::value) {
-      return "lg_data_npin";
+      return "_npin_";
     }
     return "bogus";
   }
 
-  static std::string get_filename(Lg_type_id lgid) { return absl::StrCat(get_base(), std::to_string(lgid), Name); };
+  static std::string get_filename(Lg_type_id lgid) { return absl::StrCat("lg_", std::to_string(lgid), get_base(), Name); };
 
   static void setup_table(const LGraph *lg) {
     last_lg  = lg;
