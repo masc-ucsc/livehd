@@ -77,7 +77,7 @@ git_repository(
 new_git_repository(
     name = "fmt",
     build_file = "BUILD.fmt",
-    commit = "f19b1a521ee8b606dedcadfda69fd10ddf882753", # 7.0.1 June 23, 2020 f94b7364b9409f05207c3af3fa4666730e11a854", # 6.1.2.0 APril 13, 2020
+    commit = "cd4af11efc9c622896a3e4cb599fa28668ca3d05", # 7.0.3 August 20 f19b1a521ee8b606dedcadfda69fd10ddf882753", # 7.0.1 June 23, 2020
     remote = "https://github.com/fmtlib/fmt.git",
     #strip_prefix = "include",
 )

@@ -203,51 +203,36 @@ protected:
   std::string_view get_filename() const { I(memblock_fd != -1); return buffer_name; }
   bool is_parse_inline() const { return memblock_fd == -1; }
 
+  void parser_error_int(std::string_view text) const;
+  void parser_warn_int(std::string_view text) const;
+  void parser_info_int(std::string_view text) const;
+  void scan_error_int(std::string_view text) const;
+  void scan_warn_int(std::string_view text) const;
+
 public:
   Elab_scanner();
   virtual ~Elab_scanner();
 
-  void scan_error(std::string_view text) const;  // Not really const, but to allow to be used by const methods
-  void scan_warn(std::string_view text) const;
+  template <typename S, typename... Args>
+  void scan_error(const S& format, Args&&... args) const {
+    scan_error_int(fmt::format(format, args...));
+  }
+  template <typename S, typename... Args>
+  void scan_warn(const S& format, Args&&... args) const {
+    scan_warn_int(fmt::format(format, args...));
+  }
 
-  void parser_error(std::string_view text) const;
-  void parser_warn(std::string_view text) const;
-  void parser_info(std::string_view text) const;
-
-  template <typename... Args>
-  void scan_error(const char *format, const Args &... args) const {
-    fmt::format_args fargs = fmt::make_format_args(args...);
-    fmt::memory_buffer tmp;
-    fmt::vformat_to(tmp, format, fargs);
-    scan_error(std::string_view(tmp.data(), tmp.size()));
+  template <typename S, typename... Args>
+  void parser_error(const S& format, Args&&... args) const {
+    parser_error_int(fmt::format(format, args...));
   }
-  template <typename... Args>
-  void scan_warn(std::string_view format, const Args &... args) const {
-    fmt::format_args fargs = fmt::make_format_args(args...);
-    fmt::memory_buffer tmp;
-    fmt::vformat_to(tmp, format, fargs);
-    scan_warn(std::string_view(tmp.data(), tmp.size()));
+  template <typename S, typename... Args>
+  void parser_warn(const S& format, Args&&... args) const {
+    parser_warn_int(fmt::format(format, args...));
   }
-  template <typename... Args>
-  void parser_error(std::string_view format, const Args &... args) const {
-    fmt::format_args fargs = fmt::make_format_args(args...);
-    fmt::memory_buffer tmp;
-    fmt::vformat_to(tmp, format, fargs);
-    parser_error(std::string_view(tmp.data(), tmp.size()));
-  }
-  template <typename... Args>
-  void parser_warn(std::string_view format, const Args &... args) const {
-    fmt::format_args fargs = fmt::make_format_args(args...);
-    fmt::memory_buffer tmp;
-    fmt::vformat_to(tmp, format, fargs);
-    parser_warn(std::string_view(tmp.data(), tmp.size()));
-  }
-  template <typename... Args>
-  void parser_info(std::string_view format, const Args &... args) const {
-    fmt::format_args fargs = fmt::make_format_args(args...);
-    fmt::memory_buffer tmp;
-    fmt::vformat_to(tmp, format, fargs);
-    parser_info(std::string_view(tmp.data(), tmp.size()));
+  template <typename S, typename... Args>
+  void parser_info(const S& format, Args&&... args) const {
+    parser_info_int(fmt::format(format, args...));
   }
 
   bool scan_next();
