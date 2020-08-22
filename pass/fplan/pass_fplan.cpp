@@ -14,7 +14,7 @@ void setup_pass_fplan() { Pass_fplan::setup(); }
 void Pass_fplan::setup() {
   // register the method with lgraph in order to use it
   auto m = Eprp_method("pass.fplan.makefp", "generate a floorplan from an LGraph", &Pass_fplan::pass);
-  
+
   register_pass(m);
 }
 
@@ -24,45 +24,60 @@ void Pass_fplan::make_graph(Eprp_var &var) {
 
   for (auto lg : var.lgs) {
     fmt::print("LGraph: {}\n", lg->get_name());
-    for (auto cn : lg->get_down_nodes_map()) {
-      
-      // root node is not printed
-      fmt::print("name: {}\n nid: {}\n hidx: {}\n", cn.first.get_node(lg).get_name(), cn.first.get_nid().value, cn.first.get_node(lg).get_hidx().get_hash());
-
+    lg->each_sub_fast_direct([&](Node& n, Lg_type_id id) -> bool {
+      fmt::print("  node: {}, lgid: {}\n", n.get_name(), id);
+      return true;
+    });
+    
+    auto self_node = lg->get_self_sub_node();
+    if (self_node.get_lgid() == 1) {
+      fmt::print("root node: {}, lgid: {}\n", self_node.get_name(), self_node.get_lgid());
     }
   }
 
-  // create nodes without any connections between them, and fill in as much information as we can.
   for (auto lg : var.lgs) {
-    for (auto cn : lg->get_down_nodes_map()) {
-      auto n = cn.first.get_node(lg);
-      bool found = false;
+    bool found = false;
+    lg->each_sub_fast_direct([&](Node& n, Lg_type_id id) -> bool {
       for (auto v : gi.al.verts()) {
-        if (gi.ids[v] == cn.first.get_nid()) {
+        if (gi.ids(v) == id) {
           found = true;
-          std::cout << "Already found node " << n.get_name() << " with nid " << n.get_compact().get_nid() << std::endl;
+          std::cout << "Already found node " << n.get_name() << std::endl;
           break;
         }
       }
 
       // node does not already exist, so make a new one
       if (!found) {
-        std::cout << "Making new node " << n.get_name() << " with nid " << n.get_compact().get_nid() << std::endl;
+        std::cout << "Making new node " << n.get_name() << std::endl;
         auto new_v = gi.al.insert_vert();
-        gi.ids[new_v] = cn.first.get_nid();
+        gi.ids[new_v] = id;
         gi.debug_names[new_v] = n.get_name();
         // TODO: find an actual area of a node
         gi.areas[new_v] = n.get_num_outputs() + n.get_num_inputs();
         gi.sets[0].insert(new_v);  // all verts start in set zero, and get dividied up during hierarchy discovery
       }
-    }    
+      return true;
+    });
+
+    auto self_node = lg->get_self_sub_node();
+    if (self_node.get_lgid() == 1) {
+      std::cout << "Making new node " << self_node.get_name() << std::endl;
+      auto new_v = gi.al.insert_vert();
+      gi.ids[new_v] = self_node.get_lgid();
+      gi.debug_names[new_v] = self_node.get_name();
+      // TODO: find an actual area of self node
+      gi.areas[new_v] = -1.0;
+      gi.sets[0].insert(new_v);  // all verts start in set zero, and get dividied up during hierarchy discovery
+    }
   }
+
+  // create nodes without any connections between them, and fill in as much information as we can.
 
   auto existing_edges = gi.al.edge_set();
 
   std::cout << "Running node connection pass..." << std::endl;
 
-  auto find_name = [&](Index_ID id) -> vertex_t {
+  auto find_name = [&](const Lg_type_id id) -> vertex_t {
     for (auto v : gi.al.verts()) {
       if (gi.ids(v) == id) {
         return v;
@@ -75,30 +90,29 @@ void Pass_fplan::make_graph(Eprp_var &var) {
   // wire up nodes with connections between them
   // obviously, only nodes that are in the same level of hierarchy can be connected to each other.
   for (auto lg : var.lgs) {
-    for (auto cn : lg->get_down_nodes_map()) {
-
-      auto n = cn.first.get_node(lg);
-
+    lg->each_sub_fast_direct([&](Node& n, Lg_type_id id) -> bool {
       for (auto p : n.inp_connected_pins()) {
         for (auto other_p : p.inp_driver()) {
           
-          auto v1 = find_name(n.get_compact().get_nid());
-          auto v2 = find_name(other_p.get_node().get_compact().get_nid());
+          auto v1 = find_name(id);
+          auto v2 = find_name(other_p.get_node().get_class_lgraph()->get_lgid());
+
+          fmt::print("found nodes with lgids {} and {}.\n", id, other_p.get_node().get_class_lgraph()->get_lgid());
               
           auto new_e = gi.al.insert_edge(v1, v2);
-          gi.weights[new_e] = other_p.get_bits(); // TODO: only driver pins can call get_bits()?
+          gi.weights[new_e] = other_p.get_bits();
           existing_edges.insert(new_e);
         }
 
       }
-    }
+      return true;
+    });
   }
   
   using namespace graph::attributes;
-  std::cout << gi.al.dot_format("weight"_of_edge = gi.weights, "name"_of_vert = gi.debug_names) << std::endl;
+  std::cout << gi.al.dot_format("weight"_of_edge = gi.weights, "name"_of_vert = gi.debug_names, "area"_of_vert = gi.areas, "id"_of_vert = gi.ids) << std::endl;
 
   // if the graph is not fully connected, ker-lin fails to work.
-  // TODO: eventually replace this with an adjacency matrix, since it's probably faster.
   for (const auto& v : gi.al.verts()) {
     for (const auto& other_v : gi.al.verts()) {
       bool found = false;
