@@ -78,13 +78,17 @@ do
   fi
 done
 
+
+echo "inou.yosys.tolg files:inou/yosys/tests/trivial.v path:mlgdb" | ${LGSHELL}
+echo "inou.yosys.tolg files:inou/yosys/tests/trivial.v path:mlgdb |> pass.cprop" | ${LGSHELL}
 echo "lgraph.open name:trivial path:mlgdb |> lgraph.stats" | ${LGSHELL} | sed -es/trivial/potato/g >potato1.log
 if [ $? -ne 0 ]; then
   echo "FAIL: it should open trivial"
   exit 1
 fi
 
-echo "lgraph.rename name:trivial path:mlgdb dest:potato" | ${LGSHELL}
+echo "lgraph.copy   name:trivial path:mlgdb dest:temp_lg" | ${LGSHELL}
+echo "lgraph.rename name:temp_lg path:mlgdb dest:potato" | ${LGSHELL}
 echo "lgraph.open name:potato path:mlgdb |> lgraph.stats" | ${LGSHELL} >potato2.log
 if [ $? -ne 0 ]; then
   echo "FAIL: it could not rename to potato"

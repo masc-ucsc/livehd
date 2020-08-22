@@ -524,6 +524,7 @@ Lg_type_id Graph_library::copy_lgraph(std::string_view name, std::string_view ne
   Lg_type_id id_new = reset_id(new_name, attributes[id_orig].source);
 
   attributes[id_new] = attributes[id_orig];
+  sub_nodes[id_new].copy_from(new_name, id_new, sub_nodes[id_orig]);
 
   DIR *dr = opendir(path.c_str());
   if (dr == NULL) {
@@ -532,8 +533,9 @@ Lg_type_id Graph_library::copy_lgraph(std::string_view name, std::string_view ne
   }
 
   struct dirent *de;  // Pointer for directory entry
-  std::string    match   = absl::StrCat("lgraph_", std::to_string(id_orig));
-  std::string    rematch = absl::StrCat("lgraph_", std::to_string(id_new));
+  std::string    match   = absl::StrCat("lg_", std::to_string(id_orig));
+  std::string    rematch = absl::StrCat("lg_", std::to_string(id_new));
+
   while ((de = readdir(dr)) != NULL) {
     std::string chop_name(de->d_name, match.size());
     if (chop_name == match) {
@@ -542,8 +544,6 @@ Lg_type_id Graph_library::copy_lgraph(std::string_view name, std::string_view ne
       std::string_view extension = dname.substr(match.size());
 
       auto new_file = absl::StrCat(path, "/", rematch, extension);
-
-      fmt::print("copying... {} to {}\n", file, new_file);
 
       int source = open(file.c_str(), O_RDONLY, 0);
       int dest   = open(new_file.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -565,6 +565,8 @@ Lg_type_id Graph_library::copy_lgraph(std::string_view name, std::string_view ne
 
   closedir(dr);
 
+
+
   clean_library();
 
   return id_new;
@@ -583,8 +585,7 @@ Lg_type_id Graph_library::register_lgraph(std::string_view name, std::string_vie
 
   global_name2lgraph[path][name] = lg;
 
-  I(attributes[id].lg == nullptr);
-  attributes[id].lg = lg;
+  attributes[id].lg = lg; // It could be already set if there was a copy
 
 #ifndef NDEBUG
   const auto &it = name2id.find(name);
