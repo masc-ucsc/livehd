@@ -24,6 +24,11 @@ filegroup(
     srcs = ["tests/synth1.eprp"],
     )
 
+filegroup(
+    name = "verilog_test",
+    srcs = ["tests/hierarchy.v"],
+    )
+
 cc_test(
     name = "ast_test",
     srcs = ["tests/ast_test.cpp"],
@@ -57,9 +62,9 @@ cc_test(
 cc_test(
     name = "elab_verilog_test",
     srcs = ["tests/elab_verilog_test.cpp"],
-    args = ["$(location :elab_scripts)"],
+    args = ["$(location :verilog_test)"],
     data = [
-        ":elab_scripts",
+        ":verilog_test",
         ],
     deps = [
         ":elab",

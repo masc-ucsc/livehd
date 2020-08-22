@@ -85,6 +85,7 @@ Hierarchy_index Hierarchy_tree::go_down(const Node &node) const {
   return child;
 }
 
+/* LCOV_EXCL_START */
 void Hierarchy_tree::dump() const {
   for (const auto &index : depth_preorder()) {
     std::string indent(index.level, ' ');
@@ -92,3 +93,4 @@ void Hierarchy_tree::dump() const {
     fmt::print("{} level:{} pos:{} lgid:{} nid:{}\n", indent, index.level, index.pos, index_data.lgid, index_data.up_nid);
   }
 }
+/* LCOV_EXCL_STOP */

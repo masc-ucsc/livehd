@@ -88,6 +88,7 @@ public:
   }
   // Sub_node(const Sub_node &s) = delete;
   Sub_node &operator=(const Sub_node &) = delete;
+  void copy_from(std::string_view new_name, Lg_type_id new_lgid, const Sub_node &sub);
 
   void to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer> &writer) const;
   void from_json(const rapidjson::Value &entry);

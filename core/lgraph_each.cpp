@@ -15,14 +15,12 @@ void LGraph::each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)
   auto out = Node(this, hidx, Node::Hardcoded_output_nid);
   for (auto &o_pin : out.out_setup_pins()) {
     auto pos = get_self_sub_node().get_graph_pos_from_instance_pid(o_pin.get_pid());
-    fmt::print("1.name:{} pos:{} pid:{}\n",o_pin.get_name(), pos, o_pin.get_pid());
     pin_pair.emplace_back(std::make_pair(o_pin, pos));
   }
 
   auto inp = Node(this, hidx, Node::Hardcoded_input_nid);
   for (auto &i_pin : inp.out_setup_pins()) {
     auto pos = get_self_sub_node().get_graph_pos_from_instance_pid(i_pin.get_pid());
-    fmt::print("2.name:{} pos:{} pid:{}\n",i_pin.get_name(), pos, i_pin.get_pid());
     pin_pair.emplace_back(std::make_pair(i_pin, pos));
   }
 
@@ -38,42 +36,37 @@ void LGraph::each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)
   });
 
   for (auto &pp : pin_pair) {
-    fmt::print("3.name:{} pos:{} pid:{}\n", pp.first.get_name(), pp.second, pp.first.get_pid());
     f1(pp.first, pp.second);
   }
 }
 
 void LGraph::each_pin(const Node_pin &dpin, std::function<bool(Index_ID idx)> f1) const {
 
-  Index_ID root_idx2 = dpin.get_root_idx();
-  Index_ID idx2 = root_idx2;
+  Index_ID first_idx2 = dpin.get_idx();
+  Index_ID idx2 = first_idx2;
 
   bool should_not_find = false;
 
   while (true) {
-    if (node_internal[idx2].get_dst_pid() == dpin.get_pid()) {
-      I(!should_not_find);
-      bool cont = f1(idx2);
-      if (!cont)
-        return;
-    }
+    I(!should_not_find);
+    bool cont = f1(idx2);
+    if (!cont)
+      return;
+
+    do{
+      if (node_internal[idx2].is_last_state()) {
 #ifndef NDEBUG
-    if (node_internal[idx2].is_last_state()) {
-      idx2 = dpin.get_node().get_nid();
-      should_not_find = true; // loop and try the others (should not have it before root)
-    } else {
-      idx2 = node_internal[idx2].get_next();
-    }
-    if (idx2 == root_idx2) {  // already visited
-      return;
-    }
+        idx2 = dpin.get_node().get_nid();
+        should_not_find = true; // loop and try the others (should not have it before root)
 #else
-    if (node_internal[idx2].is_last_state()) {
-      return;
-    }
-    idx2 = node_internal[idx2].get_next();
-    I(idx2 != root_idx2);
+        idx2 = node_internal[idx2].get_nid();
 #endif
+      }else{
+        idx2 = node_internal[idx2].get_next();
+      }
+      if (idx2==first_idx2)
+        return;
+    } while (node_internal[idx2].get_dst_pid() != dpin.get_pid());
   }
 }
 
@@ -98,45 +91,6 @@ void LGraph::each_graph_output(std::function<void(Node_pin &pin)> f1, bool hiera
   auto node = Node(this, hidx, Node::Hardcoded_output_nid);
   for (auto &pin : node.out_setup_pins()) {
     f1(pin);
-  }
-}
-
-void LGraph::each_top_node_fast(std::function<void(Node &node)> f1, bool hierarchical) {
-  auto hidx = hierarchical? Hierarchy_tree::root_index() : Hierarchy_tree::invalid_index();
-
-  for (auto &ni : node_internal) {
-    if (!ni.is_node_state())
-      continue;
-    if (!ni.is_master_root())
-      continue;
-    if (ni.is_graph_io())
-      continue;
-
-    Node node(this, hidx, ni.get_nid());
-    f1(node);
-  }
-}
-
-void LGraph::each_top_output_edge_fast(std::function<void(XEdge &edge)> f1, bool hierarchical) {
-  auto hidx = hierarchical? Hierarchy_tree::root_index() : Hierarchy_tree::invalid_index();
-
-  for (const auto &ni : node_internal) {
-    if (!ni.is_node_state())
-      continue;
-    if (!ni.is_root())
-      continue;
-    if (!ni.has_local_outputs())
-      continue;
-
-    auto dpin = Node_pin(this, this, hidx, ni.get_nid(), ni.get_dst_pid(), false);
-
-    const Edge_raw *edge_raw = ni.get_output_begin();
-    do {
-      XEdge edge(dpin, Node_pin(this, this, hidx, edge_raw->get_idx(), edge_raw->get_inp_pid(), true));
-
-      f1(edge);
-      edge_raw += edge_raw->next_node_inc();
-    } while (edge_raw != ni.get_output_end());
   }
 }
 

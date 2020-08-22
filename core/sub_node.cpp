@@ -2,6 +2,15 @@
 
 #include "sub_node.hpp"
 
+void Sub_node::copy_from(std::string_view new_name, Lg_type_id new_lgid, const Sub_node &sub) {
+  name = new_name;
+  lgid = new_lgid;
+  io_pins = sub.io_pins;
+  name2id = sub.name2id;
+  graph_pos2instance_pid = sub.graph_pos2instance_pid;
+
+}
+
 void Sub_node::to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer> &writer) const {
   writer.Key("lgid");
   writer.Uint64(lgid);
@@ -99,6 +108,7 @@ void Sub_node::from_json(const rapidjson::Value &entry) {
   }
 }
 
+/* LCOV_EXCL_START */
 void Sub_node::dump() const {
   fmt::print("lgid:{} name:{} #iopins:{}\n", lgid, name, io_pins.size());
 
@@ -112,6 +122,7 @@ void Sub_node::dump() const {
     pos++;
   }
 }
+/* LCOV_EXCL_STOP */
 
 std::vector<Sub_node::IO_pin> Sub_node::get_sorted_io_pins() const {
 
