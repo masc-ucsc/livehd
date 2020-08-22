@@ -63,14 +63,9 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
   vertex_t temp_vertex = g.null_vert();
   if (graph_size % 2 == 1) {
     temp_vertex             = g.insert_vert();
-    
-    uint64_t max_id = 0;
-    for (auto v : g.verts()) {
-      if (info.ids(v) > max_id) {
-        max_id = info.ids(v);
-      }
-    }
-    info.ids[temp_vertex] = max_id + 1; // choose an id that hasn't been used before
+
+
+    //info.ids[temp_vertex] = max_id + 1; // choose an id that hasn't been used before
     info.areas[temp_vertex] = 0.0f;
 
     for (auto other_v : g.verts()) {
