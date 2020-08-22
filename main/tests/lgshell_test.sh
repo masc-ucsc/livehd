@@ -49,7 +49,7 @@ do
     exit 3
   fi
 
-  echo "inou.yosys.tolg files:${file} path:mlgdb" | ${LGSHELL}
+  echo "inou.yosys.tolg files:${file} path:mlgdb |> pass.bitwidth hier:true" | ${LGSHELL}
 
   if [ $? -eq 0 ]; then
     echo "Successfully created graph from ${input}"
