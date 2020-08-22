@@ -89,6 +89,6 @@ void Hierarchy_tree::dump() const {
   for (const auto &index : depth_preorder()) {
     std::string indent(index.level, ' ');
     const auto &index_data = get_data(index);
-    fmt::print("{} l:{} p:{} lgid:{} nid:{}\n", indent, index.level, index.pos, index_data.lgid, index_data.up_nid);
+    fmt::print("{} level:{} pos:{} lgid:{} nid:{}\n", indent, index.level, index.pos, index_data.lgid, index_data.up_nid);
   }
 }
