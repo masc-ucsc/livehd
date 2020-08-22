@@ -50,20 +50,6 @@ Index_ID Edge_raw::get_self_idx() const {
   return static_cast<Index_ID>(idx);
 }
 
-Index_ID Edge_raw::get_self_root_idx() const {
-  const auto &root_page = Node_internal_Page::get(this);
-  const auto &root_self = Node_internal::get(this);
-
-  SIndex_ID delta = &root_self - (const Node_internal *)&root_page;
-  I(delta < 4096 / sizeof(Node_internal) && delta > 0);
-
-  SIndex_ID self_idx = delta + root_page.get_idx();
-  if (root_self.is_root())
-    return static_cast<Index_ID>(self_idx);
-
-  return root_self.get_nid();
-}
-
 Index_ID Node_internal::get_self_idx() const {
   const auto &root_page = Node_internal_Page::get(this);
 
@@ -210,27 +196,6 @@ void Node_internal::try_recycle() {
   // TODO: recycle the node no matter what
 
   SIndex_ID self_idx = get_self_idx();
-
-#if 0
-  if (is_root()) return;  // Keep node for attributes
-
-  Node_internal *root_ptr = (Node_internal *)&get_root();
-  Index_ID       root_idx = root_ptr->get_nid();
-
-  SIndex_ID prev_idx = root_idx;
-  I(prev_idx != self_idx);  // because it is not a root_ptr
-
-  while (root_ptr[prev_idx - root_idx].get_next() != self_idx) {
-    I(root_ptr[prev_idx - root_idx].is_next_state());
-    prev_idx = root_ptr[prev_idx - root_idx].get_next();
-  }
-
-  if (is_next_state()) {
-    root_ptr[prev_idx - root_idx].set_next_state(get_next());
-  } else {
-    root_ptr[prev_idx - root_idx].set_last_state();
-  }
-#endif
 
   set_free_state();
 

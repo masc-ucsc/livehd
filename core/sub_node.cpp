@@ -108,6 +108,7 @@ void Sub_node::from_json(const rapidjson::Value &entry) {
   }
 }
 
+/* LCOV_EXCL_START */
 void Sub_node::dump() const {
   fmt::print("lgid:{} name:{} #iopins:{}\n", lgid, name, io_pins.size());
 
@@ -121,6 +122,7 @@ void Sub_node::dump() const {
     pos++;
   }
 }
+/* LCOV_EXCL_STOP */
 
 std::vector<Sub_node::IO_pin> Sub_node::get_sorted_io_pins() const {
 
