@@ -70,9 +70,13 @@ TEST_F(VTest1, interface) {
   EXPECT_NE(access("tdelta/parse/chunk_inline/test1_modb.v", R_OK), F_OK);
 }
 
-TEST_F(VTest1, noaccess) {
+void test_throw() {
   std::string test2_verilog = "";
 
   Chunkify_verilog chunker("/proc");
-  ASSERT_THROW(chunker.parse_inline(test2_verilog.c_str()),std::runtime_error);
+  chunker.parse_inline(test2_verilog.c_str());
+}
+
+TEST_F(VTest1, noaccess) {
+  ASSERT_THROW(test_throw() ,std::runtime_error);
 }

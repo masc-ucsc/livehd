@@ -78,7 +78,9 @@ public:
 
     constexpr bool is_invalid() const { return nid == 0; }
 
-    constexpr bool operator==(const Compact &other) const { return hidx == other.hidx && nid == other.nid; }
+    constexpr bool operator==(const Compact &other) const {
+      return nid == other.nid && (hidx == other.hidx || hidx.is_invalid() || other.hidx.is_invalid());
+    }
     constexpr bool operator!=(const Compact &other) const { return !(*this == other); }
 
     template <typename H>
@@ -180,8 +182,8 @@ public:
 
   bool has_inputs() const;
   bool has_outputs() const;
-  int  get_num_inputs() const;
-  int  get_num_outputs() const;
+  int  get_num_inp_edges() const;
+  int  get_num_out_edges() const;
   int  get_num_edges() const;
 
   constexpr bool is_invalid() const { return nid == 0; }
@@ -191,14 +193,12 @@ public:
   constexpr bool operator==(const Node &other) const {
     GI(nid == 0, hidx.is_invalid());
     GI(other.nid == 0, other.hidx.is_invalid());
-    return top_g == other.top_g && hidx == other.hidx && nid == other.nid;
-  }
-  constexpr bool operator!=(const Node &other) const {
-    GI(nid == 0, hidx.is_invalid());
-    GI(other.nid == 0, other.hidx.is_invalid());
     GI(nid && other.nid, top_g == other.top_g);
-    return (nid != other.nid || hidx != other.hidx);
-  };
+
+    return nid == other.nid
+           && (hidx == other.hidx || hidx.is_invalid() || other.hidx.is_invalid());
+  }
+  constexpr bool operator!=(const Node &other) const { return !(*this == other); }
 
   void   set_type_lut(const Lconst &lutid);
   Lconst get_type_lut() const;

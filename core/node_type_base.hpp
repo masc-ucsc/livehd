@@ -219,23 +219,6 @@ public:
     return outputs[idx];
   }
 
-  bool is_input_signed(Port_ID pid) const {
-    if (inputs_sign.size() < pid)
-      return inputs_sign[pid];
-    return false;
-  }
-
-  size_t get_num_inputs() const {
-    if (inputs.size())
-      return inputs.size();
-    return (1 << Port_bits) - 1;
-  }
-  size_t get_num_outputs() const {
-    if (outputs.size())
-      return outputs.size();
-    return (1 << Port_bits) - 1;
-  }
-
   bool has_output(Port_ID pid) const {
     return outputs.size() > pid || outputs.empty();  // no default outputs subgraph
   }

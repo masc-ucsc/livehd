@@ -228,7 +228,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending() {
 
           auto it = pending_loop_detect.find(node.get_compact());
           if (it == pending_loop_detect.end()) {
-            pending_loop_detect[node.get_compact()] = node.get_num_outputs();
+            pending_loop_detect[node.get_compact()] = node.get_num_out_edges();
           } else {
             it->second--;
             if (it->second <= 0) {  // Loop

@@ -76,7 +76,11 @@ public:
 
     constexpr bool is_invalid() const { return idx == 0; }
 
-    constexpr bool operator==(const Compact &other) const { return hidx == other.hidx && idx == other.idx && sink == other.sink; }
+    constexpr bool operator==(const Compact &other) const {
+      return idx == other.idx
+             && sink == other.sink
+             && (hidx == other.hidx || hidx.is_invalid() || other.hidx.is_invalid());
+    }
     constexpr bool operator!=(const Compact &other) const { return !(*this == other); }
 
     template <typename H>
@@ -116,7 +120,10 @@ public:
 
     constexpr bool is_invalid() const { return idx == 0; }
 
-    constexpr bool operator==(const Compact_driver &other) const { return hidx == other.hidx && idx == other.idx; }
+    constexpr bool operator==(const Compact_driver &other) const { 
+      return idx == other.idx
+             && (hidx == other.hidx || hidx.is_invalid() || other.hidx.is_invalid());
+    }
     constexpr bool operator!=(const Compact_driver &other) const { return !(*this == other); }
 
     template <typename H>
@@ -240,8 +247,17 @@ public:
   bool is_graph_input() const;
   bool is_graph_output() const;
 
-  Node_pin get_sink_from_output() const;
-  Node_pin get_driver_from_output() const;
+  Node_pin get_driver() const;
+  Node_pin get_sink() const;
+  Node_pin get_sink_from_output() const {
+    I(is_graph_output());
+    return get_sink();
+  }
+
+  Node_pin get_driver_from_output() const {
+    I(is_graph_output());
+    return get_driver();
+  }
 
   bool is_sink() const {
     I(idx);
@@ -286,10 +302,15 @@ public:
   constexpr bool is_hierarchical() const { return !hidx.is_invalid(); }
   Node_pin       get_non_hierarchical() const;
 
-  constexpr bool operator==(const Node_pin &other) const {
-    return (top_g == other.top_g) && (idx == other.idx) && (pid == other.pid) && (sink == other.sink) && (hidx == other.hidx);
+  bool operator==(const Node_pin &other) const {
+    GI(idx == 0, hidx.is_invalid());
+    GI(other.idx == 0, other.hidx.is_invalid());
+    GI(idx && other.idx, top_g == other.top_g);
+    return get_root_idx() == other.get_root_idx()
+           && sink == other.sink
+           && (hidx == other.hidx || hidx.is_invalid() || other.hidx.is_invalid());
   }
-  constexpr bool operator!=(const Node_pin &other) const { return !(*this == other); }
+  bool operator!=(const Node_pin &other) const { return !(*this == other); }
 
   void nuke();  // Delete all the edges, and attributes of this node_pin
 
