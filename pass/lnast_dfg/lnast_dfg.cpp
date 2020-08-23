@@ -137,7 +137,7 @@ void Lnast_dfg::process_ast_phi_op(LGraph *dfg, const Lnast_nid &lnidx_phi) {
     auto pos = reg_name.find_last_of('_');
     auto reg_qpin_name = lhs_name.substr(0,pos);
 
-    I(name2dpin[reg_qpin_name] != Node_pin());
+    I(name2dpin.count(reg_qpin_name)!=0);
     auto reg_qpin = name2dpin[reg_qpin_name];
     true_dpin = reg_qpin;
   } else {
@@ -149,7 +149,7 @@ void Lnast_dfg::process_ast_phi_op(LGraph *dfg, const Lnast_nid &lnidx_phi) {
     auto reg_name = c2_name.substr();
     auto pos = reg_name.find_last_of('_');
     auto reg_qpin_name = lhs_name.substr(0,pos);
-    I(name2dpin[reg_qpin_name] != Node_pin());
+    I(name2dpin.count(reg_qpin_name)!=0);
     auto reg_qpin = name2dpin[reg_qpin_name];
     false_dpin = reg_qpin;
   } else {
@@ -165,7 +165,7 @@ void Lnast_dfg::process_ast_phi_op(LGraph *dfg, const Lnast_nid &lnidx_phi) {
     // (1) find the corresponding #reg and its qpin, wname = #reg
     auto pos = lhs_name.find_last_of('_');
     auto reg_qpin_name = lhs_name.substr(0,pos);
-    I(name2dpin[reg_qpin_name] != Node_pin());
+    I(name2dpin.count(reg_qpin_name));
     auto reg_qpin = name2dpin[reg_qpin_name];
 
     // (2) remove the previous D-pin edge from the #reg
@@ -808,7 +808,7 @@ Node_pin Lnast_dfg::setup_node_assign_and_lhs(LGraph *dfg, const Lnast_nid &lnid
       setup_dpin_ssa(name2dpin[lhs_name], lhs_vname, lnast->get_subs(lhs));
 
       // (2) find the corresponding #reg by its qpin_name, #reg
-      I(name2dpin[lhs_vname] != Node_pin());
+      I(name2dpin.count(lhs_vname));
       auto reg_qpin = name2dpin[lhs_vname];
 
       // (3) remove the previous D-pin edge from the #reg
