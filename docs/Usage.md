@@ -64,11 +64,9 @@ Below are some sample usages of the LiveHD shell (lgshell).  A bash prompt is in
 
 ### General concepts
 
-TODO: clean this up
- - In lgshell, pipes (`|>`) are used to move data between LiveHD passes.
- - When Verilog files are imported with `inou.yosys.tolg`, the LGraph(s) are stored in the lgdb directory.
-  - This directory (and thus the LGraphs) persist across shells
- - LiveHD only accepts synthesizable Verilog/SystemVerilog
+When Verilog file(s) are imported into lgshell through the `inou.yosys.tolg` command (see below for examples), the Verilog modules get converted to an internal representation and are stored in `livehd/lgdb`.  If a problem occurs while importing Verilog files (due to a syntax error, use of un-synthesizable Verilog, or something else), the corresponding error from Yosys will be printed.  Once a hierarchy has been created, other lgshell commands can read, modify, or export this hierarchy freely.
+
+The command `lgraph.match` can be used to specify a (sub)hierarchy to operate over, which can then be moved from pass to pass using the pipe (`|>`) operator.
 
 ### Starting and exiting the shell
 
@@ -76,11 +74,11 @@ TODO: clean this up
 $ ./bazel-bin/main/lgshell
 livehd> help
   ...
+livehd> help pass.sample
 livehd> exit
 ```
 
-### Reading and writing verilog files with of LiveHD
-
+### Reading and writing Verilog files with of LiveHD
 - To read a single-module Verilog file with Yosys and create an LGraph:
   ```
   $ ./bazel-bin/main/lgshell
@@ -101,7 +99,6 @@ livehd> exit
   livehd> inou.yosys.tolg files:./inou/yosys/tests/trivial.v
   livehd> lgraph.match |> lgraph.stats
   ```
-
 - To dump an LGraph (and submodules) to Verilog:
   ```
   $ ./bazel-bin/main/lgshell
