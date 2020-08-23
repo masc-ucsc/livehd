@@ -3,20 +3,24 @@
 mkdir -p cov
 rm -f ./cov/coverage.*
 
+# disable checking for results (no need for coverage)
+export NOCHECK=1
 # -k keep going, --experimental_cc_coverage for gcc newer patches
-bazel coverage -k --experimental_cc_coverage  //...
+# bazel coverage -k --experimental_cc_coverage  //...
+bazel test --sandbox_debug --collect_code_coverage //...
 
-for a in `bazel query "tests(//...)" 2>/dev/null | grep ^\/ | sed -e 's/^\//.\/bazel-bin/g' | sed -e 's/:/\//g'`
-do
-  if [[ $a =~ "long" ]]; then
-    echo "Not using ${a} for coverage"
-  else
-    echo "coverage for ${a}"
-    ${a}
-  fi
-done
+#for a in `bazel query "tests(//...)" 2>/dev/null | grep ^\/ | sed -e 's/^\//.\/bazel-bin/g' | sed -e 's/:/\//g'`
+#do
+  #if [[ $a =~ "long" ]]; then
+    #echo "Not using ${a} for coverage"
+  #else
+    #echo "coverage for ${a}"
+    #${a}
+  #fi
+#done
 
 ./scripts/gencoveralls.sh
+lcov --summary ./cov/coverage.info
 
 echo "rtp"
 if [ -s cov/coverage.info ]; then
