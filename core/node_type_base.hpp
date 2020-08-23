@@ -99,7 +99,7 @@ public:
 
   static constexpr Port_ID        get_pid(Node_Type_Op op, frozen::string str) { return driver_pidmap[op].at(str); }
   static constexpr frozen::string get_name(Node_Type_Op op, Port_ID pid) {
-    for (const auto e : driver_pidmap[op]) {
+    for (const auto &e : driver_pidmap[op]) {
       if (e.second == pid)
         return e.first;
     }

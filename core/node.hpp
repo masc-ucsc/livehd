@@ -64,13 +64,15 @@ public:
 
     Compact(const Hierarchy_index &_hidx, Index_ID _nid) : hidx(_hidx), nid(_nid) { I(nid); };
     Compact() : nid(0){};
-    Compact &operator=(const Compact &obj) {
-      I(this != &obj);
+#if 0
+    constexpr Compact &operator=(const Compact &obj) {
+      assert(this != &obj);
       hidx = obj.hidx;
       nid  = obj.nid;
 
       return *this;
     }
+#endif
 
     Index_ID get_nid() const { return nid; }  // Mostly for debugging or to know order
 
@@ -110,12 +112,14 @@ public:
     constexpr Compact_class() : nid(0){};
 
     Compact_class(const Index_ID &_nid) : nid(_nid) { I(nid); };
-    Compact_class &operator=(const Compact_class &obj) {
-      I(this != &obj);
+#if 0
+    constexpr Compact_class &operator=(const Compact_class &obj) {
+      assert(this != &obj);
       nid = obj.nid;
 
       return *this;
     }
+#endif
 
     Node get_node(LGraph *lg) const noexcept { return Node(lg, *this); }
 

@@ -156,6 +156,9 @@ private:
   struct Translate_item {
     Translate_item() : tok(Token_id_nop), try_merge(false) {}
     Translate_item(Token_id t, bool tm = false) : tok(t), try_merge(tm) {}
+    Translate_item(const Translate_item &t) : tok(t.tok), try_merge(t.try_merge) {}
+    Translate_item(const Token_id &other_tok) : tok(other_tok), try_merge(false) {}
+#if 1
     Translate_item &operator=(const Translate_item &other) {
       *const_cast<Token_id *>(&tok)   = other.tok;
       *const_cast<bool *>(&try_merge) = other.try_merge;
@@ -166,6 +169,7 @@ private:
       *const_cast<bool *>(&try_merge) = false;
       return *this;
     }
+#endif
     const Token_id tok;
     const bool     try_merge;
   };

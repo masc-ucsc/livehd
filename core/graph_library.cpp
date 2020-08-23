@@ -112,7 +112,7 @@ void Graph_library::clean_library() {
 
   writer.Key("liberty");
   writer.StartArray();
-  for (const auto lib : liberty_list) {
+  for (const auto &lib : liberty_list) {
     writer.StartObject();
 
     writer.Key("file");
@@ -124,7 +124,7 @@ void Graph_library::clean_library() {
 
   writer.Key("sdc");
   writer.StartArray();
-  for (const auto lib : sdc_list) {
+  for (const auto &lib : sdc_list) {
     writer.StartObject();
 
     writer.Key("file");
@@ -136,7 +136,7 @@ void Graph_library::clean_library() {
 
   writer.Key("spef");
   writer.StartArray();
-  for (const auto lib : spef_list) {
+  for (const auto &lib : spef_list) {
     writer.StartObject();
 
     writer.Key("file");
@@ -174,7 +174,11 @@ Graph_library *Graph_library::instance(std::string_view path) {
   char  full_path_char[PATH_MAX + 1];
   char *ptr = realpath(spath.c_str(), full_path_char);
   if (ptr == nullptr) {
-    mkdir(spath.c_str(), 0755);  // At least make sure directory exists for future
+    int ok = mkdir(spath.c_str(), 0755);  // At least make sure directory exists for future
+    if (ok<0) { // no access
+      LGraph::error("could not open lgdb:{} path\n", spath);
+      return nullptr;
+    }
     ptr = realpath(spath.c_str(), full_path_char);
     I(ptr);
   }
@@ -621,7 +625,7 @@ void Graph_library::unregister(std::string_view name, Lg_type_id lgid, LGraph *l
 }
 
 void Graph_library::each_lgraph(std::function<void(Lg_type_id lgid, std::string_view name)> f1) const {
-  for (const auto [name, id] : name2id) {
+  for (const auto &[name, id] : name2id) {
     f1(id, name);
   }
 }
@@ -630,7 +634,7 @@ void Graph_library::each_lgraph(std::string_view match, std::function<void(Lg_ty
   const std::string string_match(match);  // NOTE: regex does not support string_view, c++20 may fix this missing feature
   const std::regex  txt_regex(string_match);
 
-  for (const auto [name, id] : name2id) {
+  for (const auto &[name, id] : name2id) {
     const std::string line(name);
     if (!std::regex_search(line, txt_regex))
       continue;

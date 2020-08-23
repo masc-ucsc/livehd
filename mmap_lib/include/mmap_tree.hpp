@@ -23,7 +23,7 @@ public:
   constexpr Tree_index() :level(-1), pos(-1) { };
   constexpr Tree_index(Tree_level l, Tree_pos i) : level(l), pos(i) {}
 
-  Tree_index &operator=(const Tree_index &o) {
+  constexpr Tree_index &operator=(const Tree_index &o) {
     level = o.level;
     pos   = o.pos;
     return *this;
