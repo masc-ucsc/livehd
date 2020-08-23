@@ -345,9 +345,11 @@ phier Hier_tree::discover_hierarchy(Graph_info& info, int start_set, unsigned in
 }
 
 Hier_tree::Hier_tree(Graph_info&& json_info, unsigned int num_components) : ginfo(std::move(json_info)) {
+  std::cout << "  creating hierarchy...";
   I(num_components >= 1);
 
   root = discover_hierarchy(ginfo, 0, num_components);
+  std::cout << "done." << std::endl;
 }
 
 void Hier_tree::print_node(const phier& node) const {
@@ -445,12 +447,19 @@ phier Hier_tree::collapse(phier node, double threshold_area) {
 }
 
 void Hier_tree::collapse(double threshold_area) {
+  std::cout << "  collapsing hierarchy...";
   I(threshold_area >= 0.0);
 
   if (threshold_area > 0.0) {
     auto new_tree = collapse(root, threshold_area);
     collapsed_hiers.push_back(new_tree);
   }
+  std::cout << "done." << std::endl;
 }
 
-void Hier_tree::discover_regularity() {}
+void Hier_tree::discover_regularity() {
+  std::cout << "  discovering regularity...";
+
+
+  std::cout << "done." << std::endl;
+}
