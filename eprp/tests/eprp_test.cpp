@@ -16,8 +16,6 @@ public:
     static int conta=0;
     id = conta++;
   };
-
-  int get_id() const { return id; };
 };
 
 #include "eprp.hpp"
@@ -51,9 +49,7 @@ public:
       fmt::print(" {}:{}",v.first,v.second);
     }
     fmt::print(" ::");
-    for (const auto& v : var.lgs) {
-      fmt::print(" {}",v->get_id());
-    }
+    I(var.lgs.empty());
     fmt::print("\n");
 
     var.add("test1_foo","field1");
@@ -87,9 +83,7 @@ public:
       fmt::print(" {}:{}",v.first,v.second);
     }
     fmt::print(" ::");
-    for (const auto& v : var.lgs) {
-      fmt::print(" {}",v->get_id());
-    }
+    I(var.lgs.empty());
     fmt::print("\n");
 
     var.add("test2_bar", "field2");
