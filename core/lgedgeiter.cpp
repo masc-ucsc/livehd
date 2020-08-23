@@ -64,8 +64,8 @@ Fast_edge_iterator::Fast_iter Fast_edge_iterator::begin() const {
   auto nid = top_g->fast_first();
 
   if (nid) {
-    auto it = Fast_edge_iterator::Fast_iter(top_g, top_g, visit_sub?Hierarchy_tree::root_index():Hierarchy_tree::invalid_index(), nid, visit_sub);
-    if (visit_sub) {
+    Fast_iter it(top_g, top_g, visit_sub?Hierarchy_tree::root_index():Hierarchy_tree::invalid_index(), nid, visit_sub);
+    if (visit_sub) { // && top_g->is_type_sub(nid)) {
       Node node(top_g, top_g, Hierarchy_tree::root_index(), nid);
       if (node.is_type_sub_present())
         ++it;
@@ -150,7 +150,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear(LGraph *top) {
       if (visit_sub && next_node.is_type_sub())
         is_topo_sorted = false;
     } else {
-      for (const auto edge : next_node.inp_edges()) {
+      for (const auto &edge : next_node.inp_edges()) {
         auto driver_node = edge.driver.get_node();
 
         if (driver_node.is_graph_input())

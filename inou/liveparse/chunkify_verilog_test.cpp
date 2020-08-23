@@ -73,7 +73,9 @@ TEST_F(VTest1, interface) {
 void test_throw() {
   std::string test2_verilog = "";
 
-  Chunkify_verilog chunker("/proc");
+  mkdir("tdelta/noaccess_dir",0000);
+
+  Chunkify_verilog chunker("lgdb/noaccess_dir");
   chunker.parse_inline(test2_verilog.c_str());
 }
 
