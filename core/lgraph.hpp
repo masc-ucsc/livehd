@@ -76,11 +76,11 @@ protected:
   bool has_outputs(const Node_pin &pin) const;
   bool has_inputs(const Node_pin &pin) const;
 
-  int get_num_outputs(const Node &node) const;
-  int get_num_inputs(const Node &node) const;
+  int get_num_out_edges(const Node &node) const;
+  int get_num_inp_edges(const Node &node) const;
   int get_num_edges(const Node &node) const;
-  int get_num_outputs(const Node_pin &pin) const;
-  int get_num_inputs(const Node_pin &pin) const;
+  int get_num_out_edges(const Node_pin &pin) const;
+  int get_num_inp_edges(const Node_pin &pin) const;
 
   void del_driver2node_int(Node &driver, const Node &sink);
   void del_sink2node_int(const Node &driver, Node &sink);

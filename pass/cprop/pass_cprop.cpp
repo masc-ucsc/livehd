@@ -793,7 +793,7 @@ void Pass_cprop::process_tuple_add(Node &node, LGraph *lg) {
 
   merge_to_tuple(ctup, node, parent_node, parent_dpin, key_pos, key_name, val_dpin, is_attr_set, attr_bits);
 
-  fmt::print("TupAdd node:{} pos:{} key:{} val:{} del:{} #out:{}\n", node.debug_name(), key_pos, key_name, val_dpin.debug_name(), parent_could_be_deleted, parent_node.get_num_outputs());
+  fmt::print("TupAdd node:{} pos:{} key:{} val:{} del:{} #out:{}\n", node.debug_name(), key_pos, key_name, val_dpin.debug_name(), parent_could_be_deleted, parent_node.get_num_out_edges());
 
 #if 0
   if (parent_could_be_deleted)
@@ -917,7 +917,7 @@ void Pass_cprop::trans(LGraph *lg) {
 #endif
       continue;
     }
-    // fmt::print("node:{} inp:{} out:{}\n",node.debug_name(), node.get_num_inputs(), node.get_num_outputs());
+    // fmt::print("node:{} inp:{} out:{}\n",node.debug_name(), node.get_num_inputs(), node.get_num_out_edges());
 
     try_collapse_forward(node, inp_edges_ordered);
   }

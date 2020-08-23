@@ -127,6 +127,8 @@ bool Lgtuple::set(int pos, std::string_view key, const Node_pin &_val_dpin) {
 }
 
 void Lgtuple::set(std::string_view key, std::shared_ptr<Lgtuple> tup) {
+  (void)key;
+  (void)tup;
   I(false);  // handle copy of tuple recursively
 }
 
@@ -200,7 +202,7 @@ bool Lgtuple::add(const std::shared_ptr<Lgtuple> tup2) {
     add(val_dpin);
   } else {
     auto shift = pos2tuple.size();
-    for (auto i = 0; i < tup2->pos2tuple.size(); ++i) {
+    for (auto i = 0u; i < tup2->pos2tuple.size(); ++i) {
       pos2tuple.emplace_back(tup2->pos2tuple[i]);
     }
     for (auto e : tup2->key2pos) {

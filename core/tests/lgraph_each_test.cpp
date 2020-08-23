@@ -48,23 +48,19 @@ protected:
 
       // Match parent names in tmap
       for(const auto &io_pin:parent_sub.get_io_pins()) {
-        Port_ID graph_pos = sub->size();
-
         if (io_pin.dir == Sub_node::Direction::Input) {
           if (!sub->has_pin(io_pin.name)) {
-            auto instance_pid = sub->add_pin(io_pin.name, Sub_node::Direction::Input, graph_pos);
-
+            sub->add_input_pin(io_pin.name);
             auto dpin = parent->get_graph_input(io_pin.name);
-
-            dpin.connect_sink(node.setup_sink_pin(instance_pid));
+            dpin.connect_sink(node.setup_sink_pin(io_pin.name));
           }
 
         }else if (io_pin.dir == Sub_node::Direction::Output) {
           if (!sub->has_pin(io_pin.name)) {
-            auto instance_pid = sub->add_pin(io_pin.name, Sub_node::Direction::Output, graph_pos);
             auto spin = parent->get_graph_output(io_pin.name);
             if (!spin.get_node().has_inputs()) {
-              node.setup_driver_pin(instance_pid).connect_sink(spin);
+              sub->add_output_pin(io_pin.name);
+              node.setup_driver_pin(io_pin.name).connect_sink(spin);
             }
           }
         }else if (io_pin.dir == Sub_node::Direction::Invalid) {
@@ -166,6 +162,7 @@ TEST_F(Setup_graphs_test, each_sub_graph) {
   for(auto &parent:lgs) {
     fmt::print("checking parent:{}\n", parent->get_name());
     parent->each_sub_fast([parent,&children2,this](Node &node, Lg_type_id lgid) {
+        (void)lgid;
         LGraph *child = LGraph::open(parent->get_path(),node.get_type_sub());
 
         ASSERT_NE(child,nullptr);
@@ -202,6 +199,7 @@ TEST_F(Setup_graphs_test, each_sub_graph_twice) {
   for(auto &parent:lgs) {
     fmt::print("checking parent:{}\n", parent->get_name());
     parent->each_sub_fast([parent,&children2,this](Node &node, Lg_type_id lgid) {
+        (void)lgid;
         LGraph *child = LGraph::open(parent->get_path(),node.get_type_sub());
 
         ASSERT_NE(child,nullptr);

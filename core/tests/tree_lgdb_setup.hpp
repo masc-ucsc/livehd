@@ -46,6 +46,7 @@ protected:
     std::vector<mmap_lib::Tree_index> index_order;
 
     tree.each_top_down_fast([&index_order](const mmap_lib::Tree_index &index, const Node_data &node) {
+      (void)node;
       //fmt::print(" level:{} pos:{} create_pos:{} fwd:{} bwd:{} leaf:{}\n", index.level, index.pos, node.create_pos, node.fwd_pos, node.bwd_pos, node.leaf);
 
       if (index.level || index.pos)
@@ -164,7 +165,8 @@ protected:
         LGraph *prev_lg = LGraph::open("lgdb_hierarchy_test", prev_data.name);
         I(prev_node.get_class_lgraph() != prev_lg);
         auto d_pid = prev_node.get_type_sub_node().get_instance_pid("o0");
-        dpin = prev_node.setup_driver_pin(d_pid);
+        dpin = prev_node.setup_driver_pin("o0");
+        I(dpin.get_pid() == d_pid);
         I(prev_node.get_type_op() == SubGraph_Op);
       }
 
@@ -176,7 +178,8 @@ protected:
         LGraph *curr_lg = LGraph::open("lgdb_hierarchy_test", curr_data.name);
         I(curr_node.get_class_lgraph() != curr_lg);
         auto s_pid = curr_node.get_type_sub_node().get_instance_pid("i0");
-        spin = curr_node.setup_sink_pin(s_pid);
+        spin = curr_node.setup_sink_pin("i0");
+        I(spin.get_pid() == s_pid);
         I(curr_node.get_type_op() == SubGraph_Op);
       }
 
@@ -234,14 +237,15 @@ protected:
           } else {
             I(last_node.get_class_lgraph() == lg);
             auto d_pid = last_node.get_type_sub_node().get_instance_pid("o1");
-            dpin       = last_node.setup_driver_pin(d_pid);
+            dpin       = last_node.setup_driver_pin("o1");
+            I(dpin.get_pid() == d_pid);
             I(last_node.get_type_op() == SubGraph_Op);
           }
           spin.connect_driver(dpin);
         }
     });
 
-    int conta = 0;
+    auto conta = 0u;
     for (const auto &node:node_order) {
       if (node.is_type_sub()) {
         if (conta != (node_order.size()-1)) { // LAST NODE

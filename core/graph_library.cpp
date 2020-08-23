@@ -80,8 +80,11 @@ void Graph_library::sync_all() {
 }
 
 void Graph_library::clean_library() {
+#if 0
+  // Possible to call sub_nodes directly and miss this update
   if (graph_library_clean)
     return;
+#endif
 
   rapidjson::StringBuffer                          s;
   rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(s);
@@ -180,6 +183,11 @@ Graph_library *Graph_library::instance(std::string_view path) {
   auto it = Graph_library::global_instances.find(full_path);
   if (it != Graph_library::global_instances.end()) {
     return it->second;
+  }
+
+  if (access(full_path.c_str(), W_OK) == -1) {
+    LGraph::error("could not open lgdb:{} path\n", full_path);
+    return nullptr;
   }
 
   Graph_library *graph_library = new Graph_library(full_path);

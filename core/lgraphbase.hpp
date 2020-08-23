@@ -148,21 +148,16 @@ public:
   const Graph_library &get_library() const { return *library; }
   Graph_library *      ref_library() const { return library; }
 
-  static void error(std::string_view text);
-  static void warn(std::string_view text);
+  static void error_int(std::string_view text);
+  static void warn_int(std::string_view text);
 
-  template <typename... Args>
-  static void error(const char *format, const Args &... args) {
-    fmt::format_args   fargs = fmt::make_format_args(args...);
-    fmt::memory_buffer tmp;
-    fmt::vformat_to(tmp, format, fargs);
-    error(std::string_view(tmp.data(), tmp.size()));
+  template <typename S, typename... Args>
+  static void error(const S& format, Args&&... args) {
+    error_int(fmt::format(format, args...));
   }
-  template <typename... Args>
-  static void warn(std::string_view format, const Args &... args) {
-    fmt::format_args   fargs = fmt::make_format_args(args...);
-    fmt::memory_buffer tmp;
-    fmt::vformat_to(tmp, format, fargs);
-    warn(std::string_view(tmp.data(), tmp.size()));
+
+  template <typename S, typename... Args>
+  static void warn(const S& format, Args&&... args) {
+    warn_int(fmt::format(format, args...));
   }
 };

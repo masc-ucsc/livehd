@@ -163,23 +163,24 @@ bool Lnast::is_attribute_related(const Lnast_nid &opr_nid) {
 }
 
 
-//  LNAST attr_bits merge from dot and assign lnast nodes and create Attr_set, if is dot but at rhs, just
-//
-//  original:
-//     dot               assign
-//    / | \               /  \
-//   /  |  \             /    \
-//  /   |   \           /      \
-// ___t $a  __bits    ___t     0d4
-//
-//
-// merged:
-//   Attr_set           invalid
-//    / | \               /  \
-//   /  |  \             /    \
-//  /   |   \           /      \
-// $a __bits 0d4      ___t     0d4
+/**********************************
+  LNAST attr_bits merge from dot and assign lnast nodes and create Attr_set, if is dot but at rhs, just
 
+ original:
+     dot               assign
+    / | \               /  \
+   /  |  \             /    \
+  /   |   \           /      \
+ ___t $a  __bits    ___t     0d4
+
+
+ merged:
+   Attr_set           invalid
+    / | \               /  \
+   /  |  \             /    \
+  /   |   \           /      \
+ $a __bits 0d4      ___t     0d4
+*/
 
 void Lnast::dot2attr_set_get(const Lnast_nid &psts_nid, Lnast_nid &dot_nid) {
   auto &dot_lrhs_table   = dot_lrhs_tables[psts_nid];
@@ -339,27 +340,27 @@ void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid)
 
 }
 
+/*******
+  LNAST dot/sel/ and assign node semantic illustration for type replacement
 
-//  LNAST dot/sel/ and assign node semantic illustration for type replacement
-//
-//     dot                                       tuple_add
-//    / | \                                     /    |    \
-//   /  |  \                                   /     |     \
-//  c0  c1  c2                                c0     c1     c2
-//  c0 = temporary target of dot/sel          c0 = tuple name
-//  c1 = tuple name                           c1 = tuple field
-//  c2 = tuple field                          c2 = value of tuple field
-//
-//    assign           tuple_phi_add             tuple_get
-//    /    \              /     \               /    |    \
-//   c0    c1            /       \             /     |     \
-//   c0 = lhs           phi      tuple_add    c0     c1     c2
-//   c1 = rhs         / | | \      ...        c0 = temporary target of dot/sel
-//                                            c1 = tuple name
-//                                            c2 = tuple field
-//  To know more detail, see my note
-//  https://drive.google.com/open?id=16DSzAPf0GzuxYptxkZzdPKJDDP8DxnBz
+     dot                                       tuple_add
+    / | \                                     /    |    \
+   /  |  \                                   /     |     \
+  c0  c1  c2                                c0     c1     c2
+  c0 = temporary target of dot/sel          c0 = tuple name
+  c1 = tuple name                           c1 = tuple field
+  c2 = tuple field                          c2 = value of tuple field
 
+    assign           tuple_phi_add             tuple_get
+    /    \              /     \               /    |    \
+   c0    c1            /       \             /     |     \
+   c0 = lhs           phi      tuple_add    c0     c1     c2
+   c1 = rhs         / | | \      ...        c0 = temporary target of dot/sel
+                                            c1 = tuple name
+                                            c2 = tuple field
+  To know more detail, see my note
+  https://drive.google.com/open?id=16DSzAPf0GzuxYptxkZzdPKJDDP8DxnBz
+*/
 
 void Lnast::dot2hier_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid, const Lnast_nid &cond_nid, bool is_else_sts) {
   auto &dot_lrhs_table  =  dot_lrhs_tables[psts_nid];
@@ -849,6 +850,9 @@ Lnast_nid Lnast::check_phi_table_parents_chain(std::string_view target_name, con
     auto new_psts_nid = get_parent(tmp_if_nid);
     return check_phi_table_parents_chain(target_name, new_psts_nid, originate_from_csts);
   }
+
+  I(false); // what return value? not-deterministic result
+  return Lnast_nid();
 }
 
 
@@ -913,7 +917,9 @@ bool Lnast::is_lhs(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
   auto &dot_lrhs_table = dot_lrhs_tables[psts_nid];
   if (dot_lrhs_table.find(opr_nid)!= dot_lrhs_table.end())
     return dot_lrhs_table[opr_nid].first;
+
   I(false);
+  return false;
 }
 
 void Lnast::reg_ini_global_lhs_ssa_cnt_table(const Lnast_nid &rhs_nid) {

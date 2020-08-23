@@ -719,7 +719,7 @@ void Pass_bitwidth::bw_pass(LGraph *lg) {
       bwmap.emplace(dpin.get_compact(), Bitwidth_range(dpin.get_bits()));
   }
 
-  outcountmap[lg->get_graph_input_node(hier).get_compact()] = lg->get_graph_input_node(hier).get_num_outputs();
+  outcountmap[lg->get_graph_input_node(hier).get_compact()] = lg->get_graph_input_node(hier).get_num_out_edges();
 
   for (auto node : lg->forward(hier)) {
     auto inp_edges = node.inp_edges();
@@ -733,7 +733,7 @@ void Pass_bitwidth::bw_pass(LGraph *lg) {
       continue;
     }
 
-    outcountmap[node.get_compact()] = node.get_num_outputs();
+    outcountmap[node.get_compact()] = node.get_num_out_edges();
 
     if (op == Const_Op) {
       process_const(node);

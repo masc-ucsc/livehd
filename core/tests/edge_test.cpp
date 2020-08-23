@@ -36,8 +36,8 @@ protected:
   void SetUp() override {
     g = LGraph::create("lgdb_edge_test", "test0", "test");
 
-    n1 = g->create_node_sub("n1");
-    n2 = g->create_node_sub("n2");
+    n1 = g->create_node_sub("n1"); // creates n1
+    n2 = g->create_node_sub("n2"); // creates n2
 
     n1_sub = g->ref_library()->ref_sub("n1");
     n2_sub = g->ref_library()->ref_sub("n2");
@@ -47,7 +47,6 @@ protected:
 
     n1_graph_pos_created.clear();
     n2_graph_pos_created.clear();
-    g->sync();
   }
 
   void TearDown() override {
@@ -86,15 +85,15 @@ protected:
       EXPECT_TRUE(track_n1_out_setup_pins.has(pin.get_type_sub_pin_name()));
       n_hits++;
     }
+
     EXPECT_EQ(track_n1_out_setup_pins.size(), n_hits);
 
-    n_hits=0;
-    for(auto &pin : n2.out_setup_pins()) {
-      EXPECT_TRUE(!pin.is_invalid());
-      EXPECT_TRUE(track_n2_out_setup_pins.has(pin.get_type_sub_pin_name()));
-      n_hits++;
-    }
-    EXPECT_EQ(track_n2_out_setup_pins.size(), n_hits);
+    auto nedges = n1.out_edges().size(); // edges only from n1 to n2
+
+    EXPECT_EQ(n1.get_num_inp_edges(), 0);
+    EXPECT_EQ(n1.get_num_out_edges(), nedges);
+    EXPECT_EQ(n2.get_num_edges(), nedges);
+    EXPECT_EQ(n2.out_setup_pins().size(),0);
 
     n_hits=0;
     for(auto &pin : n1.inp_setup_pins()) {
@@ -102,16 +101,10 @@ protected:
       EXPECT_TRUE(track_n1_inp_setup_pins.has(pin.get_type_sub_pin_name()));
       n_hits++;
     }
+
+
     EXPECT_EQ(track_n1_inp_setup_pins.size(), n_hits);
-
-    n_hits=0;
-    for(auto &pin : n2.inp_setup_pins()) {
-      EXPECT_TRUE(!pin.is_invalid());
-      EXPECT_TRUE(track_n2_inp_setup_pins.has(pin.get_type_sub_pin_name()));
-      n_hits++;
-    }
-    EXPECT_EQ(track_n2_inp_setup_pins.size(), n_hits);
-
+    EXPECT_EQ(n1.inp_setup_pins().size(),0);
   }
 
   Node_pin add_n1_setup_driver_pin(const std::string pname) {
@@ -174,7 +167,6 @@ protected:
   }
 
   void check_edges() {
-    g->sync(); // For debug in graph_library.yaml
 
     for(auto e:n1.inp_edges()) {
       (void)e;
@@ -232,9 +224,9 @@ TEST_F(Edge_test, random_insert) {
     Node_pin d;
     Node_pin s;
     if (rbool.any())
-      d = add_n1_setup_driver_pin("driver_pin" + std::to_string(i));
+      d = add_n1_setup_driver_pin("driver_pin" + std::to_string(rint.max(i+10)));
     if (rbool.any())
-      s = add_n2_setup_sink_pin("sink_pin" + std::to_string(i));
+      s = add_n2_setup_sink_pin("sink_pin" + std::to_string(rint.max(i+10)));
     if (rbool.any() && !d.is_invalid() && !s.is_invalid()) {
       add_edge(d, s);
     }
@@ -445,66 +437,138 @@ TEST_F(Edge_test, overflow_delete_del_node_bench) {
   EXPECT_TRUE(s1.is_invalid());
 }
 
-#if 0
-bool test22() {
+TEST_F(Edge_test, trivial_delete2) {
 
-  LGraph *g = LGraph::create("lgdb_core_test", "test22", "test");
+  LGraph *g2 = LGraph::create("lgdb_edge_test", "test22", "test");
 
-  auto n1 = g->create_node_sub("n1");
-  auto n2 = g->create_node_sub("n2");
+  auto nn1 = g2->create_node_sub("n1");
+  auto nn2 = g2->create_node_sub("n2");
 
-  auto dpin = n1.setup_driver_pin(20);
-  auto spin = n2.setup_sink_pin(0);
+  g2->ref_library()->sync_all();
 
-  g->add_edge(dpin, spin, 33);
+  auto *sub1 = g2->ref_library()->ref_sub("n1");
+  auto *sub2 = g2->ref_library()->ref_sub("n2");
+  sub1->add_output_pin(" quite a long name with % spaces both ends ", Port_invalid);
+  sub2->add_input_pin(" uff this is bad too% ", Port_invalid);
 
-  for(auto &out : n1.out_edges()) {
+  g2->ref_library()->sync_all();
+
+  EXPECT_FALSE(nn1.has_inputs());
+  EXPECT_FALSE(nn1.has_outputs());
+  EXPECT_FALSE(nn2.has_inputs());
+  EXPECT_FALSE(nn2.has_outputs());
+
+  EXPECT_EQ(nn1.get_num_inp_edges(),0);
+  EXPECT_EQ(nn1.get_num_out_edges(),0);
+  EXPECT_EQ(nn1.get_num_edges(),0);
+  EXPECT_EQ(nn2.get_num_inp_edges(),0);
+  EXPECT_EQ(nn2.get_num_out_edges(),0);
+  EXPECT_EQ(nn2.get_num_edges(),0);
+
+  EXPECT_EQ(nn1.inp_edges().size(),0);
+  EXPECT_EQ(nn1.out_edges().size(),0);
+  EXPECT_EQ(nn2.inp_edges().size(),0);
+  EXPECT_EQ(nn2.out_edges().size(),0);
+
+  auto dpin = nn1.setup_driver_pin(" quite a long name with % spaces both ends ");
+  auto spin = nn2.setup_sink_pin(" uff this is bad too% ");
+
+  EXPECT_EQ(dpin, nn1.get_driver_pin(" quite a long name with % spaces both ends "));
+  EXPECT_EQ(spin, nn2.get_sink_pin(" uff this is bad too% "));
+
+  g2->add_edge(dpin, spin, 33);
+
+  EXPECT_EQ(nn1.inp_edges().size(),0);
+  EXPECT_EQ(nn1.out_edges().size(),1);
+  EXPECT_EQ(nn2.inp_edges().size(),1);
+  EXPECT_EQ(nn2.out_edges().size(),0);
+
+  EXPECT_FALSE(nn1.has_inputs());
+  EXPECT_TRUE(nn1.has_outputs());
+  EXPECT_TRUE(nn2.has_inputs());
+  EXPECT_FALSE(nn2.has_outputs());
+
+  EXPECT_EQ(nn1.get_num_inp_edges(),0);
+  EXPECT_EQ(nn1.get_num_out_edges(),1);
+  EXPECT_EQ(nn1.get_num_edges(),1);
+  EXPECT_EQ(nn2.get_num_inp_edges(),1);
+  EXPECT_EQ(nn2.get_num_out_edges(),0);
+  EXPECT_EQ(nn2.get_num_edges(),1);
+
+  for(auto &out : nn1.out_edges()) {
     out.del_edge();
   }
 
-  for(auto &inp : n2.inp_edges()) {
-    assert(false);
-    (void)inp; // just to silence the warning
-  }
-
-  for(auto &out : n1.out_edges()) {
-    assert(false);
-    (void)out; // just to silence the warning
-  }
-
-  return true;
+  EXPECT_EQ(nn1.inp_edges().size(),0);
+  EXPECT_EQ(nn1.out_edges().size(),0);
+  EXPECT_EQ(nn2.inp_edges().size(),0);
+  EXPECT_EQ(nn2.out_edges().size(),0);
 }
 
-bool test3() {
+TEST_F(Edge_test, trivial_delete3) {
 
-  LGraph *g = LGraph::create("lgdb_core_test", "test3", "test");
+  LGraph *g2 = LGraph::create("lgdb_edge_test", "test3", "test");
 
-  auto n1 = g->create_node_sub("n1");
-  auto n2 = g->create_node_sub("n2");
+  auto nn1 = g2->create_node_sub("n1");
+  auto nn2 = g2->create_node_sub("n2");
 
-  g->add_edge(n1.setup_driver_pin(20), n2.setup_sink_pin(25));
+  g2->ref_library()->sync_all();
 
-  for(auto &inp : n2.inp_edges()) {
+  auto *sub1 = g2->ref_library()->ref_sub("n1");
+  auto *sub2 = g2->ref_library()->ref_sub("n2");
+  sub1->add_output_pin(" another % $ # long name ", Port_invalid);
+  sub2->add_input_pin("foo", Port_invalid);
+
+  nn1.setup_driver_pin(" another % $ # long name ");
+  g2->add_edge(nn1.get_driver_pin(" another % $ # long name "), nn2.setup_sink_pin("foo"));
+
+  for(auto &inp : nn2.inp_edges()) {
     inp.del_edge();
   }
 
-  for(auto &inp : n2.inp_edges()) {
-    assert(false);
-    (void)inp; // just to silence the warning
+  EXPECT_EQ(nn2.inp_edges().size(),0);
+  EXPECT_EQ(nn2.out_edges().size(),0);
+
+  bool found_cp=false;
+  bool found_c =false;
+  bool found   =false;
+  for(auto node:g2->fast()) {
+    if (node.get_compact_class() == nn2.get_compact_class())
+      found_cp=true;
+    if (node.get_compact() == nn2.get_compact())
+      found_c=true;
+    if (node == nn2)
+      found =true;
   }
+  EXPECT_TRUE(found_cp);
+  EXPECT_TRUE(found_c);
+  EXPECT_TRUE(found);
 
-  for(auto &out : n1.out_edges()) {
-    assert(false);
-    (void)out; // just to silence the warning
+  found_cp=false;
+  found_c =false;
+  found   =false;
+  for(auto node:g2->fast(true)) {
+    if (node.get_compact_class() == nn2.get_compact_class())
+      found_cp=true;
+    if (node.get_compact() == nn2.get_compact())
+      found_c=true;
+    if (node == nn2)
+      found =true;
   }
+  EXPECT_TRUE(found_cp);
+  EXPECT_TRUE(found_c);
+  EXPECT_TRUE(found);
 
-  n2.del_node();
+  auto n2_copy = nn2; // delete will clear the nid
 
-  for(auto node:g->fast()) {
-    I(node != n2);
+  EXPECT_TRUE(!nn2.is_invalid());
+  nn2.del_node();
+  EXPECT_TRUE(nn2.is_invalid());
+
+  for(auto node:g2->fast()) {
+    EXPECT_NE(node.get_compact_class(), n2_copy.get_compact_class());
+    EXPECT_NE(node.get_compact(), n2_copy.get_compact());
+    EXPECT_NE(node, n2_copy);
   }
-
-  return true;
 }
 
-#endif

@@ -69,16 +69,14 @@ Node_pin Node_pin::get_non_hierarchical() const {
   return Node_pin(current_g, current_g, Hierarchy_tree::invalid_index(), idx, pid, sink);
 }
 
-Node_pin Node_pin::get_sink_from_output() const {
-  I(is_graph_output());
+Node_pin Node_pin::get_sink() const {
   if(is_sink())
     return *this;
 
   return Node_pin(top_g, current_g, hidx, idx, pid, true);
 }
 
-Node_pin Node_pin::get_driver_from_output() const {
-  I(is_graph_output());
+Node_pin Node_pin::get_driver() const {
   if (is_driver())
     return *this;
 
@@ -137,9 +135,9 @@ void Node_pin::connect_driver(const Node_pin &dpin) {
 
 int Node_pin::get_num_edges() const {
   if (is_sink())
-    return current_g->get_num_inputs(*this);
+    return current_g->get_num_inp_edges(*this);
 
-  return current_g->get_num_outputs(*this);
+  return current_g->get_num_out_edges(*this);
 }
 
 uint32_t Node_pin::get_bits() const {

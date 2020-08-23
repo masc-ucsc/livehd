@@ -399,7 +399,7 @@ void Pass_mockturtle::mapping_comparison_cell_lg2mt(const bool &lt_op, const boo
     Comparator_input_signal<typename ntk_type::signal> inp_sigs;
     setup_input_signals(group_id, inp_edge, inp_sigs.signals, mt_ntk);
 
-    inp_sigs.is_signed = node.get_type().is_input_signed(inp_edge.sink.get_pid());
+    inp_sigs.is_signed = (inp_edge.sink.get_pid()&1)==0;
 
     if (inp_edge.sink.get_pid() >= 0 && inp_edge.sink.get_pid() <= 1) {
       left_opd_sigs.emplace_back(inp_sigs);
@@ -688,7 +688,7 @@ void Pass_mockturtle::create_mockturtle_network(LGraph *g) {
           // fmt::print("input_bit_width:{}\n",inp_edge.get_bits());
           Comparator_input_signal<mockturtle_network::signal> inp_sig;
           setup_input_signals(group_id, inp_edge, inp_sig.signals, mt_ntk);
-          inp_sig.is_signed = node.get_type().is_input_signed(inp_edge.sink.get_pid());
+          inp_sig.is_signed = (inp_edge.sink.get_pid()&1)==0; // odd unsinged/ even signed
           opd_sigs.emplace_back(inp_sig);
         }
         // creating output signal

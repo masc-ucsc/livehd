@@ -713,7 +713,7 @@ bool LGraph::has_inputs(const Node_pin &pin) const {
   }
 }
 
-int LGraph::get_num_outputs(const Node &node) const {
+int LGraph::get_num_out_edges(const Node &node) const {
   auto idx2 = node.get_nid();
   int total = 0;
   while (true) {
@@ -727,7 +727,7 @@ int LGraph::get_num_outputs(const Node &node) const {
   return -1;
 }
 
-int LGraph::get_num_inputs(const Node &node) const {
+int LGraph::get_num_inp_edges(const Node &node) const {
   auto idx2 = node.get_nid();
   int total = 0;
   while (true) {
@@ -755,7 +755,7 @@ int LGraph::get_num_edges(const Node &node) const {
   return -1;
 }
 
-int LGraph::get_num_outputs(const Node_pin &pin) const {
+int LGraph::get_num_out_edges(const Node_pin &pin) const {
   I(pin.is_driver());
   int total = 0;
   auto idx = pin.get_root_idx();
@@ -775,7 +775,7 @@ int LGraph::get_num_outputs(const Node_pin &pin) const {
   return -1;
 }
 
-int LGraph::get_num_inputs(const Node_pin &pin) const {
+int LGraph::get_num_inp_edges(const Node_pin &pin) const {
   I(pin.is_sink());
   int total = 0;
   auto idx = pin.get_root_idx();
