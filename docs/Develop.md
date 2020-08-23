@@ -25,9 +25,9 @@ $ CXX=clang++ CC=clang bazel build -c dbg //...
 Use lgbench to gather statistics in your code block. It also allows to run perf record
 for the code section (from lgbench construction to destruction). To enable perf record
 set LGBENCH_PERF environment variable
-
-     export LGBENCH_PERF=1
-
+```
+$ export LGBENCH_PERF=1
+```
 ## GDB/LLDB usage
 
 For most tests, you can debug with
@@ -39,16 +39,16 @@ or
 $ lldb ./bazel-bin/main/lgshell
 ```
 Sometimes the failure is yosys/lgraph bridge. In this case, you need to gdb yosys directly
-
-     gdb `which gdb`
-     (gdb) r -m ./bazel-bin/inou/yosys/liblgraph_yosys.so 
-
+```
+$ gdb `which gdb`
+(gdb) r -m ./bazel-bin/inou/yosys/liblgraph_yosys.so 
+```
 ## Address Sanitizer
 
 LiveHD has the option to run it with address sanitizer to detect memory leaks.
 
 ```
-bazel build -c dbg --config asan //...
+$ bazel build -c dbg --config asan //...
 ```
 
 An issue is that YOSYS needs the libasan.a linked against statitcally. To enable this, you mist edit the tools/linkso.bzl
@@ -62,7 +62,7 @@ to:
   args = [output.path] + [compiler_executable] + [ar_executable] + [f.path for f in src_libs2] + ["-Wl,-Bstatic"] + ["-lstdc++", "-lasan"] + ["-Wl,-Bdynamic"] + ["-lrt", "-lgcov", "-lpthread"]
 ```
 
-## Debugging a broken docker image
+## Debugging a broken Docker image
 
 The travis/azure regressions run several docker images. To debug the issue, run the same as the failing
 docker image. c++ OPT with archlinux-masc image
@@ -72,29 +72,29 @@ docker image. c++ OPT with archlinux-masc image
    several times before)
 
 ```
-mkdir $HOME/docker
+$ mkdir $HOME/docker
 ```
 
 2. Run the docker image (in some masc docker images you can change the user to not being root)
 
 ```
-docker run --rm --cap-add SYS_ADMIN -it  -e LOCAL_USER_ID=$(id -u $USER) -v ${HOME}/docker:/home/user mascucsc/archlinux-masc                                                                                                                         
+$ docker run --rm --cap-add SYS_ADMIN -it  -e LOCAL_USER_ID=$(id -u $USER) -v ${HOME}/docker:/home/user mascucsc/archlinux-masc                                                                                                                         
 # Once inside docker image. Create local "user" at /home/user with your userid
-/usr/local/bin/entrypoint.sh
+$ /usr/local/bin/entrypoint.sh
 ```
 
 3. If the docker image did not have the livehd repo, clone it
 ```
-git clone https://github.com/masc-ucsc/livehd.git
+$ git clone https://github.com/masc-ucsc/livehd.git
 ```
 
 4. Build with the failing options and debug
 ```
-CXX=g++ CC=gcc bazel build -c opt //...
+$ CXX=g++ CC=gcc bazel build -c opt //...
 ```
 
 A docker distro that specially fails (address randomizing and muslc vs libc) is alpine. The command line to debug it:
 ```
- docker run --rm --cap-add SYS_ADMIN -it -e LOCAL_USER_ID=$(id -u $USER) -v $HOME:/home/user -v/local/scrap:/local/scrap mascucsc/alpine-masc
+$ docker run --rm --cap-add SYS_ADMIN -it -e LOCAL_USER_ID=$(id -u $USER) -v $HOME:/home/user -v/local/scrap:/local/scrap mascucsc/alpine-masc
 ```
 
