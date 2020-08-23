@@ -563,6 +563,7 @@ int Node::get_color() const {
 
 bool Node::has_color() const { return Ann_node_color::ref(current_g)->has_key(get_compact_class()); }
 
+// LCOV_EXCL_START
 void Node::dump() {
   fmt::print("node:{} nid:{} type:{} ", debug_name(), nid, get_type().get_name());
   if (get_type_op() == LUT_Op) {
@@ -601,3 +602,4 @@ void Node::dump() {
     fmt::print("  out bits:{} pid:{} name:{} UNCONNECTED\n", dpin.get_bits(), dpin.get_pid(), dpin.debug_name());
   }
 }
+// LCOV_EXCL_STOP

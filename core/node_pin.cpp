@@ -248,29 +248,6 @@ std::string_view Node_pin::get_prp_vname() const {
   return Ann_node_pin_prp_vname::ref(current_g)->get(Compact_class_driver(get_root_idx()));
 }
 
-std::string_view Node_pin::create_name() const {
-  auto ref = Ann_node_pin_name::ref(current_g);
-
-  if (ref->has_key(get_compact_class_driver()))
-    return ref->get_val(get_compact_class_driver());
-
-  std::string signature(get_node().create_name());
-
-  if (is_driver()) {
-    for (auto &e : inp_edges()) {
-      absl::StrAppend(&signature, "_p", std::to_string(e.driver.get_pid()), "_", e.driver.create_name());
-    }
-  }
-
-  auto found = ref->has_val(signature);
-  if (!found) {
-    absl::StrAppend(&signature, "_nid", std::to_string(get_node().get_nid()));
-  }
-
-  const auto it = ref->set(get_compact_class_driver(), signature);
-  return ref->get_val(it);
-}
-
 bool Node_pin::has_name() const { return Ann_node_pin_name::ref(current_g)->has_key(get_compact_class_driver()); }
 
 bool Node_pin::has_prp_vname() const { return Ann_node_pin_prp_vname::ref(current_g)->has(get_compact_class_driver()); }

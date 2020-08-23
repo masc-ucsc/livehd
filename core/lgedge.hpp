@@ -328,12 +328,6 @@ public:
     type = op;
   }
 
-  bool has_node_inputs() const;
-  bool has_node_outputs() const;
-
-  bool has_pin_inputs() const;
-  bool has_pin_outputs() const;
-
   void reset() {
     state        = Last_node_state;
     root         = 1;
