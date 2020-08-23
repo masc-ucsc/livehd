@@ -35,8 +35,6 @@ void Pass_fplan::make_graph(Eprp_var& var) {
         auto new_v            = gi.al.insert_vert();
         gi.ids[new_v]         = id;
         gi.debug_names[new_v] = n.debug_name();
-        // TODO: find an actual area of a node
-        gi.areas[new_v] = n.get_num_outputs() + n.get_num_inputs();
         gi.sets[0].insert(new_v);  // all verts start in set zero, and get dividied up during hierarchy discovery
       }
       return true;
@@ -47,9 +45,14 @@ void Pass_fplan::make_graph(Eprp_var& var) {
       auto new_v            = gi.al.insert_vert();
       gi.ids[new_v]         = self_node.get_lgid();
       gi.debug_names[new_v] = self_node.get_name();
-      // TODO: find an actual area of self node
-      gi.areas[new_v] = -1.0;
       gi.sets[0].insert(new_v);  // all verts start in set zero, and get dividied up during hierarchy discovery
+    }
+
+    // area is a property of the LGraph (not the node), so we need a seperate pass for each node
+    for (auto v : gi.al.verts()) {
+      if (gi.ids[v] == lg->get_lgid()) {
+        gi.areas[v] = lg->size();
+      }
     }
   }
 
