@@ -1,13 +1,11 @@
 
 #include "pass_fplan.hpp"
 
+#include "graph_info.hpp"
+#include "hier_tree.hpp"
+#include "i_resolve_header.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
-
-#include "graph_info.hpp"
-#include "i_resolve_header.hpp"
-
-#include "hier_tree.hpp"
 
 void setup_pass_fplan() { Pass_fplan::setup(); }
 
@@ -19,8 +17,7 @@ void Pass_fplan::setup() {
 
 // turn an LGraph into a graph suitable for HiReg.
 // NOTE: sometimes code is repeated in order to process the root node since each_sub_fast_direct() doesn't touch the root.
-void Pass_fplan::make_graph(Eprp_var &var) {
-
+void Pass_fplan::make_graph(Eprp_var& var) {
   std::cout << "  creating floorplan graph...";
 
   for (auto lg : var.lgs) {
@@ -35,8 +32,8 @@ void Pass_fplan::make_graph(Eprp_var &var) {
 
       // node does not already exist, so make a new one
       if (!found) {
-        auto new_v = gi.al.insert_vert();
-        gi.ids[new_v] = id;
+        auto new_v            = gi.al.insert_vert();
+        gi.ids[new_v]         = id;
         gi.debug_names[new_v] = n.debug_name();
         // TODO: find an actual area of a node
         gi.areas[new_v] = n.get_num_outputs() + n.get_num_inputs();
@@ -47,8 +44,8 @@ void Pass_fplan::make_graph(Eprp_var &var) {
 
     auto self_node = lg->get_self_sub_node();
     if (self_node.get_lgid() == 1) {
-      auto new_v = gi.al.insert_vert();
-      gi.ids[new_v] = self_node.get_lgid();
+      auto new_v            = gi.al.insert_vert();
+      gi.ids[new_v]         = self_node.get_lgid();
       gi.debug_names[new_v] = self_node.get_name();
       // TODO: find an actual area of self node
       gi.areas[new_v] = -1.0;
@@ -73,7 +70,6 @@ void Pass_fplan::make_graph(Eprp_var &var) {
     lg->each_sub_fast_direct([&](Node& n, Lg_type_id id) -> bool {
       for (auto p : n.inp_connected_pins()) {
         for (auto other_p : p.inp_driver()) {
-          
           auto v1 = find_name(id);
           auto v2 = find_name(other_p.get_node().get_class_lgraph()->get_lgid());
 
@@ -90,7 +86,7 @@ void Pass_fplan::make_graph(Eprp_var &var) {
           // all connections have to be symmetrical
           auto e_1_2 = find_edge(v1, v2);
           if (e_1_2 == gi.al.null_edge()) {
-            auto new_e = gi.al.insert_edge(v1, v2);
+            auto new_e        = gi.al.insert_edge(v1, v2);
             gi.weights[new_e] = other_p.get_bits();
           } else {
             gi.weights[e_1_2] += other_p.get_bits();
@@ -98,7 +94,7 @@ void Pass_fplan::make_graph(Eprp_var &var) {
 
           auto e_2_1 = find_edge(v2, v1);
           if (e_2_1 == gi.al.null_edge()) {
-            auto new_e = gi.al.insert_edge(v2, v1);
+            auto new_e        = gi.al.insert_edge(v2, v1);
             gi.weights[new_e] = other_p.get_bits();
           } else {
             gi.weights[e_2_1] += other_p.get_bits();
@@ -108,9 +104,10 @@ void Pass_fplan::make_graph(Eprp_var &var) {
       return true;
     });
   }
-  
-  //using namespace graph::attributes;
-  //std::cout << gi.al.dot_format("weight"_of_edge = gi.weights, "name"_of_vert = gi.debug_names, "area"_of_vert = gi.areas, "id"_of_vert = gi.ids) << std::endl;
+
+  // using namespace graph::attributes;
+  // std::cout << gi.al.dot_format("weight"_of_edge = gi.weights, "name"_of_vert = gi.debug_names, "area"_of_vert = gi.areas,
+  // "id"_of_vert = gi.ids) << std::endl;
 
   // if the graph is not fully connected, ker-lin fails to work.
   for (const auto& v : gi.al.verts()) {
@@ -123,7 +120,7 @@ void Pass_fplan::make_graph(Eprp_var &var) {
         }
       }
       if (!found) {
-        auto temp_e = gi.al.insert_edge(v, other_v);
+        auto temp_e        = gi.al.insert_edge(v, other_v);
         gi.weights[temp_e] = 0;
       }
     }
@@ -131,12 +128,12 @@ void Pass_fplan::make_graph(Eprp_var &var) {
   std::cout << "done." << std::endl;
 }
 
-void Pass_fplan::pass(Eprp_var &var) {
+void Pass_fplan::pass(Eprp_var& var) {
   std::cout << "\ngenerating floorplan..." << std::endl;
   Pass_fplan p(var);
 
   p.make_graph(var);
-  
+
   Hier_tree h(std::move(p.gi), 1);
   h.collapse(0.0);
   h.discover_regularity();

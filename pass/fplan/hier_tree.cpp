@@ -62,10 +62,9 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
   // if there are an odd number of elements, we need to insert one to make the graph size even.
   vertex_t temp_vertex = g.null_vert();
   if (graph_size % 2 == 1) {
-    temp_vertex             = g.insert_vert();
+    temp_vertex = g.insert_vert();
 
-
-    //info.ids[temp_vertex] = max_id + 1; // choose an id that hasn't been used before
+    // info.ids[temp_vertex] = max_id + 1; // choose an id that hasn't been used before
     info.areas[temp_vertex] = 0.0f;
 
     for (auto other_v : g.verts()) {
@@ -80,7 +79,6 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
     graph_size++;
   }
 
-  
   //  The reason why I made vert_set a new variable is because views carry no state of their own,
   //  so the view recomputes what should be contained in it every time we access the view.
 
@@ -88,7 +86,6 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
   //  be in the cut_verts view anymore and removes everything.
 
   //  To resolve this, a new view should be created with the correct condition.
-  
 
   auto new_sets = std::pair(sets.size(), sets.size() + 1);
   sets.push_back(g.vert_set());
@@ -459,7 +456,6 @@ void Hier_tree::collapse(double threshold_area) {
 
 void Hier_tree::discover_regularity() {
   std::cout << "  discovering regularity...";
-
 
   std::cout << "done." << std::endl;
 }
