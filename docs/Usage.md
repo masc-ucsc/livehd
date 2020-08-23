@@ -177,3 +177,7 @@ To generate PDFs, run
 ```
 $ pandoc -S -N -V geometry:margin=1in ./docs/Usage.md -o ./docs/Usage.pdf
 ```
+
+## Developing LiveHD
+
+If you're interested in working on LiveHD, refer to the [developer documentation](./Develop.md).
