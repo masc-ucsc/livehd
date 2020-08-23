@@ -20,7 +20,7 @@ cc_library(
     )
 
 filegroup(
-    name = "elab_scripts",
+    name = "pyrope_test",
     srcs = ["tests/synth1.eprp"],
     )
 
@@ -41,9 +41,9 @@ cc_test(
 cc_test(
     name = "elab_scanner_test",
     srcs = ["tests/elab_scanner_test.cpp"],
-    args = ["$(location :elab_scripts)"],
+    args = ["$(location :pyrope_test)"],
     data = [
-        ":elab_scripts",
+        ":pyrope_test",
         ],
     deps = [
         ":elab",
@@ -95,8 +95,11 @@ cc_test(
 cc_binary(
     name = "elab_pyrope_test",
     srcs = ["elab_pyrope_test.cpp"],
-    # args = ["$(location tests/synth1.elab)"],
+    args = ["$(location :pyrope_test)"],
     deps = [
         ":elab",
+        ],
+    data = [
+        ":pyrope_test",
         ],
     )

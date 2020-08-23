@@ -318,7 +318,6 @@ public:
   std::string debug_name() const;
 
   void             set_name(std::string_view wname);
-  std::string_view create_name() const;
   std::string_view get_name() const;
   bool             has_name() const;
   static Node_pin  find_driver_pin(LGraph *top, std::string_view wname);
