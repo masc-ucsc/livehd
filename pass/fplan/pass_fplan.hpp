@@ -1,8 +1,7 @@
 #pragma once
 
-#include "pass.hpp"
-
 #include "graph_info.hpp"
+#include "pass.hpp"
 
 // not sure if we're an inou or a pass.  Assuming a pass for now.
 
