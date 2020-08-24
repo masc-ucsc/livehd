@@ -5,8 +5,8 @@
 #include "lgraphbase.hpp"
 
 // static_assert(Node_Type::nentries[1].at("foo") == 1);
-// static_assert(Node_Type::get_pid(Sum_Op, "foo") == 1);
-// static_assert(Node_Type::get_name(Sum_Op, 1) == "foo");
+static_assert(Node_Type::get_driver_pid(Sum_Op, "Q") == 0);
+static_assert(Node_Type::get_driver_name(Sum_Op, 0) == "Q");
 
 Node_Type *Node_Type::table[Last_invalid_Op] = {
     nullptr,

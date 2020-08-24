@@ -52,6 +52,7 @@ new_git_repository(
     commit = "a66200ed1d1741150092e89c94f5c25676e9e436", # April 28, 2020 6edca05793197a846bbfb0329e836c87fa5aabb6", # Feb 25, 2020 
     remote = "https://github.com/YosysHQ/yosys.git",
     #strip_prefix = "kernel",
+    shallow_since = "1588020530 -0700",
 )
 new_git_repository(
     name = "mustache",
@@ -59,6 +60,7 @@ new_git_repository(
     commit = "a7eebc9bec92676c1931eddfff7637d7e819f2d2", # August 10, 2020 "40ddfe9daecc699eca319f1c739b0cfc7e5f3ae5", # April 6 2019
     remote = "https://github.com/kainjow/Mustache.git",
     #strip_prefix = "kernel",
+    shallow_since = "1587271057 -0700",
 )
 
 http_archive(
@@ -80,6 +82,7 @@ new_git_repository(
     commit = "cd4af11efc9c622896a3e4cb599fa28668ca3d05", # 7.0.3 August 20 f19b1a521ee8b606dedcadfda69fd10ddf882753", # 7.0.1 June 23, 2020
     remote = "https://github.com/fmtlib/fmt.git",
     #strip_prefix = "include",
+    shallow_since = "1596729061 -0700",
 )
 # Move xxhash.c to xxhash.cpp, fix include inside xxhash.h
 # mkdir build; cd build ; cmake ../ ; make ; mv source ../generated/ ; cd ..
@@ -146,6 +149,7 @@ new_git_repository(
     build_file = "BUILD.replxx",
     commit = "c634cde996610f4d3330e13c0c9e16bf1034382b", # March 23, 2020
     remote = "https://github.com/AmokHuginnsson/replxx.git",
+    shallow_since = "1583869163 +0100",
 )
 new_git_repository(
     name = "gtest",
@@ -196,6 +200,7 @@ new_git_repository(
 	build_file = "BUILD.rangev3",
 	commit = "4f4beb45c5e56aca4233e4d4c760208e21fff2ec", # specific commit used by graph, made on Jan 11 2019
 	remote = "https://github.com/ericniebler/range-v3",
+  shallow_since = "1547250373 -0800",
 )
 
 # BOOST Libraries dependences
