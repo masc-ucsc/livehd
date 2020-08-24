@@ -42,6 +42,7 @@ protected:
     std::vector<mmap_lib::Tree_index> index_order;
 
     tree.each_top_down_fast([&index_order](const mmap_lib::Tree_index &index, const Node_data &node) {
+      (void)node;
       // fmt::print(" level:{} pos:{} create_pos:{} fwd:{} bwd:{} leaf:{}\n", index.level, index.pos, node.create_pos, node.fwd_pos, node.bwd_pos, node.leaf);
 
       if (index.level || index.pos)

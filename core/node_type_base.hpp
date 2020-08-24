@@ -88,18 +88,18 @@ enum Node_Type_Op : uint8_t {
 class Node_Type {
 public:
   constexpr static inline frozen::map<frozen::string, Port_ID, 12> sink_pidmap[] = {
-      {/* invalid */ {"",  0 }, {"" , 0}, {"" , 0}, {"" , 0}, {"" , 0}, {"" , 0}, {"" , 0}, {"" , 0}, {"" , 0}, {"" , 0}, {"" , 0}, {"" , 0}},
-      {/* Memory  */ {"a", 0 }, {"b", 0}, {"c", 0}, {"d", 0}, {"e", 0}, {"f", 0}, {"l", 0}, {"m", 0}, {"p", 0}, {"s", 0}, {"w", 0}, {"" , 0}}
+      {/* invalid */ {"", -1 }, {"" ,-1}, {"" ,-1}, {"" ,-1}, {"" ,-1}, {"" ,-1}, {"" ,-1}, {"" ,-1}, {"" ,-1}, {"" ,-1}, {"" ,-1}, {"" ,-1}},
+      {/* Memory  */ {"a", 0 }, {"b", 1}, {"c", 2}, {"d", 3}, {"e", 4}, {"f", 5}, {"l", 6}, {"m", 7}, {"p", 8}, {"s", 9}, {"w",10}, {"" ,-1}}
   };
 
   constexpr static inline frozen::map<frozen::string, Port_ID, 2> driver_pidmap[] = {
-      { /* invalid */ {"" , 0}, {"", 0}, },
-      { /* Memory  */ {"Q", 0}, {"", 0}, },
+      { /* invalid */ {"" ,-1}, {"",-1}, },
+      { /* Memory  */ {"Q", 0}, {"",-1}, },
   };
 
-  static constexpr Port_ID        get_pid(Node_Type_Op op, frozen::string str) { return driver_pidmap[op].at(str); }
-  static constexpr frozen::string get_name(Node_Type_Op op, Port_ID pid) {
-    for (const auto &e : driver_pidmap[op]) {
+  static constexpr Port_ID        get_driver_pid(Node_Type_Op op, frozen::string str) { return driver_pidmap[op].at(str); }
+  static constexpr frozen::string get_driver_name(Node_Type_Op op, Port_ID pid) {
+    for (const auto e : driver_pidmap[op]) {
       if (e.second == pid)
         return e.first;
     }
