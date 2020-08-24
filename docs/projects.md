@@ -31,8 +31,19 @@ lgedge and lgraph. Like LGraph, Graph_core should use the mmap_lib::vector for
 storage.
 
 
+We do not use a typical CSR because insertions/deletions are very frequent.
+Also important, the Index_ID returned after creation must be stable (can not
+change due to surounding addition/deletions) and it should be stable across
+program executions (load/un-load with mmaps).
+
+
 The current LGraph node uses around 34 bytes per Node_pin. This implementation
-should be around 18 bytes per node.
+should be around 18 bytes per node. The state of the art (not fast
+insert/delete) compressed graphs can reach 10 bits per edge vs the expected
+40bits per edge (18bytes/3+edges). So there is still room for improvement, but
+we should not sacrifice speed, insertion/deletion, bidirectional, and Index_ID
+stability.
+
 
 ```
 Graph_core {
