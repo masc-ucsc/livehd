@@ -44,7 +44,7 @@ do
     echo "Pyrope -> LNAST-SSA Graphviz debug"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "inou.pyrope files:inou/cfg/tests/${pt}.prp |> inou.lnast_dfg.dbg_lnast_ssa |> inou.graphviz.from"
+    ${LGSHELL} "inou.pyrope files:inou/cfg/tests/${pt}.prp |> inou.lnast_tolg.dbg_lnast_ssa |> inou.graphviz.from"
 
     if [ -f ${pt}.lnast.dot ]; then
       echo "Successfully create a lnast from inou/cfg/tests/${pt}.prp"
@@ -57,8 +57,8 @@ do
     echo "Pyrope -> LNAST -> LGraph"
     echo "----------------------------------------------------"
 
-    # ${LGSHELL} "inou.lnast_dfg.tolg files:${pt}.cfg"
-    ${LGSHELL} "inou.pyrope files:inou/cfg/tests/${pt}.prp |> inou.lnast_dfg.tolg"
+    # ${LGSHELL} "inou.lnast_tolg.tolg files:${pt}.cfg"
+    ${LGSHELL} "inou.pyrope files:inou/cfg/tests/${pt}.prp |> inou.lnast_tolg.tolg"
     if [ $? -eq 0 ]; then
       echo "Successfully create the inital LGraph: inou/cfg/tests/${pt}.prp"
     else
@@ -79,7 +79,7 @@ do
 #     echo "----------------------------------------------------"
 #     echo "Tuple Chain Resolve(LGraph)"
 #     echo "----------------------------------------------------"
-#     ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.resolve_tuples"
+#     ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_tolg.resolve_tuples"
 #     # ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop"
 #     if [ $? -eq 0 ]; then
 #       echo "Successfully resolve the tuple chain: inou/cfg/tests/${pt}.prp"
@@ -154,7 +154,7 @@ do
     # echo "----------------------------------------------------"
     # echo "Assignment_Or_Op Elimination(LGraph)"
     # echo "----------------------------------------------------"
-    # ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.assignment_or_elimination"
+    # ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_tolg.assignment_or_elimination"
     # if [ $? -eq 0 ]; then
     #   echo "Successfully eliminate all assignment or_op: inou/cfg/tests/${pt}.prp"
     # else
@@ -188,7 +188,7 @@ do
     # echo "----------------------------------------------------"
     # echo "Dead Code Elimination(LGraph)"
     # echo "----------------------------------------------------"
-    # ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.dce"
+    # ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_tolg.dce"
     # if [ $? -eq 0 ]; then
     #   echo "Successfully perform dead code elimination: inou/cfg/tests/${pt}.prp"
     # else

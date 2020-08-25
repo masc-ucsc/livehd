@@ -3,7 +3,7 @@ rm -rf ./lgdb
 
 pts='BundleCombiner'
 
-#SimpleBitOps Ops -- parity and mod op not in lnast_dfg
+#SimpleBitOps Ops -- parity and mod op not in lnast_tolg
 
 #HwachaSequencer -- printf, pad, stop
 
@@ -52,7 +52,7 @@ do
     echo "HiFIRRTL-> SSAed LNAST"
     echo "----------------------------------------------------"
   
-    ${LGSHELL} "inou.firrtl.tolnast files:inou/firrtl/tests/proto/${pt}.hi.pb |> pass.lnast_dfg.dbg_lnast_ssa |> inou.graphviz.from"
+    ${LGSHELL} "inou.firrtl.tolnast files:inou/firrtl/tests/proto/${pt}.hi.pb |> pass.lnast_tolg.dbg_lnast_ssa |> inou.graphviz.from"
   
     if [ -f ${pt}.lnast.dot ]; then
       echo "Successfully create ssaed lnast from inou/firrtl/tests/proto/${pt}.hi.pb"
@@ -73,7 +73,7 @@ do
     echo "HiFIRRTL -> LNAST -> Optimized LGraph"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "inou.firrtl.tolnast files:inou/firrtl/tests/proto/${pt}.hi.pb |> pass.lnast_dfg |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.bitwidth"
+    ${LGSHELL} "inou.firrtl.tolnast files:inou/firrtl/tests/proto/${pt}.hi.pb |> pass.lnast_tolg |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.bitwidth"
     if [ $? -eq 0 ]; then
       echo "Successfully translated FIRRTL to LNAST to LGraph: ${pt}.hi.pb"
     else
