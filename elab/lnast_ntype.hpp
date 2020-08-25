@@ -388,11 +388,11 @@ protected:
     "select", // []
     "bit_select", // [[]]
     "range",         // ..
-    "shift_right",
-    "shift_left",
-    "logic_shift_right",
-    "arith_shift_right",
-    "arith_shift_left",
+    ">>",//shift_right",
+    "<<",//shift_left",
+    ">>",//logic_shift_right",
+    ">>",//arith_shift_right",
+    "<<",//arith_shift_left",
     "rotate_shift_right",
     "rotate_shift_left",
     "dynamic_shift_right",
