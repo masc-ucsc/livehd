@@ -868,7 +868,7 @@ void Pass_cprop::merge_to_tuple(std::shared_ptr<Lgtuple> ctup, Node &node, Node 
 
 
 void Pass_cprop::trans(LGraph *lg) {
-  Lbench b("pass.cprop");
+  /* Lbench b("pass.cprop"); */
 
   bool tup_get_left=false;
 
@@ -922,7 +922,7 @@ void Pass_cprop::trans(LGraph *lg) {
     try_collapse_forward(node, inp_edges_ordered);
   }
 
-  fmt::print("starting final GC pass...\n");
+  fmt::print("starting final Garbage Collection pass...\n");
 
   for (auto node : lg->fast()) {
     if(!tup_get_left && node.is_type_tup()) {
