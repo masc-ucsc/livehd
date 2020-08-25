@@ -124,6 +124,19 @@ std::string Cpp_parser::supporting_fstart(std::string basename_s){
 std::string Cpp_parser::supporting_fend(std::string basename_s){
   return absl::StrCat("<<EOF ", basename_s);
 }
+std::string Cpp_parser::supp_buffer_to_print(std::string modname) {
+  std::string header_strt = "class " + modname + " {\n  uint64_t hidx;\n  ";
+
+  std::string outps_nline;
+  for (auto const& [key, val] : outp_bw) {
+    absl::StrAppend(&outps_nline, "UInt<", val, "> " + key + ";\n  ");
+  }
+
+  std::string funcs = modname + "(uint64_t _hidx);\n  void reset_cycle();\n  void cycle();\n";
+
+  std::string trace_part = "#ifdef SIMLIB_TRACE\n  void add_signature(Simlib_signature &sign);\n#endif";
+  return absl::StrCat(header_strt + outps_nline + funcs + trace_part + "\n};");
+}
 
 std::string Cpp_parser::main_fstart(std::string basename, std::string basename_s) {
   return absl::StrCat("file: ", basename, "\n#include \"livesim_types.hpp\"\n#include \"", basename_s, "\"\n");
@@ -164,13 +177,27 @@ void Cpp_parser::get_maps() {
 void Cpp_parser::call_get_maps() {
   Cpp_parser::get_maps();
 }
-std::string Cpp_parser::outline_cpp(std::string modname) {
+int Cpp_parser::indent_final_system() {
+  return 1;
+}
+std::string Cpp_parser::final_print(std::string modname, std::string buffer_to_print) {
   //constructor
-  std::vector<std::string> name_split = absl::StrSplit(modname, "_");
-  std::string constructor_vcd = modname + "::" + modname + "(uint64_t _hidx, const std::string &parent_name, vcd::VCDWriter* writer)\n\t: hidx(_hidx)\n\t, scope_name(parent_name+\"." + name_split[1] + "\")\n\t, vcd_writer(writer) {\n}\n";
-  std::string constructor = modname + "::" + modname + "(uint64_t _hidx)\n\t: hidx(_hidx) {\n}\n";
+  //std::vector<std::string> name_split = absl::StrSplit(modname, "_");
+  //std::string constructor_vcd = modname + "::" + modname + "(uint64_t _hidx, const std::string &parent_name, vcd::VCDWriter* writer)\n\t: hidx(_hidx)\n\t, scope_name(parent_name.empty() ? \"" + name_split[1] + "\": parent_name + \"." + name_split[1] + "\")\n\t, vcd_writer(writer) {\n}\n";
+  std::string constructor_vcd = modname + "::" + modname + "(uint64_t _hidx, const std::string &parent_name, vcd::VCDWriter* writer)\n  : hidx(_hidx)\n  , scope_name(parent_name.empty() ? \"" + modname + "\": parent_name + \"." + modname + "\")\n  , vcd_writer(writer) {\n}\n";
+  std::string constructor = modname + "::" + modname + "(uint64_t _hidx)\n  : hidx(_hidx) {\n}\n";
 
-  //reset function
+  //TODO: reset function
+  
   //main code part function
-  return absl::StrCat(constructor_vcd, "\n", constructor);
+  std::string main_func = "void "+ modname+"::cycle() {\n"+ buffer_to_print+"\n}";
+  return absl::StrCat(constructor_vcd, "\n", constructor, "\n", main_func, "\n");
+}
+
+std::string Prp_parser::final_print(std::string , std::string buffer_to_print) {
+ return absl::StrCat(buffer_to_print+"\n");
+}
+
+std::string Ver_parser::final_print(std::string, std::string buffer_to_print) {
+ return absl::StrCat(buffer_to_print+"\n");
 }
