@@ -12,7 +12,7 @@ pts='reg_bits_set tuple_copy logic
      '
 
 #make sure to call Pyrope_compile() in the end of script
-pts='firrtl_gcd'
+# pts='firrtl_gcd'
 pts_hier='sum funcall'
 pts_hier2='sum2 funcall2'
 pts_hier4='funcall4'
@@ -105,8 +105,8 @@ Pyrope_compile () {
       echo "Local Bitwidth Optimization(LGraph)"
       echo "----------------------------------------------------"
 
-      # ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.cprop"
-      ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth |> pass.bitwidth |> pass.cprop"
+      # ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth |> pass.bitwidth |> pass.cprop"
+      ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.cprop"
       if [ $? -eq 0 ]; then
         echo "Successfully optimize design bitwidth: inou/pyrope/tests/compiler/${pt}.prp"
       else
