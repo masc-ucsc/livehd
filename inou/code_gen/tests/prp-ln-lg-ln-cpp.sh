@@ -30,8 +30,8 @@ do
     echo "Pyrope -> LNAST -> LGraph"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "inou.pyrope files:inou/${folder}/tests/compiler/${pt}.prp |> pass.lnast_dfg"
-    #${LGSHELL} "inou.pyrope files:${pt}.prp |> pass.lnast_dfg"
+    ${LGSHELL} "inou.pyrope files:inou/${folder}/tests/compiler/${pt}.prp |> pass.lnast_tolg"
+    #${LGSHELL} "inou.pyrope files:${pt}.prp |> pass.lnast_tolg"
     if [ $? -eq 0 ]; then
       echo "Successfully create the inital LGraph with tuples: ${pt}.cfg"
     else

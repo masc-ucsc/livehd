@@ -60,7 +60,7 @@ do
     echo "----------------------------------------------------"
     echo "FIRRTL (Proto) -> LNAST -> LGraph -> Verilog"
     echo "----------------------------------------------------"
-    ${LGSHELL} "inou.firrtl.tolnast files:${pt}.pb |> lnast.dump |> pass.lnast_dfg |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.bitwidth |> inou.graphviz.from |> inou.yosys.fromlg"
+    ${LGSHELL} "inou.firrtl.tolnast files:${pt}.pb |> lnast.dump |> pass.lnast_tolg |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.bitwidth |> inou.graphviz.from |> inou.yosys.fromlg"
     if [ $? -eq 0 ]; then
       echo "Successfully generated Verilog (Proto): ${pt}"
     else

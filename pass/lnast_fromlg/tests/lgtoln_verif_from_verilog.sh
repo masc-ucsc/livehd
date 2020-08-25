@@ -15,12 +15,12 @@ pts='trivial3 logic_bitwise_op_gld common_sub
 #  Node not yet handled in some other pass:
 #     - consts (shift_left not yet handled in pass.bw)
 #     - satsmall, satlarge (mult not supported in pass.bw)
-#     - arith (mod op not yet suppoted in pass.lnast_dfg)
+#     - arith (mod op not yet suppoted in pass.lnast_tolg)
 #  Problems with registers:
 #     - simple_flop
 #     - cse_basic
 #     - shift
-#  pass.lnast_dfg requires temp vars to be used immediately after being set:
+#  pass.lnast_tolg requires temp vars to be used immediately after being set:
 #     - long_gcd
 #  Submodules failing
 #     - submodule
@@ -49,7 +49,7 @@ do
     echo "----------------------------------------------------"
     echo "Verilog -> LGraph -> LNAST -> LGraph"
     echo "----------------------------------------------------"
-    ${LGSHELL} "inou.yosys.tolg files:inou/yosys/tests/${pt}.v top:${pt} |> pass.cprop |> pass.cprop |> inou.graphviz.from |> pass.lnast_fromlg |> lnast.dump |> pass.lnast_dfg path:lgdb2"
+    ${LGSHELL} "inou.yosys.tolg files:inou/yosys/tests/${pt}.v top:${pt} |> pass.cprop |> pass.cprop |> inou.graphviz.from |> pass.lnast_fromlg |> lnast.dump |> pass.lnast_tolg path:lgdb2"
     if [ $? -eq 0 ]; then
       echo "Successfully created the inital LGraph using Yosys: ${pt}.v"
     else
