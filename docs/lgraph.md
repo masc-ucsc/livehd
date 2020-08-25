@@ -220,19 +220,26 @@ node_pin.set_delay(float delay);
 
 For each LGraph node, there is a specific semantic. This section explains the
 operation to perform for each node. It includes a precise way to compute the
-maximum and minimum value for the output. In most cases, if the minimum value
-can not be negative, the result is unsigned.
+maximum and minimum value for the output. 
+
+In LGraph, the cells operate like having unlimited precision with signed
+numbers. Most HDLs focus on unsigned, but LiveHD handles the superset (sign and
+unlimited precision). The precision is reduced only explicitly with few
+operations like and-gate with masks or Shifts. In LGraph, an unsigned value is
+a value that can not be negative.
 
 
 The document also explains corner cases in relationship to Verilog and how to
-convert to/from Verilog semantics. In general the nodes have a single output
-with the exception of complex nodes like subgraphs or memories.
+convert to/from Verilog semantics. These are corner cases to deal with sign and
+precision. Each HDL may have different semantics, the Verilog is to showcase
+the specifics.
 
 
-Cells with single output, have 'Y' as output. The inputs are single characters
-'A', 'B'... For most inputs, there can be many drivers. E.g: a single Sum cell
-can do `Y=3+20+a0+a3` where `A_{0} = 3`, `A_{1} = 20`, `A_{2} = a0`, and `A_{3}
-= a3`.
+In general the nodes have a single output with the exception of complex nodes
+like subgraphs or memories.  Cells with single output, have 'Y' as output. The
+inputs are single characters 'A', 'B'... For most inputs, there can be many
+drivers. E.g: a single Sum cell can do `Y=3+20+a0+a3` where `A_{0} = 3`, `A_{1}
+= 20`, `A_{2} = a0`, and `A_{3} = a3`.
 
 If an input can not have multiple drivers, a lower case name is used ('a',
 'b'...). E.g: the right shift cell is `Y=a>>b` because only one driver can
@@ -241,18 +248,15 @@ connect to 'a' and 'b'.
 
 The section includes description on how to compute the maximum (`max`) and
 minimum (`min`) allowed result range. This is used by the bitwidth inference
-pass. To easy the explanation, a `sign` value means that the result may be
-negative (`sign = result.min<0`). `known` is true if the result sign is known
-(`known = result.max<0 or result.min>=0`), either positive or negative (`neg`).
+pass. To ease the explanation, a `sign` value means that the result may be
+negative (`a.sign == a.min<0`). `known` is true if the result sign is known
+(`a.known == a.max<0 or a.min>=0`), either positive or negative (`neg ==
+a.max<0`). The cells explanation also requires the to compute the bit mask
+(`a.mask == (1<<a.bits)-1`).
 
-For any value (`val`), the number of bits required (`bits`) is `val.bits =
-log2(absmax(val.max,val.min))+val.sign?1:0`.
+For any value (`a`), the number of bits required (`bits`) is `a.bits =
+log2(absmax(a.max,a.min))+a.sign?1:0`.
 
-
-In LGraph, the cells operate like having unlimited precision with signed
-numbers. Most HDLs focus on unsigned, but LiveHD handles the superset (sign and
-unlimited precision). The preciion is reduced only explicitly with few
-operations like and-gate with masks or Shifts.
 
 ### Sum_op
 
@@ -306,10 +310,8 @@ In Verilog, the addition is unsigned if any of the inputs is unsigned. If any
 input is unsigned. all the inputs will be "unsigned extended" to match the
 largest value. This is different from Sum_Op semantics were each input is
 signed or unsigned extended independent of the other inputs. To match the
-semantics, when mixing signed and unsigned, the signed inputs connected to
-Sum_Op with less than the maximum number of bits should be 1 bit zero extended.
-An easy way to zero extend a number if with the Join_Op (Join_Op has an
-unsigned output if the last input is unsigned or zero).
+semantics, when mixing signed and unsigned, all the potentially negative inputs
+must be converted to unsign with the Unsigned_op.
 
 
 ```verilog
@@ -335,8 +337,8 @@ c == -16 (!!)
 * `Y = x+x+...` becomes `Y = (x<<1)+...`
 * `Y = (x<<n)+(y<<m)` where m>n becomes `Y = (x+y<<(m-n)<<n`
 * `Y = (~x)+1+...` becomes `Y = ...-x`
-* `Y = a + (b<<n)` becomes `Y = {(a>>n)+b, a&((1<<n)-1)}`
-* `Y = a - (b<<n)` becomes `Y = {(a>>n)-b, a&((1<<n)-1)}`
+* `Y = a + (b<<n)` becomes `Y = {(a>>n)+b, a&n.mask}`
+* `Y = a - (b<<n)` becomes `Y = {(a>>n)-b, a&n.mask}`
 * If every x,y... lower bit is zero `Y=x+y+...` becomes Y=((x>>1)+(y>>1)+..)<<1
 
 ### Mult_op
@@ -403,9 +405,9 @@ LiveHD mult node result (Y) number of bits can be more efficient than in
 Verilog.  E.g: if the max value of A0 is 3 (2 bits) and A1 is 5 (3bits). If the
 result is unsigned, the maximum result is 15 (4 bits). In Verilog, the result
 will always be 5 bits. If the Verilog result was to an unsigned variable.
-Either all the inputs were unsigned, or there should be a Join_Op with 1bit
-zero to force the MSB as positive. This extra bit will be simplified but it
-will notify LGraph that the output is to be treated as unsigned.
+Either all the inputs were unsigned, or there should pass to an Unsigned_op to
+force the MSB as positive. This extra bit will be simplified but it will notify
+LGraph that the output is to be treated as unsigned.
 
 #### Peephole Optimizations
 
@@ -463,8 +465,10 @@ The same considerations as in the multiplication should be applied.
 * `Y = a/power2b` becomes `Y=a>>log2(power2b)` if `Y.known and !Y.neg`
 * `Y = a/power2b` becomes `Y=1+~(a>>log2(power2b))` if `Y.known and Y.neg`
 * `Y = (x*c)/a` if c.bits>a.bits becomes `Y = x * (c/a)` which should be a smaller division.
-* If b is a constant and `Y.known and !Y.neg`. From the hackers delight, we know that the division can be changed for a multiplication `Y=(a*(((1<<(a.__bits+2)))/b+1))>>(a.__bits+2)`
-* If a sign is not `known`. Then `Y = Y.neg? (~Y_unsigned+1):Y_unsigned`
+* If b is a constant and `Y.known and !Y.neg`. From the hackers delight, we
+* know that the division can be changed for a multiplication
+* `Y=(a*(((1<<(a.bits+2)))/b+1))>>(a.bits+2)` If a sign is not `known`. Then `Y
+* = Y.neg? (~Y_unsigned+1):Y_unsigned`
 
 
 #### Modulo
@@ -493,7 +497,7 @@ y = a - (a>>n)<<n
 The add optimization should reduce it to:
 
 ```
-y = a & ((1<<n)-1)
+y = a & n.mask
 ```
 
 ### Not_op
@@ -535,123 +539,58 @@ Same semantics as verilog
 No optimizations by itself, it has a single input. Other operations like Sum_Op can optimize when combined with Not_Op.
 
 
-### Sext_op
+### Unsigned_op
 
-This operatator sign extends the input picking the 'b' bit as most significant
-or sign bit. If the input has more bits, all the upper bits are cleared or set
-depending on the sign extension.
+Every value is signed but some times a value must be treated as unsigned.
+LGraph has the Unsigned_op that behaves like concatenating a zero bit to the
+most significant bit of the input value. The result is an always positive
+value. The result is always positive.
 
-```{.graph .center caption="Sext LGraph Node."}
-digraph Sext {
+
+```{.graph .center caption="Unsigned_op LGraph Node."}
+digraph Unsigned {
     rankdir=LR;
     size="1,0.5"
 
-    node [shape = circle]; cell;
+    node [shape = circle]; Unsigned;
     node [shape = point ]; q0
-    node [shape = point ]; q1
     node [shape = point ]; q
 
-    q0 -> cell [ label ="a" ];
-    q1 -> cell [ label ="b" ];
-    cell  -> q [ label = "Y" ];
+    q0 -> Unsigned [ label ="a" ];
+    Unsigned  -> q [ label = "Y" ];
 }
 ```
 
 #### Forward Propagation
 
-* $Y = \begin{cases} a\&((1\ll b)-1)  & \text{if}\ a[b]==0 \\ 
-                           -(a\&((1\ll b)-1)) & \text{otherwise} \end{cases}$
-* $Y.max = \text{min}(a.max,(1<<b)-1)$
-* $Y.min = \text{max}(a.min,-(1<<b)$
+* $Y     = \begin{cases} a               & a \get 0 \\
+                         a.mask-(\neg a) & otherwise \end{cases}$
+* $Y.max = \begin{cases} a.max           & a \get 0 \\
+                         a.mask          & otherwise \end{cases}$
+* $Y.min = 0$
 
 #### Backward Propagation
 
-If the driver to Sext_Op only drives this node, the same Y.max and Y.min can be
-propagated to the VAL.max and VAL.min.  The reason is that the upper dropped
-bits were not used anyway, so no need to have all those bits computed.
-
-* $a.max = Y.max$
-* $a.min = Y.min$
-
-#### Other Considerations
-
-The Sext_Op is similar to the Pick_Op when `b` is zero and `b` is the same. The
-difference is the sign extension. For Pick_Op, the result is always unsigned,
-for Sext_Op, the result can be signed.
-
-
-#### Peephole Optimizations
-
-* `Y = sext(a,b)` if `maxabs(a.max,a.min) < (1<<b)` becomes `Y=a`
-* `Y = sext(a,b)` if `a.min>=0` becomes `Y=a&(1<<b)-1`
-
-
-### Join_op
-
-Join or concatenate operator. The output keeps the sign of the most last or
-most significant input.  This means that if the upper value is negative, the
-result is negative.
-
-```{.graph .center caption="Join LGraph Node."}
-digraph Join {
-    rankdir=LR;
-    size="1,0.5"
-
-    node [shape = circle]; Join;
-    node [shape = point ]; q0
-    node [shape = point ]; q1
-    node [shape = point ]; q2
-    node [shape = point ]; q
-
-    q0 -> Join [ label ="a" ];
-    q1 -> Join [ label ="b" ];
-    q2 -> Join [ label ="c" ];
-    Join  -> q [ label = "Y" ];
-}
-```
-
-#### Forward Propagation
-
-* $Y = ... c<<(b.bits+a._bits) | b<<(a.bits) | a$
-* $Y.max = \begin{cases} c.max<<(b.bits+a.bits) & c.max \ne 0 \\
-                         b.max<<(a.bits)        & b.max \be 0 \\
-                         a.max                  & otherwise \end{cases}$
-* $Y.min = \begin{cases} c.min<<(b.bits+a.bits) & c.min \ne 0 \\
-                         b.min<<(a.bits)        & b.min \be 0 \\
-                         a.min                  & otherwise \end{cases}$
-
-#### Backward Propagation
-
-Back propagation is possible when only one input is unknown. It is conservative
-because the max/min for the intermediate values are gone.
-
-* $b.max =  \frac{Y.max}{c.max<<(a.bits)}$ if b is not the highest value
-* $b.min = -\frac{Y.min}{c.min<<(a.bits)}$ if b is not the highest value
-
-* $c.max =  \frac{Y.max}{1<<(a.bits+b.bits)}$ if c is the highest value
-* $c.min =  \frac{Y.min}{1<<(a.bits+b.bits)}$ if c is the highest value
+* $a.max = Y.max $
+* $a.min = -Y.max-1 $
 
 
 #### Other Considerations
 
-Join_Op has two uses besides concatenating values. It is the way to implement a left shift
-and it is the way to create an unsigned value out of a signed value.
-
-Join_Op(xx,0u3bits) is a left shift by adding as many zeros as the `a` has.
-
-Join_Op can not be used to created an unsigned value. Join_Op(0,x) is the same as x.
+It is important to notice that Unsigned_op is different from a absolute
+calculation. It is like a concatenating a zero to convert the signed values.
 
 
 #### Peephole Optimizations
 
-* `Y = Join(0,a,b)` becomes `Y= Join(a,b)`
-* `Y = Join(a,0)` is the implementation for `a<<n` where `n=0.bits`
-* `Y = Join(0,a)` becomes `Y=a` when `a.min>=0` 
+* `Y = Unsigned(a)` becomes `Y= a` when `a.min>=0`
+* `Y = And(Unsigned(a),a.mask)` becomes `Y= a`
+* `Y = And(Unsigned(a),b)` can become `Y= Unsigned(And(a,b))`
 
 ### Pick_op
 
 Pick some bits from the VAL input pin
-Y = VAL[[OFF..(OFF+Y.__bits)]]}
+Y = VAL[[OFF..(OFF+Y.bits)]]}
 
 #### Other Considerations
 
@@ -669,8 +608,7 @@ Verilog has 2 types of shift `>>` and `>>>`. The first is unsigned right shift,
 the 2nd is arithmetic right shift. LGraph only has arithmetic right shift
 (ShiftRigt_op). The verilog translation should make the value unsigned
 (`ShiftRigt(Join(0,a),b)`) before calling the shift operation. Conversely, for
-a `>>>` if the input is unsigned, the Sign Extend should be called first
-(`ShiftRigt(Sext(a),b)`)
+a `>>>` if the input is Verilog unsigned (`ShiftRigt(a,b)`)
 
 ### Mux_op
 

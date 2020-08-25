@@ -3,7 +3,7 @@ rm -rf ./lgdb
 rm -rf ./lgdb2
 rm -rf ./*.dot*
 
-pts='logic' #'funcall4' # tuple_if'
+pts='reset1' #'funcall4' # tuple_if'
 folder='pyrope'
 
 LGSHELL=./bazel-bin/main/lgshell
@@ -30,8 +30,8 @@ do
     echo "Pyrope -> LNAST -> LGraph"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "inou.pyrope files:inou/${folder}/tests/compiler/${pt}.prp |> pass.lnast_dfg"
-    #${LGSHELL} "inou.pyrope files:${pt}.prp |> pass.lnast_dfg"
+    ${LGSHELL} "inou.pyrope files:inou/${folder}/tests/compiler/${pt}.prp |> pass.lnast_tolg"
+    #${LGSHELL} "inou.pyrope files:${pt}.prp |> pass.lnast_tolg"
     if [ $? -eq 0 ]; then
       echo "Successfully create the inital LGraph with tuples: ${pt}.cfg"
     else

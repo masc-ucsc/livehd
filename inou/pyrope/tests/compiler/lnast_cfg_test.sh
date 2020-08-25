@@ -70,8 +70,8 @@ do
     echo "CFG -> LNAST -> LGraph"  
     echo "----------------------------------------------------"
     
-    # ${LGSHELL} "inou.lnast_dfg.tolg files:${pt}.cfg"
-    ${LGSHELL} "inou.cfg files:${pt}.cfg |> inou.lnast_dfg.tolg"
+    # ${LGSHELL} "inou.lnast_tolg.tolg files:${pt}.cfg"
+    ${LGSHELL} "inou.cfg files:${pt}.cfg |> inou.lnast_tolg.tolg"
     if [ $? -eq 0 ]; then
       echo "Successfully create the inital LGraph with tuples: ${pt}.cfg"
     else
@@ -91,7 +91,7 @@ do
     echo "----------------------------------------------------"
     echo "Reduced_Or_Op Elimination(LGraph)"  
     echo "----------------------------------------------------"
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.reduced_or_elimination"
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_tolg.reduced_or_elimination"
     if [ $? -eq 0 ]; then
       echo "Successfully eliminate all reduced_or_op: ${pt}.cfg"
     else
@@ -109,7 +109,7 @@ do
     echo "----------------------------------------------------"
     echo "Tuple Chain Resolve(LGraph)"  
     echo "----------------------------------------------------"
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.resolve_tuples"
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_tolg.resolve_tuples"
     if [ $? -eq 0 ]; then
       echo "Successfully resolve the tuple chain: ${pt}.cfg"
     else
