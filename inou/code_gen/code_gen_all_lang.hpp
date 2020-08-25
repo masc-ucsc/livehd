@@ -98,7 +98,7 @@ else
   virtual std::string_view supp_buffer_to_print() {return "";};
 
   //for main file (cpp file)
-  virtual std::string main_fstart(std::string basename, std::string basename_s) {return absl::StrCat("file: ", basename, "\n");} ;
+  virtual std::string main_fstart(std::string basename, std::string ) {return absl::StrCat("file: ", basename, "\n");} ;//the other arg is basename_s
   virtual bool convert_parameters(std::string , std::string) {return false;};//1st param is key and 2nd is ref
 
   //for cpp constructor:
