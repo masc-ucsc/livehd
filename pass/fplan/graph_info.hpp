@@ -1,13 +1,13 @@
 #pragma once
 #include "i_resolve_header.hpp"
-#include "lgraph.hpp"
+#include "lgraph_base_core.hpp"
 
 typedef decltype(graph::Bi_adjacency_list().insert_vert())                                         vertex_t;
 typedef decltype(graph::Bi_adjacency_list().insert_edge(graph::Bi_adjacency_list().insert_vert(),
                                                         graph::Bi_adjacency_list().insert_vert())) edge_t;
 
 typedef decltype(graph::Bi_adjacency_list().vert_map<std::string>())  name_map_t;
-typedef decltype(graph::Bi_adjacency_list().vert_map<Lg_type_id>())   id_map_t;
+typedef decltype(graph::Bi_adjacency_list().vert_map<unsigned long>())   id_map_t;
 typedef decltype(graph::Bi_adjacency_list().vert_map<double>())       area_map_t;
 typedef decltype(graph::Bi_adjacency_list().edge_map<unsigned int>()) weight_map_t;
 
@@ -28,7 +28,7 @@ public:
   Graph_info()
       : al(graph::Bi_adjacency_list())
       , debug_names(al.vert_map<std::string>())
-      , ids(al.vert_map<Lg_type_id>())
+      , ids(al.vert_map<unsigned long>())
       , areas(al.vert_map<double>())
       , weights(al.edge_map<unsigned int>())
       , sets(1, al.vert_set()) {}

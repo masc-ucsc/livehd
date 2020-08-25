@@ -27,12 +27,6 @@ protected:
 
   Hierarchy_tree htree;
 
-  Hierarchy_tree *ref_htree() {
-    if (htree.empty())
-      htree.regenerate();
-    return &htree;
-  }
-
   explicit LGraph(std::string_view _path, std::string_view _name, std::string_view _source);
 
   Index_ID get_root_idx(Index_ID idx) const {
@@ -48,7 +42,6 @@ protected:
 
     return node_internal[idx].get_nid();
   }
-
 
   Node_pin_iterator out_connected_pins(const Node &node) const;
   Node_pin_iterator inp_connected_pins(const Node &node) const;
@@ -152,6 +145,16 @@ public:
 
   bool is_empty() const { return fast_first() == 0; }
 
+  Hierarchy_tree *ref_htree() {
+    if (htree.empty())
+      htree.regenerate();
+    return &htree;
+  }
+/*
+  mmap_lib::vector<Node_internal>& ref_internal() {
+    return node_internal;
+  }
+*/
   Index_ID add_edge(const Node_pin &dpin, const Node_pin &spin) {
     I(dpin.is_driver());
     I(spin.is_sink());
@@ -227,6 +230,9 @@ public:
 
   void each_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)>);
   void each_sub_unique_fast(const std::function<bool(Node &, Lg_type_id)> fn);
+
+  //void each_sub_with_hier(const Hierarchy_index hidx, const std::function<bool(Node &, Lg_type_id)> fn);
+  //Hierarchy_index find_hidx_from_node(const Node& n);
 
   template <typename FN>
   void each_sub_fast(const FN f1) {
