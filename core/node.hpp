@@ -76,6 +76,11 @@ public:
 
     Index_ID get_nid() const { return nid; }  // Mostly for debugging or to know order
 
+    Hierarchy_index get_hidx() const {
+      I(!hidx.is_invalid());
+      return hidx;
+    }
+
     Node get_node(LGraph *lg) const { return Node(lg, *this); }
 
     constexpr bool is_invalid() const { return nid == 0; }

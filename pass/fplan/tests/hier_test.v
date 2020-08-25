@@ -36,6 +36,7 @@ module mid1(input [899:0] di, output [899:0] dout);
   wire [24:0] w_7_to_2;
 
   leaf1 l1(.ai(w_2_to_1), .ao(w_1_to_2));
+  leaf1 ltest(.ai(w_2_to_1), .ao(dout[15:1]));
   leaf2 l2(.ai(w_1_to_2), .ao(w_2_to_1), .bi(w_7_to_2), .bo(w_2_to_7));
   leaf7 l7(.bi(w_2_to_7), .bo(w_7_to_2));
 
