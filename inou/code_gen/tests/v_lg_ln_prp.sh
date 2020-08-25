@@ -3,7 +3,7 @@ rm -rf ./lgdb
 rm -rf ./lgdb2
 rm -rf ./*.dot
 rm -rf ./*.pdf
-pts='mem_reset'
+pts='consts'
 
 
 LGSHELL=./bazel-bin/main/lgshell
