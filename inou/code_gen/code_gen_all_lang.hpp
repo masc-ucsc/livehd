@@ -89,20 +89,20 @@ else
   //in verilog, assign stmt starts with assign keyword. thus this function.
   virtual std::string_view assign_node_strt() {return "";}
 
-  virtual std::string starter(std::string_view filename) {return "";} ;
+  virtual std::string starter(std::string_view ) {return "";} ;//filename goes in here
 
   //for header file:
-  virtual std::string supporting_fend(std::string basename_s) {return "";} ;
-  virtual std::string supporting_fstart(std::string basename_s) {return "";} ;
+  virtual std::string supporting_fend(std::string) {return "";} ;//basename_s goes here
+  virtual std::string supporting_fstart(std::string) {return "";} ;//basename_s goes in here
   virtual std::string_view supporting_ftype() {return "";};
   virtual std::string_view supp_buffer_to_print() {return "";};
 
   //for main file (cpp file)
   virtual std::string main_fstart(std::string basename, std::string basename_s) {return absl::StrCat("file: ", basename, "\n");} ;
-  virtual bool convert_parameters(std::string key, std::string ref) {return false;};
+  virtual bool convert_parameters(std::string , std::string) {return false;};//1st param is key and 2nd is ref
 
   //for cpp constructor:
-  virtual std::string outline_cpp(std::string modname) {return "";};
+  virtual std::string outline_cpp(std::string) {return "";};//param is modname
   virtual void call_get_maps() {;};//for debugging only
 };
 

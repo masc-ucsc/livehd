@@ -50,7 +50,7 @@ void Pass_bitwidth::trans(Eprp_var &var) {
 }
 
 void Pass_bitwidth::do_trans(LGraph *lg) {
-  Lbench b("pass.bitwidth");
+  /* Lbench b("pass.bitwidth"); */
   bw_pass(lg);
 }
 
@@ -423,7 +423,7 @@ void Pass_bitwidth::process_attr_set_dp_assign(Node &node) {
   auto dpin_value    = node.get_sink_pin(0).get_driver_pin();
   auto dpin_output   = node.get_driver_pin(0);
 
-  auto           it = bwmap.find(dpin_variable.get_compact());
+  auto it = bwmap.find(dpin_variable.get_compact());
   Bitwidth_range bw_variable(0);
   if (it != bwmap.end()) {
     bw_variable = it->second;
