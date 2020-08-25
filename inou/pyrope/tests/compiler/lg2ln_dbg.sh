@@ -41,7 +41,7 @@ Pyrope_compile () {
     echo "Pyrope -> LNAST-SSA Graphviz debug"
     echo "----------------------------------------------------"
   
-    ${LGSHELL} "inou.pyrope files:inou/cfg/tests/${pt}.prp |> inou.lnast_dfg.dbg_lnast_ssa |> inou.graphviz.from"
+    ${LGSHELL} "inou.pyrope files:inou/cfg/tests/${pt}.prp |> inou.lnast_tolg.dbg_lnast_ssa |> inou.graphviz.from"
   
     if [ -f ${pt}.lnast.dot ]; then
       echo "Successfully create a lnast from inou/cfg/tests/${pt}.prp"
@@ -55,8 +55,8 @@ Pyrope_compile () {
       echo "Pyrope -> LNAST -> LGraph"
       echo "----------------------------------------------------"
   
-      # ${LGSHELL} "inou.lnast_dfg.tolg files:${pt}.cfg"
-      ${LGSHELL} "inou.pyrope files:inou/cfg/tests/${pt}.prp |> inou.lnast_dfg.tolg"
+      # ${LGSHELL} "inou.lnast_tolg.tolg files:${pt}.cfg"
+      ${LGSHELL} "inou.pyrope files:inou/cfg/tests/${pt}.prp |> inou.lnast_tolg.tolg"
       if [ $? -eq 0 ]; then
         echo "Successfully create the inital LGraph: inou/cfg/tests/${pt}.prp"
       else
@@ -74,7 +74,7 @@ Pyrope_compile () {
       echo "----------------------------------------------------"
       echo "Copy-Propagation And Tuple Chain Resolve"
       echo "----------------------------------------------------"
-      #${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.resolve_tuples"
+      #${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_tolg.resolve_tuples"
       ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop"
       if [ $? -eq 0 ]; then
         echo "Successfully resolve the tuple chain: inou/cfg/tests/${pt}.prp"
@@ -182,7 +182,7 @@ Pyrope_compile () {
       echo "LGraph -> LNAST -> SSA -> DOT"
       echo "----------------------------------------------------"
     
-      ${LGSHELL} "lgraph.open name:${pt} |> pass.lnast_fromlg |> inou.lnast_dfg.dbg_lnast_ssa |> lnast.dump"
+      ${LGSHELL} "lgraph.open name:${pt} |> pass.lnast_fromlg |> inou.lnast_tolg.dbg_lnast_ssa |> lnast.dump"
     
 
       if [ $? -eq 0 ]; then
@@ -200,7 +200,7 @@ Pyrope_compile () {
       echo "LGraph -> LNAST -> LGraph"
       echo "----------------------------------------------------"
     
-      ${LGSHELL} "lgraph.open name:${pt} |> pass.lnast_fromlg |> inou.lnast_dfg.tolg" 
+      ${LGSHELL} "lgraph.open name:${pt} |> pass.lnast_fromlg |> inou.lnast_tolg.tolg" 
     
 
       if [ $? -eq 0 ]; then
@@ -217,7 +217,7 @@ Pyrope_compile () {
       echo "----------------------------------------------------"
       echo "Copy-Propagation And Tuple Chain Resolve"
       echo "----------------------------------------------------"
-      #${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.resolve_tuples"
+      #${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_tolg.resolve_tuples"
       ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop"
       if [ $? -eq 0 ]; then
         echo "Successfully resolve the tuple chain: inou/cfg/tests/${pt}.prp"

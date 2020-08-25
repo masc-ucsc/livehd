@@ -32,7 +32,7 @@ cc_binary(
             "//pass/lnast_fromlg:pass_lnast_fromlg",
             "//pass/bitwidth:pass_bitwidth",
             "//pass/semantic:pass_semantic",
-            "//pass/lnast_dfg:pass_lnast_dfg",
+            "//pass/lnast_tolg:pass_lnast_tolg",
             "//pass/lnastfmt:pass_lnastfmt",
 
             #add dependencies to new passes here

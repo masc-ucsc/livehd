@@ -81,9 +81,9 @@ After building the LiveHD repo, you can go from Protobuf to Verilog by entering 
 ```
 and then doing the following using a `SimpleBitOps` example:
 ```
-inou.firrtl.tolnast files:inou/firrtl/tests/proto/SimpleBitOps.lo.pb |> inou.lnast_dfg.tolg
+inou.firrtl.tolnast files:inou/firrtl/tests/proto/SimpleBitOps.lo.pb |> inou.lnast_tolg.tolg
 
-lgraph.open name:SimpleBitOps |> inou.lnast_dfg.resolve_tuples |> pass.bitwidth |> inou.lnast_dfg.assignment_or_elimination |> inou.lnast_dfg.dce
+lgraph.open name:SimpleBitOps |> inou.lnast_tolg.resolve_tuples |> pass.bitwidth |> inou.lnast_tolg.assignment_or_elimination |> inou.lnast_tolg.dce
 
 lgraph.open name:SimpleBitOps |> inou.yosys.fromlg
 ```
