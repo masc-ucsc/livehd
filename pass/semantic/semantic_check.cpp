@@ -387,12 +387,22 @@ void Semantic_check::resolve_lhs_rhs_lists(Lnast *lnast) {
 void Semantic_check::resolve_out_of_scope(Lnast *lnast) {
   std::vector<std::string_view> out_of_scope_vars;
   for (auto entry : read_dict) {
-    if (!in_write_list(entry.first, entry.second)) {
+    if (entry.first != "true" && entry.second != "false" && !in_write_list(entry.first, entry.second)) {
       out_of_scope_vars.push_back(entry.first);
     }
   }
   if (out_of_scope_vars.size() != 0) {
     error_print_lnast_var_warn(lnast, out_of_scope_vars);
+    auto first_entry = out_of_scope_vars.begin();
+    fmt::print(fmt::fg(fmt::color::blue), "Out of Scope Variable Warning");
+    fmt::print(": {}", *first_entry);
+    for (auto node_name : out_of_scope_vars) {
+      if (node_name == *first_entry) {
+        continue;
+      }
+      fmt::print(", {}", node_name);
+    }
+    fmt::print(" is/are not defined in the scope of definition\n");
   }
 }
 
@@ -584,6 +594,7 @@ void Semantic_check::check_tree_struct_ops(Lnast *lnast, const Lnast_nid &lnidx_
   //   fmt::print("{} : {}\n", name.first, name.second);
   // }
   // fmt::print("\n");
+  resolve_out_of_scope(lnast);
   out_of_scope_stack.push_back(write_dict);
   out_of_scope_stack.push_back(read_dict);
   write_dict.clear();
@@ -862,6 +873,7 @@ void Semantic_check::do_check(Lnast *lnast) {
   // }
   // fmt::print("\n")
   // Find Errors!
+  resolve_out_of_scope(lnast);
   resolve_read_write_lists(lnast);
   resolve_lhs_rhs_lists(lnast);
   fmt::print("\n");
