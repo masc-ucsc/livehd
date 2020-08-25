@@ -68,9 +68,6 @@ void Pass_bitwidth::process_flop(Node &node) {
   Lconst min_val;
   auto   it3 = bwmap.find(d_dpin.get_compact());
   if (it3 != bwmap.end()) {
-    fmt::print("hello!!\n");
-    fmt::print("hello!!\n");
-    fmt::print("hello!!\n");
     max_val = it3->second.get_max();
     min_val = it3->second.get_min();
   } else if (d_dpin.get_bits()) {
@@ -426,7 +423,7 @@ void Pass_bitwidth::process_attr_set_dp_assign(Node &node) {
   auto dpin_value    = node.get_sink_pin(0).get_driver_pin();
   auto dpin_output   = node.get_driver_pin(0);
 
-  auto           it = bwmap.find(dpin_variable.get_compact());
+  auto it = bwmap.find(dpin_variable.get_compact());
   Bitwidth_range bw_variable(0);
   if (it != bwmap.end()) {
     bw_variable = it->second;
