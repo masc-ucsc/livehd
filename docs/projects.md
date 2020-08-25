@@ -135,6 +135,14 @@ allows faster iteration for the fast pass. The last bit in the 64byte chunk
 indicates if it is a 64 or a 16byte chunk (1 means 64byte). To distinguish
 between master and master_root we use the root field.
 
+Some potential optimizations to explore is to reduce to 12bytes (vs 16) and 48 vs (64). Also,
+to use a variation of the simple-8b encoding for 70 (master_root with 12bytes).
+
+3: 2x34
+2: 4x17
+1: 12+5x11+12
+0: 2x9+4x8+2x9
+
 ## Verilog input with a slang 2 LNAST pass
 
 slang (https://github.com/MikePopoloski/slang) is an open source System Verilog parser/compiler.
