@@ -20,36 +20,27 @@ void Pass_fplan::make_graph(Eprp_var& var) {
   std::cout << "  creating floorplan graph...";
 
   Hierarchy_tree* root_tree;
-  LGraph*         root_lg;
+  //LGraph*         root_lg;
 
   for (auto lg : var.lgs) {
     if (lg->get_lgid() == 1) {
       root_tree = lg->ref_htree();
-      root_lg   = lg;
+      //root_lg   = lg;
     }
   }
 
   // nodes and compact nodes are basically just pointers to the internal lgraph rep.
   // they can be deleted and re-created at will.
 
-  root_tree->dump();
+  //root_tree->dump();
 
-  absl::flat_hash_map<Node, vertex_t> nvmap;
+  //absl::flat_hash_map<Node, vertex_t> nvmap;
 
-  unsigned long unique_value_counter = 0;
-
-  for (auto hidx : root_tree->depth_preorder()) {
-  auto lg = root_tree->ref_lgraph(hidx);
-  lg->each_sub_fast([&](Node& n, Lg_type_id id) -> bool {
-    Node hnode(lg, hidx, n.get_compact_class());
-    for(auto e:hnode.out_edges()) {}
-    for(auto e:hnode.inp_edges()) {}
-  });
-}
-
+  //unsigned long unique_value_counter = 0;
 /*
   for (auto hidx : root_tree->depth_preorder()) {
     auto lg = root_tree->ref_lgraph(hidx);
+    fmt::print("LG: {}\n", lg->get_name());
     lg->each_sub_fast([&](Node& n, Lg_type_id id) -> bool {
       auto new_v = gi.al.insert_vert();
 
@@ -62,15 +53,30 @@ void Pass_fplan::make_graph(Eprp_var& var) {
 
       nvmap.emplace(Node(lg, hidx, n.get_compact_class()), new_v);
       fmt::print("Node: {}, (height: {}, pos: {}), nid: {}\n",
-                 n.debug_name(),
-                 int32_t(hidx.level),
-                 int32_t(hidx.pos),
-                 n.get_compact().get_nid()
-                 );
+                  n.debug_name(),
+                  int32_t(hidx.level),
+                  int32_t(hidx.pos),
+                  n.get_compact().get_nid()
+                  );
       return true;
     });
   }
   */
+
+  for (auto hidx : root_tree->depth_preorder()) {
+    auto lg = root_tree->ref_lgraph(hidx);
+    //fmt::print("2LG: {}\n", lg->get_name());
+    lg->each_sub_fast([&](Node& n, Lg_type_id id) -> bool {
+      Node hnode(lg, hidx, n.get_compact_class());
+      //for(auto e:hnode.out_edges()) {}
+      //for(auto e:hnode.inp_edges()) {}
+      return true;
+    });
+  }
+
+
+
+/*
 
   for (auto hidx : root_tree->depth_preorder()) {
     auto lg = root_tree->ref_lgraph(hidx);
@@ -171,9 +177,9 @@ void Pass_fplan::pass(Eprp_var& var) {
 
   p.make_graph(var);
 
-  Hier_tree h(std::move(p.gi), 1);
-  h.collapse(0.0);
-  h.discover_regularity();
+  //Hier_tree h(std::move(p.gi), 1);
+  //h.collapse(0.0);
+  //h.discover_regularity();
 
   // 3. <finish HiReg>
   // 4. write code to use the existing hierarchy instead of throwing it away...?
