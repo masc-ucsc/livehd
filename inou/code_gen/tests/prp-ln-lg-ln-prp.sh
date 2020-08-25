@@ -3,7 +3,7 @@ rm -rf ./lgdb
 rm -rf ./lgdb2
 rm -rf ./*.dot*
 
-pts='logic' #'funcall4' # tuple_if'
+pts='reset1' #'funcall4' # tuple_if'
 folder='pyrope'
 
 LGSHELL=./bazel-bin/main/lgshell
