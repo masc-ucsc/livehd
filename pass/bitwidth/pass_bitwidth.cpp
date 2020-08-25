@@ -50,7 +50,7 @@ void Pass_bitwidth::trans(Eprp_var &var) {
 }
 
 void Pass_bitwidth::do_trans(LGraph *lg) {
-  Lbench b("pass.bitwidth");
+  /* Lbench b("pass.bitwidth"); */
   bw_pass(lg);
 }
 
@@ -68,6 +68,9 @@ void Pass_bitwidth::process_flop(Node &node) {
   Lconst min_val;
   auto   it3 = bwmap.find(d_dpin.get_compact());
   if (it3 != bwmap.end()) {
+    fmt::print("hello!!\n");
+    fmt::print("hello!!\n");
+    fmt::print("hello!!\n");
     max_val = it3->second.get_max();
     min_val = it3->second.get_min();
   } else if (d_dpin.get_bits()) {
