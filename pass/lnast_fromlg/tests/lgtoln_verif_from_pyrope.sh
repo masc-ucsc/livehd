@@ -53,7 +53,7 @@ lgtoln_verif() {
     echo "Pyrope -> LNAST -> LGraph"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "inou.pyrope files:inou/pyrope/tests/compiler/${pt}.prp |> pass.lnast_dfg"
+    ${LGSHELL} "inou.pyrope files:inou/pyrope/tests/compiler/${pt}.prp |> pass.lnast_tolg"
     if [ $? -eq 0 ]; then
       echo "Successfully created optimized LGraph: ${pt}"
     else
@@ -87,7 +87,7 @@ lgtoln_verif() {
     echo "LGraph (golden) -> LNAST -> LGraph (new)"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.lnast_fromlg |> lnast.dump |> pass.lnast_dfg path:lgdb2"
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.lnast_fromlg |> lnast.dump |> pass.lnast_tolg path:lgdb2"
     if [ $? -eq 0 ]; then
       echo "Successfully create the new LG: ${pt}"
     else
