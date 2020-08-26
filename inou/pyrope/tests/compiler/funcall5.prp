@@ -2,7 +2,7 @@ sum5 = ::{
   // basic: only the input is a tuple
   %out = $inp.a + $inp.b + $c
 
-  // advanced
+  // advanced: both input and output are tuples 
   // res1 = $inp.a + $inp.b 
   // res2 = $inp.a + $inp.b + $c
   // %out.o1 = res1
