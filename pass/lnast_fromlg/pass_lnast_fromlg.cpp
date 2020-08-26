@@ -1035,7 +1035,9 @@ void Pass_lnast_fromlg::attach_memory_node(Lnast& lnast, Lnast_nid& parent_node,
   // Create a tuple for each memory port.
   absl::flat_hash_set<std::pair<std::string_view, std::string_view>> port_temp_name_list;
   for (uint64_t i = 0; i < port_count; i++) {
-    auto idx_tuple = lnast.add_child(parent_node, Lnast_node::create_tuple(""));
+    /* FIXME: This tuple having the name "memory[1/2/3]" is important to the LN->FIR interface,
+     * specifically to help with identifying things related to memory. This is hacky... */
+    auto idx_tuple = lnast.add_child(parent_node, Lnast_node::create_tuple("memory1"));
     auto temp_var_name = create_temp_var(lnast);
     port_temp_name_list.insert({"FIXME:GET_DPIN_NAME", temp_var_name});
     lnast.add_child(idx_tuple, Lnast_node::create_ref(temp_var_name)); //FIXME: how to get port name?
@@ -1075,24 +1077,25 @@ void Pass_lnast_fromlg::attach_memory_node(Lnast& lnast, Lnast_nid& parent_node,
     auto idx_asg_pose = lnast.add_child(idx_tuple, Lnast_node::create_assign(""));
     lnast.add_child(idx_asg_pose, Lnast_node::create_ref("__posedge"));
     attach_child(lnast, idx_asg_pose, pose_q.front());
-    if (!is_one_wmask) wmask_q.pop();
+    if (!is_one_pose) pose_q.pop();
 
     //FIXME: How to handle wmode?
   }
 
   // Create a single tuple with each memory port instantiated in.
-  auto idx_port_tuple = lnast.add_child(parent_node, Lnast_node::create_tuple(""));
+  auto idx_port_tuple = lnast.add_child(parent_node, Lnast_node::create_tuple("memory2"));
   auto temp_var_name = create_temp_var(lnast);
   lnast.add_child(idx_port_tuple, Lnast_node::create_ref(temp_var_name));
   for (const auto& it : port_temp_name_list) {
     auto idx_asg = lnast.add_child(idx_port_tuple, Lnast_node::create_assign(""));
+    // Note->hunter: this translation is changed to not have port names, need to change to FIRRTL interface
     lnast.add_child(idx_asg, Lnast_node::create_ref(it.first));
     lnast.add_child(idx_asg, Lnast_node::create_ref(it.second));
   }
 
   // Specify all the attributes of this memory (.__port, .__size, ...)
-  auto idx_mem_tuple = lnast.add_child(parent_node, Lnast_node::create_tuple(""));
-  lnast.add_child(idx_mem_tuple, Lnast_node::create_ref("FIXME:MEM_NAME"));
+  auto idx_mem_tuple = lnast.add_child(parent_node, Lnast_node::create_tuple("memory3"));
+  lnast.add_child(idx_mem_tuple, Lnast_node::create_ref("#FIXME:MEM_NAME"));
 
   auto idx_asg_port = lnast.add_child(idx_mem_tuple, Lnast_node::create_assign(""));
   lnast.add_child(idx_asg_port, Lnast_node::create_ref("__port"));
@@ -1101,6 +1104,11 @@ void Pass_lnast_fromlg::attach_memory_node(Lnast& lnast, Lnast_nid& parent_node,
   auto idx_asg_size = lnast.add_child(idx_mem_tuple, Lnast_node::create_assign(""));
   lnast.add_child(idx_asg_size, Lnast_node::create_ref("__size"));
   attach_child(lnast, idx_asg_size, size_dpin);
+
+  // FIXME: Should specify __bits?
+
+  // Need to now handle data out ports
+  // FIXME: Unclear how to do this. Need to have port name then do: dpin_name = mem.{port_name}
 }
 
 //------------- Helper Functions ------------
