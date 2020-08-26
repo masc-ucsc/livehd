@@ -1,8 +1,8 @@
 sum5 = ::{
-  // basic
+  // basic: only the input is a tuple
   %out = $inp.a + $inp.b + $c
 
-  // advanced
+  // advanced: both input and output are tuples 
   // res1 = $inp.a + $inp.b 
   // res2 = $inp.a + $inp.b + $c
   // %out.o1 = res1
@@ -10,4 +10,4 @@ sum5 = ::{
 }
 
 subinp = (a = 3, b = 4)
-%out = sum5(subinp, c = 5)
+%out = sum5(inp = subinp, c = 5)
