@@ -150,6 +150,11 @@ public:
       htree.regenerate();
     return &htree;
   }
+  const Hierarchy_tree &get_htree() {
+    if (htree.empty())
+      htree.regenerate();
+    return htree;
+  }
 /*
   mmap_lib::vector<Node_internal>& ref_internal() {
     return node_internal;

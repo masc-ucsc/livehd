@@ -106,6 +106,33 @@ void Inou_graphviz::do_hierarchy(LGraph *g) {
 
   g->dump_down_nodes();
 
+  const auto &root_tree = g->get_htree();
+
+  for (auto hidx : root_tree.depth_preorder()) {
+    auto *lg = root_tree.ref_lgraph(hidx);
+    lg->each_sub_fast([&](Node& n, Lg_type_id id) -> bool {
+      Node hnode(g, hidx, n.get_compact_class());
+      for(auto e:hnode.out_edges()) {
+        if(e.sink.get_driver().get_hidx()== e.driver.get_driver().get_hidx())
+          continue;
+
+        fmt::print("edge from:{} to:{} level:{} pos:{}\n"
+            ,e.sink.get_driver().get_class_lgraph()->get_name()
+            ,e.driver.get_driver().get_class_lgraph()->get_name()
+            ,(int)hidx.level, (int)hidx.pos);
+      }
+      for(auto e:hnode.inp_edges()) {
+        if(e.sink.get_driver().get_hidx()== e.driver.get_driver().get_hidx())
+          continue;
+
+        fmt::print("edge from:{} to:{} level:{} pos:{}\n"
+            ,e.sink.get_driver().get_class_lgraph()->get_name()
+            ,e.driver.get_driver().get_class_lgraph()->get_name()
+            ,(int)hidx.level, (int)hidx.pos);
+      }
+    });
+  }
+
   for (const auto node : g->fast(true)) {
     if (!node.is_type_sub())
       continue;
