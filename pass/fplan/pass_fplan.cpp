@@ -20,12 +20,14 @@ void Pass_fplan::make_graph(Eprp_var& var) {
   std::cout << "  creating floorplan graph...";
 
   Hierarchy_tree* root_tree;
-  //LGraph*         root_lg;
+  LGraph*         root_lg;
 
+  // TODO: finding the root lgraph may require the user to pass in a root lgraph name.
+  // not sure if I can find it automatically.
   for (auto lg : var.lgs) {
     if (lg->get_lgid() == 1) {
       root_tree = lg->ref_htree();
-      //root_lg   = lg;
+      root_lg   = lg;
     }
   }
 
@@ -34,57 +36,49 @@ void Pass_fplan::make_graph(Eprp_var& var) {
 
   //root_tree->dump();
 
-  //absl::flat_hash_map<Node, vertex_t> nvmap;
+  absl::flat_hash_map<Node, vertex_t> nvmap;
 
   //unsigned long unique_value_counter = 0;
-/*
+
   for (auto hidx : root_tree->depth_preorder()) {
     auto lg = root_tree->ref_lgraph(hidx);
-    fmt::print("LG: {}\n", lg->get_name());
+    //fmt::print("LG: {}\n", lg->get_name());
     lg->each_sub_fast([&](Node& n, Lg_type_id id) -> bool {
       auto new_v = gi.al.insert_vert();
 
       //LGraph* child_graph = LGraph::open(lg->get_path(), n.get_type_sub());
 
-      gi.ids[new_v]         = unique_value_counter++;
-      gi.debug_names[new_v] = n.debug_name();
-      //gi.areas[new_v]       = child_graph->size();
-      gi.sets[0].insert(new_v);  // all verts start in set zero, and get dividied up during hierarchy discovery
+      //gi.ids[new_v]         = unique_value_counter++;
+      //gi.debug_names[new_v] = n.debug_name();
+      //gi.areas[new_v]       = lg->size();
+      //gi.sets[0].insert(new_v);  // all verts start in set zero, and get dividied up during hierarchy discovery
 
-      nvmap.emplace(Node(lg, hidx, n.get_compact_class()), new_v);
+      // Node constructor needs root lgraph, not parent lgraph
+      auto hn = Node(root_lg, hidx, n.get_compact_class());
+      nvmap.emplace(hn, new_v);
       fmt::print("Node: {}, (height: {}, pos: {}), nid: {}\n",
                   n.debug_name(),
                   int32_t(hidx.level),
                   int32_t(hidx.pos),
                   n.get_compact().get_nid()
                   );
+
       return true;
     });
   }
-  */
+/*
 
   for (auto hidx : root_tree->depth_preorder()) {
     auto lg = root_tree->ref_lgraph(hidx);
     //fmt::print("2LG: {}\n", lg->get_name());
     lg->each_sub_fast([&](Node& n, Lg_type_id id) -> bool {
-      Node hnode(lg, hidx, n.get_compact_class());
+      //Node hnode(root_lg, hidx, n.get_compact_class());
       //for(auto e:hnode.out_edges()) {}
       //for(auto e:hnode.inp_edges()) {}
       return true;
     });
   }
-
-
-
-/*
-
-  for (auto hidx : root_tree->depth_preorder()) {
-    auto lg = root_tree->ref_lgraph(hidx);
-    lg->each_sub_fast_direct([&](Node& n, Lg_type_id id) -> bool {
-      
-      return true;
-    });
-  }
+  */
 
   // we need the hidx in order to identify nodes.
   // we need the nid in order for nv.first.get_node(root_lg) to return an actual node.
@@ -103,6 +97,13 @@ void Pass_fplan::make_graph(Eprp_var& var) {
 
       vertex_t v1 = gi.al.null_vert();
       vertex_t v2 = gi.al.null_vert();
+
+      fmt::print("looking for driver hidx: (level: {}, pos: {})\n", int32_t(lg_e.driver.get_hidx().level), int32_t(lg_e.driver.get_hidx().pos));
+      fmt::print("looking for sink hidx: (level: {}, pos: {})\n", int32_t(lg_e.sink.get_hidx().level), int32_t(lg_e.sink.get_hidx().pos));
+
+      if (lg_e.driver.get_hidx() == lg_e.sink.get_hidx()) {
+        continue;
+      }
 
       for (auto cnv : nvmap) {
         if (cnv.first.get_hidx() == lg_e.driver.get_hidx()) {
