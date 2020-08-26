@@ -64,6 +64,9 @@ def _impl(ctx):
   #print(compiler_executable)
   #print(ar_executable)
 
+  # With config=asan
+  #args = [output.path] + [compiler_executable] + [ar_executable] + [f.path for f in src_libs2] + ["-Wl,-Bstatic"] + ["-lstdc++", "-lasan"] + ["-Wl,-Bdynamic"] + ["-lrt", "-lgcov", "-lpthread"]
+  # without address sanitizer
   args = [output.path] + [compiler_executable] + [ar_executable] + [f.path for f in src_libs2] + ["-Wl,-Bstatic"] + ["-lstdc++"] + ["-Wl,-Bdynamic"] + ["-lrt", "-lgcov", "-lpthread"]
 
   ctx.actions.run(

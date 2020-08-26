@@ -7,7 +7,6 @@
 #include <fstream>
 #include <regex>
 
-#include "cfg_lnast.hpp"
 #include "eprp_utils.hpp"
 #include "lbench.hpp"
 #include "lgedgeiter.hpp"
@@ -29,11 +28,11 @@ void Inou_graphviz::populate_lg_handle_xedge(const Node &node, const XEdge &out,
   auto dbits   = out.driver.get_bits();
   auto dp_name = out.driver.has_name() ? out.driver.get_name() : "";
 
-  if (node.get_type().op == Const_Op)
+  if (node.get_type_op() == Const_Op)
     data += fmt::format(" {}->{}[label=<{}b:({},{})>];\n", dn_name, sn_name, dbits, dp_pid, sp_pid);
-  else if (node.get_type().op == TupRef_Op)
+  else if (node.get_type_op() == TupRef_Op)
     data += fmt::format(" {}->{}[label=<({},{}):<font color=\"#0000ff\">{}</font>>];\n", dn_name, sn_name, dp_pid, sp_pid, dp_name);
-  else if (node.get_type().op == TupAdd_Op)
+  else if (node.get_type_op() == TupAdd_Op)
     data += fmt::format(" {}->{}[label=<{}b:({},{}):<font color=\"#0000ff\">{}</font>>];\n",
                         dn_name,
                         sn_name,
@@ -63,22 +62,11 @@ void Inou_graphviz::setup() {
 
   m1.add_label_optional("bits", "dump bits (true/false)", "false");
   m1.add_label_optional("verbose", "dump bits and wirename (true/false)", "false");
-  // m1.add_label_optional("odir",    "path to put the dot", ".");
-
   register_inou("graphviz", m1);
 
-  Eprp_method m2("inou.graphviz.fromlnast", "export lnast cfg to graphviz dot format", &Inou_graphviz::fromlnast);
 
-  // m2.add_label_required("files",  "cfg_text files to process (comma separated)");
-  // m2.add_label_optional("odir",   "path to put the dot", ".");
-
+  Eprp_method m2("inou.graphviz.fromlg.hierarchy", "export lgraph hierarchy to graphviz dot format", &Inou_graphviz::hierarchy);
   register_inou("graphviz", m2);
-
-  Eprp_method m3("inou.graphviz.fromlg.hierarchy", "export lgraph hierarchy to graphviz dot format", &Inou_graphviz::hierarchy);
-
-  // m3.add_label_optional("odir",   "path to put the dot", ".");
-
-  register_inou("graphviz", m3);
 }
 
 Inou_graphviz::Inou_graphviz(const Eprp_var &var) : Pass("inou.graphviz", var) {
@@ -112,31 +100,59 @@ void Inou_graphviz::hierarchy(Eprp_var &var) {
   }
 }
 
-void Inou_graphviz::fromlnast(Eprp_var &var) {
-  Inou_graphviz p(var);
-
-  for (const auto &f : absl::StrSplit(p.files, ',')) {
-    Cfg_parser cfg_parser(f);
-
-    std::shared_ptr<Lnast> lnast{cfg_parser.ref_lnast()};
-    lnast->ssa_trans();
-
-    p.do_from_lnast(lnast);
-  }
-}
 
 void Inou_graphviz::do_hierarchy(LGraph *g) {
   std::string data = "digraph {\n";
 
-  g->dump_down_nodes();
+  const auto &root_tree = g->get_htree();
 
-  for (const auto node : g->fast(true)) {
-    if (!node.is_type_sub())
-      continue;
-    // fmt::print("lg:{} node:{} type:{}\n", node.get_class_lgraph()->get_name(), node.debug_name(), node.get_type().get_name());
+  absl::flat_hash_set<std::pair<Hierarchy_index,Hierarchy_index>> added;
 
-    const auto &child_sub = node.get_type_sub_node();
-    data += fmt::format(" {}->{};", graphviz_legalize_name(node.get_class_lgraph()->get_name()), graphviz_legalize_name(child_sub.get_name()));
+  for (auto hidx : root_tree.depth_preorder()) {
+    auto *lg = root_tree.ref_lgraph(hidx);
+    fmt::print("visiting node:{} level:{} pos:{}\n"
+        ,lg->get_name()
+        ,(int)hidx.level, (int)hidx.pos);
+
+    Node h_inp(g, hidx, Node::Hardcoded_input_nid);
+    for(auto e:h_inp.inp_edges()) {
+      fmt::print("edge from:{} to:{} level:{} pos:{}\n"
+          ,e.driver.get_class_lgraph()->get_name()
+          ,e.sink.get_class_lgraph()->get_name()
+          ,(int)hidx.level, (int)hidx.pos);
+
+      auto p = std::pair(e.driver.get_hidx(), e.sink.get_hidx());
+      if (p.first==p.second)
+        continue; // no itself edges
+      if (added.contains(p))
+        continue;
+      added.insert(p);
+
+      data += fmt::format(" {}_l{}p{}->{}_l{}p{};\n"
+          , graphviz_legalize_name(e.driver.get_class_lgraph()->get_name()), (int)e.driver.get_hidx().level, (int)e.driver.get_hidx().pos
+          , graphviz_legalize_name(e.sink.get_class_lgraph()->get_name()), (int)e.sink.get_hidx().level, (int)e.sink.get_hidx().pos
+          );
+    }
+
+    Node h_out(g, hidx, Node::Hardcoded_output_nid);
+    for(auto e:h_out.out_edges()) {
+      fmt::print("edge from:{} to:{} level:{} pos:{}\n"
+          ,e.driver.get_class_lgraph()->get_name()
+          ,e.sink.get_class_lgraph()->get_name()
+          ,(int)hidx.level, (int)hidx.pos);
+
+      auto p = std::pair(e.driver.get_hidx(), e.sink.get_hidx());
+      if (p.first==p.second)
+        continue; // no itself edges
+      if (added.contains(p))
+        continue;
+      added.insert(p);
+
+      data += fmt::format(" {}_l{}p{}->{}_l{}p{};\n"
+          , graphviz_legalize_name(e.driver.get_class_lgraph()->get_name()), (int)e.driver.get_hidx().level, (int)e.driver.get_hidx().pos
+          , graphviz_legalize_name(e.sink.get_class_lgraph()->get_name()), (int)e.sink.get_hidx().level, (int)e.sink.get_hidx().pos
+          );
+    }
   }
 
   data += "\n}\n";
@@ -185,7 +201,7 @@ void Inou_graphviz::populate_lg_data(LGraph *g) {
     }
 
     auto gv_name = graphviz_legalize_name(node.debug_name());
-    if (node.get_type().op == Const_Op)
+    if (node.get_type_op() == Const_Op)
       data += fmt::format(" {} [label=<{}:{}>];\n", gv_name, node_info, node.get_type_const().to_pyrope());
     else
       data += fmt::format(" {} [label=<{}>];\n", gv_name, node_info);

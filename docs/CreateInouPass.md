@@ -1,12 +1,9 @@
 # Select between inou and pass
 
-* inou: reads from external (non-LGraph) to create an LGraph, or exports external from a LGraph.
-Examples, inou/json
+* **inou**: reads external (non-LGraph) files to create an LGraph, or exports files from an LGraph (ex: [inou/json](../inou/json)).
+* **pass**: optimizes or regenerates a LGraph, or generates a new set of LGraphs from a given LGraph (such as dead code elimination).
 
-* pass: optimizes or regenerates a LGraph, or generated a new set of LGraphs from a given LGraph.
-E.g: dead-code-elimination
-
-Use one of the sample passes as starting point (inou/rand or pass/dce) and
+Use one of the sample passes as starting point ([inou/rand](../inou/json) or [pass/sample](../pass/sample)) and
  make sure to use the Options_base and inherit from Inou or Pass
 
 ## Create a pass
@@ -52,18 +49,21 @@ void setup_pass_<my_pass>() {
 
 void <My_pass>::setup() {
   Eprp_method m1("pass.<my_pass>", "<my_pass> is an example pass, this is an example help text", &<My_pass>::pass);
+  m1.add_label_required("required_label_name", "label help text");
   register_pass(m1);
 }
 
 void <My_pass>::pass(Eprp_var &var) {
   <My_pass> pass;
-
+  
+  fmt::print("the option passed in the required label name is {}.\n", var.get("required_label_name");
+  
   for(auto &l:var.lgs) {
     pass.do_work(l);
   }
 }
 
-void <My_pass>::trans(LGraph &g) {
+void <My_pass>::do_work(LGraph &g) {
 
   for(auto idx : g.fast()) {
     if(g.is_graph_output(idx)) {
@@ -145,5 +145,15 @@ In the pass\_<my_pass>.cpp file:
   <my_other_pass>.add_label_optional("odir","output location","<some default location in case none is provided>");
   <my_other_pass>.add_label_optional("path","lgdb path","lgdb");
   register_pass(<my_other_pass>);
+  
+  ...
+  
+  void <My_pass>::pass(Eprp_var &var) {
+    ...
+    if (var.has_label("label name")) {
+      fmt::print("entered label name: {}\n", var.get("label name"));
+    }
+    ...
+  }
 ```
 

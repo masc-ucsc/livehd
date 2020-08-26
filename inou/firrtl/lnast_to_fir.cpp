@@ -18,11 +18,11 @@ void Inou_firrtl::toFIRRTL(Eprp_var &var) {
   bool first = true;
   for (const auto &lnast : var.lnasts) {
     p.do_tofirrtl(lnast, circuit);
-    if (first) {
+    //if (first) {
       top_msg->set_name(
           (std::string)lnast->get_name(lnast->get_root()));  // FIXME: Placeholder for now, need to figure out which LNAST is "top"
       first = false;
-    }
+    //}
   }
 
   //fir_design.PrintDebugString();
@@ -75,6 +75,9 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
   } else if (ntype.is_not()) {
     auto fstmt = pos_to_add_to == 0 ? when->add_consequent() : when->add_otherwise();
     process_ln_not_op(ln, lnidx, fstmt);
+  } else if (ntype.is_parity()) {
+    auto fstmt = pos_to_add_to == 0 ? when->add_consequent() : when->add_otherwise();
+    process_ln_par_op(ln, lnidx, fstmt);
     /*} else if (ntype.is_select()) {
       I(false); // should has been converted to tuple chain
     } else if (ntype.is_logical_op()) {
@@ -84,7 +87,6 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
     } else if (ntype.is_tuple()) {
       process_ast_tuple_struct(dfg, lnidx);*/
   } else if (ntype.is_if()) {
-    add_cstmts(ln, lnidx, when, pos_to_add_to);
     auto nested_when_stmt = process_ln_if_op(ln, lnidx);
     auto fstmt            = pos_to_add_to == 0 ? when->add_consequent() : when->add_otherwise();
     fstmt->set_allocated_when(nested_when_stmt);
@@ -153,6 +155,9 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
   } else if (ntype.is_not()) {
     auto fstmt = umod->add_statement();
     process_ln_not_op(ln, lnidx, fstmt);
+  } else if (ntype.is_parity()) {
+    auto fstmt = umod->add_statement();
+    process_ln_par_op(ln, lnidx, fstmt);
   /*} else if (ntype.is_select()) {
     I(false); // should has been converted to tuple chain
   } else if (ntype.is_logical_op()) {
@@ -162,7 +167,6 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
   } else if (ntype.is_tuple()) {
     process_ast_tuple_struct(dfg, lnidx);*/
   } else if (ntype.is_if()) {
-    add_cstmts(ln, lnidx, umod);
     auto when_stmt = process_ln_if_op(ln, lnidx);
     auto fstmt     = umod->add_statement();
     fstmt->set_allocated_when(when_stmt);
@@ -315,6 +319,26 @@ void Inou_firrtl::process_ln_not_op(Lnast &ln, const Lnast_nid &lnidx_not, firrt
   make_assignment(ln, c0, rhs_expr, fstmt);
 }
 
+void Inou_firrtl::process_ln_par_op(Lnast &ln, const Lnast_nid &lnidx_par, firrtl::FirrtlPB_Statement *fstmt) {
+  auto c0       = ln.get_first_child(lnidx_par);
+  auto c1       = ln.get_sibling_next(c0);
+  auto ntype_c0 = ln.get_type(c0);
+  I(ntype_c0.is_ref());
+  auto ntype_c1 = ln.get_type(c1);
+  I(ntype_c1.is_const() || ntype_c1.is_ref());
+
+  // Form expression that holds RHS contents.
+  firrtl::FirrtlPB_Expression *       rhs_expr    = new firrtl::FirrtlPB_Expression();
+  firrtl::FirrtlPB_Expression_PrimOp *rhs_prim_op = new firrtl::FirrtlPB_Expression_PrimOp();
+  rhs_prim_op->set_op(firrtl::FirrtlPB_Expression_PrimOp_Op_OP_XOR_REDUCE);
+
+  add_refcon_as_expr(ln, c1, rhs_prim_op->add_arg());
+  rhs_expr->set_allocated_prim_op(rhs_prim_op);
+
+  // Now assign lhs to rhs.
+  make_assignment(ln, c0, rhs_expr, fstmt);
+}
+
 void Inou_firrtl::process_ln_nary_op(Lnast &ln, const Lnast_nid &lnidx_op, firrtl::FirrtlPB_Statement *fstmt) {
   bool        first     = true;
   bool        first_arg = true;
@@ -382,26 +406,6 @@ void Inou_firrtl::make_assignment(Lnast &ln, const Lnast_nid &lnidx_lhs, firrtl:
   }
 }
 
-void Inou_firrtl::add_cstmts(Lnast &ln, const Lnast_nid &lnidx_if, firrtl::FirrtlPB_Module_UserModule *umod) {
-  for (const auto &if_child : ln.children(lnidx_if)) {
-    const auto ntype = ln.get_data(if_child).type;
-    if (ntype.is_cstmts()) {
-      for (const auto &cst_child : ln.children(if_child)) {
-        process_ln_stmt(ln, cst_child, umod);
-      }
-    }
-  }
-}
-
-void Inou_firrtl::add_cstmts(Lnast &ln, const Lnast_nid &lnidx_if, firrtl::FirrtlPB_Statement_When *when, uint8_t pos_to_add_to) {
-  for (const auto &if_child : ln.children(lnidx_if)) {
-    const auto ntype = ln.get_data(if_child).type;
-    if (ntype.is_cstmts()) {
-      process_ln_stmt(ln, if_child, when, pos_to_add_to);
-    }
-  }
-}
-
 firrtl::FirrtlPB_Statement_When *Inou_firrtl::process_ln_if_op(Lnast &ln, const Lnast_nid &lnidx_if) {
   auto    when_highest  = new firrtl::FirrtlPB_Statement_When();
   auto    when_lowest   = when_highest;
@@ -426,8 +430,8 @@ firrtl::FirrtlPB_Statement_When *Inou_firrtl::process_ln_if_op(Lnast &ln, const 
       auto predicate = new firrtl::FirrtlPB_Expression();
       add_refcon_as_expr(ln, if_child, predicate);
       when_lowest->set_allocated_predicate(predicate);
-    } else if (ntype.is_cstmts()) {
-      continue;
+    //} else if (ntype.is_cstmts()) {
+    //  continue;
     } else {
       I(false);
     }
@@ -497,6 +501,14 @@ bool Inou_firrtl::process_ln_dot(Lnast &ln, const Lnast_nid &lnidx_dot, firrtl::
 
     make_assignment(ln, lhs, expr, fstmt);
     return true;
+  } else if (ln.get_name(field) == "__q_pin") {
+    // For FIRRTL, this is just the same lhs = tup
+    firrtl::FirrtlPB_Expression_Reference *rhs_ref = new firrtl::FirrtlPB_Expression_Reference();
+    rhs_ref->set_id((std::string)ln.get_name(tup).substr(1)); // Remove 1st char since it's a '#'
+    auto expr = new firrtl::FirrtlPB_Expression();
+    expr->set_allocated_reference(rhs_ref);
+    make_assignment(ln, lhs, expr, fstmt);
+    return true;
   } else {
     // This is for an attribute, no FIRRTL assign statement needed.
     return false;
@@ -510,7 +522,6 @@ void Inou_firrtl::handle_attr_assign(Lnast &ln, const Lnast_nid &lhs, const Lnas
   auto attr      = pair.second;
   auto attr_name = ln.get_name(attr);
 
-  // TODO: __signed __posedge ...
   if (attr_name == "__clk_pin") {
     handle_clock_attr(ln, var_name, rhs);
   } else if (attr_name == "__reset_pin") {
@@ -519,9 +530,20 @@ void Inou_firrtl::handle_attr_assign(Lnast &ln, const Lnast_nid &lhs, const Lnas
     handle_async_attr(ln, var_name, rhs);
   } else if (attr_name == "__sign") {
     handle_sign_attr(ln, var_name, rhs);
+  } else if (attr_name == "__fwd") {
+    // Can be ignored.
+  } else if (attr_name == "__posedge") {
+    if (ln.get_name(rhs) == "false") {
+      Pass::warn("Attribute __posedge was set to false, but currently FIRRTL does not support negedge-triggered registers. Will ignore.");
+    }
+  } else if (attr_name == "__bits") {
+    // Ignore. Should have only been specified in bw_table attribute of LNAST.
+  } else if (attr_name == "__latch") {
+    if (ln.get_name(rhs) == "true") {
+      Pass::error("A latch is in your design, but latches are not supported in FIRRTL. Cannot translate.");
+    }
   } else {
-    fmt::print("Error: attribute found, but it is either incorrect or not supported yet.\n");
-    // I(false);
+    fmt::print("Error: compiler attribute \"{}\" found, but it is either incorrect or not supported yet.\n", attr_name);
   }
 }
 
@@ -789,8 +811,8 @@ firrtl::FirrtlPB_Expression_PrimOp_Op Inou_firrtl::get_firrtl_oper_code(const Ln
     return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_TIMES;
   } else if (ntype.is_div()) {
     return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_DIVIDE;
-    //} else if (ntype.is_rem()) { //FIXME: Modulo not yet implemented in LNAST
-    //  firrtl_op = "rem";
+  } else if (ntype.is_mod()) {
+    return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_REM;
   } else if (ntype.is_ge()) {
     return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_GREATER_EQ;
   } else if (ntype.is_gt()) {
@@ -836,7 +858,6 @@ void Inou_firrtl::add_refcon_as_expr(Lnast &ln, const Lnast_nid &lnidx, firrtl::
 
     firrtl::FirrtlPB_Expression_IntegerLiteral *num = new firrtl::FirrtlPB_Expression_IntegerLiteral();
     num->set_value(lconst_str);
-    //fmt::print("ULit: {} {}\n", lconst_str, lconst_holder.to_pyrope());
     firrtl::FirrtlPB_Width *width = new firrtl::FirrtlPB_Width();
     width->set_value(lconst_holder.get_bits());
 

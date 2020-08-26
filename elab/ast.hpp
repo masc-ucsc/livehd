@@ -6,12 +6,12 @@
 
 using Rule_id = int;  // FIXME explicit_type
 
-struct Ast_parser_node {
+class Ast_parser_node {
+public:
   Rule_id     rule_id;
   Token_entry token_entry;
-  Ast_parser_node() : rule_id(0), token_entry(0) {}
-  Ast_parser_node(const Ast_parser_node &other) : rule_id(other.rule_id), token_entry(other.token_entry) {}
-  Ast_parser_node(const Rule_id rid, const Token_entry te) : rule_id(rid), token_entry(te) { I(rid); }
+  constexpr Ast_parser_node() : rule_id(0), token_entry(0) {}
+  constexpr Ast_parser_node(const Rule_id rid, const Token_entry te) : rule_id(rid), token_entry(te) { I(rid); }
 };
 
 class Ast_parser : public mmap_lib::tree<Ast_parser_node> {

@@ -12,8 +12,11 @@
 using Lnast_nid       = mmap_lib::Tree_index;
 using Phi_rtable      = std::map<std::string_view, Lnast_nid>; // rtable = resolve_table
 using Cnt_rtable      = absl::flat_hash_map<std::string_view, int8_t>;
-using Dot_lrhs_table  = absl::flat_hash_map<Lnast_nid, std::pair<bool, Lnast_nid>>;  // for both dot and selection, dot -> (lrhs, related assign node)
+using Dot_lrhs_table  = absl::flat_hash_map<Lnast_nid, std::pair<bool, Lnast_nid>>;  // for both dot and selection, dot -> (lrhs, paired opr node)
 using Tuple_var_table = absl::flat_hash_set<std::string_view>;
+
+
+
 
 //tricky old C macro to avoid redundant code from function overloadings
 #define CREATE_LNAST_NODE(type) \
@@ -64,10 +67,12 @@ struct Lnast_node {
   CREATE_LNAST_NODE(_or)
   CREATE_LNAST_NODE(_not)
   CREATE_LNAST_NODE(_xor)
+  CREATE_LNAST_NODE(_parity)
   CREATE_LNAST_NODE(_plus)
   CREATE_LNAST_NODE(_minus)
   CREATE_LNAST_NODE(_mult)
   CREATE_LNAST_NODE(_div)
+  CREATE_LNAST_NODE(_mod)
   CREATE_LNAST_NODE(_eq)
   CREATE_LNAST_NODE(_same)
   CREATE_LNAST_NODE(_lt)
@@ -168,7 +173,7 @@ private:
   std::vector<std::string *> string_pool;
 
 public:
-  Lnast() = default;
+  explicit Lnast(): top_module_name("noname"), source_filename(""), memblock_fd(-1) { }
   ~Lnast();
   explicit Lnast(std::string_view _module_name): top_module_name(_module_name), source_filename(""), memblock_fd(-1) { }
   explicit Lnast(std::string_view _module_name, std::string_view _file_name): top_module_name(_module_name), source_filename(_file_name), memblock_fd(-1) { }

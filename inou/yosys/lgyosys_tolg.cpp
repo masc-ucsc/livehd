@@ -131,9 +131,12 @@ static Node_pin &get_edge_pin(LGraph *g, const RTLIL::Wire *wire) {
   return wire2pin[wire];
 }
 
-static Node_pin connect_constant(LGraph *g, uint32_t value, Node &exit_node, Port_ID opid) {
-  Bits_t bits = (64 - __builtin_clzll(value));
-  auto   dpin = g->create_node_const(Lconst(value, bits)).setup_driver_pin();
+static Node_pin connect_constant(LGraph *g, uint64_t value, Node &exit_node, Port_ID opid) {
+  Bits_t bits = 1;
+  if (value)
+    bits = (64 - __builtin_clzll(value));
+
+  auto   dpin = g->create_node_const(value, bits).setup_driver_pin();
   auto   spin = exit_node.setup_sink_pin(opid);
 
   spin.connect_driver(dpin);
@@ -242,7 +245,7 @@ static Node resolve_memory(LGraph *g, RTLIL::Cell *cell) {
             g->add_edge(dpin, join_dpin.get_sink_from_output());
           } else {
             auto join_node = join_dpin.get_node();
-            I(join_node.get_type().op == Join_Op);
+            I(join_node.get_type_op() == Join_Op);
             I(join_node.inp_connected_pins().size() == 0);
 
             auto spin_join = join_node.setup_sink_pin(0);
@@ -493,6 +496,8 @@ static void look_for_cell_outputs(RTLIL::Module *module, const std::string &path
             continue;
 
           pid = sub->get_instance_pid(pin_name);
+
+          printf("module %s submodule %s has pin_name %s instance_pid %d\n", module->name.c_str(), cell->type.c_str(), pin_name.c_str(), pid);
         }
 
         node_type = SubGraph_Op;
@@ -509,7 +514,14 @@ static void look_for_cell_outputs(RTLIL::Module *module, const std::string &path
         }
       }
 
-      Node_pin driver_pin = node.setup_driver_pin(pid);
+      Node_pin driver_pin;
+      if (node.is_type_sub()) {
+        std::string pin_name(&(conn.first.c_str()[1]));
+        driver_pin = node.setup_driver_pin(pin_name);
+        assert(driver_pin.get_pid() == pid);
+      }else{
+        driver_pin = node.setup_driver_pin(pid);
+      }
 
       const RTLIL::SigSpec ss = conn.second;
       if (ss.chunks().size() > 0)
@@ -535,8 +547,6 @@ static void look_for_cell_outputs(RTLIL::Module *module, const std::string &path
             if (wire->port_output) {
               auto spin = g->get_graph_output(&wire->name.c_str()[1]);
               g->add_edge(driver_pin, spin);
-            } else {
-              I(false);
             }
           } else if (chunk.width == ss.size()) {
             // output port drives a single wire
@@ -1006,13 +1016,6 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
 
       exit_node.set_name(name);
 
-    } else if (cell->type.c_str()[0] == '$' && cell->type.c_str()[1] != '_' && strncmp(cell->type.c_str(), "$paramod", 8) != 0) {
-      if (cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
-        size = cell->parameters["\\Y_WIDTH"].as_int();
-      log_error("ERROR: add this cell type %s to lgraph size:%d\n", cell->type.c_str(), size);
-
-      I(false);
-
     } else if (g->get_library().get_lgid(&cell->type.c_str()[1])) {
       // external graph reference
       auto sub_lgid = g->get_library().get_lgid(&cell->type.c_str()[1]);
@@ -1030,6 +1033,11 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
 #endif
 
       // DO NOT MERGE THE BELLOW WITH THE OTHER ANDs, NOTs, DFFs
+    } else if (cell->type.c_str()[0] == '$' && cell->type.c_str()[1] != '_' && strncmp(cell->type.c_str(), "$paramod", 8) != 0) {
+      if (cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
+        size = cell->parameters["\\Y_WIDTH"].as_int();
+      log("likely error: add this cell type %s to lgraph size:%d\n", cell->type.c_str(), size);
+
     } else if (std::strncmp(cell->type.c_str(), "$_AND_", 6) == 0) {
       if (cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
@@ -1219,7 +1227,14 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
         }
       }
 
-      Node_pin spin = entry_node.setup_sink_pin(sink_pid);
+      Node_pin spin;
+      if(entry_node.is_type_sub()) {
+        std::string name(&conn.first.c_str()[1]);
+        spin = entry_node.setup_sink_pin(name);
+      }else{
+        spin = entry_node.setup_sink_pin(sink_pid);
+      }
+
       if (ss.size() > 0) {
         Node_pin dpin = create_join_operator(g, ss);
         if (added_edges.find(XEdge(dpin, spin).get_compact()) != added_edges.end()) {
@@ -1240,7 +1255,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
 
     auto join_dpin = wire2pin[wire];
     auto join_node = join_dpin.get_node();
-    I(join_node.get_type().op == Join_Op);
+    I(join_node.get_type_op() == Join_Op);
     Port_ID join_pid = 0;
 
     set_bits_wirename(join_dpin, wire);

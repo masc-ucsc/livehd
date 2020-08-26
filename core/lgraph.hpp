@@ -27,64 +27,20 @@ protected:
 
   Hierarchy_tree htree;
 
-  Hierarchy_tree *ref_htree() {
-    if (htree.empty())
-      htree.regenerate();
-    return &htree;
-  }
-
   explicit LGraph(std::string_view _path, std::string_view _name, std::string_view _source);
 
-  bool has_node_outputs(Index_ID idx) const {
-    I(idx < node_internal.size());
-    I(node_internal[idx].is_root());
-    return node_internal[idx].has_node_outputs();
-  }
-
-  bool has_node_inputs(Index_ID idx) const {
-    I(idx < node_internal.size());
-    I(node_internal[idx].is_root());
-    return node_internal[idx].has_node_inputs();
-  }
-
-  Index_ID find_idx(const Node_pin &pin) const {
-    if (likely(node_internal[pin.get_idx()].get_dst_pid() == pin.get_pid())) {  // Common case
-      return pin.get_idx();
-    }
-    return find_idx_from_pid(pin.get_idx(), pin.get_pid());
+  Index_ID get_root_idx(Index_ID idx) const {
+    if (node_internal[idx].is_root())
+      return idx;
+    return node_internal[idx].get_nid();
   }
 
   Index_ID get_node_nid(Index_ID idx) const {
+    I(node_internal[idx].is_root());
     if (node_internal[idx].is_master_root())
       return idx;
 
     return node_internal[idx].get_nid();
-  }
-
-  int get_node_num_outputs(Index_ID nid) const {
-    I(nid < node_internal.size());
-    I(node_internal[nid].is_master_root());
-    return node_internal[nid].get_node_num_outputs();
-  }
-
-  int get_node_num_inputs(Index_ID nid) const {
-    I(nid < node_internal.size());
-    I(node_internal[nid].is_master_root());
-    return node_internal[nid].get_node_num_inputs();
-  }
-
-  int get_node_pin_num_outputs(Index_ID idx) const {
-    I(idx < node_internal.size());
-    I(node_internal[idx].is_root());
-    Index_ID nid = get_node_nid(idx);
-    return node_internal[nid].get_node_pin_num_outputs(idx);
-  }
-
-  int get_node_pin_num_inputs(Index_ID idx) const {
-    I(idx < node_internal.size());
-    I(node_internal[idx].is_root());
-    Index_ID nid = get_node_nid(idx);
-    return node_internal[nid].get_node_pin_num_inputs(idx);
   }
 
   Node_pin_iterator out_connected_pins(const Node &node) const;
@@ -106,24 +62,23 @@ protected:
   XEdge_iterator out_edges(const Node_pin &pin) const;
   XEdge_iterator inp_edges(const Node_pin &pin) const;
 
-  bool has_outputs(const Node_pin &pin) const {
-    I(pin.get_idx() < node_internal.size());
-    I(node_internal[pin.get_idx()].is_root());
-    GI(node_internal[pin.get_idx()].has_pin_outputs(), node_internal[pin.get_idx()].is_driver_setup());
+  Node_pin_iterator inp_driver(const Node_pin &spin) const; // 1 or 0 drivers allowed for correct graphs
 
-    return node_internal[pin.get_idx()].is_driver_setup() && node_internal[pin.get_idx()].has_pin_outputs();
-  }
-  bool has_inputs(const Node_pin &pin) const {
-    I(pin.get_idx() < node_internal.size());
-    I(node_internal[pin.get_idx()].is_root());
-    GI(node_internal[pin.get_idx()].has_pin_inputs(), node_internal[pin.get_idx()].is_sink_setup());
+  bool has_outputs(const Node &node) const;
+  bool has_inputs(const Node &node) const;
+  bool has_outputs(const Node_pin &pin) const;
+  bool has_inputs(const Node_pin &pin) const;
 
-    return node_internal[pin.get_idx()].is_sink_setup() && node_internal[pin.get_idx()].has_pin_inputs();
-  }
+  int get_num_out_edges(const Node &node) const;
+  int get_num_inp_edges(const Node &node) const;
+  int get_num_edges(const Node &node) const;
+  int get_num_out_edges(const Node_pin &pin) const;
+  int get_num_inp_edges(const Node_pin &pin) const;
 
   void del_driver2node_int(Node &driver, const Node &sink);
   void del_sink2node_int(const Node &driver, Node &sink);
 
+  void try_del_node_int(Index_ID last_idx, Index_ID idx);
   bool del_edge_driver_int(const Node_pin &dpin, const Node_pin &spin);
   bool del_edge_sink_int(const Node_pin &dpin, const Node_pin &spin);
 
@@ -133,18 +88,21 @@ protected:
   bool is_graph_io(Index_ID idx) const {
     I(static_cast<Index_ID>(node_internal.size()) > idx);
     auto nid = node_internal[idx].get_nid();
+    nid = node_internal[nid].get_nid();
     return nid == Node::Hardcoded_input_nid || nid == Node::Hardcoded_output_nid;
   }
 
   bool is_graph_input(Index_ID idx) const {
     I(static_cast<Index_ID>(node_internal.size()) > idx);
     auto nid = node_internal[idx].get_nid();
+    nid = node_internal[nid].get_nid();
     return nid == Node::Hardcoded_input_nid;
   }
 
   bool is_graph_output(Index_ID idx) const {
     I(static_cast<Index_ID>(node_internal.size()) > idx);
     auto nid = node_internal[idx].get_nid();
+    nid = node_internal[nid].get_nid();
     return nid == Node::Hardcoded_output_nid;
   }
 
@@ -176,6 +134,9 @@ protected:
     return node_internal[nid].get_type() == SubGraph_Op;
   }
 
+  void trace_back2driver(Node_pin_iterator &xiter, const Node_pin &dpin) const;
+  void trace_forward2sink(XEdge_iterator &xiter, const Node_pin &dpin, const Node_pin &spin) const;
+
 public:
   LGraph()               = delete;
   LGraph(const LGraph &) = delete;
@@ -184,8 +145,21 @@ public:
 
   bool is_empty() const { return fast_first() == 0; }
 
-  bool has_edge(const Node_pin &driver, const Node_pin &sink) const;
-
+  Hierarchy_tree *ref_htree() {
+    if (htree.empty())
+      htree.regenerate();
+    return &htree;
+  }
+  const Hierarchy_tree &get_htree() {
+    if (htree.empty())
+      htree.regenerate();
+    return htree;
+  }
+/*
+  mmap_lib::vector<Node_internal>& ref_internal() {
+    return node_internal;
+  }
+*/
   Index_ID add_edge(const Node_pin &dpin, const Node_pin &spin) {
     I(dpin.is_driver());
     I(spin.is_sink());
@@ -194,13 +168,13 @@ public:
     GI(!spin.is_graph_io() && !dpin.is_graph_io() && dpin.get_node().get_nid() == spin.get_node().get_nid(),
        dpin.get_node().get_type().is_pipelined());
 
-    return add_edge_int(spin.get_idx(), spin.get_pid(), dpin.get_idx(), dpin.get_pid());
+    return add_edge_int(spin.get_root_idx(), spin.get_pid(), dpin.get_root_idx(), dpin.get_pid());
   }
 
   Index_ID add_edge(const Node_pin &dpin, const Node_pin &spin, uint32_t bits) {
     Index_ID idx = add_edge(dpin, spin);
-    I(idx = dpin.get_idx());
     GI(bits != get_bits(idx), !is_type_const(node_internal[idx].get_nid()));  // Do not overwrite bits in constants
+    I(node_internal[idx].is_root()); // add_edge returns the root
     set_bits(idx, bits);
     return idx;
   }
@@ -230,6 +204,9 @@ public:
   Node create_node(Node_Type_Op op);
   Node create_node(Node_Type_Op op, uint32_t bits);
   Node create_node_const(const Lconst &value);
+  Node create_node_const(uint64_t val);
+  Node create_node_const(uint64_t val, Bits_t bits);
+  Node create_node_lut(const Lconst &value);
   Node create_node_sub(Lg_type_id sub);
   Node create_node_sub(std::string_view sub_name);
 
@@ -239,8 +216,8 @@ public:
   void dump();
   void dump_down_nodes();
 
-  Node get_graph_input_node();
-  Node get_graph_output_node();
+  Node get_graph_input_node(bool hier=false);
+  Node get_graph_output_node(bool hier=false);
 
   Node_pin get_graph_input(std::string_view str);
   Node_pin get_graph_output(std::string_view str);
@@ -251,15 +228,16 @@ public:
 
   // Iterators defined in the lgraph_each.cpp
 
-  void each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)> f1);
-  void each_graph_input(std::function<void(Node_pin &pin)> f1);
-  void each_graph_output(std::function<void(Node_pin &pin)> f1);
-
-  void each_node_fast(std::function<void(Node &node)> f1);
-
-  void each_output_edge_fast(std::function<void(XEdge &edge)> f1);
+  void each_pin(const Node_pin &dpin, std::function<bool(Index_ID idx)> f1) const;
+  void each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)> f1, bool hierarchical=false);
+  void each_graph_input(std::function<void(Node_pin &pin)> f1, bool hierarchical=false);
+  void each_graph_output(std::function<void(Node_pin &pin)> f1, bool hierarchical=false);
 
   void each_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)>);
+  void each_sub_unique_fast(const std::function<bool(Node &, Lg_type_id)> fn);
+
+  //void each_sub_with_hier(const Hierarchy_index hidx, const std::function<bool(Node &, Lg_type_id)> fn);
+  //Hierarchy_index find_hidx_from_node(const Node& n);
 
   template <typename FN>
   void each_sub_fast(const FN f1) {
@@ -277,20 +255,4 @@ public:
     }
   };
 
-  void each_root_fast_direct(std::function<bool(Node &)> f1);
-  template <typename FN>
-  void each_root_fast(const FN f1) {
-    if constexpr (std::is_invocable_r_v<bool, FN &, Node &>) {  // WARNING: bool must be before void
-      each_root_direct(f1);
-    } else if constexpr (std::is_invocable_r_v<void, FN &, Node &>) {
-      auto f2 = [&f1](Node &node) {
-        f1(node);
-        return true;
-      };
-      each_root_direct(f2);
-    } else {
-      I(false);
-      each_root_direct(f1);  // Better error message if I keep this
-    }
-  };
 };

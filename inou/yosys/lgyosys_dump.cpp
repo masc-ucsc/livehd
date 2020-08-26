@@ -24,7 +24,7 @@ RTLIL::Wire *Lgyosys_dump::get_wire(const Node_pin &pin) {
     return cell_it->second;
   }
 
-  fmt::print("trying to get wire for non existing driver pin {} ??\n", pin.debug_name());
+  fmt::print("trying to get wire for non existing driver pin {}\n", pin.debug_name());
   assert(pin.is_driver());
   assert(false);
 
@@ -119,7 +119,8 @@ void Lgyosys_dump::create_blackbox(const Sub_node &sub, RTLIL::Design *design) {
   design->add(mod);
 
   int port_id = 0;
-  for (const auto &io_pin : sub.get_io_pins()) {
+  for (const auto &io_pin : sub.get_io_pins()) { // no need to be sorted if pins are named
+    //fmt::print("bbox:{} name:{}\n", sub.get_name(), io_pin.name);
     std::string  name = absl::StrCat("\\", io_pin.name);
     RTLIL::Wire *wire = mod->addWire(name);  // , pin.get_bits());
     wire->port_id     = port_id++;
@@ -136,7 +137,7 @@ void Lgyosys_dump::create_blackbox(const Sub_node &sub, RTLIL::Design *design) {
 }
 
 void Lgyosys_dump::create_memory(LGraph *g, RTLIL::Module *module, Node &node) {
-  assert(node.get_type().op == Memory_Op);
+  assert(node.get_type_op() == Memory_Op);
 
   RTLIL::Cell *memory = module->addCell(absl::StrCat("\\", node.create_name()), RTLIL::IdString("$mem"));
 
@@ -262,7 +263,7 @@ void Lgyosys_dump::create_memory(LGraph *g, RTLIL::Module *module, Node &node) {
 }
 
 void Lgyosys_dump::create_subgraph(LGraph *g, RTLIL::Module *module, Node &node) {
-  assert(node.get_type().op == SubGraph_Op);
+  assert(node.get_type_op() == SubGraph_Op);
 
   const auto &sub = node.get_type_sub_node();
 
@@ -271,24 +272,24 @@ void Lgyosys_dump::create_subgraph(LGraph *g, RTLIL::Module *module, Node &node)
   RTLIL::Cell *new_cell = module->addCell(absl::StrCat("\\", node.create_name()), absl::StrCat("\\", sub.get_name()));
 
   fmt::print("inou_yosys instance_name:{}, subgraph->get_name():{}\n", node.get_name(), sub.get_name());
-  for (const auto &e : node.inp_edges()) {
+  for (const auto &e : node.inp_edges_ordered()) {
     auto port_name = e.sink.get_type_sub_io_name();
     // auto  port_name = e.sink.get_type_sub_pin_name();
-    fmt::print("input:{}\n", port_name);
+    fmt::print("input:{} pin:{}\n", port_name, e.driver.debug_name());
     RTLIL::Wire *input = get_wire(e.driver);
     new_cell->setPort(absl::StrCat("\\", port_name).c_str(), input);
   }
   for (const auto &dpin : node.out_connected_pins()) {
     auto port_name = dpin.get_type_sub_io_name();
     // auto  port_name = dpin.get_type_sub_pin_name();
-    fmt::print("output:{}\n", port_name);
+    fmt::print("output:{} pin:{}\n", port_name, dpin.debug_name());
     RTLIL::Wire *output = get_wire(dpin);
     new_cell->setPort(absl::StrCat("\\", port_name).c_str(), output);
   }
 }
 
 void Lgyosys_dump::create_subgraph_outputs(LGraph *g, RTLIL::Module *module, Node &node) {
-  assert(node.get_type().op == SubGraph_Op);
+  assert(node.get_type_op() == SubGraph_Op);
 
   for (auto &dpin : node.out_connected_pins()) {
     cell_output_map[dpin.get_compact()] = add_wire(module, dpin);
@@ -311,15 +312,16 @@ void Lgyosys_dump::create_wires(LGraph *g, RTLIL::Module *module) {
       input_map[pin.get_compact()]->port_input  = true;
       input_map[pin.get_compact()]->port_output = false;
     }
-  });
+  }, hierarchy);
 
-  for (auto node : g->fast()) {
-    I(node.get_type().op != GraphIO_Op);
+  for (auto node : g->fast(hierarchy)) { // FIXME: add this as an option -flatten
+    I(!node.is_invalid());
+    I(node.get_type_op() != GraphIO_Op);
 
     if (!node.has_inputs() && !node.has_outputs())
       continue;  // DCE code
 
-    if (node.get_type().op == Const_Op) {
+    if (node.get_type_op() == Const_Op) {
       auto         dpin     = node.get_driver_pin();
       RTLIL::Wire *new_wire = add_wire(module, dpin);
 
@@ -332,11 +334,11 @@ void Lgyosys_dump::create_wires(LGraph *g, RTLIL::Module *module) {
       }
       input_map[dpin.get_compact()] = new_wire;
       continue;
-    } else if (node.get_type().op == SubGraph_Op) {
+    } else if (node.get_type_op() == SubGraph_Op) {
       create_subgraph_outputs(g, module, node);
       continue;
 
-    } else if (node.get_type().op == Memory_Op) {
+    } else if (node.get_type_op() == Memory_Op) {
       for (auto &dpin : node.out_connected_pins()) {
         RTLIL::Wire *new_wire = add_wire(module, dpin);
 
@@ -344,7 +346,7 @@ void Lgyosys_dump::create_wires(LGraph *g, RTLIL::Module *module) {
         mem_output_map[node.get_compact()].push_back(RTLIL::SigChunk(new_wire));
       }
       continue;
-    } else if (node.get_type().op == And_Op || node.get_type().op == Or_Op || node.get_type().op == Xor_Op) {
+    } else if (node.get_type_op() == And_Op || node.get_type_op() == Or_Op || node.get_type_op() == Xor_Op) {
       // This differentiates between binary and unary Ands, Ors, Xors
       int count = 0;
       for (const auto &e : node.out_edges()) {
@@ -406,20 +408,21 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         module->connect(RTLIL::SigSpec(lhs.as_wire(), 0, rhs.size()), rhs);
       }
     }
-  });
+  }, hierarchy);
 
   // now create nodes and make connections
-  for (auto node : g->fast()) {
-    I(node.get_type().op != GraphIO_Op);
+  for (auto node : g->fast(hierarchy)) {
+    I(node.get_type_op() != GraphIO_Op);
 
     if (!node.has_inputs() && !node.has_outputs())
       continue;  // DCE code
 
-    auto op = node.get_type().op;
+    auto op = node.get_type_op();
 
     if (op != Memory_Op && op != SubGraph_Op && !node.has_outputs())
       continue;
 
+    fmt::print("node:{}\n",node.debug_name());
     Bits_t size = 0;
 
     switch (op) {
@@ -625,7 +628,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
           switch (e.sink.get_pid()) {
             case 0: picked_wire = get_wire(e.driver); break;
             case 1:
-              if (e.driver.get_node().get_type().op != Const_Op)
+              if (e.driver.get_node().get_type_op() != Const_Op)
                 log_error("Internal Error: Pick range is not a constant.\n");
               lower = e.driver.get_node().get_type_const().to_i();
               break;
@@ -688,30 +691,30 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
 
         if (pid == 1) {  // REDUCE OP
           RTLIL::Wire *or_input_wires = module->addWire(next_id(g), inps[0]->width);
-          if (node.get_type().op == And_Op)
+          if (node.get_type_op() == And_Op)
             create_tree(g, inps, module, &RTLIL::Module::addAnd, false, or_input_wires);
-          else if (node.get_type().op == Or_Op)
+          else if (node.get_type_op() == Or_Op)
             create_tree(g, inps, module, &RTLIL::Module::addOr, false, or_input_wires);
-          else if (node.get_type().op == Xor_Op)
+          else if (node.get_type_op() == Xor_Op)
             create_tree(g, inps, module, &RTLIL::Module::addXor, false, or_input_wires);
           else
             assert(false);
 
-          if (node.get_type().op == And_Op)
+          if (node.get_type_op() == And_Op)
             module->addReduceAnd(next_id(g), or_input_wires, cell_output_map[node.get_driver_pin(pid).get_compact()]);
-          else if (node.get_type().op == Or_Op)
+          else if (node.get_type_op() == Or_Op)
             module->addReduceOr(next_id(g), or_input_wires, cell_output_map[node.get_driver_pin(pid).get_compact()]);
-          else if (node.get_type().op == Xor_Op)
+          else if (node.get_type_op() == Xor_Op)
             module->addReduceXor(next_id(g), or_input_wires, cell_output_map[node.get_driver_pin(pid).get_compact()]);
           else
             assert(false);
 
         } else {
-          if (node.get_type().op == And_Op)
+          if (node.get_type_op() == And_Op)
             create_tree(g, inps, module, &RTLIL::Module::addAnd, false, cell_output_map[node.get_driver_pin(pid).get_compact()]);
-          else if (node.get_type().op == Or_Op)
+          else if (node.get_type_op() == Or_Op)
             create_tree(g, inps, module, &RTLIL::Module::addOr, false, cell_output_map[node.get_driver_pin(pid).get_compact()]);
-          else if (node.get_type().op == Xor_Op)
+          else if (node.get_type_op() == Xor_Op)
             create_tree(g, inps, module, &RTLIL::Module::addXor, false, cell_output_map[node.get_driver_pin(pid).get_compact()]);
           else
             assert(false);
@@ -728,7 +731,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
             case 0: dWire = get_wire(e.driver); break;
             case 1: enWire = get_wire(e.driver); break;
             case 2: {
-              if (e.driver.get_node().get_type().op != Const_Op)
+              if (e.driver.get_node().get_type_op() != Const_Op)
                 log_error("Internal Error: polarity is not a constant.\n");
               polarity = e.driver.get_node().get_type_const().to_i() ? true : false;
             } break;
@@ -759,7 +762,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
             case 3: rstWire = get_wire(e.driver); break;  // clr signal in yosys
             case 4: rstVal = get_wire(e.driver); break;   // set signal in yosys
             case 5: {
-              if (e.driver.get_node().get_type().op != Const_Op)
+              if (e.driver.get_node().get_type_op() != Const_Op)
                 log_error("Internal Error: polarity is not a constant.\n");
               polarity = e.driver.get_node().get_type_const().to_i() ? true : false;
             }
@@ -769,7 +772,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         if (dWire)
           log("adding sflop_Op width = %d\n", dWire->width);
         // last argument is polarity
-        switch (node.get_type().op) {
+        switch (node.get_type_op()) {
           case SFlop_Op:
             if (enWire == nullptr && clkWire != nullptr && dWire != nullptr && rstWire == nullptr && rstVal == nullptr) {
               module->addDff(next_id(g), clkWire, dWire, cell_output_map[node.get_driver_pin().get_compact()], polarity);
@@ -845,7 +848,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         if (lhs == nullptr || rhs == nullptr)
           log_error("Internal error: found no connections to LT pid.\n");
 
-        switch (node.get_type().op) {
+        switch (node.get_type_op()) {
           case LessThan_Op: module->addLt(next_id(g), lhs, rhs, cell_output_map[node.get_driver_pin().get_compact()], sign); break;
           case LessEqualThan_Op:
             module->addLe(next_id(g), lhs, rhs, cell_output_map[node.get_driver_pin().get_compact()], sign);
@@ -879,7 +882,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
             case 1:
               if (shift_amount.size() != 0)
                 log_error("Internal Error: multiple wires assigned to same shift\n");
-              if (e.driver.get_node().get_type().op == Const_Op)
+              if (e.driver.get_node().get_type_op() == Const_Op)
                 shift_amount = RTLIL::Const(e.driver.get_node().get_type_const().to_i());
               else
                 shift_amount = get_wire(e.driver);
@@ -914,13 +917,13 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
             case 1:
               if (shift_amount.size() != 0)
                 log_error("Internal Error: multiple wires assigned to same shift\n");
-              if (e.driver.get_node().get_type().op == Const_Op)
+              if (e.driver.get_node().get_type_op() == Const_Op)
                 shift_amount = RTLIL::Const(e.driver.get_node().get_type_const().to_i());
               else
                 shift_amount = get_wire(e.driver);
               break;
             case 2:
-              if (e.driver.get_node().get_type().op != Const_Op)
+              if (e.driver.get_node().get_type_op() != Const_Op)
                 log_error("Internal Error: Shift sign is not a constant.\n");
               auto val = e.driver.get_node().get_type_const().to_i();
               sign     = (val) % 2 == 1;  // FIXME: Weird encoding

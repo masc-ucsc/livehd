@@ -2,7 +2,6 @@
 
 #include "hierarchy.hpp"
 
-#include "absl/strings/substitute.h"
 #include "annotate.hpp"
 #include "lgraph.hpp"
 
@@ -10,6 +9,8 @@ Hierarchy_tree::Hierarchy_tree(LGraph *_top)
     : mmap_lib::tree<Hierarchy_data>(_top->get_path(), absl::StrCat(_top->get_name(), "_htree")), top(_top) {}
 
 LGraph *Hierarchy_tree::ref_lgraph(const Hierarchy_index &hidx) const {
+  I(!hidx.is_invalid()); // no hierarchical should not call this
+
   // NOTE: if this becomes a bottleneck, we can memorize the LGraph *
   const auto &data = get_data(hidx);
 
@@ -84,10 +85,12 @@ Hierarchy_index Hierarchy_tree::go_down(const Node &node) const {
   return child;
 }
 
+/* LCOV_EXCL_START */
 void Hierarchy_tree::dump() const {
   for (const auto &index : depth_preorder()) {
     std::string indent(index.level, ' ');
     const auto &index_data = get_data(index);
-    fmt::print("{} l:{} p:{} lgid:{} nid:{}\n", indent, index.level, index.pos, index_data.lgid, index_data.up_nid);
+    fmt::print("{} level:{} pos:{} lgid:{} nid:{}\n", indent, index.level, index.pos, index_data.lgid, index_data.up_nid);
   }
 }
+/* LCOV_EXCL_STOP */

@@ -34,10 +34,12 @@ public:
     Lnast_ntype_or,           // |
     Lnast_ntype_not,          // ~
     Lnast_ntype_xor,          // ^
+    Lnast_ntype_parity,
     Lnast_ntype_plus,
     Lnast_ntype_minus,
     Lnast_ntype_mult,
     Lnast_ntype_div,
+    Lnast_ntype_mod,
     Lnast_ntype_eq,
     Lnast_ntype_same,
     Lnast_ntype_lt,
@@ -107,10 +109,12 @@ protected:
     "or",
     "not",
     "xor",
+    "parity",
     "plus",
     "minus",
     "mult",
     "div",
+    "mod",
     "eq",
     "same",
     "lt",
@@ -173,10 +177,12 @@ protected:
     "|",
     "~",
     "^",
+    "parity",
     "+",
     "-",
     "*",
     "/",
+    "mod",
     "ed",
     "==",
     "<",
@@ -235,10 +241,12 @@ protected:
     "|",
     "~",
     "^",
+    "^", // parity
     "+",
     "-",
     "*",
     "/",
+    "mod",
     "eq",
     "==",
     "<",
@@ -297,10 +305,12 @@ protected:
     "|",
     "~",
     "^",
+    "^", // parity
     "+",
     "-",
     "*",
     "/",
+    "%",
     "eq",
     "==",
     "<",
@@ -360,10 +370,12 @@ protected:
     "|", // or
     "~", // not
     "^",
+    "^", // parity
     "+",
     "-",
     "*",
     "/",
+    "%",
     "eq",
     "==",
     "<",
@@ -434,10 +446,12 @@ public:
   static constexpr Lnast_ntype create_or()           { return Lnast_ntype(Lnast_ntype_or); }
   static constexpr Lnast_ntype create_not()          { return Lnast_ntype(Lnast_ntype_not); }
   static constexpr Lnast_ntype create_xor()          { return Lnast_ntype(Lnast_ntype_xor); }
+  static constexpr Lnast_ntype create_parity()          { return Lnast_ntype(Lnast_ntype_parity); }
   static constexpr Lnast_ntype create_plus()         { return Lnast_ntype(Lnast_ntype_plus); }
   static constexpr Lnast_ntype create_minus()        { return Lnast_ntype(Lnast_ntype_minus); }
   static constexpr Lnast_ntype create_mult()         { return Lnast_ntype(Lnast_ntype_mult); }
   static constexpr Lnast_ntype create_div()          { return Lnast_ntype(Lnast_ntype_div); }
+  static constexpr Lnast_ntype create_mod()          { return Lnast_ntype(Lnast_ntype_mod); }
   static constexpr Lnast_ntype create_eq()           { return Lnast_ntype(Lnast_ntype_eq); }
   static constexpr Lnast_ntype create_same()         { return Lnast_ntype(Lnast_ntype_same); }
   static constexpr Lnast_ntype create_lt()           { return Lnast_ntype(Lnast_ntype_lt); }
@@ -500,10 +514,12 @@ public:
   bool constexpr is_or()           const { return val == Lnast_ntype_or; }
   bool constexpr is_not()          const { return val == Lnast_ntype_not; }
   bool constexpr is_xor()          const { return val == Lnast_ntype_xor; }
+  bool constexpr is_parity()       const { return val == Lnast_ntype_parity; }
   bool constexpr is_plus()         const { return val == Lnast_ntype_plus; }
   bool constexpr is_minus()        const { return val == Lnast_ntype_minus; }
   bool constexpr is_mult()         const { return val == Lnast_ntype_mult; }
   bool constexpr is_div()          const { return val == Lnast_ntype_div; }
+  bool constexpr is_mod()          const { return val == Lnast_ntype_mod; }
   bool constexpr is_eq()           const { return val == Lnast_ntype_eq; }
   bool constexpr is_same()         const { return val == Lnast_ntype_same; }
   bool constexpr is_lt()           const { return val == Lnast_ntype_lt; }

@@ -6,10 +6,10 @@
 template <typename T, typename Meaning, T inv_val>
 struct Explicit_type {
   //! Default constructor does not initialize the value.
-  constexpr Explicit_type() : value(inv_val) {}
+  constexpr inline Explicit_type() : value(inv_val) {}
 
   //! Construction from a fundamental value.
-  constexpr Explicit_type(T _value) : value(_value) {}
+  constexpr inline Explicit_type(const T &_value) : value(_value) {}
 
   //! Implicit conversion back to the fundamental data type.
   [[nodiscard]] constexpr inline operator T() const noexcept { return value; }

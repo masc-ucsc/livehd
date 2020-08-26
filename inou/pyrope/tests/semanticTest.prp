@@ -78,12 +78,12 @@
 
 // Basic Func Def
 // func_xor = :($a, $b, %out):{
-//   %out = $a ^ $b
+//   %out = param1 ^ param2
 // }
 // Warning: func_xor
 // ================================================
 
-// Cond Func Def
+// Cond Func Def (Doesn't work for some reason?)
 // func_xor = :($a, $b, $valid, %out) when $valid:{
 //   %out = $a ^ $b
 // }
@@ -152,5 +152,30 @@
 // a = a * 3
 // b = a
 // a = a / 3
-// Warning: Inefficient LNAST for variable b
+// Warning: None
+
+// %foo = 4
+// %out = %foo
+// %out = %foo + 4
+// %bar = (4 * 5) / 2
+// %valid = %bar
+// %valid = %valid + %out
+// Warning: Inefficient LNASt for variable %out and %valid
+
+// x = 3
+// x = 3 * (x + 3)
+// y = 4
+// y = ((y + 3) * 7) / 7
+// Read Variable Warning: x, y
+
+// a = 3
+// b = c
+// a = a + 3
+
+a = 3
+if true {
+  b = 3
+}
+foo = b
+// Warning: b is out of scope
 // ================================================

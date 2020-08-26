@@ -6,6 +6,7 @@
 #endif
 
 #include <fcntl.h>
+#include <gmock/gmock.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/wait.h>
@@ -15,9 +16,7 @@
 #include <regex>
 #include <string>
 
-#include <gmock/gmock.h>
 #include "gtest/gtest.h"
-
 #include "tmt_test.hpp"
 
 using testing::HasSubstr;
@@ -28,13 +27,16 @@ protected:
   pid_t child;
   void  SetUp() override {
     struct winsize win = {
-        80, 24,   // row, col
-        480, 192  // pixes, unused
+        80,
+        24,  // row, col
+        480,
+        192  // pixes, unused
     };
 
     child = forkpty(&master, NULL, NULL, &win);
     EXPECT_NE(child, -1);
-    if (child == -1) exit(-3);
+    if (child == -1)
+      exit(-3);
 
     if (child == 0) {
       const char *lgshell = "main/lgshell";
@@ -66,32 +68,36 @@ protected:
   std::string read_line() {
     std::string line;
     char        buffer;
-    while(1) {
+    while (1) {
       bool skipping_warning = false;
       while (1) {
         int sz = read(master, &buffer, 1);
-        if (sz != 1) break;
+        if (sz != 1)
+          break;
 
         if (line == ":0:0 warning:") {
           skipping_warning = true;
         }
-        if ((buffer == '#') && line.size()) break;
+        if ((buffer == '#') && line.size())
+          break;
 
-        if ((buffer == '\n' || buffer == '\r' || buffer == ' ') && line.empty()) continue;
+        if ((buffer == '\n' || buffer == '\r' || buffer == ' ') && line.empty())
+          continue;
 
-        if ((buffer == '\n' || buffer == '\r') && line.size()) break;
+        if ((buffer == '\n' || buffer == '\r') && line.size())
+          break;
 
         line += buffer;
       }
 
       if (!skipping_warning)
         break;
-      line.clear(); // let's try again
+      line.clear();  // let's try again
     }
 
     {
       std::string line2;
-      TMT *vt = tmt_open(24, 80, nullptr, NULL, NULL);
+      TMT *       vt = tmt_open(24, 80, nullptr, NULL, NULL);
       tmt_write(vt, line.c_str(), line.size());
 
       const TMTSCREEN *s = tmt_screen(vt);
@@ -108,7 +114,7 @@ protected:
       }
 
       tmt_close(vt);
-      //std::cerr << "x.xline:" << line2 << std::endl;
+      // std::cerr << "x.xline:" << line2 << std::endl;
 
       return line2;
     }
@@ -187,11 +193,10 @@ TEST_F(MainTest, Autocomplete) {
 }
 
 TEST_F(MainTest, LabelsComplete) {
-
   drain_stdin();
   std::string cmd = "files pa\t\n";
 
-  write(master,cmd.c_str(),cmd.size());
+  write(master, cmd.c_str(), cmd.size());
 
   std::string l0 = read_line();
   std::string l1 = read_line();
@@ -227,18 +232,18 @@ TEST_F(MainTest, HelpPass) {
   auto sz = write(master, cmd.c_str(), cmd.size());
   EXPECT_EQ(sz, cmd.size());
 
-  std::string l0 = read_line(); // typed
-  std::string l1 = read_line(); // echo
-  std::string l2 = read_line(); // xtra space after return
-  std::string l3 = read_line(); // 1st response
-  std::string l4 = read_line(); // 2nd response
-  std::string l5 = read_line(); // 3rd response
+  std::string l0 = read_line();  // typed
+  std::string l1 = read_line();  // echo
+  std::string l2 = read_line();  // xtra space after return
+  std::string l3 = read_line();  // 1st response
+  std::string l4 = read_line();  // 2nd response
+  std::string l5 = read_line();  // 3rd response
 
-  EXPECT_THAT(l0, HasSubstr("help")); // Typed
-  EXPECT_THAT(l1, HasSubstr("help")); // echo
-  EXPECT_THAT(l3, HasSubstr("dot format")); // explanation
+  EXPECT_THAT(l0, HasSubstr("help"));        // Typed
+  EXPECT_THAT(l1, HasSubstr("help"));        // echo
+  EXPECT_THAT(l3, HasSubstr("dot format"));  // explanation
 
-  EXPECT_THAT(l4, HasSubstr("optional")); // first arg explained
+  EXPECT_THAT(l4, HasSubstr("optional"));  // first arg explained
 }
 
 TEST_F(MainTest, Quit) {
@@ -248,11 +253,10 @@ TEST_F(MainTest, Quit) {
   auto sz = write(master, cmd.c_str(), cmd.size());
   EXPECT_EQ(sz, cmd.size());
 
-  std::string l0 = read_line(); // type
-  std::string l1 = read_line(); // echo
-  std::string l2 = read_line(); // 1st response
+  std::string l0 = read_line();  // type
+  std::string l1 = read_line();  // echo
+  std::string l2 = read_line();  // 1st response
 
-  EXPECT_THAT(l0, HasSubstr("qui"));  // It has escape colors, just match word
+  EXPECT_THAT(l0, HasSubstr("qui"));   // It has escape colors, just match word
   EXPECT_THAT(l1, HasSubstr("quit"));  // It has escape colors, just match word
 }
-

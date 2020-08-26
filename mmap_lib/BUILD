@@ -30,6 +30,17 @@ cc_test(
 )
 
 cc_test(
+    name = "strbench",
+    srcs = ["tests/strbench.cpp"],
+    deps = [
+        ":mmap_lib_test_lib",
+        "//lbench:headers",
+        "@gtest//:gtest_main",
+        "@fmt//:fmt",
+    ],
+)
+
+cc_test(
     name = "bench_map_use",
     srcs = ["tests/bench_map_use.cpp"],
     deps = [

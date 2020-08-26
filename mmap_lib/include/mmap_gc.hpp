@@ -56,6 +56,8 @@ protected:
     std::vector<mmap_gc_entry> sorted;
     for (auto it : mmap_gc_pool) {
       if (it.second.fd < 0) continue;
+      if (it.second.base == nullptr) continue; // just open, no mmap
+
       may_recycle_fds++;
       if (it.second.base) may_recycle_mmaps++;
 
@@ -114,6 +116,20 @@ protected:
         n_gc++;
       }
     }
+    if (n_gc==0) { // try with force
+      for (const auto e : sorted) {
+        if (n_recycle_fds == 0 && n_recycle_mmaps == 0) break;
+        auto it = mmap_gc_pool.find(e.base);
+        assert(it != mmap_gc_pool.end());
+        bool done = mmap_gc::recycle_int(it, true); // force (do not give an option)
+        assert(done);
+        if (e.base) n_recycle_mmaps--;
+        n_recycle_fds--;
+        mmap_gc_pool.erase(it);
+        n_gc++;
+      }
+    }
+
 #if 0
     std::cerr << "gc:" << n_gc
       << " n_open_mmaps:" << n_open_mmaps << " n_max_mmaps:" << n_max_mmaps
@@ -174,6 +190,7 @@ protected:
 
     if (fd < 0) {
       void *base = ::mmap(0, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, fd, 0);  // superpages
+      // Allowed to fail. Then new step afterwards
       return {base, size};
     }
 
@@ -182,6 +199,7 @@ protected:
     /* LCOV_EXCL_START */
     if (status < 0) {
       std::cerr << "mmap_map::reload ERROR Could not check file status " << name << std::endl;
+      perror("mmap_map fstat:");
       exit(-3);
     }
     /* LCOV_EXCL_STOP */
@@ -190,6 +208,7 @@ protected:
       /* LCOV_EXCL_START */
       if (ret < 0) {
         std::cerr << "mmap_map::reload ERROR ftruncate could not resize " << name << " to " << size << "\n";
+        perror("mmap_map ftruncate:");
         exit(-1);
       }
       /* LCOV_EXCL_STOP */
@@ -198,8 +217,9 @@ protected:
     }
 
     void *base = ::mmap(0, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);  // no superpages
+    // allowed to fail: step called again if needed
 
-    return std::make_tuple(base, size);
+    return {base, size};
   }
 
 public:
@@ -236,7 +256,7 @@ public:
 #ifndef NDEBUG
     for (const auto &e : mmap_gc_pool) {
       if (e.second.fd < 0) continue;
-      assert(e.second.name != name);  // No name duplicate (may be OK for multithreaded access)
+      assert(e.second.name != name); // No name duplicate (may be OK for multithreaded access)
     }
 #endif
 
@@ -256,10 +276,10 @@ public:
       return fd;
     }
 
-    /* LCOV_EXCL_STOP */
+    /* LCOV_EXCL_START */
     dump();  // We were not able to find fds to recycle
     assert(false);
-    /* LCOV_EXCL_START */
+    /* LCOV_EXCL_STOP */
 
     return -1;
   }
@@ -344,13 +364,19 @@ public:
       base = ::mmap(0, new_size, PROT_READ | PROT_WRITE, MAP_SHARED, it->second.fd, 0);  // no superpages
       /* LCOV_EXCL_START */
       if (base == MAP_FAILED) {
-        std::cerr << "ERROR: OS X could not allocate" << mmap_name << "txt with " << new_size << "bytes\n";
+        std::cerr << "ERROR: OS X 1 could not allocate" << mmap_name << "txt with " << new_size/1024 << "KB\n";
         exit(-1);
       }
       /* LCOV_EXCL_STOP */
     } else {
       // Painful new allocation, and then copy
       base = ::mmap(0, new_size, PROT_READ | PROT_WRITE, MAP_SHARED, it->second.fd, 0);  // no superpages
+      /* LCOV_EXCL_START */
+      if (base == MAP_FAILED) {
+        std::cerr << "ERROR: OS X 2 could not allocate" << mmap_name << "txt with " << new_size/1024 << "KB\n";
+        exit(-1);
+      }
+      /* LCOV_EXCL_STOP */
       memcpy(base, mmap_old_base, old_size);
       munmap(mmap_old_base, old_size);
     }

@@ -1362,4 +1362,10 @@ TEST_F(Lconst_test, lconst_add) {
     EXPECT_EQ(a.to_i(), -2);
     EXPECT_EQ(a.get_bits(), 2);
   }
+  {
+    auto a = Lconst("0b0?") + Lconst("1");
+    EXPECT_FALSE(a.is_i());
+    EXPECT_EQ(a.to_pyrope(), "0b??u2bits");
+  }
+
 }

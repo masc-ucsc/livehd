@@ -1,5 +1,5 @@
 module loop_in_lg(
-  input clk,
+  input clock,
   input [7:0] a,
   input [7:0] b,
   output reg [1:0] x
@@ -7,7 +7,7 @@ module loop_in_lg(
 
   reg [7:0] regi;
 
-  always @(posedge clk) begin
+  always @(posedge clock) begin
     if (regi > 0) begin
       regi <= a;
       x <= 'h2;

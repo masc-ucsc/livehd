@@ -8,7 +8,9 @@ cc_library(
     includes = ["."],
     deps = [
         "//pass/common:pass",
-        "//inou/cfg:inou_cfg"
+    ],
+    data = [
+        "//inou/pyrope:pyrope_tests"
     ],
 )
 

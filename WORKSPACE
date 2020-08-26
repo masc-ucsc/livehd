@@ -27,12 +27,18 @@ new_git_repository( # Open_timer user taskflow
     commit = "3d2b025ff2509f40424855e3f8640fc2fb6b90b9", # July 1, 2020
     remote = "https://github.com/serge-sans-paille/frozen.git",
 )
-new_git_repository( # Open_timer user taskflow
-    name = "taskflow",
-    build_file = "BUILD.taskflow",
-    commit = "ef1e9916529ce52ca2968a20ac4f8accbd18cdf4", # April 29, 2019
-    remote = "https://github.com/cpp-taskflow/cpp-taskflow.git",
+git_repository( # Open_timer user taskflow
+    name = "range-v3",
+    commit = "6dd1cb6a03a588031868b6ffb66286e6eaab6714", # July 18, 2020
+    remote = "https://github.com/ericniebler/range-v3.git",
 )
+
+#new_git_repository( # Open_timer user taskflow
+    #name = "taskflow",
+    #build_file = "BUILD.taskflow",
+    #commit = "ef1e9916529ce52ca2968a20ac4f8accbd18cdf4", # April 29, 2019
+    #remote = "https://github.com/cpp-taskflow/cpp-taskflow.git",
+#)
 new_git_repository(
     name = "abc",
     build_file = "BUILD.abc", # relative to external path
@@ -50,30 +56,28 @@ new_git_repository(
 new_git_repository(
     name = "mustache",
     build_file = "BUILD.mustache", # relative to external path
-    commit = "40ddfe9daecc699eca319f1c739b0cfc7e5f3ae5", # April 6 2019
+    commit = "a7eebc9bec92676c1931eddfff7637d7e819f2d2", # August 10, 2020 "40ddfe9daecc699eca319f1c739b0cfc7e5f3ae5", # April 6 2019
     remote = "https://github.com/kainjow/Mustache.git",
     #strip_prefix = "kernel",
 )
-# Needed for bazel abseil package
+
 http_archive(
     name = "rules_cc",
-    sha256 = "9a446e9dd9c1bb180c86977a8dc1e9e659550ae732ae58bd2e8fd51e15b2c91d",
+    urls = ["https://github.com/bazelbuild/rules_cc/archive/262ebec3c2296296526740db4aefce68c80de7fa.zip"],
     strip_prefix = "rules_cc-262ebec3c2296296526740db4aefce68c80de7fa",
-    urls = [
-        "https://mirror.bazel.build/github.com/bazelbuild/rules_cc/archive/262ebec3c2296296526740db4aefce68c80de7fa.zip",
-        "https://github.com/bazelbuild/rules_cc/archive/262ebec3c2296296526740db4aefce68c80de7fa.zip",
-    ],
-)
+    )
 git_repository(
     name = "com_google_absl",
     #build_file = "BUILD.abseil", # relative to external path
-    commit = "bf86cfe165ef7d70dfe68f0b8fc0c018bc79a577", # December 16, 2019 e9f9000c7c80993cb589d011616b7a8016e42f4a", # October 11, 2019 a0d1e098c2f99694fa399b175a7ccf920762030e"
+    #commit = "d0c433455801e1c1fb6f486f0b447e22f946ab52", # August, 16 2020 (fails because Yosys)
+    commit = "bf86cfe165ef7d70dfe68f0b8fc0c018bc79a577", # December 16, 2019
     remote = "https://github.com/abseil/abseil-cpp.git",
 )
+
 new_git_repository(
     name = "fmt",
     build_file = "BUILD.fmt",
-    commit = "f19b1a521ee8b606dedcadfda69fd10ddf882753", # 7.0.1 June 23, 2020 f94b7364b9409f05207c3af3fa4666730e11a854", # 6.1.2.0 APril 13, 2020
+    commit = "cd4af11efc9c622896a3e4cb599fa28668ca3d05", # 7.0.3 August 20 f19b1a521ee8b606dedcadfda69fd10ddf882753", # 7.0.1 June 23, 2020
     remote = "https://github.com/fmtlib/fmt.git",
     #strip_prefix = "include",
 )
@@ -133,9 +137,8 @@ new_git_repository(
 new_git_repository(
     name = "gtest",
     build_file = "BUILD.gtest",
-    commit = "37f322783175a66c11785d17fc153477b0777753", # October 24, 2019
+    commit = "adeef192947fbc0f68fa14a6c494c8df32177508", # August 15, 2020 "37f322783175a66c11785d17fc153477b0777753", # October 24, 2019
     remote = "https://github.com/google/googletest",
-    #tag = "release-1.8.0",
 )
 new_git_repository(
     name = "verilator",
@@ -168,6 +171,18 @@ new_git_repository(
     remote = "https://git.savannah.gnu.org/git/bison.git",
     #patches = ["//external:patch.verilator"],
     #strip_prefix = "include",
+)
+new_git_repository(
+    name = "graph",
+    build_file = "BUILD.graph",
+    commit = "b1e38e1084a0dff6f4eb4ed9a645ed63d3e83dd2", # latest commit as of 7/18/20
+    remote = "https://github.com/cbbowen/graph",
+)
+new_git_repository(
+	name = "range-v3",
+	build_file = "BUILD.rangev3",
+	commit = "4f4beb45c5e56aca4233e4d4c760208e21fff2ec", # specific commit used by graph, made on Jan 11 2019
+	remote = "https://github.com/ericniebler/range-v3",
 )
 
 # BOOST Libraries dependences
@@ -224,3 +239,5 @@ http_archive(
 
 load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
 protobuf_deps()
+
+

@@ -1,13 +1,8 @@
 #!/bin/sh
 rm -rf ./lgdb
-rm -f   yosys_srcipt.*
-rm -f   *.v
-rm -r  ./logs/*.v
-rm -f  ./logs/*.dot
-rm -f  ./logs/yosys_log/yosys_script.*
+rm -rf ./mtlogs
 
-mkdir logs
-mkdir -p logs/yosys_log
+mkdir -p mtlogs/yosys_log
 
 ### Don't need LUT-synth
 # pts='wires simple_rf2 simple_flop simple_add satsmall satpick satlarge
@@ -29,9 +24,30 @@ mkdir -p logs/yosys_log
 
 pts='trivial_offset trivial2a trivial trivial3 trivial_and
      dce1 gates trivial1 trivial_join compare cse_basic
-     simple_weird2 mt_basic_test reduce null_port shift
+     simple_weird2 mt_basic_test reduce null_port
      '
 
+PTS_PATH="inou/yosys/tests"
+
+if [ "$1" != "" ]; then
+  PTS_PATH=""
+  pts=""
+  while [ "$1" != "" ]; do
+    full_input=$1
+    shift
+
+    PTS_PATH=$(dirname ${full_input})
+    base=$(basename ${full_input})
+    TT=${base%.*}
+    pts=${pts}" "${TT}
+    echo ${TT}
+    echo $base
+    echo $PTS_PATH
+  done
+  echo "mt_test.sh inputs: ${pts}"
+fi
+
+pts_fixme='shift'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -46,38 +62,30 @@ if [ ! -f $LGSHELL ]; then
   fi
 fi
 
-
-
 for pt in $pts
 do
-  echo "Pattern:${pt}.v"
-  echo "Pattern:${pt}.v"
-  echo "Pattern:${pt}.v"
+  echo "Pattern:${PTS_PATH}/${pt}.v"
   echo ""
   echo "Mockturtle LUT Synthesis Flow"
   echo ""
-  ${LGSHELL} "inou.yosys.tolg files:inou/yosys/tests/${pt}.v"
+  ${LGSHELL} "inou.yosys.tolg files:${PTS_PATH}/${pt}.v"
   ${LGSHELL} "lgraph.open name:${pt}          |> inou.graphviz.from"
   ${LGSHELL} "lgraph.open name:${pt}          |> pass.mockturtle"
-  ${LGSHELL} "lgraph.open name:${pt}_lutified |> inou.yosys.fromlg"
-  ${LGSHELL} "lgraph.open name:${pt}_lutified |> inou.graphviz.from"
+  ${LGSHELL} "lgraph.open name:${pt}_lutified |> inou.yosys.fromlg odir:mtlogs"
+  ${LGSHELL} "lgraph.open name:${pt}_lutified |> inou.graphviz.from odir:mtlogs"
 
-  if [ $? -eq 0 ] && [ -f ${pt}_lutified.v ]; then
+  if [ $? -eq 0 ] && [ -f mtlogs/${pt}_lutified.v ]; then
     echo "Successfully created lutified verilog:${pt}_lutified.v"
   else
     echo "FAIL: verilog generation terminated with an error, testcase: ${pt}.v"
     exit 1
   fi
 
-  mv *.v ./logs
-  mv *.dot ./logs
-  mv yosys_script.* ./logs/yosys_log
-
   echo ""
   echo "Logic Equivalence Check"
   echo ""
 
-  ${LGCHECK} -r./inou/yosys/tests/${pt}.v -i./logs/${pt}_lutified.v
+  ${LGCHECK} -r${PTS_PATH}/${pt}.v -i./mtlogs/${pt}_lutified.v
   if [ $? -eq 0 ]; then
     echo "Successfully pass logic equivilence check!"
     echo "=========================================="

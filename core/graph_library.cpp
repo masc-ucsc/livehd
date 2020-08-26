@@ -32,12 +32,136 @@ class Cleanup_graph_library {
 public:
   Cleanup_graph_library(){};
   ~Cleanup_graph_library() {
-    // fmt::print("Shutting down...\n");
     Graph_library::sync_all();
+    Graph_library::shutdown();
   };
 };
 
 static Cleanup_graph_library private_instance;
+
+void Graph_library::shutdown() {
+  absl::flat_hash_set<LGraph *> lg_deleted;
+
+  for (auto it : global_name2lgraph) {
+    for (auto it2 : it.second) {
+      if (lg_deleted.contains(it2.second))
+        continue;
+      lg_deleted.insert(it2.second);
+
+      delete it2.second; // delete lgraphs (may be inserted many times different paths)
+    }
+  }
+  global_name2lgraph.clear();
+
+
+  absl::flat_hash_set<Graph_library *> gl_deleted;
+
+  // The same graph library is inserted TWICE (full and short path)
+  for(auto it : global_instances) {
+    if (gl_deleted.contains(it.second))
+      continue;
+
+    gl_deleted.insert(it.second);
+
+    delete it.second;
+  }
+  global_instances.clear();
+}
+
+void Graph_library::sync_all() {
+  for (auto &it : global_name2lgraph) {
+    for (auto &it2 : it.second) {
+      it2.second->sync();
+    }
+  }
+  for (auto &it : global_instances) {
+    it.second->clean_library();
+  }
+}
+
+void Graph_library::clean_library() {
+#if 0
+  // Possible to call sub_nodes directly and miss this update
+  if (graph_library_clean)
+    return;
+#endif
+
+  rapidjson::StringBuffer                          s;
+  rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(s);
+
+  writer.StartObject();
+
+  writer.Key("lgraph");
+  writer.StartArray();
+  // NOTE: insert in reverse order to reduce number of resizes when loading
+  for (size_t i = attributes.size() - 1; i >= 1; --i) {  // Not position zero
+    const auto &it = attributes[i];
+    writer.StartObject();
+
+    writer.Key("version");
+    writer.Uint64(it.version);
+
+    writer.Key("source");
+    writer.String(it.source.c_str());
+
+    sub_nodes[i].to_json(writer);
+
+    writer.EndObject();
+  }
+  writer.EndArray();
+
+  writer.Key("liberty");
+  writer.StartArray();
+  for (const auto &lib : liberty_list) {
+    writer.StartObject();
+
+    writer.Key("file");
+    writer.String(lib.c_str());
+
+    writer.EndObject();
+  }
+  writer.EndArray();
+
+  writer.Key("sdc");
+  writer.StartArray();
+  for (const auto &lib : sdc_list) {
+    writer.StartObject();
+
+    writer.Key("file");
+    writer.String(lib.c_str());
+
+    writer.EndObject();
+  }
+  writer.EndArray();
+
+  writer.Key("spef");
+  writer.StartArray();
+  for (const auto &lib : spef_list) {
+    writer.StartObject();
+
+    writer.Key("file");
+    writer.String(lib.c_str());
+
+    writer.EndObject();
+  }
+  writer.EndArray();
+  writer.EndObject();
+
+  {
+    std::ofstream fs;
+
+    fs.open(library_file, std::ios::out | std::ios::trunc);
+    if (!fs.is_open()) {
+      LGraph::error("graph_library::clean_library could not open graph_library file {}", library_file);
+      return;
+    }
+    fs << s.GetString() << std::endl;
+    fs.close();
+  }
+
+  graph_library_clean = true;
+}
+
 
 Graph_library *Graph_library::instance(std::string_view path) {
   auto it1 = Graph_library::global_instances.find(path);
@@ -47,17 +171,27 @@ Graph_library *Graph_library::instance(std::string_view path) {
 
   std::string spath(path);
 
-  char  full_path[PATH_MAX + 1];
-  char *ptr = realpath(spath.c_str(), full_path);
+  char  full_path_char[PATH_MAX + 1];
+  char *ptr = realpath(spath.c_str(), full_path_char);
   if (ptr == nullptr) {
-    mkdir(spath.c_str(), 0755);  // At least make sure directory exists for future
-    ptr = realpath(spath.c_str(), full_path);
+    int ok = mkdir(spath.c_str(), 0755);  // At least make sure directory exists for future
+    if (ok<0) { // no access
+      LGraph::error("could not open lgdb:{} path\n", spath);
+      return nullptr;
+    }
+    ptr = realpath(spath.c_str(), full_path_char);
     I(ptr);
   }
+  std::string full_path(full_path_char);
 
   auto it = Graph_library::global_instances.find(full_path);
   if (it != Graph_library::global_instances.end()) {
     return it->second;
+  }
+
+  if (access(full_path.c_str(), W_OK) == -1) {
+    LGraph::error("could not open lgdb:{} path\n", full_path);
+    return nullptr;
   }
 
   Graph_library *graph_library = new Graph_library(full_path);
@@ -203,18 +337,6 @@ Lg_type_id Graph_library::add_name(std::string_view name, std::string_view sourc
   name2id[name] = id;
 
   return id;
-}
-
-std::string Graph_library::get_lgraph_filename(std::string_view path, std::string_view name, std::string_view ext) {
-  std::string f;
-
-  f.append(path);
-  f.append("/lgraph_");
-  f.append(name);
-  f.append("_");
-  f.append(ext);
-
-  return f;
 }
 
 bool Graph_library::rename_name(std::string_view orig, std::string_view dest) {
@@ -414,6 +536,7 @@ Lg_type_id Graph_library::copy_lgraph(std::string_view name, std::string_view ne
   Lg_type_id id_new = reset_id(new_name, attributes[id_orig].source);
 
   attributes[id_new] = attributes[id_orig];
+  sub_nodes[id_new].copy_from(new_name, id_new, sub_nodes[id_orig]);
 
   DIR *dr = opendir(path.c_str());
   if (dr == NULL) {
@@ -422,8 +545,9 @@ Lg_type_id Graph_library::copy_lgraph(std::string_view name, std::string_view ne
   }
 
   struct dirent *de;  // Pointer for directory entry
-  std::string    match   = absl::StrCat("lgraph_", std::to_string(id_orig));
-  std::string    rematch = absl::StrCat("lgraph_", std::to_string(id_new));
+  std::string    match   = absl::StrCat("lg_", std::to_string(id_orig));
+  std::string    rematch = absl::StrCat("lg_", std::to_string(id_new));
+
   while ((de = readdir(dr)) != NULL) {
     std::string chop_name(de->d_name, match.size());
     if (chop_name == match) {
@@ -432,8 +556,6 @@ Lg_type_id Graph_library::copy_lgraph(std::string_view name, std::string_view ne
       std::string_view extension = dname.substr(match.size());
 
       auto new_file = absl::StrCat(path, "/", rematch, extension);
-
-      fmt::print("copying... {} to {}\n", file, new_file);
 
       int source = open(file.c_str(), O_RDONLY, 0);
       int dest   = open(new_file.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -455,6 +577,8 @@ Lg_type_id Graph_library::copy_lgraph(std::string_view name, std::string_view ne
 
   closedir(dr);
 
+
+
   clean_library();
 
   return id_new;
@@ -473,8 +597,7 @@ Lg_type_id Graph_library::register_lgraph(std::string_view name, std::string_vie
 
   global_name2lgraph[path][name] = lg;
 
-  I(attributes[id].lg == nullptr);
-  attributes[id].lg = lg;
+  attributes[id].lg = lg; // It could be already set if there was a copy
 
 #ifndef NDEBUG
   const auto &it = name2id.find(name);
@@ -501,99 +624,8 @@ void Graph_library::unregister(std::string_view name, Lg_type_id lgid, LGraph *l
     expunge(name);
 }
 
-void Graph_library::sync_all() {
-  for (auto &it : global_name2lgraph) {
-    for (auto &it2 : it.second) {
-      it2.second->sync();
-    }
-  }
-  for (auto &it : global_instances) {
-    it.second->clean_library();
-  }
-}
-
-void Graph_library::clean_library() {
-  if (graph_library_clean)
-    return;
-
-  rapidjson::StringBuffer                          s;
-  rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(s);
-
-  writer.StartObject();
-
-  writer.Key("lgraph");
-  writer.StartArray();
-  // NOTE: insert in reverse order to reduce number of resizes when loading
-  for (size_t i = attributes.size() - 1; i >= 1; --i) {  // Not position zero
-    const auto &it = attributes[i];
-    writer.StartObject();
-
-    writer.Key("version");
-    writer.Uint64(it.version);
-
-    writer.Key("source");
-    writer.String(it.source.c_str());
-
-    sub_nodes[i].to_json(writer);
-
-    writer.EndObject();
-  }
-  writer.EndArray();
-
-  writer.Key("liberty");
-  writer.StartArray();
-  for (const auto lib : liberty_list) {
-    writer.StartObject();
-
-    writer.Key("file");
-    writer.String(lib.c_str());
-
-    writer.EndObject();
-  }
-  writer.EndArray();
-
-  writer.Key("sdc");
-  writer.StartArray();
-  for (const auto lib : sdc_list) {
-    writer.StartObject();
-
-    writer.Key("file");
-    writer.String(lib.c_str());
-
-    writer.EndObject();
-  }
-  writer.EndArray();
-
-  writer.Key("spef");
-  writer.StartArray();
-  for (const auto lib : spef_list) {
-    writer.StartObject();
-
-    writer.Key("file");
-    writer.String(lib.c_str());
-
-    writer.EndObject();
-  }
-  writer.EndArray();
-  writer.EndObject();
-
-  {
-    std::ofstream fs;
-
-    fs.open(library_file, std::ios::out | std::ios::trunc);
-    if (!fs.is_open()) {
-      LGraph::error("graph_library::clean_library could not open graph_library file {}", library_file);
-      return;
-    }
-    fs << s.GetString() << std::endl;
-    fs.close();
-  }
-
-  graph_library_clean = true;
-}
-
 void Graph_library::each_lgraph(std::function<void(Lg_type_id lgid, std::string_view name)> f1) const {
-  for (const auto [name, id] : name2id) {
+  for (const auto &[name, id] : name2id) {
     f1(id, name);
   }
 }
@@ -602,7 +634,7 @@ void Graph_library::each_lgraph(std::string_view match, std::function<void(Lg_ty
   const std::string string_match(match);  // NOTE: regex does not support string_view, c++20 may fix this missing feature
   const std::regex  txt_regex(string_match);
 
-  for (const auto [name, id] : name2id) {
+  for (const auto &[name, id] : name2id) {
     const std::string line(name);
     if (!std::regex_search(line, txt_regex))
       continue;

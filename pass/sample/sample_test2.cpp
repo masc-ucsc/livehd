@@ -31,4 +31,6 @@ TEST_F(SampleMainTest, EmptyLGraph) {
   Pass_sample::work(var);
 
   EXPECT_TRUE(g->get_library().has_name("pass_sample"));
+
+  Graph_library::shutdown(); // needed to recycle pointers (AddressSanitizer will flag leak otherwise)
 }

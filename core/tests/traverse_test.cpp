@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 
+#include "lbench.hpp"
 #include "lrand.hpp"
 #include "mmap_tree.hpp"
 
@@ -20,6 +21,8 @@ using testing::HasSubstr;
 class Setup_traverse : public Tree_lgdb_setup {
 protected:
   void check_lgraph_fwd() {
+    Lbench bench("check_lgraph_fwd");
+
     I(lg_root);
 
     int pos = 1;
@@ -44,7 +47,7 @@ protected:
 
     std::vector<std::string> fwd_order;
     for(size_t i=0;i<full_fwd_order.size();++i) {
-      fmt::print("full_fwd_order: {}\n",full_fwd_order[i]);
+      // fmt::print("full_fwd_order: {}\n",full_fwd_order[i]);
       if (full_fwd_order[i].rfind("name:leaf")!=std::string::npos)
         fwd_order.emplace_back(full_fwd_order[i]);
     }
@@ -67,7 +70,7 @@ protected:
 #else
 #endif
       std::string txt = fmt::format("name:{} lg:{} debug:{}", node.get_name(), node.get_class_lgraph()->get_name(), node.debug_name());
-      fmt::print("iterator_order: {}\n",txt);
+      //fmt::print("iterator_order: {}\n",txt);
       iterator_order.push_back(txt);
 
       //EXPECT_EQ(fwd_pos,pos);
@@ -88,6 +91,7 @@ protected:
 
   void TearDown() override {
     //Graph_library::sync_all();
+    Graph_library::shutdown();
   }
 };
 
@@ -131,6 +135,7 @@ TEST_F(Setup_traverse, check_fwd) {
 
       check_lgraph_fwd();
     }
+    Graph_library::shutdown();
   }
 }
 

@@ -27,3 +27,4 @@ dist
 lbench.trace
 *.dot
 *.dot.pdf
+docs/graph-images

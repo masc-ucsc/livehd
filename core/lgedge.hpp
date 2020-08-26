@@ -114,7 +114,6 @@ protected:
   static const Edge_raw *find_edge(const Edge_raw *bt, const Edge_raw *et, Index_ID ptr_nid, Port_ID inp_pod, Port_ID dst_pid);
 
   Index_ID get_self_idx() const;  // WARNING: it can point to overflow. Be careful!
-  Index_ID get_self_root_idx() const;
 
 public:
   friend struct Node_internal_Page;
@@ -124,8 +123,6 @@ public:
   friend struct SEdge;
 
   int  next_node_inc() const { return is_snode() ? 1 : 2; }
-  bool is_last_input() const;
-  bool is_last_output() const;
 
   bool is_input() const { return input; }
 
@@ -136,8 +133,8 @@ public:
     I(snode == reinterpret_cast<const SEdge_Internal *>(this)->is_snode());
   }
 
-  Node_pin get_out_pin(LGraph *g, LGraph *cg, const Hierarchy_index &hidx) const;
-  Node_pin get_inp_pin(LGraph *g, LGraph *cg, const Hierarchy_index &hidx) const;
+  Node_pin get_out_pin(LGraph *g, LGraph *cg, const Hierarchy_index &hidx, Index_ID idx) const;
+  Node_pin get_inp_pin(LGraph *g, LGraph *cg, const Hierarchy_index &hidx, Index_ID idx) const;
 
   Index_ID get_self_nid() const;
   Index_ID get_idx() const {
@@ -156,9 +153,6 @@ public:
 
     fmt::print("snode:{} page_idx:{} a:{} addr:{:x}", is_snode(), get_page_idx(), a, (uint64_t)this);
   }
-
-  uint32_t get_bits() const;
-  bool     is_root() const;
 
   bool is_page_align() const {
     return ((((uint64_t)this) & 0xFFF) == 0);  // page align.
@@ -248,7 +242,7 @@ private:
   uint32_t   bits : Bits_bits;
   uint64_t   nid : Index_bits;  // 31bits, 4 byte aligned
   uint16_t   type : 8;          // 8 bits for master_root type (could be used for something else in non master root)
-  uint16_t   sign : 1;          // 1 bit (reserved future) for sign extension attribute to simplify gates
+  uint16_t   unused_too : 1;    // 1 bit (reserved future) for sign extension attribute to simplify gates
   uint16_t   root : 1;
   Port_ID    dst_pid : Port_bits;  // 15bits
   // 8 bytes aligned
@@ -321,6 +315,10 @@ public:
     return n;
   }
 
+  uint8_t get_num_local_edges() const {
+    return get_num_local_inputs() + get_num_local_outputs();
+  }
+
   uint8_t get_type() const {
     I(is_master_root());
     return type;
@@ -329,22 +327,6 @@ public:
     I(is_master_root());
     type = op;
   }
-
-  void set_signed() { sign = 1; }
-  void set_unsigned() { sign = 0; }
-  bool is_signed() const { return sign; }
-  bool is_unsigned() const { return !sign; }
-
-  int32_t get_node_num_inputs() const;
-  int32_t get_node_num_outputs() const;
-  int32_t get_node_pin_num_inputs(Index_ID idx) const;
-  int32_t get_node_pin_num_outputs(Index_ID idx) const;
-
-  bool has_node_inputs() const;
-  bool has_node_outputs() const;
-
-  bool has_pin_inputs() const;
-  bool has_pin_outputs() const;
 
   void reset() {
     state        = Last_node_state;
@@ -358,7 +340,6 @@ public:
     inp_long     = 0;
     out_long     = 0;
     nid          = 0;
-    sign         = 0;  // unsigned by default
     type         = 0;
   }
 
@@ -516,6 +497,7 @@ public:
       inp_pos++;
     }
   }
+  bool has_local_edges() const { return inp_pos>0 || out_pos>0; }
   bool has_local_inputs() const { return inp_pos > 0; }
   bool has_local_outputs() const { return out_pos > 0; }
   int  get_space_available() const {

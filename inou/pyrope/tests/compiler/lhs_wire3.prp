@@ -1,0 +1,5 @@
+tmp = foo.a.__last_value
+foo = (a = 2, b = 3)
+
+%out = tmp + foo.b
+

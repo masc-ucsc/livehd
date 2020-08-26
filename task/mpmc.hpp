@@ -44,7 +44,7 @@ public:
       : _size(size)
       ,
       //_buffer(reinterpret_cast<node_t *>(aligned_alloc(128,sizeof(node_t)*(_size + 1)))), // page align needed for muslc (alpine)
-      _buffer(reinterpret_cast<node_t *>(std::aligned_alloc(8 * alignof(std::max_align_t), sizeof(node_t) * (_size + 1))))
+      _buffer(reinterpret_cast<node_t *>(std::aligned_alloc(8 * alignof(std::max_align_t), ((((sizeof(node_t) * (_size)))>>12)|1)<<12)))
       , // page align needed for muslc (alpine)
       _mask(size - 1)
       , _head_seq(0)
