@@ -64,21 +64,30 @@ public:
 
     Compact(const Hierarchy_index &_hidx, Index_ID _nid) : hidx(_hidx), nid(_nid) { I(nid); };
     Compact() : nid(0){};
-    Compact &operator=(const Compact &obj) {
-      I(this != &obj);
+#if 0
+    constexpr Compact &operator=(const Compact &obj) {
+      assert(this != &obj);
       hidx = obj.hidx;
       nid  = obj.nid;
 
       return *this;
     }
+#endif
 
     Index_ID get_nid() const { return nid; }  // Mostly for debugging or to know order
+
+    Hierarchy_index get_hidx() const {
+      I(!hidx.is_invalid());
+      return hidx;
+    }
 
     Node get_node(LGraph *lg) const { return Node(lg, *this); }
 
     constexpr bool is_invalid() const { return nid == 0; }
 
-    constexpr bool operator==(const Compact &other) const { return hidx == other.hidx && nid == other.nid; }
+    constexpr bool operator==(const Compact &other) const {
+      return nid == other.nid && (hidx == other.hidx || hidx.is_invalid() || other.hidx.is_invalid());
+    }
     constexpr bool operator!=(const Compact &other) const { return !(*this == other); }
 
     template <typename H>
@@ -108,12 +117,14 @@ public:
     constexpr Compact_class() : nid(0){};
 
     Compact_class(const Index_ID &_nid) : nid(_nid) { I(nid); };
-    Compact_class &operator=(const Compact_class &obj) {
-      I(this != &obj);
+#if 0
+    constexpr Compact_class &operator=(const Compact_class &obj) {
+      assert(this != &obj);
       nid = obj.nid;
 
       return *this;
     }
+#endif
 
     Node get_node(LGraph *lg) const noexcept { return Node(lg, *this); }
 
@@ -155,8 +166,14 @@ public:
   };
 #endif
 
-  inline Compact       get_compact() const { return Compact(hidx, nid); }
-  inline Compact_class get_compact_class() const { return Compact_class(nid); }
+  inline Compact       get_compact() const {
+    return Compact(hidx, nid);
+  }
+
+  inline Compact_class get_compact_class() const {
+    // OK to pick a hierarchical to avoid replication of info like names
+    return Compact_class(nid);
+  }
 
   LGraph *get_top_lgraph() const { return top_g; }
   LGraph *get_class_lgraph() const { return current_g; }
@@ -174,23 +191,23 @@ public:
 
   bool has_inputs() const;
   bool has_outputs() const;
-  int  get_num_inputs() const;
-  int  get_num_outputs() const;
+  int  get_num_inp_edges() const;
+  int  get_num_out_edges() const;
+  int  get_num_edges() const;
 
   constexpr bool is_invalid() const { return nid == 0; }
   constexpr bool is_down_node() const { return top_g != current_g; }
+  constexpr bool is_hierarchical() const { return !hidx.is_invalid(); }
 
   constexpr bool operator==(const Node &other) const {
     GI(nid == 0, hidx.is_invalid());
     GI(other.nid == 0, other.hidx.is_invalid());
-    return top_g == other.top_g && hidx == other.hidx && nid == other.nid;
-  }
-  constexpr bool operator!=(const Node &other) const {
-    GI(nid == 0, hidx.is_invalid());
-    GI(other.nid == 0, other.hidx.is_invalid());
     GI(nid && other.nid, top_g == other.top_g);
-    return (nid != other.nid || hidx != other.hidx);
-  };
+
+    return nid == other.nid
+           && (hidx == other.hidx || hidx.is_invalid() || other.hidx.is_invalid());
+  }
+  constexpr bool operator!=(const Node &other) const { return !(*this == other); }
 
   void   set_type_lut(const Lconst &lutid);
   Lconst get_type_lut() const;
@@ -203,6 +220,7 @@ public:
   bool             is_type_sub() const;
   bool             is_type_const() const;
   bool             is_type_attr() const;
+  bool             is_type_tup() const;
   bool             is_type_io() const;
   bool             is_type_loop_breaker() const;
 

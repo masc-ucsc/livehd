@@ -1,0 +1,10 @@
+$a.__bits = 8
+foo = #reg == 0
+#reg.__bits = 8
+if (foo) {
+  #reg := $a
+} else {
+  #reg := #reg - 1
+}
+
+%out = #reg.__q_pin

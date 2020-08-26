@@ -21,26 +21,13 @@ Index_ID SEdge_Internal::get_page_idx() const { return Node_internal_Page::get(t
 
 Index_ID Edge_raw::get_page_idx() const { return Node_internal_Page::get(this).get_idx(); }
 
-bool Edge_raw::is_last_input() const {
-  const auto &node = Node_internal::get(this);
-
-  int sz = snode ? 1 : 2;
-
-  return ((this + sz) >= node.get_input_end());
-}
-
-bool Edge_raw::is_last_output() const {
-  const auto &node = Node_internal::get(this);
-  int         sz   = snode ? 1 : 2;
-
-  return ((this + sz) >= node.get_output_end());
-}
-
 const Edge_raw *Edge_raw::find_edge(const Edge_raw *bt, const Edge_raw *et, Index_ID ptr_idx, Port_ID inp_pid, Port_ID dst_pid) {
   const Edge_raw *eit = bt;
   while (eit != et) {
-    if (eit->get_idx() == ptr_idx && eit->get_inp_pid() == inp_pid && eit->get_dst_pid() == dst_pid)
+    if (eit->get_idx() == ptr_idx && eit->get_dst_pid() == dst_pid) {
+      I(eit->get_inp_pid() == inp_pid);
       return eit;
+    }
 
     if (eit->is_snode())
       eit++;
@@ -63,188 +50,12 @@ Index_ID Edge_raw::get_self_idx() const {
   return static_cast<Index_ID>(idx);
 }
 
-Index_ID Edge_raw::get_self_root_idx() const {
-  const auto &root_page = Node_internal_Page::get(this);
-  const auto &root_self = Node_internal::get(this);
-
-  SIndex_ID delta = &root_self - (const Node_internal *)&root_page;
-  I(delta < 4096 / sizeof(Node_internal) && delta > 0);
-
-  SIndex_ID self_idx = delta + root_page.get_idx();
-  if (root_self.is_root())
-    return static_cast<Index_ID>(self_idx);
-
-  return root_self.get_nid();
-}
-
 Index_ID Node_internal::get_self_idx() const {
   const auto &root_page = Node_internal_Page::get(this);
 
   SIndex_ID delta = this - (const Node_internal *)&root_page;
 
   return delta + root_page.get_idx();
-}
-
-int32_t Node_internal::get_node_num_inputs() const {
-  I(is_master_root());
-
-  int32_t total = get_num_local_inputs();
-  if (is_last_state())
-    return total;
-
-  const Node_internal *node = this;
-  do {
-    node = &get(node->get_next());
-    total += node->get_num_local_inputs();
-  } while (!node->is_last_state());
-
-  return total;
-}
-
-int32_t Node_internal::get_node_num_outputs() const {
-  I(is_master_root());
-
-  int32_t total = get_num_local_outputs();
-  if (is_last_state())
-    return total;
-
-  const Node_internal *node = this;
-  do {
-    node = &get(node->get_next());
-    total += node->get_num_local_outputs();
-  } while (!node->is_last_state());
-
-  return total;
-}
-
-int32_t Node_internal::get_node_pin_num_inputs(Index_ID idx) const {
-  I(false);
-  // This code is not right because inputs can map to any idx locally. Must
-  // traverse all the edges!!! (fix once test case happens)
-
-  I(is_master_root());
-
-  int32_t total = 0;
-  if (get_self_idx() == idx)
-    total = get_num_local_inputs();
-  if (is_last_state())
-    return total;
-
-  const Node_internal *node = this;
-  do {
-    auto next_idx = node->get_next();
-    node          = &get(next_idx);
-    if (get_nid() == idx || next_idx == idx)
-      total += node->get_num_local_inputs();
-  } while (!node->is_last_state());
-
-  return total;
-}
-
-int32_t Node_internal::get_node_pin_num_outputs(Index_ID idx) const {
-  I(is_master_root());
-
-  int32_t total = 0;
-  if (get_self_idx() == idx)
-    total = get_num_local_outputs();
-  if (is_last_state())
-    return total;
-
-  const Node_internal *node = this;
-  do {
-    auto next_idx = node->get_next();
-    node          = &get(next_idx);
-    if (get_nid() == idx || next_idx == idx)
-      total += node->get_num_local_outputs();
-  } while (!node->is_last_state());
-
-  return total;
-}
-
-bool Node_internal::has_node_inputs() const {
-  I(is_master_root());
-
-  int32_t total = get_num_local_inputs();
-  if (total)
-    return true;
-
-  if (is_last_state())
-    return false;
-
-  const Node_internal *node = this;
-  do {
-    node  = &get(node->get_next());
-    total = node->get_num_local_inputs();
-    if (total)
-      return true;
-  } while (!node->is_last_state());
-
-  return false;
-}
-
-bool Node_internal::has_pin_inputs() const {
-  I(is_root());
-
-  int32_t total = get_num_local_inputs();
-  if (total)
-    return true;
-
-  if (is_last_state())
-    return false;
-
-  Port_ID              pid  = get_dst_pid();
-  const Node_internal *node = this;
-  do {
-    node  = &get(node->get_next());
-    total = node->get_num_local_inputs();
-    if (total && node->get_dst_pid() == pid)
-      return true;
-  } while (!node->is_last_state());
-
-  return false;
-}
-
-bool Node_internal::has_node_outputs() const {
-  I(is_master_root());
-
-  int32_t total = get_num_local_outputs();
-  if (total)
-    return true;
-
-  if (is_last_state())
-    return false;
-
-  const Node_internal *node = this;
-  do {
-    node  = &get(node->get_next());
-    total = node->get_num_local_outputs();
-    if (total)
-      return true;
-  } while (!node->is_last_state());
-
-  return false;
-}
-
-bool Node_internal::has_pin_outputs() const {
-  I(is_root());
-
-  int32_t total = get_num_local_outputs();
-  if (total)
-    return true;
-
-  if (is_last_state())
-    return false;
-
-  Port_ID              pid  = get_dst_pid();
-  const Node_internal *node = this;
-  do {
-    node  = &get(node->get_next());
-    total = node->get_num_local_outputs();
-    if (total && node->get_dst_pid() == pid)
-      return true;
-  } while (!node->is_last_state());
-
-  return false;
 }
 
 const Node_internal &Node_internal::get_root() const {
@@ -299,27 +110,6 @@ void Node_internal::try_recycle() {
   // TODO: recycle the node no matter what
 
   SIndex_ID self_idx = get_self_idx();
-
-#if 0
-  if (is_root()) return;  // Keep node for attributes
-
-  Node_internal *root_ptr = (Node_internal *)&get_root();
-  Index_ID       root_idx = root_ptr->get_nid();
-
-  SIndex_ID prev_idx = root_idx;
-  I(prev_idx != self_idx);  // because it is not a root_ptr
-
-  while (root_ptr[prev_idx - root_idx].get_next() != self_idx) {
-    I(root_ptr[prev_idx - root_idx].is_next_state());
-    prev_idx = root_ptr[prev_idx - root_idx].get_next();
-  }
-
-  if (is_next_state()) {
-    root_ptr[prev_idx - root_idx].set_next_state(get_next());
-  } else {
-    root_ptr[prev_idx - root_idx].set_last_state();
-  }
-#endif
 
   set_free_state();
 
@@ -572,29 +362,21 @@ void Node_internal::assimilate_edges(Node_internal *other_ptr) {
 
 Port_ID Edge_raw::get_dst_pid() const { return Node_internal::get(this).get_dst_pid(); }
 
-Node_pin Edge_raw::get_out_pin(LGraph *g, LGraph *cg, const Hierarchy_index &hidx) const {
+Node_pin Edge_raw::get_out_pin(LGraph *g, LGraph *cg, const Hierarchy_index &hidx, Index_ID self_idx) const {
+  I(get_self_idx()==self_idx);
   if (is_input())
     return Node_pin(g, cg, hidx, get_idx(), get_inp_pid(), false);
   else
-    return Node_pin(g, cg, hidx, get_self_root_idx(), get_dst_pid(), false);
+    return Node_pin(g, cg, hidx, self_idx, get_dst_pid(), false);
 }
 
-Node_pin Edge_raw::get_inp_pin(LGraph *g, LGraph *cg, const Hierarchy_index &hidx) const {
+Node_pin Edge_raw::get_inp_pin(LGraph *g, LGraph *cg, const Hierarchy_index &hidx, Index_ID self_idx) const {
+  I(get_self_idx()==self_idx);
   if (is_input())
-    return Node_pin(g, cg, hidx, get_self_root_idx(), get_dst_pid(), true);
+    return Node_pin(g, cg, hidx, self_idx, get_dst_pid(), true);
   else
     return Node_pin(g, cg, hidx, get_idx(), get_inp_pid(), true);
 }
 
 Index_ID Edge_raw::get_self_nid() const { return Node_internal::get(this).get_nid(); }
 
-uint32_t Edge_raw::get_bits() const {
-  const auto &node = Node_internal::get(this);
-
-  if (node.is_root())
-    return node.get_bits();
-
-  return node.get_root().get_bits();
-}
-
-bool Edge_raw::is_root() const { return Node_internal::get(this).is_root(); }

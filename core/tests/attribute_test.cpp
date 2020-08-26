@@ -40,6 +40,12 @@ protected:
   };
 
   void TearDown() override {
+    top->sync();
+    delete top;
+    for(int i=0;i<1024;i++) {
+      subs[i]->sync();
+      delete subs[i];
+    }
   };
 };
 

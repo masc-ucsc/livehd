@@ -1,16 +1,29 @@
 #!/bin/bash
 rm -rf ./lgdb
 
-pts='FinalVal2Test FinalValTest NotAnd Trivial SimpleBitOps Test1 RegTrivial RegisterSimple Flop Register GCD RocketCore ICache' #Flop Register
-#Ops -- no rem op yet
+
+pts='Trivial TrivialArith TrivialAdd NotAnd
+     Test1 Test2
+     BundleCombiner MemoryController Tail
+     RegisterSimple Register RegXor Decrementer
+     GCD Flop Rob MemoryController ICache HwachaSequencer'
+#pts='GCD Flop regex'
+
+pts_hier='FinalVal2Test'
+pts_hier2='FinalValTest'
+pts_hier3='SubModule'
+pts_hier4='BundleConnect'
+
+pts_hier9='RocketCore'
+
+#SimpleBitOps Ops -- parity and mod op not in lnast_tolg
+#Flop -- seems to break when I do HandleMuxAssign pre assign, but works without
 
 #HwachaSequencer -- printf, pad, stop
 
 #SubModule BundleConnect -- submodules
-#TrivialArith, Test3 -- pad op
-#Test2 -- range, bit_sel op
+#Test3 -- fails because of DCE
 #Test4 -- as_... ops in FIRRTL
-#Test5 -- as_... ops in FIRRTL
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -24,137 +37,37 @@ if [ ! -f $LGSHELL ]; then
     fi
 fi
 
-for pt in $pts
-do
-    echo ""
-    echo ""
+lofirrtl_test() {
+  for pt in $1
+  do
+    rm -f ${pt}.v
+    rm -f ${pt}.dot
+    rm -f lgdb/*
+
     echo ""
     echo "===================================================="
     echo "Verify LoFIRRTL -> LNAST"
     echo "===================================================="
 
-
     echo "----------------------------------------------------"
-    echo "LoFIRRTL -> LNAST-SSA Graphviz debug"
-    echo "----------------------------------------------------"
-
-    ${LGSHELL} "inou.firrtl.tolnast files:inou/firrtl/tests/proto/${pt}.lo.pb |> inou.lnast_dfg.dbg_lnast_ssa |> inou.graphviz.from"
-
-    if [ -f ${pt}.lnast.dot ]; then
-      echo "Successfully create a ssa lnast for debug: ${pt}.lo.pb"
-    else
-      echo "ERROR: LoFIRRTL -> LNAST -> LNAST-SSA failed... testcase: ${pt}.lo.pb"
-      exit 1
-    fi
-
-
-    echo "----------------------------------------------------"
-    echo "LoFIRRTL (Proto) -> LNAST -> LGraph"
+    echo "LoFIRRTL -> LNAST -> Optimized LGraph"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "inou.firrtl.tolnast files:inou/firrtl/tests/proto/${pt}.lo.pb |> inou.lnast_dfg.tolg"
+    ${LGSHELL} "inou.firrtl.tolnast files:inou/firrtl/tests/proto/${pt}.lo.pb |> lnast.dump |> pass.lnast_tolg |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.bitwidth"
     if [ $? -eq 0 ]; then
       echo "Successfully translated FIRRTL to LNAST to LGraph: ${pt}.lo.pb"
     else
       echo "ERROR: FIRRTL -> LNAST -> LGraph failed... testcase: ${pt}.lo.pb"
       exit 1
     fi
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.tuple.no_bits.or.dot
+    ${LGSHELL} "lgraph.match |> inou.graphviz.from"
 
-    echo ""
-    echo ""
     echo ""
     echo "----------------------------------------------------"
-    echo "Copy-Propagation and Tuple Chain Resolve"
+    echo "Optimized LGraph -> Verilog"
     echo "----------------------------------------------------"
-
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop"
-    if [ $? -eq 0 ]; then
-      echo "Successfully resolve the tuple chain in new lg: ${pt}.lo.pb"
-    else
-      echo "ERROR: Pyrope compiler failed on new lg: resolve tuples, testcase: ${pt}.lo.pb"
-      exit 1
-    fi
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.no_bits.or.dot
-
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "Bitwidth Optimization (Round 1)"
-    echo "----------------------------------------------------"
-
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth"
-    if [ $? -eq 0 ]; then
-      echo "Successfully optimize design bitwidth on new lg: ${pt}.lo.pb"
-    else
-      echo "ERROR: Pyrope compiler failed on new lg: bitwidth optimization, testcase: ${pt}.lo.pb"
-      exit 1
-    fi
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.or.dot
-
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "Copy Propagation Optimization (DCE)"
-    echo "----------------------------------------------------"
-
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop"
-    if [ $? -eq 0 ]; then
-      echo "Successfully eliminate all assignment or_op: ${pt}.lo.pb"
-    else
-      echo "ERROR: Pyrope compiler failed on new lg: cprop, testcase: ${pt}.lo.pb"
-      exit 1
-    fi
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-
-    echo ""
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "Rest of bw-cprop"
-    echo "----------------------------------------------------"
-
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.bitwidth"
-    if [ $? -eq 0 ]; then
-      echo "Successfully finished all bw-cprops: ${pt}.lo.pb"
-    else
-      echo "ERROR: Pyrope compiler failed on new lg: cprop-bw, testcase: ${pt}.lo.pb"
-      exit 1
-    fi
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.newlg.dot
-
-    #echo ""
-    #echo ""
-    #echo ""
-    #echo "----------------------------------------------------"
-    #echo "Dead Code Elimination"
-    #echo "----------------------------------------------------"
-    #${LGSHELL} "lgraph.open name:${pt} |> inou.lnast_dfg.dce"
-    #if [ $? -eq 0 ]; then
-    #  echo "Successfully perform dead code elimination: ${pt}.lo.pb"
-    #else
-    #  echo "ERROR: Pyrope compiler failed on new lg: dead code elimination, testcase: ${pt}.lo.pb"
-    #  exit 1
-    #fi
-
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
-    mv ${pt}.dot ${pt}.newlg.dce.dot
-
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "LGraph -> Verilog"
-    echo "----------------------------------------------------"
-
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg"
+    echo "Generating Verilog: ${pt}"
+    ${LGSHELL} "lgraph.match |> inou.yosys.fromlg"
     if [ $? -eq 0 ] && [ -f ${pt}.v ]; then
       echo "Successfully generate Verilog: ${pt}.v"
       rm -f  yosys_script.*
@@ -163,21 +76,47 @@ do
       exit 1
     fi
 
-#    echo ""
-#    echo ""
-#    echo ""
-#    echo "----------------------------------------------------"
-#    echo "Logic Equivalence Check"
-#    echo "----------------------------------------------------"
-#
-#    ${LGCHECK} --implementation=${pt}.v --reference=./inou/firrtl/tests/verilog_gld/${pt}.lo.v
-#
-#    if [ $? -eq 0 ]; then
-#      echo "Successfully pass logic equivilence check!"
-#    else
-#      echo "FAIL: "${pt}".v !== "${pt}".lo.v (golden)"
-#      exit 1
-#    fi
-#    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+    if [[ $3 == "hier" ]]; then
+      top_module=$1
+      echo $top_module
 
-done #end of for
+      for sub in $2
+      do
+        $(cat ${sub}.v >> ${top_module}.v)
+      done
+    fi
+
+    echo ""
+    echo ""
+    echo ""
+    echo "----------------------------------------------------"
+    echo "Logic Equivalence Check"
+    echo "----------------------------------------------------"
+
+    ${LGCHECK} --implementation=${pt}.v --reference=./inou/firrtl/tests/verilog_gld/${pt}.v
+
+    if [ $? -eq 0 ]; then
+      echo "Successfully pass logic equivilence check!"
+    else
+      echo "FAIL: "${pt}".v !== "${pt}".v (golden)"
+      exit 1
+    fi
+
+    rm -f *.v
+    rm -f *.dot
+    rm -f lgdb/*
+    rm -f yosys.*
+  done
+}
+
+lofirrtl_test "$pts"
+# If testing a module with submodules in it, put the name of the
+# top module as the first argument then list all the submodules
+# in the entire design as the second argument, and "hier" as the
+# third agument.
+lofirrtl_test "$pts_hier"  "Sum" "hier"
+lofirrtl_test "$pts_hier2" "Sum" "hier"
+#lofirrtl_test "$pts_hier3" "SubModuleSubMod" "hier"
+#lofirrtl_test "$pts_hier4" "BundleConnectSubMod" "hier"
+
+#lofirrtl_test "$pts_hier9" "IBuf CSRFile BreakpointUnit ALU MulDiv RVCExpander" "hier"

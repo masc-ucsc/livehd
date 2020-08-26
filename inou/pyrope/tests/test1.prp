@@ -1,11 +1,15 @@
 // code/test1.prp file
 mytest = ::{
-  puts.("Hello World")
-  I 1 == 0+1
-  yield
+  puts = import("io.puts")
+  puts("Hello World")
+  I(1 == 0+1)
+  yield()
   c = 1
   f.a = 2
   f.b = 3
-  a = methodx.(c, f)
-  I a.res == 6 and a.mor == 0b11
+
+  m = import("methodx")
+  a = m(c, f)
+  I(a.res == 6)
+  I(a.mor == 0b11)
 }

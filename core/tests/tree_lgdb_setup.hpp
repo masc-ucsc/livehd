@@ -41,10 +41,13 @@ protected:
   using Bwd_pos_attr  = Attribute<bwd_name,Node ,mmap_lib::map<Node::Compact, uint64_t> >;
 
   void map_tree_to_lgraph() {
+    Lbench bench("map_tree_to_lgraph");
+
     std::vector<mmap_lib::Tree_index> index_order;
 
     tree.each_top_down_fast([&index_order](const mmap_lib::Tree_index &index, const Node_data &node) {
-      fmt::print(" level:{} pos:{} create_pos:{} fwd:{} bwd:{} leaf:{}\n", index.level, index.pos, node.create_pos, node.fwd_pos, node.bwd_pos, node.leaf);
+      (void)node;
+      //fmt::print(" level:{} pos:{} create_pos:{} fwd:{} bwd:{} leaf:{}\n", index.level, index.pos, node.create_pos, node.fwd_pos, node.bwd_pos, node.leaf);
 
       if (index.level || index.pos)
         index_order.emplace_back(index);
@@ -151,31 +154,33 @@ protected:
       auto &curr_node = node_order[i];
       auto &prev_node = node_order[i-1];
 
-      fmt::print("prev   {} class {}\n", prev_node.debug_name(), prev_node.get_class_lgraph()->get_name());
-      fmt::print("curr   {} class {}\n", curr_node.debug_name(), curr_node.get_class_lgraph()->get_name());
+      //fmt::print("prev   {} class {}\n", prev_node.debug_name(), prev_node.get_class_lgraph()->get_name());
+      //fmt::print("curr   {} class {}\n", curr_node.debug_name(), curr_node.get_class_lgraph()->get_name());
 
       Node_pin dpin;
-      if (prev_node.get_type().op == Sum_Op) {
+      if (prev_node.get_type_op() == Sum_Op) {
         I(prev_data.leaf);
         dpin = prev_node.setup_driver_pin(0);
       }else{
         LGraph *prev_lg = LGraph::open("lgdb_hierarchy_test", prev_data.name);
         I(prev_node.get_class_lgraph() != prev_lg);
         auto d_pid = prev_node.get_type_sub_node().get_instance_pid("o0");
-        dpin = prev_node.setup_driver_pin(d_pid);
-        I(prev_node.get_type().op == SubGraph_Op);
+        dpin = prev_node.setup_driver_pin("o0");
+        I(dpin.get_pid() == d_pid);
+        I(prev_node.get_type_op() == SubGraph_Op);
       }
 
       Node_pin spin;
-      if (curr_node.get_type().op == Sum_Op) {
+      if (curr_node.get_type_op() == Sum_Op) {
         I(curr_data.leaf);
         spin = curr_node.setup_sink_pin(0);
       }else{
         LGraph *curr_lg = LGraph::open("lgdb_hierarchy_test", curr_data.name);
         I(curr_node.get_class_lgraph() != curr_lg);
         auto s_pid = curr_node.get_type_sub_node().get_instance_pid("i0");
-        spin = curr_node.setup_sink_pin(s_pid);
-        I(curr_node.get_type().op == SubGraph_Op);
+        spin = curr_node.setup_sink_pin("i0");
+        I(spin.get_pid() == s_pid);
+        I(curr_node.get_type_op() == SubGraph_Op);
       }
 
       bool connect_inp = true; // rbool.any();
@@ -227,19 +232,20 @@ protected:
 
           auto spin = lg->get_graph_output("o0");
           Node_pin dpin;
-          if (last_node.get_type().op == Sum_Op) {
+          if (last_node.get_type_op() == Sum_Op) {
             dpin = last_node.setup_driver_pin(0);
           } else {
             I(last_node.get_class_lgraph() == lg);
             auto d_pid = last_node.get_type_sub_node().get_instance_pid("o1");
-            dpin       = last_node.setup_driver_pin(d_pid);
-            I(last_node.get_type().op == SubGraph_Op);
+            dpin       = last_node.setup_driver_pin("o1");
+            I(dpin.get_pid() == d_pid);
+            I(last_node.get_type_op() == SubGraph_Op);
           }
           spin.connect_driver(dpin);
         }
     });
 
-    int conta = 0;
+    auto conta = 0u;
     for (const auto &node:node_order) {
       if (node.is_type_sub()) {
         if (conta != (node_order.size()-1)) { // LAST NODE
@@ -292,7 +298,7 @@ protected:
       //fmt::print("leaf_ratio:{} {} {}\n", leaf_ratio,n_leafs, i);
 
       if (leaf_ratio < leaf_ratio_goal && index.level) { // Not to root
-        tree.add_next_sibling(index, data);
+        tree.append_sibling(index, data);
         n_leafs++;
       }else{
         //index.pos = tree.get_tree_width(index.level)-1; // Add child at the end

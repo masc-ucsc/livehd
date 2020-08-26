@@ -54,10 +54,10 @@ public:
 
   constexpr bool is_invalid() const { return driver.is_invalid(); }
 
-  constexpr bool operator==(const XEdge &other) const { return (driver == other.driver) && (sink == other.sink); }
-  constexpr bool operator!=(const XEdge &other) const { return !(*this == other); };
+  bool operator==(const XEdge &other) const { return (driver == other.driver) && (sink == other.sink); }
+  bool operator!=(const XEdge &other) const { return !(*this == other); };
 
-  inline Compact get_compact() const { return Compact(driver.get_idx(), sink.get_idx()); }
+  inline Compact get_compact() const { return Compact(driver.get_root_idx(), sink.get_root_idx()); }
 
   void del_edge();
   void add_edge();

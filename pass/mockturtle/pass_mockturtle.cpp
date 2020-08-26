@@ -399,7 +399,7 @@ void Pass_mockturtle::mapping_comparison_cell_lg2mt(const bool &lt_op, const boo
     Comparator_input_signal<typename ntk_type::signal> inp_sigs;
     setup_input_signals(group_id, inp_edge, inp_sigs.signals, mt_ntk);
 
-    inp_sigs.is_signed = node.get_type().is_input_signed(inp_edge.sink.get_pid());
+    inp_sigs.is_signed = (inp_edge.sink.get_pid()&1)==0;
 
     if (inp_edge.sink.get_pid() >= 0 && inp_edge.sink.get_pid() <= 1) {
       left_opd_sigs.emplace_back(inp_sigs);
@@ -503,7 +503,7 @@ void Pass_mockturtle::mapping_shift_cell_lg2mt(const bool &is_shift_right, const
   ////fmt::print("opr_A_bit_width:{}\n",opr_A_edge.get_bits());
   ////fmt::print("opr_B_bit_width:{}\n",opr_B_edge.get_bits());
   setup_input_signals(group_id, opr_A_edge, opr_A_sigs, mt_ntk);
-  if (opr_B_edge.driver.get_node().get_type().op == Const_Op) {
+  if (opr_B_edge.driver.get_node().get_type_op() == Const_Op) {
     // creating output signal for const shift
     uint32_t offset = opr_B_edge.driver.get_node().get_type_const().to_i();
     shift_op(opr_A_sigs, is_shift_right, sign_ext, offset, out_sigs, mt_ntk);
@@ -564,7 +564,7 @@ void Pass_mockturtle::mapping_dynamic_shift_cell_lg2mt(const bool &is_shift_righ
   ////fmt::print("opr_A_bit_width:{}\n",opr_A_edge.get_bits());
   ////fmt::print("opr_B_bit_width:{}\n",opr_B_edge.get_bits());
   setup_input_signals(group_id, opr_A_edge, opr_A_sigs, mt_ntk);
-  if (opr_B_edge.driver.get_node().get_type().op == Const_Op) {
+  if (opr_B_edge.driver.get_node().get_type_op() == Const_Op) {
     // creating output signal for const shift
     uint32_t ofs;
     bool     is_negative;
@@ -616,7 +616,7 @@ void Pass_mockturtle::create_mockturtle_network(LGraph *g) {
 
     auto &mt_ntk = gid2mt[group_id];
 
-    switch (node.get_type().op) {
+    switch (node.get_type_op()) {
       case Not_Op: {
         // Note: Don't need to check the node_pin pid since Not_Op has only one sink pin and one driver pin
         fmt::print("Not_Op in gid:{}\n", group_id);
@@ -688,7 +688,7 @@ void Pass_mockturtle::create_mockturtle_network(LGraph *g) {
           // fmt::print("input_bit_width:{}\n",inp_edge.get_bits());
           Comparator_input_signal<mockturtle_network::signal> inp_sig;
           setup_input_signals(group_id, inp_edge, inp_sig.signals, mt_ntk);
-          inp_sig.is_signed = node.get_type().is_input_signed(inp_edge.sink.get_pid());
+          inp_sig.is_signed = (inp_edge.sink.get_pid()&1)==0; // odd unsinged/ even signed
           opd_sigs.emplace_back(inp_sig);
         }
         // creating output signal
@@ -956,7 +956,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
 
     // create edges which connect unchanged parts in lgraph
     for (const auto &inp_edge : old_node.inp_edges_ordered()) {
-      if (old_node.get_type().op == GraphIO_Op)
+      if (old_node.get_type_op() == GraphIO_Op)
         fmt::print("hit!\n");
       if (edge2mt_sigs.find(inp_edge) == edge2mt_sigs.end()) {
         auto peer_driver_node = inp_edge.driver.get_node();
@@ -964,8 +964,9 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
           auto driver_node = old_node_to_new_node[peer_driver_node.get_compact()].get_node(new_lg);
           auto driver_pin  = driver_node.setup_driver_pin(inp_edge.driver.get_pid());
           auto sink_pin    = new_node.setup_sink_pin(inp_edge.sink.get_pid());
-          if (!new_lg->has_edge(driver_pin, sink_pin))  // TODO: This is slow. Can we do better?
+          if (!sink_pin.is_connected(driver_pin)) {  // TODO: This is slow. Can we do better?
             new_lg->add_edge(driver_pin, sink_pin);
+          }
         }
       }
     }
@@ -976,8 +977,9 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
           auto sink_node  = old_node_to_new_node[peer_sink_node.get_compact()].get_node(new_lg);
           auto sink_pin   = sink_node.setup_sink_pin(out_edge.sink.get_pid());
           auto driver_pin = new_node.setup_driver_pin(out_edge.driver.get_pid());
-          if (!new_lg->has_edge(driver_pin, sink_pin))  // TODO: This is slow. Can we do better?
+          if (!sink_pin.is_connected(driver_pin)) {  // TODO: This is slow. Can we do better?
             new_lg->add_edge(driver_pin, sink_pin);
+          }
         }
       }
     }
@@ -1020,11 +1022,9 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
         }
       });
 
-      auto encoding = std::stoul(kitty::to_hex(func), nullptr, 16);
-      auto new_node = new_lg->create_node(LUT_Op);
+      auto encoding = std::string("0x") + kitty::to_hex(func);
+      auto new_node = new_lg->create_node_lut(Lconst(encoding));
 
-      fmt::print("encoding:{}\n", encoding);
-      new_node.set_type_lut(encoding);
       gid_klut_node2lg_node[std::make_pair(group_id, klut_ntk_node)] = new_node.get_compact();
     });
     fmt::print("finished.\n");
@@ -1082,9 +1082,9 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
       }
     } else {
       for (auto i = 0UL; i < bit_width; i++) {
-        Bits_t bits = (64 - __builtin_clzll(i));
-        if (bits == 0)
-          bits = 1;
+        Bits_t bits = 1;
+        if (i)
+          bits = (64 - __builtin_clzll(i));
 
         const auto &vec_klut_node_and_lg_pid = gid_pi2sink_node_lg_pid[std::make_pair(group_id, sigs[i])];
         for (const auto &klut_node_and_lg_pid : vec_klut_node_and_lg_pid) {

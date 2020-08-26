@@ -2,13 +2,13 @@
 
 // top_api. This are commands at the top level like filter, files...
 
+#include "top_api.hpp"
+
 #include <dirent.h>
 
 #include <iostream>
 #include <regex>
 #include <string>
-
-#include "top_api.hpp"
 
 void Top_api::files(Eprp_var &var) {
   std::string path(var.get("path"));
@@ -21,13 +21,14 @@ void Top_api::files(Eprp_var &var) {
 
     DIR *dirp = opendir(path.c_str());
     if (dirp == 0) {
-      Main_api::error(fmt::format("invalid path:{}, is it a valid directory?", path));
+      Main_api::error("invalid path:{}, is it a valid directory?", path);
       return;
     }
     std::vector<std::string> sort_files;
     struct dirent *          dp;
     while ((dp = readdir(dirp)) != NULL) {
-      if (dp->d_type == DT_DIR) continue;
+      if (dp->d_type == DT_DIR)
+        continue;
       if (match.empty()) {
         if (filter.empty()) {
           sort_files.push_back(dp->d_name);
@@ -47,7 +48,8 @@ void Top_api::files(Eprp_var &var) {
     std::sort(sort_files.begin(), sort_files.end());
     std::string files;
     for (const auto &s : sort_files) {
-      if (!files.empty()) files.append(",");
+      if (!files.empty())
+        files.append(",");
       files.append(path);
       files.append("/");
       files.append(s);
@@ -57,8 +59,8 @@ void Top_api::files(Eprp_var &var) {
     var.delete_label("path");  // Path was used for looking for files
 
   } catch (const std::regex_error &e) {
-    Main_api::error(
-        fmt::format("invalid regex. It is a FULL regex unlike bash. To test, try: `ls path | grep -E \"match\" | grep -v \"filter\"`", match));
+    Main_api::error("invalid regex. It is a FULL regex unlike bash. To test, try: `ls path | grep -E \"match\" | grep -v \"filter\"`",
+        match);
   }
 }
 

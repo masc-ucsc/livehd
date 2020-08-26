@@ -33,6 +33,7 @@ linkso(
     name = "liblgraph_yosys",
     srcs   = [
         ":lgyosys-lib",
+        "@com_google_absl//absl/strings",
         #"//core:core",
         #"//eprp:eprp",
         #"//elab:elab",

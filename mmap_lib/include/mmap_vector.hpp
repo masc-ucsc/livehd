@@ -31,12 +31,12 @@ protected:
     // Get the size of the file
     struct stat s;
     int         status = fstat(mmap_fd, &s);
-    /* LCOV_EXCL_STOP */
+    /* LCOV_EXCL_START */
     if (status < 0) {
       std::cerr << "ERROR: Could not check file status " << mmap_name << std::endl;
       exit(-3);
     }
-    /* LCOV_EXCL_START */
+    /* LCOV_EXCL_STOP */
 
     return s.st_size;
   }
@@ -49,13 +49,13 @@ protected:
     }
     if (mmap_size != file_size) {
       int ret = ftruncate(mmap_fd, mmap_size);
-      /* LCOV_EXCL_STOP */
+      /* LCOV_EXCL_START */
       if (ret < 0) {
         std::cerr << "ERROR: ftruncate could not resize  " << mmap_name << " to " << mmap_size << "\n";
         mmap_base = 0;
         exit(-1);
       }
-      /* LCOV_EXCL_START */
+      /* LCOV_EXCL_STOP */
       file_size = mmap_size;
     }
   }

@@ -60,6 +60,7 @@ protected:
   Setup_path  p;  // Must be first in base object
   std::string path;
   std::string name;
+  const std::string unique_name;
   std::string long_name;
   Lg_type_id  lgid;
 
@@ -74,6 +75,8 @@ public:
 
   virtual void clear();
   virtual void sync();
+
+  const std::string &get_unique_name() const { return unique_name; }
 
   std::string_view get_name() const { return std::string_view(name); }
 

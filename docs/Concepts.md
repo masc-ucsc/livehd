@@ -29,7 +29,7 @@ options.
   Edges in the graph are connected to pins.
 
 * **Edge**: An edge is the pair of a driver and a sink pin that are directly connected.
-  All the graphs use bi-direct
+  All the graphs use bi-directional edges.
 
 HERE
 LGraphs are bi-directional graphs that allow
@@ -67,6 +67,35 @@ some random order.  This is the fastest traversal algorithm with high cache
 locality, it is significantly faster than the other traversals.
 
 ### Forward Traversal
+
+## Common LGraph Operations
+
+TODO: either write out examples for basic operations or explain what things do
+
+ - Enumerate everything connected to a certain pin (lgraph -> each_pin)
+ - Enumerate the inputs/outputs of an LGraph (lgraph -> get_self_sub_node -> ?)
+ - show hidx vs idx vs lgid vs nid vs ...
+ - explain lg_type_id
+ - explain get_down_nodes_map and why it's compact
+ - explain get_top_lgraph vs get_...
+ 
+ - Iterate over all drivers of a node:  
+```
+for (auto pin : node.inp_connected_pins()) {
+  for (auto driver_pin : pin.inp_driver()) {
+    std::cout << driver_pin.get_node().debug_name() << std::endl;
+  }
+}
+```
+ - Iterate over all child nodes in an LGraph:
+```
+for (auto lg : var.lgs) {
+  lg->each_sub_fast([&](Node& n, Lg_type_id id) -> bool {
+    std::cout << "node: " << n.debug_name() << ", id: " << id << std::endl;
+    return true; // return true to keep iterating over children, or false to end early
+  });
+}
+```
 
 HERE
 

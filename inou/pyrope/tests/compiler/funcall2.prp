@@ -1,0 +1,2 @@
+%out.__bits = 3
+%out = sum2(a = 2, b = 3)

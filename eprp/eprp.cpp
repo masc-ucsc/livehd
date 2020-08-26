@@ -286,7 +286,7 @@ void Eprp::run_cmd(const std::string &cmd, Eprp_var &var) {
   }
 
 #if 0
-  for(const auto v:var.dict) {
+  for(const auto &v:var.dict) {
     if (!m.has_label(v.first)) {
       parser_warn("method {} does not have passed label {}", cmd, v.first);
     }
@@ -312,7 +312,7 @@ const std::string &Eprp::get_command_help(const std::string &cmd) const {
 }
 
 void Eprp::get_commands(std::function<void(const std::string &, const std::string &)> fn) const {
-  for (const auto v : methods) {
+  for (const auto &v : methods) {
     fn(v.first, v.second.help);
   }
 }
@@ -322,7 +322,7 @@ void Eprp::get_labels(const std::string &                                       
   const auto &it = methods.find(cmd);
   if (it == methods.end()) return;
 
-  for (const auto v : it->second.labels) {
+  for (const auto &v : it->second.labels) {
     fn(v.first, v.second.help, v.second.required);
   }
 }

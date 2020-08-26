@@ -61,4 +61,18 @@ struct Ann_support {
     Ann_node_tree_pos::clear(lg);
     Ann_node_color::clear(lg);
   };
+
+  static void sync(LGraph *lg) {
+    Ann_node_pin_offset::sync(lg);
+    Ann_node_pin_delay::sync(lg);
+    Ann_node_pin_name::sync(lg);
+    Ann_node_pin_delay::sync(lg);
+    Ann_node_pin_prp_vname::sync(lg);
+
+    Ann_node_name::sync(lg);
+    Ann_node_place::sync(lg);
+    Ann_node_file_loc::sync(lg);
+    Ann_node_tree_pos::sync(lg);
+    Ann_node_color::sync(lg);
+  };
 };

@@ -87,60 +87,19 @@ enum Node_Type_Op : uint8_t {
 
 class Node_Type {
 public:
-  constexpr static inline frozen::map<frozen::string, Port_ID, 6> sink_pidmap[] = {
-      {/* invalid */ {"", 0}, {"", 0}, {"", 0}, {"", 0}, {"", 0}, {"", 0}},
-      {/* sum     */ {"ADD", 0}, {"SUB", 1}, {"", 0}, {"", 0}, {"", 0}, {"", 0}},
-      {/* mult    */ {"VAL", 0}, {"", 0}, {"", 0}, {"", 0}, {"", 0}, {"", 0}},
-      {/* div     */ {"NUM", 0}, {"DEN", 1}, {"", 0}, {"", 0}, {"", 0}, {"", 0}},
-      {/* mod     */ {"NUM", 0}, {"DEN", 1}, {"", 0}, {"", 0}, {"", 0}, {"", 0}},
-      {/* not     */ {"VAL", 0}, {"", 0}, {"", 0}, {"", 0}, {"", 0}, {"", 0}},
-      {/* join    */ {"V0", 0}, {"V1", 1}, {"V2", 2}, {"V3", 3}, {"V4", 4}, {"V5", 5}},
-      {/* pick    */ {"VAL", 0}, {"OFF", 1}, {"", 0}, {"", 0}, {"", 0}, {"", 0}},
-      {/* AND     */ {"VAL", 0}, {"", 0}, {"", 0}, {"", 0}, {"", 0}, {"", 0}},
+  constexpr static inline frozen::map<frozen::string, Port_ID, 12> sink_pidmap[] = {
+      {/* invalid */ {"",  0 }, {"" , 0}, {"" , 0}, {"" , 0}, {"" , 0}, {"" , 0}, {"" , 0}, {"" , 0}, {"" , 0}, {"" , 0}, {"" , 0}, {"" , 0}},
+      {/* Memory  */ {"a", 0 }, {"b", 0}, {"c", 0}, {"d", 0}, {"e", 0}, {"f", 0}, {"l", 0}, {"m", 0}, {"p", 0}, {"s", 0}, {"w", 0}, {"" , 0}}
   };
 
   constexpr static inline frozen::map<frozen::string, Port_ID, 2> driver_pidmap[] = {
-      {
-          /* invalid */ {"", 0},
-          {"", 0},
-      },
-      {
-          /* sum     */ {"Y", 0},
-          {"", 0},
-      },  // Y = ADD+..+ADD-SUB..-SUB
-      {
-          /* mult    */ {"Y", 0},
-          {"", 0},
-      },  // Y = VAL*..*VAL
-      {
-          /* div     */ {"Y", 0},
-          {"", 0},
-      },  // Y = NUM/DEN
-      {
-          /* mod     */ {"Y", 0},
-          {"", 0},
-      },  // Y = NUM % DEN
-      {
-          /* not     */ {"Y", 0},
-          {"", 0},
-      },  // Y = ~VAL
-      {
-          /* join    */ {"Y", 0},
-          {"", 0},
-      },  // Y = ..,V3,V2,V1,V0
-      {
-          /* pick    */ {"Y", 0},
-          {"", 0},
-      },  // Y = VAL[[OFF..(OFF+Y.__bits)]]
-      {
-          /* AND     */ {"Y", 0},
-          {"RED", 1},
-      },  // Y = VAL&..&VAL ; RED= &Y
+      { /* invalid */ {"" , 0}, {"", 0}, },
+      { /* Memory  */ {"Q", 0}, {"", 0}, },
   };
 
   static constexpr Port_ID        get_pid(Node_Type_Op op, frozen::string str) { return driver_pidmap[op].at(str); }
   static constexpr frozen::string get_name(Node_Type_Op op, Port_ID pid) {
-    for (const auto e : driver_pidmap[op]) {
+    for (const auto &e : driver_pidmap[op]) {
       if (e.second == pid)
         return e.first;
     }
@@ -216,6 +175,13 @@ public:
     return Port_invalid;
   }
 
+  std::string_view get_input_match(Port_ID pid) const {
+    size_t idx = static_cast<size_t>(pid);
+    I(idx < inputs.size());
+
+    return inputs[idx];
+  }
+
   Port_ID get_output_match(std::string_view str) const {
     if (outputs.empty())  // blackbox, subgraph...
       return Port_invalid;
@@ -246,21 +212,11 @@ public:
     return Port_invalid;
   }
 
-  bool is_input_signed(Port_ID pid) const {
-    if (inputs_sign.size() < pid)
-      return inputs_sign[pid];
-    return false;
-  }
+  std::string_view get_output_match(Port_ID pid) const {
+    size_t idx = static_cast<size_t>(pid);
+    I(idx < outputs.size());
 
-  size_t get_num_inputs() const {
-    if (inputs.size())
-      return inputs.size();
-    return (1 << Port_bits) - 1;
-  }
-  size_t get_num_outputs() const {
-    if (outputs.size())
-      return outputs.size();
-    return (1 << Port_bits) - 1;
+    return outputs[idx];
   }
 
   bool has_output(Port_ID pid) const {

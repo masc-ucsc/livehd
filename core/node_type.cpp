@@ -103,7 +103,8 @@ Sub_node *LGraph_Node_Type::ref_type_sub_node(std::string_view sub_name) {
 }
 
 void LGraph_Node_Type::set_type_lut(Index_ID nid, const Lconst &lutid) {
-  I(node_internal[nid].get_type() == LUT_Op);
+  auto *ptr = node_internal.ref(nid);
+  ptr->set_type(LUT_Op);
 
   lut_map.set(Node::Compact_class(nid), lutid.serialize());
 }

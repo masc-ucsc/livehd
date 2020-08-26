@@ -1,5 +1,10 @@
 #!/bin/bash
 
+if [ ${NO_CHECK}"x" == "1x" ]; then
+  # disable check for performance monitoring
+  exit 0
+fi
+
 TEMP=$(getopt -o r::,i::,l::,d --long reference::,implementation::,cell_library::,top::,yosys:: -n 'lgcheck' -- "$@")
 eval set -- "$TEMP"
 

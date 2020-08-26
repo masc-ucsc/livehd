@@ -22,10 +22,10 @@ void Pass_sample::setup() {
 Pass_sample::Pass_sample(const Eprp_var &var) : Pass("pass.sample", var) {}
 
 void Pass_sample::do_work(LGraph *g) {
-  // compute_histogram(g);
+  compute_histogram(g);
   compute_max_depth(g);
   // annotate_placement(g);
-  // create_sample_graph(g);
+  create_sample_graph(g);
 }
 
 void Pass_sample::work(Eprp_var &var) {
@@ -74,7 +74,7 @@ void Pass_sample::do_wirecount(LGraph *g, int indent) {
   std::string space;
   for (int i = 0; i < indent; i++) space.append("  ");
 
-  fmt::print("{}module {} : inputs {} bits {} : outputs {} bits {} : nodes {} : wire {} bits {}\n",
+  fmt::print("{}module {} : inputs {} bits {} : outputs {} bits {} : nodes {} : submodules {} : wire {} bits {}\n",
              space,
              g->get_name(),
              i_num,
@@ -180,7 +180,7 @@ void Pass_sample::annotate_placement(LGraph *g) {
 
 void Pass_sample::create_sample_graph(LGraph *g) {
   auto lg_path   = g->get_path();
-  auto lg_source = g->get_library().get_source(g->get_lgid());
+  std::string lg_source{g->get_library().get_source(g->get_lgid())}; // must be string because create can free it
 
   LGraph *lg = LGraph::create(lg_path, "pass_sample", lg_source);
   fmt::print("Creating new sample LGraph...\n");

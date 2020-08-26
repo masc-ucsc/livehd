@@ -7,8 +7,10 @@ cc_library(
     includes = ["."],
     deps = [
         "//inou/firrtl:inou_firrtl_cpp",
-        "//inou/cfg:inou_cfg",
         "//pass/common:pass",
+    ],
+    data = [
+        "//inou/pyrope:pyrope_tests",
     ],
 )
 

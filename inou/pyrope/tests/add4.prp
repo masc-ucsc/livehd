@@ -1,15 +1,20 @@
-// code/add4.prp file
-..s2.. as libs.adder.scla.cla
-s1 as libs.adder.rca
-(%sum, sum1, sum2) as (__stage=true)
-sum1 = $a ..s2.. $b
-sum2 = $c ..s2.. $c
-%sum = s1(a=sum1.sum, b=sum2.sum, cin=0)
-test=::{
-  b as add4(a=1, b=2, c=3, d=4)
-  I(b.sum == 0)
-  yield()
-  I(b.sum == 0)
-  yield()
-  I(b.sum == 10)
-}
+ // code/add4.prp file
+ ..+.. = import("libs.adder.scla.cla")
+ s1 = import("libs.adder.rca")
+
+ %sum.__stage = true
+ %sum1.__stage as true
+ %sum2 as (__stage=true)
+
+ sum1 = $a + $b
+ sum2 = $c + $c
+ %sum = s1(a=sum1.sum,b=sum2.sum,cin=0)
+
+ test = ::{
+   b as add4(a=1,b=2,c=3,d=4)
+   I(b.sum1 == 10 and b.sum2 ==  0 and b.sum ==  0)
+   yield()
+   I(b.sum1 == 10 and b.sum2 == 10 and b.sum ==  0)
+   yield()
+   I(b.sum1 == 10 and b.sum2 == 10 and b.sum == 10)
+ }

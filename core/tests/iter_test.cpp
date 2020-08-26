@@ -47,10 +47,18 @@ void check_test_order(LGraph *top) {
       max_input_pin = edge.driver;
     }
     if (max_input>it_node->second) {
-      fmt::print("ERROR: wrong order node:{} is earlier than pin:{}\n",node.debug_name(), max_input_pin.debug_name());
+      fmt::print("ERROR: wrong order node:{} l:{} p:{} is earlier than pin:{} of node:{} l:{} p:{}\n"
+          ,node.debug_name() ,node.get_hidx().level ,node.get_hidx().pos
+          ,max_input_pin.debug_name()
+          ,max_input_pin.get_node().debug_name()
+          ,max_input_pin.get_node().get_hidx().level
+          ,max_input_pin.get_node().get_hidx().pos);
       I(false);
     }
   }
+
+  top->sync();
+  delete top;
 }
 
 // performs Topological Sort on a given DAG
@@ -61,7 +69,8 @@ void do_fwd_traversal(LGraph *lg) {
     setup_test_order();
     for (auto node : lg->fast(true)) {
       I(!node.is_graph_io());
-      //fmt::print("visiting {}\n", node.debug_name());
+      //fmt::print("fast visiting {} l:{} p:{}\n", node.debug_name(),node.get_hidx().level,node.get_hidx().pos);
+      //node.dump();
       I(test_order.find(node.get_compact()) == test_order.end());
       test_order[node.get_compact()] = test_order_sequence++;
     }
@@ -72,7 +81,7 @@ void do_fwd_traversal(LGraph *lg) {
     setup_test_order();
     for (auto node : lg->forward(true)) {
       I(!node.is_graph_io());
-      //fmt::print("visiting {}\n", node.debug_name());
+      //fmt::print("fwd  visiting {} l:{} p:{}\n", node.debug_name(),node.get_hidx().level,node.get_hidx().pos);
       I(test_order.find(node.get_compact()) == test_order.end());
       test_order[node.get_compact()] = test_order_sequence++;
     }
@@ -185,12 +194,10 @@ void generate_graphs(int n) {
         continue; // No self-loops
 
       edges.insert(std::make_pair(src, dst));
-      I(!g->has_edge(dpin, spin));
+      I(!spin.is_connected(dpin)); // no edge
       g->add_edge(dpin, spin);
-      I(g->has_edge(dpin, spin));
+      I( spin.is_connected(dpin)); //    edge
     }
-
-    g->sync();
   }
 }
 
@@ -228,10 +235,10 @@ bool bwd(int n) {
 
       visited.insert(node.get_compact());
 
-      if (!node.get_type().is_pipelined() && node.get_type().op != GraphIO_Op) {
+      if (!node.get_type().is_pipelined() && node.get_type_op() != GraphIO_Op) {
         // check if all incoming edges were visited
         for(auto &out : node.out_edges()) {
-          if (!out.sink.get_node().get_type().is_pipelined() && out.sink.get_node().get_type().op != GraphIO_Op) {
+          if (!out.sink.get_node().get_type().is_pipelined() && out.sink.get_node().get_type_op() != GraphIO_Op) {
             if(visited.find(out.sink.get_node().get_compact()) == visited.end()) {
               fmt::print("bwd failed for lgraph node:{} bwd:{}\n", node.debug_name(), out.sink.get_node().debug_name());
               I(false);
@@ -248,10 +255,10 @@ bool bwd(int n) {
 
       visited.insert(node.get_compact());
 
-      if (!node.get_type().is_pipelined() && node.get_type().op != GraphIO_Op) {
+      if (!node.get_type().is_pipelined() && node.get_type_op() != GraphIO_Op) {
         // check if all incoming edges were visited
         for(auto &out : node.out_edges()) {
-          if (!out.sink.get_node().get_type().is_pipelined() && out.sink.get_node().get_type().op != GraphIO_Op) {
+          if (!out.sink.get_node().get_type().is_pipelined() && out.sink.get_node().get_type_op() != GraphIO_Op) {
             if(visited.find(out.sink.get_node().get_compact()) == visited.end()) {
               fmt::print("bwd failed for lgraph node:{} bwd:{}\n", node.debug_name(), out.sink.get_node().debug_name());
               I(false);
@@ -338,6 +345,10 @@ void simple_line() {
   do_fwd_traversal(g0);
 
   check_test_order(g0);
+
+  delete s0;
+  delete s1;
+  delete s2;
 }
 
 void simple() {
@@ -481,6 +492,9 @@ void simple() {
   do_fwd_traversal(g);
 
   check_test_order(g);
+
+  sub_g->sync();
+  delete sub_g;
 }
 
 int main() {

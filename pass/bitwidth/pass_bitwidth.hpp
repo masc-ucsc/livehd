@@ -13,6 +13,7 @@ class Pass_bitwidth : public Pass {
 protected:
   int  max_iterations;
   bool must_perform_backward;
+  bool hier;
 
   enum class Attr { Set_other, Set_bits, Set_max, Set_min, Set_dp_assign };
 
@@ -44,7 +45,8 @@ protected:
   void process_attr_set(Node &node);
 
   void garbage_collect_support_structures(XEdge_iterator &inp_edges);
-  void adjust_dpin_bits(Node_pin &dpin, Bitwidth_range &bw);
+  void forward_adjust_dpin(Node_pin &dpin, Bitwidth_range &bw);
+  void set_graph_boundary(Node_pin &dpin, Node_pin &spin);
 
   void bw_pass(LGraph *lg);
 

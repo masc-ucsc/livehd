@@ -1,0 +1,7 @@
+Things to fix:
+1. get hierarchy discovery to take area into account when making splits
+
+Things to do:
+1. Discover regularity
+2. Create boundary curve
+3. Create floorplans

@@ -100,8 +100,10 @@ void Elab_scanner::add_token(Token &t) {
     }
   } else if (t.tok == Token_id_qmark) {
     if (last_tok.tok == Token_id_alnum) {
-      if (last_tok.text[0] == '0') {
-        if (last_tok.text.size() >= 2 && (last_tok.text[1] == 'b' || last_tok.text[1] == 'B')) {
+      auto txt = last_tok.get_text();
+      if (txt.size() && txt[0] == '0') {
+        auto last_txt = last_tok.get_text();
+        if (last_txt.size() >= 2 && (last_txt[1] == 'b' || last_txt[1] == 'B')) {
           token_list.back().fuse_token(Token_id_alnum, t);
           return;
         }
@@ -168,9 +170,6 @@ void Elab_scanner::patch_pass(const absl::flat_hash_map<std::string, Token_id> &
 
     auto it = keywords.find(txt);
     if (it == keywords.end()) continue;
-
-    assert(it->second >= static_cast<Token_id>(Token_id_keyword_first));
-    assert(it->second <= static_cast<Token_id>(Token_id_keyword_last));
 
     t.tok = it->second;
   }
@@ -371,7 +370,7 @@ void Elab_scanner::parse_step() {
 Elab_scanner::Elab_scanner() {
   setup_translate();
   max_errors   = 1;
-  max_warnings = 0; // Unlimited 1024;
+  max_warnings = 1024;
   n_errors     = 0;
   n_warnings   = 0;
 
@@ -437,29 +436,29 @@ void Elab_scanner::lex_error(std::string_view text) {
   n_errors++;
   throw std::runtime_error(std::string(text));
 }
-void Elab_scanner::scan_error(std::string_view text) const {
+void Elab_scanner::scan_error_int(std::string_view text) const {
   scan_raw_msg("error", text, true);
   n_errors++;
   throw std::runtime_error(std::string(text));
 }
 
-void Elab_scanner::scan_warn(std::string_view text) const {
+void Elab_scanner::scan_warn_int(std::string_view text) const {
   scan_raw_msg("warning", text, true);
   n_warnings++;
   if (n_warnings > max_warnings)
     throw std::runtime_error("too many warnings");
 }
 
-void Elab_scanner::parser_info(std::string_view text) const { scan_raw_msg("info", text, true); }
+void Elab_scanner::parser_info_int(std::string_view text) const { scan_raw_msg("info", text, true); }
 
-void Elab_scanner::parser_error(std::string_view text) const {
+void Elab_scanner::parser_error_int(std::string_view text) const {
   scan_raw_msg("error", text, false);
   n_errors++;
   //if (n_errors > max_errors) exit(-3);
   throw std::runtime_error(std::string(text));
 }
 
-void Elab_scanner::parser_warn(std::string_view text) const {
+void Elab_scanner::parser_warn_int(std::string_view text) const {
   scan_raw_msg("warning", text, false);
   n_warnings++;
   if (max_warnings && n_warnings > max_warnings)
@@ -534,5 +533,5 @@ void Elab_scanner::dump_token() const {
   if (pos >= token_list.size()) pos = token_list.size();
 
   auto &t = token_list[pos];
-  fmt::print("tok:{} pos1:{}, pos2:{}, line:{} text:{}\n", t.tok, t.pos1, t.pos2, t.line, t.text);
+  fmt::print("tok:{} pos1:{}, pos2:{}, line:{} text:{}\n", t.tok, t.pos1, t.pos2, t.line, t.get_text());
 }

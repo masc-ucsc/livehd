@@ -12,13 +12,14 @@ cc_binary(
 
             "//inou/code_gen:inou_code_gen",
             "//inou/liveparse:inou_liveparse",
+            "//inou/json:inou_json",
             "//inou/pyrope:inou_pyrope",
             "//inou/graphviz:inou_graphviz",
-            "//inou/lnast_dfg:inou_lnast_dfg",
             "//inou/yosys:lgyosys-api",
             "//inou/firrtl:inou_firrtl_cpp",
 
             "//pass/common:pass",
+            "//pass/fplan:fplan",
 
             "//lgcpp/common:lgcpp",
             "//lgcpp/prplib:prplib",
@@ -27,11 +28,12 @@ cc_binary(
             "//pass/punch:pass_punch",
             "//pass/mockturtle:pass_mockturtle",
             "//pass/lec:pass_lec",
-            "//pass/dce:pass_dce",
             "//pass/cprop:pass_cprop",
-            "//pass/lgraph_to_lnast:pass_lgraph_to_lnast",
+            "//pass/lnast_fromlg:pass_lnast_fromlg",
             "//pass/bitwidth:pass_bitwidth",
             "//pass/semantic:pass_semantic",
+            "//pass/lnast_tolg:pass_lnast_tolg",
+            "//pass/lnastfmt:pass_lnastfmt",
 
             #add dependencies to new passes here
     ],
@@ -45,12 +47,14 @@ cc_binary(
 sh_test(
     name = "lgshell_test.sh",
     srcs = ["tests/lgshell_test.sh"],
-    tags = ["fixme"],
     data = [
         "//inou/yosys:liblgraph_yosys.so",
         "//inou/yosys:verilog_tests",
         ":lgshell",
     ],
+    deps = [
+        "//inou/yosys:scripts",
+    ]
 )
 
 sh_test(

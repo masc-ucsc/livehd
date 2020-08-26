@@ -51,10 +51,11 @@ void Eprp_utils::clean_dir(std::string_view dir) {
   const std::string path(dir.data(), dir.size());  // null terminated
 
   DIR *dirp = opendir(path.c_str());
-  if (dirp == 0) {
+  if (dirp == nullptr) {
     mkdir(path.c_str(), 0755);
     return;
   }
+  closedir(dirp);
 
   // Rename, and allow a slow thread to delete it
   char  dtemp[] = "deleting_dir.XXXXXX";

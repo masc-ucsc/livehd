@@ -1,5 +1,0 @@
-tmp = foo.a.__final_value
-foo = (a = 2, b = 3)
-
-%out = tmp + foo.b
-

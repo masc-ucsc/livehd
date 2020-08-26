@@ -39,6 +39,7 @@ protected:
     I(idx);
     return idx;
   }
+  const Index_ID get_root_idx() const;
 
 public:
   class __attribute__((packed)) Compact {
@@ -62,7 +63,7 @@ public:
     // constexpr operator size_t() const { I(0); return idx|(sink<<31); }
 
     Compact(const Compact &obj) : hidx(obj.hidx), idx(obj.idx), sink(obj.sink) {}
-    Compact(const Hierarchy_index _hidx, Index_ID _idx, bool _sink) : hidx(_hidx), idx(_idx), sink(_sink){};
+    Compact(const Hierarchy_index _hidx, Index_ID _idx, bool _sink) : hidx(_hidx), idx(_idx), sink(_sink){ I(!hidx.is_invalid()); };
     Compact() : idx(0), sink(0){};
     Compact &operator=(const Compact &obj) {
       I(this != &obj);
@@ -75,7 +76,11 @@ public:
 
     constexpr bool is_invalid() const { return idx == 0; }
 
-    constexpr bool operator==(const Compact &other) const { return hidx == other.hidx && idx == other.idx && sink == other.sink; }
+    constexpr bool operator==(const Compact &other) const {
+      return idx == other.idx
+             && sink == other.sink
+             && (hidx == other.hidx || hidx.is_invalid() || other.hidx.is_invalid());
+    }
     constexpr bool operator!=(const Compact &other) const { return !(*this == other); }
 
     template <typename H>
@@ -103,7 +108,7 @@ public:
     // constexpr operator size_t() const { I(0); return idx|(sink<<31); }
 
     Compact_driver(const Compact_driver &obj) : hidx(obj.hidx), idx(obj.idx) {}
-    Compact_driver(const Hierarchy_index _hidx, Index_ID _idx) : hidx(_hidx), idx(_idx){};
+    Compact_driver(const Hierarchy_index _hidx, Index_ID _idx) : hidx(_hidx), idx(_idx){ I(!hidx.is_invalid()); };
     Compact_driver() : idx(0){};
     Compact_driver &operator=(const Compact_driver &obj) {
       I(this != &obj);
@@ -115,7 +120,10 @@ public:
 
     constexpr bool is_invalid() const { return idx == 0; }
 
-    constexpr bool operator==(const Compact_driver &other) const { return hidx == other.hidx && idx == other.idx; }
+    constexpr bool operator==(const Compact_driver &other) const { 
+      return idx == other.idx
+             && (hidx == other.hidx || hidx.is_invalid() || other.hidx.is_invalid());
+    }
     constexpr bool operator!=(const Compact_driver &other) const { return !(*this == other); }
 
     template <typename H>
@@ -211,20 +219,20 @@ public:
   Node_pin(LGraph *_g, Compact comp);
   Node_pin(LGraph *_g, Compact_driver comp);
   Node_pin(LGraph *_g, Compact_class comp);
+  Node_pin(LGraph *_g, const Hierarchy_index &hidx, Compact_class comp);
   Node_pin(LGraph *_g, Compact_class_driver comp);
 
-  Compact get_compact() const { return Compact(hidx, idx, sink); }
-
-  Compact_driver get_compact_driver() const {
-    I(!sink);
-    return Compact_driver(hidx, idx);
+  Compact        get_compact() const;
+  Compact_driver get_compact_driver() const;
+  Compact_class  get_compact_class() const {
+    // OK to pick a hierarchical to avoid replication of info like names
+    return Compact_class(idx, sink);
   }
 
-  Compact_class get_compact_class() const { return Compact_class(idx, sink); }
-
   Compact_class_driver get_compact_class_driver() const {
+    // OK to pick a hierarchical to avoid replication of info like names
     I(!sink);  // Only driver pin allowed
-    return Compact_class_driver(idx);
+    return Compact_class_driver(get_root_idx());
   }
 
   LGraph *        get_top_lgraph() const { return top_g; };
@@ -240,7 +248,17 @@ public:
   bool is_graph_input() const;
   bool is_graph_output() const;
 
-  Node_pin get_sink_from_output() const;
+  Node_pin get_driver() const;
+  Node_pin get_sink() const;
+  Node_pin get_sink_from_output() const {
+    I(is_graph_output());
+    return get_sink();
+  }
+
+  Node_pin get_driver_from_output() const {
+    I(is_graph_output());
+    return get_driver();
+  }
 
   bool is_sink() const {
     I(idx);
@@ -252,22 +270,24 @@ public:
   }
 
   Node     get_node() const;
-  Node     get_driver_node() const;
-  Node_pin get_driver_pin() const;
 
-  void del_driver(Node_pin &dst);
-  void del_sink(Node_pin &dst);
-  void del(Node_pin &dst) {
+  Node              get_driver_node() const; // common 0 or 1 driver case
+  Node_pin          get_driver_pin() const;  // common 0 or 1 driver case
+  Node_pin_iterator inp_driver() const; // handle 0 to inf driver case
+
+  bool del_driver(Node_pin &dst);
+  bool del_sink(Node_pin &dst);
+  bool del(Node_pin &dst) {
     if (dst.is_sink() && is_driver())
       return del_sink(dst);
     I(dst.is_driver() && is_sink());
     return del_driver(dst);
   }
 
-  void connect_sink(Node_pin &dst);
+  void connect_sink(const Node_pin &dst);
   void connect_sink(Node_pin &&dst) { connect_sink(dst); }
-  void connect_driver(Node_pin &dst);
-  void connect(Node_pin &dst) {
+  void connect_driver(const Node_pin &dst);
+  void connect(const Node_pin &dst) {
     if (dst.is_sink() && is_driver())
       return connect_sink(dst);
     I(dst.is_driver() && is_sink());
@@ -275,33 +295,23 @@ public:
   }
   int get_num_edges() const;
 
-#if 0
-  Node_pin &operator=(const Node_pin &obj) {
-    I(this != &obj); // Do not assign object to itself. works but wastefull
-    top_g     = obj.top_g;
-    current_g = obj.current_g;
-    idx       = obj.idx;
-    pid       = obj.pid;
-    hidx      = obj.hidx;
-    sink      = obj.sink;
-
-    return *this;
-  };
-#endif
-
   // NOTE: No operator<() needed for std::set std::map to avoid their use. Use flat_map_set for speed
-
-  // static Node_pin get_out_pin(const Edge_raw *edge_raw);
-  // static Node_pin get_inp_pin(const Edge_raw *edge_raw);
 
   void           invalidate() { idx = 0; }
   constexpr bool is_invalid() const { return idx == 0; }
   constexpr bool is_down_node() const { return top_g != current_g; }
+  constexpr bool is_hierarchical() const { return !hidx.is_invalid(); }
+  Node_pin       get_non_hierarchical() const;
 
-  constexpr bool operator==(const Node_pin &other) const {
-    return (top_g == other.top_g) && (idx == other.idx) && (pid == other.pid) && (sink == other.sink) && (hidx == other.hidx);
+  bool operator==(const Node_pin &other) const {
+    GI(idx == 0, hidx.is_invalid());
+    GI(other.idx == 0, other.hidx.is_invalid());
+    GI(idx && other.idx, top_g == other.top_g);
+    return get_root_idx() == other.get_root_idx()
+           && sink == other.sink
+           && (hidx == other.hidx || hidx.is_invalid() || other.hidx.is_invalid());
   }
-  constexpr bool operator!=(const Node_pin &other) const { return !(*this == other); }
+  bool operator!=(const Node_pin &other) const { return !(*this == other); }
 
   void nuke();  // Delete all the edges, and attributes of this node_pin
 
@@ -309,10 +319,10 @@ public:
   std::string debug_name() const;
 
   void             set_name(std::string_view wname);
-  std::string_view create_name() const;
   std::string_view get_name() const;
   bool             has_name() const;
   static Node_pin  find_driver_pin(LGraph *top, std::string_view wname);
+  std::string_view get_pin_name() const;
 
   void             set_prp_vname(std::string_view prp_vname);
   std::string_view get_prp_vname() const;
@@ -325,11 +335,6 @@ public:
   uint32_t get_bits() const;
   void     set_bits(uint32_t bits);
 
-  bool is_signed() const;
-  bool is_unsigned() const;
-  void set_signed();
-  void set_unsigned();
-
   std::string_view get_type_sub_io_name() const;
   std::string_view get_type_sub_pin_name() const;
 
@@ -340,6 +345,7 @@ public:
   Ann_ssa *      ref_ssa();
   bool           has_ssa() const;
   bool           is_connected() const;
+  bool           is_connected(const Node_pin &pin) const;
 
   // END ATTRIBUTE ACCESSORS
   XEdge_iterator out_edges() const;

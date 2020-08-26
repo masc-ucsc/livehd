@@ -1,2 +1,2 @@
-foo.a.__bits = 3
-%out = foo.a.__bits
+x = a ++ (c,d)
+x|>fcall

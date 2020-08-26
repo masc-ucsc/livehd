@@ -37,12 +37,12 @@ protected:
 
   Port_ID recompute_io_ports(const Index_ID track_nid);
 
-  Index_ID find_idx_from_pid_int(const Index_ID idx, const Port_ID pid) const;
-  Index_ID find_idx_from_pid(const Index_ID idx, const Port_ID pid) const {
-    if (likely(node_internal[idx].get_dst_pid() == pid)) {  // Common case
-      return idx;
+  Index_ID find_idx_from_pid_int(const Index_ID nid, const Port_ID pid) const;
+  Index_ID find_idx_from_pid(const Index_ID nid, const Port_ID pid) const {
+    if (likely(node_internal[nid].get_dst_pid() == pid)) {  // Common case
+      return nid;
     }
-    return find_idx_from_pid_int(idx, pid);
+    return find_idx_from_pid_int(nid, pid);
   }
 
   Index_ID setup_idx_from_pid(const Index_ID nid, const Port_ID pid);
@@ -68,30 +68,6 @@ protected:
     I(idx < node_internal.size());
     I(node_internal[idx].is_root());
     node_internal.ref(idx)->set_bits(bits);
-  }
-
-  void set_unsigned(Index_ID idx) {
-    I(idx < node_internal.size());
-    I(node_internal[idx].is_root());
-    node_internal.ref(idx)->set_unsigned();
-  }
-
-  void set_signed(Index_ID idx) {
-    I(idx < node_internal.size());
-    I(node_internal[idx].is_root());
-    node_internal.ref(idx)->set_signed();
-  }
-
-  bool is_signed(Index_ID idx) const {
-    I(idx < node_internal.size());
-    I(node_internal[idx].is_root());
-    return node_internal[idx].is_signed();
-  }
-
-  bool is_unsigned(Index_ID idx) const {
-    I(idx < node_internal.size());
-    I(node_internal[idx].is_root());
-    return node_internal[idx].is_unsigned();
   }
 
 public:
@@ -172,21 +148,16 @@ public:
   const Graph_library &get_library() const { return *library; }
   Graph_library *      ref_library() const { return library; }
 
-  static void error(std::string_view text);
-  static void warn(std::string_view text);
+  static void error_int(std::string_view text);
+  static void warn_int(std::string_view text);
 
-  template <typename... Args>
-  static void error(const char *format, const Args &... args) {
-    fmt::format_args   fargs = fmt::make_format_args(args...);
-    fmt::memory_buffer tmp;
-    fmt::vformat_to(tmp, format, fargs);
-    error(std::string_view(tmp.data(), tmp.size()));
+  template <typename S, typename... Args>
+  static void error(const S& format, Args&&... args) {
+    error_int(fmt::format(format, args...));
   }
-  template <typename... Args>
-  static void warn(std::string_view format, const Args &... args) {
-    fmt::format_args   fargs = fmt::make_format_args(args...);
-    fmt::memory_buffer tmp;
-    fmt::vformat_to(tmp, format, fargs);
-    warn(std::string_view(tmp.data(), tmp.size()));
+
+  template <typename S, typename... Args>
+  static void warn(const S& format, Args&&... args) {
+    warn_int(fmt::format(format, args...));
   }
 };

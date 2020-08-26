@@ -1,0 +1,8 @@
+sum6 = ::{
+  %total = 0
+  for i in $ {
+    %total = %total + i
+  }
+}
+
+%out = sum6(a = 1, b = 2)
