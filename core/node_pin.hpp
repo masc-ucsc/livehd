@@ -219,6 +219,7 @@ public:
   Node_pin(LGraph *_g, Compact comp);
   Node_pin(LGraph *_g, Compact_driver comp);
   Node_pin(LGraph *_g, Compact_class comp);
+  Node_pin(LGraph *_g, const Hierarchy_index &hidx, Compact_class comp);
   Node_pin(LGraph *_g, Compact_class_driver comp);
 
   Compact        get_compact() const;

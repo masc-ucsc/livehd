@@ -442,6 +442,18 @@ XEdge_iterator LGraph::out_edges(const Node &node) const {
 
   XEdge_iterator xiter;
 
+  const bool hier = node.is_hierarchical();
+  if (hier && node.is_graph_output()) {
+
+    for(auto out_spin:node.inp_connected_pins()) {
+      for(auto e:out_spin.inp_edges()) {
+        trace_forward2sink(xiter, e.driver, out_spin);
+      }
+    }
+
+    return xiter;
+  }
+
   Index_ID idx2 = node.get_nid();
   I(node_internal[node.get_nid()].is_master_root());
 
@@ -458,9 +470,9 @@ XEdge_iterator LGraph::out_edges(const Node &node) const {
                             node_internal[idx2].get_dst_pid(),
                             false);
 
-      I(node.is_hierarchical() == dpin.is_hierarchical());
+      I(hier == dpin.is_hierarchical());
 
-      if (node.is_hierarchical()) {
+      if (hier) {
         for (i = 0, redge = node_internal[idx2].get_output_begin(); i < n; i++, redge += redge->next_node_inc()) {
           I(redge->get_self_idx() == idx2);
           I(dpin == redge->get_out_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx(), idx2));
@@ -489,10 +501,25 @@ XEdge_iterator LGraph::inp_edges(const Node &node) const {
 
   XEdge_iterator xiter;
 
+  const bool hier = node.is_hierarchical();
+  if (hier && node.is_graph_input()) {
+
+    for(auto inp_dpin:node.out_connected_pins()) {
+      Node_pin_iterator piter;
+      trace_back2driver(piter, inp_dpin);
+
+      for(auto out_spin:inp_dpin.out_edges()) {
+        for (auto &dpin2 : piter) {
+          xiter.emplace_back(dpin2, out_spin.sink);
+        }
+      }
+    }
+
+    return xiter;
+  }
+
   Index_ID idx2 = node.get_nid();
   I(node_internal[node.get_nid()].is_master_root());
-
-  const bool hier = node.is_hierarchical();
 
   while (true) {
     auto n = node_internal[idx2].get_num_local_inputs();
@@ -595,7 +622,7 @@ XEdge_iterator LGraph::out_edges(const Node_pin &dpin) const {
 }
 
 XEdge_iterator LGraph::inp_edges(const Node_pin &spin) const {
-  I(spin.is_sink());
+  I(spin.is_sink() || spin.is_graph_input());
   I(spin.get_class_lgraph() == this);
 
   XEdge_iterator xiter;
@@ -1315,10 +1342,10 @@ void LGraph::dump() {
   }
 #endif
 
-  each_sub_fast([this](Node &node, Lg_type_id lgid) {
+  each_sub_fast([this](Node &node, Lg_type_id lgid2) {
     LGraph *child = LGraph::open(get_path(), node.get_type_sub());
 
-    fmt::print("  lgid:{} sub:{}\n", node.debug_name(), lgid, child->get_name());
+    fmt::print("  lgid:{} sub:{}\n", node.debug_name(), lgid2, child->get_name());
   });
 }
 
