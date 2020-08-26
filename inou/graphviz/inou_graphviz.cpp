@@ -110,27 +110,25 @@ void Inou_graphviz::do_hierarchy(LGraph *g) {
 
   for (auto hidx : root_tree.depth_preorder()) {
     auto *lg = root_tree.ref_lgraph(hidx);
-    lg->each_sub_fast([&](Node& n, Lg_type_id id) -> bool {
-      Node hnode(g, hidx, n.get_compact_class());
-      for(auto e:hnode.out_edges()) {
-        if(e.sink.get_driver().get_hidx()== e.driver.get_driver().get_hidx())
-          continue;
+    fmt::print("visiting node:{} level:{} pos:{}\n"
+        ,lg->get_name()
+        ,(int)hidx.level, (int)hidx.pos);
 
-        fmt::print("edge from:{} to:{} level:{} pos:{}\n"
-            ,e.sink.get_driver().get_class_lgraph()->get_name()
-            ,e.driver.get_driver().get_class_lgraph()->get_name()
-            ,(int)hidx.level, (int)hidx.pos);
-      }
-      for(auto e:hnode.inp_edges()) {
-        if(e.sink.get_driver().get_hidx()== e.driver.get_driver().get_hidx())
-          continue;
+    Node h_inp(g, hidx, Node::Hardcoded_input_nid);
+    for(auto e:h_inp.inp_edges()) {
+      fmt::print("edge from:{} to:{} level:{} pos:{}\n"
+          ,e.driver.get_driver().get_class_lgraph()->get_name()
+          ,e.sink.get_driver().get_class_lgraph()->get_name()
+          ,(int)hidx.level, (int)hidx.pos);
+    }
 
-        fmt::print("edge from:{} to:{} level:{} pos:{}\n"
-            ,e.sink.get_driver().get_class_lgraph()->get_name()
-            ,e.driver.get_driver().get_class_lgraph()->get_name()
-            ,(int)hidx.level, (int)hidx.pos);
-      }
-    });
+    Node h_out(g, hidx, Node::Hardcoded_output_nid);
+    for(auto e:h_out.out_edges()) {
+      fmt::print("edge from:{} to:{} level:{} pos:{}\n"
+          ,e.driver.get_driver().get_class_lgraph()->get_name()
+          ,e.sink.get_driver().get_class_lgraph()->get_name()
+          ,(int)hidx.level, (int)hidx.pos);
+    }
   }
 
   for (const auto node : g->fast(true)) {
