@@ -287,28 +287,38 @@ void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid)
     paired_type = get_type(paired_nid);
 
   if (is_lhs(psts_nid, dot_nid) && paired_type.is_assign()) {
-    ref_data(paired_nid)->type = Lnast_ntype::create_invalid();
-    ref_data(dot_nid)->type = Lnast_ntype::create_tuple_add();
-    auto c0_assign = get_first_child(paired_nid);
-    auto c1_assign = get_sibling_next(c0_assign);
+    // merge the tuple_add at the original assign node
+    ref_data(dot_nid)->type    = Lnast_ntype::create_invalid();
+    ref_data(paired_nid)->type = Lnast_ntype::create_tuple_add();
+    auto c0_assign      = get_first_child(paired_nid);
+    auto c1_assign      = get_sibling_next(c0_assign);
+    auto c1_assign_data = get_data(c1_assign);
 
+    int i = 0;
     for (auto child : children(dot_nid)) {
-      if (child == get_last_child(dot_nid)){
-        ref_data(child)->token = get_data(c1_assign).token;
-        ref_data(child)->type  = get_data(c1_assign).type;
-        ref_data(child)->subs  = get_data(c1_assign).subs;
+      if (i == 0) {
+        i++;
+        continue;
+      } else if (i == 1) {
+        ref_data(c0_assign)->token = get_data(child).token;
+        ref_data(c0_assign)->type  = get_data(child).type;
+        ref_data(c0_assign)->subs  = get_data(child).subs;
+      } else if (i == 2) {
+        ref_data(c1_assign)->token = get_data(child).token;
+        ref_data(c1_assign)->type  = get_data(child).type;
+        ref_data(c1_assign)->subs  = get_data(child).subs;
       } else {
-        auto child_sibling = get_sibling_next(child);
-        ref_data(child)->token = get_data(child_sibling).token;
-        ref_data(child)->type  = get_data(child_sibling).type;
-        ref_data(child)->subs  = get_data(child_sibling).subs;
+        add_child(paired_nid, get_data(child));
       }
+      i++;
     }
+    add_child(paired_nid, c1_assign_data);
 
-    auto c0_dot_name = get_name(get_first_child(dot_nid));
-    tuple_var_table.insert(c0_dot_name); //insert new tuple name
+    auto c0_ta_name = get_name(get_first_child(paired_nid));
+    tuple_var_table.insert(c0_ta_name); //insert new tuple name
     return;
   } 
+
 
   if (is_lhs(psts_nid, dot_nid) && !paired_type.is_assign()) {
     ref_data(dot_nid)->type = Lnast_ntype::create_tuple_add();

@@ -4,8 +4,6 @@
 
 #include "inou_firrtl.hpp"
 
-#define PRINT_DEBUG
-
 /* Iterate over all nodes, looking to see if any
  * circuit components (wires, regs, IO, submodules)
  * can be found in the LNAST. If found, add to
@@ -17,12 +15,6 @@ void Inou_firrtl::FindCircuitComps(Lnast &ln, firrtl::FirrtlPB_Module_UserModule
   for (const auto &lnidx : ln.children(stmts)) {
     SearchNode(ln, lnidx, umod);
   }
-  /*for (auto iter = io_map.begin(); iter != io_map.end(); iter++) {
-    fmt::print("io: {}\n", iter->first);
-  }
-  for (auto iter = reg_wire_map.begin(); iter != reg_wire_map.end(); iter++) {
-    fmt::print("ri: {}\n", iter->first);
-  }*/
 }
 
 /* Look at a specific LNAST node and search it plus
@@ -42,7 +34,7 @@ void Inou_firrtl::SearchNode(Lnast &ln, const Lnast_nid &parent_node, firrtl::Fi
   } else if (ntype.is_tuple()) {
     CheckTuple(ln, parent_node, umod);
   } else if (ntype.is_func_call()) {
-    CreateSubmodInstance(ln, parent_node, umod);
+    CreateSubmodInst(ln, parent_node, umod);
   } else if (ntype.is_dot()) {
     return;
   } else {
@@ -91,6 +83,164 @@ void Inou_firrtl::CheckTuple(Lnast &ln, const Lnast_nid &tup_node, firrtl::Firrt
         CheckRefForComp(ln, asg_rhs, umod);
       }
     }
+  }
+
+  if (ln.get_name(tup_node).substr(0,6) == "memory") {
+    HandleMemTup(ln, tup_node, umod);
+  }
+}
+
+/* FIXME: STRICTLY WIP RIGHT NOW. DO NOT EXPECT THIS TO WORK.
+ * ----------------------------------------------------------
+ * Due to being broken into multiple separate tuples, handling
+ * Memory blocks can be difficult on this interface. To handle
+ * them, this interface looks for all the tuples where port
+ * attributes are defined in (memory1). Then it looks for where
+ * they are combined all into one tuple (memory2). Finally, when
+ * the tuple for the whole memory block is found (memory3), the
+ * actual memory statement is made and all ports are specified. */
+void Inou_firrtl::HandleMemTup(Lnast &ln, const Lnast_nid &tup_node, firrtl::FirrtlPB_Module_UserModule *umod) {
+  auto tup_node_name = ln.get_name(tup_node);
+  if (tup_node_name == "memory1") {
+    // memory1 tuples store port attr (but not port name)
+    auto lhs_name = ln.get_name(ln.get_first_child(tup_node));
+    pname_to_tup_map[lhs_name] = tup_node;
+
+  } else if (tup_node_name == "memory2") {
+    // memory2 tuple helps map memory1 temp names to port names
+    auto first = true;
+    std::string_view tup_name;
+    for (const auto& child : ln.children(tup_node)) {
+      if (first) {
+        tup_name = ln.get_name(child);
+        first = false;
+      } else {
+        auto lhs_node  = ln.get_first_child(child);
+        auto port_name = ln.get_name(lhs_node);
+        auto temp_name = ln.get_name(ln.get_sibling_next(lhs_node));
+
+        // Change from temp name to actual port name in map.
+        auto tup_attr_node  = pname_to_tup_map[temp_name];
+        pname_to_tup_map.erase(temp_name);
+        pname_to_tup_map[port_name] = tup_attr_node;
+
+        mem_to_ports_lists[tup_name].insert(port_name);
+      }
+    }
+
+  } else { // should be memory3
+    // memory3 tuple is the actual memory + attrs (.__port, .__size, ...)
+    std::string_view mem_name;
+    Lnast_nid ports_rhs, size_rhs;
+    auto first = true;
+    for (const auto& child : ln.children(tup_node)) {
+      if (first) {
+        first = false;
+      } else {
+        I(ln.get_type(child).is_assign());
+        auto lhs_asg = ln.get_first_child(child);
+        auto rhs_asg = ln.get_sibling_next(lhs_asg);
+
+        if (ln.get_name(lhs_asg) == "__port") {
+          ports_rhs = rhs_asg;
+        } else if (ln.get_name(lhs_asg) == "__size") {
+          I(ln.get_type(rhs_asg).is_const());
+          size_rhs = rhs_asg;
+        } else {
+          I(false); // FIXME: Something came up in tuple that shouldn't be there?
+        }
+      }
+    }
+    auto size_str = Lconst(ln.get_name(size_rhs)).to_firrtl();
+    uint32_t size_val = std::stoul(size_str); //FIXME: Could cause problems for sizes >= 2^32 (can use BigInt in proto for this)
+
+    // Actually create Memory statement + subexpressions
+    auto type = CreateTypeObject(0); // leave bw as implicit for now
+
+    auto mem_stmt = new firrtl::FirrtlPB_Statement_Memory();
+    mem_stmt->set_id((std::string)mem_name.substr(1));
+    mem_stmt->set_allocated_type(type);
+    mem_stmt->set_uint_depth(size_val);
+
+    auto fstmt = umod->add_statement();
+    fstmt->set_allocated_memory(mem_stmt);
+
+    for (const auto& tup_str : mem_to_ports_lists[ln.get_name(ports_rhs)]) {
+      auto port_tup_node = pname_to_tup_map[tup_str];
+      uint8_t port_type; // 0 = read, 1 = write, 2 = read-write
+      for (const auto& child : ln.children(port_tup_node)) {
+        // Do an initial pass over to see if this is a read/write/read-write port.
+        auto lhs_asg  = ln.get_first_child(child);
+        auto rhs_asg  = ln.get_sibling_next(lhs_asg);
+        auto attr_str = ln.get_name(lhs_asg);
+        /* FIXME: Need to identify right here if read/write/read-write.
+         * Then use that in next for-loop. Maybe determine by some attr? */
+        // set port_type here
+      }
+
+      // Now add to mem_stmt as read/write/read-write port as string. like mem_stmt->add_reader_id(...)
+      // use variable "port_type" as condition
+
+      // Create many assignments where all the attributes are specified for a port.
+      for (const auto& child : ln.children(port_tup_node)) {
+        // Iterate over each of the assign statements that set a port's attributes.
+        auto lhs_asg  = ln.get_first_child(child);
+        auto rhs_asg  = ln.get_sibling_next(lhs_asg);
+        auto attr_str = ln.get_name(lhs_asg);
+        if (attr_str == "__posedge") {
+          Pass::warn("attribute __posedge used for a memory port tuple, but only posedge=true is supported in FIRRTL");
+        } else if (attr_str == "__latency") {
+          // based on port_type, help determine read_lat and write_lat
+        } else if (attr_str == "__fwd") {
+          // help determine memory statement's read_under_write policy
+        } else if (attr_str.substr(0,2) == "__") {
+          auto mem_id_ref  = new firrtl::FirrtlPB_Expression_Reference();
+          mem_id_ref->set_id((std::string)mem_name.substr(1));
+          auto mem_id_expr = new firrtl::FirrtlPB_Expression();
+          mem_id_expr->set_allocated_reference(mem_id_ref);
+
+          auto subfield_expr = new firrtl::FirrtlPB_Expression_SubField();
+          subfield_expr->set_allocated_expression(mem_id_expr);
+          auto lhs_expr = new firrtl::FirrtlPB_Expression();
+          lhs_expr->set_allocated_sub_field(subfield_expr);
+
+          // FIXME: Haven't yet specified all attributes for all cases.
+          // RW need: wmode, rdata, wdata. W need: data, R need: data.
+          if (attr_str == "__addr") {
+            subfield_expr->set_field("addr");
+          } else if (attr_str == "__clk_pin") {
+            subfield_expr->set_field("clk");
+          } else if (attr_str == "__enable") {
+            subfield_expr->set_field("en");
+          } else if (attr_str == "__wrmask") {
+            if (port_type == 2) { // read-writer
+              subfield_expr->set_field("wmask");
+            } else if (port_type == 1) { // writer
+              subfield_expr->set_field("mask");
+            }
+          } else {
+            Pass::error("Specifying attribute {} in a memory tuple, but not yet supported on LN->FIR interface", attr_str);
+          }
+          // Now that we lhs_expr, just create a rhs expr and assignment statement.
+          auto rhs_expr = new firrtl::FirrtlPB_Expression();
+          add_refcon_as_expr(ln, rhs_asg, rhs_expr);
+
+          auto fstmt2 = umod->add_statement();
+          auto conn   = new firrtl::FirrtlPB_Statement_Connect();
+          conn->set_allocated_location(lhs_expr);
+          conn->set_allocated_expression(rhs_expr);
+          fstmt2->set_allocated_connect(conn);
+        } else {
+          I(false); // Should this be valid in the LNAST??
+        }
+      }
+    }
+    //mem_stmt->set_read_latency(read_lat);
+    //mem_stmt->set_write_latency(write_lat);
+
+    // Clear maps for this memory (since two mems can have same port names)
+    pname_to_tup_map.clear();
+    mem_to_ports_lists.clear();
   }
 }
 
@@ -222,7 +372,7 @@ firrtl::FirrtlPB_Expression *Inou_firrtl::CreateULitExpr(const uint32_t &val) {
   return expr;
 }
 
-void Inou_firrtl::CreateSubmodInstance(Lnast &ln, const Lnast_nid &fcall_node, firrtl::FirrtlPB_Module_UserModule *umod) {
+void Inou_firrtl::CreateSubmodInst(Lnast &ln, const Lnast_nid &fcall_node, firrtl::FirrtlPB_Module_UserModule *umod) {
   auto func_out = ln.get_first_child(fcall_node);
   auto mod_name = ln.get_sibling_next(func_out);
   auto func_inp = ln.get_sibling_next(mod_name);
@@ -230,7 +380,7 @@ void Inou_firrtl::CreateSubmodInstance(Lnast &ln, const Lnast_nid &fcall_node, f
   // 1. Converge func_out name with func_inp name
   // 2. Create submodule instance with this name
   auto inst        = new firrtl::FirrtlPB_Statement_Instance();
-  auto submod_name = ConvergeFCallNames(ln.get_name(func_out), ln.get_name(func_inp));
+  auto submod_name = ConvergeFCallName(ln.get_name(func_out), ln.get_name(func_inp));
   inst->set_id((std::string)submod_name);
   inst->set_module_id((std::string)ln.get_name(mod_name));
 
@@ -243,7 +393,7 @@ void Inou_firrtl::CreateSubmodInstance(Lnast &ln, const Lnast_nid &fcall_node, f
  * Thus, we must specify what name we will use. In general, take
  * output tuple name and make that the standard (means changing
  * input tuple names to match output tuple when seen in LNAST). */
-std::string_view Inou_firrtl::ConvergeFCallNames(const std::string_view func_out, const std::string_view func_inp) {
+std::string_view Inou_firrtl::ConvergeFCallName(const std::string_view func_out, const std::string_view func_inp) {
   if (func_inp.substr(0, 4) == "inp_" && func_out.substr(0, 4) == "out_" && func_inp.substr(4) == func_out.substr(4)) {
     // Specific case from FIRRTL->LNAST translation.
     // some function call like out_foo = submodule(inp_foo) will get its bundle name set to foo
