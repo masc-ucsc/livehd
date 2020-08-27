@@ -50,7 +50,7 @@ do
     echo "cprop and bitwidth"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth"
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.cprop"
     if [ $? -eq 0 ]; then
       echo "Successfully optimize design bitwidth: ${pt}.v"
     else
