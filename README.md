@@ -39,7 +39,7 @@ LiveHD. If you want to contribute or seek for MS/undergraduate thesis projects, 
 contact renau@ucsc.edu to query about them.
 
 ## Building
-Read (Installation)[./docs/Installation.md] for installation instructions.
+Read [Installation](./docs/Installation.md) for installation instructions.
 
 ## LiveHD Data Structures
 
