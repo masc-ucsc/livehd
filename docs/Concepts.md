@@ -20,7 +20,8 @@ options.
 * **Node**: Each vertex in the graph is a node. The nodes are either logic
   operations (and, or, xor, LUT,...), arithmetic operations (add, mult,...),
   muxes, wire selection (pick, join,...) , registers (flop,latches,...),
-  constants (strings, numeric,...), memories, or sub-graphs.
+  constants (strings, numeric,...), memories, or sub-graphs.  One way to think of a node is
+  part of an instantiation of an LGraph.
 
 * **Pin**: Each node has a set of driver or sink pins. In LGraph a driver pin
   is a pin in a node that has drive strength. Driver pins are outputs from the
@@ -56,6 +57,48 @@ LGraphs are bi-directional graphs that allow
   values. A hierarchical attribute allows to have a value per pin, node, or edge
   for each instance.
 
+## Working with LGraphs
+
+`Node`:  
+  The Node class is essentially a fancy pointer to an actual node in the hierarchy.  Information can be stripped from a node by making it a compact node (which preserves the value of `hidx`) or a compact_class node (which does not).
+  A node contains several values that can be used for identification:
+   - `nid`, which returns a type that is unique to the node *within an LGraph*.
+   - `hidx`, which returns a type that uniquely describes the node *within an LGraph*, if the node was passed a `hidx` value upon creation.  This value can be made unique across the entire hierarchy by ?? (TODO: find a way to do this that doesn't depend on internal features of LGraph...)
+   - `current_g`, which stores a pointer to the parent LGraph of the node.
+   - `top_g`, which stores a pointer to the root LGraph of the entire hierarchy. (TODO: not sure if this is accurate!)
+   - fields containing the node type (lut, and, add, subgraph, etc.)
+  When the connections going to/from a node are queried, the connection information returned will be different depending on if the node contains hierarchy information or not.  If the node contains no hierarchy information, then the connection possibilities will be limited to nodes within the current LGraph.  Otherwise, the connections will be traced back through the hierarchy and the original driver will be returned.
+  
+  If the node is created with a node id like n.get_compact().get_nid(), the node id will represent the node id of the actual node.  If the edges of this node are traversed, then the hidx of the other node will be the hidx *of that node*, not the parent of that node.
+  
+  If the node was created with a nid of Node::Hardcoded_input_nid or Node::Hardcoded_output_nid, then the hidx returned when the edges are traversed is the hidx *of the parent*.
+  
+  The best way to traverse across a hierarchy to get globally unique values:
+  1. find the root hierarchy (lgid of 1?)
+  2. get the reftree (could replace this with an LGraph function)
+  3. do a depth_preorder traversal of the graph
+  4. create a node using the lgraph, the hidx, and some kind of node id
+  5. do stuff with that node - all edges and stuff will be automatically filled since the node you created is a pointer.
+  
+  TODO: when you call get_down_nodes_map, are all the nodes subgraph nodes? yes!
+  
+
+`Node_pin`:
+  Node pins contain both an index (representing the node that the pin is connected to) and a port id (which is used to uniquely identify the node *within an LGraph*).
+
+`Sub_node`:
+  A Sub_node stores a complete list of all the inputs and outputs of an LGraph, as well as the physical locations of said inputs and outputs.
+
+`LGraph`:  
+  The LGraph class stores graph information.  An LGraph does not contain information to uniquely identify it (TODO: does it?), but it does contain plenty of methods for querying various attributes of a node within the LGraph from a given `nid` value.
+  Iterators:
+   - each_sub_fast_direct (all children, goes over every node)
+   - each_sub_fast_unique (all children, skips repeated instantiations of the same lgraph)
+  
+  Graph inputs and outputs are treated as special nodes with hardcoded id values.
+
+Various classes have dump() methods, which print information about the class for debugging purposes.
+
 ## Traversal Algorithms
 
 There are 3 main traversals algorithms fast, forward, and backward. 
@@ -87,6 +130,10 @@ for (auto pin : node.inp_connected_pins()) {
   }
 }
 ```
+
+### Iterating over the connections on a node
+
+
  - Iterate over all child nodes in an LGraph:
 ```
 for (auto lg : var.lgs) {
