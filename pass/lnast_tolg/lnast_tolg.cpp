@@ -557,17 +557,42 @@ void Lnast_tolg::process_ast_tuple_get_op(LGraph *dfg, const Lnast_nid &lnidx_tg
   }
 }
 
+void Lnast_tolg::create_hier_out_tup_get(LGraph *dfg, const Lnast_nid &c0_ta) {
+  auto c1_ta       = lnast->get_sibling_next(c0_ta);
+  auto c1_ta_sname = lnast->get_sname(c1_ta);
+  auto c1_ta_vname = lnast->get_vname(c1_ta);
+  auto tup_name    = lnast->get_sname(c0_ta);
+  
+  // create new graph output
+  auto new_out_name = absl::StrCat(tup_name.substr(1, tup_name.size()-3), "." ,c1_ta_vname);
+  auto out_spin     = dfg->add_graph_output(new_out_name, Port_invalid, 0);
+
+  I(dfg->is_graph_output(new_out_name));
+
+  // (1) construct TG (2) connect TG to this output
+  auto tup_get = dfg->create_node(TupGet_Op);
+  auto tn_spin = tup_get.setup_sink_pin("TN"); // tuple name
+  auto kn_spin = tup_get.setup_sink_pin("KN"); // key name
+
+  auto tn_dpin = setup_tuple_ref(dfg, tup_name);
+  tn_dpin.connect_sink(tn_spin);
+
+  auto kn_dpin = setup_key_dpin(dfg, c1_ta_sname);
+  kn_dpin.connect_sink(kn_spin);
+
+  tup_get.setup_driver_pin().connect_sink(out_spin);
+}
 
 void Lnast_tolg::create_hier_inp_tup_add(LGraph *dfg, const Lnast_nid &c1_tg) {
-  auto c2_tg = lnast->get_sibling_next(c1_tg);
+  auto c2_tg       = lnast->get_sibling_next(c1_tg);
   auto c2_tg_sname = lnast->get_sname(c2_tg);
   auto c2_tg_vname = lnast->get_vname(c2_tg);
   auto tup_name    = lnast->get_sname(c1_tg);
   auto tup_add     = dfg->create_node(TupAdd_Op);
 
   // create new graph input 
-  auto new_inp_name = absl::StrCat("\\", tup_name.substr(1, tup_name.size()-3), "." ,c2_tg_vname);
-  auto inp_dpin = dfg->add_graph_input(new_inp_name, Port_invalid, 0);
+  auto new_inp_name = absl::StrCat(tup_name.substr(1, tup_name.size()-3), "." ,c2_tg_vname);
+  auto inp_dpin     = dfg->add_graph_input(new_inp_name, Port_invalid, 0);
   name2dpin[new_inp_name] = inp_dpin;  
 
 
@@ -628,6 +653,12 @@ void Lnast_tolg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnidx_ta
       ta_map[i]  = tup_add;
       ta_name[i] = tup_name;
       i++ ;
+
+      // create tup_get to handle hier_tuple_output
+      if (is_output(tup_name)) {
+        create_hier_out_tup_get(dfg, c0_ta);
+      }
+
       continue;
     }
 
@@ -1339,7 +1370,7 @@ void Lnast_tolg::setup_lgraph_outputs_and_final_var_name(LGraph *dfg) {
   //based on the table, create graph outputs or set the final variable name
   for (auto const&[vname, vname_dpin] : vname2dpin) {
     auto dpin_name = vname_dpin.get_name();
-    if (is_output(dpin_name)) {
+    if (is_output(dpin_name) && vname_dpin.get_node().get_type_op()!= TupAdd_Op) {
       auto out_spin = dfg->add_graph_output(dpin_name.substr(1, dpin_name.size() - 3), Port_invalid, 0); // Port_invalid pos means do not care about position
       /* fmt::print("add graph out:{}\n", dpin_name.substr(1, dpin_name.size() - 3));                       // -3 means get rid of %, _0(ssa subscript) */
       dfg->add_edge(vname_dpin, out_spin);
