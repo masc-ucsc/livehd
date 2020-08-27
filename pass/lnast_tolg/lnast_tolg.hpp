@@ -92,6 +92,7 @@ protected:
   static bool  is_tup_get_target         (const Node &tup_add, uint32_t         tup_get_target);
   static void  collect_node_for_deleting (const Node &node, absl::flat_hash_set<Node> &to_be_deleted);
   void         create_hier_inp_tup_add   (LGraph *dfg, const Lnast_nid &c1_tg);
+  void         create_hier_out_tup_get   (LGraph *dfg, const Lnast_nid &c0_ta);
 
 
   // attribute related
