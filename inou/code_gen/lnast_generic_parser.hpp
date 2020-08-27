@@ -21,6 +21,7 @@ public:
   std::string ref_name(std::string prp_term) final;
   std::string ref_name(std::string_view prp_term) final;
 
+  std::string final_print(std::string modname, std::string buffer_to_print) final;
 };
 
 //-------------------------------------------------------------------------------------
@@ -47,13 +48,15 @@ public:
   std::string_view supporting_ftype() final;
   std::string supporting_fstart(std::string basename_s) final;
   std::string supporting_fend(std::string basename_s) final;
+  std::string supp_buffer_to_print(std::string modname) final;
   
   std::string main_fstart(std::string basename, std::string basename_s) final;
   bool convert_parameters(std::string key, std::string ref) final;
   void get_maps();//for debugging only
   void call_get_maps() final;
 
-  std::string outline_cpp(std::string modname) final;
+  std::string final_print(std::string modname, std::string buffer_to_print) final;
+  int indent_final_system() final;
 };
 
 //-------------------------------------------------------------------------------------
@@ -78,5 +81,7 @@ public:
   std::string_view for_cond_beg() final;
   std::string_view for_cond_end() final;
   std::string_view assign_node_strt() final;
+
+  std::string final_print(std::string modname, std::string buffer_to_print) final;
 };
 
