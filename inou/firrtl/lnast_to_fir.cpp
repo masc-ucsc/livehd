@@ -80,12 +80,8 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
     process_ln_par_op(ln, lnidx, fstmt);
     /*} else if (ntype.is_select()) {
       I(false); // should has been converted to tuple chain
-    } else if (ntype.is_logical_op()) {
-      process_ast_logical_op(dfg, lnidx);
     } else if (ntype.is_as()) {
-      process_ast_as_op(dfg, lnidx);
-    } else if (ntype.is_tuple()) {
-      process_ast_tuple_struct(dfg, lnidx);*/
+      process_ast_as_op(dfg, lnidx);*/
   } else if (ntype.is_if()) {
     auto nested_when_stmt = process_ln_if_op(ln, lnidx);
     auto fstmt            = pos_to_add_to == 0 ? when->add_consequent() : when->add_otherwise();
@@ -160,12 +156,8 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
     process_ln_par_op(ln, lnidx, fstmt);
   /*} else if (ntype.is_select()) {
     I(false); // should has been converted to tuple chain
-  } else if (ntype.is_logical_op()) {
-    process_ast_logical_op(dfg, lnidx);
   } else if (ntype.is_as()) {
-    process_ast_as_op(dfg, lnidx);
-  } else if (ntype.is_tuple()) {
-    process_ast_tuple_struct(dfg, lnidx);*/
+    process_ast_as_op(dfg, lnidx);*/
   } else if (ntype.is_if()) {
     auto when_stmt = process_ln_if_op(ln, lnidx);
     auto fstmt     = umod->add_statement();

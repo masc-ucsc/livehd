@@ -137,14 +137,15 @@ protected:
   firrtl::FirrtlPB_Expression_PrimOp_Op get_firrtl_oper_code(const Lnast_ntype &op_type);
 
   // Finding Circuit Components
-  void                         FindCircuitComps(Lnast &ln, firrtl::FirrtlPB_Module_UserModule *umod);
-  void                         SearchNode(Lnast &ln, const Lnast_nid &parent_node, firrtl::FirrtlPB_Module_UserModule *umod);
-  void                         CheckTuple(Lnast &ln, const Lnast_nid &tup_node, firrtl::FirrtlPB_Module_UserModule *umod);
-  void                         CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::FirrtlPB_Module_UserModule *umod);
-  firrtl::FirrtlPB_Type *      CreateTypeObject(uint32_t bitwidth);
-  firrtl::FirrtlPB_Expression *CreateULitExpr(const uint32_t &val);
-  void             CreateSubmodInstance(Lnast &ln, const Lnast_nid &fcall_node, firrtl::FirrtlPB_Module_UserModule *umod);
-  std::string_view ConvergeFCallNames(const std::string_view func_out, const std::string_view func_inp);
+  void                         FindCircuitComps (Lnast &ln, firrtl::FirrtlPB_Module_UserModule *umod);
+  void                         SearchNode       (Lnast &ln, const Lnast_nid &parent_node, firrtl::FirrtlPB_Module_UserModule *umod);
+  void                         CheckTuple       (Lnast &ln, const Lnast_nid &tup_node, firrtl::FirrtlPB_Module_UserModule *umod);
+  void                         HandleMemTup     (Lnast &ln, const Lnast_nid &ref_node, firrtl::FirrtlPB_Module_UserModule *umod);
+  void                         CheckRefForComp  (Lnast &ln, const Lnast_nid &ref_node, firrtl::FirrtlPB_Module_UserModule *umod);
+  firrtl::FirrtlPB_Type *      CreateTypeObject (uint32_t bitwidth);
+  firrtl::FirrtlPB_Expression *CreateULitExpr   (const uint32_t &val);
+  void                         CreateSubmodInst (Lnast &ln, const Lnast_nid &fcall_node, firrtl::FirrtlPB_Module_UserModule *umod);
+  std::string_view             ConvergeFCallName(const std::string_view func_out, const std::string_view func_inp);
 
 private:
   //----------- FOR toLNAST ----------
@@ -193,6 +194,10 @@ private:
   // This indicates which register have async reset (if not on here, it's sync)
   absl::flat_hash_set<std::string_view> async_regs;
 
+  // This maps a port name to the tuple that defines that port's attributes.
+  absl::flat_hash_map<std::string_view, Lnast_nid> pname_to_tup_map;
+  // This map tracks all of the ports associated with a specific memory.
+  absl::flat_hash_map<std::string_view, absl::flat_hash_set<std::string_view>> mem_to_ports_lists;
 public:
   Inou_firrtl(const Eprp_var &var);
 
