@@ -1156,29 +1156,58 @@ bool Lnast_tolg::subgraph_outp_is_tuple(Sub_node* sub) {
   return false;
 }
 
+std::vector<std::string_view> Lnast_tolg::split_hier_name(std::string_view hier_name) {
+  auto start = 0u;
+  auto end = hier_name.find('.');
+  std::vector<std::string_view> token_vec;
+  while (end != std::string_view::npos) {
+    std::string_view token = hier_name.substr(start, end - start);
+    token_vec.emplace_back(token);
+    start = end + 1; //
+    end = hier_name.find('.', start);
+  }
+  std::string_view token = hier_name.substr(start, end - start);
+  token_vec.emplace_back(token);
+  return token_vec;
+}
+
 void Lnast_tolg::subgraph_io_connection(LGraph *dfg, Sub_node* sub, std::string_view arg_tup_name, std::string_view res_name, Node subg_node) {
   bool subg_outp_is_scalar = !subgraph_outp_is_tuple(sub);
 
   // start query subgraph io and construct TGs for connecting inputs, TAs/scalar for connecting outputs
   for (const auto &io_pin : sub->get_io_pins()) {
-    /* Port_ID pos_pid = sub->get_graph_pos(io_pin.name); */
-    /* fmt::print("io_name:{}, pos_pid:{}\n", io_pin.name, pos_pid); */
+    // 2020/8/28: support hier-tuple-inpuputs
     if (io_pin.is_input()) {
-      auto tup_get = dfg->create_node(TupGet_Op);
-      auto tn_spin = tup_get.setup_sink_pin("TN"); // tuple name
-      auto kn_spin = tup_get.setup_sink_pin("KN"); // key name
+      std::vector<Node_pin> created_tup_gets;
+      auto hier_inp_subnames = split_hier_name(io_pin.name);
+      for (const auto& subname : hier_inp_subnames) {
+        auto tup_get = dfg->create_node(TupGet_Op);
+        auto tn_spin = tup_get.setup_sink_pin("TN"); // tuple name
+        auto kn_spin = tup_get.setup_sink_pin("KN"); // key name
+        
+        Node_pin tn_dpin;
+        if (&subname == &hier_inp_subnames.front()) {
+          tn_dpin = setup_tuple_ref(dfg, arg_tup_name);
+        } else {
+          tn_dpin = created_tup_gets.back();
+        }
 
-      auto tn_dpin = setup_tuple_ref(dfg, arg_tup_name);
-      tn_dpin.connect_sink(tn_spin);
+        tn_dpin.connect_sink(tn_spin);
+        auto subname_ssa = absl::StrCat(subname, "_0");
+        auto kn_dpin = setup_key_dpin(dfg, subname_ssa);
+        kn_dpin.connect_sink(kn_spin);
 
-      auto io_name_ssa = absl::StrCat(io_pin.name, "_0");
-      auto kn_dpin = setup_key_dpin(dfg, io_name_ssa);
-      kn_dpin.connect_sink(kn_spin);
+        // note: for scalar input, front() == back()
+        if (&subname == &hier_inp_subnames.back()) {
+          auto subg_spin = subg_node.setup_sink_pin(io_pin.name);
+          tup_get.setup_driver_pin().connect_sink(subg_spin);
+        }
+        created_tup_gets.emplace_back(tup_get.get_driver_pin());
+      }
+      continue;
+    } 
 
-      auto subg_spin = subg_node.setup_sink_pin(io_pin.name);
-      tup_get.setup_driver_pin().connect_sink(subg_spin);
-
-    } else if (subg_outp_is_scalar) {
+    if (subg_outp_is_scalar) {
       auto io_name_ssa = absl::StrCat(io_pin.name, "_0");
       auto subg_dpin = subg_node.setup_driver_pin(io_pin.name);
       auto scalar_node = dfg->create_node(Or_Op);
@@ -1208,27 +1237,28 @@ void Lnast_tolg::subgraph_io_connection(LGraph *dfg, Sub_node* sub, std::string_
         setup_dpin_ssa(name2dpin[res_name], res_vname, res_sub);
         vname2attr_dpin[res_vname] = aset_node.setup_driver_pin(1);
       }
+      continue;
+    } 
 
-    } else {
-      auto tup_add    = dfg->create_node(TupAdd_Op);
-      auto tn_spin    = tup_add.setup_sink_pin("TN"); //tuple name
-      auto kn_spin    = tup_add.setup_sink_pin("KN"); //key name
-      auto value_spin = tup_add.setup_sink_pin("KV"); //value
+    // subgraph output 
+    auto tup_add    = dfg->create_node(TupAdd_Op);
+    auto tn_spin    = tup_add.setup_sink_pin("TN"); //tuple name
+    auto kn_spin    = tup_add.setup_sink_pin("KN"); //key name
+    auto value_spin = tup_add.setup_sink_pin("KV"); //value
 
-      auto tn_dpin = setup_tuple_ref(dfg, res_name);
-      tn_dpin.connect_sink(tn_spin);
+    auto tn_dpin = setup_tuple_ref(dfg, res_name);
+    tn_dpin.connect_sink(tn_spin);
 
-      auto io_name_ssa = absl::StrCat(io_pin.name, "_0");
-      auto kn_dpin = setup_key_dpin(dfg, io_name_ssa);
-      kn_dpin.connect_sink(kn_spin);
+    auto io_name_ssa = absl::StrCat(io_pin.name, "_0");
+    auto kn_dpin = setup_key_dpin(dfg, io_name_ssa);
+    kn_dpin.connect_sink(kn_spin);
 
-      auto subg_dpin = subg_node.setup_driver_pin(io_pin.name);
-      subg_dpin.connect_sink(value_spin);
-      
-      auto ta_dpin = tup_add.setup_driver_pin();
-      name2dpin[res_name] = ta_dpin;
-      ta_dpin.set_name(res_name);
-    }
+    auto subg_dpin = subg_node.setup_driver_pin(io_pin.name);
+    subg_dpin.connect_sink(value_spin);
+    
+    auto ta_dpin = tup_add.setup_driver_pin();
+    name2dpin[res_name] = ta_dpin;
+    ta_dpin.set_name(res_name);
   }
 }
 
