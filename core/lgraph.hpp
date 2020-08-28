@@ -155,11 +155,7 @@ public:
       htree.regenerate();
     return htree;
   }
-/*
-  mmap_lib::vector<Node_internal>& ref_internal() {
-    return node_internal;
-  }
-*/
+  
   Index_ID add_edge(const Node_pin &dpin, const Node_pin &spin) {
     I(dpin.is_driver());
     I(spin.is_sink());
@@ -235,9 +231,6 @@ public:
 
   void each_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)>);
   void each_sub_unique_fast(const std::function<bool(Node &, Lg_type_id)> fn);
-
-  //void each_sub_with_hier(const Hierarchy_index hidx, const std::function<bool(Node &, Lg_type_id)> fn);
-  //Hierarchy_index find_hidx_from_node(const Node& n);
 
   template <typename FN>
   void each_sub_fast(const FN f1) {
