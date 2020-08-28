@@ -1,13 +1,13 @@
 
 #include "pass_fplan.hpp"
 
+#include <set>
+
 #include "graph_info.hpp"
 #include "hier_tree.hpp"
 #include "i_resolve_header.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
-
-#include <set>
 
 void setup_pass_fplan() { Pass_fplan::setup(); }
 
@@ -24,11 +24,11 @@ void Pass_fplan::make_graph(Eprp_var& var) {
 
   std::cout << "  creating floorplan graph...";
 
-  Hierarchy_tree* root_tree;
-  LGraph*         root_lg;
+  Hierarchy_tree* root_tree = nullptr;
+  LGraph*         root_lg   = nullptr;
 
   // TODO: finding the root lgraph may require the user to pass in a root lgraph name.
-  // not sure if I can find it automatically.
+  // not sure if I can legally find it automatically.
   for (auto lg : var.lgs) {
     if (lg->get_lgid() == 1) {
       root_tree = lg->ref_htree();
@@ -36,13 +36,14 @@ void Pass_fplan::make_graph(Eprp_var& var) {
     }
   }
 
-  root_tree->dump();
+  I(root_tree);
+  I(root_lg);
 
   // TODO: optimize this.
 
   absl::flat_hash_set<std::tuple<Hierarchy_index, Hierarchy_index, uint32_t>> edges;
-  absl::flat_hash_map<Hierarchy_index, vertex_t> vm;
-  unsigned long unique_vector_id = 0;
+  absl::flat_hash_map<Hierarchy_index, vertex_t>                              vm;
+  unsigned long                                                               unique_vector_id = 0;
 
   for (auto hidx : root_tree->depth_preorder()) {
     LGraph* lg = root_tree->ref_lgraph(hidx);
@@ -81,6 +82,16 @@ void Pass_fplan::make_graph(Eprp_var& var) {
     }
   }
 
+  auto find_edge = [&](vertex_t v_src, vertex_t v_dst) -> edge_t {
+    for (auto e : gi.al.out_edges(v_src)) {
+      if (gi.al.head(e) == v_dst) {
+        return e;
+      }
+    }
+
+    return gi.al.null_edge();
+  };
+
   for (auto ei : edges) {
     // all connections have to be symmetrical
 
@@ -88,16 +99,6 @@ void Pass_fplan::make_graph(Eprp_var& var) {
 
     auto v1 = vm.at(src);
     auto v2 = vm.at(dst);
-
-    auto find_edge = [&](vertex_t v_src, vertex_t v_dst) -> edge_t {
-      for (auto e : gi.al.edges()) {
-        if (gi.al.tail(e) == v_src && gi.al.head(e) == v_dst) {
-          return e;
-        }
-      }
-
-      return gi.al.null_edge();
-    };
 
     auto e_1_2 = find_edge(v1, v2);
     if (e_1_2 == gi.al.null_edge()) {
@@ -117,24 +118,34 @@ void Pass_fplan::make_graph(Eprp_var& var) {
   }
 
   using namespace graph::attributes;
-  std::cout << gi.al.dot_format("weight"_of_edge = gi.weights, "name"_of_vert = gi.debug_names, "area"_of_vert = gi.areas, "id"_of_vert = gi.ids) << std::endl;
+  std::cout << gi.al.dot_format("weight"_of_edge = gi.weights,
+                                "name"_of_vert   = gi.debug_names,
+                                "area"_of_vert   = gi.areas,
+                                "id"_of_vert     = gi.ids)
+            << std::endl;
 
   // if the graph is not fully connected, ker-lin fails to work.
   for (const auto& v : gi.al.verts()) {
-    for (const auto& other_v : gi.al.verts()) {
-      bool found = false;
-      for (const auto& e : gi.al.out_edges(v)) {
-        if (gi.al.head(e) == other_v && gi.al.tail(e) == v) {
-          found = true;
-          break;
-        }
-      }
-      if (!found) {
-        auto temp_e        = gi.al.insert_edge(v, other_v);
+    for (const auto& ov : gi.al.verts()) {
+      if (find_edge(v, ov) == gi.al.null_edge()) {
+        auto temp_e        = gi.al.insert_edge(v, ov);
         gi.weights[temp_e] = 0;
       }
     }
   }
+
+  auto is_symmetrical = [&]() -> bool {
+    for (auto v : gi.al.verts()) {
+      for (auto ov : gi.al.verts()) {
+        if (find_edge(v, ov) == gi.al.null_edge()) return false;
+        if (find_edge(ov, v) == gi.al.null_edge()) return false;
+      }
+    }
+    return true;
+  };
+
+  I(is_symmetrical());
+
   std::cout << "done." << std::endl;
 }
 

@@ -39,6 +39,5 @@ public:
       , ids(std::move(other.ids))
       , areas(std::move(other.areas))
       , weights(std::move(other.weights))
-      , sets(std::move(other.sets)) {  // TODO: delete stuff here?
-  }
+      , sets(std::move(other.sets)) {}
 };
