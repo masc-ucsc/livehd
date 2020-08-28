@@ -376,7 +376,7 @@ double Hier_tree::find_area(phier node) const {
   return find_area(node->children[0]) + find_area(node->children[1]);
 }
 
-void Hier_tree::print() const {
+void Hier_tree::dump() const {
   std::cout << std::endl << "printing uncollapsed hierarchy:" << std::endl;
   print_node(root);
   std::cout << std::endl;

@@ -40,17 +40,12 @@ public:
   Hier_tree& operator=(const Hier_tree& other) = delete;
 
   // moves defined since copies are deleted
-  Hier_tree(Hier_tree&& other) noexcept : ginfo(std::move(other.ginfo)), root(other.root) {  // TODO: delete stuff here?
-  }
+  // moved-from object can be left alone, since contents are "unspecified" after move.
+  Hier_tree(Hier_tree&& other) noexcept : ginfo(std::move(other.ginfo)), root(other.root) {}
 
-  Hier_tree& operator=(Hier_tree&& other) noexcept {
-    // TODO: write this
-    I(false);
-    return *this;
-  }
+  // move assignment operator not specified because graph_info contents are really hard to move
 
-  // print the hierarchy
-  void print() const;
+  void dump() const;
 
   // returns a new tree with small leaf nodes collapsed together (Algorithm 2 in HiReg)
   void collapse(double threshold_area);

@@ -13,7 +13,7 @@ module leaf3(input [29:0] ci, output [29:0] co);
 endmodule
 
 module leaf4(input tempi, output tempo);
-  assign tempo = ~tempi;
+  assign tempo = tempi - 2;
 endmodule
 
 module leaf5(input [29:0] ci, output [29:0] co);
@@ -25,7 +25,7 @@ module leaf6(input tempi, output tempo);
 endmodule
 
 module leaf7(input [24:0] bi, output [24:0] bo);
-  assign bo = ~bi;
+  assign bo = bi + bi;
 endmodule
 
 module mid1(input [899:0] di, output [899:0] dout);
