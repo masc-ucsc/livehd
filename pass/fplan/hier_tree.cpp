@@ -1,14 +1,14 @@
 
 #include "hier_tree.hpp"
 
-#include <iostream>  // include printing facilities if we're debugging things
+#include <fmt/core.h>
 #include <limits>    // for most negative value in min cut
 #include <vector>    // for min cut
 
 #include "i_resolve_header.hpp"
 
 // temporary bool for printing out tons of debug information
-constexpr bool dbg_verbose = false;
+constexpr bool dbg_verbose = true;
 
 std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
   auto&      g    = info.al;
@@ -47,13 +47,10 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
     sets[triv_sets.second].insert(v2);
 
     if (dbg_verbose) {
-      std::cout << "trivial partition:" << std::endl;
-
-      std::cout << info.debug_names(v1) << ":\t";
-      std::cout << "a (aka " << triv_sets.first << ")" << std::endl;
-
-      std::cout << info.debug_names(v2) << ":\t";
-      std::cout << "b (aka " << triv_sets.second << ")" << std::endl;
+      std::cout << "\ntrivial partition:" << std::endl;
+      fmt::print("{:<30}a (aka {}), area {}\n", info.debug_names(v1), triv_sets.first, info.areas(v1));
+      fmt::print("{:<30}b (aka {}), area {}\n", info.debug_names(v2), triv_sets.second, info.areas(v2));
+      fmt::print("imb: {:.3f}\n", std::max(info.areas(v1), info.areas(v2)) / (info.areas(v1) + info.areas(v2)));
     }
 
     return triv_sets;
@@ -66,6 +63,7 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
 
     // info.ids[temp_vertex] = max_id + 1; // choose an id that hasn't been used before
     info.areas[temp_vertex] = 0.0f;
+    info.debug_names[temp_vertex] = "temp_vertex";
 
     for (auto other_v : g.verts()) {
       edge_t temp_edge_t        = g.insert_edge(temp_vertex, other_v);
@@ -91,14 +89,14 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
   sets.push_back(g.vert_set());
   sets.push_back(g.vert_set());
 
-  // given a vertex, find the set containing that vert, or -1 if not found.
-  auto find_set = [&](auto v) -> int {
+  // given a vertex, find the set containing that vert, or an invalid set if not found.
+  auto find_set = [&](auto v) -> size_t {
     for (size_t i = 0; i < sets.size(); i++) {
       if (sets[i].contains(v)) {
         return i;
       }
     }
-    return -1;
+    return std::numeric_limits<size_t>::max();
   };
 
   auto is_valid_set = [&, new_sets](auto v) -> bool { return find_set(v) == new_sets.first || find_set(v) == new_sets.second; };
@@ -157,6 +155,28 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
 
     std::vector<vertex_t> av, bv;
     std::vector<int>      cv;
+    std::vector<double> aiv;
+
+    double a_area = 0.0;
+    double b_area = 0.0;
+
+    auto area_imb = [](double a1, double a2) -> double {
+      return std::max(a1, a2) / (a1 + a2);
+    };
+
+    for (auto v : vert_set) {
+      if (is_in_a(v)) {
+        a_area += info.areas(v);
+      } else {
+        b_area += info.areas(v);
+      }
+    }
+
+    // if we started out with an imbalance in area, don't bother trying to make it balanced.
+    bool already_imbalanced = area_imb(a_area, b_area) > 2.0 / 3.0;
+
+    // TODO: I made an assumption later on that the initial split respects the area rule, which isn't always the case.
+    // find some way to make the initial split respect area and be even...?
 
     // remove the node pair with the highest global reduction in cost, and add it to cv.
     // also add the nodes used in the reduction to av and bv, respectively.
@@ -174,6 +194,7 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
             if (is_in_a(v) && is_in_b(other_v) && cmap(other_v).active) {
               // only select nodes in the other set
               int new_cost = cmap(v).d_cost + cmap(other_v).d_cost - 2 * info.weights(e);
+
               if (new_cost > cost) {
                 cost  = new_cost;
                 a_max = v;
@@ -193,6 +214,13 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
 
       av.push_back(a_max);
       bv.push_back(b_max);
+
+      double new_a_area = a_area - info.areas(a_max) + info.areas(b_max);
+      double new_b_area = b_area - info.areas(b_max) + info.areas(a_max);
+
+      double area_imb = std::max(new_a_area, new_b_area) / (new_a_area + new_b_area);
+
+      aiv.push_back(area_imb);
 
       cmap[a_max].active = false;
       cmap[b_max].active = false;
@@ -242,7 +270,7 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
     for (size_t k = 0; k < cv.size(); k++) {
       int trial_decrease = 0;
       for (size_t i = 0; i < k; i++) {
-        trial_decrease += cv[i];
+        trial_decrease += (aiv[i] <= 2.0 / 3.0 || already_imbalanced) ? cv[i] : 0;
       }
       if (trial_decrease > best_decrease) {
         best_decrease  = trial_decrease;
@@ -254,14 +282,16 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
     if (best_decrease > 0) {
       for (size_t i = 0; i < decrease_index; i++) {
         if (dbg_verbose) {
-          std::cout << "swapping " << info.debug_names(av[i]) << " with " << info.debug_names(bv[i]) << std::endl;
+          fmt::print("  swapping {} with {}.\n", info.debug_names(av[i]), info.debug_names(bv[i]));
         }
 
-        sets[new_sets.first].erase(av[i]);
-        sets[new_sets.second].insert(av[i]);
+        if (aiv[i] <= 2.0 / 3.0 || already_imbalanced) {
+          sets[new_sets.first].erase(av[i]);
+          sets[new_sets.second].insert(av[i]);
 
-        sets[new_sets.second].erase(bv[i]);
-        sets[new_sets.first].insert(bv[i]);
+          sets[new_sets.second].erase(bv[i]);
+          sets[new_sets.first].insert(bv[i]);
+        }
       }
     }
 
@@ -273,13 +303,26 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
   } while (best_decrease > 0);
 
   if (dbg_verbose) {
-    std::cout << std::endl;
-    std::cout << "best partition:" << std::endl;
+    std::cout << "\nbest partition:" << std::endl;
     for (auto v : vert_set) {
-      std::cout << info.debug_names(v) << ":\t";
-      std::cout << (is_in_a(v) ? "a" : "b") << " (aka " << (is_in_a(v) ? new_sets.first : new_sets.second);
-      std::cout << "), cost " << cmap(v).d_cost << std::endl;
+      fmt::print("{:<30}{} (aka {}), cost {}, area {}\n", info.debug_names(v), (is_in_a(v) ? "a" : "b"), (is_in_a(v) ? new_sets.first : new_sets.second), cmap(v).d_cost, info.areas(v));
     }
+
+    double final_a_area = 0.0;
+    double final_b_area = 0.0;
+
+    for (auto v : vert_set) {
+      if (is_in_a(v)) {
+        final_a_area += info.areas(v);
+      } else {
+        final_b_area += info.areas(v);
+      }
+    }
+
+    double final_imb = std::max(final_a_area, final_b_area) / (final_a_area + final_b_area);
+    //I(final_imb > 0.0 && final_imb <= 2.0 / 3.0);
+
+    fmt::print("a area: {}, b area: {}, imb: {:.3f}.\n", final_a_area, final_b_area, final_imb);
   }
 
   // if we inserted a temporary vertex, remove it from the list of active sets and erase it from the graph
@@ -401,32 +444,32 @@ phier Hier_tree::collapse(phier node, double threshold_area) {
   }
 
   // create a new subtree from an existing subtree
-  std::function<phier(phier)> copy_subtree = [&, this](phier node) -> phier {
-    if (node->is_leaf()) {
-      return make_hier_node(node->graph_subset);
+  std::function<phier(phier)> copy_subtree = [&, this](phier n) -> phier {
+    if (n->is_leaf()) {
+      return make_hier_node(n->graph_subset);
     }
 
     // I believe the HiReg paper states that child nodes can have areas less than the thresold,
     // as long as the total area between the child nodes is greater than the threshold
-    auto n1 = copy_subtree(node->children[0]);
-    auto n2 = copy_subtree(node->children[1]);
+    auto n1 = copy_subtree(n->children[0]);
+    auto n2 = copy_subtree(n->children[1]);
 
     return make_hier_tree(n1, n2);
   };
 
   // make all nodes belong to the same set
   // this lambda assumes that set_number currently contains a unique set
-  std::function<void(phier)> collapse_subtree = [&, this](phier node) {
-    if (node->is_leaf()) {
+  std::function<void(phier)> collapse_subtree = [&, this](phier n) {
+    if (n->is_leaf()) {
       ginfo.sets.push_back(ginfo.al.vert_set());
       int new_set = ginfo.sets.size() - 1;
 
-      for (auto v : ginfo.sets[node->graph_subset]) {
+      for (auto v : ginfo.sets[n->graph_subset]) {
         ginfo.sets[new_set].insert(v);
       }
     } else {
-      collapse_subtree(node->children[0]);
-      collapse_subtree(node->children[1]);
+      collapse_subtree(n->children[0]);
+      collapse_subtree(n->children[1]);
     }
   };
 
