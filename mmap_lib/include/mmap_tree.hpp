@@ -453,9 +453,9 @@ public:
     return Tree_index(level, pos);
   }
 
-  static Tree_index invalid_index() { return Tree_index(-1, -1); }
-  static Tree_index root_index() { return Tree_index(0, 0); }
-  const Tree_index  get_root() const { return Tree_index(0, 0); }
+  static constexpr Tree_index invalid_index() { return Tree_index(-1, -1); }
+  static constexpr Tree_index root_index() { return Tree_index(0, 0); }
+  constexpr Tree_index  get_root() const { return Tree_index(0, 0); }
   void              set_root(const X &data);
 
   // NOTE: not a typical depth first traversal, goes to bottom without touching

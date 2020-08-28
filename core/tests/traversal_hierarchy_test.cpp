@@ -114,7 +114,7 @@ protected:
 
     {
       auto dpin = lg_root->get_graph_input("i0");
-      node_order[0].get_sink_pin(0).connect_driver(dpin);
+      node_order[0].get_sink_pin().connect_driver(dpin);
     }
 
     for (size_t i=1;i<node_order.size();++i) {
