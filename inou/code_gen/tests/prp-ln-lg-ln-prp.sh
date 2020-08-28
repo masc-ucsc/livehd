@@ -41,8 +41,8 @@ do
     fi
 
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from"
-    mv ${pt}.dot ${pt}.no_bits.tuple.reduced_or.dot
-    dot -Tpdf -o ${pt}.no_bits.tuple.reduced_or.dot.pdf ${pt}.no_bits.tuple.reduced_or.dot
+    mv ${pt}.dot ${pt}.raw.dot
+    dot -Tpdf -o ${pt}.raw.dot.pdf ${pt}.raw.dot
 
     echo ""
     echo ""
@@ -60,8 +60,8 @@ do
     fi
 
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from"
-    mv ${pt}.dot ${pt}.or.dot
-    dot -Tpdf -o ${pt}.or.dot.pdf ${pt}.or.dot
+    mv ${pt}.dot ${pt}.no_bits.dot
+    dot -Tpdf -o ${pt}.no_bits.dot.pdf ${pt}.no_bits.dot
     echo ""
     echo "----------------------------------------------------"
     echo "PRP->LN->LG optimized completed"
