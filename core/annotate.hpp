@@ -10,6 +10,8 @@
 #include "ann_place.hpp"
 #include "ann_ssa.hpp"
 #include "attribute.hpp"
+#include "node.hpp"
+#include "node_pin.hpp"
 
 struct Ann_name {
   static constexpr char delay[]      = "delay";

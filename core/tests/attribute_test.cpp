@@ -12,6 +12,7 @@
 
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
+#include "node.hpp"
 
 using testing::HasSubstr;
 

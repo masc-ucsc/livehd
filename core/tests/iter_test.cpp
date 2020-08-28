@@ -117,10 +117,10 @@ void generate_graphs(int n) {
     int nnodes = SIZE_BASE + rand_r(&rseed) % (SIZE_BASE*10);
     for(int j = 0; j < nnodes; j++) { // Simple output nodes
       auto node = g->create_node();
-      Node_Type_Op op  = (Node_Type_Op)(1+(rand_r(&rseed) % ShiftLeft_Op)); // regular node types range
+      Cell_op op  = (Cell_op)(1+(rand_r(&rseed) % (int)Cell_op::Mux)); // regular node types range
       node.set_type(op);
-      dpins.push_back(node.setup_driver_pin(0).get_compact());
-      spins.push_back(node.setup_sink_pin(0).get_compact());
+      dpins.push_back(node.setup_driver_pin().get_compact());
+      spins.push_back(node.setup_sink_pin_raw(0).get_compact());
     }
 
     int const_nodes = SIZE_BASE/10 + rand_r(&rseed) % SIZE_BASE;
@@ -131,18 +131,18 @@ void generate_graphs(int n) {
 
     int cnodes = SIZE_BASE/10 + rand_r(&rseed) % (SIZE_BASE*10);
     for(int j = 0; j < cnodes; j++) { // complex nodes
-      auto node = g->create_node(FFlop_Op);
+      auto node = g->create_node(Cell_op::CompileErr);
       auto d1 = rand_r(&rseed)%3;
       auto s1 = rand_r(&rseed)%6;
-      dpins.push_back(node.setup_driver_pin(d1).get_compact());
-      spins.push_back(node.setup_sink_pin(s1).get_compact());
+      dpins.push_back(node.setup_driver_pin_raw(d1).get_compact());
+      spins.push_back(node.setup_sink_pin_raw(s1).get_compact());
       if (rand_r(&rseed)&1) {
         auto d2 = rand_r(&rseed)%3;
         auto s2 = rand_r(&rseed)%6;
         if (d1!=d2)
-          dpins.push_back(node.setup_driver_pin(d2).get_compact());
+          dpins.push_back(node.setup_driver_pin_raw(d2).get_compact());
         if (s1!=s2)
-          spins.push_back(node.setup_sink_pin(s2).get_compact());
+          spins.push_back(node.setup_sink_pin_raw(s2).get_compact());
       }
     }
 
@@ -235,10 +235,10 @@ bool bwd(int n) {
 
       visited.insert(node.get_compact());
 
-      if (!node.get_type().is_pipelined() && node.get_type_op() != GraphIO_Op) {
+      if (!node.is_type_loop_breaker() && node.get_type_op() != Cell_op::GraphIO) {
         // check if all incoming edges were visited
         for(auto &out : node.out_edges()) {
-          if (!out.sink.get_node().get_type().is_pipelined() && out.sink.get_node().get_type_op() != GraphIO_Op) {
+          if (!out.sink.get_node().is_type_loop_breaker() && out.sink.get_node().get_type_op() != Cell_op::GraphIO) {
             if(visited.find(out.sink.get_node().get_compact()) == visited.end()) {
               fmt::print("bwd failed for lgraph node:{} bwd:{}\n", node.debug_name(), out.sink.get_node().debug_name());
               I(false);
@@ -255,10 +255,10 @@ bool bwd(int n) {
 
       visited.insert(node.get_compact());
 
-      if (!node.get_type().is_pipelined() && node.get_type_op() != GraphIO_Op) {
+      if (!node.is_type_loop_breaker() && node.get_type_op() != Cell_op::GraphIO) {
         // check if all incoming edges were visited
         for(auto &out : node.out_edges()) {
-          if (!out.sink.get_node().get_type().is_pipelined() && out.sink.get_node().get_type_op() != GraphIO_Op) {
+          if (!out.sink.get_node().is_type_loop_breaker() && out.sink.get_node().get_type_op() != Cell_op::GraphIO) {
             if(visited.find(out.sink.get_node().get_compact()) == visited.end()) {
               fmt::print("bwd failed for lgraph node:{} bwd:{}\n", node.debug_name(), out.sink.get_node().debug_name());
               I(false);
@@ -303,7 +303,7 @@ void simple_line() {
   (void)s2_o_pin; // disconnected
 
 
-  auto g0_node0 = g0->create_node(Or_Op);
+  auto g0_node0 = g0->create_node(Cell_op::Or);
   g0_node0.set_name("g0_node0");
   auto g0_node1 = g0->create_node_sub(s0->get_lgid());
   g0_node1.set_name("g0_node1");
@@ -316,13 +316,13 @@ void simple_line() {
   auto g0_node5 = g0->create_node_sub(s2->get_lgid());
   g0_node5.set_name("g0_disc1");
 
-  auto s0_node = s0->create_node(Or_Op);
-  auto s1_node = s1->create_node(Or_Op);
-  auto s2_node = s2->create_node(Or_Op);
+  auto s0_node = s0->create_node(Cell_op::Or);
+  auto s1_node = s1->create_node(Cell_op::Or);
+  auto s2_node = s2->create_node(Cell_op::Or);
 
   // g0
-  g0->add_edge(g0_i_pin, g0_node0.setup_sink_pin(0));
-  g0->add_edge(g0_node0.setup_driver_pin(0), g0_node1.setup_sink_pin("s0_i"));
+  g0->add_edge(g0_i_pin, g0_node0.setup_sink_pin());
+  g0->add_edge(g0_node0.setup_driver_pin(), g0_node1.setup_sink_pin("s0_i"));
   g0->add_edge(g0_node1.setup_driver_pin("s0_o"), g0_node2.setup_sink_pin("s1_i"));
   g0->add_edge(g0_node2.setup_driver_pin("s1_o"), g0_o_pin);
   g0->add_edge(g0_node2.setup_driver_pin("s1_o"), g0_node3.setup_sink_pin("fut_i"));
@@ -330,15 +330,15 @@ void simple_line() {
   g0->add_edge(g0_node4.setup_driver_pin("s2_o"), g0_node5.setup_sink_pin("s2_i"));
 
   // s0
-  s0->add_edge(s0_i_pin, s0_node.setup_sink_pin(0));
-  s0->add_edge(s0_node.setup_driver_pin(0), s0_o_pin);
+  s0->add_edge(s0_i_pin, s0_node.setup_sink_pin());
+  s0->add_edge(s0_node.setup_driver_pin(), s0_o_pin);
 
   // s1
-  s1->add_edge(s1_i_pin, s1_node.setup_sink_pin(0));
-  s1->add_edge(s1_node.setup_driver_pin(0), s1_o_pin);
+  s1->add_edge(s1_i_pin, s1_node.setup_sink_pin());
+  s1->add_edge(s1_node.setup_driver_pin(), s1_o_pin);
 
   // s2
-  s2->add_edge(s2_i_pin, s2_node.setup_sink_pin(0));
+  s2->add_edge(s2_i_pin, s2_node.setup_sink_pin());
 
   setup_test_order();
 
@@ -364,9 +364,9 @@ void simple() {
     // Connected IOs from 1-512
     auto ipin = sub_g->add_graph_input("i" + std::to_string(i), i+1, 0);
     auto opin = sub_g->add_graph_output("o" + std::to_string(i), 256+i+1, 0);
-    auto node = sub_g->create_node(Or_Op);
-    sub_g->add_edge(ipin, node.setup_sink_pin(0));
-    sub_g->add_edge(node.setup_driver_pin(rand()&1), opin);
+    auto node = sub_g->create_node(Cell_op::Or);
+    sub_g->add_edge(ipin, node.setup_sink_pin());
+    sub_g->add_edge(node.setup_driver_pin(), opin);
   }
 #ifndef NDEBUG
   g->ref_library()->sync(); // Not needed, but nice to debug/read the Graph_library

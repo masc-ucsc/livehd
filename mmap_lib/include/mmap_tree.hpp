@@ -55,7 +55,7 @@ public:
 
 template <>
 struct hash<Tree_index> {
-  size_t operator()(Tree_index const &o) const {
+  constexpr size_t operator()(Tree_index const &o) const {
     uint64_t h = o.level;
     h          = (h << 32) | o.pos;
     return hash<uint64_t>{}(h);

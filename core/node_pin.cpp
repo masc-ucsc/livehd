@@ -4,6 +4,7 @@
 
 #include "annotate.hpp"
 #include "lgraph.hpp"
+#include "node.hpp"
 
 Node_pin::Node_pin(LGraph *_g, LGraph *_c_g, const Hierarchy_index &_hidx, Index_ID _idx, Port_ID _pid, bool _sink)
     : top_g(_g), current_g(_c_g), hidx(_hidx), idx(_idx), pid(_pid), sink(_sink) {
@@ -284,9 +285,9 @@ std::string_view Node_pin::get_pin_name() const {
   if (get_node().is_type_sub())
     return get_type_sub_io_name();
   if (is_driver())
-    return get_node().get_type().get_output_match(pid);
-  else
-    return get_node().get_type().get_input_match(pid);
+    return Cell::get_driver_name(get_node().get_type_op(), pid);
+
+  return Cell::get_sink_name(get_node().get_type_op(), pid);
 }
 
 void Node_pin::set_offset(Bits_t offset) {
@@ -382,7 +383,7 @@ Node_pin Node_pin::get_down_pin() const {
 
   // 4th: get down_idx
   Index_ID down_idx
-      = down_current_g->find_idx_from_pid(is_driver() ? Node::Hardcoded_output_nid : Node::Hardcoded_input_nid, down_pid);
+      = down_current_g->find_idx_from_pid(is_driver() ? Hardcoded_output_nid : Hardcoded_input_nid, down_pid);
   I(down_idx);
 
   bool down_sink = is_driver();  // top driver goes to an down output which should be a sink

@@ -3,7 +3,10 @@
 #pragma once
 
 #include "mmap_tree.hpp"
-#include "node.hpp"
+#include "lgraph_base_core.hpp"
+
+class Node;
+class LGraph;
 
 class Hierarchy_tree : public mmap_lib::tree<Hierarchy_data> {
 protected:
@@ -23,8 +26,8 @@ public:
 
   Hierarchy_index go_down(const Node &node) const;
 
-  Hierarchy_index go_up(const Node &node) const { return get_parent(node.get_hidx()); }
-  bool            is_root(const Node &node) const { return node.get_hidx().is_root(); }
+  Hierarchy_index go_up(const Node &node) const;
+  bool            is_root(const Node &node) const;
 
   void dump() const;
 };

@@ -433,7 +433,7 @@ static void look_for_cell_outputs(RTLIL::Module *module, const std::string &path
 
     for (const auto &conn : cell->connections()) {
       Port_ID      pid;
-      Node_Type_Op node_type = Invalid_Op;
+      Cell_op      node_type = Cell_op::Invalid;
 
       if (sub) {
         std::string pin_name(&(conn.first.c_str()[1]));
@@ -841,7 +841,8 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
     } else if (std::strncmp(cell->type.c_str(), "$mod", 4) == 0) {
       if (cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
         size = cell->parameters["\\Y_WIDTH"].as_int();
-      entry_node.set_type(Mod_Op, size);
+      assert(0); // imlement mod with mutl
+      //entry_node.set_type(Mod_Op, size);
 
     } else if (std::strncmp(cell->type.c_str(), "$sub", 4) == 0) {
       if (cell->parameters.find("\\Y_WIDTH") != cell->parameters.end())
@@ -1158,7 +1159,7 @@ static LGraph *process_module(RTLIL::Module *module, const std::string &path) {
           if (cell->parameters[conn.first.str() + "_SIGNED"].as_int() == 0)
             sink_pid += 1;
         } else if (entry_node.is_type(GreaterThan_Op) || entry_node.is_type(LessThan_Op) || entry_node.is_type(GreaterEqualThan_Op)
-                   || entry_node.is_type(LessEqualThan_Op) || entry_node.is_type(Div_Op) || entry_node.is_type(Mod_Op)) {
+                   || entry_node.is_type(LessEqualThan_Op) || entry_node.is_type(Div_Op)) {
           sink_pid = 0;
           if (cell->parameters[conn.first.str() + "_SIGNED"].as_int() == 0)
             sink_pid += 1;

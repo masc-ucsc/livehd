@@ -8,6 +8,8 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "lgraph.hpp"
+#include "node.hpp"
+#include "node_pin.hpp"
 
 using testing::HasSubstr;
 

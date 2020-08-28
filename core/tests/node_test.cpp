@@ -54,9 +54,9 @@ protected:
 
     auto s1 = top->create_node_sub(c1->get_lgid());
     auto s2 = top->create_node_sub("c2");
-    auto sum = top->create_node(Sum_Op);
-    auto mux = top->create_node(Mux_Op);
-    auto mor = top->create_node(Xor_Op); // cell called mor to avoid xor reserved keyword
+    auto sum = top->create_node(Cell_op::Sum);
+    auto mux = top->create_node(Cell_op::Mux);
+    auto mor = top->create_node(Cell_op::Xor); // cell called mor to avoid xor reserved keyword
 
     auto s1_aaa = s1.setup_sink_pin("an_input");
     auto s1_sss = s1.setup_driver_pin("s1_output");
@@ -71,16 +71,16 @@ protected:
     I(s2_bbb.get_pid() == c2_bbb.get_pid());
     I(s2_sss.get_pid() == c2_sss.get_pid());
 
-    auto sum_a = sum.setup_sink_pin("AU");
-    auto sum_b = sum.setup_sink_pin("BU");
+    auto sum_a = sum.setup_sink_pin("A");
+    auto sum_b = sum.setup_sink_pin("B");
     auto sum_y = sum.setup_driver_pin("Y");
 
     auto mor_a = mor.setup_sink_pin("A");
     auto mor_y = mor.setup_driver_pin("Y");
 
-    auto mux_a = mux.setup_sink_pin("A");
-    auto mux_b = mux.setup_sink_pin("B");
-    auto mux_s = mux.setup_sink_pin("S");
+    auto mux_a = mux.setup_sink_pin("1");
+    auto mux_b = mux.setup_sink_pin("2");
+    auto mux_s = mux.setup_sink_pin("0");
     auto mux_y = mux.setup_driver_pin("Y");
 
     top_a.connect_sink(sum_a);

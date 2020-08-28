@@ -4,6 +4,8 @@
 
 #include "annotate.hpp"
 #include "lgraph.hpp"
+#include "node.hpp"
+#include "node_pin.hpp"
 
 Hierarchy_tree::Hierarchy_tree(LGraph *_top)
     : mmap_lib::tree<Hierarchy_data>(_top->get_path(), absl::StrCat(_top->get_name(), "_htree")), top(_top) {}
@@ -84,6 +86,9 @@ Hierarchy_index Hierarchy_tree::go_down(const Node &node) const {
   Hierarchy_index child(node.get_hidx().level + 1, pos);
   return child;
 }
+
+Hierarchy_index Hierarchy_tree::go_up(const Node &node) const { return get_parent(node.get_hidx()); }
+bool            Hierarchy_tree::is_root(const Node &node) const { return node.get_hidx().is_root(); }
 
 /* LCOV_EXCL_START */
 void Hierarchy_tree::dump() const {

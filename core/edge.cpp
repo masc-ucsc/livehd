@@ -1,8 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "edge.hpp"
-
 #include "lgraph.hpp"
+#include "node.hpp"
+#include "node_pin.hpp"
 
 static_assert(sizeof(XEdge::Compact) == 8);
 static_assert(sizeof(Node_pin::Compact) == 12);

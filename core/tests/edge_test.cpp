@@ -285,7 +285,7 @@ TEST_F(Edge_test, trivial_delete) {
 
 TEST_F(Edge_test, overflow_delete) {
 
-  auto s1 = g->create_node(Sum_Op);
+  auto s1 = g->create_node(Cell_op::Sum);
 
   track_edge_count.clear();
   check_setup_pins();
@@ -299,7 +299,7 @@ TEST_F(Edge_test, overflow_delete) {
     if (rbool.any())
       s = add_n2_setup_sink_pin("sink_pin" + std::to_string(i));
     if (rbool.any() && !d.is_invalid() && !s.is_invalid()) {
-      add_edge(d, s1.setup_sink_pin(0));
+      add_edge(d, s1.setup_sink_pin("A"));
       add_edge(s1.setup_driver_pin(), s);
     }
   }
@@ -328,7 +328,7 @@ TEST_F(Edge_test, overflow_delete) {
 
 TEST_F(Edge_test, overflow_delete_node) {
 
-  auto s1 = g->create_node(Sum_Op);
+  auto s1 = g->create_node(Cell_op::Sum);
 
   track_edge_count.clear();
   check_setup_pins();
@@ -342,7 +342,7 @@ TEST_F(Edge_test, overflow_delete_node) {
     if (rbool.any())
       s = add_n2_setup_sink_pin("sink_pin" + std::to_string(i));
     if (rbool.any() && !d.is_invalid() && !s.is_invalid()) {
-      add_edge(d, s1.setup_sink_pin(0));
+      add_edge(d, s1.setup_sink_pin("A"));
       add_edge(s1.setup_driver_pin(), s);
     }
   }
@@ -361,7 +361,7 @@ TEST_F(Edge_test, overflow_delete_node) {
 TEST_F(Edge_test, overflow_delete_del_edge_bench) {
 
 
-  auto s1 = g->create_node(Sum_Op);
+  auto s1 = g->create_node(Cell_op::Sum);
 
   for(int i=0;i<6000;++i) {
     Node_pin d;
@@ -371,7 +371,7 @@ TEST_F(Edge_test, overflow_delete_del_edge_bench) {
     if (rbool.any())
       s = add_n2_setup_sink_pin("sink_pin" + std::to_string(i));
     if (rbool.any() && !d.is_invalid() && !s.is_invalid()) {
-      add_edge(d, s1.setup_sink_pin(0));
+      add_edge(d, s1.setup_sink_pin("A"));
       add_edge(s1.setup_driver_pin(), s);
     }
   }
@@ -405,7 +405,7 @@ TEST_F(Edge_test, overflow_delete_del_edge_bench) {
 
 TEST_F(Edge_test, overflow_delete_del_node_bench) {
 
-  auto s1 = g->create_node(Sum_Op);
+  auto s1 = g->create_node(Cell_op::Sum);
 
   int all_edges=0;
   for(int i=0;i<6000;++i) {
@@ -416,7 +416,7 @@ TEST_F(Edge_test, overflow_delete_del_node_bench) {
     if (rbool.any())
       s = add_n2_setup_sink_pin("sink_pin" + std::to_string(i));
     if (rbool.any() && !d.is_invalid() && !s.is_invalid()) {
-      add_edge(d, s1.setup_sink_pin(0));
+      add_edge(d, s1.setup_sink_pin("A"));
       add_edge(s1.setup_driver_pin(), s);
       all_edges+=2;
     }

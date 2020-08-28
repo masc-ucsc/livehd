@@ -7,10 +7,10 @@
 #include "hierarchy.hpp"
 #include "lgedge.hpp"
 #include "lgraphbase.hpp"
-#include "node.hpp"
 #include "node_pin.hpp"
+#include "node.hpp"
 #include "node_type.hpp"
-#include "node_type_base.hpp"
+#include "cell.hpp"
 
 class LGraph : public LGraph_Node_Type {
 protected:
@@ -89,21 +89,21 @@ protected:
     I(static_cast<Index_ID>(node_internal.size()) > idx);
     auto nid = node_internal[idx].get_nid();
     nid = node_internal[nid].get_nid();
-    return nid == Node::Hardcoded_input_nid || nid == Node::Hardcoded_output_nid;
+    return nid == Hardcoded_input_nid || nid == Hardcoded_output_nid;
   }
 
   bool is_graph_input(Index_ID idx) const {
     I(static_cast<Index_ID>(node_internal.size()) > idx);
     auto nid = node_internal[idx].get_nid();
     nid = node_internal[nid].get_nid();
-    return nid == Node::Hardcoded_input_nid;
+    return nid == Hardcoded_input_nid;
   }
 
   bool is_graph_output(Index_ID idx) const {
     I(static_cast<Index_ID>(node_internal.size()) > idx);
     auto nid = node_internal[idx].get_nid();
     nid = node_internal[nid].get_nid();
-    return nid == Node::Hardcoded_output_nid;
+    return nid == Hardcoded_output_nid;
   }
 
   Index_ID fast_next(Index_ID nid) const {
@@ -123,15 +123,15 @@ protected:
   }
 
   Index_ID fast_first() const {
-    static_assert(Node::Hardcoded_output_nid > Node::Hardcoded_input_nid);
-    return fast_next(Node::Hardcoded_output_nid);
+    static_assert(Hardcoded_output_nid > Hardcoded_input_nid);
+    return fast_next(Hardcoded_output_nid);
   }
 
   bool is_sub(Index_ID nid) const {  // Very common function (shoud be fast)
     I(node_internal[nid].is_node_state());
     I(node_internal[nid].is_master_root());
 
-    return node_internal[nid].get_type() == SubGraph_Op;
+    return node_internal[nid].get_type() == Cell_op::Sub;
   }
 
   void trace_back2driver(Node_pin_iterator &xiter, const Node_pin &dpin) const;
@@ -155,14 +155,11 @@ public:
       htree.regenerate();
     return htree;
   }
-  
+
   Index_ID add_edge(const Node_pin &dpin, const Node_pin &spin) {
     I(dpin.is_driver());
     I(spin.is_sink());
     I(spin.get_class_lgraph() == dpin.get_class_lgraph());
-    // Do not loop back unless pipelined or subgraph
-    GI(!spin.is_graph_io() && !dpin.is_graph_io() && dpin.get_node().get_nid() == spin.get_node().get_nid(),
-       dpin.get_node().get_type().is_pipelined());
 
     return add_edge_int(spin.get_root_idx(), spin.get_pid(), dpin.get_root_idx(), dpin.get_pid());
   }
@@ -197,8 +194,8 @@ public:
 
   Node create_node(const Node &old_node);
 
-  Node create_node(Node_Type_Op op);
-  Node create_node(Node_Type_Op op, uint32_t bits);
+  Node create_node(const Cell_op op);
+  Node create_node(const Cell_op op, Bits_t bits);
   Node create_node_const(const Lconst &value);
   Node create_node_const(uint64_t val);
   Node create_node_const(uint64_t val, Bits_t bits);

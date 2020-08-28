@@ -1,11 +1,14 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "lgraph_base_core.hpp"
 
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "mmap_map.hpp"
+#include "node.hpp"
+#include "node_pin.hpp"
+#include "lgraph_base_core.hpp"
 #include "graph_library.hpp"
 #include "lgedgeiter.hpp"
 #include "tech_library.hpp"

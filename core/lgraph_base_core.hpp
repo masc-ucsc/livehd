@@ -39,6 +39,9 @@ struct Index_ID_hash {
 
 using Port_ID = uint16_t;  // ports have a set order (a-b != b-a)
 
+constexpr Index_ID Hardcoded_input_nid  = 1;
+constexpr Index_ID Hardcoded_output_nid = 2;
+
 constexpr int Index_bits = 31;  // 31 bit to have Sink/Driver + Index in 32 bits
 constexpr int Port_bits  = 15;
 // NOTE: Bits_bits defined in lconst.hpp
