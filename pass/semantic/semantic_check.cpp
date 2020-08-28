@@ -103,6 +103,18 @@ int Semantic_check::in_rhs_list(Lnast *lnast, std::string_view node_name) {
   return -1;
 }
 
+bool Semantic_check::in_in_scope_stack(std::string_view node_name) {
+  int in_scope_stack_size = in_scope_stack.size();
+  for (int i = 0; i < in_scope_stack_size; i++) {
+    for (auto node : in_scope_stack[i]) {
+      if (node.first == node_name) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 void Semantic_check::add_to_output_vars(std::string_view node_name) {
   if (!in_output_vars(node_name)) {
     output_vars.insert(node_name);
@@ -387,7 +399,7 @@ void Semantic_check::resolve_lhs_rhs_lists(Lnast *lnast) {
 void Semantic_check::resolve_out_of_scope(Lnast *lnast) {
   std::vector<std::string_view> out_of_scope_vars;
   for (auto entry : read_dict) {
-    if (entry.first != "true" && entry.second != "false" && !in_write_list(entry.first, entry.second)) {
+    if (entry.first != "true" && entry.second != "false" && !in_in_scope_stack(entry.first) && !is_temp_var(entry.first)) {
       out_of_scope_vars.push_back(entry.first);
     }
   }
