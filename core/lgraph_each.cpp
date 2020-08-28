@@ -110,47 +110,6 @@ void LGraph::each_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)> 
   }
 }
 
-/*
-// go over each subgraph, but also include hierarchy information.
-// not really going to work - the hierarchy should be seperate from nodes.
-void LGraph::each_sub_with_hier(const Hierarchy_index hidx, const std::function<bool(Node &, Lg_type_id)> fn) {
-  const auto &m = get_down_nodes_map();
-  for (auto it = m.begin(), end = m.end(); it != end; ++it) {
-    Index_ID cid = it->first.nid;
-    I(cid);
-    I(node_internal[cid].is_node_state());
-    I(node_internal[cid].is_master_root());
-
-    //auto hidx = LGraph::open(current_g->get_path(), current_g)
-    
-    for (auto child_hidx : ref_htree()->children(hidx)) {
-      if (child_hidx != ref_htree()->invalid_index()) {
-
-      } else {
-        std::cout "invalid index" << std::endl;
-      }
-    }
-
-    auto node = Node(this, it->first);
-
-    bool cont = fn(node, it->second);
-    if (!cont)
-      return;
-  }
-}
-*/
-
-/*
-
-Hierarchy_index LGraph::find_hidx_from_node(const Node& n) {
-  const auto &m = get_down_nodes_map();
-  for (auto it = m.begin(); it != m.end(); it++) {
-    // compact_class -> lgid
-    Hierarchy_index h();
-  }
-}
-*/
-
 void LGraph::each_sub_unique_fast(const std::function<bool(Node &, Lg_type_id)> fn) {
   const auto &m = get_down_nodes_map();
   std::set<Lg_type_id> visited;
