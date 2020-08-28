@@ -9,6 +9,7 @@
 #include "node_pin.hpp"
 #include "cell.hpp"
 #include "sub_node.hpp"
+#include "hierarchy.hpp"
 
 class Ann_place;
 using Node_iterator = std::vector<Node>;
@@ -33,7 +34,12 @@ protected:
 
   Index_ID get_nid() const { return nid; }
 
-  Node(LGraph *_g, LGraph *_c_g, const Hierarchy_index &_hidx, Index_ID _nid);
+  constexpr Node(LGraph *_g, LGraph *_c_g, const Hierarchy_index &_hidx, Index_ID _nid)
+    : top_g(_g), current_g(_c_g), hidx(_hidx), nid(_nid) {
+    assert(nid);
+    assert(top_g);
+    assert(current_g);
+  }
 
   void invalidate(LGraph *_g);
   void invalidate();
@@ -58,16 +64,17 @@ public:
     friend class mmap_lib::hash<Compact>;
 
   public:
-    Compact(const Hierarchy_index &_hidx, Index_ID _nid) : hidx(_hidx), nid(_nid) { I(nid); };
-    Compact() : nid(0){};
+    constexpr Compact(const Hierarchy_index &_hidx, Index_ID _nid) : hidx(_hidx), nid(_nid) { assert(nid); };
+    constexpr Compact() : nid(0){};
 
-    Index_ID get_nid() const { return nid; }  // Mostly for debugging or to know order
+    constexpr Index_ID get_nid() const { return nid; }  // Mostly for debugging or to know order
 
-    Hierarchy_index get_hidx() const {
+    constexpr Hierarchy_index get_hidx() const {
       I(!hidx.is_invalid());
       return hidx;
     }
 
+    // Can not be constexpr find current_g
     Node get_node(LGraph *lg) const { return Node(lg, *this); }
 
     constexpr bool is_invalid() const { return nid == 0; }
@@ -105,7 +112,7 @@ public:
 
     constexpr Compact_class(const Index_ID &_nid) : nid(_nid) { };
 
-    Node get_node(LGraph *lg) const ;
+    constexpr Node get_node(LGraph *lg) const { return Node(lg, *this); }
 
     constexpr Index_ID get_nid() const { return nid; }
     constexpr bool     is_invalid() const { return nid == 0; }
@@ -131,11 +138,16 @@ public:
   void update(const Node::Compact &comp);
   void update(const Node &node);
 
-  Node() : top_g(0), current_g(0), nid(0) {}
-  // Node(LGraph *_g);
+  constexpr Node() : top_g(0), current_g(0), nid(0) {}
+
   Node(LGraph *_g, const Compact &comp) { update(_g, comp); }
   Node(LGraph *_g, const Hierarchy_index &_hidx, const Compact_class &comp);
-  Node(LGraph *_g, const Compact_class &comp);
+  constexpr Node(LGraph *_g, const Compact_class &comp) : top_g(_g), current_g(0), hidx(Hierarchy_tree::invalid_index()), nid(comp.nid) {
+    I(nid);
+    I(top_g);
+
+    current_g = top_g;
+  }
 #if 0
   Node &operator=(const Node &obj) {
     I(this != &obj); // Do not assign object to itself. works but wastefull
@@ -163,8 +175,15 @@ public:
 
   Hierarchy_index get_hidx() const { return hidx; }
 
-  Node_pin get_driver_pin() const;
-  Node_pin get_sink_pin() const;
+  Node_pin get_driver_pin() const {
+    I(!Cell::is_multi_driver(get_type_op()));
+    Node_pin pin(top_g, current_g, hidx, nid, 0, false);
+    return pin;
+  }
+  Node_pin get_sink_pin() const {
+    I(!Cell::is_multi_sink(get_type_op()));
+    return Node_pin(top_g, current_g, hidx, nid, 0, true);
+  }
 
   Node_pin get_driver_pin_raw(Port_ID pid) const;
   Node_pin get_sink_pin_raw(Port_ID pid) const;

@@ -5,9 +5,6 @@
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
-Node Node::Compact::get_node(LGraph *lg) const { return Node(lg, *this); }
-Node Node::Compact_class::get_node(LGraph *lg) const { return Node(lg, *this); }
-
 void Node::invalidate(LGraph *_g) {
   top_g     = _g;
   current_g = _g;
@@ -96,38 +93,9 @@ Node::Node(LGraph *_g, const Hierarchy_index &_hidx, const Compact_class &comp)
   // I(top_g->get_hierarchy_class_lgid(hidx) == current_g->get_lgid());
 }
 
-Node::Node(LGraph *_g, const Compact_class &comp) : top_g(_g), current_g(0), hidx(Hierarchy_tree::invalid_index()), nid(comp.nid) {
-  I(nid);
-  I(top_g);
-
-  current_g = top_g;
-
-  I(current_g->is_valid_node(nid));
-  // I(top_g->get_hierarchy_class_lgid(hidx) == current_g->get_lgid());
-}
-
-Node::Node(LGraph *_g, LGraph *_c_g, const Hierarchy_index &_hidx, Index_ID _nid)
-    : top_g(_g), current_g(_c_g), hidx(_hidx), nid(_nid) {
-  I(nid);
-  I(top_g);
-  I(current_g);
-  I(current_g->is_valid_node(nid));
-  // I(top_g->get_hierarchy_class_lgid(hidx) == current_g->get_lgid());
-}
-
-Node_pin Node::get_driver_pin() const {
-  I(!Cell::is_multi_driver(current_g->get_type_op(nid)));
-  return Node_pin(top_g, current_g, hidx, nid, 0, false);
-}
-
-Node_pin Node::get_sink_pin() const {
-  I(!Cell::is_multi_sink(current_g->get_type_op(nid)));
-  return Node_pin(top_g, current_g, hidx, nid, 0, true);
-}
-
 Node_pin Node::get_driver_pin_raw(Port_ID pid) const {
   I(!is_type_sub()); // Do not setup subs by PID, use name
-  I(Cell::has_driver(current_g->get_type_op(nid),pid));
+  I(Cell::has_driver(get_type_op(),pid));
   Index_ID idx = current_g->find_idx_from_pid(nid, pid);
   // It can be zero, then invalid node_pin
   return Node_pin(top_g, current_g, hidx, idx, pid, false);
@@ -135,7 +103,7 @@ Node_pin Node::get_driver_pin_raw(Port_ID pid) const {
 
 Node_pin Node::get_sink_pin_raw(Port_ID pid) const {
   I(!is_type_sub()); // Do not setup subs by PID, use name
-  I(Cell::has_sink(current_g->get_type_op(nid),pid));
+  I(Cell::has_sink(get_type_op(),pid));
   Index_ID idx = current_g->find_idx_from_pid(nid, pid);
   // It can be zero, then invalid node_pin
   return Node_pin(top_g, current_g, hidx, idx, pid, true);
@@ -214,7 +182,7 @@ Node_pin Node::setup_sink_pin_slow(std::string_view name) {
 
 Node_pin Node::setup_sink_pin_raw(Port_ID pid) {
   I(!is_type_sub()); // Do not setup subs by PID, use name
-  I(Cell::has_sink(current_g->get_type_op(nid),pid));
+  I(Cell::has_sink(get_type_op(),pid));
 #ifndef NDEBUG
   if (is_type_sub()) {
     Lg_type_id  sub_lgid = current_g->get_type_sub(nid);
@@ -229,7 +197,7 @@ Node_pin Node::setup_sink_pin_raw(Port_ID pid) {
 }
 
 Node_pin Node::setup_sink_pin() const {
-  I(!Cell::is_multi_sink(current_g->get_type_op(nid)));
+  I(!Cell::is_multi_sink(get_type_op()));
   current_g->setup_sink(nid);
   return Node_pin(top_g, current_g, hidx, nid, 0, true);
 }
@@ -243,7 +211,7 @@ int Node::get_num_edges() const { return current_g->get_num_edges(*this); }
 
 Node_pin Node::setup_driver_pin_raw(Port_ID pid) {
   I(!is_type_sub()); // Do not setup subs by PID, use name
-  I(Cell::has_driver(current_g->get_type_op(nid),pid));
+  I(Cell::has_driver(get_type_op(),pid));
 #ifndef NDEBUG
   if (is_type_sub()) {
     Lg_type_id  sub_lgid = current_g->get_type_sub(nid);
@@ -259,7 +227,7 @@ Node_pin Node::setup_driver_pin_raw(Port_ID pid) {
 }
 
 Node_pin Node::setup_driver_pin() const {
-  I(!Cell::is_multi_driver(current_g->get_type_op(nid)));
+  I(!Cell::is_multi_driver(get_type_op()));
   current_g->setup_driver(nid);
   return Node_pin(top_g, current_g, hidx, nid, 0, false);
 }
@@ -279,18 +247,18 @@ void Node::set_type(const Cell_op op, Bits_t bits) {
   setup_driver_pin().set_bits(bits);
 }
 
-bool Node::is_type(const Cell_op op) const { return current_g->get_type_op(nid) == op; }
+bool Node::is_type(const Cell_op op) const { return get_type_op() == op; }
 
 bool Node::is_type_const() const { return current_g->is_type_const(nid); }
 
 bool Node::is_type_attr() const {
-  auto op = current_g->get_type_op(nid);
+  auto op = get_type_op();
 
   return op == Cell_op::AttrGet || op == Cell_op::AttrSet;
 }
 
 bool Node::is_type_tup() const {
-  auto op = current_g->get_type_op(nid);
+  auto op = get_type_op();
 
   return op == Cell_op::TupAdd || op == Cell_op::TupGet;
 }
@@ -347,7 +315,6 @@ const Sub_node &Node::get_type_sub_node() const { return current_g->get_type_sub
 Sub_node *Node::ref_type_sub_node() const { return current_g->ref_type_sub_node(nid); }
 
 Lconst Node::get_type_const() const { return current_g->get_type_const(nid); }
-
 
 void Node::nuke() {
   I(false);  // TODO:
@@ -528,3 +495,4 @@ void Node::dump() {
   }
 }
 // LCOV_EXCL_STOP
+//

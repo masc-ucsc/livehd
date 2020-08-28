@@ -6,12 +6,6 @@
 #include "lgraph.hpp"
 #include "node.hpp"
 
-Node_pin::Node_pin(LGraph *_g, LGraph *_c_g, const Hierarchy_index &_hidx, Index_ID _idx, Port_ID _pid, bool _sink)
-    : top_g(_g), current_g(_c_g), hidx(_hidx), idx(_idx), pid(_pid), sink(_sink) {
-  I(_g);
-  I(_idx);
-}
-
 Node_pin::Node_pin(LGraph *_g, Compact comp)
     : top_g(_g), hidx(comp.hidx), idx(comp.idx), sink(comp.sink) {
   I(!comp.hidx.is_invalid()); // Why to Compact. Use Compact_class
@@ -50,13 +44,6 @@ Node_pin::Node_pin(LGraph *_g, Compact_class_driver comp)
 
 const Index_ID Node_pin::get_root_idx() const {
   return current_g->get_root_idx(idx);
-}
-
-
-Node_pin::Compact Node_pin::get_compact() const {
-  if(hidx.is_invalid())
-    return Compact(Hierarchy_tree::root_index(), get_root_idx(), sink);
-  return Compact(hidx, get_root_idx(), sink);
 }
 
 Node_pin::Compact_driver Node_pin::get_compact_driver() const {

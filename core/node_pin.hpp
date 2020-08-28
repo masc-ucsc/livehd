@@ -10,6 +10,7 @@ class Node;
 #include "ann_ssa.hpp"
 #include "lgedge.hpp"
 #include "mmap_map.hpp"
+#include "hierarchy.hpp"
 
 using XEdge_iterator    = std::vector<XEdge>;
 using Node_pin_iterator = std::vector<Node_pin>;
@@ -33,7 +34,11 @@ protected:
   Port_ID         pid;
   bool            sink;
 
-  Node_pin(LGraph *_g, LGraph *_c_g, const Hierarchy_index &_hidx, Index_ID _idx, Port_ID _pid, bool _sink);
+  constexpr Node_pin(LGraph *_g, LGraph *_c_g, const Hierarchy_index &_hidx, Index_ID _idx, Port_ID _pid, bool _sink)
+    : top_g(_g), current_g(_c_g), hidx(_hidx), idx(_idx), pid(_pid), sink(_sink) {
+    assert(_g);
+    assert(_idx);
+  }
 
   const Index_ID get_idx() const {
     I(idx);
@@ -215,14 +220,20 @@ public:
     return H::combine(std::move(h), s.hidx.get_hash(), (int)s.idx, s.sink);  // Ignore lgraph pointer in hash
   }
 
-  Node_pin() : top_g(0), current_g(0), idx(0), pid(0), sink(false) {}
+  constexpr Node_pin() : top_g(0), current_g(0), idx(0), pid(0), sink(false) {}
+  // rest can not be constexpr (find pid)
   Node_pin(LGraph *_g, Compact comp);
   Node_pin(LGraph *_g, Compact_driver comp);
   Node_pin(LGraph *_g, Compact_class comp);
   Node_pin(LGraph *_g, const Hierarchy_index &hidx, Compact_class comp);
   Node_pin(LGraph *_g, Compact_class_driver comp);
 
-  Compact        get_compact() const;
+  // No constexpr (get_root_idx)
+  Compact        get_compact() const {
+    if(hidx.is_invalid())
+      return Compact(Hierarchy_tree::root_index(), get_root_idx(), sink);
+    return Compact(hidx, get_root_idx(), sink);
+  }
   Compact_driver get_compact_driver() const;
   Compact_class  get_compact_class() const {
     // OK to pick a hierarchical to avoid replication of info like names
