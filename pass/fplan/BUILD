@@ -16,6 +16,7 @@ cc_library(
          "@rapidjson//:headers",
          "@graph//:graph",
          "@range-v3//:range-v3",
+         "@fmt//:fmt"
          ],
     )
 
