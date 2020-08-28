@@ -1,13 +1,17 @@
 sum5 = ::{
-  // basic: only the input is a tuple
-  // %out = $inp.a + $inp.b + $c
-
-  // advanced: both input and output are tuples 
-  %out.o1 = $inp.a + $c
-  %out.o2 = $inp.b + $c
-  // also need to test 
-  // %out = (o1 = $inp.a + $c, o2 = $inp.b + $c)
+  %out = $itup.a + $itup.b + $c
+  // // note: both input and output are tuples 
+  // %out     = $itup.a + $itup.b
+  // %otup.o1 = $itup.a + $c
+  // %otup.o2 = $itup.b + $c
+  // // also need to test 
+  // // %out = (o1 = $inp.a + $c, o2 = $inp.b + $c)
 }
 
 subinp = (a = 3, b = 4)
-%out = sum5(inp = subinp, c = 5)
+%out = sum5(inp = subinp, c = 5) //%out = (otup = (o1 = foo, o2 = bar), out = baz)
+// 3 outputs in total
+// \out.otup.o1
+// \out.otup.o2
+// \out.cat
+
