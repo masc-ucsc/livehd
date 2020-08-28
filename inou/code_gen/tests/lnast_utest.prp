@@ -12,7 +12,7 @@ fun1 = :($a,$b,%o1,%o2):{
 }
 result = fun1(a = 3, b = 4)
 %s2.__bits = 3
-%s2 = result.o1 + result.o2
+//%s2 = result.o1 + result.o2
 x = $a
 if ($a > 1) {
   x = $e
@@ -27,6 +27,6 @@ if ($a > 1) {
 } else {
   x = $f
 }
-%o1 = x + $a
-%o2 = y + $a
+//%o1 = x + $a
+//%o2 = y + $a
 
