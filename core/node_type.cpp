@@ -1,11 +1,11 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "node.hpp"
 #include "node_type.hpp"
-
 #include "annotate.hpp"
 #include "graph_library.hpp"
 
-static_assert(Last_invalid_Op < 512, "lgedge has 9 bits for type");
+static_assert(static_cast<int>(Cell_op::Last_invalid) < 127, "lgedge has 8 bits for type");
 
 LGraph_Node_Type::LGraph_Node_Type(std::string_view _path, std::string_view _name, Lg_type_id _lgid) noexcept
     : LGraph_Base(_path, _name, _lgid)
@@ -19,63 +19,30 @@ void LGraph_Node_Type::clear() {
   lut_map.clear();
 }
 
-void LGraph_Node_Type::set_type(Index_ID nid, Node_Type_Op op) {
-  I(node_internal[nid].is_node_state());
-  I(node_internal[nid].is_master_root());
-  I(op != Invalid_Op);
-
-  node_internal.ref(nid)->set_type(static_cast<uint8_t>(op));
-}
-
-const Node_Type &LGraph_Node_Type::get_type(Index_ID nid) const {
-  I(node_internal[nid].is_node_state());
+void LGraph_Node_Type::set_type(Index_ID nid, const Cell_op op) {
   I(node_internal[nid].is_master_root());
 
-  return Node_Type::get(static_cast<Node_Type_Op>(node_internal[nid].get_type()));
-}
-
-Node_Type_Op LGraph_Node_Type::get_type_op(Index_ID nid) const {
-  I(node_internal[nid].is_master_root());
-
-  return static_cast<Node_Type_Op>(node_internal[nid].get_type());
+  node_internal.ref(nid)->set_type(op);
 }
 
 bool LGraph_Node_Type::is_type_const(Index_ID nid) const {
-  I(node_internal[nid].is_node_state());
   I(node_internal[nid].is_master_root());
 
-  return node_internal[nid].get_type() == Const_Op;
-}
-
-bool LGraph_Node_Type::is_type_loop_breaker(Index_ID nid) const {
-  I(node_internal[nid].is_node_state());
-  I(node_internal[nid].is_master_root());
-
-  auto op = node_internal[nid].get_type();
-
-  return op > Loop_breaker_begin && op < Loop_breaker_end;
-}
-
-bool LGraph_Node_Type::is_type_sub(Index_ID nid) const {
-  I(node_internal[nid].is_node_state());
-  I(node_internal[nid].is_master_root());
-
-  return node_internal[nid].get_type() == SubGraph_Op;
+  return node_internal[nid].get_type() == Cell_op::Const;
 }
 
 void LGraph_Node_Type::set_type_sub(Index_ID nid, Lg_type_id subgraphid) {
-  I(node_internal[nid].is_node_state());
   I(node_internal[nid].is_master_root());
 
   subid_map.set(Node::Compact_class(nid), subgraphid.value);
 
   Ann_node_tree_pos::ref(static_cast<const LGraph *>(this))->set(Node::Compact_class(nid), subid_map.size());
 
-  node_internal.ref(nid)->set_type(SubGraph_Op);
+  node_internal.ref(nid)->set_type(Cell_op::Sub);
 }
 
 Lg_type_id LGraph_Node_Type::get_type_sub(Index_ID nid) const {
-  I(node_internal[nid].get_type() == SubGraph_Op);
+  I(node_internal[nid].get_type() == Cell_op::Sub);
 
   return subid_map.get(Node::Compact_class(nid));
 }
@@ -104,13 +71,13 @@ Sub_node *LGraph_Node_Type::ref_type_sub_node(std::string_view sub_name) {
 
 void LGraph_Node_Type::set_type_lut(Index_ID nid, const Lconst &lutid) {
   auto *ptr = node_internal.ref(nid);
-  ptr->set_type(LUT_Op);
+  ptr->set_type(Cell_op::LUT);
 
   lut_map.set(Node::Compact_class(nid), lutid.serialize());
 }
 
 Lconst LGraph_Node_Type::get_type_lut(Index_ID nid) const {
-  I(node_internal[nid].get_type() == LUT_Op);
+  I(node_internal[nid].get_type() == Cell_op::LUT);
 
   return Lconst(lut_map.get(Node::Compact_class(nid)));
 }
@@ -124,7 +91,7 @@ Lconst LGraph_Node_Type::get_type_const(Index_ID nid) const {
 void LGraph_Node_Type::set_type_const(Index_ID nid, const Lconst &value) {
   const_map.set(Node::Compact_class(nid), value.serialize());
   auto *ptr = node_internal.ref(nid);
-  ptr->set_type(Const_Op);
+  ptr->set_type(Cell_op::Const);
   ptr->set_bits(value.get_bits());
 
   I(value.get_bits());

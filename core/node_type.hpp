@@ -5,9 +5,9 @@
 #include "mmap_bimap.hpp"
 #include "mmap_map.hpp"
 #include "mmap_vector.hpp"
-#include "node.hpp"
-#include "node_type_base.hpp"
+#include "cell.hpp"
 #include "sub_node.hpp"
+#include "node.hpp"
 
 using Node_down_map = mmap_lib::map<Node::Compact_class, Lg_type_id>;
 
@@ -24,14 +24,12 @@ protected:
 
   void clear();
 
-  void             set_type(Index_ID nid, Node_Type_Op op);
-  const Node_Type &get_type(Index_ID nid) const;
-  Node_Type_Op     get_type_op(Index_ID nid) const;
+  void             set_type(Index_ID nid, const Cell_op op);
+  Cell_op          get_type_op(Index_ID nid) const {
+    return node_internal[nid].get_type();
+  }
 
   bool is_type_const(Index_ID nid) const;
-  bool is_type_sub(Index_ID nid) const;
-
-  bool is_type_loop_breaker(Index_ID nid) const;
 
   void       set_type_sub(Index_ID nid, Lg_type_id subgraphid);
   Lg_type_id get_type_sub(Index_ID nid) const;
@@ -54,7 +52,6 @@ protected:
 public:
   LGraph_Node_Type() = delete;
   explicit LGraph_Node_Type(std::string_view path, std::string_view name, Lg_type_id lgid) noexcept;
-  virtual ~LGraph_Node_Type(){};
 
   const Node_down_map &get_down_nodes_map() const { return subid_map; };
 };

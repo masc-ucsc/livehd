@@ -18,6 +18,7 @@ using testing::HasSubstr;
 class Tree_lgdb_setup : public ::testing::Test {
 protected:
   struct Node_data {
+    Node_data() : cnode(0) {} 
     int create_pos;
     LGraph         *lg;
     Hierarchy_index hidx;
@@ -79,7 +80,7 @@ protected:
       I(parent_lg);
       Node node;
       if (data->leaf && rbool.any()) {
-        node = parent_lg->create_node(Sum_Op,10);
+        node = parent_lg->create_node(Cell_op::Sum,10);
       } else {
         node = parent_lg->create_node_sub(data->name);
         LGraph *sub_lg = LGraph::create("lgdb_hierarchy_test", data->name, "hierarchy_test");
@@ -138,7 +139,14 @@ protected:
 
     {
       auto dpin = lg_root->get_graph_input("i0");
-      node_order[0].get_sink_pin(0).connect_driver(dpin);
+      if (node_order[0].is_type(Cell_op::Sum)) {
+        if (rbool.any())
+          node_order[0].setup_sink_pin("A").connect_driver(dpin);
+        else
+          node_order[0].setup_sink_pin("B").connect_driver(dpin);
+      }else{
+        node_order[0].get_sink_pin("i0").connect_driver(dpin);
+      }
     }
 
     for (size_t i=1;i<node_order.size();++i) {
@@ -158,29 +166,32 @@ protected:
       //fmt::print("curr   {} class {}\n", curr_node.debug_name(), curr_node.get_class_lgraph()->get_name());
 
       Node_pin dpin;
-      if (prev_node.get_type_op() == Sum_Op) {
+      if (prev_node.get_type_op() == Cell_op::Sum) {
         I(prev_data.leaf);
-        dpin = prev_node.setup_driver_pin(0);
+        dpin = prev_node.setup_driver_pin();
       }else{
         LGraph *prev_lg = LGraph::open("lgdb_hierarchy_test", prev_data.name);
         I(prev_node.get_class_lgraph() != prev_lg);
         auto d_pid = prev_node.get_type_sub_node().get_instance_pid("o0");
         dpin = prev_node.setup_driver_pin("o0");
         I(dpin.get_pid() == d_pid);
-        I(prev_node.get_type_op() == SubGraph_Op);
+        I(prev_node.get_type_op() == Cell_op::Sub);
       }
 
       Node_pin spin;
-      if (curr_node.get_type_op() == Sum_Op) {
+      if (curr_node.get_type_op() == Cell_op::Sum) {
         I(curr_data.leaf);
-        spin = curr_node.setup_sink_pin(0);
+        if (rbool.any())
+          spin = curr_node.setup_sink_pin("A");
+        else
+          spin = curr_node.setup_sink_pin("B");
       }else{
         LGraph *curr_lg = LGraph::open("lgdb_hierarchy_test", curr_data.name);
         I(curr_node.get_class_lgraph() != curr_lg);
         auto s_pid = curr_node.get_type_sub_node().get_instance_pid("i0");
         spin = curr_node.setup_sink_pin("i0");
         I(spin.get_pid() == s_pid);
-        I(curr_node.get_type_op() == SubGraph_Op);
+        I(curr_node.get_type_op() == Cell_op::Sub);
       }
 
       bool connect_inp = true; // rbool.any();
@@ -232,14 +243,14 @@ protected:
 
           auto spin = lg->get_graph_output("o0");
           Node_pin dpin;
-          if (last_node.get_type_op() == Sum_Op) {
-            dpin = last_node.setup_driver_pin(0);
+          if (last_node.get_type_op() == Cell_op::Sum) {
+            dpin = last_node.setup_driver_pin();
           } else {
             I(last_node.get_class_lgraph() == lg);
             auto d_pid = last_node.get_type_sub_node().get_instance_pid("o1");
             dpin       = last_node.setup_driver_pin("o1");
             I(dpin.get_pid() == d_pid);
-            I(last_node.get_type_op() == SubGraph_Op);
+            I(last_node.get_type_op() == Cell_op::Sub);
           }
           spin.connect_driver(dpin);
         }
@@ -250,13 +261,15 @@ protected:
       if (node.is_type_sub()) {
         if (conta != (node_order.size()-1)) { // LAST NODE
           auto d_pid   = node.get_type_sub_node().get_instance_pid("o0");
-          auto out_pin = node.get_driver_pin(d_pid);
+          auto out_pin = node.get_driver_pin("o0");
+          I(out_pin.get_pid()==d_pid);
           I(out_pin.has_outputs());
         }
 
         if (conta!=0) { // FIRST NODE
           auto s_pid   = node.get_type_sub_node().get_instance_pid("i0");
-          auto inp_pin = node.get_sink_pin(s_pid);
+          auto inp_pin = node.get_sink_pin("i0");
+          I(inp_pin.get_pid() == s_pid);
 
           I(inp_pin.has_inputs());
         }

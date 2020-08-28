@@ -6,6 +6,7 @@
 
 #include "iassert.hpp"
 #include "lgraph.hpp"
+#include "node.hpp"
 #include "node_pin.hpp"
 
 static_assert(sizeof(LEdge) == 6, "LEdge should be 6 bytes");

@@ -2,6 +2,7 @@
 #pragma once
 
 #include "lgraph_base_core.hpp"
+#include "cell.hpp"
 
 class Node_pin;
 
@@ -319,13 +320,13 @@ public:
     return get_num_local_inputs() + get_num_local_outputs();
   }
 
-  uint8_t get_type() const {
+  Cell_op get_type() const {
     I(is_master_root());
-    return type;
+    return static_cast<Cell_op>(type);
   }
-  void set_type(uint8_t op) {
+  void set_type(Cell_op op) {
     I(is_master_root());
-    type = op;
+    type = static_cast<uint8_t>(op);
   }
 
   void reset() {

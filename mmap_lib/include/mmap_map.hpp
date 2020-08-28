@@ -297,9 +297,9 @@ struct pair {
 
 // A thin wrapper around std::hash, performing a single multiplication to (hopefully) get nicely
 // randomized upper bits, which are used by the mmap_lib.
-template <typename T>
+template<typename T>
 struct hash : public std::hash<T> {
-	size_t operator()(T const& obj) const noexcept {
+	constexpr size_t operator()(T const& obj) const {
 		return std::hash<T>::operator()(obj);
 	}
 };
@@ -307,53 +307,35 @@ struct hash : public std::hash<T> {
 // specialization used for uint64_t and int64_t. Uses 128bit multiplication
 template <>
 struct hash<uint64_t> {
-	size_t operator()(uint64_t const& obj) const noexcept {
-#if defined(mmap_map_HAS_UMUL128)
-		// 167079903232 masksum, 120428523 ops best: 0xde5fb9d2630458e9
-		static constexpr uint64_t k = UINT64_C(0xde5fb9d2630458e9);
-		uint64_t h;
-		uint64_t l = detail::umul128(obj, k, &h);
-		return h + l;
-#elif mmap_map_BITNESS == 32
-		static constexpr uint32_t k = UINT32_C(0x9a0ecda7);
-		uint64_t const r = obj * k;
-		uint32_t h = static_cast<uint32_t>(r >> 32);
-		uint32_t l = static_cast<uint32_t>(r);
-		return h + l;
-#else
-		// murmurhash 3 finalizer
-		uint64_t h = obj;
-		h ^= h >> 33;
-		h *= 0xff51afd7ed558ccd;
-		h ^= h >> 33;
-		h *= 0xc4ceb9fe1a85ec53;
-		h ^= h >> 33;
-		return static_cast<size_t>(h);
-#endif
+	constexpr size_t operator()(uint64_t const& obj) const {
+    // murmurhash 3 finalizer
+    uint64_t h = obj;
+    h ^= h >> 33;
+    h *= 0xff51afd7ed558ccd;
+    h ^= h >> 33;
+    h *= 0xc4ceb9fe1a85ec53;
+    h ^= h >> 33;
+    return static_cast<size_t>(h);
 	}
 };
 
 template <>
 struct hash<int64_t> {
-	size_t operator()(int64_t const& obj) const noexcept {
+	constexpr size_t operator()(int64_t const& obj) const {
 		return hash<uint64_t>{}(static_cast<uint64_t>(obj));
 	}
 };
 
 template <>
 struct hash<uint32_t> {
-	size_t operator()(uint32_t const& h) const noexcept {
-//#if mmap_map_BITNESS == 32
+	constexpr size_t operator()(uint32_t const& h) const {
 		return static_cast<size_t>((UINT64_C(0xca4bcaa75ec3f625) * (uint64_t)h) >> 32);
-//#else
-		//return hash<uint64_t>{}(static_cast<uint64_t>(h));
-//#endif
 	}
 };
 
 template <>
 struct hash<int32_t> {
-	size_t operator()(int32_t const& obj) const noexcept {
+	constexpr size_t operator()(int32_t const& obj) const {
 		return hash<uint32_t>{}(static_cast<uint32_t>(obj));
 	}
 };

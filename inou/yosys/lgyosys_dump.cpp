@@ -808,7 +808,6 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         break;
       }
       case Div_Op:
-      case Mod_Op:
       case LessThan_Op:
       case GreaterThan_Op:
       case LessEqualThan_Op:
@@ -859,7 +858,6 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
             module->addGe(next_id(g), lhs, rhs, cell_output_map[node.get_driver_pin().get_compact()], sign);
             break;
           case Div_Op: module->addDiv(next_id(g), lhs, rhs, cell_output_map[node.get_driver_pin().get_compact()], sign); break;
-          case Mod_Op: module->addMod(next_id(g), lhs, rhs, cell_output_map[node.get_driver_pin().get_compact()], sign); break;
           default: ::Pass::error("lgyosys_dump: internal error!");
         }
         break;

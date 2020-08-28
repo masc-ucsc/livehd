@@ -219,7 +219,7 @@ void Pass_lnast_fromlg::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node, co
     case Equals_Op:
     case Mult_Op:
     case Div_Op:
-    case Mod_Op:
+    //case Mod_Op:
     case LogicShiftRight_Op:
     case ArithShiftRight_Op:
     case DynamicShiftRight_Op:
@@ -670,7 +670,7 @@ void Pass_lnast_fromlg::attach_simple_node(Lnast& lnast, Lnast_nid& parent_node,
     case Equals_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_same("==")); break;
     case Mult_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_mult("mult")); break;
     case Div_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_div("div")); break;
-    case Mod_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_mod("mod")); break;
+    //case Mod_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_mod("mod")); break;
     case LogicShiftRight_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_logic_shift_right("l_shr")); break;
     case ArithShiftRight_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_arith_shift_right("a_shr")); break;
     case DynamicShiftRight_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_dynamic_shift_right("d_shr")); break;

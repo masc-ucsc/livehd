@@ -75,7 +75,7 @@ protected:
       I(parent_lg);
       Node node;
       if (data.leaf && rbool.any()) {
-        node = parent_lg->create_node(Sum_Op,10);
+        node = parent_lg->create_node(Cell_op::Sum,10);
       } else {
         node = parent_lg->create_node_sub(data.name);
         LGraph *sub_lg = LGraph::create("lgdb_hierarchy_test", data.name, "hierarchy_test");
@@ -134,27 +134,28 @@ protected:
   //    fmt::print("curr   {} class {}\n", prev_node.debug_name(), prev_node.get_class_lgraph()->get_name());
 
       Node_pin dpin;
-      if (prev_node.get_type_op() == Sum_Op) {
+      if (prev_node.get_type_op() == Cell_op::Sum) {
         I(prev_data.leaf);
-        dpin = prev_node.setup_driver_pin(0);
+        dpin = prev_node.setup_driver_pin();
       }else{
         LGraph *prev_lg = LGraph::open("lgdb_hierarchy_test", prev_data.name);
         I(prev_node.get_class_lgraph() != prev_lg);
-        auto d_pid = prev_node.get_class_lgraph()->get_self_sub_node().get_instance_pid("o0");
-        dpin = prev_node.setup_driver_pin(d_pid);
-        I(prev_node.get_type_op() == SubGraph_Op);
+        dpin = prev_node.setup_driver_pin("o0");
+        I(prev_node.get_type_op() == Cell_op::Sub);
       }
 
       Node_pin spin;
-      if (curr_node.get_type_op() == Sum_Op) {
+      if (curr_node.get_type_op() == Cell_op::Sum) {
         I(curr_data.leaf);
-        spin = curr_node.setup_sink_pin(0);
+        if (rbool.any())
+          spin = curr_node.setup_sink_pin("A");
+        else
+          spin = curr_node.setup_sink_pin("B");
       }else{
         LGraph *curr_lg = LGraph::open("lgdb_hierarchy_test", curr_data.name);
         I(curr_node.get_class_lgraph() != curr_lg);
-        auto s_pid = curr_node.get_class_lgraph()->get_self_sub_node().get_instance_pid("i0");
-        spin = curr_node.setup_sink_pin(s_pid);
-        I(curr_node.get_type_op() == SubGraph_Op);
+        spin = curr_node.setup_sink_pin("i0");
+        I(curr_node.get_type_op() == Cell_op::Sub);
       }
 
       bool connect_inp = rbool.any();
@@ -209,13 +210,12 @@ protected:
 
           auto spin = lg->get_graph_output("o0");
           Node_pin dpin;
-          if (last_node.get_type_op() == Sum_Op) {
-            dpin = last_node.setup_driver_pin(0);
+          if (last_node.get_type_op() == Cell_op::Sum) {
+            dpin = last_node.setup_driver_pin("Y");
           } else {
             I(last_node.get_class_lgraph() == lg);
-            auto d_pid = last_node.get_class_lgraph()->get_self_sub_node().get_instance_pid("o0");
-            dpin       = last_node.setup_driver_pin(d_pid);
-            I(last_node.get_type_op() == SubGraph_Op);
+            dpin       = last_node.setup_driver_pin("o0");
+            I(last_node.get_type_op() == Cell_op::Sub);
           }
           spin.connect_driver(dpin);
         }

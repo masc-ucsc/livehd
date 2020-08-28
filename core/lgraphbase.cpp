@@ -1,10 +1,13 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "lgraphbase.hpp"
 
 #include <iostream>
 #include <set>
 
+#include "mmap_map.hpp"
+#include "node.hpp"
+#include "node_pin.hpp"
+#include "lgraphbase.hpp"
 #include "attribute.hpp"
 #include "graph_library.hpp"
 #include "iassert.hpp"
@@ -212,8 +215,6 @@ void LGraph_Base::print_stats() const {
   }
 
   bytes += node_internal.size() * sizeof(Node_internal);
-  // bytes += node_type_op.size() * sizeof(Node_Type_Op);
-  // bytes += node_delay.size()    * sizeof(Node_Delay);
   auto n_edges = n_short_edges + n_long_edges;
 
   fmt::print("path:{} name:{}\n", path, name);

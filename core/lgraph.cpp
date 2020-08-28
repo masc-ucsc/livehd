@@ -52,7 +52,7 @@ LGraph *LGraph::clone_skeleton(std::string_view extended_name) {
     new_sub->add_pin(old_io_pin.name, old_io_pin.dir, old_io_pin.graph_io_pos);
   }
 
-  auto inp_node = Node(this, Hierarchy_tree::invalid_index(), Node::Hardcoded_input_nid);
+  auto inp_node = Node(this, Hierarchy_tree::invalid_index(), Hardcoded_input_nid);
   for (const auto &pin : inp_node.out_setup_pins()) {
     auto pos = get_self_sub_node().get_graph_pos_from_instance_pid(pin.get_pid());
     I(pin.is_graph_input());
@@ -60,7 +60,7 @@ LGraph *LGraph::clone_skeleton(std::string_view extended_name) {
     I(dpin.get_pid() == pin.get_pid());  // WARNING: pins created in same order should match
   }
 
-  auto out_node = Node(this, Hierarchy_tree::invalid_index(), Node::Hardcoded_output_nid);
+  auto out_node = Node(this, Hierarchy_tree::invalid_index(), Hardcoded_output_nid);
   for (const auto &pin : out_node.out_setup_pins()) {
     auto pos = get_self_sub_node().get_graph_pos_from_instance_pid(pin.get_pid());
     I(pin.is_graph_output());
@@ -126,11 +126,11 @@ void LGraph::clear() {
   auto nid1 = create_node_int();
   auto nid2 = create_node_int();
 
-  I(nid1 == Node::Hardcoded_input_nid);
-  I(nid2 == Node::Hardcoded_output_nid);
+  I(nid1 == Hardcoded_input_nid);
+  I(nid2 == Hardcoded_output_nid);
 
-  set_type(nid1, GraphIO_Op);
-  set_type(nid2, GraphIO_Op);
+  set_type(nid1, Cell_op::GraphIO);
+  set_type(nid2, Cell_op::GraphIO);
 
   htree.clear();
 
@@ -148,19 +148,19 @@ void LGraph::sync() {
 Node_pin LGraph::get_graph_input(std::string_view str) {
   auto io_pid = get_self_sub_node().get_instance_pid(str);
 
-  return Node(this, Hierarchy_tree::root_index(), Node::Hardcoded_input_nid).setup_driver_pin(io_pid);
+  return Node(this, Hierarchy_tree::root_index(), Hardcoded_input_nid).setup_driver_pin_raw(io_pid);
 }
 
 Node_pin LGraph::get_graph_output(std::string_view str) {
   auto io_pid = get_self_sub_node().get_instance_pid(str);
 
-  return Node(this, Hierarchy_tree::root_index(), Node::Hardcoded_output_nid).setup_sink_pin(io_pid);
+  return Node(this, Hierarchy_tree::root_index(), Hardcoded_output_nid).setup_sink_pin_raw(io_pid);
 }
 
 Node_pin LGraph::get_graph_output_driver_pin(std::string_view str) {
   auto io_pid = get_self_sub_node().get_instance_pid(str);
 
-  return Node(this, Hierarchy_tree::root_index(), Node::Hardcoded_output_nid).setup_driver_pin(io_pid);
+  return Node(this, Hierarchy_tree::root_index(), Hardcoded_output_nid).setup_driver_pin_raw(io_pid);
 }
 
 bool LGraph::is_graph_input(std::string_view io_name) const {
@@ -181,7 +181,7 @@ bool LGraph::is_graph_input(std::string_view io_name) const {
   }
   auto compact = ref->get_key(it);
   auto dpin    = Node_pin(const_cast<LGraph *>(this), compact);
-  bool cond    = dpin.get_node().get_nid() == Node::Hardcoded_input_nid;
+  bool cond    = dpin.get_node().get_nid() == Hardcoded_input_nid;
 
   I(cond == alt);
 
@@ -206,7 +206,7 @@ bool LGraph::is_graph_output(std::string_view io_name) const {
   }
   auto compact = ref->get_key(it);
   auto dpin    = Node_pin(const_cast<LGraph *>(this), compact);
-  bool cond    = dpin.get_node().get_nid() == Node::Hardcoded_output_nid;
+  bool cond    = dpin.get_node().get_nid() == Hardcoded_output_nid;
 
   I(cond == alt);
 
@@ -222,13 +222,13 @@ Node_pin LGraph::add_graph_input(std::string_view str, Port_ID pos, uint32_t bit
   } else {
     inst_pid = ref_self_sub_node()->add_pin(str, Sub_node::Direction::Input, pos);
   }
-  I(node_internal[Node::Hardcoded_input_nid].get_type() == GraphIO_Op);
+  I(node_internal[Hardcoded_input_nid].get_type() == Cell_op::GraphIO);
 
-  I(!find_idx_from_pid(Node::Hardcoded_input_nid, inst_pid));  // Just added, so it should not be there
+  I(!find_idx_from_pid(Hardcoded_input_nid, inst_pid));  // Just added, so it should not be there
   Index_ID root_idx = 0;
-  auto     idx      = get_space_output_pin(Node::Hardcoded_input_nid, inst_pid, root_idx);
+  auto     idx      = get_space_output_pin(Hardcoded_input_nid, inst_pid, root_idx);
 
-  // auto idx = setup_idx_from_pid(Node::Hardcoded_input_nid, inst_pid);
+  // auto idx = setup_idx_from_pid(Hardcoded_input_nid, inst_pid);
   setup_driver(idx);  // Just driver, no sink
 
   Node_pin pin(this, this, Hierarchy_tree::root_index(), idx, inst_pid, false);
@@ -248,12 +248,12 @@ Node_pin LGraph::add_graph_output(std::string_view str, Port_ID pos, uint32_t bi
   } else {
     inst_pid = ref_self_sub_node()->add_pin(str, Sub_node::Direction::Output, pos);
   }
-  I(node_internal[Node::Hardcoded_output_nid].get_type() == GraphIO_Op);
+  I(node_internal[Hardcoded_output_nid].get_type() == Cell_op::GraphIO);
 
-  I(!find_idx_from_pid(Node::Hardcoded_output_nid, inst_pid));  // Just added, so it should not be there
+  I(!find_idx_from_pid(Hardcoded_output_nid, inst_pid));  // Just added, so it should not be there
   Index_ID root_idx = 0;
-  auto     idx      = get_space_output_pin(Node::Hardcoded_output_nid, inst_pid, root_idx);
-  // auto idx = setup_idx_from_pid(Node::Hardcoded_output_nid, inst_pid);
+  auto     idx      = get_space_output_pin(Hardcoded_output_nid, inst_pid, root_idx);
+  // auto idx = setup_idx_from_pid(Hardcoded_output_nid, inst_pid);
   setup_sink(idx);
   setup_driver(idx);  // outputs can also drive internal nodes. So both sink/driver
 
@@ -827,13 +827,13 @@ void LGraph::del_node(const Node &node) {
 
   auto op = node_internal[idx2].get_type();
 
-  if (op == Const_Op) {
+  if (op == Cell_op::Const) {
     const_map.erase(node.get_compact_class());
-  } else if (op == GraphIO_Op) {
+  } else if (op == Cell_op::GraphIO) {
     I(false);  // add the case once we have a testing case
-  } else if (op == LUT_Op) {
+  } else if (op == Cell_op::LUT) {
     lut_map.erase(node.get_compact_class());
-  } else if (op == SubGraph_Op) {
+  } else if (op == Cell_op::Sub) {
     subid_map.erase(node.get_compact_class());
   }
 
@@ -1156,50 +1156,54 @@ Node LGraph::create_node(const Node &old_node) {
 
   Node new_node;
 
-  Node_Type_Op op = old_node.get_type_op();
+  Cell_op op = old_node.get_type_op();
 
-  if (op == LUT_Op) {
+  if (op == Cell_op::LUT) {
     new_node = create_node();
     new_node.set_type_lut(old_node.get_type_lut());
-  } else if (op == SubGraph_Op) {
+  } else if (op == Cell_op::Sub) {
     new_node = create_node_sub(old_node.get_type_sub());
-  } else if (op == Const_Op) {
+  } else if (op == Cell_op::Const) {
     new_node = create_node_const(old_node.get_type_const());
     I(new_node.get_driver_pin().get_bits() == old_node.get_driver_pin().get_bits());
   } else {
-    I(op != GraphIO_Op);  // Special case, must use add input/output API
+    I(op != Cell_op::GraphIO);  // Special case, must use add input/output API
     new_node = create_node(op);
   }
 
   for (auto old_dpin : old_node.out_setup_pins()) {
-    auto new_dpin = new_node.setup_driver_pin(old_dpin.get_pid());
+    auto new_dpin = new_node.setup_driver_pin_raw(old_dpin.get_pid());
     new_dpin.set_bits(old_dpin.get_bits());
   }
 
   return new_node;
 }
 
-Node LGraph::create_node(Node_Type_Op op) {
+Node LGraph::create_node(const Cell_op op) {
   Index_ID nid = create_node_int();
   set_type(nid, op);
 
-  I(op != GraphIO_Op);   // Special case, must use add input/output API
-  I(op != SubGraph_Op);  // Do not build by steps. call create_node_sub
+  I(op != Cell_op::GraphIO);   // Special case, must use add input/output API
+  I(op != Cell_op::Sub);  // Do not build by steps. call create_node_sub
 
   return Node(this, Hierarchy_tree::root_index(), nid);
 }
 
-Node LGraph::create_node(Node_Type_Op op, uint32_t bits) {
+Node LGraph::create_node(const Cell_op op, Bits_t bits) {
   auto node = create_node(op);
 
-  node.setup_driver_pin(0).set_bits(bits);
+  I(!Cell::is_multi_driver(op));
+  node.setup_driver_pin().set_bits(bits);
 
   return node;
 }
 
 Node LGraph::create_node_const(const Lconst &value) {
   Index_ID nid = memoize_const_hint[value.hash() % memoize_const_hint.size()];
-  if (nid == 0 || nid >= node_internal.size() || !node_internal[nid].is_valid() || node_internal[nid].get_type() != Const_Op
+  if (nid == 0
+      || nid >= node_internal.size()
+      || !node_internal[nid].is_valid()
+      || node_internal[nid].get_type() != Cell_op::Const
       || get_type_const(nid) != value) {
     nid = create_node_int();
     set_type_const(nid, value);
@@ -1319,6 +1323,30 @@ Fast_edge_iterator LGraph::fast(bool visit_sub) { return Fast_edge_iterator(this
 void LGraph::dump() {
   fmt::print("lgraph name:{} size:{}\n", name, node_internal.size());
 
+  int n6=0;
+  int n8=0;
+  int n12=0;
+  int nlarge=0;
+  for(auto n:fast()) {
+    int last = n.get_nid();
+    fmt::print("nid:{}\n",last);
+    for(auto e:n.out_edges()) {
+      int delta = (int)last-(int)e.sink.get_idx().value;
+      if (delta>-31 && delta<31)
+        n6++;
+      else if (delta>-127 && delta<128)
+        n8++;
+      else if (delta>-1024 && delta<1024)
+        n12++;
+      else
+        nlarge++;
+      fmt::print("  {}\n", (int)last - (int)e.sink.get_idx().value);
+      //last = e.sink.get_idx().value;
+    }
+  }
+  fmt::print("n6:{} n8:{} n12:{} nlarge:{}\n",n6,n8,n12,nlarge);
+  return;
+
   for (const auto &io_pin : get_self_sub_node().get_io_pins()) {
     fmt::print("io {} pos:{} pid:{} {}\n",
                io_pin.name,
@@ -1357,14 +1385,14 @@ void LGraph::dump_down_nodes() {
 
 Node LGraph::get_graph_input_node(bool hier) {
   if (hier)
-    return Node(this, Hierarchy_tree::root_index(), Node::Hardcoded_input_nid);
+    return Node(this, Hierarchy_tree::root_index(), Hardcoded_input_nid);
   else
-    return Node(this, Hierarchy_tree::invalid_index(), Node::Hardcoded_input_nid);
+    return Node(this, Hierarchy_tree::invalid_index(), Hardcoded_input_nid);
 }
 
 Node LGraph::get_graph_output_node(bool hier) {
   if (hier)
-    return Node(this, Hierarchy_tree::root_index(), Node::Hardcoded_output_nid);
+    return Node(this, Hierarchy_tree::root_index(), Hardcoded_output_nid);
   else
-    return Node(this, Hierarchy_tree::invalid_index(), Node::Hardcoded_output_nid);
+    return Node(this, Hierarchy_tree::invalid_index(), Hardcoded_output_nid);
 }

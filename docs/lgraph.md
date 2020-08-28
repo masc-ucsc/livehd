@@ -245,6 +245,8 @@ If an input can not have multiple drivers, a lower case name is used ('a',
 'b'...). E.g: the right shift cell is `Y=a>>b` because only one driver can
 connect to 'a' and 'b'.
 
+Only a few cells (comparators) operate over unsigned only values. Those have a
+letter 'u' added like 'RU' for Right Unsigned.
 
 The section includes description on how to compute the maximum (`max`) and
 minimum (`min`) allowed result range. This is used by the bitwidth inference
@@ -586,17 +588,6 @@ calculation. It is like a concatenating a zero to convert the signed values.
 * `Y = Unsigned(a)` becomes `Y= a` when `a.min>=0`
 * `Y = And(Unsigned(a),a.mask)` becomes `Y= a`
 * `Y = And(Unsigned(a),b)` can become `Y= Unsigned(And(a,b))`
-
-### Pick_op
-
-Pick some bits from the VAL input pin
-Y = VAL[[OFF..(OFF+Y.bits)]]}
-
-#### Other Considerations
-
-The Pick_Op operation performs unsigned right shift even for signed inputs $Y = Pick_Op(VAL, OFF, 0)$ behaves like a $Y=VAL>>OFF$.
-
-Pick selects some bits from the source (VAL). It can be used as an unsigned right shift. The Pick_Op result is always unsigned.
 
 ### ShiftRigt_op
 
