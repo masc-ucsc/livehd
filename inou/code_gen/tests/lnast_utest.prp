@@ -1,18 +1,18 @@
 $a.__bits = 1
 $b.__bits = 1
-$s.__bits = 1
+%s.__bits = 1
 %s = $a & $b
 fun1 = :($a,$b,%o1,%o2):{
   $a.__bits = 2
   $b.__bits = 2
-  $o1.__bits = 2
-  $o2.__bits = 2
+  %o1.__bits = 2
+  %o2.__bits = 2
   %o1 = $a ^ $b
   %o2 = $a & $b
 }
 result = fun1(a = 3, b = 4)
 %s2.__bits = 3
-$s2 = result.o1 + result.o2
+%s2 = result.o1 + result.o2
 x = $a
 if ($a > 1) {
   x = $e
