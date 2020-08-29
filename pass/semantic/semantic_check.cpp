@@ -14,6 +14,8 @@
 #include "pass.hpp"
 #include "prp_lnast.hpp"
 
+using FlatHashMap = absl::flat_hash_map<std::string_view, std::string_view>;
+
 bool Semantic_check::is_primitive_op(const Lnast_ntype node_type) {
   if (node_type.is_logical_op() || node_type.is_unary_op() || node_type.is_nary_op() || node_type.is_assign()
       || node_type.is_dp_assign() || node_type.is_as() || node_type.is_eq() || node_type.is_select() || node_type.is_bit_select()
@@ -43,8 +45,8 @@ bool Semantic_check::is_temp_var(std::string_view node_name) {
   }
 }
 
-bool Semantic_check::in_write_list(std::string_view node_name, std::string_view stmt_name) {
-  for (auto node : write_dict) {
+bool Semantic_check::in_write_list(FlatHashMap dict, std::string_view node_name, std::string_view stmt_name) {
+  for (auto node : dict) {
     if (node.first == node_name && node.second == stmt_name) {
       return true;
     }
@@ -52,8 +54,8 @@ bool Semantic_check::in_write_list(std::string_view node_name, std::string_view 
   return false;
 }
 
-bool Semantic_check::in_read_list(std::string_view node_name, std::string_view stmt_name) {
-  for (auto node : read_dict) {
+bool Semantic_check::in_read_list(FlatHashMap dict, std::string_view node_name, std::string_view stmt_name) {
+  for (auto node : dict) {
     if (node.first == node_name && node.second == stmt_name) {
       return true;
     }
@@ -79,10 +81,10 @@ bool Semantic_check::in_output_vars(std::string_view node_name) {
   return false;
 }
 
-std::string_view Semantic_check::in_lhs_list(Lnast *lnast, int index) {
+std::string_view Semantic_check::in_lhs_list(Lnast* lnast, int index) {
   int lhs_index = 0;
   for (auto name : lhs_list) {
-    lhs_index += 1;
+    lhs_index++;
     if (lhs_index == index) {
       return lnast->get_name(name);
     }
@@ -93,7 +95,7 @@ std::string_view Semantic_check::in_lhs_list(Lnast *lnast, int index) {
 int Semantic_check::in_rhs_list(Lnast *lnast, std::string_view node_name) {
   int index = -1;
   for (auto node : rhs_list) {
-    index += 1;
+    index++;
     for (auto name : node) {
       if (lnast->get_name(name) == node_name) {
         return index;
@@ -104,9 +106,22 @@ int Semantic_check::in_rhs_list(Lnast *lnast, std::string_view node_name) {
 }
 
 bool Semantic_check::in_in_scope_stack(std::string_view node_name) {
+  // Look to find node from previous write_dict (so check every even indexed element)
   int in_scope_stack_size = in_scope_stack.size();
-  for (int i = 0; i < in_scope_stack_size; i++) {
+  for (int i = 0; i % 2 == 0 && i < in_scope_stack_size; i++) {
     for (auto node : in_scope_stack[i]) {
+      if (node.first == node_name) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool Semantic_check::in_out_scope_stack(std::string_view node_name) {
+  int out_of_scope_stack_size = out_of_scope_stack.size();
+  for (int i = 0; i % 2 != 0 && i < out_of_scope_stack_size; i++) {
+    for (auto node : out_of_scope_stack[i]) {
       if (node.first == node_name) {
         return true;
       }
@@ -121,12 +136,11 @@ void Semantic_check::add_to_output_vars(std::string_view node_name) {
   }
 }
 
-void Semantic_check::add_to_write_list(Lnast *lnast, std::string_view node_name, std::string_view stmt_name) {
+void Semantic_check::add_to_write_list(Lnast* lnast, std::string_view node_name, std::string_view stmt_name) {
   if (node_name[0] == '%') {
     add_to_output_vars(node_name);
   }
-  // if (node_name[0] != '%' && !in_write_list(node_name, stmt_name)) {
-  if (!in_write_list(node_name, stmt_name)) {
+  if (!in_write_list(write_dict, node_name, stmt_name)) {
     if (node_name != "null") {
       write_dict[node_name] = stmt_name;
     }
@@ -136,23 +150,39 @@ void Semantic_check::add_to_write_list(Lnast *lnast, std::string_view node_name,
       Pass::error("Temporary Variable Error: {} should be only written to once\n", node_name);
     }
   }
-}
-
-void Semantic_check::add_to_read_list(std::string_view node_name, std::string_view stmt_name) {
-  if (!in_read_list(node_name, stmt_name)) {
-    read_dict[node_name] = stmt_name;
+  if (!in_write_list(perm_write_dict, node_name, stmt_name)) {
+    if (node_name != "null") {
+      perm_write_dict[node_name] = stmt_name;
+    }
   }
 }
 
-void Semantic_check::add_to_lhs_list(Lnast_nid node_name) {
-  lhs_list.push_back(node_name);
+void Semantic_check::add_to_read_list(std::string_view node_name, std::string_view stmt_name) {
+  if (!in_read_list(read_dict, node_name, stmt_name)) {
+    read_dict[node_name] = stmt_name;
+  }
+  if (!in_read_list(perm_read_dict, node_name, stmt_name)) {
+    perm_read_dict[node_name] = stmt_name;
+  }
 }
 
-void Semantic_check::add_to_rhs_list(std::vector<Lnast_nid> node_name) {
-  rhs_list.push_back(node_name);
+void Semantic_check::print_out_of_scope_vars(Lnast* lnast) {
+  if (out_of_scope_vars.size() != 0) {
+    error_print_lnast_var_warn(lnast, out_of_scope_vars);
+    auto first_entry = out_of_scope_vars.begin();
+    fmt::print(fmt::fg(fmt::color::blue), "Out of Scope Variable Warning");
+    fmt::print(": {}", *first_entry);
+    for (auto node_name : out_of_scope_vars) {
+      if (node_name == *first_entry) {
+        continue;
+      }
+      fmt::print(", {}", node_name);
+    }
+    fmt::print(" is/are not defined in the scope of definition\n");
+  }
 }
 
-void Semantic_check::error_print_lnast_by_name(Lnast *lnast, std::string_view error_name) {
+void Semantic_check::error_print_lnast_by_name(Lnast* lnast, std::string_view error_name) {
   // Print LNAST and indicate error based Node's Text Name
   Prp_lnast converter;
   bool      printed = false;
@@ -175,7 +205,7 @@ void Semantic_check::error_print_lnast_by_name(Lnast *lnast, std::string_view er
   fmt::print("\n");
 }
 
-void Semantic_check::error_print_lnast_by_type(Lnast *lnast, std::string_view error_name) {
+void Semantic_check::error_print_lnast_by_type(Lnast* lnast, std::string_view error_name) {
   // Print LNAST and indicate error based Node's Type
   Prp_lnast converter;
   bool      printed = false;
@@ -198,7 +228,7 @@ void Semantic_check::error_print_lnast_by_type(Lnast *lnast, std::string_view er
   fmt::print("\n");
 }
 
-void Semantic_check::error_print_lnast_var_warn(Lnast *lnast, std::vector<std::string_view> error_names) {
+void Semantic_check::error_print_lnast_var_warn(Lnast* lnast, std::vector<std::string_view> error_names) {
   // Print LNAST and indicate error based a vector of variable warnings
   Prp_lnast converter;
   bool      printed = false;
@@ -231,9 +261,9 @@ void Semantic_check::error_print_lnast_var_warn(Lnast *lnast, std::vector<std::s
   fmt::print("\n");
 }
 
-void Semantic_check::resolve_read_write_lists(Lnast *lnast) {
+void Semantic_check::resolve_read_write_lists(Lnast* lnast) {
   // Check to look for variables that are never read
-  for (auto node_name : read_dict) {
+  for (auto node_name : perm_read_dict) {
     std::string_view read_node_name = node_name.first;
     if (is_temp_var(read_node_name)) {
       continue;
@@ -275,10 +305,10 @@ void Semantic_check::resolve_read_write_lists(Lnast *lnast) {
   }
   // Check to look for variables that are written to but never read
   // Check also to look for output variables are not written to that should be written to
-  for (auto node_name : write_dict) {
+  for (auto node_name : perm_write_dict) {
     // Resolve Write and Read Dicts
-    if (node_name.first[0] != '%' && read_dict.contains(node_name.first)) {
-      write_dict.erase(node_name.first);
+    if (node_name.first[0] != '%' && perm_read_dict.contains(node_name.first)) {
+      perm_write_dict.erase(node_name.first);
     // Make sure that if output variable is declared, it is written to
     } else if (node_name.first[0] == '%') {
       for (auto output_var = output_vars.begin(); output_var != output_vars.end(); *output_var++) {
@@ -287,20 +317,20 @@ void Semantic_check::resolve_read_write_lists(Lnast *lnast) {
           break;
         }
       }
-      write_dict.erase(node_name.first);
+      perm_write_dict.erase(node_name.first);
     }
   }
   // Variable Warning
-  if (write_dict.size() != 0) {
+  if (perm_write_dict.size() != 0) {
     std::vector<std::string_view> error_names;
-    for (auto node_name : write_dict) {
+    for (auto node_name : perm_write_dict) {
       error_names.push_back(node_name.first);
     }
     error_print_lnast_var_warn(lnast, error_names);
-    auto first_entry = write_dict.begin();
+    auto first_entry = perm_write_dict.begin();
     fmt::print(fmt::fg(fmt::color::blue), "Variable Warning");
     fmt::print(": {}", first_entry->first);
-    for (auto node_name : write_dict) {
+    for (auto node_name : perm_write_dict) {
       if (node_name == *first_entry) {
         continue;
       }
@@ -329,7 +359,7 @@ void Semantic_check::resolve_read_write_lists(Lnast *lnast) {
   
 }
 
-void Semantic_check::resolve_lhs_rhs_lists(Lnast *lnast) {
+void Semantic_check::resolve_lhs_rhs_lists(Lnast* lnast) {
   // Check for variables are considered unnecessary causing an inefficient LNAST
   for (auto lhs_node : lhs_list) {
     std::string_view lhs_name = lnast->get_name(lhs_node);
@@ -396,29 +426,15 @@ void Semantic_check::resolve_lhs_rhs_lists(Lnast *lnast) {
   }
 }
 
-void Semantic_check::resolve_out_of_scope(Lnast *lnast) {
-  std::vector<std::string_view> out_of_scope_vars;
+void Semantic_check::resolve_out_of_scope() {
   for (auto entry : read_dict) {
-    if (entry.first != "true" && entry.second != "false" && !in_in_scope_stack(entry.first) && !is_temp_var(entry.first)) {
+    if (entry.first != "true" && entry.second != "false" && !in_in_scope_stack(entry.first) && !in_write_list(write_dict, entry.first, entry.second) && !is_temp_var(entry.first)) {
       out_of_scope_vars.push_back(entry.first);
     }
   }
-  if (out_of_scope_vars.size() != 0) {
-    error_print_lnast_var_warn(lnast, out_of_scope_vars);
-    auto first_entry = out_of_scope_vars.begin();
-    fmt::print(fmt::fg(fmt::color::blue), "Out of Scope Variable Warning");
-    fmt::print(": {}", *first_entry);
-    for (auto node_name : out_of_scope_vars) {
-      if (node_name == *first_entry) {
-        continue;
-      }
-      fmt::print(", {}", node_name);
-    }
-    fmt::print(" is/are not defined in the scope of definition\n");
-  }
 }
 
-void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_opr, const Lnast_ntype node_type,
+void Semantic_check::check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_opr, const Lnast_ntype node_type,
                                          std::string_view stmt_name) {
   if (!lnast->has_single_child(lnidx_opr)) {
 
@@ -446,11 +462,11 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
       if (rhs_type.is_ref()) {
         add_to_read_list(lnast->get_name(rhs), stmt_name);
       }
-      add_to_lhs_list(lhs); 
+      lhs_list.push_back(lhs); 
       if (rhs_type.is_ref()) {
         rhs_args.push_back(rhs);
       }
-      add_to_rhs_list(rhs_args);
+      rhs_list.push_back(rhs_args);
       // N-ary Operations (need to add node_type.is_select())
     } else if (node_type.is_logical_and() || node_type.is_logical_or() || node_type.is_nary_op() || node_type.is_eq()
                || node_type.is_bit_select() || node_type.is_logic_shift_right() || node_type.is_arith_shift_right()
@@ -466,7 +482,7 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
           }
           // Store type 'ref' variables
           add_to_write_list(lnast, lnast->get_name(lnidx_opr_child), stmt_name);
-          add_to_lhs_list(lnidx_opr_child);
+          lhs_list.push_back(lnidx_opr_child); 
           continue;
         } else if (!node_type_child.is_ref() && !node_type_child.is_const()) {
           error_print_lnast_by_name(lnast, lnast->get_name(lnidx_opr_child));
@@ -478,7 +494,7 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
           add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
         }
       }
-      add_to_rhs_list(rhs_args);
+      rhs_list.push_back(rhs_args);
     } else if (node_type.is_tuple()) {
       int num_of_ref    = 0;
       int num_of_assign = 0;
@@ -490,7 +506,7 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
           num_of_ref += 1;
           // Store type 'ref' variables
           add_to_write_list(lnast, lnast->get_name(lnidx_opr_child), stmt_name);
-          add_to_lhs_list(lnidx_opr_child);
+          lhs_list.push_back(lnidx_opr_child); 
           continue;
         }
         if (node_type_child.is_ref()) {
@@ -511,7 +527,7 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
           Pass::error("Tuple Operation Error: Child Node(s) must be Node type 'ref' or 'assign'\n");
         }
       }
-      add_to_rhs_list(rhs_args);
+      rhs_list.push_back(rhs_args);
       // Missing Nodes
       if (num_of_ref == 0) {
         error_print_lnast_by_type(lnast, node_type.to_s());
@@ -525,7 +541,7 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
         if (lnast->get_first_child(lnidx_opr) == lnidx_opr_child) {
           num_of_ref += 1;
           add_to_write_list(lnast, lnast->get_name(lnidx_opr_child), stmt_name);
-          add_to_lhs_list(lnidx_opr_child);
+          lhs_list.push_back(lnidx_opr_child); 
           continue;
         }
         if (node_type_child.is_ref()) {
@@ -539,7 +555,7 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
           Pass::error("Tuple Concatenation Operation Error: Child Node(s) must be Node type 'ref'\n");
         }
       }
-      add_to_rhs_list(rhs_args);
+      rhs_list.push_back(rhs_args);
       // Missing Nodes
       if (num_of_ref != 3) {
         error_print_lnast_by_type(lnast, node_type.to_s());
@@ -575,7 +591,7 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
   }
 }
 
-void Semantic_check::check_tree_struct_ops(Lnast *lnast, const Lnast_nid &lnidx_opr, const Lnast_ntype node_type,
+void Semantic_check::check_tree_struct_ops(Lnast* lnast, const Lnast_nid &lnidx_opr, const Lnast_ntype node_type,
                                            std::string_view stmt_name) {
   in_scope_stack.push_back(write_dict);
   in_scope_stack.push_back(read_dict);
@@ -605,8 +621,8 @@ void Semantic_check::check_tree_struct_ops(Lnast *lnast, const Lnast_nid &lnidx_
   // for (auto name : read_dict) {
   //   fmt::print("{} : {}\n", name.first, name.second);
   // }
-  // fmt::print("\n");
-  resolve_out_of_scope(lnast);
+  fmt::print("\n");
+  resolve_out_of_scope();
   out_of_scope_stack.push_back(write_dict);
   out_of_scope_stack.push_back(read_dict);
   write_dict.clear();
@@ -617,7 +633,7 @@ void Semantic_check::check_tree_struct_ops(Lnast *lnast, const Lnast_nid &lnidx_
   in_scope_stack.pop_back();
 }
 
-void Semantic_check::check_if_op(Lnast *lnast, const Lnast_nid &lnidx_opr, std::string_view stmt_name) {
+void Semantic_check::check_if_op(Lnast* lnast, const Lnast_nid &lnidx_opr, std::string_view stmt_name) {
   int cstmts_count = 0;
   int cond_count   = 0;
   int stmts_count  = 0;
@@ -652,7 +668,7 @@ void Semantic_check::check_if_op(Lnast *lnast, const Lnast_nid &lnidx_opr, std::
   }
 }
 
-void Semantic_check::check_for_op(Lnast *lnast, const Lnast_nid &lnidx_opr, std::string_view stmt_name) {
+void Semantic_check::check_for_op(Lnast* lnast, const Lnast_nid &lnidx_opr, std::string_view stmt_name) {
   bool stmts      = false;
   int  num_of_ref = 0;
   for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
@@ -689,7 +705,7 @@ void Semantic_check::check_for_op(Lnast *lnast, const Lnast_nid &lnidx_opr, std:
   }
 }
 
-void Semantic_check::check_while_op(Lnast *lnast, const Lnast_nid &lnidx_opr, std::string_view stmt_name) {
+void Semantic_check::check_while_op(Lnast* lnast, const Lnast_nid &lnidx_opr, std::string_view stmt_name) {
   bool cond = false;
   bool stmt = false;
   for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
@@ -725,7 +741,7 @@ void Semantic_check::check_while_op(Lnast *lnast, const Lnast_nid &lnidx_opr, st
   }
 }
 
-void Semantic_check::check_func_def(Lnast *lnast, const Lnast_nid &lnidx_opr, std::string_view stmt_name) {
+void Semantic_check::check_func_def(Lnast* lnast, const Lnast_nid &lnidx_opr, std::string_view stmt_name) {
   int  num_of_refs = 0;
   bool cond        = false;
   bool stmts       = false;
@@ -814,7 +830,7 @@ void Semantic_check::check_func_def(Lnast *lnast, const Lnast_nid &lnidx_opr, st
   }
 }
 
-void Semantic_check::check_func_call(Lnast *lnast, const Lnast_nid &lnidx_opr, std::string_view stmt_name) {
+void Semantic_check::check_func_call(Lnast* lnast, const Lnast_nid &lnidx_opr, std::string_view stmt_name) {
   int num_of_refs = 0;
   // Iterate through children of func call node
   for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
@@ -843,7 +859,7 @@ void Semantic_check::check_func_call(Lnast *lnast, const Lnast_nid &lnidx_opr, s
 }
 
 // NOTE: Test does only consider tuple and tuple concat operations
-void Semantic_check::do_check(Lnast *lnast) {
+void Semantic_check::do_check(Lnast* lnast) {
   // Get Lnast Root
   const auto top = lnast->get_root();
   // Get Lnast top statements
@@ -885,7 +901,20 @@ void Semantic_check::do_check(Lnast *lnast) {
   // }
   // fmt::print("\n")
   // Find Errors!
-  resolve_out_of_scope(lnast);
+  resolve_out_of_scope();
+  if (out_of_scope_vars.size() != 0) {
+    error_print_lnast_var_warn(lnast, out_of_scope_vars);
+    auto first_entry = out_of_scope_vars.begin();
+    fmt::print(fmt::fg(fmt::color::blue), "Out of Scope Variable Warning");
+    fmt::print(": {}", *first_entry);
+    for (auto node_name : out_of_scope_vars) {
+      if (node_name == *first_entry) {
+        continue;
+      }
+      fmt::print(", {}", node_name);
+    }
+    fmt::print(" is/are not defined in the scope of definition\n");
+  }
   resolve_read_write_lists(lnast);
   resolve_lhs_rhs_lists(lnast);
   fmt::print("\n");

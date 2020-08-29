@@ -5,47 +5,55 @@
 
 #include "lnast.hpp"
 
+using FlatHashMap = absl::flat_hash_map<std::string_view, std::string_view>;
+using FlatHashSet = absl::flat_hash_set<std::string_view>;
+
 class Semantic_check {
 private:
 protected:
-  absl::flat_hash_map<std::string_view, std::string_view> write_dict;
-  absl::flat_hash_map<std::string_view, std::string_view> read_dict;
+  FlatHashMap write_dict;
+  FlatHashMap read_dict;
 
-  absl::flat_hash_set<std::string_view> inefficient_LNAST;
-  absl::flat_hash_set<std::string_view> output_vars;
-  absl::flat_hash_set<std::string_view> never_read;
+  FlatHashMap perm_write_dict;
+  FlatHashMap perm_read_dict;
+
+
+  FlatHashSet inefficient_LNAST;
+  FlatHashSet output_vars;
+  FlatHashSet never_read;
 
   std::vector<Lnast_nid> lhs_list;
   std::vector<std::vector<Lnast_nid>> rhs_list;
+  std::vector<std::string_view> out_of_scope_vars;
 
-  std::vector<absl::flat_hash_map<std::string_view, std::string_view>> in_scope_stack;
-  std::vector<absl::flat_hash_map<std::string_view, std::string_view>> out_of_scope_stack;
+  std::vector<FlatHashMap> in_scope_stack;
+  std::vector<FlatHashMap> out_of_scope_stack;
 
   bool is_primitive_op(const Lnast_ntype node_type);
   bool is_tree_structs(const Lnast_ntype node_type);
   bool is_temp_var(std::string_view node_name);
-  bool in_write_list(std::string_view node_name, std::string_view stmt_name);
-  bool in_read_list(std::string_view node_name, std::string_view stmt_name);
+  bool in_write_list(FlatHashMap dict, std::string_view node_name, std::string_view stmt_name);
+  bool in_read_list(FlatHashMap dict, std::string_view node_name, std::string_view stmt_name);
   bool in_lhs_list(Lnast_nid node_name);
   bool in_inefficient_LNAST(std::string_view node_name);
   bool in_output_vars(std::string_view node_name);
-  std::string_view in_lhs_list(Lnast *lnast, int index);
-  int in_rhs_list(Lnast *lnast, std::string_view node_name);
+  std::string_view in_lhs_list(Lnast* lnast, int index);
+  int in_rhs_list(Lnast* lnast, std::string_view node_name);
   bool in_in_scope_stack(std::string_view node_name);
+  bool in_out_scope_stack(std::string_view node_name);
 
   void add_to_write_list(Lnast* lnast, std::string_view node_name, std::string_view stmt_name);
   void add_to_read_list(std::string_view node_name, std::string_view stmt_name);
-  void add_to_lhs_list(Lnast_nid node_name);
-  void add_to_rhs_list(std::vector<Lnast_nid> node_name);
-
   void add_to_output_vars(std::string_view node_name);
+
+  void print_out_of_scope_vars(Lnast* lnast);
   void error_print_lnast_by_name(Lnast* lnast, std::string_view error_name);
   void error_print_lnast_by_type(Lnast* lnast, std::string_view error_name);
   void error_print_lnast_var_warn(Lnast* lnast, std::vector<std::string_view> error_names);
 
   void resolve_read_write_lists(Lnast* lnast);
   void resolve_lhs_rhs_lists(Lnast* lnast);
-  void resolve_out_of_scope(Lnast *lnast);
+  void resolve_out_of_scope();
 
   void check_primitive_ops(Lnast* lnast, const Lnast_nid& lnidx_opr, const Lnast_ntype node_type, std::string_view
                            stmt_name);
