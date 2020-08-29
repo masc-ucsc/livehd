@@ -1,5 +1,21 @@
 sum5 = ::{
-  %out = $itup.a + $itup.b + $c
+  // case I: basic
+  // %out = $itup.a + $itup.b + $c
+
+  // case II: intermediate variable for input tuple
+  // tmp = $itup  
+  // %out = tmp.a + tmp.b + $c
+
+  // case III: intermediate variable for both input/output tuple
+  tmp_itup = $itup
+  
+  tmp_otup.o1 = tmp_itup.a + $c
+  tmp_otup.o2 = tmp_itup.b + $c
+  %otup       = tmp_otup
+  %out        = tmp_itup.a + tmp_itup.b
+  
+
+
   // // note: both input and output are tuples 
   // %out     = $itup.a + $itup.b
   // %otup.o1 = $itup.a + $c
