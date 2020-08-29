@@ -6,8 +6,9 @@ typedef decltype(graph::Bi_adjacency_list().insert_vert())                      
 typedef decltype(graph::Bi_adjacency_list().insert_edge(graph::Bi_adjacency_list().insert_vert(),
                                                         graph::Bi_adjacency_list().insert_vert())) edge_t;
 
-typedef decltype(graph::Bi_adjacency_list().vert_map<std::string>())  name_map_t;
-typedef decltype(graph::Bi_adjacency_list().vert_map<unsigned long>())   id_map_t;
+typedef decltype(graph::Bi_adjacency_list().vert_map<std::string>()) name_map_t;
+typedef decltype(graph::Bi_adjacency_list()
+                     .vert_map<unsigned long>()) id_map_t;  // TODO: unused?  might be accidentally depending on debug_names...
 typedef decltype(graph::Bi_adjacency_list().vert_map<double>())       area_map_t;
 typedef decltype(graph::Bi_adjacency_list().edge_map<unsigned int>()) weight_map_t;
 
@@ -22,6 +23,7 @@ public:
   name_map_t               debug_names;
   id_map_t                 ids;
   area_map_t               areas;
+  set_t                    temp_set;
   weight_map_t             weights;
   set_vec_t                sets;
 
@@ -30,6 +32,7 @@ public:
       , debug_names(al.vert_map<std::string>())
       , ids(al.vert_map<unsigned long>())
       , areas(al.vert_map<double>())
+      , temp_set(al.vert_set())
       , weights(al.edge_map<unsigned int>())
       , sets(1, al.vert_set()) {}
 
@@ -38,6 +41,7 @@ public:
       , debug_names(std::move(other.debug_names))
       , ids(std::move(other.ids))
       , areas(std::move(other.areas))
+      , temp_set(std::move(other.temp_set))
       , weights(std::move(other.weights))
       , sets(std::move(other.sets)) {}
 };
