@@ -56,25 +56,31 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
     return triv_sets;
   }
 
-  // if there are an odd number of elements, we need to insert one to make the graph size even.
-  vertex_t temp_vertex = g.null_vert();
-  if (graph_size % 2 == 1) {
-    temp_vertex = g.insert_vert();
+  auto make_temp_vertex = [&graph_size, &info](std::string debug_name, double area, size_t set) -> vertex_t {
+    auto nv = info.al.insert_vert();
 
-    // info.ids[temp_vertex] = max_id + 1; // choose an id that hasn't been used before
-    info.areas[temp_vertex] = 0.0f;
-    info.debug_names[temp_vertex] = "temp_vertex";
+    info.ids[nv] = ++graph_size;
+    info.areas[nv] = area;
+    info.debug_names[nv] = debug_name;
 
-    for (auto other_v : g.verts()) {
-      edge_t temp_edge_t        = g.insert_edge(temp_vertex, other_v);
+    for (auto other_v : info.al.verts()) {
+      edge_t temp_edge_t        = info.al.insert_edge(nv, other_v);
       info.weights[temp_edge_t] = 0;
 
-      temp_edge_t               = g.insert_edge(other_v, temp_vertex);
+      temp_edge_t               = info.al.insert_edge(other_v, nv);
       info.weights[temp_edge_t] = 0;
     }
 
-    sets[cut_set].insert(temp_vertex);
-    graph_size++;
+    info.sets[set].insert(nv);
+    info.temp_set.insert(nv);
+
+    return nv;
+  };
+
+  // if there are an odd number of elements, we need to insert one to make the graph size even.
+  vertex_t temp_even_vertex = g.null_vert();
+  if (graph_size % 2 == 1) {
+    temp_even_vertex = make_temp_vertex(std::string("temp_even"), 0.0, cut_set);
   }
 
   //  The reason why I made vert_set a new variable is because views carry no state of their own,
@@ -90,6 +96,7 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
   sets.push_back(g.vert_set());
 
   // given a vertex, find the set containing that vert, or an invalid set if not found.
+  // TODO: replace with std::optional
   auto find_set = [&](auto v) -> size_t {
     for (size_t i = 0; i < sets.size(); i++) {
       if (sets[i].contains(v)) {
@@ -103,7 +110,7 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
 
   auto vert_set = g.verts() | ranges::view::remove_if([=](auto v) { return !is_valid_set(v); });
 
-  const unsigned int set_size = graph_size / 2;
+  unsigned int set_size = graph_size / 2;
 
   auto is_in_a = [&, new_sets](auto v) -> bool { return find_set(v) == new_sets.first; };
 
@@ -126,6 +133,44 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
       which_set = 2;
     } else {
       which_set = 1;
+    }
+  }
+
+  double init_a_area = 0.0;
+  double init_b_area = 0.0;
+
+  for (auto v : vert_set) {
+    if (is_in_a(v)) {
+      init_a_area += info.areas(v);
+    } else {
+      init_b_area += info.areas(v);
+    }
+  }
+
+  constexpr double max_imb = 2.0 / 3.0;
+  auto area_imb = [](double a1, double a2) -> double {
+    return std::max(a1, a2) / (a1 + a2);
+  };
+
+  if (area_imb(init_a_area, init_b_area) > max_imb) {
+
+    size_t add_area_set = (init_a_area > init_b_area) ? new_sets.second : new_sets.first;
+    size_t keep_area_set = (add_area_set == new_sets.first) ? new_sets.second : new_sets.first;
+    double darea = (1.0 / max_imb) * std::max(init_a_area, init_b_area) - init_a_area - init_b_area + 0.01;
+
+    // TODO: re-use an existing vert instead of making a new one, if possible
+    // TODO: be more intelligent about how verts are split up in order to avoid making temp nodes, if possible. (sort?)
+
+    make_temp_vertex("area_adj_add", darea, add_area_set);
+    make_temp_vertex("area_adj_keep", 0.0, keep_area_set);
+
+    set_size += 1;
+  }
+
+  if (dbg_verbose) {
+    std::cout << "\nincoming partition:" << std::endl;
+    for (auto v : vert_set) {
+      fmt::print("{:<30}{} (aka {}), area {}\n", info.debug_names(v), (is_in_a(v) ? "a" : "b"), (is_in_a(v) ? new_sets.first : new_sets.second), info.areas(v));
     }
   }
 
@@ -155,14 +200,11 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
 
     std::vector<vertex_t> av, bv;
     std::vector<int>      cv;
-    std::vector<double> aiv;
+    std::vector<double> aav;
+    std::vector<double> bav;
 
     double a_area = 0.0;
     double b_area = 0.0;
-
-    auto area_imb = [](double a1, double a2) -> double {
-      return std::max(a1, a2) / (a1 + a2);
-    };
 
     for (auto v : vert_set) {
       if (is_in_a(v)) {
@@ -173,7 +215,8 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
     }
 
     // if we started out with an imbalance in area, don't bother trying to make it balanced.
-    bool already_imbalanced = area_imb(a_area, b_area) > 2.0 / 3.0;
+    bool prev_imbalanced = area_imb(a_area, b_area) > max_imb;
+    I(!prev_imbalanced);
 
     // TODO: I made an assumption later on that the initial split respects the area rule, which isn't always the case.
     // find some way to make the initial split respect area and be even...?
@@ -215,12 +258,11 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
       av.push_back(a_max);
       bv.push_back(b_max);
 
-      double new_a_area = a_area - info.areas(a_max) + info.areas(b_max);
-      double new_b_area = b_area - info.areas(b_max) + info.areas(a_max);
+      double delta_a_area = -info.areas(a_max) + info.areas(b_max);
+      double delta_b_area = -info.areas(b_max) + info.areas(a_max);
 
-      double area_imb = std::max(new_a_area, new_b_area) / (new_a_area + new_b_area);
-
-      aiv.push_back(area_imb);
+      aav.push_back(delta_a_area);
+      bav.push_back(delta_b_area);
 
       cmap[a_max].active = false;
       cmap[b_max].active = false;
@@ -267,10 +309,20 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
     best_decrease         = 0;
     size_t decrease_index = 0;
 
+    double total_a_area = a_area;
+    double total_b_area = b_area;
+
+    std::vector<bool> swap_vec(cv.size(), false);
+
     for (size_t k = 0; k < cv.size(); k++) {
       int trial_decrease = 0;
       for (size_t i = 0; i < k; i++) {
-        trial_decrease += (aiv[i] <= 2.0 / 3.0 || already_imbalanced) ? cv[i] : 0;
+        if (area_imb(total_a_area + aav[i], total_b_area + bav[i]) <= max_imb || prev_imbalanced) {
+          trial_decrease += cv[i];
+          total_a_area += aav[i];
+          total_b_area += bav[i];
+          swap_vec[i] = true;
+        }
       }
       if (trial_decrease > best_decrease) {
         best_decrease  = trial_decrease;
@@ -285,7 +337,7 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
           fmt::print("  swapping {} with {}.\n", info.debug_names(av[i]), info.debug_names(bv[i]));
         }
 
-        if (aiv[i] <= 2.0 / 3.0 || already_imbalanced) {
+        if (swap_vec[i] || prev_imbalanced) {
           sets[new_sets.first].erase(av[i]);
           sets[new_sets.second].insert(av[i]);
 
@@ -322,14 +374,14 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
     double final_imb = std::max(final_a_area, final_b_area) / (final_a_area + final_b_area);
     //I(final_imb > 0.0 && final_imb <= 2.0 / 3.0);
 
-    fmt::print("a area: {}, b area: {}, imb: {:.3f}.\n", final_a_area, final_b_area, final_imb);
+    fmt::print("a area: {}, b area: {}, imb: {}.\n", final_a_area, final_b_area, final_imb);
   }
 
   // if we inserted a temporary vertex, remove it from the list of active sets and erase it from the graph
-  if (temp_vertex != g.null_vert()) {
-    int loc = find_set(temp_vertex);
-    sets[loc].erase(temp_vertex);
-    g.erase_vert(temp_vertex);
+  if (temp_even_vertex != g.null_vert()) {
+    int loc = find_set(temp_even_vertex);
+    sets[loc].erase(temp_even_vertex);
+    g.erase_vert(temp_even_vertex);
   }
 
   return new_sets;
@@ -371,7 +423,14 @@ phier Hier_tree::make_hier_node(const int set) {
 }
 
 phier Hier_tree::discover_hierarchy(Graph_info& info, int start_set, unsigned int num_components) {
-  if (info.sets[start_set].size() <= num_components) {
+  unsigned int set_size = 0;
+  for (auto se : info.sets[start_set]) { // don't include temp elements in the set count
+    if (!info.temp_set.contains(se)) {
+      set_size++;
+    }
+  }
+  
+  if (set_size <= num_components) {
     // set contains less than the minimum number of components, so treat it as a leaf node
     return make_hier_node(start_set);
   }
