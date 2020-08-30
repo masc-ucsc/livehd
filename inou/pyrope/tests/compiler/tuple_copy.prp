@@ -3,8 +3,9 @@ foo.b = 3
 bar.c = 6
 
 bar = foo
+baz = bar
 
-%out = bar.a + bar.b
+%out = baz.a + baz.b
 
 //%out2 = bar.c // compile error
 

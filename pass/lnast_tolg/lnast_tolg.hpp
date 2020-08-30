@@ -93,8 +93,7 @@ protected:
   static bool  is_tup_get_target         (const Node &tup_add, uint32_t         tup_get_target);
   static void  collect_node_for_deleting (const Node &node, absl::flat_hash_set<Node> &to_be_deleted);
   void         create_hier_inp_tup_add   (LGraph *dfg, const Lnast_nid &c1_tg);
-  void         create_hier_out_tup_get   (LGraph *dfg, const Lnast_nid &c0_ta);
-
+  void         dp_create_hier_outputs    (LGraph *dfg, Node &cur_node, std::string hier_name, absl::flat_hash_set<Node::Compact> &memo);
 
   // attribute related
   bool check_new_var_chain (const Lnast_nid &lnidx_opr);

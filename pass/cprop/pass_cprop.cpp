@@ -730,7 +730,7 @@ void Pass_cprop::process_tuple_add(Node &node, LGraph *lg) {
   auto parent_node = parent_dpin.get_node();
 
   bool                     parent_could_be_deleted = false;
-  std::shared_ptr<Lgtuple> ctup;
+  std::shared_ptr<Lgtuple> ctup; //current tuple
 
   auto ptup_it = node2tuple.find(parent_node.get_compact());
   if (ptup_it == node2tuple.end()) {
@@ -840,7 +840,7 @@ void Pass_cprop::merge_to_tuple(std::shared_ptr<Lgtuple> ctup, Node &node, Node 
         return;  // tuple assignment happened here, the dummy tup_add inherit the parent lgtuple and represent the new variable
       }
 
-      if (val_dpin.get_node().get_type_op() == TupAdd_Op) {  // hier-tuple
+      if (val_dpin.get_node().get_type_op() == TupAdd_Op) {// tuple concatenation
         auto it2 = node2tuple.find(val_dpin.get_node().get_compact());
         I(it2 != node2tuple.end());
         bool ok = ctup->add(it2->second);
@@ -853,8 +853,8 @@ void Pass_cprop::merge_to_tuple(std::shared_ptr<Lgtuple> ctup, Node &node, Node 
       } else {
         ctup->add(val_dpin);
       }
-    } else {
-      bool ok = ctup->set(key_pos, key_name, val_dpin);
+    } else { 
+      bool ok = ctup->set(key_pos, key_name, val_dpin); //it doesn't matter val_dpin is TA or not, hier-tuple is included here
       if (!ok)
         compile_error = true;
     }

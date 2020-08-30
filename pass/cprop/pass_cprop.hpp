@@ -35,7 +35,6 @@ protected:
   // Tuple methods
   void merge_to_tuple(std::shared_ptr<Lgtuple> tup, Node &node, Node &parent_node, Node_pin &parent_dpin, int key_pos,
                       std::string_view key_name, Node_pin &val_dpin, bool is_attr_set, int attr_bits);
-  std::tuple<std::string_view, int> get_tuple_name_key(Node &node);
   void                              process_tuple_add(Node &node, LGraph *lg);
   bool                              process_tuple_get(Node &node, LGraph *lg);
   bool                           process_tuple_get_bk(Node &node);
@@ -45,5 +44,6 @@ protected:
 public:
   Pass_cprop(const Eprp_var &var);
 
+  static std::tuple<std::string_view, int> get_tuple_name_key(Node &node);
   static void setup();
 };
