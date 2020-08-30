@@ -82,6 +82,8 @@ private:
 
   double find_area(phier node) const;
 
+  int find_tree_size(phier node) const;
+
   void dump_node(const phier& node) const;
 
   phier collapse(phier node, double threshold_area);

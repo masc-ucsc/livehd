@@ -117,13 +117,15 @@ void Pass_fplan::make_graph(Eprp_var& var) {
     }
   }
 
+#ifdef FPLAN_DBG_VERBOSE
   using namespace graph::attributes;
   std::cout << gi.al.dot_format("weight"_of_edge = gi.weights,
                                 "name"_of_vert   = gi.debug_names,
                                 "area"_of_vert   = gi.areas,
                                 "id"_of_vert     = gi.ids)
             << std::endl;
-
+#endif
+  
   // if the graph is not fully connected, ker-lin fails to work.
   for (const auto& v : gi.al.verts()) {
     for (const auto& ov : gi.al.verts()) {
@@ -156,7 +158,7 @@ void Pass_fplan::pass(Eprp_var& var) {
   p.make_graph(var);
 
   Hier_tree h(std::move(p.gi), 1);
-  h.collapse(0.0);
+  h.collapse(60.0);
   h.discover_regularity();
 
   h.dump();
