@@ -5,11 +5,12 @@
 //#define NDEBUG
 //#endif
 #include <assert.h>
+#include <string_view>
 
 //-------------------------------------------------------------------------------------
 //Constructor:
 //
-Code_gen::Code_gen(Inou_code_gen::Code_gen_type code_gen_type, std::shared_ptr<Lnast> _lnast, std::string_view _path) : lnast(std::move(_lnast)), path(_path) {
+Code_gen::Code_gen(Inou_code_gen::Code_gen_type code_gen_type, std::shared_ptr<Lnast> _lnast, std::string_view _path, std::string_view _odir) : lnast(std::move(_lnast)), path(_path), odir(_odir) {
   if (code_gen_type == Inou_code_gen::Code_gen_type::Type_prp) {
     lnast_to = std::make_unique<Prp_parser>();
   } else if (code_gen_type == Inou_code_gen::Code_gen_type::Type_cpp) {
@@ -66,6 +67,22 @@ void Code_gen::generate(){
   //:main code segment
   //fmt::print("{}\n", buffer_to_print);
   fmt::print("<<EOF\n");
+
+  //for odir part:
+  auto f2   = lnast->get_top_module_name();
+  auto file = absl::StrCat(odir, "/", f2, ".", lang_type);
+  int  fd   = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
+  if (fd < 0) {
+    Pass::error("inou.code_gen unable to create {}", file);
+    return;
+  }
+  size_t sz = write(fd, buffer_to_print.c_str(), buffer_to_print.size());
+  if (sz != buffer_to_print.size()) {
+    Pass::error("inou.code_gen unexpected write missmatch");
+    return;
+  }
+  close(fd);
+
 }
 
 //-------------------------------------------------------------------------------------

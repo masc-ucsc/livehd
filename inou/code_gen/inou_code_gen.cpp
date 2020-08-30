@@ -41,7 +41,7 @@ void Inou_code_gen::setup() {
 
 void Inou_code_gen::to_xxx(Code_gen_type code_gen_type, std::shared_ptr<Lnast> lnast) {
   std::unique_ptr<Code_gen> lnast_to;
-  lnast_to = std::make_unique<Code_gen>(code_gen_type, std::move(lnast), path);
+  lnast_to = std::make_unique<Code_gen>(code_gen_type, std::move(lnast), path, odir);
 
   lnast_to->generate();
 }

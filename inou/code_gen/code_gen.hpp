@@ -12,6 +12,7 @@ protected:
   //Lnast *top;
   std::shared_ptr<Lnast> lnast;
   std::string_view       path;
+  std::string_view       odir;
   std::string            buffer_to_print = "";
   std::map<std::string_view, std::string> ref_map;
   //enum class Code_gen_type { Type_verilog, Type_prp, Type_cfg, Type_cpp };
@@ -20,7 +21,7 @@ private:
   int indendation = 0;
   std::string indent();
 public:
-  Code_gen(Inou_code_gen::Code_gen_type code_gen_type, std::shared_ptr<Lnast>_lnast, std::string_view _path);
+  Code_gen(Inou_code_gen::Code_gen_type code_gen_type, std::shared_ptr<Lnast>_lnast, std::string_view _path, std::string_view _odir);
   //virtual void generate() = 0;
   void generate();
   void do_stmts(const mmap_lib::Tree_index& stmt_node_index);
