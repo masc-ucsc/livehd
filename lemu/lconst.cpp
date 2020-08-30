@@ -371,7 +371,7 @@ Lconst Lconst::add_op(const Lconst &o) const {
     return Lconst(qmarks);
   }
 
-  Number res_num = get_num(max_bits) + o.get_num(max_bits);
+  Number res_num = get_num() + o.get_num();
 
   Bits_t res_bits=0u;
   if (res_num<0)
@@ -402,7 +402,7 @@ Lconst Lconst::sub_op(const Lconst &o) const {
     return Lconst(qmarks);
   }
 
-  Number res_num = get_num(max_bits) - o.get_num(max_bits);
+  Number res_num = get_num() - o.get_num();
 
   Bits_t res_bits=0u;
   if (res_num<0)
@@ -472,7 +472,7 @@ Lconst Lconst::or_op(const Lconst &o) const {
     return Lconst(qmarks);
   }
 
-  Number res_num  = get_num(res_bits) | o.get_num(res_bits);
+  Number res_num  = get_num() | o.get_num();
 
   auto res_explicit_str  = explicit_str && o.explicit_str;
   auto res_explicit_sign = explicit_sign && o.explicit_sign && sign == o.sign;
@@ -515,7 +515,7 @@ Lconst Lconst::and_op(const Lconst &o) const {
     qmarks.append(res_bits, '?');
     return Lconst(qmarks);
   }
-  Number res_num  = get_num(res_bits) & o.get_num(res_bits);
+  Number res_num  = get_num() & o.get_num();
 
   auto res_explicit_str  = explicit_str && o.explicit_str;
   auto res_explicit_sign = explicit_sign && o.explicit_sign && sign == o.sign;
@@ -607,7 +607,7 @@ std::string Lconst::to_pyrope() const {
     return str2;
   }
 
-  const auto v = get_num(bits);
+  const auto v = get_num();
   std::stringstream ss;
 
   bool print_hexa = explicit_bits || v > 6;
@@ -680,7 +680,7 @@ std::string Lconst::to_yosys() const {
     return to_string();
   }
 
-  const auto v = get_num(bits);
+  const auto v = get_num();
   std::string str;
   for (int i = bits-1; i >= 0; --i) {
     str.append(1, bit_test(v, i) ? '1' : '0');
@@ -705,7 +705,7 @@ std::string Lconst::to_verilog() const {
 
   std::stringstream ss;
   ss << std::hex;
-  const auto v = get_num(bits);
+  const auto v = get_num();
   if (v<0)
     ss << -v;
   else

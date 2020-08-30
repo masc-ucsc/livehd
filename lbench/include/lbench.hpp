@@ -191,6 +191,7 @@ public:
       else
         m = s.mem - prev_mem;
 
+#if 0
       std::cerr << s.name << " secs=" << t.count();
       if (s.ncycles) {
         std::cerr
@@ -199,6 +200,7 @@ public:
           << ":L2 MPKI=" << ((double)s.nmem_misses*1000) / (s.ninst+1);
       }
       std::cerr << m << ":KB delta " << s.mem << "KB abs\n";
+#endif
 
       prev     = s.tp;
       prev_mem = s.mem;
@@ -216,7 +218,7 @@ public:
       << ":L2 MPKI=" << ((double)stats[3]*1000) / (stats[1]+1)
       << "\n";
 
-    std::cerr << sstr.str();
+    // std::cerr << sstr.str();
 
     int tfd = ::open("lbench.trace",O_CREAT|O_RDWR|O_APPEND, 0644);
 
