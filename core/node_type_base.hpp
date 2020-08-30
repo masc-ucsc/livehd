@@ -684,7 +684,7 @@ public:
   };
 };
 
-// TN = tuple name, KN = key name, KP = key position ,V = value
+// TN = tuple name, KN = key name, KP = key position, V = value
 class Node_Type_TupAdd : public Node_Type {
 public:
   Node_Type_TupAdd() : Node_Type("tup_add", TupAdd_Op, false) {

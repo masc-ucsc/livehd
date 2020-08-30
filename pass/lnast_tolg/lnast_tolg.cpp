@@ -3,6 +3,7 @@
 
 #include "lnast_tolg.hpp"
 #include "pass.hpp"
+#include "pass_cprop.hpp"
 
 Lnast_tolg::Lnast_tolg(const Eprp_var &_var, std::string_view _module_name) :
   Pass("pass.lnast_tolg", _var), eprp_var(_var), module_name(_module_name) {
@@ -335,7 +336,7 @@ void Lnast_tolg::process_ast_dp_assign_op(LGraph *dfg, const Lnast_nid &lnidx_dp
   auto c0_dp       = lnast->get_first_child(lnidx_dp_assign);
   auto c1_dp       = lnast->get_sibling_next(c0_dp);
   auto c0_dp_name  = lnast->get_sname(c0_dp);  // ssa name
-  auto attr_vname  = "__dp_assign";  // no-ssa name
+  auto attr_vname  = "__dp_assign";            // no-ssa name
   auto c0_dp_vname = lnast->get_vname(c0_dp);  // no-ssa name
 
   auto vn_dpin = setup_ref_node_dpin(dfg, c1_dp);
@@ -557,31 +558,7 @@ void Lnast_tolg::process_ast_tuple_get_op(LGraph *dfg, const Lnast_nid &lnidx_tg
   }
 }
 
-void Lnast_tolg::create_hier_out_tup_get(LGraph *dfg, const Lnast_nid &c0_ta) {
-  auto c1_ta       = lnast->get_sibling_next(c0_ta);
-  auto c1_ta_sname = lnast->get_sname(c1_ta);
-  auto c1_ta_vname = lnast->get_vname(c1_ta);
-  auto tup_name    = lnast->get_sname(c0_ta);
-  
-  // create new graph output
-  auto new_out_name = absl::StrCat(tup_name.substr(1, tup_name.size()-3), "." ,c1_ta_vname);
-  auto out_spin     = dfg->add_graph_output(new_out_name, Port_invalid, 0);
 
-  I(dfg->is_graph_output(new_out_name));
-
-  // (1) construct TG (2) connect TG to this output
-  auto tup_get = dfg->create_node(TupGet_Op);
-  auto tn_spin = tup_get.setup_sink_pin("TN"); // tuple name
-  auto kn_spin = tup_get.setup_sink_pin("KN"); // key name
-
-  auto tn_dpin = setup_tuple_ref(dfg, tup_name);
-  tn_dpin.connect_sink(tn_spin);
-
-  auto kn_dpin = setup_key_dpin(dfg, c1_ta_sname);
-  kn_dpin.connect_sink(kn_spin);
-
-  tup_get.setup_driver_pin().connect_sink(out_spin);
-}
 
 void Lnast_tolg::create_hier_inp_tup_add(LGraph *dfg, const Lnast_nid &c1_tg) {
   auto c2_tg       = lnast->get_sibling_next(c1_tg);
@@ -653,11 +630,6 @@ void Lnast_tolg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnidx_ta
       ta_map[i]  = tup_add;
       ta_name[i] = tup_name;
       i++ ;
-
-      // create tup_get to handle hier_tuple_output
-      if (is_output(tup_name)) {
-        create_hier_out_tup_get(dfg, c0_ta);
-      }
 
       continue;
     }
@@ -944,8 +916,8 @@ Node_pin Lnast_tolg::setup_node_assign_and_lhs(LGraph *dfg, const Lnast_nid &lni
 // for both target and operands, except the new io, reg, and const, the node and its dpin
 // should already be in the table as the operand comes from existing operator output
 Node_pin Lnast_tolg::setup_ref_node_dpin(LGraph *dfg, const Lnast_nid &lnidx_opd, 
-                                                     bool from_phi,     bool from_concat, 
-                                                     bool from_tupstrc, bool from_assign) {
+                                                      bool from_phi,     bool from_concat, 
+                                                      bool from_tupstrc, bool from_assign) {
   auto name  = lnast->get_sname(lnidx_opd); //name = ssa_name
   auto vname = lnast->get_vname(lnidx_opd);
   auto subs  = lnast->get_subs(lnidx_opd);
@@ -1378,10 +1350,68 @@ void Lnast_tolg::setup_dpin_ssa(Node_pin &dpin, std::string_view var_name, uint1
 }
 
 
+void Lnast_tolg::dp_create_hier_outputs(LGraph *dfg, Node &cur_node, std::string hier_name, absl::flat_hash_set<Node::Compact> &memo) {
+  auto cur_type = cur_node.get_type_op();
+  if (cur_type == TupRef_Op || cur_type != TupAdd_Op) 
+    return;
+  
+  if (memo.find(cur_node.get_compact())!= memo.end())
+    return;
+
+  memo.insert(cur_node.get_compact());
+
+  auto parent_dpin = cur_node.get_sink_pin(0).get_driver_pin();
+  auto parent_node = parent_dpin.get_node();
+
+  if (!cur_node.has_sink_pin_connected(1) && !cur_node.has_sink_pin_connected(2)) {
+    dp_create_hier_outputs(dfg, parent_node, hier_name, memo);
+    return;
+  } 
+
+  auto [key_name, key_pos] = Pass_cprop::get_tuple_name_key(cur_node);
+  std::string new_hier_name;
+  if (!key_name.empty()) {
+    new_hier_name = absl::StrCat(hier_name, ".", key_name.substr(0, key_name.size()-2));  
+  } else {
+    new_hier_name = absl::StrCat(hier_name, ".", key_pos);  
+  }
+  fmt::print("cur_node:{}, new_hier_name:{}\n", cur_node.debug_name(), new_hier_name);
+
+  Node_pin val_dpin;
+  if (cur_node.has_sink_pin_connected(3))
+    val_dpin = cur_node.get_sink_pin(3).get_driver_pin();
+
+  auto val_dnode      = val_dpin.get_node();
+  auto val_dnode_type = val_dnode.get_type_op();
+  if (val_dnode_type == TupAdd_Op) {
+    dp_create_hier_outputs(dfg, val_dnode,   new_hier_name, memo);
+    dp_create_hier_outputs(dfg, parent_node, hier_name, memo);
+  } else {
+    //Todo: check output existence
+    auto out_spin = dfg->add_graph_output(new_hier_name, Port_invalid, 0);
+    val_dpin.connect(out_spin);
+  } 
+  dp_create_hier_outputs(dfg, parent_node, hier_name, memo);
+  return;
+}
+
+
+
 void Lnast_tolg::setup_lgraph_outputs_and_final_var_name(LGraph *dfg) {
   absl::flat_hash_map<std::string_view, Node_pin> vname2dpin; //Pyrope variable -> dpin with the largest ssa var subscription
   for (auto node: dfg->forward()) {
     auto dpin = node.get_driver_pin(0);
+
+    //construct hier-tuple-outputs by backward Dynamic Programming DFS traversal (memoization)
+    if (node.get_type_op() == TupAdd_Op && !node.has_outputs() && is_output(dpin.get_name())) {
+      auto dpin_name = dpin.get_name();
+      auto hier_name_base = std::string(dpin_name.substr(1, dpin_name.size()-3));
+      absl::flat_hash_set<Node::Compact> memo;
+      dp_create_hier_outputs(dfg, node, hier_name_base, memo);     
+    }
+
+
+    // collect vname table info
     if (dpin.has_ssa() && dpin.has_prp_vname()) {
       auto vname = dpin.get_prp_vname();
       auto subs  = dpin.ref_ssa()->get_subs();
@@ -1395,6 +1425,7 @@ void Lnast_tolg::setup_lgraph_outputs_and_final_var_name(LGraph *dfg) {
       if (subs >= vname2dpin[vname].get_ssa().get_subs())
         vname2dpin[vname] = dpin;
     }
+
   }
 
   //based on the table, create graph outputs or set the final variable name

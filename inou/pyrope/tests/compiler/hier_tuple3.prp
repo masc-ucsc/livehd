@@ -1,5 +1,5 @@
-foo = (a = (1,2), b = (3,4))
-%out = foo.a.0 + foo.b.1 // 5
+foo = (foo = (foo = 1,2), b = (3,4))
+%out = foo.foo.foo + foo.b.1 // 5
 
 // bar = (a = (10,20))
 // bar.a = bar.a ++ 30
