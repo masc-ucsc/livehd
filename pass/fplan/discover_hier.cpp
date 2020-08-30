@@ -68,7 +68,6 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
     }
 
     info.sets[set].insert(nv);
-    info.temp_set.insert(nv);
 
     return nv;
   };
@@ -153,11 +152,16 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
 
     // TODO: re-use an existing vert instead of making a new one, if possible
     // TODO: be more intelligent about how verts are split up in order to avoid making temp nodes, if possible. (sort?)
+    // adding random areas to nodes technically works, but probably generates floorplans with tons of weird spaces in them that
+    // aren't required.
 
-    make_temp_vertex("area_adj_add", darea, add_area_set);
-    make_temp_vertex("area_adj_keep", 0.0, keep_area_set);
-
-    set_size += 1;
+    for (auto v : sets[add_area_set]) {
+#ifdef FPLAN_DBG_VERBOSE
+      fmt::print("adding area {} to node {:<30}.\n", darea, info.debug_names[v]);
+#endif
+      info.areas[v] += darea;
+      break;
+    }
   }
 
 #ifdef FPLAN_DBG_VERBOSE
@@ -390,14 +394,7 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
 }
 
 phier Hier_tree::discover_hierarchy(Graph_info& info, int start_set, unsigned int num_components) {
-  unsigned int set_size = 0;
-  for (auto se : info.sets[start_set]) {  // don't include temp elements in the set count
-    if (!info.temp_set.contains(se)) {
-      set_size++;
-    }
-  }
-
-  if (set_size <= num_components) {
+  if (info.sets[start_set].size() <= num_components) {
     // set contains less than the minimum number of components, so treat it as a leaf node
     return make_hier_node(start_set);
   }

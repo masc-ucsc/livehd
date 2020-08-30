@@ -29,13 +29,21 @@ double Hier_tree::find_area(phier node) const {
   return find_area(node->children[0]) + find_area(node->children[1]);
 }
 
+int Hier_tree::find_tree_size(phier node) const {
+  if (node->is_leaf()) {
+    return 1;
+  }
+
+  return find_tree_size(node->children[0]) + find_tree_size(node->children[1]) + 1;
+}
+
 void Hier_tree::dump() const {
-  std::cout << std::endl << "printing uncollapsed hierarchy:" << std::endl;
+  fmt::print("\nprinting uncollapsed hierarchy ({} nodes):\n", find_tree_size(root));
   dump_node(root);
   std::cout << std::endl;
 
   for (size_t i = 0; i < collapsed_hiers.size(); i++) {
-    std::cout << "printing collapsed hierarchy " << i << ":" << std::endl;
+    fmt::print("printing collapsed hierarchy {} ({} nodes):\n", i, find_tree_size(collapsed_hiers[i]));
     dump_node(collapsed_hiers[i]);
     std::cout << std::endl;
   }
