@@ -12,6 +12,8 @@
 
 #include "graph_info.hpp"
 
+#define FPLAN_DBG_VERBOSE
+
 // a struct representing a node in a hier_tree
 struct Hier_node {
   std::string name;
@@ -80,7 +82,7 @@ private:
 
   double find_area(phier node) const;
 
-  void print_node(const phier& node) const;
+  void dump_node(const phier& node) const;
 
   phier collapse(phier node, double threshold_area);
 
