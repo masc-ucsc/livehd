@@ -4,50 +4,66 @@ with traditional Makefiles is that it checks to make sure that dependences are n
 lost and the builds are reproducible and hermetic. This document explains how
 to use Bazel in the LGraph project.
 
+Build targets are referred to using the syntax `//<relative path to BUILD file>:<executable>`, where
+`//` is the path of the root livehd directory.
+
+To build the LiveHD shell and supporting libraries, the target would be `//main:all`.
+
 ## List bazel targets starting from top directory
-
-    bazel query '...'
-
+```
+$ bazel query <target>
+```
 ## List bazel targets starting from any directory
-
-    bazel query 'inou/...'
-
+```
+$ bazel query <target>
+```
 ## List files needed for a given target
-
-   bazel query "deps(//inou/lefdef:lglefdef)"
-
+```
+$ bazel query "deps(<target>)"
+```
 ## List all the passes that use core (those should be listed at main/BUILD deps)
-
-   bazel query "rdeps(//pass/..., //core:all)" | grep pass_
-
+```
+$ bazel query "rdeps(//pass/..., //core:all)" | grep pass_
+```
 ## Release vs fastbuild (default) vs debug
+ - Fast build: no optimization, minimal debugging information (no local variable information), assertions turned on (default)
+```    
+$ bazel build <target>
+```
+ - Debug build: some optimization, full debugging information, assertions turned on
+```
+$ bazel build -c dbg <target>
+```
+ - Release build: full optimization, no debug symbols, assertions turned off
+```
+$ bazel build -c opt <target>
+```
 
-    # Debug
-    bazel build -c dbg //inou/json:inou_json
+## Clear out cache (not needed in most cases)
 
-    # Release
-    bazel build -c opt //inou/json:inou_json
-
-    # Fast Build with assertions
-    bazel build       //inou/json:inou_json
+This command is useful for benchmarking build time, and when system parameters change (the compiler gets upgraded, for example)
+```
+$ bazel clean --expunge
+```
 
 ## See the commands executed
-
-    bazel build -s //main:all
+```
+$ bazel build -s //main:all
+```
 
 ## To run SHORT tests
 
 The SHORT tests should have less than 15 minutes execution time for each
 individual test. Those tests are used to gate commits to the main repo,
 and to generate coverage reports.
-
-    bazel test //...
-
+```
+$ bazel test <target>
+```
 To debug errors in the testing environment, you may want to keep the sandbox
 files to check what may be going wrong. Use:
-
-    bazel test //... --sandbox_debug --verbose_failures --keep_state_after_build
-
+```
+$ bazel test <target> --sandbox_debug --verbose_failures --keep_state_after_build
+```
 ## To run FIXME tests
 
 Many times, we have new tests that make the regression fail. We use "fixme" if
@@ -62,98 +78,91 @@ Those tests are marked with tags "fixme" in the BUILD. E.g:
         srcs = ["tests/pyrope_test.sh"],
 
 To run all the fixme tests
-
-    bazel test --test_tag_filters "fixme" //...
-
+```
+$ bazel test --test_tag_filters "fixme" <target>
+```
 To list all the fixme tests (the goal is to have zero)
-
-    bazel query 'attr(tags, fixme, tests(//...))'
-
+```
+$ bazel query 'attr(tags, fixme, tests(<target>))'
+```
 ## To run LONG tests
 
 In addition to the short tests, there are sets of long tests that are run frequently
 but not before every push to main line. The reason is that those are multi-hour
 tests.
-
-    bazel test --test_tag_filters "long1" //...
-
+```
+$ bazel test --test_tag_filters "long1" <target>
+```
 There are up to 8 long tests categories (long1, long2, long3...). Each of those
 tests groups should last less than 4 hours when running in a dual core machine
 (travis or azure).
 
 To list the tests under each tag. E.g., to list all the tests with long1 tag.
-
-    bazel query 'attr(tags, long1, tests(//...))'
-
+```
+$ bazel query 'attr(tags, long1, tests(<target>))'
+```
 ## Debugging with bazel
 
 First run the tests to see the failing one. Then run with debug options
 the failing test. E.g:
-
-    bazel run -c dbg //eprp:all
-
+```
+$ bazel run -c dbg //eprp:all
+```
 Increase logging level if wanted
-
-    export LGRAPH_LOG=info
-    bazel run -c dbg //eprp:all
-
+```
+$ LGRAPH_LOG=info bazel run -c dbg //eprp:all
+```
 To run with gdb
-
-    bazel build -c dbg //eprp:eprp_test
-    gdb bazel-bin/eprp/eprp_test
-    >b Eprp::run
-    >r
+```
+$ bazel build -c dbg //eprp:eprp_test
+$ gdb bazel-bin/eprp/eprp_test
+(gdb) b Eprp::run
+(gdb) r
+```
+(lldb is also supported.)
 
 ## Debugging with Yosys verilog code generation
 
 create local yosys binary 
-    
-    git clone https://github.com/YosysHQ/yosys.git
-
-    cd yosys
-
-    make 
-
+```
+$ git clone https://github.com/YosysHQ/yosys.git
+$ cd yosys
+$ make -j<number of CPU cores * 2>
+```
 launch gdb with this new installed yosys binary and lgraph-yosys plugin
-
-    cd ~/your/work_path/lgraph
-    
-    gdb --args ~/yosys/yosys -m ./bazel-bin/inou/yosys/liblgraph_yosys.so
-
-    (gdb) run
-
-    yosys> lg2yosys -name your_lgraph_name
-
-    set break point at the line of assertion failure 
+```
+$ cd ~/your/work_path/lgraph
+$ gdb --args ~/yosys/yosys -m ./bazel-bin/inou/yosys/liblgraph_yosys.so
+(gdb) r
+yosys> lg2yosys -name your_lgraph_name
+```
+set break point at the line of assertion failure
 
 ## Code coverage for all the tests used
-
-    bazel build --collect_code_coverage ...
-    # or better with runs
-    bazel test --collect_code_coverage --test_output=all --nocache_test_results ...
-
-    # To run locally, and push the coverage reports
-    COVERAGE_RUN=coverage LGRAPH_SRC=`pwd` LGRAPH_BUILD_MODE=dbg LGRAPH_COMPILER=g++ RUN_TYPE=long ./scripts/build-and-run.sh
+```
+$ bazel build --collect_code_coverage ...
+```
+or better with runs
+```
+$ bazel test --collect_code_coverage --test_output=all --nocache_test_results ...
+```
+To run locally, and push the coverage reports
+```
+$ COVERAGE_RUN=coverage LGRAPH_SRC=`pwd` LGRAPH_BUILD_MODE=dbg LGRAPH_COMPILER=g++ RUN_TYPE=long ./scripts/build-and-run.sh
+```
 
 ## To download the dependent packages and apply patches (abc, bm,...)
 
 No need to run this, as the bazel build will do it.
+```
+$ bazel fetch ...
+```
 
-    bazel fetch ...
-
-The downloaded code would be at bazel-lgraph/external/
+The downloaded code will be at bazel-lgraph/external/
 
 ## To create a fully static binary
 
-In the cc binary, add linkopts = ['-static']
+In the cc_binary of the relevant BUILD file, add `linkopts = ['-static']`
 
 Notice that the lgshell still needs the directory inside
-bazel-bin/main/lgshell.runfiles when using inou.yosys.\*
-
-## To remove all the bazel (it should not be needed, but in case)
-
-This command is useful for benchmarking build time, and in rare cases that
-building in one machine breaks, and starts in another and it freezes.
-
-    bazel clean --expunge
-
+`bazel-bin/main/lgshell.runfiles when using inou.yosys.\*`

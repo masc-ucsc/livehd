@@ -47,11 +47,12 @@ It is also assumed that bash is used to compile LiveHD.
   - ```$ sudo pacman -Syu bazel``` (Arch)
   - ```$ sudo apt-get install bazel``` (Kali/Debian/Ubuntu)
 4. **Build LiveHD**  
-  LiveHD has both release and debug build options.  Release is for regular users, and debug is for those who want to contribute to LiveHD.  See [Bazel.md](Bazel.md) for more information.
-
+  LiveHD has several build options, detailed below.  All three should result in a working executable, but may differ in speed or output.  
+  
   - Build LiveHD  
-      ```$ bazel build //main:all``` (release mode)  
-      ```$ bazel build //main:all -c dbg``` (debug mode)  
+      ```$ bazel build //main:all``` (fast build)  
+      ```$ bazel build //main:all -c opt``` (fast execution)  
+      ```$ bazel build //main:all -c dbg``` (debug symbols)  
     (A binary will be created in `livehd/bazel-bin/main/lgshell`)
 
 5. **Install pandoc (optional)**
@@ -61,4 +62,3 @@ It is also assumed that bash is used to compile LiveHD.
 ## Next Steps
 
 To start using LiveHD, check out [Usage](./Usage.md).  If you're interested in working on LiveHD, refer to [Develop](./Develop.md).
-
