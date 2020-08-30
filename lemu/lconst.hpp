@@ -102,15 +102,6 @@ protected:
   }
 
   Number get_num() const { return num; }
-  Number get_num(Bits_t b) const {
-    if (num >= 0) {
-      assert(b>=bits);
-      return num;
-    } else {
-      assert(b>=bits);
-      return num;
-    }
-  }
 public:
   using Container=std::vector<unsigned char>;
 
