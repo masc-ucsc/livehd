@@ -159,6 +159,8 @@ void Pass_fplan::pass(Eprp_var& var) {
   h.collapse(0.0);
   h.discover_regularity();
 
+  h.dump();
+
   // 3. <finish HiReg>
   // 4. write code to use the existing hierarchy instead of throwing it away...?
   // HiReg specifies area requirements that a normal LGraph may not fill
