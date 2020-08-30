@@ -158,10 +158,11 @@ void Pass_fplan::pass(Eprp_var& var) {
   p.make_graph(var);
 
   Hier_tree h(std::move(p.gi), 1);
+  h.collapse(30.0);
   h.collapse(60.0);
-  h.discover_regularity();
-
   h.dump();
+
+  h.collapse(60.0);
 
   // 3. <finish HiReg>
   // 4. write code to use the existing hierarchy instead of throwing it away...?
