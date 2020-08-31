@@ -1,5 +1,5 @@
-Things to fix:
-1. get hierarchy discovery to take area into account when making splits
+Things to test:
+1. test clocked logic as well
 
 Things to do:
 1. Discover regularity

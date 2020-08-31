@@ -41,4 +41,10 @@ public:
       , areas(std::move(other.areas))
       , weights(std::move(other.weights))
       , sets(std::move(other.sets)) {}
+  
+  vertex_t make_temp_vertex(std::string debug_name, double area, size_t set);
+  vertex_t make_vertex(std::string debug_name, double area, size_t set);
+
+private:
+  unsigned long unique_id_counter = 0;
 };
