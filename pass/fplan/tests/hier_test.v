@@ -28,6 +28,10 @@ module leaf7(input [24:0] bi, output [24:0] bo);
   assign bo = bi + bi;
 endmodule
 
+module leafout(input oi, output oo);
+  assign oo = ~oi;
+endmodule
+
 module mid1(input [899:0] di, output [899:0] dout);
   wire [14:0] w_1_to_2;
   wire [14:0] w_2_to_1;
@@ -37,6 +41,7 @@ module mid1(input [899:0] di, output [899:0] dout);
 
   leaf1 l1(.ai(w_2_to_1), .ao(w_1_to_2));
   leaf1 ltest(.ai(w_2_to_1), .ao(dout[15:1]));
+  leafout lout(.oi(1'b1), .oo(dout[0]));
   leaf2 l2(.ai(w_1_to_2), .ao(w_2_to_1), .bi(w_7_to_2), .bo(w_2_to_7));
   leaf7 l7(.bi(w_2_to_7), .bo(w_7_to_2));
 

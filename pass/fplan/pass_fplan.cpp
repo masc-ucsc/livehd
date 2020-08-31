@@ -43,19 +43,13 @@ void Pass_fplan::make_graph(Eprp_var& var) {
 
   absl::flat_hash_set<std::tuple<Hierarchy_index, Hierarchy_index, uint32_t>> edges;
   absl::flat_hash_map<Hierarchy_index, vertex_t>                              vm;
-  unsigned long                                                               unique_vector_id = 0;
 
   for (auto hidx : root_tree->depth_preorder()) {
     LGraph* lg = root_tree->ref_lgraph(hidx);
 
     Node temp(root_lg, hidx, Node::Hardcoded_input_nid);
 
-    auto new_v = gi.al.insert_vert();
-
-    gi.ids[new_v]         = unique_vector_id++;
-    gi.debug_names[new_v] = temp.debug_name();
-    gi.areas[new_v]       = lg->size();
-    gi.sets[0].insert(new_v);
+    auto new_v = gi.make_vertex(temp.debug_name(), lg->size(), 0);
 
     vm.emplace(hidx, new_v);
 
@@ -104,16 +98,12 @@ void Pass_fplan::make_graph(Eprp_var& var) {
     if (e_1_2 == gi.al.null_edge()) {
       auto new_e        = gi.al.insert_edge(v1, v2);
       gi.weights[new_e] = weight;
-    } else {
-      gi.weights[e_1_2] += weight;
     }
 
     auto e_2_1 = find_edge(v2, v1);
     if (e_2_1 == gi.al.null_edge()) {
       auto new_e        = gi.al.insert_edge(v2, v1);
       gi.weights[new_e] = weight;
-    } else {
-      gi.weights[e_2_1] += weight;
     }
   }
 
@@ -125,7 +115,7 @@ void Pass_fplan::make_graph(Eprp_var& var) {
                                 "id"_of_vert     = gi.ids)
             << std::endl;
 #endif
-  
+
   // if the graph is not fully connected, ker-lin fails to work.
   for (const auto& v : gi.al.verts()) {
     for (const auto& ov : gi.al.verts()) {
@@ -139,8 +129,10 @@ void Pass_fplan::make_graph(Eprp_var& var) {
   auto is_symmetrical = [&]() -> bool {
     for (auto v : gi.al.verts()) {
       for (auto ov : gi.al.verts()) {
-        if (find_edge(v, ov) == gi.al.null_edge()) return false;
-        if (find_edge(ov, v) == gi.al.null_edge()) return false;
+        if (find_edge(v, ov) == gi.al.null_edge())
+          return false;
+        if (find_edge(ov, v) == gi.al.null_edge())
+          return false;
       }
     }
     return true;
@@ -161,8 +153,6 @@ void Pass_fplan::pass(Eprp_var& var) {
   h.collapse(30.0);
   h.collapse(60.0);
   h.dump();
-
-  h.collapse(60.0);
 
   // 3. <finish HiReg>
   // 4. write code to use the existing hierarchy instead of throwing it away...?

@@ -14,15 +14,15 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
 
   // TODO: graph lib needs a specific version of range-v3, and that version doesn't have size or conversion utilities yet.
   // this method isn't pretty, but it works.  [[maybe_unused]] directive silences warning about "v" being unused.
-  unsigned int graph_size = 0;
+  unsigned int cut_size = 0;
   for ([[maybe_unused]] auto v : cut_verts) {
-    graph_size++;
+    cut_size++;
   }
 
-  I(graph_size >= 2);
+  I(cut_size >= 2);
 
   // if there are only two elements in the graph, we can exit early.
-  if (graph_size == 2) {
+  if (cut_size == 2) {
     int      which_vert = 0;
     vertex_t v1, v2;
     for (auto v : cut_verts) {
@@ -52,30 +52,11 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
     return triv_sets;
   }
 
-  auto make_temp_vertex = [&graph_size, &info](std::string debug_name, double area, size_t set) -> vertex_t {
-    auto nv = info.al.insert_vert();
-
-    info.ids[nv]         = ++graph_size;
-    info.areas[nv]       = area;
-    info.debug_names[nv] = debug_name;
-
-    for (auto other_v : info.al.verts()) {
-      edge_t temp_edge_t        = info.al.insert_edge(nv, other_v);
-      info.weights[temp_edge_t] = 0;
-
-      temp_edge_t               = info.al.insert_edge(other_v, nv);
-      info.weights[temp_edge_t] = 0;
-    }
-
-    info.sets[set].insert(nv);
-
-    return nv;
-  };
-
   // if there are an odd number of elements, we need to insert one to make the graph size even.
   vertex_t temp_even_vertex = g.null_vert();
-  if (graph_size % 2 == 1) {
-    temp_even_vertex = make_temp_vertex(std::string("temp_even"), 0.0, cut_set);
+  if (cut_size % 2 == 1) {
+    temp_even_vertex = info.make_temp_vertex(std::string("temp_even"), 0.0, cut_set);
+    cut_size++;
   }
 
   //  The reason why I made vert_set a new variable is because views carry no state of their own,
@@ -105,7 +86,7 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
 
   auto vert_set = g.verts() | ranges::view::remove_if([=](auto v) { return !is_valid_set(v); });
 
-  unsigned int set_size = graph_size / 2;
+  unsigned int set_size = cut_size / 2;
 
   auto is_in_a = [&, new_sets](auto v) -> bool { return find_set(v) == new_sets.first; };
 
