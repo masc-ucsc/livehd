@@ -127,13 +127,9 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
   auto             area_imb = [](double a1, double a2) -> double { return std::max(a1, a2) / (a1 + a2); };
 
   if (area_imb(init_a_area, init_b_area) > max_imb) {
+    // if the area combo is illegal, add some area to a random node to make it legal.  Not super smart, but it works for now
     size_t add_area_set  = (init_a_area > init_b_area) ? new_sets.second : new_sets.first;
     double darea         = (1.0 / max_imb) * std::max(init_a_area, init_b_area) - init_a_area - init_b_area + 0.01;
-
-    // TODO: re-use an existing vert instead of making a new one, if possible
-    // TODO: be more intelligent about how verts are split up in order to avoid making temp nodes, if possible. (sort?)
-    // adding random areas to nodes technically works, but probably generates floorplans with tons of weird spaces in them that
-    // aren't required.
 
     for (auto v : sets[add_area_set]) {
 #ifdef FPLAN_DBG_VERBOSE
@@ -298,6 +294,7 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
     for (size_t k = 0; k < cv.size(); k++) {
       int trial_decrease = 0;
       for (size_t i = 0; i < k; i++) {
+        // make sure the area imbalance won't climb too high if the swap occurs
         if (area_imb(total_a_area + aav[i], total_b_area + bav[i]) <= max_imb) {
           trial_decrease += cv[i];
           total_a_area += aav[i];
@@ -318,7 +315,7 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
         fmt::print("  swapping {} with {}.\n", info.debug_names(av[i]), info.debug_names(bv[i]));
 #endif
 
-        if (swap_vec[i] || prev_imbalanced) {
+        if (swap_vec[i]) {
           sets[new_sets.first].erase(av[i]);
           sets[new_sets.second].insert(av[i]);
 
