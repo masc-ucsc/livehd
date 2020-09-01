@@ -7,16 +7,17 @@ sum5 = ::{
   // %out = tmp.a + tmp.b + $c
 
   // case III: intermediate variable for both input/output tuple
-  tmp_itup = $itup
-  
-  tmp_otup.o1   = tmp_itup.a + $c
-  tmp_otup.o2   = tmp_itup.b + $c
+  tmp_itup  = $itup
+  tmp_itup1 = tmp_itup 
+  tmp_otup.o1   = tmp_itup1.a + $c
+  tmp_otup.o2   = tmp_itup1.b + $c
   tmp_otup.o3.a = $c
 
   tmp_otup1     = tmp_otup
   %otup         = tmp_otup1
   
-  tmp_out1      = tmp_itup.a + tmp_itup.b
+  tmp_out1      = tmp_itup1.a + tmp_itup1.b
+  // tmp_out1      = tmp_itup.a + tmp_itup.b
   tmp_out2      = tmp_out1
   %out          = tmp_out2     
 

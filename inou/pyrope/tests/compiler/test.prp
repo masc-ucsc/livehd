@@ -1,10 +1,8 @@
-$a.__bits = 8
-foo = #reg == 0
-#reg.__bits = 8
-if (foo) {
-  #reg := $a
-} else {
-  #reg := #reg - 1
-}
+foo   = $inp
+%out  = foo.a.b
+%out2 = foo.c
 
-%out = #reg.__q_pin
+bar   = $inp
+%out4 = bar.a.d
+
+//todo : try to add bits attribute
