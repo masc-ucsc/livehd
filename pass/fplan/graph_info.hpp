@@ -44,8 +44,12 @@ public:
       , weights(std::move(other.weights))
       , sets(std::move(other.sets)) {}
   
+  // various graph helper functions that get used somewhat frequently
+
   vertex_t make_temp_vertex(std::string debug_name, double area, size_t set);
   vertex_t make_vertex(std::string debug_name, double area, Lg_type_id label, size_t set);
+  
+  edge_t find_edge(vertex_t v_src, vertex_t v_dst);
 
 private:
   unsigned long unique_id_counter = 0;

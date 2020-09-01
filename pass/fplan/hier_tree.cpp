@@ -4,7 +4,28 @@ Hier_tree::Hier_tree(Graph_info&& netlist, unsigned int num_components) : ginfo(
   std::cout << "  creating hierarchy...";
   I(num_components >= 1);
 
+  // if the graph is not fully connected, ker-lin fails to work.
+  for (const auto& v : ginfo.al.verts()) {
+    for (const auto& ov : ginfo.al.verts()) {
+      if (ginfo.find_edge(v, ov) == ginfo.al.null_edge()) {
+        auto temp_e        = ginfo.al.insert_edge(v, ov);
+        ginfo.weights[temp_e] = 0;
+      }
+    }
+  }
+
   hiers.push_back(discover_hierarchy(ginfo, 0, num_components));
+
+  // undo temp edge creation because it's really inconvienent elsewhere
+  for (const auto& v : ginfo.al.verts()) {
+    for (const auto& ov : ginfo.al.verts()) {
+      auto e = ginfo.find_edge(v, ov);
+      if (e != ginfo.al.null_edge() && ginfo.weights[e] == 0) {
+        ginfo.al.erase_edge(e);
+      }
+    }
+  }
+
   std::cout << "done." << std::endl;
 }
 
