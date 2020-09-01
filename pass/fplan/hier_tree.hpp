@@ -8,7 +8,8 @@
 #pragma once
 
 #include <memory>  // for shared_ptr
-#include <string>  // for strings
+#include <string>
+#include <vector>
 
 #include "graph_info.hpp"
 
@@ -98,5 +99,7 @@ private:
   std::vector<phier> hiers;
 
   // find patterns in the collapsed hierarchy
-  void find_most_freq_pattern();
+  set_t find_most_freq_pattern(set_t graph, const size_t bwidth) const;
+
+  void compress_hier(std::vector<set_t>& pl);
 };
