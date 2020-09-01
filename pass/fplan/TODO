@@ -1,15 +1,20 @@
 Things to test:
 1. test clocked logic as well
 
+Quick things to do:
+1. Replace hier_test_diagram with a graphviz diagram that looks good
+
 Things to do:
-1. Discover regularity
-2. Create boundary curve
-3. Create floorplans
+1. Create boundary curve
+2. Create floorplans
 
 Things to optimize:
 1. area adjustment algorithm is naive, and inserts area when it isn't necessary
 2. iterating over LGraphs could possibly use some work
 3. preloading vectors with sizes known ahead of time could save some time
+4. check to see if graph lib has fast functions to do what I'm doing myself
 
 Refactors:
-1. move recursive versions of functions into lambdas - a lot cleaner!
+1. move recursive versions of functions into lambdas or just use static counters idk
+2. replace '&' in lambdas with actual things used if # things used is small
+3. seperate verbose output per-stage

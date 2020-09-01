@@ -117,30 +117,6 @@ void Pass_fplan::make_graph(Eprp_var& var) {
             << std::endl;
 #endif
 
-  // if the graph is not fully connected, ker-lin fails to work.
-  for (const auto& v : gi.al.verts()) {
-    for (const auto& ov : gi.al.verts()) {
-      if (find_edge(v, ov) == gi.al.null_edge()) {
-        auto temp_e        = gi.al.insert_edge(v, ov);
-        gi.weights[temp_e] = 0;
-      }
-    }
-  }
-
-  auto is_symmetrical = [&]() -> bool {
-    for (auto v : gi.al.verts()) {
-      for (auto ov : gi.al.verts()) {
-        if (find_edge(v, ov) == gi.al.null_edge())
-          return false;
-        if (find_edge(ov, v) == gi.al.null_edge())
-          return false;
-      }
-    }
-    return true;
-  };
-
-  I(is_symmetrical());
-
   std::cout << "done." << std::endl;
 }
 
