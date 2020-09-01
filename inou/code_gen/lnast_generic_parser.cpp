@@ -132,7 +132,7 @@ std::string Cpp_parser::supp_buffer_to_print(std::string modname) {
     absl::StrAppend(&outps_nline, "UInt<", val, "> " + key + ";\n  ");
   }
 
-  std::string inps_csv;
+//  std::string inps_csv;
   for (auto const& [key, val] : inp_bw) {
     absl::StrAppend(&inps_csv, "UInt<", val, "> " + key + ", ");
   }
@@ -201,12 +201,12 @@ std::string Cpp_parser::final_print(std::string modname, std::string buffer_to_p
   //TODO: reset function
   
   //main code part function
-  std::string inps_csv;
-  for (auto const& [key, val] : inp_bw) {
-    absl::StrAppend(&inps_csv, "UInt<", val, "> " + key + ", ");
-  }
-  inps_csv.pop_back();
-  inps_csv.pop_back();
+//  std::string inps_csv;
+//  for (auto const& [key, val] : inp_bw) {
+//    absl::StrAppend(&inps_csv, "UInt<", val, "> " + key + ", ");
+//  }
+//  inps_csv.pop_back();
+//  inps_csv.pop_back();
 
   std::string main_func = "void "+ modname+"::cycle(" + inps_csv + ") {\n"+ buffer_to_print+"\n}";
   return absl::StrCat(constructor_vcd, "\n", constructor, "\n", main_func, "\n");
