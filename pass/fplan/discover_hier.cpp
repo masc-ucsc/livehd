@@ -128,7 +128,6 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
 
   if (area_imb(init_a_area, init_b_area) > max_imb) {
     size_t add_area_set  = (init_a_area > init_b_area) ? new_sets.second : new_sets.first;
-    size_t keep_area_set = (add_area_set == new_sets.first) ? new_sets.second : new_sets.first;
     double darea         = (1.0 / max_imb) * std::max(init_a_area, init_b_area) - init_a_area - init_b_area + 0.01;
 
     // TODO: re-use an existing vert instead of making a new one, if possible
@@ -138,7 +137,7 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
 
     for (auto v : sets[add_area_set]) {
 #ifdef FPLAN_DBG_VERBOSE
-      fmt::print("adding area {} to node {:<30}.\n", darea, info.debug_names[v]);
+      fmt::print("adding area {} to node {:<30}\n", darea, info.debug_names[v]);
 #endif
       info.areas[v] += darea;
       break;

@@ -43,7 +43,7 @@ public:
 
   // moves defined since copies are deleted
   // moved-from object can be left alone, since contents are "unspecified" after move.
-  Hier_tree(Hier_tree&& other) noexcept : ginfo(std::move(other.ginfo)), root(other.root) {}
+  Hier_tree(Hier_tree&& other) noexcept : ginfo(std::move(other.ginfo)) {}
 
   // move assignment operator not specified because graph_info contents are really hard to move
 
@@ -53,7 +53,7 @@ public:
   void collapse(double threshold_area);
 
   // discover similar subgraphs in the collapsed hierarchy
-  void discover_regularity();
+  void discover_regularity(size_t hier_index);
 
 private:
   // graph containing the divided netlist
@@ -82,20 +82,20 @@ private:
 
   double find_area(phier node) const;
 
-  int find_tree_size(phier node) const;
+  unsigned int find_tree_size(phier node) const;
 
-  void dump_node(const phier& node) const;
+  unsigned int find_tree_depth(phier node) const;
+  
+  void dump_node(const phier node) const;
 
   phier collapse(phier node, double threshold_area);
 
   // generator used to make unique node names
   unsigned int node_number = 0;
 
-  // root node of hierarchy tree
-  phier root;
-
-  // vector of altered hierarchy trees with nodes collapsed
-  std::vector<phier> collapsed_hiers;
+  // vector of hierarchy trees with some nodes collapsed
+  // 0th element is always uncollapsed hierarchy
+  std::vector<phier> hiers;
 
   // find patterns in the collapsed hierarchy
   void find_most_freq_pattern();

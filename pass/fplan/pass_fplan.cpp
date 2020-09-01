@@ -49,7 +49,7 @@ void Pass_fplan::make_graph(Eprp_var& var) {
 
     Node temp(root_lg, hidx, Node::Hardcoded_input_nid);
 
-    auto new_v = gi.make_vertex(temp.debug_name(), lg->size(), 0);
+    auto new_v = gi.make_vertex(temp.debug_name(), lg->size(), lg->get_lgid(), 0);
 
     vm.emplace(hidx, new_v);
 
@@ -112,6 +112,7 @@ void Pass_fplan::make_graph(Eprp_var& var) {
   std::cout << gi.al.dot_format("weight"_of_edge = gi.weights,
                                 "name"_of_vert   = gi.debug_names,
                                 "area"_of_vert   = gi.areas,
+                                "label"_of_vert  = gi.labels,
                                 "id"_of_vert     = gi.ids)
             << std::endl;
 #endif
@@ -153,6 +154,8 @@ void Pass_fplan::pass(Eprp_var& var) {
   h.collapse(30.0);
   h.collapse(60.0);
   h.dump();
+
+  h.discover_regularity(0);
 
   // 3. <finish HiReg>
   // 4. write code to use the existing hierarchy instead of throwing it away...?

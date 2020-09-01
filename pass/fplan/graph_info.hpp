@@ -8,21 +8,21 @@ typedef decltype(graph::Bi_adjacency_list().insert_edge(graph::Bi_adjacency_list
 
 typedef decltype(graph::Bi_adjacency_list().vert_map<std::string>()) name_map_t;
 typedef decltype(graph::Bi_adjacency_list()
-                     .vert_map<unsigned long>()) id_map_t;  // TODO: unused?  might be accidentally depending on debug_names...
+                     .vert_map<unsigned long>()) id_map_t;
 typedef decltype(graph::Bi_adjacency_list().vert_map<double>())       area_map_t;
+typedef decltype(graph::Bi_adjacency_list().vert_map<Lg_type_id>())   label_map_t;
 typedef decltype(graph::Bi_adjacency_list().edge_map<unsigned int>()) weight_map_t;
-
 typedef decltype(graph::Bi_adjacency_list().vert_set()) set_t;
 typedef std::vector<set_t>                              set_vec_t;
 
 // this holds a graph and all the related map information.
-// it looks complicated because everything in the graph lib is a template and has copy constructors removed.
 class Graph_info {
 public:
   graph::Bi_adjacency_list al;
-  name_map_t               debug_names;
-  id_map_t                 ids;
+  name_map_t               debug_names; // can remove later, mostly for debugging
+  id_map_t                 ids; // TODO: is this required?
   area_map_t               areas;
+  label_map_t              labels; // what LGraph a node represents
   weight_map_t             weights;
   set_vec_t                sets;
 
@@ -31,6 +31,7 @@ public:
       , debug_names(al.vert_map<std::string>())
       , ids(al.vert_map<unsigned long>())
       , areas(al.vert_map<double>())
+      , labels(al.vert_map<Lg_type_id>())
       , weights(al.edge_map<unsigned int>())
       , sets(1, al.vert_set()) {}
 
@@ -39,11 +40,12 @@ public:
       , debug_names(std::move(other.debug_names))
       , ids(std::move(other.ids))
       , areas(std::move(other.areas))
+      , labels(std::move(other.labels))
       , weights(std::move(other.weights))
       , sets(std::move(other.sets)) {}
   
   vertex_t make_temp_vertex(std::string debug_name, double area, size_t set);
-  vertex_t make_vertex(std::string debug_name, double area, size_t set);
+  vertex_t make_vertex(std::string debug_name, double area, Lg_type_id label, size_t set);
 
 private:
   unsigned long unique_id_counter = 0;

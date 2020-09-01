@@ -1,15 +1,26 @@
 #include "hier_tree.hpp"
 
-Hier_tree::Hier_tree(Graph_info&& json_info, unsigned int num_components) : ginfo(std::move(json_info)) {
+Hier_tree::Hier_tree(Graph_info&& netlist, unsigned int num_components) : ginfo(std::move(netlist)) {
   std::cout << "  creating hierarchy...";
   I(num_components >= 1);
 
-  root = discover_hierarchy(ginfo, 0, num_components);
+  hiers.push_back(discover_hierarchy(ginfo, 0, num_components));
   std::cout << "done." << std::endl;
 }
 
-void Hier_tree::dump_node(const phier& node) const {
-  fmt::print("{}node: {:<30} ", (node->parent == nullptr) ? "root " : "", node->name);
+void Hier_tree::dump_node(const phier node) const {
+  static int depth = -1;
+
+  depth++;
+
+  std::string prefix;
+  if (node->parent == nullptr) {
+    prefix.append("root, ");
+  }
+  if (node->is_leaf()) {
+    prefix.append("leaf, ");
+  }
+  fmt::print("node: {:<30}{}depth: {}, ", node->name, prefix, depth);
 
   if (node->is_leaf()) {
     fmt::print("area: {:.2f}, containing set {}.\n", node->area, node->graph_subset);
@@ -18,6 +29,8 @@ void Hier_tree::dump_node(const phier& node) const {
     dump_node(node->children[0]);
     dump_node(node->children[1]);
   }
+
+  depth--;
 }
 
 // add up the total area of all the leaves in the subtree
@@ -26,25 +39,46 @@ double Hier_tree::find_area(phier node) const {
     return node->area;
   }
 
+  I(node->children[0] != nullptr);
+  I(node->children[1] != nullptr);
+
   return find_area(node->children[0]) + find_area(node->children[1]);
 }
 
-int Hier_tree::find_tree_size(phier node) const {
+unsigned int Hier_tree::find_tree_size(phier node) const {
   if (node->is_leaf()) {
     return 1;
   }
 
+  I(node->children[0] != nullptr);
+  I(node->children[1] != nullptr);
+
   return find_tree_size(node->children[0]) + find_tree_size(node->children[1]) + 1;
 }
 
-void Hier_tree::dump() const {
-  fmt::print("\nprinting uncollapsed hierarchy ({} nodes):\n", find_tree_size(root));
-  dump_node(root);
-  std::cout << std::endl;
+unsigned int Hier_tree::find_tree_depth(phier node) const {
+  std::function<unsigned int(phier, unsigned int)> find_depth
+      = [&find_depth](phier rnode, unsigned int depth) -> unsigned int {
+    if (rnode->is_leaf()) {
+      return depth;
+    }
 
-  for (size_t i = 0; i < collapsed_hiers.size(); i++) {
-    fmt::print("printing collapsed hierarchy {} ({} nodes):\n", i, find_tree_size(collapsed_hiers[i]));
-    dump_node(collapsed_hiers[i]);
+    I(rnode->children[0] != nullptr);
+    I(rnode->children[1] != nullptr);
+
+    unsigned int dc0 = find_depth(rnode->children[0], depth + 1);
+    unsigned int dc1 = find_depth(rnode->children[1], depth + 1);
+
+    return std::max(dc0, dc1);
+  };
+
+  return find_depth(node, 0);
+}
+
+void Hier_tree::dump() const {
+  for (size_t i = 0; i < hiers.size(); i++) {
+    fmt::print("printing hierarchy {} ({} nodes):\n", i, find_tree_size(hiers[i]));
+    dump_node(hiers[i]);
     std::cout << std::endl;
   }
 }
