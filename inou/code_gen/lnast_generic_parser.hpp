@@ -34,6 +34,7 @@ class Cpp_parser: public Code_gen_all_lang {
   std::map<std::string, std::string> inp_bw;//first->input port name, second->UInt<bw>
   std::map<std::string, std::string> outp_bw;//first->o/p port name, sec->UInt<bw>
   std::map<std::string, std::string> reg_bw;//first->register name, sec->UInt<bw>    
+  std::string inps_csv;
 public:
   Cpp_parser(){};
   std::string_view stmt_sep() final;
