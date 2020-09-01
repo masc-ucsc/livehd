@@ -28,6 +28,10 @@ module leaf7(input [24:0] bi, output [24:0] bo);
   assign bo = bi + bi;
 endmodule
 
+module leaf8(input [1:0] i, output [1:0] o);
+  assign o = i * 2;
+endmodule
+
 module leafout(input oi, output oo);
   assign oo = ~oi;
 endmodule
@@ -85,6 +89,8 @@ module hier_test(input [913:0] testi, output [913:0] testo);
   mid2 m2(.di(w_1_to_2), .dout(w_2_to_1), .ei(w_2_to_4), .eo(w_4_to_2));
   mid3 m3(.fi(w_4_to_3), .fo(w_3_to_4));
   mid4 m4(.ei(w_4_to_2), .eo(w_2_to_4), .fi(w_3_to_4), .fo(w_4_to_3));
+
+  leaf8 l8(.i(testi[1:0]), .o(testo[3:2]));
 
   assign testo = ~{testi[0], w_2_to_1, w_2_to_4, w_3_to_4};
   

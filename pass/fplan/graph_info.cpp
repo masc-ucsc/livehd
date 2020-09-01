@@ -22,12 +22,13 @@ vertex_t Graph_info::make_temp_vertex(std::string debug_name, double area, size_
 }
 
 // make a vertex, but don't attach it to anything
-vertex_t Graph_info::make_vertex(std::string debug_name, double area, size_t set) {
+vertex_t Graph_info::make_vertex(std::string debug_name, double area, Lg_type_id label, size_t set) {
   auto nv = al.insert_vert();
 
   ids[nv]         = ++unique_id_counter;
   areas[nv]       = area;
   debug_names[nv] = debug_name;
+  labels[nv]      = label;
 
   sets[set].insert(nv);
 
