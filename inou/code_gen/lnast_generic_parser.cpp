@@ -132,7 +132,14 @@ std::string Cpp_parser::supp_buffer_to_print(std::string modname) {
     absl::StrAppend(&outps_nline, "UInt<", val, "> " + key + ";\n  ");
   }
 
-  std::string funcs = modname + "(uint64_t _hidx);\n  void reset_cycle();\n  void cycle();\n";
+  std::string inps_csv;
+  for (auto const& [key, val] : inp_bw) {
+    absl::StrAppend(&inps_csv, "UInt<", val, "> " + key + ", ");
+  }
+  inps_csv.pop_back();
+  inps_csv.pop_back();
+
+  std::string funcs = modname + "(uint64_t _hidx);\n  void reset_cycle();\n  void cycle(" + inps_csv + ");\n";
 
   std::string vcd_params = "  std::string scope_name;\n  vcd::VCDWriter* vcd_writer;\n";
 
@@ -194,7 +201,14 @@ std::string Cpp_parser::final_print(std::string modname, std::string buffer_to_p
   //TODO: reset function
   
   //main code part function
-  std::string main_func = "void "+ modname+"::cycle() {\n"+ buffer_to_print+"\n}";
+  std::string inps_csv;
+  for (auto const& [key, val] : inp_bw) {
+    absl::StrAppend(&inps_csv, "UInt<", val, "> " + key + ", ");
+  }
+  inps_csv.pop_back();
+  inps_csv.pop_back();
+
+  std::string main_func = "void "+ modname+"::cycle(" + inps_csv + ") {\n"+ buffer_to_print+"\n}";
   return absl::StrCat(constructor_vcd, "\n", constructor, "\n", main_func, "\n");
 }
 
