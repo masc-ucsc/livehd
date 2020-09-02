@@ -36,6 +36,10 @@ void Pass_fplan::make_graph(Eprp_var& var) {
     }
   }
 
+  if (!root_tree) {
+    throw std::runtime_error("empty input hierarchy!");
+  }
+
   I(root_tree);
   I(root_lg);
 
