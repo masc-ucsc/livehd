@@ -1,0 +1,55 @@
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' src/boolector.c src/boolector.c
+--- src/boolector.c	2020-09-01 18:10:28.256791552 -0700
++++ src/boolector.c	2020-09-01 12:01:46.579161579 -0700
+@@ -4655,10 +4655,11 @@
+   return res;
+ }
+ 
+ /*------------------------------------------------------------------------*/
+ 
++#if 0
+ /* Note: no need to trace parse function calls!! */
+ 
+ int32_t
+ boolector_parse (Btor *btor,
+                  FILE *infile,
+@@ -4783,10 +4784,11 @@
+   /* shadow clone can not shadow boolector_parse* (parser uses API calls only,
+    * hence all API calls issued while parsing are already shadowed and the
+    * shadow clone already maintains the parsed formula) */
+   return res;
+ }
++#endif
+ 
+ /*------------------------------------------------------------------------*/
+ 
+ void
+ boolector_dump_btor_node (Btor *btor, FILE *file, BoolectorNode *node)
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' src/btorconfig.h src/btorconfig.h
+--- src/btorconfig.h	1969-12-31 16:00:00.000000000 -0800
++++ src/btorconfig.h	2020-09-01 18:08:57.918677536 -0700
+@@ -0,0 +1,24 @@
++/*************************************************************/
++/* Automatically generated, do note edit!                    */
++/*************************************************************/
++#ifndef BTORCONFIG_H_INCLUDED
++#define BTORCONFIG_H_INCLUDED
++
++#define BTOR_CC          "GNU 9.3.0"
++#define BTOR_CXX         "GNU 9.3.0"
++#define BTOR_CFLAGS      " -std=gnu99 -W -Wall -Wextra -Wredundant-decls -O3"
++#define BTOR_CXXFLAGS    " -std=gnu++11 -W -Wall -Wextra -Wredundant-decls -O3"
++#define BTOR_OS          "Linux 5.4.0-kali3-amd64"
++#define BTOR_COMPILED    "2020-09-01T11:47:16"
++#define BTOR_SRC_DIR     "/soe/renau/projs/synth/src/"
++#define BTOR_BIN_DIR     "/soe/renau/projs/synth/boolector/build/bin/"
++#define BTOR_TEST_DIR    "/soe/renau/projs/synth/boolector/test/"
++#define BTOR_LOG_DIR     "/soe/renau/projs/synth/boolector/build/test/"
++#define BTOR_OUT_DIR     "/soe/renau/projs/synth/boolector/test/log/"
++#define BTOR_CONTRIB_DIR "/soe/renau/projs/synth/boolector/contrib/"
++#define BTOR_RELEASED    "2020-09-01T11:47:16"
++#define BTOR_VERSION     "3.2.1"
++#define BTOR_GIT_ID      "master-03d76134f86170ab0767194c339fd080e92ad371"
++
++#endif
++
