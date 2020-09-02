@@ -195,12 +195,8 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
       }
     }
 
-    // if we started out with an imbalance in area, don't bother trying to make it balanced.
     bool prev_imbalanced = area_imb(a_area, b_area) > max_imb;
     I(!prev_imbalanced);
-
-    // TODO: I made an assumption later on that the initial split respects the area rule, which isn't always the case.
-    // find some way to make the initial split respect area and be even...?
 
     // remove the node pair with the highest global reduction in cost, and add it to cv.
     // also add the nodes used in the reduction to av and bv, respectively.
@@ -290,19 +286,18 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
     best_decrease         = 0;
     size_t decrease_index = 0;
 
-    double total_a_area = a_area;
-    double total_b_area = b_area;
-
     std::vector<bool> swap_vec(cv.size(), false);
 
     for (size_t k = 0; k < cv.size(); k++) {
-      int trial_decrease = 0;
+      int    trial_decrease = 0;
+      double new_a_area   = a_area;
+      double new_b_area   = b_area;
       for (size_t i = 0; i < k; i++) {
         // make sure the area imbalance won't climb too high if the swap occurs
-        if (area_imb(total_a_area + aav[i], total_b_area + bav[i]) <= max_imb) {
+        if (area_imb(new_a_area + aav[i], new_b_area + bav[i]) <= max_imb) {
           trial_decrease += cv[i];
-          total_a_area += aav[i];
-          total_b_area += bav[i];
+          new_a_area += aav[i];
+          new_b_area += bav[i];
           swap_vec[i] = true;
         }
       }
