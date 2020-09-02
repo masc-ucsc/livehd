@@ -50,6 +50,7 @@ livehd> exit
   livehd> exit
   $ ls lgdb/*.v
   ```
+`lgraph.match` picks up any LGraphs matching the regex passed (or everything if no regex is provided) and treats every single one as the top of the hierarchy, whereas `lgraph.open name:<root module>` will just open the root module as the top of the hierarchy.
 
 ### Running a custom pass
 
