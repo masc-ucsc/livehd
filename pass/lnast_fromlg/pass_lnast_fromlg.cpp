@@ -104,7 +104,7 @@ void Pass_lnast_fromlg::begin_transformation(LGraph* lg, Lnast& lnast, Lnast_nid
     I(!edge_dpin.get_node().is_hierarchical());
     handle_source_node(lg, edge_dpin, lnast, ln_node);
 
-    auto asg_node = lnast.add_child(ln_node, Lnast_node::create_dp_assign("out_dpasg"));
+    auto asg_node = lnast.add_child(ln_node, Lnast_node::create_assign("out_asg"));
     if (gpio_dpin.get_name()[0] == '%') {
       lnast.add_child(asg_node, Lnast_node::create_ref(lnast.add_string(gpio_dpin.get_name())));
     } else {
