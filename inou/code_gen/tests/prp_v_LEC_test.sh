@@ -5,7 +5,7 @@ rm -rf ./prp_v_LEC_test_dir
 rm -f ./*dot*
 rm -f *.v
 
-pts='logic'
+pts='logic1'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -27,7 +27,7 @@ echo "  Prp_in -> LN -> LG -> LN -> Prp_out                         "
 echo "                   |               |                          "
 echo "                   V               V                          "
 echo "                  Ver1            LN -> LG -> Ver2            "
-echo "  Perform LEC b/w Ver1 and Ver2                                         "
+echo "  Perform LEC b/w Ver1 and Ver2                               "
 echo "=============================================================="
 
 
@@ -43,7 +43,7 @@ do
   echo "--------------------------------------------------------------"
   echo "PRP -> LNAST -> LGraph                                        "
   echo "--------------------------------------------------------------"
-  ${LGSHELL} "inou.pyrope files:inou/pyrope/tests/compiler/${pt}.prp |> pass.lnast_tolg"
+  ${LGSHELL} "inou.pyrope files:inou/pyrope/tests/compiler/${pt}.prp |> lnast.dump |> pass.lnast_tolg"
   if [ $? -eq 0 ]; then
     echo "Successfully create the inital LGraph: inou/pyrope/tests/compiler/${pt}.prp"
   else
@@ -123,7 +123,7 @@ do
   echo "--------------------------------------------------------------"
   echo "pyrope(code_gen) -> LNAST -> LGraph"
   echo "--------------------------------------------------------------"
-  ${LGSHELL} "inou.pyrope files:prp_v_LEC_test_dir/${pt}.prp |> pass.lnast_tolg path:lgdb2 "
+  ${LGSHELL} "inou.pyrope files:prp_v_LEC_test_dir/${pt}.prp |> lnast.dump |> pass.lnast_tolg path:lgdb2 "
   if [ $? -eq 0 ]; then
     echo "Successfully create the second LGraph: prp_v_LEC_test_dir/${pt}.prp"
   else

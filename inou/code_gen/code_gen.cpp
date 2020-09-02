@@ -159,7 +159,7 @@ void Code_gen::invalid_node() {
 //-------------------------------------------------------------------------------------
 //Process the assign node:
 void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index) {
-  fmt::print("node:assign\n");
+  fmt::print("node:assign: {}\n", lnast->get_name(assign_node_index));
   auto curr_index = lnast->get_first_child(assign_node_index);
   std::vector<std::string_view> assign_str_vect;
 
@@ -433,7 +433,7 @@ void Code_gen::do_cond(const mmap_lib::Tree_index& cond_node_index) {
 //-------------------------------------------------------------------------------------
 //Process the operator (like and,or,etc.) node:
 void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
-  fmt::print("node:op\n");
+  fmt::print("node:op: {}\n", lnast->get_name(op_node_index));
   auto curr_index = lnast->get_first_child(op_node_index);
   std::vector<std::string_view> op_str_vect;
 
@@ -450,7 +450,9 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
 
   auto key = op_str_vect.front();
   bool op_is_unary = false;
-  if(is_temp_var(key) && op_str_vect.size()==2){
+  //if(is_temp_var(key) && op_str_vect.size()==2){ 
+  //This is because of the SSA assignments (key can be like "o2_0")
+  if(op_str_vect.size()==2){
     op_is_unary = true;
   }
 
@@ -469,7 +471,9 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
       ref = process_number(ref);
     }
     // check if a number
-    if(op_is_unary) {absl::StrAppend(&val,lnast_to->debug_name_lang(op_node_data.type));}
+    if(op_is_unary) {
+      absl::StrAppend(&val,lnast_to->debug_name_lang(op_node_data.type));
+    }
     absl::StrAppend(&val, lnast_to->ref_name(ref));
     if ((i+1) != op_str_vect.size() && !op_is_unary) {//check that another entry is left in op_str_vect && it is a binary operation
       absl::StrAppend(&val, " ", lnast_to->debug_name_lang(op_node_data.type), " ");
