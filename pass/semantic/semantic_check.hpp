@@ -40,7 +40,6 @@ protected:
   std::string_view in_lhs_list(Lnast* lnast, int index);
   int in_rhs_list(Lnast* lnast, std::string_view node_name);
   bool in_in_scope_stack(std::string_view node_name);
-  bool in_out_scope_stack(std::string_view node_name);
 
   void add_to_write_list(Lnast* lnast, std::string_view node_name, std::string_view stmt_name);
   void add_to_read_list(std::string_view node_name, std::string_view stmt_name);
@@ -54,6 +53,7 @@ protected:
   void resolve_read_write_lists(Lnast* lnast);
   void resolve_lhs_rhs_lists(Lnast* lnast);
   void resolve_out_of_scope();
+  void resolve_out_of_scope_func_def();
 
   void check_primitive_ops(Lnast* lnast, const Lnast_nid& lnidx_opr, const Lnast_ntype node_type, std::string_view
                            stmt_name);
