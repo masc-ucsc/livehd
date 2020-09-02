@@ -349,15 +349,19 @@ bool Node_pin::is_connected(const Node_pin &pin) const {
 Node_pin Node_pin::get_down_pin() const {
   auto node = get_node();
   I(node.is_type_sub_present());
-  I(!top_g->ref_htree()->is_leaf(hidx));
 
   // 1st: Get down_hidx
   const auto *tree_pos = Ann_node_tree_pos::ref(current_g);
   I(tree_pos);
   I(tree_pos->has(node.get_compact_class()));
-  auto pos = tree_pos->get(node.get_compact_class());
+  auto delta_pos = tree_pos->get(node.get_compact_class());
 
-  Hierarchy_index down_hidx(hidx.level + 1, pos);
+  const auto &htree= top_g->get_htree();
+  I(!htree.is_leaf(hidx));
+  auto first_child = htree.get_first_child(hidx);
+
+  Hierarchy_index down_hidx(first_child.level, first_child.pos + delta_pos);
+  I(htree.get_parent(down_hidx) == hidx);
 
   // 2nd: get down_pid
   I(pid != Port_invalid);
@@ -366,7 +370,7 @@ Node_pin Node_pin::get_down_pin() const {
   I(down_pid != Port_invalid);
 
   // 3rd: get down_current_g
-  auto *down_current_g = top_g->ref_htree()->ref_lgraph(down_hidx);
+  auto *down_current_g = htree.ref_lgraph(down_hidx);
 
   // 4th: get down_idx
   Index_ID down_idx
