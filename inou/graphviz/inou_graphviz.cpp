@@ -102,7 +102,8 @@ void Inou_graphviz::hierarchy(Eprp_var &var) {
 
 
 void Inou_graphviz::do_hierarchy(LGraph *g) {
-  std::string data = "digraph {\n";
+  // include a font name to get graph to render properly with kgraphviewer
+  std::string data = "digraph {\n node [fontname = \"Source Code Pro\"];\n";
 
   const auto &root_tree = g->get_htree();
 
