@@ -729,6 +729,7 @@ void Pass_bitwidth::bw_pass(LGraph *lg) {
 
     if (inp_edges.empty() && (op != Const_Op && op != SubGraph_Op && op != LUT_Op && op != TupKey_Op)) {
       fmt::print("pass.bitwidth: removing dangling node:{}\n", node.debug_name());
+      fmt::print("node:{}\n", node.debug_name());
       node.del_node();
       continue;
     }

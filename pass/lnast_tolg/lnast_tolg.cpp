@@ -31,7 +31,7 @@ void Lnast_tolg::top_stmts2lgraph(LGraph *dfg, const Lnast_nid &lnidx_stmts) {
   fmt::print("============================= Phase-1: LNAST->LGraph Start ===============================================\n");
   process_ast_stmts(dfg, lnidx_stmts);
 
-  fmt::print("============================= Phase-2: Adding final Module Outputs and Final Dpin Name ===================\n");
+  fmt::print("============================= Phase-2: Adding final Module IOs and Final Dpin Name ===================\n");
   setup_lgraph_ios_and_final_var_name(dfg);
 
   dfg->ref_self_sub_node()->populate_graph_pos();
@@ -1387,21 +1387,36 @@ void Lnast_tolg::dp_create_hier_outputs(LGraph *dfg, Node &cur_node, std::string
     dp_create_hier_outputs(dfg, val_dnode,   new_hier_name, memo);
     dp_create_hier_outputs(dfg, parent_node, hier_name, memo);
   } else {
-    auto out_spin = dfg->add_graph_output(new_hier_name, Port_invalid, 0);
-    val_dpin.connect(out_spin);
+    if (val_dnode_type == TupRef_Op && is_input(val_dpin.get_name())) {
+      auto val_dpin_name  = val_dpin.get_name();
+      auto ginp_name      = val_dpin_name.substr(1, val_dpin_name.size()-3);
+
+      Node_pin ginp;
+      if (!dfg->is_graph_input(ginp_name))
+        ginp = dfg->add_graph_input(ginp_name, Port_invalid, 0);
+      else 
+        ginp = dfg->get_graph_input(ginp_name);
+
+      auto out_spin = dfg->add_graph_output(new_hier_name, Port_invalid, 0);
+      inp2leaf_artifact_spins[ginp].emplace_back(out_spin);
+    } else {
+      auto out_spin = dfg->add_graph_output(new_hier_name, Port_invalid, 0);
+      val_dpin.connect(out_spin);
+    }
   } 
   dp_create_hier_outputs(dfg, parent_node, hier_name, memo);
   return;
 }
 
-void Lnast_tolg::dfs_create_flattened_hier_inp(LGraph *dfg, Node &cur_node, Node_pin &cur_node_spin, std::string hier_name, 
-                                               absl::flat_hash_set<Node> &inp_artifacts,
-                                               absl::flat_hash_map<Node_pin, std::vector<Node_pin>> &inp2leaf_artifact_spins) 
+void Lnast_tolg::dfs_create_flattened_hier_inp(LGraph *dfg, Node_pin &cur_node_spin, std::string hier_name, 
+                                               absl::flat_hash_set<Node> &inp_artifacts) 
 {
+  auto cur_node  = cur_node_spin.get_node();
+  auto cur_ntype = cur_node.get_type_op();
   bool is_leaf = true;
   auto new_hier_name = hier_name;
-  if (cur_node.get_type_op() == TupGet_Op) {
-    inp_artifacts.insert(cur_node);
+  if (cur_ntype == TupGet_Op) {
+    inp_artifacts.insert(cur_node); // only remove the artifact tup_gets
     auto [key_name, key_pos] = Pass_cprop::get_tuple_name_key(cur_node);
     if (!key_name.empty()) {
       new_hier_name = absl::StrCat(new_hier_name, ".", key_name.substr(0, key_name.size()-2));  
@@ -1410,12 +1425,21 @@ void Lnast_tolg::dfs_create_flattened_hier_inp(LGraph *dfg, Node &cur_node, Node
     }
   }
 
-  for (auto& out: cur_node.out_edges()) {
-    auto sink_node = out.sink.get_node();
-    if(sink_node.get_type_op() == TupGet_Op) {
-      is_leaf = false;
-      auto spin = out.sink;
-      dfs_create_flattened_hier_inp(dfg, sink_node, spin, new_hier_name, inp_artifacts, inp2leaf_artifact_spins);
+  if (cur_ntype != AttrSet_Op) {
+    for (auto& out: cur_node.out_edges()) {
+      auto sink_node = out.sink.get_node();
+      auto sink_ntype = sink_node.get_type_op();
+      if (sink_ntype == TupGet_Op) {
+        is_leaf = false;
+        auto spin = out.sink;
+        dfs_create_flattened_hier_inp(dfg, spin, new_hier_name, inp_artifacts);
+      }
+
+      if(sink_ntype == Or_Op && sink_node.inp_edges().size() == 1) { //sink_node is an assign_or_op
+        is_leaf = false;
+        auto spin = out.sink;
+        dfs_create_flattened_hier_inp(dfg, spin, new_hier_name, inp_artifacts);
+      }
     }
   }
 
@@ -1426,7 +1450,6 @@ void Lnast_tolg::dfs_create_flattened_hier_inp(LGraph *dfg, Node &cur_node, Node
     else 
       ginp = dfg->get_graph_input(new_hier_name);
 
-    fmt::print("leaf node :{}\n", cur_node.debug_name());
     inp2leaf_artifact_spins[ginp].emplace_back(cur_node_spin);
     return;
   }
@@ -1436,7 +1459,6 @@ void Lnast_tolg::dfs_create_flattened_hier_inp(LGraph *dfg, Node &cur_node, Node
 void Lnast_tolg::setup_lgraph_ios_and_final_var_name(LGraph *dfg) {
   absl::flat_hash_map<std::string_view, Node_pin> vname2dpin; //Pyrope variable -> dpin with the largest ssa var subscription
   absl::flat_hash_set<Node> inp_artifacts;
-  absl::flat_hash_map<Node_pin, std::vector<Node_pin>> inp2leaf_artifact_spins;
   for (auto node: dfg->forward()) {
     auto dpin = node.get_driver_pin(0);
     auto ntype = node.get_type_op();
@@ -1447,8 +1469,7 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(LGraph *dfg) {
       auto hier_name_base = std::string(dpin.get_name().substr(1, dpin.get_name().size()-3));
       for (auto &out : node.out_edges()) {
         auto spin = out.sink;
-        auto sink_node = out.sink.get_node();
-        dfs_create_flattened_hier_inp(dfg, sink_node, spin, hier_name_base, inp_artifacts, inp2leaf_artifact_spins);
+        dfs_create_flattened_hier_inp(dfg, spin, hier_name_base, inp_artifacts);
       }
       continue;
     } 
