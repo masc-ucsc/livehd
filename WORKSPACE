@@ -108,12 +108,18 @@ git_repository(
     remote = "https://github.com/masc-ucsc/iassert.git",
     #strip_prefix = "src",
 )
-git_repository(
+#git_repository(
+#    name = "cryptominisat",
+#    commit = "d522ab933584ea812429bfb22f752088ed7be599", # August 10, 2019
+#    remote = "https://github.com/masc-ucsc/cryptominisat.git",
+#    shallow_since = "1565452382 -0700",
+#)
+new_git_repository(
     name = "cryptominisat",
-    #build_file = "BUILD.abseil", # relative to external path
-    commit = "d522ab933584ea812429bfb22f752088ed7be599", # August 10, 2019
-    remote = "https://github.com/masc-ucsc/cryptominisat.git",
-    shallow_since = "1565452382 -0700",
+    build_file = "BUILD.cryptominisat",
+    commit = "f8b1da0eed202953912ff8cca10175eab61c0a1d", # September 1, 2020
+    remote = "https://github.com/msoos/cryptominisat.git",
+    patches = ["//external:patch.cryptominisat"],
 )
 new_git_repository(
     name = "boolector",
