@@ -19,3 +19,12 @@ cc_test(
         ":pass_lec",
     ],
 )
+
+cc_test(
+    name = "boolector_test",
+    srcs = ["boolector_test.cpp"],
+    deps = [
+        "@boolector//:boolector",
+        "@cryptominisat//:cryptominisat",
+    ],
+)

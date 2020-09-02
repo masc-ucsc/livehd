@@ -116,6 +116,13 @@ git_repository(
     shallow_since = "1565452382 -0700",
 )
 new_git_repository(
+    name = "boolector",
+    build_file = "BUILD.boolector",
+    commit = "03d76134f86170ab0767194c339fd080e92ad371", # September 1, 2020
+    remote = "https://github.com/Boolector/boolector",
+    patches = ["//external:patch.boolector"],
+)
+new_git_repository(
     name = "rapidjson",
     build_file = "BUILD.rapidjson",
     commit = "6534506e829a489bda78bc5eac5faa34da0a2c51", # Nov 23, 2019
