@@ -1,0 +1,16 @@
+#  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
+cc_library(
+   name = "cryptominisat",
+   srcs = glob(["cryptominisat5/*.cpp","cryptominisat5/*.c"],exclude=["cryptominisat5/toplevelgauss.cpp","cryptominisat5/main*.cpp","cryptominisat5/watcharray_*.cpp","cryptominisat5/fuzz*.cpp","cryptominisat5/sqlitestats.cpp","cryptominisat5/gatefinder.cpp" ,"cryptominisat5/cl_predictors.cpp", 
+       "cryptominisat5/cms_bosphorus.cpp", # No MIT
+       "cryptominisat5/datasyncserver.cpp", # No MPI
+       "cryptominisat5/cms_breakid.cpp", # No breakid compile option
+]),
+   hdrs = glob(["cryptominisat5/*.h"])
+   ,
+   linkopts = ["-lpthread"],
+   visibility = ["//visibility:public"],
+   defines = ["USE_GAUSS","USE_ZLIB","cryptominisat5_EXPORTS"],
+)
+
