@@ -13,14 +13,13 @@ private:
 protected:
   FlatHashMap write_dict;
   FlatHashMap read_dict;
-
   FlatHashMap perm_write_dict;
   FlatHashMap perm_read_dict;
-
 
   FlatHashSet inefficient_LNAST;
   FlatHashSet output_vars;
   FlatHashSet never_read;
+  FlatHashSet functions;
 
   std::vector<Lnast_nid> lhs_list;
   std::vector<std::vector<Lnast_nid>> rhs_list;
