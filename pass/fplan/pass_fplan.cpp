@@ -13,8 +13,10 @@ void setup_pass_fplan() { Pass_fplan::setup(); }
 
 void Pass_fplan::setup() {
   auto m = Eprp_method("pass.fplan.makefp", "generate a floorplan from an LGraph", &Pass_fplan::pass);
-
   register_pass(m);
+
+  auto dm = Eprp_method("pass.fplan.dumpfp", "dump a DOT file representing the floorplan graph", &Pass_fplan_dump::pass);
+  register_pass(dm);
 }
 
 // turn an LGraph into a graph suitable for HiReg.
@@ -53,7 +55,7 @@ void Pass_fplan::make_graph(Eprp_var& var) {
 
     Node temp(root_lg, hidx, Node::Hardcoded_input_nid);
 
-    auto new_v = gi.make_vertex(temp.debug_name(), lg->size(), lg->get_lgid(), 0);
+    auto new_v = gi.make_vertex(temp.debug_name().substr(18), lg->size(), lg->get_lgid(), 0);
 
     vm.emplace(hidx, new_v);
 
@@ -110,16 +112,6 @@ void Pass_fplan::make_graph(Eprp_var& var) {
       gi.weights[new_e] = weight;
     }
   }
-
-#ifdef FPLAN_DBG_VERBOSE
-  using namespace graph::attributes;
-  std::cout << gi.al.dot_format("weight"_of_edge = gi.weights,
-                                "name"_of_vert   = gi.debug_names,
-                                "area"_of_vert   = gi.areas,
-                                "label"_of_vert  = gi.labels,
-                                "id"_of_vert     = gi.ids)
-            << std::endl;
-#endif
 
   std::cout << "done." << std::endl;
 }

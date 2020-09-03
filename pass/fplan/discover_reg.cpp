@@ -4,30 +4,79 @@
 #include "hier_tree.hpp"
 
 set_t Hier_tree::find_most_freq_pattern(set_t subgraph, const size_t bwidth) const {
-  // TODO: make sure patterns with repeated lgraph ids are accounted for properly
-
-  set_vec_t vp;  // vector of patterns
+  set_vec_t                     vp;
+  std::vector<Lg_type_id::type> initlabel;
 
   // remove verts with duplicate labels
   for (auto v : subgraph) {
     bool found = false;
-    for (auto pat : vp) {
-      if (pat.contains(v)) {
+    for (size_t i = 0; i < vp.size(); i++) {
+      if (initlabel[i] == ginfo.labels(v)) {
         found = true;
       }
     }
     if (!found) {
       vp.push_back(ginfo.al.vert_set());
       vp[vp.size() - 1].insert(v);
+
+      initlabel.push_back(ginfo.labels(v));
     }
   }
 
-  set_t best = vp[0];
+  // get value (# inst of P in G * size(G) + size(P))
+  auto find_value = [&](const set_t pattern) -> unsigned int {
+    set_t        global_found_nodes = ginfo.al.vert_set();
+    unsigned int count              = 0;
 
-  std::map<std::set<Lg_type_id>, unsigned int> memo_map;
+    typedef std::unordered_set<Lg_type_id::type> generic_set_t;  // doesn't need to store unique elements
+    generic_set_t                                gpat;
+
+    for (auto v : pattern) {
+      gpat.insert(ginfo.labels(v));
+    }
+
+    for (auto pv : subgraph) {
+      set_t found_pattern = ginfo.al.vert_set();
+
+      std::function<void(generic_set_t search_pattern, vertex_t v)> check_pattern = [&](generic_set_t search_pattern, vertex_t v) {
+        if (search_pattern.find(ginfo.labels(v)) != search_pattern.end() && !found_pattern.contains(v)
+            && !global_found_nodes.contains(v) && subgraph.contains(v)) {
+          // checked:
+          // 1. label of node is something that exists in our set
+          // 2. we haven't already found it this iteration
+          // 3. we haven't already found it some other iteration
+          // 4. node is in our subgraph
+          found_pattern.insert(v);
+
+          for (auto e : ginfo.al.out_edges(v)) {
+            check_pattern(search_pattern, ginfo.al.head(e));
+          }
+        }
+      };
+
+      check_pattern(gpat, pv);
+      if (found_pattern.size() == pattern.size()) {
+        count++;
+        for (auto v : found_pattern) {
+          global_found_nodes.insert(v);
+        }
+      }
+    }
+
+    unsigned int value = count * subgraph.size() + pattern.size();
+
+    fmt::print("value ({}) = count ({}) * G({}) + P({})\n", value, count, subgraph.size(), pattern.size());
+    return value;
+  };
+
+  set_t best_pat = vp[0];
+  // int   best_val = find_value(vg[0]);
 
   while (vp.size() > 0) {
-    std::vector<set_t> new_vp;
+    std::vector<int> vval(vp.size(), -1);  // hacky map of set_t -> unsigned int
+    // using two vectors because std::map and absl::flat_hash_map fails when passed a set_t...
+
+    set_vec_t new_vp;
     for (auto pat : vp) {
       for (auto v : pat) {
         for (auto e : ginfo.al.out_edges(v)) {
@@ -41,55 +90,16 @@ set_t Hier_tree::find_most_freq_pattern(set_t subgraph, const size_t bwidth) con
       }
     }
 
-    // get value (# inst of P in G * size(G) + size(P))
-    auto find_value = [&](const std::set<Lg_type_id> search_pattern) -> unsigned int {
-      set_t        global_found_nodes = ginfo.al.vert_set();
-      unsigned int count              = 0;
-
-      for (auto pv : subgraph) {
-        set_t found_pattern = ginfo.al.vert_set();
-
-        std::function<void(std::set<Lg_type_id> search_pattern, vertex_t v)> check_pattern
-            = [&](std::set<Lg_type_id> search_pattern, vertex_t v) {
-                if (search_pattern.find(ginfo.labels(v)) != search_pattern.end() && !found_pattern.contains(v)
-                    && !global_found_nodes.contains(v) && subgraph.contains(v)) {
-                  found_pattern.insert(v);
-
-                  for (auto e : ginfo.al.out_edges(v)) {
-                    check_pattern(search_pattern, ginfo.al.head(e));
-                  }
-                }
-              };
-
-        check_pattern(search_pattern, pv);
-        if (found_pattern.size() == search_pattern.size()) {
-          count++;
-          for (auto v : found_pattern) {
-            global_found_nodes.insert(v);
-          }
-        }
-      }
-
-      unsigned int value = count * subgraph.size() + search_pattern.size();
-
-      fmt::print("value ({}) = count ({}) * G({}) + P({})\n", value, count, subgraph.size(), search_pattern.size());
-      return value;
-    };
-
     for (unsigned int i = 0; i < new_vp.size(); i++) {
       fmt::print("pattern {}:\n", i);
-      std::set<Lg_type_id> spat;
-      for (auto v : new_vp[i]) {
-        spat.insert(ginfo.labels(v));
-      }
 
-      auto         mval = memo_map.find(spat);
+      auto         mval = vval[i];
       unsigned int value;
-      if (mval != memo_map.end()) {
-        value = mval->second;
+      if (mval != -1) {
+        value = mval;
       } else {
-        value          = find_value(spat);
-        memo_map[spat] = value;
+        value   = find_value(new_vp[i]);
+        vval[i] = value;
       }
 
       for (auto v : new_vp[i]) {
@@ -97,7 +107,27 @@ set_t Hier_tree::find_most_freq_pattern(set_t subgraph, const size_t bwidth) con
       }
     }
 
-    // TODO: sort using find_value and get first bwidth elems, replace vp, track pbest
+    std::vector<std::pair<size_t, int>> sortvec;
+    for (size_t i = 0; i < new_vp.size(); i++) {
+      sortvec.emplace_back(i, vval[i]);
+    }
+
+    auto cmp = [](auto a, auto b) -> bool { return a.second < b.second; };
+
+    std::sort(sortvec.begin(), sortvec.end(), cmp);
+
+    sortvec.resize(bwidth);
+
+    // sets can't be moved, so we have to copy each element over
+    for (size_t i = 0; i < sortvec.size(); i++) {
+      vp[i].clear();
+      for (auto v : new_vp[sortvec[i].first]) {
+        vp[i].insert(v);
+      }
+    }
+
+    // TODO: bug where vp isn't picking up all the pairs it should be.
+    // TODO: track pbest
 
     // TODO: currently not checking if the same set is created multiple times in the new_vp.
     // might want to do this later to avoid excessive operations on useless graphs...
