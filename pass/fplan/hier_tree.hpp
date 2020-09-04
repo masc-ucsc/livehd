@@ -103,17 +103,13 @@ private:
   // 0th element is always uncollapsed hierarchy
   std::vector<phier> hiers;
 
-  // set, but hashable for fast equality comparison
-  typedef std::unordered_set<vertex_t> hash_set_t;
-  typedef std::vector<hash_set_t>      hset_vec_t;
-
   // find patterns in the collapsed hierarchy
-  hash_set_t find_most_freq_pattern(hash_set_t graph, const size_t bwidth);
+  set_t find_most_freq_pattern(set_t graph, const size_t bwidth);
 
   // list of node types in the pattern and total size of pattern
   typedef std::pair<std::unordered_set<Lg_type_id::type>, size_t> generic_set_t;
 
-  unsigned int find_value(const hash_set_t& subgraph, const hash_set_t& pattern);
-  hset_vec_t   find_other_patterns(const hash_set_t& subgraph, const hash_set_t& pattern);
-  hset_vec_t   find_all_patterns(const hash_set_t& subgraph, const generic_set_t& gpattern);
+  unsigned int find_value(const set_t& subgraph, const set_t& pattern);
+  set_vec_t   find_other_patterns(const set_t& subgraph, const set_t& pattern);
+  set_vec_t   find_all_patterns(const set_t& subgraph, const generic_set_t& gpattern);
 };
