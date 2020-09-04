@@ -231,7 +231,10 @@ void Pass_bitwidth::process_sum(Node &node, XEdge_iterator &inp_edges) {
     } else if (e.driver.get_bits()) {
       Lconst b(1);
       b = b.lsh_op(e.driver.get_bits()) - 1;
-
+      //FIXME->sh: Debug on Lconst(0) - Lconst(0xFFFF) = 0 ??
+      max_val = max_val + b;
+      min_val = min_val + b;
+#if 0
       if (e.sink.get_pid() == 0 || e.sink.get_pid() == 1) {
         max_val = max_val + b;
         min_val = min_val + b;
@@ -239,6 +242,7 @@ void Pass_bitwidth::process_sum(Node &node, XEdge_iterator &inp_edges) {
         max_val = max_val - b;
         min_val = min_val - b;
       }
+#endif
     } else {
       if (e.driver.has_name())
         fmt::print("pass.bitwidth sum:{} has input pin:{} unconstrained\n", node.debug_name(), e.driver.get_name());
@@ -248,9 +252,6 @@ void Pass_bitwidth::process_sum(Node &node, XEdge_iterator &inp_edges) {
       return;
     }
   }
-
-  // fmt::print("sum max:{} min:{}\n", max_val.to_pyrope(), min_val.to_pyrope());
-
   bwmap.emplace(node.get_driver_pin(0).get_compact(), Bitwidth_range(min_val, max_val));
 }
 
@@ -437,7 +438,7 @@ void Pass_bitwidth::process_attr_set_dp_assign(Node &node) {
     return;
   }
 
-  auto           it2 = bwmap.find(dpin_value.get_compact());
+  auto it2 = bwmap.find(dpin_value.get_compact());
   Bitwidth_range bw_value(0);
   if (it2 != bwmap.end()) {
     bw_value = it2->second;
@@ -478,7 +479,7 @@ void Pass_bitwidth::process_attr_set_dp_assign(Node &node) {
       for (auto e : node.out_edges()) {
         dpin_value.connect_sink(e.sink);
       }
-    } else {  // lhs.bits < rhs.bits --> drop rhs bits and reconnect
+    } else {  // rhs.bits > lhs.bits --> drop rhs bits and reconnect
       auto new_node  = node.get_class_lgraph()->create_node(Pick_Op);
       auto zero_node = node.get_class_lgraph()->create_node_const(Lconst(0));
       auto zero_dpin = zero_node.setup_driver_pin();
@@ -494,6 +495,7 @@ void Pass_bitwidth::process_attr_set_dp_assign(Node &node) {
   }
 
   node.del_node();
+  fmt::print("DBG: delete dp_assign\n");
 }
 
 void Pass_bitwidth::process_attr_set_new_attr(Node &node) {
