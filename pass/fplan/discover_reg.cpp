@@ -41,7 +41,7 @@ set_t Hier_tree::find_most_freq_pattern(set_t subgraph, const size_t bwidth) con
       std::function<void(generic_set_t search_pattern, vertex_t v)> check_pattern = [&](generic_set_t search_pattern, vertex_t v) {
         if (search_pattern.find(ginfo.labels(v)) != search_pattern.end() && !found_pattern.contains(v)
             && !global_found_nodes.contains(v) && subgraph.contains(v)) {
-          // checked:
+          // checked here:
           // 1. label of node is something that exists in our set
           // 2. we haven't already found it this iteration
           // 3. we haven't already found it some other iteration
@@ -65,15 +65,25 @@ set_t Hier_tree::find_most_freq_pattern(set_t subgraph, const size_t bwidth) con
 
     unsigned int value = count * subgraph.size() + pattern.size();
 
-    fmt::print("value ({}) = count ({}) * G({}) + P({})\n", value, count, subgraph.size(), pattern.size());
+    if (reg_verbose) {
+      fmt::print("value ({}) = count ({}) * G({}) + P({})\n", value, count, subgraph.size(), pattern.size());
+    }
     return value;
   };
 
+  // copy set by value since std::move doesn't work and '=' isn't defined
+  auto copy_set = [](set_t& dst, set_t& src) {
+    dst.clear();
+    for (auto v : src) {
+      dst.insert(v);
+    }
+  };
+
   set_t best_pat = vp[0];
-  // int   best_val = find_value(vg[0]);
+  int   best_val = find_value(best_pat);
 
   while (vp.size() > 0) {
-    std::vector<int> vval(vp.size(), -1);  // hacky map of set_t -> unsigned int
+    std::vector<int> vval(vp.size(), -1);  // hacky map of set_t -> int
     // using two vectors because std::map and absl::flat_hash_map fails when passed a set_t...
 
     set_vec_t new_vp;
@@ -91,19 +101,25 @@ set_t Hier_tree::find_most_freq_pattern(set_t subgraph, const size_t bwidth) con
     }
 
     for (unsigned int i = 0; i < new_vp.size(); i++) {
-      fmt::print("pattern {}:\n", i);
+      if (reg_verbose) {
+        fmt::print("pattern {}:\n", i);
+      }
 
       auto         mval = vval[i];
       unsigned int value;
       if (mval != -1) {
         value = mval;
+        if (reg_verbose) {
+          fmt::print("  repeat.\n");
+        }
       } else {
         value   = find_value(new_vp[i]);
         vval[i] = value;
-      }
-
-      for (auto v : new_vp[i]) {
-        fmt::print("  {}\n", ginfo.debug_names[v]);
+        for (auto v : new_vp[i]) {
+          if (reg_verbose) {
+            fmt::print("  {}\n", ginfo.debug_names[v]);
+          }
+        }
       }
     }
 
@@ -116,33 +132,31 @@ set_t Hier_tree::find_most_freq_pattern(set_t subgraph, const size_t bwidth) con
 
     std::sort(sortvec.begin(), sortvec.end(), cmp);
 
-    sortvec.resize(bwidth);
+    vp.clear();
 
-    // sets can't be moved, so we have to copy each element over
+    sortvec.resize(std::min(bwidth, sortvec.size()));
+
     for (size_t i = 0; i < sortvec.size(); i++) {
-      vp[i].clear();
-      for (auto v : new_vp[sortvec[i].first]) {
-        vp[i].insert(v);
-      }
+      vp.push_back(ginfo.al.vert_set());
+      copy_set(vp[i], new_vp[sortvec[i].first]);
     }
 
-    // TODO: bug where vp isn't picking up all the pairs it should be.
-    // TODO: track pbest
+    if (sortvec.size() > 0 && sortvec[0].second > best_val) {
+      best_val = sortvec[0].second;
+      copy_set(best_pat, new_vp[sortvec[0].first]);
+    }
 
     // TODO: currently not checking if the same set is created multiple times in the new_vp.
     // might want to do this later to avoid excessive operations on useless graphs...
-
-    break;
   }
 
-  return ginfo.al.vert_set();
+  return best_pat;
 }
 
+// TODO: write this
 void Hier_tree::compress_hier(std::vector<set_t>& plist) { plist.clear(); }
 
 void Hier_tree::discover_regularity(size_t hier_index) {
-  std::cout << "  discovering regularity...";
-
   auto hier = hiers[hier_index];
   I(hier != nullptr);
 
@@ -169,15 +183,15 @@ void Hier_tree::discover_regularity(size_t hier_index) {
     set_t level_children = ginfo.al.vert_set();
     get_level_children(hier, 0, curr_min_depth, level_children);
 
-#ifdef FPLAN_DBG_VERBOSE
-    fmt::print("\ndepth: {}, nodes:\n", curr_min_depth);
-    unsigned int total = 0;
-    for (auto v : level_children) {
-      fmt::print("  node: {:<15}\n", ginfo.debug_names[v]);
-      total++;
+    if (reg_verbose) {
+      fmt::print("\ndepth: {}, nodes:\n", curr_min_depth);
+      unsigned int total = 0;
+      for (auto v : level_children) {
+        fmt::print("  node: {:<15}\n", ginfo.debug_names[v]);
+        total++;
+      }
+      fmt::print("  total: {}\n", total);
     }
-    fmt::print("  total: {}\n", total);
-#endif
 
     do {
       set_t most_freq_pattern = find_most_freq_pattern(level_children, 100);
@@ -187,6 +201,4 @@ void Hier_tree::discover_regularity(size_t hier_index) {
 
     curr_min_depth--;
   }
-
-  std::cout << "done." << std::endl;
 }

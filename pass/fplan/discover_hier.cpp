@@ -42,12 +42,12 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
     sets[triv_sets.first].insert(v1);
     sets[triv_sets.second].insert(v2);
 
-#ifdef FPLAN_DBG_VERBOSE
-    std::cout << "\ntrivial partition:" << std::endl;
-    fmt::print("{:<30}a (aka {}), area {:.2f}\n", info.debug_names(v1), triv_sets.first, info.areas(v1));
-    fmt::print("{:<30}b (aka {}), area {:.2f}\n", info.debug_names(v2), triv_sets.second, info.areas(v2));
-    fmt::print("imb: {:.3f}\n", std::max(info.areas(v1), info.areas(v2)) / (info.areas(v1) + info.areas(v2)));
-#endif
+    if (hier_verbose) {
+      std::cout << "\ntrivial partition:" << std::endl;
+      fmt::print("{:<30}a (aka {}), area {:.2f}\n", info.debug_names(v1), triv_sets.first, info.areas(v1));
+      fmt::print("{:<30}b (aka {}), area {:.2f}\n", info.debug_names(v2), triv_sets.second, info.areas(v2));
+      fmt::print("imb: {:.3f}\n", std::max(info.areas(v1), info.areas(v2)) / (info.areas(v1) + info.areas(v2)));
+    }
 
     return triv_sets;
   }
@@ -112,6 +112,8 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
     }
   }
 
+  // find the total area of both the a and b sets.  If the area is > max_imb, correct it.
+
   double init_a_area = 0.0;
   double init_b_area = 0.0;
 
@@ -126,34 +128,35 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
   constexpr double max_imb  = 2.0 / 3.0;
   auto             area_imb = [](double a1, double a2) -> double { return std::max(a1, a2) / (a1 + a2); };
 
-#ifdef FPLAN_DBG_VERBOSE
-  fmt::print("\nincoming imb: {:.3f}\n", area_imb(init_a_area, init_b_area));
-#endif
+  if (hier_verbose) {
+    fmt::print("\nincoming imb: {:.3f}\n", area_imb(init_a_area, init_b_area));
+  }
 
   if (area_imb(init_a_area, init_b_area) > max_imb) {
     // if the area combo is illegal, add some area to a random node to make it legal.  Not super smart, but it works for now
     size_t add_area_set = (init_a_area > init_b_area) ? new_sets.second : new_sets.first;
     double darea        = (1.0 / max_imb) * std::max(init_a_area, init_b_area) - init_a_area - init_b_area + 0.01;
 
+    // TODO: this is a one-shot for loop - fix it
     for (auto v : sets[add_area_set]) {
-#ifdef FPLAN_DBG_VERBOSE
-      fmt::print("adding area {} to node {:<30}\n", darea, info.debug_names[v]);
-#endif
+      if (hier_verbose) {
+        fmt::print("adding area {} to node {:<30}\n", darea, info.debug_names[v]);
+      }
       info.areas[v] += darea;
       break;
     }
   }
 
-#ifdef FPLAN_DBG_VERBOSE
-  std::cout << "incoming partition:" << std::endl;
-  for (auto v : vert_set) {
-    fmt::print("{:<30}{} (aka {}), area {:.2f}\n",
-               info.debug_names(v),
-               (is_in_a(v) ? "a" : "b"),
-               (is_in_a(v) ? new_sets.first : new_sets.second),
-               info.areas(v));
+  if (hier_verbose) {
+    std::cout << "incoming partition:" << std::endl;
+    for (auto v : vert_set) {
+      fmt::print("{:<30}{} (aka {}), area {:.2f}\n",
+                 info.debug_names(v),
+                 (is_in_a(v) ? "a" : "b"),
+                 (is_in_a(v) ? new_sets.first : new_sets.second),
+                 info.areas(v));
+    }
   }
-#endif
 
   auto cmap = g.vert_map<Min_cut_data>();
 
@@ -290,8 +293,8 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
 
     for (size_t k = 0; k < cv.size(); k++) {
       int    trial_decrease = 0;
-      double new_a_area   = a_area;
-      double new_b_area   = b_area;
+      double new_a_area     = a_area;
+      double new_b_area     = b_area;
       for (size_t i = 0; i < k; i++) {
         // make sure the area imbalance won't climb too high if the swap occurs
         if (area_imb(new_a_area + aav[i], new_b_area + bav[i]) <= max_imb) {
@@ -310,9 +313,9 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
     // if the maximum reduction has a higher external cost than internal cost, there's something we can do.
     if (best_decrease > 0) {
       for (size_t i = 0; i < decrease_index; i++) {
-#ifdef FPLAN_DBG_VERBOSE
-        fmt::print("  swapping {} with {}.\n", info.debug_names(av[i]), info.debug_names(bv[i]));
-#endif
+        if (hier_verbose) {
+          fmt::print("  swapping {} with {}.\n", info.debug_names(av[i]), info.debug_names(bv[i]));
+        }
 
         if (swap_vec[i]) {
           sets[new_sets.first].erase(av[i]);
@@ -345,19 +348,19 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
   double final_imb = std::max(final_a_area, final_b_area) / (final_a_area + final_b_area);
   I(final_imb > 0.0 && final_imb <= 2.0 / 3.0);
 
-#ifdef FPLAN_DBG_VERBOSE
-  std::cout << "\nbest partition:" << std::endl;
-  for (auto v : vert_set) {
-    fmt::print("{:<30}{} (aka {}), cost {}, area {:.2f}\n",
-               info.debug_names(v),
-               (is_in_a(v) ? "a" : "b"),
-               (is_in_a(v) ? new_sets.first : new_sets.second),
-               cmap(v).d_cost,
-               info.areas(v));
-  }
+  if (hier_verbose) {
+    std::cout << "\nbest partition:" << std::endl;
+    for (auto v : vert_set) {
+      fmt::print("{:<30}{} (aka {}), cost {}, area {:.2f}\n",
+                 info.debug_names(v),
+                 (is_in_a(v) ? "a" : "b"),
+                 (is_in_a(v) ? new_sets.first : new_sets.second),
+                 cmap(v).d_cost,
+                 info.areas(v));
+    }
 
-  fmt::print("a area: {:.2f}, b area: {:.2f}, imb: {:.3f}.\n", final_a_area, final_b_area, final_imb);
-#endif
+    fmt::print("a area: {:.2f}, b area: {:.2f}, imb: {:.3f}.\n", final_a_area, final_b_area, final_imb);
+  }
 
   // if we inserted a temporary vertex, remove it from the list of active sets and erase it from the graph
   if (temp_even_vertex != g.null_vert()) {
@@ -381,6 +384,32 @@ phier Hier_tree::discover_hierarchy(Graph_info& info, int start_set, unsigned in
   phier t2 = discover_hierarchy(info, b, num_components);
 
   return make_hier_tree(t1, t2);
+}
+
+void Hier_tree::discover_hierarchy(unsigned int num_components) {
+  I(num_components >= 1);
+
+  // if the graph is not fully connected, ker-lin fails to work.
+  for (const auto& v : ginfo.al.verts()) {
+    for (const auto& ov : ginfo.al.verts()) {
+      if (ginfo.find_edge(v, ov) == ginfo.al.null_edge()) {
+        auto temp_e           = ginfo.al.insert_edge(v, ov);
+        ginfo.weights[temp_e] = 0;
+      }
+    }
+  }
+
+  hiers.push_back(discover_hierarchy(ginfo, 0, num_components));
+
+  // undo temp edge creation because it's really inconvienent elsewhere
+  for (const auto& v : ginfo.al.verts()) {
+    for (const auto& ov : ginfo.al.verts()) {
+      auto e = ginfo.find_edge(v, ov);
+      if (e != ginfo.al.null_edge() && ginfo.weights[e] == 0) {
+        ginfo.al.erase_edge(e);
+      }
+    }
+  }
 }
 
 phier Hier_tree::make_hier_tree(phier t1, phier t2) {
