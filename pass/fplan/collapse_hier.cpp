@@ -65,11 +65,9 @@ phier Hier_tree::collapse(phier node, double threshold_area) {
 }
 
 void Hier_tree::collapse(double threshold_area) {
-  std::cout << "  collapsing hierarchy...";
   I(threshold_area >= 0.0);
 
   if (threshold_area > 0.0) {
     hiers.push_back(collapse(hiers[0], threshold_area));
   }
-  std::cout << "done." << std::endl;
 }

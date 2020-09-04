@@ -11,5 +11,10 @@ livehd> inou.yosys.tolg files:livehd/pass/fplan/tests/hier_test.v root:hier_test
 ```
 lgraph.open name:hier_test |> pass.fplan.makefp
 ```
+if you want debug info about the graph:
+```
+lgraph.open name:hier_test |> pass.fplan.dumpfp
+```
+DOT file will be saved as fplan_dump.dot.
 
 3. output will eventually be saved somewhere.

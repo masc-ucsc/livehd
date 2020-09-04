@@ -1,7 +1,7 @@
 
 #include "pass_fplan.hpp"
 
-#include <set>
+#include <chrono>
 
 #include "graph_info.hpp"
 #include "hier_tree.hpp"
@@ -15,7 +15,7 @@ void Pass_fplan::setup() {
   auto m = Eprp_method("pass.fplan.makefp", "generate a floorplan from an LGraph", &Pass_fplan::pass);
   register_pass(m);
 
-  auto dm = Eprp_method("pass.fplan.dumpfp", "dump a DOT file representing the floorplan graph", &Pass_fplan_dump::pass);
+  auto dm = Eprp_method("pass.fplan.dumpfp", "dump a DOT file representing the recreated hierarchy", &Pass_fplan_dump::pass);
   register_pass(dm);
 }
 
@@ -23,8 +23,6 @@ void Pass_fplan::setup() {
 void Pass_fplan::make_graph(Eprp_var& var) {
   // TODO: check to make sure the lgraph(s) are actually valid before traversing them
   // TODO: after I get this working, harden this code.  Assert stuff.
-
-  std::cout << "  creating floorplan graph...";
 
   Hierarchy_tree* root_tree = nullptr;
   LGraph*         root_lg   = nullptr;
@@ -112,26 +110,48 @@ void Pass_fplan::make_graph(Eprp_var& var) {
       gi.weights[new_e] = weight;
     }
   }
-
-  std::cout << "done." << std::endl;
 }
 
 void Pass_fplan::pass(Eprp_var& var) {
-  std::cout << "\ngenerating floorplan..." << std::endl;
+  auto time = []() -> auto { return std::chrono::system_clock::now(); };
+  auto dur  = [](auto e, auto s) -> auto { return std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count(); };
+
+  fmt::print("\ngenerating floorplan...\n");
+  auto       whole_s = time();
   Pass_fplan p(var);
 
+  fmt::print("  making floorplan graph...");
+  auto s = time();
   p.make_graph(var);
+  auto e = time();
+  fmt::print("done ({} ms).\n", dur(e, s));
 
-  Hier_tree h(std::move(p.gi), 1);
+  Hier_tree h(std::move(p.gi));
+
+  fmt::print("  discovering hierarchy...");
+  s = time();
+  h.discover_hierarchy(1);
+  e = time();
+  fmt::print("done ({} ms).\n", dur(e, s));
+
+  fmt::print("  collapsing hierarchy...");
+  s = time();
   h.collapse(30.0);
   h.collapse(60.0);
-  h.dump();
+  e = time();
+  fmt::print("done ({} ms).\n", dur(e, s));
 
+  // h.dump();
+
+  fmt::print("  discovering regularity...");
+  s = time();
   h.discover_regularity(0);
+  e = time();
+  fmt::print("done ({} ms).\n", dur(e, s));
 
   // 3. <finish HiReg>
   // 4. write code to use the existing hierarchy instead of throwing it away...?
   // HiReg specifies area requirements that a normal LGraph may not fill
-
-  std::cout << "floorplan generated." << std::endl << std::endl;
+  auto whole_e = time();
+  fmt::print("floorplan generated ({} ms).\n\n", dur(whole_e, whole_s));
 }
