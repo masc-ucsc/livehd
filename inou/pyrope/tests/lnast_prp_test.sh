@@ -13,6 +13,7 @@ pts='hier_tuple_io logic
      '
 
 #make sure to call Pyrope_compile() in the end of script
+pts='firrtl_gcd'
 pts_hier='sum funcall'
 pts_hier2='sum2 funcall2'
 pts_hier4='funcall4'
