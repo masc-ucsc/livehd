@@ -16,7 +16,7 @@
 // controls for debug output on various stages
 constexpr bool hier_verbose = false;
 constexpr bool coll_verbose = false;
-constexpr bool reg_verbose  = false;
+constexpr bool reg_verbose  = true;
 
 // a struct representing a node in a hier_tree
 struct Hier_node {
@@ -36,7 +36,7 @@ typedef std::shared_ptr<Hier_node> phier;
 
 class Hier_tree {
 public:
-  Hier_tree(Graph_info&& netlist) : ginfo(std::move(netlist)) {}
+  Hier_tree(Graph_info<g_type>&& netlist) : ginfo(std::move(netlist)) {}
 
   // copies require copying the entire tree and are very expensive.
   Hier_tree(const Hier_tree& other) = delete;
@@ -63,7 +63,7 @@ public:
 
 private:
   // graph containing the divided netlist
-  Graph_info&& ginfo;
+  Graph_info<g_type>&& ginfo;
 
   // data used by min_cut
   struct Min_cut_data {
@@ -75,7 +75,7 @@ private:
 
   // make a partition of the graph minimizing the number of edges crossing the cut and keeping in mind area (modified kernighan-lin
   // algorithm)
-  std::pair<int, int> min_wire_cut(Graph_info& info, int cut_set);
+  std::pair<int, int> min_wire_cut(Graph_info<g_type>& info, int cut_set);
 
   // make a node for insertion into the hierarchy
   phier make_hier_node(const int set);
@@ -84,7 +84,7 @@ private:
   phier make_hier_tree(phier t1, phier t2);
 
   // perform hierarchy discovery
-  phier discover_hierarchy(Graph_info& g, int start_set, unsigned int min_num_components);
+  phier discover_hierarchy(Graph_info<g_type>& g, int start_set, unsigned int min_num_components);
 
   double find_area(phier node) const;
 
@@ -103,8 +103,17 @@ private:
   // 0th element is always uncollapsed hierarchy
   std::vector<phier> hiers;
 
-  // find patterns in the collapsed hierarchy
-  set_t find_most_freq_pattern(set_t graph, const size_t bwidth) const;
+  // set, but hashable for fast equality comparison
+  typedef std::unordered_set<vertex_t> hash_set_t;
+  typedef std::vector<hash_set_t>      hset_vec_t;
 
-  void compress_hier(std::vector<set_t>& pl);
+  // find patterns in the collapsed hierarchy
+  hash_set_t find_most_freq_pattern(hash_set_t graph, const size_t bwidth);
+
+  // list of node types in the pattern and total size of pattern
+  typedef std::pair<std::unordered_set<Lg_type_id::type>, size_t> generic_set_t;
+
+  unsigned int find_value(const hash_set_t& subgraph, const hash_set_t& pattern);
+  hset_vec_t   find_other_patterns(const hash_set_t& subgraph, const hash_set_t& pattern);
+  hset_vec_t   find_all_patterns(const hash_set_t& subgraph, const generic_set_t& gpattern);
 };

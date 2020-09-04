@@ -6,7 +6,7 @@
 #include "hier_tree.hpp"
 #include "i_resolve_header.hpp"
 
-std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
+std::pair<int, int> Hier_tree::min_wire_cut(Graph_info<g_type>& info, int cut_set) {
   auto&      g    = info.al;
   set_vec_t& sets = info.sets;
 
@@ -372,7 +372,7 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info& info, int cut_set) {
   return new_sets;
 }
 
-phier Hier_tree::discover_hierarchy(Graph_info& info, int start_set, unsigned int num_components) {
+phier Hier_tree::discover_hierarchy(Graph_info<g_type>& info, int start_set, unsigned int num_components) {
   if (info.sets[start_set].size() <= num_components) {
     // set contains less than the minimum number of components, so treat it as a leaf node
     return make_hier_node(start_set);
