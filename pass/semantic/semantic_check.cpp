@@ -157,8 +157,9 @@ void Semantic_check::add_to_read_list(std::string_view node_name, std::string_vi
 void Semantic_check::print_out_of_scope_vars(Lnast* lnast) {
   if (out_of_scope_vars.size() != 0) {
     error_print_lnast_var_warn(lnast, out_of_scope_vars);
+    std::sort(out_of_scope_vars.begin(), out_of_scope_vars.end());
     auto first_entry = out_of_scope_vars.begin();
-    fmt::print(fmt::fg(fmt::color::blue), "Out of Scope Variable Warning");
+    fmt::print(fmt::fg(fmt::color::blue), "Out of Scope Variable Error:");
     fmt::print(": {}", *first_entry);
     for (auto node_name : out_of_scope_vars) {
       if (node_name == *first_entry) {
@@ -282,7 +283,7 @@ void Semantic_check::resolve_read_write_lists(Lnast* lnast) {
     }
     error_print_lnast_var_warn(lnast, error_reads);
     auto first_entry = never_read.begin();
-    fmt::print(fmt::fg(fmt::color::blue), "Variable Warning");
+    fmt::print(fmt::fg(fmt::color::blue), "Last-Write Variable Warning");
     fmt::print(": Last write(s) to '{}'", *first_entry);
     for (auto node_name : never_read) {
       if (node_name == *first_entry) {
@@ -316,8 +317,9 @@ void Semantic_check::resolve_read_write_lists(Lnast* lnast) {
       error_names.push_back(node_name.first);
     }
     error_print_lnast_var_warn(lnast, error_names);
+    std::sort(error_names.begin(), error_names.end());
     auto first_entry = perm_write_dict.begin();
-    fmt::print(fmt::fg(fmt::color::blue), "Variable Warning");
+    fmt::print(fmt::fg(fmt::color::blue), "Never-Read Variable Warning");
     fmt::print(": {}", first_entry->first);
     for (auto node_name : perm_write_dict) {
       if (node_name == *first_entry) {
@@ -334,6 +336,7 @@ void Semantic_check::resolve_read_write_lists(Lnast* lnast) {
       error_outputs.push_back(node_name);
     }
     error_print_lnast_var_warn(lnast, error_outputs);
+    std::sort(error_outputs.begin(), error_outputs.end());
     auto first_entry = output_vars.begin();
     fmt::print(fmt::fg(fmt::color::blue), "Output Variable Warning");
     fmt::print(": {}", *first_entry);
@@ -898,7 +901,7 @@ void Semantic_check::do_check(Lnast* lnast) {
   if (out_of_scope_vars.size() != 0) {
     error_print_lnast_var_warn(lnast, out_of_scope_vars);
     auto first_entry = out_of_scope_vars.begin();
-    fmt::print(fmt::fg(fmt::color::blue), "Out of Scope Variable Warning");
+    fmt::print(fmt::fg(fmt::color::red), "Out of Scope Variable Error");
     fmt::print(": {}", *first_entry);
     for (auto node_name : out_of_scope_vars) {
       if (node_name == *first_entry) {
