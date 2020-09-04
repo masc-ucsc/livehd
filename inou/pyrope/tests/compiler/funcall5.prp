@@ -17,7 +17,6 @@ sum5 = ::{
   %otup         = tmp_otup1
   
   tmp_out1      = tmp_itup1.a + tmp_itup1.b
-  // tmp_out1      = tmp_itup.a + tmp_itup.b
   tmp_out2      = tmp_out1
   %out          = tmp_out2     
 
@@ -31,10 +30,10 @@ sum5 = ::{
 }
 
 subinp = (a = 3, b = 4)
-res  = sum5(inp = subinp, c = 5) //%out = (otup = (o1 = foo, o2 = bar), out = baz)
+res  = sum5(itup = subinp, c = 5) //%out = (otup = (o1 = foo, o2 = bar), out = baz)
 %out = res
 // 3 outputs in total
-// \out.otup.o1
-// \out.otup.o2
-// \out.cat
+// out.otup.o1
+// out.otup.o2
+// out.c
 
