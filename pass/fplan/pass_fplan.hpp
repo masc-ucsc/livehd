@@ -16,7 +16,7 @@ private:
 
   void make_graph(Eprp_var &var);
 
-  Graph_info gi;
+  Graph_info<g_type> gi;
 };
 
 class Pass_fplan_dump : public Pass {
@@ -26,7 +26,4 @@ public:
   static void setup();
 
   static void pass(Eprp_var &v);
-
-private:
-  
 };
