@@ -45,48 +45,14 @@ we should not sacrifice speed, insertion/deletion, bidirectional, and Index_ID
 stability.
 
 
-```
-Graph_core {
-protected:
-  mmap_lib::vector storage;   // replaces old LGraph::node_internal
-  Index_ID next16_free;       // Pointer to 16byte free chunks
-  Index_ID next64_free;       // Pointer to 64byte free chunks
-
-public:
-  void add_edge(Index_ID s, Index_ID d); // Add edge from s->d and d->s
-  void del_edge(Index_ID s, Index_ID d); // Remove both s->d and d->s
-
-  const Index_iter out_idx(Index_ID s) const;  // Iterate over the out edges of s
-  const Index_iter inp_idx(Index_ID s) const;  // Iterate over the inp edges of s
-
-  // unlike the const iterator, it should allow to delete edges/nodes while
-  // traversing
-
-  Index_iter fast(); // faster iterator returning all the master_root Index_ID
-
-  Index_iter out_idx(Index_ID s);  // Iterate over the out edges of s (*it is Index_ID)
-  Index_iter inp_idx(Index_ID s);  // Iterate over the inp edges of s
-  Index_iter edge_idx(Index_ID s); // Iterate over the inp and out edges of s
-
-  uint8_t get_type(Index_ID s) const;  // set/get type on the master_root idx (s or pointed by s)
-  void    set_type(Index_ID s);
-
-  Port_ID get_pid() const; // pid for master or 0 for master_root
-
-  Index_ID create_master_root(uint8_t type);       // Create a master root node
-  Index_ID create_master(Index_ID m, Port_ID pid); // Create a master and point to master root m
-  void delete(Index_ID s);                         // Delete node s, all related edges and masters (if master root)
-};
-```
-
 Graph_core has 4 node types in storage: master, master_root, overflow, and free
 
-master_root (16bytes): This is the IDX/NID for the Node and Node_pin when PID is 0. It has the following fields:
+master_root (12bytes): This is the IDX/NID for the Node and Node_pin when PID is 0. It has the following fields:
 
-* edge_list 104bits: Using a vbyte compression. This is the list of IDX for
+* edge_storage: Using a vbyte compression. This is the list of ID for
   input/output. The list is ordered to allow fast search. The ordered nature
-  also allows better compression for vbyte. At most 8 edges are stored. If
-  more, overflow is triggered
+  also allows better compression for vbyte. At most 6 edges are stored (6 bits in inp_mask). 
+  If more, overflow is triggered
 * master_next 4bits: It is the pointer to the next master node in same cell.
   The ptr is to the edge list. If 0xF, no next
 * overflow_next 4bits: Similar to master_next but points to an overflow edge
@@ -97,9 +63,9 @@ master_root (16bytes): This is the IDX/NID for the Node and Node_pin when PID is
 * root 1bit: set to true
 * chunk64 1bit: set to false
 
-master (16bytes): This is the IDX/NID for Node_pins with PID>0. It has the following fields:
+master (12bytes): This is the IDX/NID for Node_pins with PID>0. It has the following fields:
 
-* edge_list 88bits: Using a vbyte compression. This is the list of IDX for
+* edge_storage: Using a vbyte compression. This is the list of IDX for
   input/output. The list is ordered to allow fast search. The ordered nature
   also allows better compression for vbyte.
 * master_prev 4bits: It is the pointer to the master node. It must be populated
@@ -110,9 +76,9 @@ master (16bytes): This is the IDX/NID for Node_pins with PID>0. It has the follo
 * root 1bit: set to false
 * chunk64 1bit: set to false
 
-overflow (64bytes): This is overflow edge list for either inputs or outputs (not both).
+overflow (48bytes): This is overflow edge list for either inputs or outputs (not both).
 
-* edge_list 504bits: Using a varintgb compression (for our lg sizes, performs
+* edge_storage (47 bytes): Using a varintgb compression (for our lg sizes, performs
   better than streambyte/bp128/vbyte/pfor). Since the list is larger the faster
   (but not as high compression with small list) varintgb is used. The integers
   are relative to the master (or master_root) that points to this
@@ -129,19 +95,26 @@ free (16 or 64 bytes): This is just an empty node that keeps the link list of fr
 * chunk64 1bit: set to true for 64bytes chunks
 
 
-The overflow (and free 64bytes) are always 64byte aligned. As a result, a chunk
-of 64 bytes is either 4 master/master_root/free16 or 1 chunk of 64bytes. This
-allows faster iteration for the fast pass. The last bit in the 64byte chunk
-indicates if it is a 64 or a 16byte chunk (1 means 64byte). To distinguish
+The overflow (and free 48bytes) are always 48byte aligned. As a result, a chunk
+of 48 bytes is either 4 master/master_root/free12 or 1 chunk of 48bytes. This
+allows faster iteration for the fast pass. The last bit in the 48byte chunk
+indicates if it is a 48 or a 12byte chunk (1 means 48byte). To distinguish
 between master and master_root we use the root field.
 
-Some potential optimizations to explore is to reduce to 12bytes (vs 16) and 48 vs (64). Also,
-to use a variation of the simple-8b encoding for 70 (master_root with 12bytes).
+The vbyte may be an option, but a simple-8b encoding variation optimized for our common sizes
+would require (2 bits stored somewhere else)
 
-3: 2x34
-2: 4x17
-1: 12+5x11+12
-0: 2x9+4x8+2x9
+master: (8 bytes 64bits)
+3: 2x32
+2: 4x16
+1: 5x9+19
+0: 12+4x10+12
+
+master_root: (9 bytes or 72bits -2 code -> 70bits)
+3: 6+2x32
+2: 18+17+17+18
+1: 5x10+20
+0: 2x12+2x11_2x12
 
 ## Verilog input with a slang 2 LNAST pass
 
