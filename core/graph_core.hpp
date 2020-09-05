@@ -47,18 +47,16 @@ public:
 
 class Graph_core {
 protected:
-  class __attribute__((packed)) Entry48 {
-    uint8_t  edge_storage[48-1];
+  class __attribute__((packed)) Entry64 { // AKA Overflow Entry
+    uint8_t  edge_storage[64-1];
     uint8_t  last_byte;
   protected:
-    constexpr Entry48() : edge_storage{0,},last_byte(0x80) {
+    constexpr Entry64() : edge_storage{0,},last_byte(0) {
     }
-    void set_input()  { last_byte |= 0xC0; } // set 6thbit (and 7th is always set)
-    void set_output() { last_byte &= 0xBF; } // clear 6th bit
+    void set_input()  { last_byte |= 0x80; } // set 8th bit
+    void set_output() { last_byte &= 0x7F; } // clear 8th bit
 
-    constexpr Index_ID get_overflow() const; // returns the next Entry48 if overflow, zero otherwise
-
-    constexpr bool is_overflow() const { return (last_byte & 0x80)==0x80; }
+    constexpr Index_ID get_overflow() const; // returns the next Entry64 if overflow, zero otherwise
 
     void fill_inp(std::vector<Index_ID> &ev) const; // fill the list of edges to ev (requires expand)
     void fill_out(std::vector<Index_ID> &ev) const; // fill the list of edges to ev (requires expand)
@@ -66,39 +64,40 @@ protected:
     bool try_add_sink(Index_ID id); // return false if there was no space
 
   };
-  class __attribute__((packed)) Entry12 {
-    uint8_t  edge_storage[12-4];
-    uint8_t  edge_storate_or_pid_bits; // edge_store in master_root, pid in master
-    uint8_t  ptrs_next; // master_next (only in master_root, otherwise pid bits) and overflow_next
-    uint8_t  inp_mask;  // 6bits inp_mast, 2 lower bits is driver_set, sink_set
-    uint8_t  last_byte;
+
+  class __attribute__((packed)) Entry16 { // AKA master or master_root entry
+    uint8_t  edge_storage[16-5];
+    uint16_t edge_storate_or_pid_bits; // edge_store in master_root, 16 pid bits in master
+    uint8_t  pid_bits_or_type:6;       // type in master_root, 6 pid bits in master
+    uint8_t  driver_set:1;
+    uint8_t  sink_set:1;               // different from inp_mask!=0 because bidirectional edges
+    uint8_t  ptrs;                     // master_next in master_root (master_prev in master) and overflow_next
+    uint8_t  inp_mask:7;               // 7bits inp_mask (8 or 0b111 means not used)
+    uint8_t  master_root:1;            // for speed good to remember root vs master (pid==0?)
   protected:
-    constexpr Entry12() : edge_storage{0,}, edge_storate_or_pid_bits(0), ptrs_next(0xFF), inp_mask(0), last_byte(0) {
+    constexpr Entry16() : edge_storage{0,}, edge_storate_or_pid_bits(0), pid_bits_or_type(0), driver_set(0), sink_set(0), ptrs(0xFF), inp_mask(0), master_root(0) {
     }
 
     void set_master_root();
     void set_master();
 
-    constexpr Index_ID get_overflow() const; // returns the next Entry48 if overflow, zero otherwise
-    constexpr Index_ID get_next() const;     // returns the next Entry12 that is master, zero if none
+    constexpr Index_ID get_overflow() const; // returns the next Entry64 if overflow, zero otherwise
+    constexpr Index_ID get_next() const;     // returns the next Entry16 that is master, zero if none
 
-    constexpr bool is_driver_set()  const { return inp_mask & 0x1; }
-    constexpr bool is_sink_set()    const { return inp_mask & 0x2; }
+    constexpr bool is_driver_set()  const { return driver_set; }
+    constexpr bool is_sink_set()    const { return sink_set; }
+    constexpr bool is_master_root() const { return master_root; }
 
-    constexpr bool is_overflow()    const { return (last_byte & 0x80) == 0x80; }
-    constexpr bool is_master_root() const { return (last_byte & 0xC0) == 0x40; }
-    constexpr bool is_master()      const { return (last_byte & 0xC0) == 0x00; }
-
-    constexpr uint8_t  get_type()   const { assert(is_master_root()); return last_byte & 0x3F; }
+    constexpr uint8_t  get_type()   const { return pid_bits_or_type; }
     constexpr uint32_t get_pid()    const {
       if(is_master_root())
         return 0;
 
-      auto pid = (static_cast<uint32_t>(edge_storate_or_pid_bits)<<10)
-               | (static_cast<uint32_t>(ptrs_next&0xF0)<<2)
-               | (last_byte & 0x3F);
+      uint32_t pid = pid_bits_or_type;
+      pid <<=16;
+      pid  |= edge_storate_or_pid_bits;
 
-      return pid;
+      return pid; //22 bits PID
     }
 
     constexpr Index_ID get_master_root() const; // ptr to master root (zero if itself is root)
@@ -110,7 +109,7 @@ protected:
 
   };
 
-  std::vector<Entry48> table; // to be replaced by mmap_lib::vector once it works
+  std::vector<Entry64> table; // to be replaced by mmap_lib::vector once it works
 
   Index_ID next12_free;       // Pointer to 12byte free chunks
   Index_ID next48_free;       // Pointer to 48byte free chunks
