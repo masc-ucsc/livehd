@@ -372,7 +372,7 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info<g_type>& info, int cut_se
   return new_sets;
 }
 
-phier Hier_tree::discover_hierarchy(Graph_info<g_type>& info, int start_set, unsigned int num_components) {
+Hier_tree::phier Hier_tree::discover_hierarchy(Graph_info<g_type>& info, int start_set, unsigned int num_components) {
   if (info.sets[start_set].size() <= num_components) {
     // set contains less than the minimum number of components, so treat it as a leaf node
     return make_hier_node(start_set);
@@ -412,7 +412,7 @@ void Hier_tree::discover_hierarchy(unsigned int num_components) {
   }
 }
 
-phier Hier_tree::make_hier_tree(phier t1, phier t2) {
+Hier_tree::phier Hier_tree::make_hier_tree(phier t1, phier t2) {
   auto pnode  = std::make_shared<Hier_node>();
   pnode->name = "node_" + std::to_string(node_number);
 
@@ -427,7 +427,7 @@ phier Hier_tree::make_hier_tree(phier t1, phier t2) {
   return pnode;
 }
 
-phier Hier_tree::make_hier_node(const int set) {
+Hier_tree::phier Hier_tree::make_hier_node(const int set) {
   I(set >= 0);
 
   phier pnode = std::make_shared<Hier_node>();

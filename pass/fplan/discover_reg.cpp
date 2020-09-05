@@ -1,7 +1,5 @@
 #include "hier_tree.hpp"
 
-typedef std::unordered_set<Lg_type_id::type> generic_set_t;
-
 // given a generic pattern, find all instantiations of that pattern in a subd
 set_vec_t Hier_tree::find_all_patterns(const Hier_dag& subd, const generic_set_t& gpattern) {
   set_t global_found_nodes = subd.dag.vert_set();
@@ -38,7 +36,7 @@ set_vec_t Hier_tree::find_all_patterns(const Hier_dag& subd, const generic_set_t
   return found_patterns;
 }
 
-generic_set_t Hier_tree::make_generic(const Hier_dag& subd, const set_t& pat) {
+Hier_tree::generic_set_t Hier_tree::make_generic(const Hier_dag& subd, const set_t& pat) {
   generic_set_t gpat;
   for (auto v : pat) {
     gpat.insert(subd.labels(v));
@@ -47,7 +45,7 @@ generic_set_t Hier_tree::make_generic(const Hier_dag& subd, const set_t& pat) {
 }
 
 // get value (# inst of P in G * size(G) + size(P))
-// duplicated from above because we can get a speed increase by only tracking the count of found patterns, not the instantiations
+// some code duplicated from above because we can get a speed increase by only tracking the count of found patterns, not the instantiations
 // themselves
 unsigned int Hier_tree::find_value(const Hier_dag& subd, const set_t& pattern) {
   set_t global_found_nodes = subd.dag.vert_set();
@@ -88,7 +86,7 @@ unsigned int Hier_tree::find_value(const Hier_dag& subd, const set_t& pattern) {
   return value;
 }
 
-generic_set_t Hier_tree::find_most_freq_pattern(const Hier_dag& subd, const size_t bwidth) {
+Hier_tree::generic_set_t Hier_tree::find_most_freq_pattern(const Hier_dag& subd, const size_t bwidth) {
   set_vec_t                     vp;
   std::vector<Lg_type_id::type> initlabel;
 
@@ -221,15 +219,14 @@ generic_set_t Hier_tree::find_most_freq_pattern(const Hier_dag& subd, const size
 void Hier_tree::compress_hier(const Hier_dag& subd, const generic_set_t& gpat) {
   auto vinst = find_all_patterns(subd, gpat);
   if (vinst.size() > 1) {
-    /*
     std::vector<std::pair<vertex_t, unsigned int>> connect_edge_info;
-    std::vector<double>                            internal_vert_info;
+    //std::vector<double>                            internal_vert_info;
     for (auto inst : vinst) {
       for (auto v : inst) {
-        for (auto e : ginfo.al.out_edges(v)) {
-          connect_edge_info.push_back(ginfo.al.head(e), ginfo.weights(e));
+        for (auto e : subd.dag.out_edges(v)) {
+          connect_edge_info.emplace_back(subd.dag.head(e), subd.weights(e));
         }
-        internal_vert_info.push_back(ginfo.areas(v));
+        //internal_vert_info.push_back(subd.areas(v));
         ginfo.al.erase_vert(v);
       }
 
@@ -237,7 +234,6 @@ void Hier_tree::compress_hier(const Hier_dag& subd, const generic_set_t& gpat) {
       // there's no need to generate a whole new hierarchy here,
       // what we have right now maps pretty darn well to what to what we need.
     }
-    */
   }
 }
 
@@ -281,7 +277,8 @@ void Hier_tree::discover_regularity(size_t hier_index, const size_t beam_width) 
       for (auto e : ginfo.al.out_edges(v)) {
         auto ov = ginfo.al.head(e);
         if (hier_nodes.contains(ov)) {
-          hd.dag.insert_edge(v_dag_map[v], v_dag_map[ov]);
+          auto new_e = hd.dag.insert_edge(v_dag_map[v], v_dag_map[ov]);
+          hd.weights[new_e] = ginfo.weights(e);
         }
       }
     }

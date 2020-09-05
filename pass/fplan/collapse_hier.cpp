@@ -1,6 +1,6 @@
 #include "hier_tree.hpp"
 
-phier Hier_tree::collapse(phier node, double threshold_area) {
+Hier_tree::phier Hier_tree::collapse(phier node, double threshold_area) {
   if (find_area(node) >= threshold_area) {
     if (!node->is_leaf()) {
       auto n1 = collapse(node->children[0], threshold_area);
