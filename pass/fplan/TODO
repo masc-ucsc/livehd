@@ -5,9 +5,6 @@ Things to do:
 1. Create boundary curve
 2. Create floorplans
 
-dump hier I created to dotfile and view it!
-add more info to dotfile so kgraphviewer can display more stuff
-
 Things to optimize:
 1. area adjustment algorithm is naive, and inserts area when it isn't necessary
 2. iterating over LGraphs could possibly use some work
@@ -15,13 +12,10 @@ Things to optimize:
 4. check to see if graph lib has fast functions to do what I'm doing myself
 5. set/map -> absl versions
 6. map -> pair of arrays (have to profile this to see if it makes a difference)
-7. use ephemeral sets since the number of nodes in the graph doesn't change that often 
-8. experiment with different kinds of graph types to see if any of em decrease runtime significantly
-9. put more stuff on the heap
+7. put more stuff on the heap
 
 Refactors:
 0. namespace stuff
 1. move recursive versions of functions into lambdas or just use static counters idk
 2. replace '&' in lambdas with actual things used if # things used is small
-3. replace my typedefs with actual graph typedefs
-4. more comments...?
+3. more comments...?

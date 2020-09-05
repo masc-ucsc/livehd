@@ -19,14 +19,17 @@ constexpr bool hier_verbose = false;
 constexpr bool coll_verbose = false;
 constexpr bool reg_verbose  = false;
 
-typedef graph::Bi_adjacency_list dag_type;
-// TODO: change set_t in discover_reg to something else - if the type of a hier_tree changes then things will break.
+typedef g_type dag_type;
 
 // this holds a DAG used by the regularity discovery stage
 class Hier_dag {
 public:
   Hier_dag()
-      : dag(), debug_names(dag.vert_map<std::string>()), labels(dag.vert_map<Lg_type_id>()), verts(dag.vert_map<vertex_t>()) {}
+      : dag()
+      , debug_names(dag.vert_map<std::string>())
+      , labels(dag.vert_map<Lg_type_id>())
+      , verts(dag.vert_map<vertex_t>())
+      , weights(dag.edge_map<unsigned int>()) {}
 
   vertex_t make_vert(const std::string& name, const Lg_type_id& label, const vertex_t& v) {
     auto new_v         = dag.insert_vert();
@@ -36,11 +39,12 @@ public:
 
     return new_v;
   }
-
-  dag_type                               dag;
-  graph::Vert_map<dag_type, std::string> debug_names;
-  graph::Vert_map<dag_type, Lg_type_id>  labels;
-  graph::Vert_map<dag_type, vertex_t>    verts;
+  
+  dag_type                                dag;
+  graph::Vert_map<dag_type, std::string>  debug_names;
+  graph::Vert_map<dag_type, Lg_type_id>   labels;
+  graph::Vert_map<dag_type, vertex_t>     verts;
+  graph::Edge_map<dag_type, unsigned int> weights;
 };
 
 // a struct representing a node in a hier_tree
@@ -56,8 +60,6 @@ struct Hier_node {
 
   bool is_leaf() const { return children[0] == nullptr && children[1] == nullptr; }
 };
-
-typedef std::shared_ptr<Hier_node> phier;
 
 class Hier_tree {
 public:
@@ -87,6 +89,8 @@ public:
   void discover_regularity(size_t hier_index, const size_t beam_width);
 
 private:
+  using phier = std::shared_ptr<Hier_node>;
+
   // graph containing the divided netlist
   Graph_info<g_type>&& ginfo;
 
@@ -95,7 +99,7 @@ private:
     int  d_cost;  // difference between the external and internal cost of the node
     bool active;  // whether the node is being considered for a swap or not
   };
-  
+
   // make a partition of the graph minimizing the number of edges crossing the cut and keeping in mind area (modified kernighan-lin
   // algorithm)
   std::pair<int, int> min_wire_cut(Graph_info<g_type>& info, int cut_set);
@@ -126,7 +130,7 @@ private:
   // 0th element is always uncollapsed hierarchy
   std::vector<phier> hiers;
 
-  typedef std::unordered_set<Lg_type_id::type> generic_set_t;
+  using generic_set_t = std::unordered_set<Lg_type_id::type>;
 
   generic_set_t make_generic(const Hier_dag& subd, const set_t& pat);
 

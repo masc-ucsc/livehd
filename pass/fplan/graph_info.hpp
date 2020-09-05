@@ -6,12 +6,13 @@
 #include "i_resolve_header.hpp"
 #include "lgraph_base_core.hpp"
 
-typedef graph::Bi_adjacency_list g_type;
+// Out_adjacency_list is buggy
+using g_type = graph::Bi_adjacency_list;
 
-typedef g_type::Vert       vertex_t;
-typedef g_type::Edge       edge_t;
-typedef g_type::Vert_set   set_t;
-typedef std::vector<set_t> set_vec_t;
+using vertex_t  = g_type::Vert;
+using edge_t    = g_type::Edge;
+using set_t     = g_type::Vert_set;
+using set_vec_t = std::vector<set_t>;
 
 // this holds a graph and all the related map information.
 template <typename GImp>
