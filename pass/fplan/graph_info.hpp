@@ -1,7 +1,7 @@
 #pragma once
 
-#include <unordered_set>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "i_resolve_header.hpp"
 #include "lgraph_base_core.hpp"
@@ -20,9 +20,9 @@ public:
   GImp                                 al;
   graph::Vert_map<GImp, std::string>   debug_names;  // can remove later, mostly for debugging
   graph::Vert_map<GImp, unsigned long> ids;          // TODO: is this required?
-  graph::Vert_map<GImp, double>        areas;
-  graph::Vert_map<GImp, Lg_type_id>    labels;  // what LGraph a node represents
-  graph::Edge_map<GImp, unsigned int>  weights;
+  graph::Vert_map<GImp, double>        areas;        // area of the node
+  graph::Vert_map<GImp, Lg_type_id>    labels;       // what LGraph a node represents
+  graph::Edge_map<GImp, unsigned int>  weights;      // number of wires in a connection between two nodes
   std::vector<graph::Vert_set<GImp>>   sets;
 
   // We have to use the "template" keyword here because the compiler doesn't know how to compile Graph_info since al is not an

@@ -12,11 +12,38 @@
 #include <vector>
 
 #include "graph_info.hpp"
+#include "i_resolve_header.hpp"
 
 // controls for debug output on various stages
 constexpr bool hier_verbose = false;
 constexpr bool coll_verbose = false;
-constexpr bool reg_verbose  = true;
+constexpr bool reg_verbose  = false;
+
+typedef std::unordered_set<Lg_type_id::type> generic_set_t;
+
+typedef graph::Bi_adjacency_list dag_type;
+// TODO: change set_t in discover_reg to something else - if the type of a hier_tree changes then things will break.
+
+// this holds a DAG used by the regularity discovery stage
+class Hier_dag {
+public:
+  Hier_dag()
+      : dag(), debug_names(dag.vert_map<std::string>()), labels(dag.vert_map<Lg_type_id>()), verts(dag.vert_map<vertex_t>()) {}
+
+  vertex_t make_vert(const std::string& name, const Lg_type_id& label, const vertex_t& v) {
+    auto new_v         = dag.insert_vert();
+    debug_names[new_v] = name;
+    labels[new_v]      = label;
+    verts[new_v]         = v;
+
+    return new_v;
+  }
+
+  dag_type                               dag;
+  graph::Vert_map<dag_type, std::string> debug_names;
+  graph::Vert_map<dag_type, Lg_type_id>  labels;
+  graph::Vert_map<dag_type, vertex_t>    verts;
+};
 
 // a struct representing a node in a hier_tree
 struct Hier_node {
@@ -59,7 +86,7 @@ public:
   void collapse(double threshold_area);
 
   // discover similar subgraphs in the collapsed hierarchy
-  void discover_regularity(size_t hier_index);
+  void discover_regularity(size_t hier_index, const size_t beam_width);
 
 private:
   // graph containing the divided netlist
@@ -103,13 +130,14 @@ private:
   // 0th element is always uncollapsed hierarchy
   std::vector<phier> hiers;
 
+  generic_set_t make_generic(const Hier_dag& subd, const set_t& pat);
+
+  set_vec_t    find_all_patterns(const Hier_dag& subd, const generic_set_t& gpattern);
+
+  unsigned int find_value(const Hier_dag& subd, const set_t& pattern);
+
   // find patterns in the collapsed hierarchy
-  set_t find_most_freq_pattern(set_t graph, const size_t bwidth);
+  generic_set_t find_most_freq_pattern(const Hier_dag& subd, const size_t bwidth);
 
-  // list of node types in the pattern and total size of pattern
-  typedef std::pair<std::unordered_set<Lg_type_id::type>, size_t> generic_set_t;
-
-  unsigned int find_value(const set_t& subgraph, const set_t& pattern);
-  set_vec_t   find_other_patterns(const set_t& subgraph, const set_t& pattern);
-  set_vec_t   find_all_patterns(const set_t& subgraph, const generic_set_t& gpattern);
+  void compress_hier(const Hier_dag& subd, const generic_set_t& gpat);
 };
