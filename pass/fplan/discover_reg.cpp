@@ -1,5 +1,7 @@
 #include "hier_tree.hpp"
 
+typedef std::unordered_set<Lg_type_id::type> generic_set_t;
+
 // given a generic pattern, find all instantiations of that pattern in a subd
 set_vec_t Hier_tree::find_all_patterns(const Hier_dag& subd, const generic_set_t& gpattern) {
   set_t global_found_nodes = subd.dag.vert_set();
