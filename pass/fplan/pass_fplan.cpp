@@ -145,7 +145,7 @@ void Pass_fplan::pass(Eprp_var& var) {
 
   fmt::print("  discovering regularity...");
   s = time();
-  h.discover_regularity(0);
+  h.discover_regularity(0, 15);
   e = time();
   fmt::print("done ({} ms).\n", dur(e, s));
 
