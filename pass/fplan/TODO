@@ -23,6 +23,5 @@ Refactors:
 0. namespace stuff
 1. move recursive versions of functions into lambdas or just use static counters idk
 2. replace '&' in lambdas with actual things used if # things used is small
-3. seperate verbose output per-stage
-4. replace my typedefs with actual graph typedefs
-5. more comments...?
+3. replace my typedefs with actual graph typedefs
+4. more comments...?

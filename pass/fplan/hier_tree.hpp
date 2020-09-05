@@ -19,8 +19,6 @@ constexpr bool hier_verbose = false;
 constexpr bool coll_verbose = false;
 constexpr bool reg_verbose  = false;
 
-typedef std::unordered_set<Lg_type_id::type> generic_set_t;
-
 typedef graph::Bi_adjacency_list dag_type;
 // TODO: change set_t in discover_reg to something else - if the type of a hier_tree changes then things will break.
 
@@ -34,7 +32,7 @@ public:
     auto new_v         = dag.insert_vert();
     debug_names[new_v] = name;
     labels[new_v]      = label;
-    verts[new_v]         = v;
+    verts[new_v]       = v;
 
     return new_v;
   }
@@ -97,9 +95,7 @@ private:
     int  d_cost;  // difference between the external and internal cost of the node
     bool active;  // whether the node is being considered for a swap or not
   };
-
-  typedef decltype(graph::Bi_adjacency_list().vert_map<Min_cut_data>()) Min_cut_map;
-
+  
   // make a partition of the graph minimizing the number of edges crossing the cut and keeping in mind area (modified kernighan-lin
   // algorithm)
   std::pair<int, int> min_wire_cut(Graph_info<g_type>& info, int cut_set);
@@ -130,9 +126,11 @@ private:
   // 0th element is always uncollapsed hierarchy
   std::vector<phier> hiers;
 
+  typedef std::unordered_set<Lg_type_id::type> generic_set_t;
+
   generic_set_t make_generic(const Hier_dag& subd, const set_t& pat);
 
-  set_vec_t    find_all_patterns(const Hier_dag& subd, const generic_set_t& gpattern);
+  set_vec_t find_all_patterns(const Hier_dag& subd, const generic_set_t& gpattern);
 
   unsigned int find_value(const Hier_dag& subd, const set_t& pattern);
 
