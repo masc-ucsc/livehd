@@ -1,7 +1,7 @@
 #!/bin/bash
 rm -rf ./lgdb
 
-pts_to_do='lhs_wire3 tuple'
+pts_to_do='lhs_wire3 tuple funcall_unnamed2'
 pts='firrtl_gcd hier_tuple_io logic
      reg_bits_set tuple_copy 
      hier_tuple hier_tuple2 hier_tuple3
@@ -13,7 +13,7 @@ pts='firrtl_gcd hier_tuple_io logic
      '
 
 # make sure to call Pyrope_compile() in the end of script
-# pts='firrtl_gcd'
+# pts='funcall5'
 pts_hier='sum funcall'
 pts_hier2='sum2 funcall2'
 pts_hier4='funcall4'

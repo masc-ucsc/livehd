@@ -8,6 +8,7 @@ pts='Trivial TrivialArith TrivialAdd NotAnd
      RegisterSimple Register RegXor Decrementer
      GCD Flop Rob MemoryController ICache HwachaSequencer'
 #pts='GCD Flop regex'
+# pts='BundleCombiner'
 
 pts_hier='FinalVal2Test'
 pts_hier2='FinalValTest'

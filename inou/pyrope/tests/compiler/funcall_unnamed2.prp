@@ -1,0 +1,14 @@
+add = ::{ 
+  $a + $b 
+}
+
+sub = ::{ 
+  $a - $b 
+}
+
+dowork = ::{
+ %o = $fun($a,$b)
+}
+
+x = dowork(fun = add, a = 3, b = 1)
+y = dowork(fun = sub, a = 3, b = 1)
