@@ -45,49 +45,65 @@ we should not sacrifice speed, insertion/deletion, bidirectional, and Index_ID
 stability.
 
 
+Some characteristic that we want:
+
+* Use 16 bytes most of the time for node and node_pin entries (2-4 edges + next is typical)
+* ID 0 is reserved to indicated free/unused
+* Cluster nodes (and node_pins) in continuous sequence of 64 entries. This
+  helps the locality/utilization of other structures. This means that nodes
+  (master_root) can be 1,2,3,4...63, and master can not be 5,6, (64..127 is OK).
+  Same for overflow but since overflow is 4x bigger, it is just 16 continuous
+  overflow IDs.
+* It may be possible to fit in 12 bytes, but the 64 continuous alignment favors 16 bytes
+* IDs should be stable. This means that once assigned, can not be "moved" or "reused" unless deleted.
+* Since master/master_root are clustered in 64 entries. The iterator should leverage this for speed.
+* master/master_root/overflow are grouped in 1KByte entries (64x16 master/master_root or 16x64 overflow)
+
+* The iterator needs to know where are the master/master_root chunks. There is a control table (1KByte)
+each 1MByte (the first 64 entries in the mmap/vector are control table). The control table indicates
+the following 1023 (1023-1) entries if they belong to master/master_root/overflow/free
+
 Graph_core has 4 node types in storage: master, master_root, overflow, and free
 
-master_root (12bytes): This is the IDX/NID for the Node and Node_pin when PID is 0. It has the following fields:
+master_root (16bytes): This is the entry (ID) for the Node and Node_pin when PID is 0. It has the following fields:
 
-* edge_storage: Using a vbyte compression. This is the list of ID for
-  input/output. The list is ordered to allow fast search. The ordered nature
-  also allows better compression for vbyte. At most 6 edges are stored (6 bits in inp_mask). 
-  If more, overflow is triggered
+* edge_storage: simple-8b variation
+* type 6bits: the node type (2 bit
 * master_next 4bits: It is the pointer to the next master node in same cell.
   The ptr is to the edge list. If 0xF, no next
 * overflow_next 4bits: Similar to master_next but points to an overflow edge
   node for when too many edges exists. If 0xF no overflow
 * inp_mask 8bits: input mask. The edge_list are input/output edges relative the
   this node IDX.
-* type 7bits: the node type (6bits not 8 to allow space for chunk64)
-* root 1bit: set to true
-* chunk64 1bit: set to false
+* driver_set (1bit)
+* sink_set (1bit)
 
-master (12bytes): This is the IDX/NID for Node_pins with PID>0. It has the following fields:
+master (16bytes): This is the entry (ID) for Node_pins with PID>0. It has the following fields:
 
-* edge_storage: Using a vbyte compression. This is the list of IDX for
-  input/output. The list is ordered to allow fast search. The ordered nature
-  also allows better compression for vbyte.
+* edge_storage: same as master_root with 2 byte less (pid space)
+* pid_xtra (14 bits): PID for the Node_pin.
+* driver_set (1bit)
+* sink_set (1bit)
 * master_prev 4bits: It is the pointer to the master node. It must be populated
   (0xF makes no sense)
 * overflow_next 4bits: Similar to master_root overflow_next pointer
 * inp_mask 8bits: Similar to master_root inp_mask
-* pid (23bits): PID for the Node_pin.
-* root 1bit: set to false
-* chunk64 1bit: set to false
 
-overflow (48bytes): This is overflow edge list for either inputs or outputs (not both).
+overflow (64bytes): This is overflow edge list for either inputs or outputs (not both).
 
-* edge_storage (47 bytes): Using a varintgb compression (for our lg sizes, performs
-  better than streambyte/bp128/vbyte/pfor). Since the list is larger the faster
-  (but not as high compression with small list) varintgb is used. The integers
-  are relative to the master (or master_root) that points to this
-  overflow.
+* edge_storage (63 bytes): Using a varintgb compression or simple8b variation.
 * overflow_next 6bits: Similar to master_root overflow_next pointer. Used when
   this overflow is not large enough.
 * all_inputs 1bits: true when all the edge list are input edges, false when all
   the edge lists are output edges.
-* chunk64 1bit: set to true
+
+
+control (1024Bytes);
+
+* bitmap for present master  (1024 entries or 128bytes)
+* bitmap for present master_root  (1024 entries or 128bytes)
+* bitmap for present overflow  (128bytes)
+
 
 free (16 or 64 bytes): This is just an empty node that keeps the link list of free nodes
 
@@ -101,20 +117,71 @@ allows faster iteration for the fast pass. The last bit in the 48byte chunk
 indicates if it is a 48 or a 12byte chunk (1 means 48byte). To distinguish
 between master and master_root we use the root field.
 
-The vbyte may be an option, but a simple-8b encoding variation optimized for our common sizes
-would require (2 bits stored somewhere else)
+The vbyte may be an option, but a simple-8b encoding variation optimized for our common deltas.
 
-master: (8 bytes 64bits)
-3: 2x32
-2: 4x16
-1: 5x9+19
-0: 12+4x10+12
+master: (11 bytes 88bits) (2 ctrl bits in lower bit)
+3: 2x32+22   (3)
+2: 4x16+22   (5)
+1: 4x15+2x13 (6)
+0: 5x12+2x13 (7)
 
-master_root: (9 bytes or 72bits -2 code -> 70bits)
-3: 6+2x32
-2: 18+17+17+18
-1: 5x10+20
-0: 2x12+2x11_2x12
+
+master_root: (13 bytes or 104bits -2 code)
+3: 2x32+2x19  (4)
+2: 3x21+20+19 (5)
+1: 4x16+2x19  (6)
+0: 4x15+3x14  (7)
+
+
+## New Visitor Set
+
+Nodes and Node_pins IDs are likely to be continuous. Instead of using a normal set map, we could optimize
+to use a map with 64 bitmap entry.
+
+
+```
+Visitor_set<Node, hier> set("path","file"); // persistant
+Visitor_set<Node, hier> set(top_lg); // ephemeral (not persistant)
+```
+
+```
+set.insert(node);
+set.contains(node);
+for(auto node:set) 
+  ...
+}
+set.insert(pin);
+set.contains(pin);
+for(auto pin:set) 
+  ...
+}
+```
+
+For the set to create nodes (with pointers) it needs to access the
+graph_library when unloaded (only if persistent).
+
+The index in both pin and node is (ID>>6), and then there is a uint64_t
+presence bit for each ID. The reason is that a dense set will have ~32x space
+saving, and a sparse set is by definition small so not significant overhead.
+
+
+Being able handle Node/Pins directly will make the creation faster (building
+from a compact with hierarchy needs to find the current_g which is slow).
+
+## New Memoize Map
+
+Runtime (no persistence) memoization to reduce costly ops. Fixed size at
+compile time, with statistics about hit/miss utilization during DEBUG runs.
+Capacity to enable/disable at compile time if stats change.
+
+
+E.g: avoid calling costly Lgraph::open if frequently used. Or remember last
+insertion point in map/vector if just used....
+
+
+It should be very fast, and able to notify when not useful so that it can be
+enable/disabled per use if needed.
+
 
 ## Verilog input with a slang 2 LNAST pass
 
