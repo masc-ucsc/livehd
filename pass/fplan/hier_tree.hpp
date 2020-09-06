@@ -17,7 +17,9 @@
 // controls for debug output on various stages
 constexpr bool hier_verbose = false;
 constexpr bool coll_verbose = false;
-constexpr bool reg_verbose  = false;
+constexpr bool reg_verbose  = true;
+
+/*
 
 typedef g_type dag_type;
 
@@ -39,13 +41,15 @@ public:
 
     return new_v;
   }
-  
+
   dag_type                                dag;
   graph::Vert_map<dag_type, std::string>  debug_names;
   graph::Vert_map<dag_type, Lg_type_id>   labels;
   graph::Vert_map<dag_type, vertex_t>     verts;
   graph::Edge_map<dag_type, unsigned int> weights;
 };
+
+*/
 
 // a struct representing a node in a hier_tree
 struct Hier_node {
@@ -130,16 +134,17 @@ private:
   // 0th element is always uncollapsed hierarchy
   std::vector<phier> hiers;
 
-  using generic_set_t = std::unordered_set<Lg_type_id::type>;
+  // finding all the instantiations of a pattern needs a generic set that contains the number of verts in a pattern
+  using generic_set_t = std::unordered_multiset<Lg_type_id::type>;
 
-  generic_set_t make_generic(const Hier_dag& subd, const set_t& pat);
+  generic_set_t make_generic(const set_t& pat);
 
-  set_vec_t find_all_patterns(const Hier_dag& subd, const generic_set_t& gpattern);
+  set_vec_t find_all_patterns(const set_t& subg, const generic_set_t& gpattern);
 
-  unsigned int find_value(const Hier_dag& subd, const set_t& pattern);
+  unsigned int find_value(const set_t& subg, const set_t& pattern);
 
   // find patterns in the collapsed hierarchy
-  generic_set_t find_most_freq_pattern(const Hier_dag& subd, const size_t bwidth);
+  generic_set_t find_most_freq_pattern(const set_t& subg, const size_t bwidth);
 
-  void compress_hier(const Hier_dag& subd, const generic_set_t& gpat);
+  void compress_hier(const set_t& subg, const generic_set_t& gpat);
 };

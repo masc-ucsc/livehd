@@ -5,6 +5,9 @@ Things to do:
 1. Create boundary curve
 2. Create floorplans
 
+Quick things to do:
+1. add ratio metric (to indicate if blocks are flexible)
+
 Things to optimize:
 1. area adjustment algorithm is naive, and inserts area when it isn't necessary
 2. iterating over LGraphs could possibly use some work
