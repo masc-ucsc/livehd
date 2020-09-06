@@ -1,0 +1,9 @@
+if $a and $b {
+  #x = $a
+  #y = $b
+  //(#x,#y) = ($a,$b)
+}else{
+  if   #x > #y { %z = #x - #y }
+  else         { %z = #y - #x }
+  if #y == 0   { %z = #x      }
+}
