@@ -415,7 +415,8 @@ void Pass_bitwidth::process_attr_get(Node &node) {
   }
 
   //#ifndef PRESERVE_ATTR_NODE
-  node.del_node();
+  if (!hier) // FIXME: once hier del works
+    node.del_node();
   //#endif
 }
 
@@ -494,7 +495,8 @@ void Pass_bitwidth::process_attr_set_dp_assign(Node &node) {
     }
   }
 
-  node.del_node();
+  if (!hier) // FIXME: once hier del works
+    node.del_node();
   fmt::print("DBG: delete dp_assign\n");
 }
 
@@ -732,7 +734,8 @@ void Pass_bitwidth::bw_pass(LGraph *lg) {
     if (inp_edges.empty() && (op != Const_Op && op != SubGraph_Op && op != LUT_Op && op != TupKey_Op)) {
       fmt::print("pass.bitwidth: removing dangling node:{}\n", node.debug_name());
       fmt::print("node:{}\n", node.debug_name());
-      node.del_node();
+      if (!hier) // FIXME: once hier del works
+        node.del_node();
       continue;
     }
 
@@ -859,7 +862,8 @@ void Pass_bitwidth::bw_pass(LGraph *lg) {
             }
           }
         }
-        node.del_node();
+        if (!hier) // FIXME: once hier del works
+          node.del_node();
       } else if (op == AttrGet_Op) {
         I(false);  // should be deleted by now if solved
       }
