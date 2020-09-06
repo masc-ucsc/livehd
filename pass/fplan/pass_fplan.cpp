@@ -91,13 +91,12 @@ void Pass_fplan::make_graph(Eprp_var& var) {
   };
 
   for (auto ei : edges) {
-    // all connections have to be symmetrical
-
     auto [src, dst, weight] = ei;
 
     auto v1 = vm.at(src);
     auto v2 = vm.at(dst);
 
+    // this is done twice to make bidirectional edges for nodes that may only have outputs or inputs
     auto e_1_2 = find_edge(v1, v2);
     if (e_1_2 == gi.al.null_edge()) {
       auto new_e        = gi.al.insert_edge(v1, v2);

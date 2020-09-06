@@ -24,7 +24,7 @@ public:
   graph::Vert_map<GImp, double>        areas;        // area of the node
   graph::Vert_map<GImp, Lg_type_id>    labels;       // what LGraph a node represents
   graph::Edge_map<GImp, unsigned int>  weights;      // number of wires in a connection between two nodes
-  std::vector<graph::Vert_set<GImp>>   sets;
+  std::vector<graph::Vert_set<GImp>>   sets;         // map of hierarchy nodes -> node(s) in the graph
 
   // We have to use the "template" keyword here because the compiler doesn't know how to compile Graph_info since al is not an
   // explicit type.  The type given at instantiation time could drastically change the behavior of how the class behaves, so we use
