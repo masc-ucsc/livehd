@@ -3,8 +3,8 @@ rm -rf ./lgdb
 rm -rf ./lgdb2
 rm -rf ./*.dot*
 
-pts='logic' # tuple_if'
-folder='cfg' #could be pyrope
+pts='long_gcd' # tuple_if'
+folder='pyrope'
 
 LGSHELL=./bazel-bin/main/lgshell
 
@@ -19,13 +19,6 @@ fi
 
 for pt in $pts
 do
-    echo ""
-    echo ""
-    echo ""
-    echo "===================================================="
-    echo "Compilation to get stable LGraph"
-    echo "===================================================="
-
     echo "----------------------------------------------------"
     echo "Pyrope -> LNAST "
     echo "----------------------------------------------------"
