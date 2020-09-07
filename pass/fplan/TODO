@@ -7,6 +7,7 @@ Things to do:
 
 Quick things to do:
 1. add ratio metric (to indicate if blocks are flexible)
+2. rewrite initial hierarchy printing to use shape=record and dump more info
 
 Things to optimize:
 1. area adjustment algorithm is naive, and inserts area when it isn't necessary
