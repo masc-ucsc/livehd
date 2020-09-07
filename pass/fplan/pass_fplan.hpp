@@ -1,6 +1,7 @@
 #pragma once
 
 #include "graph_info.hpp"
+#include "hier_tree.hpp"
 #include "pass.hpp"
 
 class Pass_fplan : public Pass {
@@ -25,5 +26,6 @@ public:
 
   static void setup();
 
-  static void pass(Eprp_var &v);
+  static void dump_hier(Eprp_var &v);
+  static void dump_tree(Eprp_var &v);
 };

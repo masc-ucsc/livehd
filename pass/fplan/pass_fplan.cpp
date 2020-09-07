@@ -15,8 +15,11 @@ void Pass_fplan::setup() {
   auto m = Eprp_method("pass.fplan.makefp", "generate a floorplan from an LGraph", &Pass_fplan::pass);
   register_pass(m);
 
-  auto dm = Eprp_method("pass.fplan.dumpfp", "dump a DOT file representing the recreated hierarchy", &Pass_fplan_dump::pass);
-  register_pass(dm);
+  auto dhm = Eprp_method("pass.fplan.dumphier", "dump a DOT file representing the recreated hierarchy", &Pass_fplan_dump::dump_hier);
+  register_pass(dhm);
+
+  auto dtm = Eprp_method("pass.fplan.dumptree", "dump a DOT file representing the hierarchy tree", &Pass_fplan_dump::dump_tree);
+  register_pass(dtm);
 }
 
 // turn an LGraph into a graph suitable for HiReg.
@@ -144,7 +147,7 @@ void Pass_fplan::pass(Eprp_var& var) {
 
   fmt::print("  discovering regularity...");
   s = time();
-  h.discover_regularity(0, 15);
+  h.discover_regularity(0, 10);
   e = time();
   fmt::print("done ({} ms).\n", dur(e, s));
 
