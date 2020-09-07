@@ -392,9 +392,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
 
     RTLIL::SigSpec lhs = RTLIL::SigSpec(output_map[pin.get_compact()]);
 
-    for (const auto &e : pin.get_node().inp_edges()) {
-      if (e.sink.get_pid() != pin.get_pid())
-        continue;
+    for (const auto &e : pin.get_sink_from_output().inp_edges()) {
 
       RTLIL::SigSpec rhs = RTLIL::SigSpec(get_wire(e.driver));
       if(rhs == lhs)
