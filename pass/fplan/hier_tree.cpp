@@ -1,3 +1,6 @@
+#include <functional>
+#include "fmt/core.h"
+
 #include "hier_tree.hpp"
 
 void Hier_tree::dump_node(const phier node) const {
@@ -71,7 +74,7 @@ void Hier_tree::dump_hier() const {
   for (size_t i = 0; i < hiers.size(); i++) {
     fmt::print("printing hierarchy {} ({} nodes):\n", i, find_tree_size(hiers[i]));
     dump_node(hiers[i]);
-    std::cout << std::endl;
+    fmt::print("\n");
   }
 }
 

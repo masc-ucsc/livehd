@@ -1,9 +1,13 @@
-
 #include "pass_fplan.hpp"
 
 #include <chrono>
+#include <stdexcept> // for std::runtime_error
+#include <tuple>
+#include <functional>
 
-#include "graph_info.hpp"
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
+
 #include "hier_tree.hpp"
 #include "i_resolve_header.hpp"
 #include "lgedgeiter.hpp"
@@ -15,7 +19,8 @@ void Pass_fplan::setup() {
   auto m = Eprp_method("pass.fplan.makefp", "generate a floorplan from an LGraph", &Pass_fplan::pass);
   register_pass(m);
 
-  auto dhm = Eprp_method("pass.fplan.dumphier", "dump a DOT file representing the recreated hierarchy", &Pass_fplan_dump::dump_hier);
+  auto dhm
+      = Eprp_method("pass.fplan.dumphier", "dump a DOT file representing the recreated hierarchy", &Pass_fplan_dump::dump_hier);
   register_pass(dhm);
 
   auto dtm = Eprp_method("pass.fplan.dumptree", "dump a DOT file representing the hierarchy tree", &Pass_fplan_dump::dump_tree);
