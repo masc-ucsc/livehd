@@ -2,6 +2,8 @@
 #include <sstream>
 #include <string>
 
+#include "fmt/format.h" // for more advanced formatting
+
 #include <functional>
 
 #include <iostream>
@@ -41,7 +43,7 @@ void Pass_fplan_dump::dump_hier(Eprp_var &var) {
 
   dumpfile.close();
 
-  std::cout << "  wrote file " << path << "." << std::endl;
+  fmt::print("  wrote file {}.\n", path);
 }
 
 void Pass_fplan_dump::dump_tree(Eprp_var &var) {
@@ -57,21 +59,26 @@ void Pass_fplan_dump::dump_tree(Eprp_var &var) {
   dotstr << "digraph g {\n\tnode [fontname = \"Source Code Pro\", shape=record];\n";
 
   std::function<void(std::shared_ptr<Hier_node>)> dump_graph_names = [&](std::shared_ptr<Hier_node> root) {
-    dotstr << "\t" << root->name;
+    dotstr << fmt::format("\t{};\n", root->name);
     if (root->is_leaf()) {
-      // graph subset
-      // dotstr << " [label=\"{" << root->graph_subset << "}\"]";
+      for (auto v : h.ginfo.sets[root->graph_subset]) {
+        std::string name = h.ginfo.debug_names(v);
+        name.append("_");
+        name.append(std::to_string(h.ginfo.ids(v)));
+
+        dotstr << fmt::format("\t{} [color=red];\n", name);
+        dotstr << fmt::format("\t{} -> {};\n", name, root->name);
+      }
     }
-    dotstr << ";\n";
 
     if (root->children[0] != nullptr) {
       dump_graph_names(root->children[0]);
-      dotstr << "\t" << root->children[0]->name << " -> " << root->name << ";\n";
+      dotstr << fmt::format("\t{} -> {};\n", root->children[0]->name, root->name);
     }
 
     if (root->children[1] != nullptr) {
       dump_graph_names(root->children[1]);
-      dotstr << "\t" << root->children[1]->name << " -> " << root->name << ";\n";
+      dotstr << fmt::format("\t{} -> {};\n", root->children[1]->name, root->name);
     }
   };
 
@@ -88,5 +95,5 @@ void Pass_fplan_dump::dump_tree(Eprp_var &var) {
 
   dumpfile.close();
 
-  std::cout << "  wrote file " << path << "." << std::endl;
+  fmt::print("  wrote file {}.\n", path);
 }
