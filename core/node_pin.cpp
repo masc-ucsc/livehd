@@ -176,7 +176,15 @@ float Node_pin::get_delay() const { return Ann_node_pin_delay::ref(top_g)->get(g
 
 void Node_pin::set_delay(float val) { Ann_node_pin_delay::ref(top_g)->set(get_compact_driver(), val); }
 
-void Node_pin::set_name(std::string_view wname) { Ann_node_pin_name::ref(current_g)->set(get_compact_class_driver(), wname); }
+void Node_pin::set_name(std::string_view wname) {
+  I(wname.size()); //empty names not allowed
+  Ann_node_pin_name::ref(current_g)->set(get_compact_class_driver(), wname);
+}
+
+void Node_pin::erase_name() {
+  I(has_name());
+  Ann_node_pin_name::ref(current_g)->erase_key(get_compact_class_driver());
+}
 
 // FIXME->sh: could be deprecated if ann_ssa could be mmapped for a std::string_view
 void Node_pin::set_prp_vname(std::string_view prp_vname) {
