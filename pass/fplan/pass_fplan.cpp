@@ -143,13 +143,15 @@ void Pass_fplan::pass(Eprp_var& var) {
   e = time();
   fmt::print("done ({} ms).\n", dur(e, s));
 
-  // h.dump();
+  // h.dump_hier();
 
   fmt::print("  discovering regularity...");
   s = time();
   h.discover_regularity(0, 10);
   e = time();
   fmt::print("done ({} ms).\n", dur(e, s));
+
+  h.dump_dag();
 
   // 3. <finish HiReg>
   // 4. write code to use the existing hierarchy instead of throwing it away...?

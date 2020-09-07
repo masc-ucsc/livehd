@@ -1,15 +1,22 @@
 #include "hier_tree.hpp"
 
+unsigned int Hier_tree::generic_pattern_size(const pattern_t& gset) const {
+  unsigned int total = 0;
+  for (auto p : gset) {
+    total += p.second;
+  }
+  return total;
+}
+
 // given a generic pattern, find all instantiations of that pattern in a subg
-set_vec_t Hier_tree::find_all_patterns(const set_t& subg, const generic_set_t& gpattern) {
+set_vec_t Hier_tree::find_all_patterns(const set_t& subg, const pattern_t& gpattern) const {
   set_vec_t found_patterns;
 
   unsigned int count = 0;
 
-  unsigned int pattern_size = 0;
-  for (auto p : gpattern) {
-    pattern_size += p.second;
-  }
+  unsigned int pattern_size = generic_pattern_size(gpattern);
+
+  I(pattern_size > 1);
 
   auto qualifying_nodes   = ginfo.al.vert_set();
   auto global_found_nodes = ginfo.al.vert_set();
@@ -21,8 +28,8 @@ set_vec_t Hier_tree::find_all_patterns(const set_t& subg, const generic_set_t& g
   }
 
   while (qualifying_nodes.size() > 0) {
-    set_t         pattern_nodes = ginfo.al.vert_set();
-    generic_set_t temp_gpat     = gpattern;
+    set_t     pattern_nodes = ginfo.al.vert_set();
+    pattern_t temp_gpat     = gpattern;
 
     // avoid looking at already-visited nodes, regardless of if they're in a pattern or not
     set_t visited_nodes = ginfo.al.vert_set();
@@ -76,7 +83,8 @@ set_vec_t Hier_tree::find_all_patterns(const set_t& subg, const generic_set_t& g
   }
 
   I(count);
-  I(count * pattern_size < subg.size());
+  // fmt::print("  count ({}) * G({}) + P({})\n", count, subg.size(), pattern_size);
+  I(count * pattern_size <= subg.size());
 
   /*
   if (reg_verbose) {
@@ -88,8 +96,8 @@ set_vec_t Hier_tree::find_all_patterns(const set_t& subg, const generic_set_t& g
   return found_patterns;
 }
 
-Hier_tree::generic_set_t Hier_tree::make_generic(const set_t& pat) {
-  generic_set_t gpat;
+Hier_tree::pattern_t Hier_tree::make_generic(const set_t& pat) const {
+  pattern_t gpat;
   for (auto v : pat) {
     gpat[ginfo.labels(v)] += 1;
   }
@@ -97,7 +105,7 @@ Hier_tree::generic_set_t Hier_tree::make_generic(const set_t& pat) {
 }
 
 // get value (# inst of P in G * size(G) + size(P))
-unsigned int Hier_tree::find_value(const set_t& subg, const set_t& pattern) {
+unsigned int Hier_tree::find_value(const set_t& subg, const set_t& pattern) const {
   auto         inst  = find_all_patterns(subg, make_generic(pattern));
   unsigned int value = inst.size() * subg.size() + pattern.size();
   if (reg_verbose) {
@@ -106,7 +114,7 @@ unsigned int Hier_tree::find_value(const set_t& subg, const set_t& pattern) {
   return value;
 }
 
-Hier_tree::generic_set_t Hier_tree::find_most_freq_pattern(const set_t& subg, const size_t bwidth) {
+Hier_tree::pattern_t Hier_tree::find_most_freq_pattern(const set_t& subg, const size_t bwidth) const {
   set_vec_t                     vp;
   std::vector<Lg_type_id::type> initlabel;
 
@@ -135,8 +143,12 @@ Hier_tree::generic_set_t Hier_tree::find_most_freq_pattern(const set_t& subg, co
   }
   */
 
+  if (vp.size() == 0) {
+    return pattern_t();
+  }
+
   set_t best_pat = vp[0];
-  int   best_val = find_value(subg, best_pat);
+  int   best_val = -1;
 
   auto cmp_set = [](const set_t& a, const set_t& b) -> bool {
     if (a.size() != b.size()) {
@@ -226,56 +238,57 @@ Hier_tree::generic_set_t Hier_tree::find_most_freq_pattern(const set_t& subg, co
   return make_generic(best_pat);
 }
 
-void Hier_tree::compress_hier(const set_t& subg, const generic_set_t& gpat, graph::Vert_map<g_type, phier>& hier_map) {
+void Hier_tree::compress_hier(set_t& subg, const pattern_t& gpat, std::vector<vertex_t>& patset) {
   auto vinst = find_all_patterns(subg, gpat);
 
   for (auto inst : vinst) {
-    // find the node in the hierarchy that's the parent of every node in inst
-    bool  diff_root;
-    phier root;
+    std::string name = "pat";
+    for (auto v : inst) {
+      name.append("_").append(ginfo.debug_names(v));
+    }
 
-    unsigned int up_ctr = 1;
+    double area = 0.0;
+    for (auto v : inst) {
+      area += ginfo.areas[v];
+    }
 
-    do {
-      diff_root = false;
-      root      = hier_map[*(inst.begin())];
-      for (auto v : inst) {
-        if (hier_map[v] != root) {
-          diff_root = true;
-          break;
-        }
+    auto pat_v = ginfo.make_bare_vertex(name, area);
+
+    patset.push_back(pat_v);
+
+    for (auto v : inst) {
+      for (auto e : ginfo.al.out_edges(v)) {
+        auto ov = ginfo.al.head(e);
+        auto e1 = ginfo.al.insert_edge(pat_v, ov);
+        auto e2 = ginfo.al.insert_edge(ov, pat_v);
+
+        ginfo.weights[e1] = ginfo.weights(e);
+        ginfo.weights[e2] = ginfo.weights(e);
       }
+    }
 
-      if (diff_root) {
-        for (auto v : inst) {
-          if (hier_map[v] != nullptr) {
-            hier_map[v] = hier_map[v]->parent;
-          }
-        }
-        up_ctr++;
-      }
-    } while (diff_root);
-
-    // fmt::print("root parent is {}, up level {}.\n", root->name, up_ctr);
-
-    // collapse the root
+    for (auto v : inst) {
+      subg.erase(v);
+    }
   }
 }
-
-// when compressing, only compress the hierarchy - not the actual graph! we need the netlist!
-// when items are compressed, remove them from the set of active nodes (subg)
 
 void Hier_tree::discover_regularity(size_t hier_index, const size_t beam_width) {
   auto hier = hiers[hier_index];
   I(hier != nullptr);
 
-  std::vector<generic_set_t> pattern_list;
-  int                        curr_min_depth = find_tree_depth(hier);
+  auto& pattern_list   = pattern_lists.emplace_back();
+  int  curr_min_depth = find_tree_depth(hier);
 
-  auto hier_map = ginfo.al.vert_map<phier>();
+  unsigned int old_size = 0;
+  unsigned int curr_size;
 
   while (curr_min_depth >= 0) {
     auto hier_nodes = ginfo.al.vert_set();
+
+    // TODO: set_t has some weird segfault problem, but a vector of vertex_t's works fine...?
+    // might be an issue of move vs copy semantics...?
+    std::vector<vertex_t> pat_set;
 
     // get all leaves with depth >= minlevel
     std::function<void(phier, unsigned int, unsigned int)> get_level_nodes
@@ -284,7 +297,6 @@ void Hier_tree::discover_regularity(size_t hier_index, const size_t beam_width) 
               if (level >= minlevel) {
                 for (auto v : ginfo.sets[node->graph_subset]) {
                   hier_nodes.insert(v);
-                  hier_map[v] = node->parent;
                 }
               }
               return;
@@ -296,8 +308,14 @@ void Hier_tree::discover_regularity(size_t hier_index, const size_t beam_width) 
 
     get_level_nodes(hier, 0, curr_min_depth);
 
+    curr_size = hier_nodes.size();
+
     if (reg_verbose) {
-      fmt::print("\ndepth: {}, nodes:\n", curr_min_depth);
+      fmt::print("\ndepth: {}, ", curr_min_depth);
+      if (curr_size == old_size) {
+        fmt::print("repeat, ");
+      }
+      fmt::print("nodes:\n");
       unsigned int total = 0;
       for (auto v : hier_nodes) {
         fmt::print("  node: {:<15}\n", ginfo.debug_names(v));
@@ -306,11 +324,26 @@ void Hier_tree::discover_regularity(size_t hier_index, const size_t beam_width) 
       fmt::print("  total: {}\n", total);
     }
 
-    do {
-      generic_set_t most_freq_pattern = find_most_freq_pattern(hier_nodes, beam_width);
+    pattern_t most_freq_pattern = find_most_freq_pattern(hier_nodes, beam_width);
+
+    while (generic_pattern_size(most_freq_pattern) > 1) {
+      if (curr_size == old_size) {
+        break;  // nothing new to add to pattern_list since our set of nodes didn't grow at all
+      }
+
       pattern_list.push_back(most_freq_pattern);
-      compress_hier(hier_nodes, most_freq_pattern, hier_map);
-    } while (false);  // until no repeating patterns in subg (best pattern size is 1)
+      compress_hier(hier_nodes, most_freq_pattern, pat_set);
+
+      most_freq_pattern = find_most_freq_pattern(hier_nodes, beam_width);
+    }
+
+    old_size = curr_size;
+
+    for (auto v : pat_set) {
+      ginfo.al.erase_vert(v);
+    }
+
+    pat_set.clear();
 
     curr_min_depth--;
   }

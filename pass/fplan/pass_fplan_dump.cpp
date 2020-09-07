@@ -52,7 +52,7 @@ void Pass_fplan_dump::dump_tree(Eprp_var &var) {
     dotstr << "\t" << root->name;
     if (root->is_leaf()) {
       // graph subset
-      dotstr << " [label=\"{" << root->graph_subset << "}\"]";
+      // dotstr << " [label=\"{" << root->graph_subset << "}\"]";
     }
     dotstr << ";\n";
 

@@ -17,9 +17,17 @@ Things to optimize:
 5. set/map -> absl versions
 6. map -> pair of arrays (have to profile this to see if it makes a difference)
 7. put more stuff on the heap
+8. string -> string_view
+9. for loops -> ranges (faster?)
+10. beware of temporaries
+
+build time improvements:
+1. move included headers to .cpp files
+2. if std::set or something is used in a .cpp file, put it in the .cpp file.
 
 Refactors:
 0. namespace stuff
 1. move recursive versions of functions into lambdas or just use static counters idk
 2. replace '&' in lambdas with actual things used if # things used is small
 3. more comments...?
+4. replace fmt strings with macro fmt strings that catch more stuff at compile time

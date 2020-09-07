@@ -50,7 +50,7 @@ public:
       , weights(std::move(other.weights))
       , sets(std::move(other.sets)) {}
 
-  vertex_t make_temp_vertex(std::string debug_name, double area, size_t set) {
+  vertex_t make_temp_vertex(const std::string& debug_name, double area, size_t set) {
     auto nv = al.insert_vert();
 
     ids[nv]         = ++unique_id_counter;
@@ -70,12 +70,13 @@ public:
     return nv;
   }
 
-  vertex_t make_vertex(std::string debug_name, double area, Lg_type_id label, size_t set) {
+  vertex_t make_vertex(const std::string& debug_name, double area, const Lg_type_id label, const size_t set) {
     auto nv = al.insert_vert();
 
-    ids[nv]         = ++unique_id_counter;
-    areas[nv]       = area;
-    debug_names[nv] = debug_name.append(std::string("_").append(std::to_string(unique_id_counter)));
+    ids[nv]   = ++unique_id_counter;
+    areas[nv] = area;
+    // debug_names[nv] = debug_name.append(std::string("_").append(std::to_string(unique_id_counter)));
+    debug_names[nv] = debug_name;
     labels[nv]      = label;
 
     sets[set].insert(nv);
@@ -83,7 +84,18 @@ public:
     return nv;
   }
 
-  edge_t find_edge(vertex_t v_src, vertex_t v_dst) {
+  vertex_t make_bare_vertex(const std::string& debug_name, const double area) {
+    auto nv = al.insert_vert();
+
+    ids[nv]   = ++unique_id_counter;
+    areas[nv] = area;
+    // debug_names[nv] = debug_name.append(std::string("_").append(std::to_string(unique_id_counter)));
+    debug_names[nv] = debug_name;
+
+    return nv;
+  }
+
+  edge_t find_edge(const vertex_t& v_src, const vertex_t& v_dst) const {
     for (auto e : al.out_edges(v_src)) {
       if (al.head(e) == v_dst) {
         return e;

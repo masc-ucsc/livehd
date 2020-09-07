@@ -67,10 +67,23 @@ unsigned int Hier_tree::find_tree_depth(phier node) const {
   return find_depth(node, 0);
 }
 
-void Hier_tree::dump() const {
+void Hier_tree::dump_hier() const {
   for (size_t i = 0; i < hiers.size(); i++) {
     fmt::print("printing hierarchy {} ({} nodes):\n", i, find_tree_size(hiers[i]));
     dump_node(hiers[i]);
     std::cout << std::endl;
+  }
+}
+
+void Hier_tree::dump_dag() const {
+  for (size_t i = 0; i < pattern_lists.size(); i++) {
+    fmt::print("printing dag {} ({} nodes):\n", i, pattern_lists[i].size());
+    for (size_t j = 0; j < pattern_lists[i].size(); j++) {
+      auto pattern = pattern_lists[i][j];
+      fmt::print("printing pattern {} ({} nodes):\n", j, pattern.size());
+      for (auto id : pattern) {
+        fmt::print("  lgid: {}\n", id.first);
+      }
+    }
   }
 }
