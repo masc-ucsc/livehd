@@ -1,0 +1,15 @@
+$clock.__bits = 1
+$reset.__bits = 1
+#x.__bits = 16
+#y.__bits = 16
+$a.__bits = 16
+$b.__bits = 16
+if $a and $b {
+  #x = $a
+  #y = $b
+  //(#x,#y) = ($a,$b)
+}else{
+  if   #x > #y { %z = #x - #y }
+  else         { %z = #y - #x }
+  if #y == 0   { %z = #x      }
+}
