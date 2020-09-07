@@ -6,7 +6,7 @@ sum5 = ::{
   // tmp = $itup  
   // %out = tmp.a + tmp.b + $c
 
-  // case III: intermediate variable for both input/output tuple
+  // case III: intentional intermediate variable for both input/output tuple
   tmp_itup  = $itup
   tmp_itup1 = tmp_itup 
   tmp_otup.o1   = tmp_itup1.a + $c
