@@ -909,7 +909,7 @@ Node_pin Lnast_tolg::setup_node_assign_and_lhs(LGraph *dfg, const Lnast_nid &lni
     dfg->add_edge(aset_vn_dpin, aset_vn_spin);
 
     name2dpin[lhs_name] = aset_node.setup_driver_pin(0); // dummy_attr_set node now represent the latest variable
-    assign_node.get_driver_pin(0).set_name("");
+    //assign_node.get_driver_pin(0).erase_name();
     aset_node.get_driver_pin(0).set_name(lhs_name);
     setup_dpin_ssa(name2dpin[lhs_name], lhs_vname, lnast->get_subs(lhs));
 
