@@ -397,7 +397,8 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         continue;
 
       RTLIL::SigSpec rhs = RTLIL::SigSpec(get_wire(e.driver));
-      assert(rhs != lhs);
+      if(rhs == lhs)
+        continue;
       if (lhs.size() == rhs.size()) {
         module->connect(lhs, rhs);
       } else if (lhs.size() < rhs.size()) {  // Drop bits
