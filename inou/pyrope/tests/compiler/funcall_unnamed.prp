@@ -1,5 +1,7 @@
 func = ::{
   t1 = $[$0]
   t2 = $[$foo]
-  %out[t1] = t2
+  %o[t1] = t2
 }
+
+%out = func(1, foo = 2, 3) // t1 = 2, t2 = 3, %o_2 = 3, %out = 3
