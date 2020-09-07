@@ -5,7 +5,7 @@ rm -rf ./prp_v_LEC_test_dir
 rm -f ./*dot*
 rm -f *.v
 
-pts='logic1'
+pts='logic'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck

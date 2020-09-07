@@ -98,33 +98,33 @@ void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
   while(curr_index!=lnast->invalid_index()) {
     const auto& curr_node_type = lnast->get_type(curr_index);
     auto curlvl = curr_index.level;
-    fmt::print("Processing stmt child {} at level {} \n",lnast->get_name(curr_index), curlvl);
+    fmt::print("Processing stmt child {}:{} at level {} \n", lnast->get_name(curr_index), lnast->get_type(curr_index).debug_name(), curlvl);
 
     assert(!curr_node_type.is_invalid());
     if (curr_node_type.is_assign() || curr_node_type.is_dp_assign()) {
       do_assign(curr_index);
     } else if (curr_node_type.is_if()) {
       do_if(curr_index);
-    } else if (curr_node_type.is_and() ||
-               curr_node_type.is_or() ||
-               curr_node_type.is_not() ||
-               curr_node_type.is_xor() ||
-               curr_node_type.is_logical_not() ||
-               curr_node_type.is_logical_and() ||
-               curr_node_type.is_logical_or() ||
-               curr_node_type.is_same() ||
-               curr_node_type.is_as() ||
-               curr_node_type.is_plus() ||
-               curr_node_type.is_minus() ||
-               curr_node_type.is_mult() ||
-               curr_node_type.is_div() ||
-               curr_node_type.is_lt() ||
-               curr_node_type.is_le() ||
-               curr_node_type.is_gt() ||
-               curr_node_type.is_ge() ||
+    } else if (curr_node_type.is_and()          ||
+               curr_node_type.is_or()           ||
+               curr_node_type.is_not()          ||
+               curr_node_type.is_xor()          ||
+               curr_node_type.is_logical_not()  ||
+               curr_node_type.is_logical_and()  ||
+               curr_node_type.is_logical_or()   ||
+               curr_node_type.is_same()         ||
+               curr_node_type.is_as()           ||
+               curr_node_type.is_plus()         ||
+               curr_node_type.is_minus()        ||
+               curr_node_type.is_mult()         ||
+               curr_node_type.is_div()          ||
+               curr_node_type.is_lt()           ||
+               curr_node_type.is_le()           ||
+               curr_node_type.is_gt()           ||
+               curr_node_type.is_ge()           ||
                curr_node_type.is_tuple_concat() ||
                curr_node_type.is_tuple_delete() ||
-               curr_node_type.is_shift_left() ||
+               curr_node_type.is_shift_left()   ||
                curr_node_type.is_shift_right()) {
       do_op(curr_index);
     } else if (curr_node_type.is_dot()) {
@@ -159,7 +159,7 @@ void Code_gen::invalid_node() {
 //-------------------------------------------------------------------------------------
 //Process the assign node:
 void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index) {
-  fmt::print("node:assign: {}\n", lnast->get_name(assign_node_index));
+  fmt::print("node:assign: {}:{}\n", lnast->get_name(assign_node_index), lnast->get_type(assign_node_index).debug_name());
   auto curr_index = lnast->get_first_child(assign_node_index);
   std::vector<std::string_view> assign_str_vect;
 
@@ -373,7 +373,7 @@ void Code_gen::do_if(const mmap_lib::Tree_index& if_node_index) {
     node_num++;
     const auto& curr_node_type = lnast->get_type(curr_index);
     auto curlvl = curr_index.level;//for debugging message printing purposes only
-    fmt::print("Processing assign child {} at level {} \n",lnast->get_name(curr_index), curlvl);
+    fmt::print("Processing if child {} at level {} \n",lnast->get_name(curr_index), curlvl);
 
     if(node_num>2) {
       //if(curr_node_type.is_cstmts()) {
@@ -433,7 +433,7 @@ void Code_gen::do_cond(const mmap_lib::Tree_index& cond_node_index) {
 //-------------------------------------------------------------------------------------
 //Process the operator (like and,or,etc.) node:
 void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
-  fmt::print("node:op: {}\n", lnast->get_name(op_node_index));
+  fmt::print("node:op: {}:{}\n", lnast->get_name(op_node_index), lnast->get_type(op_node_index).debug_name());
   auto curr_index = lnast->get_first_child(op_node_index);
   std::vector<std::string_view> op_str_vect;
 
@@ -441,7 +441,8 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
     assert(!(lnast->get_type(curr_index)).is_invalid());
     //const auto& curr_node_data = lnast->get_data(curr_index);
     auto curlvl = curr_index.level;//for debugging message printing purposes only
-    fmt::print("Processing op child {} at level {} \n",lnast->get_name(curr_index), curlvl);
+    auto curpos = curr_index.pos;
+    fmt::print("Processing op child {} at level {} pos {}\n",lnast->get_name(curr_index), curlvl, curpos);
     //std::string tmp_trm = lnast_to->ref_name(std::string(lnast->get_name(curr_index)));
     op_str_vect.push_back(lnast->get_name(curr_index));
     curr_index = lnast->get_sibling_next(curr_index);
@@ -499,8 +500,8 @@ void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index) {
   std::vector<std::string_view> dot_str_vect;
   while(curr_index!=lnast->invalid_index()) {
     assert(!(lnast->get_type(curr_index)).is_invalid());
-    //auto curlvl = curr_index.level;
-    //fmt::print("Processing dot child {} at level {} \n",lnast->get_name(curr_index), curlvl);
+    auto curlvl = curr_index.level;
+    fmt::print("Processing dot child {}:{} at level {} \n",lnast->get_name(curr_index), lnast->get_type(curr_index).debug_name(), curlvl);
     dot_str_vect.push_back(lnast->get_name(curr_index));
     curr_index = lnast->get_sibling_next(curr_index);
   }

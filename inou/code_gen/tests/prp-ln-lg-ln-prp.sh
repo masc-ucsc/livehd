@@ -2,8 +2,9 @@
 rm -rf ./lgdb
 rm -rf ./lgdb2
 rm -rf ./*.dot*
+rm -rf ./prp_ln_lg_ln_prp_dir
 
-pts='lnast_utest' #'funcall4' # tuple_if'
+pts='long_gcd' #lnast_utest' #'funcall4' # tuple_if'
 folder='pyrope'
 
 LGSHELL=./bazel-bin/main/lgshell
@@ -19,20 +20,14 @@ fi
 
 for pt in $pts
 do
-    echo ""
-    echo ""
-    echo ""
-    echo "===================================================="
-    echo "Compilation to get stable LGraph"
-    echo "===================================================="
-
     echo "----------------------------------------------------"
     echo "Pyrope -> LNAST -> LGraph"
     echo "----------------------------------------------------"
 
     #${LGSHELL} "inou.pyrope files:inou/${folder}/tests/compiler/${pt}.prp |> pass.lnast_tolg"
-    ${LGSHELL} "inou.pyrope files:inou/code_gen/tests/${pt}.prp |> pass.lnast_tolg"
-    #${LGSHELL} "inou.pyrope files:${pt}.prp |> pass.lnast_tolg"
+    ${LGSHELL} "inou.pyrope files:inou/${folder}/tests/${pt}.prp |> pass.lnast_tolg"
+    #${LGSHELL} "inou.pyrope files:inou/code_gen/tests/${pt}.prp |> pass.lnast_tolg"
+    #${LGSHELL} "inou.pyrope files:${pt}.prp |> pass.lnast_tolg |> lgraph.dump"
     if [ $? -eq 0 ]; then
       echo "Successfully create the inital LGraph with tuples: ${pt}.cfg"
     else
@@ -51,7 +46,7 @@ do
     echo "cprop and bitwidth"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.cprop"
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.cprop |> lgraph.dump"
     if [ $? -eq 0 ]; then
       echo "Successfully optimize design bitwidth: ${pt}.v"
     else
@@ -67,34 +62,28 @@ do
     echo "PRP->LN->LG optimized completed"
     echo "----------------------------------------------------"
 
-#############################################################
-
     if [[ ${pt} == *_err* ]]; then
-        echo "----------------------------------------------------"
-        echo "Pass! This is a Compile Error Test, No Need to Generate Verilog Code "
-        echo "----------------------------------------------------"
+      echo "----------------------------------------------------"
+      echo "Pass! This is a Compile Error Test, No Need to Generate Verilog Code "
+      echo "----------------------------------------------------"
     fi
-    #${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from verbose:false"
-#############################################################
-    echo ""
     echo "----------------------------------------------------"
     echo "LG->LN starting..."
     echo "----------------------------------------------------"
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.lnast_fromlg |> inou.graphviz.from"
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.lnast_fromlg |> lnast.dump |> inou.graphviz.from"
     if [ $? -eq 0 ]; then
       echo "Successfully converted LGraph to LNAST: ${pt}.prp"
     else
       echo "ERROR: LG -> LN pass failed: ${pt}.prp"
       exit 1
     fi
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.lnast_fromlg |> lnast.dump"
     dot -Tpdf -o ${pt}.lnast.dot.pdf ${pt}.lnast.dot
     echo ""
     echo "----------------------------------------------------"
     echo "LG->LN completed"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.lnast_fromlg |> inou.code_gen.prp"
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.lnast_fromlg |> inou.code_gen.prp odir:prp_ln_lg_ln_prp_dir"
     if [ $? -eq 0 ]; then
       echo "Successful code generation: ${pt}.prp"
     else
