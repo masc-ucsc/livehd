@@ -134,8 +134,8 @@ private:
   // 0th element is always uncollapsed hierarchy
   std::vector<phier> hiers;
 
-  // finding all the instantiations of a pattern needs a generic set that contains the number of verts in a pattern
-  using generic_set_t = std::unordered_multiset<Lg_type_id::type>;
+  // keep track of all the kinds of vertices we can have, as well as how many there are
+  using generic_set_t = std::unordered_map<Lg_type_id::type, unsigned int>;
 
   generic_set_t make_generic(const set_t& pat);
 

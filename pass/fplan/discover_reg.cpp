@@ -2,35 +2,85 @@
 
 // given a generic pattern, find all instantiations of that pattern in a subg
 set_vec_t Hier_tree::find_all_patterns(const set_t& subg, const generic_set_t& gpattern) {
-  set_t global_found_nodes = ginfo.al.vert_set();
-
   set_vec_t found_patterns;
 
-  for (auto pv : subg) {
-    set_t found_pattern = ginfo.al.vert_set();
+  unsigned int count = 0;
 
-    std::function<void(generic_set_t search_pattern, vertex_t v)> check_pattern = [&](generic_set_t search_pattern, vertex_t v) {
-      if (search_pattern.find(ginfo.labels(v)) != search_pattern.end() && !found_pattern.contains(v)
-          && !global_found_nodes.contains(v) && subg.contains(v)) {
-        // checked here:
-        // 1. label of node is something that exists in our set
-        // 2. we haven't already found it this iteration
-        // 3. we haven't already found it some other iteration
-        found_pattern.insert(v);
+  unsigned int pattern_size = 0;
+  for (auto p : gpattern) {
+    pattern_size += p.second;
+  }
 
-        for (auto e : ginfo.al.out_edges(v)) {
-          check_pattern(search_pattern, ginfo.al.head(e));
+  auto qualifying_nodes   = ginfo.al.vert_set();
+  auto global_found_nodes = ginfo.al.vert_set();
+
+  for (auto v : subg) {
+    if (gpattern.count(ginfo.labels(v)) > 0) {
+      qualifying_nodes.insert(v);
+    }
+  }
+
+  while (qualifying_nodes.size() > 0) {
+    set_t         pattern_nodes = ginfo.al.vert_set();
+    generic_set_t temp_gpat     = gpattern;
+
+    // avoid looking at already-visited nodes, regardless of if they're in a pattern or not
+    set_t visited_nodes = ginfo.al.vert_set();
+
+    std::function<void(const vertex_t&)> find_pattern = [&](const vertex_t& v) {
+      visited_nodes.insert(v);
+      pattern_nodes.insert(v);
+
+      I(temp_gpat.at(ginfo.labels(v)) > 0);
+
+      temp_gpat.at(ginfo.labels(v))--;
+
+      for (auto e : ginfo.al.out_edges(v)) {
+        auto ov = ginfo.al.head(e);
+        if (subg.contains(ov) && !visited_nodes.contains(ov) && temp_gpat.count(ginfo.labels(ov)) > 0
+            && temp_gpat.at(ginfo.labels(ov)) && !global_found_nodes.contains(ov)) {
+          find_pattern(ov);
         }
       }
     };
 
-    check_pattern(gpattern, pv);
-    if (found_pattern.size() == gpattern.size()) {
-      found_patterns.push_back(found_pattern);
-      for (auto v : found_pattern) {
+    find_pattern(*(qualifying_nodes.begin()));
+
+    I(pattern_nodes.size() <= pattern_size);
+
+    bool hit_all_nodes = true;
+    if (pattern_nodes.size() == pattern_size) {
+      // detailed check to make sure we got all the right nodes
+      for (auto p : temp_gpat) {
+        if (p.second != 0) {
+          hit_all_nodes = false;
+          break;
+        }
+      }
+    } else {
+      // we didn't find a pattern because the count is wrong
+      hit_all_nodes = false;
+    }
+
+    if (hit_all_nodes) {
+      count++;
+      found_patterns.push_back(pattern_nodes);
+      for (auto v : pattern_nodes) {
         global_found_nodes.insert(v);
       }
     }
+
+    for (auto v : pattern_nodes) {
+      qualifying_nodes.erase(v);
+    }
+  }
+
+  I(count);
+  I(count * pattern_size < subg.size());
+
+  if (reg_verbose) {
+    unsigned int value = count * subg.size() + pattern_size;
+    //fmt::print("  value ({}) = count ({}) * G({}) + P({})\n", value, count, subg.size(), pattern_size);
   }
 
   return found_patterns;
@@ -39,56 +89,19 @@ set_vec_t Hier_tree::find_all_patterns(const set_t& subg, const generic_set_t& g
 Hier_tree::generic_set_t Hier_tree::make_generic(const set_t& pat) {
   generic_set_t gpat;
   for (auto v : pat) {
-    gpat.insert(ginfo.labels(v));
+    gpat[ginfo.labels(v)] += 1;
   }
   return gpat;
 }
 
 // get value (# inst of P in G * size(G) + size(P))
-// some code duplicated from above because we can get a speed increase by only tracking the count of found patterns, not the
-// instantiations themselves
 unsigned int Hier_tree::find_value(const set_t& subg, const set_t& pattern) {
-  set_t global_found_nodes = ginfo.al.vert_set();
-
-  unsigned int count = 0;
-
-  auto gpattern = make_generic(pattern);
-
-  for (auto pv : subg) {
-    set_t found_pattern = ginfo.al.vert_set();
-
-    std::function<void(generic_set_t search_pattern, vertex_t v)> check_pattern = [&](generic_set_t search_pattern, vertex_t v) {
-
-      if (search_pattern.find(ginfo.labels(v)) != search_pattern.end() && !found_pattern.contains(v)
-          && !global_found_nodes.contains(v) && subg.contains(v)) {
-        found_pattern.insert(v);
-
-        if (found_pattern.size() < gpattern.size()) {
-          for (auto e : ginfo.al.out_edges(v)) {
-            check_pattern(search_pattern, ginfo.al.head(e));
-          }
-        }
-      }
-    };
-
-    check_pattern(gpattern, pv);
-    if (found_pattern.size() == gpattern.size()) {
-      count++;
-      for (auto v : found_pattern) {
-        global_found_nodes.insert(v);
-      }
-    }
-  }
-
-  I(count);
-
-  unsigned int value = count * subg.size() + pattern.size();
-
+  auto         inst  = find_all_patterns(subg, make_generic(pattern));
+  unsigned int value = inst.size() * subg.size() + pattern.size();
   if (reg_verbose) {
-    fmt::print("  value ({}) = count ({}) * G({}) + P({})\n", value, count, subg.size(), pattern.size());
+    //fmt::print("  value ({}) = count ({}) * G({}) + P({})\n", value, inst.size(), subg.size(), pattern.size());
   }
-
-  return value;
+  return inst.size() * subg.size() + pattern.size();
 }
 
 Hier_tree::generic_set_t Hier_tree::find_most_freq_pattern(const set_t& subg, const size_t bwidth) {
@@ -112,16 +125,16 @@ Hier_tree::generic_set_t Hier_tree::find_most_freq_pattern(const set_t& subg, co
   }
 
   if (reg_verbose) {
-    fmt::print("initial pattern:\n");
+    // fmt::print("initial pattern:\n");
     for (auto v : vp[0]) {
-      fmt::print("  {}\n", ginfo.debug_names(v));
+      // fmt::print("  {}\n", ginfo.debug_names(v));
     }
   }
 
   set_t best_pat = vp[0];
   int   best_val = find_value(subg, best_pat);
 
-  auto cmp_set = [&](const set_t& a, const set_t& b) -> bool {
+  auto cmp_set = [](const set_t& a, const set_t& b) -> bool {
     if (a.size() != b.size()) {
       return false;
     }
@@ -169,43 +182,26 @@ Hier_tree::generic_set_t Hier_tree::find_most_freq_pattern(const set_t& subg, co
       }
     }
 
-    // hacky set_t -> value map, since hash tables don't take set_t since it doesn't have a default constructor.
-    std::vector<int> memo_vec(new_vp.size(), -1);
-
-    for (unsigned int i = 0; i < new_vp.size(); i++) {
-      if (reg_verbose) {
-        fmt::print("pattern {}:\n", i);
-      }
-
-      auto         mval = memo_vec[i];
-      unsigned int value;
-      if (mval != -1) {
-        value = mval;
-        if (reg_verbose) {
-          fmt::print("  repeat.\n");
-        }
-      } else {
-        value       = find_value(subg, new_vp[i]);
-        memo_vec[i] = value;
-        for (auto v : new_vp[i]) {
-          if (reg_verbose) {
-            fmt::print("  {}\n", ginfo.debug_names(v));
-          }
-        }
-      }
-    }
-
     // pair of [owner of value in new_vp, value]
     std::vector<std::pair<size_t, int>> sortvec;
     for (size_t i = 0; i < new_vp.size(); i++) {
-      sortvec.emplace_back(i, memo_vec[i]);
+      sortvec.emplace_back(i, find_value(subg, new_vp[i]));
     }
 
-    auto cmp = [](auto a, auto b) -> bool { return a.second < b.second; };
+    auto cmp = [](auto a, auto b) -> bool { return a.second > b.second; };
 
     std::sort(sortvec.begin(), sortvec.end(), cmp);
 
     sortvec.resize(std::min(bwidth, sortvec.size()));
+
+    if (reg_verbose) {
+      if (sortvec.size()) {
+        //fmt::print("best pattern, value {}:\n", sortvec[0].second);
+        for (auto v : new_vp[sortvec[0].first]) {
+          // fmt::print("  {}\n", ginfo.debug_names(v));
+        }
+      }
+    }
 
     vp.clear();
 
@@ -218,7 +214,7 @@ Hier_tree::generic_set_t Hier_tree::find_most_freq_pattern(const set_t& subg, co
       copy_set(best_pat, new_vp[sortvec[0].first]);
     }
 
-    break;
+    // break;
   }
 
   return make_generic(best_pat);
@@ -227,26 +223,31 @@ Hier_tree::generic_set_t Hier_tree::find_most_freq_pattern(const set_t& subg, co
 void Hier_tree::compress_hier(const set_t& subg, const generic_set_t& gpat) {
   auto vinst = find_all_patterns(subg, gpat);
   if (vinst.size() > 1) {
+    fmt::print("stuff\n");
     // std::vector<double>                            internal_vert_info;
+    /*
     for (auto inst : vinst) {
       std::vector<std::pair<vertex_t, unsigned int>> connect_edge_info;
 
       for (auto v : inst) {
         for (auto e : ginfo.al.out_edges(v)) {
-          // check if the edge is going to a node that's inside the pattern!!
+          auto ov = ginfo.al.head(e);
 
-          connect_edge_info.emplace_back(ginfo.al.head(e), ginfo.weights(e));
+          if (!inst.contains(ov)) {
+            // only track incoming or outgoing edges
+            connect_edge_info.emplace_back(ginfo.al.head(e), ginfo.weights(e));
+          }
         }
         // internal_vert_info.push_back(subg.areas(v));
-        ginfo.al.erase_vert(v);
+        // ginfo.al.erase_vert(v);
       }
+
+
     }
-
-
+    */
   }
 }
 
-// TODO: fix compress_hier
 // when compressing, only compress the hierarchy - not the actual graph! we need the netlist!
 // when items are compressed, remove them from the set of active nodes (subg)
 
@@ -291,8 +292,8 @@ void Hier_tree::discover_regularity(size_t hier_index, const size_t beam_width) 
     do {
       generic_set_t most_freq_pattern = find_most_freq_pattern(hier_nodes, beam_width);
       pattern_list.push_back(most_freq_pattern);
-      // compress_hier(hier_nodes, most_freq_pattern);
-    } while (false);  // no repeating patterns in subg (pattern size is 1)
+      compress_hier(hier_nodes, most_freq_pattern);
+    } while (false);  // until no repeating patterns in subg (best pattern size is 1)
 
     curr_min_depth--;
   }
