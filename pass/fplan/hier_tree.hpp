@@ -16,40 +16,8 @@
 
 // controls for debug output on various stages
 constexpr bool hier_verbose = false;
-constexpr bool coll_verbose = false;
+//constexpr bool coll_verbose = false;
 constexpr bool reg_verbose  = true;
-
-/*
-
-typedef g_type dag_type;
-
-// this holds a DAG used by the regularity discovery stage
-class Hier_dag {
-public:
-  Hier_dag()
-      : dag()
-      , debug_names(dag.vert_map<std::string>())
-      , labels(dag.vert_map<Lg_type_id>())
-      , verts(dag.vert_map<vertex_t>())
-      , weights(dag.edge_map<unsigned int>()) {}
-
-  vertex_t make_vert(const std::string& name, const Lg_type_id& label, const vertex_t& v) {
-    auto new_v         = dag.insert_vert();
-    debug_names[new_v] = name;
-    labels[new_v]      = label;
-    verts[new_v]       = v;
-
-    return new_v;
-  }
-
-  dag_type                                dag;
-  graph::Vert_map<dag_type, std::string>  debug_names;
-  graph::Vert_map<dag_type, Lg_type_id>   labels;
-  graph::Vert_map<dag_type, vertex_t>     verts;
-  graph::Edge_map<dag_type, unsigned int> weights;
-};
-
-*/
 
 // a struct representing a node in a hier_tree
 struct Hier_node {
@@ -93,6 +61,8 @@ public:
   void discover_regularity(size_t hier_index, const size_t beam_width);
 
 private:
+  friend class Pass_fplan_dump;
+
   using phier = std::shared_ptr<Hier_node>;
 
   // graph containing the divided netlist
@@ -146,5 +116,5 @@ private:
   // find patterns in the collapsed hierarchy
   generic_set_t find_most_freq_pattern(const set_t& subg, const size_t bwidth);
 
-  void compress_hier(const set_t& subg, const generic_set_t& gpat);
+  void compress_hier(const set_t&, const generic_set_t&, graph::Vert_map<g_type, phier>&);
 };
