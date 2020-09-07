@@ -1,3 +1,6 @@
+#include <functional>
+#include "fmt/core.h"
+
 #include "hier_tree.hpp"
 
 unsigned int Hier_tree::generic_pattern_size(const pattern_t& gset) const {

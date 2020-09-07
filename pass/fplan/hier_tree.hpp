@@ -9,7 +9,11 @@
 
 #include <memory>  // for shared_ptr
 #include <string>
+#include <string_view>
 #include <vector>
+#include <unordered_map>
+#include <utility> // for std::pair
+#include <algorithm> // for std::max, std::min, std::sort
 
 #include "graph_info.hpp"
 #include "i_resolve_header.hpp"

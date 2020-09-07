@@ -1,10 +1,11 @@
-#include <fmt/core.h>
+#include <limits>  // for std::numeric_limits
+#include <vector>
+#include <functional>
 
-#include <limits>  // for most negative value in min cut
-#include <vector>  // for min cut
+#include "fmt/core.h"
 
-#include "hier_tree.hpp"
 #include "i_resolve_header.hpp"
+#include "hier_tree.hpp"
 
 std::pair<int, int> Hier_tree::min_wire_cut(Graph_info<g_type>& info, int cut_set) {
   auto&      g    = info.al;
@@ -43,7 +44,7 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info<g_type>& info, int cut_se
     sets[triv_sets.second].insert(v2);
 
     if (hier_verbose) {
-      std::cout << "\ntrivial partition:" << std::endl;
+      fmt::print("\ntrivial partition:\n");
       fmt::print("{:<30}a (aka {}), area {:.2f}\n", info.debug_names(v1), triv_sets.first, info.areas(v1));
       fmt::print("{:<30}b (aka {}), area {:.2f}\n", info.debug_names(v2), triv_sets.second, info.areas(v2));
       fmt::print("imb: {:.3f}\n", std::max(info.areas(v1), info.areas(v2)) / (info.areas(v1) + info.areas(v2)));
@@ -148,7 +149,7 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info<g_type>& info, int cut_se
   }
 
   if (hier_verbose) {
-    std::cout << "incoming partition:" << std::endl;
+    fmt::print("incoming partition:\n");
     for (auto v : vert_set) {
       fmt::print("{:<30}{} (aka {}), area {:.2f}\n",
                  info.debug_names(v),
@@ -349,7 +350,7 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info<g_type>& info, int cut_se
   I(final_imb > 0.0 && final_imb <= 2.0 / 3.0);
 
   if (hier_verbose) {
-    std::cout << "\nbest partition:" << std::endl;
+    fmt::print("\nbest partition:\n");
     for (auto v : vert_set) {
       fmt::print("{:<30}{} (aka {}), cost {}, area {:.2f}\n",
                  info.debug_names(v),

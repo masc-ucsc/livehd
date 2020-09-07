@@ -1,6 +1,14 @@
 #include <fstream>
 #include <sstream>
+#include <string>
 
+#include <functional>
+
+#include <iostream>
+
+#include "i_resolve_header.hpp" // for iassert
+
+#include "hier_tree.hpp"
 #include "pass_fplan.hpp"
 
 void Pass_fplan_dump::dump_hier(Eprp_var &var) {

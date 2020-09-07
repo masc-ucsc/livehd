@@ -1,3 +1,5 @@
+#include <functional>
+
 #include "hier_tree.hpp"
 
 Hier_tree::phier Hier_tree::collapse(phier node, double threshold_area) {
