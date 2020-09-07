@@ -21,7 +21,7 @@
 // controls for debug output on various stages
 constexpr bool hier_verbose = false;
 // constexpr bool coll_verbose = false;
-constexpr bool reg_verbose = true;
+constexpr bool reg_verbose = false;
 
 // a struct representing a node in a hier_tree
 struct Hier_node {
