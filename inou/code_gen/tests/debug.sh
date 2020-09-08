@@ -230,14 +230,19 @@ Pyrope_compile () {
 
 # Pyrope_compile "$pts_hier6" "hier"
 # Pyrope_compile "$pts_hier5" "hier"
-Pyrope_compile "$pts"
+# Pyrope_compile "$pts"
 Pyrope_compile "$pts_hier"  "hier"
-Pyrope_compile "$pts_hier2" "hier"
-Pyrope_compile "$pts_hier4" "hier"
+# Pyrope_compile "$pts_hier2" "hier"
+# Pyrope_compile "$pts_hier4" "hier"
 
+${LGSHELL} "lgraph.open name:funcall |> inou.graphviz.from verbose:false"
+mv funcall.dot funcall.dbg.dot
+${LGSHELL} "lgraph.open name:funcall |> pass.lnast_fromlg |> inou.graphviz.from verbose:false"
+mv funcall.lnast.dot funcall.lnast.raw.dot
+${LGSHELL} "lgraph.open name:funcall |> pass.lnast_fromlg |> pass.lnast_tolg"
 
-rm -f *.v
-rm -f lnast.dot.gld
-rm -f lnast.nodes
-rm -f lnast.nodes.gld
-rm -f *.dot
+# rm -f *.v
+# rm -f lnast.dot.gld
+# rm -f lnast.nodes
+# rm -f lnast.nodes.gld
+# rm -f *.dot
