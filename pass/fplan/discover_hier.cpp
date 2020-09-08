@@ -367,7 +367,7 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info<g_type>& info, int cut_se
   if (temp_even_vertex != g.null_vert()) {
     int loc = find_set(temp_even_vertex);
     sets[loc].erase(temp_even_vertex);
-    // FIXME: g.erase_vert(temp_even_vertex);
+    g.erase_vert(temp_even_vertex);
   }
 
   return new_sets;

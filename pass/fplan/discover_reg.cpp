@@ -350,4 +350,23 @@ void Hier_tree::discover_regularity(size_t hier_index, const size_t beam_width) 
 
     curr_min_depth--;
   }
+
+  // verify that each type of node is represented in some pattern in the dag
+  auto check_pats = [&]() -> bool {
+    for (auto v : ginfo.al.verts()) {
+      bool represented = false;
+      for (auto pat : pattern_list) {
+        if (pat.count(ginfo.labels(v))) {
+          represented = true;
+        }
+      }
+      if (!represented) {
+        return false;
+      }
+    }
+
+    return true;
+  };
+
+  I(check_pats());
 }

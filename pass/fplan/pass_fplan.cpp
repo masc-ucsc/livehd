@@ -145,6 +145,7 @@ void Pass_fplan::pass(Eprp_var& var) {
   s = time();
   h.collapse(30.0);
   h.collapse(60.0);
+  h.collapse(5.0);
   e = time();
   fmt::print("done ({} ms).\n", dur(e, s));
 
@@ -157,6 +158,12 @@ void Pass_fplan::pass(Eprp_var& var) {
   fmt::print("done ({} ms).\n", dur(e, s));
 
   h.dump_dag();
+
+  fmt::print("  constructing boundary curve...");
+  s = time();
+  h.construct_bounds(0, 15);
+  e =  time();
+  fmt::print("done ({} ms).\n", dur(e, s));
 
   // 3. <finish HiReg>
   // 4. write code to use the existing hierarchy instead of throwing it away...?
