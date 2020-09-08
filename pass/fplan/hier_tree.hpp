@@ -7,13 +7,13 @@
 
 #pragma once
 
-#include <memory>  // for shared_ptr
+#include <algorithm>  // for std::max, std::min, std::sort
+#include <memory>     // for shared_ptr
 #include <string>
 #include <string_view>
-#include <vector>
 #include <unordered_map>
-#include <utility> // for std::pair
-#include <algorithm> // for std::max, std::min, std::sort
+#include <utility>  // for std::pair
+#include <vector>
 
 #include "graph_info.hpp"
 #include "i_resolve_header.hpp"
@@ -65,6 +65,9 @@ public:
 
   // discover similar subgraphs in the collapsed hierarchy
   void discover_regularity(size_t hier_index, const size_t beam_width);
+
+  // construct a boundary curve using an exhaustive approach if the number of blocks is < optimal_thresh
+  void construct_bounds(size_t pat_index, unsigned int optimal_thresh);
 
 private:
   friend class Pass_fplan_dump;

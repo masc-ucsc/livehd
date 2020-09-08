@@ -26,6 +26,7 @@ Refactors:
 2. replace '&' in lambdas with actual things used if # things used is small
 3. more comments...?
 4. replace fmt strings with macro fmt strings that catch more stuff at compile time
+5. shorten comparisons if it doesn't impact readability
 
 Things tried:
  - string -> string_view: string_views need to not outlive the string they are initialized with
