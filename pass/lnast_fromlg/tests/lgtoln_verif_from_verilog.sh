@@ -3,9 +3,11 @@ rm -rf ./lgdb
 rm -rf ./lgdb2
 
 pts='trivial3 logic_bitwise_op_gld common_sub
-     operators mux mux2 trivial simple_add
+     operators mux mux2 trivial
      trivial_and assigns compare trivial1
      loop_in_lg loop_in_lg2'
+
+#pts='simple_add'
 
 #TO ADD LIST, but have bugs:
 #  Sign isn't working yet:
