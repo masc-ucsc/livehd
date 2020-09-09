@@ -4,7 +4,7 @@
 
 1. import the hierarchy you want:
 ```
-livehd> inou.yosys.tolg files:livehd/pass/fplan/tests/hier_test.v root:hier_test
+livehd> inou.yosys.tolg files:livehd/pass/fplan/tests/hier_test.v name:hier_test
 ```
 
 2. call fplan on the hierarchy:
