@@ -34,9 +34,13 @@ $ bazel build <target>
 ```
 $ bazel build -c dbg <target>
 ```
- - Release build: full optimization, no debug symbols, assertions turned off
+ - Release build: most optimization, no debug symbols, assertions turned off
 ```
 $ bazel build -c opt <target>
+```
+ - Benchmarking build: aggressive optimization for the current architecture (binary may not be portable!)
+```
+$ bazel build --config=bench <target>
 ```
 
 ## Clear out cache (not needed in most cases)
