@@ -85,7 +85,7 @@ void Hier_tree::dump_dag() const {
       auto pattern = pattern_lists[i][j];
       fmt::print("  printing pattern {} ({} nodes):\n", j, pattern.size());
       for (auto id : pattern) {
-        fmt::print("    lgid: {}\n", id.first);
+        fmt::print("    label: {}\n", id.first);
       }
     }
   }

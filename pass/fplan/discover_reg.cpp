@@ -244,6 +244,9 @@ Hier_tree::pattern_t Hier_tree::find_most_freq_pattern(const set_t& subg, const 
 void Hier_tree::compress_hier(set_t& subg, const pattern_t& gpat, std::vector<vertex_t>& patset) {
   auto vinst = find_all_patterns(subg, gpat);
 
+  static unsigned int pat_count = 0;
+  fmt::print("\npattern {} has {} instantiations.\n", pat_count++, vinst.size());
+
   for (auto inst : vinst) {
     std::string name = "pat";
     for (auto v : inst) {

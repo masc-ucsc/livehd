@@ -64,9 +64,9 @@ void Pass_fplan_dump::dump_tree(Eprp_var &var) {
       for (auto v : h.ginfo.sets[root->graph_subset]) {
         std::string name = h.ginfo.debug_names(v);
         name.append("_");
-        name.append(std::to_string(h.ginfo.ids(v)));
+        name.append(std::to_string(h.ginfo.ids(v))); // create a unique label for each node, not just each node type
 
-        dotstr << fmt::format("\t{} [color=red];\n", name);
+        dotstr << fmt::format("\t{} [label=\"{{{} | {{lb {} | id {}}}}}\", color=red];\n", name, name, h.ginfo.labels(v), h.ginfo.ids(v));
         dotstr << fmt::format("\t{} -> {};\n", name, root->name);
       }
     }

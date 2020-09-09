@@ -1,13 +1,12 @@
 #include "pass_fplan.hpp"
 
 #include <chrono>
-#include <stdexcept> // for std::runtime_error
-#include <tuple>
 #include <functional>
+#include <stdexcept>  // for std::runtime_error
+#include <tuple>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
-
 #include "hier_tree.hpp"
 #include "i_resolve_header.hpp"
 #include "lgedgeiter.hpp"
@@ -32,21 +31,16 @@ void Pass_fplan::make_graph(Eprp_var& var) {
   // TODO: check to make sure the lgraph(s) are actually valid before traversing them
   // TODO: after I get this working, harden this code.  Assert stuff.
 
-  Hierarchy_tree* root_tree = nullptr;
-  LGraph*         root_lg   = nullptr;
-
-  // TODO: finding the root lgraph may require the user to pass in a root lgraph name.
-  // not sure if I can legally find it automatically.
-  for (auto lg : var.lgs) {
-    if (lg->get_lgid() == 1) {
-      root_tree = lg->ref_htree();
-      root_lg   = lg;
-    }
+  if (var.lgs.size() > 1) {
+    throw std::runtime_error("cannot find root hierarchy, did you pass more than one lgraph?");
   }
 
-  if (!root_tree) {
-    throw std::runtime_error("empty input hierarchy!");
+  if (!var.lgs.size()) {
+    throw std::runtime_error("no hierarchies found!");
   }
+
+  Hierarchy_tree* root_tree = var.lgs[0]->ref_htree();
+  LGraph*         root_lg   = var.lgs[0];
 
   I(root_tree);
   I(root_lg);
@@ -137,7 +131,7 @@ void Pass_fplan::pass(Eprp_var& var) {
 
   fmt::print("  discovering hierarchy...");
   s = time();
-  h.discover_hierarchy(1);
+  h.discover_hierarchy(100);
   e = time();
   fmt::print("done ({} ms).\n", dur(e, s));
 
@@ -153,7 +147,7 @@ void Pass_fplan::pass(Eprp_var& var) {
 
   fmt::print("  discovering regularity...");
   s = time();
-  h.discover_regularity(0, 10);
+  h.discover_regularity(0, 15);
   e = time();
   fmt::print("done ({} ms).\n", dur(e, s));
 
@@ -162,7 +156,7 @@ void Pass_fplan::pass(Eprp_var& var) {
   fmt::print("  constructing boundary curve...");
   s = time();
   h.construct_bounds(0, 15);
-  e =  time();
+  e = time();
   fmt::print("done ({} ms).\n", dur(e, s));
 
   // 3. <finish HiReg>
