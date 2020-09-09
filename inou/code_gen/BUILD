@@ -14,3 +14,16 @@ cc_library(
     ],
 )
 
+sh_test(
+    name = "prp_v_LEC_test.sh",
+    srcs = ["tests/prp_v_LEC_test.sh"],
+    data = [
+        "//inou/yosys:liblgraph_yosys.so",
+        "//main:lgshell",
+    ],
+    deps = [
+        "//inou/yosys:scripts",
+    ]
+)
+
+
