@@ -5,7 +5,7 @@ rm -rf ./prp_v_LEC_test_dir
 rm -f ./*dot*
 rm -f *.v
 
-pts='logic'
+pts='logic if bits_rhs'
 
 pts_hier='sum funcall'
 
