@@ -14,28 +14,24 @@ void Pass_fplan_dump::dump_hier(Eprp_var &var) {
 
   p.make_graph(var);
 
-  using namespace graph::attributes;
+  // although the graph lib has a way to make dotfiles out of a graph, it doesn't print out enough information.
+  
   std::stringstream dotstr;
-
-  /*
-  // note that we have to be careful about what attributes we give a node because they could coincide with something graphviz uses
-  tempstr << p.gi.al.dot_format("label"_of_edge            = p.gi.weights,
-                                "label"_of_vert            = p.gi.debug_names,
-                                "fplan_area"_of_vert       = p.gi.areas,
-                                "fplan_lgid_label"_of_vert = p.gi.labels,
-                                "fplan_id"_of_vert         = p.gi.ids)
-          << std::endl;
-
-  std::string modstring = tempstr.str();
-  size_t      pos       = modstring.find('\n', 0) + 1;
-  modstring.insert(
-      pos,
-      "\tnode [fontname = \"Source Code Pro\", shape=record];\n");  // patch the dotfile to get kgraphviewer to work properly
-  */
 
   dotstr << "digraph g {\n\tnode [fontname = \"Source Code Pro\", shape=record];\n";
 
   for (auto v : p.gi.al.verts()) {
+    auto name  = p.gi.debug_names(v);
+    auto id    = p.gi.ids(v);
+    auto label = p.gi.labels(v);
+    auto area  = p.gi.areas(v);
+    dotstr << fmt::format("\t{} [label=\"{{{} | {{lb {} | id {} | area {}}}}}\"];\n", id, name, label, id, area);
+  }
+
+  for (auto e : p.gi.al.edges()) {
+    auto src = p.gi.ids(p.gi.al.tail(e));
+    auto dst = p.gi.ids(p.gi.al.head(e));
+    dotstr << fmt::format("\t{} -> {} [label={}];\n", src, dst, p.gi.weights(e));
   }
 
   dotstr << "}";
