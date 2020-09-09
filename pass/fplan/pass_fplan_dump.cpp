@@ -1,16 +1,12 @@
 #include <fstream>
+#include <functional>
+#include <iostream>
 #include <sstream>
 #include <string>
 
-#include "fmt/format.h" // for more advanced formatting
-
-#include <functional>
-
-#include <iostream>
-
-#include "i_resolve_header.hpp" // for iassert
-
+#include "fmt/format.h"  // for more advanced formatting
 #include "hier_tree.hpp"
+#include "i_resolve_header.hpp"  // for iassert
 #include "pass_fplan.hpp"
 
 void Pass_fplan_dump::dump_hier(Eprp_var &var) {
@@ -19,7 +15,9 @@ void Pass_fplan_dump::dump_hier(Eprp_var &var) {
   p.make_graph(var);
 
   using namespace graph::attributes;
-  std::stringstream tempstr;
+  std::stringstream dotstr;
+
+  /*
   // note that we have to be careful about what attributes we give a node because they could coincide with something graphviz uses
   tempstr << p.gi.al.dot_format("label"_of_edge            = p.gi.weights,
                                 "label"_of_vert            = p.gi.debug_names,
@@ -33,13 +31,21 @@ void Pass_fplan_dump::dump_hier(Eprp_var &var) {
   modstring.insert(
       pos,
       "\tnode [fontname = \"Source Code Pro\", shape=record];\n");  // patch the dotfile to get kgraphviewer to work properly
+  */
+
+  dotstr << "digraph g {\n\tnode [fontname = \"Source Code Pro\", shape=record];\n";
+
+  for (auto v : p.gi.al.verts()) {
+  }
+
+  dotstr << "}";
 
   std::ofstream     dumpfile;
   const std::string path = "hier_dump.dot";
   dumpfile.open(path);
 
   I(dumpfile);
-  dumpfile << modstring;
+  dumpfile << dotstr.str();
 
   dumpfile.close();
 
@@ -64,10 +70,14 @@ void Pass_fplan_dump::dump_tree(Eprp_var &var) {
       for (auto v : h.ginfo.sets[root->graph_subset]) {
         std::string name = h.ginfo.debug_names(v);
         name.append("_");
-        name.append(std::to_string(h.ginfo.ids(v))); // create a unique label for each node, not just each node type
+        name.append(std::to_string(h.ginfo.ids(v)));  // create a unique label for each node, not just each node type
 
-        dotstr << fmt::format("\t{} [label=\"{{{} | {{lb {} | id {}}}}}\", color=red];\n", name, name, h.ginfo.labels(v), h.ginfo.ids(v));
-        dotstr << fmt::format("\t{} -> {};\n", name, root->name);
+        dotstr << fmt::format("\t{} [label=\"{{{} | {{lb {} | id {}}}}}\", color=red];\n",
+                              h.ginfo.ids(v),
+                              name,
+                              h.ginfo.labels(v),
+                              h.ginfo.ids(v));
+        dotstr << fmt::format("\t{} -> {};\n", h.ginfo.ids(v), root->name);
       }
     }
 
