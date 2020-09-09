@@ -1,5 +1,10 @@
 #!/bin/bash
 rm -rf ./lgdb
+rm -f *.v
+rm -f lnast.dot.gld
+rm -f lnast.nodes
+rm -f lnast.nodes.gld
+rm -f *.dot
 
 pts_to_do='lhs_wire3 tuple funcall_unnamed2'
 pts='firrtl_gcd hier_tuple_io logic
