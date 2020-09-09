@@ -229,6 +229,10 @@ void Pass_lnast_fromlg::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node, co
 }
 
 void Pass_lnast_fromlg::add_bw_in_ln(Lnast& lnast, Lnast_nid& parent_node, const std::string_view& pin_name, const uint32_t& bits) {
+//creates subtree in LN for the "dot" and corresponding "assign" to depict bw
+//          dot                    assign
+//     /     |     \               /    \
+// tmp_var pin_name __bits     tmp_var  const(bits) 
   auto tmp_var = create_temp_var(lnast);
   auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_dot(""));
   lnast.add_child(idx_dot, Lnast_node::create_ref(tmp_var));
@@ -281,7 +285,7 @@ void Pass_lnast_fromlg::handle_io(LGraph* lg, Lnast_nid& parent_lnast_node, Lnas
       lnast.set_bitwidth(pin_name, bits);
       if (put_bw_in_ln) {
         add_bw_in_ln(lnast, parent_lnast_node,
-            lnast.add_string(absl::StrCat("%", pin_name)), bits);
+            lnast.add_string(absl::StrCat("%", pin_name)), bits);//adds str to lnast->string_pool
       }
     }
   }
@@ -930,8 +934,10 @@ void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_nod
   fmt::print("instance_name:{}, subgraph->get_name():{}\n", pin.get_node().get_name(), sub.get_name());
 
   // Create tuple names for submodule IO.
-  auto inp_tup_name  = lnast.add_string(absl::StrCat("inp_", pin.get_node().get_name()));
-  auto out_tup_name = lnast.add_string(absl::StrCat("out_", pin.get_node().get_name()));
+  //auto inp_tup_name  = lnast.add_string(absl::StrCat("inp_", pin.get_node().get_name()));
+  auto inp_tup_name  = lnast.add_string(pin.get_node().get_name());
+  //auto out_tup_name = lnast.add_string(absl::StrCat("out_", pin.get_node().get_name()));
+  auto out_tup_name = lnast.add_string(pin.get_node().get_name());
 
   // Create + instantiate input tuple.
   auto args_idx = lnast.add_child(parent_node, Lnast_node::create_tuple("args_tuple"));
@@ -945,7 +951,14 @@ void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_nod
 
   // Create actual call to submodule.
   auto func_call_node = lnast.add_child(parent_node, Lnast_node::create_func_call("func_call"));
-  lnast.add_child(func_call_node, Lnast_node::create_ref(out_tup_name));
+ // if (pin.get_node().out_connected_pins().size() == 1) {
+ //   for (const auto dpin : pin.get_node().out_connected_pins()) {
+ //     // will only do 1 iteration
+ //     attach_child(lnast, func_call_node, dpin);
+ //   }
+ // } else {
+    lnast.add_child(func_call_node, Lnast_node::create_ref(out_tup_name));
+ // }
   lnast.add_child(func_call_node, Lnast_node::create_ref(sub.get_name()));
   lnast.add_child(func_call_node, Lnast_node::create_ref(inp_tup_name));
 
@@ -958,17 +971,17 @@ void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_nod
     lnast.add_child(idx_dotasg, Lnast_node::create_ref(port_name));
 
     // Specify output's bw -- NOTE: shouldn't be necessary, but useful for bw pass for now
-    if (put_bw_in_ln) {
-      auto port_bw   = dpin.get_bits();
-      auto temp_var_bw = create_temp_var(lnast);
-      auto idx_dot_bw = lnast.add_child(parent_node, Lnast_node::create_dot("sb_out_bwd"));
-      lnast.add_child(idx_dot_bw, Lnast_node::create_ref(temp_var_bw));
-      lnast.add_child(idx_dot_bw, Lnast_node::create_ref(out_tup_name));
-      lnast.add_child(idx_dot_bw, Lnast_node::create_ref(port_name));
-      auto idx_asg_bw = lnast.add_child(parent_node, Lnast_node::create_assign("sb_out_bwa"));
-      lnast.add_child(idx_asg_bw, Lnast_node::create_ref(temp_var_bw));
-      lnast.add_child(idx_asg_bw, Lnast_node::create_const(lnast.add_string(std::to_string(port_bw))));
-    }
+   // if (put_bw_in_ln) {
+   //   auto port_bw   = dpin.get_bits();
+   //   auto temp_var_bw = create_temp_var(lnast);
+   //   auto idx_dot_bw = lnast.add_child(parent_node, Lnast_node::create_dot("sb_out_bwd"));
+   //   lnast.add_child(idx_dot_bw, Lnast_node::create_ref(temp_var_bw));
+   //   lnast.add_child(idx_dot_bw, Lnast_node::create_ref(out_tup_name));
+   //   lnast.add_child(idx_dot_bw, Lnast_node::create_ref(port_name));
+   //   auto idx_asg_bw = lnast.add_child(parent_node, Lnast_node::create_assign("sb_out_bwa"));
+   //   lnast.add_child(idx_asg_bw, Lnast_node::create_ref(temp_var_bw));
+   //   lnast.add_child(idx_asg_bw, Lnast_node::create_const(lnast.add_string(std::to_string(port_bw))));
+   // }
   }
 }
 
