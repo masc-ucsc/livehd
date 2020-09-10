@@ -179,6 +179,6 @@ lgtoln_verif() {
   rm -rf ./lgdb2
 }
 
-lgtoln_verif "$pts"
+#lgtoln_verif "$pts"
 lgtoln_verif "$pts_hier" "hier"
 #lgtoln_verif "$pts_hier2" "hier"

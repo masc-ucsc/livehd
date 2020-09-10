@@ -22,7 +22,7 @@ if [ ! -f $LGSHELL ]; then
 fi
 
 #referred lnast_prp_test.sh
-Pyrope_compile () {
+Pyrope_lec_test () {
   echo "=============================================================="
   echo "Flow:                                                         "
   echo "  Prp_in -> LN -> LG -> LN -> Prp_out                         "
@@ -275,8 +275,8 @@ Pyrope_compile () {
   fi
 }
 
-Pyrope_compile "$pts"
-#Pyrope_compile "$pts_hier" "hier"
+Pyrope_lec_test "$pts"
+Pyrope_lec_test "$pts_hier" "hier"
 
 rm -f lnast.dot.gld
 rm -f lnast.nodes
