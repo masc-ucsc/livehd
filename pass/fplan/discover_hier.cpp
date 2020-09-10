@@ -387,7 +387,7 @@ Hier_tree::phier Hier_tree::discover_hierarchy(Graph_info<g_type>& info, int sta
   return make_hier_tree(t1, t2);
 }
 
-void Hier_tree::discover_hierarchy(unsigned int num_components) {
+void Hier_tree::discover_hierarchy(const unsigned int num_components) {
   I(num_components >= 1);
 
   // if the graph is not fully connected, ker-lin fails to work.
@@ -411,39 +411,4 @@ void Hier_tree::discover_hierarchy(unsigned int num_components) {
       }
     }
   }
-}
-
-Hier_tree::phier Hier_tree::make_hier_tree(phier t1, phier t2) {
-  auto pnode  = std::make_shared<Hier_node>();
-  pnode->name = "node_" + std::to_string(node_number);
-
-  pnode->children[0] = t1;
-  t1->parent         = pnode;
-
-  pnode->children[1] = t2;
-  t2->parent         = pnode;
-
-  node_number++;
-
-  return pnode;
-}
-
-Hier_tree::phier Hier_tree::make_hier_node(const int set) {
-  I(set >= 0);
-
-  phier pnode = std::make_shared<Hier_node>();
-  pnode->name = "leaf_node_" + std::to_string(node_number);
-
-  auto set_areas = ginfo.al.verts() | ranges::view::remove_if([this, set](auto v) { return !this->ginfo.sets[set].contains(v); })
-                   | ranges::view::transform([this](auto v) { return this->ginfo.areas(v); });
-
-  for (const double a : set_areas) {
-    pnode->area += a;
-  }
-
-  pnode->graph_subset = set;
-
-  node_number++;
-
-  return pnode;
 }
