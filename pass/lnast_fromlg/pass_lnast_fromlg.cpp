@@ -5,6 +5,7 @@
 #include <queue>
 #include <stack>
 #include <string>
+#include <string_view>
 
 #include "lbench.hpp"
 #include "lgedgeiter.hpp"
@@ -929,14 +930,19 @@ void Pass_lnast_fromlg::attach_latch_node(Lnast& lnast, Lnast_nid& parent_node, 
 
 void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
   const auto &sub = pin.get_node().get_type_sub_node();
-  if (!pin.get_node().has_name())
-    pin.get_node().set_name(create_temp_var(lnast));
-  fmt::print("instance_name:{}, subgraph->get_name():{}\n", pin.get_node().get_name(), sub.get_name());
 
   // Create tuple names for submodule IO.
   //auto inp_tup_name  = lnast.add_string(absl::StrCat("inp_", pin.get_node().get_name()));
+  std::string_view out_tup_name;
+  if (!pin.get_node().has_name()) {
+    pin.get_node().set_name(create_temp_var(lnast));
+    out_tup_name = lnast.add_string(absl::StrCat("out", pin.get_node().get_name()));
+  } else {
+    out_tup_name = lnast.add_string(pin.get_node().get_name());
+  }
   auto inp_tup_name  = lnast.add_string(pin.get_node().get_name());
-  auto out_tup_name = lnast.add_string(absl::StrCat("out", pin.get_node().get_name()));
+  fmt::print("instance_name:{}, subgraph->get_name():{}\n", pin.get_node().get_name(), sub.get_name());
+
   //auto out_tup_name = lnast.add_string(pin.get_node().get_name());
 
   // Create + instantiate input tuple.
