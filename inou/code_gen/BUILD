@@ -19,6 +19,7 @@ sh_test(
     srcs = ["tests/prp_v_LEC_test.sh"],
     data = [
         "//inou/yosys:liblgraph_yosys.so",
+        "//inou/pyrope:pyrope_tests",
         "//main:lgshell",
     ],
     deps = [
