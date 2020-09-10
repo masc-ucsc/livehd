@@ -253,7 +253,7 @@ Pyrope_lec_test () {
     if [ $? -eq 0 ]; then
       echo "Successfully pass logic equivilence check!"
     else
-      echo "FAIL: "${top_module}"_1.v !== "${top_module}"_2.v"
+      echo "FAIL: ${top_module}_1.v !== ${top_module}_2.v"
       exit 1
     fi
 

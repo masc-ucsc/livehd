@@ -342,10 +342,12 @@ void Code_gen::do_func_call(const mmap_lib::Tree_index& func_call_node_index) {
       lhs = map_it->second;
     }
   }
+  fmt::print("func_call 1st child: {}\n", lhs);
   absl::StrAppend(&buffer_to_print, indent(), lhs, " = ");//lhs and assignment op to further assign the func name and arguments to lhs
 
   curr_index = lnast->get_sibling_next(curr_index);
   absl::StrAppend(&buffer_to_print, lnast->get_name(curr_index));//printitng the func name(the func called)
+  fmt::print("func_call 2nd child: {}\n", lnast->get_name(curr_index));
 
   curr_index = lnast->get_sibling_next(curr_index);
   auto ref = lnast->get_name(curr_index);
@@ -356,6 +358,7 @@ void Code_gen::do_func_call(const mmap_lib::Tree_index& func_call_node_index) {
     }
   }
   absl::StrAppend(&buffer_to_print, lnast_to->ref_name(ref), lnast_to->stmt_sep());//parameters for the func call
+  fmt::print("func_call 3rd child: {}\n", ref);
 }
 //-------------------------------------------------------------------------------------
 //Process the "if" node:
@@ -540,7 +543,8 @@ void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index) {
   if (is_temp_var(key)) {
     //ref_map.insert(std::pair<std::string_view, std::string>(key, lnast_to->ref_name(value)));
     //this value is preserved with "$"/"%"/"#" so that during "convert_parameters()", we have the char to decide i/p or o/p or reg
-    ref_map.insert(std::pair<std::string_view, std::string>(key, value));
+    auto ref_map_inst_succ = ref_map.insert(std::pair<std::string_view, std::string>(key, value));
+    I(ref_map_inst_succ.second, "\n\nThe ref value was already in the ref_map. Thus redundant keypresent. BUG!\nParent_node : dot\n\n");
   } else {
     absl::StrAppend(&buffer_to_print, indent(), key, " saved as ", lnast_to->ref_name(value), "\n");
     // this should never be possible
@@ -597,6 +601,8 @@ void Code_gen::do_tuple(const mmap_lib::Tree_index& tuple_node_index) {
   //Process the first child-node in key and move to the next node:
   auto curr_index = lnast->get_first_child(tuple_node_index);
   std::string_view key = lnast->get_name(curr_index);
+  fmt::print("processing tuple's 1st child {}\n", key);
+  fmt::print("same index value from lnast data stack: {}\n", lnast->get_data(curr_index).token.get_text());
 
   //Process remaining nodes/sub-trees:
   curr_index = lnast->get_sibling_next(curr_index);
@@ -633,6 +639,7 @@ void Code_gen::do_tuple(const mmap_lib::Tree_index& tuple_node_index) {
   } else if (tuple_value=="") { tuple_value = absl::StrCat(lnast_to->tuple_begin(), lnast_to->tuple_end()) ;}//to cater to scenario like: out = () :in ring.prp
 
   //insert to map:
+  fmt::print("final tuple value for the above key: {}\n", tuple_value);
   if(is_temp_var(key)) {
     ref_map.insert(std::pair<std::string_view, std::string>(key, tuple_value));
   } else {
