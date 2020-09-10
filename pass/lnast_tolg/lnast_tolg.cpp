@@ -1251,7 +1251,9 @@ void Lnast_tolg::process_ast_func_call_op(LGraph *dfg, const Lnast_nid &lnidx_fc
 
     auto *sub = library->ref_sub(lgid);
     auto subg_node = dfg->create_node_sub(lgid);
-
+    
+    subg_node.set_name(absl::StrCat(res_name, ":", func_name));
+    fmt::print("subg node_name:{}\n", subg_node.get_name());
     subgraph_io_connection(dfg, sub, arg_tup_name, res_name, subg_node);
     return;
   } 
@@ -1265,6 +1267,8 @@ void Lnast_tolg::process_ast_func_call_op(LGraph *dfg, const Lnast_nid &lnidx_fc
   auto *sub = library->ref_sub(lgid);
   auto subg_node = dfg->create_node_sub(lgid);
 
+  subg_node.set_name(absl::StrCat(res_name, ":", func_name));
+  fmt::print("subg node_name:{}\n", subg_node.get_name());
   subgraph_io_connection(dfg, sub, arg_tup_name, res_name, subg_node);
 };
 

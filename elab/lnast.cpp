@@ -674,11 +674,11 @@ void Lnast::opr_lhs_merge_handle_a_statement(const Lnast_nid &assign_nid) {
 
   if (c1_assign_name.substr(0,3) == "___") {
     auto opr_nid = get_sibling_prev(assign_nid);
-    //fmt::print("opr name:{}\n", get_name(opr_nid));
-    //fmt::print("assign name:{}\n", get_name(assign_nid));
+    fmt::print("opr name:{}\n", get_name(opr_nid));
+    fmt::print("assign name:{}\n", get_name(assign_nid));
     auto c0_opr = get_first_child(opr_nid);
-    //fmt::print("c0_opr name:{}\n", get_name(c0_opr));
-    //fmt::print("c1_assign name:{}\n", c1_assign_name);
+    fmt::print("c0_opr name:{}\n", get_name(c0_opr));
+    fmt::print("c1_assign name:{}\n", c1_assign_name);
     I(get_name(c0_opr) == c1_assign_name);
     ref_data(c0_opr)->token = get_data(c0_assign).token;
     ref_data(c0_opr)->type = get_data(c0_assign).type;
