@@ -2,6 +2,41 @@
 
 #include "hier_tree.hpp"
 
+Hier_tree::phier Hier_tree::make_hier_tree(phier t1, phier t2) {
+  auto pnode  = std::make_shared<Hier_node>();
+  pnode->name = "node_" + std::to_string(node_number);
+
+  pnode->children[0] = t1;
+  t1->parent         = pnode;
+
+  pnode->children[1] = t2;
+  t2->parent         = pnode;
+
+  node_number++;
+
+  return pnode;
+}
+
+Hier_tree::phier Hier_tree::make_hier_node(const int set) {
+  I(set >= 0);
+
+  phier pnode = std::make_shared<Hier_node>();
+  pnode->name = "leaf_node_" + std::to_string(node_number);
+
+  auto set_areas = ginfo.al.verts() | ranges::view::remove_if([this, set](auto v) { return !this->ginfo.sets[set].contains(v); })
+                   | ranges::view::transform([this](auto v) { return this->ginfo.areas(v); });
+
+  for (const double a : set_areas) {
+    pnode->area += a;
+  }
+
+  pnode->graph_subset = set;
+
+  node_number++;
+
+  return pnode;
+}
+
 Hier_tree::phier Hier_tree::collapse(phier node, double threshold_area) {
   if (find_area(node) >= threshold_area) {
     if (!node->is_leaf()) {
@@ -26,7 +61,7 @@ Hier_tree::phier Hier_tree::collapse(phier node, double threshold_area) {
     I(rnode->children[0] != nullptr);
     I(rnode->children[1] != nullptr);
 
-    // I believe the HiReg paper states that child nodes can have areas less than the thresold,
+    // I believe the HiReg paper states that child nodes can have layouts less than the thresold,
     // as long as the total area between the child nodes is greater than the threshold
     auto n1 = copy_subtree(rnode->children[0]);
     auto n2 = copy_subtree(rnode->children[1]);
@@ -56,7 +91,7 @@ Hier_tree::phier Hier_tree::collapse(phier node, double threshold_area) {
   auto new_subtree = copy_subtree(node);
   collapse_subtree(new_subtree);
 
-  new_subtree->area         = find_area(new_subtree);
+  new_subtree->area = find_area(new_subtree);
   new_subtree->graph_subset = ginfo.sets.size() - 1;
 
   // delete child nodes once everything is moved over
@@ -66,7 +101,7 @@ Hier_tree::phier Hier_tree::collapse(phier node, double threshold_area) {
   return new_subtree;
 }
 
-void Hier_tree::collapse(double threshold_area) {
+void Hier_tree::collapse(const double threshold_area) {
   I(threshold_area >= 0.0);
 
   if (threshold_area > 0.0) {

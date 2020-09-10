@@ -86,15 +86,7 @@ set_vec_t Hier_tree::find_all_patterns(const set_t& subg, const pattern_t& gpatt
   }
 
   I(count);
-  // fmt::print("  count ({}) * G({}) + P({})\n", count, subg.size(), pattern_size);
   I(count * pattern_size <= subg.size());
-
-  /*
-  if (reg_verbose) {
-    unsigned int value = count * subg.size() + pattern_size;
-    fmt::print("  value ({}) = count ({}) * G({}) + P({})\n", value, count, subg.size(), pattern_size);
-  }
-  */
 
   return found_patterns;
 }
@@ -112,7 +104,7 @@ unsigned int Hier_tree::find_value(const set_t& subg, const set_t& pattern) cons
   auto         inst  = find_all_patterns(subg, make_generic(pattern));
   unsigned int value = inst.size() * subg.size() + pattern.size();
   if (reg_verbose) {
-    // fmt::print("  value ({}) = count ({}) * G({}) + P({})\n", value, inst.size(), subg.size(), pattern.size());
+    fmt::print("  value ({}) = count ({}) * G({}) + P({})\n", value, inst.size(), subg.size(), pattern.size());
   }
   return value;
 }
@@ -137,14 +129,12 @@ Hier_tree::pattern_t Hier_tree::find_most_freq_pattern(const set_t& subg, const 
     }
   }
 
-  /*
   if (reg_verbose) {
     fmt::print("initial pattern:\n");
     for (auto v : vp[0]) {
       fmt::print("  {}\n", ginfo.debug_names(v));
     }
   }
-  */
 
   if (vp.size() == 0) {
     return pattern_t();
@@ -213,7 +203,6 @@ Hier_tree::pattern_t Hier_tree::find_most_freq_pattern(const set_t& subg, const 
 
     sortvec.resize(std::min(bwidth, sortvec.size()));
 
-    /*
     if (reg_verbose) {
       if (sortvec.size()) {
         fmt::print("best pattern, value {}:\n", sortvec[0].second);
@@ -222,7 +211,6 @@ Hier_tree::pattern_t Hier_tree::find_most_freq_pattern(const set_t& subg, const 
         }
       }
     }
-    */
 
     vp.clear();
 
@@ -234,8 +222,6 @@ Hier_tree::pattern_t Hier_tree::find_most_freq_pattern(const set_t& subg, const 
       best_val = sortvec[0].second;
       copy_set(best_pat, new_vp[sortvec[0].first]);
     }
-
-    // break;
   }
 
   return make_generic(best_pat);
@@ -279,7 +265,7 @@ void Hier_tree::compress_hier(set_t& subg, const pattern_t& gpat, std::vector<ve
   }
 }
 
-void Hier_tree::discover_regularity(size_t hier_index, const size_t beam_width) {
+void Hier_tree::discover_regularity(const size_t hier_index, const size_t beam_width) {
   auto hier = hiers[hier_index];
   I(hier != nullptr);
 
