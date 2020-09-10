@@ -23,212 +23,258 @@
 // ================================================
 
 // And Operation
-// a = 1;
-// b = 1;
-// c = 0;
-// out = a & b & c
+/*
+a = 1;
+b = 1;
+c = 0;
+out = a & b & c
+*/
 // Warning: out were written but never read
 // ================================================
 
 // If Statement
-// a = 4
-// if a > 3 {
-//   b = a + 1
-// }
+/*
+a = 4
+if a > 3 {
+  b = a + 1
+}
+*/
 // Warning: b were written but never read
 // ================================================
 
 // If Statement Full Case
-// a = 10
-// if a > 10 {
-//  b = 3 
-// } elif a < 1 {
-//   b = 2
-// } else {
-//   b = 1
-// }
+/*
+a = 10
+if a > 10 {
+ b = 3 
+} elif a < 1 {
+  b = 2
+} else {
+  b = 1
+}
+*/
 // Warning: b were written but never read
 // ================================================
 
 // Tuple Statement
-// cat = 10
-// tup = (foo = 1, bar = cat + 2)
-// Warning: foo, bar, tup were written but never read
+/*
+cat = 10
+tup = (foo = 1, bar = cat + 2)
+*/
+// Warning: bar, foo, tup were written but never read
 // ================================================
 
 // Tuple Concate Statement
-// tup = (foo = 1, bar = cat + 2) 
-// tup = tup ++ (4, dog)
+/*
+tup = (foo = 1, bar = cat + 2) 
+tup = tup ++ (4, dog)
+*/
 // Warning: 
 //    Last write(s) to 'tup' is/are never read
-//    foo, bar were written but never read
+//    bar, foo were written but never read
 // ================================================
 
 // For Loop Statement
-// total = 0
-// for i in (0..3) {
-//   total = total + i
-// }
+/*
+total = 0
+for i in (0..3) {
+  total = total + i
+}
+*/
 // Warning: 
 //    Last write(s) to 'total' is/are never read
 //    __range_end, __range_begin were written but never read
 // ================================================
 
 // While Loop Statement
-// a = 10
-// while (a > 0) {
-//   b = a + 1
-//   a = a - 1
-// }
+/*
+a = 10
+while (a > 0) {
+  b = a + 1
+  a = a - 1
+}
+*/
 // Warning: b were written but never read
 // ================================================
 
 // Basic Func Def
-// func_xor = :($a, $b, %out):{
-//   %out = $a ^ $b
-// }
+/*
+func_xor = :($a, $b, %out):{
+  %out = $a ^ $b
+}
+*/
 // Warning: func_xor were written but never read
 // ================================================
 
 // Implicit Func Call
-// func_xor = :($a, $b, %out):{
-//   %out = $a ^ $b
-// }
+/*
+func_xor = :($a, $b, %out):{
+  %out = $a ^ $b
+}
 
-// $foo = 1
-// $bar = 2
-// my_xor = func_xor($foo, $bar)
-// %out = my_xor.%out
+$foo = 1
+$bar = 2
+my_xor = func_xor($foo, $bar)
+%out = my_xor.%out
+*/
 // Warning: None
 // ================================================
 
 
 // Explicit Func Call
-// func_xor = :($a, $b, %out):{
-//   %out = $a ^ $b
-// }
+/*
+func_xor = :($a, $b, %out):{
+  %out = $a ^ $b
+}
 
-// my_xor = func_xor(a = 1, b = 0)
-// %out = my_xor.%out
-// Warning: b, a were written but never read
+my_xor = func_xor(a = 1, b = 0)
+%out = my_xor.%out
+*/
+// Warning: a, b were written but never read
 // ================================================
 
 // Attribute Statement
-// foo.___bits = 3
-// foo = 7
+/*
+foo.___bits = 3
+foo = 7
 
-// bar as (___bits = 10)
-// bar = 123
+bar as (___bits = 10)
+bar = 123
+*/
 // Warning: bar were written but never read
 // ================================================
 
 // Other Tests
-// a = 10
-// if (a < 0) {
-//   b = -1 
-// } elif (a == 0) {
-//   b = 0
-// } else {
-//   b = 1
-// }
+/*
+a = 10
+if (a < 0) {
+  b = -1 
+} elif (a == 0) {
+  b = 0
+} else {
+  b = 1
+}
+*/
 // Warning: b were written but never read
 // ================================================
 
 // Inefficient LNAST  + Never Read Tests
-// a = 1
-// b = a
-// c = b + 1
+/*
+a = 1
+b = a
+c = b + 1
+*/
 // Warning: 
 //    b may be unnecessary
 //    c were written but never read
 
-// tup = (foo = 1, bar = 2)
-// temp_tup = tup
-// temp_tup = temp_tup ++ (4, dog)
+/*
+tup = (foo = 1, bar = 2)
+temp_tup = tup
+temp_tup = temp_tup ++ (4, dog)
+*/
 // Warning: 
 //    Last write(s) to 'temp_tup' is/are never read
-//    foo, bar were written but never read
+//    bar, foo were written but never read
 //    temp_tup may be unnecessary
 
-// a = 1 + 4
-// b = a
-// b = b * 2
+/*
+a = 1 + 4
+b = a
+b = b * 2
+*/
 // Warning: 
 //    Last write(s) to 'b' is/are never read
 //    b may be unnecessary
 
-// a = 1 + 4
-// a = a * 3
-// b = a
-// a = a / 3
+/*
+a = 1 + 4
+a = a * 3
+b = a
+a = a / 3
+*/
 // Warning: 
 //    Last write(s) to 'a' is/are never read
 //    b were written but never read
 
-// %foo = 4
-// %out = %foo
-// %out = %foo + 4
-// %bar = (4 * 5) / 2
-// %valid = %bar
-// %valid = %valid + %out
+/*
+%foo = 4
+%out = %foo
+%out = %foo + 4
+%bar = (4 * 5) / 2
+%valid = %bar
+%valid = %valid + %out
+*/
 // Warning: 
 //    Last write(s) to '%valid' is/are never read
 //    %out, %valid may be unnecessary
 
-// x = 3
-// x = 3 * (x + 3)
-// y = 4
-// y = ((y + 3) * 7) / 7
+/*
+x = 3
+x = 3 * (x + 3)
+y = 4
+y = ((y + 3) * 7) / 7
+*/
 // Warning: Last write(s) to 'x', 'y' is/are never read
 
-// a = 3
-// b = c
-// a = a + 3
+/* TODO : Fix This
+a = 3
+b = a
+a = a + 3
+*/
 // Warning: 
 //    Last write(s) to 'a' is/are never read
 //    b were written but never read
 // ================================================
 
 // Out of Scope Tests
-// a = 3
-// if true {
-//   b = 3
-//   c = 9
-// }
-// foo = b + c
+/*
+a = 3
+if true {
+  b = 3
+  c = 9
+}
+foo = b + c
+*/
 // Warning:
 //    b, c is/are not defined in the scope of definition
 //    a, foo were written but never read
 
-// a = 3
-// while (true) {
-//   b = 3
-// }
-// foo = b
+/*
+a = 3
+while (true) {
+  b = 3
+}
+foo = b
+*/
 // Warning:
 //    b is/are not defined in the scope of definition
 //    a, foo were written but never read
 
-// a = 3
-// for i in (0..10) {
-//   b = 3
-// }
-// foo = b
+/*
+a = 3
+for i in (0..10) {
+  b = a + i
+}
+foo = b
+*/
 // Warning: 
-//    i, b is/are not defined in the scope of definition
-//    __range_begin, a, __range_end, foo were written but never read
+//    b is/are not defined in the scope of definition
+//    __range_begin, __range_end, foo were written but never read
 
-// a = 1
-// b = 14
-// while (a == b) {
-//   if (a == 13) {
-//     e = a
-//   } else {
-//     f = e - a
-//   }
-//   a += 1
-// }
-// d = e + f
+/*
+a = 1
+b = 14
+while (a == b) {
+  if (a == 13) {
+    e = a
+  } else {
+    f = e - a
+  }
+  a += 1
+}
+d = e + f
+*/
 // Warning:
 //    e, f is/are not defined in the scope of definition
 //    d were written but never read
@@ -251,6 +297,7 @@ my_nand = func_nand(a = 1, b = 0)
 my_and  = func_and(a = 1, b = 0)
 my_xor  = func_xor(a = my_nand, b = my_and)
 %out = my_xor.%out
+
 // Warning:
 //     a, b were written but never read
 // ================================================
