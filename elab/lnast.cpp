@@ -345,7 +345,19 @@ void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid)
   
   // is rhs
   // change node semantic from dot/set->tuple_get
-  ref_data(dot_nid)->type = Lnast_ntype::create_tuple_get();
+  if (paired_type.is_assign()) {
+
+    ref_data(dot_nid)->type = Lnast_ntype::create_tuple_get();
+    auto c0_tg     = get_first_child(dot_nid);
+    auto c0_assign = get_first_child(paired_nid);
+    ref_data(c0_tg)->token = get_data(c0_assign).token;
+    ref_data(c0_tg)->type  = get_data(c0_assign).type;
+    ref_data(c0_tg)->subs  = get_data(c0_assign).subs;
+
+    ref_data(paired_nid)->type = Lnast_ntype::create_invalid();
+  } else {
+    ref_data(dot_nid)->type = Lnast_ntype::create_tuple_get();
+  }
   
 
 }
@@ -521,11 +533,12 @@ void Lnast::analyze_dot_lrhs_handle_a_statement(const Lnast_nid &psts_nid, const
       } else if (get_name(sib_child) == c0_dot_name){
         hit = true;
         dot_lrhs_table[dot_nid].first  = false;
-        if (type.is_tuple_concat() || type.is_tuple()) {
-          dot_lrhs_table[dot_nid].second = sib_nid;
-        } else {
-          dot_lrhs_table[dot_nid].second = Lnast_nid(-1, -1); // rhs dot doesn't need the corresponding assignment nid
-        }
+        dot_lrhs_table[dot_nid].second = sib_nid;
+        /* if (type.is_tuple_concat() || type.is_tuple()) { */
+        /*   dot_lrhs_table[dot_nid].second = sib_nid; */
+        /* } else { */
+        /*   dot_lrhs_table[dot_nid].second = Lnast_nid(-1, -1); // rhs dot doesn't need the corresponding assignment nid */
+        /* } */
         break;
       }
     }
@@ -674,11 +687,7 @@ void Lnast::opr_lhs_merge_handle_a_statement(const Lnast_nid &assign_nid) {
 
   if (c1_assign_name.substr(0,3) == "___") {
     auto opr_nid = get_sibling_prev(assign_nid);
-    fmt::print("opr name:{}\n", get_name(opr_nid));
-    fmt::print("assign name:{}\n", get_name(assign_nid));
     auto c0_opr = get_first_child(opr_nid);
-    fmt::print("c0_opr name:{}\n", get_name(c0_opr));
-    fmt::print("c1_assign name:{}\n", c1_assign_name);
     I(get_name(c0_opr) == c1_assign_name);
     ref_data(c0_opr)->token = get_data(c0_assign).token;
     ref_data(c0_opr)->type = get_data(c0_assign).type;
