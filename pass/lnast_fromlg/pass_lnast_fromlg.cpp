@@ -229,10 +229,10 @@ void Pass_lnast_fromlg::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node, co
 }
 
 void Pass_lnast_fromlg::add_bw_in_ln(Lnast& lnast, Lnast_nid& parent_node, const std::string_view& pin_name, const uint32_t& bits) {
-//creates subtree in LN for the "dot" and corresponding "assign" to depict bw
-//          dot                    assign
-//     /     |     \               /    \
-// tmp_var pin_name __bits     tmp_var  const(bits) 
+/*creates subtree in LN for the "dot" and corresponding "assign" to depict bw
+ *          dot                    assign
+ *     /     |     \               /    \
+ * tmp_var pin_name __bits     tmp_var  const(bits)  */
   auto tmp_var = create_temp_var(lnast);
   auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_dot(""));
   lnast.add_child(idx_dot, Lnast_node::create_ref(tmp_var));
@@ -936,8 +936,8 @@ void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_nod
   // Create tuple names for submodule IO.
   //auto inp_tup_name  = lnast.add_string(absl::StrCat("inp_", pin.get_node().get_name()));
   auto inp_tup_name  = lnast.add_string(pin.get_node().get_name());
-  //auto out_tup_name = lnast.add_string(absl::StrCat("out_", pin.get_node().get_name()));
-  auto out_tup_name = lnast.add_string(pin.get_node().get_name());
+  auto out_tup_name = lnast.add_string(absl::StrCat("out", pin.get_node().get_name()));
+  //auto out_tup_name = lnast.add_string(pin.get_node().get_name());
 
   // Create + instantiate input tuple.
   auto args_idx = lnast.add_child(parent_node, Lnast_node::create_tuple("args_tuple"));
@@ -971,6 +971,7 @@ void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_nod
     lnast.add_child(idx_dotasg, Lnast_node::create_ref(port_name));
 
     // Specify output's bw -- NOTE: shouldn't be necessary, but useful for bw pass for now
+    // --commented due to dummy dot problem--
    // if (put_bw_in_ln) {
    //   auto port_bw   = dpin.get_bits();
    //   auto temp_var_bw = create_temp_var(lnast);
