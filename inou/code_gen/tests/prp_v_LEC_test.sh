@@ -4,7 +4,9 @@ rm -rf ./lgdb2
 rm -rf ./prp_v_LEC_test_dir
 rm -f ./*dot*
 rm -f *.v
-
+rm -f lnast.dot.gld      
+rm -f lnast.nodes        
+rm -f lnast.nodes.gld    
 pts='logic if bits_rhs'
 
 pts_hier='sum funcall'
@@ -110,6 +112,35 @@ Pyrope_lec_test () {
   fi # end of hier bits
 
 
+#/////////picked from here
+
+  for pt in $1
+  do
+		#BUG!!#TODO!!#
+#    echo "--------------------------------------------------------------"
+#    echo "optimized LGraph -> LNAST          "
+#    echo "--------------------------------------------------------------"
+#    ${LGSHELL} "lgraph.open name:${pt} |> pass.lnast_fromlg |> lnast.dump"
+#    if [ $? -eq 0 ]; then
+#      echo "Successfully obtained LNAST of the optimized LGraph: inou/pyrope/tests/compiler/${pt}.prp"
+#    else
+#      echo "ERROR: Pyrope compiler failed: LGraph -> LNAST  conversion, testcase: inou/pyrope/tests/compiler/${pt}.prp"
+#      exit 1
+#    fi
+  
+    echo "--------------------------------------------------------------"
+    echo "optimized LGraph -> LNAST -> pyrope(code_gen)            "
+    echo "--------------------------------------------------------------"
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.lnast_fromlg |> inou.code_gen.prp odir:prp_v_LEC_test_dir"
+    if [ $? -eq 0 ]; then
+      echo "Successfully obtained pyrope from LNAST of the optimized LGraph: inou/pyrope/tests/compiler/${pt}.prp"
+    else
+      echo "ERROR: Pyrope compiler failed: either LNAST or code_gen conversion, testcase: inou/pyrope/tests/compiler/${pt}.prp"
+      exit 1
+    fi
+	done
+#////////inserted here:
+
   for pt in $1
   do
     if [[ ${pt} == *_err* ]]; then
@@ -146,32 +177,10 @@ Pyrope_lec_test () {
     done
   fi
 
+#//////:to here
 
-
-  for pt in $1
-  do
-    echo "--------------------------------------------------------------"
-    echo "optimized LGraph -> LNAST          "
-    echo "--------------------------------------------------------------"
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.lnast_fromlg |> lnast.dump"
-    if [ $? -eq 0 ]; then
-      echo "Successfully obtained LNAST of the optimized LGraph: inou/pyrope/tests/compiler/${pt}.prp"
-    else
-      echo "ERROR: Pyrope compiler failed: LGraph -> LNAST  conversion, testcase: inou/pyrope/tests/compiler/${pt}.prp"
-      exit 1
-    fi
-  
-    echo "--------------------------------------------------------------"
-    echo "optimized LGraph -> LNAST -> pyrope(code_gen)            "
-    echo "--------------------------------------------------------------"
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.lnast_fromlg |> inou.code_gen.prp odir:prp_v_LEC_test_dir"
-    if [ $? -eq 0 ]; then
-      echo "Successfully obtained pyrope from LNAST of the optimized LGraph: inou/pyrope/tests/compiler/${pt}.prp"
-    else
-      echo "ERROR: Pyrope compiler failed: either LNAST or code_gen conversion, testcase: inou/pyrope/tests/compiler/${pt}.prp"
-      exit 1
-    fi
-  
+	for pt in $1
+	do
     echo "--------------------------------------------------------------"
     echo "pyrope(code_gen) -> LNAST -> LGraph"
     echo "--------------------------------------------------------------"
