@@ -282,6 +282,7 @@ void Semantic_check::resolve_read_write_lists(Lnast* lnast) {
       error_reads.push_back(node_name);
     }
     error_print_lnast_var_warn(lnast, error_reads);
+    std::sort(error_reads.begin(), error_reads.end());
     auto first_entry = never_read.begin();
     fmt::print(fmt::fg(fmt::color::blue), "Last-Write Variable Warning");
     fmt::print(": Last write(s) to '{}'", *first_entry);
@@ -293,7 +294,6 @@ void Semantic_check::resolve_read_write_lists(Lnast* lnast) {
     }
     fmt::print(" is/are never read\n");
   }
-  // Check to look for variables that are written to but never read
   // Check also to look for output variables are not written to that should be written to
   for (auto node_name : perm_write_dict) {
     // Resolve Write and Read Dicts
@@ -310,7 +310,7 @@ void Semantic_check::resolve_read_write_lists(Lnast* lnast) {
       perm_write_dict.erase(node_name.first);
     }
   }
-  // Variable Warning
+  // Never-Read Variable Warning
   if (perm_write_dict.size() != 0) {
     std::vector<std::string_view> error_names;
     for (auto node_name : perm_write_dict) {
@@ -318,14 +318,18 @@ void Semantic_check::resolve_read_write_lists(Lnast* lnast) {
     }
     error_print_lnast_var_warn(lnast, error_names);
     std::sort(error_names.begin(), error_names.end());
-    auto first_entry = perm_write_dict.begin();
+    // auto first_entry = perm_write_dict.begin();
+    auto first_entry = error_names.begin();
     fmt::print(fmt::fg(fmt::color::blue), "Never-Read Variable Warning");
-    fmt::print(": {}", first_entry->first);
-    for (auto node_name : perm_write_dict) {
+    // fmt::print(": {}", first_entry->first);
+    fmt::print(": {}", *first_entry);
+    // for (auto node_name : perm_write_dict) {
+    for (auto node_name : error_names) {
       if (node_name == *first_entry) {
         continue;
       }
-      fmt::print(", {}", node_name.first);
+      // fmt::print(", {}", node_name.first);
+      fmt::print(", {}", node_name);
     }
     fmt::print(" were written but never read\n");
   }
@@ -666,6 +670,7 @@ void Semantic_check::check_if_op(Lnast* lnast, const Lnast_nid &lnidx_opr, std::
 
 void Semantic_check::check_for_op(Lnast* lnast, const Lnast_nid &lnidx_opr, std::string_view stmt_name) {
   bool stmts      = false;
+  bool it_name    = false;
   int  num_of_ref = 0;
   for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
     const auto ntype_child = lnast->get_data(lnidx_opr_child).type;
@@ -682,9 +687,13 @@ void Semantic_check::check_for_op(Lnast* lnast, const Lnast_nid &lnidx_opr, std:
         }
       }
     } else if (ntype_child.is_ref()) {
-      num_of_ref += 1;
-      // Store type 'ref' variables
-      add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
+      if (!it_name) {
+        it_name = true;
+        add_to_write_list(lnast, lnast->get_name(lnidx_opr_child), stmt_name);
+      } else {
+        add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
+      }
+      num_of_ref += 1;      
     } else {
       // Invalid Node Type
       error_print_lnast_by_name(lnast, lnast->get_name(lnidx_opr));
@@ -811,6 +820,7 @@ void Semantic_check::check_func_def(Lnast* lnast, const Lnast_nid &lnidx_opr, st
       error_outputs.push_back(node_name);
     }
     error_print_lnast_var_warn(lnast, error_outputs);
+    std::sort(error_outputs.begin(), error_outputs.end());
     auto first_entry = output_vars.begin();
     fmt::print(fmt::fg(fmt::color::blue), "Output Variable Warning");
     fmt::print(": {}", *first_entry);
@@ -900,6 +910,7 @@ void Semantic_check::do_check(Lnast* lnast) {
   resolve_out_of_scope();
   if (out_of_scope_vars.size() != 0) {
     error_print_lnast_var_warn(lnast, out_of_scope_vars);
+    std::sort(out_of_scope_vars.begin(), out_of_scope_vars.end());
     auto first_entry = out_of_scope_vars.begin();
     fmt::print(fmt::fg(fmt::color::red), "Out of Scope Variable Error");
     fmt::print(": {}", *first_entry);
