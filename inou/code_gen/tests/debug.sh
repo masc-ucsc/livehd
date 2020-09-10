@@ -242,7 +242,7 @@ Pyrope_compile "$pts_hier"  "hier"
 
 ${LGSHELL} "lgraph.open name:funcall |> inou.graphviz.from verbose:false"
 mv funcall.dot funcall.dbg.dot
-${LGSHELL} "lgraph.open name:funcall |> pass.lnast_fromlg |> inou.graphviz.from verbose:false |> inou.code_gen.prp"
+${LGSHELL} "lgraph.open name:funcall |> pass.lnast_fromlg |> lnast.dump |> inou.graphviz.from verbose:false |> inou.code_gen.prp"
 mv funcall.lnast.dot funcall.lnast.raw.dot
 ${LGSHELL} "lgraph.open name:funcall |> pass.lnast_fromlg |> pass.lnast_tolg"
 

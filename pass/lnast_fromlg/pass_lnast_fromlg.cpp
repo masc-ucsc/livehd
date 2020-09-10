@@ -6,6 +6,7 @@
 #include <stack>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "lbench.hpp"
 #include "lgedgeiter.hpp"
@@ -938,9 +939,11 @@ void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_nod
     pin.get_node().set_name(create_temp_var(lnast));
     out_tup_name = lnast.add_string(absl::StrCat("out", pin.get_node().get_name()));
   } else {
-    out_tup_name = lnast.add_string(pin.get_node().get_name());
+    std::vector<std::string_view> out_node_name = absl::StrSplit(pin.get_node().get_name(), ":");//du to commit: embed return variable name to subgraph node name
+    out_tup_name = lnast.add_string(out_node_name[0]);
   }
-  auto inp_tup_name  = lnast.add_string(pin.get_node().get_name());
+  //auto inp_tup_name  = lnast.add_string(pin.get_node().get_name());
+  auto inp_tup_name  = lnast.add_string(create_temp_var(lnast));
   fmt::print("instance_name:{}, subgraph->get_name():{}\n", pin.get_node().get_name(), sub.get_name());
 
   //auto out_tup_name = lnast.add_string(pin.get_node().get_name());
