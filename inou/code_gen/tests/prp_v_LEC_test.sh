@@ -141,7 +141,7 @@ Pyrope_lec_test () {
     for pt in $1
     do
      if [[ pt != $top_module ]]; then
-      $(cat ${pt}_2.v >> ${top_module}_2.v)
+      $(cat ${pt}_1.v >> ${top_module}_1.v)
      fi
     done
   fi

@@ -594,7 +594,7 @@ void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index, std::str
 void Code_gen::do_tuple(const mmap_lib::Tree_index& tuple_node_index) {
   fmt::print("node:tuple\n");
 
-  //Process the first child node in key and move to the next node:
+  //Process the first child-node in key and move to the next node:
   auto curr_index = lnast->get_first_child(tuple_node_index);
   std::string_view key = lnast->get_name(curr_index);
 
