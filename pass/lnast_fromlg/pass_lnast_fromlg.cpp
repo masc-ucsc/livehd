@@ -933,7 +933,6 @@ void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_nod
   const auto &sub = pin.get_node().get_type_sub_node();
 
   // Create tuple names for submodule IO.
-  //auto inp_tup_name  = lnast.add_string(absl::StrCat("inp_", pin.get_node().get_name()));
   std::string_view out_tup_name;
   if (!pin.get_node().has_name()) {
     pin.get_node().set_name(create_temp_var(lnast));
@@ -942,6 +941,7 @@ void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_nod
     std::vector<std::string_view> out_node_name = absl::StrSplit(pin.get_node().get_name(), ":");//du to commit: embed return variable name to subgraph node name
     out_tup_name = lnast.add_string(out_node_name[0]);
   }
+  //auto inp_tup_name  = lnast.add_string(absl::StrCat("inp_", pin.get_node().get_name()));
   //auto inp_tup_name  = lnast.add_string(pin.get_node().get_name());
   auto inp_tup_name  = lnast.add_string(create_temp_var(lnast));
   fmt::print("instance_name:{}, subgraph->get_name():{}\n", pin.get_node().get_name(), sub.get_name());
@@ -951,6 +951,7 @@ void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_nod
   // Create + instantiate input tuple.
   auto args_idx = lnast.add_child(parent_node, Lnast_node::create_tuple("args_tuple"));
   lnast.add_child(args_idx, Lnast_node::create_ref(inp_tup_name));
+  //attach_child(lnast, args_idx, const Node_pin &dpin)
   for (const auto inp : pin.get_node().inp_edges()) {
     auto port_name = inp.sink.get_type_sub_io_name();
     auto idx_asg = lnast.add_child(args_idx, Lnast_node::create_assign("sb_arg_set"));
