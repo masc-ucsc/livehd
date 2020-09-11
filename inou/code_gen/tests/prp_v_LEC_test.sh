@@ -115,16 +115,16 @@ Pyrope_lec_test () {
   for pt in $1
   do
 		#BUG!!#TODO!!#
-    echo "--------------------------------------------------------------"
-    echo "optimized LGraph -> LNAST          "
-    echo "--------------------------------------------------------------"
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.lnast_fromlg |> lnast.dump"
-    if [ $? -eq 0 ]; then
-      echo "Successfully obtained LNAST of the optimized LGraph: inou/pyrope/tests/compiler/${pt}.prp"
-    else
-      echo "ERROR: Pyrope compiler failed: LGraph -> LNAST  conversion, testcase: inou/pyrope/tests/compiler/${pt}.prp"
-      exit 1
-    fi
+#    echo "--------------------------------------------------------------"
+#    echo "optimized LGraph -> LNAST          "
+#    echo "--------------------------------------------------------------"
+#    ${LGSHELL} "lgraph.open name:${pt} |> pass.lnast_fromlg |> lnast.dump"
+#    if [ $? -eq 0 ]; then
+#      echo "Successfully obtained LNAST of the optimized LGraph: inou/pyrope/tests/compiler/${pt}.prp"
+#    else
+#      echo "ERROR: Pyrope compiler failed: LGraph -> LNAST  conversion, testcase: inou/pyrope/tests/compiler/${pt}.prp"
+#      exit 1
+#    fi
 
     echo "--------------------------------------------------------------"
     echo "optimized LGraph -> LNAST -> pyrope(code_gen)            "
@@ -281,7 +281,7 @@ Pyrope_lec_test () {
   fi
 }
 
-#Pyrope_lec_test "$pts"
+Pyrope_lec_test "$pts"
 Pyrope_lec_test "$pts_hier" "hier"
 
 rm -f lnast.dot.gld
