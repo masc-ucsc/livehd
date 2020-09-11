@@ -135,10 +135,4 @@ private:
   void compress_hier(set_t&, const pattern_t&, std::vector<vertex_t>&);
 
   std::vector<pattern_vec_t> pattern_lists;
-
-  using bound_graph_t = decltype(graph::Stable_out_adjacency_list());
-  using bound_pair_t = std::pair<bound_graph_t, bound_graph_t>;
-
-  void simulated_annealing();
-  void branch_n_bound(const pattern_t& pat, bound_pair_t& bp, const size_t num_inst);
 };
