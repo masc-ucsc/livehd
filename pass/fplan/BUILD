@@ -17,7 +17,9 @@ cc_library(
          "@graph//:graph",
          "@range-v3//:range-v3",
          "@fmt//:fmt",
-         "@blobb//:blobb",
+         "//third_party/misc/blobb_compass:blobb",
          ],
     )
+
+#"@blobb//:blobb",
 
