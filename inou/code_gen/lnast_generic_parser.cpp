@@ -119,7 +119,7 @@ std::string_view Cpp_parser::supporting_ftype(){
   return supp_ftype;
 }
 std::string Cpp_parser::supporting_fstart(std::string basename_s){
-  return absl::StrCat("file: ", basename_s, "\n#pragma once\n#include \"vcd_writer.hpp\"");
+  return absl::StrCat("file: ", basename_s, "\n#pragma once\n#include \"vcd_writer.hpp\"\n");
 }
 std::string Cpp_parser::supporting_fend(std::string basename_s){
   return absl::StrCat("<<EOF ", basename_s);
@@ -164,7 +164,7 @@ std::string Cpp_parser::supp_buffer_to_print(std::string modname) {
   }
 
 
-  std::string vcd_funcs = "  " + modname + "_sim(uint64_t _hidx, const std::string &parent_name, vcd::VCDWriter* writer);\n  void vcd_reset_cycle();\n  void vcd_posedge();\n  void vcd_negedge();\n  void vcd_comb();\n";
+  std::string vcd_funcs = "  " + modname + "_sim(uint64_t _hidx, const std::string &parent_name, vcd::VCDWriter* writer);\n  void vcd_reset_cycle();\n  void vcd_posedge();\n  void vcd_negedge();\n  void vcd_comb(" + inps_csv + ");\n";
 //  std::string trace_part = "#ifdef SIMLIB_TRACE\n  void add_signature(Simlib_signature &sign);\n#endif";
 //  return absl::StrCat(header_strt + outps_nline + funcs + trace_part + "\n};");
   return absl::StrCat(header_strt + outps_nline + funcs + vcd_params + vcd_varptrs + vcd_funcs + "\n};");

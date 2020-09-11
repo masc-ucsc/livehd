@@ -7,6 +7,7 @@ rm -f *.v
 rm -f lnast.dot.gld
 rm -f lnast.nodes
 rm -f lnast.nodes.gld
+
 pts='logic if bits_rhs'
 
 pts_hier='sum funcall'
@@ -111,9 +112,6 @@ Pyrope_lec_test () {
     mv ${top_module}.dot ${top_module}.hier.dot
   fi # end of hier bits
 
-
-#/////////picked from here
-
   for pt in $1
   do
 		#BUG!!#TODO!!#
@@ -139,7 +137,6 @@ Pyrope_lec_test () {
       exit 1
     fi
 	done
-#////////inserted here:
 
   for pt in $1
   do
@@ -284,7 +281,7 @@ Pyrope_lec_test () {
   fi
 }
 
-Pyrope_lec_test "$pts"
+#Pyrope_lec_test "$pts"
 Pyrope_lec_test "$pts_hier" "hier"
 
 rm -f lnast.dot.gld
