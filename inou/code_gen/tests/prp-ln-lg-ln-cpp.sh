@@ -23,7 +23,7 @@ do
     echo ""
     echo ""
     echo "===================================================="
-    echo "Compilation to get stable LGraph"
+    echo "Compilation to get CPP from the PRP code via LGraph"
     echo "===================================================="
 
     echo "----------------------------------------------------"

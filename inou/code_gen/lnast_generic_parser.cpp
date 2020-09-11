@@ -143,10 +143,31 @@ std::string Cpp_parser::supp_buffer_to_print(std::string modname) {
 
   std::string vcd_params = "  std::string scope_name;\n  vcd::VCDWriter* vcd_writer;\n";
 
+  std::string vcd_varptrs;
+  for (auto const& [key, val] : inp_bw) {
+    if (val>"1")
+      absl::StrAppend(&vcd_varptrs, "  vcs::VarPtr vcd_", key, " = vcd_writer->register_passed_var(scope_name, \"", key, "[", std::to_string(std::stoi(val)-1), ":0]\", vcd::VariableType::wire, ", val, ");\n");
+    else
+      absl::StrAppend(&vcd_varptrs, "  vcs::VarPtr vcd_", key, " = vcd_writer->register_passed_var(scope_name, \"", key, "\", vcd::VariableType::wire, ", val, ");\n");
+  }
+  for (auto const& [key,val] : outp_bw) {
+    if (val>"1")
+      absl::StrAppend(&vcd_varptrs, "  vcs::VarPtr vcd_", key, " = vcd_writer->register_passed_var(scope_name, \"", key, "[", std::to_string(std::stoi(val)-1), ":0]\", vcd::VariableType::wire, ", val, ");\n");
+    else
+      absl::StrAppend(&vcd_varptrs, "  vcs::VarPtr vcd_", key, " = vcd_writer->register_passed_var(scope_name, \"", key, "\", vcd::VariableType::wire, ", val, ");\n");
+  }
+  for (auto const& [key,val] : reg_bw) {
+    if (val>"1")
+      absl::StrAppend(&vcd_varptrs, "  vcs::VarPtr vcd_", key, " = vcd_writer->register_var(scope_name, \"", key, "[", std::to_string(std::stoi(val)-1), ":0]\", vcd::VariableType::wire, ", val, ");\n");
+    else
+      absl::StrAppend(&vcd_varptrs, "  vcs::VarPtr vcd_", key, " = vcd_writer->register_var(scope_name, \"", key, "\", vcd::VariableType::wire, ", val, ");\n");
+  }
+
+
   std::string vcd_funcs = "  " + modname + "_sim(uint64_t _hidx, const std::string &parent_name, vcd::VCDWriter* writer);\n  void vcd_reset_cycle();\n  void vcd_posedge();\n  void vcd_negedge();\n  void vcd_comb();\n";
 //  std::string trace_part = "#ifdef SIMLIB_TRACE\n  void add_signature(Simlib_signature &sign);\n#endif";
 //  return absl::StrCat(header_strt + outps_nline + funcs + trace_part + "\n};");
-  return absl::StrCat(header_strt + outps_nline + funcs + vcd_params + vcd_funcs + "\n};");
+  return absl::StrCat(header_strt + outps_nline + funcs + vcd_params + vcd_varptrs + vcd_funcs + "\n};");
 }
 
 std::string Cpp_parser::main_fstart(std::string basename, std::string basename_s) {
