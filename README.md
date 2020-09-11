@@ -18,7 +18,7 @@ sub-second.
 As the goal of "seconds," we do not need to perform too fine grain incremental
 work. Notice that this is a different goal from having an typical incremental
 synthesis, where many edges are added and removed in the order of thousands of
-nodes/edges. 
+nodes/edges.
 
 
 ## LiveHD Framework
@@ -34,9 +34,19 @@ generation.
 ![LiveHD overall flow](./docs/livehd.svg)
 
 ## Contribute to LiveHD
+
+Contributors are welcome to the LiveHD project. This project is led by the
+[MASC group](https://masc.soe.ucsc.edu) from UCSC.
+
 There is a list of available [projects.md](docs/projects.md) to further improve
-LiveHD. If you want to contribute or seek for MS/undergraduate thesis projects, please
-contact renau@ucsc.edu to query about them.
+LiveHD. If you want to contribute or seek for MS/undergraduate thesis projects,
+please contact renau@ucsc.edu to query about them.
+
+
+You can also
+[donate](https://secure.ucsc.edu/s/1069/bp18/interior.aspx?sid=1069&gid=1001&pgid=780&cid=1749&dids=1053)
+to the LiveHD project. The funds will be used to provide food for meetings,
+equipment, and support to students/faculty at UCSC working on this project.
 
 ## Building
 Read [Installation](./docs/Installation.md) for installation instructions.
@@ -114,12 +124,12 @@ indicated in [CONTRIBUTING.md](docs/CONTRIBUTING.md) and [GitHub-use.md](docs/Gi
 
 
 # Publications
-For more detailed information and paper reference, please refer to 
+For more detailed information and paper reference, please refer to
 the following publications. If you are doing research or projects corresponding
 to LiveHD, please send us a notification, we are glad to add your paper.
 
-## Live techniques 
-1. [LiveHD: A Productive Live Hardware Development Flow](docs/papers/LiveHD_IEEE_Micro20.pdf), Sheng-Hong Wang, Rafael T. Possignolo, Haven Skinner, and Jose Renau, IEEE Micro Special Issue on Agile and Open-Source Hardware, July/August 2020. 
+## Live techniques
+1. [LiveHD: A Productive Live Hardware Development Flow](docs/papers/LiveHD_IEEE_Micro20.pdf), Sheng-Hong Wang, Rafael T. Possignolo, Haven Skinner, and Jose Renau, IEEE Micro Special Issue on Agile and Open-Source Hardware, July/August 2020.
 
 
 2. [LiveSim: A Fast Hot Reload Simulator for HDLs](docs/papers/LiveSim_ISPASS20.pdf), Haven Skinner, Rafael T. Possignolo, Sheng-Hong Wang, and Jose Renau, International Symposium on Performance Analysis of Systems and Software (ISPASS), April 2020. **(Best Paper Nomination)**
@@ -130,8 +140,8 @@ to LiveHD, please send us a notification, we are glad to add your paper.
 4. [LiveSynth: Towards an Interactive Synthesis Flow](docs/papers/LiveSynth_DAC17.pdf), Rafael T. Possignolo, and
    Jose Renau, Design Automation Conference (DAC), June 2017.
 
-## LGraph 
-5. [LGraph: A Unified Data Model and API for Productive Open-Source Hardware Design](docs/papers/LGraph_WOSET19.pdf), 
+## LGraph
+5. [LGraph: A Unified Data Model and API for Productive Open-Source Hardware Design](docs/papers/LGraph_WOSET19.pdf),
    Sheng-Hong Wang, Rafael T. Possignolo, Qian Chen, Rohan Ganpati, and
    Jose Renau, Second Workshop on Open-Source EDA Technology (WOSET), November 2019.
 
@@ -139,7 +149,7 @@ to LiveHD, please send us a notification, we are glad to add your paper.
    Sheng-Hong Wang, Haven Skinner, and Jose Renau. First Workshop on Open-Source
    EDA Technology (WOSET), November 2018. **(Best Tool Nomination)**
 
-## LNAST 
+## LNAST
 7. [LNAST: A Language Neutral Intermediate Representation for Hardware Description Languages](docs/papers/LNAST_WOSET19.pdf), Sheng-Hong Wang, Akash Sridhar, and Jose Renau,
    Second Workshop on Open-Source EDA Technology (WOSET), 2019.
 
