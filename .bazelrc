@@ -13,6 +13,22 @@ build:bench --cxxopt -ffast-math
 build:bench --cxxopt -Ofast
 build:bench --cxxopt -march=native
 
+build:prof --copt -Og
+build:prof --cxxopt -Og
+build:prof --linkopt -Og
+
+build:prof --copt -pg
+build:prof --cxxopt -pg
+build:prof --linkopt -pg
+
+#build:prof --copt -fprofile-arcs
+#build:prof --cxxopt -fprofile-arcs
+#build:prof --linkopt -fprofile-arcs
+
+#build:prof --copt -ftest-coverage
+#build:prof --cxxopt -ftest-coverage
+#build:prof --linkopt -ftest-coverage
+
 test --test_tag_filters "-long1,-long2,-long3,-long4,-long5,-long6,-long7,-long8,-manual,-fixme"
 coverage --test_tag_filters "-long1,-long2,-long3,-long4,-long5,-long6,-long7,-long8,-manual,-fixme"
 coverage --cache_test_results=no
