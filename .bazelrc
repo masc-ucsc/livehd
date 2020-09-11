@@ -7,11 +7,13 @@ build:bench --copt -mavx2
 build:bench --copt -ffast-math
 build:bench --copt -Ofast
 build:bench --copt -march=native
+build:bench --copt -DNDEBUG
 
 build:bench --cxxopt -mavx2
 build:bench --cxxopt -ffast-math
 build:bench --cxxopt -Ofast
 build:bench --cxxopt -march=native
+build:bench --cxxopt -DNDEBUG
 
 build:prof --copt -Og
 build:prof --cxxopt -Og

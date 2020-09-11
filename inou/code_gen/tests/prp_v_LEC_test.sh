@@ -1,12 +1,12 @@
-#!/bin/bash        
-rm -rf ./lgdb      
+#!/bin/bash
+rm -rf ./lgdb
 rm -rf ./lgdb2
 rm -rf ./prp_v_LEC_test_dir
 rm -f ./*dot*
 rm -f *.v
-rm -f lnast.dot.gld      
-rm -f lnast.nodes        
-rm -f lnast.nodes.gld    
+rm -f lnast.dot.gld
+rm -f lnast.nodes
+rm -f lnast.nodes.gld
 pts='logic if bits_rhs'
 
 pts_hier='sum funcall'
@@ -33,8 +33,8 @@ Pyrope_lec_test () {
   echo "                  Ver_1           LN -> LG -> Ver_2           "
   echo "  Perform LEC b/w Ver_1 and Ver_2                             "
   echo "=============================================================="
-  
-  
+
+
   for pt in $1
   #for pt in $pts
   do
@@ -43,7 +43,7 @@ Pyrope_lec_test () {
       echo "ERROR: could not find ${pt}.prp in /inou/pyrope/tests/compiler"
       exit 2
     fi
-  
+
     echo "--------------------------------------------------------------"
     echo "PRP -> LNAST -> LGraph                                        "
     echo "--------------------------------------------------------------"
@@ -54,11 +54,11 @@ Pyrope_lec_test () {
       echo "ERROR: Pyrope compiler failed: LNAST -> LGraph, testcase: inou/pyrope/tests/compiler/${pt}.prp"
       exit 1
     fi
-    
+
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from"
     mv ${pt}.dot ${pt}.raw.dot
     dot -Tpdf -o ${pt}.raw.dot.pdf ${pt}.raw.dot
-  
+
     echo "--------------------------------------------------------------"
     echo "raw LGraph -> Copy-Propagation And Tuple Chain Resolved LGraph"
     echo "--------------------------------------------------------------"
@@ -69,14 +69,14 @@ Pyrope_lec_test () {
       echo "ERROR: Pyrope compiler failed: resolve tuples, testcase: inou/pyrope/tests/compiler/${pt}.prp"
       exit 1
     fi
-  
+
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from"
-    mv ${pt}.dot ${pt}.no_bits.dot   
-    
+    mv ${pt}.dot ${pt}.no_bits.dot
+
     echo "--------------------------------------------------------------"
     echo "LGraph -> Local Bitwidth Optimization(LGraph)             "
     echo "--------------------------------------------------------------"
-    
+
     ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.cprop"
     if [ $? -eq 0 ]; then
       echo "Successfully optimize design bitwidth: inou/pyrope/tests/compiler/${pt}.prp"
@@ -84,9 +84,9 @@ Pyrope_lec_test () {
       echo "ERROR: Pyrope compiler failed: bitwidth optimization, testcase: inou/pyrope/tests/compiler/${pt}.prp"
       exit 1
     fi
-  
+
     ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from"
-    mv ${pt}.dot ${pt}.optimized.dot   
+    mv ${pt}.dot ${pt}.optimized.dot
     dot -Tpdf -o ${pt}.optimized.dot.pdf ${pt}.optimized.dot
   done
 
@@ -117,21 +117,21 @@ Pyrope_lec_test () {
   for pt in $1
   do
 		#BUG!!#TODO!!#
-#    echo "--------------------------------------------------------------"
-#    echo "optimized LGraph -> LNAST          "
-#    echo "--------------------------------------------------------------"
-#    ${LGSHELL} "lgraph.open name:${pt} |> pass.lnast_fromlg |> lnast.dump"
-#    if [ $? -eq 0 ]; then
-#      echo "Successfully obtained LNAST of the optimized LGraph: inou/pyrope/tests/compiler/${pt}.prp"
-#    else
-#      echo "ERROR: Pyrope compiler failed: LGraph -> LNAST  conversion, testcase: inou/pyrope/tests/compiler/${pt}.prp"
-#      exit 1
-#    fi
-  
+    echo "--------------------------------------------------------------"
+    echo "optimized LGraph -> LNAST          "
+    echo "--------------------------------------------------------------"
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.lnast_fromlg |> lnast.dump"
+    if [ $? -eq 0 ]; then
+      echo "Successfully obtained LNAST of the optimized LGraph: inou/pyrope/tests/compiler/${pt}.prp"
+    else
+      echo "ERROR: Pyrope compiler failed: LGraph -> LNAST  conversion, testcase: inou/pyrope/tests/compiler/${pt}.prp"
+      exit 1
+    fi
+
     echo "--------------------------------------------------------------"
     echo "optimized LGraph -> LNAST -> pyrope(code_gen)            "
     echo "--------------------------------------------------------------"
-    ${LGSHELL} "lgraph.open name:${pt} |> pass.lnast_fromlg |> inou.code_gen.prp odir:prp_v_LEC_test_dir"
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.lnast_fromlg |> lnast.dump |> inou.code_gen.prp odir:prp_v_LEC_test_dir"
     if [ $? -eq 0 ]; then
       echo "Successfully obtained pyrope from LNAST of the optimized LGraph: inou/pyrope/tests/compiler/${pt}.prp"
     else
@@ -191,11 +191,11 @@ Pyrope_lec_test () {
       echo "ERROR: Pyrope compiler failed: LNAST -> LGraph, testcase: prp_v_LEC_test_dir/${pt}.prp"
       exit 1
     fi
-    
+
     ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from"
     mv ${pt}.dot ${pt}.sec.dot
     dot -Tpdf -o ${pt}.sec.dot.pdf ${pt}.sec.dot
-  
+
     echo "--------------------------------------------------------------"
     echo "sec LGraph -> Copy-Propagation And Tuple Chain Resolved LGraph"
     echo "--------------------------------------------------------------"
@@ -206,13 +206,13 @@ Pyrope_lec_test () {
       echo "ERROR: Pyrope compiler failed: resolve tuples, testcase: prp_v_LEC_test_dir/${pt}.prp"
       exit 1
     fi
-  
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from"   
-    
+
+    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from"
+
     echo "--------------------------------------------------------------"
     echo "sec LGraph cpropped -> Local Bitwidth Optimization(LGraph)             "
     echo "--------------------------------------------------------------"
-    
+
     ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> pass.bitwidth |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.cprop"
     if [ $? -eq 0 ]; then
       echo "Successfully optimize design bitwidth: prp_v_LEC_test_dir/${pt}.prp"
@@ -220,11 +220,11 @@ Pyrope_lec_test () {
       echo "ERROR: Pyrope compiler failed: bitwidth optimization, testcase: prp_v_LEC_test_dir/${pt}.prp"
       exit 1
     fi
-  
+
     ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from"
-    mv ${pt}.dot ${pt}.sec.optimized.dot   
+    mv ${pt}.dot ${pt}.sec.optimized.dot
     dot -Tpdf -o ${pt}.sec.optimized.dot.pdf ${pt}.sec.optimized.dot
-  
+
     echo "--------------------------------------------------------------"
     echo "optimized LGraph -> Verilog_2             "
     echo "--------------------------------------------------------------"
@@ -238,7 +238,7 @@ Pyrope_lec_test () {
     fi
     mv ${pt}.v ${pt}_2.v
   done
- 
+
   #logic equivalence check
   if [[ $2 == "hier" ]]; then
     #get the last pattern of pts_hier
@@ -273,7 +273,7 @@ Pyrope_lec_test () {
       echo "Logic Equivalence Check"
       echo "--------------------------------------------------------------"
       ${LGCHECK} --implementation=${pt}_2.v --reference=${pt}_1.v
-  
+
       if [ $? -eq 0 ]; then
         echo "Successfully passed logic equivalence check!"
       else
