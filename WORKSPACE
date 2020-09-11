@@ -198,6 +198,15 @@ new_git_repository(
 	remote = "https://github.com/ericniebler/range-v3",
 )
 
+# need the SHA256 since this is an http archive
+http_archive(
+    name = "blobb",
+    urls = ["http://vlsicad.eecs.umich.edu/BK/BloBB/blobb_050315/BloBB_CompaSS_050315_source.tar.gz"],
+    sha256 = "9f7355945440aaddd4d1fd0bbe136e09f8e7fa76d9af62d94936630454af3fef",
+    patches = ["patch.blobb_compass"],
+    build_file = "BUILD.blobb",
+)
+
 # BOOST Libraries dependences
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
