@@ -15,6 +15,8 @@
 #include <utility>  // for std::pair
 #include <vector>
 
+#include "Stable_adjacency_list.hpp" // for bounding curves
+
 #include "graph_info.hpp"
 #include "i_resolve_header.hpp"
 
@@ -22,6 +24,7 @@
 constexpr bool hier_verbose = false;
 // constexpr bool coll_verbose = false;
 constexpr bool reg_verbose = false;
+constexpr bool bound_verbose = true;
 
 // a struct representing a node in a hier_tree
 struct Hier_node {
@@ -58,16 +61,17 @@ public:
   // take in a graph of all nodes in the netlist, and convert it to a tree.
   // min_num_components sets the minimum number of components required to trigger analysis of the hierarchy
   // any node with a smaller area than min_area gets folded into a new supernode with area >= min_area
-  void discover_hierarchy(unsigned int num_components);
+  void discover_hierarchy(const unsigned int num_components);
 
   // returns a new tree with small leaf nodes collapsed together (Algorithm 2 in HiReg)
-  void collapse(double threshold_area);
+  void collapse(const double threshold_area);
 
   // discover similar subgraphs in the collapsed hierarchy
-  void discover_regularity(size_t hier_index, const size_t beam_width);
+  void discover_regularity(const size_t hier_index, const size_t beam_width);
 
   // construct a boundary curve using an exhaustive approach if the number of blocks is < optimal_thresh
-  void construct_bounds(size_t pat_index, unsigned int optimal_thresh);
+  // num_inst indicates how many instantiations of each block we should create
+  void construct_bounds(const size_t pat_index, const size_t num_inst, const unsigned int optimal_thresh);
 
 private:
   friend class Pass_fplan_dump;
@@ -115,7 +119,6 @@ private:
 
   // keep track of all the kinds of vertices we can have, as well as how many there are
   using pattern_t = std::unordered_map<Lg_type_id::type, unsigned int>;
-
   using pattern_vec_t = std::vector<pattern_t>;
 
   unsigned int generic_pattern_size(const pattern_t& gset) const;
@@ -132,4 +135,10 @@ private:
   void compress_hier(set_t&, const pattern_t&, std::vector<vertex_t>&);
 
   std::vector<pattern_vec_t> pattern_lists;
+
+  using bound_graph_t = decltype(graph::Stable_out_adjacency_list());
+  using bound_pair_t = std::pair<bound_graph_t, bound_graph_t>;
+
+  void simulated_annealing();
+  void branch_n_bound(const pattern_t& pat, bound_pair_t& bp, const size_t num_inst);
 };

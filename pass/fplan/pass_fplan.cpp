@@ -95,8 +95,11 @@ void Pass_fplan::make_graph(Eprp_var& var) {
   for (auto ei : edges) {
     auto [src, dst, weight] = ei;
 
-    auto v1 = vm.at(src);
-    auto v2 = vm.at(dst);
+    I(vm.count(src) == 1);
+    I(vm.count(dst) == 1);
+
+    auto v1 = vm[src];
+    auto v2 = vm[dst];
 
     // this is done twice to make bidirectional edges for nodes that may only have outputs or inputs
     auto e_1_2 = find_edge(v1, v2);
@@ -155,7 +158,7 @@ void Pass_fplan::pass(Eprp_var& var) {
 
   fmt::print("  constructing boundary curve...");
   s = time();
-  h.construct_bounds(0, 15);
+  h.construct_bounds(0, 3, 15);
   e = time();
   fmt::print("done ({} ms).\n", dur(e, s));
 

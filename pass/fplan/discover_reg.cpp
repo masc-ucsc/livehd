@@ -43,12 +43,12 @@ set_vec_t Hier_tree::find_all_patterns(const set_t& subg, const pattern_t& gpatt
 
       I(temp_gpat.at(ginfo.labels(v)) > 0);
 
-      temp_gpat.at(ginfo.labels(v))--;
+      temp_gpat[ginfo.labels(v)]--;
 
       for (auto e : ginfo.al.out_edges(v)) {
         auto ov = ginfo.al.head(e);
         if (subg.contains(ov) && !visited_nodes.contains(ov) && temp_gpat.count(ginfo.labels(ov)) > 0
-            && temp_gpat.at(ginfo.labels(ov)) && !global_found_nodes.contains(ov)) {
+            && temp_gpat[ginfo.labels(ov)] && !global_found_nodes.contains(ov)) {
           find_pattern(ov);
         }
       }
