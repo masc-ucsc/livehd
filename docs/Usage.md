@@ -71,7 +71,7 @@ $ less trivial.json
 
 ### RocketChip example pass
 
-- Load RocketChip to the DB for the first time
+- Load RocketChip (a RISC-V core) to the DB for the first time
   ```
   $ ./bazel-bin/main/lgshell
   livehd> files path:projects/rocketchip/ |> inou.liveparse
@@ -83,6 +83,7 @@ $ less trivial.json
   $ ./bazel-bin/main/lgshell
   livehd> lgraph.open name:RocketTile |> pass.sample.wirecount
   ```
+Other example projects are located in the `projects` folder.  Keep in mind that the `BoomConfig` verilog file contains almost 500,000 lines of code!
 
 ### Low level directed build
 
