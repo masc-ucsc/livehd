@@ -112,14 +112,15 @@ public:
   }
 
   void fuse_token(Token_id new_tok, const Token &t2) {
-    I(text.data()+text.size() == t2.text.data()); // t2 must be continuous (otherwise, create new token)
+    I(text.data() + text.size() == t2.text.data()); // t2 must be continuous (otherwise, create new token)
     tok = new_tok;
 
     auto new_len = text.size() + t2.text.size();
     text = std::string_view{text.data(), new_len};
   }
+
   void append_token(const Token &t2) {
-    I(text.data()+text.size() == t2.text.data()); // t2 must be continuous (otherwise, create new token)
+    I(text.data() + text.size() == t2.text.data()); // t2 must be continuous (otherwise, create new token)
 
     auto new_len = text.size() + t2.text.size();
     text = std::string_view{text.data(), new_len};

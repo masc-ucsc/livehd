@@ -320,7 +320,7 @@ void Elab_scanner::parse_step() {
           while(!is_newline(memblock[pos+1]) && (pos+3)<memblock.size())
             pos++;
         }
-      }else{
+      } else {
         if(!is_newline(memblock[pos]) && memblock[pos]!='*' && memblock[pos]!='/' && (pos+3)<memblock.size()) {
           // TODO: Convert this to a word base (not byte based) skip
           while(!is_newline(memblock[pos+1]) && memblock[pos+1]!='*' && memblock[pos+1]!='/' && (pos+3)<memblock.size())
@@ -352,7 +352,8 @@ void Elab_scanner::parse_step() {
     }
 
     last_c = c;
-  }
+  } //end of token_list building
+
   if (t.tok != Token_id_nop) {
     t.adjust_token_size(memblock.size());
     add_token(t);
