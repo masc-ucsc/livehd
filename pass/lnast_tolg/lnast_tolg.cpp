@@ -477,7 +477,7 @@ void Lnast_tolg::process_ast_tuple_get_op(LGraph *dfg, const Lnast_nid &lnidx_tg
       }
 
       auto tup_get = dfg->create_node(TupGet_Op);
-      tg_map[i] = tup_get;
+      tg_map.insert({i, tup_get});
 
       auto tn_spin = tup_get.setup_sink_pin("TN");
 
@@ -531,7 +531,7 @@ void Lnast_tolg::process_ast_tuple_get_op(LGraph *dfg, const Lnast_nid &lnidx_tg
 
     } else { //not the last child
       auto new_tup_get = dfg->create_node(TupGet_Op);
-      tg_map[i] = new_tup_get;
+      tg_map.insert({i, new_tup_get});
       auto tn_spin = new_tup_get.setup_sink_pin("TN");
 
 

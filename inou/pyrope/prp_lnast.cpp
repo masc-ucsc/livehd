@@ -1329,6 +1329,14 @@ Lnast_node Prp_lnast::eval_fcall_explicit(mmap_lib::Tree_index idx_start_ast, mm
     // add the argument tuple
     lnast->add_child(idx_fcall_root, arg_lhs);
 
+    if (idx_next_fcall.is_invalid()) {
+      idx_next_fcall = ast->get_sibling_next(idx_pipe_maybe);
+      if (idx_next_fcall.is_invalid()) {
+        return lhs_node;
+      }
+      I(ast->get_data(idx_next_fcall).rule_id == Prp_rule_fcall_explicit);
+    }
+
     if (ast->get_data(idx_next_fcall).rule_id == Prp_rule_fcall_explicit) {
       if (is_assign_expr) {
         return eval_fcall_explicit(idx_next_fcall, idx_start_ln, ast->invalid_index(), intermediate_lhs, lhs_node);
