@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <string_view>
 #include "lgraph.hpp"
 #include "lnast.hpp"
 #include "pass.hpp"
@@ -10,6 +11,8 @@ protected:
   uint64_t temp_var_count = 0;
   uint64_t seq_count      = 0;
   bool     put_bw_in_ln   = true;
+
+  std::map<Port_ID, std::string_view> dpin_name_map;
 
   void do_trans(LGraph* g, Eprp_var& var, std::string_view module_name);
 
@@ -40,9 +43,9 @@ protected:
   void handle_io(LGraph* g, Lnast_nid& parent_lnast_node, Lnast& lnast);
   void add_bw_in_ln(Lnast& lnast, Lnast_nid& parent_node, const std::string_view& pin_name, const uint32_t& bits);
 
-  std::string_view create_temp_var(Lnast& lnast);
+  std::string_view create_temp_var(Lnast& lnast, std::string_view str_prefix = "___");
 
-  std::string_view dpin_get_name(const Node_pin dpin);
+  std::string_view dpin_get_name(Lnast &lnast, const Node_pin dpin);
   std::string_view get_new_seq_name(Lnast& lnast);
 
 public:
