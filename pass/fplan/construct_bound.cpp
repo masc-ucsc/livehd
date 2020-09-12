@@ -8,6 +8,7 @@
 
 #include "fmt/format.h"
 #include "hier_tree.hpp"
+#include "profile_time.hpp"
 
 constexpr double max_aspect_ratio = 1.0 / 5.0;
 
@@ -41,7 +42,9 @@ void Hier_tree::construct_bounds(const size_t pat_index, const unsigned int opti
     // shelling out here because blobb uses static variables that can't easily be reset across calls.
     // additionally, forking is actually pretty fast compared to the other things I have to do!
 
-    fmt::print("\ninput string stream:\n{}", instr.str());
+    if (bound_verbose) {
+      fmt::print("\ninput string stream:\n{}", instr.str());
+    }
 
     std::ofstream blobb_inf;
 
@@ -58,11 +61,11 @@ void Hier_tree::construct_bounds(const size_t pat_index, const unsigned int opti
       throw std::runtime_error(fmt::format("No binary found in {}!", blobb_p.string()));
     }
 
-    const std::string files = "/tmp/infile.txt /tmp/outfile.bbb";
+    const std::string files      = "/tmp/infile.txt /tmp/outfile.bbb";
     const std::string fixed_args = "--slicing --free-orient -t";
-    const std::string alg = (pat.size() < optimal_thresh) ? "--backtrack" : "--hierarchical";
+    const std::string alg        = (pat.size() < optimal_thresh) ? "--backtrack" : "--hierarchical";
 
-    int dead_p = 15; // when set to the default (5%), small floorplans fail frequently
+    int dead_p = 15;  // when set to the default (5%), small floorplans fail frequently
 
     std::ifstream blobb_outf;
 
@@ -73,6 +76,10 @@ void Hier_tree::construct_bounds(const size_t pat_index, const unsigned int opti
 
       const std::string command = fmt::format("{} {} {} {} {}", blobb_p.string(), files, fixed_args, alg, deadspace);
 
+      profile_time::timer t;
+      t.start();
+
+      fmt::print("    running blobb...");
       // forking requires C file handles :/
       FILE* cfstream = popen(command.c_str(), "r");
       I(cfstream);
@@ -84,12 +91,15 @@ void Hier_tree::construct_bounds(const size_t pat_index, const unsigned int opti
       }
 
       pclose(cfstream);
+      fmt::print("done ({} ms).\n", t.time());
 
       blobb_outf.open("/tmp/outfile.bbb");
       I(blobb_outf);
 
       if (blobb_outf.peek() == std::ifstream::traits_type::eof()) {
-        fmt::print("no output was sent to file, trying with {}% deadspace...\n", dead_p);
+        if (bound_verbose) {
+          fmt::print("no output was sent to file, trying with {}% deadspace...\n", dead_p);
+        }
         blobb_outf.close();
       }
 
@@ -104,7 +114,9 @@ void Hier_tree::construct_bounds(const size_t pat_index, const unsigned int opti
 
     blobb_outf.close();
 
-    fmt::print("adding ({:.4f}, {:.4f}) to bounding curve\n", width, height);
+    if (bound_verbose) {
+      fmt::print("adding ({:.4f}, {:.4f}) to bounding curve\n", width, height);
+    }
     bounding_curve.emplace_back(width, height);
   }
 }

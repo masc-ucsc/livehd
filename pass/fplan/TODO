@@ -19,6 +19,7 @@ Things to optimize:
 7. put more stuff on the heap?
 9. for loops -> ranges (faster?)
 10. beware of temporaries
+11. const <type>& -> &&?
 
 Refactors:
 0. namespace stuff

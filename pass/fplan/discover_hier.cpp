@@ -1,11 +1,11 @@
+#include <functional>
 #include <limits>  // for std::numeric_limits
 #include <vector>
-#include <functional>
 
 #include "fmt/core.h"
-
-#include "i_resolve_header.hpp"
 #include "hier_tree.hpp"
+#include "i_resolve_header.hpp"
+#include "profile_time.hpp"
 
 std::pair<int, int> Hier_tree::min_wire_cut(Graph_info<g_type>& info, int cut_set) {
   auto&      g    = info.al;
@@ -390,6 +390,10 @@ Hier_tree::phier Hier_tree::discover_hierarchy(Graph_info<g_type>& info, int sta
 void Hier_tree::discover_hierarchy(const unsigned int num_components) {
   I(num_components >= 1);
 
+  profile_time::timer t;
+  t.start();
+
+  fmt::print("    wiring zero-cost edges...");
   // if the graph is not fully connected, ker-lin fails to work.
   for (const auto& v : ginfo.al.verts()) {
     for (const auto& ov : ginfo.al.verts()) {
@@ -399,10 +403,19 @@ void Hier_tree::discover_hierarchy(const unsigned int num_components) {
       }
     }
   }
+  fmt::print("done. ({} ms).\n", t.time());
 
+  fmt::print("    discovering hierarchy...");
+  t.start();
   hiers.push_back(discover_hierarchy(ginfo, 0, num_components));
+  fmt::print("done. ({} ms).\n", t.time());
+
+  t.start();
+  fmt::print("    deleting zero-cost edges...");
 
   // undo temp edge creation because it's really inconvienent elsewhere
+  // NOTE: this isn't very efficient, but using edge sets causes segfaults because the underlying graph is changing.
+  // using std::set<edge_t> works, but doesn't speed things up that much.
   for (const auto& v : ginfo.al.verts()) {
     for (const auto& ov : ginfo.al.verts()) {
       auto e = ginfo.find_edge(v, ov);
@@ -411,4 +424,6 @@ void Hier_tree::discover_hierarchy(const unsigned int num_components) {
       }
     }
   }
+
+  fmt::print("done. ({} ms).\n", t.time());
 }
