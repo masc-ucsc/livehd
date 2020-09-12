@@ -191,11 +191,12 @@ void Pass_lnast_fromlg::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node, co
 
   std::string_view name;
   auto bw = pin.get_bits();
-  if (ntype == SFlop_Op || ntype == AFlop_Op || ntype == Latch_Op) {
-    if ((bw > 0) & (pin.get_name().substr(0,3) != "___")) {
+  //if ((bw > 0) & (pin.get_name().substr(0,3) != "___")) {
+  if (bw > 0) {
+    if (ntype == SFlop_Op || ntype == AFlop_Op || ntype == Latch_Op) {
     /* NOTE->hunter: I decided to only specify reg and IO bw (not
      * wires). If more is needed just widen below condition. */
-      name = lnast.add_string(pin.get_name());
+      name = dpin_get_name(lnast, pin);
       lnast.set_bitwidth(name.substr(1), bw);
       if (put_bw_in_ln) {
         add_bw_in_ln(lnast, parent_node, name, bw);
@@ -785,7 +786,8 @@ void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, c
   }
   I(has_din && has_clk);  // A flop at least has to have the input and clock, others are optional/have defaults.
 
-  std::string_view pin_name = lnast.add_string(pin.get_name());
+  //std::string_view pin_name = lnast.add_string(pin.get_name());
+  std::string_view pin_name = dpin_get_name(lnast,pin);
 
   // Set __clk_pin
   /* FIXME: Currently, this is commented out since LN->LG does not support __clk_pin attribute.
@@ -903,7 +905,7 @@ void Pass_lnast_fromlg::attach_latch_node(Lnast& lnast, Lnast_nid& parent_node, 
   }
   I(has_din && has_en); // A latch at least has to have the din and enable.
 
-  std::string_view pin_name = lnast.add_string(pin.get_name());
+  std::string_view pin_name = dpin_get_name(lnast, pin);//lnast.add_string(pin.get_name());
 
   // Set __latch = true
   auto tmp_var = create_temp_var(lnast);
@@ -945,9 +947,9 @@ void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_nod
   // Create tuple names for submodule IO.
   std::string_view out_tup_name;
   if (!pin.get_node().has_name()) {
-		dpin_get_name(lnast, pin);
+		out_tup_name = dpin_get_name(lnast, pin);//TODO: check the type_op and assign prefix of "out"
     //pin.get_node().set_name(create_temp_var(lnast));
-    out_tup_name = lnast.add_string(absl::StrCat("out", pin.get_node().get_name()));
+    //out_tup_name = lnast.add_string(absl::StrCat("out", pin.get_node().get_name()));
   } else {
     std::vector<std::string_view> out_node_name = absl::StrSplit(pin.get_node().get_name(), ":");//du to commit: embed return variable name to subgraph node name
     out_tup_name = lnast.add_string(out_node_name[0]);
@@ -955,7 +957,8 @@ void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_nod
   //auto inp_tup_name  = lnast.add_string(absl::StrCat("inp_", pin.get_node().get_name()));
   //auto inp_tup_name  = lnast.add_string(pin.get_node().get_name());
   auto inp_tup_name  = create_temp_var(lnast);
-  fmt::print("instance_name:{}, subgraph->get_name():{}\n", pin.get_node().get_name(), sub.get_name());
+  if (pin.has_name())
+    fmt::print("instance_name:{}, subgraph->get_name():{}\n", pin.get_node().get_name(), sub.get_name());
 
   //auto out_tup_name = lnast.add_string(pin.get_node().get_name());
 
@@ -1166,12 +1169,12 @@ void Pass_lnast_fromlg::attach_child(Lnast& lnast, Lnast_nid& op_node, const Nod
     auto dpin_name = dpin_get_name(lnast, dpin);
     lnast.add_child(op_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("$", dpin_name))));
   } else if (dpin.get_node().is_graph_output()) {
-    auto out_driver_name = lnast.add_string(absl::StrCat("%", dpin.get_name()));
+    auto out_driver_name = dpin_get_name(lnast, dpin);
     lnast.add_child(op_node,
                     Lnast_node::create_ref(out_driver_name));  // lnast.add_string(absl::StrCat(prefix, "%", dpin.get_name()))));
   } else if ((dpin.get_node().get_type_op() == AFlop_Op) || (dpin.get_node().get_type_op() == SFlop_Op)) {
     // dpin_name is already persistent, no need to do add_string but cleaner
-    lnast.add_child(op_node, Lnast_node::create_ref(lnast.add_string(dpin.get_name())));
+    lnast.add_child(op_node, Lnast_node::create_ref(dpin_get_name(lnast, dpin)));
   } else if (dpin.get_node().get_type_op() == Const_Op) {
     lnast.add_child(op_node, Lnast_node::create_const(lnast.add_string(dpin.get_node().get_type_const().to_pyrope())));
   } else {
@@ -1209,7 +1212,6 @@ void Pass_lnast_fromlg::attach_cond_child(Lnast& lnast, Lnast_nid& op_node, cons
 std::string_view Pass_lnast_fromlg::dpin_get_name(Lnast &lnast, const Node_pin dpin) {
   auto ntype = dpin.get_node().get_type_op();
   if (!dpin.has_name()) {
-
     auto ccd = dpin.get_compact_class_driver();
     std::string_view name;
 		auto it = dpin_name_map.find(ccd);
@@ -1219,11 +1221,13 @@ std::string_view Pass_lnast_fromlg::dpin_get_name(Lnast &lnast, const Node_pin d
 			  name = create_temp_var(lnast, "");
       } else if ((ntype == SFlop_Op) || (ntype == AFlop_Op) || (ntype == FFlop_Op) || (ntype == Latch_Op)) {
   			name = create_temp_var(lnast, "#");
+      } else if (dpin.get_node().is_graph_output()){
+        name = create_temp_var(lnast, "%");
       } else {
   			name = create_temp_var(lnast);
       }
       dpin_name_map.emplace(ccd, name);
-		}else{
+		}else{//name is present in the map
       name = it->second;
     }
 
@@ -1234,6 +1238,8 @@ std::string_view Pass_lnast_fromlg::dpin_get_name(Lnast &lnast, const Node_pin d
     return lnast.add_string(dpin.get_name().substr(1));
   } else if ((ntype == SFlop_Op) || (ntype == AFlop_Op) || (ntype == FFlop_Op) || (ntype == Latch_Op)) {
     return lnast.add_string(absl::StrCat("#", dpin.get_name()));
+   } else if (dpin.get_node().is_graph_output()) {
+     return lnast.add_string(absl::StrCat("%", dpin.get_name()));
   } else
   return lnast.add_string(dpin.get_name());
 }
