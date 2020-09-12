@@ -100,16 +100,6 @@ Hier_tree::pattern_t Hier_tree::make_generic(const set_t& pat) const {
   return gpat;
 }
 
-// get value (# inst of P in G * size(G) + size(P))
-unsigned int Hier_tree::find_value(const set_t& subg, const set_t& pattern) const {
-  auto         inst  = find_all_patterns(subg, make_generic(pattern));
-  unsigned int value = inst.size() * subg.size() + pattern.size();
-  if (reg_verbose) {
-    fmt::print("  value ({}) = count ({}) * G({}) + P({})\n", value, inst.size(), subg.size(), pattern.size());
-  }
-  return value;
-}
-
 Hier_tree::pattern_t Hier_tree::find_most_freq_pattern(const set_t& subg, const size_t bwidth) const {
   set_vec_t                     vp;
   std::vector<Lg_type_id::type> initlabel;
@@ -195,7 +185,17 @@ Hier_tree::pattern_t Hier_tree::find_most_freq_pattern(const set_t& subg, const 
     // pair of [owner of value in new_vp, value]
     std::vector<std::pair<size_t, int>> sortvec;
     for (size_t i = 0; i < new_vp.size(); i++) {
-      sortvec.emplace_back(i, find_value(subg, new_vp[i]));
+      auto inst = find_all_patterns(subg, make_generic(new_vp[i]));
+
+      // value = (# instantiations of pattern in subg) * size(subg) + size(pattern)
+      unsigned int value = inst.size() * subg.size() + new_vp[i].size();
+      if (reg_verbose) {
+        fmt::print("  value ({}) = count ({}) * G({}) + P({})\n", value, inst.size(), subg.size(), new_vp[i].size());
+      }
+
+      if (inst.size() > 1) {
+        sortvec.emplace_back(i, value);
+      }
     }
 
     auto cmp = [](auto a, auto b) -> bool { return a.second > b.second; };
@@ -231,8 +231,8 @@ Hier_tree::pattern_t Hier_tree::find_most_freq_pattern(const set_t& subg, const 
 void Hier_tree::compress_hier(set_t& subg, const pattern_t& gpat, std::vector<vertex_t>& patset) {
   auto vinst = find_all_patterns(subg, gpat);
 
-  static unsigned int pat_count = 0;
   if (bound_verbose) {
+    static unsigned int pat_count = 0;
     fmt::print("\npattern {} has {} instantiation(s).\n", pat_count++, vinst.size());
   }
 
@@ -328,6 +328,8 @@ void Hier_tree::discover_regularity(const size_t hier_index, const size_t beam_w
     pattern_t most_freq_pattern = find_most_freq_pattern(hier_nodes, beam_width);
     fmt::print("done ({} ms).\n", t.time());
 
+    // if we have a pattern consisting of more than one element, find_most_frequent_pattern ensures it has >1 instantiation,
+    // so we have to collapse it.
     while (generic_pattern_size(most_freq_pattern) > 1) {
       if (curr_size == old_size) {
         break;  // nothing new to add to pattern_list since our set of nodes didn't grow at all
@@ -373,5 +375,5 @@ void Hier_tree::discover_regularity(const size_t hier_index, const size_t beam_w
     return true;
   };
 
-  I(check_pats());
+  //I(check_pats());
 }

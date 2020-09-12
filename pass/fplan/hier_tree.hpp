@@ -126,9 +126,7 @@ private:
   pattern_t make_generic(const set_t& pat) const;
 
   set_vec_t find_all_patterns(const set_t& subg, const pattern_t& gpattern) const;
-
-  unsigned int find_value(const set_t& subg, const set_t& pattern) const;
-
+  
   // find patterns in the collapsed hierarchy
   pattern_t find_most_freq_pattern(const set_t& subg, const size_t bwidth) const;
 
