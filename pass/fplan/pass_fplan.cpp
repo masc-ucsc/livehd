@@ -158,7 +158,7 @@ void Pass_fplan::pass(Eprp_var& var) {
 
   fmt::print("  constructing boundary curve...");
   s = time();
-  h.construct_bounds(0, 3, 15);
+  h.construct_bounds(0, 15);
   e = time();
   fmt::print("done ({} ms).\n", dur(e, s));
 

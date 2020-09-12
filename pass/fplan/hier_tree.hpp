@@ -71,7 +71,7 @@ public:
 
   // construct a boundary curve using an exhaustive approach if the number of blocks is < optimal_thresh
   // num_inst indicates how many instantiations of each block we should create
-  void construct_bounds(const size_t pat_index, const size_t num_inst, const unsigned int optimal_thresh);
+  void construct_bounds(const size_t pat_index, const unsigned int optimal_thresh);
 
 private:
   friend class Pass_fplan_dump;
@@ -135,4 +135,6 @@ private:
   void compress_hier(set_t&, const pattern_t&, std::vector<vertex_t>&);
 
   std::vector<pattern_vec_t> pattern_lists;
+
+  std::vector<std::pair<double, double>> bounding_curve;
 };
