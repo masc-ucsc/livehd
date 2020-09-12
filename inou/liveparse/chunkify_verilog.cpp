@@ -142,6 +142,7 @@ void Chunkify_verilog::elaborate() {
         format_name[i] = '.';
     }
   }
+
   Lbench bench("live.parse " + format_name);
 
   auto source = absl::StrCat(parse_path, "file_", format_name);
@@ -177,6 +178,7 @@ void Chunkify_verilog::elaborate() {
   Sub_node *sub = nullptr;
 
   int inside_task_function = 0;
+
   while (!scan_is_end()) {
     bool endmodule_found = false;
     if (scan_is_token(Token_id_alnum)) {
@@ -245,6 +247,7 @@ void Chunkify_verilog::elaborate() {
         continue;
       }
     }
+
     if (!in_module && !endmodule_found) {
       scan_format_append(not_in_module_text);
     } else {
