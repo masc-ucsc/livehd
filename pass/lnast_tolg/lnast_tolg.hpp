@@ -16,8 +16,6 @@ class Lnast_tolg : public Pass {
 public:
   explicit Lnast_tolg(const Eprp_var &var, std::string_view _module_name);
   std::vector<LGraph *> do_tolg(std::shared_ptr<Lnast> ln, const Lnast_nid &top_stmts);
-  
-
 
 private:
   std::shared_ptr<Lnast> lnast;

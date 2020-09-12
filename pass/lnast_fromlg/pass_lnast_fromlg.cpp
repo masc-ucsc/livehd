@@ -1209,25 +1209,27 @@ void Pass_lnast_fromlg::attach_cond_child(Lnast& lnast, Lnast_nid& op_node, cons
 std::string_view Pass_lnast_fromlg::dpin_get_name(Lnast &lnast, const Node_pin dpin) {
   auto ntype = dpin.get_node().get_type_op();
   if (!dpin.has_name()) {
-		//check if the map has it; if yes then retireive from map; if not with map then create one and return
-		if(dpin_name_map.find(dpin.get_pid()) == dpin_name_map.end()) {//if treu, then map has it!
-//      return lnast.add_string(dpin_name_map.find(dpin.get_pid())->second); 
-//		} else {
-      /*not present in map already
-			 *create new one, insert in map and return with this new value*/
-      //auto temp_var_name = absl::StrCat("___M", temp_var_count);
-      //temp_var_count++;
+
+    auto ccd = dpin.get_compact_class_driver();
+    std::string_view name;
+		auto it = dpin_name_map.find(ccd);
+		if(it == dpin_name_map.end()) {
+
       if (ntype == Mux_Op) {
-			  dpin_name_map.insert(std::pair<Port_ID, std::string_view>(dpin.get_pid(), create_temp_var(lnast, "")));
+			  name = create_temp_var(lnast, "");
       } else if ((ntype == SFlop_Op) || (ntype == AFlop_Op) || (ntype == FFlop_Op) || (ntype == Latch_Op)) {
-  			dpin_name_map.insert(std::pair<Port_ID, std::string_view>(dpin.get_pid(), create_temp_var(lnast, "#")));
+  			name = create_temp_var(lnast, "#");
       } else {
-  			dpin_name_map.insert(std::pair<Port_ID, std::string_view>(dpin.get_pid(), create_temp_var(lnast)));
+  			name = create_temp_var(lnast);
       }
-//			return lnast.add_string(temp_var_name);
-		}
-    return lnast.add_string(dpin_name_map.find(dpin.get_pid())->second);
+      dpin_name_map.emplace(ccd, name);
+		}else{
+      name = it->second;
+    }
+
+    return lnast.add_string(name);
   }
+
   if (dpin.get_name().substr(0, 1) == "%" || (dpin.get_name().substr(0,1) == "#" && !((ntype == SFlop_Op) || (ntype == AFlop_Op) || (ntype == FFlop_Op) || (ntype == Latch_Op)))) {
     return lnast.add_string(dpin.get_name().substr(1));
   } else if ((ntype == SFlop_Op) || (ntype == AFlop_Op) || (ntype == FFlop_Op) || (ntype == Latch_Op)) {
