@@ -1,7 +1,8 @@
 #include <functional>
-#include "fmt/core.h"
 
+#include "fmt/core.h"
 #include "hier_tree.hpp"
+#include "profile_time.hpp"
 
 unsigned int Hier_tree::generic_pattern_size(const pattern_t& gset) const {
   unsigned int total = 0;
@@ -47,8 +48,8 @@ set_vec_t Hier_tree::find_all_patterns(const set_t& subg, const pattern_t& gpatt
 
       for (auto e : ginfo.al.out_edges(v)) {
         auto ov = ginfo.al.head(e);
-        if (subg.contains(ov) && !visited_nodes.contains(ov) && temp_gpat.count(ginfo.labels(ov)) > 0
-            && temp_gpat[ginfo.labels(ov)] && !global_found_nodes.contains(ov)) {
+        if (subg.contains(ov) && !visited_nodes.contains(ov) && temp_gpat.count(ginfo.labels(ov)) > 0 && temp_gpat[ginfo.labels(ov)]
+            && !global_found_nodes.contains(ov)) {
           find_pattern(ov);
         }
       }
@@ -231,7 +232,9 @@ void Hier_tree::compress_hier(set_t& subg, const pattern_t& gpat, std::vector<ve
   auto vinst = find_all_patterns(subg, gpat);
 
   static unsigned int pat_count = 0;
-  fmt::print("\npattern {} has {} instantiations.\n", pat_count++, vinst.size());
+  if (bound_verbose) {
+    fmt::print("\npattern {} has {} instantiation(s).\n", pat_count++, vinst.size());
+  }
 
   for (auto inst : vinst) {
     std::string name = "pat";
@@ -270,13 +273,14 @@ void Hier_tree::discover_regularity(const size_t hier_index, const size_t beam_w
   I(hier != nullptr);
 
   auto& pattern_list   = pattern_lists.emplace_back();
-  int  curr_min_depth = find_tree_depth(hier);
+  int   curr_min_depth = find_tree_depth(hier);
 
   unsigned int old_size = 0;
   unsigned int curr_size;
 
   while (curr_min_depth >= 0) {
-    auto hier_nodes = ginfo.al.vert_set();
+    profile_time::timer t;
+    auto                hier_nodes = ginfo.al.vert_set();
 
     // TODO: set_t has some weird segfault problem, but a vector of vertex_t's works fine...?
     // might be an issue of move vs copy semantics...?
@@ -298,7 +302,10 @@ void Hier_tree::discover_regularity(const size_t hier_index, const size_t beam_w
             get_level_nodes(node->children[1], level + 1, minlevel);
           };
 
+    t.start();
+    fmt::print("    getting level nodes...");
     get_level_nodes(hier, 0, curr_min_depth);
+    fmt::print("done ({} ms).\n", t.time());
 
     curr_size = hier_nodes.size();
 
@@ -316,7 +323,10 @@ void Hier_tree::discover_regularity(const size_t hier_index, const size_t beam_w
       fmt::print("  total: {}\n", total);
     }
 
+    t.start();
+    fmt::print("    finding most frequent pattern...");
     pattern_t most_freq_pattern = find_most_freq_pattern(hier_nodes, beam_width);
+    fmt::print("done ({} ms).\n", t.time());
 
     while (generic_pattern_size(most_freq_pattern) > 1) {
       if (curr_size == old_size) {
@@ -324,9 +334,15 @@ void Hier_tree::discover_regularity(const size_t hier_index, const size_t beam_w
       }
 
       pattern_list.push_back(most_freq_pattern);
+      t.start();
+      fmt::print("    compressing hierarchy...");
       compress_hier(hier_nodes, most_freq_pattern, pat_set);
+      fmt::print("done ({} ms).\n", t.time());
 
+      t.start();
+      fmt::print("    finding most frequent pattern...");
       most_freq_pattern = find_most_freq_pattern(hier_nodes, beam_width);
+      fmt::print("done ({} ms).\n", t.time());
     }
 
     old_size = curr_size;

@@ -137,4 +137,23 @@ private:
   std::vector<pattern_vec_t> pattern_lists;
 
   std::vector<std::pair<double, double>> bounding_curve;
+
+  // encapsulating dag class because we don't really need the actual nodes
+  class dag {
+    using dag_t = graph::Stable_out_adjacency_list;
+    using dag_map_t = graph::Vert_map<dag_t, Lg_type_id::type>;
+
+    dag_t g;
+    dag_map_t labels;
+
+    dag() : g(dag_t()), labels(g.vert_map<Lg_type_id::type>()) {}
+
+    void fold(const std::unordered_map<Lg_type_id::type, unsigned int>& pat) {
+      for (auto gv : pat) {
+        auto new_v = g.insert_vert();
+        labels[new_v] = gv.first;
+      }
+    }
+  };
+ 
 };

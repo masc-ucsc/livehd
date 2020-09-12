@@ -25,12 +25,10 @@ DOT file will be saved as fplan_dump.dot.
 
 3. output will eventually be saved somewhere.
 
-Papers used:
+Papers / Programs used:
 1. HiReg: A hierarchical approach for generating regular floorplans
    https://www.cs.upc.edu/~jordicf/gavina/BIB/files/floorplan_iccad2014.pdf
 2. Min cut: An Efficient Heuristic Procedure for Partitioning Graphs
    https://janders.eecg.utoronto.ca/1387/readings/kl.pdf
-3. Branch and bound: Optimal aspect ratios of building blocks in VLSI (not sure if I'll actually use this)
-   http://www.eng.biu.ac.il/~wimers/files/journals/04-OptimalAspectRatio.pdf
-4. Simulated Annealing: ??
-   
+3. Branch and bound: BloBB (Block-Packing with Branch-and-Bound)
+   http://vlsicad.eecs.umich.edu/BK/BloBB/

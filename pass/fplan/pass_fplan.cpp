@@ -11,6 +11,7 @@
 #include "i_resolve_header.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
+#include "profile_time.hpp"
 
 void setup_pass_fplan() { Pass_fplan::setup(); }
 
@@ -50,6 +51,10 @@ void Pass_fplan::make_graph(Eprp_var& var) {
   absl::flat_hash_set<std::tuple<Hierarchy_index, Hierarchy_index, uint32_t>> edges;
   absl::flat_hash_map<Hierarchy_index, vertex_t>                              vm;
 
+  auto t = profile_time::timer();
+  t.start();
+  fmt::print("    traversing hierarchy...");
+
   for (auto hidx : root_tree->depth_preorder()) {
     LGraph* lg = root_tree->ref_lgraph(hidx);
 
@@ -82,6 +87,8 @@ void Pass_fplan::make_graph(Eprp_var& var) {
     }
   }
 
+  fmt::print("done ({} ms).\n", t.time());
+
   auto find_edge = [&](vertex_t v_src, vertex_t v_dst) -> edge_t {
     for (auto e : gi.al.out_edges(v_src)) {
       if (gi.al.head(e) == v_dst) {
@@ -91,6 +98,9 @@ void Pass_fplan::make_graph(Eprp_var& var) {
 
     return gi.al.null_edge();
   };
+
+  t.start();
+  fmt::print("    assigning edges...");
 
   for (auto ei : edges) {
     auto [src, dst, weight] = ei;
@@ -114,57 +124,53 @@ void Pass_fplan::make_graph(Eprp_var& var) {
       gi.weights[new_e] = weight;
     }
   }
+
+  fmt::print("done ({} ms).\n", t.time());
 }
 
 void Pass_fplan::pass(Eprp_var& var) {
-  auto time = []() -> auto { return std::chrono::system_clock::now(); };
-  auto dur  = [](auto e, auto s) -> auto { return std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count(); };
+  auto t       = profile_time::timer();
+  auto whole_t = profile_time::timer();
 
   fmt::print("\ngenerating floorplan...\n");
-  auto       whole_s = time();
+  whole_t.start();
   Pass_fplan p(var);
 
-  fmt::print("  making floorplan graph...");
-  auto s = time();
+  fmt::print("  making floorplan graph...\n");
+  t.start();
   p.make_graph(var);
-  auto e = time();
-  fmt::print("done ({} ms).\n", dur(e, s));
+  fmt::print("  done ({} ms).\n", t.time());
 
   Hier_tree h(std::move(p.gi));
 
-  fmt::print("  discovering hierarchy...");
-  s = time();
+  fmt::print("  discovering hierarchy...\n");
+  t.start();
   h.discover_hierarchy(100);
-  e = time();
-  fmt::print("done ({} ms).\n", dur(e, s));
+  fmt::print("  done({} ms).\n", t.time());
 
   fmt::print("  collapsing hierarchy...");
-  s = time();
+  t.start();
   h.collapse(30.0);
   h.collapse(60.0);
   h.collapse(5.0);
-  e = time();
-  fmt::print("done ({} ms).\n", dur(e, s));
+  fmt::print("done ({} ms).\n", t.time());
 
   // h.dump_hier();
 
-  fmt::print("  discovering regularity...");
-  s = time();
+  fmt::print("  discovering regularity...\n");
+  t.start();
   h.discover_regularity(0, 15);
-  e = time();
-  fmt::print("done ({} ms).\n", dur(e, s));
+  fmt::print("done ({} ms).\n", t.time());
 
   h.dump_dag();
 
-  fmt::print("  constructing boundary curve...");
-  s = time();
+  fmt::print("  constructing boundary curve...\n");
+  t.start();
   h.construct_bounds(0, 15);
-  e = time();
-  fmt::print("done ({} ms).\n", dur(e, s));
+  fmt::print("  done ({} ms).\n", t.time());
 
   // 3. <finish HiReg>
   // 4. write code to use the existing hierarchy instead of throwing it away...?
   // HiReg specifies area requirements that a normal LGraph may not fill
-  auto whole_e = time();
-  fmt::print("floorplan generated ({} ms).\n\n", dur(whole_e, whole_s));
+  fmt::print("floorplan generated ({} ms).\n\n", whole_t.time());
 }
