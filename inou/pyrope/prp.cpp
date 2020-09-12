@@ -1432,7 +1432,6 @@ uint8_t Prp::rule_additive_expression(std::list<std::tuple<Rule_id, Token_entry>
   bool    next      = true;
   bool    found_op  = false;
   bool    op_failed = false;
-  uint8_t last_op;  // 0 = none/other, 1 = p/m, 2=m/d
 
   INIT_PSEUDO_FAIL();
 
@@ -1607,8 +1606,7 @@ uint8_t Prp::rule_factor(std::list<std::tuple<Rule_id, Token_entry>> &pass_list)
     check_lb();
     if (CHECK_RULE(&Prp::rule_range_notation)) {
       PSEUDO_FAIL();
-    }
-    else if (!CHECK_RULE(&Prp::rule_logical_expression)) {
+    } else if (!CHECK_RULE(&Prp::rule_logical_expression)) {
       PSEUDO_FAIL();
     } else {
       check_lb();
@@ -1845,14 +1843,14 @@ void Prp::elaborate() {
     exit(0);
   */
 
-  if (!CHECK_RULE(&Prp::rule_start)){
+  if (!CHECK_RULE(&Prp::rule_start)) {
     failed = 1;
   }
 
   if (failed) {
-    //fmt::print("Parsing error line {}. Unexpected token [{}].\n",
-               //get_token(term_token + base_token).line + 1,
-               //scan_text(term_token + base_token));
+    // fmt::print("Parsing error line {}. Unexpected token [{}].\n",
+    // get_token(term_token + base_token).line + 1,
+    // scan_text(term_token + base_token));
     PRINT_DBG_AST("base token: {}, term token: {}\n", base_token, term_token);
     PRINT_DBG_AST("terminal token: {}\n", scan_text(term_token + base_token));
     fmt::print("Parsing error line {}. Unexpected token [{}].\n",
@@ -1962,6 +1960,7 @@ void Prp::ast_handler() {
     auto node       = ast->get_data(it);
     rule_name       = rule_id_to_string(node.rule_id);
     auto token_text = scan_text(node.token_entry);
+		(void)token_text;
     PRINT_AST("Rule name: {}, Token text: {}, Tree level: {}\n", rule_name, token_text, it.level);
   }
 }
