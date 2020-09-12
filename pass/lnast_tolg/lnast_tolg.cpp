@@ -477,7 +477,7 @@ void Lnast_tolg::process_ast_tuple_get_op(LGraph *dfg, const Lnast_nid &lnidx_tg
       }
 
       auto tup_get = dfg->create_node(TupGet_Op);
-      tg_map.insert({i, tup_get});
+      tg_map.insert_or_assign(i, tup_get);
 
       auto tn_spin = tup_get.setup_sink_pin("TN");
 
@@ -531,7 +531,7 @@ void Lnast_tolg::process_ast_tuple_get_op(LGraph *dfg, const Lnast_nid &lnidx_tg
 
     } else { //not the last child
       auto new_tup_get = dfg->create_node(TupGet_Op);
-      tg_map.insert({i, new_tup_get});
+      tg_map.insert_or_assign(i, new_tup_get);
       auto tn_spin = new_tup_get.setup_sink_pin("TN");
 
 
@@ -627,8 +627,8 @@ void Lnast_tolg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnidx_ta
       tup_add.setup_driver_pin().set_name(tup_name); // tuple ref semantically move to here
       setup_dpin_ssa(name2dpin[tup_name], lnast->get_vname(c0_ta), lnast->get_subs(c0_ta));
 
-      ta_map.insert({i,tup_add});
-      ta_name.insert({i,tup_name});
+      ta_map.insert_or_assign(i,tup_add);
+      ta_name.insert_or_assign(i,tup_name);
       i++ ;
 
       continue;
@@ -648,7 +648,7 @@ void Lnast_tolg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnidx_ta
         kn_dpin = setup_key_dpin(dfg, key_name);
         dfg->add_edge(kn_dpin, kn_spin);
       }
-      ta_name.insert({i, lnast->get_sname(c1_ta)});
+      ta_name.insert_or_assign(i, lnast->get_sname(c1_ta));
       i++ ;
       continue;
     }
@@ -667,7 +667,7 @@ void Lnast_tolg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnidx_ta
       // create a new tuple chain
       const auto &cn_ta = child;
       auto tup_add  = dfg->create_node(TupAdd_Op);
-      ta_map.insert({i-1,tup_add});
+      ta_map.insert_or_assign(i-1,tup_add);
       auto tn_spin  = tup_add.setup_sink_pin("TN");
       auto tup_name = ta_name[i-1];
       auto tn_dpin  = setup_tuple_ref(dfg, tup_name);
@@ -695,7 +695,7 @@ void Lnast_tolg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnidx_ta
         kn_dpin = setup_key_dpin(dfg, key_name);
         dfg->add_edge(kn_dpin, kn_spin);
       }
-      ta_name.insert({i, lnast->get_sname(cn_ta)});
+      ta_name.insert_or_assign(i, lnast->get_sname(cn_ta));
       i++ ;
     }
   }
@@ -1493,12 +1493,13 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(LGraph *dfg) {
 
       if(vname2dpin.find(vname) == vname2dpin.end()) {
         /* fmt::print("add new vname2dpin:{}\n", vname); */
-        vname2dpin.insert({vname, dpin});
+        auto [it,inserted] = vname2dpin.insert({vname, dpin});
+        assert(inserted);
         continue;
       }
 
       if (subs >= vname2dpin[vname].get_ssa().get_subs()) {
-        vname2dpin.insert({vname, dpin});
+        vname2dpin.insert_or_assign(vname, dpin);
       }
     }
   }
