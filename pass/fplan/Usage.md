@@ -2,6 +2,12 @@
 
 :warning: this command is in active development, use at your own risk!
 
+0. Build BloBB (it's not very big, shouldn't take that long)
+```
+$ cd livdhd/third_party/misc/blobb_compass
+$ make -j<number of CPU cores * 2>
+```
+
 1. import the hierarchy you want:
 ```
 livehd> inou.yosys.tolg files:livehd/pass/fplan/tests/hier_test.v name:hier_test
