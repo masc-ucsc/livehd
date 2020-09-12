@@ -1,6 +1,14 @@
+#include <cstdio> // for popen, pclose
+
+#include <cstring>  // for strcpy
+#include <filesystem> // for *nix file hierarchy traversal
+#include <fstream>
 #include <random>
 #include <unordered_map>
 
+#include <string>
+
+#include "fmt/format.h"
 #include "hier_tree.hpp"
 
 constexpr double max_aspect_ratio = 1.0 / 5.0;
@@ -22,9 +30,40 @@ void Hier_tree::construct_bounds(const size_t pat_index, const size_t num_inst, 
   pattern_vec_t& pat_list = pattern_lists[pat_index];
 
   for (pattern_t pat : pat_list) {
-    // go into blobb, copy over the code required to run it without calling exec() on it
-    // might have to use a temp file for now, that's okay to get things running
-    // once done, convert to bounding curve (?)
+    // copying strings to silence warnings
+    std::stringstream instr;
+    instr << fmt::format("{}\n", pat.size());
+    for (auto v : pat) {
+      double width_factor = dist(gen);
+      double width        = label_area_map[v.first] * width_factor;
+      double height       = label_area_map[v.first] * (1.0 - width_factor);
+      instr << fmt::format("{:.4f} {:.4f}\n", width, height);
+    }
+
+    // shelling out here because blobb uses static variables that can't easily be reset across calls.
+
+    std::cout << "\ninput string stream:\n";
+    std::cout << instr.str();
+
+    std::ofstream inf;
+
+    inf.open("/tmp/infile.txt", std::ios::out | std::ios::trunc);
+    inf << instr.str();
+    inf.close();
+
+    // should be <...>/livehd
+    auto curr_p = std::filesystem::current_path();
+
+    auto blobb_p = curr_p / "third_party" / "misc" / "blobb_compass" / "bin" / "blobb";
+    if (!std::filesystem::exists(blobb_p)) {
+      throw std::runtime_error("BloBB isn't built!");
+    }
+
+    // use "w" to print to stdout
+    const std::string args = std::string(" /tmp/infile.txt /tmp/outfile.bbb --backtrack --slicing --free-orient -t");
+    auto cfstream = popen(blobb_p.string().append(args).c_str(), "r");
+    I(cfstream);
+    pclose(cfstream);
   }
 
   /*
