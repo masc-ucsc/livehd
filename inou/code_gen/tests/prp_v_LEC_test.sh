@@ -8,9 +8,14 @@ rm -f lnast.dot.gld
 rm -f lnast.nodes
 rm -f lnast.nodes.gld
 
-pts='logic if bits_rhs'
-
+pts='logic'
+pts1='logic1 if bits_rhs'
 pts_hier='sum funcall'
+pts_hier2='sum2 funcall2'    
+#inline function call        
+pts_hier4='funcall4'         
+pts_hier5='funcall5'         
+pts_hier6='funcall_unnamed' 
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -281,9 +286,12 @@ Pyrope_lec_test () {
   fi
 }
 
-Pyrope_lec_test "$pts"
+Pyrope_lec_test "$pts1"
 Pyrope_lec_test "$pts_hier" "hier"
-
+#Pyrope_lec_test "$pts_hier2" "hier" 
+#Pyrope_lec_test "$pts_hier4" "hier" 
+                                   
+                                   
 rm -f lnast.dot.gld
 rm -f lnast.nodes
 rm -f lnast.nodes.gld
