@@ -12,7 +12,7 @@ protected:
   uint64_t seq_count      = 0;
   bool     put_bw_in_ln   = true;
 
-  std::map<Port_ID, std::string_view> dpin_name_map;
+  absl::flat_hash_map<Node_pin::Compact_class_driver, std::string> dpin_name_map;
 
   void do_trans(LGraph* g, Eprp_var& var, std::string_view module_name);
 
