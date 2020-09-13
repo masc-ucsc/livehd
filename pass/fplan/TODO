@@ -1,9 +1,9 @@
 Things to test:
 1. test clocked logic as well
+2. test design with 2/1/0 modules
 
 Things to do:
-1. Create boundary curve
-2. Create floorplans
+1. Create floorplans
 
 Quick things to do:
 1. add ratio metric (to indicate if blocks are flexible)
@@ -19,7 +19,10 @@ Things to optimize:
 7. put more stuff on the heap?
 9. for loops -> ranges (faster?)
 10. beware of temporaries
-11. const <type>& -> &&?
+11. only need <functional> if doing a recursive lambda...
+
+n. const <type>& -> &&?
+n. when making maps, see if I can use references instead of actual copies - might be a lot cheaper!
 
 Refactors:
 0. namespace stuff

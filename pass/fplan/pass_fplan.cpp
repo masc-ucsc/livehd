@@ -40,18 +40,21 @@ void Pass_fplan::make_graph(Eprp_var& var) {
     throw std::runtime_error("no hierarchies found!");
   }
 
+  auto t = profile_time::timer();
+  fmt::print("    setting up tree...");
+  t.start();
+
   Hierarchy_tree* root_tree = var.lgs[0]->ref_htree();
   LGraph*         root_lg   = var.lgs[0];
 
   I(root_tree);
   I(root_lg);
 
-  // TODO: optimize this.
-
   absl::flat_hash_set<std::tuple<Hierarchy_index, Hierarchy_index, uint32_t>> edges;
   absl::flat_hash_map<Hierarchy_index, vertex_t>                              vm;
 
-  auto t = profile_time::timer();
+  fmt::print("done ({} ms).\n", t.time());
+
   t.start();
   fmt::print("    traversing hierarchy...");
 
@@ -129,6 +132,7 @@ void Pass_fplan::make_graph(Eprp_var& var) {
 }
 
 void Pass_fplan::pass(Eprp_var& var) {
+
   auto t       = profile_time::timer();
   auto whole_t = profile_time::timer();
 
@@ -162,11 +166,16 @@ void Pass_fplan::pass(Eprp_var& var) {
   h.discover_regularity(0, 15);
   fmt::print("done ({} ms).\n", t.time());
 
-  h.dump_dag();
+  h.dump_patterns();
 
   fmt::print("  constructing boundary curve...\n");
   t.start();
-  h.construct_bounds(0, 15);
+  h.construct_bounds(15);
+  fmt::print("  done ({} ms).\n", t.time());
+
+  fmt::print("  constructing dag...");
+  t.start();
+  h.make_dag(0);
   fmt::print("  done ({} ms).\n", t.time());
 
   // 3. <finish HiReg>

@@ -78,7 +78,7 @@ void Hier_tree::dump_hier() const {
   }
 }
 
-void Hier_tree::dump_dag() const {
+void Hier_tree::dump_patterns() const {
   for (size_t i = 0; i < pattern_lists.size(); i++) {
     fmt::print("printing dag {} ({} nodes):\n", i, pattern_lists[i].size());
     for (size_t j = 0; j < pattern_lists[i].size(); j++) {

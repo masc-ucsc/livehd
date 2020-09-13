@@ -15,7 +15,7 @@
 #include <utility>  // for std::pair
 #include <vector>
 
-#include "Stable_adjacency_list.hpp" // for bounding curves
+#include "dag.hpp"
 
 #include "graph_info.hpp"
 #include "i_resolve_header.hpp"
@@ -23,7 +23,7 @@
 // controls for debug output on various stages
 constexpr bool hier_verbose = false;
 // constexpr bool coll_verbose = false;
-constexpr bool reg_verbose = false;
+constexpr bool reg_verbose   = false;
 constexpr bool bound_verbose = true;
 
 // a struct representing a node in a hier_tree
@@ -56,7 +56,7 @@ public:
 
   void dump_hier() const;
 
-  void dump_dag() const;
+  void dump_patterns() const;
 
   // take in a graph of all nodes in the netlist, and convert it to a tree.
   // min_num_components sets the minimum number of components required to trigger analysis of the hierarchy
@@ -71,7 +71,13 @@ public:
 
   // construct a boundary curve using an exhaustive approach if the number of blocks is < optimal_thresh
   // num_inst indicates how many instantiations of each block we should create
-  void construct_bounds(const size_t pat_index, const unsigned int optimal_thresh);
+  void construct_bounds(const unsigned int optimal_thresh);
+
+  void make_dag(size_t pat_list) {
+    Dag d;
+    d.make(pattern_lists[pat_list], ginfo);
+    d.dump();
+  }
 
 private:
   friend class Pass_fplan_dump;
@@ -118,7 +124,7 @@ private:
   std::vector<phier> hiers;
 
   // keep track of all the kinds of vertices we can have, as well as how many there are
-  using pattern_t = std::unordered_map<Lg_type_id::type, unsigned int>;
+  using pattern_t     = std::unordered_map<Lg_type_id::type, unsigned int>;
   using pattern_vec_t = std::vector<pattern_t>;
 
   unsigned int generic_pattern_size(const pattern_t& gset) const;
@@ -126,7 +132,7 @@ private:
   pattern_t make_generic(const set_t& pat) const;
 
   set_vec_t find_all_patterns(const set_t& subg, const pattern_t& gpattern) const;
-  
+
   // find patterns in the collapsed hierarchy
   pattern_t find_most_freq_pattern(const set_t& subg, const size_t bwidth) const;
 
@@ -135,23 +141,4 @@ private:
   std::vector<pattern_vec_t> pattern_lists;
 
   std::vector<std::pair<double, double>> bounding_curve;
-
-  // encapsulating dag class because we don't really need the actual nodes
-  class dag {
-    using dag_t = graph::Stable_out_adjacency_list;
-    using dag_map_t = graph::Vert_map<dag_t, Lg_type_id::type>;
-
-    dag_t g;
-    dag_map_t labels;
-
-    dag() : g(dag_t()), labels(g.vert_map<Lg_type_id::type>()) {}
-
-    void fold(const std::unordered_map<Lg_type_id::type, unsigned int>& pat) {
-      for (auto gv : pat) {
-        auto new_v = g.insert_vert();
-        labels[new_v] = gv.first;
-      }
-    }
-  };
- 
 };

@@ -7,7 +7,8 @@
 // anything coming from the graph lib or the ranges library that graph includes should be from here.
 
 #pragma once
-#include "Adjacency_list.hpp"
+#include "Adjacency_list.hpp" // for graph type
+#include "Stable_adjacency_list.hpp" // for dag type
 #include "range/v3/view.hpp"
 #undef I
 

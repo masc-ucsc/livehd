@@ -5,7 +5,8 @@
 #include "i_resolve_header.hpp"
 #include "lgraph_base_core.hpp"
 
-// Out_adjacency_list is buggy
+// specific kind of graph used elsewhere
+// Out_adjacency_list doesn't work yet
 using g_type = graph::Bi_adjacency_list;
 
 using vertex_t  = g_type::Vert;
