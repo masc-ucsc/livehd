@@ -33,7 +33,7 @@
 .SUFFIXES:        .o .cpp 
 
 CC = g++
-CCFLAGS = -Wall -O3 -ansi $(CCDIRS)
+CCFLAGS = -Wall -O3 -march=native -ansi $(CCDIRS)
 PURIFY = purify -log-file=log.txt
 MOREOPT = -funroll-loops
 
