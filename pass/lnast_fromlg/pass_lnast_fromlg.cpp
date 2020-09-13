@@ -1236,10 +1236,10 @@ std::string_view Pass_lnast_fromlg::dpin_get_name(Lnast &lnast, const Node_pin d
 
   if (dpin.get_name().substr(0, 1) == "%" || (dpin.get_name().substr(0,1) == "#" && !((ntype == SFlop_Op) || (ntype == AFlop_Op) || (ntype == FFlop_Op) || (ntype == Latch_Op)))) {
     return lnast.add_string(dpin.get_name().substr(1));
-  } else if ((ntype == SFlop_Op) || (ntype == AFlop_Op) || (ntype == FFlop_Op) || (ntype == Latch_Op)) {
+  } else if (((ntype == SFlop_Op) || (ntype == AFlop_Op) || (ntype == FFlop_Op) || (ntype == Latch_Op)) && dpin.get_name().substr(0,1) != "#") {
     return lnast.add_string(absl::StrCat("#", dpin.get_name()));
-   } else if (dpin.get_node().is_graph_output()) {
-     return lnast.add_string(absl::StrCat("%", dpin.get_name()));
+  } else if (dpin.get_node().is_graph_output()) {
+    return lnast.add_string(absl::StrCat("%", dpin.get_name()));
   } else
   return lnast.add_string(dpin.get_name());
 }
