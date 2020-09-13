@@ -15,7 +15,7 @@ void Pass_fplan_dump::dump_hier(Eprp_var &var) {
   p.make_graph(var);
 
   // although the graph lib has a way to make dotfiles out of a graph, it doesn't print out enough information.
-  
+
   std::stringstream dotstr;
 
   dotstr << "digraph g {\n\tnode [fontname = \"Source Code Pro\", shape=record];\n";
@@ -25,7 +25,7 @@ void Pass_fplan_dump::dump_hier(Eprp_var &var) {
     auto id    = p.gi.ids(v);
     auto label = p.gi.labels(v);
     auto area  = p.gi.areas(v);
-    dotstr << fmt::format("\t{} [label=\"{{{} | {{lb {} | id {} | area {}}}}}\"];\n", id, name, label, id, area);
+    dotstr << fmt::format("\t{} [label=\"{{{} | {{lb {} | id {} | area {:.2f}}}}}\"];\n", id, name, label, id, area);
   }
 
   for (auto e : p.gi.al.edges()) {
@@ -68,11 +68,12 @@ void Pass_fplan_dump::dump_tree(Eprp_var &var) {
         name.append("_");
         name.append(std::to_string(h.ginfo.ids(v)));  // create a unique label for each node, not just each node type
 
-        dotstr << fmt::format("\t{} [label=\"{{{} | {{lb {} | id {}}}}}\", color=red];\n",
+        dotstr << fmt::format("\t{} [label=\"{{{} | {{lb {} | id {} | area {:.2f}}}}}\", color=red];\n",
                               h.ginfo.ids(v),
                               name,
                               h.ginfo.labels(v),
-                              h.ginfo.ids(v));
+                              h.ginfo.ids(v),
+                              h.ginfo.areas(v));
         dotstr << fmt::format("\t{} -> {};\n", h.ginfo.ids(v), root->name);
       }
     }

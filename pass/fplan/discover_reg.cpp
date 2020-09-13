@@ -335,7 +335,20 @@ void Hier_tree::discover_regularity(const size_t hier_index, const size_t beam_w
         break;  // nothing new to add to pattern_list since our set of nodes didn't grow at all
       }
 
-      pattern_list.push_back(most_freq_pattern);
+      bool dup = false;
+      for (size_t i = 0; i < pattern_list.size(); i++) {
+        if (pattern_list[i] == most_freq_pattern) {
+          dup = true;
+          if (bound_verbose) {
+            fmt::print("    pattern {} is a duplicate of {}.\n", i + 1, i);
+          }
+        }
+      }
+
+      if (!dup) {
+        pattern_list.push_back(most_freq_pattern);
+      }
+
       t.start();
       fmt::print("    compressing hierarchy...");
       compress_hier(hier_nodes, most_freq_pattern, pat_set);
@@ -356,5 +369,8 @@ void Hier_tree::discover_regularity(const size_t hier_index, const size_t beam_w
     pat_set.clear();
 
     curr_min_depth--;
+    if (bound_verbose) {
+      fmt::print("    going up a level.\n");
+    }
   }
 }

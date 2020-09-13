@@ -133,19 +133,18 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info<g_type>& info, int cut_se
     fmt::print("\nincoming imb: {:.3f}\n", area_imb(init_a_area, init_b_area));
   }
 
+  auto   add_area_vertex = info.al.null_vert();
+  double add_area_amt    = 0.0;
   if (area_imb(init_a_area, init_b_area) > max_imb) {
     // if the area combo is illegal, add some area to a random node to make it legal.  Not super smart, but it works for now
     size_t add_area_set = (init_a_area > init_b_area) ? new_sets.second : new_sets.first;
-    double darea        = (1.0 / max_imb) * std::max(init_a_area, init_b_area) - init_a_area - init_b_area + 0.01;
+    add_area_amt        = (1.0 / max_imb) * std::max(init_a_area, init_b_area) - init_a_area - init_b_area + 0.01;
 
-    // TODO: this is a one-shot for loop - fix it
-    for (auto v : sets[add_area_set]) {
-      if (hier_verbose) {
-        fmt::print("adding area {} to node {:<30}\n", darea, info.debug_names[v]);
-      }
-      info.areas[v] += darea;
-      break;
+    if (hier_verbose) {
+      fmt::print("adding area {} to node {:<30}\n", add_area_amt, info.debug_names[*(sets[add_area_set].begin())]);
     }
+    add_area_vertex = *(sets[add_area_set].begin());
+    info.areas[add_area_vertex] += add_area_amt;
   }
 
   if (hier_verbose) {
@@ -368,6 +367,11 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info<g_type>& info, int cut_se
     int loc = find_set(temp_even_vertex);
     sets[loc].erase(temp_even_vertex);
     g.erase_vert(temp_even_vertex);
+  }
+
+  // if we added some area to a vertex, subtract it out
+  if (add_area_vertex != g.null_vert()) {
+    info.areas[add_area_vertex] -= add_area_amt;
   }
 
   return new_sets;

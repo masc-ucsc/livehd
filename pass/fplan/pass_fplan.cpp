@@ -3,6 +3,8 @@
 #include <chrono>
 #include <functional>
 #include <stdexcept>  // for std::runtime_error
+#include <string>     // for std::to_string
+#include <thread>
 #include <tuple>
 
 #include "absl/container/flat_hash_map.h"
@@ -15,8 +17,28 @@
 
 void setup_pass_fplan() { Pass_fplan::setup(); }
 
+constexpr unsigned int def_min_tree_nodes    = 1;
+constexpr double       def_min_tree_area     = 0.0;
+constexpr unsigned int def_max_pats          = 15;
+constexpr unsigned int def_max_optimal_nodes = 15;
+// thread count determined at runtime
+
 void Pass_fplan::setup() {
   auto m = Eprp_method("pass.fplan.makefp", "generate a floorplan from an LGraph", &Pass_fplan::pass);
+  m.add_label_optional("min_tree_nodes",
+                       "minimum number of components to trigger analysis of a subtree",
+                       std::to_string(def_min_tree_nodes));
+  m.add_label_optional("min_tree_area",
+                       "area (mm^2) threshold below which nodes will be collapsed together",
+                       std::to_string(def_min_tree_area));
+  m.add_label_optional("max_pats", "maximum number of intermediate patterns to keep", std::to_string(def_max_pats));
+  m.add_label_optional("max_optimal_nodes",
+                       "crossover point between exhaustive branch-and-bound and simulated annealing",
+                       std::to_string(def_max_optimal_nodes));
+  m.add_label_optional("max_threads",
+                       "maximum number of threads to spawn",
+                       std::to_string(std::thread::hardware_concurrency() * 2));
+
   register_pass(m);
 
   auto dhm
@@ -25,6 +47,7 @@ void Pass_fplan::setup() {
 
   auto dtm = Eprp_method("pass.fplan.dumptree", "dump a DOT file representing the hierarchy tree", &Pass_fplan_dump::dump_tree);
   register_pass(dtm);
+  m.add_label_optional("min_tree_count", "minimum number of components to trigger analysis of a subtree", "1");
 }
 
 // turn an LGraph into a graph suitable for HiReg.
@@ -132,11 +155,14 @@ void Pass_fplan::make_graph(Eprp_var& var) {
 }
 
 void Pass_fplan::pass(Eprp_var& var) {
-
   auto t       = profile_time::timer();
   auto whole_t = profile_time::timer();
 
-  fmt::print("\ngenerating floorplan...\n");
+  if (std::thread::hardware_concurrency() > 12) {
+    fmt::print("\ncomfortable sheets detected!\n");
+  }
+
+  fmt::print("generating floorplan...\n");
   whole_t.start();
   Pass_fplan p(var);
 
@@ -149,28 +175,46 @@ void Pass_fplan::pass(Eprp_var& var) {
 
   fmt::print("  discovering hierarchy...\n");
   t.start();
-  h.discover_hierarchy(100);
-  fmt::print("  done({} ms).\n", t.time());
+  unsigned int mtn = std::stoi(var.get("min_tree_nodes").data());
+  if (mtn == def_min_tree_nodes) {
+    fmt::print("  using default param {}.\n", mtn);
+  }
+  h.discover_hierarchy(mtn);
+
+  fmt::print("  done ({} ms).\n", t.time());
 
   fmt::print("  collapsing hierarchy...");
   t.start();
-  h.collapse(30.0);
-  h.collapse(60.0);
-  h.collapse(5.0);
+
+  const double mta = std::stod(var.get("min_tree_area").data());
+  if (mta == def_min_tree_area) {
+    fmt::print("  using default param {} mm^2.\n", mta);
+  }
+  h.collapse(mta);
+
   fmt::print("done ({} ms).\n", t.time());
 
   // h.dump_hier();
 
   fmt::print("  discovering regularity...\n");
   t.start();
-  h.discover_regularity(0, 15);
+  const unsigned int mp = std::stoi(var.get("max_pats").data());
+  if (mp == def_max_pats) {
+    fmt::print("  using default param {}.\n", def_max_pats);
+  }
+  h.discover_regularity(0, mp);
+
   fmt::print("done ({} ms).\n", t.time());
 
   h.dump_patterns();
 
   fmt::print("  constructing boundary curve...\n");
   t.start();
-  h.construct_bounds(15);
+  const unsigned int mon = std::stoi(var.get("max_optimal_nodes").data());
+  if (mon == def_max_optimal_nodes) {
+    fmt::print("  using default param {}.\n", def_max_optimal_nodes);
+  }
+  h.construct_bounds(mon);
   fmt::print("  done ({} ms).\n", t.time());
 
   fmt::print("  constructing dag...");
@@ -180,6 +224,5 @@ void Pass_fplan::pass(Eprp_var& var) {
 
   // 3. <finish HiReg>
   // 4. write code to use the existing hierarchy instead of throwing it away...?
-  // HiReg specifies area requirements that a normal LGraph may not fill
   fmt::print("floorplan generated ({} ms).\n\n", whole_t.time());
 }

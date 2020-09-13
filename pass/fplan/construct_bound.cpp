@@ -24,15 +24,16 @@ void Hier_tree::construct_bounds(const unsigned int optimal_thresh) {
     I(label_area_map[label] == 0.0 || label_area_map[label] == ginfo.areas(v));
     label_area_map[label] = ginfo.areas(v);
   }
+
   for (auto pat_list : pattern_lists) {
     for (pattern_t pat : pat_list) {
       // copying strings to silence warnings
       std::stringstream instr;
       instr << fmt::format("{}\n", pat.size());
-      for (auto v : pat) {
+      for (auto gv : pat) {
         double width_factor = dist(gen);
-        double width        = label_area_map[v.first] * width_factor;
-        double height       = label_area_map[v.first] * (1.0 - width_factor);
+        double width        = label_area_map[gv.first] * width_factor;
+        double height       = label_area_map[gv.first] * (1.0 - width_factor);
         instr << fmt::format("{:.4f} {:.4f}\n", width, height);
       }
 
