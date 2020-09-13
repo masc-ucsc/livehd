@@ -19,7 +19,7 @@
 void setup_pass_fplan() { Pass_fplan::setup(); }
 
 constexpr unsigned int def_min_tree_nodes    = 1;
-constexpr double       def_min_tree_area     = 0.0;
+constexpr double       def_min_tree_area     = 6.0;
 constexpr unsigned int def_max_pats          = 15;
 constexpr unsigned int def_max_optimal_nodes = 15;
 unsigned int           def_max_threads       = std::thread::hardware_concurrency() / 2;
@@ -182,7 +182,8 @@ void Pass_fplan::pass(Eprp_var& var) {
 
   fmt::print("  done ({} ms).\n", t.time());
 
-  fmt::print("  collapsing hierarchy...\n");
+  const unsigned int mt = std::stod(var.get("max_threads").data());
+  fmt::print("  collapsing hierarchy using {} threads...\n", mt);
   t.start();
 
   const double mta = std::stod(var.get("min_tree_area").data());
@@ -190,15 +191,25 @@ void Pass_fplan::pass(Eprp_var& var) {
     fmt::print("  using default param {} mm^2.\n", mta);
   }
 
-  const unsigned int mt = std::stod(var.get("max_threads").data());
-  if (mt == def_max_threads) {
-    fmt::print("  using {} threads.\n", mt);
+  h.make_hierarchies(mt);  // make mt - 1 additional hierarchies
+
+/*
+  std::vector<std::thread> threads;
+  auto                     f = [&](size_t i, double mta2) { h.collapse(i, mta2); };
+
+  for (size_t i = 0; i < 1; i++) {
+    fmt::print("collapsing {} with area {}.\n", i, mta * i);
+    threads.emplace_back(f, i, mta * i);
   }
-  h.make_hierarchies(mt - 1); // make mt - 1 additional hierarchies
+
+  for (size_t i = 0; i < mt; i++) {
+    threads[i].join();
+  }
+*/
 
   h.collapse(1, mta);
 
-  fmt::print("done ({} ms).\n", t.time());
+  fmt::print("  done ({} ms).\n", t.time());
 
   fmt::print("  discovering regularity...\n");
   t.start();

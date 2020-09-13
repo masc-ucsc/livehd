@@ -1,5 +1,6 @@
 #pragma once
 
+#include <mutex>
 #include <string>
 
 #include "i_resolve_header.hpp"
@@ -25,6 +26,8 @@ public:
   graph::Vert_map<GImp, Lg_type_id>    labels;       // what LGraph a node represents
   graph::Edge_map<GImp, unsigned int>  weights;      // number of wires in a connection between two nodes
   std::vector<graph::Vert_set<GImp>>   sets;         // map of hierarchy nodes -> node(s) in the graph
+
+  std::mutex set_add_mut;
 
   // We have to use the "template" keyword here because the compiler doesn't know how to compile Graph_info since al is not an
   // explicit type.  The type given at instantiation time could drastically change the behavior of how the class behaves, so we use
@@ -89,7 +92,6 @@ public:
 
     ids[nv]   = ++unique_id_counter;
     areas[nv] = area;
-    // debug_names[nv] = debug_name.append(std::string("_").append(std::to_string(unique_id_counter)));
     debug_names[nv] = debug_name;
 
     return nv;
@@ -103,6 +105,14 @@ public:
     }
 
     return al.null_edge();
+  }
+
+  size_t thr_add_set() {
+    set_add_mut.lock();
+    sets.push_back(al.vert_set());
+    size_t loc = sets.size() - 1;
+    set_add_mut.unlock();
+    return loc;
   }
 
 private:
