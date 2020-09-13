@@ -138,7 +138,7 @@ private:
   // find patterns in the collapsed hierarchy
   pattern_t find_most_freq_pattern(const set_t& subg, const size_t bwidth) const;
 
-  void compress_hier(set_t&, const pattern_t&, std::vector<vertex_t>&);
+  vertex_t compress_inst(set_t& subg, set_t& inst);
 
   std::vector<pattern_vec_t> pattern_lists;
 

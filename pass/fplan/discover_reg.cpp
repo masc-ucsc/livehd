@@ -228,44 +228,35 @@ Hier_tree::pattern_t Hier_tree::find_most_freq_pattern(const set_t& subg, const 
   return make_generic(best_pat);
 }
 
-void Hier_tree::compress_hier(set_t& subg, const pattern_t& gpat, std::vector<vertex_t>& patset) {
-  auto vinst = find_all_patterns(subg, gpat);
-
-  if (bound_verbose) {
-    static unsigned int pat_count = 0;
-    fmt::print("\npattern {} has {} instantiation(s).\n", pat_count++, vinst.size());
+vertex_t Hier_tree::compress_inst(set_t& subg, set_t& inst) {
+  std::string name = "pat";
+  for (auto v : inst) {
+    name.append("_").append(ginfo.debug_names(v));
   }
 
-  for (auto inst : vinst) {
-    std::string name = "pat";
-    for (auto v : inst) {
-      name.append("_").append(ginfo.debug_names(v));
-    }
+  double area = 0.0;
+  for (auto v : inst) {
+    area += ginfo.areas[v];
+  }
 
-    double area = 0.0;
-    for (auto v : inst) {
-      area += ginfo.areas[v];
-    }
+  auto pat_v = ginfo.make_bare_vertex(name, area);
 
-    auto pat_v = ginfo.make_bare_vertex(name, area);
+  for (auto v : inst) {
+    for (auto e : ginfo.al.out_edges(v)) {
+      auto ov = ginfo.al.head(e);
+      auto e1 = ginfo.al.insert_edge(pat_v, ov);
+      auto e2 = ginfo.al.insert_edge(ov, pat_v);
 
-    patset.push_back(pat_v);
-
-    for (auto v : inst) {
-      for (auto e : ginfo.al.out_edges(v)) {
-        auto ov = ginfo.al.head(e);
-        auto e1 = ginfo.al.insert_edge(pat_v, ov);
-        auto e2 = ginfo.al.insert_edge(ov, pat_v);
-
-        ginfo.weights[e1] = ginfo.weights(e);
-        ginfo.weights[e2] = ginfo.weights(e);
-      }
-    }
-
-    for (auto v : inst) {
-      subg.erase(v);
+      ginfo.weights[e1] = ginfo.weights(e);
+      ginfo.weights[e2] = ginfo.weights(e);
     }
   }
+
+  for (auto v : inst) {
+    subg.erase(v);
+  }
+
+  return pat_v;
 }
 
 void Hier_tree::discover_regularity(const size_t hier_index, const size_t beam_width) {
@@ -282,9 +273,8 @@ void Hier_tree::discover_regularity(const size_t hier_index, const size_t beam_w
     profile_time::timer t;
     auto                hier_nodes = ginfo.al.vert_set();
 
-    // TODO: set_t has some weird segfault problem, but a vector of vertex_t's works fine...?
-    // might be an issue of move vs copy semantics...?
-    std::vector<vertex_t> pat_set;
+    // have to use a map here because if we create nodes inside the loop, they go out of scope and deletion segfaults
+    auto pat_map = ginfo.al.vert_map<bool>();
 
     // get all leaves with depth >= minlevel
     std::function<void(phier, unsigned int, unsigned int)> get_level_nodes
@@ -351,7 +341,17 @@ void Hier_tree::discover_regularity(const size_t hier_index, const size_t beam_w
 
       t.start();
       fmt::print("    compressing hierarchy...");
-      compress_hier(hier_nodes, most_freq_pattern, pat_set);
+
+      auto         vinst = find_all_patterns(hier_nodes, most_freq_pattern);
+      unsigned int ctr   = 0;
+      for (auto inst : vinst) {
+        if (bound_verbose) {
+          fmt::print("\npattern {} has {} instantiation(s).\n", ctr++, vinst.size());
+        }
+        auto comp_v     = compress_inst(hier_nodes, inst);
+        pat_map[comp_v] = true;
+      }
+
       fmt::print("done ({} ms).\n", t.time());
 
       t.start();
@@ -362,11 +362,12 @@ void Hier_tree::discover_regularity(const size_t hier_index, const size_t beam_w
 
     old_size = curr_size;
 
-    for (auto v : pat_set) {
-      ginfo.al.erase_vert(v);
+    for (auto v : ginfo.al.verts()) {
+      if (pat_map(v)) {
+        pat_map[v] = false;
+        ginfo.al.erase_vert(v);
+      }
     }
-
-    pat_set.clear();
 
     curr_min_depth--;
     if (bound_verbose) {

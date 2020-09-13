@@ -74,10 +74,12 @@ Hier_tree::phier Hier_tree::collapse(phier node, double threshold_area) {
   std::function<void(phier)> collapse_subtree = [&, this](phier rnode) {
     if (rnode->is_leaf()) {
       ginfo.sets.push_back(ginfo.al.vert_set());
-      int new_set = ginfo.sets.size() - 1;
+      size_t set_loc = ginfo.sets.size() - 1;
+      //set_loc  = ginfo.thr_add_set();
+      //auto set = ginfo.sets[set_loc];
 
       for (auto v : ginfo.sets[rnode->graph_subset]) {
-        ginfo.sets[new_set].insert(v);
+        ginfo.sets[set_loc].insert(v);
       }
     } else {
       I(rnode->children[0] != nullptr);
@@ -103,6 +105,7 @@ Hier_tree::phier Hier_tree::collapse(phier node, double threshold_area) {
 
 void Hier_tree::collapse(const size_t hier_index, const double threshold_area) {
   I(threshold_area >= 0.0);
+  I(hier_index < hiers.size());
 
   if (threshold_area > 0.0) {
     hiers[hier_index] = collapse(hiers[0], threshold_area);
