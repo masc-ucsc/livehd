@@ -101,10 +101,10 @@ Hier_tree::phier Hier_tree::collapse(phier node, double threshold_area) {
   return new_subtree;
 }
 
-void Hier_tree::collapse(const double threshold_area) {
+void Hier_tree::collapse(const size_t hier_index, const double threshold_area) {
   I(threshold_area >= 0.0);
 
   if (threshold_area > 0.0) {
-    hiers.push_back(collapse(hiers[0], threshold_area));
+    hiers[hier_index] = collapse(hiers[0], threshold_area);
   }
 }
