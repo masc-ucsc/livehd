@@ -1,16 +1,4 @@
-// foo_tmp = $inp
-// foo   = foo_tmp
-// %out  = foo.a.b
-// %out2 = foo.c
-// 
-// bar   = $inp
-// %out3 = bar.a.d
-// 
-// 
-// baz = foo_tmp
-// %out4 = baz.a.e
-
-//todo : try to add bits attribute
 
 $inp.__bits = 5
+x = $inp.a.b 
 %out = $inp
