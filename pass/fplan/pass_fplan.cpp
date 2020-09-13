@@ -6,6 +6,7 @@
 #include <string>     // for std::to_string
 #include <thread>
 #include <tuple>
+#include <vector>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
@@ -21,7 +22,7 @@ constexpr unsigned int def_min_tree_nodes    = 1;
 constexpr double       def_min_tree_area     = 0.0;
 constexpr unsigned int def_max_pats          = 15;
 constexpr unsigned int def_max_optimal_nodes = 15;
-// thread count determined at runtime
+unsigned int           def_max_threads       = std::thread::hardware_concurrency() / 2;
 
 void Pass_fplan::setup() {
   auto m = Eprp_method("pass.fplan.makefp", "generate a floorplan from an LGraph", &Pass_fplan::pass);
@@ -35,9 +36,7 @@ void Pass_fplan::setup() {
   m.add_label_optional("max_optimal_nodes",
                        "crossover point between exhaustive branch-and-bound and simulated annealing",
                        std::to_string(def_max_optimal_nodes));
-  m.add_label_optional("max_threads",
-                       "maximum number of threads to spawn",
-                       std::to_string(std::thread::hardware_concurrency() * 2));
+  m.add_label_optional("max_threads", "maximum number of threads to spawn", std::to_string(def_max_threads));
 
   register_pass(m);
 
@@ -183,18 +182,23 @@ void Pass_fplan::pass(Eprp_var& var) {
 
   fmt::print("  done ({} ms).\n", t.time());
 
-  fmt::print("  collapsing hierarchy...");
+  fmt::print("  collapsing hierarchy...\n");
   t.start();
 
   const double mta = std::stod(var.get("min_tree_area").data());
   if (mta == def_min_tree_area) {
     fmt::print("  using default param {} mm^2.\n", mta);
   }
-  h.collapse(mta);
+
+  const unsigned int mt = std::stod(var.get("max_threads").data());
+  if (mt == def_max_threads) {
+    fmt::print("  using {} threads.\n", mt);
+  }
+  h.make_hierarchies(mt - 1); // make mt - 1 additional hierarchies
+
+  h.collapse(1, mta);
 
   fmt::print("done ({} ms).\n", t.time());
-
-  // h.dump_hier();
 
   fmt::print("  discovering regularity...\n");
   t.start();

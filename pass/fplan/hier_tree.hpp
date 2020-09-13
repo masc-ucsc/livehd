@@ -16,7 +16,6 @@
 #include <vector>
 
 #include "dag.hpp"
-
 #include "graph_info.hpp"
 #include "i_resolve_header.hpp"
 
@@ -24,7 +23,7 @@
 constexpr bool hier_verbose = false;
 // constexpr bool coll_verbose = false;
 constexpr bool reg_verbose   = false;
-constexpr bool bound_verbose = true;
+constexpr bool bound_verbose = false;
 
 // a struct representing a node in a hier_tree
 struct Hier_node {
@@ -63,8 +62,11 @@ public:
   // any node with a smaller area than min_area gets folded into a new supernode with area >= min_area
   void discover_hierarchy(const unsigned int num_components);
 
-  // returns a new tree with small leaf nodes collapsed together (Algorithm 2 in HiReg)
-  void collapse(const double threshold_area);
+  // allocates hierarchies (so hierarchy collapsing and regularity discovery can happen in parallel)
+  void make_hierarchies(const size_t num_hiers) { hiers.resize(num_hiers); }
+
+  // returns a new tree with small leaf nodes collapsed together
+  void collapse(const size_t hier_index, const double threshold_area);
 
   // discover similar subgraphs in the collapsed hierarchy
   void discover_regularity(const size_t hier_index, const size_t beam_width);
@@ -76,7 +78,7 @@ public:
   void make_dag(size_t pat_list) {
     Dag d;
     d.make(pattern_lists[pat_list], ginfo);
-    d.dump();
+    // d.dump();
   }
 
 private:
