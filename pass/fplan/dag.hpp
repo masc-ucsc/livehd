@@ -1,38 +1,42 @@
 #pragma once
 
+#include <iostream>
 #include <unordered_map>
+#include <unordered_set>
+#include <utility>  // for std::pair
 #include <vector>
 
+#include "pattern.hpp"
 #include "graph_info.hpp"
-
 #include "i_resolve_header.hpp"
 #include "lgraph_base_core.hpp"
 
 // encapsulating dag class because we don't really need the actual nodes
 
-// TODO: this isn't cheap, but I'm not exactly sure what we need for alg 5.
-// TODO: is 0 an illegal lgid?
-
-// NOTE: all patterns should be put in before any leaves are put in.
-
 class Dag {
 public:
-  using pattern_t     = std::unordered_map<Lg_type_id::type, unsigned int>;
-  using pattern_vec_t = std::vector<pattern_t>;
-
-  using dag_t = graph::Stable_out_adjacency_list;
+  using d_type = graph::Atomic_out_adjacency_list;
 
   Dag();
 
-  void make(pattern_vec_t pv, const Graph_info<g_type>& ginfo);
+  // initialize a dag from a vector of patterns with all leaves being unique,
+  // and all patterns either containing leaves or other patterns.
+  // TODO: this should be a constructor, but Graph_info has serious restrictions on moving.
+  void init(std::vector<Pattern> hier_patterns, std::unordered_map<Lg_type_id::type, Dim> leaf_dims,
+            const Graph_info<g_type>& ginfo);
 
-  void dump();
+  void dump() {
+    using namespace graph::attributes;
+    std::cout << g.dot_format("label"_of_vert = labels, "dim"_of_vert = dims) << std::endl;
+  }
 
 private:
-  using label_map_t = graph::Vert_map<dag_t, Lg_type_id::type>;
+  // TODO: I'll probably be using this in the future...
+  using label_map_t = graph::Vert_map<d_type, Lg_type_id::type>;
+  using dim_map_t   = graph::Vert_map<d_type, Dim>;
 
-  dag_t       g;
-  label_map_t labels;
-
-  dag_t::Vert root;
+  d_type       g;
+  dim_map_t    dims;  // area of a node
+  d_type::Vert root;
+  label_map_t  labels;  // used to ensure dag doesn't contain duplicates
 };

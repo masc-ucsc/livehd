@@ -262,9 +262,15 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info<g_type>& info, int cut_se
       // recalculate costs considering a_max and b_max swapped
       for (auto v : vert_set) {
         if (is_in_a(v)) {
+          if (v == a_max) {
+            continue;
+          }
           cmap[v].d_cost
               = cmap(v).d_cost + 2 * info.weights(find_edge_to_max(v, a_max)) - 2 * info.weights(find_edge_to_max(v, b_max));
         } else {
+          if (v == b_max) {
+            continue;
+          }
           cmap[v].d_cost
               = cmap(v).d_cost + 2 * info.weights(find_edge_to_max(v, b_max)) - 2 * info.weights(find_edge_to_max(v, a_max));
         }

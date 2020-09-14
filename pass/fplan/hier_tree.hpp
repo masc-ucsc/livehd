@@ -18,6 +18,7 @@
 #include "dag.hpp"
 #include "graph_info.hpp"
 #include "i_resolve_header.hpp"
+#include "pattern.hpp"
 
 // controls for debug output on various stages
 constexpr bool hier_verbose = false;
@@ -41,7 +42,7 @@ struct Hier_node {
 
 class Hier_tree {
 public:
-  Hier_tree(Graph_info<g_type>&& netlist) : ginfo(std::move(netlist)) {}
+  Hier_tree(Graph_info<g_type>&& netlist) : ginfo(std::move(netlist)), hier_patterns({}) {}
 
   // copies require copying the entire tree and are very expensive.
   Hier_tree(const Hier_tree& other) = delete;
@@ -49,7 +50,7 @@ public:
 
   // moves defined since copies are deleted
   // moved-from object can be left alone, since contents are "unspecified" after move.
-  Hier_tree(Hier_tree&& other) noexcept : ginfo(std::move(other.ginfo)) {}
+  // Hier_tree(Hier_tree&& other) noexcept : ginfo(std::move(other.ginfo)) {}
 
   // move assignment operator not specified because graph_info contents are really hard to move
 
@@ -62,7 +63,7 @@ public:
   // any node with a smaller area than min_area gets folded into a new supernode with area >= min_area
   void discover_hierarchy(const unsigned int num_components);
 
-  // allocates hierarchies (so hierarchy collapsing and regularity discovery can happen in parallel)
+  // allocates hierarchies
   void make_hierarchies(const size_t num_hiers) { hiers.resize(num_hiers); }
 
   // returns a new tree with small leaf nodes collapsed together
@@ -71,14 +72,18 @@ public:
   // discover similar subgraphs in the collapsed hierarchy
   void discover_regularity(const size_t hier_index, const size_t beam_width);
 
-  // construct a boundary curve using an exhaustive approach if the number of blocks is < optimal_thresh
-  // num_inst indicates how many instantiations of each block we should create
+  // randomly generate leaf dimensions to use when constructing floorplans
+  void make_leaf_dims();
+
+  // gets floorplan dimensions of all patterns using an exhaustive approach if the number of blocks is < optimal_thresh
+
+  // invariant: bounding curves for patterns can only generated after leaf dimensions have been set
   void construct_bounds(const unsigned int optimal_thresh);
 
-  void make_dag(size_t pat_list) {
-    Dag d;
-    d.make(pattern_lists[pat_list], ginfo);
-    // d.dump();
+  // collapse all patterns created by various hierarchies into a single dag ("bounding curve")
+  void collapse_dag() {
+    d.init(hier_patterns, leaf_dims, ginfo);
+    //d.dump();
   }
 
 private:
@@ -126,21 +131,25 @@ private:
   std::vector<phier> hiers;
 
   // keep track of all the kinds of vertices we can have, as well as how many there are
-  using pattern_t     = std::unordered_map<Lg_type_id::type, unsigned int>;
-  using pattern_vec_t = std::vector<pattern_t>;
 
-  unsigned int generic_pattern_size(const pattern_t& gset) const;
+  unsigned int generic_pattern_size(const Pattern& gset) const;
 
-  pattern_t make_generic(const set_t& pat) const;
+  Pattern make_generic(const set_t& pat) const;
 
-  set_vec_t find_all_patterns(const set_t& subg, const pattern_t& gpattern) const;
+  set_vec_t find_all_patterns(const set_t& subg, const Pattern& gpattern) const;
 
-  // find patterns in the collapsed hierarchy
-  pattern_t find_most_freq_pattern(const set_t& subg, const size_t bwidth) const;
+  Pattern find_most_freq_pattern(const set_t& subg, const size_t bwidth) const;
 
   vertex_t compress_inst(set_t& subg, set_t& inst);
 
-  std::vector<pattern_vec_t> pattern_lists;
+  // all the (unique) patterns from every hierarchy
+  std::vector<Pattern> hier_patterns;
 
-  std::vector<std::pair<double, double>> bounding_curve;
+  // TODO: we will also eventually need to store the whole floorplan of each pattern!
+
+  // set of leaf dims used when generating pattern floorplans
+  // if these differ per hierarchy, it becomes really difficult to figure out what patterns used what vertices
+  std::unordered_map<Lg_type_id::type, Dim> leaf_dims;
+
+  Dag d;
 };

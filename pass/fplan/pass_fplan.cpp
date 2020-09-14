@@ -4,9 +4,7 @@
 #include <functional>
 #include <stdexcept>  // for std::runtime_error
 #include <string>     // for std::to_string
-#include <thread>
 #include <tuple>
-#include <vector>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
@@ -18,14 +16,17 @@
 
 void setup_pass_fplan() { Pass_fplan::setup(); }
 
-constexpr unsigned int def_min_tree_nodes    = 1;
-constexpr double       def_min_tree_area     = 6.0;
-constexpr unsigned int def_max_pats          = 15;
-constexpr unsigned int def_max_optimal_nodes = 15;
-unsigned int           def_max_threads       = std::thread::hardware_concurrency() / 2;
+constexpr unsigned int def_min_tree_nodes      = 1;
+constexpr unsigned int def_num_collapsed_hiers = 6;
+constexpr double       def_min_tree_area       = 6.0;
+constexpr unsigned int def_max_pats            = 15;
+constexpr unsigned int def_max_optimal_nodes   = 15;
 
 void Pass_fplan::setup() {
   auto m = Eprp_method("pass.fplan.makefp", "generate a floorplan from an LGraph", &Pass_fplan::pass);
+  m.add_label_optional("num_collapsed_hiers",
+                       "number of (partially) collapsed hierarchies to generate",
+                       std::to_string(def_num_collapsed_hiers));
   m.add_label_optional("min_tree_nodes",
                        "minimum number of components to trigger analysis of a subtree",
                        std::to_string(def_min_tree_nodes));
@@ -36,7 +37,6 @@ void Pass_fplan::setup() {
   m.add_label_optional("max_optimal_nodes",
                        "crossover point between exhaustive branch-and-bound and simulated annealing",
                        std::to_string(def_max_optimal_nodes));
-  m.add_label_optional("max_threads", "maximum number of threads to spawn", std::to_string(def_max_threads));
 
   register_pass(m);
 
@@ -172,72 +172,45 @@ void Pass_fplan::pass(Eprp_var& var) {
 
   Hier_tree h(std::move(p.gi));
 
-  fmt::print("  discovering hierarchy...\n");
-  t.start();
   unsigned int mtn = std::stoi(var.get("min_tree_nodes").data());
-  if (mtn == def_min_tree_nodes) {
-    fmt::print("  using default param {}.\n", mtn);
-  }
+  fmt::print("  discovering hierarchy (min nodes: {})...\n", mtn);
+  t.start();
   h.discover_hierarchy(mtn);
 
   fmt::print("  done ({} ms).\n", t.time());
 
-  const unsigned int mt = std::stod(var.get("max_threads").data());
-  fmt::print("  collapsing hierarchy using {} threads...\n", mt);
-  t.start();
+  const double       mta = std::stod(var.get("min_tree_area").data());
+  const unsigned int nch = std::stoi(var.get("num_collapsed_hiers").data());
 
-  const double mta = std::stod(var.get("min_tree_area").data());
-  if (mta == def_min_tree_area) {
-    fmt::print("  using default param {} mm^2.\n", mta);
+  h.make_hierarchies(nch);
+
+  for (size_t i = 0; i < nch; i++) {
+    fmt::print("  generating collapsed hierarchy (hier {}/{}, min area: {})...", i, nch, i * mta);
+    t.start();
+    h.collapse(i, i * mta);
+    fmt::print("done ({} ms).\n", t.time());
   }
 
-  h.make_hierarchies(mt);  // make mt - 1 additional hierarchies
-
-/*
-  std::vector<std::thread> threads;
-  auto                     f = [&](size_t i, double mta2) { h.collapse(i, mta2); };
-
-  for (size_t i = 0; i < 1; i++) {
-    fmt::print("collapsing {} with area {}.\n", i, mta * i);
-    threads.emplace_back(f, i, mta * i);
-  }
-
-  for (size_t i = 0; i < mt; i++) {
-    threads[i].join();
-  }
-*/
-
-  h.collapse(1, mta);
-
-  fmt::print("  done ({} ms).\n", t.time());
-
-  fmt::print("  discovering regularity...\n");
-  t.start();
   const unsigned int mp = std::stoi(var.get("max_pats").data());
-  if (mp == def_max_pats) {
-    fmt::print("  using default param {}.\n", def_max_pats);
-  }
+
+  fmt::print("  discovering regularity (max patterns: {})...\n", mp);
+  t.start();
   h.discover_regularity(0, mp);
 
-  fmt::print("done ({} ms).\n", t.time());
+  fmt::print("  done ({} ms).\n", t.time());
 
   h.dump_patterns();
 
-  fmt::print("  constructing boundary curve...\n");
-  t.start();
+  h.make_leaf_dims();
+
   const unsigned int mon = std::stoi(var.get("max_optimal_nodes").data());
-  if (mon == def_max_optimal_nodes) {
-    fmt::print("  using default param {}.\n", def_max_optimal_nodes);
-  }
+  fmt::print("  constructing boundary curve (max nodes: {})...\n", mon);
+  t.start();
   h.construct_bounds(mon);
   fmt::print("  done ({} ms).\n", t.time());
 
-  fmt::print("  constructing dag...");
-  t.start();
-  h.make_dag(0);
-  fmt::print("  done ({} ms).\n", t.time());
+  h.collapse_dag();
 
-  // 3. <finish HiReg>
-  // 4. write code to use the existing hierarchy instead of throwing it away...?
+  // 1. <finish HiReg>
   fmt::print("floorplan generated ({} ms).\n\n", whole_t.time());
 }

@@ -1,7 +1,9 @@
-#include <functional>
-#include "fmt/core.h"
-
 #include "hier_tree.hpp"
+
+#include <functional>
+#include <random>
+
+#include "fmt/core.h"
 
 void Hier_tree::dump_node(const phier node) const {
   static int depth = -1;
@@ -52,8 +54,7 @@ unsigned int Hier_tree::find_tree_size(phier node) const {
 }
 
 unsigned int Hier_tree::find_tree_depth(phier node) const {
-  std::function<unsigned int(phier, unsigned int)> find_depth
-      = [&find_depth](phier rnode, unsigned int depth) -> unsigned int {
+  std::function<unsigned int(phier, unsigned int)> find_depth = [&find_depth](phier rnode, unsigned int depth) -> unsigned int {
     if (rnode->is_leaf()) {
       return depth;
     }
@@ -79,14 +80,24 @@ void Hier_tree::dump_hier() const {
 }
 
 void Hier_tree::dump_patterns() const {
-  for (size_t i = 0; i < pattern_lists.size(); i++) {
-    fmt::print("printing pattern list {} ({} nodes):\n", i, pattern_lists[i].size());
-    for (size_t j = 0; j < pattern_lists[i].size(); j++) {
-      auto pattern = pattern_lists[i][j];
-      fmt::print("  printing pattern {} ({} nodes):\n", j, pattern.size());
-      for (auto id : pattern) {
-        fmt::print("    label: {}\n", id.first);
-      }
+  for (size_t i = 0; i < hier_patterns.size(); i++) {
+    fmt::print("printing pattern {} ({} nodes):\n", i, hier_patterns[i].count());
+    for (auto v : hier_patterns[i].verts) {
+      fmt::print("    label: {}, count: {}\n", v.first, v.second);
     }
+  }
+}
+
+void Hier_tree::make_leaf_dims() {
+  static std::default_random_engine     gen;
+  static std::uniform_real_distribution dist(max_aspect_ratio, 1.0 - max_aspect_ratio);
+
+  for (auto v : ginfo.al.verts()) {
+    double width_factor = dist(gen);
+
+    double width  = ginfo.areas(v) * width_factor;
+    double height = ginfo.areas(v) * (1.0 - width_factor);
+
+    leaf_dims[ginfo.labels(v)] = {width, height};
   }
 }
