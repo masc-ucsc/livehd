@@ -14,9 +14,7 @@ public:
 
 private:
   friend class Pass_fplan_dump;
-
-  void make_graph(Eprp_var &var);
-
+  
   Graph_info<g_type> gi;
 };
 

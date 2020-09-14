@@ -2,8 +2,124 @@
 
 #include <functional>
 #include <random>
+#include <stdexcept>  // for std::runtime_error
+#include <tuple>
 
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "fmt/core.h"
+#include "lgedgeiter.hpp"
+#include "lgraph.hpp"
+#include "profile_time.hpp"
+
+// turn an LGraph into a graph suitable for HiReg.
+Hier_tree::Hier_tree(Eprp_var& var) : ginfo(), hier_patterns({}) {
+  // TODO: check to make sure the lgraph(s) are actually valid before traversing them
+  // TODO: after I get this working, harden this code.  Assert stuff.
+
+  if (var.lgs.size() > 1) {
+    throw std::runtime_error("cannot find root hierarchy, did you pass more than one lgraph?");
+  }
+
+  if (!var.lgs.size()) {
+    throw std::runtime_error("no hierarchies found!");
+  }
+
+  auto t = profile_time::timer();
+  fmt::print("    setting up tree...");
+  t.start();
+
+  Hierarchy_tree* root_tree = var.lgs[0]->ref_htree();
+  LGraph*         root_lg   = var.lgs[0];
+
+  I(root_tree);
+  I(root_lg);
+
+  absl::flat_hash_set<std::tuple<Hierarchy_index, Hierarchy_index, uint32_t>> edges;
+  absl::flat_hash_map<Hierarchy_index, vertex_t>                              vm;
+
+  fmt::print("done ({} ms).\n", t.time());
+
+  t.start();
+  fmt::print("    traversing hierarchy...");
+
+  for (auto hidx : root_tree->depth_preorder()) {
+    LGraph* lg = root_tree->ref_lgraph(hidx);
+    fmt::print("    hit edge {}\n", lg->get_name());
+
+    Node temp(root_lg, hidx, Node::Hardcoded_input_nid);
+
+    auto new_v = ginfo.make_vertex(temp.debug_name().substr(18), lg->size(), lg->get_lgid(), 0);
+
+    vm.emplace(hidx, new_v);
+
+    for (auto e : temp.inp_edges()) {
+      fmt::print("    hit inp edge\n");
+
+      auto ei = std::tuple(e.driver.get_hidx(), hidx, e.get_bits());
+      if (e.driver.get_hidx() == hidx) {
+        continue;
+      }
+      if (edges.contains(ei)) {
+        continue;
+      }
+      edges.emplace(ei);
+    }
+
+    for (auto e : temp.out_edges()) {
+      fmt::print("    hit outp edge\n");
+
+      auto ei = std::tuple(hidx, e.sink.get_hidx(), e.get_bits());
+      if (hidx == e.sink.get_hidx()) {
+        continue;
+      }
+      if (edges.contains(ei)) {
+        continue;
+      }
+      edges.emplace(ei);
+    }
+  }
+
+  fmt::print("done ({} ms).\n", t.time());
+
+  auto find_edge = [&](vertex_t v_src, vertex_t v_dst) -> edge_t {
+    for (auto e : ginfo.al.out_edges(v_src)) {
+      if (ginfo.al.head(e) == v_dst) {
+        return e;
+      }
+    }
+
+    return ginfo.al.null_edge();
+  };
+
+  t.start();
+  fmt::print("    assigning edges...");
+
+  for (auto ei : edges) {
+    auto [src, dst, weight] = ei;
+
+    I(vm.count(src) == 1);
+    I(vm.count(dst) == 1);
+
+    auto v1 = vm[src];
+    auto v2 = vm[dst];
+
+    // this is done twice to make bidirectional edges for nodes that may only have outputs or inputs
+    auto e_1_2 = find_edge(v1, v2);
+    if (e_1_2 == ginfo.al.null_edge()) {
+      auto new_e           = ginfo.al.insert_edge(v1, v2);
+      ginfo.weights[new_e] = weight;
+    }
+
+    auto e_2_1 = find_edge(v2, v1);
+    if (e_2_1 == ginfo.al.null_edge()) {
+      auto new_e           = ginfo.al.insert_edge(v2, v1);
+      ginfo.weights[new_e] = weight;
+    }
+  }
+
+  fmt::print("done ({} ms).\n", t.time());
+}
 
 void Hier_tree::dump_node(const phier node) const {
   static int depth = -1;
