@@ -69,15 +69,13 @@ Hier_tree::phier Hier_tree::collapse(phier node, double threshold_area) {
     return make_hier_tree(n1, n2);
   };
 
+  ginfo.sets.push_back(ginfo.al.vert_set());
+  size_t set_loc = ginfo.sets.size() - 1;
+
   // make all nodes belong to the same set
   // this lambda assumes that set_number currently contains a unique set
   std::function<void(phier)> collapse_subtree = [&, this](phier rnode) {
     if (rnode->is_leaf()) {
-      ginfo.sets.push_back(ginfo.al.vert_set());
-      size_t set_loc = ginfo.sets.size() - 1;
-      //set_loc  = ginfo.thr_add_set();
-      //auto set = ginfo.sets[set_loc];
-
       for (auto v : ginfo.sets[rnode->graph_subset]) {
         ginfo.sets[set_loc].insert(v);
       }
@@ -93,8 +91,8 @@ Hier_tree::phier Hier_tree::collapse(phier node, double threshold_area) {
   auto new_subtree = copy_subtree(node);
   collapse_subtree(new_subtree);
 
-  new_subtree->area = find_area(new_subtree);
-  new_subtree->graph_subset = ginfo.sets.size() - 1;
+  new_subtree->area         = find_area(new_subtree);
+  new_subtree->graph_subset = set_loc;
 
   // delete child nodes once everything is moved over
   new_subtree->children[0] = nullptr;

@@ -1,29 +1,32 @@
 #include "dag.hpp"
 
+#include <functional>
 #include <unordered_set>
 
-Dag::Dag() : g(dag_t()), labels(g.vert_map<Lg_type_id::type>()), root(g.insert_vert()) {}
+Dag::Dag() : g(d_type()), dims(g.vert_map<Dim>()), root(g.insert_vert()), labels(g.vert_map<Lg_type_id::type>()) {}
 
-void Dag::make(pattern_vec_t pv, const Graph_info<g_type>& ginfo) {
-  // hacky pattern_t -> Vert map since we can't hash verts directly
-  // map is pv[i] (pattern_t) -> pat_v_map[i] (vert)
-  std::vector<dag_t::Vert> pat_v_map(pv.size());
+void Dag::init(std::vector<Pattern> hier_patterns, std::unordered_map<Lg_type_id::type, Dim> leaf_dims,
+               const Graph_info<g_type>& ginfo) {
+  // Pattern -> vert map since we can't hash verts directly
+  std::vector<d_type::Vert> pat_v_map(hier_patterns.size());
 
   // need a set that is valid across graph types
   auto subp_verts = std::unordered_multiset<Lg_type_id::type>();
 
-  for (size_t i = 0; i < pv.size(); i++) {
-    pat_v_map[i] = g.insert_vert();
-    // pattern verts have a label of 0
+  for (size_t i = 0; i < hier_patterns.size(); i++) {
+    auto new_v   = g.insert_vert();
+    pat_v_map[i] = new_v;
+    dims[new_v]  = hier_patterns[i].d;
+    // Pattern verts have a label of 0
   }
 
-  for (size_t i = 0; i < pv.size(); i++) {
-    auto pat      = pv[i];
+  for (size_t i = 0; i < hier_patterns.size(); i++) {
+    auto pat      = hier_patterns[i].verts;
     auto parent_v = pat_v_map[i];
 
     // going in reverse because we want the largest subset, not the smallest
     for (int j = i - 1; j >= 0; j--) {
-      auto subpat = pv[j];
+      auto subpat = hier_patterns[j].verts;
 
       bool subset = true;
 
@@ -52,11 +55,13 @@ void Dag::make(pattern_vec_t pv, const Graph_info<g_type>& ginfo) {
 
     // anything not matched by a subpattern is a leaf node of the pattern
     for (auto pair : pat) {
-      dag_t::Vert leaf_v;
+      d_type::Vert leaf_v;
       if (pair.second > 0) {
         leaf_v = g.insert_vert();
         subp_verts.insert(pair.first);
         labels[leaf_v] = pair.first;
+        I(leaf_dims.count(pair.first) > 0);
+        dims[leaf_v] = leaf_dims[pair.first];
       }
 
       for (size_t k = 0; k < pair.second; k++) {
@@ -77,12 +82,9 @@ void Dag::make(pattern_vec_t pv, const Graph_info<g_type>& ginfo) {
     if (subp_verts.find(ginfo.labels(v)) == subp_verts.end()) {
       auto new_v    = g.insert_vert();
       labels[new_v] = ginfo.labels(v);
+      I(leaf_dims.count(ginfo.labels(v)) > 0);
+      dims[new_v] = leaf_dims[ginfo.labels(v)];
       g.insert_edge(new_v, root);
     }
   }
-}
-
-void Dag::dump() {
-  using namespace graph::attributes;
-  std::cout << g.dot_format("label"_of_vert = labels) << std::endl;
 }

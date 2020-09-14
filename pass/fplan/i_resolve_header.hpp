@@ -8,7 +8,7 @@
 
 #pragma once
 #include "Adjacency_list.hpp" // for graph type
-#include "Stable_adjacency_list.hpp" // for dag type
+#include "Atomic_adjacency_list.hpp" // for dag type
 #include "range/v3/view.hpp"
 #undef I
 

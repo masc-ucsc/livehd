@@ -12,6 +12,9 @@ Quick things to do:
 
 Things to optimize:
 1. area adjustment algorithm is naive, and inserts area when it isn't necessary
+
+n. sets -> subgraphs
+
 2. iterating over LGraphs could possibly use some work
 3. preloading vectors with sizes known ahead of time could save some time
 4. check to see if graph lib has fast functions to do what I'm doing myself
@@ -24,6 +27,7 @@ Things to optimize:
 
 n. const <type>& -> &&?
 n. when making maps, see if I can use references instead of actual copies - might be a lot cheaper!
+n. memoize construct_bounds
 
 Refactors:
 0. namespace stuff
@@ -32,7 +36,11 @@ Refactors:
 3. more comments...?
 4. replace fmt strings with macro fmt strings that catch more stuff at compile time
 5. shorten comparisons if it doesn't impact readability
+6. Hier_tree is starting to become kinda monolithic.  This is prob okay, since graph objects are super hard to move.
+   Make sure that things are as decoupled as possible - private globals aren't readable.
+   We can return literals, and as long as we use move semantics we'll be fine on speed.
+7. Group a hier, pattern, etc. into a "slice" that is totally contained in a single thread?
+8. Node/vertex/vert/module terminology is inconsistant
 
 Things tried:
  - string -> string_view: string_views need to not outlive the string they are initialized with
- - graph::Out_adjacency_list: buggy
