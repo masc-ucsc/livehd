@@ -18,6 +18,7 @@
 #include "dag.hpp"
 #include "graph_info.hpp"
 #include "i_resolve_header.hpp"
+#include "eprp_var.hpp"
 #include "pattern.hpp"
 
 // controls for debug output on various stages
@@ -42,7 +43,8 @@ struct Hier_node {
 
 class Hier_tree {
 public:
-  Hier_tree(Graph_info<g_type>&& netlist) : ginfo(std::move(netlist)), hier_patterns({}) {}
+  Hier_tree(Eprp_var& var);
+  //Hier_tree(Graph_info<g_type>&& netlist) : ginfo(std::move(netlist)), hier_patterns({}) {}
 
   // copies require copying the entire tree and are very expensive.
   Hier_tree(const Hier_tree& other) = delete;
@@ -92,7 +94,7 @@ private:
   using phier = std::shared_ptr<Hier_node>;
 
   // graph containing the divided netlist
-  Graph_info<g_type>&& ginfo;
+  Graph_info<g_type> ginfo;
 
   // data used by min_cut
   struct Min_cut_data {

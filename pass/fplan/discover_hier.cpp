@@ -383,57 +383,64 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info<g_type>& info, int cut_se
   return new_sets;
 }
 
-Hier_tree::phier Hier_tree::discover_hierarchy(Graph_info<g_type>& info, int start_set, unsigned int num_components) {
-  if (info.sets[start_set].size() <= num_components) {
+Hier_tree::phier Hier_tree::discover_hierarchy(Graph_info<g_type>& info, int start_set, unsigned int min_size) {
+  if (info.sets[start_set].size() <= min_size) {
     // set contains less than the minimum number of components, so treat it as a leaf node
     return make_hier_node(start_set);
   }
 
   auto [a, b] = min_wire_cut(info, start_set);
 
-  phier t1 = discover_hierarchy(info, a, num_components);
-  phier t2 = discover_hierarchy(info, b, num_components);
+  phier t1 = discover_hierarchy(info, a, min_size);
+  phier t2 = discover_hierarchy(info, b, min_size);
 
   return make_hier_tree(t1, t2);
 }
 
-void Hier_tree::discover_hierarchy(const unsigned int num_components) {
-  I(num_components >= 1);
-
+void Hier_tree::discover_hierarchy(const unsigned int min_size) {
+  I(min_size >= 1);
   profile_time::timer t;
-  t.start();
 
-  fmt::print("    wiring zero-cost edges...");
-  // if the graph is not fully connected, ker-lin fails to work.
-  for (const auto& v : ginfo.al.verts()) {
-    for (const auto& ov : ginfo.al.verts()) {
-      if (ginfo.find_edge(v, ov) == ginfo.al.null_edge()) {
-        auto temp_e           = ginfo.al.insert_edge(v, ov);
-        ginfo.weights[temp_e] = 0;
+  if (min_size < ginfo.al.order()) {
+    fmt::print("    wiring zero-cost edges...");
+    t.start();
+    // if the graph is not fully connected, ker-lin fails to work.
+    for (const auto& v : ginfo.al.verts()) {
+      for (const auto& ov : ginfo.al.verts()) {
+        if (ginfo.find_edge(v, ov) == ginfo.al.null_edge()) {
+          auto temp_e           = ginfo.al.insert_edge(v, ov);
+          ginfo.weights[temp_e] = 0;
+        }
       }
     }
+    fmt::print("done. ({} ms).\n", t.time());
+  } else {
+    fmt::print("    skipping zero-cost edge wiring.\n");
   }
-  fmt::print("done. ({} ms).\n", t.time());
 
   fmt::print("    discovering hierarchy...");
   t.start();
-  hiers.push_back(discover_hierarchy(ginfo, 0, num_components));
+  hiers.push_back(discover_hierarchy(ginfo, 0, min_size));
   fmt::print("done. ({} ms).\n", t.time());
 
-  t.start();
-  fmt::print("    deleting zero-cost edges...");
+  if (min_size < ginfo.al.order()) {
+    fmt::print("    deleting zero-cost edges...");
+    t.start();
 
-  // undo temp edge creation because it's really inconvienent elsewhere
-  // NOTE: this isn't very efficient, but using edge sets causes segfaults because the underlying graph is changing.
-  // using std::set<edge_t> works, but doesn't speed things up that much.
-  for (const auto& v : ginfo.al.verts()) {
-    for (const auto& ov : ginfo.al.verts()) {
-      auto e = ginfo.find_edge(v, ov);
-      if (e != ginfo.al.null_edge() && ginfo.weights[e] == 0) {
-        ginfo.al.erase_edge(e);
+    // undo temp edge creation because it's really inconvienent elsewhere
+    // NOTE: this isn't very efficient, but using edge sets causes segfaults because the underlying graph is changing.
+    // using std::set<edge_t> works, but doesn't speed things up that much.
+    for (const auto& v : ginfo.al.verts()) {
+      for (const auto& ov : ginfo.al.verts()) {
+        auto e = ginfo.find_edge(v, ov);
+        if (e != ginfo.al.null_edge() && ginfo.weights[e] == 0) {
+          ginfo.al.erase_edge(e);
+        }
       }
     }
-  }
 
-  fmt::print("done. ({} ms).\n", t.time());
+    fmt::print("done. ({} ms).\n", t.time());
+  } else {
+    fmt::print("    skipping zero-cost edge deletion.\n");
+  }
 }

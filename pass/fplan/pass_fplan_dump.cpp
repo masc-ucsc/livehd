@@ -10,9 +10,7 @@
 #include "pass_fplan.hpp"
 
 void Pass_fplan_dump::dump_hier(Eprp_var &var) {
-  Pass_fplan p(var);
-
-  p.make_graph(var);
+  Hier_tree h(var);
 
   // although the graph lib has a way to make dotfiles out of a graph, it doesn't print out enough information.
 
@@ -20,18 +18,18 @@ void Pass_fplan_dump::dump_hier(Eprp_var &var) {
 
   dotstr << "digraph g {\n\tnode [fontname = \"Source Code Pro\", shape=record];\n";
 
-  for (auto v : p.gi.al.verts()) {
-    auto name  = p.gi.debug_names(v);
-    auto id    = p.gi.ids(v);
-    auto label = p.gi.labels(v);
-    auto area  = p.gi.areas(v);
+  for (auto v : h.ginfo.al.verts()) {
+    auto name  = h.ginfo.debug_names(v);
+    auto id    = h.ginfo.ids(v);
+    auto label = h.ginfo.labels(v);
+    auto area  = h.ginfo.areas(v);
     dotstr << fmt::format("\t{} [label=\"{{{} | {{lb {} | id {} | area {:.2f}}}}}\"];\n", id, name, label, id, area);
   }
 
-  for (auto e : p.gi.al.edges()) {
-    auto src = p.gi.ids(p.gi.al.tail(e));
-    auto dst = p.gi.ids(p.gi.al.head(e));
-    dotstr << fmt::format("\t{} -> {} [label={}];\n", src, dst, p.gi.weights(e));
+  for (auto e : h.ginfo.al.edges()) {
+    auto src = h.ginfo.ids(h.ginfo.al.tail(e));
+    auto dst = h.ginfo.ids(h.ginfo.al.head(e));
+    dotstr << fmt::format("\t{} -> {} [label={}];\n", src, dst, h.ginfo.weights(e));
   }
 
   dotstr << "}";
@@ -49,10 +47,7 @@ void Pass_fplan_dump::dump_hier(Eprp_var &var) {
 }
 
 void Pass_fplan_dump::dump_tree(Eprp_var &var) {
-  Pass_fplan p(var);
-  p.make_graph(var);
-
-  Hier_tree h(std::move(p.gi));
+  Hier_tree h(var);
 
   h.discover_hierarchy(1);
 

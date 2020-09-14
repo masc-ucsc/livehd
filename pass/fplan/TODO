@@ -1,46 +1,34 @@
-Things to test:
-1. test clocked logic as well
-2. test design with 2/1/0 modules
-
-Things to do:
-1. Create floorplans
-
-Quick things to do:
-1. add ratio metric (to indicate if blocks are flexible)
-2. rewrite initial hierarchy printing to use shape=record and dump more info
-3. allow for creation of >1 collapsed hierarchy per thread
+Longer things to do:
+1. write a test suite and integrate it with bazel test
+   test clocked logic
+   test design with 2/1/0 modules
+   test 500K XOR table or something
 
 Things to optimize:
 1. area adjustment algorithm is naive, and inserts area when it isn't necessary
-
-n. sets -> subgraphs
-
-2. iterating over LGraphs could possibly use some work
 3. preloading vectors with sizes known ahead of time could save some time
 4. check to see if graph lib has fast functions to do what I'm doing myself
+   sets -> subgraphs
 5. set/map -> absl versions
-6. map -> pair of arrays (have to profile this to see if it makes a difference)
-7. put more stuff on the heap?
+6. map -> pair of arrays (have to profile this to see if it makes a difference, code complexity goes up)
 9. for loops -> ranges (faster?)
 10. beware of temporaries
-11. only need <functional> if doing a recursive lambda...
-
-n. const <type>& -> &&?
-n. when making maps, see if I can use references instead of actual copies - might be a lot cheaper!
-n. memoize construct_bounds
+12. const <type>& -> &&?
+13. when making maps, see if I can use references instead of actual copies - might be a lot cheaper!
+14. memoize construct_bounds
 
 Refactors:
-0. namespace stuff
 1. move recursive versions of functions into lambdas or just use static counters idk
 2. replace '&' in lambdas with actual things used if # things used is small
-3. more comments...?
-4. replace fmt strings with macro fmt strings that catch more stuff at compile time
+3. uniform frequency of comments
 5. shorten comparisons if it doesn't impact readability
 6. Hier_tree is starting to become kinda monolithic.  This is prob okay, since graph objects are super hard to move.
    Make sure that things are as decoupled as possible - private globals aren't readable.
    We can return literals, and as long as we use move semantics we'll be fine on speed.
 7. Group a hier, pattern, etc. into a "slice" that is totally contained in a single thread?
 8. Node/vertex/vert/module terminology is inconsistant
+9. only need <functional> if doing a recursive lambda...
 
-Things tried:
+Tried:
  - string -> string_view: string_views need to not outlive the string they are initialized with
+ - namespaces: none of the other passes are namespaced so whatever
