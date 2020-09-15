@@ -253,12 +253,20 @@ void Semantic_check::error_print_lnast_var_warn(Lnast* lnast, std::vector<std::s
 
 void Semantic_check::resolve_read_write_lists(Lnast* lnast) {
   // Check to look for variables that are never read
-  for (auto node_name : perm_read_dict) {
-    std::string_view read_node_name = node_name.first;
+  std::vector<std::string_view> read_variables;
+  for (auto group : rhs_list) {
+    for (auto var : group) {
+      read_variables.push_back(lnast->get_name(var));
+    }
+  }
+  // for (auto node_name : perm_read_dict) {
+  for (auto node_name : read_variables) {
+    // std::string_view read_node_name = node_name.first;
+    std::string_view read_node_name = node_name;
     if (is_temp_var(read_node_name)) {
       continue;
     }
-    // Find index of node_name in rhs_list
+    // Find index of node_name in rhs_list (FIX THIS SO STARTS WHERE INDEX OF NODE_NAME)
     int node_name_index = in_rhs_list(lnast, read_node_name);
     if (node_name_index == -1) {
       continue;
@@ -898,14 +906,14 @@ void Semantic_check::do_check(Lnast* lnast) {
   // fmt::print("\n");
   // fmt::print("LHS + RHS List\n");
   // for (int i = 0; i < lhs_list.size(); i++) {
-  //   fmt::print("{} : \n", lnast->get_name(lhs_list[i]));
+  //   fmt::print("{} : ", lnast->get_name(lhs_list[i]));
   //   fmt::print("[");
   //   for (int j = 0; j < rhs_list[i].size(); j++)  {
   //     fmt::print("{}, ", lnast->get_name(rhs_list[i][j]));
   //   }
   //   fmt::print("]\n");
   // }
-  // fmt::print("\n")
+  // fmt::print("\n");
   // Find Errors!
   resolve_out_of_scope();
   if (out_of_scope_vars.size() != 0) {
