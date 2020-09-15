@@ -42,9 +42,8 @@ void Pass_fplan::setup() {
   m.add_label_optional("min_tree_count", "minimum number of components to trigger analysis of a subtree", "1");
 }
 
-#include <thread>
-
 void Pass_fplan::pass(Eprp_var& var) {
+  
   auto t       = profile_time::timer();
   auto whole_t = profile_time::timer();
 
