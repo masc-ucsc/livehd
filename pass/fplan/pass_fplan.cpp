@@ -1,11 +1,11 @@
 #include "pass_fplan.hpp"
 
 #include <string>  // for std::to_string
-#include <thread>
 
 #include "hier_tree.hpp"
 #include "i_resolve_header.hpp"
 #include "profile_time.hpp"
+#include "thread_pool.hpp"
 
 void setup_pass_fplan() { Pass_fplan::setup(); }
 
@@ -30,9 +30,6 @@ void Pass_fplan::setup() {
   m.add_label_optional("max_optimal_nodes",
                        "crossover point between exhaustive branch-and-bound and simulated annealing",
                        std::to_string(def_max_optimal_nodes));
-  m.add_label_optional("max_threads",
-                       "maximum number of threads to use",
-                       std::to_string(std::thread::hardware_concurrency() * 2));
 
   register_pass(m);
 
@@ -45,11 +42,16 @@ void Pass_fplan::setup() {
   m.add_label_optional("min_tree_count", "minimum number of components to trigger analysis of a subtree", "1");
 }
 
+#include <thread>
+
 void Pass_fplan::pass(Eprp_var& var) {
   auto t       = profile_time::timer();
   auto whole_t = profile_time::timer();
+  
+  Thread_pool tp;
 
-  if (std::thread::hardware_concurrency() > 12) {
+  if (tp.size() > 16) {
+    // high thread count
     fmt::print("\ncomfortable sheets detected!\n");
   }
 
@@ -99,8 +101,12 @@ void Pass_fplan::pass(Eprp_var& var) {
   h.construct_bounds(mon);
   fmt::print("  done ({} ms).\n", t.time());
 
-  h.collapse_dag();
+  h.make_dag();
 
-  // 1. <finish HiReg>
+  fmt::print("  constructing floorplans...");
+  t.start();
+  h.construct_floorplans();
+  fmt::print("done ({} ms).\n", t.time());
+
   fmt::print("floorplan generated ({} ms).\n\n", whole_t.time());
 }

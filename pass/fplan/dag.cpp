@@ -3,26 +3,22 @@
 #include <functional>
 #include <unordered_set>
 
-Dag::Dag() : g(d_type()), dims(g.vert_map<Dim>()), root(g.insert_vert()), labels(g.vert_map<Lg_type_id::type>()) {}
+#include "fmt/core.h"
 
 void Dag::init(std::vector<Pattern> hier_patterns, std::unordered_map<Lg_type_id::type, Dim> leaf_dims,
                const Graph_info<g_type>& ginfo) {
-  // Pattern -> vert map since we can't hash verts directly
-  std::vector<d_type::Vert> pat_v_map(hier_patterns.size());
+  std::unordered_map<Pattern, pdag> pat_dag_map;
 
-  // need a set that is valid across graph types
+  // need to keep track of all the verts we've added so we can add them to the dag as leaves if required
   auto subp_verts = std::unordered_multiset<Lg_type_id::type>();
 
-  for (size_t i = 0; i < hier_patterns.size(); i++) {
-    auto new_v   = g.insert_vert();
-    pat_v_map[i] = new_v;
-    dims[new_v]  = hier_patterns[i].d;
-    // Pattern verts have a label of 0
+  for (auto pat : hier_patterns) {
+    pat_dag_map.emplace(pat, std::make_shared<Dag_node>());
   }
 
   for (size_t i = 0; i < hier_patterns.size(); i++) {
-    auto pat      = hier_patterns[i].verts;
-    auto parent_v = pat_v_map[i];
+    auto  pat       = hier_patterns[i].verts;
+    auto& pat_dag_p = pat_dag_map[hier_patterns[i]];
 
     // going in reverse because we want the largest subset, not the smallest
     for (int j = i - 1; j >= 0; j--) {
@@ -46,45 +42,107 @@ void Dag::init(std::vector<Pattern> hier_patterns, std::unordered_map<Lg_type_id
       if (subset) {
         for (auto spair : subpat) {
           pat[spair.first] -= spair.second;
-          g.insert_edge(parent_v, pat_v_map[j]);
+          pat_dag_map[hier_patterns[j]]->parent = pat_dag_p;
+          pat_dag_p->children.push_back(pat_dag_map[hier_patterns[j]]);
           j++;  // run the same check over again to see if we can match another subpattern of the same type
         }
-        pat_v_map[i] = parent_v;
       }
     }
 
     // anything not matched by a subpattern is a leaf node of the pattern
     for (auto pair : pat) {
-      d_type::Vert leaf_v;
       if (pair.second > 0) {
-        leaf_v = g.insert_vert();
+        pdag pd = std::make_shared<Dag_node>();
         subp_verts.insert(pair.first);
-        labels[leaf_v] = pair.first;
+        pd->label = pair.first;
         I(leaf_dims.count(pair.first) > 0);
-        dims[leaf_v] = leaf_dims[pair.first];
-      }
+        pd->dims.push_back(leaf_dims[pair.first]);
 
-      for (size_t k = 0; k < pair.second; k++) {
-        g.insert_edge(leaf_v, parent_v);
+        for (size_t k = 0; k < pair.second; k++) {
+          pd->parent = pat_dag_p;
+          pat_dag_p->children.push_back(pd);
+        }
       }
     }
   }
 
-  // any subpatterns that aren't hit by other subpatterns are children of root
-  for (auto v : g.verts() | ranges::view::drop(1)) {
-    if (g.out_degree(v) == 0) {
-      g.insert_edge(v, root);
+  // find subpatterns not owned by other subpatterns, as they should belong to root
+  for (auto pd : pat_dag_map) {
+    if (pd.second->parent == nullptr) {
+      pd.second->parent = root;
+      root->children.push_back(pd.second);
     }
   }
 
   // any vertices that aren't hit by subpatterns are also children of root
   for (auto v : ginfo.al.verts()) {
     if (subp_verts.find(ginfo.labels(v)) == subp_verts.end()) {
-      auto new_v    = g.insert_vert();
-      labels[new_v] = ginfo.labels(v);
+      auto pd   = std::make_shared<Dag_node>();
+      pd->label = ginfo.labels(v);
       I(leaf_dims.count(ginfo.labels(v)) > 0);
-      dims[new_v] = leaf_dims[ginfo.labels(v)];
-      g.insert_edge(new_v, root);
+      pd->dims.push_back(leaf_dims[ginfo.labels(v)]);
+      pd->parent = root;
+      root->children.push_back(pd);
     }
   }
+}
+
+// TODO: this currently just chooses all leaf nodes and a single pattern
+void Dag::select_points() {
+  std::unordered_set<pdag> nodes({});
+  bool                     found_pat = false;
+
+  std::function<void(pdag)> select_nodes = [&](pdag pd) {
+    if (pd->label == 0 && !found_pat && pd != root) {
+      nodes.insert(pd);
+      found_pat = true;
+    } else if (pd->label > 0) {
+      nodes.insert(pd);
+    }
+
+    if (pd->is_leaf()) {
+      return;
+    }
+
+    for (auto child : pd->children) {
+      I(child != nullptr);
+      select_nodes(child);
+    }
+  };
+
+  select_nodes(root);
+}
+
+void Dag::dump() {
+  std::function<void(pdag)> dump_dag = [&](pdag pd) {
+    if (pd == root) {
+      fmt::print("root node\n");
+    } else {
+      fmt::print("label {}, parent {}\n", pd->label, pd->parent->label);
+    }
+
+    if (pd->children.size() > 0) {
+      fmt::print("  children: ");
+      for (auto child : pd->children) {
+        I(child != nullptr);
+        fmt::print("{}, ", child->label);
+      }
+      fmt::print("\n");
+    }
+
+    for (auto dim : pd->dims) {
+      fmt::print("  dim: (w: {:.2f}, h: {:.2f})\n", dim.width, dim.height);
+    }
+
+    if (pd->is_leaf()) {
+      return;
+    }
+
+    for (auto child : pd->children) {
+      I(child != nullptr);
+      dump_dag(child);
+    }
+  };
+
+  dump_dag(root);
 }
