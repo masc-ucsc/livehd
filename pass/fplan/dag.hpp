@@ -19,28 +19,28 @@ public:
   std::vector<pdag> children;
 
   Lg_type_id::type label;
-  std::vector<Dim> dims;
+  std::vector<Layout> dims;
 
   Dag_node() : parent(nullptr), children(), label(0), dims() {}
-  bool is_leaf() {
-    return children.size() == 0;
-  }
+  bool is_leaf() { return children.size() == 0; }
 };
 
 class Dag {
 public:
+  using pdag = std::shared_ptr<Dag_node>;
+
   Dag() : root(std::make_shared<Dag_node>()) {}
 
   // initialize a dag from a vector of patterns with all leaves being unique,
   // and all patterns either containing leaves or other patterns.
-  void init(std::vector<Pattern> hier_patterns, std::unordered_map<Lg_type_id::type, Dim> leaf_dims,
+  void init(std::vector<Pattern> hier_patterns, std::unordered_map<Lg_type_id::type, std::vector<Layout>> leaf_dims,
             const Graph_info<g_type>& ginfo);
 
-  void select_points();
+  std::unordered_set<pdag> select_points();
 
   void dump();
 
 private:
-  using pdag = std::shared_ptr<Dag_node>;
+  std::unordered_map<Pattern, pdag> pat_dag_map;
   pdag root;
 };

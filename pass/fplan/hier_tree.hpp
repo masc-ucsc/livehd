@@ -16,9 +16,9 @@
 #include <vector>
 
 #include "dag.hpp"
+#include "eprp_var.hpp"
 #include "graph_info.hpp"
 #include "i_resolve_header.hpp"
-#include "eprp_var.hpp"
 #include "pattern.hpp"
 
 // controls for debug output on various stages
@@ -44,7 +44,7 @@ struct Hier_node {
 class Hier_tree {
 public:
   Hier_tree(Eprp_var& var);
-  //Hier_tree(Graph_info<g_type>&& netlist) : ginfo(std::move(netlist)), hier_patterns({}) {}
+  // Hier_tree(Graph_info<g_type>&& netlist) : ginfo(std::move(netlist)), hier_patterns({}) {}
 
   // copies require copying the entire tree and are very expensive.
   Hier_tree(const Hier_tree& other) = delete;
@@ -74,9 +74,6 @@ public:
   // discover similar subgraphs in the collapsed hierarchy
   void discover_regularity(const size_t hier_index, const size_t beam_width);
 
-  // randomly generate leaf dimensions to use when constructing floorplans
-  void make_leaf_dims();
-
   // gets floorplan dimensions of all patterns using an exhaustive approach if the number of blocks is < optimal_thresh
   // invariant: bounding curves for patterns can only generated after leaf dimensions have been set
   void construct_bounds(const unsigned int optimal_thresh);
@@ -86,6 +83,9 @@ public:
     d.init(hier_patterns, leaf_dims, ginfo);
     d.dump();
   }
+
+  // generate various leaf implementations to use for constructing patterns
+  void generate_leaf_dims(const unsigned int num_dims);
 
   void construct_floorplans();
 
@@ -148,11 +148,11 @@ private:
   // all the (unique) patterns from every hierarchy
   std::vector<Pattern> hier_patterns;
 
-  // TODO: we will also eventually need to store the whole floorplan of each pattern!
+  // for each leaf node, there can be various different dimensions used
+  std::unordered_map<Lg_type_id::type, std::vector<Layout>> leaf_dims;
 
-  // set of leaf dims used when generating pattern floorplans
-  // if these differ per hierarchy, it becomes really difficult to figure out what patterns used what vertices
-  std::unordered_map<Lg_type_id::type, Dim> leaf_dims;
+  unsigned int num_dims;
 
+  // dag representing a hierarchy of types
   Dag d;
 };

@@ -31,6 +31,7 @@ Refactors:
 7. Group a hier, pattern, etc. into a "slice" that is totally contained in a single thread?
 8. Node/vertex/vert/module terminology is inconsistant
 9. only need <functional> if doing a recursive lambda...
+10. getters and setters would be helpful
 
 Tried:
  - string -> string_view: string_views need to not outlive the string they are initialized with
