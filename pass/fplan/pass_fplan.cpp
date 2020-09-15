@@ -5,7 +5,7 @@
 #include "hier_tree.hpp"
 #include "i_resolve_header.hpp"
 #include "profile_time.hpp"
-#include "thread_pool.hpp"
+//#include "thread_pool.hpp"
 
 void setup_pass_fplan() { Pass_fplan::setup(); }
 
@@ -93,7 +93,7 @@ void Pass_fplan::pass(Eprp_var& var) {
 
   h.dump_patterns();
 
-  h.make_leaf_dims();
+  h.generate_leaf_dims(3);
 
   const unsigned int mon = std::stoi(var.get("max_optimal_nodes").data());
   fmt::print("  constructing boundary curve (max nodes: {})...\n", mon);

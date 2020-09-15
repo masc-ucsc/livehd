@@ -1,6 +1,11 @@
 #include "hier_tree.hpp"
 
-void Hier_tree::construct_floorplans() { 
-  d.select_points();
+#include "fmt/core.h"
 
+void Hier_tree::construct_floorplans() { 
+  auto points = d.select_points();
+
+  for (auto point : points) {
+    // point is a location on the DAG
+  }
 }
