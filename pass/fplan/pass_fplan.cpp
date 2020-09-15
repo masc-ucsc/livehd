@@ -47,13 +47,14 @@ void Pass_fplan::setup() {
 void Pass_fplan::pass(Eprp_var& var) {
   auto t       = profile_time::timer();
   auto whole_t = profile_time::timer();
-  
-  Thread_pool tp;
 
+  /*
+  Thread_pool tp;
   if (tp.size() > 16) {
     // high thread count
     fmt::print("\ncomfortable sheets detected!\n");
   }
+  */
 
   fmt::print("generating floorplan...\n");
   whole_t.start();

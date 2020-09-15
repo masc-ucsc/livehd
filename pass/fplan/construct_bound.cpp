@@ -38,8 +38,8 @@ void Hier_tree::construct_bounds(const unsigned int optimal_thresh) {
     // should be <...>/livehd (symlink)
     auto curr_p = std::filesystem::current_path();
 
-    auto blobb_p = curr_p / "third_party" / "misc" / "blobb_compass" / "bin" / "blobb";
-    if (!std::filesystem::exists(blobb_p) || !std::filesystem::is_symlink(blobb_p)) {
+    auto blobb_p = curr_p / "bazel-bin" / "third_party" / "misc" / "blobb_compass" / "blobb";
+    if (!std::filesystem::exists(blobb_p)) {
       throw std::runtime_error(fmt::format("No binary found in {}!", blobb_p.string()));
     }
 
