@@ -63,7 +63,7 @@ public:
   // take in a graph of all nodes in the netlist, and convert it to a tree.
   // min_num_components sets the minimum number of components required to trigger analysis of the hierarchy
   // any node with a smaller area than min_area gets folded into a new supernode with area >= min_area
-  void discover_hierarchy(const unsigned int num_components);
+  void discover_hierarchy(const unsigned int min_size);
 
   // allocates hierarchies
   void make_hierarchies(const size_t num_hiers) { hiers.resize(num_hiers); }
@@ -78,15 +78,16 @@ public:
   void make_leaf_dims();
 
   // gets floorplan dimensions of all patterns using an exhaustive approach if the number of blocks is < optimal_thresh
-
   // invariant: bounding curves for patterns can only generated after leaf dimensions have been set
   void construct_bounds(const unsigned int optimal_thresh);
 
   // collapse all patterns created by various hierarchies into a single dag ("bounding curve")
-  void collapse_dag() {
+  void make_dag() {
     d.init(hier_patterns, leaf_dims, ginfo);
-    //d.dump();
+    d.dump();
   }
+
+  void construct_floorplans();
 
 private:
   friend class Pass_fplan_dump;

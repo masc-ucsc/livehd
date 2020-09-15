@@ -1,42 +1,46 @@
 #pragma once
 
 #include <iostream>
+#include <memory>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>  // for std::pair
 #include <vector>
 
-#include "pattern.hpp"
 #include "graph_info.hpp"
 #include "i_resolve_header.hpp"
 #include "lgraph_base_core.hpp"
+#include "pattern.hpp"
 
-// encapsulating dag class because we don't really need the actual nodes
+class Dag_node {
+public:
+  using pdag = std::shared_ptr<Dag_node>;
+
+  pdag              parent;
+  std::vector<pdag> children;
+
+  Lg_type_id::type label;
+  std::vector<Dim> dims;
+
+  Dag_node() : parent(nullptr), children(), label(0), dims() {}
+  bool is_leaf() {
+    return children.size() == 0;
+  }
+};
 
 class Dag {
 public:
-  using d_type = graph::Atomic_out_adjacency_list;
-
-  Dag();
+  Dag() : root(std::make_shared<Dag_node>()) {}
 
   // initialize a dag from a vector of patterns with all leaves being unique,
   // and all patterns either containing leaves or other patterns.
-  // TODO: this should be a constructor, but Graph_info has serious restrictions on moving.
   void init(std::vector<Pattern> hier_patterns, std::unordered_map<Lg_type_id::type, Dim> leaf_dims,
             const Graph_info<g_type>& ginfo);
 
-  void dump() {
-    using namespace graph::attributes;
-    std::cout << g.dot_format("label"_of_vert = labels, "dim"_of_vert = dims) << std::endl;
-  }
+  void select_points();
+
+  void dump();
 
 private:
-  // TODO: I'll probably be using this in the future...
-  using label_map_t = graph::Vert_map<d_type, Lg_type_id::type>;
-  using dim_map_t   = graph::Vert_map<d_type, Dim>;
-
-  d_type       g;
-  dim_map_t    dims;  // area of a node
-  d_type::Vert root;
-  label_map_t  labels;  // used to ensure dag doesn't contain duplicates
+  using pdag = std::shared_ptr<Dag_node>;
+  pdag root;
 };

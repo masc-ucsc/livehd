@@ -14,8 +14,6 @@
 
 // turn an LGraph into a graph suitable for HiReg.
 Hier_tree::Hier_tree(Eprp_var& var) : ginfo(), hier_patterns({}) {
-  // TODO: check to make sure the lgraph(s) are actually valid before traversing them
-  // TODO: after I get this working, harden this code.  Assert stuff.
 
   if (var.lgs.size() > 1) {
     throw std::runtime_error("cannot find root hierarchy, did you pass more than one lgraph?");
@@ -45,7 +43,6 @@ Hier_tree::Hier_tree(Eprp_var& var) : ginfo(), hier_patterns({}) {
 
   for (auto hidx : root_tree->depth_preorder()) {
     LGraph* lg = root_tree->ref_lgraph(hidx);
-    fmt::print("    hit edge {}\n", lg->get_name());
 
     Node temp(root_lg, hidx, Node::Hardcoded_input_nid);
 
@@ -54,8 +51,6 @@ Hier_tree::Hier_tree(Eprp_var& var) : ginfo(), hier_patterns({}) {
     vm.emplace(hidx, new_v);
 
     for (auto e : temp.inp_edges()) {
-      fmt::print("    hit inp edge\n");
-
       auto ei = std::tuple(e.driver.get_hidx(), hidx, e.get_bits());
       if (e.driver.get_hidx() == hidx) {
         continue;
@@ -67,8 +62,6 @@ Hier_tree::Hier_tree(Eprp_var& var) : ginfo(), hier_patterns({}) {
     }
 
     for (auto e : temp.out_edges()) {
-      fmt::print("    hit outp edge\n");
-
       auto ei = std::tuple(hidx, e.sink.get_hidx(), e.get_bits());
       if (hidx == e.sink.get_hidx()) {
         continue;

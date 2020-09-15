@@ -12,6 +12,7 @@ cc_library(
     deps = [
          "//core:core",
          "//pass/common:pass",
+         "//task:task",
          "@iassert//:iassert",
          "@rapidjson//:headers",
          "@graph//:graph",

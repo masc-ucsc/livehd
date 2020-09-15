@@ -4,6 +4,8 @@ Longer things to do:
    test design with 2/1/0 modules
    test 500K XOR table or something
 
+2. 
+
 Things to optimize:
 1. area adjustment algorithm is naive, and inserts area when it isn't necessary
 3. preloading vectors with sizes known ahead of time could save some time
@@ -16,6 +18,7 @@ Things to optimize:
 12. const <type>& -> &&?
 13. when making maps, see if I can use references instead of actual copies - might be a lot cheaper!
 14. memoize construct_bounds
+15. provide hash methods for my own objects so they can be used in unordered_maps
 
 Refactors:
 1. move recursive versions of functions into lambdas or just use static counters idk
