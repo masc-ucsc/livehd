@@ -16,8 +16,11 @@ class Dag_node {
 public:
   using pdag = std::shared_ptr<Dag_node>;
 
-  pdag              parent;
-  std::vector<pdag> children;
+  pdag                      parent;
+  std::vector<pdag>         children;
+  std::vector<unsigned int> child_edge_count;
+
+  unsigned int dag_id;
 
   // TODO: insert node content here
 
@@ -29,7 +32,7 @@ class Dag {
 public:
   using pdag = std::shared_ptr<Dag_node>;
 
-  Dag() : root(std::make_shared<Dag_node>()) {}
+  Dag() : root(std::make_shared<Dag_node>()), dag_id_counter(0) {}
 
   // initialize a dag from a vector of patterns with all leaves being unique,
   // and all patterns either containing leaves or other patterns.
@@ -41,5 +44,7 @@ public:
 
 private:
   std::unordered_map<Pattern, pdag> pat_dag_map;
-  pdag                              root;
+  // map of child edge -> count of how many of that kind of edge should exist
+  pdag         root;
+  unsigned int dag_id_counter;
 };
