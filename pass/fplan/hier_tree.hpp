@@ -66,7 +66,10 @@ public:
   void discover_hierarchy(const unsigned int min_size);
 
   // allocates hierarchies
-  void make_hierarchies(const size_t num_hiers) { hiers.resize(num_hiers); }
+  void make_hierarchies(const size_t num_hiers) {
+    I(num_hiers > 1);
+    hiers.resize(num_hiers);
+  }
 
   // returns a new tree with small leaf nodes collapsed together
   void collapse(const size_t hier_index, const double threshold_area);
