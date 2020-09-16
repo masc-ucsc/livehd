@@ -149,7 +149,10 @@ void Hier_tree::dump_node(const phier node) const {
   fmt::print("node: {:<30}{}depth: {}, ", node->name, prefix, depth);
 
   if (node->is_leaf()) {
-    fmt::print("area: {:.2f}, containing node {}.\n", node->area, ginfo.debug_names(node->graph_vert));
+    fmt::print("area: {:.2f}, containing nodes:\n", node->area);
+    for (auto v : node->graph_set) {
+      fmt::print("  {}\n", ginfo.debug_names(v));
+    }
   } else {
     fmt::print("area: {:.2f}, children: {} and {}.\n", find_area(node), node->children[0]->name, node->children[1]->name);
     dump_node(node->children[0]);

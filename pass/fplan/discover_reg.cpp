@@ -289,7 +289,9 @@ void Hier_tree::discover_regularity(const size_t hier_index, const size_t beam_w
         = [&](phier node, unsigned int level, unsigned int minlevel) {
             if (node->is_leaf()) {
               if (level >= minlevel) {
-                hier_nodes.insert(node->graph_vert);
+                for (auto v : node->graph_set) {
+                  hier_nodes.insert(v);
+                }
               }
               return;
             }

@@ -67,15 +67,11 @@ void Pass_fplan::pass(Eprp_var& var) {
   fmt::print("  discovering hierarchy (min nodes: {})...\n", mtn);
   t.start();
 
-
-  // TODO: this is forced to be 1 because I forgot that the hierarchy doesn't have to map completely to the input netlist at this stage.
-  // fix this later.
+  // TODO: this is forced to be 1 because I forgot that the hierarchy doesn't have to map completely to the input netlist at this
+  // stage. I'll fix this later.
   h.discover_hierarchy(1);
 
   fmt::print("  done ({} ms).\n", t.time());
-
-  // haven't checked the stuff past this
-  I(false);
 
   const double       mta = std::stod(var.get("min_tree_area").data());
   const unsigned int nch = std::stoi(var.get("num_collapsed_hiers").data());
@@ -89,8 +85,10 @@ void Pass_fplan::pass(Eprp_var& var) {
     fmt::print("done ({} ms).\n", t.time());
   }
 
-  const unsigned int mp = std::stoi(var.get("max_pats").data());
+  // haven't checked the stuff past this
+  I(false);
 
+  const unsigned int mp = std::stoi(var.get("max_pats").data());
 
   h.discover_regularity(mp);
   h.make_dags();
