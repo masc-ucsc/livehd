@@ -13,6 +13,7 @@
 
 constexpr double max_aspect_ratio = 1.0 / 5.0;
 
+// TODO: pointless to generate leaf dims if the leaves are collapsed into something else in the hierarchy
 void Hier_tree::generate_leaf_dims(const unsigned int ndims) {
   static std::default_random_engine     gen;
   static std::uniform_real_distribution dist(max_aspect_ratio, 1.0 - max_aspect_ratio);

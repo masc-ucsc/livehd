@@ -1,10 +1,14 @@
+Large bug:
+
+when nodes are collapsed in the hierarchy, the graph is left alone.  This means that when we try and discover regularity, 
+we repeatedly discover regularity of the entire graph and not subsections of it!
+
+
 Longer things to do:
 1. write a test suite and integrate it with bazel test
    test clocked logic
    test design with 2/1/0 modules
    test 500K XOR table or something
-
-2. 
 
 Things to optimize:
 1. area adjustment algorithm is naive, and inserts area when it isn't necessary
