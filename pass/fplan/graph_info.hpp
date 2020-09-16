@@ -94,7 +94,7 @@ public:
 
     std::string dname = std::string("cp_vert_");
     for (auto v : set) {
-      dname.append(std::to_string(ids(v)));
+      dname.append(std::to_string(ids(v))).append("_");
     }
 
     debug_names[nv] = dname;

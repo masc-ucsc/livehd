@@ -55,36 +55,47 @@ void Pass_fplan_dump::dump_tree(Eprp_var &var) {
 
   dotstr << "digraph g {\n\tnode [fontname = \"Source Code Pro\", shape=record];\n";
 
-  std::function<void(std::shared_ptr<Hier_node>)> dump_graph_names = [&](std::shared_ptr<Hier_node> root) {
-    dotstr << fmt::format("\t{};\n", root->name);
-    if (root->is_leaf()) {
-      for (auto v : root->graph_set) {
-        std::string name = h.ginfo.debug_names(v);
+  std::function<void(std::shared_ptr<Hier_node>, const Graph_info<g_type>&)> dump_graph_names = [&](std::shared_ptr<Hier_node> n, const Graph_info<g_type>& gi) {
+    dotstr << fmt::format("\t{};\n", n->name);
+    if (n->is_leaf()) {
+      for (auto v : n->graph_set) {
+        std::string name = gi.debug_names(v);
         name.append("_");
-        name.append(std::to_string(h.ginfo.ids(v)));  // create a unique label for each node, not just each node type
+        name.append(std::to_string(gi.ids(v)));  // create a unique label for each node, not just each node type
 
         dotstr << fmt::format("\t{} [label=\"{{{} | {{lb {} | id {} | area {:.2f}}}}}\", color=red];\n",
-                              h.ginfo.ids(v),
+                              gi.ids(v),
                               name,
-                              h.ginfo.labels(v),
-                              h.ginfo.ids(v),
-                              h.ginfo.areas(v));
-        dotstr << fmt::format("\t{} -> {};\n", h.ginfo.ids(v), root->name);
+                              gi.labels(v),
+                              gi.ids(v),
+                              gi.areas(v));
+        dotstr << fmt::format("\t{} -> {};\n", gi.ids(v), n->name);
       }
     }
 
-    if (root->children[0] != nullptr) {
-      dump_graph_names(root->children[0]);
-      dotstr << fmt::format("\t{} -> {};\n", root->children[0]->name, root->name);
+    if (n->children[0] != nullptr) {
+      dump_graph_names(n->children[0], gi);
+      dotstr << fmt::format("\t{} -> {};\n", n->children[0]->name, n->name);
     }
 
-    if (root->children[1] != nullptr) {
-      dump_graph_names(root->children[1]);
-      dotstr << fmt::format("\t{} -> {};\n", root->children[1]->name, root->name);
+    if (n->children[1] != nullptr) {
+      dump_graph_names(n->children[1], gi);
+      dotstr << fmt::format("\t{} -> {};\n", n->children[1]->name, n->name);
     }
   };
 
-  dump_graph_names(h.hiers[0]);
+  h.make_collapsed_hierarchies(1);
+
+  if (!var.has_label("min_tree_area")) {
+    fmt::print("here!\n");
+  }
+
+  const double mta = std::stod(var.get("min_tree_area").data());
+  fmt::print("  generating collapsed hierarchy (min area: {})...", mta);
+  h.collapse(1, mta);
+  fmt::print("done.\n");
+
+  dump_graph_names(h.hiers[1], h.collapsed_gis[1]);
 
   dotstr << "}";
 
