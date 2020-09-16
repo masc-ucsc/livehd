@@ -17,24 +17,36 @@ Hier_tree::phier Hier_tree::make_hier_tree(phier t1, phier t2) {
   return pnode;
 }
 
-Hier_tree::phier Hier_tree::make_hier_node(const int set) {
-  I(set >= 0);
+Hier_tree::phier Hier_tree::make_hier_node(const vertex_t v) {
+  I(v != ginfo.al.null_vert());
 
   phier pnode = std::make_shared<Hier_node>();
   pnode->name = "leaf_node_" + std::to_string(node_number);
 
-  auto set_areas = ginfo.al.verts() | ranges::view::remove_if([this, set](auto v) { return !this->ginfo.sets[set].contains(v); })
-                   | ranges::view::transform([this](auto v) { return this->ginfo.areas(v); });
+  pnode->area = ginfo.areas(v);
 
-  for (const double a : set_areas) {
-    pnode->area += a;
-  }
-
-  pnode->graph_subset = set;
+  pnode->graph_vert = v;
 
   node_number++;
 
   return pnode;
+}
+
+// create a new subtree from an existing subtree
+Hier_tree::phier Hier_tree::copy_subtree(phier rnode) {
+  if (rnode->is_leaf()) {
+    return make_hier_node(rnode->graph_vert);
+  }
+
+  I(rnode->children[0] != nullptr);
+  I(rnode->children[1] != nullptr);
+
+  // I believe the HiReg paper states that child nodes can have layouts less than the thresold,
+  // as long as the total area between the child nodes is greater than the threshold
+  auto n1 = copy_subtree(rnode->children[0]);
+  auto n2 = copy_subtree(rnode->children[1]);
+
+  return make_hier_tree(n1, n2);
 }
 
 Hier_tree::phier Hier_tree::collapse(phier node, double threshold_area) {
@@ -49,36 +61,24 @@ Hier_tree::phier Hier_tree::collapse(phier node, double threshold_area) {
       return make_hier_tree(n1, n2);
     }
 
-    return make_hier_node(node->graph_subset);
+    return make_hier_node(node->graph_vert);
   }
 
-  // create a new subtree from an existing subtree
-  std::function<phier(phier)> copy_subtree = [&, this](phier rnode) -> phier {
-    if (rnode->is_leaf()) {
-      return make_hier_node(rnode->graph_subset);
-    }
+  // TODO: finish writing this!
+  I(false);
 
-    I(rnode->children[0] != nullptr);
-    I(rnode->children[1] != nullptr);
+  auto edges = ginfo.al.edge_set();
+  auto verts = ginfo.al.vert_set();
 
-    // I believe the HiReg paper states that child nodes can have layouts less than the thresold,
-    // as long as the total area between the child nodes is greater than the threshold
-    auto n1 = copy_subtree(rnode->children[0]);
-    auto n2 = copy_subtree(rnode->children[1]);
+  auto collapsed_v = ginfo.al.insert_vert();
 
-    return make_hier_tree(n1, n2);
-  };
-
-  ginfo.sets.push_back(ginfo.al.vert_set());
-  size_t set_loc = ginfo.sets.size() - 1;
+  // right now, assume that every graph_set vector has one element in it.
 
   // make all nodes belong to the same set
   // this lambda assumes that set_number currently contains a unique set
-  std::function<void(phier)> collapse_subtree = [&, this](phier rnode) {
+  std::function<void(phier)> collapse_subtree = [&](phier rnode) {
     if (rnode->is_leaf()) {
-      for (auto v : ginfo.sets[rnode->graph_subset]) {
-        ginfo.sets[set_loc].insert(v);
-      }
+      verts.insert(rnode->graph_vert);
     } else {
       I(rnode->children[0] != nullptr);
       I(rnode->children[1] != nullptr);
@@ -88,11 +88,43 @@ Hier_tree::phier Hier_tree::collapse(phier node, double threshold_area) {
     }
   };
 
+  /*
+  // ginfo.sets.push_back(ginfo.al.vert_set());
+  // size_t set_loc = ginfo.sets.size() - 1;
+
+  auto verts = ginfo.al.vert_set();
+  auto edges = ginfo.al.edge_set();
+
+  // right now, assume that every graph_set vector has one element in it.
+
+  // make all nodes belong to the same set
+  // this lambda assumes that set_number currently contains a unique set
+  std::function<void(phier)> get_node_info = [&, this](phier rnode) {
+    if (rnode->is_leaf()) {
+      for (auto n : ginfo.sets[rnode->graph_subset]) {
+        verts.insert(n);
+        for (auto e : ginfo.out_edges(n)) {
+          edges.insert(e);
+        }
+      }
+    } else {
+      I(rnode->children[0] != nullptr);
+      I(rnode->children[1] != nullptr);
+
+      get_node_info(rnode->children[0]);
+      get_node_info(rnode->children[1]);
+    }
+  };
+
+  auto new_subtree = copy_subtree(node);
+  get_node_info(new_subtree);
+  */
+
   auto new_subtree = copy_subtree(node);
   collapse_subtree(new_subtree);
 
-  new_subtree->area         = find_area(new_subtree);
-  new_subtree->graph_subset = set_loc;
+  new_subtree->area       = find_area(new_subtree);
+  new_subtree->graph_vert = collapsed_v;
 
   // delete child nodes once everything is moved over
   new_subtree->children[0] = nullptr;

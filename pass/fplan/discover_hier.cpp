@@ -7,11 +7,10 @@
 #include "i_resolve_header.hpp"
 #include "profile_time.hpp"
 
-std::pair<int, int> Hier_tree::min_wire_cut(Graph_info<g_type>& info, int cut_set) {
-  auto&      g    = info.al;
-  set_vec_t& sets = info.sets;
+std::pair<set_t, set_t> Hier_tree::min_wire_cut(set_t& cut_set) {
+  auto& g = ginfo.al;
 
-  auto cut_verts = g.verts() | ranges::view::remove_if([&](auto v) -> bool { return !sets[cut_set].contains(v); });
+  auto cut_verts = g.verts() | ranges::view::remove_if([&](auto v) -> bool { return !cut_set.contains(v); });
 
   // TODO: graph lib needs a specific version of range-v3, and that version doesn't have size or conversion utilities yet.
   // this method isn't pretty, but it works.  [[maybe_unused]] directive silences warning about "v" being unused.
@@ -21,6 +20,8 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info<g_type>& info, int cut_se
   }
 
   I(cut_size >= 2);
+
+  auto new_sets = std::pair(g.vert_set(), g.vert_set());
 
   // if there are only two elements in the graph, we can exit early.
   if (cut_size == 2) {
@@ -35,28 +36,24 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info<g_type>& info, int cut_se
       }
     }
 
-    auto triv_sets = std::pair(sets.size(), sets.size() + 1);
-
-    sets.push_back(g.vert_set());
-    sets.push_back(g.vert_set());
-
-    sets[triv_sets.first].insert(v1);
-    sets[triv_sets.second].insert(v2);
+    new_sets.first.insert(v1);
+    new_sets.second.insert(v2);
 
     if (hier_verbose) {
       fmt::print("\ntrivial partition:\n");
-      fmt::print("{:<30}a (aka {}), area {:.2f}\n", info.debug_names(v1), triv_sets.first, info.areas(v1));
-      fmt::print("{:<30}b (aka {}), area {:.2f}\n", info.debug_names(v2), triv_sets.second, info.areas(v2));
-      fmt::print("imb: {:.3f}\n", std::max(info.areas(v1), info.areas(v2)) / (info.areas(v1) + info.areas(v2)));
+      fmt::print("{:<30}a, area {:.2f}\n", ginfo.debug_names(v1), ginfo.areas(v1));
+      fmt::print("{:<30}b, area {:.2f}\n", ginfo.debug_names(v2), ginfo.areas(v2));
+      fmt::print("imb: {:.3f}\n", std::max(ginfo.areas(v1), ginfo.areas(v2)) / (ginfo.areas(v1) + ginfo.areas(v2)));
     }
 
-    return triv_sets;
+    return new_sets;
   }
 
   // if there are an odd number of elements, we need to insert one to make the graph size even.
   vertex_t temp_even_vertex = g.null_vert();
   if (cut_size % 2 == 1) {
-    temp_even_vertex = info.make_temp_vertex(std::string("temp_even"), 0.0, cut_set);
+    temp_even_vertex = ginfo.make_temp_vertex(std::string("temp_even"), 0.0);
+    cut_set.insert(temp_even_vertex);
     cut_size++;
   }
 
@@ -68,50 +65,37 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info<g_type>& info, int cut_se
 
   //  To resolve this, a new view should be created with the correct condition.
 
-  auto new_sets = std::pair(sets.size(), sets.size() + 1);
-  sets.push_back(g.vert_set());
-  sets.push_back(g.vert_set());
-
-  // given a vertex, find the set containing that vert, or an invalid set if not found.
-  // TODO: replace with std::optional
-  auto find_set = [&](auto v) -> size_t {
-    for (size_t i = 0; i < sets.size(); i++) {
-      if (sets[i].contains(v)) {
-        return i;
-      }
-    }
-    return std::numeric_limits<size_t>::max();
-  };
-
-  auto is_valid_set = [&, new_sets](auto v) -> bool { return find_set(v) == new_sets.first || find_set(v) == new_sets.second; };
+  auto is_valid_set = [&](auto v) -> bool { return cut_set.contains(v); };
 
   auto vert_set = g.verts() | ranges::view::remove_if([=](auto v) { return !is_valid_set(v); });
 
   unsigned int set_size = cut_size / 2;
 
-  auto is_in_a = [&, new_sets](auto v) -> bool { return find_set(v) == new_sets.first; };
+  auto is_in_a = [&](auto v) -> bool { return new_sets.first.contains(v); };
 
-  auto is_in_b = [&, new_sets](auto v) -> bool { return find_set(v) == new_sets.second; };
+  auto is_in_b = [&](auto v) -> bool { return new_sets.second.contains(v); };
 
   auto same_set = [&](auto v1, auto v2) -> bool {
     I(is_valid_set(v1));
     I(is_valid_set(v2));
-    return find_set(v1) == find_set(v2);
+    return (new_sets.first.contains(v1) && new_sets.first.contains(v2))
+           || (new_sets.second.contains(v1) && new_sets.second.contains(v2));
   };
 
   // assign vertices to one of the two new sets we made
-  unsigned int which_set  = 1;
-  unsigned int back_index = sets.size() - 3;
+  unsigned int which_set = 0;
   for (auto v : cut_verts) {
-    sets[back_index + which_set].insert(v);
-    sets[cut_set].erase(v);
-
-    if (which_set == 1) {
-      which_set = 2;
+    if (which_set == 0) {
+      new_sets.first.insert(v);
     } else {
-      which_set = 1;
+      new_sets.second.insert(v);
     }
+
+    // alternate between 0 and 1
+    which_set ^= 1;
   }
+
+  I(new_sets.first.size() == new_sets.second.size());
 
   // find the total area of both the a and b sets.  If the area is > max_imb, correct it.
 
@@ -120,9 +104,9 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info<g_type>& info, int cut_se
 
   for (auto v : vert_set) {
     if (is_in_a(v)) {
-      init_a_area += info.areas(v);
+      init_a_area += ginfo.areas(v);
     } else {
-      init_b_area += info.areas(v);
+      init_b_area += ginfo.areas(v);
     }
   }
 
@@ -133,28 +117,24 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info<g_type>& info, int cut_se
     fmt::print("\nincoming imb: {:.3f}\n", area_imb(init_a_area, init_b_area));
   }
 
-  auto   add_area_vertex = info.al.null_vert();
+  auto   add_area_vertex = ginfo.al.null_vert();
   double add_area_amt    = 0.0;
   if (area_imb(init_a_area, init_b_area) > max_imb) {
     // if the area combo is illegal, add some area to a random node to make it legal.  Not super smart, but it works for now
-    size_t add_area_set = (init_a_area > init_b_area) ? new_sets.second : new_sets.first;
+    set_t& add_area_set = (init_a_area > init_b_area) ? new_sets.second : new_sets.first;
     add_area_amt        = (1.0 / max_imb) * std::max(init_a_area, init_b_area) - init_a_area - init_b_area + 0.01;
 
     if (hier_verbose) {
-      fmt::print("adding area {} to node {:<30}\n", add_area_amt, info.debug_names[*(sets[add_area_set].begin())]);
+      fmt::print("adding area {} to node {:<30}\n", add_area_amt, ginfo.debug_names[*(add_area_set.begin())]);
     }
-    add_area_vertex = *(sets[add_area_set].begin());
-    info.areas[add_area_vertex] += add_area_amt;
+    add_area_vertex = *(add_area_set.begin());
+    ginfo.areas[add_area_vertex] += add_area_amt;
   }
 
   if (hier_verbose) {
     fmt::print("incoming partition:\n");
     for (auto v : vert_set) {
-      fmt::print("{:<30}{} (aka {}), area {:.2f}\n",
-                 info.debug_names(v),
-                 (is_in_a(v) ? "a" : "b"),
-                 (is_in_a(v) ? new_sets.first : new_sets.second),
-                 info.areas(v));
+      fmt::print("{:<30}{}, area {:.2f}\n", ginfo.debug_names(v), (is_in_a(v) ? "a" : "b"), ginfo.areas(v));
     }
   }
 
@@ -172,9 +152,9 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info<g_type>& info, int cut_se
         vertex_t other_v = g.head(e);
         if (is_valid_set(other_v)) {
           if (!same_set(v, other_v)) {
-            exter += info.weights(e);
+            exter += ginfo.weights(e);
           } else {
-            inter += info.weights(e);
+            inter += ginfo.weights(e);
           }
         }
       }
@@ -192,9 +172,9 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info<g_type>& info, int cut_se
 
     for (auto v : vert_set) {
       if (is_in_a(v)) {
-        a_area += info.areas(v);
+        a_area += ginfo.areas(v);
       } else {
-        b_area += info.areas(v);
+        b_area += ginfo.areas(v);
       }
     }
 
@@ -216,7 +196,7 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info<g_type>& info, int cut_se
             vertex_t other_v = g.head(e);
             if (is_in_a(v) && is_in_b(other_v) && cmap(other_v).active) {
               // only select nodes in the other set
-              int new_cost = cmap(v).d_cost + cmap(other_v).d_cost - 2 * info.weights(e);
+              int new_cost = cmap(v).d_cost + cmap(other_v).d_cost - 2 * ginfo.weights(e);
 
               if (new_cost > cost) {
                 cost  = new_cost;
@@ -238,8 +218,8 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info<g_type>& info, int cut_se
       av.push_back(a_max);
       bv.push_back(b_max);
 
-      double delta_a_area = -info.areas(a_max) + info.areas(b_max);
-      double delta_b_area = -info.areas(b_max) + info.areas(a_max);
+      double delta_a_area = -ginfo.areas(a_max) + ginfo.areas(b_max);
+      double delta_b_area = -ginfo.areas(b_max) + ginfo.areas(a_max);
 
       aav.push_back(delta_a_area);
       bav.push_back(delta_b_area);
@@ -266,13 +246,13 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info<g_type>& info, int cut_se
             continue;
           }
           cmap[v].d_cost
-              = cmap(v).d_cost + 2 * info.weights(find_edge_to_max(v, a_max)) - 2 * info.weights(find_edge_to_max(v, b_max));
+              = cmap(v).d_cost + 2 * ginfo.weights(find_edge_to_max(v, a_max)) - 2 * ginfo.weights(find_edge_to_max(v, b_max));
         } else {
           if (v == b_max) {
             continue;
           }
           cmap[v].d_cost
-              = cmap(v).d_cost + 2 * info.weights(find_edge_to_max(v, b_max)) - 2 * info.weights(find_edge_to_max(v, a_max));
+              = cmap(v).d_cost + 2 * ginfo.weights(find_edge_to_max(v, b_max)) - 2 * ginfo.weights(find_edge_to_max(v, a_max));
         }
       }
     }
@@ -320,15 +300,15 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info<g_type>& info, int cut_se
     if (best_decrease > 0) {
       for (size_t i = 0; i < decrease_index; i++) {
         if (hier_verbose) {
-          fmt::print("  swapping {} with {}.\n", info.debug_names(av[i]), info.debug_names(bv[i]));
+          fmt::print("  swapping {} with {}.\n", ginfo.debug_names(av[i]), ginfo.debug_names(bv[i]));
         }
 
         if (swap_vec[i]) {
-          sets[new_sets.first].erase(av[i]);
-          sets[new_sets.second].insert(av[i]);
+          new_sets.first.erase(av[i]);
+          new_sets.second.insert(av[i]);
 
-          sets[new_sets.second].erase(bv[i]);
-          sets[new_sets.first].insert(bv[i]);
+          new_sets.second.erase(bv[i]);
+          new_sets.first.insert(bv[i]);
         }
       }
     }
@@ -345,9 +325,9 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info<g_type>& info, int cut_se
 
   for (auto v : vert_set) {
     if (is_in_a(v)) {
-      final_a_area += info.areas(v);
+      final_a_area += ginfo.areas(v);
     } else {
-      final_b_area += info.areas(v);
+      final_b_area += ginfo.areas(v);
     }
   }
 
@@ -357,12 +337,11 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info<g_type>& info, int cut_se
   if (hier_verbose) {
     fmt::print("\nbest partition:\n");
     for (auto v : vert_set) {
-      fmt::print("{:<30}{} (aka {}), cost {}, area {:.2f}\n",
-                 info.debug_names(v),
+      fmt::print("{:<30}{}, cost {}, area {:.2f}\n",
+                 ginfo.debug_names(v),
                  (is_in_a(v) ? "a" : "b"),
-                 (is_in_a(v) ? new_sets.first : new_sets.second),
                  cmap(v).d_cost,
-                 info.areas(v));
+                 ginfo.areas(v));
     }
 
     fmt::print("a area: {:.2f}, b area: {:.2f}, imb: {:.3f}.\n", final_a_area, final_b_area, final_imb);
@@ -370,29 +349,33 @@ std::pair<int, int> Hier_tree::min_wire_cut(Graph_info<g_type>& info, int cut_se
 
   // if we inserted a temporary vertex, remove it from the list of active sets and erase it from the graph
   if (temp_even_vertex != g.null_vert()) {
-    int loc = find_set(temp_even_vertex);
-    sets[loc].erase(temp_even_vertex);
+    if (new_sets.first.contains(temp_even_vertex)) {
+      new_sets.first.erase(temp_even_vertex);
+    } else {
+      I(new_sets.second.contains(temp_even_vertex));
+      new_sets.second.erase(temp_even_vertex);
+    }
     g.erase_vert(temp_even_vertex);
   }
 
   // if we added some area to a vertex, subtract it out
   if (add_area_vertex != g.null_vert()) {
-    info.areas[add_area_vertex] -= add_area_amt;
+    ginfo.areas[add_area_vertex] -= add_area_amt;
   }
 
   return new_sets;
 }
 
-Hier_tree::phier Hier_tree::discover_hierarchy(Graph_info<g_type>& info, int start_set, unsigned int min_size) {
-  if (info.sets[start_set].size() <= min_size) {
+Hier_tree::phier Hier_tree::discover_hierarchy(set_t& set, unsigned int min_size) {
+  if (set.size() <= min_size) {
     // set contains less than the minimum number of components, so treat it as a leaf node
-    return make_hier_node(start_set);
+    return make_hier_node(ginfo.collapse_to_vertex(set));
   }
 
-  auto [a, b] = min_wire_cut(info, start_set);
+  auto [a, b] = min_wire_cut(set);
 
-  phier t1 = discover_hierarchy(info, a, min_size);
-  phier t2 = discover_hierarchy(info, b, min_size);
+  phier t1 = discover_hierarchy(a, min_size);
+  phier t2 = discover_hierarchy(b, min_size);
 
   return make_hier_tree(t1, t2);
 }
@@ -420,7 +403,13 @@ void Hier_tree::discover_hierarchy(const unsigned int min_size) {
 
   fmt::print("    discovering hierarchy...");
   t.start();
-  hiers.push_back(discover_hierarchy(ginfo, 0, min_size));
+
+  auto all_verts = ginfo.al.vert_set();
+  for (auto v : ginfo.al.verts()) {
+    all_verts.insert(v);
+  }
+
+  hiers.push_back(discover_hierarchy(all_verts, min_size));
   fmt::print("done. ({} ms).\n", t.time());
 
   if (min_size < ginfo.al.order()) {

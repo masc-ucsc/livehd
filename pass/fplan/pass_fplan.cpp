@@ -66,9 +66,16 @@ void Pass_fplan::pass(Eprp_var& var) {
   unsigned int mtn = std::stoi(var.get("min_tree_nodes").data());
   fmt::print("  discovering hierarchy (min nodes: {})...\n", mtn);
   t.start();
-  h.discover_hierarchy(mtn);
+
+
+  // TODO: this is forced to be 1 because I forgot that the hierarchy doesn't have to map completely to the input netlist at this stage.
+  // fix this later.
+  h.discover_hierarchy(1);
 
   fmt::print("  done ({} ms).\n", t.time());
+
+  // haven't checked the stuff past this
+  I(false);
 
   const double       mta = std::stod(var.get("min_tree_area").data());
   const unsigned int nch = std::stoi(var.get("num_collapsed_hiers").data());
