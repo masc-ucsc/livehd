@@ -36,6 +36,7 @@ void Hier_tree::generate_leaf_dims(const unsigned int ndims) {
 }
 
 void Hier_tree::construct_bounds(const unsigned int optimal_thresh) {
+  /*
   for (auto& pat : hier_patterns) {
     for (size_t i = 0; i < num_dims; i++) {
       std::stringstream instr;
@@ -138,4 +139,5 @@ void Hier_tree::construct_bounds(const unsigned int optimal_thresh) {
       blobb_outf.close();
     }
   }
+  */
 }

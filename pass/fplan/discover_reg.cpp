@@ -24,7 +24,7 @@ set_vec_t Hier_tree::find_all_patterns(const set_t& subg, const Pattern& gpatter
   }
 
   while (qualifying_nodes.size() > 0) {
-    set_t     pattern_nodes = ginfo.al.vert_set();
+    set_t   pattern_nodes = ginfo.al.vert_set();
     Pattern temp_gpat     = gpattern;
 
     // avoid looking at already-visited nodes, regardless of if they're in a pattern or not
@@ -40,8 +40,8 @@ set_vec_t Hier_tree::find_all_patterns(const set_t& subg, const Pattern& gpatter
 
       for (auto e : ginfo.al.out_edges(v)) {
         auto ov = ginfo.al.head(e);
-        if (subg.contains(ov) && !visited_nodes.contains(ov) && temp_gpat.verts.count(ginfo.labels(ov)) > 0 && temp_gpat.verts[ginfo.labels(ov)]
-            && !global_found_nodes.contains(ov)) {
+        if (subg.contains(ov) && !visited_nodes.contains(ov) && temp_gpat.verts.count(ginfo.labels(ov)) > 0
+            && temp_gpat.verts[ginfo.labels(ov)] && !global_found_nodes.contains(ov)) {
           find_pattern(ov);
         }
       }
@@ -114,9 +114,11 @@ Pattern Hier_tree::find_most_freq_pattern(const set_t& subg, const size_t bwidth
 
   if (reg_verbose) {
     fmt::print("initial pattern:\n");
+    /*
     for (auto v : vp[0]) {
       fmt::print("  {}\n", ginfo.debug_names(v));
     }
+    */
   }
 
   if (vp.size() == 0) {
@@ -182,7 +184,7 @@ Pattern Hier_tree::find_most_freq_pattern(const set_t& subg, const size_t bwidth
       // value = (# instantiations of pattern in subg) * size(subg) + size(pattern)
       unsigned int value = inst.size() * subg.size() + new_vp[i].size();
       if (reg_verbose) {
-        fmt::print("  value ({}) = count ({}) * G({}) + P({})\n", value, inst.size(), subg.size(), new_vp[i].size());
+        //fmt::print("  value ({}) = count ({}) * G({}) + P({})\n", value, inst.size(), subg.size(), new_vp[i].size());
       }
 
       if (inst.size() > 1) {
@@ -199,9 +201,11 @@ Pattern Hier_tree::find_most_freq_pattern(const set_t& subg, const size_t bwidth
     if (reg_verbose) {
       if (sortvec.size()) {
         fmt::print("best pattern, value {}:\n", sortvec[0].second);
+        /*
         for (auto v : new_vp[sortvec[0].first]) {
           fmt::print("  {}\n", ginfo.debug_names(v));
         }
+        */
       }
     }
 
@@ -251,17 +255,30 @@ vertex_t Hier_tree::compress_inst(set_t& subg, set_t& inst) {
   return pat_v;
 }
 
+void Hier_tree::discover_regularity(const size_t beam_width) {
+  hier_patterns.resize(hiers.size());
+  profile_time::timer t;
+  for (size_t i = 0; i < hier_patterns.size(); i++) {
+    fmt::print("  discovering regularity (hier {}/{}, max patterns: {})...", i + 1, hier_patterns.size(), beam_width);
+    t.start();
+    discover_regularity(i, beam_width);
+    fmt::print("done ({} ms).\n", t.time());
+  }
+}
+
 void Hier_tree::discover_regularity(const size_t hier_index, const size_t beam_width) {
   auto hier = hiers[hier_index];
   I(hier != nullptr);
 
-  int   curr_min_depth = find_tree_depth(hier);
+  auto& pattern_set = hier_patterns[hier_index];
+
+  int curr_min_depth = find_tree_depth(hier);
 
   unsigned int old_size = 0;
   unsigned int curr_size;
 
   while (curr_min_depth >= 0) {
-    profile_time::timer t;
+    //profile_time::timer t;
     auto                hier_nodes = ginfo.al.vert_set();
 
     // have to use a map here because if we create nodes inside the loop, they go out of scope and deletion segfaults
@@ -283,10 +300,10 @@ void Hier_tree::discover_regularity(const size_t hier_index, const size_t beam_w
             get_level_nodes(node->children[1], level + 1, minlevel);
           };
 
-    t.start();
-    fmt::print("    getting level nodes...");
+    //t.start();
+    //fmt::print("    getting level nodes...");
     get_level_nodes(hier, 0, curr_min_depth);
-    fmt::print("done ({} ms).\n", t.time());
+    //fmt::print("done ({} ms).\n", t.time());
 
     curr_size = hier_nodes.size();
 
@@ -294,20 +311,21 @@ void Hier_tree::discover_regularity(const size_t hier_index, const size_t beam_w
       fmt::print("\ndepth: {}, ", curr_min_depth);
       if (curr_size == old_size) {
         fmt::print("repeat, ");
+      } else {
+        fmt::print("nodes:\n");
+        unsigned int total = 0;
+        for (auto v : hier_nodes) {
+          fmt::print("  node: {:<15}\n", ginfo.debug_names(v));
+          total++;
+        }
+        fmt::print("  total: {}\n", total);
       }
-      fmt::print("nodes:\n");
-      unsigned int total = 0;
-      for (auto v : hier_nodes) {
-        fmt::print("  node: {:<15}\n", ginfo.debug_names(v));
-        total++;
-      }
-      fmt::print("  total: {}\n", total);
     }
 
-    t.start();
-    fmt::print("    finding most frequent pattern...");
+    //t.start();
+    //fmt::print("    finding most frequent pattern...");
     Pattern most_freq_pattern = find_most_freq_pattern(hier_nodes, beam_width);
-    fmt::print("done ({} ms).\n", t.time());
+    //fmt::print("done ({} ms).\n", t.time());
 
     // if we have a pattern consisting of more than one element, find_most_frequent_pattern ensures it has >1 instantiation,
     // so we have to collapse it.
@@ -317,8 +335,8 @@ void Hier_tree::discover_regularity(const size_t hier_index, const size_t beam_w
       }
 
       bool dup = false;
-      for (size_t i = 0; i < hier_patterns.size(); i++) {
-        if (hier_patterns[i] == most_freq_pattern) {
+      for (size_t i = 0; i < pattern_set.size(); i++) {
+        if (pattern_set[i] == most_freq_pattern) {
           dup = true;
           if (bound_verbose) {
             fmt::print("    pattern {} is a duplicate of {}.\n", i + 1, i);
@@ -327,11 +345,11 @@ void Hier_tree::discover_regularity(const size_t hier_index, const size_t beam_w
       }
 
       if (!dup) {
-        hier_patterns.push_back(most_freq_pattern);
+        pattern_set.push_back(most_freq_pattern);
       }
 
-      t.start();
-      fmt::print("    compressing hierarchy...");
+      //t.start();
+      //fmt::print("    compressing hierarchy...");
 
       auto         vinst = find_all_patterns(hier_nodes, most_freq_pattern);
       unsigned int ctr   = 0;
@@ -343,12 +361,12 @@ void Hier_tree::discover_regularity(const size_t hier_index, const size_t beam_w
         pat_map[comp_v] = true;
       }
 
-      fmt::print("done ({} ms).\n", t.time());
+      //fmt::print("done ({} ms).\n", t.time());
 
-      t.start();
-      fmt::print("    finding most frequent pattern...");
+      //t.start();
+      //fmt::print("    finding most frequent pattern...");
       most_freq_pattern = find_most_freq_pattern(hier_nodes, beam_width);
-      fmt::print("done ({} ms).\n", t.time());
+      //fmt::print("done ({} ms).\n", t.time());
     }
 
     old_size = curr_size;
@@ -364,5 +382,14 @@ void Hier_tree::discover_regularity(const size_t hier_index, const size_t beam_w
     if (bound_verbose) {
       fmt::print("    going up a level.\n");
     }
+  }
+}
+
+void Hier_tree::make_dags() {
+  dags.resize(hier_patterns.size());
+
+  for (size_t i = 0; i < dags.size(); i++) {
+    dags[i].init(hier_patterns[i], ginfo);
+    dags[i].dump();
   }
 }

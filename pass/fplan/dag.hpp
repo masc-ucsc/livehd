@@ -3,6 +3,7 @@
 #include <iostream>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>  // for std::pair
 #include <vector>
 
@@ -18,10 +19,9 @@ public:
   pdag              parent;
   std::vector<pdag> children;
 
-  Lg_type_id::type label;
-  std::vector<Layout> dims;
+  // TODO: insert node content here
 
-  Dag_node() : parent(nullptr), children(), label(0), dims() {}
+  Dag_node() : parent(nullptr), children() {}
   bool is_leaf() { return children.size() == 0; }
 };
 
@@ -33,8 +33,7 @@ public:
 
   // initialize a dag from a vector of patterns with all leaves being unique,
   // and all patterns either containing leaves or other patterns.
-  void init(std::vector<Pattern> hier_patterns, std::unordered_map<Lg_type_id::type, std::vector<Layout>> leaf_dims,
-            const Graph_info<g_type>& ginfo);
+  void init(std::vector<Pattern> pat_set, const Graph_info<g_type>& ginfo);
 
   std::unordered_set<pdag> select_points();
 
@@ -42,5 +41,5 @@ public:
 
 private:
   std::unordered_map<Pattern, pdag> pat_dag_map;
-  pdag root;
+  pdag                              root;
 };

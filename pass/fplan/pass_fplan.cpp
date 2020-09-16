@@ -10,7 +10,7 @@
 void setup_pass_fplan() { Pass_fplan::setup(); }
 
 constexpr unsigned int def_min_tree_nodes      = 1;
-constexpr unsigned int def_num_collapsed_hiers = 6;
+constexpr unsigned int def_num_collapsed_hiers = 3;
 constexpr double       def_min_tree_area       = 6.0;
 constexpr unsigned int def_max_pats            = 15;
 constexpr unsigned int def_max_optimal_nodes   = 15;
@@ -43,7 +43,6 @@ void Pass_fplan::setup() {
 }
 
 void Pass_fplan::pass(Eprp_var& var) {
-  
   auto t       = profile_time::timer();
   auto whole_t = profile_time::timer();
 
@@ -77,7 +76,7 @@ void Pass_fplan::pass(Eprp_var& var) {
   h.make_hierarchies(nch);
 
   for (size_t i = 0; i < nch; i++) {
-    fmt::print("  generating collapsed hierarchy (hier {}/{}, min area: {})...", i, nch, i * mta);
+    fmt::print("  generating collapsed hierarchy (hier {}/{}, min area: {})...", i + 1, nch, i * mta);
     t.start();
     h.collapse(i, i * mta);
     fmt::print("done ({} ms).\n", t.time());
@@ -85,11 +84,9 @@ void Pass_fplan::pass(Eprp_var& var) {
 
   const unsigned int mp = std::stoi(var.get("max_pats").data());
 
-  fmt::print("  discovering regularity (max patterns: {})...\n", mp);
-  t.start();
-  h.discover_regularity(0, mp);
 
-  fmt::print("  done ({} ms).\n", t.time());
+  h.discover_regularity(mp);
+  h.make_dags();
 
   h.dump_patterns();
 
@@ -100,8 +97,6 @@ void Pass_fplan::pass(Eprp_var& var) {
   t.start();
   h.construct_bounds(mon);
   fmt::print("  done ({} ms).\n", t.time());
-
-  h.make_dag();
 
   fmt::print("  constructing floorplans...");
   t.start();
