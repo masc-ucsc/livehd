@@ -85,10 +85,12 @@ public:
 
   // set will be modified interally by graph I think
   vertex_t collapse_to_vertex(set_t& set) {
+    I(set.size() >= 1);
+
     auto nv = al.insert_vert();
 
-    ids[nv]         = ++unique_id_counter;
-    labels[nv]      = ++unique_label_counter;
+    ids[nv]    = ++unique_id_counter;
+    labels[nv] = ++unique_label_counter;
 
     std::string dname = std::string("cp_vert_");
     for (auto v : set) {
@@ -101,6 +103,8 @@ public:
       areas[nv] += areas(v);
     }
 
+    auto marked   = al.template vert_map<bool>();
+
     for (auto v : set) {
       for (auto e : al.out_edges(v)) {
         al.insert_edge(nv, al.head(e));
@@ -109,11 +113,20 @@ public:
       for (auto e : al.in_edges(v)) {
         al.insert_edge(al.tail(e), nv);
       }
+
+      marked[v] = true;
     }
 
-    // TODO: might have to copy things over to a std set since this might segfault
-    for (auto v : set) {
-      al.erase_vert(v);
+    // we have to be extremely careful about how we delete verts here, because otherwise graph will segfault
+    // trying to keep track of verts in the set that have already been deleted.
+    
+    set.clear();
+
+    for (auto it = al.verts().begin(); it != al.verts().end(); it++) {
+      if (marked(*it)) {
+        al.erase_vert(*it);
+        it = al.verts().begin();
+      }
     }
 
     return nv;

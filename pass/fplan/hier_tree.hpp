@@ -22,7 +22,7 @@
 #include "pattern.hpp"
 
 // controls for debug output on various stages
-constexpr bool hier_verbose = true;
+constexpr bool hier_verbose = false;
 // constexpr bool coll_verbose = false;
 constexpr bool reg_verbose   = true;
 constexpr bool bound_verbose = false;
@@ -33,11 +33,13 @@ struct Hier_node {
 
   double area = 0.0;  // area of the leaf (if node is a leaf)
 
-  std::shared_ptr<Hier_node> parent      = {nullptr};
+  std::shared_ptr<Hier_node> parent      = nullptr;
   std::shared_ptr<Hier_node> children[2] = {nullptr, nullptr};
 
-  // which vertex in the graph the node maps to
-  vertex_t graph_vert;
+  // which vertices in the graph the node maps to
+  set_t graph_set;
+
+  Hier_node(const Graph_info<g_type>& gi) : parent(nullptr), graph_set(gi.al.vert_set()) {}
 
   bool is_leaf() const { return children[0] == nullptr && children[1] == nullptr; }
 };
@@ -96,8 +98,6 @@ public:
 private:
   friend class Pass_fplan_dump;
 
-  using phier = std::shared_ptr<Hier_node>;
-
   // graph containing the uncollapsed netlist
   Graph_info<g_type> ginfo;
 
@@ -110,12 +110,14 @@ private:
     bool active;  // whether the node is being considered for a swap or not
   };
 
+  using phier = std::shared_ptr<Hier_node>;
+
   // make a partition of the graph minimizing the number of edges crossing the cut and keeping in mind area (modified kernighan-lin
   // algorithm)
   std::pair<set_t, set_t> min_wire_cut(set_t& cut_set);
 
   // make a node for insertion into the hierarchy
-  phier make_hier_node(const vertex_t v);
+  phier make_hier_node(const set_t v);
 
   // create a hierarchy tree out of existing hierarchies
   phier make_hier_tree(phier t1, phier t2);
@@ -133,10 +135,10 @@ private:
 
   phier copy_subtree(phier rnode);
 
-  phier collapse(phier node, double threshold_area);
+  phier collapse(phier node, Graph_info<g_type>& gi, double threshold_area);
 
   // generator used to make unique node names
-  unsigned int node_number = 0;
+  unsigned int unique_node_counter = 0;
 
   // vector of hierarchy trees with some nodes collapsed
   // 0th element is always uncollapsed hierarchy

@@ -58,7 +58,7 @@ void Pass_fplan_dump::dump_tree(Eprp_var &var) {
   std::function<void(std::shared_ptr<Hier_node>)> dump_graph_names = [&](std::shared_ptr<Hier_node> root) {
     dotstr << fmt::format("\t{};\n", root->name);
     if (root->is_leaf()) {
-      for (auto v : h.ginfo.al.verts()) {
+      for (auto v : root->graph_set) {
         std::string name = h.ginfo.debug_names(v);
         name.append("_");
         name.append(std::to_string(h.ginfo.ids(v)));  // create a unique label for each node, not just each node type

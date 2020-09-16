@@ -368,8 +368,7 @@ std::pair<set_t, set_t> Hier_tree::min_wire_cut(set_t& cut_set) {
 
 Hier_tree::phier Hier_tree::discover_hierarchy(set_t& set, unsigned int min_size) {
   if (set.size() <= min_size) {
-    // set contains less than the minimum number of components, so treat it as a leaf node
-    return make_hier_node(ginfo.collapse_to_vertex(set));
+    return make_hier_node(set);
   }
 
   auto [a, b] = min_wire_cut(set);
