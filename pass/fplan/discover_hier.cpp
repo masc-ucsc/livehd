@@ -368,7 +368,8 @@ std::pair<set_t, set_t> Hier_tree::min_wire_cut(set_t& cut_set) {
 
 Hier_tree::phier Hier_tree::discover_hierarchy(set_t& set, unsigned int min_size) {
   if (set.size() <= min_size) {
-    return make_hier_node(set);
+    I(set.size() != 0);
+    return make_hier_node(collapsed_gis[0], set);
   }
 
   auto [a, b] = min_wire_cut(set);
@@ -376,7 +377,7 @@ Hier_tree::phier Hier_tree::discover_hierarchy(set_t& set, unsigned int min_size
   phier t1 = discover_hierarchy(a, min_size);
   phier t2 = discover_hierarchy(b, min_size);
 
-  return make_hier_tree(t1, t2);
+  return make_hier_tree(collapsed_gis[0], t1, t2);
 }
 
 void Hier_tree::discover_hierarchy(const unsigned int min_size) {

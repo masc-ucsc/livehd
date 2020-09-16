@@ -69,11 +69,13 @@ public:
   void discover_hierarchy(const unsigned int min_size);
 
   // allocates space for collapsed hierarchies, and a graph to go along with each one
-  void make_hierarchies(const size_t num_hiers) {
-    I(num_hiers > 1);
-    hiers.resize(num_hiers);
-    for (size_t i = 0; i < num_hiers; i++) {
+  void make_collapsed_hierarchies(const size_t num_chiers) {
+    I(num_chiers != 0);
+
+    hiers.resize(num_chiers + 1);
+    for (size_t i = 1; i <= num_chiers; i++) {
       collapsed_gis.emplace_back(ginfo);
+      hiers[i] = dup_tree(hiers[0], collapsed_gis[i]);
     }
   }
 
@@ -97,12 +99,19 @@ public:
 
 private:
   friend class Pass_fplan_dump;
+  using phier = std::shared_ptr<Hier_node>;
 
   // graph containing the uncollapsed netlist
+  // only here for compatibility with the stuff I already wrote, should be removed eventually
   Graph_info<g_type> ginfo;
 
-  // graphs containing the collapsed netlists (seperated for now so things still compile)
+  // graphs containing the collapsed netlists (seperated from ginfo for now so things compile)
+  // the 0th element is always the uncollapsed graph.
   std::vector<Graph_info<g_type>> collapsed_gis;
+
+  // vector of hierarchy trees with some nodes collapsed
+  // 0th element is always uncollapsed hierarchy
+  std::vector<phier> hiers;
 
   // data used by min_cut
   struct Min_cut_data {
@@ -110,17 +119,15 @@ private:
     bool active;  // whether the node is being considered for a swap or not
   };
 
-  using phier = std::shared_ptr<Hier_node>;
-
   // make a partition of the graph minimizing the number of edges crossing the cut and keeping in mind area (modified kernighan-lin
   // algorithm)
   std::pair<set_t, set_t> min_wire_cut(set_t& cut_set);
 
   // make a node for insertion into the hierarchy
-  phier make_hier_node(const set_t v);
+  phier make_hier_node(Graph_info<g_type>& gi, const set_t& v);
 
   // create a hierarchy tree out of existing hierarchies
-  phier make_hier_tree(phier t1, phier t2);
+  phier make_hier_tree(Graph_info<g_type>& gi, phier t1, phier t2);
 
   // perform hierarchy discovery
   phier discover_hierarchy(set_t& set, unsigned int min_num_components);
@@ -133,16 +140,12 @@ private:
 
   void dump_node(const phier node) const;
 
-  phier copy_subtree(phier rnode);
+  phier dup_tree(phier oldn, Graph_info<g_type>& new_gi);
 
   phier collapse(phier node, Graph_info<g_type>& gi, double threshold_area);
 
   // generator used to make unique node names
   unsigned int unique_node_counter = 0;
-
-  // vector of hierarchy trees with some nodes collapsed
-  // 0th element is always uncollapsed hierarchy
-  std::vector<phier> hiers;
 
   // keep track of all the kinds of vertices we can have, as well as how many there are
 

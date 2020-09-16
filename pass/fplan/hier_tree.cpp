@@ -13,7 +13,7 @@
 #include "profile_time.hpp"
 
 // turn an LGraph into a graph suitable for HiReg.
-Hier_tree::Hier_tree(Eprp_var& var) : ginfo(), hier_patterns({}) {
+Hier_tree::Hier_tree(Eprp_var& var) : ginfo(), collapsed_gis(), hier_patterns() {
   // if I run this code in lgshell with -c opt on the rocket core, temp.imp_edges hangs.
   // this doesn't happen with a smaller hierarchy like hier_test
 
@@ -130,6 +130,8 @@ Hier_tree::Hier_tree(Eprp_var& var) : ginfo(), hier_patterns({}) {
       ginfo.weights[new_e] = weight;
     }
   }
+
+  collapsed_gis.emplace_back(ginfo);
 
   fmt::print("done ({} ms).\n", t.time());
 }

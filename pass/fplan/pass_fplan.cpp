@@ -38,8 +38,11 @@ void Pass_fplan::setup() {
   register_pass(dhm);
 
   auto dtm = Eprp_method("pass.fplan.dumptree", "dump a DOT file representing the hierarchy tree", &Pass_fplan_dump::dump_tree);
+  dtm.add_label_optional("min_tree_count", "minimum number of components to trigger analysis of a subtree", "1");
+  dtm.add_label_optional("min_tree_area",
+                         "area (mm^2) threshold below which nodes will be collapsed together",
+                         std::to_string(def_min_tree_area));
   register_pass(dtm);
-  m.add_label_optional("min_tree_count", "minimum number of components to trigger analysis of a subtree", "1");
 }
 
 void Pass_fplan::pass(Eprp_var& var) {
@@ -76,10 +79,10 @@ void Pass_fplan::pass(Eprp_var& var) {
   const double       mta = std::stod(var.get("min_tree_area").data());
   const unsigned int nch = std::stoi(var.get("num_collapsed_hiers").data());
 
-  h.make_hierarchies(nch + 1);
+  h.make_collapsed_hierarchies(nch);
 
-  for (size_t i = 1; i <= nch; i++) {
-    fmt::print("  generating collapsed hierarchy (hier {}/{}, min area: {})...", i, nch, i * mta);
+  for (size_t i = 0; i < nch; i++) {
+    fmt::print("  generating collapsed hierarchy (hier {}/{}, min area: {})...", i + 1, nch, i * mta);
     t.start();
     h.collapse(i, i * mta);
     fmt::print("done ({} ms).\n", t.time());

@@ -1,9 +1,3 @@
-Large bug:
-
-when nodes are collapsed in the hierarchy, the graph is left alone.  This means that when we try and discover regularity, 
-we repeatedly discover regularity of the entire graph and not subsections of it!
-
-
 Longer things to do:
 1. write a test suite and integrate it with bazel test
    test clocked logic
@@ -36,6 +30,9 @@ Refactors:
 8. Node/vertex/vert/module terminology is inconsistant
 9. only need <functional> if doing a recursive lambda...
 10. getters and setters would be helpful
+
+Things to add:
+1. some sort of check() method that verifies netlists and internal functionality
 
 Tried:
  - string -> string_view: string_views need to not outlive the string they are initialized with
