@@ -61,7 +61,12 @@ Hier_tree::Hier_tree(Eprp_var& var) : ginfo(), hier_patterns({}) {
 
     Node temp(root_lg, hidx, Node::Hardcoded_input_nid);
 
-    auto new_v = ginfo.make_vertex(temp.debug_name().substr(18), lg->size(), lg->get_lgid(), 0);
+    auto new_v = ginfo.make_vertex(temp.debug_name().substr(18), lg->size(), lg->get_lgid());
+    
+    // helpful to have a totally unique label number to use when making collapsed vertices
+    if (ginfo.unique_label_counter < lg->get_lgid()) {
+      ginfo.unique_label_counter = lg->get_lgid();
+    }
 
     vm.emplace(hidx, new_v);
 
@@ -144,7 +149,7 @@ void Hier_tree::dump_node(const phier node) const {
   fmt::print("node: {:<30}{}depth: {}, ", node->name, prefix, depth);
 
   if (node->is_leaf()) {
-    fmt::print("area: {:.2f}, containing set {}.\n", node->area, node->graph_subset);
+    fmt::print("area: {:.2f}, containing node {}.\n", node->area, ginfo.debug_names(node->graph_vert));
   } else {
     fmt::print("area: {:.2f}, children: {} and {}.\n", find_area(node), node->children[0]->name, node->children[1]->name);
     dump_node(node->children[0]);
@@ -209,7 +214,7 @@ void Hier_tree::dump_patterns() const {
 
     for (size_t pattern_index = 0; pattern_index < hier_patterns[hier_index].size(); pattern_index++) {
       fmt::print("  in pattern {}:\n", pattern_index);
-      
+
       for (auto vpair : hier_patterns[hier_index][pattern_index].verts) {
         fmt::print("    label: {}, count: {}\n", vpair.first, vpair.second);
       }

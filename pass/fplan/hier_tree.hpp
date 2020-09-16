@@ -22,9 +22,9 @@
 #include "pattern.hpp"
 
 // controls for debug output on various stages
-constexpr bool hier_verbose = false;
+constexpr bool hier_verbose = true;
 // constexpr bool coll_verbose = false;
-constexpr bool reg_verbose   = false;
+constexpr bool reg_verbose   = true;
 constexpr bool bound_verbose = false;
 
 // a struct representing a node in a hier_tree
@@ -36,7 +36,8 @@ struct Hier_node {
   std::shared_ptr<Hier_node> parent      = {nullptr};
   std::shared_ptr<Hier_node> children[2] = {nullptr, nullptr};
 
-  int graph_subset;  // which part of the graph the leaf is responsible for (if node is a leaf)
+  // which vertex in the graph the node maps to
+  vertex_t graph_vert;
 
   bool is_leaf() const { return children[0] == nullptr && children[1] == nullptr; }
 };
@@ -65,10 +66,13 @@ public:
   // any node with a smaller area than min_area gets folded into a new supernode with area >= min_area
   void discover_hierarchy(const unsigned int min_size);
 
-  // allocates hierarchies
+  // allocates space for collapsed hierarchies, and a graph to go along with each one
   void make_hierarchies(const size_t num_hiers) {
     I(num_hiers > 1);
     hiers.resize(num_hiers);
+    for (size_t i = 0; i < num_hiers; i++) {
+      collapsed_gis.emplace_back(ginfo);
+    }
   }
 
   // returns a new tree with small leaf nodes collapsed together
@@ -94,8 +98,11 @@ private:
 
   using phier = std::shared_ptr<Hier_node>;
 
-  // graph containing the divided netlist
+  // graph containing the uncollapsed netlist
   Graph_info<g_type> ginfo;
+
+  // graphs containing the collapsed netlists (seperated for now so things still compile)
+  std::vector<Graph_info<g_type>> collapsed_gis;
 
   // data used by min_cut
   struct Min_cut_data {
@@ -105,16 +112,16 @@ private:
 
   // make a partition of the graph minimizing the number of edges crossing the cut and keeping in mind area (modified kernighan-lin
   // algorithm)
-  std::pair<int, int> min_wire_cut(Graph_info<g_type>& info, int cut_set);
+  std::pair<set_t, set_t> min_wire_cut(set_t& cut_set);
 
   // make a node for insertion into the hierarchy
-  phier make_hier_node(const int set);
+  phier make_hier_node(const vertex_t v);
 
   // create a hierarchy tree out of existing hierarchies
   phier make_hier_tree(phier t1, phier t2);
 
   // perform hierarchy discovery
-  phier discover_hierarchy(Graph_info<g_type>& g, int start_set, unsigned int min_num_components);
+  phier discover_hierarchy(set_t& set, unsigned int min_num_components);
 
   double find_area(phier node) const;
 
@@ -123,6 +130,8 @@ private:
   unsigned int find_tree_depth(phier node) const;
 
   void dump_node(const phier node) const;
+
+  phier copy_subtree(phier rnode);
 
   phier collapse(phier node, double threshold_area);
 
