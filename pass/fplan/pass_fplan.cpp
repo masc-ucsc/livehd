@@ -73,10 +73,10 @@ void Pass_fplan::pass(Eprp_var& var) {
   const double       mta = std::stod(var.get("min_tree_area").data());
   const unsigned int nch = std::stoi(var.get("num_collapsed_hiers").data());
 
-  h.make_hierarchies(nch);
+  h.make_hierarchies(nch + 1);
 
-  for (size_t i = 0; i < nch; i++) {
-    fmt::print("  generating collapsed hierarchy (hier {}/{}, min area: {})...", i + 1, nch, i * mta);
+  for (size_t i = 1; i <= nch; i++) {
+    fmt::print("  generating collapsed hierarchy (hier {}/{}, min area: {})...", i, nch, i * mta);
     t.start();
     h.collapse(i, i * mta);
     fmt::print("done ({} ms).\n", t.time());
