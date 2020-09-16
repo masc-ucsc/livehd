@@ -92,15 +92,19 @@ std::string_view Semantic_check::in_lhs_list(Lnast* lnast, int index) {
   return "";
 }
 
-int Semantic_check::in_rhs_list(Lnast *lnast, std::string_view node_name) {
-  int index = -1;
+int Semantic_check::in_rhs_list(Lnast *lnast, std::string_view node_name, int op_start_index = 0) {
+  int index = 0;
   for (auto node : rhs_list) {
-    index++;
+    if (index < op_start_index) {
+      index++;
+      continue;
+    }
     for (auto name : node) {
       if (lnast->get_name(name) == node_name) {
         return index;
       }
     }
+    index++;
   }
   return -1;
 }
@@ -253,36 +257,41 @@ void Semantic_check::error_print_lnast_var_warn(Lnast* lnast, std::vector<std::s
 
 void Semantic_check::resolve_read_write_lists(Lnast* lnast) {
   // Check to look for variables that are never read
-  std::vector<std::string_view> read_variables;
-  for (auto group : rhs_list) {
-    for (auto var : group) {
-      read_variables.push_back(lnast->get_name(var));
-    }
-  }
+  // std::vector<std::string_view> read_variables;
+  // for (auto group : rhs_list) {
+  //   for (auto var : group) {
+  //     read_variables.push_back(lnast->get_name(var));
+  //   }
+  // }
   // for (auto node_name : perm_read_dict) {
-  for (auto node_name : read_variables) {
+  // for (auto node_name : read_variables) {
     // std::string_view read_node_name = node_name.first;
-    std::string_view read_node_name = node_name;
-    if (is_temp_var(read_node_name)) {
-      continue;
-    }
-    // Find index of node_name in rhs_list (FIX THIS SO STARTS WHERE INDEX OF NODE_NAME)
-    int node_name_index = in_rhs_list(lnast, read_node_name);
-    if (node_name_index == -1) {
-      continue;
-    }
-    while (is_temp_var(lnast->get_name(lhs_list[node_name_index]))) {
-      node_name_index = in_rhs_list(lnast, lnast->get_name(lhs_list[node_name_index]));
+  int rhs_index = 0;
+  for (auto group : rhs_list) {
+    for (auto node_name : group) {
+      std::string_view read_node_name = lnast->get_name(node_name);
+      if (is_temp_var(read_node_name)) {
+        continue;
+      }
+      // Find index of node_name in rhs_list (FIX THIS SO STARTS WHERE INDEX OF NODE_NAME)
+      int node_name_index = in_rhs_list(lnast, read_node_name, rhs_index);
       if (node_name_index == -1) {
-        break;
+        continue;
+      }
+      while (is_temp_var(lnast->get_name(lhs_list[node_name_index]))) {
+        node_name_index = in_rhs_list(lnast, lnast->get_name(lhs_list[node_name_index]), rhs_index);
+        if (node_name_index == -1) {
+          break;
+        }
+      }
+      if (node_name_index == -1) {
+        continue;
+      }
+      if (read_node_name == lnast->get_name(lhs_list[node_name_index])) {
+        never_read.insert(read_node_name);
       }
     }
-    if (node_name_index == -1) {
-      continue;
-    }
-    if (read_node_name == lnast->get_name(lhs_list[node_name_index])) {
-      never_read.insert(read_node_name);
-    }
+    rhs_index++;
   }
   if (never_read.size() != 0) {
     std::vector<std::string_view> error_reads;
@@ -468,11 +477,9 @@ void Semantic_check::check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_op
       add_to_write_list(lnast, lnast->get_name(lhs), stmt_name);
       if (rhs_type.is_ref()) {
         add_to_read_list(lnast->get_name(rhs), stmt_name);
-      }
-      lhs_list.push_back(lhs); 
-      if (rhs_type.is_ref()) {
         rhs_args.push_back(rhs);
       }
+      lhs_list.push_back(lhs);
       rhs_list.push_back(rhs_args);
       // N-ary Operations (need to add node_type.is_select())
     } else if (node_type.is_logical_and() || node_type.is_logical_or() || node_type.is_nary_op() || node_type.is_eq()
@@ -524,7 +531,7 @@ void Semantic_check::check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_op
         } else if (node_type_child.is_const()) {
           num_of_const += 1;
           add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
-          rhs_args.push_back(lnidx_opr_child);
+          // rhs_args.push_back(lnidx_opr_child);
         } else if (node_type_child.is_assign()) {
           num_of_assign += 1;
           check_primitive_ops(lnast, lnidx_opr_child, node_type_child, stmt_name);
@@ -904,16 +911,16 @@ void Semantic_check::do_check(Lnast* lnast) {
   //   fmt::print("{}\n", name);
   // }
   // fmt::print("\n");
-  // fmt::print("LHS + RHS List\n");
-  // for (int i = 0; i < lhs_list.size(); i++) {
-  //   fmt::print("{} : ", lnast->get_name(lhs_list[i]));
-  //   fmt::print("[");
-  //   for (int j = 0; j < rhs_list[i].size(); j++)  {
-  //     fmt::print("{}, ", lnast->get_name(rhs_list[i][j]));
-  //   }
-  //   fmt::print("]\n");
-  // }
-  // fmt::print("\n");
+  fmt::print("LHS + RHS List\n");
+  for (int i = 0; i < lhs_list.size(); i++) {
+    fmt::print("{} : ", lnast->get_name(lhs_list[i]));
+    fmt::print("[");
+    for (int j = 0; j < rhs_list[i].size(); j++)  {
+      fmt::print("{}, ", lnast->get_name(rhs_list[i][j]));
+    }
+    fmt::print("]\n");
+  }
+  fmt::print("\n");
   // Find Errors!
   resolve_out_of_scope();
   if (out_of_scope_vars.size() != 0) {

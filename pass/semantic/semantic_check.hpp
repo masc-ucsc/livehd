@@ -37,7 +37,7 @@ protected:
   bool in_inefficient_LNAST(std::string_view node_name);
   bool in_output_vars(std::string_view node_name);
   std::string_view in_lhs_list(Lnast* lnast, int index);
-  int in_rhs_list(Lnast* lnast, std::string_view node_name);
+  int in_rhs_list(Lnast* lnast, std::string_view node_name, int op_start_index);
   bool in_in_scope_stack(std::string_view node_name);
 
   void add_to_write_list(Lnast* lnast, std::string_view node_name, std::string_view stmt_name);
