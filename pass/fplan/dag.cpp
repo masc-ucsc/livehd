@@ -6,8 +6,7 @@
 
 #include "fmt/core.h"
 
-void Dag::init(std::vector<Pattern> hier_patterns, std::unordered_map<Lg_type_id::type, std::vector<Layout>> leaf_dims,
-               const Graph_info<g_type>& ginfo) {
+void Dag::init(std::vector<Pattern> hier_patterns, const Graph_info<g_type>& ginfo) {
   // need to keep track of all the verts we've added so we can add them to the dag as leaves if required
   auto subp_verts = std::unordered_multiset<Lg_type_id::type>();
 
@@ -53,9 +52,9 @@ void Dag::init(std::vector<Pattern> hier_patterns, std::unordered_map<Lg_type_id
       if (pair.second > 0) {
         pdag pd = std::make_shared<Dag_node>();
         subp_verts.insert(pair.first);
-        pd->label = pair.first;
-        I(leaf_dims.count(pair.first) > 0);
-        pd->dims = leaf_dims[pair.first];
+        // pd->label = pair.first;
+        // I(leaf_dims.count(pair.first) > 0);
+        // pd->dims = leaf_dims[pair.first];
 
         for (size_t k = 0; k < pair.second; k++) {
           pd->parent = pat_dag_p;
@@ -76,10 +75,10 @@ void Dag::init(std::vector<Pattern> hier_patterns, std::unordered_map<Lg_type_id
   // any vertices that aren't hit by subpatterns are also children of root
   for (auto v : ginfo.al.verts()) {
     if (subp_verts.find(ginfo.labels(v)) == subp_verts.end()) {
-      auto pd   = std::make_shared<Dag_node>();
-      pd->label = ginfo.labels(v);
-      I(leaf_dims.count(ginfo.labels(v)) > 0);
-      pd->dims = leaf_dims[ginfo.labels(v)];
+      auto pd = std::make_shared<Dag_node>();
+      // pd->label = ginfo.labels(v);
+      // I(leaf_dims.count(ginfo.labels(v)) > 0);
+      // pd->dims = leaf_dims[ginfo.labels(v)];
       pd->parent = root;
       root->children.push_back(pd);
     }
@@ -91,6 +90,7 @@ std::unordered_set<Dag::pdag> Dag::select_points() {
   std::unordered_set<pdag> nodes;
   bool                     found_pat = false;
 
+  /*
   std::function<void(pdag)> select_nodes = [&](pdag pd) {
     if (pd->label == 0 && !found_pat && pd != root) {
       nodes.insert(pd);
@@ -110,11 +110,13 @@ std::unordered_set<Dag::pdag> Dag::select_points() {
   };
 
   select_nodes(root);
+  */
 
   return nodes;
 }
 
 void Dag::dump() {
+  /*
   std::function<void(pdag)> dump_dag = [&](pdag pd) {
     if (pd == root) {
       fmt::print("root node\n");
@@ -146,4 +148,5 @@ void Dag::dump() {
   };
 
   dump_dag(root);
+  */
 }

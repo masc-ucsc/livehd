@@ -204,10 +204,15 @@ void Hier_tree::dump_hier() const {
 }
 
 void Hier_tree::dump_patterns() const {
-  for (size_t i = 0; i < hier_patterns.size(); i++) {
-    fmt::print("printing pattern {} ({} nodes):\n", i, hier_patterns[i].count());
-    for (auto v : hier_patterns[i].verts) {
-      fmt::print("    label: {}, count: {}\n", v.first, v.second);
+  for (size_t hier_index = 0; hier_index < hier_patterns.size(); hier_index++) {
+    fmt::print("in hierarchy {} ({} pattern sets):\n", hier_index, hier_patterns.size());
+
+    for (size_t pattern_index = 0; pattern_index < hier_patterns[hier_index].size(); pattern_index++) {
+      fmt::print("  in pattern {}:\n", pattern_index);
+      
+      for (auto vpair : hier_patterns[hier_index][pattern_index].verts) {
+        fmt::print("    label: {}, count: {}\n", vpair.first, vpair.second);
+      }
     }
   }
 }

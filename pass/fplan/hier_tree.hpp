@@ -71,18 +71,15 @@ public:
   // returns a new tree with small leaf nodes collapsed together
   void collapse(const size_t hier_index, const double threshold_area);
 
-  // discover similar subgraphs in the collapsed hierarchy
-  void discover_regularity(const size_t hier_index, const size_t beam_width);
+  // discover similar subgraphs in the collapsed hierarchy (and make a dag)
+  void discover_regularity(const size_t beam_width);
+
+  // generate dags, 1 per set of patterns
+  void make_dags();
 
   // gets floorplan dimensions of all patterns using an exhaustive approach if the number of blocks is < optimal_thresh
   // invariant: bounding curves for patterns can only generated after leaf dimensions have been set
   void construct_bounds(const unsigned int optimal_thresh);
-
-  // collapse all patterns created by various hierarchies into a single dag ("bounding curve")
-  void make_dag() {
-    d.init(hier_patterns, leaf_dims, ginfo);
-    d.dump();
-  }
 
   // generate various leaf implementations to use for constructing patterns
   void generate_leaf_dims(const unsigned int num_dims);
@@ -145,14 +142,16 @@ private:
 
   vertex_t compress_inst(set_t& subg, set_t& inst);
 
-  // all the (unique) patterns from every hierarchy
-  std::vector<Pattern> hier_patterns;
+  // vector of pattern sets, 1 per hierarchy tree
+  std::vector<std::vector<Pattern>> hier_patterns;
+
+  void discover_regularity(const size_t hier_index, const size_t beam_width);
+
+  // dag representing a hierarchy of types
+  std::vector<Dag> dags;
 
   // for each leaf node, there can be various different dimensions used
   std::unordered_map<Lg_type_id::type, std::vector<Layout>> leaf_dims;
 
   unsigned int num_dims;
-
-  // dag representing a hierarchy of types
-  Dag d;
 };
