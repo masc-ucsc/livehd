@@ -253,14 +253,50 @@ Main features:
 
 ## Tree-sitter Pyrope
 
-Build a tree-sitter Pyrope grammar that can spill CFG like the pegjs.
+Build a tree-sitter Pyrope grammar that can output LNAST 
+
+Dependence: lnast_tolg must be completed first
+
+Main features:
 
 * Pyrope tree-sitter grammar
-* CFG dump that LNAST understands
 * Atom integration
 * Atom go definition, highlight, and attribute
 * Atom capacity to query LNAST/LGraph generated grammar for bit-width. The incremental grammar passed to LNAST, passed to LGraph,
   and incremental bit-width inference.
+
+## Parallel forward/backward traversal
+
+LGraph has fwd/bwd/fast iterators. Those are efficient but single threaded. The idea is to create iterators
+that accept a lambda function. The idea is to "chunk" the graph in subgraphs and give a subchunk of the graph
+to each thread.
+
+Dependence: none
+
+Main features:
+
+* The workload distribution is with livehd/task Thread_pool
+* Possible to speedup the topological sort: https://link.springer.com/chapter/10.1007/978-981-10-5828-8_39
+* Fast is more straightforward (no hierarchical, just chunk the graph). 
+* The parallel should work with and without hierarchy, but it is more important
+  WITH hierarchy because those are the large graph traversals.
+
+To understand the forward, before a task starts with a sub-graph, all the inputs must be handled first.
+Similar to the backward but out all the subgraph outputs.
+
+A main challenge is that most data structures new a lock for read/writes. This
+would KILL performance. There could be several options, but the best would be
+to have a structure per thread. E.g: to compute bitwidth in parallel, each
+thread can have its own bitwidth data and populate the bits as an aggregation
+process once all the tasks have finished.
+
+This adds a significant complexity bar, so it should be handled per task. The
+most logical is bitwidth and cprop. Both can do the data structure per thread,
+and traverse to aggregate.
+
+
+The goal is to aim at 16 cores and achieve 10x speedup for those larger
+bitwidth/cprop tasks.
 
 ## LGraph partition/decomposition/coloring
 
