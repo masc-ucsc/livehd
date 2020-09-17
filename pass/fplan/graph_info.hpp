@@ -88,35 +88,39 @@ public:
   vertex_t make_set_vertex(const std::string& prefix, const set_t& set) {
     I(set.size() >= 1);
 
-    auto nv = al.insert_vert();
+    if (set.size() > 1) {
+      auto nv = al.insert_vert();
 
-    ids[nv]    = ++unique_id_counter;
-    labels[nv] = ++unique_label_counter;
+      ids[nv]    = ++unique_id_counter;
+      labels[nv] = ++unique_label_counter;
 
-    std::string name = prefix;
-    for (auto v : set) {
-      name.append(std::to_string(ids(v))).append("_");
-    }
-
-    debug_names[nv] = name;
-
-    for (auto v : set) {
-      areas[nv] += areas(v);
-    }
-
-    for (auto v : set) {
-      for (auto e : al.out_edges(v)) {
-        auto new_e = al.insert_edge(nv, al.head(e));
-        weights[new_e] = weights(e);
+      std::string name = prefix;
+      for (auto v : set) {
+        name.append(std::to_string(ids(v))).append("_");
       }
 
-      for (auto e : al.in_edges(v)) {
-        auto new_e = al.insert_edge(al.tail(e), nv);
-        weights[new_e] = weights(e);
-      }
-    }
+      debug_names[nv] = name;
 
-    return nv;
+      for (auto v : set) {
+        areas[nv] += areas(v);
+      }
+
+      for (auto v : set) {
+        for (auto e : al.out_edges(v)) {
+          auto new_e     = al.insert_edge(nv, al.head(e));
+          weights[new_e] = weights(e);
+        }
+
+        for (auto e : al.in_edges(v)) {
+          auto new_e     = al.insert_edge(al.tail(e), nv);
+          weights[new_e] = weights(e);
+        }
+      }
+
+      return nv;
+    } else {
+      return *(set.begin());
+    }
   }
 
   // delete all the elements in a set without segfaulting

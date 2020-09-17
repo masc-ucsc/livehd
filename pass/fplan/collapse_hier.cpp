@@ -103,8 +103,10 @@ Hier_tree::phier Hier_tree::collapse(phier node, Graph_info<g_type>& gi, double 
 
   get_subtree_nodes(node);
 
-  auto collapsed_v = gi.make_set_vertex("cp_vert_", collapse_set);
-  gi.erase_set_verts(collapse_set);
+  vertex_t collapsed_v = gi.make_set_vertex("cp_vert_", collapse_set);
+  if (collapse_set.size() > 1) {
+    gi.erase_set_verts(collapse_set);
+  }
 
   node->name = std::string("hleaf_").append(gi.debug_names(collapsed_v));
   node->area = gi.areas(collapsed_v);
@@ -143,10 +145,11 @@ void Hier_tree::collapse(const size_t num_chiers, const double threshold_area) {
 
   // clean up edges in the collapsed graph - if there's >1 edge between two nodes,
   // add up the weights of the edges and remove all but one of em
-  fmt::print("    cleaning up duplicate edges...");
+  fmt::print("    cleaning up unused edges...");
   t.start();
   for (size_t i = 0; i <= num_chiers; i++) {
-    auto& gi = collapsed_gis[i];
+    auto& gi     = collapsed_gis[i];
+    auto  marked = gi.al.edge_map<bool>();
 
     for (auto v : gi.al.verts()) {
       // map of connected verts -> edge connecting v and other vert
@@ -156,13 +159,19 @@ void Hier_tree::collapse(const size_t num_chiers, const double threshold_area) {
         auto ov = gi.al.head(*it);
         if (visited_verts[ov] != gi.al.null_edge()) {
           gi.weights[visited_verts[ov]] += gi.weights(*it);
-          gi.al.erase_edge(*it);
-          it = gi.al.out_edges(v).begin();
+          marked[*it] = true;
         } else {
           visited_verts[ov] = *it;
         }
       }
     }
+
+    for (auto e : gi.al.edges()) {
+      if (marked[e]) {
+        gi.al.erase_edge(e);
+      }
+    }
   }
+
   fmt::print("done ({} ms).\n", t.time());
 }
