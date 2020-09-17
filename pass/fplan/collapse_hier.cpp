@@ -1,7 +1,7 @@
 #include <functional>
 
-#include "profile_time.hpp"
 #include "hier_tree.hpp"
+#include "profile_time.hpp"
 
 Hier_tree::phier Hier_tree::make_hier_tree(Graph_info<g_type>& gi, phier t1, phier t2) {
   auto pnode  = std::make_shared<Hier_node>(gi);
@@ -135,11 +135,34 @@ void Hier_tree::collapse(const size_t num_chiers, const double threshold_area) {
   fmt::print("done ({} ms).\n", t.time());
 
   for (size_t i = 0; i <= num_chiers; i++) {
-    //if (threshold_area > 0.0) {
-      fmt::print("    collapsing hierarchy {} (min area: {})...", i, i * threshold_area);
-      t.start();
-      hiers[i] = collapse(hiers[i], collapsed_gis[i], i * threshold_area);
-      fmt::print("done ({} ms).\n", t.time());
-    //}
+    fmt::print("    collapsing hierarchy {} (min area: {})...", i, i * threshold_area);
+    t.start();
+    hiers[i] = collapse(hiers[i], collapsed_gis[i], i * threshold_area);
+    fmt::print("done ({} ms).\n", t.time());
   }
+
+  // clean up edges in the collapsed graph - if there's >1 edge between two nodes,
+  // add up the weights of the edges and remove all but one of em
+  fmt::print("    cleaning up duplicate edges...");
+  t.start();
+  for (size_t i = 0; i <= num_chiers; i++) {
+    auto& gi = collapsed_gis[i];
+
+    for (auto v : gi.al.verts()) {
+      // map of connected verts -> edge connecting v and other vert
+      auto visited_verts = gi.al.vert_map<edge_t>(gi.al.null_edge());
+
+      for (auto it = gi.al.out_edges(v).begin(); it != gi.al.out_edges(v).end(); it++) {
+        auto ov = gi.al.head(*it);
+        if (visited_verts[ov] != gi.al.null_edge()) {
+          gi.weights[visited_verts[ov]] += gi.weights(*it);
+          gi.al.erase_edge(*it);
+          it = gi.al.out_edges(v).begin();
+        } else {
+          visited_verts[ov] = *it;
+        }
+      }
+    }
+  }
+  fmt::print("done ({} ms).\n", t.time());
 }
