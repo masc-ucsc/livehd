@@ -7,12 +7,9 @@
 
 #pragma once
 
-#include <algorithm>  // for std::max, std::min, std::sort
 #include <memory>     // for shared_ptr
 #include <sstream>
 #include <string>
-#include <string_view>
-#include <unordered_map>
 #include <utility>  // for std::pair
 #include <vector>
 
@@ -53,19 +50,12 @@ struct Dim {
 class Hier_tree {
 public:
   Hier_tree(Eprp_var& var);
-  // Hier_tree(Graph_info<g_type>&& netlist) : ginfo(std::move(netlist)), pattern_sets({}) {}
 
   // copies require copying the entire tree and are very expensive.
   Hier_tree(const Hier_tree& other) = delete;
   Hier_tree& operator=(const Hier_tree& other) = delete;
 
-  // moves defined since copies are deleted
-  // moved-from object can be left alone, since contents are "unspecified" after move.
-  // Hier_tree(Hier_tree&& other) noexcept : ginfo(std::move(other.ginfo)) {}
-
   // move assignment operator not specified because graph_info contents are really hard to move
-
-  // void dump_hier() const;
 
   void dump_patterns() const;
 
@@ -84,15 +74,12 @@ public:
   // invariant: bounding curves for patterns can only generated after leaf dimensions have been set
   void construct_bounds(const unsigned int optimal_thresh);
 
+  // make actual floorplans based on the patterns previously selected
   void construct_floorplans();
 
 private:
   friend class Pass_fplan_dump;
   using phier = std::shared_ptr<Hier_node>;
-
-  // graph containing the uncollapsed netlist
-  // only here for compatibility with the stuff I already wrote, should be removed eventually
-  // Graph_info<g_type> ginfo;
 
   // graphs containing the collapsed netlists (seperated from ginfo for now so things compile)
   // the 0th element is always the uncollapsed graph.
@@ -136,27 +123,33 @@ private:
   // generator used to make unique node names
   unsigned int unique_node_counter = 0;
 
-  // keep track of all the kinds of vertices we can have, as well as how many there are
-
-  // unsigned int generic_pattern_size(const Pattern& gset) const;
-
+  // make a (specific) set of vertices into a (generic) pattern
   Pattern make_generic(Graph_info<g_type>& gi, const set_t& pat) const;
 
+  // find all instantiations of a specific pattern consisting of verts in subg
   set_vec_t find_all_patterns(Graph_info<g_type>& gi, const set_t& subg, const Pattern& gpattern) const;
 
+  // find the most frequently occuring pattern subg
   Pattern find_most_freq_pattern(Graph_info<g_type>& gi, const set_t& subg, const size_t bwidth) const;
 
+  // compress a pattern instantiation so it is represented by a single vertex
   vertex_t compress_inst(Graph_info<g_type>& gi, set_t& subg, set_t& inst);
 
   // vector of pattern sets, 1 per hierarchy tree
   std::vector<std::vector<Pattern>> pattern_sets;
 
+  // discover patterns in the hierarchy
   void discover_regularity(const size_t hier_index, const size_t beam_width);
 
   // dag representing a hierarchy of types
   std::vector<Dag> dags;
 
+  // construct bounding boxes for patterns discovered
   void construct_bounds(const size_t dag_id, const unsigned int optimal_thresh);
 
+  // shell out to BloBB (a quick floorplanner that is used for floorplanning patterns)
   void invoke_blobb(const std::stringstream& instr, std::stringstream& outstr, const bool small);
+
+  // ask the user for the patterns worth exploring
+  void select_points();
 };

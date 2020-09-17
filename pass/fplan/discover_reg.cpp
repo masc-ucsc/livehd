@@ -1,4 +1,5 @@
 #include <functional>
+#include <algorithm>  // for std::max, std::min, std::sort
 
 #include "fmt/core.h"
 #include "hier_tree.hpp"

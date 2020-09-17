@@ -135,9 +135,6 @@ void Pass_fplan::pass(Eprp_var& var) {
   h.construct_bounds(mon);
   fmt::print("  done ({} ms).\n", t.time());
 
-  // haven't checked the stuff past this
-  return;
-
   fmt::print("  constructing floorplans...");
   t.start();
   h.construct_floorplans();

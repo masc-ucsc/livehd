@@ -1,6 +1,7 @@
 #include <functional>
 #include <limits>  // for std::numeric_limits
 #include <vector>
+#include <algorithm>  // for std::max, std::min
 
 #include "fmt/core.h"
 #include "hier_tree.hpp"
