@@ -44,14 +44,13 @@ fi
 
 for pt in $pts
 do
-    rm -rf ./lgdb
-    rm -rf ./lgdb2
+    rm -rf ./lgdb*
     if [ -f ${pt}.v ]; then rm ${pt}.v; fi
 
     echo "----------------------------------------------------"
-    echo "Verilog -> LGraph -> LNAST -> LGraph"
+    echo "Verilog -> LGraph"
     echo "----------------------------------------------------"
-    ${LGSHELL} "inou.yosys.tolg files:inou/yosys/tests/${pt}.v top:${pt} |> pass.cprop |> pass.cprop |> pass.bitwidth |> pass.cprop |> inou.graphviz.from |> pass.lnast_fromlg |> lnast.dump |> pass.lnast_tolg path:lgdb2"
+    ${LGSHELL} "inou.yosys.tolg files:inou/yosys/tests/${pt}.v top:${pt} |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.cprop |> inou.graphviz.from"
     if [ $? -eq 0 ]; then
       echo "Successfully created the inital LGraph using Yosys: ${pt}.v"
     else
@@ -59,8 +58,37 @@ do
       exit 1
     fi
     mv ${pt}.dot ${pt}.origlg.dot
+    echo "----------------------------------------------------"
+    echo "LGraph -> LNAST"
+    echo "----------------------------------------------------"
+    ${LGSHELL} "lgraph.match |> pass.lnast_fromlg |> lnast.dump"
+    if [ $? -eq 0 ]; then
+      echo "Successfully created the inital LGraph using Yosys: ${pt}.v"
+    else
+      echo "ERROR: Verilog -> LGraph failed... testcase: ${pt}.v"
+      exit 1
+    fi
+#    echo "----------------------------------------------------"
+#    echo "LGraph -> LNAST -> code_gen prp"
+#    echo "----------------------------------------------------"
+#    ${LGSHELL} "lgraph.match |> pass.lnast_fromlg |> lnast.dump |> inou.code_gen.prp"
+#    if [ $? -eq 0 ]; then
+#      echo "Successfully created the inital LGraph using Yosys: ${pt}.v"
+#    else
+#      echo "ERROR: Verilog -> LGraph failed... testcase: ${pt}.v"
+#      exit 1
+#    fi
+    echo "----------------------------------------------------"
+    echo "LGraph -> LNAST -> lgraph2"
+    echo "----------------------------------------------------"
+    ${LGSHELL} "lgraph.match |> pass.lnast_fromlg |> pass.lnast_tolg path:lgdb2"
+    if [ $? -eq 0 ]; then
+      echo "Successfully created the inital LGraph using Yosys: ${pt}.v"
+    else
+      echo "ERROR: Verilog -> LGraph failed... testcase: ${pt}.v"
+      exit 1
+    fi
 
-    echo ""
     echo "----------------------------------------------------"
     echo "LGraph Optimization"
     echo "----------------------------------------------------"
