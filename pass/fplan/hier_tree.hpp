@@ -71,11 +71,8 @@ public:
   // returns a new tree with small leaf nodes collapsed together
   void collapse(const size_t num_chiers, const double threshold_area);
 
-  // discover similar subgraphs in the collapsed hierarchy (and make a dag)
+  // discover similar subgraphs in the collapsed hierarchy and make a dag
   void discover_regularity(const size_t beam_width);
-
-  // generate dags, 1 per set of patterns
-  void make_dags();
 
   // gets floorplan dimensions of all patterns using an exhaustive approach if the number of blocks is < optimal_thresh
   // invariant: bounding curves for patterns can only generated after leaf dimensions have been set
@@ -155,6 +152,8 @@ private:
 
   // dag representing a hierarchy of types
   std::vector<Dag> dags;
+
+  void construct_bounds(const Dag::pdag pd, const unsigned int optimal_thresh);
 
   // for each leaf node, there can be various different dimensions used
   std::unordered_map<Lg_type_id::type, std::vector<Layout>> leaf_dims;

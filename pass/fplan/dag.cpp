@@ -6,36 +6,36 @@
 
 #include "fmt/core.h"
 
+// add an edge from a parent to a child, making sure to keep track of repeating edges
+void Dag::add_edge(pdag parent, pdag child, unsigned int count) {
+  child->parent = parent;
+
+  // technically an illegal value
+  size_t child_index = parent->children.size();
+
+  for (size_t i = 0; i < parent->children.size(); i++) {
+    if (parent->children[i] == child) {
+      child_index = i;
+    }
+  }
+
+  if (child_index == parent->children.size()) {
+    parent->children.push_back(child);
+    parent->child_edge_count.emplace_back(count);
+  } else {
+    parent->child_edge_count[child_index] += count;
+  }
+}
+
+Dag::pdag Dag::add_vert() {
+  auto pd    = std::make_shared<Dag_node>();
+  pd->dag_id = ++dag_id_counter;
+  return pd;
+}
+
 void Dag::init(std::vector<Pattern> pattern_sets, const Graph_info<g_type>& gi) {
   // need to keep track of all the verts we've come across so we can add them to the dag as leaves if required
   std::unordered_map<Lg_type_id::type, unsigned int> subp_verts;
-
-  // add an edge from a parent to a child, making sure to keep track of repeating edges
-  auto add_edge = [&](pdag parent, pdag child, unsigned int count) {
-    child->parent = parent;
-
-    // technically an illegal value
-    size_t child_index = parent->children.size();
-
-    for (size_t i = 0; i < parent->children.size(); i++) {
-      if (parent->children[i] == child) {
-        child_index = i;
-      }
-    }
-
-    if (child_index == parent->children.size()) {
-      parent->children.push_back(child);
-      parent->child_edge_count.emplace_back(count);
-    } else {
-      parent->child_edge_count[child_index] += count;
-    }
-  };
-
-  auto add_vert = [&]() -> pdag {
-    auto pd    = std::make_shared<Dag_node>();
-    pd->dag_id = ++dag_id_counter;
-    return pd;
-  };
 
   for (auto pat : pattern_sets) {
     auto pd = add_vert();
@@ -101,11 +101,8 @@ void Dag::init(std::vector<Pattern> pattern_sets, const Graph_info<g_type>& gi) 
 
   // TODO: broken - doesn't take into account collapsed verts, just throws in the entire hierarchy.
 
-
   // NOTE: not all nodes in the dag represent a single vertex.
   // if the hierarchy is partially collapsed, then leaf nodes in the hierarchy can represent multiple verts.
-
-
 
   for (auto v : gi.al.verts()) {
     pdag pd;
