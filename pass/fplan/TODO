@@ -33,6 +33,7 @@ Code improvements:
  - Group a hier, pattern, etc. into a "slice" that is totally contained in a single thread?
  - Node/vertex/vert/module terminology is inconsistant
  - only need <functional> if doing a recursive lambda...
+ - dag could probably be an ordered set...
 
 Long term:
 1. some sort of check() method that verifies netlists and internal functionality
