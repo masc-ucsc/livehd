@@ -45,7 +45,8 @@ protected:
 
   std::string_view create_temp_var(Lnast& lnast, std::string_view str_prefix = "___");
 
-  std::string_view dpin_get_name(Lnast &lnast, const Node_pin dpin);
+  std::string_view dpin_get_name(const Node_pin dpin);
+  void dpin_set_map_name(const Node_pin dpin, std::string_view name_part);
   std::string_view get_new_seq_name(Lnast& lnast);
 
 public:
