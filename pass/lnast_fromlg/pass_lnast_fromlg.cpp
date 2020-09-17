@@ -940,10 +940,7 @@ void Pass_lnast_fromlg::attach_latch_node(Lnast& lnast, Lnast_nid& parent_node, 
   lnast.add_child(idx_dot_q, Lnast_node::create_ref("__q_pin"));
 
   auto editable_pin = pin;
-//	dpin_get_name(editable_pin);
-  //editable_pin.set_name(tmp_var_q);
   dpin_set_map_name(editable_pin, tmp_var_q);
-  // :SG:potential bug:TODO!!     
 }
 
 void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
@@ -962,11 +959,8 @@ void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_nod
     std::vector<std::string_view> out_node_name = absl::StrSplit(pin.get_node().get_name(), ":");//du to commit: embed return variable name to subgraph node name
     out_tup_name = lnast.add_string(out_node_name[0]);
   }
-  //auto inp_tup_name  = lnast.add_string(absl::StrCat("inp_", pin.get_node().get_name()));
-  //auto inp_tup_name  = lnast.add_string(pin.get_node().get_name());
   auto inp_tup_name  = create_temp_var(lnast);
-  //if (pin.has_name())
-    fmt::print("instance_name:{}, subgraph->get_name():{}\n", pin.get_node().get_name(), sub.get_name());
+  fmt::print("instance_name:{}, subgraph->get_name():{}\n", pin.get_node().get_name(), sub.get_name());
 
   //auto out_tup_name = lnast.add_string(pin.get_node().get_name());
 
@@ -983,14 +977,7 @@ void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_nod
 
   // Create actual call to submodule.
   auto func_call_node = lnast.add_child(parent_node, Lnast_node::create_func_call("func_call"));
- // if (pin.get_node().out_connected_pins().size() == 1) {
- //   for (const auto dpin : pin.get_node().out_connected_pins()) {
- //     // will only do 1 iteration
- //     attach_child(lnast, func_call_node, dpin);
- //   }
- // } else {
-    lnast.add_child(func_call_node, Lnast_node::create_ref(out_tup_name));
- // }
+  lnast.add_child(func_call_node, Lnast_node::create_ref(out_tup_name));
   lnast.add_child(func_call_node, Lnast_node::create_ref(lnast.add_string(sub.get_name())));
   lnast.add_child(func_call_node, Lnast_node::create_ref(inp_tup_name));
 
@@ -1004,17 +991,19 @@ void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_nod
 
     // Specify output's bw -- NOTE: shouldn't be necessary, but useful for bw pass for now
     // --commented due to dummy dot problem--
-   // if (put_bw_in_ln) {
-   //   auto port_bw   = dpin.get_bits();
-   //   auto temp_var_bw = create_temp_var(lnast);
-   //   auto idx_dot_bw = lnast.add_child(parent_node, Lnast_node::create_dot("sb_out_bwd"));
-   //   lnast.add_child(idx_dot_bw, Lnast_node::create_ref(temp_var_bw));
-   //   lnast.add_child(idx_dot_bw, Lnast_node::create_ref(out_tup_name));
-   //   lnast.add_child(idx_dot_bw, Lnast_node::create_ref(port_name));
-   //   auto idx_asg_bw = lnast.add_child(parent_node, Lnast_node::create_assign("sb_out_bwa"));
-   //   lnast.add_child(idx_asg_bw, Lnast_node::create_ref(temp_var_bw));
-   //   lnast.add_child(idx_asg_bw, Lnast_node::create_const(lnast.add_string(std::to_string(port_bw))));
-   // }
+  #if 0
+    if (put_bw_in_ln) {
+     auto port_bw   = dpin.get_bits();
+     auto temp_var_bw = create_temp_var(lnast);
+     auto idx_dot_bw = lnast.add_child(parent_node, Lnast_node::create_dot("sb_out_bwd"));
+     lnast.add_child(idx_dot_bw, Lnast_node::create_ref(temp_var_bw));
+     lnast.add_child(idx_dot_bw, Lnast_node::create_ref(out_tup_name));
+     lnast.add_child(idx_dot_bw, Lnast_node::create_ref(port_name));
+     auto idx_asg_bw = lnast.add_child(parent_node, Lnast_node::create_assign("sb_out_bwa"));
+     lnast.add_child(idx_asg_bw, Lnast_node::create_ref(temp_var_bw));
+     lnast.add_child(idx_asg_bw, Lnast_node::create_const(lnast.add_string(std::to_string(port_bw))));
+    }
+  #endif
   }
 }
 
@@ -1233,39 +1222,6 @@ std::string_view Pass_lnast_fromlg::dpin_get_name(const Node_pin dpin) {
     I(false, "\n\nERROR: trying to fetch a name that is not present in dpin_name_map ans well as in lgraph as the dpin name\n\n");
     return "ERROR";
   }
-
-//  auto ntype = dpin.get_node().get_type_op();
-//  if (!dpin.has_name()) {
-//    auto ccd = dpin.get_compact_class_driver();
-//    std::string_view name;
-//		auto it = dpin_name_map.find(ccd);
-//		if(it == dpin_name_map.end()) {
-//
-//      if (ntype == Mux_Op) {
-//			  name = create_temp_var(lnast, "");
-//      } else if ((ntype == SFlop_Op) || (ntype == AFlop_Op) || (ntype == FFlop_Op) || (ntype == Latch_Op)) {
-//  			name = create_temp_var(lnast, "#");
-//      } else if (dpin.get_node().is_graph_output()){
-//        name = create_temp_var(lnast, "%");
-//      } else {
-//  			name = create_temp_var(lnast);
-//      }
-//      dpin_name_map.emplace(ccd, name);
-//		}else{//name is present in the map
-//      name = it->second;
-//    }
-//
-//    return lnast.add_string(name);
-//  }
-//
-//  if (dpin.get_name().substr(0, 1) == "%" || (dpin.get_name().substr(0,1) == "#" && !((ntype == SFlop_Op) || (ntype == AFlop_Op) || (ntype == FFlop_Op) || (ntype == Latch_Op)))) {
-//    return lnast.add_string(dpin.get_name().substr(1));
-//  } else if (((ntype == SFlop_Op) || (ntype == AFlop_Op) || (ntype == FFlop_Op) || (ntype == Latch_Op)) && dpin.get_name().substr(0,1) != "#") {
-//    return lnast.add_string(absl::StrCat("#", dpin.get_name()));
-//  } else if (dpin.get_node().is_graph_output()) {
-//    return lnast.add_string(absl::StrCat("%", dpin.get_name()));
-//  } else
-//  return lnast.add_string(dpin.get_name());
 }
 
 
