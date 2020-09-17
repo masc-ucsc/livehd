@@ -22,7 +22,7 @@ constexpr unsigned int def_max_optimal_nodes   = 5;
 // generate more information for debugging stuff
 #ifdef FULL
 constexpr unsigned int def_min_tree_nodes      = 1;
-constexpr unsigned int def_num_collapsed_hiers = 3; // patterns only get found up to collapsed hier 3 in hier_test
+constexpr unsigned int def_num_collapsed_hiers = 3;  // patterns only get found up to collapsed hier 3 in hier_test
 constexpr double       def_min_tree_area       = 6.0;
 constexpr unsigned int def_max_pats            = 15;
 constexpr unsigned int def_max_optimal_nodes   = 15;
@@ -105,16 +105,14 @@ void Pass_fplan::pass(Eprp_var& var) {
 
   h.dump_patterns();
 
-  // haven't checked the stuff past this
-  return;
-
-  h.generate_leaf_dims(3);
-
   const unsigned int mon = std::stoi(var.get("max_optimal_nodes").data());
   fmt::print("  constructing boundary curve (max nodes: {})...\n", mon);
   t.start();
   h.construct_bounds(mon);
   fmt::print("  done ({} ms).\n", t.time());
+
+  // haven't checked the stuff past this
+  return;
 
   fmt::print("  constructing floorplans...");
   t.start();

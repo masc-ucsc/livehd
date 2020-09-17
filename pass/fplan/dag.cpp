@@ -27,9 +27,13 @@ void Dag::add_edge(pdag parent, pdag child, unsigned int count) {
   }
 }
 
-Dag::pdag Dag::add_vert() {
-  auto pd    = std::make_shared<Dag_node>();
-  pd->dag_id = ++dag_id_counter;
+Dag::pdag Dag::add_pat_vert() {
+  auto pd = std::make_shared<Dag_node>(++dag_id_counter);
+  return pd;
+}
+
+Dag::pdag Dag::add_leaf_vert(const Lg_type_id::type label, const double area) {
+  auto pd = std::make_shared<Dag_node>(++dag_id_counter, label, area);
   return pd;
 }
 
@@ -38,14 +42,14 @@ void Dag::init(std::vector<Pattern> pattern_sets, const Graph_info<g_type>& gi) 
   std::unordered_map<Lg_type_id::type, unsigned int> subp_verts;
 
   for (auto pat : pattern_sets) {
-    auto pd = add_vert();
+    auto pd = add_pat_vert();
     pat_dag_map.emplace(pat, pd);
   }
 
   // check for edges between patterns
   for (size_t i = 0; i < pattern_sets.size(); i++) {
-    auto  pat       = pattern_sets[i].verts;
-    auto& pat_dag_p = pat_dag_map[pattern_sets[i]];
+    auto  pat   = pattern_sets[i].verts;
+    auto& pat_p = pat_dag_map[pattern_sets[i]];
 
     // going in reverse because we want the largest subset, not the smallest
     for (int j = i - 1; j >= 0; j--) {
@@ -70,7 +74,7 @@ void Dag::init(std::vector<Pattern> pattern_sets, const Graph_info<g_type>& gi) 
         for (auto spair : subpat) {
           pat[spair.first] -= spair.second;
 
-          add_edge(pat_dag_p, pat_dag_map[pattern_sets[j]], spair.second);
+          add_edge(pat_p, pat_dag_map[pattern_sets[j]], spair.second);
           j++;  // run the same check over again to see if we can match another subpattern of the same type
         }
       }
@@ -79,13 +83,23 @@ void Dag::init(std::vector<Pattern> pattern_sets, const Graph_info<g_type>& gi) 
     // anything not matched by a subpattern is a leaf node of the pattern
     for (auto pair : pat) {
       if (pair.second > 0) {
-        auto pd = add_vert();
-        subp_verts.emplace(pair);
-        // pd->label = pair.first;
-        // I(leaf_dims.count(pair.first) > 0);
-        // pd->dims = leaf_dims[pair.first];
+        Lg_type_id::type label = pair.first;
 
-        add_edge(pat_dag_p, pd, pair.second);
+        pdag pat_leaf;
+
+        // find a node in the graph with the same label and get the area from it
+        double area = 0.0;
+        for (auto v : gi.al.verts()) {
+          if (gi.labels(v) == label) {
+            area = gi.areas(v);
+          }
+        }
+        I(area != 0.0);
+        
+        pat_leaf = add_leaf_vert(label, area);
+
+        subp_verts.emplace(pair);
+        add_edge(pat_p, pat_leaf, pair.second);
       }
     }
   }
@@ -99,18 +113,23 @@ void Dag::init(std::vector<Pattern> pattern_sets, const Graph_info<g_type>& gi) 
 
   std::unordered_map<Lg_type_id::type, pdag> label_pat_map;
 
-  // TODO: broken - doesn't take into account collapsed verts, just throws in the entire hierarchy.
-
-  // NOTE: not all nodes in the dag represent a single vertex.
-  // if the hierarchy is partially collapsed, then leaf nodes in the hierarchy can represent multiple verts.
-
   for (auto v : gi.al.verts()) {
     pdag pd;
     auto label = gi.labels(v);
     if (subp_verts.count(label) == 0) {
       // if vertex hasn't been picked up by a subpattern, it's a child of root
       if (label_pat_map.count(label) == 0) {
-        pd = add_vert();
+        // find the area
+        double area = 0.0;
+        for (auto av : gi.al.verts()) {
+          if (gi.labels(av) == label) {
+            area = gi.areas(av);
+          }
+        }
+        I(area != 0.0);
+
+        pd = add_leaf_vert(label, area);
+
         label_pat_map.emplace(label, pd);
       } else {
         pd = label_pat_map[label];
@@ -118,15 +137,9 @@ void Dag::init(std::vector<Pattern> pattern_sets, const Graph_info<g_type>& gi) 
       add_edge(root, pd, 1);
     }
   }
-
-  // pd->label = gi.labels(v);
-  // I(leaf_dims.count(gi.labels(v)) > 0);
-  // pd->dims = leaf_dims[gi.labels(v)];
-
-  // add_edge(root, pd)
 }
 
-// TODO: this currently just chooses all leaf nodes and a single pattern
+// TODO: write this
 std::unordered_set<Dag::pdag> Dag::select_points() {
   std::unordered_set<pdag> nodes;
   // bool                     found_pat = false;
@@ -161,16 +174,19 @@ void Dag::dump() {
     if (pd == root) {
       fmt::print("root node\n");
     } else {
-      fmt::print("dag id {}, parent {}\n", pd->dag_id, (pd->parent == root) ? "root" : std::to_string(pd->parent->dag_id));
+      fmt::print("dag id {}, parent {}", pd->dag_id, pd->is_root() ? "root" : std::to_string(pd->parent->dag_id));
+      if (pd->is_leaf()) {
+        fmt::print(", label {}, area {}", pd->dag_label, pd->area);
+      }
+      fmt::print("\n");
     }
 
     if (pd->children.size() > 0) {
-      fmt::print("  children: ");
-      for (auto child : pd->children) {
-        I(child != nullptr);
-        fmt::print("{}, ", child->dag_id);
+      fmt::print("children:\n");
+      for (size_t i = 0; i < pd->children.size(); i++) {
+        I(pd->children[i] != nullptr);
+        fmt::print("  id {}, count {}\n", pd->children[i]->dag_id, pd->child_edge_count[i]);
       }
-      fmt::print("\n");
     }
 
     // for (auto lout : pd->dims) {
@@ -178,6 +194,7 @@ void Dag::dump() {
     //}
 
     if (pd->is_leaf()) {
+      // fmt::print("")
       return;
     }
 

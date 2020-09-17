@@ -14,6 +14,7 @@
 #include <unordered_map>
 #include <utility>  // for std::pair
 #include <vector>
+#include <sstream>
 
 #include "dag.hpp"
 #include "eprp_var.hpp"
@@ -25,7 +26,7 @@
 constexpr bool hier_verbose = false;
 // constexpr bool coll_verbose = false;
 constexpr bool reg_verbose   = false;
-constexpr bool bound_verbose = false;
+constexpr bool bound_verbose = true;
 
 // a struct representing a node in a hier_tree
 struct Hier_node {
@@ -77,9 +78,6 @@ public:
   // gets floorplan dimensions of all patterns using an exhaustive approach if the number of blocks is < optimal_thresh
   // invariant: bounding curves for patterns can only generated after leaf dimensions have been set
   void construct_bounds(const unsigned int optimal_thresh);
-
-  // generate various leaf implementations to use for constructing patterns
-  void generate_leaf_dims(const unsigned int num_dims);
 
   void construct_floorplans();
 
@@ -153,10 +151,18 @@ private:
   // dag representing a hierarchy of types
   std::vector<Dag> dags;
 
+  struct Dim {
+    double width;
+    double height;
+  };
+
+  // all leaves of the same type have to have the same dimensions, so store them across dags here
+  std::unordered_map<Lg_type_id::type, Dim> leaf_dims;
+
+  // outlines of patterns generated
+  std::unordered_map<Pattern, Dim> pat_outlines;
+
   void construct_bounds(const Dag::pdag pd, const unsigned int optimal_thresh);
 
-  // for each leaf node, there can be various different dimensions used
-  std::unordered_map<Lg_type_id::type, std::vector<Layout>> leaf_dims;
-
-  unsigned int num_dims;
+  void invoke_blobb(const std::stringstream& instr, std::stringstream& outstr, const bool small);
 };
