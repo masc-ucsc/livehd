@@ -51,9 +51,7 @@ public:
   // initialize a dag from a vector of patterns with all leaves being unique,
   // and all patterns either containing leaves or other patterns.
   void init(std::vector<Pattern> pat_set, const Graph_info<g_type>& gi);
-
-  std::unordered_set<pdag> select_points();
-
+  
   void dump();
 
 private:

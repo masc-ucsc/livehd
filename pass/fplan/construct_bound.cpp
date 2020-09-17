@@ -56,7 +56,7 @@ void Hier_tree::construct_bounds(const size_t dag_id, const unsigned int optimal
     for (auto child : pd->children) {
       I(child->width != 0);
       I(child->height != 0);
-      instr << fmt::format("{:.4f} {:.4f}\n", child->width, child->height);
+      instr << fmt::format("{} {}\n", child->width, child->height);
     }
 
     if (bound_verbose) {

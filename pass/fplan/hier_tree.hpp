@@ -1,13 +1,8 @@
-/*
-  This class holds a hierarchy hypertree (coming from json_inou or elsewhere) and two algorithms that operate on the tree:
-  1. Hierarchy discovery, where we walk the tree and subdivide it if the number of components in the tree grows beyond a certain
-  number.
-  2. Tree collapsing, where nodes with small areas get combined into supernodes with larger areas.
-*/
+// main class that hold the whole hierarchy tree and all the operations that are performed on it
 
 #pragma once
 
-#include <memory>     // for shared_ptr
+#include <memory>  // for shared_ptr
 #include <sstream>
 #include <string>
 #include <utility>  // for std::pair
@@ -19,11 +14,10 @@
 #include "i_resolve_header.hpp"
 #include "pattern.hpp"
 
-// controls for debug output on various stages
+// controls for debug output on various stages that have verbose output
 constexpr bool hier_verbose = false;
-// constexpr bool coll_verbose = false;
 constexpr bool reg_verbose   = false;
-constexpr bool bound_verbose = true;
+constexpr bool bound_verbose = false;
 
 // a struct representing a node in a hier_tree
 struct Hier_node {
@@ -151,5 +145,16 @@ private:
   void invoke_blobb(const std::stringstream& instr, std::stringstream& outstr, const bool small);
 
   // ask the user for the patterns worth exploring
-  void select_points();
+  void manual_select_points();
+
+  // choose points at random for benchmarking
+  void auto_select_points();
+
+  struct pattern_id {
+    size_t pattern_set_id;
+    size_t pattern_id;
+  };
+
+  // store a list of indices into pattern_sets
+  std::vector<pattern_id> chosen_patterns;
 };
