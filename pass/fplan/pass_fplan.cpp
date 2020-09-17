@@ -9,11 +9,24 @@
 
 void setup_pass_fplan() { Pass_fplan::setup(); }
 
+#define FULL
+
+#ifdef REG
 constexpr unsigned int def_min_tree_nodes      = 1;
 constexpr unsigned int def_num_collapsed_hiers = 3;
+constexpr double       def_min_tree_area       = 6.0;  // cut small nodes (area 6.0 is frequent)
+constexpr unsigned int def_max_pats            = 5;
+constexpr unsigned int def_max_optimal_nodes   = 5;
+#endif
+
+// generate more information for debugging stuff
+#ifdef FULL
+constexpr unsigned int def_min_tree_nodes      = 1;
+constexpr unsigned int def_num_collapsed_hiers = 7;
 constexpr double       def_min_tree_area       = 6.0;
 constexpr unsigned int def_max_pats            = 15;
 constexpr unsigned int def_max_optimal_nodes   = 15;
+#endif
 
 void Pass_fplan::setup() {
   auto m = Eprp_method("pass.fplan.makefp", "generate a floorplan from an LGraph", &Pass_fplan::pass);
@@ -38,7 +51,9 @@ void Pass_fplan::setup() {
   register_pass(dhm);
 
   auto dtm = Eprp_method("pass.fplan.dumptree", "dump a DOT file representing the hierarchy tree", &Pass_fplan_dump::dump_tree);
-  dtm.add_label_optional("min_tree_count", "minimum number of components to trigger analysis of a subtree", "1");
+  dtm.add_label_optional("min_tree_nodes",
+                         "minimum number of components to trigger analysis of a subtree",
+                         std::to_string(def_min_tree_nodes));
   dtm.add_label_optional("min_tree_area",
                          "area (mm^2) threshold below which nodes will be collapsed together",
                          std::to_string(def_min_tree_area));
@@ -79,24 +94,21 @@ void Pass_fplan::pass(Eprp_var& var) {
   const double       mta = std::stod(var.get("min_tree_area").data());
   const unsigned int nch = std::stoi(var.get("num_collapsed_hiers").data());
 
-  h.make_collapsed_hierarchies(nch);
-
-  for (size_t i = 0; i < nch; i++) {
-    fmt::print("  generating collapsed hierarchy (hier {}/{}, min area: {})...", i + 1, nch, i * mta);
-    t.start();
-    h.collapse(i, i * mta);
-    fmt::print("done ({} ms).\n", t.time());
-  }
-
-  // haven't checked the stuff past this
-  I(false);
+  fmt::print("  collapsing {} hierarchies (min area: {})...\n", nch, mta);
+  t.start();
+  h.collapse(nch, mta);
+  fmt::print("  done ({} ms).\n", t.time());
 
   const unsigned int mp = std::stoi(var.get("max_pats").data());
 
   h.discover_regularity(mp);
-  h.make_dags();
 
   h.dump_patterns();
+
+  // haven't checked the stuff past this
+  return;
+
+  h.make_dags();
 
   h.generate_leaf_dims(3);
 

@@ -1,5 +1,6 @@
 #include <functional>
 
+#include "profile_time.hpp"
 #include "hier_tree.hpp"
 
 Hier_tree::phier Hier_tree::make_hier_tree(Graph_info<g_type>& gi, phier t1, phier t2) {
@@ -35,7 +36,6 @@ Hier_tree::phier Hier_tree::make_hier_node(Graph_info<g_type>& gi, const set_t& 
 }
 
 // create a new hierarchy tree from the unmodified hierarchy tree
-
 // invariant: the old and new graphs have to be exactly the same (same verts, vert maps, and edges)
 Hier_tree::phier Hier_tree::dup_tree(phier oldn, Graph_info<g_type>& new_gi) {
   // quick (non-exhaustive) checks that the graphs are the same
@@ -43,7 +43,6 @@ Hier_tree::phier Hier_tree::dup_tree(phier oldn, Graph_info<g_type>& new_gi) {
   I(collapsed_gis[0].al.size() == new_gi.al.size());
 
   if (oldn->is_leaf()) {
-
     // record ids of old verts and use ids to get an equivalent set to new verts
     std::unordered_set<unsigned long> old_ids;
     for (auto v : oldn->graph_set) {
@@ -104,7 +103,8 @@ Hier_tree::phier Hier_tree::collapse(phier node, Graph_info<g_type>& gi, double 
 
   get_subtree_nodes(node);
 
-  auto collapsed_v = gi.collapse_to_vertex(collapse_set);
+  auto collapsed_v = gi.make_set_vertex("cp_vert_", collapse_set);
+  gi.erase_set_verts(collapse_set);
 
   node->name = std::string("hleaf_").append(gi.debug_names(collapsed_v));
   node->area = gi.areas(collapsed_v);
@@ -118,13 +118,28 @@ Hier_tree::phier Hier_tree::collapse(phier node, Graph_info<g_type>& gi, double 
   return node;
 }
 
-void Hier_tree::collapse(const size_t hier_index, const double threshold_area) {
+void Hier_tree::collapse(const size_t num_chiers, const double threshold_area) {
   I(threshold_area >= 0.0);
-  I(hier_index < hiers.size());
-  I(hiers[hier_index] != nullptr);              // hier should be legal
-  I(collapsed_gis[hier_index].al.order() > 0);  // graph should have something in it as well
+  I(hiers.size() == 1);
+  I(collapsed_gis.size() == 1);
 
-  if (threshold_area > 0.0 && hier_index > 0) {
-    hiers[hier_index] = collapse(hiers[hier_index], collapsed_gis[hier_index], threshold_area);
+  profile_time::timer t;
+
+  fmt::print("    allocating collapsed hierarchies...");
+  t.start();
+  hiers.resize(num_chiers + 1);
+  for (size_t i = 1; i <= num_chiers; i++) {
+    collapsed_gis.emplace_back(collapsed_gis[0]);
+    hiers[i] = dup_tree(hiers[0], collapsed_gis[i]);
+  }
+  fmt::print("done ({} ms).\n", t.time());
+
+  for (size_t i = 0; i <= num_chiers; i++) {
+    //if (threshold_area > 0.0) {
+      fmt::print("    collapsing hierarchy {} (min area: {})...", i, i * threshold_area);
+      t.start();
+      hiers[i] = collapse(hiers[i], collapsed_gis[i], i * threshold_area);
+      fmt::print("done ({} ms).\n", t.time());
+    //}
   }
 }

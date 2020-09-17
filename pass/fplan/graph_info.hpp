@@ -83,8 +83,9 @@ public:
     }
   }
 
-  // set will be modified interally by graph I think
-  vertex_t collapse_to_vertex(set_t& set) {
+  // create a new vertex representing the set, with edges copied
+  // existing set elements are left alone
+  vertex_t make_set_vertex(const std::string& prefix, const set_t& set) {
     I(set.size() >= 1);
 
     auto nv = al.insert_vert();
@@ -92,34 +93,43 @@ public:
     ids[nv]    = ++unique_id_counter;
     labels[nv] = ++unique_label_counter;
 
-    std::string dname = std::string("cp_vert_");
+    std::string name = prefix;
     for (auto v : set) {
-      dname.append(std::to_string(ids(v))).append("_");
+      name.append(std::to_string(ids(v))).append("_");
     }
 
-    debug_names[nv] = dname;
+    debug_names[nv] = name;
 
     for (auto v : set) {
       areas[nv] += areas(v);
     }
 
-    auto marked   = al.template vert_map<bool>();
-
     for (auto v : set) {
       for (auto e : al.out_edges(v)) {
-        al.insert_edge(nv, al.head(e));
+        auto new_e = al.insert_edge(nv, al.head(e));
+        weights[new_e] = weights(e);
       }
 
       for (auto e : al.in_edges(v)) {
-        al.insert_edge(al.tail(e), nv);
+        auto new_e = al.insert_edge(al.tail(e), nv);
+        weights[new_e] = weights(e);
       }
+    }
 
+    return nv;
+  }
+
+  // delete all the elements in a set without segfaulting
+  void erase_set_verts(set_t& set) {
+    // we have to be extremely careful about how we delete verts here, because otherwise graph will segfault
+    // trying to keep track of verts in the set that have already been deleted.
+
+    auto marked = al.template vert_map<bool>();
+
+    for (auto v : set) {
       marked[v] = true;
     }
 
-    // we have to be extremely careful about how we delete verts here, because otherwise graph will segfault
-    // trying to keep track of verts in the set that have already been deleted.
-    
     set.clear();
 
     for (auto it = al.verts().begin(); it != al.verts().end(); it++) {
@@ -128,8 +138,6 @@ public:
         it = al.verts().begin();
       }
     }
-
-    return nv;
   }
 
   vertex_t make_temp_vertex(const std::string& debug_name, double area) {

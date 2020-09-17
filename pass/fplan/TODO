@@ -33,6 +33,8 @@ Refactors:
 
 Things to add:
 1. some sort of check() method that verifies netlists and internal functionality
+2. a way to call BloBB or CompaSS directly, since they're way faster than HiReg
+   (1 sec on a test floorplan vs 15 sec for HiReg, according to the HiReg paper)
 
 Tried:
  - string -> string_view: string_views need to not outlive the string they are initialized with
