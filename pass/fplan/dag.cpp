@@ -159,12 +159,7 @@ void Dag::dump() {
       }
     }
 
-    // for (auto lout : pd->dims) {
-    // fmt::print("  dim: ({:.2f}, {:.2f}), loc ({:.2f}, {:.2f})\n", lout.width, lout.height, lout.xpos, lout.ypos);
-    //}
-
     if (pd->is_leaf()) {
-      // fmt::print("")
       return;
     }
 
