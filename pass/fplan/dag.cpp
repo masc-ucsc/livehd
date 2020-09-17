@@ -6,7 +6,7 @@
 
 #include "fmt/core.h"
 
-void Dag::init(std::vector<Pattern> hier_patterns, const Graph_info<g_type>& ginfo) {
+void Dag::init(std::vector<Pattern> pattern_sets, const Graph_info<g_type>& gi) {
   // need to keep track of all the verts we've come across so we can add them to the dag as leaves if required
   std::unordered_map<Lg_type_id::type, unsigned int> subp_verts;
 
@@ -37,19 +37,19 @@ void Dag::init(std::vector<Pattern> hier_patterns, const Graph_info<g_type>& gin
     return pd;
   };
 
-  for (auto pat : hier_patterns) {
+  for (auto pat : pattern_sets) {
     auto pd = add_vert();
     pat_dag_map.emplace(pat, pd);
   }
 
   // check for edges between patterns
-  for (size_t i = 0; i < hier_patterns.size(); i++) {
-    auto  pat       = hier_patterns[i].verts;
-    auto& pat_dag_p = pat_dag_map[hier_patterns[i]];
+  for (size_t i = 0; i < pattern_sets.size(); i++) {
+    auto  pat       = pattern_sets[i].verts;
+    auto& pat_dag_p = pat_dag_map[pattern_sets[i]];
 
     // going in reverse because we want the largest subset, not the smallest
     for (int j = i - 1; j >= 0; j--) {
-      auto subpat = hier_patterns[j].verts;
+      auto subpat = pattern_sets[j].verts;
 
       bool subset = true;
 
@@ -70,7 +70,7 @@ void Dag::init(std::vector<Pattern> hier_patterns, const Graph_info<g_type>& gin
         for (auto spair : subpat) {
           pat[spair.first] -= spair.second;
 
-          add_edge(pat_dag_p, pat_dag_map[hier_patterns[j]], spair.second);
+          add_edge(pat_dag_p, pat_dag_map[pattern_sets[j]], spair.second);
           j++;  // run the same check over again to see if we can match another subpattern of the same type
         }
       }
@@ -107,9 +107,9 @@ void Dag::init(std::vector<Pattern> hier_patterns, const Graph_info<g_type>& gin
 
 
 
-  for (auto v : ginfo.al.verts()) {
+  for (auto v : gi.al.verts()) {
     pdag pd;
-    auto label = ginfo.labels(v);
+    auto label = gi.labels(v);
     if (subp_verts.count(label) == 0) {
       // if vertex hasn't been picked up by a subpattern, it's a child of root
       if (label_pat_map.count(label) == 0) {
@@ -122,9 +122,9 @@ void Dag::init(std::vector<Pattern> hier_patterns, const Graph_info<g_type>& gin
     }
   }
 
-  // pd->label = ginfo.labels(v);
-  // I(leaf_dims.count(ginfo.labels(v)) > 0);
-  // pd->dims = leaf_dims[ginfo.labels(v)];
+  // pd->label = gi.labels(v);
+  // I(leaf_dims.count(gi.labels(v)) > 0);
+  // pd->dims = leaf_dims[gi.labels(v)];
 
   // add_edge(root, pd)
 }

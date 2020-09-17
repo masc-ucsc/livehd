@@ -13,7 +13,7 @@
 #include "profile_time.hpp"
 
 // turn an LGraph into a graph suitable for HiReg.
-Hier_tree::Hier_tree(Eprp_var& var) : ginfo(), collapsed_gis(), hier_patterns() {
+Hier_tree::Hier_tree(Eprp_var& var) : collapsed_gis(), pattern_sets() {
   // if I run this code in lgshell with -c opt on the rocket core, temp.imp_edges hangs.
   // this doesn't happen with a smaller hierarchy like hier_test
 
@@ -51,6 +51,9 @@ Hier_tree::Hier_tree(Eprp_var& var) : ginfo(), collapsed_gis(), hier_patterns() 
   absl::flat_hash_set<std::tuple<Hierarchy_index, Hierarchy_index, uint32_t>> edges;
   absl::flat_hash_map<Hierarchy_index, vertex_t>                              vm;
 
+  collapsed_gis.emplace_back();
+  auto& gi = collapsed_gis[0];
+
   fmt::print("done ({} ms).\n", t.time());
 
   t.start();
@@ -61,11 +64,11 @@ Hier_tree::Hier_tree(Eprp_var& var) : ginfo(), collapsed_gis(), hier_patterns() 
 
     Node temp(root_lg, hidx, Node::Hardcoded_input_nid);
 
-    auto new_v = ginfo.make_vertex(temp.debug_name().substr(18), lg->size(), lg->get_lgid());
-    
+    auto new_v = gi.make_vertex(temp.debug_name().substr(18), lg->size(), lg->get_lgid());
+
     // helpful to have a totally unique label number to use when making collapsed vertices
-    if (ginfo.unique_label_counter < lg->get_lgid()) {
-      ginfo.unique_label_counter = lg->get_lgid();
+    if (gi.unique_label_counter < lg->get_lgid()) {
+      gi.unique_label_counter = lg->get_lgid();
     }
 
     vm.emplace(hidx, new_v);
@@ -96,13 +99,13 @@ Hier_tree::Hier_tree(Eprp_var& var) : ginfo(), collapsed_gis(), hier_patterns() 
   fmt::print("done ({} ms).\n", t.time());
 
   auto find_edge = [&](vertex_t v_src, vertex_t v_dst) -> edge_t {
-    for (auto e : ginfo.al.out_edges(v_src)) {
-      if (ginfo.al.head(e) == v_dst) {
+    for (auto e : gi.al.out_edges(v_src)) {
+      if (gi.al.head(e) == v_dst) {
         return e;
       }
     }
 
-    return ginfo.al.null_edge();
+    return gi.al.null_edge();
   };
 
   t.start();
@@ -119,23 +122,22 @@ Hier_tree::Hier_tree(Eprp_var& var) : ginfo(), collapsed_gis(), hier_patterns() 
 
     // this is done twice to make bidirectional edges for nodes that may only have outputs or inputs
     auto e_1_2 = find_edge(v1, v2);
-    if (e_1_2 == ginfo.al.null_edge()) {
-      auto new_e           = ginfo.al.insert_edge(v1, v2);
-      ginfo.weights[new_e] = weight;
+    if (e_1_2 == gi.al.null_edge()) {
+      auto new_e           = gi.al.insert_edge(v1, v2);
+      gi.weights[new_e] = weight;
     }
 
     auto e_2_1 = find_edge(v2, v1);
-    if (e_2_1 == ginfo.al.null_edge()) {
-      auto new_e           = ginfo.al.insert_edge(v2, v1);
-      ginfo.weights[new_e] = weight;
+    if (e_2_1 == gi.al.null_edge()) {
+      auto new_e           = gi.al.insert_edge(v2, v1);
+      gi.weights[new_e] = weight;
     }
   }
-
-  collapsed_gis.emplace_back(ginfo);
 
   fmt::print("done ({} ms).\n", t.time());
 }
 
+/*
 void Hier_tree::dump_node(const phier node) const {
   static int depth = -1;
 
@@ -153,7 +155,7 @@ void Hier_tree::dump_node(const phier node) const {
   if (node->is_leaf()) {
     fmt::print("area: {:.2f}, containing nodes:\n", node->area);
     for (auto v : node->graph_set) {
-      fmt::print("  {}\n", ginfo.debug_names(v));
+      fmt::print("  {}\n", gi.debug_names(v));
     }
   } else {
     fmt::print("area: {:.2f}, children: {} and {}.\n", find_area(node), node->children[0]->name, node->children[1]->name);
@@ -163,6 +165,7 @@ void Hier_tree::dump_node(const phier node) const {
 
   depth--;
 }
+*/
 
 // add up the total area of all the leaves in the subtree
 double Hier_tree::find_area(phier node) const {
@@ -205,6 +208,7 @@ unsigned int Hier_tree::find_tree_depth(phier node) const {
   return find_depth(node, 0);
 }
 
+/*
 void Hier_tree::dump_hier() const {
   for (size_t i = 0; i < hiers.size(); i++) {
     fmt::print("printing hierarchy {} ({} nodes):\n", i, find_tree_size(hiers[i]));
@@ -212,15 +216,16 @@ void Hier_tree::dump_hier() const {
     fmt::print("\n");
   }
 }
+*/
 
 void Hier_tree::dump_patterns() const {
-  for (size_t hier_index = 0; hier_index < hier_patterns.size(); hier_index++) {
-    fmt::print("in hierarchy {} ({} pattern sets):\n", hier_index, hier_patterns[hier_index].size());
+  for (size_t hier_index = 0; hier_index < pattern_sets.size(); hier_index++) {
+    fmt::print("in hierarchy {} ({} pattern sets):\n", hier_index, pattern_sets[hier_index].size());
 
-    for (size_t pattern_index = 0; pattern_index < hier_patterns[hier_index].size(); pattern_index++) {
+    for (size_t pattern_index = 0; pattern_index < pattern_sets[hier_index].size(); pattern_index++) {
       fmt::print("  in pattern {}:\n", pattern_index);
 
-      for (auto vpair : hier_patterns[hier_index][pattern_index].verts) {
+      for (auto vpair : pattern_sets[hier_index][pattern_index].verts) {
         fmt::print("    label: {}, count: {}\n", vpair.first, vpair.second);
       }
     }

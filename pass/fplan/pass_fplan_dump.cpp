@@ -12,24 +12,26 @@
 void Pass_fplan_dump::dump_hier(Eprp_var &var) {
   Hier_tree h(var);
 
+  auto& ginfo = h.collapsed_gis[0];
+
   // although the graph lib has a way to make dotfiles out of a graph, it doesn't print out enough information.
 
   std::stringstream dotstr;
 
   dotstr << "digraph g {\n\tnode [fontname = \"Source Code Pro\", shape=record];\n";
 
-  for (auto v : h.ginfo.al.verts()) {
-    auto name  = h.ginfo.debug_names(v);
-    auto id    = h.ginfo.ids(v);
-    auto label = h.ginfo.labels(v);
-    auto area  = h.ginfo.areas(v);
+  for (auto v : ginfo.al.verts()) {
+    auto name  = ginfo.debug_names(v);
+    auto id    = ginfo.ids(v);
+    auto label = ginfo.labels(v);
+    auto area  = ginfo.areas(v);
     dotstr << fmt::format("\t{} [label=\"{{{} | {{lb {} | id {} | area {:.2f}}}}}\"];\n", id, name, label, id, area);
   }
 
-  for (auto e : h.ginfo.al.edges()) {
-    auto src = h.ginfo.ids(h.ginfo.al.tail(e));
-    auto dst = h.ginfo.ids(h.ginfo.al.head(e));
-    dotstr << fmt::format("\t{} -> {} [label={}];\n", src, dst, h.ginfo.weights(e));
+  for (auto e : ginfo.al.edges()) {
+    auto src = ginfo.ids(ginfo.al.tail(e));
+    auto dst = ginfo.ids(ginfo.al.head(e));
+    dotstr << fmt::format("\t{} -> {} [label={}];\n", src, dst, ginfo.weights(e));
   }
 
   dotstr << "}";
@@ -83,12 +85,6 @@ void Pass_fplan_dump::dump_tree(Eprp_var &var) {
       dotstr << fmt::format("\t{} -> {};\n", n->children[1]->name, n->name);
     }
   };
-
-  h.make_collapsed_hierarchies(1);
-
-  if (!var.has_label("min_tree_area")) {
-    fmt::print("here!\n");
-  }
 
   const double mta = std::stod(var.get("min_tree_area").data());
   fmt::print("  generating collapsed hierarchy (min area: {})...", mta);

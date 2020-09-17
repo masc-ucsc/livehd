@@ -24,7 +24,7 @@
 // controls for debug output on various stages
 constexpr bool hier_verbose = false;
 // constexpr bool coll_verbose = false;
-constexpr bool reg_verbose   = true;
+constexpr bool reg_verbose   = false;
 constexpr bool bound_verbose = false;
 
 // a struct representing a node in a hier_tree
@@ -47,7 +47,7 @@ struct Hier_node {
 class Hier_tree {
 public:
   Hier_tree(Eprp_var& var);
-  // Hier_tree(Graph_info<g_type>&& netlist) : ginfo(std::move(netlist)), hier_patterns({}) {}
+  // Hier_tree(Graph_info<g_type>&& netlist) : ginfo(std::move(netlist)), pattern_sets({}) {}
 
   // copies require copying the entire tree and are very expensive.
   Hier_tree(const Hier_tree& other) = delete;
@@ -59,7 +59,7 @@ public:
 
   // move assignment operator not specified because graph_info contents are really hard to move
 
-  void dump_hier() const;
+  // void dump_hier() const;
 
   void dump_patterns() const;
 
@@ -68,19 +68,8 @@ public:
   // any node with a smaller area than min_area gets folded into a new supernode with area >= min_area
   void discover_hierarchy(const unsigned int min_size);
 
-  // allocates space for collapsed hierarchies, and a graph to go along with each one
-  void make_collapsed_hierarchies(const size_t num_chiers) {
-    I(num_chiers != 0);
-
-    hiers.resize(num_chiers + 1);
-    for (size_t i = 1; i <= num_chiers; i++) {
-      collapsed_gis.emplace_back(ginfo);
-      hiers[i] = dup_tree(hiers[0], collapsed_gis[i]);
-    }
-  }
-
   // returns a new tree with small leaf nodes collapsed together
-  void collapse(const size_t hier_index, const double threshold_area);
+  void collapse(const size_t num_chiers, const double threshold_area);
 
   // discover similar subgraphs in the collapsed hierarchy (and make a dag)
   void discover_regularity(const size_t beam_width);
@@ -103,7 +92,7 @@ private:
 
   // graph containing the uncollapsed netlist
   // only here for compatibility with the stuff I already wrote, should be removed eventually
-  Graph_info<g_type> ginfo;
+  // Graph_info<g_type> ginfo;
 
   // graphs containing the collapsed netlists (seperated from ginfo for now so things compile)
   // the 0th element is always the uncollapsed graph.
@@ -138,7 +127,7 @@ private:
 
   unsigned int find_tree_depth(phier node) const;
 
-  void dump_node(const phier node) const;
+  // void dump_node(const phier node) const;
 
   phier dup_tree(phier oldn, Graph_info<g_type>& new_gi);
 
@@ -149,18 +138,18 @@ private:
 
   // keep track of all the kinds of vertices we can have, as well as how many there are
 
-  unsigned int generic_pattern_size(const Pattern& gset) const;
+  // unsigned int generic_pattern_size(const Pattern& gset) const;
 
-  Pattern make_generic(const set_t& pat) const;
+  Pattern make_generic(Graph_info<g_type>& gi, const set_t& pat) const;
 
-  set_vec_t find_all_patterns(const set_t& subg, const Pattern& gpattern) const;
+  set_vec_t find_all_patterns(Graph_info<g_type>& gi, const set_t& subg, const Pattern& gpattern) const;
 
-  Pattern find_most_freq_pattern(const set_t& subg, const size_t bwidth) const;
+  Pattern find_most_freq_pattern(Graph_info<g_type>& gi, const set_t& subg, const size_t bwidth) const;
 
-  vertex_t compress_inst(set_t& subg, set_t& inst);
+  vertex_t compress_inst(Graph_info<g_type>& gi, set_t& subg, set_t& inst);
 
   // vector of pattern sets, 1 per hierarchy tree
-  std::vector<std::vector<Pattern>> hier_patterns;
+  std::vector<std::vector<Pattern>> pattern_sets;
 
   void discover_regularity(const size_t hier_index, const size_t beam_width);
 
