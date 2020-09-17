@@ -689,22 +689,23 @@ void Pass_lnast_fromlg::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node, co
   // PID: 0 = S, 1 = A, 2 = B, ...
   // Y = ~SA | SB
 
-  std::queue<XEdge> mux_vals; // FIXME: for speed use std::vector<Node_pin> (driver with only emplace and pop_back() API)
+  std::vector<Node_pin> mux_vals; // FIXME: for speed use std::vector<Node_pin> (driver with only emplace and pop_back() API)
   Node_pin sel_pin;
-  for (const auto inp : pin.get_node().inp_edges_ordered()) {
-    if (inp.sink.get_pid() == 0) {  // If mux selector S, create if's "condition"
-      sel_pin = inp.driver;
+  for (const auto inp : pin.get_node().inp_connected_pins()) {
+    if (inp.get_sink().get_pid() == 0) {  // If mux selector S, create if's "condition"
+      sel_pin = inp.get_driver_pin();
     } else {
-      mux_vals.push(inp);
+      //mux_vals.push(inp);
+      mux_vals.emplace_back(inp);
     }
   }
   I(mux_vals.size() >= 2);
 
   // Set up each cond value
-  std::queue<std::string_view> temp_vars;
+  std::vector<std::string_view> temp_vars;
   for (long unsigned int i = 0; i < mux_vals.size() - 1; i++) {
     auto temp_var = create_temp_var(lnast);
-    temp_vars.push(temp_var);
+    temp_vars.emplace_back(temp_var);
 
     auto eq_idx = lnast.add_child(parent_node, Lnast_node::create_same(""));
     lnast.add_child(eq_idx, Lnast_node::create_ref(temp_var));
@@ -726,14 +727,14 @@ void Pass_lnast_fromlg::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node, co
   auto if_node  = lnast.add_child(parent_node, Lnast_node::create_if("mux"));
   while (mux_vals.size() > 1) {
     lnast.add_child(if_node, Lnast_node::create_cond(temp_vars.front()));
-    temp_vars.pop();
+    temp_vars.erase(temp_vars.begin());
 
     auto stmt_idx = lnast.add_child(if_node, Lnast_node::create_stmts(get_new_seq_name(lnast)));
 
     auto asg_idx = lnast.add_child(stmt_idx, Lnast_node::create_assign(""));
     lnast.add_child(asg_idx, Lnast_node::create_ref(pin_name));
-    attach_child(lnast, asg_idx, mux_vals.front().driver);
-    mux_vals.pop();
+    attach_child(lnast, asg_idx, mux_vals.front().get_driver_pin());
+    mux_vals.erase(mux_vals.begin());
   }
 
   // Attach last mux input, with no condition (since it is "else" case)
@@ -741,7 +742,7 @@ void Pass_lnast_fromlg::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node, co
 
   auto asg_idx = lnast.add_child(stmt_idx, Lnast_node::create_assign(""));
   lnast.add_child(asg_idx, Lnast_node::create_ref(pin_name));
-  attach_child(lnast, asg_idx, mux_vals.front().driver);
+  attach_child(lnast, asg_idx, mux_vals.front().get_driver_pin());
 }
 
 void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
