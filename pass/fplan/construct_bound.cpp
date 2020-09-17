@@ -12,7 +12,9 @@
 #include "hier_tree.hpp"
 #include "profile_time.hpp"
 
-void Hier_tree::construct_bounds(const Dag::pdag pd, const unsigned int optimal_thresh) {
+void Hier_tree::construct_bounds(const size_t dag_id, const unsigned int optimal_thresh) {
+  auto& d = dags[dag_id];
+  
   // set dimensions of leaf nodes in the dag
   std::function<void(const Dag::pdag)> assign_leaf_dims = [&](const Dag::pdag pd) {
     if (pd->is_leaf()) {
@@ -20,17 +22,9 @@ void Hier_tree::construct_bounds(const Dag::pdag pd, const unsigned int optimal_
       static std::default_random_engine     gen;
       static std::uniform_real_distribution dist(max_aspect_ratio, 1.0 - max_aspect_ratio);
 
-      if (leaf_dims.count(pd->dag_label) == 0) {
-        double width_factor = dist(gen);
-        pd->width           = pd->area * width_factor;
-        pd->height          = pd->area * (1.0 - width_factor);
-
-        leaf_dims[pd->dag_label] = {pd->width, pd->height};
-      } else {
-        auto dims  = leaf_dims[pd->dag_label];
-        pd->width  = dims.width;
-        pd->height = dims.height;
-      }
+      double width_factor = dist(gen);
+      pd->width           = pd->area * width_factor;
+      pd->height          = pd->area * (1.0 - width_factor);
     }
 
     for (auto child : pd->children) {
@@ -38,10 +32,10 @@ void Hier_tree::construct_bounds(const Dag::pdag pd, const unsigned int optimal_
     }
   };
 
-  assign_leaf_dims(pd);
+  assign_leaf_dims(d.root);
 
   std::function<void(const Dag::pdag)> floorplan_patterns = [&](const Dag::pdag pd) {
-    // avoid floorplanning leaves (no point, since they only contain a single type of node)
+    // avoid floorplanning leaves (no point, since they only contain a single generic node)
     if (pd->is_leaf()) {
       return;
     }
@@ -69,50 +63,24 @@ void Hier_tree::construct_bounds(const Dag::pdag pd, const unsigned int optimal_
       fmt::print("\ninput string stream:\n{}", instr.str());
     }
 
-    
-
     // if the pattern is small, we can afford to use an exhaustive approach to finding floorplans.
     bool small_pat = pd->children.size() <= optimal_thresh;
     invoke_blobb(instr, outstr, small_pat);
 
-    // TODO: memoize pattern generation with a map of Pattern -> Outline
-    // TODO: at end: assign area!!!
+    double pat_width, pat_height;
+    outstr >> pat_width;
+    outstr >> pat_height;
+
+    pd->width  = pat_width;
+    pd->height = pat_height;
   };
 
-  floorplan_patterns(pd);
+  floorplan_patterns(d.root);
 }
-
-/*
-
-    blobb_outf >> pat.pat_layout.width;
-    blobb_outf >> pat.pat_layout.height;
-
-    size_t total_size;
-    blobb_outf >> total_size;
-
-    I(total_size == pat.count());
-
-    for (auto inp_dims : pat.verts) {
-      Layout l;
-      blobb_outf >> l.width;
-      blobb_outf >> l.height;
-
-      pat.layouts[inp_dims.first].push_back(l);
-    }
-
-    for (auto& lpair : pat.layouts) {
-      blobb_outf >> lpair.second[i].xpos;
-      blobb_outf >> lpair.second[i].ypos;
-    }
-
-    blobb_outf.close();
-  }
-}
-*/
 
 void Hier_tree::construct_bounds(const unsigned int optimal_thresh) {
   for (size_t i = 0; i < dags.size(); i++) {
-    construct_bounds(dags[i].root, optimal_thresh);
+    construct_bounds(i, optimal_thresh);
   }
 }
 

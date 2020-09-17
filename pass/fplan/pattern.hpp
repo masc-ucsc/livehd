@@ -2,7 +2,7 @@
 
 #include <functional>  // for std::hash
 #include <iostream>
-#include <unordered_map>
+#include <map>
 #include <vector>
 
 #include "lgraph_base_core.hpp"
@@ -34,7 +34,8 @@ private:
 class Pattern {
 public:
   // a list of each kind of module in the pattern, as well as how many modules there are of that type
-  std::unordered_map<Lg_type_id::type, unsigned int> verts;
+  // this needs to be an ordered map since we want patterns that differ in order to be hashed the same way
+  std::map<Lg_type_id::type, unsigned int> verts;
 
   // in order to use a Pattern as a key in an unordered_map, we need it to have operator() (for hashing) and operator==
   // (in case the hash ends up being the same by coincidence)

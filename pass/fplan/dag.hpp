@@ -1,7 +1,7 @@
 #pragma once
 
 #include <iostream>
-#include <memory>
+#include <memory>  // for shared_ptr, unique_ptr
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>  // for std::pair
@@ -19,6 +19,8 @@ public:
   std::vector<unsigned int>              child_edge_count;
 
   unsigned int     dag_id;
+
+  // label of the dag node in the hierarchy used to generate the pattern
   Lg_type_id::type dag_label;
 
   double area;
@@ -42,6 +44,8 @@ public:
 
   pdag root;
 
+  std::unordered_map<Pattern, pdag> pat_dag_map;
+
   Dag() : root(std::make_shared<Dag_node>()), dag_id_counter(0) {}
 
   // initialize a dag from a vector of patterns with all leaves being unique,
@@ -53,8 +57,6 @@ public:
   void dump();
 
 private:
-  std::unordered_map<Pattern, pdag> pat_dag_map;
-
   unsigned int dag_id_counter;
 
   void add_edge(pdag parent, pdag child, unsigned int count);

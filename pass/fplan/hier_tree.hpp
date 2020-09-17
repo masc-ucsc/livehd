@@ -9,12 +9,12 @@
 
 #include <algorithm>  // for std::max, std::min, std::sort
 #include <memory>     // for shared_ptr
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <utility>  // for std::pair
 #include <vector>
-#include <sstream>
 
 #include "dag.hpp"
 #include "eprp_var.hpp"
@@ -43,6 +43,11 @@ struct Hier_node {
   Hier_node(const Graph_info<g_type>& gi) : parent(nullptr), graph_set(gi.al.vert_set()) {}
 
   bool is_leaf() const { return children[0] == nullptr && children[1] == nullptr; }
+};
+
+struct Dim {
+  double width;
+  double height;
 };
 
 class Hier_tree {
@@ -151,18 +156,7 @@ private:
   // dag representing a hierarchy of types
   std::vector<Dag> dags;
 
-  struct Dim {
-    double width;
-    double height;
-  };
-
-  // all leaves of the same type have to have the same dimensions, so store them across dags here
-  std::unordered_map<Lg_type_id::type, Dim> leaf_dims;
-
-  // outlines of patterns generated
-  std::unordered_map<Pattern, Dim> pat_outlines;
-
-  void construct_bounds(const Dag::pdag pd, const unsigned int optimal_thresh);
+  void construct_bounds(const size_t dag_id, const unsigned int optimal_thresh);
 
   void invoke_blobb(const std::stringstream& instr, std::stringstream& outstr, const bool small);
 };
