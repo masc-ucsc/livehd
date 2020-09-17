@@ -14,7 +14,7 @@
 
 void Hier_tree::construct_bounds(const size_t dag_id, const unsigned int optimal_thresh) {
   auto& d = dags[dag_id];
-  
+
   // set dimensions of leaf nodes in the dag
   std::function<void(const Dag::pdag)> assign_leaf_dims = [&](const Dag::pdag pd) {
     if (pd->is_leaf()) {
@@ -106,11 +106,19 @@ void Hier_tree::invoke_blobb(const std::stringstream& instr, std::stringstream& 
     throw std::runtime_error(fmt::format("No binary found in {}!", blobb_p.string()));
   }
 
-  const std::string files      = "/tmp/infile.txt /tmp/outfile.bbb";
-  const std::string fixed_args = "--slicing --free-orient -t";
-  const std::string alg        = (small) ? "--backtrack" : "--hierarchical";
+  // configure BloBB as follows:
+  // 1. only consider slicing packings (default)
+  // 2. allow for blocks to be rotated (default)
+  // 3. enable quiet operation (-t)
+  // 4. switch between an optimal floorplanning algorithm and a hierarchical one capable of handling bigger inputs with reduced quality
+  // 5. a maximum deadspace percent that starts small and grows bigger over time
 
-  int dead_p = 15;  // when set to the default (5%), small floorplans fail frequently
+  // note that another option here is to use the --backtrack option to find _some_ packing with a slowly increasing deadspace percent
+  // it isn't optimal, but it's a lot faster
+
+  const std::string files      = "/tmp/infile.txt /tmp/outfile.bbb";
+  const std::string fixed_args = "-t";
+  const std::string alg        = (small) ? "--optimal" : "--hierarchical";
 
   std::ifstream blobb_outf;
 
@@ -119,43 +127,33 @@ void Hier_tree::invoke_blobb(const std::stringstream& instr, std::stringstream& 
   t.start();
 
   fmt::print("    running blobb...");
-  do {
-    std::string deadspace = fmt::format("-d {}", dead_p);
-    dead_p += 10;
 
-    const std::string command = fmt::format("{} {} {} {} {}", blobb_p.string(), files, fixed_args, alg, deadspace);
+  const std::string command = fmt::format("{} {} {} {}", blobb_p.string(), files, fixed_args, alg);
 
-    auto cfstream = popen(command.c_str(), "r");
-    I(cfstream);
+  auto cfstream = popen(command.c_str(), "r");
+  I(cfstream);
 
-    // even if we don't print the output of BloBB, we still have to read it or BloBB will hang?
-    char c;
-    while ((c = fgetc(cfstream)) != EOF) {
-      // putchar(ch);
-    }
+  // even if we don't print the output of BloBB, we still have to read it or BloBB will hang?
+  char c;
+  while ((c = fgetc(cfstream)) != EOF) {
+    // putchar(ch);
+  }
 
-    int retcode = pclose(cfstream);
-    if (retcode != 0) {
-      throw std::runtime_error("blobb exited with non-zero value!");
-    }
+  int retcode = pclose(cfstream);
+  if (retcode != 0) {
+    throw std::runtime_error("blobb exited with non-zero value!");
+  }
 
-    blobb_outf.open("/tmp/outfile.bbb");
-    if (!blobb_outf) {
-      throw std::runtime_error("cannot open /tmp/outfile.bbb!");
-    }
+  blobb_outf.open("/tmp/outfile.bbb");
+  if (!blobb_outf) {
+    throw std::runtime_error("cannot open /tmp/outfile.bbb!");
+  }
 
-    if (blobb_outf.peek() == std::ifstream::traits_type::eof()) {
-      if (bound_verbose) {
-        fmt::print("\nno output was sent to file, trying with {}% deadspace...", dead_p);
-      }
-      blobb_outf.close();
-    }
-
-  } while (!blobb_outf.is_open() && dead_p < 100);
+  if (blobb_outf.peek() == std::ifstream::traits_type::eof()) {
+    throw std::runtime_error("no output from blobb!");
+  }
 
   fmt::print("\ndone ({} ms).\n", t.time());
-
-  I(dead_p < 100);
 
   outstr << blobb_outf.rdbuf();
 

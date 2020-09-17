@@ -139,36 +139,6 @@ void Dag::init(std::vector<Pattern> pattern_sets, const Graph_info<g_type>& gi) 
   }
 }
 
-// TODO: write this
-std::unordered_set<Dag::pdag> Dag::select_points() {
-  std::unordered_set<pdag> nodes;
-  // bool                     found_pat = false;
-
-  /*
-  std::function<void(pdag)> select_nodes = [&](pdag pd) {
-    if (pd->label == 0 && !found_pat && pd != root) {
-      nodes.insert(pd);
-      found_pat = true;
-    } else if (pd->label > 0) {
-      nodes.insert(pd);
-    }
-
-    if (pd->is_leaf()) {
-      return;
-    }
-
-    for (auto child : pd->children) {
-      I(child != nullptr);
-      select_nodes(child);
-    }
-  };
-
-  select_nodes(root);
-  */
-
-  return nodes;
-}
-
 void Dag::dump() {
   std::function<void(pdag)> dump_dag = [&](pdag pd) {
     if (pd == root) {
