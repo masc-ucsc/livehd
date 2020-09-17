@@ -65,7 +65,7 @@ do
     if [ $? -eq 0 ]; then
       echo "Successfully created the inital LGraph using Yosys: ${pt}.v"
     else
-      echo "ERROR: Verilog -> LGraph failed... testcase: ${pt}.v"
+      echo "ERROR: LGraph -> LNAST failed... testcase: ${pt}.v"
       exit 1
     fi
 #    echo "----------------------------------------------------"
@@ -75,7 +75,7 @@ do
 #    if [ $? -eq 0 ]; then
 #      echo "Successfully created the inital LGraph using Yosys: ${pt}.v"
 #    else
-#      echo "ERROR: Verilog -> LGraph failed... testcase: ${pt}.v"
+#      echo "ERROR: LNAST -> code_gen prp  failed... testcase: ${pt}.v"
 #      exit 1
 #    fi
     echo "----------------------------------------------------"
@@ -85,7 +85,7 @@ do
     if [ $? -eq 0 ]; then
       echo "Successfully created the inital LGraph using Yosys: ${pt}.v"
     else
-      echo "ERROR: Verilog -> LGraph failed... testcase: ${pt}.v"
+      echo "ERROR: LGraph -> LNAST -> LGraph2 failed... testcase: ${pt}.v"
       exit 1
     fi
 
