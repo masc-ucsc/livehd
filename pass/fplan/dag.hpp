@@ -47,4 +47,7 @@ private:
   // map of child edge -> count of how many of that kind of edge should exist
   pdag         root;
   unsigned int dag_id_counter;
+
+  void add_edge(pdag parent, pdag child, unsigned int count);
+  pdag add_vert();
 };

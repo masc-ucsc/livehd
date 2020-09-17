@@ -236,13 +236,19 @@ vertex_t Hier_tree::compress_inst(Graph_info<g_type>& gi, set_t& subg, set_t& in
 
 void Hier_tree::discover_regularity(const size_t beam_width) {
   pattern_sets.resize(hiers.size());
+  dags.resize(collapsed_gis.size());
+
   profile_time::timer t;
   for (size_t i = 0; i < pattern_sets.size(); i++) {
     fmt::print("  discovering regularity on hier {} (max patterns: {})...", i, beam_width);
     t.start();
     discover_regularity(i, beam_width);
+    dags[i].init(pattern_sets[i], collapsed_gis[i]);
     fmt::print("done ({} ms).\n", t.time());
   }
+
+  dags[0].dump();
+  fmt::print("\n\n");
 }
 
 void Hier_tree::discover_regularity(const size_t hier_index, const size_t beam_width) {
@@ -358,14 +364,4 @@ void Hier_tree::discover_regularity(const size_t hier_index, const size_t beam_w
       fmt::print("    going up a level.\n");
     }
   }
-}
-
-void Hier_tree::make_dags() {
-  dags.resize(collapsed_gis.size());
-
-  for (size_t i = 0; i < collapsed_gis.size(); i++) {
-    dags[i].init(pattern_sets[i], collapsed_gis[i]);
-  }
-
-  dags[0].dump();
 }
