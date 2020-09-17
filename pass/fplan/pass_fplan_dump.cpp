@@ -51,7 +51,10 @@ void Pass_fplan_dump::dump_hier(Eprp_var &var) {
 void Pass_fplan_dump::dump_tree(Eprp_var &var) {
   Hier_tree h(var);
 
-  h.discover_hierarchy(1);
+  unsigned int mtn = std::stoi(var.get("min_tree_nodes").data());
+  fmt::print("  discovering hierarchy (min nodes: {})...\n", mtn);
+  h.discover_hierarchy(mtn);
+  fmt::print("  done.\n");
 
   std::stringstream dotstr;
 

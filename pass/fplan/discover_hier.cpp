@@ -386,7 +386,7 @@ void Hier_tree::discover_hierarchy(const unsigned int min_size) {
   auto& gi = collapsed_gis[0];
   profile_time::timer t;
 
-  if (min_size < gi.al.order()) {
+  if (gi.al.order() > min_size) {
     fmt::print("    wiring zero-cost edges...");
     t.start();
     // if the graph is not fully connected, ker-lin fails to work.

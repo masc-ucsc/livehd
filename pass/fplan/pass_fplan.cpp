@@ -51,12 +51,13 @@ void Pass_fplan::setup() {
   register_pass(dhm);
 
   auto dtm = Eprp_method("pass.fplan.dumptree", "dump a DOT file representing the hierarchy tree", &Pass_fplan_dump::dump_tree);
+  // if no options are specified, print out the whole hierarchy
   dtm.add_label_optional("min_tree_nodes",
                          "minimum number of components to trigger analysis of a subtree",
-                         std::to_string(def_min_tree_nodes));
+                         std::to_string(1));
   dtm.add_label_optional("min_tree_area",
                          "area (mm^2) threshold below which nodes will be collapsed together",
-                         std::to_string(def_min_tree_area));
+                         std::to_string(0.0));
   register_pass(dtm);
 }
 
@@ -72,6 +73,31 @@ void Pass_fplan::pass(Eprp_var& var) {
   }
   */
 
+  Pattern p1;
+  Pattern p2;
+
+  auto hash = std::hash<Pattern>();
+  auto h1   = hash(p1);
+  auto h2   = hash(p2);
+
+  I(h1 == h2, "empty hashes differ");
+
+  p1.verts.emplace(1, 1);
+  p2.verts.emplace(2, 1);
+
+  h1 = hash(p1);
+  h2 = hash(p2);
+
+  I(h1 != h2, "different objects hash the same");
+
+  p1.verts.emplace(2, 1);
+  p2.verts.emplace(1, 1);
+
+  h1 = hash(p1);
+  h2 = hash(p2);
+
+  I(h1 == h2, "different orders hash differently");
+
   fmt::print("generating floorplan...\n");
   whole_t.start();
   Pass_fplan p(var);
@@ -85,9 +111,7 @@ void Pass_fplan::pass(Eprp_var& var) {
   fmt::print("  discovering hierarchy (min nodes: {})...\n", mtn);
   t.start();
 
-  // TODO: this is forced to be 1 because I forgot that the hierarchy doesn't have to map completely to the input netlist at this
-  // stage. I'll fix this later.
-  h.discover_hierarchy(1);
+  h.discover_hierarchy(mtn);
 
   fmt::print("  done ({} ms).\n", t.time());
 
