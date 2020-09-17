@@ -689,13 +689,12 @@ void Pass_lnast_fromlg::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node, co
   // PID: 0 = S, 1 = A, 2 = B, ...
   // Y = ~SA | SB
 
-  std::vector<Node_pin> mux_vals; // FIXME: for speed use std::vector<Node_pin> (driver with only emplace and pop_back() API)
+  std::vector<Node_pin> mux_vals; 
   Node_pin sel_pin;
   for (const auto inp : pin.get_node().inp_connected_pins()) {
     if (inp.get_sink().get_pid() == 0) {  // If mux selector S, create if's "condition"
       sel_pin = inp.get_driver_pin();
     } else {
-      //mux_vals.push(inp);
       mux_vals.emplace_back(inp);
     }
   }
