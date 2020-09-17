@@ -324,7 +324,7 @@ void Hier_tree::discover_regularity(const size_t hier_index, const size_t beam_w
       for (size_t i = 0; i < pattern_set.size(); i++) {
         if (pattern_set[i] == most_freq_pattern) {
           dup = true;
-          if (bound_verbose) {
+          if (reg_verbose) {
             fmt::print("    pattern {} is a duplicate of {}.\n", i + 1, i);
           }
         }
@@ -340,7 +340,7 @@ void Hier_tree::discover_regularity(const size_t hier_index, const size_t beam_w
       auto         vinst = find_all_patterns(gi, hier_nodes, most_freq_pattern);
       unsigned int ctr   = 0;
       for (auto inst : vinst) {
-        if (bound_verbose) {
+        if (reg_verbose) {
           fmt::print("\npattern {} has {} instantiation(s).\n", ctr++, vinst.size());
         }
         auto comp_v = compress_inst(gi, hier_nodes, inst);
@@ -360,7 +360,7 @@ void Hier_tree::discover_regularity(const size_t hier_index, const size_t beam_w
     gi.erase_set_verts(pat_set);
 
     curr_min_depth--;
-    if (bound_verbose) {
+    if (reg_verbose) {
       fmt::print("    going up a level.\n");
     }
   }
