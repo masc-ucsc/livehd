@@ -54,6 +54,19 @@ bool Semantic_check::in_write_list(FlatHashMap dict, std::string_view node_name,
   return false;
 }
 
+/*
+bool Semantic_check::in_write_list(Lnast* lnast, FlatHashMap dict, Lnast_nid node_to_find, std::string_view stmt_name) {
+  for (auto node : dict) {
+    // node.first  --> Lnast_nid
+    // node.second --> string_view
+    if (lnast->get_name(node.first) == lnast->get_name(node_to_find) && node.second == stmt_name) {
+      return true;
+    }
+  }
+  return false;
+}
+*/
+
 bool Semantic_check::in_read_list(FlatHashMap dict, std::string_view node_name, std::string_view stmt_name) {
   for (auto node : dict) {
     if (node.first == node_name && node.second == stmt_name) {
@@ -62,6 +75,19 @@ bool Semantic_check::in_read_list(FlatHashMap dict, std::string_view node_name, 
   }
   return false;
 }
+
+/*
+bool Semantic_check::in_read_list(Lnast* lnast, FlatHashMap dict, Lnast_nid node_to_find, std::string_view stmt_name) {
+  for (auto node : dict) {
+    // node.first  --> Lnast_nid
+    // node.second --> string_view
+    if (lnast->get_name(node.first) == lnast->get_name(node_to_find) && node.second == stmt_name) {
+      return true;
+    }
+  }
+  return false;
+}
+*/
 
 bool Semantic_check::in_inefficient_LNAST(std::string_view node_name) {
   for (auto name : inefficient_LNAST) {
@@ -121,6 +147,20 @@ bool Semantic_check::in_in_scope_stack(std::string_view node_name) {
   }
   return false;
 }
+/*
+bool Semantic_check::in_in_scope_stack(Lnast* lnast, std::string_view node_name) {
+  // Look to find node from previous write_dict (so check every even indexed element)
+  int in_scope_stack_size = in_scope_stack.size();
+  for (int i = 0; i % 2 == 0 && i < in_scope_stack_size; i++) {
+    for (auto node : in_scope_stack[i]) {
+      if (lnast->get_name(node.first) == node_name) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+*/
 
 void Semantic_check::add_to_output_vars(std::string_view node_name) {
   if (!in_output_vars(node_name)) {
@@ -149,6 +189,30 @@ void Semantic_check::add_to_write_list(Lnast* lnast, std::string_view node_name,
   }
 }
 
+/*
+void Semantic_check::add_to_write_list(Lnast* lnast, Lnast_nid node_to_find, std::string_view stmt_name) {
+  std::string_view node_to_find_name = lnast->get_name(node_to_find);
+  if (node_to_find_name[0] == '%') {
+    add_to_output_vars(node_to_find_name);
+  }
+  if (!in_write_list(lnast, write_dict, node_to_find, stmt_name)) {
+    if (node_to_find_name != "null") {
+      write_dict[node_to_find] = stmt_name;
+    }
+  } else {
+    if (node_to_find_name[0] == '_' && node_to_find_name[1] == '_' && node_to_find_name[2] == '_') {
+      error_print_lnast_by_name(lnast, node_to_find_name);
+      Pass::error("Temporary Variable Error: {} should be only written to once\n", node_to_find_name);
+    }
+  }
+  if (!in_write_list(lnast, perm_write_dict, node_to_find, stmt_name)) {
+    if (node_to_find_name != "null") {
+      perm_write_dict[node_to_find] = stmt_name;
+    }
+  }
+}
+*/
+
 void Semantic_check::add_to_read_list(std::string_view node_name, std::string_view stmt_name) {
   if (!in_read_list(read_dict, node_name, stmt_name)) {
     read_dict[node_name] = stmt_name;
@@ -157,6 +221,17 @@ void Semantic_check::add_to_read_list(std::string_view node_name, std::string_vi
     perm_read_dict[node_name] = stmt_name;
   }
 }
+
+/*
+void Semantic_check::add_to_read_list(Lnast* lnast, Lnast_nid node_to_find, std::string_view stmt_name) {
+  if (!in_read_list(lnast, read_dict, node_to_find, stmt_name)) {
+    read_dict[node_to_find] = stmt_name;
+  }
+  if (!in_read_list(lnast, perm_read_dict, node_to_find, stmt_name)) {
+    perm_read_dict[node_to_find] = stmt_name;
+  }
+}
+*/
 
 void Semantic_check::print_out_of_scope_vars(Lnast* lnast) {
   if (out_of_scope_vars.size() != 0) {
@@ -327,6 +402,24 @@ void Semantic_check::resolve_read_write_lists(Lnast* lnast) {
       perm_write_dict.erase(node_name.first);
     }
   }
+  /*
+  for (auto node : perm_write_dict) {
+    // Resolve Write and Read Dicts
+    std::string_view node_name = lnast->get_name(node.first);
+    if (node_name[0] != '%' && perm_read_dict.contains(node.first)) {
+      perm_write_dict.erase(node_name);
+    // Make sure that if output variable is declared, it is written to
+    } else if (node_name[0] == '%') {
+      for (auto output_var = output_vars.begin(); output_var != output_vars.end(); *output_var++) {
+        if (*output_var == node_name) {
+          output_vars.erase(output_var);
+          break;
+        }
+      }
+      perm_write_dict.erase(node_name);
+    }
+  }
+` */
   // Never-Read Variable Warning
   if (perm_write_dict.size() != 0) {
     std::vector<std::string_view> error_names;
@@ -350,6 +443,30 @@ void Semantic_check::resolve_read_write_lists(Lnast* lnast) {
     }
     fmt::print(" were written but never read\n");
   }
+  /*
+  if (perm_write_dict.size() != 0) {
+    std::vector<std::string_view> error_names;
+    for (auto node : perm_write_dict) {
+      error_names.push_back(lnast->get_name(node.first));
+    }
+    error_print_lnast_var_warn(lnast, error_names);
+    std::sort(error_names.begin(), error_names.end());
+    // auto first_entry = perm_write_dict.begin();
+    auto first_entry = error_names.begin();
+    fmt::print(fmt::fg(fmt::color::blue), "Never-Read Variable Warning");
+    // fmt::print(": {}", first_entry->first);
+    fmt::print(": {}", *first_entry);
+    // for (auto node_name : perm_write_dict) {
+    for (auto node_name : error_names) {
+      if (node_name == *first_entry) {
+        continue;
+      }
+      // fmt::print(", {}", node_name.first);
+      fmt::print(", {}", node_name);
+    }
+    fmt::print(" were written but never read\n");
+  }
+  */
   // Output Variable Warning
   if (output_vars.size() != 0) {
     std::vector<std::string_view> error_outputs;
@@ -440,15 +557,31 @@ void Semantic_check::resolve_lhs_rhs_lists(Lnast* lnast) {
 }
 
 void Semantic_check::resolve_out_of_scope() {
-   for (auto entry : read_dict) {
+   for (auto node : read_dict) {
     // if (entry.first != "true" && entry.second != "false" && !in_in_scope_stack(entry.first) && !in_write_list(write_dict, entry.first, entry.second) && !is_temp_var(entry.first)) {
     //   out_of_scope_vars.push_back(entry.first);
     // }
-    if (entry.first != "true" && entry.second != "false" && !in_in_scope_stack(entry.first) && write_dict.count(entry.first) == 0 && !is_temp_var(entry.first) && functions.count(entry.first) == 0) {
-      out_of_scope_vars.push_back(entry.first);
+    
+    if (node.first != "true" && node.second != "false" && !in_in_scope_stack(node.first) && write_dict.count(node.first) == 0 && !is_temp_var(node.first) && functions.count(node.first) == 0) {
+      out_of_scope_vars.push_back(node.first);
     }
   }
 }
+
+/*
+void Semantic_check::resolve_out_of_scope(Lnast* lnast) {
+   for (auto node : read_dict) {
+    // if (entry.first != "true" && entry.second != "false" && !in_in_scope_stack(entry.first) && !in_write_list(write_dict, entry.first, entry.second) && !is_temp_var(entry.first)) {
+    //   out_of_scope_vars.push_back(entry.first);
+    // }
+
+    std::string_view node_name = lnast->get_name(node.first);
+    if (node_name != "true" && node_name != "false" && !in_in_scope_stack(lnast, node_name) && write_dict.count(node.first) == 0 && !is_temp_var(node_name) && functions.count(node_name) == 0) {
+      out_of_scope_vars.push_back(node_name);
+    }
+  }
+}
+*/
 
 void Semantic_check::check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_opr, const Lnast_ntype node_type,
                                          std::string_view stmt_name) {
@@ -475,8 +608,10 @@ void Semantic_check::check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_op
       }
       // Store type 'ref' variables
       add_to_write_list(lnast, lnast->get_name(lhs), stmt_name);
+      // add_to_write_list(lnast, lhs, stmt_name);
       if (rhs_type.is_ref()) {
         add_to_read_list(lnast->get_name(rhs), stmt_name);
+        // add_to_read_list(lnast, rhs, stmt_name);
         rhs_args.push_back(rhs);
       }
       lhs_list.push_back(lhs);
@@ -496,6 +631,7 @@ void Semantic_check::check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_op
           }
           // Store type 'ref' variables
           add_to_write_list(lnast, lnast->get_name(lnidx_opr_child), stmt_name);
+          // add_to_write_list(lnast, lnidx_opr_child, stmt_name);
           lhs_list.push_back(lnidx_opr_child); 
           continue;
         } else if (!node_type_child.is_ref() && !node_type_child.is_const()) {
@@ -506,6 +642,7 @@ void Semantic_check::check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_op
         if (node_type_child.is_ref()) {
           rhs_args.push_back(lnidx_opr_child);
           add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
+          // add_to_read_list(lnast, lnidx_opr_child, stmt_name);
         }
       }
       rhs_list.push_back(rhs_args);
@@ -520,6 +657,7 @@ void Semantic_check::check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_op
           num_of_ref += 1;
           // Store type 'ref' variables
           add_to_write_list(lnast, lnast->get_name(lnidx_opr_child), stmt_name);
+          // add_to_write_list(lnast, lnidx_opr_child, stmt_name);
           lhs_list.push_back(lnidx_opr_child); 
           continue;
         }
@@ -527,10 +665,12 @@ void Semantic_check::check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_op
           num_of_ref += 1;
           // Store type 'ref' variables
           add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
+          // add_to_read_list(lnast, lnidx_opr_child, stmt_name);
           rhs_args.push_back(lnidx_opr_child);
         } else if (node_type_child.is_const()) {
           num_of_const += 1;
           add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
+          // add_to_read_list(lnast, lnidx_opr_child, stmt_name);
           // rhs_args.push_back(lnidx_opr_child);
         } else if (node_type_child.is_assign()) {
           num_of_assign += 1;
@@ -555,6 +695,7 @@ void Semantic_check::check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_op
         if (lnast->get_first_child(lnidx_opr) == lnidx_opr_child) {
           num_of_ref += 1;
           add_to_write_list(lnast, lnast->get_name(lnidx_opr_child), stmt_name);
+          // add_to_write_list(lnast, lnidx_opr_child, stmt_name);
           lhs_list.push_back(lnidx_opr_child); 
           continue;
         }
@@ -562,6 +703,7 @@ void Semantic_check::check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_op
           num_of_ref += 1;
           // Store type 'ref' variables
           add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
+          // add_to_read_list(lnast, lnidx_opr_child, stmt_name);
           rhs_args.push_back(lnidx_opr_child);
         } else {
           // Invalid Node Type
@@ -584,6 +726,7 @@ void Semantic_check::check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_op
           num_of_ref += 1;
           // Store type 'ref' variables
           add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
+          // add_to_read_list(lnast, lnidx_opr_child, stmt_name);
         } else {
           // Invalid Node Type
           error_print_lnast_by_name(lnast, lnast->get_name(lnidx_opr));
@@ -675,6 +818,7 @@ void Semantic_check::check_if_op(Lnast* lnast, const Lnast_nid &lnidx_opr, std::
     } else if (ntype_child.is_cond()) {
       cond_count += 1;
       add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
+      // add_to_read_list(lnast, lnidx_opr_child, stmt_name);
     } else {
       // Invalid Node Type
       error_print_lnast_by_name(lnast, lnast->get_name(lnidx_opr));
@@ -705,8 +849,10 @@ void Semantic_check::check_for_op(Lnast* lnast, const Lnast_nid &lnidx_opr, std:
       if (!it_name) {
         it_name = true;
         add_to_write_list(lnast, lnast->get_name(lnidx_opr_child), stmt_name);
+        // add_to_write_list(lnast, lnidx_opr_child, stmt_name);
       } else {
         add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
+        // add_to_read_list(lnast, lnidx_opr_child, stmt_name);
       }
       num_of_ref += 1;      
     } else {
@@ -734,6 +880,7 @@ void Semantic_check::check_while_op(Lnast* lnast, const Lnast_nid &lnidx_opr, st
     if (ntype_child.is_cond()) {
       cond = true;
       add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
+      // add_to_read_list(lnast, lnidx_opr_child, stmt_name);
     } else if (ntype_child.is_stmts()) {
       stmt            = true;
       // Iterate through statements
@@ -774,6 +921,7 @@ void Semantic_check::check_func_def(Lnast* lnast, const Lnast_nid &lnidx_opr, st
       num_of_refs += 1;
       // Store type 'ref' variables
       add_to_write_list(lnast, lnast->get_name(lnidx_opr_child), stmt_name);
+      // add_to_write_list(lnast, lnidx_opr_child, stmt_name);
       functions.insert(lnast->get_name(lnidx_opr_child));
       continue;
     }
@@ -794,10 +942,12 @@ void Semantic_check::check_func_def(Lnast* lnast, const Lnast_nid &lnidx_opr, st
     } else if (ntype_child.is_cond()) {
       cond = true;
       add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
+      // add_to_read_list(lnast, lnidx_opr_child, stmt_name);
       // Inputs and Outputs
     } else if (ntype_child.is_ref()) {
       std::string_view ref_name = lnast->get_name(lnidx_opr_child);
       add_to_write_list(lnast, ref_name, stmt_name);
+      // add_to_write_list(lnast, lnidx_opr_child, stmt_name);
       num_of_refs += 1;
     } else {
       // Invalid Node Type
@@ -859,12 +1009,14 @@ void Semantic_check::check_func_call(Lnast* lnast, const Lnast_nid &lnidx_opr, s
     if (lnidx_opr_child == lnast->get_first_child(lnidx_opr)) {
       num_of_refs += 1;
       add_to_write_list(lnast, lnast->get_name(lnidx_opr_child), stmt_name);
+      // add_to_write_list(lnast, lnidx_opr_child, stmt_name);
       continue;
     }
     // Nodes are func_name and arguments
     if (ntype_child.is_ref()) {
       num_of_refs += 1;
       add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
+      // add_to_read_list(lnast, lnidx_opr_child, stmt_name);
     } else if (!ntype_child.is_ref()) {
       error_print_lnast_by_name(lnast, lnast->get_name(lnidx_opr));
       Pass::error("Func Call Operation Error: Child Node(s) must be Node type 'ref'\n");
@@ -911,16 +1063,16 @@ void Semantic_check::do_check(Lnast* lnast) {
   //   fmt::print("{}\n", name);
   // }
   // fmt::print("\n");
-  fmt::print("LHS + RHS List\n");
-  for (int i = 0; i < lhs_list.size(); i++) {
-    fmt::print("{} : ", lnast->get_name(lhs_list[i]));
-    fmt::print("[");
-    for (int j = 0; j < rhs_list[i].size(); j++)  {
-      fmt::print("{}, ", lnast->get_name(rhs_list[i][j]));
-    }
-    fmt::print("]\n");
-  }
-  fmt::print("\n");
+  // fmt::print("LHS + RHS List\n");
+  // for (int i = 0; i < lhs_list.size(); i++) {
+  //   fmt::print("{} : ", lnast->get_name(lhs_list[i]));
+  //   fmt::print("[");
+  //   for (int j = 0; j < rhs_list[i].size(); j++)  {
+  //     fmt::print("{}, ", lnast->get_name(rhs_list[i][j]));
+  //   }
+  //   fmt::print("]\n");
+  // }
+  // fmt::print("\n");
   // Find Errors!
   resolve_out_of_scope();
   if (out_of_scope_vars.size() != 0) {
