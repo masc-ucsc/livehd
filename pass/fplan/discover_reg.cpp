@@ -1,5 +1,5 @@
-#include <functional>
 #include <algorithm>  // for std::max, std::min, std::sort
+#include <functional>
 
 #include "fmt/core.h"
 #include "hier_tree.hpp"
@@ -93,7 +93,8 @@ Pattern Hier_tree::make_generic(Graph_info<g_type>& gi, const set_t& pat) const 
   return gpat;
 }
 
-Pattern Hier_tree::find_most_freq_pattern(Graph_info<g_type>& gi, const set_t& subg, const size_t bwidth) const {
+std::pair<Pattern, unsigned int> Hier_tree::find_most_freq_pattern(Graph_info<g_type>& gi, const set_t& subg,
+                                                                   const size_t bwidth) const {
   set_vec_t                     vp;
   std::vector<Lg_type_id::type> initlabel;
 
@@ -123,11 +124,12 @@ Pattern Hier_tree::find_most_freq_pattern(Graph_info<g_type>& gi, const set_t& s
   }
 
   if (vp.size() == 0) {
-    return Pattern();
+    return std::pair(Pattern(), 0);
   }
 
-  set_t best_pat = vp[0];
-  int   best_val = -1;
+  set_t        best_pat   = vp[0];
+  int          best_val   = -1;
+  unsigned int best_count = 0;
 
   auto cmp_set = [](const set_t& a, const set_t& b) -> bool {
     if (a.size() != b.size()) {
@@ -179,6 +181,7 @@ Pattern Hier_tree::find_most_freq_pattern(Graph_info<g_type>& gi, const set_t& s
 
     // pair of [owner of value in new_vp, value]
     std::vector<std::pair<size_t, int>> sortvec;
+    std::vector<std::pair<size_t, int>> countvec;  // for debugging only
     for (size_t i = 0; i < new_vp.size(); i++) {
       auto inst = find_all_patterns(gi, subg, make_generic(gi, new_vp[i]));
 
@@ -190,23 +193,24 @@ Pattern Hier_tree::find_most_freq_pattern(Graph_info<g_type>& gi, const set_t& s
 
       if (inst.size() > 1) {
         sortvec.emplace_back(i, value);
+        countvec.emplace_back(i, inst.size());
       }
     }
 
     auto cmp = [](auto a, auto b) -> bool { return a.second > b.second; };
 
     std::sort(sortvec.begin(), sortvec.end(), cmp);
+    std::sort(countvec.begin(), countvec.end(), cmp);
 
     sortvec.resize(std::min(bwidth, sortvec.size()));
+    countvec.resize(std::min(bwidth, countvec.size()));
 
     if (reg_verbose) {
       if (sortvec.size()) {
-        fmt::print("best pattern, value {}:\n", sortvec[0].second);
-        /*
+        fmt::print("best pattern is new_vp[{}], value {}, count {}:\n", sortvec[0].first, sortvec[0].second, countvec[0].second);
         for (auto v : new_vp[sortvec[0].first]) {
           fmt::print("  {}\n", gi.debug_names(v));
         }
-        */
       }
     }
 
@@ -217,12 +221,13 @@ Pattern Hier_tree::find_most_freq_pattern(Graph_info<g_type>& gi, const set_t& s
     }
 
     if (sortvec.size() > 0 && sortvec[0].second > best_val) {
-      best_val = sortvec[0].second;
+      best_val   = sortvec[0].second;
+      best_count = countvec[0].second;
       copy_set(best_pat, new_vp[sortvec[0].first]);
     }
   }
 
-  return make_generic(gi, best_pat);
+  return std::pair(make_generic(gi, best_pat), best_count);
 }
 
 vertex_t Hier_tree::compress_inst(Graph_info<g_type>& gi, set_t& subg, set_t& inst) {
@@ -237,6 +242,7 @@ vertex_t Hier_tree::compress_inst(Graph_info<g_type>& gi, set_t& subg, set_t& in
 
 void Hier_tree::discover_regularity(const size_t beam_width) {
   pattern_sets.resize(hiers.size());
+  pattern_counts.resize(hiers.size());
   dags.resize(collapsed_gis.size());
 
   profile_time::timer t;
@@ -244,7 +250,7 @@ void Hier_tree::discover_regularity(const size_t beam_width) {
     fmt::print("  discovering regularity on hier {} (max patterns: {})...", i, beam_width);
     t.start();
     discover_regularity(i, beam_width);
-    dags[i].init(pattern_sets[i], collapsed_gis[i]);
+    dags[i].init(pattern_sets[i], pattern_counts[i], collapsed_gis[i]);
     fmt::print("done ({} ms).\n", t.time());
   }
 
@@ -257,7 +263,8 @@ void Hier_tree::discover_regularity(const size_t hier_index, const size_t beam_w
   auto& gi   = collapsed_gis[hier_index];
   I(hier != nullptr);
 
-  auto& pattern_set = pattern_sets[hier_index];
+  auto& pattern_set   = pattern_sets[hier_index];
+  auto& pattern_count = pattern_counts[hier_index];
 
   int curr_min_depth = find_tree_depth(hier);
 
@@ -297,7 +304,7 @@ void Hier_tree::discover_regularity(const size_t hier_index, const size_t beam_w
     if (reg_verbose) {
       fmt::print("\ndepth: {}, ", curr_min_depth);
       if (curr_size == old_size) {
-        fmt::print("repeat.");
+        fmt::print("repeat, going up a level.\n");
       } else {
         fmt::print("nodes:\n");
         unsigned int total = 0;
@@ -309,40 +316,63 @@ void Hier_tree::discover_regularity(const size_t hier_index, const size_t beam_w
       }
     }
 
+    if (curr_size == old_size) {
+      curr_min_depth--;
+      continue;  // nothing new to add to pattern_sets since our set of nodes didn't grow at all
+      // but there might be something to add next round
+    }
+
     // t.start();
     // fmt::print("    finding most frequent pattern...");
-    Pattern most_freq_pattern = find_most_freq_pattern(gi, hier_nodes, beam_width);
+    auto patp = find_most_freq_pattern(gi, hier_nodes, beam_width);
+    if (reg_verbose) {
+      fmt::print("returned pattern has count {}, {} found:\n", patp.first.count(), patp.second);
+      for (auto pair : patp.first.verts) {
+        fmt::print("  label: {}, count: {}\n", pair.first, pair.second);
+      }
+    }
+
     // fmt::print("done ({} ms).\n", t.time());
 
     // if we have a pattern consisting of more than one element, find_most_frequent_pattern ensures it has >1 instantiation,
     // so we have to collapse it.
-    while (most_freq_pattern.count() > 1) {
-      if (curr_size == old_size) {
-        break;  // nothing new to add to pattern_sets since our set of nodes didn't grow at all
-      }
-
+    while (patp.first.count() > 1) {
       bool dup = false;
       for (size_t i = 0; i < pattern_set.size(); i++) {
-        if (pattern_set[i] == most_freq_pattern) {
-          dup = true;
-          if (reg_verbose) {
-            fmt::print("    pattern {} is a duplicate of {}.\n", i + 1, i);
+        if (pattern_set[i] == patp.first) {
+          if (pattern_count.at(pattern_set[i]) == patp.second) {
+            dup = true;
+            if (reg_verbose) {
+              fmt::print("    pattern returned is a duplicate of {}.\n", i);
+            }
+            break;
+          } else {
+            dup = true;
+            // found more of an existing pattern
+            auto curr_count = pattern_count.at(pattern_set[i]);
+            if (reg_verbose) {
+              fmt::print("    pattern {} bumped by {}.\n", i, patp.second - curr_count);
+            }
+            if (patp.second > curr_count) {
+              pattern_count.at(pattern_set[i]) += patp.second - curr_count;
+            }
           }
         }
       }
 
       if (!dup) {
-        pattern_set.push_back(most_freq_pattern);
+        auto new_pat           = pattern_set.emplace_back(patp.first);
+        pattern_count[new_pat] = patp.second;
       }
 
       // t.start();
       // fmt::print("    compressing hierarchy...");
 
-      auto         vinst = find_all_patterns(gi, hier_nodes, most_freq_pattern);
+      auto         vinst = find_all_patterns(gi, hier_nodes, patp.first);
       unsigned int ctr   = 0;
       for (auto inst : vinst) {
         if (reg_verbose) {
-          fmt::print("\npattern {} has {} instantiation(s).\n", ctr++, vinst.size());
+          // fmt::print("\npattern {} has {} instantiation(s).\n", ctr++, vinst.size());
         }
         auto comp_v = compress_inst(gi, hier_nodes, inst);
         pat_set.insert(comp_v);
@@ -352,7 +382,14 @@ void Hier_tree::discover_regularity(const size_t hier_index, const size_t beam_w
 
       // t.start();
       // fmt::print("    finding most frequent pattern...");
-      most_freq_pattern = find_most_freq_pattern(gi, hier_nodes, beam_width);
+      patp = find_most_freq_pattern(gi, hier_nodes, beam_width);
+      if (reg_verbose) {
+        fmt::print("returned pattern has count {}, {} found:\n", patp.first.count(), patp.second);
+        for (auto pair : patp.first.verts) {
+          fmt::print("  label: {}, count: {}\n", pair.first, pair.second);
+        }
+      }
+
       // fmt::print("done ({} ms).\n", t.time());
     }
 

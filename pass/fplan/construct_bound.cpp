@@ -13,7 +13,7 @@
 #include "profile_time.hpp"
 
 void Hier_tree::construct_bounds(const size_t dag_id, const unsigned int optimal_thresh) {
-  auto& d = dags[dag_id];
+  auto& d      = dags[dag_id];
 
   // set dimensions of leaf nodes in the dag
   std::function<void(const Dag::pdag)> assign_leaf_dims = [&](const Dag::pdag pd) {
@@ -52,12 +52,18 @@ void Hier_tree::construct_bounds(const size_t dag_id, const unsigned int optimal
 
     std::stringstream instr, outstr;
 
+    size_t in_count;
     instr << fmt::format("{}\n", pd->children.size());
-    for (auto child : pd->children) {
+    for (size_t child_i = 0; child_i < pd->children.size(); child_i++) {
+      auto child = pd->children[child_i];
       I(child->width != 0);
       I(child->height != 0);
-      // keep a few digits of precision to ourselves
-      instr << fmt::format("{:.12f} {:.12f}\n", child->width, child->height);
+      // account for the fact that there may be more than one children of a given type
+      for (in_count = 0; in_count < pd->child_edge_count[child_i]; in_count++) {
+        // keep a few digits of precision to ourselves
+        in_count++;
+        instr << fmt::format("{:.12f} {:.12f}\n", child->width, child->height);
+      }
     }
 
     if (bound_verbose) {
@@ -66,7 +72,10 @@ void Hier_tree::construct_bounds(const size_t dag_id, const unsigned int optimal
 
     // if the pattern is small, we can afford to use an exhaustive approach to finding floorplans.
     bool small_pat = pd->children.size() <= optimal_thresh;
+
     invoke_blobb(instr, outstr, small_pat);
+
+    // only record bounding box ("bounding curve") information right now
 
     double pat_width, pat_height;
     outstr >> pat_width;
@@ -88,7 +97,7 @@ void Hier_tree::construct_bounds(const unsigned int optimal_thresh) {
 void Hier_tree::invoke_blobb(const std::stringstream& instr, std::stringstream& outstr, const bool small) {
   // shelling out here because blobb uses static variables that can't easily be reset across calls.
   // TODO: information is passed to blobb by reading and writing files for now, which is slow.
-  // can we map files to memory?  the files are pretty small...
+  // can we map files to memory?  The files are pretty small...
 
   std::ofstream blobb_inf;
 
@@ -111,11 +120,12 @@ void Hier_tree::invoke_blobb(const std::stringstream& instr, std::stringstream& 
   // 1. only consider slicing packings (default)
   // 2. allow for blocks to be rotated (default)
   // 3. enable quiet operation (-t)
-  // 4. switch between an optimal floorplanning algorithm and a hierarchical one capable of handling bigger inputs with reduced quality
+  // 4. switch between an optimal floorplanning algorithm and a hierarchical one capable of handling bigger inputs with reduced
+  // quality
   // 5. a maximum deadspace percent that starts small and grows bigger over time
 
-  // note that another option here is to use the --backtrack option to find _some_ packing with a slowly increasing deadspace percent
-  // it isn't optimal, but it's a lot faster
+  // note that another option here is to use the --backtrack option to find _some_ packing with a slowly increasing deadspace
+  // percent it isn't optimal, but it's a lot faster
 
   const std::string files      = "/tmp/infile.txt /tmp/outfile.bbb";
   const std::string fixed_args = "-t";
@@ -123,7 +133,6 @@ void Hier_tree::invoke_blobb(const std::stringstream& instr, std::stringstream& 
 
   std::ifstream blobb_outf;
 
-  // run BloBB with increasing deadspace percentages until we get a floorplan
   profile_time::timer t;
   t.start();
 

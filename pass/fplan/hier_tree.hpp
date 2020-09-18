@@ -15,25 +15,30 @@
 #include "pattern.hpp"
 
 // controls for debug output on various stages that have verbose output
-constexpr bool hier_verbose = false;
+constexpr bool hier_verbose  = false;
 constexpr bool reg_verbose   = false;
 constexpr bool bound_verbose = false;
 
 // a struct representing a node in a hier_tree
-struct Hier_node {
+class Hier_node {
+public:
   std::string name;
 
-  double area = 0.0;  // area of the leaf (if node is a leaf)
-
-  std::shared_ptr<Hier_node> parent      = nullptr;
-  std::shared_ptr<Hier_node> children[2] = {nullptr, nullptr};
-
-  // which vertices in the graph the node maps to
+  // which vertices in the graph the (leaf) node maps to
   set_t graph_set;
 
-  Hier_node(const Graph_info<g_type>& gi) : parent(nullptr), graph_set(gi.al.vert_set()) {}
+  std::shared_ptr<Hier_node> parent;
+  std::shared_ptr<Hier_node> children[2] = {nullptr, nullptr};
+
+  double area;  // area of the leaf (if node is a leaf)
+  double width, height;
+  double xpos, ypos;
+
+  Hier_node(const Graph_info<g_type>& gi)
+      : graph_set(gi.al.vert_set()), parent(nullptr), area(0.0), width(0.0), height(0.0), xpos(0.0), ypos(0.0) {}
 
   bool is_leaf() const { return children[0] == nullptr && children[1] == nullptr; }
+  bool is_root() const { return parent == nullptr; }
 };
 
 struct Dim {
@@ -108,6 +113,8 @@ private:
 
   unsigned int find_tree_depth(phier node) const;
 
+  void for_each_node(phier n, void (*f)(phier n));
+
   // void dump_node(const phier node) const;
 
   phier dup_tree(phier oldn, Graph_info<g_type>& new_gi);
@@ -124,13 +131,17 @@ private:
   set_vec_t find_all_patterns(Graph_info<g_type>& gi, const set_t& subg, const Pattern& gpattern) const;
 
   // find the most frequently occuring pattern subg
-  Pattern find_most_freq_pattern(Graph_info<g_type>& gi, const set_t& subg, const size_t bwidth) const;
+  std::pair<Pattern, unsigned int> find_most_freq_pattern(Graph_info<g_type>& gi, const set_t& subg, const size_t bwidth) const;
 
   // compress a pattern instantiation so it is represented by a single vertex
   vertex_t compress_inst(Graph_info<g_type>& gi, set_t& subg, set_t& inst);
 
   // vector of pattern sets, 1 per hierarchy tree
-  std::vector<std::vector<Pattern>> pattern_sets;
+  using pattern_set = std::vector<Pattern>;
+  std::vector<pattern_set> pattern_sets;
+
+  using pattern_count = std::unordered_map<Pattern, unsigned int>;
+  std::vector<pattern_count> pattern_counts;
 
   // discover patterns in the hierarchy
   void discover_regularity(const size_t hier_index, const size_t beam_width);
@@ -151,10 +162,16 @@ private:
   void auto_select_points();
 
   struct pattern_id {
-    size_t pattern_set_id;
-    size_t pattern_id;
+    size_t pset;
+    size_t p;
   };
 
-  // store a list of indices into pattern_sets
-  std::vector<pattern_id> chosen_patterns;
+  void floorplan_point();
+
+  void generate_floorplans();
+
+  void floorplan_set(const set_t& set);
+
+  using floorplan = std::vector<Pos>;
+  std::vector<floorplan> floorplans;
 };

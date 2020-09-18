@@ -8,27 +8,28 @@
 #include "lgraph_base_core.hpp"
 
 // class representing where the node is located inside of a pattern or the whole floorplan
-/*
-class Layout {
+class Pos {
 public:
   double width, height;
   double xpos, ypos;
 
-  Layout() : width(0.0), height(0.0), xpos(-1.0), ypos(-1.0) {}
+  Pos() : width(0.0), height(0.0), xpos(0.0), ypos(0.0) {}
 
   // we may want to create a layout containing the dimensions of the node without knowing where it'll be placed
-  Layout(const double nwidth, const double nheight) : width(nwidth), height(nheight), xpos(-1.0), ypos(-1.0) {}
+  Pos(const double nwidth, const double nheight) : width(nwidth), height(nheight) {}
 
-  friend bool operator==(const Layout& l, const Layout& r) {
+  Pos(const double nwidth, const double nheight, const double nxpos, const double nypos)
+      : width(nwidth), height(nheight), xpos(nxpos), ypos(nypos) {}
+
+  friend bool operator==(const Pos& l, const Pos& r) {
     return cmpd(l.width, r.width) && cmpd(l.height, r.height) && cmpd(l.xpos, r.xpos) && cmpd(l.ypos, r.ypos);
   }
 
 private:
-  static constexpr double epsilon = 0.00001;
   // quick and dirty comparison method
-  static bool cmpd(const double l, const double r) { return std::abs(l - r) < epsilon; }
+  static constexpr double epsilon = 0.00001;
+  static bool             cmpd(const double l, const double r) { return std::abs(l - r) < epsilon; }
 };
-*/
 
 // a collection of modules
 class Pattern {

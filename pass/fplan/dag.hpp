@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <memory>  // for shared_ptr, unique_ptr
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>  // for std::pair
@@ -18,15 +19,16 @@ public:
   std::vector<std::shared_ptr<Dag_node>> children;
   std::vector<unsigned int>              child_edge_count;
 
-  unsigned int     dag_id;
+  unsigned int dag_id;
 
   // label of the dag node in the hierarchy used to generate the pattern
   Lg_type_id::type dag_label;
 
   double area;
-  double width, height;
+
   // width and height of the node (if a child), or
   // width and height of the pattern (if not a child)
+  double width, height;
 
   // iterate over pat_dag_map to find the pattern represented by a Dag_node for now
 
@@ -50,8 +52,8 @@ public:
 
   // initialize a dag from a vector of patterns with all leaves being unique,
   // and all patterns either containing leaves or other patterns.
-  void init(std::vector<Pattern> pat_set, const Graph_info<g_type>& gi);
-  
+  void init(std::vector<Pattern> pat_set, std::unordered_map<Pattern, unsigned int> pat_count, const Graph_info<g_type>& gi);
+
   void dump();
 
 private:
