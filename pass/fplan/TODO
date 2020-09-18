@@ -9,6 +9,9 @@ Optimizations:
      sets -> subgraphs
  - beware of temporaries
  - when making maps, see if I can use references instead of actual copies - might be a lot cheaper!
+ - Group a hier, pattern, etc. into a "slice" that is totally contained in a single thread
+     this is also going to make the code a ton faster because >1 thing can be done at once and better cache locality
+
 
 Style refactors:
  - make sure all class/type names are uppercase
@@ -29,8 +32,7 @@ Code improvements:
  - uniform frequency of comments
  - Hier_tree is starting to become kinda monolithic.  This is prob okay, since graph objects are super hard to move.
      Make sure that things are as decoupled as possible - private globals aren't readable.
-     We can return literals, and as long as we use move semantics we'll be fine on speed.
- - Group a hier, pattern, etc. into a "slice" that is totally contained in a single thread?
+     We can return literals, and as long as we use move semantics we'll be fine on speed. 
  - Node/vertex/vert/module terminology is inconsistant
  - only need <functional> if doing a recursive lambda...
  - dag could probably be an ordered set...

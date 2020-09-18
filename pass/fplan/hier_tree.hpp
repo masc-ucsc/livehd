@@ -18,6 +18,7 @@
 constexpr bool hier_verbose  = false;
 constexpr bool reg_verbose   = false;
 constexpr bool bound_verbose = false;
+constexpr bool floor_verbose = false;
 
 // a struct representing a node in a hier_tree
 class Hier_node {
@@ -113,8 +114,6 @@ private:
 
   unsigned int find_tree_depth(phier node) const;
 
-  void for_each_node(phier n, void (*f)(phier n));
-
   // void dump_node(const phier node) const;
 
   phier dup_tree(phier oldn, Graph_info<g_type>& new_gi);
@@ -152,8 +151,14 @@ private:
   // construct bounding boxes for patterns discovered
   void construct_bounds(const size_t dag_id, const unsigned int optimal_thresh);
 
+  void floorplan_dag_node(const Dag::pdag pd, std::stringstream& outstr, const unsigned int optimal_thresh);
+
+  // how fast blobb should run
+  enum speed { blobb_good, blobb_fast, blobb_enum };
+
   // shell out to BloBB (a quick floorplanner that is used for floorplanning patterns)
-  void invoke_blobb(const std::stringstream& instr, std::stringstream& outstr, const bool small);
+  // set hier to true for worse but faster floorplans
+  void invoke_blobb(const std::stringstream& instr, std::stringstream& outstr, const bool hier);
 
   // ask the user for the patterns worth exploring
   void manual_select_points();
@@ -174,4 +179,6 @@ private:
 
   using floorplan = std::vector<Pos>;
   std::vector<floorplan> floorplans;
+
+  void floorplan_dag_set(const std::list<Dag::pdag>& set, std::stringstream& outstr);
 };
