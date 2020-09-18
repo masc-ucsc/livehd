@@ -67,4 +67,16 @@ struct hash<Pattern> {
     return partial_hash;
   }
 };
+
+template <>
+struct hash<Pos> {
+  size_t operator()(const Pos& p) const {
+    size_t partial_hash = 0;
+    partial_hash ^= std::hash<double>()(p.width);
+    partial_hash ^= std::hash<double>()(p.height) << 1;
+    partial_hash ^= std::hash<double>()(p.xpos) << 2;
+    partial_hash ^= std::hash<double>()(p.ypos) << 3;
+    return partial_hash;
+  }
+};
 }  // namespace std

@@ -8,60 +8,6 @@
 #include "hier_tree.hpp"
 #include "i_resolve_header.hpp"
 
-/*
-void Hier_tree::manual_select_points() {
-  for (size_t i = 0; i < pattern_sets.size(); i++) {
-    for (size_t j = 0; j < pattern_sets[i].size(); j++) {
-      auto& dag = dags[i].pat_dag_map[pattern_sets[i][j]];
-
-      I(dag->width != 0.0);
-      I(dag->height != 0.0);
-      double asp = dag->width / dag->height;
-
-      fmt::print("floorplan {}, pattern {}: width {:.3f}, height {:.3f}, aspect ratio {:.3f}.\n",
-                 i,
-                 j,
-                 dag->width,
-                 dag->height,
-                 asp);
-      fmt::print("keep? (y/n/q) > ");
-      char ans;
-      std::cin >> ans;
-      if (ans == 'y') {
-        chosen_patterns.push_back({i, j});
-        fmt::print("pattern chosen.\n");
-      } else if (ans == 'n') {
-        fmt::print("pattern skipped.\n");
-      } else if (ans == 'q') {
-        return;
-      } else {
-        fmt::print("unknown choice '{}'!", ans);
-        j--;  // redo the same pattern
-      }
-    }
-  }
-}
-
-void Hier_tree::auto_select_points() {
-  static std::default_random_engine    gen;
-  static std::uniform_int_distribution dist(0, 3);  // range is actually [0, 1]!
-  for (size_t i = 0; i < pattern_sets.size(); i++) {
-    for (size_t j = 0; j < pattern_sets[i].size(); j++) {
-      //if (dist(gen) == 0) {
-        //chosen_patterns.push_back({i, j});
-      //}
-
-      if (i == 0 && j == 0) {
-        chosen_patterns.push_back({i, j});
-      }
-      if (i == 2 && j == 0) {
-        chosen_patterns.push_back({i, j});
-      }
-    }
-  }
-}
-*/
-
 void Hier_tree::floorplan_dag_set(const std::list<Dag::pdag>& set, std::stringstream& outstr) {
   std::stringstream instr;
   unsigned int      node_counter = 0;
@@ -124,9 +70,7 @@ void Hier_tree::parse_blobb(std::stringstream& blobb_str) {
 }
 
 // map an abstract floorplan back to a floorplan of actual nodes so we get connectivity information
-void Hier_tree::map_floorplan(floorplan& fp, Graph_info<g_type>& gi) {
-  // floorplan -> dag list -> pattern list -> list of verts
-}
+void Hier_tree::map_floorplan() {}
 
 // recursively descent the hierarchy tree and send full floorplans to blobb.
 // TODO: this is really slow, and not what HiReg asks for (I thought it was)
