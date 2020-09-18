@@ -52,9 +52,7 @@ void Pass_fplan::setup() {
 
   auto dtm = Eprp_method("pass.fplan.dumptree", "dump a DOT file representing the hierarchy tree", &Pass_fplan_dump::dump_tree);
   // if no options are specified, print out the whole hierarchy
-  dtm.add_label_optional("min_tree_nodes",
-                         "minimum number of components to trigger analysis of a subtree",
-                         std::to_string(1));
+  dtm.add_label_optional("min_tree_nodes", "minimum number of components to trigger analysis of a subtree", std::to_string(1));
   dtm.add_label_optional("min_tree_area",
                          "area (mm^2) threshold below which nodes will be collapsed together",
                          std::to_string(0.0));
@@ -137,6 +135,13 @@ void Pass_fplan::pass(Eprp_var& var) {
 
   fmt::print("  constructing (recursive) floorplans...\n");
   t.start();
+
+  // in order to get netlist information and complete the last algorithm, I would have to traverse
+  // floorplan -> dag list -> pattern list -> list of verts.  This isn't smart, and I can't really think of a way
+  // around it without major refactoring of internal logic.
+
+  // for now, the floorplans are just the output of blobb area-packing different versions of the hierarchy.
+
   h.construct_recursive_floorplans();
   fmt::print("done ({} ms).\n", t.time());
 

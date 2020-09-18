@@ -129,6 +129,9 @@ private:
   // find the most frequently occuring pattern subg
   std::pair<Pattern, unsigned int> find_most_freq_pattern(Graph_info<g_type>& gi, const set_t& subg, const size_t bwidth) const;
 
+  using pimap = std::unordered_map<Pattern, std::vector<set_t&>>;
+  pimap pat_imp_map;
+
   // compress a pattern instantiation so it is represented by a single vertex
   vertex_t compress_inst(Graph_info<g_type>& gi, set_t& subg, set_t& inst);
 
@@ -165,10 +168,10 @@ private:
     size_t p;
   };
 
+  // generate floorplans properly according to HiReg
   void generate_floorplans();
 
-  void floorplan_set(const set_t& set);
-
+  // stores actual floorplan information
   struct floorplan {
     std::vector<Pos> sub_fps;
     double           total_width, total_height;
@@ -176,9 +179,12 @@ private:
 
   std::vector<floorplan> floorplans;
 
+  // floorplan a dag set (for recursively generating floorplans, which isn't what we want)
   void floorplan_dag_set(const std::list<Dag::pdag>& set, std::stringstream& outstr);
 
+  // stuff output from blobb into the floorplan vector
   void parse_blobb(std::stringstream& instr);
 
-  void map_floorplan(floorplan& fp, Graph_info<g_type>& gi);
+  // put netlist information into a floorplan
+  void map_floorplan();
 };
