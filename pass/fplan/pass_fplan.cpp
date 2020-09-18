@@ -137,7 +137,7 @@ void Pass_fplan::pass(Eprp_var& var) {
   t.start();
 
   // in order to get netlist information and complete the last algorithm, I would have to traverse
-  // floorplan -> dag list -> pattern list -> list of verts.  This isn't smart, and I can't really think of a way
+  // floorplan -> dag list -> pattern list -> list of verts.  This is needlessly complex and slow, and I can't really think of a way
   // around it without major refactoring of internal logic.
 
   // for now, the floorplans are just the output of blobb area-packing different versions of the hierarchy.
