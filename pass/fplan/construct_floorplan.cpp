@@ -64,20 +64,30 @@ void Hier_tree::parse_blobb(std::stringstream& blobb_str) {
     blobb_str >> x;
     blobb_str >> y;
 
-    fp.sub_fps[i].width  = x;
-    fp.sub_fps[i].height = y;
+    fp.sub_fps[i].xpos  = x;
+    fp.sub_fps[i].ypos = y;
   }
 }
 
 // map an abstract floorplan back to a floorplan of actual nodes so we get connectivity information
 void Hier_tree::map_floorplan() {}
 
+void Hier_tree::dump_floorplans() {
+  for (size_t i = 0; i < floorplans.size(); i++) {
+    fmt::print("floorplan {}, width {:.3f}, height {:.3f}.\n", i, floorplans[i].total_width, floorplans[i].total_height);
+    for (size_t j = 0; j < floorplans[i].sub_fps.size(); j++) {
+      auto elem = floorplans[i].sub_fps[j];
+      fmt::print("  element {} at ({}, {}) has width {:.3f}, height {:.3f}\n", j, elem.xpos, elem.ypos, elem.width, elem.height);
+    }
+  }
+}
+
 // recursively descent the hierarchy tree and send full floorplans to blobb.
 // TODO: this is really slow, and not what HiReg asks for (I thought it was)
 void Hier_tree::construct_recursive_floorplans() {
   for (size_t i = 0; i < hiers.size(); i++) {
     auto& dag         = dags[i];
-    auto& pattern_set = pattern_sets[i];
+    // auto& pattern_set = pattern_sets[i];
 
     // TODO: replace this with an unordered set
     std::list<Dag::pdag> subpatterns;
