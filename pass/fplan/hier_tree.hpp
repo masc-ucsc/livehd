@@ -42,11 +42,6 @@ public:
   bool is_root() const { return parent == nullptr; }
 };
 
-struct Dim {
-  double width;
-  double height;
-};
-
 class Hier_tree {
 public:
   Hier_tree(Eprp_var& var);
@@ -76,6 +71,8 @@ public:
 
   // make actual floorplans based on the patterns previously selected
   void construct_floorplans();
+
+  void construct_recursive_floorplans();
 
 private:
   friend class Pass_fplan_dump;
@@ -153,9 +150,6 @@ private:
 
   void floorplan_dag_node(const Dag::pdag pd, std::stringstream& outstr, const unsigned int optimal_thresh);
 
-  // how fast blobb should run
-  enum speed { blobb_good, blobb_fast, blobb_enum };
-
   // shell out to BloBB (a quick floorplanner that is used for floorplanning patterns)
   // set hier to true for worse but faster floorplans
   void invoke_blobb(const std::stringstream& instr, std::stringstream& outstr, const bool hier);
@@ -171,14 +165,20 @@ private:
     size_t p;
   };
 
-  void floorplan_point();
-
   void generate_floorplans();
 
   void floorplan_set(const set_t& set);
 
-  using floorplan = std::vector<Pos>;
+  struct floorplan {
+    std::vector<Pos> sub_fps;
+    double           total_width, total_height;
+  };
+
   std::vector<floorplan> floorplans;
 
   void floorplan_dag_set(const std::list<Dag::pdag>& set, std::stringstream& outstr);
+
+  void parse_blobb(std::stringstream& instr);
+
+  void map_floorplan(floorplan& fp, Graph_info<g_type>& gi);
 };

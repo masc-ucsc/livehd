@@ -62,18 +62,6 @@ void Hier_tree::auto_select_points() {
 }
 */
 
-void Hier_tree::floorplan_point() {
-  // TODO: replace this mess with some maps or something
-  // auto& pat = pattern_sets[pid.pset][pid.p];
-  // auto& layout = floorplan_sets[pid.pset][pid.p];
-  // auto& dag    = dags[pid.pset].pat_dag_map[pat];
-
-  // the tree we're using to generate floorplans is NOT A HIERARCHY TREE
-  // 1. output earlier in the paper says "set of regular hierarchies"
-  // 2. alg 5 mentions "for all children in T", not just for the two children like earlier in the paper
-  //    This means the tree isn't binary like the hierarchy tree.
-}
-
 void Hier_tree::floorplan_dag_set(const std::list<Dag::pdag>& set, std::stringstream& outstr) {
   std::stringstream instr;
   unsigned int      node_counter = 0;
@@ -94,13 +82,55 @@ void Hier_tree::floorplan_dag_set(const std::list<Dag::pdag>& set, std::stringst
   if (floor_verbose) {
     fmt::print("\ninput string stream:\n{}", instr.str());
   }
-  
+
   invoke_blobb(instr, outstr, node_counter > 8);
 }
 
-// generates a list of possible floorplans ranging from all leaf nodes (best wire connectivity)
-// to all pattern nodes (best regularity)
-void Hier_tree::generate_floorplans() {
+// read blobb output from a string and assign it to a floorplan
+void Hier_tree::parse_blobb(std::stringstream& blobb_str) {
+  floorplans.emplace_back();
+  auto& fp = floorplans[floorplans.size() - 1];
+
+  double tw, th;
+  blobb_str >> tw;
+  blobb_str >> th;
+
+  fp.total_width  = tw;
+  fp.total_height = th;
+
+  size_t num_subs;
+  blobb_str >> num_subs;
+
+  for (size_t i = 0; i < num_subs; i++) {
+    double w, h;
+
+    blobb_str >> w;
+    blobb_str >> h;
+
+    fp.sub_fps.emplace_back();
+    fp.sub_fps[i].width  = w;
+    fp.sub_fps[i].height = h;
+  }
+
+  for (size_t i = 0; i < num_subs; i++) {
+    double x, y;
+
+    blobb_str >> x;
+    blobb_str >> y;
+
+    fp.sub_fps[i].width  = x;
+    fp.sub_fps[i].height = y;
+  }
+}
+
+// map an abstract floorplan back to a floorplan of actual nodes so we get connectivity information
+void Hier_tree::map_floorplan(floorplan& fp, Graph_info<g_type>& gi) {
+  // floorplan -> dag list -> pattern list -> list of verts
+}
+
+// recursively descent the hierarchy tree and send full floorplans to blobb.
+// TODO: this is really slow, and not what HiReg asks for (I thought it was)
+void Hier_tree::construct_recursive_floorplans() {
   for (size_t i = 0; i < hiers.size(); i++) {
     auto& dag         = dags[i];
     auto& pattern_set = pattern_sets[i];
@@ -127,6 +157,7 @@ void Hier_tree::generate_floorplans() {
       // we're floorplanning a lot of nodes, so switching to hierarchical seems like a good idea
       // TODO: maybe also enumeration mode in BloBB? we aren't really going after optimal packings...
       floorplan_dag_set(subpatterns, outstr);
+      parse_blobb(outstr);
 
       has_patterns = false;
 
@@ -144,49 +175,38 @@ void Hier_tree::generate_floorplans() {
 
     // floorplan all the leaf nodes too
     floorplan_dag_set(subpatterns, outstr);
-
-    /*
-    fp_set.emplace_back();  // create a new floorplan
-        double pat_width, pat_height;
-        outstr >> pat_width;
-        outstr >> pat_height;
-
-        pd->width  = pat_width;
-        pd->height = pat_height;
-
-        size_t out_count;
-        outstr >> out_count;
-
-        I(out_count == in_count);
-
-        auto& gi   = collapsed_gis[dag_id];
-        auto  allg = gi.al.vert_set();
-        for (auto v : gi.al.verts()) {
-          allg.insert(v);
-        }
-
-        for (size_t i = 0; i < out_count; i++) {
-          double child_width, child_height;
-          outstr >> child_width;
-          outstr >> child_height;
-          fp_set[floorplan_i].emplace_back(child_width, child_height);
-        }
-
-        for (size_t i = 0; i < out_count; i++) {
-          double child_xpos, child_ypos;
-          outstr >> child_xpos;
-          outstr >> child_ypos;
-          fp_set[floorplan_i][i].xpos = child_xpos;
-          fp_set[floorplan_i][i].ypos = child_ypos;
-        }
-
-    */
+    parse_blobb(outstr);
   }
 }
 
 void Hier_tree::construct_floorplans() {
-  // HiReg states that we should select outlines and start constructing floorplans from those outlines.
-  // It's going to be easier (and more popular) to just recursively floorplan the whole design at once.
+  std::vector<pattern_id> valid_pats;
 
-  generate_floorplans();
+  std::unordered_map<Pattern, floorplan> fpm;
+
+  // just floorplan a test pattern for now
+  const size_t valid_ps   = 0;
+  const size_t valid_p    = 0;
+  auto         valid_pdag = dags[0].pat_dag_map[pattern_sets[valid_ps][valid_p]];
+
+  double vw, vh;
+  vw = valid_pdag->width;
+  vh = valid_pdag->height;
+
+  // find all floorplans that can fit inside valid_pats
+  size_t valid_matches = 0;
+  for (size_t ps = 0; ps < pattern_sets.size(); ps++) {
+    for (size_t p = 0; p < pattern_sets[ps].size(); p++) {
+      auto& pat = pattern_sets[ps][p];
+      auto& pd  = dags[ps].pat_dag_map[pat];
+      if (pd->width == vw && pd->height == vh) {
+        valid_pats.push_back({ps, p});
+        valid_matches++;
+      }
+    }
+  }
+
+  fmt::print("{} matches found.\n", valid_matches);
+
+  I(false, "not implemented yet!");
 }

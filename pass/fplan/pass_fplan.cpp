@@ -135,9 +135,9 @@ void Pass_fplan::pass(Eprp_var& var) {
   h.construct_bounds(mon);
   fmt::print("  done ({} ms).\n", t.time());
 
-  fmt::print("  constructing floorplans...\n");
+  fmt::print("  constructing (recursive) floorplans...\n");
   t.start();
-  h.construct_floorplans();
+  h.construct_recursive_floorplans();
   fmt::print("done ({} ms).\n", t.time());
 
   fmt::print("floorplan generated ({} ms).\n\n", whole_t.time());
