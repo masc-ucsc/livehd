@@ -37,23 +37,24 @@ Dag::pdag Dag::add_leaf_vert(const Lg_type_id::type label, const double area) {
   return pd;
 }
 
-void Dag::init(std::vector<Pattern> pattern_sets, const Graph_info<g_type>& gi) {
+void Dag::init(std::vector<Pattern> pattern_set, std::unordered_map<Pattern, unsigned int> pattern_count,
+               const Graph_info<g_type>& gi) {
   // need to keep track of all the verts we've come across so we can add them to the dag as leaves if required
   std::unordered_map<Lg_type_id::type, unsigned int> subp_verts;
 
-  for (auto pat : pattern_sets) {
+  for (auto pat : pattern_set) {
     auto pd = add_pat_vert();
     pat_dag_map.emplace(pat, pd);
   }
 
   // check for edges between patterns
-  for (size_t i = 0; i < pattern_sets.size(); i++) {
-    auto  pat   = pattern_sets[i].verts;
-    auto& pat_p = pat_dag_map[pattern_sets[i]];
+  for (size_t i = 0; i < pattern_set.size(); i++) {
+    auto  pat   = pattern_set[i].verts;
+    auto& pat_p = pat_dag_map[pattern_set[i]];
 
     // going in reverse because we want the largest subset, not the smallest
     for (int j = i - 1; j >= 0; j--) {
-      auto subpat = pattern_sets[j].verts;
+      auto subpat = pattern_set[j].verts;
 
       bool subset = true;
 
@@ -73,8 +74,9 @@ void Dag::init(std::vector<Pattern> pattern_sets, const Graph_info<g_type>& gi) 
       if (subset) {
         for (auto spair : subpat) {
           pat[spair.first] -= spair.second;
+          pattern_count[pattern_set[j]]--;
 
-          add_edge(pat_p, pat_dag_map[pattern_sets[j]], spair.second);
+          add_edge(pat_p, pat_dag_map[pattern_set[j]], spair.second);
           j++;  // run the same check over again to see if we can match another subpattern of the same type
         }
       }
@@ -95,7 +97,7 @@ void Dag::init(std::vector<Pattern> pattern_sets, const Graph_info<g_type>& gi) 
           }
         }
         I(area != 0.0);
-        
+
         pat_leaf = add_leaf_vert(label, area);
 
         subp_verts.emplace(pair);
@@ -107,16 +109,16 @@ void Dag::init(std::vector<Pattern> pattern_sets, const Graph_info<g_type>& gi) 
   // find subpatterns not owned by other subpatterns, as they should belong to root
   for (auto pd : pat_dag_map) {
     if (pd.second->parent == nullptr) {
-      add_edge(root, pd.second, 1);
+      add_edge(root, pd.second, pattern_count[pd.first]);
     }
   }
 
   std::unordered_map<Lg_type_id::type, pdag> label_pat_map;
 
   for (auto v : gi.al.verts()) {
-    pdag pd;
     auto label = gi.labels(v);
     if (subp_verts.count(label) == 0) {
+      pdag pd;
       // if vertex hasn't been picked up by a subpattern, it's a child of root
       if (label_pat_map.count(label) == 0) {
         // find the area

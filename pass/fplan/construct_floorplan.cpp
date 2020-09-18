@@ -1,9 +1,11 @@
 #include <iostream>
 #include <random>
+#include <set>
 
 #include "fmt/core.h"
 #include "hier_tree.hpp"
 
+/*
 void Hier_tree::manual_select_points() {
   for (size_t i = 0; i < pattern_sets.size(); i++) {
     for (size_t j = 0; j < pattern_sets[i].size(); j++) {
@@ -42,11 +44,9 @@ void Hier_tree::auto_select_points() {
   static std::uniform_int_distribution dist(0, 3);  // range is actually [0, 1]!
   for (size_t i = 0; i < pattern_sets.size(); i++) {
     for (size_t j = 0; j < pattern_sets[i].size(); j++) {
-      /*
-      if (dist(gen) == 0) {
-        chosen_patterns.push_back({i, j});
-      }
-      */
+      //if (dist(gen) == 0) {
+        //chosen_patterns.push_back({i, j});
+      //}
 
       if (i == 0 && j == 0) {
         chosen_patterns.push_back({i, j});
@@ -57,19 +57,75 @@ void Hier_tree::auto_select_points() {
     }
   }
 }
+*/
+
+void Hier_tree::floorplan_point() {
+  // TODO: replace this mess with some maps or something
+  // auto& pat = pattern_sets[pid.pset][pid.p];
+  // auto& layout = floorplan_sets[pid.pset][pid.p];
+  // auto& dag    = dags[pid.pset].pat_dag_map[pat];
+
+  // the tree we're using to generate floorplans is NOT A HIERARCHY TREE
+  // 1. output earlier in the paper says "set of regular hierarchies"
+  // 2. alg 5 mentions "for all children in T", not just for the two children like earlier in the paper
+  //    This means the tree isn't binary like the hierarchy tree.
+}
+
+void Hier_tree::floorplan_set(const set_t& set) {
+
+}
+
+// generates a list of possible floorplans ranging from all leaf nodes (best wire connectivity)
+// to all pattern nodes (best regularity)
+void Hier_tree::generate_floorplans() {
+  // 1. toss anything that is bigger than the target outline (not done in our case)
+  for (size_t i = 0; i < hiers.size(); i++) {
+    auto& dag = dags[i];
+    auto& pattern_set = pattern_sets[i];
+    std::vector<Dim> components;
+    
+
+
+    /*
+    fp_set.emplace_back();  // create a new floorplan
+        double pat_width, pat_height;
+        outstr >> pat_width;
+        outstr >> pat_height;
+
+        pd->width  = pat_width;
+        pd->height = pat_height;
+
+        size_t out_count;
+        outstr >> out_count;
+
+        I(out_count == in_count);
+
+        auto& gi   = collapsed_gis[dag_id];
+        auto  allg = gi.al.vert_set();
+        for (auto v : gi.al.verts()) {
+          allg.insert(v);
+        }
+
+        for (size_t i = 0; i < out_count; i++) {
+          double child_width, child_height;
+          outstr >> child_width;
+          outstr >> child_height;
+          fp_set[floorplan_i].emplace_back(child_width, child_height);
+        }
+
+        for (size_t i = 0; i < out_count; i++) {
+          double child_xpos, child_ypos;
+          outstr >> child_xpos;
+          outstr >> child_ypos;
+          fp_set[floorplan_i][i].xpos = child_xpos;
+          fp_set[floorplan_i][i].ypos = child_ypos;
+        }
+
+    */
+  }
+}
 
 void Hier_tree::construct_floorplans() {
-  bool automatic = true;
-  if (automatic) {
-    auto_select_points();
-    fmt::print("selected patterns ");
-    for (auto pati : chosen_patterns) {
-      fmt::print("({}, {}) ", pati.pattern_set_id, pati.pattern_id);
-    }
-    fmt::print("\n");
-  } else {
-    manual_select_points();
-  }
-
-  // actually construct floorplans here
+  // HiReg states that we should select outlines and start constructing floorplans from those outlines.
+  // It's going to be easier (and more popular) to just recursively floorplan the whole design at once.
 }

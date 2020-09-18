@@ -190,6 +190,18 @@ unsigned int Hier_tree::find_tree_size(phier node) const {
   return find_tree_size(node->children[0]) + find_tree_size(node->children[1]) + 1;
 }
 
+// calls f for each node in the hierarchy tree, post-order
+void Hier_tree::for_each_node(phier n, void(*f)(phier n)) {
+  if (n->is_leaf()) {
+    return;
+  }
+
+  f(n);
+
+  for_each_node(n->children[0], f);
+  for_each_node(n->children[1], f);
+}
+
 unsigned int Hier_tree::find_tree_depth(phier node) const {
   std::function<unsigned int(phier, unsigned int)> find_depth = [&find_depth](phier rnode, unsigned int depth) -> unsigned int {
     if (rnode->is_leaf()) {
