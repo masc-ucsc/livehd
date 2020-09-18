@@ -1,9 +1,12 @@
 #include <iostream>
+#include <list>
 #include <random>
 #include <set>
+#include <sstream>
 
 #include "fmt/core.h"
 #include "hier_tree.hpp"
+#include "i_resolve_header.hpp"
 
 /*
 void Hier_tree::manual_select_points() {
@@ -71,20 +74,76 @@ void Hier_tree::floorplan_point() {
   //    This means the tree isn't binary like the hierarchy tree.
 }
 
-void Hier_tree::floorplan_set(const set_t& set) {
+void Hier_tree::floorplan_dag_set(const std::list<Dag::pdag>& set, std::stringstream& outstr) {
+  std::stringstream instr;
+  unsigned int      node_counter = 0;
 
+  I(set.size() > 0);
+
+  instr << fmt::format("{}\n", set.size());
+
+  for (auto pd : set) {
+    I(pd->width != 0);
+    I(pd->height != 0);
+    // account for the fact that there may be more than one children of a given type
+    node_counter++;
+    // keep a few digits of precision to ourselves
+    instr << fmt::format("{:.12f} {:.12f}\n", pd->width, pd->height);
+  }
+
+  if (floor_verbose) {
+    fmt::print("\ninput string stream:\n{}", instr.str());
+  }
+  
+  invoke_blobb(instr, outstr, node_counter > 8);
 }
 
 // generates a list of possible floorplans ranging from all leaf nodes (best wire connectivity)
 // to all pattern nodes (best regularity)
 void Hier_tree::generate_floorplans() {
-  // 1. toss anything that is bigger than the target outline (not done in our case)
   for (size_t i = 0; i < hiers.size(); i++) {
-    auto& dag = dags[i];
+    auto& dag         = dags[i];
     auto& pattern_set = pattern_sets[i];
-    std::vector<Dim> components;
-    
 
+    // TODO: replace this with an unordered set
+    std::list<Dag::pdag> subpatterns;
+
+    auto push_children = [&](Dag::pdag pd) {
+      for (size_t ci = 0; ci < pd->children.size(); ci++) {
+        for (size_t count = 0; count < pd->child_edge_count[ci]; count++) {
+          subpatterns.push_back(pd->children[ci]);
+        }
+      }
+    };
+
+    I(dag.root != nullptr);
+
+    push_children(dag.root);
+
+    std::stringstream outstr;
+
+    bool has_patterns;
+    do {
+      // we're floorplanning a lot of nodes, so switching to hierarchical seems like a good idea
+      // TODO: maybe also enumeration mode in BloBB? we aren't really going after optimal packings...
+      floorplan_dag_set(subpatterns, outstr);
+
+      has_patterns = false;
+
+      for (auto it = subpatterns.begin(); it != subpatterns.end(); it++) {
+        auto pd = *it;
+        if (!pd->is_leaf()) {
+          subpatterns.erase(it);
+
+          push_children(pd);
+          has_patterns = true;
+          break;
+        }
+      }
+    } while (has_patterns);
+
+    // floorplan all the leaf nodes too
+    floorplan_dag_set(subpatterns, outstr);
 
     /*
     fp_set.emplace_back();  // create a new floorplan
@@ -128,4 +187,6 @@ void Hier_tree::generate_floorplans() {
 void Hier_tree::construct_floorplans() {
   // HiReg states that we should select outlines and start constructing floorplans from those outlines.
   // It's going to be easier (and more popular) to just recursively floorplan the whole design at once.
+
+  generate_floorplans();
 }
