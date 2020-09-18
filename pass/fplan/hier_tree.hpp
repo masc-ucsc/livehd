@@ -74,6 +74,8 @@ public:
 
   void construct_recursive_floorplans();
 
+  void dump_floorplans();
+
 private:
   friend class Pass_fplan_dump;
   using phier = std::shared_ptr<Hier_node>;
@@ -128,9 +130,6 @@ private:
 
   // find the most frequently occuring pattern subg
   std::pair<Pattern, unsigned int> find_most_freq_pattern(Graph_info<g_type>& gi, const set_t& subg, const size_t bwidth) const;
-
-  using pimap = std::unordered_map<Pattern, std::vector<set_t&>>;
-  pimap pat_imp_map;
 
   // compress a pattern instantiation so it is represented by a single vertex
   vertex_t compress_inst(Graph_info<g_type>& gi, set_t& subg, set_t& inst);

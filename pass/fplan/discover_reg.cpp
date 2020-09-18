@@ -369,14 +369,10 @@ void Hier_tree::discover_regularity(const size_t hier_index, const size_t beam_w
       // fmt::print("    compressing hierarchy...");
 
       auto         vinst = find_all_patterns(gi, hier_nodes, patp.first);
-      unsigned int ctr   = 0;
       for (auto inst : vinst) {
         if (reg_verbose) {
           // fmt::print("\npattern {} has {} instantiation(s).\n", ctr++, vinst.size());
         }
-        
-        // record instantiations of patterns so we can get connectivity info later
-        pat_imp_map[patp.first].emplace_back(inst);
 
         auto comp_v = compress_inst(gi, hier_nodes, inst);
         pat_set.insert(comp_v);
