@@ -343,7 +343,7 @@ void Elab_scanner::parse_step() {
 
       in_string_pos = true;
     } else {
-      Token_id nt = translate[c].tok;
+      Token_id nt = translate[c].tok;//next token
       finishing_comment = false;
 
       add_token(t);
