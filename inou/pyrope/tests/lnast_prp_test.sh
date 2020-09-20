@@ -12,8 +12,7 @@ pts='hier_tuple_io logic
      out_ssa if2 if ssa_rhs bits_rhs counter counter_nested_if
      '
 
-pts="firrtl_gcd"
-  # FIXME: firrtl_tail3 firrtl_gcd
+  # FIXME: firrtl_tail3 firrtl_gcd counter_tup
 
 # make sure to call Pyrope_compile() in the end of script
 # pts=''
