@@ -177,6 +177,7 @@ public:
 
   LGraph *get_top_lgraph() const { return top_g; }
   LGraph *get_class_lgraph() const { return current_g; }
+  LGraph *get_lg() const { return current_g; } // To handle hierarchical API
 
   Hierarchy_index get_hidx() const { return hidx; }
 

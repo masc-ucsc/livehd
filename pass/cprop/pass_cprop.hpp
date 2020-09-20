@@ -9,7 +9,9 @@
 
 class Pass_cprop : public Pass {
 private:
+  bool hier;
 protected:
+
   absl::flat_hash_map<Node::Compact, std::shared_ptr<Lgtuple>> node2tuple;  // node to the most up-to-dated tuple chain
 
   static void optimize(Eprp_var &var);
@@ -33,20 +35,19 @@ protected:
   void process_attr_q_pin(Node &node, Node_pin &parent_dpin);
 
   // Tuple methods
-  void merge_to_tuple(std::shared_ptr<Lgtuple> tup, Node &node, Node &parent_node, Node_pin &parent_dpin, int key_pos,
-                      std::string_view key_name, Node_pin &val_dpin, bool is_attr_set, int attr_bits);
+  std::shared_ptr<Lgtuple> process_tuple_add_chain(Node_pin up_dpin);
+  void process_tuple_add(Node &node);
+  bool process_tuple_get(Node &node);
 
-  bool process_tuple_get_get_chain(Node &tg_node, Node &gp_node, Node_pin &val_dpin, std::string_view key_name, LGraph *lg,
-                                   Node &follower_tg_node);
-  void process_tuple_add(Node &node, LGraph *lg);
-  bool process_tuple_get(Node &node, LGraph *lg);
-  bool process_tuple_get_bk(Node &node);
-
+  // Entry point
   void trans(LGraph *orig);
 
 public:
   Pass_cprop(const Eprp_var &var);
 
-  static std::tuple<std::string_view, int> get_tuple_name_key(Node &node);
+  static std::tuple<std::string_view, std::string_view, int> get_tuple_name_key(Node &node);
   static void                              setup();
+
+  void dump_node2tuples() const;
 };
+
