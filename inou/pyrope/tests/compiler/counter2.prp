@@ -1,0 +1,9 @@
+
+#counter.__bits = 2
+
+if $in1 {
+  #counter := #counter + 1
+}
+
+%out = #counter
+
