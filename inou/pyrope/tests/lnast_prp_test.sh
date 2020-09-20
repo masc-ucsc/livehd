@@ -3,7 +3,7 @@ rm -rf ./lgdb
 
 pts_to_do='lhs_wire3 tuple funcall_unnamed2'
 pts='hier_tuple_io logic
-     reg_bits_set tuple_copy
+     hier_tuple reg_bits_set tuple_copy
      hier_tuple2 hier_tuple3
      lhs_wire lhs_wire2 scalar_tuple attr_set
      firrtl_tail firrtl_tail2
@@ -12,7 +12,8 @@ pts='hier_tuple_io logic
      out_ssa if2 if ssa_rhs bits_rhs counter counter_nested_if
      '
 
-     # hier_tuple firrtl_tail3 firrtl_gcd
+pts="firrtl_gcd"
+  # FIXME: firrtl_tail3 firrtl_gcd
 
 # make sure to call Pyrope_compile() in the end of script
 # pts=''
