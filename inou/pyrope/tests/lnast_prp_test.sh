@@ -2,23 +2,25 @@
 rm -rf ./lgdb
 
 pts_to_do='lhs_wire3 tuple funcall_unnamed2'
-pts='firrtl_gcd hier_tuple_io logic
-     reg_bits_set tuple_copy 
-     hier_tuple hier_tuple2 hier_tuple3
+pts='hier_tuple_io logic
+     reg_bits_set tuple_copy
+     hier_tuple2 hier_tuple3
      lhs_wire lhs_wire2 scalar_tuple attr_set
-     firrtl_tail firrtl_tail2  firrtl_tail3
-     adder_stage tuple_if reg__q_pin nested_if 
+     firrtl_tail firrtl_tail2
+     adder_stage tuple_if reg__q_pin nested_if
      capricious_bits2 capricious_bits4 capricious_bits
      out_ssa if2 if ssa_rhs bits_rhs counter counter_nested_if
      '
 
+     # hier_tuple firrtl_tail3 firrtl_gcd
+
 # make sure to call Pyrope_compile() in the end of script
 # pts=''
-pts_hier='sum funcall'  
+pts_hier='sum funcall'
 pts_hier2='sum2 funcall2'
 
 #inline function call
-pts_hier4='funcall4'      
+pts_hier4='funcall4'
 pts_hier5='funcall5'
 pts_hier6='funcall_unnamed'
 

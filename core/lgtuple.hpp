@@ -25,7 +25,8 @@ protected:
 
   absl::flat_hash_map<std::string, int> key2pos;
   std::vector<std::shared_ptr<Lgtuple>> pos2tuple;  // pos to its corresponding most up-to-dated tuple chain (at old time)
-  absl::flat_hash_map<std::string, int> key2bits;
+
+  void reset_non_attr_fields();
 
   void reset() {
     ordered = true;
@@ -82,26 +83,21 @@ public:
     return has_name;
   }
 
+  bool has_key(int key_pos, std::string_view key_name) {
+    if (!key_name.empty())
+      return has_key_name(key_name);
+    assert(key_pos>=0);
+    return has_key_pos(key_pos);
+  }
+
   std::string_view get_key_name(size_t key) const {
     I(has_key_name(key));
     return pos2tuple[key]->get_parent_key_name();
   }
 
-
-  void set_key2bits(std::string_view key, int bits) {
-    I(bits != -1);
-    key2bits[key] = bits;
-  }
-  
-  int get_bits_from_key(std::string_view key) {
-    if(key2bits.find(key) == key2bits.end()) 
-      return -1;
-    
-    return key2bits[key];
-  }
-
   std::shared_ptr<Lgtuple> get_tuple(std::string_view key);
   std::shared_ptr<Lgtuple> get_tuple(size_t key);
+  std::shared_ptr<Lgtuple> get_tuple(int pos, std::string_view key);
 
   bool set(int pos, std::string_view key, const Node_pin &dpin);  // int -> pos<0 invalid
 
@@ -129,6 +125,8 @@ public:
 
   void set(LGraph *lg, const Lconst &constant);
   void set(const Node_pin &dpin);
+
+  std::vector<std::pair<std::string_view, Node_pin>> get_all_attributes() const;
 
   void dump() const { dump("  "); }
   void dump(std::string_view indent) const;

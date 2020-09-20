@@ -30,6 +30,25 @@ std::shared_ptr<Lgtuple> Lgtuple::get_tuple(size_t pos) {
   return pos2tuple[pos];
 }
 
+std::shared_ptr<Lgtuple> Lgtuple::get_tuple(int pos, std::string_view key) {
+  if (pos == 0 && is_scalar()) {
+    return shared_from_this();
+  }
+  if (pos < 0) {
+    if (!has_key_name(key))
+      return nullptr; // field not found
+
+    pos = get_key_pos(key);
+  }else if (has_key_name(key)) {
+    if (static_cast<size_t>(pos)!=get_key_pos(key))
+      return nullptr; // Should be a compile error. Inconsistent field
+  }
+
+  I(pos>=0);
+  I(static_cast<size_t>(pos) < pos2tuple.size());
+  return pos2tuple[pos];
+}
+
 void Lgtuple::unscalarize_if_needed() {
   if (is_scalar() && !val_dpin.is_invalid()) {
     named = false;                                         // first did not have name
@@ -64,17 +83,14 @@ size_t Lgtuple::get_or_create_pos(size_t pos, std::string_view key) {
 size_t Lgtuple::get_or_create_pos(std::string_view key) {
   unscalarize_if_needed();
 
-  auto pos       = pos2tuple.size();
-  bool new_entry = true;
-
-  ordered = false;
-
+  size_t pos;
   if (has_key_name(key)) {
     pos       = get_key_pos(key);
-    new_entry = false;
   } else {
+    pos       = pos2tuple.size();
     pos2tuple.emplace_back(std::make_shared<Lgtuple>(key));  // named
     key2pos[key] = pos;
+    ordered = false;
   }
 
   return pos;
@@ -126,10 +142,27 @@ bool Lgtuple::set(int pos, std::string_view key, const Node_pin &_val_dpin) {
   return true;
 }
 
-void Lgtuple::set(std::string_view key, std::shared_ptr<Lgtuple> tup) {
-  (void)key;
-  (void)tup;
-  I(false);  // handle copy of tuple recursively
+void Lgtuple::set(std::string_view key, std::shared_ptr<Lgtuple> tup2) {
+  auto it = key2pos.find(key);
+  if (it == key2pos.end()) {
+    auto shift = pos2tuple.size();
+    pos2tuple.emplace_back(tup2);
+    key2pos[key] = shift;
+  }else{
+    I(pos2tuple.size()> it->second);
+    I(!(pos2tuple[it->second]->is_dpin() && tup2->is_dpin())); // Which one to pick??!!??
+    if (tup2->is_dpin()) {
+      pos2tuple[it->second]->set(tup2->get_value_dpin()); // also resets non attr fields
+    }else{
+      pos2tuple[it->second]->reset_non_attr_fields();
+    }
+    pos2tuple[it->second]->add(tup2);
+  }
+
+  if (tup2->parent_key_name.empty())
+    tup2->parent_key_name = key;
+  else if (tup2->parent_key_name[0] == '_' && tup2->parent_key_name[2] == '_')
+    tup2->parent_key_name = key;
 }
 
 void Lgtuple::set(std::string_view key, LGraph *lg, const Lconst &constant) {
@@ -226,17 +259,42 @@ Lconst Lgtuple::get_constant() const {
   return val_dpin.get_node().get_type_const();
 }
 
+void Lgtuple::reset_non_attr_fields() {
+  ordered = true;
+  named   = true;
+  for(auto it=key2pos.begin();it!=key2pos.end();++it) {
+    if (it->first.substr(0,2) == "__")
+      continue;
+    pos2tuple[it->second] = nullptr;
+    key2pos.erase(it);
+  }
+}
+
 void Lgtuple::set(LGraph *lg, const Lconst &constant) {
-  reset();
+  reset_non_attr_fields();
 
   auto node = lg->create_node_const(constant);
   val_dpin  = node.setup_driver_pin();
 }
 
 void Lgtuple::set(const Node_pin &_val_dpin) {
-  reset();
+  reset_non_attr_fields();
 
   val_dpin = _val_dpin;  // this means the val_dpin of final TupAdd node from the most-up-to-date tuple-chain
+}
+
+std::vector<std::pair<std::string_view, Node_pin>> Lgtuple::get_all_attributes() const {
+
+  std::vector<std::pair<std::string_view, Node_pin>> v;
+
+  for(auto it=key2pos.begin();it!=key2pos.end();++it) {
+    if (it->first.substr(0,2) != "__")
+      continue;
+
+    v.emplace_back(it->first, pos2tuple[it->second]->get_value_dpin());
+  }
+
+  return v;
 }
 
 void Lgtuple::dump(std::string_view indent) const {

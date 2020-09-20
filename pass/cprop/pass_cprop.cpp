@@ -17,11 +17,19 @@ static Pass_plugin sample("pass_cprop", Pass_cprop::setup);
 
 void Pass_cprop::setup() {
   Eprp_method m1("pass.cprop", "in-place copy propagation", &Pass_cprop::optimize);
+  m1.add_label_optional("hier", "hierarchical bitwidth", "false");
 
   register_pass(m1);
 }
 
-Pass_cprop::Pass_cprop(const Eprp_var &var) : Pass("pass.cprop", var) {}
+Pass_cprop::Pass_cprop(const Eprp_var &var) : Pass("pass.cprop", var) {
+  auto hier_txt = var.get("hier");
+
+  if (hier_txt != "false" && hier_txt != "0")
+    hier = true;
+  else
+    hier = false;
+}
 
 void Pass_cprop::optimize(Eprp_var &var) {
   Pass_cprop pass(var);
@@ -435,9 +443,12 @@ void Pass_cprop::process_subgraph(Node &node) {
   fmt::print("cprop subgraph:{} is not present, found lgcpp...\n", sub->get_name());
 
   std::shared_ptr<Lgtuple> inp;
-  std::shared_ptr<Lgtuple> out = std::make_shared<Lgtuple>();
+  std::shared_ptr<Lgtuple> out;
   it->second(node.get_class_lgraph(), inp, out);
 
+  if (!out) { // no out tuple populated
+    return;
+  }
   fmt::print("cprop subgraph:{} has out\n", sub->get_name());
   out->dump("  ");
 
@@ -512,13 +523,21 @@ bool Pass_cprop::process_attr_get(Node &node) {
   return false;
 }
 
-std::tuple<std::string_view, int> Pass_cprop::get_tuple_name_key(Node &node) {
+std::tuple<std::string_view, std::string_view, int> Pass_cprop::get_tuple_name_key(Node &node) {
+  std::string_view tup_name;
   std::string_view key_name;
   int              key_pos = -1;
   if (node.has_sink_pin_connected(1)) {
     auto node2 = node.get_sink_pin(1).get_driver_node();
     if (node2.get_type_op() == TupKey_Op)
       key_name = node2.get_driver_pin().get_name();
+  }
+
+  for(auto dpin:node.get_sink_pin(0).inp_driver()) {
+    if (dpin.has_name()) {
+      tup_name = dpin.get_name();
+      break;
+    }
   }
 
   if (node.has_sink_pin_connected(2)) {
@@ -530,337 +549,176 @@ std::tuple<std::string_view, int> Pass_cprop::get_tuple_name_key(Node &node) {
   // I(!key_name.empty() || key_pos != -1);  // At least one defined // FIXME->sh: not necessarily true, could be resolved at later
   // TupAdd merge step
 
-  return std::make_tuple(key_name, key_pos);
+  return std::make_tuple(tup_name, key_name, key_pos);
 }
 
-bool Pass_cprop::process_tuple_get_get_chain(Node &tg_node, Node &gp_node, Node_pin &val_dpin, std::string_view key_name,
-                                             LGraph *lg, Node &follower_tg_node) {
-  std::string_view follower_key_name;
-  if (follower_tg_node.has_sink_pin_connected(1))
-    follower_key_name = follower_tg_node.setup_sink_pin(1).get_driver_pin().get_name();
+bool Pass_cprop::process_tuple_get(Node &node) {
+  I(node.get_type_op() == TupGet_Op);
 
-  // FIXME: more generic. Any type of field
-  if (follower_key_name.substr(0, 6) != "__bits")  // extend to other attribute
-    return false;
-
-  if (val_dpin.get_node().get_type_op() == TupAdd_Op) {
-    Pass::error("access __bits attribute from a tuple chain. Follower tg:{}, current_tg:{}\n",
-                follower_tg_node.debug_name(),
-                tg_node.debug_name());
-    return false;
-  }
-
-  // construct attr-set/get sub-struct
-  auto attr_set_node    = lg->create_node(AttrSet_Op);
-  auto attr_set_an_spin = attr_set_node.setup_sink_pin(1);
-  auto attr_set_an_dpin = lg->create_node(TupKey_Op).setup_driver_pin();
-  auto attr_set_av_spin = attr_set_node.setup_sink_pin(2);
-  attr_set_an_dpin.set_name(follower_key_name);
-  attr_set_an_dpin.connect_sink(attr_set_an_spin);
-
-  // search in lgraph chain to get where __bits value defined. note: you cannot avoid this
-  // iteration even with lgtuple, but theoretically, the __bits node won't be defined too far
-  // FIXME->sh: instead of iterate lgraph, try to leverage the new key2bits table in Lgtuple
-  Node_pin attr_set_av_dpin;
-  while (gp_node.get_type_op() == TupAdd_Op) {
-    auto gp_node_key_dpin = gp_node.setup_sink_pin(1).get_driver_pin();
-    if (gp_node_key_dpin.has_name() && gp_node_key_dpin.get_name() == key_name) {
-      auto node2          = gp_node.setup_sink_pin(3).get_driver_node();
-      auto node2_key_dpin = node2.setup_sink_pin(1).get_driver_pin();
-      if (node2_key_dpin.get_name() != follower_key_name) {
-        Pass::error("trying to access scalar attribute from a tuple\n");
-      }
-      attr_set_av_dpin = node2.setup_sink_pin(3).get_driver_pin();
-      // node2.del_node(); -- TupAdd can not be removed unless all the TupGet are gone
-      break;
-    }
-  }
-  attr_set_av_dpin.connect_sink(attr_set_av_spin);
-
-  auto attr_get_node    = lg->create_node(AttrGet_Op);
-  auto attr_get_vn_spin = attr_get_node.setup_sink_pin(0);
-  auto attr_get_vn_dpin = attr_set_node.setup_driver_pin(0);
-  attr_get_vn_dpin.connect_sink(attr_get_vn_spin);
-
-  auto attr_get_an_spin = attr_get_node.setup_sink_pin(1);
-  auto attr_get_an_dpin = lg->create_node(TupKey_Op).setup_driver_pin();
-  attr_get_an_dpin.set_name(follower_key_name);
-  attr_get_an_dpin.connect_sink(attr_get_an_spin);
-
-  auto attr_get_dpin = attr_get_node.setup_driver_pin();
-  collapse_forward_for_pin(follower_tg_node, attr_get_dpin);
-
-  return true;
-}
-
-bool Pass_cprop::process_tuple_get(Node &tg_node, LGraph *lg) {
-  I(tg_node.get_type_op() == TupGet_Op);
-
-  auto parent_dpin = tg_node.get_sink_pin(0).get_driver_pin();
+  auto parent_dpin = node.get_sink_pin(0).get_driver_pin();
   auto parent_node = parent_dpin.get_node();
 
-  auto ptup_it             = node2tuple.find(parent_node.get_compact());
-  auto [key_name, key_pos] = get_tuple_name_key(tg_node);
+  auto [tup_name, key_name, key_pos] = get_tuple_name_key(node);
 
   // special case when TG try to get a scalar variable by accessing pos 0
   if (parent_node.get_type_op() != TupAdd_Op && key_pos == 0 && !parent_dpin.is_invalid()) {
-    collapse_forward_for_pin(tg_node, parent_dpin);
+    collapse_forward_for_pin(node, parent_dpin);
     return true;
   }
 
-  std::string tup_name;
-  if (parent_dpin.has_name()) {
-    tup_name = parent_dpin.get_name();
-  } else {
-    tup_name = tg_node.debug_name();
-  }
-
+  auto ptup_it = node2tuple.find(parent_node.get_compact());
   if (ptup_it == node2tuple.end()) {  // ptup_it = parent_node
-    std::string key;
-    if (key_name.empty())
+    std::string key(key_name);
+    if (key.empty())
       key = std::to_string(key_pos);
-    else
-      key = key_name;
 
-    Pass::error("for tuple_get {} parent_node {}, there is no tuple of {}, so no valid field {}\n",
-                tg_node.debug_name(),
+    Pass::error("for tuple_get {} parent_node {}, there is no tuple of {}, so no valid field:{}\n",
+                node.debug_name(),
                 parent_node.debug_name(),
                 tup_name,
                 key);
     return false;
   }
 
-  Node_pin val_dpin;
-  auto &   ctup = ptup_it->second;
-
-  if (!key_name.empty()) {
-    if (ctup->has_key_name(key_name)) {
-      val_dpin = ctup->get_value_dpin(key_pos, key_name);
-      /*// FIXME->sh*/
-      /* } else if (tg_node.out_edges()[0].sink.get_node().get_type_op() == Mux_Op) { */
-      /*   I(tg_node.get_driver_pin().out_edges().size() == 1); */
-      /*   // this is the case of tuple-if, where TG try to get upper scope tuple field but the target is not there. */
-      /*   // keep this TG and wait cprop to try to resolve the mux at compile time. */
-      /*   // If success, maybe never choose the TG path */
-      /*   return false; */
-    } else {
-      ctup->dump();
-      fmt::print("tg_node:{}\n", tg_node.debug_name());
-      Pass::error("tuple {} does not have field key {}\n", tup_name, key_name);
-      return false;
-    }
-  } else if (key_pos >= 0) {
-    auto &ctup2 = ptup_it->second;
-    if (ctup2->has_key_pos(key_pos)) {
-      val_dpin = ctup2->get_value_dpin(key_pos, key_name);
-    } else {
-      ctup->dump();
-      Pass::error("tuple {} does not have field pos {}\n", tup_name, key_pos);
-      return false;
-    }
+  auto ctup = ptup_it->second;
+  if (!ctup->has_key(key_pos, key_name)) {
+    ctup->dump();
+    Pass::error("tuple {} does not have field pos:{} key:{}\n", tup_name, key_pos, key_name);
+    return false;
   }
 
-  // case of accessing __bits from a hier-tg-chain, ex: x = foo.a.b.__bits
-  bool xtra_followers = false;
-  auto gp_node        = parent_node.setup_sink_pin(0).get_driver_node();  // grand_parent_node
-  for (auto &out : tg_node.out_edges()) {
-    auto sink_node = out.sink.get_node();
-    if (sink_node.get_type_op() == TupGet_Op) {
-      bool done = process_tuple_get_get_chain(tg_node, gp_node, val_dpin, key_name, lg, sink_node);
-      if (!done)
-        xtra_followers = true;
-    } else {
-      xtra_followers = true;
-    }
+  std::shared_ptr<Lgtuple> sub_tup;
+  if (key_pos == 0 && ctup->is_scalar())
+    sub_tup = ctup;
+  else
+    sub_tup = ctup->get_tuple(key_pos, key_name);
+  if (!sub_tup) {
+    return false; // Could not resolve (maybe compile error, maybe hierarchical needed)
   }
 
-  if (!xtra_followers) {
-    tg_node.del_node();
+  if (!sub_tup->is_dpin()) {
+    node2tuple[node.get_compact()] = sub_tup;
+    return true; // still unclear if the TupGet chain is resolved (final TupGet will decide)
+  }
+
+  auto val_dpin = sub_tup->get_value_dpin();
+  I(!val_dpin.is_invalid());
+
+  if (sub_tup->is_scalar()) {
+    collapse_forward_for_pin(node, val_dpin);
     return true;
   }
 
-  // case of accessing a normal field in both hier/non-hier tg chain
-  if (!val_dpin.is_invalid()) {
-    for (auto &e : tg_node.out_edges()) {
-      if (val_dpin.get_node() == e.sink.get_node()) {
-        Pass::error("tuple {} assignment loop detected", tup_name);
-        return false;
+  int conta=0;
+  for(auto it:sub_tup->get_all_attributes()) {
+    auto attr_key_node = node.get_lg()->create_node(TupKey_Op);
+    auto attr_key_dpin = attr_key_node.setup_driver_pin();
+    attr_key_dpin.set_name(it.first);
+
+    if (conta==0) {
+      fmt::print("cprop: changing node:{} to AttrSet node for attr:{} from pin:{}\n",node.debug_name(), it.first, it.second.debug_name());
+      // Reuse current node. First delete input edges
+      for(auto e:node.inp_edges()) {
+        e.del_edge();
       }
+      node.set_type(AttrSet_Op);
+      node.setup_sink_pin("VN").connect_driver(val_dpin);
+      node.setup_sink_pin("AN").connect_driver(attr_key_dpin);
+      node.setup_sink_pin("AV").connect_driver(it.second);
+    }else{
+      I(false); // handle multiple attr set (create node)
     }
-
-    auto attr_bits = ctup->get_bits_from_key(key_name);
-    if (val_dpin.get_node().get_type_op() != TupAdd_Op && attr_bits != -1) {  // is scalar and bits has been set
-      // when access scalar, check if corresponding attr is set -> yes -> insert attr_set in between
-
-      auto attr_set_node      = lg->create_node(AttrSet_Op);
-      auto attr_set_node_dpin = attr_set_node.setup_driver_pin(0);
-
-      auto attr_set_vn_spin = attr_set_node.setup_sink_pin(0);
-      auto attr_set_vn_dpin = val_dpin;
-      attr_set_vn_dpin.connect_sink(attr_set_vn_spin);
-
-      auto attr_set_an_spin = attr_set_node.setup_sink_pin(1);
-      auto attr_set_an_dpin = lg->create_node(TupKey_Op).setup_driver_pin();
-      attr_set_an_dpin.set_name("__bits");
-      attr_set_an_dpin.connect_sink(attr_set_an_spin);
-
-      auto attr_set_av_spin = attr_set_node.setup_sink_pin(2);
-      auto attr_set_av_dpin = lg->create_node_const(attr_bits).setup_driver_pin();
-      attr_set_av_dpin.connect_sink(attr_set_av_spin);
-
-      collapse_forward_for_pin(tg_node, attr_set_node_dpin);
-    } else {
-      fmt::print("TupGet node:{} pos:{} key:{} val:{}\n", tg_node.debug_name(), key_pos, key_name, val_dpin.debug_name());
-      collapse_forward_for_pin(tg_node, val_dpin);
-      return true;
-    }
+    conta++;
   }
-  return false;
+
+  return true;
 }
 
-void Pass_cprop::process_tuple_add(Node &node, LGraph *lg) {
+std::shared_ptr<Lgtuple> Pass_cprop::process_tuple_add_chain(Node_pin up_dpin) {
+
+  auto up_node = up_dpin.get_node();
+  auto ptup_it = node2tuple.find(up_node.get_compact());
+  if (ptup_it == node2tuple.end()) {
+    return nullptr;
+  }
+
+  I(up_node.get_type_op() == TupAdd_Op || up_node.get_type_op() == TupGet_Op || up_node.get_type_op() == TupRef_Op);
+
+  return std::make_shared<Lgtuple>(*(ptup_it->second));
+}
+
+void Pass_cprop::process_tuple_add(Node &node) {
+  // Can not delete TupAdd here. Only TupGet can delete up chain if nobody needs the TupAdd
   I(node.get_type_op() == TupAdd_Op);
 
-  I(node.get_sink_pin(0).is_connected());
-  auto parent_dpin = node.get_sink_pin(0).get_driver_pin();
-  auto parent_node = parent_dpin.get_node();
 
-  bool                     parent_could_be_deleted = false;
-  std::shared_ptr<Lgtuple> ctup;  // current tuple
+  std::shared_ptr<Lgtuple> parent_ctup;
+  if (node.get_sink_pin(0).is_connected())
+    parent_ctup = process_tuple_add_chain(node.get_sink_pin(0).get_driver_pin());
+  std::shared_ptr<Lgtuple> chain_ctup;
+  if(node.has_sink_pin_connected(3))
+    chain_ctup = process_tuple_add_chain(node.get_sink_pin(3).get_driver_pin());
 
-  auto ptup_it = node2tuple.find(parent_node.get_compact());
-  if (ptup_it == node2tuple.end()) {
-    ctup = std::make_shared<Lgtuple>();
-  } else {
-    auto parent_out_edges   = parent_dpin.out_edges();
-    parent_could_be_deleted = parent_out_edges.size() == 1;  // I'm the only one child
+  auto [tup_name, key_name, key_pos] = get_tuple_name_key(node);
 
-    if (!parent_could_be_deleted) {
-      // if all other parent out edges are tup_get and can be resolved, this parent can still be deleted
-      bool loop_exit = false;
-      for (auto e : parent_out_edges) {
-        auto dest_node = e.sink.get_node();
-        if (dest_node == node)
-          continue;  // this node
-
-        if (dest_node.get_type_op() == TupGet_Op) {
-          // WARNING: no testing case, but it should work
-          bool deleted = process_tuple_get(dest_node, lg);
-          if (deleted)
-            continue;
-        }
-
-        loop_exit = true;  // as long as one of the sink node is not TG or the TG cannot be resolved, this parent cannot be removed.
-        break;
+  std::shared_ptr<Lgtuple> ctup;
+  if (chain_ctup) {
+    if (parent_ctup) {
+      //fmt::print("1.TupAdd node:{} tup_name:{} pos:{} key:{}\n", node.debug_name(), tup_name, key_pos, key_name);
+      ctup = std::make_shared<Lgtuple>(*parent_ctup);
+    }else{
+      //fmt::print("2.TupAdd node:{} tup_name:{} pos:{} key:{}\n", node.debug_name(), tup_name, key_pos, key_name);
+      ctup = std::make_shared<Lgtuple>(tup_name);
+    }
+    if (key_pos<0 && key_name.empty()) { // Tuple Concatenation operator
+      bool ok = ctup->add(chain_ctup);
+      if (!ok) {
+        parent_ctup->dump();
+        chain_ctup->dump();
+        Pass::error("tuples name:{} pos:{} key:{} can not be merged\n", tup_name, key_pos, key_name);
+        return;
       }
-
-      if (!loop_exit)
-        parent_could_be_deleted = true;
+    }else{
+      ctup->set(key_name, chain_ctup);  // FIXME: create lgtuple:set(pos,key,tuple)
     }
-
-    if (parent_could_be_deleted) {
-      ctup = ptup_it->second;
-      node2tuple.erase(ptup_it);
-    } else {
-      ctup = std::make_shared<Lgtuple>(*(ptup_it->second));
+  }else{
+    if (parent_ctup) {
+      //fmt::print("3.TupAdd node:{} tup_name:{} pos:{} key:{}\n", node.debug_name(), tup_name, key_pos, key_name);
+      ctup = parent_ctup;
+    }else{
+      //fmt::print("4.TupAdd node:{} tup_name:{} pos:{} key:{}\n", node.debug_name(), tup_name, key_pos, key_name);
+      ctup = std::make_shared<Lgtuple>(tup_name);
     }
-  }
-
-  auto [key_name, key_pos] = get_tuple_name_key(node);
-
-  // not all tuple_add has value pin connected, for example, the __last_value TA doesn't have
-  Node_pin val_dpin;
-  if (node.has_sink_pin_connected(3))
-    val_dpin = node.get_sink_pin(3).get_driver_pin();
-
-  bool is_attr_set = false;
-  int  attr_bits   = -1;
-  if (!val_dpin.is_invalid()) {
-    auto val_dnode = val_dpin.get_node();
-    if (val_dnode.get_type_op() == TupAdd_Op && val_dnode.has_sink_pin_connected(1)
-        && val_dnode.setup_sink_pin(1).get_driver_pin().get_name().substr(0, 6) == "__bits") {
-      is_attr_set = true;
-      I(val_dnode.setup_sink_pin(3).get_driver_node().is_type_const());
-      attr_bits = val_dnode.setup_sink_pin(3).get_driver_node().get_type_const().to_i();
-    }
-  }
-
-  merge_to_tuple(ctup, node, parent_node, parent_dpin, key_pos, key_name, val_dpin, is_attr_set, attr_bits);
-
-  fmt::print("TupAdd node:{} pos:{} key:{} val:{} del:{} #out:{}\n",
-             node.debug_name(),
-             key_pos,
-             key_name,
-             val_dpin.debug_name(),
-             parent_could_be_deleted,
-             parent_node.get_num_out_edges());
-
-#if 0
-  if (parent_could_be_deleted)
-    parent_node.del_node();
-#endif
-}
-
-void Pass_cprop::merge_to_tuple(std::shared_ptr<Lgtuple> ctup, Node &node, Node &parent_node, Node_pin &parent_dpin, int key_pos,
-                                std::string_view key_name, Node_pin &val_dpin, bool is_attr_set, int attr_bits) {
-  bool compile_error = false;
-
-  if (is_attr_set) {
-    ctup->set_key2bits(key_name, attr_bits);
-    node2tuple[node.get_compact()] = ctup;  // notice in this case, ctup = parent tup
-    return;
-  }
-
-  if (parent_node.get_type_op() == TupRef_Op) {
-    // First tuple
-    bool ok = ctup->set(key_pos, key_name, val_dpin);
-    if (!ok)
-      compile_error = true;
-  } else {
-    if (parent_node.get_type_op() != TupAdd_Op) {
-      std::string unnamed;
-      bool        ok = ctup->set(0, unnamed, parent_dpin);  // includes the parent into Lgtuple where the parent is not TupAdd
-      if (!ok)
-        compile_error = true;
-    }
-
-    bool is_connected_has_name = node.has_sink_pin_connected(1) && node.get_sink_pin(1).get_driver_pin().has_name();
-    if (is_connected_has_name && node.get_sink_pin(1).get_driver_pin().get_name() == "__last_value") {
-      I(node.get_type_op() == TupAdd_Op);
-      node2tuple[node.get_compact()] = ctup;
-      return;  // for the __last_value tuple_add, no new tuple_chain element need to add, just inherit it's parent Lgtuple, i.e.
-               // ctup
-    }
-
-    if (key_pos < 0 && key_name.empty()) {
-      if (val_dpin.is_invalid()) {
-        I(node.get_type_op() == TupAdd_Op);
-        node2tuple[node.get_compact()] = ctup;
-        return;  // tuple assignment happened here, the dummy tup_add inherit the parent lgtuple and represent the new variable
-      }
-
-      if (val_dpin.get_node().get_type_op() == TupAdd_Op) {  // tuple concatenation
-        auto it2 = node2tuple.find(val_dpin.get_node().get_compact());
-        I(it2 != node2tuple.end());
-        bool ok = ctup->add(it2->second);
-        if (!ok) {
-          compile_error = true;
-          ctup->dump();
-          it2->second->dump();
-          Pass::error("tuples {} and {} can not be merged\n", "XX", "XX");
+    if (node.has_sink_pin_connected(3)) {
+      auto val_dpin = node.get_sink_pin(3).get_driver_pin();
+      if (key_pos<0 && key_name.empty()) { // Tuple Concatenation operator
+        if (!parent_ctup && node.get_sink_pin(0).is_connected()) {
+          ctup->add(node.get_sink_pin(0).get_driver_pin());
         }
-      } else {
         ctup->add(val_dpin);
+      }else{
+        bool ok = ctup->set(key_pos, key_name, val_dpin);
+        if (!ok) {
+          Pass::error("new tuple {} could not add field pos:{} name:{}\n", tup_name, key_pos, key_name);
+          return;
+        }
       }
-    } else {
-      bool ok = ctup->set(key_pos, key_name, val_dpin);  // it doesn't matter val_dpin is TA or not, hier-tuple is included here
-      if (!ok)
-        compile_error = true;
+    }else{
+      I(parent_ctup); // tup1 = tup2 can have no sink(3)
     }
   }
-
-  if (compile_error)
-    Pass::error("tuples {} could not add field \n", "XX", "XX");
+#if 0
+  if (parent_ctup) {
+    fmt::print("Parent:{}\n", node.get_sink_pin(0).get_driver_node().debug_name());
+    parent_ctup->dump();
+  }
+  if (chain_ctup) {
+    fmt::print("Chain:{}\n", node.get_sink_pin(3).get_driver_node().debug_name());
+    chain_ctup->dump();
+  }
+  fmt::print("current:{}\n", node.debug_name());
+  ctup->dump();
+#endif
 
   node2tuple[node.get_compact()] = ctup;
 }
@@ -889,16 +747,14 @@ void Pass_cprop::trans(LGraph *lg) {
       // FIXME: if flop is disconnected *after AttrGet processed*, the flop was not used. Delete
       continue;
     } else if (!node.has_outputs()) {
-      // fmt::print("cprop deleting node:{}\n", node.debug_name());
       node.del_node();
       continue;
     } else if (op == TupAdd_Op) {
-      process_tuple_add(node, lg);
+      process_tuple_add(node);
       continue;
     } else if (op == TupGet_Op) {
-      process_tuple_get(node, lg);
-      if (!node.is_invalid())
-        tup_get_left = true;
+      auto ok = process_tuple_get(node);
+      tup_get_left |= !ok;
       continue;
     }
 
@@ -909,6 +765,7 @@ void Pass_cprop::trans(LGraph *lg) {
     if (node.is_invalid())
       continue;  // It got deleted
 
+#if 0
     if (inp_edges_ordered.size() > 64) {
 #ifndef NDEBUG
       fmt::print("node:{} is already quite large. Skipping cprop\n", node.debug_name());
@@ -916,23 +773,46 @@ void Pass_cprop::trans(LGraph *lg) {
       continue;
     }
     // fmt::print("node:{} inp:{} out:{}\n",node.debug_name(), node.get_num_inputs(), node.get_num_out_edges());
+#endif
 
     try_collapse_forward(node, inp_edges_ordered);
   }
 
-  fmt::print("starting final Garbage Collection pass...\n");
-
   for (auto node : lg->fast()) {
     if (!tup_get_left && node.is_type_tup()) {
+      if (hier) {
+        auto it = node2tuple.find(node.get_compact());
+        if (it != node2tuple.end()) {
+          node2tuple.erase(it);
+        }
+      }
       node.del_node();
       continue;
     }
 
     if (!node.has_outputs()) {
-      if (!node.is_type_sub() && !node.is_type_attr() && !node.is_type_tup()) {
+      auto op = node.get_type_op();
+      if (op != SFlop_Op && op != AFlop_Op && op != Latch_Op && op != FFlop_Op && op != Memory_Op && op != SubGraph_Op) {
+        // TODO: del_dead_end_nodes(); It can propagate back and keep deleting
+        // nodes until it reaches a SubGraph or a driver_pin that has some
+        // other outputs. Doing this dead_end_nodes delete iterator can retuce
+        // the number of times that cprop needs to be called for deep chains.
         node.del_node();
-        continue;
       }
+      continue;
     }
   }
+
+  if (!hier) {
+    node2tuple.clear();
+  }
 }
+
+void Pass_cprop::dump_node2tuples() const {
+
+  for(const auto it:node2tuple) {
+    fmt::print("node nid:{}\n",it.first.get_nid());
+    it.second->dump();
+  }
+}
+
