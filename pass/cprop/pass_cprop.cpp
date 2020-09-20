@@ -494,10 +494,13 @@ void Pass_cprop::process_attr_q_pin(Node &node, Node_pin &parent_dpin) {
   auto pos   = driver_wname.find_last_of('_');
   auto wname = driver_wname.substr(0, pos);
 
-  // Find flop
-  auto target_ff_qpin = Node_pin::find_driver_pin(node.get_class_lgraph(), wname);
-
-  collapse_forward_for_pin(node, target_ff_qpin);
+  if (wname == driver_wname) {
+    collapse_forward_for_pin(node, parent_dpin);
+  }else{
+    // Find flop
+    auto target_ff_qpin = Node_pin::find_driver_pin(node.get_class_lgraph(), wname);
+    collapse_forward_for_pin(node, target_ff_qpin);
+  }
 }
 
 bool Pass_cprop::process_attr_get(Node &node) {
@@ -609,26 +612,39 @@ bool Pass_cprop::process_tuple_get(Node &node) {
     return true;
   }
 
-  int conta=0;
-  for(auto it:sub_tup->get_all_attributes()) {
-    auto attr_key_node = node.get_lg()->create_node(TupKey_Op);
-    auto attr_key_dpin = attr_key_node.setup_driver_pin();
-    attr_key_dpin.set_name(it.first);
+  bool all_tuples = true;
+  bool any_tuples = false;
+  for(auto e:node.out_edges()) {
+    auto t = e.sink.get_node().is_type_tup();
+    all_tuples = all_tuples && t;
+    any_tuples = any_tuples || t;
+  }
 
-    if (conta==0) {
-      fmt::print("cprop: changing node:{} to AttrSet node for attr:{} from pin:{}\n",node.debug_name(), it.first, it.second.debug_name());
-      // Reuse current node. First delete input edges
-      for(auto e:node.inp_edges()) {
-        e.del_edge();
+  if (all_tuples) {
+    node2tuple[node.get_compact()] = sub_tup;
+  }else{
+    I(!any_tuples); // If so, must create attrset for non tup and keep up (conta==0 opt out)
+    int conta=0;
+    for(auto it:sub_tup->get_all_attributes()) {
+      auto attr_key_node = node.get_lg()->create_node(TupKey_Op);
+      auto attr_key_dpin = attr_key_node.setup_driver_pin();
+      attr_key_dpin.set_name(it.first);
+
+      if (conta==0) {
+        fmt::print("cprop: changing node:{} to AttrSet node for attr:{} from pin:{}\n",node.debug_name(), it.first, it.second.debug_name());
+        // Reuse current node. First delete input edges
+        for(auto e:node.inp_edges()) {
+          e.del_edge();
+        }
+        node.set_type(AttrSet_Op);
+        node.setup_sink_pin("VN").connect_driver(val_dpin);
+        node.setup_sink_pin("AN").connect_driver(attr_key_dpin);
+        node.setup_sink_pin("AV").connect_driver(it.second);
+      }else{
+        I(false); // handle multiple attr set (create node)
       }
-      node.set_type(AttrSet_Op);
-      node.setup_sink_pin("VN").connect_driver(val_dpin);
-      node.setup_sink_pin("AN").connect_driver(attr_key_dpin);
-      node.setup_sink_pin("AV").connect_driver(it.second);
-    }else{
-      I(false); // handle multiple attr set (create node)
+      conta++;
     }
-    conta++;
   }
 
   return true;
@@ -754,6 +770,9 @@ void Pass_cprop::trans(LGraph *lg) {
       continue;
     } else if (op == TupGet_Op) {
       auto ok = process_tuple_get(node);
+      if (!ok) {
+        fmt::print("cprop could not simplify node:{}\n",node.debug_name());
+      }
       tup_get_left |= !ok;
       continue;
     }
