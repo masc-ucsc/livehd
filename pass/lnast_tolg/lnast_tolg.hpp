@@ -12,15 +12,15 @@
 #include "pass.hpp"
 
 
-class Lnast_tolg : public Pass {
+class Lnast_tolg {
 public:
-  explicit Lnast_tolg(const Eprp_var &var, std::string_view _module_name);
+  explicit Lnast_tolg(std::string_view _module_name, std::string_view _path);
   std::vector<LGraph *> do_tolg(std::shared_ptr<Lnast> ln, const Lnast_nid &top_stmts);
 
 private:
   std::shared_ptr<Lnast> lnast;
-  Eprp_var eprp_var;
   std::string_view module_name;
+  std::string_view path;
   absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Node_Type_Op>  primitive_type_lnast2lg;
   absl::flat_hash_map<std::string_view, Node_pin>                  vname2attr_dpin;       // for dummy attribute node construction, vn = variable non-ssa name, dpin = last attr dpin within "any" attributes
   absl::flat_hash_map<std::string, Node_pin>                       name2dpin;             // for scalar variable
@@ -90,6 +90,8 @@ protected:
   static bool  is_tup_get_target         (const Node &tup_add, std::string_view tup_get_target);
   static bool  is_tup_get_target         (const Node &tup_add, uint32_t         tup_get_target);
   void         create_hier_inp_tup_add   (LGraph *dfg, const Lnast_nid &c1_tg);
+  Node_pin     create_inp_tg             (LGraph *dfg, std::string_view input_field);
+  void         create_out_ta             (LGraph *dfg, std::string_view key_name, Node_pin &val_dpin);
   void         dp_create_hier_outputs    (LGraph *dfg, Node &cur_node, std::string hier_name, absl::flat_hash_set<Node::Compact> &memo);
   void         dfs_create_flattened_hier_inp (LGraph *dfg, Node_pin &cur_node_spin, std::string hier_name, 
                                               absl::flat_hash_set<Node> &inp_artifacts);

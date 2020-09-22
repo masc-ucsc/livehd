@@ -1,4 +1,4 @@
-
+// This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "main_api.hpp"
 
 #include "cloud_api.hpp"
@@ -14,13 +14,12 @@ void setup_inou_liveparse();
 void setup_inou_graphviz();
 void setup_inou_json();
 void setup_inou_pyrope();
-/* void setup_inou_cfg(); */
 void setup_inou_verific();
-/* void setup_inou_lnast_dfg(); */
 void setup_inou_yosys();
 void setup_inou_firrtl();
 void setup_pass_fplan();
 void setup_pass_lnast_tolg();
+void setup_pass_compiler();
 
 void setup_cops_live();
 
@@ -36,13 +35,11 @@ void Main_api::init() {
   setup_inou_liveparse();
   setup_inou_graphviz();
   setup_inou_pyrope();
-  /* setup_inou_cfg(); */
-  /* setup_inou_lnast_dfg(); */
   setup_inou_yosys();
   setup_inou_firrtl();
   setup_pass_fplan();
   setup_pass_lnast_tolg();
-  /* setup_inou_json(); */
+  setup_pass_compiler();
   setup_inou_json();
   /* setup_inou_verific(); */
   /* setup_cops_live(); */

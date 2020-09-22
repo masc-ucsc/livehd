@@ -20,8 +20,8 @@ protected:
   const std::string odir;
 
   const std::string get_files(const Eprp_var &var) const;
-  const std::string get_path(const Eprp_var &var) const;
-  const std::string get_odir(const Eprp_var &var) const;
+  const std::string get_path(const Eprp_var &var)  const;
+  const std::string get_odir(const Eprp_var &var)  const;
 
   static void register_pass(Eprp_method &method);
   static void register_inou(std::string_view pname, Eprp_method &method);
@@ -64,6 +64,9 @@ public:
     fmt::vformat_to(tmp, format, fargs);
     eprp.parser_info(std::string_view(tmp.data(), tmp.size()));
   }
+
+  virtual bool is_done() const { return true; }
+  virtual bool has_made_progress() const { return true; }
 };
 
 class Pass_plugin {

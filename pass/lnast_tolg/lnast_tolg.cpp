@@ -5,8 +5,7 @@
 #include "pass.hpp"
 #include "pass_cprop.hpp"
 
-Lnast_tolg::Lnast_tolg(const Eprp_var &_var, std::string_view _module_name) :
-  Pass("pass.lnast_tolg", _var), eprp_var(_var), module_name(_module_name) {
+Lnast_tolg::Lnast_tolg(std::string_view _module_name, std::string_view _path) : module_name(_module_name), path(_path) {
   setup_lnast_to_lgraph_primitive_type_mapping();
 }
 
@@ -18,7 +17,9 @@ std::vector<LGraph *> Lnast_tolg::do_tolg(std::shared_ptr<Lnast> ln, const Lnast
     if (src.empty())
       src = "-";
     dfg = LGraph::create(path, module_name, src);
-
+    name2dpin["$"] = dfg->add_graph_input("$", Port_invalid, 0);
+    /* name2dpin["$"] = dfg->add_graph_input("$", 0, 0); */
+    setup_tuple_ref(dfg, "%");
     std::vector<LGraph *> lgs;
     top_stmts2lgraph(dfg, top_stmts);
     lgs.push_back(dfg);
@@ -452,6 +453,30 @@ void Lnast_tolg::process_ast_tuple_phi_add_op(LGraph *dfg, const Lnast_nid &lnid
   process_ast_tuple_add_op(dfg, c1_tpa);
 }
 
+Node_pin Lnast_tolg::create_inp_tg(LGraph *dfg, std::string_view input_field) {
+  auto it = name2dpin.find(input_field);
+  if (it != name2dpin.end())
+    return it->second;
+
+  auto tup_get_inp = dfg->create_node(TupGet_Op);
+  auto tn_spin = tup_get_inp.setup_sink_pin("TN");
+  auto tn_dpin = name2dpin["$"];
+  tn_dpin.connect_sink(tn_spin);
+
+  auto kn_spin = tup_get_inp.setup_sink_pin("KN");
+  auto kn_dpin  = setup_key_dpin(dfg, input_field.substr(1, input_field.size()-1));
+  kn_dpin.connect_sink(kn_spin);
+  auto tg_dpin = tup_get_inp.setup_driver_pin();
+
+#ifndef NDEBUG
+  tg_dpin.set_name(input_field);
+#endif
+  
+  name2dpin[input_field] = tg_dpin;
+  return tg_dpin;
+}
+
+
 void Lnast_tolg::process_ast_tuple_get_op(LGraph *dfg, const Lnast_nid &lnidx_tg) {
   int i = 0;
   absl::flat_hash_map<int, Node> tg_map;
@@ -472,9 +497,6 @@ void Lnast_tolg::process_ast_tuple_get_op(LGraph *dfg, const Lnast_nid &lnidx_tg
     if (i == 1) {
       const auto &c1_tg = child;
       auto c1_tg_name  = lnast->get_sname(c1_tg);
-      if (is_input(c1_tg_name)) {
-        create_hier_inp_tup_add(dfg, c1_tg);
-      }
 
       auto tup_get = dfg->create_node(TupGet_Op);
       tg_map.insert_or_assign(i, tup_get);
@@ -482,10 +504,14 @@ void Lnast_tolg::process_ast_tuple_get_op(LGraph *dfg, const Lnast_nid &lnidx_tg
       auto tn_spin = tup_get.setup_sink_pin("TN");
 
       Node_pin tn_dpin;
-      if (is_register(c1_tg_name))
+      
+      if (is_input(c1_tg_name)) {
+        tn_dpin = create_inp_tg(dfg, c1_tg_name);
+      } else if (is_register(c1_tg_name)) {
         tn_dpin = setup_ref_node_dpin(dfg, c1_tg);
-      else
+      } else {
         tn_dpin = setup_tuple_ref(dfg, c1_tg_name);
+      }
 
       dfg->add_edge(tn_dpin, tn_spin);
       i++;
@@ -559,7 +585,6 @@ void Lnast_tolg::process_ast_tuple_get_op(LGraph *dfg, const Lnast_nid &lnidx_tg
 }
 
 
-
 void Lnast_tolg::create_hier_inp_tup_add(LGraph *dfg, const Lnast_nid &c1_tg) {
   auto c2_tg       = lnast->get_sibling_next(c1_tg);
   auto c2_tg_sname = lnast->get_sname(c2_tg);
@@ -608,20 +633,24 @@ void Lnast_tolg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnidx_ta
   for (const auto & child : lnast->children(lnidx_ta)) {
     if (i == 0) {
       const auto &c0_ta = child;
+      auto tup_name = lnast->get_sname(c0_ta);
+      if (is_input(tup_name)) {
+        create_inp_tg(dfg, tup_name); 
+      } 
+      
+
       auto tup_add  = dfg->create_node(TupAdd_Op);
       auto tn_spin  = tup_add.setup_sink_pin("TN");
-      auto tup_name = lnast->get_sname(c0_ta);
-      auto tn_dpin = setup_tuple_ref(dfg, tup_name);
+      auto tn_dpin  = setup_tuple_ref(dfg, tup_name);
+      tn_dpin.connect_sink(tn_spin);
 
       // exclude invalid scalar->tuple cases
       auto tn_node  = tn_dpin.get_node();
       auto tn_ntype = tn_node.get_type_op();
-      bool is_scalar =  tn_ntype != TupAdd_Op && tn_ntype != TupRef_Op;
       auto key_name = lnast->get_sname(lnast->get_sibling_next(c0_ta)); // peep for key_name ...
-      if (is_scalar && key_name != "0")
-	    	Pass::error("try to modify a non-exist tuple key field:{} in tuple:{}\n", key_name, tup_name);
-
-      dfg->add_edge(tn_dpin, tn_spin);
+      /* bool is_scalar =  tn_ntype != TupAdd_Op && tn_ntype != TupRef_Op; */
+      /* if (is_scalar && key_name != "0") */
+	    	/* Pass::error("try to modify a non-exist tuple key field:{} in tuple:{}\n", key_name, tup_name); */
 
       name2dpin[tup_name] = tup_add.setup_driver_pin();
       tup_add.setup_driver_pin().set_name(tup_name); // tuple ref semantically move to here
@@ -679,9 +708,12 @@ void Lnast_tolg::process_ast_tuple_add_op(LGraph *dfg, const Lnast_nid &lnidx_ta
 
       // take the new tuple-chain as the original tuple-chain value-dpin -> hierarchical tuple now!
       auto tup_add_parent = ta_map[i-2];
-      auto value_spin_parent = tup_add_parent.setup_sink_pin("KV");
-      auto value_dpin_parent = tup_add.setup_driver_pin();
-      dfg->add_edge(value_dpin_parent, value_spin_parent);
+      // note: no need to handle val_dpin for input_tg cases
+      if (tup_add_parent.get_type_op() == TupAdd_Op) {
+        auto value_spin_parent = tup_add_parent.setup_sink_pin("KV");
+        auto value_dpin_parent = tup_add.setup_driver_pin();
+        dfg->add_edge(value_dpin_parent, value_spin_parent);
+      }
 
       // setup key for the new tuple chain head
       auto kn_spin = tup_add.setup_sink_pin("KN"); //key name
@@ -710,10 +742,12 @@ Node_pin Lnast_tolg::setup_tuple_ref(LGraph *dfg, std::string_view ref_name) {
   if (it != name2dpin.end())
     return it->second;
 
+  if (is_input(ref_name)) 
+    return create_inp_tg(dfg, ref_name);
+
   auto dpin = dfg->create_node(TupRef_Op).setup_driver_pin();
   dpin.set_name(ref_name);
   name2dpin[ref_name] = dpin;
-
   return dpin;
 }
 
@@ -1059,7 +1093,8 @@ void Lnast_tolg::process_ast_attr_set_op (LGraph *dfg, const Lnast_nid &lnidx_as
       dfg->add_edge(vn_dpin, vn_spin);
     }
   } else if (is_input(c0_aset_name)) {
-    vn_dpin = setup_ref_node_dpin(dfg, c0_aset);
+    /* vn_dpin = setup_ref_node_dpin(dfg, c0_aset); */
+    vn_dpin = setup_tuple_ref(dfg, lnast->get_name(c0_aset));
     dfg->add_edge(vn_dpin, vn_spin);
   } else if (name2dpin.find(aset_ancestor_name) != name2dpin.end()) {
     vn_dpin = name2dpin[aset_ancestor_name];
@@ -1236,21 +1271,20 @@ void Lnast_tolg::subgraph_io_connection(LGraph *dfg, Sub_node* sub, std::string_
 }
 
 void Lnast_tolg::process_ast_func_call_op(LGraph *dfg, const Lnast_nid &lnidx_fc) {
-  auto c0_fc = lnast->get_first_child(lnidx_fc);
-  auto res_name  = lnast->get_sname(c0_fc);
-  auto func_name     = lnast->get_vname(lnast->get_sibling_next(c0_fc));
-  auto arg_tup_name  = lnast->get_sname(lnast->get_last_child(lnidx_fc));
+  auto c0_fc        = lnast->get_first_child(lnidx_fc);
+  auto res_name     = lnast->get_sname(c0_fc);
+  auto func_name    = lnast->get_vname(lnast->get_sibling_next(c0_fc));
+  auto arg_tup_name = lnast->get_sname(lnast->get_last_child(lnidx_fc));
 
   auto *library = Graph_library::instance(path);
   if (name2dpin.find(func_name) == name2dpin.end()) {
     fmt::print("function {} defined in separated prp file, query lgdb\n", func_name);
-    /* auto path = dfg->get_path(); */
     Lg_type_id lgid;
     if (library->has_name(func_name))
       lgid = library->get_lgid(func_name);
 
-    auto *sub = library->ref_sub(lgid);
     auto subg_node = dfg->create_node_sub(lgid);
+    auto *sub = library->ref_sub(lgid);
 
     subg_node.set_name(absl::StrCat(res_name, ":", func_name));
     fmt::print("subg node_name:{}\n", subg_node.get_name());
@@ -1264,8 +1298,8 @@ void Lnast_tolg::process_ast_func_call_op(LGraph *dfg, const Lnast_nid &lnidx_fc
   I(ta_func_def.setup_sink_pin("KV").get_driver_node().get_type_op() == Const_Op);
   Lg_type_id lgid = ta_func_def.setup_sink_pin("KV").get_driver_node().get_type_const().to_i();
 
-  auto *sub = library->ref_sub(lgid);
   auto subg_node = dfg->create_node_sub(lgid);
+  auto *sub = library->ref_sub(lgid);
 
   subg_node.set_name(absl::StrCat(res_name, ":", func_name));
   fmt::print("subg node_name:{}\n", subg_node.get_name());
@@ -1277,9 +1311,8 @@ void Lnast_tolg::process_ast_func_def_op (LGraph *dfg, const Lnast_nid &lnidx) {
   auto c1_fdef = lnast->get_sibling_next(c0_fdef);
   auto func_stmts = lnast->get_sibling_next(c1_fdef);
   auto func_name = lnast->get_vname(c0_fdef);
-  // auto subg_module_name = absl::StrCat(module_name, ".", func_name); FIXME->sh: graphviz compains about "." hierarchy
   auto subg_module_name = absl::StrCat(module_name, ":", func_name);
-  Lnast_tolg p(eprp_var, subg_module_name);
+  Lnast_tolg p(subg_module_name, path);
 
   fmt::print("============================= Sub-module: LNAST->LGraph Start ===============================================\n");
   p.do_tolg(lnast, func_stmts);
@@ -1304,7 +1337,6 @@ void Lnast_tolg::process_ast_func_def_op (LGraph *dfg, const Lnast_nid &lnidx) {
 
   name2dpin[func_name] = tup_add.setup_driver_pin(); //note: record only the function_name instead of top.function_name
   tup_add.setup_driver_pin().set_name(func_name);
-  /* setup_dpin_ssa(name2dpin[tup_name], lnast->get_vname(c0_ta), lnast->get_subs(c0_ta)); */
 };
 
 void Lnast_tolg::process_ast_as_op       (LGraph *dfg, const Lnast_nid &lnidx) { ; };
@@ -1460,30 +1492,60 @@ void Lnast_tolg::dfs_create_flattened_hier_inp(LGraph *dfg, Node_pin &cur_node_s
 }
 
 
+void Lnast_tolg::create_out_ta(LGraph *dfg, std::string_view key_name, Node_pin &val_dpin) {
+  auto tup_add  = dfg->create_node(TupAdd_Op);
+  auto tn_spin  = tup_add.setup_sink_pin("TN");
+  auto tn_dpin  = setup_tuple_ref(dfg, "%"); // might come from TupRef or TupAdd
+  tn_dpin.connect_sink(tn_spin);
+
+  auto kn_spin  = tup_add.setup_sink_pin("KN");
+  auto kn_dpin  = setup_key_dpin(dfg, key_name);
+  kn_dpin.connect_sink(kn_spin);
+
+  auto val_spin = tup_add.setup_sink_pin("KV");
+  val_dpin.connect_sink(val_spin);
+
+
+  name2dpin["%"] = tup_add.setup_driver_pin();
+  tup_add.setup_driver_pin().set_name("%"); // tuple ref semantically moves to here
+}
+
+
 void Lnast_tolg::setup_lgraph_ios_and_final_var_name(LGraph *dfg) {
-  absl::flat_hash_map<std::string_view, Node_pin> vname2dpin; //Pyrope variable -> dpin with the largest ssa var subscription
-  absl::flat_hash_set<Node> inp_artifacts;
+  absl::flat_hash_map<std::string_view, Node_pin> vname2dpin; // pyrope variable -> dpin with the largest ssa var subscription
+  /* absl::flat_hash_set<Node> inp_artifacts; */
   for (auto node: dfg->forward()) {
     auto dpin = node.get_driver_pin(0);
     auto ntype = node.get_type_op();
 
-    // construct hier-tuple-inputs and scalar input
+    // connect hier-tuple-inputs and scalar input from unified input $
     if (ntype == TupRef_Op && is_input(dpin.get_name())) {
-      inp_artifacts.insert(node);
-      auto hier_name_base = std::string(dpin.get_name().substr(1, dpin.get_name().size()-3));
-      for (auto &out : node.out_edges()) {
-        auto spin = out.sink;
-        dfs_create_flattened_hier_inp(dfg, spin, hier_name_base, inp_artifacts);
-      }
+      node.set_type(TupGet_Op);
+      auto tn_spin = node.setup_sink_pin("TN");
+      auto tn_dpin = name2dpin["$"];
+      tn_dpin.connect_sink(tn_spin);
+
+      auto kn_spin = node.setup_sink_pin("KN");
+      auto kn_dpin  = setup_key_dpin(dfg, dpin.get_name().substr(1, dpin.get_name().size()-1));
+      kn_dpin.connect_sink(kn_spin);
+      /* inp_artifacts.insert(node); */
+      /* auto hier_name_base = std::string(dpin.get_name().substr(1, dpin.get_name().size()-3)); */
+      /* for (auto &out : node.out_edges()) { */
+      /*   auto spin = out.sink; */
+      /*   dfs_create_flattened_hier_inp(dfg, spin, hier_name_base, inp_artifacts); */
+      /* } */
       continue;
     }
 
-    // construct hier-tuple-outputs
-    // backward Dynamic Programming DFS traversal (memoization)
     if (ntype == TupAdd_Op && !node.has_outputs() && is_output(dpin.get_name())) {
-      auto hier_name_base = std::string(dpin.get_name().substr(1, dpin.get_name().size()-3));
-      absl::flat_hash_set<Node::Compact> memo;
-      dp_create_hier_outputs(dfg, node, hier_name_base, memo);
+      create_out_ta(dfg, dpin.get_name(), dpin);
+      
+      continue;
+      // construct hier-tuple-outputs
+      // backward Dynamic Programming DFS traversal (memoization)
+      /* auto hier_name_base = std::string(dpin.get_name().substr(1, dpin.get_name().size()-3)); */
+      /* absl::flat_hash_set<Node::Compact> memo; */
+      /* dp_create_hier_outputs(dfg, node, hier_name_base, memo); */
     }
 
     // collect vname table info
@@ -1507,9 +1569,12 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(LGraph *dfg) {
   //create scalar graph outputs or set the final variable name based on vname table
   for (auto const&[vname, vname_dpin] : vname2dpin) {
     auto dpin_name = vname_dpin.get_name();
-    if (is_output(dpin_name) && vname_dpin.get_node().get_type_op()!= TupAdd_Op) {
-      auto out_spin = dfg->add_graph_output(dpin_name.substr(1, dpin_name.size() - 3), Port_invalid, 0); // Port_invalid pos means do not care about position
-      dfg->add_edge(vname_dpin, out_spin);
+    /* if (is_output(dpin_name) && vname_dpin.get_node().get_type_op()!= TupAdd_Op) { */
+    if (is_output(dpin_name)) {
+      auto edible_dpin = vname_dpin;
+      create_out_ta(dfg, dpin_name, edible_dpin);
+      /* auto out_spin = dfg->add_graph_output(dpin_name.substr(1, dpin_name.size() - 3), Port_invalid, 0); // Port_invalid pos means do not care about position */
+      /* dfg->add_edge(vname_dpin, out_spin); */
       continue;
     }
 
@@ -1539,29 +1604,37 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(LGraph *dfg) {
     /* } */
   }
 
-
-  // connect graph inputs to leaf_artifact fanout
-  for (auto &itr : inp2leaf_artifact_spins) {
-    Node_pin ginp = itr.first;
-
-    for (auto &spin : itr.second) {
-      auto leaf_node = spin.get_node();
-      auto leaf_ntype = leaf_node.get_type_op();
-
-      if (leaf_ntype == TupGet_Op ) {
-        for (auto & out : leaf_node.out_edges())
-          ginp.connect_sink(out.sink);
-      } else if (leaf_ntype == AttrSet_Op) {
-        ginp.connect_sink(leaf_node.setup_sink_pin(0));
-      } else {
-        ginp.connect_sink(spin);
-      }
-    }
-  }
+  // connect output tuple-chain to output pin "%"
+  auto unified_out_dpin = name2dpin["%"]; // TA node
+  auto unified_out_spin = dfg->add_graph_output("%", Port_invalid, 0);
+  fmt::print("unified_out_dpin:{}\n", unified_out_dpin.debug_name());
+  fmt::print("unified_out_spin:{}\n", unified_out_spin.debug_name());
+  /* auto unified_out_spin = dfg->add_graph_output("%", 1, 0); */
+  unified_out_dpin.connect_sink(unified_out_spin);
 
 
-  // clean up tmp hierarchical input artifacts
-  for (auto itr : inp_artifacts) {
-    itr.del_node();
-  }
+  /* // connect graph inputs to leaf_artifact fanout */
+  /* for (auto &itr : inp2leaf_artifact_spins) { */
+  /*   Node_pin ginp = itr.first; */
+
+  /*   for (auto &spin : itr.second) { */
+  /*     auto leaf_node = spin.get_node(); */
+  /*     auto leaf_ntype = leaf_node.get_type_op(); */
+
+  /*     if (leaf_ntype == TupGet_Op ) { */
+  /*       for (auto & out : leaf_node.out_edges()) */
+  /*         ginp.connect_sink(out.sink); */
+  /*     } else if (leaf_ntype == AttrSet_Op) { */
+  /*       ginp.connect_sink(leaf_node.setup_sink_pin(0)); */
+  /*     } else { */
+  /*       ginp.connect_sink(spin); */
+  /*     } */
+  /*   } */
+  /* } */
+
+
+  /* // clean up tmp hierarchical input artifacts */
+  /* for (auto itr : inp_artifacts) { */
+  /*   itr.del_node(); */
+  /* } */
 }

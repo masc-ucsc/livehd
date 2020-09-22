@@ -67,7 +67,7 @@ void Pass::register_pass(Eprp_method &method) {
 }
 
 void Pass::register_inou(std::string_view _pname, Eprp_method &method) {
-  // All the passses should start with inou.*
+  // All the inou should start with inou.*
   const std::string pname{_pname};
 
   assert(method.get_name().compare(0, pname.size() + 5, std::string{"inou." + pname}) == 0);

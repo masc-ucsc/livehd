@@ -1,4 +1,7 @@
+$foo.a.b.__bits = 3
+$bar.__bits = 3
 
-$inp.__bits = 5
-x = $inp.a.b 
-%out = $inp
+%otup.c.d = $bar + 5
+%out = $foo.a.b + $bar
+
+

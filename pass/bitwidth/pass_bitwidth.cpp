@@ -44,8 +44,8 @@ void Pass_bitwidth::trans(Eprp_var &var) {
   Pass_bitwidth p(var);
 
   std::vector<const LGraph *> lgs;
-  for (const auto &l : var.lgs) {
-    p.do_trans(l);
+  for (const auto &lg : var.lgs) {
+    p.do_trans(lg);
   }
 }
 
