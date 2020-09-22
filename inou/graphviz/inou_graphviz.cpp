@@ -48,10 +48,13 @@ std::string Inou_graphviz::graphviz_legalize_name(std::string_view name) {
   std::string legal;
 
   for (auto c : name) {
-    if (std::isalnum(c))
+    if (std::isalnum(c)) {
       legal.append(1,c);
-    else
-      legal.append(1,'_');
+    } else if (c == 37) {
+      legal += "unified_out";
+    } else {
+      legal += "_char" + std::to_string(c) + "_";
+    }
   }
 
   return legal;

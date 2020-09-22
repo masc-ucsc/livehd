@@ -34,8 +34,8 @@ Pass_cprop::Pass_cprop(const Eprp_var &var) : Pass("pass.cprop", var) {
 void Pass_cprop::optimize(Eprp_var &var) {
   Pass_cprop pass(var);
 
-  for (auto &l : var.lgs) {
-    pass.trans(l);
+  for (auto &lg : var.lgs) {
+    pass.trans(lg);
   }
 }
 

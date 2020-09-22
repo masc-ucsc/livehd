@@ -15,15 +15,20 @@ void Pass_lnast_tolg::setup() {
 }
 
 
+Pass_lnast_tolg::Pass_lnast_tolg(const Eprp_var &var) : Pass("pass.lnast_tolg", var) {}
+
+
+
 void Pass_lnast_tolg::dbg_lnast_ssa(Eprp_var &var) {
-  for (const auto &lnast : var.lnasts) {
+  for (const auto &lnast : var.lnasts) 
     lnast->ssa_trans();
-  }
 }
 
 
 void Pass_lnast_tolg::tolg(Eprp_var &var) {
   /* Lbench b1("pass.lnast_tolg.ssa"); */
+  Pass_lnast_tolg p(var);
+  auto path = p.get_path(var);
 
   for (const auto &lnast : var.lnasts) {
     lnast->ssa_trans();
@@ -33,10 +38,12 @@ void Pass_lnast_tolg::tolg(Eprp_var &var) {
   std::vector<LGraph *> lgs;
   for (const auto &ln : var.lnasts) {
     auto module_name = ln->get_top_module_name();
-    const auto top = ln->get_root();
+    const auto top   = ln->get_root();
     const auto top_stmts = ln->get_first_child(top);
-    Lnast_tolg p(var, module_name);
-    lgs = p.do_tolg(ln, top_stmts);
+
+
+    Lnast_tolg pp(module_name, path);
+    lgs = pp.do_tolg(ln, top_stmts);
     var.add(lgs);
   }
 
@@ -44,3 +51,31 @@ void Pass_lnast_tolg::tolg(Eprp_var &var) {
     error("failed to generate any lgraph from lnast");
   }
 }
+
+std::vector<LGraph *> Pass_lnast_tolg::tolg2(const Eprp_var &var, std::shared_ptr<Lnast> ln) {
+  /* Lbench b1("pass.lnast_tolg.ssa"); */
+
+  ln->ssa_trans();
+
+  /* Lbench b2("pass.lnast_tolg.tolg"); */
+  std::vector<LGraph *> lgs;
+  auto module_name = ln->get_top_module_name();
+  const auto top   = ln->get_root();
+  const auto top_stmts = ln->get_first_child(top);
+  /* Eprp_var var; //empty to fit Pass constructor */
+  std::string_view path;
+  if (var.has_label("path")) {
+    path = var.get("path");
+  } else {
+    path = "/INVALID";
+  }
+  Lnast_tolg p(module_name, path);
+  lgs = p.do_tolg(ln, top_stmts);
+
+  if (lgs.empty()) {
+    error("failed to generate any lgraph from lnast");
+  }
+  return lgs;
+}
+
+
