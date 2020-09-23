@@ -911,24 +911,29 @@ static void process_module(RTLIL::Module *module, LGraph *g) {
     } else if (std::strncmp(cell->type.c_str(), "$reduce_xor", 11) == 0) {
       assert(get_output_size(cell)==1); // reduce xor
 
-      auto inp_size = get_input_size(cell);
-      if (inp_size==1) { // pass it through
-        exit_node.set_type(Cell_op::Xor,1); // nothing to do
-        connect_all_inputs(exit_node.setup_sink_pin(), cell);
-      }else{
-        auto entry_node = g->create_node(Cell_op::Xor, inp_size); // chain all the xor inputs
-        auto xor_node   = g->create_node(Cell_op::Xor, inp_size); // the tree goes here
-        exit_node.set_type(Cell_op::And,1);
-        g->create_node_const(1).connect_driver(exit_node);
+      auto a_bits = cell->getParam(ID::A_WIDTH).as_int();
+      auto a_dpin = get_dpin(g, cell, ID::A);
 
-        entry_node.connect_driver(xor_node); // SRA 0
-        for(int i=1;i<inp_size;++i) {
+      if (a_bits==1) { // pass it through
+        exit_node.set_type(Cell_op::And,1);
+        exit_node.connect_driver(a_dpin);
+      }else{
+        exit_node.set_type(Cell_op::And,1);
+
+        auto xor_node = g->create_node(Cell_op::Xor,1);
+        xor_node.connect_sink(a_dpin);
+
+        for(int i=1;i<a_bits;++i) {
           auto sra_node = g->create_node(Cell_op::SRA, 1);
-          entry_node.setup_driver_pin().connect_sink(sra_node.setup_sink_pin("a"));
-          g->create_node_const(i).setup_driver_pin().connect_sink(sra_node.setup_sink_pin("b"));
-          sra_node.connect_driver(xor_node);
+
+          sra_node.setup_sink_pin("a").connect_driver(a_dpin);
+          sra_node.setup_sink_pin("b").connect_driver(g->create_node_const(i));
+
+          xor_node.connect_sink(sra_node);
         }
-        connect_all_inputs(entry_node.setup_sink_pin(), cell);
+
+        exit_node.connect_sink(xor_node);
+        exit_node.connect_sink(g->create_node_const(1,1));
       }
 #if 0
       // C++ code for log2 parity compute
@@ -956,8 +961,34 @@ static void process_module(RTLIL::Module *module, LGraph *g) {
       connect_all_inputs(entry_node.setup_sink_pin(), cell);
     //--------------------------------------------------------------
     } else if (std::strncmp(cell->type.c_str(), "$reduce_xnor", 11) == 0) {
+      assert(get_output_size(cell)==1); // reduce xor
 
-      assert(false); // FIXME: just copy xor and NOT the end (check that xor code is right first)
+      auto a_bits = cell->getParam(ID::A_WIDTH).as_int();
+      auto a_dpin = get_dpin(g, cell, ID::A);
+
+      if (a_bits==1) { // pass it through
+        exit_node.set_type(Cell_op::Not,1);
+        exit_node.connect_driver(a_dpin);
+      }else{
+        exit_node.set_type(Cell_op::Not,1);
+        auto and_node = g->create_node(Cell_op::And,1);
+        and_node.connect_sink(g->create_node_const(1,1));
+
+        auto xor_node = g->create_node(Cell_op::Xor,1);
+        xor_node.connect_sink(a_dpin);
+
+        for(int i=1;i<a_bits;++i) {
+          auto sra_node = g->create_node(Cell_op::SRA, 1);
+
+          sra_node.setup_sink_pin("a").connect_driver(a_dpin);
+          sra_node.setup_sink_pin("b").connect_driver(g->create_node_const(i));
+
+          xor_node.connect_sink(sra_node);
+        }
+
+        and_node.connect_sink(xor_node);
+        exit_node.connect_sink(and_node);
+      }
 
       connect_all_inputs(exit_node.setup_sink_pin(), cell);
     //--------------------------------------------------------------
