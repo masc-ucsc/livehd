@@ -129,21 +129,21 @@ std::string Cpp_parser::supporting_fend(std::string basename_s){
   return absl::StrCat("<<EOF ", basename_s);
 }
 std::string Cpp_parser::supp_buffer_to_print(std::string modname) {
-  std::string header_strt = "class " + modname + "_sim {\n  uint64_t hidx;\n  ";
+  std::string header_strt = absl::StrCat("class ", modname, "_sim {\n  uint64_t hidx;\n  ");
 
   std::string outps_nline;
   for (auto const& [key, val] : outp_bw) {
-    absl::StrAppend(&outps_nline, "SInt<", val, "> " + key + ";\n  ");
+    absl::StrAppend(&outps_nline, "SInt<", val, "> ", key, ";\n  ");
   }
 
 //  std::string inps_csv;
   for (auto const& [key, val] : inp_bw) {
-    absl::StrAppend(&inps_csv, "SInt<", val, "> " + key + ", ");
+    absl::StrAppend(&inps_csv, "SInt<", val, "> ", key, ", ");
   }
   inps_csv.pop_back();
   inps_csv.pop_back();
 
-  std::string funcs = modname + "_sim(uint64_t _hidx);\n  void reset_cycle();\n  void cycle(" + inps_csv + ");\n";
+  std::string funcs = absl::StrCat(modname, "_sim(uint64_t _hidx);\n  void reset_cycle();\n  void cycle(", inps_csv, ");\n");
 
   std::string vcd_params = "  std::string scope_name;\n  vcd::VCDWriter* vcd_writer;\n";
 
@@ -168,10 +168,10 @@ std::string Cpp_parser::supp_buffer_to_print(std::string modname) {
   }
 
 
-  std::string vcd_funcs = "  " + modname + "_sim(uint64_t _hidx, const std::string &parent_name, vcd::VCDWriter* writer);\n  void vcd_reset_cycle();\n  void vcd_posedge();\n  void vcd_negedge();\n  void vcd_comb(" + inps_csv + ");\n";
+  std::string vcd_funcs = absl::StrCat("  ", modname, "_sim(uint64_t _hidx, const std::string &parent_name, vcd::VCDWriter* writer);\n  void vcd_reset_cycle();\n  void vcd_posedge();\n  void vcd_negedge();\n  void vcd_comb(", inps_csv, ");\n");
 //  std::string trace_part = "#ifdef SIMLIB_TRACE\n  void add_signature(Simlib_signature &sign);\n#endif";
-//  return absl::StrCat(header_strt + outps_nline + funcs + trace_part + "\n};");
-  auto answer = absl::StrCat(header_strt + outps_nline + funcs + vcd_params + vcd_varptrs + vcd_funcs + "\n};");
+//  return absl::StrCat(header_strt, outps_nline, funcs, trace_part, "\n};");
+  auto answer = absl::StrCat(header_strt, outps_nline, funcs, vcd_params, vcd_varptrs, vcd_funcs, "\n};");
   absl::StrAppend(&supp_file_final_str, answer);
   return answer;
 }
@@ -229,9 +229,9 @@ void Cpp_parser::for_vcd_comb(std::string_view key) {
 std::string Cpp_parser::final_print(std::string modname, std::string buffer_to_print) {
   //constructor
   //std::vector<std::string> name_split = absl::StrSplit(modname, "_");
-  //std::string constructor_vcd = modname + "::" + modname + "(uint64_t _hidx, const std::string &parent_name, vcd::VCDWriter* writer)\n\t: hidx(_hidx)\n\t, scope_name(parent_name.empty() ? \"" + name_split[1] + "\": parent_name + \"." + name_split[1] + "\")\n\t, vcd_writer(writer) {\n}\n";
-  std::string constructor_vcd = modname + "_sim::" + modname + "_sim(uint64_t _hidx, const std::string &parent_name, vcd::VCDWriter* writer)\n  : hidx(_hidx)\n  , scope_name(parent_name.empty() ? \"" + modname + "_sim\": parent_name + \"." + modname + "_sim\")\n  , vcd_writer(writer) {\n}\n";
-  std::string constructor = modname + "_sim::" + modname + "_sim(uint64_t _hidx)\n  : hidx(_hidx) {\n}\n";
+  //std::string constructor_vcd = absl::StrCat(modname, "::", modname, "(uint64_t _hidx, const std::string &parent_name, vcd::VCDWriter* writer)\n\t: hidx(_hidx)\n\t, scope_name(parent_name.empty() ? \"", name_split[1], "\": parent_name, \".", name_split[1], "\")\n\t, vcd_writer(writer) {\n}\n");
+  std::string constructor_vcd = absl::StrCat(modname, "_sim::", modname, "_sim(uint64_t _hidx, const std::string &parent_name, vcd::VCDWriter* writer)\n  : hidx(_hidx)\n  , scope_name(parent_name.empty() ? \"", modname, "_sim\": parent_name, \".", modname, "_sim\")\n  , vcd_writer(writer) {\n}\n");
+  std::string constructor = absl::StrCat(modname, "_sim::", modname, "_sim(uint64_t _hidx)\n  : hidx(_hidx) {\n}\n");
 
   std::string rst_vals_nline;
   std::string rst_vals_nline_vcd;
@@ -251,13 +251,13 @@ std::string Cpp_parser::final_print(std::string modname, std::string buffer_to_p
   //main code part function
 //  std::string inps_csv;
 //  for (auto const& [key, val] : inp_bw) {
-//    absl::StrAppend(&inps_csv, "SInt<", val, "> " + key + ", ");
+//    absl::StrAppend(&inps_csv, "SInt<", val, "> ", key, ", ");
 //  }
 //  inps_csv.pop_back();
 //  inps_csv.pop_back();
 
-  std::string main_func_vcd = "void "+ modname+"_sim::vcd_comb(" + inps_csv + ") {\n"+ buffer_to_print+ buff_to_print_vcd + "\n}";
-  std::string main_func = "void "+ modname+"_sim::cycle(" + inps_csv + ") {\n"+ buffer_to_print+"\n}";
+  std::string main_func_vcd = absl::StrCat("void "+ modname+"_sim::vcd_comb(", inps_csv, ") {\n"+ buffer_to_print+ buff_to_print_vcd, "\n}");
+  std::string main_func = absl::StrCat("void "+ modname+"_sim::cycle(", inps_csv, ") {\n"+ buffer_to_print+"\n}");
   auto answer = absl::StrCat(constructor_vcd, "\n", constructor, "\n", reset_vcd, "\n", reset_func, "\n", posedge_vcd, "\n", negedge_vcd, "\n",  main_func, "\n", main_func_vcd, "\n");
   absl::StrAppend(&main_file_final_str, answer);
   return answer;
