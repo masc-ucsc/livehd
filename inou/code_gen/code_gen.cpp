@@ -69,19 +69,8 @@ void Code_gen::generate(){
   fmt::print("<<EOF\n");
 
   //for odir part:
-  auto f2   = lnast->get_top_module_name();
-  auto file = absl::StrCat(odir, "/", f2, ".", lang_type);
-  int  fd   = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
-  if (fd < 0) {
-    Pass::error("inou.code_gen unable to create {}", file);
-    return;
-  }
-  size_t sz = write(fd, buffer_to_print.c_str(), buffer_to_print.size());
-  if (sz != buffer_to_print.size()) {
-    Pass::error("inou.code_gen unexpected write missmatch");
-    return;
-  }
-  close(fd);
+  auto fname   = lnast->get_top_module_name();
+  lnast_to->result_in_odir(fname, odir, buffer_to_print);
 
 }
 
@@ -200,6 +189,7 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index) {
     }
   } else {
     absl::StrAppend(&buffer_to_print, indent(), lnast_to->assign_node_strt(), lnast_to->ref_name(key), " ", lnast_to->debug_name_lang(assign_node_data.type), " ", lnast_to->ref_name(ref), lnast_to->stmt_sep());
+    lnast_to->for_vcd_comb(lnast_to->ref_name(key));
   }
 }
 //-------------------------------------------------------------------------------------
