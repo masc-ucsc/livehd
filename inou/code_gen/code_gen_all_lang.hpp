@@ -106,5 +106,10 @@ else
   virtual void call_get_maps() {;};//for debugging only
 
   virtual int indent_final_system() {return 0;};
+
+  //odir related:
+  virtual void result_in_odir(std::string_view fname, std::string_view odir, std::string buffer_to_print) =0;
+
+  virtual void for_vcd_comb(std::string_view ) {return ;};
 };
 

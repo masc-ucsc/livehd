@@ -22,6 +22,8 @@ public:
   std::string ref_name(std::string_view prp_term) final;
 
   std::string final_print(std::string modname, std::string buffer_to_print) final;
+
+  void result_in_odir(std::string_view fname, std::string_view odir, std::string buffer_to_print) final;
 };
 
 //-------------------------------------------------------------------------------------
@@ -35,6 +37,10 @@ class Cpp_parser: public Code_gen_all_lang {
   std::map<std::string, std::string> outp_bw;//first->o/p port name, sec->UInt<bw>
   std::map<std::string, std::string> reg_bw;//first->register name, sec->UInt<bw>    
   std::string inps_csv;
+  std::string supp_file_final_str;
+  std::string main_file_final_str;
+  std::string buff_to_print_vcd;
+
 public:
   Cpp_parser(){};
   std::string_view stmt_sep() final;
@@ -58,6 +64,8 @@ public:
 
   std::string final_print(std::string modname, std::string buffer_to_print) final;
   int indent_final_system() final;
+  void result_in_odir(std::string_view fname, std::string_view odir, std::string buffer_to_print) final;
+  void for_vcd_comb(std::string_view key) final;
 };
 
 //-------------------------------------------------------------------------------------
@@ -84,5 +92,6 @@ public:
   std::string_view assign_node_strt() final;
 
   std::string final_print(std::string modname, std::string buffer_to_print) final;
+  void result_in_odir(std::string_view fname, std::string_view odir, std::string buffer_to_print) final;
 };
 
