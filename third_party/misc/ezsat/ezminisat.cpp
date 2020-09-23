@@ -126,6 +126,8 @@ bool ezMiniSAT::solver(const std::vector<int> &modelExpressions, std::vector<boo
   if(minisatSolver == NULL) {
     minisatSolver = new Solver;
     minisatSolver->set_verbosity(EZMINISAT_VERBOSITY);
+    //minisatSolver->set_allow_otf_gauss();
+    //minisatSolver->set_num_threads(2);
   }
 
 #if EZMINISAT_INCREMENTAL
@@ -241,8 +243,9 @@ bool ezMiniSAT::solver(const std::vector<int> &modelExpressions, std::vector<boo
   }
 
 #if !EZMINISAT_INCREMENTAL
-  delete minisatSolver;
-  minisatSolver = NULL;
+  //minisatSolver->print_stats();
+  //delete minisatSolver;
+  //minisatSolver = NULL;
   minisatVars.clear();
 #endif
   return true;

@@ -156,8 +156,9 @@ void check(const char *expr1_str, bool expr1, const char *expr2_str, bool expr2)
   }
 }
 
+ezMiniSAT sat;
 void test_signed(int8_t a, int8_t b, int8_t c) {
-  ezMiniSAT sat;
+  sat.clear();
 
   std::vector<int> av = sat.vec_const_signed(a, 8);
   std::vector<int> bv = sat.vec_const_signed(b, 8);
@@ -174,8 +175,65 @@ void test_signed(int8_t a, int8_t b, int8_t c) {
   printf("\n");
 }
 
+void test_add_chain() {
+  {
+    sat.clear();
+
+    std::vector<int> av = sat.vec_var(8);
+    std::vector<int> bv = sat.vec_var(8);
+    std::vector<int> cv = sat.vec_var(8);
+
+    auto r1 = sat.vec_add(av, av);
+    auto r2 = sat.vec_add(r1, r1);
+    auto r3 = sat.vec_add(r2, r2);
+    auto r4 = sat.vec_add(r3, r3);
+    auto r5 = sat.vec_add(r4, r4);
+    auto r6 = sat.vec_add(r5, r5);
+    auto r7 = sat.vec_add(r6, r6);
+    auto r8 = sat.vec_add(r7, r7);
+    auto r9 = sat.vec_add(r8, r8);
+    auto r10= sat.vec_add(r9, r9);
+
+    std::vector<int> zero(r10.size(), ezSAT::CONST_FALSE);
+
+    std::vector<bool> modelValues;
+    std::vector<int>  modelExpressions;
+    modelExpressions.push_back(sat.vec_ne(r10, zero));
+
+    auto s = sat.solve(modelExpressions, modelValues);
+    if (s) {
+      printf("1.satisfiable:");
+      for(int i = 0; i < int(modelValues.size()); i++)
+        printf(" %s=%d", sat.to_string(modelExpressions[i]).c_str(), int(modelValues[i]));
+      printf("\n\n");
+    } else {
+      printf("1.not satisfiable.\n\n");
+    }
+  }
+
+  {
+    sat.clear();
+    std::vector<int> av = sat.vec_var(8);
+    auto res = sat.vec_sub(av, av);
+    std::vector<int> zero(res.size(), ezSAT::CONST_FALSE);
+
+    std::vector<bool> modelValues;
+    std::vector<int>  modelExpressions;
+    modelExpressions.push_back(sat.vec_eq(res, zero));
+
+    auto s = sat.solve(modelExpressions, modelValues);
+    if (s) {
+      printf("1.satisfiable:");
+      printf("\n\n");
+    } else {
+      printf("1.not satisfiable.\n\n");
+    }
+  }
+
+}
+
 void test_unsigned(uint8_t a, uint8_t b, uint8_t c) {
-  ezMiniSAT sat;
+  sat.clear();
 
   if(b < c)
     b ^= c, c ^= b, b ^= c;
@@ -419,6 +477,7 @@ int main() {
   test_ordered();
   test_onehot();
   test_manyhot();
+  test_add_chain();
   printf("Passed all tests.\n\n");
   return 0;
 }

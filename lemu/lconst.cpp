@@ -144,11 +144,11 @@ Lconst::Lconst() {
   num           = 0;
 }
 
-Lconst::Lconst(uint64_t v) {
+Lconst::Lconst(int64_t v) {
   explicit_str  = false;
   explicit_sign = false;
   explicit_bits = false;
-  sign          = false;
+  sign          = v<0;
   num           = v;
   bits          = calc_bits();
 }
@@ -162,11 +162,11 @@ Lconst::Lconst(Number v) {
   bits          = calc_bits();
 }
 
-Lconst::Lconst(uint64_t v, Bits_t b) {
+Lconst::Lconst(int64_t v, Bits_t b) {
   explicit_str  = false;
   explicit_sign = false;
   explicit_bits = true;
-  sign          = false;
+  sign          = v<0;
   bits          = b;
   if(b<64)
     num = (v & ((1ULL<<b)-1)); // clear upper bits if present
@@ -668,7 +668,7 @@ std::string Lconst::to_firrtl() const {
   return str;
 }
 
-long int Lconst::to_i() const {
+int64_t Lconst::to_i() const {
   I(is_i());
   return static_cast<long int>(num);
 }

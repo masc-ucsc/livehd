@@ -295,10 +295,11 @@ public:
     return del_driver(dst);
   }
 
-  void connect_sink(const Node_pin &dst);
-  void connect_sink(Node_pin &&dst) { connect_sink(dst); }
-  void connect_driver(const Node_pin &dst);
-  void connect(const Node_pin &dst) {
+  void connect_sink(const Node_pin &dst) const;
+  void connect_sink(const Node &dst) const;
+  void connect_driver(const Node_pin &dst) const;
+  void connect_driver(const Node &dst) const;
+  void connect(const Node_pin &dst) const {
     if (dst.is_sink() && is_driver())
       return connect_sink(dst);
     I(dst.is_driver() && is_sink());

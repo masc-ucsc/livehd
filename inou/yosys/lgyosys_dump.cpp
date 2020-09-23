@@ -1,11 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "lgyosys_dump.hpp"
-
 #include <math.h>
-
 #include <algorithm>
 
+#include "lgyosys_dump.hpp"
 #include "lgedgeiter.hpp"
 
 RTLIL::Wire *Lgyosys_dump::get_wire(const Node_pin &pin) {
@@ -88,6 +86,10 @@ RTLIL::Wire *Lgyosys_dump::create_tree(LGraph *g, const std::vector<RTLIL::Wire 
   auto name = next_id(g);
   if (result_wire == nullptr)
     result_wire = mod->addWire(next_id(g), width);
+
+  if (sign && (unsigned_wire.contains(result_wire) || unsigned_wire.contains(l) || unsigned_wire.contains(r)))
+    sign = false;
+
   (mod->*add_fnc)(name, l, r, result_wire, sign, "");
 
   return result_wire;
@@ -98,6 +100,7 @@ RTLIL::Wire *Lgyosys_dump::create_io_wire(const Node_pin &pin, RTLIL::Module *mo
   RTLIL::IdString name = absl::StrCat("\\", pin.get_name());
 
   RTLIL::Wire *new_wire  = module->addWire(name, pin.get_bits());
+  unsigned_wire.insert(new_wire);
   new_wire->start_offset = pin.get_offset();
 
   module->ports.push_back(name);
@@ -137,133 +140,152 @@ void Lgyosys_dump::create_blackbox(const Sub_node &sub, RTLIL::Design *design) {
 }
 
 void Lgyosys_dump::create_memory(LGraph *g, RTLIL::Module *module, Node &node) {
-  assert(node.get_type_op() == Memory_Op);
+  assert(node.get_type_op() == Cell_op::Memory);
 
   RTLIL::Cell *memory = module->addCell(absl::StrCat("\\", node.create_name()), RTLIL::IdString("$mem"));
 
-  RTLIL::SigSpec wr_addr, wr_data, wr_en, rd_addr, rd_data;
-  int            nrd_ports = 0;
+  RTLIL::SigSpec wr_addr;
+  RTLIL::SigSpec wr_data;
+  RTLIL::SigSpec wr_en;
+  RTLIL::SigSpec wr_clk;
+  uint64_t wr_clk_enable=0;
+  uint64_t wr_clk_polarity=0;
+
+  RTLIL::SigSpec rd_addr;
+  RTLIL::SigSpec rd_data;
   RTLIL::SigSpec rd_en;
-  RTLIL::Wire *  clk        = nullptr;
-  bool           rd_clk     = false;
-  bool           wr_clk     = false;
+  RTLIL::SigSpec rd_clk;
+  uint64_t rd_clk_enable =0;
+  uint64_t rd_clk_polarity=0;
+
   RTLIL::State   rd_posedge = RTLIL::State::Sx;
-  RTLIL::State   wr_posedge = RTLIL::State::Sx;
-  RTLIL::State   transp     = RTLIL::State::Sx;
 
-  for (const auto &e : node.inp_edges()) {
-    Port_ID input_pin   = e.sink.get_pid();
-    auto    driver_node = e.driver.get_node();
+  auto mem_size  = node.get_sink_pin("size").get_driver_node().get_type_const().to_i();
+  auto data_bits = node.get_sink_pin("bits").get_driver_node().get_type_const().to_i();
+  auto addr_dpin = node.get_sink_pin("addr").get_driver_pin();
+  auto mode_node = node.get_sink_pin("mode").get_driver_node();
+  if (!mode_node.is_type_const()) {
+    log_error("TODO: Yosys does not rd/wr ports in memories\n");
+  }
 
-    if (input_pin == LGRAPH_MEMOP_CLK) {
-      if (clk != nullptr)
-        log_error("Internal Error: multiple wires assigned to same mem port\n");
-      clk = get_wire(e.driver);
-      assert(clk);
+  int  addr_bits = ceill(log2(mem_size));
 
-    } else if (input_pin == LGRAPH_MEMOP_SIZE) {
-      memory->setParam("\\SIZE", RTLIL::Const(driver_node.get_type_const().to_i()));
+  int n_ports = addr_dpin.get_bits()/addr_bits;
+  assert(n_ports*addr_bits == addr_dpin.get_bits()); // exact match
 
-    } else if (input_pin == LGRAPH_MEMOP_OFFSET) {
-      memory->setParam("\\OFFSET", RTLIL::Const(driver_node.get_type_const().to_i()));
+  auto mode_mask = mode_node.get_type_const().to_i();
 
-    } else if (input_pin == LGRAPH_MEMOP_ABITS) {
-      memory->setParam("\\ABITS", RTLIL::Const(driver_node.get_type_const().to_i()));
+  auto do_fwd = node.get_sink_pin("fwd").get_driver_node().get_type_const().to_i();
+  assert(do_fwd == 0 || do_fwd==1);
 
-    } else if (input_pin == LGRAPH_MEMOP_WRPORT) {
-      memory->setParam("\\WR_PORTS", RTLIL::Const(driver_node.get_type_const().to_i()));
+  auto latency_value = node.get_sink_pin("latency").get_driver_node().get_type_const().to_i();
 
-    } else if (input_pin == LGRAPH_MEMOP_RDPORT) {
-      assert(nrd_ports == 0);  // Do not double set
+  memory->setParam("\\SIZE" , mem_size);
+  memory->setParam("\\MEMID", RTLIL::Const(std::string(node.get_name())));
+  memory->setParam("\\WIDTH", data_bits);
 
-      nrd_ports = driver_node.get_type_const().to_i();
-      memory->setParam("\\RD_PORTS", RTLIL::Const(nrd_ports));
+  memory->setParam("\\OFFSET", RTLIL::Const(0)); // mem[addr-OFFSET]. Why????
+  memory->setParam("\\INIT", RTLIL::Const::from_string("x"));
 
-    } else if (input_pin == LGRAPH_MEMOP_RDTRAN) {
-      transp = driver_node.get_type_const().to_i() ? RTLIL::State::S1 : RTLIL::State::S0;
+  auto posedge_value = node.get_sink_pin("posclk").get_driver_node().get_type_const().to_i();
 
-    } else if (input_pin == LGRAPH_MEMOP_RDCLKPOL) {
-      rd_posedge = (driver_node.get_type_const() == 0) ? RTLIL::State::S1 : RTLIL::State::S0;
-      rd_clk     = true;
+  auto clock_dpin = node.get_sink_pin("clock").get_driver_pin();
+  auto *clk_wire = get_wire(clock_dpin);
 
-    } else if (input_pin == LGRAPH_MEMOP_WRCLKPOL) {
-      wr_posedge = (driver_node.get_type_const() == 0) ? RTLIL::State::S1 : RTLIL::State::S0;
-      wr_clk     = true;
+  auto *addr_wire    = get_wire(addr_dpin);
+  auto *data_in_wire = get_wire(node.get_sink_pin("data_in").get_driver_pin());
+  auto *enable_wire  = get_wire(node.get_sink_pin("enable").get_driver_pin());
+  int nrd = 0;
+  int nwr = 0;
+  {
+    int tmp         = mode_mask;
+    int addr_pos    = 0;
+    int data_in_pos = 0;
+    int enable_pos  = 0;
+    int posedge     = posedge_value;
+    int latency     = latency_value;
+    while(tmp) {
+      auto lat = latency & 3;
+      auto pos = posedge & 1;
+      if (tmp&1) { // WR_PORT
+        nwr++;
+        wr_addr.append( RTLIL::SigSpec(addr_wire   ,addr_pos   ,addr_pos   +addr_bits));
+        wr_data.append( RTLIL::SigSpec(data_in_wire,data_in_pos,data_in_pos+data_bits));
+        wr_en.append  ( RTLIL::SigSpec(enable_wire ,enable_pos ,enable_pos +1        ));
 
-    } else if (LGRAPH_MEMOP_ISWRADDR(input_pin)) {
-      wr_addr.append(RTLIL::SigSpec(get_wire(e.driver)));
+        wr_clk_polarity <<= 1;
+        wr_clk_enable   <<= 1;
+        if (lat==0) {
+          wr_clk.append(RTLIL::State::Sx);
+        }else if (lat==1) {
+          wr_clk_polarity |= pos?1:0;
+          wr_clk_enable   |= 1;
 
-    } else if (LGRAPH_MEMOP_ISWRDATA(input_pin)) {
-      wr_data.append(RTLIL::SigSpec(get_wire(e.driver)));
+          if (clock_dpin.get_bits()==1) {
+            wr_clk.append(RTLIL::SigSpec(RTLIL::SigBit(clk_wire)));
+          }else{
+            wr_clk.append(RTLIL::SigSpec(clk_wire, enable_pos, 1));
+          }
+        }else{
+          log_error("latency of %d not currently supported by yosys memory wr bridge\n", lat);
+        }
 
-    } else if (LGRAPH_MEMOP_ISWREN(input_pin)) {
-      wr_en.append(RTLIL::SigSpec(get_wire(e.driver)));
-#if 0
-      RTLIL::Wire *en = get_wire(e.driver);
-      assert(en->width == 1); // yosys requires one wr_en per bit
-      wr_en.append(RTLIL::SigSpec(RTLIL::SigBit(en), e.get_bits()));
-#endif
+        data_in_pos += data_bits;
+      }else{ // RD_PORT
+        nrd++;
+        rd_addr.append( RTLIL::SigSpec(addr_wire,addr_pos,addr_pos+addr_bits));
+        rd_en.append  ( RTLIL::SigSpec(enable_wire ,enable_pos ,enable_pos +1        ));
 
-    } else if (LGRAPH_MEMOP_ISRDADDR(input_pin)) {
-      rd_addr.append(RTLIL::SigSpec(get_wire(e.driver)));
+        rd_clk_polarity <<= 1;
+        rd_clk_enable   <<= 1;
+        if (lat==0) {
+          rd_clk.append(RTLIL::State::Sx);
+        }else if (lat==1) {
+          rd_clk_enable |= 1;
+          if (clock_dpin.get_bits()==1) {
+            rd_clk.append(RTLIL::SigSpec(RTLIL::SigBit(clk_wire)));
+          }else{
+            rd_clk.append(RTLIL::SigSpec(clk_wire, enable_pos, 1));
+          }
+          rd_clk_polarity <<= pos?1:0;
+        }else{
+          log_error("latency of %d not currently supported by yosys memory rd bridge\n", lat);
+        }
+      }
+      tmp = tmp>>1;
 
-    } else if (LGRAPH_MEMOP_ISRDEN(input_pin)) {
-      rd_en.append(RTLIL::SigSpec(get_wire(e.driver)));
-      // rd_en.append(RTLIL::SigSpec(RTLIL::State::Sx));
-
-    } else {
-      log_error("Unrecognized input pid %d\n", input_pin);
-      assert(false);
+      addr_pos += addr_bits;
+      enable_pos++;
+      posedge >>=1;
+      latency >>=2;
     }
   }
 
-  if (rd_clk)
-    assert(rd_posedge != RTLIL::State::Sx);
-  if (wr_clk)
-    assert(wr_posedge != RTLIL::State::Sx);
-  assert(transp != RTLIL::State::Sx);
+  memory->setParam("\\RD_PORTS", RTLIL::Const(nrd));
+  memory->setParam("\\WR_PORTS", RTLIL::Const(nwr));
+  memory->setParam("\\RD_TRANSPARENT", RTLIL::Const(do_fwd, nrd)); // all the rd ports do
 
-  memory->setParam("\\MEMID", RTLIL::Const(std::string(node.get_name())));
-  memory->setParam("\\WIDTH", node.get_driver_pin(0).get_bits());
+  memory->setParam("\\WR_CLK_POLARITY", RTLIL::Const(wr_clk_polarity));
+  memory->setParam("\\WR_CLK_ENABLE",   RTLIL::Const(wr_clk_enable));
 
-  int rd_port_bits = memory->getParam("\\RD_PORTS").as_int();
-  if (rd_clk) {
-    memory->setParam("\\RD_CLK_ENABLE", RTLIL::Const(RTLIL::State::S1, rd_port_bits));
-    memory->setParam("\\RD_CLK_POLARITY", RTLIL::Const(rd_posedge, rd_port_bits));
-    memory->setPort("\\RD_CLK", RTLIL::SigSpec(RTLIL::SigBit(clk), rd_port_bits));
-  } else {
-    memory->setParam("\\RD_CLK_ENABLE", RTLIL::Const(RTLIL::State::S0, rd_port_bits));
-    memory->setParam("\\RD_CLK_POLARITY", RTLIL::Const(RTLIL::State::S0, rd_port_bits));
-    memory->setPort("\\RD_CLK", RTLIL::SigSpec(RTLIL::State::Sx, rd_port_bits));
-  }
-  int wr_port_bits = memory->getParam("\\WR_PORTS").as_int();
-  if (wr_clk) {
-    memory->setParam("\\WR_CLK_ENABLE", RTLIL::Const(RTLIL::State::S1, wr_port_bits));
-    memory->setParam("\\WR_CLK_POLARITY", RTLIL::Const(wr_posedge, wr_port_bits));
-    memory->setPort("\\WR_CLK", RTLIL::SigSpec(RTLIL::SigBit(clk), wr_port_bits));
-  } else {
-    memory->setParam("\\WR_CLK_ENABLE", RTLIL::Const(RTLIL::State::S0, wr_port_bits));
-    memory->setParam("\\WR_CLK_POLARITY", RTLIL::Const(RTLIL::State::S0, wr_port_bits));
-    memory->setPort("\\WR_CLK", RTLIL::SigSpec(RTLIL::State::Sx, wr_port_bits));
-  }
+  memory->setParam("\\RD_CLK_POLARITY", RTLIL::Const(rd_clk_polarity));
+  memory->setParam("\\RD_CLK_ENABLE",   RTLIL::Const(rd_clk_enable));
 
-  memory->setParam("\\INIT", RTLIL::Const::from_string("x"));
+  memory->setParam("\\RD_CLK_POLARITY", rd_posedge);
 
-  memory->setParam("\\RD_TRANSPARENT", RTLIL::Const(transp, memory->getParam("\\RD_PORTS").as_int()));
-
+  memory->setPort("\\WR_CLK",          wr_clk);
   memory->setPort("\\WR_DATA", wr_data);
   memory->setPort("\\WR_ADDR", wr_addr);
-  memory->setPort("\\WR_EN", wr_en);
+  memory->setPort("\\WR_EN",   wr_en);
 
+  memory->setPort("\\RD_CLK",          rd_clk);
   memory->setPort("\\RD_DATA", RTLIL::SigSpec(mem_output_map[node.get_compact()]));
   memory->setPort("\\RD_ADDR", rd_addr);
-
-  assert(nrd_ports == rd_en.size());
-  memory->setPort("\\RD_EN", rd_en);
+  memory->setPort("\\RD_EN",   rd_en);
 }
 
 void Lgyosys_dump::create_subgraph(LGraph *g, RTLIL::Module *module, Node &node) {
-  assert(node.get_type_op() == SubGraph_Op);
+  assert(node.get_type_op() == Cell_op::Sub);
 
   const auto &sub = node.get_type_sub_node();
 
@@ -289,7 +311,7 @@ void Lgyosys_dump::create_subgraph(LGraph *g, RTLIL::Module *module, Node &node)
 }
 
 void Lgyosys_dump::create_subgraph_outputs(LGraph *g, RTLIL::Module *module, Node &node) {
-  assert(node.get_type_op() == SubGraph_Op);
+  assert(node.get_type_op() == Cell_op::Sub);
 
   for (auto &dpin : node.out_connected_pins()) {
     cell_output_map[dpin.get_compact()] = add_wire(module, dpin);
@@ -314,57 +336,46 @@ void Lgyosys_dump::create_wires(LGraph *g, RTLIL::Module *module) {
     }
   }, hierarchy);
 
-  for (auto node : g->fast(hierarchy)) { // FIXME: add this as an option -flatten
+  for (auto node : g->fast(hierarchy)) {
     I(!node.is_invalid());
-    I(node.get_type_op() != GraphIO_Op);
+    I(!node.is_type_io());
 
     if (!node.has_inputs() && !node.has_outputs())
       continue;  // DCE code
 
-    if (node.get_type_op() == Const_Op) {
-      auto         dpin     = node.get_driver_pin();
-      RTLIL::Wire *new_wire = add_wire(module, dpin);
+    auto op = node.get_type_op();
+
+    if (op == Cell_op::AttrSet || op == Cell_op::AttrGet || op == Cell_op::TupAdd || op == Cell_op::TupGet)
+      continue;
+
+    if (op == Cell_op::Const) {
+      RTLIL::Wire *new_wire = add_wire(module, node.get_driver_pin());
 
       auto lc = node.get_type_const();
-
       if (lc.is_i()) {
-        module->connect(new_wire, RTLIL::SigSpec(lc.to_i(), dpin.get_bits()));
+        assert(node.get_driver_pin().get_bits()==lc.get_bits());
+        module->connect(new_wire, RTLIL::SigSpec(lc.to_i(), lc.get_bits()));
       } else {
         module->connect(new_wire, RTLIL::SigSpec(RTLIL::Const::from_string(lc.to_yosys())));
       }
-      input_map[dpin.get_compact()] = new_wire;
-      continue;
-    } else if (node.get_type_op() == SubGraph_Op) {
+      input_map[node.get_driver_pin().get_compact()] = new_wire;
+      if (!lc.is_negative()) {
+        unsigned_wire.insert(new_wire);
+      }
+    } else if (op == Cell_op::Sub) {
       create_subgraph_outputs(g, module, node);
-      continue;
-
-    } else if (node.get_type_op() == Memory_Op) {
+    } else if (op == Cell_op::Memory) {
       for (auto &dpin : node.out_connected_pins()) {
         RTLIL::Wire *new_wire = add_wire(module, dpin);
 
         cell_output_map[dpin.get_compact()] = new_wire;
         mem_output_map[node.get_compact()].push_back(RTLIL::SigChunk(new_wire));
       }
-      continue;
-    } else if (node.get_type_op() == And_Op || node.get_type_op() == Or_Op || node.get_type_op() == Xor_Op) {
-      // This differentiates between binary and unary Ands, Ors, Xors
-      int count = 0;
-      for (const auto &e : node.out_edges()) {
-        if (cell_output_map.find(e.driver.get_compact()) == cell_output_map.end()) {
-          ++count;
-          assert(count == 1);
-          // bitwise operators have the regular size
-
-          RTLIL::Wire *new_wire                   = add_wire(module, e.driver);
-          cell_output_map[e.driver.get_compact()] = new_wire;
-        }
-      }
-      continue;
+    }else{
+      auto         dpin                   = node.get_driver_pin();
+      RTLIL::Wire *result                 = add_wire(module, dpin);
+      cell_output_map[dpin.get_compact()] = result;
     }
-
-    auto         dpin                   = node.get_driver_pin();
-    RTLIL::Wire *result                 = add_wire(module, dpin);
-    cell_output_map[dpin.get_compact()] = result;
   }
 }
 
@@ -384,8 +395,10 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
   input_map.clear();
   output_map.clear();
   cell_output_map.clear();
+  mem_output_map.clear();
+  unsigned_wire.clear();
 
-  create_wires(g, module);
+  create_wires(g, module); // 1st create all the dpin wires to be used
 
   g->each_graph_output([this, module](const Node_pin &pin) {
     assert(pin.is_graph_output());
@@ -411,58 +424,41 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
 
   // now create nodes and make connections
   for (auto node : g->fast(hierarchy)) {
-    I(node.get_type_op() != GraphIO_Op);
+    auto op = node.get_type_op();
+    I(op != Cell_op::IO);
 
     if (!node.has_inputs() && !node.has_outputs())
       continue;  // DCE code
 
-    auto op = node.get_type_op();
-
-    if (op != Memory_Op && op != SubGraph_Op && !node.has_outputs())
+    if (op != Cell_op::Memory && op != Cell_op::Sub && !node.has_outputs())
       continue;
 
-    fmt::print("node:{}\n",node.debug_name());
     Bits_t size = 0;
-
     switch (op) {
-      case GraphIO_Op:
-      case Const_Op: continue;
-
-      case Sum_Op: {
-        std::vector<RTLIL::Wire *> add_unsigned;
+      case Cell_op::IO:
+      case Cell_op::Const: {
+      }
+      break;
+      case Cell_op::Sum: {
         std::vector<RTLIL::Wire *> add_signed;
-        std::vector<RTLIL::Wire *> sub_unsigned;
         std::vector<RTLIL::Wire *> sub_signed;
 
         size = 0;
         for (const auto &e : node.inp_edges()) {
           size = (e.get_bits() > size) ? e.get_bits() : size;
 
-          switch (e.sink.get_pid()) {
-            case 0: add_signed.push_back(get_wire(e.driver)); break;
-            case 1: add_unsigned.push_back(get_wire(e.driver)); break;
-            case 2: sub_signed.push_back(get_wire(e.driver)); break;
-            case 3: sub_unsigned.push_back(get_wire(e.driver)); break;
+          if (e.sink.get_pid()==0) {
+            assert(e.sink.get_pin_name()=="A");
+            add_signed.push_back(get_wire(e.driver));
+          }else{
+            assert(e.sink.get_pin_name()=="B");
+            sub_signed.push_back(get_wire(e.driver));
           }
-        }
-
-        // u_type = (add_unsigned.size() > 0 || sub_unsigned.size() > 0);
-
-        RTLIL::Wire *addu_result = nullptr;
-        if (add_unsigned.size() > 1) {
-          if (add_signed.size() + sub_unsigned.size() + sub_signed.size() > 0) {
-            addu_result = module->addWire(next_id(g), size);
-          } else {
-            addu_result = cell_output_map[node.get_driver_pin().get_compact()];
-          }
-          create_tree(g, add_unsigned, module, &RTLIL::Module::addAdd, false, addu_result);
-        } else if (add_unsigned.size() == 1) {
-          addu_result = add_unsigned[0];
         }
 
         RTLIL::Wire *adds_result = nullptr;
         if (add_signed.size() > 1) {
-          if (add_unsigned.size() + sub_unsigned.size() + sub_signed.size() > 0) {
+          if (sub_signed.size() > 0) {
             adds_result = module->addWire(next_id(g), size);
           } else {
             adds_result = cell_output_map[node.get_driver_pin().get_compact()];
@@ -472,21 +468,9 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
           adds_result = add_signed[0];
         }
 
-        RTLIL::Wire *subu_result = nullptr;
-        if (sub_unsigned.size() > 1) {
-          if (add_signed.size() + add_unsigned.size() + sub_signed.size() > 0) {
-            subu_result = module->addWire(next_id(g), size);
-          } else {
-            subu_result = cell_output_map[node.get_driver_pin().get_compact()];
-          }
-          create_tree(g, sub_unsigned, module, &RTLIL::Module::addAdd, false, subu_result);
-        } else if (sub_unsigned.size() == 1) {
-          subu_result = sub_unsigned[0];
-        }
-
         RTLIL::Wire *subs_result = nullptr;
         if (sub_signed.size() > 1) {
-          if (add_unsigned.size() + sub_unsigned.size() + add_signed.size() > 0) {
+          if (add_signed.size() > 0) {
             subs_result = module->addWire(next_id(g), size);
           } else {
             subs_result = cell_output_map[node.get_driver_pin().get_compact()];
@@ -496,158 +480,74 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
           subs_result = sub_signed[0];
         }
 
-        RTLIL::Wire *a_result = nullptr;
-        if (addu_result != nullptr && adds_result != nullptr) {
-          if (subu_result != nullptr || subs_result != nullptr) {
-            a_result = module->addWire(next_id(g), size);
-          } else {
-            a_result = cell_output_map[node.get_driver_pin().get_compact()];
-          }
-          module->addAdd(next_id(g), addu_result, adds_result, a_result, false);
-        } else if (addu_result != nullptr) {
-          a_result = addu_result;
-        } else if (adds_result != nullptr) {
-          a_result = adds_result;
-        }
-
-        RTLIL::Wire *s_result = nullptr;
-        if (subu_result != nullptr && subs_result != nullptr) {
-          s_result = module->addWire(next_id(g), size);
-          module->addAdd(next_id(g), subu_result, subs_result, s_result, false);
-        } else if (subu_result != nullptr) {
-          s_result = subu_result;
-        } else if (subs_result != nullptr) {
-          s_result = subs_result;
-        }
+        RTLIL::Wire *a_result = adds_result;
+        RTLIL::Wire *s_result = subs_result;
 
         if (a_result != nullptr && s_result != nullptr) {
-          module->addSub(next_id(g), a_result, s_result, cell_output_map[node.get_driver_pin().get_compact()], false);
+          module->addSub(next_id(g), a_result, s_result, cell_output_map[node.get_driver_pin().get_compact()], true);
         } else if (s_result != nullptr) {
-          module->addSub(next_id(g), RTLIL::Const(0), s_result, cell_output_map[node.get_driver_pin().get_compact()], false);
+          module->addSub(next_id(g), RTLIL::Const(0), s_result, cell_output_map[node.get_driver_pin().get_compact()], true);
         } else {
           if (cell_output_map[node.get_driver_pin().get_compact()]->name != a_result->name)
             module->connect(cell_output_map[node.get_driver_pin().get_compact()], RTLIL::SigSpec(a_result));
         }
 
-        break;
       }
-      case Mult_Op: {
-        std::vector<RTLIL::Wire *> m_unsigned;
+      break;
+      case Cell_op::Mult: {
         std::vector<RTLIL::Wire *> m_signed;
 
         size = 0;
         for (const auto &e : node.inp_edges()) {
           size = (e.get_bits() > size) ? e.get_bits() : size;
 
-          switch (e.sink.get_pid()) {
-            case 0: m_signed.push_back(get_wire(e.driver)); break;
-            case 1: m_unsigned.push_back(get_wire(e.driver)); break;
-          }
+          m_signed.push_back(get_wire(e.driver));
         }
 
-        // u_type                 = (m_unsigned.size() > 0);
-        RTLIL::Wire *mu_result = nullptr;
         RTLIL::Wire *ms_result = nullptr;
 
-        if (m_unsigned.size() > 1) {
-          if (m_signed.size() == 0) {
-            mu_result = cell_output_map[node.get_driver_pin().get_compact()];
-          } else {
-            mu_result = module->addWire(next_id(g), size);
-          }
-          create_tree(g, m_unsigned, module, &RTLIL::Module::addMul, false, mu_result);
-        } else if (m_unsigned.size() == 1) {
-          mu_result = m_unsigned[0];
-        }
-
         if (m_signed.size() > 1) {
-          if (m_unsigned.size() == 0) {
-            ms_result = cell_output_map[node.get_driver_pin().get_compact()];
-          } else {
-            ms_result = module->addWire(next_id(g), size);
-          }
+          ms_result = cell_output_map[node.get_driver_pin().get_compact()];
           create_tree(g, m_signed, module, &RTLIL::Module::addMul, false, ms_result);
         } else if (m_signed.size() == 1) {
           ms_result = m_signed[0];
         }
 
-        if (mu_result != nullptr && ms_result != nullptr) {
-          module->addMul(next_id(g), mu_result, ms_result, cell_output_map[node.get_driver_pin().get_compact()], false);
-        } else if (mu_result != nullptr) {
-          if (cell_output_map[node.get_driver_pin().get_compact()]->name != mu_result->name)
-            module->connect(cell_output_map[node.get_driver_pin().get_compact()], RTLIL::SigSpec(mu_result));
-        } else if (ms_result != nullptr) {
-          if (cell_output_map[node.get_driver_pin().get_compact()]->name != ms_result->name)
-            module->connect(cell_output_map[node.get_driver_pin().get_compact()], RTLIL::SigSpec(ms_result));
-        }
+        if (cell_output_map[node.get_driver_pin().get_compact()]->name != ms_result->name)
+          module->connect(cell_output_map[node.get_driver_pin().get_compact()], RTLIL::SigSpec(ms_result));
 
-        break;
       }
+      break;
+      case Cell_op::Div: {
+        auto   a_dpin = node.get_sink_pin("a").get_driver_pin();
+        auto   b_dpin = node.get_sink_pin("b").get_driver_pin();
 
-      case Not_Op: {
-        int n_inps = 0;
+        auto *lhs  = get_wire(a_dpin);
+        auto *rhs  = get_wire(b_dpin);
 
-        for (const auto &e : node.inp_edges()) {
-          n_inps++;
-          RTLIL::Wire *inWire = get_wire(e.driver);
-          module->addNot(next_id(g), inWire, cell_output_map[node.get_driver_pin().get_compact()]);
-        }
-        // if the assertion fails, check what does a not with multiple inputs mean
-        assert(n_inps == 1);
-
-        break;
+        module->addDiv(next_id(g), lhs, rhs, cell_output_map[node.get_driver_pin().get_compact()], true); // signed
       }
-      case Join_Op: {
-        std::vector<RTLIL::SigChunk> joined_wires;
-        joined_wires.resize(cell_output_map[node.get_driver_pin().get_compact()]->width);
-        uint32_t width      = 0;
-        bool     has_inputs = false;
-        for (const auto &e : node.inp_edges_ordered()) {
-          RTLIL::Wire *join              = get_wire(e.driver);
-          joined_wires[e.sink.get_pid()] = RTLIL::SigChunk(join);
-          width += join->width;
-          has_inputs = true;
-        }
-
-        if (!has_inputs) {
-          continue;
-        }
-        assert(cell_output_map.find(node.get_driver_pin().get_compact()) != cell_output_map.end());
-        assert(width == (uint32_t)(cell_output_map[node.get_driver_pin().get_compact()]->width));
-        module->connect(cell_output_map[node.get_driver_pin().get_compact()], RTLIL::SigSpec(joined_wires));
-
-        break;
+      break;
+      case Cell_op::Not: {
+        auto *wire = get_wire(node.get_sink_pin().get_driver_pin());
+        module->addNot(next_id(g), wire, cell_output_map[node.get_driver_pin().get_compact()]);
       }
-      case Pick_Op: {
-        int          upper       = 0;
-        int          lower       = 0;
-        RTLIL::Wire *picked_wire = nullptr;
+      break;
+      case Cell_op::Tposs: {
+        auto *in_wire  = get_wire(node.get_sink_pin().get_driver_pin());
+        auto *out_wire = cell_output_map[node.get_driver_pin().get_compact()];
 
-        for (const auto &e : node.inp_edges()) {
-          switch (e.sink.get_pid()) {
-            case 0: picked_wire = get_wire(e.driver); break;
-            case 1:
-              if (e.driver.get_node().get_type_op() != Const_Op)
-                log_error("Internal Error: Pick range is not a constant.\n");
-              lower = e.driver.get_node().get_type_const().to_i();
-              break;
-            default: assert(0);  // pids > 1 not supported
-          }
+        if (in_wire->width+1 == out_wire->width) {
+          auto w2 = RTLIL::SigSpec(in_wire);
+          w2.extend_u0(in_wire->width+1, false);  // unsigned extend
+          module->connect(out_wire, w2);
+        }else{
+          unsigned_wire.insert(out_wire);
+          module->connect(out_wire, in_wire);
         }
-        assert(node.get_driver_pin().get_bits());
-        upper = lower + node.get_driver_pin().get_bits() - 1;
-        if (upper - lower + 1 > picked_wire->width) {
-          upper = lower + picked_wire->width - 1;
-          module->connect(RTLIL::SigSpec(cell_output_map[node.get_driver_pin().get_compact()], lower, upper - lower + 1),
-                          RTLIL::SigSpec(picked_wire, lower, upper - lower + 1));
-        } else {
-          assert(cell_output_map[node.get_driver_pin().get_compact()]->name != picked_wire->name);
-          module->connect(cell_output_map[node.get_driver_pin().get_compact()],
-                          RTLIL::SigSpec(picked_wire, lower, upper - lower + 1));
-        }
-        break;
       }
-      case LUT_Op: {
+      break;
+      case Cell_op::LUT: {
         RTLIL::SigSpec joined_inp_wires;
         bool           has_inputs = false;
         uint8_t        inp_num    = 0;
@@ -666,402 +566,289 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         auto lut_code = RTLIL::Const::from_string(node.get_type_lut().to_yosys());
 
         module->addLut(next_id(g), joined_inp_wires, cell_output_map[node.get_driver_pin().get_compact()], lut_code);
-        break;
       }
-      case And_Op:
-      case Or_Op:
-      case Xor_Op: {
+      break;
+      case Cell_op::And:
+      case Cell_op::Or:
+      case Cell_op::Xor: {
+        std::vector<RTLIL::Wire *> inps;
+
+        bool must_be_signed = false;
+        auto y_bits = node.get_driver_pin().get_bits();
+        for (const auto &e : node.inp_edges()) {
+          if (e.driver.get_bits() != y_bits)
+            must_be_signed = true;
+          inps.push_back(get_wire(e.driver));
+        }
+
+        add_cell_fnc_sign yop = &RTLIL::Module::addAnd;
+        if (node.get_type_op() == Cell_op::Or)
+          yop = &RTLIL::Module::addOr;
+        else if (node.get_type_op() == Cell_op::Xor)
+          yop = &RTLIL::Module::addXor;
+
+        create_tree(g, inps, module, yop, must_be_signed, cell_output_map[node.get_driver_pin().get_compact()]);
+      }
+      break;
+      case Cell_op::Rand:
+      case Cell_op::Ror: {
         std::vector<RTLIL::Wire *> inps;
 
         for (const auto &e : node.inp_edges()) {
           inps.push_back(get_wire(e.driver));
         }
 
-        Port_ID pid = 0;
-        if (cell_output_map.find(node.get_driver_pin(0).get_compact()) != cell_output_map.end())
-          pid = 0;
-        else if (cell_output_map.find(node.get_driver_pin(1).get_compact()) != cell_output_map.end())
-          pid = 1;
-        else
+        RTLIL::Wire *or_input_wires = module->addWire(next_id(g), inps[0]->width);
+        if (node.get_type_op() == Cell_op::Rand) {
+          create_tree(g, inps, module, &RTLIL::Module::addAnd, false, or_input_wires);
+          module->addReduceAnd(next_id(g), or_input_wires, cell_output_map[node.get_driver_pin().get_compact()]);
+        }else if (node.get_type_op() == Cell_op::Ror) {
+          create_tree(g, inps, module, &RTLIL::Module::addOr, false, or_input_wires);
+          module->addReduceOr(next_id(g), or_input_wires, cell_output_map[node.get_driver_pin().get_compact()]);
+        }else{
           assert(false);
-
-        assert(cell_output_map.find(node.get_driver_pin(pid).get_compact())
-               != cell_output_map.end());  // single input and gate that is not used as a reduce and
-
-        if (pid == 1) {  // REDUCE OP
-          RTLIL::Wire *or_input_wires = module->addWire(next_id(g), inps[0]->width);
-          if (node.get_type_op() == And_Op)
-            create_tree(g, inps, module, &RTLIL::Module::addAnd, false, or_input_wires);
-          else if (node.get_type_op() == Or_Op)
-            create_tree(g, inps, module, &RTLIL::Module::addOr, false, or_input_wires);
-          else if (node.get_type_op() == Xor_Op)
-            create_tree(g, inps, module, &RTLIL::Module::addXor, false, or_input_wires);
-          else
-            assert(false);
-
-          if (node.get_type_op() == And_Op)
-            module->addReduceAnd(next_id(g), or_input_wires, cell_output_map[node.get_driver_pin(pid).get_compact()]);
-          else if (node.get_type_op() == Or_Op)
-            module->addReduceOr(next_id(g), or_input_wires, cell_output_map[node.get_driver_pin(pid).get_compact()]);
-          else if (node.get_type_op() == Xor_Op)
-            module->addReduceXor(next_id(g), or_input_wires, cell_output_map[node.get_driver_pin(pid).get_compact()]);
-          else
-            assert(false);
-
-        } else {
-          if (node.get_type_op() == And_Op)
-            create_tree(g, inps, module, &RTLIL::Module::addAnd, false, cell_output_map[node.get_driver_pin(pid).get_compact()]);
-          else if (node.get_type_op() == Or_Op)
-            create_tree(g, inps, module, &RTLIL::Module::addOr, false, cell_output_map[node.get_driver_pin(pid).get_compact()]);
-          else if (node.get_type_op() == Xor_Op)
-            create_tree(g, inps, module, &RTLIL::Module::addXor, false, cell_output_map[node.get_driver_pin(pid).get_compact()]);
-          else
-            assert(false);
         }
-        break;
       }
-      case Latch_Op: {
-        RTLIL::Wire *dWire    = nullptr;
-        RTLIL::Wire *enWire   = nullptr;
-        bool         polarity = true;
+      break;
+      case Cell_op::Latch: {
+        auto     din_dpin = node.get_sink_pin("din"   ).get_driver_pin();
+        auto  enable_dpin = node.get_sink_pin("enable").get_driver_pin();
+        auto  posclk_dpin = node.get_sink_pin("posclk").get_driver_pin();
 
-        for (const auto &e : node.inp_edges()) {
-          switch (e.sink.get_pid()) {
-            case 0: dWire = get_wire(e.driver); break;
-            case 1: enWire = get_wire(e.driver); break;
-            case 2: {
-              if (e.driver.get_node().get_type_op() != Const_Op)
-                log_error("Internal Error: polarity is not a constant.\n");
-              polarity = e.driver.get_node().get_type_const().to_i() ? true : false;
-            } break;
-            default: log_error("DumpYosys: unrecognized wire connection pid=%d\n", e.sink.get_pid());
-          }
-        }
-        if (dWire)
-          log("adding Latch_Op width = %d\n", dWire->width);
-        if (enWire)
-          log("adding Latch_Op enable width = %d\n", dWire->width);
-        // last argument is polarity
-        module->addDlatch(next_id(g), enWire, dWire, cell_output_map[node.get_driver_pin().get_compact()], polarity);
-      } break;
-      case SFlop_Op:
-      case AFlop_Op: {
-        RTLIL::Wire *enWire   = nullptr;
-        RTLIL::Wire *dWire    = nullptr;
-        RTLIL::Wire *clkWire  = nullptr;
-        RTLIL::Wire *rstWire  = nullptr;
-        RTLIL::Wire *rstVal   = nullptr;
-        bool         polarity = true;
+        assert(!    din_dpin.is_invalid());
+        assert(! enable_dpin.is_invalid());
 
-        for (const auto &e : node.inp_edges()) {
-          switch (e.sink.get_pid()) {
-            case 0: clkWire = get_wire(e.driver); break;
-            case 1: dWire = get_wire(e.driver); break;
-            case 2: enWire = get_wire(e.driver); break;
-            case 3: rstWire = get_wire(e.driver); break;  // clr signal in yosys
-            case 4: rstVal = get_wire(e.driver); break;   // set signal in yosys
-            case 5: {
-              if (e.driver.get_node().get_type_op() != Const_Op)
-                log_error("Internal Error: polarity is not a constant.\n");
-              polarity = e.driver.get_node().get_type_const().to_i() ? true : false;
-            }
-            default: log("[WARNING] DumpYosys: unrecognized wire connection pid=%d\n", e.sink.get_pid());
-          }
+        RTLIL::Wire *    din_wire = get_wire(    din_dpin);
+        RTLIL::Wire * enable_wire = get_wire( enable_dpin);
+        bool polarity = true;
+
+        if (!posclk_dpin.is_invalid()) {
+          auto v = posclk_dpin.get_node().get_type_const();
+          polarity = v.to_i() != 0;
         }
-        if (dWire)
-          log("adding sflop_Op width = %d\n", dWire->width);
-        // last argument is polarity
-        switch (node.get_type_op()) {
-          case SFlop_Op:
-            if (enWire == nullptr && clkWire != nullptr && dWire != nullptr && rstWire == nullptr && rstVal == nullptr) {
-              module->addDff(next_id(g), clkWire, dWire, cell_output_map[node.get_driver_pin().get_compact()], polarity);
-            } else if (enWire == nullptr && clkWire != nullptr && dWire != nullptr && rstWire != nullptr && rstVal != nullptr) {
-              module->addDffsr(next_id(g),
-                               clkWire,
-                               rstVal,
-                               rstWire,
-                               dWire,
-                               cell_output_map[node.get_driver_pin().get_compact()],
-                               polarity,
-                               polarity,
-                               polarity);
-            } else {
-              log_error("Enable and Reset not supported on Flops yet!\n");
-            }
-            break;
-          case AFlop_Op:
-            if (enWire == nullptr && clkWire != nullptr && dWire != nullptr && rstWire != nullptr && rstVal == nullptr) {
-              module->addAdff(next_id(g),
-                              clkWire,
-                              rstWire,
-                              dWire,
-                              cell_output_map[node.get_driver_pin().get_compact()],
-                              RTLIL::Const(0, dWire->width),
-                              true,
-                              true);
-            } else {
-              log_error("Enable not supported on AFlops yet, RST required on AFlops!\n");
-            }
-            break;
-          default: assert(false);  // internal error
-        }
-        break;
+
+        module->addDlatch(next_id(g), enable_wire, din_wire, cell_output_map[node.get_driver_pin().get_compact()], polarity);
       }
-      case Div_Op:
-      case LessThan_Op:
-      case GreaterThan_Op:
-      case LessEqualThan_Op:
-      case GreaterEqualThan_Op: {
-        RTLIL::Wire *lhs  = nullptr;
-        RTLIL::Wire *rhs  = nullptr;
-        bool         sign = false;
+      break;
+      case Cell_op::Sflop:
+      case Cell_op::Aflop: {
 
-        for (const auto &e : node.inp_edges()) {
-          switch (e.sink.get_pid()) {
-            case 0:
-              if (lhs != nullptr)
-                log_error("Internal error: found two connections to GT pid.\n");
-              lhs  = get_wire(e.driver);
-              sign = true;
-              break;
-            case 1:
-              if (lhs != nullptr)
-                log_error("Internal error: found two connections to GT pid.\n");
-              lhs = get_wire(e.driver);
-              break;
-            case 2:
-              if (rhs != nullptr)
-                log_error("Internal error: found two connections to GT pid.\n");
-              rhs  = get_wire(e.driver);
-              sign = true;
-              break;
-            case 3:
-              if (rhs != nullptr)
-                log_error("Internal error: found two connections to GT pid.\n");
-              rhs = get_wire(e.driver);
-              break;
-          }
+        Node_pin    reset_dpin;
+        Node_pin  initial_dpin;
+        Node_pin    clock_dpin;
+        Node_pin      din_dpin;
+        Node_pin   enable_dpin;
+        Node_pin   posclk_dpin;
+        Node_pin negreset_dpin;
+
+        if (node.is_sink_connected("reset"  )) reset_dpin   = node.get_sink_pin("reset"  ).get_driver_pin();
+        if (node.is_sink_connected("initial")) initial_dpin = node.get_sink_pin("initial").get_driver_pin();
+        if (node.is_sink_connected("clock"  )) clock_dpin   = node.get_sink_pin("clock"  ).get_driver_pin();
+        if (node.is_sink_connected("din"    )) din_dpin     = node.get_sink_pin("din"    ).get_driver_pin();
+        if (node.is_sink_connected("enable" )) enable_dpin  = node.get_sink_pin("enable" ).get_driver_pin();
+        if (node.is_sink_connected("posclk" )) posclk_dpin  = node.get_sink_pin("posclk" ).get_driver_pin();
+        if (node.is_sink_connected("negreset")) negreset_dpin  = node.get_sink_pin("negreset").get_driver_pin();
+
+        RTLIL::Wire *  reset_wire = nullptr;
+        RTLIL::Wire *  clock_wire = nullptr;
+        RTLIL::Wire *    din_wire = nullptr;
+        RTLIL::Wire * enable_wire = nullptr;
+
+        if (!initial_dpin.is_invalid()) { assert(false); } //  no reset value in yosys, add mux before
+        if (!  reset_dpin.is_invalid()) {   reset_wire = get_wire(  reset_dpin); }
+        if (!  clock_dpin.is_invalid()) {   clock_wire = get_wire(  clock_dpin); }
+        if (!    din_dpin.is_invalid()) {     din_wire = get_wire(    din_dpin); }
+        if (! enable_dpin.is_invalid()) {  enable_wire = get_wire( enable_dpin); }
+
+        bool posclk = true;
+        if (!posclk_dpin.is_invalid()) {
+          posclk = posclk_dpin.get_node().get_type_const().to_i()!=0;
+        }
+        bool negreset = false;
+        if (!negreset_dpin.is_invalid()) {
+          negreset = negreset_dpin.get_node().get_type_const().to_i()!=0;
         }
 
-        if (lhs == nullptr || rhs == nullptr)
-          log_error("Internal error: found no connections to LT pid.\n");
+        if (op == Cell_op::Sflop) {
+          assert(clock_wire);
+          assert(din_wire);
 
-        switch (node.get_type_op()) {
-          case LessThan_Op: module->addLt(next_id(g), lhs, rhs, cell_output_map[node.get_driver_pin().get_compact()], sign); break;
-          case LessEqualThan_Op:
-            module->addLe(next_id(g), lhs, rhs, cell_output_map[node.get_driver_pin().get_compact()], sign);
-            break;
-          case GreaterThan_Op:
-            module->addGt(next_id(g), lhs, rhs, cell_output_map[node.get_driver_pin().get_compact()], sign);
-            break;
-          case GreaterEqualThan_Op:
-            module->addGe(next_id(g), lhs, rhs, cell_output_map[node.get_driver_pin().get_compact()], sign);
-            break;
-          case Div_Op: module->addDiv(next_id(g), lhs, rhs, cell_output_map[node.get_driver_pin().get_compact()], sign); break;
-          default: ::Pass::error("lgyosys_dump: internal error!");
-        }
-        break;
-      }
-      case ShiftLeft_Op: {
-        // log("adding SHL_Op\n");
-        RTLIL::Wire *  shifted_wire = nullptr;
-        RTLIL::SigSpec shift_amount;
-
-        for (const auto &e : node.inp_edges()) {
-          size = (e.get_bits() > size) ? e.get_bits() : size;
-
-          switch (e.sink.get_pid()) {
-            case 0:
-              if (shifted_wire != nullptr)
-                log_error("Internal Error: multiple wires assigned to same shift\n");
-              shifted_wire = get_wire(e.driver);
-              break;
-            case 1:
-              if (shift_amount.size() != 0)
-                log_error("Internal Error: multiple wires assigned to same shift\n");
-              if (e.driver.get_node().get_type_op() == Const_Op)
-                shift_amount = RTLIL::Const(e.driver.get_node().get_type_const().to_i());
-              else
-                shift_amount = get_wire(e.driver);
-              break;
-          }
-        }
-        if (shifted_wire == nullptr)
-          log_error("Internal Error: did not find a wire to be shifted.\n");
-        if (shift_amount.size() == 0)
-          log_error("Internal Error: did not find a wire to be shifted.\n");
-        module->addShl(next_id(g), shifted_wire, shift_amount, cell_output_map[node.get_driver_pin().get_compact()], false);
-        break;
-      }
-      case ShiftRight_Op: {
-        // log("adding SHR_Op\n");
-        RTLIL::Wire *  shifted_wire = nullptr;
-        RTLIL::SigSpec shift_amount;
-
-        bool sign   = false;
-        bool b_sign = false;
-        bool a_sign = false;
-
-        for (const auto &e : node.inp_edges()) {
-          size = (e.get_bits() > size) ? e.get_bits() : size;
-
-          switch (e.sink.get_pid()) {
-            case 0:
-              if (shifted_wire != nullptr)
-                log_error("Internal Error: multiple wires assigned to same shift\n");
-              shifted_wire = get_wire(e.driver);
-              break;
-            case 1:
-              if (shift_amount.size() != 0)
-                log_error("Internal Error: multiple wires assigned to same shift\n");
-              if (e.driver.get_node().get_type_op() == Const_Op)
-                shift_amount = RTLIL::Const(e.driver.get_node().get_type_const().to_i());
-              else
-                shift_amount = get_wire(e.driver);
-              break;
-            case 2:
-              if (e.driver.get_node().get_type_op() != Const_Op)
-                log_error("Internal Error: Shift sign is not a constant.\n");
-              auto val = e.driver.get_node().get_type_const().to_i();
-              sign     = (val) % 2 == 1;  // FIXME: Weird encoding
-              b_sign   = (val) == 2;
-              a_sign   = (val) > 2;
-              break;
-          }
-        }
-        if (shifted_wire == nullptr)
-          log_error("Internal Error: did not find a wire to be shifted.\n");
-        if (shift_amount.size() == 0)
-          log_error("Internal Error: did not find a wire to be shifted.\n");
-
-        if (sign)
-          module->addSshr(next_id(g), shifted_wire, shift_amount, cell_output_map[node.get_driver_pin().get_compact()], a_sign);
-        else if (b_sign)
-          module->addShiftx(next_id(g), shifted_wire, shift_amount, cell_output_map[node.get_driver_pin().get_compact()], a_sign);
-        else
-          module->addShr(next_id(g), shifted_wire, shift_amount, cell_output_map[node.get_driver_pin().get_compact()], a_sign);
-        break;
-      }
-      case Equals_Op: {
-        std::vector<RTLIL::Wire *> e_unsigned;
-        std::vector<RTLIL::Wire *> e_signed;
-
-        size = 0;
-        for (const auto &e : node.inp_edges()) {
-          size = (e.get_bits() > size) ? e.get_bits() : size;
-
-          switch (e.sink.get_pid()) {
-            case 0: e_signed.push_back(get_wire(e.driver)); break;
-            case 1: e_unsigned.push_back(get_wire(e.driver)); break;
-          }
-        }
-
-        // u_type                 = (e_unsigned.size() > 0);
-        RTLIL::Wire *eu_result = nullptr;
-        RTLIL::Wire *es_result = nullptr;
-
-        if (e_unsigned.size() > 1) {
-          if (e_signed.size() == 0) {
-            eu_result = cell_output_map[node.get_driver_pin().get_compact()];
+          if (enable_wire == nullptr && reset_wire == nullptr) {
+            assert(initial_dpin.is_invalid()); // no reset here
+            module->addDff(next_id(g), clock_wire, din_wire, cell_output_map[node.get_driver_pin().get_compact()], posclk);
+          } else if (enable_wire == nullptr && reset_wire != nullptr) {
+            assert(initial_dpin.is_invalid()); // no reset here
+            auto set_wire = RTLIL::SigSpec(RTLIL::State::S0);
+            module->addDffsr(next_id(g),
+                clock_wire,
+                set_wire,
+                reset_wire,
+                din_wire,
+                cell_output_map[node.get_driver_pin().get_compact()],
+                posclk,
+                !negreset,  // set_polarity
+                !negreset); // reset_polarity
+          } else if (enable_wire && reset_wire == nullptr) {
+            assert(initial_dpin.is_invalid()); // no reset here
+            auto set_wire = RTLIL::SigSpec(RTLIL::State::S0);
+            module->addDffe(next_id(g),
+                clock_wire,
+                enable_wire,
+                din_wire,
+                cell_output_map[node.get_driver_pin().get_compact()],
+                posclk,
+                !negreset); // enable_polarity
           } else {
-            eu_result = module->addWire(next_id(g), size);
+            log_error("Flop options not supported yet! (fixme?)\n");
           }
-          create_tree(g, e_unsigned, module, &RTLIL::Module::addEq, false, eu_result);
-        } else if (e_unsigned.size() == 1) {
-          eu_result = e_unsigned[0];
-        }
+        }else{
+          if (reset_wire && enable_wire == nullptr) {
+            RTLIL::Const initial_const(0, node.get_driver_pin().get_bits());
+            if (!initial_dpin.is_invalid()) {
+              initial_const = RTLIL::Const(initial_dpin.get_node().get_type_const().to_yosys());
+            }
 
-        if (e_signed.size() > 1) {
-          if (e_unsigned.size() == 0) {
-            es_result = cell_output_map[node.get_driver_pin().get_compact()];
+            auto *c2 = module->addAdff(next_id(g),
+                clock_wire,
+                reset_wire,
+                din_wire,
+                cell_output_map[node.get_driver_pin().get_compact()],
+                initial_const,
+                posclk,
+                !negreset // reset polarity
+                );
           } else {
-            es_result = module->addWire(next_id(g), size);
+            log_error("Enable not supported on AFlops yet and RST required on AFlops!\n");
           }
-          create_tree(g, e_signed, module, &RTLIL::Module::addEq, false, es_result);
-        } else if (e_signed.size() == 1) {
-          es_result = e_signed[0];
         }
-
-        if (eu_result != nullptr && es_result != nullptr) {
-          module->addEq(next_id(g), eu_result, es_result, cell_output_map[node.get_driver_pin().get_compact()], false);
-        } else if (eu_result != nullptr) {
-          if (cell_output_map[node.get_driver_pin().get_compact()]->name != eu_result->name)
-            module->connect(cell_output_map[node.get_driver_pin().get_compact()], RTLIL::SigSpec(eu_result));
-        } else if (es_result != nullptr) {
-          if (cell_output_map[node.get_driver_pin().get_compact()]->name != es_result->name)
-            module->connect(cell_output_map[node.get_driver_pin().get_compact()], RTLIL::SigSpec(es_result));
-        }
-        break;
       }
-      case Mux_Op: {
-        // log("adding MUX_Op\n");
+      break;
+      case Cell_op::LT:
+      case Cell_op::GT:
+      case Cell_op::EQ: {
+        std::vector<RTLIL::Wire *> v_lhs;
+        std::vector<RTLIL::Wire *> v_rhs;
 
-        RTLIL::Wire *aport = nullptr;
-        RTLIL::Wire *bport = nullptr;
+        for (const auto &e : node.inp_edges()) {
+          switch (e.sink.get_pid()) {
+            case 0:
+              v_lhs.emplace_back(get_wire(e.driver));
+              break;
+            case 1:
+              v_rhs.emplace_back(get_wire(e.driver));
+              break;
+          }
+        }
+
+        if (v_lhs.empty() || v_rhs.empty())
+          log_error("Internal error: found no connections to compare.\n");
+
+        RTLIL::Wire *final_wire = cell_output_map[node.get_driver_pin().get_compact()];
+        assert(final_wire);
+
+        bool multi_comparator = v_lhs.size()>1 || v_rhs.size()>1;
+        std::vector<RTLIL::Wire *> cmp_wires;
+
+        for(auto *lhs:v_lhs) {
+          for( auto *rhs:v_rhs) {
+            RTLIL::Wire *wire;
+            if (multi_comparator) {
+              wire = module->addWire(next_id(g), size);
+            }else{
+              wire = final_wire;
+            }
+            bool must_be_signed = true;
+            if (rhs->width == lhs->width)
+              must_be_signed = false;
+            switch (node.get_type_op()) {
+              case Cell_op::LT: module->addLt(next_id(g), lhs, rhs, wire, must_be_signed); break;
+              case Cell_op::GT: module->addGt(next_id(g), lhs, rhs, wire, must_be_signed); break;
+              case Cell_op::EQ: module->addEq(next_id(g), lhs, rhs, wire, must_be_signed); break;
+              default: ::Pass::error("lgyosys_dump: unknown compare gate error!");
+            }
+          }
+        }
+        if (multi_comparator) {
+          create_tree(g, cmp_wires, module, &RTLIL::Module::addAnd, false, final_wire);
+        }
+      }
+      break;
+      case Cell_op::SRA: {
+        auto   a_dpin = node.get_sink_pin("a").get_driver_pin();
+        auto   b_dpin = node.get_sink_pin("b").get_driver_pin();
+
+        auto *lhs  = get_wire(a_dpin);
+        auto *rhs  = get_wire(b_dpin);
+
+        if (unsigned_wire.contains(lhs)) {
+          log("FIXME: use Shr");
+        }
+
+        if (b_dpin.get_node().is_type_const()) { // common optimization
+          auto amount = RTLIL::Const(b_dpin.get_node().get_type_const().to_i());
+          module->addSshr(next_id(g), lhs, amount, cell_output_map[node.get_driver_pin().get_compact()], true);
+        }else{
+          module->addSshr(next_id(g), lhs, rhs, cell_output_map[node.get_driver_pin().get_compact()], true);
+        }
+      }
+      break;
+      case Cell_op::SHL: {
+        auto   a_dpin = node.get_sink_pin("a").get_driver_pin();
+        auto   b_dpin = node.get_sink_pin("b").get_driver_pin();
+
+        auto *lhs  = get_wire(a_dpin);
+        auto *rhs  = get_wire(b_dpin);
+
+        if (b_dpin.get_node().is_type_const()) { // common optimization
+          auto amount = RTLIL::Const(b_dpin.get_node().get_type_const().to_i());
+          module->addShl(next_id(g), lhs, amount, cell_output_map[node.get_driver_pin().get_compact()], false);
+        }else{
+          module->addShl(next_id(g), lhs, rhs, cell_output_map[node.get_driver_pin().get_compact()], false);
+        }
+      }
+      break;
+      case Cell_op::Mux: {
+        std::vector<RTLIL::Wire *> port;
         RTLIL::Wire *sel   = nullptr;
-
-        for (const auto &e : node.inp_edges()) {
-          switch (e.sink.get_pid()) {
-            case 0:
-              if (sel != nullptr)
-                log_error("Internal Error: multiple wires assigned to same mux port\n");
-              sel = get_wire(e.driver);
-              break;
-            case 1:
-              if (aport != nullptr)
-                log_error("Internal Error: multiple wires assigned to same mux port\n");
-              aport = get_wire(e.driver);
-              break;
-            case 2:
-              if (bport != nullptr)
-                log_error("Internal Error: multiple wires assigned to same mux port\n");
-              bport = get_wire(e.driver);
-              break;
-          }
-        }
-
-        if (aport == nullptr || bport == nullptr || sel == nullptr)
-          log_error("Internal Error: did not find a wire to be shifted.\n");
 
         auto out_width = cell_output_map[node.get_driver_pin().get_compact()]->width;
 
-        if (aport->width != out_width || bport->width != out_width) {
-          log("ports size don't match a=%d, b=%d, y=%d\n", aport->width, bport->width, out_width);
-        }
-        if (aport->width < out_width) {
-          auto w2 = RTLIL::SigSpec(aport);
-          w2.extend_u0(out_width);  // unsigned extend
-          auto *result_wire = module->addWire(next_id(g), out_width);
-          module->connect(result_wire, w2);
-          aport = result_wire;
-        }
-        if (bport->width < out_width) {
-          auto w2 = RTLIL::SigSpec(bport);
-          w2.extend_u0(out_width);  // unsigned extend
-          auto *result_wire = module->addWire(next_id(g), out_width);
-          module->connect(result_wire, w2);
-          bport = result_wire;
+        for (const auto &e : node.inp_edges_ordered()) {
+          if (e.sink.get_pid()==0) {
+            sel = get_wire(e.sink.get_driver_pin());
+            continue;
+          }
+          auto *wire = get_wire(e.sink.get_driver_pin());
+
+          if (wire->width < out_width) {
+            auto w2 = RTLIL::SigSpec(wire);
+            w2.extend_u0(out_width, true);  // sign extend
+            auto *extended_wire = module->addWire(next_id(g), out_width);
+            module->connect(extended_wire, w2);
+            port.emplace_back(extended_wire);
+          }else{
+            port.emplace_back(wire);
+          }
         }
 
-        assert(aport->width == out_width);
-        assert(bport->width == out_width);
+        assert(port.size()==2); // FIXME: add more ports (tree of muxes)
 
-        module->addMux(next_id(g), aport, bport, sel, cell_output_map[node.get_driver_pin().get_compact()]);
-        break;
+        module->addMux(next_id(g), port[0], port[1], sel, cell_output_map[node.get_driver_pin().get_compact()]);
       }
-      case Memory_Op: {
-        // log("adding Mem_Op\n");
+      break;
+      case Cell_op::Memory: {
         create_memory(g, module, node);
-        break;
       }
-      case SubGraph_Op: {
+      break;
+      case Cell_op::Sub: {
         create_subgraph(g, module, node);
-        break;
       }
-
-      default:
-        log_error("Operation %s not supported, please add to lgyosys_dump.\n", std::string(node.get_type().get_name()).c_str());
-        break;
+      break;
+      default: {
+        std::string name(node.get_type_name());
+        log_error("Operation %s not supported, please add to lgyosys_dump.\n", name.c_str());
+      }
     }
   }
 }
+
