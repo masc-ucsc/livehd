@@ -354,7 +354,7 @@ void Lgyosys_dump::create_wires(LGraph *g, RTLIL::Module *module) {
       auto lc = node.get_type_const();
       if (lc.is_i()) {
         assert(node.get_driver_pin().get_bits()==lc.get_bits());
-        module->connect(new_wire, RTLIL::SigSpec(lc.to_i(), lc.get_bits()));
+        module->connect(new_wire, RTLIL::SigSpec(RTLIL::Const(lc.to_i(), lc.get_bits())));
       } else {
         module->connect(new_wire, RTLIL::SigSpec(RTLIL::Const::from_string(lc.to_yosys())));
       }
@@ -537,13 +537,15 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         auto *in_wire  = get_wire(node.get_sink_pin().get_driver_pin());
         auto *out_wire = cell_output_map[node.get_driver_pin().get_compact()];
 
-        if (in_wire->width+1 == out_wire->width) {
-          auto w2 = RTLIL::SigSpec(in_wire);
-          w2.extend_u0(in_wire->width+1, false);  // unsigned extend
-          module->connect(out_wire, w2);
-        }else{
-          unsigned_wire.insert(out_wire);
+        unsigned_wire.insert(out_wire);
+
+        if (in_wire->width == out_wire->width) {
           module->connect(out_wire, in_wire);
+        }else{
+          assert(out_wire->width>in_wire->width);
+          auto w2 = RTLIL::SigSpec(in_wire);
+          w2.extend_u0(out_wire->width, false);  // unsigned extend
+          module->connect(out_wire, w2);
         }
       }
       break;
