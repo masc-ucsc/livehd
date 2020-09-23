@@ -26,11 +26,11 @@ private:
 
   static void populate_lg_handle_xedge(const Node &node, const XEdge &out, std::string &data);
   static std::string graphviz_legalize_name(std::string_view name);
-  void populate_lg_data(LGraph *g);
+  void populate_lg_data(LGraph *g, std::string_view dot_postfix = "");
 
 public:
-  void do_from_lnast(std::shared_ptr<Lnast> lnast); 
-  void do_from_lgraph(LGraph *lg_parent);
+  void do_from_lnast(std::shared_ptr<Lnast> lnast, std::string_view dot_postfix = ""); 
+  void do_from_lgraph(LGraph *lg_parent, std::string_view dot_postfix = "");
   void do_hierarchy(LGraph *g);
   
   Graphviz(bool _bits, bool _verbose, std::string_view _odir);

@@ -3,7 +3,7 @@
 
 #include "lnast_tolg.hpp"
 #include "pass.hpp"
-#include "pass_cprop.hpp"
+#include "cprop.hpp"
 
 Lnast_tolg::Lnast_tolg(std::string_view _module_name, std::string_view _path) : module_name(_module_name), path(_path) {
   setup_lnast_to_lgraph_primitive_type_mapping();
@@ -1405,7 +1405,7 @@ void Lnast_tolg::dp_create_hier_outputs(LGraph *dfg, Node &cur_node, std::string
     return;
   }
 
-  auto [tup_name, key_name, key_pos] = Pass_cprop::get_tuple_name_key(cur_node);
+  auto [tup_name, key_name, key_pos] = Cprop::get_tuple_name_key(cur_node);
   std::string new_hier_name;
   if (!key_name.empty()) {
     new_hier_name = absl::StrCat(hier_name, ".", key_name.substr(0, key_name.size()-2));
@@ -1453,7 +1453,7 @@ void Lnast_tolg::dfs_create_flattened_hier_inp(LGraph *dfg, Node_pin &cur_node_s
   auto new_hier_name = hier_name;
   if (cur_ntype == TupGet_Op) {
     inp_artifacts.insert(cur_node); // only remove the artifact tup_gets
-    auto [tup_name, key_name, key_pos] = Pass_cprop::get_tuple_name_key(cur_node);
+    auto [tup_name, key_name, key_pos] = Cprop::get_tuple_name_key(cur_node);
     if (!key_name.empty()) {
       new_hier_name = absl::StrCat(new_hier_name, ".", key_name.substr(0, key_name.size()-2));
     } else {

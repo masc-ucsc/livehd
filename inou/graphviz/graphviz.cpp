@@ -128,18 +128,18 @@ void Graphviz::do_hierarchy(LGraph *g) {
   close(fd);
 }
 
-void Graphviz::do_from_lgraph(LGraph *lg_parent) {
-  populate_lg_data(lg_parent);
+void Graphviz::do_from_lgraph(LGraph *lg_parent, std::string_view dot_postfix) {
+  populate_lg_data(lg_parent, dot_postfix);
 
-  lg_parent->each_sub_fast([lg_parent, this](Node &node, Lg_type_id lgid) {
+  lg_parent->each_sub_fast([&, this](Node &node, Lg_type_id lgid) {
     (void)node;
     fmt::print("subgraph lgid:{}\n", lgid);
     LGraph *lg_child = LGraph::open(lg_parent->get_path(), lgid);
-    populate_lg_data(lg_child);
+    populate_lg_data(lg_child, dot_postfix);
   });
 }
 
-void Graphviz::populate_lg_data(LGraph *g) {
+void Graphviz::populate_lg_data(LGraph *g, std::string_view dot_postfix) {
   std::string data = "digraph {\n";
 
   for(auto node:g->fast(false)) {
@@ -186,7 +186,12 @@ void Graphviz::populate_lg_data(LGraph *g) {
 
   data += "}\n";
 
-  std::string file = absl::StrCat(odir, "/", g->get_name(), ".dot");
+  std::string file;
+  if (dot_postfix == "")
+    file = absl::StrCat(odir, "/", g->get_name(), ".dot");
+  else
+    file = absl::StrCat(odir, "/", g->get_name(), ".", dot_postfix, ".dot");
+    
   int         fd   = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
   if (fd < 0) {
     Pass::error("inou.graphviz unable to create {}", file);
@@ -200,7 +205,7 @@ void Graphviz::populate_lg_data(LGraph *g) {
   close(fd);
 }
 
-void Graphviz::do_from_lnast(std::shared_ptr<Lnast> lnast) {
+void Graphviz::do_from_lnast(std::shared_ptr<Lnast> lnast, std::string_view dot_postfix) {
   std::string data = "digraph {\n";
 
   for (const auto &itr : lnast->depth_preorder(lnast->get_root())) {
@@ -234,7 +239,14 @@ void Graphviz::do_from_lnast(std::shared_ptr<Lnast> lnast) {
   data += "}\n";
 
   auto f2   = lnast->get_top_module_name();
-  auto file = absl::StrCat(odir, "/", f2, ".lnast.dot");
+
+  std::string file;
+  if (dot_postfix == "")
+    file = absl::StrCat(odir, "/", f2, ".lnast.dot");
+  else
+    file = absl::StrCat(odir, "/", f2, ".lnast", ".", dot_postfix, ".dot");
+
+
   int  fd   = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
   if (fd < 0) {
     Pass::error("inou.graphviz_lnast unable to create {}", file);

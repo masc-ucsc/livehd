@@ -12,6 +12,7 @@
 class Pass_compiler : public Pass {
 protected:
   static void compile (Eprp_var &var);
+  bool check_option_gviz(Eprp_var &var);
 public:
   explicit Pass_compiler(const Eprp_var &var);
   static std::vector<LGraph *> compile_thread (std::shared_ptr<Lnast> ln, const Eprp_var &var);  

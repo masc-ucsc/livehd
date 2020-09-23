@@ -8,12 +8,12 @@
 #include "lbench.hpp"
 #include "lnast.hpp"
 #include "likely.hpp"
-#include "lnast_tolg.hpp"
-#include "inou_graphviz.hpp"
 
 class Lcompiler {
 private:
-  std::string_view path;  
+  const std::string_view path;  
+  const std::string odir;
+  const bool gviz;
 
 protected:
   std::mutex lgs_mutex;
@@ -24,7 +24,7 @@ protected:
   void add_thread(std::shared_ptr<Lnast> lnast);
 
 public:
-  Lcompiler(std::string_view path);
+  Lcompiler(std::string_view path, std::string_view odir, bool gviz);
 
   void add(std::shared_ptr<Lnast> lnast);
   /* void add(std::string_view file); */
