@@ -66,6 +66,8 @@ tup = (foo = 1, bar = cat + 2)
 
 // Tuple Concate Statement
 /*
+cat = 1
+dog = 4
 tup = (foo = 1, bar = cat + 2) 
 tup = tup ++ (4, dog)
 */
@@ -94,7 +96,9 @@ while (a > 0) {
   a = a - 1
 }
 */
-// Warning: b were written but never read
+// Warning:
+//    Last write(s) to 'a' is/are never read
+//    b were written but never read
 // ================================================
 
 // Basic Func Def
@@ -169,6 +173,7 @@ c = b + 1
 //    c were written but never read
 
 /*
+dog = 5
 tup = (foo = 1, bar = 2)
 temp_tup = tup
 temp_tup = temp_tup ++ (4, dog)
@@ -217,7 +222,7 @@ y = ((y + 3) * 7) / 7
 */
 // Warning: Last write(s) to 'x', 'y' is/are never read
 
-/* TODO : Fix This
+/*
 a = 3
 b = a
 a = a + 3
@@ -271,7 +276,6 @@ while (a == b) {
   } else {
     f = e - a
   }
-  a += 1
 }
 d = e + f
 */
