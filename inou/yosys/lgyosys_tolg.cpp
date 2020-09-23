@@ -755,7 +755,8 @@ static uint32_t get_output_size(const RTLIL::Cell *cell) {
 
 static void connect_comparator(Cell_op op, Node &exit_node, const RTLIL::Cell *cell) {
   exit_node.set_type(op, 1);
-  assert(cell->getParam(ID::Y_WIDTH).as_int() == 1);
+  // In yosys, the comparater output can be 1 or 0 or ..01 or ...00. bitwidth in LG allows to ignore this
+  // assert(cell->getParam(ID::Y_WIDTH).as_int() == 1);
 
   auto *g = exit_node.get_class_lgraph();
 
