@@ -19,9 +19,6 @@ protected:
   // eprp callback methods
   static void from(Eprp_var &var);
   static void hierarchy(Eprp_var &var);
-  /* static bool setup_option_bits(Eprp_var &var); */
-  /* static bool setup_option_verbose(Eprp_var &var); */
-  /* static std::string get_odir(Eprp_var &var); */
 
 public:
   Inou_graphviz(const Eprp_var &var);

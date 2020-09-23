@@ -4,7 +4,11 @@
 #include "inou_graphviz.hpp"
 #include "eprp_utils.hpp"
 
-void setup_inou_graphviz() { Inou_graphviz::setup(); }
+/* void setup_inou_graphviz() { Inou_graphviz::setup(); } */
+
+
+static Pass_plugin sample("inou_graphviz", Inou_graphviz::setup);
+
 
 Inou_graphviz::Inou_graphviz(const Eprp_var &var) : Pass("inou.graphviz", var) {
   if (var.has_label("bits")) {
@@ -29,25 +33,6 @@ void Inou_graphviz::setup() {
   Eprp_method m2("inou.graphviz.fromlg.hierarchy", "export lgraph hierarchy to graphviz dot format", &Inou_graphviz::hierarchy);
   register_inou("graphviz", m2);
 }
-
-/* bool Inou_graphviz::setup_option_bits(Eprp_var &var) { */
-/*   bool bits; */
-/*   if (var.has_label("bits")) { */
-/*     auto b = var.get("bits"); */
-/*     bits   = b != "false" && b != "0"; */
-/*   } else { */
-/*     bits = false; */
-/*   } */
-/*   return bits; */
-/* } */
-
-
-/* bool Inou_graphviz::setup_option_verbose(Eprp_var &var) { */
-/*   bool verbose; */
-/*   auto v  = var.get("verbose"); */
-/*   verbose = v != "false" && v != "0"; */
-/*   return verbose; */
-/* } */
 
 
 
