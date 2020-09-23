@@ -1,5 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <charconv>
+
 #include "node.hpp"
 #include "annotate.hpp"
 #include "lgedgeiter.hpp"
@@ -143,7 +145,7 @@ Node_pin Node::get_sink_pin_slow(std::string_view pname) const {
   return Node_pin(top_g, current_g, hidx, idx, pid, true);
 }
 
-Node_pin Node::setup_driver_pin_slow(std::string_view name) {
+Node_pin Node::setup_driver_pin_slow(std::string_view name) const {
   I(is_type_sub());
 
   Lg_type_id sub_lgid = current_g->get_type_sub(nid);
@@ -161,6 +163,59 @@ Node_pin Node::setup_driver_pin_slow(std::string_view name) {
   return Node_pin(top_g, current_g, hidx, idx, pid, false);
 }
 
+bool Node::is_sink_connected(std::string_view pname) const {
+  if (!is_type_sub()) {
+    auto pid = Cell::get_sink_pid(get_type_op(), pname);
+    I(pid>=0); // if quering a cell, the name should be right, no?
+    Index_ID idx = get_lg()->find_idx_from_pid(nid, pid);
+    if (idx==0)
+      return false;
+    return get_lg()->has_inputs(Node_pin(top_g, current_g, hidx, idx, pid, true));
+  }
+
+  Lg_type_id sub_lgid = current_g->get_type_sub(nid);
+
+  const auto &sub = current_g->get_library().get_sub(sub_lgid);
+  if (!sub.has_pin(pname) || !sub.is_input(pname))
+    return false;
+
+  auto pid = sub.get_instance_pid(pname);
+  if (pid == Port_invalid)
+    return false;
+
+  Index_ID idx = get_lg()->find_idx_from_pid(nid, pid);
+  if (idx==0)
+    return false;
+
+  return get_lg()->has_inputs(Node_pin(top_g, current_g, hidx, idx, pid, true));
+}
+
+bool Node::is_driver_connected(std::string_view pname) const {
+  if (!is_type_sub()) {
+    auto pid = Cell::get_driver_pid(get_type_op(), pname);
+    I(pid>=0); // if quering a cell, the name should be right, no?
+    Index_ID idx = get_lg()->find_idx_from_pid(nid, pid);
+    if (idx==0)
+      return false;
+    return get_lg()->has_outputs(Node_pin(top_g, current_g, hidx, idx, pid, false));
+  }
+
+  Lg_type_id sub_lgid = current_g->get_type_sub(nid);
+
+  const auto &sub = current_g->get_library().get_sub(sub_lgid);
+  if (!sub.has_pin(pname) || sub.is_input(pname))
+    return false;
+
+  auto pid = sub.get_instance_pid(pname);
+  if (pid == Port_invalid)
+    return false;
+
+  Index_ID idx = get_lg()->find_idx_from_pid(nid, pid);
+  if (idx==0)
+    return false;
+
+  return get_lg()->has_inputs(Node_pin(top_g, current_g, hidx, idx, pid, false));
+}
 
 Node_pin Node::setup_sink_pin_slow(std::string_view name) {
   I(is_type_sub());
@@ -170,9 +225,30 @@ Node_pin Node::setup_sink_pin_slow(std::string_view name) {
 
   const auto &sub = current_g->get_library().get_sub(sub_lgid);
   I(sub.has_pin(name)); // maybe you forgot an add_graph_input/output in the sub?
-  I(sub.is_input(name));
+  if(sub.is_output(name))
+    return Node_pin();
 
-  auto pid = sub.get_instance_pid(name);
+  Port_ID pid;
+
+  if (std::isdigit(name[0])) {
+    int pos;
+    std::from_chars(name.data(), name.data() + name.size(), pos);
+
+    if (!sub.has_instance_pin(pos))
+      return Node_pin(); // invalid pin
+
+    auto io_pin = sub.get_io_pin_from_graph_pos(pos);
+    if (io_pin.dir == Sub_node::Direction::Output) {
+      return Node_pin(); // invalid pin
+    }
+
+    pid = sub.get_instance_pid(io_pin.name);
+  }else{
+    pid = sub.get_instance_pid(name);
+    if (pid == Port_invalid)
+      return Node_pin();
+  }
+
   I(pid != Port_invalid);  // graph_pos must be valid if connected
 
   Index_ID idx = current_g->setup_idx_from_pid(nid, pid);
@@ -209,7 +285,7 @@ int Node::get_num_inp_edges() const { return current_g->get_num_inp_edges(*this)
 int Node::get_num_out_edges() const { return current_g->get_num_out_edges(*this); }
 int Node::get_num_edges() const { return current_g->get_num_edges(*this); }
 
-Node_pin Node::setup_driver_pin_raw(Port_ID pid) {
+Node_pin Node::setup_driver_pin_raw(Port_ID pid) const {
   I(!is_type_sub()); // Do not setup subs by PID, use name
   I(Cell::has_driver(get_type_op(),pid));
 #ifndef NDEBUG
@@ -233,6 +309,7 @@ Node_pin Node::setup_driver_pin() const {
 }
 
 Cell_op Node::get_type_op() const { return current_g->get_type_op(nid); }
+std::string_view Node::get_type_name() const { return Cell::get_name(current_g->get_type_op(nid)); }
 
 void Node::set_type(const Cell_op op) {
   I(op != Cell_op::Sub && op != Cell_op::Const && op != Cell_op::LUT);  // do not set type directly, call set_type_const ....

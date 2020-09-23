@@ -90,6 +90,8 @@ Node Node_pin::get_node() const {
 Node Node_pin::get_driver_node() const { return get_driver_pin().get_node(); }
 
 Node_pin Node_pin::get_driver_pin() const {
+  if (is_invalid())
+    return *this;
   I(is_sink() || is_graph_output());
   auto piter = current_g->inp_driver(*this);
   if (piter.empty())
@@ -117,18 +119,26 @@ bool Node_pin::del_driver(Node_pin &dpin) {
   return current_g->del_edge(dpin, *this);
 }
 
-void Node_pin::connect_sink(const Node_pin &spin) {
+void Node_pin::connect_sink(const Node_pin &spin) const {
   I(spin.is_sink());
   I(is_driver());
   I(current_g == spin.current_g);  // Use punch otherwise
   current_g->add_edge(*this, spin);
 }
 
-void Node_pin::connect_driver(const Node_pin &dpin) {
+void Node_pin::connect_sink(const Node &node) const {
+  connect_sink(node.setup_sink_pin());
+}
+
+void Node_pin::connect_driver(const Node_pin &dpin) const {
   I(dpin.is_driver());
   I(is_sink());
   I(current_g == dpin.current_g);
   current_g->add_edge(dpin, *this);
+}
+
+void Node_pin::connect_driver(const Node &node) const {
+  connect_driver(node.setup_driver_pin());
 }
 
 int Node_pin::get_num_edges() const {
@@ -269,12 +279,13 @@ Node_pin Node_pin::find_driver_pin(LGraph *top, std::string_view wname) {
 }
 
 std::string_view Node_pin::get_pin_name() const {
-  if (get_node().is_type_sub())
+  auto op = get_node().get_type_op();
+  if (op == Cell_op::Sub)
     return get_type_sub_io_name();
   if (is_driver())
-    return Cell::get_driver_name(get_node().get_type_op(), pid);
+    return Cell::get_driver_name(op, pid);
 
-  return Cell::get_sink_name(get_node().get_type_op(), pid);
+  return Cell::get_sink_name(op, pid);
 }
 
 void Node_pin::set_offset(Bits_t offset) {

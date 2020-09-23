@@ -210,8 +210,8 @@ public:
       return get_sink_pin_raw(pid);
     return Node_pin(top_g, current_g, hidx, nid, 0, true); // could be invalid if not setup
   }
-  Node_pin setup_driver_pin_slow(std::string_view name);
-  Node_pin setup_driver_pin(std::string_view pname) {
+  Node_pin setup_driver_pin_slow(std::string_view name) const;
+  Node_pin setup_driver_pin(std::string_view pname) const {
     assert(pname.size());
     if (unlikely(is_type_sub())) {
       return setup_driver_pin_slow(pname);
@@ -222,7 +222,7 @@ public:
     return Node_pin(top_g, current_g, hidx, nid, 0, false);
 
   }
-  Node_pin setup_driver_pin_raw(Port_ID pid);
+  Node_pin setup_driver_pin_raw(Port_ID pid) const;
   Node_pin setup_driver_pin() const;
 
   Node_pin setup_sink_pin_slow(std::string_view name);
@@ -263,6 +263,7 @@ public:
   void   set_type_lut(const Lconst &lutid);
   Lconst get_type_lut() const;
 
+  std::string_view get_type_name() const;
   Cell_op          get_type_op() const;
   void             set_type(const Cell_op op);
   void             set_type(const Cell_op op, Bits_t bits);
@@ -294,8 +295,16 @@ public:
 
   Lconst get_type_const() const;
 
+  void connect_sink(const Node &n2)   const { setup_sink_pin().connect_driver(n2.setup_driver_pin()); }
+  void connect_driver(const Node &n2) const { setup_driver_pin().connect_sink(n2.setup_sink_pin()); }
+
+  void connect_sink(const Node_pin &dpin)   const { setup_sink_pin().connect_driver(dpin); }
+  void connect_driver(const Node_pin &spin) const { setup_driver_pin().connect_sink(spin); }
 
   void nuke();  // Delete all the pins, edges, and attributes of this node
+
+  bool is_sink_connected(std::string_view v) const;
+  bool is_driver_connected(std::string_view v) const;
 
   Node_pin_iterator out_connected_pins() const;
   Node_pin_iterator inp_connected_pins() const;

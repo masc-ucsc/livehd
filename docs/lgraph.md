@@ -245,9 +245,6 @@ If an input can not have multiple drivers, a lower case name is used ('a',
 'b'...). E.g: the right shift cell is `Y=a>>b` because only one driver can
 connect to 'a' and 'b'.
 
-Only a few cells (comparators) operate over unsigned only values. Those have a
-letter 'u' added like 'RU' for Right Unsigned.
-
 The section includes description on how to compute the maximum (`max`) and
 minimum (`min`) allowed result range. This is used by the bitwidth inference
 pass. To ease the explanation, a `sign` value means that the result may be
@@ -313,7 +310,7 @@ input is unsigned. all the inputs will be "unsigned extended" to match the
 largest value. This is different from Sum_Op semantics were each input is
 signed or unsigned extended independent of the other inputs. To match the
 semantics, when mixing signed and unsigned, all the potentially negative inputs
-must be converted to unsign with the Unsigned_op.
+must be converted to unsign with the Cell_op::Tposs.
 
 
 ```verilog
@@ -323,13 +320,44 @@ logic signed [4:0] c;
 assign c = a + 1'b1;
 ```
 
-The previous Verilog example extends everything to 5 bits (c), but unsigned
-extended because one of the inputs is unsigned (1b1 is unsigned in verilog, and
-2sb1 is signed +1). LGraph semantics are different.
+The previous Verilog example extends everything to 5 bits (c) UNSIGNED extended
+because one of the inputs is unsigned (1b1 is unsigned in verilog, and 2sb1 is
+signed +1). LGraph semantics are different, everything is signed.
 
 ```verilog
 c = 5b01111 + 5b0001 // this is the Verilog semantics by matching size
 c == -16 (!!)
+```
+
+
+Since the operation is commutative. A Sum(a,b) can have these options:
+
+| size | A_sign | B_sign | Operation |
+-------------------------------
+|  a==b  | S | S |  Sum(a,b) |
+|  a==b  | S | U |  Sum(a,b) | 
+|  a==b  | U | S |  Sum(a,b) |
+|  a==b  | U | U |  Sum(a,b) |
+|  a< b  | S | S |  Sum(a,b) |
+|  a< b  | S | U |  Sum(a,Tposs(b)) |
+|  a< b  | U | S |  Sum(Tposs(a),b) |
+|  a< b  | U | U |  Sum(Tposs(a),Tposs(b)) |
+
+
+The Verilog addition/substraction output can have more bits than the inputs.
+This is the same as in LGraph Sum. Nevertheless, Verilog requires to specify
+the bits for all the input/outputs. This means that whenever Verilog drops
+precision an AND gate must be added. In the following examples only the 'g' and
+'h' variables needed.
+
+```verilog
+  wire [7:0] a;
+  wire [7:0] b;
+  wire [6:0] c;
+  wire [8:0] f = a + b; // f = Sum(a,b)  // a same size as b
+  wire [8:0] f = a + c; // f = Sum(a,Tposs(c))
+  wire [7:0] g = a + b; // g = And(Sum(a,b),0x7F)
+  wire [6:0] h = a + b; // h = And(Sum(a,b),0x3F)
 ```
 
 #### Peephole Optimizations
@@ -343,13 +371,14 @@ c == -16 (!!)
 * `Y = a - (b<<n)` becomes `Y = {(a>>n)-b, a&n.mask}`
 * If every x,y... lower bit is zero `Y=x+y+...` becomes Y=((x>>1)+(y>>1)+..)<<1
 
-### Mult_op
+### Cell_op::Mult
 
 Multiply operator. There is no Prod_Op that combines multiplication and
 division because unlike in Sum_Op, in integer operations the order matters
+(unlimited precision decimals may combine)
 (`a*(b/c) != (a*b)/c`).
 
-```{.graph .center caption="Multiply LGraph Node."}
+```{.graph .center caption="Cell_op::Mult LGraph Node."}
 digraph Mult {
     rankdir=LR;
     size="1,0.5"
@@ -407,7 +436,7 @@ LiveHD mult node result (Y) number of bits can be more efficient than in
 Verilog.  E.g: if the max value of A0 is 3 (2 bits) and A1 is 5 (3bits). If the
 result is unsigned, the maximum result is 15 (4 bits). In Verilog, the result
 will always be 5 bits. If the Verilog result was to an unsigned variable.
-Either all the inputs were unsigned, or there should pass to an Unsigned_op to
+Either all the inputs were unsigned, or there should pass to an Cell_op::Tposs to
 force the MSB as positive. This extra bit will be simplified but it will notify
 LGraph that the output is to be treated as unsigned.
 
@@ -475,9 +504,9 @@ The same considerations as in the multiplication should be applied.
 
 #### Modulo
 
-There is no module cell in LGraph. The reason is that a modulo different from a
-power of 2 is very rare in hardware. If the language supports modulo
-operations, they must be translated to division/multiplication.
+There is no mod cell (Cell_op::Mod) in LGraph. The reason is that a modulo
+different from a power of 2 is very rare in hardware. If the language supports
+modulo operations, they must be translated to division/multiplication.
 
 
 ```
@@ -540,16 +569,56 @@ Same semantics as verilog
 
 No optimizations by itself, it has a single input. Other operations like Sum_Op can optimize when combined with Not_Op.
 
+### And
 
-### Unsigned_op
+`And` is a typical AND gate with multiple inputs. All the inputs connect to pin
+'A' because input order does not matter. The result is always a signed number.
+
+
+```{.graph .center caption="Cell_op::And LGraph Node."}
+digraph And {
+    rankdir=LR;
+    size="1,0.5"
+
+    node [shape = circle]; And;
+    node [shape = point ]; q0
+    node [shape = point ]; q
+
+    q0 -> And [ label ="A" ];
+    And  -> q [ label = "Y" ];
+}
+```
+
+#### Forward Propagation
+
+* $Y = \forall_{i=0}^{\infty} Y \& A_{i}$
+* $m = \forall_{i=0}^{\infty} min(m,A_{i}.bits)$
+* $Y.max = (1\ll m)-1$
+* $Y.min = -Y.max-1$
+
+#### Backward Propagation
+
+The And cell has a significant backpropagation impact. Even if some inputs had
+more bits, after the And cell the upper bits are dropped. This allows the back
+propagation to indicate that those bits are useless.
+
+* $a.max = Y.max $
+* $a.min = -Y.max-1 $
+
+#### Other Considerations
+
+#### Peephole Optimizations
+
+
+### Cell_op::Tposs
 
 Every value is signed but some times a value must be treated as unsigned.
-LGraph has the Unsigned_op that behaves like concatenating a zero bit to the
-most significant bit of the input value. The result is an always positive
-value. The result is always positive.
 
+The Tposs operator stands for To Positive Signed. It does nothing if the input
+is signed and positive, but behaves like concatenating a zero bit to the most
+significant bit of the input value. The result is an always positive value.
 
-```{.graph .center caption="Unsigned_op LGraph Node."}
+```{.graph .center caption="Cell_op::Tposs LGraph Node."}
 digraph Unsigned {
     rankdir=LR;
     size="1,0.5"
@@ -579,15 +648,38 @@ digraph Unsigned {
 
 #### Other Considerations
 
-It is important to notice that Unsigned_op is different from a absolute
+It is important to notice that Cell_op::Tposs is different from a absolute
 calculation. It is like a concatenating a zero to convert the signed values.
 
 
 #### Peephole Optimizations
 
-* `Y = Unsigned(a)` becomes `Y= a` when `a.min>=0`
-* `Y = And(Unsigned(a),a.mask)` becomes `Y= a`
-* `Y = And(Unsigned(a),b)` can become `Y= Unsigned(And(a,b))`
+* `Y = Tposs(a)` becomes `Y= a` when `a.min>=0`
+* `Y = And(Tposs(a),a.mask)` becomes `Y= a`
+* `Y = And(Tposs(a),b)` can become `Y= Tposs(And(a,b))`
+* `Y = Tposs(const)` becomes `Y=const` when `const>=0`
+
+### Comparators
+
+LT, GT, EQ
+
+
+There are only 3 comparators. Other typically found like LE, GE, and NE can be
+created by simply negating one of the LGraph comparators. `GT = ~LE`, `LT =
+~GE`, and `NE = ~EQ`.
+
+#### Forward Propagation
+
+#### Backward Propagation
+
+#### Peephole Optimizations
+
+#### Other Considerations
+
+
+Verilog treats all the inputs as unsigned if any of them is unsigned. LGraph treats all the inputs as signed all the time.
+
+
 
 ### ShiftRigt_op
 
@@ -602,6 +694,22 @@ the 2nd is arithmetic right shift. LGraph only has arithmetic right shift
 a `>>>` if the input is Verilog unsigned (`ShiftRigt(a,b)`)
 
 ### Mux_op
+
+
+#### Forward Propagation
+
+* $Y = P_{(1+P_{0}}$
+* $Y.max = (1\ll m)-1$
+* $Y.max = \forall_{i=0}^{\infty} P_{i}.max$
+* $Y.max = \forall_{i=0}^{\infty} P_{i}.min$
+
+#### Backward Propagation
+
+#### Peephole Optimizations
+
+#### Other Considerations
+
+
 
 ### LUT_op
 
@@ -666,8 +774,9 @@ digraph Memory {
 }
 ```
 
-* `s` is for the array size in number of entries
-* `b` is the number of bits per entry
+* `s` (`size`) is for the array size in number of entries
+* `b` (`bits`) is the number of bits per entry
+* `f` (`fwd`)     points to a 0/1 constant driver pin to indicate if writes forward value (`0b0` for write-only ports). Effectively, it means zero cycles read latency when enabled. `fwd` is more than just setting `latency=0`. Even with latency zero, the write delay affects until the result is visible. With `fwd` enabled, the write latency does not matter to observe the results. This requires a costly forwarding logic.
 * `c`,`d`,`e`,`q`... are the memory configuration, data, address ports
 
 Ports (`a`,`c`...`p`,`w`) are arrays/vectors to support multiported memories. If a single instance
@@ -681,18 +790,17 @@ mem2.c[1] = clk2 // clock for memory port 1
 mem2.c[2] = clk2 // clock for memory port 2
 ```
 
-Each memory has the following ports:
+Each memory port (rd, wr, or rd/wr) has the following ports:
 
 * `a` (`addr`)    points to the driver pin for the address. The address bits should match the array size (`ceil(log2(s))`)
-* `c` (`clk_pin`) points to the clock driver pin
-* `d` (`data in`)   points to the write data driver pin (read result is in `q` port).
+* `c` (`clock`) points to the clock driver pin
+* `d` (`data_in`)   points to the write data driver pin (read result is in `q` port).
 * `e` (`enable`)  points to the driver pin for read/write enable.
-* `f` (`fwd`)     points to a 0/1 constant driver pin to indicate if writes forward value (`0b0` for write-only ports). Effectively, it means zero cycles read latency when enabled. `fwd` is more than just setting `latency=0`. Even with latency zero, the write delay affects until the result is visible. With `fwd` enabled, the write latency does not matter to observe the results. This requires a costly forwarding logic.
-* `l` (`latency`) points to an integer constant driver pin (2 bits). For writes `latency from 1 to 3`, for reads `latency from 0 to 3`
-* `m` (`wmask`)   Points to the write mask (1 == write, 0==no write). The mask bust be a big as the number of bits per entry (`b`). The `wmask` pin can be disconnected which means no write mask (a write will write all the bits).
+* `l` (`latency`) points to an integer constant driver pin (2 bits always). For writes `latency from 1 to 3`, for reads `latency from 0 to 3`
+* `w` (`wmask`)   Points to the write mask (1 == write, 0==no write). The mask bust be a big as the number of bits per entry (`b`). The `wmask` pin can be disconnected which means no write mask (a write will write all the bits).
 * `p` (`posedge`) points to a 1/0 constant driver pin
-* `w` (`wmode`)   points to the driver pin or switching between read and write mode (single bit)
-* `Q` (`data out`)  is a driver pin with the data read from the memory
+* `m` (`mode`)   points to the driver pin or switching between read (0) and write mode (1) (single bit)
+* `Q` (`data_out`)  is a driver pin with the data read from the memory
 
 All the entries but the `wmask` must be populated. If the `wmask` is not set, a
 full write size is expected.  Read-only ports do not have `data` and `wmask`

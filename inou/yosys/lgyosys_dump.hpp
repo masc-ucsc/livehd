@@ -28,6 +28,7 @@ private:
   absl::flat_hash_map<Node_pin::Compact, RTLIL::Wire *>            output_map;
   absl::flat_hash_map<Node_pin::Compact, RTLIL::Wire *>            cell_output_map;
   absl::flat_hash_map<Node::Compact, std::vector<RTLIL::SigChunk>> mem_output_map;
+  absl::flat_hash_set<RTLIL::Wire *>                               unsigned_wire;
 
   uint64_t ids = 0;
 

@@ -91,8 +91,8 @@ protected:
     if (num == 0)
       return 1;
     if (num>0)
-      return msb(num)+1+(sign?1:0);
-    return msb(-num)+1+(sign?1:0);
+      return msb(num)+1;
+    return msb(-num)+1;
   }
   bool same_explicit_bits(const Lconst &o) const {
     bool s1 = explicit_bits && o.explicit_bits && bits == o.bits;
@@ -109,8 +109,8 @@ public:
   Lconst(const Container &v);
   Lconst(std::string_view txt);
   Lconst(Number v);
-  Lconst(uint64_t v);
-  Lconst(uint64_t v, Bits_t bits);
+  Lconst(int64_t v);
+  Lconst(int64_t v, Bits_t bits);
   Lconst();
 
   Container serialize() const;
@@ -137,7 +137,7 @@ public:
   Bits_t get_bits() const { return bits; }
 
   bool is_i() const { return !explicit_str && bits <= 62; } // 62 to handle sign (int)
-  long int to_i() const; // must fit in int or exception raised
+  int64_t to_i() const; // must fit in int or exception raised
 
   std::string to_yosys() const;
   std::string to_verilog() const;
@@ -148,16 +148,16 @@ public:
 
   // Operator list
   [[nodiscard]] const Lconst operator+(const Lconst &other) const { return add_op(other); }
-  [[nodiscard]] const Lconst operator+(uint64_t other) const { return add_op(Lconst(other)); }
+  [[nodiscard]] const Lconst operator+(int64_t other) const { return add_op(Lconst(other)); }
 
   [[nodiscard]] const Lconst operator-(const Lconst &other) const { return sub_op(other); }
-  [[nodiscard]] const Lconst operator-(uint64_t other) const { return sub_op(Lconst(other)); }
+  [[nodiscard]] const Lconst operator-(int64_t other) const { return sub_op(Lconst(other)); }
 
   [[nodiscard]] const Lconst operator<<(const Lconst &other) const { return lsh_op(other.to_i()); }
   [[nodiscard]] const Lconst operator<<(Bits_t other) const { return lsh_op(other); }
 
   [[nodiscard]] const Lconst operator|(const Lconst &other) const { return or_op(other); }
-  [[nodiscard]] const Lconst operator|(uint64_t other) const { return or_op(Lconst(other)); }
+  [[nodiscard]] const Lconst operator|(int64_t other) const { return or_op(Lconst(other)); }
 
 #if 0
   bool equals_op(const Lconst &other) const {
