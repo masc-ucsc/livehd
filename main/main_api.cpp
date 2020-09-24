@@ -28,14 +28,14 @@ void Main_api::init() {
     it.second();
   }
 
-  setup_inou_code_gen();
-  setup_inou_liveparse();
+  //setup_inou_code_gen();
+  //setup_inou_liveparse();
   setup_inou_pyrope();
   setup_inou_yosys();
-  setup_inou_firrtl();
-  setup_pass_fplan();
-  setup_pass_lnast_tolg();
-  setup_inou_json();
+  //setup_inou_firrtl();
+  //setup_pass_fplan();
+  //setup_pass_lnast_tolg();
+  //setup_inou_json();
   /* setup_inou_verific(); */
   /* setup_cops_live(); */
 

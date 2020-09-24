@@ -21,7 +21,7 @@ Hier_tree::Hier_tree(Eprp_var& var) : collapsed_gis(), pattern_sets() {
   LGraph*         root_lg2   = var.lgs[0];
 
   for (auto hidx : root_tree2->depth_preorder()) {
-    Node temp(root_lg2, hidx, Node::Hardcoded_input_nid);
+    Node temp(root_lg2, hidx, Hardcoded_input_nid);
     // std::cout << "creating edges..." << std::endl;
     auto edges = temp.inp_edges();
     // std::cout << "done creating edges." << std::endl;
@@ -62,7 +62,7 @@ Hier_tree::Hier_tree(Eprp_var& var) : collapsed_gis(), pattern_sets() {
   for (auto hidx : root_tree->depth_preorder()) {
     LGraph* lg = root_tree->ref_lgraph(hidx);
 
-    Node temp(root_lg, hidx, Node::Hardcoded_input_nid);
+    Node temp(root_lg, hidx, Hardcoded_input_nid);
 
     auto new_v = gi.make_vertex(temp.debug_name().substr(18), lg->size(), lg->get_lgid());
 
