@@ -33,7 +33,7 @@ cc_binary(
             "//pass/lnastfmt:pass_lnastfmt",
 #Sheng       "//pass/mockturtle:pass_mockturtle",
 #Sheng       "//pass/punch:pass_punch",
-#Sheng       "//pass/sample:pass_sample",
+            "//pass/sample:pass_sample",
             "//pass/semantic:pass_semantic",
 #Sheng            "//pass/compiler:pass_compiler",
 
