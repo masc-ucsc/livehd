@@ -170,11 +170,11 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
       break;
     case Ntype_op::TupAdd:
       switch(pid) {
-        case 0: return "tuple_name";      // tuple name
-        case 2: return "position";
-        case 3: return "value";     // stop from next cycle
-                // no 4 to keep f 5
-        case 5: return "field";     // tuple field
+        case 0: return "tuple_name";  // tuple name
+        case 2: return "position";    // position of tuple field
+        case 3: return "value";        
+                                      // no 4 to keep f 5
+        case 5: return "field";       // tuple field
         default: return "invalid";
       }
       break;
@@ -195,9 +195,9 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
         break;
     case Ntype_op::AttrSet:
       switch(pid) {
-        case 0: return "name";  // variable name
+        case 0: return "var_name";  
         case 2: return "chain";
-        case 3: return "value";
+        case 3: return "value"; 
         case 5: return "field";
         default: return "invalid";
       }
