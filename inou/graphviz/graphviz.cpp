@@ -6,6 +6,7 @@
 
 #include "graphviz.hpp"
 #include "pass.hpp"
+#include "cell.hpp"
 
 Graphviz::Graphviz(bool _bits, bool _verbose, std::string_view _odir): bits(_bits), verbose(_verbose), odir(_odir) {}
 
@@ -23,11 +24,11 @@ void Graphviz::populate_lg_handle_xedge(const Node &node, const XEdge &out, std:
   auto dbits   = out.driver.get_bits();
   auto dp_name = out.driver.has_name() ? out.driver.get_name() : "";
 
-  if (node.get_type_op() == Const_Op)
+  if (node.get_type_op() == Ntype_op::Const)
     data += fmt::format(" {}->{}[label=<{}b:({},{})>];\n", dn_name, sn_name, dbits, dp_pid, sp_pid);
-  else if (node.get_type_op() == TupRef_Op)
+  else if (node.get_type_op() == Ntype_op::TupRef)
     data += fmt::format(" {}->{}[label=<({},{}):<font color=\"#0000ff\">{}</font>>];\n", dn_name, sn_name, dp_pid, sp_pid, dp_name);
-  else if (node.get_type_op() == TupAdd_Op)
+  else if (node.get_type_op() == Ntype_op::TupAdd)
     data += fmt::format(" {}->{}[label=<{}b:({},{}):<font color=\"#0000ff\">{}</font>>];\n",
                         dn_name,
                         sn_name,
@@ -71,7 +72,7 @@ void Graphviz::do_hierarchy(LGraph *g) {
         ,lg->get_name()
         ,(int)hidx.level, (int)hidx.pos);
 
-    Node h_inp(g, hidx, Node::Hardcoded_input_nid);
+    Node h_inp(g, hidx, Hardcoded_input_nid);
     for(auto e:h_inp.inp_edges()) {
       fmt::print("edge from:{} to:{} level:{} pos:{}\n"
           ,e.driver.get_class_lgraph()->get_name()
@@ -91,7 +92,7 @@ void Graphviz::do_hierarchy(LGraph *g) {
           );
     }
 
-    Node h_out(g, hidx, Node::Hardcoded_output_nid);
+    Node h_out(g, hidx, Hardcoded_output_nid);
     for(auto e:h_out.out_edges()) {
       fmt::print("edge from:{} to:{} level:{} pos:{}\n"
           ,e.driver.get_class_lgraph()->get_name()
@@ -158,7 +159,7 @@ void Graphviz::populate_lg_data(LGraph *g, std::string_view dot_postfix) {
     }
 
     auto gv_name = graphviz_legalize_name(node.debug_name());
-    if (node.get_type_op() == Const_Op)
+    if (node.get_type_op() == Ntype_op::Const)
       data += fmt::format(" {} [label=<{}:{}>];\n", gv_name, node_info, node.get_type_const().to_pyrope());
     else
       data += fmt::format(" {} [label=<{}>];\n", gv_name, node_info);

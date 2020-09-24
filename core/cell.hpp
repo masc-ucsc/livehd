@@ -49,6 +49,8 @@ enum class Ntype_op : uint8_t {
 
   TupAdd,
   TupGet,
+  TupRef,
+  TupKey,
 
   AttrSet,
   AttrGet,
@@ -99,6 +101,8 @@ protected:
 
     "TupAdd",
     "TupGet",
+    "TupRef",
+    "TupKey",
 
     "AttrSet",
     "AttrGet",

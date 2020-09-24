@@ -187,6 +187,12 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
         default: return "invalid";
       }
       break;
+    case Ntype_op::TupRef:
+        return "invalid";
+        break;
+    case Ntype_op::TupKey:
+        return "invalid";
+        break;
     case Ntype_op::AttrSet:
       switch(pid) {
         case 0: return "name";  // variable name
