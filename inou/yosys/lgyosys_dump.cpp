@@ -730,9 +730,41 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         }
       }
       break;
-      case Ntype_op::LT:
-      case Ntype_op::GT:
       case Ntype_op::EQ: {
+        std::vector<RTLIL::Wire *> rest;
+        RTLIL::Wire *first=nullptr;
+        for (const auto &e : node.inp_edges()) {
+          auto *w= get_wire(e.driver);
+          if (first)
+            rest.push_back(w);
+          else
+            first = w;
+        }
+        assert(rest.size()>0); // otherwise nothing to compare
+        RTLIL::Wire *final_wire = cell_output_map[node.get_driver_pin().get_compact()];
+
+        bool multi_comparator = rest.size()>1;
+        std::vector<RTLIL::Wire *> cmp_wires;
+        for(auto *lhs:rest) {
+          bool must_be_signed = true;
+          if (first->width == lhs->width)
+            must_be_signed = false;
+
+          RTLIL::Wire *wire;
+          if (multi_comparator) {
+            auto *wire = module->addWire(next_id(g), size);
+            module->addEq(next_id(g), first, lhs, wire, must_be_signed);
+            cmp_wires.emplace_back(wire);
+          }else{
+            module->addEq(next_id(g), first, lhs, final_wire, must_be_signed);
+          }
+        }
+        if (multi_comparator)
+          create_tree(g, cmp_wires, module, &RTLIL::Module::addAnd, false, final_wire);
+      }
+      break;
+      case Ntype_op::LT:
+      case Ntype_op::GT: {
         std::vector<RTLIL::Wire *> v_lhs;
         std::vector<RTLIL::Wire *> v_rhs;
 
@@ -758,20 +790,22 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
 
         for(auto *lhs:v_lhs) {
           for( auto *rhs:v_rhs) {
-            RTLIL::Wire *wire;
-            if (multi_comparator) {
-              wire = module->addWire(next_id(g), size);
-            }else{
-              wire = final_wire;
-            }
             bool must_be_signed = true;
             if (rhs->width == lhs->width)
               must_be_signed = false;
-            switch (node.get_type_op()) {
-              case Ntype_op::LT: module->addLt(next_id(g), lhs, rhs, wire, must_be_signed); break;
-              case Ntype_op::GT: module->addGt(next_id(g), lhs, rhs, wire, must_be_signed); break;
-              case Ntype_op::EQ: module->addEq(next_id(g), lhs, rhs, wire, must_be_signed); break;
-              default: ::Pass::error("lgyosys_dump: unknown compare gate error!");
+
+            RTLIL::Wire *wire;
+            if (multi_comparator) {
+              wire = module->addWire(next_id(g), size);
+              cmp_wires.emplace_back(wire);
+            }else{
+              wire = final_wire;
+            }
+            if (node.is_type(Ntype_op::LT)) {
+              module->addLt(next_id(g), lhs, rhs, wire, must_be_signed); break;
+            }else{
+              assert(node.is_type(Ntype_op::GT));
+              module->addGt(next_id(g), lhs, rhs, wire, must_be_signed); break;
             }
           }
         }
