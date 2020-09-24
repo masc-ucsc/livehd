@@ -334,14 +334,14 @@ Since the operation is commutative. A Sum(a,b) can have these options:
 
 | size | A_sign | B_sign | Operation |
 -------------------------------
-|  a==b  | S | S |  Sum(a,b) |
-|  a==b  | S | U |  Sum(a,b) | 
-|  a==b  | U | S |  Sum(a,b) |
-|  a==b  | U | U |  Sum(a,b) |
-|  a< b  | S | S |  Sum(a,b) |
-|  a< b  | S | U |  Sum(a,Tposs(b)) |
-|  a< b  | U | S |  Sum(Tposs(a),b) |
-|  a< b  | U | U |  Sum(Tposs(a),Tposs(b)) |
+|  a==b  | S | S |  EQ(a,b) |
+|  a==b  | S | U |  EQ(a,b) | 
+|  a==b  | U | S |  EQ(a,b) |
+|  a==b  | U | U |  EQ(a,b) |
+|  a< b  | S | S |  LT(a,b) |
+|  a< b  | S | U |  LT(a,Tposs(b)) |
+|  a< b  | U | S |  LT(Tposs(a),b) |
+|  a< b  | U | U |  LT(Tposs(a),Tposs(b)) |
 
 
 The Verilog addition/substraction output can have more bits than the inputs.

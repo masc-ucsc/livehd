@@ -444,7 +444,11 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         std::vector<RTLIL::Wire *> sub_signed;
 
         size = 0;
+        bool all_inputs_same_size=true;
         for (const auto &e : node.inp_edges()) {
+          if (size && size != e.get_bits()) {
+            all_inputs_same_size = false;
+          }
           size = (e.get_bits() > size) ? e.get_bits() : size;
 
           if (e.sink.get_pid()==0) {
@@ -463,7 +467,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
           } else {
             adds_result = cell_output_map[node.get_driver_pin().get_compact()];
           }
-          create_tree(g, add_signed, module, &RTLIL::Module::addAdd, true, adds_result);
+          create_tree(g, add_signed, module, &RTLIL::Module::addAdd, !all_inputs_same_size, adds_result);
         } else if (add_signed.size() == 1) {
           adds_result = add_signed[0];
         }
@@ -475,7 +479,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
           } else {
             subs_result = cell_output_map[node.get_driver_pin().get_compact()];
           }
-          create_tree(g, sub_signed, module, &RTLIL::Module::addAdd, true, subs_result);
+          create_tree(g, sub_signed, module, &RTLIL::Module::addAdd, !all_inputs_same_size, subs_result);
         } else if (sub_signed.size() == 1) {
           subs_result = sub_signed[0];
         }
@@ -484,9 +488,9 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         RTLIL::Wire *s_result = subs_result;
 
         if (a_result != nullptr && s_result != nullptr) {
-          module->addSub(next_id(g), a_result, s_result, cell_output_map[node.get_driver_pin().get_compact()], true);
+          module->addSub(next_id(g), a_result, s_result, cell_output_map[node.get_driver_pin().get_compact()], !all_inputs_same_size);
         } else if (s_result != nullptr) {
-          module->addSub(next_id(g), RTLIL::Const(0), s_result, cell_output_map[node.get_driver_pin().get_compact()], true);
+          module->addSub(next_id(g), RTLIL::Const(0), s_result, cell_output_map[node.get_driver_pin().get_compact()], !all_inputs_same_size);
         } else {
           if (cell_output_map[node.get_driver_pin().get_compact()]->name != a_result->name)
             module->connect(cell_output_map[node.get_driver_pin().get_compact()], RTLIL::SigSpec(a_result));

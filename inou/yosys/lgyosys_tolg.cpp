@@ -602,7 +602,7 @@ static void setup_cell_driver_pins(RTLIL::Module *module, LGraph *g) {
         if (wire == 0)
           continue;
 
-        fmt::print("dpin:{} bits:{} wire:{}\n", driver_pin.debug_name(), driver_pin.get_bits(), wire->name.str());
+        //fmt::print("dpin:{} bits:{} wire:{}\n", driver_pin.debug_name(), driver_pin.get_bits(), wire->name.str());
 
         if (chunk.width == wire->width) {
           if (wire2pin.find(wire) != wire2pin.end()) {

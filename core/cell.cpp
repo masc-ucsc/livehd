@@ -65,7 +65,6 @@ constexpr std::string_view Cell::get_sink_name_slow(Cell_op op, int pid) {
     case Cell_op::Sum:
     case Cell_op::LT:
     case Cell_op::GT:
-    case Cell_op::EQ:
       if (pid==0)
         return "A";
       else if (pid==1)
@@ -78,6 +77,7 @@ constexpr std::string_view Cell::get_sink_name_slow(Cell_op op, int pid) {
     case Cell_op::Xor:
     case Cell_op::Rand:
     case Cell_op::Ror:
+    case Cell_op::EQ:
       if (pid==0)
         return "A";
       return "invalid";
