@@ -100,7 +100,8 @@ RTLIL::Wire *Lgyosys_dump::create_io_wire(const Node_pin &pin, RTLIL::Module *mo
   RTLIL::IdString name = absl::StrCat("\\", pin.get_name());
 
   RTLIL::Wire *new_wire  = module->addWire(name, pin.get_bits());
-  unsigned_wire.insert(new_wire);
+  // WARNING: In yosys, the IOs can be signed or unsigned
+  // unsigned_wire.insert(new_wire);
   new_wire->start_offset = pin.get_offset();
 
   module->ports.push_back(name);
@@ -467,7 +468,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
           } else {
             adds_result = cell_output_map[node.get_driver_pin().get_compact()];
           }
-          create_tree(g, add_signed, module, &RTLIL::Module::addAdd, !all_inputs_same_size, adds_result);
+          create_tree(g, add_signed, module, &RTLIL::Module::addAdd, true, adds_result);
         } else if (add_signed.size() == 1) {
           adds_result = add_signed[0];
         }
@@ -479,7 +480,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
           } else {
             subs_result = cell_output_map[node.get_driver_pin().get_compact()];
           }
-          create_tree(g, sub_signed, module, &RTLIL::Module::addAdd, !all_inputs_same_size, subs_result);
+          create_tree(g, sub_signed, module, &RTLIL::Module::addAdd, true, subs_result);
         } else if (sub_signed.size() == 1) {
           subs_result = sub_signed[0];
         }
@@ -488,9 +489,9 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         RTLIL::Wire *s_result = subs_result;
 
         if (a_result != nullptr && s_result != nullptr) {
-          module->addSub(next_id(g), a_result, s_result, cell_output_map[node.get_driver_pin().get_compact()], !all_inputs_same_size);
+          module->addSub(next_id(g), a_result, s_result, cell_output_map[node.get_driver_pin().get_compact()], true);
         } else if (s_result != nullptr) {
-          module->addSub(next_id(g), RTLIL::Const(0), s_result, cell_output_map[node.get_driver_pin().get_compact()], !all_inputs_same_size);
+          module->addSub(next_id(g), RTLIL::Const(0), s_result, cell_output_map[node.get_driver_pin().get_compact()], true);
         } else {
           if (cell_output_map[node.get_driver_pin().get_compact()]->name != a_result->name)
             module->connect(cell_output_map[node.get_driver_pin().get_compact()], RTLIL::SigSpec(a_result));
@@ -593,7 +594,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         else if (node.get_type_op() == Cell_op::Xor)
           yop = &RTLIL::Module::addXor;
 
-        create_tree(g, inps, module, yop, must_be_signed, cell_output_map[node.get_driver_pin().get_compact()]);
+        create_tree(g, inps, module, yop, true, cell_output_map[node.get_driver_pin().get_compact()]);
       }
       break;
       case Cell_op::Rand:
