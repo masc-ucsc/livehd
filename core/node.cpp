@@ -97,7 +97,7 @@ Node::Node(LGraph *_g, const Hierarchy_index &_hidx, const Compact_class &comp)
 
 Node_pin Node::get_driver_pin_raw(Port_ID pid) const {
   I(!is_type_sub()); // Do not setup subs by PID, use name
-  I(Cell::has_driver(get_type_op(),pid));
+  I(Ntype::has_driver(get_type_op(),pid));
   Index_ID idx = current_g->find_idx_from_pid(nid, pid);
   // It can be zero, then invalid node_pin
   return Node_pin(top_g, current_g, hidx, idx, pid, false);
@@ -105,7 +105,7 @@ Node_pin Node::get_driver_pin_raw(Port_ID pid) const {
 
 Node_pin Node::get_sink_pin_raw(Port_ID pid) const {
   I(!is_type_sub()); // Do not setup subs by PID, use name
-  I(Cell::has_sink(get_type_op(),pid));
+  I(Ntype::has_sink(get_type_op(),pid));
   Index_ID idx = current_g->find_idx_from_pid(nid, pid);
   // It can be zero, then invalid node_pin
   return Node_pin(top_g, current_g, hidx, idx, pid, true);
@@ -165,7 +165,7 @@ Node_pin Node::setup_driver_pin_slow(std::string_view name) const {
 
 bool Node::is_sink_connected(std::string_view pname) const {
   if (!is_type_sub()) {
-    auto pid = Cell::get_sink_pid(get_type_op(), pname);
+    auto pid = Ntype::get_sink_pid(get_type_op(), pname);
     I(pid>=0); // if quering a cell, the name should be right, no?
     Index_ID idx = get_lg()->find_idx_from_pid(nid, pid);
     if (idx==0)
@@ -192,7 +192,7 @@ bool Node::is_sink_connected(std::string_view pname) const {
 
 bool Node::is_driver_connected(std::string_view pname) const {
   if (!is_type_sub()) {
-    auto pid = Cell::get_driver_pid(get_type_op(), pname);
+    auto pid = Ntype::get_driver_pid(get_type_op(), pname);
     I(pid>=0); // if quering a cell, the name should be right, no?
     Index_ID idx = get_lg()->find_idx_from_pid(nid, pid);
     if (idx==0)
@@ -258,7 +258,7 @@ Node_pin Node::setup_sink_pin_slow(std::string_view name) {
 
 Node_pin Node::setup_sink_pin_raw(Port_ID pid) {
   I(!is_type_sub()); // Do not setup subs by PID, use name
-  I(Cell::has_sink(get_type_op(),pid));
+  I(Ntype::has_sink(get_type_op(),pid));
 #ifndef NDEBUG
   if (is_type_sub()) {
     Lg_type_id  sub_lgid = current_g->get_type_sub(nid);
@@ -273,7 +273,7 @@ Node_pin Node::setup_sink_pin_raw(Port_ID pid) {
 }
 
 Node_pin Node::setup_sink_pin() const {
-  I(!Cell::is_multi_sink(get_type_op()));
+  I(!Ntype::is_multi_sink(get_type_op()));
   current_g->setup_sink(nid);
   return Node_pin(top_g, current_g, hidx, nid, 0, true);
 }
@@ -287,7 +287,7 @@ int Node::get_num_edges() const { return current_g->get_num_edges(*this); }
 
 Node_pin Node::setup_driver_pin_raw(Port_ID pid) const {
   I(!is_type_sub()); // Do not setup subs by PID, use name
-  I(Cell::has_driver(get_type_op(),pid));
+  I(Ntype::has_driver(get_type_op(),pid));
 #ifndef NDEBUG
   if (is_type_sub()) {
     Lg_type_id  sub_lgid = current_g->get_type_sub(nid);
@@ -303,41 +303,41 @@ Node_pin Node::setup_driver_pin_raw(Port_ID pid) const {
 }
 
 Node_pin Node::setup_driver_pin() const {
-  I(!Cell::is_multi_driver(get_type_op()));
+  I(!Ntype::is_multi_driver(get_type_op()));
   current_g->setup_driver(nid);
   return Node_pin(top_g, current_g, hidx, nid, 0, false);
 }
 
-Cell_op Node::get_type_op() const { return current_g->get_type_op(nid); }
-std::string_view Node::get_type_name() const { return Cell::get_name(current_g->get_type_op(nid)); }
+Ntype_op Node::get_type_op() const { return current_g->get_type_op(nid); }
+std::string_view Node::get_type_name() const { return Ntype::get_name(current_g->get_type_op(nid)); }
 
-void Node::set_type(const Cell_op op) {
-  I(op != Cell_op::Sub && op != Cell_op::Const && op != Cell_op::LUT);  // do not set type directly, call set_type_const ....
+void Node::set_type(const Ntype_op op) {
+  I(op != Ntype_op::Sub && op != Ntype_op::Const && op != Ntype_op::LUT);  // do not set type directly, call set_type_const ....
   current_g->set_type(nid, op);
 }
 
-void Node::set_type(const Cell_op op, Bits_t bits) {
+void Node::set_type(const Ntype_op op, Bits_t bits) {
   current_g->set_type(nid, op);
 
-  I(!Cell::is_multi_driver(op)); // bits only possible when the cell has a single output
+  I(!Ntype::is_multi_driver(op)); // bits only possible when the cell has a single output
 
   setup_driver_pin().set_bits(bits);
 }
 
-bool Node::is_type(const Cell_op op) const { return get_type_op() == op; }
+bool Node::is_type(const Ntype_op op) const { return get_type_op() == op; }
 
 bool Node::is_type_const() const { return current_g->is_type_const(nid); }
 
 bool Node::is_type_attr() const {
   auto op = get_type_op();
 
-  return op == Cell_op::AttrGet || op == Cell_op::AttrSet;
+  return op == Ntype_op::AttrGet || op == Ntype_op::AttrSet;
 }
 
 bool Node::is_type_tup() const {
   auto op = get_type_op();
 
-  return op == Cell_op::TupAdd || op == Cell_op::TupGet;
+  return op == Ntype_op::TupAdd || op == Ntype_op::TupGet;
 }
 
 Hierarchy_index Node::hierarchy_go_down() const {
@@ -433,7 +433,7 @@ std::string_view Node::create_name() const {
   if (it != ref->end())
     return ref->get_val(it);
 
-  auto cell_name = Cell::get_name(get_type_op());
+  auto cell_name = Ntype::get_name(get_type_op());
   std::string sig = absl::StrCat("lg_", cell_name, std::to_string(nid));
   const auto  it2 = ref->set(get_compact_class(), sig);
   return ref->get_val(it2);
@@ -487,7 +487,7 @@ std::string Node::debug_name() const {
     absl::StrAppend(&name, "_sub_", get_type_sub_node().get_name());
   }
 
-  auto cell_name = Cell::get_name(get_type_op());
+  auto cell_name = Ntype::get_name(get_type_op());
   if (name.empty())
     return absl::StrCat("node_", std::to_string(nid), "_", cell_name, "_lg_", current_g->get_name());
   return absl::StrCat("node_", std::to_string(nid), "_", cell_name, "_", name, "_lg_", current_g->get_name());
@@ -533,11 +533,11 @@ bool Node::has_color() const { return Ann_node_color::ref(current_g)->has_key(ge
 
 // LCOV_EXCL_START
 void Node::dump() {
-  auto cell_name = Cell::get_name(get_type_op());
+  auto cell_name = Ntype::get_name(get_type_op());
   fmt::print("node:{} nid:{} type:{} ", debug_name(), nid, cell_name);
-  if (get_type_op() == Cell_op::LUT) {
+  if (get_type_op() == Ntype_op::LUT) {
     fmt::print(" lut={}\n", get_type_lut().to_pyrope());
-  } else if (get_type_op() == Cell_op::Const) {
+  } else if (get_type_op() == Ntype_op::Const) {
     fmt::print(" const={}\n", get_type_const().to_pyrope());
   } else {
     fmt::print("\n");

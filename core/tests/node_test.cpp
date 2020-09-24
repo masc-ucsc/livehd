@@ -54,9 +54,9 @@ protected:
 
     auto s1 = top->create_node_sub(c1->get_lgid());
     auto s2 = top->create_node_sub("c2");
-    auto sum = top->create_node(Cell_op::Sum);
-    auto mux = top->create_node(Cell_op::Mux);
-    auto mor = top->create_node(Cell_op::Xor); // cell called mor to avoid xor reserved keyword
+    auto sum = top->create_node(Ntype_op::Sum);
+    auto mux = top->create_node(Ntype_op::Mux);
+    auto mor = top->create_node(Ntype_op::Xor); // cell called mor to avoid xor reserved keyword
 
     auto s1_aaa = s1.setup_sink_pin("an_input");
     auto s1_sss = s1.setup_driver_pin("s1_output");

@@ -75,7 +75,7 @@ protected:
       I(parent_lg);
       Node node;
       if (data.leaf && rbool.any()) {
-        node = parent_lg->create_node(Cell_op::Sum,10);
+        node = parent_lg->create_node(Ntype_op::Sum,10);
       } else {
         node = parent_lg->create_node_sub(data.name);
         LGraph *sub_lg = LGraph::create("lgdb_hierarchy_test", data.name, "hierarchy_test");
@@ -134,18 +134,18 @@ protected:
   //    fmt::print("curr   {} class {}\n", prev_node.debug_name(), prev_node.get_class_lgraph()->get_name());
 
       Node_pin dpin;
-      if (prev_node.get_type_op() == Cell_op::Sum) {
+      if (prev_node.get_type_op() == Ntype_op::Sum) {
         I(prev_data.leaf);
         dpin = prev_node.setup_driver_pin();
       }else{
         LGraph *prev_lg = LGraph::open("lgdb_hierarchy_test", prev_data.name);
         I(prev_node.get_class_lgraph() != prev_lg);
         dpin = prev_node.setup_driver_pin("o0");
-        I(prev_node.get_type_op() == Cell_op::Sub);
+        I(prev_node.get_type_op() == Ntype_op::Sub);
       }
 
       Node_pin spin;
-      if (curr_node.get_type_op() == Cell_op::Sum) {
+      if (curr_node.get_type_op() == Ntype_op::Sum) {
         I(curr_data.leaf);
         if (rbool.any())
           spin = curr_node.setup_sink_pin("A");
@@ -155,7 +155,7 @@ protected:
         LGraph *curr_lg = LGraph::open("lgdb_hierarchy_test", curr_data.name);
         I(curr_node.get_class_lgraph() != curr_lg);
         spin = curr_node.setup_sink_pin("i0");
-        I(curr_node.get_type_op() == Cell_op::Sub);
+        I(curr_node.get_type_op() == Ntype_op::Sub);
       }
 
       bool connect_inp = rbool.any();
@@ -210,12 +210,12 @@ protected:
 
           auto spin = lg->get_graph_output("o0");
           Node_pin dpin;
-          if (last_node.get_type_op() == Cell_op::Sum) {
+          if (last_node.get_type_op() == Ntype_op::Sum) {
             dpin = last_node.setup_driver_pin("Y");
           } else {
             I(last_node.get_class_lgraph() == lg);
             dpin       = last_node.setup_driver_pin("o0");
-            I(last_node.get_type_op() == Cell_op::Sub);
+            I(last_node.get_type_op() == Ntype_op::Sub);
           }
           spin.connect_driver(dpin);
         }

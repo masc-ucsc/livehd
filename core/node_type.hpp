@@ -24,8 +24,8 @@ protected:
 
   void clear();
 
-  void             set_type(Index_ID nid, const Cell_op op);
-  Cell_op          get_type_op(Index_ID nid) const {
+  void             set_type(Index_ID nid, const Ntype_op op);
+  Ntype_op          get_type_op(Index_ID nid) const {
     return node_internal[nid].get_type();
   }
 

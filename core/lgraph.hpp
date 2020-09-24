@@ -131,7 +131,7 @@ protected:
     I(node_internal[nid].is_node_state());
     I(node_internal[nid].is_master_root());
 
-    return node_internal[nid].get_type() == Cell_op::Sub;
+    return node_internal[nid].get_type() == Ntype_op::Sub;
   }
 
   void trace_back2driver(Node_pin_iterator &xiter, const Node_pin &dpin) const;
@@ -194,8 +194,8 @@ public:
 
   Node create_node(const Node &old_node);
 
-  Node create_node(const Cell_op op);
-  Node create_node(const Cell_op op, Bits_t bits);
+  Node create_node(const Ntype_op op);
+  Node create_node(const Ntype_op op, Bits_t bits);
 
   Node create_node_const(const Lconst &value);
   Node create_node_const(std::string_view val)     { return create_node_const(Lconst(val)); }

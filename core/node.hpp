@@ -176,12 +176,12 @@ public:
   Hierarchy_index get_hidx() const { return hidx; }
 
   Node_pin get_driver_pin() const {
-    I(!Cell::is_multi_driver(get_type_op()));
+    I(!Ntype::is_multi_driver(get_type_op()));
     Node_pin pin(top_g, current_g, hidx, nid, 0, false);
     return pin;
   }
   Node_pin get_sink_pin() const {
-    I(!Cell::is_multi_sink(get_type_op()));
+    I(!Ntype::is_multi_sink(get_type_op()));
     return Node_pin(top_g, current_g, hidx, nid, 0, true);
   }
 
@@ -194,7 +194,7 @@ public:
     if (unlikely(is_type_sub())) {
       return get_driver_pin_slow(pname);
     }
-    auto pid = Cell::get_driver_pid(get_type_op(), pname);
+    auto pid = Ntype::get_driver_pid(get_type_op(), pname);
     if (pid)
       return get_driver_pin_raw(pid);
     return Node_pin(top_g, current_g, hidx, nid, 0, false); // could be invalid if not setup
@@ -205,7 +205,7 @@ public:
     if (unlikely(is_type_sub())) {
       return get_sink_pin_slow(pname);
     }
-    auto pid = Cell::get_sink_pid(get_type_op(), pname);
+    auto pid = Ntype::get_sink_pid(get_type_op(), pname);
     if (pid)
       return get_sink_pin_raw(pid);
     return Node_pin(top_g, current_g, hidx, nid, 0, true); // could be invalid if not setup
@@ -216,7 +216,7 @@ public:
     if (unlikely(is_type_sub())) {
       return setup_driver_pin_slow(pname);
     }
-    auto pid = Cell::get_driver_pid(get_type_op(), pname);
+    auto pid = Ntype::get_driver_pid(get_type_op(), pname);
     if (pid)
       return setup_driver_pin_raw(pid);
     return Node_pin(top_g, current_g, hidx, nid, 0, false);
@@ -231,7 +231,7 @@ public:
     if (unlikely(is_type_sub())) {
       return setup_sink_pin_slow(pname);
     }
-    auto pid = Cell::get_sink_pid(get_type_op(), pname);
+    auto pid = Ntype::get_sink_pid(get_type_op(), pname);
     if (pid)
       return setup_sink_pin_raw(pid);
     return Node_pin(top_g, current_g, hidx, nid, 0, true); // could be invalid if not setup
@@ -264,12 +264,12 @@ public:
   Lconst get_type_lut() const;
 
   std::string_view get_type_name() const;
-  Cell_op          get_type_op() const;
-  void             set_type(const Cell_op op);
-  void             set_type(const Cell_op op, Bits_t bits);
-  bool             is_type(const Cell_op op) const;
+  Ntype_op          get_type_op() const;
+  void             set_type(const Ntype_op op);
+  void             set_type(const Ntype_op op, Bits_t bits);
+  bool             is_type(const Ntype_op op) const;
   bool             is_type_sub() const {
-    return get_type_op() == Cell_op::Sub;
+    return get_type_op() == Ntype_op::Sub;
   }
   bool             is_type_const() const;
   bool             is_type_attr() const;
@@ -278,7 +278,7 @@ public:
     return nid == Hardcoded_input_nid || nid == Hardcoded_output_nid;
   }
   bool             is_type_loop_breaker() const {
-    return Cell::is_loop_breaker(get_type_op());
+    return Ntype::is_loop_breaker(get_type_op());
   }
 
   Hierarchy_index hierarchy_go_down() const;

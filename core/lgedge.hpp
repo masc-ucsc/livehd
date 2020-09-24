@@ -320,11 +320,11 @@ public:
     return get_num_local_inputs() + get_num_local_outputs();
   }
 
-  Cell_op get_type() const {
+  Ntype_op get_type() const {
     I(is_master_root());
-    return static_cast<Cell_op>(type);
+    return static_cast<Ntype_op>(type);
   }
-  void set_type(Cell_op op) {
+  void set_type(Ntype_op op) {
     I(is_master_root());
     type = static_cast<uint8_t>(op);
   }

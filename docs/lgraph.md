@@ -236,7 +236,7 @@ the specifics.
 
 
 In general the nodes have a single output with the exception of complex nodes
-like subgraphs or memories.  Cells with single output, have 'Y' as output. The
+like subgraphs or memories.  Ntypes with single output, have 'Y' as output. The
 inputs are single characters 'A', 'B'... For most inputs, there can be many
 drivers. E.g: a single Sum cell can do `Y=3+20+a0+a3` where `A_{0} = 3`, `A_{1}
 = 20`, `A_{2} = a0`, and `A_{3} = a3`.
@@ -310,7 +310,7 @@ input is unsigned. all the inputs will be "unsigned extended" to match the
 largest value. This is different from Sum_Op semantics were each input is
 signed or unsigned extended independent of the other inputs. To match the
 semantics, when mixing signed and unsigned, all the potentially negative inputs
-must be converted to unsign with the Cell_op::Tposs.
+must be converted to unsign with the Ntype_op::Tposs.
 
 
 ```verilog
@@ -371,14 +371,14 @@ precision an AND gate must be added. In the following examples only the 'g' and
 * `Y = a - (b<<n)` becomes `Y = {(a>>n)-b, a&n.mask}`
 * If every x,y... lower bit is zero `Y=x+y+...` becomes Y=((x>>1)+(y>>1)+..)<<1
 
-### Cell_op::Mult
+### Ntype_op::Mult
 
 Multiply operator. There is no Prod_Op that combines multiplication and
 division because unlike in Sum_Op, in integer operations the order matters
 (unlimited precision decimals may combine)
 (`a*(b/c) != (a*b)/c`).
 
-```{.graph .center caption="Cell_op::Mult LGraph Node."}
+```{.graph .center caption="Ntype_op::Mult LGraph Node."}
 digraph Mult {
     rankdir=LR;
     size="1,0.5"
@@ -436,7 +436,7 @@ LiveHD mult node result (Y) number of bits can be more efficient than in
 Verilog.  E.g: if the max value of A0 is 3 (2 bits) and A1 is 5 (3bits). If the
 result is unsigned, the maximum result is 15 (4 bits). In Verilog, the result
 will always be 5 bits. If the Verilog result was to an unsigned variable.
-Either all the inputs were unsigned, or there should pass to an Cell_op::Tposs to
+Either all the inputs were unsigned, or there should pass to an Ntype_op::Tposs to
 force the MSB as positive. This extra bit will be simplified but it will notify
 LGraph that the output is to be treated as unsigned.
 
@@ -504,7 +504,7 @@ The same considerations as in the multiplication should be applied.
 
 #### Modulo
 
-There is no mod cell (Cell_op::Mod) in LGraph. The reason is that a modulo
+There is no mod cell (Ntype_op::Mod) in LGraph. The reason is that a modulo
 different from a power of 2 is very rare in hardware. If the language supports
 modulo operations, they must be translated to division/multiplication.
 
@@ -575,7 +575,7 @@ No optimizations by itself, it has a single input. Other operations like Sum_Op 
 'A' because input order does not matter. The result is always a signed number.
 
 
-```{.graph .center caption="Cell_op::And LGraph Node."}
+```{.graph .center caption="Ntype_op::And LGraph Node."}
 digraph And {
     rankdir=LR;
     size="1,0.5"
@@ -610,7 +610,7 @@ propagation to indicate that those bits are useless.
 #### Peephole Optimizations
 
 
-### Cell_op::Tposs
+### Ntype_op::Tposs
 
 Every value is signed but some times a value must be treated as unsigned.
 
@@ -618,7 +618,7 @@ The Tposs operator stands for To Positive Signed. It does nothing if the input
 is signed and positive, but behaves like concatenating a zero bit to the most
 significant bit of the input value. The result is an always positive value.
 
-```{.graph .center caption="Cell_op::Tposs LGraph Node."}
+```{.graph .center caption="Ntype_op::Tposs LGraph Node."}
 digraph Unsigned {
     rankdir=LR;
     size="1,0.5"
@@ -648,7 +648,7 @@ digraph Unsigned {
 
 #### Other Considerations
 
-It is important to notice that Cell_op::Tposs is different from a absolute
+It is important to notice that Ntype_op::Tposs is different from a absolute
 calculation. It is like a concatenating a zero to convert the signed values.
 
 
