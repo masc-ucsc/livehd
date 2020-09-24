@@ -280,12 +280,12 @@ Node_pin Node_pin::find_driver_pin(LGraph *top, std::string_view wname) {
 
 std::string_view Node_pin::get_pin_name() const {
   auto op = get_node().get_type_op();
-  if (op == Cell_op::Sub)
+  if (op == Ntype_op::Sub)
     return get_type_sub_io_name();
   if (is_driver())
-    return Cell::get_driver_name(op, pid);
+    return Ntype::get_driver_name(op, pid);
 
-  return Cell::get_sink_name(op, pid);
+  return Ntype::get_sink_name(op, pid);
 }
 
 void Node_pin::set_offset(Bits_t offset) {

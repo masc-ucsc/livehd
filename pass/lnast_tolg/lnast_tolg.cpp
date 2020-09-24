@@ -116,7 +116,7 @@ void Lnast_tolg::process_ast_if_op(LGraph *dfg, const Lnast_nid &lnidx_if) {
 }
 
 void Lnast_tolg::process_ast_phi_op(LGraph *dfg, const Lnast_nid &lnidx_phi) {
-  auto phi_node   = dfg->create_node(Cell_op::Mux);
+  auto phi_node   = dfg->create_node(Ntype_op::Mux);
   auto cond_spin  = phi_node.setup_sink_pin("0"); // Y = ~SA + SB
   auto true_spin  = phi_node.setup_sink_pin("1");
   auto false_spin = phi_node.setup_sink_pin("2");
@@ -202,7 +202,7 @@ void Lnast_tolg::process_ast_concat_op(LGraph *dfg, const Lnast_nid &lnidx_conca
 
 
   //create TupAdd, concat both tail of opd1 and opd2, name it with old opd1_name (a = a ++ b) or new lhs_name (c = a ++ b)
-    auto tup_add    = dfg->create_node(Cell_op::TupAdd);
+    auto tup_add    = dfg->create_node(Ntype_op::TupAdd);
     auto tn_spin    = tup_add.setup_sink_pin("tuple_name"); // tuple name
     auto value_spin = tup_add.setup_sink_pin("value"); // key->value
 
@@ -253,7 +253,7 @@ void Lnast_tolg::process_ast_logical_op(LGraph *dfg, const Lnast_nid &lnidx_opr)
     if (opr_child == lnast->get_first_child(lnidx_opr))
       continue; // the lhs has been handled at setup_node_opr_and_lhs();
 
-    auto node_eq = dfg->create_node(Cell_op::EQ);
+    auto node_eq = dfg->create_node(Ntype_op::EQ);
     auto ori_opd = setup_ref_node_dpin(dfg, opr_child);
     auto zero_dpin = dfg->create_node_const(Lconst(0, 1)).setup_driver_pin();
 
@@ -271,8 +271,8 @@ void Lnast_tolg::process_ast_logical_op(LGraph *dfg, const Lnast_nid &lnidx_opr)
 void Lnast_tolg::nary_node_rhs_connections(LGraph *dfg, Node &opr_node, const std::vector<Node_pin> &opds, bool is_subt) {
   // FIXME->sh: need to think about signed number handling and signed number copy-propagation analysis for now, assuming everything is unsigned number
   switch(opr_node.get_type_op()) {
-    case Cell_op::Sum:
-    case Cell_op::Mult: { // FIXME: add could be + a b c (same mult)
+    case Ntype_op::Sum:
+    case Ntype_op::Mult: { // FIXME: add could be + a b c (same mult)
       bool is_first = true;
       for (const auto &opd : opds) {
         if (is_subt & !is_first) { //note: Hunter -- for subtraction
@@ -284,24 +284,24 @@ void Lnast_tolg::nary_node_rhs_connections(LGraph *dfg, Node &opr_node, const st
       }
     }
     break;
-    case Cell_op::LT:
-    case Cell_op::GT: {
+    case Ntype_op::LT:
+    case Ntype_op::GT: {
       I(opds.size()==2); // FIXME: comparator can have many inputs (a<b<c<d)
       dfg->add_edge(opds[0], opr_node.setup_sink_pin("A"));
       dfg->add_edge(opds[1], opr_node.setup_sink_pin("B"));  // why not sign?
     }
     break;
-    case Cell_op::Div:
-    case Cell_op::SHL:
-    case Cell_op::SRA: {
+    case Ntype_op::Div:
+    case Ntype_op::SHL:
+    case Ntype_op::SRA: {
       I(opds.size()==2); // val<<amount
       dfg->add_edge(opds[0], opr_node.setup_sink_pin("a"));
       dfg->add_edge(opds[1], opr_node.setup_sink_pin("b"));
     }
     break;
     default: {
-      I(opr_node.get_type_op()!=Cell_op::Mux);
-      I(opr_node.get_type_op()!=Cell_op::Sflop);
+      I(opr_node.get_type_op()!=Ntype_op::Mux);
+      I(opr_node.get_type_op()!=Ntype_op::Sflop);
       for (const auto &opd : opds) {
         dfg->add_edge(opd, opr_node.setup_sink_pin());
       }

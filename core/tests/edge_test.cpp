@@ -285,7 +285,7 @@ TEST_F(Edge_test, trivial_delete) {
 
 TEST_F(Edge_test, overflow_delete) {
 
-  auto s1 = g->create_node(Cell_op::Sum);
+  auto s1 = g->create_node(Ntype_op::Sum);
 
   track_edge_count.clear();
   check_setup_pins();
@@ -328,7 +328,7 @@ TEST_F(Edge_test, overflow_delete) {
 
 TEST_F(Edge_test, overflow_delete_node) {
 
-  auto s1 = g->create_node(Cell_op::Sum);
+  auto s1 = g->create_node(Ntype_op::Sum);
 
   track_edge_count.clear();
   check_setup_pins();
@@ -361,7 +361,7 @@ TEST_F(Edge_test, overflow_delete_node) {
 TEST_F(Edge_test, overflow_delete_del_edge_bench) {
 
 
-  auto s1 = g->create_node(Cell_op::Sum);
+  auto s1 = g->create_node(Ntype_op::Sum);
 
   for(int i=0;i<6000;++i) {
     Node_pin d;
@@ -405,7 +405,7 @@ TEST_F(Edge_test, overflow_delete_del_edge_bench) {
 
 TEST_F(Edge_test, overflow_delete_del_node_bench) {
 
-  auto s1 = g->create_node(Cell_op::Sum);
+  auto s1 = g->create_node(Ntype_op::Sum);
 
   int all_edges=0;
   for(int i=0;i<6000;++i) {

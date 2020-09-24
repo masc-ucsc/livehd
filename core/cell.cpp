@@ -2,10 +2,10 @@
 
 #include "cell.hpp"
 
-Cell::_init Cell::_static_initializer;
+Ntype::_init Ntype::_static_initializer;
 
-Cell::_init::_init() {
-  for (uint8_t op = 1; op < static_cast<uint8_t>(Cell_op::Last_invalid); ++op) {
+Ntype::_init::_init() {
+  for (uint8_t op = 1; op < static_cast<uint8_t>(Ntype_op::Last_invalid); ++op) {
 
     for(auto i=0;i<256;++i) {
       sink_name2pid[i][op]=-1;
@@ -17,7 +17,7 @@ Cell::_init::_init() {
     int pid=0;
     while(true) {
       assert(pid<12); // 11 max for Memory
-      auto pin_name = Cell::get_sink_name_slow(static_cast<Cell_op>(op), pid);
+      auto pin_name = Ntype::get_sink_name_slow(static_cast<Ntype_op>(op), pid);
       if (pin_name.empty() || pin_name == "invalid")
         break;
 
@@ -26,8 +26,8 @@ Cell::_init::_init() {
       sink_pid2name[pid][op] = pin_name;
       sink_name2pid[pin_name[0]][op] = pid;
 
-      assert(pid == Cell::get_sink_pid(static_cast<Cell_op>(op), pin_name));
-      assert(pin_name == Cell::get_sink_name(static_cast<Cell_op>(op), pid));
+      assert(pid == Ntype::get_sink_pid(static_cast<Ntype_op>(op), pin_name));
+      assert(pin_name == Ntype::get_sink_name(static_cast<Ntype_op>(op), pid));
 
       ++pid;
     }
@@ -57,52 +57,52 @@ Cell::_init::_init() {
   }
 }
 
-constexpr std::string_view Cell::get_sink_name_slow(Cell_op op, int pid) {
+constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
   switch(op) {
-    case Cell_op::Invalid:
+    case Ntype_op::Invalid:
       return "invalid";
       break;
-    case Cell_op::Sum:
-    case Cell_op::LT:
-    case Cell_op::GT:
+    case Ntype_op::Sum:
+    case Ntype_op::LT:
+    case Ntype_op::GT:
       if (pid==0)
         return "A";
       else if (pid==1)
         return "B";
       return "invalid";
       break;
-    case Cell_op::Mult:
-    case Cell_op::And:
-    case Cell_op::Or:
-    case Cell_op::Xor:
-    case Cell_op::Rand:
-    case Cell_op::Ror:
-    case Cell_op::EQ:
+    case Ntype_op::Mult:
+    case Ntype_op::And:
+    case Ntype_op::Or:
+    case Ntype_op::Xor:
+    case Ntype_op::Rand:
+    case Ntype_op::Ror:
+    case Ntype_op::EQ:
       if (pid==0)
         return "A";
       return "invalid";
       break;
-    case Cell_op::Not:
-    case Cell_op::Tposs:
+    case Ntype_op::Not:
+    case Ntype_op::Tposs:
       if (pid==0)
         return "a";
       return "invalid";
       break;
-    case Cell_op::Div:
-    case Cell_op::SHL:
-    case Cell_op::SRA:
+    case Ntype_op::Div:
+    case Ntype_op::SHL:
+    case Ntype_op::SRA:
       if (pid==0)
         return "a";
       else if (pid==1)
         return "b";
       return "invalid";
       break;
-    case Cell_op::Const: // No drivers to Constants
+    case Ntype_op::Const: // No drivers to Constants
       return "invalid";
       break;
-    case Cell_op::Mux:   // unlimited case: 1,2,3,4,5....
-    case Cell_op::LUT:   // unlimited case: 1,2,3,4,5....
-    case Cell_op::Sub:   // unlimited case: 1,2,3,4,5....
+    case Ntype_op::Mux:   // unlimited case: 1,2,3,4,5....
+    case Ntype_op::LUT:   // unlimited case: 1,2,3,4,5....
+    case Ntype_op::Sub:   // unlimited case: 1,2,3,4,5....
       assert(is_unlimited_sink(op));
       switch(pid) {
         case 0: return "0";
@@ -119,7 +119,7 @@ constexpr std::string_view Cell::get_sink_name_slow(Cell_op op, int pid) {
       }
       return "invalid";
       break;
-    case Cell_op::Memory:
+    case Ntype_op::Memory:
       switch(pid) {
         case 0: return "addr";
         case 1: return "bits";
@@ -135,8 +135,8 @@ constexpr std::string_view Cell::get_sink_name_slow(Cell_op op, int pid) {
         default: return "invalid";
       }
       break;
-    case Cell_op::Sflop:
-    case Cell_op::Aflop:
+    case Ntype_op::Sflop:
+    case Ntype_op::Aflop:
       switch(pid) {
         case 0: return "reset";
         case 1: return "initial";  // reset value
@@ -148,7 +148,7 @@ constexpr std::string_view Cell::get_sink_name_slow(Cell_op op, int pid) {
         default: return "invalid";
       }
       break;
-    case Cell_op::Latch:
+    case Ntype_op::Latch:
       switch(pid) {
         case 0: return "posclk";
                 // No 1 to keep din at pos 3 (a,b,c)
@@ -157,7 +157,7 @@ constexpr std::string_view Cell::get_sink_name_slow(Cell_op op, int pid) {
         default: return "invalid";
       }
       break;
-    case Cell_op::Fflop:
+    case Ntype_op::Fflop:
       switch(pid) {
         case 0: return "reset";
         case 1: return "initial";  // reset value
@@ -168,7 +168,7 @@ constexpr std::string_view Cell::get_sink_name_slow(Cell_op op, int pid) {
         default: return "invalid";
       }
       break;
-    case Cell_op::TupAdd:
+    case Ntype_op::TupAdd:
       switch(pid) {
         case 0: return "tuple_name";      // tuple name
         case 2: return "position";
@@ -178,7 +178,7 @@ constexpr std::string_view Cell::get_sink_name_slow(Cell_op op, int pid) {
         default: return "invalid";
       }
       break;
-    case Cell_op::TupGet:
+    case Ntype_op::TupGet:
       switch(pid) {
         case 0: return "tuple_name";
         case 2: return "position";
@@ -187,7 +187,7 @@ constexpr std::string_view Cell::get_sink_name_slow(Cell_op op, int pid) {
         default: return "invalid";
       }
       break;
-    case Cell_op::AttrSet:
+    case Ntype_op::AttrSet:
       switch(pid) {
         case 0: return "name";  // variable name
         case 2: return "chain";
@@ -196,15 +196,15 @@ constexpr std::string_view Cell::get_sink_name_slow(Cell_op op, int pid) {
         default: return "invalid";
       }
       break;
-    case Cell_op::AttrGet:
+    case Ntype_op::AttrGet:
       switch(pid) {
         case 0: return "var_name";
         case 5: return "field";
         default: return "invalid";
       }
       break;
-    case Cell_op::IO:
-    case Cell_op::CompileErr:
+    case Ntype_op::IO:
+    case Ntype_op::CompileErr:
       switch(pid) {
         case 0: return "A";
         case 1: return "B";
@@ -235,13 +235,13 @@ constexpr std::string_view Cell::get_sink_name_slow(Cell_op op, int pid) {
 //
 //This should be compile time constants (check assembly)
 int cell_code_check_code1() {
-  constexpr auto pid = Cell::get_sink_pid(Cell_op::Sum,"B");
+  constexpr auto pid = Ntype::get_sink_pid(Ntype_op::Sum,"B");
   static_assert(pid==1);
   return pid;
 }
 
 int cell_code_check_code2() {
-  constexpr auto pid = Cell::get_sink_pid(Cell_op::Mux,"321");
+  constexpr auto pid = Ntype::get_sink_pid(Ntype_op::Mux,"321");
   static_assert(pid==321);
   return pid;
 }

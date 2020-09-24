@@ -129,8 +129,8 @@ void LGraph::clear() {
   I(nid1 == Hardcoded_input_nid);
   I(nid2 == Hardcoded_output_nid);
 
-  set_type(nid1, Cell_op::IO);
-  set_type(nid2, Cell_op::IO);
+  set_type(nid1, Ntype_op::IO);
+  set_type(nid2, Ntype_op::IO);
 
   htree.clear();
 
@@ -222,7 +222,7 @@ Node_pin LGraph::add_graph_input(std::string_view str, Port_ID pos, uint32_t bit
   } else {
     inst_pid = ref_self_sub_node()->add_pin(str, Sub_node::Direction::Input, pos);
   }
-  I(node_internal[Hardcoded_input_nid].get_type() == Cell_op::IO);
+  I(node_internal[Hardcoded_input_nid].get_type() == Ntype_op::IO);
 
   I(!find_idx_from_pid(Hardcoded_input_nid, inst_pid));  // Just added, so it should not be there
   Index_ID root_idx = 0;
@@ -248,7 +248,7 @@ Node_pin LGraph::add_graph_output(std::string_view str, Port_ID pos, uint32_t bi
   } else {
     inst_pid = ref_self_sub_node()->add_pin(str, Sub_node::Direction::Output, pos);
   }
-  I(node_internal[Hardcoded_output_nid].get_type() == Cell_op::IO);
+  I(node_internal[Hardcoded_output_nid].get_type() == Ntype_op::IO);
 
   I(!find_idx_from_pid(Hardcoded_output_nid, inst_pid));  // Just added, so it should not be there
   Index_ID root_idx = 0;
@@ -827,13 +827,13 @@ void LGraph::del_node(const Node &node) {
 
   auto op = node_internal[idx2].get_type();
 
-  if (op == Cell_op::Const) {
+  if (op == Ntype_op::Const) {
     const_map.erase(node.get_compact_class());
-  } else if (op == Cell_op::IO) {
+  } else if (op == Ntype_op::IO) {
     I(false);  // add the case once we have a testing case
-  } else if (op == Cell_op::LUT) {
+  } else if (op == Ntype_op::LUT) {
     lut_map.erase(node.get_compact_class());
-  } else if (op == Cell_op::Sub) {
+  } else if (op == Ntype_op::Sub) {
     subid_map.erase(node.get_compact_class());
   }
 
@@ -1156,18 +1156,18 @@ Node LGraph::create_node(const Node &old_node) {
 
   Node new_node;
 
-  Cell_op op = old_node.get_type_op();
+  Ntype_op op = old_node.get_type_op();
 
-  if (op == Cell_op::LUT) {
+  if (op == Ntype_op::LUT) {
     new_node = create_node();
     new_node.set_type_lut(old_node.get_type_lut());
-  } else if (op == Cell_op::Sub) {
+  } else if (op == Ntype_op::Sub) {
     new_node = create_node_sub(old_node.get_type_sub());
-  } else if (op == Cell_op::Const) {
+  } else if (op == Ntype_op::Const) {
     new_node = create_node_const(old_node.get_type_const());
     I(new_node.get_driver_pin().get_bits() == old_node.get_driver_pin().get_bits());
   } else {
-    I(op != Cell_op::IO);  // Special case, must use add input/output API
+    I(op != Ntype_op::IO);  // Special case, must use add input/output API
     new_node = create_node(op);
   }
 
@@ -1179,20 +1179,20 @@ Node LGraph::create_node(const Node &old_node) {
   return new_node;
 }
 
-Node LGraph::create_node(const Cell_op op) {
+Node LGraph::create_node(const Ntype_op op) {
   Index_ID nid = create_node_int();
   set_type(nid, op);
 
-  I(op != Cell_op::IO);   // Special case, must use add input/output API
-  I(op != Cell_op::Sub);  // Do not build by steps. call create_node_sub
+  I(op != Ntype_op::IO);   // Special case, must use add input/output API
+  I(op != Ntype_op::Sub);  // Do not build by steps. call create_node_sub
 
   return Node(this, Hierarchy_tree::root_index(), nid);
 }
 
-Node LGraph::create_node(const Cell_op op, Bits_t bits) {
+Node LGraph::create_node(const Ntype_op op, Bits_t bits) {
   auto node = create_node(op);
 
-  I(!Cell::is_multi_driver(op));
+  I(!Ntype::is_multi_driver(op));
   node.setup_driver_pin().set_bits(bits);
 
   return node;
@@ -1203,7 +1203,7 @@ Node LGraph::create_node_const(const Lconst &value) {
   if (nid == 0
       || nid >= node_internal.size()
       || !node_internal[nid].is_valid()
-      || node_internal[nid].get_type() != Cell_op::Const
+      || node_internal[nid].get_type() != Ntype_op::Const
       || get_type_const(nid) != value) {
     nid = create_node_int();
     set_type_const(nid, value);
