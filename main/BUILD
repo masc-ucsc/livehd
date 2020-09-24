@@ -29,7 +29,7 @@ cc_binary(
             "//pass/fplan:fplan",
 #Renau       "//pass/lec:pass_lec",
 #Sakshi            "//pass/lnast_fromlg:pass_lnast_fromlg",
-#Sheng       "//pass/lnast_tolg:pass_lnast_tolg",
+            "//pass/lnast_tolg:pass_lnast_tolg",
             "//pass/lnastfmt:pass_lnastfmt",
 #Sheng       "//pass/mockturtle:pass_mockturtle",
 #Sheng       "//pass/punch:pass_punch",

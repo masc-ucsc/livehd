@@ -11,7 +11,6 @@ protected:
 
 public:
   explicit Pass_lnast_tolg(const Eprp_var &var);
-  std::vector<LGraph *> tolg2 (const Eprp_var &var, std::shared_ptr<Lnast> lnast);
   static void setup();
 };
 

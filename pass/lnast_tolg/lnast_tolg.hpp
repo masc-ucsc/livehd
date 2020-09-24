@@ -10,6 +10,7 @@
 #include "lnast.hpp"
 #include "likely.hpp"
 #include "pass.hpp"
+#include "cell.hpp"
 
 
 class Lnast_tolg {
@@ -21,10 +22,10 @@ private:
   std::shared_ptr<Lnast> lnast;
   std::string_view module_name;
   std::string_view path;
-  absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Node_Type_Op>  primitive_type_lnast2lg;
+  absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Ntype_op>  primitive_type_lnast2lg;
   absl::flat_hash_map<std::string_view, Node_pin>                  vname2attr_dpin;       // for dummy attribute node construction, vn = variable non-ssa name, dpin = last attr dpin within "any" attributes
   absl::flat_hash_map<std::string, Node_pin>                       name2dpin;             // for scalar variable
-  absl::flat_hash_map<std::string, Node_pin>                       key2dpin;
+  absl::flat_hash_map<std::string, Node_pin>                       field2dpin;
   absl::flat_hash_map<std::string_view, std::vector<Node>>         driver_var2wire_nodes; // for __last_value temporarily wire nodes
   absl::flat_hash_map<Node_pin, std::vector<Node_pin>>             inp2leaf_artifact_spins;
 protected:
@@ -61,7 +62,7 @@ protected:
                                           bool from_tupstrc = false,
                                           bool from_assign  = false);
 
-  Node_Type_Op decode_lnast_op           (const Lnast_nid &lnidx_opr);
+  Ntype_op decode_lnast_op           (const Lnast_nid &lnidx_opr);
   void         setup_dpin_ssa            (Node_pin &dpin, std::string_view var_name, uint16_t subs);
   void         nary_node_rhs_connections (LGraph *dfg, Node &opr_node, const std::vector<Node_pin> &opds, bool is_subt);
   void         setup_clk                 (LGraph *dfg, Node &reg_node);
@@ -75,7 +76,7 @@ protected:
   static bool is_bool_true         (std::string_view name) {return name.substr(0,4) == "true"; }
   static bool is_bool_false        (std::string_view name) {return name.substr(0,5) == "false"; }
   static bool is_err_var_undefined (std::string_view name) {return name.substr(0,17) == "err_var_undefined"; }
-  static bool is_scalar            (Node_pin dpin) {return dpin.get_node().get_type_op() != TupAdd_Op; }
+  static bool is_scalar            (Node_pin dpin) {return dpin.get_node().get_type_op() != Ntype_op::TupAdd; }
 
   bool        subgraph_outp_is_tuple (Sub_node* sub);
   void        subgraph_io_connection (LGraph *dfg, Sub_node* sub, std::string_view arg_tup_name, std::string_view res_name, Node subg_node);
@@ -83,7 +84,7 @@ protected:
 
   // tuple related
   Node_pin     setup_tuple_ref           (LGraph *dfg, std::string_view tup_name);
-  Node_pin     setup_key_dpin            (LGraph *dfg, std::string_view key_name);
+  Node_pin     setup_field_dpin            (LGraph *dfg, std::string_view key_name);
   void         reconnect_to_ff_qpin      (LGraph *dfg, const Node &tg_node);
   static bool  tuple_get_has_key_name    (const Node &tup_get);
   static bool  tuple_get_has_key_pos     (const Node &tup_get);
@@ -92,9 +93,9 @@ protected:
   void         create_hier_inp_tup_add   (LGraph *dfg, const Lnast_nid &c1_tg);
   Node_pin     create_inp_tg             (LGraph *dfg, std::string_view input_field);
   void         create_out_ta             (LGraph *dfg, std::string_view key_name, Node_pin &val_dpin);
-  void         dp_create_hier_outputs    (LGraph *dfg, Node &cur_node, std::string hier_name, absl::flat_hash_set<Node::Compact> &memo);
-  void         dfs_create_flattened_hier_inp (LGraph *dfg, Node_pin &cur_node_spin, std::string hier_name, 
-                                              absl::flat_hash_set<Node> &inp_artifacts);
+  /* void         dp_create_hier_outputs    (LGraph *dfg, Node &cur_node, std::string hier_name, absl::flat_hash_set<Node::Compact> &memo); */
+  /* void         dfs_create_flattened_hier_inp (LGraph *dfg, Node_pin &cur_node_spin, std::string hier_name, */ 
+  /*                                             absl::flat_hash_set<Node> &inp_artifacts); */
 
   // attribute related
   bool check_new_var_chain (const Lnast_nid &lnidx_opr);
