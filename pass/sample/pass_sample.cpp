@@ -1,4 +1,5 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#include <string>
 
 #include "pass_sample.hpp"
 
@@ -6,6 +7,7 @@
 #include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
+#include "cell.hpp"
 
 static Pass_plugin sample("pass_sample", Pass_sample::setup);
 
@@ -113,20 +115,14 @@ void Pass_sample::do_wirecount(LGraph *g, int indent) {
 void Pass_sample::compute_histogram(LGraph *g) {
   Lbench b("pass.sample.compute_histogram");
 
-  std::map<std::string, int> histogram;
+  std::map<Ntype_op, int> histogram;
 
   int cells = 0;
   for (const auto node : g->forward()) {
     cells++;
-    std::string name(node.get_type().get_name());
-    for (const auto &edge : node.inp_edges()) {
-      absl::StrAppend(&name, "_i", std::to_string(edge.get_bits()));
-    }
-    for (const auto &edge : node.out_edges()) {
-      absl::StrAppend(&name, "_o", std::to_string(edge.get_bits()));
-    }
+    auto type = node.get_type_op();
 
-    histogram[name]++;
+    histogram[type]++;
   }
 
   for (auto it = histogram.begin(); it != histogram.end(); it++) {
@@ -188,28 +184,20 @@ void Pass_sample::create_sample_graph(LGraph *g) {
   auto graph_inp_b = lg->add_graph_input("g_inp_b", 1, 1);  // Module position 1, 1 bit
   auto graph_out   = lg->add_graph_output("g_out", 2, 3);   // Module possition 2, 3 bits
 
-  auto shr_node     = lg->create_node(ShiftRight_Op);
-  auto shr_inp_sink = shr_node.setup_sink_pin(0);
-  auto shr_out_drv  = shr_node.setup_driver_pin(0);
+  auto shr_node     = lg->create_node(Ntype_op::SRA);
+  auto shr_out_drv  = shr_node.setup_driver_pin();
   shr_out_drv.set_bits(8);
   shr_out_drv.set_name("shr_out");
 
-  // auto b_const = lg->create_node_const(3, 2);
-  // auto b_drv = b_const.setup_driver_pin(0);
-  // b_drv.set_name("b_drv");
-
+  
   auto s_const = lg->create_node_const(Lconst(2, 2));
   I(s_const.get_driver_pin().get_bits() == 2);  // Automatically set bits for const
-  auto s_drv = s_const.setup_driver_pin(0);
-  s_drv.set_name("s_drv");
 
-  auto b_sink = shr_node.setup_sink_pin(1);
-  auto s_sink = shr_node.setup_sink_pin(2);
-  lg->add_edge(graph_inp_a, shr_inp_sink);
-  lg->add_edge(shr_out_drv, graph_out);
-  // lg->add_edge(b_drv, b_sink);
+  auto a_sink = shr_node.setup_sink_pin("a");
+  auto b_sink = shr_node.setup_sink_pin("b");
+  lg->add_edge(graph_inp_a, a_sink);
   lg->add_edge(graph_inp_b, b_sink);
-  lg->add_edge(s_drv, s_sink);
+  lg->add_edge(shr_out_drv, graph_out);
 
   fmt::print("Finished.\n");
 }
