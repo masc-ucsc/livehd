@@ -14,12 +14,10 @@ Ntype::_init::_init() {
       sink_pid2name[i][op]="invalid";
     }
 
-    int pid=0;
-    while(true) {
-      assert(pid<12); // 11 max for Memory
+    for(int pid=0;pid<12;++pid) {
       auto pin_name = Ntype::get_sink_name_slow(static_cast<Ntype_op>(op), pid);
       if (pin_name.empty() || pin_name == "invalid")
-        break;
+        continue;
 
       assert(sink_name2pid[pin_name[0]][op] == -1); // No double assign
 
@@ -28,10 +26,9 @@ Ntype::_init::_init() {
 
       assert(pid == Ntype::get_sink_pid(static_cast<Ntype_op>(op), pin_name));
       assert(pin_name == Ntype::get_sink_name(static_cast<Ntype_op>(op), pid));
-
-      ++pid;
     }
 
+    int pid;
     // Check that common case is fine
 
     pid = sink_name2pid['a'][op];
@@ -51,7 +48,6 @@ Ntype::_init::_init() {
 
     pid = sink_name2pid['f'][op];
     assert(pid==-1 || pid == 5);
-
 
     pid = sink_name2pid['A'][op];
     assert(pid==-1 || pid == 0);
