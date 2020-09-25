@@ -26,6 +26,7 @@
 #include "mockturtle/networks/mig.hpp"
 #include "mockturtle/views/mapping_view.hpp"
 #include "pass.hpp"
+#include "cell.hpp"
 
 #define LUTIFIED_NETWORK_NAME_SIGNATURE "_lutified"
 #define BIT_WIDTH_THRESHOLD             2
@@ -169,7 +170,7 @@ protected:
       // case GraphIO_Op:
       //  //fmt::print("Node: GraphIO_Op");
       //  break;
-      case Not_Op:
+      case Ntype_op::Not:
         // fmt::print("Node: Not_Op\n");
         break;
 #if 0
@@ -177,31 +178,25 @@ protected:
         //fmt::print("Node: And_Op\n");
         break;
 #endif
-      case And_Op:
+      case Ntype_op::And:
         // fmt::print("Node: And_Op\n");
         break;
-      case Or_Op:
+      case Ntype_op::Or:
         // fmt::print("Node: Or_Op\n");
         break;
-      case Xor_Op:
+      case Ntype_op::Xor:
         // fmt::print("Node: Xor_Op\n");
         break;
-      case Equals_Op:
+      case Ntype_op::EQ:
         // fmt::print("Node: Equals_Op\n");
         break;
-      case LessThan_Op:
+      case Ntype_op::LT:
         // fmt::print("Node: LessThan_Op\n");
         break;
-      case GreaterThan_Op:
+      case Ntype_op::GT:
         // fmt::print("Node: GreaterThan_Op\n");
         break;
-      case LessEqualThan_Op:
-        // fmt::print("Node: LessEqualThan_Op\n");
-        break;
-      case GreaterEqualThan_Op:
-        // fmt::print("Node: GreaterEqualThan_Op\n");
-        break;
-      case ShiftLeft_Op:
+      case Ntype_op::SHL:
         // fmt::print("Node: ShiftLeft_Op\n");
         // check if Node_Pin "B" is a constant or of small bit_width
         for (const auto &in_edge : cell.inp_edges()) {
@@ -209,15 +204,7 @@ protected:
             return false;
         }
         break;
-      case LogicShiftRight_Op: {
-        // fmt::print("Node: LogicShiftRight_Op\n");
-        for (const auto &in_edge : cell.inp_edges()) {
-          if (in_edge.sink.get_pid() == 1 && in_edge.get_bits() > BIT_WIDTH_THRESHOLD)
-            return false;
-        }
-        break;
-      }
-      case ArithShiftRight_Op: {
+      case Ntype_op::SRA: {
         // fmt::print("Node: ArithShiftRight_Op\n");
         for (const auto &in_edge : cell.inp_edges()) {
           if (in_edge.sink.get_pid() == 1 && in_edge.get_bits() > BIT_WIDTH_THRESHOLD)
@@ -225,27 +212,6 @@ protected:
         }
         break;
       }
-      case DynamicShiftRight_Op: {
-        // fmt::print("Node: DynamicShiftRight_Op\n");
-        for (const auto &in_edge : cell.inp_edges()) {
-          if (in_edge.sink.get_pid() == 1 && in_edge.get_bits() > BIT_WIDTH_THRESHOLD - 1)
-            return false;
-        }
-        break;
-      }
-      case DynamicShiftLeft_Op: {
-        // fmt::print("Node: DynamicShiftLeft_Op\n");
-        for (const auto &in_edge : cell.inp_edges()) {
-          if (in_edge.sink.get_pid() == 1 && in_edge.get_bits() > BIT_WIDTH_THRESHOLD - 1)
-            return false;
-        }
-        break;
-      }
-        /*
-              case ShiftRight_Op:
-                //fmt::print("Node: ShiftRight_Op\n");
-                break;
-        */
       default:
         // fmt::print("Node: Unknown\n");
         return false;
