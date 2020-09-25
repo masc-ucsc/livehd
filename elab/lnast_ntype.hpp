@@ -558,8 +558,8 @@ public:
 
   // Super types
   bool constexpr is_logical_op()   const { return (val == Lnast_ntype_logical_and) ||
-                                        (val == Lnast_ntype_logical_or) ||
-                                        (val == Lnast_ntype_logical_not); }
+                                                  (val == Lnast_ntype_logical_or)  ||
+                                                  (val == Lnast_ntype_logical_not); }
 
   bool constexpr is_unary_op()     const { return (val == Lnast_ntype_not); }
 

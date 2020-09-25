@@ -254,8 +254,8 @@ void Lnast_tolg::process_ast_logical_op(LGraph *dfg, const Lnast_nid &lnidx_opr)
     auto ori_opd = setup_ref_node_dpin(dfg, opr_child);
     auto zero_dpin = dfg->create_node_const(Lconst(0, 1)).setup_driver_pin();
 
-    dfg->add_edge(ori_opd, node_eq.setup_sink_pin());
-    dfg->add_edge(zero_dpin, node_eq.setup_sink_pin());
+    dfg->add_edge(ori_opd, node_eq.setup_sink_pin("A"));
+    dfg->add_edge(zero_dpin, node_eq.setup_sink_pin("A"));
 
     eqs_dpins.emplace_back(node_eq.setup_driver_pin());
   }
@@ -1396,7 +1396,7 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(LGraph *dfg) {
   /* absl::flat_hash_set<Node> inp_artifacts; */
   for (auto node: dfg->forward()) {
     /* auto dpin = node.get_driver_pin(0); */
-    auto dpin = node.get_driver_pin();
+    auto dpin = node.get_driver_pin("Y");
     auto ntype = node.get_type_op();
 
     // connect hier-tuple-inputs and scalar input from unified input $

@@ -32,7 +32,7 @@ enum class Ntype_op : uint8_t {
   Mux,    // Multiplexor with many options
   LUT,    // LUT
 
-  IO,  // Graph Input or Output
+  IO,     // Graph Input or Output
 
   //------------------BEGIN PIPELINED (break LOOPS)
   Memory,
