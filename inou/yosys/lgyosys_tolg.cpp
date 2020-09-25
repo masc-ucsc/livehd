@@ -779,7 +779,7 @@ static void connect_comparator(Ntype_op op, Node &exit_node, const RTLIL::Cell *
     a_tposs.connect_sink(a_dpin);
     exit_node.setup_sink_pin("A").connect_driver(a_tposs);
   }
-  std::string b = "B";
+  std::string_view b("B");
   if (op == Ntype_op::EQ)
     b="A";
 
