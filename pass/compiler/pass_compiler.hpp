@@ -6,8 +6,8 @@
 #include "lcompiler.hpp"
 #include "pass.hpp"
 #include "pass_lnast_tolg.hpp"
-#include "pass_cprop.hpp"
-#include "pass_bitwidth.hpp"
+/* #include "pass_cprop.hpp" */
+/* #include "pass_bitwidth.hpp" */
 
 class Pass_compiler : public Pass {
 protected:

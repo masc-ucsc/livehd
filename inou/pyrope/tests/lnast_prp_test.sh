@@ -2,8 +2,8 @@
 rm -rf ./lgdb
 
 pts_to_do='lhs_wire3 tuple funcall_unnamed2'
-pts='hier_tuple_io logic
-     hier_tuple reg_bits_set tuple_copy
+pts='hier_tuple hier_tuple_io logic
+     reg_bits_set tuple_copy
      hier_tuple2 hier_tuple3
      lhs_wire lhs_wire2 scalar_tuple attr_set
      firrtl_tail firrtl_tail2

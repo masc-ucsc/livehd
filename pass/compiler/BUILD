@@ -6,10 +6,9 @@ cc_library(
     visibility = ["//visibility:public"],
     includes = ["."],
     deps = [
-        "//pass/bitwidth:pass_bitwidth",
-        "//pass/cprop:pass_cprop",
+        # "//pass/bitwidth:pass_bitwidth",
+        # "//pass/cprop:pass_cprop",
         "//pass/lnast_tolg:pass_lnast_tolg",
-        "//pass/lnast_fromlg:pass_lnast_fromlg",
         "//pass/common:pass",
         "//inou/graphviz:inou_graphviz",
     ],
