@@ -4,8 +4,8 @@
 #include "lcompiler.hpp"
 #include "inou_graphviz.hpp"
 #include "lnast_tolg.hpp"
-#include "cprop.hpp"
-#include "bitwidth.hpp"
+/* #include "cprop.hpp" */
+/* #include "bitwidth.hpp" */
 
 Lcompiler::Lcompiler(std::string_view _path, std::string_view _odir, bool _gviz) 
   : path(_path), odir(_odir), gviz(_gviz) {}
@@ -39,10 +39,12 @@ void Lcompiler::add_thread(std::shared_ptr<Lnast> ln) {
 
   for (const auto &lg : local_lgs) {
     /* retry: */
-    Cprop cp(false); //hier = false
-    Bitwidth bw(false, 10); // hier = false, max_iters = 10
-    cp.do_trans(lg);
-    bw.do_trans(lg);
+    /* Cprop cp(false); //hier = false */
+    /* Bitwidth bw(false, 10); // hier = false, max_iters = 10 */
+    /* cp.do_trans(lg); */
+    /* bw.do_trans(lg); */
+
+
     // FIXEME:sh -> todo 
     /* if (cprop.tup_get_left || bw.not_finished) { */
     /*   if (cprop.made_progress || bw.made_progress) */
