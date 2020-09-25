@@ -19,7 +19,7 @@ Ntype::_init::_init() {
       if (pin_name.empty() || pin_name == "invalid")
         continue;
 
-      assert(sink_name2pid[pin_name[0]][op] == -1); // No double assign
+      assert(sink_name2pid[pin_name[0]][op] == -1 || sink_name2pid[pin_name[0]][op] == pid); // No double assign
 
       sink_pid2name[pid][op] = pin_name;
       sink_name2pid[pin_name[0]][op] = pid;
@@ -172,7 +172,7 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
       switch(pid) {
         case 0: return "tuple_name";  // tuple name
         case 2: return "position";    // position of tuple field
-        case 3: return "value";        
+        case 3: return "value";
                                       // no 4 to keep f 5
         case 5: return "field";       // tuple field
         default: return "invalid";
@@ -195,9 +195,9 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
         break;
     case Ntype_op::AttrSet:
       switch(pid) {
-        case 0: return "var_name";  
+        case 0: return "name";
         case 2: return "chain";
-        case 3: return "value"; 
+        case 3: return "value";
         case 5: return "field";
         default: return "invalid";
       }
