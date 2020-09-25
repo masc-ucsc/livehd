@@ -28,7 +28,7 @@ cc_binary(
 #Renau            "//pass/cprop:pass_cprop",
             "//pass/fplan:fplan",
 #Renau       "//pass/lec:pass_lec",
-#Sakshi            "//pass/lnast_fromlg:pass_lnast_fromlg",
+            "//pass/lnast_fromlg:pass_lnast_fromlg",
             "//pass/lnast_tolg:pass_lnast_tolg",
             "//pass/lnastfmt:pass_lnastfmt",
             "//pass/mockturtle:pass_mockturtle",

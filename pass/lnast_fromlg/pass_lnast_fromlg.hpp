@@ -5,6 +5,7 @@
 #include "lgraph.hpp"
 #include "lnast.hpp"
 #include "pass.hpp"
+#include "cell.hpp"
 
 class Pass_lnast_fromlg : public Pass {
 protected:
