@@ -1058,8 +1058,8 @@ void Lnast_tolg::process_ast_attr_set_op (LGraph *dfg, const Lnast_nid &lnidx_as
 
   auto aset_node = dfg->create_node(Ntype_op::AttrSet);
   auto vn_spin   = aset_node.setup_sink_pin("var_name"); // variable name
-  auto af_spin   = aset_node.setup_sink_pin("field");    // attribute field
   auto av_spin   = aset_node.setup_sink_pin("value");    // attribute value
+  auto af_spin   = aset_node.setup_sink_pin("field");    // attribute field
 
   auto aset_ancestor_subs  = lnast->get_data(c0_aset).subs - 1;
   auto aset_ancestor_name = std::string(vname) + "_" + std::to_string(aset_ancestor_subs);

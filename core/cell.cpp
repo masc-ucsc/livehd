@@ -49,6 +49,10 @@ Ntype::_init::_init() {
     pid = sink_name2pid['e'][op];
     assert(pid==-1 || pid == 4);
 
+    pid = sink_name2pid['f'][op];
+    assert(pid==-1 || pid == 5);
+
+
     pid = sink_name2pid['A'][op];
     assert(pid==-1 || pid == 0);
 

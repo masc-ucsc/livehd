@@ -15,7 +15,7 @@ pts='hier_tuple_io logic
   # FIXME: firrtl_tail3 firrtl_gcd counter_tup counter2
 
 # make sure to call Pyrope_compile() in the end of script
-# pts=''
+pts='logic'
 pts_hier='sum funcall'
 pts_hier2='sum2 funcall2'
 
