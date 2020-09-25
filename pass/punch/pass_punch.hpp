@@ -5,6 +5,7 @@
 
 #include "pass.hpp"
 #include "hierarchy.hpp"
+#include "node_pin.hpp"
 
 class Pass_punch : public Pass {
 protected:

@@ -6,6 +6,7 @@
 #include <array>
 #include <string_view>
 
+
 enum class Ntype_op : uint8_t {
   Invalid, // Detect bugs/unset (not used anywhere)
   Sum,

@@ -2,7 +2,8 @@
 #include "pass_lnast_tolg.hpp"
 
 
-void setup_pass_lnast_tolg() { Pass_lnast_tolg::setup(); }
+/* void setup_pass_lnast_tolg() { Pass_lnast_tolg::setup(); } */
+static Pass_plugin sample("pass.lnast_tolg", Pass_lnast_tolg::setup);
 
 void Pass_lnast_tolg::setup() {
 
