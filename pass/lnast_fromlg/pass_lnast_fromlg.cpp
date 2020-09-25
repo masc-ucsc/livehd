@@ -71,22 +71,22 @@ void Pass_lnast_fromlg::initial_tree_coloring(LGraph* lg, Lnast &lnast) {
       auto dpin_editable = dpin;
       auto ntype         = dpin.get_node().get_type_op();
 
-      if (!dpin_editable.has_name() && !((ntype == GraphIO_Op) || (ntype == Const_Op))) {
-        if (ntype == Mux_Op) {
+      if (!dpin_editable.has_name() && !((ntype == Ntype_op::IO) || (ntype == Ntype_op::Const))) {
+        if (ntype == Ntype_op::Mux) {
           // WARNING: Need to use _._ because it allows SSA (needed for if)
           auto temp_var_name = lnast.add_string(absl::StrCat("_._L", temp_var_count++));
           dpin_set_map_name(dpin_editable, temp_var_name);
         } else {
           dpin_set_map_name(dpin_editable, create_temp_var(lnast));
         }
-        if ((ntype == SFlop_Op) || (ntype == AFlop_Op) || (ntype == FFlop_Op) || (ntype == Latch_Op)) {
+        if ((ntype == Ntype_op::Sflop) || (ntype == Ntype_op::Aflop) || (ntype == Ntype_op::Fflop) || (ntype == Ntype_op::Latch)) {
           dpin_set_map_name(dpin_editable, lnast.add_string(absl::StrCat("#", dpin_get_name(dpin_editable))));
         }
       } else if (dpin_editable.has_name() && (dpin_editable.get_name()[0] == '#')) {
-        if(!((ntype == SFlop_Op) || (ntype == AFlop_Op) || (ntype == FFlop_Op) || (ntype == Latch_Op))) {
+        if(!((ntype == Ntype_op::Sflop) || (ntype == Ntype_op::Aflop) || (ntype == Ntype_op::Fflop) || (ntype == Ntype_op::Latch))) {
           dpin_set_map_name(dpin_editable, lnast.add_string(dpin_get_name(dpin_editable).substr(1)));
         }
-      } else  if ((ntype == SFlop_Op) || (ntype == AFlop_Op) || (ntype == FFlop_Op) || (ntype == Latch_Op)) {
+      } else  if ((ntype == Ntype_op::Sflop) || (ntype == Ntype_op::Aflop) || (ntype == Ntype_op::Fflop) || (ntype == Ntype_op::Latch)) {
         if (dpin_editable.get_name()[0] != '#') {
 					dpin_set_map_name(dpin_editable, lnast.add_string(absl::StrCat("#", dpin_get_name(dpin_editable))));
         }
@@ -140,7 +140,7 @@ void Pass_lnast_fromlg::handle_source_node(LGraph* lg, Node_pin& pin, Lnast& lna
       auto editable_pin = inp.driver;
       if (editable_pin.get_node().get_color() == GREY || editable_pin.get_node().get_color() == WHITE) {
         auto ntype = editable_pin.get_node().get_type_op();
-        if (ntype == AFlop_Op || ntype == SFlop_Op || ntype == FFlop_Op || ntype == Latch_Op) {
+        if (ntype == Ntype_op::Aflop || ntype == Ntype_op::Sflop || ntype == Ntype_op::Fflop || ntype == Ntype_op::Latch) {
           continue;
         }
         handle_source_node(lg, editable_pin, lnast, ln_node);
@@ -180,12 +180,12 @@ void Pass_lnast_fromlg::handle_source_node(LGraph* lg, Node_pin& pin, Lnast& lna
   Invalid_Op,
   LUT_Op,
   DontCare_Op,
-  Memory_Op,
+  Ntype_op::Memory,
 */
 void Pass_lnast_fromlg::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
   // Specify bitwidth in LNAST table (for code gen purposes)
   auto ntype = pin.get_node().get_type_op();
-  if (ntype == GraphIO_Op || ntype == Const_Op) {
+  if (ntype == Ntype_op::IO || ntype == Ntype_op::Const) {
     // Nothing to do, and don't specify bitwidth.
     return;
   }
@@ -194,7 +194,7 @@ void Pass_lnast_fromlg::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node, co
   auto bw = pin.get_bits();
   //if ((bw > 0) & (pin.get_name().substr(0,3) != "___")) {
   if ((bw > 0) & (dpin_get_name(pin).substr(0,3) != "___")) {
-    if (ntype == SFlop_Op || ntype == AFlop_Op || ntype == Latch_Op) {
+    if (ntype == Ntype_op::Sflop || ntype == Ntype_op::Aflop || ntype == Ntype_op::Latch) {
     /* NOTE->hunter: I decided to only specify reg and IO bw (not
      * wires). If more is needed just widen below condition. */
       name = dpin_get_name(pin);
@@ -207,33 +207,25 @@ void Pass_lnast_fromlg::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node, co
 
   // Look at pin's node's type, then based off that figure out what type of node to add to LNAST.
   switch (ntype) {
-    case And_Op:
-    case Or_Op:
-    case Xor_Op: attach_binaryop_node(lnast, parent_node, pin); break;
-    case Not_Op: attach_not_node(lnast, parent_node, pin); break;
-    case Sum_Op: attach_sum_node(lnast, parent_node, pin); break;
-    case LessThan_Op:
-    case GreaterThan_Op:
-    case LessEqualThan_Op:
-    case GreaterEqualThan_Op: attach_compar_node(lnast, parent_node, pin); break;
-    case Equals_Op:
-    case Mult_Op:
-    case Div_Op:
+    case Ntype_op::And:
+    case Ntype_op::Or:
+    case Ntype_op::Xor: attach_binaryop_node(lnast, parent_node, pin); break;
+    case Ntype_op::Not: attach_not_node(lnast, parent_node, pin); break;
+    case Ntype_op::Sum: attach_sum_node(lnast, parent_node, pin); break;
+    case Ntype_op::LT:
+    case Ntype_op::GT: attach_compar_node(lnast, parent_node, pin); break;
+    case Ntype_op::EQ:
+    case Ntype_op::Mult:
+    case Ntype_op::Div:
     //case Mod_Op:
-    case LogicShiftRight_Op:
-    case ArithShiftRight_Op:
-    case DynamicShiftRight_Op:
-    case DynamicShiftLeft_Op:
-    case ShiftRight_Op:
-    case ShiftLeft_Op: attach_simple_node(lnast, parent_node, pin); break;
-    case Join_Op: attach_join_node(lnast, parent_node, pin); break;
-    case Pick_Op: attach_pick_node(lnast, parent_node, pin); break;
-    case Mux_Op: attach_mux_node(lnast, parent_node, pin); break;
-    case SFlop_Op:
-    case AFlop_Op: attach_flop_node(lnast, parent_node, pin); break;
-    case Latch_Op: attach_latch_node(lnast, parent_node, pin); break;
-    case SubGraph_Op: attach_subgraph_node(lnast, parent_node, pin); break;
-    case Memory_Op: attach_memory_node(lnast, parent_node, pin); break;
+    case Ntype_op::SRA:
+    case Ntype_op::SHL: attach_simple_node(lnast, parent_node, pin); break;
+    case Ntype_op::Mux: attach_mux_node(lnast, parent_node, pin); break;
+    case Ntype_op::Sflop:
+    case Ntype_op::Aflop: attach_flop_node(lnast, parent_node, pin); break;
+    case Ntype_op::Latch: attach_latch_node(lnast, parent_node, pin); break;
+    case Ntype_op::Sub: attach_subgraph_node(lnast, parent_node, pin); break;
+    case Ntype_op::Memory: attach_memory_node(lnast, parent_node, pin); break;
     default: Pass::error("Found node {} with op not yet supported in attach_to_lnast", pin.get_node().debug_name());
   }
 }
@@ -387,9 +379,9 @@ void Pass_lnast_fromlg::attach_binaryop_node(Lnast& lnast, Lnast_nid& parent_nod
   if (pid0_used) { // Y
     Lnast_nid bop_node;
     switch (pid0_pin.get_node().get_type_op()) {
-      case And_Op: bop_node = lnast.add_child(parent_node, Lnast_node::create_and("and")); break; //fmt::print("\t{}\n", pid0_pin.get_node().debug_name()); break;
-      case Or_Op: bop_node = lnast.add_child(parent_node, Lnast_node::create_or("or")); break;
-      case Xor_Op: bop_node = lnast.add_child(parent_node, Lnast_node::create_xor("xor")); break;
+      case Ntype_op::And: bop_node = lnast.add_child(parent_node, Lnast_node::create_and("and")); break; //fmt::print("\t{}\n", pid0_pin.get_node().debug_name()); break;
+      case Ntype_op::Or: bop_node = lnast.add_child(parent_node, Lnast_node::create_or("or")); break;
+      case Ntype_op::Xor: bop_node = lnast.add_child(parent_node, Lnast_node::create_xor("xor")); break;
       default: Pass::error("attach_binaryop_node doesn't support given node type");
     }
     lnast.add_child(bop_node, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pid0_pin))));
@@ -446,7 +438,7 @@ void Pass_lnast_fromlg::attach_binary_reduc(Lnast& lnast, Lnast_nid& parent_node
   }
 
   auto ntype = pid1_pin.get_node().get_type_op();
-  if (ntype == And_Op) {
+  if (ntype == Ntype_op::And) {
     // AndReduc is same as ConcatVal == 2^(bw(ConcatVal)) - 1
     std::string rhs_2pow = "0b";
     for (uint32_t i = 0; i < total_bits; i++) {
@@ -462,7 +454,7 @@ void Pass_lnast_fromlg::attach_binary_reduc(Lnast& lnast, Lnast_nid& parent_node
     }
     lnast.add_child(eq_idx, Lnast_node::create_const(lnast.add_string(rhs_2pow)));
 
-  } else if (ntype == Or_Op) {
+  } else if (ntype == Ntype_op::Or) {
     // OrReduc is same as ConcatVal != 0
     auto temp_eq_name = create_temp_var(lnast);
     auto eq_idx = lnast.add_child(parent_node, Lnast_node::create_same("yred_same"));
@@ -478,7 +470,7 @@ void Pass_lnast_fromlg::attach_binary_reduc(Lnast& lnast, Lnast_nid& parent_node
     lnast.add_child(not_idx, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pid1_pin))));
     lnast.add_child(not_idx, Lnast_node::create_ref(temp_eq_name));
 
-  } else if (ntype == Xor_Op) {
+  } else if (ntype == Ntype_op::Xor) {
     auto par_idx = lnast.add_child(parent_node, Lnast_node::create_parity("yred_par"));
     lnast.add_child(par_idx, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pid1_pin))));
     if (only_one_pin) {
@@ -498,110 +490,110 @@ void Pass_lnast_fromlg::attach_not_node(Lnast& lnast, Lnast_nid& parent_node, co
   attach_children_to_node(lnast, not_node, pin);
 }
 
-void Pass_lnast_fromlg::attach_join_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
-  std::stack<Node_pin> dpins;
-  auto                 bits_to_shift = 0;
-  /* This stack method works because the inp_edges iterator goes from edges w/ lowest sink pid to highest
-   * and the highest sink pid correlates to the most significant part of the concatenation. */
-  for (const auto inp : pin.get_node().inp_edges_ordered()) {
-    dpins.push(inp.driver);
-    bits_to_shift += inp.driver.get_bits();
-  }
+//void Pass_lnast_fromlg::attach_join_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
+//  std::stack<Node_pin> dpins;
+//  auto                 bits_to_shift = 0;
+//  /* This stack method works because the inp_edges iterator goes from edges w/ lowest sink pid to highest
+//   * and the highest sink pid correlates to the most significant part of the concatenation. */
+//  for (const auto inp : pin.get_node().inp_edges_ordered()) {
+//    dpins.push(inp.driver);
+//    bits_to_shift += inp.driver.get_bits();
+//  }
+//
+//  I(dpins.size() != 0);
+//  if (dpins.size() < 2) {
+//    // If this join node only has 1 input, it's really just an assign.
+//    auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
+//    lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));
+//    attach_child(lnast, idx_asg, dpins.top());
+//    return;
+//  }
+//
+//  absl::flat_hash_set<std::string_view> interm_names;
+//  while (dpins.size() > 1) {
+//    bits_to_shift -= dpins.top().get_bits();
+//    auto interm_name = create_temp_var(lnast);
+//    interm_names.insert(interm_name);
+//
+//    auto idx_sl = lnast.add_child(parent_node, Lnast_node::create_shift_left("join_sl"));
+//    lnast.add_child(idx_sl, Lnast_node::create_ref(interm_name));
+//    attach_child(lnast, idx_sl, dpins.top());
+//    lnast.add_child(idx_sl, Lnast_node::create_const(lnast.add_string(std::to_string(bits_to_shift))));
+//    dpins.pop();
+//  }
+//
+//  auto idx_or = lnast.add_child(parent_node, Lnast_node::create_or("join_or"));
+//  lnast.add_child(idx_or, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));
+//  for (auto& strv : interm_names) {
+//    lnast.add_child(idx_or, Lnast_node::create_ref(strv));
+//  }
+//  attach_child(lnast, idx_or, dpins.top());
+//}
 
-  I(dpins.size() != 0);
-  if (dpins.size() < 2) {
-    // If this join node only has 1 input, it's really just an assign.
-    auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
-    lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));
-    attach_child(lnast, idx_asg, dpins.top());
-    return;
-  }
-
-  absl::flat_hash_set<std::string_view> interm_names;
-  while (dpins.size() > 1) {
-    bits_to_shift -= dpins.top().get_bits();
-    auto interm_name = create_temp_var(lnast);
-    interm_names.insert(interm_name);
-
-    auto idx_sl = lnast.add_child(parent_node, Lnast_node::create_shift_left("join_sl"));
-    lnast.add_child(idx_sl, Lnast_node::create_ref(interm_name));
-    attach_child(lnast, idx_sl, dpins.top());
-    lnast.add_child(idx_sl, Lnast_node::create_const(lnast.add_string(std::to_string(bits_to_shift))));
-    dpins.pop();
-  }
-
-  auto idx_or = lnast.add_child(parent_node, Lnast_node::create_or("join_or"));
-  lnast.add_child(idx_or, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));
-  for (auto& strv : interm_names) {
-    lnast.add_child(idx_or, Lnast_node::create_ref(strv));
-  }
-  attach_child(lnast, idx_or, dpins.top());
-}
-
-void Pass_lnast_fromlg::attach_pick_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
-  // PID: 0 = A, 1 = Offset... Y = A[Offset+(Y_Bitwidth) : Offset]
-  /* Y = pick(X, off) in LGraph form turns into Lnast form as:
-   * IMPROVED/FUTURE TRANS:   |||  WORKING TRANS:
-   *  range_op   bit_select   |||     shr        and
-   *   / | \       / | \      |||    / | \      / | \
-   * T0  lo hi    Y  X  T0    |||  T0  X off   Y T0 xyz
-   *                          |||
-   * where lo = offset,       |||  where xyz = 0b111...1 where
-   * hi = offset + y.bits()-1 |||  the # of 1s = y.bits() */
-
-  Node_pin offset_pin, var_pin;
-  for (const auto inp : pin.get_node().inp_edges()) {
-    if (inp.sink.get_pid() == 0) {
-      var_pin = inp.driver;
-    } else if (inp.sink.get_pid() == 1) {
-      offset_pin = inp.driver;
-    } else {
-      I(false);  // No other sink pin id should be used.
-    }
-  }
-
-/* FIXME: Currently range and bit_select nodes are not supported
- * on the LN->LG interface. So for now, we can mimic their
- * functionality by using a shift right and AND node. Once range
- * and bit_select work on that interface, go back to that translation. */
-#if 1
-  std::string bit_str = "0b";
-  for (uint32_t i = 0; i < pin.get_bits(); i++) {
-    bit_str = absl::StrCat(bit_str, "1");
-  }
-  bit_str = absl::StrCat(bit_str, "u");
-
-  auto pin_str = lnast.add_string(dpin_get_name(pin));
-  auto t0_str  = create_temp_var(lnast);
-
-  auto shr_idx = lnast.add_child(parent_node, Lnast_node::create_shift_right(""));
-  lnast.add_child(shr_idx, Lnast_node::create_ref(t0_str));
-  attach_child(lnast, shr_idx, var_pin);
-  attach_child(lnast, shr_idx, offset_pin);
-
-  auto and_idx = lnast.add_child(parent_node, Lnast_node::create_and(""));
-  lnast.add_child(and_idx, Lnast_node::create_ref(pin_str));
-  lnast.add_child(and_idx, Lnast_node::create_ref(t0_str));
-  lnast.add_child(and_idx, Lnast_node::create_const(lnast.add_string(bit_str)));
-#endif
-#if 0
-  auto pin_str = dpin_get_name(pin);
-  auto t0_str  = create_temp_var(lnast);
-  auto lo_str  = lnast.add_string(offset_pin.get_node().get_type_const().to_pyrope());
-  auto hi_val  = offset_pin.get_node().get_type_const() + Lconst(pin.get_bits() - 1);
-  auto hi_str  = lnast.add_string(hi_val.to_pyrope());
-
-  auto range_node = lnast.add_child(parent_node, Lnast_node::create_range("range_pick"));
-  lnast.add_child(range_node, Lnast_node::create_ref(t0_str));
-  lnast.add_child(range_node, Lnast_node::create_const(lo_str));
-  lnast.add_child(range_node, Lnast_node::create_const(hi_str));
-
-  auto bitsel_node = lnast.add_child(parent_node, Lnast_node::create_bit_select("bitsel_pick"));
-  lnast.add_child(bitsel_node, Lnast_node::create_ref(pin_str));
-  attach_child(lnast, bitsel_node, var_pin);
-  lnast.add_child(bitsel_node, Lnast_node::create_ref(t0_str));
-#endif
-}
+//void Pass_lnast_fromlg::attach_pick_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
+//  // PID: 0 = A, 1 = Offset... Y = A[Offset+(Y_Bitwidth) : Offset]
+//  /* Y = pick(X, off) in LGraph form turns into Lnast form as:
+//   * IMPROVED/FUTURE TRANS:   |||  WORKING TRANS:
+//   *  range_op   bit_select   |||     shr        and
+//   *   / | \       / | \      |||    / | \      / | \
+//   * T0  lo hi    Y  X  T0    |||  T0  X off   Y T0 xyz
+//   *                          |||
+//   * where lo = offset,       |||  where xyz = 0b111...1 where
+//   * hi = offset + y.bits()-1 |||  the # of 1s = y.bits() */
+//
+//  Node_pin offset_pin, var_pin;
+//  for (const auto inp : pin.get_node().inp_edges()) {
+//    if (inp.sink.get_pid() == 0) {
+//      var_pin = inp.driver;
+//    } else if (inp.sink.get_pid() == 1) {
+//      offset_pin = inp.driver;
+//    } else {
+//      I(false);  // No other sink pin id should be used.
+//    }
+//  }
+//
+///* FIXME: Currently range and bit_select nodes are not supported
+// * on the LN->LG interface. So for now, we can mimic their
+// * functionality by using a shift right and AND node. Once range
+// * and bit_select work on that interface, go back to that translation. */
+//#if 1
+//  std::string bit_str = "0b";
+//  for (uint32_t i = 0; i < pin.get_bits(); i++) {
+//    bit_str = absl::StrCat(bit_str, "1");
+//  }
+//  bit_str = absl::StrCat(bit_str, "u");
+//
+//  auto pin_str = lnast.add_string(dpin_get_name(pin));
+//  auto t0_str  = create_temp_var(lnast);
+//
+//  auto shr_idx = lnast.add_child(parent_node, Lnast_node::create_shift_right(""));
+//  lnast.add_child(shr_idx, Lnast_node::create_ref(t0_str));
+//  attach_child(lnast, shr_idx, var_pin);
+//  attach_child(lnast, shr_idx, offset_pin);
+//
+//  auto and_idx = lnast.add_child(parent_node, Lnast_node::create_and(""));
+//  lnast.add_child(and_idx, Lnast_node::create_ref(pin_str));
+//  lnast.add_child(and_idx, Lnast_node::create_ref(t0_str));
+//  lnast.add_child(and_idx, Lnast_node::create_const(lnast.add_string(bit_str)));
+//#endif
+//#if 0
+//  auto pin_str = dpin_get_name(pin);
+//  auto t0_str  = create_temp_var(lnast);
+//  auto lo_str  = lnast.add_string(offset_pin.get_node().get_type_const().to_pyrope());
+//  auto hi_val  = offset_pin.get_node().get_type_const() + Lconst(pin.get_bits() - 1);
+//  auto hi_str  = lnast.add_string(hi_val.to_pyrope());
+//
+//  auto range_node = lnast.add_child(parent_node, Lnast_node::create_range("range_pick"));
+//  lnast.add_child(range_node, Lnast_node::create_ref(t0_str));
+//  lnast.add_child(range_node, Lnast_node::create_const(lo_str));
+//  lnast.add_child(range_node, Lnast_node::create_const(hi_str));
+//
+//  auto bitsel_node = lnast.add_child(parent_node, Lnast_node::create_bit_select("bitsel_pick"));
+//  lnast.add_child(bitsel_node, Lnast_node::create_ref(pin_str));
+//  attach_child(lnast, bitsel_node, var_pin);
+//  lnast.add_child(bitsel_node, Lnast_node::create_ref(t0_str));
+//#endif
+//}
 
 void Pass_lnast_fromlg::attach_compar_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
   // Y = (As|Au) [comparator] (Bs|Bu)... Note: the | means one or the other, can't have both.
@@ -623,10 +615,10 @@ void Pass_lnast_fromlg::attach_compar_node(Lnast& lnast, Lnast_nid& parent_node,
     // If only 1 comparison needs to be done, we don't need to do any extra & at the end.
     Lnast_nid comp_node;
     switch (pin.get_node().get_type_op()) {
-      case LessThan_Op: comp_node = lnast.add_child(parent_node, Lnast_node::create_lt("lt")); break;
-      case LessEqualThan_Op: comp_node = lnast.add_child(parent_node, Lnast_node::create_le("lte")); break;
-      case GreaterThan_Op: comp_node = lnast.add_child(parent_node, Lnast_node::create_gt("gt")); break;
-      case GreaterEqualThan_Op: comp_node = lnast.add_child(parent_node, Lnast_node::create_ge("gte")); break;
+      case Ntype_op::LT: comp_node = lnast.add_child(parent_node, Lnast_node::create_lt("lt")); break;
+      //case LessEqualThan_Op: comp_node = lnast.add_child(parent_node, Lnast_node::create_le("lte")); break;
+      case Ntype_op::GT: comp_node = lnast.add_child(parent_node, Lnast_node::create_gt("gt")); break;
+      //case GreaterEqualThan_Op: comp_node = lnast.add_child(parent_node, Lnast_node::create_ge("gte")); break;
       default: Pass::error("Error: invalid node type in attach_compar_node");
     }
     lnast.add_child(comp_node, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));
@@ -641,10 +633,10 @@ void Pass_lnast_fromlg::attach_compar_node(Lnast& lnast, Lnast_nid& parent_node,
       for (const auto bpin : b_pins) {
         Lnast_nid comp_node;
         switch (pin.get_node().get_type_op()) {
-          case LessThan_Op: comp_node = lnast.add_child(parent_node, Lnast_node::create_lt("lt_i")); break;
-          case LessEqualThan_Op: comp_node = lnast.add_child(parent_node, Lnast_node::create_le("lte_i")); break;
-          case GreaterThan_Op: comp_node = lnast.add_child(parent_node, Lnast_node::create_gt("gt_i")); break;
-          case GreaterEqualThan_Op: comp_node = lnast.add_child(parent_node, Lnast_node::create_ge("gte_i")); break;
+          case Ntype_op::LT: comp_node = lnast.add_child(parent_node, Lnast_node::create_lt("lt_i")); break;
+          //case LessEqualThan_Op: comp_node = lnast.add_child(parent_node, Lnast_node::create_le("lte_i")); break;
+          case Ntype_op::GT: comp_node = lnast.add_child(parent_node, Lnast_node::create_gt("gt_i")); break;
+          //case GreaterEqualThan_Op: comp_node = lnast.add_child(parent_node, Lnast_node::create_ge("gte_i")); break;
           default: Pass::error("Error: invalid node type in attach_compar_node");
         }
         auto temp_var_name = create_temp_var(lnast);
@@ -667,16 +659,16 @@ void Pass_lnast_fromlg::attach_compar_node(Lnast& lnast, Lnast_nid& parent_node,
 void Pass_lnast_fromlg::attach_simple_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
   Lnast_nid simple_node;
   switch (pin.get_node().get_type_op()) {
-    case Equals_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_same("==")); break;
-    case Mult_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_mult("mult")); break;
-    case Div_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_div("div")); break;
+    case Ntype_op::EQ: simple_node = lnast.add_child(parent_node, Lnast_node::create_same("==")); break;
+    case Ntype_op::Mult: simple_node = lnast.add_child(parent_node, Lnast_node::create_mult("mult")); break;
+    case Ntype_op::Div: simple_node = lnast.add_child(parent_node, Lnast_node::create_div("div")); break;
     //case Mod_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_mod("mod")); break;
-    case LogicShiftRight_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_logic_shift_right("l_shr")); break;
-    case ArithShiftRight_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_arith_shift_right("a_shr")); break;
-    case DynamicShiftRight_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_dynamic_shift_right("d_shr")); break;
-    case DynamicShiftLeft_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_dynamic_shift_left("d_shl")); break;
-    case ShiftRight_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_shift_right("shr")); break;
-    case ShiftLeft_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_shift_left("shl")); break;
+    //case LogicShiftRight_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_logic_shift_right("l_shr")); break;
+    case Ntype_op::SRA: simple_node = lnast.add_child(parent_node, Lnast_node::create_arith_shift_right("a_shr")); break;
+    //case DynamicShiftRight_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_dynamic_shift_right("d_shr")); break;
+    case DynamicNtype_op::SHL: simple_node = lnast.add_child(parent_node, Lnast_node::create_dynamic_shift_left("d_shl")); break;
+    //case ShiftRight_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_shift_right("shr")); break;
+    case Ntype_op::SHL: simple_node = lnast.add_child(parent_node, Lnast_node::create_shift_left("shl")); break;
     default: Pass::error("Error: attach_simple_node unknown node type provided");
   }
   lnast.add_child(simple_node, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));
@@ -753,32 +745,32 @@ void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, c
   bool     has_pola  = false;
   Node_pin clk_pin, din_pin, en_pin, reset_pin, set_v_pin, pola_pin;
   for (const auto inp : pin.get_node().inp_edges()) {
-    if (inp.sink.get_pid() == 0) {
+    if (inp.sink.get_pid() == 2) {
       I(!has_clk);
       has_clk = true;
       clk_pin = inp.driver;
 
-    } else if (inp.sink.get_pid() == 1) {
+    } else if (inp.sink.get_pid() == 3) {
       I(!has_din);
       has_din = true;
       din_pin = inp.driver;
 
-    } else if (inp.sink.get_pid() == 2) {
+    } else if (inp.sink.get_pid() == 4) {
       I(!has_en);
       has_en = true;
       en_pin = inp.driver;
 
-    } else if (inp.sink.get_pid() == 3) {
+    } else if (inp.sink.get_pid() == 0) {
       I(!has_reset);
       has_reset = true;
       reset_pin = inp.driver;
 
-    } else if (inp.sink.get_pid() == 4) {
+    } else if (inp.sink.get_pid() == 6) {
       I(!has_set_v);
       has_set_v = true;
       set_v_pin = inp.driver;
 
-    } else if (inp.sink.get_pid() == 5) {
+    } else if (inp.sink.get_pid() == 5) {//clock polarity
       I(!has_pola);
       has_pola = true;
       pola_pin = inp.driver;
@@ -808,7 +800,7 @@ void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, c
 #endif
 
   // Specify if async reset
-  if (pin.get_node().get_type_op() == AFlop_Op) {
+  if (pin.get_node().get_type_op() == Ntype_op::Aflop) {
     auto temp_var_name = create_temp_var(lnast);
 
     auto dot_asr_node = lnast.add_child(parent_node, Lnast_node::create_dot("dot_flop_async"));
@@ -839,7 +831,7 @@ void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, c
   }
 
   if (has_pola) {
-    I(pin.get_node().get_type_op() != AFlop_Op);
+    I(pin.get_node().get_type_op() != Ntype_op::Aflop);
     auto temp_var_name = create_temp_var(lnast);
     auto dot_pol       = lnast.add_child(parent_node, Lnast_node::create_dot("dot_flop_pol"));
     lnast.add_child(dot_pol, Lnast_node::create_ref(temp_var_name));
@@ -848,7 +840,7 @@ void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, c
 
     auto asg_pol = lnast.add_child(parent_node, Lnast_node::create_assign("asg_pol"));
     lnast.add_child(asg_pol, Lnast_node::create_ref(temp_var_name));
-    if (pola_pin.get_node().get_type_op() == Const_Op) {
+    if (pola_pin.get_node().get_type_op() == Ntype_op::Const) {
       if (pola_pin.get_node().get_type_const().to_firrtl() == "1") {
         lnast.add_child(asg_pol, Lnast_node::create_const("true"));
       } else {
@@ -1171,10 +1163,10 @@ void Pass_lnast_fromlg::attach_child(Lnast& lnast, Lnast_nid& op_node, const Nod
     }
     auto out_driver_name = lnast.add_string(name);
     lnast.add_child(op_node, Lnast_node::create_ref(out_driver_name));  // lnast.add_string(absl::StrCat(prefix, "%", dpin.get_name()))));
-  } else if ((dpin.get_node().get_type_op() == AFlop_Op) || (dpin.get_node().get_type_op() == SFlop_Op)) {
+  } else if ((dpin.get_node().get_type_op() == Ntype_op::Aflop) || (dpin.get_node().get_type_op() == Ntype_op::Sflop)) {
     // dpin_name is already persistent, no need to do add_string but cleaner
     lnast.add_child(op_node, Lnast_node::create_ref(lnast.add_string(dpin_get_name(dpin))));
-  } else if (dpin.get_node().get_type_op() == Const_Op) {
+  } else if (dpin.get_node().get_type_op() == Ntype_op::Const) {
     lnast.add_child(op_node, Lnast_node::create_const(lnast.add_string(dpin.get_node().get_type_const().to_pyrope())));
   } else {
     auto dpin_name = lnast.add_string(dpin_get_name(dpin));
@@ -1193,9 +1185,9 @@ void Pass_lnast_fromlg::attach_cond_child(Lnast& lnast, Lnast_nid& op_node, cons
   } else if (dpin.get_node().is_graph_output()) {
     auto dpin_name = lnast.add_string(dpin_get_name(dpin));
     lnast.add_child(op_node, Lnast_node::create_cond(lnast.add_string(absl::StrCat("%", dpin_name))));
-  } else if ((dpin.get_node().get_type_op() == AFlop_Op) || (dpin.get_node().get_type_op() == SFlop_Op)) {
+  } else if ((dpin.get_node().get_type_op() == Ntype_op::Aflop) || (dpin.get_node().get_type_op() == Ntype_op::Sflop)) {
     lnast.add_child(op_node, Lnast_node::create_cond(lnast.add_string(dpin.get_name())));
-  } else if (dpin.get_node().get_type_op() == Const_Op) {
+  } else if (dpin.get_node().get_type_op() == Ntype_op::Const) {
     lnast.add_child(op_node, Lnast_node::create_cond(lnast.add_string(dpin.get_node().get_type_const().to_pyrope())));
   } else {
     auto dpin_name = lnast.add_string(dpin_get_name(dpin));
