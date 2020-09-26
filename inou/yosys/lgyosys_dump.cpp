@@ -857,6 +857,12 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         for (const auto &e : node.inp_edges_ordered()) {
           if (e.sink.get_pid()==0) {
             sel = get_wire(e.sink.get_driver_pin());
+            if (sel->width>1) { // drop upper bits (Tposs)
+              RTLIL::Wire *new_wire  = module->addWire(next_id(g), 1);
+              module->addAnd(next_id(g), sel, RTLIL::Const(1), new_wire);
+              sel = new_wire;
+              assert(sel->width==1);
+            }
             continue;
           }
           auto *wire = get_wire(e.sink.get_driver_pin());
