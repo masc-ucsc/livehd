@@ -28,7 +28,6 @@ void Main_api::init() {
     it.second();
   }
 
-  //setup_inou_code_gen();
   //setup_inou_liveparse();
   setup_inou_pyrope();
   setup_inou_yosys();
