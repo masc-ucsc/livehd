@@ -134,6 +134,7 @@ do
       echo "FAIL: Generated verilog file tmp_yosys_mix/all_${base}.v is too small"
       ((fail++))
       fail_list+=" "$base
+      continue
     fi
   else
     ${LGCHECK} --implementation=tmp_yosys_mix/all_${base}.v --reference=${full_input} --top=${base}
@@ -143,6 +144,7 @@ do
       echo "FAIL: circuits are not equivalent (${full_input})"
       ((fail++))
       fail_list+=" "$base
+      continue
     fi
   fi
 
