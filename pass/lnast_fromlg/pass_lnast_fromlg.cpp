@@ -106,7 +106,7 @@ void Pass_lnast_fromlg::begin_transformation(LGraph* lg, Lnast& lnast, Lnast_nid
   auto out_node = lg->get_graph_output_node();
   out_node.set_color(BLACK);
   for (const auto& inp : out_node.inp_edges()) {
-    auto gpio_dpin = out_node.get_driver_pin(inp.sink.get_pid());
+    auto gpio_dpin = out_node.get_driver_pin_raw(inp.sink.get_pid());
     I(gpio_dpin.has_name());
 
     auto edge_dpin = inp.driver;
@@ -277,7 +277,7 @@ void Pass_lnast_fromlg::handle_io(LGraph* lg, Lnast_nid& parent_lnast_node, Lnas
   auto out_io_node = lg->get_graph_output_node();
   for (const auto edge : out_io_node.inp_edges()) {
     auto sink_pid = edge.sink.get_pid();
-    auto out_pin = edge.sink.get_node().get_driver_pin(sink_pid);
+    auto out_pin = edge.sink.get_node().get_driver_pin_raw(sink_pid);
     I(out_pin.has_name());
     auto pin_name = out_pin.get_name();
 
@@ -296,6 +296,7 @@ void Pass_lnast_fromlg::handle_io(LGraph* lg, Lnast_nid& parent_lnast_node, Lnas
 // -------- How to convert each LGraph node type to LNAST -------------
 void Pass_lnast_fromlg::attach_sum_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
   // PID: 0 = AS, 1 = AU, 2 = BS, 3 = BU, 4 = Y... Y = (AS+...+AS+AU+...+AU) - (BS+...+BS+BU+...+BU)
+  // new version: PID: 0=A, 1=B, else invalid ; we are dealing with signed only now. 
   bool is_add = false;
   bool is_subt = false;
   int  add_count = 0;
@@ -306,7 +307,7 @@ void Pass_lnast_fromlg::attach_sum_node(Lnast& lnast, Lnast_nid& parent_node, co
   auto pin_name = lnast.add_string(dpin_get_name(pin));
   for (const auto inp : pin.get_node().inp_edges()) {
     auto spin = inp.sink;
-    if ((spin.get_pid() == 0) || (spin.get_pid() == 1)) {
+    if (spin.get_pid() == 0) {
       add_count++;
       // is_add = true;
     } else {
@@ -345,7 +346,7 @@ void Pass_lnast_fromlg::attach_sum_node(Lnast& lnast, Lnast_nid& parent_node, co
     auto dpin = inp.driver;
     auto spin = inp.sink;
     // This if statement is used to figure out if the inp_edge is for plus or minus.
-    if ((spin.get_pid() == 0) || (spin.get_pid() == 1)) {
+    if (spin.get_pid() == 0) {
       attach_child(lnast, add_node, dpin);
     } else {
       attach_child(lnast, subt_node, dpin);
@@ -367,6 +368,7 @@ void Pass_lnast_fromlg::attach_binaryop_node(Lnast& lnast, Lnast_nid& parent_nod
       pid0_used = true;
       pid0_pin = dpin;
     } else {
+      I(false, "SAKSHI: CHECK: what is this for??");
       pid1_used = true;
       pid1_pin = dpin;
     }
@@ -603,7 +605,7 @@ void Pass_lnast_fromlg::attach_compar_node(Lnast& lnast, Lnast_nid& parent_node,
    * We know which is which based off the inp_edge's sink pin pid. */
   std::vector<Node_pin> a_pins, b_pins;
   for (const auto inp : pin.get_node().inp_edges()) {
-    if ((inp.sink.get_pid() == 0) || (inp.sink.get_pid() == 1)) {
+    if (inp.sink.get_pid() == 0) {
       a_pins.push_back(inp.driver);
     } else {
       b_pins.push_back(inp.driver);
@@ -666,7 +668,7 @@ void Pass_lnast_fromlg::attach_simple_node(Lnast& lnast, Lnast_nid& parent_node,
     //case LogicShiftRight_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_logic_shift_right("l_shr")); break;
     case Ntype_op::SRA: simple_node = lnast.add_child(parent_node, Lnast_node::create_arith_shift_right("a_shr")); break;
     //case DynamicShiftRight_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_dynamic_shift_right("d_shr")); break;
-    case DynamicNtype_op::SHL: simple_node = lnast.add_child(parent_node, Lnast_node::create_dynamic_shift_left("d_shl")); break;
+    //case Ntype_op::SHL: simple_node = lnast.add_child(parent_node, Lnast_node::create_dynamic_shift_left("d_shl")); break;
     //case ShiftRight_Op: simple_node = lnast.add_child(parent_node, Lnast_node::create_shift_right("shr")); break;
     case Ntype_op::SHL: simple_node = lnast.add_child(parent_node, Lnast_node::create_shift_left("shl")); break;
     default: Pass::error("Error: attach_simple_node unknown node type provided");
@@ -736,14 +738,16 @@ void Pass_lnast_fromlg::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node, co
 }
 
 void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
-  // PID: 0 = CLK, 1 = Din, 2 = En, 3 = Reset, 4 = Set Val, 5 = Clk Polarity (5 is not used for AFlop)
+  // PID: 0 = CLK, 1 = Din, 2 = En, 3 = Reset, 4 = Set Val, 5 = Clk Polarity (5 is not used for AFlop)//-->OLD
+  // new config: PID: 0=reset, 1=initial(reset value), 2=clock, 3=din, 4=enable, 5=posclk, 6=negreset 
   bool     has_clk   = false;
   bool     has_din   = false;
   bool     has_en    = false;
   bool     has_reset = false;
   bool     has_set_v = false;
   bool     has_pola  = false;
-  Node_pin clk_pin, din_pin, en_pin, reset_pin, set_v_pin, pola_pin;
+  bool     has_init  = false;
+  Node_pin clk_pin, din_pin, en_pin, reset_pin, set_v_pin, pola_pin, init_pin;
   for (const auto inp : pin.get_node().inp_edges()) {
     if (inp.sink.get_pid() == 2) {
       I(!has_clk);
@@ -775,6 +779,10 @@ void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, c
       has_pola = true;
       pola_pin = inp.driver;
 
+    } else if (inp.sink.get_pid() == 1) {//"initial" // reset value
+      I(!has_init);
+      has_init = true;
+      init_pin = inp.driver;
     } else {
       I(false); // There shouldn't be any other inputs to a flop.
     }
@@ -824,6 +832,19 @@ void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, c
     auto asg_rst_node = lnast.add_child(parent_node, Lnast_node::create_assign("asg_flop_rst"));
     lnast.add_child(asg_rst_node, Lnast_node::create_ref(temp_var_name));
     attach_child(lnast, asg_rst_node, reset_pin);
+  }
+
+  if (has_init) {
+    auto temp_var_name = create_temp_var(lnast);
+
+    auto dot_init_node = lnast.add_child(parent_node, Lnast_node::create_dot("dot_flop_init"));
+    lnast.add_child(dot_init_node, Lnast_node::create_ref(temp_var_name));
+    lnast.add_child(dot_init_node, Lnast_node::create_ref(pin_name));
+    lnast.add_child(dot_init_node, Lnast_node::create_ref("__reset"));
+
+    auto asg_init_node = lnast.add_child(parent_node, Lnast_node::create_assign("asg_flop_init"));
+    lnast.add_child(asg_init_node, Lnast_node::create_ref(temp_var_name));
+    attach_child(lnast, asg_init_node, init_pin);
   }
 
   if (has_set_v) {
@@ -882,19 +903,20 @@ void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, c
 
 void Pass_lnast_fromlg::attach_latch_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
   // PID: 0 = Din, 1 = En, 2 = ???
+  // new PID: 0=posclk, 3=din, 4=enable, default=invalid
   bool     has_din   = false;
   bool     has_en    = false;
   Node_pin din_pin, en_pin;
   for (const auto inp : pin.get_node().inp_edges()) {
-    if (inp.sink.get_pid() == 0) {
+    if (inp.sink.get_pid() == 3) {
       I(!has_din);
       has_din = true;
       din_pin = inp.driver;
-    } else if (inp.sink.get_pid() == 1) {
+    } else if (inp.sink.get_pid() == 4) {
       I(!has_en);
       has_en = true;
       en_pin = inp.driver;
-    } else if (inp.sink.get_pid() == 2) {
+    } else if (inp.sink.get_pid() == 0) {
       // FIXME: What does this pin mean?
     }
   }
@@ -1026,13 +1048,13 @@ void Pass_lnast_fromlg::attach_memory_node(Lnast& lnast, Lnast_nid& parent_node,
       case 5:  // fwd
         fwd_q.push(inp.driver);
         break;
-      case 6:  // latency
+      case 7:  // latency
         lat_q.push(inp.driver);
         break;
-      case 7:  // wmask
+      case 8:  // wmask
         wmask_q.push(inp.driver);
         break;
-      case 8:  // posedge
+      case 6:  // posedge
         pose_q.push(inp.driver);
         break;
       case 9:  // size
