@@ -9,6 +9,7 @@ TEMP=$(getopt -o r::,i::,l::,d --long reference::,implementation::,cell_library:
 eval set -- "$TEMP"
 
 YOSYS=$(which yosys)
+#YOSYS=../synth/yosys/yosys
 CELLLIB=""
 OPT_TOP=""
 OPT_DEBUG=""
@@ -141,13 +142,13 @@ if [ "$OPT_DEBUG" != "" ]; then
 fi
 
 
-${YOSYS} -p "${yosys_read}; ${yosys_prep}; ${yosys_equiv}; equiv_status -assert" \
-    2> /dev/null | grep "Equivalence successfully proven!"
+#${YOSYS} -p "${yosys_read}; ${yosys_prep}; ${yosys_equiv}; equiv_status -assert" \
+#    2> /dev/null | grep "Equivalence successfully proven!"
 
-if [ $? -eq 0 ]; then
-  echo "Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
-  exit 0
-fi
+#if [ $? -eq 0 ]; then
+#  echo "1.Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
+#  exit 0
+#fi
 
 #${YOSYS} -p " read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}; opt ; prep; memory; rename -top gold; design -stash gold;
               #read_verilog -sv ${GATE}; hierarchy ${TOP_STR}; opt ; prep; memory; rename -top gate; design -stash gate;
@@ -156,44 +157,46 @@ fi
 #
               #miter -equiv -make_assert -make_outcmp -flatten gold gate equiv
               #hierarchy -top equiv
-              #sat -prove-asserts -tempinduct -timeout 30 -ignore_unknown_cells -verify -set-init-undef equiv"
+              #sat -prove-asserts -tempinduct -timeout 30 -ignore_unknown_cells -verify -set-init-undef equiv" \
+#    2> /dev/null | grep "Equivalence successfully proven!"
 #if [ $? -eq 0 ]; then
-  #echo "Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
-  #exit 0
+#  echo "Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
+#  exit 0
 #fi
 
-${YOSYS} -p " read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}; opt ; prep; memory; rename -top gold; design -stash gold;
-              read_verilog -sv ${GATE}; hierarchy ${TOP_STR}; opt ; prep; memory; rename -top gate; design -stash gate;
+${YOSYS} -p " read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}; rename -top gold; prep -top gold ; design -stash gold;
+              read_verilog -sv ${GATE}; hierarchy ${TOP_STR}; rename -top gate; prep -top gate ; design -stash gate;
               design -copy-from gold -as gold gold
               design -copy-from gate -as gate gate
 
-              miter -equiv -make_assert -make_outcmp -flatten gold gate equiv
-              hierarchy -top equiv
-              sat -prove-asserts -seq 4 -show-public -verify -set-init-undef -ignore_unknown_cells equiv"
+              miter -equiv -flatten -make_outputs -ignore_gold_x gold gate miter
+              hierarchy -top miter
+              sat -tempinduct -prove trigger 0 -set-init-undef -enable_undef -set-def-inputs -ignore_unknown_cells -show-ports miter
+              " \
+    2> /dev/null | tee lgcheck2.log | grep "proven: SUCC"
 if [ $? -eq 0 ]; then
-  echo "Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
+  echo "2.Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
   exit 0
 fi
 
-${YOSYS} -p "${yosys_read};
-    proc; memory -nomap; opt_expr -full; opt -purge; opt -purge;
-    opt_reduce -full; opt_expr -mux_undef; opt_reduce; opt_merge; opt_clean -purge;
-    ${yosys_prep}; opt -purge; proc; opt -purge; ${yosys_equiv}; equiv_status -assert" \
-    | grep "Equivalence successfully proven!"
-
-if [ $? -eq 0 ]; then
-  echo "Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
-  exit 0
-fi
+#${YOSYS} -p "${yosys_read};
+#    proc; memory -nomap; opt_expr -full; opt -purge; opt -purge;
+#    opt_reduce -full; opt_expr -mux_undef; opt_reduce; opt_merge; opt_clean -purge;
+#    ${yosys_prep}; opt -purge; proc; opt -purge; ${yosys_equiv}; equiv_status -assert" 
+#
+#if [ $? -eq 0 ]; then
+#  echo "3.Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
+#  exit 0
+#fi
 
 ${YOSYS} -p "${yosys_read};
     memory -nomap; opt_expr -full; opt -purge; proc; opt -purge;
     opt_reduce -full; opt_expr -mux_undef; opt_reduce; opt_merge; opt_clean -purge; techmap -map +/adff2dff.v;
     ${yosys_prep}; opt -purge; proc; opt -purge; ${yosys_equiv_extra}; equiv_status -assert" \
-    | grep "Equivalence successfully proven!"
+    2>/dev/null | tee lgcheck4.log | grep "Equivalence successfully proven!"
 
 if [ $? -eq 0 ]; then
-  echo "Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
+  echo "4.Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
   exit 0
 fi
 
@@ -234,7 +237,7 @@ exit" > fm_script_${gold_top}.tcl
 
 ${FM_SHELL} -64bit -f fm_script_${gold_top}.tcl | grep "Verification SUCCEEDED"
 if [ $? -eq 0 ]; then
-  echo "Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
+  echo "5.Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
   exit 0
 fi
 
