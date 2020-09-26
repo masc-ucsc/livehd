@@ -241,7 +241,7 @@ static Node_pin create_pick_operator(LGraph *g, const RTLIL::Wire *wire, int off
   return create_pick_operator(get_edge_pin(g, wire), offset, width);
 }
 
-static Node_pin create_pick_concat_dpin(LGraph *g, const RTLIL::SigSpec &ss) {
+static Node_pin create_pick_concat_dpin(LGraph *g, const RTLIL::SigSpec &ss, bool is_signed) {
   std::vector<Node_pin> inp_pins;
   I(ss.chunks().size() != 0);
 
@@ -260,7 +260,16 @@ static Node_pin create_pick_concat_dpin(LGraph *g, const RTLIL::SigSpec &ss) {
     int offset = 0;
     auto chunks=ss.chunks();
     for (int i=0;i<chunks.size();++i) {
-      auto &inp_pin = inp_pins[i];
+
+      Node_pin inp_pin;
+
+      if ((i+1) == chunks.size()) { // last pin
+        inp_pin = inp_pins[i];
+      }else{
+        auto tposs_node = g->create_node(Ntype_op::Tposs, inp_pins[i].get_bits()+1);
+        tposs_node.connect_sink(inp_pins[i]);
+        inp_pin = tposs_node.setup_driver_pin();
+      }
 
       if (offset==0) {
         or_node.connect_sink(inp_pin);
@@ -273,7 +282,7 @@ static Node_pin create_pick_concat_dpin(LGraph *g, const RTLIL::SigSpec &ss) {
         or_node.connect_sink(shl_node);
       }
 
-      assert(chunks[i].width == inp_pin.get_bits() || (chunks[i].width+1) == inp_pin.get_bits());
+      assert(chunks[i].width <= inp_pin.get_bits()); // there may be Tposs increasing size
       offset += chunks[i].width;
     }
     dpin = or_node.setup_driver_pin();
@@ -295,8 +304,14 @@ static Node_pin get_dpin(LGraph *g, const RTLIL::Cell *cell, RTLIL::IdString nam
     v_str += v.as_string();
     return g->create_node_const(v_str).setup_driver_pin();
   }
+  bool is_signed = false;
+  if (name == ID::A && cell->hasParam(ID::A_SIGNED)) {
+      is_signed = cell->getParam(ID::A_SIGNED).as_bool();
+  }else if (name == ID::B && cell->hasParam(ID::B_SIGNED)) {
+    is_signed = cell->getParam(ID::B_SIGNED).as_bool();
+  }
 
-  return create_pick_concat_dpin(g, cell->getPort(name));
+  return create_pick_concat_dpin(g, cell->getPort(name), is_signed);
 }
 
 static bool is_yosys_output(const std::string &idstring) {
@@ -311,8 +326,14 @@ static void connect_all_inputs(const Node_pin &spin, const RTLIL::Cell *cell) {
       continue;
     if (is_yosys_output(conn.first.c_str()))
       continue;  // Just go over the inputs
+    bool is_signed = false;
+    if (conn.first == ID::A && cell->hasParam(ID::A_SIGNED)) {
+      is_signed = cell->getParam(ID::A_SIGNED).as_bool();
+    }else if (conn.first == ID::B && cell->hasParam(ID::B_SIGNED)) {
+      is_signed = cell->getParam(ID::B_SIGNED).as_bool();
+    }
 
-    spin.connect_driver(create_pick_concat_dpin(spin.get_class_lgraph(), ss));
+    spin.connect_driver(create_pick_concat_dpin(spin.get_class_lgraph(), ss, is_signed));
   }
 }
 
@@ -685,11 +706,11 @@ static void process_assigns(RTLIL::Module *module, LGraph *g) {
           continue;
 
         if (lhs_wire->port_output) {
-          Node_pin dpin = create_pick_concat_dpin(g, rhs.extract(offset, chunk.width));
+          Node_pin dpin = create_pick_concat_dpin(g, rhs.extract(offset, chunk.width), false);
           Node_pin spin = g->get_graph_output(&lhs_wire->name.c_str()[1]);
           g->add_edge(dpin, spin, lhs_wire->width);
         } else if (wire2pin.find(lhs_wire) == wire2pin.end()) {
-          Node_pin dpin      = create_pick_concat_dpin(g, rhs.extract(offset, chunk.width));
+          Node_pin dpin      = create_pick_concat_dpin(g, rhs.extract(offset, chunk.width), false);
           wire2pin[lhs_wire] = dpin;
         } else {
           auto dpin = wire2pin[lhs_wire];
@@ -711,7 +732,7 @@ static void process_assigns(RTLIL::Module *module, LGraph *g) {
 
         if (chunk.width == 0)
           continue;
-        Node_pin dpin = create_pick_concat_dpin(g, rhs.extract(offset, chunk.width));
+        Node_pin dpin = create_pick_concat_dpin(g, rhs.extract(offset, chunk.width), false);
 
         offset += chunk.width;
         for (int i = 0; i < chunk.width; i++) {
@@ -1555,7 +1576,7 @@ static void process_module(RTLIL::Module *module, LGraph *g) {
         if (spin.is_invalid())
           continue;
 
-        Node_pin dpin = create_pick_concat_dpin(g, ss);
+        Node_pin dpin = create_pick_concat_dpin(g, ss, true);
 
         if (added_edges.find(XEdge(dpin, spin).get_compact()) != added_edges.end()) {
           // there are two edges from dpin to spin
@@ -1885,7 +1906,6 @@ struct Yosys2lg_Pass : public Yosys::Pass {
         process_module(module, g);
 
         g->sync();
-        g->dump();
       }
 
       wire2pin.clear();
