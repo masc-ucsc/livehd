@@ -543,9 +543,10 @@ void Node::dump() {
     fmt::print("\n");
   }
   for (const auto &edge : inp_edges()) {
-    fmt::print("  inp bits:{} pid:{} from nid:{} idx:{} pid:{} name:{}\n",
+    fmt::print("  inp bits:{} pid:{} name:{} <- nid:{} idx:{} pid:{} name:{}\n",
                edge.get_bits(),
                edge.sink.get_pid(),
+               edge.sink.debug_name(),
                edge.driver.get_node().nid,
                edge.driver.get_idx(),
                edge.driver.get_pid(),
@@ -557,13 +558,15 @@ void Node::dump() {
     fmt::print("              pid:{} name:{} UNCONNECTED\n", spin.get_pid(), spin.debug_name());
   }
   for (const auto &edge : out_edges()) {
-    fmt::print("  out bits:{} pid:{} name:{} to nid:{} idx:{} pid:{}\n",
+    fmt::print("  out bits:{} pid:{} name:{} -> nid:{} idx:{} pid:{} name:{}\n",
                edge.get_bits(),
                edge.driver.get_pid(),
                edge.driver.debug_name(),
                edge.sink.get_node().nid,
                edge.sink.get_idx(),
-               edge.sink.get_pid());
+               edge.sink.get_pid(),
+               edge.sink.debug_name()
+               );
   }
   for (const auto &dpin : out_setup_pins()) {
     if (dpin.is_connected())  // Already printed
