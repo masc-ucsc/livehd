@@ -1080,7 +1080,7 @@ static void process_module(RTLIL::Module *module, LGraph *g) {
 
     //--------------------------------------------------------------
     } else if (std::strncmp(cell->type.c_str(), "$dlatch", 7) == 0) {
-      exit_node.set_type(Ntype_op::Aflop, get_output_size(cell));
+      exit_node.set_type(Ntype_op::Latch, get_output_size(cell));
 
       if (cell->hasParam(ID::EN_POLARITY) && cell->getParam(ID::EN_POLARITY)[0] != RTLIL::S1)
         exit_node.setup_sink_pin("posclk").connect_driver(g->create_node_const(0));

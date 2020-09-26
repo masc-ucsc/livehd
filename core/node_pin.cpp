@@ -225,6 +225,13 @@ std::string Node_pin::debug_name() const {
   if (name.empty()) {
     if (node.is_type_sub()) {
       name = node.get_type_sub_node().get_name_from_instance_pid(pid);
+		}else if (node.is_type_const()) {
+			name = node.get_type_const().to_pyrope();
+			return absl::StrCat("pin_",
+					"n",
+					std::to_string(node.nid),
+					"_",
+					name);
     } else if (node.has_name()) {
       name = node.get_name();
     } else {

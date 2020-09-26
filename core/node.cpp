@@ -543,7 +543,7 @@ void Node::dump() {
     fmt::print("\n");
   }
   for (const auto &edge : inp_edges()) {
-    fmt::print("  inp bits:{} pid:{} name:{} <- nid:{} idx:{} pid:{} name:{}\n",
+    fmt::print("  inp bits:{:<3} pid:{:<2} name:{:<30} <- nid:{} idx:{} pid:{:<2} name:{}\n",
                edge.get_bits(),
                edge.sink.get_pid(),
                edge.sink.debug_name(),
@@ -555,10 +555,10 @@ void Node::dump() {
   for (const auto &spin : inp_setup_pins()) {
     if (spin.is_connected())  // Already printed
       continue;
-    fmt::print("              pid:{} name:{} UNCONNECTED\n", spin.get_pid(), spin.debug_name());
+    fmt::print("              pid:{:<2} name:{}\n", spin.get_pid(), spin.debug_name());
   }
   for (const auto &edge : out_edges()) {
-    fmt::print("  out bits:{} pid:{} name:{} -> nid:{} idx:{} pid:{} name:{}\n",
+    fmt::print("  out bits:{:<3} pid:{:<2} name:{:<30} -> nid:{} idx:{} pid:{:<2} name:{}\n",
                edge.get_bits(),
                edge.driver.get_pid(),
                edge.driver.debug_name(),
@@ -571,7 +571,7 @@ void Node::dump() {
   for (const auto &dpin : out_setup_pins()) {
     if (dpin.is_connected())  // Already printed
       continue;
-    fmt::print("  out bits:{} pid:{} name:{} UNCONNECTED\n", dpin.get_bits(), dpin.get_pid(), dpin.debug_name());
+    fmt::print("  out bits:{:<3} pid:{:<2} name:{}\n", dpin.get_bits(), dpin.get_pid(), dpin.debug_name());
   }
 }
 // LCOV_EXCL_STOP
