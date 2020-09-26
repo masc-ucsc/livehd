@@ -12,7 +12,7 @@ cc_binary(
             "//eprp:eprp",
 
             "//inou/code_gen:inou_code_gen",
-#Sakshi            "//inou/firrtl:inou_firrtl_cpp",
+            "//inou/firrtl:inou_firrtl_cpp",
             "//inou/graphviz:inou_graphviz",
 #  later     "//inou/json:inou_json",
             "//inou/liveparse:inou_liveparse",

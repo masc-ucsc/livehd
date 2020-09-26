@@ -31,7 +31,6 @@ void Main_api::init() {
   //setup_inou_liveparse();
   setup_inou_pyrope();
   setup_inou_yosys();
-  //setup_inou_firrtl();
   //setup_pass_fplan();
   //setup_pass_lnast_tolg();
   //setup_inou_json();
