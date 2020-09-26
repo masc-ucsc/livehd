@@ -8,7 +8,8 @@
  * 2) Structure of FIRRTL Protobuf file:
  * github.com/freechipsproject/firrtl/blob/master/src/main/proto/firrtl.proto */
 
-void setup_inou_firrtl() { Inou_firrtl::setup(); }
+//void setup_inou_firrtl() { Inou_firrtl::setup(); }
+static Pass_plugin sample("Inou_firrtl", Inou_firrtl::setup);
 
 void Inou_firrtl::setup() {
   Eprp_method m1("inou.firrtl.tolnast", "Translate FIRRTL to LNAST (in progress)", &Inou_firrtl::toLNAST);
