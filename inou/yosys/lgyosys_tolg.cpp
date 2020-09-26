@@ -950,12 +950,12 @@ static void process_module(RTLIL::Module *module, LGraph *g) {
 
     //--------------------------------------------------------------
     } else if (std::strncmp(cell->type.c_str(), "$reduce_xor", 11) == 0) {
-      assert(get_output_size(cell)==1); // reduce xor
+      auto y_bits = get_output_size(cell); // in yosys, it can be 00001
 
       auto a_bits = cell->getParam(ID::A_WIDTH).as_int();
       auto a_dpin = get_dpin(g, cell, ID::A);
 
-			exit_node.set_type(Ntype_op::And,1);
+			exit_node.set_type(Ntype_op::And, y_bits);
       if (a_bits==1) { // pass it through
         exit_node.connect_driver(a_dpin);
       }else{
@@ -973,7 +973,7 @@ static void process_module(RTLIL::Module *module, LGraph *g) {
         }
 
         exit_node.connect_sink(xor_node);
-        exit_node.connect_sink(g->create_node_const(1,1));
+        exit_node.connect_sink(g->create_node_const(1,y_bits));
       }
 #if 0
       // C++ code for log2 parity compute
@@ -1130,7 +1130,7 @@ static void process_module(RTLIL::Module *module, LGraph *g) {
     } else if (std::strncmp(cell->type.c_str(), "$mux", 4) == 0) {
       exit_node.set_type(Ntype_op::Mux, get_output_size(cell));
 
-      exit_node.setup_sink_pin("0").connect_driver(get_dpin(g, cell, "\\S"));
+      exit_node.setup_sink_pin("0").connect_driver(get_dpin(g, cell, ID::S));
       exit_node.setup_sink_pin("1").connect_driver(get_dpin(g, cell, ID::A));
       exit_node.setup_sink_pin("2").connect_driver(get_dpin(g, cell, ID::B));
 
