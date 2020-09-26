@@ -221,18 +221,24 @@ std::string Node_pin::debug_name() const {
     if (Ann_node_pin_name::ref(current_g)->has_key(get_compact_class_driver()))
       name = Ann_node_pin_name::ref(current_g)->get_val(get_compact_class_driver());
 
+  const auto node = get_node();
   if (name.empty()) {
-    const auto node = get_node();
     if (node.is_type_sub()) {
       name = node.get_type_sub_node().get_name_from_instance_pid(pid);
     } else if (node.has_name()) {
       name = node.get_name();
+    } else {
+      if (is_sink()) {
+        name = Ntype::get_sink_name(node.get_type_op(),pid);
+      }else{
+        name = Ntype::get_driver_name(node.get_type_op(),pid);
+      }
     }
   }
 
-  return absl::StrCat("node_pin_",
+  return absl::StrCat("pin_",
                       "n",
-                      std::to_string(get_node().nid),
+                      std::to_string(node.nid),
                       "_",
                       name,
                       "_",
