@@ -40,6 +40,6 @@ This is a proposal of GSoC projects.
 | **Mentor(s)**   | [Jose Renau](https://www.soe.ucsc.edu/~renau)
 | **Skills**      | C++
 | **Description** | Improve the Pyrope code generation with LNAST to support alignment, comments
-| **Link**        | https://github.com/masc-ucsc/livehd/tree/master/inou/cgen
+| **Link**        | https://github.com/masc-ucsc/livehd/tree/master/inou/code_gen
 | **Difficulty**  | Medium
 

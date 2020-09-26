@@ -200,9 +200,9 @@ to handle classes.
     * Titan23 (http://www.eecg.utoronto.ca/~kmurray/titan.html).
     * Anubis (https://github.com/masc-ucsc/anubis)
 * Regression set
-    * slang->lnast->lgraph->lnast->cgen (C++ and verilog+lgcheck)
+    * slang->lnast->lgraph->lnast->code_gen (C++ and verilog+lgcheck)
         * https://github.com/zachjs/sv2v/tree/master/test
-    * slang->lnast->lgraph->lnast->cgen (verilog+lgcheck)
+    * slang->lnast->lgraph->lnast->code_gen (verilog+lgcheck)
         * BOOM
         * https://github.com/SymbiFlow/sv-tests
         * https://github.com/taichi-ishitani/tnoc
