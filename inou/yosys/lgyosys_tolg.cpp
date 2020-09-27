@@ -101,11 +101,17 @@ static Node_pin get_edge_pin(LGraph *g, const RTLIL::Wire *wire) {
 
   if (wire2pin.find(wire) != wire2pin.end()) {
     if (wire->width != (int)wire2pin[wire].get_bits()) {
+      auto &dpin = wire2pin[wire];
+
+      if (wire->width>dpin.get_bits()) { // OK, just zero extend like in comparators
+        return dpin;
+      }
+
       fmt::print("w_name:{} w_w:{} | pid:{} bits:{}\n",
                  wire->name.c_str(),
                  wire->width,
-                 wire2pin[wire].get_pid(),
-                 wire2pin[wire].get_bits());
+                 dpin.get_pid(),
+                 dpin.get_bits());
       I(false);  // WHY?
       wire2pin[wire].set_bits(wire->width);
       I(wire->width == wire2pin[wire].get_bits());
@@ -242,7 +248,7 @@ static Node_pin create_pick_operator(LGraph *g, const RTLIL::Wire *wire, int off
 }
 
 
-static void append_to_or_gate(LGraph *g, Node &or_node, Node_pin &dpin, int offset) {
+static void append_to_or_node(LGraph *g, Node &or_node, Node_pin &dpin, int offset) {
 	auto tposs_node = g->create_node(Ntype_op::Tposs, dpin.get_bits()+1);
 	tposs_node.connect_sink(dpin);
 
@@ -289,7 +295,7 @@ static Node_pin create_pick_concat_dpin(LGraph *g, const RTLIL::SigSpec &ss, boo
         inp_pin = tposs_node.setup_driver_pin();
       }
 
-			append_to_or_gate(g, or_node, inp_pin, offset);
+			append_to_or_node(g, or_node, inp_pin, offset);
 
       assert(chunks[i].width <= inp_pin.get_bits()); // there may be Tposs increasing size
       offset += chunks[i].width;
@@ -861,9 +867,70 @@ static void process_module(RTLIL::Module *module, LGraph *g) {
       connect_all_inputs(exit_node.setup_sink_pin(), cell);
     //--------------------------------------------------------------
     } else if (std::strncmp(cell->type.c_str(), "$reduce_and", 11) == 0 || std::strncmp(cell->type.c_str(), "$logic_and", 10)==0) {
-      exit_node.set_type(Ntype_op::Rand, 1);
+      // No reduce and to avoid being width (drop zeroes) sensitive
+      //
+      // multibit inputs
+      // And(Not(Ror(Not(inp))), inp.MSB)
+      //
+      // 1bit inputs
+      //   And(inp1,inp2)
 
-      connect_all_inputs(exit_node.setup_sink_pin(), cell);
+      bool all_1bit = true;
+      bool has_b_input = false;
+      assert(cell->hasParam(ID::A_WIDTH));
+      if (cell->getParam(ID::A_WIDTH).as_int() > 1)
+        all_1bit = false;
+      if(cell->hasParam(ID::B_WIDTH)) {
+        has_b_input = true;
+        if (cell->getParam(ID::B_WIDTH).as_int() > 1)
+          all_1bit = false;
+      }
+
+      exit_node.set_type(Ntype_op::And, 1);
+
+      if (all_1bit) {
+        connect_all_inputs(exit_node.setup_sink_pin(), cell);
+      }else{
+
+        auto ror_node = g->create_node(Ntype_op::Ror, 1);
+
+        auto not_ror_node = g->create_node(Ntype_op::Not, 1);
+        not_ror_node.connect_sink(ror_node);
+
+        exit_node.connect_sink(not_ror_node);
+
+        auto a_dpin = get_dpin(g, cell, ID::A);
+
+        if (a_dpin.get_bits()>1) {
+          auto not_a_node = g->create_node(Ntype_op::Not, a_dpin.get_bits());
+          not_a_node.connect_sink(a_dpin);
+
+          ror_node.connect_sink(not_a_node);
+
+          auto sra_node = g->create_node(Ntype_op::SRA, 1);
+          sra_node.setup_sink_pin("a").connect_driver(a_dpin);
+          sra_node.setup_sink_pin("b").connect_driver(g->create_node_const(a_dpin.get_bits()-1));
+
+          exit_node.connect_sink(sra_node);
+        }
+
+        if (has_b_input) {
+          auto b_dpin = get_dpin(g, cell, ID::B);
+          if (b_dpin.get_bits()>1) {
+            auto not_b_node = g->create_node(Ntype_op::Not, b_dpin.get_bits());
+            not_b_node.connect_sink(b_dpin);
+
+            ror_node.connect_sink(not_b_node);
+
+            auto sra_node = g->create_node(Ntype_op::SRA, 1);
+            sra_node.setup_sink_pin("a").connect_driver(b_dpin);
+            sra_node.setup_sink_pin("b").connect_driver(g->create_node_const(b_dpin.get_bits()-1));
+
+            exit_node.connect_sink(sra_node);
+          }
+        }
+
+      }
     //--------------------------------------------------------------
     } else if (std::strncmp(cell->type.c_str(), "$not", 4) == 0) {
       assert(get_input_size(cell) == get_output_size(cell));
@@ -1637,7 +1704,7 @@ static void process_module(RTLIL::Module *module, LGraph *g) {
         I(size < dpin.get_bits() || size % dpin.get_bits() == 0);
         int times = size < dpin.get_bits() ? 1 : size / dpin.get_bits();
         for (int i = 0; i < times; i++) {
-					append_to_or_gate(g, or_node, dpin, offset);
+					append_to_or_node(g, or_node, dpin, offset);
 
           offset += dpin.get_bits();
         }
@@ -1658,7 +1725,7 @@ static void process_module(RTLIL::Module *module, LGraph *g) {
     I(size < dpin.get_bits() || size % dpin.get_bits() == 0);
     auto times = size < dpin.get_bits() ? 1 : size / dpin.get_bits();
     for (auto i = 0UL; i < times; i++) {
-			append_to_or_gate(g, or_node, dpin, offset);
+			append_to_or_node(g, or_node, dpin, offset);
       offset += dpin.get_bits();
     }
   }

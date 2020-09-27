@@ -597,7 +597,6 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         create_tree(g, inps, module, yop, true, cell_output_map[node.get_driver_pin().get_compact()]);
       }
       break;
-      case Ntype_op::Rand:
       case Ntype_op::Ror: {
         std::vector<RTLIL::Wire *> inps;
 
@@ -606,15 +605,8 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         }
 
         RTLIL::Wire *or_input_wires = module->addWire(next_id(g), inps[0]->width);
-        if (node.get_type_op() == Ntype_op::Rand) {
-          create_tree(g, inps, module, &RTLIL::Module::addAnd, false, or_input_wires);
-          module->addReduceAnd(next_id(g), or_input_wires, cell_output_map[node.get_driver_pin().get_compact()]);
-        }else if (node.get_type_op() == Ntype_op::Ror) {
-          create_tree(g, inps, module, &RTLIL::Module::addOr, false, or_input_wires);
-          module->addReduceOr(next_id(g), or_input_wires, cell_output_map[node.get_driver_pin().get_compact()]);
-        }else{
-          assert(false);
-        }
+        create_tree(g, inps, module, &RTLIL::Module::addOr, false, or_input_wires);
+        module->addReduceOr(next_id(g), or_input_wires, cell_output_map[node.get_driver_pin().get_compact()]);
       }
       break;
       case Ntype_op::Latch: {

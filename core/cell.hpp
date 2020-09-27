@@ -16,7 +16,6 @@ enum class Ntype_op : uint8_t {
   And,
   Or,
   Xor,
-  Rand,   // Reduce AND
   Ror,    // Reduce OR
 
   Not,    // bitwise not
@@ -72,7 +71,6 @@ protected:
     "And",
     "Or",
     "Xor",
-    "Rand",
     "Ror",
 
     "Not",
@@ -139,7 +137,6 @@ public:
         && op != Ntype_op::And
         && op != Ntype_op::Or
         && op != Ntype_op::Xor
-        && op != Ntype_op::Rand
         && op != Ntype_op::Ror
         && op != Ntype_op::Not
         && op != Ntype_op::Tposs;
