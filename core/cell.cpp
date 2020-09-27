@@ -75,7 +75,6 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
     case Ntype_op::And:
     case Ntype_op::Or:
     case Ntype_op::Xor:
-    case Ntype_op::Rand:
     case Ntype_op::Ror:
     case Ntype_op::EQ:
       if (pid==0)
