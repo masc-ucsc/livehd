@@ -359,7 +359,7 @@ protected:
     "func_call",
     "func_def",
     "=", // assign
-    ":=",
+    "=", //dp_assign
     "as",
     "=", // label
     ".", // dot
