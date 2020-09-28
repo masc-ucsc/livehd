@@ -1,19 +1,20 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-// This is free and unencumbered software released into the public domain.
-//
-// Anyone is free to copy, modify, publish, use, compile, sell, or
-// distribute this software, either in source code form or as a compiled
-// binary, for any purpose, commercial or non-commercial, and by any
-// means.
 
-#include <assert.h>
+// External package includes
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wshadow"
+#pragma GCC diagnostic ignored "-Wsign-compare"
 
+#include <cassert>
 #include <map>
 #include <set>
 #include <string>
 
 #include "kernel/sigtools.h"
 #include "kernel/yosys.h"
+#pragma GCC diagnostic pop
+
+// LiveHD includes
 #include "lbench.hpp"
 #include "lgyosys_dump.hpp"
 

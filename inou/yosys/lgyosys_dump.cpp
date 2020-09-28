@@ -59,7 +59,7 @@ RTLIL::Wire *Lgyosys_dump::create_tree(LGraph *g, const std::vector<RTLIL::Wire 
         mod->connect(result_wire, RTLIL::SigSpec(wires[0], 0, width));
       } else {  // extend bits
         auto w2 = RTLIL::SigSpec(wires[0]);
-        w2.extend_u0(width);  // unsigned extend
+        w2.extend_u0(width, true);  // signed extend
         mod->connect(result_wire, w2);
       }
       return result_wire;
@@ -416,30 +416,30 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
       } else if (lhs.size() < rhs.size()) {  // Drop bits
         assert(rhs.is_wire());
         module->connect(lhs, RTLIL::SigSpec(rhs.as_wire(), 0, lhs.size()));
-      } else {      // add disconnected bits?
-        assert(0);  // TODO: once we have a case
-        module->connect(RTLIL::SigSpec(lhs.as_wire(), 0, rhs.size()), rhs);
+      } else {
+        rhs.extend_u0(lhs.size(), false);  // FIXME: missing Tposs unsigned extend
+        module->connect(lhs, rhs);
       }
     }
   }, hierarchy);
 
   // now create nodes and make connections
   for (auto node : g->fast(hierarchy)) {
-    auto op = node.get_type_op();
-    I(op != Ntype_op::IO);
 
     if (!node.has_inputs() && !node.has_outputs())
       continue;  // DCE code
 
-    if (op != Ntype_op::Memory && op != Ntype_op::Sub && !node.has_outputs())
-      continue;
+    auto op = node.get_type_op();
+    I(op != Ntype_op::IO);
+
+    if (op != Ntype_op::Memory && op != Ntype_op::Sub)
+      if (!node.has_inputs() || !node.has_outputs())
+        continue;
+
+    assert(op != Ntype_op::Const); // filtered before
 
     Bits_t size = 0;
     switch (op) {
-      case Ntype_op::IO:
-      case Ntype_op::Const: {
-      }
-      break;
       case Ntype_op::Sum: {
         std::vector<RTLIL::Wire *> add_signed;
         std::vector<RTLIL::Wire *> sub_signed;

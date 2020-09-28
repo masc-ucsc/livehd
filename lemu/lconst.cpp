@@ -438,6 +438,20 @@ Lconst Lconst::lsh_op(Bits_t amount) const {
   return Lconst(explicit_str, explicit_sign, explicit_bits, sign, res_bits, res_num);
 }
 
+Lconst Lconst::rsh_op(Bits_t amount) const {
+  auto res_bits = bits - amount;
+
+  if (explicit_str) {
+    auto qmarks = to_string();
+    auto s = qmarks.substr(amount);
+    return Lconst(s);
+  }
+
+  auto res_num  = num >> amount;
+
+  return Lconst(explicit_str, explicit_sign, explicit_bits, sign, res_bits, res_num);
+}
+
 Lconst Lconst::or_op(const Lconst &o) const {
   auto   res_bits = std::max(bits, o.bits);
 

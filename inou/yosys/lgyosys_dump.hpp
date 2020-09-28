@@ -1,14 +1,21 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#ifndef DUMP_YOSYS_H_
-#define DUMP_YOSYS_H_
+#pragma once
+
+// External package includes
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wshadow"
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/substitute.h"
-#include "annotate.hpp"
-#include "inou.hpp"
 #include "kernel/rtlil.h"
 #include "kernel/yosys.h"
+
+#pragma GCC diagnostic pop
+// LiveHD includes
+
+#include "annotate.hpp"
+#include "inou.hpp"
 #include "lgraph.hpp"
 #include "pass.hpp"
 
@@ -99,6 +106,3 @@ public:
   };
 };
 
-// PRIVATE_NAMESPACE_END
-
-#endif

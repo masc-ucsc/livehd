@@ -1,11 +1,17 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include "lgraph.hpp"
+// External package includes
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wshadow"
+
 #include "mustache.hpp"
-#include "pass.hpp"
 using namespace kainjow;
 
+#pragma GCC diagnostic pop
+
+#include "lgraph.hpp"
+#include "pass.hpp"
 #include "eprp.hpp"
 
 class Inou_yosys_api : public Pass {

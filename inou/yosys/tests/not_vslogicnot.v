@@ -1,4 +1,4 @@
-module not_vslogicnot(input [3:0] d, input [3:0] c, output [3:0] q, output [1:0] should_be_one);
+module not_vslogicnot(input [3:0] a, input [3:0] c, output [3:0] q, output [1:0] should_be_one);
 
   wire [10:0] tmp1;
   wire [10:0] tmp2;
