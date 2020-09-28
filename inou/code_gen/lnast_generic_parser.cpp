@@ -129,16 +129,16 @@ std::string Cpp_parser::supporting_fend(std::string basename_s){
   return absl::StrCat("<<EOF ", basename_s);
 }
 std::string Cpp_parser::supp_buffer_to_print(std::string modname) {
-  std::string header_strt = absl::StrCat("class ", modname, "_sim {\n  uint64_t hidx;\n  ");
+  std::string header_strt = absl::StrCat("class ", modname, "_sim {\npublic:\n  uint64_t hidx;\n  ");
 
   std::string outps_nline;
   for (auto const& [key, val] : outp_bw) {
-    absl::StrAppend(&outps_nline, "SInt<", val, "> ", key, ";\n  ");
+    absl::StrAppend(&outps_nline, "UInt<", val, "> ", key, ";\n  ");
   }
 
 //  std::string inps_csv;
   for (auto const& [key, val] : inp_bw) {
-    absl::StrAppend(&inps_csv, "SInt<", val, "> ", key, ", ");
+    absl::StrAppend(&inps_csv, "UInt<", val, "> ", key, ", ");
   }
   inps_csv.pop_back();
   inps_csv.pop_back();
@@ -150,21 +150,21 @@ std::string Cpp_parser::supp_buffer_to_print(std::string modname) {
   std::string vcd_varptrs;
   for (auto const& [key, val] : inp_bw) {
     if (val>"1")
-      absl::StrAppend(&vcd_varptrs, "  vcs::VarPtr vcd_", key, " = vcd_writer->register_passed_var(scope_name, \"", key, "[", std::to_string(std::stoi(val)-1), ":0]\", vcd::VariableType::wire, ", val, ");\n");
+      absl::StrAppend(&vcd_varptrs, "  vcd::VarPtr vcd_", key, " = vcd_writer->register_passed_var(scope_name, \"", key, "[", std::to_string(std::stoi(val)-1), ":0]\", vcd::VariableType::wire, ", val, ");\n");
     else
-      absl::StrAppend(&vcd_varptrs, "  vcs::VarPtr vcd_", key, " = vcd_writer->register_passed_var(scope_name, \"", key, "\", vcd::VariableType::wire, ", val, ");\n");
+      absl::StrAppend(&vcd_varptrs, "  vcd::VarPtr vcd_", key, " = vcd_writer->register_passed_var(scope_name, \"", key, "\", vcd::VariableType::wire, ", val, ");\n");
   }
   for (auto const& [key,val] : outp_bw) {
     if (val>"1")
-      absl::StrAppend(&vcd_varptrs, "  vcs::VarPtr vcd_", key, " = vcd_writer->register_passed_var(scope_name, \"", key, "[", std::to_string(std::stoi(val)-1), ":0]\", vcd::VariableType::wire, ", val, ");\n");
+      absl::StrAppend(&vcd_varptrs, "  vcd::VarPtr vcd_", key, " = vcd_writer->register_passed_var(scope_name, \"", key, "[", std::to_string(std::stoi(val)-1), ":0]\", vcd::VariableType::wire, ", val, ");\n");
     else
-      absl::StrAppend(&vcd_varptrs, "  vcs::VarPtr vcd_", key, " = vcd_writer->register_passed_var(scope_name, \"", key, "\", vcd::VariableType::wire, ", val, ");\n");
+      absl::StrAppend(&vcd_varptrs, "  vcd::VarPtr vcd_", key, " = vcd_writer->register_passed_var(scope_name, \"", key, "\", vcd::VariableType::wire, ", val, ");\n");
   }
   for (auto const& [key,val] : reg_bw) {
     if (val>"1")
-      absl::StrAppend(&vcd_varptrs, "  vcs::VarPtr vcd_", key, " = vcd_writer->register_var(scope_name, \"", key, "[", std::to_string(std::stoi(val)-1), ":0]\", vcd::VariableType::wire, ", val, ");\n");
+      absl::StrAppend(&vcd_varptrs, "  vcd::VarPtr vcd_", key, " = vcd_writer->register_var(scope_name, \"", key, "[", std::to_string(std::stoi(val)-1), ":0]\", vcd::VariableType::wire, ", val, ");\n");
     else
-      absl::StrAppend(&vcd_varptrs, "  vcs::VarPtr vcd_", key, " = vcd_writer->register_var(scope_name, \"", key, "\", vcd::VariableType::wire, ", val, ");\n");
+      absl::StrAppend(&vcd_varptrs, "  vcd::VarPtr vcd_", key, " = vcd_writer->register_var(scope_name, \"", key, "\", vcd::VariableType::wire, ", val, ");\n");
   }
 
 
@@ -186,7 +186,12 @@ bool Cpp_parser::convert_parameters(std::string key, std::string ref) {
   assert(key.size()>=1);
   if(key.find("$")==0) {//it is i/p
     std::vector<std::string> _key = absl::StrSplit(key, absl::ByAnyChar("$."));
-    inp_bw.insert(std::pair<std::string, std::string>(_key[1], ref));
+    if (_key[1].find("clock")==std::string::npos) {
+      inp_bw.insert(std::pair<std::string, std::string>(_key[1], ref));
+    } else {//TODO: add for reset also
+      sys_clock = _key[1];
+      sys_clock_bits = ref;
+    }
   } else if (key.find("%")==0) {//it is o/p
     std::vector<std::string> _key = absl::StrSplit(key, absl::ByAnyChar("%."));
     outp_bw.insert(std::pair<std::string, std::string>(_key[1], ref));
@@ -232,18 +237,18 @@ std::string Cpp_parser::final_print(std::string modname, std::string buffer_to_p
   std::string rst_vals_nline;
   std::string rst_vals_nline_vcd;
   for (auto const& [key, val] : outp_bw) {
-    absl::StrAppend(&rst_vals_nline, "  ", key, " = SInt<", val, "> (0);\n");
+    absl::StrAppend(&rst_vals_nline, "  ", key, " = UInt<", val, "> (0);\n");
     absl::StrAppend(&rst_vals_nline_vcd, "vcd_writer->change(vcd_", key, ", ", key, ".to_string_binary());\n");
   }
   for (auto const& [key, val]:reg_bw) {
-    absl::StrAppend(&rst_vals_nline, "  ", key, " = SInt<", val, "> (0);\n");
+    absl::StrAppend(&rst_vals_nline, "  ", key, " = UInt<", val, "> (0);\n");
     absl::StrAppend(&rst_vals_nline_vcd, "vcd_writer->change(vcd_", key, ", ", key, ".to_string_binary());\n");
   }
   std::string reset_vcd = absl::StrCat("void ", modname, "::reset_cycle() {\n", rst_vals_nline, rst_vals_nline_vcd, "}\n");
   std::string reset_func = absl::StrCat("void ", modname, "::vcd_reset_cycle() {\n", rst_vals_nline, "}\n");
 
-  std::string posedge_vcd = absl::StrCat("void ", modname, "::vcd_posedge(){\n}\n");
-  std::string negedge_vcd = absl::StrCat("void ", modname, "::vcd_negedge(){\n}\n");
+  std::string posedge_vcd = absl::StrCat("void ", modname, "::vcd_posedge(){\n  vcd_writer->change(", sys_clock, ", \"1\");\n}\n");
+  std::string negedge_vcd = absl::StrCat("void ", modname, "::vcd_negedge(){\n  vcd_writer->change(", sys_clock, ", \"0\");\n}\n");
 
   //main code part function
   std::string main_func_vcd = absl::StrCat("void "+ modname+"_sim::vcd_comb(", inps_csv, ") {\n"+ buffer_to_print+ buff_to_print_vcd, "\n}");

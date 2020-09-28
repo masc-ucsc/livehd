@@ -5,6 +5,7 @@
 //#define NDEBUG
 //#endif
 #include <assert.h>
+#include <string>
 #include <string_view>
 
 //-------------------------------------------------------------------------------------
@@ -172,6 +173,11 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index) {
   } else if (is_number(ref)) {
    ref = process_number(ref);
   }
+
+  if(ref.find(".__q_pin")!=std::string::npos && lnast_to->get_lang_type()=="cpp") {
+    std::vector<std::string> _ref = absl::StrSplit(ref,".");
+    ref = _ref[0];
+  }//TODO: make virtual func extract_main_name() and remove the second condition from this "if"
 
   const auto& assign_node_data = lnast->get_data(assign_node_index);
   if (is_temp_var(key)) {
