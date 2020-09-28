@@ -1,12 +1,21 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+// External package includes
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wshadow"
+#pragma GCC diagnostic ignored "-Wsign-compare"
+
 #include <string>
 #include <tuple>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "firrtl.pb.h"
+
+#pragma GCC diagnostic pop
+// LiveHD includes
+
 #include "lconst.hpp"
 #include "lnast.hpp"
 #include "mmap_tree.hpp"
