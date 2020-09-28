@@ -341,6 +341,8 @@ public:
   Ann_place *      ref_place();
   bool             has_place() const;
 
+  Bits_t get_bits() const;
+
   void set_color(int color);
   int  get_color() const;
   bool has_color() const;

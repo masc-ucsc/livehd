@@ -345,8 +345,8 @@ public:
   void  set_delay(float val);
   float get_delay() const;
 
-  uint32_t get_bits() const;
-  void     set_bits(uint32_t bits);
+  Bits_t   get_bits() const;
+  void     set_bits(Bits_t bits);
 
   std::string_view get_type_sub_io_name() const;
   std::string_view get_type_sub_pin_name() const;

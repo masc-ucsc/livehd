@@ -513,6 +513,11 @@ Ann_place *Node::ref_place() {
   return ref->ref(it2);
 }
 
+Bits_t Node::get_bits() const {
+  I(!Ntype::is_multi_driver(get_type_op()));
+  return current_g->get_bits(nid);
+}
+
 bool Node::has_place() const { return Ann_node_place::ref(top_g)->has(get_compact()); }
 
 //----- Subject to changes in the future:
