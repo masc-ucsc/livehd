@@ -354,7 +354,7 @@ void Lgyosys_dump::create_wires(LGraph *g, RTLIL::Module *module) {
 
       auto lc = node.get_type_const();
       if (lc.is_i()) {
-        assert(node.get_driver_pin().get_bits()==lc.get_bits());
+        assert(node.get_bits()==lc.get_bits());
         module->connect(new_wire, RTLIL::SigSpec(RTLIL::Const(lc.to_i(), lc.get_bits())));
       } else {
         module->connect(new_wire, RTLIL::SigSpec(RTLIL::Const::from_string(lc.to_yosys())));
@@ -581,7 +581,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         std::vector<RTLIL::Wire *> inps;
 
         bool must_be_signed = false;
-        auto y_bits = node.get_driver_pin().get_bits();
+        auto y_bits = node.get_bits();
         for (const auto &e : node.inp_edges()) {
           if (e.driver.get_bits() != y_bits)
             must_be_signed = true;
@@ -702,7 +702,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
           }
         }else{
           if (reset_wire && enable_wire == nullptr) {
-            RTLIL::Const initial_const(0, node.get_driver_pin().get_bits());
+            RTLIL::Const initial_const(0, node.get_bits());
             if (!initial_dpin.is_invalid()) {
               initial_const = RTLIL::Const(initial_dpin.get_node().get_type_const().to_yosys());
             }

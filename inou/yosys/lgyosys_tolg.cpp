@@ -168,7 +168,7 @@ static Node_pin resolve_constant(LGraph *g, const std::vector<RTLIL::State> &dat
 
   if (u64_const && data.size() <= 63) {
     auto node = g->create_node_const(Lconst(value, data.size()));
-    I(node.get_driver_pin().get_bits() <= data.size());
+    I(node.get_bits() <= data.size());
     return node.setup_driver_pin();
   }
 
@@ -924,7 +924,7 @@ static void process_module(RTLIL::Module *module, LGraph *g) {
 
       connect_all_inputs(exit_node.setup_sink_pin(), cell);
     //--------------------------------------------------------------
-    } else if (std::strncmp(cell->type.c_str(), "$reduce_and", 11) == 0 || std::strncmp(cell->type.c_str(), "$logic_and", 10)==0) {
+    } else if (std::strncmp(cell->type.c_str(), "$reduce_and", 11) == 0) {
       // No reduce and to avoid being width (drop zeroes) sensitive
       //
       // multibit inputs
@@ -934,14 +934,9 @@ static void process_module(RTLIL::Module *module, LGraph *g) {
       //   And(inp1,inp2)
 
       bool all_1bit = true;
-      bool has_b_input = false;
       I(cell->hasParam(ID::A_WIDTH));
-      if (cell->getParam(ID::A_WIDTH).as_int() > 1)
+      if (cell->getParam(ID::A_WIDTH).as_int() > 1) {
         all_1bit = false;
-      if(cell->hasParam(ID::B_WIDTH)) {
-        has_b_input = true;
-        if (cell->getParam(ID::B_WIDTH).as_int() > 1)
-          all_1bit = false;
       }
 
       exit_node.set_type(Ntype_op::And, 1);
@@ -959,15 +954,17 @@ static void process_module(RTLIL::Module *module, LGraph *g) {
 
         auto a_dpin = get_dpin(g, cell, ID::A);
         auto a_bits = cell->getParam(ID::A_WIDTH).as_int();
+
         I(a_bits>=a_dpin.get_bits());
 
         if (a_bits>1) {
+          auto sra_node = g->create_node(Ntype_op::SRA, 1);
+
           auto not_a_node = g->create_node(Ntype_op::Not, a_bits);
           not_a_node.connect_sink(a_dpin);
 
           ror_node.connect_sink(not_a_node);
 
-          auto sra_node = g->create_node(Ntype_op::SRA, 1);
           sra_node.setup_sink_pin("a").connect_driver(a_dpin);
           sra_node.setup_sink_pin("b").connect_driver(g->create_node_const(a_bits-1));
 
@@ -975,28 +972,35 @@ static void process_module(RTLIL::Module *module, LGraph *g) {
         }else{
           exit_node.connect_sink(a_dpin);
         }
-
-        if (has_b_input) {
-          auto b_dpin = get_dpin(g, cell, ID::B);
-          auto b_bits = cell->getParam(ID::B_WIDTH).as_int();
-          I(b_bits>=b_dpin.get_bits());
-
-          if (b_bits>1) {
-            auto not_b_node = g->create_node(Ntype_op::Not, b_bits);
-            not_b_node.connect_sink(b_dpin);
-
-            ror_node.connect_sink(not_b_node);
-
-            auto sra_node = g->create_node(Ntype_op::SRA, 1);
-            sra_node.setup_sink_pin("a").connect_driver(b_dpin);
-            sra_node.setup_sink_pin("b").connect_driver(g->create_node_const(b_bits-1));
-
-            exit_node.connect_sink(sra_node);
-          }else{
-            exit_node.connect_sink(b_dpin);
-          }
-        }
       }
+    //--------------------------------------------------------------
+    } else if (std::strncmp(cell->type.c_str(), "$logic_and", 10)==0) {
+
+      I(cell->hasParam(ID::A_WIDTH));
+      I(cell->hasParam(ID::B_WIDTH));
+
+      auto a_dpin = get_dpin(g, cell, ID::A);
+      auto b_dpin = get_dpin(g, cell, ID::B);
+
+      auto a_bits = cell->getParam(ID::A_WIDTH).as_int();
+      auto b_bits = cell->getParam(ID::B_WIDTH).as_int();
+
+      exit_node.set_type(Ntype_op::And, 1);
+      if (a_bits==1) {
+        exit_node.connect_sink(a_dpin);
+      }else{
+        auto ror_node = g->create_node(Ntype_op::Ror, 1);
+        ror_node.connect_sink(a_dpin);
+        exit_node.connect_sink(ror_node);
+      }
+      if (b_bits==1) {
+        exit_node.connect_sink(b_dpin);
+      }else{
+        auto ror_node = g->create_node(Ntype_op::Ror, 1);
+        ror_node.connect_sink(b_dpin);
+        exit_node.connect_sink(ror_node);
+      }
+
     //--------------------------------------------------------------
     } else if (std::strncmp(cell->type.c_str(), "$not", 4) == 0) {
       I(get_input_size(cell) == get_output_size(cell));
@@ -1762,7 +1766,7 @@ static void process_module(RTLIL::Module *module, LGraph *g) {
       uint32_t offset = 0;
 
       if (!partially_assigned[wire].empty()) {
-        or_node = g->create_node(Ntype_op::Or, or_node.get_driver_pin().get_bits());
+        or_node = g->create_node(Ntype_op::Or, or_node.get_bits());
       }
 
       for(auto i=0u;i<kv.second.size();++i) {
