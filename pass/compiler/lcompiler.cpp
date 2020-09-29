@@ -1,11 +1,8 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#pragma once
 
 #include "lcompiler.hpp"
 #include "inou_graphviz.hpp"
 #include "lnast_tolg.hpp"
-/* #include "cprop.hpp" */
-/* #include "bitwidth.hpp" */
 
 Lcompiler::Lcompiler(std::string_view _path, std::string_view _odir, bool _gviz) 
   : path(_path), odir(_odir), gviz(_gviz) {}

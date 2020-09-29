@@ -1,6 +1,5 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#pragma once
-#include <atomic>
+
 #include <fstream>
 #include <regex>
 
@@ -183,6 +182,9 @@ void Graphviz::populate_lg_data(LGraph *g, std::string_view dot_postfix) {
     std::string_view dst_str = "virtual_dst_module";
     auto             dbits   = pin.get_bits();
     data += fmt::format(" {}->{}[label=<{}b>];\n", graphviz_legalize_name(pin.get_name()), dst_str, dbits);
+    for (const auto &out : pin.out_edges()) {
+      populate_lg_handle_xedge(pin.get_node(), out, data);
+    }
   });
 
   data += "}\n";
@@ -192,7 +194,7 @@ void Graphviz::populate_lg_data(LGraph *g, std::string_view dot_postfix) {
     file = absl::StrCat(odir, "/", g->get_name(), ".dot");
   else
     file = absl::StrCat(odir, "/", g->get_name(), ".", dot_postfix, ".dot");
-    
+
   int         fd   = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
   if (fd < 0) {
     Pass::error("inou.graphviz unable to create {}", file);
