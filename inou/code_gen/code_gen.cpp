@@ -333,7 +333,10 @@ void Code_gen::do_func_call(const mmap_lib::Tree_index& func_call_node_index) {
     }
   }
   fmt::print("func_call 1st child: {}\n", lhs);
-  absl::StrAppend(&buffer_to_print, indent(), lhs, " = ");//lhs and assignment op to further assign the func name and arguments to lhs
+  absl::StrAppend(&buffer_to_print, indent());
+  if(!is_temp_var(lhs)) {
+    absl::StrAppend(&buffer_to_print, lhs, " = ");//lhs and assignment op to further assign the func name and arguments to lhs
+  }
 
   curr_index = lnast->get_sibling_next(curr_index);
   absl::StrAppend(&buffer_to_print, lnast->get_name(curr_index));//printitng the func name(the func called)
@@ -611,7 +614,12 @@ void Code_gen::do_tuple(const mmap_lib::Tree_index& tuple_node_index) {
           ref = map_it->second;
         }
       }
-      absl::StrAppend(&tuple_value, lnast_to->ref_name(ref), lnast_to->tuple_stmt_sep());
+      fmt::print("tuple's next leaf child: {}\n", ref);
+      if (lnast->get_type(curr_index).is_const()) {
+        absl::StrAppend(&tuple_value, "\"", lnast_to->ref_name(ref), "\"",  lnast_to->tuple_stmt_sep());
+      } else {
+        absl::StrAppend(&tuple_value, lnast_to->ref_name(ref), lnast_to->tuple_stmt_sep());
+      }
     } else {
       absl::StrAppend(&tuple_value, resolve_tuple_assign(curr_index));
     }
