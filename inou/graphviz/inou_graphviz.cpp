@@ -1,14 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#pragma once
 
 #include "inou_graphviz.hpp"
 #include "eprp_utils.hpp"
-
-/* void setup_inou_graphviz() { Inou_graphviz::setup(); } */
-
+#include "graphviz.hpp"
 
 static Pass_plugin sample("inou_graphviz", Inou_graphviz::setup);
-
 
 Inou_graphviz::Inou_graphviz(const Eprp_var &var) : Pass("inou.graphviz", var) {
   if (var.has_label("bits")) {
@@ -34,11 +30,9 @@ void Inou_graphviz::setup() {
   register_inou("graphviz", m2);
 }
 
-
-
 void Inou_graphviz::from(Eprp_var &var) {
   Inou_graphviz pp(var);
-  
+
   Graphviz p(pp.bits, pp.verbose, pp.get_odir(var));
 
   for (const auto &l : var.lgs) {
@@ -58,5 +52,4 @@ void Inou_graphviz::hierarchy(Eprp_var &var) {
     p.do_hierarchy(l);
   }
 }
-
 
