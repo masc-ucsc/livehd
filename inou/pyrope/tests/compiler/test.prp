@@ -1,7 +1,21 @@
-$foo.a.b.__bits = 3
-$bar.__bits = 3
+// $foo.a.b.__bits = 3
+// $bar.__bits = 3
 
-%otup.c.d = $bar + 5
-%out = $foo.a.b + $bar
+// %otup.c.d = $bar + 5
+// %out = $foo.a.b + $bar
 
 
+%z.__bits = 2
+x = $a xor $b
+
+adder = ::{
+    %s = $c + $d
+}
+
+if (x > y) {
+    %z = 0
+} else {
+    %z = 1
+}
+
+%z = adder($c = 1, $d = 2)
