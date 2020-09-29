@@ -1,5 +1,5 @@
 CXXFLAGS=-std=c++17 -I../../ -I../../../lbench/include
-CXXFLAGS+=-O0
+CXXFLAGS+=-O3
 #make this -O3 for final optimized run.
 CXXFLAGS+=-g
 CXXFLAGS+=-DSIMLIB_TRACE
@@ -8,12 +8,13 @@ CXXFLAGS+=-DSIMLIB_VCD
 all: sample
 
 SIMLIB_OBJS=vcd_writer.o
-GENERATED_OBJS=sample1_stage.o  sample2_stage.o  sample3_stage.o  sample_stage.o
+#GENERATED_OBJS=sample1_stage.o  sample2_stage.o  sample3_stage.o  sample_stage.o
+GENERATED_OBJS=adder_stage.o
 
 sample: livesim_types.hpp.gch $(SIMLIB_OBJS) $(GENERATED_OBJS) main.o
 	$(CXX) $(CXXFLAGS) -o $@ $(SIMLIB_OBJS) $(GENERATED_OBJS) main.o
 
-sample: export SIMLIB_DUMPDIR=${MADA_SCRAP}/simlib
+#SIMLIB_DUMPDIR=${MADA_SCRAP}/simlib
 
 
 # simlib objects
