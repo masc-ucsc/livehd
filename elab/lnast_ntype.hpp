@@ -294,7 +294,7 @@ protected:
     "func_call",
     "func_def",
     "=",
-    ":=",
+    "=",//dp_assign
     "as",
     "=",
     "_",
