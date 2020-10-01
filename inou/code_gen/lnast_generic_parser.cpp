@@ -3,14 +3,52 @@
 #include <unistd.h>
 #include <cstring>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
+#include "code_gen_all_lang.hpp"
 
-std::string Prp_parser::ref_name(std::string prp_term){
+std::string Prp_parser::ref_name(std::string prp_term, bool ){
     return prp_term;
 }
 
-std::string Prp_parser::ref_name(std::string_view prp_term){
+std::string Prp_parser::ref_name(std::string_view prp_term, bool ){
+    return std::string(prp_term);
+}
+
+std::string Cpp_parser::ref_name(std::string prp_term, bool strct ) {
+  if(Code_gen_all_lang::has_prefix(prp_term)) {
+    if(Code_gen_all_lang::is_output(prp_term) && strct==true) {
+      return (absl::StrCat("outputs.", prp_term.substr(1)));
+    }
+    return prp_term.substr(1);
+  } else
+    return prp_term;
+}
+
+std::string Cpp_parser::ref_name(std::string_view prp_term, bool strct ) {
+  if(Code_gen_all_lang::has_prefix(prp_term)) {
+    std::string _prp_term = std::string(prp_term);
+    if(Code_gen_all_lang::is_output(prp_term) && strct==true) {
+      return (absl::StrCat("outputs.", _prp_term.substr(1)));
+    }
+    return _prp_term.substr(1);
+  } else
+    return std::string(prp_term);
+}
+
+std::string Ver_parser::ref_name(std::string prp_term, bool ) {
+  if(Code_gen_all_lang::has_prefix(prp_term)) {
+    return prp_term.substr(1);
+  } else
+    return prp_term;
+}
+
+std::string Ver_parser::ref_name(std::string_view prp_term, bool) {
+  if(Code_gen_all_lang::has_prefix(prp_term)) {
+    std::string _prp_term = std::string(prp_term);
+    return _prp_term.substr(1);
+  } else
     return std::string(prp_term);
 }
 
@@ -131,9 +169,27 @@ std::string Cpp_parser::supporting_fend(std::string basename_s){
 std::string Cpp_parser::supp_buffer_to_print(std::string modname) {
   std::string header_strt = absl::StrCat("class ", modname, "_sim {\npublic:\n  uint64_t hidx;\n  ");
 
-  std::string outps_nline;
-  for (auto const& [key, val] : outp_bw) {
-    absl::StrAppend(&outps_nline, "UInt<", val, "> ", key, ";\n  ");
+  std::string outps_nline ;
+  if (!outp_bw.empty()) {
+    outps_nline = "struct {";
+    for (auto const& [key, val] : outp_bw) {
+      absl::StrAppend(&outps_nline, "UInt<", val, "> ", key, ", ");
+    }
+    outps_nline.pop_back();
+    outps_nline.pop_back();
+    absl::StrAppend(&outps_nline, "} outputs;\n");
+  }
+
+  std::string regs_nline, regs_next_nline; 
+  if (!reg_bw.empty()) {
+    regs_nline = "struct {";
+    for (auto const& [key, val] : reg_bw) {
+      absl::StrAppend(&regs_nline, "UInt<", val, "> ", key, ", ");
+    }
+    regs_nline.pop_back();
+    regs_nline.pop_back();
+    absl::StrAppend(&regs_next_nline, regs_nline, "} regs_next;");
+    absl::StrAppend(&regs_nline, "} regs;");
   }
 
 //  std::string inps_csv;
@@ -169,7 +225,7 @@ std::string Cpp_parser::supp_buffer_to_print(std::string modname) {
 
 
   std::string vcd_funcs = absl::StrCat("  ", modname, "_sim(uint64_t _hidx, const std::string &parent_name, vcd::VCDWriter* writer);\n  void vcd_reset_cycle();\n  void vcd_posedge();\n  void vcd_negedge();\n  void vcd_comb(", inps_csv, ");\n");
-  auto answer = absl::StrCat(header_strt, outps_nline, funcs, vcd_params, vcd_varptrs, vcd_funcs, "\n};");
+  auto answer = absl::StrCat(header_strt, outps_nline, regs_nline, regs_next_nline, funcs, vcd_params, vcd_varptrs, vcd_funcs, "\n};");
   absl::StrAppend(&supp_file_final_str, answer);
   return answer;
 }
@@ -224,8 +280,8 @@ int Cpp_parser::indent_final_system() {
   return 1;
 }
 
-void Cpp_parser::for_vcd_comb(std::string_view key) {
-    absl::StrAppend(&buff_to_print_vcd, "vcd_writer->change(vcd_", key, ", ", key, ".to_string_binary());\n");
+void Cpp_parser::for_vcd_comb(std::string_view key1, std::string_view key2) {
+    absl::StrAppend(&buff_to_print_vcd, "vcd_writer->change(vcd_", key1, ", ", key2, ".to_string_binary());\n");
 }
 
 std::string Cpp_parser::final_print(std::string modname, std::string buffer_to_print) {
@@ -236,12 +292,12 @@ std::string Cpp_parser::final_print(std::string modname, std::string buffer_to_p
   std::string rst_vals_nline;
   std::string rst_vals_nline_vcd;
   for (auto const& [key, val] : outp_bw) {
-    absl::StrAppend(&rst_vals_nline, "  ", key, " = UInt<", val, "> (0);\n");
-    absl::StrAppend(&rst_vals_nline_vcd, "vcd_writer->change(vcd_", key, ", ", key, ".to_string_binary());\n");
+    absl::StrAppend(&rst_vals_nline, "  outputs.", key, " = UInt<", val, "> (0);\n");
+    absl::StrAppend(&rst_vals_nline_vcd, "  vcd_writer->change(vcd_", key, ", outputs.", key, ".to_string_binary());\n");
   }
   for (auto const& [key, val]:reg_bw) {
-    absl::StrAppend(&rst_vals_nline, "  ", key, " = UInt<", val, "> (0);\n");
-    absl::StrAppend(&rst_vals_nline_vcd, "vcd_writer->change(vcd_", key, ", ", key, ".to_string_binary());\n");
+    absl::StrAppend(&rst_vals_nline, "  regs.", key, " = UInt<", val, "> (0);\n");
+    absl::StrAppend(&rst_vals_nline_vcd, "  vcd_writer->change(vcd_", key, ", regs.", key, ".to_string_binary());\n");
   }
   std::string reset_vcd = absl::StrCat("void ", modname, "::vcd_reset_cycle() {\n", rst_vals_nline, rst_vals_nline_vcd, "}\n");
   std::string reset_func = absl::StrCat("void ", modname, "::reset_cycle() {\n", rst_vals_nline, "}\n");
@@ -256,7 +312,7 @@ std::string Cpp_parser::final_print(std::string modname, std::string buffer_to_p
   absl::StrAppend(&negedge_vcd, "}\n");
 
   //main code part function
-  std::string main_func_vcd = absl::StrCat("void ",  modname, "_sim::vcd_comb(", inps_csv, ") {\n",  buffer_to_print,  buff_to_print_vcd, "\n}");
+  std::string main_func_vcd = absl::StrCat("void ",  modname, "_sim::vcd_comb(", inps_csv, ") {\n",  buffer_to_print, "  ",  buff_to_print_vcd, "\n}");
   std::string main_func = absl::StrCat("void ",  modname, "_sim::cycle(", inps_csv, ") {\n",  buffer_to_print, "\n}");
   auto answer = absl::StrCat(constructor_vcd, "\n", constructor, "\n", reset_vcd, "\n", reset_func, "\n", posedge_vcd, "\n", negedge_vcd, "\n",  main_func, "\n", main_func_vcd, "\n");
   absl::StrAppend(&main_file_final_str, answer);
