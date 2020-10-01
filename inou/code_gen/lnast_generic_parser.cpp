@@ -226,7 +226,6 @@ int Cpp_parser::indent_final_system() {
 
 void Cpp_parser::for_vcd_comb(std::string_view key) {
     absl::StrAppend(&buff_to_print_vcd, "vcd_writer->change(vcd_", key, ", ", key, ".to_string_binary());\n");
-
 }
 
 std::string Cpp_parser::final_print(std::string modname, std::string buffer_to_print) {
@@ -244,26 +243,32 @@ std::string Cpp_parser::final_print(std::string modname, std::string buffer_to_p
     absl::StrAppend(&rst_vals_nline, "  ", key, " = UInt<", val, "> (0);\n");
     absl::StrAppend(&rst_vals_nline_vcd, "vcd_writer->change(vcd_", key, ", ", key, ".to_string_binary());\n");
   }
-  std::string reset_vcd = absl::StrCat("void ", modname, "::reset_cycle() {\n", rst_vals_nline, rst_vals_nline_vcd, "}\n");
-  std::string reset_func = absl::StrCat("void ", modname, "::vcd_reset_cycle() {\n", rst_vals_nline, "}\n");
+  std::string reset_vcd = absl::StrCat("void ", modname, "::vcd_reset_cycle() {\n", rst_vals_nline, rst_vals_nline_vcd, "}\n");
+  std::string reset_func = absl::StrCat("void ", modname, "::reset_cycle() {\n", rst_vals_nline, "}\n");
 
-  std::string posedge_vcd = absl::StrCat("void ", modname, "::vcd_posedge(){\n  vcd_writer->change(", sys_clock, ", \"1\");\n}\n");
-  std::string negedge_vcd = absl::StrCat("void ", modname, "::vcd_negedge(){\n  vcd_writer->change(", sys_clock, ", \"0\");\n}\n");
+  std::string posedge_vcd = absl::StrCat("void ", modname, "::vcd_posedge(){\n");
+  std::string negedge_vcd = absl::StrCat("void ", modname, "::vcd_negedge(){\n");
+  if(sys_clock!="") {
+    absl::StrAppend(&posedge_vcd, "  vcd_writer->change(", sys_clock, ", \"1\");\n");
+    absl::StrAppend(&negedge_vcd, "  vcd_writer->change(", sys_clock, ", \"0\");\n");
+  }
+  absl::StrAppend(&posedge_vcd, "}\n");
+  absl::StrAppend(&negedge_vcd, "}\n");
 
   //main code part function
-  std::string main_func_vcd = absl::StrCat("void "+ modname+"_sim::vcd_comb(", inps_csv, ") {\n"+ buffer_to_print+ buff_to_print_vcd, "\n}");
-  std::string main_func = absl::StrCat("void "+ modname+"_sim::cycle(", inps_csv, ") {\n"+ buffer_to_print+"\n}");
+  std::string main_func_vcd = absl::StrCat("void ",  modname, "_sim::vcd_comb(", inps_csv, ") {\n",  buffer_to_print,  buff_to_print_vcd, "\n}");
+  std::string main_func = absl::StrCat("void ",  modname, "_sim::cycle(", inps_csv, ") {\n",  buffer_to_print, "\n}");
   auto answer = absl::StrCat(constructor_vcd, "\n", constructor, "\n", reset_vcd, "\n", reset_func, "\n", posedge_vcd, "\n", negedge_vcd, "\n",  main_func, "\n", main_func_vcd, "\n");
   absl::StrAppend(&main_file_final_str, answer);
   return answer;
 }
 
 std::string Prp_parser::final_print(std::string , std::string buffer_to_print) {
- return absl::StrCat(buffer_to_print+"\n");
+ return absl::StrCat(buffer_to_print, "\n");
 }
 
 std::string Ver_parser::final_print(std::string, std::string buffer_to_print) {
- return absl::StrCat(buffer_to_print+"\n");
+ return absl::StrCat(buffer_to_print, "\n");
 }
 
 

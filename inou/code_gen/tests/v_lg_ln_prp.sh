@@ -3,7 +3,8 @@ rm -rf ./lgdb
 rm -rf ./lgdb2
 rm -rf ./*.dot
 rm -rf ./*.pdf
-pts='consts'
+#pts='consts trivial add'
+pts='trivial add'
 
 
 LGSHELL=./bazel-bin/main/lgshell
@@ -25,7 +26,8 @@ do
     echo "----------------------------------------------------"
     echo "Verilog -> LGraph"
     echo "----------------------------------------------------"
-    ${LGSHELL} "inou.yosys.tolg files:inou/yosys/tests/${pt}.v top:${pt} |> pass.cprop |> pass.cprop |> inou.graphviz.from "
+    #${LGSHELL} "inou.yosys.tolg files:inou/yosys/tests/${pt}.v top:${pt} |> pass.cprop |> pass.cprop |> inou.graphviz.from "
+    ${LGSHELL} "inou.yosys.tolg files:inou/yosys/tests/${pt}.v top:${pt} |> lgraph.dump"
     if [ $? -eq 0 ]; then
       echo "Successfully created the inital LGraph using Yosys: ${pt}.v"
     else
@@ -34,19 +36,20 @@ do
     fi
     ##mv ${pt}.dot ${pt}.origlg.dot
     ##mv ${pt}.lnast.dot 
-    dot -Tpdf -o ${pt}.dot.pdf ${pt}.dot
+    #dot -Tpdf -o ${pt}.dot.pdf ${pt}.dot
 
     echo ""
     echo "----------------------------------------------------"
     echo "LGraph to LNAST to code_gen(prp)"
     echo "----------------------------------------------------"
-    ${LGSHELL} "lgraph.match |> pass.lnast_fromlg |> lnast.dump |> inou.graphviz.from |> inou.code_gen.prp"
+    #${LGSHELL} "lgraph.match |> pass.lnast_fromlg |> lnast.dump |> inou.graphviz.from |> inou.code_gen.prp"
+    ${LGSHELL} "lgraph.match |> pass.lnast_fromlg |> lnast.dump |> inou.code_gen.prp"
     if [ $? -eq 0 ]; then
       echo "Successfully created the LNAST for: ${pt}.v"
     else
       echo "ERROR: Failed to optimize design on new lg, testcase: ${pt}.v"
       exit 1
     fi
-    dot -Tpdf -o ${pt}.lnast.dot.pdf ${pt}.lnast.dot
+#    dot -Tpdf -o ${pt}.lnast.dot.pdf ${pt}.lnast.dot
 
 done #end of for
