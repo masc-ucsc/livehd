@@ -18,8 +18,8 @@ public:
   std::string_view for_cond_mid() final;
   std::string_view for_cond_beg() final;
   std::string_view for_cond_end() final;
-  std::string ref_name(std::string prp_term) final;
-  std::string ref_name(std::string_view prp_term) final;
+  std::string ref_name(std::string prp_term, bool strct = true) final;
+  std::string ref_name(std::string_view prp_term, bool strct = true) final;
 
   std::string final_print(std::string modname, std::string buffer_to_print) final;
 
@@ -52,6 +52,8 @@ public:
   std::string_view for_cond_mid() final;
   std::string_view for_cond_beg() final;
   std::string_view for_cond_end() final;
+  std::string ref_name(std::string prp_term, bool strct = true) final;
+  std::string ref_name(std::string_view prp_term, bool strct = true) final;
   std::string starter(std::string_view filename) final;
 //header related functions:
   std::string_view supporting_ftype() final;
@@ -67,7 +69,7 @@ public:
   std::string final_print(std::string modname, std::string buffer_to_print) final;
   int indent_final_system() final;
   void result_in_odir(std::string_view fname, std::string_view odir, std::string buffer_to_print) final;
-  void for_vcd_comb(std::string_view key) final;
+  void for_vcd_comb(std::string_view key1, std::string_view key2) final;
 };
 
 //-------------------------------------------------------------------------------------
@@ -91,6 +93,8 @@ public:
   std::string_view for_cond_mid() final;
   std::string_view for_cond_beg() final;
   std::string_view for_cond_end() final;
+  std::string ref_name(std::string prp_term, bool strct = true) final;
+  std::string ref_name(std::string_view prp_term, bool strct = true) final;
   std::string_view assign_node_strt() final;
 
   std::string final_print(std::string modname, std::string buffer_to_print) final;

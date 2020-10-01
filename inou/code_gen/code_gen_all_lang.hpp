@@ -71,20 +71,11 @@ else
   bool has_prefix(std::string_view test_string) {
     return (test_string.find("$")==0 || test_string.find("#") ==0 || test_string.find("%") == 0);
   }
-  virtual std::string ref_name(std::string_view prp_term) {
-    if(Code_gen_all_lang::has_prefix(prp_term)) {
-      std::string _prp_term = std::string(prp_term);
-      return _prp_term.substr(1);
-    } else
-      return std::string(prp_term);
+  bool is_output(std::string_view test_string) {
+    return (test_string.find("%") == 0);
   }
-
-  virtual std::string ref_name(std::string prp_term) {
-    if(Code_gen_all_lang::has_prefix(prp_term)) {
-      return prp_term.substr(1);
-    } else
-      return prp_term;
-  }
+  virtual std::string ref_name(std::string_view prp_term, bool strct = true) = 0;//if you do not want "outputs." to appear before the output variable in cpp, then use "false" as second parameter
+  virtual std::string ref_name(std::string prp_term, bool strct = true) = 0;//if you do not want "outputs." to appear before the output variable in cpp, then use "false" as second parameter
 
   //in verilog, assign stmt starts with assign keyword. thus this function.
   virtual std::string_view assign_node_strt() {return "";}
@@ -110,6 +101,6 @@ else
   //odir related:
   virtual void result_in_odir(std::string_view fname, std::string_view odir, std::string buffer_to_print) =0;
 
-  virtual void for_vcd_comb(std::string_view ) {return ;};
+  virtual void for_vcd_comb(std::string_view , std::string_view) {return ;};
 };
 
