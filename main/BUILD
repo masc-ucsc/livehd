@@ -25,7 +25,7 @@ cc_binary(
 
 #Renau            "//pass/bitwidth:pass_bitwidth",
             "//pass/common:pass",
-#Renau            "//pass/cprop:pass_cprop",
+            "//pass/cprop:pass_cprop",
             "//pass/fplan:fplan",
 #Renau       "//pass/lec:pass_lec",
             "//pass/lnast_fromlg:pass_lnast_fromlg",

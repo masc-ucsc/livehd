@@ -203,7 +203,7 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
       break;
     case Ntype_op::AttrGet:
       switch(pid) {
-        case 0: return "var_name";
+        case 0: return "name";
         case 5: return "field";
         default: return "invalid";
       }

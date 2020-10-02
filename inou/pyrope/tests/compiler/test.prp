@@ -5,17 +5,7 @@
 // %out = $foo.a.b + $bar
 
 
-%z.__bits = 2
-x = $a xor $b
+$a.__bits = 3
+$b.__bits = 2
 
-adder = ::{
-    %s = $c + $d
-}
-
-if (x > y) {
-    %z = 0
-} else {
-    %z = 1
-}
-
-%z = adder($c = 1, $d = 2)
+%o = $a + $b
