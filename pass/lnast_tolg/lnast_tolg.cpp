@@ -27,10 +27,10 @@ std::vector<LGraph *> Lnast_tolg::do_tolg(std::shared_ptr<Lnast> ln, const Lnast
 
 
 void Lnast_tolg::top_stmts2lgraph(LGraph *dfg, const Lnast_nid &lnidx_stmts) {
-  fmt::print("============================= Phase-1: LNAST->LGraph Start ===============================================\n");
+  fmt::print("======== Phase-1: LNAST->LGraph Start ================================\n");
   process_ast_stmts(dfg, lnidx_stmts);
 
-  fmt::print("============================= Phase-2: Adding final Module IOs and Final Dpin Name ===================\n");
+  fmt::print("======== Phase-2: Adding final Module IOs and Final Dpin Name ========\n");
   setup_lgraph_ios_and_final_var_name(dfg);
 
   dfg->ref_self_sub_node()->populate_graph_pos();
@@ -326,7 +326,7 @@ Node Lnast_tolg::process_ast_assign_op(LGraph *dfg, const Lnast_nid &lnidx_assig
 
 void Lnast_tolg::process_ast_dp_assign_op(LGraph *dfg, const Lnast_nid &lnidx_dp_assign) {
   auto aset_node = dfg->create_node(Ntype_op::AttrSet);
-  auto vn_spin   = aset_node.setup_sink_pin("var_name"); // variable name
+  auto vn_spin   = aset_node.setup_sink_pin("name");     // variable name
   auto af_spin   = aset_node.setup_sink_pin("field");    // attribute field
   auto av_spin   = aset_node.setup_sink_pin("value");    // attribute value
 
@@ -536,7 +536,7 @@ void Lnast_tolg::process_ast_tuple_get_op(LGraph *dfg, const Lnast_nid &lnidx_tg
         auto aset_ancestor_dpin = vname2attr_dpin[c0_tg_vname];
         dfg->add_edge(aset_ancestor_dpin, aset_aci_spin);
 
-        auto aset_vn_spin = aset_node.setup_sink_pin("var_name");
+        auto aset_vn_spin = aset_node.setup_sink_pin("name");
         auto aset_vn_dpin = tup_get.get_driver_pin();
         dfg->add_edge(aset_vn_dpin, aset_vn_spin);
 
@@ -821,7 +821,7 @@ Node Lnast_tolg::setup_node_opr_and_lhs(LGraph *dfg, const Lnast_nid &lnidx_opr)
     auto aset_ancestor_dpin = vname2attr_dpin[lhs_vname];
     dfg->add_edge(aset_ancestor_dpin, aset_chain_spin);
 
-    auto aset_vn_spin = aset_node.setup_sink_pin("var_name");
+    auto aset_vn_spin = aset_node.setup_sink_pin("name");
     auto aset_vn_dpin = lg_opr_node.get_driver_pin();
     dfg->add_edge(aset_vn_dpin, aset_vn_spin);
 
@@ -925,7 +925,7 @@ Node_pin Lnast_tolg::setup_node_assign_and_lhs(LGraph *dfg, const Lnast_nid &lni
     auto aset_ancestor_dpin = vname2attr_dpin[lhs_vname];
     dfg->add_edge(aset_ancestor_dpin, aset_chain_spin);
 
-    auto aset_vn_spin = aset_node.setup_sink_pin("var_name");
+    auto aset_vn_spin = aset_node.setup_sink_pin("name");
     auto aset_vn_dpin = assign_node.get_driver_pin("Y");
     dfg->add_edge(aset_vn_dpin, aset_vn_spin);
 
@@ -1057,7 +1057,7 @@ void Lnast_tolg::process_ast_attr_set_op (LGraph *dfg, const Lnast_nid &lnidx_as
   auto vname        = lnast->get_vname(c0_aset);  // no-ssa name
 
   auto aset_node = dfg->create_node(Ntype_op::AttrSet);
-  auto vn_spin   = aset_node.setup_sink_pin("var_name"); // variable name
+  auto vn_spin   = aset_node.setup_sink_pin("name");     // variable name
   auto av_spin   = aset_node.setup_sink_pin("value");    // attribute value
   auto af_spin   = aset_node.setup_sink_pin("field");    // attribute field
 
@@ -1117,8 +1117,8 @@ void Lnast_tolg::process_ast_attr_get_op(LGraph *dfg, const Lnast_nid &lnidx_age
   }
 
   auto aget_node = dfg->create_node(Ntype_op::AttrGet);
-  auto vn_spin   = aget_node.setup_sink_pin("var_name"); // variable name
-  auto af_spin   = aget_node.setup_sink_pin("field");       // attribute field
+  auto vn_spin   = aget_node.setup_sink_pin("name");  // variable name
+  auto af_spin   = aget_node.setup_sink_pin("field"); // attribute field
 
 
   /* I(name2dpin.find(c1_aget_name) != name2dpin.end()); */
@@ -1219,7 +1219,7 @@ void Lnast_tolg::subgraph_io_connection(LGraph *dfg, Sub_node* sub, std::string_
         auto aset_ancestor_dpin = vname2attr_dpin[res_vname];
         dfg->add_edge(aset_ancestor_dpin, aset_chain_spin);
 
-        auto aset_vn_spin = aset_node.setup_sink_pin("var_name");
+        auto aset_vn_spin = aset_node.setup_sink_pin("name");
         auto aset_vn_dpin = scalar_dpin;
         dfg->add_edge(aset_vn_dpin, aset_vn_spin);
 
@@ -1467,7 +1467,7 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(LGraph *dfg) {
           auto attr_key_dpin = setup_field_dpin(dfg, "__last_value");
           auto attr_key_spin = it.setup_sink_pin("field");
           dfg->add_edge(attr_key_dpin, attr_key_spin);
-          auto wire_spin = it.get_sink_pin("var_name");
+          auto wire_spin = it.get_sink_pin("tuple_name");
           dfg->add_edge(vname_dpin, wire_spin);
         } else {
           I(it != vname_dpin.get_node());

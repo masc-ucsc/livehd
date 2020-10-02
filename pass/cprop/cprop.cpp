@@ -33,7 +33,7 @@ void Cprop::collapse_forward_same_op(Node &node, XEdge_iterator &inp_edges_order
 
     for (auto &inp : inp_edges_ordered) {
       TRACE(fmt::print("cprop same_op pin:{} to pin:{}\n", inp.driver.debug_name(), out.sink.debug_name()));
-      if (op == Xor_Op) {
+      if (op == Ntype_op::Xor) {
         // fmt::print("cprop xor pin:{} node.size:{} sink.size:{}\n",inp.driver.debug_name(), node.get_num_edges(),
         // inp.driver.get_node().get_num_edges()); if (out.sink.is_connected(inp.driver)) {
         if (inp.driver.is_connected(out.sink)) {
@@ -41,11 +41,11 @@ void Cprop::collapse_forward_same_op(Node &node, XEdge_iterator &inp_edges_order
         } else {
           out.sink.connect_driver(inp.driver);
         }
-      } else if (op == Or_Op || op == And_Op) {
+      } else if (op == Ntype_op::Or || op == Ntype_op::And) {
         // fmt::print("cprop simplified forward or/and pin:{}\n",inp.driver.debug_name());
         out.sink.connect_driver(inp.driver);
       } else {
-        I(op != Sum_Op);  // handled at collapse_forward_sum
+        I(op != Ntype_op::Sum);  // handled at collapse_forward_sum
         out.sink.connect_driver(inp.driver);
       }
     }
@@ -61,10 +61,10 @@ void Cprop::collapse_forward_same_op(Node &node, XEdge_iterator &inp_edges_order
 
 void Cprop::collapse_forward_sum(Node &node, XEdge_iterator &inp_edges_ordered) {
   auto op = node.get_type_op();
-  I(op == Sum_Op);
+  I(op == Ntype_op::Sum);
   bool all_edges_deleted = true;
   for (auto &out : node.out_edges()) {
-    if (out.sink.get_node().get_type_op() != Sum_Op) {
+    if (out.sink.get_node().get_type_op() != Ntype_op::Sum) {
       all_edges_deleted = false;
       continue;
     }
@@ -72,7 +72,8 @@ void Cprop::collapse_forward_sum(Node &node, XEdge_iterator &inp_edges_ordered) 
     auto next_sum_node = out.sink.get_node();
     for (auto &inp : inp_edges_ordered) {
       TRACE(fmt::print("cprop same_op pin:{} to pin:{}\n", inp.driver.debug_name(), out.sink.debug_name()));
-      auto next_sum_spin = next_sum_node.setup_sink_pin(inp.sink.get_pid());  // Connect same PID
+      auto sink_name = Ntype::get_sink_name(Ntype_op::Sum, inp.sink.get_pid());
+      auto next_sum_spin = next_sum_node.setup_sink_pin(sink_name);  // Connect same PID
       next_sum_spin.connect_driver(inp.driver);
     }
     TRACE(fmt::print("cprop same_op del_edge pin:{} to pin:{}\n", out.driver.debug_name(), out.sink.debug_name()));
@@ -118,7 +119,7 @@ void Cprop::collapse_forward_always_pin0(Node &node, XEdge_iterator &inp_edges_o
         continue;
       }
       TRACE(fmt::print("cprop forward_always pin:{} to pin:{}\n", inp.driver.debug_name(), out.sink.debug_name()));
-      if (op == Xor_Op) {
+      if (op == Ntype_op::Xor) {
         if (inp.driver.is_connected(out.sink)) {
           out.sink.del_driver(inp.driver);
         } else {
@@ -166,18 +167,18 @@ void Cprop::try_collapse_forward(Node &node, XEdge_iterator &inp_edges_ordered) 
   auto op = node.get_type_op();
 
   if (inp_edges_ordered.size() == 1) {
-    if (op == Sum_Op || op == Mult_Op || op == Div_Op || op == Mod_Op || op == Join_Op || op == And_Op || op == Or_Op
-        || op == Xor_Op) {
+    if (op == Ntype_op::Sum || op == Ntype_op::Mult || op == Ntype_op::Div || op == Ntype_op::And || op == Ntype_op::Or
+        || op == Ntype_op::Xor) {
       collapse_forward_always_pin0(node, inp_edges_ordered);
       return;
     }
   }
 
-  if (op == Sum_Op) {
+  if (op == Ntype_op::Sum) {
     collapse_forward_sum(node, inp_edges_ordered);
-  } else if (op == Mult_Op || op == And_Op || op == Or_Op || op == Xor_Op) {
+  } else if (op == Ntype_op::Mult || op == Ntype_op::And || op == Ntype_op::Or || op == Ntype_op::Xor) {
     collapse_forward_same_op(node, inp_edges_ordered);
-  } else if (op == Mux_Op) {
+  } else if (op == Ntype_op::Mux) {
     // If all the options are the same. Collapse forward
     auto &a_pin = inp_edges_ordered[1].driver;
     for (auto i = 2u; i < inp_edges_ordered.size(); ++i) {
@@ -190,7 +191,7 @@ void Cprop::try_collapse_forward(Node &node, XEdge_iterator &inp_edges_ordered) 
 
 void Cprop::replace_part_inputs_const(Node &node, XEdge_iterator &inp_edges_ordered) {
   auto op = node.get_type_op();
-  if (op == Mux_Op) {
+  if (op == Ntype_op::Mux) {
     auto s_node = inp_edges_ordered[0].driver.get_node();
     if (!s_node.is_type_const())
       return;
@@ -207,7 +208,7 @@ void Cprop::replace_part_inputs_const(Node &node, XEdge_iterator &inp_edges_orde
     }
 
     collapse_forward_for_pin(node, a_pin);
-  } else if (op == Sum_Op) {
+  } else if (op == Ntype_op::Sum) {
     int n_replace = 0;
     for (auto &i : inp_edges_ordered) {
       if (i.driver.get_node().is_type_const())
@@ -221,9 +222,9 @@ void Cprop::replace_part_inputs_const(Node &node, XEdge_iterator &inp_edges_orde
           continue;
 
         auto c = i.driver.get_node().get_type_const();
-        if (i.sink.get_pid() == 0 || i.sink.get_pid() == 1) {
+        if (i.sink.get_pid() == 0) {
           result = result + c;
-        } else {
+        } else if (i.sink.get_pid() == 1){
           result = result - c;
         }
         i.del_edge();
@@ -231,9 +232,9 @@ void Cprop::replace_part_inputs_const(Node &node, XEdge_iterator &inp_edges_orde
       auto new_node = node.get_class_lgraph()->create_node_const(result);
       auto dpin     = new_node.get_driver_pin();
       if (result < 0) {
-        node.setup_sink_pin(1).connect_driver(dpin);  // signed pin
+        node.setup_sink_pin("B").connect_driver(dpin);  // signed pin
       } else {
-        node.setup_sink_pin(0).connect_driver(dpin);  // unsigned pin
+        node.setup_sink_pin("A").connect_driver(dpin);  // unsigned pin
       }
     }
   }
@@ -242,24 +243,7 @@ void Cprop::replace_part_inputs_const(Node &node, XEdge_iterator &inp_edges_orde
 void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_ordered) {
   // simple constant propagation
   auto op = node.get_type_op();
-  if (op == Join_Op) {
-    Lconst result;
-
-    for (auto rit = inp_edges_ordered.rbegin(); rit != inp_edges_ordered.rend(); ++rit) {
-      auto &i = *rit;
-
-      result = result << i.driver.get_bits();
-      auto c = i.driver.get_node().get_type_const();
-      I(c.get_bits() <= i.driver.get_bits());
-      result = result | c;
-    }
-    result = result.adjust_bits(node.get_driver_pin().get_bits());
-
-    TRACE(fmt::print("cprop: join to {}\n", result.to_pyrope()));
-
-    replace_node(node, result);
-
-  } else if (op == ShiftLeft_Op) {
+  if (op == Ntype_op::SHL) {
     Lconst val = node.get_sink_pin("A").get_driver_node().get_type_const();
     Lconst amt = node.get_sink_pin("B").get_driver_node().get_type_const();
 
@@ -268,13 +252,13 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
     TRACE(fmt::print("cprop: shl to {} ({}<<{})\n", result.to_pyrope(), val.to_pyrope(), amt.to_pyrope()));
 
     replace_node(node, result);
-  } else if (op == Sum_Op) {
+  } else if (op == Ntype_op::Sum) {
     Lconst result;
     for (auto &i : inp_edges_ordered) {
       auto c = i.driver.get_node().get_type_const();
-      if (i.sink.get_pid() == 0 || i.sink.get_pid() == 1) {
+      if (i.sink.get_pid() == 0) {
         result = result + c;
-      } else {
+      } else { //pid = 1
         result = result - c;
       }
     }
@@ -282,7 +266,7 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
     TRACE(fmt::print("cprop: add node:{} to {}\n", node.debug_name(), result.to_pyrope()));
 
     replace_node(node, result);
-  } else if (op == Or_Op) {
+  } else if (op == Ntype_op::Or) {
     Bits_t max_bits = 0;
     for (auto &i : inp_edges_ordered) {
       auto c = i.driver.get_node().get_type_const();
@@ -301,7 +285,7 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
 
     replace_logic_node(node, result, result_reduced);
 
-  } else if (op == And_Op) {
+  } else if (op == Ntype_op::And) {
     Bits_t max_bits = 0;
     for (auto &i : inp_edges_ordered) {
       auto c = i.driver.get_node().get_type_const();
@@ -320,7 +304,7 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
 
     replace_logic_node(node, result, result_reduced);
 
-  } else if (op == Equals_Op) {
+  } else if (op == Ntype_op::EQ) {
     bool eq = true;
     I(inp_edges_ordered.size() > 1);
     auto first = inp_edges_ordered[0].driver.get_node().get_type_const();
@@ -334,7 +318,7 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
     TRACE(fmt::print("cprop: eq node:{} to {}\n", node.debug_name(), result.to_pyrope()));
 
     replace_node(node, result);
-  } else if (op == Mux_Op) {
+  } else if (op == Ntype_op::Mux) {
     auto sel_const = inp_edges_ordered[0].driver.get_node().get_type_const();
     I(sel_const.is_i());  // string with ??? in mux? Give me test case to debug
 
@@ -383,6 +367,7 @@ void Cprop::replace_node(Node &node, const Lconst &result) {
   node.del_node();
 }
 
+// FIXME: not sure
 void Cprop::replace_logic_node(Node &node, const Lconst &result, const Lconst &result_reduced) {
   Node_pin dpin_0;
   Node_pin dpin_1;
@@ -482,16 +467,16 @@ void Cprop::process_attr_q_pin(Node &node, Node_pin &parent_dpin) {
 }
 
 bool Cprop::process_attr_get(Node &node) {
-  I(node.get_type_op() == AttrGet_Op);
+  I(node.get_type_op() == Ntype_op::AttrGet);
 
-  if (!node.has_sink_pin_connected(0) || !node.has_sink_pin_connected(1))
+  if (!node.is_sink_connected("var_name") || !node.is_sink_connected("field"))
     return false;
 
   // Either pos or name
-  auto parent_dpin   = node.get_sink_pin(0).get_driver_pin();
-  auto key_name_dpin = node.get_sink_pin(1).get_driver_pin();
+  auto parent_dpin   = node.get_sink_pin("var_name").get_driver_pin();
+  auto key_name_dpin = node.get_sink_pin("field").get_driver_pin();
 
-  I(key_name_dpin.get_node().get_type_op() == TupKey_Op);
+  I(key_name_dpin.get_node().get_type_op() == Ntype_op::TupKey);
   I(key_name_dpin.has_name());
   auto key_name = key_name_dpin.get_name();
   if (key_name.substr(0, 2) == "__") {
@@ -508,21 +493,21 @@ std::tuple<std::string_view, std::string_view, int> Cprop::get_tuple_name_key(No
   std::string_view tup_name;
   std::string_view key_name;
   int              key_pos = -1;
-  if (node.has_sink_pin_connected(1)) {
-    auto node2 = node.get_sink_pin(1).get_driver_node();
-    if (node2.get_type_op() == TupKey_Op)
+  if (node.is_sink_connected("field")) {
+    auto node2 = node.get_sink_pin("field").get_driver_node();
+    if (node2.get_type_op() == Ntype_op::TupKey)
       key_name = node2.get_driver_pin().get_name();
   }
 
-  for(auto dpin:node.get_sink_pin(0).inp_driver()) {
+  for(auto dpin : node.get_sink_pin("tuple_name").inp_driver()) {
     if (dpin.has_name()) {
       tup_name = dpin.get_name();
       break;
     }
   }
 
-  if (node.has_sink_pin_connected(2)) {
-    auto node2 = node.get_sink_pin(2).get_driver_node();
+  if (node.is_sink_connected("position")) {
+    auto node2 = node.get_sink_pin("position").get_driver_node();
     if (node2.is_type_const())
       key_pos = node2.get_type_const().to_i();
   }
@@ -534,15 +519,15 @@ std::tuple<std::string_view, std::string_view, int> Cprop::get_tuple_name_key(No
 }
 
 bool Cprop::process_tuple_get(Node &node) {
-  I(node.get_type_op() == TupGet_Op);
+  I(node.get_type_op() == Ntype_op::TupGet);
 
-  auto parent_dpin = node.get_sink_pin(0).get_driver_pin();
+  auto parent_dpin = node.get_sink_pin("tuple_name").get_driver_pin();
   auto parent_node = parent_dpin.get_node();
 
   auto [tup_name, key_name, key_pos] = get_tuple_name_key(node);
 
   // special case when TG try to get a scalar variable by accessing pos 0
-  if (parent_node.get_type_op() != TupAdd_Op && key_pos == 0 && !parent_dpin.is_invalid()) {
+  if (parent_node.get_type_op() != Ntype_op::TupAdd && key_pos == 0 && !parent_dpin.is_invalid()) {
     collapse_forward_for_pin(node, parent_dpin);
     return true;
   }
@@ -600,11 +585,11 @@ bool Cprop::process_tuple_get(Node &node) {
 
   if (all_tuples) {
     node2tuple[node.get_compact()] = sub_tup;
-  }else{
+  } else {
     I(!any_tuples); // If so, must create attrset for non tup and keep up (conta==0 opt out)
     int conta=0;
     for(auto it:sub_tup->get_all_attributes()) {
-      auto attr_key_node = node.get_lg()->create_node(TupKey_Op);
+      auto attr_key_node = node.get_lg()->create_node(Ntype_op::TupKey);
       auto attr_key_dpin = attr_key_node.setup_driver_pin();
       attr_key_dpin.set_name(it.first);
 
@@ -614,10 +599,10 @@ bool Cprop::process_tuple_get(Node &node) {
         for(auto e:node.inp_edges()) {
           e.del_edge();
         }
-        node.set_type(AttrSet_Op);
-        node.setup_sink_pin("VN").connect_driver(val_dpin);
-        node.setup_sink_pin("AN").connect_driver(attr_key_dpin);
-        node.setup_sink_pin("AV").connect_driver(it.second);
+        node.set_type(Ntype_op::AttrSet);
+        node.setup_sink_pin("var_name").connect_driver(val_dpin);
+        node.setup_sink_pin("field").connect_driver(attr_key_dpin);
+        node.setup_sink_pin("value").connect_driver(it.second);
       }else{
         I(false); // handle multiple attr set (create node)
       }
@@ -636,22 +621,22 @@ std::shared_ptr<Lgtuple> Cprop::process_tuple_add_chain(Node_pin up_dpin) {
     return nullptr;
   }
 
-  I(up_node.get_type_op() == TupAdd_Op || up_node.get_type_op() == TupGet_Op || up_node.get_type_op() == TupRef_Op);
+  I(up_node.get_type_op() == Ntype_op::TupAdd || up_node.get_type_op() == Ntype_op::TupGet || up_node.get_type_op() == Ntype_op::TupRef);
 
   return std::make_shared<Lgtuple>(*(ptup_it->second));
 }
 
 void Cprop::process_tuple_add(Node &node) {
   // Can not delete TupAdd here. Only TupGet can delete up chain if nobody needs the TupAdd
-  I(node.get_type_op() == TupAdd_Op);
+  I(node.get_type_op() == Ntype_op::TupAdd);
 
 
   std::shared_ptr<Lgtuple> parent_ctup;
-  if (node.get_sink_pin(0).is_connected())
-    parent_ctup = process_tuple_add_chain(node.get_sink_pin(0).get_driver_pin());
+  if (node.get_sink_pin("tuple_name").is_connected())
+    parent_ctup = process_tuple_add_chain(node.get_sink_pin("tuple_name").get_driver_pin());
   std::shared_ptr<Lgtuple> chain_ctup;
-  if(node.has_sink_pin_connected(3))
-    chain_ctup = process_tuple_add_chain(node.get_sink_pin(3).get_driver_pin());
+  if(node.is_sink_connected("value"))
+    chain_ctup = process_tuple_add_chain(node.get_sink_pin("value").get_driver_pin());
 
   auto [tup_name, key_name, key_pos] = get_tuple_name_key(node);
 
@@ -660,10 +645,11 @@ void Cprop::process_tuple_add(Node &node) {
     if (parent_ctup) {
       //fmt::print("1.TupAdd node:{} tup_name:{} pos:{} key:{}\n", node.debug_name(), tup_name, key_pos, key_name);
       ctup = std::make_shared<Lgtuple>(*parent_ctup);
-    }else{
+    } else {
       //fmt::print("2.TupAdd node:{} tup_name:{} pos:{} key:{}\n", node.debug_name(), tup_name, key_pos, key_name);
       ctup = std::make_shared<Lgtuple>(tup_name);
     }
+
     if (key_pos<0 && key_name.empty()) { // Tuple Concatenation operator
       bool ok = ctup->add(chain_ctup);
       if (!ok) {
@@ -672,32 +658,32 @@ void Cprop::process_tuple_add(Node &node) {
         Pass::error("tuples name:{} pos:{} key:{} can not be merged\n", tup_name, key_pos, key_name);
         return;
       }
-    }else{
+    } else {
       ctup->set(key_name, chain_ctup);  // FIXME: create lgtuple:set(pos,key,tuple)
     }
-  }else{
+  } else {
     if (parent_ctup) {
       //fmt::print("3.TupAdd node:{} tup_name:{} pos:{} key:{}\n", node.debug_name(), tup_name, key_pos, key_name);
       ctup = parent_ctup;
-    }else{
+    } else {
       //fmt::print("4.TupAdd node:{} tup_name:{} pos:{} key:{}\n", node.debug_name(), tup_name, key_pos, key_name);
       ctup = std::make_shared<Lgtuple>(tup_name);
     }
-    if (node.has_sink_pin_connected(3)) {
-      auto val_dpin = node.get_sink_pin(3).get_driver_pin();
+    if (node.is_sink_connected("value")) {
+      auto val_dpin = node.get_sink_pin("value").get_driver_pin();
       if (key_pos<0 && key_name.empty()) { // Tuple Concatenation operator
-        if (!parent_ctup && node.get_sink_pin(0).is_connected()) {
-          ctup->add(node.get_sink_pin(0).get_driver_pin());
+        if (!parent_ctup && node.get_sink_pin("tuple_name").is_connected()) {
+          ctup->add(node.get_sink_pin("tuple_name").get_driver_pin());
         }
         ctup->add(val_dpin);
-      }else{
+      } else {
         bool ok = ctup->set(key_pos, key_name, val_dpin);
         if (!ok) {
           Pass::error("new tuple {} could not add field pos:{} name:{}\n", tup_name, key_pos, key_name);
           return;
         }
       }
-    }else{
+    } else {
       I(parent_ctup); // tup1 = tup2 can have no sink(3)
     }
   }
@@ -727,15 +713,15 @@ void Cprop::do_trans(LGraph *lg) {
     // fmt::print("NEXT: node:{}\n",node.debug_name());
 
     // Special cases to handle in cprop
-    if (op == AttrGet_Op) {
+    if (op == Ntype_op::AttrGet) {
       process_attr_get(node);
       continue;
-    } else if (op == AttrSet_Op) {
+    } else if (op == Ntype_op::AttrSet) {
       continue;  // Nothing to do in cprop
-    } else if (op == SubGraph_Op) {
+    } else if (op == Ntype_op::Sub) {
       process_subgraph(node);
       continue;
-    } else if (op == SFlop_Op || op == AFlop_Op || op == Latch_Op || op == FFlop_Op || op == Memory_Op || op == SubGraph_Op) {
+    } else if (op == Ntype_op::Sflop || op == Ntype_op::Aflop || op == Ntype_op::Latch || op == Ntype_op::Fflop || op == Ntype_op::Memory || op == Ntype_op::Sub) {
       fmt::print("cprop skipping node:{}\n", node.debug_name());
       // FIXME: if flop feeds itself (no update, delete, replace for zero)
       // FIXME: if flop is disconnected *after AttrGet processed*, the flop was not used. Delete
@@ -743,10 +729,10 @@ void Cprop::do_trans(LGraph *lg) {
     } else if (!node.has_outputs()) {
       node.del_node();
       continue;
-    } else if (op == TupAdd_Op) {
+    } else if (op == Ntype_op::TupAdd) {
       process_tuple_add(node);
       continue;
-    } else if (op == TupGet_Op) {
+    } else if (op == Ntype_op::TupGet) {
       auto ok = process_tuple_get(node);
       if (!ok) {
         fmt::print("cprop could not simplify node:{}\n",node.debug_name());
@@ -789,7 +775,7 @@ void Cprop::do_trans(LGraph *lg) {
 
     if (!node.has_outputs()) {
       auto op = node.get_type_op();
-      if (op != SFlop_Op && op != AFlop_Op && op != Latch_Op && op != FFlop_Op && op != Memory_Op && op != SubGraph_Op) {
+      if (op != Ntype_op::Sflop && op != Ntype_op::Aflop && op != Ntype_op::Latch && op != Ntype_op::Fflop && op != Ntype_op::Memory && op != Ntype_op::Sub) {
         // TODO: del_dead_end_nodes(); It can propagate back and keep deleting
         // nodes until it reaches a SubGraph or a driver_pin that has some
         // other outputs. Doing this dead_end_nodes delete iterator can retuce

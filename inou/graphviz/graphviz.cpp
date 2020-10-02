@@ -150,9 +150,6 @@ void Graphviz::populate_lg_data(LGraph *g, std::string_view dot_postfix) {
       auto pos  = node.debug_name().find("_lg_");
       node_info = node.debug_name().substr(0, pos);  // get rid of the lgraph name
       node_info = std::regex_replace(node_info, std::regex("node_"), "n");
-
-      /* if (node.has_cfcnt()) // for temporarily dbg cfcnt*/
-      /*   node_info = node_info + "_" + std::to_string(node.get_cfcnt()); */
     } else {
       node_info = node.debug_name();
     }

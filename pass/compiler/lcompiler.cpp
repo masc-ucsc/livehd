@@ -3,16 +3,20 @@
 #include "lcompiler.hpp"
 #include "inou_graphviz.hpp"
 #include "lnast_tolg.hpp"
+#include "cprop.hpp"
 
 Lcompiler::Lcompiler(std::string_view _path, std::string_view _odir, bool _gviz) 
   : path(_path), odir(_odir), gviz(_gviz) {}
 
 
 void Lcompiler::add_thread(std::shared_ptr<Lnast> ln) {
-  Graphviz gv(gviz, gviz, odir);
+  Graphviz gv(true, false, odir);
   if (gviz) {
     gv.do_from_lnast(ln, "raw"); // rename dot with postfix raw
   }
+  fmt::print("-------------------------------------\n");
+  fmt::print("-------- Pyrope -> LNAST-SSA --------\n");
+  fmt::print("-------------------------------------\n");
 
   ln->ssa_trans();
 
@@ -20,6 +24,10 @@ void Lcompiler::add_thread(std::shared_ptr<Lnast> ln) {
     gv.do_from_lnast(ln);
   }
 
+
+  fmt::print("-------------------------------------\n");
+  fmt::print("-------- LNAST -> LGraph ------------\n");
+  fmt::print("-------------------------------------\n");
 
   auto module_name = ln->get_top_module_name();
   Lnast_tolg ln2lg(module_name, path);
@@ -35,10 +43,18 @@ void Lcompiler::add_thread(std::shared_ptr<Lnast> ln) {
 
 
   for (const auto &lg : local_lgs) {
-    /* retry: */
-    /* Cprop cp(false); //hier = false */
+    retry:
+    Cprop cp(false); //hier = false
     /* Bitwidth bw(false, 10); // hier = false, max_iters = 10 */
-    /* cp.do_trans(lg); */
+
+    fmt::print("-------------------------------------");
+    fmt::print("Copy-Propagation");
+    fmt::print("-------------------------------------");
+    cp.do_trans(lg);
+    cp.do_trans(lg);
+    if (gviz) {
+      gv.do_from_lgraph(lg, "no_bits"); // rename dot with postfix raw
+    }
     /* bw.do_trans(lg); */
 
 
@@ -48,6 +64,11 @@ void Lcompiler::add_thread(std::shared_ptr<Lnast> ln) {
     /*     goto retry; */
     /* } */
 
+    /* if (cp.tup_get_left) { */
+    /*   if (cp.made_progress) { */
+    /*     goto retry; */
+    /*   } */
+    /* } */
   }
 
   std::lock_guard<std::mutex> guard(lgs_mutex);
