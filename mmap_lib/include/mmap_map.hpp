@@ -54,6 +54,7 @@
 #include <iostream>
 
 #include "mmap_gc.hpp"
+#include "mmap_hash.hpp"
 
 //#define mmap_map_LOG_ENABLED
 #ifdef mmap_map_LOG_ENABLED
@@ -397,7 +398,7 @@ inline size_t hash_bytes(void const* ptr, size_t const len) {
 template <>
 struct hash<std::string_view> {
 	size_t operator()(std::string_view str) const noexcept {
-		return hash_bytes(str.data(), str.size());
+		return mmap_lib::hash64(str.data(), str.size());
 	}
 };
 
@@ -406,7 +407,7 @@ struct hash<std::string_view> {
 template<class T>
 struct hash<std::vector<T>> {
 	size_t operator()(const std::vector<T> &str) const noexcept {
-		return hash_bytes(str.data(), sizeof(T) * str.size());
+		return mmap_lib::hash64(str.data(), sizeof(T) * str.size());
 	}
 };
 

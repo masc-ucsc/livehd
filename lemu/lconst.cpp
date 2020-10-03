@@ -5,6 +5,7 @@
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_cat.h"
 
+#include "mmap_hash.hpp"
 #include "lbench.hpp"
 #include "lrand.hpp"
 #include "iassert.hpp"
@@ -88,12 +89,7 @@ uint64_t Lconst::hash() const {
 
   boost::multiprecision::export_bits(num, std::back_inserter(v), 64);
 
-  auto h=0;
-  for (auto e : v) {
-    h ^= e;
-  }
-
-  return h;
+  return mmap_lib::hash64(v.data(),v.size()*8);
 }
 
 Lconst::Lconst(absl::Span<unsigned char> v) {
