@@ -1199,6 +1199,8 @@ Node LGraph::create_node(const Ntype_op op, Bits_t bits) {
 }
 
 Node LGraph::create_node_const(const Lconst &value) {
+  // WARNING: There is a const_map, but it is NOT a bimap (speed). Just from
+  // nid to const.
   Index_ID nid = memoize_const_hint[value.hash() % memoize_const_hint.size()];
   if (nid == 0
       || nid >= node_internal.size()

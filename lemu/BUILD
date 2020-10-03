@@ -11,6 +11,7 @@ cc_library(
         "@com_google_absl//absl/types:span",
         "@com_google_absl//absl/strings",
         "//lbench:headers",
+        "//mmap_lib:headers",
         "@iassert//:iassert",
         ],
     )
@@ -22,7 +23,6 @@ cc_test(
         ":lemu",
         "@gtest//:gtest_main",
         "//simlib:headers",
-        "//mmap_lib:headers",
         ],
     )
 

@@ -20,7 +20,6 @@ protected:
 
   Node_down_map subid_map;
   Node_lut_map  lut_map;
-  ;
 
   void clear();
 
