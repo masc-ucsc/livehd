@@ -159,7 +159,7 @@ std::string_view Cpp_parser::supporting_ftype(){
 }
 std::string Cpp_parser::supporting_fstart(std::string basename_s){
   auto txt_to_print = absl::StrCat("file: ", basename_s, "\n");
-  auto header_includes = "#pragma once\n#include \"vcd_writer.hpp\"\n";
+  auto header_includes = "#pragma once\n#include <string>\n#include \"vcd_writer.hpp\"\n";
   absl::StrAppend(&supp_file_final_str, header_includes);
   return absl::StrCat(txt_to_print, header_includes);
 }
@@ -173,10 +173,8 @@ std::string Cpp_parser::supp_buffer_to_print(std::string modname) {
   if (!outp_bw.empty()) {
     outps_nline = "struct {";
     for (auto const& [key, val] : outp_bw) {
-      absl::StrAppend(&outps_nline, "UInt<", val, "> ", key, ", ");
+      absl::StrAppend(&outps_nline, "UInt<", val, "> ", key, "; ");
     }
-    outps_nline.pop_back();
-    outps_nline.pop_back();
     absl::StrAppend(&outps_nline, "} outputs;\n");
   }
 
@@ -184,10 +182,8 @@ std::string Cpp_parser::supp_buffer_to_print(std::string modname) {
   if (!reg_bw.empty()) {
     regs_nline = "struct {";
     for (auto const& [key, val] : reg_bw) {
-      absl::StrAppend(&regs_nline, "UInt<", val, "> ", key, ", ");
+      absl::StrAppend(&regs_nline, "UInt<", val, "> ", key, "; ");
     }
-    regs_nline.pop_back();
-    regs_nline.pop_back();
     absl::StrAppend(&regs_next_nline, regs_nline, "} regs_next;");
     absl::StrAppend(&regs_nline, "} regs;");
   }
@@ -199,22 +195,22 @@ std::string Cpp_parser::supp_buffer_to_print(std::string modname) {
   inps_csv.pop_back();
   inps_csv.pop_back();
 
-  std::string funcs = absl::StrCat(modname, "_sim(uint64_t _hidx);\n  void reset_cycle();\n  void cycle(", inps_csv, ");\n");
+  std::string funcs = absl::StrCat("  ", modname, "_sim(uint64_t _hidx);\n  void reset_cycle();\n  void cycle(", inps_csv, ");\n");
 
   std::string vcd_params = "  std::string scope_name;\n  vcd::VCDWriter* vcd_writer;\n";
 
   std::string vcd_varptrs;
   for (auto const& [key, val] : inp_bw) {
     if (val>"1")
-      absl::StrAppend(&vcd_varptrs, "  vcd::VarPtr vcd_", key, " = vcd_writer->register_passed_var(scope_name, \"", key, "[", std::to_string(std::stoi(val)-1), ":0]\", vcd::VariableType::wire, ", val, ");\n");
+      absl::StrAppend(&vcd_varptrs, "  vcd::VarPtr vcd_", key, " = vcd_writer->register_var(scope_name, \"", key, "[", std::to_string(std::stoi(val)-1), ":0]\", vcd::VariableType::wire, ", val, ");\n");
     else
-      absl::StrAppend(&vcd_varptrs, "  vcd::VarPtr vcd_", key, " = vcd_writer->register_passed_var(scope_name, \"", key, "\", vcd::VariableType::wire, ", val, ");\n");
+      absl::StrAppend(&vcd_varptrs, "  vcd::VarPtr vcd_", key, " = vcd_writer->register_var(scope_name, \"", key, "\", vcd::VariableType::wire, ", val, ");\n");
   }
   for (auto const& [key,val] : outp_bw) {
     if (val>"1")
-      absl::StrAppend(&vcd_varptrs, "  vcd::VarPtr vcd_", key, " = vcd_writer->register_passed_var(scope_name, \"", key, "[", std::to_string(std::stoi(val)-1), ":0]\", vcd::VariableType::wire, ", val, ");\n");
+      absl::StrAppend(&vcd_varptrs, "  vcd::VarPtr vcd_", key, " = vcd_writer->register_var(scope_name, \"", key, "[", std::to_string(std::stoi(val)-1), ":0]\", vcd::VariableType::wire, ", val, ");\n");
     else
-      absl::StrAppend(&vcd_varptrs, "  vcd::VarPtr vcd_", key, " = vcd_writer->register_passed_var(scope_name, \"", key, "\", vcd::VariableType::wire, ", val, ");\n");
+      absl::StrAppend(&vcd_varptrs, "  vcd::VarPtr vcd_", key, " = vcd_writer->register_var(scope_name, \"", key, "\", vcd::VariableType::wire, ", val, ");\n");
   }
   for (auto const& [key,val] : reg_bw) {
     if (val>"1")
@@ -224,8 +220,9 @@ std::string Cpp_parser::supp_buffer_to_print(std::string modname) {
   }
 
 
-  std::string vcd_funcs = absl::StrCat("  ", modname, "_sim(uint64_t _hidx, const std::string &parent_name, vcd::VCDWriter* writer);\n  void vcd_reset_cycle();\n  void vcd_posedge();\n  void vcd_negedge();\n  void vcd_comb(", inps_csv, ");\n");
-  auto answer = absl::StrCat(header_strt, outps_nline, regs_nline, regs_next_nline, funcs, vcd_params, vcd_varptrs, vcd_funcs, "\n};");
+  std::string vcd_funcs = absl::StrCat("  ", modname, "_sim(uint64_t _hidx, const std::string &parent_name+ vcd::VCDWriter* writer);\n  void vcd_reset_cycle();\n  void vcd_posedge();\n  void vcd_negedge();\n  void vcd_comb(", inps_csv, ");\n");
+  //auto answer = absl::StrCat(header_strt, outps_nline, regs_nline, regs_next_nline, funcs, vcd_params, vcd_varptrs, vcd_funcs, "\n};");
+  auto answer = absl::StrCat(header_strt, outps_nline, regs_nline, regs_next_nline, "\n#ifndef SIMLIB_VCD\n", funcs, "\n#else\n", vcd_params, vcd_varptrs, vcd_funcs, "\n#endif\n};");
   absl::StrAppend(&supp_file_final_str, answer);
   return answer;
 }
@@ -299,11 +296,11 @@ std::string Cpp_parser::final_print(std::string modname, std::string buffer_to_p
     absl::StrAppend(&rst_vals_nline, "  regs.", key, " = UInt<", val, "> (0);\n");
     absl::StrAppend(&rst_vals_nline_vcd, "  vcd_writer->change(vcd_", key, ", regs.", key, ".to_string_binary());\n");
   }
-  std::string reset_vcd = absl::StrCat("void ", modname, "::vcd_reset_cycle() {\n", rst_vals_nline, rst_vals_nline_vcd, "}\n");
-  std::string reset_func = absl::StrCat("void ", modname, "::reset_cycle() {\n", rst_vals_nline, "}\n");
+  std::string reset_vcd = absl::StrCat("void ", modname, "_sim::vcd_reset_cycle() {\n", rst_vals_nline, rst_vals_nline_vcd, "}\n");
+  std::string reset_func = absl::StrCat("void ", modname, "_sim::reset_cycle() {\n", rst_vals_nline, "}\n");
 
-  std::string posedge_vcd = absl::StrCat("void ", modname, "::vcd_posedge(){\n");
-  std::string negedge_vcd = absl::StrCat("void ", modname, "::vcd_negedge(){\n");
+  std::string posedge_vcd = absl::StrCat("void ", modname, "_sim::vcd_posedge(){\n");
+  std::string negedge_vcd = absl::StrCat("void ", modname, "_sim::vcd_negedge(){\n");
   if(sys_clock!="") {
     absl::StrAppend(&posedge_vcd, "  vcd_writer->change(", sys_clock, ", \"1\");\n");
     absl::StrAppend(&negedge_vcd, "  vcd_writer->change(", sys_clock, ", \"0\");\n");
@@ -314,7 +311,7 @@ std::string Cpp_parser::final_print(std::string modname, std::string buffer_to_p
   //main code part function
   std::string main_func_vcd = absl::StrCat("void ",  modname, "_sim::vcd_comb(", inps_csv, ") {\n",  buffer_to_print, "  ",  buff_to_print_vcd, "\n}");
   std::string main_func = absl::StrCat("void ",  modname, "_sim::cycle(", inps_csv, ") {\n",  buffer_to_print, "\n}");
-  auto answer = absl::StrCat(constructor_vcd, "\n", constructor, "\n", reset_vcd, "\n", reset_func, "\n", posedge_vcd, "\n", negedge_vcd, "\n",  main_func, "\n", main_func_vcd, "\n");
+  auto answer = absl::StrCat("#ifdef SIMLIB_VCD\n", constructor_vcd, "\n", reset_vcd, "\n", posedge_vcd, "\n", negedge_vcd, "\n", main_func_vcd, "\n#else\n", constructor, "\n", reset_func, "\n",  main_func, "\n#endif\n");
   absl::StrAppend(&main_file_final_str, answer);
   return answer;
 }
