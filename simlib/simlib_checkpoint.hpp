@@ -56,9 +56,9 @@ public:
     next_checkpoint_ncycles = 1000000000;
     last_checkpoint_sec     = 0.0;
     advance_reset(reset_ncycles);
-#ifdef SIMLIB_TRACE
-    top.add_signature(signature);
-#endif
+//#ifdef SIMLIB_TRACE
+//    top.add_signature(signature);
+//#endif
   };
 #else
   Simlib_checkpoint(std::string_view _name, uint64_t _reset_ncycles = 10000)
@@ -68,9 +68,9 @@ public:
     next_checkpoint_ncycles = 1000000000;
     last_checkpoint_sec     = 0.0;
     advance_reset(reset_ncycles);
-#ifdef SIMLIB_TRACE
-    top.add_signature(signature);
-#endif
+//#ifdef SIMLIB_TRACE
+//    top.add_signature(signature);
+//#endif
   };
 #endif
 
@@ -236,7 +236,7 @@ public:
         vcd::advance_to_posedge();
         top.vcd_posedge();
         vcd::advance_to_comb();
-        top.vcd_comb();
+        top.vcd_comb(1,0);
         //        vcd_writer->advance_to_posedge();
         vcd::advance_to_negedge();
         top.vcd_negedge();
@@ -300,7 +300,7 @@ public:
   void handle_checkpoint() {
 #ifdef SIMLIB_TRACE
     auto delta_secs = perf.get_secs() - last_checkpoint_sec;  // delta_secs is of type double
-    if (delta_secs > 0.4)
+    if (delta_secs > 0.1)
       save_checkpoint();
     else
       last_checkpoint_sec = perf.get_secs();
@@ -333,11 +333,14 @@ public:
         vcd::advance_to_posedge();
         top.vcd_posedge();
         vcd::advance_to_comb();
-        top.vcd_comb();
+        top.vcd_comb(1,0);
         vcd::advance_to_negedge();
         top.vcd_negedge();
 #else
-        top.cycle();
+        if(i<10000)
+          top.cycle(1,0);
+        else
+          top.cycle(0,0);
 #endif
       }
       ncycles += step;
