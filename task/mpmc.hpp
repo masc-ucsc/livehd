@@ -29,7 +29,7 @@
 #ifndef __MPMC_BOUNDED_QUEUE_INCLUDED__
 #define __MPMC_BOUNDED_QUEUE_INCLUDED__
 
-#include <assert.h>
+#include <cassert>
 #include <strings.h>
 
 #include <cstddef>

@@ -18,7 +18,7 @@
  */
 
 #include "ezminisat.hpp"
-#include <assert.h>
+#include <cassert>
 #include <stdio.h>
 
 #define DIM_X 5

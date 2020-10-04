@@ -34,7 +34,7 @@
 #ifndef __SPSC_BOUNDED_QUEUE_INCLUDED__
 #define __SPSC_BOUNDED_QUEUE_INCLUDED__
 
-#include <assert.h>
+#include <cassert>
 #include <stdio.h>
 #include <stdlib.h>
 
