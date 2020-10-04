@@ -77,7 +77,10 @@ public:
     Lnast_ntype_tuple_get,
     Lnast_ntype_tuple_phi_add,
     Lnast_ntype_attr_set,
-    Lnast_ntype_attr_get
+    Lnast_ntype_attr_get,
+
+    //for unsigned
+    Lnast_ntype_tposs
   };
 
 protected:
@@ -150,7 +153,9 @@ protected:
     "tuple_get",
     "tuple_phi_add",
     "attr_set",  
-    "attr_get"
+    "attr_get",
+    //unsigned(tposs)
+    "tposs"
   };
   constexpr static std::array namemap_cfg{
     "invalid",
@@ -214,7 +219,8 @@ protected:
     "tuple_get",
     "tuple_phi_add",
     "attr_set",
-    "attr_get"
+    "attr_get",
+    "unsigned"//tposs
   };
   constexpr static std::array namemap_pyrope{
     "invalid",
@@ -278,7 +284,8 @@ protected:
     "tuple_get",
     "tuple_phi_add",
     "attr_set",
-    "attr_get"
+    "attr_get",
+    "unsigned"//tposs
   };
   constexpr static std::array namemap_verilog{
     "invalid",
@@ -342,8 +349,8 @@ protected:
     "tuple_get",
     "tuple_phi_add",
     "attr_set",
-    "attr_get"
-
+    "attr_get",
+    "unsigned"//tposs
   };
   constexpr static std::array namemap_cpp{
     "invalid",
@@ -407,7 +414,8 @@ protected:
     "tuple_get",
     "tuple_phi_add",
     "attr_set",
-    "attr_get"
+    "attr_get",
+    "unsigned"
   };
 
   Lnast_ntype_int val;
@@ -487,6 +495,7 @@ public:
   static constexpr Lnast_ntype create_tuple_phi_add() { return Lnast_ntype(Lnast_ntype_tuple_phi_add) ;}
   static constexpr Lnast_ntype create_attr_set()      { return Lnast_ntype(Lnast_ntype_attr_set) ;}
   static constexpr Lnast_ntype create_attr_get()      { return Lnast_ntype(Lnast_ntype_attr_get) ;}
+  static constexpr Lnast_ntype create_tposs()      { return Lnast_ntype(Lnast_ntype_tposs) ;}
 
   bool constexpr is_invalid()      const { return val == Lnast_ntype_invalid; }
   bool constexpr is_top()          const { return val == Lnast_ntype_top; }
@@ -555,6 +564,7 @@ public:
   bool constexpr is_tuple_phi_add() const { return val == Lnast_ntype_tuple_phi_add; }
   bool constexpr is_attr_set()      const { return val == Lnast_ntype_attr_set; }
   bool constexpr is_attr_get()      const { return val == Lnast_ntype_attr_get; }
+  bool constexpr is_tposs()      const { return val == Lnast_ntype_tposs; }
 
   // Super types
   bool constexpr is_logical_op()   const { return (val == Lnast_ntype_logical_and) ||
