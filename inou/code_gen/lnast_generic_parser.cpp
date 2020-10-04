@@ -220,7 +220,7 @@ std::string Cpp_parser::supp_buffer_to_print(std::string modname) {
   }
 
 
-  std::string vcd_funcs = absl::StrCat("  ", modname, "_sim(uint64_t _hidx, const std::string &parent_name+ vcd::VCDWriter* writer);\n  void vcd_reset_cycle();\n  void vcd_posedge();\n  void vcd_negedge();\n  void vcd_comb(", inps_csv, ");\n");
+  std::string vcd_funcs = absl::StrCat("  ", modname, "_sim(uint64_t _hidx, const std::string &parent_name, vcd::VCDWriter* writer);\n  void vcd_reset_cycle();\n  void vcd_posedge();\n  void vcd_negedge();\n  void vcd_comb(", inps_csv, ");\n");
   //auto answer = absl::StrCat(header_strt, outps_nline, regs_nline, regs_next_nline, funcs, vcd_params, vcd_varptrs, vcd_funcs, "\n};");
   auto answer = absl::StrCat(header_strt, outps_nline, regs_nline, regs_next_nline, "\n#ifndef SIMLIB_VCD\n", funcs, "\n#else\n", vcd_params, vcd_varptrs, vcd_funcs, "\n#endif\n};");
   absl::StrAppend(&supp_file_final_str, answer);
@@ -283,7 +283,7 @@ void Cpp_parser::for_vcd_comb(std::string_view key1, std::string_view key2) {
 
 std::string Cpp_parser::final_print(std::string modname, std::string buffer_to_print) {
   //constructor
-  std::string constructor_vcd = absl::StrCat(modname, "_sim::", modname, "_sim(uint64_t _hidx, const std::string &parent_name, vcd::VCDWriter* writer)\n  : hidx(_hidx)\n  , scope_name(parent_name.empty() ? \"", modname, "_sim\": parent_name, \".", modname, "_sim\")\n  , vcd_writer(writer) {\n}\n");
+  std::string constructor_vcd = absl::StrCat(modname, "_sim::", modname, "_sim(uint64_t _hidx, const std::string &parent_name, vcd::VCDWriter* writer)\n  : hidx(_hidx)\n  , scope_name(parent_name.empty() ? \"", modname, "_sim\": parent_name+ \".", modname, "_sim\")\n  , vcd_writer(writer) {\n}\n");
   std::string constructor = absl::StrCat(modname, "_sim::", modname, "_sim(uint64_t _hidx)\n  : hidx(_hidx) {\n}\n");
 
   std::string rst_vals_nline;
