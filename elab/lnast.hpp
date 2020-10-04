@@ -66,6 +66,7 @@ struct Lnast_node {
   CREATE_LNAST_NODE(_and)
   CREATE_LNAST_NODE(_or)
   CREATE_LNAST_NODE(_not)
+  CREATE_LNAST_NODE(_tposs)
   CREATE_LNAST_NODE(_xor)
   CREATE_LNAST_NODE(_parity)
   CREATE_LNAST_NODE(_plus)
