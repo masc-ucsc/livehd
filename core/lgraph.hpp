@@ -166,7 +166,6 @@ public:
 
   Index_ID add_edge(const Node_pin &dpin, const Node_pin &spin, uint32_t bits) {
     Index_ID idx = add_edge(dpin, spin);
-    GI(bits != get_bits(idx), !is_type_const(node_internal[idx].get_nid()));  // Do not overwrite bits in constants
     I(node_internal[idx].is_root()); // add_edge returns the root
     set_bits(idx, bits);
     return idx;
