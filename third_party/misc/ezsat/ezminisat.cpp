@@ -23,7 +23,7 @@
 
 #include "ezminisat.hpp"
 
-#include <assert.h>
+#include <cassert>
 #include <cinttypes>
 #include <csignal>
 #include <limits.h>

@@ -235,10 +235,10 @@ bool bwd(int n) {
 
       visited.insert(node.get_compact());
 
-      if (!node.is_type_loop_breaker() && node.get_type_op() != Ntype_op::GraphIO) {
+      if (!node.is_type_loop_breaker() && node.get_type_op() != Ntype_op::IO) {
         // check if all incoming edges were visited
         for(auto &out : node.out_edges()) {
-          if (!out.sink.get_node().is_type_loop_breaker() && out.sink.get_node().get_type_op() != Ntype_op::GraphIO) {
+          if (!out.sink.get_node().is_type_loop_breaker() && out.sink.get_node().get_type_op() != Ntype_op::IO) {
             if(visited.find(out.sink.get_node().get_compact()) == visited.end()) {
               fmt::print("bwd failed for lgraph node:{} bwd:{}\n", node.debug_name(), out.sink.get_node().debug_name());
               I(false);
@@ -255,10 +255,10 @@ bool bwd(int n) {
 
       visited.insert(node.get_compact());
 
-      if (!node.is_type_loop_breaker() && node.get_type_op() != Ntype_op::GraphIO) {
+      if (!node.is_type_loop_breaker() && node.get_type_op() != Ntype_op::IO) {
         // check if all incoming edges were visited
         for(auto &out : node.out_edges()) {
-          if (!out.sink.get_node().is_type_loop_breaker() && out.sink.get_node().get_type_op() != Ntype_op::GraphIO) {
+          if (!out.sink.get_node().is_type_loop_breaker() && out.sink.get_node().get_type_op() != Ntype_op::IO) {
             if(visited.find(out.sink.get_node().get_compact()) == visited.end()) {
               fmt::print("bwd failed for lgraph node:{} bwd:{}\n", node.debug_name(), out.sink.get_node().debug_name());
               I(false);

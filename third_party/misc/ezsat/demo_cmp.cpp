@@ -18,7 +18,7 @@
  */
 
 #include "ezminisat.hpp"
-#include <assert.h>
+#include <cassert>
 
 #define INIT_X 123456789
 #define INIT_Y 362436069

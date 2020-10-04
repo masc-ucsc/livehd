@@ -1,7 +1,7 @@
-#ifndef THREAD_POOL_H
-#define THREAD_POOL_H
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#pragma once
 
-#include <assert.h>
+#include <cassert>
 #include <unistd.h>
 
 #include <atomic>
@@ -156,4 +156,3 @@ public:
   }
 };
 
-#endif

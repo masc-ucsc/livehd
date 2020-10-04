@@ -1,4 +1,6 @@
-#include <assert.h>
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
+#include <cassert>
 #include <stdio.h>
 #include <stdlib.h>
 #include "boolector.h"

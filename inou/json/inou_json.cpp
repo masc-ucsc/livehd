@@ -67,7 +67,7 @@ void Inou_json::from_json(LGraph *g, rapidjson::Document &document) {
     assert(nodes.HasMember("nid"));
     last_nid = nodes["nid"].GetUint64();
     if (json_remap.find(last_nid) == json_remap.end()) {
-      json_remap[last_nid] = g->create_node().get_compact_class();
+      json_remap.insert(last_nid, g->create_node().get_compact_class());
     }
     last_node = Node(g, json_remap[last_nid]);
 

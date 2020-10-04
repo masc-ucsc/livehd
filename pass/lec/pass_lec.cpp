@@ -70,6 +70,6 @@ void Pass_lec::check_lec(LGraph *g) {
 
   for (const auto node : g->forward()) {
     // sat.generate_model();
-    fmt::print("node type: {}\n", node.get_type().get_name());
+    fmt::print("node type: {}\n", node.get_type_name());
   };
 }

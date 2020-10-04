@@ -4,7 +4,7 @@
 //#ifndef NDEBUG
 //#define NDEBUG
 //#endif
-#include <assert.h>
+#include <cassert>
 #include <string>
 #include <string_view>
 
