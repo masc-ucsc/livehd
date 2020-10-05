@@ -47,7 +47,7 @@ do
   STARTTIME=$SECONDS
   #echo "starting test "${input}" at "$(/usr/bin/date)
   input=$(basename ${full_input})
-  echo ${YOSYS} ./inou/yosys/tests/${input}
+  echo ${YOSYS} ${full_input}
   base=${input%.*}
 
   if [[ $input =~ "long_" ]]; then

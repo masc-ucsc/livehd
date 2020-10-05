@@ -1,8 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#pragma once
 #include "pass_cprop.hpp"
 #include "cprop.hpp"
-
 
 static Pass_plugin sample("pass_cprop", Pass_cprop::setup);
 
