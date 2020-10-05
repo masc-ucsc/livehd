@@ -26,7 +26,7 @@ void Cprop::collapse_forward_same_op(Node &node, XEdge_iterator &inp_edges_order
       all_done = false;
       continue;
     }
-    if (out.driver.get_pid() != out.sink.get_pid()) {
+    if (out.driver.get_pid() != out.sink.get_pid()) { //FIXME: maybe separate different op 
       all_done = false;
       continue;
     }
@@ -72,7 +72,7 @@ void Cprop::collapse_forward_sum(Node &node, XEdge_iterator &inp_edges_ordered) 
     auto next_sum_node = out.sink.get_node();
     for (auto &inp : inp_edges_ordered) {
       TRACE(fmt::print("cprop same_op pin:{} to pin:{}\n", inp.driver.debug_name(), out.sink.debug_name()));
-      auto sink_name = Ntype::get_sink_name(Ntype_op::Sum, inp.sink.get_pid());
+      auto sink_name = Ntype::get_sink_name(Ntype_op::Sum, inp.sink.get_pid()); //use get_pin_name or pin_raw
       auto next_sum_spin = next_sum_node.setup_sink_pin(sink_name);  // Connect same PID
       next_sum_spin.connect_driver(inp.driver);
     }
@@ -108,16 +108,16 @@ void Cprop::collapse_forward_always_pin0(Node &node, XEdge_iterator &inp_edges_o
   auto op = node.get_type_op();
 
   for (auto &out : node.out_edges()) {
-    if (out.driver.get_pid()) {
-      can_delete = false;
-      continue;
-    }
+    /* if (out.driver.get_pid()) { */
+    /*   can_delete = false; */
+    /*   continue; */
+    /* } */
 
     for (auto &inp : inp_edges_ordered) {
-      if (inp.sink.get_pid()) {
-        can_delete = false;
-        continue;
-      }
+      /* if (inp.sink.get_pid()) { */
+      /*   can_delete = false; */
+      /*   continue; */
+      /* } */
       TRACE(fmt::print("cprop forward_always pin:{} to pin:{}\n", inp.driver.debug_name(), out.sink.debug_name()));
       if (op == Ntype_op::Xor) {
         if (inp.driver.is_connected(out.sink)) {
@@ -222,7 +222,7 @@ void Cprop::replace_part_inputs_const(Node &node, XEdge_iterator &inp_edges_orde
           continue;
 
         auto c = i.driver.get_node().get_type_const();
-        if (i.sink.get_pid() == 0) {
+        if (i.sink.get_pid() == 0) { //FIXME: change to A
           result = result + c;
         } else if (i.sink.get_pid() == 1){
           result = result - c;

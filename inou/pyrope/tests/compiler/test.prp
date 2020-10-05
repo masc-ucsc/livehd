@@ -1,11 +1,12 @@
-// $foo.a.b.__bits = 3
-// $bar.__bits = 3
-
-// %otup.c.d = $bar + 5
-// %out = $foo.a.b + $bar
-
-
 $a.__bits = 3
 $b.__bits = 2
 
-%o = $a + $b
+c = $a
+
+%o1 = c + $b
+
+%o2 = $d
+
+
+
+
