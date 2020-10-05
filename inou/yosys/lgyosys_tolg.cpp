@@ -83,7 +83,17 @@ static void look_for_wire(LGraph *g, const RTLIL::Wire *wire) {
   }
 }
 
-static Node_pin resolve_constant(LGraph *g, const std::vector<RTLIL::State> &data) {
+static Node_pin resolve_constant(LGraph *g, const std::vector<RTLIL::State> &data, bool is_signed) {
+  RTLIL::Const v(data);
+  if (v.is_fully_zero()) {
+    return g->create_node_const(Lconst(0, data.size())).setup_driver_pin();
+  }
+
+  if (v.is_fully_def() && data.size()<30) {
+    auto x = v.as_int(is_signed);
+    return g->create_node_const(Lconst(x, data.size())).setup_driver_pin();
+  }
+
   // this is a vector of RTLIL::State
   // S0 => 0
   // S1 => 1
@@ -91,43 +101,23 @@ static Node_pin resolve_constant(LGraph *g, const std::vector<RTLIL::State> &dat
   // Sz => high z
   // Sa => don't care (not sure what is the diff between Sa and Sx
   // Sm => used internally by Yosys
-
-  uint64_t    value = 0;
-  std::string val;
-
-  uint32_t current_bit = 0;
-  bool     u64_const   = true;
-  for (auto &b : data) {
-    switch (b) {
-      case RTLIL::S0: val = absl::StrCat("0", val); break;
-      case RTLIL::S1:
-        val = absl::StrCat("1", val);
-        value += 1 << current_bit;
-        break;
-      case RTLIL::Sz:
-      case RTLIL::Sa:
-        val       = absl::StrCat("z", val);
-        u64_const = false;
-        break;
-      case RTLIL::Sx:
-        val       = absl::StrCat("x", val);
-        u64_const = false;
-        break;
-      default: I(false);
-    }
-    current_bit++;
+	std::string val("0b");
+	val.reserve(data.size());
+	for (size_t i = data.size(); i > 0; i--) {
+		switch (data[i-1]) {
+      case RTLIL::S0: absl::StrAppend(&val, "0"); break;
+      case RTLIL::S1: absl::StrAppend(&val, "1"); break;
+      default: absl::StrAppend(&val, "x"); break;
+		}
+  }
+  if (is_signed) {
+    absl::StrAppend(&val, "s", (int)data.size(), "bits");
+  }else{
+    absl::StrAppend(&val, "u", (int)data.size(), "bits");
   }
 
-  if (u64_const && data.size() <= 63) {
-    auto node = g->create_node_const(Lconst(value, data.size()));
-    I(node.get_bits() <= data.size());
-    return node.setup_driver_pin();
-  }
-
-  val = absl::StrCat("0b", val, "u", (int)data.size(), "bits");
-  // fmt::print("val:{} prp:{}\n", val, Lconst(val).to_pyrope());
-  auto node = g->create_node_const(Lconst(val));
-  return node.setup_driver_pin();
+  //fmt::print("val:{} prp:{}\n", val, Lconst(val).to_pyrope());
+  return g->create_node_const(Lconst(val)).setup_driver_pin();
 }
 
 class Pick_ID {
@@ -255,19 +245,13 @@ static void append_to_or_node(LGraph *g, const Node &or_node, const Node_pin &dp
 	}
 }
 
-
-
 static Node_pin create_pick_concat_dpin(LGraph *g, const RTLIL::SigSpec &ss, bool is_signed) {
   std::vector<Node_pin> inp_pins;
   I(ss.chunks().size() != 0);
 
   for (auto &chunk : ss.chunks()) {
     if (chunk.wire == nullptr) {
-      RTLIL::Const v(chunk.data);
-      if (v.is_fully_zero())
-        inp_pins.emplace_back(Node_pin()); // to keep chunks and inp_pins matching in size
-      else
-        inp_pins.emplace_back(resolve_constant(g, chunk.data));
+      inp_pins.emplace_back(resolve_constant(g, chunk.data, is_signed));
     } else {
       inp_pins.push_back(create_pick_operator(g, chunk.wire, chunk.offset, chunk.width));
     }
@@ -316,7 +300,7 @@ static Node_pin get_dpin(LGraph *g, const RTLIL::Cell *cell, RTLIL::IdString nam
 
   if (cell->hasParam(name)) {
     const RTLIL::Const &v = cell->getParam(name);
-    if (v.is_fully_def() && v.size() <60) {
+    if (v.is_fully_def() && v.size() <30) {
       return g->create_node_const(v.as_int(), v.size()).setup_driver_pin();
     }
     std::string v_str("0b");
@@ -715,7 +699,7 @@ static void setup_cell_driver_pins(RTLIL::Module *module, LGraph *g) {
           } else {
             I((chunk.width+offset)<=driver_pin.get_bits());
             // output port drives multiple wires
-            Node_pin pick_pin = create_pick_operator(driver_pin, offset, chunk.width);
+            Node_pin pick_pin = create_pick_operator(driver_pin, offset, chunk.width); // FIXME: offset or 0??
             wire2pin[wire]     = pick_pin;
             set_bits_wirename(pick_pin, wire);
           }
@@ -725,8 +709,15 @@ static void setup_cell_driver_pins(RTLIL::Module *module, LGraph *g) {
           if (partially_assigned.find(wire) == partially_assigned.end()) {
             partially_assigned[wire].resize(wire->width);
 
+            auto n2        = g->create_node(Ntype_op::Or, wire->width);
             if (wire2pin.find(wire) != wire2pin.end()) {
               auto dpin = wire2pin[wire];
+#if 0
+              // FIXME: this is better than at partial
+              if (dpin.is_graph_output()) {
+                n2.connect_driver(dpin.get_sink_from_output());
+              }
+#endif
               fmt::print("partial wire {} from module {} cell type {} (switching to partial node:{})\n",
                      wire->name.c_str(),
                      module->name.c_str(),
@@ -734,15 +725,13 @@ static void setup_cell_driver_pins(RTLIL::Module *module, LGraph *g) {
                      dpin.get_node().debug_name()
                      );
             }
-            auto n2        = g->create_node(Ntype_op::Or, wire->width);
             wire2pin[wire] = n2.setup_driver_pin();
           }
-          driver_pin.set_bits(ss.size());
 
           auto src_pin = create_pick_operator(driver_pin, offset, chunk.width);
           offset += chunk.width;
 
-          // fmt::print("partial assign from node:{} to wire:{}[{}:{}]\n", driver_pin.get_node().debug_name(), wire->name.str(), chunk.offset, chunk.offset+chunk.width);
+          fmt::print("partial assign from node:{} to wire:{}[{}:{}]\n", driver_pin.get_node().debug_name(), wire->name.str(), chunk.offset, chunk.offset+chunk.width);
 
           for (int i = 0; i < chunk.width; i++) {
             I((size_t)(chunk.offset + i) < partially_assigned[wire].size());
@@ -775,7 +764,7 @@ static void process_assigns(RTLIL::Module *module, LGraph *g) {
     for (auto &chunk : lhs.chunks()) {
       const RTLIL::Wire *lhs_wire = chunk.wire;
 
-      // printf("Assignment to %s\n", lhs_wire->name.c_str());
+      //printf("Assignment to %s\n", lhs_wire->name.c_str());
 
       if (lhs_wire->port_input) {
         log_error("Assignment to input port %s\n", lhs_wire->name.c_str());
@@ -784,11 +773,11 @@ static void process_assigns(RTLIL::Module *module, LGraph *g) {
           continue;
 
         if (lhs_wire->port_output) {
-          Node_pin dpin = create_pick_concat_dpin(g, rhs.extract(offset, chunk.width), false);
+          Node_pin dpin = create_pick_concat_dpin(g, rhs.extract(offset, chunk.width), lhs_wire->is_signed);
           Node_pin spin = g->get_graph_output(&lhs_wire->name.c_str()[1]);
           g->add_edge(dpin, spin, lhs_wire->width);
         } else if (wire2pin.find(lhs_wire) == wire2pin.end()) {
-          Node_pin dpin      = create_pick_concat_dpin(g, rhs.extract(offset, chunk.width), false);
+          Node_pin dpin      = create_pick_concat_dpin(g, rhs.extract(offset, chunk.width), lhs_wire->is_signed);
           wire2pin[lhs_wire] = dpin;
         } else {
           I(wire2pin[lhs_wire].get_bits() == lhs_wire->width);
@@ -944,6 +933,8 @@ static void process_module(RTLIL::Module *module, LGraph *g) {
 #endif
 
   process_assigns(module, g);
+
+  g->dump();
 
 #ifndef NDEBUG
   log("INOU/YOSYS processing module %s, ncells %lu, nwires %lu\n",
@@ -1214,7 +1205,6 @@ static void process_module(RTLIL::Module *module, LGraph *g) {
     //--------------------------------------------------------------
     } else if (std::strncmp(cell->type.c_str(), "$xnor", 5) == 0) {
       auto size = get_output_size(cell);
-      I(get_input_size(cell)==size);
 
       auto entry_node = g->create_node(Ntype_op::Xor, size);
       exit_node.set_type(Ntype_op::Not, size);
@@ -1798,13 +1788,15 @@ static void process_module(RTLIL::Module *module, LGraph *g) {
     }
   }
 
-  // dump_partially_assigned();
+  //dump_partially_assigned();
 
   for (auto &kv : partially_assigned) {
     const RTLIL::Wire *wire = kv.first;
 
     auto or_dpin = get_edge_pin(g, wire);
     auto or_node = or_dpin.get_node();
+    I(or_node.is_type(Ntype_op::Or));
+#if 1
     if (or_node.is_graph_output()) { // Some outputs are deferred
       auto real_or_node = g->create_node(Ntype_op::Or, or_dpin.get_bits());
       or_dpin.get_sink_from_output().connect_driver(real_or_node);
@@ -1812,7 +1804,7 @@ static void process_module(RTLIL::Module *module, LGraph *g) {
 
       wire2pin[wire] = or_node.setup_driver_pin();
     }
-    I(or_node.get_type_op() == Ntype_op::Or);
+#endif
 
     set_bits_wirename(or_dpin, wire);
 

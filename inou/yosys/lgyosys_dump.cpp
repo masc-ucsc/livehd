@@ -353,7 +353,7 @@ void Lgyosys_dump::create_wires(LGraph *g, RTLIL::Module *module) {
       RTLIL::Wire *new_wire = add_wire(module, node.get_driver_pin());
 
       auto lc = node.get_type_const();
-      if (lc.is_i()) {
+      if (lc.get_bits()<31 && lc.is_i()) { // 32bit in yosys const
         assert(node.get_bits()>=lc.get_bits());
         module->connect(new_wire, RTLIL::SigSpec(RTLIL::Const(lc.to_i(), node.get_bits())));
       } else {
@@ -793,7 +793,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         for(auto *lhs:v_lhs) {
           for( auto *rhs:v_rhs) {
             bool must_be_signed = true;
-            if (rhs->width == lhs->width)
+            if (unsigned_wire.contains(rhs) && unsigned_wire.contains(lhs))
               must_be_signed = false;
 
             RTLIL::Wire *wire;
@@ -851,9 +851,9 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
 
         if (b_dpin.get_node().is_type_const()) { // common optimization
           auto amount = RTLIL::Const(b_dpin.get_node().get_type_const().to_i());
-          module->addShl(next_id(g), lhs, amount, cell_output_map[node.get_driver_pin().get_compact()], false);
+          module->addSshl(next_id(g), lhs, amount, cell_output_map[node.get_driver_pin().get_compact()], true);
         }else{
-          module->addShl(next_id(g), lhs, rhs, cell_output_map[node.get_driver_pin().get_compact()], false);
+          module->addSshl(next_id(g), lhs, rhs, cell_output_map[node.get_driver_pin().get_compact()], true);
         }
       }
       break;
