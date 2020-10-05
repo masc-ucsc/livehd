@@ -231,7 +231,6 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
       return "invalid";
   }
 
-  assert(false);
   return "invalid";
 }
 
