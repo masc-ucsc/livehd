@@ -1,12 +1,15 @@
-$a.__bits = 3
+// $a.foo.__bits = 3
 $b.__bits = 2
 
-c = $a
-
-%o1 = c + $b
-
-%o2 = $d
+// c = $a.foo
+// e = $a.foo
 
 
+// %o1 = c + $b
+
+// %o2 = $d
+
+
+%o1 = $a.foo + $b
 
 

@@ -27,36 +27,36 @@ private:
   absl::flat_hash_map<std::string, Node_pin>                   name2dpin;             // for scalar variable
   absl::flat_hash_map<std::string, Node_pin>                   field2dpin;
   absl::flat_hash_map<std::string_view, std::vector<Node>>     driver_var2wire_nodes; // for __last_value temporarily wire nodes
-  absl::flat_hash_map<Node_pin, std::vector<Node_pin>>         inp2leaf_artifact_spins;
+  absl::flat_hash_map<Node_pin, std::vector<Node_pin>>         inp2leaf_tg_spins;
 protected:
-  void top_stmts2lgraph             (LGraph *dfg, const Lnast_nid &lnidx_stmts);
-  void process_ast_stmts            (LGraph *dfg, const Lnast_nid &lnidx_stmts);
-  Node process_ast_assign_op        (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_dp_assign_op     (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_nary_op          (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_logical_op       (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_as_op            (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_if_op            (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_phi_op           (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_uif_op           (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_func_call_op     (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_func_def_op      (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_for_op           (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_while_op         (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_tuple_struct     (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_concat_op        (LGraph *dfg, const Lnast_nid &lnidx);
-  void process_ast_tuple_add_op     (LGraph *dfg, const Lnast_nid &lnidx_ta);
-  void process_ast_tuple_get_op     (LGraph *dfg, const Lnast_nid &lnidx_tg);
-  void process_ast_attr_set_op      (LGraph *dfg, const Lnast_nid &lnidx_aset);
-  void process_ast_attr_get_op      (LGraph *dfg, const Lnast_nid &lnidx_aget);
-  void process_ast_tuple_phi_add_op (LGraph *dfg, const Lnast_nid &lnidx_tpa);
-  void setup_lgraph_ios_and_final_var_name(LGraph *dfg);
+  void top_stmts2lgraph             (LGraph *lg, const Lnast_nid &lnidx_stmts);
+  void process_ast_stmts            (LGraph *lg, const Lnast_nid &lnidx_stmts);
+  Node process_ast_assign_op        (LGraph *lg, const Lnast_nid &lnidx);
+  void process_ast_dp_assign_op     (LGraph *lg, const Lnast_nid &lnidx);
+  void process_ast_nary_op          (LGraph *lg, const Lnast_nid &lnidx);
+  void process_ast_logical_op       (LGraph *lg, const Lnast_nid &lnidx);
+  void process_ast_as_op            (LGraph *lg, const Lnast_nid &lnidx);
+  void process_ast_if_op            (LGraph *lg, const Lnast_nid &lnidx);
+  void process_ast_phi_op           (LGraph *lg, const Lnast_nid &lnidx);
+  void process_ast_uif_op           (LGraph *lg, const Lnast_nid &lnidx);
+  void process_ast_func_call_op     (LGraph *lg, const Lnast_nid &lnidx);
+  void process_ast_func_def_op      (LGraph *lg, const Lnast_nid &lnidx);
+  void process_ast_for_op           (LGraph *lg, const Lnast_nid &lnidx);
+  void process_ast_while_op         (LGraph *lg, const Lnast_nid &lnidx);
+  void process_ast_tuple_struct     (LGraph *lg, const Lnast_nid &lnidx);
+  void process_ast_concat_op        (LGraph *lg, const Lnast_nid &lnidx);
+  void process_ast_tuple_add_op     (LGraph *lg, const Lnast_nid &lnidx_ta);
+  void process_ast_tuple_get_op     (LGraph *lg, const Lnast_nid &lnidx_tg);
+  void process_ast_attr_set_op      (LGraph *lg, const Lnast_nid &lnidx_aset);
+  void process_ast_attr_get_op      (LGraph *lg, const Lnast_nid &lnidx_aget);
+  void process_ast_tuple_phi_add_op (LGraph *lg, const Lnast_nid &lnidx_tpa);
+  void setup_lgraph_ios_and_final_var_name(LGraph *lg);
 
 
-  Node         setup_node_opr_and_lhs    (LGraph *dfg, const Lnast_nid &lnidx_opr);
-  Node_pin     setup_tuple_assignment    (LGraph *dfg, const Lnast_nid &lnidx_opr);
-  Node_pin     setup_node_assign_and_lhs (LGraph *dfg, const Lnast_nid &lnidx_opr);
-  Node_pin     setup_ref_node_dpin       (LGraph *dfg, const Lnast_nid &lnidx, 
+  Node         setup_node_opr_and_lhs    (LGraph *lg, const Lnast_nid &lnidx_opr);
+  Node_pin     setup_tuple_assignment    (LGraph *lg, const Lnast_nid &lnidx_opr);
+  Node_pin     setup_node_assign_and_lhs (LGraph *lg, const Lnast_nid &lnidx_opr);
+  Node_pin     setup_ref_node_dpin       (LGraph *lg, const Lnast_nid &lnidx, 
                                           bool from_phi     = false, 
                                           bool from_concat  = false,
                                           bool from_tupstrc = false,
@@ -64,8 +64,8 @@ protected:
 
   Ntype_op decode_lnast_op           (const Lnast_nid &lnidx_opr);
   void         setup_dpin_ssa            (Node_pin &dpin, std::string_view var_name, uint16_t subs);
-  void         nary_node_rhs_connections (LGraph *dfg, Node &opr_node, const std::vector<Node_pin> &opds, bool is_subt);
-  void         setup_clk                 (LGraph *dfg, Node &reg_node);
+  void         nary_node_rhs_connections (LGraph *lg, Node &opr_node, const std::vector<Node_pin> &opds, bool is_subt);
+  void         setup_clk                 (LGraph *lg, Node &reg_node);
   void         setup_lnast_to_lgraph_primitive_type_mapping();
 
 
@@ -79,25 +79,29 @@ protected:
   static bool is_scalar            (Node_pin dpin) {return dpin.get_node().get_type_op() != Ntype_op::TupAdd; }
 
   bool        subgraph_outp_is_tuple (Sub_node* sub);
-  void        subgraph_io_connection (LGraph *dfg, Sub_node* sub, std::string_view arg_tup_name, std::string_view res_name, Node subg_node);
+  void        subgraph_io_connection (LGraph *lg, Sub_node* sub, std::string_view arg_tup_name, std::string_view res_name, Node subg_node);
   std::vector<std::string_view> split_hier_name (std::string_view hier_name);
 
   // tuple related
-  Node_pin     setup_tuple_ref           (LGraph *dfg, std::string_view tup_name);
-  Node_pin     setup_field_dpin            (LGraph *dfg, std::string_view key_name);
-  void         reconnect_to_ff_qpin      (LGraph *dfg, const Node &tg_node);
+  Node_pin     setup_tuple_ref           (LGraph *lg, std::string_view tup_name);
+  Node_pin     setup_field_dpin          (LGraph *lg, std::string_view key_name);
+  void         reconnect_to_ff_qpin      (LGraph *lg, const Node &tg_node);
   static bool  tuple_get_has_key_name    (const Node &tup_get);
   static bool  tuple_get_has_key_pos     (const Node &tup_get);
   static bool  is_tup_get_target         (const Node &tup_add, std::string_view tup_get_target);
   static bool  is_tup_get_target         (const Node &tup_add, uint32_t         tup_get_target);
-  void         create_hier_inp_tup_add   (LGraph *dfg, const Lnast_nid &c1_tg);
-  Node_pin     create_inp_tg             (LGraph *dfg, std::string_view input_field);
-  void         create_out_ta             (LGraph *dfg, std::string_view key_name, Node_pin &val_dpin);
-  /* void         dp_create_hier_outputs    (LGraph *dfg, Node &cur_node, std::string hier_name, absl::flat_hash_set<Node::Compact> &memo); */
-  /* void         dfs_create_flattened_hier_inp (LGraph *dfg, Node_pin &cur_node_spin, std::string hier_name, */ 
-  /*                                             absl::flat_hash_set<Node> &inp_artifacts); */
+  void         create_hier_inp_tup_add   (LGraph *lg, const Lnast_nid &c1_tg);
+  Node_pin     create_inp_tg             (LGraph *lg, std::string_view input_field);
+  void         create_out_ta             (LGraph *lg, std::string_view key_name, Node_pin &val_dpin);
+  /* void         dp_create_hier_outputs    (LGraph *lg, Node &cur_node, std::string hier_name, absl::flat_hash_set<Node::Compact> &memo); */
+  void         dfs_try_create_flattened_inp  (LGraph *lg, Node_pin &cur_node_spin, std::string hier_name, 
+                                          absl::flat_hash_set<Node> &inp_artifacts);
+
+  /* void         try_create_flattened_inp  (LGraph *lg, Node_pin &inp, std::string hier_name); */
+  void         try_create_flattened_out  (LGraph *lg, Node_pin &out);
 
   // attribute related
   bool check_new_var_chain (const Lnast_nid &lnidx_opr);
+  bool check_is_attrset_ta (Node &node);
 
 };

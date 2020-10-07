@@ -459,7 +459,7 @@ void Cprop::process_attr_q_pin(Node &node, Node_pin &parent_dpin) {
 
   if (wname == driver_wname) {
     collapse_forward_for_pin(node, parent_dpin);
-  }else{
+  } else {
     // Find flop
     auto target_ff_qpin = Node_pin::find_driver_pin(node.get_class_lgraph(), wname);
     collapse_forward_for_pin(node, target_ff_qpin);
@@ -469,11 +469,11 @@ void Cprop::process_attr_q_pin(Node &node, Node_pin &parent_dpin) {
 bool Cprop::process_attr_get(Node &node) {
   I(node.get_type_op() == Ntype_op::AttrGet);
 
-  if (!node.is_sink_connected("var_name") || !node.is_sink_connected("field"))
+  if (!node.is_sink_connected("name") || !node.is_sink_connected("field"))
     return false;
 
   // Either pos or name
-  auto parent_dpin   = node.get_sink_pin("var_name").get_driver_pin();
+  auto parent_dpin   = node.get_sink_pin("name").get_driver_pin();
   auto key_name_dpin = node.get_sink_pin("field").get_driver_pin();
 
   I(key_name_dpin.get_node().get_type_op() == Ntype_op::TupKey);

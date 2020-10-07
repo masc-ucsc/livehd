@@ -7,6 +7,7 @@ cc_library(
     includes = ["."],
     deps = [
         "//pass/common:pass",
+        "//pass/cprop:pass_cprop",
     ],
 )
 
