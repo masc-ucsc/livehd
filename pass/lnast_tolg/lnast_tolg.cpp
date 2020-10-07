@@ -1518,8 +1518,8 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(LGraph *lg) {
 
   // if all inputs could be resolved, delete the unified $
   auto unified_inp = lg->get_graph_input("$");
-  if (unified_inp.out_edges().size() == 0)
-    unified_inp.del_driver(Node_pin &dst)
+  /* if (unified_inp.out_edges().size() == 0) */
+    /* unified_inp.del_driver(Node_pin &dst) */
 
 }
 
