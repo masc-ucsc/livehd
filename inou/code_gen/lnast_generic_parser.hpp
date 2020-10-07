@@ -24,6 +24,8 @@ public:
   std::string final_print(std::string modname, std::string buffer_to_print) final;
 
   void result_in_odir(std::string_view fname, std::string_view odir, std::string buffer_to_print) final;
+
+  std::string make_unsigned(std::string sec_child) final;
 };
 
 //-------------------------------------------------------------------------------------
@@ -70,6 +72,8 @@ public:
   int indent_final_system() final;
   void result_in_odir(std::string_view fname, std::string_view odir, std::string buffer_to_print) final;
   void for_vcd_comb(std::string_view key1, std::string_view key2) final;
+
+  std::string make_unsigned(std::string sec_child) final;
 };
 
 //-------------------------------------------------------------------------------------
@@ -99,5 +103,7 @@ public:
 
   std::string final_print(std::string modname, std::string buffer_to_print) final;
   void result_in_odir(std::string_view fname, std::string_view odir, std::string buffer_to_print) final;
+
+  std::string make_unsigned(std::string sec_child) final;
 };
 

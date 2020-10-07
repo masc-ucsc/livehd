@@ -7,6 +7,7 @@
 #include <cassert>
 #include <string>
 #include <string_view>
+#include <utility>
 
 //-------------------------------------------------------------------------------------
 //Constructor:
@@ -133,6 +134,8 @@ void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
       do_for(curr_index);
     } else if (curr_node_type.is_while()) {
       do_while(curr_index);
+    } else if (curr_node_type.is_tposs()) {
+      do_tposs(curr_index);
     }
 
     curr_index = lnast->get_sibling_next(curr_index);
@@ -490,6 +493,26 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
     absl::StrAppend (&buffer_to_print, indent(), lnast_to->ref_name(key), " ", "=", " ", lnast_to->ref_name(val), lnast_to->stmt_sep());
   }
 
+}
+
+//-------------------------------------------------------------------------------------
+//processing tposs operator
+//pattern: tposs --> ref,___L5        ref,$a
+//this means $a is unsigned
+void Code_gen::do_tposs(const mmap_lib::Tree_index& tposs_node_index) {
+  fmt::print("node:op: {}:{}\n", lnast->get_name(tposs_node_index), lnast->get_type(tposs_node_index).debug_name());
+
+  auto first_child_index = lnast->get_first_child(tposs_node_index);
+  auto first_child = lnast->get_name(first_child_index);
+  auto sec_child = lnast->get_name(lnast->get_sibling_next(first_child_index));
+
+  if(is_temp_var(first_child)) {
+    ref_map.insert(std::pair<std::string_view, std::string>(first_child, sec_child));
+  } else {
+    I(false, "Error: expected temp str as first child of Tposs.\n\tCheck this issue!\n");
+  }
+
+  absl::StrAppend(&buffer_to_print, indent(), lnast_to->make_unsigned(std::string(sec_child)), lnast_to->stmt_sep());  
 }
 
 //-------------------------------------------------------------------------------------
