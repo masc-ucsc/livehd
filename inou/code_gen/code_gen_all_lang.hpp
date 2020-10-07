@@ -102,5 +102,8 @@ else
   virtual void result_in_odir(std::string_view fname, std::string_view odir, std::string buffer_to_print) =0;
 
   virtual void for_vcd_comb(std::string_view , std::string_view) {return ;};
+
+  //For tposs:
+  virtual std::string make_unsigned(std::string sec_child) =0;
 };
 
