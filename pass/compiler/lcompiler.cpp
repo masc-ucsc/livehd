@@ -47,9 +47,9 @@ void Lcompiler::add_thread(std::shared_ptr<Lnast> ln) {
     Cprop cp(false); //hier = false
     /* Bitwidth bw(false, 10); // hier = false, max_iters = 10 */
 
-    fmt::print("-------------------------------------");
-    fmt::print("Copy-Propagation");
-    fmt::print("-------------------------------------");
+    fmt::print("-------------------------------------\n");
+    fmt::print("-------- Copy-Propagation -----------\n");
+    fmt::print("-------------------------------------\n");
     cp.do_trans(lg);
     cp.do_trans(lg);
     if (gviz) {
