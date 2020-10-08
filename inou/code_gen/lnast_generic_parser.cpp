@@ -257,6 +257,22 @@ bool Cpp_parser::convert_parameters(std::string key, std::string ref) {
   return true;
 }
 
+void Prp_parser::get_maps() {
+  fmt::print("printing the unsigned vector\n");
+  for(auto elem : unsigned_vars)
+    fmt::print("var:{}\n", elem);
+}
+void Prp_parser::call_get_maps() {
+  Prp_parser::get_maps();
+}
+void Ver_parser::get_maps() {
+  fmt::print("printing the unsigned vector\n");
+  for(auto elem : unsigned_vars)
+    fmt::print("var:{}\n", elem);
+}
+void Ver_parser::call_get_maps() {
+  Ver_parser::get_maps();
+}
 void Cpp_parser::get_maps() {
   fmt::print("printing I/P bitwidth values:\n");
   for (auto elem : inp_bw)
@@ -269,6 +285,10 @@ void Cpp_parser::get_maps() {
   fmt::print("printing reg bitwidth values:\n");                      
   for (auto elem : reg_bw)                                            
     fmt::print("\tkey: {}, value: {}\n", elem.first, elem.second);    
+
+  fmt::print("printing the unsigned vector\n");
+  for(auto elem : unsigned_vars)
+    fmt::print("var:{}\n", elem);
 }
 void Cpp_parser::call_get_maps() {
   Cpp_parser::get_maps();
@@ -388,12 +408,27 @@ void Ver_parser::result_in_odir(std::string_view fname, std::string_view odir, s
 
 
 std::string Prp_parser::make_unsigned(std::string sec_child) {
+  unsigned_vars.push_back(sec_child);
   return absl::StrCat(sec_child, ".__unsigned = true");
 }
 
 std::string Cpp_parser::make_unsigned(std::string sec_child) {
-  return absl::StrCat(sec_child, ".__unsigned = true");//TODO: FIX it
+  unsigned_vars.push_back(sec_child);
+  return "//";
 }
 std::string Ver_parser::make_unsigned(std::string sec_child) {
-  return absl::StrCat(sec_child, ".__unsigned = true");//TODO: FIX it
+  unsigned_vars.push_back(sec_child);
+  return "//";
 }
+
+bool Prp_parser::is_unsigned(std::string var_name) {
+  return (std::find(unsigned_vars.begin(), unsigned_vars.end(), var_name)!=unsigned_vars.end());
+}
+
+bool Cpp_parser::is_unsigned(std::string var_name) {
+  return (std::find(unsigned_vars.begin(), unsigned_vars.end(), var_name)!=unsigned_vars.end());
+}
+bool Ver_parser::is_unsigned(std::string var_name) {
+  return (std::find(unsigned_vars.begin(), unsigned_vars.end(), var_name)!=unsigned_vars.end());
+}
+

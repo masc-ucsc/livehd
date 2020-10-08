@@ -3,12 +3,14 @@
 
 #include <string>
 #include <string_view>
+#include <vector>
 #include "code_gen.hpp"
 #include "code_gen_all_lang.hpp"
 
 class Prp_parser: public Code_gen_all_lang {
   std::string_view stmt_separator = "\n";
   std::string_view lang_type = "prp";
+  std::vector<std::string> unsigned_vars;
 public:
   Prp_parser() {};
   std::string_view stmt_sep() final;
@@ -20,12 +22,15 @@ public:
   std::string_view for_cond_end() final;
   std::string ref_name(std::string prp_term, bool strct = true) final;
   std::string ref_name(std::string_view prp_term, bool strct = true) final;
+  void get_maps();//for debugging only
+  void call_get_maps() final;
 
   std::string final_print(std::string modname, std::string buffer_to_print) final;
 
   void result_in_odir(std::string_view fname, std::string_view odir, std::string buffer_to_print) final;
 
   std::string make_unsigned(std::string sec_child) final;
+  bool is_unsigned(std::string var_name) final;
 };
 
 //-------------------------------------------------------------------------------------
@@ -45,6 +50,7 @@ class Cpp_parser: public Code_gen_all_lang {
   std::string main_file_final_str;
   std::string buff_to_print_vcd;
 
+  std::vector<std::string> unsigned_vars;
 public:
   Cpp_parser(){};
   std::string_view stmt_sep() final;
@@ -74,6 +80,7 @@ public:
   void for_vcd_comb(std::string_view key1, std::string_view key2) final;
 
   std::string make_unsigned(std::string sec_child) final;
+  bool is_unsigned(std::string var_name) final;
 };
 
 //-------------------------------------------------------------------------------------
@@ -82,6 +89,7 @@ class Ver_parser: public Code_gen_all_lang {
   std::string_view stmt_separator = ";\n";
   std::string_view lang_type = "v";
 
+  std::vector<std::string> unsigned_vars;
 public:
   Ver_parser(){};
   std::string_view stmt_sep() final;
@@ -100,10 +108,13 @@ public:
   std::string ref_name(std::string prp_term, bool strct = true) final;
   std::string ref_name(std::string_view prp_term, bool strct = true) final;
   std::string_view assign_node_strt() final;
+  void get_maps();//for debugging only
+  void call_get_maps() final;
 
   std::string final_print(std::string modname, std::string buffer_to_print) final;
   void result_in_odir(std::string_view fname, std::string_view odir, std::string buffer_to_print) final;
 
   std::string make_unsigned(std::string sec_child) final;
+  bool is_unsigned(std::string var_name) final;
 };
 

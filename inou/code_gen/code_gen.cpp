@@ -509,7 +509,7 @@ void Code_gen::do_tposs(const mmap_lib::Tree_index& tposs_node_index) {
   if(is_temp_var(first_child)) {
     ref_map.insert(std::pair<std::string_view, std::string>(first_child, sec_child));
   } else {
-    I(false, "Error: expected temp str as first child of Tposs.\n\tCheck this issue!\n");
+    I(false, "Error: expected temp str as first child of Tposs.\n\tMight need to check this issue!\n");
   }
 
   absl::StrAppend(&buffer_to_print, indent(), lnast_to->make_unsigned(std::string(sec_child)), lnast_to->stmt_sep());  

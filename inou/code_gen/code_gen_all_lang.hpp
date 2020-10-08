@@ -94,7 +94,7 @@ else
 
   //for final printing
   virtual std::string final_print(std::string modname, std::string buffer_to_print) = 0;//param is modname
-  virtual void call_get_maps() {;};//for debugging only
+  virtual void call_get_maps() = 0;//for debugging only
 
   virtual int indent_final_system() {return 0;};
 
@@ -105,5 +105,6 @@ else
 
   //For tposs:
   virtual std::string make_unsigned(std::string sec_child) =0;
+  virtual bool is_unsigned(std::string var_name) =0;
 };
 
