@@ -1,0 +1,7 @@
+$a.__bits = 2
+$b.__bits = 2
+c = $a
+d = c 
+e = d 
+%o1 = d + e
+%o2 = e + $b

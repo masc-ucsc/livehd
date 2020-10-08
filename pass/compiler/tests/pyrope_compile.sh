@@ -15,6 +15,9 @@ pts='hier_tuple hier_tuple_io logic
   # FIXME: firrtl_tail3 firrtl_gcd counter_tup counter2
 
 pts='test'
+pts='io_gen'
+pts='io_gen2'
+pts='io_gen3'
 
 
 LGSHELL=./bazel-bin/main/lgshell
