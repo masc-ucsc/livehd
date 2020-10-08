@@ -28,6 +28,7 @@ private:
   absl::flat_hash_map<std::string, Node_pin>                   field2dpin;
   absl::flat_hash_map<std::string_view, std::vector<Node>>     driver_var2wire_nodes; // for __last_value temporarily wire nodes
   absl::flat_hash_map<Node_pin, std::vector<Node_pin>>         inp2leaf_tg_spins;
+  absl::flat_hash_map<Node, std::vector<Node>>                 inp_artifacts;
 protected:
   void top_stmts2lgraph             (LGraph *lg, const Lnast_nid &lnidx_stmts);
   void process_ast_stmts            (LGraph *lg, const Lnast_nid &lnidx_stmts);
@@ -63,10 +64,10 @@ protected:
                                           bool from_assign  = false);
 
   Ntype_op decode_lnast_op           (const Lnast_nid &lnidx_opr);
-  void         setup_dpin_ssa            (Node_pin &dpin, std::string_view var_name, uint16_t subs);
-  void         nary_node_rhs_connections (LGraph *lg, Node &opr_node, const std::vector<Node_pin> &opds, bool is_subt);
-  void         setup_clk                 (LGraph *lg, Node &reg_node);
-  void         setup_lnast_to_lgraph_primitive_type_mapping();
+  void     setup_dpin_ssa            (Node_pin &dpin, std::string_view var_name, uint16_t subs);
+  void     nary_node_rhs_connections (LGraph *lg, Node &opr_node, const std::vector<Node_pin> &opds, bool is_subt);
+  void     setup_clk                 (LGraph *lg, Node &reg_node);
+  void     setup_lnast_to_lgraph_primitive_type_mapping();
 
 
   static bool is_register          (std::string_view name) {return name.substr(0, 1) == "#" ; }
@@ -93,15 +94,16 @@ protected:
   void         create_hier_inp_tup_add   (LGraph *lg, const Lnast_nid &c1_tg);
   Node_pin     create_inp_tg             (LGraph *lg, std::string_view input_field);
   void         create_out_ta             (LGraph *lg, std::string_view key_name, Node_pin &val_dpin);
-  /* void         dp_create_hier_outputs    (LGraph *lg, Node &cur_node, std::string hier_name, absl::flat_hash_set<Node::Compact> &memo); */
-  void         dfs_try_create_flattened_inp  (LGraph *lg, Node_pin &cur_node_spin, std::string hier_name, 
-                                          absl::flat_hash_set<Node> &inp_artifacts);
 
-  /* void         try_create_flattened_inp  (LGraph *lg, Node_pin &inp, std::string hier_name); */
-  void         try_create_flattened_out  (LGraph *lg, Node_pin &out);
+  void         try_create_flattened_inp     (LGraph *lg);
+  void         dfs_try_create_flattened_inp (LGraph *lg, Node_pin &cur_node_spin, std::string hier_name, Node &chain_head);                       
+
+  void         try_create_flattened_out  (LGraph *lg);
+  /* void         dp_create_hier_outputs    (LGraph *lg, Node &cur_node, std::string hier_name, absl::flat_hash_set<Node::Compact> &memo); */
 
   // attribute related
   bool check_new_var_chain (const Lnast_nid &lnidx_opr);
-  bool check_is_attrset_ta (Node &node);
+  bool check_is_attrset_ta (Node &node, std::string &var_name, std::string &attr_name, Lconst &bits, Node &chain_head);
+  bool check_is_tup_assign (Node node);
 
 };
