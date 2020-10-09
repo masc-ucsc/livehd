@@ -449,7 +449,17 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
     auto curpos = curr_index.pos;
     fmt::print("Processing op child {} at level {} pos {}\n",lnast->get_name(curr_index), curlvl, curpos);
     //std::string tmp_trm = lnast_to->ref_name(std::string(lnast->get_name(curr_index)));
-    op_str_vect.push_back(lnast->get_name(curr_index));
+/*    if(lnast->get_type(curr_index).is_const()) {
+      if ((lnast_to->get_lang_type()=="cpp") && (!op_str_vect.empty())) {//&& check if op_str_vect.back is unsigned
+        //op_str_vect.push_back(absl::StrCat("UInt<>(",lnast->get_name(curr_index), ")"));/FIXME
+      } else if ((lnast_to->get_lang_type()=="v") && (!op_str_vect.empty())) {//&& check if op_str_vect.back() is signed
+        op_str_vect.push_back(absl::StrCat("signed",lnast->get_name(curr_index)));//FIXME
+      } else {
+        op_str_vect.push_back(lnast->get_name(curr_index));
+      }
+    } else {*/
+      op_str_vect.push_back(lnast->get_name(curr_index));
+/*    }*/
     curr_index = lnast->get_sibling_next(curr_index);
   }
   //op_str_vect now has all the children of the operation "op"
@@ -480,6 +490,7 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
     if(op_is_unary) {
       absl::StrAppend(&val,lnast_to->debug_name_lang(op_node_data.type));
     }
+    //TODO:check if ref is const type or not
     absl::StrAppend(&val, lnast_to->ref_name(ref));
     if ((i+1) != op_str_vect.size() && !op_is_unary) {//check that another entry is left in op_str_vect && it is a binary operation
       absl::StrAppend(&val, " ", lnast_to->debug_name_lang(op_node_data.type), " ");

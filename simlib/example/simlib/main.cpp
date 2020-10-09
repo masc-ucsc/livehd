@@ -2,10 +2,10 @@
 #include "livesim_types.hpp"
 #include "simlib_checkpoint.hpp"
 //#include "sample_stage.hpp"
-#include "trivial.hpp"
+#include "add1.hpp"
 
 int main(int argc, char **argv) {
-  Simlib_checkpoint<trivial_sim> top("ckpt");
+  Simlib_checkpoint<add1_sim> top("ckpt");
   // top.enable_trace(".");
   if (getenv("SIMLIB_DUMPDIR")) {
     top.enable_trace(getenv("SIMLIB_DUMPDIR"));  // to dump the created files in scrap folder so as to not saturate the NFS
