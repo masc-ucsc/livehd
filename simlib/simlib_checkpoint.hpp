@@ -333,7 +333,12 @@ public:
         vcd::advance_to_posedge();
         top.vcd_posedge();
         vcd::advance_to_comb();
-        top.vcd_comb(1,0);
+        if(i<=1000)
+          top.vcd_comb(0001,0001);
+        else if (i<10000)
+          top.vcd_comb(0010,0001);
+        else
+          top.vcd_comb(0010,0010);
         vcd::advance_to_negedge();
         top.vcd_negedge();
 #else

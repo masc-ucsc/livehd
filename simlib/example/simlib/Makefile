@@ -9,7 +9,7 @@ all: sample
 
 SIMLIB_OBJS=vcd_writer.o
 #GENERATED_OBJS=sample1_stage.o  sample2_stage.o  sample3_stage.o  sample_stage.o
-GENERATED_OBJS=trivial.o
+GENERATED_OBJS=add1.o
 
 sample: livesim_types.hpp.gch $(SIMLIB_OBJS) $(GENERATED_OBJS) main.o
 	$(CXX) $(CXXFLAGS) -o $@ $(SIMLIB_OBJS) $(GENERATED_OBJS) main.o
