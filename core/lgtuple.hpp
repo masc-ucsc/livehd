@@ -24,7 +24,7 @@ protected:
   Node_pin val_dpin;
 
   absl::flat_hash_map<std::string, int> key2pos;
-  std::vector<std::shared_ptr<Lgtuple>> pos2tuple;  // pos to its corresponding most up-to-dated tuple chain (at old time)
+  std::vector<std::shared_ptr<Lgtuple>> pos2tuple;  // pos to its corresponding sub-tuple chain (at old time)
 
   void reset_non_attr_fields();
 
@@ -115,7 +115,7 @@ public:
   bool   add(const std::shared_ptr<Lgtuple> tup2);
 
   bool is_scalar() const { return pos2tuple.empty(); }
-  bool is_dpin() const { return !val_dpin.is_invalid(); }
+  bool is_valid_val_dpin() const { return !val_dpin.is_invalid(); }
 
   Node_pin get_value_dpin(int pos, std::string_view key) const;  // get driver dpin of value field
   Node_pin get_value_dpin() const { return val_dpin; };

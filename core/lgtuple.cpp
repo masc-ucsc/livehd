@@ -39,7 +39,7 @@ std::shared_ptr<Lgtuple> Lgtuple::get_tuple(int pos, std::string_view key) {
       return nullptr; // field not found
 
     pos = get_key_pos(key);
-  }else if (has_key_name(key)) {
+  } else if (has_key_name(key)) {
     if (static_cast<size_t>(pos)!=get_key_pos(key))
       return nullptr; // Should be a compile error. Inconsistent field
   }
@@ -148,12 +148,12 @@ void Lgtuple::set(std::string_view key, std::shared_ptr<Lgtuple> tup2) {
     auto shift = pos2tuple.size();
     pos2tuple.emplace_back(tup2);
     key2pos[key] = shift;
-  }else{
-    I(pos2tuple.size()> it->second);
-    I(!(pos2tuple[it->second]->is_dpin() && tup2->is_dpin())); // Which one to pick??!!??
-    if (tup2->is_dpin()) {
+  } else {
+    I(pos2tuple.size() > it->second);
+    I(!(pos2tuple[it->second]->is_valid_val_dpin() && tup2->is_valid_val_dpin())); // Which one to pick??!!??
+    if (tup2->is_valid_val_dpin()) {
       pos2tuple[it->second]->set(tup2->get_value_dpin()); // also resets non attr fields
-    }else{
+    } else {
       pos2tuple[it->second]->reset_non_attr_fields();
     }
     pos2tuple[it->second]->add(tup2);
@@ -221,11 +221,12 @@ size_t Lgtuple::add(const Node_pin &_val_dpin) {
   return pos;
 }
 
+// for tuple concatenate
 bool Lgtuple::add(const std::shared_ptr<Lgtuple> tup2) {
+  // check label overlap
   for (auto e : tup2->key2pos) {
     if (key2pos.count(e.first)) {
-      return false;  // label overlap
-    }
+      return false;      }
   }
 
   named   = named && tup2->named;
