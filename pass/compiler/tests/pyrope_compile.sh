@@ -18,6 +18,7 @@ pts='test'
 pts='io_gen'
 pts='io_gen2'
 pts='io_gen3'
+pts='hier_tuple'
 
 
 LGSHELL=./bazel-bin/main/lgshell

@@ -318,7 +318,7 @@ Node Lnast_tolg::process_ast_assign_op(LGraph *lg, const Lnast_nid &lnidx_assign
     opr_spin  = setup_tuple_assignment(lg, lnidx_assign);
   } else if (opd1_node.get_type_op() == Ntype_op::AttrSet) {
     opr_spin  = setup_node_assign_and_lhs(lg, lnidx_assign);
-  } else if (is_input(opd1.get_name())) {
+  } else if (opd1.has_name() && is_input(opd1.get_name())) {
     opr_spin  = setup_tuple_assignment(lg, lnidx_assign);
   } else {
     opr_spin  = setup_node_assign_and_lhs(lg, lnidx_assign);

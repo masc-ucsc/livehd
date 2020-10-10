@@ -527,17 +527,22 @@ bool Cprop::process_tuple_get(Node &node) {
   auto [tup_name, key_name, key_pos] = get_tuple_name_key(node);
 
   // special case when TG try to get a scalar variable by accessing pos 0
+  // FIXME:sh-> should be handled by tup.is_scalar()
   if (parent_node.get_type_op() != Ntype_op::TupAdd && key_pos == 0 && !parent_dpin.is_invalid()) {
     collapse_forward_for_pin(node, parent_dpin);
     return true;
   }
 
+
   auto ptup_it = node2tuple.find(parent_node.get_compact());
   if (ptup_it == node2tuple.end()) {  // ptup_it = parent_node
+    //FIXME:sh-> if the parent comes from unified input $, we should just give it a empty lgtuple
+
     std::string key(key_name);
     if (key.empty())
       key = std::to_string(key_pos);
 
+    
     Pass::error("for tuple_get {} parent_node {}, there is no tuple of {}, so no valid field:{}\n",
                 node.debug_name(),
                 parent_node.debug_name(),
@@ -547,6 +552,7 @@ bool Cprop::process_tuple_get(Node &node) {
   }
 
   auto ctup = ptup_it->second;
+  //FIXME:sh -> should exclude the TG of $
   if (!ctup->has_key(key_pos, key_name)) {
     ctup->dump();
     Pass::error("tuple {} does not have field pos:{} key:{}\n", tup_name, key_pos, key_name);
@@ -558,13 +564,16 @@ bool Cprop::process_tuple_get(Node &node) {
     sub_tup = ctup;
   else
     sub_tup = ctup->get_tuple(key_pos, key_name);
+
   if (!sub_tup) {
     return false; // Could not resolve (maybe compile error, maybe hierarchical needed)
   }
 
-  if (!sub_tup->is_dpin()) {
+
+  // still unclear if the TupGet chain is resolved (final TupGet will decide)
+  if (!sub_tup->is_valid_val_dpin()) { 
     node2tuple[node.get_compact()] = sub_tup;
-    return true; // still unclear if the TupGet chain is resolved (final TupGet will decide)
+    return true;   
   }
 
   auto val_dpin = sub_tup->get_value_dpin();
@@ -588,7 +597,7 @@ bool Cprop::process_tuple_get(Node &node) {
   } else {
     I(!any_tuples); // If so, must create attrset for non tup and keep up (conta==0 opt out)
     int conta=0;
-    for(auto it:sub_tup->get_all_attributes()) {
+    for(auto it : sub_tup->get_all_attributes()) {
       auto attr_key_node = node.get_lg()->create_node(Ntype_op::TupKey);
       auto attr_key_dpin = attr_key_node.setup_driver_pin();
       attr_key_dpin.set_name(it.first);
@@ -603,13 +612,12 @@ bool Cprop::process_tuple_get(Node &node) {
         node.setup_sink_pin("var_name").connect_driver(val_dpin);
         node.setup_sink_pin("field").connect_driver(attr_key_dpin);
         node.setup_sink_pin("value").connect_driver(it.second);
-      }else{
+      } else {
         I(false); // handle multiple attr set (create node)
       }
       conta++;
     }
   }
-
   return true;
 }
 
@@ -630,41 +638,43 @@ void Cprop::process_tuple_add(Node &node) {
   // Can not delete TupAdd here. Only TupGet can delete up chain if nobody needs the TupAdd
   I(node.get_type_op() == Ntype_op::TupAdd);
 
-
-  std::shared_ptr<Lgtuple> parent_ctup;
+  // ptup == parent_tup == up_tup
+  std::shared_ptr<Lgtuple> ptup; 
   if (node.get_sink_pin("tuple_name").is_connected())
-    parent_ctup = process_tuple_add_chain(node.get_sink_pin("tuple_name").get_driver_pin());
-  std::shared_ptr<Lgtuple> chain_ctup;
+    ptup = process_tuple_add_chain(node.get_sink_pin("tuple_name").get_driver_pin());
+
+  // a new tuple chain as the val_dpin, either for a tuple concat or a new tuple hierarchy
+  std::shared_ptr<Lgtuple> chain_tup; 
   if(node.is_sink_connected("value"))
-    chain_ctup = process_tuple_add_chain(node.get_sink_pin("value").get_driver_pin());
+    chain_tup = process_tuple_add_chain(node.get_sink_pin("value").get_driver_pin());
 
   auto [tup_name, key_name, key_pos] = get_tuple_name_key(node);
 
   std::shared_ptr<Lgtuple> ctup;
-  if (chain_ctup) {
-    if (parent_ctup) {
+  if (chain_tup) { 
+    if (ptup) {
       //fmt::print("1.TupAdd node:{} tup_name:{} pos:{} key:{}\n", node.debug_name(), tup_name, key_pos, key_name);
-      ctup = std::make_shared<Lgtuple>(*parent_ctup);
+      ctup = std::make_shared<Lgtuple>(*ptup);
     } else {
       //fmt::print("2.TupAdd node:{} tup_name:{} pos:{} key:{}\n", node.debug_name(), tup_name, key_pos, key_name);
       ctup = std::make_shared<Lgtuple>(tup_name);
     }
 
-    if (key_pos<0 && key_name.empty()) { // Tuple Concatenation operator
-      bool ok = ctup->add(chain_ctup);
+    if (key_pos<0 && key_name.empty()) { // dummy TA -> Tuple Concatenation operator
+      bool ok = ctup->add(chain_tup);
       if (!ok) {
-        parent_ctup->dump();
-        chain_ctup->dump();
+        ptup->dump();
+        chain_tup->dump();
         Pass::error("tuples name:{} pos:{} key:{} can not be merged\n", tup_name, key_pos, key_name);
         return;
       }
     } else {
-      ctup->set(key_name, chain_ctup);  // FIXME: create lgtuple:set(pos,key,tuple)
+      ctup->set(key_name, chain_tup);  // add hier-tuple field. FIXME: create lgtuple:set(pos,key,tuple)
     }
   } else {
-    if (parent_ctup) {
+    if (ptup) {
       //fmt::print("3.TupAdd node:{} tup_name:{} pos:{} key:{}\n", node.debug_name(), tup_name, key_pos, key_name);
-      ctup = parent_ctup;
+      ctup = ptup;
     } else {
       //fmt::print("4.TupAdd node:{} tup_name:{} pos:{} key:{}\n", node.debug_name(), tup_name, key_pos, key_name);
       ctup = std::make_shared<Lgtuple>(tup_name);
@@ -672,7 +682,7 @@ void Cprop::process_tuple_add(Node &node) {
     if (node.is_sink_connected("value")) {
       auto val_dpin = node.get_sink_pin("value").get_driver_pin();
       if (key_pos<0 && key_name.empty()) { // Tuple Concatenation operator
-        if (!parent_ctup && node.get_sink_pin("tuple_name").is_connected()) {
+        if (!ptup && node.get_sink_pin("tuple_name").is_connected()) {
           ctup->add(node.get_sink_pin("tuple_name").get_driver_pin());
         }
         ctup->add(val_dpin);
@@ -684,17 +694,17 @@ void Cprop::process_tuple_add(Node &node) {
         }
       }
     } else {
-      I(parent_ctup); // tup1 = tup2 can have no sink(3)
+      I(ptup); // tup1 = tup2 can have no sink(3)
     }
   }
 #if 0
-  if (parent_ctup) {
+  if (ptup) {
     fmt::print("Parent:{}\n", node.get_sink_pin(0).get_driver_node().debug_name());
-    parent_ctup->dump();
+    ptup->dump();
   }
-  if (chain_ctup) {
+  if (chain_tup) {
     fmt::print("Chain:{}\n", node.get_sink_pin(3).get_driver_node().debug_name());
-    chain_ctup->dump();
+    chain_tup->dump();
   }
   fmt::print("current:{}\n", node.debug_name());
   ctup->dump();

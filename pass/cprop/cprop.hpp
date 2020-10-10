@@ -32,6 +32,7 @@ protected:
   bool process_attr_get(Node &node);
   void process_attr_q_pin(Node &node, Node_pin &parent_dpin);
 
+
   // Tuple methods
   std::shared_ptr<Lgtuple> process_tuple_add_chain(Node_pin up_dpin);
   void process_tuple_add(Node &node);
