@@ -1,6 +1,11 @@
 Tests:
-   clocked logic
-   500K XOR table or something
+ - clocked logic
+ - 500K XOR table
+
+Big refactor:
+ - Group a collapsed hier, pattern, etc. into a "slice" that is totally contained in a single thread
+     this is also going to make the code a ton faster because >1 thing can be done at once and better cache locality
+ - Make sure that connectivity information is kept throughout the floorplan generation process since that information is required at the end
 
 Optimizations:
  - area adjustment algorithm is naive, and inserts area when it isn't necessary
@@ -9,11 +14,8 @@ Optimizations:
      sets -> subgraphs
  - beware of temporaries
  - when making maps, see if I can use references instead of actual copies - might be a lot cheaper!
- - Group a hier, pattern, etc. into a "slice" that is totally contained in a single thread
-     this is also going to make the code a ton faster because >1 thing can be done at once and better cache locality
 
-
-Style refactors:
+Style guide refactors:
  - make sure all class/type names are uppercase
  - set/map -> absl versions
  - const string& as a parameter -> string_view
@@ -34,8 +36,8 @@ Code improvements:
      Make sure that things are as decoupled as possible - private globals aren't readable.
      We can return literals, and as long as we use move semantics we'll be fine on speed. 
  - Node/vertex/vert/module terminology is inconsistant
- - only need <functional> if doing a recursive lambda...
- - dag could probably be an ordered set...
+ - only need <functional> if doing a recursive lambda
+ - dag could probably be an ordered set
 
 Long term:
 1. some sort of check() method that verifies netlists and internal functionality
