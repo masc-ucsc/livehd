@@ -15,8 +15,8 @@
 class Lgtuple : std::enable_shared_from_this<Lgtuple> {
 private:
 protected:
-  std::string parent_key_name;  // empty not set
-  int         parent_key_pos;   // -1 not set
+  std::string parent_key_name;  // empty not set  //FIXME->sh: should be rename to hier_parent_key_name
+  int         parent_key_pos;   // -1 not set     //FIXME->sh: should be rename to hier_parent_key_pos
 
   bool ordered;
   bool named;
@@ -102,19 +102,22 @@ public:
   bool set(int pos, std::string_view key, const Node_pin &dpin);  // int -> pos<0 invalid
 
   void set(std::string_view key, std::shared_ptr<Lgtuple> tup);
-  void set(std::string_view key, LGraph *lg, const Lconst &constant);
   void set(std::string_view key, const Node_pin &dpin);
+  void set(std::string_view key, LGraph *lg, const Lconst &constant);
 
   void set(size_t pos, std::shared_ptr<Lgtuple> tup);
   void set(size_t pos, LGraph *lg, const Lconst &constant);
   void set(size_t pos, const Node_pin &dpin);
+
+  void set(LGraph *lg, const Lconst &constant);
+  void set(const Node_pin &dpin);
 
 
   size_t add(LGraph *lg, const Lconst &constant);
   size_t add(const Node_pin &dpin);
   bool   add(const std::shared_ptr<Lgtuple> tup2);
 
-  bool is_scalar() const { return pos2tuple.empty(); }
+  bool is_scalar() const { return pos2tuple.empty(); } //FIXME->sh: should be renamed to parent_is_scalar
   bool is_valid_val_dpin() const { return !val_dpin.is_invalid(); }
 
   Node_pin get_value_dpin(int pos, std::string_view key) const;  // get driver dpin of value field
@@ -122,9 +125,6 @@ public:
 
   bool   is_constant() const;
   Lconst get_constant() const;
-
-  void set(LGraph *lg, const Lconst &constant);
-  void set(const Node_pin &dpin);
 
   std::vector<std::pair<std::string_view, Node_pin>> get_all_attributes() const;
 

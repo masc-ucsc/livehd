@@ -1,7 +1,4 @@
-$foo.a.b.__bits = 3
-$bar.__bits = 3
+tup = (a = 1, b = 2, c = (foo = 3, bar = 4))
 
-%otup.c.d = $bar + 5
-%out = $foo.a.b + $bar
-
+%x = tup.a + tup.c.foo
 
