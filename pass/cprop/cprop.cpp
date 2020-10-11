@@ -552,8 +552,8 @@ bool Cprop::process_tuple_get(Node &node) {
   }
 
   auto ctup = ptup_it->second;
-  //FIXME:sh -> should exclude the TG of $
   if (!ctup->has_key(key_pos, key_name)) {
+    //FIXME:sh -> should exclude the TG of $
     ctup->dump();
     Pass::error("tuple {} does not have field pos:{} key:{}\n", tup_name, key_pos, key_name);
     return false;
@@ -643,7 +643,7 @@ void Cprop::process_tuple_add(Node &node) {
   if (node.get_sink_pin("tuple_name").is_connected())
     ptup = process_tuple_add_chain(node.get_sink_pin("tuple_name").get_driver_pin());
 
-  // a new tuple chain as the val_dpin, either for a tuple concat or a new tuple hierarchy
+  // a new tuple chain as the val_dpin, either for a tup_concat or a new tuple hierarchy
   std::shared_ptr<Lgtuple> chain_tup; 
   if(node.is_sink_connected("value"))
     chain_tup = process_tuple_add_chain(node.get_sink_pin("value").get_driver_pin());
@@ -679,9 +679,13 @@ void Cprop::process_tuple_add(Node &node) {
       //fmt::print("4.TupAdd node:{} tup_name:{} pos:{} key:{}\n", node.debug_name(), tup_name, key_pos, key_name);
       ctup = std::make_shared<Lgtuple>(tup_name);
     }
+
     if (node.is_sink_connected("value")) {
       auto val_dpin = node.get_sink_pin("value").get_driver_pin();
-      if (key_pos<0 && key_name.empty()) { // Tuple Concatenation operator
+      I(val_dpin.get_node().get_type_op() != Ntype_op::TupAdd); //sh added, check?
+
+      // Tuple Concatenation operator
+      if (key_pos<0 && key_name.empty()) { 
         if (!ptup && node.get_sink_pin("tuple_name").is_connected()) {
           ctup->add(node.get_sink_pin("tuple_name").get_driver_pin());
         }
