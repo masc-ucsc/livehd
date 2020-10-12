@@ -489,14 +489,15 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
     if(op_is_unary) {
       absl::StrAppend(&val,lnast_to->debug_name_lang(op_node_data.type));
     }
-    //TODO:check if refi is const type or not
-    if(std::find(const_vect.begin(), const_vect.end(), ref) != const_vect.end()) {
+
+    //TODO:check if ref is const type (used for masking) or not
+    if((std::find(const_vect.begin(), const_vect.end(), ref) != const_vect.end()) && (lnast_to->is_unsigned(std::string(op_str_vect[i-1])))) {
       fmt::print("\nNow, op str vect i-1 is {} and ref is {}\n",op_str_vect[i-1], ref);
-      if(lnast_to->is_unsigned(std::string(op_str_vect[i-1]))) {
-        fmt::print("\nop str vect i-1 is {} and ref is {}\n",op_str_vect[i-1], ref);
-        ref = absl::StrCat("UInt<>(", ref, ")");//FIXME: bitwidth as per the output!?
-      }
+//      auto bw_num = (int)log2(ref)+1; 
+//      ref = absl::StrCat("UInt<", bw_num, ">(", ref, ")");//FIXME: bitwidth as per the output!?
+      ref = absl::StrCat("UInt<>(", ref, ")");//FIXME: bitwidth as per the output!?
     }
+
     absl::StrAppend(&val, lnast_to->ref_name(ref));
     if ((i+1) != op_str_vect.size() && !op_is_unary) {//check that another entry is left in op_str_vect && it is a binary operation
       absl::StrAppend(&val, " ", lnast_to->debug_name_lang(op_node_data.type), " ");
