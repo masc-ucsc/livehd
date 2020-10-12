@@ -2,6 +2,7 @@
 
 #include <string>
 #include <string_view>
+#include <vector>
 #include "lnast.hpp"
 #include "inou_code_gen.hpp"
 #include "lnast_generic_parser.hpp"
@@ -20,6 +21,7 @@ private:
   std::unique_ptr<Code_gen_all_lang> lnast_to;
   int indendation = 0;
   std::string indent();
+  std::vector<std::string_view> const_vect;
 public:
   Code_gen(Inou_code_gen::Code_gen_type code_gen_type, std::shared_ptr<Lnast>_lnast, std::string_view _path, std::string_view _odir);
   //virtual void generate() = 0;

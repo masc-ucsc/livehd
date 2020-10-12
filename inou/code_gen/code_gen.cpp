@@ -4,6 +4,7 @@
 //#ifndef NDEBUG
 //#define NDEBUG
 //#endif
+#include <algorithm>
 #include <cassert>
 #include <string>
 #include <string_view>
@@ -52,6 +53,9 @@ void Code_gen::generate(){
 
   //for debugging purposes only:
   lnast_to->call_get_maps();
+  for (auto const& [key, val] : ref_map) {
+    fmt::print("For map key: {}, val is: {}\n", key, val);
+  }
 
   fmt::print("lnast_to_{}_parser path:{} \n", lang_type, path);
 
@@ -458,6 +462,8 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
         op_str_vect.push_back(lnast->get_name(curr_index));
       }
     } else {*/
+      if(lnast->get_type(curr_index).is_const()) 
+        Code_gen::const_vect.push_back(lnast->get_name(curr_index));
       op_str_vect.push_back(lnast->get_name(curr_index));
 /*    }*/
     curr_index = lnast->get_sibling_next(curr_index);
@@ -482,6 +488,9 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
         ref = absl::StrCat("(", map_it->second, ")");
       } else {
         ref = map_it->second;
+        if(lnast_to->is_unsigned(ref) && lnast_to->get_lang_type()=="cpp") {
+          lnast_to->make_unsigned(std::string(key));
+        }
       }
     } else if (is_number(ref)) {
       ref = process_number(ref);
@@ -490,7 +499,14 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
     if(op_is_unary) {
       absl::StrAppend(&val,lnast_to->debug_name_lang(op_node_data.type));
     }
-    //TODO:check if ref is const type or not
+    //TODO:check if refi is const type or not
+    if(std::find(const_vect.begin(), const_vect.end(), ref) != const_vect.end()) {
+      fmt::print("\nNow, op str vect i-1 is {} and ref is {}\n",op_str_vect[i-1], ref);
+      if(lnast_to->is_unsigned(std::string(op_str_vect[i-1]))) {
+        fmt::print("\nop str vect i-1 is {} and ref is {}\n",op_str_vect[i-1], ref);
+        ref = absl::StrCat("UInt<>(", ref, ")");//FIXME: bitwidth as per the output!?
+      }
+    }
     absl::StrAppend(&val, lnast_to->ref_name(ref));
     if ((i+1) != op_str_vect.size() && !op_is_unary) {//check that another entry is left in op_str_vect && it is a binary operation
       absl::StrAppend(&val, " ", lnast_to->debug_name_lang(op_node_data.type), " ");
