@@ -734,7 +734,7 @@ void Cprop::process_tuple_add(Node &node) {
   node2tuple[node.get_compact()] = ctup;
 
   if (node.out_edges().begin()->sink.is_graph_output()) {
-    auto lg = node.get_top_lgraph();
+    auto lg = node.get_class_lgraph();
     try_create_graph_output(lg, ctup);
   }
 }
