@@ -409,16 +409,16 @@ void Ver_parser::result_in_odir(std::string_view fname, std::string_view odir, s
 
 std::string Prp_parser::make_unsigned(std::string sec_child) {
   unsigned_vars.push_back(sec_child);
-  return absl::StrCat(sec_child, ".__unsigned = true");
+  return absl::StrCat(sec_child, ".__unsigned = true", std::string(stmt_sep()));
 }
 
 std::string Cpp_parser::make_unsigned(std::string sec_child) {
   unsigned_vars.push_back(sec_child);
-  return "//";
+  return "";
 }
 std::string Ver_parser::make_unsigned(std::string sec_child) {
   unsigned_vars.push_back(sec_child);
-  return "//";
+  return "";
 }
 
 bool Prp_parser::is_unsigned(std::string var_name) {
