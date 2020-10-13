@@ -1442,7 +1442,7 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(LGraph *lg) {
   //create scalar graph outputs or set the final variable name based on vname table
   for (auto const&[vname, vname_dpin] : vname2dpin) {
     auto dpin_name = vname_dpin.get_name();
-    if (is_output(dpin_name)) {
+    if (is_output(dpin_name) && vname_dpin.get_node().get_type_op() != Ntype_op::TupAdd) {
       auto edible_dpin = vname_dpin;
       create_out_ta(lg, dpin_name, edible_dpin);
       continue;

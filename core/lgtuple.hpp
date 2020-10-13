@@ -15,8 +15,8 @@
 class Lgtuple : std::enable_shared_from_this<Lgtuple> {
 private:
 protected:
-  std::string parent_key_name;  // empty not set  //FIXME->sh: should be rename to hier_parent_key_name
-  int         parent_key_pos;   // -1 not set     //FIXME->sh: should be rename to hier_parent_key_pos
+  std::string hier_parent_key_name;  // empty not set  //FIXME->sh: should be rename to hier_hier_parent_key_name
+  int         hier_parent_key_pos;   // -1 not set     //FIXME->sh: should be rename to hier_hier_parent_key_pos
 
   bool ordered;
   bool named;
@@ -41,21 +41,24 @@ protected:
   size_t get_or_create_pos(size_t pos);
 
 public:
-  Lgtuple() : parent_key_pos(-1) { reset(); }
+  Lgtuple() : hier_parent_key_pos(-1) { reset(); }
 
-  Lgtuple(std::string_view name) : parent_key_name(name), parent_key_pos(-1) { reset(); }
-
-  // pos -1 -> invalid pos
-  Lgtuple(int ppos, std::string_view name) : parent_key_name(name), parent_key_pos(ppos) { reset(); }
+  Lgtuple(std::string_view name) : hier_parent_key_name(name), hier_parent_key_pos(-1) { reset(); }
 
   // pos -1 -> invalid pos
-  Lgtuple(int ppos) : parent_key_pos(ppos) { reset(); }
+  Lgtuple(int ppos, std::string_view name) : hier_parent_key_name(name), hier_parent_key_pos(ppos) { reset(); }
 
-  bool             has_parent_key_name() const { return !parent_key_name.empty(); }
-  std::string_view get_parent_key_name() const { return parent_key_name; }
+  // pos -1 -> invalid pos
+  Lgtuple(int ppos) : hier_parent_key_pos(ppos) { reset(); }
 
-  bool   has_parent_key_pos() const { return parent_key_pos >= 0; }
-  size_t get_parent_key_pos() const { return parent_key_pos; }
+  bool             has_hier_parent_key_name() const { return !hier_parent_key_name.empty(); }
+  std::string_view get_hier_parent_key_name() const { return hier_parent_key_name; }
+
+
+
+  bool   has_hier_parent_key_pos() const { return hier_parent_key_pos >= 0; }
+  size_t get_hier_parent_key_pos() const { return hier_parent_key_pos; }
+
 
   bool has_key_name(std::string_view key) const {
     auto it = key2pos.find(key);
@@ -77,8 +80,8 @@ public:
     bool raw = has_key_pos(key);
     if (!raw)
       return false;
-    auto has_name = pos2tuple[key]->has_parent_key_name();
-    GI(has_name, has_key_name(pos2tuple[key]->get_parent_key_name()));
+    auto has_name = pos2tuple[key]->has_hier_parent_key_name();
+    GI(has_name, has_key_name(pos2tuple[key]->get_hier_parent_key_name()));
 
     return has_name;
   }
@@ -92,7 +95,7 @@ public:
 
   std::string_view get_key_name(size_t key) const {
     I(has_key_name(key));
-    return pos2tuple[key]->get_parent_key_name();
+    return pos2tuple[key]->get_hier_parent_key_name();
   }
 
   std::shared_ptr<Lgtuple> get_tuple(std::string_view key);
@@ -117,7 +120,8 @@ public:
   size_t add(const Node_pin &dpin);
   bool   add(const std::shared_ptr<Lgtuple> tup2);
 
-  bool is_scalar() const { return pos2tuple.empty(); } //FIXME->sh: should be renamed to parent_is_scalar
+  bool is_scalar() const { return pos2tuple.empty(); }  
+
   bool is_valid_val_dpin() const { return !val_dpin.is_invalid(); }
 
   Node_pin get_value_dpin(int pos, std::string_view key) const;  // get driver dpin of value field
@@ -130,4 +134,7 @@ public:
 
   void dump() const { dump("  "); }
   void dump(std::string_view indent) const;
+
+  /* void analyze_graph_output(absl::flat_hash_map<std::string, Node_pin> &gout2driver) const; */
+  void analyze_graph_output(absl::flat_hash_map<std::string, Node_pin> &gout2driver, std::string base_name) const;
 };

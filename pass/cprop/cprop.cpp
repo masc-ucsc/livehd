@@ -26,6 +26,7 @@ void Cprop::collapse_forward_same_op(Node &node, XEdge_iterator &inp_edges_order
       all_done = false;
       continue;
     }
+
     if (out.driver.get_pid() != out.sink.get_pid()) { //FIXME: maybe separate different op 
       all_done = false;
       continue;
@@ -533,7 +534,6 @@ bool Cprop::process_tuple_get(Node &node) {
     return true;
   }
 
-
   auto ptup_it = node2tuple.find(parent_node.get_compact());
   if (ptup_it == node2tuple.end()) {  // ptup_it = parent_node
     //FIXME:sh-> if the parent comes from unified input $, we should just give it a empty lgtuple
@@ -542,7 +542,6 @@ bool Cprop::process_tuple_get(Node &node) {
     if (key.empty())
       key = std::to_string(key_pos);
 
-    
     Pass::error("for tuple_get {} parent_node {}, there is no tuple of {}, so no valid field:{}\n",
                 node.debug_name(),
                 parent_node.debug_name(),
@@ -576,48 +575,66 @@ bool Cprop::process_tuple_get(Node &node) {
     return true;   
   }
 
-  auto val_dpin = sub_tup->get_value_dpin();
-  I(!val_dpin.is_invalid());
+  /* fmt::print("top start ---------\n"); */
+  /* ctup->dump(); */
+  /* fmt::print("sub start ---------\n"); */
+  /* sub_tup->dump(); */
+  /* fmt::print("sub end ---------\n"); */
 
-  if (sub_tup->is_scalar()) {
-    collapse_forward_for_pin(node, val_dpin);
+  if (sub_tup->is_valid_val_dpin()) {
+    auto val_dpin = sub_tup->get_value_dpin();
+    I(!val_dpin.is_invalid());
+
+    /*
+       a.b.__bits = 1
+       a.b = 3
+
+       a.is_scalar_wiht_attributes("b");  TRUE
+       a.get("b")  -> sub, dpin valid and no scalar
+
+       h.k = 6
+
+       h.get("k") -> sub, dpin and scalar
+
+       c.e.f = 4
+       c.e.g = 5
+
+       c.get("e") -> sub. no dpin and no scalar
+
+*/
+
+    if (sub_tup->is_scalar()) { // Does not have attributes
+      collapse_forward_for_pin(node, val_dpin);
+    } else { // Has attributes
+      int conta=0;
+      for(auto it : sub_tup->get_all_attributes()) {
+        auto attr_key_node = node.get_lg()->create_node(Ntype_op::TupKey);
+        auto attr_key_dpin = attr_key_node.setup_driver_pin();
+        attr_key_dpin.set_name(it.first);
+
+        if (conta==0) {
+          fmt::print("cprop: changing node:{} to AttrSet node for attr:{} from pin:{}\n",node.debug_name(), it.first, it.second.debug_name());
+          // Reuse current node. First delete input edges
+          for(auto e:node.inp_edges()) {
+            e.del_edge();
+          }
+          node.set_type(Ntype_op::AttrSet); // Replace TupGet for AttrSet
+          node.setup_sink_pin("var_name").connect_driver(val_dpin);
+          node.setup_sink_pin("field").connect_driver(attr_key_dpin);
+          node.setup_sink_pin("value").connect_driver(it.second);
+        } else {
+          I(false); // FIXME: TODO handle multiple attr set (create node)
+        }
+        conta++;
+      }
+      I(conta==1); // If this is possible, maybe just connect to dpin and collapse.
+    }
     return true;
   }
 
-  bool all_tuples = true;
-  bool any_tuples = false;
-  for(auto e:node.out_edges()) {
-    auto t = e.sink.get_node().is_type_tup();
-    all_tuples = all_tuples && t;
-    any_tuples = any_tuples || t;
-  }
+  // sub_tup is really a tuple
+  node2tuple[node.get_compact()] = sub_tup;
 
-  if (all_tuples) {
-    node2tuple[node.get_compact()] = sub_tup;
-  } else {
-    I(!any_tuples); // If so, must create attrset for non tup and keep up (conta==0 opt out)
-    int conta=0;
-    for(auto it : sub_tup->get_all_attributes()) {
-      auto attr_key_node = node.get_lg()->create_node(Ntype_op::TupKey);
-      auto attr_key_dpin = attr_key_node.setup_driver_pin();
-      attr_key_dpin.set_name(it.first);
-
-      if (conta==0) {
-        fmt::print("cprop: changing node:{} to AttrSet node for attr:{} from pin:{}\n",node.debug_name(), it.first, it.second.debug_name());
-        // Reuse current node. First delete input edges
-        for(auto e:node.inp_edges()) {
-          e.del_edge();
-        }
-        node.set_type(Ntype_op::AttrSet);
-        node.setup_sink_pin("var_name").connect_driver(val_dpin);
-        node.setup_sink_pin("field").connect_driver(attr_key_dpin);
-        node.setup_sink_pin("value").connect_driver(it.second);
-      } else {
-        I(false); // handle multiple attr set (create node)
-      }
-      conta++;
-    }
-  }
   return true;
 }
 
@@ -715,6 +732,11 @@ void Cprop::process_tuple_add(Node &node) {
 #endif
 
   node2tuple[node.get_compact()] = ctup;
+
+  if (node.out_edges().begin()->sink.is_graph_output()) {
+    auto lg = node.get_top_lgraph();
+    try_create_graph_output(lg, ctup);
+  }
 }
 
 void Cprop::do_trans(LGraph *lg) {
@@ -762,18 +784,14 @@ void Cprop::do_trans(LGraph *lg) {
     if (node.is_invalid())
       continue;  // It got deleted
 
-#if 0
-    if (inp_edges_ordered.size() > 64) {
-#ifndef NDEBUG
-      fmt::print("node:{} is already quite large. Skipping cprop\n", node.debug_name());
-#endif
-      continue;
-    }
-    // fmt::print("node:{} inp:{} out:{}\n",node.debug_name(), node.get_num_inputs(), node.get_num_out_edges());
-#endif
-
     try_collapse_forward(node, inp_edges_ordered);
   }
+
+  // FIXME: due to strange bug?? I move this function to the process_tuple_add
+  /* auto last_ta = lg->get_graph_output("%").get_driver_node(); */
+  /* fmt::print("last_ta:{}\n", last_ta.debug_name()); */
+  /* auto tup = node2tuple[last_ta.get_compact()]; */
+  /* try_create_graph_output(tup); */
 
   for (auto node : lg->fast()) {
     if (!tup_get_left && node.is_type_tup()) {
@@ -805,8 +823,22 @@ void Cprop::do_trans(LGraph *lg) {
   }
 }
 
-void Cprop::dump_node2tuples() const {
+void Cprop::try_create_graph_output(LGraph *lg, std::shared_ptr<Lgtuple> tup) {
+  absl::flat_hash_map<std::string, Node_pin> gout2driver;
+  tup->dump();
+  fmt::print("------------------------\n");
+  tup->analyze_graph_output(gout2driver, "");
 
+  for (const auto &it : gout2driver) {
+    if (!lg->is_graph_output(it.first)) {
+      auto flattened_gout = lg->add_graph_output(it.first, Port_invalid, 0);
+      it.second.connect_sink(flattened_gout);
+    }
+  }
+}
+
+
+void Cprop::dump_node2tuples() const {
   for(const auto it:node2tuple) {
     fmt::print("node nid:{}\n",it.first.get_nid());
     it.second->dump();
