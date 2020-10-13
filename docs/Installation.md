@@ -31,6 +31,11 @@ LiveHD requires a specific commit of Yosys which needs to be built from source.
 
 ## Steps
 
+0. Make sure that you do not have another version installed in your system
+  ```
+      which -a yosys
+  ```
+
 1. **Download LiveHD source**  
   ```
     git clone https://github.com/masc-ucsc/livehd
