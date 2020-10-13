@@ -29,8 +29,8 @@ void Bitwidth::process_const(Node &node) {
 }
 
 void Bitwidth::process_flop(Node &node) {
-  I(node.has_sink_pin_connected(1));
-  auto d_dpin = node.get_sink_pin(1).get_driver_pin();
+  I(node.is_sink_connected("din"));
+  auto d_dpin = node.get_sink_pin("din").get_driver_pin();
 
   Lconst max_val;
   Lconst min_val;
@@ -41,10 +41,10 @@ void Bitwidth::process_flop(Node &node) {
   } else if (d_dpin.get_bits()) {
     Lconst b(1);
     max_val = b.lsh_op(d_dpin.get_bits()) - 1;
-  } else if (node.get_driver_pin(0).get_bits()) {
+  } else if (node.get_driver_pin().get_bits()) {
     // At least propagate backward the width
-    if (d_dpin.get_bits()==0 || d_dpin.get_bits() > node.get_driver_pin(0).get_bits())
-      d_dpin.set_bits(node.get_driver_pin(0).get_bits());
+    if (d_dpin.get_bits()==0 || d_dpin.get_bits() > node.get_driver_pin().get_bits())
+      d_dpin.set_bits(node.get_driver_pin().get_bits());
     return;
   } else {
     if (d_dpin.has_name())
@@ -55,7 +55,7 @@ void Bitwidth::process_flop(Node &node) {
     return;
   }
 
-  bwmap.emplace(node.get_driver_pin(0).get_compact(), Bitwidth_range(min_val, max_val));
+  bwmap.emplace(node.get_driver_pin().get_compact(), Bitwidth_range(min_val, max_val));
 }
 
 void Bitwidth::process_not(Node &node, XEdge_iterator &inp_edges) {
@@ -88,7 +88,7 @@ void Bitwidth::process_not(Node &node, XEdge_iterator &inp_edges) {
     }
   }
 
-  bwmap.emplace(node.get_driver_pin(0).get_compact(), Bitwidth_range(min_val, max_val));
+  bwmap.emplace(node.get_driver_pin().get_compact(), Bitwidth_range(min_val, max_val));
 }
 
 void Bitwidth::process_mux(Node &node, XEdge_iterator &inp_edges) {
@@ -125,18 +125,18 @@ void Bitwidth::process_mux(Node &node, XEdge_iterator &inp_edges) {
   }
 
   Lconst n_options(inp_edges.size() - 1 - 1);  // -1 for log and -1 for the select
-  node.get_sink_pin(0).get_driver_pin().set_bits(n_options.get_bits());
+  node.get_sink_pin("0").get_driver_pin().set_bits(n_options.get_bits());
 
   Bitwidth_range bw(min_val, max_val);
-  bwmap.emplace(node.get_driver_pin(0).get_compact(), bw);
-  node.get_driver_pin(0).set_bits(bw.get_bits());
+  bwmap.emplace(node.get_driver_pin().get_compact(), bw);
+  node.get_driver_pin().set_bits(bw.get_bits());
 }
 
 void Bitwidth::process_shr(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size() == 2);
 
-  auto a_dpin = node.get_sink_pin(0).get_driver_pin();
-  auto n_dpin = node.get_sink_pin(1).get_driver_pin();
+  auto a_dpin = node.get_sink_pin("a").get_driver_pin();
+  auto n_dpin = node.get_sink_pin("b").get_driver_pin();
 
   auto a_it = bwmap.find(a_dpin.get_compact());
   auto n_it = bwmap.find(n_dpin.get_compact());
@@ -179,6 +179,7 @@ void Bitwidth::process_shr(Node &node, XEdge_iterator &inp_edges) {
   }
 }
 
+//FIXME->sh: here
 void Bitwidth::process_sum(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size());  // Dangling sum??? (delete)
 
@@ -187,7 +188,7 @@ void Bitwidth::process_sum(Node &node, XEdge_iterator &inp_edges) {
   for (auto e : inp_edges) {
     auto it = bwmap.find(e.driver.get_compact());
     if (it != bwmap.end()) {
-      if (e.sink.get_pid() == 0 || e.sink.get_pid() == 1) {
+      if (e.sink.get_pin_name() == "A") {
         max_val = max_val + it->second.get_max();
         min_val = min_val + it->second.get_min();
       } else {
@@ -199,7 +200,6 @@ void Bitwidth::process_sum(Node &node, XEdge_iterator &inp_edges) {
     } else if (e.driver.get_bits()) {
       Lconst b(1);
       b = b.lsh_op(e.driver.get_bits()) - 1;
-      //FIXME->sh: Debug on Lconst(0) - Lconst(0xFFFF) = 0 ??
       max_val = max_val + b;
       min_val = min_val + b;
 #if 0

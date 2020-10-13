@@ -23,7 +23,7 @@ cc_binary(
             "//lgcpp/common:lgcpp",
             "//lgcpp/prplib:prplib",
 
-#Renau            "//pass/bitwidth:pass_bitwidth",
+            "//pass/bitwidth:pass_bitwidth",
             "//pass/common:pass",
             "//pass/cprop:pass_cprop",
             "//pass/fplan:fplan",
