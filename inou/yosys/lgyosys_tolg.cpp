@@ -766,7 +766,7 @@ static void process_cell_drivers_intialization(RTLIL::Module *module, LGraph *g)
           auto src_pin = create_pick_operator(driver_pin, offset, chunk.width);
           offset += chunk.width;
 
-          fmt::print("partial assign from node:{} to wire:{}[{}:{}]\n", driver_pin.get_node().debug_name(), wire->name.str(), chunk.offset, chunk.offset+chunk.width);
+          fmt::print("partial assign from node:{} to wire:{}[{}:{}]\n", driver_pin.get_node().debug_name(), wire->name.str(), chunk.offset, chunk.offset+chunk.width-1);
 
           partially_assigned[wire][chunk.offset] = src_pin;
           partially_assigned_bits[wire][chunk.offset] = chunk.width;
@@ -792,7 +792,7 @@ static void dump_partially_assigned() {
       const auto &dpin = it.second[i];
       I(!dpin.is_invalid());
 
-      fmt::print("   [{}:{}] name:{}\n",i, i+width, dpin.debug_name());
+      fmt::print("   [{}:{}] name:{}\n",i, i+width-1, dpin.debug_name());
 
 #ifndef NDEBUG
       for(int j=i+1;j<i+width;++j) {
@@ -899,12 +899,12 @@ static void process_assigns(RTLIL::Module *module, LGraph *g) {
 
             int from_in_rchunk = rhs_pos + rhs_off;
             int max_bits       = std::min(rchunk.width, lchunk.width - lhs_pos);
-            int to_in_rchunk   = from_in_rchunk + max_bits;
+            int to_in_rchunk   = from_in_rchunk + max_bits; // not inclusive
 
             int bits_needed;
             if (to_in_rchunk>rchunk.offset+rchunk.width) {
               to_in_rchunk=rchunk.offset+rchunk.width;
-              bits_needed = to_in_rchunk - from_in_rchunk + 1;
+              bits_needed = to_in_rchunk - from_in_rchunk;
             }else{
               bits_needed = max_bits;
             }
@@ -926,7 +926,7 @@ static void process_assigns(RTLIL::Module *module, LGraph *g) {
                 sra_node.setup_sink_pin("b").connect_driver(c_node);
                 dpin = sra_node.setup_driver_pin();
               }
-              if (bits_needed<rchunk.width) {
+              if (to_in_rchunk<rchunk.width) {
                 auto and_node = g->create_node(Ntype_op::And, bits_needed);
                 and_node.connect_sink(dpin);
                 auto c_node = g->create_node_const((Lconst(1)<<Lconst(bits_needed))-Lconst(1));
