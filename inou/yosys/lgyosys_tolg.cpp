@@ -28,13 +28,6 @@
 USING_YOSYS_NAMESPACE
 PRIVATE_NAMESPACE_BEGIN
 
-struct GlobalPin {
-  RTLIL::IdString      port;
-  const RTLIL::Module *module;
-  LGraph *             g;
-  bool                 input;
-};
-
 static CellTypes                        ct_all;
 static absl::flat_hash_set<size_t>      driven_signals;
 static absl::flat_hash_set<std::string> cell_port_inputs;
@@ -42,10 +35,10 @@ static absl::flat_hash_set<std::string> cell_port_outputs;
 
 typedef std::pair<const RTLIL::Wire *, int> Wire_bit;
 
-// static std::map<const RTLIL::Wire *, GlobalPin> wire2gpin;
 static absl::flat_hash_map<const RTLIL::Wire *, Node_pin>          wire2pin;
 static absl::flat_hash_map<const RTLIL::Cell *, Node>              cell2node;  // Points to the exit_node for the block
 static absl::flat_hash_map<const RTLIL::Wire *, Node_pin_iterator> partially_assigned;
+static absl::flat_hash_map<const RTLIL::Wire *, std::vector<int>>  partially_assigned_bits;
 static absl::flat_hash_map<const RTLIL::Wire *, std::vector<int>>  partially_assigned_fwd;
 
 static void look_for_wire(LGraph *g, const RTLIL::Wire *wire) {
@@ -67,6 +60,7 @@ static void look_for_wire(LGraph *g, const RTLIL::Wire *wire) {
       pin.set_offset(wire->start_offset);
     }
     wire2pin[wire] = pin;
+    // NOTE: can not convert to unsidned. In yosys/verilog is use dependent (still undecided)
   } else if (wire->port_output) {
     // log("output %s\n",wire->name.c_str());
     I(wire->name.c_str()[0] == '\\');
@@ -139,7 +133,7 @@ bool operator==(const Pick_ID &lhs, const Pick_ID &rhs) {
   return lhs.driver == rhs.driver && lhs.width == rhs.width && lhs.offset == rhs.offset;
 }
 
-static absl::flat_hash_map<Pick_ID, Node_pin> picks;  // NODE, not flat to preserve pointer stability
+static absl::flat_hash_map<Pick_ID, Node_pin> picks;
 
 static Node_pin create_pick_operator(const Node_pin &wide_dpin, int offset, int width) {
   if (offset == 0 && (int)wide_dpin.get_bits() == width)
@@ -184,14 +178,14 @@ static Node_pin create_pick_operator(const Node_pin &wide_dpin, int offset, int 
   return dpin;
 }
 
-static Node_pin get_edge_pin(LGraph *g, const RTLIL::Wire *wire) {
+static Node_pin get_edge_pin(LGraph *g, const RTLIL::Wire *wire, bool is_signed) {
   if (wire2pin.find(wire) == wire2pin.end()) {
     look_for_wire(g, wire);
   }
 
   if (wire2pin.find(wire) != wire2pin.end()) {
+    auto &dpin = wire2pin[wire];
     if (wire->width != (int)wire2pin[wire].get_bits()) {
-      auto &dpin = wire2pin[wire];
 
       if (wire->width>static_cast<int>(dpin.get_bits())) { // OK, just zero extend like in comparators
         return dpin;
@@ -206,7 +200,17 @@ static Node_pin get_edge_pin(LGraph *g, const RTLIL::Wire *wire) {
       wire2pin[wire].set_bits(wire->width);
       I(wire->width == wire2pin[wire].get_bits());
     }
-    return wire2pin[wire];
+
+    if (is_signed || !dpin.is_graph_input())
+      return dpin;
+
+    if (dpin.get_node().is_type(Ntype_op::Tposs))
+      return dpin;
+
+    auto tposs_node = g->create_node(Ntype_op::Tposs, wire->width+1);
+    tposs_node.connect_sink(dpin);
+
+    return tposs_node.setup_driver_pin();
   }
 
   I(!wire->port_input);  // Added before at look_for_wire
@@ -220,11 +224,11 @@ static Node_pin get_edge_pin(LGraph *g, const RTLIL::Wire *wire) {
 }
 
 
-static Node_pin create_pick_operator(LGraph *g, const RTLIL::Wire *wire, int offset, int width) {
+static Node_pin create_pick_operator(LGraph *g, const RTLIL::Wire *wire, int offset, int width, bool is_signed) {
   if (wire->width == width && offset == 0)
-    return get_edge_pin(g, wire);
+    return get_edge_pin(g, wire, is_signed);
 
-  return create_pick_operator(get_edge_pin(g, wire), offset, width);
+  return create_pick_operator(get_edge_pin(g, wire, is_signed), offset, width);
 }
 
 static void append_to_or_node(LGraph *g, const Node &or_node, const Node_pin &dpin, int or_offset) {
@@ -253,7 +257,7 @@ static Node_pin create_pick_concat_dpin(LGraph *g, const RTLIL::SigSpec &ss, boo
     if (chunk.wire == nullptr) {
       inp_pins.emplace_back(resolve_constant(g, chunk.data, is_signed));
     } else {
-      inp_pins.push_back(create_pick_operator(g, chunk.wire, chunk.offset, chunk.width));
+      inp_pins.emplace_back(create_pick_operator(g, chunk.wire, chunk.offset, chunk.width, is_signed));
     }
   }
 
@@ -296,7 +300,7 @@ static Node_pin create_pick_concat_dpin(LGraph *g, const RTLIL::SigSpec &ss, boo
   return dpin;
 }
 
-static Node_pin get_dpin(LGraph *g, const RTLIL::Cell *cell, RTLIL::IdString name) {
+static Node_pin get_dpin(LGraph *g, const RTLIL::Cell *cell, const RTLIL::IdString &name) {
 
   if (cell->hasParam(name)) {
     const RTLIL::Const &v = cell->getParam(name);
@@ -307,17 +311,21 @@ static Node_pin get_dpin(LGraph *g, const RTLIL::Cell *cell, RTLIL::IdString nam
     v_str += v.as_string();
     return g->create_node_const(v_str).setup_driver_pin();
   }
-  bool is_signed = false;
+  bool is_signed = true; // signed by default
   if (name == ID::A && cell->hasParam(ID::A_SIGNED)) {
       is_signed = cell->getParam(ID::A_SIGNED).as_bool();
   }else if (name == ID::B && cell->hasParam(ID::B_SIGNED)) {
     is_signed = cell->getParam(ID::B_SIGNED).as_bool();
   }
 
+  if(!cell->hasPort(name)) {
+    return g->create_node_const(Lconst("0bx")).setup_driver_pin();
+  }
+
   return create_pick_concat_dpin(g, cell->getPort(name), is_signed);
 }
 
-static Node_pin get_unsigned_dpin(LGraph *g, const RTLIL::Cell *cell, RTLIL::IdString name) {
+static Node_pin get_unsigned_dpin(LGraph *g, const RTLIL::Cell *cell, const RTLIL::IdString &name) {
 
   bool no_need = false;
   int  bits = 0;
@@ -364,18 +372,28 @@ static bool is_yosys_output(const std::string &idstring) {
 
 static void connect_all_inputs(const Node_pin &spin, const RTLIL::Cell *cell) {
   I(spin.is_sink());
+  bool is_signed = false;
   for (auto &conn : cell->connections()) {
     RTLIL::SigSpec ss = conn.second;
     if (ss.size() == 0)
       continue;
     if (is_yosys_output(conn.first.c_str()))
       continue;  // Just go over the inputs
-    bool is_signed = false;
     if (conn.first == ID::A && cell->hasParam(ID::A_SIGNED)) {
       is_signed = cell->getParam(ID::A_SIGNED).as_bool();
     }else if (conn.first == ID::B && cell->hasParam(ID::B_SIGNED)) {
       is_signed = cell->getParam(ID::B_SIGNED).as_bool();
     }
+    if (!is_signed)
+      break; // no need to test more
+  }
+
+  for (auto &conn : cell->connections()) {
+    RTLIL::SigSpec ss = conn.second;
+    if (ss.size() == 0)
+      continue;
+    if (is_yosys_output(conn.first.c_str()))
+      continue;  // Just go over the inputs
 
     spin.connect_driver(create_pick_concat_dpin(spin.get_class_lgraph(), ss, is_signed));
   }
@@ -404,6 +422,22 @@ static void set_bits_wirename(Node_pin &pin, const RTLIL::Wire *wire) {
   if (!pin.is_graph_io()) {
     pin.set_bits(wire->width);
   }
+}
+
+static Node_pin get_partial_dpin(LGraph *g, const RTLIL::Wire *wire) {
+  auto or_dpin = get_edge_pin(g, wire, true);
+  I(or_dpin.get_node().is_type(Ntype_op::Or));
+
+  if (or_dpin.is_graph_output()) { // Some outputs are deferred
+    auto real_or_node = g->create_node(Ntype_op::Or, or_dpin.get_bits());
+    or_dpin.get_sink_from_output().connect_driver(real_or_node);
+
+    wire2pin[wire] = real_or_node.setup_driver_pin();
+  }
+
+  set_bits_wirename(or_dpin, wire);
+
+  return or_dpin;
 }
 
 static Node resolve_memory(LGraph *g, RTLIL::Cell *cell) {
@@ -552,8 +586,7 @@ static bool is_black_box_input(const RTLIL::Module *module, const RTLIL::Cell *c
   return false;
 }
 
-static void setup_cell_driver_pins(RTLIL::Module *module, LGraph *g) {
-  // log("yosys2lg setup_cell_driver_pins pass for module %s:\n", module->name.c_str());
+static void process_cell_drivers_intialization(RTLIL::Module *module, LGraph *g) {
 
   for (auto cell : module->cells()) {
     if (cell->type == "$mem") {
@@ -708,6 +741,7 @@ static void setup_cell_driver_pins(RTLIL::Module *module, LGraph *g) {
         } else {
           if (partially_assigned.find(wire) == partially_assigned.end()) {
             partially_assigned[wire].resize(wire->width);
+            partially_assigned_bits[wire].resize(wire->width);
 
             auto n2        = g->create_node(Ntype_op::Or, wire->width);
             if (wire2pin.find(wire) != wire2pin.end()) {
@@ -733,10 +767,8 @@ static void setup_cell_driver_pins(RTLIL::Module *module, LGraph *g) {
 
           fmt::print("partial assign from node:{} to wire:{}[{}:{}]\n", driver_pin.get_node().debug_name(), wire->name.str(), chunk.offset, chunk.offset+chunk.width);
 
-          for (int i = 0; i < chunk.width; i++) {
-            I((size_t)(chunk.offset + i) < partially_assigned[wire].size());
-            partially_assigned[wire][chunk.offset + i] = src_pin;
-          }
+          partially_assigned[wire][chunk.offset] = src_pin;
+          partially_assigned_bits[wire][chunk.offset] = chunk.width;
         }
       }
     }
@@ -746,11 +778,28 @@ static void setup_cell_driver_pins(RTLIL::Module *module, LGraph *g) {
 static void dump_partially_assigned() {
 
   for(auto it:partially_assigned) {
-    auto *wire = it.first;
+    const auto *wire = it.first;
     fmt::print("wire:{} width:{}\n",wire->name.str(), wire->width);
-    int bit=0;
-    for(auto &pin:it.second) {
-      fmt::print("   bit:{} width:{}\n",bit++, pin.debug_name());
+
+    int i=0;
+    while(i<it.second.size()) {
+      auto width = partially_assigned_bits[wire][i];
+      if (width==0) {
+        i++;
+        continue;
+      }
+      const auto &dpin = it.second[i];
+      I(!dpin.is_invalid());
+
+      fmt::print("   [{}:{}] name:{}\n",i, i+width, dpin.debug_name());
+
+#ifndef NDEBUG
+      for(int j=i+1;j<i+width;++j) {
+        I(partially_assigned_bits[wire][j]==0);
+      }
+#endif
+
+      i+=width;
     }
   }
 }
@@ -760,31 +809,32 @@ static void process_assigns(RTLIL::Module *module, LGraph *g) {
     const RTLIL::SigSpec lhs = conn.first;
     const RTLIL::SigSpec rhs = conn.second;
 
-    int offset = 0;
-    for (auto &chunk : lhs.chunks()) {
-      const RTLIL::Wire *lhs_wire = chunk.wire;
+    int global_lhs_pos = 0;
+
+    for (auto &lchunk : lhs.chunks()) {
+      const RTLIL::Wire *lhs_wire = lchunk.wire;
 
       //printf("Assignment to %s\n", lhs_wire->name.c_str());
+      if (lchunk.width == 0)
+        continue;
 
       if (lhs_wire->port_input) {
         log_error("Assignment to input port %s\n", lhs_wire->name.c_str());
-      } else if (chunk.width == lhs_wire->width) {
-        if (chunk.width == 0)
-          continue;
+      } else if (lchunk.width == lhs_wire->width) {
 
         if (lhs_wire->port_output) {
-          Node_pin dpin = create_pick_concat_dpin(g, rhs.extract(offset, chunk.width), lhs_wire->is_signed);
+          Node_pin dpin = create_pick_concat_dpin(g, rhs.extract(lchunk.offset, lchunk.width), lhs_wire->is_signed);
           Node_pin spin = g->get_graph_output(&lhs_wire->name.c_str()[1]);
           g->add_edge(dpin, spin, lhs_wire->width);
         } else if (wire2pin.find(lhs_wire) == wire2pin.end()) {
-          Node_pin dpin      = create_pick_concat_dpin(g, rhs.extract(offset, chunk.width), lhs_wire->is_signed);
+          Node_pin dpin      = create_pick_concat_dpin(g, rhs.extract(lchunk.offset, lchunk.width), lhs_wire->is_signed);
           wire2pin[lhs_wire] = dpin;
         } else {
           I(wire2pin[lhs_wire].get_bits() == lhs_wire->width);
         }
 
-        offset += chunk.width;
       } else {
+
         if (partially_assigned.find(lhs_wire) == partially_assigned.end()) {
           partially_assigned[lhs_wire].resize(lhs_wire->width);
 
@@ -796,44 +846,113 @@ static void process_assigns(RTLIL::Module *module, LGraph *g) {
           }
         }
 
-        if (chunk.width == 0)
-          continue;
-
         {
-          int wr_pos = offset;
+          // Detect writes with local reads (loops) to handle specially to avoid combinational loops
+
+          // STEP: look for dpins to write in lhs_wire from lchunk.offset to lchunk.offset+lchunk.width
+
+          const int lhs_off = lchunk.offset; // position to write in lchunk
+          int lhs_pos = 0;
+
+          int global_rhs_pos = 0;
           for (auto &rchunk : rhs.chunks()) {
-            int rd_pos = rchunk.offset;
-            if (lhs_wire != rchunk.wire || rd_pos == wr_pos) {
-              wr_pos += rchunk.width;
+
+            // done for this lhs?
+            if (lhs_pos >= lchunk.width) {
+              break;
+            }
+
+            const int rhs_off = rchunk.offset;
+            int rhs_pos       = 0;                   // cross rchunk position read
+
+            // advance rhs until end of chunk or reach the global_lhs_pos
+            while (global_lhs_pos > global_rhs_pos && rhs_pos < rchunk.width) {
+              global_rhs_pos++;
+              rhs_pos++;
+            }
+
+            // done for this rchunk?
+            if (rhs_pos == rchunk.width)
+              continue;
+
+            // There should be some overlap between rchunk and lchunk
+            if (rchunk.wire == lhs_wire) {
+              if (partially_assigned_fwd.find(lhs_wire) == partially_assigned_fwd.end()) {
+                partially_assigned_fwd[lhs_wire].resize(lhs_wire->width);
+              }
+              int delta = (lhs_off+lhs_pos) - (rhs_off+rhs_pos);
+              for (int pos = 0; pos < rchunk.width; ++pos) {
+                I(lhs_off+lhs_pos<lhs_wire->width);
+                I(partially_assigned_fwd[lhs_wire][lhs_off+lhs_pos] == 0);
+                partially_assigned_fwd[lhs_wire][lhs_off+lhs_pos] = delta;
+                ++lhs_pos;
+                ++rhs_pos; // not needed but to be symmetric
+                ++global_lhs_pos;
+                ++global_rhs_pos;
+              }
               continue;
             }
 
-            if (partially_assigned_fwd.find(lhs_wire) == partially_assigned_fwd.end()) {
-              partially_assigned_fwd[lhs_wire].resize(lhs_wire->width);
+            I(lhs_off+lhs_pos>=rhs_pos);
+
+            int from_in_rchunk = rhs_pos + rhs_off;
+            int max_bits       = std::min(rchunk.width, lchunk.width - lhs_pos);
+            int to_in_rchunk   = from_in_rchunk + max_bits;
+
+            int bits_needed;
+            if (to_in_rchunk>rchunk.offset+rchunk.width) {
+              to_in_rchunk=rchunk.offset+rchunk.width;
+              bits_needed = to_in_rchunk - from_in_rchunk + 1;
+            }else{
+              bits_needed = max_bits;
             }
 
-            rd_pos=rchunk.offset;
-            for (int i = 0; i < rchunk.width; ++i) {
-              I(partially_assigned_fwd[lhs_wire][rd_pos]==0); // no overwrite (true comb loop?)
-              I(rd_pos!=wr_pos); // self read?
-              partially_assigned_fwd[lhs_wire][wr_pos] = wr_pos-rd_pos;
+            I(from_in_rchunk <rchunk.offset+rchunk.width);
+            I(from_in_rchunk>=rchunk.offset);
+            I(from_in_rchunk<=to_in_rchunk);
+            I(from_in_rchunk>=rhs_off);
+            I(bits_needed>0);
+            I(bits_needed<=rchunk.width);
 
-              ++rd_pos;
-              ++wr_pos;
+            Node_pin dpin;
+            if (rchunk.wire == nullptr) {
+              dpin = resolve_constant(g, rchunk.data, false);
+              if (from_in_rchunk>0) {
+                auto sra_node = g->create_node(Ntype_op::SRA, bits_needed);
+                sra_node.setup_sink_pin("a").connect_driver(dpin);
+                auto c_node = g->create_node_const(Lconst(from_in_rchunk));
+                sra_node.setup_sink_pin("b").connect_driver(c_node);
+                dpin = sra_node.setup_driver_pin();
+              }
+              if (bits_needed<rchunk.width) {
+                auto and_node = g->create_node(Ntype_op::And, bits_needed);
+                and_node.connect_sink(dpin);
+                auto c_node = g->create_node_const((Lconst(1)<<Lconst(bits_needed))-Lconst(1));
+                and_node.connect_sink(c_node);
+                dpin = and_node.setup_driver_pin();
+              }
+            } else {
+              auto from = rhs_off + from_in_rchunk;
+              I(from>= rchunk.offset);
+              dpin = create_pick_operator(g, rchunk.wire, from, bits_needed, true);
             }
+
+#ifdef NDEBUG
+            for (int pos = 0; pos < bits_needed; ++pos) {
+              I(lhs_off+lhs_pos<lhs_wire->width);
+              if (partially_assigned_fwd.find(lhs_wire) != partially_assigned_fwd.end()) {
+                I(partially_assigned_fwd[lhs_wire][lhs_off+lhs_pos]==0);
+              }
+              I(partially_assigned_bits[lhs_wire][lhs_off+lhs_pos]==0);
+            }
+#endif
+            partially_assigned[lhs_wire][lhs_off+lhs_pos] = dpin;
+            partially_assigned_bits[lhs_wire][lhs_off+lhs_pos] = bits_needed;
+            lhs_pos += bits_needed;
+            rhs_pos += bits_needed;
+            global_lhs_pos += bits_needed;
+            global_rhs_pos += bits_needed;
           }
-        }
-
-        Node_pin dpin = create_pick_concat_dpin(g, rhs.extract(offset, chunk.width), false);
-
-        offset += chunk.width;
-        for (int i = 0; i < chunk.width; i++) {
-          I((size_t)(chunk.offset + i) < partially_assigned[lhs_wire].size());
-//          if (partially_assigned_fwd.find(lhs_wire) != partially_assigned_fwd.end()) {
-//            if(partially_assigned_fwd[lhs_wire][chunk.offset + i])
-//              continue;
-//          }
-          partially_assigned[lhs_wire][chunk.offset + i] = dpin;
         }
       }
     }
@@ -866,7 +985,7 @@ static uint32_t get_output_size(const RTLIL::Cell *cell) {
     if (cell->input(conn.first))
       continue;
 
-    const RTLIL::SigSpec ss = conn.second;
+    const RTLIL::SigSpec &ss = conn.second;
     if (ss.chunks().size() > 0)
       return ss.size();
   }
@@ -877,7 +996,7 @@ static uint32_t get_output_size(const RTLIL::Cell *cell) {
 }
 
 
-static void connect_partial_dpin(LGraph *g, Node &or_node, uint32_t or_offset, uint32_t nbits, Node_pin &current_dpin) {
+static void connect_partial_dpin(LGraph *g, Node &or_node, uint32_t or_offset, uint32_t nbits, const Node_pin &current_dpin) {
 
   fmt::print("connect_partial_dpin to:{} or_offset:{} from pin:{} bits:{}\n", or_node.debug_name(), or_offset, current_dpin.debug_name(), nbits);
 
@@ -908,6 +1027,140 @@ static void connect_partial_dpin(LGraph *g, Node &or_node, uint32_t or_offset, u
   }
 }
 
+static void process_partially_assigned_other(LGraph *g) {
+  for (const auto &it : partially_assigned) {
+    const RTLIL::Wire *wire = it.first;
+    I(it.second.size()==it.first->width); // every bit set (maye be same dpin)
+
+    auto or_dpin = get_partial_dpin(g, wire);
+    auto or_node = or_dpin.get_node();
+
+    int i=0;
+    while(i<it.second.size()) {
+      auto width = partially_assigned_bits[wire][i];
+      if (width==0) {
+        i++;
+        continue;
+      }
+      const auto &dpin = it.second[i];
+      I(!dpin.is_invalid());
+
+      connect_partial_dpin(g, or_node, i, width, dpin);
+
+      i+=width;
+    }
+  }
+}
+
+static void process_partially_assigned_self_chains(LGraph *g) {
+
+  for (const auto &kv : partially_assigned_fwd) {
+    const RTLIL::Wire *wire = kv.first;
+
+    // Find the order to process partially_assigned_fwd
+    bool pending_chain= true;
+
+    std::set<int> processed_pos;
+    for(int pos=0;pos<partially_assigned_fwd[wire].size();++pos) {
+      auto shift = partially_assigned_fwd[wire][pos];
+      if (shift==0) { // no pending
+        processed_pos.insert(pos);
+      }
+    }
+
+    if (processed_pos.size() == wire->width)
+      return; // nothing pending to do
+
+    while(pending_chain) {
+      pending_chain = false;
+      absl::flat_hash_set<int> ready_pos;
+      absl::flat_hash_set<int> shifts;
+
+      for(int pos=0;pos<partially_assigned_fwd[wire].size();++pos) {
+        auto shift = partially_assigned_fwd[wire][pos];
+        if (shift==0)
+          continue;
+
+        I(partially_assigned[wire].size()> pos);
+        I(pos-shift>=0);
+        I(pos-shift < partially_assigned[wire].size());
+
+        if(!processed_pos.count(pos-shift)) {
+          pending_chain = true; // more iterations needed
+          continue;
+        }
+
+        ready_pos.insert(pos);
+        shifts.insert(shift);
+      }
+
+      if (shifts.empty())
+        return; // done
+
+      auto master_or_dpin = get_partial_dpin(g, wire);
+      auto master_or_node = master_or_dpin.get_node();
+
+      auto pre_or_node = g->create_node(Ntype_op::Or, wire->width);
+
+      // Move all the inputs to the new pre
+      for(auto e:master_or_node.inp_edges()) {
+        pre_or_node.connect_sink(e.driver);
+        e.del_edge();
+      }
+      I(!master_or_node.has_inputs());
+      master_or_node.connect_sink(pre_or_node);
+
+      for(auto shift:shifts) {
+        Lconst wr_mask(0);
+        bool started=false;
+        const auto &v = partially_assigned_fwd[wire];
+        // for(int pos=0;pos<v.size();++pos)
+        for(int pos=v.size()-1;pos>=0;--pos) {
+          auto i = v[pos];
+          if (started)
+            wr_mask = wr_mask<<1;
+          started = true;
+
+          if (i==shift && processed_pos.count(pos-shift)) {
+            wr_mask = wr_mask|1;
+          }
+        }
+        Lconst rd_mask;
+        if (shift<0)
+          rd_mask = wr_mask.lsh_op(-shift).adjust_bits(wire->width);
+        else
+          rd_mask = wr_mask.rsh_op(shift).adjust_bits(wire->width);
+
+        //fmt::print("wr_mask:{} = rd_mask:{}>>{} from node:{} wire:{}\n" ,wr_mask.to_yosys(), rd_mask.to_yosys(), shift, master_or_node.debug_name(), wire->name.str());
+
+        auto and_node = g->create_node(Ntype_op::And, wire->width);
+        and_node.connect_sink(pre_or_node);
+        and_node.connect_sink(g->create_node_const(rd_mask));
+
+        I(shift);
+        if (shift<0) {
+          auto sra_node = g->create_node(Ntype_op::SRA, wire->width);
+          sra_node.setup_sink_pin("a").connect_driver(and_node);
+          sra_node.setup_sink_pin("b").connect_driver(g->create_node_const(Lconst(-shift)));
+
+          master_or_node.connect_sink(sra_node);
+        }else{
+          auto shl_node = g->create_node(Ntype_op::SHL, wire->width);
+          shl_node.setup_sink_pin("a").connect_driver(and_node);
+          shl_node.setup_sink_pin("b").connect_driver(g->create_node_const(Lconst(shift)));
+
+          master_or_node.connect_sink(shl_node);
+        }
+      }
+
+      for(auto pos:ready_pos) {
+        processed_pos.insert(pos);
+      }
+    }
+  }
+
+}
+
 static void connect_comparator(Node &exit_node, const RTLIL::Cell *cell) {
   // In yosys, the comparater output can be 1 or 0 or ..01 or ...00. bitwidth in LG allows to ignore this
   // I(cell->getParam(ID::Y_WIDTH).as_int() == 1);
@@ -925,24 +1178,29 @@ static void connect_comparator(Node &exit_node, const RTLIL::Cell *cell) {
     exit_node.setup_sink_pin("B").connect_driver(b_dpin);
 }
 
-// this function is called for each module in the design
-static void process_module(RTLIL::Module *module, LGraph *g) {
-#ifndef NDEBUG
-  log("yosys2lg pass for module %s:\n", module->name.c_str());
-  printf("process_module %s\n", module->name.c_str());
-#endif
+static void process_partially_assigned(LGraph *g) {
 
-  process_assigns(module, g);
+  dump_partially_assigned();
 
-  g->dump();
+  process_partially_assigned_other(g);
+  process_partially_assigned_self_chains(g);
+}
 
-#ifndef NDEBUG
-  log("INOU/YOSYS processing module %s, ncells %lu, nwires %lu\n",
-      module->name.c_str(),
-      module->cells().size(),
-      module->wires().size());
-#endif
+static void process_connect_outputs(RTLIL::Module *module, LGraph *g) {
+  // we need to connect global outputs to the cell that drives it
+  for (auto wire : module->wires()) {
+    if (wire->port_output && wire2pin.find(wire) != wire2pin.end()) {
+      Node_pin &dpin = wire2pin[wire];
+      if (dpin.is_graph_output())
+        continue;
 
+      Node_pin spin = g->get_graph_output(&wire->name.c_str()[1]);
+      g->add_edge(dpin, spin, wire->width);
+    }
+  }
+}
+
+static void process_cells(RTLIL::Module *module, LGraph *g) {
   for (auto cell : module->cells()) {
     // log("Looking for cell %s:\n", cell->type.c_str());
 
@@ -1007,8 +1265,6 @@ static void process_module(RTLIL::Module *module, LGraph *g) {
 
         auto a_dpin = get_dpin(g, cell, ID::A);
         auto a_bits = cell->getParam(ID::A_WIDTH).as_int();
-
-        I(a_bits>=a_dpin.get_bits());
 
         if (a_bits>1) {
           auto sra_node = g->create_node(Ntype_op::SRA, 1);
@@ -1788,194 +2044,6 @@ static void process_module(RTLIL::Module *module, LGraph *g) {
     }
   }
 
-  //dump_partially_assigned();
-
-  for (auto &kv : partially_assigned) {
-    const RTLIL::Wire *wire = kv.first;
-
-    auto or_dpin = get_edge_pin(g, wire);
-    auto or_node = or_dpin.get_node();
-    I(or_node.is_type(Ntype_op::Or));
-#if 1
-    if (or_node.is_graph_output()) { // Some outputs are deferred
-      auto real_or_node = g->create_node(Ntype_op::Or, or_dpin.get_bits());
-      or_dpin.get_sink_from_output().connect_driver(real_or_node);
-      or_node = real_or_node;
-
-      wire2pin[wire] = or_node.setup_driver_pin();
-    }
-#endif
-
-    set_bits_wirename(or_dpin, wire);
-
-    I(kv.second.size()==kv.first->width); // every bit set (maye be same dpin)
-
-    {
-      Node_pin current_dpin;
-
-      uint32_t nbits  = 0;
-      uint32_t offset = 0;
-
-#if 0
-      if (!partially_assigned[wire].empty()) {
-        or_node = g->create_node(Ntype_op::Or, or_node.get_bits());
-      }
-#endif
-
-      for(auto i=0u;i<kv.second.size();++i) {
-        auto &dpin = kv.second[i];
-        if (dpin.is_invalid() && current_dpin.is_invalid()) {
-          continue;
-        }
-        if (!dpin.is_invalid() && current_dpin.is_invalid()) {
-          current_dpin = dpin;
-          offset = i;
-          nbits  = 1;
-          continue;
-        }
-        if (!dpin.is_invalid() && !current_dpin.is_invalid() && dpin == current_dpin) {
-          nbits++;
-          continue;
-        }
-
-        if (!current_dpin.is_invalid()) {
-          connect_partial_dpin(g, or_node, offset, nbits, current_dpin);
-          current_dpin = dpin;
-          offset = i;
-          if (dpin.is_invalid())
-            nbits=0;
-          else
-            nbits=1;
-        }
-      }
-      if (!current_dpin.is_invalid()) {
-        connect_partial_dpin(g, or_node, offset, nbits, current_dpin);
-      }
-    }
-
-#if 0
-    // Add the local forwards
-    if (!partially_assigned[wire].empty()) {
-      I(wire2pin.find(wire) != wire2pin.end()); // inserted if needed at previous get_edge_pin
-      auto master_or_node = wire2pin[wire].get_node();
-
-      master_or_node.connect_sink(or_node);
-
-      std::set<int> shifts;
-      for(auto i:partially_assigned_fwd[wire]) {
-        if (i)
-          shifts.insert(i);
-      }
-      for(auto s:shifts) {
-        Lconst mask(0);
-        bool started=false;
-        const auto &v = partially_assigned_fwd[wire];
-        for(int j=v.size()-1;j>=0;--j) {
-          auto i = v[j];
-          if (started)
-            mask = mask<<1;
-          started = true;
-
-          if (i==s)
-            mask = mask|1;
-        }
-
-        Lconst rd_mask = mask;
-        if (s<0)
-          rd_mask = rd_mask<<(-s);
-        else
-          rd_mask = rd_mask.rsh_op(s);
-
-        fmt::print("mask:{} with shift:{} rd_mask:{}<<{}\n", mask.to_yosys(), s, rd_mask.to_yosys(), -s);
-
-        auto and_node = g->create_node(Ntype_op::And, wire->width);
-        and_node.connect_sink(or_node);
-        and_node.connect_sink(g->create_node_const(rd_mask));
-
-        if (s<0) {
-          s = -s;
-          if ((s+1) == wire->width) {
-            auto tposs_node = g->create_node(Ntype_op::Tposs, wire->width+1);
-            tposs_node.connect_sink(and_node);
-            and_node = tposs_node;
-          }
-          auto sra_node = g->create_node(Ntype_op::SRA, wire->width);
-          sra_node.setup_sink_pin("a").connect_driver(and_node);
-          sra_node.setup_sink_pin("b").connect_driver(g->create_node_const(Lconst(s)));
-
-          master_or_node.connect_sink(sra_node);
-        }else{
-          auto shl_node = g->create_node(Ntype_op::SHL, wire->width);
-          shl_node.setup_sink_pin("a").connect_driver(and_node);
-          shl_node.setup_sink_pin("b").connect_driver(g->create_node_const(Lconst(s)));
-
-          master_or_node.connect_sink(shl_node);
-        }
-      }
-    }
-#endif
-
-#if 0
-    Node_pin current;
-    auto     size  = 0UL;
-    bool     first = true;
-
-    I(kv.second.size()==kv.first->width); // FIXME: HERE (do not use dpin.get_bits)
-    for (auto pin : kv.second) {
-      if (first)
-        first = false;
-      else if ((current.is_invalid() && !pin.is_invalid()) || (!current.is_invalid() && pin.is_invalid())
-               || (!pin.is_invalid() && current != pin)) {
-        Node_pin dpin;
-        if (!current.is_invalid()) {
-          dpin = current;
-        } else {
-          auto all_x = absl::StrCat("0b", std::string(size, 'x'), "u", (int)size, "bits");
-          auto node  = g->create_node_const(Lconst(all_x));
-          dpin       = node.setup_driver_pin();
-        }
-
-        I(size < dpin.get_bits() || size % dpin.get_bits() == 0);
-        int times = size < dpin.get_bits() ? 1 : size / dpin.get_bits();
-        for (int i = 0; i < times; i++) {
-					append_to_or_node(g, or_node, dpin, offset);
-
-          offset += dpin.get_bits();
-        }
-        size = 0;
-      }
-      size++;
-      current = pin;
-    }
-
-    Node_pin dpin;
-    if (!current.is_invalid()) {
-      dpin = current;
-    } else {
-      auto all_x = absl::StrCat("0b", std::string(size, 'x'), "u", (int)size, "bits");
-      auto node  = g->create_node_const(Lconst(all_x));
-      dpin       = node.setup_driver_pin();
-    }
-    I(size < dpin.get_bits() || size % dpin.get_bits() == 0);
-    auto times = size < dpin.get_bits() ? 1 : size / dpin.get_bits();
-    for (auto i = 0UL; i < times; i++) {
-			append_to_or_node(g, or_node, dpin, offset);
-      offset += dpin.get_bits();
-    }
-#endif
-  }
-
-  // we need to connect global outputs to the cell that drives it
-  for (auto wire : module->wires()) {
-    if (wire->port_output && wire2pin.find(wire) != wire2pin.end()) {
-      Node_pin &dpin = wire2pin[wire];
-      if (dpin.is_graph_output())
-        continue;
-
-      Node_pin spin = g->get_graph_output(&wire->name.c_str()[1]);
-      g->add_edge(dpin, spin, wire->width);
-    }
-  }
 }
 
 static void guess_modules_io(RTLIL::Design *design, std::string_view path) {
@@ -1991,8 +2059,8 @@ static void guess_modules_io(RTLIL::Design *design, std::string_view path) {
     }
 
     for (auto it2 : module->connections()) {
-      for (auto &chunk : it2.first.chunks()) {
-        const RTLIL::Wire *wire = chunk.wire;
+      for (auto &lchunk : it2.first.chunks()) {
+        const RTLIL::Wire *wire = lchunk.wire;
         if (wire)
           driven_signals.insert(wire->hash());
       }
@@ -2002,8 +2070,8 @@ static void guess_modules_io(RTLIL::Design *design, std::string_view path) {
       if (ct_all.cell_known(cell->type)) {
         for (auto &conn : cell->connections()) {
           if (ct_all.cell_output(cell->type, conn.first)) {
-            for (auto &chunk : conn.second.chunks()) {
-              const RTLIL::Wire *wire = chunk.wire;
+            for (auto &rchunk : conn.second.chunks()) {
+              const RTLIL::Wire *wire = rchunk.wire;
               if (wire)
                 driven_signals.insert(wire->hash());
             }
@@ -2019,8 +2087,8 @@ static void guess_modules_io(RTLIL::Design *design, std::string_view path) {
         std::string_view mod_name(&(cell->type.c_str()[1]));
 
         for (auto &conn : cell->connections()) {
-          for (auto &chunk : conn.second.chunks()) {
-            const RTLIL::Wire *wire = chunk.wire;
+          for (auto &rchunk : conn.second.chunks()) {
+            const RTLIL::Wire *wire = rchunk.wire;
             if (wire == nullptr)
               continue;
             std::string cell_port = absl::StrCat(cell->type.str(), "_:_", conn.first.str());
@@ -2190,7 +2258,6 @@ struct Yosys2lg_Pass : public Yosys::Pass {
     extra_args(args, argidx, design);
 
     ct_all.setup(design);
-
     driven_signals.clear();
 
     guess_modules_io(design, path);
@@ -2198,14 +2265,26 @@ struct Yosys2lg_Pass : public Yosys::Pass {
     for (auto &it : design->modules_) {
       RTLIL::Module *module = it.second;
       if (design->selected_module(it.first)) {
+#ifndef NDEBUG
+        log("yosys2lg pass for module %s:\n", module->name.c_str());
+        printf("process_module %s\n", module->name.c_str());
+#endif
+
         Lbench b("inou.yosys.tolg." + module->name.str());
 
         auto  library = Graph_library::instance(path);
         auto *g       = library->try_find_lgraph(&module->name.c_str()[1]);
         I(g);
 
-        setup_cell_driver_pins(module, g);
-        process_module(module, g);
+        process_cell_drivers_intialization(module, g);
+
+        process_assigns(module, g);
+
+        process_cells(module, g);
+
+        process_partially_assigned(g);
+
+        process_connect_outputs(module, g);
 
         g->sync();
       }

@@ -22,12 +22,12 @@ Open projects are potential MS thesis/projects.
 
 ## New Compressed Graph Core
 
-LGraph uses a 32byte nodes and it is able to use large (absolute), short(delta)
+Lgraph uses a 32byte nodes and it is able to use large (absolute), short(delta)
 edges (idx). Now, that we run many graphs, we have seen that "on average" most
 Node Pins have just 2-4 edges (including input/output), but some pins (clock,
 IOs, or ruduction gates) could have hundreds of edges. The idea is to create a
 new Graph_core class to replace the some of the functionality spread across
-lgedge and lgraph. Like LGraph, Graph_core should use the mmap_lib::vector for
+lgedge and lgraph. Like Lgraph, Graph_core should use the mmap_lib::vector for
 storage.
 
 
@@ -37,7 +37,7 @@ change due to surounding addition/deletions) and it should be stable across
 program executions (load/un-load with mmaps).
 
 
-The current LGraph node uses around 34 bytes per Node_pin. This implementation
+The current Lgraph node uses around 34 bytes per Node_pin. This implementation
 should be around 18 bytes per node. The state of the art (not fast
 insert/delete) compressed graphs can reach 10 bits per edge vs the expected
 40bits per edge (18bytes/3+edges). So there is still room for improvement, but
@@ -208,6 +208,19 @@ to handle classes.
         * https://github.com/taichi-ishitani/tnoc
 * The interface with slang could be through the C++ ASTVisitor in slang or maybe just handling the dumped json
 
+## Lgraph to/from XLS IR
+
+Create a bridge between Lgraph and XLS IR. Not LNAST because the XLS IR is very close to Lgraph.
+
+Dependence: none
+
+Main features:
+
+* Bring XLS build to combine in a single bazel
+* Bridge to allow runs of DSLX to LiveHD
+* Bridge to allow from XLS IR to LiveHD
+* Bridge to allow from Lgraph to XLS IR
+
 ## Lgraph to Yosys JSON
 
 The json format from yosys is used by several tools like nextpnr and netlistsvg. Creating the json interface
@@ -262,12 +275,12 @@ Main features:
 * Pyrope tree-sitter grammar
 * Atom integration
 * Atom go definition, highlight, and attribute
-* Atom capacity to query LNAST/LGraph generated grammar for bit-width. The incremental grammar passed to LNAST, passed to LGraph,
+* Atom capacity to query LNAST/Lgraph generated grammar for bit-width. The incremental grammar passed to LNAST, passed to Lgraph,
   and incremental bit-width inference.
 
 ## Parallel forward/backward traversal
 
-LGraph has fwd/bwd/fast iterators. Those are efficient but single threaded. The idea is to create iterators
+Lgraph has fwd/bwd/fast iterators. Those are efficient but single threaded. The idea is to create iterators
 that accept a lambda function. The idea is to "chunk" the graph in subgraphs and give a subchunk of the graph
 to each thread.
 
@@ -298,9 +311,9 @@ and traverse to aggregate.
 The goal is to aim at 16 cores and achieve 10x speedup for those larger
 bitwidth/cprop tasks.
 
-## LGraph partition/decomposition/coloring
+## Lgraph partition/decomposition/coloring
 
-Implement several partitioning/coloring algorithms in LGraph. The
+Implement several partitioning/coloring algorithms in Lgraph. The
 attributes/colors could be used for synthesis/placement/...
 
 Dependence: none
@@ -326,7 +339,7 @@ Main features:
 * The current synthesis divides the circuit in partitions. Each partition can be synthesized in parallel.
 * Support hierarchical synthesis to optimize cross Lgraphs (cross verilog module optimization)
 
-## Bring Back Incremental Synthesis to LGraph
+## Bring Back Incremental Synthesis to Lgraph
 
 WARNING: Traversal/color depdendence
 
@@ -334,19 +347,19 @@ Dependence: none
 
 Main features:
 
-* Reimplement the DAC synthesis in LGraph
+* Reimplement the DAC synthesis in Lgraph
 * Re-run anubis to get data
 
 ## OpenWare
 
-We need a set of set of implementations with different trade-offs for each basic LGraph gate. The implementations
+We need a set of set of implementations with different trade-offs for each basic Lgraph gate. The implementations
 could optimize for FPGA and ASIC.
 
 Dependence: none
 
 Main features:
 
-* Custom implementations for all the LGraph cells: reductions, add/sub, mult, shift, barrel shifter...
+* Custom implementations for all the Lgraph cells: reductions, add/sub, mult, shift, barrel shifter...
 * The OpenWare library is built in Pyrope, with efficient verilog generated
 * Benchmark the OpenWare against FPGA and ASIC default (designWare) targets
 * Specific target implementations for FPGA (Xilinx) and ASIC (generic)
@@ -361,13 +374,13 @@ Dependence: Mockturtle + OpenWare projects
 Main features:
 
 * Goal to run several large tests (Anubis) and BOOM and Titan23 (http://www.eecg.utoronto.ca/~kmurray/titan.html).
-* Compare against vivado, quartus, DC, ABC, Mockturtle.... results can not be published directly but OK as A/B/C vs LGraph+XX.
-* Important to focus on OpenWare LGraph flow vs others
+* Compare against vivado, quartus, DC, ABC, Mockturtle.... results can not be published directly but OK as A/B/C vs Lgraph+XX.
+* Important to focus on OpenWare Lgraph flow vs others
 * Create regression system that plots freq/area/power for several key benchmarks
 
-## Useful LGraph Passes
+## Useful Lgraph Passes
 
-LGraph has several passes. Many compiler like passes that can be used by
+Lgraph has several passes. Many compiler like passes that can be used by
 several projects. This is a set of those unrelated passes.
 
 Dependence: none
@@ -377,7 +390,7 @@ Main features:
 * Find combinational loops and notified LoC responsible
 * Find cross clock domain and check that it has acceptable patters to cross. Allow to be extensible
 * Copy propagation and Dead-code elimination in LGRAPH with and without hierarchy
-* Check LGraph consistency. E.g: NOT should have same bits input/output edges
+* Check Lgraph consistency. E.g: NOT should have same bits input/output edges
 
 ## Dynamic Power Model
 
@@ -426,7 +439,7 @@ Main features:
 
 ## Floorplanner
 
-Implement a floorplanner for large LGraph designs (firesim target).
+Implement a floorplanner for large Lgraph designs (firesim target).
 
 Dependence: coloring
 
@@ -497,9 +510,9 @@ Main features:
 
 * Get timing from openSTA and get openTimer to work
 
-## ECO pass with LGraph
+## ECO pass with Lgraph
 
-Leverage the incremental and push it further to make LGraph the ECO flow for open source
+Leverage the incremental and push it further to make Lgraph the ECO flow for open source
 
 Dependence: bring back incremental synthesis, coloring, and SAT solver
 
@@ -515,11 +528,11 @@ Dependence: Rapidwright, incremental synthesis
 
 Main features:
 
-* Do a full flow of LGraph for F1. Fast incremental
+* Do a full flow of Lgraph for F1. Fast incremental
 
 ## OpenDB
 
-Integrate OpenDB flows with LGraph
+Integrate OpenDB flows with Lgraph
 
 Dependence: none
 
@@ -592,7 +605,7 @@ Main steps:
 * Benchmark a potential replacement of Eigen library with SuperSCS (This is over 70% of the time for large bench. Try different libraries pick faster SuperSCS?)
     * gp_qsolve.cpp (location for Eigen)
     * SuperSCS code example in C: https://kul-forbes.github.io/scs/examples_in_c.html
-    * In-place solver leveraging LGraph is also very reasonable as alternative
+    * In-place solver leveraging Lgraph is also very reasonable as alternative
 
 Some characteristics/thoughts to consider:
 
@@ -618,7 +631,7 @@ Integrate with the nextPNR FPGA placement/routing
 Dependence: Rapidwright
 
 Main features:
-* Create a bridge to/from LGraph and nextpntr (json)
+* Create a bridge to/from Lgraph and nextpntr (json)
 
 ## simdjson
 
@@ -711,7 +724,7 @@ Maybe use https://github.com/Boolector/boolector
 
 ## Mockturtle (Qian Chen)
 
-Integrate EPFL mockturtle (https://github.com/lsils/mockturtle) with LGraph. The main characteristics:
+Integrate EPFL mockturtle (https://github.com/lsils/mockturtle) with Lgraph. The main characteristics:
 
 * Use mockturtle to tmap to LUTs
 * Use mockturtle to synthesize (optimize) logic
@@ -735,7 +748,7 @@ Some tasks that were not finished that a potential future project can address: (
 
 ## ABC (Yunxun Qiu)
 
-Integrate ABC with LGraph. The interface use the C-API, bit the file dump format.
+Integrate ABC with Lgraph. The interface use the C-API, bit the file dump format.
 
 ## FIRRTL 2 LNAST (Hunter Coffman)
 
@@ -746,7 +759,7 @@ Dependence: none
 
 Main features:
 
-* Bridge between high level FIRRTL and LGraph using LNAST (to/from FIRRTL translation)
+* Bridge between high level FIRRTL and Lgraph using LNAST (to/from FIRRTL translation)
 * Ideally handle "high level FIRRTL" Then, we can read out of CHISEL.
 * Benchmark is rocketchip and BOOM
 * How to handle annotations? (unclear at the moment if we need this)
@@ -848,16 +861,16 @@ https://github.com/azukaar/GuPM
 * Allow to specify a specific lgraph library
 * Allow to specify passes/commands in lgraph
 
-## LGraph and LNAST Wavedrom/duh bitfield
+## Lgraph and LNAST Wavedrom/duh bitfield
 
 Wavedrom and duh allows to dump bitfield information for structures. It would
 be interesting to explore to dump tables and bit fields for Lgraph IOs, and
 structs/fields inside the module. It may be a way to integrate with the
 documentation generation.
 
-## LGraph and LNAST check pass
+## Lgraph and LNAST check pass
 
-Create a pass that checks that the LGraph (and/or LNAST) is sementically correct. Some checks:
+Create a pass that checks that the Lgraph (and/or LNAST) is sementically correct. Some checks:
 
 * No combinational loops
 * No missmatch in bit widths
@@ -943,7 +956,7 @@ Main features:
 ### Waveform Window
 
  * GTKwave like with capacity to drag to/from source window
- * Query to LGraph to have "order" in variables computed. This is shown in the wave form like small delays (up to 40% of the cycle for delays? maybe configurable)
+ * Query to Lgraph to have "order" in variables computed. This is shown in the wave form like small delays (up to 40% of the cycle for delays? maybe configurable)
  * Capacity to add edges (like in wavedrom, https://observablehq.com/@drom/wavedrom) leveraging producer consumer info from lgraph
  * load/save configured signal configuration through the console window
  * Struct-like support for signals (groups)

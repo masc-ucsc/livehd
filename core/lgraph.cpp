@@ -1036,9 +1036,10 @@ bool LGraph::del_edge_driver_int(const Node_pin &dpin, const Node_pin &spin) {
   I(spin.get_class_lgraph() == spin.get_top_lgraph());
   I(spin.get_class_lgraph() == dpin.get_top_lgraph());
 
+  node_internal.ref(dpin.get_root_idx())->clear_full_hint();
+
   Index_ID idx2         = dpin.get_idx();
   auto *   node_int_ptr = node_internal.ref(idx2);
-  node_int_ptr->clear_full_hint();
 
   Index_ID last_idx = idx2;
 
@@ -1092,7 +1093,7 @@ bool LGraph::del_edge_sink_int(const Node_pin &dpin, const Node_pin &spin) {
 
   Index_ID idx2         = spin.get_idx();
   auto *   node_int_ptr = node_internal.ref(idx2);
-  node_int_ptr->clear_full_hint();
+  node_internal.ref(spin.get_root_idx())->clear_full_hint();
 
   auto dpin_root_idx = dpin.get_root_idx();
 
