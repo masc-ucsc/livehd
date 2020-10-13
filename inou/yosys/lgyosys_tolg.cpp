@@ -426,14 +426,15 @@ static void set_bits_wirename(Node_pin &pin, const RTLIL::Wire *wire) {
 
 static Node_pin get_partial_dpin(LGraph *g, const RTLIL::Wire *wire) {
   auto or_dpin = get_edge_pin(g, wire, true);
-  I(or_dpin.get_node().is_type(Ntype_op::Or));
 
   if (or_dpin.is_graph_output()) { // Some outputs are deferred
     auto real_or_node = g->create_node(Ntype_op::Or, or_dpin.get_bits());
     or_dpin.get_sink_from_output().connect_driver(real_or_node);
 
-    wire2pin[wire] = real_or_node.setup_driver_pin();
+    or_dpin = real_or_node.setup_driver_pin();
+    wire2pin[wire] = or_dpin;
   }
+  I(or_dpin.get_node().is_type(Ntype_op::Or));
 
   set_bits_wirename(or_dpin, wire);
 
@@ -837,6 +838,7 @@ static void process_assigns(RTLIL::Module *module, LGraph *g) {
 
         if (partially_assigned.find(lhs_wire) == partially_assigned.end()) {
           partially_assigned[lhs_wire].resize(lhs_wire->width);
+          partially_assigned_bits[lhs_wire].resize(lhs_wire->width);
 
           if (wire2pin.find(lhs_wire) == wire2pin.end()) {
             auto or_node       = g->create_node(Ntype_op::Or, lhs_wire->width);
@@ -932,9 +934,7 @@ static void process_assigns(RTLIL::Module *module, LGraph *g) {
                 dpin = and_node.setup_driver_pin();
               }
             } else {
-              auto from = rhs_off + from_in_rchunk;
-              I(from>= rchunk.offset);
-              dpin = create_pick_operator(g, rchunk.wire, from, bits_needed, true);
+              dpin = create_pick_operator(g, rchunk.wire, from_in_rchunk, bits_needed, true);
             }
 
 #ifdef NDEBUG
