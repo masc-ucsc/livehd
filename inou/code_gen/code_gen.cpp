@@ -493,9 +493,9 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
     //TODO:check if ref is const type (used for masking) or not
     if((std::find(const_vect.begin(), const_vect.end(), ref) != const_vect.end()) && (lnast_to->is_unsigned(std::string(op_str_vect[i-1])))) {
       fmt::print("\nNow, op str vect i-1 is {} and ref is {}\n",op_str_vect[i-1], ref);
-//      auto bw_num = (int)log2(ref)+1; 
-//      ref = absl::StrCat("UInt<", bw_num, ">(", ref, ")");//FIXME: bitwidth as per the output!?
-      ref = absl::StrCat("UInt<>(", ref, ")");//FIXME: bitwidth as per the output!?
+      auto bw_num = Lconst(ref);//(int)log2(ref)+1; 
+      fmt::print("{}\n", bw_num.get_bits());
+      ref = absl::StrCat("UInt<", std::to_string(bw_num.get_bits()), ">(", ref, ")");
     }
 
     absl::StrAppend(&val, lnast_to->ref_name(ref));
@@ -530,7 +530,7 @@ void Code_gen::do_tposs(const mmap_lib::Tree_index& tposs_node_index) {
     I(false, "Error: expected temp str as first child of Tposs.\n\tMight need to check this issue!\n");
   }
 
-  absl::StrAppend(&buffer_to_print, indent(), lnast_to->make_unsigned(std::string(sec_child)), lnast_to->stmt_sep());  
+  absl::StrAppend(&buffer_to_print, indent(), lnast_to->make_unsigned(std::string(sec_child)));  
 }
 
 //-------------------------------------------------------------------------------------
