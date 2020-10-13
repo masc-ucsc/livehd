@@ -70,7 +70,7 @@ size_t Lgtuple::get_or_create_pos(size_t pos, std::string_view key) {
     key2pos[key] = pos;
   } else {
     if (pos2tuple[pos]) {
-      I(pos2tuple[pos]->get_parent_key_name() == key);
+      I(pos2tuple[pos]->get_hier_parent_key_name() == key);
     } else {
       pos2tuple[pos] = std::make_shared<Lgtuple>(pos, key);
       key2pos[key]   = pos;
@@ -109,7 +109,7 @@ size_t Lgtuple::get_or_create_pos(size_t pos) {
     pos2tuple.emplace_back(std::make_shared<Lgtuple>(pos));  // unname
   } else {
     if (pos2tuple[pos]) {
-      named = named && pos2tuple[pos]->has_parent_key_name();
+      named = named && pos2tuple[pos]->has_hier_parent_key_name();
     } else {
       new_entry = true;
     }
@@ -159,10 +159,10 @@ void Lgtuple::set(std::string_view key, std::shared_ptr<Lgtuple> tup2) {
     pos2tuple[it->second]->add(tup2);
   }
 
-  if (tup2->parent_key_name.empty())
-    tup2->parent_key_name = key;
-  else if (tup2->parent_key_name[0] == '_' && tup2->parent_key_name[2] == '_')
-    tup2->parent_key_name = key;
+  if (tup2->hier_parent_key_name.empty())
+    tup2->hier_parent_key_name = key;
+  else if (tup2->hier_parent_key_name[0] == '_' && tup2->hier_parent_key_name[2] == '_')
+    tup2->hier_parent_key_name = key;
 }
 
 void Lgtuple::set(std::string_view key, LGraph *lg, const Lconst &constant) {
@@ -243,7 +243,6 @@ bool Lgtuple::add(const std::shared_ptr<Lgtuple> tup2) {
       key2pos[e.first] = e.second + shift;
     }
   }
-
   return true;
 }
 
@@ -299,12 +298,13 @@ std::vector<std::pair<std::string_view, Node_pin>> Lgtuple::get_all_attributes()
 }
 
 void Lgtuple::dump(std::string_view indent) const {
-  fmt::print("{}parent name:{} parent pos:{} {} {} val_dpin:{}\n",
+  fmt::print("{}hier_parent_name:{} hier_parent_pos:{} {} {} {} val_dpin:{}\n",
              indent,
-             parent_key_name,
-             parent_key_pos,
+             hier_parent_key_name,
+             hier_parent_key_pos,
              ordered ? "ordered" : "unordered",
              named ? "named" : "unnamed",
+             is_scalar() ? "scalar" : "not-scalar",
              val_dpin.debug_name());
 
   std::string indent2(indent);
@@ -314,5 +314,31 @@ void Lgtuple::dump(std::string_view indent) const {
       pos2tuple[i]->dump(indent2);
     else
       fmt::print("{}invalid pos:{}\n", indent2, i);
+  }
+}
+
+void Lgtuple::analyze_graph_output(absl::flat_hash_map<std::string, Node_pin> &gout2driver, std::string base_name) const {
+  std::string new_hier_name;
+  if (hier_parent_key_name != "%") {
+    auto pos = hier_parent_key_name.find_last_of('_');
+
+    if (hier_parent_key_name[0] == '%') {
+      new_hier_name = hier_parent_key_name.substr(1, pos-1);
+    } else {
+      new_hier_name = absl::StrCat(base_name, ".", hier_parent_key_name.substr(0, pos));
+    }
+
+    if (is_scalar()) {
+      fmt::print("hier-name:{}, val_dpin:{}\n", new_hier_name, val_dpin.debug_name());
+      gout2driver.insert_or_assign(new_hier_name, val_dpin);
+      return;
+    }
+  }
+
+  for (auto i = 0u; i < pos2tuple.size(); ++i) {
+    if (pos2tuple[i])
+      pos2tuple[i]->analyze_graph_output(gout2driver, new_hier_name);
+    else
+      fmt::print("{}invalid pos:{}\n", "  ", i);
   }
 }

@@ -12,6 +12,7 @@ private:
 protected:
 
   absl::flat_hash_map<Node::Compact, std::shared_ptr<Lgtuple>> node2tuple;  // node to the most up-to-dated tuple chain
+  absl::flat_hash_map<std::string_view, Node_pin> oname2dpin;
 
   void collapse_forward_same_op(Node &node, XEdge_iterator &inp_edges_ordered);
   void collapse_forward_sum(Node &node, XEdge_iterator &inp_edges_ordered);
@@ -37,6 +38,9 @@ protected:
   std::shared_ptr<Lgtuple> process_tuple_add_chain(Node_pin up_dpin);
   void process_tuple_add(Node &node);
   bool process_tuple_get(Node &node);
+
+  // io construction
+  void try_create_graph_output(LGraph *lg, std::shared_ptr<Lgtuple> tup);
 
 
 public:
