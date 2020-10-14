@@ -199,7 +199,7 @@ public:
   Node create_node_const(const Lconst &value);
   Node create_node_const(std::string_view val)     { return create_node_const(Lconst(val)); }
   Node create_node_const(int64_t val)              { return create_node_const(Lconst(val)); }
-  Node create_node_const(int64_t val, Bits_t bits) { return create_node_const(Lconst(val, bits)); }
+  // Node create_node_const(int64_t val, Bits_t bits) { return create_node_const(Lconst(val, bits)); }
 
   Node create_node_lut(const Lconst &value);
   Node create_node_sub(Lg_type_id sub);

@@ -253,7 +253,7 @@ void Lnast_tolg::process_ast_logical_op(LGraph *lg, const Lnast_nid &lnidx_opr) 
 
     auto node_eq = lg->create_node(Ntype_op::EQ);
     auto ori_opd = setup_ref_node_dpin(lg, opr_child);
-    auto zero_dpin = lg->create_node_const(Lconst(0, 1)).setup_driver_pin();
+    auto zero_dpin = lg->create_node_const(Lconst(0)).setup_driver_pin();
 
     lg->add_edge(ori_opd, node_eq.setup_sink_pin("A"));
     lg->add_edge(zero_dpin, node_eq.setup_sink_pin("A"));

@@ -158,18 +158,20 @@ Lconst::Lconst(Number v) {
   bits          = calc_bits();
 }
 
+#if 0
 Lconst::Lconst(int64_t v, Bits_t b) {
   explicit_str  = false;
   explicit_sign = false;
   explicit_bits = true;
   sign          = v<0;
-  bits          = b;
+  bits          = calc_bits();
   if(b<64)
     num = (v & ((1ULL<<b)-1)); // clear upper bits if present
   else
     num = v;
   I(calc_bits() <= bits);
 }
+#endif
 
 Lconst::Lconst(std::string_view orig_txt) {
 

@@ -350,23 +350,13 @@ void Lgyosys_dump::create_wires(LGraph *g, RTLIL::Module *module) {
       continue;
 
     if (op == Ntype_op::Const) {
-      RTLIL::Wire *new_wire = add_wire(module, node.get_driver_pin());
+      auto lc        = node.get_type_const();
+      auto *new_wire = module->addWire(next_id(node.get_class_lgraph()), lc.get_bits());
 
-      auto lc = node.get_type_const();
       if (lc.get_bits()<31 && lc.is_i()) { // 32bit in yosys const
-        assert(node.get_bits()>=lc.get_bits());
-        module->connect(new_wire, RTLIL::SigSpec(RTLIL::Const(lc.to_i(), node.get_bits())));
+        module->connect(new_wire, RTLIL::SigSpec(RTLIL::Const(lc.to_i(), lc.get_bits())));
       } else {
-        std::string txt;
-        if (lc.get_bits()<node.get_bits()) {
-          int delta = node.get_bits()-lc.get_bits();
-
-          txt.append(delta,'0');
-          txt = lc.to_yosys();
-        }else{
-          txt = lc.to_yosys();
-        }
-        module->connect(new_wire, RTLIL::SigSpec(RTLIL::Const::from_string(txt)));
+        module->connect(new_wire, RTLIL::SigSpec(RTLIL::Const::from_string(lc.to_yosys())));
       }
 
       input_map[node.get_driver_pin().get_compact()] = new_wire;
@@ -454,12 +444,8 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         std::vector<RTLIL::Wire *> add_signed;
         std::vector<RTLIL::Wire *> sub_signed;
 
-        size = 0;
-        bool all_inputs_same_size=true;
+        size = 0; // max IO size
         for (const auto &e : node.inp_edges()) {
-          if (size && size != e.get_bits()) {
-            all_inputs_same_size = false;
-          }
           size = (e.get_bits() > size) ? e.get_bits() : size;
 
           if (e.sink.get_pid()==0) {
@@ -876,14 +862,19 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
           }
           auto *wire = get_wire(e.sink.get_driver_pin());
 
-          if (wire->width < out_width) {
-            auto w2 = RTLIL::SigSpec(wire);
-            w2.extend_u0(out_width, true);  // sign extend
-            auto *extended_wire = module->addWire(next_id(g), out_width);
-            module->connect(extended_wire, w2);
-            port.emplace_back(extended_wire);
-          }else{
+          if (wire->width == out_width) {
             port.emplace_back(wire);
+          }else{
+            auto w2 = RTLIL::SigSpec(wire);
+            auto *new_wire = module->addWire(next_id(g), out_width);
+
+            if (wire->width < out_width) {
+              w2.extend_u0(out_width, true);  // sign extend
+            }else{
+              w2 = w2.extract(0, out_width);  // drop bits
+            }
+            module->connect(new_wire, w2);
+            port.emplace_back(new_wire);
           }
         }
 
