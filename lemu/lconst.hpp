@@ -91,8 +91,8 @@ protected:
     if (num == 0)
       return 1;
     if (num>0)
-      return msb(num)+1;
-    return msb(-num)+1;
+      return msb(num)+2; // +2 because values are signed
+    return msb(-num)+2;
   }
   bool same_explicit_bits(const Lconst &o) const {
     bool s1 = explicit_bits && o.explicit_bits && bits == o.bits;
@@ -110,7 +110,7 @@ public:
   Lconst(std::string_view txt);
   Lconst(Number v);
   Lconst(int64_t v);
-  Lconst(int64_t v, Bits_t bits);
+  //Lconst(int64_t v, Bits_t bits);
   Lconst();
 
   Container serialize() const;

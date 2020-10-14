@@ -189,8 +189,7 @@ void Pass_sample::create_sample_graph(LGraph *g) {
   shr_out_drv.set_bits(8);
   shr_out_drv.set_name("shr_out");
 
-  
-  auto s_const = lg->create_node_const(Lconst(2, 2));
+  auto s_const = lg->create_node_const(Lconst(2));
   I(s_const.get_driver_pin().get_bits() == 2);  // Automatically set bits for const
 
   auto a_sink = shr_node.setup_sink_pin("a");

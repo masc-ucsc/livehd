@@ -80,12 +80,12 @@ static void look_for_wire(LGraph *g, const RTLIL::Wire *wire) {
 static Node_pin resolve_constant(LGraph *g, const std::vector<RTLIL::State> &data, bool is_signed) {
   RTLIL::Const v(data);
   if (v.is_fully_zero()) {
-    return g->create_node_const(Lconst(0, data.size())).setup_driver_pin();
+    return g->create_node_const(Lconst(0)).setup_driver_pin();
   }
 
   if (v.is_fully_def() && data.size()<30) {
     auto x = v.as_int(is_signed);
-    return g->create_node_const(Lconst(x, data.size())).setup_driver_pin();
+    return g->create_node_const(Lconst(x)).setup_driver_pin();
   }
 
   // this is a vector of RTLIL::State
@@ -283,7 +283,6 @@ static Node_pin create_pick_concat_dpin(LGraph *g, const RTLIL::SigSpec &ss, boo
         }
 
         append_to_or_node(g, or_node, inp_pin, offset);
-        I(chunks[i].width <= inp_pin.get_bits()); // there may be Tposs increasing size
       }
 
       offset += chunks[i].width;
@@ -305,7 +304,7 @@ static Node_pin get_dpin(LGraph *g, const RTLIL::Cell *cell, const RTLIL::IdStri
   if (cell->hasParam(name)) {
     const RTLIL::Const &v = cell->getParam(name);
     if (v.is_fully_def() && v.size() <30) {
-      return g->create_node_const(v.as_int(), v.size()).setup_driver_pin();
+      return g->create_node_const(v.as_int()).setup_driver_pin();
     }
     std::string v_str("0b");
     v_str += v.as_string();
@@ -1442,7 +1441,7 @@ static void process_cells(RTLIL::Module *module, LGraph *g) {
         }
 
         and_node.connect_sink(xor_node);
-        and_node.connect_sink(g->create_node_const(1,y_bits));
+        and_node.connect_sink(g->create_node_const(1)); // ,y_bits));
       }
 #if 0
       // C++ code for log2 parity compute
@@ -1489,7 +1488,7 @@ static void process_cells(RTLIL::Module *module, LGraph *g) {
         }
 
         auto and_node = g->create_node(Ntype_op::And,1);
-        and_node.connect_sink(g->create_node_const(1,1));
+        and_node.connect_sink(g->create_node_const(1)); // ,1));
 
         auto xor_node = g->create_node(Ntype_op::Xor,1);
         xor_node.connect_sink(a_dpin);
