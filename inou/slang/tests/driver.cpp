@@ -44,7 +44,7 @@ bool runPreprocessor(SourceManager& sourceManager, const Bag& options,
     output.setIncludeDirectives(includeDirectives);
 
     while (true) {
-        Token token = preprocessor.next();
+        slang::Token token = preprocessor.next();
         output.print(token);
         if (token.kind == TokenKind::EndOfFile)
             break;
@@ -72,7 +72,7 @@ void printMacros(SourceManager& sourceManager, const Bag& options,
         preprocessor.pushSource(*it);
 
     while (true) {
-        Token token = preprocessor.next();
+        slang::Token token = preprocessor.next();
         if (token.kind == TokenKind::EndOfFile)
             break;
     }

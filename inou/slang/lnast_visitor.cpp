@@ -36,39 +36,78 @@ void Lnast_visitor::handle(const slang::ContinuousAssignSymbol& symbol) {
 
   handle(symbol.getAssignment().as<AssignmentExpression>());
 }
+// void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
+//   if (numErrors > errorLimit)
+//     return;
+//   const auto &lhs =  expr.left();
+//   const auto &rhs =  expr.right();
+//   //base cases, traverse recursion for expr.right() checking nested lefts and rights
+// }
 
 void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
+  int line_num, pos1, pos2 = 0;
+ 
+  auto idx_root    = Lnast_node::create_top       ("top",  line_num, pos1, pos2);
+
   if (numErrors > errorLimit)
     return;
-    const auto &lhs =  expr.left();
-    const auto &rhs =  expr.right();
+  
+  char* operand1;
+  char* operand2;
+  lnast = std::make_unique<Lnast>("module name");
+  lnast->set_root(idx_root);
+  //auto   lnast = converter.prp_ast_to_lnast("test");
+  auto node_stmts  = Lnast_node::create_stmts     ("stmts",  line_num, pos1, pos2);
+  auto node_dpa    = Lnast_node::create_dp_assign ("dp_assign",  line_num, pos1, pos2);
+  auto idx_stmts   = lnast->add_child(lnast->get_root(), node_stmts);
+  auto idx_assign  = lnast->add_child(idx_stmts,  node_dpa);
+  Lnast_nid idx;
+  fmt::print("check\n");
+  const auto &lhs =  expr.left();
+  const auto &rhs =  expr.right();
     if (lhs.kind == ExpressionKind::NamedValue) {
       const auto &var = lhs.as<NamedValueExpression>();
       fmt::print("bits:{} {} =  ", var.type->getBitWidth(), var.symbol.name);
+      auto idx_lhs  = lnast->add_child(idx_assign, Lnast_node::create_ref(var.symbol.name)); // string_view = %out
     } else {
       fmt::print("TODO. What is this");
     }
     if (rhs.kind==ExpressionKind::UnaryOp){
       const auto &op1 = rhs.as<UnaryExpression>();
+
       //const auto check=getBinaryExpression(temp.kind);
       fmt::print("UnaryOperator: {} {} \n",rhs.kind,op1.op);
+      //auto idx_lhs  = lnast->add_child(idx_assign, Lnast_node::create_ref(op1.op)); // string_view = %out
       
       switch (op1.op) {
-        case (UnaryOperator::Plus): 
-          fmt::print("UnaryOperator: + \n");
-          break;
-        case (UnaryOperator::Minus): 
-          fmt::print("UnaryOperator: - \n");
-          break;
+        case (UnaryOperator::Plus):
+          {
+            fmt::print("UnaryOperator: + \n");
+            break;
+          }
+        case (UnaryOperator::Minus):
+          {
+            fmt::print("UnaryOperator: - \n");
+            break;
+          }
         case (UnaryOperator::BitwiseNot):
-          fmt::print("UnaryOperator: ~ \n");
-          break;
+          {
+            idx = lnast->add_child(idx_stmts, Lnast_node::create_not("BitNot"));
+            fmt::print("UnaryOperator: ~ \n");
+            break;
+          }
         case (UnaryOperator::BitwiseAnd):
-          fmt::print("UnaryOperator: & \n");
-          break;
+          {
+            fmt::print("UnaryOperator: & \n");
+
+            break;
+          }
+
         case (UnaryOperator::BitwiseOr):
-          fmt::print("UnaryOperator: | \n");
-          break;
+          {
+            fmt::print("UnaryOperator: | \n");
+            break;
+          }
         case (UnaryOperator::BitwiseXor):
           fmt::print("UnaryOperator: ^ \n");
           break;
@@ -88,55 +127,89 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
         // case UnaryOperator::Postdecrement:
         
       }
+      //add flags to trigger the operators
+ 
     }
-    if(rhs.kind==ExpressionKind::NamedValue){
-      const auto &op2 = rhs.as<NamedValueExpression>();
-      
-      fmt::print("RHS named value: {} \n",op2.symbol.name);
-
-    }
-
+    //auto idx    = lnast->add_child(idx_stmts, Lnast_node::create_xor  ("XOR")); 
+   
     
+    if(rhs.kind==ExpressionKind::NamedValue){
+      
+      const auto &op2 = rhs.as<NamedValueExpression>();
+      fmt::print("RHS named value: {} \n",op2.symbol.name);
+      //auto idx_op   = lnast->add_child(idx, Lnast_node::create_ref(op2.symbol.name)); 
+        const auto operand=op2.symbol.name;
+        auto node_op   = Lnast_node::create_ref (operand);
+        auto idx_op     = lnast->add_child(idx, node_op); //segfaulting
+    }
+
     else if (rhs.kind==ExpressionKind::BinaryOp){
       const auto &op1 = rhs.as<BinaryExpression>();
       
       const Type& temp= op1.type->getCanonicalType(); //figure out what kind type is possible
-      //const auto check=getBinaryExpression(temp.kind);
       const auto &check1=op1.left();
       const auto &check2=op1.right();
-      if(check1.kind==ExpressionKind::NamedValue){
-        const auto &rhs_1=check1.as<NamedValueExpression>();
-        fmt::print(" {} ",rhs_1.symbol.name);
-      }
 
       switch (op1.op) {
-        case BinaryOperator::Add: 
-          fmt::print(" + ");
+
+        case BinaryOperator::Add:
+        {
+          idx   = lnast->add_child(idx_stmts, Lnast_node::create_plus  ("+")); //line num? pos1? pos2?
+          // auto node_op1    = Lnast_node::create_ref       (operand1,    line_num, pos1, pos2);
+          // auto node_op2    = Lnast_node::create_const     (operand2,  line_num, pos1, pos2);
+          // auto idx_plus    = lnast->add_child(idx_stmts, node_plus);
+          // auto idx_op1     = lnast->add_child(idx_plus,  node_op1);
+          // auto idx_op2     = lnast->add_child(idx_plus,  node_op2); 
+          //fmt::print(" + ");
           break;
-        case BinaryOperator::Subtract: 
-          fmt::print(" - ");
+        }
+        case BinaryOperator::Subtract:
+        {
+          idx    = lnast->add_child(idx_stmts, Lnast_node::create_minus  ("-"));
+          // auto node_op1    = Lnast_node::create_ref       (operand1,    line_num, pos1, pos2);
+          // auto node_op2    = Lnast_node::create_const     (operand2,  line_num, pos1, pos2);
+          // auto idx_minus   = lnast->add_child(idx_stmts, node_minus);
+          // auto idx_op1     = lnast->add_child(idx_minus, node_op1);        
+          // auto idx_op2     = lnast->add_child(idx_minus, node_op2);
           break;
+        }
         case BinaryOperator::Multiply: 
+        {
           fmt::print(" * ");
           break;
+        }
         case BinaryOperator::Divide: 
           fmt::print(" / ");
           break;
         case BinaryOperator::Mod: 
           fmt::print(" % ");
           break;
-        case BinaryOperator::BinaryAnd: 
+        case BinaryOperator::BinaryAnd:
+        {
+          idx    = lnast->add_child(idx_stmts, Lnast_node::create_and  ("AND"));
           fmt::print(" & ");
           break;
+        }
         case BinaryOperator::BinaryOr: 
+          idx = lnast->add_child(idx_stmts, Lnast_node::create_or  ("OR"));
           fmt::print(" | ");
           break;
-        case BinaryOperator::BinaryXor: 
+        case BinaryOperator::BinaryXor:
+        {
+          idx = lnast->add_child(idx_stmts, Lnast_node::create_xor  ("XOR"));
           fmt::print(" ^ ");
           break;
+        }
         case BinaryOperator::BinaryXnor: 
+        {
           fmt::print(" XNOR ");
           break;
+        }
+        default:
+        {
+          //int flag=0;
+          break;
+        }
         // case BinaryOperator::Equality:
         // case BinaryOperator::Inequality:
         // case BinaryOperator::CaseEquality:
@@ -157,12 +230,30 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
         // case BinaryOperator::ArithmeticShiftRight:
         // case BinaryOperator::Power:
       }
+      
+      if(check1.kind==ExpressionKind::NamedValue){
+        const auto &rhs_1=check1.as<NamedValueExpression>();
+        const auto operand1=rhs_1.symbol.name;
+        auto node_op1   = Lnast_node::create_ref       (operand1);
+        auto idx_op1     = lnast->add_child(idx, node_op1); //segfaulting
+        fmt::print(" {} ",rhs_1.symbol.name);
+           
+      }
       if(check2.kind==ExpressionKind::NamedValue){
         const auto &rhs_2=check2.as<NamedValueExpression>();
+        const auto operand2=rhs_2.symbol.name;
+        auto node_op2    = Lnast_node::create_ref       (operand2,    line_num, pos1, pos2);
+        auto idx_op2     = lnast->add_child(idx, node_op2);
         fmt::print(" {} \n",rhs_2.symbol.name);
       }
+      
+      
     }
     fmt::print("handle recursively the rhs (binaryOp,unaryop,...)\n");
+    lnast->dump();
+    
+    //std::move(lnast);
+    return;
 }
 
 void Lnast_visitor::handle(const slang::ExpressionStatement& expr) {
@@ -204,20 +295,6 @@ void Lnast_visitor::handle(const slang::ProceduralBlockSymbol& pblock) {
         if (stmt->kind == StatementKind::ExpressionStatement) {
           handle(stmt->as<ExpressionStatement>()); // This call handle ExpressionStatement
 
-            //fmt::print("Block: %s \n",stmt->toString());
-          
-          // if (stmt->kind==1){
-          //   fmt::print("Block jump: success \n",stmt->kind);
-          // }
-          // if (stmt->kind==2){
-          //   fmt::print("Block jump: return \n",stmt->kind);
-          // }
-          // if (stmt->kind==3){
-          //   fmt::print("Block jump: break \n",stmt->kind);
-          // }
-          // if (stmt->kind==4){
-          //   fmt::print("Block jump: continue \n",stmt->kind);
-          // }
         } else
           fmt::print("TODO: handle kind {}\n", stmt->kind);
       }

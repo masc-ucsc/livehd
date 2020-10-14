@@ -9,6 +9,8 @@
 #include "slang/symbols/CompilationUnitSymbols.h"
 #include "slang/syntax/SyntaxPrinter.h"
 #include "slang/syntax/SyntaxTree.h"
+#include "lnast.hpp"
+
 
 class Lnast_visitor : public slang::ASTVisitor<Lnast_visitor, false, false> {
 protected:
@@ -17,6 +19,7 @@ protected:
   flat_hash_set<const slang::InstanceBodySymbol*> visitedInstanceBodies;
   uint32_t errorLimit;
   uint32_t hierarchyDepth = 0;
+  std::unique_ptr<Lnast> lnast;
 
 public:
   Lnast_visitor(slang::Compilation& _compilation, const size_t& _numErrors, uint32_t _errorLimit);
