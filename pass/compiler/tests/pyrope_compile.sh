@@ -20,6 +20,7 @@ pts='io_gen2'
 pts='io_gen3'
 pts='hier_tuple'
 pts='test2'
+pts='firrtl_tail'
 
 
 LGSHELL=./bazel-bin/main/lgshell

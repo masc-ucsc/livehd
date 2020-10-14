@@ -4,6 +4,7 @@
 #include "inou_graphviz.hpp"
 #include "lnast_tolg.hpp"
 #include "cprop.hpp"
+#include "bitwidth.hpp"
 
 Lcompiler::Lcompiler(std::string_view _path, std::string_view _odir, bool _gviz) 
   : path(_path), odir(_odir), gviz(_gviz) {}
@@ -45,7 +46,7 @@ void Lcompiler::add_thread(std::shared_ptr<Lnast> ln) {
   for (const auto &lg : local_lgs) {
     retry:
     Cprop cp(false); //hier = false
-    /* Bitwidth bw(false, 10); // hier = false, max_iters = 10 */
+    Bitwidth bw(false, 10); // hier = false, max_iters = 10
 
     fmt::print("-------------------------------------\n");
     fmt::print("-------- Copy-Propagation -----------\n");
@@ -55,7 +56,22 @@ void Lcompiler::add_thread(std::shared_ptr<Lnast> ln) {
     if (gviz) {
       gv.do_from_lgraph(lg, "no_bits"); // rename dot with postfix raw
     }
-    /* bw.do_trans(lg); */
+
+    fmt::print("-------------------------------------\n");
+    fmt::print("-------- Bitwidth-Inference ---------\n");
+    fmt::print("-------------------------------------\n");
+    bw.do_trans(lg);
+    bw.do_trans(lg);
+
+
+    fmt::print("-------------------------------------\n");
+    fmt::print("-------- Final Copy-Propagation -----\n");
+    fmt::print("-------------------------------------\n");
+    cp.do_trans(lg);
+
+    if (gviz) {
+      gv.do_from_lgraph(lg); // rename dot with postfix raw
+    }
 
 
     // FIXEME:sh -> todo 

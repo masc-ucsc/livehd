@@ -8,6 +8,7 @@ cc_library(
     deps = [
         # "//pass/bitwidth:pass_bitwidth",
         "//pass/cprop:pass_cprop",
+        "//pass/bitwidth:pass_bitwidth",
         "//pass/lnast_tolg:pass_lnast_tolg",
         "//pass/common:pass",
         "//inou/graphviz:inou_graphviz",
