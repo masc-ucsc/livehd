@@ -9,6 +9,7 @@
 
 using Bits_t  = uint32_t;  // bits type (future use)
 constexpr int     Bits_bits      = 17;
+constexpr int     Bits_max       = ((1ULL<<Bits_bits)-1);
 
 class Lconst {
 private:

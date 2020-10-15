@@ -85,7 +85,7 @@ Bitwidth_range::Bitwidth_range(Bits_t bits, bool _sign) {
 Bitwidth_range::Bitwidth_range(Bits_t bits) { set_ubits(bits); }
 
 void Bitwidth_range::set_sbits(Bits_t size) {
-  I(size <= (1UL << Bits_bits) - 1);
+  I(size < Bits_max);
 
   if (size == 0) {
     overflow = true;
@@ -106,7 +106,7 @@ void Bitwidth_range::set_sbits(Bits_t size) {
 }
 
 void Bitwidth_range::set_ubits(Bits_t size) {
-  I(size <= (1UL << Bits_bits) - 1);
+  I(size < Bits_max);
 
   if (size == 0) {
     overflow = true;
@@ -132,7 +132,7 @@ Bits_t Bitwidth_range::get_bits() const {
     Bits_t bits = max;
     if (min < 0)
       bits++;
-    if (bits >= (1UL << Bits_bits) - 1)  // Limit in bits
+    if (bits >= Bits_max)
       return 0;                          // To indicate overflow (unable to compute)
     return bits;
   }
@@ -145,7 +145,7 @@ Bits_t Bitwidth_range::get_bits() const {
   if (min < 0)
     bits++;
 
-  I(bits <= (1UL << Bits_bits) - 1);
+  I(bits < Bits_max);
 
   return bits;
 }

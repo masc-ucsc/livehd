@@ -524,8 +524,8 @@ public:
     I(is_root());
     return bits;
   }
-  void set_bits(uint32_t _bits) {
-    I(_bits < (1UL << Bits_bits));
+  void set_bits(Bits_t _bits) {
+    I(_bits < Bits_max);
     I(is_root());
     bits = _bits;
   }
