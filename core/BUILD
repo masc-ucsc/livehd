@@ -54,6 +54,15 @@ cc_test(
     )
 
 cc_test(
+    name = "lgraph_test",
+    srcs = ["tests/lgraph_test.cpp"],
+    deps = [
+        "@gtest//:gtest_main",
+        ":core",
+        ],
+    )
+
+cc_test(
     name = "attribute_test",
     srcs = ["tests/attribute_test.cpp"],
     deps = [

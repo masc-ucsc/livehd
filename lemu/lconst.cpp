@@ -38,7 +38,7 @@ Bits_t Lconst::read_bits(std::string_view txt) {
   if (tmp <= 0) {
     throw std::runtime_error(fmt::format("ERROR: {} the number of bits should be positive not {}", txt, tmp));
   }
-  if (tmp >= ((1UL<<Bits_bits)-1)) {
+  if (tmp >= Bits_max) {
     throw std::runtime_error(fmt::format("ERROR: {} the number of bits is too big {}", txt, tmp));
   }
 
