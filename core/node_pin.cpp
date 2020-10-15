@@ -174,14 +174,43 @@ float Node_pin::get_delay() const { return Ann_node_pin_delay::ref(top_g)->get(g
 
 void Node_pin::set_delay(float val) { Ann_node_pin_delay::ref(top_g)->set(get_compact_driver(), val); }
 
+void Node_pin::del_delay() {
+  Ann_node_pin_delay::ref(top_g)->erase(get_compact_driver());
+}
+
 void Node_pin::set_name(std::string_view wname) {
   I(wname.size()); //empty names not allowed
   Ann_node_pin_name::ref(current_g)->set(get_compact_class_driver(), wname);
 }
 
-void Node_pin::erase_name() {
+void Node_pin::del() {
+  if (sink && is_graph_output()) {
+    auto dpin = get_driver_from_output();
+    I(dpin.is_driver()); // infinite loop otherwise
+    dpin.del();
+    return;
+  }
+
+  get_lg()->del_pin(*this);
+  if (is_driver()) {
+    del_name();
+    del_delay();
+  }
+
+  invalidate();
+}
+
+void Node_pin::del_name() {
   I(has_name());
-  Ann_node_pin_name::ref(current_g)->erase_key(get_compact_class_driver());
+  if (is_hierarchical()) {
+    I(false); 
+    // the flow still does not have hierarchical compact_class delete. Are you
+    // sure that you do not need a not hierarchical node?  
+    //
+    // pin.get_non_hierarchical().del() will work if you got a hierarchical pin for some reason
+  }else{
+    Ann_node_pin_name::ref(current_g)->erase_key(get_compact_class_driver());
+  }
 }
 
 // FIXME->sh: could be deprecated if ann_ssa could be mmapped for a std::string_view

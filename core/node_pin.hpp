@@ -248,6 +248,7 @@ public:
 
   LGraph *        get_top_lgraph() const { return top_g; };
   LGraph *        get_class_lgraph() const { return current_g; };
+  LGraph *        get_lg() const { return current_g; };
   Hierarchy_index get_hidx() const { return hidx; };
 
   constexpr Port_ID get_pid() const { return pid; }
@@ -271,12 +272,12 @@ public:
     return get_driver();
   }
 
-  bool is_sink() const {
-    I(idx);
+  constexpr bool is_sink() const {
+    assert(idx);
     return sink;
   }
-  bool is_driver() const {
-    I(idx);
+  constexpr bool is_driver() const {
+    assert(idx);
     return !sink;
   }
 
@@ -294,6 +295,7 @@ public:
     I(dst.is_driver() && is_sink());
     return del_driver(dst);
   }
+  void del(); // del self and all connections
 
   void connect_sink(const Node_pin &dst) const;
   void connect_sink(const Node &dst) const;
@@ -331,7 +333,7 @@ public:
   std::string debug_name() const;
 
   void             set_name(std::string_view wname);
-  void             erase_name();
+  void             del_name();
   std::string_view get_name() const;
   bool             has_name() const;
   static Node_pin  find_driver_pin(LGraph *top, std::string_view wname);
@@ -343,6 +345,7 @@ public:
   void             dump_all_prp_vname() const;
 
   void  set_delay(float val);
+  void  del_delay();
   float get_delay() const;
 
   Bits_t   get_bits() const;

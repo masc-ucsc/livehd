@@ -82,6 +82,7 @@ protected:
   bool del_edge_driver_int(const Node_pin &dpin, const Node_pin &spin);
   bool del_edge_sink_int(const Node_pin &dpin, const Node_pin &spin);
 
+  void del_pin(const Node_pin &pin);
   void del_node(const Node &node);
   bool del_edge(const Node_pin &dpin, const Node_pin &spin);
 
