@@ -159,7 +159,6 @@ Node_pin Node::setup_driver_pin_slow(std::string_view name) const {
   I(pid != Port_invalid);  // graph_pos must be valid if connected
 
   Index_ID idx = current_g->setup_idx_from_pid(nid, pid);
-  current_g->setup_driver(idx);
   return Node_pin(top_g, current_g, hidx, idx, pid, false);
 }
 
@@ -252,7 +251,6 @@ Node_pin Node::setup_sink_pin_slow(std::string_view name) {
   I(pid != Port_invalid);  // graph_pos must be valid if connected
 
   Index_ID idx = current_g->setup_idx_from_pid(nid, pid);
-  current_g->setup_sink(idx);
   return Node_pin(top_g, current_g, hidx, idx, pid, true);
 }
 
@@ -268,13 +266,11 @@ Node_pin Node::setup_sink_pin_raw(Port_ID pid) {
 #endif
 
   Index_ID idx = current_g->setup_idx_from_pid(nid, pid);
-  current_g->setup_sink(idx);
   return Node_pin(top_g, current_g, hidx, idx, pid, true);
 }
 
 Node_pin Node::setup_sink_pin() const {
   I(!Ntype::is_multi_sink(get_type_op()));
-  current_g->setup_sink(nid);
   return Node_pin(top_g, current_g, hidx, nid, 0, true);
 }
 
@@ -298,13 +294,11 @@ Node_pin Node::setup_driver_pin_raw(Port_ID pid) const {
 #endif
 
   Index_ID idx = current_g->setup_idx_from_pid(nid, pid);
-  current_g->setup_driver(idx);
   return Node_pin(top_g, current_g, hidx, idx, pid, false);
 }
 
 Node_pin Node::setup_driver_pin() const {
   I(!Ntype::is_multi_driver(get_type_op()));
-  current_g->setup_driver(nid);
   return Node_pin(top_g, current_g, hidx, nid, 0, false);
 }
 

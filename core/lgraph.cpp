@@ -221,8 +221,6 @@ Node_pin LGraph::add_graph_input(std::string_view str, Port_ID pos, uint32_t bit
   if (idx==0)
     idx = get_space_output_pin(Hardcoded_input_nid, inst_pid, root_idx);
 
-  setup_driver(idx);  // Just driver, no sink
-
   Node_pin pin(this, this, Hierarchy_tree::root_index(), idx, inst_pid, false);
 
   pin.set_name(str);
@@ -246,9 +244,6 @@ Node_pin LGraph::add_graph_output(std::string_view str, Port_ID pos, uint32_t bi
   auto idx = find_idx_from_pid(Hardcoded_output_nid, inst_pid);
   if (idx==0)
     idx = get_space_output_pin(Hardcoded_output_nid, inst_pid, root_idx);
-
-  setup_sink(idx);
-  setup_driver(idx);  // outputs can also drive internal nodes. So both sink/driver
 
   Node_pin dpin(this, this, Hierarchy_tree::root_index(), idx, inst_pid, false);
   dpin.set_name(str);
@@ -335,13 +330,14 @@ Node_pin_iterator LGraph::out_setup_pins(const Node &node) const {
   I(node_internal[idx2].is_master_root());
 
   while (true) {
-    if (node_internal[idx2].is_root() && node_internal[idx2].is_driver_setup()) {
-      xiter.emplace_back(Node_pin(node.get_top_lgraph(),
-                                  node.get_class_lgraph(),
-                                  node.get_hidx(),
-                                  idx2,
-                                  node_internal[idx2].get_dst_pid(),
-                                  false));
+    if (node_internal[idx2].is_root()) {
+      if (node_internal[idx2].get_type() != Ntype_op::Sub || node_internal[idx2].get_dst_pid())
+        xiter.emplace_back(Node_pin(node.get_top_lgraph(),
+                                    node.get_class_lgraph(),
+                                    node.get_hidx(),
+                                    idx2,
+                                    node_internal[idx2].get_dst_pid(),
+                                    false));
     }
 
     if (node_internal[idx2].is_last_state())
@@ -365,9 +361,15 @@ Node_pin_iterator LGraph::inp_setup_pins(const Node &node) const {
   I(node_internal[idx2].is_master_root());
 
   while (true) {
-    if (node_internal[idx2].is_root() && node_internal[idx2].is_sink_setup())
-      xiter.emplace_back(
-          Node_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx(), idx2, node_internal[idx2].get_dst_pid(), true));
+    if (node_internal[idx2].is_root()) {
+      if (node_internal[idx2].get_type() != Ntype_op::Sub || node_internal[idx2].get_dst_pid())
+        xiter.emplace_back(Node_pin(node.get_top_lgraph(),
+                                    node.get_class_lgraph(),
+                                    node.get_hidx(),
+                                    idx2,
+                                    node_internal[idx2].get_dst_pid(),
+                                    true));
+    }
 
     if (node_internal[idx2].is_last_state())
       break;
@@ -697,8 +699,6 @@ bool LGraph::has_inputs(const Node &node) const {
 bool LGraph::has_outputs(const Node_pin &pin) const {
   I(pin.is_driver());
   auto idx = pin.get_root_idx();
-  if (!node_internal[idx].is_driver_setup())
-    return false;
 
   auto idx2 = pin.get_root_idx();
   while (true) {
@@ -717,8 +717,6 @@ bool LGraph::has_inputs(const Node_pin &pin) const {
   I(pin.is_sink());
 
   auto idx = pin.get_root_idx();
-  if (!node_internal[idx].is_sink_setup())
-    return false;
 
   auto idx2 = pin.get_root_idx();
   while (true) {
@@ -779,8 +777,6 @@ int LGraph::get_num_out_edges(const Node_pin &pin) const {
   I(pin.is_driver());
   int total = 0;
   auto idx = pin.get_root_idx();
-  if (!node_internal[idx].is_driver_setup())
-    return 0;
 
   auto idx2 = pin.get_root_idx();
   while (true) {
@@ -799,8 +795,6 @@ int LGraph::get_num_inp_edges(const Node_pin &pin) const {
   I(pin.is_sink());
   int total = 0;
   auto idx = pin.get_root_idx();
-  if (!node_internal[idx].is_sink_setup())
-    return 0;
 
   auto idx2 = pin.get_root_idx();
   while (true) {

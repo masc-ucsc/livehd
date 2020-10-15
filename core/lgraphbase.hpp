@@ -47,15 +47,6 @@ protected:
 
   Index_ID setup_idx_from_pid(const Index_ID nid, const Port_ID pid);
 
-  void setup_driver(const Index_ID idx) {
-    I(idx < node_internal.size());
-    node_internal.ref(idx)->set_driver_setup();
-  }
-  void setup_sink(const Index_ID idx) {
-    I(idx < node_internal.size());
-    node_internal.ref(idx)->set_sink_setup();
-  }
-
   Index_ID get_master_nid(Index_ID idx) const { return node_internal[idx].get_master_root_nid(); }
 
   uint32_t get_bits(Index_ID idx) const {
