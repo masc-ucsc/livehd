@@ -331,13 +331,12 @@ Node_pin_iterator LGraph::out_setup_pins(const Node &node) const {
 
   while (true) {
     if (node_internal[idx2].is_root()) {
-      if (node_internal[idx2].get_type() != Ntype_op::Sub || node_internal[idx2].get_dst_pid())
-        xiter.emplace_back(Node_pin(node.get_top_lgraph(),
-                                    node.get_class_lgraph(),
-                                    node.get_hidx(),
-                                    idx2,
-                                    node_internal[idx2].get_dst_pid(),
-                                    false));
+      xiter.emplace_back(Node_pin(node.get_top_lgraph(),
+                                  node.get_class_lgraph(),
+                                  node.get_hidx(),
+                                  idx2,
+                                  node_internal[idx2].get_dst_pid(),
+                                  false));
     }
 
     if (node_internal[idx2].is_last_state())
@@ -362,13 +361,12 @@ Node_pin_iterator LGraph::inp_setup_pins(const Node &node) const {
 
   while (true) {
     if (node_internal[idx2].is_root()) {
-      if (node_internal[idx2].get_type() != Ntype_op::Sub || node_internal[idx2].get_dst_pid())
-        xiter.emplace_back(Node_pin(node.get_top_lgraph(),
-                                    node.get_class_lgraph(),
-                                    node.get_hidx(),
-                                    idx2,
-                                    node_internal[idx2].get_dst_pid(),
-                                    true));
+      xiter.emplace_back(Node_pin(node.get_top_lgraph(),
+                                  node.get_class_lgraph(),
+                                  node.get_hidx(),
+                                  idx2,
+                                  node_internal[idx2].get_dst_pid(),
+                                  true));
     }
 
     if (node_internal[idx2].is_last_state())
