@@ -203,9 +203,9 @@ void Node_pin::del() {
 void Node_pin::del_name() {
   I(has_name());
   if (is_hierarchical()) {
-    I(false); 
+    I(false);
     // the flow still does not have hierarchical compact_class delete. Are you
-    // sure that you do not need a not hierarchical node?  
+    // sure that you do not need a not hierarchical node?
     //
     // pin.get_non_hierarchical().del() will work if you got a hierarchical pin for some reason
   }else{
