@@ -15,16 +15,19 @@ void LGraph::each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)
 
   auto hidx = hierarchical? Hierarchy_tree::root_index() : Hierarchy_tree::invalid_index();
 
-  auto out = Node(this, hidx, Hardcoded_output_nid);
-  for (auto &o_pin : out.out_setup_pins()) {
-    auto pos = get_self_sub_node().get_graph_pos_from_instance_pid(o_pin.get_pid());
-    pin_pair.emplace_back(std::make_pair(o_pin, pos));
-  }
+  Port_ID pid = 1;
+  for(const auto &io_pin:get_self_sub_node().get_io_pins()) {
+    if (io_pin.is_invalid())
+      continue;
 
-  auto inp = Node(this, hidx, Hardcoded_input_nid);
-  for (auto &i_pin : inp.out_setup_pins()) {
-    auto pos = get_self_sub_node().get_graph_pos_from_instance_pid(i_pin.get_pid());
-    pin_pair.emplace_back(std::make_pair(i_pin, pos));
+    Index_ID nid = Hardcoded_output_nid;
+    if (io_pin.is_input())
+      nid = Hardcoded_input_nid;
+
+    Node_pin pin(this, this, hidx, nid, pid, false);
+    pin_pair.emplace_back(std::make_pair(pin, io_pin.graph_io_pos));
+
+    ++pid;
   }
 
   std::sort(pin_pair.begin(), pin_pair.end(), [](const std::pair<Node_pin, Port_ID> &a, const std::pair<Node_pin, Port_ID> &b) {
@@ -59,7 +62,8 @@ void LGraph::each_pin(const Node_pin &dpin, std::function<bool(Index_ID idx)> f1
     do{
       if (node_internal[idx2].is_last_state()) {
 #ifndef NDEBUG
-        idx2 = node_internal[idx2].get_nid();
+        idx2 = node_internal[idx2].get_master_root_nid();
+        I(idx2 == dpin.get_node().get_nid());
         should_not_find = true; // loop and try the others (should not have it before root)
 #else
         return;
@@ -79,9 +83,14 @@ void LGraph::each_graph_input(std::function<void(Node_pin &pin)> f1, bool hierar
 
   auto hidx = hierarchical? Hierarchy_tree::root_index() : Hierarchy_tree::invalid_index();
 
-  auto node = Node(this, hidx, Hardcoded_input_nid);
-  for (auto &pin : node.out_setup_pins()) {
-    f1(pin);
+  Port_ID pid = 1;
+  for(const auto &io_pin:get_self_sub_node().get_io_pins()) {
+    if (io_pin.is_input()) {
+      I(!io_pin.is_invalid());
+      Node_pin dpin(this, this, hidx, Hardcoded_input_nid, pid, false);
+      f1(dpin);
+    }
+    ++pid;
   }
 }
 
@@ -91,9 +100,14 @@ void LGraph::each_graph_output(std::function<void(Node_pin &pin)> f1, bool hiera
 
   auto hidx = hierarchical? Hierarchy_tree::root_index() : Hierarchy_tree::invalid_index();
 
-  auto node = Node(this, hidx, Hardcoded_output_nid);
-  for (auto &pin : node.out_setup_pins()) {
-    f1(pin);
+  Port_ID pid = 1;
+  for(const auto &io_pin:get_self_sub_node().get_io_pins()) {
+    if (io_pin.is_output()) {
+      I(!io_pin.is_invalid());
+      Node_pin dpin(this, this, hidx, Hardcoded_output_nid, pid, false);
+      f1(dpin);
+    }
+    ++pid;
   }
 }
 

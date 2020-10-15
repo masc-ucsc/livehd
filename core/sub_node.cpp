@@ -8,7 +8,6 @@ void Sub_node::copy_from(std::string_view new_name, Lg_type_id new_lgid, const S
   io_pins = sub.io_pins;
   name2id = sub.name2id;
   graph_pos2instance_pid = sub.graph_pos2instance_pid;
-
 }
 
 void Sub_node::to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer> &writer) const {
@@ -102,6 +101,9 @@ void Sub_node::from_json(const rapidjson::Value &entry) {
     io_pins[instance_pid].dir          = dir;
     io_pins[instance_pid].graph_io_pos = pid;
 
+    if (io_pins[instance_pid].is_invalid())
+      deleted.emplace_back(instance_pid);
+
     if (pid != Port_invalid) {
       map_pin_int(instance_pid, pid);
     }
@@ -128,6 +130,8 @@ std::vector<Sub_node::IO_pin> Sub_node::get_sorted_io_pins() const {
 
   std::vector<IO_pin> slist;
   for (auto i = 1u; i < io_pins.size(); ++i) {
+    if (io_pins[i].is_invalid())
+      continue;
     slist.emplace_back(io_pins[i]);
   }
 
@@ -179,3 +183,19 @@ void Sub_node::populate_graph_pos() {
       map_graph_pos(sorted_pin.name, sorted_pin.dir, pos);
   }
 }
+
+void Sub_node::del_pin(Port_ID instance_pid) {
+  I(has_instance_pin(instance_pid));
+
+  name2id.erase(io_pins[instance_pid].name);
+  auto pos = io_pins[instance_pid].graph_io_pos;
+  if (pos != Port_invalid) {
+    I(graph_pos2instance_pid.size() > pos);
+    I(graph_pos2instance_pid[pos] != Port_invalid);
+    graph_pos2instance_pid[pos] = Port_invalid;
+  }
+  io_pins[instance_pid].clear(); // do not erase to avoid remap of all the instance_pids (users)
+
+  deleted.emplace_back(instance_pid);
+}
+

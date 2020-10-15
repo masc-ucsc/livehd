@@ -54,7 +54,15 @@ public:
     bool    is_mapped() const { return graph_io_pos != Port_invalid; }
     bool    is_input() const { return dir == Direction::Input; }
     bool    is_output() const { return dir == Direction::Output; }
+    bool    is_invalid() const { return dir == Direction::Invalid; }
     Port_ID get_graph_pos() const { return graph_io_pos; }
+
+    void clear() {
+      dir = Direction::Invalid;
+      name.clear();
+      graph_io_pos = Port_invalid;
+      phys.clear();
+    }
   };
 
 private:
@@ -66,6 +74,7 @@ private:
 
   absl::flat_hash_map<std::string, Port_ID> name2id;
   std::vector<Port_ID>                      graph_pos2instance_pid;
+  std::vector<Port_ID>                      deleted;
 
   void map_pin_int(Port_ID instance_pid, Port_ID graph_pos) {
     I(graph_pos != Port_invalid);
@@ -152,8 +161,17 @@ public:
   Port_ID add_pin(std::string_view io_name, Direction dir, Port_ID graph_pos = Port_invalid) {
     I(lgid);
     I(!has_pin(io_name));
-    Port_ID instance_pid = io_pins.size();
-    io_pins.emplace_back(io_name, dir, graph_pos);
+    Port_ID instance_pid;
+    if (deleted.empty()) {
+      instance_pid = io_pins.size();
+      io_pins.emplace_back(io_name, dir, graph_pos);
+    }else{
+      instance_pid = deleted.back();
+      deleted.pop_back();
+      io_pins[instance_pid].name         = io_name;
+      io_pins[instance_pid].dir          = dir;
+      io_pins[instance_pid].graph_io_pos = graph_pos;
+    }
     name2id[io_name] = instance_pid;
     I(io_pins[instance_pid].name == io_name);
     if (graph_pos != Port_invalid)
@@ -161,6 +179,7 @@ public:
 
     return instance_pid;
   }
+  void del_pin(Port_ID instance_pid);
 
   Port_ID map_graph_pos(std::string_view io_name, Direction dir, Port_ID graph_pos) {
     I(graph_pos);  // 0 possition is also not used (to catch bugs)
@@ -196,7 +215,7 @@ public:
   }
   bool has_instance_pin(Port_ID instance_pid) const {
     I(lgid);
-    return io_pins.size() > instance_pid;
+    return io_pins.size() > instance_pid && !io_pins[instance_pid].is_invalid();
   }
 
   Port_ID get_instance_pid(std::string_view io_name) const {
@@ -322,6 +341,7 @@ public:
 
   size_t size() const { return io_pins.size() - 1; };
 
+  // Returns a span/vector-like array of all the pins. If the pin was deleted, there may be a pin witout name and position.
   const absl::Span<const IO_pin> get_io_pins() const {
     I(io_pins.size() >= 1);
     return absl::MakeSpan(io_pins).subspan(1);

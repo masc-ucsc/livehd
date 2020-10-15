@@ -10,6 +10,7 @@
 #include "lrand.hpp"
 
 #include "eprp_utils.hpp"
+#include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
 using testing::HasSubstr;
@@ -24,8 +25,45 @@ protected:
 
   Lrand_range<Port_ID> rand_pos;
   Lrand_range<Bits_t>  rand_bits;
+  Lrand<size_t>        rand_size;
+  Lrand<bool>          rbool;
 
   Setup_lgraph() : rand_pos(1, Port_invalid-1), rand_bits(1, Bits_max) {
+  }
+
+  void randomly_delete_one_io(LGraph *lg) {
+    if (posused.empty())
+      return;
+
+    auto it= name2pos.begin();
+    std::advance(it, rand_size.max(posused.size()));
+
+    auto name = it->first;
+    auto pos  = it->second;
+
+    Node_pin pin;
+    if (posinput.count(pos)) {
+      EXPECT_TRUE(lg->is_graph_input(name));
+      pin = lg->get_graph_input(name);
+    }else{
+      EXPECT_TRUE(lg->is_graph_output(name));
+      if (rbool.any())
+        pin = lg->get_graph_output_driver_pin(name);
+      else
+        pin = lg->get_graph_output(name);
+    }
+
+    // FIXME: we should get this working both ways (hier and non_hier)
+    pin.get_non_hierarchical().del(); // del pin and connected edges (no dest nodes)
+
+    EXPECT_FALSE(lg->is_graph_input(name));
+    EXPECT_FALSE(lg->is_graph_output(name));
+
+    posused.erase(pos);
+    posinput.erase(pos); // may be there or not
+
+    name2pos.erase(name);
+    name2bits.erase(name);
   }
 
   void add_input(LGraph *lg, const std::string &name) {
@@ -58,6 +96,7 @@ protected:
     EXPECT_FALSE(name2bits.find(name) == name2bits.end());
     EXPECT_TRUE(lg->is_graph_input(name));
   }
+
 
   void add_output(LGraph *lg, const std::string &name) {
     EXPECT_FALSE(lg->is_graph_output(name));
@@ -151,7 +190,6 @@ TEST_F(Setup_lgraph, add_remove_inputs) {
 
   check_ios(lg1);
 
-  Lrand<bool> rbool;
   for(int i=2;i<40;++i) {
     if (rbool.any()) {
       add_input(lg1, std::string("inp_") + std::to_string(i));
@@ -161,5 +199,52 @@ TEST_F(Setup_lgraph, add_remove_inputs) {
   }
 
   check_ios(lg1);
+
+  for(int i=2;i<40;++i) {
+    randomly_delete_one_io(lg1);
+    check_ios(lg1);
+  }
+
+  int conta=0;
+  for(auto node:lg1->fast()) {
+    (void)node;
+    ++conta;
+  }
+  EXPECT_EQ(conta,0); // everything should be deleted
+
+  conta=0;
+  lg1->each_sorted_graph_io([&conta](Node_pin &pin, Port_ID pid) {
+    (void)pin;
+    (void)pid;
+    ++conta;
+  });
+  EXPECT_EQ(conta,0); // everything should be deleted
+
+  check_ios(lg1);
+
+  for(int i=2;i<1000;++i) {
+    if (rbool.any()) {
+      add_input(lg1, std::string("inp_") + std::to_string(i));
+    }else if (rbool.any()) {
+      add_output(lg1, std::string("out_") + std::to_string(i));
+    }else{
+      randomly_delete_one_io(lg1);
+    }
+
+    if (posused.size()>100) {
+      if (rbool.any()) {
+        randomly_delete_one_io(lg1);
+      }
+    }
+    check_ios(lg1);
+  }
+
+  conta=0;
+  lg1->each_sorted_graph_io([&conta](Node_pin &pin, Port_ID pid) {
+    (void)pin;
+    (void)pid;
+    ++conta;
+  });
+  EXPECT_EQ(conta,posused.size());
 }
 

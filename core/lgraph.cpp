@@ -49,23 +49,15 @@ LGraph *LGraph::clone_skeleton(std::string_view extended_name) {
   new_sub->reset_pins();  // NOTE: it may have been created before. Clear to keep same order/attributes
 
   for (const auto &old_io_pin : get_self_sub_node().get_io_pins()) {
-    new_sub->add_pin(old_io_pin.name, old_io_pin.dir, old_io_pin.graph_io_pos);
-  }
-
-  auto inp_node = Node(this, Hierarchy_tree::invalid_index(), Hardcoded_input_nid);
-  for (const auto &pin : inp_node.out_setup_pins()) {
-    auto pos = get_self_sub_node().get_graph_pos_from_instance_pid(pin.get_pid());
-    I(pin.is_graph_input());
-    auto dpin = new_lg->add_graph_input(pin.get_name(), pos, pin.get_bits());
-    I(dpin.get_pid() == pin.get_pid());  // WARNING: pins created in same order should match
-  }
-
-  auto out_node = Node(this, Hierarchy_tree::invalid_index(), Hardcoded_output_nid);
-  for (const auto &pin : out_node.out_setup_pins()) {
-    auto pos = get_self_sub_node().get_graph_pos_from_instance_pid(pin.get_pid());
-    I(pin.is_graph_output());
-    auto dpin = new_lg->add_graph_output(pin.get_name(), pos, pin.get_bits());
-    I(dpin.get_pid() == pin.get_pid());  // WARNING: pins created in same order should match
+    if (old_io_pin.is_invalid())
+      continue;
+    if (old_io_pin.is_input()) {
+      auto old_dpin = get_graph_input(old_io_pin.name);
+      new_lg->add_graph_input(old_io_pin.name, old_io_pin.graph_io_pos, old_dpin.get_bits());
+    }else{
+      auto old_dpin = get_graph_output(old_io_pin.name);
+      new_lg->add_graph_output(old_io_pin.name, old_io_pin.graph_io_pos, old_dpin.get_bits());
+    }
   }
 
   return new_lg;
@@ -224,11 +216,11 @@ Node_pin LGraph::add_graph_input(std::string_view str, Port_ID pos, uint32_t bit
   }
   I(node_internal[Hardcoded_input_nid].get_type() == Ntype_op::IO);
 
-  I(!find_idx_from_pid(Hardcoded_input_nid, inst_pid));  // Just added, so it should not be there
   Index_ID root_idx = 0;
-  auto     idx      = get_space_output_pin(Hardcoded_input_nid, inst_pid, root_idx);
+  auto idx = find_idx_from_pid(Hardcoded_input_nid, inst_pid);
+  if (idx==0)
+    idx = get_space_output_pin(Hardcoded_input_nid, inst_pid, root_idx);
 
-  // auto idx = setup_idx_from_pid(Hardcoded_input_nid, inst_pid);
   setup_driver(idx);  // Just driver, no sink
 
   Node_pin pin(this, this, Hierarchy_tree::root_index(), idx, inst_pid, false);
@@ -250,10 +242,11 @@ Node_pin LGraph::add_graph_output(std::string_view str, Port_ID pos, uint32_t bi
   }
   I(node_internal[Hardcoded_output_nid].get_type() == Ntype_op::IO);
 
-  I(!find_idx_from_pid(Hardcoded_output_nid, inst_pid));  // Just added, so it should not be there
   Index_ID root_idx = 0;
-  auto     idx      = get_space_output_pin(Hardcoded_output_nid, inst_pid, root_idx);
-  // auto idx = setup_idx_from_pid(Hardcoded_output_nid, inst_pid);
+  auto idx = find_idx_from_pid(Hardcoded_output_nid, inst_pid);
+  if (idx==0)
+    idx = get_space_output_pin(Hardcoded_output_nid, inst_pid, root_idx);
+
   setup_sink(idx);
   setup_driver(idx);  // outputs can also drive internal nodes. So both sink/driver
 
@@ -821,6 +814,20 @@ int LGraph::get_num_inp_edges(const Node_pin &pin) const {
   }
 }
 
+void LGraph::del_pin(const Node_pin &pin) {
+  Node_pin inv;
+
+  if (pin.is_graph_io()) {
+    ref_self_sub_node()->del_pin(pin.get_pid());
+  }
+
+  if (pin.is_driver()) {
+    del_edge_driver_int(pin, inv);
+  }else{
+    del_edge_sink_int(inv, pin);
+  }
+}
+
 void LGraph::del_node(const Node &node) {
   auto idx2 = node.get_nid();
   I(node_internal.size()>idx2);
@@ -1032,9 +1039,9 @@ bool LGraph::del_edge_driver_int(const Node_pin &dpin, const Node_pin &spin) {
   // start (nid) again once at the end. If idx again, then it is not anywhere.
 
   // In hierarchy, not allowed to remove nodes (mark as deleted attribute?)
-  I(dpin.get_class_lgraph() == dpin.get_top_lgraph());
-  I(spin.get_class_lgraph() == spin.get_top_lgraph());
-  I(spin.get_class_lgraph() == dpin.get_top_lgraph());
+  GI(!spin.is_invalid(), dpin.get_class_lgraph() == dpin.get_top_lgraph());
+  GI(!spin.is_invalid(), spin.get_class_lgraph() == spin.get_top_lgraph());
+  GI(!spin.is_invalid(), spin.get_class_lgraph() == dpin.get_top_lgraph());
 
   node_internal.ref(dpin.get_root_idx())->clear_full_hint();
 
@@ -1043,7 +1050,9 @@ bool LGraph::del_edge_driver_int(const Node_pin &dpin, const Node_pin &spin) {
 
   Index_ID last_idx = idx2;
 
-  auto spin_root_idx = spin.get_root_idx();
+  Index_ID spin_root_idx = 0;
+  if (!spin.is_invalid())
+    spin_root_idx = spin.get_root_idx();
 
   while (true) {
     I(node_int_ptr->get_dst_pid() == dpin.get_pid());
@@ -1053,11 +1062,12 @@ bool LGraph::del_edge_driver_int(const Node_pin &dpin, const Node_pin &spin) {
     const Edge_raw *redge;
     for (i = 0, redge = node_int_ptr->get_output_begin(); i < n; i++, redge += redge->next_node_inc()) {
       I(redge->get_self_idx() == idx2);
-      if (redge->get_idx() == spin_root_idx) {
-        I(redge->get_inp_pid() == spin.get_pid());
+      if (spin_root_idx==0 || redge->get_idx() == spin_root_idx) {
+        GI(spin_root_idx, redge->get_inp_pid() == spin.get_pid());
         node_int_ptr->del_output_int(redge);
         try_del_node_int(last_idx, idx2);
-        return true;
+        if (spin_root_idx)
+          return true;
       }
     }
     do {
@@ -1074,9 +1084,8 @@ bool LGraph::del_edge_driver_int(const Node_pin &dpin, const Node_pin &spin) {
       }
       last_idx = idx2;
       idx2 = tmp;
-    } while (node_internal[idx2].get_dst_pid() != dpin.get_pid());
-
-    node_int_ptr = node_internal.ref(idx2);
+      node_int_ptr = node_internal.ref(idx2);
+    } while (node_int_ptr->get_dst_pid() != dpin.get_pid());
   }
 
   return false;
@@ -1087,15 +1096,17 @@ bool LGraph::del_edge_sink_int(const Node_pin &dpin, const Node_pin &spin) {
   // likely to find it early starting from idx. Start from idx, and go back to
   // start (nid) again once at the end. If idx again, then it is not anywhere.
 
-  I(dpin.get_class_lgraph() == dpin.get_top_lgraph());
-  I(spin.get_class_lgraph() == spin.get_top_lgraph());
-  I(spin.get_class_lgraph() == dpin.get_top_lgraph());
+  GI(!dpin.is_invalid(), dpin.get_class_lgraph() == dpin.get_top_lgraph());
+  GI(!dpin.is_invalid(), spin.get_class_lgraph() == spin.get_top_lgraph());
+  GI(!dpin.is_invalid(), spin.get_class_lgraph() == dpin.get_top_lgraph());
 
   Index_ID idx2         = spin.get_idx();
   auto *   node_int_ptr = node_internal.ref(idx2);
   node_internal.ref(spin.get_root_idx())->clear_full_hint();
 
-  auto dpin_root_idx = dpin.get_root_idx();
+  Index_ID dpin_root_idx = 0;
+  if (!dpin.is_invalid())
+    dpin_root_idx = dpin.get_root_idx();
 
   Index_ID last_idx = idx2;
   while (true) {
@@ -1106,11 +1117,12 @@ bool LGraph::del_edge_sink_int(const Node_pin &dpin, const Node_pin &spin) {
     const Edge_raw *redge;
     for (i = 0, redge = node_int_ptr->get_input_begin(); i < n; i++, redge += redge->next_node_inc()) {
       I(redge->get_self_idx() == idx2);
-      if (redge->get_idx() == dpin_root_idx) {
-        I(redge->get_inp_pid() == dpin.get_pid());
+      if (dpin_root_idx == 0 || redge->get_idx() == dpin_root_idx) {
+        GI(dpin_root_idx, redge->get_inp_pid() == dpin.get_pid());
         node_int_ptr->del_input_int(redge);
         try_del_node_int(last_idx, idx2);
-        return true;
+        if (dpin_root_idx)
+          return true;
       }
     }
     do {
@@ -1125,9 +1137,9 @@ bool LGraph::del_edge_sink_int(const Node_pin &dpin, const Node_pin &spin) {
       }
       last_idx = idx2;
       idx2 = tmp;
-    } while (node_internal[idx2].get_dst_pid() != spin.get_pid());
+      node_int_ptr = node_internal.ref(idx2);
+    } while (node_int_ptr->get_dst_pid() != spin.get_pid());
 
-    node_int_ptr = node_internal.ref(idx2);
   }
 
   return false;
@@ -1172,7 +1184,7 @@ Node LGraph::create_node(const Node &old_node) {
     new_node = create_node(op);
   }
 
-  for (auto old_dpin : old_node.out_setup_pins()) {
+  for (const auto &old_dpin : old_node.out_setup_pins()) {
     auto new_dpin = new_node.setup_driver_pin_raw(old_dpin.get_pid());
     new_dpin.set_bits(old_dpin.get_bits());
   }
