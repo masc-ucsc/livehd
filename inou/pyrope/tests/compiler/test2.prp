@@ -1,4 +1,5 @@
 tup = (a = 1, b = 2, c = (foo = 3, bar = 4))
+%x.__bits = 3
 %x = tup.a + tup.c.foo
 // %x = 4
 // %y = 5
