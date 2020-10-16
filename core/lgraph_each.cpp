@@ -17,8 +17,10 @@ void LGraph::each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)
 
   Port_ID pid = 1;
   for(const auto &io_pin:get_self_sub_node().get_io_pins()) {
-    if (io_pin.is_invalid())
+    if (io_pin.is_invalid()) {
+      ++pid;
       continue;
+    }
 
     Index_ID nid = Hardcoded_output_nid;
     if (io_pin.is_input())
