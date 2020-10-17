@@ -495,7 +495,7 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
       fmt::print("\nNow, op str vect i-1 is {} and ref is {}\n",op_str_vect[i-1], ref);
       auto bw_num = Lconst(ref);//(int)log2(ref)+1; 
       fmt::print("{}\n", bw_num.get_bits());
-      ref = absl::StrCat("UInt<", std::to_string(bw_num.get_bits()), ">(", ref, ")");
+      ref = absl::StrCat("UInt<", bw_num.get_bits(), ">(", ref, ")");
     }
 
     absl::StrAppend(&val, lnast_to->ref_name(ref));
