@@ -578,17 +578,28 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
 
         bool must_be_signed = false;
         auto y_bits = node.get_bits();
+        auto y_mask = (Lconst(1)<<(y_bits))-1;
         for (const auto &e : node.inp_edges()) {
           if (e.driver.get_bits() != y_bits)
             must_be_signed = true;
+
+          if (op == Ntype_op::And) {
+            auto dnode = e.driver.get_node();
+            if (dnode.is_type_const()) {
+              auto v = dnode.get_type_const();
+              if (v == y_mask)
+                continue; // no need to add
+            }
+          }
           inps.push_back(get_wire(e.driver));
         }
 
         add_cell_fnc_sign yop = &RTLIL::Module::addAnd;
-        if (node.get_type_op() == Ntype_op::Or)
+        if (op == Ntype_op::Or)
           yop = &RTLIL::Module::addOr;
-        else if (node.get_type_op() == Ntype_op::Xor)
+        else if (op == Ntype_op::Xor)
           yop = &RTLIL::Module::addXor;
+
 
         create_tree(g, inps, module, yop, true, cell_output_map[node.get_driver_pin().get_compact()]);
       }
