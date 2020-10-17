@@ -821,6 +821,14 @@ void Cprop::do_trans(LGraph *lg) {
   if (!hier) {
     node2tuple.clear();
   }
+
+  //remove unified output % if fully resolved
+  auto uout = lg->get_graph_output("%");
+  fmt::print("uout:{}\n", uout.debug_name());
+  if (uout.inp_edges().size() == 0) {
+    fmt::print("hit!\n");
+    uout.get_non_hierarchical().del();
+  }
 }
 
 void Cprop::try_create_graph_output(LGraph *lg, std::shared_ptr<Lgtuple> tup) {
@@ -835,6 +843,7 @@ void Cprop::try_create_graph_output(LGraph *lg, std::shared_ptr<Lgtuple> tup) {
       it.second.connect_sink(flattened_gout);
     }
   }
+
 }
 
 
