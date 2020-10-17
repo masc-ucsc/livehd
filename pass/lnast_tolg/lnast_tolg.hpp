@@ -91,19 +91,15 @@ protected:
   static bool  tuple_get_has_key_pos     (const Node &tup_get);
   static bool  is_tup_get_target         (const Node &tup_add, std::string_view tup_get_target);
   static bool  is_tup_get_target         (const Node &tup_add, uint32_t         tup_get_target);
-  void         create_hier_inp_tup_add   (LGraph *lg, const Lnast_nid &c1_tg);
   Node_pin     create_inp_tg             (LGraph *lg, std::string_view input_field);
   void         create_out_ta             (LGraph *lg, std::string_view key_name, Node_pin &val_dpin);
 
   void         try_create_flattened_inp     (LGraph *lg);
-  void         dfs_try_create_flattened_inp (LGraph *lg, Node_pin &cur_node_spin, std::string hier_name, Node &chain_head);                       
-
-  void         try_create_flattened_out  (LGraph *lg);
-  /* void         dp_create_hier_outputs    (LGraph *lg, Node &cur_node, std::string hier_name, absl::flat_hash_set<Node::Compact> &memo); */
+  void         dfs_try_create_flattened_inp (LGraph *lg, Node_pin &cur_node_spin, std::string hier_name, Node &chain_head);
 
   // attribute related
   bool check_new_var_chain (const Lnast_nid &lnidx_opr);
   bool check_is_attrset_ta (Node &node, std::string &var_name, std::string &attr_name, Lconst &bits, Node &chain_head);
-  bool check_is_tup_assign (Node node);
+  bool check_is_tup_assign (Node node) { return !node.setup_sink_pin("value").is_connected();};
 
 };

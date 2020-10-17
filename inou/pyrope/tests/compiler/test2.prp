@@ -1,14 +1,7 @@
-tup = (a = 1, b = 2, c = (foo = 3, bar = 4))
-%x.__bits = 3
-%x = tup.a + tup.c.foo
-// %x = 4
-// %y = 5
-// %z = 6
-// %out = (foo = 1, bar = 2)
-// %x = 4
-%y = (a = 5, b = (alpha = 6, beta = 7))
-
-
-// %y.a = 8
-// %y.b = 6
+// tup = (a = 1, b = 2, c = (foo = 3, bar = 4))
+// %x.__bits = 3
+// %x = tup.a + tup.c.foo
+// %y = (a = 5, b = (alpha = 6, beta = 7))
+%z = $inp.a.b + $inp.a.c + $inp2
+// %z = $inp.a + $inp2
 
