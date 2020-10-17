@@ -268,8 +268,10 @@ void Pass_lnast_fromlg::handle_io(LGraph* lg, Lnast_nid& parent_lnast_node, Lnas
       // Put input bitwidth info in from_lg_bw_table
       lnast.set_bitwidth(pin_name, bits);
       if (put_bw_in_ln) {
-        add_bw_in_ln(lnast, parent_lnast_node,
-            lnast.add_string(absl::StrCat("$", pin_name)), bits);
+        if(has_prefix(pin_name)) 
+          add_bw_in_ln(lnast, parent_lnast_node, lnast.add_string(pin_name), bits);
+        else
+          add_bw_in_ln(lnast, parent_lnast_node, lnast.add_string(absl::StrCat("$", pin_name)), bits);
       }
     }
 
@@ -287,8 +289,10 @@ void Pass_lnast_fromlg::handle_io(LGraph* lg, Lnast_nid& parent_lnast_node, Lnas
       // Put output bitwidth info in from_lg_bw_table
       lnast.set_bitwidth(pin_name, bits);
       if (put_bw_in_ln) {
-        add_bw_in_ln(lnast, parent_lnast_node,
-            lnast.add_string(absl::StrCat("%", pin_name)), bits);//adds str to lnast->string_pool
+        if(has_prefix(pin_name)) 
+          add_bw_in_ln(lnast, parent_lnast_node, lnast.add_string(pin_name), bits);//adds str to lnast->string_pool
+        else
+          add_bw_in_ln(lnast, parent_lnast_node, lnast.add_string(absl::StrCat("%", pin_name)), bits);//adds str to lnast->string_pool
       }
     }
   }
@@ -1185,7 +1189,10 @@ void Pass_lnast_fromlg::attach_child(Lnast& lnast, Lnast_nid& op_node, const Nod
   if (dpin.get_node().is_graph_input()) {
     // If the input to the node is from a GraphIO node (it's a module input), add the $ in front.
     auto dpin_name = lnast.add_string(dpin_get_name(dpin));
-    lnast.add_child(op_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("$", dpin_name))));
+    if(has_prefix(dpin_name))
+      lnast.add_child(op_node, Lnast_node::create_ref(lnast.add_string(dpin_name)));
+    else
+      lnast.add_child(op_node, Lnast_node::create_ref(lnast.add_string(absl::StrCat("$", dpin_name))));
   } else if (dpin.get_node().is_graph_output()) {
     auto name = dpin_get_name(dpin);
     if (name[0] != '%') {
@@ -1211,10 +1218,16 @@ void Pass_lnast_fromlg::attach_cond_child(Lnast& lnast, Lnast_nid& op_node, cons
   if (dpin.get_node().is_graph_input()) {
     // If the input to the node is from a GraphIO node (it's a module input), add the $ in front.
     auto dpin_name = lnast.add_string(dpin_get_name(dpin));
-    lnast.add_child(op_node, Lnast_node::create_cond(lnast.add_string(absl::StrCat("$", dpin_name))));
+    if (has_prefix(dpin_name))
+      lnast.add_child(op_node, Lnast_node::create_cond(lnast.add_string(dpin_name)));
+    else
+      lnast.add_child(op_node, Lnast_node::create_cond(lnast.add_string(absl::StrCat("$", dpin_name))));
   } else if (dpin.get_node().is_graph_output()) {
     auto dpin_name = lnast.add_string(dpin_get_name(dpin));
-    lnast.add_child(op_node, Lnast_node::create_cond(lnast.add_string(absl::StrCat("%", dpin_name))));
+    if (has_prefix(dpin_name))
+      lnast.add_child(op_node, Lnast_node::create_cond(lnast.add_string(dpin_name)));
+    else
+      lnast.add_child(op_node, Lnast_node::create_cond(lnast.add_string(absl::StrCat("%", dpin_name))));
   } else if ((dpin.get_node().get_type_op() == Ntype_op::Aflop) || (dpin.get_node().get_type_op() == Ntype_op::Sflop)) {
     lnast.add_child(op_node, Lnast_node::create_cond(lnast.add_string(dpin.get_name())));
   } else if (dpin.get_node().get_type_op() == Ntype_op::Const) {
@@ -1271,4 +1284,12 @@ std::string_view Pass_lnast_fromlg::create_temp_var(Lnast& lnast, std::string_vi
   auto temp_var_name = lnast.add_string(absl::StrCat(str_prefix, "L", temp_var_count));
   temp_var_count++;
   return temp_var_name;
+}
+
+
+bool Pass_lnast_fromlg::has_prefix(std::string_view test_string) {
+  return (test_string.find("$")==0 || test_string.find("#") ==0 || test_string.find("%") == 0);
+}
+bool Pass_lnast_fromlg::has_prefix(std::string test_string) {
+  return (test_string.find("$")==0 || test_string.find("#") ==0 || test_string.find("%") == 0);
 }
