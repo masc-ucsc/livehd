@@ -46,6 +46,8 @@ protected:
   void add_bw_in_ln(Lnast& lnast, Lnast_nid& parent_node, const std::string_view& pin_name, const uint32_t& bits);
 
   std::string_view create_temp_var(Lnast& lnast, std::string_view str_prefix = "___");
+  bool has_prefix(std::string_view test_string);
+  bool has_prefix(std::string test_string);
 
   std::string_view dpin_get_name(const Node_pin dpin);
   void dpin_set_map_name(const Node_pin dpin, std::string_view name_part);
