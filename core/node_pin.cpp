@@ -172,6 +172,10 @@ std::string_view Node_pin::get_type_sub_pin_name() const {
 
 float Node_pin::get_delay() const { return Ann_node_pin_delay::ref(top_g)->get(get_compact_driver()); }
 
+bool Node_pin::has_delay() const {
+  return Ann_node_pin_delay::ref(top_g)->has(get_compact_driver());
+}
+
 void Node_pin::set_delay(float val) { Ann_node_pin_delay::ref(top_g)->set(get_compact_driver(), val); }
 
 void Node_pin::del_delay() {
@@ -186,15 +190,19 @@ void Node_pin::set_name(std::string_view wname) {
 void Node_pin::del() {
   if (sink && is_graph_output()) {
     auto dpin = get_driver_from_output();
-    I(dpin.is_driver()); // infinite loop otherwise
     dpin.del();
     return;
   }
 
   get_lg()->del_pin(*this);
-  if (is_driver()) {
-    del_name();
-    del_delay();
+
+  if (!sink) {
+    if (has_name()) { // works for sink/driver if needed
+      del_name();
+    }
+    if (has_delay()) {
+      del_delay();
+    }
   }
 
   invalidate();

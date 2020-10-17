@@ -347,6 +347,7 @@ public:
   void  set_delay(float val);
   void  del_delay();
   float get_delay() const;
+  bool  has_delay() const;
 
   Bits_t   get_bits() const;
   void     set_bits(Bits_t bits);

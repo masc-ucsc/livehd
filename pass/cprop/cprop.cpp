@@ -823,11 +823,13 @@ void Cprop::do_trans(LGraph *lg) {
   }
 
   //remove unified output % if fully resolved
-  auto uout = lg->get_graph_output("%");
-  fmt::print("uout:{}\n", uout.debug_name());
-  if (uout.inp_edges().size() == 0) {
-    fmt::print("hit!\n");
-    uout.get_non_hierarchical().del();
+  if (lg->is_graph_output("%")) {
+    auto uout = lg->get_graph_output("%");
+    fmt::print("uout:{}\n", uout.debug_name());
+    if (!uout.has_inputs()) {
+      fmt::print("hit!\n");
+      uout.get_non_hierarchical().del();
+    }
   }
 }
 

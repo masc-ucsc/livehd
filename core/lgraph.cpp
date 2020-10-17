@@ -138,18 +138,21 @@ void LGraph::sync() {
 }
 
 Node_pin LGraph::get_graph_input(std::string_view str) {
+  I(get_self_sub_node().is_input(str)); // The input does not exist, do not call get_input
   auto io_pid = get_self_sub_node().get_instance_pid(str);
 
   return Node(this, Hierarchy_tree::root_index(), Hardcoded_input_nid).setup_driver_pin_raw(io_pid);
 }
 
 Node_pin LGraph::get_graph_output(std::string_view str) {
+  I(get_self_sub_node().is_output(str)); // The output does not exist, do not call get_output
   auto io_pid = get_self_sub_node().get_instance_pid(str);
 
   return Node(this, Hierarchy_tree::root_index(), Hardcoded_output_nid).setup_sink_pin_raw(io_pid);
 }
 
 Node_pin LGraph::get_graph_output_driver_pin(std::string_view str) {
+  I(get_self_sub_node().is_output(str)); // The output does not exist, do not call get_output
   auto io_pid = get_self_sub_node().get_instance_pid(str);
 
   return Node(this, Hierarchy_tree::root_index(), Hardcoded_output_nid).setup_driver_pin_raw(io_pid);

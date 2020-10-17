@@ -299,7 +299,8 @@ public:
   }
 
   bool is_input(std::string_view io_name) const {
-    I(has_pin(io_name));
+    if (!has_pin(io_name))
+      return false;
 
     auto instance_pid = name2id.at(io_name);
     I(io_pins[instance_pid].name == io_name);
@@ -317,7 +318,8 @@ public:
   }
 
   bool is_output(std::string_view io_name) const {
-    I(has_pin(io_name));
+    if (!has_pin(io_name))
+      return false;
 
     auto instance_pid = name2id.at(io_name);
     I(io_pins[instance_pid].name == io_name);
