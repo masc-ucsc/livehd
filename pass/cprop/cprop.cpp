@@ -848,7 +848,6 @@ void Cprop::try_create_graph_output(LGraph *lg, std::shared_ptr<Lgtuple> tup) {
 
 }
 
-
 void Cprop::dump_node2tuples() const {
   for(const auto &it:node2tuple) {
     fmt::print("node nid:{}\n",it.first.get_nid());

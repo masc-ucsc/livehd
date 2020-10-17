@@ -33,10 +33,8 @@ void Lnast_tolg::top_stmts2lgraph(LGraph *lg, const Lnast_nid &lnidx_stmts) {
   fmt::print("======== Phase-2: Adding final Module IOs and Final Dpin Name ========\n");
   setup_lgraph_ios_and_final_var_name(lg);
 
-  lg->ref_self_sub_node()->populate_graph_pos();
+  // lg->ref_self_sub_node()->populate_graph_pos();
 }
-
-
 
 void Lnast_tolg::process_ast_stmts(LGraph *lg, const Lnast_nid &lnidx_stmts) {
   for (const auto &lnidx : lnast->children(lnidx_stmts)) {
