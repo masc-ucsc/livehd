@@ -167,14 +167,14 @@ void Lnast_tolg::process_ast_phi_op(LGraph *lg, const Lnast_nid &lnidx_phi) {
 
     // (2) remove the previous D-pin edge from the #reg
     auto reg_node = reg_qpin.get_node();
-    I(reg_node.setup_sink_pin("D").inp_edges().size() <= 1);
-    if (reg_node.setup_sink_pin("D").inp_edges().size() == 1) {
-      reg_node.setup_sink_pin("D").inp_edges().begin()->del_edge();
+    I(reg_node.setup_sink_pin("din").inp_edges().size() <= 1);
+    if (reg_node.setup_sink_pin("din").inp_edges().size() == 1) {
+      reg_node.setup_sink_pin("din").inp_edges().begin()->del_edge();
     }
 
     // (3) actively connect the new created #reg_N to the #reg D-pin
     auto dpin = phi_node.setup_driver_pin();
-    auto spin = reg_node.setup_sink_pin("D");
+    auto spin = reg_node.setup_sink_pin("din");
     lg->add_edge(dpin, spin);
   }
 
@@ -266,7 +266,7 @@ void Lnast_tolg::process_ast_logical_op(LGraph *lg, const Lnast_nid &lnidx_opr) 
 void Lnast_tolg::nary_node_rhs_connections(LGraph *lg, Node &opr_node, const std::vector<Node_pin> &opds, bool is_subt) {
   switch(opr_node.get_type_op()) {
     case Ntype_op::Sum:
-    case Ntype_op::Mult: { // FIXME: add could be + a b c (same mult)
+    case Ntype_op::Mult: { 
       bool is_first = true;
       for (const auto &opd : opds) {
         if (is_subt & !is_first) { //note: Hunter -- for subtraction
@@ -280,11 +280,16 @@ void Lnast_tolg::nary_node_rhs_connections(LGraph *lg, Node &opr_node, const std
     break;
     case Ntype_op::LT:
     case Ntype_op::GT: {
-      I(opds.size()==2); // FIXME: comparator can have many inputs (a<b<c<d)
+      I(opds.size()==2); 
       lg->add_edge(opds[0], opr_node.setup_sink_pin("A"));
       lg->add_edge(opds[1], opr_node.setup_sink_pin("B"));  
     }
     break;
+    case Ntype_op::EQ: {
+      for (const auto &opd : opds) 
+        lg->add_edge(opd, opr_node.setup_sink_pin("A"));
+    }
+    break;                       
     case Ntype_op::Div:
     case Ntype_op::SHL:
     case Ntype_op::SRA: {
@@ -887,7 +892,7 @@ Node_pin Lnast_tolg::setup_node_assign_and_lhs(LGraph *lg, const Lnast_nid &lnid
     //when #reg_0 at lhs, the register has not been created before
     if (lhs_name.substr(lhs_name.size()-2) == "_0") {
       auto reg_qpin = setup_ref_node_dpin(lg, lhs);
-      auto reg_data_pin = reg_qpin.get_node().setup_sink_pin("D");
+      auto reg_data_pin = reg_qpin.get_node().setup_sink_pin("din");
 
       auto assign_node = lg->create_node(Ntype_op::Or);
       //create an extra-Or_Op for #reg_0, return #reg_0 sink pin for rhs connection
