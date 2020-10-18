@@ -69,7 +69,7 @@ void Lconst::process_ending(std::string_view txt, size_t pos) {
 Lconst::Container Lconst::serialize() const {
 
   Container v;
-  unsigned char c = (explicit_str?0x10:0) | (explicit_sign?0x8:0) | (explicit_bits?0x4:0) | (sign?0x2:0);
+  unsigned char c = (explicit_str?0x10:0) | (explicit_sign?0x08:0) | (explicit_bits?0x04:0) | (sign?0x02:0) | (is_negative()?0x01:0);
   v.emplace_back(c);
   v.emplace_back(bits>>16);
   v.emplace_back(bits>>8 );
@@ -83,7 +83,7 @@ Lconst::Container Lconst::serialize() const {
 uint64_t Lconst::hash() const {
 
   std::vector<uint64_t> v;
-  uint64_t c = (explicit_str?0x10:0) | (explicit_sign?0x8:0) | (explicit_bits?0x4:0) | (sign?0x2:0);
+  uint64_t c = (explicit_str?0x10:0) | (explicit_sign?0x08:0) | (explicit_bits?0x04:0) | (sign?0x02:0) | (is_negative()?0x01:0);
   c = (c<<32) | bits;
   v.emplace_back(c);
 
@@ -110,6 +110,10 @@ Lconst::Lconst(absl::Span<unsigned char> v) {
 
   auto s = v.subspan(4);
   boost::multiprecision::import_bits(num,s.begin(),s.end());
+
+  if (c0&0x01) { // negative
+    num = -num;
+  }
 }
 
 Lconst::Lconst(const Container &v) {
@@ -129,6 +133,9 @@ Lconst::Lconst(const Container &v) {
   bits = (c1<<16) | (c2<<8) | c3;
 
   boost::multiprecision::import_bits(num,v.begin()+4,v.end());
+  if (c0&0x01) { // negative
+    num = -num;
+  }
 }
 
 Lconst::Lconst() {
@@ -622,19 +629,18 @@ std::string Lconst::to_pyrope() const {
   const auto v = get_num();
   std::stringstream ss;
 
-  bool print_hexa = explicit_bits || v > 6;
+  bool print_hexa = explicit_bits || v > 63;
   if (print_hexa) {
     ss << std::hex;
   }
 
-  if (v<0)
-    ss << -v;
-  else
-    ss << v;
-
   std::string str;
-  if (is_negative())
+  if (v<0) {
     str.append(1,'-');
+    ss << -v;
+  }else{
+    ss << v;
+  }
 
   if (print_hexa)
     absl::StrAppend(&str, "0x");
@@ -692,13 +698,19 @@ std::string Lconst::to_yosys() const {
     return to_string();
   }
 
-  const auto v = get_num();
-  std::string str;
-  for (int i = bits-1; i >= 0; --i) {
-    str.append(1, bit_test(v, i) ? '1' : '0');
+  auto v = get_num();
+  std::string txt;
+  for(int i=0;i<get_bits();++i) {
+    if (v&1) {
+      txt.append(1, '1');
+    }else{
+      txt.append(1, '0');
+    }
+    v = v>>1;
   }
+  const std::string rev(txt.rbegin(),txt.rend());
 
-  return str;
+  return rev;
 }
 
 std::string Lconst::to_verilog() const {
@@ -715,22 +727,35 @@ std::string Lconst::to_verilog() const {
     return absl::StrCat("'b", str);
   }
 
-  std::stringstream ss;
-  ss << std::hex;
-  const auto v = get_num();
-  if (v<0)
-    ss << -v;
-  else
-    ss << v;
-
   std::string str;
-  if (is_negative())
-    str.append(1,'-');
-
   if (explicit_bits)
     absl::StrAppend(&str, (int)bits);
 
-  absl::StrAppend(&str, "'h", ss.str());
+  // Hexa
+  auto v = get_num();
+  if (v<0) { // Negative
+    std::string txt;
+    for(int i=0;i<get_bits();++i) {
+      if (v&1) {
+        txt.append(1, '1');
+      }else{
+        txt.append(1, '0');
+      }
+      v = v>>1;
+    }
+    const std::string rev(txt.rbegin(),txt.rend());
+
+    absl::StrAppend(&str, "'sb", rev);
+  }else{
+    std::stringstream ss;
+    ss << std::hex;
+    ss << v;
+
+    if (is_negative())
+      absl::StrAppend(&str, "'sh", ss.str());
+    else
+      absl::StrAppend(&str, "'h", ss.str());
+  }
 
   return str;
 }
