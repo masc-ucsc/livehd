@@ -2,20 +2,19 @@
 rm -rf ./lgdb
 
 pts_to_be_merged='io_gen io_gen2 io_gen3 test2'
-pts_to_do='lhs_wire3 tuple funcall_unnamed2'
-pts='hier_tuple hier_tuple_io logic
-     reg_bits_set tuple_copy
-     hier_tuple2 hier_tuple3
-     lhs_wire lhs_wire2 scalar_tuple attr_set
-     firrtl_tail firrtl_tail2
-     adder_stage tuple_if reg__q_pin nested_if
-     capricious_bits2 capricious_bits4 capricious_bits
-     out_ssa if2 if ssa_rhs bits_rhs counter counter_nested_if
-     '
+pts_tuple_dbg='capricious_bits2 reg__q_pin tuple_if bits_rhs firrtl_tail2 
+               capricious_bits4 hier_tuple2 hier_tuple hier_tuple_io  
+               lhs_wire3 tuple funcall_unnamed2 
+               firrtl_tail3 firrtl_gcd counter_tup counter2'
+pts_signed_dbg='nested_if adder_stage'
+pts_1st_priority='if if2'
 
-  # FIXME: firrtl_tail3 firrtl_gcd counter_tup counter2
 
-pts='hier_tuple'
+pts='logic reg_bits_set tuple_copy hier_tuple3 lhs_wire lhs_wire2 scalar_tuple
+     firrtl_tail attr_set capricious_bits out_ssa ssa_rhs counter counter_nested_if'
+pts=''
+
+
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -42,11 +41,15 @@ Pyrope_compile () {
   do
     if [ ! -f inou/pyrope/tests/compiler/${pt}.prp ]; then
         echo "ERROR: could not find ${pt}.prp in /inou/pyrope/tests/compiler"
-        exit 2
+        exit 1
     fi
 
-
     ${LGSHELL} "inou.pyrope files:inou/pyrope/tests/compiler/${pt}.prp |> pass.compiler gviz:true"
+    ret_val=$?
+    if [ $ret_val -ne 0 ]; then
+      echo "ERROR: could not compile with pattern: ${pt}.prp!"
+      exit $ret_val
+    fi
   done #end of for
 
 
@@ -120,7 +123,7 @@ Pyrope_compile () {
           ${LGCHECK} --implementation=${pt}.v --reference=./inou/pyrope/tests/compiler/verilog_gld/${pt}.gld.v
 
           if [ $? -eq 0 ]; then
-              echo "Successfully pass logic equivilence check!"
+            echo "Successfully pass LEC!"
           else
               echo "FAIL: "${pt}".v !== "${pt}".gld.v"
               exit 1
