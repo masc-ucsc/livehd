@@ -577,20 +577,87 @@ void Lnast_tolg::process_ast_tuple_get_op(LGraph *lg, const Lnast_nid &lnidx_tg)
   }
 }
 
+bool Lnast_tolg::is_hier_inp_bits_set(const Lnast_nid &lnidx_ta) {
+  // bugs on lnast->get_sibling_prev(lnast_child);
+  /* auto first_child = lnast->get_first_child(lnidx_ta); */
+  /* auto last_child = lnast->get_last_child(lnidx_ta); */
+  /* auto second_last_child = lnast->get_sibling_prev(last_child); */
+  /* fmt::print("DBG:{} {}\n", lnast->get_vname(second_last_child), lnast->get_vname(first_child)); */
+  /* return lnast->get_vname(second_last_child) == "__bits" && is_input(lnast->get_vname(first_child)); */
+
+  for (const auto &child : lnast->children(lnidx_ta)) {
+    if (child == lnast->get_first_child(lnidx_ta)) {
+      if (is_input(lnast->get_vname(child)))
+        continue;
+      else 
+        return false;
+    } else {
+      if (lnast->get_vname(child) == "__bits")
+        return true;
+    }
+  }
+  return false;
+}
+
+
+// since it's BW setting on the hier-inp, you know it's flattened scalar -> can create lg hier-input for it
+void Lnast_tolg::process_hier_inp_bits_set(LGraph *lg, const Lnast_nid &lnidx_ta) {
+  std::string hier_inp_name;
+  for (const auto &child : lnast->children(lnidx_ta)) {
+    if (child == lnast->get_first_child(lnidx_ta)) {
+      const auto &c0_ta = child;
+      I(is_input(lnast->get_vname(c0_ta)));
+      hier_inp_name = lnast->get_vname(c0_ta).substr(1);
+    } else if (lnast->get_vname(child) != "__bits") {
+      I(child != lnast->get_last_child(lnidx_ta));
+      hier_inp_name = absl::StrCat(hier_inp_name, ".", lnast->get_vname(child));
+    } else if (lnast->get_vname(child) == "__bits") { //at the __bits child
+      //(1) create flattened input 
+      Node_pin flattened_inp;
+      if (!lg->is_graph_input(hier_inp_name))
+        flattened_inp = lg->add_graph_input(hier_inp_name, Port_invalid, 0);
+      else
+        flattened_inp = name2dpin[hier_inp_name];
+
+      //(2) create attr_set node for input
+      auto aset_node = lg->create_node(Ntype_op::AttrSet);
+      auto vn_spin   = aset_node.setup_sink_pin("name");     // variable name
+      auto af_spin   = aset_node.setup_sink_pin("field");    // attribute field
+      auto av_spin   = aset_node.setup_sink_pin("value");    // attribute value
+  
+      flattened_inp.connect_sink(vn_spin);
+      auto af_dpin = setup_field_dpin(lg, lnast->get_vname(child));   
+      af_dpin.connect_sink(af_spin);
+
+      auto const_lnidx = lnast->get_sibling_next(child);
+      auto av_dpin = setup_ref_node_dpin(lg, const_lnidx);
+      av_dpin.connect(av_spin);
+      name2dpin[hier_inp_name] = aset_node.setup_driver_pin("Y");
+      break; // no need to iterate to last child
+    }
+  }
+}
+
 
 void Lnast_tolg::process_ast_tuple_add_op(LGraph *lg, const Lnast_nid &lnidx_ta) {
+  if (is_hier_inp_bits_set(lnidx_ta)) {
+    process_hier_inp_bits_set(lg, lnidx_ta);
+    return;
+  }
+
   int i = 0;
   absl::flat_hash_map<int, Node> ta_map;
   absl::flat_hash_map<int, std::string_view> ta_name;
-  for (const auto & child : lnast->children(lnidx_ta)) {
+
+  for (const auto &child : lnast->children(lnidx_ta)) {
     if (i == 0) {
       const auto &c0_ta = child;
       auto tup_name = lnast->get_sname(c0_ta);
 
-      if (is_input(tup_name)) {
-        tup_name = lnast->get_vname(c0_ta);
-        create_inp_tg(lg, tup_name); 
-      }
+      /* if (is_input(tup_name)) { */
+      /*   tup_name = lnast->get_vname(c0_ta); */
+      /*   create_inp_tg(lg, tup_name); */ 
+      /* } */
 
       auto tup_add  = lg->create_node(Ntype_op::TupAdd);
       auto tn_spin  = tup_add.setup_sink_pin("tuple_name");
@@ -599,9 +666,6 @@ void Lnast_tolg::process_ast_tuple_add_op(LGraph *lg, const Lnast_nid &lnidx_ta)
 
       // exclude invalid scalar->tuple cases
       auto field_name = lnast->get_sname(lnast->get_sibling_next(c0_ta)); // peep for field_name ...
-      /* bool is_scalar =  tn_ntype != TupAdd_Op && tn_ntype != TupRef_Op; */
-      /* if (is_scalar && field_name != "0") */
-	    	/* Pass::error("try to modify a non-exist tuple key field:{} in tuple:{}\n", field_name, tup_name); */
 
       name2dpin[tup_name] = tup_add.setup_driver_pin();
       tup_add.setup_driver_pin().set_name(tup_name); // tuple ref semantically move to here
@@ -1449,7 +1513,7 @@ void Lnast_tolg::try_create_flattened_inp(LGraph *lg) {
   for (auto &e : uinp.out_edges()) {
     auto tg = e.sink.get_node();
     I(tg.get_type_op() == Ntype_op::TupGet);
-    auto hier_name = (std::string)tg.get_driver_pin().get_name();
+    auto hier_name = (std::string)tg.get_driver_pin().get_name().substr(1); //get rid of "$" in "$foo"
 
     fmt::print("start handle chain of TG:{}\n", tg.debug_name());
     for (auto &tg_out : tg.out_edges()) {
@@ -1497,6 +1561,8 @@ void Lnast_tolg::dfs_try_create_flattened_inp(LGraph *lg, Node_pin &cur_node_spi
     Node_pin ginp;
     if (!lg->is_graph_input(hier_name))
       ginp = lg->add_graph_input(hier_name, Port_invalid, 0);
+    else if (name2dpin.find(hier_name) != name2dpin.end()) 
+      ginp = name2dpin[hier_name];
     else
       ginp = lg->get_graph_input(hier_name);
 

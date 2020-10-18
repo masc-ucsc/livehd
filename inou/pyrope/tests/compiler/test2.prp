@@ -2,8 +2,13 @@
 // %x.__bits = 3
 // %x = tup.a + tup.c.foo
 // %y = (a = 5, b = (alpha = 6, beta = 7))
-x1 = $inp.a.b & 0xFF
-x2 = $inp.a.c & 0xF
-%z = x1 + x2 + ($inp2 & 0x3F)
+// x1 = $inp.a.b & 0xFF
+// x2 = $inp.a.c & 0xF
+// %z = x1 + x2 + ($inp2 & 0x3F)
+
+$inp2.__bits = 2
+$inp.a.b.__bits = 3
+$inp.a.c.__bits = 4
+%z = $inp.a.b + $inp.a.c + $inp2
 // %z = $inp.a + $inp2
 

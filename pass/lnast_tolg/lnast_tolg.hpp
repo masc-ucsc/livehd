@@ -51,6 +51,7 @@ protected:
   void process_ast_attr_set_op      (LGraph *lg, const Lnast_nid &lnidx_aset);
   void process_ast_attr_get_op      (LGraph *lg, const Lnast_nid &lnidx_aget);
   void process_ast_tuple_phi_add_op (LGraph *lg, const Lnast_nid &lnidx_tpa);
+  void process_hier_inp_bits_set    (LGraph *lg, const Lnast_nid &lnidx_ta);
   void setup_lgraph_ios_and_final_var_name(LGraph *lg);
 
 
@@ -101,5 +102,8 @@ protected:
   bool check_new_var_chain (const Lnast_nid &lnidx_opr);
   bool check_is_attrset_ta (Node &node, std::string &var_name, std::string &attr_name, Lconst &bits, Node &chain_head);
   bool check_is_tup_assign (Node node) { return !node.setup_sink_pin("value").is_connected();};
+  bool is_hier_inp_bits_set(const Lnast_nid &lnidx_ta);
+
 
 };
+
