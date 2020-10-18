@@ -12,7 +12,6 @@ pts_1st_priority='if if2'
 
 pts='logic reg_bits_set tuple_copy hier_tuple3 lhs_wire lhs_wire2 scalar_tuple
      firrtl_tail attr_set capricious_bits out_ssa ssa_rhs counter counter_nested_if'
-pts=''
 
 
 
