@@ -1806,9 +1806,25 @@ static void process_cells(RTLIL::Module *module, LGraph *g) {
                || (std::strncmp(cell->type.c_str(), "$sshr"  , 5) == 0 && !cell->getParam(ID::A_SIGNED).as_bool())) {
       // y = SRA(Tposs(A),B) - unsigned shift right
 
-      exit_node.set_type(Ntype_op::SRA, get_output_size(cell));
+      auto y_bits = cell->getParam(ID::Y_WIDTH).as_int();
+      exit_node.set_type(Ntype_op::SRA, y_bits);
 
-      exit_node.setup_sink_pin("a").connect_driver(get_unsigned_dpin(g, cell, ID::A));
+      Node_pin dpin_a = get_dpin(g, cell, ID::A);
+      if (cell->getParam(ID::A_SIGNED).as_bool()) {
+        auto a_bits = cell->getParam(ID::A_WIDTH).as_int();
+        if (a_bits < y_bits) { // must sign extend to match sizes
+          auto and_node = g->create_node(Ntype_op::And, y_bits);
+          and_node.connect_sink(get_dpin(g, cell, ID::A));
+          and_node.connect_sink(g->create_node_const((Lconst(1)<<Lconst(y_bits))-1));
+
+          auto tposs_node = g->create_node(Ntype_op::Tposs, y_bits+1);
+          tposs_node.connect_sink(and_node);
+
+          dpin_a = tposs_node.setup_driver_pin();
+        }
+      }
+
+      exit_node.setup_sink_pin("a").connect_driver(dpin_a);
       exit_node.setup_sink_pin("b").connect_driver(get_dpin(g, cell, ID::B));
 
     //--------------------------------------------------------------
