@@ -287,7 +287,7 @@ std::vector<std::pair<std::string_view, Node_pin>> Lgtuple::get_all_attributes()
 
   std::vector<std::pair<std::string_view, Node_pin>> v;
 
-  for(auto it=key2pos.begin();it!=key2pos.end();++it) {
+  for(auto it=key2pos.begin(); it!=key2pos.end(); ++it) {
     if (it->first.substr(0,2) != "__")
       continue;
 
@@ -328,7 +328,7 @@ void Lgtuple::analyze_graph_output(absl::flat_hash_map<std::string, Node_pin> &g
       new_hier_name = absl::StrCat(base_name, ".", hier_parent_key_name.substr(0, pos));
     }
 
-    if (is_scalar()) {
+    if (is_valid_val_dpin()) {
       fmt::print("hier-name:{}, val_dpin:{}\n", new_hier_name, val_dpin.debug_name());
       gout2driver.insert_or_assign(new_hier_name, val_dpin);
       return;

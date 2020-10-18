@@ -521,6 +521,7 @@ std::tuple<std::string_view, std::string_view, int> Cprop::get_tuple_name_key(No
 
 bool Cprop::process_tuple_get(Node &node) {
   I(node.get_type_op() == Ntype_op::TupGet);
+  fmt::print("\nDBG:TG->{}\n", node.debug_name());
 
   auto parent_dpin = node.get_sink_pin("tuple_name").get_driver_pin();
   auto parent_node = parent_dpin.get_node();
@@ -531,6 +532,14 @@ bool Cprop::process_tuple_get(Node &node) {
   // FIXME:sh-> should be handled by tup.is_scalar()
   if (parent_node.get_type_op() != Ntype_op::TupAdd && key_pos == 0 && !parent_dpin.is_invalid()) {
     collapse_forward_for_pin(node, parent_dpin);
+    return true;
+  }
+
+  // this attr comes from tail of TG chain where the TG tail has been transformed into an AttrSet node.
+  if (parent_node.get_type_op() == Ntype_op::AttrSet) {
+    //FIXME: bug?
+    auto attr_val_dpin = parent_node.get_sink_pin("value").get_driver_pin();
+    collapse_forward_for_pin(node, attr_val_dpin);
     return true;
   }
 
@@ -568,6 +577,10 @@ bool Cprop::process_tuple_get(Node &node) {
     return false; // Could not resolve (maybe compile error, maybe hierarchical needed)
   }
 
+  fmt::print("top ---------\n");
+  ctup->dump();
+  fmt::print("sub ---------\n");
+  sub_tup->dump();
 
   // still unclear if the TupGet chain is resolved (final TupGet will decide)
   if (!sub_tup->is_valid_val_dpin()) { 
@@ -575,33 +588,28 @@ bool Cprop::process_tuple_get(Node &node) {
     return true;   
   }
 
-  /* fmt::print("top start ---------\n"); */
-  /* ctup->dump(); */
-  /* fmt::print("sub start ---------\n"); */
-  /* sub_tup->dump(); */
-  /* fmt::print("sub end ---------\n"); */
+
+  /*
+     a.b.__bits = 1
+     a.b = 3
+
+     a.is_scalar_wiht_attributes("b");  TRUE
+     a.get("b")  -> sub, dpin valid and no scalar
+
+     h.k = 6
+
+     h.get("k") -> sub, dpin and scalar
+
+     c.e.f = 4
+     c.e.g = 5
+
+     c.get("e") -> sub. no dpin and no scalar
+  */
 
   if (sub_tup->is_valid_val_dpin()) {
     auto val_dpin = sub_tup->get_value_dpin();
     I(!val_dpin.is_invalid());
 
-    /*
-       a.b.__bits = 1
-       a.b = 3
-
-       a.is_scalar_wiht_attributes("b");  TRUE
-       a.get("b")  -> sub, dpin valid and no scalar
-
-       h.k = 6
-
-       h.get("k") -> sub, dpin and scalar
-
-       c.e.f = 4
-       c.e.g = 5
-
-       c.get("e") -> sub. no dpin and no scalar
-
-*/
 
     if (sub_tup->is_scalar()) { // Does not have attributes
       collapse_forward_for_pin(node, val_dpin);
@@ -646,7 +654,8 @@ std::shared_ptr<Lgtuple> Cprop::process_tuple_add_chain(Node_pin up_dpin) {
     return nullptr;
   }
 
-  I(up_node.get_type_op() == Ntype_op::TupAdd || up_node.get_type_op() == Ntype_op::TupGet || up_node.get_type_op() == Ntype_op::TupRef);
+  I(up_node.get_type_op() == Ntype_op::TupAdd || up_node.get_type_op() == Ntype_op::TupGet || 
+    up_node.get_type_op() == Ntype_op::TupRef /*|| up_node.get_type_op() == Ntype_op::AttrSet*/);
 
   return std::make_shared<Lgtuple>(*(ptup_it->second));
 }
@@ -834,6 +843,7 @@ void Cprop::do_trans(LGraph *lg) {
 }
 
 void Cprop::try_create_graph_output(LGraph *lg, std::shared_ptr<Lgtuple> tup) {
+  fmt::print("\ntry create graph output\n");
   absl::flat_hash_map<std::string, Node_pin> gout2driver;
   tup->dump();
   fmt::print("------------------------\n");
