@@ -360,7 +360,7 @@ void Lgyosys_dump::create_wires(LGraph *g, RTLIL::Module *module) {
       }
 
       input_map[node.get_driver_pin().get_compact()] = new_wire;
-      if (!lc.is_negative()) {
+      if (!lc.is_negative() && !lc.is_explicit_sign()) {
         unsigned_wire.insert(new_wire);
       }
     } else if (op == Ntype_op::Sub) {
