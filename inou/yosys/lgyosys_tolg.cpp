@@ -204,7 +204,12 @@ static Node_pin get_edge_pin(LGraph *g, const RTLIL::Wire *wire, bool is_signed)
     if (is_signed) // || !dpin.is_graph_input())
       return dpin;
 
-    if (dpin.get_node().is_type(Ntype_op::Tposs))
+    auto node = dpin.get_node();
+
+    if (node.is_type(Ntype_op::Tposs))
+      return dpin;
+
+    if (node.is_type_const() && node.get_type_const().is_unsigned())
       return dpin;
 
     auto tposs_node = g->create_node(Ntype_op::Tposs, wire->width+1);
@@ -1809,7 +1814,7 @@ static void process_cells(RTLIL::Module *module, LGraph *g) {
       auto y_bits = cell->getParam(ID::Y_WIDTH).as_int();
       exit_node.set_type(Ntype_op::SRA, y_bits);
 
-      Node_pin dpin_a = get_dpin(g, cell, ID::A);
+      Node_pin dpin_a = get_unsigned_dpin(g, cell, ID::A);
       if (cell->getParam(ID::A_SIGNED).as_bool()) {
         auto a_bits = cell->getParam(ID::A_WIDTH).as_int();
         if (a_bits < y_bits) { // must sign extend to match sizes
