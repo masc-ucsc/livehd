@@ -191,17 +191,17 @@ static Node_pin get_edge_pin(LGraph *g, const RTLIL::Wire *wire, bool is_signed)
         return dpin;
       }
 
-      fmt::print("w_name:{} w_w:{} | pid:{} bits:{}\n",
+      fmt::print("w_name:{} w_w:{} | pid:{} bits:{}\n", // due to extra tposs
                  wire->name.c_str(),
                  wire->width,
                  dpin.get_pid(),
                  dpin.get_bits());
-      I(false);  // WHY?
+      // I(false);  // WHY?
       wire2pin[wire].set_bits(wire->width);
       I(wire->width == wire2pin[wire].get_bits());
     }
 
-    if (is_signed || !dpin.is_graph_input())
+    if (is_signed) // || !dpin.is_graph_input())
       return dpin;
 
     if (dpin.get_node().is_type(Ntype_op::Tposs))
