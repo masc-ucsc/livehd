@@ -521,7 +521,6 @@ std::tuple<std::string_view, std::string_view, int> Cprop::get_tuple_name_key(No
 
 bool Cprop::process_tuple_get(Node &node) {
   I(node.get_type_op() == Ntype_op::TupGet);
-  fmt::print("\nDBG:TG->{}\n", node.debug_name());
 
   auto parent_dpin = node.get_sink_pin("tuple_name").get_driver_pin();
   auto parent_node = parent_dpin.get_node();
@@ -538,9 +537,13 @@ bool Cprop::process_tuple_get(Node &node) {
   // this attr comes from tail of TG chain where the TG tail has been transformed into an AttrSet node.
   if (parent_node.get_type_op() == Ntype_op::AttrSet) {
     //FIXME: bug?
-    auto attr_val_dpin = parent_node.get_sink_pin("value").get_driver_pin();
-    collapse_forward_for_pin(node, attr_val_dpin);
-    return true;
+    auto attr_val_spin = parent_node.get_sink_pin("value");
+    fmt::print("DBG: attr val sinkpin:{}\n", attr_val_spin.debug_name());
+    for (auto e:attr_val_spin.inp_edges()) {
+      fmt::print("DBG: e driver:{}\n", e.driver.debug_name());
+      /* collapse_forward_for_pin(node, e.driver); */
+      /* return true; */
+    }
   }
 
   auto ptup_it = node2tuple.find(parent_node.get_compact());
@@ -588,24 +591,6 @@ bool Cprop::process_tuple_get(Node &node) {
     return true;   
   }
 
-
-  /*
-     a.b.__bits = 1
-     a.b = 3
-
-     a.is_scalar_wiht_attributes("b");  TRUE
-     a.get("b")  -> sub, dpin valid and no scalar
-
-     h.k = 6
-
-     h.get("k") -> sub, dpin and scalar
-
-     c.e.f = 4
-     c.e.g = 5
-
-     c.get("e") -> sub. no dpin and no scalar
-  */
-
   if (sub_tup->is_valid_val_dpin()) {
     auto val_dpin = sub_tup->get_value_dpin();
     I(!val_dpin.is_invalid());
@@ -626,10 +611,12 @@ bool Cprop::process_tuple_get(Node &node) {
           for(auto e:node.inp_edges()) {
             e.del_edge();
           }
+
           node.set_type(Ntype_op::AttrSet); // Replace TupGet for AttrSet
           node.setup_sink_pin("var_name").connect_driver(val_dpin);
           node.setup_sink_pin("field").connect_driver(attr_key_dpin);
           node.setup_sink_pin("value").connect_driver(it.second);
+          fmt::print("hit! value driver:{}\n", it.second.debug_name());
         } else {
           I(false); // FIXME: TODO handle multiple attr set (create node)
         }
@@ -754,6 +741,7 @@ void Cprop::do_trans(LGraph *lg) {
   bool tup_get_left = false;
 
   for (auto node : lg->forward()) {
+    fmt::print("\nDBG:current node->{}\n", node.debug_name());
     auto op = node.get_type_op();
     // fmt::print("NEXT: node:{}\n",node.debug_name());
 
