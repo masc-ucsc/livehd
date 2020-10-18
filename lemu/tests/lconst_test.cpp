@@ -1137,12 +1137,18 @@ TEST_F(Lconst_test, string) {
 }
 
 TEST_F(Lconst_test, binary) {
-  Lconst a("0b1100u4bits");
-  Lconst b("12u4bits");
+  Lconst a("0b1100u5bits");
+  Lconst b("12s5bits");
+  Lconst b2("12");
   a.dump();
   b.dump();
-  EXPECT_TRUE(a == b);
+  EXPECT_TRUE(a == b); // explicit sign (12s vs 12u) does not change this
+  EXPECT_TRUE(a == b2); // explicit sign (12s vs 12u) does not change this
+  EXPECT_TRUE(a.is_explicit_sign());
+  EXPECT_TRUE(b.is_explicit_sign());
+  EXPECT_TRUE(!b2.is_explicit_sign());
   EXPECT_EQ(a, b);
+  EXPECT_EQ(a, b2);
 
   Lconst c("0b01?10?1");
   EXPECT_EQ(c.to_string(), "01?10?1");
@@ -1161,7 +1167,7 @@ TEST_F(Lconst_test, binary) {
   EXPECT_EQ(e.to_verilog(), "\"_-__0b1_\"");
 
   Lconst f("0b1_0100");
-  EXPECT_EQ(f.to_pyrope(), "0x14");
+  EXPECT_EQ(f.to_pyrope(), "20");
   EXPECT_EQ(f.to_verilog(), "'h14");
   EXPECT_EQ(f.to_yosys(), "10100");
 
@@ -1171,6 +1177,17 @@ TEST_F(Lconst_test, binary) {
   EXPECT_EQ(g.to_yosys()    , "xxxxxxxx");
   Lconst h("0bxxxxxxxxu8bits");
   EXPECT_EQ(h,g);
+
+
+  Lconst j("-17");
+  EXPECT_EQ(j.to_pyrope(),   "-17"); // small constant
+  EXPECT_EQ(j.to_verilog(), "'sb101111"); // neg values use binary (could be patched)
+  EXPECT_EQ(j.to_yosys()    ,"101111");
+
+  Lconst k("17");
+  EXPECT_EQ(k.to_pyrope(),   "17");
+  EXPECT_EQ(k.to_verilog(), "'h11"); // hex positives
+  EXPECT_EQ(k.to_yosys()    ,"010001");
 }
 
 TEST_F(Lconst_test, serialize) {
@@ -1247,7 +1264,6 @@ TEST_F(Lconst_test, zerocase) {
   Lconst zero;
   EXPECT_EQ(zero.get_bits(), 1);
   EXPECT_EQ(Lconst(0).get_bits(), 1);
-  EXPECT_EQ(Lconst(0,3).get_bits(), 3);
 
   EXPECT_EQ(Lconst("0x0").get_bits(), 1);
   EXPECT_EQ(Lconst("0").get_bits(), 1);
