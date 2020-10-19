@@ -1824,14 +1824,16 @@ static void process_cells(RTLIL::Module *module, LGraph *g) {
       Node_pin dpin_a_signed = get_dpin(g, cell, ID::A);
       if (cell->getParam(ID::A_SIGNED).as_bool()) {
 
-        auto and_node = g->create_node(Ntype_op::And, y_bits);
-        and_node.connect_sink(dpin_a_signed);
-        and_node.connect_sink(g->create_node_const((Lconst(1)<<Lconst(y_bits))-1));
+        if (dpin_a_signed.get_bits() < y_bits) {
+          auto and_node = g->create_node(Ntype_op::And, y_bits);
+          and_node.connect_sink(dpin_a_signed);
+          and_node.connect_sink(g->create_node_const((Lconst(1)<<Lconst(y_bits))-1));
 
-        auto tposs_node = g->create_node(Ntype_op::Tposs, y_bits+1);
-        tposs_node.connect_sink(and_node);
+          auto tposs_node = g->create_node(Ntype_op::Tposs, y_bits+1);
+          tposs_node.connect_sink(and_node);
 
-        dpin_a = tposs_node.setup_driver_pin();
+          dpin_a = tposs_node.setup_driver_pin();
+        }
       }
       if (dpin_a.is_invalid()) {
         auto node = dpin_a_signed.get_node();
