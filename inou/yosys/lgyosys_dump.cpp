@@ -579,7 +579,8 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         bool must_be_signed = false;
         auto y_bits = node.get_bits();
         auto y_mask = (Lconst(1)<<(y_bits))-1;
-        for (const auto &e : node.inp_edges()) {
+        const auto inp_edges = node.inp_edges();
+        for (const auto &e : inp_edges) {
           if (e.driver.get_bits() != y_bits)
             must_be_signed = true;
 
@@ -587,11 +588,15 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
             auto dnode = e.driver.get_node();
             if (dnode.is_type_const()) {
               auto v = dnode.get_type_const();
-              if (v == y_mask)
-                continue; // no need to add
+              if (v == y_mask) {
+                continue;
+              }
             }
           }
           inps.push_back(get_wire(e.driver));
+        }
+        if (inps.empty() && !inp_edges.empty()) { // maybe it was a AND(63,63)
+          inps.push_back(get_wire(inp_edges[0].driver));
         }
 
         add_cell_fnc_sign yop = &RTLIL::Module::addAnd;

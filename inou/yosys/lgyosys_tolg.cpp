@@ -334,13 +334,13 @@ static Node_pin get_unsigned_dpin(LGraph *g, const RTLIL::Cell *cell, const RTLI
   bool no_need = false;
   int  bits = 0;
   if (name == ID::A) {
+    bits = cell->getParam(ID::A_WIDTH).as_int();
     if (cell->hasParam(ID::A_SIGNED))
       no_need = cell->getParam(ID::A_SIGNED).as_bool();
-    bits = cell->getParam(ID::A_WIDTH).as_int();
   }else if (name == ID::B) {
+    bits = cell->getParam(ID::B_WIDTH).as_int();
     if (cell->hasParam(ID::B_SIGNED))
       no_need = cell->getParam(ID::B_SIGNED).as_bool();
-    bits = cell->getParam(ID::B_WIDTH).as_int();
   }else{
     I(false); // do not use it for this port name
   }
@@ -348,9 +348,14 @@ static Node_pin get_unsigned_dpin(LGraph *g, const RTLIL::Cell *cell, const RTLI
   if (no_need)
     return dpin;
 
-  if (dpin.get_node().is_type(Ntype_op::Tposs)) {
+  auto node = dpin.get_node();
+  if (node.is_type(Ntype_op::Tposs)) {
     return dpin;
   }
+  if (node.is_type_const() && node.get_type_const().is_unsigned()) {
+    return dpin;
+  }
+
   auto a_tposs = g->create_node(Ntype_op::Tposs, bits+1);
   a_tposs.connect_sink(dpin);
 
@@ -1811,19 +1816,32 @@ static void process_cells(RTLIL::Module *module, LGraph *g) {
                || (std::strncmp(cell->type.c_str(), "$sshr"  , 5) == 0 && !cell->getParam(ID::A_SIGNED).as_bool())) {
       // y = SRA(Tposs(A),B) - unsigned shift right
 
+      auto a_bits = cell->getParam(ID::A_WIDTH).as_int();
       auto y_bits = cell->getParam(ID::Y_WIDTH).as_int();
       exit_node.set_type(Ntype_op::SRA, y_bits);
 
-      Node_pin dpin_a = get_unsigned_dpin(g, cell, ID::A);
+      Node_pin dpin_a;
+      Node_pin dpin_a_signed = get_dpin(g, cell, ID::A);
       if (cell->getParam(ID::A_SIGNED).as_bool()) {
-        auto a_bits = cell->getParam(ID::A_WIDTH).as_int();
-        if (a_bits < y_bits) { // must sign extend to match sizes
-          auto and_node = g->create_node(Ntype_op::And, y_bits);
-          and_node.connect_sink(get_dpin(g, cell, ID::A));
-          and_node.connect_sink(g->create_node_const((Lconst(1)<<Lconst(y_bits))-1));
 
-          auto tposs_node = g->create_node(Ntype_op::Tposs, y_bits+1);
-          tposs_node.connect_sink(and_node);
+        auto and_node = g->create_node(Ntype_op::And, y_bits);
+        and_node.connect_sink(dpin_a_signed);
+        and_node.connect_sink(g->create_node_const((Lconst(1)<<Lconst(y_bits))-1));
+
+        auto tposs_node = g->create_node(Ntype_op::Tposs, y_bits+1);
+        tposs_node.connect_sink(and_node);
+
+        dpin_a = tposs_node.setup_driver_pin();
+      }
+      if (dpin_a.is_invalid()) {
+        auto node = dpin_a_signed.get_node();
+        if (node.is_type(Ntype_op::Tposs)) {
+          dpin_a = dpin_a_signed;
+        }else if (node.is_type_const() && node.get_type_const().is_unsigned()) {
+          dpin_a = dpin_a_signed;
+        }else{
+          auto tposs_node = g->create_node(Ntype_op::Tposs, a_bits+1);
+          tposs_node.connect_sink(dpin_a_signed);
 
           dpin_a = tposs_node.setup_driver_pin();
         }
