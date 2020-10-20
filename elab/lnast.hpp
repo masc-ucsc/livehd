@@ -168,6 +168,7 @@ private:
 
   Lnast_nid  default_const_nid;
   Lnast_nid  err_var_undefined_nid;
+  Lnast_nid  local_var_nid;
   Lnast_nid  register_fwd_nid;
   uint32_t   tup_internal_cnt = 0;
 
