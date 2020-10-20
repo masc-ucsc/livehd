@@ -885,7 +885,10 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
             auto *new_wire = module->addWire(next_id(g), out_width);
 
             if (wire->width < out_width) {
-              w2.extend_u0(out_width, true);  // sign extend
+              if (unsigned_wire.contains(wire))
+                w2.extend_u0(out_width, false);  // zero extend
+              else
+                w2.extend_u0(out_width, true);  // sign extend
             }else{
               w2 = w2.extract(0, out_width);  // drop bits
             }
