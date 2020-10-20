@@ -386,13 +386,16 @@ Lconst Lconst::add_op(const Lconst &o) const {
   else
     res_bits = msb(res_num)+1;
 
-  auto res_sign = sign && o.sign;
+  auto res_sign = sign || o.sign;
+  if (res_num<0)
+    res_sign = true;
+
   if (res_sign)
     res_bits++;
 
   // explicit kept if both explicit and agree
   auto res_explicit_str  = explicit_str && o.explicit_str;
-  auto res_explicit_sign = explicit_sign && o.explicit_sign && sign == o.sign;
+  auto res_explicit_sign = explicit_sign || o.explicit_sign;
   bool res_explicit_bits = false;
 
   return Lconst(res_explicit_str, res_explicit_sign, res_explicit_bits, res_sign, res_bits, res_num);

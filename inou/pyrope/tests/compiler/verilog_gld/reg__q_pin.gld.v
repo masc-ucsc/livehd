@@ -1,5 +1,6 @@
 module reg__q_pin (
   input        inp, 
+  input        clock,
   output [2:0] out
 );
 
