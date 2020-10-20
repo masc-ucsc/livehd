@@ -53,6 +53,7 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
   /* Lnast_nid top_sts_nid = get_first_child(top_nid); */
   default_const_nid     = add_child(top_sts_nid, Lnast_node(Lnast_ntype::create_const(),    Token(Token_id_alnum, 0, 0, 0, "default_const")));
   err_var_undefined_nid = add_child(top_sts_nid, Lnast_node(Lnast_ntype::create_err_flag(), Token(Token_id_alnum, 0, 0, 0, "err_var_undefined")));
+  local_var_nid         = add_child(top_sts_nid, Lnast_node(Lnast_ntype::create_local_var(),Token(Token_id_alnum, 0, 0, 0, "local_var")));
   register_fwd_nid      = add_child(top_sts_nid, Lnast_node(Lnast_ntype::create_reg_fwd(),  Token(Token_id_alnum, 0, 0, 0, "register_forwarding")));
 
   Phi_rtable top_phi_resolve_table;
@@ -790,19 +791,16 @@ void Lnast::ssa_handle_phi_nodes(const Lnast_nid &if_nid) {
       Phi_rtable fake_false_table ; //for the case of if-elif-elif
       Lnast_nid condition_nid = get_sibling_prev(*itr);
       resolve_phi_nodes(condition_nid, true_table, fake_false_table);
-
     } else if (itr == if_stmts_vec.rbegin()+1 && has_else_stmts(if_nid)) {
       Phi_rtable &true_table  = phi_resolve_tables[*itr];
       Phi_rtable &false_table = phi_resolve_tables[*if_stmts_vec.rbegin()];
       Lnast_nid condition_nid = get_sibling_prev(*itr);
       resolve_phi_nodes(condition_nid, true_table, false_table);
-
     } else {
       Phi_rtable &true_table  = phi_resolve_tables[*itr];
       Phi_rtable &false_table = new_added_phi_node_tables[get_parent(*itr)];
       Lnast_nid condition_nid = get_sibling_prev(*itr);
       resolve_phi_nodes(condition_nid, true_table, false_table);
-
     }
   }
 }
@@ -810,6 +808,7 @@ void Lnast::ssa_handle_phi_nodes(const Lnast_nid &if_nid) {
 
 void Lnast::resolve_phi_nodes(const Lnast_nid &cond_nid, Phi_rtable &true_table, Phi_rtable &false_table) {
   for (auto const&[key, val] : false_table) {
+    /* fmt::print("false table content: key->{}, value->{}\n", key, get_token(val).get_text()); */
     if (true_table.find(key) != true_table.end()) {
       add_phi_node(cond_nid, true_table[key], false_table[key]);
       true_table.erase(key);
@@ -823,6 +822,7 @@ void Lnast::resolve_phi_nodes(const Lnast_nid &cond_nid, Phi_rtable &true_table,
 
   std::vector<std::string_view> key_list;
   for (auto const&[key, val] : true_table) {
+    fmt::print("true table content: key->{}, value->{}\n", key, get_token(val).get_text());
     if (true_table.empty()) // it might be empty due to the erase from previous for loop
       break;
 
@@ -833,7 +833,10 @@ void Lnast::resolve_phi_nodes(const Lnast_nid &cond_nid, Phi_rtable &true_table,
       auto if_nid = get_parent(cond_nid);
       auto psts_nid = get_parent(if_nid);
       auto f_nid = get_complement_nid(key, psts_nid, true);
-      add_phi_node(cond_nid, true_table[key], f_nid);
+      if (!get_type(f_nid).is_local_var()) {
+      
+        add_phi_node(cond_nid, true_table[key], f_nid);
+      }
       key_list.push_back(key);
     }
   }
@@ -847,10 +850,12 @@ void Lnast::resolve_phi_nodes(const Lnast_nid &cond_nid, Phi_rtable &true_table,
 Lnast_nid Lnast::get_complement_nid(std::string_view brother_name, const Lnast_nid &psts_nid, bool false_path) {
   auto if_nid = get_parent(psts_nid);
   Phi_rtable &new_added_phi_node_table = new_added_phi_node_tables[if_nid];
-  if(false_path && new_added_phi_node_table.find(brother_name) != new_added_phi_node_table.end())
+  if(false_path && new_added_phi_node_table.find(brother_name) != new_added_phi_node_table.end()) {
     return new_added_phi_node_table[brother_name];
-  else
+  }
+  else {
     return check_phi_table_parents_chain(brother_name, psts_nid, false);
+  }
 }
 
 
@@ -866,7 +871,8 @@ Lnast_nid Lnast::check_phi_table_parents_chain(std::string_view target_name, con
     if (is_reg(target_name)) {
       return register_fwd_nid;
     } else {
-      return err_var_undefined_nid;
+      /* return err_var_undefined_nid; */
+      return local_var_nid;
     }
   } else {
     auto tmp_if_nid = get_parent(psts_nid);

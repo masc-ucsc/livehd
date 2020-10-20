@@ -88,6 +88,9 @@ void Lnast_tolg::process_ast_stmts(LGraph *lg, const Lnast_nid &lnidx_stmts) {
     } else if (ntype.is_err_flag()) {
       I(lnast->get_name(lnidx) == "err_var_undefined");
       continue;
+    } else if (ntype.is_local_var()) {
+      I(lnast->get_name(lnidx) == "local_var");
+      continue;
     } else {
       I(false);
       return;
@@ -151,7 +154,7 @@ void Lnast_tolg::process_ast_phi_op(LGraph *lg, const Lnast_nid &lnidx_phi) {
     auto reg_qpin = name2dpin[reg_qpin_name];
     false_dpin = reg_qpin;
   } else {
-    false_dpin  = setup_ref_node_dpin(lg, c3, true);
+    false_dpin = setup_ref_node_dpin(lg, c3, true);
   }
 
   lg->add_edge(cond_dpin,  cond_spin);
@@ -231,6 +234,10 @@ void Lnast_tolg::process_ast_nary_op(LGraph *lg, const Lnast_nid &lnidx_opr) {
       continue; // the lhs has been handled at setup_node_opr_and_lhs();
 
     opd = setup_ref_node_dpin(lg, opr_child);
+    if (opd.is_invalid()) {
+      Pass::error("for operator node {}, undefined variable {} is used!\n", opr_node.debug_name(), lnast->get_sname(opr_child));
+    }
+      
     opds.emplace_back(opd);
   }
   nary_node_rhs_connections(lg, opr_node, opds, lnast->get_type(lnidx_opr).is_minus());
