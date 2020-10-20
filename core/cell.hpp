@@ -156,14 +156,17 @@ public:
     if (c>='a' && c<='f') {
       int pid = c-'a';
       assert(sink_name2pid[str[0]][static_cast<std::size_t>(op)]==pid);
+      assert(get_sink_name(op, pid) == str);
       return pid;
     }
     if (c=='A') {
       assert(sink_name2pid[str[0]][static_cast<std::size_t>(op)]==0);
+      assert(get_sink_name(op, 0) == str);
       return 0;
     }
     if (c=='B') {
       assert(sink_name2pid[str[0]][static_cast<std::size_t>(op)]==1);
+      assert(get_sink_name(op, 1) == str);
       return 1;
     }
 
@@ -180,6 +183,7 @@ public:
 
     auto pid = sink_name2pid[str[0]][static_cast<std::size_t>(op)];
     assert(pid!=-1);
+    assert(get_sink_name(op, pid) == str);
     return pid;
   }
 
