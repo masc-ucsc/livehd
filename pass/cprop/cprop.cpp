@@ -245,8 +245,8 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
   // simple constant propagation
   auto op = node.get_type_op();
   if (op == Ntype_op::SHL) {
-    Lconst val = node.get_sink_pin("A").get_driver_node().get_type_const();
-    Lconst amt = node.get_sink_pin("B").get_driver_node().get_type_const();
+    Lconst val = node.get_sink_pin("a").get_driver_node().get_type_const();
+    Lconst amt = node.get_sink_pin("b").get_driver_node().get_type_const();
 
     Lconst result = val << amt;
 
@@ -537,13 +537,10 @@ bool Cprop::process_tuple_get(Node &node) {
   // this attr comes from tail of TG chain where the TG tail has been transformed into an AttrSet node.
   if (parent_node.get_type_op() == Ntype_op::AttrSet) {
     //FIXME: bug?
-    auto attr_val_spin = parent_node.get_sink_pin("value");
-    fmt::print("DBG: attr val sinkpin:{}\n", attr_val_spin.debug_name());
-    for (auto e:attr_val_spin.inp_edges()) {
-      fmt::print("DBG: e driver:{}\n", e.driver.debug_name());
-      /* collapse_forward_for_pin(node, e.driver); */
-      /* return true; */
-    }
+    auto attr_val_dpin = parent_node.get_sink_pin("value").get_driver_pin();
+    fmt::print("DBG: attr val dpin:{}\n", attr_val_dpin.debug_name());
+    collapse_forward_for_pin(node, attr_val_dpin);
+    return true;
   }
 
   auto ptup_it = node2tuple.find(parent_node.get_compact());
@@ -613,10 +610,9 @@ bool Cprop::process_tuple_get(Node &node) {
           }
 
           node.set_type(Ntype_op::AttrSet); // Replace TupGet for AttrSet
-          node.setup_sink_pin("var_name").connect_driver(val_dpin);
+          node.setup_sink_pin("name").connect_driver(val_dpin);
           node.setup_sink_pin("field").connect_driver(attr_key_dpin);
           node.setup_sink_pin("value").connect_driver(it.second);
-          fmt::print("hit! value driver:{}\n", it.second.debug_name());
         } else {
           I(false); // FIXME: TODO handle multiple attr set (create node)
         }

@@ -113,9 +113,9 @@ void Lnast_tolg::process_ast_if_op(LGraph *lg, const Lnast_nid &lnidx_if) {
 
 void Lnast_tolg::process_ast_phi_op(LGraph *lg, const Lnast_nid &lnidx_phi) {
   auto phi_node   = lg->create_node(Ntype_op::Mux);
-  auto cond_spin  = phi_node.setup_sink_pin("0"); // Y = ~SA + SB
-  auto true_spin  = phi_node.setup_sink_pin("1");
-  auto false_spin = phi_node.setup_sink_pin("2");
+  auto cond_spin  = phi_node.setup_sink_pin("0"); // Y = ~S&"1" + S&"2"
+  auto true_spin  = phi_node.setup_sink_pin("2");
+  auto false_spin = phi_node.setup_sink_pin("1");
 
   auto lhs = lnast->get_first_child(lnidx_phi);
   auto c1 = lnast->get_sibling_next(lhs);
