@@ -551,11 +551,6 @@ void Node::dump() {
                edge.driver.get_pid(),
                edge.driver.debug_name());
   }
-  for (const auto &spin : inp_setup_pins()) {
-    if (spin.is_connected())  // Already printed
-      continue;
-    fmt::print("              pid:{:<2} name:{}\n", spin.get_pid(), spin.debug_name());
-  }
   for (const auto &edge : out_edges()) {
     fmt::print("  out bits:{:<3} pid:{:<2} name:{:<30} -> nid:{} idx:{} pid:{:<2} name:{}\n",
                edge.get_bits(),
@@ -566,11 +561,6 @@ void Node::dump() {
                edge.sink.get_pid(),
                edge.sink.debug_name()
                );
-  }
-  for (const auto &dpin : out_setup_pins()) {
-    if (dpin.is_connected())  // Already printed
-      continue;
-    fmt::print("  out bits:{:<3} pid:{:<2} name:{}\n", dpin.get_bits(), dpin.get_pid(), dpin.debug_name());
   }
 }
 // LCOV_EXCL_STOP
