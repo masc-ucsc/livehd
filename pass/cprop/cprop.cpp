@@ -538,7 +538,6 @@ bool Cprop::process_tuple_get(Node &node) {
   if (parent_node.get_type_op() == Ntype_op::AttrSet) {
     //FIXME: bug?
     auto attr_val_dpin = parent_node.get_sink_pin("value").get_driver_pin();
-    fmt::print("DBG: attr val dpin:{}\n", attr_val_dpin.debug_name());
     collapse_forward_for_pin(node, attr_val_dpin);
     return true;
   }
@@ -737,9 +736,8 @@ void Cprop::do_trans(LGraph *lg) {
   bool tup_get_left = false;
 
   for (auto node : lg->forward()) {
-    fmt::print("\nDBG:current node->{}\n", node.debug_name());
+    /* fmt::print("\nDBG:current node->{}\n", node.debug_name()); */
     auto op = node.get_type_op();
-    // fmt::print("NEXT: node:{}\n",node.debug_name());
 
     // Special cases to handle in cprop
     if (op == Ntype_op::AttrGet) {
@@ -820,7 +818,6 @@ void Cprop::do_trans(LGraph *lg) {
     auto uout = lg->get_graph_output("%");
     fmt::print("uout:{}\n", uout.debug_name());
     if (!uout.has_inputs()) {
-      fmt::print("hit!\n");
       uout.get_non_hierarchical().del();
     }
   }
