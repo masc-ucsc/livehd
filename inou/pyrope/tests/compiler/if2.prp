@@ -2,6 +2,6 @@ $inp.__bits = 1
 
 x = 1 + 2
 if ($inp == 0) {
-  x = 4 
-} 
+  x = 4u10bits
+}
 %out = x
