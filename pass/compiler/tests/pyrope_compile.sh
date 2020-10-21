@@ -2,10 +2,12 @@
 rm -rf ./lgdb
 
 pts_to_be_merged='io_gen io_gen2 io_gen3 test2'
-pts_tuple_dbg='reg__q_pin firrtl_tail2 
+pts_tuple_dbg='firrtl_tail2 
                hier_tuple_io  
                lhs_wire3 tuple funcall_unnamed2 
                firrtl_tail3 firrtl_gcd counter_tup counter2'
+
+pts_1st_priority='reg__q_pin'
 
 pts='if2 hier_tuple2 nested_if adder_stage if bits_rhs capricious_bits2 capricious_bits4 
      hier_tuple logic reg_bits_set tuple_copy hier_tuple3 lhs_wire lhs_wire2 scalar_tuple
