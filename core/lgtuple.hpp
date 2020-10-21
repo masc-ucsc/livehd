@@ -15,8 +15,8 @@
 class Lgtuple : std::enable_shared_from_this<Lgtuple> {
 private:
 protected:
-  std::string hier_parent_key_name;  // empty not set  //FIXME->sh: should be rename to hier_hier_parent_key_name
-  int         hier_parent_key_pos;   // -1 not set     //FIXME->sh: should be rename to hier_hier_parent_key_pos
+  std::string hier_parent_key_name;  // empty not set  
+  int         hier_parent_key_pos;   // -1 not set     
 
   bool ordered;
   bool named;

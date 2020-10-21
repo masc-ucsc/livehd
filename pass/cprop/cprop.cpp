@@ -653,8 +653,9 @@ void Cprop::process_tuple_add(Node &node) {
 
   // a new tuple chain as the val_dpin, either for a tup_concat or a new tuple hierarchy
   std::shared_ptr<Lgtuple> chain_tup; 
-  if(node.is_sink_connected("value"))
+  if(node.is_sink_connected("value")) {
     chain_tup = process_tuple_add_chain(node.get_sink_pin("value").get_driver_pin());
+  }
 
   auto [tup_name, key_name, key_pos] = get_tuple_name_key(node);
 
@@ -726,6 +727,7 @@ void Cprop::process_tuple_add(Node &node) {
 
   if (node.out_edges().begin()->sink.is_graph_output()) {
     auto lg = node.get_class_lgraph();
+    fmt::print("\ntry create graph output from node:{}\n", node.debug_name());
     try_create_graph_output(lg, ctup);
   }
 }
@@ -824,7 +826,6 @@ void Cprop::do_trans(LGraph *lg) {
 }
 
 void Cprop::try_create_graph_output(LGraph *lg, std::shared_ptr<Lgtuple> tup) {
-  fmt::print("\ntry create graph output\n");
   absl::flat_hash_map<std::string, Node_pin> gout2driver;
   tup->dump();
   fmt::print("------------------------\n");

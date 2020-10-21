@@ -146,6 +146,7 @@ void Lgtuple::set(std::string_view key, std::shared_ptr<Lgtuple> tup2) {
   auto it = key2pos.find(key);
   if (it == key2pos.end()) {
     auto shift = pos2tuple.size();
+    tup2->hier_parent_key_name = key; //FIXME->sh: check
     pos2tuple.emplace_back(tup2);
     key2pos[key] = shift;
   } else {
@@ -298,7 +299,7 @@ std::vector<std::pair<std::string_view, Node_pin>> Lgtuple::get_all_attributes()
 }
 
 void Lgtuple::dump(std::string_view indent) const {
-  fmt::print("{}hier_parent_name:{} hier_parent_pos:{} {} {} {} val_dpin:{}\n",
+  fmt::print("{}hier_parent_key_name:{} hier_parent_key_pos:{} {} {} {} val_dpin:{}\n",
              indent,
              hier_parent_key_name,
              hier_parent_key_pos,
@@ -321,6 +322,7 @@ void Lgtuple::analyze_graph_output(absl::flat_hash_map<std::string, Node_pin> &g
   std::string new_hier_name;
   if (hier_parent_key_name != "%") {
     auto pos = hier_parent_key_name.find_last_of('_');
+
 
     if (hier_parent_key_name[0] == '%') {
       new_hier_name = hier_parent_key_name.substr(1, pos-1);
