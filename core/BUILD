@@ -97,6 +97,16 @@ cc_test(
         ],
     )
 
+cc_test(
+    name = "graph_bench",
+    srcs = ["tests/graph_bench.cpp"],
+    deps = [
+        ":core",
+         "@graph//:graph",
+         "@range-v3//:range-v3",
+         "@fmt//:fmt",
+        ],
+    )
 
 cc_test(
     name = "edge_test",
