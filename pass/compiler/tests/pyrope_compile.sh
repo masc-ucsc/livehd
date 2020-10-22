@@ -2,17 +2,15 @@
 rm -rf ./lgdb
 
 pts_to_be_merged='io_gen io_gen2 io_gen3 test2'
-pts_tuple_dbg='firrtl_tail2 
-               lhs_wire3 funcall_unnamed2 
-               firrtl_tail3 firrtl_gcd counter_tup counter2'
+pts_tuple_dbg='lhs_wire3 funcall_unnamed2 
+               firrtl_gcd counter_tup counter2'
 
-
-pts='hier_tuple_io reg__q_pin if2 hier_tuple2 nested_if adder_stage if bits_rhs capricious_bits2 capricious_bits4 
+pts='firrtl_tail2 firrtl_tail3 reg__q_pin hier_tuple_io if2 hier_tuple2 nested_if adder_stage 
+     if bits_rhs capricious_bits2 capricious_bits4 
      hier_tuple logic reg_bits_set tuple_copy hier_tuple3 lhs_wire lhs_wire2 scalar_tuple
      firrtl_tail attr_set capricious_bits out_ssa ssa_rhs counter counter_nested_if tuple_if'
 
-# pts='lhs_wire3'
-# pts='firrtl_tail2'
+# pts='firrtl_gcd'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -140,6 +138,6 @@ Pyrope_compile "$pts"
 # Pyrope_compile "$pts_hier5" "hier"
 # Pyrope_compile "$pts_hier6" "hier"
 
-# rm -f *.dot
-# rm -f *.v
-# rm -f lgcheck*
+rm -f *.dot
+rm -f *.v
+rm -f lgcheck*

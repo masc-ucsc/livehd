@@ -166,10 +166,6 @@ private:
   // populated during LG->LN pass, maps name -> bitwidth
   absl::flat_hash_map<std::string, uint32_t> from_lgraph_bw_table;
 
-  Lnast_nid  default_const_nid;
-  Lnast_nid  err_var_undefined_nid;
-  Lnast_nid  local_var_nid;
-  Lnast_nid  register_fwd_nid;
   uint32_t   tup_internal_cnt = 0;
 
   std::vector<std::string *> string_pool;

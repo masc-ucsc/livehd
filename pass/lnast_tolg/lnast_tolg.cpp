@@ -88,9 +88,6 @@ void Lnast_tolg::process_ast_stmts(LGraph *lg, const Lnast_nid &lnidx_stmts) {
     } else if (ntype.is_err_flag()) {
       I(lnast->get_name(lnidx) == "err_var_undefined");
       continue;
-    } else if (ntype.is_local_var()) {
-      I(lnast->get_name(lnidx) == "local_var");
-      continue;
     } else {
       I(false);
       return;
@@ -156,6 +153,9 @@ void Lnast_tolg::process_ast_phi_op(LGraph *lg, const Lnast_nid &lnidx_phi) {
   } else {
     false_dpin = setup_ref_node_dpin(lg, c3, true);
   }
+
+  I(!true_dpin.is_invalid());
+  I(!false_dpin.is_invalid());
 
   lg->add_edge(cond_dpin,  cond_spin);
   lg->add_edge(true_dpin,  true_spin);
@@ -780,7 +780,6 @@ Node_pin Lnast_tolg::setup_tuple_ref(LGraph *lg, std::string_view ref_name) {
 }
 
 Node_pin Lnast_tolg::setup_field_dpin(LGraph *lg, std::string_view field_name) {
-  // FIXME->sh: create new table:field2dpin 2020/8/1
   auto it = field2dpin.find(field_name);
   if (it != field2dpin.end()) {
     return it->second;
@@ -896,7 +895,7 @@ Node_pin Lnast_tolg::setup_node_assign_and_lhs(LGraph *lg, const Lnast_nid &lnid
 
   //handle register as lhs
   if (is_register(lhs_name)) {
-    //when #reg_0 at lhs, the register has not been created before
+    //when #reg_0 at lhs, the register possibly has not been created before
     if (lhs_name.substr(lhs_name.size()-2) == "_0") {
       auto reg_qpin = setup_ref_node_dpin(lg, lhs);
       auto reg_data_pin = reg_qpin.get_node().setup_sink_pin("din");
@@ -984,7 +983,16 @@ Node_pin Lnast_tolg::setup_ref_node_dpin(LGraph *lg, const Lnast_nid &lnidx_opd,
   I(!name.empty());
 
   // special case for register, when #x_-1 in rhs, return the reg_qpin, wname #x. Note this is not true for a phi-node.
+  
+
   bool reg_existed = name2dpin.find(vname) != name2dpin.end();
+  
+  if (is_register(name)) {
+    fmt::print("name:{}, vname:{}, from_phi:{}, from_assign:{}, reg_existed:{}\n", name, vname, from_phi, from_assign, reg_existed);
+  }
+
+
+
   if (is_register(name) && !from_phi && reg_existed) {
     if (subs == -1) {
       return name2dpin.find(vname)->second;
@@ -992,6 +1000,8 @@ Node_pin Lnast_tolg::setup_ref_node_dpin(LGraph *lg, const Lnast_nid &lnidx_opd,
       return name2dpin.find(name)->second;
     } else if (subs == 0 && name2dpin.find(name) != name2dpin.end()){
       return name2dpin.find(name)->second;
+    } else if (subs == 0 && name2dpin.find(vname) != name2dpin.end()){
+      return name2dpin.find(vname)->second; // subs == 0 and the register is actually created before, maybe because of x = #foo.__q_pin
     } else {
       ; //the subs == 0 and this must be in lhs case, handle later in this function
     }
@@ -1063,7 +1073,7 @@ Node_pin Lnast_tolg::setup_ref_node_dpin(LGraph *lg, const Lnast_nid &lnidx_opd,
 
     return node_dpin;
   } else if (is_err_var_undefined(name)) {
-    node_dpin = lg->create_node(Ntype_op::CompileErr).setup_driver_pin();
+    node_dpin = lg->create_node(Ntype_op::CompileErr).setup_driver_pin("Y");
   } else if (is_bool_true(name)) {
     node_dpin = lg->create_node_const(Lconst(1)).setup_driver_pin();
   } else if (is_bool_false(name)) {
@@ -1143,7 +1153,7 @@ void Lnast_tolg::process_ast_attr_get_op(LGraph *lg, const Lnast_nid &lnidx_aget
   auto c0_aget_vname = lnast->get_vname(c0_aget);
   auto c1_aget_name  = lnast->get_sname(c1_aget);
   auto driver_vname  = lnast->get_vname(c1_aget);
-  auto attr_field     = lnast->get_vname(c2_aget);
+  auto attr_field    = lnast->get_vname(c2_aget);
 
   if (attr_field == "__last_value") {
     auto wire_node = lg->create_node(Ntype_op::Or); // might need to change to other type according to the real driver
@@ -1158,10 +1168,7 @@ void Lnast_tolg::process_ast_attr_get_op(LGraph *lg, const Lnast_nid &lnidx_aget
   auto vn_spin   = aget_node.setup_sink_pin("name");  // variable name
   auto af_spin   = aget_node.setup_sink_pin("field"); // attribute field
 
-
-  /* I(name2dpin.find(c1_aget_name) != name2dpin.end()); */
   auto vn_dpin = setup_ref_node_dpin(lg, c1_aget);
-  /* auto vn_dpin = name2dpin[c1_aget_name]; */
   lg->add_edge(vn_dpin, vn_spin);
 
   auto af_dpin = setup_field_dpin(lg, attr_field);
