@@ -5,12 +5,13 @@ module firrtl_tail3 (
 );
 
 reg  [15:0] x_next;
-wire [15:0] minus = x - 1;
+wire [15:0] minus = $signed(x) - $signed(2'b01);
 always @ (*) begin
   if (x == 0)
     x_next = inp;
   else
-    x_next = {1'b0, minus[14:0]};
+    /* x_next = {0, minus[14:0]}; */
+    x_next = minus;
 end
 
 reg [15:0] x;

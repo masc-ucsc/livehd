@@ -70,7 +70,6 @@ public:
     //group: others
     Lnast_ntype_assert,      // I
     Lnast_ntype_err_flag,    // compile error flag
-    Lnast_ntype_local_var,   // local variable inside if-else scope
     Lnast_ntype_reg_fwd,     // point to the corresponding reg_fwd in LGraph
 
     //group: compiler internal type
@@ -148,7 +147,6 @@ protected:
     //group: others
     "assert",
     "error_flag",
-    "local_var",
     "reg_fwd",
     //group: compiler internal type
     "tuple_add",
@@ -216,7 +214,6 @@ protected:
     "const",
     "I",
     "error_flag",
-    "local_var",
     "reg_fwd",
     "tuple_add",
     "tuple_get",
@@ -282,7 +279,6 @@ protected:
     "const",
     "assert",
     "error_flag",
-    "local_var",
     "reg_fwd",
     "tuple_add",
     "tuple_get",
@@ -348,7 +344,6 @@ protected:
     "const",
     "assert",
     "error_flag",
-    "local_var",
     "reg_fwd",
     "tuple_add",
     "tuple_get",
@@ -414,7 +409,6 @@ protected:
     "const",
     "assert",
     "error_flag",
-    "local_var",
     "reg_fwd",
     "tuple_add",
     "tuple_get",
@@ -494,7 +488,6 @@ public:
 
   static constexpr Lnast_ntype create_assert()        { return Lnast_ntype(Lnast_ntype_assert); }
   static constexpr Lnast_ntype create_err_flag()      { return Lnast_ntype(Lnast_ntype_err_flag); }
-  static constexpr Lnast_ntype create_local_var()     { return Lnast_ntype(Lnast_ntype_local_var); }
   static constexpr Lnast_ntype create_reg_fwd()       { return Lnast_ntype(Lnast_ntype_reg_fwd); }
 
   static constexpr Lnast_ntype create_tuple_add()     { return Lnast_ntype(Lnast_ntype_tuple_add);}
@@ -564,7 +557,6 @@ public:
 
   bool constexpr is_assert()        const { return val == Lnast_ntype_assert; }
   bool constexpr is_err_flag()      const { return val == Lnast_ntype_err_flag; }
-  bool constexpr is_local_var()     const { return val == Lnast_ntype_local_var; }
   bool constexpr is_reg_fwd()       const { return val == Lnast_ntype_reg_fwd; }
 
   bool constexpr is_tuple_add()     const { return val == Lnast_ntype_tuple_add; }

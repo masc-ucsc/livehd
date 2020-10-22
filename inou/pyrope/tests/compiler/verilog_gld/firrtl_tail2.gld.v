@@ -11,7 +11,7 @@ always @ (*) begin
   if (en == 1)
     x_next = inp;
   else
-    x_next = {1'b0, minus[2:0]};
+    x_next = {minus[2], minus[2:0]};
 end
 
 reg [3:0] x;
