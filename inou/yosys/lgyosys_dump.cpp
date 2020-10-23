@@ -712,7 +712,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
           } else {
             log_error("Flop options not supported yet! (fixme?)\n");
           }
-        }else{
+        } else {
           if (reset_wire && enable_wire == nullptr) {
             RTLIL::Const initial_const(0, node.get_bits());
             if (!initial_dpin.is_invalid()) {

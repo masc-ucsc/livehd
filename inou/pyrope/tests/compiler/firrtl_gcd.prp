@@ -20,18 +20,23 @@ _i_T_3  = #y.__q_pin - #x.__q_pin
 _i_T_4  = _i_T_3 >> 1
 _i_T_4 := _i_T_3
 
+_i_GEN_0 = 0
 if (_i_T) {
   _i_GEN_0 = _i_T_2
 } else {
   _i_GEN_0 = #x.__q_pin
 }
 
+
+_i_GEN_1 = 0
 if (_i_T) {
   _i_GEN_1 = #y.__q_pin
 } else {
   _i_GEN_1 = _i_T_4
 }
 
+
+_i_GEN_2 = 0
 if ($io_loading_values) {
   _i_GEN_2 = $io_value1
 } else {
@@ -39,6 +44,7 @@ if ($io_loading_values) {
 }
 
 
+_i_GEN_3 = 0
 if ($io_loading_values) {
   _i_GEN_3 = $io_value2
 } else {

@@ -480,9 +480,9 @@ bool Cprop::process_attr_get(Node &node) {
   I(key_name_dpin.get_node().get_type_op() == Ntype_op::TupKey);
   I(key_name_dpin.has_name());
   auto key_name = key_name_dpin.get_name();
-  if (key_name.substr(0, 2) == "__") {
+  if (key_name.substr(0, 2) == "__") { //FIXME->sh: why not merge?
     if (key_name.substr(0, 7) == "__q_pin") {
-      fmt::print("process_attr_q_pin parent_dpin:{} node:{}\n", parent_dpin.debug_name(), node.debug_name());
+      fmt::print("process_attr_q_pin parent_node:{} node:{}\n", parent_dpin.get_node().debug_name(), node.debug_name());
       process_attr_q_pin(node, parent_dpin);
       return true;
     }
@@ -637,7 +637,7 @@ std::shared_ptr<Lgtuple> Cprop::process_tuple_add_chain(Node_pin up_dpin) {
   }
 
   I(up_node.get_type_op() == Ntype_op::TupAdd || up_node.get_type_op() == Ntype_op::TupGet || 
-    up_node.get_type_op() == Ntype_op::TupRef /*|| up_node.get_type_op() == Ntype_op::AttrSet*/);
+    up_node.get_type_op() == Ntype_op::TupRef);
 
   return std::make_shared<Lgtuple>(*(ptup_it->second));
 }
@@ -725,6 +725,7 @@ void Cprop::process_tuple_add(Node &node) {
 
   node2tuple[node.get_compact()] = ctup;
 
+  //FIXME: should move to line 785 to avoid checking every TA, be there is a bug in line 785??
   if (node.out_edges().begin()->sink.is_graph_output()) {
     auto lg = node.get_class_lgraph();
     fmt::print("\ntry create graph output from node:{}\n", node.debug_name());
@@ -738,7 +739,7 @@ void Cprop::do_trans(LGraph *lg) {
   bool tup_get_left = false;
 
   for (auto node : lg->forward()) {
-    /* fmt::print("\nDBG:current node->{}\n", node.debug_name()); */
+    /* fmt::print("DBG:current node->{}\n", node.debug_name()); */
     auto op = node.get_type_op();
 
     // Special cases to handle in cprop
@@ -800,7 +801,8 @@ void Cprop::do_trans(LGraph *lg) {
 
     if (!node.has_outputs()) {
       auto op = node.get_type_op();
-      if (op != Ntype_op::Sflop && op != Ntype_op::Aflop && op != Ntype_op::Latch && op != Ntype_op::Fflop && op != Ntype_op::Memory && op != Ntype_op::Sub) {
+      if (op != Ntype_op::Sflop && op != Ntype_op::Aflop  && op != Ntype_op::Latch && 
+          op != Ntype_op::Fflop && op != Ntype_op::Memory && op != Ntype_op::Sub   && op != Ntype_op::AttrSet) {
         // TODO: del_dead_end_nodes(); It can propagate back and keep deleting
         // nodes until it reaches a SubGraph or a driver_pin that has some
         // other outputs. Doing this dead_end_nodes delete iterator can retuce
@@ -827,8 +829,8 @@ void Cprop::do_trans(LGraph *lg) {
 
 void Cprop::try_create_graph_output(LGraph *lg, std::shared_ptr<Lgtuple> tup) {
   absl::flat_hash_map<std::string, Node_pin> gout2driver;
-  tup->dump();
-  fmt::print("------------------------\n");
+  /* tup->dump(); */
+  /* fmt::print("------------------------\n"); */
   tup->analyze_graph_output(gout2driver, "");
 
   for (const auto &it : gout2driver) {
@@ -837,7 +839,7 @@ void Cprop::try_create_graph_output(LGraph *lg, std::shared_ptr<Lgtuple> tup) {
       it.second.connect_sink(flattened_gout);
     }
   }
-
+  fmt::print("output generation finished\n");
 }
 
 void Cprop::dump_node2tuples() const {
