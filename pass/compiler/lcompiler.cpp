@@ -48,34 +48,26 @@ void Lcompiler::add_thread(std::shared_ptr<Lnast> ln) {
     Cprop cp(false); //hier = false
     Bitwidth bw(false, 10); // hier = false, max_iters = 10
 
-    fmt::print("-------------------------------------\n");
-    fmt::print("-------- Copy-Propagation -----------\n");
-    fmt::print("-------------------------------------\n");
+    fmt::print("------------------------ Copy-Propagation --------------------------- (1)\n");
+    cp.do_trans(lg);
+    cp.do_trans(lg);
     cp.do_trans(lg);
     cp.do_trans(lg);
     if (gviz) {
       gv.do_from_lgraph(lg, "no_bits"); // rename dot with postfix raw
     }
 
-    fmt::print("-------------------------------------\n");
-    fmt::print("-------- Bitwidth-Inference ---------\n");
-    fmt::print("-------------------------------------\n");
+    fmt::print("------------------------ Bitwidth-Inference ------------------------- (2)\n");
     bw.do_trans(lg);
     bw.do_trans(lg);
 
-    fmt::print("-------------------------------------\n");
-    fmt::print("-------- Copy-Propagation -----------\n");
-    fmt::print("-------------------------------------\n");
+    fmt::print("------------------------ Copy-Propagation --------------------------- (3)\n");
     cp.do_trans(lg);
 
-    fmt::print("-------------------------------------\n");
-    fmt::print("-------- Bitwidth-Inference ---------\n");
-    fmt::print("-------------------------------------\n");
+    fmt::print("------------------------ Bitwidth-Inference ------------------------- (4)\n");
     bw.do_trans(lg);
 
-    fmt::print("-------------------------------------\n");
-    fmt::print("-------- Final Copy-Propagation -----\n");
-    fmt::print("-------------------------------------\n");
+    fmt::print("------------------------ Final Copy-Propagation --------------------- (5)\n");
     cp.do_trans(lg);
 
     if (gviz) {

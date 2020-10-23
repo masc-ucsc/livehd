@@ -10,7 +10,7 @@ pts='firrtl_tail2 firrtl_tail3 reg__q_pin hier_tuple_io if2 hier_tuple2 nested_i
      hier_tuple logic reg_bits_set tuple_copy hier_tuple3 lhs_wire lhs_wire2 scalar_tuple
      firrtl_tail attr_set capricious_bits out_ssa ssa_rhs counter counter_nested_if tuple_if'
 
-# pts='firrtl_gcd'
+pts='firrtl_gcd'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -138,6 +138,6 @@ Pyrope_compile "$pts"
 # Pyrope_compile "$pts_hier5" "hier"
 # Pyrope_compile "$pts_hier6" "hier"
 
-rm -f *.dot
-rm -f *.v
-rm -f lgcheck*
+# rm -f *.dot
+# rm -f *.v
+# rm -f lgcheck*

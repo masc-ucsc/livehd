@@ -590,13 +590,6 @@ void Lnast_tolg::process_ast_tuple_get_op(LGraph *lg, const Lnast_nid &lnidx_tg)
 }
 
 bool Lnast_tolg::is_hier_inp_bits_set(const Lnast_nid &lnidx_ta) {
-  // bugs on lnast->get_sibling_prev(lnast_child);
-  /* auto first_child = lnast->get_first_child(lnidx_ta); */
-  /* auto last_child = lnast->get_last_child(lnidx_ta); */
-  /* auto second_last_child = lnast->get_sibling_prev(last_child); */
-  /* fmt::print("DBG:{} {}\n", lnast->get_vname(second_last_child), lnast->get_vname(first_child)); */
-  /* return lnast->get_vname(second_last_child) == "__bits" && is_input(lnast->get_vname(first_child)); */
-
   for (const auto &child : lnast->children(lnidx_ta)) {
     if (child == lnast->get_first_child(lnidx_ta)) {
       if (is_input(lnast->get_vname(child)))
@@ -976,7 +969,8 @@ Node_pin Lnast_tolg::setup_node_assign_and_lhs(LGraph *lg, const Lnast_nid &lnid
 // should already be in the table as the operand comes from existing operator output
 Node_pin Lnast_tolg::setup_ref_node_dpin(LGraph *lg, const Lnast_nid &lnidx_opd,
                                                       bool from_phi,     bool from_concat,
-                                                      bool from_tupstrc, bool from_assign) {
+                                                      bool from_tupstrc, bool from_assign, 
+                                                      bool want_reg_qpin) {
   auto name  = lnast->get_sname(lnidx_opd); //name = ssa_name
   auto vname = lnast->get_vname(lnidx_opd);
   auto subs  = lnast->get_subs(lnidx_opd);
@@ -984,16 +978,13 @@ Node_pin Lnast_tolg::setup_ref_node_dpin(LGraph *lg, const Lnast_nid &lnidx_opd,
 
   // special case for register, when #x_-1 in rhs, return the reg_qpin, wname #x. Note this is not true for a phi-node.
   
-
   bool reg_existed = name2dpin.find(vname) != name2dpin.end();
   
-  if (is_register(name)) {
-    fmt::print("name:{}, vname:{}, from_phi:{}, from_assign:{}, reg_existed:{}\n", name, vname, from_phi, from_assign, reg_existed);
+  if (is_register(name) && reg_existed && want_reg_qpin) {
+    return name2dpin.find(vname)->second;
   }
 
-
-
-  if (is_register(name) && !from_phi && reg_existed) {
+  if (is_register(name) && reg_existed && !from_phi) {
     if (subs == -1) {
       return name2dpin.find(vname)->second;
     } else if (subs != 0){
@@ -1167,8 +1158,14 @@ void Lnast_tolg::process_ast_attr_get_op(LGraph *lg, const Lnast_nid &lnidx_aget
   auto aget_node = lg->create_node(Ntype_op::AttrGet);
   auto vn_spin   = aget_node.setup_sink_pin("name");  // variable name
   auto af_spin   = aget_node.setup_sink_pin("field"); // attribute field
+  
+  Node_pin vn_dpin;
+  if (attr_field == "__q_pin") {
+    vn_dpin = setup_ref_node_dpin(lg, c1_aget, 0, 0, 0, 0, 1);
+  } else {
+    vn_dpin = setup_ref_node_dpin(lg, c1_aget);
+  }
 
-  auto vn_dpin = setup_ref_node_dpin(lg, c1_aget);
   lg->add_edge(vn_dpin, vn_spin);
 
   auto af_dpin = setup_field_dpin(lg, attr_field);
@@ -1534,7 +1531,6 @@ void Lnast_tolg::try_create_flattened_inp(LGraph *lg) {
     I(tg.get_type_op() == Ntype_op::TupGet);
     auto hier_name = (std::string)tg.get_driver_pin().get_name().substr(1); //get rid of "$" in "$foo"
 
-    fmt::print("start handle chain of TG:{}\n", tg.debug_name());
     for (auto &tg_out : tg.out_edges()) {
       inp_artifacts[tg].emplace_back(tg); // insert the head of the chain
       dfs_try_create_flattened_inp(lg, tg_out.sink, hier_name, tg);

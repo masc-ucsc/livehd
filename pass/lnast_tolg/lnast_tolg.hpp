@@ -62,7 +62,8 @@ protected:
                                           bool from_phi     = false, 
                                           bool from_concat  = false,
                                           bool from_tupstrc = false,
-                                          bool from_assign  = false);
+                                          bool from_assign  = false,
+                                          bool want_reg_qpin = false);
 
   Ntype_op decode_lnast_op           (const Lnast_nid &lnidx_opr);
   void     setup_dpin_ssa            (Node_pin &dpin, std::string_view var_name, uint16_t subs);

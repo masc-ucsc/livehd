@@ -426,7 +426,6 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_attr) {
 
   if (!hier) // FIXME: once hier del works
     node_attr.del_node();
-  fmt::print("DBG: delete dp_assign\n");
 }
 
 void Bitwidth::process_attr_set_new_attr(Node &node_attr) {
@@ -484,10 +483,11 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr) {
                   bw.get_bits(),
                   val.to_i());
     } else {
-      if (bw.is_always_positive())
+      if (bw.is_always_positive()) {
         bw.set_ubits(val.to_i());
-      else
+      } else {
         bw.set_sbits(val.to_i());
+      }
     }
   } else if (attr == Attr::Set_max) {
     I(false);  // FIXME: todo
@@ -572,8 +572,6 @@ void Bitwidth::process_attr_set_propagate(Node &node_attr) {
 
   if (parent_data_pending) {
     data_dpin.set_bits(parent_attr_bw.get_bits());
-    fmt::print("data_dpin:{}\n", data_dpin.debug_name());
-    fmt::print("data_dpin bits:{}\n", data_dpin.get_bits());
     bwmap.emplace(data_dpin.get_compact(), parent_attr_bw);
   }
 
