@@ -29,6 +29,7 @@ Ntype::_init::_init() {
     }
 
     int pid;
+    (void)pid;
     // Check that common case is fine
 
     pid = sink_name2pid['a'][op];
