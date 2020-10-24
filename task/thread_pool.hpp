@@ -12,6 +12,8 @@
 #include <type_traits>
 #include <vector>
 
+#include <iostream>
+
 //#define MPMC
 #ifdef MPMC
 #include "mpmc.hpp"
@@ -61,7 +63,7 @@ class Thread_pool {
     while(!finishing) {
       while(!queue.empty()) {
         next_job()();
-        jobs_left--;
+        jobs_left.fetch_sub(1, std::memory_order_relaxed);
       }
     }
   }
@@ -74,21 +76,28 @@ class Thread_pool {
     job_available_var.wait(job_lock, [this]() -> bool { return !queue.empty() || finishing; });
 
     bool has_work = queue.dequeue(res);
-    if(has_work) {
+    if (has_work) {
       return res;
     }
 
-    jobs_left++; // To not affect the jobs left
+    jobs_left.fetch_add(1, std::memory_order_relaxed);
 
     return [] {}; // Nothing to do
   }
 
   void add_(std::function<void(void)> job) {
+    //static int n_inline=0;
+    //static int n_thread=0;
+    //if (((n_thread+n_inline)&0xFFFF)==0) {
+      //std::cout << "n_thread:" << n_thread << " n_inline:" << n_inline << "\n";
+    //}
     if(jobs_left > 48) {
+      //++n_inline;
       job();
       return;
     }
-    jobs_left++;
+    //++n_thread;
+    jobs_left.fetch_add(1, std::memory_order_relaxed);
     queue.enqueue(job);
     job_available_var.notify_one();
   }
@@ -150,7 +159,7 @@ public:
       bool                      has_work = queue.dequeue(res);
       if(has_work) {
         res();
-        jobs_left--;
+        jobs_left.fetch_sub(1, std::memory_order_relaxed);
       }
     }
   }
