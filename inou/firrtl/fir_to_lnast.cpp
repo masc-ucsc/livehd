@@ -780,7 +780,7 @@ void Inou_firrtl::create_module_inst(Lnast& lnast, const firrtl::FirrtlPB_Statem
       lnast.add_child(idx_asg_bw, Lnast_node::create_const(lnast.add_string(std::to_string(port_bw))));
     }
 
-    if (std::get<3>(name_bw_tup) == true) { // __sign = true
+    if (std::get<3>(name_bw_tup) == false) { // __sign = false
       auto acc_name_s = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(io_name, ".__sign"));
       auto idx_asg_s = lnast.add_child(parent_node, Lnast_node::create_assign(""));
       lnast.add_child(idx_asg_s, Lnast_node::create_ref(acc_name_s));
@@ -1748,11 +1748,11 @@ void Inou_firrtl::ListPortInfo(Lnast& lnast, const firrtl::FirrtlPB_Port& port, 
       lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(std::to_string(port_bits))));
     }
 
-    if (port_sign == true) { // Specify __sign
+    if (port_sign == false) { // Specify __sign
       auto sign_acc_name = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(full_port_name, ".__sign"));
       auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
       lnast.add_child(idx_asg, Lnast_node::create_ref(sign_acc_name));
-      lnast.add_child(idx_asg, Lnast_node::create_const("true"));
+      lnast.add_child(idx_asg, Lnast_node::create_const("false"));
     }
   }
 }
