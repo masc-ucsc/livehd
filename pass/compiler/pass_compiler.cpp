@@ -21,7 +21,7 @@ bool Pass_compiler::check_option_gviz(Eprp_var &var) {
   bool gviz_en; 
   if (var.has_label("gviz")) { 
     auto gv = var.get("gviz"); 
-    gviz_en   = gv != "false" && gv != "0"; 
+    gviz_en = gv != "false" && gv != "0"; 
   } else { 
     gviz_en = false; 
   } 

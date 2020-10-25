@@ -12,23 +12,17 @@ Lcompiler::Lcompiler(std::string_view _path, std::string_view _odir, bool _gviz)
 
 void Lcompiler::add_thread(std::shared_ptr<Lnast> ln) {
   Graphviz gv(true, false, odir);
-  if (gviz) {
+  if (gviz) 
     gv.do_from_lnast(ln, "raw"); // rename dot with postfix raw
-  }
-  fmt::print("-------------------------------------\n");
-  fmt::print("-------- Pyrope -> LNAST-SSA --------\n");
-  fmt::print("-------------------------------------\n");
+  
+  fmt::print("------------------------ Pyrope -> LNAST-SSA ------------------------ (1)\n");
 
   ln->ssa_trans();
 
-  if (gviz) {
+  if (gviz) 
     gv.do_from_lnast(ln);
-  }
 
-
-  fmt::print("-------------------------------------\n");
-  fmt::print("-------- LNAST -> LGraph ------------\n");
-  fmt::print("-------------------------------------\n");
+  fmt::print("------------------------ LNAST-> LGraph ----------------------------- (2)\n");
 
   auto module_name = ln->get_top_module_name();
   Lnast_tolg ln2lg(module_name, path);
@@ -37,9 +31,8 @@ void Lcompiler::add_thread(std::shared_ptr<Lnast> ln) {
   const auto top_stmts = ln->get_first_child(top);
   auto local_lgs = ln2lg.do_tolg(ln, top_stmts);
   if (gviz) {
-    for (const auto &lg : local_lgs) {
+    for (const auto &lg : local_lgs) 
       gv.do_from_lgraph(lg, "raw"); // rename dot with postfix raw
-    }
   }
 
 
@@ -48,32 +41,31 @@ void Lcompiler::add_thread(std::shared_ptr<Lnast> ln) {
     Cprop cp(false); //hier = false
     Bitwidth bw(false, 10); // hier = false, max_iters = 10
 
-    fmt::print("------------------------ Copy-Propagation --------------------------- (1)\n");
-    cp.do_trans(lg);
-    cp.do_trans(lg);
-    cp.do_trans(lg);
-    cp.do_trans(lg);
-    if (gviz) {
-      gv.do_from_lgraph(lg, "no_bits"); // rename dot with postfix raw
-    }
-
-    fmt::print("------------------------ Bitwidth-Inference ------------------------- (2)\n");
-    bw.do_trans(lg);
-    bw.do_trans(lg);
-
     fmt::print("------------------------ Copy-Propagation --------------------------- (3)\n");
     cp.do_trans(lg);
+    cp.do_trans(lg);
+    cp.do_trans(lg);
+    cp.do_trans(lg);
+    if (gviz) 
+      gv.do_from_lgraph(lg, "no_bits"); // rename dot with postfix raw
+    
 
     fmt::print("------------------------ Bitwidth-Inference ------------------------- (4)\n");
     bw.do_trans(lg);
+    bw.do_trans(lg);
 
-    fmt::print("------------------------ Final Copy-Propagation --------------------- (5)\n");
+    fmt::print("------------------------ Copy-Propagation --------------------------- (5)\n");
     cp.do_trans(lg);
 
-    if (gviz) {
-      gv.do_from_lgraph(lg); // rename dot with postfix raw
-    }
+    fmt::print("------------------------ Bitwidth-Inference ------------------------- (6)\n");
+    bw.do_trans(lg);
 
+    fmt::print("------------------------ Final Copy-Propagation --------------------- (7)\n");
+    cp.do_trans(lg);
+
+    if (gviz) 
+      gv.do_from_lgraph(lg); // rename dot with postfix raw
+    
 
     // FIXEME:sh -> todo 
     /* if (cprop.tup_get_left || bw.not_finished) { */
