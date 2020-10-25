@@ -585,9 +585,10 @@ void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index) {
     //this value is preserved with "$"/"%"/"#" so that during "convert_parameters()", we have the char to decide i/p or o/p or reg
     auto ref_map_inst_succ = ref_map.insert(std::pair<std::string_view, std::string>(key, value));
     I(ref_map_inst_succ.second, "\n\nThe ref value was already in the ref_map. Thus redundant keypresent. BUG!\nParent_node : dot\n\n");
+    //works for inou.pyrope input
   } else {
-    absl::StrAppend(&buffer_to_print, indent(), key, " saved as ", lnast_to->ref_name(value), "\n");
-    // this should never be possible
+    absl::StrAppend(&buffer_to_print, indent(), lnast_to->ref_name(value), " = ", key,  "\n");
+    // Works for lnast_fromlg pass input
   }
 
 }
