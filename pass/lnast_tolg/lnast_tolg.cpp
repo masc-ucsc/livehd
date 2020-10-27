@@ -1529,11 +1529,16 @@ void Lnast_tolg::try_create_flattened_inp(LGraph *lg) {
   for (auto &e : uinp.out_edges()) {
     auto tg = e.sink.get_node();
     I(tg.get_type_op() == Ntype_op::TupGet);
-    auto hier_name = (std::string)tg.get_driver_pin().get_name().substr(1); //get rid of "$" in "$foo"
 
+    inp_artifacts[tg.get_compact()].insert(tg); // insert the head of the chain
+    auto hier_name = (std::string)tg.get_driver_pin().get_name().substr(1); //get rid of "$" in "$foo"
     for (auto &tg_out : tg.out_edges()) {
-      inp_artifacts[tg].emplace_back(tg); // insert the head of the chain
       dfs_try_create_flattened_inp(lg, tg_out.sink, hier_name, tg);
+    }
+
+    for (auto itr : inp_artifacts[tg.get_compact()]) {
+      if (!itr.is_invalid())
+        itr.del_node();
     }
   }
 }
@@ -1545,7 +1550,7 @@ void Lnast_tolg::dfs_try_create_flattened_inp(LGraph *lg, Node_pin &cur_node_spi
   bool is_leaf = false;
   std::string new_hier_name;
   if (cur_ntype == Ntype_op::TupGet) {
-    inp_artifacts[chain_head].emplace_back(cur_node); // only remove the artifact tup_gets
+    inp_artifacts[chain_head.get_compact()].insert(cur_node); // only remove the artifact tup_gets
     auto [tup_name, field_name, key_pos] = Cprop::get_tuple_name_key(cur_node);
     if (!field_name.empty()) {
       new_hier_name = absl::StrCat(hier_name, ".", field_name.substr(0, field_name.size()-2));
@@ -1561,7 +1566,7 @@ void Lnast_tolg::dfs_try_create_flattened_inp(LGraph *lg, Node_pin &cur_node_spi
     }
   } else if (cur_ntype == Ntype_op::TupAdd) {
     if (check_is_tup_assign(cur_node)) {
-      inp_artifacts[chain_head].emplace_back(cur_node); 
+      inp_artifacts[chain_head.get_compact()].insert(cur_node); 
       for (auto &e : cur_node.out_edges()) {
         dfs_try_create_flattened_inp(lg, e.sink, hier_name, chain_head);
       }
@@ -1583,31 +1588,8 @@ void Lnast_tolg::dfs_try_create_flattened_inp(LGraph *lg, Node_pin &cur_node_spi
 
     inp2leaf_tg_spins[ginp].emplace_back(cur_node_spin);
 
-    // if can reach leaf, the hierarchy is a scalar, all path assignments (either Or or TA) shold be removed
-    for (auto itr : inp_artifacts[chain_head]) {
-      if (!itr.is_invalid()) 
-        itr.del_node();
-    }
+    // if can reach leaf, the hierarchy is ended as a scalar, all path assignments (either Or or TA) shold be removed later
     return;
   }
 }
-
-
-#if 1
-bool Lnast_tolg::check_is_attrset_ta(Node &node, std::string &var_name, std::string &attr_name, Lconst &bits, Node &chain_head) {
-  auto val_dnode = node.setup_sink_pin("value").get_driver_node();
-  if (val_dnode.get_type_op() == Ntype_op::TupAdd) {
-    auto val_dnode_field_dpin = val_dnode.setup_sink_pin("field").get_driver_node().get_driver_pin();
-    if (val_dnode_field_dpin.get_name().substr(0,6) == "__bits") {
-      var_name = val_dnode.get_driver_pin().get_name();
-      attr_name = val_dnode_field_dpin.get_name();
-      bits = val_dnode.setup_sink_pin("value").get_driver_node().get_type_const();
-      inp_artifacts[chain_head].emplace_back(val_dnode);
-      return true;
-    }
-  }
-  return false;
-}
-#endif
-
 
