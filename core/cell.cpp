@@ -56,6 +56,12 @@ Ntype::_init::_init() {
     pid = sink_name2pid['B'][op];
     assert(pid==-1 || pid == 1);
   }
+
+  int pos=0;
+  for(auto e:cell_name) {
+    cell_name_map[e] = static_cast<Ntype_op>(pos);
+    ++pos;
+  }
 }
 
 constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
