@@ -16,3 +16,17 @@ cc_library(
 )
 
 
+sh_test(
+    name = "pyrope_compile.sh",
+    srcs = ["tests/pyrope_compile.sh"],
+    # tags = ["manual"],
+    # tags = ["fixme"],
+    data = [
+        "//inou/yosys:liblgraph_yosys.so",
+        "//main:lgshell",
+        "//inou/pyrope:pyrope_tests"
+        ],
+    deps = [
+        "//inou/yosys:scripts",
+    ]
+)

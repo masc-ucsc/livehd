@@ -524,14 +524,22 @@ bool Cprop::process_tuple_get(Node &node) {
 
   auto parent_dpin = node.get_sink_pin("tuple_name").get_driver_pin();
   auto parent_node = parent_dpin.get_node();
-
+  auto parent_ntype = parent_node.get_type_op();
   auto [tup_name, key_name, key_pos] = get_tuple_name_key(node);
 
   // special case when TG try to get a scalar variable by accessing pos 0
   // FIXME:sh-> should be handled by tup.is_scalar()
-  if (parent_node.get_type_op() != Ntype_op::TupAdd && key_pos == 0 && !parent_dpin.is_invalid()) {
-    collapse_forward_for_pin(node, parent_dpin);
-    return true;
+  if ( parent_ntype != Ntype_op::TupAdd && parent_ntype != Ntype_op::TupGet) {
+    if (key_pos == 0 && !parent_dpin.is_invalid()) {
+      collapse_forward_for_pin(node, parent_dpin);
+      return true;
+    } else if (key_pos == -1 && key_name!= "__bits_0") {
+      Pass::error("for tuple_get {} parent_node {}, try to get a field {} from a scalar!\n",
+                  node.debug_name(),
+                  parent_node.debug_name(),
+                  key_name);
+      return false;
+    }
   }
 
   // this attr comes from tail of TG chain where the TG tail has been transformed into an AttrSet node.
