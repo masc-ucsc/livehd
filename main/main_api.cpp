@@ -11,7 +11,6 @@ std::string Main_api::main_path;
 
 void setup_inou_code_gen();
 void setup_inou_liveparse();
-void setup_inou_json();
 void setup_inou_pyrope();
 void setup_inou_verific();
 void setup_inou_yosys();
@@ -33,7 +32,6 @@ void Main_api::init() {
   setup_inou_yosys();
   //setup_pass_fplan();
   //setup_pass_lnast_tolg();
-  //setup_inou_json();
   /* setup_inou_verific(); */
   /* setup_cops_live(); */
 

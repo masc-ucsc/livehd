@@ -6,6 +6,7 @@
 #include <array>
 #include <string_view>
 
+#include "absl/container/flat_hash_map.h"
 
 enum class Ntype_op : uint8_t {
   Invalid, // Detect bugs/unset (not used anywhere)
@@ -110,6 +111,9 @@ protected:
 
     "Last_invalid"
   };
+
+  inline static absl::flat_hash_map<std::string, Ntype_op> cell_name_map;
+
   class _init {
   public:
     _init();
@@ -230,6 +234,13 @@ public:
 
   static std::string_view get_name(Ntype_op op) {
     return cell_name[static_cast<int>(op)];
+  }
+
+  static Ntype_op get_op(std::string_view name) {
+    const auto it = cell_name_map.find(name);
+    if (it == cell_name_map.end())
+      return Ntype_op::Invalid;
+    return it->second;
   }
 
 };
