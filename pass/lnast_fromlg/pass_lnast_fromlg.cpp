@@ -233,20 +233,18 @@ void Pass_lnast_fromlg::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node, co
 
 void Pass_lnast_fromlg::add_bw_in_ln(Lnast& lnast, Lnast_nid& parent_node, const std::string_view& pin_name, const uint32_t& bits) {
 /*creates subtree in LN for the "dot" and corresponding "assign" to depict bw
- *            dot                    assign
- *     /       |      \               /    \
- *const(bits) pin_name __bits                              --> updated
- * tmp_var    pin_name __bits     tmp_var  const(bits)     --> outdated*/
-  //auto tmp_var = create_temp_var(lnast);
+ *          dot                    assign
+ *     /     |     \               /    \
+ * tmp_var pin_name __bits     tmp_var  const(bits)  */
+  auto tmp_var = create_temp_var(lnast);
   auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_dot(""));
-  //lnast.add_child(idx_dot, Lnast_node::create_ref(tmp_var));
-  lnast.add_child(idx_dot, Lnast_node::create_const(lnast.add_string(std::to_string(bits))));
+  lnast.add_child(idx_dot, Lnast_node::create_ref(tmp_var));
   lnast.add_child(idx_dot, Lnast_node::create_ref(lnast.add_string(pin_name)));
   lnast.add_child(idx_dot, Lnast_node::create_ref("__bits"));
 
-  //auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
-  //lnast.add_child(idx_asg, Lnast_node::create_ref(tmp_var));
-  //lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(std::to_string(bits))));
+  auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
+  lnast.add_child(idx_asg, Lnast_node::create_ref(tmp_var));
+  lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(std::to_string(bits))));
 }
 
 void Pass_lnast_fromlg::handle_io(LGraph* lg, Lnast_nid& parent_lnast_node, Lnast& lnast) {
