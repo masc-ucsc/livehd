@@ -331,7 +331,6 @@ void Lgtuple::analyze_graph_output(absl::flat_hash_map<std::string, Node_pin> &g
     }
 
     if (is_valid_val_dpin()) {
-      fmt::print("hier-name:{}, val_dpin:{}\n", new_hier_name, val_dpin.debug_name());
       gout2driver.insert_or_assign(new_hier_name, val_dpin);
       return;
     }

@@ -1,5 +1,3 @@
-$inp.__bits  = 3
-$inp2.__bits = 4
-
-%out.__bits = 6
-%out = $inp + $inp2
+a = $inp
+tmp = a.foo + a.bar
+%out = tmp
