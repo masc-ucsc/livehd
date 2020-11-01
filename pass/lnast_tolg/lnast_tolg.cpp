@@ -1214,13 +1214,12 @@ void Lnast_tolg::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_v
         }
 
         tn_dpin.connect_sink(tn_spin);
-        auto subname_ssa = absl::StrCat(subname, "_0");
-        auto field_dpin = setup_field_dpin(lg, subname_ssa);
+        auto field_dpin = setup_field_dpin(lg, subname);
         field_dpin.connect_sink(field_spin);
 
         // note: for scalar input, front() == back()
         if (&subname == &hier_inp_subnames.back()) {
-          auto subg_spin = subg_node.setup_sink_pin(io_pin.name);
+          auto subg_spin = subg_node.setup_sink_pin(io_pin.name); // FIXME->sh: no corresponding pin by real name, Jose?
           tup_get.setup_driver_pin().connect_sink(subg_spin);
         }
         created_tup_gets.emplace_back(tup_get.get_driver_pin());
@@ -1229,7 +1228,7 @@ void Lnast_tolg::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_v
     }
 
     if (subg_outp_is_scalar) {
-      auto io_name_ssa = absl::StrCat(io_pin.name, "_0");
+      /* auto io_name_ssa = absl::StrCat(io_pin.name, "_0"); //DBG */
       auto subg_dpin = subg_node.setup_driver_pin(io_pin.name);
       auto scalar_node = lg->create_node(Ntype_op::Or);
       auto scalar_dpin = scalar_node.setup_driver_pin();
@@ -1271,8 +1270,8 @@ void Lnast_tolg::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_v
     auto tn_dpin = setup_tuple_ref(lg, res_name);
     tn_dpin.connect_sink(tn_spin);
 
-    auto io_name_ssa = absl::StrCat(io_pin.name, "_0");
-    auto field_dpin = setup_field_dpin(lg, io_name_ssa);
+    /* auto io_name_ssa = absl::StrCat(io_pin.name, "_0"); */
+    auto field_dpin = setup_field_dpin(lg, io_pin.name);
     field_dpin.connect_sink(field_spin);
 
     auto subg_dpin = subg_node.setup_driver_pin(io_pin.name);

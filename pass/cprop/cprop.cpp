@@ -841,6 +841,7 @@ void Cprop::try_create_graph_output(LGraph *lg, std::shared_ptr<Lgtuple> tup) {
   tup->analyze_graph_output(gout2driver, "");
 
   for (const auto &it : gout2driver) {
+    fmt::print("new added graph output name:{}\n", it.first);
     if (!lg->is_graph_output(it.first)) {
       auto flattened_gout = lg->add_graph_output(it.first, Port_invalid, 0);
       it.second.connect_sink(flattened_gout);
