@@ -159,8 +159,12 @@ void Pass_lnast_fromlg::handle_source_node(LGraph* lg, Node_pin& pin, Lnast& lna
   for (const auto& inp : pin.get_node().inp_edges()) {
     auto editable_pin = inp.driver;
     I(!inp.driver.get_node().is_hierarchical());
-    if (editable_pin.get_node().get_color() == WHITE || editable_pin.get_node().get_color() == GREY) {
+    //if (editable_pin.get_node().get_color() == WHITE || editable_pin.get_node().get_color() == GREY) {
+    if (editable_pin.get_node().get_color() == WHITE) {
       handle_source_node(lg, editable_pin, lnast, ln_node);
+    }
+    if (editable_pin.get_node().get_color() == GREY) {
+      continue;
     }
     I(editable_pin.get_node().get_color() == BLACK);
   }
