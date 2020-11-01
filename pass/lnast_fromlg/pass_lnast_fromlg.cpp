@@ -164,6 +164,9 @@ void Pass_lnast_fromlg::handle_source_node(LGraph* lg, Node_pin& pin, Lnast& lna
       handle_source_node(lg, editable_pin, lnast, ln_node);
     }
     if (editable_pin.get_node().get_color() == GREY) {
+      /* if the node is grey, then we have recursively reached here.
+       * Need not process that node in another handle_source_node()
+       * Hence reached here as a result of loop in lgraph. */
       continue;
     }
     I(editable_pin.get_node().get_color() == BLACK);
