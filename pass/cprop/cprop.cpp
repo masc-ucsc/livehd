@@ -435,17 +435,17 @@ void Cprop::process_subgraph(Node &node) {
 
 #if 1
   Port_ID instance_pid = 0;
-  for (const auto &io_pin : sub->get_io_pins()) {
+  for (const auto *io_pin : sub->get_io_pins()) {
     instance_pid++;
-    if (io_pin.is_input())
+    if (io_pin->is_input())
       continue;
-    if (out->has_key_name(io_pin.name)) {
-      fmt::print("replace io_pin:{}\n", io_pin.name);
+    if (out->has_key_name(io_pin->name)) {
+      fmt::print("replace io_pin:{}\n", io_pin->name);
     } else {
-      fmt::print("disconnected io_pin:{}\n", io_pin.name);
+      fmt::print("disconnected io_pin:{}\n", io_pin->name);
     }
 
-    fmt::print("iopin:{} pos:{} instance_pid:{}...\n", io_pin.name, io_pin.graph_io_pos, instance_pid);
+    fmt::print("iopin:{} pos:{} instance_pid:{}...\n", io_pin->name, io_pin->graph_io_pos, instance_pid);
   }
 #endif
 }

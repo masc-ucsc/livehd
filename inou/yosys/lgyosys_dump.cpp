@@ -123,12 +123,12 @@ void Lgyosys_dump::create_blackbox(const Sub_node &sub, RTLIL::Design *design) {
   design->add(mod);
 
   int port_id = 0;
-  for (const auto &io_pin : sub.get_io_pins()) { // no need to be sorted if pins are named
-    //fmt::print("bbox:{} name:{}\n", sub.get_name(), io_pin.name);
-    std::string  name = absl::StrCat("\\", io_pin.name);
+  for (const auto *io_pin : sub.get_io_pins()) { // no need to be sorted if pins are named
+    //fmt::print("bbox:{} name:{}\n", sub.get_name(), io_pin->name);
+    std::string  name = absl::StrCat("\\", io_pin->name);
     RTLIL::Wire *wire = mod->addWire(name);  // , pin.get_bits());
     wire->port_id     = port_id++;
-    if (io_pin.is_input()) {
+    if (io_pin->is_input()) {
       wire->port_input  = false;
       wire->port_output = true;
     } else {
