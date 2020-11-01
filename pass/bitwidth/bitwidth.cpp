@@ -191,8 +191,6 @@ void Bitwidth::process_sum(Node &node, XEdge_iterator &inp_edges) {
         max_val = max_val + it->second.get_max();
         min_val = min_val + it->second.get_min();
       } else {
-        fmt::print("max_val:{}, pmax_val:{}\n", max_val.to_i(), it->second.get_max().to_i());
-        fmt::print("min_val:{}, pmin_val:{}\n", min_val.to_i(), it->second.get_min().to_i());
         max_val = max_val - it->second.get_min();
         min_val = min_val - it->second.get_max();
       }
@@ -411,7 +409,7 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_attr) {
       auto mask_node = node_attr.get_class_lgraph()->create_node(Ntype_op::And);
       auto mask_dpin  = mask_node.get_driver_pin();
       auto mask_const = (Lconst(1) << Lconst(bw_lhs.get_bits())) - 1;
-      fmt::print("mask_const:{}\n", mask_const.to_pyrope());
+      /* fmt::print("mask_const:{}\n", mask_const.to_pyrope()); */
       auto all_one_node = node_attr.get_class_lgraph()->create_node_const(mask_const);
       auto all_one_dpin = all_one_node.setup_driver_pin();
       mask_dpin.set_bits(bw_lhs.get_bits()); //FIXME: instead of set bits directly, try to using (max, min) so the final bits could be optimized no matter signed or unsigned

@@ -533,7 +533,7 @@ bool Cprop::process_tuple_get(Node &node) {
     if (key_pos == 0 && !parent_dpin.is_invalid()) {
       collapse_forward_for_pin(node, parent_dpin);
       return true;
-    } else if (key_pos == -1 && key_name!= "__bits_0") {
+    } else if (key_pos == -1 && key_name!= "__bits") {
       Pass::error("for tuple_get {} parent_node {}, try to get a field {} from a scalar!\n",
                   node.debug_name(),
                   parent_node.debug_name(),
@@ -828,7 +828,6 @@ void Cprop::do_trans(LGraph *lg) {
   //remove unified output % if fully resolved
   if (lg->is_graph_output("%")) {
     auto uout = lg->get_graph_output("%");
-    fmt::print("uout:{}\n", uout.debug_name());
     if (!uout.has_inputs()) {
       uout.get_non_hierarchical().del();
     }
@@ -847,7 +846,6 @@ void Cprop::try_create_graph_output(LGraph *lg, std::shared_ptr<Lgtuple> tup) {
       it.second.connect_sink(flattened_gout);
     }
   }
-  fmt::print("output generation finished\n");
 }
 
 void Cprop::dump_node2tuples() const {
