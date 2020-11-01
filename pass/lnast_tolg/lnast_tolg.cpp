@@ -352,8 +352,8 @@ void Lnast_tolg::process_ast_dp_assign_op(LGraph *lg, const Lnast_nid &lnidx_dp_
 
   auto vn_dpin = setup_ref_node_dpin(lg, c1_dp);
   lg->add_edge(vn_dpin, vn_spin);
-  auto an_dpin = setup_field_dpin(lg, attr_vname);
-  lg->add_edge(an_dpin, af_spin);
+  auto af_dpin = setup_field_dpin(lg, attr_vname);
+  lg->add_edge(af_dpin, af_spin);
 
 
   auto dp_ancestor_subs  = lnast->get_data(c0_dp).subs - 1;
@@ -403,7 +403,7 @@ void Lnast_tolg::process_ast_tuple_struct(LGraph *lg, const Lnast_nid &lnidx_tup
     if (lnast->get_type(tup_child).is_assign()) {
       auto c0       = lnast->get_first_child(tup_child);
       auto c1       = lnast->get_sibling_next(c0);
-      auto field_name = lnast->get_sname(c0);
+      auto field_name = lnast->get_vname(c0);
 
       auto tn_dpin    = setup_tuple_ref(lg, tup_name);
       auto fp_dnode   = lg->create_node_const(Lconst(fp));
@@ -526,7 +526,7 @@ void Lnast_tolg::process_ast_tuple_get_op(LGraph *lg, const Lnast_nid &lnidx_tg)
     // i >= 2
     if (child == lnast->get_last_child(lnidx_tg)) {
       const auto& cn_tg = child;
-      auto cn_tg_name = lnast->get_sname(cn_tg);
+      auto cn_tg_name = lnast->get_vname(cn_tg);
       auto tup_get = tg_map[i-1];
       auto field_spin = tup_get.setup_sink_pin("field");
       auto field_pos_spin = tup_get.setup_sink_pin("position");
@@ -567,7 +567,7 @@ void Lnast_tolg::process_ast_tuple_get_op(LGraph *lg, const Lnast_nid &lnidx_tg)
 
 
       const auto& cn_tg = child;
-      auto cn_tg_name = lnast->get_sname(cn_tg);
+      auto cn_tg_name = lnast->get_vname(cn_tg); 
       auto prev_tup_get = tg_map[i-1];
       auto field_spin = prev_tup_get.setup_sink_pin("field");
       auto field_pos_spin = prev_tup_get.setup_sink_pin("position");
@@ -659,11 +659,6 @@ void Lnast_tolg::process_ast_tuple_add_op(LGraph *lg, const Lnast_nid &lnidx_ta)
       const auto &c0_ta = child;
       auto tup_name = lnast->get_sname(c0_ta);
 
-      /* if (is_input(tup_name)) { */
-      /*   tup_name = lnast->get_vname(c0_ta); */
-      /*   create_inp_tg(lg, tup_name); */ 
-      /* } */
-
       auto tup_add  = lg->create_node(Ntype_op::TupAdd);
       auto tn_spin  = tup_add.setup_sink_pin("tuple_name");
       auto tn_dpin  = setup_tuple_ref(lg, tup_name);
@@ -686,9 +681,9 @@ void Lnast_tolg::process_ast_tuple_add_op(LGraph *lg, const Lnast_nid &lnidx_ta)
     if (i == 1) {
       const auto &c1_ta = child;
       auto tup_add = ta_map[i-1];
-      auto field_spin = tup_add.setup_sink_pin("field"); //field name
-      auto field_pos_spin = tup_add.setup_sink_pin("position"); //field pos
-      auto field_name = lnast->get_sname(c1_ta);
+      auto field_spin = tup_add.setup_sink_pin("field"); 
+      auto field_pos_spin = tup_add.setup_sink_pin("position"); 
+      auto field_name = lnast->get_vname(c1_ta); 
       Node_pin field_dpin;
       if (is_const(field_name)) { // it is a key_pos, not a field_name
         auto field_pos_dpin = lg->create_node_const(Lconst(field_name)).setup_driver_pin();
@@ -738,7 +733,7 @@ void Lnast_tolg::process_ast_tuple_add_op(LGraph *lg, const Lnast_nid &lnidx_ta)
       // setup key for the new tuple chain head
       auto field_spin = tup_add.setup_sink_pin("field");    //field name
       auto field_pos_spin = tup_add.setup_sink_pin("position"); //field position
-      auto field_name = lnast->get_sname(cn_ta);
+      auto field_name = lnast->get_vname(cn_ta); 
       Node_pin field_dpin;
       if (is_const(field_name)) { // it is a key_pos, not a field_name
         auto field_pos_dpin = lg->create_node_const(Lconst(field_name)).setup_driver_pin();
@@ -1553,7 +1548,7 @@ void Lnast_tolg::dfs_try_create_flattened_inp(LGraph *lg, Node_pin &cur_node_spi
     inp_artifacts[chain_head.get_compact()].insert(cur_node); // only remove the artifact tup_gets
     auto [tup_name, field_name, key_pos] = Cprop::get_tuple_name_key(cur_node);
     if (!field_name.empty()) {
-      new_hier_name = absl::StrCat(hier_name, ".", field_name.substr(0, field_name.size()-2));
+      new_hier_name = absl::StrCat(hier_name, ".", field_name);
     } else {
       new_hier_name = absl::StrCat(hier_name, ".", key_pos);
     }
