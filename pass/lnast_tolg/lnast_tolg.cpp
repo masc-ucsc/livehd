@@ -118,22 +118,19 @@ void Lnast_tolg::process_ast_phi_op(LGraph *lg, const Lnast_nid &lnidx_phi) {
   auto false_spin = phi_node.setup_sink_pin("1");
 
   auto lhs = lnast->get_first_child(lnidx_phi);
-  auto c1 = lnast->get_sibling_next(lhs);
-  auto c2 = lnast->get_sibling_next(c1);
-  auto c3 = lnast->get_sibling_next(c2);
-  auto lhs_name = lnast->get_sname(lhs);
-  auto c2_name = lnast->get_sname(c2);
-  auto c3_name = lnast->get_sname(c3);
+  auto c1  = lnast->get_sibling_next(lhs);
+  auto c2  = lnast->get_sibling_next(c1);
+  auto c3  = lnast->get_sibling_next(c2);
+  auto lhs_sname = lnast->get_sname(lhs);
+  auto lhs_vname = lnast->get_vname(lhs);
+  auto c2_vname  = lnast->get_vname(c2);
+  auto c3_vname  = lnast->get_vname(c3);
 
   auto cond_dpin   = setup_ref_node_dpin(lg, c1);
   Node_pin true_dpin;
   Node_pin false_dpin;
-  if (c2_name == "register_forwarding_0") {
-    // referece sibling's info to get the root reg qpin
-    auto reg_name = c3_name.substr();
-
-    auto pos = reg_name.find_last_of('_');
-    auto reg_qpin_name = lhs_name.substr(0,pos);
+  if (c2_vname == "register_forwarding") {
+    auto reg_qpin_name = lhs_vname;
 
     I(name2dpin.count(reg_qpin_name)!=0);
     auto reg_qpin = name2dpin[reg_qpin_name];
@@ -142,11 +139,8 @@ void Lnast_tolg::process_ast_phi_op(LGraph *lg, const Lnast_nid &lnidx_phi) {
     true_dpin = setup_ref_node_dpin(lg, c2, true);
   }
 
-  if (c3_name == "register_forwarding_0") {
-    // referece sibling's info to get the root reg qpin
-    auto reg_name = c2_name.substr();
-    auto pos = reg_name.find_last_of('_');
-    auto reg_qpin_name = lhs_name.substr(0,pos);
+  if (c3_vname == "register_forwarding") {
+    auto reg_qpin_name = lhs_vname;
     I(name2dpin.count(reg_qpin_name)!=0);
     auto reg_qpin = name2dpin[reg_qpin_name];
     false_dpin = reg_qpin;
@@ -161,10 +155,9 @@ void Lnast_tolg::process_ast_phi_op(LGraph *lg, const Lnast_nid &lnidx_phi) {
   lg->add_edge(true_dpin,  true_spin);
   lg->add_edge(false_dpin, false_spin);
 
-  if (is_register(lhs_name)){
+  if (is_register(lhs_vname)){
     // (1) find the corresponding #reg and its qpin, wname = #reg
-    auto pos = lhs_name.find_last_of('_');
-    auto reg_qpin_name = lhs_name.substr(0,pos);
+    auto reg_qpin_name = lhs_vname;
     I(name2dpin.count(reg_qpin_name));
     auto reg_qpin = name2dpin[reg_qpin_name];
 
@@ -181,10 +174,9 @@ void Lnast_tolg::process_ast_phi_op(LGraph *lg, const Lnast_nid &lnidx_phi) {
     lg->add_edge(dpin, spin);
   }
 
-  name2dpin[lhs_name] = phi_node.setup_driver_pin();
-  phi_node.setup_driver_pin().set_name(lhs_name);
-  auto lhs_name_no_ssa = lnast->get_vname(lhs);
-  setup_dpin_ssa(name2dpin[lhs_name], lhs_name_no_ssa, lnast->get_subs(lhs));
+  name2dpin[lhs_sname] = phi_node.setup_driver_pin();
+  phi_node.setup_driver_pin().set_name(lhs_sname);
+  setup_dpin_ssa(name2dpin[lhs_sname], lhs_vname, lnast->get_subs(lhs));
 }
 
 
@@ -1206,6 +1198,7 @@ void Lnast_tolg::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_v
   for (const auto &io_pin : sub->get_io_pins()) {
     // 2020/8/28: support hier-tuple-inpuputs
     if (io_pin.is_input()) {
+      fmt::print("subgraph $input:{}\n", io_pin.name);
       std::vector<Node_pin> created_tup_gets;
       auto hier_inp_subnames = split_hier_name(io_pin.name);
       for (const auto& subname : hier_inp_subnames) {
@@ -1268,10 +1261,11 @@ void Lnast_tolg::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_v
       continue;
     }
 
+    fmt::print("subgraph %output:{}\n", io_pin.name);
     // subgraph output
     auto tup_add    = lg->create_node(Ntype_op::TupAdd);
     auto tn_spin    = tup_add.setup_sink_pin("tuple_name"); //tuple name
-    auto field_spin    = tup_add.setup_sink_pin("field"); 
+    auto field_spin = tup_add.setup_sink_pin("field"); 
     auto value_spin = tup_add.setup_sink_pin("value"); 
 
     auto tn_dpin = setup_tuple_ref(lg, res_name);
@@ -1444,7 +1438,7 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(LGraph *lg) {
     }
 
     if (ntype == Ntype_op::TupAdd && !node.has_outputs() && is_output(dpin.get_name())) {
-      create_out_ta(lg, dpin.get_name(), dpin);
+      create_out_ta(lg, dpin.get_prp_vname(), dpin);
       continue;
     }
 
@@ -1467,10 +1461,10 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(LGraph *lg) {
 
   //create scalar graph outputs or set the final variable name based on vname table
   for (auto const&[vname, vname_dpin] : vname2dpin) {
-    auto dpin_name = vname_dpin.get_name();
-    if (is_output(dpin_name) && vname_dpin.get_node().get_type_op() != Ntype_op::TupAdd) {
+    auto dpin_vname = vname_dpin.get_prp_vname();
+    if (is_output(dpin_vname) && vname_dpin.get_node().get_type_op() != Ntype_op::TupAdd) {
       auto edible_dpin = vname_dpin;
-      create_out_ta(lg, dpin_name, edible_dpin);
+      create_out_ta(lg, dpin_vname, edible_dpin);
       continue;
     }
 

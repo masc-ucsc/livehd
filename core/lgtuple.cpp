@@ -321,13 +321,12 @@ void Lgtuple::dump(std::string_view indent) const {
 void Lgtuple::analyze_graph_output(absl::flat_hash_map<std::string, Node_pin> &gout2driver, std::string base_name) const {
   std::string new_hier_name;
   if (hier_parent_key_name != "%") {
-    auto pos = hier_parent_key_name.find_last_of('_');
 
 
     if (hier_parent_key_name[0] == '%') {
-      new_hier_name = hier_parent_key_name.substr(1, pos-1);
+      new_hier_name = hier_parent_key_name.substr(1);
     } else {
-      new_hier_name = absl::StrCat(base_name, ".", hier_parent_key_name.substr(0, pos));
+      new_hier_name = absl::StrCat(base_name, ".", hier_parent_key_name);
     }
 
     if (is_valid_val_dpin()) {
