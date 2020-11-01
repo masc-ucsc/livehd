@@ -344,9 +344,15 @@ public:
   size_t size() const { return io_pins.size() - 1; };
 
   // Returns a span/vector-like array of all the pins. If the pin was deleted, there may be a pin witout name and position.
-  const absl::Span<const IO_pin> get_io_pins() const {
+  const std::vector<const IO_pin *> get_io_pins() const {
     I(io_pins.size() >= 1);
-    return absl::MakeSpan(io_pins).subspan(1);
+    std::vector<const IO_pin *> v;
+    for(const auto &e:io_pins) {
+      if (e.is_invalid())
+        continue;
+      v.emplace_back(&e);
+    }
+    return v;
   }
 
   std::vector<IO_pin> get_sorted_io_pins() const;

@@ -48,15 +48,13 @@ LGraph *LGraph::clone_skeleton(std::string_view extended_name) {
   auto *new_sub = new_lg->ref_self_sub_node();
   new_sub->reset_pins();  // NOTE: it may have been created before. Clear to keep same order/attributes
 
-  for (const auto &old_io_pin : get_self_sub_node().get_io_pins()) {
-    if (old_io_pin.is_invalid())
-      continue;
-    if (old_io_pin.is_input()) {
-      auto old_dpin = get_graph_input(old_io_pin.name);
-      new_lg->add_graph_input(old_io_pin.name, old_io_pin.graph_io_pos, old_dpin.get_bits());
+  for (const auto *old_io_pin : get_self_sub_node().get_io_pins()) {
+    if (old_io_pin->is_input()) {
+      auto old_dpin = get_graph_input(old_io_pin->name);
+      new_lg->add_graph_input(old_io_pin->name, old_io_pin->graph_io_pos, old_dpin.get_bits());
     }else{
-      auto old_dpin = get_graph_output(old_io_pin.name);
-      new_lg->add_graph_output(old_io_pin.name, old_io_pin.graph_io_pos, old_dpin.get_bits());
+      auto old_dpin = get_graph_output(old_io_pin->name);
+      new_lg->add_graph_output(old_io_pin->name, old_io_pin->graph_io_pos, old_dpin.get_bits());
     }
   }
 
@@ -1349,12 +1347,12 @@ void LGraph::dump() {
   return;
 #endif
 
-  for (const auto &io_pin : get_self_sub_node().get_io_pins()) {
+  for (const auto *io_pin : get_self_sub_node().get_io_pins()) {
     fmt::print("io {} pos:{} pid:{} {}\n",
-               io_pin.name,
-               io_pin.graph_io_pos,
-               get_self_sub_node().get_instance_pid(io_pin.name),
-               io_pin.dir == Sub_node::Direction::Input ? "input" : "output");
+               io_pin->name,
+               io_pin->graph_io_pos,
+               get_self_sub_node().get_instance_pid(io_pin->name),
+               io_pin->dir == Sub_node::Direction::Input ? "input" : "output");
   }
 
 #if 1
