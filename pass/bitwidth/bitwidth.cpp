@@ -539,10 +539,10 @@ void Bitwidth::process_attr_set_propagate(Node &node_attr) {
   }
   const auto parent_attr_bw = parent_attr_it->second;
 
-  fmt::print("attr_set_prop name:{} parent_attr.bits:{} data_bw.bits:{}\n",
-             dpin_name,
-             parent_attr_bw.get_bits(),
-             data_bw.get_bits());
+  /* fmt::print("attr_set_prop name:{} parent_attr.bits:{} data_bw.bits:{}\n", */
+  /*            dpin_name, */
+  /*            parent_attr_bw.get_bits(), */
+  /*            data_bw.get_bits()); */
 
   if (parent_attr_bw.get_bits() && data_bw.get_bits()) {
     if (parent_attr_bw.get_bits() < data_bw.get_bits()) {

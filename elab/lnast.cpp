@@ -74,7 +74,6 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
 
 
   fmt::print("LNAST SSA Transformation Finished!\n");
-  fmt::print("====================================\n");
 }
 
 
@@ -818,7 +817,6 @@ void Lnast::resolve_phi_nodes(const Lnast_nid &cond_nid, Phi_rtable &true_table,
 
   std::vector<std::string_view> key_list;
   for (auto const&[key, val] : true_table) {
-    fmt::print("true table content: key->{}, value->{}\n", key, get_token(val).get_text());
     if (true_table.empty()) // it might be empty due to the erase from previous for loop
       break;
 

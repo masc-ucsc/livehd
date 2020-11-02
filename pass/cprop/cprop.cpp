@@ -584,10 +584,10 @@ bool Cprop::process_tuple_get(Node &node) {
     return false; // Could not resolve (maybe compile error, maybe hierarchical needed)
   }
 
-  fmt::print("top ---------\n");
-  ctup->dump();
-  fmt::print("sub ---------\n");
-  sub_tup->dump();
+  /* fmt::print("top ---------\n"); */
+  /* ctup->dump(); */
+  /* fmt::print("sub ---------\n"); */
+  /* sub_tup->dump(); */
 
   // still unclear if the TupGet chain is resolved (final TupGet will decide)
   if (!sub_tup->is_valid_val_dpin()) { 
@@ -736,7 +736,6 @@ void Cprop::process_tuple_add(Node &node) {
   //FIXME: should move to line 785 to avoid checking every TA, be there is a bug in line 785??
   if (node.out_edges().begin()->sink.is_graph_output()) {
     auto lg = node.get_class_lgraph();
-    fmt::print("\ntry create graph output from node:{}\n", node.debug_name());
     try_create_graph_output(lg, ctup);
   }
 }
@@ -747,7 +746,7 @@ void Cprop::do_trans(LGraph *lg) {
   bool tup_get_left = false;
 
   for (auto node : lg->forward()) {
-    /* fmt::print("DBG:current node->{}\n", node.debug_name()); */
+    /* fmt::print("current node->{}\n", node.debug_name()); */
     auto op = node.get_type_op();
 
     // Special cases to handle in cprop
@@ -841,7 +840,6 @@ void Cprop::try_create_graph_output(LGraph *lg, std::shared_ptr<Lgtuple> tup) {
   tup->analyze_graph_output(gout2driver, "");
 
   for (const auto &it : gout2driver) {
-    fmt::print("new added graph output name:{}\n", it.first);
     if (!lg->is_graph_output(it.first)) {
       auto flattened_gout = lg->add_graph_output(it.first, Port_invalid, 0);
       it.second.connect_sink(flattened_gout);
