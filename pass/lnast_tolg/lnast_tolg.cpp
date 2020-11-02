@@ -1425,6 +1425,9 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(LGraph *lg) {
     auto dpin  = node.get_driver_pin("Y");
     auto ntype = node.get_type_op();
 
+    if (ntype == Ntype_op::Sub || ntype == Ntype_op::TupKey)
+      continue;
+
     // connect hier-tuple-inputs and scalar input from the unified input $
     if (ntype == Ntype_op::TupRef && is_input(dpin.get_name())) {
       node.set_type(Ntype_op::TupGet); //change node semantic: TupRef -> TupGet
