@@ -5,20 +5,33 @@
 #  cmake ../
 #  make
 #  cp -a source/* ../../slang/generated
+#  rm the llvm source/codegen/
 #  cd ../../slang
 #  rm -rf ../slang_orig/build
 #  mkpatch ../slang_orig .
 cc_library(
    name = "slang",
-   srcs = glob(["source/**/*.cpp", "generated/*.cpp", "generated/**/*.cpp"]),
+   srcs = glob(["source/**/*.cpp",
+                "generated/*.cpp",
+                "external/xxhash/*.cpp",
+                "generated/**/*.cpp"],
+                exclude=[
+                 "source/codegen/CGExpr.cpp",
+                 "source/codegen/CGSysCall.cpp",
+                 "source/codegen/CodeGenerator.cpp",
+                 "source/codegen/CodeGenFunction.cpp",
+                 "source/codegen/CodeGenTypes.cpp",
+                 "source/codegen/JIT.cpp",
+               ]),
    hdrs = glob(["source/**/*.h",
                 "include/slang/**/*.h",
                 "generated/slang/**/*.h",
                 "generated/source/slang/**/*.h",
                 "external/*.hpp",
                 "external/gsl/*",
+                "external/fmt/*.h",
+                "external/fmt/*.cc",
                 "external/xxhash/*.h",
-                "external/xxhash/*.cpp",
                 "external/ieee1800/*.h",
               ]),
    includes = [ "include", "external", "generated" ,"generated/source"], # Needed because some includes use <foo.h>
