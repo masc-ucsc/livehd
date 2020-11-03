@@ -10,8 +10,8 @@
 #include "slang/syntax/SyntaxPrinter.h"
 #include "slang/syntax/SyntaxTree.h"
 #include "lnast.hpp"
-
-
+#include <vector>
+#include <string.h>
 class Lnast_visitor : public slang::ASTVisitor<Lnast_visitor, false, false> {
 protected:
   slang::Compilation& compilation;
@@ -20,6 +20,8 @@ protected:
   uint32_t errorLimit;
   uint32_t hierarchyDepth = 0;
   std::unique_ptr<Lnast> lnast;
+  std::vector<std::string> verilogList;
+  std::vector<std::string> operandList;
 
 public:
   Lnast_visitor(slang::Compilation& _compilation, const size_t& _numErrors, uint32_t _errorLimit);
@@ -64,6 +66,7 @@ public:
   void handle(const slang::VariableDeclStatement& stmt);
   void handle(const slang::ContinuousAssignSymbol& symbol);
 	void handle(const slang::AssignmentExpression& expr);
+  void handle(const slang::Expression& expr);
   void handle(const slang::ExpressionStatement& expr);
 	void handle(const slang::StatementBlockSymbol& symbol);
 	void handle(const slang::ProceduralBlockSymbol& expr);

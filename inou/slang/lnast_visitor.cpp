@@ -1,6 +1,6 @@
 
 #include "lnast_visitor.hpp"
-
+#include <iostream>
 #include "iassert.hpp"
 
 using namespace slang; // just inside this file
@@ -63,199 +63,225 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
   auto idx_assign  = lnast->add_child(idx_stmts,  node_dpa);
   Lnast_nid idx;
   fmt::print("check\n");
-  const auto &lhs =  expr.left();
+  const auto &lhs =  expr.left(); //slang::Expression
   const auto &rhs =  expr.right();
+
     if (lhs.kind == ExpressionKind::NamedValue) {
       const auto &var = lhs.as<NamedValueExpression>();
+      
       fmt::print("bits:{} {} =  ", var.type->getBitWidth(), var.symbol.name);
+      operandList.emplace_back(var.symbol.name);
       auto idx_lhs  = lnast->add_child(idx_assign, Lnast_node::create_ref(var.symbol.name)); // string_view = %out
     } else {
       fmt::print("TODO. What is this");
     }
-    if (rhs.kind==ExpressionKind::UnaryOp){
-      const auto &op1 = rhs.as<UnaryExpression>();
+    fmt::print("Started recursion\n");
+    handle(expr.right());
+    fmt::print("Finished recursion\n");
 
-      //const auto check=getBinaryExpression(temp.kind);
-      fmt::print("UnaryOperator: {} {} \n",rhs.kind,op1.op);
-      //auto idx_lhs  = lnast->add_child(idx_assign, Lnast_node::create_ref(op1.op)); // string_view = %out
-      
-      switch (op1.op) {
-        case (UnaryOperator::Plus):
-          {
-            fmt::print("UnaryOperator: + \n");
-            break;
-          }
-        case (UnaryOperator::Minus):
-          {
-            fmt::print("UnaryOperator: - \n");
-            break;
-          }
-        case (UnaryOperator::BitwiseNot):
-          {
-            idx = lnast->add_child(idx_stmts, Lnast_node::create_not("BitNot"));
-            fmt::print("UnaryOperator: ~ \n");
-            break;
-          }
-        case (UnaryOperator::BitwiseAnd):
-          {
-            fmt::print("UnaryOperator: & \n");
+    //check verilog list
+    fmt::print("printing operator recursion\n");
+    for (auto it = verilogList.begin(); it != verilogList.end(); ++it)
+          std::cout << " " << *it;
+    fmt::print("printing operand recursion\n");
+    for (auto it = operandList.begin(); it != operandList.end(); ++it)
+          std::cout << " " << *it;
+    std::cout<<'\n';
 
-            break;
-          }
 
-        case (UnaryOperator::BitwiseOr):
-          {
-            fmt::print("UnaryOperator: | \n");
-            break;
-          }
-        case (UnaryOperator::BitwiseXor):
-          fmt::print("UnaryOperator: ^ \n");
-          break;
-        case (UnaryOperator::BitwiseNand):
-          fmt::print("UnaryOperator: NAND \n");
-          break;
-        case (UnaryOperator::BitwiseNor):
-          fmt::print("UnaryOperator: NOR \n");
-          break;
-        case (UnaryOperator::BitwiseXnor):
-          fmt::print("UnaryOperator: XNOR \n");
-          break;
-        // case UnaryOperator::LogicalNot:
-        // case UnaryOperator::Preincrement:
-        // case UnaryOperator::Predecrement:
-        // case UnaryOperator::Postincrement:
-        // case UnaryOperator::Postdecrement:
-        
-      }
-      //add flags to trigger the operators
- 
-    }
-    //auto idx    = lnast->add_child(idx_stmts, Lnast_node::create_xor  ("XOR")); 
-   
-    
-    if(rhs.kind==ExpressionKind::NamedValue){
-      
-      const auto &op2 = rhs.as<NamedValueExpression>();
-      fmt::print("RHS named value: {} \n",op2.symbol.name);
-      //auto idx_op   = lnast->add_child(idx, Lnast_node::create_ref(op2.symbol.name)); 
-        const auto operand=op2.symbol.name;
-        auto node_op   = Lnast_node::create_ref (operand);
-        auto idx_op     = lnast->add_child(idx, node_op); //segfaulting
-    }
+    //lnast->dump();
 
-    else if (rhs.kind==ExpressionKind::BinaryOp){
-      const auto &op1 = rhs.as<BinaryExpression>();
-      
-      const Type& temp= op1.type->getCanonicalType(); //figure out what kind type is possible
-      const auto &check1=op1.left();
-      const auto &check2=op1.right();
-
-      switch (op1.op) {
-
-        case BinaryOperator::Add:
-        {
-          idx   = lnast->add_child(idx_stmts, Lnast_node::create_plus  ("+")); //line num? pos1? pos2?
-          // auto node_op1    = Lnast_node::create_ref       (operand1,    line_num, pos1, pos2);
-          // auto node_op2    = Lnast_node::create_const     (operand2,  line_num, pos1, pos2);
-          // auto idx_plus    = lnast->add_child(idx_stmts, node_plus);
-          // auto idx_op1     = lnast->add_child(idx_plus,  node_op1);
-          // auto idx_op2     = lnast->add_child(idx_plus,  node_op2); 
-          //fmt::print(" + ");
-          break;
-        }
-        case BinaryOperator::Subtract:
-        {
-          idx    = lnast->add_child(idx_stmts, Lnast_node::create_minus  ("-"));
-          // auto node_op1    = Lnast_node::create_ref       (operand1,    line_num, pos1, pos2);
-          // auto node_op2    = Lnast_node::create_const     (operand2,  line_num, pos1, pos2);
-          // auto idx_minus   = lnast->add_child(idx_stmts, node_minus);
-          // auto idx_op1     = lnast->add_child(idx_minus, node_op1);        
-          // auto idx_op2     = lnast->add_child(idx_minus, node_op2);
-          break;
-        }
-        case BinaryOperator::Multiply: 
-        {
-          fmt::print(" * ");
-          break;
-        }
-        case BinaryOperator::Divide: 
-          fmt::print(" / ");
-          break;
-        case BinaryOperator::Mod: 
-          fmt::print(" % ");
-          break;
-        case BinaryOperator::BinaryAnd:
-        {
-          idx    = lnast->add_child(idx_stmts, Lnast_node::create_and  ("AND"));
-          fmt::print(" & ");
-          break;
-        }
-        case BinaryOperator::BinaryOr: 
-          idx = lnast->add_child(idx_stmts, Lnast_node::create_or  ("OR"));
-          fmt::print(" | ");
-          break;
-        case BinaryOperator::BinaryXor:
-        {
-          idx = lnast->add_child(idx_stmts, Lnast_node::create_xor  ("XOR"));
-          fmt::print(" ^ ");
-          break;
-        }
-        case BinaryOperator::BinaryXnor: 
-        {
-          fmt::print(" XNOR ");
-          break;
-        }
-        default:
-        {
-          //int flag=0;
-          break;
-        }
-        // case BinaryOperator::Equality:
-        // case BinaryOperator::Inequality:
-        // case BinaryOperator::CaseEquality:
-        // case BinaryOperator::CaseInequality:
-        // case BinaryOperator::GreaterThanEqual:
-        // case BinaryOperator::GreaterThan:
-        // case BinaryOperator::LessThanEqual:
-        // case BinaryOperator::LessThan:
-        // case BinaryOperator::WildcardEquality:
-        // case BinaryOperator::WildcardInequality:
-        // case BinaryOperator::LogicalAnd:
-        // case BinaryOperator::LogicalOr:
-        // case BinaryOperator::LogicalImplication:
-        // case BinaryOperator::LogicalEquivalence:
-        // case BinaryOperator::LogicalShiftLeft:
-        // case BinaryOperator::LogicalShiftRight:
-        // case BinaryOperator::ArithmeticShiftLeft:
-        // case BinaryOperator::ArithmeticShiftRight:
-        // case BinaryOperator::Power:
-      }
-      
-      if(check1.kind==ExpressionKind::NamedValue){
-        const auto &rhs_1=check1.as<NamedValueExpression>();
-        const auto operand1=rhs_1.symbol.name;
-        auto node_op1   = Lnast_node::create_ref       (operand1);
-        auto idx_op1     = lnast->add_child(idx, node_op1); //segfaulting
-        fmt::print(" {} ",rhs_1.symbol.name);
-           
-      }
-      if(check2.kind==ExpressionKind::NamedValue){
-        const auto &rhs_2=check2.as<NamedValueExpression>();
-        const auto operand2=rhs_2.symbol.name;
-        auto node_op2    = Lnast_node::create_ref       (operand2,    line_num, pos1, pos2);
-        auto idx_op2     = lnast->add_child(idx, node_op2);
-        fmt::print(" {} \n",rhs_2.symbol.name);
-      }
-      
-      
-    }
-    fmt::print("handle recursively the rhs (binaryOp,unaryop,...)\n");
-    lnast->dump();
-    
     //std::move(lnast);
     return;
 }
+void Lnast_visitor::handle(const slang::Expression& expr){
+  if (numErrors > errorLimit)
+    return;
+  fmt::print("recurse!\n");
+  const auto rhs=expr;
+  if (expr.kind==ExpressionKind::UnaryOp){
+    fmt::print("unary\n");
+    const auto &op1 = expr.as<UnaryExpression>();
+    //const auto check=getBinaryExpression(temp.kind);
+    fmt::print("UnaryOperator: {} {} \n",expr.kind,op1.op);
+    //auto idx_lhs  = lnast->add_child(idx_assign, Lnast_node::create_ref(op1.op)); // string_view = %out
+    switch (op1.op) {
+      case (UnaryOperator::Plus):
+        {
+          fmt::print("UnaryOperator: + \n");
+          break;
+        }
+      case (UnaryOperator::Minus):
+        {
+          fmt::print("UnaryOperator: - \n");
+          break;
+        }
+      case (UnaryOperator::BitwiseNot):
+        {
+          verilogList.emplace_back("NOT");
+          //idx = lnast->add_child(idx_stmts, Lnast_node::create_not("BitNot"));
+          fmt::print("UnaryOperator: ~ \n");
+          fmt::print("my list says {}\n", verilogList.back());
+          break;
+        }
+      case (UnaryOperator::BitwiseAnd):
+        {
+          fmt::print("UnaryOperator: & \n");
+          break;
+        }
 
+      case (UnaryOperator::BitwiseOr):
+        {
+          fmt::print("UnaryOperator: | \n");
+          break;
+        }
+      case (UnaryOperator::BitwiseXor):
+        fmt::print("UnaryOperator: ^ \n");
+        break;
+      case (UnaryOperator::BitwiseNand):
+        fmt::print("UnaryOperator: NAND \n");
+        break;
+      case (UnaryOperator::BitwiseNor):
+        fmt::print("UnaryOperator: NOR \n");
+        break;
+      case (UnaryOperator::BitwiseXnor):
+        fmt::print("UnaryOperator: XNOR \n");
+        break;
+      // case UnaryOperator::LogicalNot:
+      // case UnaryOperator::Preincrement:
+      // case UnaryOperator::Predecrement:
+      // case UnaryOperator::Postincrement:
+      // case UnaryOperator::Postdecrement:
+    }
+    //add flags to trigger the operators
+  }
+    //auto idx    = lnast->add_child(idx_stmts, Lnast_node::create_xor  ("XOR")); 
+  if(expr.kind==ExpressionKind::NamedValue){
+    const auto &op2 = expr.as<NamedValueExpression>();
+    fmt::print("RHS named value: {} \n",op2.symbol.name);
+    //auto idx_op   = lnast->add_child(idx, Lnast_node::create_ref(op2.symbol.name)); 
+    //char operand=op2.symbol.name;
+    
+    operandList.emplace_back(op2.symbol.name);
+    
+    // auto node_op   = Lnast_node::create_ref (operand);
+    // auto idx_op    = lnast->add_child(idx, node_op); //segfaulting
+  }
+
+  else if (expr.kind==ExpressionKind::BinaryOp){
+    const auto &op1 = expr.as<BinaryExpression>();
+    const Type& temp= op1.type->getCanonicalType(); //figure out what kind type is possible
+    const auto &check1=op1.left();
+    const auto &check2=op1.right();
+    switch (op1.op) {
+      case BinaryOperator::Add:
+      {
+        //idx   = lnast->add_child(idx_stmts, Lnast_node::create_plus  ("+"));
+        verilogList.emplace_back("+");
+        // auto node_op1    = Lnast_node::create_ref       (operand1);
+        // auto node_op2    = Lnast_node::create_const     (operand2);
+        // auto idx_plus    = lnast->add_child(idx_stmts, node_plus);
+        // auto idx_op1     = lnast->add_child(idx_plus,  node_op1);
+        // auto idx_op2     = lnast->add_child(idx_plus,  node_op2); 
+        // fmt::print(" + ");
+        break;
+      }
+      case BinaryOperator::Subtract:
+      {
+        //idx    = lnast->add_child(idx_stmts, Lnast_node::create_minus  ("-"));
+        verilogList.emplace_back("-");
+        // auto node_op1    = Lnast_node::create_ref       (operand1);
+        // auto node_op2    = Lnast_node::create_const     (operand2);
+        // auto idx_minus   = lnast->add_child(idx_stmts, node_minus);
+        // auto idx_op1     = lnast->add_child(idx_minus, node_op1);        
+        // auto idx_op2     = lnast->add_child(idx_minus, node_op2);
+        break;
+      }
+      case BinaryOperator::Multiply: 
+      {
+        fmt::print(" * ");
+        break;
+      }
+      case BinaryOperator::Divide: 
+        fmt::print(" / ");
+        break;
+      case BinaryOperator::Mod: 
+        fmt::print(" % ");
+        break;
+      case BinaryOperator::BinaryAnd:
+      {
+        verilogList.emplace_back("AND");
+        //idx = lnast->add_child(idx_stmts, Lnast_node::create_and ("AND"));
+        fmt::print(" & ");
+        break;
+      }
+      case BinaryOperator::BinaryOr: 
+        verilogList.emplace_back("OR");
+        //idx = lnast->add_child(idx_stmts, Lnast_node::create_or ("OR"));
+        fmt::print("my list says {}\n", verilogList.back());
+        break;
+      case BinaryOperator::BinaryXor:
+      {
+        verilogList.emplace_back("XOR");
+        //idx = lnast->add_child(idx_stmts, Lnast_node::create_xor ("XOR"));
+        fmt::print(" ^ \n");
+        fmt::print("my list says {}\n", verilogList.back());
+        break;
+      }
+      case BinaryOperator::BinaryXnor: 
+      {
+        fmt::print(" XNOR ");
+        break;
+      }
+      default:
+      {
+        //int flag=0;
+        fmt::print("check!\n");
+        break;
+      }
+      // case BinaryOperator::Equality:
+      // case BinaryOperator::Inequality:
+      // case BinaryOperator::CaseEquality:
+      // case BinaryOperator::CaseInequality:
+      // case BinaryOperator::GreaterThanEqual:
+      // case BinaryOperator::GreaterThan:
+      // case BinaryOperator::LessThanEqual:
+      // case BinaryOperator::LessThan:
+      // case BinaryOperator::WildcardEquality:
+      // case BinaryOperator::WildcardInequality:
+      // case BinaryOperator::LogicalAnd:
+      // case BinaryOperator::LogicalOr:
+      // case BinaryOperator::LogicalImplication:
+      // case BinaryOperator::LogicalEquivalence:
+      // case BinaryOperator::LogicalShiftLeft:
+      // case BinaryOperator::LogicalShiftRight:
+      // case BinaryOperator::ArithmeticShiftLeft:
+      // case BinaryOperator::ArithmeticShiftRight:
+      // case BinaryOperator::Power:
+    }
+
+    if(check1.kind==ExpressionKind::NamedValue){
+      const auto &rhs_1=check1.as<NamedValueExpression>();
+      const auto operand1=rhs_1.symbol.name;
+      //auto node_op1    = Lnast_node::create_ref (operand1);
+      //auto idx_op1     = lnast->add_child(idx, node_op1); //segfaulting
+      operandList.emplace_back(rhs_1.symbol.name);
+      fmt::print(" {} ",rhs_1.symbol.name);
+    }
+
+    if(check2.kind==ExpressionKind::NamedValue){
+      const auto &rhs_2=check2.as<NamedValueExpression>();
+      const auto operand2=rhs_2.symbol.name;
+      // auto node_op2    = Lnast_node::create_ref (operand2);
+      // auto idx_op2     = lnast->add_child(idx, node_op2);
+      operandList.emplace_back(rhs_2.symbol.name);
+      fmt::print(" {} \n",rhs_2.symbol.name);
+    }
+    
+  }
+  fmt::print("handle recursively the rhs (binaryOp,unaryop,...)\n");
+  //handle(expr.left)
+}
 void Lnast_visitor::handle(const slang::ExpressionStatement& expr) {
   if (numErrors > errorLimit)
     return;
