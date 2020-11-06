@@ -1217,7 +1217,7 @@ void Lnast_tolg::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_v
 
         // note: for scalar input, front() == back()
         if (&subname == &hier_inp_subnames.back()) {
-          auto subg_spin = subg_node.setup_sink_pin(io_pin->name); // FIXME->sh: no corresponding pin by real name, Jose?
+          auto subg_spin = subg_node.setup_sink_pin(io_pin->name); 
           tup_get.setup_driver_pin().connect_sink(subg_spin);
         }
         created_tup_gets.emplace_back(tup_get.get_driver_pin());
@@ -1262,7 +1262,6 @@ void Lnast_tolg::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_v
     auto hier_inp_subnames = split_hier_name(io_pin->name);
     auto i = 0;
     for (const auto &subname : hier_inp_subnames) {
-      fmt::print("subname:{}\n", subname);
       if (i == 0) {
         // handle the TA of function call return and the TA of first subname
         auto ta_ret      = lg->create_node(Ntype_op::TupAdd);
@@ -1291,28 +1290,35 @@ void Lnast_tolg::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_v
           ta_subname_tn_dpin.connect_sink(ta_subname.setup_sink_pin("tuple_name"));
         // note: we don't know the field and value for ta_subname yet till next subname
 
-          ta_subname_dpin.connect_sink(ta_ret.setup_sink_pin("value"));
+          ta_subname_dpin.connect_sink(ta_ret.setup_sink_pin("value")); //connect to parent value_dpin
           name2dpin[subname] = ta_subname_dpin;
           ta_subname_dpin.set_name(subname);
           i++;
         } 
       } else if (i == (int)(hier_inp_subnames.size()-1)) {
-        auto field_dpin     = setup_field_dpin(lg, subname);
-        auto pre_subname    = hier_inp_subnames[i-1];
-        auto ta_hier_parent = name2dpin[pre_subname].get_node();
-        field_dpin.connect_sink(ta_hier_parent.setup_sink_pin("field"));
+        auto parent_field_dpin = setup_field_dpin(lg, subname);
+        auto parent_subname    = hier_inp_subnames[i-1];
+        auto ta_hier_parent    = name2dpin[parent_subname].get_node();
+        parent_field_dpin.connect_sink(ta_hier_parent.setup_sink_pin("field"));
         auto subg_dpin = subg_node.setup_driver_pin(io_pin->name);
         subg_dpin.connect_sink(ta_hier_parent.setup_sink_pin("value"));
+
       } else { //the middle ones, if any
         I(hier_inp_subnames.size() >= 3);
-        auto ta_subname      = lg->create_node(Ntype_op::TupAdd);
-        auto ta_subname_dpin = ta_subname.setup_driver_pin();
-        name2dpin[subname] = ta_subname_dpin;
-        ta_subname_dpin.set_name(subname);
+        auto ta_subname         = lg->create_node(Ntype_op::TupAdd);
+        auto parent_subname     = hier_inp_subnames[i-1];
+        auto ta_hier_parent     = name2dpin[parent_subname].get_node();
+        auto parent_field_dpin  = setup_field_dpin(lg, subname);
 
         auto ta_subname_tn_dpin = setup_tuple_ref(lg, subname);
         ta_subname_tn_dpin.connect_sink(ta_subname.setup_sink_pin("tuple_name"));
         // note: we don't know the field and value for ta_subname yet till next subname
+
+        auto ta_subname_dpin = ta_subname.setup_driver_pin();
+        ta_subname_dpin.connect_sink(ta_hier_parent.setup_sink_pin("value"));
+        parent_field_dpin.connect_sink(ta_hier_parent.setup_sink_pin("field"));
+        name2dpin[subname] = ta_subname_dpin;
+        ta_subname_dpin.set_name(subname);
         i++;
       }
     }
