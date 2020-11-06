@@ -1,3 +1,3 @@
 tmp   = sum(a = (foo = 3, bar = 2), b = 4)
-%out  = tmp.out.o1
+%out  = tmp.out.o1.baz
 %out5 = tmp.out2
