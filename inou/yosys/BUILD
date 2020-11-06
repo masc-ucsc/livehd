@@ -5,11 +5,13 @@ cc_library(
     srcs = glob(["lg*.cpp"],exclude=["*test*.cpp"]),
     hdrs = glob(["lg*.hpp"]),
     #alwayslink=1,
+    alwayslink=True,
     defines = ["_YOSYS_","YOSYS_ENABLE_PLUGINS"],
     visibility = ["//visibility:public"],
     deps = [
         "//pass/common:pass",
-        "@yosys//:headers",
+        #"@yosys//:headers",
+        "@yosys//:kernel",
     ],
 )
 
@@ -72,3 +74,19 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
+cc_binary(
+    name = "yosys2",
+    srcs = [
+        "yosys_driver.cc",
+    ],
+    features = ["-use_header_modules"],
+    visibility = ["//visibility:public"],
+    linkstatic=True,
+    deps = [
+        ":lgyosys-lib",
+        "//core:core",
+        # "@yosys//:kernel",
+        "@yosys//:version",
+        #"@dk_thrysoee_libedit//:pretend_to_be_gnu_readline_system",
+    ],
+)

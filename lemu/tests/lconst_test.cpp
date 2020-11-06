@@ -1343,6 +1343,12 @@ TEST_F(Lconst_test, cpp_int_vs_lconst) {
 
 TEST_F(Lconst_test, lconst_add) {
   {
+    auto a = Lconst("0xF0") + Lconst("0x0E");
+    EXPECT_TRUE(a.is_unsigned());
+    EXPECT_EQ(a.to_i(), 254);
+    EXPECT_EQ(a.get_bits(), 8);
+  }
+  {
     auto a = Lconst("0xFF") + Lconst("-1");
     EXPECT_TRUE(a.is_unsigned());
     EXPECT_EQ(a.to_i(), 254);
@@ -1362,15 +1368,15 @@ TEST_F(Lconst_test, lconst_add) {
   }
   {
     auto a = Lconst("0xFFs") + Lconst("-1");
-    EXPECT_TRUE(!a.is_unsigned()); // SIGNED
+    EXPECT_TRUE(a.is_unsigned());
     EXPECT_EQ(a.to_i(), 254);
-    EXPECT_EQ(a.get_bits(), 9);
+    EXPECT_EQ(a.get_bits(), 8);
   }
   {
     auto a = Lconst("1s") + Lconst("-1");
-    EXPECT_TRUE(!a.is_unsigned());  // SIGNED
+    EXPECT_TRUE(a.is_unsigned());
     EXPECT_EQ(a.to_i(), 0);
-    EXPECT_EQ(a.get_bits(), 1);
+    EXPECT_EQ(a.get_bits(), 0);
   }
   {
     auto a = Lconst("-1u") + Lconst("-1u");

@@ -14,7 +14,6 @@ if [ ! -x $LGSHELL ]; then
   fi
 fi
 
-YOSYS=./inou/yosys/lgyosys
 LGCHECK=./inou/yosys/lgcheck
 
 rm -rf ./logs
@@ -47,7 +46,7 @@ do
   STARTTIME=$SECONDS
   #echo "starting test "${input}" at "$(/usr/bin/date)
   input=$(basename ${full_input})
-  echo ${YOSYS} ${full_input}
+  echo ${full_input}
   base=${input%.*}
 
   if [[ $input =~ "long_" ]]; then
@@ -105,8 +104,6 @@ do
     #echo "WARN: Not able to create JSON for testcase ${input}"
   #fi
 
-  #${YOSYS} -g${base} -h > ./yosys-test/log_to_yosys_${input} 2> ./yosys-test/err_to_yosys_${input}
-
   #FIXME: echo "lgraph.match path:lgdb_yosys |> pass.cprop |> inou.yosys.fromlg odir:tmp_yosys" | ${LGSHELL} -q 2>tmp_yosys/${input}.err
   echo "lgraph.match path:lgdb_yosys |> inou.yosys.fromlg odir:tmp_yosys" | ${LGSHELL} -q 2>tmp_yosys/${input}.err
   LC=$(grep -iv Warning tmp_yosys/${input}.err | grep -v perf_event | grep -v "recommended to use " | grep -v "IPC=" | wc -l | cut -d" " -f1)
@@ -119,7 +116,7 @@ do
   if [ $? -eq 0 ]; then
     echo "Successfully created verilog from graph ${input}"
   else
-    echo ${YOSYS} -g${base} -h -d
+    echo "yosys -g"${base} -h -d
     echo "FAIL: verilog generation terminated with an error (testcase ${input})"
     ((fail++))
     fail_list+=" "$base

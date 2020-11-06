@@ -22,12 +22,11 @@ void setup_inou_yosys() { Inou_yosys_api::setup(); }
 
 Inou_yosys_api::Inou_yosys_api(Eprp_var &var, bool do_read) : Pass("inou.yosys", var) {
   yosys = var.get("yosys");
-  set_script_liblg(var, do_read);
+  set_script_yosys(var, do_read);
 }
 
-void Inou_yosys_api::set_script_liblg(const Eprp_var &var, bool do_read) {
+void Inou_yosys_api::set_script_yosys(const Eprp_var &var, bool do_read) {
   auto script = var.get("script");
-  liblg       = var.get("liblg");
 
   auto main_path = Eprp_utils::get_exe_path();
 
@@ -45,18 +44,18 @@ void Inou_yosys_api::set_script_liblg(const Eprp_var &var, bool do_read) {
 		  ,"/../inou/yosys/"
 		  ,"/inou/yosys/"};
 
-  if (liblg.empty()) {
+  if (yosys.empty()) {
 	  for(const auto e:alt_paths) {
-		  auto test = main_path + e + "liblgraph_yosys.so";
+		  auto test = main_path + e + "yosys2";
 		  if (access(test.c_str(), X_OK) != -1) {
-			  liblg = test;
+			  yosys = test;
 			  break;
 		  }
 	  }
   }
 
-  if (access(liblg.c_str(), X_OK) == -1) {
-    error("could not find an executable liblgraph_yosys.so at {}\n", liblg);
+  if (access(yosys.c_str(), X_OK) == -1) {
+    error("could not find a yosys2 executable at {}\n", yosys);
     return;
   }
 
@@ -141,7 +140,7 @@ int Inou_yosys_api::call_yosys(mustache::data &vars) {
   I(sz_check == yosys_cmd.size());
   close(fd);
 
-  fmt::print("yosys {} synthesis cmd: {} -m {} using {}\n", filename, yosys, liblg, script_file);
+  fmt::print("yosys {} synthesis cmd: {} using {}\n", filename, yosys, script_file);
 
   int pid = fork();
   if (pid < 0) {
@@ -173,8 +172,6 @@ int Inou_yosys_api::call_yosys(mustache::data &vars) {
 
     char *argv[] = {strdup(yosys.c_str()),
                     strdup("-q"),
-                    strdup("-m"),
-                    strdup(liblg.c_str()),
                     strdup("-s"),
                     strdup(filename),
                     0};
@@ -338,14 +335,6 @@ void Inou_yosys_api::fromlg(Eprp_var &var) {
 }
 
 void Inou_yosys_api::setup() {
-  std::string yosys;
-  yosys = "/usr/bin/yosys";
-  if (access(yosys.c_str(), X_OK) == -1) {
-    yosys = "/usr/local/bin/yosys";
-    if (access(yosys.c_str(), X_OK) == -1) {
-      yosys = "yosys";
-    }
-  }
 
   Eprp_method m1("inou.yosys.tolg", "read verilog using yosys to lgraph", &Inou_yosys_api::tolg);
   m1.add_label_required("files", "verilog files to process (comma separated)");
@@ -354,8 +343,7 @@ void Inou_yosys_api::setup() {
   m1.add_label_optional("liberty", "Liberty file for technology mapping. Cannot be used with techmap, will call abc for tmap", "");
   m1.add_label_optional("abc", "run ABC inside yosys before loading lgraph", "false");
   m1.add_label_optional("script", "alternative custom inou_yosys_read.ys command");
-  m1.add_label_optional("yosys", "path for yosys command", yosys);
-  m1.add_label_optional("liblg", "path for libgraph_yosys.so library");
+  m1.add_label_optional("yosys", "path for yosys command", "");
   m1.add_label_optional("top", "define top module, will call yosys hierarchy pass (-auto-top allowed)");
 
   register_inou("yosys", m1);
@@ -364,7 +352,7 @@ void Inou_yosys_api::setup() {
   m2.add_label_optional("path", "path to read the lgraph[s]", "lgdb");
   m2.add_label_optional("odir", "output directory for generated verilog files", ".");
   m2.add_label_optional("script", "alternative custom inou_yosys_write.ys command");
-  m2.add_label_optional("yosys", "path for yosys command", yosys);
+  m2.add_label_optional("yosys", "path for yosys command", "");
   m2.add_label_optional("hier", "hierarchy pass in LiveHD (like flat in yosys)");
 
   register_inou("yosys", m2);

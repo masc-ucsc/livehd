@@ -50,25 +50,25 @@ protected:
 
       // Match parent names in tmap
       for(const auto &io_pin:parent_sub.get_io_pins()) {
-        if (io_pin.dir == Sub_node::Direction::Input) {
-          if (!sub->has_pin(io_pin.name)) {
-            sub->add_input_pin(io_pin.name);
-            auto dpin = parent->get_graph_input(io_pin.name);
-            dpin.connect_sink(node.setup_sink_pin(io_pin.name));
+        if (io_pin->dir == Sub_node::Direction::Input) {
+          if (!sub->has_pin(io_pin->name)) {
+            sub->add_input_pin(io_pin->name);
+            auto dpin = parent->get_graph_input(io_pin->name);
+            dpin.connect_sink(node.setup_sink_pin(io_pin->name));
           }
 
-        }else if (io_pin.dir == Sub_node::Direction::Output) {
-          if (!sub->has_pin(io_pin.name)) {
-            auto spin = parent->get_graph_output(io_pin.name);
+        }else if (io_pin->dir == Sub_node::Direction::Output) {
+          if (!sub->has_pin(io_pin->name)) {
+            auto spin = parent->get_graph_output(io_pin->name);
             if (!spin.get_node().has_inputs()) {
-              sub->add_output_pin(io_pin.name);
-              node.setup_driver_pin(io_pin.name).connect_sink(spin);
+              sub->add_output_pin(io_pin->name);
+              node.setup_driver_pin(io_pin->name).connect_sink(spin);
             }
           }
-        }else if (io_pin.dir == Sub_node::Direction::Invalid) {
+        }else if (io_pin->dir == Sub_node::Direction::Invalid) {
         }else{
           I(false);// For LGraph sub there should be no undefined iopins
-          I(io_pin.graph_io_pos != Port_invalid); // graph_io_pos must be defined too
+          I(io_pin->graph_io_pos != Port_invalid); // graph_io_pos must be defined too
         }
       }
       node.set_type_sub(sub->get_lgid());

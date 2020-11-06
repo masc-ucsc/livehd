@@ -584,6 +584,19 @@ Main features:
     * Have DB with fuzz regex to point potentially similar variables
 * Have a fuzz regex to find very similar messages to collapse at entry ("missing string" or "string not found")
 
+## UHDM 2 LNAST
+
+UHDM is able to interface with several tools like Verilator/yosys. It may be interesting to create a bridge
+between LNAST and UHDM.
+
+Dependence: none
+
+Main features:
+
+* UHDM2LNAST
+* LNAST2UHDM
+* Support structs/bundles and most UHDM features
+
 ## FPGA Placer
 
 Build an analytical placer for FPGAs based on Ripple-FPGA.
@@ -879,9 +892,21 @@ Create a pass that checks that the Lgraph (and/or LNAST) is sementically correct
 * Check for innefficient splits (do not split busses that can be combined)
 * Transformations stages should not drop names if same net is preserved
 
-## Copy Propagation Pass
+## Short demos
 
-Create a copy propagation pass that works with hierarchy.
+Using ascinema, create some small demos to show how to use LiveHD. 
+
+It would be good to have demos on how to "start to create a pass".
+
+https://asciinema.org/
+
+## Term record/replay for benchmarking
+
+Use automatic asciinema generation. Compare the test speed and summarize the
+performance difference from "a user" point of view. The results should allow to
+track performance changes.
+
+Maybe expand tmt_test and main_test to be a more stand-alone testing setup.
 
 ## OS X Support
 
