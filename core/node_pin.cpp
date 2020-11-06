@@ -82,7 +82,7 @@ Node_pin Node_pin::get_driver() const {
 }
 
 Node Node_pin::get_node() const {
-  auto nid = current_g->get_node_nid(get_root_idx());
+  auto nid = current_g->get_node_nid(idx);
 
   return Node(top_g, current_g, hidx, nid);
 }
@@ -329,7 +329,8 @@ Node_pin Node_pin::find_driver_pin(LGraph *top, std::string_view wname) {
 }
 
 std::string_view Node_pin::get_pin_name() const {
-  auto op = get_node().get_type_op();
+  auto nid = current_g->get_node_nid(idx);
+  auto op = current_g->get_type_op(nid);
   if (op == Ntype_op::Sub)
     return get_type_sub_io_name();
   if (is_driver())

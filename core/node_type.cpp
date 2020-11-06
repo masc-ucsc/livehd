@@ -93,8 +93,6 @@ void LGraph_Node_Type::set_type_const(Index_ID nid, const Lconst &value) {
   auto *ptr = node_internal.ref(nid);
   ptr->set_type(Ntype_op::Const);
   ptr->set_bits(value.get_bits());
-
-  I(value.get_bits());
 }
 
 void LGraph_Node_Type::set_type_const(Index_ID nid, std::string_view sv) { set_type_const(nid, Lconst(sv)); }

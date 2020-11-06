@@ -49,10 +49,8 @@ new_git_repository(
 new_git_repository(
     name = "yosys",
     build_file = "BUILD.yosys", # relative to external path
-    commit = "de79978372c1953e295fa262444cb0a28a246c5f", # Sep 24, 2020 a66200ed1d1741150092e89c94f5c25676e9e436", # April 28, 2020 6edca05793197a846bbfb0329e836c87fa5aabb6", # Feb 25, 2020 
-    #commit = "a66200ed1d1741150092e89c94f5c25676e9e436", # April 28, 2020 6edca05793197a846bbfb0329e836c87fa5aabb6", # Feb 25, 2020 
+    commit = "de79978372c1953e295fa262444cb0a28a246c5f", # Sep 24, 2020 
     remote = "https://github.com/YosysHQ/yosys.git",
-    #strip_prefix = "kernel",
     shallow_since = "1588020530 -0700",
 )
 new_git_repository(
@@ -75,6 +73,22 @@ git_repository(
     #commit = "d0c433455801e1c1fb6f486f0b447e22f946ab52", # August, 16 2020 (fails because Yosys)
     commit = "bf86cfe165ef7d70dfe68f0b8fc0c018bc79a577", # December 16, 2019
     remote = "https://github.com/abseil/abseil-cpp.git",
+)
+
+git_repository(
+    name = "com_google_xls",
+    commit = "43cc00719bbf106828aebf57d4b435f7971d5bf5", # Nov 4, 2020
+    remote = "https://github.com/google/xls.git",
+)
+
+http_archive(
+    name = "tk_tcl_tcl",
+    urls = [
+        "https://prdownloads.sourceforge.net/tcl/tcl8.6.10-src.tar.gz",
+        ],
+    build_file = "BUILD.tk_tcl_tcl",
+    strip_prefix = "tcl8.6.10",
+    sha256 = "5196dbf6638e3df8d5c87b5815c8c2b758496eb6f0e41446596c9a4e638d87ed",
 )
 
 new_git_repository(

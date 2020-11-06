@@ -36,11 +36,11 @@ protected:
   }
 
   Index_ID get_node_nid(Index_ID idx) const {
-    I(node_internal[idx].is_root());
-    if (node_internal[idx].is_master_root())
-      return idx;
+    while (!node_internal[idx].is_master_root()) {
+      idx = node_internal[idx].get_nid();
+    }
 
-    return node_internal[idx].get_nid();
+    return idx;
   }
 
   Node_pin_iterator out_connected_pins(const Node &node) const;

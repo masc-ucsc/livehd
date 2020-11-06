@@ -10,7 +10,8 @@ def genlex(name, srcs, out):
 
 def genyacc(name, srcs, outs):
   arg_adjust = "$$(bison --version | grep -qE '^bison .* 3\..*' && echo -Wno-deprecated)"
-  cmd = "bison %s -o $(@D)/%s --defines --name-prefix=%s $(location %s)" % (arg_adjust, outs[0], name, srcs[0])
+  # cmd = "bison %s -o $(@D)/%s --defines --name-prefix=%s $(location %s)" % (arg_adjust, outs[0], name, srcs[0])
+  cmd = "bison %s -o $(@D)/%s --defines $(location %s)" % (arg_adjust, outs[0], srcs[0])
   native.genrule(
     name = name,
     outs = outs,

@@ -103,6 +103,8 @@ protected:
   }
 
   Number get_num() const { return num; }
+  Lconst adjust(const Number &res_num, const Lconst &o) const;
+
 public:
   using Container=std::vector<unsigned char>;
 

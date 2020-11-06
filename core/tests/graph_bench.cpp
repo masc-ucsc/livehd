@@ -43,7 +43,7 @@ void populate_graph(LGraph *lg) {
   }
 }
 
-main(int argc, char **argv) {
+int main(int argc, char **argv) {
 
   fmt::print("benchmark the graph\n");
 

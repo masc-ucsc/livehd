@@ -356,6 +356,28 @@ void Lconst::dump() const {
     fmt::print("num:{} sign:{} bits:{} explicit_bits:{} explicit_sign:{}\n", num.str(), sign, bits, explicit_bits, explicit_sign);
 }
 
+Lconst Lconst::adjust(const Number &res_num, const Lconst &o) const {
+  auto res_explicit_sign = explicit_sign && o.explicit_sign && sign == o.sign;
+  auto res_sign = res_explicit_sign? sign : (res_num<0);
+
+  Bits_t res_bits=0u;
+  if (res_num<0)
+    res_bits = msb(-res_num)+1;
+  else if (res_num==0)
+    res_bits = 0;
+  else
+    res_bits = msb(res_num)+1;
+
+  if (res_sign)
+    res_bits++;
+
+  // explicit kept if both explicit and agree
+  auto res_explicit_str  = explicit_str && o.explicit_str;
+  bool res_explicit_bits = false;
+
+  return Lconst(res_explicit_str, res_explicit_sign, res_explicit_bits, res_sign, res_bits, res_num);
+}
+
 Lconst Lconst::add_op(const Lconst &o) const {
 
   auto max_bits = std::max(bits, o.bits);
@@ -378,27 +400,7 @@ Lconst Lconst::add_op(const Lconst &o) const {
 
   Number res_num = get_num() + o.get_num();
 
-  Bits_t res_bits=0u;
-  if (res_num<0)
-    res_bits = msb(-res_num)+1;
-  else if (res_num==0)
-    res_bits = 0;
-  else
-    res_bits = msb(res_num)+1;
-
-  auto res_sign = sign || o.sign;
-  if (res_num<0)
-    res_sign = true;
-
-  if (res_sign)
-    res_bits++;
-
-  // explicit kept if both explicit and agree
-  auto res_explicit_str  = explicit_str && o.explicit_str;
-  auto res_explicit_sign = explicit_sign || o.explicit_sign;
-  bool res_explicit_bits = false;
-
-  return Lconst(res_explicit_str, res_explicit_sign, res_explicit_bits, res_sign, res_bits, res_num);
+  return adjust(res_num, o);
 }
 
 Lconst Lconst::sub_op(const Lconst &o) const {
@@ -412,24 +414,7 @@ Lconst Lconst::sub_op(const Lconst &o) const {
 
   Number res_num = get_num() - o.get_num();
 
-  Bits_t res_bits=0u;
-  if (res_num<0)
-    res_bits = msb(-res_num)+1;
-  else if (res_num==0)
-    res_bits = 0;
-  else
-    res_bits = msb(res_num)+1;
-
-  auto res_sign = sign && o.sign;
-  if (res_sign)
-    res_bits++;
-
-  // explicit kept if both explicit and agree
-  auto res_explicit_str  = explicit_str && o.explicit_str;
-  auto res_explicit_sign = explicit_sign && o.explicit_sign && sign == o.sign;
-  bool res_explicit_bits = false;
-
-  return Lconst(res_explicit_str, res_explicit_sign, res_explicit_bits, res_sign, res_bits, res_num);
+  return adjust(res_num, o);
 }
 
 Lconst Lconst::lsh_op(Bits_t amount) const {
@@ -461,9 +446,9 @@ Lconst Lconst::rsh_op(Bits_t amount) const {
 }
 
 Lconst Lconst::or_op(const Lconst &o) const {
-  auto   res_bits = std::max(bits, o.bits);
 
   if (unlikely(explicit_str || o.explicit_str)) {
+    auto   res_bits = std::max(bits, o.bits);
     std::string str;
     std::string o_str;
     if (explicit_str)
@@ -496,18 +481,13 @@ Lconst Lconst::or_op(const Lconst &o) const {
 
   Number res_num  = get_num() | o.get_num();
 
-  auto res_explicit_str  = explicit_str && o.explicit_str;
-  auto res_explicit_sign = explicit_sign && o.explicit_sign && sign == o.sign;
-  bool res_explicit_bits = explicit_bits && explicit_bits;
-  auto res_sign = sign && o.sign;
-
-  return Lconst(res_explicit_str, res_explicit_sign, res_explicit_bits, res_sign, res_bits, res_num);
+  return adjust(res_num, o);
 }
 
 Lconst Lconst::and_op(const Lconst &o) const {
-  auto   res_bits = std::max(bits, o.bits);
 
   if (unlikely(explicit_str || o.explicit_str)) {
+    auto   res_bits = std::max(bits, o.bits);
     std::string str;
     std::string o_str;
     if (explicit_str)
@@ -539,12 +519,7 @@ Lconst Lconst::and_op(const Lconst &o) const {
   }
   Number res_num  = get_num() & o.get_num();
 
-  auto res_explicit_str  = explicit_str && o.explicit_str;
-  auto res_explicit_sign = explicit_sign && o.explicit_sign && sign == o.sign;
-  bool res_explicit_bits = explicit_bits && explicit_bits;
-  auto res_sign = sign && o.sign;
-
-  return Lconst(res_explicit_str, res_explicit_sign, res_explicit_bits, res_sign, res_bits, res_num);
+  return adjust(res_num, o);
 }
 
 bool Lconst::eq_op(const Lconst &o) const {
@@ -703,7 +678,7 @@ std::string Lconst::to_yosys() const {
 
   auto v = get_num();
   std::string txt;
-  for(int i=0;i<get_bits();++i) {
+  for(auto i=0u;i<get_bits();++i) {
     if (v&1) {
       txt.append(1, '1');
     }else{
@@ -738,7 +713,7 @@ std::string Lconst::to_verilog() const {
   auto v = get_num();
   if (v<0) { // Negative
     std::string txt;
-    for(int i=0;i<get_bits();++i) {
+    for(auto i=0u;i<get_bits();++i) {
       if (v&1) {
         txt.append(1, '1');
       }else{

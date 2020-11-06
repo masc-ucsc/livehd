@@ -9,7 +9,6 @@ TEMP=$(getopt -o r::,i::,l::,d --long reference::,implementation::,cell_library:
 eval set -- "$TEMP"
 
 YOSYS=$(which yosys)
-#YOSYS=../synth/yosys/yosys
 CELLLIB=""
 OPT_TOP=""
 OPT_DEBUG=""
