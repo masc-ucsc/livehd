@@ -268,7 +268,7 @@ protected:
     ">>",
     "<<",
     "logic_shift_right",
-    "arith_shift_right",
+    ">>", //arith_shift_right
     "arith_shift_left",
     "rotate_shift_right",
     "rotate_shift_left",
@@ -333,8 +333,8 @@ protected:
     "shift_right",
     "shift_left",
     "logic_shift_right",
-    "arith_shift_right",
-    "arith_shift_left",
+    ">>>",//arithmetic right shift (>>>) - shift right specified number of bits, fill with value of sign bit if expression is signed, otherwise fill with zero
+    "<<<",//"arith_shift_left",
     "rotate_shift_right",
     "rotate_shift_left",
     "dynamic_shift_right",

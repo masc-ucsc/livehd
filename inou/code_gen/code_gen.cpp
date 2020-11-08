@@ -120,6 +120,7 @@ void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
                curr_node_type.is_tuple_concat() ||
                curr_node_type.is_tuple_delete() ||
                curr_node_type.is_shift_left()   ||
+               curr_node_type.is_arith_shift_right()   ||
                curr_node_type.is_shift_right()) {
       do_op(curr_index);
     } else if (curr_node_type.is_dot()) {
@@ -515,22 +516,35 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
 
 //-------------------------------------------------------------------------------------
 //processing tposs operator
-//pattern: tposs --> ref,___L5        ref,$a
+//                 pattern: tposs --> ref,___L5        ref,$a
+//Another possible pattern: tposs --> ref,___L5        ref,___L7
 //this means $a is unsigned
 void Code_gen::do_tposs(const mmap_lib::Tree_index& tposs_node_index) {
   fmt::print("node:op: {}:{}\n", lnast->get_name(tposs_node_index), lnast->get_type(tposs_node_index).debug_name());
 
   auto first_child_index = lnast->get_first_child(tposs_node_index);
   auto first_child = lnast->get_name(first_child_index);
+  auto sec_child_is_const = lnast->get_type(lnast->get_sibling_next(first_child_index)).is_const();
+  //fmt::print("second child of {} is const = {} !!\n", first_child, sec_child_is_const);
   auto sec_child = lnast->get_name(lnast->get_sibling_next(first_child_index));
 
+  auto map_it = ref_map.find(sec_child);
+  bool sec_child_is_temp = false;
+  if (map_it != ref_map.end()) {
+    sec_child_is_temp = true;
+    sec_child = map_it->second;
+  }
   if(is_temp_var(first_child)) {
     ref_map.insert(std::pair<std::string_view, std::string>(first_child, sec_child));
   } else {
     I(false, "Error: expected temp str as first child of Tposs.\n\tMight need to check this issue!\n");
   }
 
-  absl::StrAppend(&buffer_to_print, indent(), lnast_to->make_unsigned(std::string(sec_child)));  
+  if(!sec_child_is_const && !sec_child_is_temp) {
+  //if(!sec_child_is_const) {
+    //fmt::print("\nThis is not const, first child:{}\n", first_child);
+    absl::StrAppend(&buffer_to_print, indent(), lnast_to->make_unsigned(std::string(sec_child)));
+  }
 }
 
 //-------------------------------------------------------------------------------------
