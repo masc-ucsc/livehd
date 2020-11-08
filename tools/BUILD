@@ -22,36 +22,17 @@ exports_files([
 ])
 
 configure_make(
-    name = "m4",
-    binaries = [
-        "m4",
-    ],
-    configure_options = [
-        "--disable-nls",
-    ],
-    lib_source = "@m4//:all",
-)
-
-filegroup(
-    name = "m4_bin",
-    srcs = [":m4"],
-    output_group = "m4",
-    visibility = ["//visibility:public"],
-)
-
-configure_make(
     name = "bison",
     binaries = [
         "bison",
         "yacc",
     ],
     configure_env_vars = {
-        "M4": "$$EXT_BUILD_DEPS$$/m4/bin/m4",
         "CC_FOR_BUILD": "$$CC$$",
     },
     lib_source = "@bison//:all",
     static_libraries = ["liby.a"],
-    deps = [":m4"],
+    toolchains = ["@rules_m4//m4:current_m4_toolchain"],
 )
 
 filegroup(
@@ -69,9 +50,8 @@ configure_make(
     # This seems to be necessary (using tools_dep and weird path) because unlike
     # bison, flex needs to invoke m4 during build (whereas bison needs it only
     # during `configure`).
-    configure_env_vars = {"M4": "$$EXT_BUILD_DEPS$$/m4/bin/m4"},
     lib_source = "@flex//:all",
-    deps = [":m4"],
+    toolchains = ["@rules_m4//m4:current_m4_toolchain"],
 )
 
 filegroup(

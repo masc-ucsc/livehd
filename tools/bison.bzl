@@ -15,6 +15,8 @@
 """Build rule for generating C or C++ sources with Bison.
 """
 
+load("@rules_m4//m4:m4.bzl", "M4_TOOLCHAIN_TYPE", "m4_toolchain")
+
 def _genyacc_impl(ctx):
     """Implementation for genyacc rule."""
 
@@ -33,14 +35,13 @@ def _genyacc_impl(ctx):
         ctx.outputs.source_out,
     ]
 
+    m4 = m4_toolchain(ctx)
     ctx.actions.run(
         executable = ctx.executable._bison,
-        env = {
-            "M4": ctx.executable._m4.path,
-        },
+        env = m4.m4_env,
         arguments = [args],
         inputs = ctx.files.src,
-        tools = [ctx.executable._m4],
+        tools = [m4.m4_tool],
         outputs = outputs,
         mnemonic = "Yacc",
         progress_message = "Generating %s and %s from %s" %
@@ -87,13 +88,9 @@ genyacc = rule(
             executable = True,
             cfg = "host",
         ),
-        "_m4": attr.label(
-            default = Label("@livehd//tools:m4_bin"),
-            executable = True,
-            cfg = "host",
-        ),
     },
     doc = "Generate C/C++-language sources from a Yacc file using Bison.",
     output_to_genfiles = True,
     implementation = _genyacc_impl,
+    toolchains = [M4_TOOLCHAIN_TYPE],
 )

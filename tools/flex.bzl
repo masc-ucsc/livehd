@@ -57,6 +57,8 @@ genlex(
 ```
 """
 
+load("@rules_m4//m4:m4.bzl", "M4_TOOLCHAIN_TYPE", "m4_toolchain")
+
 def _genlex_impl(ctx):
     """Implementation for genlex rule."""
 
@@ -73,14 +75,13 @@ def _genlex_impl(ctx):
     args.add_all(ctx.attr.lexopts)
     args.add(ctx.file.src)
 
+    m4 = m4_toolchain(ctx)
     ctx.actions.run(
         executable = ctx.executable._flex,
-        env = {
-            "M4": ctx.executable._m4.path,
-        },
+        env = m4.m4_env,
         arguments = [args],
         inputs = ctx.files.src + ctx.files.includes,
-        tools = [ctx.executable._m4],
+        tools = [m4.m4_tool],
         outputs = [ctx.outputs.out],
         mnemonic = "Flex",
         progress_message = "Generating %s from %s" % (
@@ -124,13 +125,9 @@ genlex = rule(
             executable = True,
             cfg = "host",
         ),
-        "_m4": attr.label(
-            default = Label("@livehd//tools:m4_bin"),
-            executable = True,
-            cfg = "host",
-        ),
     },
     doc = "Generate C/C++-language sources from a lex file using Flex.",
     output_to_genfiles = True,
     implementation = _genlex_impl,
+    toolchains = [M4_TOOLCHAIN_TYPE],
 )

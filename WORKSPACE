@@ -235,14 +235,12 @@ http_archive(
     )
 
 http_archive(
-    name = "m4",
-    build_file_content = all_content,
-    patch_args = ["-p1"],
-    patches = ["//external:patch.m4"],
-    sha256 = "ab2633921a5cd38e48797bf5521ad259bdc4b979078034a3b790d7fec5493fab",
-    strip_prefix = "m4-1.4.18",
-    urls = ["https://ftp.gnu.org/gnu/m4/m4-1.4.18.tar.gz"],
+    name = "rules_m4",
+    urls = ["https://github.com/jmillikin/rules_m4/releases/download/v0.2/rules_m4-v0.2.tar.xz"],
+    sha256 = "c67fa9891bb19e9e6c1050003ba648d35383b8cb3c9572f397ad24040fb7f0eb",
     )
+load("@rules_m4//m4:m4.bzl", "m4_register_toolchains")
+m4_register_toolchains()
 
 new_git_repository(
     name = "graph",
