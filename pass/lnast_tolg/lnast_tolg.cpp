@@ -1325,7 +1325,6 @@ void Lnast_tolg::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_v
   }
 }
 
-#if 0
 void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc) {
   auto c0_fc        = lnast->get_first_child(lnidx_fc);
   auto res_name     = lnast->get_sname(c0_fc);
@@ -1385,9 +1384,8 @@ void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc)
   /* fmt::print("subg node_name:{}\n", subg_node.get_name()); */
   subgraph_io_connection(lg, sub, arg_tup_name, res_name, subg_node);
 };
-#endif
 
-
+#if 0
 void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc) {
   auto c0_fc        = lnast->get_first_child(lnidx_fc);
   auto res_name     = lnast->get_sname(c0_fc);
@@ -1423,7 +1421,7 @@ void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc)
   /* fmt::print("subg node_name:{}\n", subg_node.get_name()); */
   subgraph_io_connection(lg, sub, arg_tup_name, res_name, subg_node);
 };
-
+#endif
 
 void Lnast_tolg::process_ast_func_def_op (LGraph *lg, const Lnast_nid &lnidx) {
   auto c0_fdef = lnast->get_first_child(lnidx);
