@@ -6,7 +6,7 @@ pts_tuple_dbg='lhs_wire3 funcall_unnamed2
                firrtl_gcd counter_tup counter2'
 pts_unsigned_issue='firrtl_gcd'               
 
-pts='tuple_copy2 firrtl_tail2 firrtl_tail3 reg__q_pin hier_tuple_io hier_tuple2 nested_if 
+pts='hier_tuple_io tuple_copy2 firrtl_tail2 firrtl_tail3 reg__q_pin hier_tuple2 nested_if 
      if bits_rhs capricious_bits2 capricious_bits4 hier_tuple if2 adder_stage 
      logic reg_bits_set tuple_copy hier_tuple3 lhs_wire lhs_wire2 scalar_tuple
      firrtl_tail attr_set capricious_bits out_ssa ssa_rhs counter counter_nested_if tuple_if'

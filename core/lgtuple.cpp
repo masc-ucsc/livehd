@@ -146,15 +146,17 @@ void Lgtuple::set(std::string_view key, std::shared_ptr<Lgtuple> tup2) {
   auto it = key2pos.find(key);
   if (it == key2pos.end()) {
     auto shift = pos2tuple.size();
-    tup2->hier_parent_key_name = key; //FIXME->sh: check
+    tup2->hier_parent_key_name = key; 
     pos2tuple.emplace_back(tup2);
-    key2pos[key] = shift;
+    /* key2pos[key] = shift; */
+    key2pos.insert_or_assign(key, shift);
   } else {
     I(pos2tuple.size() > it->second);
     I(!(pos2tuple[it->second]->is_valid_val_dpin() && tup2->is_valid_val_dpin())); // Which one to pick??!!??
     if (tup2->is_valid_val_dpin()) {
       pos2tuple[it->second]->set(tup2->get_value_dpin()); // also resets non attr fields
     } else {
+      pos2tuple[it->second]->dump();
       pos2tuple[it->second]->reset_non_attr_fields();
     }
     pos2tuple[it->second]->add(tup2);
@@ -263,11 +265,13 @@ Lconst Lgtuple::get_constant() const {
 void Lgtuple::reset_non_attr_fields() {
   ordered = true;
   named   = true;
-  for(auto it=key2pos.begin();it!=key2pos.end();++it) {
-    if (it->first.substr(0,2) == "__")
+  for(auto it=key2pos.begin();it!=key2pos.end();) {
+    if (it->first.substr(0,2) == "__") {
+      it ++;
       continue;
+    }
     pos2tuple[it->second] = nullptr;
-    key2pos.erase(it);
+    key2pos.erase(it++);
   }
 }
 
