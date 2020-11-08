@@ -1189,7 +1189,7 @@ std::vector<std::string_view> Lnast_tolg::split_hier_name(std::string_view hier_
   return token_vec;
 }
 
-void Lnast_tolg::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_view arg_tup_name, std::string_view res_name, Node subg_node) {
+void Lnast_tolg::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_view arg_tup_name, std::string_view ret_name, Node subg_node) {
   bool subg_outp_is_scalar = !subgraph_outp_is_tuple(sub);
 
   // start query subgraph io and construct TGs for connecting inputs, TAs/scalar for connecting outputs
@@ -1232,11 +1232,11 @@ void Lnast_tolg::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_v
       auto scalar_dpin = scalar_node.setup_driver_pin();
       subg_dpin.connect_sink(scalar_node.setup_sink_pin("A"));
 
-      name2dpin[res_name] = scalar_dpin;
-      scalar_dpin.set_name(res_name);
-      auto pos = res_name.find_last_of('_');
-      auto res_vname = res_name.substr(0,pos);
-      auto res_sub   = std::stoi(std::string(res_name.substr(pos+1)));
+      name2dpin[ret_name] = scalar_dpin;
+      scalar_dpin.set_name(ret_name);
+      auto pos = ret_name.find_last_of('_');
+      auto res_vname = ret_name.substr(0,pos);
+      auto res_sub   = std::stoi(std::string(ret_name.substr(pos+1)));
       setup_dpin_ssa(scalar_dpin, res_vname, 0);
 
       // note: the function call scalar return must be a "new_var_chain"
@@ -1250,9 +1250,9 @@ void Lnast_tolg::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_v
         auto aset_vn_dpin = scalar_dpin;
         lg->add_edge(aset_vn_dpin, aset_vn_spin);
 
-        name2dpin[res_name] = aset_node.setup_driver_pin("Y"); // dummy_attr_set node now represent the latest variable
-        aset_node.get_driver_pin("Y").set_name(res_name);
-        setup_dpin_ssa(name2dpin[res_name], res_vname, res_sub);
+        name2dpin[ret_name] = aset_node.setup_driver_pin("Y"); // dummy_attr_set node now represent the latest variable
+        aset_node.get_driver_pin("Y").set_name(ret_name);
+        setup_dpin_ssa(name2dpin[ret_name], res_vname, res_sub);
         vname2attr_dpin[res_vname] = aset_node.setup_driver_pin("chain");
       }
       continue;
@@ -1267,14 +1267,14 @@ void Lnast_tolg::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_v
         auto ta_ret      = lg->create_node(Ntype_op::TupAdd);
         auto ta_ret_dpin = ta_ret.setup_driver_pin();
 
-        auto ta_ret_tn_dpin = setup_tuple_ref(lg, res_name);
+        auto ta_ret_tn_dpin = setup_tuple_ref(lg, ret_name);
         ta_ret_tn_dpin.connect_sink(ta_ret.setup_sink_pin("tuple_name"));
 
         auto ta_ret_field_dpin = setup_field_dpin(lg, subname);
         ta_ret_field_dpin.connect_sink(ta_ret.setup_sink_pin("field"));
 
-        name2dpin[res_name] = ta_ret_dpin;
-        ta_ret_dpin.set_name(res_name);
+        name2dpin[ret_name] = ta_ret_dpin;
+        ta_ret_dpin.set_name(ret_name);
 
 
         if (hier_inp_subnames.size() == 1) {
@@ -1327,7 +1327,7 @@ void Lnast_tolg::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_v
 
 void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc) {
   auto c0_fc        = lnast->get_first_child(lnidx_fc);
-  auto res_name     = lnast->get_sname(c0_fc);
+  auto ret_name     = lnast->get_sname(c0_fc);
   auto func_name    = lnast->get_vname(lnast->get_sibling_next(c0_fc));
   auto arg_tup_name = lnast->get_sname(lnast->get_last_child(lnidx_fc));
 
@@ -1345,10 +1345,10 @@ void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc)
       sub       = lg->ref_library()->ref_sub(func_name);
     }
 
-    subg_node.set_name(absl::StrCat(res_name, ":", func_name));
+    subg_node.set_name(absl::StrCat(ret_name, ":", func_name));
     fmt::print("subg node_name:{}\n", subg_node.get_name());
 
-    // just connect 
+    // just connect to $ and %, handle the rest at global io connection
     Node_pin subg_spin;
     Node_pin subg_dpin;
     if (sub->has_pin("$")) { //sum.prp -> top.prp
@@ -1358,7 +1358,7 @@ void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc)
       subg_spin = subg_node.setup_sink_pin("$");
     }
     auto arg_tup_dpin = setup_tuple_ref(lg, arg_tup_name);
-    arg_tup_dpin.connect_sink(subg_dpin);
+    arg_tup_dpin.connect_sink(subg_spin);
 
     if (sub->has_pin("%")) {
       subg_dpin = subg_node.setup_driver_pin("%");
@@ -1367,7 +1367,15 @@ void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc)
       subg_dpin = subg_node.setup_driver_pin("%");
     }
 
-    /* subgraph_io_connection(lg, sub, arg_tup_name, res_name, subg_node); */
+    // create a TA assignment for the ret
+    auto ta_ret      = lg->create_node(Ntype_op::TupAdd);
+    auto ta_ret_dpin = ta_ret.setup_driver_pin();
+
+    subg_dpin.connect_sink(ta_ret.setup_sink_pin("tuple_name"));
+    name2dpin[ret_name] = ta_ret_dpin;
+    ta_ret_dpin.set_name(ret_name);
+
+    /* subgraph_io_connection(lg, sub, arg_tup_name, ret_name, subg_node); */
     return;
   }
 
@@ -1380,15 +1388,15 @@ void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc)
   auto subg_node = lg->create_node_sub(lgid);
   auto *sub = library->ref_sub(lgid);
 
-  subg_node.set_name(absl::StrCat(res_name, ":", func_name));
+  subg_node.set_name(absl::StrCat(ret_name, ":", func_name));
   /* fmt::print("subg node_name:{}\n", subg_node.get_name()); */
-  subgraph_io_connection(lg, sub, arg_tup_name, res_name, subg_node);
+  subgraph_io_connection(lg, sub, arg_tup_name, ret_name, subg_node);
 };
 
 #if 0
 void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc) {
   auto c0_fc        = lnast->get_first_child(lnidx_fc);
-  auto res_name     = lnast->get_sname(c0_fc);
+  auto ret_name     = lnast->get_sname(c0_fc);
   auto func_name    = lnast->get_vname(lnast->get_sibling_next(c0_fc));
   auto arg_tup_name = lnast->get_sname(lnast->get_last_child(lnidx_fc));
 
@@ -1402,9 +1410,9 @@ void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc)
     auto subg_node = lg->create_node_sub(lgid);
     auto *sub = library->ref_sub(lgid);
 
-    subg_node.set_name(absl::StrCat(res_name, ":", func_name));
+    subg_node.set_name(absl::StrCat(ret_name, ":", func_name));
     /* fmt::print("subg node_name:{}\n", subg_node.get_name()); */
-    subgraph_io_connection(lg, sub, arg_tup_name, res_name, subg_node);
+    subgraph_io_connection(lg, sub, arg_tup_name, ret_name, subg_node);
     return;
   }
 
@@ -1417,9 +1425,9 @@ void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc)
   auto subg_node = lg->create_node_sub(lgid);
   auto *sub = library->ref_sub(lgid);
 
-  subg_node.set_name(absl::StrCat(res_name, ":", func_name));
+  subg_node.set_name(absl::StrCat(ret_name, ":", func_name));
   /* fmt::print("subg node_name:{}\n", subg_node.get_name()); */
-  subgraph_io_connection(lg, sub, arg_tup_name, res_name, subg_node);
+  subgraph_io_connection(lg, sub, arg_tup_name, ret_name, subg_node);
 };
 #endif
 
