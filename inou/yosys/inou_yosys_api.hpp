@@ -16,7 +16,6 @@ using namespace kainjow;
 
 class Inou_yosys_api : public Pass {
 protected:
-  std::string yosys;  // yosys configuration script option
   std::string script_file;
 
   void set_script_yosys(const Eprp_var &var, bool do_read);

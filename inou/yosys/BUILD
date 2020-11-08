@@ -43,6 +43,14 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
+filegroup(
+    name = "inou_yosys_scripts",
+    srcs = glob([
+        "inou_yosys_*.ys",
+    ]),
+    visibility = ["//visibility:public"],
+)
+
 cc_binary(
     name = "yosys2",
     srcs = [

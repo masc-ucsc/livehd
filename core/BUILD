@@ -11,7 +11,6 @@ cc_library(
         "@rapidjson//:headers",
         "@iassert//:iassert",
         "@boost//:multiprecision",
-        "@frozen//:headers",
         "//eprp:eprp",
         "//mmap_lib:headers",
         "//lbench:headers",

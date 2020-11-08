@@ -21,17 +21,12 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
     ##strip_prefix = "ot", OpenTimer uses ot/... so, we have to keep it
     #patches = ["//external:patch.opentimer"],  # For generated ot/config.hpp
 #)
-new_git_repository( # Open_timer user taskflow
-    name = "frozen",
-    build_file = "BUILD.frozen",
-    commit = "3d2b025ff2509f40424855e3f8640fc2fb6b90b9", # July 1, 2020
-    remote = "https://github.com/serge-sans-paille/frozen.git",
-)
-git_repository( # Open_timer user taskflow
-    name = "range-v3",
-    commit = "6dd1cb6a03a588031868b6ffb66286e6eaab6714", # July 18, 2020
-    remote = "https://github.com/ericniebler/range-v3.git",
-)
+#new_git_repository( # Open_timer user taskflow
+#    name = "frozen",
+#    build_file = "BUILD.frozen",
+#    commit = "3d2b025ff2509f40424855e3f8640fc2fb6b90b9", # July 1, 2020
+#    remote = "https://github.com/serge-sans-paille/frozen.git",
+#)
 
 #new_git_repository( # Open_timer user taskflow
     #name = "taskflow",
@@ -63,10 +58,33 @@ new_git_repository(
 )
 
 http_archive(
+    name = "rules_proto",
+    sha256 = "602e7161d9195e50246177e7c55b2f39950a9cf7366f74ed5f22fd45750cd208",
+    strip_prefix = "rules_proto-97d8af4dc474595af3900dd85cb3a29ad28cc313",
+    urls = [
+        "https://mirror.bazel.build/github.com/bazelbuild/rules_proto/archive/97d8af4dc474595af3900dd85cb3a29ad28cc313.tar.gz",
+        "https://github.com/bazelbuild/rules_proto/archive/97d8af4dc474595af3900dd85cb3a29ad28cc313.tar.gz",
+        ],
+    )
+load("@rules_proto//proto:repositories.bzl", "rules_proto_dependencies", "rules_proto_toolchains")
+rules_proto_dependencies()
+rules_proto_toolchains()
+
+http_archive(
     name = "rules_cc",
     urls = ["https://github.com/bazelbuild/rules_cc/archive/262ebec3c2296296526740db4aefce68c80de7fa.zip"],
     strip_prefix = "rules_cc-262ebec3c2296296526740db4aefce68c80de7fa",
     )
+
+http_archive(
+    name = "rules_foreign_cc",
+    sha256 = "ab266a13f5f695c898052271af860bf4928fb2ef6a333f7b63076b81271e4342",
+    strip_prefix = "rules_foreign_cc-6bb0536452eaca3bad20c21ba6e7968d2eda004d",
+    urls = ["https://github.com/bazelbuild/rules_foreign_cc/archive/6bb0536452eaca3bad20c21ba6e7968d2eda004d.zip"],
+    )
+
+load("@rules_foreign_cc//:workspace_definitions.bzl", "rules_foreign_cc_dependencies")
+rules_foreign_cc_dependencies()
 
 git_repository(
     name = "com_google_absl",
@@ -195,48 +213,72 @@ new_git_repository(
     # patches = ["//external:patch.mockturtle"],
     #strip_prefix = "include",
 )
-new_git_repository(
+
+all_content = """filegroup(name = "all", srcs = glob(["**"]), visibility = ["//visibility:public"])"""
+
+http_archive(
     name = "bison",
-    build_file = "BUILD.bison",
-    commit = "0d44f83fcc330dd4674cf4493e2a4e18e758e6bc",
-    remote = "https://git.savannah.gnu.org/git/bison.git",
-    #patches = ["//external:patch.verilator"],
-    #strip_prefix = "include",
-)
+    build_file_content = all_content,
+    sha256 = "e28ed3aad934de2d1df68be209ac0b454f7b6d3c3d6d01126e5cd2cbadba089a",
+    strip_prefix = "bison-3.6.2",
+    urls = ["https://ftp.gnu.org/gnu/bison/bison-3.6.2.tar.gz"],
+    )
+
+http_archive(
+    name = "flex",
+    build_file_content = all_content,
+    patch_args = ["-p1"],
+    patches = ["//external:patch.flex"],
+    sha256 = "e87aae032bf07c26f85ac0ed3250998c37621d95f8bd748b31f15b33c45ee995",
+    strip_prefix = "flex-2.6.4",
+    urls = ["https://github.com/westes/flex/releases/download/v2.6.4/flex-2.6.4.tar.gz"],
+    )
+
+http_archive(
+    name = "m4",
+    build_file_content = all_content,
+    patch_args = ["-p1"],
+    patches = ["//external:patch.m4"],
+    sha256 = "ab2633921a5cd38e48797bf5521ad259bdc4b979078034a3b790d7fec5493fab",
+    strip_prefix = "m4-1.4.18",
+    urls = ["https://ftp.gnu.org/gnu/m4/m4-1.4.18.tar.gz"],
+    )
+
 new_git_repository(
     name = "graph",
     build_file = "BUILD.graph",
-    commit = "b1e38e1084a0dff6f4eb4ed9a645ed63d3e83dd2", # latest commit as of 7/18/20
+    commit = "b1e38e1084a0dff6f4eb4ed9a645ed63d3e83dd2", # latest commit Jan 21, 2019
     remote = "https://github.com/cbbowen/graph",
 )
 new_git_repository(
 	name = "range-v3",
 	build_file = "BUILD.rangev3",
-	commit = "4f4beb45c5e56aca4233e4d4c760208e21fff2ec", # specific commit used by graph, made on Jan 11 2019
+	commit = "f013aef2ae81f3661a560e7922a968665bedebff", # 4f4beb45c5e56aca4233e4d4c760208e21fff2ec", # specific commit used by graph, made on Jan 11 2019
 	remote = "https://github.com/ericniebler/range-v3",
-  shallow_since = "1547250373 -0800",
 )
-
-# BOOST Libraries dependences
-load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
 git_repository(
     name = "com_github_nelhage_rules_boost",
-    commit = "0cc5bf5513c067917b5e083cee22a8dcdf2e0266", # Original "9f9fb8b2f0213989247c9d5c0e814a8451d18d7f",
+    commit = "1e3a69bf2d5cd10c34b74f066054cd335d033d71",  # Nov 7, 2020
     remote = "https://github.com/nelhage/rules_boost",
-    shallow_since = "1570056263 -0700",
-)
+    shallow_since = "1591047380 -0700",
+    )
 
 load("@com_github_nelhage_rules_boost//:boost/boost.bzl", "boost_deps")
 boost_deps()
 
-#git_repository(
-    #name = "subpar",
-    #remote = "https://github.com/google/subpar",
-    #tag = "1.3.0",
-#)
 
 # Hermetic even for the toolchain :D
+http_archive(
+    name = "bazel_toolchains",
+    sha256 = "882fecfc88d3dc528f5c5681d95d730e213e39099abff2e637688a91a9619395",
+    strip_prefix = "bazel-toolchains-3.4.0",
+    urls = [
+        "https://github.com/bazelbuild/bazel-toolchains/releases/download/3.4.0/bazel-toolchains-3.4.0.tar.gz",
+        "https://mirror.bazel.build/github.com/bazelbuild/bazel-toolchains/releases/download/3.4.0/bazel-toolchains-3.4.0.tar.gz",
+        ],
+    )
+
 #http_archive(
     #name = "bazel_toolchains",
     #sha256 = "239a1a673861eabf988e9804f45da3b94da28d1aff05c373b013193c315d9d9e",
@@ -265,11 +307,12 @@ boost_deps()
 
 http_archive(
     name = "com_google_protobuf",
-    strip_prefix = "protobuf-master",
-    urls = ["https://github.com/protocolbuffers/protobuf/archive/master.zip"],
-)
-
-load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
-protobuf_deps()
-
+    #repo_mapping = {"@zlib": "@net_zlib"},
+    sha256 = "1c744a6a1f2c901e68c5521bc275e22bdc66256eeb605c2781923365b7087e5f",
+    strip_prefix = "protobuf-3.13.0",
+    urls = [
+        "https://mirror.bazel.build/github.com/protocolbuffers/protobuf/archive/v3.13.0.zip",
+        "https://github.com/protocolbuffers/protobuf/archive/v3.13.0.zip",
+        ],
+    )
 
