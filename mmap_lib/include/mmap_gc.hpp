@@ -359,21 +359,21 @@ public:
     void *base;
 #ifdef __APPLE__
     // No remap in OS X
-    if (it->second.fd > 0) {
+    if (it->second.fd >= 0) {
       munmap(mmap_old_base, old_size);
       base = ::mmap(0, new_size, PROT_READ | PROT_WRITE, MAP_SHARED, it->second.fd, 0);  // no superpages
       /* LCOV_EXCL_START */
       if (base == MAP_FAILED) {
-        std::cerr << "ERROR: OS X 1 could not allocate" << mmap_name << "txt with " << new_size/1024 << "KB\n";
+        std::cerr << "ERROR: OS X 1 could not allocate " << mmap_name << "txt with " << new_size/1024 << "KB\n";
         exit(-1);
       }
       /* LCOV_EXCL_STOP */
     } else {
       // Painful new allocation, and then copy
-      base = ::mmap(0, new_size, PROT_READ | PROT_WRITE, MAP_SHARED, it->second.fd, 0);  // no superpages
+      base = ::mmap(0, new_size, PROT_READ | PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
       /* LCOV_EXCL_START */
       if (base == MAP_FAILED) {
-        std::cerr << "ERROR: OS X 2 could not allocate" << mmap_name << "txt with " << new_size/1024 << "KB\n";
+        std::cerr << "ERROR: OS X 2 could not allocate " << mmap_name << "txt with " << new_size/1024 << "KB\n";
         exit(-1);
       }
       /* LCOV_EXCL_STOP */
