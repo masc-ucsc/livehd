@@ -32,7 +32,6 @@ void setup_inou_yosys() {
 }
 
 Inou_yosys_api::Inou_yosys_api(Eprp_var &var, bool do_read) : Pass("inou.yosys", var) {
-  yosys = var.get("yosys");
   set_script_yosys(var, do_read);
 }
 
@@ -55,21 +54,6 @@ void Inou_yosys_api::set_script_yosys(const Eprp_var &var, bool do_read) {
 		  ,"/../inou/yosys/"
 		  ,"/inou/yosys/"};
 
-  if (yosys.empty()) {
-	  for(const auto e:alt_paths) {
-		  auto test = main_path + e + "yosys2";
-		  if (access(test.c_str(), X_OK) != -1) {
-			  yosys = test;
-			  break;
-		  }
-	  }
-  }
-
-  if (access(yosys.c_str(), X_OK) == -1) {
-    error("could not find a yosys2 executable at {}\n", yosys);
-    return;
-  }
-
   if (script.empty()) {
     std::string do_read_str;
     if (do_read)
@@ -90,7 +74,6 @@ void Inou_yosys_api::set_script_yosys(const Eprp_var &var, bool do_read) {
     error("yosys setup could not find the provided script:{} file", script_file);
     return;
   }
-
 }
 
 void Inou_yosys_api::call_yosys(mustache::data &vars) {

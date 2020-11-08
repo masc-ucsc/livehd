@@ -39,6 +39,9 @@ cc_binary(
 
             #add dependencies to new passes here
     ],
+    data = [
+        "//inou/yosys:inou_yosys_scripts",
+    ],
     visibility = ["//visibility:public"],
     #linkopts = ["-static"],
     linkstatic=False,

@@ -23,7 +23,9 @@ exports_files(["LICENSE"])
 #load("@com_google_xls//dependency_support/at_clifford_yosys:yosys.bzl", "yosys_syntax_check")
 #load("@com_google_xls//dependency_support/flex:flex.bzl", "genlex")
 #load("@com_google_xls//dependency_support/org_gnu_bison:bison.bzl", "genyacc")
-load("@livehd//tools:lexyacc.bzl", "genlex", "genyacc")
+#load("@livehd//tools:lexyacc.bzl", "genlex", "genyacc")
+load("@livehd//tools:bison.bzl", "genyacc")
+load("@livehd//tools:flex.bzl", "genlex")
 
 genrule(
     name = "version_src",
@@ -53,30 +55,28 @@ genrule(
 
 genlex(
     name = "verilog_lexer",
-    srcs = ["frontends/verilog/verilog_lexer.l"],
+    src = "frontends/verilog/verilog_lexer.l",
     out  = "verilog_lexer.cc",
 )
 
 genyacc(
     name = "verilog_parser",
-    srcs = ["frontends/verilog/verilog_parser.y"],
-    outs = ["frontends/verilog/verilog_parser.tab.cc",
-            "frontends/verilog/verilog_parser.tab.hh",
-           ],
+    src  = "frontends/verilog/verilog_parser.y",
+    source_out = "frontends/verilog/verilog_parser.tab.cc",
+    header_out = "frontends/verilog/verilog_parser.tab.hh",
 )
 
 genlex(
     name = "rtlil_lexer",
-    srcs = ["frontends/rtlil/rtlil_lexer.l"],
+    src  = "frontends/rtlil/rtlil_lexer.l",
     out  = "rtlil_lexer.cc",
 )
 
 genyacc(
     name = "rtlil_parser",
-    srcs = ["frontends/rtlil/rtlil_parser.y"],
-    outs = ["frontends/rtlil/rtlil_parser.tab.cc",
-            "frontends/rtlil/rtlil_parser.tab.hh",
-           ],
+    src = "frontends/rtlil/rtlil_parser.y",
+    source_out = "frontends/rtlil/rtlil_parser.tab.cc",
+    header_out = "frontends/rtlil/rtlil_parser.tab.hh",
 )
 
 #genlex(
