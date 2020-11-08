@@ -22,7 +22,6 @@ sh_test(
     # tags = ["manual"],
     # tags = ["fixme"],
     data = [
-        "//inou/yosys:liblgraph_yosys.so",
         "//main:lgshell",
         "//inou/pyrope:pyrope_tests"
         ],

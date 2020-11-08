@@ -28,7 +28,6 @@ sh_test(
     name = "mt_test.sh",
     srcs = ["tests/mt_test.sh"],
     data = [
-        "//inou/yosys:liblgraph_yosys.so",
         "//main:lgshell",
         "//inou/yosys:verilog_tests"
         ],
