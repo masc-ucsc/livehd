@@ -16,6 +16,9 @@
 #include <iostream>
 #include <vector>
 #include <sstream>
+#ifndef __linux__
+#include <mach/mach.h>
+#endif
 
 #include "likely.hpp"
 
@@ -36,7 +39,8 @@ private:
     return i;
   }
 
-  int getValue() { // Note: this value is in KB!
+  int getValue() const { // Note: this value is in KB!
+#ifdef __linux__
     FILE *file   = fopen("/proc/self/status", "r");
     int result = -1;
     char line[128];
@@ -49,6 +53,15 @@ private:
     }
     fclose(file);
     return result;
+#else
+    task_vm_info_data_t vmInfo;
+    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    kern_return_t kernelReturn = task_info(mach_task_self(), TASK_VM_INFO, (task_info_t) &vmInfo, &count);
+    if(kernelReturn == KERN_SUCCESS) {
+      return (int) vmInfo.phys_footprint / (1024 * 1024);
+    }
+    return 0;
+#endif
   }
 
   static inline bool perf_setup   = false;
@@ -130,7 +143,7 @@ public:
     linux.setup(evts);
 
     start();
-  };
+  }
 
   ~Lbench() {
     if(end_called)
