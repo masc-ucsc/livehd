@@ -28,7 +28,7 @@ class Lbench {
 private:
   LinuxEvents<PERF_TYPE_HARDWARE> linux;
 
-  int parseLine(char *line) {
+  int parseLine(char *line) const {
     // This assumes that a digit will be found and the line ends in " Kb".
     int         i = strlen(line);
     const char *p = line;
