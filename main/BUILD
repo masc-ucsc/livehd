@@ -18,7 +18,7 @@ cc_binary(
             "//inou/liveparse:inou_liveparse",
             "//inou/pyrope:inou_pyrope",
             "//inou/slang:inou_slang",
-            "//inou/yosys:lgyosys-api",
+            "//inou/yosys:lgyosys",
 
             "//lgcpp/common:lgcpp",
             "//lgcpp/prplib:prplib",
@@ -39,8 +39,6 @@ cc_binary(
 
             #add dependencies to new passes here
     ],
-    data = ["//inou/yosys:liblgraph_yosys.so",   # A bit special as only libraries are used in yosys -m XXX
-    ],
     visibility = ["//visibility:public"],
     #linkopts = ["-static"],
     linkstatic=False,
@@ -50,7 +48,6 @@ sh_test(
     name = "lgshell_test.sh",
     srcs = ["tests/lgshell_test.sh"],
     data = [
-        "//inou/yosys:liblgraph_yosys.so",
         "//inou/yosys:verilog_tests",
         ":lgshell",
     ],
@@ -63,7 +60,6 @@ sh_test(
     name = "verilog.sh",
     srcs = ["tests/verilog.sh"],
     data = [
-        "//inou/yosys:liblgraph_yosys.so",
         "//inou/yosys:verilog_tests",
         ":lgshell",
         ],
@@ -77,7 +73,6 @@ sh_test(
     name = "verilog.sh-long",
     srcs = ["tests/verilog.sh"],
     data = [
-        "//inou/yosys:liblgraph_yosys.so",
         "//inou/yosys:verilog_tests",
         ":lgshell",
         ],

@@ -195,7 +195,7 @@ cc_library(
         # "YOSYS_ENABLE_PLUGINS",
         # "YOSYS_ENABLE_READLINE",
         "YOSYS_ENABLE_GLOB",
-        "YOSYS_ENABLE_TCL",
+        #"YOSYS_ENABLE_TCL",
         "YOSYS_ENABLE_ABC",
         "YOSYS_ENABLE_COVER",
         'ABCEXTERNAL=\\"abc\\"',
@@ -221,7 +221,7 @@ cc_library(
         # "@edu_berkeley_abc//:abc-lib",
         "@abc//:abc",
         # "@org_sourceware_libffi//:libffi",
-        "@tk_tcl_tcl//:tcl",
+        #"@tk_tcl_tcl//:tcl",
     ],
     visibility = ["//visibility:public"],
 )
