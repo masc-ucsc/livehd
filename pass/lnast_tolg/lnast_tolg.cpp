@@ -1325,6 +1325,68 @@ void Lnast_tolg::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_v
   }
 }
 
+#if 0
+void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc) {
+  auto c0_fc        = lnast->get_first_child(lnidx_fc);
+  auto res_name     = lnast->get_sname(c0_fc);
+  auto func_name    = lnast->get_vname(lnast->get_sibling_next(c0_fc));
+  auto arg_tup_name = lnast->get_sname(lnast->get_last_child(lnidx_fc));
+
+  auto *library = Graph_library::instance(path);
+  if (name2dpin.find(func_name) == name2dpin.end()) {
+    fmt::print("function {} defined in separated prp file, query lgdb\n", func_name);
+    Node subg_node;
+    Sub_node* sub;
+    if (library->has_name(func_name)) {
+      auto lgid = library->get_lgid(func_name);
+      subg_node = lg->create_node_sub(lgid);
+      sub       = library->ref_sub(lgid);
+    } else {
+      subg_node = lg->create_node_sub(func_name);
+      sub       = lg->ref_library()->ref_sub(func_name);
+    }
+
+    subg_node.set_name(absl::StrCat(res_name, ":", func_name));
+    fmt::print("subg node_name:{}\n", subg_node.get_name());
+
+    // just connect 
+    Node_pin subg_spin;
+    Node_pin subg_dpin;
+    if (sub->has_pin("$")) { //sum.prp -> top.prp
+      subg_spin = subg_node.setup_sink_pin("$");
+    } else { // top.prp -> sum.prp
+      sub->add_input_pin("$", Port_invalid);
+      subg_spin = subg_node.setup_sink_pin("$");
+    }
+    auto arg_tup_dpin = setup_tuple_ref(lg, arg_tup_name);
+    arg_tup_dpin.connect_sink(subg_dpin);
+
+    if (sub->has_pin("%")) {
+      subg_dpin = subg_node.setup_driver_pin("%");
+    } else {
+      sub->add_output_pin("%", Port_invalid);
+      subg_dpin = subg_node.setup_driver_pin("%");
+    }
+
+    /* subgraph_io_connection(lg, sub, arg_tup_name, res_name, subg_node); */
+    return;
+  }
+
+  fmt::print("function {} defined in same prp file, query lgdb\n", func_name);
+  auto ta_func_def = name2dpin[func_name].get_node();
+  I(ta_func_def.get_type_op() == Ntype_op::TupAdd);
+  I(ta_func_def.setup_sink_pin("KV").get_driver_node().get_type_op() == Ntype_op::Const);
+  Lg_type_id lgid = ta_func_def.setup_sink_pin("KV").get_driver_node().get_type_const().to_i();
+
+  auto subg_node = lg->create_node_sub(lgid);
+  auto *sub = library->ref_sub(lgid);
+
+  subg_node.set_name(absl::StrCat(res_name, ":", func_name));
+  /* fmt::print("subg node_name:{}\n", subg_node.get_name()); */
+  subgraph_io_connection(lg, sub, arg_tup_name, res_name, subg_node);
+};
+#endif
+
 
 void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc) {
   auto c0_fc        = lnast->get_first_child(lnidx_fc);
@@ -1361,6 +1423,7 @@ void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc)
   /* fmt::print("subg node_name:{}\n", subg_node.get_name()); */
   subgraph_io_connection(lg, sub, arg_tup_name, res_name, subg_node);
 };
+
 
 void Lnast_tolg::process_ast_func_def_op (LGraph *lg, const Lnast_nid &lnidx) {
   auto c0_fdef = lnast->get_first_child(lnidx);
