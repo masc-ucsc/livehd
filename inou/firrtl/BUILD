@@ -35,7 +35,6 @@ sh_test(
     name = "firrtl_test_livehd.sh",
     srcs = ["tests/firrtl_test_livehd.sh"],
     data = [
-        "//inou/yosys:liblgraph_yosys.so",
         "//inou/yosys:verilog_tests",
         "//main:lgshell",
     ],
