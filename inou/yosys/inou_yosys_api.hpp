@@ -21,10 +21,9 @@ protected:
 
   void set_script_yosys(const Eprp_var &var, bool do_read);
 
-  int  create_lib(const std::string &lib_file, const std::string &lgdb);
   void do_tolg(Eprp_var &var);
 
-  int call_yosys(mustache::data &vars);
+  void call_yosys(mustache::data &vars);
 
   // eprp callback
   static void tolg(Eprp_var &var);

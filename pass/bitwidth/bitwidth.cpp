@@ -666,7 +666,7 @@ void Bitwidth::bw_pass(LGraph *lg) {
     } else if (op == Ntype_op::Or || op == Ntype_op::Xor) {
       process_logic(node, inp_edges);
     } else if (op == Ntype_op::Ror) {
-      I(false); //FIXME: todo
+      I(false); //FIXME: todo (1 bit output)
     } else if (op == Ntype_op::And) {
       process_logic_and(node, inp_edges);
     } else if (op == Ntype_op::AttrSet) {

@@ -1,60 +1,29 @@
 #  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 cc_library(
-    name = "lgyosys-lib",
-    srcs = glob(["lg*.cpp"],exclude=["*test*.cpp"]),
-    hdrs = glob(["lg*.hpp"]),
+    name = "lgyosys",
+    srcs = glob(["*.cpp"],exclude=["*test*.cpp", "yosys_driver.cpp"]),
+    hdrs = glob(["*.hpp"]),
     #alwayslink=1,
     alwayslink=True,
-    defines = ["_YOSYS_","YOSYS_ENABLE_PLUGINS"],
-    visibility = ["//visibility:public"],
-    deps = [
-        "//pass/common:pass",
-        #"@yosys//:headers",
-        "@yosys//:kernel",
+    defines = [
+        "_YOSYS_",
+        # "YOSYS_ENABLE_PLUGINS",
+        # "YOSYS_ENABLE_READLINE",
+        "YOSYS_ENABLE_GLOB",
+        #"YOSYS_ENABLE_TCL",
+        "YOSYS_ENABLE_ABC",
+        "YOSYS_ENABLE_COVER",
+        'ABCEXTERNAL=\\"abc\\"',
     ],
-)
-
-cc_library(
-    name = "lgyosys-api",
-    srcs = glob(["inou*.cpp"],exclude=["*test*.cpp"]),
-    hdrs = glob(["inou*.hpp"]),
+    features = ["-use_header_modules"],
     visibility = ["//visibility:public"],
     deps = [
         "//pass/common:pass",
         "@mustache//:headers",
+        "@yosys//:kernel",
+        "@yosys//:version",
     ],
-    data = ["inou_yosys_read.ys",
-            "inou_yosys_write.ys",
-    ],
-)
-
-load("//tools:linkso.bzl", "linkso")
-
-linkso(
-    name = "liblgraph_yosys",
-    srcs   = [
-        ":lgyosys-lib",
-        "@com_google_absl//absl/strings",
-        #"//core:core",
-        #"//eprp:eprp",
-        #"//elab:elab",
-        #"@com_google_absl//absl/base:base",
-        # "@com_google_absl//absl/base:malloc_internal",
-#        "@com_google_absl//absl/hash:city",
-        #"@com_google_absl//absl/container:flat_hash_map",
-        #"@com_google_absl//absl/container:hashtablez_sampler",
-        #"@com_google_absl//absl/container:raw_hash_set",
-        #"@com_google_absl//absl/synchronization:synchronization",
-        #"@com_google_absl//absl/debugging:symbolize",
-    ],
-    deps   = [
-        "@com_google_absl//absl/container:flat_hash_map",
-        "@fmt//:fmt",
-        "//core:core",
-        "//eprp:eprp",
-        ],
-    visibility = ["//visibility:public"],
 )
 
 sh_library(
@@ -77,16 +46,14 @@ filegroup(
 cc_binary(
     name = "yosys2",
     srcs = [
-        "yosys_driver.cc",
+        "yosys_driver.cpp",
     ],
     features = ["-use_header_modules"],
     visibility = ["//visibility:public"],
     linkstatic=True,
     deps = [
-        ":lgyosys-lib",
+        ":lgyosys",
         "//core:core",
-        # "@yosys//:kernel",
-        "@yosys//:version",
         #"@dk_thrysoee_libedit//:pretend_to_be_gnu_readline_system",
     ],
 )

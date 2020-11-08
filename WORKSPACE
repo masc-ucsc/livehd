@@ -67,11 +67,10 @@ http_archive(
     urls = ["https://github.com/bazelbuild/rules_cc/archive/262ebec3c2296296526740db4aefce68c80de7fa.zip"],
     strip_prefix = "rules_cc-262ebec3c2296296526740db4aefce68c80de7fa",
     )
+
 git_repository(
     name = "com_google_absl",
-    #build_file = "BUILD.abseil", # relative to external path
-    #commit = "d0c433455801e1c1fb6f486f0b447e22f946ab52", # August, 16 2020 (fails because Yosys)
-    commit = "bf86cfe165ef7d70dfe68f0b8fc0c018bc79a577", # December 16, 2019
+    commit = "e96d49687d9c078f2d47356b6723c3b5715493f7", # Nov, 7 2020
     remote = "https://github.com/abseil/abseil-cpp.git",
 )
 
