@@ -20,12 +20,8 @@ licenses(["restricted"])
 
 exports_files(["LICENSE"])
 
-#load("@com_google_xls//dependency_support/at_clifford_yosys:yosys.bzl", "yosys_syntax_check")
-#load("@com_google_xls//dependency_support/flex:flex.bzl", "genlex")
-#load("@com_google_xls//dependency_support/org_gnu_bison:bison.bzl", "genyacc")
-#load("@livehd//tools:lexyacc.bzl", "genlex", "genyacc")
-load("@livehd//tools:bison.bzl", "genyacc")
-load("@livehd//tools:flex.bzl", "genlex")
+load("@rules_flex//flex:flex.bzl", "flex")
+load("@rules_bison//bison:bison.bzl", "bison")
 
 genrule(
     name = "version_src",
@@ -53,45 +49,55 @@ genrule(
     ),
 )
 
-genlex(
-    name = "verilog_lexer",
-    src = "frontends/verilog/verilog_lexer.l",
-    out  = "verilog_lexer.cc",
+genrule(
+    name = "verilog_lexer_cpp",
+    srcs  = ["frontends/verilog/verilog_lexer.l"],
+    outs = ["verilog_lexer.cpp"],
+    cmd = "M4=$(M4) $(FLEX) --outfile=$@ $<",
+    toolchains = [
+        "@rules_flex//flex:current_flex_toolchain",
+        "@rules_m4//m4:current_m4_toolchain",
+    ],
 )
 
-genyacc(
+genrule(
     name = "verilog_parser",
-    src  = "frontends/verilog/verilog_parser.y",
-    source_out = "frontends/verilog/verilog_parser.tab.cc",
-    header_out = "frontends/verilog/verilog_parser.tab.hh",
+    srcs = ["frontends/verilog/verilog_parser.y"],
+    outs = ["frontends/verilog/verilog_parser.tab.cc",
+            "frontends/verilog/verilog_parser.tab.hh",
+           ],
+    cmd = "M4=$(M4) $(BISON) --defines=$(location frontends/verilog/verilog_parser.tab.hh) --output-file=$(location frontends/verilog/verilog_parser.tab.cc) $<",
+        # "--name-prefix=xxx",
+    toolchains = [
+        "@rules_bison//bison:current_bison_toolchain",
+        "@rules_m4//m4:current_m4_toolchain",
+    ],
 )
 
-genlex(
-    name = "rtlil_lexer",
-    src  = "frontends/rtlil/rtlil_lexer.l",
-    out  = "rtlil_lexer.cc",
+genrule(
+    name = "rtlil_lexer_cpp",
+    srcs  = ["frontends/rtlil/rtlil_lexer.l"],
+    outs = ["rtlil_lexer.cpp"],
+    cmd = "M4=$(M4) $(FLEX) --outfile=$@ $<",
+    toolchains = [
+        "@rules_flex//flex:current_flex_toolchain",
+        "@rules_m4//m4:current_m4_toolchain",
+    ],
 )
 
-genyacc(
+genrule(
     name = "rtlil_parser",
-    src = "frontends/rtlil/rtlil_parser.y",
-    source_out = "frontends/rtlil/rtlil_parser.tab.cc",
-    header_out = "frontends/rtlil/rtlil_parser.tab.hh",
+    srcs = ["frontends/rtlil/rtlil_parser.y"],
+    outs = ["frontends/rtlil/rtlil_parser.tab.cc",
+            "frontends/rtlil/rtlil_parser.tab.hh",
+           ],
+    cmd = "M4=$(M4) $(BISON) --defines=$(location frontends/rtlil/rtlil_parser.tab.hh) --output-file=$(location frontends/rtlil/rtlil_parser.tab.cc) $<",
+        # "--name-prefix=xxx",
+    toolchains = [
+        "@rules_bison//bison:current_bison_toolchain",
+        "@rules_m4//m4:current_m4_toolchain",
+    ],
 )
-
-#genlex(
-#    name = "ilang_lexer",
-#    srcs = ["frontends/ilang/ilang_lexer.l"],
-#    out = "ilang_lexer.cc",
-#)
-#
-#genyacc(
-#    name = "ilang_parser",
-#    srcs = ["frontends/ilang/ilang_parser.y"],
-#    outs = ["frontends/ilang/ilang_parser.tab.cc",
-#            "frontends/ilang/ilang_parser.tab.hh",
-#           ],
-#)
 
 py_binary(
     name = "cellhelp",
@@ -165,9 +171,9 @@ cc_library(
             "passes/techmap/filterlib.cc",
         ],
     ) + [
-        ":verilog_lexer",
+        ":verilog_lexer_cpp",
         ":verilog_parser",
-        ":rtlil_lexer",
+        ":rtlil_lexer_cpp",
         ":rtlil_parser",
         #":ilang_lexer",
         #":ilang_parser",
