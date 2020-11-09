@@ -40,6 +40,8 @@ void Inou_yosys_api::set_script_yosys(const Eprp_var &var, bool do_read) {
 
   auto main_path = Eprp_utils::get_exe_path();
 
+  fmt::print("path:{}\n",main_path);
+
   std::vector<std::string> alt_paths{
 		  "/../pass/mockturtle/mt_test.sh.runfiles/livehd/inou/yosys/"
 		  ,"/../pass/lnast_fromlg/lgtoln_verif_from_verilog.sh.runfiles/livehd/inou/yosys/"
