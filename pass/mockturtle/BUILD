@@ -6,6 +6,7 @@ cc_library(
     hdrs = glob(["pass_mockturtle.hpp"]),
     visibility = ["//visibility:public"],
     includes = ["."],
+    alwayslink=True,
     deps = [
         "//pass/common:pass",
         "@mockturtle//:mockturtle",

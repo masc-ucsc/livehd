@@ -14,9 +14,8 @@ void setup_pass_fplan();
 // add new setup function prototypes here
 
 void Main_api::init() {
-  //fmt::print("HERE\n");
   for (const auto &it : Pass_plugin::get_registry()) {
-    //fmt::print("function:{}\n", it.first);
+    // fmt::print("function:{}\n", it.first);
     it.second();
   }
 
