@@ -567,9 +567,14 @@ bool Cprop::process_tuple_get(Node &node) {
   }
 
   auto ctup = ptup_it->second;
+
   if (!ctup->has_key(key_pos, key_name)) {
+    // the case that TG tries fetch from an empty parent tuple -> very likely it's the dummy TA connected to the SubG %
+    if (ctup->get_tuple_size() == 0) { 
+      node2tuple[node.get_compact()] = ctup;
+      return false;
+    }
     //FIXME:sh -> should exclude the TG of $
-    ctup->dump();
     Pass::error("tuple {} does not have field pos:{} key:{}\n", tup_name, key_pos, key_name);
     return false;
   }
@@ -714,26 +719,16 @@ void Cprop::process_tuple_add(Node &node) {
           return;
         }
       }
+    } else if (node.is_sink_connected("tuple_name") && node.setup_sink_pin("tuple_name").get_driver_node().get_type_op() == Ntype_op::Sub) {
+      ;
     } else {
-      I(ptup); // tup1 = tup2 can have no sink(3)
+      I(ptup); // tup1 = tup2 can have no sink("value")
     }
   }
-#if 0
-  if (ptup) {
-    fmt::print("Parent:{}\n", node.get_sink_pin(0).get_driver_node().debug_name());
-    ptup->dump();
-  }
-  if (chain_tup) {
-    fmt::print("Chain:{}\n", node.get_sink_pin(3).get_driver_node().debug_name());
-    chain_tup->dump();
-  }
-  fmt::print("current:{}\n", node.debug_name());
-  ctup->dump();
-#endif
 
   node2tuple[node.get_compact()] = ctup;
 
-  //FIXME: should move to line 785 to avoid checking every TA, be there is a bug in line 785??
+  //FIXME: should move to line 779 to avoid checking every TA, but there is a bug in line that cannot retreive the tuple in line 779??
   if (node.out_edges().begin()->sink.is_graph_output()) {
     auto lg = node.get_class_lgraph();
     try_create_graph_output(lg, ctup);
@@ -788,11 +783,13 @@ void Cprop::do_trans(LGraph *lg) {
     try_collapse_forward(node, inp_edges_ordered);
   }
 
-  // FIXME: due to strange bug?? I move this function to the process_tuple_add
+  // FIXME: due to strange bug?? I move this function to the end of process_tuple_add
   /* auto last_ta = lg->get_graph_output("%").get_driver_node(); */
   /* fmt::print("last_ta:{}\n", last_ta.debug_name()); */
   /* auto tup = node2tuple[last_ta.get_compact()]; */
-  /* try_create_graph_output(tup); */
+  /* tup->dump(); */
+  /* try_create_graph_output(lg, tup); */
+
 
   for (auto node : lg->fast()) {
     if (!tup_get_left && node.is_type_tup()) {

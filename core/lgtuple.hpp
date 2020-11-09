@@ -127,6 +127,7 @@ public:
   Node_pin get_value_dpin(int pos, std::string_view key) const;  // get driver dpin of value field
   Node_pin get_value_dpin() const { return val_dpin; };
 
+
   bool   is_constant() const;
   Lconst get_constant() const;
 
@@ -137,4 +138,5 @@ public:
 
   /* void analyze_graph_output(absl::flat_hash_map<std::string, Node_pin> &gout2driver) const; */
   void analyze_graph_output(absl::flat_hash_map<std::string, Node_pin> &gout2driver, std::string base_name) const;
+  size_t  get_tuple_size() const { return key2pos.size(); };
 };
