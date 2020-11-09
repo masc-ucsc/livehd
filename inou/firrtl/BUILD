@@ -25,6 +25,7 @@ cc_library(
     hdrs = ["inou_firrtl.hpp"],
     visibility = ["//visibility:public"],
     includes = ["."],
+    alwayslink=True,
     deps = [
         ":firrtl_cc_proto",
         "//pass/common:pass",

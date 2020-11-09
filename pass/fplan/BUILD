@@ -9,6 +9,7 @@ cc_library(
     hdrs = glob(["*.hpp"]),
     includes = ["."],
     visibility = ["//visibility:public"],
+    alwayslink=True,
     deps = [
          "//core:core",
          "//pass/common:pass",
