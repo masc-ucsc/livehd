@@ -108,6 +108,8 @@ void Sub_node::from_json(const rapidjson::Value &entry) {
       map_pin_int(instance_pid, pid);
     }
   }
+
+  std::sort(deleted.begin(), deleted.end(), std::greater<>());
 }
 
 /* LCOV_EXCL_START */
@@ -197,5 +199,6 @@ void Sub_node::del_pin(Port_ID instance_pid) {
   io_pins[instance_pid].clear(); // do not erase to avoid remap of all the instance_pids (users)
 
   deleted.emplace_back(instance_pid);
+  std::sort(deleted.begin(), deleted.end(), std::greater<>());
 }
 
