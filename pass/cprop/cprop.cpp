@@ -500,7 +500,7 @@ std::tuple<std::string_view, std::string_view, int> Cprop::get_tuple_name_key(No
       key_name = node2.get_driver_pin().get_name();
   }
 
-  for(auto dpin : node.get_sink_pin("tuple_name").inp_driver()) {
+  for(const auto &dpin : node.setup_sink_pin("tuple_name").inp_driver()) {
     if (dpin.has_name()) {
       tup_name = dpin.get_name();
       break;
@@ -675,10 +675,8 @@ void Cprop::process_tuple_add(Node &node) {
   std::shared_ptr<Lgtuple> ctup;
   if (chain_tup) { 
     if (ptup) {
-      //fmt::print("1.TupAdd node:{} tup_name:{} pos:{} key:{}\n", node.debug_name(), tup_name, key_pos, key_name);
       ctup = std::make_shared<Lgtuple>(*ptup);
     } else {
-      //fmt::print("2.TupAdd node:{} tup_name:{} pos:{} key:{}\n", node.debug_name(), tup_name, key_pos, key_name);
       ctup = std::make_shared<Lgtuple>(tup_name);
     }
 
@@ -695,10 +693,8 @@ void Cprop::process_tuple_add(Node &node) {
     }
   } else {
     if (ptup) {
-      //fmt::print("3.TupAdd node:{} tup_name:{} pos:{} key:{}\n", node.debug_name(), tup_name, key_pos, key_name);
       ctup = ptup;
     } else {
-      //fmt::print("4.TupAdd node:{} tup_name:{} pos:{} key:{}\n", node.debug_name(), tup_name, key_pos, key_name);
       ctup = std::make_shared<Lgtuple>(tup_name);
     }
 
@@ -707,7 +703,7 @@ void Cprop::process_tuple_add(Node &node) {
       I(val_dpin.get_node().get_type_op() != Ntype_op::TupAdd); //sh added, check?
 
       // Tuple Concatenation operator
-      if (key_pos<0 && key_name.empty()) { 
+      if (key_pos < 0 && key_name.empty()) { 
         if (!ptup && node.get_sink_pin("tuple_name").is_connected()) {
           ctup->add(node.get_sink_pin("tuple_name").get_driver_pin());
         }
@@ -730,6 +726,7 @@ void Cprop::process_tuple_add(Node &node) {
 
   //FIXME: should move to line 779 to avoid checking every TA, but there is a bug in line that cannot retreive the tuple in line 779??
   if (node.out_edges().begin()->sink.is_graph_output()) {
+    ctup->dump();
     auto lg = node.get_class_lgraph();
     try_create_graph_output(lg, ctup);
   }
@@ -839,7 +836,9 @@ void Cprop::try_create_graph_output(LGraph *lg, std::shared_ptr<Lgtuple> tup) {
   for (const auto &it : gout2driver) {
     if (!lg->is_graph_output(it.first)) {
       auto flattened_gout = lg->add_graph_output(it.first, Port_invalid, 0);
+      I(!lg->get_graph_output(it.first).is_invalid());
       it.second.connect_sink(flattened_gout);
+      I(flattened_gout.get_driver_pin() == it.second);
     }
   }
 }

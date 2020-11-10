@@ -13,6 +13,8 @@ pts='hier_tuple_io tuple_copy2 firrtl_tail2 firrtl_tail3 reg__q_pin hier_tuple2 
 
 # pts='sum top'
 # pts='top sum'
+# pts='sum'
+pts='top'
 # inou.pyrope files:inou/pyrope/tests/compiler/top.prp, inou/pyrope/tests/compiler/sum.prp |> pass.compiler gviz:true
 
 LGSHELL=./bazel-bin/main/lgshell
