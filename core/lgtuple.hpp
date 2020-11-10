@@ -137,6 +137,6 @@ public:
   void dump(std::string_view indent) const;
 
   /* void analyze_graph_output(absl::flat_hash_map<std::string, Node_pin> &gout2driver) const; */
-  void analyze_graph_output(absl::flat_hash_map<std::string, Node_pin> &gout2driver, std::string base_name) const;
+  void    analyze_graph_output(absl::flat_hash_map<std::string, Node_pin> &gout2driver, std::string base_name) const;
   size_t  get_tuple_size() const { return key2pos.size(); };
 };
