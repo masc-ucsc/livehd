@@ -6,7 +6,7 @@ static Pass_plugin sample("pass_cprop", Pass_cprop::setup);
 
 void Pass_cprop::setup() {
   Eprp_method m1("pass.cprop", "in-place copy propagation", &Pass_cprop::optimize);
-  m1.add_label_optional("hier", "hierarchical bitwidth", "false");
+  m1.add_label_optional("hier", "hierarchical copy-propagation", "false");
 
   register_pass(m1);
 }

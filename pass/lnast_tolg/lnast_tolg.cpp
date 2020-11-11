@@ -746,8 +746,10 @@ void Lnast_tolg::process_ast_tuple_add_op(LGraph *lg, const Lnast_nid &lnidx_ta)
 Node_pin Lnast_tolg::setup_tuple_ref(LGraph *lg, std::string_view ref_name) {
   auto it = name2dpin.find(ref_name);
 
-  if (it != name2dpin.end())
+  if (it != name2dpin.end()) {
+    I(name2dpin[ref_name].get_name() == ref_name);
     return it->second;
+  }
 
   if (is_input(ref_name)) {
     return create_inp_tg(lg, ref_name);
@@ -1345,7 +1347,7 @@ void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc)
       sub       = lg->ref_library()->ref_sub(func_name);
     }
 
-    subg_node.set_name(absl::StrCat(ret_name, ":", func_name));
+    subg_node.set_name(absl::StrCat(arg_tup_name, ":", ret_name, ":", func_name));
     fmt::print("subg node_name:{}\n", subg_node.get_name());
 
     // just connect to $ and %, handle the rest at global io connection
@@ -1382,8 +1384,8 @@ void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc)
   fmt::print("function {} defined in same prp file, query lgdb\n", func_name);
   auto ta_func_def = name2dpin[func_name].get_node();
   I(ta_func_def.get_type_op() == Ntype_op::TupAdd);
-  I(ta_func_def.setup_sink_pin("KV").get_driver_node().get_type_op() == Ntype_op::Const);
-  Lg_type_id lgid = ta_func_def.setup_sink_pin("KV").get_driver_node().get_type_const().to_i();
+  I(ta_func_def.setup_sink_pin("value").get_driver_node().get_type_op() == Ntype_op::Const);
+  Lg_type_id lgid = ta_func_def.setup_sink_pin("value").get_driver_node().get_type_const().to_i();
 
   auto subg_node = lg->create_node_sub(lgid);
   auto *sub = library->ref_sub(lgid);
@@ -1619,10 +1621,11 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(LGraph *lg) {
     }
   }
 
-  // if all inputs could be resolved, delete the unified $
-  auto unified_inp = lg->get_graph_input("$");
-  if (unified_inp.out_edges().size() == 0)
-    unified_inp.get_non_hierarchical().del();
+  //FIXME: don't remove the $ and wait till GIOC phase
+  /* // if all inputs could be resolved, delete the unified $ */
+  /* auto unified_inp = lg->get_graph_input("$"); */
+  /* if (unified_inp.out_edges().size() == 0) */
+  /*   unified_inp.get_non_hierarchical().del(); */
 }
 
 

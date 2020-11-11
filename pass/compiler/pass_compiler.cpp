@@ -36,7 +36,7 @@ void Pass_compiler::compile(Eprp_var &var) {
   bool gviz = pc.check_option_gviz(var);
 
 
-  Lcompiler comp(path, odir, gviz);
+  Lcompiler compile(path, odir, gviz);
 
   if (var.lnasts.empty()) {
     auto files = pc.get_files(var);
@@ -47,15 +47,18 @@ void Pass_compiler::compile(Eprp_var &var) {
 
     for (auto f : absl::StrSplit(files, ',')) {
       Pass::warn("todo: start from prp parser");
-      /* comp.add(f); */
+      /* compile.add(f); */
     }
   } else {
     for (const auto &lnast : var.lnasts) {
-      comp.add(lnast);
+      compile.add(lnast);
     }
   }
 
-  auto lgs = comp.wait_all();
+  compile.global_io_connection();  
+  
+
+  auto lgs = compile.wait_all();
   var.add(lgs);
 }
 
