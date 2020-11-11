@@ -41,6 +41,8 @@ static absl::flat_hash_map<const RTLIL::Wire *, Node_pin_iterator> partially_ass
 static absl::flat_hash_map<const RTLIL::Wire *, std::vector<int>>  partially_assigned_bits;
 static absl::flat_hash_map<const RTLIL::Wire *, std::vector<int>>  partially_assigned_fwd;
 
+static std::vector<const RTLIL::Wire *> pending_outputs;
+
 static void look_for_wire(LGraph *g, const RTLIL::Wire *wire) {
   if (wire2pin.find(wire) != wire2pin.end())
     return;
@@ -64,6 +66,7 @@ static void look_for_wire(LGraph *g, const RTLIL::Wire *wire) {
   } else if (wire->port_output) {
     // log("output %s\n",wire->name.c_str());
     I(wire->name.c_str()[0] == '\\');
+#if 0
     if (!g->is_graph_output(&wire->name.c_str()[1])) {
       g->add_graph_output(&wire->name.c_str()[1], wire->port_id, wire->width);
     }
@@ -72,6 +75,10 @@ static void look_for_wire(LGraph *g, const RTLIL::Wire *wire) {
     if (wire->start_offset) {
       dpin.set_offset(wire->start_offset);
     }
+#else
+    auto dpin = g->create_node(Ntype_op::Or, wire->width).setup_driver_pin();
+    pending_outputs.emplace_back(wire);
+#endif
 
     wire2pin[wire] = dpin;
   }
@@ -227,7 +234,6 @@ static Node_pin get_edge_pin(LGraph *g, const RTLIL::Wire *wire, bool is_signed)
 
   return wire2pin[wire];
 }
-
 
 static Node_pin create_pick_operator(LGraph *g, const RTLIL::Wire *wire, int offset, int width, bool is_signed) {
   if (wire->width == width && offset == 0)
@@ -713,14 +719,16 @@ static void process_cell_drivers_intialization(RTLIL::Module *module, LGraph *g)
         //fmt::print("dpin:{} bits:{} wire:{}\n", driver_pin.debug_name(), driver_pin.get_bits(), wire->name.str());
 
         if (chunk.width == wire->width) {
+#if 0
           if (wire2pin.find(wire) != wire2pin.end()) {
             auto pin2 = wire2pin[wire];
-            log("io wire %s from module %s cell type %s (%s vs %s)\n",
+            fmt::print("io wire {} from module {} cell type {} ({} vs {})\n",
                 wire->name.c_str(),
                 module->name.c_str(),
                 cell->type.c_str(),
-                driver_pin.debug_name().c_str(),
-                pin2.debug_name().c_str());
+                driver_pin.debug_name(),
+                pin2.debug_name());
+#if 0
             if (wire->port_output) {
               auto io_spin = g->get_graph_output(&wire->name.c_str()[1]);
               if (static_cast<int>(driver_pin.get_bits())==wire->width) {
@@ -733,7 +741,10 @@ static void process_cell_drivers_intialization(RTLIL::Module *module, LGraph *g)
                 io_spin.connect_driver(and_node);
               }
             }
-          } else if (chunk.width == ss.size()) {
+#endif
+          } else
+#endif
+            if (chunk.width == ss.size()) {
             I(driver_pin.get_bits()==wire->width); // bits should still not be set
             I(driver_pin.get_bits()==ss.size());
             // output port drives a single wire
@@ -832,16 +843,19 @@ static void process_assigns(RTLIL::Module *module, LGraph *g) {
         log_error("Assignment to input port %s\n", lhs_wire->name.c_str());
       } else if (lchunk.width == lhs_wire->width) {
 
+#ifndef NDEBUG
         if (lhs_wire->port_output) {
-          Node_pin dpin = create_pick_concat_dpin(g, rhs.extract(lchunk.offset, lchunk.width), lhs_wire->is_signed);
-          Node_pin spin = g->get_graph_output(&lhs_wire->name.c_str()[1]);
-          g->add_edge(dpin, spin, lhs_wire->width);
-        } else if (wire2pin.find(lhs_wire) == wire2pin.end()) {
-          Node_pin dpin      = create_pick_concat_dpin(g, rhs.extract(lchunk.offset, lchunk.width), lhs_wire->is_signed);
-          wire2pin[lhs_wire] = dpin;
-        } else {
-          I(wire2pin[lhs_wire].get_bits() == lhs_wire->width);
+          auto it = std::find(pending_outputs.begin(), pending_outputs.end(), lhs_wire);
+          I(it != pending_outputs.end());
         }
+        if (wire2pin.find(lhs_wire) != wire2pin.end()) {
+          auto dpin = wire2pin[lhs_wire];
+          I(!dpin.get_node().has_inputs());
+          I(dpin.get_bits() == lhs_wire->width);
+        }
+#endif
+        Node_pin dpin  = create_pick_concat_dpin(g, rhs.extract(lchunk.offset, lchunk.width), lhs_wire->is_signed);
+        wire2pin[lhs_wire] = dpin;
 
       } else {
 
@@ -1197,15 +1211,29 @@ static void process_partially_assigned(LGraph *g) {
 
 static void process_connect_outputs(RTLIL::Module *module, LGraph *g) {
   // we need to connect global outputs to the cell that drives it
-  for (auto wire : module->wires()) {
-    if (wire->port_output && wire2pin.find(wire) != wire2pin.end()) {
-      Node_pin &dpin = wire2pin[wire];
-      if (dpin.is_graph_output())
-        continue;
+  for (auto *wire : pending_outputs) {
 
-      Node_pin spin = g->get_graph_output(&wire->name.c_str()[1]);
-      g->add_edge(dpin, spin, wire->width);
+    if (!g->is_graph_output(&wire->name.c_str()[1]))
+      g->add_graph_output(&wire->name.c_str()[1], wire->port_id, wire->width);
+
+    if (wire2pin.find(wire) == wire2pin.end())
+      continue;
+
+    Node_pin dpin3 = wire2pin[wire];
+
+    I(wire->port_output);
+    if (dpin3.is_graph_output())
+      continue;
+
+    Node_pin spin = g->get_graph_output(&wire->name.c_str()[1]);
+    g->add_edge(dpin3, spin, wire->width);
+
+    auto dpin = spin.get_driver_from_output();
+    if (wire->start_offset) {
+      dpin.set_offset(wire->start_offset);
     }
+
+    wire2pin[wire] = dpin;
   }
 }
 
@@ -2298,9 +2326,45 @@ struct Yosys2lg_Pass : public Yosys::Pass {
     extra_args(args, argidx, design);
 
     ct_all.setup(design);
+    cell_port_outputs.clear();
+    cell_port_inputs.clear();
     driven_signals.clear();
 
-    guess_modules_io(design, path);
+    auto  library = Graph_library::instance(path);
+
+    for (auto &it : design->modules_) {
+      RTLIL::Module *module = it.second;
+      auto *g = library->try_find_lgraph(&module->name.c_str()[1]);
+      if (g==nullptr) {
+        g = ::LGraph::create(path, &module->name.c_str()[1], "-");
+      }
+      Sub_node *sub= g->ref_self_sub_node();
+
+      for (auto port : module->ports) {
+        RTLIL::Wire *wire = module->wire(port);
+        std::string wire_name(&wire->name.c_str()[1]);
+
+        std::string cell_port = absl::StrCat(module->name.str(), "_:_", wire->name.str());
+        if (wire->port_input && !wire->port_output) {
+          fmt::print("mod:{} inp:{}\n", module->name.str(), wire->name.str());
+          cell_port_inputs.insert(cell_port);
+          if (sub->has_pin(wire_name))
+            sub->map_graph_pos(wire_name, Sub_node::Direction::Input, wire->port_id);
+          else
+            g->add_graph_input(wire_name, wire->port_id, wire->width);
+        } else if (!wire->port_input && wire->port_output) {
+          fmt::print("mod:{} out:{}\n", module->name.str(), wire->name.str());
+          cell_port_outputs.insert(cell_port);
+          if (sub->has_pin(wire_name))
+            sub->map_graph_pos(wire_name, Sub_node::Direction::Output, wire->port_id);
+          else
+            g->add_graph_output(wire_name, wire->port_id, wire->width);
+        } else {
+          ::LGraph::error("inou.yosys.tolg: mod:{} bidirectional:{} NOT supported by livehd\n", module->name.str(), wire->name.str());
+        }
+      }
+    }
+    //guess_modules_io(design, path);
 
     for (auto &it : design->modules_) {
       RTLIL::Module *module = it.second;
@@ -2312,7 +2376,14 @@ struct Yosys2lg_Pass : public Yosys::Pass {
 
         Lbench b("inou.yosys.tolg." + module->name.str());
 
-        auto  library = Graph_library::instance(path);
+        for (auto port : module->ports) {
+          RTLIL::Wire *wire = module->wire(port);
+          std::string wire_name(&wire->name.c_str()[1]);
+          if (wire->port_output) {
+            pending_outputs.emplace_back(wire);
+          }
+        }
+
         auto *g       = library->try_find_lgraph(&module->name.c_str()[1]);
         I(g);
 
@@ -2326,13 +2397,12 @@ struct Yosys2lg_Pass : public Yosys::Pass {
 
         process_connect_outputs(module, g);
 
-        g->sync();
+        wire2pin.clear();
+        cell2node.clear();
+        partially_assigned.clear();
+        picks.clear();
+        pending_outputs.clear();
       }
-
-      wire2pin.clear();
-      cell2node.clear();
-      partially_assigned.clear();
-      picks.clear();
     }
   }
 } Yosys2lg_Pass;
