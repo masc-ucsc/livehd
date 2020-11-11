@@ -819,12 +819,13 @@ void Cprop::do_trans(LGraph *lg) {
   }
 
   //remove unified output % if fully resolved
-  if (lg->is_graph_output("%")) {
-    auto uout = lg->get_graph_output("%");
-    if (!uout.has_inputs()) {
-      uout.get_non_hierarchical().del();
-    }
-  }
+  //FIXME: don't remove the % and wait till GIOC phase
+  /* if (lg->is_graph_output("%")) { */
+  /*   auto uout = lg->get_graph_output("%"); */
+  /*   if (!uout.has_inputs()) { */
+  /*     uout.get_non_hierarchical().del(); */
+  /*   } */
+  /* } */
 }
 
 void Cprop::try_create_graph_output(LGraph *lg, std::shared_ptr<Lgtuple> tup) {

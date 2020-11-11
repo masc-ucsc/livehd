@@ -4,6 +4,7 @@
 #include "inou_graphviz.hpp"
 #include "lnast_tolg.hpp"
 #include "cprop.hpp"
+#include "gioc.hpp"
 #include "bitwidth.hpp"
 
 Lcompiler::Lcompiler(std::string_view _path, std::string_view _odir, bool _gviz) 
@@ -38,7 +39,7 @@ void Lcompiler::add_thread(std::shared_ptr<Lnast> ln) {
 
   for (const auto &lg : local_lgs) {
     retry:
-    Cprop cp(false); //hier = false
+    Cprop    cp(false);     // hier = false
     Bitwidth bw(false, 10); // hier = false, max_iters = 10
 
     fmt::print("------------------------ Copy-Propagation --------------------------- (3)\n");
@@ -60,11 +61,11 @@ void Lcompiler::add_thread(std::shared_ptr<Lnast> ln) {
     fmt::print("------------------------ Bitwidth-Inference ------------------------- (6)\n");
     bw.do_trans(lg);
 
-    fmt::print("------------------------ Final Copy-Propagation --------------------- (7)\n");
+    fmt::print("------------------------ Copy-Propagation --------------------------- (7)\n");
     cp.do_trans(lg);
 
     if (gviz) 
-      gv.do_from_lgraph(lg); // rename dot with postfix raw
+      gv.do_from_lgraph(lg, "local"); // rename dot with postfix raw
     
 
     // FIXEME:sh -> todo 
@@ -91,6 +92,22 @@ void Lcompiler::add(std::shared_ptr<Lnast> ln) {
   add_thread(ln);
 }
 
+
+void Lcompiler::global_io_connection() {
+  Graphviz gv(true, false, odir);
+  Cprop    cp(false);     // hier = false
+  Bitwidth bw(false, 10); // hier = false, max_iters = 10
+  Gioc     gioc(path);
+
+  for (const auto &lg : lgs) {
+    fmt::print("------------------------ Global IO Connection ----------------------- (8)\n");
+    gioc.do_trans(lg);
+    fmt::print("------------------------ Copy-Propagation --------------------------- (9)\n");
+    cp.do_trans(lg);
+    fmt::print("------------------------ Bitwidth-Inference ------------------------- (A)\n");
+    bw.do_trans(lg);
+  }
+}
 
 std::vector<LGraph *> Lcompiler::wait_all() {
   /* thread_pool.wait_all(); */
