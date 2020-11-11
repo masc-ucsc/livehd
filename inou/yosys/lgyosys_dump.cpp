@@ -509,7 +509,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
 
         if (m_signed.size() > 1) {
           ms_result = cell_output_map[node.get_driver_pin().get_compact()];
-          create_tree(g, m_signed, module, &RTLIL::Module::addMul, false, ms_result);
+          create_tree(g, m_signed, module, &RTLIL::Module::addMul, true, ms_result);
         } else if (m_signed.size() == 1) {
           ms_result = m_signed[0];
         }
