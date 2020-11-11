@@ -244,6 +244,12 @@ static Node_pin create_pick_operator(LGraph *g, const RTLIL::Wire *wire, int off
 
 static void append_to_or_node(LGraph *g, const Node &or_node, const Node_pin &dpin, int or_offset) {
 
+  if (dpin.get_node().is_type_const()) {
+    auto val = dpin.get_node().get_type_const();
+    if (val==0)
+      return;
+  }
+
 	if (or_offset) {
     auto tposs_node = g->create_node(Ntype_op::Tposs, or_offset+dpin.get_bits()+1);
 
@@ -264,11 +270,14 @@ static Node_pin create_pick_concat_dpin(LGraph *g, const RTLIL::SigSpec &ss, boo
   std::vector<Node_pin> inp_pins;
   I(ss.chunks().size() != 0);
 
-  for (auto &chunk : ss.chunks()) {
+  const auto chunk_list = ss.chunks();
+  for (auto i=0u;i<chunk_list.size();++i) {
+    const auto &chunk = chunk_list[i];
+    bool signed_last = ((i+1) == chunk_list.size()) && is_signed;
     if (chunk.wire == nullptr) {
-      inp_pins.emplace_back(resolve_constant(g, chunk.data, is_signed));
+      inp_pins.emplace_back(resolve_constant(g, chunk.data, signed_last));
     } else {
-      inp_pins.emplace_back(create_pick_operator(g, chunk.wire, chunk.offset, chunk.width, is_signed));
+      inp_pins.emplace_back(create_pick_operator(g, chunk.wire, chunk.offset, chunk.width, signed_last));
     }
   }
 
@@ -277,13 +286,12 @@ static Node_pin create_pick_concat_dpin(LGraph *g, const RTLIL::SigSpec &ss, boo
     auto or_node = g->create_node(Ntype_op::Or, ss.size());
 
     int offset = 0;
-    auto chunks=ss.chunks();
-    for (auto i=0u;i<chunks.size();++i) {
+    for (auto i=0u;i<chunk_list.size();++i) {
 
       if (!inp_pins[i].is_invalid()) {
         Node_pin inp_pin;
 
-        if ((i+1) == chunks.size() || is_signed) { // last pin
+        if ((i+1) == chunk_list.size() || is_signed) { // last pin
           inp_pin = inp_pins[i];
         }else if (inp_pins[i].get_node().is_type(Ntype_op::Tposs)) {
           inp_pin = inp_pins[i];
@@ -296,7 +304,7 @@ static Node_pin create_pick_concat_dpin(LGraph *g, const RTLIL::SigSpec &ss, boo
         append_to_or_node(g, or_node, inp_pin, offset);
       }
 
-      offset += chunks[i].width;
+      offset += chunk_list[i].width;
     }
     dpin = or_node.setup_driver_pin();
   } else {
@@ -366,19 +374,6 @@ static Node_pin get_unsigned_dpin(LGraph *g, const RTLIL::Cell *cell, const RTLI
   a_tposs.connect_sink(dpin);
 
   return a_tposs.setup_driver_pin();
-}
-
-static void look_for_module_io(RTLIL::Module *module, std::string_view path) {
-#ifndef NDEBUG
-  log("yosys2lg look_for_module_io pass for module %s:\n", module->name.c_str());
-#endif
-  auto  library = Graph_library::instance(path);
-  auto *g       = library->try_find_lgraph(&module->name.c_str()[1]);
-  I(g);
-
-  for (auto &wire_iter : module->wires_) {
-    look_for_wire(g, wire_iter.second);
-  }
 }
 
 static bool is_yosys_output(const std::string &idstring) {
@@ -2114,182 +2109,6 @@ static void process_cells(RTLIL::Module *module, LGraph *g) {
 
 }
 
-static void guess_modules_io(RTLIL::Design *design, std::string_view path) {
-  for (auto &it : design->modules_) {
-    RTLIL::Module *module = it.second;
-    std::string    name   = &module->name.c_str()[1];
-
-    SigMap sigmap(module);
-
-    for (auto wire : module->wires()) {
-      if (wire->port_input)
-        driven_signals.insert(wire->hash());
-    }
-
-    for (auto it2 : module->connections()) {
-      for (auto &lchunk : it2.first.chunks()) {
-        const RTLIL::Wire *wire = lchunk.wire;
-        if (wire)
-          driven_signals.insert(wire->hash());
-      }
-    }
-
-    for (auto cell : module->cells()) {
-      if (ct_all.cell_known(cell->type)) {
-        for (auto &conn : cell->connections()) {
-          if (ct_all.cell_output(cell->type, conn.first)) {
-            for (auto &rchunk : conn.second.chunks()) {
-              const RTLIL::Wire *wire = rchunk.wire;
-              if (wire)
-                driven_signals.insert(wire->hash());
-            }
-          }
-        }
-      }
-    }
-
-    auto library = Graph_library::instance(path);
-
-    for (auto cell : module->cells()) {
-      if (!ct_all.cell_known(cell->type)) {
-        std::string_view mod_name(&(cell->type.c_str()[1]));
-
-        for (auto &conn : cell->connections()) {
-          for (auto &rchunk : conn.second.chunks()) {
-            const RTLIL::Wire *wire = rchunk.wire;
-            if (wire == nullptr)
-              continue;
-            std::string cell_port = absl::StrCat(cell->type.str(), "_:_", conn.first.str());
-            if (cell_port_inputs.count(cell_port))
-              continue;
-
-            bool is_input  = wire->port_input;
-            bool is_output = false;  // WARNING: wire->port_output is NOT ALWAYS. The output can go to other internal
-            if (!is_input && !is_output)
-              is_input = driven_signals.count(wire->hash()) > 0;
-
-            if (library->has_name(mod_name)) {
-              const auto &sub = library->get_sub(mod_name);
-              if (sub.has_pin(name)) {
-                is_input  = sub.is_input(mod_name);
-                is_output = sub.is_output(mod_name);
-                continue;
-              }
-            }
-
-            const char *str = conn.first.c_str();
-            if (!is_input && !is_output && str[0] == '\\') {
-              str++;
-              if (str[0] == 'A' || str[0] == 'B' || str[0] == 'C' || str[0] == 'D' || str[0] == 'S') {
-                if (isdigit(str[1]) || str[1] == 0)
-                  is_input = true;
-              }
-              if (str[0] == 'a' || str[0] == 'b' || str[0] == 'c' || str[0] == 'd' || str[0] == 's') {
-                if ((isdigit(str[1]) && str[2] == 0) || str[1] == 0)
-                  is_input = true;
-              }
-              if (strncmp(str, "CK", 2) == 0 || strstr(str, "CLK") || strstr(str, "clk") || strcmp(str, "clock") == 0
-                  || strcmp(str, "EN") == 0 || strcmp(str, "RD") == 0 || strcmp(str, "en") == 0 || strcmp(str, "enable") == 0
-                  || strstr(str, "reset") || strstr(str, "RST"))
-                is_input = true;
-
-              if ((strncmp(cell->type.c_str(), "\\sa", 3) == 0)
-                  && (strncmp(str, "ME", 2) == 0 || strncmp(str, "QPB", 3) == 0 || strncmp(str, "RME", 3) == 0))
-                is_input = true;
-
-              if ((strncmp(cell->type.c_str(), "\\sa", 3) == 0)
-                  && (strcmp(str, "BC2") == 0 || strncmp(str, "DFT", 3) == 0 || strncmp(str, "SO_CNT", 6) == 0
-                    || strcmp(str, "SO_D") == 0))
-                is_input = true;
-
-              if (cell->type.str()[1] == 'H' && cell->type.str()[2] == 'D') {
-                if (strcmp(str, "SI") == 0 || strcmp(str, "SE") == 0 || strcmp(str, "CI") == 0 || strcmp(str, "TE") == 0
-                    || strcmp(str, "TEN") == 0 || strcmp(str, "S") == 0 || strcmp(str, "SE") == 0)
-                  is_input = true;
-              }
-
-              if (strncmp(str, "io_is", 5) == 0 || strncmp(str, "io_in", 5) == 0)
-                is_input = true;
-
-              if (strstr(cell->type.c_str(), "mem")) {
-                if (strcmp(str, "R0_data") == 0 || strcmp(str, "R0_en") == 0 || strcmp(str, "R0_addr") == 0
-                    || strcmp(str, "W0_addr") == 0 || strcmp(str, "W0_mask") == 0 || strcmp(str, "W0_en") == 0)
-                  is_input = true;
-
-                if (strcmp(str, "R0_wdata") == 0)
-                  is_output = true;
-              }
-              if (strstr(cell->type.c_str(), "array")) {
-                if (strcmp(str, "RW0_rdata") == 0)
-                  is_input = true;
-
-                if (strcmp(str, "RW0_wdata") == 0)
-                  is_output = true;
-              }
-
-              if (strncmp(str, "IN", 2) == 0 || strncmp(str, "in", 2) == 0)
-                is_input = true;
-
-              if (str[1] == 0 && (str[0] == 'X' || str[0] == 'Y' || str[0] == 'Z' || str[0] == 'Q'))
-                is_output = true;
-              if (str[1] == 0 && (str[0] == 'x' || str[0] == 'y' || str[0] == 'z' || str[0] == 'q'))
-                is_output = true;
-
-              if (cell->type.str()[1] == 'H' && cell->type.str()[2] == 'D') {
-                if (strcmp(str, "CON") == 0 || strcmp(str, "SN") == 0)
-                  is_output = true;
-              }
-
-              if (strcmp(str, "SO") == 0 || strncmp(str, "io_out", 6) == 0 || strcmp(str, "QN") == 0 || strcmp(str, "CO") == 0
-                  || strcmp(str, "QP") == 0)
-                is_output = true;
-
-              if (strncmp(str, "OU", 2) == 0 || strncmp(str, "ou", 2) == 0)
-                is_output = true;
-
-              if (cell->type.str() == "\\$memrd") {
-                is_input  = false;
-                is_output = false;
-                if (strcmp(str, "DATA") == 0)
-                  is_output = true;
-                else
-                  is_input = true;
-              } else if (cell->type.str() == "\\$memwr") {
-                is_input  = true;
-                is_output = false;
-              }
-
-              // Last fix for SRAMs
-              if (strncmp(cell->type.c_str(), "\\sa", 3) == 0 && strstr(cell->type.c_str(), "rw")) {
-                if (strcmp(str, "RSCOUT") == 0 || strcmp(str, "SO_CN") == 0 || strcmp(str, "SO_Q") == 0)
-                  is_output = true;
-                if (!is_output)
-                  is_input = true;
-              }
-            }
-
-#if 1
-            std::cout << "unknown cell_type:" << cell->type.str() << " cell_instance:" << cell->name.str()
-              << " port_name:" << conn.first.str() << " wire_name:" << wire->name.str() << " sig:" << wire->hash()
-              << " io:" << (is_input ? "I" : "") << (is_output ? "O" : "") << "\n";
-#endif
-            I(!(is_input && is_output));
-
-            if (is_input)
-              cell_port_inputs.insert(cell_port);
-            if (is_output)
-              cell_port_outputs.insert(cell_port);
-          }
-        }
-      }
-    }
-
-    auto *g = LGraph::create(path, name, "-");  // No source, unable to track
-    I(g);
-    look_for_module_io(module, path);
-  }
-}
-
 // each pass contains a singleton object that is derived from Pass
 struct Yosys2lg_Pass : public Yosys::Pass {
   Yosys2lg_Pass() : Pass("yosys2lg") {}
@@ -2346,14 +2165,14 @@ struct Yosys2lg_Pass : public Yosys::Pass {
 
         std::string cell_port = absl::StrCat(module->name.str(), "_:_", wire->name.str());
         if (wire->port_input && !wire->port_output) {
-          fmt::print("mod:{} inp:{}\n", module->name.str(), wire->name.str());
+          //fmt::print("mod:{} inp:{}\n", module->name.str(), wire->name.str());
           cell_port_inputs.insert(cell_port);
           if (sub->has_pin(wire_name))
             sub->map_graph_pos(wire_name, Sub_node::Direction::Input, wire->port_id);
           else
             g->add_graph_input(wire_name, wire->port_id, wire->width);
         } else if (!wire->port_input && wire->port_output) {
-          fmt::print("mod:{} out:{}\n", module->name.str(), wire->name.str());
+          //fmt::print("mod:{} out:{}\n", module->name.str(), wire->name.str());
           cell_port_outputs.insert(cell_port);
           if (sub->has_pin(wire_name))
             sub->map_graph_pos(wire_name, Sub_node::Direction::Output, wire->port_id);
@@ -2364,17 +2183,16 @@ struct Yosys2lg_Pass : public Yosys::Pass {
         }
       }
     }
-    //guess_modules_io(design, path);
 
     for (auto &it : design->modules_) {
       RTLIL::Module *module = it.second;
       if (design->selected_module(it.first)) {
+        const std::string mod_name(&(module->name.c_str()[1]));
 #ifndef NDEBUG
-        log("yosys2lg pass for module %s:\n", module->name.c_str());
-        printf("process_module %s\n", module->name.c_str());
+        fmt::print("inou.yosys.tolg module:{}\n", mod_name);
 #endif
 
-        Lbench b("inou.yosys.tolg." + module->name.str());
+        Lbench b("inou.yosys.tolg." + mod_name);
 
         for (auto port : module->ports) {
           RTLIL::Wire *wire = module->wire(port);
@@ -2384,17 +2202,13 @@ struct Yosys2lg_Pass : public Yosys::Pass {
           }
         }
 
-        auto *g       = library->try_find_lgraph(&module->name.c_str()[1]);
+        auto *g       = library->try_find_lgraph(mod_name);
         I(g);
 
         process_cell_drivers_intialization(module, g);
-
         process_assigns(module, g);
-
         process_cells(module, g);
-
         process_partially_assigned(g);
-
         process_connect_outputs(module, g);
 
         wire2pin.clear();

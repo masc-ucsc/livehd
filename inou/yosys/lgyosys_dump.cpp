@@ -87,8 +87,10 @@ RTLIL::Wire *Lgyosys_dump::create_tree(LGraph *g, const std::vector<RTLIL::Wire 
   if (result_wire == nullptr)
     result_wire = mod->addWire(next_id(g), width);
 
+#if 0
   if (sign && (unsigned_wire.contains(result_wire) || unsigned_wire.contains(l) || unsigned_wire.contains(r)))
     sign = false;
+#endif
 
   (mod->*add_fnc)(name, l, r, result_wire, sign, "");
 
