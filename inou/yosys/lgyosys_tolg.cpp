@@ -1155,16 +1155,19 @@ static void process_partially_assigned_self_chains(LGraph *g) {
         and_node.connect_sink(pre_or_node);
         and_node.connect_sink(g->create_node_const(rd_mask));
 
+        auto tposs_node = g->create_node(Ntype_op::Tposs, wire->width+1);
+        tposs_node.connect_sink(and_node);
+
         I(shift);
         if (shift<0) {
           auto sra_node = g->create_node(Ntype_op::SRA, wire->width);
-          sra_node.setup_sink_pin("a").connect_driver(and_node);
+          sra_node.setup_sink_pin("a").connect_driver(tposs_node);
           sra_node.setup_sink_pin("b").connect_driver(g->create_node_const(Lconst(-shift)));
 
           master_or_node.connect_sink(sra_node);
         }else{
           auto shl_node = g->create_node(Ntype_op::SHL, wire->width);
-          shl_node.setup_sink_pin("a").connect_driver(and_node);
+          shl_node.setup_sink_pin("a").connect_driver(tposs_node);
           shl_node.setup_sink_pin("b").connect_driver(g->create_node_const(Lconst(shift)));
 
           master_or_node.connect_sink(shl_node);
