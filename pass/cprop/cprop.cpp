@@ -15,7 +15,7 @@
 
 
 
-Cprop::Cprop (bool _hier) : hier(_hier) {}
+Cprop::Cprop (bool _hier, bool _gioc) : hier(_hier), gioc(_gioc) {}
 
 void Cprop::collapse_forward_same_op(Node &node, XEdge_iterator &inp_edges_ordered) {
   auto op = node.get_type_op();
@@ -812,14 +812,20 @@ void Cprop::do_trans(LGraph *lg) {
     node2tuple.clear();
   }
 
-  /* //FIXME->sh: don't remove the % and wait till GIOC phase ?? */
-  /* //remove unified output % if fully resolved */
-  /* if (lg->is_graph_output("%")) { */
-  /*   auto uout = lg->get_graph_output("%"); */
-  /*   if (!uout.has_inputs()) { */
-  /*     uout.get_non_hierarchical().del(); */
-  /*   } */
-  /* } */
+  if (gioc) {
+    // if all inputs could be resolved, delete the unified $
+    auto unified_inp = lg->get_graph_input("$");
+    if (unified_inp.out_edges().size() == 0)
+      unified_inp.get_non_hierarchical().del();
+
+    //remove unified output % if fully resolved
+    if (lg->is_graph_output("%")) {
+      auto uout = lg->get_graph_output("%");
+      if (!uout.has_inputs()) {
+        uout.get_non_hierarchical().del();
+      }
+    }
+  }
 }
 
 void Cprop::try_create_graph_output(LGraph *lg, std::shared_ptr<Lgtuple> tup) {

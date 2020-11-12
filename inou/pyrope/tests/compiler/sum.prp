@@ -2,5 +2,5 @@ $a.foo.__bits = 2
 $a.bar.__bits = 3
 $b.__bits = 4
 
-%out.o1.baz = $a.foo + $b
-%out2 = $a.bar + $b
+%sout.o1.baz = $a.foo + $b
+%sout2 = $a.bar + $b

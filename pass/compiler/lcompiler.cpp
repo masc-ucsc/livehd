@@ -39,8 +39,8 @@ void Lcompiler::add_thread(std::shared_ptr<Lnast> ln) {
 
   for (const auto &lg : local_lgs) {
     retry:
-    Cprop    cp(false);     // hier = false
-    Bitwidth bw(false, 10); // hier = false, max_iters = 10
+    Cprop    cp(false, false);  // hier = false, gioc = false
+    Bitwidth bw(false, 10);     // hier = false, max_iters = 10
 
     fmt::print("------------------------ Copy-Propagation --------------------------- (3)\n");
     cp.do_trans(lg);
@@ -95,22 +95,37 @@ void Lcompiler::add(std::shared_ptr<Lnast> ln) {
 
 void Lcompiler::global_io_connection() {
   Graphviz gv(true, false, odir);
-  Cprop    cp(false);     // hier = false
-  Bitwidth bw(false, 10); // hier = false, max_iters = 10
+  Cprop    cp(false, true); // hier = false, gioc = true 
+  Bitwidth bw(true, 10);   // hier = false, max_iters = 10
   Gioc     gioc(path);
 
   for (auto &lg : lgs) {
     fmt::print("------------------------ Global IO Connection ----------------------- (8)\n");
     gioc.do_trans(lg);
     if (gviz) 
-      gv.do_from_lgraph(lg, "gioc"); // rename dot with postfix raw
+      gv.do_from_lgraph(lg, "gioc.raw"); // rename dot with postfix raw
     fmt::print("------------------------ Copy-Propagation --------------------------- (9)\n");
     cp.do_trans(lg);
+    if (gviz) 
       gv.do_from_lgraph(lg, "gioc.no_bits"); // rename dot with postfix raw
-    fmt::print("------------------------ Bitwidth-Inference ------------------------- (A)\n");
-    bw.do_trans(lg);
   }
 }
+
+
+void Lcompiler::global_bitwidth_inference() {
+  Graphviz gv(true, false, odir);
+  Bitwidth bw(true, 10);   // hier = true, max_iters = 10
+
+  //FIXME->sh: if we could specify top here, we could avoid many unnecessary lgraph traverse
+  for (auto &lg : lgs) {
+    fmt::print("------------------------ Bitwidth-Inference ------------------------- (A)\n");
+    bw.do_trans(lg);
+    if (gviz) 
+      gv.do_from_lgraph(lg, ""); // rename dot with postfix raw
+  }
+}
+
+
 
 std::vector<LGraph *> Lcompiler::wait_all() {
   /* thread_pool.wait_all(); */

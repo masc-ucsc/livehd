@@ -17,8 +17,8 @@ protected:
   std::vector<std::string_view> split_name (std::string_view hier_name, std::string_view delimiter);
   bool     subgraph_outp_is_tuple (Sub_node* sub);
   void     subgraph_io_connection (LGraph *lg, Sub_node* sub, std::string_view arg_tup_name, std::string_view res_name, Node subg_node);
-  void     collect_tgs_from_unified_out(Node subg_node);
-  void     reconnect_the_tgs_from_unified_out(std::string_view ret_name);
+  void     collect_tgs_from_unified_out( Node subg_node);
+  void     reconnect_the_tgs_from_unified_out (std::string_view ret_name);
   Node_pin setup_tuple_ref        (LGraph *lg, std::string_view tup_name);
   Node_pin setup_field_dpin       (LGraph *lg, std::string_view key_name);
 
