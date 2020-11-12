@@ -850,7 +850,18 @@ static void process_assigns(RTLIL::Module *module, LGraph *g) {
         }
 #endif
         Node_pin dpin  = create_pick_concat_dpin(g, rhs.extract(lchunk.offset, lchunk.width), lhs_wire->is_signed);
-        wire2pin[lhs_wire] = dpin;
+        if (wire2pin.find(lhs_wire) != wire2pin.end()) {
+          auto prev_dpin = wire2pin[lhs_wire];
+          if (prev_dpin.has_outputs()) { // OOPS, got used out of order (lack of topo here)
+            I(prev_dpin.get_node().is_type(Ntype_op::Or));
+            I(!prev_dpin.get_node().has_inputs());
+            append_to_or_node(g, prev_dpin.get_node(), dpin, 0);
+          }else{
+            wire2pin[lhs_wire] = dpin;
+          }
+        }else{
+          wire2pin[lhs_wire] = dpin;
+        }
 
       } else {
 
@@ -1868,7 +1879,7 @@ static void process_cells(RTLIL::Module *module, LGraph *g) {
         }else if (node.is_type_const() && node.get_type_const().is_unsigned()) {
           dpin_a = dpin_a_signed;
         }else{
-          auto tposs_node = g->create_node(Ntype_op::Tposs, a_bits+1);
+          auto tposs_node = g->create_node(Ntype_op::Tposs, dpin_a_signed.get_bits()+1);
           tposs_node.connect_sink(dpin_a_signed);
 
           dpin_a = tposs_node.setup_driver_pin();
