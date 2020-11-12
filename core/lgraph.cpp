@@ -1212,7 +1212,8 @@ Node LGraph::create_node_const(const Lconst &value) {
       || nid >= node_internal.size()
       || !node_internal[nid].is_valid()
       || node_internal[nid].get_type() != Ntype_op::Const
-      || get_type_const(nid) != value) {
+      || get_type_const(nid) != value
+      || get_type_const(nid).get_bits() != value.get_bits()) {
     nid = create_node_int();
     set_type_const(nid, value);
     memoize_const_hint[value.hash() % memoize_const_hint.size()] = nid;

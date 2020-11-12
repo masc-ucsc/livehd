@@ -88,12 +88,15 @@ protected:
 
   Lconst(bool str, bool a, bool b, bool c, Bits_t d, Number n) : explicit_str(str), explicit_sign(a), explicit_bits(b), sign(c), bits(d), num(n) {}
 
-  Bits_t calc_bits() const {
+  static Bits_t calc_num_bits(const Number &num) {
     if (num == 0 || num == -1)
       return 1;
     if (num>0)
       return msb(num)+2;   // +2 because values are signed (msb==0 is 1 bit)
     return msb(-num-1)+2;
+  }
+  Bits_t calc_num_bits() const {
+    return calc_num_bits(num);
   }
   bool same_explicit_bits(const Lconst &o) const {
     bool s1 = explicit_bits && o.explicit_bits && bits == o.bits;
