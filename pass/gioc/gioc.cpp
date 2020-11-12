@@ -34,15 +34,37 @@ void Gioc::do_trans(LGraph *lg) {
         return;
       }
 
+      collect_tgs_from_unified_out(node);
       subgraph_io_connection(lg, sub, arg_tup_name, ret_name, node);
+      reconnect_the_tgs_from_unified_out(ret_name);
     }
   }
 }
 
+void Gioc::collect_tgs_from_unified_out(Node subg_node) {
+  Node unified_out_ta;
+  for (auto &e : subg_node.out_edges()) {
+    unified_out_ta = e.sink.get_node();
+    /* e.del_edge(); */
+    /* unified_out_ta.set_type(Ntype_op::TupRef); */
+  }
 
+  for (auto &e : unified_out_ta.out_edges()) {
+    tgs_spins_from_unified_ta.emplace_back(e.sink);
+    e.del_edge();
+  }
+}
+
+void Gioc::reconnect_the_tgs_from_unified_out(std::string_view ret_name) {
+  auto ret_ta_dpin = name2dpin[ret_name];
+  for (auto &sink_pin : tgs_spins_from_unified_ta) {
+    ret_ta_dpin.connect(sink_pin);
+  }
+}
 
 void Gioc::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_view arg_tup_name, std::string_view ret_name, Node subg_node) {
   /* bool subg_outp_is_scalar = !subgraph_outp_is_tuple(sub); */
+
   // start query subgraph io and construct TGs for connecting inputs, TAs/scalar for connecting outputs
   for (const auto *io_pin : sub->get_io_pins()) {
     I(!io_pin->is_invalid());

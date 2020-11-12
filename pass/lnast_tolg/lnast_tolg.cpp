@@ -1621,7 +1621,7 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(LGraph *lg) {
     }
   }
 
-  //FIXME: don't remove the $ and wait till GIOC phase
+  /* //FIXME->sh: don't remove the $ and wait till GIOC phase ?? */
   /* // if all inputs could be resolved, delete the unified $ */
   /* auto unified_inp = lg->get_graph_input("$"); */
   /* if (unified_inp.out_edges().size() == 0) */

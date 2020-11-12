@@ -589,11 +589,6 @@ bool Cprop::process_tuple_get(Node &node) {
     return false; // Could not resolve (maybe compile error, maybe hierarchical needed)
   }
 
-  /* fmt::print("top ---------\n"); */
-  /* ctup->dump(); */
-  /* fmt::print("sub ---------\n"); */
-  /* sub_tup->dump(); */
-
   // still unclear if the TupGet chain is resolved (final TupGet will decide)
   if (!sub_tup->is_valid_val_dpin()) { 
     node2tuple[node.get_compact()] = sub_tup;
@@ -726,7 +721,6 @@ void Cprop::process_tuple_add(Node &node) {
 
   //FIXME: should move to line 779 to avoid checking every TA, but there is a bug in line that cannot retreive the tuple in line 779??
   if (node.out_edges().begin()->sink.is_graph_output()) {
-    ctup->dump();
     auto lg = node.get_class_lgraph();
     try_create_graph_output(lg, ctup);
   }
@@ -818,8 +812,8 @@ void Cprop::do_trans(LGraph *lg) {
     node2tuple.clear();
   }
 
-  //remove unified output % if fully resolved
-  //FIXME: don't remove the % and wait till GIOC phase
+  /* //FIXME->sh: don't remove the % and wait till GIOC phase ?? */
+  /* //remove unified output % if fully resolved */
   /* if (lg->is_graph_output("%")) { */
   /*   auto uout = lg->get_graph_output("%"); */
   /*   if (!uout.has_inputs()) { */
@@ -830,8 +824,6 @@ void Cprop::do_trans(LGraph *lg) {
 
 void Cprop::try_create_graph_output(LGraph *lg, std::shared_ptr<Lgtuple> tup) {
   absl::flat_hash_map<std::string, Node_pin> gout2driver;
-  /* tup->dump(); */
-  /* fmt::print("------------------------\n"); */
   tup->analyze_graph_output(gout2driver, "");
 
   for (const auto &it : gout2driver) {

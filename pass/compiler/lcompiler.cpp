@@ -99,11 +99,14 @@ void Lcompiler::global_io_connection() {
   Bitwidth bw(false, 10); // hier = false, max_iters = 10
   Gioc     gioc(path);
 
-  for (const auto &lg : lgs) {
+  for (auto &lg : lgs) {
     fmt::print("------------------------ Global IO Connection ----------------------- (8)\n");
     gioc.do_trans(lg);
+    if (gviz) 
+      gv.do_from_lgraph(lg, "gioc"); // rename dot with postfix raw
     fmt::print("------------------------ Copy-Propagation --------------------------- (9)\n");
     cp.do_trans(lg);
+      gv.do_from_lgraph(lg, "gioc.no_bits"); // rename dot with postfix raw
     fmt::print("------------------------ Bitwidth-Inference ------------------------- (A)\n");
     bw.do_trans(lg);
   }
