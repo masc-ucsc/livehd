@@ -56,6 +56,7 @@ void Pass_compiler::compile(Eprp_var &var) {
   }
 
   compile.global_io_connection();  
+  compile.global_bitwidth_inference();  
   
 
   auto lgs = compile.wait_all();

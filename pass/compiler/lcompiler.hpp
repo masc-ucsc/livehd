@@ -28,6 +28,7 @@ public:
 
   void add(std::shared_ptr<Lnast> lnast);
   void global_io_connection();
+  void global_bitwidth_inference();
   /* void add(std::string_view file); */
 
   std::vector<LGraph *> wait_all();

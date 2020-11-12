@@ -9,6 +9,7 @@
 class Cprop {
 private:
   bool hier;
+  bool gioc;
 protected:
 
   absl::flat_hash_map<Node::Compact, std::shared_ptr<Lgtuple>> node2tuple;  // node to the most up-to-dated tuple chain
@@ -44,7 +45,7 @@ protected:
 
 
 public:
-  Cprop (bool _hier);
+  Cprop (bool _hier, bool _gioc);
   static std::tuple<std::string_view, std::string_view, int> get_tuple_name_key(Node &node);
   void dump_node2tuples() const;
   // Entry point
