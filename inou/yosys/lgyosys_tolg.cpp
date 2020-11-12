@@ -92,7 +92,9 @@ static Node_pin resolve_constant(LGraph *g, const std::vector<RTLIL::State> &dat
 
   if (v.is_fully_def() && data.size()<30) {
     auto x = v.as_int(is_signed);
-    return g->create_node_const(Lconst(x)).setup_driver_pin();
+    if (x>0)
+      return g->create_node_const(Lconst(x)).setup_driver_pin();
+    // NOTE: negatives must be explicit in bits
   }
 
   // this is a vector of RTLIL::State
@@ -117,8 +119,9 @@ static Node_pin resolve_constant(LGraph *g, const std::vector<RTLIL::State> &dat
     absl::StrAppend(&val, "u", (int)data.size(), "bits");
   }
 
-  //fmt::print("val:{} prp:{}\n", val, Lconst(val).to_pyrope());
-  return g->create_node_const(Lconst(val)).setup_driver_pin();
+  Lconst lc(val);
+  //fmt::print("val:{} prp:{} bits:{}\n", val, lc.to_pyrope(), lc.get_bits());
+  return g->create_node_const(lc).setup_driver_pin();
 }
 
 class Pick_ID {
