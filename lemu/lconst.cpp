@@ -153,7 +153,7 @@ Lconst::Lconst(int64_t v) {
   explicit_bits = false;
   sign          = v<0;
   num           = v;
-  bits          = calc_bits();
+  bits          = calc_num_bits();
 }
 
 Lconst::Lconst(Number v) {
@@ -162,23 +162,8 @@ Lconst::Lconst(Number v) {
   explicit_bits = false;
   sign          = v<0;
   num           = v;
-  bits          = calc_bits();
+  bits          = calc_num_bits();
 }
-
-#if 0
-Lconst::Lconst(int64_t v, Bits_t b) {
-  explicit_str  = false;
-  explicit_sign = false;
-  explicit_bits = true;
-  sign          = v<0;
-  bits          = calc_bits();
-  if(b<64)
-    num = (v & ((1ULL<<b)-1)); // clear upper bits if present
-  else
-    num = v;
-  I(calc_bits() <= bits);
-}
-#endif
 
 Lconst::Lconst(std::string_view orig_txt) {
 
@@ -312,7 +297,7 @@ Lconst::Lconst(std::string_view orig_txt) {
       }
     }
 
-    nbits_used = calc_bits();
+    nbits_used = calc_num_bits();
   }else{
     // alnum string (not number, still convert to num)
     for(int i=orig_txt.size()-1; i>=0 ;--i) {
@@ -360,29 +345,18 @@ Lconst Lconst::adjust(const Number &res_num, const Lconst &o) const {
   auto res_explicit_sign = explicit_sign && o.explicit_sign && sign == o.sign;
   auto res_sign = res_explicit_sign? sign : (res_num<0);
 
-  Bits_t res_bits=0u;
-  if (res_num<0)
-    res_bits = msb(-res_num)+1;
-  else if (res_num==0)
-    res_bits = 0;
-  else
-    res_bits = msb(res_num)+1;
-
-  if (res_sign)
-    res_bits++;
-
   // explicit kept if both explicit and agree
   auto res_explicit_str  = explicit_str && o.explicit_str;
   bool res_explicit_bits = false;
 
-  return Lconst(res_explicit_str, res_explicit_sign, res_explicit_bits, res_sign, res_bits, res_num);
+  return Lconst(res_explicit_str, res_explicit_sign, res_explicit_bits, res_sign, calc_num_bits(res_num), res_num);
 }
 
 Lconst Lconst::add_op(const Lconst &o) const {
 
-  auto max_bits = std::max(bits, o.bits);
-
   if (explicit_str || o.explicit_str) {
+    auto max_bits = std::max(bits, o.bits);
+
     std::string str;
     std::string o_str;
     if (explicit_str)
@@ -404,9 +378,10 @@ Lconst Lconst::add_op(const Lconst &o) const {
 }
 
 Lconst Lconst::sub_op(const Lconst &o) const {
-  auto max_bits = std::max(bits, o.bits);
 
   if (explicit_str || o.explicit_str) {
+    auto max_bits = std::max(bits, o.bits);
+
     std::string qmarks("0b");
     qmarks.append(max_bits, '?');
     return Lconst(qmarks);
@@ -418,7 +393,6 @@ Lconst Lconst::sub_op(const Lconst &o) const {
 }
 
 Lconst Lconst::lsh_op(Bits_t amount) const {
-  auto res_bits = bits + amount;
 
   if (explicit_str) {
     auto qmarks = to_string();
@@ -428,12 +402,10 @@ Lconst Lconst::lsh_op(Bits_t amount) const {
 
   auto res_num  = num << amount;
 
-  return Lconst(explicit_str, explicit_sign, explicit_bits, sign, res_bits, res_num);
+  return Lconst(explicit_str, explicit_sign, explicit_bits, sign, calc_num_bits(res_num), res_num);
 }
 
 Lconst Lconst::rsh_op(Bits_t amount) const {
-  auto res_bits = bits - amount;
-
   if (explicit_str) {
     auto qmarks = to_string();
     auto s = qmarks.substr(amount);
@@ -442,7 +414,7 @@ Lconst Lconst::rsh_op(Bits_t amount) const {
 
   auto res_num  = num >> amount;
 
-  return Lconst(explicit_str, explicit_sign, explicit_bits, sign, res_bits, res_num);
+  return Lconst(explicit_str, explicit_sign, explicit_bits, sign, calc_num_bits(res_num), res_num);
 }
 
 Lconst Lconst::or_op(const Lconst &o) const {
@@ -539,12 +511,10 @@ bool Lconst::eq_op(const Lconst &o) const {
 Lconst Lconst::adjust_bits(Bits_t amount) const {
   I(amount>0);
 
-  auto res_bits = amount;
-
   Number r(1);
   Number res_num = num & ((r<<amount)-1);
 
-  return Lconst(explicit_str, explicit_sign, true, sign, res_bits, res_num);
+  return Lconst(explicit_str, explicit_sign, true, sign, calc_num_bits(res_num), res_num);
 }
 
 std::string Lconst::to_string() const {
