@@ -33,7 +33,7 @@ void Lcompiler::add_thread(std::shared_ptr<Lnast> ln) {
   auto local_lgs = ln2lg.do_tolg(ln, top_stmts);
   if (gviz) {
     for (const auto &lg : local_lgs) 
-      gv.do_from_lgraph(lg, "raw"); // rename dot with postfix raw
+      gv.do_from_lgraph(lg, "local.raw"); // rename dot with postfix raw
   }
 
 
@@ -48,7 +48,7 @@ void Lcompiler::add_thread(std::shared_ptr<Lnast> ln) {
     cp.do_trans(lg);
     cp.do_trans(lg);
     if (gviz) 
-      gv.do_from_lgraph(lg, "no_bits"); // rename dot with postfix raw
+      gv.do_from_lgraph(lg, "local.no_bits"); // rename dot with postfix raw
     
 
     fmt::print("------------------------ Bitwidth-Inference ------------------------- (4)\n");
