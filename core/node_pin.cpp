@@ -411,8 +411,14 @@ Node_pin Node_pin::get_down_pin() const {
   // 1st: Get down_hidx
   const auto *tree_pos = Ann_node_tree_pos::ref(current_g);
   I(tree_pos);
-  I(tree_pos->has(node.get_compact_class()));
-  auto delta_pos = tree_pos->get(node.get_compact_class());
+  auto tree_it = tree_pos->find(node.get_compact_class());
+  if (tree_it == tree_pos->end()) {
+    top_g->regenerate_htree(); // force regenerate
+    tree_it = tree_pos->find(node.get_compact_class());
+    I(tree_it != tree_pos->end());
+  }
+
+  auto delta_pos = tree_pos->get(tree_it);
 
   const auto &htree= top_g->get_htree();
   I(!htree.is_leaf(hidx));

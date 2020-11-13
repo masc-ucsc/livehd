@@ -36,7 +36,7 @@ void LGraph_Node_Type::set_type_sub(Index_ID nid, Lg_type_id subgraphid) {
 
   subid_map.set(Node::Compact_class(nid), subgraphid.value);
 
-  Ann_node_tree_pos::ref(static_cast<const LGraph *>(this))->set(Node::Compact_class(nid), subid_map.size());
+  // Ann_node_tree_pos::ref(static_cast<const LGraph *>(this))->set(Node::Compact_class(nid), subid_map.size());
 
   node_internal.ref(nid)->set_type(Ntype_op::Sub);
 }

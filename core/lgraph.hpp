@@ -15,6 +15,7 @@
 class LGraph : public LGraph_Node_Type {
 protected:
   friend class Node;
+  friend class Hierarchy_tree;
   friend class Node_pin;
   friend class XEdge;
   friend class CFast_edge_iterator;
@@ -145,6 +146,11 @@ public:
   virtual ~LGraph();
 
   bool is_empty() const { return fast_first() == 0; }
+
+  void regenerate_htree() {
+    htree.clear();
+    htree.regenerate();
+  }
 
   Hierarchy_tree *ref_htree() {
     if (htree.empty())
