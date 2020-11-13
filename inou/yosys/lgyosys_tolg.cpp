@@ -113,10 +113,10 @@ static Node_pin resolve_constant(LGraph *g, const std::vector<RTLIL::State> &dat
       default: absl::StrAppend(&val, "x"); break;
 		}
   }
-  if (is_signed) {
+  if (is_signed && data[data.size()-1] == RTLIL::S1) { // only explicit bits if top is 1 and negative
     absl::StrAppend(&val, "s", (int)data.size(), "bits");
-  }else{
-    absl::StrAppend(&val, "u", (int)data.size(), "bits");
+//  }else{
+//    absl::StrAppend(&val, "u", (int)data.size(), "bits");
   }
 
   Lconst lc(val);

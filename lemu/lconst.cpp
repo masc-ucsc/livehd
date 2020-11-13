@@ -328,7 +328,7 @@ Lconst::Lconst(std::string_view orig_txt) {
       I(num>0);
     }
   } else {
-    bits = nbits_used;
+    bits = calc_num_bits();
   }
 
   I(bits);
