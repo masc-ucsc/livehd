@@ -712,8 +712,7 @@ void Cprop::process_tuple_add(Node &node) {
 
 void Cprop::do_trans(LGraph *lg) {
   /* Lbench b("pass.cprop"); */
-
-  bool tup_get_left = false;
+  /* bool tup_get_left = false; */
 
   for (auto node : lg->forward()) {
     /* fmt::print("current node->{}\n", node.debug_name()); */
@@ -744,7 +743,7 @@ void Cprop::do_trans(LGraph *lg) {
       if (!ok) {
         fmt::print("cprop could not simplify node:{}\n",node.debug_name());
       }
-      tup_get_left |= !ok;
+      tuple_get_left |= !ok;
       continue;
     }
 
@@ -767,7 +766,7 @@ void Cprop::do_trans(LGraph *lg) {
 
 
   for (auto node : lg->fast()) {
-    if (!tup_get_left && node.is_type_tup()) {
+    if (!tuple_get_left && node.is_type_tup()) {
       if (hier) {
         auto it = node2tuple.find(node.get_compact());
         if (it != node2tuple.end()) {
@@ -796,17 +795,20 @@ void Cprop::do_trans(LGraph *lg) {
     node2tuple.clear();
   }
 
+
   if (at_gioc) {
-    // if all inputs could be resolved, delete the unified $
-    auto unified_inp = lg->get_graph_input("$");
-    if (unified_inp.out_edges().size() == 0)
-      unified_inp.get_non_hierarchical().del();
+    //remove unified input $ if fully resolved
+    if (lg->is_graph_input("$")) {
+      auto unified_inp = lg->get_graph_input("$");
+      if (unified_inp.out_edges().size() == 0)
+        unified_inp.get_non_hierarchical().del();
+    }
 
     //remove unified output % if fully resolved
     if (lg->is_graph_output("%")) {
-      auto uout = lg->get_graph_output("%");
-      if (!uout.has_inputs()) {
-        uout.get_non_hierarchical().del();
+      auto unified_out = lg->get_graph_output("%");
+      if (!unified_out.has_inputs()) {
+        unified_out.get_non_hierarchical().del();
       }
     }
   }
@@ -831,4 +833,8 @@ void Cprop::dump_node2tuples() const {
     fmt::print("node nid:{}\n",it.first.get_nid());
     it.second->dump();
   }
+}
+
+bool Cprop::get_tuple_get_left() const {
+  return tuple_get_left;
 }

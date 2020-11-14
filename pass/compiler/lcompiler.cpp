@@ -44,9 +44,6 @@ void Lcompiler::add_thread(std::shared_ptr<Lnast> ln) {
 
     fmt::print("------------------------ Copy-Propagation --------------------------- (3)\n");
     cp.do_trans(lg);
-    cp.do_trans(lg);
-    cp.do_trans(lg);
-    cp.do_trans(lg);
     if (gviz) 
       gv.do_from_lgraph(lg, "local.no_bits"); // rename dot with postfix raw
     
@@ -69,12 +66,7 @@ void Lcompiler::add_thread(std::shared_ptr<Lnast> ln) {
     
 
     // FIXEME:sh -> todo 
-    /* if (cprop.tup_get_left || bw.not_finished) { */
-    /*   if (cprop.made_progress || bw.made_progress) */
-    /*     goto retry; */
-    /* } */
-
-    /* if (cp.tup_get_left) { */
+    /* if (cp.get_tuple_get_left()) { */
     /*   if (cp.made_progress) { */
     /*     goto retry; */
     /*   } */

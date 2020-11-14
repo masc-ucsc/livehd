@@ -102,15 +102,11 @@ Pyrope_compile_hier () {
   echo ""
   echo ""
   echo "===================================================="
-  echo "Pyrope Full Compilation"
+  echo "Hierarchical Pyrope Full Compilation"
   echo "===================================================="
 
   declare pts_concat
   declare top_module
-  # if [ ${#1[@]} < 3 ]; then
-  #   echo "ERROR: you just specify one pattern for hierarchical Pyrope compilation, remember the first item is for identifying top name"
-  #   exit 1
-  # fi
 
   for pt in $1
   do
@@ -162,10 +158,6 @@ Pyrope_compile_hier () {
         exit 1
     fi
   done
-
-
-  # Logic Equivalence Check
-  echo ${top_module}
 
   #concatenate every submodule under top_module.v
   for pt in $1
