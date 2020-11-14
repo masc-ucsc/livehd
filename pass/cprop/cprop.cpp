@@ -13,9 +13,7 @@
 #define TRACE(x)
 //#define TRACE(x) x
 
-
-
-Cprop::Cprop (bool _hier, bool _gioc) : hier(_hier), gioc(_gioc) {}
+Cprop::Cprop (bool _hier, bool _at_gioc) : hier(_hier), at_gioc(_at_gioc) {}
 
 void Cprop::collapse_forward_same_op(Node &node, XEdge_iterator &inp_edges_ordered) {
   auto op = node.get_type_op();
@@ -109,16 +107,7 @@ void Cprop::collapse_forward_always_pin0(Node &node, XEdge_iterator &inp_edges_o
   auto op = node.get_type_op();
 
   for (auto &out : node.out_edges()) {
-    /* if (out.driver.get_pid()) { */
-    /*   can_delete = false; */
-    /*   continue; */
-    /* } */
-
     for (auto &inp : inp_edges_ordered) {
-      /* if (inp.sink.get_pid()) { */
-      /*   can_delete = false; */
-      /*   continue; */
-      /* } */
       TRACE(fmt::print("cprop forward_always pin:{} to pin:{}\n", inp.driver.debug_name(), out.sink.debug_name()));
       if (op == Ntype_op::Xor) {
         if (inp.driver.is_connected(out.sink)) {
@@ -164,7 +153,6 @@ void Cprop::try_constant_prop(Node &node, XEdge_iterator &inp_edges_ordered) {
 
 void Cprop::try_collapse_forward(Node &node, XEdge_iterator &inp_edges_ordered) {
   // No need to collapse things like const -> join because the Lconst will be forward eval
-
   auto op = node.get_type_op();
 
   if (inp_edges_ordered.size() == 1) {
@@ -361,8 +349,6 @@ void Cprop::replace_node(Node &node, const Lconst &result) {
 
       dpin2.connect_sink(out.sink);
     }
-
-    // out.del_edge();
   }
 
   node.del_node();
@@ -397,7 +383,6 @@ void Cprop::process_subgraph(Node &node) {
     return;
 
   auto *sub = node.ref_type_sub_node();
-
   const auto &reg = Lgcpp_plugin::get_registry();
 
   auto it = reg.find(sub->get_name());
@@ -432,8 +417,7 @@ void Cprop::process_subgraph(Node &node) {
       }
     }
   }
-
-#if 1
+#if 0
   Port_ID instance_pid = 0;
   for (const auto *io_pin : sub->get_io_pins()) {
     instance_pid++;
@@ -812,7 +796,7 @@ void Cprop::do_trans(LGraph *lg) {
     node2tuple.clear();
   }
 
-  if (gioc) {
+  if (at_gioc) {
     // if all inputs could be resolved, delete the unified $
     auto unified_inp = lg->get_graph_input("$");
     if (unified_inp.out_edges().size() == 0)
