@@ -9,7 +9,7 @@
 class Cprop {
 private:
   bool hier;
-  bool gioc;
+  bool at_gioc;
 protected:
 
   absl::flat_hash_map<Node::Compact, std::shared_ptr<Lgtuple>> node2tuple;  // node to the most up-to-dated tuple chain

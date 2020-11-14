@@ -95,8 +95,8 @@ void Lcompiler::add(std::shared_ptr<Lnast> ln) {
 
 void Lcompiler::global_io_connection() {
   Graphviz gv(true, false, odir);
-  Cprop    cp(false, true); // hier = false, gioc = true 
-  Bitwidth bw(true, 10);   // hier = false, max_iters = 10
+  Cprop    cp(false, true); // hier = false, at_gioc = true 
+  Bitwidth bw(true, 10);    // hier = false, max_iters = 10
   Gioc     gioc(path);
 
   for (auto &lg : lgs) {
@@ -112,16 +112,25 @@ void Lcompiler::global_io_connection() {
 }
 
 
-void Lcompiler::global_bitwidth_inference() {
+void Lcompiler::global_bitwidth_inference(std::string_view top) {
   Graphviz gv(true, false, odir);
   Bitwidth bw(true, 10);   // hier = true, max_iters = 10
 
-  //FIXME->sh: if we could specify top here, we could avoid many unnecessary lgraph traverse
+  auto lgcnt = 0;
+  auto hit = false;
   for (auto &lg : lgs) {
-    fmt::print("------------------------ Bitwidth-Inference ------------------------- (A)\n");
-    bw.do_trans(lg);
-    if (gviz) 
-      gv.do_from_lgraph(lg, ""); // rename dot with postfix raw
+    ++lgcnt;
+    if (lg->get_name() == top) {
+      hit = true;
+      fmt::print("------------------------ Bitwidth-Inference ------------------------- (A)\n");
+      bw.do_trans(lg);
+      if (gviz) 
+        gv.do_from_lgraph(lg, ""); // rename dot with postfix raw
+    }
+  }
+
+  if (lgcnt > 1 && hit == false) {
+    Pass::error("Top module not specified from multiple Pyrope source codes!\n");
   }
 }
 

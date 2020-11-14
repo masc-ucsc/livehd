@@ -1,5 +1,4 @@
 #!/bin/bash
-rm -rf ./lgdb
 
 pts_to_be_merged='io_gen io_gen2 io_gen3 test2'
 pts_tuple_dbg='lhs_wire3 funcall_unnamed2 
@@ -11,14 +10,14 @@ pts='hier_tuple_io tuple_copy2 firrtl_tail2 firrtl_tail3 reg__q_pin hier_tuple2 
      logic reg_bits_set tuple_copy hier_tuple3 lhs_wire lhs_wire2 scalar_tuple
      firrtl_tail attr_set capricious_bits out_ssa ssa_rhs counter counter_nested_if tuple_if'
 
-# pts='sum top'
-# pts='top sum'
-# pts='sum'
-# pts='top sum'
-# inou.pyrope files:inou/pyrope/tests/compiler/top.prp, inou/pyrope/tests/compiler/sum.prp |> pass.compiler gviz:true
+# Note: in bash, specify top module name at first position
+pts_hier1='top sum top'
+pts_hier2='top top sum'
+
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
+PATTERN_PATH=./inou/pyrope/tests/compiler
 
 if [ ! -f $LGSHELL ]; then
     if [ -f ./main/lgshell ]; then
@@ -28,6 +27,7 @@ if [ ! -f $LGSHELL ]; then
         echo "ERROR: could not find lgshell binary in $(pwd)";
     fi
 fi
+
 
 Pyrope_compile () {
   echo ""
@@ -40,12 +40,12 @@ Pyrope_compile () {
 
   for pt in $1
   do
-    if [ ! -f inou/pyrope/tests/compiler/${pt}.prp ]; then
-        echo "ERROR: could not find ${pt}.prp in /inou/pyrope/tests/compiler"
+    if [ ! -f ${PATTERN_PATH}/${pt}.prp ]; then
+        echo "ERROR: could not find ${pt}.prp in ${PATTERN_PATH}"
         exit 1
     fi
 
-    ${LGSHELL} "inou.pyrope files:inou/pyrope/tests/compiler/${pt}.prp |> pass.compiler gviz:true"
+    ${LGSHELL} "inou.pyrope files:${PATTERN_PATH}/${pt}.prp |> pass.compiler gviz:true"
     ret_val=$?
     if [ $ret_val -ne 0 ]; then
       echo "ERROR: could not compile with pattern: ${pt}.prp!"
@@ -57,91 +57,150 @@ Pyrope_compile () {
   # Verilog code generation
   for pt in $1
   do
-      if [[ ${pt} == *_err* ]]; then
-          echo "----------------------------------------------------"
-          echo "Pass! This is a Compile Error Test, No Need to Generate Verilog Code "
-          echo "----------------------------------------------------"
-      else
-          echo ""
-          echo ""
-          echo ""
-          echo "----------------------------------------------------"
-          echo "LGraph -> Verilog"
-          echo "----------------------------------------------------"
+    echo ""
+    echo ""
+    echo ""
+    echo "----------------------------------------------------"
+    echo "LGraph -> Verilog"
+    echo "----------------------------------------------------"
 
-          ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg hier:true"
-          if [ $? -eq 0 ] && [ -f ${pt}.v ]; then
-              echo "Successfully generate Verilog: ${pt}.v"
-              rm -f  yosys_script.*
-          else
-              echo "ERROR: Pyrope compiler failed: verilog generation, testcase: inou/pyrope/tests/compiler/${pt}.prp"
-              exit 1
-          fi
-      fi
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg hier:true"
+    if [ $? -eq 0 ] && [ -f ${pt}.v ]; then
+        echo "Successfully generate Verilog: ${pt}.v"
+        rm -f  yosys_script.*
+    else
+        echo "ERROR: Pyrope compiler failed: verilog generation, testcase: ${PATTERN_PATH}/${pt}.prp"
+        exit 1
+    fi
   done
 
 
   # Logic Equivalence Check
-  if [[ $2 == "hier" ]]; then
-      #get the last pattern of pts_hier
-      top_module=$(echo $1 | awk '{print $NF}')
-      echo $top_module
-
-      #concatenate every submodule under top_module.v
-      for pt in $1
-      do
-          if [[ pt != $top_module ]]; then
-              $(cat ${pt}.v >> ${top_module}.v)
-          fi
-      done
-
-
+  for pt in $1
+  do
       echo ""
       echo ""
       echo ""
       echo "----------------------------------------------------"
-      echo "Logic Equivalence Check: Hierarchical Design"
+      echo "Logic Equivalence Check"
       echo "----------------------------------------------------"
 
-      ${LGCHECK} --top=$top_module --implementation=${top_module}.v --reference=./inou/pyrope/tests/compiler/verilog_gld/${top_module}.gld.v
+      ${LGCHECK} --implementation=${pt}.v --reference=${PATTERN_PATH}/verilog_gld/${pt}.gld.v
 
       if [ $? -eq 0 ]; then
-          echo "Successfully pass logic equivilence check!"
+        echo "Successfully pass LEC!"
       else
-          echo "FAIL: "${top_module}".v !== "${top_module}".gld.v"
+          echo "FAIL: "${pt}".v !== "${pt}".gld.v"
           exit 1
       fi
+  done
+}
+
+
+Pyrope_compile_hier () {
+  echo ""
+  echo ""
+  echo ""
+  echo "===================================================="
+  echo "Pyrope Full Compilation"
+  echo "===================================================="
+
+  declare pts_concat
+  declare top_module
+  # if [ ${#1[@]} < 3 ]; then
+  #   echo "ERROR: you just specify one pattern for hierarchical Pyrope compilation, remember the first item is for identifying top name"
+  #   exit 1
+  # fi
+
+  for pt in $1
+  do
+    if [ ! -f ${PATTERN_PATH}/${pt}.prp ]; then
+        echo "ERROR: could not find ${pt}.prp in ${PATTERN_PATH}"
+        exit 1
+    fi
+    
+    # the first item in pts_hier is just specifying the top_module name
+    if [ -z "${top_module}" ]; then 
+      top_module=${pt}
+      continue
+    fi  
+
+    # check if pts_concat is empty or not and perform pattern concatenation, patterns have to be comma seperated
+    if [ -z "${pts_concat}" ]; then
+      pts_concat="${PATTERN_PATH}/${pt}.prp"
+    else
+      pts_concat="${pts_concat}, ${PATTERN_PATH}/${pt}.prp"
+    fi
+  done
+
+
+  ${LGSHELL} "inou.pyrope files:${pts_concat} |> pass.compiler gviz:true top:${top_module}"
+  ret_val=$?
+  if [ $ret_val -ne 0 ]; then
+    echo "ERROR: could not compile with pattern: ${pts_concat}.prp!"
+    exit $ret_val
+  fi
+
+
+  # Verilog code generation
+  for pt in $1
+  do
+    echo ""
+    echo ""
+    echo ""
+    echo "----------------------------------------------------"
+    echo "LGraph -> Verilog"
+    echo "----------------------------------------------------"
+
+    # ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg hier:true"
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg"
+    if [ $? -eq 0 ] && [ -f ${pt}.v ]; then
+        echo "Successfully generate Verilog: ${pt}.v"
+        rm -f  yosys_script.*
+    else
+        echo "ERROR: Pyrope compiler failed: verilog generation, testcase: ${PATTERN_PATH}/${pt}.prp"
+        exit 1
+    fi
+  done
+
+
+  # Logic Equivalence Check
+  echo ${top_module}
+
+  #concatenate every submodule under top_module.v
+  for pt in $1
+  do
+      if [[ pt != $top_module ]]; then
+          $(cat ${pt}.v >> ${top_module}.v)
+      fi
+  done
+
+
+  echo ""
+  echo ""
+  echo ""
+  echo "----------------------------------------------------"
+  echo "Logic Equivalence Check: Hierarchical Design"
+  echo "----------------------------------------------------"
+
+  ${LGCHECK} --top=$top_module --implementation=${top_module}.v --reference=./inou/pyrope/tests/compiler/verilog_gld/${top_module}.gld.v
+
+  if [ $? -eq 0 ]; then
+      echo "Successfully pass logic equivilence check!"
   else
-      for pt in $1
-      do
-          echo ""
-          echo ""
-          echo ""
-          echo "----------------------------------------------------"
-          echo "Logic Equivalence Check"
-          echo "----------------------------------------------------"
-
-          ${LGCHECK} --implementation=${pt}.v --reference=./inou/pyrope/tests/compiler/verilog_gld/${pt}.gld.v
-
-          if [ $? -eq 0 ]; then
-            echo "Successfully pass LEC!"
-          else
-              echo "FAIL: "${pt}".v !== "${pt}".gld.v"
-              exit 1
-          fi
-      done
+      echo "FAIL: "${top_module}".v !== "${top_module}".gld.v"
+      exit 1
   fi
 }
 
 
-
-
+rm -rf ./lgdb
 Pyrope_compile "$pts"
-# Pyrope_compile "$pts_hier"  "hier"
-# Pyrope_compile "$pts_hier2" "hier"
-# Pyrope_compile "$pts_hier4" "hier"
-# Pyrope_compile "$pts_hier5" "hier"
-# Pyrope_compile "$pts_hier6" "hier"
+rm -rf ./lgdb
+Pyrope_compile_hier "$pts_hier1"  
+rm -rf ./lgdb
+Pyrope_compile_hier "$pts_hier2"  
+
 
 rm -f *.dot
 rm -f *.v

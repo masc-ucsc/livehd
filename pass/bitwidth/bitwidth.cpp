@@ -16,7 +16,6 @@
 
 Bitwidth::Bitwidth(bool _hier, int _max_iterations) :  max_iterations(_max_iterations), hier(_hier) {}
 
-
 void Bitwidth::do_trans(LGraph *lg) {
   /* Lbench b("pass.bitwidth"); */
   bw_pass(lg);
@@ -243,6 +242,7 @@ void Bitwidth::process_logic(Node &node, XEdge_iterator &inp_edges) {
   }
 }
 
+
 void Bitwidth::process_logic_and(Node &node, XEdge_iterator &inp_edges) {
   // determine the min_bits among all inp_edges
   if (inp_edges.size() >= 1) {
@@ -281,6 +281,7 @@ void Bitwidth::process_logic_and(Node &node, XEdge_iterator &inp_edges) {
     }
   }
 }
+
 
 Bitwidth::Attr Bitwidth::get_key_attr(std::string_view key) {
   if (key.substr(0, 6) == "__bits")
@@ -470,7 +471,6 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr) {
     }
   }
 
-  // fmt::print("attr_set_new name:{} key:{} bw_bits:{} node_attr:{}\n", dpin_name, key, bw.get_bits(), node_attr.debug_name());
 
   if (attr == Attr::Set_bits) {
     I(dpin_val.get_node().is_type_const());
@@ -538,11 +538,6 @@ void Bitwidth::process_attr_set_propagate(Node &node_attr) {
     return;
   }
   const auto parent_attr_bw = parent_attr_it->second;
-
-  /* fmt::print("attr_set_prop name:{} parent_attr.bits:{} data_bw.bits:{}\n", */
-  /*            dpin_name, */
-  /*            parent_attr_bw.get_bits(), */
-  /*            data_bw.get_bits()); */
 
   if (parent_attr_bw.get_bits() && data_bw.get_bits()) {
     if (parent_attr_bw.get_bits() < data_bw.get_bits()) {
