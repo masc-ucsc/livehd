@@ -144,13 +144,14 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
     case Ntype_op::Sflop:
     case Ntype_op::Aflop:
       switch(pid) {
-        case 0: return "reset";
+        case 0: return "async";
         case 1: return "initial";  // reset value
         case 2: return "clock";
         case 3: return "din";
         case 4: return "enable";
         case 5: return "posclk";
         case 6: return "negreset";
+        case 7: return "reset";
         default: return "invalid";
       }
       break;

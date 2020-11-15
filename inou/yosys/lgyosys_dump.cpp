@@ -653,85 +653,100 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         Node_pin   enable_dpin;
         Node_pin   posclk_dpin;
         Node_pin negreset_dpin;
+        Node_pin    async_dpin;
 
-        if (node.is_sink_connected("reset"  )) reset_dpin   = node.get_sink_pin("reset"  ).get_driver_pin();
-        if (node.is_sink_connected("initial")) initial_dpin = node.get_sink_pin("initial").get_driver_pin();
-        if (node.is_sink_connected("clock"  )) clock_dpin   = node.get_sink_pin("clock"  ).get_driver_pin();
-        if (node.is_sink_connected("din"    )) din_dpin     = node.get_sink_pin("din"    ).get_driver_pin();
-        if (node.is_sink_connected("enable" )) enable_dpin  = node.get_sink_pin("enable" ).get_driver_pin();
-        if (node.is_sink_connected("posclk" )) posclk_dpin  = node.get_sink_pin("posclk" ).get_driver_pin();
-        if (node.is_sink_connected("negreset")) negreset_dpin  = node.get_sink_pin("negreset").get_driver_pin();
+        if (node.is_sink_connected("reset"   ))    reset_dpin = node.get_sink_pin("reset"   ).get_driver_pin();
+        if (node.is_sink_connected("initial" ))  initial_dpin = node.get_sink_pin("initial" ).get_driver_pin();
+        if (node.is_sink_connected("clock"   ))    clock_dpin = node.get_sink_pin("clock"   ).get_driver_pin();
+        if (node.is_sink_connected("din"     ))      din_dpin = node.get_sink_pin("din"     ).get_driver_pin();
+        if (node.is_sink_connected("enable"  ))   enable_dpin = node.get_sink_pin("enable"  ).get_driver_pin();
+        if (node.is_sink_connected("posclk"  ))   posclk_dpin = node.get_sink_pin("posclk"  ).get_driver_pin();
+        if (node.is_sink_connected("negreset")) negreset_dpin = node.get_sink_pin("negreset").get_driver_pin();
+        if (node.is_sink_connected("async"   ))    async_dpin = node.get_sink_pin("async"   ).get_driver_pin();
 
         RTLIL::Wire *  reset_wire = nullptr;
         RTLIL::Wire *  clock_wire = nullptr;
         RTLIL::Wire *    din_wire = nullptr;
         RTLIL::Wire * enable_wire = nullptr;
 
-        if (!initial_dpin.is_invalid()) { assert(false); } //  no reset value in yosys, add mux before
         if (!  reset_dpin.is_invalid()) {   reset_wire = get_wire(  reset_dpin); }
         if (!  clock_dpin.is_invalid()) {   clock_wire = get_wire(  clock_dpin); }
         if (!    din_dpin.is_invalid()) {     din_wire = get_wire(    din_dpin); }
         if (! enable_dpin.is_invalid()) {  enable_wire = get_wire( enable_dpin); }
+        if (!initial_dpin.is_invalid()) { assert(reset_wire); } //  no reset value in yosys, add mux before
 
-        bool posclk = true;
-        if (!posclk_dpin.is_invalid()) {
-          posclk = posclk_dpin.get_node().get_type_const().to_i()!=0;
-        }
-        bool negreset = false;
-        if (!negreset_dpin.is_invalid()) {
-          negreset = negreset_dpin.get_node().get_type_const().to_i()!=0;
-        }
+        bool posclk   =    posclk_dpin.is_invalid() ||   posclk_dpin.get_node().get_type_const().to_i()!=0;
+        bool async    = !   async_dpin.is_invalid() &&    async_dpin.get_node().get_type_const().to_i()!=0;
+        bool negreset = !negreset_dpin.is_invalid() && negreset_dpin.get_node().get_type_const().to_i()!=0;
 
-        if (op == Ntype_op::Sflop) {
-          assert(clock_wire);
-          assert(din_wire);
+        assert(clock_wire);
+        assert(din_wire);
 
-          if (enable_wire == nullptr && reset_wire == nullptr) {
-            assert(initial_dpin.is_invalid()); // no reset here
+        if (reset_wire==nullptr) {
+          assert(initial_dpin.is_invalid()); // no reset here
+          assert(!async); // only if reset is present, it can be async
+
+          if (enable_wire == nullptr) {
             module->addDff(next_id(g), clock_wire, din_wire, cell_output_map[node.get_driver_pin().get_compact()], posclk);
-          } else if (enable_wire == nullptr && reset_wire != nullptr) {
-            assert(initial_dpin.is_invalid()); // no reset here
-            auto set_wire = RTLIL::SigSpec(RTLIL::State::S0);
-            module->addDffsr(next_id(g),
-                clock_wire,
-                set_wire,
-                reset_wire,
-                din_wire,
-                cell_output_map[node.get_driver_pin().get_compact()],
-                posclk,
-                !negreset,  // set_polarity
-                !negreset); // reset_polarity
-          } else if (enable_wire && reset_wire == nullptr) {
-            assert(initial_dpin.is_invalid()); // no reset here
-            auto set_wire = RTLIL::SigSpec(RTLIL::State::S0);
+          } else {
             module->addDffe(next_id(g),
                 clock_wire,
                 enable_wire,
                 din_wire,
                 cell_output_map[node.get_driver_pin().get_compact()],
                 posclk,
-                !negreset); // enable_polarity
-          } else {
-            log_error("Flop options not supported yet! (fixme?)\n");
+                true); // enable is always active high in LiveHD
           }
-        } else {
-          if (reset_wire && enable_wire == nullptr) {
-            RTLIL::Const initial_const(0, node.get_bits());
-            if (!initial_dpin.is_invalid()) {
-              initial_const = RTLIL::Const(initial_dpin.get_node().get_type_const().to_yosys());
-            }
+        }else{ // reset wire
+          RTLIL::Const initial_const(0, node.get_bits());
+          if (!initial_dpin.is_invalid()) {
+            initial_const = RTLIL::Const(initial_dpin.get_node().get_type_const().to_yosys());
+          }
 
-            auto *c2 = module->addAdff(next_id(g),
+          if (enable_wire == nullptr) {
+            if (async) {
+              module->addAdff(next_id(g),
                 clock_wire,
                 reset_wire,
                 din_wire,
                 cell_output_map[node.get_driver_pin().get_compact()],
                 initial_const,
                 posclk,
-                !negreset // reset polarity
-                );
-          } else {
-            log_error("Enable not supported on AFlops yet and RST required on AFlops!\n");
+                !negreset); // reset_polarity
+            }else{
+              module->addSdff(next_id(g),
+                clock_wire,
+                reset_wire,
+                din_wire,
+                cell_output_map[node.get_driver_pin().get_compact()],
+                initial_const,
+                posclk,
+                !negreset); // reset_polarity
+            }
+          }else{
+            if (async) {
+              module->addAdffe(next_id(g),
+                  clock_wire,
+                  enable_wire,
+                  reset_wire,
+                  din_wire,
+                  cell_output_map[node.get_driver_pin().get_compact()],
+                  initial_const,
+                  posclk,
+                  true,   // only posedge enable polarity supported in LiveHD
+                  !negreset); // reset_polarity
+            }else{
+              module->addSdffe(next_id(g),
+                  clock_wire,
+                  enable_wire,
+                  reset_wire,
+                  din_wire,
+                  cell_output_map[node.get_driver_pin().get_compact()],
+                  initial_const,
+                  posclk,
+                  true,   // only posedge enable polarity supported in LiveHD
+                  !negreset); // reset_polarity
+            }
           }
         }
       }

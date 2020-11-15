@@ -427,9 +427,9 @@ static void set_bits_wirename(Node_pin &pin, const RTLIL::Wire *wire) {
     }
   }
 
-  if (!pin.is_graph_io()) {
-    pin.set_bits(wire->width);
-  }
+//  if (!pin.is_graph_io()) {
+//    pin.set_bits(wire->width);
+//  }
 }
 
 static Node_pin get_partial_dpin(LGraph *g, const RTLIL::Wire *wire) {
@@ -1525,64 +1525,80 @@ static void process_cells(RTLIL::Module *module, LGraph *g) {
     //--------------------------------------------------------------
     } else if (std::strncmp(cell->type.c_str(), "$dff", 4) == 0
             || std::strncmp(cell->type.c_str(), "$dffe", 5) == 0
-            || std::strncmp(cell->type.c_str(), "$dffsr", 6) == 0) {
+            || std::strncmp(cell->type.c_str(), "$dffsr", 6) == 0
+            || std::strncmp(cell->type.c_str(), "$adff", 5) == 0
+            || std::strncmp(cell->type.c_str(), "$adffe", 6) == 0
+            || std::strncmp(cell->type.c_str(), "$adffsr", 7) == 0
+            || std::strncmp(cell->type.c_str(), "$sdff", 5) == 0
+            || std::strncmp(cell->type.c_str(), "$sdffe", 6) == 0
+            || std::strncmp(cell->type.c_str(), "$sdffsr", 7) == 0) {
       exit_node.set_type(Ntype_op::Sflop, get_output_size(cell));
 
-      RTLIL::Const clk_polarity = cell->getParam(ID::CLK_POLARITY);
-      for (int i = 1; i < clk_polarity.size(); i++) {
-        I(clk_polarity[0] == clk_polarity[i]);
-      }
-      if (clk_polarity.size() && clk_polarity[0] != RTLIL::S1) {
+      // NOTE: yosys has 0s and 1s but multibit flops, but it is not a polarity per bit
+      if (cell->hasParam(ID::CLK_POLARITY) && !cell->getParam(ID::CLK_POLARITY).as_bool()) {
         exit_node.setup_sink_pin("posclk").connect_driver(g->create_node_const(0));
       }
 
-      bool wants_negreset=false;
-      if (cell->hasParam(ID::EN)) {
-        if (cell->hasParam(ID::EN_POLARITY)) {
-          wants_negreset = cell->getParam(ID::EN_POLARITY).as_int() == 0;
-        }
-        exit_node.setup_sink_pin("enable").connect_driver(get_dpin(g, cell, ID::EN));
-      }
-
       if (cell->hasParam(ID::CLR)) {
+        I(false); // get a test using this and debug
+        bool wants_negreset=false;
+        if (cell->hasParam(ID::EN)) {
+          if (cell->hasParam(ID::EN_POLARITY)) {
+            wants_negreset = !cell->getParam(ID::EN_POLARITY).as_bool();
+          }
+          exit_node.setup_sink_pin("enable").connect_driver(get_dpin(g, cell, ID::EN));
+        }
+
         if (cell->hasParam(ID::CLR_POLARITY)) {
           bool wants_negreset2 = cell->getParam(ID::CLR_POLARITY).as_int() == 0;
           I(wants_negreset2 == wants_negreset); // both agree
         }
         exit_node.setup_sink_pin("reset").connect_driver(get_dpin(g, cell, ID::CLR));
+      }else if (cell->hasPort(ID::SRST)) {
+        if (cell->hasParam(ID::SRST_POLARITY)) {
+          if (cell->getParam(ID::SRST_POLARITY).as_bool()) {
+            exit_node.setup_sink_pin("negreset").connect_driver(g->create_node_const(0));
+          }else{
+            exit_node.setup_sink_pin("negreset").connect_driver(g->create_node_const(1));
+          }
+        }
+
+        exit_node.setup_sink_pin("reset").connect_driver(get_dpin(g, cell, ID::SRST));
+
+        if (cell->hasParam(ID::SRST_VALUE)) {
+          const auto &v = cell->getParam(ID::SRST_VALUE);
+          if (!v.is_fully_zero())
+            exit_node.setup_sink_pin("initial").connect_driver(get_dpin(g, cell, ID::SRST_VALUE));
+        }
       }
-      if (wants_negreset)
-        exit_node.setup_sink_pin("negreset").connect_driver(g->create_node_const(1));
 
       I(!cell->hasParam(ID::SET)); // FIXME: active low not supported in LG (add mux before sflop)
 
-      exit_node.setup_sink_pin("clock").connect_driver(get_dpin(g, cell,ID::CLK));
-      exit_node.setup_sink_pin("din").connect_driver(get_dpin(g, cell,ID::D));
-    //--------------------------------------------------------------
-    } else if (std::strncmp(cell->type.c_str(), "$adff", 4) == 0) {
-      exit_node.set_type(Ntype_op::Aflop, get_output_size(cell));
-
-      if (cell->getParam(ID::ARST_POLARITY)[0] != RTLIL::S1)
-        exit_node.setup_sink_pin("negreset").connect_driver(g->create_node_const(1));
-
-      if (!cell->getParam(ID::CLK_POLARITY).as_bool())
-        exit_node.setup_sink_pin("posclk").connect_driver(g->create_node_const(0));
-
-      exit_node.setup_sink_pin("clock").connect_driver(get_dpin(g, cell,ID::CLK));
-      exit_node.setup_sink_pin("reset").connect_driver(get_dpin(g, cell,ID::ARST));
-      if (cell->hasParam(ID::ARST_VALUE)) {
-        const auto &v = cell->getParam(ID::ARST_VALUE);
-        if (!v.is_fully_zero())
-          exit_node.setup_sink_pin("initial").connect_driver(get_dpin(g, cell, ID::ARST_VALUE));
+      if (cell->hasPort(ID::EN)) {
+        auto enable_dpin = get_dpin(g, cell, ID::EN);
+        if (cell->hasParam(ID::EN_POLARITY) && !cell->getParam(ID::EN_POLARITY).as_bool()) {
+          auto not_node = g->create_node(Ntype_op::Not, 1);
+          not_node.connect_sink(enable_dpin);
+          exit_node.setup_sink_pin("enable").connect_driver(not_node.get_driver_pin());
+        }else{
+          exit_node.setup_sink_pin("enable").connect_driver(enable_dpin);
+        }
       }
-      exit_node.setup_sink_pin("din").connect_driver(get_dpin(g, cell,ID::D));
+      if (std::strncmp(cell->type.c_str(), "$adff", 5) == 0
+          || std::strncmp(cell->type.c_str(), "$adffe", 6) == 0
+          || std::strncmp(cell->type.c_str(), "$adffsr", 7) == 0) {
+        exit_node.setup_sink_pin("async").connect_driver(g->create_node_const(1));
+      }
 
+      exit_node.setup_sink_pin("clock").connect_driver(get_dpin(g, cell,ID::CLK));
+      exit_node.setup_sink_pin("din").connect_driver(get_dpin(g, cell,ID::D));
     //--------------------------------------------------------------
     } else if (std::strncmp(cell->type.c_str(), "$dlatch", 7) == 0) {
       exit_node.set_type(Ntype_op::Latch, get_output_size(cell));
 
-      if (cell->hasParam(ID::EN_POLARITY) && cell->getParam(ID::EN_POLARITY)[0] != RTLIL::S1)
+      if (cell->hasParam(ID::EN_POLARITY) && !cell->getParam(ID::EN_POLARITY).as_bool()) {
         exit_node.setup_sink_pin("posclk").connect_driver(g->create_node_const(0));
+      }
 
       exit_node.setup_sink_pin("din").connect_driver(get_dpin(g, cell,ID::D));
       exit_node.setup_sink_pin("enable").connect_driver(get_dpin(g, cell, ID::EN));
@@ -2074,7 +2090,7 @@ static void process_cells(RTLIL::Module *module, LGraph *g) {
           // there are two edges from dpin to spin
           // this is not allowed in lgraph, add a Ntype_op::Or in between
           auto or_node = g->create_node(Ntype_op::Or, ss.size());
-          g->add_edge(dpin, or_node.setup_sink_pin(), ss.size());
+          g->add_edge(dpin, or_node.setup_sink_pin());
           dpin = or_node.setup_driver_pin();
         }
         g->add_edge(dpin, spin);

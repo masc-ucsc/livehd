@@ -74,13 +74,6 @@ public:
 
   void emplace_back();
 
-#if 1
-  // WARNING: deprecated: Use get/set_bits(const Node_pin)
-  void     set_bits_pid(Index_ID nid, Port_ID pid, uint32_t bits);
-  uint32_t get_bits_pid(Index_ID nid, Port_ID pid) const;
-  uint32_t get_bits_pid(Index_ID nid, Port_ID pid);
-#endif
-
   void add_edge(const Index_ID dst_idx, const Index_ID src_idx) {
     I(src_idx < node_internal.size());
     I(node_internal[src_idx].is_root());
