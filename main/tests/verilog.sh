@@ -83,6 +83,7 @@ do
     echo "FAIL: lgyosys parsing terminated with an error (testcase ${input})"
     ((fail++))
     fail_list+=" "$base
+    continue
   fi
   LC=$(grep -iv Warning tmp_yosys/${input}.err | grep -v perf_event | grep -v "recommended to use " | wc -l | cut -d" " -f1)
   if [[ $LC -gt 0 ]]; then
@@ -165,5 +166,4 @@ else
   echo "FAIL: ${pass} tests passed but ${fail} failed verification: ${fail_list}"
   exit 1
 fi
-
 

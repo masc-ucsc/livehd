@@ -141,6 +141,7 @@ public:
   bool     is_explicit_sign() const { return explicit_sign; }
   bool     is_explicit_bits() const { return explicit_bits; }
   bool     is_string() const { return explicit_str; }
+
   Bits_t get_bits() const { return bits; }
 
   bool is_i() const { return !explicit_str && bits <= 62; } // 62 to handle sign (int)

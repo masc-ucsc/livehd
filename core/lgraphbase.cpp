@@ -395,23 +395,6 @@ Index_ID LGraph_Base::setup_idx_from_pid(const Index_ID nid, const Port_ID pid) 
   return root_idx;
 }
 
-void LGraph_Base::set_bits_pid(const Index_ID nid, const Port_ID pid, uint32_t bits) {
-  Index_ID idx = setup_idx_from_pid(nid, pid);
-  set_bits(idx, bits);
-}
-
-uint32_t LGraph_Base::get_bits_pid(const Index_ID nid, const Port_ID pid) const {
-  I(node_internal.size() > nid);
-  I(node_internal[nid].is_master_root());
-  Index_ID idx = find_idx_from_pid(nid, pid);
-  return get_bits(idx);
-}
-
-uint32_t LGraph_Base::get_bits_pid(const Index_ID nid, const Port_ID pid) {
-  Index_ID idx = setup_idx_from_pid(nid, pid);
-  return get_bits(idx);
-}
-
 Index_ID LGraph_Base::get_space_output_pin(const Index_ID start_nid, const Port_ID dst_pid, Index_ID &root_idx) {
   I(node_internal[start_nid].is_root());
   I(node_internal[start_nid].is_node_state());

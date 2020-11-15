@@ -329,6 +329,9 @@ Node_pin Node_pin::find_driver_pin(LGraph *top, std::string_view wname) {
 }
 
 std::string_view Node_pin::get_pin_name() const {
+  if (is_graph_io())
+    return get_name();
+
   auto nid = current_g->get_node_nid(idx);
   auto op = current_g->get_type_op(nid);
   if (op == Ntype_op::Sub)

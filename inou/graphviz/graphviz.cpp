@@ -10,8 +10,9 @@
 Graphviz::Graphviz(bool _bits, bool _verbose, std::string_view _odir): bits(_bits), verbose(_verbose), odir(_odir) {}
 
 void Graphviz::populate_lg_handle_xedge(const Node &node, const XEdge &out, std::string &data) {
-  auto dp_pid  = out.driver.get_pid();
-  auto sp_pid  = out.sink.get_pid();
+  auto dp_pid  = out.driver.get_pin_name();
+  auto sp_pid  = out.sink.get_pin_name();
+
   auto dn_name = graphviz_legalize_name(out.driver.get_node().debug_name());
   if (out.driver.is_graph_io()) {
     dn_name = graphviz_legalize_name(out.driver.get_name());
