@@ -844,14 +844,14 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
 
         if (unsigned_wire.contains(lhs)) {
           if (b_dpin.get_node().is_type_const()) { // common optimization
-            auto amount = RTLIL::Const(b_dpin.get_node().get_type_const().to_i());
+            auto amount = RTLIL::Const::from_string(b_dpin.get_node().get_type_const().to_yosys());
             module->addShr(next_id(g), lhs, amount, dpin, false);
           }else{
             module->addShr(next_id(g), lhs, rhs, dpin, false);
           }
         }else{
           if (b_dpin.get_node().is_type_const()) { // common optimization
-            auto amount = RTLIL::Const(b_dpin.get_node().get_type_const().to_i());
+            auto amount = RTLIL::Const::from_string(b_dpin.get_node().get_type_const().to_yosys());
             module->addSshr(next_id(g), lhs, amount, dpin, true);
           }else{
             module->addSshr(next_id(g), lhs, rhs, dpin, true);
@@ -867,7 +867,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         auto *rhs  = get_wire(b_dpin);
 
         if (b_dpin.get_node().is_type_const()) { // common optimization
-          auto amount = RTLIL::Const(b_dpin.get_node().get_type_const().to_i());
+          auto amount = RTLIL::Const::from_string(b_dpin.get_node().get_type_const().to_yosys());
           module->addSshl(next_id(g), lhs, amount, cell_output_map[node.get_driver_pin().get_compact()], true);
         }else{
           module->addSshl(next_id(g), lhs, rhs, cell_output_map[node.get_driver_pin().get_compact()], true);

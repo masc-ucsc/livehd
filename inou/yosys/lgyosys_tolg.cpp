@@ -242,7 +242,7 @@ static Node_pin create_pick_operator(LGraph *g, const RTLIL::Wire *wire, int off
 
 static void append_to_or_node(LGraph *g, const Node &or_node, const Node_pin &dpin, int or_offset) {
 
-  if (dpin.get_node().is_type_const()) {
+  if (or_node.has_inputs() && dpin.get_node().is_type_const()) {
     auto val = dpin.get_node().get_type_const();
     if (val==0)
       return;
