@@ -77,12 +77,16 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
     }
     fmt::print("Started recursion\n");
     handle(expr.right());
+    
+    
+      
     fmt::print("Finished recursion\n");
 
     //check verilog list
     fmt::print("printing operator recursion\n");
     for (auto it = verilogList.begin(); it != verilogList.end(); ++it)
           std::cout << " " << *it;
+    std::cout<<'\n';
     fmt::print("printing operand recursion\n");
     for (auto it = operandList.begin(); it != operandList.end(); ++it)
           std::cout << " " << *it;
@@ -95,12 +99,14 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
     return;
 }
 void Lnast_visitor::handle(const slang::Expression& expr){
-  if (numErrors > errorLimit)
-    return;
-  fmt::print("recurse!\n");
-  const auto rhs=expr;
+  // if (numErrors > errorLimit)
+  //   return;
+  // if (expr==NULL){
+  //   return;
+  // }
+  //fmt::print("recurse!\n");
   if (expr.kind==ExpressionKind::UnaryOp){
-    fmt::print("unary\n");
+    //fmt::print("unary\n");
     const auto &op1 = expr.as<UnaryExpression>();
     //const auto check=getBinaryExpression(temp.kind);
     fmt::print("UnaryOperator: {} {} \n",expr.kind,op1.op);
@@ -121,7 +127,6 @@ void Lnast_visitor::handle(const slang::Expression& expr){
           verilogList.emplace_back("NOT");
           //idx = lnast->add_child(idx_stmts, Lnast_node::create_not("BitNot"));
           fmt::print("UnaryOperator: ~ \n");
-          fmt::print("my list says {}\n", verilogList.back());
           break;
         }
       case (UnaryOperator::BitwiseAnd):
@@ -154,19 +159,22 @@ void Lnast_visitor::handle(const slang::Expression& expr){
       // case UnaryOperator::Postdecrement:
     }
     //add flags to trigger the operators
+    const auto &opswitch=op1.operand();
+    if(opswitch.kind==ExpressionKind::NamedValue){
+      const auto &op2 = opswitch.as<NamedValueExpression>();
+      fmt::print("RHS named value: {} \n",op2.symbol.name);
+      //auto idx_op   = lnast->add_child(idx, Lnast_node::create_ref(op2.symbol.name)); 
+      //char operand=op2.symbol.name;
+      
+      operandList.emplace_back(op2.symbol.name);
+      
+      // auto node_op   = Lnast_node::create_ref (operand);
+      // auto idx_op    = lnast->add_child(idx, node_op); //segfaulting
+    }
+
   }
     //auto idx    = lnast->add_child(idx_stmts, Lnast_node::create_xor  ("XOR")); 
-  if(expr.kind==ExpressionKind::NamedValue){
-    const auto &op2 = expr.as<NamedValueExpression>();
-    fmt::print("RHS named value: {} \n",op2.symbol.name);
-    //auto idx_op   = lnast->add_child(idx, Lnast_node::create_ref(op2.symbol.name)); 
-    //char operand=op2.symbol.name;
-    
-    operandList.emplace_back(op2.symbol.name);
-    
-    // auto node_op   = Lnast_node::create_ref (operand);
-    // auto idx_op    = lnast->add_child(idx, node_op); //segfaulting
-  }
+
 
   else if (expr.kind==ExpressionKind::BinaryOp){
     const auto &op1 = expr.as<BinaryExpression>();
@@ -218,14 +226,13 @@ void Lnast_visitor::handle(const slang::Expression& expr){
       case BinaryOperator::BinaryOr: 
         verilogList.emplace_back("OR");
         //idx = lnast->add_child(idx_stmts, Lnast_node::create_or ("OR"));
-        fmt::print("my list says {}\n", verilogList.back());
+        //fmt::print("my list says {}\n", verilogList.back());
         break;
       case BinaryOperator::BinaryXor:
       {
         verilogList.emplace_back("XOR");
         //idx = lnast->add_child(idx_stmts, Lnast_node::create_xor ("XOR"));
         fmt::print(" ^ \n");
-        fmt::print("my list says {}\n", verilogList.back());
         break;
       }
       case BinaryOperator::BinaryXnor: 
@@ -277,10 +284,23 @@ void Lnast_visitor::handle(const slang::Expression& expr){
       operandList.emplace_back(rhs_2.symbol.name);
       fmt::print(" {} \n",rhs_2.symbol.name);
     }
-    
+    const auto &recurse=expr.as<BinaryExpression>();
+    // const auto &lhs=recurse.left().as<BinaryExpression>();
+    // const auto &rhs=recurse.right().as<BinaryExpression>();
+    const auto &lhs=recurse.left();
+    const auto &rhs=recurse.right();
+    //fmt::print(" {} \n",recurse.left().kind);
+    // fmt::print("handle recursively the rhs (binaryOp,unaryop,...)\n");
+    if(lhs.kind==ExpressionKind::BinaryOp || lhs.kind==ExpressionKind::UnaryOp){
+        handle(recurse.left());
+    }
+    if(rhs.kind==ExpressionKind::BinaryOp || rhs.kind==ExpressionKind::UnaryOp){
+        handle(recurse.right());
+    }
   }
-  fmt::print("handle recursively the rhs (binaryOp,unaryop,...)\n");
-  //handle(expr.left)
+
+  
+  
 }
 void Lnast_visitor::handle(const slang::ExpressionStatement& expr) {
   if (numErrors > errorLimit)
