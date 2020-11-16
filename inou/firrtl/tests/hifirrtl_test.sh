@@ -1,7 +1,8 @@
 #!/bin/bash
 rm -rf ./lgdb
 
-pts='BundleCombiner'
+# pts='BundleCombiner'
+pts='GCD'
 
 #SimpleBitOps Ops -- parity and mod op not in lnast_tolg
 
