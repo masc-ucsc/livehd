@@ -38,7 +38,7 @@ void Lcompiler::add_thread(std::shared_ptr<Lnast> ln) {
 
 
   for (const auto &lg : local_lgs) {
-    retry:
+    /* retry: */
     Cprop    cp(false, false);  // hier = false, gioc = false
     Bitwidth bw(false, 10);     // hier = false, max_iters = 10
 
@@ -92,6 +92,7 @@ void Lcompiler::global_io_connection() {
   Gioc     gioc(path);
 
   for (auto &lg : lgs) {
+    fmt::print("LGraph name:{}\n", lg->get_name());
     fmt::print("------------------------ Global IO Connection ----------------------- (8)\n");
     gioc.do_trans(lg);
     if (gviz) 
