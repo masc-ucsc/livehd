@@ -44,6 +44,6 @@ maccmap -unmap
 {{/techmap_alumacc}}
 
 write_ilang pp.il
-#write_verilog pp.v
+write_verilog pp.v
 yosys2lg -path {{path}}
 

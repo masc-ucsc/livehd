@@ -14,6 +14,7 @@ pts='hier_tuple_io tuple_copy2 firrtl_tail2 firrtl_tail3 reg__q_pin hier_tuple2 
 pts_hier1='top sum top'
 pts_hier2='top top sum'
 
+#pts="top sum"
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck

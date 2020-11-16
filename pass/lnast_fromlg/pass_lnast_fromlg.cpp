@@ -1005,7 +1005,7 @@ void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_nod
   lnast.add_child(args_idx, Lnast_node::create_ref(inp_tup_name));
   //attach_child(lnast, args_idx, const Node_pin &dpin)
   for (const auto inp : pin.get_node().inp_edges()) {
-    auto port_name = inp.sink.get_type_sub_io_name();
+    auto port_name = inp.sink.get_type_sub_pin_name();
     auto idx_asg = lnast.add_child(args_idx, Lnast_node::create_assign("sb_arg_set"));
     lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(port_name)));
     attach_child(lnast, idx_asg, inp.driver);
@@ -1019,7 +1019,7 @@ void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_nod
 
   // Create output
   for (const auto dpin : pin.get_node().out_connected_pins()) {
-    auto port_name = dpin.get_type_sub_io_name();
+    auto port_name = dpin.get_type_sub_pin_name();
     auto idx_dotasg = lnast.add_child(parent_node, Lnast_node::create_dot("sb_out_set"));
     attach_child(lnast, idx_dotasg, dpin);
     lnast.add_child(idx_dotasg, Lnast_node::create_ref(out_tup_name));

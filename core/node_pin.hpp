@@ -337,7 +337,7 @@ public:
   std::string_view get_name() const;
   bool             has_name() const;
   static Node_pin  find_driver_pin(LGraph *top, std::string_view wname);
-  std::string_view get_pin_name() const;
+  std::string      get_pin_name() const;
 
   void             set_prp_vname(std::string_view prp_vname);
   std::string_view get_prp_vname() const;
@@ -352,8 +352,7 @@ public:
   Bits_t   get_bits() const;
   void     set_bits(Bits_t bits);
 
-  std::string_view get_type_sub_io_name() const;
-  std::string_view get_type_sub_pin_name() const;
+  std::string get_type_sub_pin_name() const;
 
   void   set_offset(Bits_t offset);
   Bits_t get_offset() const;
