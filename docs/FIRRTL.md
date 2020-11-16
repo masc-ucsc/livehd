@@ -10,7 +10,7 @@ sbt 'test:runMain gcd.GCDMain'
 
 If you instead want Chirrtl and Verilog, do:
 ```
-sbt 'test:runMain gcd.GCDMain --backend_name verilator'
+sbt 'test:runMain gcd.GCDMain --backend-name verilator'
 ```
 
 After running these commands, any recent runs can be found in the `test_run_dir` directory.

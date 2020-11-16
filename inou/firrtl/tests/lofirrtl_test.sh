@@ -4,21 +4,21 @@ rm -rf ./lgdb
 
 pts='Trivial TrivialArith TrivialAdd NotAnd
      Test1 Test2
-     BundleCombiner MemoryController Tail
-     RegisterSimple Register RegXor Decrementer
-     GCD Flop Rob MemoryController ICache HwachaSequencer'
-#pts='GCD Flop regex'
-# pts='BundleCombiner'
+     BundleCombiner Flop MemoryController Tail
+     RegisterSimple Register
+     GCD Rob MemoryController ICache HwachaSequencer'
+#pts='RegXor Decrementer GCD regex'
 
+# pts='GCD'
 pts_hier='FinalVal2Test'
 pts_hier2='FinalValTest'
 pts_hier3='SubModule'
 pts_hier4='BundleConnect'
 
+pts_hier ='FPU'
 pts_hier9='RocketCore'
 
 #SimpleBitOps Ops -- parity and mod op not in lnast_tolg
-#Flop -- seems to break when I do HandleMuxAssign pre assign, but works without
 
 #HwachaSequencer -- printf, pad, stop
 
@@ -45,23 +45,147 @@ lofirrtl_test() {
     rm -f ${pt}.dot
     rm -f lgdb/*
 
+
+    echo "----------------------------------------------------"
+    echo "LoFIRRTL-> RAW LNAST"
+    echo "----------------------------------------------------"
+  
+    ${LGSHELL} "inou.firrtl.tolnast files:inou/firrtl/tests/proto/${pt}.lo.pb |> inou.graphviz.from"
+  
+    if [ -f ${pt}.lnast.dot ]; then
+      echo "Successfully create raw lnast from inou/firrtl/tests/proto/${pt}.lo.pb"
+    else
+      echo "ERROR: Pyrope compiler failed: raw LNAST generation, testcase: ${pt}.lo.pb"
+      exit 1
+    fi
+
+    mv ${pt}.lnast.dot ${pt}.lnast.raw.dot
+
+
+    echo "----------------------------------------------------"
+    echo "LoFIRRTL-> SSAed LNAST"
+    echo "----------------------------------------------------"
+  
+    ${LGSHELL} "inou.firrtl.tolnast files:inou/firrtl/tests/proto/${pt}.lo.pb |> pass.lnast_tolg.dbg_lnast_ssa |> inou.graphviz.from"
+  
+    if [ -f ${pt}.lnast.dot ]; then
+      echo "Successfully create ssaed lnast from inou/firrtl/tests/proto/${pt}.lo.pb"
+    else
+      echo "ERROR: Pyrope compiler failed: ssaed LNAST generation, testcase: ${pt}.lo.pb"
+      exit 1
+    fi
+
+
     echo ""
     echo "===================================================="
     echo "Verify LoFIRRTL -> LNAST"
     echo "===================================================="
 
     echo "----------------------------------------------------"
-    echo "LoFIRRTL -> LNAST -> Optimized LGraph"
+    echo "LoFIRRTL -> LNAST -> LGraph"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "inou.firrtl.tolnast files:inou/firrtl/tests/proto/${pt}.lo.pb |> lnast.dump |> pass.lnast_tolg |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.bitwidth"
+    ${LGSHELL} "inou.firrtl.tolnast files:inou/firrtl/tests/proto/${pt}.lo.pb |> pass.lnast_tolg"
     if [ $? -eq 0 ]; then
       echo "Successfully translated FIRRTL to LNAST to LGraph: ${pt}.lo.pb"
     else
       echo "ERROR: FIRRTL -> LNAST -> LGraph failed... testcase: ${pt}.lo.pb"
       exit 1
     fi
-    ${LGSHELL} "lgraph.match |> inou.graphviz.from"
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+    mv ${pt}.dot ${pt}.local.raw.dot
+
+
+    echo ""
+    echo ""
+    echo ""
+    echo "----------------------------------------------------"
+    echo "Copy-Propagation And Tuple Chain Resolve"
+    echo "----------------------------------------------------"
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop |> pass.cprop |> pass.cprop |> pass.cprop"
+    if [ $? -eq 0 ]; then
+      echo "Successfully perform copy propagation: ${pt}.lo.pb"
+    else
+      echo "ERROR: perform copy propagation failed... testcase: ${pt}.lo.pb"
+      exit 1
+    fi
+
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+    mv ${pt}.dot ${pt}.local.no_bits.dot
+
+
+    echo ""
+    echo ""
+    echo ""
+    echo "----------------------------------------------------"
+    echo "Local Bitwidth Optimization"
+    echo "----------------------------------------------------"
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.cprop"
+    if [ $? -eq 0 ]; then
+      echo "Successfully perform bitwidth propagation: ${pt}.lo.pb"
+    else
+      echo "ERROR: perform bitwidth propagation failed... testcase: ${pt}.lo.pb"
+      exit 1
+    fi
+
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+    mv ${pt}.dot ${pt}.local.dot
+
+
+
+    echo ""
+    echo ""
+    echo ""
+    echo "----------------------------------------------------"
+    echo "Global IO Connection "
+    echo "----------------------------------------------------"
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.cprop"
+    if [ $? -eq 0 ]; then
+      echo "Successfully perform bitwidth propagation: ${pt}.lo.pb"
+    else
+      echo "ERROR: perform bitwidth propagation failed... testcase: ${pt}.lo.pb"
+      exit 1
+    fi
+
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+    mv ${pt}.dot ${pt}.gioc.raw.dot
+
+
+    echo ""
+    echo ""
+    echo ""
+    echo "----------------------------------------------------"
+    echo "Copy-Propagation (GIOC)"
+    echo "----------------------------------------------------"
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop"
+    if [ $? -eq 0 ]; then
+      echo "Successfully perform copy propagation: ${pt}.lo.pb"
+    else
+      echo "ERROR: perform copy propagation failed... testcase: ${pt}.lo.pb"
+      exit 1
+    fi
+
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+    mv ${pt}.dot ${pt}.gioc.no_bits.dot
+
+
+    echo ""
+    echo ""
+    echo ""
+    echo "----------------------------------------------------"
+    echo "Bitwidth Optimization (GIOC)"
+    echo "----------------------------------------------------"
+    ${LGSHELL} "lgraph.open name:${pt} |> pass.bitwidth"
+    if [ $? -eq 0 ]; then
+      echo "Successfully perform bitwidth propagation: ${pt}.lo.pb"
+    else
+      echo "ERROR: perform bitwidth propagation failed... testcase: ${pt}.lo.pb"
+      exit 1
+    fi
+
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.graphviz.from verbose:false"
+
+
 
     echo ""
     echo "----------------------------------------------------"
@@ -103,10 +227,10 @@ lofirrtl_test() {
       exit 1
     fi
 
-    rm -f *.v
-    rm -f *.dot
-    rm -f lgdb/*
-    rm -f yosys.*
+    # rm -f *.v
+    # rm -f *.dot
+    # rm -f lgdb/*
+    # rm -f yosys.*
   done
 }
 
