@@ -158,16 +158,12 @@ void Node_pin::set_bits(uint32_t bits) {
   current_g->set_bits(get_root_idx(), bits);
 }
 
-std::string_view Node_pin::get_type_sub_io_name() const {
+std::string Node_pin::get_type_sub_pin_name() const {
   auto &sub_node = get_node().get_type_sub_node();
-  return sub_node.get_name_from_instance_pid(pid);
-}
+  if (sub_node.has_instance_pin(pid))
+    return std::string(sub_node.get_name_from_instance_pid(pid));
 
-std::string_view Node_pin::get_type_sub_pin_name() const {
-  auto node = get_node();
-  I(node.is_type_sub());
-
-  return node.get_type_sub_node().get_name_from_instance_pid(pid);
+  return std::to_string(pid);
 }
 
 float Node_pin::get_delay() const { return Ann_node_pin_delay::ref(top_g)->get(get_compact_driver()); }
@@ -328,18 +324,23 @@ Node_pin Node_pin::find_driver_pin(LGraph *top, std::string_view wname) {
   return Node_pin(top, ref->get_key(it));
 }
 
-std::string_view Node_pin::get_pin_name() const {
-  if (is_graph_io())
-    return get_name();
+std::string Node_pin::get_pin_name() const {
+  if (is_graph_io()) {
+		auto &sub_node = current_g->get_self_sub_node();
+		if (sub_node.has_instance_pin(pid))
+			return std::string(sub_node.get_name_from_instance_pid(pid));
+
+		return std::to_string(pid);
+	}
 
   auto nid = current_g->get_node_nid(idx);
   auto op = current_g->get_type_op(nid);
   if (op == Ntype_op::Sub)
-    return get_type_sub_io_name();
+    return get_type_sub_pin_name();
   if (is_driver())
-    return Ntype::get_driver_name(op, pid);
+    return std::string(Ntype::get_driver_name(op, pid));
 
-  return Ntype::get_sink_name(op, pid);
+  return std::string(Ntype::get_sink_name(op, pid));
 }
 
 void Node_pin::set_offset(Bits_t offset) {

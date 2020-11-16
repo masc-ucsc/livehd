@@ -1570,6 +1570,22 @@ static void process_cells(RTLIL::Module *module, LGraph *g) {
           if (!v.is_fully_zero())
             exit_node.setup_sink_pin("initial").connect_driver(get_dpin(g, cell, ID::SRST_VALUE));
         }
+      }else if (cell->hasPort(ID::ARST)) {
+        if (cell->hasParam(ID::ARST_POLARITY)) {
+          if (cell->getParam(ID::ARST_POLARITY).as_bool()) {
+            exit_node.setup_sink_pin("negreset").connect_driver(g->create_node_const(0));
+          }else{
+            exit_node.setup_sink_pin("negreset").connect_driver(g->create_node_const(1));
+          }
+        }
+
+        exit_node.setup_sink_pin("reset").connect_driver(get_dpin(g, cell, ID::ARST));
+
+        if (cell->hasParam(ID::ARST_VALUE)) {
+          const auto &v = cell->getParam(ID::ARST_VALUE);
+          if (!v.is_fully_zero())
+            exit_node.setup_sink_pin("initial").connect_driver(get_dpin(g, cell, ID::ARST_VALUE));
+        }
       }
 
       I(!cell->hasParam(ID::SET)); // FIXME: active low not supported in LG (add mux before sflop)
