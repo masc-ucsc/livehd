@@ -476,10 +476,7 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr) {
     I(dpin_val.get_node().is_type_const());
     auto val = dpin_val.get_node().get_type_const();
     if (bw.get_bits() && bw.get_bits() > val.to_i()) {
-      Pass::error("bitwidth missmatch. Variable {} needs {}bits, but constrained to {}bits\n",
-                  dpin_name,
-                  bw.get_bits(),
-                  val.to_i());
+      Pass::error("bitwidth missmatch. Variable {} needs {}bits, but constrained to {}bits\n", dpin_name, bw.get_bits(), val.to_i());
     } else {
       if (bw.is_always_positive()) {
         bw.set_ubits(val.to_i());
@@ -506,7 +503,6 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr) {
     through_dpin.set_bits(bw.get_bits());
     bwmap.emplace(through_dpin.get_compact(), bw);
   }
-
   // dpin_val.dump_all_prp_vname();
 }
 
@@ -541,20 +537,11 @@ void Bitwidth::process_attr_set_propagate(Node &node_attr) {
 
   if (parent_attr_bw.get_bits() && data_bw.get_bits()) {
     if (parent_attr_bw.get_bits() < data_bw.get_bits()) {
-      Pass::error("bitwidth missmatch. Variable {} needs {}bits, but constrained to {}bits\n",
-                  dpin_name,
-                  data_bw.get_bits(),
-                  parent_attr_bw.get_bits());
+      Pass::error("bitwidth missmatch. Variable {} needs {}bits, but constrained to {}bits\n", dpin_name, data_bw.get_bits(), parent_attr_bw.get_bits());
     } else if (parent_attr_bw.get_max() < data_bw.get_max()) {
-      Pass::error("bitwidth missmatch. Variable {} needs {}max, but constrained to {}max\n",
-                  dpin_name,
-                  data_bw.get_max().to_pyrope(),
-                  parent_attr_bw.get_max().to_pyrope());
+      Pass::error("bitwidth missmatch. Variable {} needs {}max, but constrained to {}max\n", dpin_name, data_bw.get_max().to_pyrope(), parent_attr_bw.get_max().to_pyrope());
     } else if (parent_attr_bw.get_min() > data_bw.get_min()) {
-      Pass::error("bitwidth missmatch. Variable {} needs {}min, but constrained to {}min\n",
-                  dpin_name,
-                  data_bw.get_min().to_pyrope(),
-                  parent_attr_bw.get_min().to_pyrope());
+      Pass::error("bitwidth missmatch. Variable {} needs {}min, but constrained to {}min\n", dpin_name, data_bw.get_min().to_pyrope(), parent_attr_bw.get_min().to_pyrope());
     }
   }
 
@@ -567,7 +554,6 @@ void Bitwidth::process_attr_set_propagate(Node &node_attr) {
     data_dpin.set_bits(parent_attr_bw.get_bits());
     bwmap.emplace(data_dpin.get_compact(), parent_attr_bw);
   }
-
 }
 
 void Bitwidth::process_attr_set(Node &node) {
@@ -642,11 +628,8 @@ void Bitwidth::bw_pass(LGraph *lg) {
     auto inp_edges = node.inp_edges();
     auto op        = node.get_type_op();
 
-    //fmt::print("bitwidth node:{} lg:{}\n", node.debug_name(), node.get_class_lgraph()->get_name());
-
     if (inp_edges.empty() && (op != Ntype_op::Const && op != Ntype_op::Sub && op != Ntype_op::LUT && op != Ntype_op::TupKey)) {
       fmt::print("pass.bitwidth: removing dangling node:{}\n", node.debug_name());
-      fmt::print("node:{}\n", node.debug_name());
       if (!hier) // FIXME: once hier del works
         node.del_node();
       continue;
