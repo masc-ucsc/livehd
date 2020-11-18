@@ -71,10 +71,16 @@ void Bitwidth::process_not(Node &node, XEdge_iterator &inp_edges) {
       if (min_val == 0 || min_val > it3->second.get_min())
         min_val = it3->second.get_min();
     } else if (e.driver.get_bits()) {
-      Lconst b(1);
-      b = b.lsh_op(e.driver.get_bits());
-      if (b > max_val)
-        max_val = b;
+
+      auto max_driver_sval =   pow(2, e.driver.get_bits() - 1) - 1 ;
+
+      if (Lconst(max_driver_sval) > max_val)
+        max_val = Lconst(max_driver_sval);
+
+      /* Lconst b(1); */
+      /* b = b.lsh_op(e.driver.get_bits()); */
+      /* if (b > max_val) */
+      /*   max_val = b; */
 
       min_val = Lconst(0) - max_val;
     } else {
@@ -107,6 +113,20 @@ void Bitwidth::process_mux(Node &node, XEdge_iterator &inp_edges) {
       if (min_val == 0 || min_val > it->second.get_min())
         min_val = it->second.get_min();
     } else if (e.driver.get_bits()) {
+
+      /* auto max_driver_sval =   pow(2, e.driver.get_bits() - 1) - 1 ; */
+      /* auto min_driver_sval = - pow(2, e.driver.get_bits() - 1); */
+
+      /* if (Lconst(max_driver_sval) > max_val) { */
+      /*   max_val = Lconst(max_driver_sval); */
+      /* } */
+
+      /* if (Lconst(min_driver_sval) < min_val) { */
+      /*   min_val = Lconst(min_driver_sval); */
+      /* } */
+
+
+      //FIXME->sh: ????????
       Lconst b(1);
       b = b.lsh_op(e.driver.get_bits()) - 1; // TODO: sign handling
       if (b > max_val)
@@ -127,6 +147,7 @@ void Bitwidth::process_mux(Node &node, XEdge_iterator &inp_edges) {
   node.get_sink_pin("0").get_driver_pin().set_bits(n_options.get_bits());
 
   Bitwidth_range bw(min_val, max_val);
+  bw.dump();
   bwmap.emplace(node.get_driver_pin().get_compact(), bw);
   node.get_driver_pin().set_bits(bw.get_bits());
 }
@@ -194,11 +215,20 @@ void Bitwidth::process_sum(Node &node, XEdge_iterator &inp_edges) {
         max_val = max_val - it->second.get_min();
         min_val = min_val - it->second.get_max();
       }
-    /* } else if (e.driver.get_bits()) { */
-    /*   Lconst b(1); */
-    /*   b = b.lsh_op(e.driver.get_bits()) - 1; */
-    /*   max_val = max_val + b; */
-    /*   min_val = min_val + b; */
+    } else if (e.driver.get_bits()) {
+      /* Lconst b(1); */
+      /* b = b.lsh_op(e.driver.get_bits()) - 1; */
+      /* max_val = max_val + b; */
+      /* min_val = min_val + b; */
+      auto max_driver_sval =   pow(2, e.driver.get_bits() - 1) - 1 ;
+      auto min_driver_sval = - pow(2, e.driver.get_bits() - 1);
+      if (e.sink.get_pin_name() == "A") {
+        max_val = max_val + Lconst(max_driver_sval);
+        min_val = min_val + Lconst(min_driver_sval);
+      } else {
+        max_val = max_val - Lconst(min_driver_sval);
+        min_val = min_val - Lconst(max_driver_sval);
+      }
     } else {
       if (e.driver.has_name())
         fmt::print("pass.bitwidth sum:{} has input pin:{} unconstrained\n", node.debug_name(), e.driver.get_name());
@@ -629,8 +659,6 @@ void Bitwidth::bw_pass(LGraph *lg) {
     auto inp_edges = node.inp_edges();
     auto op        = node.get_type_op();
 
-    //fmt::print("bitwidth node:{} lg:{}\n", node.debug_name(), node.get_class_lgraph()->get_name());
-
     if (inp_edges.empty() && (op != Ntype_op::Const && op != Ntype_op::Sub && op != Ntype_op::LUT && op != Ntype_op::TupKey)) {
       fmt::print("pass.bitwidth: removing dangling node:{}\n", node.debug_name());
       if (!hier) // FIXME: once hier del works
@@ -698,7 +726,8 @@ void Bitwidth::bw_pass(LGraph *lg) {
       dpin.set_bits(bw_bits);
     }
 
-    garbage_collect_support_structures(inp_edges);
+    if (!hier)
+      garbage_collect_support_structures(inp_edges);
   }
 
   for(auto dpin:lg->get_graph_output_node(hier).out_setup_pins()) {

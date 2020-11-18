@@ -50,6 +50,7 @@ void Lcompiler::add_thread(std::shared_ptr<Lnast> ln) {
 
     fmt::print("------------------------ Bitwidth-Inference ------------------------- (4)\n");
     bw.do_trans(lg);
+    fmt::print("------------------------ Bitwidth-Inference ------------------------- (4-1)\n");
     bw.do_trans(lg);
 
     fmt::print("------------------------ Copy-Propagation --------------------------- (5)\n");
