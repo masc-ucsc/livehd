@@ -150,4 +150,4 @@ Bits_t Bitwidth_range::get_bits() const {
   return bits;
 }
 
-void Bitwidth_range::dump() const { fmt::print("max:{} min:{} {}", max, min, overflow ? "overflow" : ""); }
+void Bitwidth_range::dump() const { fmt::print("max:{} min:{} {}\n", max, min, overflow ? "overflow" : ""); }
