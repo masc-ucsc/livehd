@@ -1282,7 +1282,7 @@ static void process_cells(RTLIL::Module *module, LGraph *g) {
 
         and_node.connect_sink(not_ror_node);
 
-        auto a_dpin = get_dpin(g, cell, ID::A);
+        auto a_dpin = get_unsigned_dpin(g, cell, ID::A);
         auto a_bits = cell->getParam(ID::A_WIDTH).as_int();
 
         if (a_bits>1) {

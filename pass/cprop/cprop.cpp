@@ -268,6 +268,9 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
     TRACE(fmt::print("cprop: shl to {} ({}<<{})\n", result.to_pyrope(), val.to_pyrope(), amt.to_pyrope()));
 
     replace_node(node, result);
+  } else if (op == Ntype_op::Tposs) {
+    Lconst val = node.get_sink_pin("a").get_driver_node().get_type_const();
+    replace_node(node, val.tposs_op());
   } else if (op == Ntype_op::Sum) {
     Lconst result;
     for (auto &i : inp_edges_ordered) {
