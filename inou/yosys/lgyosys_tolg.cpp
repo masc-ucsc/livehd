@@ -173,10 +173,14 @@ static Node_pin create_pick_operator(const Node_pin &wide_dpin, int offset, int 
 
   and_node.connect_sink(lg->create_node_const(((Lconst(1)<<Lconst(width))-1)));
 
+#if 0
   auto tposs_node = lg->create_node(Ntype_op::Tposs, and_node.get_driver_pin().get_bits()+1);
   tposs_node.connect_sink(and_node);
 
   auto dpin = tposs_node.setup_driver_pin();
+#else
+  auto dpin = and_node.setup_driver_pin();
+#endif
 
   picks.insert(std::make_pair(pick_id, dpin));
 
@@ -1703,8 +1707,7 @@ static void process_cells(RTLIL::Module *module, LGraph *g) {
       if (std::strncmp(cell->type.c_str(), "$sub", 4) == 0)
         b = "B";
 
-
-      if ((a_sign && b_sign) || (a_bits==b_bits && a_bits==y_bits)) {
+      if (a_sign && b_sign) {
         auto a_dpin = get_dpin(g, cell, ID::A);
         auto b_dpin = get_dpin(g, cell, ID::B);
 
@@ -1790,10 +1793,19 @@ static void process_cells(RTLIL::Module *module, LGraph *g) {
     //--------------------------------------------------------------
     } else if (std::strncmp(cell->type.c_str(), "$pos", 4) == 0) {
       auto y_bits = cell->getParam(ID::Y_WIDTH).as_int();
-      exit_node.set_type(Ntype_op::And, y_bits);
 
-      exit_node.connect_sink(g->create_node_const((Lconst(1)<<Lconst(y_bits))-1));
-      exit_node.connect_sink(get_dpin(g, cell, ID::A));
+      if (cell->getParam(ID::A_SIGNED).as_bool()) {
+        exit_node.set_type(Ntype_op::And, y_bits);
+        exit_node.connect_sink(g->create_node_const((Lconst(1)<<Lconst(y_bits))-1));
+        exit_node.connect_sink(get_dpin(g, cell, ID::A));
+      }else{
+        auto and_node = g->create_node(Ntype_op::And, y_bits);
+        and_node.connect_sink(g->create_node_const((Lconst(1)<<Lconst(y_bits))-1));
+        and_node.connect_sink(get_unsigned_dpin(g, cell, ID::A));
+
+        exit_node.set_type(Ntype_op::Tposs, y_bits+1);
+        exit_node.connect_sink(and_node);
+      }
 
     //--------------------------------------------------------------
     } else if (std::strncmp(cell->type.c_str(), "$shiftx", 6) == 0 && cell->getParam(ID::B_SIGNED).as_bool()) {

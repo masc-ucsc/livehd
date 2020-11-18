@@ -51,8 +51,8 @@ void Hierarchy_tree::regenerate_step(LGraph *lg, const Hierarchy_index &parent) 
 
     auto child_lgid = lg->get_type_sub(it.first.get_nid());
 
-#ifndef NDEBUG
     auto node = it.first.get_node(lg);
+#ifndef NDEBUG
     I(node.is_type_sub());
     I(child_lgid == node.get_type_sub());
 #endif
