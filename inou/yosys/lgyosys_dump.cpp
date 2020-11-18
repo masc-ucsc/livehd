@@ -184,7 +184,7 @@ void Lgyosys_dump::create_memory(LGraph *g, RTLIL::Module *module, Node &node) {
   auto latency_value = node.get_sink_pin("latency").get_driver_node().get_type_const().to_i();
 
   memory->setParam("\\SIZE" , mem_size);
-  memory->setParam("\\MEMID", RTLIL::Const(std::string(node.get_name())));
+  memory->setParam("\\MEMID", RTLIL::Const::from_string(std::string(node.get_name())));
   memory->setParam("\\WIDTH", data_bits);
 
   memory->setParam("\\OFFSET", RTLIL::Const(0)); // mem[addr-OFFSET]. Why????
@@ -356,6 +356,7 @@ void Lgyosys_dump::create_wires(LGraph *g, RTLIL::Module *module) {
       if (lc.get_bits()<31 && lc.is_i()) { // 32bit in yosys const
         module->connect(new_wire, RTLIL::SigSpec(RTLIL::Const(lc.to_i(), lc.get_bits())));
       } else {
+        fmt::print("add:{} prp:{}\n",lc.to_yosys(), lc.to_pyrope());
         module->connect(new_wire, RTLIL::SigSpec(RTLIL::Const::from_string(lc.to_yosys())));
       }
 
@@ -542,11 +543,13 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
 
         if (in_wire->width == out_wire->width) {
           module->connect(out_wire, in_wire);
-        }else{
-          assert(out_wire->width>in_wire->width);
+        }else if (out_wire->width>in_wire->width) {
           auto w2 = RTLIL::SigSpec(in_wire);
           w2.extend_u0(out_wire->width, false);  // unsigned extend
           module->connect(out_wire, w2);
+        }else{
+          Lconst mask = (Lconst(1)<<Lconst(out_wire->width))-1;
+          module->addAnd(next_id(g), in_wire, RTLIL::Const::from_string(mask.to_yosys()), out_wire);
         }
       }
       break;
@@ -698,7 +701,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         }else{ // reset wire
           RTLIL::Const initial_const(0, node.get_bits());
           if (!initial_dpin.is_invalid()) {
-            initial_const = RTLIL::Const(initial_dpin.get_node().get_type_const().to_yosys());
+            initial_const = RTLIL::Const::from_string(initial_dpin.get_node().get_type_const().to_yosys());
           }
 
           if (enable_wire == nullptr) {

@@ -71,9 +71,20 @@ void Cprop::collapse_forward_sum(Node &node, XEdge_iterator &inp_edges_ordered) 
     auto next_sum_node = out.sink.get_node();
     for (auto &inp : inp_edges_ordered) {
       TRACE(fmt::print("cprop same_op pin:{} to pin:{}\n", inp.driver.debug_name(), out.sink.debug_name()));
-      auto sink_name = Ntype::get_sink_name(Ntype_op::Sum, inp.sink.get_pid()); //use get_pin_name or pin_raw
-      auto next_sum_spin = next_sum_node.setup_sink_pin(sink_name);  // Connect same PID
-      next_sum_spin.connect_driver(inp.driver);
+      //auto sink_name = Ntype::get_sink_name(Ntype_op::Sum, inp.sink.get_pid()); //use get_pin_name or pin_raw
+      //auto next_sum_spin = next_sum_node.setup_sink_pin(sink_name);  // Connect same PID
+      //
+      // Sum(A,Sum(B,C))  = Sum(A+C,B)
+      // Sum(Sum(A,B),C)) = Sum(A+C,B)
+      if (inp.sink.get_pid() == 0 && out.sink.get_pid() == 0) { // Sum(A+Sum(B)) = Sum(A+B)
+        out.sink.connect_driver(inp.driver);
+      }else if (inp.sink.get_pid() == 0 && out.sink.get_pid() == 1) { // Sum(A+Sum(,B)) = Sum(A,B)
+        out.sink.connect_driver(inp.driver);
+      }else if (inp.sink.get_pid() == 1 && out.sink.get_pid() == 0) { // Sum(,A+Sum(B)) = Sum(,A+B)
+        next_sum_node.setup_sink_pin("B").connect_driver(inp.driver);
+      }else{ // Sum(,A+Sum(,B)) = Sum(B,A)
+        next_sum_node.setup_sink_pin("A").connect_driver(inp.driver);
+      }
     }
     TRACE(fmt::print("cprop same_op del_edge pin:{} to pin:{}\n", out.driver.debug_name(), out.sink.debug_name()));
     out.del_edge();
@@ -140,8 +151,13 @@ void Cprop::try_constant_prop(Node &node, XEdge_iterator &inp_edges_ordered) {
   int n_inputs          = 0;
   for (auto e : inp_edges_ordered) {
     n_inputs++;
-    if (e.driver.get_node().is_type_const())
-      n_inputs_constant++;
+    auto drv_node = e.driver.get_node();
+    if (!drv_node.is_type_const())
+      continue;
+    const auto &lc = drv_node.get_type_const();
+    if (lc.is_string())
+      continue;
+    n_inputs_constant++;
   }
 
   if (n_inputs == n_inputs_constant && n_inputs) {
@@ -156,10 +172,21 @@ void Cprop::try_collapse_forward(Node &node, XEdge_iterator &inp_edges_ordered) 
   auto op = node.get_type_op();
 
   if (inp_edges_ordered.size() == 1) {
+    auto prev_op = inp_edges_ordered[0].driver.get_node().get_type_op();
     if (op == Ntype_op::Sum || op == Ntype_op::Mult || op == Ntype_op::Div || op == Ntype_op::And || op == Ntype_op::Or
         || op == Ntype_op::Xor) {
       collapse_forward_always_pin0(node, inp_edges_ordered);
       return;
+    }
+    if (prev_op == Ntype_op::Tposs) {
+      if (op == Ntype_op::Tposs) {
+        collapse_forward_always_pin0(node, inp_edges_ordered);
+        return;
+      }else if (op == Ntype_op::Ror) {
+        auto prev_node = inp_edges_ordered[0].driver.get_node();
+        auto prev_inp_edges = prev_node.inp_edges();
+        collapse_forward_always_pin0(prev_node, prev_inp_edges);
+      }
     }
   }
 
