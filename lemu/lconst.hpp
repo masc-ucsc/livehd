@@ -124,6 +124,10 @@ public:
 
   void dump() const;
 
+  [[nodiscard]] static Lconst get_mask(Bits_t bits);
+  [[nodiscard]] Lconst get_mask() const;
+
+  [[nodiscard]] Lconst tposs_op() const;
   [[nodiscard]] Lconst add_op(const Lconst &o) const;
   [[nodiscard]] Lconst sub_op(const Lconst &o) const;
   [[nodiscard]] Lconst lsh_op(Bits_t amount) const;

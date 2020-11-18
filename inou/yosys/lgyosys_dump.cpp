@@ -356,7 +356,7 @@ void Lgyosys_dump::create_wires(LGraph *g, RTLIL::Module *module) {
       if (lc.get_bits()<31 && lc.is_i()) { // 32bit in yosys const
         module->connect(new_wire, RTLIL::SigSpec(RTLIL::Const(lc.to_i(), lc.get_bits())));
       } else {
-        fmt::print("add:{} prp:{}\n",lc.to_yosys(), lc.to_pyrope());
+        //fmt::print("add:{} prp:{}\n",lc.to_yosys(), lc.to_pyrope());
         module->connect(new_wire, RTLIL::SigSpec(RTLIL::Const::from_string(lc.to_yosys())));
       }
 

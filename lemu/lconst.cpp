@@ -352,6 +352,26 @@ Lconst Lconst::adjust(const Number &res_num, const Lconst &o) const {
   return Lconst(res_explicit_str, res_explicit_sign, res_explicit_bits, res_sign, calc_num_bits(res_num), res_num);
 }
 
+Lconst Lconst::get_mask(Bits_t bits) {
+  return Lconst((Number(1)<<bits)-1);
+}
+
+Lconst Lconst::get_mask() const {
+  return get_mask(get_bits());
+}
+
+Lconst Lconst::tposs_op() const {
+
+  Number res_num;
+  if (num<0) {
+    res_num = (Number(1)<<get_bits())+num;  // mask+num+1
+  }else{
+    res_num = num;
+  }
+
+  return Lconst(explicit_str, true, explicit_bits, false, calc_num_bits(res_num), res_num);
+}
+
 Lconst Lconst::add_op(const Lconst &o) const {
 
   if (explicit_str || o.explicit_str) {

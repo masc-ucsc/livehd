@@ -1,12 +1,12 @@
 #!/bin/bash
 
 pts_to_be_merged='io_gen io_gen2 io_gen3 test2'
-pts_tuple_dbg='lhs_wire3 funcall_unnamed2 
+pts_tuple_dbg='lhs_wire3 funcall_unnamed2
                firrtl_gcd counter_tup counter2'
-pts_unsigned_issue='firrtl_gcd'               
+pts_unsigned_issue='firrtl_gcd'
 
-pts='hier_tuple_io tuple_copy2 firrtl_tail2 firrtl_tail3 reg__q_pin hier_tuple2 nested_if 
-     if bits_rhs capricious_bits2 capricious_bits4 hier_tuple if2 adder_stage 
+pts='hier_tuple_io tuple_copy2 firrtl_tail2 firrtl_tail3 reg__q_pin hier_tuple2 nested_if
+     if bits_rhs capricious_bits2 capricious_bits4 hier_tuple if2 adder_stage
      logic reg_bits_set tuple_copy hier_tuple3 lhs_wire lhs_wire2 scalar_tuple
      firrtl_tail attr_set capricious_bits out_ssa ssa_rhs counter counter_nested_if tuple_if'
 # pts='firrtl_gcd'
@@ -115,12 +115,12 @@ Pyrope_compile_hier () {
         echo "ERROR: could not find ${pt}.prp in ${PATTERN_PATH}"
         exit 1
     fi
-    
+
     # the first item in pts_hier is just specifying the top_module name
-    if [ -z "${top_module}" ]; then 
+    if [ -z "${top_module}" ]; then
       top_module=${pt}
       continue
-    fi  
+    fi
 
     # check if pts_concat is empty or not and perform pattern concatenation, patterns have to be comma seperated
     if [ -z "${pts_concat}" ]; then
@@ -190,9 +190,9 @@ Pyrope_compile_hier () {
 rm -rf ./lgdb
 Pyrope_compile "$pts"
 rm -rf ./lgdb
-Pyrope_compile_hier "$pts_hier1"  
+Pyrope_compile_hier "$pts_hier1"
 rm -rf ./lgdb
-Pyrope_compile_hier "$pts_hier2"  
+Pyrope_compile_hier "$pts_hier2"
 
 
 rm -f *.dot
