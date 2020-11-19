@@ -40,7 +40,7 @@ void Lcompiler::add_thread(std::shared_ptr<Lnast> ln) {
   for (const auto &lg : local_lgs) {
     /* retry: */
     Cprop    cp(false, false);  // hier = false, gioc = false
-    Bitwidth bw(false, 10);     // hier = false, max_iters = 10
+    Bitwidth bw(false, 10, global_bwmap);     // hier = false, max_iters = 10
 
     fmt::print("------------------------ Copy-Propagation --------------------------- (3)\n");
     cp.do_trans(lg);
@@ -50,6 +50,7 @@ void Lcompiler::add_thread(std::shared_ptr<Lnast> ln) {
 
     fmt::print("------------------------ Bitwidth-Inference ------------------------- (4)\n");
     bw.do_trans(lg);
+    I(!global_bwmap.empty());
     fmt::print("------------------------ Bitwidth-Inference ------------------------- (4-1)\n");
     bw.do_trans(lg);
 
@@ -88,8 +89,8 @@ void Lcompiler::add(std::shared_ptr<Lnast> ln) {
 
 void Lcompiler::global_io_connection() {
   Graphviz gv(true, false, odir);
-  Cprop    cp(false, true); // hier = false, at_gioc = true 
-  Bitwidth bw(true, 10);    // hier = false, max_iters = 10
+  Cprop    cp(false, true);               // hier = false, at_gioc = true 
+  Bitwidth bw(true, 10, global_bwmap);    // hier = false, max_iters = 10
   Gioc     gioc(path);
 
   for (auto &lg : lgs) {
@@ -108,7 +109,7 @@ void Lcompiler::global_io_connection() {
 
 void Lcompiler::global_bitwidth_inference(std::string_view top) {
   Graphviz gv(true, false, odir);
-  Bitwidth bw(true, 10);   // hier = true, max_iters = 10
+  Bitwidth bw(true, 10, global_bwmap);   // hier = true, max_iters = 10
 
   auto lgcnt = 0;
   auto hit = false;
@@ -118,9 +119,10 @@ void Lcompiler::global_bitwidth_inference(std::string_view top) {
       hit = true;
       fmt::print("------------------------ Bitwidth-Inference ------------------------- (A)\n");
       bw.do_trans(lg);
-      if (gviz) 
-        gv.do_from_lgraph(lg, ""); // rename dot with postfix raw
     }
+
+    if (gviz) 
+      gv.do_from_lgraph(lg, ""); // rename dot with postfix raw
   }
 
   if (lgcnt > 1 && hit == false) {

@@ -4,16 +4,20 @@
 #include <vector>
 
 #include "lgedgeiter.hpp"
+#include "bitwidth_range.hpp"
 #include "lgraph.hpp"
 #include "lbench.hpp"
 #include "lnast.hpp"
 #include "likely.hpp"
+
+using BWMap = absl::flat_hash_map<Node_pin::Compact, Bitwidth_range>;
 
 class Lcompiler {
 private:
   const std::string_view path;  
   const std::string odir;
   const bool gviz;
+  BWMap global_bwmap;
 
 protected:
   std::mutex lgs_mutex;
