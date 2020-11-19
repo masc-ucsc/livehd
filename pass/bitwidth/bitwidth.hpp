@@ -19,8 +19,7 @@ protected:
   static Attr get_key_attr(std::string_view key);
 
   bool not_finished;
-  BWMap &bwmap;
-  absl::flat_hash_map<Node::Compact, uint32_t> outcountmap;
+  BWMap &bwmap; // reference the global bwmap outside
 
   void process_const(Node &node);
   void process_not(Node &node, XEdge_iterator &inp_edges);
@@ -41,7 +40,7 @@ protected:
   void garbage_collect_support_structures(XEdge_iterator &inp_edges);
   void forward_adjust_dpin(Node_pin &dpin, Bitwidth_range &bw);
   void set_graph_boundary(Node_pin &dpin, Node_pin &spin);
-  void debug_unconstrained_msg(Node &node, Node_pin &d_dpin, bool is_dp_assign = false);
+  void debug_unconstrained_msg(Node &node, Node_pin &d_dpin);
 
   void bw_pass(LGraph *lg);
 

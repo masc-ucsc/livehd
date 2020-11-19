@@ -30,21 +30,21 @@ void Bitwidth::process_const(Node &node) {
 void Bitwidth::process_flop(Node &node) {
   I(node.is_sink_connected("din"));
   auto d_dpin = node.get_sink_pin("din").get_driver_pin();
+  auto qpin = node.get_driver_pin();
 
   Lconst max_val;
   Lconst min_val;
-  auto   it3 = bwmap.find(d_dpin.get_compact());
-  if (it3 != bwmap.end()) {
-    max_val = it3->second.get_max();
-    min_val = it3->second.get_min();
-  } else if (node.get_driver_pin().get_bits()) { //FIXME->sh: want to remove this section but can't, what's the case that Qpin will have the bit being set before the data_pin being set??
-    // At least propagate backward the width
-    if (d_dpin.get_bits() == 0 || d_dpin.get_bits() > node.get_driver_pin().get_bits())
-      d_dpin.set_bits(node.get_driver_pin().get_bits());
+  auto   it_d_dpin = bwmap.find(d_dpin.get_compact());
+  auto   it_qpin = bwmap.find(qpin.get_compact());
+  if (it_d_dpin != bwmap.end()) {
+    max_val = it_d_dpin->second.get_max();
+    min_val = it_d_dpin->second.get_min();
+  } else if (it_qpin != bwmap.end()) {  // At least propagate backward the width
+    auto tmp_min  = Lconst(it_qpin->second.min);
+    auto tmp_max  = Lconst(it_qpin->second.max);
+    bwmap.emplace(d_dpin.get_compact(), Bitwidth_range(tmp_min, tmp_max));
     return;
   } else {
-    /* bwmap.emplace(d_dpin.get_compact(), Bitwidth_range(0)); // FIXME->sh: Initialize a 0 BW for the algorithm to continue run */
-    /* bwmap.emplace(node.get_driver_pin().get_compact(), Bitwidth_range(0)); // FIXME->sh: Initialize a 0 BW for the algorithm to continue run */
     debug_unconstrained_msg(node, d_dpin);
     not_finished = true;
     return;
@@ -90,8 +90,12 @@ void Bitwidth::process_mux(Node &node, XEdge_iterator &inp_edges) {
       if (max_val < it->second.get_max())
         max_val = it->second.get_max();
 
-      if (min_val == 0 || min_val > it->second.get_min())
+      if (min_val > it->second.get_min())
         min_val = it->second.get_min();
+
+      // update as soon as possible, don't wait everyone ready, so you could break the flop-loop
+      Bitwidth_range bw(min_val, max_val);
+      bwmap.emplace(node.get_driver_pin().get_compact(), bw);
     } else {
       debug_unconstrained_msg(node, e.driver);
       not_finished = true;
@@ -101,9 +105,6 @@ void Bitwidth::process_mux(Node &node, XEdge_iterator &inp_edges) {
 
   auto sel_bits = ceil(log2(inp_edges.size() - 1)); // -1 for the select
   node.get_sink_pin("0").get_driver_pin().set_bits(sel_bits);
-
-  Bitwidth_range bw(min_val, max_val);
-  bwmap.emplace(node.get_driver_pin().get_compact(), bw);
 }
 
 void Bitwidth::process_shr(Node &node, XEdge_iterator &inp_edges) {
@@ -147,10 +148,8 @@ void Bitwidth::process_shr(Node &node, XEdge_iterator &inp_edges) {
 
     Bitwidth_range bw(min, max);
     bwmap.emplace(node.get_driver_pin().get_compact(), bw);
-    node.get_driver_pin().set_bits(bw.get_bits());
   } else {
     bwmap.emplace(node.get_driver_pin().get_compact(), a_bw);
-    node.get_driver_pin().set_bits(a_bw.get_bits());
   }
 }
 
@@ -218,10 +217,10 @@ void Bitwidth::process_logic_and(Node &node, XEdge_iterator &inp_edges) {
 
     for (auto e : inp_edges) {
       auto   pit  = bwmap.find(e.driver.get_compact());
-      Bits_t bits = 0;
+      Bits_t bw_bits = 0;
       if (pit == bwmap.end()) {
         if (e.driver.is_graph_input()) {
-          bits = 0; // give temporary 0 to continue
+          bw_bits = 0; // give temporary 0 to continue
         } else {
           // should wait till later BW run to have a driver bwmap ready
           debug_unconstrained_msg(node, e.driver);
@@ -229,16 +228,16 @@ void Bitwidth::process_logic_and(Node &node, XEdge_iterator &inp_edges) {
           return;
         }
       } else {
-        bits = pit->second.get_bits();
+        bw_bits = pit->second.get_bits();
       }
 
-      if (bits && bits < min_bits)
-        min_bits = bits;
+      if (bw_bits && bw_bits < min_bits)
+        min_bits = bw_bits;
     }
 
 
     if (min_bits == UINT16_MAX) {
-      fmt::print("pass.bitwidth and:{} does not have any constrained input\n", node.debug_name());
+      fmt::print("BW-> and:{} does not have any constrained input\n", node.debug_name());
       not_finished = true;
       return;
     }
@@ -246,15 +245,16 @@ void Bitwidth::process_logic_and(Node &node, XEdge_iterator &inp_edges) {
     bwmap.emplace(node.get_driver_pin().get_compact(), Bitwidth_range(min_bits));
 
     for (auto e : inp_edges) {
-      auto bits = e.driver.get_bits();
-      if (bits)
+      auto bw_bits = e.driver.get_bits();
+      if (bw_bits)
         continue;  // only handle unconstrained inputs
 
       if (e.driver.get_num_edges() > 1) {
         must_perform_backward = true;
-      } else if (bits==0 || bits > min_bits) {
+      } else if (bw_bits==0 || bw_bits > min_bits) {
         // no other output, parent could follow the child
         e.driver.set_bits(min_bits);
+        bwmap.emplace(e.driver.get_compact(), Bitwidth_range(min_bits));
       }
     }
   }
@@ -323,20 +323,17 @@ void Bitwidth::process_attr_get(Node &node) {
   //#endif
 }
 
-// y := x
+// lhs := rhs
 void Bitwidth::process_attr_set_dp_assign(Node &node_attr) {
   auto dpin_lhs_value = node_attr.get_sink_pin("value").get_driver_pin(); 
   auto dpin_rhs       = node_attr.get_sink_pin("name").get_driver_pin();  
-  auto dpin_output    = node_attr.get_driver_pin("Y");
 
   auto it = bwmap.find(dpin_lhs_value.get_compact());
   Bitwidth_range bw_lhs(0);
   if (it != bwmap.end()) {
     bw_lhs = it->second;
-  } else if (dpin_lhs_value.get_bits()) {
-    bw_lhs = Bitwidth_range(dpin_lhs_value.get_bits());
   } else {
-    // FIXME->sh: think about a reasonable debug message later
+    fmt::print("BW->LHS isn't ready, wait for next iteration\n");
     return;
   }
 
@@ -344,22 +341,17 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_attr) {
   Bitwidth_range bw_rhs(0);
   if (it2 != bwmap.end()) {
     bw_rhs = it2->second;
-  } else if (dpin_lhs_value.get_bits()) {
-    bw_rhs = Bitwidth_range(dpin_rhs.get_bits());
   } else {
-    // FIXME->sh: think about a reasonable debug message later
+    fmt::print("BW->RHS isn't ready, wait for next iteration\n");
     return;
   }
-
-  // fmt::print("attr_set_dp_assign name:{} variable_bits:{} bw_rhs:{} node_attr:{}\n", dpin_lhs_value.debug_name(),
-  // bw_lhs.get_bits(), bw_rhs.get_bits(), node_attr.debug_name());
 
   if (bw_rhs.get_bits() == 0 && bw_lhs.get_bits() == 0) {  // Can not solve now
     // FIXME->sh: think about a reasonable debug message later
     return;
   } else {
     if (bw_rhs.get_bits() == 0) {
-      fmt::print("pass.bitwidth := propagating bits:{} upwards to node_attr:{}\n", bw_lhs.get_bits(), dpin_rhs.debug_name());
+      fmt::print("BW-> := propagating bits:{} upwards to node_attr:{}\n", bw_lhs.get_bits(), dpin_rhs.debug_name());
       dpin_rhs.set_bits(bw_lhs.get_bits());
       bwmap.emplace(dpin_rhs.get_compact(), bw_lhs);
       return;
@@ -375,14 +367,15 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_attr) {
         dpin_rhs.connect_sink(e.sink);
       }
     } else {  // rhs.bits > lhs.bits --> drop rhs bits and reconnect
-      auto mask_node = node_attr.get_class_lgraph()->create_node(Ntype_op::And);
+      auto mask_node  = node_attr.get_class_lgraph()->create_node(Ntype_op::And);
       auto mask_dpin  = mask_node.get_driver_pin();
       auto mask_const = (Lconst(1) << Lconst(bw_lhs.get_bits())) - 1;
       /* fmt::print("mask_const:{}\n", mask_const.to_pyrope()); */
       auto all_one_node = node_attr.get_class_lgraph()->create_node_const(mask_const);
       auto all_one_dpin = all_one_node.setup_driver_pin();
-      mask_dpin.set_bits(bw_lhs.get_bits()); //FIXME: instead of set bits directly, try to using (max, min) so the final bits could be optimized no matter signed or unsigned
+      /* mask_dpin.set_bits(bw_lhs.get_bits()); //FIXME: instead of set bits directly, try to using (max, min) so the final bits could be optimized no matter signed or unsigned */
 
+      bwmap.emplace(mask_dpin.get_compact(), bw_lhs);
       dpin_rhs.connect_sink(mask_node.setup_sink_pin("A"));
       all_one_dpin.connect_sink(mask_node.setup_sink_pin("A"));
       for (auto e : node_attr.out_edges()) {
@@ -415,7 +408,7 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr) {
 
   if (!dpin_key.get_node().is_type(Ntype_op::TupKey)) {
     not_finished = true;
-    return;  // Can not handle now
+    return;  // can not handle now
   }
 
   I(dpin_key.has_name());
@@ -446,7 +439,7 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr) {
       Pass::error("bitwidth missmatch. Variable {} needs {}bits, but constrained to {}bits\n", dpin_name, bw.get_bits(), val.to_i());
     } else {
       if (bw.is_always_positive()) {
-        bw.set_ubits(val.to_i());
+        bw.set_ubits(val.to_i()); // FIXME->sh: this is a key point to change when you move to __ubit/__sbit in Pyrope/Firrtl
       } else {
         bw.set_sbits(val.to_i());
       }
@@ -460,7 +453,6 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr) {
   }
 
   for (auto out_dpin : node_attr.out_connected_pins()) {
-    out_dpin.set_bits(bw.get_bits());
     bwmap.emplace(out_dpin.get_compact(), bw);
   }
 
@@ -470,7 +462,6 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr) {
     through_dpin.set_bits(bw.get_bits());
     bwmap.emplace(through_dpin.get_compact(), bw);
   }
-  // dpin_val.dump_all_prp_vname();
 }
 
 void Bitwidth::process_attr_set_propagate(Node &node_attr) {
@@ -512,15 +503,13 @@ void Bitwidth::process_attr_set_propagate(Node &node_attr) {
     }
   }
 
-  for (auto out_dpin : node_attr.out_connected_pins()) {
-    out_dpin.set_bits(parent_attr_bw.get_bits());
+  for (auto out_dpin : node_attr.out_connected_pins()) 
     bwmap.emplace(out_dpin.get_compact(), parent_attr_bw);
-  }
+  
 
-  if (parent_data_pending) {
-    data_dpin.set_bits(parent_attr_bw.get_bits());
+  if (parent_data_pending) 
     bwmap.emplace(data_dpin.get_compact(), parent_attr_bw);
-  }
+  
 }
 
 void Bitwidth::process_attr_set(Node &node) {
@@ -531,34 +520,10 @@ void Bitwidth::process_attr_set(Node &node) {
   }
 }
 
-// focusing on judging the parent is garbage or not
-void Bitwidth::garbage_collect_support_structures(XEdge_iterator &inp_edges) {
-  for (auto e : inp_edges) {
-    /* auto pit = outcountmap.find(e.driver.get_node().get_compact());  // pit = parent iterator */
-    /* if (pit == outcountmap.end()) { */
-    /*   continue;  // parent node not yet visited */
-    /* } */
-
-    /* auto n = pit->second; */
-    /* if (n <= 1) {  // I'm the only child, the parent bw_range object could be recycled */
-    /*   outcountmap.erase(pit); */
-    /*   for (auto parent_dpin : e.driver.get_node().out_connected_pins()) { */
-    /*     auto it2 = bwmap.find(parent_dpin.get_compact()); */
-    /*     if (it2 != bwmap.end()) {  // Not all the nodes create bwmap (impossible to infer do not) */
-    /*       forward_adjust_dpin(parent_dpin, it2->second); */
-    /*       bwmap.erase(it2); */
-    /*     } */
-    /*   } */
-    /* } else { */
-    /*   pit->second = n - 1; */
-    /* } */
-  }
-}
 
 void Bitwidth::forward_adjust_dpin(Node_pin &dpin, Bitwidth_range &bw) {
   auto bw_bits = bw.get_bits();
   if (bw_bits && bw_bits < dpin.get_bits()) {
-    // fmt::print("bitwidth: bits:{}->{} for dpin:{}\n", dpin.get_bits(), bw_bits, dpin.debug_name());
     dpin.set_bits(bw_bits);
   }
 }
@@ -580,30 +545,59 @@ void Bitwidth::set_graph_boundary(Node_pin &dpin, Node_pin &spin) {
   }
 }
 
+
+void Bitwidth::debug_unconstrained_msg(Node &node, Node_pin &dpin) {
+  if (dpin.has_name()) {
+    fmt::print("BW-> gate:{} has input pin:{} unconstrained\n", node.debug_name(), dpin.debug_name());
+  } else {
+    fmt::print("BW-> gate:{} has some inputs unconstrained\n", node.debug_name());
+  }
+}
+
+
+#if 0
+// FIXME->sh: due to our centralized BW algorithm in lcompiler pass, we cannot perform garbage collection locally or the information will be losed between BW iterations
+// focusing on judging the parent is garbage or not
+void Bitwidth::garbage_collect_support_structures(XEdge_iterator &inp_edges) {
+  for (auto e : inp_edges) {
+    auto pit = outcountmap.find(e.driver.get_node().get_compact());  // pit = parent iterator
+    if (pit == outcountmap.end()) {
+      continue;  // parent node not yet visited
+    }
+
+    auto n = pit->second;
+    if (n <= 1) {  // I'm the only child, the parent bw_range object could be recycled
+      outcountmap.erase(pit);
+      for (auto parent_dpin : e.driver.get_node().out_connected_pins()) {
+        auto it2 = bwmap.find(parent_dpin.get_compact());
+        if (it2 != bwmap.end()) {  // Not all the nodes create bwmap (impossible to infer do not)
+          forward_adjust_dpin(parent_dpin, it2->second);
+          bwmap.erase(it2);
+        }
+      }
+    } else {
+      pit->second = n - 1;
+    }
+  }
+}
+#endif
+
 void Bitwidth::bw_pass(LGraph *lg) {
   must_perform_backward = false;
   not_finished          = false;
 
-  // FIXME->sh: no graph will have input bits set by default, it's should be set by some attr_set node, we should not anticipate a pin bits ready
-  /* for(auto dpin:lg->get_graph_input_node(hier).out_setup_pins()) { */
-  /*   if (dpin.get_bits()) */
-  /*     bwmap.emplace(dpin.get_compact(), Bitwidth_range(dpin.get_bits())); */
-  /* } */
-
-  outcountmap[lg->get_graph_input_node(hier).get_compact()] = lg->get_graph_input_node(hier).get_num_out_edges();
-
+  // Note: lg input bits must be set by attr_set node, it will be handled through the algorithm runs
   for (auto node : lg->forward(hier)) {
     auto inp_edges = node.inp_edges();
     auto op        = node.get_type_op();
 
     if (inp_edges.empty() && (op != Ntype_op::Const && op != Ntype_op::Sub && op != Ntype_op::LUT && op != Ntype_op::TupKey)) {
-      fmt::print("pass.bitwidth: removing dangling node:{}\n", node.debug_name());
+      fmt::print("BW-> removing dangling node:{}\n", node.debug_name());
       if (!hier) // FIXME: once hier del works
         node.del_node();
       continue;
     }
 
-    outcountmap[node.get_compact()] = node.get_num_out_edges();
 
     if (op == Ntype_op::Const) {
       process_const(node);
@@ -647,13 +641,12 @@ void Bitwidth::bw_pass(LGraph *lg) {
 
     for (auto dpin : node.out_connected_pins()) {
       auto it = bwmap.find(dpin.get_compact());
-      if (it == bwmap.end())
+      if (it == bwmap.end()) 
         continue;
-
+      
       auto bw_bits = it->second.get_bits();
-
       if (bw_bits == 0 && it->second.is_overflow()) {
-        fmt::print("bitwidth: dpin:{} has over {}bits (simplify first!)\n", dpin.debug_name(), it->second.get_raw_max());
+        fmt::print("BW-> dpin:{} has over {}bits (simplify first!)\n", dpin.debug_name(), it->second.get_raw_max());
         continue;
       }
 
@@ -662,9 +655,6 @@ void Bitwidth::bw_pass(LGraph *lg) {
 
       dpin.set_bits(bw_bits);
     }
-
-    if (!hier)
-      garbage_collect_support_structures(inp_edges);
   }
 
   for(auto dpin:lg->get_graph_output_node(hier).out_setup_pins()) {
@@ -678,8 +668,6 @@ void Bitwidth::bw_pass(LGraph *lg) {
     auto it = bwmap.find(out_driver.get_compact());
     if (it != bwmap.end()) {
       forward_adjust_dpin(out_driver, it->second);
-
-      /* bwmap.erase(it); */
     }
 
     if (out_driver.get_bits()) {
@@ -691,7 +679,7 @@ void Bitwidth::bw_pass(LGraph *lg) {
 
 #ifndef PRESERVE_ATTR_NODE
   if (not_finished) {
-    fmt::print("pass_bitwidth: could not converge\n");
+    fmt::print("BW-> could not converge\n");
   } else {
     // FIXME: this code may need to move to cprop if we have several types of
     // attributes. Delete only if all the attributes are finished
@@ -727,23 +715,6 @@ void Bitwidth::bw_pass(LGraph *lg) {
 #endif
 
   if (must_perform_backward) {
-    fmt::print("pass_bitwidth: some nodes need to back propagate width\n");
-  }
-}
-
-void Bitwidth::debug_unconstrained_msg(Node &node, Node_pin &dpin, bool is_dp_assign) {
-  if (is_dp_assign) {
-    if (dpin.has_name())
-      fmt::print("pass.bitwidth {}:= is unconstrained\n", dpin.get_name());
-    else
-      fmt::print("pass.bitwidth := is unconstrained (node_attr:{})\n", node.debug_name());
-    return;
-  }
-
-
-  if (dpin.has_name()) {
-    fmt::print("pass.bitwidth gate:{} has input pin:{} unconstrained\n", node.debug_name(), dpin.debug_name());
-  } else {
-    fmt::print("pass.bitwidth gate:{} has some inputs unconstrained\n", node.debug_name());
+    fmt::print("BW-> some nodes need to back propagate width\n");
   }
 }
