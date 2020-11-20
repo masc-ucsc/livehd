@@ -3,7 +3,7 @@
 pts_to_be_merged='io_gen io_gen2 io_gen3 test2'
 pts_tuple_dbg='lhs_wire3 funcall_unnamed2
                firrtl_gcd counter_tup counter2'
-pts_unsigned_issue='firrtl_gcd'
+pts_unsigned_issue='firrtl_gcd '
 
 
 pts='if firrtl_tail2 firrtl_tail3 tuple_copy2 hier_tuple_io reg__q_pin hier_tuple2 nested_if
