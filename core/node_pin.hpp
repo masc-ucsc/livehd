@@ -352,6 +352,10 @@ public:
   Bits_t   get_bits() const;
   void     set_bits(Bits_t bits);
 
+  void    set_io_sign();
+  void    clear_io_sign();
+  bool    is_io_sign() const;
+
   std::string get_type_sub_pin_name() const;
 
   void   set_offset(Bits_t offset);
