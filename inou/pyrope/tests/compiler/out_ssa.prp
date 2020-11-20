@@ -1,4 +1,4 @@
-%out.__bits = 3
+%out.__ubits = 3
 %out = 1
 tmp = %out
 %out = 3

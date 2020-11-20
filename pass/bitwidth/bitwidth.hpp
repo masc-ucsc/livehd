@@ -14,7 +14,7 @@ protected:
   bool hier;
   bool must_perform_backward;
 
-  enum class Attr { Set_other, Set_bits, Set_max, Set_min, Set_dp_assign };
+  enum class Attr { Set_other, Set_ubits, Set_sbits, Set_max, Set_min, Set_dp_assign };
 
   static Attr get_key_attr(std::string_view key);
 

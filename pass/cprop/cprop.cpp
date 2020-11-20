@@ -547,7 +547,7 @@ bool Cprop::process_tuple_get(Node &node) {
     if (key_pos == 0 && !parent_dpin.is_invalid()) {
       collapse_forward_for_pin(node, parent_dpin);
       return true;
-    } else if (key_pos == -1 && key_name!= "__bits") {
+    } else if (key_pos == -1 && key_name != "__ubits" && key_name != "__sbits") {
       Pass::error("for tuple_get {} parent_node {}, try to get a field {} from a scalar!\n",
                   node.debug_name(),
                   parent_node.debug_name(),

@@ -262,8 +262,11 @@ void Bitwidth::process_logic_and(Node &node, XEdge_iterator &inp_edges) {
 
 
 Bitwidth::Attr Bitwidth::get_key_attr(std::string_view key) {
-  if (key.substr(0, 6) == "__bits")
-    return Attr::Set_bits;
+  if (key.substr(0, 7) == "__ubits")
+    return Attr::Set_ubits;
+
+  if (key.substr(0, 7) == "__sbits")
+    return Attr::Set_sbits;
 
   if (key.substr(0, 5) == "__max")
     return Attr::Set_max;
@@ -301,7 +304,7 @@ void Bitwidth::process_attr_get(Node &node) {
   auto &bw = it->second;
 
   Lconst result;
-  if (attr == Attr::Set_bits) {
+  if (attr == Attr::Set_ubits || attr == Attr::Set_sbits) {
     result = Lconst(bw.get_bits());
   } else if (attr == Attr::Set_max) {
     result = bw.get_max();
@@ -432,17 +435,25 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr) {
     }
   }
 
-  if (attr == Attr::Set_bits) {
+  if (attr == Attr::Set_ubits || attr == Attr::Set_sbits) {
     I(dpin_val.get_node().is_type_const());
     auto val = dpin_val.get_node().get_type_const();
     if (bw.get_bits() && bw.get_bits() > val.to_i()) {
       Pass::error("bitwidth missmatch. Variable {} needs {}bits, but constrained to {}bits\n", dpin_name, bw.get_bits(), val.to_i());
     } else {
-      if (bw.is_always_positive()) {
+      if (attr == Attr::Set_ubits) {
         bw.set_ubits(val.to_i()); // FIXME->sh: this is a key point to change when you move to __ubit/__sbit in Pyrope/Firrtl
       } else {
         bw.set_sbits(val.to_i());
       }
+#if 0
+      if (bw.is_always_positive()) {
+        bw.set_ubits(val.to_i()); // FIXME->sh: this is a key point to change when you move to __ubit/__sbit in Pyrope/Firrtl
+      } else {
+        I(false);
+        bw.set_sbits(val.to_i());
+      }
+#endif
     }
   } else if (attr == Attr::Set_max) {
     I(false);  // FIXME: todo
