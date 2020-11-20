@@ -1,4 +1,4 @@
-$inp.__bits = 1
+$inp.__ubits = 1
 
 if ($inp) {
   tmp = 4

@@ -1,6 +1,6 @@
-$a.__bits = 8
+$a.__ubits = 8
 foo = #reg == 0
-#reg.__bits = 8
+#reg.__ubits = 8
 if (foo) {
   #reg := $a
 } else {

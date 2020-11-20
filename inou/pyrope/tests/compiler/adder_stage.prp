@@ -1,6 +1,6 @@
-$b.__bits = 3
-#adder.__bits = 4
-$a.__bits = 3
+$b.__ubits = 3
+#adder.__ubits = 4
+$a.__ubits = 3
 
 #adder = $a + $b
 

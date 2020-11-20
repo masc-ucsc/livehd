@@ -588,7 +588,7 @@ bool Lnast_tolg::is_hier_inp_bits_set(const Lnast_nid &lnidx_ta) {
       else 
         return false;
     } else {
-      if (lnast->get_vname(child) == "__bits")
+      if (lnast->get_vname(child) == "__ubits" || lnast->get_vname(child) == "__sbits")
         return true;
     }
   }
@@ -604,10 +604,10 @@ void Lnast_tolg::process_hier_inp_bits_set(LGraph *lg, const Lnast_nid &lnidx_ta
       const auto &c0_ta = child;
       I(is_input(lnast->get_vname(c0_ta)));
       hier_inp_name = lnast->get_vname(c0_ta).substr(1);
-    } else if (lnast->get_vname(child) != "__bits") {
+    } else if (lnast->get_vname(child) != "__ubits" && lnast->get_vname(child) != "__sbits") {
       I(child != lnast->get_last_child(lnidx_ta));
       hier_inp_name = absl::StrCat(hier_inp_name, ".", lnast->get_vname(child));
-    } else if (lnast->get_vname(child) == "__bits") { //at the __bits child
+    } else if (lnast->get_vname(child) == "__ubits" || lnast->get_vname(child) == "__sbits") { //at the __bits child
       //(1) create flattened input 
       Node_pin flattened_inp;
       if (!lg->is_graph_input(hier_inp_name))
