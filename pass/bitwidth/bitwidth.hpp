@@ -27,6 +27,7 @@ protected:
   void process_mux(Node &node, XEdge_iterator &inp_edges);
   void process_shr(Node &node, XEdge_iterator &inp_edges);
   void process_sum(Node &node, XEdge_iterator &inp_edges);
+  void process_tposs(Node &node, XEdge_iterator &inp_edges);
   void process_comparator(Node &node);
   void process_logic_or_xor(Node &node, XEdge_iterator &inp_edges);
   void process_ror(Node &node, XEdge_iterator &inp_edges);
@@ -36,6 +37,7 @@ protected:
   void process_attr_set_new_attr(Node &node);
   void process_attr_set_propagate(Node &node);
   void process_attr_set(Node &node);
+  void insert_tposs_node(Node &node_attr);
 
   void garbage_collect_support_structures(XEdge_iterator &inp_edges);
   void forward_adjust_dpin(Node_pin &dpin, Bitwidth_range &bw);

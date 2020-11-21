@@ -139,15 +139,25 @@ void Bitwidth::process_shr(Node &node, XEdge_iterator &inp_edges) {
     return;
   }
 
+  // FIXME->sh: lgraph should only support arithmetic shift right now,
+  //            how to express it using Lconst? for now the temporary solution 
+  //            is convert everything back to C++ integer and perform a division :(
   if (n_bw.get_min() > 0 && n_bw.get_min().is_i()) {
-    auto max    = a_bw.get_max();
-    auto min    = a_bw.get_min();
+    auto max    = a_bw.get_max().to_i();
+    auto min    = a_bw.get_min().to_i();
     auto amount = n_bw.get_min().to_i();
-    max         = Lconst(max.get_raw_num() >> amount);
-    min         = Lconst(min.get_raw_num() >> amount);
+    /* max         = Lconst(max.get_raw_num() >> amount); */
+    /* min         = Lconst(min.get_raw_num() >> amount); */
+    /* Bitwidth_range bw(min, max); */
+    max = floor(max/amount);   
+    min = floor(min/amount);   
+    fmt::print("max_floor:{}\n", max);
+    fmt::print("min_floor:{}\n", min);
 
-    Bitwidth_range bw(min, max);
+    Bitwidth_range bw((Lconst(min), Lconst(max)));
     bwmap.emplace(node.get_driver_pin().get_compact(), bw);
+    bw.dump();
+    I(false);
   } else {
     bwmap.emplace(node.get_driver_pin().get_compact(), a_bw);
   }
@@ -168,6 +178,30 @@ void Bitwidth::process_sum(Node &node, XEdge_iterator &inp_edges) {
         max_val = max_val - it->second.get_min();
         min_val = min_val - it->second.get_max();
       }
+    } else {
+      debug_unconstrained_msg(node, e.driver);
+      not_finished = true;
+      return;
+    }
+  }
+  auto bw = Bitwidth_range(min_val, max_val);
+  bwmap.emplace(node.get_driver_pin().get_compact(), bw);
+  fmt::print("hello2\n");
+  bw.dump();
+}
+
+
+void Bitwidth::process_tposs(Node &node, XEdge_iterator &inp_edges) {
+  Lconst max_val;
+  Lconst min_val;
+  for (auto e : inp_edges) {
+    auto it = bwmap.find(e.driver.get_compact());
+    if (it != bwmap.end()) {
+      auto pmax  = it->second.get_max();
+      auto pmin  = it->second.get_min();
+      auto pbits = it->second.get_bits();
+      max_val = pmax + (pmin <= 0 ? (1 << pbits) : 0);
+      min_val = 0;
     } else {
       debug_unconstrained_msg(node, e.driver);
       not_finished = true;
@@ -424,9 +458,11 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr) {
 
   // copy parent's bw for some judgement and then update to attr_set value
   Bitwidth_range bw(0);
-  bool           parent_pending = false;
+  bool parent_pending = false;
+  bool parent_is_ginp = false;
   if (node_attr.is_sink_connected("name")) {
     auto through_dpin = node_attr.get_sink_pin("name").get_driver_pin();
+    parent_is_ginp    = through_dpin.is_graph_input();
     auto it           = bwmap.find(through_dpin.get_compact());
     if (it != bwmap.end()) {
       bw = it->second;
@@ -435,32 +471,33 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr) {
     }
   }
 
+
   if (attr == Attr::Set_ubits || attr == Attr::Set_sbits) {
     I(dpin_val.get_node().is_type_const());
     auto val = dpin_val.get_node().get_type_const();
-    if (bw.get_bits() && bw.get_bits() > val.to_i()) {
+    if (bw.get_bits() && bw.get_bits() > val.to_i()) 
       Pass::error("bitwidth missmatch. Variable {} needs {}bits, but constrained to {}bits\n", dpin_name, bw.get_bits(), val.to_i());
-    } else {
-      if (attr == Attr::Set_ubits) {
-        bw.set_ubits(val.to_i()); // FIXME->sh: this is a key point to change when you move to __ubit/__sbit in Pyrope/Firrtl
-      } else {
-        bw.set_sbits(val.to_i());
+    
+    if (attr == Attr::Set_ubits) {
+      bw.set_ubits(val.to_i()); 
+      bool tposs_existed = false;
+      for (auto e : node_attr.out_edges()) 
+        tposs_existed = e.sink.get_node().get_type_op() == Ntype_op::Tposs ? true : false ;
+
+      if (parent_is_ginp && !tposs_existed) {
+        insert_tposs_node(node_attr);
       }
-#if 0
-      if (bw.is_always_positive()) {
-        bw.set_ubits(val.to_i()); // FIXME->sh: this is a key point to change when you move to __ubit/__sbit in Pyrope/Firrtl
-      } else {
-        I(false);
-        bw.set_sbits(val.to_i());
-      }
-#endif
+    } else { // Attr::Set_sbits
+      bw.set_sbits(val.to_i());
     }
   } else if (attr == Attr::Set_max) {
     I(false);  // FIXME: todo
   } else if (attr == Attr::Set_min) {
     I(false);  // FIXME: todo
   } else {
-    I(false);  // Attr::Set_dp_assign handled in another method
+    I(false); 
+    // note-I:  Attr::unsigned may need insert Tposs also
+    // note-II: Attr::set_dp_assign handled in another method
   }
 
   for (auto out_dpin : node_attr.out_connected_pins()) {
@@ -474,6 +511,21 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr) {
     bwmap.emplace(through_dpin.get_compact(), bw);
   }
 }
+
+
+// insert tposs after attr node when ubits
+void Bitwidth::insert_tposs_node(Node &node_attr) {
+  I(node_attr.get_sink_pin("name").get_driver_pin().is_graph_input()) ;
+  I(node_attr.get_sink_pin("field").get_driver_pin().get_name() == "__ubits") ;
+
+  for (auto &e : node_attr.out_edges()) {
+    auto ntposs = node_attr.get_class_lgraph()->create_node(Ntype_op::Tposs);
+    e.driver.connect_sink(ntposs.setup_sink_pin("a"));
+    ntposs.setup_driver_pin().connect_sink(e.sink);
+    e.del_edge();
+  }
+}
+
 
 void Bitwidth::process_attr_set_propagate(Node &node_attr) {
   auto             attr_dpin = node_attr.get_driver_pin("Y");
@@ -599,6 +651,7 @@ void Bitwidth::bw_pass(LGraph *lg) {
 
   // Note: lg input bits must be set by attr_set node, it will be handled through the algorithm runs
   for (auto node : lg->forward(hier)) {
+    fmt::print("@node:{}\n", node.debug_name());
     auto inp_edges = node.inp_edges();
     auto op        = node.get_type_op();
 
@@ -640,6 +693,8 @@ void Bitwidth::bw_pass(LGraph *lg) {
       process_mux(node, inp_edges);
     } else if (op == Ntype_op::GT || op == Ntype_op::LT ||op == Ntype_op::EQ) {
       process_comparator(node);
+    } else if (op == Ntype_op::Tposs) {
+      process_tposs(node, inp_edges);
     } else {
       fmt::print("FIXME: node:{} still not handled by bitwidth\n", node.debug_name());
     }

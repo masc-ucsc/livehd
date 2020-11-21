@@ -1100,7 +1100,6 @@ void Lnast_tolg::process_ast_attr_set_op (LGraph *lg, const Lnast_nid &lnidx_ase
       lg->add_edge(vn_dpin, vn_spin);
     }
   } else if (is_input(c0_aset_name)) {
-    /* vn_dpin = setup_ref_node_dpin(lg, c0_aset); */
     vn_dpin = setup_tuple_ref(lg, lnast->get_name(c0_aset));
     lg->add_edge(vn_dpin, vn_spin);
   } else if (name2dpin.find(aset_ancestor_name) != name2dpin.end()) {
