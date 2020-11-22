@@ -87,6 +87,20 @@ protected:
 
 public:
   const Node &operator*() const { return current_node; }
+
+  void add_node(const Node::Compact &node) {
+    unvisited.insert(node);
+  }
+  void add_node(const Node &node) {
+    add_node(node.get_compact());
+  }
+  void del_node(const Node::Compact &node) {
+    unvisited.erase(node);
+  }
+
+  void del_node(const Node &node) {
+    del_node(node.get_compact());
+  }
 };
 
 class Fwd_edge_iterator {
