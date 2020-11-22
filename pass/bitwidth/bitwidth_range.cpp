@@ -142,10 +142,23 @@ Bits_t Bitwidth_range::get_bits() const {
     auto abs_max = abs(max);
     bits = (sizeof(uint64_t) * 8 - __builtin_clzll(abs_max));
   }
-  if (min < 0)
+  
+
+  // FIXME->sh: we could optimize it a little bit, only when the 
+  // min is too negative that the max_bits cannot represent
+  // e.g. (max, min) = (15, -1) ---> bits 4
+  //      (max, min) = (15, -10) --> bits 4
+  //      (max, min) = (15, -16) --> bits 5! since -16 needs 5sbits
+  //
+  // original code     
+  /* if (min < 0) */
+  /*   bits++; */
+  if (min < -pow(2, ceil(log2(max))))
     bits++;
 
+
   I(bits < Bits_max);
+  fmt::print("Hello: get_bits {}, max {}, min {}\n", bits, max, min);
 
   return bits;
 }

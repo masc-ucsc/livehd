@@ -702,7 +702,14 @@ void Bitwidth::bw_pass(LGraph *lg) {
     } else if (op == Ntype_op::GT || op == Ntype_op::LT || op == Ntype_op::EQ) {
       process_comparator(node);
     } else if (op == Ntype_op::Tposs) {
-      continue; // The Tposs bw should has been handled when insertion happened, check insert_tposs_node()
+      // Note-I: The Tposs bw should has been handled when insertion happened, check insert_tposs_node()
+      // Note-II: the Tposs's dpin bits should ONLY depends on (max, min), we should not always excrease 1-bit 
+      // from Tposs's parents unconditionally. In most cases (at least for graph-input), 
+      // Tposs's dpin bits should be the same as its parent since their (max, min) are the same.
+      // In a way, Tposs is just a node needed for the Yosys-Verilog generation algorithm, 
+      // but this algorithm doesn't care about it's bits in reality (why?).
+      // If we thinking in this way, we avoid the dilema of "the Tposs's 1-bit increase ripple 
+      // through the whole circuit and causes an unbounded bits and signedness" 
     } else {
       fmt::print("FIXME: node:{} still not handled by bitwidth\n", node.debug_name());
     }
