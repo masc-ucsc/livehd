@@ -10,10 +10,13 @@ protected:
   static Lconst  to_lconst(bool overflow, int64_t val);
 
 public:
-  int64_t max = 0;
-  int64_t min = 0;
+  int64_t max;
+  int64_t min;
 
-  bool overflow = false;
+  bool overflow;
+
+  Bitwidth_range() : max(0), min(0), overflow(false) {
+  }
 
   Bitwidth_range(const Bitwidth_range &i) {
     max = i.max;
@@ -34,6 +37,9 @@ public:
   Bitwidth_range(const Lconst &min_val, const Lconst &max_val);
   Bitwidth_range(Bits_t bits, bool sign);
   Bitwidth_range(Bits_t bits);
+
+  void set_narrower_range(const Lconst &min_val, const Lconst &max_val);
+  void set_range(const Lconst &min_val, const Lconst &max_val);
 
   bool   is_overflow() const { return overflow; };
   void   set_sbits(Bits_t size);

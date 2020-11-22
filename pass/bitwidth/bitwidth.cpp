@@ -107,17 +107,19 @@ void Bitwidth::process_mux(Node &node, XEdge_iterator &inp_edges) {
     }
   }
 
-  /* Bitwidth_range bw(min_val, max_val); */
-  Bitwidth_range bw(Lconst(-1), max_val);
-  bwmap.emplace(node.get_driver_pin().get_compact(), bw);
+  if (auto it = bwmap.find(node.get_driver_pin().get_compact()) ; it!=bwmap.end()) {
+    it->second.set_range(Lconst(-1), max_val);
+  }else{
+    /* Bitwidth_range bw(min_val, max_val); */
+    Bitwidth_range bw(Lconst(-1), max_val);
+    bwmap.emplace(node.get_driver_pin().get_compact(), bw);
 
+    fmt::print("Hello: Mux ");
+    bw.dump();
+  }
 
   auto sel_bits = ceil(log2(inp_edges.size() - 1)); // -1 for the select
   node.get_sink_pin("0").get_driver_pin().set_bits(sel_bits);
-
-  fmt::print("Hello: Mux ");
-  bw.dump();
-
 
   fmt::print("Hello: Mux-post ");
   auto it = bwmap.find(node.get_driver_pin().get_compact());
