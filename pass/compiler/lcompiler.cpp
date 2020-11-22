@@ -53,9 +53,11 @@ void Lcompiler::add_thread(std::shared_ptr<Lnast> ln) {
     I(!global_bwmap.empty());
     fmt::print("------------------------ Bitwidth-Inference ------------------------- (4-1)\n");
     bw.do_trans(lg);
+    if (gviz) 
+      gv.do_from_lgraph(lg, "local.debug"); // rename dot with postfix raw
 
-    fmt::print("------------------------ Copy-Propagation --------------------------- (5)\n");
-    cp.do_trans(lg);
+    /* fmt::print("------------------------ Copy-Propagation --------------------------- (5)\n"); */
+    /* cp.do_trans(lg); */
 
     fmt::print("------------------------ Bitwidth-Inference ------------------------- (6)\n");
     bw.do_trans(lg);

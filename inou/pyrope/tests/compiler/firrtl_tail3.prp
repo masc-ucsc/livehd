@@ -1,5 +1,5 @@
-$inp.__ubits = 16
-%out.__ubits = 16
+$inp.__ubits = 4
+%out.__ubits = 4
 
 x_q = #x.__q_pin
 

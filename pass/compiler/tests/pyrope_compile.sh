@@ -189,14 +189,14 @@ Pyrope_compile_hier () {
 }
 
 
+# rm -rf ./lgdb
+# Pyrope_compile_hier "$pts_hier1"
+# rm -rf ./lgdb
+# Pyrope_compile_hier "$pts_hier2"
 rm -rf ./lgdb
 Pyrope_compile "$pts"
-rm -rf ./lgdb
-Pyrope_compile_hier "$pts_hier1"
-rm -rf ./lgdb
-Pyrope_compile_hier "$pts_hier2"
 
 
-rm -f *.dot
-rm -f *.v
-rm -f lgcheck*
+# rm -f *.dot
+# rm -f *.v
+# rm -f lgcheck*
