@@ -534,5 +534,7 @@ int main(int argc, char** argv) {
   if (Main_api::has_errors())
     return 1;
 
+  _exit(0);
+
   return 0;
 }

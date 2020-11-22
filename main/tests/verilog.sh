@@ -1,7 +1,7 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-echo "yosys.sh running in "$(pwd)
+echo "verilog.sh running in "$(pwd)
 
 LGSHELL=./bazel-bin/main/lgshell
 
@@ -10,7 +10,7 @@ if [ ! -x $LGSHELL ]; then
     LGSHELL=./main/lgshell
     echo "lgshell is in $(pwd)"
   else
-    echo "FAILED: pyrope_test.sh could not find lgshell binary in $(pwd)";
+    echo "FAILED: verilog.sh could not find lgshell binary in $(pwd)";
   fi
 fi
 
@@ -100,8 +100,8 @@ do
     continue
   fi
 
-  echo "lgraph.match path:lgdb_yosys |> pass.cprop |> inou.yosys.fromlg odir:tmp_yosys" | ${LGSHELL} -q 2>tmp_yosys/${input}.err
-  #echo "lgraph.match path:lgdb_yosys |> inou.yosys.fromlg odir:tmp_yosys" | ${LGSHELL} -q 2>tmp_yosys/${input}.err
+  #echo "lgraph.match path:lgdb_yosys |> pass.cprop |> inou.yosys.fromlg odir:tmp_yosys" | ${LGSHELL} -q 2>tmp_yosys/${input}.err
+  echo "lgraph.match path:lgdb_yosys |> inou.yosys.fromlg odir:tmp_yosys" | ${LGSHELL} -q 2>tmp_yosys/${input}.err
   LC=$(grep -iv Warning tmp_yosys/${input}.err | grep -v perf_event | grep -v "recommended to use " | grep -v "IPC=" | wc -l | cut -d" " -f1)
   if [[ $LC -gt 0 ]]; then
     echo "FAIL: Faulty "$LC" err verilog file tmp_yosys/${input}.err"

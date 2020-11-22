@@ -2,6 +2,7 @@
 #pragma once
 
 #include "absl/container/flat_hash_set.h"
+//#include "absl/container/inlined_vector.h"
 
 #include "mmap_map.hpp"
 #include "lconst.hpp"
@@ -13,7 +14,6 @@
 
 class Ann_place;
 using Node_iterator = std::vector<Node>;
-
 
 class Node {
 protected:
