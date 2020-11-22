@@ -158,7 +158,6 @@ Bits_t Bitwidth_range::get_bits() const {
 
 
   I(bits < Bits_max);
-  fmt::print("Hello: get_bits {}, max {}, min {}\n", bits, max, min);
 
   return bits;
 }
