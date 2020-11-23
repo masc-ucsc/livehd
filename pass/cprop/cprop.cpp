@@ -287,21 +287,21 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
     replace_node(node, result);
   } else if (op == Ntype_op::Or) {
     Bits_t max_bits = 0;
-    for (auto &i : inp_edges_ordered) {
-      auto c = i.driver.get_node().get_type_const();
+    for (auto &e : inp_edges_ordered) {
+      auto c = e.driver.get_node().get_type_const();
       if (c.get_bits() > max_bits)
         max_bits = c.get_bits();
     }
     Lconst result(0);
-    for (auto &i : inp_edges_ordered) {
-      auto c = i.driver.get_node().get_type_const();
+    for (auto &e : inp_edges_ordered) {
+      auto c = e.driver.get_node().get_type_const();
       result = result.or_op(c.adjust_bits(max_bits));
     }
-
+    
     TRACE(fmt::print("cprop: and node:{} to {}\n", node.debug_name(), result.to_pyrope()));
 
     Lconst result_reduced = result == 0 ? 0 : 1;
-
+    fmt::print("node {}, result {}, result_reduced {}\n", node.debug_name(), result.to_i(), result_reduced.to_i());
     replace_logic_node(node, result, result_reduced);
 
   } else if (op == Ntype_op::And) {
@@ -387,22 +387,12 @@ void Cprop::replace_node(Node &node, const Lconst &result) {
 // FIXME: not sure
 void Cprop::replace_logic_node(Node &node, const Lconst &result, const Lconst &result_reduced) {
   Node_pin dpin_0;
-  Node_pin dpin_1;
 
   for (auto &out : node.out_edges()) {
-    if (out.driver.get_pid()) {
-      // Reduction
-      if (dpin_1.is_invalid()) {
-        dpin_1 = node.get_class_lgraph()->create_node_const(result_reduced).get_driver_pin();
-      }
-      dpin_1.connect_sink(out.sink);
-    } else {
-      // bitwise op
-      if (dpin_0.is_invalid()) {
-        dpin_0 = node.get_class_lgraph()->create_node_const(result).get_driver_pin();
-      }
-      dpin_0.connect_sink(out.sink);
+    if (dpin_0.is_invalid()) {
+      dpin_0 = node.get_class_lgraph()->create_node_const(result).get_driver_pin();
     }
+    dpin_0.connect_sink(out.sink);
   }
 
   node.del_node();
