@@ -50,19 +50,20 @@ void Lcompiler::add_thread(std::shared_ptr<Lnast> ln) {
 
     fmt::print("------------------------ Bitwidth-Inference ------------------------- (4)\n");
     bw.do_trans(lg);
-    I(!global_bwmap.empty());
+    if (gviz) 
+      gv.do_from_lgraph(lg, "local.debug0"); // rename dot with postfix raw
+
     fmt::print("------------------------ Bitwidth-Inference ------------------------- (4-1)\n");
     bw.do_trans(lg);
     if (gviz) 
-      gv.do_from_lgraph(lg, "local.debug"); // rename dot with postfix raw
+      gv.do_from_lgraph(lg, "local.debug1"); // rename dot with postfix raw
 
-    /* fmt::print("------------------------ Copy-Propagation --------------------------- (5)\n"); */
-    /* cp.do_trans(lg); */
-
-    fmt::print("------------------------ Bitwidth-Inference ------------------------- (6)\n");
+    fmt::print("------------------------ Bitwidth-Inference ------------------------- (4-2)\n");
     bw.do_trans(lg);
+    if (gviz) 
+      gv.do_from_lgraph(lg, "local.debug2"); // rename dot with postfix raw
 
-    fmt::print("------------------------ Copy-Propagation --------------------------- (7)\n");
+    fmt::print("------------------------ Copy-Propagation --------------------------- (5)\n");
     cp.do_trans(lg);
 
     if (gviz) 
@@ -97,11 +98,11 @@ void Lcompiler::global_io_connection() {
 
   for (auto &lg : lgs) {
     fmt::print("LGraph name:{}\n", lg->get_name());
-    fmt::print("------------------------ Global IO Connection ----------------------- (8)\n");
+    fmt::print("------------------------ Global IO Connection ----------------------- (6)\n");
     gioc.do_trans(lg);
     if (gviz) 
       gv.do_from_lgraph(lg, "gioc.raw"); // rename dot with postfix raw
-    fmt::print("------------------------ Copy-Propagation --------------------------- (9)\n");
+    fmt::print("------------------------ Copy-Propagation --------------------------- (7)\n");
     cp.do_trans(lg);
     if (gviz) 
       gv.do_from_lgraph(lg, "gioc.no_bits"); // rename dot with postfix raw
