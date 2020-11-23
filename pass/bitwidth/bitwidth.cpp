@@ -602,10 +602,12 @@ Node Bitwidth::insert_tposs_node(Node &node_attr) {
   auto attr_dpin = node_attr.setup_driver_pin("Y");
 
   auto ntposs = node_attr.get_class_lgraph()->create_node(Ntype_op::Tposs);
+  attr_dpin.connect_sink(ntposs.setup_sink_pin("a"));
   for (auto &e : attr_dpin.out_edges()) {
-    e.driver.connect_sink(ntposs.setup_sink_pin("a"));
-    ntposs.setup_driver_pin().connect_sink(e.sink);
-    e.del_edge();
+    if (e.sink.get_node() != ntposs) {
+      ntposs.setup_driver_pin().connect_sink(e.sink);
+      e.del_edge();
+    }
   }
   return ntposs;
 }

@@ -69,6 +69,8 @@ void Lcompiler::add_thread(std::shared_ptr<Lnast> ln) {
     if (gviz) 
       gv.do_from_lgraph(lg, "local"); // rename dot with postfix raw
     
+    fmt::print("------------------------ Bitwidth-Inference ------------------------- (4-2)\n");
+    bw.do_trans(lg);
 
     // FIXEME:sh -> todo 
     /* if (cp.get_tuple_get_left()) { */
