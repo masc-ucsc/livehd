@@ -12,6 +12,7 @@
 #include "graph_core.hpp"
 
 using testing::HasSubstr;
+using namespace std;
 
 class Setup_graph_core : public ::testing::Test {
 protected:
