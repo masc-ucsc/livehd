@@ -132,10 +132,6 @@ public:
       && static_cast<int>(op)<=static_cast<int>(Ntype_op::Const);
   }
 
-  static inline constexpr bool is_multi_driver(Ntype_op op) {
-    return op==Ntype_op::AttrSet || op==Ntype_op::Sub || op==Ntype_op::CompileErr;
-  }
-
   static inline constexpr bool is_multi_sink(Ntype_op op) {
     return op != Ntype_op::Mult
         && op != Ntype_op::And
@@ -151,6 +147,15 @@ public:
   }
   static inline constexpr bool is_unlimited_driver(Ntype_op op) {
     return op==Ntype_op::Sub || op==Ntype_op::IO || op==Ntype_op::CompileErr;
+  }
+  static inline constexpr bool is_multi_driver(Ntype_op op) {
+    return op==Ntype_op::AttrSet || is_unlimited_driver(op);
+  }
+  static inline constexpr bool is_single_driver_per_pin(Ntype_op op) {
+    if (is_unlimited_sink(op))
+      return true;
+    auto c = sink_pid2name[0][static_cast<std::size_t>(op)]; // Is first port Upper or lower case
+    return c[0]>='a' && c[0]<='z';
   }
 
   // Carefully crafted call so that it is solved at compile time most of the time
