@@ -711,7 +711,8 @@ void Bitwidth::bw_pass(LGraph *lg) {
       // In a way, Tposs is just a node needed for the Yosys-Verilog generation algorithm, 
       // but this algorithm doesn't care about it's bits in reality (why?).
       // If we thinking in this way, we avoid the dilema of "the Tposs's 1-bit increase ripple 
-      // through the whole circuit and causes an unbounded bits and signedness" 
+      // through the whole circuit and causes an unbounded bits and signedness", becasue Tposs doesn't 
+      // change any (max, min)
     } else {
       fmt::print("FIXME: node:{} still not handled by bitwidth\n", node.debug_name());
     }
