@@ -11,7 +11,6 @@ pts='if firrtl_tail2 firrtl_tail3 tuple_copy2 hier_tuple_io reg__q_pin hier_tupl
      logic reg_bits_set tuple_copy hier_tuple3 lhs_wire lhs_wire2 scalar_tuple 
      firrtl_tail attr_set capricious_bits out_ssa ssa_rhs counter counter_nested_if tuple_if'
 
-pts='firrtl_tail3'
 
 # Note: in this bash script, you MUST specify top module name at first position
 pts_hier1='top sum top'

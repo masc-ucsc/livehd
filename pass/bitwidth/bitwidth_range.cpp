@@ -136,6 +136,16 @@ void Bitwidth_range::set_ubits(Bits_t size) {
   }
 }
 
+// FIXME->sh: the following might be a false conclusion!!!!!
+// Note: I change the semantic to -> get the least bits needed to represent both max/min together,
+//           only when the min is too negative that the max_bits cannot represent, we need to increase 
+//           one bit, this could perfectly avoid the Tposs extra-1-bit ripple problem.
+//           e.g. (max, min) = (15, -1) ---> bits 4
+//                (max, min) = (15, -8) ---> bits 4
+//                (max, min) = (15, -9) ---> bits 5! since -9 needs 5sbits
+// Note: the only node affected by this semantic change is DP-assign, where the mask need to mask all 
+//       possible value
+//               
 Bits_t Bitwidth_range::get_bits() const {
   if (overflow) {
     Bits_t bits = max;
@@ -152,18 +162,12 @@ Bits_t Bitwidth_range::get_bits() const {
     bits = (sizeof(uint64_t) * 8 - __builtin_clzll(abs_max));
   }
   
-
-  // FIXME->sh: we could optimize it a little bit, only when the 
-  // min is too negative that the max_bits cannot represent
-  // e.g. (max, min) = (15, -1) ---> bits 4
-  //      (max, min) = (15, -10) --> bits 4
-  //      (max, min) = (15, -16) --> bits 5! since -16 needs 5sbits
   //
   // original code     
-  /* if (min < 0) */
-  /*   bits++; */
-  if (min < -pow(2, ceil(log2(max))))
+  if (min < 0)
     bits++;
+  /* if (min < -pow(2, ceil(log2(max)))) */
+  /*   bits++; */
 
 
   I(bits < Bits_max);
