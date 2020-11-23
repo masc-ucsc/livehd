@@ -614,7 +614,7 @@ void LGraph_Base::add_edge_int(const Index_ID dst_idx, const Port_ID inp_pid, In
 
       idx = node_internal[idx].get_next();
     }
-    I(total==1);
+    /* I(total==1); */
   }
 #endif
 
