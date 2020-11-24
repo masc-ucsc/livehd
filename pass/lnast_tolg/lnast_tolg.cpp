@@ -240,20 +240,33 @@ void Lnast_tolg::process_ast_logical_op(LGraph *lg, const Lnast_nid &lnidx_opr) 
   // (2) create comparator node and compare with 0 for each of the inputs
   // (3) take the result of every comparator as the inputs of logical operator inputs
 
+  const auto ntype = lnast->get_data(lnidx_opr).type;
+
   auto opr_node = setup_node_opr_and_lhs(lg, lnidx_opr);
   std::vector<Node_pin> eqs_dpins;
   for (const auto &opr_child : lnast->children(lnidx_opr)) {
     if (opr_child == lnast->get_first_child(lnidx_opr))
       continue; // the lhs has been handled at setup_node_opr_and_lhs();
 
-    auto node_eq = lg->create_node(Ntype_op::EQ);
+    Node node_eq;
+    Node node_compare;
+    if (ntype.is_logical_not_op()) {
+      node_eq = lg->create_node(Ntype_op::EQ);
+      auto node_not = lg->create_node(Ntype_op::Not);
+      node_eq.setup_driver_pin().connect_sink(node_not.setup_sink_pin("a"));
+      node_compare = node_not;
+    } else {
+      node_eq = lg->create_node(Ntype_op::EQ);
+      node_compare = node_eq;
+    }
+
     auto ori_opd = setup_ref_node_dpin(lg, opr_child);
     auto zero_dpin = lg->create_node_const(Lconst(0)).setup_driver_pin();
 
     lg->add_edge(ori_opd, node_eq.setup_sink_pin("A"));
     lg->add_edge(zero_dpin, node_eq.setup_sink_pin("A"));
 
-    eqs_dpins.emplace_back(node_eq.setup_driver_pin());
+    eqs_dpins.emplace_back(node_compare.setup_driver_pin());
   }
 
   nary_node_rhs_connections(lg, opr_node, eqs_dpins, lnast->get_type(lnidx_opr).is_minus());

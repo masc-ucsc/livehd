@@ -570,7 +570,7 @@ public:
   bool constexpr is_logical_op()   const { return (val == Lnast_ntype_logical_and) ||
                                                   (val == Lnast_ntype_logical_or)  ||
                                                   (val == Lnast_ntype_logical_not); }
-
+  bool constexpr is_logical_not_op()   const { return (val == Lnast_ntype_logical_not); }
   bool constexpr is_unary_op()     const { return (val == Lnast_ntype_not); }
 
   bool constexpr is_nary_op()      const { return (val == Lnast_ntype_and) ||
