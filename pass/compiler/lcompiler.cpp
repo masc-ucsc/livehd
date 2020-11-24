@@ -12,7 +12,7 @@ Lcompiler::Lcompiler(std::string_view _path, std::string_view _odir, bool _gviz)
 
 
 void Lcompiler::add_thread(std::shared_ptr<Lnast> ln) {
-  Graphviz gv(true, false, odir);
+  Graphviz gv(true, false, odir); 
   if (gviz) 
     gv.do_from_lnast(ln, "raw"); // rename dot with postfix raw
   
