@@ -1,11 +1,11 @@
 module firrtl_gcd(
-  input         clock,
-  input         reset,
+  input        clock,
+  input        reset,
   input  [2:0] io_value1,
   input  [2:0] io_value2,
-  input         io_loading_values,
+  input        io_loading_values,
   output [2:0] io_output_gcd,
-  output        io_output_valid
+  output       io_output_valid
 );
   reg [2:0] x; // @[GCD.scala 21:2]
   reg [31:0] _RAND_0;
@@ -18,7 +18,7 @@ module firrtl_gcd(
   assign _T_2 = x - y; // @[GCD.scala 24:24]
   assign _T_4 = y - x; // @[GCD.scala 25:25]
   assign io_output_gcd = x; // @[GCD.scala 32:16]
-  assign io_output_valid = y == 16'h0; // @[GCD.scala 33:18]
+  assign io_output_valid = y == 3'h0; // @[GCD.scala 33:18]
 `ifdef RANDOMIZE_GARBAGE_ASSIGN
 `define RANDOMIZE
 `endif

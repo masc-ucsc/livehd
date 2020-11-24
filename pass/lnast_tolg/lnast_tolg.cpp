@@ -240,8 +240,6 @@ void Lnast_tolg::process_ast_logical_op(LGraph *lg, const Lnast_nid &lnidx_opr) 
   // (2) create comparator node and compare with 0 for each of the inputs
   // (3) take the result of every comparator as the inputs of logical operator inputs
 
-  const auto ntype = lnast->get_data(lnidx_opr).type;
-
   auto opr_node = setup_node_opr_and_lhs(lg, lnidx_opr);
   std::vector<Node_pin> eqs_dpins;
   for (const auto &opr_child : lnast->children(lnidx_opr)) {
@@ -1652,7 +1650,7 @@ void Lnast_tolg::dfs_try_create_flattened_inp(LGraph *lg, Node_pin &cur_node_spi
 
     inp2leaf_tg_spins[ginp].emplace_back(cur_node_spin);
 
-    // if can reach leaf, the hierarchy is ended as a scalar, all path assignments (either Or or TA) shold be removed later
+    // if can reach leaf, the hierarchy is ended as a scalar, all path assignments (either Or or TA) should be removed later
     return;
   }
 }
