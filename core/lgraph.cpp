@@ -407,8 +407,8 @@ Node_pin_iterator LGraph::inp_drivers(const Node &node, const absl::flat_hash_se
         auto driver_master_nid = node_internal[driver_pin_idx].get_nid();
         I(node_internal[driver_master_nid].is_master_root());
 
-        if (!restrict_to.contains(Node::Compact(node.get_hidx(), driver_master_nid)))
-          continue;
+//        if (!restrict_to.contains(Node::Compact(node.get_hidx(), driver_master_nid)))
+//          continue;
 
         Node_pin dpin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx(), driver_pin_idx, driver_pin_pid, false);
 
