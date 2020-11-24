@@ -248,15 +248,9 @@ void Lnast_tolg::process_ast_logical_op(LGraph *lg, const Lnast_nid &lnidx_opr) 
     if (opr_child == lnast->get_first_child(lnidx_opr))
       continue; // the lhs has been handled at setup_node_opr_and_lhs();
 
-    /* if (ntype.is_logical_not_op()) { */
     auto node_eq = lg->create_node(Ntype_op::EQ);
     auto node_not = lg->create_node(Ntype_op::Not);
     node_eq.setup_driver_pin().connect_sink(node_not.setup_sink_pin("a"));
-    /* } else { */
-    /*   node_eq = lg->create_node(Ntype_op::EQ); */
-    /*   node_compare = node_eq; */
-    /* } */
-
     auto ori_opd = setup_ref_node_dpin(lg, opr_child);
     auto zero_dpin = lg->create_node_const(Lconst(0)).setup_driver_pin();
 
