@@ -20,8 +20,8 @@ assign o4 = c | b;
 assign o5 = c ^ b;
 assign o6 = !(a != 0) ; // o6 = !a
 assign o7 = !(b != 0) ; // o7 = !b
-wire   t1 = a == 0;
-wire   t2 = b == 0;
+wire   t1 = (a != 0);
+wire   t2 = (b != 0);
 assign o8 = t1 && t2;
 assign o9 = t1 || t2;
 
