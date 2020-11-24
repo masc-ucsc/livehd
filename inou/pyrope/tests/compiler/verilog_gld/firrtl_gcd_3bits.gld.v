@@ -1,9 +1,9 @@
 module firrtl_gcd(
   input        clock,
   input        reset,
-  input  [2:0] io_value1,
-  input  [2:0] io_value2,
-  input        io_loading_values,
+  input  [2:0] inp1,
+  input  [2:0] inp2,
+  input        inp_load,
   output [2:0] io_output_gcd,
   output       io_output_valid
 );
@@ -62,13 +62,13 @@ initial begin
 end // initial
 `endif // SYNTHESIS
   always @(posedge clock) begin
-    if (io_loading_values) begin
-      x <= io_value1;
+    if (inp_load) begin
+      x <= inp1;
     end else if (_T) begin
       x <= _T_2;
     end
-    if (io_loading_values) begin
-      y <= io_value2;
+    if (inp_load) begin
+      y <= inp2;
     end else if (!(_T)) begin
       y <= _T_4;
     end

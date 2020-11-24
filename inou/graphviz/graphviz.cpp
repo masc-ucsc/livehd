@@ -15,8 +15,8 @@ void Graphviz::populate_lg_handle_xedge(const Node &node, const XEdge &out, std:
     dp_pid = graphviz_legalize_name(out.driver.get_pin_name());
     sp_pid = graphviz_legalize_name(out.sink.get_pin_name());
   } else {
-    dp_pid = std::to_string(out.driver.get_pid());
-    sp_pid = std::to_string(out.sink.get_pid());
+    dp_pid = graphviz_legalize_name(std::to_string(out.driver.get_pid()));
+    sp_pid = graphviz_legalize_name(std::to_string(out.sink.get_pid()));
   }
 
   auto dn_name = graphviz_legalize_name(out.driver.get_node().debug_name());
@@ -28,7 +28,7 @@ void Graphviz::populate_lg_handle_xedge(const Node &node, const XEdge &out, std:
     sn_name = graphviz_legalize_name(out.sink.get_name());
   }
   auto dbits   = out.driver.get_bits();
-  auto dp_name = out.driver.has_name() ? out.driver.get_name() : "";
+  auto dp_name = graphviz_legalize_name(out.driver.has_name() ? out.driver.get_name() : "");
 
   if (node.get_type_op() == Ntype_op::Const)
     data += fmt::format(" {}->{}[label=<{}b:({},{})>];\n", dn_name, sn_name, dbits, dp_pid, sp_pid);
@@ -48,12 +48,15 @@ void Graphviz::populate_lg_handle_xedge(const Node &node, const XEdge &out, std:
 
 std::string Graphviz::graphviz_legalize_name(std::string_view name) {
   std::string legal;
-
   for (auto c : name) {
     if (std::isalnum(c)) {
       legal.append(1,c);
     } else if (c == 37) {
       legal += "unified_out";
+    } else if (c == 95) {
+      legal += "_";
+    } else if (c == 35) {
+      legal += "#";
     } else {
       legal += "_char" + std::to_string(c) + "_";
     }
@@ -156,9 +159,9 @@ void Graphviz::populate_lg_data(LGraph *g, std::string_view dot_postfix) {
     if (!verbose) {
       auto pos  = node.debug_name().find("_lg_");
       node_info = node.debug_name().substr(0, pos);  // get rid of the lgraph name
-      node_info = std::regex_replace(node_info, std::regex("node_"), "n");
+      node_info = graphviz_legalize_name(std::regex_replace(node_info, std::regex("node_"), "n"));
     } else {
-      node_info = node.debug_name();
+      node_info = graphviz_legalize_name(node.debug_name());
     }
 
     auto gv_name = graphviz_legalize_name(node.debug_name());
@@ -173,7 +176,7 @@ void Graphviz::populate_lg_data(LGraph *g, std::string_view dot_postfix) {
   }
 
   g->each_graph_input([&](const Node_pin &pin) {
-    std::string_view io_name = graphviz_legalize_name(pin.get_pin_name());
+    auto io_name = graphviz_legalize_name(pin.get_pin_name());
     data += fmt::format(" {} [label=<{}>];\n", io_name, io_name);  // pin.debug_name());
 
     for (const auto &out : pin.out_edges()) {

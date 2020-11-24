@@ -246,6 +246,8 @@ void Bitwidth::process_sum(Node &node, XEdge_iterator &inp_edges) {
       }
     } else {
       debug_unconstrained_msg(node, e.driver);
+      GI(hier, false, "Assert! bwmap entries should be ready at final bitwidth pass");
+
       not_finished = true;
       return;
     }
@@ -484,7 +486,8 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_attr) {
 
 
       // Note: I set the unsigned k-bits (max, min) for the mask 
-      bwmap.insert_or_assign(mask_dpin.get_compact(), Bitwidth_range(Lconst(0), mask_const));  
+      /* bwmap.insert_or_assign(mask_dpin.get_compact(), Bitwidth_range(Lconst(0), mask_const)); */  
+      bwmap.insert_or_assign(mask_dpin.get_compact(), bw_lhs);  
       dpin_rhs.connect_sink(mask_node.setup_sink_pin("A"));
       all_one_dpin.connect_sink(mask_node.setup_sink_pin("A"));
       for (auto e : node_attr.out_edges()) {
