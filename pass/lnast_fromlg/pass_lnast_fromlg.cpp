@@ -22,7 +22,7 @@ static Pass_plugin sample("pass_lnast_fromlg", Pass_lnast_fromlg::setup);
 void Pass_lnast_fromlg::setup() {
   Eprp_method m1("pass.lnast_fromlg", "translates LGraph to LNAST", &Pass_lnast_fromlg::trans);
   // For bw_in_ln, if __bits are not put in the LNAST then they can be accessed using bw_table in LNAST.
-  m1.add_label_optional("bw_in_ln", "true/false: put __bits nodes in LNAST?", "true");
+  m1.add_label_optional("bw_in_ln", "true/false: put __ubits or __sbits nodes in LNAST?", "true");
   register_pass(m1);
 }
 
@@ -207,7 +207,8 @@ void Pass_lnast_fromlg::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node, co
       name = dpin_get_name(pin);
       lnast.set_bitwidth(name.substr(1), bw);
       if (put_bw_in_ln) {
-        add_bw_in_ln(lnast, parent_node, name, bw);
+        //add_bw_in_ln(lnast, parent_node, name, bw);
+        add_bw_in_ln(lnast, parent_node, pin, name, bw);
       }
     }
   }
@@ -238,7 +239,7 @@ void Pass_lnast_fromlg::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node, co
   }
 }
 
-void Pass_lnast_fromlg::add_bw_in_ln(Lnast& lnast, Lnast_nid& parent_node, const std::string_view& pin_name, const uint32_t& bits) {
+void Pass_lnast_fromlg::add_bw_in_ln(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin, const std::string_view& pin_name, const uint32_t& bits) {
 /*creates subtree in LN for the "dot" and corresponding "assign" to depict bw
  *          dot                    assign
  *     /     |     \               /    \
@@ -247,7 +248,11 @@ void Pass_lnast_fromlg::add_bw_in_ln(Lnast& lnast, Lnast_nid& parent_node, const
   auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_dot(""));
   lnast.add_child(idx_dot, Lnast_node::create_ref(tmp_var));
   lnast.add_child(idx_dot, Lnast_node::create_ref(lnast.add_string(pin_name)));
-  lnast.add_child(idx_dot, Lnast_node::create_ref("__bits"));
+  if(!pin.is_io_sign()) {
+    lnast.add_child(idx_dot, Lnast_node::create_ref("__ubits"));
+  } else {
+    lnast.add_child(idx_dot, Lnast_node::create_ref("__sbits"));
+  }
 
   auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
   lnast.add_child(idx_asg, Lnast_node::create_ref(tmp_var));
@@ -279,7 +284,7 @@ void Pass_lnast_fromlg::handle_io(LGraph* lg, Lnast_nid& parent_lnast_node, Lnas
           I(false, "IO in lgraph should not have %/$");
           //add_bw_in_ln(lnast, parent_lnast_node, lnast.add_string(pin_name), bits);
         } else {
-          add_bw_in_ln(lnast, parent_lnast_node, lnast.add_string(absl::StrCat("$", pin_name)), bits);
+          add_bw_in_ln(lnast, parent_lnast_node, edge.driver, lnast.add_string(absl::StrCat("$", pin_name)), bits);
         }
       }
     }
@@ -302,7 +307,7 @@ void Pass_lnast_fromlg::handle_io(LGraph* lg, Lnast_nid& parent_lnast_node, Lnas
           I(false, "IO in lgraph should not have %/$");
           //add_bw_in_ln(lnast, parent_lnast_node, lnast.add_string(pin_name), bits);//adds str to lnast->string_pool
         } else {
-          add_bw_in_ln(lnast, parent_lnast_node, lnast.add_string(absl::StrCat("%", pin_name)), bits);//adds str to lnast->string_pool
+          add_bw_in_ln(lnast, parent_lnast_node, out_pin, lnast.add_string(absl::StrCat("%", pin_name)), bits);//adds str to lnast->string_pool
         }
       }
     }
