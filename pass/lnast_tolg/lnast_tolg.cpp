@@ -901,6 +901,12 @@ Node_pin Lnast_tolg::setup_node_assign_and_lhs(LGraph *lg, const Lnast_nid &lnid
       // (2) find the corresponding #reg by its qpin_name, #reg
       I(name2dpin.count(lhs_vname));
       auto reg_qpin = name2dpin[lhs_vname];
+      //DEBUG
+      if (reg_qpin.get_node().is_type_attr()) {
+        auto attr_node = reg_qpin.get_node();
+        reg_qpin = attr_node.get_sink_pin("name").get_driver_pin();
+        fmt::print("reg_qpin:{}\n", reg_qpin.debug_name());
+      }
 
       // (3) remove the previous D-pin edge from the #reg
       auto reg_node = reg_qpin.get_node();
@@ -955,21 +961,20 @@ Node_pin Lnast_tolg::setup_node_assign_and_lhs(LGraph *lg, const Lnast_nid &lnid
 // for both target and operands, except the new io, reg, and const, the node and its dpin
 // should already be in the table as the operand comes from existing operator output
 Node_pin Lnast_tolg::setup_ref_node_dpin(LGraph *lg, const Lnast_nid &lnidx_opd,
-                                                      bool from_phi,     bool from_concat,
-                                                      bool from_tupstrc, bool from_assign, 
-                                                      bool want_reg_qpin) {
+                                         bool from_phi,     bool from_concat,
+                                         bool from_tupstrc, bool from_assign, 
+                                         bool want_reg_qpin) {
   auto name  = lnast->get_sname(lnidx_opd); //name = ssa_name
   auto vname = lnast->get_vname(lnidx_opd);
   auto subs  = lnast->get_subs(lnidx_opd);
   I(!name.empty());
 
   // special case for register, when #x_-1 in rhs, return the reg_qpin, wname #x. Note this is not true for a phi-node.
-  
   bool reg_existed = name2dpin.find(vname) != name2dpin.end();
   
-  if (is_register(name) && reg_existed && want_reg_qpin) {
+  if (is_register(name) && reg_existed && want_reg_qpin) 
     return name2dpin.find(vname)->second;
-  }
+
 
   if (is_register(name) && reg_existed && !from_phi) {
     if (subs == -1) {
@@ -1097,6 +1102,8 @@ void Lnast_tolg::process_ast_attr_set_op (LGraph *lg, const Lnast_nid &lnidx_ase
     if (!reg_existed) {
       vn_dpin = setup_ref_node_dpin(lg, c0_aset);
       lg->add_edge(vn_dpin, vn_spin);
+      //DEBUG
+      name2dpin[vname] = aset_node.setup_driver_pin("Y");
     } else {
       vn_dpin = name2dpin[vname];
       lg->add_edge(vn_dpin, vn_spin);

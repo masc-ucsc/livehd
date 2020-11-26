@@ -246,7 +246,7 @@ void Bitwidth::process_sum(Node &node, XEdge_iterator &inp_edges) {
       }
     } else {
       debug_unconstrained_msg(node, e.driver);
-      GI(hier, false, "Assert! bwmap entries should be ready at final bitwidth pass");
+      GI(hier, false, "Assert! bwmap entry should be ready at final bitwidth pass, entry:{}\n", e.driver.debug_name());
 
       not_finished = true;
       return;
@@ -261,15 +261,20 @@ void Bitwidth::process_sum(Node &node, XEdge_iterator &inp_edges) {
 
 
 void Bitwidth::process_tposs(Node &node, XEdge_iterator &inp_edges) {
+  // Tposs (max, min) should only be set once and never be overwritten after it's attr parent being deleted
+  auto it2 = bwmap.find(node.get_driver_pin().get_compact());
+  if (it2 != bwmap.end()) 
+    return;
+
   Lconst max_val;
   Lconst min_val;
+
   for (auto e : inp_edges) {
     auto it = bwmap.find(e.driver.get_compact());
     if (it != bwmap.end()) {
+      GI(!hier, it->second.get_min() == 0, "Tposs should be only inserted after ubits");
       auto pmax  = it->second.get_max();
-      auto pmin  = it->second.get_min();
-      auto pbits = it->second.get_bits();
-      max_val = pmax + (pmin < 0 ? (1 << pbits) : 0);
+      max_val = pmax ;
       min_val = 0;
     } else {
       debug_unconstrained_msg(node, e.driver);
@@ -486,8 +491,8 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_attr) {
 
 
       // Note: I set the unsigned k-bits (max, min) for the mask 
-      /* bwmap.insert_or_assign(mask_dpin.get_compact(), Bitwidth_range(Lconst(0), mask_const)); */  
-      bwmap.insert_or_assign(mask_dpin.get_compact(), bw_lhs);  
+      bwmap.insert_or_assign(mask_dpin.get_compact(), Bitwidth_range(Lconst(0), mask_const));  
+      /* bwmap.insert_or_assign(mask_dpin.get_compact(), bw_lhs); */  
       dpin_rhs.connect_sink(mask_node.setup_sink_pin("A"));
       all_one_dpin.connect_sink(mask_node.setup_sink_pin("A"));
       for (auto e : node_attr.out_edges()) {
@@ -538,9 +543,11 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr) {
   Bitwidth_range bw(0);
   bool parent_pending = false;
   bool parent_is_ginp = false;
+  bool parent_is_flop = false;
   if (node_attr.is_sink_connected("name")) {
     auto through_dpin = node_attr.get_sink_pin("name").get_driver_pin();
     parent_is_ginp    = through_dpin.is_graph_input();
+    parent_is_flop    = through_dpin.get_node().is_type_flop();
     auto it           = bwmap.find(through_dpin.get_compact());
     if (it != bwmap.end()) {
       bw = it->second;
@@ -561,9 +568,9 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr) {
       bw.set_ubits(val.to_i()); 
       bool tposs_existed = false;
       for (auto e : node_attr.out_edges()) 
-        tposs_existed = e.sink.get_node().get_type_op() == Ntype_op::Tposs ? true : false ;
+        tposs_existed = e.sink.get_node().get_type_op() == Ntype_op::Tposs;
 
-      if (parent_is_ginp && !tposs_existed) {
+      if (!tposs_existed && (parent_is_ginp || parent_is_flop)) {
         ntposs = insert_tposs_node(node_attr);      
       }
     } else { // Attr::Set_sbits
@@ -599,16 +606,19 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr) {
 
 
 // insert tposs after attr node when ubits
-Node Bitwidth::insert_tposs_node(Node &node_attr) {
-  I(node_attr.get_sink_pin("name").get_driver_pin().is_graph_input()) ;
-  I(node_attr.get_sink_pin("field").get_driver_pin().get_name() == "__ubits") ;
-  auto attr_dpin = node_attr.setup_driver_pin("Y");
+Node Bitwidth::insert_tposs_node(Node &node) {
 
-  auto ntposs = node_attr.get_class_lgraph()->create_node(Ntype_op::Tposs);
-  attr_dpin.connect_sink(ntposs.setup_sink_pin("a"));
-  for (auto &e : attr_dpin.out_edges()) {
+  I(node.get_sink_pin("name").get_driver_pin().is_graph_input() || 
+    node.get_sink_pin("name").get_driver_pin().get_node().is_type_flop()) ;
+  I(node.get_sink_pin("field").get_driver_pin().get_name() == "__ubits") ;
+  auto dpin = node.setup_driver_pin("Y");
+
+  auto ntposs = node.get_class_lgraph()->create_node(Ntype_op::Tposs);
+  auto ntposs_dpin = ntposs.setup_driver_pin();
+  dpin.connect_sink(ntposs.setup_sink_pin("a"));
+  for (auto &e : dpin.out_edges()) {
     if (e.sink.get_node() != ntposs) {
-      ntposs.setup_driver_pin().connect_sink(e.sink);
+      ntposs_dpin.connect_sink(e.sink);
       e.del_edge();
     }
   }
@@ -676,7 +686,8 @@ void Bitwidth::process_attr_set(Node &node) {
 void Bitwidth::forward_adjust_dpin(Node_pin &dpin, Bitwidth_range &bw) {
   auto bw_bits = bw.get_bits();
   if (bw_bits && bw_bits < dpin.get_bits()) {
-    dpin.set_bits(bw_bits);
+    if (dpin.get_node().get_type_op() != Ntype_op::Tposs)
+      dpin.set_bits(bw_bits);
   }
 }
 
@@ -757,15 +768,7 @@ void Bitwidth::bw_pass(LGraph *lg) {
     } else if (op == Ntype_op::GT || op == Ntype_op::LT || op == Ntype_op::EQ) {
       process_comparator(node);
     } else if (op == Ntype_op::Tposs) {
-      // Note-I: The Tposs bw should has been handled when insertion happened, check insert_tposs_node()
-      // Note-II: the Tposs's dpin bits should ONLY depends on (max, min), we should not always excrease 1-bit 
-      // from Tposs's parents unconditionally. In most cases (at least for graph-input), 
-      // Tposs's dpin bits should be the same as its parent since their (max, min) are the same.
-      // In a way, Tposs is just a node needed for the Yosys-Verilog generation algorithm, 
-      // but this algorithm doesn't care about it's bits in reality (why?).
-      // If we thinking in this way, we avoid the dilema of "the Tposs's 1-bit increase ripple 
-      // through the whole circuit and causes an unbounded bits and signedness", becasue Tposs doesn't 
-      // change any (max, min)
+      process_tposs(node, inp_edges);
     } else {
       fmt::print("FIXME: node:{} still not handled by bitwidth\n", node.debug_name());
     }
@@ -792,10 +795,14 @@ void Bitwidth::bw_pass(LGraph *lg) {
       if (dpin.get_bits() && dpin.get_bits() >= bw_bits)
         continue;
 
-      dpin.set_bits(bw_bits);
+      if (op == Ntype_op::Tposs) {
+        auto parent_dpin_bits = node.setup_sink_pin("a").get_driver_pin().get_bits();                        
+        dpin.set_bits(parent_dpin_bits + 1);
+      } else {
+        dpin.set_bits(bw_bits);
+      }
     }
   }
-
 
 
   for(auto dpin:lg->get_graph_output_node(hier).out_setup_pins()) {
@@ -812,7 +819,11 @@ void Bitwidth::bw_pass(LGraph *lg) {
     }
 
     if (out_driver.get_bits()) {
-      dpin.set_bits(out_driver.get_bits());
+      if (out_driver.get_node().get_type_op() == Ntype_op::Tposs) 
+        dpin.set_bits(out_driver.get_bits() - 1); //Tposs should not affect bits of graph output
+      else 
+        dpin.set_bits(out_driver.get_bits());
+  
       if (hier)
         set_graph_boundary(out_driver, spin);
     }

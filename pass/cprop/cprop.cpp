@@ -455,6 +455,12 @@ void Cprop::process_subgraph(Node &node) {
 }
 
 void Cprop::process_attr_q_pin(Node &node, Node_pin &parent_dpin) {
+  // if some attribute are set on the flop, you will get that dpin instead of the real flop qpin
+  if (parent_dpin.get_node().get_type_op() == Ntype_op::AttrSet) {
+    collapse_forward_for_pin(node, parent_dpin);
+    return;
+  }
+
   // Get variable name
   auto driver_wname = parent_dpin.get_name();
 

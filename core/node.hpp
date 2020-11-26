@@ -273,6 +273,7 @@ public:
   }
   bool             is_type_const() const;
   bool             is_type_attr() const;
+  bool             is_type_flop() const;
   bool             is_type_tup() const;
   bool             is_type_io() const {
     return nid == Hardcoded_input_nid || nid == Hardcoded_output_nid;
