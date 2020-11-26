@@ -50,9 +50,13 @@ void Lcompiler::add_thread(std::shared_ptr<Lnast> ln) {
 
     fmt::print("------------------------ Bitwidth-Inference ------------------------- (4)\n");
     bw.do_trans(lg);
+    if (gviz) 
+      gv.do_from_lgraph(lg, "local.debug0"); // rename dot with postfix raw
 
     fmt::print("------------------------ Bitwidth-Inference ------------------------- (5)\n");
     bw.do_trans(lg);
+    if (gviz) 
+      gv.do_from_lgraph(lg, "local.debug1"); // rename dot with postfix raw
 
     fmt::print("------------------------ Bitwidth-Inference ------------------------- (6)\n");
     bw.do_trans(lg);

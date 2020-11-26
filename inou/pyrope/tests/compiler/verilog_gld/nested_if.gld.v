@@ -16,12 +16,12 @@ reg [3:0] y;
 always @ (*) begin
   x = a;
   y = 5;
-  if ($signed(a) > $signed(1)) begin
+  if (a > 1) begin
     x = e; 
-    if ($signed(a) > $signed(2)) begin
+    if (a > 2) begin
       x = b;
     end 
-    else if ($signed(($signed(a) + $signed(1))) > $signed(3)) begin 
+    else if ((a + 1) > 3) begin 
       x = c;
     end 
     else begin
@@ -34,7 +34,7 @@ always @ (*) begin
   end
 end
 
-assign o1 = $signed(x) + $signed(a);
-assign o2 = $signed(y) + $signed(a);
+assign o1 = x + a;
+assign o2 = y + a;
 
 endmodule
