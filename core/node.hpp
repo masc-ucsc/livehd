@@ -310,9 +310,6 @@ public:
   Node_pin_iterator out_connected_pins() const;
   Node_pin_iterator inp_connected_pins() const;
 
-  Node_pin_iterator out_setup_pins() const;
-  Node_pin_iterator inp_setup_pins() const;
-
   XEdge_iterator out_edges() const;
   XEdge_iterator inp_edges() const;
 

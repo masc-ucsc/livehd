@@ -260,7 +260,11 @@ Node_pin_iterator LGraph::out_connected_pins(const Node &node) const {
   Index_ID idx2 = node.get_nid();
   I(node_internal[idx2].is_master_root());
 
+  absl::flat_hash_set<Port_ID> xiter_set;
+
+  auto pid = node_internal[idx2].get_dst_pid();
   while (true) {
+    I(!xiter_set.contains(pid));
     auto n = node_internal[idx2].get_num_local_outputs();
     if (n > 0) {
       auto root_idx = idx2;
@@ -271,16 +275,21 @@ Node_pin_iterator LGraph::out_connected_pins(const Node &node) const {
             node.get_class_lgraph(),
             node.get_hidx(),
             root_idx,
-            node_internal[idx2].get_dst_pid(),
+            pid,
             false));
+
+      xiter_set.insert(pid);
     }
 
-    if (node_internal[idx2].is_last_state())
-      break;
+    do {
+      if (node_internal[idx2].is_last_state())
+        return xiter;
 
-    Index_ID tmp = node_internal[idx2].get_next();
-    I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
-    idx2 = tmp;
+      Index_ID tmp = node_internal[idx2].get_next();
+      I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
+      idx2 = tmp;
+      pid = node_internal[idx2].get_dst_pid();
+    }while(xiter_set.contains(pid));
   }
 
   return xiter;
@@ -292,8 +301,11 @@ Node_pin_iterator LGraph::inp_connected_pins(const Node &node) const {
 
   Index_ID idx2 = node.get_nid();
   I(node_internal[idx2].is_master_root());
+  absl::flat_hash_set<Port_ID> xiter_set;
 
+  auto pid = node_internal[idx2].get_dst_pid();
   while (true) {
+    I(!xiter_set.contains(pid));
     auto n = node_internal[idx2].get_num_local_inputs();
     if (n > 0) {
       auto root_idx = idx2;
@@ -304,78 +316,20 @@ Node_pin_iterator LGraph::inp_connected_pins(const Node &node) const {
             node.get_class_lgraph(),
             node.get_hidx(),
             root_idx,
-            node_internal[idx2].get_dst_pid(),
+            pid,
             true));
+      xiter_set.insert(pid);
     }
 
-    if (node_internal[idx2].is_last_state())
-      break;
+    do {
+      if (node_internal[idx2].is_last_state())
+        return xiter;
 
-    Index_ID tmp = node_internal[idx2].get_next();
-    I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
-    idx2 = tmp;
-  }
-
-  return xiter;
-}
-
-Node_pin_iterator LGraph::out_setup_pins(const Node &node) const {
-  I(node.get_class_lgraph() == this);
-
-  Node_pin_iterator xiter;
-
-  //fmt::print("node:{}\n", node.debug_name());
-
-  Index_ID idx2 = node.get_nid();
-  I(node_internal.size() > idx2);
-  I(node_internal[idx2].is_master_root());
-
-  while (true) {
-    if (node_internal[idx2].is_root()) {
-      xiter.emplace_back(Node_pin(node.get_top_lgraph(),
-                                  node.get_class_lgraph(),
-                                  node.get_hidx(),
-                                  idx2,
-                                  node_internal[idx2].get_dst_pid(),
-                                  false));
-    }
-
-    if (node_internal[idx2].is_last_state())
-      break;
-
-    Index_ID tmp = node_internal[idx2].get_next();
-    I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
-    idx2 = tmp;
-  }
-
-  return xiter;
-}
-
-Node_pin_iterator LGraph::inp_setup_pins(const Node &node) const {
-  I(node.get_class_lgraph() == this);
-
-  Node_pin_iterator xiter;
-
-  Index_ID idx2 = node.get_nid();
-  I(node_internal.size() > idx2);
-  I(node_internal[idx2].is_master_root());
-
-  while (true) {
-    if (node_internal[idx2].is_root()) {
-      xiter.emplace_back(Node_pin(node.get_top_lgraph(),
-                                  node.get_class_lgraph(),
-                                  node.get_hidx(),
-                                  idx2,
-                                  node_internal[idx2].get_dst_pid(),
-                                  true));
-    }
-
-    if (node_internal[idx2].is_last_state())
-      break;
-
-    Index_ID tmp = node_internal[idx2].get_next();
-    I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
-    idx2 = tmp;
+      Index_ID tmp = node_internal[idx2].get_next();
+      I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
+      idx2 = tmp;
+      pid = node_internal[idx2].get_dst_pid();
+    }while(xiter_set.contains(pid));
   }
 
   return xiter;
@@ -1177,7 +1131,9 @@ Node LGraph::create_node(const Node &old_node) {
     new_node = create_node(op);
   }
 
-  for (const auto &old_dpin : old_node.out_setup_pins()) {
+  // TODO: What happens to all the node/pin attributes??
+  for (const auto &old_dpin : old_node.out_connected_pins()) {
+    // WARNING: If pin has bits, but it is not connected, the attribute is not copied
     auto new_dpin = new_node.setup_driver_pin_raw(old_dpin.get_pid());
     new_dpin.set_bits(old_dpin.get_bits());
   }
