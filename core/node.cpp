@@ -411,11 +411,7 @@ XEdge_iterator Node::inp_edges_ordered_reverse() const { return current_g->inp_e
 XEdge_iterator Node::out_edges_ordered_reverse() const { return current_g->out_edges_ordered_reverse(*this); }
 
 Node_pin_iterator Node::inp_connected_pins() const { return current_g->inp_connected_pins(*this); }
-
 Node_pin_iterator Node::out_connected_pins() const { return current_g->out_connected_pins(*this); }
-
-Node_pin_iterator Node::inp_setup_pins() const { return current_g->inp_setup_pins(*this); }
-Node_pin_iterator Node::out_setup_pins() const { return current_g->out_setup_pins(*this); }
 
 Node_pin_iterator Node::inp_drivers(const absl::flat_hash_set<Node::Compact> &exclude) const {
   return current_g->inp_drivers(*this, exclude);

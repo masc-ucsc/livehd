@@ -36,6 +36,7 @@ cc_binary(
             "//pass/punch:pass_punch",
             "//pass/sample:pass_sample",
             "//pass/semantic:pass_semantic",
+            "//pass/submatch:pass_submatch",
             "//pass/compiler:pass_compiler",
 
             #add dependencies to new passes here

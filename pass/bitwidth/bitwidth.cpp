@@ -804,8 +804,7 @@ void Bitwidth::bw_pass(LGraph *lg) {
     }
   }
 
-
-  for(auto dpin:lg->get_graph_output_node(hier).out_setup_pins()) {
+  for(auto dpin:lg->get_graph_output_node(hier).out_connected_pins()) {
     auto spin = dpin.get_sink_from_output();
     if (!spin.has_inputs())
       continue;
