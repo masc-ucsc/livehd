@@ -464,11 +464,11 @@ void Semantic_check::resolve_out_of_scope() {
     if (!is_a_number(node.first) && node.first != "true" && node.second != "false" && !in_in_scope_stack(node.first) && write_dict.count(node.first) == 0 && !is_temp_var(node.first) && functions.count(node.first) == 0) {
       out_of_scope_vars.push_back(node.first);
     }
+   fmt::print("Printing the read_dict:{}, {}\n", node.first, node.second);
   }
 }
 
-void Semantic_check::check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_opr, const Lnast_ntype node_type,
-                                         std::string_view stmt_name) {
+void Semantic_check::check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_opr, const Lnast_ntype node_type, std::string_view stmt_name) {
   if (!lnast->has_single_child(lnidx_opr)) {
 
     // Vector for add_to_rhs_list()
