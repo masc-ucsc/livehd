@@ -35,15 +35,18 @@ void pass_submatch::check_lec(LGraph *g) {
   fmt::print("TODO: implement pass\n");
   //-----------------------------------------------------------------------------------------------------
 
-  absl::flat_hash_map<uint64_t, Node_pin::Compact> hash2dpin;
-  absl::flat_hash_map<Node_pin::Compact, uint64_t> dpin2hash;
+  absl::flat_hash_map<uint64_t, Node_pin::Compact_driver> hash2dpin;
+  absl::flat_hash_map<Node_pin::Compact_driver, uint64_t> dpin2hash;
+  absl::flat_hash_map<Node_pin::Compact_driver, uint64_t> dpin2depth;
 
   for (const auto node : g->forward()) {
     // sat.generate_model();
 
     std::vector<uint64_t> i_hash;
+
+    uint64_t i_depth = 0;
     for(auto e:node.inp_edges()) {
-      auto it = dpin2hash.find(e.driver.get_compact());
+      auto it = dpin2hash.find(e.driver.get_compact_driver());
       if (it == dpin2hash.end()) {
         uint64_t n = e.driver.get_pid();
         n <<= 8;
@@ -53,11 +56,17 @@ void pass_submatch::check_lec(LGraph *g) {
         i_hash.emplace_back(n);
       }else{
         i_hash.emplace_back(it->second ^ e.sink.get_pid());
+
+        const auto it2 = dpin2depth.find(e.driver.get_compact_driver());
+        if (it2->second>i_depth)
+          i_depth = it2->second;
       }
     }
     std::sort(i_hash.begin(), i_hash.begin()+i_hash.size());
 
     uint64_t i_key = mmap_lib::woothash64(i_hash.data(), i_hash.size()*8);
+    if (node.is_type_loop_breaker())
+      i_depth = 0;
 
     for(auto dpin:node.out_connected_pins()) {
       uint64_t n = dpin.get_pid();
@@ -67,10 +76,11 @@ void pass_submatch::check_lec(LGraph *g) {
 
       uint64_t key = (i_key<<2)^c_key;
 
-      fmt::print("dpin:{} i_key:{} c_key:{} key:{}\n",dpin.debug_name(), i_key, c_key, key);
+      fmt::print("dpin:{} i_key:{} c_key:{} key:{} d:{}\n",dpin.debug_name(), i_key, c_key, key, i_depth + 1);
 
-      dpin2hash[dpin.get_compact()] = key;
-      hash2dpin[key] = dpin.get_compact();
+      dpin2hash[dpin.get_compact_driver()] = key;
+      dpin2depth[dpin.get_compact_driver()] = i_depth + 1;
+      hash2dpin[key] = dpin.get_compact_driver();
     }
   }
 }
