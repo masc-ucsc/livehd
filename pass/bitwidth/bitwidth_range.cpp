@@ -136,17 +136,9 @@ void Bitwidth_range::set_ubits(Bits_t size) {
   }
 }
 
-// FIXME->sh: the following might be a false conclusion!!!!!
-// Note: I change the semantic to -> get the least bits needed to represent both max/min together,
-//           only when the min is too negative that the max_bits cannot represent, we need to increase 
-//           one bit, this could perfectly avoid the Tposs extra-1-bit ripple problem.
-//           e.g. (max, min) = (15, -1) ---> bits 4
-//                (max, min) = (15, -8) ---> bits 4
-//                (max, min) = (15, -9) ---> bits 5! since -9 needs 5sbits
-// Note: the only node affected by this semantic change is DP-assign, where the mask need to mask all 
-//       possible value
-//               
-Bits_t Bitwidth_range::get_bits() const {
+
+// we get sbits from the max/min since every thing in lgraph should be initially signed                
+Bits_t Bitwidth_range::get_sbits() const {
   if (overflow) {
     Bits_t bits = max;
     if (min < 0)
@@ -156,17 +148,20 @@ Bits_t Bitwidth_range::get_bits() const {
     return bits;
   }
 
-  Bits_t bits = 1;
-  if (max) {
-    auto abs_max = abs(max);
-    bits = (sizeof(uint64_t) * 8 - __builtin_clzll(abs_max));
-  }
+  auto a = Lconst(max).get_bits(); // 15 -> 5sbits
+  auto b = Lconst(min).get_bits();
+  auto bits =  std::max(a,b);
+
+  /* Bits_t bits = 1; */
+
+  /* if (max) { // bits max + 1 -> signed always -> get sbits */
+  /*   auto abs_max = abs(max); */
+  /*   bits = (sizeof(uint64_t) * 8 - __builtin_clzll(abs_max)); */
+  /* } */
   
   //
   // original code     
-  if (min < 0)
-    bits++;
-  /* if (min < -pow(2, ceil(log2(max)))) */
+  /* if (min < 0) */
   /*   bits++; */
 
 
@@ -175,4 +170,7 @@ Bits_t Bitwidth_range::get_bits() const {
   return bits;
 }
 
-void Bitwidth_range::dump() const { fmt::print("max:{} min:{} {}\n", max, min, overflow ? "overflow" : ""); }
+void Bitwidth_range::dump() const { 
+  //(max, min, sbis, overflow)
+  fmt::print("({}, {}, {}b) {}\n", max, min, get_sbits(), overflow ? "overflow" : ""); 
+} 

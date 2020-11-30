@@ -5,7 +5,7 @@ module adder_stage (
   output reg [3:0] out
 );
 
-wire [3:0] adder_next = $signed(a) + $signed(b);
+wire [3:0] adder_next = $signed({1'b0, a}) + $signed({1'b0, b});
 
 always @ (posedge clock) begin 
   out <= adder_next;

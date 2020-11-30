@@ -44,7 +44,7 @@ public:
   bool   is_overflow() const { return overflow; };
   void   set_sbits(Bits_t size);
   void   set_ubits(Bits_t size);
-  Bits_t get_bits() const;
+  Bits_t get_sbits() const;
   Lconst get_max() const { return to_lconst(overflow, max); };
   Lconst get_min() const { return to_lconst(overflow, min); };
   int    get_raw_max() const { return max; };

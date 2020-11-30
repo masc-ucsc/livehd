@@ -1,13 +1,10 @@
 #!/bin/bash
 rm -rf ./lgdb
 
-pts_todo='RegXor Decrementer GCD regex MemoryController Rob ICache HwachaSequencer'
-pts_handle_1st='TrivialArith '
-pts='GCD NotAnd Test1 Test2 BundleCombiner 
-     Flop Tail RegisterSimple Register '
+pts_todo='MemoryController Rob ICache HwachaSequencer'
+pts_handle_1st='TrivialArith regex GCD Test3 coverage'
 
-
-pts='Trivial TrivialAdd '
+pts='Decrementer RegXor Trivial TrivialAdd NotAnd Test1 Test2 BundleCombiner Flop Tail RegisterSimple Register'
 
 pts_hier='FinalVal2Test'
 pts_hier2='FinalValTest'
@@ -18,9 +15,7 @@ pts_hier='FPU'
 pts_hier9='RocketCore'
 
 #SimpleBitOps Ops -- parity and mod op not in lnast_tolg
-
 #HwachaSequencer -- printf, pad, stop
-
 #SubModule BundleConnect -- submodules
 #Test3 -- fails because of DCE
 #Test4 -- as_... ops in FIRRTL
