@@ -3,17 +3,16 @@
 pts_to_be_merged='io_gen io_gen2 io_gen3 test2'
 pts_tuple_dbg='lhs_wire3 funcall_unnamed2
                firrtl_gcd counter_tup counter2'
-pts_unsigned_issue='firrtl_gcd '
+pts_unsigned_issue='firrtl_gcd'
 
 
 pts='if firrtl_tail2 firrtl_tail3 tuple_copy2 hier_tuple_io reg__q_pin hier_tuple2 
-     capricious_bits2 capricious_bits4 hier_tuple if2 bits_rhs 
-     reg_bits_set tuple_copy hier_tuple3 lhs_wire lhs_wire2 scalar_tuple logic 
+     capricious_bits2 capricious_bits4 hier_tuple if2 bits_rhs adder_stage counter
+     reg_bits_set tuple_copy hier_tuple3 lhs_wire lhs_wire2 scalar_tuple logic counter_nested_if
      firrtl_tail attr_set capricious_bits out_ssa ssa_rhs tuple_if firrtl_gcd_3bits'
-# pts='nested_if adder_stage counter counter_nested_if'
-# pts='firrtl_gcd_3bits'
-# pts='nested_if'
 # pts='firrtl_gcd'
+# pts='nested_if'
+pts='if nested_if'
 
 # Note: in this bash script, you MUST specify top module name AT FIRST POSITION
 pts_hier1='top sum top'
@@ -50,7 +49,7 @@ Pyrope_compile () {
         exit 1
     fi
 
-    ${LGSHELL} "inou.pyrope files:${PATTERN_PATH}/${pt}.prp |> pass.compiler gviz:true"
+    ${LGSHELL} "inou.pyrope files:${PATTERN_PATH}/${pt}.prp |> pass.compiler gviz:true top:${pt}"
     ret_val=$?
     if [ $ret_val -ne 0 ]; then
       echo "ERROR: could not compile with pattern: ${pt}.prp!"

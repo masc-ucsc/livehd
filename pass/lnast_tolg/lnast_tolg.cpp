@@ -160,8 +160,18 @@ void Lnast_tolg::process_ast_phi_op(LGraph *lg, const Lnast_nid &lnidx_phi) {
     I(name2dpin.count(reg_qpin_name));
     auto reg_qpin = name2dpin[reg_qpin_name];
 
+
+    Node reg_node;
+    if (reg_qpin.get_node().is_type_attr()) {
+      reg_node = reg_qpin.get_node().setup_sink_pin("name").get_driver_node();
+    } else {
+      I(reg_qpin.get_node().is_type_flop());
+      reg_node = reg_qpin.get_node();
+    }
+
+
+
     // (2) remove the previous D-pin edge from the #reg
-    auto reg_node = reg_qpin.get_node();
     I(reg_node.setup_sink_pin("din").inp_edges().size() <= 1);
     if (reg_node.setup_sink_pin("din").inp_edges().size() == 1) {
       reg_node.setup_sink_pin("din").inp_edges().begin()->del_edge();
@@ -362,15 +372,26 @@ void Lnast_tolg::process_ast_dp_assign_op(LGraph *lg, const Lnast_nid &lnidx_dp_
   setup_dpin_ssa(name2dpin[c0_dp_name], c0_dp_vname, lnast->get_subs(c0_dp));
 
   if (is_register(c0_dp_name)) {
-    auto reg_node = name2dpin[c0_dp_vname].get_node();
-    I(reg_node.get_type_op() == Ntype_op::Sflop);
-    I(reg_node.setup_sink_pin("din").inp_edges().size() <= 1);
-    if (reg_node.setup_sink_pin("din").inp_edges().size() == 1) {
-      reg_node.setup_sink_pin("din").inp_edges().begin()->del_edge();
+    auto reg_qpin = name2dpin[c0_dp_vname];
+
+    Node_pin reg_data_pin;
+    if (reg_qpin.get_node().is_type_attr()) {
+      auto real_reg_node = reg_qpin.get_node().setup_sink_pin("name").get_driver_node();
+      reg_data_pin = real_reg_node.setup_sink_pin("din");
+    } else {
+      I(reg_qpin.get_node().is_type_flop());
+      reg_data_pin = reg_qpin.get_node().setup_sink_pin("din");
     }
+
+
+    I(reg_data_pin.get_node().get_type_op() == Ntype_op::Sflop);
+    I(reg_data_pin.inp_edges().size() <= 1);
+
+    if (reg_data_pin.inp_edges().size() == 1) 
+      reg_data_pin.inp_edges().begin()->del_edge();
+    
     auto dpin = aset_node.setup_driver_pin("Y");
-    auto spin = reg_node.setup_sink_pin("din");
-    lg->add_edge(dpin, spin);
+    dpin.connect_sink(reg_data_pin);
   }
 }
 
@@ -816,7 +837,13 @@ Node Lnast_tolg::setup_node_opr_and_lhs(LGraph *lg, const Lnast_nid &lnidx_opr) 
     else
       reg_qpin = name2dpin[lhs_vname];
 
-    reg_data_pin = reg_qpin.get_node().setup_sink_pin("din");
+    if (reg_qpin.get_node().is_type_attr()) {
+      auto real_reg_node = reg_qpin.get_node().setup_sink_pin("name").get_driver_node();
+      reg_data_pin = real_reg_node.setup_sink_pin("din");
+    } else {
+      I(reg_qpin.get_node().is_type_flop());
+      reg_data_pin = reg_qpin.get_node().setup_sink_pin("din");
+    }
   }
 
 
@@ -901,7 +928,7 @@ Node_pin Lnast_tolg::setup_node_assign_and_lhs(LGraph *lg, const Lnast_nid &lnid
       // (2) find the corresponding #reg by its qpin_name, #reg
       I(name2dpin.count(lhs_vname));
       auto reg_qpin = name2dpin[lhs_vname];
-      //DEBUG
+      // when an attr is set on the register
       if (reg_qpin.get_node().is_type_attr()) {
         auto attr_node = reg_qpin.get_node();
         reg_qpin = attr_node.get_sink_pin("name").get_driver_pin();
@@ -1077,7 +1104,7 @@ Ntype_op Lnast_tolg::decode_lnast_op(const Lnast_nid &lnidx_opr) {
 
 
 
-void Lnast_tolg::process_ast_attr_set_op (LGraph *lg, const Lnast_nid &lnidx_aset) {
+void Lnast_tolg::process_ast_attr_set_op(LGraph *lg, const Lnast_nid &lnidx_aset) {
 
   auto c0_aset      = lnast->get_first_child(lnidx_aset);
   auto c1_aset      = lnast->get_sibling_next(c0_aset);
@@ -1102,7 +1129,7 @@ void Lnast_tolg::process_ast_attr_set_op (LGraph *lg, const Lnast_nid &lnidx_ase
     if (!reg_existed) {
       vn_dpin = setup_ref_node_dpin(lg, c0_aset);
       lg->add_edge(vn_dpin, vn_spin);
-      //DEBUG
+      // qpin should move to attr node dpin if any attr set
       name2dpin[vname] = aset_node.setup_driver_pin("Y");
     } else {
       vn_dpin = name2dpin[vname];

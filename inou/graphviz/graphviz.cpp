@@ -57,6 +57,8 @@ std::string Graphviz::graphviz_legalize_name(std::string_view name) {
       legal += "_";
     } else if (c == 35) {
       legal += "#";
+    } else if (c == 58) {
+      legal += ":";
     } else {
       legal += "_char" + std::to_string(c) + "_";
     }
@@ -157,7 +159,7 @@ void Graphviz::populate_lg_data(LGraph *g, std::string_view dot_postfix) {
       continue;
     std::string node_info;
     if (!verbose) {
-      auto pos  = node.debug_name().find("_lg_");
+      auto pos  = node.debug_name().find("_g");
       node_info = node.debug_name().substr(0, pos);  // get rid of the lgraph name
       node_info = graphviz_legalize_name(std::regex_replace(node_info, std::regex("node_"), "n"));
     } else {
