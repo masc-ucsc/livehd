@@ -35,7 +35,11 @@ void pass_submatch::check_lec(LGraph *g) {
   fmt::print("TODO: implement pass\n");
   //-----------------------------------------------------------------------------------------------------
 
-  absl::flat_hash_map<uint64_t, Node_pin::Compact_driver> hash2dpin;
+  struct Hash_attr {
+    int depth;
+    int n;
+  };
+  absl::flat_hash_map<uint64_t, Hash_attr> hash2attr;
   absl::flat_hash_map<Node_pin::Compact_driver, uint64_t> dpin2hash;
   absl::flat_hash_map<Node_pin::Compact_driver, uint64_t> dpin2depth;
 
@@ -80,7 +84,13 @@ void pass_submatch::check_lec(LGraph *g) {
 
       dpin2hash[dpin.get_compact_driver()] = key;
       dpin2depth[dpin.get_compact_driver()] = i_depth + 1;
-      hash2dpin[key] = dpin.get_compact_driver();
+      hash2attr[key].depth = i_depth + 1;
+      hash2attr[key].n++;
     }
+  }
+
+  for(const auto it:hash2attr) {
+    const auto &attr = it.second;
+    fmt::print("hash:{} depth:{} n:{} s:{}\n", it.first, attr.depth, attr.n, attr.depth*attr.n);
   }
 }
