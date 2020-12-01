@@ -876,7 +876,7 @@ void Bitwidth::bw_pass(LGraph *lg) {
 
     //FIXME->sh: optimize MSB zeros at the final global BW algorithm.
     if (hier) {
-      for(auto dpin : lg->get_graph_output_node(hier).out_connected_pins()) {
+      lg->each_graph_output([this](Node_pin &dpin) {
         fmt::print("hello!\n");
         auto dpin_bits = dpin.get_bits();
         fmt::print("graph out:{}, bits:{}\n", dpin.debug_name(), dpin.get_bits());
@@ -888,7 +888,7 @@ void Bitwidth::bw_pass(LGraph *lg) {
           if (min >= 0 && dpin_bits > 1)
             dpin.set_bits(bw->second.get_sbits() - 1);
         }
-      }
+      }, true);
     }
   }
 #endif
