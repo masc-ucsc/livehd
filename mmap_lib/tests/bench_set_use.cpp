@@ -16,12 +16,20 @@
 
 #include "mmap_map.hpp"
 
-#define BENCH_OUT_SIZE 500
-#define BENCH_INN_SIZE 200
+#include "mmap_vset.hpp" // including the visitor set
+
+#define BENCH_OUT_SIZE 500 // try bigger sizes
+#define BENCH_INN_SIZE 200 // try bigger sizes
 
 //#define ABSEIL_USE_MAP
 //#define USE_MAP_FALSE
 
+/* Seems to contain possible tests for dense/sparse traversals of a set
+ *
+ * 
+ *
+ *
+ */
 void random_std_set(int max) {
   Lrand<int> rng;
 
@@ -29,6 +37,12 @@ void random_std_set(int max) {
 
   std::unordered_set<uint32_t> map;
 
+  // INSERT/ERASE DENSE TEST
+	// runs about (500 * 200) times
+	// each run:
+	//   --> generate rand num, insert that num into the map
+	//   --> generate another rand num, erase that num from the map
+	//   --> generate another rand num, if this num is not the end of the map, erase
   for (int n = 1; n < BENCH_OUT_SIZE; ++n) {
     for (int i = 0; i < BENCH_INN_SIZE; ++i) {
       auto pos = rng.max(max);
@@ -39,10 +53,15 @@ void random_std_set(int max) {
         map.erase(pos);
     }
   }
-
   b.sample("insert/erase dense");
-  int conta = 0;
-  for (int i = 0; i < BENCH_INN_SIZE; ++i) {
+	
+	int conta = 0;
+  
+	// TRAVERSAL SPARSE TEST
+	// runs (200) times
+	// each run:
+	//   --> 
+	for (int i = 0; i < BENCH_INN_SIZE; ++i) {
     for (auto it = map.begin(), end = map.end(); it != end;++it) {
       conta++;
     }
@@ -52,10 +71,10 @@ void random_std_set(int max) {
       map.erase(pos);
   }
   b.sample("traversal sparse");
-
   printf("inserts random %d\n",conta);
-  conta = 0;
+  
 
+	conta = 0;
   for (int i = 0; i < max; ++i) {
     map.erase(rng.max(max));
     map.erase(rng.max(max));
@@ -69,8 +88,8 @@ void random_std_set(int max) {
     }
   }
   b.sample("traversal dense");
-
   printf("inserts random %d\n",conta);
+
 }
 
 void random_robin_set(int max) {
