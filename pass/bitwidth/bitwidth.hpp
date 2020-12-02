@@ -4,6 +4,7 @@
 #include "bitwidth_range.hpp"
 #include "node.hpp"
 #include "node_pin.hpp"
+#include "lgedgeiter.hpp"
 #include "pass.hpp"
 #include "lgedgeiter.hpp"
 
@@ -36,7 +37,7 @@ protected:
   void process_logic_and(Node &node, XEdge_iterator &inp_edges);
   void process_attr_get(Node &node);
   void process_attr_set_dp_assign(Node &node);
-  void process_attr_set_new_attr(Node &node);
+  void process_attr_set_new_attr(Node &node, Fwd_edge_iterator::Fwd_iter git);
   void process_attr_set_propagate(Node &node);
   void process_attr_set(Fwd_edge_iterator::Fwd_iter &fwd_it, Node &node);
   Node insert_tposs_node(Node &node_attr);
