@@ -15,20 +15,17 @@ void LGraph::each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)
 
   auto hidx = hierarchical? Hierarchy_tree::root_index() : Hierarchy_tree::invalid_index();
 
-  Port_ID pid = 1;
-  for(const auto &io_pin:get_self_sub_node().get_io_pins()) {
-    if (io_pin.is_invalid()) {
-      ++pid;
-      continue;
-    }
+  for(const auto *io_pin:get_self_sub_node().get_io_pins()) {
+    Port_ID pid = get_self_sub_node().get_instance_pid(io_pin->name);
 
     Index_ID nid = Hardcoded_output_nid;
-    if (io_pin.is_input())
+    if (io_pin->is_input())
       nid = Hardcoded_input_nid;
     auto idx = find_idx_from_pid(nid, pid);
-    I(idx); // if it does not exist, we should create it (but does it happen?)
-    Node_pin pin(this, this, hidx, idx, pid, false);
-    pin_pair.emplace_back(std::make_pair(pin, io_pin.graph_io_pos));
+    if (idx) {
+      Node_pin pin(this, this, hidx, idx, pid, false);
+      pin_pair.emplace_back(std::make_pair(pin, io_pin->graph_io_pos));
+    }
 
     ++pid;
   }
@@ -86,16 +83,16 @@ void LGraph::each_graph_input(std::function<void(Node_pin &pin)> f1, bool hierar
 
   auto hidx = hierarchical? Hierarchy_tree::root_index() : Hierarchy_tree::invalid_index();
 
-  Port_ID pid = 1;
-  for(const auto &io_pin:get_self_sub_node().get_io_pins()) {
-    if (io_pin.is_input()) {
-      I(!io_pin.is_invalid());
+  for(const auto *io_pin:get_self_sub_node().get_io_pins()) {
+    I(!io_pin->is_invalid());
+    if (io_pin->is_input()) {
+      Port_ID pid = get_self_sub_node().get_instance_pid(io_pin->name);
       auto idx = find_idx_from_pid(Hardcoded_input_nid, pid);
-      I(idx); // if it does not exist, we should create it (but does it happen?)
-      Node_pin dpin(this, this, hidx, idx, pid, false);
-      f1(dpin);
+      if (idx) {
+        Node_pin dpin(this, this, hidx, idx, pid, false);
+        f1(dpin);
+      }
     }
-    ++pid;
   }
 }
 
@@ -105,16 +102,16 @@ void LGraph::each_graph_output(std::function<void(Node_pin &pin)> f1, bool hiera
 
   auto hidx = hierarchical? Hierarchy_tree::root_index() : Hierarchy_tree::invalid_index();
 
-  Port_ID pid = 1;
-  for(const auto &io_pin:get_self_sub_node().get_io_pins()) {
-    if (io_pin.is_output()) {
-      I(!io_pin.is_invalid());
+  for(const auto *io_pin:get_self_sub_node().get_io_pins()) {
+    I(!io_pin->is_invalid());
+    if (io_pin->is_output()) {
+      Port_ID pid = get_self_sub_node().get_instance_pid(io_pin->name);
       auto idx = find_idx_from_pid(Hardcoded_output_nid, pid);
-      I(idx); // if it does not exist, we should create it (but does it happen?)
-      Node_pin dpin(this, this, hidx, idx, pid, false);
-      f1(dpin);
+      if (idx) {
+        Node_pin dpin(this, this, hidx, idx, pid, false);
+        f1(dpin);
+      }
     }
-    ++pid;
   }
 }
 

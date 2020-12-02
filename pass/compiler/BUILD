@@ -5,9 +5,11 @@ cc_library(
     hdrs = glob(["*.hpp"]),
     visibility = ["//visibility:public"],
     includes = ["."],
+    alwayslink=True,
     deps = [
         # "//pass/bitwidth:pass_bitwidth",
         "//pass/cprop:pass_cprop",
+        "//pass/gioc:pass_gioc",
         "//pass/bitwidth:pass_bitwidth",
         "//pass/lnast_tolg:pass_lnast_tolg",
         "//pass/common:pass",
@@ -16,3 +18,16 @@ cc_library(
 )
 
 
+sh_test(
+    name = "pyrope_compile.sh",
+    srcs = ["tests/pyrope_compile.sh"],
+    # tags = ["manual"],
+    # tags = ["fixme"],
+    data = [
+        "//main:lgshell",
+        "//inou/pyrope:pyrope_tests"
+        ],
+    deps = [
+        "//inou/yosys:scripts",
+    ]
+)

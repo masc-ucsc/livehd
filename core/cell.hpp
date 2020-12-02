@@ -6,6 +6,7 @@
 #include <array>
 #include <string_view>
 
+#include "absl/container/flat_hash_map.h"
 
 enum class Ntype_op : uint8_t {
   Invalid, // Detect bugs/unset (not used anywhere)
@@ -110,6 +111,9 @@ protected:
 
     "Last_invalid"
   };
+
+  inline static absl::flat_hash_map<std::string, Ntype_op> cell_name_map;
+
   class _init {
   public:
     _init();
@@ -128,10 +132,6 @@ public:
       && static_cast<int>(op)<=static_cast<int>(Ntype_op::Const);
   }
 
-  static inline constexpr bool is_multi_driver(Ntype_op op) {
-    return op==Ntype_op::AttrSet || op==Ntype_op::Sub || op==Ntype_op::CompileErr;
-  }
-
   static inline constexpr bool is_multi_sink(Ntype_op op) {
     return op != Ntype_op::Mult
         && op != Ntype_op::And
@@ -148,6 +148,15 @@ public:
   static inline constexpr bool is_unlimited_driver(Ntype_op op) {
     return op==Ntype_op::Sub || op==Ntype_op::IO || op==Ntype_op::CompileErr;
   }
+  static inline constexpr bool is_multi_driver(Ntype_op op) {
+    return op==Ntype_op::AttrSet || is_unlimited_driver(op);
+  }
+  static inline constexpr bool is_single_driver_per_pin(Ntype_op op) {
+    if (is_unlimited_sink(op))
+      return true;
+    auto c = sink_pid2name[0][static_cast<std::size_t>(op)]; // Is first port Upper or lower case
+    return c[0]>='a' && c[0]<='z';
+  }
 
   // Carefully crafted call so that it is solved at compile time most of the time
   static inline constexpr int get_sink_pid(Ntype_op op, std::string_view str) {
@@ -156,14 +165,17 @@ public:
     if (c>='a' && c<='f') {
       int pid = c-'a';
       assert(sink_name2pid[str[0]][static_cast<std::size_t>(op)]==pid);
+      assert(get_sink_name(op, pid) == str);
       return pid;
     }
     if (c=='A') {
       assert(sink_name2pid[str[0]][static_cast<std::size_t>(op)]==0);
+      assert(get_sink_name(op, 0) == str);
       return 0;
     }
     if (c=='B') {
       assert(sink_name2pid[str[0]][static_cast<std::size_t>(op)]==1);
+      assert(get_sink_name(op, 1) == str);
       return 1;
     }
 
@@ -180,10 +192,14 @@ public:
 
     auto pid = sink_name2pid[str[0]][static_cast<std::size_t>(op)];
     assert(pid!=-1);
+    assert(get_sink_name(op, pid) == str);
     return pid;
   }
 
   static inline constexpr std::string_view get_sink_name(Ntype_op op, int pid) {
+    if (pid>10)
+      return "x";
+
     auto name = sink_pid2name[pid][static_cast<std::size_t>(op)];
     assert(name!="invalid");
     return name;
@@ -223,6 +239,13 @@ public:
 
   static std::string_view get_name(Ntype_op op) {
     return cell_name[static_cast<int>(op)];
+  }
+
+  static Ntype_op get_op(std::string_view name) {
+    const auto it = cell_name_map.find(name);
+    if (it == cell_name_map.end())
+      return Ntype_op::Invalid;
+    return it->second;
   }
 
 };

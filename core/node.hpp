@@ -2,6 +2,7 @@
 #pragma once
 
 #include "absl/container/flat_hash_set.h"
+//#include "absl/container/inlined_vector.h"
 
 #include "mmap_map.hpp"
 #include "lconst.hpp"
@@ -13,7 +14,6 @@
 
 class Ann_place;
 using Node_iterator = std::vector<Node>;
-
 
 class Node {
 protected:
@@ -273,6 +273,7 @@ public:
   }
   bool             is_type_const() const;
   bool             is_type_attr() const;
+  bool             is_type_flop() const;
   bool             is_type_tup() const;
   bool             is_type_io() const {
     return nid == Hardcoded_input_nid || nid == Hardcoded_output_nid;
@@ -308,9 +309,6 @@ public:
 
   Node_pin_iterator out_connected_pins() const;
   Node_pin_iterator inp_connected_pins() const;
-
-  Node_pin_iterator out_setup_pins() const;
-  Node_pin_iterator inp_setup_pins() const;
 
   XEdge_iterator out_edges() const;
   XEdge_iterator inp_edges() const;

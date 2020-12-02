@@ -1,7 +1,7 @@
-foo.a.b.__bits = 3
+foo.a.b.__ubits = 3
 foo.a.b = 5
 
-%out  = foo.a.b.__bits
+%out  = foo.a.b.__ubits
 %out2 = foo.a.b
 
 c = 3

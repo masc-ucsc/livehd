@@ -24,7 +24,7 @@ private:
   const std::string odir;
 
 
-  static void populate_lg_handle_xedge(const Node &node, const XEdge &out, std::string &data);
+  static void populate_lg_handle_xedge(const Node &node, const XEdge &out, std::string &data, bool verbose);
   static std::string graphviz_legalize_name(std::string_view name);
   void populate_lg_data(LGraph *g, std::string_view dot_postfix = "");
 

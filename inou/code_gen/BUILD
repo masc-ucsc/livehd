@@ -6,6 +6,7 @@ cc_library(
     hdrs = glob(["*.hpp"]),
     visibility = ["//visibility:public"],
     includes = ["."],
+    alwayslink=True,
     deps = [
         "//pass/common:pass",
     ],
@@ -18,7 +19,6 @@ sh_test(
     name = "prp_v_LEC_test.sh",
     srcs = ["tests/prp_v_LEC_test.sh"],
     data = [
-        "//inou/yosys:liblgraph_yosys.so",
         "//inou/pyrope:pyrope_tests",
         "//main:lgshell",
     ],

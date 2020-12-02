@@ -98,9 +98,9 @@ void Pass_sample::do_wirecount(LGraph *g, int indent) {
       int n_inp = 0;
       int n_out = 0;
       for (auto io_pin : sub_lg->get_self_sub_node().get_io_pins()) {
-        if (io_pin.is_input())
+        if (io_pin->is_input())
           n_inp++;
-        if (io_pin.is_output())
+        if (io_pin->is_output())
           n_out++;
       }
       fmt::print("{}  module {} BBOX : inputs {} outputs {}\n", space, sub_lg->get_name(), n_inp, n_out);
@@ -190,7 +190,7 @@ void Pass_sample::create_sample_graph(LGraph *g) {
   shr_out_drv.set_name("shr_out");
 
   auto s_const = lg->create_node_const(Lconst(2));
-  I(s_const.get_driver_pin().get_bits() == 2);  // Automatically set bits for const
+  I(s_const.get_driver_pin().get_bits() == 3);  // Automatically set bits for const
 
   auto a_sink = shr_node.setup_sink_pin("a");
   auto b_sink = shr_node.setup_sink_pin("b");

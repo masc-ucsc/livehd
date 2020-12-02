@@ -6,6 +6,7 @@ cc_library(
     hdrs = glob(["*.hpp"]),
     visibility = ["//visibility:public"],
     includes = ["."],
+    alwayslink=True,
     deps = [
         "//pass/common:pass",
     ],
@@ -26,7 +27,6 @@ sh_test(
     tags = ["fixme"],
     srcs = ["tests/pyrope_test.sh"],
     data = [
-        "//inou/yosys:liblgraph_yosys.so",
         "//main:lgshell",
         ":pyrope_tests",
         "//inou/yosys:verilog_tests",
@@ -34,20 +34,19 @@ sh_test(
 )
 
 
-sh_test(
-    name = "lnast_prp_test.sh",
-    srcs = ["tests/lnast_prp_test.sh"],
-    # tags = ["manual"],
-    # tags = ["fixme"],
-    data = [
-        "//inou/yosys:liblgraph_yosys.so",
-        "//main:lgshell",
-        ":pyrope_tests"
-        ],
-    deps = [
-        "//inou/yosys:scripts",
-    ]
-)
+# sh_test(
+#     name = "lnast_prp_test.sh",
+#     srcs = ["tests/lnast_prp_test.sh"],
+#     # tags = ["manual"],
+#     # tags = ["fixme"],
+#     data = [
+#         "//main:lgshell",
+#         ":pyrope_tests"
+#         ],
+#     deps = [
+#         "//inou/yosys:scripts",
+#     ]
+# )
 
 
 cc_binary(

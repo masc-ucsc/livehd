@@ -6,6 +6,7 @@ cc_library(
     hdrs = glob(["pass_mockturtle.hpp"]),
     visibility = ["//visibility:public"],
     includes = ["."],
+    alwayslink=True,
     deps = [
         "//pass/common:pass",
         "@mockturtle//:mockturtle",
@@ -28,7 +29,6 @@ sh_test(
     name = "mt_test.sh",
     srcs = ["tests/mt_test.sh"],
     data = [
-        "//inou/yosys:liblgraph_yosys.so",
         "//main:lgshell",
         "//inou/yosys:verilog_tests"
         ],

@@ -5,6 +5,7 @@ cc_library(
     hdrs = glob(["*.hpp"]),
     visibility = ["//visibility:public"],
     includes = ["."],
+    alwayslink=True,
     deps = [
         "//inou/firrtl:inou_firrtl_cpp",
         "//pass/common:pass",

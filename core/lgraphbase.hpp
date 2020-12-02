@@ -33,7 +33,7 @@ protected:
   // Index_ID         get_space_input_pin(const Index_ID master_nid, const Index_ID idx, bool large = false);
   Index_ID create_node_int();
 
-  Index_ID add_edge_int(Index_ID dst_nid, Port_ID dst_pid, Index_ID src_nid, Port_ID inp_pid);
+  void add_edge_int(Index_ID dst_nid, Port_ID dst_pid, Index_ID src_nid, Port_ID inp_pid);
 
   Port_ID recompute_io_ports(const Index_ID track_nid);
 
@@ -73,13 +73,6 @@ public:
   virtual void sync();
 
   void emplace_back();
-
-#if 1
-  // WARNING: deprecated: Use get/set_bits(const Node_pin)
-  void     set_bits_pid(Index_ID nid, Port_ID pid, uint32_t bits);
-  uint32_t get_bits_pid(Index_ID nid, Port_ID pid) const;
-  uint32_t get_bits_pid(Index_ID nid, Port_ID pid);
-#endif
 
   void add_edge(const Index_ID dst_idx, const Index_ID src_idx) {
     I(src_idx < node_internal.size());

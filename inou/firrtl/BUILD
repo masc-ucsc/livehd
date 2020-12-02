@@ -17,14 +17,15 @@ cc_library(
     name = "inou_firrtl_cpp",
     srcs = [
         "inou_firrtl.cpp",
-        "fir_to_lnast.cpp",
-        "lnast_to_fir.cpp",
+        "fir_tolnast.cpp",
+        "lnast_tofir.cpp",
         "find_circuit_comps.cpp",
         "inou_firrtl.hpp",
     ],
     hdrs = ["inou_firrtl.hpp"],
     visibility = ["//visibility:public"],
     includes = ["."],
+    alwayslink=True,
     deps = [
         ":firrtl_cc_proto",
         "//pass/common:pass",
@@ -35,7 +36,6 @@ sh_test(
     name = "firrtl_test_livehd.sh",
     srcs = ["tests/firrtl_test_livehd.sh"],
     data = [
-        "//inou/yosys:liblgraph_yosys.so",
         "//inou/yosys:verilog_tests",
         "//main:lgshell",
     ],

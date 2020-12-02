@@ -14,20 +14,21 @@ cc_binary(
             "//inou/code_gen:inou_code_gen",
             "//inou/firrtl:inou_firrtl_cpp",
             "//inou/graphviz:inou_graphviz",
-#  later     "//inou/json:inou_json",
+            "//inou/json:inou_json",
             "//inou/liveparse:inou_liveparse",
             "//inou/pyrope:inou_pyrope",
             "//inou/slang:inou_slang",
-            "//inou/yosys:lgyosys-api",
+            "//inou/yosys:lgyosys",
 
             "//lgcpp/common:lgcpp",
             "//lgcpp/prplib:prplib",
 
             "//pass/bitwidth:pass_bitwidth",
             "//pass/common:pass",
+            "//pass/gioc:pass_gioc",
             "//pass/cprop:pass_cprop",
             "//pass/fplan:fplan",
-#Renau       "//pass/lec:pass_lec",
+            "//pass/lec:pass_lec",
             "//pass/lnast_fromlg:pass_lnast_fromlg",
             "//pass/lnast_tolg:pass_lnast_tolg",
             "//pass/lnastfmt:pass_lnastfmt",
@@ -35,22 +36,23 @@ cc_binary(
             "//pass/punch:pass_punch",
             "//pass/sample:pass_sample",
             "//pass/semantic:pass_semantic",
+            "//pass/submatch:pass_submatch",
             "//pass/compiler:pass_compiler",
 
             #add dependencies to new passes here
     ],
-    data = ["//inou/yosys:liblgraph_yosys.so",   # A bit special as only libraries are used in yosys -m XXX
+    data = [
+        "//inou/yosys:inou_yosys_scripts",
     ],
     visibility = ["//visibility:public"],
     #linkopts = ["-static"],
-    linkstatic=False,
+    #linkstatic=True,
 )
 
 sh_test(
     name = "lgshell_test.sh",
     srcs = ["tests/lgshell_test.sh"],
     data = [
-        "//inou/yosys:liblgraph_yosys.so",
         "//inou/yosys:verilog_tests",
         ":lgshell",
     ],
@@ -63,7 +65,6 @@ sh_test(
     name = "verilog.sh",
     srcs = ["tests/verilog.sh"],
     data = [
-        "//inou/yosys:liblgraph_yosys.so",
         "//inou/yosys:verilog_tests",
         ":lgshell",
         ],
@@ -77,7 +78,6 @@ sh_test(
     name = "verilog.sh-long",
     srcs = ["tests/verilog.sh"],
     data = [
-        "//inou/yosys:liblgraph_yosys.so",
         "//inou/yosys:verilog_tests",
         ":lgshell",
         ],

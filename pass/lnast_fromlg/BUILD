@@ -5,6 +5,7 @@ cc_library(
     hdrs = glob(["*.hpp"]),
     visibility = ["//visibility:public"],
     includes = ["."],
+    alwayslink=True,
     deps = [
         "//pass/common:pass",
     ]
@@ -14,7 +15,6 @@ sh_test(
     name = "lgtoln_verif_from_verilog.sh",
     srcs = ["tests/lgtoln_verif_from_verilog.sh"],
     data = [
-        "//inou/yosys:liblgraph_yosys.so",
         "//inou/yosys:verilog_tests",
         "//main:lgshell",
     ],
@@ -27,7 +27,6 @@ sh_test(
     name = "lgtoln_verif_from_pyrope.sh",
     srcs = ["tests/lgtoln_verif_from_pyrope.sh"],
     data = [
-        "//inou/yosys:liblgraph_yosys.so",
         "//inou/pyrope:pyrope_tests",
         "//main:lgshell",
     ],

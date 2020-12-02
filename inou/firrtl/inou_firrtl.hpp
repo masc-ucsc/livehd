@@ -30,7 +30,7 @@ protected:
   std::string      get_full_name(Lnast &lnast, Lnast_nid &parent_node, const std::string &term, const bool is_rhs);
 
   // Helper Functions (for handling specific cases)
-  void     create_bitwidth_dot_node(Lnast &lnast, uint32_t bw, Lnast_nid &parent_node, const std::string &port_id);
+  void     create_bitwidth_dot_node(Lnast &lnast, uint32_t bw, Lnast_nid &parent_node, const std::string &port_id, bool is_signed);
   uint32_t get_bit_count(const firrtl::FirrtlPB_Type type);
   void     init_wire_dots(Lnast &lnast, const firrtl::FirrtlPB_Type &type, const std::string &id,
                           Lnast_nid &parent_node);  // const firrtl::FirrtlPB_Statement_Wire& expr, Lnast_nid& parent_node);
@@ -39,7 +39,7 @@ protected:
                          const firrtl::FirrtlPB_Expression& init,  Lnast_nid& parent_node);
   void     init_reg_ref_dots(Lnast &lnast, const std::string &id, const firrtl::FirrtlPB_Expression& clock,
                              const firrtl::FirrtlPB_Expression& reset, const firrtl::FirrtlPB_Expression& init,
-                             uint32_t bitwidth, Lnast_nid& parent_node);
+                             uint32_t bitwidth, Lnast_nid& parent_node, bool sign);
   void     PreCheckForMem(Lnast &lnast, Lnast_nid &stmt_node, const firrtl::FirrtlPB_Statement& stmt);
   void     InitMemory   (Lnast &lnast, Lnast_nid& parent_node, const firrtl::FirrtlPB_Statement_Memory& mem);
   void     InitCMemory  (Lnast &lnast, Lnast_nid& parent_node, const firrtl::FirrtlPB_Statement_CMemory& cmem);
@@ -168,8 +168,8 @@ private:
   absl::flat_hash_map<std::string, std::string> inst_to_mod_map;
   // Maps (module name + I/O name) pair to direction of that I/O in that module.
   absl::flat_hash_map<std::pair<std::string, std::string>, uint8_t> mod_to_io_dir_map;
-  /* Maps module name to list of tuples of (signal name + signal biwdith + signal dir + sign).
-   * Used when a submodule inst is created, have to specify bw of all IO in module. */
+  /* Used when a submodule inst is created, have to specify bw of all IO in module. 
+     Maps module name to list of tuples of (signal name + signal biwdith + signal dir + sign). */
   absl::flat_hash_map<std::string, absl::flat_hash_set<std::tuple<std::string, uint32_t, uint8_t, bool>>> mod_to_io_map;
   // Map used by external modules to indicate parameters names + values.
   absl::flat_hash_map<std::string, absl::flat_hash_set<std::pair<std::string, std::string>>> emod_to_param_map;

@@ -5,3 +5,5 @@ foo.tup3   = 7
 
 foo1 = foo
 %out = foo1
+
+%out2.sub = 9

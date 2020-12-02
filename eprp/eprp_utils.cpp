@@ -8,27 +8,38 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include <cassert>
 #include <cstring>
 #include <iostream>
 
 #include "eprp_utils.hpp"
 #include "thread_pool.hpp"
+#include "iassert.hpp"
+
+#ifdef __APPLE__
+#include <libproc.h>
+#endif
 
 std::string Eprp_utils::get_exe_path() {
   char exePath[PATH_MAX] = {
       0,
   };
+#ifdef __APPLE__
+  pid_t pid = getpid();
+  int ret   = proc_pidpath(pid, exePath, PATH_MAX);
+  I(ret>0);
+  int len = strlen(exePath);
+#else
   int len = readlink("/proc/self/exe", exePath, PATH_MAX);
-  assert(len > 0 && len < PATH_MAX);
+#endif
+  I(len > 0 && len < PATH_MAX);
   for (int p = len - 1; p >= 0; p--) {
     if (exePath[p] == '/') {
       len = p;
       break;
     }
   }
-
   std::string path(exePath, 0, len);
+
   return path;
 }
 

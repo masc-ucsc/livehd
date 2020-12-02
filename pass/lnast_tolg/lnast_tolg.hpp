@@ -22,13 +22,13 @@ private:
   std::shared_ptr<Lnast> lnast;
   std::string_view module_name;
   std::string_view path;
-  absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Ntype_op>  primitive_type_lnast2lg;
-  absl::flat_hash_map<std::string_view, Node_pin>              vname2attr_dpin;       // for dummy attribute node construction, vn = variable non-ssa name, dpin = last attr dpin within "any" attributes
-  absl::flat_hash_map<std::string, Node_pin>                   name2dpin;             // for scalar variable
-  absl::flat_hash_map<std::string, Node_pin>                   field2dpin;
-  absl::flat_hash_map<std::string_view, std::vector<Node>>     driver_var2wire_nodes; // for __last_value temporarily wire nodes
-  absl::flat_hash_map<Node_pin, std::vector<Node_pin>>         inp2leaf_tg_spins;
-  absl::flat_hash_map<Node, std::vector<Node>>                 inp_artifacts;
+  absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Ntype_op>   primitive_type_lnast2lg;
+  absl::flat_hash_map<std::string_view, Node_pin>               vname2attr_dpin;       // for dummy attribute node construction, vn = variable non-ssa name, dpin = last attr dpin within "any" attributes
+  absl::flat_hash_map<std::string, Node_pin>                    name2dpin;             // for scalar variable
+  absl::flat_hash_map<std::string, Node_pin>                    field2dpin;
+  absl::flat_hash_map<std::string_view, std::vector<Node>>      driver_var2wire_nodes; // for __last_value temporarily wire nodes
+  absl::flat_hash_map<Node_pin, std::vector<Node_pin>>          inp2leaf_tg_spins;
+  absl::flat_hash_map<Node::Compact, absl::flat_hash_set<Node>> inp_artifacts;
 protected:
   void top_stmts2lgraph             (LGraph *lg, const Lnast_nid &lnidx_stmts);
   void process_ast_stmts            (LGraph *lg, const Lnast_nid &lnidx_stmts);
@@ -51,6 +51,7 @@ protected:
   void process_ast_attr_set_op      (LGraph *lg, const Lnast_nid &lnidx_aset);
   void process_ast_attr_get_op      (LGraph *lg, const Lnast_nid &lnidx_aget);
   void process_ast_tuple_phi_add_op (LGraph *lg, const Lnast_nid &lnidx_tpa);
+  void process_hier_inp_bits_set    (LGraph *lg, const Lnast_nid &lnidx_ta);
   void setup_lgraph_ios_and_final_var_name(LGraph *lg);
 
 
@@ -61,7 +62,8 @@ protected:
                                           bool from_phi     = false, 
                                           bool from_concat  = false,
                                           bool from_tupstrc = false,
-                                          bool from_assign  = false);
+                                          bool from_assign  = false,
+                                          bool want_reg_qpin = false);
 
   Ntype_op decode_lnast_op           (const Lnast_nid &lnidx_opr);
   void     setup_dpin_ssa            (Node_pin &dpin, std::string_view var_name, uint16_t subs);
@@ -101,5 +103,8 @@ protected:
   bool check_new_var_chain (const Lnast_nid &lnidx_opr);
   bool check_is_attrset_ta (Node &node, std::string &var_name, std::string &attr_name, Lconst &bits, Node &chain_head);
   bool check_is_tup_assign (Node node) { return !node.setup_sink_pin("value").is_connected();};
+  bool is_hier_inp_bits_set(const Lnast_nid &lnidx_ta);
+
 
 };
+

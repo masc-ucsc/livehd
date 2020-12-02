@@ -21,17 +21,12 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
     ##strip_prefix = "ot", OpenTimer uses ot/... so, we have to keep it
     #patches = ["//external:patch.opentimer"],  # For generated ot/config.hpp
 #)
-new_git_repository( # Open_timer user taskflow
-    name = "frozen",
-    build_file = "BUILD.frozen",
-    commit = "3d2b025ff2509f40424855e3f8640fc2fb6b90b9", # July 1, 2020
-    remote = "https://github.com/serge-sans-paille/frozen.git",
-)
-git_repository( # Open_timer user taskflow
-    name = "range-v3",
-    commit = "6dd1cb6a03a588031868b6ffb66286e6eaab6714", # July 18, 2020
-    remote = "https://github.com/ericniebler/range-v3.git",
-)
+#new_git_repository( # Open_timer user taskflow
+#    name = "frozen",
+#    build_file = "BUILD.frozen",
+#    commit = "3d2b025ff2509f40424855e3f8640fc2fb6b90b9", # July 1, 2020
+#    remote = "https://github.com/serge-sans-paille/frozen.git",
+#)
 
 #new_git_repository( # Open_timer user taskflow
     #name = "taskflow",
@@ -49,10 +44,8 @@ new_git_repository(
 new_git_repository(
     name = "yosys",
     build_file = "BUILD.yosys", # relative to external path
-    commit = "de79978372c1953e295fa262444cb0a28a246c5f", # Sep 24, 2020 a66200ed1d1741150092e89c94f5c25676e9e436", # April 28, 2020 6edca05793197a846bbfb0329e836c87fa5aabb6", # Feb 25, 2020 
-    #commit = "a66200ed1d1741150092e89c94f5c25676e9e436", # April 28, 2020 6edca05793197a846bbfb0329e836c87fa5aabb6", # Feb 25, 2020 
+    commit = "de79978372c1953e295fa262444cb0a28a246c5f", # Sep 24, 2020 
     remote = "https://github.com/YosysHQ/yosys.git",
-    #strip_prefix = "kernel",
     shallow_since = "1588020530 -0700",
 )
 new_git_repository(
@@ -65,16 +58,54 @@ new_git_repository(
 )
 
 http_archive(
+    name = "rules_proto",
+    sha256 = "602e7161d9195e50246177e7c55b2f39950a9cf7366f74ed5f22fd45750cd208",
+    strip_prefix = "rules_proto-97d8af4dc474595af3900dd85cb3a29ad28cc313",
+    urls = [
+        "https://mirror.bazel.build/github.com/bazelbuild/rules_proto/archive/97d8af4dc474595af3900dd85cb3a29ad28cc313.tar.gz",
+        "https://github.com/bazelbuild/rules_proto/archive/97d8af4dc474595af3900dd85cb3a29ad28cc313.tar.gz",
+        ],
+    )
+load("@rules_proto//proto:repositories.bzl", "rules_proto_dependencies", "rules_proto_toolchains")
+rules_proto_dependencies()
+rules_proto_toolchains()
+
+http_archive(
     name = "rules_cc",
     urls = ["https://github.com/bazelbuild/rules_cc/archive/262ebec3c2296296526740db4aefce68c80de7fa.zip"],
     strip_prefix = "rules_cc-262ebec3c2296296526740db4aefce68c80de7fa",
     )
+
+http_archive(
+    name = "rules_foreign_cc",
+    sha256 = "ab266a13f5f695c898052271af860bf4928fb2ef6a333f7b63076b81271e4342",
+    strip_prefix = "rules_foreign_cc-6bb0536452eaca3bad20c21ba6e7968d2eda004d",
+    urls = ["https://github.com/bazelbuild/rules_foreign_cc/archive/6bb0536452eaca3bad20c21ba6e7968d2eda004d.zip"],
+    )
+
+load("@rules_foreign_cc//:workspace_definitions.bzl", "rules_foreign_cc_dependencies")
+rules_foreign_cc_dependencies()
+
 git_repository(
     name = "com_google_absl",
-    #build_file = "BUILD.abseil", # relative to external path
-    #commit = "d0c433455801e1c1fb6f486f0b447e22f946ab52", # August, 16 2020 (fails because Yosys)
-    commit = "bf86cfe165ef7d70dfe68f0b8fc0c018bc79a577", # December 16, 2019
+    commit = "e96d49687d9c078f2d47356b6723c3b5715493f7", # Nov, 7 2020
     remote = "https://github.com/abseil/abseil-cpp.git",
+)
+
+git_repository(
+    name = "com_google_xls",
+    commit = "43cc00719bbf106828aebf57d4b435f7971d5bf5", # Nov 4, 2020
+    remote = "https://github.com/google/xls.git",
+)
+
+http_archive(
+    name = "tk_tcl_tcl",
+    urls = [
+        "https://prdownloads.sourceforge.net/tcl/tcl8.6.10-src.tar.gz",
+        ],
+    build_file = "BUILD.tk_tcl_tcl",
+    strip_prefix = "tcl8.6.10",
+    sha256 = "5196dbf6638e3df8d5c87b5815c8c2b758496eb6f0e41446596c9a4e638d87ed",
 )
 
 new_git_repository(
@@ -93,7 +124,7 @@ new_git_repository(
 new_git_repository(
     name = "slang",
     build_file = "BUILD.slang",
-    commit = "2a774123444a6152f40639296cf20e90dd7d55b0", # July 23, 2020 # 823fc41d44d53797f0b5ddb1242028cc1fd51f18", #June 12, 2020
+    commit = "c0cf9a643f05df63268ecbfe561e9af37c9a62a8", # Nov 2nd, 2020 2a774123444a6152f40639296cf20e90dd7d55b0", # July 23, 2020 # 823fc41d44d53797f0b5ddb1242028cc1fd51f18", #June 12, 2020
     remote = "https://github.com/MikePopoloski/slang.git",
     patches = ["//external:patch.slang"],
 )
@@ -182,48 +213,66 @@ new_git_repository(
     # patches = ["//external:patch.mockturtle"],
     #strip_prefix = "include",
 )
-new_git_repository(
-    name = "bison",
-    build_file = "BUILD.bison",
-    commit = "0d44f83fcc330dd4674cf4493e2a4e18e758e6bc",
-    remote = "https://git.savannah.gnu.org/git/bison.git",
-    #patches = ["//external:patch.verilator"],
-    #strip_prefix = "include",
-)
+
+http_archive(
+    name = "rules_m4",
+    urls = ["https://github.com/jmillikin/rules_m4/releases/download/v0.2/rules_m4-v0.2.tar.xz"],
+    sha256 = "c67fa9891bb19e9e6c1050003ba648d35383b8cb3c9572f397ad24040fb7f0eb",
+    )
+load("@rules_m4//m4:m4.bzl", "m4_register_toolchains")
+m4_register_toolchains()
+
+http_archive(
+    name = "rules_flex",
+    urls = ["https://github.com/jmillikin/rules_flex/releases/download/v0.2/rules_flex-v0.2.tar.xz"],
+    sha256 = "f1685512937c2e33a7ebc4d5c6cf38ed282c2ce3b7a9c7c0b542db7e5db59d52",
+    )
+load("@rules_flex//flex:flex.bzl", "flex_register_toolchains")
+flex_register_toolchains()
+
+http_archive(
+    name = "rules_bison",
+    urls = ["https://github.com/jmillikin/rules_bison/releases/download/v0.2/rules_bison-v0.2.tar.xz"],
+    sha256 = "6ee9b396f450ca9753c3283944f9a6015b61227f8386893fb59d593455141481",
+    )
+load("@rules_bison//bison:bison.bzl", "bison_register_toolchains")
+bison_register_toolchains()
+
 new_git_repository(
     name = "graph",
     build_file = "BUILD.graph",
-    commit = "b1e38e1084a0dff6f4eb4ed9a645ed63d3e83dd2", # latest commit as of 7/18/20
+    commit = "b1e38e1084a0dff6f4eb4ed9a645ed63d3e83dd2", # latest commit Jan 21, 2019
     remote = "https://github.com/cbbowen/graph",
 )
 new_git_repository(
 	name = "range-v3",
 	build_file = "BUILD.rangev3",
-	commit = "4f4beb45c5e56aca4233e4d4c760208e21fff2ec", # specific commit used by graph, made on Jan 11 2019
+	commit = "f013aef2ae81f3661a560e7922a968665bedebff", # 4f4beb45c5e56aca4233e4d4c760208e21fff2ec", # specific commit used by graph, made on Jan 11 2019
 	remote = "https://github.com/ericniebler/range-v3",
-  shallow_since = "1547250373 -0800",
 )
-
-# BOOST Libraries dependences
-load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
 git_repository(
     name = "com_github_nelhage_rules_boost",
-    commit = "0cc5bf5513c067917b5e083cee22a8dcdf2e0266", # Original "9f9fb8b2f0213989247c9d5c0e814a8451d18d7f",
+    commit = "1e3a69bf2d5cd10c34b74f066054cd335d033d71",  # Nov 7, 2020
     remote = "https://github.com/nelhage/rules_boost",
-    shallow_since = "1570056263 -0700",
-)
+    shallow_since = "1591047380 -0700",
+    )
 
 load("@com_github_nelhage_rules_boost//:boost/boost.bzl", "boost_deps")
 boost_deps()
 
-#git_repository(
-    #name = "subpar",
-    #remote = "https://github.com/google/subpar",
-    #tag = "1.3.0",
-#)
 
 # Hermetic even for the toolchain :D
+http_archive(
+    name = "bazel_toolchains",
+    sha256 = "882fecfc88d3dc528f5c5681d95d730e213e39099abff2e637688a91a9619395",
+    strip_prefix = "bazel-toolchains-3.4.0",
+    urls = [
+        "https://github.com/bazelbuild/bazel-toolchains/releases/download/3.4.0/bazel-toolchains-3.4.0.tar.gz",
+        "https://mirror.bazel.build/github.com/bazelbuild/bazel-toolchains/releases/download/3.4.0/bazel-toolchains-3.4.0.tar.gz",
+        ],
+    )
+
 #http_archive(
     #name = "bazel_toolchains",
     #sha256 = "239a1a673861eabf988e9804f45da3b94da28d1aff05c373b013193c315d9d9e",
@@ -252,11 +301,12 @@ boost_deps()
 
 http_archive(
     name = "com_google_protobuf",
-    strip_prefix = "protobuf-master",
-    urls = ["https://github.com/protocolbuffers/protobuf/archive/master.zip"],
-)
-
-load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
-protobuf_deps()
-
+    #repo_mapping = {"@zlib": "@net_zlib"},
+    sha256 = "1c744a6a1f2c901e68c5521bc275e22bdc66256eeb605c2781923365b7087e5f",
+    strip_prefix = "protobuf-3.13.0",
+    urls = [
+        "https://mirror.bazel.build/github.com/protocolbuffers/protobuf/archive/v3.13.0.zip",
+        "https://github.com/protocolbuffers/protobuf/archive/v3.13.0.zip",
+        ],
+    )
 

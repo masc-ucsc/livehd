@@ -5,12 +5,12 @@ cc_library(
     hdrs = glob(["*.hpp"]),
     visibility = ["//visibility:public"],
     includes = ["."],
+    alwayslink=True,
     linkopts = ["-lstdc++fs"],  # for gcc-8 or older
     deps = [
         "@rapidjson//:headers",
         "@iassert//:iassert",
         "@boost//:multiprecision",
-        "@frozen//:headers",
         "//eprp:eprp",
         "//mmap_lib:headers",
         "//lbench:headers",
@@ -97,6 +97,16 @@ cc_test(
         ],
     )
 
+cc_test(
+    name = "graph_bench",
+    srcs = ["tests/graph_bench.cpp"],
+    deps = [
+        ":core",
+         "@graph//:graph",
+         "@range-v3//:range-v3",
+         "@fmt//:fmt",
+        ],
+    )
 
 cc_test(
     name = "edge_test",

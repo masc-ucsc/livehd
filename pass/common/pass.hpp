@@ -75,7 +75,7 @@ public:
   using Map_setup = std::map<std::string, Setup_fn>;
 
 protected:
-  static Map_setup registry;
+  static inline Map_setup registry;
 
 public:
   Pass_plugin(const std::string &name, Setup_fn setup_fn) {

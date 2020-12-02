@@ -5,6 +5,7 @@ cc_library(
     hdrs = glob(["*.hpp"]),
     visibility = ["//visibility:public"],
     includes = ["."],
+    alwayslink=True,   # Needed to have constructor called
     deps = [
         "//pass/common:pass",
     ]
@@ -14,7 +15,6 @@ sh_test(
     name = "sample_test1.sh",
     srcs = ["tests/sample_test1.sh"],
     data = [
-        "//inou/yosys:liblgraph_yosys.so",
         "//main:lgshell",
         "//inou/yosys:verilog_tests",
         ],
