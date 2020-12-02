@@ -278,7 +278,10 @@ void Bitwidth::process_logic_or_xor(Node &node, XEdge_iterator &inp_edges) {
         not_finished = true;
         return;
       } else {
-        bits = it->second.get_sbits();
+        if (it->second.is_always_positive())
+          bits = it->second.get_sbits() - 1;
+        else
+          bits = it->second.get_sbits();
       }
 
       if (bits == 0) {
@@ -289,44 +292,49 @@ void Bitwidth::process_logic_or_xor(Node &node, XEdge_iterator &inp_edges) {
       if (bits > max_bits)
         max_bits = bits;
     }
-    bwmap.insert_or_assign(node.get_driver_pin().get_compact(), Bitwidth_range(max_bits));
+
+    auto max_val = Lconst((1<<(max_bits)) - 1); // conservative unsigned max 
+    auto min_val = Lconst(0);
+    bwmap.insert_or_assign(node.get_driver_pin().get_compact(), Bitwidth_range(min_val, max_val)); // the max/min of AND MASK should be unsigned
   }
 }
 
 
 void Bitwidth::process_logic_and(Node &node, XEdge_iterator &inp_edges) {
-  // determine the min_bits among all inp_edges
+  // note: the goal is to get the min requiered bits in advance of final global BW and calculate the min range of (max, min)
   if (inp_edges.size() >= 1) {
-    Bits_t min_bits = UINT16_MAX;
+    Bits_t min_sbits = UINT16_MAX;
 
+    bool any_constrained = false;
     for (auto e : inp_edges) {
-      auto   pit  = bwmap.find(e.driver.get_compact());
-      Bits_t bw_bits = 0;
-      if (pit == bwmap.end()) {
-        if (e.driver.is_graph_input()) {
-          bw_bits = 0; // give temporary 0 to continue
-        } else {
-          // should wait till later BW run to have a driver bwmap ready
-          debug_unconstrained_msg(node, e.driver);
-          not_finished = true;
-          return;
-        }
+      auto   it  = bwmap.find(e.driver.get_compact());
+      Bits_t bw_sbits = 0;
+      if (it == bwmap.end()) {
+        continue;
       } else {
-        bw_bits = pit->second.get_sbits();
+        auto &bw = it->second;
+        if (it->second.is_always_positive())
+          bw_sbits = bw.get_sbits() - 1;
+        else 
+          bw_sbits = bw.get_sbits();
+        any_constrained = true;
       }
 
-      if (bw_bits && bw_bits < min_bits)
-        min_bits = bw_bits;
+      if (bw_sbits && bw_sbits < min_sbits)
+        min_sbits = bw_sbits;
     }
+    
 
-
-    if (min_bits == UINT16_MAX) {
+    if (min_sbits == UINT16_MAX || any_constrained == false) {
       fmt::print("BW-> and:{} does not have any constrained input\n", node.debug_name());
       not_finished = true;
       return;
     }
 
-    bwmap.insert_or_assign(node.get_driver_pin().get_compact(), Bitwidth_range(min_bits));
+    auto max_val = Lconst((1<<(min_sbits)) - 1); // conservative unsigned max 
+    auto min_val = Lconst(0);
+    bwmap.insert_or_assign(node.get_driver_pin().get_compact(), Bitwidth_range(min_val, max_val)); // the max/min of AND MASK should be unsigned
+    
 
     for (auto e : inp_edges) {
       auto bw_bits = e.driver.get_bits();
@@ -335,10 +343,10 @@ void Bitwidth::process_logic_and(Node &node, XEdge_iterator &inp_edges) {
 
       if (e.driver.get_num_edges() > 1) {
         must_perform_backward = true;
-      } else if (bw_bits == 0 || bw_bits > min_bits) {
+      } else if (bw_bits == 0 || bw_bits > min_sbits) {
         // no other output, parent could follow the child
-        e.driver.set_bits(min_bits);
-        bwmap.insert_or_assign(e.driver.get_compact(), Bitwidth_range(min_bits));
+        e.driver.set_bits(min_sbits);
+        bwmap.insert_or_assign(e.driver.get_compact(), Bitwidth_range(min_val, max_val));
       }
     }
   }
@@ -388,7 +396,10 @@ void Bitwidth::process_attr_get(Node &node) {
   auto &bw = it->second;
 
   Lconst result;
-  if (attr == Attr::Set_ubits || attr == Attr::Set_sbits) {
+  if (attr == Attr::Set_ubits) {
+    result = bw.get_min() >= 0 ? Lconst(bw.get_sbits() - 1) : Lconst(bw.get_sbits());
+    fmt::print("min:{}, result:{}\n", bw.get_min().to_i(), result.to_i());
+  } else if (attr == Attr::Set_sbits) {
     result = Lconst(bw.get_sbits());
   } else if (attr == Attr::Set_max) {
     result = bw.get_max();
@@ -528,11 +539,12 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr) {
   if (attr == Attr::Set_ubits || attr == Attr::Set_sbits) {
     I(dpin_val.get_node().is_type_const());
     auto val = dpin_val.get_node().get_type_const();
-    if (bw.get_sbits() && bw.get_sbits() > val.to_i()) 
-      Pass::error("bitwidth missmatch. Variable {} needs {}bits, but constrained to {}bits\n", dpin_name, bw.get_sbits(), val.to_i());
     
     if (attr == Attr::Set_ubits) {
-      bw.set_ubits(val.to_i()); 
+      if (bw.get_sbits() && (bw.get_sbits() - 1) > (val.to_i()))   
+        Pass::error("bitwidth missmatch. Variable {} needs {}sbits, but constrained to {}ubits\n", dpin_name, bw.get_sbits(), val.to_i());
+      
+      bw.set_ubits_range(val.to_i()); 
       bool tposs_existed = false;
       for (auto e : node_attr.out_edges()) {
         if (e.sink.get_node().get_type_op() == Ntype_op::Tposs) {
@@ -544,9 +556,13 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr) {
       if (!tposs_existed && (parent_is_ginp || parent_is_flop)) {
         ntposs = insert_tposs_node(node_attr);      
       }
-      attr_dpin.set_bits(bw.get_sbits() - 1); //get signed_bits and minus 1 to set usigned bits 
+      attr_dpin.set_bits(bw.get_sbits() - 1); //get signed_bits and minus 1 to set usigned bits //FIXME->sh: really??
     } else { // Attr::Set_sbits
-      bw.set_sbits(val.to_i());
+
+      if (bw.get_sbits() && bw.get_sbits() > (val.to_i())) 
+        Pass::error("bitwidth missmatch. Variable {} needs {}sbits, but constrained to {}sbits\n", dpin_name, bw.get_sbits(), val.to_i());
+      
+      bw.set_sbits_range(val.to_i());
       attr_dpin.set_bits(bw.get_sbits());  
     }
   } else if (attr == Attr::Set_max) {
@@ -663,10 +679,8 @@ void Bitwidth::process_attr_set(Node &node) {
 
 void Bitwidth::forward_adjust_dpin(Node_pin &dpin, Bitwidth_range &bw) {
   auto bw_bits = bw.get_sbits();
-  if (bw_bits && bw_bits < dpin.get_bits()) {
-    if (dpin.get_node().get_type_op() != Ntype_op::Tposs)
-      dpin.set_bits(bw_bits);
-  }
+  if (bw_bits && bw_bits < dpin.get_bits() && (dpin.get_node().get_type_op() != Ntype_op::Tposs)) 
+    dpin.set_bits(bw_bits);
 }
 
 void Bitwidth::set_graph_boundary(Node_pin &dpin, Node_pin &spin) {
@@ -676,13 +690,14 @@ void Bitwidth::set_graph_boundary(Node_pin &dpin, Node_pin &spin) {
     return;
 
   I(dpin.get_hidx() != spin.get_hidx());
-
   auto same_level_spin = spin.get_non_hierarchical();
   for (auto dpin_sub : same_level_spin.inp_driver()) {
-    if (!dpin_sub.get_node().is_type(Ntype_op::Sub))
+    if (!dpin_sub.get_node().is_type(Ntype_op::Sub)) 
       continue;
-    if (dpin_sub.get_bits() == 0 || dpin_sub.get_bits() > dpin.get_bits())
+    
+    if (dpin_sub.get_bits() == 0 || dpin_sub.get_bits() > dpin.get_bits()) 
       dpin_sub.set_bits(dpin.get_bits());
+    
   }
 }
 
@@ -717,6 +732,7 @@ void Bitwidth::bw_pass(LGraph *lg) {
       process_const(node);
     } else if (op == Ntype_op::TupKey || op == Ntype_op::TupGet || op == Ntype_op::TupAdd) {
       // Nothing to do for this
+      continue;
     } else if (op == Ntype_op::Or || op == Ntype_op::Xor) {
       process_logic_or_xor(node, inp_edges);
     } else if (op == Ntype_op::Ror) {
@@ -792,12 +808,11 @@ void Bitwidth::bw_pass(LGraph *lg) {
   } // end of lg->forward()
 
 
-  for(auto dpin:lg->get_graph_output_node(hier).out_connected_pins()) {
-    fmt::print("Hello\n");
+  lg->each_graph_output([this](Node_pin &dpin) {
+    if (dpin.get_name() == "%")
+      return;
     auto spin = dpin.get_sink_from_output();
-    if (!spin.has_inputs())
-      continue;
-
+    
     auto out_driver = spin.get_driver_pin();
 
     I(!out_driver.is_invalid());
@@ -818,8 +833,7 @@ void Bitwidth::bw_pass(LGraph *lg) {
     }
 
     bwmap.insert_or_assign(dpin.get_compact(), it->second);
-  }
-
+  }, hier);
 
 
 #ifndef PRESERVE_ATTR_NODE
@@ -845,13 +859,13 @@ void Bitwidth::bw_pass(LGraph *lg) {
           auto data_dpin = node.get_sink_pin("name").get_driver_pin();
 
           for (auto e : node.out_edges()) {
-            if (e.driver.get_pid() == 0) {
+            if (e.driver.get_pid() == 0) 
               e.sink.connect_driver(data_dpin);
-            }
           }
         }
         if (!hier) // FIXME: once hier del works
           node.del_node();
+
       } else if (op == Ntype_op::AttrGet) {
         I(false);  // should be deleted by now if solved
       }
@@ -877,16 +891,35 @@ void Bitwidth::bw_pass(LGraph *lg) {
     //FIXME->sh: optimize MSB zeros at the final global BW algorithm.
     if (hier) {
       lg->each_graph_output([this](Node_pin &dpin) {
-        fmt::print("hello!\n");
+        I(dpin.get_name() != "%");
         auto dpin_bits = dpin.get_bits();
-        fmt::print("graph out:{}, bits:{}\n", dpin.debug_name(), dpin.get_bits());
-        auto bw = bwmap.find(dpin.get_compact());
-        /* I(bw != bwmap.end()); */
-        if (bw != bwmap.end()) {
+        auto it = bwmap.find(dpin.get_compact());
+        if (it != bwmap.end()) {
+          auto & bw = it->second;
           I(dpin_bits != 0);
-          auto min = bw->second.get_min();
-          if (min >= 0 && dpin_bits > 1)
-            dpin.set_bits(bw->second.get_sbits() - 1);
+          if (bw.is_always_positive() && dpin_bits > 1)
+            dpin.set_bits(bw.get_sbits() - 1);
+        }
+      }, true);
+
+
+      lg->each_graph_input([this](Node_pin &dpin) {
+        I(dpin.get_name() != "$");
+        auto dpin_bits = dpin.get_bits();
+        auto it = bwmap.find(dpin.get_compact());
+        if (it != bwmap.end()) {
+          auto &bw = it->second;
+          I(dpin_bits != 0);
+          auto min = bw.get_min();
+
+          bool any_tposs_sink = false;
+          for (auto e : dpin.out_edges()) {
+            if (e.sink.get_node().get_type_op() == Ntype_op::Tposs)
+              any_tposs_sink = true;
+          }
+
+          if (bw.is_always_positive() && dpin_bits > 1 && !any_tposs_sink)
+            dpin.set_bits(bw.get_sbits() - 1);
         }
       }, true);
     }

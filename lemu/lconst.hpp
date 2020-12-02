@@ -146,7 +146,7 @@ public:
   bool     is_explicit_bits() const { return explicit_bits; }
   bool     is_string() const { return explicit_str; }
 
-  Bits_t get_bits() const { return bits; }
+  Bits_t get_bits() const { return bits; } // note: this is returning signed bits of the constant
 
   bool is_i() const { return !explicit_str && bits <= 62; } // 62 to handle sign (int)
   int64_t to_i() const; // must fit in int or exception raised

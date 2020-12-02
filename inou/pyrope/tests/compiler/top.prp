@@ -1,5 +1,5 @@
 tmp   = sum(a = (foo = 3, bar = 2), b = 4)
 // on the other hand, %out = tmp.out.o1.baz is the pattern you will want to test tuple assaign across 
 // hierarchy because again, you actually don't know whether tmp.out.o1.baz is a scalar or tuple ...
-%out  = tmp.sout.o1.baz + 1 
-%out5 = tmp.sout2 + 1
+%out  = tmp.sout.o1.baz + 1  //7 + 1 = 8 -> 4b
+%out5 = tmp.sout2 + 1        //6 + 1 = 7 -> 3b

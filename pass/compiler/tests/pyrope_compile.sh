@@ -5,14 +5,16 @@ pts_tuple_dbg='lhs_wire3 funcall_unnamed2
                firrtl_gcd counter_tup counter2'
 pts_unsigned_issue='firrtl_gcd'
 
+pts='reg_bits_set firrtl_tail firrtl_tail2 firrtil_tail3 firrtl_gcd_3bits firrtl_gcd counter counter_nested_if '
 
-pts='if firrtl_tail2 firrtl_tail3 tuple_copy2 hier_tuple_io reg__q_pin hier_tuple2 
-     capricious_bits2 capricious_bits4 hier_tuple if2 bits_rhs adder_stage counter
-     reg_bits_set tuple_copy hier_tuple3 lhs_wire lhs_wire2 scalar_tuple logic counter_nested_if
-     firrtl_tail attr_set capricious_bits out_ssa ssa_rhs tuple_if firrtl_gcd_3bits'
-# pts='firrtl_gcd'
-# pts='nested_if'
-pts='if nested_if'
+
+pts='hier_tuple2 hier_tuple_io tuple_copy2 if nested_if reg__q_pin tuple_copy
+     capricious_bits capricious_bits2 capricious_bits4 hier_tuple if2  bits_rhs 
+     adder_stage hier_tuple3 lhs_wire lhs_wire2 scalar_tuple logic attr_set out_ssa
+     ssa_rhs tuple_if'
+
+# pts='counter'
+
 
 # Note: in this bash script, you MUST specify top module name AT FIRST POSITION
 pts_hier1='top sum top'
