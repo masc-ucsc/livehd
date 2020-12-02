@@ -15,6 +15,7 @@ pts='hier_tuple2 hier_tuple_io tuple_copy2 if nested_if reg__q_pin tuple_copy
 
 # pts='tuple_copy2 counter'
 # pts='tuple_copy2 '
+pts='if'
 
 
 # Note: in this bash script, you MUST specify top module name AT FIRST POSITION

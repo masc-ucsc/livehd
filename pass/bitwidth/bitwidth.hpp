@@ -5,6 +5,7 @@
 #include "node.hpp"
 #include "node_pin.hpp"
 #include "pass.hpp"
+#include "lgedgeiter.hpp"
 
 using BWMap = absl::flat_hash_map<Node_pin::Compact, Bitwidth_range>;
 
@@ -37,7 +38,7 @@ protected:
   void process_attr_set_dp_assign(Node &node);
   void process_attr_set_new_attr(Node &node);
   void process_attr_set_propagate(Node &node);
-  void process_attr_set(Node &node);
+  void process_attr_set(Fwd_edge_iterator::Fwd_iter &fwd_it, Node &node);
   Node insert_tposs_node(Node &node_attr);
 
   void garbage_collect_support_structures(XEdge_iterator &inp_edges);
