@@ -13,14 +13,9 @@ pts='hier_tuple2 hier_tuple_io tuple_copy2 if nested_if reg__q_pin tuple_copy
      adder_stage hier_tuple3 lhs_wire lhs_wire2 scalar_tuple logic attr_set out_ssa
      ssa_rhs tuple_if counter counter_nested_if firrtl_tail'
 
-<<<<<<< HEAD
 # pts='tuple_copy2 counter'
 # pts='tuple_copy2 '
 pts='if'
-=======
-# pts='reg_bits_set'
-# pts='sum'
->>>>>>> b760e8f9 ((1) change max/min of input to be always signed, and insert a Tposs to convert to unsigned max/min if unsigned attribute is set (2) for debug)
 
 
 # Note: in this bash script, you MUST specify top module name AT FIRST POSITION
