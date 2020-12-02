@@ -489,7 +489,7 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_attr) {
     node_attr.del_node();
 }
 
-void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd_iter &git) {
+void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd_iter &fwd_it) {
   I(node_attr.is_sink_connected("field"));
   auto dpin_key = node_attr.get_sink_pin("field").get_driver_pin();
   auto key      = dpin_key.get_name();
@@ -558,7 +558,7 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
       /* if (!tposs_existed && (parent_is_ginp || parent_is_flop)) */ 
       /*   ntposs = insert_tposs_node(node_attr); */      
       if (!tposs_existed) 
-        ntposs = insert_tposs_node(node_attr, git);      
+        ntposs = insert_tposs_node(node_attr, fwd_it);      
     } else { // Attr::Set_sbits
 
       if (bw.get_sbits() && bw.get_sbits() > (val.to_i())) 
@@ -596,7 +596,7 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
 
 
 // insert tposs after attr node when ubits
-Node Bitwidth::insert_tposs_node(Node &node, Fwd_edge_iterator::Fwd_iter &git) {
+Node Bitwidth::insert_tposs_node(Node &node, Fwd_edge_iterator::Fwd_iter &fwd_it)  {
 
   /* I(node.get_sink_pin("name").get_driver_pin().is_graph_input() || */ 
   /*   node.get_sink_pin("name").get_driver_pin().get_node().is_type_flop()) ; */
@@ -604,7 +604,7 @@ Node Bitwidth::insert_tposs_node(Node &node, Fwd_edge_iterator::Fwd_iter &git) {
   auto dpin = node.setup_driver_pin("Y");
 
   auto ntposs = node.get_class_lgraph()->create_node(Ntype_op::Tposs);
-  git.add_node(ntposs);
+  fwd_it.add_node(ntposs);
   auto ntposs_dpin = ntposs.setup_driver_pin();
   dpin.connect_sink(ntposs.setup_sink_pin("a"));
   for (auto &e : dpin.out_edges()) {
@@ -666,13 +666,9 @@ void Bitwidth::process_attr_set_propagate(Node &node_attr) {
   
 }
 
-<<<<<<< HEAD
-void Bitwidth::process_attr_set(Fwd_edge_iterator::Fwd_iter &fwd_it, Node &node) {
-=======
-void Bitwidth::process_attr_set(Node &node, Fwd_edge_iterator::Fwd_iter &git) {
->>>>>>> 2b2e1a68 (for debug)
+void Bitwidth::process_attr_set(Node &node, Fwd_edge_iterator::Fwd_iter &fwd_it) {
   if (node.is_sink_connected("field")) {
-    process_attr_set_new_attr(node, git);
+    process_attr_set_new_attr(node, fwd_it);
   } else {
     process_attr_set_propagate(node);
   }
@@ -716,18 +712,11 @@ void Bitwidth::bw_pass(LGraph *lg) {
   must_perform_backward = false;
   not_finished          = false;
 
-<<<<<<< HEAD
   // Note: lg input bits must be set by attr_set node, it will be handled through the algorithm runs
   // for (auto node : lg->forward(hier));
   auto lgit = lg->forward(hier); // Not C++17 because it is passed
   for (auto fwd_it = lgit.begin(); fwd_it != lgit.end() ; ++fwd_it) {
     auto node = *fwd_it;
-=======
-
-  auto iter = lg->forward(hier);
-  for (auto git = iter.begin(); git != iter.end(); ++git) {
-    auto node = *git;
->>>>>>> 2b2e1a68 (for debug)
     fmt::print("{}\n", node.debug_name());
     auto inp_edges = node.inp_edges();
     auto op        = node.get_type_op();
@@ -752,7 +741,7 @@ void Bitwidth::bw_pass(LGraph *lg) {
     } else if (op == Ntype_op::And) {
       process_logic_and(node, inp_edges);
     } else if (op == Ntype_op::AttrSet) {
-      process_attr_set(fwd_it, node);
+      process_attr_set(node, fwd_it);
       if (node.is_invalid())
         continue;
     } else if (op == Ntype_op::AttrGet) {

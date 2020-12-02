@@ -37,15 +37,10 @@ protected:
   void process_logic_and(Node &node, XEdge_iterator &inp_edges);
   void process_attr_get(Node &node);
   void process_attr_set_dp_assign(Node &node);
-  void process_attr_set_new_attr(Node &node, Fwd_edge_iterator::Fwd_iter &git);
+  void process_attr_set_new_attr(Node &node, Fwd_edge_iterator::Fwd_iter &fwd_it);
   void process_attr_set_propagate(Node &node);
-<<<<<<< HEAD
-  void process_attr_set(Fwd_edge_iterator::Fwd_iter &fwd_it, Node &node);
-  Node insert_tposs_node(Node &node_attr);
-=======
-  void process_attr_set(Node &node, Fwd_edge_iterator::Fwd_iter &git);
-  Node insert_tposs_node(Node &node_attr, Fwd_edge_iterator::Fwd_iter &git);
->>>>>>> 2b2e1a68 (for debug)
+  void process_attr_set(Node &node, Fwd_edge_iterator::Fwd_iter &fwd_it);
+  Node insert_tposs_node(Node &node_attr, Fwd_edge_iterator::Fwd_iter &fwd_it);
 
   void garbage_collect_support_structures(XEdge_iterator &inp_edges);
   void forward_adjust_dpin(Node_pin &dpin, Bitwidth_range &bw);
