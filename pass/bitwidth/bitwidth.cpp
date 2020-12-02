@@ -661,7 +661,7 @@ void Bitwidth::process_attr_set_propagate(Node &node_attr) {
   
 }
 
-void Bitwidth::process_attr_set(Node &node) {
+void Bitwidth::process_attr_set(Fwd_edge_iterator::Fwd_iter &fwd_it, Node &node) {
   if (node.is_sink_connected("field")) {
     process_attr_set_new_attr(node);
   } else {
@@ -708,7 +708,10 @@ void Bitwidth::bw_pass(LGraph *lg) {
   not_finished          = false;
 
   // Note: lg input bits must be set by attr_set node, it will be handled through the algorithm runs
-  for (auto node : lg->forward(hier)) {
+  // for (auto node : lg->forward(hier));
+  auto lgit = lg->forward(hier); // Not C++17 because it is passed
+  for (auto fwd_it = lgit.begin(); fwd_it != lgit.end() ; ++fwd_it) {
+    auto node = *fwd_it;
     fmt::print("{}\n", node.debug_name());
     auto inp_edges = node.inp_edges();
     auto op        = node.get_type_op();
@@ -733,7 +736,7 @@ void Bitwidth::bw_pass(LGraph *lg) {
     } else if (op == Ntype_op::And) {
       process_logic_and(node, inp_edges);
     } else if (op == Ntype_op::AttrSet) {
-      process_attr_set(node);
+      process_attr_set(fwd_it, node);
       if (node.is_invalid())
         continue;
     } else if (op == Ntype_op::AttrGet) {
