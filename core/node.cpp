@@ -486,8 +486,8 @@ std::string Node::debug_name() const {
 
   auto cell_name = Ntype::get_name(get_type_op());
   if (name.empty())
-    return absl::StrCat("n", std::to_string(nid), "_", cell_name, "_g", current_g->get_name());
-  return absl::StrCat("n", std::to_string(nid), "_", cell_name, "_", name, "_g", current_g->get_name());
+    return absl::StrCat("n", std::to_string(nid), "_", cell_name, "_lg", current_g->get_name());
+  return absl::StrCat("n", std::to_string(nid), "_", cell_name, "_", name, "_lg", current_g->get_name());
 }
 
 bool Node::has_name() const { return Ann_node_name::ref(current_g)->has_key(get_compact_class()); }

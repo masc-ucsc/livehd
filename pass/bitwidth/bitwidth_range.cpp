@@ -84,16 +84,8 @@ void Bitwidth_range::set_narrower_range(const Lconst &min_val, const Lconst &max
   set_range(min_val, max_val);
 }
 
-Bitwidth_range::Bitwidth_range(Bits_t bits, bool _sign) {
-  if (_sign)
-    set_sbits(bits);
-  else
-    set_ubits(bits);
-}
 
-Bitwidth_range::Bitwidth_range(Bits_t bits) { set_ubits(bits); }
-
-void Bitwidth_range::set_sbits(Bits_t size) {
+void Bitwidth_range::set_sbits_range(Bits_t size) {
   I(size < Bits_max);
 
   if (size == 0) {
@@ -114,7 +106,7 @@ void Bitwidth_range::set_sbits(Bits_t size) {
   }
 }
 
-void Bitwidth_range::set_ubits(Bits_t size) {
+void Bitwidth_range::set_ubits_range(Bits_t size) {
   I(size < Bits_max);
 
   if (size == 0) {
@@ -151,19 +143,6 @@ Bits_t Bitwidth_range::get_sbits() const {
   auto a = Lconst(max).get_bits(); // 15 -> 5sbits
   auto b = Lconst(min).get_bits();
   auto bits =  std::max(a,b);
-
-  /* Bits_t bits = 1; */
-
-  /* if (max) { // bits max + 1 -> signed always -> get sbits */
-  /*   auto abs_max = abs(max); */
-  /*   bits = (sizeof(uint64_t) * 8 - __builtin_clzll(abs_max)); */
-  /* } */
-  
-  //
-  // original code     
-  /* if (min < 0) */
-  /*   bits++; */
-
 
   I(bits < Bits_max);
 

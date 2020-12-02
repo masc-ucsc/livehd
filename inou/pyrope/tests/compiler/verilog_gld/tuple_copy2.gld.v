@@ -4,7 +4,6 @@ module tuple_copy2 (
   output [8:0] out
 );
 
-
 assign out = $signed(\inp.foo ) + $signed(\inp.bar );
 
 endmodule
