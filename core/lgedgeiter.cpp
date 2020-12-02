@@ -223,7 +223,8 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending() {
 
         if (!dpin_list.empty()) {         // Something got added, track potential combinational loops
           for (auto &dpin : dpin_list) {  // fwd
-            topo_add_chain_fwd(dpin);
+            if (unvisited.contains(dpin.get_node().get_compact()))
+              topo_add_chain_fwd(dpin);
           }
 
           auto it = pending_loop_detect.find(node.get_compact());
@@ -264,7 +265,8 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending() {
     if (unvisited.count((*global_it).get_compact())) {
       pending_stack.push_back(*global_it);
       for (auto &dpin : (*global_it).inp_drivers(unvisited)) {  // fwd
-        topo_add_chain_fwd(dpin);
+        if (unvisited.contains(dpin.get_node().get_compact()))
+          topo_add_chain_fwd(dpin);
       }
     }
 

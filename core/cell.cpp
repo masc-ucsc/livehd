@@ -29,6 +29,7 @@ Ntype::_init::_init() {
     }
 
     int pid;
+    (void)pid;
     // Check that common case is fine
 
     pid = sink_name2pid['a'][op];
@@ -54,6 +55,12 @@ Ntype::_init::_init() {
 
     pid = sink_name2pid['B'][op];
     assert(pid==-1 || pid == 1);
+  }
+
+  int pos=0;
+  for(auto e:cell_name) {
+    cell_name_map[e] = static_cast<Ntype_op>(pos);
+    ++pos;
   }
 }
 
@@ -99,7 +106,7 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
     case Ntype_op::Const: // No drivers to Constants
       return "invalid";
       break;
-    case Ntype_op::Mux:   // unlimited case: 1,2,3,4,5....
+    case Ntype_op::Mux:   // unlimited case: 1,2,3,4,5.... // Y = "0" ? "2" : "1"
     case Ntype_op::LUT:   // unlimited case: 1,2,3,4,5....
     case Ntype_op::Sub:   // unlimited case: 1,2,3,4,5....
       assert(is_unlimited_sink(op));
@@ -137,13 +144,14 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
     case Ntype_op::Sflop:
     case Ntype_op::Aflop:
       switch(pid) {
-        case 0: return "reset";
+        case 0: return "async";
         case 1: return "initial";  // reset value
         case 2: return "clock";
         case 3: return "din";
         case 4: return "enable";
         case 5: return "posclk";
         case 6: return "negreset";
+        case 7: return "reset";
         default: return "invalid";
       }
       break;

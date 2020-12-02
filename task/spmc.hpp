@@ -31,9 +31,9 @@ public:
 
   int size() const { // WARNING: NOT ATOMIC. Can give WEIRD RESULTS
     if(tail > head)
-      return tail - head;
+      return tail - head.load(std::memory_order_relaxed);
     else
-      return 256 - (head - tail);
+      return 256 - (head.load(std::memory_order_relaxed) - tail);
   }
 
   bool enqueue(const Type &item_) {

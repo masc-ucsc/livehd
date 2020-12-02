@@ -68,8 +68,8 @@ public:
 
 
     //group: others
-    Lnast_ntype_assert,       // I
-    Lnast_ntype_err_flag,     // compile error flag
+    Lnast_ntype_assert,      // I
+    Lnast_ntype_err_flag,    // compile error flag
     Lnast_ntype_reg_fwd,     // point to the corresponding reg_fwd in LGraph
 
     //group: compiler internal type
@@ -268,7 +268,7 @@ protected:
     ">>",
     "<<",
     "logic_shift_right",
-    "arith_shift_right",
+    ">>", //arith_shift_right
     "arith_shift_left",
     "rotate_shift_right",
     "rotate_shift_left",
@@ -333,8 +333,8 @@ protected:
     "shift_right",
     "shift_left",
     "logic_shift_right",
-    "arith_shift_right",
-    "arith_shift_left",
+    ">>>",//arithmetic right shift (>>>) - shift right specified number of bits, fill with value of sign bit if expression is signed, otherwise fill with zero
+    "<<<",//"arith_shift_left",
     "rotate_shift_right",
     "rotate_shift_left",
     "dynamic_shift_right",
@@ -570,7 +570,7 @@ public:
   bool constexpr is_logical_op()   const { return (val == Lnast_ntype_logical_and) ||
                                                   (val == Lnast_ntype_logical_or)  ||
                                                   (val == Lnast_ntype_logical_not); }
-
+  bool constexpr is_logical_not_op()   const { return (val == Lnast_ntype_logical_not); }
   bool constexpr is_unary_op()     const { return (val == Lnast_ntype_not); }
 
   bool constexpr is_nary_op()      const { return (val == Lnast_ntype_and) ||

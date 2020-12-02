@@ -82,7 +82,7 @@ Node_pin Node_pin::get_driver() const {
 }
 
 Node Node_pin::get_node() const {
-  auto nid = current_g->get_node_nid(get_root_idx());
+  auto nid = current_g->get_node_nid(idx);
 
   return Node(top_g, current_g, hidx, nid);
 }
@@ -150,6 +150,7 @@ int Node_pin::get_num_edges() const {
 
 uint32_t Node_pin::get_bits() const {
   I(is_driver());
+  // FIXME: hierarchical
   return current_g->get_bits(get_root_idx());
 }
 
@@ -158,16 +159,27 @@ void Node_pin::set_bits(uint32_t bits) {
   current_g->set_bits(get_root_idx(), bits);
 }
 
-std::string_view Node_pin::get_type_sub_io_name() const {
-  auto &sub_node = get_node().get_type_sub_node();
-  return sub_node.get_name_from_instance_pid(pid);
+void Node_pin::set_io_sign() {
+  I(is_graph_io());
+  Ann_node_pin_io_unsign::ref(get_lg())->erase(get_compact_driver());
 }
 
-std::string_view Node_pin::get_type_sub_pin_name() const {
-  auto node = get_node();
-  I(node.is_type_sub());
+void Node_pin::clear_io_sign() {
+  I(is_graph_io());
+  Ann_node_pin_io_unsign::ref(get_lg())->set(get_compact_driver(), true);
+}
 
-  return node.get_type_sub_node().get_name_from_instance_pid(pid);
+bool Node_pin::is_io_sign() const {
+  I(is_graph_io());
+  return Ann_node_pin_io_unsign::ref(top_g)->has(get_compact_driver())?false:true;
+}
+
+std::string Node_pin::get_type_sub_pin_name() const {
+  auto &sub_node = get_node().get_type_sub_node();
+  if (sub_node.has_instance_pin(pid))
+    return std::string(sub_node.get_name_from_instance_pid(pid));
+
+  return std::to_string(pid);
 }
 
 float Node_pin::get_delay() const { return Ann_node_pin_delay::ref(top_g)->get(get_compact_driver()); }
@@ -288,7 +300,7 @@ std::string Node_pin::debug_name() const {
                       "_",
                       sink ? "s" : "d",
                       std::to_string(pid),
-                      "_lg_",
+                      "_lg",
                       current_g->get_name());
 }
 
@@ -328,14 +340,23 @@ Node_pin Node_pin::find_driver_pin(LGraph *top, std::string_view wname) {
   return Node_pin(top, ref->get_key(it));
 }
 
-std::string_view Node_pin::get_pin_name() const {
-  auto op = get_node().get_type_op();
-  if (op == Ntype_op::Sub)
-    return get_type_sub_io_name();
-  if (is_driver())
-    return Ntype::get_driver_name(op, pid);
+std::string Node_pin::get_pin_name() const {
+  if (is_graph_io()) {
+		auto &sub_node = current_g->get_self_sub_node();
+		if (sub_node.has_instance_pin(pid))
+			return std::string(sub_node.get_name_from_instance_pid(pid));
 
-  return Ntype::get_sink_name(op, pid);
+		return std::to_string(pid);
+	}
+
+  auto nid = current_g->get_node_nid(idx);
+  auto op = current_g->get_type_op(nid);
+  if (op == Ntype_op::Sub)
+    return get_type_sub_pin_name();
+  if (is_driver())
+    return std::string(Ntype::get_driver_name(op, pid));
+
+  return std::string(Ntype::get_sink_name(op, pid));
 }
 
 void Node_pin::set_offset(Bits_t offset) {
@@ -410,8 +431,14 @@ Node_pin Node_pin::get_down_pin() const {
   // 1st: Get down_hidx
   const auto *tree_pos = Ann_node_tree_pos::ref(current_g);
   I(tree_pos);
-  I(tree_pos->has(node.get_compact_class()));
-  auto delta_pos = tree_pos->get(node.get_compact_class());
+  auto tree_it = tree_pos->find(node.get_compact_class());
+  if (tree_it == tree_pos->end()) {
+    top_g->regenerate_htree(); // force regenerate
+    tree_it = tree_pos->find(node.get_compact_class());
+    I(tree_it != tree_pos->end());
+  }
+
+  auto delta_pos = tree_pos->get(tree_it);
 
   const auto &htree= top_g->get_htree();
   I(!htree.is_leaf(hidx));

@@ -146,14 +146,17 @@ void Lgtuple::set(std::string_view key, std::shared_ptr<Lgtuple> tup2) {
   auto it = key2pos.find(key);
   if (it == key2pos.end()) {
     auto shift = pos2tuple.size();
+    tup2->hier_parent_key_name = key; 
     pos2tuple.emplace_back(tup2);
-    key2pos[key] = shift;
+    /* key2pos[key] = shift; */
+    key2pos.insert_or_assign(key, shift);
   } else {
     I(pos2tuple.size() > it->second);
     I(!(pos2tuple[it->second]->is_valid_val_dpin() && tup2->is_valid_val_dpin())); // Which one to pick??!!??
     if (tup2->is_valid_val_dpin()) {
       pos2tuple[it->second]->set(tup2->get_value_dpin()); // also resets non attr fields
     } else {
+      pos2tuple[it->second]->dump();
       pos2tuple[it->second]->reset_non_attr_fields();
     }
     pos2tuple[it->second]->add(tup2);
@@ -262,11 +265,13 @@ Lconst Lgtuple::get_constant() const {
 void Lgtuple::reset_non_attr_fields() {
   ordered = true;
   named   = true;
-  for(auto it=key2pos.begin();it!=key2pos.end();++it) {
-    if (it->first.substr(0,2) == "__")
+  for(auto it=key2pos.begin();it!=key2pos.end();) {
+    if (it->first.substr(0,2) == "__") {
+      it ++;
       continue;
+    }
     pos2tuple[it->second] = nullptr;
-    key2pos.erase(it);
+    key2pos.erase(it++);
   }
 }
 
@@ -287,7 +292,7 @@ std::vector<std::pair<std::string_view, Node_pin>> Lgtuple::get_all_attributes()
 
   std::vector<std::pair<std::string_view, Node_pin>> v;
 
-  for(auto it=key2pos.begin();it!=key2pos.end();++it) {
+  for(auto it=key2pos.begin(); it!=key2pos.end(); ++it) {
     if (it->first.substr(0,2) != "__")
       continue;
 
@@ -298,7 +303,7 @@ std::vector<std::pair<std::string_view, Node_pin>> Lgtuple::get_all_attributes()
 }
 
 void Lgtuple::dump(std::string_view indent) const {
-  fmt::print("{}hier_parent_name:{} hier_parent_pos:{} {} {} {} val_dpin:{}\n",
+  fmt::print("{}hier_parent_key_name:{} hier_parent_key_pos:{} {} {} {} val_dpin:{}\n",
              indent,
              hier_parent_key_name,
              hier_parent_key_pos,
@@ -320,16 +325,13 @@ void Lgtuple::dump(std::string_view indent) const {
 void Lgtuple::analyze_graph_output(absl::flat_hash_map<std::string, Node_pin> &gout2driver, std::string base_name) const {
   std::string new_hier_name;
   if (hier_parent_key_name != "%") {
-    auto pos = hier_parent_key_name.find_last_of('_');
-
     if (hier_parent_key_name[0] == '%') {
-      new_hier_name = hier_parent_key_name.substr(1, pos-1);
+      new_hier_name = hier_parent_key_name.substr(1);
     } else {
-      new_hier_name = absl::StrCat(base_name, ".", hier_parent_key_name.substr(0, pos));
+      new_hier_name = absl::StrCat(base_name, ".", hier_parent_key_name);
     }
 
-    if (is_scalar()) {
-      fmt::print("hier-name:{}, val_dpin:{}\n", new_hier_name, val_dpin.debug_name());
+    if (is_valid_val_dpin()) {
       gout2driver.insert_or_assign(new_hier_name, val_dpin);
       return;
     }

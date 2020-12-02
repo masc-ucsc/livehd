@@ -82,6 +82,7 @@ static bool trigger_clean2(void *base, bool force_recycle) {
   return false;
 }
 
+#ifdef __linux__
 TEST_F(Setup_mmap_gc_test, mmap_limit) {
     struct rlimit rval;
 
@@ -178,6 +179,7 @@ TEST_F(Setup_mmap_gc_test, mmap_limit) {
   EXPECT_GE(clean_called, 10); // ulimit was set to 18
 #endif
 }
+#endif
 
 TEST_F(Setup_mmap_gc_test, fd_limit) {
   // Constrain even more the file max fds

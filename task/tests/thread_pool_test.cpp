@@ -22,7 +22,7 @@ struct Test1 {
 
 std::atomic<int> total;
 void             mywork(int a) {
-  total += a;
+  total.fetch_add(a, std::memory_order_relaxed);
 }
 
 class GTest1 : public ::testing::Test {
@@ -33,26 +33,29 @@ protected:
 
 TEST_F(GTest1, interface) {
 
-  total = 0;
+  for(int n=1;n<5;n=n+2) {
+    total = 0;
 
-  Thread_pool pool;
-  const int JOB_COUNT = 2000000;
+    Lbench bb(std::string("pool") + std::to_string(n));
+    Thread_pool pool(n);
+    const int JOB_COUNT = 2000000;
 
-  Test1 t1;
-  t1.a = 0;
+    Test1 t1;
+    t1.a = 0;
 
-  pool.add(&Test1::inc_a, t1, 3);
+    pool.add(&Test1::inc_a, t1, 3);
 
-  for(int i = 0; i < JOB_COUNT; ++i) {
-    pool.add(mywork, 1);
+    for(int i = 0; i < JOB_COUNT; ++i) {
+      pool.add(mywork, 1);
+    }
+
+    pool.wait_all();
+    std::cout << "n:" << n << "finished total:" << total << std::endl;
+    std::cout << "test1.a:" << t1.a << std::endl;
+
+    EXPECT_EQ(t1.a, 3);
+    EXPECT_EQ(total, JOB_COUNT);
   }
-
-  pool.wait_all();
-  std::cout << "finished total:" << total << std::endl;
-  std::cout << "test1.a:" << t1.a << std::endl;
-
-  EXPECT_EQ(t1.a, 3);
-  EXPECT_EQ(total, JOB_COUNT);
 }
 
 TEST_F(GTest1, bench) {

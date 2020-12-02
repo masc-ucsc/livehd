@@ -50,10 +50,7 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
   } else {
     top_sts_nid = get_first_child(top_nid);
   }
-  /* Lnast_nid top_sts_nid = get_first_child(top_nid); */
-  default_const_nid     = add_child(top_sts_nid, Lnast_node(Lnast_ntype::create_const(),    Token(Token_id_alnum, 0, 0, 0, "default_const")));
-  err_var_undefined_nid = add_child(top_sts_nid, Lnast_node(Lnast_ntype::create_err_flag(), Token(Token_id_alnum, 0, 0, 0, "err_var_undefined")));
-  register_fwd_nid      = add_child(top_sts_nid, Lnast_node(Lnast_ntype::create_reg_fwd(),  Token(Token_id_alnum, 0, 0, 0, "register_forwarding")));
+
 
   Phi_rtable top_phi_resolve_table;
   phi_resolve_tables[top_sts_nid] = top_phi_resolve_table;
@@ -77,7 +74,6 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
 
 
   fmt::print("LNAST SSA Transformation Finished!\n");
-  fmt::print("====================================\n");
 }
 
 
@@ -790,19 +786,16 @@ void Lnast::ssa_handle_phi_nodes(const Lnast_nid &if_nid) {
       Phi_rtable fake_false_table ; //for the case of if-elif-elif
       Lnast_nid condition_nid = get_sibling_prev(*itr);
       resolve_phi_nodes(condition_nid, true_table, fake_false_table);
-
     } else if (itr == if_stmts_vec.rbegin()+1 && has_else_stmts(if_nid)) {
       Phi_rtable &true_table  = phi_resolve_tables[*itr];
       Phi_rtable &false_table = phi_resolve_tables[*if_stmts_vec.rbegin()];
       Lnast_nid condition_nid = get_sibling_prev(*itr);
       resolve_phi_nodes(condition_nid, true_table, false_table);
-
     } else {
       Phi_rtable &true_table  = phi_resolve_tables[*itr];
       Phi_rtable &false_table = new_added_phi_node_tables[get_parent(*itr)];
       Lnast_nid condition_nid = get_sibling_prev(*itr);
       resolve_phi_nodes(condition_nid, true_table, false_table);
-
     }
   }
 }
@@ -810,6 +803,7 @@ void Lnast::ssa_handle_phi_nodes(const Lnast_nid &if_nid) {
 
 void Lnast::resolve_phi_nodes(const Lnast_nid &cond_nid, Phi_rtable &true_table, Phi_rtable &false_table) {
   for (auto const&[key, val] : false_table) {
+    /* fmt::print("false table content: key->{}, value->{}\n", key, get_token(val).get_text()); */
     if (true_table.find(key) != true_table.end()) {
       add_phi_node(cond_nid, true_table[key], false_table[key]);
       true_table.erase(key);
@@ -847,10 +841,12 @@ void Lnast::resolve_phi_nodes(const Lnast_nid &cond_nid, Phi_rtable &true_table,
 Lnast_nid Lnast::get_complement_nid(std::string_view brother_name, const Lnast_nid &psts_nid, bool false_path) {
   auto if_nid = get_parent(psts_nid);
   Phi_rtable &new_added_phi_node_table = new_added_phi_node_tables[if_nid];
-  if(false_path && new_added_phi_node_table.find(brother_name) != new_added_phi_node_table.end())
+  if(false_path && new_added_phi_node_table.find(brother_name) != new_added_phi_node_table.end()) {
     return new_added_phi_node_table[brother_name];
-  else
+  }
+  else {
     return check_phi_table_parents_chain(brother_name, psts_nid, false);
+  }
 }
 
 
@@ -864,9 +860,9 @@ Lnast_nid Lnast::check_phi_table_parents_chain(std::string_view target_name, con
     ; // do nothing for csts
   } else if (get_parent(psts_nid) == get_root() && !originate_from_csts){
     if (is_reg(target_name)) {
-      return register_fwd_nid;
+      return add_child(psts_nid, Lnast_node(Lnast_ntype::create_reg_fwd(),  Token(Token_id_alnum, 0, 0, 0, "register_forwarding")));
     } else {
-      return err_var_undefined_nid;
+      return add_child(psts_nid, Lnast_node(Lnast_ntype::create_err_flag(), Token(Token_id_alnum, 0, 0, 0, "err_var_undefined")));
     }
   } else {
     auto tmp_if_nid = get_parent(psts_nid);
@@ -884,7 +880,12 @@ Lnast_nid Lnast::add_phi_node(const Lnast_nid &cond_nid, const Lnast_nid &t_nid,
   auto if_nid = get_parent(cond_nid);
   Phi_rtable &new_added_phi_node_table = new_added_phi_node_tables[if_nid];
   auto new_phi_nid = add_child(if_nid, Lnast_node(Lnast_ntype::create_phi(), Token()));
-  auto target_nid  = add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_ref(), get_token(t_nid), get_subs(t_nid)));
+  Lnast_nid target_nid;
+  if (get_type(t_nid).is_err_flag() || get_type(f_nid).is_err_flag()) {
+    target_nid  = add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_err_flag(), Token(Token_id_alnum, 0, 0, 0, "err_var_undefined"))); //ssa update later
+  } else {
+    target_nid  = add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_ref(), get_token(t_nid), get_subs(t_nid))); //ssa update later
+  }
   update_global_lhs_ssa_cnt_table(target_nid);
   add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_cond(), get_token(cond_nid), get_subs(cond_nid)));
   add_child(new_phi_nid, Lnast_node(get_type(t_nid),  get_token(t_nid), get_subs(t_nid)));

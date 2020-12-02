@@ -22,11 +22,11 @@ protected:
   Lrand<bool>  rbool;
   Lrand<int>   rint;
 
-  mmap_lib::map<std::string_view, Node_pin> track_n1_inp_setup_pins;
-  mmap_lib::map<std::string_view, Node_pin> track_n2_inp_setup_pins;
+  mmap_lib::map<std::string_view, Node_pin> track_n1_inp_connected_pins;
+  mmap_lib::map<std::string_view, Node_pin> track_n2_inp_connected_pins;
 
-  mmap_lib::map<std::string_view, Node_pin> track_n1_out_setup_pins;
-  mmap_lib::map<std::string_view, Node_pin> track_n2_out_setup_pins;
+  mmap_lib::map<std::string_view, Node_pin> track_n1_out_connected_pins;
+  mmap_lib::map<std::string_view, Node_pin> track_n2_out_connected_pins;
 
   mmap_lib::map<XEdge::Compact, int> track_edge_count;
 
@@ -74,52 +74,52 @@ protected:
     return pos;
   }
 
-  void check_setup_pins() {
+  void check_connected_pins() {
 #if 0
     Graph_library::sync_all(); // To ease debug
 
     int n_hits;
 
     n_hits=0;
-    for(auto &pin : n1.out_setup_pins()) {
+    for(auto &pin : n1.out_connected_pins()) {
       EXPECT_TRUE(!pin.is_invalid());
-      EXPECT_TRUE(track_n1_out_setup_pins.has(pin.get_type_sub_pin_name()));
+      EXPECT_TRUE(track_n1_out_connected_pins.has(pin.get_type_sub_pin_name()));
       n_hits++;
     }
 
-    EXPECT_EQ(track_n1_out_setup_pins.size(), n_hits);
+    EXPECT_EQ(track_n1_out_connected_pins.size(), n_hits);
 
     auto nedges = n1.out_edges().size(); // edges only from n1 to n2
 
     EXPECT_EQ(n1.get_num_inp_edges(), 0);
     EXPECT_EQ(n1.get_num_out_edges(), nedges);
     EXPECT_EQ(n2.get_num_edges(), nedges);
-    EXPECT_EQ(n2.out_setup_pins().size(),1);
+    EXPECT_EQ(n2.out_connected_pins().size(),1);
 
     n_hits=0;
-    for(auto &pin : n1.inp_setup_pins()) {
+    for(auto &pin : n1.inp_connected_pins()) {
       EXPECT_TRUE(!pin.is_invalid());
-      EXPECT_TRUE(track_n1_inp_setup_pins.has(pin.get_type_sub_pin_name()));
+      EXPECT_TRUE(track_n1_inp_connected_pins.has(pin.get_type_sub_pin_name()));
       n_hits++;
     }
 
 
-    EXPECT_EQ(track_n1_inp_setup_pins.size(), n_hits);
-    EXPECT_EQ(n1.inp_setup_pins().size(),1);
+    EXPECT_EQ(track_n1_inp_connected_pins.size(), n_hits);
+    EXPECT_EQ(n1.inp_connected_pins().size(),1);
 #endif
   }
 
   Node_pin add_n1_setup_driver_pin(const std::string pname) {
 
-    const auto &it = track_n1_out_setup_pins.find(pname);
-    if (it == track_n1_out_setup_pins.end()) {
+    const auto &it = track_n1_out_connected_pins.find(pname);
+    if (it == track_n1_out_connected_pins.end()) {
       EXPECT_FALSE(n1_sub->has_pin(pname));
 
       auto instance_pid = n1_sub->add_output_pin(pname, get_free_n1_graph_pos());
 
       auto dpin = n1.setup_driver_pin(pname);
       I(dpin.get_pid() == instance_pid);
-      track_n1_out_setup_pins.set(pname, dpin);
+      track_n1_out_connected_pins.set(pname, dpin);
       return dpin;
     }
 
@@ -141,14 +141,14 @@ protected:
 
   Node_pin add_n2_setup_sink_pin(const std::string pname) {
 
-    const auto &it = track_n2_inp_setup_pins.find(pname);
-    if (it == track_n2_inp_setup_pins.end()) {
+    const auto &it = track_n2_inp_connected_pins.find(pname);
+    if (it == track_n2_inp_connected_pins.end()) {
       EXPECT_FALSE(n2_sub->has_pin(pname));
       auto instance_pid = n2_sub->add_input_pin(pname, get_free_n2_graph_pos());
 
       auto spin = n2.setup_sink_pin(pname);
       I(spin.get_pid() == instance_pid);
-      track_n2_inp_setup_pins.set(pname, spin);
+      track_n2_inp_connected_pins.set(pname, spin);
       return spin;
     }
 
@@ -208,18 +208,18 @@ protected:
 
 TEST_F(Edge_test, random_insert) {
 
-  check_setup_pins();
+  check_connected_pins();
   check_edges();
 
   auto dpin = add_n1_setup_driver_pin("\\random very long @ string with spaces and complicated stuff %");
   auto spin = add_n2_setup_sink_pin("\\   foo  \nbar");
   check_edges();
 
-  check_setup_pins();
+  check_connected_pins();
 
   add_edge(dpin,spin);
 
-  check_setup_pins();
+  check_connected_pins();
   check_edges();
 
   for(int i=0;i<6000;++i) {
@@ -290,7 +290,7 @@ TEST_F(Edge_test, overflow_delete) {
   auto s1 = g->create_node(Ntype_op::Sum);
 
   track_edge_count.clear();
-  check_setup_pins();
+  check_connected_pins();
   check_edges();
 
   for(int i=0;i<6000;++i) {
@@ -333,7 +333,7 @@ TEST_F(Edge_test, overflow_delete_node) {
   auto s1 = g->create_node(Ntype_op::Sum);
 
   track_edge_count.clear();
-  check_setup_pins();
+  check_connected_pins();
   check_edges();
 
   for(int i=0;i<6000;++i) {

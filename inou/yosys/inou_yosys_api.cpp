@@ -1,6 +1,5 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "inou_yosys_api.hpp"
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -13,23 +12,35 @@
 #include <iostream>
 #include <stdexcept>
 
-#include "eprp_utils.hpp"
-#include "iassert.hpp"
-#include "lgraph.hpp"
 #include "mustache.hpp"
+#include "kernel/yosys.h"
 
-void setup_inou_yosys() { Inou_yosys_api::setup(); }
+#include "eprp_utils.hpp"
+#include "inou_yosys_api.hpp"
+#include "lgraph.hpp"
 
-Inou_yosys_api::Inou_yosys_api(Eprp_var &var, bool do_read) : Pass("inou.yosys", var) {
-  yosys = var.get("yosys");
-  set_script_liblg(var, do_read);
+static void log_error_atexit() {
+  throw std::runtime_error("yosys finished");
 }
 
-void Inou_yosys_api::set_script_liblg(const Eprp_var &var, bool do_read) {
+void setup_inou_yosys() {
+  Yosys::log_error_stderr    = true;
+  Yosys::log_cmd_error_throw = true;
+  Yosys::log_errfile         = stderr;
+  Yosys::log_error_atexit    = log_error_atexit;
+  Inou_yosys_api::setup();
+}
+
+Inou_yosys_api::Inou_yosys_api(Eprp_var &var, bool do_read) : Pass("inou.yosys", var) {
+  set_script_yosys(var, do_read);
+}
+
+void Inou_yosys_api::set_script_yosys(const Eprp_var &var, bool do_read) {
   auto script = var.get("script");
-  liblg       = var.get("liblg");
 
   auto main_path = Eprp_utils::get_exe_path();
+
+  fmt::print("path:{}\n",main_path);
 
   std::vector<std::string> alt_paths{
 		  "/../pass/mockturtle/mt_test.sh.runfiles/livehd/inou/yosys/"
@@ -44,21 +55,6 @@ void Inou_yosys_api::set_script_liblg(const Eprp_var &var, bool do_read) {
 		  ,"/../share/livehd/inou/yosys/"
 		  ,"/../inou/yosys/"
 		  ,"/inou/yosys/"};
-
-  if (liblg.empty()) {
-	  for(const auto e:alt_paths) {
-		  auto test = main_path + e + "liblgraph_yosys.so";
-		  if (access(test.c_str(), X_OK) != -1) {
-			  liblg = test;
-			  break;
-		  }
-	  }
-  }
-
-  if (access(liblg.c_str(), X_OK) == -1) {
-    error("could not find an executable liblgraph_yosys.so at {}\n", liblg);
-    return;
-  }
 
   if (script.empty()) {
     std::string do_read_str;
@@ -80,47 +76,13 @@ void Inou_yosys_api::set_script_liblg(const Eprp_var &var, bool do_read) {
     error("yosys setup could not find the provided script:{} file", script_file);
     return;
   }
-
 }
 
-int Inou_yosys_api::create_lib(const std::string &lib_file, const std::string &lgdb) {
-  std::string ofile(lgdb);
-  ofile += "/tech_library";
-
-  fmt::print("creating tech_library file for {} in {}", lib_file, ofile);
-  int fail = 0;
-
-  int pid = fork();
-  if (pid < 0) {
-    error("inou.yosys: unable to fork??");
-    return -1;
-  }
-
-  if (pid == 0) {  // Child
-    mkdir(lgdb.c_str(), 0755);
-
-    // redirect stdout to tech_file
-    int output = open(ofile.c_str(), O_WRONLY | O_CREAT | O_TRUNC, S_IRWXU);
-    dup2(output, STDOUT_FILENO);
-
-    std::string tech_parser = "./inou/tech/func_liberty_json.sh";
-    char *      argv[]      = {strdup(tech_parser.c_str()), strdup(lib_file.c_str()), 0};
-
-    if (execvp(tech_parser.c_str(), argv) < 0) {
-      error("tech_library generation failed for {} in {}, will not call yosys", lib_file, ofile);
-    }
-    exit(0);
-  }
-
-  waitpid(pid, &fail, WUNTRACED | WCONTINUED);
-  return fail;
-}
-
-int Inou_yosys_api::call_yosys(mustache::data &vars) {
+void Inou_yosys_api::call_yosys(mustache::data &vars) {
   std::ifstream inFile;
   inFile.open(std::string(script_file));
   if (!inFile.good())
-    throw std::runtime_error(fmt::format("inou_yosys_api: could not open {}", script_file));
+    error("inou_yosys_api: could not open {}", script_file);
 
   std::stringstream strStream;
   strStream << inFile.rdbuf();  // read the whole file
@@ -128,7 +90,28 @@ int Inou_yosys_api::call_yosys(mustache::data &vars) {
   mustache::mustache tmpl(strStream.str());
   tmpl.set_custom_escape([](const std::string &s) { return s; });  // No HTML escape
 
-  const std::string yosys_cmd = tmpl.render(vars);
+  const std::string yosys_all_cmds = tmpl.render(vars);
+
+  Yosys::RTLIL::Design design;
+
+  auto cmd_list = absl::StrSplit(yosys_all_cmds, '\n');
+
+  for(const auto &c:cmd_list) {
+    auto x = std::find_if(c.begin(), c.end(), [](char ch) { return std::isalnum(ch); });
+    if (x==c.end())
+      continue; // skip empty (or just space lines)
+
+    std::string cmd{c}; // yosys call needs std::string
+
+    fmt::print("yosys cmd:{}\n",cmd);
+    try{
+      Yosys::Pass::call(&design, cmd);
+    }catch(...) {
+      error("inou.yosys cmd:{} failed\n", cmd);
+    }
+  }
+
+#if 0
   char              filename[1024];
   strcpy(filename, "yosys_script.XXXXXX");
 
@@ -141,7 +124,7 @@ int Inou_yosys_api::call_yosys(mustache::data &vars) {
   I(sz_check == yosys_cmd.size());
   close(fd);
 
-  fmt::print("yosys {} synthesis cmd: {} -m {} using {}\n", filename, yosys, liblg, script_file);
+  fmt::print("yosys {} synthesis cmd: {} using {}\n", filename, yosys, script_file);
 
   int pid = fork();
   if (pid < 0) {
@@ -173,8 +156,6 @@ int Inou_yosys_api::call_yosys(mustache::data &vars) {
 
     char *argv[] = {strdup(yosys.c_str()),
                     strdup("-q"),
-                    strdup("-m"),
-                    strdup(liblg.c_str()),
                     strdup("-s"),
                     strdup(filename),
                     0};
@@ -219,8 +200,8 @@ int Inou_yosys_api::call_yosys(mustache::data &vars) {
 #else
   wait(&wstatus);
 #endif
-
   return wstatus;
+#endif
 }
 
 void Inou_yosys_api::tolg(Eprp_var &var) {
@@ -261,24 +242,17 @@ void Inou_yosys_api::do_tolg(Eprp_var &var) {
     vars.set("hierarchy", mustache::data::type::bool_false);
   }
 
-  if (techmap == "alumacc") {
-    vars.set("techmap_alumacc", mustache::data::type::bool_true);
-  } else if (techmap == "full") {
-    vars.set("techmap_full", mustache::data::type::bool_true);
-  } else if (techmap == "none") {
-    if (!lib.empty()) {
-      vars.set("liberty_tmap", mustache::data::type::bool_true);
-      vars.set("liberty_file", lib);
-
-      create_lib(lib, path);
-
+  if (!techmap.empty()) {
+    if (techmap == "alumacc") {
+      vars.set("techmap_alumacc", mustache::data::type::bool_true);
+    } else if (techmap == "full") {
+      vars.set("techmap_full", mustache::data::type::bool_true);
     } else {
-      // Nothing
+      error("unrecognized techmap {} option. Either full or alumacc", techmap);
+      return;
     }
-  } else {
-    error("unrecognized techmap {} option. Either full or alumacc", techmap);
-    return;
   }
+
   if (abc == "true" || abc == "1") {
     vars.set("abc_in_yosys", mustache::data::type::bool_true);
   } else if (abc == "false" || abc == "0") {
@@ -291,11 +265,9 @@ void Inou_yosys_api::do_tolg(Eprp_var &var) {
 
   uint32_t max_version = gl->get_max_version();
 
-  gl->sync();  // Before calling remote thread in call_yosys
+  Yosys::yosys_setup();
 
   call_yosys(vars);
-
-  gl->reload();  // after the call_yosys
 
   std::vector<LGraph *> lgs;
   gl->each_lgraph([&lgs, gl, max_version, this](Lg_type_id id, std::string_view name) {
@@ -310,11 +282,16 @@ void Inou_yosys_api::do_tolg(Eprp_var &var) {
     }
   });
 
+  //Yosys::memhasher_off();
+  //Yosys::yosys_shutdown();
+
   var.add(lgs);
 }
 
 void Inou_yosys_api::fromlg(Eprp_var &var) {
   Inou_yosys_api p(var, false);
+
+  Yosys::yosys_setup();
 
   for (auto &lg : var.lgs) {
     mustache::data vars;
@@ -338,24 +315,15 @@ void Inou_yosys_api::fromlg(Eprp_var &var) {
 }
 
 void Inou_yosys_api::setup() {
-  std::string yosys;
-  yosys = "/usr/bin/yosys";
-  if (access(yosys.c_str(), X_OK) == -1) {
-    yosys = "/usr/local/bin/yosys";
-    if (access(yosys.c_str(), X_OK) == -1) {
-      yosys = "yosys";
-    }
-  }
 
   Eprp_method m1("inou.yosys.tolg", "read verilog using yosys to lgraph", &Inou_yosys_api::tolg);
   m1.add_label_required("files", "verilog files to process (comma separated)");
   m1.add_label_optional("path", "path to build the lgraph[s]", "lgdb");
-  m1.add_label_optional("techmap", "Either full or alumac techmap or none from yosys. Cannot be used with liberty", "none");
+  m1.add_label_optional("techmap", "Either full or alumac techmap or none from yosys. Cannot be used with liberty", "");
   m1.add_label_optional("liberty", "Liberty file for technology mapping. Cannot be used with techmap, will call abc for tmap", "");
   m1.add_label_optional("abc", "run ABC inside yosys before loading lgraph", "false");
   m1.add_label_optional("script", "alternative custom inou_yosys_read.ys command");
-  m1.add_label_optional("yosys", "path for yosys command", yosys);
-  m1.add_label_optional("liblg", "path for libgraph_yosys.so library");
+  m1.add_label_optional("yosys", "path for yosys command", "");
   m1.add_label_optional("top", "define top module, will call yosys hierarchy pass (-auto-top allowed)");
 
   register_inou("yosys", m1);
@@ -364,7 +332,7 @@ void Inou_yosys_api::setup() {
   m2.add_label_optional("path", "path to read the lgraph[s]", "lgdb");
   m2.add_label_optional("odir", "output directory for generated verilog files", ".");
   m2.add_label_optional("script", "alternative custom inou_yosys_write.ys command");
-  m2.add_label_optional("yosys", "path for yosys command", yosys);
+  m2.add_label_optional("yosys", "path for yosys command", "");
   m2.add_label_optional("hier", "hierarchy pass in LiveHD (like flat in yosys)");
 
   register_inou("yosys", m2);

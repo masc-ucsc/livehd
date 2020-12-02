@@ -42,7 +42,7 @@ LiveHD requires a specific commit of Yosys which needs to be built from source.
   ```
 2. **Build Yosys from source**  
   LiveHD requires a specific commit of Yosys in order to function properly.  Versions of Yosys installed through apt, pacman, etc. will not work.  
-  When building Yosys from source, it will pull in additional dependencies it needs.  Check https://github.com/YosysHQ/yosys/#setup for more information.
+  When building Yosys from source, it will pull in additional dependencies it needs.  Check https://github.com/YosysHQ/yosys/#setup for more information. Notice that yosys compilation requires several packages to compile.
 
   - Download the Yosys source (the exact directory doesn't matter as long as it's not inside LiveHD)  
       ```

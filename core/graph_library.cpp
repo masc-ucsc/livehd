@@ -184,8 +184,8 @@ Graph_library *Graph_library::instance(std::string_view path) {
   }
   std::string full_path(full_path_char);
 
-  auto it = Graph_library::global_instances.find(full_path);
-  if (it != Graph_library::global_instances.end()) {
+  auto it = global_instances.find(full_path);
+  if (it != global_instances.end()) {
     return it->second;
   }
 
@@ -195,8 +195,14 @@ Graph_library *Graph_library::instance(std::string_view path) {
   }
 
   Graph_library *graph_library = new Graph_library(full_path);
-  Graph_library::global_instances.insert(std::make_pair(std::string(full_path), graph_library));
-  Graph_library::global_instances.insert(std::make_pair(std::string(path), graph_library));
+  global_instances.insert(std::make_pair(std::string(full_path), graph_library));
+  global_instances.insert(std::make_pair(std::string(path), graph_library));
+
+  auto it2 = global_name2lgraph.find(graph_library->path);
+  if (it2 == global_name2lgraph.end()) {
+    auto &glib = global_name2lgraph[graph_library->path]; // insert
+    I(glib.empty());
+  }
 
   return graph_library;
 }

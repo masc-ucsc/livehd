@@ -1,7 +1,7 @@
 # livehd specific bazel options
 build --output_filter='^//(core|pass|inou)'
 #build --output_filter="^//"
-build --cxxopt="-std=c++17" --cxxopt="-Wno-unknown-pragmas" --cxxopt="-Wextra" --cxxopt="-Wunused" --cxxopt="-Wshadow" --force_pic --build_tag_filters="-fixme"
+build --cxxopt="-std=c++17" --cxxopt="-fexceptions" --cxxopt="-Wno-unknown-pragmas" --cxxopt="-Wextra" --cxxopt="-Wunused" --cxxopt="-Wshadow" --force_pic --build_tag_filters="-fixme"
 # test --cache_test_results=no
 
 # config that enables super aggressive optimization for max performance

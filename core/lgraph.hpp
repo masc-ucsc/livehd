@@ -15,6 +15,7 @@
 class LGraph : public LGraph_Node_Type {
 protected:
   friend class Node;
+  friend class Hierarchy_tree;
   friend class Node_pin;
   friend class XEdge;
   friend class CFast_edge_iterator;
@@ -36,17 +37,15 @@ protected:
   }
 
   Index_ID get_node_nid(Index_ID idx) const {
-    I(node_internal[idx].is_root());
-    if (node_internal[idx].is_master_root())
-      return idx;
+    while (!node_internal[idx].is_master_root()) {
+      idx = node_internal[idx].get_nid();
+    }
 
-    return node_internal[idx].get_nid();
+    return idx;
   }
 
   Node_pin_iterator out_connected_pins(const Node &node) const;
   Node_pin_iterator inp_connected_pins(const Node &node) const;
-  Node_pin_iterator out_setup_pins(const Node &node) const;
-  Node_pin_iterator inp_setup_pins(const Node &node) const;
 
   Node_pin_iterator inp_drivers(const Node &node, const absl::flat_hash_set<Node::Compact> &exclude) const;
 
@@ -146,6 +145,11 @@ public:
 
   bool is_empty() const { return fast_first() == 0; }
 
+  void regenerate_htree() {
+    htree.clear();
+    htree.regenerate();
+  }
+
   Hierarchy_tree *ref_htree() {
     if (htree.empty())
       htree.regenerate();
@@ -157,19 +161,17 @@ public:
     return htree;
   }
 
-  Index_ID add_edge(const Node_pin &dpin, const Node_pin &spin) {
+  void add_edge(const Node_pin &dpin, const Node_pin &spin) {
     I(dpin.is_driver());
     I(spin.is_sink());
     I(spin.get_class_lgraph() == dpin.get_class_lgraph());
 
-    return add_edge_int(spin.get_root_idx(), spin.get_pid(), dpin.get_root_idx(), dpin.get_pid());
+    add_edge_int(spin.get_root_idx(), spin.get_pid(), dpin.get_root_idx(), dpin.get_pid());
   }
 
-  Index_ID add_edge(const Node_pin &dpin, const Node_pin &spin, uint32_t bits) {
-    Index_ID idx = add_edge(dpin, spin);
-    I(node_internal[idx].is_root()); // add_edge returns the root
-    set_bits(idx, bits);
-    return idx;
+  void add_edge(const Node_pin &dpin, const Node_pin &spin, uint32_t bits) {
+    add_edge(dpin, spin);
+    set_bits(dpin.get_root_idx(), bits);
   }
 
   Fwd_edge_iterator  forward(bool visit_sub = false);

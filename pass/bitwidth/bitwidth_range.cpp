@@ -9,18 +9,15 @@ Lconst Bitwidth_range::to_lconst(bool overflow, int64_t val) {
   if (val == 0)
     return Lconst(0);
 
-  if (overflow) {
-    if (val > 0) {
-      return Lconst(1).lsh_op(val) - 1;
-    } else {
-      return Lconst(0) - (Lconst(1).lsh_op(-val) - 1);
-    }
-  } else {
-    if (val > 0)
-      return Lconst(val);
-    else
-      return Lconst(0) - Lconst(-val);
+  if (!overflow) {
+    return Lconst(val);
   }
+
+  if (val > 0) {
+    return Lconst(1).lsh_op(val) - 1;
+  }
+
+  return Lconst(0) - (Lconst(1).lsh_op(-val));
 }
 
 Bitwidth_range::Bitwidth_range(const Lconst &val) {
@@ -42,7 +39,7 @@ Bitwidth_range::Bitwidth_range(const Lconst &val) {
   }
 }
 
-Bitwidth_range::Bitwidth_range(const Lconst &min_val, const Lconst &max_val) {
+void Bitwidth_range::set_range(const Lconst &min_val, const Lconst &max_val) {
   I(max_val >= min_val);
 
   if (max_val.is_i() && min_val.is_i()) {
@@ -75,16 +72,20 @@ Bitwidth_range::Bitwidth_range(const Lconst &min_val, const Lconst &max_val) {
   }
 }
 
-Bitwidth_range::Bitwidth_range(Bits_t bits, bool _sign) {
-  if (_sign)
-    set_sbits(bits);
-  else
-    set_ubits(bits);
+Bitwidth_range::Bitwidth_range(const Lconst &min_val, const Lconst &max_val) {
+  set_range(min_val, max_val);
 }
 
-Bitwidth_range::Bitwidth_range(Bits_t bits) { set_ubits(bits); }
+void Bitwidth_range::set_narrower_range(const Lconst &min_val, const Lconst &max_val) {
+  if (max_val.is_i() && min_val.is_i()) {
+    I(max>= max_val.to_i());
+    I(min<= min_val.to_i());
+  }
+  set_range(min_val, max_val);
+}
 
-void Bitwidth_range::set_sbits(Bits_t size) {
+
+void Bitwidth_range::set_sbits_range(Bits_t size) {
   I(size < Bits_max);
 
   if (size == 0) {
@@ -105,7 +106,7 @@ void Bitwidth_range::set_sbits(Bits_t size) {
   }
 }
 
-void Bitwidth_range::set_ubits(Bits_t size) {
+void Bitwidth_range::set_ubits_range(Bits_t size) {
   I(size < Bits_max);
 
   if (size == 0) {
@@ -127,7 +128,9 @@ void Bitwidth_range::set_ubits(Bits_t size) {
   }
 }
 
-Bits_t Bitwidth_range::get_bits() const {
+
+// we get sbits from the max/min since every thing in lgraph should be initially signed                
+Bits_t Bitwidth_range::get_sbits() const {
   if (overflow) {
     Bits_t bits = max;
     if (min < 0)
@@ -137,17 +140,16 @@ Bits_t Bitwidth_range::get_bits() const {
     return bits;
   }
 
-  Bits_t bits = 1;
-  if (max) {
-    auto abs_max = abs(max);
-    bits = (sizeof(uint64_t) * 8 - __builtin_clzll(abs_max));
-  }
-  if (min < 0)
-    bits++;
+  auto a = Lconst(max).get_bits(); // 15 -> 5sbits
+  auto b = Lconst(min).get_bits();
+  auto bits =  std::max(a,b);
 
   I(bits < Bits_max);
 
   return bits;
 }
 
-void Bitwidth_range::dump() const { fmt::print("max:{} min:{} {}", max, min, overflow ? "overflow" : ""); }
+void Bitwidth_range::dump() const { 
+  //(max, min, sbis, overflow)
+  fmt::print("({}, {}, {}b) {}\n", max, min, get_sbits(), overflow ? "overflow" : ""); 
+} 

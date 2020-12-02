@@ -607,6 +607,8 @@ propagation to indicate that those bits are useless.
 
 #### Other Considerations
 
+
+
 #### Peephole Optimizations
 
 
@@ -634,11 +636,11 @@ digraph Unsigned {
 
 #### Forward Propagation
 
-<!-- * $Y     = \begin{cases} a               & a \get 0 \\ -->
-<!--                          a.mask-(\neg a) & otherwise \end{cases}$ -->
-<!-- * $Y.max = \begin{cases} a.max           & a \get 0 \\ -->
-<!--                          a.mask          & otherwise \end{cases}$ -->
-<!-- * $Y.min = 0$ -->
+* $Y     = \begin{cases} a               & a \get 0 \\
+                         a.mask+a+1      & otherwise \end{cases}$
+* $Y.max = \begin{cases} a.max           & a.min \get 0 \\
+                         a.mask          & otherwise \end{cases}$
+* $Y.min = 0$
 
 #### Backward Propagation
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-echo "yosys.sh running in "$(pwd)
+echo "verilog.sh running in "$(pwd)
 
 LGSHELL=./bazel-bin/main/lgshell
 
@@ -10,11 +10,10 @@ if [ ! -x $LGSHELL ]; then
     LGSHELL=./main/lgshell
     echo "lgshell is in $(pwd)"
   else
-    echo "FAILED: pyrope_test.sh could not find lgshell binary in $(pwd)";
+    echo "FAILED: verilog.sh could not find lgshell binary in $(pwd)";
   fi
 fi
 
-YOSYS=./inou/yosys/lgyosys
 LGCHECK=./inou/yosys/lgcheck
 
 rm -rf ./logs
@@ -47,7 +46,7 @@ do
   STARTTIME=$SECONDS
   #echo "starting test "${input}" at "$(/usr/bin/date)
   input=$(basename ${full_input})
-  echo ${YOSYS} ${full_input}
+  echo ${full_input}
   base=${input%.*}
 
   if [[ $input =~ "long_" ]]; then
@@ -84,6 +83,7 @@ do
     echo "FAIL: lgyosys parsing terminated with an error (testcase ${input})"
     ((fail++))
     fail_list+=" "$base
+    continue
   fi
   LC=$(grep -iv Warning tmp_yosys/${input}.err | grep -v perf_event | grep -v "recommended to use " | wc -l | cut -d" " -f1)
   if [[ $LC -gt 0 ]]; then
@@ -100,14 +100,7 @@ do
     continue
   fi
 
-  #./inou/json/lgjson  --graph_name ${base} --json_output ${base}.json > ./yosys-test/log_json_${input} 2> ./yosys-test/err_json_${input}
-  #if [ $? -ne 0 ]; then
-    #echo "WARN: Not able to create JSON for testcase ${input}"
-  #fi
-
-  #${YOSYS} -g${base} -h > ./yosys-test/log_to_yosys_${input} 2> ./yosys-test/err_to_yosys_${input}
-
-  #FIXME: echo "lgraph.match path:lgdb_yosys |> pass.cprop |> inou.yosys.fromlg odir:tmp_yosys" | ${LGSHELL} -q 2>tmp_yosys/${input}.err
+  #echo "lgraph.match path:lgdb_yosys |> pass.cprop |> inou.yosys.fromlg odir:tmp_yosys" | ${LGSHELL} -q 2>tmp_yosys/${input}.err
   echo "lgraph.match path:lgdb_yosys |> inou.yosys.fromlg odir:tmp_yosys" | ${LGSHELL} -q 2>tmp_yosys/${input}.err
   LC=$(grep -iv Warning tmp_yosys/${input}.err | grep -v perf_event | grep -v "recommended to use " | grep -v "IPC=" | wc -l | cut -d" " -f1)
   if [[ $LC -gt 0 ]]; then
@@ -119,7 +112,7 @@ do
   if [ $? -eq 0 ]; then
     echo "Successfully created verilog from graph ${input}"
   else
-    echo ${YOSYS} -g${base} -h -d
+    echo "yosys -g"${base} -h -d
     echo "FAIL: verilog generation terminated with an error (testcase ${input})"
     ((fail++))
     fail_list+=" "$base
@@ -168,5 +161,4 @@ else
   echo "FAIL: ${pass} tests passed but ${fail} failed verification: ${fail_list}"
   exit 1
 fi
-
 

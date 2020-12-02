@@ -1,44 +1,46 @@
 // firrtl_gcd.prp
-$clock.__bits = 1
-$reset.__bits = 1
+$clock.__ubits = 1
+$reset.__ubits = 1
 
-$io_value1.__bits = 16
-$io_value2.__bits = 16
-$io_loading_values.__bits = 1
-%io_output_gcd.__bits = 16
-%io_output_valid.__bits = 1
-#x.__bits = 16
-#y.__bits = 16
+$io_value1.__ubits = 16
+$io_value2.__ubits = 16
+$io_loading_values.__ubits = 1
+%io_output_gcd.__ubits = 16
+%io_output_valid.__ubits = 1
+#x.__ubits = 16
+#y.__ubits = 16
 
 _i_T    = #x.__q_pin > #y.__q_pin
 _i_T_1  = #x.__q_pin - #y.__q_pin
 _i_T_2  = _i_T_1 >> 1
 _i_T_2 := _i_T_1
 
-
 _i_T_3  = #y.__q_pin - #x.__q_pin
 _i_T_4  = _i_T_3 >> 1
 _i_T_4 := _i_T_3
 
+_i_GEN_0 = 0
 if (_i_T) {
   _i_GEN_0 = _i_T_2
 } else {
   _i_GEN_0 = #x.__q_pin
 }
 
+_i_GEN_1 = 0
 if (_i_T) {
   _i_GEN_1 = #y.__q_pin
 } else {
   _i_GEN_1 = _i_T_4
 }
 
+_i_GEN_2 = 0
 if ($io_loading_values) {
   _i_GEN_2 = $io_value1
 } else {
   _i_GEN_2 = _i_GEN_0
 }
 
-
+_i_GEN_3 = 0
 if ($io_loading_values) {
   _i_GEN_3 = $io_value2
 } else {

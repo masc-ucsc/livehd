@@ -47,23 +47,29 @@ void Hierarchy_tree::regenerate_step(LGraph *lg, const Hierarchy_index &parent) 
   auto *tree_pos = Ann_node_tree_pos::ref(lg);
 
   int conta = 0;
-  for (auto it : *tree_pos) {
-    auto node = it.first.get_node(lg);
-    I(node.is_type_sub());
-    if (!node.is_type_sub_present())
-      continue;
+  for (auto it : lg->get_down_nodes_map()) {
 
+    auto child_lgid = lg->get_type_sub(it.first.get_nid());
+
+    auto node = it.first.get_node(lg);
+#ifndef NDEBUG
+    I(node.is_type_sub());
+    I(child_lgid == node.get_type_sub());
+#endif
+
+    auto *child_lg  = lg->get_library().try_find_lgraph(child_lgid);
+    if (child_lg==nullptr) {
+      I(!node.is_type_sub_present());
+      continue;
+    }
+
+    //Hierarchy_data data(child_lgid, node.get_nid());
+    auto      child = add_child(parent, {child_lgid, node.get_nid()});
+
+    I(child.pos == conta+get_first_child(parent).pos);
     tree_pos->set(it.first, conta);
 
-    auto child_lgid = node.get_type_sub();
-
-    Hierarchy_data data(child_lgid, node.get_nid());
-    auto           child = add_child(parent, data);
-
-    auto *child_lg = lg->get_library().try_find_lgraph(child_lgid);
-    if (child_lg) {
-      regenerate_step(child_lg, child);
-    }
+    regenerate_step(child_lg, child);
 
     conta++;
   }

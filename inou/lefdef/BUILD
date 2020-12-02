@@ -4,6 +4,7 @@ cc_library(
     srcs = glob(["*.cpp"], exclude=["lglefdef.cpp", "defrw.cpp", "lefrw.cpp"]),
     hdrs = glob(["*.hpp"]),
     visibility = ["//visibility:public"],
+    alwayslink=True,
     deps = [
         "//pass/common:pass",
         "//third_party/misc/lef/lef:lef",

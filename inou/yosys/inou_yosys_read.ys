@@ -14,7 +14,7 @@ hierarchy {{top}}
 {{/hierarchy}}
 
 proc
-opt -fast
+#opt -fast
 pmuxtree
 memory_dff
 memory_share
@@ -33,7 +33,7 @@ techmap
 #techmap -D ALU_RIPPLE
 #abc -liberty {{liberty_file}}
 #{{/liberty_tmap}}
-# opt
+opt
 
 {{#abc_in_yosys}}
 abc
@@ -43,6 +43,7 @@ abc
 maccmap -unmap
 {{/techmap_alumacc}}
 
-# write_verilog dump.v
+write_ilang pp.il
+write_verilog pp.v
 yosys2lg -path {{path}}
 

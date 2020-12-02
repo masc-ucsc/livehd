@@ -168,6 +168,9 @@ public:
     }else{
       instance_pid = deleted.back();
       deleted.pop_back();
+      if (io_pins.size()<=instance_pid) {
+        io_pins.resize(instance_pid+1);
+      }
       io_pins[instance_pid].name         = io_name;
       io_pins[instance_pid].dir          = dir;
       io_pins[instance_pid].graph_io_pos = graph_pos;
@@ -344,9 +347,15 @@ public:
   size_t size() const { return io_pins.size() - 1; };
 
   // Returns a span/vector-like array of all the pins. If the pin was deleted, there may be a pin witout name and position.
-  const absl::Span<const IO_pin> get_io_pins() const {
+  const std::vector<const IO_pin *> get_io_pins() const {
     I(io_pins.size() >= 1);
-    return absl::MakeSpan(io_pins).subspan(1);
+    std::vector<const IO_pin *> v;
+    for(const auto &e:io_pins) {
+      if (e.is_invalid())
+        continue;
+      v.emplace_back(&e);
+    }
+    return v;
   }
 
   std::vector<IO_pin> get_sorted_io_pins() const;

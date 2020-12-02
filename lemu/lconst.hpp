@@ -88,12 +88,15 @@ protected:
 
   Lconst(bool str, bool a, bool b, bool c, Bits_t d, Number n) : explicit_str(str), explicit_sign(a), explicit_bits(b), sign(c), bits(d), num(n) {}
 
-  Bits_t calc_bits() const {
-    if (num == 0)
+  static Bits_t calc_num_bits(const Number &num) {
+    if (num == 0 || num == -1)
       return 1;
     if (num>0)
-      return msb(num)+2; // +2 because values are signed
-    return msb(-num)+2;
+      return msb(num)+2;   // +2 because values are signed (msb==0 is 1 bit)
+    return msb(-num-1)+2;
+  }
+  Bits_t calc_num_bits() const {
+    return calc_num_bits(num);
   }
   bool same_explicit_bits(const Lconst &o) const {
     bool s1 = explicit_bits && o.explicit_bits && bits == o.bits;
@@ -103,6 +106,8 @@ protected:
   }
 
   Number get_num() const { return num; }
+  Lconst adjust(const Number &res_num, const Lconst &o) const;
+
 public:
   using Container=std::vector<unsigned char>;
 
@@ -119,6 +124,10 @@ public:
 
   void dump() const;
 
+  [[nodiscard]] static Lconst get_mask(Bits_t bits);
+  [[nodiscard]] Lconst get_mask() const;
+
+  [[nodiscard]] Lconst tposs_op() const;
   [[nodiscard]] Lconst add_op(const Lconst &o) const;
   [[nodiscard]] Lconst sub_op(const Lconst &o) const;
   [[nodiscard]] Lconst lsh_op(Bits_t amount) const;
@@ -136,7 +145,8 @@ public:
   bool     is_explicit_sign() const { return explicit_sign; }
   bool     is_explicit_bits() const { return explicit_bits; }
   bool     is_string() const { return explicit_str; }
-  Bits_t get_bits() const { return bits; }
+
+  Bits_t get_bits() const { return bits; } // note: this is returning signed bits of the constant
 
   bool is_i() const { return !explicit_str && bits <= 62; } // 62 to handle sign (int)
   int64_t to_i() const; // must fit in int or exception raised

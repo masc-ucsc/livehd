@@ -328,6 +328,13 @@ bool Node::is_type_attr() const {
   return op == Ntype_op::AttrGet || op == Ntype_op::AttrSet;
 }
 
+bool Node::is_type_flop() const {
+  auto op = get_type_op();
+
+  return op == Ntype_op::Aflop || op == Ntype_op::Sflop || op == Ntype_op::Fflop;
+}
+
+
 bool Node::is_type_tup() const {
   auto op = get_type_op();
 
@@ -404,11 +411,7 @@ XEdge_iterator Node::inp_edges_ordered_reverse() const { return current_g->inp_e
 XEdge_iterator Node::out_edges_ordered_reverse() const { return current_g->out_edges_ordered_reverse(*this); }
 
 Node_pin_iterator Node::inp_connected_pins() const { return current_g->inp_connected_pins(*this); }
-
 Node_pin_iterator Node::out_connected_pins() const { return current_g->out_connected_pins(*this); }
-
-Node_pin_iterator Node::inp_setup_pins() const { return current_g->inp_setup_pins(*this); }
-Node_pin_iterator Node::out_setup_pins() const { return current_g->out_setup_pins(*this); }
 
 Node_pin_iterator Node::inp_drivers(const absl::flat_hash_set<Node::Compact> &exclude) const {
   return current_g->inp_drivers(*this, exclude);
@@ -483,8 +486,8 @@ std::string Node::debug_name() const {
 
   auto cell_name = Ntype::get_name(get_type_op());
   if (name.empty())
-    return absl::StrCat("node_", std::to_string(nid), "_", cell_name, "_lg_", current_g->get_name());
-  return absl::StrCat("node_", std::to_string(nid), "_", cell_name, "_", name, "_lg_", current_g->get_name());
+    return absl::StrCat("n", std::to_string(nid), "_", cell_name, "_lg", current_g->get_name());
+  return absl::StrCat("n", std::to_string(nid), "_", cell_name, "_", name, "_lg", current_g->get_name());
 }
 
 bool Node::has_name() const { return Ann_node_name::ref(current_g)->has_key(get_compact_class()); }
@@ -551,11 +554,6 @@ void Node::dump() {
                edge.driver.get_pid(),
                edge.driver.debug_name());
   }
-  for (const auto &spin : inp_setup_pins()) {
-    if (spin.is_connected())  // Already printed
-      continue;
-    fmt::print("              pid:{:<2} name:{}\n", spin.get_pid(), spin.debug_name());
-  }
   for (const auto &edge : out_edges()) {
     fmt::print("  out bits:{:<3} pid:{:<2} name:{:<30} -> nid:{} idx:{} pid:{:<2} name:{}\n",
                edge.get_bits(),
@@ -566,11 +564,6 @@ void Node::dump() {
                edge.sink.get_pid(),
                edge.sink.debug_name()
                );
-  }
-  for (const auto &dpin : out_setup_pins()) {
-    if (dpin.is_connected())  // Already printed
-      continue;
-    fmt::print("  out bits:{:<3} pid:{:<2} name:{}\n", dpin.get_bits(), dpin.get_pid(), dpin.debug_name());
   }
 }
 // LCOV_EXCL_STOP

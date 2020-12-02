@@ -16,16 +16,13 @@ using namespace kainjow;
 
 class Inou_yosys_api : public Pass {
 protected:
-  std::string yosys;  // yosys configuration script option
   std::string script_file;
-  std::string liblg;
 
-  void set_script_liblg(const Eprp_var &var, bool do_read);
+  void set_script_yosys(const Eprp_var &var, bool do_read);
 
-  int  create_lib(const std::string &lib_file, const std::string &lgdb);
   void do_tolg(Eprp_var &var);
 
-  int call_yosys(mustache::data &vars);
+  void call_yosys(mustache::data &vars);
 
   // eprp callback
   static void tolg(Eprp_var &var);

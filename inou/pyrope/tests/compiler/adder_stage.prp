@@ -1,7 +1,7 @@
-$b.__bits = 3
-#adder.__bits = 4
-$a.__bits = 3
+$a.__ubits = 3
+$b.__ubits = 3
+#adder.__ubits = 4
 
 #adder = $a + $b
-
-%out = #adder.__q_pin
+tmp = #adder.__q_pin
+%out = tmp

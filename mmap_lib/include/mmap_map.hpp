@@ -577,7 +577,14 @@ private:
           }
         }
 
-        void operator=(const Iter&) = delete;
+        void operator=(const Iter &other) {
+					mKeyVals = other.mKeyVals;
+					mInfo    = other.mInfo;
+          map_ptr  = other.map_ptr;
+          if (map_ptr) {
+            map_ptr->iter_new();
+          }
+        }
 
 				// both const_iterator and iterator can be constructed from a non-const iterator
 				Iter(Iter<false> const& other)

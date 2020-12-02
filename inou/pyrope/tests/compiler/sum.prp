@@ -1,6 +1,6 @@
-$a.__bits = 2
-$b.__bits = 2
-%o1.__bits = 3
-%o2.__bits = 3
-%o1 = $a + $b
-%o2 = $a + $b + 1
+$a.foo.__ubits = 2
+$a.bar.__ubits = 3
+$b.__ubits = 4
+
+%sout.o1.baz = $a.foo + $b //7 ->3ub
+%sout2 = $a.bar + $b       //6 ->3ub
