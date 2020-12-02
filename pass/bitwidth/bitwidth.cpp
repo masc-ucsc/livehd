@@ -238,8 +238,9 @@ void Bitwidth::process_sum(Node &node, XEdge_iterator &inp_edges) {
 void Bitwidth::process_tposs(Node &node, XEdge_iterator &inp_edges) {
   // Tposs (max, min) should only be set once and never be overwritten after it's attr parent being deleted
   auto it2 = bwmap.find(node.get_driver_pin().get_compact());
-  if (it2 != bwmap.end()) 
+  if (it2 != bwmap.end()) {
     return;
+  }
 
   Lconst max_val;
   Lconst min_val;
@@ -428,7 +429,7 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_attr) {
   if (it != bwmap.end()) {
     bw_lhs = it->second;
   } else {
-    fmt::print("BW->LHS isn't ready, wait for next iteration\n");
+    fmt::print("BW-> LHS isn't ready, wait for next iteration\n");
     return;
   }
 
@@ -437,16 +438,16 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_attr) {
   if (it2 != bwmap.end()) {
     bw_rhs = it2->second;
   } else {
-    fmt::print("BW->RHS isn't ready, wait for next iteration\n");
+    fmt::print("BW-> RHS isn't ready, wait for next iteration\n");
     return;
   }
 
-  if (bw_rhs.get_sbits() == 0 && bw_lhs.get_sbits() == 0) {  // Can not solve now
-    // FIXME->sh: think about a reasonable debug message later
+  if (bw_rhs.get_sbits() == 0 && bw_lhs.get_sbits() == 0) {  
+    fmt::print("BW-> both LHS/RHS are not ready, wait for next iteration\n");
     return;
   } else {
     if (bw_rhs.get_sbits() == 0) {
-      fmt::print("BW-> := propagating bits:{} upwards to node_attr:{}\n", bw_lhs.get_sbits(), dpin_rhs.debug_name());
+      fmt::print("BW-> dp propagating bits:{} upwards to node_attr:{}\n", bw_lhs.get_sbits(), dpin_rhs.debug_name());
       dpin_rhs.set_bits(bw_lhs.get_sbits());
       bwmap.insert_or_assign(dpin_rhs.get_compact(), bw_lhs);
       return;
@@ -465,7 +466,10 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_attr) {
       auto mask_node  = node_attr.get_class_lgraph()->create_node(Ntype_op::And);
       auto mask_dpin  = mask_node.get_driver_pin();
 
-      auto mask_const = (Lconst(1) << Lconst(bw_lhs.get_sbits())) - 1;
+      auto bw_lhs_bits = bw_lhs.is_always_positive() ? bw_lhs.get_sbits() - 1 : bw_lhs.get_sbits();
+      /* auto bw_lhs_bits = bw_lhs.get_sbits() - 1; */
+
+      auto mask_const = Lconst((1<<(bw_lhs_bits)) - 1);
       auto all_one_node = node_attr.get_class_lgraph()->create_node_const(mask_const);
       auto all_one_dpin = all_one_node.setup_driver_pin();
 
@@ -785,17 +789,32 @@ void Bitwidth::bw_pass(LGraph *lg) {
       if (dpin.get_bits() && dpin.get_bits() >= bw_bits)
         continue;
 
-      if (op == Ntype_op::Tposs) {
-        auto parent_dpin = node.setup_sink_pin("a").get_driver_pin();
-        auto parent_dpin_bits = parent_dpin.get_bits();                        
-        dpin.set_bits(parent_dpin_bits + 1);
-      } else if (op == Ntype_op::AttrSet) {
+      /* if (op == Ntype_op::Tposs) { */
+      /*   auto parent_dpin = node.setup_sink_pin("a").get_driver_pin(); */
+      /*   auto parent_dpin_bits = parent_dpin.get_bits(); */                        
+      /*   if (parent_dpin_bits) { */
+      /*     dpin.set_bits(parent_dpin_bits + 1); */
+      /*   } else { */
+      /*     fmt::print("BW-> Tposs parent is not ready yet\n"); */
+      /*     continue; */
+      /*   } */
+      /* } else if (op == Ntype_op::AttrSet) { */
+      /*   // handled specially in process_attr_set_new_attr() because we need to know it's ubits or sbits there */
+      /*   ; */
+      /* } else { */
+      /*   dpin.set_bits(bw_bits); */
+      /* } */
+
+
+      if (op == Ntype_op::AttrSet) {
         // handled specially in process_attr_set_new_attr() because we need to know it's ubits or sbits there
         ;
       } else {
         dpin.set_bits(bw_bits);
       }
+
     }
+
     //debug
     if (op != Ntype_op::Sub) {
       fmt::print("    ");
