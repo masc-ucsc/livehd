@@ -17,6 +17,8 @@ namespace mmap_lib {
 			using VisitorSet = typename mmap_lib::map<Key, T>;
 			VisitorSet visitor_set;
 			T max_inserted = 0;
+			const size_t bucket_len = sizeof(T) * 8;
+
 			using iterator = typename VisitorSet::iterator;
 			using const_iterator = typename VisitorSet::const_iterator;
 
@@ -32,8 +34,7 @@ namespace mmap_lib {
 			//====
 			void wht() { std::cout << sizeof(T) << std::endl; }
 			size_t bucket_size() { 
-				size_t hold = sizeof(T);
-				return (hold * 8); 
+				return bucket_len;
 			}
 
 			size_t num_buckets(size_t ln) { return (ln / (sizeof(T)*8)); }
@@ -173,12 +174,12 @@ namespace mmap_lib {
 
 				// 1) detect if max needs to be updated
 				if (ele == max_inserted) {
-					std::cout << "Time to update max_inserted, ele = " << ele << "\n";
-					std::cout << "Initial hold = " << hold << "\n";
+					//std::cout << "Time to update max_inserted, ele = " << ele << "\n";
+					//std::cout << "Initial hold = " << hold << "\n";
 
 					--max_inserted;
 					T mask = 1 << (i-1); // used to detect if bit is 1 or 0
-					std::cout << "Initial mask = " << mask << "\n";
+					//std::cout << "Initial mask = " << mask << "\n";
 						
 					// mask will do this:
 					// 100000000...
@@ -188,25 +189,23 @@ namespace mmap_lib {
 					// 000010000...
 					// to check for bits starting from MSB
 
-					std::cout << "Loop Start\n\n";
+					//std::cout << "Loop Start\n\n";
 					for (; mask >= 0; mask = mask / 2) { 		
-						std::cout << "mask is: " << mask << "\n";
+						//std::cout << "mask is: " << mask << "\n";
 						if (mask == 0) { // hit the end of the bitmap
 							if (p == 0) { // if this is the last index of map, no more elements left
 								max_inserted = 0; // max insert is 0
-								std::cout << "reset?\n";
+								//std::cout << "reset?\n";
 								break; // ready to remove 
-							} else {
-								std::cout << "exit1\n";
-							}
+							} 
 							hold = visitor_set.get((Key)(p--)); // get next bitmap
-							std::cout << "reload hold: " << hold << "\n";
+							//std::cout << "reload hold: " << hold << "\n";
 							mask = 1 << ((sizeof(T)*8)-1); // reset mask
-							std::cout << "reload mask: " << mask << "\n";
+							//std::cout << "reload mask: " << mask << "\n";
 							max_inserted = max_inserted - 1;
 						}
 						if (hold & mask) { // if number detected by mask is there	
-							std::cout << "exit here?\n";
+							//std::cout << "exit here?\n";
 							break; // ready to remove
 						} else { // if mask number is not there, add to decrement
 							max_inserted = max_inserted - 1;
@@ -230,12 +229,12 @@ namespace mmap_lib {
 
 				// 1) detect if max needs to be updated
 				if (ele == max_inserted) {
-					std::cout << "Time to update max_inserted, ele = " << ele << "\n";
-					std::cout << "Initial hold = " << hold << "\n";
+					//std::cout << "Time to update max_inserted, ele = " << ele << "\n";
+					//std::cout << "Initial hold = " << hold << "\n";
 
 					--max_inserted;
 					T mask = 1 << (i-1); // used to detect if bit is 1 or 0
-					std::cout << "Initial mask = " << mask << "\n";
+					//std::cout << "Initial mask = " << mask << "\n";
 						
 					// mask will do this:
 					// 100000000...
@@ -245,28 +244,25 @@ namespace mmap_lib {
 					// 000010000...
 					// to check for bits starting from MSB
 
-					std::cout << "Loop Start\n\n";
+					//std::cout << "Loop Start\n\n";
 					for (; mask >= 0; mask = mask / 2) { 		
-						std::cout << "mask is: " << mask << "\n";
+						//std::cout << "mask is: " << mask << "\n";
 						if (mask == 0) { // hit the end of the bitmap
 							if (p == 0) { // if this is the last index of map, no more elements left
 								max_inserted = 0; // max insert is 0
-								std::cout << "reset?\n";
+								//std::cout << "reset?\n";
 								break; // ready to remove 
-							} else {
-								std::cout << "exit1\n";
 							}
 							hold = visitor_set.get((Key)(p--)); // get next bitmap
-							std::cout << "reload hold: " << hold << "\n";
+							//std::cout << "reload hold: " << hold << "\n";
 							mask = 1 << ((sizeof(T)*8)-1); // reset mask
-							std::cout << "reload mask: " << mask << "\n";
+							//std::cout << "reload mask: " << mask << "\n";
 							max_inserted = max_inserted - 1;
 						}
 						if (hold & mask) { // if number detected by mask is there	
-							std::cout << "exit here?\n";
+							//std::cout << "exit here?\n";
 							break; // ready to remove
 						} else { // if mask number is not there, add to decrement
-							//++dec;
 							max_inserted = max_inserted - 1;
 						}
 					}

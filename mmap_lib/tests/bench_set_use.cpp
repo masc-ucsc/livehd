@@ -17,8 +17,8 @@
 #include "mmap_map.hpp"
 #include "mmap_vset.hpp" // including the visitor set
 
-#define BENCH_OUT_SIZE 500 // try bigger sizes
-#define BENCH_INN_SIZE 200 // try bigger sizes
+#define BENCH_OUT_SIZE 1000 // try bigger sizes
+#define BENCH_INN_SIZE 500 // try bigger sizes
 
 //#define ABSEIL_USE_MAP
 //#define USE_MAP_FALSE
@@ -517,7 +517,12 @@ void random_mmap_vset(int max, std::string_view name) {
   
 	Lbench b(type_test);
 	mmap_lib::vset<uint32_t, uint32_t> set("lgdb_bench", name);
-	
+	//mmap_lib::map<uint32_t, uint64_t> map("lgdb_bench", name);
+
+	set.clear();
+
+	int conta = 0; // reset
+
 	// INSERT/ERASE DENSE TEST
 	// runs about (BIG * SMALL) times
 	// each run:
@@ -528,41 +533,43 @@ void random_mmap_vset(int max, std::string_view name) {
     for (int i = 0; i < BENCH_INN_SIZE; ++i) {
       auto pos = rng.max(max);
       set.insert(pos);
+
       pos = rng.max(max); 
 			set.erase(pos);
+
       pos = rng.max(max);
-      if (set.find(pos) != set.is_end(pos))
+
+      if (set.is_end(pos))
         set.erase(pos);
     }
   }
 
   b.sample("insert/erase dense");
-  int conta = 0;
+  conta = 0;
 
-	
 	// TRAVERSAL SPARSE TEST
 	// runs (200) times
 	// each run:
 	//   --> go through the whole map and increment a variable per map index
 	//   --> insert a random number into map
 	//   --> generate a random num, if num is not end of map, erase it
-  for (int i = 0; i < BENCH_INN_SIZE; ++i) {	
+  for (int i = 0; i < BENCH_INN_SIZE; ++i) {
 		for (auto it = set.bucket_begin(), end = set.bucket_end(); it != end; ++it) {
 			auto hold = set.bucket_get_val(it);
-			for (auto j = 0; j < 32; ++j) {
+			for (auto j = 0; j < set.bucket_size(); ++j) {
 				if ((hold & 1) == 1) { conta++; }
 				hold = hold >> 1;
 			}
 		}	
-    
-		set.insert(rng.max(max));
+    set.insert(rng.max(max));
 
     auto pos = rng.max(max);
-    if (set.find(pos) != set.is_end(pos)) {
+    if (set.is_end(pos)) {
       set.erase(pos);
 		}
   }
   b.sample("traversal sparse");
+
   printf("inserts random %d\n",conta);
   conta = 0;
 
@@ -579,7 +586,7 @@ void random_mmap_vset(int max, std::string_view name) {
   for (int i = 0; i < BENCH_INN_SIZE; ++i) {
 		for (auto it = set.bucket_begin(), end = set.bucket_end(); it != end; ++it) {
 			auto hold = set.bucket_get_val(it);
-			for (auto j = 0; j < 32; ++j) {
+			for (auto j = 0; j < set.bucket_size(); ++j) {
 				if ((hold & 1) == 1) { conta++; }
 				hold = hold >> 1;
 			}
