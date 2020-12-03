@@ -17,8 +17,14 @@
 #include "mmap_map.hpp"
 #include "mmap_vset.hpp" // including the visitor set
 
-#define BENCH_OUT_SIZE 1000 // try bigger sizes
-#define BENCH_INN_SIZE 500 // try bigger sizes
+#define BENCH_OUT_SIZE 500 // try bigger sizes
+#define BENCH_INN_SIZE 300 // try bigger sizes
+
+//#define BENCH_OUT_SIZE 500
+//#define BENCH_INN_SIZE 500
+
+//#define BENCH_OUT_SIZE 1000 
+//#define BENCH_INN_SIZE 500
 
 //#define ABSEIL_USE_MAP
 //#define USE_MAP_FALSE
@@ -564,7 +570,7 @@ void random_mmap_vset(int max, std::string_view name) {
     set.insert(rng.max(max));
 
     auto pos = rng.max(max);
-    if (set.is_end(pos)) {
+    if (!(set.is_end(pos))) {
       set.erase(pos);
 		}
   }
