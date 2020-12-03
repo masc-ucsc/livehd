@@ -473,6 +473,8 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_dp, Fwd_edge_iterator::Fwd_
     for (auto e : node_dp.out_edges()) {
       mask_dpin.connect_sink(e.sink);
     }
+    fmt::print("DEBUG dp create mask node:{}\n", mask_node.debug_name());
+    fmt::print("DEBUG dp create mask const:{}\n", all_one_node.debug_name());
     fwd_it.add_node(mask_node);
     fwd_it.add_node(all_one_node);
 
@@ -627,7 +629,6 @@ void Bitwidth::process_attr_set_propagate(Node &node_attr) {
     parent_data_pending = true;
   }
 
-  fmt::print("DEBUG parent_dpin:{}\n", parent_attr_dpin.debug_name());
   auto parent_attr_it = bwmap.find(parent_attr_dpin.get_compact());
   if (parent_attr_it == bwmap.end()) {
     fmt::print("attr_set propagate bwmap to AttrSet name:{}\n", dpin_name);
@@ -769,7 +770,7 @@ void Bitwidth::bw_pass(LGraph *lg) {
       if (it == bwmap.end()) {
         // FIXME->sh: check: initialize to let things keep run, e.g. Flop loop
         // FIXME->sh: might be wrong!! but how to continuw algorithm without zero initialization?
-        bwmap.insert_or_assign(dpin.get_compact(), Bitwidth_range(Lconst(0), Lconst(0)));
+        /* bwmap.insert_or_assign(dpin.get_compact(), Bitwidth_range(Lconst(0), Lconst(0))); */
         continue;
       }
       
@@ -820,7 +821,9 @@ void Bitwidth::bw_pass(LGraph *lg) {
 
     I(!out_driver.is_invalid());
     auto it = bwmap.find(out_driver.get_compact());
-    if (it != bwmap.end()) {
+    if (it == bwmap.end()) {
+      return;
+    } else {
       forward_adjust_dpin(out_driver, it->second);
     }
 
