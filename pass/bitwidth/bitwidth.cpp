@@ -604,7 +604,6 @@ Node Bitwidth::insert_tposs_node(Node &node, Fwd_edge_iterator::Fwd_iter &fwd_it
   auto dpin = node.setup_driver_pin("Y");
 
   auto ntposs = node.get_class_lgraph()->create_node(Ntype_op::Tposs);
-  fwd_it.add_node(ntposs);
   auto ntposs_dpin = ntposs.setup_driver_pin();
   dpin.connect_sink(ntposs.setup_sink_pin("a"));
   for (auto &e : dpin.out_edges()) {
@@ -613,6 +612,7 @@ Node Bitwidth::insert_tposs_node(Node &node, Fwd_edge_iterator::Fwd_iter &fwd_it
       e.del_edge();
     }
   }
+  fwd_it.add_node(ntposs); // add once the edges are added
   return ntposs;
 }
 
@@ -717,7 +717,7 @@ void Bitwidth::bw_pass(LGraph *lg) {
   auto lgit = lg->forward(hier); // Not C++17 because it is passed
   for (auto fwd_it = lgit.begin(); fwd_it != lgit.end() ; ++fwd_it) {
     auto node = *fwd_it;
-    fmt::print("{}\n", node.debug_name());
+    fmt::print("VISITING:{}\n", node.debug_name());
     auto inp_edges = node.inp_edges();
     auto op        = node.get_type_op();
 

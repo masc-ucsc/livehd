@@ -88,11 +88,18 @@ protected:
 public:
   const Node &operator*() const { return current_node; }
 
-  void add_node(const Node::Compact &node) {
-    unvisited.insert(node);
-  }
   void add_node(const Node &node) {
-    add_node(node.get_compact());
+    bool all_inputs_visited=true;
+    for(auto e:node.inp_edges()) {
+      if (unvisited.contains(e.driver.get_node().get_compact())) {
+        all_inputs_visited = false;
+        break;
+      }
+    }
+    if (all_inputs_visited) {
+      pending_stack.push_back(node);
+    }
+    unvisited.insert(node.get_compact());
   }
   void del_node(const Node::Compact &node) {
     unvisited.erase(node);
