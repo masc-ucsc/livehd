@@ -5,17 +5,15 @@ pts_tuple_dbg='lhs_wire3 funcall_unnamed2
                firrtl_gcd counter_tup counter2'
 pts_unsigned_issue='firrtl_gcd'
 
-pts='reg_bits_set firrtl_tail2 firrtil_tail3 firrtl_gcd_3bits firrtl_gcd'
+pts='firrtl_tail2 firrtl_tail3 firrtl_gcd_3bits firrtl_gcd'
 
 
 pts='hier_tuple2 hier_tuple_io tuple_copy2 if nested_if reg__q_pin tuple_copy
      capricious_bits capricious_bits2 capricious_bits4 hier_tuple if2  bits_rhs 
      adder_stage hier_tuple3 lhs_wire lhs_wire2 scalar_tuple logic attr_set out_ssa
-     ssa_rhs tuple_if counter counter_nested_if firrtl_tail'
+     ssa_rhs tuple_if counter counter_nested_if firrtl_tail reg_bits_set'
 
-# pts='tuple_copy2 counter'
-# pts='tuple_copy2 '
-pts='if'
+# pts='firrtl_tail2'
 
 
 # Note: in this bash script, you MUST specify top module name AT FIRST POSITION

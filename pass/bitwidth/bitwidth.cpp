@@ -244,11 +244,14 @@ void Bitwidth::process_tposs(Node &node, XEdge_iterator &inp_edges) {
   for (auto e : inp_edges) {
     auto it = bwmap.find(e.driver.get_compact());
     if (it != bwmap.end()) {
-      /* GI(!hier, it->second.get_min() == 0, "Tposs should be only inserted after ubits"); */
       auto &bw = it->second;
-      auto pmax  = Lconst((1 << bw.get_sbits()) - 1);
-      max_val = pmax ;
-      min_val = 0;
+      if (bw.is_always_positive()) {
+        max_val = bw.get_max() ;
+        min_val = 0;
+      } else {
+        max_val = Lconst((1 << bw.get_sbits()) - 1) ;
+        min_val = 0;
+      }
     } else {
       debug_unconstrained_msg(node, e.driver);
       not_finished = true;
@@ -256,8 +259,6 @@ void Bitwidth::process_tposs(Node &node, XEdge_iterator &inp_edges) {
     }
   }
   bwmap.insert_or_assign(node.get_driver_pin().get_compact(), Bitwidth_range(min_val, max_val));
-  fmt::print("DEBUG inserted Tposs node:{}\n", node.debug_name());
-  Bitwidth_range(min_val, max_val).dump();
 }
 
 
@@ -439,24 +440,6 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_attr) {
     fmt::print("BW-> RHS isn't ready, wait for next iteration\n");
     return;
   }
-
-
-
-  /* if (bw_rhs.get_sbits() == 0 && bw_lhs.get_sbits() == 0) { */  
-  /*   fmt::print("BW-> both LHS/RHS are not ready, wait for next iteration\n"); */
-  /*   return; */
-  /* } else { */
-    /* if (bw_rhs.get_sbits() == 0) { */
-    /*   fmt::print("BW-> dp propagating bits:{} upwards to node_attr:{}\n", bw_lhs.get_sbits(), dpin_rhs.debug_name()); */
-    /*   dpin_rhs.set_bits(bw_lhs.get_sbits()); */
-    /*   bwmap.insert_or_assign(dpin_rhs.get_compact(), bw_lhs); */
-    /*   return; */
-    /* } */
-
-    /* if (bw_lhs.get_sbits() == 0) { */
-    /*   // FIXME->sh: think about a reasonable debug message later */
-    /*   return; */
-    /* } */
     
   if (bw_rhs.get_sbits() < bw_lhs.get_sbits()) {  // Already match
     for (auto e : node_attr.out_edges()) {
@@ -483,7 +466,6 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_attr) {
       mask_dpin.connect_sink(e.sink);
     }
   }
-  /* } */
 
   if (!hier) // FIXME: once hier del works
     node_attr.del_node();
@@ -537,7 +519,6 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
     }
   }
 
-  Node ntposs;
   if (attr == Attr::Set_ubits || attr == Attr::Set_sbits) {
     I(dpin_val.get_node().is_type_const());
     auto val = dpin_val.get_node().get_type_const();
@@ -554,13 +535,10 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
           break;
         }
       }
-
-      /* if (!tposs_existed && (parent_is_ginp || parent_is_flop)) */ 
-      /*   ntposs = insert_tposs_node(node_attr); */      
       if (!tposs_existed) 
-        ntposs = insert_tposs_node(node_attr, fwd_it);      
-    } else { // Attr::Set_sbits
+        insert_tposs_nodes(node_attr, fwd_it);      
 
+    } else { // Attr::Set_sbits
       if (bw.get_sbits() && bw.get_sbits() > (val.to_i())) 
         Pass::error("bitwidth mismatch. Variable {} needs {}sbits, but constrained to {}sbits\n", dpin_name, bw.get_sbits(), val.to_i());
       
@@ -585,35 +563,30 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
     auto through_dpin = node_attr.get_sink_pin("name").get_driver_pin();
     bwmap.insert_or_assign(through_dpin.get_compact(), bw);
   }
-
-
-  // FIXME->sh: could be removed since we neeed multi-BW iteration anyway?
-  if (!ntposs.is_invalid()) {
-    auto inp_edges = ntposs.inp_edges();
-    process_tposs(ntposs, inp_edges);
-  }
 }
 
 
 // insert tposs after attr node when ubits
-Node Bitwidth::insert_tposs_node(Node &node, Fwd_edge_iterator::Fwd_iter &fwd_it)  {
+void Bitwidth::insert_tposs_nodes(Node &node_attr, Fwd_edge_iterator::Fwd_iter &fwd_it)  {
+  I(node_attr.get_sink_pin("field").get_driver_pin().get_name() == "__ubits") ;
 
-  /* I(node.get_sink_pin("name").get_driver_pin().is_graph_input() || */ 
-  /*   node.get_sink_pin("name").get_driver_pin().get_node().is_type_flop()) ; */
-  I(node.get_sink_pin("field").get_driver_pin().get_name() == "__ubits") ;
-  auto dpin = node.setup_driver_pin("Y");
+  std::vector<Node_pin> attr_dpins;
+  attr_dpins.emplace_back(node_attr.setup_driver_pin("Y"));
+  if (node_attr.setup_driver_pin("chain").is_connected())
+    attr_dpins.emplace_back(node_attr.setup_driver_pin("chain"));
 
-  auto ntposs = node.get_class_lgraph()->create_node(Ntype_op::Tposs);
-  auto ntposs_dpin = ntposs.setup_driver_pin();
-  dpin.connect_sink(ntposs.setup_sink_pin("a"));
-  for (auto &e : dpin.out_edges()) {
-    if (e.sink.get_node() != ntposs) {
-      ntposs_dpin.connect_sink(e.sink);
-      e.del_edge();
+  for (auto attr_dpin : attr_dpins) {
+    auto ntposs = node_attr.get_class_lgraph()->create_node(Ntype_op::Tposs);
+    auto ntposs_dpin = ntposs.setup_driver_pin();
+    attr_dpin.connect_sink(ntposs.setup_sink_pin("a"));
+    for (auto &e : attr_dpin.out_edges()) {
+      if (e.sink.get_node() != ntposs) {
+        ntposs_dpin.connect_sink(e.sink);
+        e.del_edge();
+      }
     }
+    fwd_it.add_node(ntposs); // add once the edges are added
   }
-  fwd_it.add_node(ntposs); // add once the edges are added
-  return ntposs;
 }
 
 
@@ -717,7 +690,7 @@ void Bitwidth::bw_pass(LGraph *lg) {
   auto lgit = lg->forward(hier); // Not C++17 because it is passed
   for (auto fwd_it = lgit.begin(); fwd_it != lgit.end() ; ++fwd_it) {
     auto node = *fwd_it;
-    fmt::print("VISITING:{}\n", node.debug_name());
+    fmt::print("{}\n", node.debug_name());
     auto inp_edges = node.inp_edges();
     auto op        = node.get_type_op();
 
@@ -807,116 +780,6 @@ void Bitwidth::bw_pass(LGraph *lg) {
     }
   } // end of lg->forward()
 
-
-
-  /* // Note: lg input bits must be set by attr_set node, it will be handled through the algorithm runs */
-  
-  /* for (auto node : lg->forward(hier)) { */
-  /*   fmt::print("{}\n", node.debug_name()); */
-  /*   auto inp_edges = node.inp_edges(); */
-  /*   auto op        = node.get_type_op(); */
-
-  /*   if (inp_edges.empty() && (op != Ntype_op::Const && op != Ntype_op::Sub && op != Ntype_op::LUT && op != Ntype_op::TupKey)) { */
-  /*     fmt::print("BW-> removing dangling node:{}\n", node.debug_name()); */
-  /*     if (!hier) // FIXME: once hier del works */
-  /*       node.del_node(); */
-  /*     continue; */
-  /*   } */
-
-
-  /*   if (op == Ntype_op::Const) { */
-  /*     process_const(node); */
-  /*   } else if (op == Ntype_op::TupKey || op == Ntype_op::TupGet || op == Ntype_op::TupAdd) { */
-  /*     // Nothing to do for this */
-  /*     continue; */
-  /*   } else if (op == Ntype_op::Or || op == Ntype_op::Xor) { */
-  /*     process_logic_or_xor(node, inp_edges); */
-  /*   } else if (op == Ntype_op::Ror) { */
-  /*     I(false); //FIXME: todo (1 bit output) */
-  /*   } else if (op == Ntype_op::And) { */
-  /*     process_logic_and(node, inp_edges); */
-  /*   } else if (op == Ntype_op::AttrSet) { */
-  /*     process_attr_set(node); */
-  /*     if (node.is_invalid()) */
-  /*       continue; */
-  /*   } else if (op == Ntype_op::AttrGet) { */
-  /*     process_attr_get(node); */
-  /*     if (node.is_invalid()) */
-  /*       continue; */
-  /*   } else if (op == Ntype_op::Sum) { */
-  /*     process_sum(node, inp_edges); */
-  /*   } else if (op == Ntype_op::SRA) { */
-  /*     process_sra(node, inp_edges); */
-  /*   } else if (op == Ntype_op::SHL) { */
-  /*     process_shl(node, inp_edges); */
-  /*   } else if (op == Ntype_op::Not) { */
-  /*     process_not(node, inp_edges); */
-  /*   } else if (op == Ntype_op::Sflop || op == Ntype_op::Aflop || op == Ntype_op::Fflop) { */
-  /*     process_flop(node); */
-  /*   } else if (op == Ntype_op::Mux) { */
-  /*     process_mux(node, inp_edges); */
-  /*   } else if (op == Ntype_op::GT || op == Ntype_op::LT || op == Ntype_op::EQ) { */
-  /*     process_comparator(node); */
-  /*   } else if (op == Ntype_op::Tposs) { */
-  /*     process_tposs(node, inp_edges); */
-  /*   } else { */
-  /*     fmt::print("FIXME: node:{} still not handled by bitwidth\n", node.debug_name()); */
-  /*   } */
-
-
-  /*   if (hier) { */
-  /*     for (auto e:inp_edges) { */
-  /*       set_graph_boundary(e.driver, e.sink); */
-  /*     } */
-  /*   } */
-
-
-  /*   for (auto dpin : node.out_connected_pins()) { */
-  /*     auto it = bwmap.find(dpin.get_compact()); */
-  /*     if (it == bwmap.end()) */ 
-  /*       continue; */
-      
-  /*     auto bw_bits = it->second.get_sbits(); */
-  /*     if (bw_bits == 0 && it->second.is_overflow()) { */
-  /*       fmt::print("BW-> dpin:{} has over {}bits (simplify first!)\n", dpin.debug_name(), it->second.get_raw_max()); */
-  /*       continue; */
-  /*     } */
-
-  /*     if (dpin.get_bits() && dpin.get_bits() >= bw_bits) */
-  /*       continue; */
-
-  /*     /1* if (op == Ntype_op::Tposs) { *1/ */
-  /*     /1*   auto parent_dpin = node.setup_sink_pin("a").get_driver_pin(); *1/ */
-  /*     /1*   auto parent_dpin_bits = parent_dpin.get_bits(); *1/ */                        
-  /*     /1*   if (parent_dpin_bits) { *1/ */
-  /*     /1*     dpin.set_bits(parent_dpin_bits + 1); *1/ */
-  /*     /1*   } else { *1/ */
-  /*     /1*     fmt::print("BW-> Tposs parent is not ready yet\n"); *1/ */
-  /*     /1*     continue; *1/ */
-  /*     /1*   } *1/ */
-  /*     /1* } else if (op == Ntype_op::AttrSet) { *1/ */
-  /*     /1*   // handled specially in process_attr_set_new_attr() because we need to know it's ubits or sbits there *1/ */
-  /*     /1*   ; *1/ */
-  /*     /1* } else { *1/ */
-  /*     /1*   dpin.set_bits(bw_bits); *1/ */
-  /*     /1* } *1/ */
-
-
-  /*     if (op == Ntype_op::AttrSet) { */
-  /*       // handled specially in process_attr_set_new_attr() because we need to know it's ubits or sbits there */
-  /*       ; */
-  /*     } else { */
-  /*       dpin.set_bits(bw_bits); */
-  /*     } */
-
-  /*   } */
-
-  /*   //debug */
-  /*   if (op != Ntype_op::Sub) { */
-  /*     fmt::print("    "); */
-  /*     bwmap[node.get_driver_pin("Y").get_compact()].dump(); */
-  /*   } */
-  /* } // end of lg->forward() */
 
 
   // set bits for graph input and output 
