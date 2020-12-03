@@ -11,7 +11,7 @@
 #include "mmap_map.hpp"
 
 #define BIG_BENCH 500
-#define SMALL_BENCH 300
+#define SMALL_BENCH 200
 
 
 /*
@@ -26,39 +26,79 @@ void mmap_vset(int max, std::string_view name) {
 	else { type_test += "(persistent)"; }
   
 	Lbench b(type_test);
-	//mmap_lib::vset<uint32_t, uint64_t> set("lgdb_bench", name);
-	mmap_lib::map<uint32_t, uint64_t> map("lgdb_bench", name);
+	mmap_lib::vset<uint32_t, uint32_t> set("lgdb_bench", name);
+	//mmap_lib::map<uint32_t, uint64_t> map("lgdb_bench", name);
 
-	map.set((uint32_t)0, (uint64_t)1);
-	auto siz = map.size();
-	auto cap = map.capacity();
-	auto emp = map.empty();
-	std::cout << siz << " " << cap << " " << emp << std::endl;
+	set.clear();
 
-/*
-	std::cout << "sanity check: ";
-	std::cout << max << std::endl;	
-	std::cout << "===== vset usage =====" << std::endl;
+	int conta = 0;
 
-	std::cout << "===== Insert/Erase 0-299\n";
+	std::cout << "Max inserted is: " << set.get_max() << std::endl;
+	// counting
+	std::cout << "Counting...  ";
+	for (auto it = set.bucket_begin(), end = set.bucket_end(); it != end; ++it) {
+		auto hold = set.bucket_get_val(it);
+		for (auto j = 0; j < 32; ++j) {
+			if ((hold & 1) == 1) { conta++; }
+			hold = hold >> 1;
+		}
+	}
 
-	//for(int i = 0; i < SMALL_BENCH; ++i) { set.insert(i); }
-	//for(int i = 0; i < SMALL_BENCH; ++i) { set.erase(i); }
-	auto siz = set.size();
-	auto cap = set.capacity();
-	auto emp = set.empty();
-	std::cout << siz << " " << cap << " " << emp << std::endl;
+	std::cout << "Initial conta: " << conta << "\n\n";
+
+	std::cout << "Inserting 0 - " << (SMALL_BENCH-1) << " into vset...\n";
+	for(int i = 0; i < SMALL_BENCH; ++i) { set.insert(i); }
+	std::cout << "Max inserted is: " << set.get_max() << std::endl;
 	
-	std::cout << "insert 0" << std::endl;
-	set.insert(0);
-	siz = set.size();
-	cap = set.capacity();
-	emp = set.empty();
-	std::cout << siz << " " << cap << " " << emp << std::endl;
+	std::cout << "Counting...  ";
+	for (auto it = set.bucket_begin(), end = set.bucket_end(); it != end; ++it) {
+		auto hold = set.bucket_get_val(it);
+		for (auto j = 0; j < 32; ++j) {
+			if ((hold & 1) == 1) { conta++; }
+			hold = hold >> 1;
+		}
+	}
+	std::cout << "After insert conta: " << conta << "\n\n";
+	
+	conta = 0; // reset
+	
+	/*
+	if (set.is_end(0)) { std::cout << "oops1\n"; }
+	if (set.is_end(12)) { std::cout << "oops2\n"; }
+	if (set.is_end(14)) { std::cout << "oops3\n"; }
+	if (set.is_end(78)) { std::cout << "oops4\n"; }
+	if (set.is_end(178)) { std::cout << "oops5\n"; }
+	if (set.is_end(199)) { std::cout << "oops6\n"; }
+	if (set.is_end(200)) { std::cout << "oops6\n"; }
+	*/
 
+	std::cout << "Erasing 0 - " << (SMALL_BENCH-1) << " from vset...\n";
+	for(int i = 0; i < SMALL_BENCH; ++i) { set.erase(i); }
+	std::cout << "Max inserted is: " << set.get_max() << "\n\n";
+/*
+	std::cout << "Counting...  ";
+	for (auto it = set.bucket_begin(), end = set.bucket_end(); it != end; ++it) {
+		auto hold = set.bucket_get_val(it);
+		for (auto j = 0; j < 32; ++j) {
+			if ((hold & 1) == 1) { conta++; }
+			hold = hold >> 1;
+		}
+	}	
+	std::cout << "After erase conta: " << conta << std::endl;
+
+	conta = 0; // reset
 */
 
-/*	
+
+/*
+	std::cout << "sanity check (printing max): " << max << std::endl;	
+
+	std::cout << "===== vset BENCH =====" << std::endl;
+
+	std::cout << "===== Insert/Erase 0-299\n";
+	for(int i = 0; i < SMALL_BENCH; ++i) { set.insert(i); }
+	for(int i = 0; i < SMALL_BENCH; ++i) { set.erase(i); }
+
 	std::cout << "===== Insert/Erase Dense\n";
 	// INSERT/ERASE DENSE TEST
 	// runs about (BIG * SMALL) times
@@ -66,20 +106,25 @@ void mmap_vset(int max, std::string_view name) {
 	//   --> generate rand num, insert that num into the map
 	//   --> generate another rand num, erase that num from the map
 	//   --> generate another rand num, if this num is not the end of the map, erase
-  for (int n = 1; n < BIG_BENCH; ++n) {
-    for (int i = 0; i < SMALL_BENCH; ++i) {
+  for (int n = 1; n < 10; ++n) {
+    for (int i = 0; i < 10; ++i) {
       auto pos = rng.max(max);
       set.insert(pos);
+
       pos = rng.max(max); 
 			set.erase(pos);
+
       pos = rng.max(max);
+		
+			//CHECKING IS_END() func
+
       if (set.find(pos) != set.is_end(pos))
         set.erase(pos);
     }
   }
 
   b.sample("insert/erase dense");
-  int conta = 0;
+  conta = 0;
 
 
 	std::cout << "===== Traversal Sparse\n";
@@ -90,9 +135,13 @@ void mmap_vset(int max, std::string_view name) {
 	//   --> insert a random number into map
 	//   --> generate a random num, if num is not end of map, erase it
   for (int i = 0; i < SMALL_BENCH; ++i) {
-    for (auto it = set.bucket_begin(), end = set.bucket_end(); it != end; ++it) {
-			conta++;
-    }
+		for (auto it = set.bucket_begin(), end = set.bucket_end(); it != end; ++it) {
+			auto hold = set.bucket_get_val(it);
+			for (auto j = 0; j < 32; ++j) {
+				if ((hold & 1) == 1) { conta++; }
+				hold = hold >> 1;
+			}
+		}	
     set.insert(rng.max(max));
 
     auto pos = rng.max(max);
@@ -117,12 +166,17 @@ void mmap_vset(int max, std::string_view name) {
   }
 
   for (int i = 0; i < SMALL_BENCH; ++i) {
-    for (auto it = 0; !(set.is_end(it)); ++it) {
-      conta++;
-    }
+		for (auto it = set.bucket_begin(), end = set.bucket_end(); it != end; ++it) {
+			auto hold = set.bucket_get_val(it);
+			for (auto j = 0; j < 32; ++j) {
+				if ((hold & 1) == 1) { conta++; }
+				hold = hold >> 1;
+			}
+		}	
   }
   b.sample("traversal dense");
   printf("inserts random %d\n",conta);
+
 */
 }
 

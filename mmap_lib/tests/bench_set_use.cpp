@@ -516,7 +516,7 @@ void random_mmap_vset(int max, std::string_view name) {
 	else { type_test += "(persistent)"; }
   
 	Lbench b(type_test);
-	mmap_lib::vset<uint32_t, uint64_t> set("lgdb_bench", name);
+	mmap_lib::vset<uint32_t, uint32_t> set("lgdb_bench", name);
 	
 	// INSERT/ERASE DENSE TEST
 	// runs about (BIG * SMALL) times
@@ -546,11 +546,16 @@ void random_mmap_vset(int max, std::string_view name) {
 	//   --> go through the whole map and increment a variable per map index
 	//   --> insert a random number into map
 	//   --> generate a random num, if num is not end of map, erase it
-  for (int i = 0; i < BENCH_INN_SIZE; ++i) {
-    for (auto it = 0; !(set.is_end(it)); ++it) {
-			conta++;
-    }
-    set.insert(rng.max(max));
+  for (int i = 0; i < BENCH_INN_SIZE; ++i) {	
+		for (auto it = set.bucket_begin(), end = set.bucket_end(); it != end; ++it) {
+			auto hold = set.bucket_get_val(it);
+			for (auto j = 0; j < 32; ++j) {
+				if ((hold & 1) == 1) { conta++; }
+				hold = hold >> 1;
+			}
+		}	
+    
+		set.insert(rng.max(max));
 
     auto pos = rng.max(max);
     if (set.find(pos) != set.is_end(pos)) {
@@ -558,7 +563,7 @@ void random_mmap_vset(int max, std::string_view name) {
 		}
   }
   b.sample("traversal sparse");
-  printf("- inserts random %d\n",conta);
+  printf("inserts random %d\n",conta);
   conta = 0;
 
 	// TRAVERSAL DENSE TEST
@@ -572,12 +577,16 @@ void random_mmap_vset(int max, std::string_view name) {
   }
 
   for (int i = 0; i < BENCH_INN_SIZE; ++i) {
-    for (auto it = 0; !(set.is_end(it)); ++it) {
-      conta++;
-    }
+		for (auto it = set.bucket_begin(), end = set.bucket_end(); it != end; ++it) {
+			auto hold = set.bucket_get_val(it);
+			for (auto j = 0; j < 32; ++j) {
+				if ((hold & 1) == 1) { conta++; }
+				hold = hold >> 1;
+			}
+		}	
   }
   b.sample("traversal dense");
-  printf("- inserts random %d\n",conta);
+  printf("inserts random %d\n",conta);
 }
 
 #if 0
