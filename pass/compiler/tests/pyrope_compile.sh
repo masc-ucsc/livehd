@@ -14,6 +14,7 @@ pts='hier_tuple2 hier_tuple_io tuple_copy2 if nested_if reg__q_pin tuple_copy
      ssa_rhs tuple_if counter counter_nested_if firrtl_tail reg_bits_set'
 
 # pts='firrtl_tail2'
+# pts='tuple_copy2 counter'
 
 
 # Note: in this bash script, you MUST specify top module name AT FIRST POSITION
