@@ -759,16 +759,19 @@ void Bitwidth::bw_pass(LGraph *lg) {
 
 
     if (hier) {
-      for (auto e:inp_edges) {
+      for (auto e:inp_edges) 
         set_graph_boundary(e.driver, e.sink);
-      }
     }
 
 
     for (auto dpin : node.out_connected_pins()) {
       auto it = bwmap.find(dpin.get_compact());
-      if (it == bwmap.end()) 
+      if (it == bwmap.end()) {
+        // FIXME->sh: check: initialize to let things keep run, e.g. Flop loop
+        // FIXME->sh: might be wrong!! but how to continuw algorithm without zero initialization?
+        bwmap.insert_or_assign(dpin.get_compact(), Bitwidth_range(Lconst(0), Lconst(0)));
         continue;
+      }
       
       auto bw_bits = it->second.get_sbits();
       if (bw_bits == 0 && it->second.is_overflow()) {
@@ -779,21 +782,16 @@ void Bitwidth::bw_pass(LGraph *lg) {
       if (dpin.get_bits() && dpin.get_bits() >= bw_bits)
         continue;
 
-      if (op == Ntype_op::AttrSet) {
-        // FIXME->sh: this contition could be removed
-        // handled specially in process_attr_set_new_attr() because we need to know it's ubits or sbits there
-        ;
-      } else {
-        dpin.set_bits(bw_bits);
-      }
-
+      dpin.set_bits(bw_bits);
     }
 
     //debug
-    if (op != Ntype_op::Sub) {
-      fmt::print("    ");
-      bwmap[node.get_driver_pin("Y").get_compact()].dump();
-    }
+    //FIXME->sh: you are accidentally initialize every node with a bw(0)!!!
+    /* if (op != Ntype_op::Sub) { */
+    /*   fmt::print("    "); */
+    /*   bwmap[node.get_driver_pin("Y").get_compact()].dump(); */
+    /* } */
+
   } // end of lg->forward()
 
 
@@ -870,9 +868,6 @@ void Bitwidth::bw_pass(LGraph *lg) {
         }
         if (!hier) // FIXME: once hier del works
           node.del_node();
-
-      } else if (op == Ntype_op::AttrGet) {
-        I(false);  // should be deleted by now if solved
       }
       
       //FIXME->sh: optimize MSB zeros at the final global BW algorithm.
@@ -887,7 +882,7 @@ void Bitwidth::bw_pass(LGraph *lg) {
           I(dpin_bits != 0);
           auto min = bw->second.get_min();
           // note: keep tposs one bit bigger than parent so lgyosys knows to handle signed-msb-zero
-          if (min >= 0 && dpin_bits > 1 && node.get_type_op()!= Ntype_op::Tposs)
+          if (min >= 0 && dpin_bits > 1)
             dpin.set_bits(bw->second.get_sbits() - 1);
         }
       }
