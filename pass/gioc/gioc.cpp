@@ -48,6 +48,8 @@ void Gioc::collect_tgs_from_unified_out(Node subg_node) {
     /* e.del_edge(); */
     /* unified_out_ta.set_type(Ntype_op::TupRef); */
   }
+  if (unified_out_ta.is_invalid())
+    return;
 
   for (auto &e : unified_out_ta.out_edges()) {
     tgs_spins_from_unified_ta.emplace_back(e.sink);
