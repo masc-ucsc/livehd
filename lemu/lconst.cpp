@@ -309,9 +309,14 @@ Lconst::Lconst(std::string_view orig_txt) {
     explicit_bits = true;
   }
 
-  if (bits && bits < nbits_used) {
-    throw std::runtime_error(
-        fmt::format("ERROR: {} bits set would truncate value {} which needs {} bits\n", bits, txt, nbits_used));
+  if (bits) {
+    if (num>0 && bits < (nbits_used-1)) {
+      throw std::runtime_error(
+          fmt::format("ERROR: {} bits set would truncate the positive value {} which needs {} bits\n", bits, txt, nbits_used));
+    }else if (num<0 && bits < nbits_used) {
+      throw std::runtime_error(
+          fmt::format("ERROR: {} bits set would truncate the negative value {} which needs {} bits\n", bits, txt, nbits_used));
+    }
   }
 
   if (negative && !explicit_str) {
