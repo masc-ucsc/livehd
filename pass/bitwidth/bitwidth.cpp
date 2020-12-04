@@ -702,9 +702,9 @@ void Bitwidth::bw_pass(LGraph *lg) {
   must_perform_backward = false;
   not_finished          = false;
 
-  // Note: lg input bits must be set by attr_set node, it will be handled through the algorithm runs
-  // for (auto node : lg->forward(hier));
-  auto lgit = lg->forward(hier); // Not C++17 because it is passed
+  // note: lg input bits must be set by attr_set node, it will be handled through the algorithm runs
+
+  auto lgit = lg->forward(hier); // the design pattern for traverse newly created nodes in same iteration
   for (auto fwd_it = lgit.begin(); fwd_it != lgit.end() ; ++fwd_it) {
     auto node = *fwd_it;
     fmt::print("{}\n", node.debug_name());
@@ -767,12 +767,8 @@ void Bitwidth::bw_pass(LGraph *lg) {
 
     for (auto dpin : node.out_connected_pins()) {
       auto it = bwmap.find(dpin.get_compact());
-      if (it == bwmap.end()) {
-        // FIXME->sh: check: initialize to let things keep run, e.g. Flop loop
-        // FIXME->sh: might be wrong!! but how to continuw algorithm without zero initialization?
-        /* bwmap.insert_or_assign(dpin.get_compact(), Bitwidth_range(Lconst(0), Lconst(0))); */
+      if (it == bwmap.end()) 
         continue;
-      }
       
       auto bw_bits = it->second.get_sbits();
       if (bw_bits == 0 && it->second.is_overflow()) {
@@ -787,11 +783,12 @@ void Bitwidth::bw_pass(LGraph *lg) {
     }
 
     //debug
-    //FIXME->sh: you are accidentally initialize every node with a bw(0)!!!
-    /* if (op != Ntype_op::Sub) { */
-    /*   fmt::print("    "); */
-    /*   bwmap[node.get_driver_pin("Y").get_compact()].dump(); */
-    /* } */
+    if (op != Ntype_op::Sub) {
+      fmt::print("    ");
+      auto it = bwmap.find(node.get_driver_pin("Y").get_compact());
+      if (it != bwmap.end())
+        it->second.dump();
+    }
 
   } // end of lg->forward()
 
@@ -880,13 +877,12 @@ void Bitwidth::bw_pass(LGraph *lg) {
 
         auto dpin = node.get_driver_pin("Y");
         auto dpin_bits = dpin.get_bits();
-        auto bw = bwmap.find(dpin.get_compact());
-        if (bw != bwmap.end()) {
+        auto it = bwmap.find(dpin.get_compact());
+        if (it != bwmap.end()) {
+          auto &bw = it->second;
           I(dpin_bits != 0);
-          auto min = bw->second.get_min();
-          // note: keep tposs one bit bigger than parent so lgyosys knows to handle signed-msb-zero
-          if (min >= 0 && dpin_bits > 1)
-            dpin.set_bits(bw->second.get_sbits() - 1);
+          if (bw.is_always_positive() && dpin_bits > 1)
+            dpin.set_bits(bw.get_sbits() - 1);
         }
       }
     } // end of lg->fast()

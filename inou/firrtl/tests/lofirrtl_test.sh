@@ -2,9 +2,9 @@
 rm -rf ./lgdb
 
 pts_todo='MemoryController Rob ICache HwachaSequencer'
-pts_handle_1st='TrivialArith regex GCD Test3 coverage'
+pts_handle_1st='regex GCD Test3 coverage'
 
-pts='Decrementer RegXor Trivial TrivialAdd NotAnd Test1 Test2 BundleCombiner Flop Tail RegisterSimple Register'
+pts='Decrementer RegXor Trivial TrivialAdd NotAnd Test1 Test2 BundleCombiner Flop Tail RegisterSimple Register TrivialArith '
 
 pts_hier='FinalVal2Test'
 pts_hier2='FinalValTest'
@@ -13,12 +13,16 @@ pts_hier4='BundleConnect'
 
 pts_hier='FPU'
 pts_hier9='RocketCore'
+pts='TrivialArith'
 
 #SimpleBitOps Ops -- parity and mod op not in lnast_tolg
 #HwachaSequencer -- printf, pad, stop
 #SubModule BundleConnect -- submodules
 #Test3 -- fails because of DCE
 #Test4 -- as_... ops in FIRRTL
+
+
+
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -49,7 +53,7 @@ lofirrtl_test() {
         exit 1
     fi
 
-    ${LGSHELL} "inou.firrtl.tolnast files:${PATTERN_PATH}/${pt}.lo.pb |> pass.compiler gviz:true"
+    ${LGSHELL} "inou.firrtl.tolnast files:${PATTERN_PATH}/${pt}.lo.pb |> pass.compiler gviz:true top:${pt}"
     ret_val=$?
     if [ $ret_val -ne 0 ]; then
       echo "ERROR: could not compile with pattern: ${pt}.lo.pb!"
