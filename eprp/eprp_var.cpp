@@ -1,7 +1,10 @@
 
 #include "absl/strings/str_split.h"
 #include <algorithm>
+#include <iterator>
+#include <memory>
 #include <utility>
+#include <vector>
 
 #include "eprp_var.hpp"
 
@@ -52,6 +55,18 @@ void Eprp_var::add(const std::string &name, std::string_view value) {
     }
   }
   dict[name] = value;
+}
+void Eprp_var::replace(std::shared_ptr<Lnast> lnast_old, std::unique_ptr<Lnast> lnast_new) {
+  std::vector<std::shared_ptr<Lnast> >::iterator itr = std::find(lnasts.begin(), lnasts.end(), lnast_old);
+  
+  //auto indx = lnasts.begin();
+  if (itr != lnasts.cend()) {
+    auto indx = std::distance(lnasts.begin(), itr);
+    lnasts.at(indx) = std::move(lnast_new);
+  } else {
+    I(false, "lnast provided is not found in the vector");
+  }
+  //lnasts[indx] = lnast_new;
 }
 
 void Eprp_var::delete_label(const std::string &name) {
