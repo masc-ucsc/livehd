@@ -4,5 +4,5 @@ module Test4(
   input  [15:0] io_inp,
   output [15:0] io_out
 );
-  assign io_out = io_inp; // @[Test4.scala 18:10]
+  assign io_out = io_inp; // @[Test4.scala 18:20]
 endmodule

@@ -1,6 +1,6 @@
 // See README.md for license details.
 
-package pb_tests
+package design
 
 import chisel3._
 

@@ -1,4 +1,4 @@
-package pb_tests
+package design
 
 import chisel3._
 
@@ -28,9 +28,9 @@ class MemoryController extends Module {
 
   // for example purposes, only update select fields
   when (true.B) {
-    nextDDR3Cmd.ba   := 5.U
+    nextDDR3Cmd.ba   := 3.U
     nextDDR3Cmd.casN := 0.U
-    nextDDR3Cmd.rasN := 1.U
+    //nextDDR3Cmd.rasN := 1.U
   }
 
   io.ddr3 := nextDDR3Cmd

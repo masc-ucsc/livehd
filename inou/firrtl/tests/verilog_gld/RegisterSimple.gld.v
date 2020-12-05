@@ -4,13 +4,20 @@ module RegisterSimple(
   input  [15:0] io_inVal,
   output [15:0] io_outVal
 );
-  reg [15:0] x; // @[RegisterSimple.scala 18:15]
+`ifdef RANDOMIZE_REG_INIT
   reg [31:0] _RAND_0;
-  wire  _T; // @[RegisterSimple.scala 20:11]
-  wire [15:0] _T_2; // @[RegisterSimple.scala 23:12]
-  assign _T = x == 16'h0; // @[RegisterSimple.scala 20:11]
-  assign _T_2 = x - 16'h1; // @[RegisterSimple.scala 23:12]
+`endif // RANDOMIZE_REG_INIT
+  reg [15:0] x; // @[RegisterSimple.scala 18:15]
+  wire [15:0] _T_2 = x - 16'h1; // @[RegisterSimple.scala 23:12]
   assign io_outVal = x; // @[RegisterSimple.scala 26:13]
+  always @(posedge clock) begin
+    if (x == 16'h0) begin // @[RegisterSimple.scala 20:20]
+      x <= io_inVal; // @[RegisterSimple.scala 21:7]
+    end else begin
+      x <= _T_2; // @[RegisterSimple.scala 23:7]
+    end
+  end
+// Register and memory initialization
 `ifdef RANDOMIZE_GARBAGE_ASSIGN
 `define RANDOMIZE
 `endif
@@ -30,6 +37,9 @@ module RegisterSimple(
   integer initvar;
 `endif
 `ifndef SYNTHESIS
+`ifdef FIRRTL_BEFORE_INITIAL
+`FIRRTL_BEFORE_INITIAL
+`endif
 initial begin
   `ifdef RANDOMIZE
     `ifdef INIT_RANDOM
@@ -42,18 +52,14 @@ initial begin
         #0.002 begin end
       `endif
     `endif
-  `ifdef RANDOMIZE_REG_INIT
+`ifdef RANDOMIZE_REG_INIT
   _RAND_0 = {1{`RANDOM}};
   x = _RAND_0[15:0];
-  `endif // RANDOMIZE_REG_INIT
+`endif // RANDOMIZE_REG_INIT
   `endif // RANDOMIZE
 end // initial
+`ifdef FIRRTL_AFTER_INITIAL
+`FIRRTL_AFTER_INITIAL
+`endif
 `endif // SYNTHESIS
-  always @(posedge clock) begin
-    if (_T) begin
-      x <= io_inVal;
-    end else begin
-      x <= _T_2;
-    end
-  end
 endmodule

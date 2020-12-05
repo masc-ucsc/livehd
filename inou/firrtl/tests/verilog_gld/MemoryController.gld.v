@@ -19,7 +19,7 @@ module MemoryController(
     if (reset) begin // @[MemoryController.scala 27:28]
       nextDDR3Cmd_ba <= 3'h0; // @[MemoryController.scala 27:28]
     end else begin
-      nextDDR3Cmd_ba <= 3'h5;
+      nextDDR3Cmd_ba <= 3'h3;
     end
   end
 // Register and memory initialization

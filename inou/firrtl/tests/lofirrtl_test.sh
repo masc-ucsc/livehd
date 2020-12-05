@@ -4,7 +4,7 @@ rm -rf ./lgdb
 pts_todo='MemoryController Rob ICache HwachaSequencer'
 pts_handle_1st='regex GCD Test3 coverage'
 
-pts='Decrementer RegXor Trivial TrivialAdd NotAnd Test1 Test2 BundleCombiner Flop Tail RegisterSimple Register TrivialArith '
+pts='Decrementer RegXor Trivial TrivialAdd AddNot NotAnd Test1 Test2 BundleCombiner Flop Tail RegisterSimple Register TrivialArith '
 
 pts_hier='FinalVal2Test'
 pts_hier2='FinalValTest'

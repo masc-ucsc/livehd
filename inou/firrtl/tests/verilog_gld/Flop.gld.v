@@ -5,9 +5,17 @@ module Flop(
   input         io_loading,
   output [15:0] io_out
 );
-  reg [15:0] x; // @[Flop.scala 14:15]
+`ifdef RANDOMIZE_REG_INIT
   reg [31:0] _RAND_0;
+`endif // RANDOMIZE_REG_INIT
+  reg [15:0] x; // @[Flop.scala 14:15]
   assign io_out = x; // @[Flop.scala 20:10]
+  always @(posedge clock) begin
+    if (io_loading) begin // @[Flop.scala 16:20]
+      x <= io_inp; // @[Flop.scala 17:7]
+    end
+  end
+// Register and memory initialization
 `ifdef RANDOMIZE_GARBAGE_ASSIGN
 `define RANDOMIZE
 `endif
@@ -27,6 +35,9 @@ module Flop(
   integer initvar;
 `endif
 `ifndef SYNTHESIS
+`ifdef FIRRTL_BEFORE_INITIAL
+`FIRRTL_BEFORE_INITIAL
+`endif
 initial begin
   `ifdef RANDOMIZE
     `ifdef INIT_RANDOM
@@ -39,16 +50,14 @@ initial begin
         #0.002 begin end
       `endif
     `endif
-  `ifdef RANDOMIZE_REG_INIT
+`ifdef RANDOMIZE_REG_INIT
   _RAND_0 = {1{`RANDOM}};
   x = _RAND_0[15:0];
-  `endif // RANDOMIZE_REG_INIT
+`endif // RANDOMIZE_REG_INIT
   `endif // RANDOMIZE
 end // initial
+`ifdef FIRRTL_AFTER_INITIAL
+`FIRRTL_AFTER_INITIAL
+`endif
 `endif // SYNTHESIS
-  always @(posedge clock) begin
-    if (io_loading) begin
-      x <= io_inp;
-    end
-  end
 endmodule
