@@ -3,7 +3,7 @@ module BundleConnectSubMod(
   input  [3:0] io_in2,
   output [3:0] io_out
 );
-  assign io_out = io_in1 + io_in2; // @[BundleConnect.scala 27:10]
+  assign io_out = io_in1 + io_in2; // @[BundleConnect.scala 27:20]
 endmodule
 module BundleConnect(
   input        clock,

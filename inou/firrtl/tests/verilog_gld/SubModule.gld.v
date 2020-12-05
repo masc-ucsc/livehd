@@ -2,7 +2,7 @@ module SubModuleSubMod(
   input  [3:0] io_a,
   output [3:0] io_b
 );
-  assign io_b = io_a + 4'h1; // @[SubModule.scala 29:8]
+  assign io_b = io_a + 4'h1; // @[SubModule.scala 29:16]
 endmodule
 module SubModule(
   input        clock,

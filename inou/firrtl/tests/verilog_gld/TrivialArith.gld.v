@@ -7,10 +7,8 @@ module TrivialArith(
   output [9:0]  io_outputAdd,
   output [15:0] io_outputMul
 );
-  wire [8:0] _T; // @[TrivialArith.scala 16:29]
-  wire [8:0] _GEN_0; // @[TrivialArith.scala 16:42]
-  assign _T = io_value1 + io_value2; // @[TrivialArith.scala 16:29]
-  assign _GEN_0 = {{1'd0}, io_value3}; // @[TrivialArith.scala 16:42]
-  assign io_outputAdd = _T + _GEN_0; // @[TrivialArith.scala 16:16]
-  assign io_outputMul = io_value1 * io_value2; // @[TrivialArith.scala 17:16]
+  wire [8:0] _T = io_value1 + io_value2; // @[TrivialArith.scala 16:29]
+  wire [8:0] _GEN_0 = {{1'd0}, io_value3}; // @[TrivialArith.scala 16:42]
+  assign io_outputAdd = _T + _GEN_0; // @[TrivialArith.scala 16:42]
+  assign io_outputMul = io_value1 * io_value2; // @[TrivialArith.scala 17:29]
 endmodule
