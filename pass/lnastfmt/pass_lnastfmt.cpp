@@ -33,7 +33,6 @@ void Pass_lnastfmt::fmt_begin(Eprp_var& var) {
 
 void Pass_lnastfmt::parse_ln(std::shared_ptr<Lnast> ln, Eprp_var& var, std::string_view module_name) {
   std::unique_ptr<Lnast> lnastfmted = std::make_unique<Lnast>(module_name);
-  //fmt::print("********{}\n", ln->get_top_module_name());
 
   observe_lnast(ln.get());//1st traversal through the original LN to record assign subtrees.
   
@@ -82,7 +81,8 @@ void Pass_lnastfmt::parse_ln(std::shared_ptr<Lnast> ln, Eprp_var& var, std::stri
 
           auto is = ref_hash_map.find(ln->get_name(it));
           if(is != ref_hash_map.end() && is_ssa(ln->get_name(it))) {
-            auto frst_fmt = lnastfmted->add_child(curr_index_fmt, Lnast_node::create_ref(is->second));
+            //auto frst_fmt = 
+            lnastfmted->add_child(curr_index_fmt, Lnast_node::create_ref(is->second));
           } else {
             lnastfmted->add_child(curr_index_fmt, Lnast_node(ln->get_type(it), ln->get_token(it), ln->get_subs(it)));
           }
@@ -103,18 +103,9 @@ void Pass_lnastfmt::parse_ln(std::shared_ptr<Lnast> ln, Eprp_var& var, std::stri
   //lnastfmted->dump();
   //fmt::print("\n:lnast fmted****\n");
   var.replace(ln, std::move(lnastfmted));//just replace the pointer
-  //var.del(ln);
   //var.add(std::move(lnastfmted));
 }
-//void Pass_lnastfmt::parse_ln(std::shared_ptr<Lnast> ln) {
-//  Pass_lnastfmt p;
-//  p.observe_lnast(ln.get());
-// // std::unique_ptr<Lnast> lnastfmted = std::make_unique<Lnast>(module_name);
-//  //lnastfmted->set_root(Lnast_node(Lnast_ntype::create_top(), Token(0, 0, 0, 0, ln->get_top_module_name())));
-//
-//  //lnastfmted->dump();
-//  //var.add(std::move(lnastfmted));
-//}
+
 void Pass_lnastfmt::observe_lnast(Lnast* ln) {
   for (const mmap_lib::Tree_index& it : ln->depth_preorder(ln->get_root())) {
     process_node(ln, it);
@@ -140,7 +131,6 @@ void Pass_lnastfmt::process_node(Lnast* ln, const mmap_lib::Tree_index& it) {
     I(ln->get_sibling_next(sec_child_indx).is_invalid(),"This assign node has more than 2 children??");
 
     ref_hash_map.try_emplace(ln->get_name(sec_child_indx), ln->get_name(frst_child_indx));//insert key, value pair.
-    //ref_map[ln->get_name(sec_child_indx)] = ln->get_name(frst_child_indx);
 
     
   }
