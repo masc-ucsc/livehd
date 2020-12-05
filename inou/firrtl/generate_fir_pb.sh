@@ -1,33 +1,29 @@
 #!/bin/bash
-#WARNING! This is a experimental and hardcoded scrip for Sheng-Hong use only
+#WARNING! This is a experimental and hardcoded script for Sheng-Hong environment only
 
-pts='GCD'
+pts='GCD Trivial TrivialArith Test1 Test2 Test3 Test4 Test5 Test6 SimpleBitOps Register RegisterSimple Flop'
 
 CHISEL_PATH=~/chisel/
-FIRRTL_PATH=~/firrtl/protobuf/
+RESULT_PATH=~/chisel/results/
+FIRRTL_EXE=~/firrtl/utils/bin/firrtl
 LIVEHD_FIRRTL_PATH=~/livehd/inou/firrtl/tests
 
 cd $CHISEL_PATH
 for pt in $pts
 do
-  OLDDIR=$(ls -td ./test_run_dir/*/ | head -1)
-  echo $OLDDIR
-  rm -rf $OLDDIR
+  sbt "runMain chisel3.stage.ChiselMain --module design.${pt}"  
 
-  sbt "test:runMain ${pt,,}.${pt}Main"  
-  NEWDIR=$(ls -td ./test_run_dir/*/ | head -1)
-  cd $NEWDIR
+  $FIRRTL_EXE -i ${pt}.fir -X high
+  $FIRRTL_EXE -i ${pt}.fir -X low
+  $FIRRTL_EXE -i ${pt}.fir -X verilog
+  $FIRRTL_EXE -i ${pt}.fir -X none --custom-transforms firrtl.transforms.WriteChPB
+  $FIRRTL_EXE -i ${pt}.fir -X none --custom-transforms firrtl.transforms.WriteHighPB
+  $FIRRTL_EXE -i ${pt}.fir -X none --custom-transforms firrtl.transforms.WriteLowPB
 
-  mkdir -p $FIRRTL_PATH${pt}
-  cp ${pt}.fir $FIRRTL_PATH${pt}
-
-  cd $FIRRTL_PATH${pt}
-  ../../utils/bin/firrtl -i ${pt}.fir -X high
-  ../../utils/bin/firrtl -i ${pt}.fir -X low
-  ../../utils/bin/firrtl -i ${pt}.fir -X verilog
-  ../../utils/bin/firrtl -i ${pt}.fir -X none --custom-transforms firrtl.transforms.WriteChPB
-  ../../utils/bin/firrtl -i ${pt}.fir -X none --custom-transforms firrtl.transforms.WriteHighPB
-  ../../utils/bin/firrtl -i ${pt}.fir -X none --custom-transforms firrtl.transforms.WriteLowPB
+  mkdir -p $RESULT_PATH${pt}
+  mv *.pb  $RESULT_PATH${pt}
+  mv *.fir $RESULT_PATH${pt}
+  mv *.v   $RESULT_PATH${pt}
 
 done
 

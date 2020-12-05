@@ -7,27 +7,44 @@ GCD design. Once you've locally cloned it and are in the directory, you can
 build the GCD example by typing
 
 
-To get Chirrtl (highest level of FIRRTL) and Verilog, do:
+To get Chirrtl (highest level of FIRRTL) and Verilog, do the following
+
+(1) define your package name and directory at
 ```
-sbt 'test:runMain gcd.GCDMain'
+~/chisel/src/main/scala/your_package_name
 ```
 
-Results can be found in the `test_run_dir`
-directory.  The relevant files can be found at 
-`src/main/scala/gcd/GCD.scala`,
-`src/test/scala/gcd/GCDMain.scala`, 
-`src/test/scala/gcd/GCDUnitTest.scala`.
+(2) put your chisel designs under the package directory
+
+```
+~/chisel/src/main/scala/your_package_name/Foo.scala
+```
+
+(3) remember to modify your chisel design to specify the package name 
+
+```
+// Foo.scala
+package your_package_name
+
+import chisel3._ 
+
+class Foo extends Module {
+  your chisel design here  
+}
+
+```
+
+(4) run this command at your chisel root directory
+
+```
+sbt 'runMain chisel3.stage.ChiselMain --module your_package_name.Foo'
+```
+
+Results can be found in your chisel root directory
 
 
-At the top of the `GCD.scala` file, you may notice there being `package gcd`.
-That is where the `gcd.` portion comes from in the `sbt` command. `GCDMain`, the
-thing that elaborates the design to FIRRTL, comes from the file with that name.
-
-### Building your own Chisel designs
-If you want to add your own designs, you'll need to make note of what package
-you specify and what you name the function that elaborates your design. If you
-change the package name or the elaboration function name, you'll have to adjust
-those in the commands above as well.
+(5) FIXME->sh
+what is the case for a hierarchical design?
 
 
 ## FIRRTL Compiler
@@ -43,6 +60,7 @@ sbt compile
 sbt assembly
 ```
 
+### Getting the lower firrtl design and Verilog
 Then, if you have a FIRRTL file that you want to lower, you can use the
 following command in the FIRRTL repository:
 ```
