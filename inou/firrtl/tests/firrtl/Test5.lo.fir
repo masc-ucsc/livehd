@@ -12,8 +12,8 @@ circuit Test5 :
     output io_out3 : UInt<4>
     output io_out4 : UInt<16>
 
-    node _T = mul(io_inp1, io_inp2) @[Test5.scala 28:21]
-    io_out <= asSInt(bits(shr(_T, 12), 31, 0)) @[Test5.scala 28:10]
+    node _io_out_T = mul(io_inp1, io_inp2) @[Test5.scala 28:21]
+    io_out <= asSInt(bits(shr(_io_out_T, 12), 31, 0)) @[Test5.scala 28:10]
     io_out20 <= UInt<3>("h5") @[Test5.scala 30:12]
     io_out21 <= asSInt(UInt<4>("h5")) @[Test5.scala 31:12]
     io_out22 <= asSInt(UInt<4>("hb")) @[Test5.scala 32:12]

@@ -9,13 +9,12 @@ module Decrementer(
   reg [31:0] _RAND_0;
 `endif // RANDOMIZE_REG_INIT
   reg [15:0] x;
-  wire  _T = inp > x;
   wire [15:0] _T_2 = x - 16'h1;
   assign out = x;
   always @(posedge clock) begin
     if (cond) begin
       x <= inp;
-    end else if (!(_T)) begin
+    end else if (!(inp > x)) begin
       x <= _T_2;
     end
   end

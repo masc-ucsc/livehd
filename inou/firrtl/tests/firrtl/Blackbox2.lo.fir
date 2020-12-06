@@ -15,7 +15,7 @@ circuit Blackbox2 :
     output io_valOut : UInt<33>
 
     inst submodule_inst of BlackboxInline2 @[Blackbox2.scala 18:30]
-    node _T = xor(submodule_inst.out, io_val0) @[Blackbox2.scala 21:38]
-    io_valOut <= _T @[Blackbox2.scala 21:13]
+    node _io_valOut_T = xor(submodule_inst.out, io_val0) @[Blackbox2.scala 21:38]
+    io_valOut <= _io_valOut_T @[Blackbox2.scala 21:13]
     submodule_inst.in1 <= io_val1 @[Blackbox2.scala 19:25]
     submodule_inst.in2 <= io_val2 @[Blackbox2.scala 20:25]

@@ -12,17 +12,17 @@ module Smem(
   reg [31:0] _RAND_2;
 `endif // RANDOMIZE_REG_INIT
   reg [31:0] mem [0:1023]; // @[Smem.scala 15:24]
-  wire [31:0] mem__T_4_data; // @[Smem.scala 15:24]
-  wire [9:0] mem__T_4_addr; // @[Smem.scala 15:24]
-  reg  mem__T_4_en_pipe_0;
-  reg [9:0] mem__T_4_addr_pipe_0;
-  assign mem__T_4_addr = mem__T_4_addr_pipe_0;
-  assign mem__T_4_data = mem[mem__T_4_addr]; // @[Smem.scala 15:24]
-  assign io_dataOut = mem__T_4_data; // @[Smem.scala 18:14]
+  wire [31:0] mem_io_dataOut_MPORT_data; // @[Smem.scala 15:24]
+  wire [9:0] mem_io_dataOut_MPORT_addr; // @[Smem.scala 15:24]
+  reg  mem_io_dataOut_MPORT_en_pipe_0;
+  reg [9:0] mem_io_dataOut_MPORT_addr_pipe_0;
+  assign mem_io_dataOut_MPORT_addr = mem_io_dataOut_MPORT_addr_pipe_0;
+  assign mem_io_dataOut_MPORT_data = mem[mem_io_dataOut_MPORT_addr]; // @[Smem.scala 15:24]
+  assign io_dataOut = mem_io_dataOut_MPORT_data; // @[Smem.scala 18:14]
   always @(posedge clock) begin
-    mem__T_4_en_pipe_0 <= io_addr > 10'hc8;
+    mem_io_dataOut_MPORT_en_pipe_0 <= io_addr > 10'hc8;
     if (io_addr > 10'hc8) begin
-      mem__T_4_addr_pipe_0 <= io_addr;
+      mem_io_dataOut_MPORT_addr_pipe_0 <= io_addr;
     end
   end
 // Register and memory initialization
@@ -67,9 +67,9 @@ initial begin
 `endif // RANDOMIZE_MEM_INIT
 `ifdef RANDOMIZE_REG_INIT
   _RAND_1 = {1{`RANDOM}};
-  mem__T_4_en_pipe_0 = _RAND_1[0:0];
+  mem_io_dataOut_MPORT_en_pipe_0 = _RAND_1[0:0];
   _RAND_2 = {1{`RANDOM}};
-  mem__T_4_addr_pipe_0 = _RAND_2[9:0];
+  mem_io_dataOut_MPORT_addr_pipe_0 = _RAND_2[9:0];
 `endif // RANDOMIZE_REG_INIT
   `endif // RANDOMIZE
 end // initial

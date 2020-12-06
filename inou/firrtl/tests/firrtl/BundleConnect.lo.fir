@@ -6,9 +6,9 @@ circuit BundleConnect :
     input io_in2 : UInt<4>
     output io_out : UInt<4>
 
-    node _T = add(io_in1, io_in2) @[BundleConnect.scala 27:20]
-    node _T_1 = tail(_T, 1) @[BundleConnect.scala 27:20]
-    io_out <= _T_1 @[BundleConnect.scala 27:10]
+    node _io_out_T = add(io_in1, io_in2) @[BundleConnect.scala 27:20]
+    node _io_out_T_1 = tail(_io_out_T, 1) @[BundleConnect.scala 27:20]
+    io_out <= _io_out_T_1 @[BundleConnect.scala 27:10]
 
   module BundleConnect :
     input clock : Clock

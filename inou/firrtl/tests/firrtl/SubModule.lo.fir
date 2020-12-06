@@ -5,9 +5,9 @@ circuit SubModule :
     input io_a : UInt<4>
     output io_b : UInt<4>
 
-    node _T = add(io_a, UInt<1>("h1")) @[SubModule.scala 29:16]
-    node _T_1 = tail(_T, 1) @[SubModule.scala 29:16]
-    io_b <= _T_1 @[SubModule.scala 29:8]
+    node _io_b_T = add(io_a, UInt<1>("h1")) @[SubModule.scala 29:16]
+    node _io_b_T_1 = tail(_io_b_T, 1) @[SubModule.scala 29:16]
+    io_b <= _io_b_T_1 @[SubModule.scala 29:8]
 
   module SubModule :
     input clock : Clock
