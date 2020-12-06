@@ -1,5 +1,5 @@
 /*
- *  ezSAT -- A simple and easy to use CNF generator for SAT solvers
+ *  lezSAT -- A simple and easy to use CNF generator for SAT solvers
  *
  *  Copyright (C) 2013  Clifford Wolf <clifford@clifford.at>
  *
@@ -20,14 +20,15 @@
 #ifndef EZSAT_H
 #define EZSAT_H
 
-#include <map>
-#include <set>
 #include <stdint.h>
 #include <stdio.h>
+
+#include <map>
+#include <set>
 #include <string>
 #include <vector>
 
-class ezSAT {
+class lezSAT {
   // each token (terminal or non-terminal) is represented by an integer number
   //
   // the zero token:
@@ -77,25 +78,17 @@ public:
   int  solverTimeout;
   bool solverTimoutStatus;
 
-  ezSAT();
-  virtual ~ezSAT();
+  lezSAT();
+  virtual ~lezSAT();
 
   unsigned int statehash;
   void         addhash(unsigned int);
 
-  void keep_cnf() {
-    flag_keep_cnf = true;
-  }
-  void non_incremental() {
-    flag_non_incremental = true;
-  }
+  void keep_cnf() { flag_keep_cnf = true; }
+  void non_incremental() { flag_non_incremental = true; }
 
-  bool mode_keep_cnf() const {
-    return flag_keep_cnf;
-  }
-  bool mode_non_incremental() const {
-    return flag_non_incremental;
-  }
+  bool mode_keep_cnf() const { return flag_keep_cnf; }
+  bool mode_non_incremental() const { return flag_non_incremental; }
 
   // manage expressions
 
@@ -116,18 +109,14 @@ public:
   int         parse_string(const std::string &text);
   std::string to_string(int id) const;
 
-  int numLiterals() const {
-    return literals.size();
-  }
-  int numExpressions() const {
-    return expressions.size();
-  }
+  int numLiterals() const { return literals.size(); }
+  int numExpressions() const { return expressions.size(); }
 
   int eval(int id, const std::vector<int> &values) const;
 
   // SAT solver interface
   // If you are planning on using the solver API (and not simply create a CNF) you must use a child class
-  // of ezSAT that actually implements a solver backend, such as ezMiniSAT (see ezminisat.h).
+  // of lezSAT that actually implements a solver backend, such as lezMiniSAT (see ezminisat.h).
 
   virtual bool solver(const std::vector<int> &modelExpressions, std::vector<bool> &modelValues,
                       const std::vector<int> &assumptions);
@@ -139,17 +128,17 @@ public:
   bool solve(const std::vector<int> &modelExpressions, std::vector<bool> &modelValues, int a = 0, int b = 0, int c = 0, int d = 0,
              int e = 0, int f = 0) {
     std::vector<int> assumptions;
-    if(a != 0)
+    if (a != 0)
       assumptions.push_back(a);
-    if(b != 0)
+    if (b != 0)
       assumptions.push_back(b);
-    if(c != 0)
+    if (c != 0)
       assumptions.push_back(c);
-    if(d != 0)
+    if (d != 0)
       assumptions.push_back(d);
-    if(e != 0)
+    if (e != 0)
       assumptions.push_back(e);
-    if(f != 0)
+    if (f != 0)
       assumptions.push_back(f);
     return solver(modelExpressions, modelValues, assumptions);
   }
@@ -157,28 +146,24 @@ public:
   bool solve(int a = 0, int b = 0, int c = 0, int d = 0, int e = 0, int f = 0) {
     std::vector<int>  assumptions, modelExpressions;
     std::vector<bool> modelValues;
-    if(a != 0)
+    if (a != 0)
       assumptions.push_back(a);
-    if(b != 0)
+    if (b != 0)
       assumptions.push_back(b);
-    if(c != 0)
+    if (c != 0)
       assumptions.push_back(c);
-    if(d != 0)
+    if (d != 0)
       assumptions.push_back(d);
-    if(e != 0)
+    if (e != 0)
       assumptions.push_back(e);
-    if(f != 0)
+    if (f != 0)
       assumptions.push_back(f);
     return solver(modelExpressions, modelValues, assumptions);
   }
 
-  void setSolverTimeout(int newTimeoutSeconds) {
-    solverTimeout = newTimeoutSeconds;
-  }
+  void setSolverTimeout(int newTimeoutSeconds) { solverTimeout = newTimeoutSeconds; }
 
-  bool getSolverTimoutStatus() {
-    return solverTimoutStatus;
-  }
+  bool getSolverTimoutStatus() { return solverTimoutStatus; }
 
   // manage CNF (usually only accessed by SAT solvers)
 
@@ -186,21 +171,13 @@ public:
   virtual void freeze(int id);
   virtual bool eliminated(int idx);
   void         assume(int id);
-  void         assume(int id, int context_id) {
-    assume(OR(id, NOT(context_id)));
-  }
-  int bind(int id, bool auto_freeze = true);
-  int bound(int id) const;
+  void         assume(int id, int context_id) { assume(OR(id, NOT(context_id))); }
+  int          bind(int id, bool auto_freeze = true);
+  int          bound(int id) const;
 
-  int numCnfVariables() const {
-    return cnfVariableCount;
-  }
-  int numCnfClauses() const {
-    return cnfClausesCount;
-  }
-  const std::vector<std::vector<int>> &cnf() const {
-    return cnfClauses;
-  }
+  int                                  numCnfVariables() const { return cnfVariableCount; }
+  int                                  numCnfClauses() const { return cnfClausesCount; }
+  const std::vector<std::vector<int>> &cnf() const { return cnfClauses; }
 
   void consumeCnf();
   void consumeCnf(std::vector<std::vector<int>> &cnf);
@@ -215,31 +192,19 @@ public:
   struct _V {
     int         id;
     std::string name;
-    _V(int id)
-        : id(id) {
-    }
-    _V(const char *name)
-        : id(0)
-        , name(name) {
-    }
-    _V(const std::string &name)
-        : id(0)
-        , name(name) {
-    }
-    int get(ezSAT *that) {
-      if(name.empty())
+    _V(int id) : id(id) {}
+    _V(const char *name) : id(0), name(name) {}
+    _V(const std::string &name) : id(0), name(name) {}
+    int get(lezSAT *that) {
+      if (name.empty())
         return id;
       return that->frozen_literal(name);
     }
   };
 
-  int VAR(_V a) {
-    return a.get(this);
-  }
+  int VAR(_V a) { return a.get(this); }
 
-  int NOT(_V a) {
-    return expression(OpNot, a.get(this));
-  }
+  int NOT(_V a) { return expression(OpNot, a.get(this)); }
 
   int AND(_V a = 0, _V b = 0, _V c = 0, _V d = 0, _V e = 0, _V f = 0) {
     return expression(OpAnd, a.get(this), b.get(this), c.get(this), d.get(this), e.get(this), f.get(this));
@@ -257,13 +222,9 @@ public:
     return expression(OpIFF, a.get(this), b.get(this), c.get(this), d.get(this), e.get(this), f.get(this));
   }
 
-  int ITE(_V a, _V b, _V c) {
-    return expression(OpITE, a.get(this), b.get(this), c.get(this));
-  }
+  int ITE(_V a, _V b, _V c) { return expression(OpITE, a.get(this), b.get(this), c.get(this)); }
 
-  void SET(_V a, _V b) {
-    assume(IFF(a.get(this), b.get(this)));
-  }
+  void SET(_V a, _V b) { assume(IFF(a.get(this), b.get(this))); }
 
   // simple helpers for building expressions with bit vectors
 
@@ -318,9 +279,7 @@ public:
   std::vector<int> vec_shr(const std::vector<int> &vec1, int shift, bool signExtend = false) {
     return vec_shl(vec1, -shift, signExtend);
   }
-  std::vector<int> vec_srr(const std::vector<int> &vec1, int shift) {
-    return vec_srl(vec1, -shift);
-  }
+  std::vector<int> vec_srr(const std::vector<int> &vec1, int shift) { return vec_srl(vec1, -shift); }
 
   std::vector<int> vec_shift(const std::vector<int> &vec1, int shift, int extend_left, int extend_right);
   std::vector<int> vec_shift_right(const std::vector<int> &vec1, const std::vector<int> &vec2, bool vec2_signed, int extend_left,
@@ -344,10 +303,10 @@ public:
   void vec_set_signed(const std::vector<int> &vec1, int64_t value);
   void vec_set_unsigned(const std::vector<int> &vec1, uint64_t value);
 
-  // helpers for generating ezSATbit and ezSATvec objects
+  // helpers for generating lezSATbit and lezSATvec objects
 
-  struct ezSATbit bit(_V a);
-  struct ezSATvec vec(const std::vector<int> &vec);
+  struct lezSATbit bit(_V a);
+  struct lezSATvec vec(const std::vector<int> &vec);
 
   // printing CNF and internal state
 
@@ -363,107 +322,51 @@ public:
 
 // helper classes for using operator overloading when generating complex expressions
 
-struct ezSATbit {
-  ezSAT &sat;
+struct lezSATbit {
+  lezSAT &sat;
   int    id;
 
-  ezSATbit(ezSAT &sat, ezSAT::_V a)
-      : sat(sat)
-      , id(sat.VAR(a)) {
-  }
+  lezSATbit(lezSAT &sat, lezSAT::_V a) : sat(sat), id(sat.VAR(a)) {}
 
-  ezSATbit operator~() {
-    return ezSATbit(sat, sat.NOT(id));
-  }
-  ezSATbit operator&(const ezSATbit &other) {
-    return ezSATbit(sat, sat.AND(id, other.id));
-  }
-  ezSATbit operator|(const ezSATbit &other) {
-    return ezSATbit(sat, sat.OR(id, other.id));
-  }
-  ezSATbit operator^(const ezSATbit &other) {
-    return ezSATbit(sat, sat.XOR(id, other.id));
-  }
-  ezSATbit operator==(const ezSATbit &other) {
-    return ezSATbit(sat, sat.IFF(id, other.id));
-  }
-  ezSATbit operator!=(const ezSATbit &other) {
-    return ezSATbit(sat, sat.NOT(sat.IFF(id, other.id)));
-  }
+  lezSATbit operator~() { return lezSATbit(sat, sat.NOT(id)); }
+  lezSATbit operator&(const lezSATbit &other) { return lezSATbit(sat, sat.AND(id, other.id)); }
+  lezSATbit operator|(const lezSATbit &other) { return lezSATbit(sat, sat.OR(id, other.id)); }
+  lezSATbit operator^(const lezSATbit &other) { return lezSATbit(sat, sat.XOR(id, other.id)); }
+  lezSATbit operator==(const lezSATbit &other) { return lezSATbit(sat, sat.IFF(id, other.id)); }
+  lezSATbit operator!=(const lezSATbit &other) { return lezSATbit(sat, sat.NOT(sat.IFF(id, other.id))); }
 
-  operator int() const {
-    return id;
-  }
-  operator ezSAT::_V() const {
-    return ezSAT::_V(id);
-  }
-  operator std::vector<int>() const {
-    return std::vector<int>(1, id);
-  }
+  operator int() const { return id; }
+  operator lezSAT::_V() const { return lezSAT::_V(id); }
+  operator std::vector<int>() const { return std::vector<int>(1, id); }
 };
 
-struct ezSATvec {
-  ezSAT &          sat;
+struct lezSATvec {
+  lezSAT &          sat;
   std::vector<int> vec;
 
-  ezSATvec(ezSAT &sat, const std::vector<int> &vec)
-      : sat(sat)
-      , vec(vec) {
-  }
+  lezSATvec(lezSAT &sat, const std::vector<int> &vec) : sat(sat), vec(vec) {}
 
-  ezSATvec operator~() {
-    return ezSATvec(sat, sat.vec_not(vec));
-  }
-  ezSATvec operator-() {
-    return ezSATvec(sat, sat.vec_neg(vec));
-  }
+  lezSATvec operator~() { return lezSATvec(sat, sat.vec_not(vec)); }
+  lezSATvec operator-() { return lezSATvec(sat, sat.vec_neg(vec)); }
 
-  ezSATvec operator&(const ezSATvec &other) {
-    return ezSATvec(sat, sat.vec_and(vec, other.vec));
-  }
-  ezSATvec operator|(const ezSATvec &other) {
-    return ezSATvec(sat, sat.vec_or(vec, other.vec));
-  }
-  ezSATvec operator^(const ezSATvec &other) {
-    return ezSATvec(sat, sat.vec_xor(vec, other.vec));
-  }
+  lezSATvec operator&(const lezSATvec &other) { return lezSATvec(sat, sat.vec_and(vec, other.vec)); }
+  lezSATvec operator|(const lezSATvec &other) { return lezSATvec(sat, sat.vec_or(vec, other.vec)); }
+  lezSATvec operator^(const lezSATvec &other) { return lezSATvec(sat, sat.vec_xor(vec, other.vec)); }
 
-  ezSATvec operator+(const ezSATvec &other) {
-    return ezSATvec(sat, sat.vec_add(vec, other.vec));
-  }
-  ezSATvec operator-(const ezSATvec &other) {
-    return ezSATvec(sat, sat.vec_sub(vec, other.vec));
-  }
+  lezSATvec operator+(const lezSATvec &other) { return lezSATvec(sat, sat.vec_add(vec, other.vec)); }
+  lezSATvec operator-(const lezSATvec &other) { return lezSATvec(sat, sat.vec_sub(vec, other.vec)); }
 
-  ezSATbit operator<(const ezSATvec &other) {
-    return ezSATbit(sat, sat.vec_lt_unsigned(vec, other.vec));
-  }
-  ezSATbit operator<=(const ezSATvec &other) {
-    return ezSATbit(sat, sat.vec_le_unsigned(vec, other.vec));
-  }
-  ezSATbit operator==(const ezSATvec &other) {
-    return ezSATbit(sat, sat.vec_eq(vec, other.vec));
-  }
-  ezSATbit operator!=(const ezSATvec &other) {
-    return ezSATbit(sat, sat.vec_ne(vec, other.vec));
-  }
-  ezSATbit operator>=(const ezSATvec &other) {
-    return ezSATbit(sat, sat.vec_ge_unsigned(vec, other.vec));
-  }
-  ezSATbit operator>(const ezSATvec &other) {
-    return ezSATbit(sat, sat.vec_gt_unsigned(vec, other.vec));
-  }
+  lezSATbit operator<(const lezSATvec &other) { return lezSATbit(sat, sat.vec_lt_unsigned(vec, other.vec)); }
+  lezSATbit operator<=(const lezSATvec &other) { return lezSATbit(sat, sat.vec_le_unsigned(vec, other.vec)); }
+  lezSATbit operator==(const lezSATvec &other) { return lezSATbit(sat, sat.vec_eq(vec, other.vec)); }
+  lezSATbit operator!=(const lezSATvec &other) { return lezSATbit(sat, sat.vec_ne(vec, other.vec)); }
+  lezSATbit operator>=(const lezSATvec &other) { return lezSATbit(sat, sat.vec_ge_unsigned(vec, other.vec)); }
+  lezSATbit operator>(const lezSATvec &other) { return lezSATbit(sat, sat.vec_gt_unsigned(vec, other.vec)); }
 
-  ezSATvec operator<<(int shift) {
-    return ezSATvec(sat, sat.vec_shl(vec, shift));
-  }
-  ezSATvec operator>>(int shift) {
-    return ezSATvec(sat, sat.vec_shr(vec, shift));
-  }
+  lezSATvec operator<<(int shift) { return lezSATvec(sat, sat.vec_shl(vec, shift)); }
+  lezSATvec operator>>(int shift) { return lezSATvec(sat, sat.vec_shr(vec, shift)); }
 
-  operator std::vector<int>() const {
-    return vec;
-  }
+  operator std::vector<int>() const { return vec; }
 };
 
 #endif

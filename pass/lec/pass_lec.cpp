@@ -3,8 +3,8 @@
 #include "pass_lec.hpp"
 
 #include "annotate.hpp"
-#include "ezminisat.hpp"
-#include "ezsat.hpp"
+#include "lezminisat.hpp"
+#include "lezsat.hpp"
 #include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
@@ -34,7 +34,9 @@ void Pass_lec::work(Eprp_var &var) {
 void Pass_lec::check_lec(LGraph *g) {
   fmt::print("TODO: implement LEC\n");
   //-----------------------------------------------------------------------------------------------------
-  ezMiniSAT sat;
+  lezMiniSAT sat;
+
+  auto va = sat.vec_var("a",4);
 
   std::vector<int>  modelExpressions;
   std::vector<bool> modelValues;
