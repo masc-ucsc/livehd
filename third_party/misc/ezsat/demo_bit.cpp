@@ -1,5 +1,5 @@
 /*
- *  ezSAT -- A simple and easy to use CNF generator for SAT solvers
+ *  lezSAT -- A simple and easy to use CNF generator for SAT solvers
  *
  *  Copyright (C) 2013  Clifford Wolf <clifford@clifford.at>
  *
@@ -17,22 +17,22 @@
  *
  */
 
-#include "ezminisat.hpp"
 #include <stdio.h>
 
+#include "lezminisat.hpp"
+
 void print_results(bool satisfiable, const std::vector<bool> &modelValues) {
-  if(!satisfiable) {
+  if (!satisfiable) {
     printf("not satisfiable.\n\n");
   } else {
     printf("satisfiable:");
-    for(auto val : modelValues)
-      printf(" %d", val ? 1 : 0);
+    for (auto val : modelValues) printf(" %d", val ? 1 : 0);
     printf("\n\n");
   }
 }
 
 int main() {
-  ezMiniSAT sat;
+  lezMiniSAT sat;
 
   // 3 input AOI-Gate
   // 'pos_active' encodes the condition under which the pullup path of the gate is active

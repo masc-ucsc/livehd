@@ -1,5 +1,5 @@
 /*
- *  ezSAT -- A simple and easy to use CNF generator for SAT solvers
+ *  lezSAT -- A simple and easy to use CNF generator for SAT solvers
  *
  *  Copyright (C) 2013  Clifford Wolf <clifford@clifford.at>
  *
@@ -24,16 +24,17 @@
 #define EZMINISAT_VERBOSITY 0
 //#define EZMINISAT_INCREMENTAL 1
 
-#include "ezsat.hpp"
 #include <time.h>
+
+#include "lezsat.hpp"
 
 // minisat is using limit macros and format macros in their headers that
 // can be the source of some troubles when used from c++11. thefore we
-// don't force ezSAT users to use minisat headers..
+// don't force lezSAT users to use minisat headers..
 
 #include "cryptominisat5/cryptominisat.h"
 
-class ezMiniSAT : public ezSAT {
+class lezMiniSAT : public lezSAT {
 private:
   typedef CMSat::SATSolver Solver;
   Solver *                 minisatSolver;
@@ -45,14 +46,14 @@ private:
 #endif
 
 #ifndef _WIN32
-  static ezMiniSAT *alarmHandlerThis;
+  static lezMiniSAT *alarmHandlerThis;
   static clock_t    alarmHandlerTimeout;
   static void       alarmHandler(int);
 #endif
 
 public:
-  ezMiniSAT();
-  virtual ~ezMiniSAT();
+  lezMiniSAT();
+  virtual ~lezMiniSAT();
   virtual void clear();
 #if EZMINISAT_SIMPSOLVER && EZMINISAT_INCREMENTAL
   virtual void freeze(int id);

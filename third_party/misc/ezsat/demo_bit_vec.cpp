@@ -1,5 +1,5 @@
 /*
- *  ezSAT -- A simple and easy to use CNF generator for SAT solvers
+ *  lezSAT -- A simple and easy to use CNF generator for SAT solvers
  *
  *  Copyright (C) 2013  Clifford Wolf <clifford@clifford.at>
  *
@@ -18,23 +18,24 @@
  */
 
 // Coded by Nilufar Ferdous
-#include "ezminisat.hpp"
 #include <stdio.h>
+
 #include <vector>
+
+#include "lezminisat.hpp"
 #define MY_MACRO(varname) int varname = getCurrentTime();
 void print_results(bool satisfiable, const std::vector<bool> &modelValues) {
-  if(!satisfiable) {
+  if (!satisfiable) {
     printf("not satisfiable.\n\n");
   } else {
     printf("satisfiable:");
-    for(auto val : modelValues)
-      printf(" %d", val ? 1 : 0);
+    for (auto val : modelValues) printf(" %d", val ? 1 : 0);
     printf("\n\n");
   }
 }
 
 int main() {
-  ezMiniSAT sat;
+  lezMiniSAT sat;
 
   std::vector<int>  modelExpressions;
   std::vector<bool> modelValues;
@@ -60,7 +61,7 @@ int main() {
   formula.push_back(sat.OR(A_vec[0], B_vec[0]));
   formula.push_back(sat.XOR(B_vec[0], C_vec[0], A_vec[0]));
   formula.push_back(sat.AND(B_vec[0], C_vec[0], A_vec[0]));
-  int a = sat.expression(ezMiniSAT::OpAnd, formula);
+  int a = sat.expression(lezMiniSAT::OpAnd, formula);
   printf("\nLookUp Expressions: %s\n", sat.to_string(a).c_str());
 
   std::vector<std::vector<int>> formula_arg;

@@ -1,5 +1,5 @@
 /*
- *  ezSAT -- A simple and easy to use CNF generator for SAT solvers
+ *  lezSAT -- A simple and easy to use CNF generator for SAT solvers
  *
  *  Copyright (C) 2013  Clifford Wolf <clifford@clifford.at>
  *
@@ -17,8 +17,9 @@
  *
  */
 
-#include "ezminisat.hpp"
 #include <stdio.h>
+
+#include "lezminisat.hpp"
 
 struct xorshift128 {
   uint32_t x, y, z, w;
@@ -38,17 +39,17 @@ struct xorshift128 {
   }
 };
 
-bool test(ezSAT &sat, int assumption = 0) {
+bool test(lezSAT &sat, int assumption = 0) {
   std::vector<int>  modelExpressions;
   std::vector<bool> modelValues;
 
-  for(int id = 1; id <= sat.numLiterals(); id++)
-    if(sat.bound(id))
+  for (int id = 1; id <= sat.numLiterals(); id++)
+    if (sat.bound(id))
       modelExpressions.push_back(id);
 
-  if(sat.solve(modelExpressions, modelValues, assumption)) {
+  if (sat.solve(modelExpressions, modelValues, assumption)) {
     printf("satisfiable:");
-    for(int i = 0; i < int(modelExpressions.size()); i++)
+    for (int i = 0; i < int(modelExpressions.size()); i++)
       printf(" %s=%d", sat.to_string(modelExpressions[i]).c_str(), int(modelValues[i]));
     printf("\n\n");
     return true;
@@ -63,7 +64,7 @@ bool test(ezSAT &sat, int assumption = 0) {
 void test_simple() {
   printf("==== %s ====\n\n", __PRETTY_FUNCTION__);
 
-  ezMiniSAT sat;
+  lezMiniSAT sat;
   sat.non_incremental();
   sat.assume(sat.OR("A", "B"));
   sat.assume(sat.NOT(sat.AND("A", "B")));
@@ -72,7 +73,7 @@ void test_simple() {
 
 // ------------------------------------------------------------------------------------------------------------
 
-void test_xorshift32_try(ezSAT &sat, uint32_t input_pattern) {
+void test_xorshift32_try(lezSAT &sat, uint32_t input_pattern) {
   uint32_t output_pattern = input_pattern;
   output_pattern ^= output_pattern << 13;
   output_pattern ^= output_pattern >> 17;
@@ -88,12 +89,12 @@ void test_xorshift32_try(ezSAT &sat, uint32_t input_pattern) {
   sat.vec_append_unsigned(forwardAssumptions, sat.vec_var("i", 32), input_pattern);
   sat.vec_append_unsigned(backwardAssumptions, sat.vec_var("o", 32), output_pattern);
 
-  if(!sat.solve(modelExpressions, backwardModel, backwardAssumptions)) {
+  if (!sat.solve(modelExpressions, backwardModel, backwardAssumptions)) {
     printf("backward solving failed!\n");
     abort();
   }
 
-  if(!sat.solve(modelExpressions, forwardModel, forwardAssumptions)) {
+  if (!sat.solve(modelExpressions, forwardModel, forwardAssumptions)) {
     printf("forward solving failed!\n");
     abort();
   }
@@ -108,7 +109,7 @@ void test_xorshift32_try(ezSAT &sat, uint32_t input_pattern) {
          (unsigned int)sat.vec_model_get_unsigned(modelExpressions, backwardModel, sat.vec_var("i", 32)),
          (unsigned int)sat.vec_model_get_unsigned(modelExpressions, backwardModel, sat.vec_var("o", 32)));
 
-  if(forwardModel != backwardModel) {
+  if (forwardModel != backwardModel) {
     printf("forward and backward results are inconsistend!\n");
     abort();
   }
@@ -119,7 +120,7 @@ void test_xorshift32_try(ezSAT &sat, uint32_t input_pattern) {
 void test_xorshift32() {
   printf("==== %s ====\n\n", __PRETTY_FUNCTION__);
 
-  ezMiniSAT sat;
+  lezMiniSAT sat;
   sat.keep_cnf();
 
   xorshift128 rng;
@@ -139,8 +140,8 @@ void test_xorshift32() {
   test_xorshift32_try(sat, rng());
   test_xorshift32_try(sat, rng());
 
-  //sat.printDIMACS(stdout, true);
-  //printf("\n");
+  // sat.printDIMACS(stdout, true);
+  // printf("\n");
 }
 
 // ------------------------------------------------------------------------------------------------------------
@@ -148,7 +149,7 @@ void test_xorshift32() {
 #define CHECK(_expr1, _expr2) check(#_expr1, _expr1, #_expr2, _expr2)
 
 void check(const char *expr1_str, bool expr1, const char *expr2_str, bool expr2) {
-  if(expr1 == expr2) {
+  if (expr1 == expr2) {
     printf("[ %s ] == [ %s ] .. ok (%s == %s)\n", expr1_str, expr2_str, expr1 ? "true" : "false", expr2 ? "true" : "false");
   } else {
     printf("[ %s ] != [ %s ] .. ERROR (%s != %s)\n", expr1_str, expr2_str, expr1 ? "true" : "false", expr2 ? "true" : "false");
@@ -156,8 +157,8 @@ void check(const char *expr1_str, bool expr1, const char *expr2_str, bool expr2)
   }
 }
 
-ezMiniSAT sat;
-void test_signed(int8_t a, int8_t b, int8_t c) {
+lezMiniSAT sat;
+void      test_signed(int8_t a, int8_t b, int8_t c) {
   sat.clear();
 
   std::vector<int> av = sat.vec_const_signed(a, 8);
@@ -183,18 +184,18 @@ void test_add_chain() {
     std::vector<int> bv = sat.vec_var(8);
     std::vector<int> cv = sat.vec_var(8);
 
-    auto r1 = sat.vec_add(av, av);
-    auto r2 = sat.vec_add(r1, r1);
-    auto r3 = sat.vec_add(r2, r2);
-    auto r4 = sat.vec_add(r3, r3);
-    auto r5 = sat.vec_add(r4, r4);
-    auto r6 = sat.vec_add(r5, r5);
-    auto r7 = sat.vec_add(r6, r6);
-    auto r8 = sat.vec_add(r7, r7);
-    auto r9 = sat.vec_add(r8, r8);
-    auto r10= sat.vec_add(r9, r9);
+    auto r1  = sat.vec_add(av, av);
+    auto r2  = sat.vec_add(r1, r1);
+    auto r3  = sat.vec_add(r2, r2);
+    auto r4  = sat.vec_add(r3, r3);
+    auto r5  = sat.vec_add(r4, r4);
+    auto r6  = sat.vec_add(r5, r5);
+    auto r7  = sat.vec_add(r6, r6);
+    auto r8  = sat.vec_add(r7, r7);
+    auto r9  = sat.vec_add(r8, r8);
+    auto r10 = sat.vec_add(r9, r9);
 
-    std::vector<int> zero(r10.size(), ezSAT::CONST_FALSE);
+    std::vector<int> zero(r10.size(), lezSAT::CONST_FALSE);
 
     std::vector<bool> modelValues;
     std::vector<int>  modelExpressions;
@@ -203,7 +204,7 @@ void test_add_chain() {
     auto s = sat.solve(modelExpressions, modelValues);
     if (s) {
       printf("1.satisfiable:");
-      for(int i = 0; i < int(modelValues.size()); i++)
+      for (int i = 0; i < int(modelValues.size()); i++)
         printf(" %s=%d", sat.to_string(modelExpressions[i]).c_str(), int(modelValues[i]));
       printf("\n\n");
     } else {
@@ -213,9 +214,9 @@ void test_add_chain() {
 
   {
     sat.clear();
-    std::vector<int> av = sat.vec_var(8);
-    auto res = sat.vec_sub(av, av);
-    std::vector<int> zero(res.size(), ezSAT::CONST_FALSE);
+    std::vector<int> av  = sat.vec_var(8);
+    auto             res = sat.vec_sub(av, av);
+    std::vector<int> zero(res.size(), lezSAT::CONST_FALSE);
 
     std::vector<bool> modelValues;
     std::vector<int>  modelExpressions;
@@ -229,13 +230,12 @@ void test_add_chain() {
       printf("1.not satisfiable.\n\n");
     }
   }
-
 }
 
 void test_unsigned(uint8_t a, uint8_t b, uint8_t c) {
   sat.clear();
 
-  if(b < c)
+  if (b < c)
     b ^= c, c ^= b, b ^= c;
 
   std::vector<int> av = sat.vec_const_unsigned(a, 8);
@@ -254,11 +254,11 @@ void test_unsigned(uint8_t a, uint8_t b, uint8_t c) {
 }
 
 void test_count(uint32_t x) {
-  ezMiniSAT sat;
+  lezMiniSAT sat;
 
   int count = 0;
-  for(int i = 0; i < 32; i++)
-    if(((x >> i) & 1) != 0)
+  for (int i = 0; i < 32; i++)
+    if (((x >> i) & 1) != 0)
       count++;
 
   printf("Testing bit counting using x=0x%08x (%d set bits) .. ", x, count);
@@ -268,12 +268,12 @@ void test_count(uint32_t x) {
   std::vector<int> cv6 = sat.vec_const_unsigned(count, 6);
   std::vector<int> cv4 = sat.vec_const_unsigned(count <= 15 ? count : 15, 4);
 
-  if(cv6 != sat.vec_count(v, 6, false)) {
+  if (cv6 != sat.vec_count(v, 6, false)) {
     fprintf(stderr, "FAILED 6bit-no-clipping test!\n");
     abort();
   }
 
-  if(cv4 != sat.vec_count(v, 4, true)) {
+  if (cv4 != sat.vec_count(v, 4, true)) {
     fprintf(stderr, "FAILED 4bit-clipping test!\n");
     abort();
   }
@@ -286,16 +286,13 @@ void test_arith() {
 
   xorshift128 rng;
 
-  for(int i = 0; i < 100; i++)
-    test_signed(rng() % 19 - 10, rng() % 19 - 10, rng() % 19 - 10);
+  for (int i = 0; i < 100; i++) test_signed(rng() % 19 - 10, rng() % 19 - 10, rng() % 19 - 10);
 
-  for(int i = 0; i < 100; i++)
-    test_unsigned(rng() % 10, rng() % 10, rng() % 10);
+  for (int i = 0; i < 100; i++) test_unsigned(rng() % 10, rng() % 10, rng() % 10);
 
   test_count(0x00000000);
   test_count(0xffffffff);
-  for(int i = 0; i < 30; i++)
-    test_count(rng());
+  for (int i = 0; i < 30; i++) test_count(rng());
 
   printf("\n");
 }
@@ -304,7 +301,7 @@ void test_arith() {
 
 void test_onehot() {
   printf("==== %s ====\n\n", __PRETTY_FUNCTION__);
-  ezMiniSAT ez;
+  lezMiniSAT ez;
 
   int a = ez.frozen_literal("a");
   int b = ez.frozen_literal("b");
@@ -320,25 +317,25 @@ void test_onehot() {
   ez.assume(ez.onehot(abcd));
 
   int solution_counter = 0;
-  while(1) {
+  while (1) {
     std::vector<bool> modelValues;
     bool              ok = ez.solve(abcd, modelValues);
 
-    if(!ok)
+    if (!ok)
       break;
 
     printf("Solution: %d %d %d %d\n", int(modelValues[0]), int(modelValues[1]), int(modelValues[2]), int(modelValues[3]));
 
     int              count_hot = 0;
     std::vector<int> sol;
-    for(int i = 0; i < 4; i++) {
-      if(modelValues[i])
+    for (int i = 0; i < 4; i++) {
+      if (modelValues[i])
         count_hot++;
       sol.push_back(modelValues[i] ? abcd[i] : ez.NOT(abcd[i]));
     }
-    ez.assume(ez.NOT(ez.expression(ezSAT::OpAnd, sol)));
+    ez.assume(ez.NOT(ez.expression(lezSAT::OpAnd, sol)));
 
-    if(count_hot != 1) {
+    if (count_hot != 1) {
       fprintf(stderr, "Wrong number of hot bits!\n");
       abort();
     }
@@ -346,7 +343,7 @@ void test_onehot() {
     solution_counter++;
   }
 
-  if(solution_counter != 4) {
+  if (solution_counter != 4) {
     fprintf(stderr, "Wrong number of one-hot solutions!\n");
     abort();
   }
@@ -356,7 +353,7 @@ void test_onehot() {
 
 void test_manyhot() {
   printf("==== %s ====\n\n", __PRETTY_FUNCTION__);
-  ezMiniSAT ez;
+  lezMiniSAT ez;
 
   int a = ez.frozen_literal("a");
   int b = ez.frozen_literal("b");
@@ -372,25 +369,25 @@ void test_manyhot() {
   ez.assume(ez.manyhot(abcd, 1, 2));
 
   int solution_counter = 0;
-  while(1) {
+  while (1) {
     std::vector<bool> modelValues;
     bool              ok = ez.solve(abcd, modelValues);
 
-    if(!ok)
+    if (!ok)
       break;
 
     printf("Solution: %d %d %d %d\n", int(modelValues[0]), int(modelValues[1]), int(modelValues[2]), int(modelValues[3]));
 
     int              count_hot = 0;
     std::vector<int> sol;
-    for(int i = 0; i < 4; i++) {
-      if(modelValues[i])
+    for (int i = 0; i < 4; i++) {
+      if (modelValues[i])
         count_hot++;
       sol.push_back(modelValues[i] ? abcd[i] : ez.NOT(abcd[i]));
     }
-    ez.assume(ez.NOT(ez.expression(ezSAT::OpAnd, sol)));
+    ez.assume(ez.NOT(ez.expression(lezSAT::OpAnd, sol)));
 
-    if(count_hot != 1 && count_hot != 2) {
+    if (count_hot != 1 && count_hot != 2) {
       fprintf(stderr, "Wrong number of hot bits!\n");
       abort();
     }
@@ -398,7 +395,7 @@ void test_manyhot() {
     solution_counter++;
   }
 
-  if(solution_counter != 4 + 4 * 3 / 2) {
+  if (solution_counter != 4 + 4 * 3 / 2) {
     fprintf(stderr, "Wrong number of one-hot solutions!\n");
     abort();
   }
@@ -408,7 +405,7 @@ void test_manyhot() {
 
 void test_ordered() {
   printf("==== %s ====\n\n", __PRETTY_FUNCTION__);
-  ezMiniSAT ez;
+  lezMiniSAT ez;
 
   int a = ez.frozen_literal("a");
   int b = ez.frozen_literal("b");
@@ -432,7 +429,7 @@ void test_ordered() {
 
   int solution_counter = 0;
 
-  while(1) {
+  while (1) {
     std::vector<int>  modelVariables;
     std::vector<bool> modelValues;
 
@@ -446,21 +443,26 @@ void test_ordered() {
 
     bool ok = ez.solve(modelVariables, modelValues);
 
-    if(!ok)
+    if (!ok)
       break;
 
-    printf("Solution: %d %d %d | %d %d %d\n", int(modelValues[0]), int(modelValues[1]), int(modelValues[2]), int(modelValues[3]),
-           int(modelValues[4]), int(modelValues[5]));
+    printf("Solution: %d %d %d | %d %d %d\n",
+           int(modelValues[0]),
+           int(modelValues[1]),
+           int(modelValues[2]),
+           int(modelValues[3]),
+           int(modelValues[4]),
+           int(modelValues[5]));
 
     std::vector<int> sol;
-    for(size_t i = 0; i < modelVariables.size(); i++)
+    for (size_t i = 0; i < modelVariables.size(); i++)
       sol.push_back(modelValues[i] ? modelVariables[i] : ez.NOT(modelVariables[i]));
-    ez.assume(ez.NOT(ez.expression(ezSAT::OpAnd, sol)));
+    ez.assume(ez.NOT(ez.expression(lezSAT::OpAnd, sol)));
 
     solution_counter++;
   }
 
-  if(solution_counter != 8 + 7 + 6 + 5 + 4 + 3 + 2 + 1) {
+  if (solution_counter != 8 + 7 + 6 + 5 + 4 + 3 + 2 + 1) {
     fprintf(stderr, "Wrong number of solutions!\n");
     abort();
   }

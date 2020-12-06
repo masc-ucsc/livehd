@@ -1,5 +1,5 @@
 /*
- *  ezSAT -- A simple and easy to use CNF generator for SAT solvers
+ *  lezSAT -- A simple and easy to use CNF generator for SAT solvers
  *
  *  Copyright (C) 2013  Clifford Wolf <clifford@clifford.at>
  *
@@ -17,8 +17,9 @@
  *
  */
 
-#include "ezminisat.hpp"
 #include <cassert>
+
+#include "lezminisat.hpp"
 
 #define INIT_X 123456789
 #define INIT_Y 362436069
@@ -39,7 +40,7 @@ uint32_t xorshift128() {
 }
 
 void test_cmp(uint32_t a, uint32_t b) {
-  ezMiniSAT sat;
+  lezMiniSAT sat;
 
   printf("A = %10u (%10d)\n", a, int32_t(a));
   printf("B = %10u (%10d)\n", b, int32_t(b));
@@ -51,10 +52,10 @@ void test_cmp(uint32_t a, uint32_t b) {
   sat.vec_set_unsigned(va, a);
   sat.vec_set_unsigned(vb, b);
 
-#define MONITOR_VARS                                                                                                           \
-  X(carry)                                                                                                                     \
-  X(overflow) X(sign) X(zero) X(lt_signed) X(le_signed) X(ge_signed) X(gt_signed) X(lt_unsigned) X(le_unsigned) X(ge_unsigned) \
-      X(gt_unsigned)
+#define MONITOR_VARS \
+  X(carry)           \
+  X(overflow)        \
+  X(sign) X(zero) X(lt_signed) X(le_signed) X(ge_signed) X(gt_signed) X(lt_unsigned) X(le_unsigned) X(ge_unsigned) X(gt_unsigned)
 
 #define X(_n) \
   int  _n;    \
@@ -108,17 +109,19 @@ void test_cmp(uint32_t a, uint32_t b) {
   sat.vec_append(modelExpressions, sub_ab);
   sat.vec_append(modelExpressions, sub_ba);
 
-  if(!sat.solve(modelExpressions, modelValues)) {
+  if (!sat.solve(modelExpressions, modelValues)) {
     fprintf(stderr, "SAT solver failed to find a model!\n");
     abort();
   }
 
   bool found_error = false;
 
-  for(size_t i = 0; i < modelMaster.size(); i++) {
-    if(modelMaster.at(i) != int(modelValues.at(i)))
+  for (size_t i = 0; i < modelMaster.size(); i++) {
+    if (modelMaster.at(i) != int(modelValues.at(i)))
       found_error = true;
-    printf("%-20s %d%s\n", modelNames.at(i).c_str(), int(modelValues.at(i)),
+    printf("%-20s %d%s\n",
+           modelNames.at(i).c_str(),
+           int(modelValues.at(i)),
            modelMaster.at(i) != modelValues.at(i) ? "   !!!" : "");
   }
   printf("\n");
@@ -132,17 +135,17 @@ void test_cmp(uint32_t a, uint32_t b) {
   printf("%-20s %10u %10u%s\n", "result(b-a)", sub_ba_value, b - a, sub_ba_value != b - a ? "   !!!" : "");
   printf("\n");
 
-  if(found_error || add_ab_value != a + b || sub_ab_value != a - b || sub_ba_value != b - a)
+  if (found_error || add_ab_value != a + b || sub_ab_value != a - b || sub_ba_value != b - a)
     abort();
 }
 
 int main() {
   printf("\n");
-  for(int i = 0; i < 1024; i++) {
+  for (int i = 0; i < 1024; i++) {
     printf("************** %d **************\n\n", i);
     uint32_t a = xorshift128();
     uint32_t b = xorshift128();
-    if(xorshift128() % 16 == 0)
+    if (xorshift128() % 16 == 0)
       a = b;
     test_cmp(a, b);
   }
