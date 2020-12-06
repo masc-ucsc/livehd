@@ -1,18 +1,35 @@
 #!/bin/bash
-#WARNING! This is a experimental and hardcoded script for Sheng-Hong environment only
+# WARNING! To execute this script, you will have to clone Sheng-Hong's Chisel patterns at your home directory
+# git clone https://github.com/swang203/chisel3
+# also prepare the upstream firrrl at home directory
+# git clone https://github.com/chipsalliance/firrtl
+
+
 
 pts_todo='Xor10k'
-pts='GCD_3bits GCD Coverage Shifts AddNot Decrementer PlusAnd RegXor Trivial TrivialArith Test1 Test2 Test3 Test4 Test5 
-     Test6 SimpleBitOps Register RegisterSimple Flop ICache Ops Rob RocketCore
-     BundleConnect MemoryController PlusAnd SubModule RWSmem Smem Smem_simple Blackbox Blackbox2 FPU HwachaSequencer '
-
+pts='GCD_3bits GCD Coverage Shifts AddNot Decrementer PlusAnd RegXor Trivial TrivialArith Test1 Test2 Test3 
+     Test4 Test5 Test6 SimpleBitOps Register RegisterSimple Flop ICache Ops Rob RocketCore HwachaSequencer 
+     BundleConnect MemoryController PlusAnd SubModule RWSmem Smem Smem_simple Blackbox Blackbox2 FPU '
 
 
 CHISEL_PATH=~/chisel3
+FIRRTL_PATH=~/firrtl
 CHIRRTL_SRC_PATH=~/chisel3/chisel_chirrtl
 CHISEL_SRC_PATH=~/chisel3/src/main/scala/design
 FIRRTL_EXE=~/firrtl/utils/bin/firrtl
 LIVEHD_FIRRTL_PATH=~/livehd/inou/firrtl/tests
+
+
+
+if [ ! -d $CHISEL_PATH ]; then
+  echo "ERROR: no chisel/firrtl patterns not ready, do this first: git clone https://github.com/swang203/chisel3"
+  exit 1
+elif [ ! -d $FIRRTL_PATH ]; then
+  echo "ERROR: firrtl compiler environment not ready, do this first: git clone https://github.com/chipsalliance/firrtl"
+  exit 1
+fi
+
+
 
 cd $CHISEL_PATH
 for pt in $pts
