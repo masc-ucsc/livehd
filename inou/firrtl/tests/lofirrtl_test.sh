@@ -1,10 +1,14 @@
 #!/bin/bash
 rm -rf ./lgdb
+FIRRTL_LEVEL='lo'
 
+pts_need_chisel_source_code='NotAnd'
 pts_todo='MemoryController Rob ICache HwachaSequencer'
-pts_handle_1st='regex GCD Test3 coverage'
+pts_long_lec='GCD'
+pts_handle_1st='regex Test3 coverage'
 
-pts='Decrementer RegXor Trivial TrivialAdd AddNot NotAnd Test1 Test2 BundleCombiner Flop Tail RegisterSimple Register TrivialArith '
+pts='Decrementer RegXor TrivialAdd Test1 Test2 NotAnd
+     BundleCombiner Flop Tail RegisterSimple Register TrivialArith GCD_3bits'
 
 pts_hier='FinalVal2Test'
 pts_hier2='FinalValTest'
@@ -13,7 +17,8 @@ pts_hier4='BundleConnect'
 
 pts_hier='FPU'
 pts_hier9='RocketCore'
-pts='TrivialArith'
+
+# pts='Trivial AddNot'
 
 #SimpleBitOps Ops -- parity and mod op not in lnast_tolg
 #HwachaSequencer -- printf, pad, stop
@@ -37,7 +42,7 @@ if [ ! -f $LGSHELL ]; then
     fi
 fi
 
-lofirrtl_test() {
+firrtl_test() {
   echo ""
   echo ""
   echo ""
@@ -48,15 +53,15 @@ lofirrtl_test() {
 
   for pt in $1
   do
-    if [ ! -f ${PATTERN_PATH}/${pt}.lo.pb ]; then
-        echo "ERROR: could not find ${pt}.lo.pb in ${PATTERN_PATH}"
+    if [ ! -f ${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb ]; then
+        echo "ERROR: could not find ${pt}.${FIRRTL_LEVEL}.pb in ${PATTERN_PATH}"
         exit 1
     fi
 
-    ${LGSHELL} "inou.firrtl.tolnast files:${PATTERN_PATH}/${pt}.lo.pb |> pass.compiler gviz:true top:${pt}"
+    ${LGSHELL} "inou.firrtl.tolnast files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb |> pass.compiler gviz:true top:${pt}"
     ret_val=$?
     if [ $ret_val -ne 0 ]; then
-      echo "ERROR: could not compile with pattern: ${pt}.lo.pb!"
+      echo "ERROR: could not compile with pattern: ${pt}.${FIRRTL_LEVEL}.pb!"
       exit $ret_val
     fi
   done #end of for
@@ -77,7 +82,7 @@ lofirrtl_test() {
         echo "Successfully generate Verilog: ${pt}.v"
         rm -f  yosys_script.*
     else
-        echo "ERROR: Pyrope compiler failed: verilog generation, testcase: ${PATTERN_PATH}/${pt}.lo.pb"
+        echo "ERROR: Pyrope compiler failed: verilog generation, testcase: ${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb"
         exit 1
     fi
   done
@@ -109,14 +114,14 @@ lofirrtl_test() {
     # rm -f yosys.*
 }
 
-lofirrtl_test "$pts"
+firrtl_test "$pts"
 # If testing a module with submodules in it, put the name of the
 # top module as the first argument then list all the submodules
 # in the entire design as the second argument, and "hier" as the
 # third agument.
-# lofirrtl_test "$pts_hier"  "Sum" "hier"
-# lofirrtl_test "$pts_hier2" "Sum" "hier"
-# lofirrtl_test "$pts_hier3" "SubModuleSubMod" "hier"
-# lofirrtl_test "$pts_hier4" "BundleConnectSubMod" "hier"
+# firrtl_test "$pts_hier"  "Sum" "hier"
+# firrtl_test "$pts_hier2" "Sum" "hier"
+# firrtl_test "$pts_hier3" "SubModuleSubMod" "hier"
+# firrtl_test "$pts_hier4" "BundleConnectSubMod" "hier"
 
-# lofirrtl_test "$pts_hier9" "IBuf CSRFile BreakpointUnit ALU MulDiv RVCExpander" "hier"
+# firrtl_test "$pts_hier9" "IBuf CSRFile BreakpointUnit ALU MulDiv RVCExpander" "hier"
