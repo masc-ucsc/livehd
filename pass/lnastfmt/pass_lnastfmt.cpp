@@ -142,9 +142,9 @@ void Pass_lnastfmt::parse_ln(std::shared_ptr<Lnast> ln, Eprp_var& var, std::stri
     }
   }
 
-  fmt::print("****lnast fmted:  \n");
-  lnastfmted->dump();
-  fmt::print("\n:lnast fmted****\n");
+  //fmt::print("****lnast fmted:  \n");
+  //lnastfmted->dump();
+  //fmt::print("\n:lnast fmted****\n");
   //var.replace(ln, std::move(lnastfmted));//just replace the pointer
   var.add(std::move(lnastfmted));
 }
