@@ -11,8 +11,8 @@ module Test5(
   output [3:0]  io_out3,
   output [15:0] io_out4
 );
-  wire [63:0] _T = $signed(io_inp1) * $signed(io_inp2); // @[Test5.scala 28:21]
-  wire [51:0] _GEN_0 = _T[63:12]; // @[Test5.scala 28:10]
+  wire [63:0] _io_out_T = $signed(io_inp1) * $signed(io_inp2); // @[Test5.scala 28:21]
+  wire [51:0] _GEN_0 = _io_out_T[63:12]; // @[Test5.scala 28:10]
   assign io_out = _GEN_0[31:0]; // @[Test5.scala 28:10]
   assign io_out20 = 4'h5; // @[Test5.scala 30:12]
   assign io_out21 = 4'sh5; // @[Test5.scala 31:12]

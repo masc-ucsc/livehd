@@ -2,32 +2,63 @@
 #WARNING! This is a experimental and hardcoded script for Sheng-Hong environment only
 
 pts_todo='Xor10k'
-pts='GCD_3bits GCD Trivial TrivialArith Test1 Test2 Test3 Test4 Test5 Test6 SimpleBitOps Register RegisterSimple Flop
-     BundleConnect MemoryController PlusAnd SubModule RWSmem Smem Blackbox Blackbox2'
-# pts='GCD_3bits'
+pts='GCD_3bits GCD Coverage Shifts AddNot Decrementer PlusAnd RegXor Trivial TrivialArith Test1 Test2 Test3 Test4 Test5 
+     Test6 SimpleBitOps Register RegisterSimple Flop ICache Ops Rob RocketCore
+     BundleConnect MemoryController PlusAnd SubModule RWSmem Smem Smem_simple Blackbox Blackbox2 FPU HwachaSequencer '
 
-CHISEL_PATH=~/chisel/
-CHISEL_RESULT_PATH=~/chisel/results/
-CHISEL_SRC_PATH=~/chisel/src/main/scala/design/
+
+
+CHISEL_PATH=~/chisel3
+CHIRRTL_SRC_PATH=~/chisel3/chisel_chirrtl
+CHISEL_SRC_PATH=~/chisel3/src/main/scala/design
 FIRRTL_EXE=~/firrtl/utils/bin/firrtl
 LIVEHD_FIRRTL_PATH=~/livehd/inou/firrtl/tests
 
 cd $CHISEL_PATH
 for pt in $pts
 do
-  sbt "runMain chisel3.stage.ChiselMain --module design.${pt}"  
+  echo "-------- Pattern: ${pt} ----------------"
+  mkdir -p $CHIRRTL_SRC_PATH/${pt}
 
-  $FIRRTL_EXE -i ${pt}.fir -X verilog
+  # two paths as sometimes you don't have a scala source code ... 
+  if [ -f $CHISEL_SRC_PATH/${pt}.scala ]; then
+    echo "-------- Compile from Chisel source code --------"
+    sbt "runMain chisel3.stage.ChiselMain --module design.${pt}"  
+    cp -f $CHISEL_SRC_PATH/${pt}.scala $CHIRRTL_SRC_PATH/${pt}
+    mv -f ${pt}.fir $CHIRRTL_SRC_PATH/${pt}
+    rm -f ${pt}.anno.json
+  else
+    if [ ! -f $CHIRRTL_SRC_PATH/${pt}/${pt}.fir ]; then
+      echo "ERROR: could not find ${pt}.fir in ${CHIRRTL_SRC_PATH} or ${pt}.scala in ${CHISEL_SRC_PATH}"
+      exit 1
+    fi
+    echo "-------- No Chisel source code, compile from Chirrtl -------"
+  fi
+
+  $FIRRTL_EXE -i ${CHIRRTL_SRC_PATH}/${pt}/${pt}.fir -X verilog
+  $FIRRTL_EXE -i ${CHIRRTL_SRC_PATH}/${pt}/${pt}.fir -X low
+  $FIRRTL_EXE -i ${CHIRRTL_SRC_PATH}/${pt}/${pt}.fir -X none --custom-transforms firrtl.transforms.WriteLowPB
   # $FIRRTL_EXE -i ${pt}.fir -X high
-  $FIRRTL_EXE -i ${pt}.fir -X low
   # $FIRRTL_EXE -i ${pt}.fir -X none --custom-transforms firrtl.transforms.WriteChPB
   # $FIRRTL_EXE -i ${pt}.fir -X none --custom-transforms firrtl.transforms.WriteHighPB
-  $FIRRTL_EXE -i ${pt}.fir -X none --custom-transforms firrtl.transforms.WriteLowPB
 
-  mkdir -p $CHISEL_RESULT_PATH${pt}
-  cp -f $CHISEL_SRC_PATH${pt}.scala $LIVEHD_FIRRTL_PATH/chisel
-  mv -f ${pt}*.fir $LIVEHD_FIRRTL_PATH/firrtl
-  mv -f ${pt}*.pb  $LIVEHD_FIRRTL_PATH/proto
-  mv -f ${pt}.v   $LIVEHD_FIRRTL_PATH/verilog_gld/${pt}.gld.v
+
+  if [ ! -f $CHISEL_PATH/${pt}.fir ]; then
+    echo "ERROR: Lower-level firrl ${pt}.fir is no generated"
+    exit 1
+  elif [ ! -f $CHISEL_PATH/${pt}*.pb ]; then
+    echo "ERROR: Protobuf ${pt}.pb is no generated"
+    exit 1
+  elif [ ! -f $CHISEL_PATH/${pt}.v ]; then
+    echo "ERROR: Verilog ${pt}.v is no generated"
+    exit 1
+  fi
+
+
+  mv -f ${pt}.lo.fir $LIVEHD_FIRRTL_PATH/firrtl
+  mv -f ${pt}.lo.pb  $LIVEHD_FIRRTL_PATH/proto
+  mv -f ${pt}.v      $LIVEHD_FIRRTL_PATH/verilog_gld/${pt}.gld.v
+  rm -f ${pt}.fir 
 done
 
+echo "-------- finish --------"

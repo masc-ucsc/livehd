@@ -13,20 +13,20 @@ module GCD_3bits(
 `endif // RANDOMIZE_REG_INIT
   reg [2:0] x; // @[GCD_3bits.scala 21:15]
   reg [2:0] y; // @[GCD_3bits.scala 22:15]
-  wire [2:0] _T_2 = x - y; // @[GCD_3bits.scala 24:24]
-  wire [2:0] _T_4 = y - x; // @[GCD_3bits.scala 25:25]
+  wire [2:0] _x_T_1 = x - y; // @[GCD_3bits.scala 24:24]
+  wire [2:0] _y_T_1 = y - x; // @[GCD_3bits.scala 25:25]
   assign io_outputGCD = x; // @[GCD_3bits.scala 32:16]
   assign io_outputValid = y == 3'h0; // @[GCD_3bits.scala 33:23]
   always @(posedge clock) begin
     if (io_loadingValues) begin // @[GCD_3bits.scala 27:26]
       x <= io_value1; // @[GCD_3bits.scala 28:7]
     end else if (x > y) begin // @[GCD_3bits.scala 24:15]
-      x <= _T_2; // @[GCD_3bits.scala 24:19]
+      x <= _x_T_1; // @[GCD_3bits.scala 24:19]
     end
     if (io_loadingValues) begin // @[GCD_3bits.scala 27:26]
       y <= io_value2; // @[GCD_3bits.scala 29:7]
     end else if (!(x > y)) begin // @[GCD_3bits.scala 24:15]
-      y <= _T_4; // @[GCD_3bits.scala 25:20]
+      y <= _y_T_1; // @[GCD_3bits.scala 25:20]
     end
   end
 // Register and memory initialization

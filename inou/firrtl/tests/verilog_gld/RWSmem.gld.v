@@ -15,29 +15,29 @@ module RWSmem(
   reg [31:0] _RAND_2;
 `endif // RANDOMIZE_REG_INIT
   reg [31:0] mem [0:1023]; // @[RWSmem.scala 15:24]
-  wire [31:0] mem__T_r_data; // @[RWSmem.scala 15:24]
-  wire [9:0] mem__T_r_addr; // @[RWSmem.scala 15:24]
-  wire [31:0] mem__T_w_data; // @[RWSmem.scala 15:24]
-  wire [9:0] mem__T_w_addr; // @[RWSmem.scala 15:24]
-  wire  mem__T_w_mask; // @[RWSmem.scala 15:24]
-  wire  mem__T_w_en; // @[RWSmem.scala 15:24]
-  reg  mem__T_r_en_pipe_0;
-  reg [9:0] mem__T_r_addr_pipe_0;
+  wire [31:0] mem_rdwrPort_r_data; // @[RWSmem.scala 15:24]
+  wire [9:0] mem_rdwrPort_r_addr; // @[RWSmem.scala 15:24]
+  wire [31:0] mem_rdwrPort_w_data; // @[RWSmem.scala 15:24]
+  wire [9:0] mem_rdwrPort_w_addr; // @[RWSmem.scala 15:24]
+  wire  mem_rdwrPort_w_mask; // @[RWSmem.scala 15:24]
+  wire  mem_rdwrPort_w_en; // @[RWSmem.scala 15:24]
+  reg  mem_rdwrPort_r_en_pipe_0;
+  reg [9:0] mem_rdwrPort_r_addr_pipe_0;
   wire  _GEN_8 = io_enable & io_write; // @[RWSmem.scala 17:19 RWSmem.scala 15:24]
-  assign mem__T_r_addr = mem__T_r_addr_pipe_0;
-  assign mem__T_r_data = mem[mem__T_r_addr]; // @[RWSmem.scala 15:24]
-  assign mem__T_w_data = io_dataIn;
-  assign mem__T_w_addr = io_addr;
-  assign mem__T_w_mask = io_write;
-  assign mem__T_w_en = io_enable & _GEN_8;
-  assign io_dataOut = mem__T_r_data; // @[RWSmem.scala 19:21 RWSmem.scala 20:34]
+  assign mem_rdwrPort_r_addr = mem_rdwrPort_r_addr_pipe_0;
+  assign mem_rdwrPort_r_data = mem[mem_rdwrPort_r_addr]; // @[RWSmem.scala 15:24]
+  assign mem_rdwrPort_w_data = io_dataIn;
+  assign mem_rdwrPort_w_addr = io_addr;
+  assign mem_rdwrPort_w_mask = io_write;
+  assign mem_rdwrPort_w_en = io_enable & _GEN_8;
+  assign io_dataOut = mem_rdwrPort_r_data; // @[RWSmem.scala 19:21 RWSmem.scala 20:34]
   always @(posedge clock) begin
-    if(mem__T_w_en & mem__T_w_mask) begin
-      mem[mem__T_w_addr] <= mem__T_w_data; // @[RWSmem.scala 15:24]
+    if(mem_rdwrPort_w_en & mem_rdwrPort_w_mask) begin
+      mem[mem_rdwrPort_w_addr] <= mem_rdwrPort_w_data; // @[RWSmem.scala 15:24]
     end
-    mem__T_r_en_pipe_0 <= io_enable & ~_GEN_8;
+    mem_rdwrPort_r_en_pipe_0 <= io_enable & ~_GEN_8;
     if (io_enable & ~_GEN_8) begin
-      mem__T_r_addr_pipe_0 <= io_addr;
+      mem_rdwrPort_r_addr_pipe_0 <= io_addr;
     end
   end
 // Register and memory initialization
@@ -82,9 +82,9 @@ initial begin
 `endif // RANDOMIZE_MEM_INIT
 `ifdef RANDOMIZE_REG_INIT
   _RAND_1 = {1{`RANDOM}};
-  mem__T_r_en_pipe_0 = _RAND_1[0:0];
+  mem_rdwrPort_r_en_pipe_0 = _RAND_1[0:0];
   _RAND_2 = {1{`RANDOM}};
-  mem__T_r_addr_pipe_0 = _RAND_2[9:0];
+  mem_rdwrPort_r_addr_pipe_0 = _RAND_2[9:0];
 `endif // RANDOMIZE_REG_INIT
   `endif // RANDOMIZE
 end // initial

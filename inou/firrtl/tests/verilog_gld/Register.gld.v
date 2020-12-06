@@ -9,13 +9,13 @@ module Register(
   reg [31:0] _RAND_0;
 `endif // RANDOMIZE_REG_INIT
   reg [15:0] x; // @[Register.scala 19:15]
-  wire [15:0] _T_2 = x - 16'h1; // @[Register.scala 25:14]
+  wire [15:0] _x_T_1 = x - 16'h1; // @[Register.scala 25:14]
   assign io_outVal = x; // @[Register.scala 29:13]
   always @(posedge clock) begin
     if (io_loadingValues) begin // @[Register.scala 21:27]
       x <= io_inVal; // @[Register.scala 22:7]
     end else if (x > 16'h0) begin // @[Register.scala 24:20]
-      x <= _T_2; // @[Register.scala 25:9]
+      x <= _x_T_1; // @[Register.scala 25:9]
     end
   end
 // Register and memory initialization
