@@ -29,8 +29,8 @@ cc_library(
 sh_library(
     name = "scripts",
     srcs = [
-        "lgyosys",
         "lgcheck",
+        ":yosys2",
     ],
     visibility = ["//visibility:public"],
 )

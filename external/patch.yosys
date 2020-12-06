@@ -1,0 +1,39 @@
+--- passes/equiv/equiv_make.cc	2020-09-25 20:47:28.789020647 -0700
++++ passes/equiv/equiv_make.cc	2020-12-06 13:24:43.418557287 -0800
+@@ -224,11 +224,11 @@
+ 
+ 				rd_signal_map.add(assign_map(gate_wire), enc_wire);
+ 				gate_wire = dec_wire;
+ 			}
+ 
+-			if (gold_wire == nullptr || gate_wire == nullptr || gold_wire->width != gate_wire->width) {
++			if (gold_wire == nullptr || gate_wire == nullptr || gold_wire->width < gate_wire->width) {
+ 				if (gold_wire && gold_wire->port_id)
+ 					log_error("Can't match gold port `%s' to a gate port.\n", log_id(gold_wire));
+ 				if (gate_wire && gate_wire->port_id)
+ 					log_error("Can't match gate port `%s' to a gold port.\n", log_id(gate_wire));
+ 				continue;
+@@ -236,10 +236,23 @@
+ 
+ 			log("Presumably equivalent wires: %s (%s), %s (%s) -> %s\n",
+ 					log_id(gold_wire), log_signal(assign_map(gold_wire)),
+ 					log_id(gate_wire), log_signal(assign_map(gate_wire)), log_id(id));
+ 
++      if (gold_wire->width != gate_wire->width) {
++        char name[gate_wire->name.str().size()+32];
++        sprintf(name, "%s_sext", gate_wire->name.c_str());
++
++        auto w2 = RTLIL::SigSpec(gate_wire);
++        w2.extend_u0(gold_wire->width, false);  // zero extend
++
++        RTLIL::Wire *wire =  equiv_mod->addWire(name, gold_wire->width);
++        equiv_mod->connect(wire, w2);
++
++        gate_wire = wire;
++      }
++
+ 			if (gold_wire->port_output || gate_wire->port_output)
+ 			{
+ 				Wire *wire = equiv_mod->addWire(id, gold_wire->width);
+ 				wire->port_output = true;
+ 				gold_wire->port_input = false;

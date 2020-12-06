@@ -47,6 +47,7 @@ new_git_repository(
     commit = "de79978372c1953e295fa262444cb0a28a246c5f", # Sep 24, 2020 
     remote = "https://github.com/YosysHQ/yosys.git",
     shallow_since = "1588020530 -0700",
+    patches = ["//external:patch.yosys"],
 )
 new_git_repository(
     name = "mustache",
