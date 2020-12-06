@@ -229,15 +229,29 @@ void Bitwidth::process_sum(Node &node, XEdge_iterator &inp_edges) {
 }
 
 
-void Bitwidth::process_tposs(Node &node, XEdge_iterator &inp_edges) {
-  // FIXME->sh: wrong conclusion!!
-  /* // Tposs (max, min) should only be set once and never be overwritten after it's attr parent being deleted */
-  /* auto it2 = bwmap.find(node.get_driver_pin().get_compact()); */
-  /* if (it2 != bwmap.end()) { */
-  /*   return; */
-  /* } */
-  
+void Bitwidth::process_mult(Node &node, XEdge_iterator &inp_edges) {
+  I(inp_edges.size());  // Dangling sum??? (delete)
 
+  int max_val;
+  int min_val;
+  for (auto e : inp_edges) {
+    auto it = bwmap.find(e.driver.get_compact());
+    if (it != bwmap.end()) {
+      max_val = max_val * it->second.get_max().to_i();
+      min_val = min_val * it->second.get_min().to_i();
+    } else {
+      debug_unconstrained_msg(node, e.driver);
+      GI(hier, false, "Assert! bwmap entry should be ready at final bitwidth pass, entry:{}\n", e.driver.debug_name());
+
+      not_finished = true;
+      return;
+    }
+  }
+  
+  bwmap.insert_or_assign(node.get_driver_pin().get_compact(), Bitwidth_range(Lconst(min_val), Lconst(max_val)));
+}
+
+void Bitwidth::process_tposs(Node &node, XEdge_iterator &inp_edges) {
   Lconst max_val;
   Lconst min_val;
 
@@ -412,10 +426,8 @@ void Bitwidth::process_attr_get(Node &node) {
     new_dpin.connect_sink(out.sink);
   }
 
-  //#ifndef PRESERVE_ATTR_NODE
   if (!hier) // FIXME: once hier del works
     node.del_node();
-  //#endif
 }
 
 // lhs := rhs
@@ -458,7 +470,6 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_dp, Fwd_edge_iterator::Fwd_
     auto mask_dpin  = mask_node.get_driver_pin();
 
     auto bw_lhs_bits = bw_lhs.is_always_positive() ? bw_lhs.get_sbits() - 1 : bw_lhs.get_sbits();
-    /* auto bw_lhs_bits = bw_lhs.get_sbits() - 1; */
 
     auto mask_const = Lconst((1<<(bw_lhs_bits)) - 1);
     auto all_one_node = node_dp.get_class_lgraph()->create_node_const(mask_const);
@@ -467,21 +478,17 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_dp, Fwd_edge_iterator::Fwd_
 
     // Note: I set the unsigned k-bits (max, min) for the mask 
     bwmap.insert_or_assign(mask_dpin.get_compact(), Bitwidth_range(Lconst(0), mask_const));  
-    /* bwmap.insert_or_assign(mask_dpin.get_compact(), bw_lhs); */  
     dpin_rhs.connect_sink(mask_node.setup_sink_pin("A"));
     all_one_dpin.connect_sink(mask_node.setup_sink_pin("A"));
-    for (auto e : node_dp.out_edges()) {
+    for (auto e : node_dp.out_edges()) 
       mask_dpin.connect_sink(e.sink);
-    }
-    fmt::print("DEBUG dp create mask node:{}\n", mask_node.debug_name());
-    fmt::print("DEBUG dp create mask const:{}\n", all_one_node.debug_name());
+    
     fwd_it.add_node(mask_node);
     fwd_it.add_node(all_one_node);
 
   } else { // bw_rhs.bits < bw_lhs.bits, already match
-    for (auto e : node_dp.out_edges()) {
+    for (auto e : node_dp.out_edges()) 
       dpin_rhs.connect_sink(e.sink);
-    }
   }
     
 
@@ -740,6 +747,8 @@ void Bitwidth::bw_pass(LGraph *lg) {
         continue;
     } else if (op == Ntype_op::Sum) {
       process_sum(node, inp_edges);
+    } else if (op == Ntype_op::Mult) {
+      process_mult(node, inp_edges);
     } else if (op == Ntype_op::SRA) {
       process_sra(node, inp_edges);
     } else if (op == Ntype_op::SHL) {
