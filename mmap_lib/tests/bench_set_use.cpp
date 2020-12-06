@@ -17,8 +17,8 @@
 #include "mmap_map.hpp"
 #include "mmap_vset.hpp" // including the visitor set
 
-#define BENCH_OUT_SIZE 500 // try bigger sizes
-#define BENCH_INN_SIZE 300 // try bigger sizes
+#define BENCH_OUT_SIZE 20000 // try bigger sizes
+#define BENCH_INN_SIZE 30000 // try bigger sizes
 
 //#define BENCH_OUT_SIZE 500
 //#define BENCH_INN_SIZE 500
