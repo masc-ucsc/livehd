@@ -6,7 +6,7 @@ pts_todo='MemoryController Rob ICache HwachaSequencer'
 pts_long_lec='GCD'
 pts_handle_1st='regex Test3 coverage'
 
-pts='Decrementer RegXor TrivialAdd Test1 Test2 NotAnd AddNot Trivial
+pts='Decrementer RegXor TrivialAdd Test1 Test2 NotAnd Trivial
      BundleCombiner Flop Tail RegisterSimple Register TrivialArith GCD_3bits'
 
 pts_hier='FinalVal2Test'
@@ -17,7 +17,7 @@ pts_hier4='BundleConnect'
 pts_hier='FPU'
 pts_hier9='RocketCore'
 
-pts='AddNot'
+# pts='AddNot'
 
 #SimpleBitOps Ops -- parity and mod op not in lnast_tolg
 #HwachaSequencer -- printf, pad, stop
