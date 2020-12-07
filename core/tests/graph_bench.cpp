@@ -1,6 +1,7 @@
 
 #include "absl/container/flat_hash_map.h"
 
+#include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "Adjacency_list.hpp"
@@ -42,10 +43,24 @@ void populate_graph(LGraph *lg) {
     }
   }
 }
+void dfs(LGraph *lg) {
+  std::vector<Index_ID> visited;
 
-main(int argc, char **argv) {
+  int i = 0;
+  for (const auto &node : lg->backward()){
+    fmt::print("{}", i);
+    i++;
+    for (const auto &out_edge : node.out_edges()) {
+      auto name = out_edge.sink.get_node().get_name();
+      fmt::print(name);
+    }
+  }
+}
+
+int main(int argc, char **argv) {
 
   fmt::print("benchmark the graph\n");
+  Lbench b("shallow_tree");
 
   LGraph *lg;
   if (argc==1) {
@@ -61,8 +76,13 @@ main(int argc, char **argv) {
   // 2. create a copy of ngraph/boost::graph/....
 
   populate_graph(lg);
+  fmt::print("dump");
+  lg->dump();
+
+  fmt::print("dump down");
+  lg->dump_down_nodes();
 
   // 3. benchmark same traverse the graph in all the graphs
-
+  dfs(lg);
 }
 
