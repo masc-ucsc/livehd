@@ -61,13 +61,13 @@ do
 
 
   if [ ! -f $CHISEL_PATH/${pt}.fir ]; then
-    echo "ERROR: Lower-level firrl ${pt}.fir is no generated"
+    echo "ERROR: Lower-level firrl ${pt}.fir is not generated"
     exit 1
   elif [ ! -f $CHISEL_PATH/${pt}*.pb ]; then
-    echo "ERROR: Protobuf ${pt}.pb is no generated"
+    echo "ERROR: Protobuf ${pt}.pb is not generated"
     exit 1
   elif [ ! -f $CHISEL_PATH/${pt}.v ]; then
-    echo "ERROR: Verilog ${pt}.v is no generated"
+    echo "ERROR: Verilog ${pt}.v is not generated"
     exit 1
   fi
 
