@@ -5,7 +5,8 @@ cc_library(
         ["*.cpp"],
         exclude = ["*test*.cpp"],
         ),
-    hdrs = glob(["*.hpp"]),
+    hdrs = glob(["*.hpp"])
+	 + glob(["*.h"]),
     includes = ["."],
     linkopts = ["-lpthread"],
     visibility = ["//visibility:public"],

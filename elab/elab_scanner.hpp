@@ -13,6 +13,8 @@
 #include "fmt/format.h"
 #include "iassert.hpp"
 
+#include "map_col.hpp"
+
 using Token_id = uint8_t;
 
 using Token_entry = Explicit_type<uint32_t, struct Token_entry_struct, 0>;
@@ -78,6 +80,7 @@ constexpr Token_id Token_id_reference     = 13;  // \foo
 constexpr Token_id Token_id_keyword_first = 14;
 constexpr Token_id Token_id_keyword_last  = 254;
 
+
 class Token {
 protected:
   std::string_view text;
@@ -140,12 +143,15 @@ public:
   std::string_view get_text() const { return text; }
 };
 
+
 class Elab_scanner {
 public:
-  typedef std::vector<Token> Token_list;
+  typedef std::vector<Token> Token_list; 
+  typedef SourceMap::ColMapArr SrcMap_Token_list; // std::vector<shared_ptr<ColMap>>
 protected:
 
   Token_list       token_list;
+  SrcMap_Token_list       SrcMap_token_list; 
 
 private:
   std::string      buffer_name;
@@ -180,6 +186,7 @@ private:
 
   // Fields updated for each chunk processed
   Token_entry scanner_pos;
+  // Token_entry NEW_scanner_pos;
 
   int         max_errors;
   int         max_warnings;
@@ -188,15 +195,33 @@ private:
 
   void setup_translate();
 
+  void SrcMap_fuse_token(SourceMap::ColMapSP &t, Token_id new_tok, const SourceMap::ColMapSP &t2); 
+  void SrcMap_append_token(SourceMap::ColMapSP &t, const SourceMap::ColMapSP &t2); 
+  void SrcMap_adjust_token_size(SourceMap::ColMapSP &t, uint64_t end_pos); 
+  SourceMap::ColMapSP SrcMap_clear(SourceMap::ColMapSP &t, uint64_t _pos1, uint32_t _line, std::string_view _text); 
+  SourceMap::ColMapSP SrcMap_reset(SourceMap::ColMapSP &t, Token_id _tok, uint64_t _pos1, uint32_t _line, std::string_view _text); 
+
   void add_token(Token &t);
+  void SrcMap_add_token(SourceMap::ColMapSP &t); 
 
   void scan_raw_msg(std::string_view cat, std::string_view text, bool third) const;
+  void Token_scan_raw_msg(std::string_view cat, std::string_view text, bool third) const; 
+  void SrcMap_scan_raw_msg(std::string_view cat, std::string_view text, bool third) const; 
 
   void lex_error(std::string_view text);
 
   void parse_setup(std::string_view filename);
+  void Token_parse_setup(std::string_view filename); 
+  void SrcMap_parse_setup(std::string_view filename); 
   void parse_setup();
+  void Token_parse_setup(); 
+  void SrcMap_parse_setup(); 
   void parse_step();
+  void Token_parse_step(); 
+  void SrcMap_parse_step(); 
+
+
+
 
 protected:
   std::pair<std::string_view, int> transfer_memblock_ownership() {
@@ -241,45 +266,178 @@ public:
   }
 
   bool scan_next();
+  bool Token_scan_next(); 
+  bool SrcMap_scan_next(); 
+
   bool scan_prev();
+  bool Token_scan_prev(); 
+  bool SrcMap_scan_prev(); 
 
   void set_max_errors(int n) { max_errors = n; }
   void set_max_warning(int n) { max_warnings = n; }
 
-  bool scan_is_end() const { return scanner_pos >= token_list.size(); }
+  bool use_Token = true; 
 
+  bool scan_is_end() {
+    if (use_Token)
+      return Token_scan_is_end();
+    else
+      return SrcMap_scan_is_end();
+  }
   bool scan_is_token(Token_id tok) const {
+    if (use_Token)
+      return Token_scan_is_token(tok);
+    else
+      return SrcMap_scan_is_token(tok);
+  }
+  Token_entry scan_token() const {
+    if (use_Token)
+      return Token_scan_token();
+    else
+      return SrcMap_scan_token();
+  }
+  std::string_view scan_prev_text() const {
+    if (use_Token)
+      return Token_scan_prev_text();
+    else
+      return SrcMap_scan_prev_text();
+  }
+  std::string_view scan_next_text() const {
+    if (use_Token)
+      return Token_scan_next_text();
+    else
+      return SrcMap_scan_next_text();
+  }
+  bool scan_next_is_token(Token_id tok) const {
+    if (use_Token)
+      return Token_scan_next_is_token(tok);   
+    else
+      return SrcMap_scan_next_is_token(tok);
+  }
+  std::string_view scan_peep_text(int offset) const {
+    if (use_Token)
+      return Token_scan_peep_text(offset);    
+    else
+      return SrcMap_scan_peep_text(offset);
+  }
+  inline std::string_view scan_text(const Token_entry te) const {
+    if (use_Token)
+      return Token_scan_text(te);
+    else
+      return SrcMap_scan_text(te);
+  }
+  std::string_view scan_text() const {
+    if (use_Token)
+      return Token_scan_text();
+    else
+      return SrcMap_scan_text();
+  }
+  size_t get_token_pos() const {
+    if (use_Token)
+      return Token_get_token_pos();
+    else
+      return SrcMap_get_token_pos();
+  }
+  bool scan_is_prev_token(Token_id tok) const {
+    if (use_Token)
+      return Token_scan_is_prev_token(tok);
+    else
+      return SrcMap_scan_is_prev_token(tok);
+  }
+  bool scan_peep_is_token(Token_id tok, int offset) const {
+    if (use_Token)
+      return Token_scan_peep_is_token(tok, offset);
+    else
+      return SrcMap_scan_peep_is_token(tok, offset);
+  }
+  bool scan_is_next_token(int pos, Token_id tok) const {
+    if (use_Token)
+      return Token_scan_is_next_token(pos, tok);
+    else
+      return SrcMap_scan_is_next_token(pos, tok);
+  }
+  const Token get_token(Token_entry entry){
+    if (use_Token)
+      return Token_get_token(entry);
+    else{
+      return SrcMap_get_token(entry);
+    }
+  }
+  Token scan_get_token(int offset = 0) const {
+    if (use_Token)
+      return Token_scan_get_token(offset);
+    else
+      return SrcMap_scan_get_token(offset);
+  }
+
+  bool Token_scan_is_end() const { return scanner_pos >= token_list.size(); }
+  bool SrcMap_scan_is_end() const { return scanner_pos >= SrcMap_token_list.size(); } 
+
+  bool Token_scan_is_token(Token_id tok) const {
     if (scanner_pos < token_list.size()) return token_list[scanner_pos].tok == tok;
     return false;
   }
-
-  Token_entry scan_token() const {
+  bool SrcMap_scan_is_token(Token_id tok) const {
+    if (scanner_pos < SrcMap_token_list.size()) return SrcMap_token_list[scanner_pos]->tkn_idx == tok; 
+    return false;
+  }
+  
+  
+  Token_entry Token_scan_token() const {
     I(scanner_pos != 0);
     I(scanner_pos < token_list.size());
     return scanner_pos;
   }
-
-  std::string_view scan_prev_text() const {
-    size_t p = scanner_pos - 1;
-    if (scanner_pos <= 0) p = 0;
-    return token_list[p].get_text();
+  Token_entry SrcMap_scan_token() const {
+    I(scanner_pos != 0);
+    I(scanner_pos < SrcMap_token_list.size()); 
+    return scanner_pos;
   }
 
-  std::string_view scan_next_text() const {
+  
+  std::string_view Token_scan_prev_text() const {
+    size_t p = scanner_pos - 1;
+    if (scanner_pos <= 0) p = 0;
+
+    return token_list[p].get_text();
+  }
+  std::string_view SrcMap_scan_prev_text() const {
+    size_t p = scanner_pos - 1;
+    if (scanner_pos <= 0) p = 0;
+    return SrcMap_token_list[p]->text; 
+  }
+
+  
+  std::string_view Token_scan_next_text() const {
     size_t p = scanner_pos + 1;
     if (p >= token_list.size())
       p = token_list.size()-1;
+
     return token_list[p].get_text();
   }
+  std::string_view SrcMap_scan_next_text() const {
+    size_t p = scanner_pos + 1;
+    if (p >= SrcMap_token_list.size()) 
+      p = SrcMap_token_list.size()-1; 
+    return SrcMap_token_list[p]->text; 
+  }
 
-  bool scan_next_is_token(Token_id tok) const {
+
+  bool Token_scan_next_is_token(Token_id tok) const {
     size_t p = scanner_pos + 1;
     if (p >= token_list.size())
       return false;
     return token_list[p].tok == tok;
   }
+  bool SrcMap_scan_next_is_token(Token_id tok) const {
+    size_t p = scanner_pos + 1;
+    if (p >= SrcMap_token_list.size()) 
+      return false;
+    return SrcMap_token_list[p]->tkn_idx == tok; 
+  }
 
-  std::string_view scan_peep_text(int offset) const {
+
+  std::string_view Token_scan_peep_text(int offset) const {
     I(offset != 0);
     size_t p = scanner_pos + offset;
     if (p >= token_list.size())
@@ -288,42 +446,90 @@ public:
       p = 0 ;
     return token_list[p].get_text();
   }
+  std::string_view SrcMap_scan_peep_text(int offset) const {
+    I(offset != 0);
+    size_t p = scanner_pos + offset;
+    if (p >= SrcMap_token_list.size()) 
+      p = SrcMap_token_list.size()-1; 
+    else if (offset > static_cast<int>(scanner_pos))
+      p = 0 ;
+    return SrcMap_token_list[p]->text;
+  }
 
   void scan_format_append(std::string &text) const;
+  void Token_scan_format_append(std::string &text) const; 
+  void SrcMap_scan_format_append(std::string &text) const; 
 
-  inline std::string_view scan_text(const Token_entry te) const {
+
+  inline std::string_view Token_scan_text(const Token_entry te) const {
     I(token_list.size() > te);
     return token_list[te].get_text();
   }
+  inline std::string_view SrcMap_scan_text(const Token_entry te) const {
+    I(SrcMap_token_list.size() > te); 
+    return SrcMap_token_list[te]->text; 
+  }
 
-  std::string_view scan_text() const {
+  
+  std::string_view Token_scan_text() const {
     return token_list[scanner_pos].get_text();
   }
+  std::string_view SrcMap_scan_text() const {
+    return SrcMap_token_list[scanner_pos]->text; 
+  }
+
+
   uint32_t    scan_line() const;
+  uint32_t    Token_scan_line() const; 
+  uint32_t    SrcMap_scan_line() const; 
 
-  size_t get_token_pos() const { return token_list[scan_token()].pos1; }
+  size_t Token_get_token_pos() const { return token_list[scan_token()].pos1; }
+  size_t SrcMap_get_token_pos() const { return SrcMap_token_list[scan_token()]->src_col; } 
 
-  bool scan_is_prev_token(Token_id tok) const {
+  bool Token_scan_is_prev_token(Token_id tok) const {
     if (scanner_pos == 0) return false;
     I(scanner_pos < token_list.size());
     return token_list[scanner_pos - 1].tok == tok;
   }
-  bool scan_is_next_token(int pos, Token_id tok) const {
+  bool SrcMap_scan_is_prev_token(Token_id tok) const {
+    if (scanner_pos == 0) return false;
+    I(scanner_pos < SrcMap_token_list.size()); 
+    return SrcMap_token_list[scanner_pos - 1]->tkn_idx == tok; 
+  }
+
+
+  bool Token_scan_is_next_token(int pos, Token_id tok) const {
     if ((scanner_pos + pos) >= token_list.size()) return false;
     return token_list[scanner_pos + pos].tok == tok;
   }
+  bool SrcMap_scan_is_next_token(int pos, Token_id tok) const {
+    if ((scanner_pos + pos) >= SrcMap_token_list.size()) return false; 
+    return  SrcMap_token_list[scanner_pos + pos]->tkn_idx == tok; 
+  }
 
-  bool scan_peep_is_token(Token_id tok, int offset) const {
+  
+  bool Token_scan_peep_is_token(Token_id tok, int offset) const {
     I(offset != 0);
     size_t p = scanner_pos + offset;
     if (p >= token_list.size())
       p = token_list.size() - 1;
     else if (offset > static_cast<int>(scanner_pos))
       p = 0 ;
-    return token_list[p].tok == tok;;
+    return token_list[p].tok == tok;
+  }
+  bool SrcMap_scan_peep_is_token(Token_id tok, int offset) const {
+    I(offset != 0);
+    size_t p = scanner_pos + offset;
+    if (p >= SrcMap_token_list.size()) 
+      p = SrcMap_token_list.size() - 1; 
+    else if (offset > static_cast<int>(scanner_pos))
+      p = 0 ;
+    return SrcMap_token_list[p]->tkn_idx == tok; 
   }
 
   void patch_pass(const absl::flat_hash_map<std::string, Token_id> &keywords);
+  void Token_patch_pass(const absl::flat_hash_map<std::string, Token_id> &keywords); 
+  void SrcMap_patch_pass(const absl::flat_hash_map<std::string, Token_id> &keywords); 
 
   void patch_pass() {
       absl::flat_hash_map<std::string, Token_id> no_keywords;
@@ -342,12 +548,14 @@ public:
   }
 
   void dump_token() const;
+  void Token_dump_token() const;
+  void SrcMap_dump_token() const;
 
   virtual void elaborate() = 0;
 
   bool has_errors() const { return n_errors > 0; }
 
-  Token scan_get_token(int offset = 0) const {
+  Token Token_scan_get_token(int offset = 0) const {
     size_t p = scanner_pos + offset;
     if (p >= token_list.size())
       p = token_list.size() - 1;
@@ -356,9 +564,30 @@ public:
     //else if (offset > static_cast<int>(scanner_pos))
     //  p = 0 ;
     return token_list[p];
-  }
-  
-  const Token &get_token(Token_entry entry){
+  } 
+  Token SrcMap_scan_get_token(int offset = 0) const {
+    size_t p = scanner_pos + offset;
+    if (p >= SrcMap_token_list.size()) 
+      p = SrcMap_token_list.size() - 1; 
+
+    //comment out by Sheng
+    //else if (offset > static_cast<int>(scanner_pos))
+    //  p = 0 ;
+
+    // return token_list[p];
+    SourceMap::ColMapSP t1 = SrcMap_token_list[p];
+    Token t2(t1->tkn_idx, t1->src_col, t1->src_idx, t1->src_line, t1->text);
+    return t2;
+  } 
+
+  Token &Token_get_token(Token_entry entry){
     return token_list[entry];
   }
+
+  Token SrcMap_get_token(Token_entry entry){
+    SourceMap::ColMapSP t1 = SrcMap_token_list[entry];
+    Token t2(t1->tkn_idx, t1->src_col, t1->src_idx, t1->src_line, t1->text);
+    return t2;
+  }
+
 };
