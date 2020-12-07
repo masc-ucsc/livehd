@@ -5,8 +5,8 @@
 #include <string>
 
 #include "eprp_utils.hpp"
-#include "ezminisat.hpp"
-#include "ezsat.hpp"
+#include "lezminisat.hpp"
+#include "lezsat.hpp"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "lgraph.hpp"
@@ -22,7 +22,7 @@ protected:
 TEST_F(LecMainTest, NoLGraphTest) {
   // Attempt 2 to add to Git for review
 
-  ezMiniSAT sat;
+  lezMiniSAT sat;
 
   std::vector<int> vx = sat.vec_var("x", 2);
   std::vector<int> vy = sat.vec_var("y", 2);
