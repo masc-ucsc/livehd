@@ -387,7 +387,7 @@ TEST_F(Edge_test, overflow_delete_del_edge_bench) {
   std::random_shuffle(all_edges.begin(), all_edges.end());
 
   {
-    Lbench bench("overflow_delete del_node");
+    Lbench bench("core.EDGE_overflow_delete_del_edge");
 
     for (auto &e : all_edges) {
       XEdge edge(g, e);
@@ -425,7 +425,7 @@ TEST_F(Edge_test, overflow_delete_del_node_bench) {
   }
 
   {
-    Lbench bench("overflow_delete del_node");
+    Lbench bench("core.EDGE_overflow_delete_del_node");
 
     s1.del_node();
 

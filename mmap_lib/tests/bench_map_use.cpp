@@ -28,7 +28,7 @@
  */
 void random_std_map(int max) {
   Lrand<int> rng;
-  Lbench b("random_std_map");
+  Lbench b("mmap.random_std_map_" + std::to_string(max));
 
   std::unordered_map<uint32_t,uint32_t> map;
   
@@ -51,7 +51,7 @@ void random_mmap_map(int max) {
   Lrand<int> rng;
 
   {
-  	Lbench b("random_mmap_map (persistent) " + std::to_string(max));
+    Lbench b("mmap.random_mmap_map_persistent_" + std::to_string(max));
 
 	// declaring a map from mmap_lib (persistent)
 	// details: map<some type (key?), some type (value?)>
@@ -87,7 +87,7 @@ void random_mmap_map(int max) {
   }
   //----------
   {
-    Lbench b("random_mmap_map (effemeral) " + std::to_string(max));
+    Lbench b("mmap.random_mmap_map_effemeral_" + std::to_string(max));
 
 	// declaring a map from mmap_lib (effemeral)
 	// effemeral means destroy after program ends
@@ -111,7 +111,7 @@ void random_mmap_map(int max) {
 void random_mmap_vector(int max) {
   Lrand<int> rng;
   {
-    Lbench b("random_mmap_vector (persistent)");
+    Lbench b("mmap.random_mmap_vector_persistent_" + std::to_string(max));
     mmap_lib::vector<uint32_t> map("lgdb_bench","bench_map_use_vector.data");
     map.reserve(max);
     for (int n = 1; n < 100; ++n) {
@@ -125,7 +125,7 @@ void random_mmap_vector(int max) {
   }
   //----------------
   {
-    Lbench b("random_mmap_vector (effemeral)");
+    Lbench b("mmap.random_mmap_vector_effemeral_" + std::to_string(max));
     mmap_lib::vector<uint32_t> map;
     map.reserve(max);
     for (int n = 1; n < 100; ++n) {
@@ -143,7 +143,7 @@ void random_mmap_vector(int max) {
  */
 void random_robin_map(int max) {
   Lrand<int> rng;
-  Lbench b("random_robin_map " + std::to_string(max));
+  Lbench b("mmap.random_robin_map_" + std::to_string(max));
   // declaring unordered map from robin hood
   robin_hood::unordered_map<uint32_t,uint32_t> map;
   for (int n = 1; n < 100; ++n) {
@@ -158,7 +158,7 @@ void random_robin_map(int max) {
 
 void random_abseil_map(int max) {
   Lrand<int> rng;
-  Lbench b("random_abseil_map" + std::to_string(max));
+  Lbench b("mmap.random_abseil_map_" + std::to_string(max));
   absl::flat_hash_map<uint32_t,uint32_t> map;
   for (int n = 1; n < 100; ++n) {
     for (int i = 0; i < BENCHSIZE; ++i) {
@@ -172,7 +172,7 @@ void random_abseil_map(int max) {
 
 void random_ska_map(int max) {
   Lrand<int> rng;
-  Lbench b("random_ska_map" + std::to_string(max));
+  Lbench b("mmap.random_ska_map_" + std::to_string(max));
   ska::flat_hash_map<uint32_t,uint32_t> map;
   for (int n = 1; n < 100; ++n) {
     for (int i = 0; i < BENCHSIZE; ++i) {
@@ -186,7 +186,7 @@ void random_ska_map(int max) {
 
 void random_vector_map(int max) {
   Lrand<int> rng;
-  Lbench b("random_vector_map" + std::to_string(max));
+  Lbench b("mmap.random_vector_map_" + std::to_string(max));
   std::vector<uint32_t> map;
   map.resize(max);
   for (int n = 1; n < 100; ++n) {

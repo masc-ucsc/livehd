@@ -37,7 +37,7 @@ int main() {
   }
 
   {
-    Lbench s("not found");
+    Lbench s("mmap.not_found");
     int conta=0;
 
     for(int i=0;i<100;++i) {
@@ -52,7 +52,7 @@ int main() {
     printf("p1 %d\n",conta);
   }
   {
-    Lbench s("found end");
+    Lbench s("mmap.found_end");
     int conta=0;
     for(int i=0;i<100;++i) {
       const char *p1;

@@ -31,7 +31,7 @@
 void random_std_set(int max) {
   Lrand<int> rng;
 
-  Lbench b("random_std_set");
+  Lbench b("mmap.random_std_set_" + std::to_string(max));
 
   std::unordered_set<uint32_t> map;
 
@@ -92,7 +92,7 @@ void random_std_set(int max) {
 void random_robin_set(int max) {
   Lrand<int> rng;
 
-  Lbench b("random_robin_set");
+  Lbench b("mmap.random_robin_set_" + std::to_string(max));
 
   robin_hood::unordered_map<uint32_t, bool> map;
 
@@ -178,11 +178,11 @@ void random_robin_set(int max) {
 void random_mmap_set(int max, std::string_view name) {
   Lrand<int> rng;
 
-  std::string type_test("mmap_map_set ");
+  std::string type_test("mmap.map_set");
   if (name.empty())
-    type_test += "(effemeral)";
+    type_test += "_effemeral_" + std::to_string(max);
   else
-    type_test += "(persistent)";
+    type_test += "_persistent_" + std::to_string(max);
 
   Lbench b(type_test);
 
@@ -270,7 +270,7 @@ void random_mmap_set(int max, std::string_view name) {
 void random_abseil_set(int max) {
   Lrand<int> rng;
 
-  Lbench b("random_abseil_set");
+  Lbench b("mmap.random_abseil_set_" + std::to_string(max));
 
 #ifdef ABSEIL_USE_MAP
   absl::flat_hash_map<uint32_t, bool> map;
@@ -375,7 +375,7 @@ void random_abseil_set(int max) {
 void random_ska_set(int max) {
   Lrand<int> rng;
 
-  Lbench b("random_ska_set");
+  Lbench b("mmap.random_ska_set_" + std::to_string(max));
 
   ska::flat_hash_map<uint32_t, bool> map;
 
@@ -458,7 +458,7 @@ void random_ska_set(int max) {
 void random_vector_set(int max) {
   Lrand<int> rng;
 
-  Lbench b("random_vector_set");
+  Lbench b("mmap.random_vector_set_" + std::to_string(max));
 
   std::vector<bool> map;
   map.resize(max);
@@ -611,7 +611,7 @@ void random_mmap_vset(int max, std::string_view name) {
 void random_bm_set(int max) {
   Lrand<int> rng;
 
-  Lbench b("random_bm_set");
+  Lbench b("mmap.random_bm_set_" + std::to_string(max));
 
   bm::bvector<> bm;
 

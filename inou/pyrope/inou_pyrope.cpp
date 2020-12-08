@@ -20,7 +20,7 @@ void Inou_pyrope::setup() {
 Inou_pyrope::Inou_pyrope(const Eprp_var &var) : Pass("inou.pyrope", var) {}
 
 void Inou_pyrope::parse_to_lnast(Eprp_var &var) {
-  Lbench      b("inou.pyrope");
+  Lbench      b("inou.PYROPE_parse_to_lnast");
   Inou_pyrope p(var);
 
   for (auto f : absl::StrSplit(p.files, ',')) {

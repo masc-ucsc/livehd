@@ -41,7 +41,7 @@ Pass_opentimer::Pass_opentimer(const Eprp_var &var) : Pass("pass.opentimer", var
 void Pass_opentimer::work(Eprp_var &var) {
   Pass_opentimer pass(var);
 
-  Lbench b("pass.opentimer");
+  Lbench b("pass.OPENTIMER_work");
 
   for (const auto &g : var.lgs) {
     pass.read_files();      // Task1: Read input files (Read user from input) | Status: 75% done
@@ -154,7 +154,7 @@ void Pass_opentimer::read_sdc() {
 }
 
 void Pass_opentimer::build_circuit(LGraph *g) {  // Enhance this for build_circuit
-  //  Lbench b("pass.opentimer.build_circuit");
+  //  Lbench b("pass.OPENTIMER_build_circuit");
 
   g->each_graph_input([this](const Node_pin &pin) {
     std::string driver_name(pin.get_name());  // OT needs std::string, not string_view support
@@ -211,7 +211,7 @@ void Pass_opentimer::build_circuit(LGraph *g) {  // Enhance this for build_circu
 }
 
 void Pass_opentimer::compute_timing() {  // Expand this method to compute timing information
-                                         //  Lbench b("pass.opentimer.compute_timing");
+                                         //  Lbench b("pass.OPENTIMER_compute_timing");
 
   timer.update_timing();
 
@@ -237,5 +237,5 @@ void Pass_opentimer::compute_timing() {  // Expand this method to compute timing
 }
 
 void Pass_opentimer::populate_table() {  // Expand this method to populate the tables in lgraph
-  //  Lbench b("pass.opentimer.populate_table");
+  //  Lbench b("pass.OPENTIMER_populate_table");
 }
