@@ -1,0 +1,48 @@
+groups:
+  - name: Execution-time(task_THREAD_POOL_pool1_thread_pool_test)
+    rules:
+      - alert: 'Execution time spikes'
+        expr: (task_THREAD_POOL_pool1_thread_pool_test_secs) > 0.4
+        labels:
+          severity: 'critical'
+        annotations:
+          title: "Execution Time"
+          description: 'Execution time of pool_test set to 0.4 sec.'
+          summary: "Execution time is `{{humanize $value}}sec`"
+          host: "{{$labels.instance}}"
+
+  - name: IPC(task_THREAD_POOL_pool1_thread_pool_test)
+    rules:
+      - alert: 'IPC dropped'
+        expr: (task_THREAD_POOL_pool1_thread_pool_test_IPC) < 0.5
+        labels:
+          severity: 'critical'
+        annotations:
+          title: "IPC"
+          description: 'IPC threshold set to 0.5.'
+          summary: "IPC is `{{humanize $value}}`"
+          host: "{{$labels.instance}}"
+
+  - name: BR_MPKI(task_THREAD_POOL_pool1_thread_pool_test)
+    rules:
+      - alert: 'BR_MPKI spikes'
+        expr: (task_THREAD_POOL_pool1_thread_pool_test_BR_MPKI) > 1.0
+        labels:
+          severity: 'critical'
+        annotations:
+          title: "BR_MPKI"
+          description: 'BR_MPKI threshold set to 1.0.'
+          summary: "BR_MPKI is `{{humanize $value}}`"
+          host: "{{$labels.instance}}"
+
+  - name: L2_MPKI(task_THREAD_POOL_pool1_thread_pool_test)
+    rules:
+      - alert: 'L2_MPKI spikes'
+        expr: (task_THREAD_POOL_pool1_thread_pool_test_L2_MPKI) > 25.0
+        labels:
+          severity: 'critical'
+        annotations:
+          title: "L2_MPKI"
+          description: 'L2_MPKI threshold set to 25.0.'
+          summary: "L2_MPKI is `{{humanize $value}}`"
+          host: "{{$labels.instance}}"

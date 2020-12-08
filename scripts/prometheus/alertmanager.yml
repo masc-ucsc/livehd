@@ -1,0 +1,25 @@
+# need to change the credentials (xxxxx)
+global:
+  resolve_timeout: 5m
+  #slack_api_url: "https://cse220-ucsc-fall2020.slack.com/services/XXXXXXXXXXXXXXX"
+
+route:
+  group_by: ['alertname']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 10s
+  receiver: "default"
+
+receivers:
+- name: default
+  email_configs:
+  - to: 'xxxxx@gmail.com'
+    from: 'xxxxx@gmail.com'
+    smarthost: 'smtp.gmail.com:587'
+    auth_username: 'xxxxx@gmail.com'
+    auth_password: 'xxxxx'
+    auth_identity: 'xxxxx@gmail.com'
+    html: '{{ template "email" .}}'
+
+templates:
+  - '../prometheus/alert.tmpl'
