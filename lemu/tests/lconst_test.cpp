@@ -802,7 +802,7 @@ TEST_F(Lconst_test, mixed_mul_operator) {
 
 
 TEST_F(Lconst_test, Trivial) {
-  Lbench bench("trivial");
+  Lbench bench("lemu.LCONST_trivial");
 
   constexpr auto v_10 = 10_uint;
   constexpr auto v_10b = 0xa_uint;
@@ -860,7 +860,7 @@ TEST_F(Lconst_test, Trivial) {
 }
 
 TEST_F(Lconst_test, Storage) {
-  Lbench b("storage");
+  Lbench b("lemu.LCONST_storage");
 
   uint64_t data = 3;
 
@@ -967,7 +967,7 @@ TEST_F(Lconst_test, trivial_vals) {
 TEST_F(Lconst_test, hexa_check) {
 
 #if 0
-  Lbench b("const_attr");
+  Lbench b("lemu.LCONST_const_attr");
 
   unlink("lgdb_attr/c_map");
 
