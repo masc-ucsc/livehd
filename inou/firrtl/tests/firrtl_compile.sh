@@ -4,20 +4,24 @@ FIRRTL_LEVEL='lo'
 
 pts_todo='MemoryController Rob ICache HwachaSequencer'
 pts_long_lec='GCD'
-pts_handle_1st='regex Test3 coverage'
+pts_handle_1st='regex Test3 Coverage'
 
-pts='Decrementer RegXor TrivialAdd Test1 Test2 NotAnd Trivial
+pts_tutorial='Adder4 Adder ByteSelector Combinational Darken EnableShiftRegister FullAdder Functionality HiLoMultiplier Life 
+              LogShifter Parity ResetShitRegister Risc Router ShiftRegister SimpleALU Stack Tbl VecSearch Accumulator Counter 
+              DynamicMemorySearch LFSR16 Max2 MaxN Memo Mul Mux4 RealGCD SingleEvenFilter VecShiftRegister VecShiftRegisterParam
+              VecShiftRegisterSimple VendingMachine VendingMachineSwitch'
+
+pts='Decrementer RegXor TrivialAdd Test1 Test2 NotAnd Trivial Accumulator
      BundleCombiner Flop Tail RegisterSimple Register TrivialArith GCD_3bits'
 
-pts_hier='FinalVal2Test'
-pts_hier2='FinalValTest'
+pts_hier='FinalValTest FinalVal2Test'
 pts_hier3='SubModule'
 pts_hier4='BundleConnect'
-
 pts_hier='FPU'
 pts_hier9='RocketCore'
 
-# pts='AddNot'
+pts='AddNot'
+pts='Test3'
 
 #SimpleBitOps Ops -- parity and mod op not in lnast_tolg
 #HwachaSequencer -- printf, pad, stop

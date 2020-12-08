@@ -11,6 +11,7 @@ pts='GCD_3bits GCD Coverage Shifts AddNot Decrementer PlusAnd RegXor Trivial Tri
      Test4 Test5 Test6 SimpleBitOps Register RegisterSimple Flop ICache Ops Rob RocketCore HwachaSequencer 
      BundleConnect MemoryController PlusAnd SubModule RWSmem Smem Smem_simple Blackbox Blackbox2 FPU '
 
+pts='Accumulator'
 
 CHISEL_PATH=~/chisel3
 FIRRTL_PATH=~/firrtl
@@ -53,6 +54,7 @@ do
   fi
 
   $FIRRTL_EXE -i ${CHIRRTL_SRC_PATH}/${pt}/${pt}.fir -X verilog
+  $FIRRTL_EXE -i ${CHIRRTL_SRC_PATH}/${pt}/${pt}.fir -X high
   $FIRRTL_EXE -i ${CHIRRTL_SRC_PATH}/${pt}/${pt}.fir -X low
   $FIRRTL_EXE -i ${CHIRRTL_SRC_PATH}/${pt}/${pt}.fir -X none --custom-transforms firrtl.transforms.WriteLowPB
   # $FIRRTL_EXE -i ${pt}.fir -X high
@@ -71,6 +73,9 @@ do
     exit 1
   fi
 
+  cp -f ${pt}.hi.fir $CHIRRTL_SRC_PATH/${pt}
+  cp -f ${pt}.lo.fir $CHIRRTL_SRC_PATH/${pt}
+  cp -f ${pt}.v      $CHIRRTL_SRC_PATH/${pt}
 
   mv -f ${pt}.lo.fir $LIVEHD_FIRRTL_PATH/firrtl
   mv -f ${pt}.lo.pb  $LIVEHD_FIRRTL_PATH/proto
