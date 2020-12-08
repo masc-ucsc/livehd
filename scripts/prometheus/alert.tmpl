@@ -1,0 +1,56 @@
+{{ define "email" }}
+
+<html>
+   <head>
+      <style type="text/css">
+         table {
+         font-family: verdana,arial,sans-serif;
+         font-size:11px;
+         color:#333333;
+         border-width: 1px;
+         border-color: #999999;
+         border-collapse: collapse;
+         }
+         table th {
+         background-color:#ff6961;
+         border-width: 1px;
+         padding: 8px;
+         border-style: solid;
+         border-color: #F54C44;
+         }
+         table td {
+         border-width: 1px;
+         padding: 8px;
+         border-style: solid;
+         border-color: #F54C44;
+         text-align: right;
+         }
+      </style>
+   </head>
+   <body>
+      <table border=1>
+         <thead>
+           <tr>
+        <th>Alert name</th>
+        <th>Host</th>
+            <th>Summary</th>
+            <th>Description</th>
+           </tr>
+         </thead>
+
+         <tbody>
+       {{ range .Alerts }}
+            <tr>
+         <td>{{ .Labels.alertname }}</td>
+         <td>{{ .Annotations.host }}</td>
+         <td>{{ .Annotations.summary }}</td>
+         <td>{{ .Annotations.description }}</td>
+           </tr>
+          {{ end }}
+         </tbody>
+
+      </table>
+  </body>
+</html>
+
+{{end}}

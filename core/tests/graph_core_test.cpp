@@ -25,7 +25,7 @@ protected:
 };
 
 TEST_F(Setup_graph_core, shallow_tree) {
-  Lbench b("shallow_tree");
+  Lbench b("core.GRAPH_CORE_shallow_tree");
 
   Graph_core c1("lgdb_gc","shallow_tree");
 

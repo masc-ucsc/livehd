@@ -39,7 +39,7 @@ void Pass_sample::work(Eprp_var &var) {
 }
 
 void Pass_sample::wirecount(Eprp_var &var) {
-  Lbench      b("pass.sample.wirecount");
+  Lbench      b("pass.SAMPLE_wirecount");
   Pass_sample p(var);
 
   for (const auto &g : var.lgs) {
@@ -113,7 +113,7 @@ void Pass_sample::do_wirecount(LGraph *g, int indent) {
 }
 
 void Pass_sample::compute_histogram(LGraph *g) {
-  Lbench b("pass.sample.compute_histogram");
+  Lbench b("pass.SAMPLE_compute_histogram");
 
   std::map<Ntype_op, int> histogram;
 
@@ -133,7 +133,7 @@ void Pass_sample::compute_histogram(LGraph *g) {
 }
 
 void Pass_sample::compute_max_depth(LGraph *g) {
-  Lbench b("pass.sample.max_depth");
+  Lbench b("pass.SAMPLE_max_depth");
 
   absl::flat_hash_map<Node::Compact, int> depth;
 
@@ -153,7 +153,7 @@ void Pass_sample::compute_max_depth(LGraph *g) {
 }
 
 void Pass_sample::annotate_placement(LGraph *g) {
-  Lbench b("pass.sample.replace_inline");
+  Lbench b("pass.SAMPLE_replace_inline");
 
   int x_pos = 0;
 

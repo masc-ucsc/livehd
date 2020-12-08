@@ -12,7 +12,7 @@ int main(int argc, char **argv) {
     exit(1);
   }
 
-  Lbench bench("prp_test");
+  Lbench bench("inou.PYROPE_prp");
 
   Prp scanner;
 

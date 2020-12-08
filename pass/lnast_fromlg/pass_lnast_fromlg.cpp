@@ -29,7 +29,7 @@ void Pass_lnast_fromlg::setup() {
 Pass_lnast_fromlg::Pass_lnast_fromlg(const Eprp_var& var) : Pass("pass.lnast_fromlg", var) {}
 
 void Pass_lnast_fromlg::trans(Eprp_var& var) {
-  Lbench b("pass.lnast_fromlg");
+  Lbench b("pass.LNAST_FROMLG_trans");
 
   Pass_lnast_fromlg p(var);
 

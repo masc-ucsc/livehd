@@ -2219,7 +2219,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
         fmt::print("inou.yosys.tolg module:{}\n", mod_name);
 #endif
 
-        Lbench b("inou.yosys.tolg." + mod_name);
+        Lbench b("inou.YOSYS_tolg_" + mod_name);
 
         for (auto port : module->ports) {
           RTLIL::Wire *wire = module->wire(port);
