@@ -12,6 +12,10 @@ void Graph_core::add_edge(const Index_ID sink_id, const Index_ID driver_id) {
   Graph_core::Entry16* sink = &table.at(sink_id);
   Graph_core::Entry16* driver = &table.at(driver_id);
 
+  if (has_edge(sink_id, driver_id)) {
+    return;
+  }
+
   int8_t d_to_s = sink_id - driver_id;
   int8_t s_to_d = driver_id - sink_id;
 
@@ -115,4 +119,13 @@ void Graph_core::del(const Index_ID s) {
   table.at(s).set_writable();
   for (int i = 0; i < std::size(table.at(s).edge_storage); i++)
     table.at(s).edge_storage[i] = 0;
+}
+
+bool Graph_core::has_edge(Index_ID a, Index_ID b) {
+  std::vector<Index_ID> a_edge = this->get_edges(a);
+  std::vector<Index_ID> b_edge = this->get_edges(b);
+
+  bool in_a = std::find(a_edge.begin(), a_edge.end(), b) != a_edge.end();
+  bool in_b = std::find(b_edge.begin(), b_edge.end(), a) != b_edge.end();
+  return in_a || in_b;
 }

@@ -24,13 +24,15 @@ public:
     constexpr Fast_iter(Graph_core *_gc, const Index_ID _id ) : gc(_gc), id(_id)   {}
     constexpr Fast_iter(const Fast_iter &it) : gc(it.gc), id(it.id) {}
 
+    void set_index_id(Index_ID n) { id = n; }
+
     constexpr Fast_iter &operator=(const Fast_iter &it) {
       gc = it.gc;
       id = it.id;
       return *this;
     }
 
-    Fast_iter &operator++(); // call Graph_core::xx if needed
+    std::vector<Fast_iter>* &operator++();
 
     constexpr bool operator!=(const Fast_iter &other) const { assert(gc==other.gc); return id != other.id; }
     constexpr bool operator==(const Fast_iter &other) const { assert(gc==other.gc); return id == other.id; }
@@ -41,7 +43,7 @@ public:
   Index_iter() = delete;
   explicit Index_iter(Graph_core *_gc) : gc(_gc) {}
 
-  Fast_iter begin() const; // Find first elemnt in Graph_core
+  Fast_iter begin() const { return Fast_iter(gc, 0); } // Find first elemnt in Graph_core
   Fast_iter end() const { return Fast_iter(gc, 0); } // More likely 0 ID for end
 };
 
@@ -103,7 +105,7 @@ public:
     }
 
     bool is_writable() { return writable; }
-    bool set_writable() { writable = 1; }
+    void set_writable() { writable = 1; }
 
     void fill_inp(std::vector<Index_ID> &ev) const; // fill the list of edges to ev (requires expand)
     void fill_out(std::vector<Index_ID> &ev) const; // fill the list of edges to ev (requires expand)
@@ -158,8 +160,6 @@ public:
   uint8_t get_type(const Index_ID master_root_id) const { return table.at(master_root_id).get_type(); }  // set/get type on the master_root id (s or pointed by s)
   void    set_type(const Index_ID master_root_id, uint8_t type) { table.at(master_root_id).set_type(type); };
 
-
-
   Port_ID get_pid(const Index_ID master_root_id) const; // pid for master or 0 for master_root
 
   // Create a master root node
@@ -175,6 +175,12 @@ public:
       i = i + 1;
 
     return i;
+  }
+
+  bool has_edge(Index_ID a, Index_ID b);
+
+  Entry16 get_id(Index_ID id) {
+    return table.at(id);
   }
 };
 
