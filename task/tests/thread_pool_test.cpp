@@ -36,7 +36,7 @@ TEST_F(GTest1, interface) {
   for(int n=1;n<5;n=n+2) {
     total = 0;
 
-    Lbench bb(std::string("pool") + std::to_string(n));
+    Lbench bb("task.THREAD_POOL_pool" + std::to_string(n));
     Thread_pool pool(n);
     const int JOB_COUNT = 2000000;
 
@@ -60,7 +60,7 @@ TEST_F(GTest1, interface) {
 
 TEST_F(GTest1, bench) {
   {
-    Lbench bb("mpmc");
+    Lbench bb("task.THREAD_POOL_mpmc");
 
     mpmc<int> queue(256);
 
@@ -72,7 +72,7 @@ TEST_F(GTest1, bench) {
     }
   }
   {
-    Lbench bb("spmc");
+    Lbench bb("task.THREAD_POOL_spmc");
 
     spmc256<int> queue;
 
@@ -84,7 +84,7 @@ TEST_F(GTest1, bench) {
     }
   }
   {
-    Lbench bb("concurrentqueue");
+    Lbench bb("task.THREAD_POOL_concurrentqueue");
     moodycamel::ConcurrentQueue<int> queue(256);
 
     for (int i = 0; i < 10000000; ++i) {

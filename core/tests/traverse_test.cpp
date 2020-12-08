@@ -21,7 +21,7 @@ using testing::HasSubstr;
 class Setup_traverse : public Tree_lgdb_setup {
 protected:
   void check_lgraph_fwd() {
-    Lbench bench("check_lgraph_fwd");
+    Lbench bench("core.TRAVERSE_check_lgraph_fwd");
 
     I(lg_root);
 
@@ -98,7 +98,7 @@ protected:
 TEST_F(Setup_traverse, check_attributes) {
 
   populate_tree(10, 100, 0.5, true);
-  map_tree_to_lgraph();
+  map_tree_to_lgraph("core.TRAVERSE_check_attributes");
 
   I(lg_root);
 
@@ -117,7 +117,7 @@ TEST_F(Setup_traverse, check_attributes) {
 TEST_F(Setup_traverse, simple_check_fwd) {
 
   populate_tree(3, 12, 0.5, true);
-  map_tree_to_lgraph();
+  map_tree_to_lgraph("core.TRAVERSE_simple_check_fwd");
   Graph_library::sync_all();
 
   check_lgraph_fwd();
@@ -131,7 +131,7 @@ TEST_F(Setup_traverse, check_fwd) {
   for(int nlevels=3;nlevels<12;nlevels+=rint.max(4)+1) {
     for(int i=0;i<3;i++) {
       populate_tree(nlevels, 8+rint.max(nlevels*30*(1+i)), 0.5, true);
-      map_tree_to_lgraph();
+      map_tree_to_lgraph("core.TRAVERSE_check_fwd");
 
       check_lgraph_fwd();
     }

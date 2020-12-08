@@ -182,7 +182,7 @@ protected:
 
 TEST_F(Setup_lgraph, add_remove_inputs) {
 
-  Lbench b("lgraph_test.add_remove_inputs");
+  Lbench b("core.LGRAPH_add_remove_inputs");
 
   std::string_view lgdb = "lgdb_lgraph_test";
 

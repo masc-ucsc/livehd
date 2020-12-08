@@ -143,7 +143,14 @@ void Chunkify_verilog::elaborate() {
     }
   }
 
-  Lbench bench("live.parse " + format_name);
+  std::string bench_name;
+  bench_name.append("inou.LIVEPARSE_");
+  bench_name.append(path.data());
+  bench_name.append("_");
+  bench_name.append(std::to_string(get_token_pos()));
+  bench_name.append("_");
+  bench_name.append(format_name);
+  Lbench bench(bench_name);
 
   auto source = absl::StrCat(parse_path, "file_", format_name);
 

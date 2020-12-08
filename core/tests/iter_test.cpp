@@ -62,9 +62,9 @@ void check_test_order(LGraph *top) {
 }
 
 // performs Topological Sort on a given DAG
-void do_fwd_traversal(LGraph *lg) {
+void do_fwd_traversal(LGraph *lg, const std::string &name) {
   {
-    Lbench b("fast");
+    Lbench b("core.ITER_"+name+"_fast");
 
     setup_test_order();
     for (auto node : lg->fast(true)) {
@@ -76,7 +76,7 @@ void do_fwd_traversal(LGraph *lg) {
     }
   }
   {
-    Lbench b("fwd");
+    Lbench b("core.ITER_"+name+"_fwd");
 
     setup_test_order();
     for (auto node : lg->forward(true)) {
@@ -212,7 +212,7 @@ bool fwd(int n) {
     setup_test_order();
 
     fmt::print("FWD {}\n", gname);
-    do_fwd_traversal(g);
+    do_fwd_traversal(g, "fwd"+std::to_string(i+1));
 
     check_test_order(g);
   }
@@ -342,7 +342,7 @@ void simple_line() {
 
   setup_test_order();
 
-  do_fwd_traversal(g0);
+  do_fwd_traversal(g0, "simple_line");
 
   check_test_order(g0);
 
@@ -351,7 +351,7 @@ void simple_line() {
   delete s2;
 }
 
-void simple() {
+void simple(int num) {
   std::string gname = "simple_iter";
   LGraph *g     = LGraph::create("lgdb_iter_test", gname, "test");
   LGraph *sub_g = LGraph::create("lgdb_iter_test", "sub", "test");
@@ -489,7 +489,7 @@ void simple() {
 
   setup_test_order();
 
-  do_fwd_traversal(g);
+  do_fwd_traversal(g, "simple"+std::to_string(num+1));
 
   check_test_order(g);
 

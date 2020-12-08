@@ -19,7 +19,7 @@ using google::protobuf::util::TimeUtil;
  * github.com/freechipsproject/firrtl/blob/master/src/main/proto/firrtl.proto */
 
 void Inou_firrtl::toLNAST(Eprp_var& var) {
-  Lbench b("inou.firrtl.tolnast");
+  Lbench b("inou.FIRRTL_tolnast");
 
   Inou_firrtl p(var);
 
