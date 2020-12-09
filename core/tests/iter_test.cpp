@@ -499,7 +499,7 @@ void simple(int num) {
 
 int main() {
 
-#if 1
+#if 0
   simple_line();
 
   simple();
