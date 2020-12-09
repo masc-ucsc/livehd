@@ -168,6 +168,12 @@ saving, and a sparse set is by definition small so not significant overhead.
 Being able handle Node/Pins directly will make the creation faster (building
 from a compact with hierarchy needs to find the current_g which is slow).
 
+## ACT (Async) output
+
+Once pyrope with Fluid is in the flow, we could use Pyrope to program async designs too.
+It may be interesting to output ACT (https://avlsi.csl.yale.edu/act/doku.php) to interface
+with AVLSI flow.
+
 ## New Memoize Map
 
 Runtime (no persistence) memoization to reduce costly ops. Fixed size at
