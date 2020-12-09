@@ -105,6 +105,7 @@ cc_test(
          "@graph//:graph",
          "@range-v3//:range-v3",
          "@fmt//:fmt",
+	 ":tree_lgdb_test",
         ],
     )
 
