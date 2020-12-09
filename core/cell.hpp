@@ -55,6 +55,7 @@ enum class Ntype_op : uint8_t {
 
   AttrSet,
   AttrGet,
+  FirMap,
 
   CompileErr,  // Indicate a compile error during a pass
 

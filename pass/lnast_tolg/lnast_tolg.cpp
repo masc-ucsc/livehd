@@ -1361,7 +1361,30 @@ void Lnast_tolg::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_v
   }
 }
 
+void Lnast_tolg::process_firrtl_op_connection(LGraph *lg, const Lnast_nid &lnidx_fc) {
+  auto fc_node = lg->create_node(Ntype_op::FirMap);
+  uint i = 0;
+  for (const auto& child : lnast->children(lnidx_fc)) {
+    auto name = lnast->get_sname(child);
+    if (child == lnast->get_first_child(lnidx_fc)) {
+      fc_node.setup_driver_pin().set_name(name);
+      name2dpin[name] = fc_node.setup_driver_pin();
+      setup_dpin_ssa(name2dpin[name], lnast->get_vname(child), lnast->get_subs(child));
+    } else {
+      auto ref_dpin = setup_ref_node_dpin(lg, child);
+      ref_dpin.connect_sink(fc_node.setup_sink_pin("A"));
+    }
+    /* i++; */
+  }
+}
+
+
 void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc) {
+  if (lnast->get_vname(lnidx_fc).substr(0, 5) == "__fop") {
+    process_firrtl_op_connection(lg, lnidx_fc);
+    return;
+  }
+
   auto c0_fc        = lnast->get_first_child(lnidx_fc);
   auto ret_name     = lnast->get_sname(c0_fc);
   auto func_name    = lnast->get_vname(lnast->get_sibling_next(c0_fc));
