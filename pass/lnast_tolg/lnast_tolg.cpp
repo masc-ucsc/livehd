@@ -1362,26 +1362,34 @@ void Lnast_tolg::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_v
 }
 
 void Lnast_tolg::process_firrtl_op_connection(LGraph *lg, const Lnast_nid &lnidx_fc) {
-  /* auto fc_node = lg->create_node(Ntype_op::FirMap); */
-  auto fc_node = lg->create_node_sub("cat");
-  fc_node.set_name(lnast->get_vname(lnidx_fc));
+  auto op = lnast->get_vname(lnidx_fc);
+  Node fc_node;
+  fc_node = lg->create_node_sub(op);
+  int i = 0;
   for (const auto& child : lnast->children(lnidx_fc)) {
     auto name = lnast->get_sname(child);
     if (child == lnast->get_first_child(lnidx_fc)) {
       fc_node.setup_driver_pin("Y").set_name(name);
-      name2dpin[name] = fc_node.setup_driver_pin();
+      name2dpin[name] = fc_node.setup_driver_pin("Y");
       setup_dpin_ssa(name2dpin[name], lnast->get_vname(child), lnast->get_subs(child));
     } else {
       auto ref_dpin = setup_ref_node_dpin(lg, child);
-      ref_dpin.connect_sink(fc_node.setup_sink_pin("A"));
+      switch (i) {
+        case 1: ref_dpin.connect_sink(fc_node.setup_sink_pin("A")); break;
+        case 2: ref_dpin.connect_sink(fc_node.setup_sink_pin("B")); break;
+        default: I(false, "firrtl_op should have 2 input edges at most!"); 
+      }
     }
+    i++;
   }
-  fmt::print("DEBUG create fc_node:{}, fc_node dpin:{}\n", fc_node.debug_name(), fc_node.get_driver_pin().get_name());
+  fmt::print("DEBUG create fc_node:{}, fc_node dpin:{}\n", fc_node.debug_name(), fc_node.get_driver_pin("Y").get_name());
 }
 
 
 void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc) {
-  if (lnast->get_vname(lnidx_fc).substr(0, 5) == "__fop") {
+  auto fcname = lnast->get_vname(lnidx_fc);
+  std::size_t pos = fcname.find("__fir"); // FIXME->sh: use ends_with() when C++20
+  if (fcname.substr(pos) == "__fir") {
     process_firrtl_op_connection(lg, lnidx_fc);
     return;
   }
@@ -1451,7 +1459,7 @@ void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc)
   subg_node.set_name(absl::StrCat(ret_name, ":", func_name));
   /* fmt::print("subg node_name:{}\n", subg_node.get_name()); */
   subgraph_io_connection(lg, sub, arg_tup_name, ret_name, subg_node);
-};
+}
 
 
 void Lnast_tolg::process_ast_func_def_op (LGraph *lg, const Lnast_nid &lnidx) {

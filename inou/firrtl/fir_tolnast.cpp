@@ -1311,67 +1311,67 @@ void Inou_firrtl::HandleTwoExprPrimOp(Lnast& lnast, const firrtl::FirrtlPB_Expre
 
   switch (op.op()) {
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_ADD: {
-      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__fop_add"));
+      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__add_fir"));
       break;
     }
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_SUB: {
-      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__fop_sub"));
+      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__sub_fir"));
       break;
     }
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_TIMES: {
-      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__fop_mul"));
+      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__mul_fir"));
       break;
     }
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_DIVIDE: {
-      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__fop_div"));
+      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__div_fir"));
       break;
     }
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_REM: {
-      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__fop_rem"));
+      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__rem_fir"));
       break;
     }
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_DYNAMIC_SHIFT_LEFT: {
-      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__fop_dshl"));
+      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__dshl_fir"));
       break;
     }
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_DYNAMIC_SHIFT_RIGHT: {
-      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__fop_dshr"));
+      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__dshr_fir"));
       break;
     }
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_BIT_AND: {
-      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__fop_andr"));
+      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__andr_fir"));
       break;
     }
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_BIT_OR: {
-      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__fop_orr"));
+      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__orr_fir"));
       break;
     }
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_BIT_XOR: {
-      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__fop_xorr"));
+      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__xorr_fir"));
       break;
     }
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_LESS: {
-      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__fop_lt"));
+      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__lt_fir"));
       break;
     }
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_LESS_EQ: {
-      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__fop_leq"));
+      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__leq_fir"));
       break;
     }
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_GREATER: {
-      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__fop_gt"));
+      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__gt_fir"));
       break;
     }
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_GREATER_EQ: {
-      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__fop_geq"));
+      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__geq_fir"));
       break;
     }
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_EQUAL: {
-      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__fop_eq"));
+      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__eq_fir"));
       break;
     }
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_NOT_EQUAL: {
-      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__fop_neq"));
+      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__neq_fir"));
       break;
     }
     default: {
