@@ -216,11 +216,6 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
         default: return "invalid";
       }
       break;
-    case Ntype_op::FirMap:
-      if (pid==0)
-        return "A";
-      return "invalid";
-      break;
     case Ntype_op::IO:
     case Ntype_op::CompileErr:
       switch(pid) {

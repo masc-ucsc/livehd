@@ -85,7 +85,7 @@ void Lcompiler::add(std::shared_ptr<Lnast> ln) {
 
 
 void Lcompiler::global_io_connection() {
-  Graphviz gv(true, false, odir);
+  Graphviz gv(true,  false, odir);
   Cprop    cp(false, true);               // hier = false, at_gioc = true 
   Bitwidth bw(true, 10, global_bwmap);    // hier = false, max_iters = 10
   Gioc     gioc(path);

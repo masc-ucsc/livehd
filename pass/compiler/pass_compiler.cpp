@@ -5,12 +5,13 @@ static Pass_plugin sample("pass_compiler", Pass_compiler::setup);
 
 
 void Pass_compiler::setup() {
-  Eprp_method m1("pass.compiler", "lnast to lgraph compilation", &Pass_compiler::compile);
-  m1.add_label_optional("top",   "specify the top module");
-  m1.add_label_optional("path",  "lgraph path", "lgdb");
-  m1.add_label_optional("files", "files to process (comma separated)");
-  m1.add_label_optional("odir",  "output directory", ".");
-  m1.add_label_optional("gviz",  "dump graphviz");
+  Eprp_method m1("pass.compiler", "LiveHD multi-HDLs compilation, default language: Pyrope", &Pass_compiler::compile);
+  m1.add_label_optional("path",   "lgraph path", "lgdb");
+  m1.add_label_optional("files",  "files to process (comma separated)");
+  m1.add_label_optional("firrtl", "is firrtl front-end");
+  m1.add_label_optional("top",    "specify the top module");
+  m1.add_label_optional("odir",   "output directory", ".");
+  m1.add_label_optional("gviz",   "dump graphviz");
 
   register_pass(m1);
 }
@@ -37,13 +38,33 @@ std::string Pass_compiler::check_option_top(Eprp_var &var) {
   return top; 
 } 
 
+
+bool Pass_compiler::check_option_firrtl(Eprp_var &var) { 
+  bool is_firrtl; 
+  if (var.has_label("firrtl")) { 
+    auto fir = var.get("firrtl"); 
+    is_firrtl = fir != "false" && fir != "0"; 
+  } else { 
+    is_firrtl = false; 
+  } 
+  return is_firrtl; 
+} 
+
+
+
 void Pass_compiler::compile(Eprp_var &var) {
   Pass_compiler pc(var);
-  auto path = pc.get_path(var);
-  auto odir = pc.get_odir(var);
-  auto top  = pc.check_option_top(var);
-  bool gviz = pc.check_option_gviz(var);
+  auto path   = pc.get_path(var);
+  auto odir   = pc.get_odir(var);
+  auto top    = pc.check_option_top(var);
+  bool gviz   = pc.check_option_gviz(var);
+  bool is_fir = pc.check_option_firrtl(var);
 
+  if (is_fir) {
+    I(top != "", "firrtl front-end must specify the top firrtl name!");
+    auto lg = LGraph::create(path, top, var.lnasts.front()->get_source());
+    setup_firmap_library(lg);   
+  }
 
   fmt::print("top module_name is:{}\n", top);
   Lcompiler compile(path, odir, gviz);
@@ -56,7 +77,7 @@ void Pass_compiler::compile(Eprp_var &var) {
     }
 
     for (auto f : absl::StrSplit(files, ',')) {
-      Pass::warn("todo: start from prp parser");
+      Pass::warn("todo: start from prp parser:{}", f);
       /* compile.add(f); */
     }
   } else {
@@ -73,4 +94,20 @@ void Pass_compiler::compile(Eprp_var &var) {
   var.add(lgs);
 }
 
+void Pass_compiler::setup_firmap_library(LGraph *lg) {
+  auto &lg_fir_add = lg->ref_library()->setup_sub("__add_fir", "-");
+  lg_fir_add.add_input_pin("A");
+  lg_fir_add.add_input_pin("B");
+  lg_fir_add.add_output_pin("Y");
+  
 
+  auto &lg_fir_sub = lg->ref_library()->setup_sub("__sub_fir", "-");
+  lg_fir_sub.add_input_pin("A");
+  lg_fir_sub.add_input_pin("B");
+  lg_fir_sub.add_output_pin("Y");
+
+
+
+
+  lg->ref_library()->sync();
+}
