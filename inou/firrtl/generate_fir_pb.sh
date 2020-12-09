@@ -6,12 +6,16 @@
 
 
 
-pts_todo='Xor10k'
 pts='GCD_3bits GCD Coverage Shifts AddNot Decrementer PlusAnd RegXor Trivial TrivialArith Test1 Test2 Test3 
      Test4 Test5 Test6 SimpleBitOps Register RegisterSimple Flop ICache Ops Rob RocketCore HwachaSequencer 
-     BundleConnect MemoryController PlusAnd SubModule RWSmem Smem Smem_simple Blackbox Blackbox2 FPU '
+     BundleConnect MemoryController PlusAnd SubModule RWSmem Smem Smem_simple Blackbox Blackbox2 FPU'
 
-pts='Accumulator'
+pts='ShiftRegister SimpleALU Stack Tbl VecSearch Accumulator Counter 
+     DynamicMemorySearch LFSR16 Max2 MaxN Memo Mul Mux4 RealGCD SingleEvenFilter VecShiftRegister VecShiftRegisterParam
+     VecShiftRegisterSimple VendingMachine VendingMachineSwitch  Adder4 Adder ByteSelector Combinational Darken EnableShiftRegister FullAdder Functionality HiLoMultiplier Life 
+     Parity ResetShiftRegister Risc LogShifter'
+
+pts='MaxN'
 
 CHISEL_PATH=~/chisel3
 FIRRTL_PATH=~/firrtl

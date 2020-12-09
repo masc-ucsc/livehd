@@ -2,34 +2,24 @@
 rm -rf ./lgdb
 FIRRTL_LEVEL='lo'
 
-pts_todo='MemoryController Rob ICache HwachaSequencer'
 pts_long_lec='GCD'
-pts_handle_1st='regex Test3 Coverage'
 
-pts_tutorial='Adder4 Adder ByteSelector Combinational Darken EnableShiftRegister FullAdder Functionality HiLoMultiplier Life 
-              LogShifter Parity ResetShitRegister Risc Router ShiftRegister SimpleALU Stack Tbl VecSearch Accumulator Counter 
-              DynamicMemorySearch LFSR16 Max2 MaxN Memo Mul Mux4 RealGCD SingleEvenFilter VecShiftRegister VecShiftRegisterParam
-              VecShiftRegisterSimple VendingMachine VendingMachineSwitch'
+pts_todo_advanced='FPU ICache MemoryController RWSmem Smem Rob ICache
+HwachaSequencer RocketCore'
 
-pts='Decrementer RegXor TrivialAdd Test1 Test2 NotAnd Trivial Accumulator
-     BundleCombiner Flop Tail RegisterSimple Register TrivialArith GCD_3bits'
+pts_todo=' Shifts PlusAnd RegXor Test4 Test5 Test6 SimpleBitOps Ops
+BundleConnect Smem_simple SubModule Coverage AddNot Test3 MaxN Adder4 Adder
+ByteSelector Combinational Darken EnableShiftRegister FullAdder Functionality
+HiLoMultiplier Life LogShifter Parity ResetShiftRegister Risc Router
+ShiftRegister SimpleALU Stack Tbl VecSearch Counter DynamicMemorySearch MaxN
+Memo Mul Mux4 RealGCD SingleEvenFilter VecShiftRegister VecShiftRegisterParam
+VecShiftRegisterSimple VendingMachine VendingMachineSwitch'
 
-pts_hier='FinalValTest FinalVal2Test'
-pts_hier3='SubModule'
-pts_hier4='BundleConnect'
-pts_hier='FPU'
-pts_hier9='RocketCore'
+pts='Decrementer TrivialAdd Test1 Test2 NotAnd Trivial Accumulator Flop
+Tail RegisterSimple Register TrivialArith GCD_3bits Max2'
 
-pts='AddNot'
-pts='Test3'
-
-#SimpleBitOps Ops -- parity and mod op not in lnast_tolg
-#HwachaSequencer -- printf, pad, stop
-#SubModule BundleConnect -- submodules
-#Test3 -- fails because of DCE
-#Test4 -- as_... ops in FIRRTL
-
-
+pts='LFSR16'
+pts='TrivialAdd'
 
 
 LGSHELL=./bazel-bin/main/lgshell
@@ -111,20 +101,9 @@ firrtl_test() {
     fi
   done
 
-    # rm -f *.v
-    # rm -f *.dot
-    # rm -f lgdb/*
-    # rm -f yosys.*
+  rm -f *.v
+  rm -f *.dot
+  rm -f lgcheck*
 }
 
 firrtl_test "$pts"
-# If testing a module with submodules in it, put the name of the
-# top module as the first argument then list all the submodules
-# in the entire design as the second argument, and "hier" as the
-# third agument.
-# firrtl_test "$pts_hier"  "Sum" "hier"
-# firrtl_test "$pts_hier2" "Sum" "hier"
-# firrtl_test "$pts_hier3" "SubModuleSubMod" "hier"
-# firrtl_test "$pts_hier4" "BundleConnectSubMod" "hier"
-
-# firrtl_test "$pts_hier9" "IBuf CSRFile BreakpointUnit ALU MulDiv RVCExpander" "hier"
