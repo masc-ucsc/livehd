@@ -13,7 +13,7 @@
 #include "mmap_map.hpp"
 #include "mmap_vector.hpp"
 
-#define NITERS 10
+#define NITERS 7
 #define NIT 2
 
 void use_std_vector(int max) {

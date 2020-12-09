@@ -133,40 +133,16 @@ master_root: (13 bytes or 104bits -2 code)
 0: 4x15+3x14  (7)
 
 
-## New Visitor Set
+## Visitor Set cleanup (mmap_vset)
 
-Nodes and Node_pins IDs are likely to be continuous. Instead of using a normal set map, we could optimize
-to use a map with 64 bitmap entry.
+Fix the API to use the same has mmap_map
 
-
-```
-Visitor_set<Node, hier> set("path","file"); // persistant
-Visitor_set<Node, hier> set(top_lg); // ephemeral (not persistant)
-```
-
-```
-set.insert(node);
-set.contains(node);
-for(auto node:set) 
-  ...
-}
-set.insert(pin);
-set.contains(pin);
-for(auto pin:set) 
-  ...
-}
-```
-
-For the set to create nodes (with pointers) it needs to access the
-graph_library when unloaded (only if persistent).
-
-The index in both pin and node is (ID>>6), and then there is a uint64_t
-presence bit for each ID. The reason is that a dense set will have ~32x space
-saving, and a sparse set is by definition small so not significant overhead.
-
-
-Being able handle Node/Pins directly will make the creation faster (building
-from a compact with hierarchy needs to find the current_g which is slow).
+* find: returns an iterator
+* has: has a return true/false
+* contains: to make it easy to port back/forth with abseil is the same as has
+* begin/end to allow an iterator
+* Add tests with Node_pin::Compact and Node::Compact
+* Improve the unit test running against abseil
 
 ## ACT (Async) output
 

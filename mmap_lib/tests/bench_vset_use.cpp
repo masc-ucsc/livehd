@@ -10,8 +10,8 @@
 #include "mmap_vset.hpp"
 #include "mmap_map.hpp"
 
-#define BIG_BENCH 500
-#define SMALL_BENCH 200
+#define BIG_BENCH 400
+#define SMALL_BENCH 400
 
 
 /*
@@ -22,9 +22,9 @@ void mmap_vset(int max, std::string_view name) {
   Lrand<int> rng;
 
   std::string type_test("mmap_vset ");
-	if (name.empty()) { type_test += "(effemeral)"; } 
+	if (name.empty()) { type_test += "(effemeral)"; }
 	else { type_test += "(persistent)"; }
-  
+
 	Lbench b(type_test);
 	mmap_lib::vset<uint32_t, uint32_t> set("lgdb_bench", name);
 	//mmap_lib::map<uint32_t, uint64_t> map("lgdb_bench", name);
@@ -33,7 +33,6 @@ void mmap_vset(int max, std::string_view name) {
 
 	int conta = 0;
 
-	std::cout << "Max inserted is: " << set.get_max() << std::endl;
 	// counting
 	std::cout << "Counting...  ";
 	for (auto it = set.bucket_begin(), end = set.bucket_end(); it != end; ++it) {
@@ -48,8 +47,7 @@ void mmap_vset(int max, std::string_view name) {
 
 	std::cout << "Inserting 0 - " << (SMALL_BENCH-1) << " into vset...\n";
 	for(int i = 0; i < SMALL_BENCH; ++i) { set.insert(i); }
-	std::cout << "Max inserted is: " << set.get_max() << std::endl;
-	
+
 	std::cout << "Counting...  ";
 	for (auto it = set.bucket_begin(), end = set.bucket_end(); it != end; ++it) {
 		auto hold = set.bucket_get_val(it);
@@ -59,19 +57,11 @@ void mmap_vset(int max, std::string_view name) {
 		}
 	}
 	std::cout << "After insert conta: " << conta << "\n\n";
-	
+
 	conta = 0; // reset
-	
-	if (set.is_end(0)) { std::cout << "oops1\n"; }
-	if (set.is_end(12)) { std::cout << "oops2\n"; }
-	if (set.is_end(78)) { std::cout << "oops4\n"; }
-	if (set.is_end(178)) { std::cout << "oops5\n"; }
-	if (set.is_end(199)) { std::cout << "End detected \n"; }
-	if (set.is_end(200)) { std::cout << "oops6\n"; }
 
 	std::cout << "Erasing 0 - " << (SMALL_BENCH-1) << " from vset...\n";
 	for(int i = 0; i < SMALL_BENCH; ++i) { set.erase(i); }
-	std::cout << "Max inserted is: " << set.get_max() << "\n\n";
 
 	std::cout << "Counting...  ";
 	for (auto it = set.bucket_begin(), end = set.bucket_end(); it != end; ++it) {
@@ -80,12 +70,12 @@ void mmap_vset(int max, std::string_view name) {
 			if ((hold & 1) == 1) { conta++; }
 			hold = hold >> 1;
 		}
-	}	
+	}
 	std::cout << "After erase conta: " << conta << std::endl;
 
 	conta = 0; // reset
 
-	std::cout << "sanity check (printing bucket_len): " << set.bucket_size() << std::endl;	
+	std::cout << "sanity check (printing bucket_len): " << set.bucket_size() << std::endl;
 
 	std::cout << "===== vset BENCH =====" << std::endl;
 
@@ -105,13 +95,12 @@ void mmap_vset(int max, std::string_view name) {
       auto pos = rng.max(max);
       set.insert(pos);
 
-      pos = rng.max(max); 
+      pos = rng.max(max);
 			set.erase(pos);
 
       pos = rng.max(max);
 
-      if (set.is_end(pos))
-        set.erase(pos);
+      set.erase(pos);
     }
   }
 
@@ -133,13 +122,11 @@ void mmap_vset(int max, std::string_view name) {
 				if ((hold & 1) == 1) { conta++; }
 				hold = hold >> 1;
 			}
-		}	
+		}
     set.insert(rng.max(max));
 
     auto pos = rng.max(max);
-    if (set.is_end(pos)) {
-      set.erase(pos);
-		}
+    set.erase(pos);
   }
   b.sample("traversal sparse");
 
@@ -164,7 +151,7 @@ void mmap_vset(int max, std::string_view name) {
 				if ((hold & 1) == 1) { conta++; }
 				hold = hold >> 1;
 			}
-		}	
+		}
   }
   b.sample("traversal dense");
   printf("inserts random %d\n",conta);
@@ -175,9 +162,9 @@ void mmap_vset(int max, std::string_view name) {
 
 
 int main(int argc, char **argv) {
-  
+
   bool run_mmap_vset = false;
-  
+
 	if (argc>1) {
     if (strcasecmp(argv[1],"vset") == 0) {
       run_mmap_vset = true;
