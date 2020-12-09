@@ -1,0 +1,221 @@
+$ for i in 1 2 3 4 5 6 7 8 9 10; do ./bazel-bin/core/graph_bench ./lgdb/ add_${i}0000;done
+benchmark the graph
+benchmark the graph lgdb:./lgdb/ name:add_10000
+Converting to boosted graph and NGraph
+NGraph, nodes: 50442, edges: 61034
+Lgraph, nodes: 50442, edges: 61034
+Boosted graph, nodes: 50444, edges: 61034
+Benchmark LGraph, boosted graph, and NGraph
+--------------------------Nodes--------------------
+Traverse LGraph 10000 times took 7s
+Traverse boosted graph 10000 times took 3s
+Traverse NGraph 10000 times took 11s
+--------------------------Nodes+in--------------------
+Traverse LGraph 10000 times took 34s
+Traverse boosted graph 10000 times took 15s
+Traverse NGraph 10000 times took 25s
+--------------------------Nodes+out--------------------
+Traverse LGraph 10000 times took 31s
+Traverse boosted graph 10000 times took 14s
+Traverse NGraph 10000 times took 25s
+--------------------------Nodes+in+out--------------------
+Traverse LGraph 10000 times took 60s
+Traverse boosted graph 10000 times took 31s
+Traverse NGraph 10000 times took 36s
+122068
+benchmark the graph
+benchmark the graph lgdb:./lgdb/ name:add_20000
+Converting to boosted graph and NGraph
+NGraph, nodes: 100858, edges: 122048
+Lgraph, nodes: 100858, edges: 122048
+Boosted graph, nodes: 100860, edges: 122048
+Benchmark LGraph, boosted graph, and NGraph
+--------------------------Nodes--------------------
+Traverse LGraph 10000 times took 15s
+Traverse boosted graph 10000 times took 6s
+Traverse NGraph 10000 times took 24s
+--------------------------Nodes+in--------------------
+Traverse LGraph 10000 times took 68s
+Traverse boosted graph 10000 times took 54s
+Traverse NGraph 10000 times took 57s
+--------------------------Nodes+out--------------------
+Traverse LGraph 10000 times took 62s
+Traverse boosted graph 10000 times took 48s
+Traverse NGraph 10000 times took 44s
+--------------------------Nodes+in+out--------------------
+Traverse LGraph 10000 times took 121s
+Traverse boosted graph 10000 times took 100s
+Traverse NGraph 10000 times took 83s
+244096
+benchmark the graph
+benchmark the graph lgdb:./lgdb/ name:add_30000
+Converting to boosted graph and NGraph
+NGraph, nodes: 151293, edges: 183074
+Lgraph, nodes: 151293, edges: 183074
+Boosted graph, nodes: 151295, edges: 183074
+Benchmark LGraph, boosted graph, and NGraph
+--------------------------Nodes--------------------
+Traverse LGraph 10000 times took 21s
+Traverse boosted graph 10000 times took 10s
+Traverse NGraph 10000 times took 47s
+--------------------------Nodes+in--------------------
+Traverse LGraph 10000 times took 103s
+Traverse boosted graph 10000 times took 109s
+Traverse NGraph 10000 times took 107s
+--------------------------Nodes+out--------------------
+Traverse LGraph 10000 times took 93s
+Traverse boosted graph 10000 times took 95s
+Traverse NGraph 10000 times took 76s
+--------------------------Nodes+in+out--------------------
+Traverse LGraph 10000 times took 182s
+Traverse boosted graph 10000 times took 166s
+Traverse NGraph 10000 times took 147s
+366148
+benchmark the graph
+benchmark the graph lgdb:./lgdb/ name:add_40000
+Converting to boosted graph and NGraph
+NGraph, nodes: 201710, edges: 244088
+Lgraph, nodes: 201710, edges: 244088
+Boosted graph, nodes: 201712, edges: 244088
+Benchmark LGraph, boosted graph, and NGraph
+--------------------------Nodes--------------------
+Traverse LGraph 10000 times took 31s
+Traverse boosted graph 10000 times took 13s
+Traverse NGraph 10000 times took 85s
+--------------------------Nodes+in--------------------
+Traverse LGraph 10000 times took 137s
+Traverse boosted graph 10000 times took 151s
+Traverse NGraph 10000 times took 166s
+--------------------------Nodes+out--------------------
+Traverse LGraph 10000 times took 124s
+Traverse boosted graph 10000 times took 134s
+Traverse NGraph 10000 times took 116s
+--------------------------Nodes+in+out--------------------
+Traverse LGraph 10000 times took 245s
+Traverse boosted graph 10000 times took 245s
+Traverse NGraph 10000 times took 220s
+488176
+benchmark the graph
+benchmark the graph lgdb:./lgdb/ name:add_50000
+Converting to boosted graph and NGraph
+NGraph, nodes: 252125, edges: 305102
+Lgraph, nodes: 252125, edges: 305102
+Boosted graph, nodes: 252127, edges: 305102
+Benchmark LGraph, boosted graph, and NGraph
+--------------------------Nodes--------------------
+Traverse LGraph 10000 times took 35s
+Traverse boosted graph 10000 times took 16s
+Traverse NGraph 10000 times took 128s
+--------------------------Nodes+in--------------------
+Traverse LGraph 10000 times took 177s
+Traverse boosted graph 10000 times took 217s
+Traverse NGraph 10000 times took 224s
+--------------------------Nodes+out--------------------
+Traverse LGraph 10000 times took 161s
+Traverse boosted graph 10000 times took 188s
+Traverse NGraph 10000 times took 161s
+--------------------------Nodes+in+out--------------------
+Traverse LGraph 10000 times took 309s
+Traverse boosted graph 10000 times took 320s
+Traverse NGraph 10000 times took 295s
+610204
+benchmark the graph
+benchmark the graph lgdb:./lgdb/ name:add_60000
+Converting to boosted graph and NGraph
+NGraph, nodes: 302546, edges: 366116
+Lgraph, nodes: 302546, edges: 366116
+Boosted graph, nodes: 302548, edges: 366116
+Benchmark LGraph, boosted graph, and NGraph
+--------------------------Nodes--------------------
+Traverse LGraph 10000 times took 42s
+Traverse boosted graph 10000 times took 21s
+Traverse NGraph 10000 times took 174s
+--------------------------Nodes+in--------------------
+Traverse LGraph 10000 times took 205s
+Traverse boosted graph 10000 times took 266s
+Traverse NGraph 10000 times took 280s
+--------------------------Nodes+out--------------------
+Traverse LGraph 10000 times took 186s
+Traverse boosted graph 10000 times took 229s
+Traverse NGraph 10000 times took 205s
+--------------------------Nodes+in+out--------------------
+Traverse LGraph 10000 times took 363s
+Traverse boosted graph 10000 times took 384s
+Traverse NGraph 10000 times took 360s
+732232
+benchmark the graph
+benchmark the graph lgdb:./lgdb/ name:add_70000
+Converting to boosted graph and NGraph
+NGraph, nodes: 352949, edges: 427130
+Lgraph, nodes: 352949, edges: 427130
+Boosted graph, nodes: 352951, edges: 427130
+Benchmark LGraph, boosted graph, and NGraph
+--------------------------Nodes--------------------
+Traverse LGraph 10000 times took 50s
+Traverse boosted graph 10000 times took 25s
+Traverse NGraph 10000 times took 214s
+--------------------------Nodes+in--------------------
+Traverse LGraph 10000 times took 240s
+Traverse boosted graph 10000 times took 288s
+Traverse NGraph 10000 times took 337s
+--------------------------Nodes+out--------------------
+Traverse LGraph 10000 times took 220s
+Traverse boosted graph 10000 times took 269s
+Traverse NGraph 10000 times took 247s
+--------------------------Nodes+in+out--------------------
+Traverse LGraph 10000 times took 424s
+Traverse boosted graph 10000 times took 448s
+Traverse NGraph 10000 times took 415s
+854260
+benchmark the graph
+benchmark the graph lgdb:./lgdb/ name:add_80000
+Converting to boosted graph and NGraph
+NGraph, nodes: 403377, edges: 488144
+Lgraph, nodes: 403377, edges: 488144
+Boosted graph, nodes: 403379, edges: 488144
+Benchmark LGraph, boosted graph, and NGraph
+--------------------------Nodes--------------------
+Traverse LGraph 10000 times took 58s
+Traverse boosted graph 10000 times took 31s
+Traverse NGraph 10000 times took 257s
+--------------------------Nodes+in--------------------
+Traverse LGraph 10000 times took 285s
+Traverse boosted graph 10000 times took 344s
+  Traverse NGraph 10000 times took 392s
+--------------------------Nodes+out--------------------
+Traverse LGraph 10000 times took 267s
+Traverse boosted graph 10000 times took 319s
+Traverse NGraph 10000 times took 294s
+--------------------------Nodes+in+out--------------------
+Traverse LGraph 10000 times took 496s
+Traverse boosted graph 10000 times took 532s
+Traverse NGraph 10000 times took 500s
+976288
+benchmark the graph
+benchmark the graph lgdb:./lgdb/ name:add_90000
+Converting to boosted graph and NGraph
+NGraph, nodes: 453792, edges: 549158
+Lgraph, nodes: 453792, edges: 549158
+Boosted graph, nodes: 453794, edges: 549158
+Benchmark LGraph, boosted graph, and NGraph
+--------------------------Nodes--------------------
+Traverse LGraph 10000 times took 67s
+Traverse boosted graph 10000 times took 38s
+Traverse NGraph 10000 times took 299s
+--------------------------Nodes+in--------------------
+Traverse LGraph 10000 times took 307s
+Traverse boosted graph 10000 times took 412s
+Traverse NGraph 10000 times took 452s
+--------------------------Nodes+out--------------------
+Traverse LGraph 10000 times took 288s
+Traverse boosted graph 10000 times took 376s
+Traverse NGraph 10000 times took 342s
+--------------------------Nodes+in+out--------------------
+Traverse LGraph 10000 times took 544s
+Traverse boosted graph 10000 times took 616s
+Traverse NGraph 10000 times took 558s
+1098316
+benchmark the graph
+benchmark the graph lgdb:./lgdb/ name:add_100000
+Converting to boosted graph and NGraph
+Segmentation fault
