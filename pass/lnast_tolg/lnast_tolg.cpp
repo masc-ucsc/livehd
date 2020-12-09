@@ -1362,20 +1362,21 @@ void Lnast_tolg::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_v
 }
 
 void Lnast_tolg::process_firrtl_op_connection(LGraph *lg, const Lnast_nid &lnidx_fc) {
-  auto fc_node = lg->create_node(Ntype_op::FirMap);
-  uint i = 0;
+  /* auto fc_node = lg->create_node(Ntype_op::FirMap); */
+  auto fc_node = lg->create_node_sub("cat");
+  fc_node.set_name(lnast->get_vname(lnidx_fc));
   for (const auto& child : lnast->children(lnidx_fc)) {
     auto name = lnast->get_sname(child);
     if (child == lnast->get_first_child(lnidx_fc)) {
-      fc_node.setup_driver_pin().set_name(name);
+      fc_node.setup_driver_pin("Y").set_name(name);
       name2dpin[name] = fc_node.setup_driver_pin();
       setup_dpin_ssa(name2dpin[name], lnast->get_vname(child), lnast->get_subs(child));
     } else {
       auto ref_dpin = setup_ref_node_dpin(lg, child);
       ref_dpin.connect_sink(fc_node.setup_sink_pin("A"));
     }
-    /* i++; */
   }
+  fmt::print("DEBUG create fc_node:{}, fc_node dpin:{}\n", fc_node.debug_name(), fc_node.get_driver_pin().get_name());
 }
 
 

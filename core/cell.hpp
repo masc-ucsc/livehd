@@ -107,6 +107,7 @@ protected:
 
     "AttrSet",
     "AttrGet",
+    "FirMap",
 
     "CompileErr",
 
