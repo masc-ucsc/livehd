@@ -1387,9 +1387,7 @@ void Lnast_tolg::process_firrtl_op_connection(LGraph *lg, const Lnast_nid &lnidx
 
 
 void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc) {
-  auto fcname = lnast->get_vname(lnidx_fc);
-  std::size_t pos = fcname.find("__fir"); // FIXME->sh: use ends_with() when C++20
-  if (fcname.substr(pos) == "__fir") {
+  if (lnast->get_vname(lnidx_fc).substr(0,5) == "__fir") {
     process_firrtl_op_connection(lg, lnidx_fc);
     return;
   }

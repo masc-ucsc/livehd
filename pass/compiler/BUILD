@@ -11,6 +11,7 @@ cc_library(
         "//pass/cprop:pass_cprop",
         "//pass/gioc:pass_gioc",
         "//pass/bitwidth:pass_bitwidth",
+        "//pass/firmap:pass_firmap",
         "//pass/lnast_tolg:pass_lnast_tolg",
         "//pass/common:pass",
         "//inou/graphviz:inou_graphviz",

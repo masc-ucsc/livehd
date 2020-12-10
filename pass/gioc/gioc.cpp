@@ -19,6 +19,9 @@ Gioc::Gioc(std::string_view _path) : path(_path){}
 void Gioc::do_trans(LGraph *lg) {
   for (auto node : lg->fast()) {
     if (node.get_type_op() == Ntype_op::Sub) {
+      if (node.get_name().substr(0, 5) == "__fir")
+        continue; 
+      
       auto *library = Graph_library::instance(path);
       auto subg_paras = split_name(node.get_name(), ":");
       auto &arg_tup_name = subg_paras[0];

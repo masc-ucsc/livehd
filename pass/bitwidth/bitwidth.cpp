@@ -729,8 +729,7 @@ void Bitwidth::bw_pass(LGraph *lg) {
     if (op == Ntype_op::Const) {
       process_const(node);
     } else if (op == Ntype_op::TupKey || op == Ntype_op::TupGet || op == Ntype_op::TupAdd) {
-      // Nothing to do for this
-      continue;
+      continue; // Nothing to do for this
     } else if (op == Ntype_op::Or || op == Ntype_op::Xor) {
       process_logic_or_xor(node, inp_edges);
     } else if (op == Ntype_op::Ror) {

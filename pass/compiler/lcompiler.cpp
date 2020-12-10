@@ -6,12 +6,13 @@
 #include "cprop.hpp"
 #include "gioc.hpp"
 #include "bitwidth.hpp"
+#include "firmap.hpp"
 
 Lcompiler::Lcompiler(std::string_view _path, std::string_view _odir, bool _gviz) 
   : path(_path), odir(_odir), gviz(_gviz) {}
 
 
-void Lcompiler::add_thread(std::shared_ptr<Lnast> ln) {
+void Lcompiler::add_thread(std::shared_ptr<Lnast> ln, bool is_firrtl) {
   Graphviz gv(true, false, odir); 
   if (gviz) 
     gv.do_from_lnast(ln, "raw"); // rename dot with postfix raw
@@ -48,21 +49,26 @@ void Lcompiler::add_thread(std::shared_ptr<Lnast> ln) {
       gv.do_from_lgraph(lg, "local.no_bits"); // rename dot with postfix raw
     
 
-    fmt::print("------------------------ Bitwidth-Inference ------------------------- (4)\n");
-    bw.do_trans(lg);
-    if (gviz) 
-      gv.do_from_lgraph(lg, "local.debug0"); // rename dot with postfix raw
+    if (is_firrtl) {
+      // do nothing for local BW, meaningless before firrtl bits analysis
+    } else {
+      fmt::print("------------------------ Bitwidth-Inference ------------------------- (4)\n");
+      bw.do_trans(lg);
+      if (gviz) 
+        gv.do_from_lgraph(lg, "local.debug0"); // rename dot with postfix raw
 
-    fmt::print("------------------------ Bitwidth-Inference ------------------------- (5)\n");
-    bw.do_trans(lg);
-    if (gviz) 
-      gv.do_from_lgraph(lg, "local.debug1"); // rename dot with postfix raw
+      fmt::print("------------------------ Bitwidth-Inference ------------------------- (5)\n");
+      bw.do_trans(lg);
+      if (gviz) 
+        gv.do_from_lgraph(lg, "local.debug1"); // rename dot with postfix raw
 
-    fmt::print("------------------------ Bitwidth-Inference ------------------------- (6)\n");
-    bw.do_trans(lg);
+      fmt::print("------------------------ Bitwidth-Inference ------------------------- (6)\n");
+      bw.do_trans(lg);
 
-    if (gviz) 
-      gv.do_from_lgraph(lg, "local"); // rename dot with postfix raw
+      if (gviz) 
+        gv.do_from_lgraph(lg, "local"); // rename dot with postfix raw
+
+    }
 
     // FIXEME:sh -> todo 
     /* if (cp.get_tuple_get_left()) { */
@@ -78,9 +84,9 @@ void Lcompiler::add_thread(std::shared_ptr<Lnast> ln) {
     lgs.emplace_back(lg);
 }
 
-void Lcompiler::add(std::shared_ptr<Lnast> ln) {
+void Lcompiler::add(std::shared_ptr<Lnast> ln, bool is_firrtl) {
   //thread_pool.add(Lcompiler::add_thread, this, ln);
-  add_thread(ln);
+  add_thread(ln, is_firrtl);
 }
 
 
@@ -103,6 +109,30 @@ void Lcompiler::global_io_connection() {
   }
 }
 
+void Lcompiler::global_firrtl_bits_analysis_map(std::string_view top) {
+  I(!global_bwmap.empty());
+
+  Graphviz gv(true, false, odir);
+  Firmap fm(true);   // hier = true, max_iters = 10
+
+  auto lgcnt = 0;
+  auto hit = false;
+  for (auto &lg : lgs) {
+    ++lgcnt;
+    if (lg->get_name() == top) {
+      hit = true;
+      fmt::print("------------------------ Bitwidth-Inference ------------------------- (9)\n");
+      fm.do_trans(lg);
+    }
+
+    if (gviz) 
+      gv.do_from_lgraph(lg, ""); // rename dot with postfix raw
+  }
+
+  if (lgcnt > 1 && hit == false) {
+    Pass::error("Top module not specified for firrtl codes!\n");
+  }
+}
 
 void Lcompiler::global_bitwidth_inference(std::string_view top) {
   I(!global_bwmap.empty());

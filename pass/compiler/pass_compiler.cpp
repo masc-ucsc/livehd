@@ -58,9 +58,9 @@ void Pass_compiler::compile(Eprp_var &var) {
   auto odir   = pc.get_odir(var);
   auto top    = pc.check_option_top(var);
   bool gviz   = pc.check_option_gviz(var);
-  bool is_fir = pc.check_option_firrtl(var);
+  bool is_firrtl = pc.check_option_firrtl(var);
 
-  if (is_fir) {
+  if (is_firrtl) {
     I(top != "", "firrtl front-end must specify the top firrtl name!");
     auto lg = LGraph::create(path, top, var.lnasts.front()->get_source());
     setup_firmap_library(lg);   
@@ -82,11 +82,12 @@ void Pass_compiler::compile(Eprp_var &var) {
     }
   } else {
     for (const auto &lnast : var.lnasts) {
-      compile.add(lnast);
+      compile.add(lnast, is_firrtl);
     }
   }
 
   compile.global_io_connection();  
+  compile.global_firrtl_bits_analysis_map(top);
   compile.global_bitwidth_inference(top);  
   
 
@@ -95,19 +96,16 @@ void Pass_compiler::compile(Eprp_var &var) {
 }
 
 void Pass_compiler::setup_firmap_library(LGraph *lg) {
-  auto &lg_fir_add = lg->ref_library()->setup_sub("__add_fir", "-");
+  auto &lg_fir_add = lg->ref_library()->setup_sub("__fir_add", "-");
   lg_fir_add.add_input_pin("A");
   lg_fir_add.add_input_pin("B");
   lg_fir_add.add_output_pin("Y");
   
 
-  auto &lg_fir_sub = lg->ref_library()->setup_sub("__sub_fir", "-");
+  auto &lg_fir_sub = lg->ref_library()->setup_sub("__fir_sub", "-");
   lg_fir_sub.add_input_pin("A");
   lg_fir_sub.add_input_pin("B");
   lg_fir_sub.add_output_pin("Y");
-
-
-
 
   lg->ref_library()->sync();
 }
