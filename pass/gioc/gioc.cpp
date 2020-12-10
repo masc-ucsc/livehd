@@ -20,8 +20,7 @@ void Gioc::do_trans(LGraph *lg) {
   for (auto node : lg->fast()) {
     if (node.get_type_op() == Ntype_op::Sub) {
       
-      /* if (node.get_type_sub_node().get_name().substr(0, 5) == "__fir") { */ //this also doesn't work
-      if (node.has_name() && node.get_name().substr(0, 5) == "__fir") {
+      if (node.get_type_sub_node().get_name().substr(0, 5) == "__fir") {  //this also doesn't work
         fmt::print("subgraph node name:{}\n", node.get_name());
         fmt::print("hit!\n");
         continue; 
