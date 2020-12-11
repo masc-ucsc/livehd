@@ -77,8 +77,8 @@ void Pass_compiler::compile(Eprp_var &var) {
 
   if (is_firrtl) {
     I(top != "", "firrtl front-end must specify the top firrtl name!");
-    auto lg = LGraph::create(path, top, var.lnasts.front()->get_source());
-    setup_firmap_library(lg);   
+    auto seed_lg = LGraph::create(path, "__firop_seed", "-");
+    setup_firmap_library(seed_lg);   
     firrtl_compilation(var, compiler);
   } else {
     pyrope_compilation(var, compiler);
@@ -104,6 +104,7 @@ void Pass_compiler::firrtl_compilation(Eprp_var &var, Lcompiler &compiler) {
     
     compiler.global_io_connection();  
     compiler.global_firrtl_bits_analysis_map();
+    compiler.local_bitwidth_inference();
     compiler.global_bitwidth_inference();  
 }
 

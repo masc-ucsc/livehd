@@ -40,9 +40,9 @@ LGraph *LGraph::create(std::string_view path, std::string_view name, std::string
   return lg;
 }
 
-LGraph *LGraph::clone_skeleton(std::string_view extended_name) {
+LGraph *LGraph::clone_skeleton(std::string_view new_lg_name) {
   std::string  lg_source{get_library().get_source(get_lgid())}; // string, create can free it
-  auto    lg_name   = absl::StrCat(get_name(), extended_name);
+  auto    lg_name   = absl::StrCat(new_lg_name);
   LGraph *new_lg    = LGraph::create(get_path(), lg_name, lg_source);
 
   auto *new_sub = new_lg->ref_self_sub_node();
@@ -52,9 +52,9 @@ LGraph *LGraph::clone_skeleton(std::string_view extended_name) {
     if (old_io_pin->is_input()) {
       auto old_dpin = get_graph_input(old_io_pin->name);
       new_lg->add_graph_input(old_io_pin->name, old_io_pin->graph_io_pos, old_dpin.get_bits());
-    }else{
-      auto old_dpin = get_graph_output(old_io_pin->name);
-      new_lg->add_graph_output(old_io_pin->name, old_io_pin->graph_io_pos, old_dpin.get_bits());
+    } else {
+      auto old_spin = get_graph_output(old_io_pin->name);
+      new_lg->add_graph_output(old_io_pin->name, old_io_pin->graph_io_pos, old_spin.get_driver_pin().get_bits());
     }
   }
 

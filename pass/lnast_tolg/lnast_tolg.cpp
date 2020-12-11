@@ -1382,7 +1382,6 @@ void Lnast_tolg::process_firrtl_op_connection(LGraph *lg, const Lnast_nid &lnidx
     }
     i++;
   }
-  fmt::print("DEBUG create fc_node:{}, fc_node dpin:{}\n", fc_node.debug_name(), fc_node.get_driver_pin("Y").get_name());
 }
 
 

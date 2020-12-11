@@ -798,7 +798,7 @@ void Bitwidth::bw_pass(LGraph *lg) {
         it->second.dump();
     }
 
-  } // end of lg->forward()
+  }// end of lg->forward()
 
 
 

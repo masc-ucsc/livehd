@@ -144,6 +144,10 @@ void Graphviz::do_from_lgraph(LGraph *lg_parent, std::string_view dot_postfix) {
   populate_lg_data(lg_parent, dot_postfix);
 
   lg_parent->each_sub_fast([&, this](Node &node, Lg_type_id lgid) {
+    // no need to populate firrtl_op_subgraph, it's just tmap cells.
+    if (node.get_type_sub_node().get_name().substr(0,5) == "__fir")
+      return;
+
     (void)node;
     fmt::print("subgraph lgid:{}\n", lgid);
     LGraph *lg_child = LGraph::open(lg_parent->get_path(), lgid);

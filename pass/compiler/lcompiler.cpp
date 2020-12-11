@@ -19,18 +19,14 @@ void Lcompiler::add_pyrope(std::shared_ptr<Lnast> ln) {
 
 void Lcompiler::add_pyrope_thread(std::shared_ptr<Lnast> ln) {
   Graphviz gv(true, false, odir); 
-  if (gviz) 
-    gv.do_from_lnast(ln, "raw"); // rename dot with postfix raw
+  gviz ? gv.do_from_lnast(ln, "raw") : void(); 
   
   fmt::print("------------------------ Pyrope -> LNAST-SSA ------------------------ (1)\n");
-
   ln->ssa_trans();
+  gviz ? gv.do_from_lnast(ln) : void();
 
-  if (gviz) 
-    gv.do_from_lnast(ln);
 
   fmt::print("------------------------ LNAST-> LGraph ----------------------------- (2)\n");
-
   auto module_name = ln->get_top_module_name();
   Lnast_tolg ln2lg(module_name, path);
 
@@ -39,43 +35,27 @@ void Lcompiler::add_pyrope_thread(std::shared_ptr<Lnast> ln) {
   auto local_lgs = ln2lg.do_tolg(ln, top_stmts);
   if (gviz) {
     for (const auto &lg : local_lgs) 
-      gv.do_from_lgraph(lg, "local.raw"); // rename dot with postfix raw
+      gv.do_from_lgraph(lg, "local.raw"); 
   }
 
-
+  Cprop    cp(false, false);                // hier = false, gioc = false
+  Bitwidth bw(false, 10, global_bwmap);     // hier = false, max_iters = 10
   for (const auto &lg : local_lgs) {
-    /* retry: */
-    Cprop    cp(false, false);  // hier = false, gioc = false
-    Bitwidth bw(false, 10, global_bwmap);     // hier = false, max_iters = 10
-
-    fmt::print("------------------------ Copy-Propagation --------------------------- (3)\n");
+    fmt::print("------------------------ Local Copy-Propagation ---------------------- (3)\n");
     cp.do_trans(lg);
-    if (gviz) 
-      gv.do_from_lgraph(lg, "local.no_bits"); // rename dot with postfix raw
-    
+    gviz ? gv.do_from_lgraph(lg, "local.no_bits") : void();
 
-    fmt::print("------------------------ Bitwidth-Inference ------------------------- (4)\n");
+    fmt::print("------------------------ Local Bitwidth-Inference -------------------- (4)\n");
     bw.do_trans(lg);
-    if (gviz) 
-      gv.do_from_lgraph(lg, "local.debug0"); // rename dot with postfix raw
+    gviz ? gv.do_from_lgraph(lg, "local.debug0") : void(); 
 
-    fmt::print("------------------------ Bitwidth-Inference ------------------------- (5)\n");
+    fmt::print("------------------------ Local Bitwidth-Inference -------------------- (5)\n");
     bw.do_trans(lg);
-    if (gviz) 
-      gv.do_from_lgraph(lg, "local.debug1"); // rename dot with postfix raw
+    gviz ? gv.do_from_lgraph(lg, "local.debug1") : void(); 
 
-    fmt::print("------------------------ Bitwidth-Inference ------------------------- (6)\n");
+    fmt::print("------------------------ Local Bitwidth-Inference -------------------- (6)\n");
     bw.do_trans(lg);
-
-    if (gviz) 
-      gv.do_from_lgraph(lg, "local"); // rename dot with postfix raw
-
-    // FIXEME:sh -> todo 
-    /* if (cp.get_tuple_get_left()) { */
-    /*   if (cp.made_progress) { */
-    /*     goto retry; */
-    /*   } */
-    /* } */
+    gviz ? gv.do_from_lgraph(lg, "local") : void(); 
   }
 
   std::lock_guard<std::mutex> guard(lgs_mutex);
@@ -93,19 +73,18 @@ void Lcompiler::add_firrtl(std::shared_ptr<Lnast> ln) {
 
 void Lcompiler::add_firrtl_thread(std::shared_ptr<Lnast> ln) {
   Graphviz gv(true, false, odir); 
-  if (gviz) 
-    gv.do_from_lnast(ln, "raw"); // rename dot with postfix raw
+  gviz ? gv.do_from_lnast(ln, "raw") : void(); 
   
-  fmt::print("------------------------ Pyrope -> LNAST-SSA ------------------------ (1)\n");
-
+  fmt::print("------------------------ Firrtl_Protobuf -> LNAST-SSA --------------- (1)\n");
   ln->ssa_trans();
+  gviz ? gv.do_from_lnast(ln) : void();
 
-  if (gviz) 
-    gv.do_from_lnast(ln);
 
   fmt::print("------------------------ LNAST-> LGraph ----------------------------- (2)\n");
-
-  auto module_name = ln->get_top_module_name();
+  // note: since the first generated lgraphs are firrtl_op_lgs, they will be removed in the end,
+  // we should keep the original module_name for the firrtl_op mapped lgraph, so here I attached
+  // "_firrtl" postfix for the firrtl_op_lgs
+  auto module_name = absl::StrCat(ln->get_top_module_name(), "_firrtl");
   Lnast_tolg ln2lg(module_name, path);
 
   const auto lnidx_top = ln->get_root();
@@ -113,19 +92,16 @@ void Lcompiler::add_firrtl_thread(std::shared_ptr<Lnast> ln) {
   auto local_lgs = ln2lg.do_tolg(ln, top_stmts);
   if (gviz) {
     for (const auto &lg : local_lgs) 
-      gv.do_from_lgraph(lg, "local.raw"); // rename dot with postfix raw
+      gv.do_from_lgraph(lg, "local.raw"); 
   }
 
 
   for (const auto &lg : local_lgs) {
-    /* retry: */
     Cprop    cp(false, false);  // hier = false, gioc = false
-    Bitwidth bw(false, 10, global_bwmap);     // hier = false, max_iters = 10
 
     fmt::print("------------------------ Copy-Propagation --------------------------- (3)\n");
     cp.do_trans(lg);
-    if (gviz) 
-      gv.do_from_lgraph(lg, "local.no_bits"); // rename dot with postfix raw
+    gviz ? gv.do_from_lgraph(lg, "local.no_bits") : void();
   }
 
   std::lock_guard<std::mutex> guard(lgs_mutex);
@@ -142,15 +118,12 @@ void Lcompiler::global_io_connection() {
   Gioc     gioc(path);
 
   for (auto &lg : lgs) {
-    fmt::print("LGraph name:{}\n", lg->get_name());
     fmt::print("------------------------ Global IO Connection ----------------------- (7)\n");
     gioc.do_trans(lg);
-    if (gviz) 
-      gv.do_from_lgraph(lg, "gioc.raw"); // rename dot with postfix raw
+    gviz ? gv.do_from_lgraph(lg, "gioc.raw") : void(); 
     fmt::print("------------------------ Copy-Propagation --------------------------- (8)\n");
     cp.do_trans(lg);
-    if (gviz) 
-      gv.do_from_lgraph(lg, "gioc.no_bits"); // rename dot with postfix raw
+    gviz ? gv.do_from_lgraph(lg, "gioc.no_bits") : void();
   }
 }
 
@@ -167,14 +140,41 @@ void Lcompiler::global_firrtl_bits_analysis_map() {
       fmt::print("------------------------ Firrtl Bits Analysis ------------------------- (9)\n");
       fm.do_analysis(lg);
     }
-
-    if (gviz) 
-      gv.do_from_lgraph(lg, "gioc.firbits"); // rename dot with postfix raw
+    gviz ? gv.do_from_lgraph(lg, "gioc.firbits") : void(); 
   }
 
   if (lgcnt > 1 && hit == false) 
     Pass::error("Top module not specified for firrtl codes!\n");
+
+
+  std::vector<LGraph*> mapped_lgs;
+  for (auto &lg : lgs) {
+    mapped_lgs.emplace_back(fm.do_mapping(lg));
+  }
+  lgs = mapped_lgs;
 }
+
+
+void Lcompiler::local_bitwidth_inference() {
+  Graphviz gv(true, false, odir); 
+  Bitwidth bw(false, 10, global_bwmap);     // hier = false, max_iters = 10
+  for (auto &lg: lgs) {
+    fmt::print("------------------------ Local Bitwidth-Inference ------------------- (9)\n");
+    bw.do_trans(lg);
+    gviz ? gv.do_from_lgraph(lg, "local.debug0") : void(); 
+
+
+    fmt::print("------------------------ Local Bitwidth-Inference ------------------- (A)\n");
+    bw.do_trans(lg);
+    gviz ? gv.do_from_lgraph(lg, "local.debug1") : void(); 
+
+
+    fmt::print("------------------------ Local Bitwidth-Inference ------------------- (B)\n");
+    bw.do_trans(lg);
+    gviz ? gv.do_from_lgraph(lg, "local") : void(); 
+  }
+}
+
 
 void Lcompiler::global_bitwidth_inference() {
   Graphviz gv(true, false, odir);
@@ -186,17 +186,15 @@ void Lcompiler::global_bitwidth_inference() {
     ++lgcnt;
     if (lg->get_name() == top) {
       hit = true;
-      fmt::print("------------------------ Bitwidth-Inference ------------------------- (A)\n");
+      fmt::print("------------------------ Global Bitwidth-Inference ------------------------- (A)\n");
       bw.do_trans(lg);
     }
 
-    if (gviz) 
-      gv.do_from_lgraph(lg, ""); // rename dot with postfix raw
+    gviz ? gv.do_from_lgraph(lg, "") : void();
   }
 
-  if (lgcnt > 1 && hit == false) {
+  if (lgcnt > 1 && hit == false) 
     Pass::error("Top module not specified from multiple Pyrope source codes!\n");
-  }
 }
 
 

@@ -882,7 +882,8 @@ void Pass_mockturtle::convert_mockturtle_to_KLUT() {
 }
 
 void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
-  LGraph *new_lg = old_lg->clone_skeleton(LUTIFIED_NETWORK_NAME_SIGNATURE);
+  auto new_lg_name = absl::StrCat(old_lg->get_name(), LUTIFIED_NETWORK_NAME_SIGNATURE);
+  LGraph *new_lg = old_lg->clone_skeleton(new_lg_name);
 
   auto old_ginp_node                                = old_lg->get_graph_input_node();
   auto old_gout_node                                = old_lg->get_graph_output_node();

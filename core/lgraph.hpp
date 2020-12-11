@@ -178,7 +178,7 @@ public:
   Bwd_edge_iterator  backward(bool visit_sub = false);
   Fast_edge_iterator fast(bool visit_sub = false);
 
-  LGraph *clone_skeleton(std::string_view extended_name);
+  LGraph *clone_skeleton(std::string_view new_lg_name);
 
   static bool    exists(std::string_view path, std::string_view name);
   static LGraph *create(std::string_view path, std::string_view name, std::string_view source);

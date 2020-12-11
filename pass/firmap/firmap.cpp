@@ -23,8 +23,10 @@ LGraph* Firmap::do_mapping(LGraph *lg) {
 }
 
 LGraph* Firmap::firrtl_lgraph_mapping(LGraph *old_lg) {
-  LGraph *new_lg = old_lg->clone_skeleton("firrtl_lg");
-
+  auto old_lg_name = old_lg->get_name();
+  auto pos = old_lg_name.find("_firrtl");
+  LGraph *new_lg = old_lg->clone_skeleton(old_lg_name.substr(0, pos));
+  I(false, "TODO!!!");
   return new_lg;
 }
 

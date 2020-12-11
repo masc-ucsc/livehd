@@ -34,6 +34,7 @@ public:
 
   void add_pyrope(std::shared_ptr<Lnast> lnast);
   void add_firrtl(std::shared_ptr<Lnast> lnast);
+  void local_bitwidth_inference();
   void global_io_connection();
   void global_bitwidth_inference();
   void global_firrtl_bits_analysis_map();
