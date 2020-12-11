@@ -8,8 +8,8 @@
 #include "bitwidth.hpp"
 #include "firmap.hpp"
 
-Lcompiler::Lcompiler(std::string_view _path, std::string_view _odir, bool _gviz) 
-  : path(_path), odir(_odir), gviz(_gviz) {}
+Lcompiler::Lcompiler(std::string_view _path, std::string_view _odir, std::string_view _top, bool _gviz) 
+  : path(_path), odir(_odir), top(_top), gviz(_gviz) {}
 
 
 void Lcompiler::add_pyrope(std::shared_ptr<Lnast> ln) {
@@ -34,8 +34,8 @@ void Lcompiler::add_pyrope_thread(std::shared_ptr<Lnast> ln) {
   auto module_name = ln->get_top_module_name();
   Lnast_tolg ln2lg(module_name, path);
 
-  const auto top = ln->get_root();
-  const auto top_stmts = ln->get_first_child(top);
+  const auto lnidx_top = ln->get_root();
+  const auto top_stmts = ln->get_first_child(lnidx_top);
   auto local_lgs = ln2lg.do_tolg(ln, top_stmts);
   if (gviz) {
     for (const auto &lg : local_lgs) 
@@ -108,8 +108,8 @@ void Lcompiler::add_firrtl_thread(std::shared_ptr<Lnast> ln) {
   auto module_name = ln->get_top_module_name();
   Lnast_tolg ln2lg(module_name, path);
 
-  const auto top = ln->get_root();
-  const auto top_stmts = ln->get_first_child(top);
+  const auto lnidx_top = ln->get_root();
+  const auto top_stmts = ln->get_first_child(lnidx_top);
   auto local_lgs = ln2lg.do_tolg(ln, top_stmts);
   if (gviz) {
     for (const auto &lg : local_lgs) 
@@ -126,34 +126,9 @@ void Lcompiler::add_firrtl_thread(std::shared_ptr<Lnast> ln) {
     cp.do_trans(lg);
     if (gviz) 
       gv.do_from_lgraph(lg, "local.no_bits"); // rename dot with postfix raw
-    
-
-    fmt::print("------------------------ Bitwidth-Inference ------------------------- (4)\n");
-    bw.do_trans(lg);
-    if (gviz) 
-      gv.do_from_lgraph(lg, "local.debug0"); // rename dot with postfix raw
-
-    fmt::print("------------------------ Bitwidth-Inference ------------------------- (5)\n");
-    bw.do_trans(lg);
-    if (gviz) 
-      gv.do_from_lgraph(lg, "local.debug1"); // rename dot with postfix raw
-
-    fmt::print("------------------------ Bitwidth-Inference ------------------------- (6)\n");
-    bw.do_trans(lg);
-
-    if (gviz) 
-      gv.do_from_lgraph(lg, "local"); // rename dot with postfix raw
-
-    // FIXEME:sh -> todo 
-    /* if (cp.get_tuple_get_left()) { */
-    /*   if (cp.made_progress) { */
-    /*     goto retry; */
-    /*   } */
-    /* } */
   }
 
   std::lock_guard<std::mutex> guard(lgs_mutex);
-
   for(auto *lg:local_lgs)
     lgs.emplace_back(lg);
 }
@@ -179,7 +154,7 @@ void Lcompiler::global_io_connection() {
   }
 }
 
-void Lcompiler::global_firrtl_bits_analysis_map(std::string_view top) {
+void Lcompiler::global_firrtl_bits_analysis_map() {
   Graphviz gv(true, false, odir);
   Firmap fm(true);   // hier = true
 
@@ -201,7 +176,7 @@ void Lcompiler::global_firrtl_bits_analysis_map(std::string_view top) {
     Pass::error("Top module not specified for firrtl codes!\n");
 }
 
-void Lcompiler::global_bitwidth_inference(std::string_view top) {
+void Lcompiler::global_bitwidth_inference() {
   Graphviz gv(true, false, odir);
   Bitwidth bw(true, 10, global_bwmap);   // hier = true, max_iters = 10
 

@@ -60,8 +60,8 @@ void Pass_compiler::compile(Eprp_var &var) {
   bool gviz      = pc.check_option_gviz(var);
   bool is_firrtl = pc.check_option_firrtl(var);
 
+  Lcompiler compiler(path, odir, top, gviz);
   fmt::print("top module_name is:{}\n", top);
-  Lcompiler compile(path, odir, gviz);
 
   if (var.lnasts.empty()) {
     auto files = pc.get_files(var);
@@ -76,36 +76,35 @@ void Pass_compiler::compile(Eprp_var &var) {
 
 
   if (is_firrtl) {
-    // Firrtl compilation flow
     I(top != "", "firrtl front-end must specify the top firrtl name!");
     auto lg = LGraph::create(path, top, var.lnasts.front()->get_source());
     setup_firmap_library(lg);   
-
-    for (const auto &lnast : var.lnasts) {
-      compile.add_firrtl(lnast);
-  
-    compile.global_io_connection();  
-    compile.global_firrtl_bits_analysis_map(top);
-    compile.global_bitwidth_inference(top);  
-    
-  
-    auto lgs = compile.wait_all();
-    var.add(lgs);
-    return;
-    }
+    firrtl_compilation(var, compiler);
+  } else {
+    pyrope_compilation(var, compiler);
   }
 
-  // Pyrope compilation flow
-  for (const auto &lnast : var.lnasts) 
-    compile.add_pyrope(lnast);
-
-  compile.global_io_connection();  
-  compile.global_firrtl_bits_analysis_map(top);
-  compile.global_bitwidth_inference(top);  
-  
-
-  auto lgs = compile.wait_all();
+  auto lgs = compiler.wait_all();
   var.add(lgs);
+  return;
+}
+
+void Pass_compiler::pyrope_compilation(Eprp_var &var, Lcompiler &compiler) {
+  for (const auto &lnast : var.lnasts) 
+    compiler.add_pyrope(lnast);
+
+  compiler.global_io_connection();  
+  compiler.global_bitwidth_inference();  
+}
+
+
+void Pass_compiler::firrtl_compilation(Eprp_var &var, Lcompiler &compiler) {
+    for (const auto &lnast : var.lnasts) 
+      compiler.add_firrtl(lnast);
+    
+    compiler.global_io_connection();  
+    compiler.global_firrtl_bits_analysis_map();
+    compiler.global_bitwidth_inference();  
 }
 
 

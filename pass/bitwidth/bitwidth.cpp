@@ -492,11 +492,8 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_dp, Fwd_edge_iterator::Fwd_
   }
     
 
-  /* if (!hier) // FIXME: once hier del works */
-  /*   node_dp.del_node(); */
-
-  node_dp.del_node();
-
+  if (!hier) // FIXME: once hier del works
+    node_dp.del_node();
 }
 
 void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd_iter &fwd_it) {

@@ -16,6 +16,7 @@ class Lcompiler {
 private:
   const std::string_view path;  
   const std::string odir;
+  const std::string_view top;
   const bool gviz;
   BWMap global_bwmap;
 
@@ -29,13 +30,14 @@ protected:
   void add_firrtl_thread(std::shared_ptr<Lnast> lnast);
 
 public:
-  Lcompiler(std::string_view path, std::string_view odir, bool gviz);
+  Lcompiler(std::string_view path, std::string_view odir, std::string_view top, bool gviz);
 
   void add_pyrope(std::shared_ptr<Lnast> lnast);
   void add_firrtl(std::shared_ptr<Lnast> lnast);
   void global_io_connection();
-  void global_bitwidth_inference(std::string_view top);
-  void global_firrtl_bits_analysis_map(std::string_view top);
+  void global_bitwidth_inference();
+  void global_firrtl_bits_analysis_map();
+  std::string_view get_top() {return top;};
 
   std::vector<LGraph *> wait_all();
 };
