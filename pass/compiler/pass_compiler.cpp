@@ -54,17 +54,11 @@ bool Pass_compiler::check_option_firrtl(Eprp_var &var) {
 
 void Pass_compiler::compile(Eprp_var &var) {
   Pass_compiler pc(var);
-  auto path   = pc.get_path(var);
-  auto odir   = pc.get_odir(var);
-  auto top    = pc.check_option_top(var);
-  bool gviz   = pc.check_option_gviz(var);
+  auto path      = pc.get_path(var);
+  auto odir      = pc.get_odir(var);
+  auto top       = pc.check_option_top(var);
+  bool gviz      = pc.check_option_gviz(var);
   bool is_firrtl = pc.check_option_firrtl(var);
-
-  if (is_firrtl) {
-    I(top != "", "firrtl front-end must specify the top firrtl name!");
-    auto lg = LGraph::create(path, top, var.lnasts.front()->get_source());
-    setup_firmap_library(lg);   
-  }
 
   fmt::print("top module_name is:{}\n", top);
   Lcompiler compile(path, odir, gviz);
@@ -76,15 +70,34 @@ void Pass_compiler::compile(Eprp_var &var) {
       return;
     }
 
-    for (auto f : absl::StrSplit(files, ',')) {
+    for (auto f : absl::StrSplit(files, ',')) 
       Pass::warn("todo: start from prp parser:{}", f);
-      /* compile.add(f); */
-    }
-  } else {
+  } 
+
+
+  if (is_firrtl) {
+    // Firrtl compilation flow
+    I(top != "", "firrtl front-end must specify the top firrtl name!");
+    auto lg = LGraph::create(path, top, var.lnasts.front()->get_source());
+    setup_firmap_library(lg);   
+
     for (const auto &lnast : var.lnasts) {
-      compile.add(lnast, is_firrtl);
+      compile.add_firrtl(lnast);
+  
+    compile.global_io_connection();  
+    compile.global_firrtl_bits_analysis_map(top);
+    compile.global_bitwidth_inference(top);  
+    
+  
+    auto lgs = compile.wait_all();
+    var.add(lgs);
+    return;
     }
   }
+
+  // Pyrope compilation flow
+  for (const auto &lnast : var.lnasts) 
+    compile.add_pyrope(lnast);
 
   compile.global_io_connection();  
   compile.global_firrtl_bits_analysis_map(top);
@@ -94,6 +107,7 @@ void Pass_compiler::compile(Eprp_var &var) {
   auto lgs = compile.wait_all();
   var.add(lgs);
 }
+
 
 void Pass_compiler::setup_firmap_library(LGraph *lg) {
   auto &lg_fir_add = lg->ref_library()->setup_sub("__fir_add", "-");

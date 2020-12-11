@@ -492,8 +492,11 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_dp, Fwd_edge_iterator::Fwd_
   }
     
 
-  if (!hier) // FIXME: once hier del works
-    node_dp.del_node();
+  /* if (!hier) // FIXME: once hier del works */
+  /*   node_dp.del_node(); */
+
+  node_dp.del_node();
+
 }
 
 void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd_iter &fwd_it) {
@@ -822,6 +825,10 @@ void Bitwidth::bw_pass(LGraph *lg) {
       return;
     auto spin = dpin.get_sink_from_output();
     
+    fmt::print("DEBUG\n");
+    for (auto e: spin.inp_edges()) {
+      fmt::print("{} drives graph-output:{}\n", e.driver.debug_name(), dpin.debug_name());
+    }
     auto out_driver = spin.get_driver_pin();
 
     I(!out_driver.is_invalid());

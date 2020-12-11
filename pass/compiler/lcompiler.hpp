@@ -25,16 +25,17 @@ protected:
 
   void compile_thread(std::shared_ptr<Lnast> ln);
   void compile_thread(std::string_view file); // future allow to call inou.pyrope or inou.verilog or comp error
-  void add_thread(std::shared_ptr<Lnast> lnast, bool is_firrtl);
+  void add_pyrope_thread(std::shared_ptr<Lnast> lnast);
+  void add_firrtl_thread(std::shared_ptr<Lnast> lnast);
 
 public:
   Lcompiler(std::string_view path, std::string_view odir, bool gviz);
 
-  void add(std::shared_ptr<Lnast> lnast, bool is_firrtl);
+  void add_pyrope(std::shared_ptr<Lnast> lnast);
+  void add_firrtl(std::shared_ptr<Lnast> lnast);
   void global_io_connection();
   void global_bitwidth_inference(std::string_view top);
   void global_firrtl_bits_analysis_map(std::string_view top);
-  /* void add(std::string_view file); */
 
   std::vector<LGraph *> wait_all();
 };

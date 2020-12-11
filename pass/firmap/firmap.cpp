@@ -11,14 +11,24 @@
 
 Firmap::Firmap(bool _hier) : hier(_hier) {}
 
-void Firmap::do_trans(LGraph *lg) {
+void Firmap::do_analysis(LGraph *lg) {
   /* Lbench b("pass.firmap"); */
-  firmap_pass(lg);
+  firbits_analysis(lg);
 }
 
 
-void Firmap::firmap_pass(LGraph *lg) {
+LGraph* Firmap::do_mapping(LGraph *lg) {
+  /* Lbench b("pass.firmap"); */
+  return firrtl_lgraph_mapping(lg);
+}
 
+LGraph* Firmap::firrtl_lgraph_mapping(LGraph *old_lg) {
+  LGraph *new_lg = old_lg->clone_skeleton("firrtl_lg");
+
+  return new_lg;
+}
+
+void Firmap::firbits_analysis(LGraph *lg) {
   auto lgit = lg->forward(hier); // the design pattern for traverse newly created nodes in same iteration
   for (auto fwd_it = lgit.begin(); fwd_it != lgit.end() ; ++fwd_it) {
     auto node = *fwd_it;
@@ -33,8 +43,9 @@ void Firmap::firmap_pass(LGraph *lg) {
 
 
     if (op == Ntype_op::Sub) {
-      if (node.get_name().substr(0,5) == "__fir") 
-        process_fir_ops(node);
+      auto subname = node.get_type_sub_node().get_name();
+      if ( subname.substr(0,5) == "__fir") 
+        process_fir_ops(node, subname);
       else 
         continue;
     } else if (op == Ntype_op::Const) {
@@ -58,10 +69,11 @@ void Firmap::firmap_pass(LGraph *lg) {
     }
 
     //debug
-    fmt::print("    ");
     auto it = fbmap.find(node.get_driver_pin("Y").get_compact());
-    if (it != fbmap.end())
+    if (it != fbmap.end()) {
+      fmt::print("    ");
       it->second.dump();
+    }
   } // end of lg->forward()
 }
 
@@ -168,7 +180,7 @@ void Firmap::process_lg_attr_set_dp_assign(Node &node_dp) {
   if (it != fbmap.end()) {
     fb_lhs = it->second;
   } else {
-    I(false, "dp lhs firrtl bits must be ready even at first traverse");
+    Pass::error("dp lhs firrtl bits must be ready even at first traverse, lhs:{}\n", dpin_lhs.debug_name());
   }
 
   auto it2 = fbmap.find(dpin_rhs.get_compact());
@@ -176,15 +188,15 @@ void Firmap::process_lg_attr_set_dp_assign(Node &node_dp) {
   if (it2 != fbmap.end()) {
     fb_rhs = it2->second;
   } else {
-    I(false, "dp lhs firrtl bits must be ready even at first traverse");
+    Pass::error("dp rhs firrtl bits must be ready even at first traverse, rhs:{}\n", dpin_rhs.debug_name());
   }
 
   // note: up to now, if something has been converted to dp, the lhs and rhs
   // firrtl bits must be the same in firrtl bits analysis
-  I(fb_lhs.get_bits() != fb_rhs.get_bits());
-  I(fb_lhs.get_signedness() != fb_rhs.get_signedness());
+  I(fb_lhs.get_bits() == fb_rhs.get_bits());
+  I(fb_lhs.get_signedness() == fb_rhs.get_signedness());
 
-  fbmap.insert_or_assign(node_dp.setup_driver_pin().get_compact(), fb_lhs);
+  fbmap.insert_or_assign(node_dp.setup_driver_pin("Y").get_compact(), fb_lhs);
 }
 
 
@@ -208,16 +220,15 @@ Firmap::Attr Firmap::get_key_attr(std::string_view key) {
 }
 
 
-void Firmap::process_fir_ops(Node &node) {
-  auto op        = node.get_name();
+void Firmap::process_fir_ops(Node &node, std::string_view op) {
   auto inp_edges = node.inp_edges();
   if (op == "__fir_add" || op == "__fir_sub") {
-    process_fir_add_sub(node, inp_edges);
+    process_fir_add_sub(node, inp_edges, op);
   }
 }
 
 
-void Firmap::process_fir_add_sub(Node &node, XEdge_iterator &inp_edges) {
+void Firmap::process_fir_add_sub(Node &node, XEdge_iterator &inp_edges, std::string_view op) {
   I(inp_edges.size());  // Dangling sum??? (delete)
 
   Bits_t bits1, bits2;
@@ -241,13 +252,12 @@ void Firmap::process_fir_add_sub(Node &node, XEdge_iterator &inp_edges) {
     e.del_edge();
   }
   
-  fbmap.insert_or_assign(node.get_driver_pin().get_compact(), Firrtl_bits(std::max(bits1, bits2) + 1, signedness));
-
+  /* fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(std::max(bits1, bits2) + 1, signedness)); */
 
   // firrtl_op -> lg_node mapping
   node.set_type(Ntype_op::Sum);
   node.setup_sink_pin("A").connect_driver(e1_dpin);
-  if (node.get_name() == "__fir_add")
+  if (op == "__fir_add")
     node.setup_sink_pin("A").connect_driver(e2_dpin);
   else
     node.setup_sink_pin("B").connect_driver(e2_dpin);
@@ -261,6 +271,8 @@ void Firmap::process_fir_add_sub(Node &node, XEdge_iterator &inp_edges) {
   for (auto spin : spins) {
     spin.connect_driver(node.setup_driver_pin());
   }
+
+  fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(std::max(bits1, bits2) + 1, signedness));
 }
 
 
