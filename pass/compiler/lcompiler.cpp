@@ -127,9 +127,10 @@ void Lcompiler::global_io_connection() {
   }
 }
 
+
 void Lcompiler::global_firrtl_bits_analysis_map() {
   Graphviz gv(true, false, odir);
-  Firmap fm(true);   // hier = true
+  Firmap   fm;   
 
   auto lgcnt = 0;
   auto hit = false;
@@ -149,7 +150,9 @@ void Lcompiler::global_firrtl_bits_analysis_map() {
 
   std::vector<LGraph*> mapped_lgs;
   for (auto &lg : lgs) {
-    mapped_lgs.emplace_back(fm.do_mapping(lg));
+    auto new_lg = fm.do_mapping(lg);
+    mapped_lgs.emplace_back(new_lg);
+    gviz ? gv.do_from_lgraph(lg, "gioc.firmap") : void(); 
   }
   lgs = mapped_lgs;
 }

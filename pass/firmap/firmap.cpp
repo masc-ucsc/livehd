@@ -9,7 +9,7 @@
 #include "lgraph.hpp"
 
 
-Firmap::Firmap(bool _hier) : hier(_hier) {}
+Firmap::Firmap() {}
 
 void Firmap::do_analysis(LGraph *lg) {
   /* Lbench b("pass.firmap"); */
@@ -19,19 +19,61 @@ void Firmap::do_analysis(LGraph *lg) {
 
 LGraph* Firmap::do_mapping(LGraph *lg) {
   /* Lbench b("pass.firmap"); */
-  return firrtl_lgraph_mapping(lg);
+  return firrtl_mapping(lg);
 }
 
-LGraph* Firmap::firrtl_lgraph_mapping(LGraph *old_lg) {
-  auto old_lg_name = old_lg->get_name();
-  auto pos = old_lg_name.find("_firrtl");
-  LGraph *new_lg = old_lg->clone_skeleton(old_lg_name.substr(0, pos));
-  I(false, "TODO!!!");
+LGraph* Firmap::firrtl_mapping(LGraph *lg) {
+  auto lg_name = lg->get_name();
+  auto pos = lg_name.find("_firrtl");
+  LGraph *new_lg = lg->clone_skeleton(lg_name.substr(0, pos));
+
+  for (auto node : lg->forward()) {
+    auto op = node.get_type_op();
+    fmt::print("{}\n", node.debug_name());
+    if (op == Ntype_op::Sub) {
+      auto subname = node.get_type_sub_node().get_name();
+      if ( subname.substr(0,5) == "__fir") 
+        map_fir_ops(node, subname, new_lg);
+      else 
+        clone_lg_ops(node, new_lg);
+    } else {
+      clone_lg_ops(node, new_lg); 
+    }
+  }
   return new_lg;
 }
 
+void Firmap::map_fir_ops(Node &node, std::string_view op, LGraph *new_lg) {
+  if (op == "__fir_add") {
+    map_fir_add(node, new_lg);
+  } else if (op == "__fir_sub") {
+    map_fir_sub(node, new_lg);
+  }
+}
+
+void Firmap::map_fir_add(Node &node, LGraph *new_lg) {
+;//FIXME->sh:todo
+}
+
+void Firmap::map_fir_sub(Node &node, LGraph *new_lg) {
+;//FIXME->sh:todo
+}
+
+void Firmap::clone_lg_ops(Node &old_node, LGraph *new_lg) {
+  auto inp_edges = old_node.inp_edges();
+  auto new_node = new_lg->create_node(old_node);
+  for (auto e : old_node.inp_edges()) {
+    o2n_dpin[e.driver].connect_sink(new_node.setup_sink_pin_raw(e.sink.get_pid()));
+  }
+
+  for (auto old_dpin : old_node.out_connected_pins()) {
+    o2n_dpin.insert_or_assign(old_dpin, new_node.setup_driver_pin_raw(old_dpin.get_pid()));
+  }
+}
+
+
 void Firmap::firbits_analysis(LGraph *lg) {
-  auto lgit = lg->forward(hier); // the design pattern for traverse newly created nodes in same iteration
+  auto lgit = lg->forward(true); // the design pattern for traverse newly created nodes in same iteration
   for (auto fwd_it = lgit.begin(); fwd_it != lgit.end() ; ++fwd_it) {
     auto node = *fwd_it;
     fmt::print("{}\n", node.debug_name());
@@ -47,25 +89,25 @@ void Firmap::firbits_analysis(LGraph *lg) {
     if (op == Ntype_op::Sub) {
       auto subname = node.get_type_sub_node().get_name();
       if ( subname.substr(0,5) == "__fir") 
-        process_fir_ops(node, subname);
+        analysis_fir_ops(node, subname);
       else 
         continue;
     } else if (op == Ntype_op::Const) {
-      process_lg_const(node);
+      analysis_lg_const(node);
     } else if (op == Ntype_op::TupKey || op == Ntype_op::TupGet || op == Ntype_op::TupAdd) {
       continue; // Nothing to do for this
     } else if (op == Ntype_op::AttrSet) {
-      process_lg_attr_set(node);
+      analysis_lg_attr_set(node);
       if (node.is_invalid())
         continue;
     } else if (op == Ntype_op::AttrGet) {
-      /* process_lg_attr_get(node); */
+      /* analysis_lg_attr_get(node); */
       if (node.is_invalid())
         continue;
     } else if (op == Ntype_op::Sflop || op == Ntype_op::Aflop || op == Ntype_op::Fflop) {
-      /* process_lg_flop(node); */
+      /* analysis_lg_flop(node); */
     } else if (op == Ntype_op::Mux) {
-      /* process_lg_mux(node, inp_edges); */
+      /* analysis_lg_mux(node, inp_edges); */
     } else {
       fmt::print("FIXME: node:{} still not handled by bitwidth\n", node.debug_name());
     }
@@ -80,24 +122,24 @@ void Firmap::firbits_analysis(LGraph *lg) {
 }
 
 
-void Firmap::process_lg_const(Node &node) {
+void Firmap::analysis_lg_const(Node &node) {
   auto dpin = node.get_driver_pin();
   auto bits = node.get_type_const().get_bits() - 1 ; // -1 for turn sbits to ubits
   fbmap.insert_or_assign(dpin.get_compact(), Firrtl_bits(bits, false));
 }
 
 
-void Firmap::process_lg_attr_set(Node &node) {
+void Firmap::analysis_lg_attr_set(Node &node) {
   if (node.is_sink_connected("field")) {
-    process_lg_attr_set_new_attr(node);
+    analysis_lg_attr_set_new_attr(node);
   } else {
     I(false, "Todo...");
-    /* process_lg_attr_set_propagate(node); */
+    /* analysis_lg_attr_set_propagate(node); */
   }
 }
 
 
-void Firmap::process_lg_attr_set_new_attr(Node &node_attr) {
+void Firmap::analysis_lg_attr_set_new_attr(Node &node_attr) {
   I(node_attr.is_sink_connected("field"));
   auto dpin_key = node_attr.get_sink_pin("field").get_driver_pin();
   auto key      = dpin_key.get_name();
@@ -107,7 +149,7 @@ void Firmap::process_lg_attr_set_new_attr(Node &node_attr) {
   }
 
   if (attr == Attr::Set_dp_assign) {
-    process_lg_attr_set_dp_assign(node_attr);
+    analysis_lg_attr_set_dp_assign(node_attr);
     return;
   }
 
@@ -173,7 +215,7 @@ void Firmap::process_lg_attr_set_new_attr(Node &node_attr) {
 }
 
 
-void Firmap::process_lg_attr_set_dp_assign(Node &node_dp) {
+void Firmap::analysis_lg_attr_set_dp_assign(Node &node_dp) {
   auto dpin_lhs = node_dp.get_sink_pin("value").get_driver_pin(); 
   auto dpin_rhs = node_dp.get_sink_pin("name").get_driver_pin();  
 
@@ -222,15 +264,15 @@ Firmap::Attr Firmap::get_key_attr(std::string_view key) {
 }
 
 
-void Firmap::process_fir_ops(Node &node, std::string_view op) {
+void Firmap::analysis_fir_ops(Node &node, std::string_view op) {
   auto inp_edges = node.inp_edges();
   if (op == "__fir_add" || op == "__fir_sub") {
-    process_fir_add_sub(node, inp_edges, op);
-  }
+    analysis_fir_add_sub(node, inp_edges);
+  } 
 }
 
 
-void Firmap::process_fir_add_sub(Node &node, XEdge_iterator &inp_edges, std::string_view op) {
+void Firmap::analysis_fir_add_sub(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size());  // Dangling sum??? (delete)
 
   Bits_t bits1, bits2;
@@ -253,27 +295,6 @@ void Firmap::process_fir_add_sub(Node &node, XEdge_iterator &inp_edges, std::str
     }
     e.del_edge();
   }
-  
-  /* fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(std::max(bits1, bits2) + 1, signedness)); */
-
-  // firrtl_op -> lg_node mapping
-  node.set_type(Ntype_op::Sum);
-  node.setup_sink_pin("A").connect_driver(e1_dpin);
-  if (op == "__fir_add")
-    node.setup_sink_pin("A").connect_driver(e2_dpin);
-  else
-    node.setup_sink_pin("B").connect_driver(e2_dpin);
-  
-  std::vector<Node_pin> spins;
-  for (auto e : node.out_edges()) {
-    spins.emplace_back(e.sink);
-    e.del_edge();
-  }
-  
-  for (auto spin : spins) {
-    spin.connect_driver(node.setup_driver_pin());
-  }
-
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(std::max(bits1, bits2) + 1, signedness));
 }
 
