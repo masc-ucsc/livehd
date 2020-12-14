@@ -7,13 +7,12 @@
 #include "lconst.hpp"
 
 class __attribute__((packed)) Firrtl_bits {
-
-public:
+protected:
   Bits_t bits;
   bool   signedness;
 
-  Firrtl_bits() : bits(0), signedness(false) {
-  }
+public:
+  Firrtl_bits() : bits(0), signedness(false) {}
 
   Firrtl_bits(const Firrtl_bits &i) {
     bits = i.bits;
@@ -37,8 +36,7 @@ public:
   }
 
 
-
-  void set_bits(Bits_t _bits) {
+  void set_bits(Bits_t _bits) { 
     bits = _bits;
   }
   
@@ -54,8 +52,6 @@ public:
     bits = _bits;
     signedness = _signedness;
   }
-
-
 
   bool get_signedness() const {
     return signedness;

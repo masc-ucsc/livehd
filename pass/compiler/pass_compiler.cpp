@@ -111,14 +111,14 @@ void Pass_compiler::firrtl_compilation(Eprp_var &var, Lcompiler &compiler) {
 
 void Pass_compiler::setup_firmap_library(LGraph *lg) {
   auto &lg_fir_add = lg->ref_library()->setup_sub("__fir_add", "-");
-  lg_fir_add.add_input_pin("A");
-  lg_fir_add.add_input_pin("B");
-  lg_fir_add.add_output_pin("Y");
+  lg_fir_add.add_input_pin("e1");
+  lg_fir_add.add_input_pin("e2");
+  lg_fir_add.add_output_pin("Y"); 
   
 
   auto &lg_fir_sub = lg->ref_library()->setup_sub("__fir_sub", "-");
-  lg_fir_sub.add_input_pin("A");
-  lg_fir_sub.add_input_pin("B");
+  lg_fir_sub.add_input_pin("e1");
+  lg_fir_sub.add_input_pin("e2");
   lg_fir_sub.add_output_pin("Y");
 
   lg->ref_library()->sync();

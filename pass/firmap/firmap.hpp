@@ -6,7 +6,7 @@
 #include "lgedgeiter.hpp"
 #include "pass.hpp"
 #include "lgedgeiter.hpp"
-#include "firbits.hpp"
+#include "struct_firbits.hpp"
 
 
 class Firmap {
@@ -39,6 +39,6 @@ protected:
 
 public:
   Firmap ();
-  void    do_analysis(LGraph *orig);
-  LGraph* do_mapping(LGraph *orig);
+  void    do_firbits_analysis(LGraph *orig);
+  LGraph* do_firrtl_mapping(LGraph *orig);
 };

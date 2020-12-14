@@ -134,12 +134,14 @@ void Lcompiler::global_firrtl_bits_analysis_map() {
 
   auto lgcnt = 0;
   auto hit = false;
+  auto top_name_before_mapping = absl::StrCat(top, "_firrtl");
+
   for (auto &lg : lgs) {
     ++lgcnt;
-    if (lg->get_name() == top) {
+    if (lg->get_name() == top_name_before_mapping) {
       hit = true;
-      fmt::print("------------------------ Firrtl Bits Analysis ------------------------- (9)\n");
-      fm.do_analysis(lg);
+      fmt::print("------------------------ Firrtl Bits Analysis ----------------------- (9)\n");
+      fm.do_firbits_analysis(lg);
     }
     gviz ? gv.do_from_lgraph(lg, "gioc.firbits") : void(); 
   }
@@ -150,7 +152,8 @@ void Lcompiler::global_firrtl_bits_analysis_map() {
 
   std::vector<LGraph*> mapped_lgs;
   for (auto &lg : lgs) {
-    auto new_lg = fm.do_mapping(lg);
+    fmt::print("------------------------ Firrtl Op Mapping ----------------------- (A)\n");
+    auto new_lg = fm.do_firrtl_mapping(lg);
     mapped_lgs.emplace_back(new_lg);
     gviz ? gv.do_from_lgraph(lg, "gioc.firmap") : void(); 
   }
@@ -162,17 +165,17 @@ void Lcompiler::local_bitwidth_inference() {
   Graphviz gv(true, false, odir); 
   Bitwidth bw(false, 10, global_bwmap);     // hier = false, max_iters = 10
   for (auto &lg: lgs) {
-    fmt::print("------------------------ Local Bitwidth-Inference ------------------- (9)\n");
+    fmt::print("------------------------ Local Bitwidth-Inference ------------------- (B)\n");
     bw.do_trans(lg);
     gviz ? gv.do_from_lgraph(lg, "local.debug0") : void(); 
 
 
-    fmt::print("------------------------ Local Bitwidth-Inference ------------------- (A)\n");
+    fmt::print("------------------------ Local Bitwidth-Inference ------------------- (C)\n");
     bw.do_trans(lg);
     gviz ? gv.do_from_lgraph(lg, "local.debug1") : void(); 
 
 
-    fmt::print("------------------------ Local Bitwidth-Inference ------------------- (B)\n");
+    fmt::print("------------------------ Local Bitwidth-Inference ------------------- (D)\n");
     bw.do_trans(lg);
     gviz ? gv.do_from_lgraph(lg, "local") : void(); 
   }
