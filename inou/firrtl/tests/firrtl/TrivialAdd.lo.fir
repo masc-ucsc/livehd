@@ -8,7 +8,7 @@ circuit TrivialAdd :
     output io_outputAdd : UInt<10>
     output io_outputSub : UInt<9>
 
-    node _T = add(io_value1, io_value2)
+    node _T   = add(io_value1, io_value2)
     node _T_1 = add(_T, io_value3)
     node _T_2 = sub(io_value1, io_value2)
     io_outputAdd <= _T_1

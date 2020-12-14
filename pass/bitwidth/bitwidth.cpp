@@ -821,10 +821,6 @@ void Bitwidth::bw_pass(LGraph *lg) {
       return;
     auto spin = dpin.get_sink_from_output();
     
-    fmt::print("DEBUG\n");
-    for (auto e: spin.inp_edges()) {
-      fmt::print("{} drives graph-output:{}\n", e.driver.debug_name(), dpin.debug_name());
-    }
     auto out_driver = spin.get_driver_pin();
 
     I(!out_driver.is_invalid());

@@ -155,9 +155,12 @@ void Lcompiler::global_firrtl_bits_analysis_map() {
     fmt::print("------------------------ Firrtl Op Mapping ----------------------- (A)\n");
     auto new_lg = fm.do_firrtl_mapping(lg);
     mapped_lgs.emplace_back(new_lg);
+  }
+
+  lgs = mapped_lgs;
+  for (auto &lg : lgs) {
     gviz ? gv.do_from_lgraph(lg, "gioc.firmap") : void(); 
   }
-  lgs = mapped_lgs;
 }
 
 
