@@ -12,7 +12,6 @@
 void Firmap::do_firbits_analysis(LGraph *lg) {
   for (auto node : lg->forward()) {
     fmt::print("{}\n", node.debug_name());
-    auto inp_edges = node.inp_edges();
     auto op        = node.get_type_op();
 
     I(op != Ntype_op::Or  && op != Ntype_op::Xor  && op != Ntype_op::Ror && op != Ntype_op::And &&
@@ -39,7 +38,7 @@ void Firmap::do_firbits_analysis(LGraph *lg) {
     } else if (op == Ntype_op::Sflop || op == Ntype_op::Aflop || op == Ntype_op::Fflop) {
       analysis_lg_flop(node);
     } else if (op == Ntype_op::Mux) {
-      analysis_lg_mux(node, inp_edges);
+      analysis_lg_mux(node);
     } else {
       fmt::print("FIXME: node:{} still not handled by firrtl bits analysis\n", node.debug_name());
     }
@@ -80,7 +79,8 @@ void Firmap::analysis_lg_flop(Node &node) {
   }
 }
 
-void Firmap::analysis_lg_mux(Node &node, XEdge_iterator &inp_edges) {
+void Firmap::analysis_lg_mux(Node &node) {
+  auto inp_edges = node.inp_edges();
   I(inp_edges.size());  // Dangling???
 
   Bits_t max_bits = 0;
