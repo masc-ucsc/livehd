@@ -11,6 +11,7 @@
 
 class Firmap {
 protected:
+  bool not_finished;
   absl::flat_hash_map<Node_pin::Compact, Firrtl_bits> fbmap;
   absl::flat_hash_map<Node_pin, Node_pin> o2n_dpin; //old_dpin to new_dpin
   enum class Attr { Set_other, Set_ubits, Set_sbits, Set_max, Set_min, Set_dp_assign };
@@ -21,7 +22,6 @@ protected:
   static Attr get_key_attr(std::string_view key);
   
   void analysis_lg_const(Node &node);
-  void analysis_lg_attr_get(Node &node);
   void analysis_lg_attr_set(Node &node);
   void analysis_lg_attr_set_dp_assign(Node &node);
   void analysis_lg_attr_set_new_attr(Node &node);

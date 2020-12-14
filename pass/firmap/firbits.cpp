@@ -7,6 +7,7 @@
 #include "firmap.hpp"
 #include "lbench.hpp"
 #include "lgraph.hpp"
+#include "struct_firbits.hpp"
 
 void Firmap::do_firbits_analysis(LGraph *lg) {
   auto lgit = lg->forward(true); // the design pattern for traverse newly created nodes in same iteration
@@ -16,10 +17,10 @@ void Firmap::do_firbits_analysis(LGraph *lg) {
     auto inp_edges = node.inp_edges();
     auto op        = node.get_type_op();
 
-    if (inp_edges.empty() && (op != Ntype_op::Const && op != Ntype_op::Sub && op != Ntype_op::LUT && op != Ntype_op::TupKey)) {
-      fmt::print("Firmap-> dangling node detected:{}\n", node.debug_name());
-      continue;
-    }
+    I(op != Ntype_op::Or && op != Ntype_op::Xor && op != Ntype_op::Ror && op != Ntype_op::And &&
+      op != Ntype_op::Sum && op != Ntype_op::Mult && op != Ntype_op::SRA && op != Ntype_op::SHL && 
+      op != Ntype_op::Not && op != Ntype_op::GT && op != Ntype_op::LT && op != Ntype_op::EQ, 
+      "basic op should be a fir_op_subnode before firmap pass!");
 
     if (op == Ntype_op::Sub) {
       auto subname = node.get_type_sub_node().get_name();
@@ -36,13 +37,11 @@ void Firmap::do_firbits_analysis(LGraph *lg) {
       if (node.is_invalid())
         continue;
     } else if (op == Ntype_op::AttrGet) {
-      /* analysis_lg_attr_get(node); */
-      if (node.is_invalid())
-        continue;
+      I(false, "firrtl ir should not have any attr_get node, it's achieved by firrtl bits op");
     } else if (op == Ntype_op::Sflop || op == Ntype_op::Aflop || op == Ntype_op::Fflop) {
-      /* analysis_lg_flop(node); */
+      analysis_lg_flop(node);
     } else if (op == Ntype_op::Mux) {
-      /* analysis_lg_mux(node, inp_edges); */
+      analysis_lg_mux(node, inp_edges);
     } else {
       fmt::print("FIXME: node:{} still not handled by bitwidth\n", node.debug_name());
     }
@@ -56,6 +55,59 @@ void Firmap::do_firbits_analysis(LGraph *lg) {
   } // end of lg->forward()
 }
 
+
+void Firmap::analysis_lg_flop(Node &node) {
+  I(node.is_sink_connected("din"));
+  auto d_dpin = node.get_sink_pin("din").get_driver_pin();
+  auto qpin = node.get_driver_pin();
+
+  auto   it_d_dpin = fbmap.find(d_dpin.get_compact());
+  auto   it_qpin   = fbmap.find(qpin.get_compact());
+
+  if (it_d_dpin != fbmap.end()) {
+    auto bits = it_d_dpin->second.get_bits(); 
+    auto sign = it_d_dpin->second.get_sign();
+    fbmap.insert_or_assign(node.get_driver_pin().get_compact(), Firrtl_bits(bits, sign));
+    return;
+  } else if (it_qpin != fbmap.end()) {  // At least propagate backward the width
+    auto bits = it_qpin->second.get_bits(); 
+    auto sign = it_qpin->second.get_sign();
+    fbmap.insert_or_assign(d_dpin.get_compact(), Firrtl_bits(bits, sign));
+    return;
+  } else {
+    not_finished = true;
+    return;
+  }
+}
+
+void Firmap::analysis_lg_mux(Node &node, XEdge_iterator &inp_edges) {
+  I(inp_edges.size());  // Dangling???
+
+  Bits_t max_bits = 0;
+  bool sign = false;
+  bool is_1st_input = true;
+  for (auto e : inp_edges) {
+    if (e.sink.get_pid() == 0)
+      continue;  // Skip select
+
+    auto it = fbmap.find(e.driver.get_compact());
+    if (it != fbmap.end()) {
+      if (is_1st_input) {
+        max_bits = it->second.get_bits();
+        sign = it->second.get_sign();
+        is_1st_input = false;
+      } else {
+        I (sign == it->second.get_sign());
+        max_bits = (max_bits < it->second.get_bits()) ? it->second.get_bits() : max_bits;
+      }
+    } else {
+      // should wait till every input is ready
+      not_finished = true;
+      return;
+    }
+  }
+  fbmap.insert_or_assign(node.get_driver_pin().get_compact(), Firrtl_bits(max_bits, sign));
+}
 
 void Firmap::analysis_lg_const(Node &node) {
   auto dpin = node.get_driver_pin();
@@ -118,21 +170,21 @@ void Firmap::analysis_lg_attr_set_new_attr(Node &node_attr) {
     auto val = dpin_val.get_node().get_type_const();
     
     if (attr == Attr::Set_ubits) {
-      if (fb.get_signedness() == true)
+      if (fb.get_sign() == true)
         I(false, "cannot set ubits to a signed parent node in firrtl!");
 
       if (fb.get_bits() && (fb.get_bits()) > (val.to_i()))   
         Pass::error("Firrtl bitwidth mismatch. Variable {} needs {}ubits, but constrained to {}ubits\n", dpin_name, fb.get_bits(), val.to_i());
-      fb.set_bits_signedness(val.to_i(), false); 
+      fb.set_bits_sign(val.to_i(), false); 
 
     } else { // Attr::Set_sbits
-      if (fb.get_signedness() == false)
+      if (fb.get_sign() == false)
         I(false, "cannot set sbits to an unsigned parent node in firrtl!");
 
       if (fb.get_bits() && fb.get_bits() > (val.to_i())) 
         Pass::error("Firrtl bitwidth mismatch. Variable {} needs {}sbits, but constrained to {}sbits\n", dpin_name, fb.get_bits(), val.to_i());
       
-      fb.set_bits_signedness(val.to_i(), true);
+      fb.set_bits_sign(val.to_i(), true);
     }
   } else {
     I(false); 
@@ -173,7 +225,7 @@ void Firmap::analysis_lg_attr_set_dp_assign(Node &node_dp) {
   // note: up to now, if something has been converted to dp, the lhs and rhs
   // firrtl bits must be the same in firrtl bits analysis
   I(fb_lhs.get_bits() == fb_rhs.get_bits());
-  I(fb_lhs.get_signedness() == fb_rhs.get_signedness());
+  I(fb_lhs.get_sign() == fb_rhs.get_sign());
 
   fbmap.insert_or_assign(node_dp.setup_driver_pin("Y").get_compact(), fb_lhs);
 }
@@ -212,7 +264,7 @@ void Firmap::analysis_fir_add_sub(Node &node, XEdge_iterator &inp_edges) {
 
   Bits_t bits1, bits2;
   Node_pin e1_dpin, e2_dpin;
-  bool signedness;
+  bool sign;
 
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact());
@@ -221,15 +273,15 @@ void Firmap::analysis_fir_add_sub(Node &node, XEdge_iterator &inp_edges) {
 
     if (e.sink.get_pin_name() == "e1") {
       bits1 = it->second.get_bits();
-      signedness = it->second.get_signedness();
+      sign = it->second.get_sign();
       e1_dpin = e.driver;
     } else {
-      I(signedness == it->second.get_signedness()); // inputs of firrtl add must have same signedness
+      I(sign == it->second.get_sign()); // inputs of firrtl add must have same sign
       bits2 = it->second.get_bits();
       e2_dpin = e.driver;
     }
   }
-  fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(std::max(bits1, bits2) + 1, signedness));
+  fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(std::max(bits1, bits2) + 1, sign));
 }
 
 

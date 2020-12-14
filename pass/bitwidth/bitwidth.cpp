@@ -772,7 +772,6 @@ void Bitwidth::bw_pass(LGraph *lg) {
         set_graph_boundary(e.driver, e.sink);
     }
 
-
     for (auto dpin : node.out_connected_pins()) {
       auto it = bwmap.find(dpin.get_compact());
       if (it == bwmap.end()) 
