@@ -21,6 +21,7 @@ protected:
 
   static Attr get_key_attr(std::string_view key);
   
+  //lg_op
   void analysis_lg_const(Node &node);
   void analysis_lg_attr_set(Node &node);
   void analysis_lg_attr_set_dp_assign(Node &node);
@@ -29,8 +30,29 @@ protected:
   void analysis_lg_flop(Node &node);
   void analysis_lg_mux(Node &node, XEdge_iterator &inp_edges);
   void analysis_fir_ops(Node &node, std::string_view op);
+  //fir_op
   void analysis_fir_add_sub(Node &node, XEdge_iterator &inp_edges);
+  void analysis_fir_mul(Node &node, XEdge_iterator &inp_edges);
+  void analysis_fir_div(Node &node, XEdge_iterator &inp_edges);
+  void analysis_fir_rem(Node &node, XEdge_iterator &inp_edges);
+  void analysis_fir_comp(Node &node, XEdge_iterator &inp_edges);
+  void analysis_fir_pad(Node &node, XEdge_iterator &inp_edges);
+  void analysis_fir_sign(Node &node, XEdge_iterator &inp_edges);
+  void analysis_fir_shl(Node &node, XEdge_iterator &inp_edges);
+  void analysis_fir_shr(Node &node, XEdge_iterator &inp_edges);
+  void analysis_fir_dshl(Node &node, XEdge_iterator &inp_edges);
+  void analysis_fir_dshr(Node &node, XEdge_iterator &inp_edges);
+  void analysis_fir_cvt(Node &node, XEdge_iterator &inp_edges);
+  void analysis_fir_neg(Node &node, XEdge_iterator &inp_edges);
+  void analysis_fir_not(Node &node, XEdge_iterator &inp_edges);
+  void analysis_fir_bitwise(Node &node, XEdge_iterator &inp_edges);
+  void analysis_fir_bitwire_reduction(Node &node, XEdge_iterator &inp_edges);
+  void analysis_fir_bits_extract(Node &node, XEdge_iterator &inp_edges);
+  void analysis_fir_head(Node &node, XEdge_iterator &inp_edges);
+  void analysis_fir_tail(Node &node, XEdge_iterator &inp_edges);
 
+
+  //fir_op->lg_ops 
   void map_fir_ops(Node &node, std::string_view op, LGraph *new_lg);
   void map_fir_add(Node &node, LGraph *new_lg);
   void map_fir_sub(Node &node, LGraph *new_lg);
