@@ -46,6 +46,7 @@ protected:
   void analysis_fir_bitwise           (Node &node, XEdge_iterator &inp_edges);
   void analysis_fir_bitwire_reduction (Node &node, XEdge_iterator &inp_edges);
   void analysis_fir_bits_extract      (Node &node, XEdge_iterator &inp_edges);
+  void analysis_fir_cat               (Node &node, XEdge_iterator &inp_edges);
   void analysis_fir_head              (Node &node, XEdge_iterator &inp_edges);
   void analysis_fir_tail              (Node &node, XEdge_iterator &inp_edges);
 

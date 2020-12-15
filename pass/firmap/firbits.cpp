@@ -288,6 +288,8 @@ void Firmap::analysis_fir_ops(Node &node, std::string_view op) {
   } else if (op == "__fir_andr" || op == "__fir_orr" || op == "__fir_xorr") {
     analysis_fir_bitwire_reduction(node, inp_edges);
   } else if (op == "__fir_bits") {
+    analysis_fir_cat(node, inp_edges);
+  } else if (op == "__fir_cat") {
     analysis_fir_bits_extract(node, inp_edges);
   } else if (op == "__fir_head") {
     analysis_fir_head(node, inp_edges);
@@ -299,25 +301,177 @@ void Firmap::analysis_fir_ops(Node &node, std::string_view op) {
 }
 
 void Firmap::analysis_fir_tail(Node &node, XEdge_iterator &inp_edges) {
-;
+  I(inp_edges.size() == 2);  
+
+  Bits_t bits1, bits2;
+  for (auto e : inp_edges) {
+    auto it = fbmap.find(e.driver.get_compact());
+    if (it == fbmap.end()) {
+      fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
+      not_finished = true;
+      return;
+    }
+
+    if (e.sink.get_pin_name() == "e1") {
+      bits1 = it->second.get_bits();
+    } else {
+      bits2 = it->second.get_bits();
+    }
+  }
+  fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(bits1 - bits2, false));
 }
+
+
 void Firmap::analysis_fir_head(Node &node, XEdge_iterator &inp_edges) {
-;
+  I(inp_edges.size() == 2);  
+
+  Bits_t bits2;
+  for (auto e : inp_edges) {
+    auto it = fbmap.find(e.driver.get_compact());
+    if (it == fbmap.end()) {
+      fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
+      not_finished = true;
+      return;
+    }
+
+    if (e.sink.get_pin_name() == "e1") {
+      continue;
+    } else {
+      bits2 = it->second.get_bits();
+    }
+  }
+  fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(bits2, false));
 }
+
+
 void Firmap::analysis_fir_bits_extract(Node &node, XEdge_iterator &inp_edges) {
-;
+  I(inp_edges.size() == 3);  
+
+  Bits_t hi, lo;
+  bool sign;
+  for (auto e : inp_edges) {
+    auto it = fbmap.find(e.driver.get_compact());
+    if (it == fbmap.end()) {
+      fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
+      not_finished = true;
+      return;
+    }
+
+    if (e.sink.get_pin_name() == "e1") {
+      sign  = it->second.get_sign();
+    } else if (e.sink.get_pin_name() == "e2"){
+      I(it->second.get_sign() == true);
+      hi = it->second.get_bits();
+    } else {
+      I(it->second.get_sign() == true);
+      lo = it->second.get_bits();
+    }
+  }
+  fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(hi - lo + 1, false));
 }
+
+void Firmap::analysis_fir_cat(Node &node, XEdge_iterator &inp_edges) {
+  I(inp_edges.size() == 2);  
+
+  Bits_t bits1, bits2;
+  bool sign;
+  for (auto e : inp_edges) {
+    auto it = fbmap.find(e.driver.get_compact());
+    if (it == fbmap.end()) {
+      fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
+      not_finished = true;
+      return;
+    }
+
+    if (e.sink.get_pin_name() == "e1") {
+      bits1 = it->second.get_bits();
+      sign  = it->second.get_sign();
+    } else {
+      I(sign == it->second.get_sign()); // inputs of firrtl add must have same sign
+      bits2 = it->second.get_bits();
+    }
+  }
+  fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(bits1 + bits2, false));
+}
+
+
 void Firmap::analysis_fir_bitwire_reduction(Node &node, XEdge_iterator &inp_edges) {
-;
+  I(inp_edges.size() == 1);  
+  for (auto e : inp_edges) {
+    auto it = fbmap.find(e.driver.get_compact());
+    if (it == fbmap.end()) {
+      fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
+      not_finished = true;
+      return;
+    }
+
+  }
+  fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(1, false));
 }
 void Firmap::analysis_fir_bitwise(Node &node, XEdge_iterator &inp_edges) {
-;
+  I(inp_edges.size() == 2);  
+
+  Bits_t bits1, bits2;
+  bool sign;
+  for (auto e : inp_edges) {
+    auto it = fbmap.find(e.driver.get_compact());
+    if (it == fbmap.end()) {
+      fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
+      not_finished = true;
+      return;
+    }
+
+    if (e.sink.get_pin_name() == "e1") {
+      bits1 = it->second.get_bits();
+      sign  = it->second.get_sign();
+    } else {
+      I(sign == it->second.get_sign()); // inputs of firrtl bitwise must have same sign
+      bits2 = it->second.get_bits();
+    }
+  }
+  fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(std::max(bits1, bits2), sign));
 }
+
+
 void Firmap::analysis_fir_not(Node &node, XEdge_iterator &inp_edges) {
-;
+  I(inp_edges.size() == 1);  
+  
+  Bits_t bits1;
+  for (auto e : inp_edges) {
+    auto it = fbmap.find(e.driver.get_compact());
+    if (it == fbmap.end()) {
+      fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
+      not_finished = true;
+      return;
+    }
+
+    if (e.sink.get_pin_name() == "e1") {
+      bits1 = it->second.get_bits();
+    } 
+  }
+
+  fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(bits1, true));
 }
+
+
 void Firmap::analysis_fir_neg(Node &node, XEdge_iterator &inp_edges) {
-;
+  I(inp_edges.size() == 1);  
+  
+  Bits_t bits1;
+  for (auto e : inp_edges) {
+    auto it = fbmap.find(e.driver.get_compact());
+    if (it == fbmap.end()) {
+      fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
+      not_finished = true;
+      return;
+    }
+
+    if (e.sink.get_pin_name() == "e1") {
+      bits1 = it->second.get_bits();
+    } 
+  }
+
+  fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(bits1 + 1, true));
 }
 
 
