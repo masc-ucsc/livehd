@@ -14,7 +14,6 @@ pts='hier_tuple2 hier_tuple_io tuple_copy2 if nested_if reg__q_pin tuple_copy
      firrtl_tail2 firrtl_tail3 firrtl_gcd_3bits'
 
 
-
 # Note: in this bash script, you MUST specify top module name AT FIRST POSITION
 pts_hier1='top sum top'
 pts_hier2='top top sum'

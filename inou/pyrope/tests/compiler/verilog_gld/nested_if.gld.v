@@ -5,12 +5,12 @@ module nested_if_gld (
   input  [3:0] d,
   input  [3:0] e,
   input  [3:0] f,
-  output [4:0] o1,
-  output [4:0] o2
+  output [5:0] o1,
+  output [5:0] o2
 );
 
-reg [3:0] x;
-reg [3:0] y;
+reg [4:0] x;
+reg [4:0] y;
 
 always @ (*) begin
   x = a;

@@ -151,7 +151,7 @@ if [ "$OPT_DEBUG" != "" ]; then
   echo "${YOSYS} -p \"${yosys_read}; ${yosys_prep}; ${yosys_equiv}; equiv_status -assert\""
 fi
 
-${YOSYS} -p "${yosys_read}; ${yosys_prep}; ${yosys_equiv}; equiv_status -assert" \
+${YOSYS} -p "${yosys_read}; ${yosys_prep}; ${yosys_equiv}; write_verilog trace1.v ; equiv_status -assert" \
     2> /dev/null | tee lgcheck1.log | grep "Equivalence successfully proven!"
 
 if [ $? -eq 0 ]; then
