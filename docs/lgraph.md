@@ -672,6 +672,13 @@ created by simply negating one of the LGraph comparators. `GT = ~LE`, `LT =
 
 #### Forward Propagation
 
+* `Y = A LT B`
+
+* `Y = A0 LT B and A1 LT B`
+
+* `Y = A0 LT B0 and A1 LT B0 and A0 LT B1 and A1 LT B1`
+
+
 #### Backward Propagation
 
 #### Peephole Optimizations

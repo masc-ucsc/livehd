@@ -791,6 +791,16 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         std::vector<RTLIL::Wire *> v_rhs;
 
         for (const auto &e : node.inp_edges()) {
+#if 0
+          const auto str = e.sink.get_pin_name();
+          if (str == "A") {
+            v_lhs.emplace_back(get_wire(e.driver));
+          }else if (str == "B") {
+            v_rhs.emplace_back(get_wire(e.driver));
+          }else{
+            I(0);
+          }
+#else
           switch (e.sink.get_pid()) {
             case 0:
               v_lhs.emplace_back(get_wire(e.driver));
@@ -799,6 +809,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
               v_rhs.emplace_back(get_wire(e.driver));
               break;
           }
+#endif
         }
 
         if (v_lhs.empty() || v_rhs.empty())
