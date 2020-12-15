@@ -877,7 +877,7 @@ void Bitwidth::bw_pass(LGraph *lg) {
           node.del_node();
       }
       
-      //FIXME->sh: optimize MSB zeros at the final global BW algorithm.
+      // set is_always_positive flag for lgyosys usigned bits optimization 
       if (hier) {
         if (op == Ntype_op::Tposs || op == Ntype_op::TupKey)
           continue;
@@ -889,7 +889,8 @@ void Bitwidth::bw_pass(LGraph *lg) {
           auto &bw = it->second;
           I(dpin_bits != 0);
           if (bw.is_always_positive() && dpin_bits > 1)
-            dpin.set_bits(bw.get_sbits() - 1);
+            dpin.set_flag_positive();
+            /* dpin.set_bits(bw.get_sbits() - 1); */
         }
       }
     } // end of lg->fast()
@@ -904,7 +905,8 @@ void Bitwidth::bw_pass(LGraph *lg) {
           auto & bw = it->second;
           I(dpin_bits != 0);
           if (bw.is_always_positive() && dpin_bits > 1)
-            dpin.set_bits(bw.get_sbits() - 1);
+            dpin.set_flag_positive();
+            /* dpin.set_bits(bw.get_sbits() - 1); */
         }
       }, true);
 
@@ -924,7 +926,8 @@ void Bitwidth::bw_pass(LGraph *lg) {
           }
 
           if (bw.is_always_positive() && dpin_bits > 1 && !any_tposs_sink)
-            dpin.set_bits(bw.get_sbits() - 1);
+            dpin.set_flag_positive();
+            /* dpin.set_bits(bw.get_sbits() - 1); */
         }
       }, true);
     }
