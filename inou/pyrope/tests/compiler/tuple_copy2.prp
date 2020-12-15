@@ -1,3 +1,3 @@
 a = $inp
-tmp = (a.foo & 0xF) + (a.bar & 0xFF)
+tmp = (a.foo & 0xFu4) + (a.bar & 0xFFu8)
 %out = tmp
