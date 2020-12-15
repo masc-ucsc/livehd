@@ -34,7 +34,8 @@ protected:
   void analysis_fir_rem               (Node &node, XEdge_iterator &inp_edges);
   void analysis_fir_comp              (Node &node, XEdge_iterator &inp_edges);
   void analysis_fir_pad               (Node &node, XEdge_iterator &inp_edges);
-  void analysis_fir_sign              (Node &node, XEdge_iterator &inp_edges);
+  void analysis_fir_as_uint           (Node &node, XEdge_iterator &inp_edges);
+  void analysis_fir_as_sint           (Node &node, XEdge_iterator &inp_edges);
   void analysis_fir_shl               (Node &node, XEdge_iterator &inp_edges);
   void analysis_fir_shr               (Node &node, XEdge_iterator &inp_edges);
   void analysis_fir_dshl              (Node &node, XEdge_iterator &inp_edges);
