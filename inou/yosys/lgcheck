@@ -159,8 +159,6 @@ if [ $? -eq 0 ]; then
   exit 0
 fi
 
-exit 0
-
 #${YOSYS} -p " read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}; opt ; prep; memory; rename -top gold; design -stash gold;
               #read_verilog -sv ${GATE}; hierarchy ${TOP_STR}; opt ; prep; memory; rename -top gate; design -stash gate;
               #design -copy-from gold -as gold gold
