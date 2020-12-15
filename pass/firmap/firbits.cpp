@@ -333,23 +333,98 @@ void Firmap::analysis_fir_shl(Node &node, XEdge_iterator &inp_edges) {
 ;
 }
 void Firmap::analysis_fir_sign(Node &node, XEdge_iterator &inp_edges) {
-;
+  I(inp_edges.size());  
+
+  Bits_t bits1;
+  bool sign;
+  for (auto e : inp_edges) {
+    auto it = fbmap.find(e.driver.get_compact());
+    if (it == fbmap.end()) {
+      fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
+      not_finished = true;
+      return;
+    }
+
+    if (e.sink.get_pin_name() == "e1") {
+      bits1 = it->second.get_bits();
+      sign  = it->second.get_sign();
+    } else {
+      I(false, "sign operator only has one input");
+    }
+  }
+  fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(bits1, sign));
 }
 void Firmap::analysis_fir_pad(Node &node, XEdge_iterator &inp_edges) {
-;
+  I(inp_edges.size());  
+
+  Bits_t bits1, bits2;
+  bool sign;
+  for (auto e : inp_edges) {
+    auto it = fbmap.find(e.driver.get_compact());
+    if (it == fbmap.end()) {
+      fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
+      not_finished = true;
+      return;
+    }
+
+    if (e.sink.get_pin_name() == "e1") {
+      bits1 = it->second.get_bits();
+      sign  = it->second.get_sign();
+    } else {
+      bits2 = it->second.get_bits();
+    }
+  }
+  fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(std::max(bits1, bits2), sign));
 }
 
 void Firmap::analysis_fir_comp(Node &node, XEdge_iterator &inp_edges) {
-;
+  I(inp_edges.size());  
+  bool sign;
+
+  for (auto e : inp_edges) {
+    auto it = fbmap.find(e.driver.get_compact());
+    if (it == fbmap.end()) {
+      fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
+      not_finished = true;
+      return;
+    }
+
+    if (e.sink.get_pin_name() == "e1") {
+      sign = it->second.get_sign();
+    } else {
+      I(sign == it->second.get_sign()); // inputs of firrtl div must have same sign
+    }
+  }
+  fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(1, false));
 }
 
 
 void Firmap::analysis_fir_rem(Node &node, XEdge_iterator &inp_edges) {
-;
+  I(inp_edges.size());  
+
+  Bits_t bits1, bits2;
+  bool sign;
+  for (auto e : inp_edges) {
+    auto it = fbmap.find(e.driver.get_compact());
+    if (it == fbmap.end()) {
+      fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
+      not_finished = true;
+      return;
+    }
+
+    if (e.sink.get_pin_name() == "e1") {
+      bits1 = it->second.get_bits();
+      sign  = it->second.get_sign();
+    } else {
+      I(sign == it->second.get_sign()); // inputs of firrtl rem must have same sign
+      bits2 = it->second.get_bits();
+    }
+  }
+  fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(std::min(bits1, bits2), sign));
 }
 
 void Firmap::analysis_fir_div(Node &node, XEdge_iterator &inp_edges) {
-  I(inp_edges.size());  // Dangling sum??? (delete)
+  I(inp_edges.size());  
 
   Bits_t bits1;
   bool sign;
@@ -364,9 +439,9 @@ void Firmap::analysis_fir_div(Node &node, XEdge_iterator &inp_edges) {
 
     if (e.sink.get_pin_name() == "e1") {
       bits1 = it->second.get_bits();
-      sign = it->second.get_sign();
+      sign  = it->second.get_sign();
     } else {
-      I(sign == it->second.get_sign()); // inputs of firrtl add must have same sign
+      I(sign == it->second.get_sign()); // inputs of firrtl div must have same sign
     }
   }
 
@@ -377,7 +452,7 @@ void Firmap::analysis_fir_div(Node &node, XEdge_iterator &inp_edges) {
 }
 
 void Firmap::analysis_fir_mul(Node &node, XEdge_iterator &inp_edges) {
-  I(inp_edges.size());  // Dangling sum??? (delete)
+  I(inp_edges.size());  
 
   Bits_t bits1, bits2;
   bool sign;
@@ -392,9 +467,9 @@ void Firmap::analysis_fir_mul(Node &node, XEdge_iterator &inp_edges) {
 
     if (e.sink.get_pin_name() == "e1") {
       bits1 = it->second.get_bits();
-      sign = it->second.get_sign();
+      sign  = it->second.get_sign();
     } else {
-      I(sign == it->second.get_sign()); // inputs of firrtl add must have same sign
+      I(sign == it->second.get_sign()); // inputs of firrtl mul must have same sign
       bits2 = it->second.get_bits();
     }
   }
@@ -403,7 +478,7 @@ void Firmap::analysis_fir_mul(Node &node, XEdge_iterator &inp_edges) {
 
 
 void Firmap::analysis_fir_add_sub(Node &node, XEdge_iterator &inp_edges) {
-  I(inp_edges.size());  // Dangling sum??? (delete)
+  I(inp_edges.size());  
 
   Bits_t bits1, bits2;
   bool sign;
@@ -417,7 +492,7 @@ void Firmap::analysis_fir_add_sub(Node &node, XEdge_iterator &inp_edges) {
 
     if (e.sink.get_pin_name() == "e1") {
       bits1 = it->second.get_bits();
-      sign = it->second.get_sign();
+      sign  = it->second.get_sign();
     } else {
       I(sign == it->second.get_sign()); // inputs of firrtl add must have same sign
       bits2 = it->second.get_bits();
