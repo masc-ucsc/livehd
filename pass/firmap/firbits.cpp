@@ -254,7 +254,7 @@ Firmap::Attr Firmap::get_key_attr(std::string_view key) {
 void Firmap::analysis_fir_ops(Node &node, std::string_view op) {
   auto inp_edges = node.inp_edges();
   if (op == "__fir_add" || op == "__fir_sub") {
-    analysis_fir_add_sub(node, inp_edges);
+    analysis_fir_add_sub(node, inp_edges, op);
   } else if (op == "__fir_mul") {
     analysis_fir_mul(node, inp_edges);
   } else if (op == "__fir_div") {
@@ -760,7 +760,7 @@ void Firmap::analysis_fir_mul(Node &node, XEdge_iterator &inp_edges) {
 }
 
 
-void Firmap::analysis_fir_add_sub(Node &node, XEdge_iterator &inp_edges) {
+void Firmap::analysis_fir_add_sub(Node &node, XEdge_iterator &inp_edges, std::string_view op) {
   I(inp_edges.size() == 2);  
 
   Bits_t bits1, bits2;
@@ -781,7 +781,11 @@ void Firmap::analysis_fir_add_sub(Node &node, XEdge_iterator &inp_edges) {
       bits2 = it->second.get_bits();
     }
   }
-  fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(std::max(bits1, bits2) + 1, sign));
+  
+  if (op == "__fir_add")
+    fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(std::max(bits1, bits2) + 1, sign));
+  else 
+    fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(std::max(bits1, bits2) + 1, true));
 }
 
 

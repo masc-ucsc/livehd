@@ -28,7 +28,7 @@ protected:
   void analysis_lg_mux                (Node &node);
   void analysis_fir_ops               (Node &node, std::string_view op);
   //fir_op
-  void analysis_fir_add_sub           (Node &node, XEdge_iterator &inp_edges);
+  void analysis_fir_add_sub           (Node &node, XEdge_iterator &inp_edges, std::string_view op);
   void analysis_fir_mul               (Node &node, XEdge_iterator &inp_edges);
   void analysis_fir_div               (Node &node, XEdge_iterator &inp_edges);
   void analysis_fir_rem               (Node &node, XEdge_iterator &inp_edges);
@@ -58,12 +58,12 @@ protected:
   void map_fir_mul     (Node &node, LGraph *new_lg);
   void map_fir_div     (Node &node, LGraph *new_lg);
   void map_fir_rem     (Node &node, LGraph *new_lg);
-  void map_fir_lt      (Node &node, LGraph *new_lg);
-  void map_fir_leq     (Node &node, LGraph *new_lg);
-  void map_fir_gt      (Node &node, LGraph *new_lg);
-  void map_fir_geq     (Node &node, LGraph *new_lg);
+  void map_fir_lt_gt   (Node &node, LGraph *new_lg, std::string_view op);
+  void map_fir_leq_geq (Node &node, LGraph *new_lg, std::string_view op);
   void map_fir_eq      (Node &node, LGraph *new_lg);
   void map_fir_neq     (Node &node, LGraph *new_lg);
+
+  //todo
   void map_fir_pad     (Node &node, LGraph *new_lg);
   void map_fir_as_uint (Node &node, LGraph *new_lg);
   void map_fir_as_sint (Node &node, LGraph *new_lg);
