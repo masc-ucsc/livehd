@@ -28,7 +28,7 @@ protected:
   void analysis_lg_mux                (Node &node);
   void analysis_fir_ops               (Node &node, std::string_view op);
   //fir_op
-  void analysis_fir_add_sub           (Node &node, XEdge_iterator &inp_edges, std::string_view op);
+  void analysis_fir_add_sub           (Node &node, XEdge_iterator &inp_edges);
   void analysis_fir_mul               (Node &node, XEdge_iterator &inp_edges);
   void analysis_fir_div               (Node &node, XEdge_iterator &inp_edges);
   void analysis_fir_rem               (Node &node, XEdge_iterator &inp_edges);

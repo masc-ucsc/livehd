@@ -760,7 +760,7 @@ void Firmap::analysis_fir_mul(Node &node, XEdge_iterator &inp_edges) {
 }
 
 
-void Firmap::analysis_fir_add_sub(Node &node, XEdge_iterator &inp_edges, std::string_view op) {
+void Firmap::analysis_fir_add_sub(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size() == 2);  
 
   Bits_t bits1, bits2;
@@ -782,10 +782,7 @@ void Firmap::analysis_fir_add_sub(Node &node, XEdge_iterator &inp_edges, std::st
     }
   }
   
-  if (op == "__fir_add")
     fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(std::max(bits1, bits2) + 1, sign));
-  else 
-    fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(std::max(bits1, bits2) + 1, true));
 }
 
 
