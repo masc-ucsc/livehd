@@ -254,7 +254,7 @@ Firmap::Attr Firmap::get_key_attr(std::string_view key) {
 void Firmap::analysis_fir_ops(Node &node, std::string_view op) {
   auto inp_edges = node.inp_edges();
   if (op == "__fir_add" || op == "__fir_sub") {
-    analysis_fir_add_sub(node, inp_edges, op);
+    analysis_fir_add_sub(node, inp_edges);
   } else if (op == "__fir_mul") {
     analysis_fir_mul(node, inp_edges);
   } else if (op == "__fir_div") {
