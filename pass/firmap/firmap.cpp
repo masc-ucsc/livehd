@@ -93,39 +93,42 @@ void Firmap::map_fir_ops(Node &node, std::string_view op, LGraph *new_lg) {
   } 
 }
 
+
 void Firmap::map_fir_shl(Node &old_node, LGraph *new_lg) {
-  /* auto new_node = new_lg->create_node(Ntype_op::Sum); */
-  /* for (auto e : old_node.inp_edges()) { */
-  /*   if (o2n_dpin.find(e.driver) == o2n_dpin.end()) */
-  /*     Pass::error("dpin:{} cannot found corresponding dpin in new lgraph", e.driver.debug_name()); */
+  auto new_node = new_lg->create_node(Ntype_op::SHL);
+  for (auto e : old_node.inp_edges()) {
+    if (o2n_dpin.find(e.driver) == o2n_dpin.end())
+      Pass::error("dpin:{} cannot found corresponding dpin in new lgraph", e.driver.debug_name());
 
-  /*   if (e.sink == old_node.setup_sink_pin("e1")) { */
-  /*     o2n_dpin[e.driver].connect_sink(new_node.setup_sink_pin("A")); */
-  /*   } else { */
-  /*     o2n_dpin[e.driver].connect_sink(new_node.setup_sink_pin("B")); */
-  /*   } */
-  /* } */
+    if (e.sink == old_node.setup_sink_pin("e1")) {
+      o2n_dpin[e.driver].connect_sink(new_node.setup_sink_pin("A"));
+    } else {
+      o2n_dpin[e.driver].connect_sink(new_node.setup_sink_pin("B"));
+    }
+  }
 
-  /* for (auto old_dpin : old_node.out_connected_pins()) */ 
-  /*   o2n_dpin.insert_or_assign(old_dpin, new_node.setup_driver_pin()); */
+  for (auto old_dpin : old_node.out_connected_pins()) 
+    o2n_dpin.insert_or_assign(old_dpin, new_node.setup_driver_pin());
 }
+
 
 void Firmap::map_fir_shr(Node &old_node, LGraph *new_lg) {
-  /* auto new_node = new_lg->create_node(Ntype_op::Sum); */
-  /* for (auto e : old_node.inp_edges()) { */
-  /*   if (o2n_dpin.find(e.driver) == o2n_dpin.end()) */
-  /*     Pass::error("dpin:{} cannot found corresponding dpin in new lgraph", e.driver.debug_name()); */
+  auto new_node = new_lg->create_node(Ntype_op::SRA);
+  for (auto e : old_node.inp_edges()) {
+    if (o2n_dpin.find(e.driver) == o2n_dpin.end())
+      Pass::error("dpin:{} cannot found corresponding dpin in new lgraph", e.driver.debug_name());
 
-  /*   if (e.sink == old_node.setup_sink_pin("e1")) { */
-  /*     o2n_dpin[e.driver].connect_sink(new_node.setup_sink_pin("A")); */
-  /*   } else { */
-  /*     o2n_dpin[e.driver].connect_sink(new_node.setup_sink_pin("B")); */
-  /*   } */
-  /* } */
+    if (e.sink == old_node.setup_sink_pin("e1")) {
+      o2n_dpin[e.driver].connect_sink(new_node.setup_sink_pin("A"));
+    } else {
+      o2n_dpin[e.driver].connect_sink(new_node.setup_sink_pin("B"));
+    }
+  }
 
-  /* for (auto old_dpin : old_node.out_connected_pins()) */ 
-  /*   o2n_dpin.insert_or_assign(old_dpin, new_node.setup_driver_pin()); */
+  for (auto old_dpin : old_node.out_connected_pins()) 
+    o2n_dpin.insert_or_assign(old_dpin, new_node.setup_driver_pin());
 }
+
 
 void Firmap::map_fir_as_uint(Node &old_node, LGraph *new_lg) {
   auto new_node = new_lg->create_node(Ntype_op::Tposs);
