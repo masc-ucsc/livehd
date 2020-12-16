@@ -140,7 +140,7 @@ yosys_read="read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}; proc; flatten; renam
             read_verilog -sv ${GATE}; hierarchy ${TOP_STR}; proc; flatten; rename -top gate; design -stash gate;
             design -copy-from gold -as gold gold; design -copy-from gate -as gate gate; ${lib};"
 
-yosys_prep="proc; memory -nomap; equiv_make gold gate equiv; prep -flatten -top equiv; hierarchy -top equiv; hierarchy -check; flatten; proc; opt_clean;"
+yosys_prep="proc; memory -nomap; write_verilog trace0.v ; equiv_make gold gate equiv; write_verilog trace0b.v ; prep -flatten -top equiv; hierarchy -top equiv; hierarchy -check; flatten; proc; opt_clean;"
 
 yosys_equiv="equiv_simple;"
 #yosys_equiv_extra="${yosys_simple}; equiv_simple -seq 4; equiv_induct -seq 4;"
@@ -151,7 +151,7 @@ if [ "$OPT_DEBUG" != "" ]; then
   echo "${YOSYS} -p \"${yosys_read}; ${yosys_prep}; ${yosys_equiv}; equiv_status -assert\""
 fi
 
-${YOSYS} -p "${yosys_read}; ${yosys_prep}; ${yosys_equiv}; equiv_status -assert" \
+${YOSYS} -p "${yosys_read}; ${yosys_prep}; ${yosys_equiv}; write_verilog trace1.v ; equiv_status -assert" \
     2> /dev/null | tee lgcheck1.log | grep "Equivalence successfully proven!"
 
 if [ $? -eq 0 ]; then

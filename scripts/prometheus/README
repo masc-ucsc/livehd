@@ -1,0 +1,5 @@
+
+livehd/scripts/prometheus$ ./setup.sh
+livehd/scripts/prometheus$ cd prometheus
+livehd/scripts/prometheus/prometheus$ ./prometheus --config.file=prometheus.yml
+

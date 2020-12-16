@@ -1,6 +1,6 @@
-$a.__ubits = 1
-$b.__ubits = 3
-$c.__ubits = 3
+$a.__sbits = 1
+$b.__sbits = 3
+$c.__sbits = 3
 
 // bitwise
 %o1 = ~$a

@@ -1375,9 +1375,10 @@ void Lnast_tolg::process_firrtl_op_connection(LGraph *lg, const Lnast_nid &lnidx
     } else {
       auto ref_dpin = setup_ref_node_dpin(lg, child);
       switch (i) {
-        case 1: ref_dpin.connect_sink(fc_node.setup_sink_pin("A")); break;
-        case 2: ref_dpin.connect_sink(fc_node.setup_sink_pin("B")); break;
-        default: I(false, "firrtl_op should have 2 input edges at most!"); 
+        case 1: ref_dpin.connect_sink(fc_node.setup_sink_pin("e1")); break;
+        case 2: ref_dpin.connect_sink(fc_node.setup_sink_pin("e2")); break;
+        case 3: ref_dpin.connect_sink(fc_node.setup_sink_pin("e3")); break;
+        default: I(false, "firrtl_op should have 3 input edges at most!"); 
       }
     }
     i++;

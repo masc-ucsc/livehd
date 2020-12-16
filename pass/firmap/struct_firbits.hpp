@@ -7,38 +7,36 @@
 #include "lconst.hpp"
 
 class __attribute__((packed)) Firrtl_bits {
+protected:
+  Bits_t bits;
+  bool   sign;
 
 public:
-  Bits_t bits;
-  bool   signedness;
-
-  Firrtl_bits() : bits(0), signedness(false) {
-  }
+  Firrtl_bits() : bits(0), sign(false) {}
 
   Firrtl_bits(const Firrtl_bits &i) {
     bits = i.bits;
-    signedness = i.signedness;
+    sign = i.sign;
   };
 
-  Firrtl_bits(const Bits_t _bits, const bool _signedness) {
+  Firrtl_bits(const Bits_t _bits, const bool _sign) {
     bits = _bits;
-    signedness = _signedness;
+    sign = _sign;
   };
 
   Firrtl_bits(const Bits_t _bits) {
     bits = _bits;
-    signedness = false;
+    sign = false;
   };
 
   constexpr Firrtl_bits &operator=(const Firrtl_bits &r) {
     bits       = r.bits;
-    signedness = r.signedness;
+    sign = r.sign;
     return *this;
   }
 
 
-
-  void set_bits(Bits_t _bits) {
+  void set_bits(Bits_t _bits) { 
     bits = _bits;
   }
   
@@ -46,22 +44,20 @@ public:
     return bits; 
   };
 
-  void set_signedness(bool _signedness) {
-    signedness = _signedness;
+  void set_sign(bool _sign) {
+    sign = _sign;
   };
 
-  void set_bits_signedness(Bits_t _bits, bool _signedness) {
+  void set_bits_sign(Bits_t _bits, bool _sign) {
     bits = _bits;
-    signedness = _signedness;
+    sign = _sign;
   }
 
-
-
-  bool get_signedness() const {
-    return signedness;
+  bool get_sign() const {
+    return sign;
   };
 
   void dump() const {
-    fmt::print("{}{}b\n", signedness ? "S" : "U", bits);
+    fmt::print("{}{}b\n", sign ? "S" : "U", bits);
   }
 };

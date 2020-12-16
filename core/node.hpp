@@ -278,9 +278,7 @@ public:
   bool             is_type_io() const {
     return nid == Hardcoded_input_nid || nid == Hardcoded_output_nid;
   }
-  bool             is_type_loop_breaker() const {
-    return Ntype::is_loop_breaker(get_type_op());
-  }
+  bool             is_type_loop_breaker() const;
 
   Hierarchy_index hierarchy_go_down() const;
   Hierarchy_index hierarchy_go_up() const;

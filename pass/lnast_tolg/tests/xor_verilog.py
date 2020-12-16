@@ -9,7 +9,7 @@ def main():
       f.write("module xor_" + str(num) + "(\n")
       f.write("    input a,\n")
       f.write("    input b,\n")
-      f.write("    output wire s\n")
+      f.write("    output s\n")
       f.write("    );\n\n")
 
       for i in range(num):
