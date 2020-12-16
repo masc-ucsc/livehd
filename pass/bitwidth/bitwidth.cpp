@@ -652,7 +652,7 @@ void Bitwidth::process_attr_set_propagate(Node &node_attr) {
     } else if (parent_attr_bw.get_max() < data_bw.get_max()) {
       Pass::error("bitwidth mismatch. Variable {} needs {}max, but constrained to {}max\n", dpin_name, data_bw.get_max().to_pyrope(), parent_attr_bw.get_max().to_pyrope());
     } else if (parent_attr_bw.get_min() > data_bw.get_min()) {
-      Pass::error("bitwidth mismatch. Variable {} needs {}min, but constrained to {}min\n", dpin_name, data_bw.get_min().to_pyrope(), parent_attr_bw.get_min().to_pyrope());
+      Pass::warn("bitwidth mismatch. Variable {} needs {}min, but constrained to {}min\n", dpin_name, data_bw.get_min().to_pyrope(), parent_attr_bw.get_min().to_pyrope());
     }
   }
 
