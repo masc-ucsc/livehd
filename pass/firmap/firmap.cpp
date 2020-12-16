@@ -71,7 +71,7 @@ void Firmap::map_fir_ops(Node &node, std::string_view op, LGraph *new_lg) {
   } else if (op == "__fir_div") {
     map_fir_div(node, new_lg);
   } else if (op == "__fir_rem") {
-    ; //todo
+    map_fir_rem(node, new_lg); //todo
   } else if (op == "__fir_lt"  || op == "__fir_gt") {
     map_fir_lt_gt(node, new_lg, op);
   } else if (op == "__fir_leq" || op == "__fir_geq") {
@@ -80,9 +80,87 @@ void Firmap::map_fir_ops(Node &node, std::string_view op, LGraph *new_lg) {
     map_fir_eq(node, new_lg);
   } else if (op == "__fir_neq") {
     map_fir_neq(node, new_lg);
-  }
+  } else if (op == "__fir_pad") {
+    map_fir_pad(node, new_lg);
+  } else if (op == "__fir_as_uint") {
+    map_fir_as_uint(node, new_lg);
+  } else if (op == "__fir_as_sint") {
+    map_fir_as_sint(node);
+  } else if (op == "__fir_shl") {
+    map_fir_shl(node, new_lg);
+  } else if (op == "__fir_shr") {
+    map_fir_shr(node, new_lg);
+  } 
 }
 
+void Firmap::map_fir_shl(Node &old_node, LGraph *new_lg) {
+  /* auto new_node = new_lg->create_node(Ntype_op::Sum); */
+  /* for (auto e : old_node.inp_edges()) { */
+  /*   if (o2n_dpin.find(e.driver) == o2n_dpin.end()) */
+  /*     Pass::error("dpin:{} cannot found corresponding dpin in new lgraph", e.driver.debug_name()); */
+
+  /*   if (e.sink == old_node.setup_sink_pin("e1")) { */
+  /*     o2n_dpin[e.driver].connect_sink(new_node.setup_sink_pin("A")); */
+  /*   } else { */
+  /*     o2n_dpin[e.driver].connect_sink(new_node.setup_sink_pin("B")); */
+  /*   } */
+  /* } */
+
+  /* for (auto old_dpin : old_node.out_connected_pins()) */ 
+  /*   o2n_dpin.insert_or_assign(old_dpin, new_node.setup_driver_pin()); */
+}
+
+void Firmap::map_fir_shr(Node &old_node, LGraph *new_lg) {
+  /* auto new_node = new_lg->create_node(Ntype_op::Sum); */
+  /* for (auto e : old_node.inp_edges()) { */
+  /*   if (o2n_dpin.find(e.driver) == o2n_dpin.end()) */
+  /*     Pass::error("dpin:{} cannot found corresponding dpin in new lgraph", e.driver.debug_name()); */
+
+  /*   if (e.sink == old_node.setup_sink_pin("e1")) { */
+  /*     o2n_dpin[e.driver].connect_sink(new_node.setup_sink_pin("A")); */
+  /*   } else { */
+  /*     o2n_dpin[e.driver].connect_sink(new_node.setup_sink_pin("B")); */
+  /*   } */
+  /* } */
+
+  /* for (auto old_dpin : old_node.out_connected_pins()) */ 
+  /*   o2n_dpin.insert_or_assign(old_dpin, new_node.setup_driver_pin()); */
+}
+
+void Firmap::map_fir_as_uint(Node &old_node, LGraph *new_lg) {
+  auto new_node = new_lg->create_node(Ntype_op::Tposs);
+  for (auto e : old_node.inp_edges()) {
+    if (o2n_dpin.find(e.driver) == o2n_dpin.end())
+      Pass::error("dpin:{} cannot found corresponding dpin in new lgraph", e.driver.debug_name());
+
+    o2n_dpin[e.driver].connect_sink(new_node.setup_sink_pin("a"));
+  }
+  
+  for (auto old_dpin : old_node.out_connected_pins()) 
+    o2n_dpin.insert_or_assign(old_dpin, new_node.setup_driver_pin());
+} 
+
+
+void Firmap::map_fir_as_sint(Node &old_node) {
+  for (auto e : old_node.inp_edges()) {
+    if (o2n_dpin.find(e.driver) == o2n_dpin.end())
+      Pass::error("dpin:{} cannot found corresponding dpin in new lgraph", e.driver.debug_name());
+
+    auto sink_pid_old = e.sink.get_pid();
+    auto sink_node_dpin_old = e.sink.get_node().get_driver_pin();
+    auto spin_new = o2n_dpin[sink_node_dpin_old].get_node().setup_sink_pin_raw(sink_pid_old);
+    o2n_dpin[e.driver].connect_sink(spin_new);
+  }
+} 
+
+
+void Firmap::map_fir_rem(Node &old_node, LGraph *new_lg) {
+  ; //todo
+} 
+
+void Firmap::map_fir_pad(Node &old_node, LGraph *new_lg) {
+  ; //todo
+} 
 
 // A neq B == ~(A eq B) 
 void Firmap::map_fir_neq(Node &old_node, LGraph *new_lg) {
@@ -115,16 +193,15 @@ void Firmap::map_fir_eq(Node &old_node, LGraph *new_lg) {
 }
 
 
-// A geq B == (A gt B) or (A eq B)
+// A geq B == ~(A lt B) ; A leq B == ~(A gt B)
 void Firmap::map_fir_leq_geq(Node &old_node, LGraph *new_lg, std::string_view op) {
 
-  Node new_node_eq = new_lg->create_node(Ntype_op::EQ);
-  Node new_node_or = new_lg->create_node(Ntype_op::Or);
+  Node new_node_not = new_lg->create_node(Ntype_op::Not);
   Node new_node_cmp;
   if (op == "__fir_leq")
-    new_node_cmp = new_lg->create_node(Ntype_op::LT);
-  else 
     new_node_cmp = new_lg->create_node(Ntype_op::GT);
+  else 
+    new_node_cmp = new_lg->create_node(Ntype_op::LT);
 
   for (auto e : old_node.inp_edges()) {
     if (o2n_dpin.find(e.driver) == o2n_dpin.end())
@@ -132,18 +209,15 @@ void Firmap::map_fir_leq_geq(Node &old_node, LGraph *new_lg, std::string_view op
 
     if (e.sink == old_node.setup_sink_pin("e1")) {
       o2n_dpin[e.driver].connect_sink(new_node_cmp.setup_sink_pin("A"));
-      o2n_dpin[e.driver].connect_sink(new_node_eq.setup_sink_pin("A"));
     } else {
       o2n_dpin[e.driver].connect_sink(new_node_cmp.setup_sink_pin("B"));
-      o2n_dpin[e.driver].connect_sink(new_node_eq.setup_sink_pin("B"));
     }
   }
 
-  new_node_cmp.setup_driver_pin().connect_sink(new_node_or.setup_sink_pin("A"));
-  new_node_eq.setup_driver_pin().connect_sink(new_node_or.setup_sink_pin("A"));
+  new_node_cmp.setup_driver_pin().connect_sink(new_node_not.setup_sink_pin("a"));
 
   for (auto old_dpin : old_node.out_connected_pins()) 
-    o2n_dpin.insert_or_assign(old_dpin, new_node_or.setup_driver_pin());
+    o2n_dpin.insert_or_assign(old_dpin, new_node_not.setup_driver_pin());
 }
 
 
@@ -248,6 +322,3 @@ void Firmap::clone_lg_ops(Node &old_node, LGraph *new_lg) {
   }
 }
 
-void Firmap::map_fir_rem(Node &old_node, LGraph *new_lg) {
-  ; //todo
-} 

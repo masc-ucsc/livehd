@@ -62,11 +62,11 @@ protected:
   void map_fir_leq_geq (Node &node, LGraph *new_lg, std::string_view op);
   void map_fir_eq      (Node &node, LGraph *new_lg);
   void map_fir_neq     (Node &node, LGraph *new_lg);
+  void map_fir_as_uint (Node &node, LGraph *new_lg);
+  void map_fir_as_sint (Node &node);
 
   //todo
   void map_fir_pad     (Node &node, LGraph *new_lg);
-  void map_fir_as_uint (Node &node, LGraph *new_lg);
-  void map_fir_as_sint (Node &node, LGraph *new_lg);
   void map_fir_shl     (Node &node, LGraph *new_lg);
   void map_fir_shr     (Node &node, LGraph *new_lg);
   void map_fir_dshl    (Node &node, LGraph *new_lg);
