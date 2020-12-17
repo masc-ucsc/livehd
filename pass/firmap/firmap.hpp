@@ -82,7 +82,7 @@ protected:
   void map_fir_bits       (Node &node, LGraph *new_lg);
   void map_fir_head       (Node &node, LGraph *new_lg);
   void map_fir_tail       (Node &node, LGraph *new_lg);
-  void clone_lg_ops       (Node &node, LGraph *new_lg);
+  void clone_lg_ops_amap  (Node &node, LGraph *new_lg); // amap = as much as possible
 
 public:
   Firmap ();

@@ -140,7 +140,9 @@ void Lcompiler::global_firrtl_bits_analysis_map() {
     ++lgcnt;
     if (lg->get_name() == top_name_before_mapping) {
       hit = true;
-      fmt::print("------------------------ Firrtl Bits Analysis ----------------------- (9)\n");
+      fmt::print("------------------------ Firrtl Bits Analysis ----------------------- (9-1)\n");
+      fm.do_firbits_analysis(lg);
+      fmt::print("------------------------ Firrtl Bits Analysis ----------------------- (9-2)\n");
       fm.do_firbits_analysis(lg);
     }
     gviz ? gv.do_from_lgraph(lg, "gioc.firbits") : void(); 
