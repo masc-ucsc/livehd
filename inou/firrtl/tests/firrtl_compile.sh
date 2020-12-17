@@ -19,7 +19,7 @@ pts='Decrementer TrivialAdd Test1 Test2 NotAnd Trivial Accumulator Flop
 Tail RegisterSimple Register TrivialArith GCD_3bits Max2'
 
 pts='LFSR16'
-pts='TrivialAdd'
+pts='Test1 TrivialAdd Decrementer'
 
 
 LGSHELL=./bazel-bin/main/lgshell

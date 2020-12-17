@@ -1135,30 +1135,16 @@ void Inou_firrtl::HandleHeadOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_P
 
 void Inou_firrtl::HandleTailOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node,
                                const std::string& lhs) {
-  /* x = tail(expr)(2) should take graph form:
-   * NOTE: the shift right is only used to get correct # bits for :=
-   *     shr         :=
-   *   /  |   \      /  \
-   *  x  expr  2    x  expr */
   I(lnast.get_data(parent_node).type.is_stmts());
   I(op.arg_size() == 1 && op.const__size() == 1);
   auto lhs_str  = lnast.add_string(lhs);
-  auto temp_var = create_temp_var(lnast);
+  /* auto temp_var = create_temp_var(lnast); */
   auto expr_str = lnast.add_string(ReturnExprString(lnast, op.arg(0), parent_node, true));
 
-  auto idx_shr = lnast.add_child(parent_node, Lnast_node::create_shift_right("shr_tail"));
-  lnast.add_child(idx_shr, Lnast_node::create_ref(temp_var));
-  AttachExprStrToNode(lnast, expr_str, idx_shr);
-  lnast.add_child(idx_shr, Lnast_node::create_const(lnast.add_string(op.const_(0).value())));
-
-  // Note->hunter: We could simplify this by removing this (and merging with shr) but compiler needs this for now.
-  auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("asg_tail"));
-  lnast.add_child(idx_asg, Lnast_node::create_ref(lhs_str));
-  lnast.add_child(idx_asg, Lnast_node::create_ref(temp_var));
-
-  auto idx_dp_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign("dpasg_tail"));
-  lnast.add_child(idx_dp_asg, Lnast_node::create_ref(lhs_str));
-  AttachExprStrToNode(lnast, expr_str, idx_dp_asg);
+  auto idx_tail = lnast.add_child(parent_node, Lnast_node::create_func_call("__fir_tail"));
+  lnast.add_child(idx_tail, Lnast_node::create_ref(lhs_str));
+  lnast.add_child(idx_tail, Lnast_node::create_ref(expr_str));
+  lnast.add_child(idx_tail, Lnast_node::create_const(lnast.add_string(op.const_(0).value())));
 }
 
 void Inou_firrtl::HandleConcatOp(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node,
@@ -1828,7 +1814,6 @@ void Inou_firrtl::ListPrimOpInfo(Lnast& lnast, const firrtl::FirrtlPB_Expression
       break;
     }
     
-    //FIXME->sh: firmap
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_TAIL: {  // take in some 'n', returns value with 'n' MSBs removed
       HandleTailOp(lnast, op, parent_node, lhs);
       break;
