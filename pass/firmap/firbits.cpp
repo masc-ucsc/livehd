@@ -288,9 +288,9 @@ void Firmap::analysis_fir_ops(Node &node, std::string_view op) {
   } else if (op == "__fir_andr" || op == "__fir_orr" || op == "__fir_xorr") {
     analysis_fir_bitwire_reduction(node, inp_edges);
   } else if (op == "__fir_bits") {
-    analysis_fir_cat(node, inp_edges);
-  } else if (op == "__fir_cat") {
     analysis_fir_bits_extract(node, inp_edges);
+  } else if (op == "__fir_cat") {
+    analysis_fir_cat(node, inp_edges);
   } else if (op == "__fir_head") {
     analysis_fir_head(node, inp_edges);
   } else if (op == "__fir_tail") {
@@ -360,11 +360,9 @@ void Firmap::analysis_fir_bits_extract(Node &node, XEdge_iterator &inp_edges) {
     if (e.sink.get_pin_name() == "e1") {
       sign  = it->second.get_sign();
     } else if (e.sink.get_pin_name() == "e2"){
-      I(it->second.get_sign() == true);
-      hi = it->second.get_bits();
+      hi = e.driver.get_node().get_type_const().to_i();
     } else {
-      I(it->second.get_sign() == true);
-      lo = it->second.get_bits();
+      lo = e.driver.get_node().get_type_const().to_i();
     }
   }
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(hi - lo + 1, false));
