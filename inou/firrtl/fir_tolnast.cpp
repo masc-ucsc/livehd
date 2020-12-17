@@ -1809,21 +1809,21 @@ void Inou_firrtl::ListPortInfo(Lnast& lnast, const firrtl::FirrtlPB_Port& port, 
 void Inou_firrtl::ListPrimOpInfo(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node,
                                  const std::string& lhs) {
   switch (op.op()) {
-    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_ADD:                //FIXME->sh: firmap
-    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_SUB:                //FIXME->sh: firmap
-    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_TIMES:              //FIXME->sh: firmap
-    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_DIVIDE:             //FIXME->sh: firmap
-    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_REM:                //FIXME->sh: firmap
-    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_DYNAMIC_SHIFT_LEFT: //FIXME->sh: firmap
-    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_DYNAMIC_SHIFT_RIGHT://FIXME->sh: firmap
-    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_BIT_AND:            //FIXME->sh: firmap
-    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_BIT_OR:             //FIXME->sh: firmap
-    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_BIT_XOR:            //FIXME->sh: firmap
-    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_LESS:               //FIXME->sh: firmap 
-    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_LESS_EQ:            //FIXME->sh: firmap
-    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_GREATER:            //FIXME->sh: firmap 
-    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_GREATER_EQ:         //FIXME->sh: firmap
-    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_EQUAL: {            //FIXME->sh: firmap
+    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_ADD:                
+    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_SUB:                
+    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_TIMES:              
+    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_DIVIDE:             
+    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_REM:                
+    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_DYNAMIC_SHIFT_LEFT: 
+    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_DYNAMIC_SHIFT_RIGHT:
+    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_BIT_AND:            
+    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_BIT_OR:             
+    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_BIT_XOR:            
+    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_LESS:                
+    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_LESS_EQ:            
+    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_GREATER:             
+    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_GREATER_EQ:         
+    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_EQUAL: {            
       HandleTwoExprPrimOp(lnast, op, parent_node, lhs);
       break;
     }
