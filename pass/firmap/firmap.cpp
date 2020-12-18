@@ -1,5 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <bits/stdint-uintn.h>
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -175,11 +176,12 @@ void Firmap::map_fir_tail(Node &old_node, LGraph *new_lg) {
     o2n_dpin.insert_or_assign(old_dpin, new_node_tp.setup_driver_pin());
 }
 
-// e1 head n = tposs (e1 >> (e1.fbits - n))
-// FIXME->sh: put a mask to constrain the bits in lgraph?
+// e1 head n = tposs (((e1 >> (e1.fbits - n)) & ((1<<n)-1)))
+// FIXME->sh: put a mask to constrain the bits in lgraph? -> yes
 void Firmap::map_fir_head(Node &old_node, LGraph *new_lg) {
-  auto new_node_sra = new_lg->create_node(Ntype_op::SRA);
-  auto new_node_tp  = new_lg->create_node(Ntype_op::Tposs);
+  auto new_node_sra  = new_lg->create_node(Ntype_op::SRA);
+  auto new_node_tp   = new_lg->create_node(Ntype_op::Tposs);
+  auto new_node_mask = new_lg->create_node(Ntype_op::And);
   Lconst e1_bits;
   Lconst n; 
   for (auto e : old_node.inp_edges()) {
@@ -197,10 +199,16 @@ void Firmap::map_fir_head(Node &old_node, LGraph *new_lg) {
   }
 
   auto shamt = e1_bits - n;
-  auto new_node_const = new_lg->create_node_const(shamt);
+  auto new_node_const_sra = new_lg->create_node_const(shamt);
 
-  new_node_const.setup_driver_pin().connect_sink(new_node_sra.setup_sink_pin("b")); // amount -> sra
-  new_node_tp.setup_sink_pin("a").connect_driver(new_node_sra.setup_driver_pin());  // sra -> tp
+  new_node_const_sra.setup_driver_pin().connect_sink(new_node_sra.setup_sink_pin("b")); // amount -> sra
+
+  auto const_mask = (1 << n.to_i()) - 1; //n bits mask
+  auto new_node_const_mask = new_lg->create_node_const(const_mask);
+  new_node_sra.setup_driver_pin().connect_sink(new_node_mask.setup_sink_pin("A"));        // sra -> mask
+  new_node_const_mask.setup_driver_pin().connect_sink(new_node_mask.setup_sink_pin("A")); // mask_const-> mask
+
+  new_node_tp.setup_sink_pin("a").connect_driver(new_node_mask.setup_driver_pin());  // mask -> tp
 
   for (auto old_dpin : old_node.out_connected_pins()) 
     o2n_dpin.insert_or_assign(old_dpin, new_node_tp.setup_driver_pin());
@@ -209,12 +217,14 @@ void Firmap::map_fir_head(Node &old_node, LGraph *new_lg) {
 
 
 
+// (e1 >> lo) & ((1<<(hi - lo)) - 1)
 void Firmap::map_fir_bits(Node &old_node, LGraph *new_lg) {
   auto new_node_sra  = new_lg->create_node(Ntype_op::SRA);
   auto new_node_mask = new_lg->create_node(Ntype_op::And);
   auto new_node_tp   = new_lg->create_node(Ntype_op::Tposs);
   Node new_node_mask_const;
   Node new_node_lo_const;
+  uint32_t hi, lo;
   for (auto e : old_node.inp_edges()) {
     if (o2n_dpin.find(e.driver) == o2n_dpin.end())
       Pass::error("dpin:{} cannot found corresponding dpin in the new lgraph", e.driver.debug_name());
@@ -222,14 +232,15 @@ void Firmap::map_fir_bits(Node &old_node, LGraph *new_lg) {
     if (e.sink == old_node.setup_sink_pin("e1")) {
       o2n_dpin[e.driver].connect_sink(new_node_sra.setup_sink_pin("a"));
     } else if (e.sink == old_node.setup_sink_pin("e2")){
-      auto hi         = e.driver.get_node().get_type_const().to_i();
-      auto mask_const = (1 << (hi - 1)) - 1;
-      new_node_mask_const = new_lg->create_node_const(mask_const);
+      hi = e.driver.get_node().get_type_const().to_i();
     } else {
-      auto lo = e.driver.get_node().get_type_const();
+      lo = e.driver.get_node().get_type_const().to_i();
       new_node_lo_const = new_lg->create_node_const(lo);
     }
   }
+
+  auto mask_const = (1 << (hi - lo + 1)) - 1;
+  new_node_mask_const = new_lg->create_node_const(mask_const);
 
   new_node_lo_const.setup_driver_pin().connect_sink(new_node_sra.setup_sink_pin("b"));
   new_node_sra.setup_driver_pin().connect_sink(new_node_mask.setup_sink_pin("A"));

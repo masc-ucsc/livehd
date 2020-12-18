@@ -222,9 +222,8 @@ void Firmap::analysis_lg_attr_set_dp_assign(Node &node_dp) {
     Pass::error("dp rhs firrtl bits must be ready even at first traverse, rhs:{}\n", dpin_rhs.debug_name());
   }
 
-  // note: up to now, if something has been converted to dp, the lhs and rhs
-  // firrtl bits must be the same in firrtl bits analysis
-  I(fb_lhs.get_bits() == fb_rhs.get_bits());
+  // note: up to now, if something has been converted to dp, the lhs_firbits must ge rhs
+  I(fb_lhs.get_bits() >= fb_rhs.get_bits());
   I(fb_lhs.get_sign() == fb_rhs.get_sign());
 
   fbmap.insert_or_assign(node_dp.setup_driver_pin("Y").get_compact(), fb_lhs);
