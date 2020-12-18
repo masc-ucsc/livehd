@@ -15,12 +15,13 @@ ShiftRegister SimpleALU Stack Tbl VecSearch Counter DynamicMemorySearch MaxN
 Memo Mul Mux4 RealGCD SingleEvenFilter VecShiftRegister VecShiftRegisterParam
 VecShiftRegisterSimple VendingMachine VendingMachineSwitch'
 
-pts='LFSR16 Test2 NotAnd Trivial Accumulator Flop
+pts='LFSR16 Test2 Trivial Accumulator Flop
 Tail RegisterSimple Register TrivialArith GCD_3bits Max2'
 
-pts_passed='Test1 TrivialAdd'
+pts_passed='Test1 TrivialAdd NotAnd'
+pts_reg='Decrementer'
 
-pts='Decrementer'
+pts='Trivial'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck

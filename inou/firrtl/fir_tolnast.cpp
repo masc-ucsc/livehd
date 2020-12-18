@@ -1037,15 +1037,15 @@ void Inou_firrtl::HandleTwoExprPrimOp(Lnast& lnast, const firrtl::FirrtlPB_Expre
       break;
     }
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_BIT_AND: {
-      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__fir_andr"));
+      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__fir_and"));
       break;
     }
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_BIT_OR: {
-      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__fir_orr"));
+      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__fir_or"));
       break;
     }
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_BIT_XOR: {
-      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__fir_xorr"));
+      idx_primop = lnast.add_child(parent_node, Lnast_node::create_func_call("__fir_xor"));
       break;
     }
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_LESS: {

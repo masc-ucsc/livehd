@@ -448,7 +448,7 @@ void Firmap::analysis_fir_not(Node &node, XEdge_iterator &inp_edges) {
     } 
   }
 
-  fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(bits1, true));
+  fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(bits1, false));
 }
 
 
