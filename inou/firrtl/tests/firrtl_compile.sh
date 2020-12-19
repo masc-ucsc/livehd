@@ -5,23 +5,26 @@ FIRRTL_LEVEL='lo'
 pts_long_lec='GCD'
 
 pts_todo_advanced='FPU ICache MemoryController RWSmem Smem Rob ICache
-HwachaSequencer RocketCore'
+HwachaSequencer RocketCore Ops'
 
-pts_todo='Test6 SimpleBitOps Ops
-BundleConnect Smem_simple SubModule Coverage AddNot Test3 MaxN Adder4 Adder
-ByteSelector Combinational Darken EnableShiftRegister FullAdder Functionality
-HiLoMultiplier Life LogShifter Parity ResetShiftRegister Risc Router
-ShiftRegister SimpleALU Stack Tbl VecSearch Counter DynamicMemorySearch MaxN
-Memo Mul Mux4 RealGCD SingleEvenFilter VecShiftRegister VecShiftRegisterParam
-VecShiftRegisterSimple VendingMachine VendingMachineSwitch'
+pts_todo='Coverage AddNot Test3 MaxN
+Adder4 Adder ByteSelector Combinational Darken EnableShiftRegister FullAdder
+Functionality HiLoMultiplier Life LogShifter Parity ResetShiftRegister Risc
+Router ShiftRegister SimpleALU Stack Tbl VecSearch Counter DynamicMemorySearch
+MaxN Memo Mul Mux4 RealGCD SingleEvenFilter VecShiftRegister
+VecShiftRegisterParam VecShiftRegisterSimple VendingMachine
+VendingMachineSwitch'
 
+pts_mem='Smem_simple'
 pts_reg='Decrementer LFSR16 Accumulator Flop RegisterSimple Register GCD_3bits
 RegXor '
+
+pts_hier='BundleConnect SubModule '
 
 pts_passed='Test1 Test2 TrivialAdd NotAnd Trivial Tail TrivialArith Max2 Shifts
 PlusAnd '
 
-pts_bits_debug='Test6'
+pts_bits_debug='Test6 SimpleBitOps Coverage'
 
 pts='Test6'
 

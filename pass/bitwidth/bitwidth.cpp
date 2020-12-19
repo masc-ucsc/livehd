@@ -52,19 +52,30 @@ void Bitwidth::process_flop(Node &node) {
   }
 }
 
+
+void Bitwidth::process_ror(Node &node, XEdge_iterator &inp_edges) {
+  I(inp_edges.size());  
+
+  Bitwidth_range bw;
+  bw.set_sbits_range(1);
+  bwmap.insert_or_assign(node.get_driver_pin().get_compact(), bw);
+}
+
 void Bitwidth::process_not(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size());  // Dangling???
 
   Lconst max_val;
   Lconst min_val;
   for (auto e : inp_edges) {
-    auto it3 = bwmap.find(e.driver.get_compact());
-    if (it3 != bwmap.end()) {
-      if (max_val < it3->second.get_max())
-        max_val = it3->second.get_max();
-
-      if (min_val == 0 || min_val > it3->second.get_min())
-        min_val = it3->second.get_min();
+    auto it = bwmap.find(e.driver.get_compact());
+    if (it != bwmap.end()) {
+      auto pmax = it->second.get_max().to_i(); //pmax = parent_max
+      auto pmin = it->second.get_min().to_i();
+      //calculate 1s'complemet value
+      auto pmax_1scomp = ~pmax;
+      auto pmin_1scomp = ~pmin;
+      max_val = Lconst(std::max(pmax_1scomp, pmin_1scomp));
+      min_val = Lconst(std::min(pmax_1scomp, pmin_1scomp));
     } else {
       debug_unconstrained_msg(node, e.driver);
       not_finished = true;
@@ -744,7 +755,7 @@ void Bitwidth::bw_pass(LGraph *lg) {
     } else if (op == Ntype_op::Or || op == Ntype_op::Xor) {
       process_logic_or_xor(node, inp_edges);
     } else if (op == Ntype_op::Ror) {
-      I(false); //FIXME: todo (1 bit output)
+      process_ror(node, inp_edges);
     } else if (op == Ntype_op::And) {
       process_logic_and(node, inp_edges);
     } else if (op == Ntype_op::AttrSet) {
