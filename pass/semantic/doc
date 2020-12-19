@@ -101,9 +101,46 @@ add_to_output_vars()
 
 == Error Functions ==
 
+print_out_of_scope_vars()
+* Paremeters: LNAST Class
+* Return value: void
+* Print LNAST AST and an error message ("Out of Scope Variable Error") followed by LNAST variable name(s) that have thrown the error.
+
+error_print_lnast_by_name()
+* Parameters: LNAST Class, LNAST Node Name
+* Return value: void
+* Print LNAST AST and indicates with an arrow the LNAST Node Name that has thrown an error.
+
+error_print_lnast_by_type()
+* Parameters: LNAST Class, LNAST Node Name
+* Return value: void
+* Print LNAST AST and indicates with an arrow the LNAST Node Type that has thrown an error.
+
+
+error_print_lnast_by_warn()
+* Parameters: LNAST Class, vector of LNAST Node Names
+* Return value: void
+* Print LNAST AST and indicates with an arrow the LNAST Node Names from a vector that have thrown an error or errors.
+
 ========================================================================================================================
 
 == Misc. Check Functions ==
+
+resolve_read_write_lists()
+* Parameters:
+* Return value:
+
+resolve_lhs_rhs_lists()
+* Parameters:
+* Return value:
+
+resolve_out_of_scope()
+* Parameters:
+* Return value:
+
+resolve_out_of_scope_func_def():
+* Parameters:
+* Return value:enguc
 
 ========================================================================================================================
 
