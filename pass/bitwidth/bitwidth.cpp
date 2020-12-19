@@ -357,10 +357,14 @@ void Bitwidth::process_logic_and(Node &node, XEdge_iterator &inp_edges) {
     auto max_val = Lconst((1<<(min_sbits-1)) - 1);
     Lconst min_val;
     if (one_always_positive)
-      min_val = Lconst(0);
+      min_val = Lconst(0); // note: this could avoid the (max, min) of AND to pollute the later Sum_op if the AND is really just a mask
     else
       min_val = Lconst(-1)-max_val;
-    bwmap.insert_or_assign(node.get_driver_pin().get_compact(), Bitwidth_range(min_val, max_val)); // the max/min of AND MASK should be unsigned
+
+    if (max_val == Lconst(0) && min_val == Lconst(0)) //FIXME->sh: handle specially to keep signed-lgraph BW working properly
+      min_val = (Lconst(-1));
+
+    bwmap.insert_or_assign(node.get_driver_pin().get_compact(), Bitwidth_range(min_val, max_val)); 
 
 
     for (auto e : inp_edges) {

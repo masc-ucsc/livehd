@@ -24,7 +24,7 @@ pts_hier='BundleConnect SubModule '
 pts_passed='Test1 Test2 TrivialAdd NotAnd Trivial Tail TrivialArith Max2 Shifts
 PlusAnd '
 
-pts_bits_debug='Test6 SimpleBitOps Coverage'
+pts_bits_debug='Test6 SimpleBitOps Coverage '
 
 pts='Test6'
 
