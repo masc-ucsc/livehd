@@ -1,6 +1,10 @@
-Semantic Pass Function Descriptions
+========================================================================================================================
 
-==== TYPE CHECK FUNCTIONS =====
+== Semantic Pass Function Descriptions ==
+
+========================================================================================================================
+
+== Type Check Functions ==
 
 is_primitive_op()
 * Parameters: LNAST Node Type
@@ -22,13 +26,13 @@ is_a_number()
 * Return value: boolean
 * Returns true if LNAST Node name is an integer. Otherwise, returns false.
 
-===============================
+========================================================================================================================
 
 == Existence Check Functions ==
 
-Note on Parameters:
-FlatHashMap write --> Holds written-to-variables as keys and statement node names they belong to as values
-FlatHashMap read  --> Holds read-from-variables as keys and statement node names they belong to as values
+Notes:
+FlatHashMap write_list --> Holds written-to-variables as keys and statement node names they belong to as values
+FlatHashMap read_list  --> Holds read-from-variables as keys and statement node names they belong to as values
 
 in_write_list()
 * Parameters: FlatHashMap, LNAST Node Name, LNAST Statement Name (the statement it belongs to)
@@ -65,5 +69,45 @@ in_in_scope_stack()
 * Return value: boolean
 * Returns true of LNAST Node Name exists in even indices of in_scope_stack. Otherwise, returns false.
 
-===============================
+========================================================================================================================
+
+== Insert Functions ==
+
+Notes:
+FlatHashMap write_list       --> Holds written-to-variables as keys and statement node names they belong to as values
+FlatHashMap read_list        --> Holds read-from-variables as keys and statement node names they belong to as values
+FlatHashSet output_vars      --> Holds LNAST output-type variable names that are not written to
+FlatHashMap perm_write_list  --> Similiar to write_list except static (will not change when scope changes)
+FlatHashMap perm_read_list   --> Similiar to read_list except static (will not change when scope changes)
+
+add_to_write_list()
+* Parameters: LNAST Class, LNAST Node Name, LNAST Statement Name
+* Return value: void
+* Adds LNAST Node Name to write_list if not in it and to perm_write_list if not in it.
+If LNAST Node Name is a temporary variable (name starts with '____'), throw error message (temporary variables should only be written to once). 
+If LNAST Node Name is a output variable (name starts with '%'), calls add_to_output_vars().
+
+add_to_read_list()
+* Parameters: LNAST Node Name, LNAST Statement Name
+* Return value: void
+* Adds LNAST Node Name to read_list if not in it and to perm_read_list if not in it.
+
+add_to_output_vars()
+* Parameters: LNAST Node Name
+* Return value: void
+* Adds LNAST Node Name to output_vars if not in it.
+
+========================================================================================================================
+
+== Error Functions ==
+
+========================================================================================================================
+
+== Misc. Check Functions ==
+
+========================================================================================================================
+
+== Semantic Check Functions ==
+
+========================================================================================================================
 
