@@ -361,11 +361,12 @@ void Bitwidth::process_logic_and(Node &node, XEdge_iterator &inp_edges) {
     else
       min_val = Lconst(-1)-max_val;
 
-    if (max_val == Lconst(0) && min_val == Lconst(0)) //FIXME->sh: handle specially to keep signed-lgraph BW working properly
-      min_val = (Lconst(-1));
-
+    if (max_val == Lconst(0) && min_val == Lconst(0)) {//FIXME->sh: handle specially to keep signed-lgraph BW working properly
+      max_val = (Lconst(1));
+      /* min_val = (Lconst(-1)); */
+    }
+    
     bwmap.insert_or_assign(node.get_driver_pin().get_compact(), Bitwidth_range(min_val, max_val)); 
-
 
     for (auto e : inp_edges) {
       auto bw_bits = e.driver.get_bits();

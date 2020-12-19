@@ -19,14 +19,14 @@ pts_mem='Smem_simple'
 pts_reg='Decrementer LFSR16 Accumulator Flop RegisterSimple Register GCD_3bits
 RegXor '
 
-pts_hier='BundleConnect SubModule '
+pts_hier='BundleConnect SubModule'
 
 pts_passed='Test1 Test2 TrivialAdd NotAnd Trivial Tail TrivialArith Max2 Shifts
 PlusAnd '
 
 pts_bits_debug='Test6 SimpleBitOps Coverage '
 
-pts='Test6'
+pts='Coverage'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck

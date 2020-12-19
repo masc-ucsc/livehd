@@ -30,7 +30,7 @@ public:
   };
 
   constexpr Firrtl_bits &operator=(const Firrtl_bits &r) {
-    bits       = r.bits;
+    bits = r.bits;
     sign = r.sign;
     return *this;
   }
