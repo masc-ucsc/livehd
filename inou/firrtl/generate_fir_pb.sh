@@ -7,7 +7,7 @@
 
 
 pts='GCD_3bits GCD Coverage Shifts AddNot Decrementer PlusAnd RegXor Trivial TrivialArith Test1 Test2 Test3 
-     Test4 Test5 Test6 SimpleBitOps Register RegisterSimple Flop ICache Ops Rob RocketCore HwachaSequencer 
+     Test5 Test6 SimpleBitOps Register RegisterSimple Flop ICache Ops Rob RocketCore HwachaSequencer 
      BundleConnect MemoryController PlusAnd SubModule RWSmem Smem Smem_simple Blackbox Blackbox2 FPU'
 
 pts='ShiftRegister SimpleALU Stack Tbl VecSearch Accumulator Counter 

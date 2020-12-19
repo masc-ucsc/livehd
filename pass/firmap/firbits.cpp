@@ -155,11 +155,15 @@ void Firmap::analysis_lg_attr_set_new_attr(Node &node_attr) {
   // copy parent's bw for some judgement and then update to attr_set value
   Firrtl_bits fb(0);
   bool parent_pending = false;
+  bool is_set_graph_inp = false;
+  bool has_through_dpin = false;
   if (node_attr.is_sink_connected("name")) {
     auto through_dpin = node_attr.get_sink_pin("name").get_driver_pin();
+    is_set_graph_inp = through_dpin.is_graph_input();
     auto it           = fbmap.find(through_dpin.get_compact());
     if (it != fbmap.end()) {
       fb = it->second;
+      has_through_dpin = true;
     } else {
       parent_pending = true;
     }
@@ -170,7 +174,7 @@ void Firmap::analysis_lg_attr_set_new_attr(Node &node_attr) {
     auto val = dpin_val.get_node().get_type_const();
     
     if (attr == Attr::Set_ubits) {
-      if (fb.get_sign() == true)
+      if (fb.get_sign() == true && has_through_dpin && !is_set_graph_inp)
         I(false, "cannot set ubits to a signed parent node in firrtl!");
 
       if (fb.get_bits() && (fb.get_bits()) > (val.to_i()))   
@@ -178,7 +182,7 @@ void Firmap::analysis_lg_attr_set_new_attr(Node &node_attr) {
       fb.set_bits_sign(val.to_i(), false); 
 
     } else { // Attr::Set_sbits
-      if (fb.get_sign() == false)
+      if (fb.get_sign() == false && has_through_dpin && !is_set_graph_inp)
         I(false, "cannot set sbits to an unsigned parent node in firrtl!");
 
       if (fb.get_bits() && fb.get_bits() > (val.to_i())) 
