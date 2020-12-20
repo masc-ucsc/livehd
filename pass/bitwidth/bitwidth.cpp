@@ -914,7 +914,8 @@ void Bitwidth::bw_pass(LGraph *lg) {
         auto it = bwmap.find(dpin.get_compact());
         if (it != bwmap.end()) {
           auto &bw = it->second;
-          I(dpin_bits != 0);
+          if (dpin.has_outputs())
+            I(dpin_bits != 0);
           if (bw.is_always_positive() && dpin_bits > 1)
             dpin.set_flag_positive();
             /* dpin.set_bits(bw.get_sbits() - 1); */
@@ -930,7 +931,8 @@ void Bitwidth::bw_pass(LGraph *lg) {
         auto it = bwmap.find(dpin.get_compact());
         if (it != bwmap.end()) {
           auto & bw = it->second;
-          I(dpin_bits != 0);
+          if (dpin.has_outputs())
+            I(dpin_bits != 0);
           if (bw.is_always_positive() && dpin_bits > 1)
             dpin.set_flag_positive();
             /* dpin.set_bits(bw.get_sbits() - 1); */

@@ -844,10 +844,13 @@ void Inou_firrtl::HandleValidIfAssign(Lnast& lnast, const firrtl::FirrtlPB_Expre
                                       const std::string& lhs) {
   I(lnast.get_data(parent_node).type.is_stmts());
 
-  auto lhs_full = get_full_name(lnast, parent_node, lhs, false);
-  auto idx_pre_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
-  lnast.add_child(idx_pre_asg, Lnast_node::create_ref(lnast.add_string(lhs_full)));
-  lnast.add_child(idx_pre_asg, Lnast_node::create_const("0b?"));
+  // FIXME->sh: do the trick to declare variable with the validif value, hope this could make the validif to fit the role of "else mux" 
+  /* auto lhs_full = get_full_name(lnast, parent_node, lhs, false); */
+  /* auto idx_pre_asg = lnast.add_child(parent_node, Lnast_node::create_assign("")); */
+  /* lnast.add_child(idx_pre_asg, Lnast_node::create_ref(lnast.add_string(lhs_full))); */
+  /* lnast.add_child(idx_pre_asg, Lnast_node::create_const("0b?")); */
+  InitialExprAdd(lnast, expr.valid_if().value(), parent_node, lhs);
+
 
   auto cond_str   = lnast.add_string(ReturnExprString(lnast, expr.valid_if().condition(), parent_node, true));
   auto idx_v_if   = lnast.add_child(parent_node, Lnast_node::create_if("validIf"));

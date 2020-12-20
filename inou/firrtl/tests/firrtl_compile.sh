@@ -7,7 +7,7 @@ pts_long_lec='GCD'
 pts_todo_advanced='FPU ICache MemoryController RWSmem Smem Rob ICache
 HwachaSequencer RocketCore Ops'
 
-pts_todo='Coverage AddNot Test3 MaxN
+pts_todo='Test3 MaxN
 Adder4 Adder ByteSelector Combinational Darken EnableShiftRegister FullAdder
 Functionality HiLoMultiplier Life LogShifter Parity ResetShiftRegister Risc
 Router ShiftRegister SimpleALU Stack Tbl VecSearch Counter DynamicMemorySearch
@@ -21,12 +21,12 @@ RegXor '
 
 pts_hier='BundleConnect SubModule'
 
-pts_passed='Test1 Test2 TrivialAdd NotAnd Trivial Tail TrivialArith Max2 Shifts
+pts_passed='Test1 Test2 Tes6 TrivialAdd NotAnd Trivial Tail TrivialArith Max2 Shifts
 PlusAnd '
 
-pts_bits_debug='Test6 SimpleBitOps Coverage '
+pts_bits_debug='SimpleBitOps Coverage'
 
-pts='SimpleBitOps'
+pts='AddNot '
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck

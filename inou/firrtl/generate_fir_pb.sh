@@ -16,6 +16,7 @@ pts='ShiftRegister SimpleALU Stack Tbl VecSearch Accumulator Counter
      Parity ResetShiftRegister Risc LogShifter'
 
 pts='MaxN'
+pts='Test6'
 
 CHISEL_PATH=~/chisel3
 FIRRTL_PATH=~/firrtl
