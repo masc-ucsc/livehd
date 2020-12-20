@@ -1106,25 +1106,25 @@ Ntype_op Lnast_tolg::decode_lnast_op(const Lnast_nid &lnidx_opr) {
 
 void Lnast_tolg::process_ast_attr_set_op(LGraph *lg, const Lnast_nid &lnidx_aset) {
 
-  auto c0_aset      = lnast->get_first_child(lnidx_aset);
-  auto c1_aset      = lnast->get_sibling_next(c0_aset);
-  auto c2_aset      = lnast->get_sibling_next(c1_aset);
+  auto c0_aset = lnast->get_first_child(lnidx_aset);
+  auto c1_aset = lnast->get_sibling_next(c0_aset);
+  auto c2_aset = lnast->get_sibling_next(c1_aset);
 
-  auto c0_aset_name = lnast->get_sname(c0_aset);  // ssa name
-  auto attr_vname   = lnast->get_vname(c1_aset);  // no-ssa name
-  auto vname        = lnast->get_vname(c0_aset);  // no-ssa name
+  auto name = lnast->get_sname(c0_aset);  // ssa name
+  auto attr_vname = lnast->get_vname(c1_aset);  // no-ssa name
+  auto vname      = lnast->get_vname(c0_aset);  // no-ssa name
 
   auto aset_node = lg->create_node(Ntype_op::AttrSet);
   auto vn_spin   = aset_node.setup_sink_pin("name");     // variable name
   auto av_spin   = aset_node.setup_sink_pin("value");    // attribute value
   auto af_spin   = aset_node.setup_sink_pin("field");    // attribute field
 
-  auto aset_ancestor_subs  = lnast->get_data(c0_aset).subs - 1;
-  auto aset_ancestor_name = std::string(vname) + "_" + std::to_string(aset_ancestor_subs);
+  auto aset_ancestor_subs = lnast->get_data(c0_aset).subs - 1;
+  auto aset_ancestor_name = absl::StrCat(vname, "_", aset_ancestor_subs);
 
   Node_pin vn_dpin;
 
-  if (is_register(c0_aset_name)) {
+  if (is_register(name)) {
     bool reg_existed = name2dpin.find(vname) != name2dpin.end();
     if (!reg_existed) {
       vn_dpin = setup_ref_node_dpin(lg, c0_aset);
@@ -1135,7 +1135,7 @@ void Lnast_tolg::process_ast_attr_set_op(LGraph *lg, const Lnast_nid &lnidx_aset
       vn_dpin = name2dpin[vname];
       lg->add_edge(vn_dpin, vn_spin);
     }
-  } else if (is_input(c0_aset_name)) {
+  } else if (is_input(name)) {
     vn_dpin = setup_tuple_ref(lg, lnast->get_name(c0_aset));
     lg->add_edge(vn_dpin, vn_spin);
   } else if (name2dpin.find(aset_ancestor_name) != name2dpin.end()) {
@@ -1150,9 +1150,9 @@ void Lnast_tolg::process_ast_attr_set_op(LGraph *lg, const Lnast_nid &lnidx_aset
   auto av_dpin = setup_ref_node_dpin(lg, c2_aset);
   lg->add_edge(av_dpin, av_spin);
 
-  aset_node.setup_driver_pin("Y").set_name(c0_aset_name);
-  aset_node.setup_driver_pin("chain").set_name(c0_aset_name); // just for debug purpose
-  name2dpin[c0_aset_name] = aset_node.get_driver_pin("Y");
+  aset_node.setup_driver_pin("Y").set_name(name);
+  aset_node.setup_driver_pin("chain").set_name(name); // just for debug purpose
+  name2dpin[name] = aset_node.get_driver_pin("Y");
   vname2attr_dpin[vname] = aset_node.get_driver_pin("chain");
 }
 
@@ -1372,14 +1372,16 @@ void Lnast_tolg::process_firrtl_op_connection(LGraph *lg, const Lnast_nid &lnidx
       fc_node.setup_driver_pin("Y").set_name(name);
       name2dpin[name] = fc_node.setup_driver_pin("Y");
       setup_dpin_ssa(name2dpin[name], lnast->get_vname(child), lnast->get_subs(child));
-    } else {
-      auto ref_dpin = setup_ref_node_dpin(lg, child);
-      switch (i) {
-        case 1: ref_dpin.connect_sink(fc_node.setup_sink_pin("e1")); break;
-        case 2: ref_dpin.connect_sink(fc_node.setup_sink_pin("e2")); break;
-        case 3: ref_dpin.connect_sink(fc_node.setup_sink_pin("e3")); break;
-        default: I(false, "firrtl_op should have 3 input edges at most!"); 
-      }
+      i++;
+      continue;
+    } 
+
+    auto ref_dpin = setup_ref_node_dpin(lg, child);
+    switch (i) {
+      case 1: ref_dpin.connect_sink(fc_node.setup_sink_pin("e1")); break;
+      case 2: ref_dpin.connect_sink(fc_node.setup_sink_pin("e2")); break;
+      case 3: ref_dpin.connect_sink(fc_node.setup_sink_pin("e3")); break;
+      default: I(false, "firrtl_op should have 3 input edges at most!"); 
     }
     i++;
   }
@@ -1562,7 +1564,7 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(LGraph *lg) {
   absl::flat_hash_map<std::string_view, Node_pin> vname2dpin; // pyrope variable -> dpin with the largest ssa var subscription
   for (auto node: lg->forward()) {
     auto ntype = node.get_type_op();
-    if (ntype == Ntype_op::Sub)
+    if (ntype == Ntype_op::Sub && node.get_type_sub_node().get_name().substr(0,5) != "__fir") 
       continue;
 
     auto dpin  = node.get_driver_pin("Y");
@@ -1583,7 +1585,7 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(LGraph *lg) {
     if (ntype == Ntype_op::TupAdd && !node.has_outputs() && is_output(dpin.get_name()) ) {
       create_out_ta(lg, dpin.get_prp_vname(), dpin);
       continue;
-    }
+    } 
 
     // collect vname table info
     if (dpin.has_ssa() && dpin.has_prp_vname()) {

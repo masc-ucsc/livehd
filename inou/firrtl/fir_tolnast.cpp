@@ -857,19 +857,8 @@ void Inou_firrtl::HandleValidIfAssign(Lnast& lnast, const firrtl::FirrtlPB_Expre
   lnast.add_child(idx_v_if, Lnast_node::create_cond(cond_str));
 
   auto idx_stmt_tr = lnast.add_child(idx_v_if, Lnast_node::create_stmts(get_new_seq_name(lnast)));
-  /* auto idx_stmt_f  = lnast.add_child(idx_v_if, Lnast_node::create_stmts(get_new_seq_name(lnast))); */
 
   InitialExprAdd(lnast, expr.valid_if().value(), idx_stmt_tr, lhs);
-
-  // For validIf, if the condition is not met then what the LHS equals is undefined. We'll just use 0.
-  /* Lnast_nid idx_asg_false; */
-  /* if (lhs.substr(0, 1) == "%") { */
-  /*   idx_asg_false = lnast.add_child(idx_stmt_f, Lnast_node::create_dp_assign("")); */
-  /* } else { */
-  /*   idx_asg_false = lnast.add_child(idx_stmt_f, Lnast_node::create_assign("assign")); */
-  /* } */
-  /* lnast.add_child(idx_asg_false, Lnast_node::create_ref(lnast.add_string(lhs))); */
-  /* lnast.add_child(idx_asg_false, Lnast_node::create_const("0")); */
 }
 
 
@@ -1633,6 +1622,7 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
       break;
     }
     case firrtl::FirrtlPB_Expression::kUintLiteral: {  // UIntLiteral
+      fmt::print("DEBUG 2");
       Lnast_nid idx_asg;
       if (lhs.substr(0, 1) == "%") {
         idx_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign(""));

@@ -34,6 +34,7 @@ protected:
   void process_tposs(Node &node, XEdge_iterator &inp_edges);
   void process_comparator(Node &node);
   void process_logic_or_xor(Node &node, XEdge_iterator &inp_edges);
+  void process_assignment_or(Node &node, XEdge_iterator &inp_edges);
   void process_ror(Node &node, XEdge_iterator &inp_edges);
   void process_logic_and(Node &node, XEdge_iterator &inp_edges);
   void process_attr_get(Node &node);

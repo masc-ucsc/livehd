@@ -24,9 +24,9 @@ pts_hier='BundleConnect SubModule'
 pts_passed='Test1 Test2 Tes6 TrivialAdd NotAnd Trivial Tail TrivialArith Max2 Shifts
 PlusAnd '
 
-pts_bits_debug='SimpleBitOps Coverage'
+pts_not_op_bits_should_constrain='SimpleBitOps AddNot Coverage'
 
-pts='AddNot '
+pts='Test3'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -107,10 +107,10 @@ firrtl_test() {
     fi
   done
 
-  rm -f *.v
-  rm -f *.dot
-  rm -f lgcheck*
-  rm -rf lgdb
+  # rm -f *.v
+  # rm -f *.dot
+  # rm -f lgcheck*
+  # rm -rf lgdb
 }
 
 firrtl_test "$pts"
