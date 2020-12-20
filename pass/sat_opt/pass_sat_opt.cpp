@@ -203,21 +203,62 @@ void Pass_sat_opt::check_sat_opt(LGraph *g) {
 			 #endif
 	  }
 	  
-	  	else if (node.get_type_op() == Ntype_op::Sum) {
+	  	/*else if (node.get_type_op() == Ntype_op::Sum) {
 			  auto a_input = node.get_sink_pin("A").inp_edges();
 			  auto b_input = node.get_sink_pin("B").inp_edges();
-			  
-			  
+			  			  
 			  auto a_result = sat.vec_add(dpin2sat_var[a_input[0].driver.get_compact()], dpin2sat_var[a_input[1].driver.get_compact()]);
 			  auto b_result = sat.vec_add(dpin2sat_var[b_input[0].driver.get_compact()], dpin2sat_var[b_input[1].driver.get_compact()]);
+			  
 			  auto sum_result = sat.vec_sub(a_result, b_result);
 			  dpin2sat_var[node.setup_driver_pin().get_compact()] = sum_result;
 
 			  fmt::print("--Debug Sum: {}\n", node.setup_driver_pin().debug_name());
+	  }*/
+	  else if (node.get_type_op() == Ntype_op::LT) {
+			  auto a_input = node.get_sink_pin("A").inp_edges();
+			  auto b_input = node.get_sink_pin("B").inp_edges();
+			  			  
+			  auto lt_result = sat.vec_lt_signed(dpin2sat_var[a_input[0].driver.get_compact()], dpin2sat_var[b_input[0].driver.get_compact()]);
+			  auto lt_result_vec = (std::vector<int>) lt_result;
+			  
+			  dpin2sat_var[node.setup_driver_pin().get_compact()] = lt_result_vec;
+
+			  fmt::print("--Debug LT: {}\n", node.setup_driver_pin().debug_name());
 	  }
-	  
-	  
-	  
+	  	  else if (node.get_type_op() == Ntype_op::GT) {
+			  auto a_input = node.get_sink_pin("A").inp_edges();
+			  auto b_input = node.get_sink_pin("B").inp_edges();
+			  			  
+			  auto gt_result = sat.vec_gt_signed(dpin2sat_var[a_input[0].driver.get_compact()], dpin2sat_var[b_input[0].driver.get_compact()]);
+			  auto gt_result_vec = (std::vector<int>) gt_result;
+			  
+			  dpin2sat_var[node.setup_driver_pin().get_compact()] = gt_result_vec;
+
+			  fmt::print("--Debug GT: {}\n", node.setup_driver_pin().debug_name());
+	  }
+	  else if (node.get_type_op() == Ntype_op::SHL) {
+			  auto a_input = node.get_sink_pin("a").inp_edges();
+			  auto b_input = node.get_sink_pin("b").inp_edges();
+			  			  
+			  auto shl_result = sat.vec_shift_left(dpin2sat_var[a_input[0].driver.get_compact()], dpin2sat_var[b_input[0].driver.get_compact()], false, false, false);
+
+			  dpin2sat_var[node.setup_driver_pin().get_compact()] = shl_result;
+
+			  fmt::print("--Debug SHL: {}\n", node.setup_driver_pin().debug_name());
+	  }
+	  /*	  else if (node.get_type_op() == Ntype_op::SRA) {
+			  auto a_input = node.get_sink_pin("A").inp_edges();
+			  auto b_input = node.get_sink_pin("B").inp_edges();
+			  			  
+			  auto a_result = sat.vec_add(dpin2sat_var[a_input[0].driver.get_compact()], dpin2sat_var[a_input[1].driver.get_compact()]);
+			  auto b_result = sat.vec_add(dpin2sat_var[b_input[0].driver.get_compact()], dpin2sat_var[b_input[1].driver.get_compact()]);
+			  
+			  auto sum_result = sat.vec_sub(a_result, b_result);
+			  dpin2sat_var[node.setup_driver_pin().get_compact()] = sum_result;
+
+			  fmt::print("--Debug Sum: {}\n", node.setup_driver_pin().debug_name());
+	  }*/  
 	  
 	  else if (node.get_type_op() == Ntype_op::Const) {
 		  auto l_val = node.get_type_const();
@@ -231,12 +272,6 @@ void Pass_sat_opt::check_sat_opt(LGraph *g) {
 			  dpin2sat_var[dpin.get_compact() ] = v;
 		  }
 	  }
-
-	
-
-	/*
-
-	  */
 	  
   }
 
@@ -259,6 +294,8 @@ void Pass_sat_opt::check_sat_opt(LGraph *g) {
   
   std::vector<bool> modelValues;
   std::vector<int> assumptions;
+  
+  sat.printDIMACS(stdout);
   
   if (sat.solve(model_expression_vec, modelValues, eq))
   {
