@@ -350,7 +350,9 @@ void Firmap::map_fir_andr(Node &old_node, LGraph *new_lg) {
       auto e1_bits = fbmap[e.driver.get_compact()].get_bits();
       o2n_dpin[e.driver].connect_sink(new_node_mask.setup_sink_pin("A"));
       /* new_node_const_mask = new_lg->create_node_const((1<<e1_bits) - 1); */
-      new_node_const_mask = new_lg->create_node_const("0b1111s4");
+      I(false, "debug for 0b1111s4 and -8, please implement a generalize way to represent firrtl unsigned bit!");
+      /* new_node_const_mask = new_lg->create_node_const("0b1111s4"); */
+      /* new_node_const_mask = new_lg->create_node_const(-8); */
       new_node_const_mask.setup_driver_pin().connect_sink(new_node_mask.setup_sink_pin("A"));
 
       // handle e1.MSB
