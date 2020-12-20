@@ -11,12 +11,11 @@ pts='GCD_3bits GCD Coverage Shifts AddNot Decrementer PlusAnd RegXor Trivial Tri
      BundleConnect MemoryController PlusAnd SubModule RWSmem Smem Smem_simple Blackbox Blackbox2 FPU'
 
 pts='ShiftRegister SimpleALU Stack Tbl VecSearch Accumulator Counter 
-     DynamicMemorySearch LFSR16 Max2 MaxN Memo Mul Mux4 RealGCD SingleEvenFilter VecShiftRegister VecShiftRegisterParam
+     DynamicMemorySearch LFSR16 MaxN Memo Mul Mux4 RealGCD SingleEvenFilter VecShiftRegister VecShiftRegisterParam
      VecShiftRegisterSimple VendingMachine VendingMachineSwitch  Adder4 Adder ByteSelector Combinational Darken EnableShiftRegister FullAdder Functionality HiLoMultiplier Life 
      Parity ResetShiftRegister Risc LogShifter'
 
-pts='MaxN'
-pts='Test6'
+pts='ByteSelector'
 
 CHISEL_PATH=~/chisel3
 FIRRTL_PATH=~/firrtl
