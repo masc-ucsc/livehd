@@ -329,31 +329,38 @@ void Firmap::map_fir_xorr(Node &old_node, LGraph *new_lg) {
 }
 
 void Firmap::map_fir_andr(Node &old_node, LGraph *new_lg) {
-  // Andr(e1) = Tposs(And(Not(Ror(Not(e1))), e1.MSB))
+  // Andr(e1) = Tposs(And(Not(Ror(Not(And(e1, mask(e.fbits))))), e1.MSB))
   // e1.MSB   = e1 >> (e1.fbits-1)
+  auto new_node_mask = new_lg->create_node(Ntype_op::And);
   auto new_node_not1 = new_lg->create_node(Ntype_op::Not);
   auto new_node_not2 = new_lg->create_node(Ntype_op::Not);
   auto new_node_ror  = new_lg->create_node(Ntype_op::Ror);
   auto new_node_and  = new_lg->create_node(Ntype_op::And);
   auto new_node_tp   = new_lg->create_node(Ntype_op::Tposs);
   auto new_node_sra  = new_lg->create_node(Ntype_op::SRA);
-  Node new_node_const;
+  Node new_node_const_sra;
+  Node new_node_const_mask;
 
   for (auto e : old_node.inp_edges()) {
     if (o2n_dpin.find(e.driver) == o2n_dpin.end())
       Pass::error("dpin:{} cannot found corresponding dpin in the new lgraph", e.driver.debug_name());
 
     if (e.sink == old_node.setup_sink_pin("e1")) {
-      o2n_dpin[e.driver].connect_sink(new_node_not1.setup_sink_pin("a"));
+      // hanlde mask of input bits
+      auto e1_bits = fbmap[e.driver.get_compact()].get_bits();
+      o2n_dpin[e.driver].connect_sink(new_node_mask.setup_sink_pin("A"));
+      /* new_node_const_mask = new_lg->create_node_const((1<<e1_bits) - 1); */
+      new_node_const_mask = new_lg->create_node_const("0b1111s4");
+      new_node_const_mask.setup_driver_pin().connect_sink(new_node_mask.setup_sink_pin("A"));
 
       // handle e1.MSB
-      auto e1_bits = fbmap[e.driver.get_compact()].get_bits();
-      new_node_const = new_lg->create_node_const(e1_bits - 1);
+      new_node_const_sra = new_lg->create_node_const(e1_bits - 1);
       o2n_dpin[e.driver].connect_sink(new_node_sra.setup_sink_pin("a"));
-      new_node_const.setup_driver_pin().connect_sink(new_node_sra.setup_sink_pin("b"));
+      new_node_const_sra.setup_driver_pin().connect_sink(new_node_sra.setup_sink_pin("b"));
     }
   }
 
+  new_node_mask.setup_driver_pin().connect_sink(new_node_not1.setup_sink_pin("a"));
   new_node_not1.setup_driver_pin().connect_sink(new_node_ror.setup_sink_pin("A"));
   new_node_ror.setup_driver_pin().connect_sink(new_node_not2.setup_sink_pin("a"));
   new_node_sra.setup_driver_pin().connect_sink(new_node_and.setup_sink_pin("A"));
@@ -362,6 +369,30 @@ void Firmap::map_fir_andr(Node &old_node, LGraph *new_lg) {
 
   for (auto old_dpin : old_node.out_connected_pins()) 
     o2n_dpin.insert_or_assign(old_dpin, new_node_tp.setup_driver_pin());
+
+  /* for (auto e : old_node.inp_edges()) { */
+  /*   if (o2n_dpin.find(e.driver) == o2n_dpin.end()) */
+  /*     Pass::error("dpin:{} cannot found corresponding dpin in the new lgraph", e.driver.debug_name()); */
+
+  /*   if (e.sink == old_node.setup_sink_pin("e1")) { */
+  /*     o2n_dpin[e.driver].connect_sink(new_node_not1.setup_sink_pin("a")); */
+
+  /*     // handle e1.MSB */
+  /*     auto e1_bits = fbmap[e.driver.get_compact()].get_bits(); */
+  /*     new_node_const_sra = new_lg->create_node_const(e1_bits - 1); */
+  /*     o2n_dpin[e.driver].connect_sink(new_node_sra.setup_sink_pin("a")); */
+  /*     new_node_const_sra.setup_driver_pin().connect_sink(new_node_sra.setup_sink_pin("b")); */
+  /*   } */
+  /* } */
+
+  /* new_node_not1.setup_driver_pin().connect_sink(new_node_ror.setup_sink_pin("A")); */
+  /* new_node_ror.setup_driver_pin().connect_sink(new_node_not2.setup_sink_pin("a")); */
+  /* new_node_sra.setup_driver_pin().connect_sink(new_node_and.setup_sink_pin("A")); */
+  /* new_node_not2.setup_driver_pin().connect_sink(new_node_and.setup_sink_pin("A")); */
+  /* new_node_and.setup_driver_pin().connect_sink(new_node_tp.setup_sink_pin("a")); */
+
+  /* for (auto old_dpin : old_node.out_connected_pins()) */ 
+  /*   o2n_dpin.insert_or_assign(old_dpin, new_node_tp.setup_driver_pin()); */
 }
 
 

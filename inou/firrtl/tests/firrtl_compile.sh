@@ -26,7 +26,7 @@ PlusAnd '
 
 pts_bits_debug='Test6 SimpleBitOps Coverage '
 
-pts='Coverage'
+pts='SimpleBitOps'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
