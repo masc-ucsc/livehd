@@ -10,8 +10,8 @@
 #include "lgtuple.hpp"
 #include "pass_cprop.hpp"
 
-#define TRACE(x)
-//#define TRACE(x) x
+//#define TRACE(x)
+#define TRACE(x) x
 
 Cprop::Cprop (bool _hier, bool _at_gioc) : hier(_hier), at_gioc(_at_gioc) {}
 
@@ -272,9 +272,12 @@ void Cprop::replace_part_inputs_const(Node &node, XEdge_iterator &inp_edges_orde
         } else {
           node.setup_sink_pin("B").connect_driver(dpin);  // substract
         }
-      }
-    }
-    if (npending==1) {
+      }else if (npending==1) {
+				collapse_forward_always_pin0(node, edge_it2);
+			}
+    }else if (npending==0 && nconstants==1) {
+      collapse_forward_always_pin0(node, inp_edges_ordered);
+    }else if (npending==1 && nconstants==0) {
       collapse_forward_always_pin0(node, edge_it2);
     }
   }
