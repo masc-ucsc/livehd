@@ -2,30 +2,28 @@
 rm -rf ./lgdb
 FIRRTL_LEVEL='lo'
 
-pts_long_lec='GCD'
+pts_long_lec='GCD '
 
 pts_todo_advanced='FPU ICache MemoryController RWSmem Smem Rob ICache
 HwachaSequencer RocketCore Ops'
 
-pts_todo='
-FullAdder Functionality HiLoMultiplier Life LogShifter Parity
-ResetShiftRegister Risc Router ShiftRegister SimpleALU Stack Tbl VecSearch
-Counter DynamicMemorySearch Memo Mul Mux4 RealGCD SingleEvenFilter
-VecShiftRegister VecShiftRegisterParam VecShiftRegisterSimple VendingMachine
-VendingMachineSwitch'
+pts_todo='ResetShiftRegister Risc Router
+ShiftRegister SimpleALU Stack Tbl VecSearch Counter DynamicMemorySearch Memo
+Mul Mux4 RealGCD SingleEvenFilter VecShiftRegister VecShiftRegisterParam
+VecShiftRegisterSimple VendingMachine VendingMachineSwitch'
 
 pts_mem='Smem_simple'
 pts_reg='Decrementer LFSR16 Accumulator Flop RegisterSimple Register GCD_3bits
-RegXor '
+RegXor EnableShiftRegister'
 
-pts_hier='BundleConnect SubModule Adder Adder4'
+pts_hier='BundleConnect SubModule Adder Adder4 Life'
 
 pts='Test1 Test2 Test3 Test6 TrivialAdd NotAnd Trivial Tail TrivialArith Shifts
-PlusAnd MaxN ByteSelector Darken ' # passed pattern pool
+PlusAnd MaxN ByteSelector Darken FullAdder HiLoMultiplier LogShifter' # passed pattern pool
 
 pts_not_op_bits_should_constrain='SimpleBitOps AddNot Coverage'
 
-pts='EnableShiftRegister'
+pts='Parity'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
