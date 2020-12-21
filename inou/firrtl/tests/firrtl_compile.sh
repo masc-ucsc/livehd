@@ -5,25 +5,29 @@ FIRRTL_LEVEL='lo'
 pts_long_lec='GCD '
 
 pts_todo_advanced='FPU ICache MemoryController RWSmem Smem Rob ICache
-HwachaSequencer RocketCore Ops'
+HwachaSequencer RocketCore Ops Router'
 
-pts_todo='ResetShiftRegister Risc Router
-ShiftRegister SimpleALU Stack Tbl VecSearch Counter DynamicMemorySearch Memo
-Mul Mux4 RealGCD SingleEvenFilter VecShiftRegister VecShiftRegisterParam
-VecShiftRegisterSimple VendingMachine VendingMachineSwitch'
+pts_todo='RealGCD SingleEvenFilter
+VecShiftRegister VecShiftRegisterParam VecShiftRegisterSimple VendingMachine
+VendingMachineSwitch'
 
-pts_mem='Smem_simple'
+pts_mem='Smem_simple Stack DynamicMemorySearch Memo'
+
 pts_reg='Decrementer LFSR16 Accumulator Flop RegisterSimple Register GCD_3bits
-RegXor EnableShiftRegister'
+RegXor EnableShiftRegister ShiftRegister Parity ResetShiftRegister Risc
+VecSearch Counter'
 
 pts_hier='BundleConnect SubModule Adder Adder4 Life'
 
-pts='Test1 Test2 Test3 Test6 TrivialAdd NotAnd Trivial Tail TrivialArith Shifts
-PlusAnd MaxN ByteSelector Darken FullAdder HiLoMultiplier LogShifter' # passed pattern pool
-
 pts_not_op_bits_should_constrain='SimpleBitOps AddNot Coverage'
 
-pts='Parity'
+# passed pattern pool
+pts='Test1 Test2 Test3 Test6 TrivialAdd NotAnd Trivial Tail TrivialArith Shifts
+PlusAnd MaxN ByteSelector Darken FullAdder HiLoMultiplier LogShifter SimpleALU
+Mul ' 
+
+
+pts='Mux4 '
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
