@@ -1622,7 +1622,6 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
       break;
     }
     case firrtl::FirrtlPB_Expression::kUintLiteral: {  // UIntLiteral
-      fmt::print("DEBUG 2");
       Lnast_nid idx_asg;
       if (lhs.substr(0, 1) == "%") {
         idx_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign(""));
