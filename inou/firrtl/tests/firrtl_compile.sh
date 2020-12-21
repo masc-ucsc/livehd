@@ -20,8 +20,8 @@ RegXor '
 
 pts_hier='BundleConnect SubModule Adder Adder4'
 
-pts_passed='Test1 Test2 Test3 Tes6 TrivialAdd NotAnd Trivial Tail TrivialArith Shifts
-PlusAnd MaxN'
+pts='Test1 Test2 Test3 Test6 TrivialAdd NotAnd Trivial Tail TrivialArith Shifts
+PlusAnd MaxN' # passed
 
 pts_not_op_bits_should_constrain='SimpleBitOps AddNot Coverage'
 

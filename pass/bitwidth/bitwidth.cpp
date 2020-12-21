@@ -267,21 +267,29 @@ void Bitwidth::process_tposs(Node &node, XEdge_iterator &inp_edges) {
 
   for (auto e : inp_edges) {
     auto it = bwmap.find(e.driver.get_compact());
-    if (it != bwmap.end()) {
-      auto &bw = it->second;
-      if (bw.is_always_positive()) {
-        max_val = bw.get_max() ;
-        min_val = 0;
-      } else {
-        max_val = Lconst((1 << bw.get_sbits()) - 1) ;
-        min_val = 0;
-      }
-    } else {
+    if (it == bwmap.end()) {
       debug_unconstrained_msg(node, e.driver);
       not_finished = true;
       return;
     }
+
+    auto &bw = it->second;
+    fmt::print("  DEBUG Tposs parent max:{}\n", bw.get_max().to_i());
+    fmt::print("  DEBUG Tposs parent min:{}\n", bw.get_min().to_i());
+    fmt::print("  DEBUG Tposs parent sbits:{}\n", bw.get_sbits());
+    if (bw.is_always_positive()) {
+      max_val = bw.get_max() ;
+      min_val = 0;
+    } else {
+      max_val = Lconst((1 << bw.get_sbits()) - 1) ;
+      min_val = 0;
+      fmt::print("  DEBUG Tposs parent afterward max:{}\n", max_val.to_i());
+      fmt::print("  DEBUG Tposs parent afterward min:{}\n", min_val.to_i());
+      if (max_val.to_i() == 0 && min_val.to_i() == 0)
+        I(false);
+    }
   }
+
   bwmap.insert_or_assign(node.get_driver_pin().get_compact(), Bitwidth_range(min_val, max_val));
 }
 
