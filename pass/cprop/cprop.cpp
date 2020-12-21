@@ -872,7 +872,7 @@ void Cprop::try_create_graph_output(LGraph *lg, std::shared_ptr<Lgtuple> tup) {
       auto flattened_gout = lg->add_graph_output(it.first, Port_invalid, 0);
       I(!lg->get_graph_output(it.first).is_invalid());
       it.second.connect_sink(flattened_gout);
-      I(flattened_gout.get_driver_pin() == it.second);
+      //I(flattened_gout.get_driver_pin() == it.second);
     }
   }
 }
