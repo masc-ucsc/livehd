@@ -283,8 +283,8 @@ void Bitwidth::process_tposs(Node &node, XEdge_iterator &inp_edges) {
     } else {
       max_val = Lconst((1 << bw.get_sbits()) - 1) ;
       min_val = 0;
-      fmt::print("  DEBUG Tposs parent afterward max:{}\n", max_val.to_i());
-      fmt::print("  DEBUG Tposs parent afterward min:{}\n", min_val.to_i());
+      fmt::print("  DEBUG Tposs max:{}\n", max_val.to_i());
+      fmt::print("  DEBUG Tposs min:{}\n", min_val.to_i());
       if (max_val.to_i() == 0 && min_val.to_i() == 0)
         I(false);
     }
