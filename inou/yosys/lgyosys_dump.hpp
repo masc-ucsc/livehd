@@ -80,6 +80,8 @@ private:
   void create_subgraph(LGraph *g, RTLIL::Module *module, Node &node);
   void create_memory(LGraph *g, RTLIL::Module *module, Node &node);
 
+  RTLIL::Wire *zero_extend_one_bit(LGraph *g, RTLIL::Module *module, RTLIL::Wire *w);
+
 protected:
 public:
   Lgyosys_dump(RTLIL::Design *d, bool hier = false) : design(d) { hierarchy = hier; };
