@@ -7,27 +7,22 @@ pts_long_lec='GCD '
 pts_todo_advanced='FPU ICache MemoryController RWSmem Smem Rob ICache
 HwachaSequencer RocketCore Ops Router'
 
-pts_todo='
-VecShiftRegisterParam VecShiftRegisterSimple VendingMachine
-VendingMachineSwitch'
-
 pts_mem='Smem_simple Stack DynamicMemorySearch Memo'
 
 pts_reg='Decrementer LFSR16 Accumulator Flop RegisterSimple Register GCD_3bits
 RegXor EnableShiftRegister ShiftRegister Parity ResetShiftRegister Risc
-VecSearch Counter VecShiftRegister'
+VecSearch Counter VecShiftRegister VendingMachine VendingMachineSwitch'
 
-pts_hier='BundleConnect SubModule Adder Adder4 SingleEvenFilter Life'
+pts_hier='BundleConnect SubModule Adder Adder4 SingleEvenFilter Life Mux4'
 
 pts_not_op_bits_should_constrain='SimpleBitOps AddNot Coverage'
 
 # passed pattern pool
 pts='Test1 Test2 Test3 Test6 TrivialAdd NotAnd Trivial Tail TrivialArith Shifts
 PlusAnd MaxN ByteSelector Darken FullAdder HiLoMultiplier LogShifter SimpleALU
-Mul ' 
+Mul VecShiftRegisterParam VecShiftRegisterSimple ' 
 
-# pts='Mux4 '
-# pts=''
+pts='Adder'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -108,10 +103,10 @@ firrtl_test() {
     fi
   done
 
-  # rm -f *.v
-  # rm -f *.dot
-  # rm -f lgcheck*
-  # rm -rf lgdb
+  rm -f *.v
+  rm -f *.dot
+  rm -f lgcheck*
+  rm -rf lgdb
 }
 
 firrtl_test "$pts"

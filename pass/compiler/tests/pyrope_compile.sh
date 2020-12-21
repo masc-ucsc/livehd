@@ -198,5 +198,5 @@ Pyrope_compile "$pts"
 
 
 rm -f *.dot
-#rm -f *.v
+rm -f *.v
 rm -f lgcheck*
