@@ -151,8 +151,8 @@ void Bitwidth::process_shl(Node &node, XEdge_iterator &inp_edges) {
   auto max    = a_bw.get_max();
   auto min    = a_bw.get_min();
   auto amount = n_bw.get_max().to_i();
-  auto max_val = Lconst(max.get_raw_num() << amount);
-  auto min_val = Lconst(min.get_raw_num() << amount);
+  auto max_val = Lconst(Lconst(max.get_raw_num()) << Lconst(amount));
+  auto min_val = Lconst(Lconst(min.get_raw_num()) << Lconst(amount));
   Bitwidth_range bw(min_val, max_val);
   bwmap.insert_or_assign(node.get_driver_pin().get_compact(), bw);
 }
@@ -278,7 +278,7 @@ void Bitwidth::process_tposs(Node &node, XEdge_iterator &inp_edges) {
       max_val = bw.get_max() ;
       min_val = 0;
     } else {
-      max_val = Lconst((1UL << bw.get_sbits()) - 1) ;
+      max_val = (Lconst(1UL) << Lconst(bw.get_sbits())) - 1;
       min_val = 0;
       if (max_val.to_i() == 0 && min_val.to_i() == 0)
         I(false);
@@ -343,7 +343,7 @@ void Bitwidth::process_logic_or_xor(Node &node, XEdge_iterator &inp_edges) {
       max_bits = bits;
   }
 
-  auto max_val = Lconst((1UL << (max_bits-1)) - 1); // conservative unsigned max
+  auto max_val = (Lconst(1UL) << Lconst(max_bits-1)) - 1;
   auto min_val = Lconst(-1)-max_val;
   bwmap.insert_or_assign(node.get_driver_pin().get_compact(), Bitwidth_range(min_val, max_val)); // the max/min of AND MASK should be unsigned
 }
@@ -376,7 +376,7 @@ void Bitwidth::process_logic_and(Node &node, XEdge_iterator &inp_edges) {
       return;
     }
 
-    auto max_val = Lconst((1UL << (min_sbits-1)) - 1);
+    auto  max_val = ((Lconst(1UL) << Lconst(min_sbits -1))) - 1;
     Lconst min_val;
     if (one_always_positive)
       min_val = Lconst(0); // note: this could avoid the (max, min) of AND to pollute the later Sum_op if the AND is really just a mask
@@ -511,7 +511,7 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_dp, Fwd_edge_iterator::Fwd_
 
     auto bw_lhs_bits = bw_lhs.is_always_positive() ? bw_lhs.get_sbits() - 1 : bw_lhs.get_sbits();
 
-    auto mask_const = Lconst((1UL << (bw_lhs_bits)) - 1);
+    auto mask_const = (Lconst(1UL) << Lconst(bw_lhs_bits)) - 1;
     auto all_one_node = node_dp.get_class_lgraph()->create_node_const(mask_const);
     auto all_one_dpin = all_one_node.setup_driver_pin();
 

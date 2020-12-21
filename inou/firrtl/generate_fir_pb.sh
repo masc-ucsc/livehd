@@ -15,7 +15,7 @@ pts='ShiftRegister SimpleALU Stack VecSearch Accumulator Counter
      VecShiftRegisterSimple VendingMachine VendingMachineSwitch  Adder4 Adder ByteSelector FullAdder HiLoMultiplier Life 
      Parity ResetShiftRegister Risc LogShifter'
 
-pts='Mux4'
+pts='VecShiftRegister'
 
 CHISEL_PATH=~/chisel3
 FIRRTL_PATH=~/firrtl
