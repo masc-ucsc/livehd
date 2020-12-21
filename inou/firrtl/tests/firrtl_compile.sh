@@ -22,7 +22,8 @@ pts='Test1 Test2 Test3 Test6 TrivialAdd NotAnd Trivial Tail TrivialArith Shifts
 PlusAnd MaxN ByteSelector Darken FullAdder HiLoMultiplier LogShifter SimpleALU
 Mul VecShiftRegisterParam VecShiftRegisterSimple ' 
 
-pts='Adder'
+# pts='Adder'
+pts='SimpleBitOps'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
