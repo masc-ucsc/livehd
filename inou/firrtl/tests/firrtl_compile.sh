@@ -7,7 +7,7 @@ pts_long_lec='GCD'
 pts_todo_advanced='FPU ICache MemoryController RWSmem Smem Rob ICache
 HwachaSequencer RocketCore Ops'
 
-pts_todo='Darken EnableShiftRegister
+pts_todo='
 FullAdder Functionality HiLoMultiplier Life LogShifter Parity
 ResetShiftRegister Risc Router ShiftRegister SimpleALU Stack Tbl VecSearch
 Counter DynamicMemorySearch Memo Mul Mux4 RealGCD SingleEvenFilter
@@ -21,11 +21,11 @@ RegXor '
 pts_hier='BundleConnect SubModule Adder Adder4'
 
 pts='Test1 Test2 Test3 Test6 TrivialAdd NotAnd Trivial Tail TrivialArith Shifts
-PlusAnd MaxN ByteSelector' # passed pattern pool
+PlusAnd MaxN ByteSelector Darken ' # passed pattern pool
 
 pts_not_op_bits_should_constrain='SimpleBitOps AddNot Coverage'
 
-pts=''
+pts='EnableShiftRegister'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck

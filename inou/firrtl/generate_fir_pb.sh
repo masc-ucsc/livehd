@@ -12,10 +12,10 @@ pts='GCD_3bits GCD Coverage Shifts AddNot Decrementer PlusAnd RegXor Trivial Tri
 
 pts='ShiftRegister SimpleALU Stack Tbl VecSearch Accumulator Counter 
      DynamicMemorySearch LFSR16 MaxN Memo Mul Mux4 RealGCD SingleEvenFilter VecShiftRegister VecShiftRegisterParam
-     VecShiftRegisterSimple VendingMachine VendingMachineSwitch  Adder4 Adder ByteSelector Darken EnableShiftRegister FullAdder Functionality HiLoMultiplier Life 
+     VecShiftRegisterSimple VendingMachine VendingMachineSwitch  Adder4 Adder ByteSelector FullAdder Functionality HiLoMultiplier Life 
      Parity ResetShiftRegister Risc LogShifter'
 
-pts=''
+pts='EnableShiftRegister '
 
 CHISEL_PATH=~/chisel3
 FIRRTL_PATH=~/firrtl
