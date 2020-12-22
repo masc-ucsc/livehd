@@ -61,7 +61,7 @@ void Pass_compiler::compile(Eprp_var &var) {
   bool is_firrtl = pc.check_option_firrtl(var);
 
   Lcompiler compiler(path, odir, top, gviz);
-  fmt::print("top module_name is:{}\n", top);
+  fmt::print("top module_name is: {}\n", top);
 
   if (var.lnasts.empty()) {
     auto files = pc.get_files(var);

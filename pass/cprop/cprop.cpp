@@ -10,8 +10,8 @@
 #include "lgtuple.hpp"
 #include "pass_cprop.hpp"
 
-#define TRACE(x)
-//#define TRACE(x) x
+//#define TRACE(x)
+#define TRACE(x) x
 
 Cprop::Cprop (bool _hier, bool _at_gioc) : hier(_hier), at_gioc(_at_gioc) {}
 
@@ -113,7 +113,6 @@ void Cprop::collapse_forward_shiftleft(Node &node) {
 
 // Collase forward single node but only for pid!=0 (not reduction ops)
 void Cprop::collapse_forward_always_pin0(Node &node, XEdge_iterator &inp_edges_ordered) {
-  bool can_delete = true;
 
   auto op = node.get_type_op();
 
@@ -132,10 +131,8 @@ void Cprop::collapse_forward_always_pin0(Node &node, XEdge_iterator &inp_edges_o
     }
   }
 
-  if (can_delete) {
-    TRACE(fmt::print("cprop forward_always del_node node:{}\n", node.debug_name()));
-    node.del_node();
-  }
+  TRACE(fmt::print("cprop forward_always del_node node:{}\n", node.debug_name()));
+  node.del_node();
 }
 
 void Cprop::collapse_forward_for_pin(Node &node, Node_pin &new_dpin) {
@@ -224,34 +221,64 @@ void Cprop::replace_part_inputs_const(Node &node, XEdge_iterator &inp_edges_orde
     }
 
     collapse_forward_for_pin(node, a_pin);
-  } else if (op == Ntype_op::Sum) {
-    int n_replace = 0;
+  } else if (op == Ntype_op::Sum || op == Ntype_op::Or) {
+    Lconst result;
+    XEdge first_const_edge;
+    int nconstants = 0;
+    int npending = 0;
+    XEdge_iterator edge_it2;
     for (auto &i : inp_edges_ordered) {
-      if (i.driver.get_node().is_type_const())
-        n_replace++;
+      if (!i.driver.get_node().is_type_const()) {
+        if (npending==0)
+          edge_it2.push_back(i);
+        npending++;
+        continue;
+      }
+
+      auto c = i.driver.get_node().get_type_const();
+
+      if (c == 0) { // zero, just drop
+        i.del_edge();
+        continue;
+      }
+
+      ++nconstants;
+
+      if (op == Ntype_op::Sum) {
+        if (i.sink.get_pin_name() == "A") {
+          result = result.add_op(c);
+        } else {
+          I(i.sink.get_pin_name() == "B");
+          result = result.sub_op(c);
+        }
+      }else{
+        I(op==Ntype_op::Or);
+        result = result.or_op(c);
+      }
+
+      if (nconstants==1)
+        first_const_edge = i;
+      else
+        i.del_edge();
     }
 
-    if (n_replace > 1) {
-      Lconst result;
-      for (auto &i : inp_edges_ordered) {
-        if (!i.driver.get_node().is_type_const())
-          continue;
-
-        auto c = i.driver.get_node().get_type_const();
-        if (i.sink.get_pid() == 0) { //FIXME: change to A
-          result = result + c;
-        } else if (i.sink.get_pid() == 1){
-          result = result - c;
+    if (nconstants>1) {
+      first_const_edge.del_edge();
+      if (result!=0) {
+        auto new_node = node.get_class_lgraph()->create_node_const(result);
+        auto dpin     = new_node.get_driver_pin();
+        if (result > 0 || op ==Ntype_op::Or) {
+          node.setup_sink_pin("A").connect_driver(dpin);  // add, Or
+        } else {
+          node.setup_sink_pin("B").connect_driver(dpin);  // substract
         }
-        i.del_edge();
-      }
-      auto new_node = node.get_class_lgraph()->create_node_const(result);
-      auto dpin     = new_node.get_driver_pin();
-      if (result < 0) {
-        node.setup_sink_pin("B").connect_driver(dpin);  // signed pin
-      } else {
-        node.setup_sink_pin("A").connect_driver(dpin);  // unsigned pin
-      }
+      }else if (npending==1) {
+				collapse_forward_always_pin0(node, edge_it2);
+			}
+    }else if (npending==0 && nconstants==1) {
+      collapse_forward_always_pin0(node, inp_edges_ordered);
+    }else if (npending==1 && nconstants==0) {
+      collapse_forward_always_pin0(node, edge_it2);
     }
   }
 }
@@ -609,7 +636,6 @@ bool Cprop::process_tuple_get(Node &node) {
     auto val_dpin = sub_tup->get_value_dpin();
     I(!val_dpin.is_invalid());
 
-
     if (sub_tup->is_scalar()) { // Does not have attributes
       collapse_forward_for_pin(node, val_dpin);
     } else { // Has attributes
@@ -849,7 +875,7 @@ void Cprop::try_create_graph_output(LGraph *lg, std::shared_ptr<Lgtuple> tup) {
       auto flattened_gout = lg->add_graph_output(it.first, Port_invalid, 0);
       I(!lg->get_graph_output(it.first).is_invalid());
       it.second.connect_sink(flattened_gout);
-      I(flattened_gout.get_driver_pin() == it.second);
+      //I(flattened_gout.get_driver_pin() == it.second);
     }
   }
 }

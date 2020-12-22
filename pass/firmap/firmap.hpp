@@ -63,14 +63,14 @@ protected:
   void map_fir_eq         (Node &node, LGraph *new_lg);
   void map_fir_neq        (Node &node, LGraph *new_lg);
   void map_fir_as_uint    (Node &node, LGraph *new_lg);
-  void map_fir_as_sint    (Node &node, LGraph *new_lg);
+  void map_fir_as_sint    (Node &node);
 
   void map_fir_pad        (Node &node, LGraph *new_lg);
   void map_fir_shl        (Node &node, LGraph *new_lg);
   void map_fir_shr        (Node &node, LGraph *new_lg);
   void map_fir_dshl       (Node &node, LGraph *new_lg);
   void map_fir_dshr       (Node &node, LGraph *new_lg);
-  void map_fir_cvt        (Node &node, LGraph *new_lg);
+  void map_fir_cvt        (Node &node);
   void map_fir_neg        (Node &node, LGraph *new_lg);
   void map_fir_not        (Node &node, LGraph *new_lg);
   void map_fir_and_or_xor (Node &node, LGraph *new_lg, std::string_view op);

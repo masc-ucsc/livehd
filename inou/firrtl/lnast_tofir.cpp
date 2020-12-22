@@ -853,10 +853,10 @@ void Inou_firrtl::add_refcon_as_expr(Lnast &ln, const Lnast_nid &lnidx, firrtl::
     firrtl::FirrtlPB_Width *width = new firrtl::FirrtlPB_Width();
     width->set_value(lconst_holder.get_bits());
 
-    if (lconst_holder.is_unsigned()) {
+    if (lconst_holder.is_negative()) {
       firrtl::FirrtlPB_Expression_UIntLiteral *ulit = new firrtl::FirrtlPB_Expression_UIntLiteral();
       ulit->set_allocated_value(num);
-      ulit->set_allocated_width(width);
+      ulit->set_allocated_width(width-1);
       expr->set_allocated_uint_literal(ulit);
     } else {
       firrtl::FirrtlPB_Expression_SIntLiteral *slit = new firrtl::FirrtlPB_Expression_SIntLiteral();

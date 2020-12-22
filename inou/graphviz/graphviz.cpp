@@ -52,7 +52,9 @@ std::string Graphviz::graphviz_legalize_name(std::string_view name) {
     if (std::isalnum(c)) {
       legal.append(1,c);
     } else if (c == 37) {
-      legal += "unified_out";
+      legal += "_percent_";
+    } else if (c == 36) {
+      legal += "_dollar_";
     } else if (c == 95) {
       legal += "_";
     } else if (c == 35) {

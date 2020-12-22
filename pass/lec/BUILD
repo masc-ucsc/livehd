@@ -9,6 +9,8 @@ cc_library(
     deps = [
         "//pass/common:pass",
         "//third_party/misc/ezsat:ezsat",
+        "@boolector//:boolector",
+        "@cryptominisat//:cryptominisat",
     ]
 )
 

@@ -2,31 +2,25 @@
 rm -rf ./lgdb
 FIRRTL_LEVEL='lo'
 
-pts_long_lec='GCD'
+pts_long_lec='GCD '
 
 pts_todo_advanced='FPU ICache MemoryController RWSmem Smem Rob ICache
-HwachaSequencer RocketCore Ops'
+HwachaSequencer RocketCore Ops Router'
 
-pts_todo='Coverage AddNot Test3 MaxN
-Adder4 Adder ByteSelector Combinational Darken EnableShiftRegister FullAdder
-Functionality HiLoMultiplier Life LogShifter Parity ResetShiftRegister Risc
-Router ShiftRegister SimpleALU Stack Tbl VecSearch Counter DynamicMemorySearch
-MaxN Memo Mul Mux4 RealGCD SingleEvenFilter VecShiftRegister
-VecShiftRegisterParam VecShiftRegisterSimple VendingMachine
-VendingMachineSwitch'
+pts_mem='Smem_simple Stack DynamicMemorySearch Memo'
 
-pts_mem='Smem_simple'
 pts_reg='Decrementer LFSR16 Accumulator Flop RegisterSimple Register GCD_3bits
-RegXor '
+RegXor EnableShiftRegister ShiftRegister Parity ResetShiftRegister Risc
+VecSearch Counter VecShiftRegister VendingMachine VendingMachineSwitch'
 
-pts_hier='BundleConnect SubModule'
+pts_hier='BundleConnect SubModule Adder Adder4 SingleEvenFilter Life Mux4'
 
-pts_passed='Test1 Test2 TrivialAdd NotAnd Trivial Tail TrivialArith Max2 Shifts
-PlusAnd '
+# passed pattern pool
+pts='Test1 Test2 Test3 Test6 TrivialAdd NotAnd Trivial Tail TrivialArith Shifts
+PlusAnd MaxN ByteSelector Darken FullAdder HiLoMultiplier LogShifter SimpleALU
+Mul VecShiftRegisterParam VecShiftRegisterSimple SimpleBitOps AddNot' 
 
-pts_bits_debug='Test6 SimpleBitOps Coverage '
-
-pts='Coverage'
+# pts='Adder'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
