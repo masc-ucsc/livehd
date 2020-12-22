@@ -2,10 +2,16 @@
 
 fplan is a floorplanner that takes advantage of hierarchy and regularity in LiveHD designs.  It implements an algorithm known as [HiReg](https://www.cs.upc.edu/~jordicf/gavina/BIB/files/floorplan_iccad2014.pdf) in order to do this effectively.
 
-## Usage
+## Sample Usage
+1. Import LGraph: `livehd> inou.yosys.tolg files:./pass/fplan/tests/hier_test.v root:hier_test`
+2. Run Floorplan: `livehd> lgraph.open name:hier_test |> pass.fplan.makefp <options>`
+
+## Commands
 - `pass.fplan.makefp` generates a floorplan and sends it to stdout (will send to file in the future)
+   - When generating a floorplan, a 'top' module must be defined.
 - `pass.fplan.dumphier` dumps the imported hierarchy to a DOT file called `hier_dump.dot`.
 - `pass.fplan.dumptree` dumps the uncollapsed internal hierarchy tree to a DOT file called `tree_dump.dot`.
+
 All dump commands take the same relevant options as `makefp`.
 
 :warning: This command is in active development, use at your own risk!
