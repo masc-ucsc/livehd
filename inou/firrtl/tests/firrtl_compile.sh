@@ -15,15 +15,12 @@ VecSearch Counter VecShiftRegister VendingMachine VendingMachineSwitch'
 
 pts_hier='BundleConnect SubModule Adder Adder4 SingleEvenFilter Life Mux4'
 
-pts_not_op_bits_should_constrain='SimpleBitOps AddNot Coverage'
-
 # passed pattern pool
 pts='Test1 Test2 Test3 Test6 TrivialAdd NotAnd Trivial Tail TrivialArith Shifts
 PlusAnd MaxN ByteSelector Darken FullAdder HiLoMultiplier LogShifter SimpleALU
-Mul VecShiftRegisterParam VecShiftRegisterSimple ' 
+Mul VecShiftRegisterParam VecShiftRegisterSimple SimpleBitOps AddNot' 
 
 # pts='Adder'
-pts='SimpleBitOps'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
