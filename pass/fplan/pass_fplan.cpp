@@ -71,31 +71,6 @@ void Pass_fplan::pass(Eprp_var& var) {
   }
   */
 
-  Pattern p1;
-  Pattern p2;
-
-  auto hash = std::hash<Pattern>();
-  auto h1   = hash(p1);
-  auto h2   = hash(p2);
-
-  I(h1 == h2, "empty hashes differ");
-
-  p1.verts.emplace(1, 1);
-  p2.verts.emplace(2, 1);
-
-  h1 = hash(p1);
-  h2 = hash(p2);
-
-  I(h1 != h2, "different objects hash the same");
-
-  p1.verts.emplace(2, 1);
-  p2.verts.emplace(1, 1);
-
-  h1 = hash(p1);
-  h2 = hash(p2);
-
-  I(h1 == h2, "different orders hash differently");
-
   fmt::print("generating floorplan...\n");
   whole_t.start();
   Pass_fplan p(var);

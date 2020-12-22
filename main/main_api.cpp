@@ -21,7 +21,7 @@ void Main_api::init() {
 
   setup_inou_pyrope();
   setup_inou_yosys();
-  //setup_pass_fplan();
+  setup_pass_fplan();
 
   // FIXME beyond this point (to delete some of them)
 
