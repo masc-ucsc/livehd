@@ -26,7 +26,8 @@ void Gioc::do_trans(LGraph *lg) {
       auto subg_paras = split_name(node.get_name(), ":");
       auto &arg_tup_name = subg_paras[0];
       auto &ret_name     = subg_paras[1];
-      auto func_name     = node.get_type_sub_node().get_name();
+      /* auto func_name     = node.get_type_sub_node().get_name(); */
+      auto &func_name     = subg_paras[2];
 
       Sub_node* sub;
       if (library->has_name(func_name)) {
@@ -106,38 +107,6 @@ void Gioc::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_view ar
       continue;
     }
     
-    /* // II. io_pin is_output and is scalar */
-    /* if (subg_outp_is_scalar) { */
-    /*   auto subg_dpin = subg_node.setup_driver_pin(io_pin->name); */
-    /*   auto scalar_node = lg->create_node(Ntype_op::Or); */
-    /*   auto scalar_dpin = scalar_node.setup_driver_pin(); */
-    /*   subg_dpin.connect_sink(scalar_node.setup_sink_pin("A")); */
-
-    /*   name2dpin[ret_name] = scalar_dpin; */
-    /*   scalar_dpin.set_name(ret_name); */
-    /*   auto pos = ret_name.find_last_of('_'); */
-    /*   auto res_vname = ret_name.substr(0,pos); */
-    /*   auto res_sub   = std::stoi(std::string(ret_name.substr(pos+1))); */
-    /*   setup_dpin_ssa(scalar_dpin, res_vname, 0); */
-
-    /*   // note: the function call scalar return must be a "new_var_chain" */
-    /*   if (vname2attr_dpin.find(res_vname) != vname2attr_dpin.end()) { */
-    /*     auto aset_node = lg->create_node(Ntype_op::AttrSet); */
-    /*     auto aset_chain_spin = aset_node.setup_sink_pin("chain"); */
-    /*     auto aset_ancestor_dpin = vname2attr_dpin[res_vname]; */
-    /*     lg->add_edge(aset_ancestor_dpin, aset_chain_spin); */
-
-    /*     auto aset_vn_spin = aset_node.setup_sink_pin("name"); */
-    /*     auto aset_vn_dpin = scalar_dpin; */
-    /*     lg->add_edge(aset_vn_dpin, aset_vn_spin); */
-
-    /*     name2dpin[ret_name] = aset_node.setup_driver_pin("Y"); // dummy_attr_set node now represent the latest variable */
-    /*     aset_node.get_driver_pin("Y").set_name(ret_name); */
-    /*     setup_dpin_ssa(name2dpin[ret_name], res_vname, res_sub); */
-    /*     vname2attr_dpin[res_vname] = aset_node.setup_driver_pin("chain"); */
-    /*   } */
-    /*   continue; */
-    /* } */
 
     // III. hier-subgraph-output
     auto hier_inp_subnames = split_name(io_pin->name, ".");

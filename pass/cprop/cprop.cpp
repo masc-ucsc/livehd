@@ -426,23 +426,18 @@ void Cprop::replace_logic_node(Node &node, const Lconst &result, const Lconst &r
 }
 
 void Cprop::process_subgraph(Node &node) {
-  if (node.is_type_sub_present()) {
-    fmt::print("DEBUG-1\n");
+  if (node.is_type_sub_present()) 
     return;
-  }
-
+  
 
   auto *sub = node.ref_type_sub_node();
   const auto &reg = Lgcpp_plugin::get_registry();
 
   auto it = reg.find(sub->get_name());
-  fmt::print("DEBUG-X sub->get_name():{}\n", sub->get_name());
-  if (it == reg.end()) {
-    fmt::print("DEBUG-2\n");
+  if (it == reg.end()) 
     return;
-  }
+ 
 
-  fmt::print("DEBUG-3\n");
 
   fmt::print("cprop subgraph:{} is not present, found lgcpp...\n", sub->get_name());
 
