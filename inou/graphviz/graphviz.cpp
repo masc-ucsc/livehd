@@ -51,16 +51,18 @@ std::string Graphviz::graphviz_legalize_name(std::string_view name) {
   for (auto c : name) {
     if (std::isalnum(c)) {
       legal.append(1,c);
+    } else if (c == 32) {
+      legal += " ";
+    } else if (c == 35) {
+      legal += "#";
     } else if (c == 37) {
       legal += "_percent_";
     } else if (c == 36) {
       legal += "_dollar_";
-    } else if (c == 95) {
-      legal += "_";
-    } else if (c == 35) {
-      legal += "#";
     } else if (c == 58) {
       legal += ":";
+    } else if (c == 95) {
+      legal += "_";
     } else {
       legal += "_c" + std::to_string(c) + "_";
     }

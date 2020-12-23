@@ -12,11 +12,6 @@ Lcompiler::Lcompiler(std::string_view _path, std::string_view _odir, std::string
   : path(_path), odir(_odir), top(_top), gviz(_gviz) {}
 
 
-void Lcompiler::add_pyrope(std::shared_ptr<Lnast> ln) {
-  //thread_pool.add(Lcompiler::add_thread, this, ln);
-  add_pyrope_thread(ln);
-}
-
 void Lcompiler::add_pyrope_thread(std::shared_ptr<Lnast> ln) {
   Graphviz gv(true, false, odir); 
   gviz ? gv.do_from_lnast(ln, "raw") : void(); 
@@ -62,12 +57,6 @@ void Lcompiler::add_pyrope_thread(std::shared_ptr<Lnast> ln) {
 
   for(auto *lg:local_lgs)
     lgs.emplace_back(lg);
-}
-
-
-void Lcompiler::add_firrtl(std::shared_ptr<Lnast> ln) {
-  //thread_pool.add(Lcompiler::add_thread, this, ln);
-  add_firrtl_thread(ln);
 }
 
 
@@ -207,7 +196,6 @@ void Lcompiler::global_bitwidth_inference() {
   if (lgcnt > 1 && hit == false) 
     Pass::error("Top module not specified from multiple Pyrope source codes!\n");
 }
-
 
 std::vector<LGraph *> Lcompiler::wait_all() {
   /* thread_pool.wait_all(); */

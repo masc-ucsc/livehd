@@ -493,8 +493,11 @@ std::string Node::debug_name() const {
   if (it != ref->end()) {
     name = ref->get_val(it);
   }
+
   if (is_type_sub()) {
-    absl::StrAppend(&name, ":", get_type_sub_node().get_name());
+    if (name.find(get_type_sub_node().get_name()) == std::string::npos) { // filter out unnecessary module name
+      absl::StrAppend(&name, get_type_sub_node().get_name());
+    }
   }
 
   auto cell_name = Ntype::get_name(get_type_op());

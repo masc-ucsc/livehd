@@ -1394,16 +1394,16 @@ void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc)
     return;
   }
 
-  auto c0_fc        = lnast->get_first_child(lnidx_fc);
-  auto ret_name     = lnast->get_sname(c0_fc);
-  auto func_name_tmp    = lnast->get_vname(lnast->get_sibling_next(c0_fc));
-  auto arg_tup_name = lnast->get_sname(lnast->get_last_child(lnidx_fc));
+  auto c0_fc         = lnast->get_first_child(lnidx_fc);
+  auto ret_name      = lnast->get_sname(c0_fc);
+  auto func_name_tmp = lnast->get_vname(lnast->get_sibling_next(c0_fc));
+  auto arg_tup_name  = lnast->get_sname(lnast->get_last_child(lnidx_fc));
 
-  auto func_name = func_name_tmp;
+
+  std::string func_name = (std::string)func_name_tmp;
   if (lg->get_name().find("_firrtl") != std::string::npos) {
-    func_name = absl::StrCat(func_name_tmp, "__firrtl");
+    func_name = absl::StrCat(func_name_tmp, "_firrtl");
   }
-
 
   auto *library = Graph_library::instance(path);
   if (name2dpin.find(func_name) == name2dpin.end()) {
