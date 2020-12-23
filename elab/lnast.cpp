@@ -43,7 +43,7 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
 
   Lnast_nid top_sts_nid;
   if (get_type(top_nid).is_func_def()) {
-    fmt::print("Step-0: Handle Inline Function Definition\n");
+    /* fmt::print("Step-0: Handle Inline Function Definition\n"); */
     auto c0 = get_first_child(top_nid);
     auto c1 = get_sibling_next(c0);
     top_sts_nid = get_sibling_next(c1);

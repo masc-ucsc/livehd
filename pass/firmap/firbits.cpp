@@ -389,7 +389,6 @@ void Firmap::analysis_fir_bits_extract(Node &node, XEdge_iterator &inp_edges) {
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(hi - lo + 1, false));
 }
 
-
 void Firmap::analysis_fir_cat(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size() == 2);  
 
@@ -428,8 +427,6 @@ void Firmap::analysis_fir_bitwire_reduction(Node &node, XEdge_iterator &inp_edge
   }
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(1, false));
 }
-
-
 void Firmap::analysis_fir_bitwise(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size() == 2);  
 
@@ -570,8 +567,6 @@ void Firmap::analysis_fir_dshl(Node &node, XEdge_iterator &inp_edges) {
   }
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(bits1 + std::pow(2, bits2) - 1, sign));
 }
-
-
 void Firmap::analysis_fir_shr(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size() == 2);  
 
@@ -600,7 +595,6 @@ void Firmap::analysis_fir_shr(Node &node, XEdge_iterator &inp_edges) {
   }
 }
 
-
 void Firmap::analysis_fir_shl(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size() == 2);  
 
@@ -624,7 +618,6 @@ void Firmap::analysis_fir_shl(Node &node, XEdge_iterator &inp_edges) {
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(bits1 + bits2, sign));
 }
 
-
 void Firmap::analysis_fir_as_sint(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size() == 1);  
 
@@ -644,7 +637,6 @@ void Firmap::analysis_fir_as_sint(Node &node, XEdge_iterator &inp_edges) {
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(bits1, true));
 }
 
-
 void Firmap::analysis_fir_as_uint(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size() == 1);  
 
@@ -663,7 +655,6 @@ void Firmap::analysis_fir_as_uint(Node &node, XEdge_iterator &inp_edges) {
   }
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(bits1, false));
 }
-
 
 void Firmap::analysis_fir_pad(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size() == 2);  
@@ -687,7 +678,6 @@ void Firmap::analysis_fir_pad(Node &node, XEdge_iterator &inp_edges) {
   }
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(std::max(bits1, bits2), sign));
 }
-
 
 void Firmap::analysis_fir_comp(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size());  
@@ -735,7 +725,6 @@ void Firmap::analysis_fir_rem(Node &node, XEdge_iterator &inp_edges) {
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(std::min(bits1, bits2), sign));
 }
 
-
 void Firmap::analysis_fir_div(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size());  
 
@@ -763,7 +752,6 @@ void Firmap::analysis_fir_div(Node &node, XEdge_iterator &inp_edges) {
   else 
     fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(bits1, sign));
 }
-
 
 void Firmap::analysis_fir_mul(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size() == 2);  
@@ -812,7 +800,8 @@ void Firmap::analysis_fir_add_sub(Node &node, XEdge_iterator &inp_edges) {
       bits2 = it->second.get_bits();
     }
   }
-  fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(std::max(bits1, bits2) + 1, sign));
+  
+    fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact(), Firrtl_bits(std::max(bits1, bits2) + 1, sign));
 }
 
 
