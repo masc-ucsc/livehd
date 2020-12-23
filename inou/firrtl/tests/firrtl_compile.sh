@@ -13,14 +13,16 @@ pts_reg='Decrementer LFSR16 Accumulator Flop RegisterSimple Register GCD_3bits
 RegXor EnableShiftRegister ShiftRegister Parity ResetShiftRegister Risc
 VecSearch Counter VecShiftRegister VendingMachine VendingMachineSwitch'
 
-pts_hier='BundleConnect SubModule Adder Adder4 SingleEvenFilter Life Mux4'
+pts_hier='SubModule Adder Adder4 SingleEvenFilter Life Mux4'
 
 # passed pattern pool
 pts='Test1 Test2 Test3 Test6 TrivialAdd NotAnd Trivial Tail TrivialArith Shifts
 PlusAnd MaxN ByteSelector Darken FullAdder HiLoMultiplier LogShifter SimpleALU
 Mul VecShiftRegisterParam VecShiftRegisterSimple SimpleBitOps AddNot' 
 
-# pts='Adder'
+pts='SubModule'
+pts='SingleEvenFilter'
+pts='BundleConnect '
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -39,9 +41,9 @@ firrtl_test() {
   echo ""
   echo ""
   echo ""
-  echo "===================================================="
-  echo "LoFIRRTL Full Compilation"
-  echo "===================================================="
+  echo "======================================================================"
+  echo "                         LoFIRRTL Full Compilation"
+  echo "======================================================================"
 
 
   for pt in $1

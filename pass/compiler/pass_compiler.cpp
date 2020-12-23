@@ -79,9 +79,7 @@ void Pass_compiler::compile(Eprp_var &var) {
     I(top != "", "firrtl front-end must specify the top firrtl name!");
     LGraph* seed_lg;
     auto *library = Graph_library::instance(path);
-    if (library->exists(path, "__firop_seed")) {
-      seed_lg = LGraph::open(path, "__firop_seed");
-    } else {
+    if (!library->exists(path, "__firop_seed")) {
       seed_lg = LGraph::create(path, "__firop_seed", "-");
       setup_firmap_library(seed_lg);   
     }

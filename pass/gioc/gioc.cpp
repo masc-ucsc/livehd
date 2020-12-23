@@ -26,7 +26,7 @@ void Gioc::do_trans(LGraph *lg) {
       auto subg_paras = split_name(node.get_name(), ":");
       auto &arg_tup_name = subg_paras[0];
       auto &ret_name     = subg_paras[1];
-      auto &func_name    = subg_paras[2];
+      auto func_name     = node.get_type_sub_node().get_name();
 
       Sub_node* sub;
       if (library->has_name(func_name)) {

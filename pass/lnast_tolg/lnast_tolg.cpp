@@ -27,10 +27,10 @@ std::vector<LGraph *> Lnast_tolg::do_tolg(std::shared_ptr<Lnast> ln, const Lnast
 
 
 void Lnast_tolg::top_stmts2lgraph(LGraph *lg, const Lnast_nid &lnidx_stmts) {
-  fmt::print("======== Phase-1: LNAST->LGraph Start ================================\n");
+  /* fmt::print("======== Phase-1: LNAST->LGraph Start ================================\n"); */
   process_ast_stmts(lg, lnidx_stmts);
 
-  fmt::print("======== Phase-2: Adding final Module IOs and Final Dpin Name ========\n");
+  /* fmt::print("======== Phase-2: Adding final Module IOs and Final Dpin Name ========\n"); */
   setup_lgraph_ios_and_final_var_name(lg);
 
 }
@@ -1394,10 +1394,20 @@ void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc)
     return;
   }
 
-  auto c0_fc        = lnast->get_first_child(lnidx_fc);
-  auto ret_name     = lnast->get_sname(c0_fc);
-  auto func_name    = lnast->get_vname(lnast->get_sibling_next(c0_fc));
-  auto arg_tup_name = lnast->get_sname(lnast->get_last_child(lnidx_fc));
+  auto c0_fc         = lnast->get_first_child(lnidx_fc);
+  auto ret_name      = lnast->get_sname(c0_fc);
+  auto func_name_tmp = lnast->get_vname(lnast->get_sibling_next(c0_fc));
+  auto arg_tup_name  = lnast->get_sname(lnast->get_last_child(lnidx_fc));
+
+  std::string func_name;
+
+  // note: if is from firrtl front-end, the current lgraphs will be postfixed with "_firrtl", 
+  // whichi will be mapped to new lgraphs at the firmap pass; hence, you need to search for
+  // a subgraph with "_firrtl" postfix
+  if (lg->get_name().find("_firrtl")) {
+    func_name = absl::StrCat(func_name_tmp, "_firrtl");
+  }
+
 
   auto *library = Graph_library::instance(path);
   if (name2dpin.find(func_name) == name2dpin.end()) {
@@ -1413,8 +1423,8 @@ void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc)
       sub       = lg->ref_library()->ref_sub(func_name);
     }
 
-    subg_node.set_name(absl::StrCat(arg_tup_name, ":", ret_name, ":", func_name));
-    fmt::print("subg node_name:{}\n", subg_node.get_name());
+    subg_node.set_name(absl::StrCat(arg_tup_name, ":", ret_name));
+    fmt::print("sub_node module name:{}\n", subg_node.get_type_sub_node().get_name());
 
     // just connect to $ and %, handle the rest at global io connection
     Node_pin subg_spin;

@@ -494,7 +494,7 @@ std::string Node::debug_name() const {
     name = ref->get_val(it);
   }
   if (is_type_sub()) {
-    absl::StrAppend(&name, get_type_sub_node().get_name());
+    absl::StrAppend(&name, ":", get_type_sub_node().get_name());
   }
 
   auto cell_name = Ntype::get_name(get_type_op());

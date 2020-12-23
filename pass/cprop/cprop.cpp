@@ -426,15 +426,23 @@ void Cprop::replace_logic_node(Node &node, const Lconst &result, const Lconst &r
 }
 
 void Cprop::process_subgraph(Node &node) {
-  if (node.is_type_sub_present())
+  if (node.is_type_sub_present()) {
+    fmt::print("DEBUG-1\n");
     return;
+  }
+
 
   auto *sub = node.ref_type_sub_node();
   const auto &reg = Lgcpp_plugin::get_registry();
 
   auto it = reg.find(sub->get_name());
-  if (it == reg.end())
+  fmt::print("DEBUG-X sub->get_name():{}\n", sub->get_name());
+  if (it == reg.end()) {
+    fmt::print("DEBUG-2\n");
     return;
+  }
+
+  fmt::print("DEBUG-3\n");
 
   fmt::print("cprop subgraph:{} is not present, found lgcpp...\n", sub->get_name());
 
@@ -445,12 +453,15 @@ void Cprop::process_subgraph(Node &node) {
   if (!out) { // no out tuple populated
     return;
   }
+
+
   fmt::print("cprop subgraph:{} has out\n", sub->get_name());
   out->dump("  ");
 
   for (auto dpin : node.out_connected_pins()) {
     fmt::print("dpin:{} pid:{} testing...\n", dpin.debug_name(), dpin.get_pid());
     if (dpin.has_name()) {
+
       if (out->has_key_name(dpin.get_name())) {
         fmt::print("replace dpin:{}\n", dpin.get_name());
       } else {
@@ -767,7 +778,7 @@ void Cprop::do_trans(LGraph *lg) {
   /* bool tup_get_left = false; */
 
   for (auto node : lg->forward()) {
-    /* fmt::print("current node->{}\n", node.debug_name()); */
+    fmt::print("{}\n", node.debug_name());
     auto op = node.get_type_op();
 
     // Special cases to handle in cprop

@@ -75,12 +75,12 @@ void Lcompiler::add_firrtl_thread(std::shared_ptr<Lnast> ln) {
   Graphviz gv(true, false, odir); 
   gviz ? gv.do_from_lnast(ln, "raw") : void(); 
   
-  fmt::print("------------------------ Firrtl_Protobuf -> LNAST-SSA --------------- \n");
+  fmt::print("------------------------ Firrtl_Protobuf -> LNAST-SSA --------------- (LN-1)\n");
   ln->ssa_trans();
   gviz ? gv.do_from_lnast(ln) : void();
 
 
-  fmt::print("------------------------ LNAST-> LGraph ----------------------------- \n");
+  fmt::print("------------------------ LNAST-> LGraph ----------------------------- (LN-2)\n");
   // note: since the first generated lgraphs are firrtl_op_lgs, they will be removed in the end,
   // we should keep the original module_name for the firrtl_op mapped lgraph, so here I attached
   // "_firrtl" postfix for the firrtl_op_lgs
@@ -121,7 +121,7 @@ void Lcompiler::global_io_connection() {
     fmt::print("------------------------ Global IO Connection ----------------------- (GIOC)\n");
     gioc.do_trans(lg);
     gviz ? gv.do_from_lgraph(lg, "gioc.raw") : void(); 
-    fmt::print("------------------------ Copy-Propagation --------------------------- (GC)\n");
+    fmt::print("------------------------ Global Copy-Propagation -------------------- (GC)\n");
     cp.do_trans(lg);
     gviz ? gv.do_from_lgraph(lg, "gioc.no_bits") : void();
   }
