@@ -14,33 +14,28 @@
 
 // turn an LGraph into a graph suitable for HiReg.
 Hier_tree::Hier_tree(Eprp_var& var) : collapsed_gis(), pattern_sets() {
-  // if I run this code in lgshell with -c opt on the rocket core, temp.imp_edges hangs.
-  // this doesn't happen with a smaller hierarchy like hier_test
-
-  // Hierarchy_tree* root_tree2 = var.lgs[0]->ref_htree();
-  // LGraph*         root_lg2   = var.lgs[0];
-
-  // for (auto hidx : root_tree2->depth_preorder()) {
-  //   Node temp(root_lg2, hidx, Hardcoded_input_nid);
-  //   // std::cout << "creating edges..." << std::endl;
-  //   auto edges = temp.inp_edges();
-  //   // std::cout << "done creating edges." << std::endl;
-  // }
-
+  
   if (var.lgs.size() > 1) {
-    throw std::runtime_error("cannot find root hierarchy, did you pass more than one lgraph?");
+    throw std::runtime_error("more than one lgraph found!");
   }
 
   if (!var.lgs.size()) {
-    throw std::runtime_error("no hierarchies found!");
+    throw std::runtime_error("no lgraphs found!");
   }
 
   auto t = profile_time::timer();
   fmt::print("    setting up tree...");
   t.start();
 
+  // TODO: this line breaks with an assertion failure...
   Hierarchy_tree* root_tree = var.lgs[0]->ref_htree();
-  LGraph*         root_lg   = var.lgs[0];
+
+  LGraph* root_lg = var.lgs[0];
+
+  std::cout << "done with traversal.\n\n\n\n\n\n";
+  abort();
+  
+  /*
 
   I(root_tree);
   I(root_lg);
@@ -130,6 +125,8 @@ Hier_tree::Hier_tree(Eprp_var& var) : collapsed_gis(), pattern_sets() {
       gi.weights[new_e] = weight;
     }
   }
+
+  */
 
   fmt::print("done ({} ms).\n", t.time());
 }
