@@ -295,8 +295,6 @@ void Pass_sat_opt::check_sat_opt(LGraph *g) {
   std::vector<bool> modelValues;
   std::vector<int> assumptions;
   
-  sat.printDIMACS(stdout);
-  
   if (sat.solve(model_expression_vec, modelValues, eq))
   {
 	  fmt::print("satisfiable \n");
