@@ -164,7 +164,7 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
         default: return "invalid";
       }
       break;
-    case Ntype_op::Fflop:
+    case Ntype_op::Fflop:          // Fluid-flop
       switch(pid) {
         case 0: return "reset";
         case 1: return "initial";  // reset value

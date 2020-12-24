@@ -69,15 +69,13 @@ private:
   };
 
   static Bits_t read_bits(std::string_view txt);
-  void process_ending(std::string_view txt, size_t pos);
+  bool process_ending(std::string_view txt, size_t pos);
 
 protected:
   using Number=boost::multiprecision::cpp_int;
 
   bool     explicit_str;
-  bool     explicit_sign;
   bool     explicit_bits;
-  bool     sign;
 
   Bits_t bits;
   Number   num;
@@ -86,7 +84,7 @@ protected:
 
   std::string_view skip_underscores(std::string_view txt) const;
 
-  Lconst(bool str, bool a, bool b, bool c, Bits_t d, Number n) : explicit_str(str), explicit_sign(a), explicit_bits(b), sign(c), bits(d), num(n) {}
+  Lconst(bool str, bool b, Bits_t d, Number n) : explicit_str(str), explicit_bits(b), bits(d), num(n) {}
 
   static Bits_t calc_num_bits(const Number &num) {
     if (num == 0 || num == -1)
@@ -135,14 +133,12 @@ public:
   [[nodiscard]] Lconst or_op(const Lconst &o) const;
   [[nodiscard]] Lconst and_op(const Lconst &o) const;
 
-  [[nodiscard]] bool   eq_op(const Lconst &o) const;
+  [[nodiscard]] int   eq_op(const Lconst &o) const;
 
   [[nodiscard]] Lconst adjust_bits(Bits_t amount) const;
 
-  bool     is_unsigned() const { return !sign; }
   // WARNING: unsigned can still be negative. It is a way to indicate as many 1s are needed
-  bool     is_negative() const { return sign && num < 0; }
-  bool     is_explicit_sign() const { return explicit_sign; }
+  bool     is_negative() const { return num < 0; }
   bool     is_explicit_bits() const { return explicit_bits; }
   bool     is_string() const { return explicit_str; }
 
@@ -151,7 +147,7 @@ public:
   bool is_i() const { return !explicit_str && bits <= 62; } // 62 to handle sign (int)
   int64_t to_i() const; // must fit in int or exception raised
 
-  std::string to_yosys() const;
+  std::string to_yosys(bool do_unsign=false) const;
   std::string to_verilog() const;
   std::string to_string() const;
   std::string to_string_no_xz() const;
@@ -180,21 +176,17 @@ public:
 #endif
 
   bool operator==(const Lconst &other) const {
-    return get_num() == other.get_num() && same_explicit_bits(other);
+    return get_num() == other.get_num() && bits == other.bits; // same_explicit_bits(other);
   }
   bool operator!=(const Lconst &other) const {
-    return get_num() != other.get_num() || !same_explicit_bits(other);
+    return get_num() != other.get_num() || bits != other.bits; //!same_explicit_bits(other);
   }
 
   bool operator==(int other) const {
-    if (bits>63)
-      return false;
-    return get_num() == other && !explicit_bits;
+    return get_num() == other && !is_string();
   }
   bool operator!=(int other) const {
-    if (bits>63)
-      return true;
-    return get_num() != other || explicit_bits;
+    return get_num() != other || is_string();
   }
 
   bool operator<(const Lconst &other) const  { return num <  other.num; }

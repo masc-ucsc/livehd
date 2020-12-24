@@ -78,13 +78,18 @@ endmodule
 module mid5(input [899:0] gi, output [899:0] gout, input [9:0] hi, output [9:0] ho);
   wire [29:0] w_3_to_5;
   wire [29:0] w_5_to_3;
+
+  wire [899:0] w_1_up_5;
+
+  // instance of mid1 inside mid5 to test out lgraph characteristics
+  mid1 m1s(.di(gi), .dout(w_1_up_5));
   
   // duplicate instantiations of mid2, for regularity discovery
   leaf3 l3d(.ci(w_5_to_3), .co(w_3_to_5));
   leaf4 l4d(.tempi(w_3_to_5[12]), .tempo(w_3_to_5[13]));
   leaf5 l5d(.ci(w_3_to_5), .co(w_5_to_3));
 
-  assign gout = ~{gi[899:30], w_3_to_5};
+  assign gout = ~{gi[899:30] & w_1_up_5[899:30], w_3_to_5};
   assign ho = ~{hi[9:1], w_5_to_3[0]};
 endmodule
 

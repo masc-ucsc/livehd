@@ -1,0 +1,17 @@
+
+sub = ::{
+  %out1 = $a + 1
+  %out2 = $a + $b - 1
+}
+
+$a.__sbits = 3
+$b.__sbits = 5
+
+t2_out1 = 0 // needed for last value connection
+
+t1 = sub(a=$a,b=t2_out1.__last_value)
+t2 = sub(a=t1.out1, b=$b)
+
+t2_out1 = t2.out1
+
+%out = t2.out2

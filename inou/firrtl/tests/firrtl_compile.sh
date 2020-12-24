@@ -2,25 +2,25 @@
 rm -rf ./lgdb
 FIRRTL_LEVEL='lo'
 
-pts_long_lec='GCD'
+pts_long_lec='GCD '
 
 pts_todo_advanced='FPU ICache MemoryController RWSmem Smem Rob ICache
-HwachaSequencer RocketCore'
+HwachaSequencer RocketCore Ops Router'
 
-pts_todo=' Shifts PlusAnd RegXor Test4 Test5 Test6 SimpleBitOps Ops
-BundleConnect Smem_simple SubModule Coverage AddNot Test3 MaxN Adder4 Adder
-ByteSelector Combinational Darken EnableShiftRegister FullAdder Functionality
-HiLoMultiplier Life LogShifter Parity ResetShiftRegister Risc Router
-ShiftRegister SimpleALU Stack Tbl VecSearch Counter DynamicMemorySearch MaxN
-Memo Mul Mux4 RealGCD SingleEvenFilter VecShiftRegister VecShiftRegisterParam
-VecShiftRegisterSimple VendingMachine VendingMachineSwitch'
+pts_mem='Smem_simple Stack DynamicMemorySearch Memo'
 
-pts='Decrementer TrivialAdd Test1 Test2 NotAnd Trivial Accumulator Flop
-Tail RegisterSimple Register TrivialArith GCD_3bits Max2'
+pts_reg='Decrementer LFSR16 Accumulator Flop RegisterSimple Register GCD_3bits
+RegXor EnableShiftRegister ShiftRegister Parity ResetShiftRegister Risc
+VecSearch Counter VecShiftRegister VendingMachine VendingMachineSwitch'
 
-pts='LFSR16'
-pts='TrivialAdd'
+pts_hier='BundleConnect SubModule Adder Adder4 SingleEvenFilter Life Mux4'
 
+# passed pattern pool
+pts='Test1 Test2 Test3 Test6 TrivialAdd NotAnd Trivial Tail TrivialArith Shifts
+PlusAnd MaxN ByteSelector Darken FullAdder HiLoMultiplier LogShifter SimpleALU
+Mul VecShiftRegisterParam VecShiftRegisterSimple SimpleBitOps AddNot' 
+
+pts='BundleConnect'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -39,11 +39,9 @@ firrtl_test() {
   echo ""
   echo ""
   echo ""
-  echo "===================================================="
-  echo "LoFIRRTL Full Compilation"
-  echo "===================================================="
-
-
+  echo "======================================================================"
+  echo "                         LoFIRRTL Full Compilation"
+  echo "======================================================================"
   for pt in $1
   do
     if [ ! -f ${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb ]; then

@@ -218,7 +218,7 @@ static Node_pin get_edge_pin(LGraph *g, const RTLIL::Wire *wire, bool is_signed)
     if (node.is_type(Ntype_op::Tposs))
       return dpin;
 
-    if (node.is_type_const() && node.get_type_const().is_unsigned())
+    if (node.is_type_const() && !node.get_type_const().is_negative())
       return dpin;
 
     auto tposs_node = g->create_node(Ntype_op::Tposs, dpin.get_bits()+1);
@@ -368,7 +368,7 @@ static Node_pin get_unsigned_dpin(LGraph *g, const RTLIL::Cell *cell, const RTLI
   if (node.is_type(Ntype_op::Tposs)) {
     return dpin;
   }
-  if (node.is_type_const() && node.get_type_const().is_unsigned()) {
+  if (node.is_type_const() && !node.get_type_const().is_negative()) {
     return dpin;
   }
 
@@ -1889,7 +1889,7 @@ static void process_cells(RTLIL::Module *module, LGraph *g) {
         auto node = dpin_a_signed.get_node();
         if (node.is_type(Ntype_op::Tposs)) {
           dpin_a = dpin_a_signed;
-        }else if (node.is_type_const() && node.get_type_const().is_unsigned()) {
+        }else if (node.is_type_const() && !node.get_type_const().is_negative()) {
           dpin_a = dpin_a_signed;
         }else{
           auto tposs_node = g->create_node(Ntype_op::Tposs, dpin_a_signed.get_bits()+1);
