@@ -40,9 +40,10 @@ LGraph* Firmap::do_firrtl_mapping(LGraph *lg) {
         map_fir_ops(node, subname, new_lg);
       else 
         clone_lg_ops_amap(node, new_lg); // amap = as much as possible
-    } else {
-      clone_lg_ops_amap(node, new_lg); 
-    }
+
+      continue;
+    } 
+    clone_lg_ops_amap(node, new_lg); 
   }
 
   // clone edges that cannot resolved at clone_lg_ops_amap() due to flop loop

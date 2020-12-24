@@ -21,6 +21,7 @@ PlusAnd MaxN ByteSelector Darken FullAdder HiLoMultiplier LogShifter SimpleALU
 Mul VecShiftRegisterParam VecShiftRegisterSimple SimpleBitOps AddNot' 
 
 pts='BundleConnect'
+# pts='SubModule'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck

@@ -141,12 +141,21 @@ void Lcompiler::global_firrtl_bits_analysis_map() {
     Pass::error("Top module not specified for firrtl codes!\n");
 
 
+  lgcnt = 0;
+  hit = false;
   std::vector<LGraph*> mapped_lgs;
   for (auto &lg : lgs) {
-    fmt::print("------------------------ Firrtl Op Mapping ----------------------- (F-3)\n");
-    auto new_lg = fm.do_firrtl_mapping(lg);
-    mapped_lgs.emplace_back(new_lg);
+    ++lgcnt;
+    if(lg->get_name() == top_name_before_mapping) {
+      hit = true;
+      fmt::print("------------------------ Firrtl Op Mapping ----------------------- (F-3)\n");
+      auto new_lg = fm.do_firrtl_mapping(lg);
+      mapped_lgs.emplace_back(new_lg);
+    }
   }
+  if (lgcnt > 1 && hit == false) 
+    Pass::error("Top module not specified for firrtl codes!\n");
+
 
   lgs = mapped_lgs;
   for (auto &lg : lgs) {
