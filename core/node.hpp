@@ -264,7 +264,7 @@ public:
   Lconst get_type_lut() const;
 
   std::string_view get_type_name() const;
-  Ntype_op          get_type_op() const;
+  Ntype_op         get_type_op() const;
   void             set_type(const Ntype_op op);
   void             set_type(const Ntype_op op, Bits_t bits);
   bool             is_type(const Ntype_op op) const;

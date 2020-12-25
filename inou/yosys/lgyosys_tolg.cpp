@@ -105,18 +105,15 @@ static Node_pin resolve_constant(LGraph *g, const std::vector<RTLIL::State> &dat
   // Sa => don't care (not sure what is the diff between Sa and Sx
   // Sm => used internally by Yosys
 	std::string val("0b");
-	val.reserve(data.size());
+  if (!is_signed && data[data.size()-1] == RTLIL::S1) {
+    absl::StrAppend(&val, "0");
+  }
 	for (size_t i = data.size(); i > 0; i--) {
 		switch (data[i-1]) {
       case RTLIL::S0: absl::StrAppend(&val, "0"); break;
       case RTLIL::S1: absl::StrAppend(&val, "1"); break;
       default: absl::StrAppend(&val, "x"); break;
 		}
-  }
-  if (is_signed && data[data.size()-1] == RTLIL::S1) { // only explicit bits if top is 1 and negative
-    absl::StrAppend(&val, "s", (int)data.size(), "bits");
-//  }else{
-//    absl::StrAppend(&val, "u", (int)data.size(), "bits");
   }
 
   Lconst lc(val);
@@ -439,14 +436,21 @@ static void set_bits_wirename(Node_pin &pin, const RTLIL::Wire *wire) {
 static Node_pin get_partial_dpin(LGraph *g, const RTLIL::Wire *wire) {
   auto or_dpin = get_edge_pin(g, wire, true);
 
-  if (or_dpin.is_graph_output()) { // Some outputs are deferred
+  if (!or_dpin.get_node().is_type(Ntype_op::Or)) {
     auto real_or_node = g->create_node(Ntype_op::Or, or_dpin.get_bits());
-    or_dpin.change_to_sink_from_graph_out_driver().connect_driver(real_or_node);
+
+		if (unlikely(or_dpin.is_graph_output())) { // Some outputs are deferred
+			or_dpin.change_to_sink_from_graph_out_driver().connect_driver(real_or_node);
+		}else if (unlikely(or_dpin.get_type_op() == Ntype_op::Sub)) {
+			real_or_node.setup_sink_pin().connect_driver(or_dpin);
+		}else if (!or_dpin.get_node().is_type(Ntype_op::Or)) {
+			fmt::print("WARNING: wire:{} is mapped to dpin:{} node or_wire\n", wire->name.str(), or_dpin.debug_name());
+			or_dpin.get_node().dump();
+		}
 
     or_dpin = real_or_node.setup_driver_pin();
-    wire2pin[wire] = or_dpin;
-  }
-  I(or_dpin.get_node().is_type(Ntype_op::Or));
+    wire2pin[wire] = real_or_node.setup_driver_pin();
+	}
 
   set_bits_wirename(or_dpin, wire);
 

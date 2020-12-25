@@ -331,6 +331,7 @@ public:
   }
 
   Node     get_node() const;
+  Ntype_op get_type_op() const;
 
   Node              get_driver_node() const; // common 0 or 1 driver case
   Node_pin          get_driver_pin() const;  // common 0 or 1 driver case

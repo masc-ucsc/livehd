@@ -104,6 +104,11 @@ Node Node_pin::get_node() const {
   return Node(top_g, current_g, hidx, nid);
 }
 
+Ntype_op Node_pin::get_type_op() const {
+  auto nid = current_g->get_node_nid(idx);
+  return current_g->get_type_op(nid);
+}
+
 Node Node_pin::get_driver_node() const { return get_driver_pin().get_node(); }
 
 Node_pin Node_pin::get_driver_pin() const {
@@ -368,8 +373,7 @@ std::string Node_pin::get_pin_name() const {
 		return std::to_string(pid);
 	}
 
-  auto nid = current_g->get_node_nid(idx);
-  auto op = current_g->get_type_op(nid);
+  auto op = get_type_op();
   if (op == Ntype_op::Sub)
     return get_type_sub_pin_name();
   if (is_driver())

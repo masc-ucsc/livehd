@@ -69,22 +69,18 @@ private:
   };
 
   static Bits_t read_bits(std::string_view txt);
-  bool process_ending(std::string_view txt, size_t pos);
 
 protected:
   using Number=boost::multiprecision::cpp_int;
 
   bool     explicit_str;
-  bool     explicit_bits;
 
   Bits_t bits;
   Number   num;
 
-  void add_pyrope_bits(std::string *str) const;
-
   std::string_view skip_underscores(std::string_view txt) const;
 
-  Lconst(bool str, bool b, Bits_t d, Number n) : explicit_str(str), explicit_bits(b), bits(d), num(n) {}
+  Lconst(bool str, Bits_t d, Number n) : explicit_str(str), bits(d), num(n) {}
 
   static Bits_t calc_num_bits(const Number &num) {
     if (num == 0 || num == -1)
@@ -95,12 +91,6 @@ protected:
   }
   Bits_t calc_num_bits() const {
     return calc_num_bits(num);
-  }
-  bool same_explicit_bits(const Lconst &o) const {
-    bool s1 = explicit_bits && o.explicit_bits && bits == o.bits;
-    bool s2 = !explicit_bits || !o.explicit_bits;
-
-    return s1 || s2;
   }
 
   Number get_num() const { return num; }
@@ -139,7 +129,6 @@ public:
 
   // WARNING: unsigned can still be negative. It is a way to indicate as many 1s are needed
   bool     is_negative() const { return num < 0; }
-  bool     is_explicit_bits() const { return explicit_bits; }
   bool     is_string() const { return explicit_str; }
 
   Bits_t get_bits() const { return bits; } // note: this is returning signed bits of the constant
@@ -176,10 +165,10 @@ public:
 #endif
 
   bool operator==(const Lconst &other) const {
-    return get_num() == other.get_num() && bits == other.bits; // same_explicit_bits(other);
+    return get_num() == other.get_num() && bits == other.bits;
   }
   bool operator!=(const Lconst &other) const {
-    return get_num() != other.get_num() || bits != other.bits; //!same_explicit_bits(other);
+    return get_num() != other.get_num() || bits != other.bits;
   }
 
   bool operator==(int other) const {

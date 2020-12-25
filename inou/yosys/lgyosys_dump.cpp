@@ -34,7 +34,7 @@ RTLIL::Wire *Lgyosys_dump::add_wire(RTLIL::Module *module, const Node_pin &pin) 
   if (pin.has_name()) {
     auto name = absl::StrCat("\\", pin.get_name());
     // fmt::print("pin{} has name:{}\n", pin.debug_name(), name);
-    return module->addWire(name, pin.get_bits());
+    return module->addWire(module->uniquify(name), pin.get_bits());
   } else {
     return module->addWire(next_id(pin.get_class_lgraph()), pin.get_bits());
   }
@@ -128,7 +128,7 @@ void Lgyosys_dump::create_blackbox(const Sub_node &sub, RTLIL::Design *design) {
   for (const auto *io_pin : sub.get_io_pins()) { // no need to be sorted if pins are named
     //fmt::print("bbox:{} name:{}\n", sub.get_name(), io_pin->name);
     std::string  name = absl::StrCat("\\", io_pin->name);
-    RTLIL::Wire *wire = mod->addWire(name);  // , pin.get_bits());
+    RTLIL::Wire *wire = mod->addWire(mod->uniquify(name));  // , pin.get_bits());
     wire->port_id     = port_id++;
     if (io_pin->is_input()) {
       wire->port_input  = false;
