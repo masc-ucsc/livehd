@@ -12,7 +12,7 @@
 class Firmap {
 protected:
   bool not_finished;
-  absl::flat_hash_map<Node_pin::Compact, Firrtl_bits> fbmap;
+  absl::flat_hash_map<Node_pin::Compact_flat, Firrtl_bits> fbmap;
   absl::flat_hash_map<Node_pin, Node_pin> o2n_dpin; //old_dpin to new_dpin
   enum class Attr { Set_other, Set_ubits, Set_sbits, Set_max, Set_min, Set_dp_assign };
 
@@ -82,6 +82,7 @@ protected:
   void map_fir_head       (Node &node, LGraph *new_lg);
   void map_fir_tail       (Node &node, LGraph *new_lg);
   void clone_lg_ops_amap  (Node &node, LGraph *new_lg); // amap = as much as possible
+  void clone_subgraph_node(Node &node, LGraph *new_lg); 
 
 public:
   Firmap ();

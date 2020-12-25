@@ -713,8 +713,8 @@ void Pass_lnast_fromlg::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node, co
 
   std::vector<Node_pin> mux_vals; 
   Node_pin sel_pin;
-  for (const auto inp : pin.get_node().inp_connected_pins()) {
-    if (inp.get_sink().get_pid() == 0) {  // If mux selector S, create if's "condition"
+  for (const auto &inp : pin.get_node().inp_connected_pins()) {
+    if (inp.get_pid() == 0) {  // If mux selector S, create if's "condition"
       sel_pin = inp.get_driver_pin();
     } else {
       mux_vals.emplace_back(inp);

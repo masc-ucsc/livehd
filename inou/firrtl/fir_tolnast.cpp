@@ -624,7 +624,7 @@ void Inou_firrtl::HandleMemPortPre(Lnast& lnast, Lnast_nid& parent_node, const f
 
     auto idx_asg_m = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
     lnast.add_child(idx_asg_m, Lnast_node::create_ref("__wrmask"));
-    lnast.add_child(idx_asg_m, Lnast_node::create_const("0u"));
+    lnast.add_child(idx_asg_m, Lnast_node::create_const("0"));
 
     auto idx_asg_l = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
     lnast.add_child(idx_asg_l, Lnast_node::create_ref("__latency"));
@@ -636,7 +636,7 @@ void Inou_firrtl::HandleMemPortPre(Lnast& lnast, Lnast_nid& parent_node, const f
 
     auto idx_asg_m = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
     lnast.add_child(idx_asg_m, Lnast_node::create_ref("__wrmask"));
-    lnast.add_child(idx_asg_m, Lnast_node::create_const("0u"));
+    lnast.add_child(idx_asg_m, Lnast_node::create_const("0"));
 
     auto idx_asg_l = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
     lnast.add_child(idx_asg_l, Lnast_node::create_ref("__latency"));
@@ -779,31 +779,31 @@ void Inou_firrtl::create_module_inst(Lnast& lnast, const firrtl::FirrtlPB_Statem
   }
 
   // Specify the bitwidth of all IO of the submodule.
-  for (const auto& name_bw_tup : mod_to_io_map[inst.module_id()]) {
-    auto port_bw = std::get<1>(name_bw_tup);
-    auto port_name = std::get<0>(name_bw_tup);
-    auto port_dir = std::get<2>(name_bw_tup);
+  /* for (const auto& name_bw_tup : mod_to_io_map[inst.module_id()]) { */
+  /*   auto port_bw = std::get<1>(name_bw_tup); */
+  /*   auto port_name = std::get<0>(name_bw_tup); */
+  /*   auto port_dir = std::get<2>(name_bw_tup); */
 
-    std::string io_name;
-    if (port_dir == 1) { // PORT_DIRECTION_IN
-      io_name = absl::StrCat(inp_name, ".", port_name);
-    } else if (port_dir == 2) {
-      io_name = absl::StrCat(out_name, ".", port_name);
-    } else {
-      I(false);
-    }
+  /*   std::string io_name; */
+  /*   if (port_dir == 1) { // PORT_DIRECTION_IN */
+  /*     io_name = absl::StrCat(inp_name, ".", port_name); */
+  /*   } else if (port_dir == 2) { */
+  /*     io_name = absl::StrCat(out_name, ".", port_name); */
+  /*   } else { */
+  /*     I(false); */
+  /*   } */
 
-    if (port_bw > 0) {
-      std::string_view acc_name_bw;
-      if (std::get<3>(name_bw_tup) == true) {
-        acc_name_bw = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(io_name, ".__sbits"));
-      } else {
-        acc_name_bw = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(io_name, ".__ubits"));
-      }
-      auto idx_asg_bw = lnast.add_child(parent_node, Lnast_node::create_assign(""));
-      lnast.add_child(idx_asg_bw, Lnast_node::create_ref(acc_name_bw));
-      lnast.add_child(idx_asg_bw, Lnast_node::create_const(lnast.add_string(std::to_string(port_bw))));
-    }
+  /*   if (port_bw > 0) { */
+  /*     std::string_view acc_name_bw; */
+  /*     if (std::get<3>(name_bw_tup) == true) { */
+  /*       acc_name_bw = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(io_name, ".__sbits")); */
+  /*     } else { */
+  /*       acc_name_bw = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(io_name, ".__ubits")); */
+  /*     } */
+  /*     auto idx_asg_bw = lnast.add_child(parent_node, Lnast_node::create_assign("")); */
+  /*     lnast.add_child(idx_asg_bw, Lnast_node::create_ref(acc_name_bw)); */
+  /*     lnast.add_child(idx_asg_bw, Lnast_node::create_const(lnast.add_string(std::to_string(port_bw)))); */
+  /*   } */
 
     /* if (std::get<3>(name_bw_tup) == false) { // __sign = false */
     /*   auto acc_name_s = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(io_name, ".__sign")); */
@@ -811,7 +811,7 @@ void Inou_firrtl::create_module_inst(Lnast& lnast, const firrtl::FirrtlPB_Statem
     /*   lnast.add_child(idx_asg_s, Lnast_node::create_ref(acc_name_s)); */
     /*   lnast.add_child(idx_asg_s, Lnast_node::create_const(lnast.add_string(std::to_string(port_bw)))); */
     /* } */
-  }
+  /* } */
 }
 
 /* No mux node type exists in LNAST. To support FIRRTL muxes, we instead
@@ -1741,11 +1741,13 @@ std::string Inou_firrtl::ReturnExprString(Lnast& lnast, const firrtl::FirrtlPB_E
       break;
     }
     case firrtl::FirrtlPB_Expression::kUintLiteral: {     // UIntLiteral
-      expr_string = absl::StrCat(expr.uint_literal().value().value(), "u");
+      /* expr_string = absl::StrCat(expr.uint_literal().value().value(), "u"); */
+      expr_string = expr.uint_literal().value().value();
       break;
     }
     case firrtl::FirrtlPB_Expression::kSintLiteral: {     // SIntLiteral
-      expr_string = absl::StrCat(expr.sint_literal().value().value(), "s");
+      /* expr_string = absl::StrCat(expr.sint_literal().value().value(), "s"); */
+      expr_string = expr.sint_literal().value().value();
       break;
     }
     case firrtl::FirrtlPB_Expression::kValidIf: {  // ValidIf

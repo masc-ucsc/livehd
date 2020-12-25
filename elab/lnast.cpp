@@ -43,7 +43,7 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
 
   Lnast_nid top_sts_nid;
   if (get_type(top_nid).is_func_def()) {
-    fmt::print("Step-0: Handle Inline Function Definition\n");
+    /* fmt::print("Step-0: Handle Inline Function Definition\n"); */
     auto c0 = get_first_child(top_nid);
     auto c1 = get_sibling_next(c0);
     top_sts_nid = get_sibling_next(c1);
@@ -55,25 +55,25 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
   Phi_rtable top_phi_resolve_table;
   phi_resolve_tables[top_sts_nid] = top_phi_resolve_table;
 
-  fmt::print("Step-1: Analyze LHS or RHS of Tuple Dot/Sel\n");
+  /* fmt::print("Step-1: Analyze LHS or RHS of Tuple Dot/Sel\n"); */
   analyze_dot_lrhs(top_sts_nid);
 
-  fmt::print("Step-2: Tuple_Add/Tuple_Get Analysis\n");
+  /* fmt::print("Step-2: Tuple_Add/Tuple_Get Analysis\n"); */
   trans_tuple_opr(top_sts_nid);
 
-  fmt::print("Step-3: LHS SSA\n");
+  /* fmt::print("Step-3: LHS SSA\n"); */
   resolve_ssa_lhs_subs(top_sts_nid);
 
   //see Note I
-  fmt::print("Step-4: RHS SSA\n");
+  /* fmt::print("Step-4: RHS SSA\n"); */
   resolve_ssa_rhs_subs(top_sts_nid);
 
 
-  fmt::print("Step-5: Operator LHS Merge\n");
+  /* fmt::print("Step-5: Operator LHS Merge\n"); */
   opr_lhs_merge(top_sts_nid);
 
 
-  fmt::print("LNAST SSA Transformation Finished!\n");
+  /* fmt::print("LNAST SSA Transformation Finished!\n"); */
 }
 
 

@@ -35,6 +35,7 @@ cc_binary(
             "//pass/mockturtle:pass_mockturtle",
             "//pass/punch:pass_punch",
             "//pass/sample:pass_sample",
+			"//pass/sat_opt:pass_sat_opt",					 
             "//pass/semantic:pass_semantic",
             "//pass/submatch:pass_submatch",
             "//pass/compiler:pass_compiler",

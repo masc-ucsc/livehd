@@ -90,6 +90,18 @@ my_map[node_pin2.get_compact()] = 58;
 ...
 ```
 
+* get the node_pin back from a Node_pin::Compact
+```
+Node_pin dpin(lg, some_dpin.get_compact())
+```
+
+* get the node back from a Node::Compact
+```
+Node node(lg, some_node.get_compact())
+```
+
+
+
 * create a LGraph input(output) with the name
 ```
 new_node_pin = lg->add_graph_input(std::string_view)

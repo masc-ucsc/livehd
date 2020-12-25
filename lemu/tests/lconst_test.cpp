@@ -123,7 +123,7 @@ TEST_F(Lconst_test, lvar_sizes) {
   EXPECT_FALSE(l1.eq_op(Lconst("0xFFFFFFF"))); // explicit bits do not match
   EXPECT_FALSE(l1.eq_op(Lconst("-1")));
   EXPECT_FALSE(l1.eq_op(Lconst("0xFFFu12")));  // explicit bits do not match
-  EXPECT_TRUE(l1.is_explicit_bits());
+  /* EXPECT_TRUE(l1.is_explicit_bits()); */
   EXPECT_EQ(l1.get_bits(), 9);
 
   Lconst l1b("-1s8"); // 0xFF or -1
@@ -132,7 +132,7 @@ TEST_F(Lconst_test, lvar_sizes) {
   EXPECT_FALSE(l1b.eq_op(Lconst("0xFFFFFFF"))); // explicit bits do not match
   EXPECT_TRUE(l1b.eq_op(Lconst("-1")));
   EXPECT_FALSE(l1b.eq_op(Lconst("0xFFFu12")));  // explicit bits do not match
-  EXPECT_TRUE(l1b.is_explicit_bits());
+  /* EXPECT_TRUE(l1b.is_explicit_bits()); */
   EXPECT_EQ(l1b.get_bits(), 8);
 
   Lconst l1c("-1"); // 0xFF or -1
@@ -140,7 +140,7 @@ TEST_F(Lconst_test, lvar_sizes) {
   EXPECT_FALSE(l1c.eq_op(Lconst("0xFF")));
   EXPECT_FALSE(l1c.eq_op(Lconst("0xFFFFFFF")));
   EXPECT_TRUE(l1c.eq_op(Lconst("-1")));
-  EXPECT_FALSE(l1c.is_explicit_bits());
+  /* EXPECT_FALSE(l1c.is_explicit_bits()); */
   EXPECT_EQ(l1c.get_bits(), 1);
 
   auto s1 = l1 + Lconst("1");
@@ -167,8 +167,8 @@ TEST_F(Lconst_test, lvar_sizes) {
   fmt::print("s4:{} bits:{}\n", s4.to_pyrope(), s4.get_bits());
   EXPECT_TRUE(s4.eq_op(Lconst("0x11E")));
   EXPECT_EQ(s4.get_bits(), 10);
-  EXPECT_TRUE(l1.is_explicit_bits());
-  EXPECT_FALSE(s4.is_explicit_bits());
+  /* EXPECT_TRUE(l1.is_explicit_bits()); */
+  /* EXPECT_FALSE(s4.is_explicit_bits()); */
 }
 
 TEST_F(Lconst_test, uint_comparison_operators) {

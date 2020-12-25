@@ -767,7 +767,7 @@ void Cprop::do_trans(LGraph *lg) {
   /* bool tup_get_left = false; */
 
   for (auto node : lg->forward()) {
-    /* fmt::print("current node->{}\n", node.debug_name()); */
+    fmt::print("{}\n", node.debug_name());
     auto op = node.get_type_op();
 
     // Special cases to handle in cprop

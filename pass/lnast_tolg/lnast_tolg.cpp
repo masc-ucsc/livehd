@@ -27,10 +27,10 @@ std::vector<LGraph *> Lnast_tolg::do_tolg(std::shared_ptr<Lnast> ln, const Lnast
 
 
 void Lnast_tolg::top_stmts2lgraph(LGraph *lg, const Lnast_nid &lnidx_stmts) {
-  fmt::print("======== Phase-1: LNAST->LGraph Start ================================\n");
+  /* fmt::print("======== Phase-1: LNAST->LGraph Start ================================\n"); */
   process_ast_stmts(lg, lnidx_stmts);
 
-  fmt::print("======== Phase-2: Adding final Module IOs and Final Dpin Name ========\n");
+  /* fmt::print("======== Phase-2: Adding final Module IOs and Final Dpin Name ========\n"); */
   setup_lgraph_ios_and_final_var_name(lg);
 
 }
@@ -1394,11 +1394,15 @@ void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc)
     return;
   }
 
-  auto c0_fc        = lnast->get_first_child(lnidx_fc);
-  auto ret_name     = lnast->get_sname(c0_fc);
-  auto func_name    = lnast->get_vname(lnast->get_sibling_next(c0_fc));
-  auto arg_tup_name = lnast->get_sname(lnast->get_last_child(lnidx_fc));
+  auto c0_fc         = lnast->get_first_child(lnidx_fc);
+  auto ret_name      = lnast->get_sname(c0_fc);
+  auto func_name_tmp = lnast->get_vname(lnast->get_sibling_next(c0_fc));
+  auto arg_tup_name  = lnast->get_sname(lnast->get_last_child(lnidx_fc));
 
+  std::string func_name = (std::string)func_name_tmp;
+  if (lg->get_name().find("_firrtl") != std::string::npos) 
+    func_name = absl::StrCat(func_name_tmp, "_firrtl");
+  
   auto *library = Graph_library::instance(path);
   if (name2dpin.find(func_name) == name2dpin.end()) {
     fmt::print("function {} defined in separated prp file, query lgdb\n", func_name);
@@ -1410,7 +1414,8 @@ void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc)
       sub       = library->ref_sub(lgid);
     } else {
       subg_node = lg->create_node_sub(func_name);
-      sub       = lg->ref_library()->ref_sub(func_name);
+      sub       = library->ref_sub(func_name);
+      /* sub       = lg->ref_library()->ref_sub(func_name); */
     }
 
     subg_node.set_name(absl::StrCat(arg_tup_name, ":", ret_name, ":", func_name));
@@ -1442,11 +1447,10 @@ void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc)
     subg_dpin.connect_sink(ta_ret.setup_sink_pin("tuple_name"));
     name2dpin[ret_name] = ta_ret_dpin;
     ta_ret_dpin.set_name(ret_name);
-
-    /* subgraph_io_connection(lg, sub, arg_tup_name, ret_name, subg_node); */
     return;
   }
 
+  //FIXME->sh: for the inlined function, we should also just connect to %/$ only?
   fmt::print("function {} defined in same prp file, query lgdb\n", func_name);
   auto ta_func_def = name2dpin[func_name].get_node();
   I(ta_func_def.get_type_op() == Ntype_op::TupAdd);
@@ -1457,7 +1461,6 @@ void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc)
   auto *sub = library->ref_sub(lgid);
 
   subg_node.set_name(absl::StrCat(ret_name, ":", func_name));
-  /* fmt::print("subg node_name:{}\n", subg_node.get_name()); */
   subgraph_io_connection(lg, sub, arg_tup_name, ret_name, subg_node);
 }
 

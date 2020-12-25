@@ -20,7 +20,8 @@ pts='Test1 Test2 Test3 Test6 TrivialAdd NotAnd Trivial Tail TrivialArith Shifts
 PlusAnd MaxN ByteSelector Darken FullAdder HiLoMultiplier LogShifter SimpleALU
 Mul VecShiftRegisterParam VecShiftRegisterSimple SimpleBitOps AddNot' 
 
-# pts='Adder'
+pts='BundleConnect'
+pts='SubModule'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -39,11 +40,9 @@ firrtl_test() {
   echo ""
   echo ""
   echo ""
-  echo "===================================================="
-  echo "LoFIRRTL Full Compilation"
-  echo "===================================================="
-
-
+  echo "======================================================================"
+  echo "                         LoFIRRTL Full Compilation"
+  echo "======================================================================"
   for pt in $1
   do
     if [ ! -f ${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb ]; then

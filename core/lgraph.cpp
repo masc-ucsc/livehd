@@ -182,28 +182,12 @@ bool LGraph::is_graph_input(std::string_view io_name) const {
 }
 
 bool LGraph::is_graph_output(std::string_view io_name) const {
-  bool alt = false;
-#ifndef NDEBUG
-  if (get_self_sub_node().has_pin(io_name)) {
-    const auto &io_pin = get_self_sub_node().get_pin(io_name);
-    alt                = io_pin.dir == Sub_node::Direction::Output;
-  } else {
-    alt = false;
-  }
-#endif
-
-  auto       ref = Ann_node_pin_name::ref(this);
-  const auto it  = ref->find_val(io_name);
-  if (it == ref->end()) {
+  if (!get_self_sub_node().is_output(io_name)) 
     return false;
-  }
-  auto compact = ref->get_key(it);
-  auto dpin    = Node_pin(const_cast<LGraph *>(this), compact);
-  bool cond    = dpin.get_node().get_nid() == Hardcoded_output_nid;
-
-  I(cond == alt);
-
-  return cond;
+ 
+  auto inst_pid = get_self_sub_node().get_instance_pid(io_name);  
+  auto idx = find_idx_from_pid(Hardcoded_output_nid, inst_pid);
+  return (idx != 0);
 }
 
 Node_pin LGraph::add_graph_input(std::string_view str, Port_ID pos, uint32_t bits) {

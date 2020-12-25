@@ -873,8 +873,7 @@ void Bitwidth::bw_pass(LGraph *lg) {
   lg->each_graph_output([this](Node_pin &dpin) {
     if (dpin.get_name() == "%")
       return;
-    auto spin = dpin.get_sink_from_output();
-
+    auto spin = dpin.change_to_sink_from_graph_out_driver();
     auto out_driver = spin.get_driver_pin();
 
     I(!out_driver.is_invalid());
