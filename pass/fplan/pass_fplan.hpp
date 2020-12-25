@@ -3,7 +3,6 @@
 #include <functional>
 
 #include "absl/container/flat_hash_map.h"
-#include "i_resolve_header.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "node.hpp"
