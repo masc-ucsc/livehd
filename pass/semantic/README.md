@@ -3,25 +3,27 @@
 
 ## Type Check Functions
 
+<br>
+
 `is_primitive_op()`
-* Parameters: LNAST Node Type
-* Return value: boolean
-* Returns true if LNAST Node Type is a Primitive type (e.g. logical, unary, nary operations). Otherwise, returns false.
+* **Parameters**: LNAST node type
+* **Return value**: Boolean
+* Returns true if LNAST node type is a primitive-type (e.g. logical, unary, nary operations). Otherwise, returns false.
 
 `is_tree_structs()`
-* Parameters: LNAST Node Type
-* Return value: boolean
-* Returns true if LNAST Node Type is a Tree Structure type (e.g. if, for, while statement). Otherwise, returns false.
+* **Parameters**: LNAST node type
+* **Return value**: Boolean
+* Returns true if LNAST node type is a tree-structure-type (e.g. if, for, while statement). Otherwise, returns false.
 
 `is_temp_var()`
-* Parameters: LNAST Node Name
-* Return value: boolean
-* Returns true if LNAST Node Name is a temporary variable often denoted by 3 underscores ("____"). Otherwise, returns false.
+* **Parameters**: LNAST node name
+* **Return value**: Boolean
+* Returns true if LNAST node name is a temporary variable often denoted by 3 underscores ("____"). Otherwise, returns false.
 
 `is_a_number()`
-* Parameters: LNAST Node Name
-* Return value: boolean
-* Returns true if LNAST Node Name is an integer. Otherwise, returns false.
+* **Parameters**: LNAST node name
+* **Return value**: Boolean
+* Returns true if LNAST node name is an integer. Otherwise, returns false.
 
 <br>
 
@@ -35,48 +37,48 @@
 | ------- | ----------- |
 | `FlatHashMap write_dict` | Holds written-to-variables as keys and statement names they belong to as values |
 | `FlatHashMap read_dict` | Holds read-from-variables as keys and statement names they belong to as values |
-| `FlatHashSet inefficient_LNAST` | Holds inefficient LNAST Node Names |
+| `FlatHashSet inefficient_LNAST` | Holds inefficient LNAST node names |
 | `FlatHashSet output_vars` | Holds LNAST output-type variable names that are not written to |
-| `std::vector<Lnast_nid> lhs_list` | Vector of left-hand-side (lhs) LNAST Nodes |
-| `std::vector<std::vector<Lnast_nid>> rhs_list` | Vector of vectors of right-hand-side (rhs) LNAST Nodes |
+| `std::vector<Lnast_nid> lhs_list` | Vector of left-hand-side (lhs) LNAST nodes |
+| `std::vector<std::vector<Lnast_nid>> rhs_list` | Vector of vectors of right-hand-side (rhs) LNAST nodes |
 | `std::vector<FlatHashMap> in_scope_stack` | Vector of FlatHashMaps (`write_dict`, `read_dict`) |
 
 <br>
 
 `in_write_list()`
-* Parameters: FlatHashMap, LNAST Node Name, LNAST Statement Name (the statement node belongs to)
-* Return value: boolean
-* Returns true if LNAST Node Name and its Statement Name exists in the FlatHashMap. Otherwise, returns false.
+* **Parameters**: FlatHashMap, LNAST node name, LNAST statement name (parent of node)
+* **Return value**: Boolean
+* Returns true if LNAST node name and its parent statement name exists in the FlatHashMap. Otherwise, returns false.
 
 `in_read_list()`
-* Parameters: FlatHashMap, LNAST Node Name, LNAST Statement Name (the statement node belongs to)
-* Return value: boolean
-* Returns true if LNAST Node Name and its Statement Name exists in the FlatHashMap. Otherwise, returns false.
+* **Parameters**: FlatHashMap, LNAST node name, LNAST statement name (parent of node)
+* **Return value**: Boolean
+* Returns true if LNAST node name and its parent statement name exists in the FlatHashMap. Otherwise, returns false.
 
 `in_inefficient_LNAST()`
-* Parameters: LNAST Node Name
-* Return value: boolean
-* Returns true if LNAST Node Name exists in `inefficient_LNAST`. Otherwise, returns false.
+* **Parameters**: LNAST node name
+* **Return value**: Boolean
+* Returns true if LNAST node name exists in `inefficient_LNAST`. Otherwise, returns false.
 
 `in_output_vars()`
-* Parameters: LNAST Node Name
-* Return value: boolean
-* Returns true if LNAST Node Name exists in `output_vars`. Otherwise, returns false.
+* **Parameters**: LNAST node name
+* **Return value**: Boolean
+* Returns true if LNAST node name exists in `output_vars`. Otherwise, returns false.
 
 `in_lhs_list()`
-* Parameters: LNAST Class, Index _n_ (integer)
-* Return value: `std::string_view`
-* Returns LNAST Node Name at Index _n_ if it exists in `lhs_list`. Otherwise return an empty `std::string_view`.
+* **Parameters**: LNAST class, index _n_ (integer)
+* **Return value**: `std::string_view`
+* Returns LNAST node name at Index _n_ if it exists in `lhs_list`. Otherwise return an empty `std::string_view`.
 
 `in_rhs_list()`
-* Parameters: LNAST Class, LNAST Node Name, Index _n_ (integer)
-* Return value: integer
-* Returns the index where Node Name is located in `rhs_list` when starting search from 0 or from _n_. If Node Name does not exists, return -1.
+* **Parameters**: LNAST class, LNAST node name, index _n_ (integer)
+* **Return value**: Integer
+* Returns the index where node name is located in `rhs_list` when starting search from 0 or from _n_. If node name does not exists, return -1.
 
 `in_in_scope_stack()`
-* Paremeter: LNAST Node Name
-* Return value: boolean
-* Returns true if LNAST Node Name exists in even indices of in_scope_stack. Otherwise, returns false.
+* **Paremeters**: LNAST node name
+* **Return value**: Boolean
+* Returns true if LNAST node name exists in even indices of `in_scope_stack`. Otherwise, returns false.
 
 <br>
 
@@ -91,27 +93,27 @@
 | `FlatHashMap write_dict` | Holds written-to-variables as keys and statement node names they belong to as values |
 | `FlatHashMap read_dict` | Holds read-from-variables as keys and statement node names they belong to as values |
 | `FlatHashSet output_vars` | Holds LNAST output-type variable names that are not written to |
-| `FlatHashMap perm_write_dict` | Similiar to write_dict except static (will not change when scope changes) |
-| `FlatHashMap perm_read_dict` | Similiar to read_dict except static (will not change when scope changes) |
+| `FlatHashMap perm_write_dict` | Similiar to `write_dict` except static (will not change when scope changes) |
+| `FlatHashMap perm_read_dict` | Similiar to `read_dict` except static (will not change when scope changes) |
 
 <br>
 
 `add_to_write_list()`
-* Parameters: LNAST Class, LNAST Node Name, LNAST Statement Name
-* Return value: void
-* Adds LNAST Node Name to `write_dict` and/or `perm_write_dict` if not in it.
-If LNAST Node Name is a temporary variable (name starts with "____"), throw error message (temporary variables should only be written to once). 
-If LNAST Node Name is a output variable (name starts with "%"), call `add_to_output_vars().`
+* **Parameters**: LNAST class, LNAST node name, LNAST statement name (parent to node name)
+* **Return value**: Void
+* Adds LNAST node name to `write_dict` and/or `perm_write_dict` if not in it.
+If LNAST node name is a temporary variable (name starts with "____"), throw error message (temporary variables should only be written to once). 
+If LNAST node name is a output variable (name starts with "%"), call `add_to_output_vars().`
 
 `add_to_read_list()`
-* Parameters: LNAST Node Name, LNAST Statement Name
-* Return value: void
-* Adds LNAST Node Name to `read_dict` if not in it and to `perm_read_dict` if not in it.
+* **Parameters**: LNAST node name, LNAST statement name (parent to node name)
+* **Return value**: Void
+* Adds LNAST node name to `read_dict` if not in it and to `perm_read_dict` if not in it.
 
 `add_to_output_vars()`
-* Parameters: LNAST Node Name
-* Return value: void
-* Adds LNAST Node Name to `output_vars` if not in it.
+* **Parameters**: LNAST node name
+* **Return value**: void
+* Adds LNAST node name to `output_vars` if not in it.
 
 <br>
 
@@ -122,24 +124,24 @@ If LNAST Node Name is a output variable (name starts with "%"), call `add_to_out
 ## Error Functions
 
 `print_out_of_scope_vars()`
-* Paremeters: LNAST Class
-* Return value: void
+* **Paremeters**: LNAST class
+* **Return value**: Void
 * Print LNAST AST and an error message ("Out of Scope Variable Error") followed by LNAST variable name(s) that have thrown the error.
 
 `error_print_lnast_by_name()`
-* Parameters: LNAST Class, LNAST Node Name
-* Return value: void
-* Print LNAST AST and indicates with an arrow the LNAST Node Name that has thrown an error.
+* **Parameters**: LNAST class, LNAST node name
+* **Return value**: Void
+* Print LNAST AST and indicates with an arrow the LNAST node name that has thrown an error.
 
 `error_print_lnast_by_type()`
-* Parameters: LNAST Class, LNAST Node Name
-* Return value: void
-* Print LNAST AST and indicates with an arrow the LNAST Node Type that has thrown an error.
+* **Parameters**: LNAST class, LNAST node name
+* **Return value**: Void
+* Print LNAST AST and indicates with an arrow the LNAST node type that has thrown an error.
 
 `error_print_lnast_by_warn()`
-* Parameters: LNAST Class, vector of LNAST Node Names
-* Return value: void
-* Print LNAST AST and indicates with an arrow the LNAST Node Names from a vector that have thrown an error or errors.
+* **Parameters**: LNAST class, vector of LNAST node names
+* **Return value**: Void
+* Print LNAST AST and indicates with an arrow the LNAST node names from a vector that have thrown an error(s).
 
 <br>
 
@@ -153,18 +155,21 @@ If LNAST Node Name is a output variable (name starts with "%"), call `add_to_out
 | --------- | ----------- |
 | `FlatHashMap write_dict` | Holds written-to-variables as keys and statement node names they belong to as values |
 | `FlatHashMap read_dict` | Holds read-from-variables as keys and statement node names they belong to as values |
-| `std::vector<Lnast_nid> lhs_list` | vector of LNAST nodes that hold lhs nodes |
-| `std::vector<std::vector<Lnast_nid>> rhs_list` | vector of vectors of LNAST nodes that hold rhs nodes |
+| `std::vector<Lnast_nid> lhs_list` | vector of left-hand-side (lhs) LNAST nodes |
+| `std::vector<std::vector<Lnast_nid>> rhs_list` | vector of vectors of right-hand-side (rhs) LNAST nodes |
 | `FlatHashSet output_vars` | Holds LNAST output-type variable names that are not written to |
-| `FlatHashMap perm_write_dict` | Similiar to write_dict except static (will not change when scope changes) |
-| `FlatHashMap perm_read_dict` | Similiar to read_dict except static (will not change when scope changes) |
-| `FlatHashSet inefficient_LNAST` | Holds inefficient LNAST Node Names |
+| `FlatHashMap perm_write_dict` | Similiar to `write_dict` except static (will not change when scope changes) |
+| `FlatHashMap perm_read_dict` | Similiar to `read_dict` except static (will not change when scope changes) |
+| `FlatHashSet inefficient_LNAST` | Holds inefficient LNAST node names |
+| `FlatHashSet functions` | Holds LNAST function names from LNAST func_def node |
+| `std::vector<std::string_view> out_of_scope_vars | Vector of LNAST node names that are not defined in their respective scopes |
+
 
 <br>
 
 `resolve_read_write_lists()`
-* Parameters: LNAST Class
-* Return value: void
+* **Parameters**: LNAST class
+* **Return value**: Void
 * Iterate through `rhs_list` and search if the LNAST node exists in `lhs_list`. If LNAST node does not exist in `lhs_list`, display the LNAST AST and throw error (Last-Write Variable Warning).
 Iterate through `perm_write_dict` and check the following:
 If LNAST node is not an output-type variable and exists in the `perm_read_dict`, then remove it from `perm_write_dict`.
@@ -173,18 +178,15 @@ If `perm_write_dict` is not empty, display the LNAST AST and throw error (Never-
 If output_vars is not empty, display the LNAST AST and throw error (Output Variable Warning)
 
 `resolve_lhs_rhs_lists()`
-* Parameters: LNAST Class
-* Return value: void
+* **Parameters**: LNAST class
+* **Return value**: Void
 * Iterate through `lhs_list` and check if LNAST node exists in `rhs_list`. If it does, insert into `inefficient_LNAST`.
 If `inefficient_LNAST` is not empty, display the LNAST AST and throw error (Inefficient LNAST Warning)
 
 `resolve_out_of_scope()`
-* Parameters: None
-* Return value: void
-
-`resolve_out_of_scope_func_def()`
-* Parameters: None
-* Return value: void
+* **Parameters**: None
+* **Return value**: void
+* Iterate through `read_dict` and insert the LNAST node if the node is not a number, not a boolean, not in `in_scope_stack`, not in `write_dict`, not a temporary variable, and not in `functions`. Otherwise, continue iteration.
 
 <br>
 
@@ -193,6 +195,57 @@ If `inefficient_LNAST` is not empty, display the LNAST AST and throw error (Inef
 <br>
 
 ## Semantic Check Functions
+
+| Parameter | Description |
+| --------- | ----------- |
+
+
+<br>
+
+`check_primitive_ops`
+* **Parameters**: LNAST class, LNAST node, LNAST node type, LNAST statement name (parent to node)
+* **Return value**: Void
+* For Unary Operations, check the LNAST node for the existence of only two *ref-type* child-nodes (right-hand-side, left-hand-side).
+For N-ary Operations, check the LNAST node for the existence of at least two *ref-type* child-nodes.
+For Tuple Declaration, check the LNAST node for the existence of only one *ref-type* child-node and at most two *assign-type* child-nodes.
+For Tuple Concatenate, Select, and Dot Operations, check the LNAST node for the existence of only three *ref-type* child-nodes.
+All other node-types will throw an error.
+
+`check_tree_struct_ops`
+* **Parameters**: LNAST class, LNAST node type, LNAST statement name (parent to node)
+* **Return value**: Void
+* If node-type is an if statement, call `check_if_ops()`.
+If node-type is a *for statement*, call `check_for_ops()`.
+If node-type is a *while statement*, call `check_while_op()`.
+If node-type is a *func_call statement*, call `check_func_call()`.
+If node-type is a *func_def statement*, call `check_func_def()`.
+All other node-types will throw an error.
+Following each tree-structure operation, push `write_dict` and `read_dict` onto `out_of_scope_stack` and pop `write_dict` and `read_dict` off of `in_scope_stack`.
+
+`check_if_ops`
+* **Parameters**: LNAST class, LNAST node, LNAST statement name (parent to node)
+* **Return value**: Void
+* Check the LNAST node to make sure the only child node-types are '*cstmts*', '*stmts*', or '*ref*'. All other node-types will throw an error.
+
+`check_for_ops`
+* **Parameters**: LNAST class, LNAST node, LNAST statement name (parent to node)
+* **Return value**: Void
+* Checks the LNAST node for the existence of two *ref-type* and one *statement-type* child-nodes. All other node-types will throw an error.
+
+`check_while_ops`
+* **Parameters**: LNAST class, LNAST node, LNAST statement name (parent to node)
+* **Return value**: Void
+* Checks the LNAST node for the existence of one *condition-type* and one *statement-type* child-nodes. All other node-types will throw an error.
+
+`check_func_def`
+* **Parameters**: LNAST class, LNAST node, LNAST statement name (parent to node)
+* **Return value**: Void
+* Checks the LNAST node for the existence of at least one *ref-type*, one *condition-type*, and one *statement-type* child-nodes. All other node-types will throw an error. Also checks to make sure all output-type variables are written to.
+
+`check_func_call`
+* **Parameters**: LNAST class, LNAST node, LNAST statement name (parent to node)
+* **Return value**: Void
+* Checks the LNAST node for the existence of three *ref-type* child-nodes. All other node-types will throw an error.
 
 <br>
 
