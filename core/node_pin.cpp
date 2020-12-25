@@ -14,6 +14,18 @@ Node_pin::Node_pin(LGraph *_g, Compact comp)
   I(current_g->is_valid_node_pin(idx));
 }
 
+Node_pin::Node_pin(std::string_view path, Compact_flat comp) {
+  current_g = LGraph::open(path, comp.lgid);
+  top_g = current_g;
+
+  hidx = Hierarchy_tree::invalid_index();
+  idx  = comp.idx;
+  pid  = top_g->get_dst_pid(comp.idx);
+  sink = comp.sink;
+
+  I(current_g->is_valid_node_pin(idx));
+}
+
 Node_pin::Node_pin(LGraph *_g, Compact_driver comp)
     : top_g(_g), hidx(comp.hidx), idx(comp.idx), sink(true) {
   I(!hidx.is_invalid());
@@ -44,6 +56,11 @@ Node_pin::Node_pin(LGraph *_g, Compact_class_driver comp)
 
 const Index_ID Node_pin::get_root_idx() const {
   return current_g->get_root_idx(idx);
+}
+
+Node_pin::Compact_flat Node_pin::get_compact_flat() const {
+  I(!is_invalid());
+  return Compact_flat(current_g->get_lgid(), get_root_idx(), sink);
 }
 
 Node_pin::Compact_driver Node_pin::get_compact_driver() const {
@@ -203,7 +220,7 @@ void Node_pin::set_name(std::string_view wname) {
 
 void Node_pin::del() {
   if (sink && is_graph_output()) {
-    auto dpin = get_driver_from_output();
+    auto dpin = change_to_driver_from_graph_out_sink();
     dpin.del();
     return;
   }

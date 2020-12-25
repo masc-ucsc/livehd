@@ -46,6 +46,9 @@ protected:
   }
   const Index_ID get_root_idx() const;
 
+  Node_pin get_driver() const; //FIXME->sh: move under protected to avoid misuse
+  Node_pin get_sink() const;   //FIXME->sh: move under protected to avoid misuse 
+
 public:
   class __attribute__((packed)) Compact {
   protected:
@@ -91,6 +94,52 @@ public:
     template <typename H>
     friend H AbslHashValue(H h, const Compact &s) {
       return H::combine(std::move(h), s.hidx.get_hash(), s.idx, s.sink);
+    };
+  };
+  class __attribute__((packed)) Compact_flat {
+  protected:
+    Lg_type_id      lgid;
+    uint32_t        idx : Index_bits;
+    uint32_t        sink : 1;
+
+    friend class LGraph;
+    friend class LGraph_Node_Type;
+    friend class Node;
+    friend class Node_pin;
+    friend class XEdge;
+    friend class Fast_edge_iterator;
+    friend class Flow_base_iterator;
+    friend class Fwd_edge_iterator;
+    friend class Bwd_edge_iterator;
+    friend class mmap_lib::hash<Node_pin::Compact_flat>;
+
+  public:
+    // constexpr operator size_t() const { I(0); return idx|(sink<<31); }
+
+    Compact_flat(const Compact_flat &obj) : lgid(obj.lgid), idx(obj.idx), sink(obj.sink) {}
+    Compact_flat(const Lg_type_id _lgid, Index_ID _idx, bool _sink) : lgid(_lgid), idx(_idx), sink(_sink){ };
+    Compact_flat() : idx(0), sink(0){};
+    Compact_flat &operator=(const Compact_flat &obj) {
+      I(this != &obj);
+      lgid = obj.lgid;
+      idx  = obj.idx;
+      sink = obj.sink;
+
+      return *this;
+    };
+
+    constexpr bool is_invalid() const { return idx == 0; }
+
+    constexpr bool operator==(const Compact_flat &other) const {
+      return idx == other.idx
+             && sink == other.sink
+             && (lgid == other.lgid || lgid.is_invalid() || other.lgid.is_invalid());
+    }
+    constexpr bool operator!=(const Compact_flat &other) const { return !(*this == other); }
+
+    template <typename H>
+    friend H AbslHashValue(H h, const Compact_flat &s) {
+      return H::combine(std::move(h), s.lgid.value, s.idx, s.sink);
     };
   };
   class __attribute__((packed)) Compact_driver {
@@ -223,6 +272,7 @@ public:
   constexpr Node_pin() : top_g(0), current_g(0), idx(0), pid(0), sink(false) {}
   // rest can not be constexpr (find pid)
   Node_pin(LGraph *_g, Compact comp);
+  Node_pin(std::string_view path, Compact_flat comp);
   Node_pin(LGraph *_g, Compact_driver comp);
   Node_pin(LGraph *_g, Compact_class comp);
   Node_pin(LGraph *_g, const Hierarchy_index &hidx, Compact_class comp);
@@ -234,6 +284,7 @@ public:
       return Compact(Hierarchy_tree::root_index(), get_root_idx(), sink);
     return Compact(hidx, get_root_idx(), sink);
   }
+  Compact_flat   get_compact_flat() const;
   Compact_driver get_compact_driver() const;
   Compact_class  get_compact_class() const {
     // OK to pick a hierarchical to avoid replication of info like names
@@ -260,14 +311,12 @@ public:
   bool is_graph_input() const;
   bool is_graph_output() const;
 
-  Node_pin get_driver() const;
-  Node_pin get_sink() const;
-  Node_pin get_sink_from_output() const {
+  Node_pin change_to_sink_from_graph_out_driver() const {
     I(is_graph_output());
     return get_sink();
   }
 
-  Node_pin get_driver_from_output() const {
+  Node_pin change_to_driver_from_graph_out_sink() const {
     I(is_graph_output());
     return get_driver();
   }
@@ -320,7 +369,7 @@ public:
   bool operator==(const Node_pin &other) const {
     GI(idx == 0, hidx.is_invalid());
     GI(other.idx == 0, other.hidx.is_invalid());
-    GI(idx && other.idx, top_g == other.top_g);
+    //GI(idx && other.idx, top_g == other.top_g);
     return get_root_idx() == other.get_root_idx()
            && sink == other.sink
            && (hidx == other.hidx || hidx.is_invalid() || other.hidx.is_invalid());
@@ -387,6 +436,15 @@ struct hash<Node_pin::Compact> {
   size_t operator()(Node_pin::Compact const &o) const {
     uint64_t h = o.idx;
     h          = (h << 12) ^ o.hidx.get_hash() ^ o.idx;
+    return hash<uint64_t>{}((h << 1) + o.sink);
+  }
+};
+
+template <>
+struct hash<Node_pin::Compact_flat> {
+  size_t operator()(Node_pin::Compact_flat const &o) const {
+    uint64_t h = o.lgid.value;
+    h          = (h << 12) ^ o.idx;
     return hash<uint64_t>{}((h << 1) + o.sink);
   }
 };

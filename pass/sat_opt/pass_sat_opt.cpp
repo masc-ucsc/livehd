@@ -279,7 +279,7 @@ void Pass_sat_opt::check_sat_opt(LGraph *g) {
 		  if (dpin.get_bits()<=1) {
 		     return true; // Nothing possible to optimize
 		  }
-		  auto spin = dpin.get_sink_from_output();
+		  auto spin = dpin.change_to_sink_from_graph_out_driver();
 		  auto out_driver = spin.get_driver_pin();
 
 		  auto sat_var_output = dpin2sat_var[out_driver.get_compact() ];

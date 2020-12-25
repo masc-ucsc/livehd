@@ -441,7 +441,7 @@ static Node_pin get_partial_dpin(LGraph *g, const RTLIL::Wire *wire) {
 
   if (or_dpin.is_graph_output()) { // Some outputs are deferred
     auto real_or_node = g->create_node(Ntype_op::Or, or_dpin.get_bits());
-    or_dpin.get_sink_from_output().connect_driver(real_or_node);
+    or_dpin.change_to_sink_from_graph_out_driver().connect_driver(real_or_node);
 
     or_dpin = real_or_node.setup_driver_pin();
     wire2pin[wire] = or_dpin;
@@ -480,7 +480,7 @@ static Node resolve_memory(LGraph *g, RTLIL::Cell *cell) {
         if (wire2pin.find(wire) != wire2pin.end()) {
           const auto &or_dpin = wire2pin[wire];
           if (or_dpin.is_graph_output()) {
-            g->add_edge(dpin, or_dpin.get_sink_from_output());
+            g->add_edge(dpin, or_dpin.change_to_sink_from_graph_out_driver());
           } else {
             auto or_node = or_dpin.get_node();
             I(or_node.get_type_op() == Ntype_op::Or);
@@ -1210,7 +1210,7 @@ static void process_connect_outputs(RTLIL::Module *module, LGraph *g) {
     Node_pin spin = g->get_graph_output(&wire->name.c_str()[1]);
     g->add_edge(dpin3, spin); // , wire->width);
 
-    auto dpin = spin.get_driver_from_output();
+    auto dpin = spin.change_to_driver_from_graph_out_sink();
     if (wire->start_offset) {
       dpin.set_offset(wire->start_offset);
     }
