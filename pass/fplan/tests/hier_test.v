@@ -1,5 +1,5 @@
 module leaf1(input [14:0] ai, output [14:0] ao);
-  assign ao = ~ai;
+  assign ao = (~ai == 15'h0) ? 15'h5 : 15'h0;
 endmodule
 
 module leaf2(input [14:0] ai, output [14:0] ao, input [24:0] bi, output [24:0] bo);
@@ -57,7 +57,7 @@ module mid2(input [899:0] di, output [899:0] dout, input [9:0] ei, output [9:0] 
   wire [29:0] w_5_to_3;
   
   leaf3 l3(.ci(w_5_to_3), .co(w_3_to_5));
-  leaf4 l4(.tempi(w_3_to_5[12]), .tempo(w_3_to_5[13])); // might get 'X' on bits 12/13 but whatever
+  leaf4 l4(.tempi(w_3_to_5[12]), .tempo(w_3_to_5[13]));
   leaf5 l5(.ci(w_3_to_5), .co(w_5_to_3));
 
   assign dout = ~{di[899:30], w_3_to_5};
