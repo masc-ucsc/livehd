@@ -56,7 +56,7 @@ module mid2(input [899:0] di, output [899:0] dout, input [9:0] ei, output [9:0] 
   wire [29:0] w_3_to_5;
   wire [29:0] w_5_to_3;
 
-  leaf3 l3(.ci(w_5_to_3), .co(w_3_to_5[28:0]));
+  leaf3 l3(.ci(di[28:0]), .co(w_3_to_5[28:0]));
   leaf4 l4(.tempi(w_3_to_5[12]), .tempo(w_3_to_5[29])); // might get 'X' on bits 12/13 but whatever
   leaf5 l5(.ci(w_3_to_5), .co(w_5_to_3));
 
@@ -85,7 +85,7 @@ module mid5(input [899:0] gi, output [890:0] gout, input [9:0] hi, output [9:0] 
   mid1 m1s(.di(gi), .dout(w_1_up_5));
 
   // duplicate instantiations of mid2, for regularity discovery
-  leaf3 l3d(.ci(w_5_to_3), .co(w_3_to_5));
+  leaf3 l3d(.ci(gi), .co(w_3_to_5));
   leaf4 l4d(.tempi(w_3_to_5[12]), .tempo(w_3_to_5[13]));
   leaf5 l5d(.ci(w_3_to_5), .co(w_5_to_3));
 
