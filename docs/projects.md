@@ -293,10 +293,9 @@ and traverse to aggregate.
 The goal is to aim at 16 cores and achieve 10x speedup for those larger
 bitwidth/cprop tasks.
 
-## Lgraph partition/decomposition/coloring
+## Lgraph partition/decomposition
 
-Implement several partitioning/coloring algorithms in Lgraph. The
-attributes/colors could be used for synthesis/placement/...
+Implement several partitioning algorithms in Lgraph. Each partition has a different attribute. The attributes/partitions could be used for synthesis/placement/...
 
 Dependence: none
 
@@ -307,7 +306,8 @@ Main features:
 * "Bi-decomposition of large Boolean functions using blocking edge graphs" https://dl.acm.org/citation.cfm?id=2133553
 * Break graph partitions in disjoin sets and areas that do not have cross optimization (disjoin)
 * Mark graph with hypergraph partition
-* Patch traversal so that we have fast/forward/backward for a "color graph"
+* Port ESSENT acycling partitioning to C++. This reads a LGraph (or hierarchical lgraphs) and partitions the graph to several acycling partitions.
+
 
 ## Parallel and Hierarchical Synthesis with Mockturtle
 
@@ -323,7 +323,7 @@ Main features:
 
 ## Bring Back Incremental Synthesis to Lgraph
 
-WARNING: Traversal/color depdendence
+WARNING: Traversal depdendence
 
 Dependence: none
 
@@ -423,7 +423,7 @@ Main features:
 
 Implement a floorplanner for large Lgraph designs (firesim target).
 
-Dependence: coloring
+Dependence: partitioning
 
 Main features:
 
@@ -431,7 +431,7 @@ Main features:
 * Placed blocks do not need boundaries, just centers (analytical placer will handle the shape.
 * Implement a more traditional floorplanner leveraging min-cut.
 * Do hierarchy. Hierarchy preserves symmetry. Bassed on "A hierarchical approach for generating regular ﬂoorplans"
-* Different partitions are marked with different colors.
+* Different partitions are marked with different partitions.
 
 Some related papers in clustering:
 * FADE: Graph dra wing, clustering and visual abstraction
@@ -496,7 +496,7 @@ Main features:
 
 Leverage the incremental and push it further to make Lgraph the ECO flow for open source
 
-Dependence: bring back incremental synthesis, coloring, and SAT solver
+Dependence: bring back incremental synthesis, partitioning, and SAT solver
 
 Main features:
 
@@ -736,7 +736,7 @@ Integrate EPFL mockturtle (https://github.com/lsils/mockturtle) with Lgraph. The
 
 Some tasks that were not finished that a potential future project can address: (Good undergraduate projects)
 
-* Split the graph coloring code out of pass/mockturtle to pass/coloring
+* Split the graph partitioning code out of pass/mockturtle to pass
 * Extend the LUTs to have "bit-width". If a LUT operates over a "bus", it can have a multi-bit input per port".
 * Avoid simple NOTs by having negated ports. E.g: 0-3 are possitive, ports 4-7 are negated inputs.
 * Go over the [cleanup.md](cleanup.md) pending tasks.
@@ -982,4 +982,33 @@ Main features:
  * allow to load/save list of commands
 
 
+# Summer Intern Projects (2-3 months)
+
+## Migrate many of the rules to bazel_rules_hdl
+
+Bazel rules HDL is a new repo to have HDL bazel rules. LiveHD has many
+rules/packages like yosys, boolector, cryptominsat, mockturtle... THe idea is
+to get these outside at bazel_rules_hdl so that they can be used by other
+external projects. As the packages get exported, it will require to understand
+bazel and changes in toolchains.
+
+https://github.com/mithro/bazel_rules_hdl
+
+## Random CHISEL/Verilog/Pyrope generator
+
+Create a python/ruby/C++ program that generates pseudo-random programs in
+several languages (CHISEL/Verilog/Pyrope). The idea is that the same program
+can be implemented in multiple ways but all should have the same result
+(simulation and LEC).
+
+## Iterators
+
+We have fast/forward with and without hierarchy. Several improvements can
+be done to make it more useful.
+
+* backward iterator
+* Start iterators (forward/backward from a given position
+* Allow to run a subset of the graph (method based). A method passed to the iterator returns true/false indicating if the node is part of the requested traversal.
+
+Blocks like mockturtle will significantly benefit from such iterator
 

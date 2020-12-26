@@ -64,12 +64,12 @@ void Lcompiler::add_firrtl_thread(std::shared_ptr<Lnast> ln) {
   Graphviz gv(true, false, odir); 
   gviz ? gv.do_from_lnast(ln, "raw") : void(); 
   
-  fmt::print("------------------------ Firrtl_Protobuf -> LNAST-SSA --------------- (LN-1)\n");
+  fmt::print("---------------- Firrtl_Protobuf -> LNAST-SSA ({}) ------- (LN-1)\n", absl::StrCat(ln->get_top_module_name(), "_firrtl"));
   ln->ssa_trans();
   gviz ? gv.do_from_lnast(ln) : void();
 
 
-  fmt::print("------------------------ LNAST-> LGraph ----------------------------- (LN-2)\n");
+  fmt::print("---------------- LNAST-> LGraph ({}) --------------------- (LN-2)\n", absl::StrCat(ln->get_top_module_name(), "_firrtl"));
   // note: since the first generated lgraphs are firrtl_op_lgs, they will be removed in the end,
   // we should keep the original module_name for the firrtl_op mapped lgraph, so here I attached
   // "_firrtl" postfix for the firrtl_op_lgs
@@ -88,7 +88,7 @@ void Lcompiler::add_firrtl_thread(std::shared_ptr<Lnast> ln) {
   for (const auto &lg : local_lgs) {
     Cprop    cp(false, false);  // hier = false, gioc = false
 
-    fmt::print("------------------------ Copy-Propagation --------------------------- (C-1)\n");
+    fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-1)\n", lg->get_name());
     cp.do_trans(lg);
     gviz ? gv.do_from_lgraph(lg, "local.no_bits") : void();
   }
@@ -107,10 +107,10 @@ void Lcompiler::global_io_connection() {
   Gioc     gioc(path);
 
   for (auto &lg : lgs) {
-    fmt::print("------------------------ Global IO Connection ----------------------- (GIOC)\n");
+    fmt::print("---------------- Global IO Connection ({}) --------------- (GIOC)\n", lg->get_name());
     gioc.do_trans(lg);
     gviz ? gv.do_from_lgraph(lg, "gioc.raw") : void(); 
-    fmt::print("------------------------ Global Copy-Propagation -------------------- (GC)\n");
+    fmt::print("---------------- Global Copy-Propagation ({}) ------------ (GC)\n", lg->get_name());
     cp.do_trans(lg);
     gviz ? gv.do_from_lgraph(lg, "gioc.no_bits") : void();
   }
@@ -125,13 +125,14 @@ void Lcompiler::global_firrtl_bits_analysis_map() {
   auto hit = false;
   auto top_name_before_mapping = absl::StrCat(top, "_firrtl");
 
+  // hierarchical traversal
   for (auto &lg : lgs) {
     ++lgcnt;
     if (lg->get_name() == top_name_before_mapping) {
       hit = true;
-      fmt::print("------------------------ Firrtl Bits Analysis ----------------------- (F-1)\n");
+      fmt::print("---------------- Firrtl Bits Analysis ({}) --------------- (F-1)\n", lg->get_name());
       fm.do_firbits_analysis(lg);
-      fmt::print("------------------------ Firrtl Bits Analysis ----------------------- (F-2)\n");
+      fmt::print("---------------- Firrtl Bits Analysis ({}) --------------- (F-2)\n", lg->get_name());
       fm.do_firbits_analysis(lg);
     }
     gviz ? gv.do_from_lgraph(lg, "gioc.firbits") : void(); 
@@ -140,21 +141,12 @@ void Lcompiler::global_firrtl_bits_analysis_map() {
   if (lgcnt > 1 && hit == false) 
     Pass::error("Top module not specified for firrtl codes!\n");
 
-
-  lgcnt = 0;
-  hit = false;
   std::vector<LGraph*> mapped_lgs;
   for (auto &lg : lgs) {
-    ++lgcnt;
-    if(lg->get_name() == top_name_before_mapping) {
-      hit = true;
-      fmt::print("------------------------ Firrtl Op Mapping ----------------------- (F-3)\n");
-      auto new_lg = fm.do_firrtl_mapping(lg);
-      mapped_lgs.emplace_back(new_lg);
-    }
+    fmt::print("---------------- Firrtl Op Mapping ({}) --------------- (F-3)\n", lg->get_name());
+    auto new_lg = fm.do_firrtl_mapping(lg);
+    mapped_lgs.emplace_back(new_lg);
   }
-  if (lgcnt > 1 && hit == false) 
-    Pass::error("Top module not specified for firrtl codes!\n");
 
 
   lgs = mapped_lgs;
@@ -168,17 +160,17 @@ void Lcompiler::local_bitwidth_inference() {
   Graphviz gv(true, false, odir); 
   Bitwidth bw(false, 10, global_bwmap);     // hier = false, max_iters = 10
   for (auto &lg: lgs) {
-    fmt::print("------------------------ Local Bitwidth-Inference ------------------- (B-1)\n");
+    fmt::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-1)\n", lg->get_name());
     bw.do_trans(lg);
     gviz ? gv.do_from_lgraph(lg, "local.debug0") : void(); 
 
 
-    fmt::print("------------------------ Local Bitwidth-Inference ------------------- (B-2)\n");
+    fmt::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-2)\n", lg->get_name());
     bw.do_trans(lg);
     gviz ? gv.do_from_lgraph(lg, "local.debug1") : void(); 
 
 
-    fmt::print("------------------------ Local Bitwidth-Inference ------------------- (B-3)\n");
+    fmt::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-3)\n", lg->get_name());
     bw.do_trans(lg);
     gviz ? gv.do_from_lgraph(lg, "local") : void(); 
   }
@@ -195,7 +187,7 @@ void Lcompiler::global_bitwidth_inference() {
     ++lgcnt;
     if (lg->get_name() == top) {
       hit = true;
-      fmt::print("------------------------ Global Bitwidth-Inference ------------------------- (GB)\n");
+      fmt::print("---------------- Global Bitwidth-Inference ({}) ----------------- (GB)\n", lg->get_name());
       bw.do_trans(lg);
     }
 

@@ -624,7 +624,7 @@ void Inou_firrtl::HandleMemPortPre(Lnast& lnast, Lnast_nid& parent_node, const f
 
     auto idx_asg_m = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
     lnast.add_child(idx_asg_m, Lnast_node::create_ref("__wrmask"));
-    lnast.add_child(idx_asg_m, Lnast_node::create_const("0u"));
+    lnast.add_child(idx_asg_m, Lnast_node::create_const("0"));
 
     auto idx_asg_l = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
     lnast.add_child(idx_asg_l, Lnast_node::create_ref("__latency"));
@@ -636,7 +636,7 @@ void Inou_firrtl::HandleMemPortPre(Lnast& lnast, Lnast_nid& parent_node, const f
 
     auto idx_asg_m = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
     lnast.add_child(idx_asg_m, Lnast_node::create_ref("__wrmask"));
-    lnast.add_child(idx_asg_m, Lnast_node::create_const("0u"));
+    lnast.add_child(idx_asg_m, Lnast_node::create_const("0"));
 
     auto idx_asg_l = lnast.add_child(idx_tup, Lnast_node::create_assign(""));
     lnast.add_child(idx_asg_l, Lnast_node::create_ref("__latency"));
@@ -1741,11 +1741,13 @@ std::string Inou_firrtl::ReturnExprString(Lnast& lnast, const firrtl::FirrtlPB_E
       break;
     }
     case firrtl::FirrtlPB_Expression::kUintLiteral: {     // UIntLiteral
-      expr_string = absl::StrCat(expr.uint_literal().value().value(), "u");
+      /* expr_string = absl::StrCat(expr.uint_literal().value().value(), "u"); */
+      expr_string = expr.uint_literal().value().value();
       break;
     }
     case firrtl::FirrtlPB_Expression::kSintLiteral: {     // SIntLiteral
-      expr_string = absl::StrCat(expr.sint_literal().value().value(), "s");
+      /* expr_string = absl::StrCat(expr.sint_literal().value().value(), "s"); */
+      expr_string = expr.sint_literal().value().value();
       break;
     }
     case firrtl::FirrtlPB_Expression::kValidIf: {  // ValidIf

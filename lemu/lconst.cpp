@@ -45,33 +45,10 @@ Bits_t Lconst::read_bits(std::string_view txt) {
   return tmp;
 }
 
-bool Lconst::process_ending(std::string_view txt, size_t pos) {
-  bool u = (txt[pos] == 'u' || txt[pos] == 'U');
-  bool s = (txt[pos] == 's' || txt[pos] == 'S');
-
-  if (s || u) {
-    pos++;
-    if (pos < txt.size()) {
-      while(pos < txt.size() && txt[pos] == '_')
-        pos++;
-
-      bits = read_bits(txt.substr(pos));
-      explicit_bits = true;
-    }
-    if (u && bits) {
-      bits++; // all the lconst are signed, give space for the extra bit
-    }
-  }else{
-    throw std::runtime_error(fmt::format("ERROR: {} invalid number format. Either u or s", txt));
-  }
-
-  return u;
-}
-
 Lconst::Container Lconst::serialize() const {
 
   Container v;
-  unsigned char c = (explicit_str?0x10:0) | (explicit_bits?0x04:0) | (is_negative()?0x01:0);
+  unsigned char c = (explicit_str?0x10:0) | (is_negative()?0x01:0);
   v.emplace_back(c);
   v.emplace_back(bits>>16);
   v.emplace_back(bits>>8 );
@@ -85,7 +62,7 @@ Lconst::Container Lconst::serialize() const {
 uint64_t Lconst::hash() const {
 
   std::vector<uint64_t> v;
-  uint64_t c = (explicit_str?0x10:0) | (explicit_bits?0x04:0) | (is_negative()?0x01:0);
+  uint64_t c = (explicit_str?0x10:0) | (is_negative()?0x01:0);
   c = (c<<32) | bits;
   v.emplace_back(c);
 
@@ -104,7 +81,6 @@ Lconst::Lconst(absl::Span<unsigned char> v) {
   uint32_t c3 = v[3];
 
   explicit_str  = (c0 & 0x10)?true:false;
-  explicit_bits = (c0 & 0x04)?true:false;
 
   bits = (c1<<16) | (c2<<8) | c3;
 
@@ -126,7 +102,6 @@ Lconst::Lconst(const Container &v) {
   uint32_t c3 = v[3];
 
   explicit_str  = (c0 & 0x10)?true:false;
-  explicit_bits = (c0 & 0x04)?true:false;
 
   bits = (c1<<16) | (c2<<8) | c3;
 
@@ -138,21 +113,18 @@ Lconst::Lconst(const Container &v) {
 
 Lconst::Lconst() {
   explicit_str  = false;
-  explicit_bits = false;
   bits          = 1;
   num           = 0;
 }
 
 Lconst::Lconst(int64_t v) {
   explicit_str  = false;
-  explicit_bits = false;
   num           = v;
   bits          = calc_num_bits();
 }
 
 Lconst::Lconst(Number v) {
   explicit_str  = false;
-  explicit_bits = false;
   num           = v;
   bits          = calc_num_bits();
 }
@@ -160,7 +132,6 @@ Lconst::Lconst(Number v) {
 Lconst::Lconst(std::string_view orig_txt) {
 
   explicit_str  = false;
-  explicit_bits = false;
   bits          = 0;
   num           = 0;
 
@@ -203,8 +174,6 @@ Lconst::Lconst(std::string_view orig_txt) {
       for(const auto ch:txt.substr(2)) {
         if (ch == '0' || ch == '1' || ch == '_')
           continue;
-        if (ch == 'u' || ch == 'U' || ch == 's' || ch == 'S')
-          break;
 
         // handle binary with special characters ?xZ...
         std::string bin;
@@ -212,11 +181,15 @@ Lconst::Lconst(std::string_view orig_txt) {
           const auto ch2 = txt[i];
           if (ch2=='_')
             continue;
-          if (ch2 == 'u' || ch2 == 'U' || ch2 == 's' || ch2 == 'S') {
-            unsign_set = process_ending(txt, i);
-            break;
+          if (ch2 == '?' || ch2 == 'x' || ch2 == 'X')
+            bin.append(1, '?');
+          else if (ch2 == 'Z' || ch2 == 'z')
+            bin.append(1, 'z');
+          else if (ch2 == '0' || ch2 == '1')
+            bin.append(1, ch2);
+          else {
+            throw std::runtime_error(fmt::format("ERROR: {} binary encoding could not use {}\n", orig_txt, ch2));
           }
-          bin.append(1, ch2);
         }
 
         for (int i = bin.size() - 1; i >= 0; --i) {
@@ -227,20 +200,10 @@ Lconst::Lconst(std::string_view orig_txt) {
           num  += bin[i];
           nbits_used++;
         }
-        if (bits==0)
-          bits = nbits_used;
+        bits = nbits_used;
 
         I(nbits_used<=bits);
         explicit_str  = true;
-        explicit_bits = true;
-
-#if 0
-        num <<=8;
-        num += (int)'b';
-
-        num <<=8;
-        num  += (int)'0';
-#endif
 
         I(!negative);
 
@@ -266,8 +229,7 @@ Lconst::Lconst(std::string_view orig_txt) {
       }else{
         if (txt[i] == '_') continue;
 
-        unsign_set = process_ending(txt, i);
-        break;
+        throw std::runtime_error(fmt::format("ERROR: {} encoding could not use {}\n", orig_txt, txt[i]));
       }
     }
     if (nbits_used==0)
@@ -284,8 +246,7 @@ Lconst::Lconst(std::string_view orig_txt) {
       } else {
         if (txt[i] == '_') continue;
 
-        unsign_set = process_ending(txt, i);
-        break;
+        throw std::runtime_error(fmt::format("ERROR: {} encoding could not use {}\n", orig_txt, txt[i]));
       }
     }
 
@@ -298,7 +259,6 @@ Lconst::Lconst(std::string_view orig_txt) {
     }
     bits          = orig_txt.size() * 8;
     explicit_str  = true;
-    explicit_bits = true;
   }
 
   if (bits && !explicit_str) {
@@ -315,14 +275,7 @@ Lconst::Lconst(std::string_view orig_txt) {
     num  = -num;
   }
 
-  if (explicit_bits) {
-    if (num < 0 && unsign_set) {  // convert to positive
-      Number mask(1);
-      mask = (mask << (bits-1)) - 1;
-      num  = num & mask;
-      I(num>0);
-    }
-  } else {
+  if (!explicit_str) {
     if (num<0 && unsign_set) {
       throw std::runtime_error(fmt::format("ERROR: {} is negative and unsigned but bits not set to truncate\n", orig_txt));
     }
@@ -336,15 +289,14 @@ void Lconst::dump() const {
   if (explicit_str)
     fmt::print("str:{} bits:{}\n", to_string(), bits);
   else
-    fmt::print("num:{} bits:{} explicit_bits:{}\n", num.str(), bits, explicit_bits);
+    fmt::print("num:{} bits:{}\n", num.str(), bits);
 }
 
 Lconst Lconst::adjust(const Number &res_num, const Lconst &o) const {
   // explicit kept if both explicit and agree
   auto res_explicit_str  = explicit_str && o.explicit_str;
-  bool res_explicit_bits = false;
 
-  return Lconst(res_explicit_str, res_explicit_bits, calc_num_bits(res_num), res_num);
+  return Lconst(res_explicit_str, calc_num_bits(res_num), res_num);
 }
 
 Lconst Lconst::get_mask(Bits_t bits) {
@@ -364,7 +316,7 @@ Lconst Lconst::tposs_op() const {
     res_num = num;
   }
 
-  return Lconst(explicit_str, explicit_bits, calc_num_bits(res_num), res_num);
+  return Lconst(explicit_str, calc_num_bits(res_num), res_num);
 }
 
 Lconst Lconst::add_op(const Lconst &o) const {
@@ -417,7 +369,7 @@ Lconst Lconst::lsh_op(Bits_t amount) const {
 
   auto res_num  = num << amount;
 
-  return Lconst(explicit_str, explicit_bits, calc_num_bits(res_num), res_num);
+  return Lconst(explicit_str, calc_num_bits(res_num), res_num);
 }
 
 Lconst Lconst::rsh_op(Bits_t amount) const {
@@ -429,7 +381,7 @@ Lconst Lconst::rsh_op(Bits_t amount) const {
 
   auto res_num  = num >> amount;
 
-  return Lconst(explicit_str, explicit_bits, calc_num_bits(res_num), res_num);
+  return Lconst(explicit_str, calc_num_bits(res_num), res_num);
 }
 
 Lconst Lconst::or_op(const Lconst &o) const {
@@ -533,7 +485,7 @@ Lconst Lconst::adjust_bits(Bits_t amount) const {
   Number r(1);
   Number res_num = num & ((r<<amount)-1);
 
-  return Lconst(explicit_str, true, calc_num_bits(res_num), res_num);
+  return Lconst(explicit_str, calc_num_bits(res_num), res_num);
 }
 
 std::string Lconst::to_string() const {
@@ -567,22 +519,6 @@ std::string Lconst::to_string_no_xz() const {
   return str;
 }
 
-void Lconst::add_pyrope_bits(std::string *str) const {
-  if (!explicit_bits) {
-    return;
-  }
-
-  absl::StrAppend(str,((num<0 && bits>1) || explicit_str)?"s":"u");
-
-  if (explicit_bits && bits>0) {
-    if (num>0 && bits>1 && !explicit_str) {
-      absl::StrAppend(str, bits-1, (bits-1)>1?"bits":"bit");
-    }else{
-      absl::StrAppend(str, bits, bits>1?"bits":"bit");
-    }
-  }
-}
-
 std::string Lconst::to_pyrope() const {
 
   if (explicit_str) {
@@ -593,14 +529,13 @@ std::string Lconst::to_pyrope() const {
 
     I(str[0] != '-');
     auto str2 = absl::StrCat("0b", str);
-    add_pyrope_bits(&str2);
     return str2;
   }
 
   const auto v = get_num();
   std::stringstream ss;
 
-  bool print_hexa = explicit_bits || v > 63;
+  bool print_hexa = v > 63;
   if (print_hexa) {
     ss << std::hex;
   }
@@ -616,8 +551,6 @@ std::string Lconst::to_pyrope() const {
   if (print_hexa)
     absl::StrAppend(&str, "0x");
   absl::StrAppend(&str, ss.str());
-
-  add_pyrope_bits(&str);
 
   return str;
 }
@@ -699,14 +632,11 @@ std::string Lconst::to_verilog() const {
       return absl::StrCat("\"", str, "\"");
 
     I(str[0] != '-');
-    if (explicit_bits)
-      return absl::StrCat((int)bits, "'b", str);
     return absl::StrCat("'b", str);
   }
 
   std::string str;
-  if (explicit_bits)
-    absl::StrAppend(&str, (int)bits);
+  absl::StrAppend(&str, (int)bits);
 
   // Hexa
   auto v = get_num();
