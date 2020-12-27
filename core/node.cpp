@@ -281,6 +281,10 @@ int Node::get_num_inp_edges() const { return current_g->get_num_inp_edges(*this)
 int Node::get_num_out_edges() const { return current_g->get_num_out_edges(*this); }
 int Node::get_num_edges() const { return current_g->get_num_edges(*this); }
 
+Node Node::get_non_hierarchical() const {
+  return Node(current_g, current_g, Hierarchy_tree::invalid_index(), nid);
+}
+
 Node_pin Node::setup_driver_pin_raw(Port_ID pid) const {
   I(!is_type_sub()); // Do not setup subs by PID, use name
   I(Ntype::has_driver(get_type_op(),pid));

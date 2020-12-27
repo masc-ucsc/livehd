@@ -144,6 +144,7 @@ void Lcompiler::global_firrtl_bits_analysis_map() {
   std::vector<LGraph*> mapped_lgs;
   for (auto &lg : lgs) {
     fmt::print("---------------- Firrtl Op Mapping ({}) --------------- (F-3)\n", lg->get_name());
+    lg->dump();
     auto new_lg = fm.do_firrtl_mapping(lg);
     mapped_lgs.emplace_back(new_lg);
   }

@@ -641,6 +641,9 @@ void Bitwidth::insert_tposs_nodes(Node &node_attr, Fwd_edge_iterator::Fwd_iter &
     attr_dpins.emplace_back(node_attr.setup_driver_pin("chain"));
 
   for (auto attr_dpin : attr_dpins) {
+    if (hier) {
+      attr_dpin = attr_dpin.get_non_hierarchical(); // insert locally not through hierarchy
+    }
     auto ntposs = node_attr.get_class_lgraph()->create_node(Ntype_op::Tposs);
     auto ntposs_dpin = ntposs.setup_driver_pin();
     attr_dpin.connect_sink(ntposs.setup_sink_pin("a"));
@@ -918,10 +921,12 @@ void Bitwidth::bw_pass(LGraph *lg) {
             continue;
         }
 
-        if (node.is_sink_connected("name")) {
-          auto data_dpin = node.get_sink_pin("name").get_driver_pin();
+        auto node_non_hier = node.get_non_hierarchical();
 
-          for (auto e : node.out_edges()) {
+        if (node_non_hier.is_sink_connected("name")) {
+          auto data_dpin = node_non_hier.get_sink_pin("name").get_driver_pin();
+
+          for (auto e : node_non_hier.out_edges()) {
             if (e.driver.get_pid() == 0)
               e.sink.connect_driver(data_dpin);
           }

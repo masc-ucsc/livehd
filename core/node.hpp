@@ -249,6 +249,7 @@ public:
   constexpr bool is_invalid() const { return nid == 0; }
   constexpr bool is_down_node() const { return top_g != current_g; }
   constexpr bool is_hierarchical() const { return !hidx.is_invalid(); }
+  Node           get_non_hierarchical() const;
 
   constexpr bool operator==(const Node &other) const {
     GI(nid == 0, hidx.is_invalid());

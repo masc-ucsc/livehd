@@ -10,6 +10,7 @@ public:
 
   // time since start
   int64_t time() { return duration_cast<milliseconds>(system_clock::now() - s).count(); }
+
 private:
   system_clock::time_point s;
 };

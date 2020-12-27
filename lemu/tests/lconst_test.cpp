@@ -117,58 +117,27 @@ void print_method(const UInt<N> v) {
 
 TEST_F(Lconst_test, lvar_sizes) {
 
-  Lconst l1("-1u8"); // 0xFF
+  Lconst l1("-1"); // 0xFF or -1
   fmt::print("l1:{} bits:{}\n", l1.to_pyrope(), l1.get_bits());
-  EXPECT_TRUE(l1.eq_op(Lconst("0xFF")));
-  EXPECT_FALSE(l1.eq_op(Lconst("0xFFFFFFF"))); // explicit bits do not match
-  EXPECT_FALSE(l1.eq_op(Lconst("-1")));
-  EXPECT_FALSE(l1.eq_op(Lconst("0xFFFu12")));  // explicit bits do not match
-  /* EXPECT_TRUE(l1.is_explicit_bits()); */
-  EXPECT_EQ(l1.get_bits(), 9);
-
-  Lconst l1b("-1s8"); // 0xFF or -1
-  fmt::print("l1b:{} bits:{}\n", l1b.to_pyrope(), l1b.get_bits());
-  EXPECT_FALSE(l1b.eq_op(Lconst("0xFF")));
-  EXPECT_FALSE(l1b.eq_op(Lconst("0xFFFFFFF"))); // explicit bits do not match
-  EXPECT_TRUE(l1b.eq_op(Lconst("-1")));
-  EXPECT_FALSE(l1b.eq_op(Lconst("0xFFFu12")));  // explicit bits do not match
-  /* EXPECT_TRUE(l1b.is_explicit_bits()); */
-  EXPECT_EQ(l1b.get_bits(), 8);
-
-  Lconst l1c("-1"); // 0xFF or -1
-  fmt::print("l1c:{} bits:{}\n", l1c.to_pyrope(), l1c.get_bits());
-  EXPECT_FALSE(l1c.eq_op(Lconst("0xFF")));
-  EXPECT_FALSE(l1c.eq_op(Lconst("0xFFFFFFF")));
-  EXPECT_TRUE(l1c.eq_op(Lconst("-1")));
-  /* EXPECT_FALSE(l1c.is_explicit_bits()); */
-  EXPECT_EQ(l1c.get_bits(), 1);
+  EXPECT_FALSE(l1.eq_op(Lconst("0xFF")));
+  EXPECT_FALSE(l1.eq_op(Lconst("0xFFFFFFF")));
+  EXPECT_TRUE(l1.eq_op(Lconst("-1")));
+  EXPECT_EQ(l1.get_bits(), 1);
 
   auto s1 = l1 + Lconst("1");
   fmt::print("s1:{} bits:{}\n", s1.to_pyrope(), s1.get_bits());
-  EXPECT_TRUE(s1.eq_op(Lconst("0x100")));
-  EXPECT_EQ(s1.get_bits(), 10); // after arithmetic op, becomes sign (unsigned bits kept only if explicit)
+  EXPECT_TRUE(s1.eq_op(Lconst("0x0")));
+  EXPECT_EQ(s1.get_bits(), 1);
 
-  auto s1b = l1b + Lconst("1");
-  fmt::print("s1b:{} bits:{}\n", s1b.to_pyrope(), s1b.get_bits());
-  EXPECT_TRUE(s1b.eq_op(Lconst("0x0")));
-  EXPECT_EQ(s1b.get_bits(), 1); // it was 8 bit signed, so still fits
-
-  auto s2 = l1 + Lconst("-1s");
+  auto s2 = l1 + Lconst("-1");
   fmt::print("s2:{} bits:{}\n", s2.to_pyrope(), s2.get_bits());
-  EXPECT_TRUE(s2.eq_op(Lconst("0xFE")));
-  EXPECT_EQ(s2.get_bits(), 9);
+  EXPECT_TRUE(s2.eq_op(Lconst("-2")));
+  EXPECT_EQ(s2.get_bits(), 2);
 
-  auto s3 = l1 + Lconst("-1");
-  fmt::print("s3:{} bits:{}\n", s3.to_pyrope(), s3.get_bits());
-  EXPECT_TRUE(s3.eq_op(Lconst("0xFE")));
-  EXPECT_EQ(s3.get_bits(), 9);
-
-  auto s4 = l1 + Lconst("0x01Fs12");
+  auto s4 = l1 + Lconst("0x1F");
   fmt::print("s4:{} bits:{}\n", s4.to_pyrope(), s4.get_bits());
-  EXPECT_TRUE(s4.eq_op(Lconst("0x11E")));
-  EXPECT_EQ(s4.get_bits(), 10);
-  /* EXPECT_TRUE(l1.is_explicit_bits()); */
-  /* EXPECT_FALSE(s4.is_explicit_bits()); */
+  EXPECT_TRUE(s4.eq_op(Lconst("0x1E")));
+  EXPECT_EQ(s4.get_bits(), 6);
 }
 
 TEST_F(Lconst_test, uint_comparison_operators) {
@@ -1094,14 +1063,7 @@ TEST_F(Lconst_test, dec_check) {
       padded.append(1, ch);
     }
     if (flip.any()) {
-      bool is_sign;
-      if (flip.any() && !negative[i]) {
-        is_sign = false;
-        padded.append(1, 'u');
-      } else {
-        is_sign = true;
-        padded.append(1, 's');
-      }
+      bool is_sign = true;
 
       if (flip.any()) {
         auto nbits = 0;
@@ -1116,10 +1078,6 @@ TEST_F(Lconst_test, dec_check) {
 
         if (flip.any()) {
           nbits += num_digits.any();
-        }
-        if (is_sign) {
-          padded.append(std::to_string(nbits));
-          padded.append("bits");
         }
       }
     }
@@ -1167,28 +1125,28 @@ TEST_F(Lconst_test, string) {
 }
 
 TEST_F(Lconst_test, binary) {
-  Lconst a("0b1100u5bits");
-  Lconst b("12s5bits");
+  Lconst a("0b1100");
+  Lconst b("12");
   Lconst b2("12");
   a.dump();
   b.dump();
-  EXPECT_FALSE(a == b);  // explicit sign (12s vs 12u) does not change this
-  EXPECT_FALSE(a == b2); // explicit sign (12s vs 12u) does not change this
-  EXPECT_NE(a, b);       // different explicit bits
-  EXPECT_NE(a, b2);      // different explicit bits
+  EXPECT_TRUE(a == b);  // explicit sign (12s vs 12u) does not change this
+  EXPECT_TRUE(a == b2); // explicit sign (12s vs 12u) does not change this
+  EXPECT_EQ(a, b);       // different explicit bits
+  EXPECT_EQ(a, b2);      // different explicit bits
   EXPECT_TRUE(a.eq_op(b));
   EXPECT_TRUE(a.eq_op(b2));
 
   Lconst c("0b01?10?1");
   EXPECT_EQ(c.to_string(), "01?10?1");
-  EXPECT_EQ(c.to_pyrope(), "0b01?10?1u7bits");
-  EXPECT_EQ(c.to_verilog(), "7'b01?10?1");
+  EXPECT_EQ(c.to_pyrope(), "0b01?10?1");
+  EXPECT_EQ(c.to_verilog(), "'b01?10?1");
 
   Lconst d("___0b1_1x1_");
-  EXPECT_EQ(d.to_string(), "11x1");
-  EXPECT_EQ(d.to_pyrope(), "0b11x1u4bits");
-  EXPECT_EQ(d.to_verilog(), "4'b11x1");
-  EXPECT_EQ(d.to_yosys(),   "11x1");
+  EXPECT_EQ(d.to_string(), "11?1");
+  EXPECT_EQ(d.to_pyrope(), "0b11?1");
+  EXPECT_EQ(d.to_verilog(), "'b11?1");
+  EXPECT_EQ(d.to_yosys(),   "11?1");
 
   Lconst e("_-__0b1_");
   EXPECT_EQ(e.to_string(), "_-__0b1_");
@@ -1197,30 +1155,30 @@ TEST_F(Lconst_test, binary) {
 
   Lconst f("0b1_0100");
   EXPECT_EQ(f.to_pyrope(), "20");
-  EXPECT_EQ(f.to_verilog(), "'h14");
-  EXPECT_EQ(f.to_yosys(), "10100");
+  EXPECT_EQ(f.to_verilog(), "6'h14");
+  EXPECT_EQ(f.to_yosys(), "010100");
 
-  Lconst g("0bxxxx_xxxx_u8bits");
-  EXPECT_EQ(g.to_pyrope(),   "0b0xxxxxxxxs9bits");
-  EXPECT_EQ(g.to_verilog(), "9'b0xxxxxxxx");
-  EXPECT_EQ(g.to_yosys()    , "0xxxxxxxx");
-  Lconst h("0b0xxxxxxxxs9bits");
+  Lconst g("0bxxxx_xxxx_");
+  EXPECT_EQ(g.to_pyrope(),   "0b????????");
+  EXPECT_EQ(g.to_verilog(), "'b????????");
+  EXPECT_EQ(g.to_yosys()    , "????????");
+  Lconst h("0b0??___???_??___?");
   EXPECT_EQ(h,g);
 
-  Lconst g2("0bxxxx_xxxx_s8bits");
-  EXPECT_EQ(g2.to_pyrope(),   "0bxxxxxxxxs8bits");
-  EXPECT_EQ(g2.to_verilog(), "8'bxxxxxxxx");
-  EXPECT_EQ(g2.to_yosys()    , "xxxxxxxx");
+  Lconst g2("0bxxxx_xxxx_");
+  EXPECT_EQ(g2.to_pyrope(),   "0b????????");
+  EXPECT_EQ(g2.to_verilog(), "'b????????");
+  EXPECT_EQ(g2.to_yosys()    , "????????");
 
 
   Lconst j("-17");
   EXPECT_EQ(j.to_pyrope(),   "-17"); // small constant
-  EXPECT_EQ(j.to_verilog(), "'sb101111"); // neg values use binary (could be patched)
+  EXPECT_EQ(j.to_verilog(), "6'sb101111"); // neg values use binary (could be patched)
   EXPECT_EQ(j.to_yosys()    ,"101111");
 
   Lconst k("17");
   EXPECT_EQ(k.to_pyrope(),   "17");
-  EXPECT_EQ(k.to_verilog(), "'h11"); // hex positives
+  EXPECT_EQ(k.to_verilog(), "6'h11"); // hex positives
   EXPECT_EQ(k.to_yosys()    ,"010001");
 }
 
@@ -1229,8 +1187,8 @@ TEST_F(Lconst_test, serialize) {
   mmap_lib::map<uint32_t, Lconst::Container> map;
 
   Lconst a(255);
-  Lconst b("0xFFu_300bits");
-  Lconst c("0x1234567890abcdef1234567890abcdefu_300bits");
+  Lconst b("0xFF");
+  Lconst c("0x1234567890abcdef1234567890abcdef");
 
   map.set(1, a.serialize());
   map.set(2, b.serialize());
@@ -1260,8 +1218,8 @@ TEST_F(Lconst_test, serialize2a) {
     mmap_lib::map<uint32_t, Lconst::Container> map("tmp_lemu", "const");
 
     Lconst a(255);
-    Lconst b("0xFFu_300bits");
-    Lconst c("0x1234567890abcdef1234567890abcdefu_300bits");
+    Lconst b("0xFF");
+    Lconst c("0x1234567890abcdef1234567890abcdef");
 
     map.set(1, a.serialize());
     map.set(2, b.serialize());
@@ -1275,8 +1233,8 @@ TEST_F(Lconst_test, serialize2a) {
     Lconst s_c(map.get(3));
 
     Lconst a(255);
-    Lconst b("0xFFu_300bits");
-    Lconst c("0x1234567890abcdef1234567890abcdefu_300bits");
+    Lconst b("0xFF");
+    Lconst c("0x1234567890abcdef1234567890abcdef");
 
     b.dump();
     s_b.dump();
@@ -1301,10 +1259,8 @@ TEST_F(Lconst_test, zerocase) {
 
   EXPECT_EQ(Lconst("0x0").get_bits(), 1);
   EXPECT_EQ(Lconst("0").get_bits(), 1);
-  EXPECT_EQ(Lconst("0u7").get_bits(), 8); // all lconst are always signed
-  EXPECT_EQ(Lconst("0s").get_bits(), 1);
-  EXPECT_EQ(Lconst("0s4").get_bits(), 4);
-
+  EXPECT_EQ(Lconst("0b0").get_bits(), 1);
+  EXPECT_EQ(Lconst("0b?").get_bits(), 2);
 }
 
 TEST_F(Lconst_test, cpp_int_vs_lconst) {
@@ -1388,34 +1344,20 @@ TEST_F(Lconst_test, lconst_add) {
     EXPECT_EQ(a.get_bits(), 9);
   }
   {
-    auto a = Lconst("0xFFu") + Lconst("-1");
+    auto a = Lconst("0xFF") + Lconst("-1");
     EXPECT_EQ(a.to_i(), 254);
     EXPECT_EQ(a.get_bits(), 9);
   }
   {
-    auto a = Lconst("0xFFu") + Lconst("-1s");
-    EXPECT_EQ(a.to_i(), 254);
-    EXPECT_EQ(a.get_bits(), 9);
-  }
-  {
-    auto a = Lconst("0xFFs") + Lconst("-1");
-    EXPECT_EQ(a.to_i(), 254);
-    EXPECT_EQ(a.get_bits(), 9);
-  }
-  {
-    auto a = Lconst("1s") + Lconst("-1");
+    auto a = Lconst("1") + Lconst("-1");
     EXPECT_EQ(a.to_i(), 0);
     EXPECT_EQ(a.get_bits(), 1);
   }
   {
-    auto a = Lconst("-1") + Lconst("-1s");
-    EXPECT_EQ(a.to_i(), -2);
-    EXPECT_EQ(a.get_bits(), 2);
-  }
-  {
     auto a = Lconst("0b0?") + Lconst("1");
     EXPECT_FALSE(a.is_i());
-    EXPECT_EQ(a.to_pyrope(), "0b??u2bit");
+    EXPECT_EQ(a.to_pyrope(), "0b??");
+    EXPECT_EQ(a.get_bits(), 3);
   }
 
 }

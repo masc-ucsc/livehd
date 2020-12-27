@@ -255,10 +255,17 @@ Dependence: lnast_tolg must be completed first
 Main features:
 
 * Pyrope tree-sitter grammar
-* Atom integration
+* Atom and neovim integration
 * Atom go definition, highlight, and attribute
 * Atom capacity to query LNAST/Lgraph generated grammar for bit-width. The incremental grammar passed to LNAST, passed to Lgraph,
   and incremental bit-width inference.
+* neovim highlight, indent, fold support
+* Integrate with atom-hide as extra language
+
+
+In addition to the packages, there should be an iterator that use the incremental builder to support incremental changes.
+
+* Generate a lnast out of the tree-sitter pyrope grammar
 
 ## Parallel forward/backward traversal
 
@@ -1011,4 +1018,32 @@ be done to make it more useful.
 * Allow to run a subset of the graph (method based). A method passed to the iterator returns true/false indicating if the node is part of the requested traversal.
 
 Blocks like mockturtle will significantly benefit from such iterator
+
+## unbitwidth Local and Global bitwidth
+
+This pass is needed to create less verbose CHISEL and Pyrope code generation. 
+
+The LGraph can have bitwidth information for each dpin. This is needed for
+Verilog code generation, but not needed for Pyrope or CHISEL.  CHISEL can
+perform local bitwidth inference and Pyrope can perform global bitwidth
+inference.
+
+A new pass should remove redundant bitwidth information. The information is
+redundant because the pass/bitwidth can regenerate it if there is enough
+details. The goal is to create a pass/unbitwidth that removes either local or
+global bitwidth. The information left should be enough for the bitwidth pass to
+regenerate it.
+
+* Local bitwidth: It is possible to leave the bitwidth information in many
+places and it will have the same results, but for CHISEL the inputs should be
+sized. The storage (memories/flops) should have bitwidth when can not be
+inferred from the inputs.
+
+* Global bitwidth: Pyrope bitwidth inference goes across the call hierarchy.
+This means that a module could have no bitwidth information at all. We start
+from the leave nodes. If all the bits can be inferred given the inputs, the
+module should have no bitwidth. In that case the bitwidth can be inferred from
+outside.
+
+
 
