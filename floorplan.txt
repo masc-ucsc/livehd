@@ -1,0 +1,178 @@
+# FloorPlan output from ArchFP: UVA's Rapid Prototyping FloorPlanner.
+# Formatted for Input to HotSpot.
+# Line Format: <unit-name>\t<width>\t<height>\t<left-x>\t<bottom-y>
+# all dimensions are in meters
+# comment lines begin with a '#'
+# comments and empty lines are ignored
+
+# Start of Cluster1 Layout.
+# Total Cluster Stats: X=0 Y=0 W=30.4959mm H=30.4959mm Area=930mm^2
+# Start of Group1 layout.
+# Total Group Stats: X=0 Y=0 W=30.4959mm H=30.4959mm Area=930mm^2
+# Start of Grid1 Layout.  There are 6 components in a 6 by 1 grid.
+# Total Grid Stats: X=0 Y=0 W=30.4959mm H=1.96748mm Area=60mm^2
+leaf11	0.00508265	0.00196748	0	0
+leaf12	0.00508265	0.00196748	0.00508265	0
+leaf13	0.00508265	0.00196748	0.0101653	0
+leaf14	0.00508265	0.00196748	0.015248	0
+leaf15	0.00508265	0.00196748	0.0203306	0
+leaf16	0.00508265	0.00196748	0.0254133	0
+# End of Grid1 Layout.
+# Start of Grid2 Layout.  There are 6 components in a 1 by 6 grid.
+# Total Grid Stats: X=0 Y=1.96748 W=2.10317mm H=28.5284mm Area=60mm^2
+leaf17	0.00210317	0.00475474	0	0.00196748
+leaf18	0.00210317	0.00475474	0	0.00672221
+leaf19	0.00210317	0.00475474	0	0.011477
+leaf110	0.00210317	0.00475474	0	0.0162317
+leaf111	0.00210317	0.00475474	0	0.0209864
+leaf112	0.00210317	0.00475474	0	0.0257412
+# End of Grid2 Layout.
+# Start of Grid3 Layout.  There are 6 components in a 6 by 1 grid.
+# Total Grid Stats: X=2.10317 Y=1.96748 W=28.3927mm H=2.11322mm Area=60mm^2
+leaf113	0.00473212	0.00211322	0.00210317	0.00196748
+leaf114	0.00473212	0.00211322	0.00683529	0.00196748
+leaf115	0.00473212	0.00211322	0.0115674	0.00196748
+leaf116	0.00473212	0.00211322	0.0162995	0.00196748
+leaf117	0.00473212	0.00211322	0.0210317	0.00196748
+leaf118	0.00473212	0.00211322	0.0257638	0.00196748
+# End of Grid3 Layout.
+# Start of Grid4 Layout.  There are 6 components in a 1 by 6 grid.
+# Total Grid Stats: X=2.10317 Y=4.08069 W=2.27142mm H=26.4152mm Area=60mm^2
+leaf119	0.00227142	0.00440253	0.00210317	0.00408069
+leaf120	0.00227142	0.00440253	0.00210317	0.00848323
+leaf121	0.00227142	0.00440253	0.00210317	0.0128858
+leaf122	0.00227142	0.00440253	0.00210317	0.0172883
+leaf123	0.00227142	0.00440253	0.00210317	0.0216908
+leaf124	0.00227142	0.00440253	0.00210317	0.0260934
+# End of Grid4 Layout.
+# Start of Grid5 Layout.  There are 6 components in a 6 by 1 grid.
+# Total Grid Stats: X=4.37458 Y=4.08069 W=26.1213mm H=2.29697mm Area=60mm^2
+leaf125	0.00435355	0.00229697	0.00437458	0.00408069
+leaf126	0.00435355	0.00229697	0.00872814	0.00408069
+leaf127	0.00435355	0.00229697	0.0130817	0.00408069
+leaf128	0.00435355	0.00229697	0.0174352	0.00408069
+leaf129	0.00435355	0.00229697	0.0217888	0.00408069
+leaf130	0.00435355	0.00229697	0.0261423	0.00408069
+# End of Grid5 Layout.
+# Start of Grid6 Layout.  There are 6 components in a 1 by 6 grid.
+# Total Grid Stats: X=4.37458 Y=6.37767 W=2.48774mm H=24.1182mm Area=60mm^2
+leaf131	0.00248774	0.00401971	0.00437458	0.00637767
+leaf132	0.00248774	0.00401971	0.00437458	0.0103974
+leaf133	0.00248774	0.00401971	0.00437458	0.0144171
+leaf134	0.00248774	0.00401971	0.00437458	0.0184368
+leaf135	0.00248774	0.00401971	0.00437458	0.0224565
+leaf136	0.00248774	0.00401971	0.00437458	0.0264762
+# End of Grid6 Layout.
+# Start of Grid7 Layout.  There are 3 components in a 3 by 1 grid.
+# Total Grid Stats: X=6.86233 Y=6.37767 W=23.6336mm H=1.26938mm Area=30mm^2
+leaf31	0.00787786	0.00126938	0.00686233	0.00637767
+leaf32	0.00787786	0.00126938	0.0147402	0.00637767
+leaf33	0.00787786	0.00126938	0.022618	0.00637767
+# End of Grid7 Layout.
+# Start of Grid8 Layout.  There are 3 components in a 1 by 3 grid.
+# Total Grid Stats: X=6.86233 Y=7.64705 W=1.31298mm H=22.8489mm Area=30mm^2
+leaf41	0.00131298	0.00761628	0.00686233	0.00764705
+leaf42	0.00131298	0.00761628	0.00686233	0.0152633
+leaf43	0.00131298	0.00761628	0.00686233	0.0228796
+# End of Grid8 Layout.
+# Start of Grid9 Layout.  There are 3 components in a 3 by 1 grid.
+# Total Grid Stats: X=8.17531 Y=7.64705 W=22.3206mm H=1.34405mm Area=30mm^2
+leaf21	0.0074402	0.00134405	0.00817531	0.00764705
+leaf22	0.0074402	0.00134405	0.0156155	0.00764705
+leaf23	0.0074402	0.00134405	0.0230557	0.00764705
+# End of Grid9 Layout.
+# Start of Grid10 Layout.  There are 3 components in a 1 by 3 grid.
+# Total Grid Stats: X=8.17531 Y=8.9911 W=1.39504mm H=21.5048mm Area=30mm^2
+leafout1	0.00139504	0.00716827	0.00817531	0.0089911
+leafout2	0.00139504	0.00716827	0.00817531	0.0161594
+leafout3	0.00139504	0.00716827	0.00817531	0.0233276
+# End of Grid10 Layout.
+# Start of Grid11 Layout.  There are 3 components in a 3 by 1 grid.
+# Total Grid Stats: X=9.57034 Y=8.9911 W=20.9256mm H=1.43365mm Area=30mm^2
+leaf24	0.00697519	0.00143365	0.00957034	0.0089911
+leaf25	0.00697519	0.00143365	0.0165455	0.0089911
+leaf26	0.00697519	0.00143365	0.0235207	0.0089911
+# End of Grid11 Layout.
+# Start of Grid12 Layout.  There are 3 components in a 1 by 3 grid.
+# Total Grid Stats: X=9.57034 Y=10.4248 W=1.49468mm H=20.0711mm Area=30mm^2
+leafout4	0.00149468	0.00669038	0.00957034	0.0104248
+leafout5	0.00149468	0.00669038	0.00957034	0.0171151
+leafout6	0.00149468	0.00669038	0.00957034	0.0238055
+# End of Grid12 Layout.
+# Start of Grid13 Layout.  There are 3 components in a 3 by 1 grid.
+# Total Grid Stats: X=11.065 Y=10.4248 W=19.4309mm H=1.54393mm Area=30mm^2
+leaf71	0.00647696	0.00154393	0.011065	0.0104248
+leaf72	0.00647696	0.00154393	0.017542	0.0104248
+leaf73	0.00647696	0.00154393	0.0240189	0.0104248
+# End of Grid13 Layout.
+# Start of Grid14 Layout.  There are 3 components in a 1 by 3 grid.
+# Total Grid Stats: X=11.065 Y=11.9687 W=1.61924mm H=18.5272mm Area=30mm^2
+leaf34	0.00161924	0.00617574	0.011065	0.0119687
+leaf35	0.00161924	0.00617574	0.011065	0.0181444
+leaf36	0.00161924	0.00617574	0.011065	0.0243202
+# End of Grid14 Layout.
+# Start of Grid15 Layout.  There are 3 components in a 3 by 1 grid.
+# Total Grid Stats: X=12.6843 Y=11.9687 W=17.8116mm H=1.68429mm Area=30mm^2
+leaf44	0.00593721	0.00168429	0.0126843	0.0119687
+leaf45	0.00593721	0.00168429	0.0186215	0.0119687
+leaf46	0.00593721	0.00168429	0.0245587	0.0119687
+# End of Grid15 Layout.
+# Start of Grid16 Layout.  There are 3 components in a 1 by 3 grid.
+# Total Grid Stats: X=12.6843 Y=13.653 W=1.78116mm H=16.8429mm Area=30mm^2
+leaf51	0.00178116	0.00561431	0.0126843	0.013653
+leaf52	0.00178116	0.00561431	0.0126843	0.0192673
+leaf53	0.00178116	0.00561431	0.0126843	0.0248816
+# End of Grid16 Layout.
+# Start of Grid17 Layout.  There are 3 components in a 3 by 1 grid.
+# Total Grid Stats: X=14.4654 Y=13.653 W=16.0305mm H=1.87144mm Area=30mm^2
+leaf74	0.00534349	0.00187144	0.0144654	0.013653
+leaf75	0.00534349	0.00187144	0.0198089	0.013653
+leaf76	0.00534349	0.00187144	0.0251524	0.013653
+# End of Grid17 Layout.
+# Start of Grid18 Layout.  There are 3 components in a 1 by 3 grid.
+# Total Grid Stats: X=14.4654 Y=15.5244 W=2.00381mm H=14.9715mm Area=30mm^2
+leafout7	0.00200381	0.0049905	0.0144654	0.0155244
+leafout8	0.00200381	0.0049905	0.0144654	0.0205149
+leafout9	0.00200381	0.0049905	0.0144654	0.0255054
+# End of Grid18 Layout.
+# Start of Grid19 Layout.  There are 3 components in a 3 by 1 grid.
+# Total Grid Stats: X=16.4692 Y=15.5244 W=14.0267mm H=2.13878mm Area=30mm^2
+leaf27	0.00467555	0.00213878	0.0164692	0.0155244
+leaf28	0.00467555	0.00213878	0.0211448	0.0155244
+leaf29	0.00467555	0.00213878	0.0258203	0.0155244
+# End of Grid19 Layout.
+# Start of Grid20 Layout.  There are 3 components in a 1 by 3 grid.
+# Total Grid Stats: X=16.4692 Y=17.6632 W=2.33778mm H=12.8327mm Area=30mm^2
+leaf54	0.00233778	0.00427757	0.0164692	0.0176632
+leaf55	0.00233778	0.00427757	0.0164692	0.0219408
+leaf56	0.00233778	0.00427757	0.0164692	0.0262183
+# End of Grid20 Layout.
+# Start of Grid21 Layout.  There are 3 components in a 3 by 1 grid.
+# Total Grid Stats: X=18.807 Y=17.6632 W=11.6889mm H=2.56654mm Area=30mm^2
+leaf77	0.0038963	0.00256654	0.018807	0.0176632
+leaf78	0.0038963	0.00256654	0.0227033	0.0176632
+leaf79	0.0038963	0.00256654	0.0265996	0.0176632
+# End of Grid21 Layout.
+# Start of Grid22 Layout.  There are 3 components in a 1 by 3 grid.
+# Total Grid Stats: X=18.807 Y=20.2297 W=2.92222mm H=10.2662mm Area=30mm^2
+leaf57	0.00292222	0.00342205	0.018807	0.0202297
+leaf58	0.00292222	0.00342205	0.018807	0.0236518
+leaf59	0.00292222	0.00342205	0.018807	0.0270738
+# End of Grid22 Layout.
+# Start of Grid23 Layout.  There are 3 components in a 3 by 1 grid.
+# Total Grid Stats: X=21.7292 Y=20.2297 W=8.76666mm H=3.42205mm Area=30mm^2
+leaf37	0.00292222	0.00342205	0.0217292	0.0202297
+leaf38	0.00292222	0.00342205	0.0246515	0.0202297
+leaf39	0.00292222	0.00342205	0.0275737	0.0202297
+# End of Grid23 Layout.
+# Start of Grid24 Layout.  There are 3 components in a 1 by 3 grid.
+# Total Grid Stats: X=21.7292 Y=23.6518 W=4.38333mm H=6.84411mm Area=30mm^2
+leaf47	0.00438333	0.00228137	0.0217292	0.0236518
+leaf48	0.00438333	0.00228137	0.0217292	0.0259332
+leaf49	0.00438333	0.00228137	0.0217292	0.0282145
+# End of Grid24 Layout.
+leaf61	0.00438333	0.00228137	0.0261126	0.0236518
+mid41	0.00438333	0.00228137	0.0261126	0.0259332
+leaf81	0.00438333	0.00228137	0.0261126	0.0282145
+# End of Group1 Layout.
+# End of Cluster1 Layout.
