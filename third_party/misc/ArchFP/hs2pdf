@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+
+tofig.pl -a 1.0 -f 22 $1 | fig2dev -L ps | ps2pdf -dEPSCrop - $1.pdf

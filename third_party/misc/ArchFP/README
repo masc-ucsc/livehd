@@ -1,0 +1,3 @@
+This program is included for the floorplanner pass (fplan) of livehd.
+
+Non-source files (including the makefile) are kept, but not used.
