@@ -1629,7 +1629,8 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
         idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
       }
       lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs)));
-      auto str_val = absl::StrCat(expr.uint_literal().value().value(), "u");
+      /* auto str_val = absl::StrCat(expr.uint_literal().value().value(), "u"); */
+      auto str_val = expr.uint_literal().value().value();
       lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(str_val)));
       break;
     }
@@ -1641,7 +1642,8 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
         idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
       }
       lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs)));
-      auto str_val = absl::StrCat(expr.sint_literal().value().value(), "s");
+      /* auto str_val = absl::StrCat(expr.sint_literal().value().value(), "s"); */
+      auto str_val = expr.sint_literal().value().value();
       lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(str_val)));
       break;
     }

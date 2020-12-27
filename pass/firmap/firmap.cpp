@@ -21,9 +21,12 @@ LGraph* Firmap::do_firrtl_mapping(LGraph *lg) {
 /*   } */
 
   auto lg_name = lg->get_name();
-  auto pos = lg_name.find("_firrtl");
+  /* auto pos = lg_name.find("__firrtl_"); */
   std::string  lg_source{lg->get_library().get_source(lg->get_lgid())}; // string, create can free it
-  LGraph *new_lg = LGraph::create(lg->get_path(), lg_name.substr(0, pos), lg_source);
+  /* LGraph *new_lg = LGraph::create(lg->get_path(), lg_name.substr(0, pos), lg_source); */
+  LGraph *new_lg = LGraph::create(lg->get_path(), lg_name.substr(9), lg_source);
+
+
 
   // clone graph input
   lg->each_graph_input([new_lg, this](Node_pin &dpin) {
@@ -46,7 +49,7 @@ LGraph* Firmap::do_firrtl_mapping(LGraph *lg) {
     fmt::print("{}\n", node.debug_name());
     if (op == Ntype_op::Sub) {
       auto subname = node.get_type_sub_node().get_name();
-      if ( subname.substr(0,5) == "__fir")
+      if ( subname.substr(0,6) == "__fir_")
         map_fir_ops(node, subname, new_lg);
       else
         clone_subgraph_node(node, new_lg);
@@ -809,11 +812,9 @@ void Firmap::clone_subgraph_node(Node &old_node, LGraph *new_lg) {
   Sub_node* new_sub;
   Sub_node* old_sub = old_node.get_class_lgraph()->ref_self_sub_node();
 
-  // get rid of _firrtl postfix to get correct new_subg_name
-  auto tmp_new_subg_name = old_node.get_type_sub_node().get_name();
-  I(tmp_new_subg_name.find("_firrtl") != std::string::npos);
-  auto pos = tmp_new_subg_name.find("_firrtl");
-  auto new_subg_name = tmp_new_subg_name.substr(0, pos);
+  // get rid of _firrtl_ prefix to get correct new_subg_name
+  I(old_node.get_type_sub_node().get_name().substr(0,9) == "__firrtl_");
+  auto new_subg_name = old_node.get_type_sub_node().get_name().substr(9);
 
 
   // create new_lg subgraph node and its affiliate Sub_node

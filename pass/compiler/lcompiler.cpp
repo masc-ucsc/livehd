@@ -64,16 +64,16 @@ void Lcompiler::add_firrtl_thread(std::shared_ptr<Lnast> ln) {
   Graphviz gv(true, false, odir); 
   gviz ? gv.do_from_lnast(ln, "raw") : void(); 
   
-  fmt::print("---------------- Firrtl_Protobuf -> LNAST-SSA ({}) ------- (LN-1)\n", absl::StrCat(ln->get_top_module_name(), "_firrtl"));
+  fmt::print("---------------- Firrtl_Protobuf -> LNAST-SSA ({}) ------- (LN-1)\n", absl::StrCat("__firrtl_", ln->get_top_module_name()));
   ln->ssa_trans();
   gviz ? gv.do_from_lnast(ln) : void();
 
 
-  fmt::print("---------------- LNAST-> LGraph ({}) --------------------- (LN-2)\n", absl::StrCat(ln->get_top_module_name(), "_firrtl"));
+  fmt::print("---------------- LNAST-> LGraph ({}) --------------------- (LN-2)\n", absl::StrCat("__firrtl_", ln->get_top_module_name()));
   // note: since the first generated lgraphs are firrtl_op_lgs, they will be removed in the end,
   // we should keep the original module_name for the firrtl_op mapped lgraph, so here I attached
-  // "_firrtl" postfix for the firrtl_op_lgs
-  auto module_name = absl::StrCat(ln->get_top_module_name(), "_firrtl");
+  // "_firrtl_" prefix for the firrtl_op_lgs
+  auto module_name = absl::StrCat("__firrtl_", ln->get_top_module_name());
   Lnast_tolg ln2lg(module_name, path);
 
   const auto lnidx_top = ln->get_root();
@@ -123,7 +123,7 @@ void Lcompiler::global_firrtl_bits_analysis_map() {
 
   auto lgcnt = 0;
   auto hit = false;
-  auto top_name_before_mapping = absl::StrCat(top, "_firrtl");
+  auto top_name_before_mapping = absl::StrCat("__firrtl_", top);
 
   // hierarchical traversal
   for (auto &lg : lgs) {

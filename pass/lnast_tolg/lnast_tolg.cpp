@@ -1389,7 +1389,8 @@ void Lnast_tolg::process_firrtl_op_connection(LGraph *lg, const Lnast_nid &lnidx
 
 
 void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc) {
-  if (lnast->get_vname(lnidx_fc).substr(0,5) == "__fir") {
+  auto tmp_name = lnast->get_vname(lnidx_fc);
+  if (tmp_name.substr(0,6) == "__fir_") {
     process_firrtl_op_connection(lg, lnidx_fc);
     return;
   }
@@ -1400,8 +1401,8 @@ void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc)
   auto arg_tup_name  = lnast->get_sname(lnast->get_last_child(lnidx_fc));
 
   std::string func_name = (std::string)func_name_tmp;
-  if (lg->get_name().find("_firrtl") != std::string::npos) 
-    func_name = absl::StrCat(func_name_tmp, "_firrtl");
+  if (lg->get_name().find("__firrtl_") != std::string::npos) 
+    func_name = absl::StrCat("__firrtl_", func_name_tmp);
   
   auto *library = Graph_library::instance(path);
   if (name2dpin.find(func_name) == name2dpin.end()) {
@@ -1567,8 +1568,14 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(LGraph *lg) {
   absl::flat_hash_map<std::string_view, Node_pin> vname2dpin; // pyrope variable -> dpin with the largest ssa var subscription
   for (auto node: lg->forward()) {
     auto ntype = node.get_type_op();
-    if (ntype == Ntype_op::Sub && node.get_type_sub_node().get_name().substr(0,5) != "__fir") 
-      continue;
+
+    if (ntype == Ntype_op::Sub) {
+      if (node.get_type_sub_node().get_name().substr(0,9) == "__firrtl_")
+        continue;
+
+      if (node.get_type_sub_node().get_name().substr(0,6) != "__fir_")
+        continue;
+    }
 
     auto dpin  = node.get_driver_pin("Y");
 
