@@ -255,10 +255,17 @@ Dependence: lnast_tolg must be completed first
 Main features:
 
 * Pyrope tree-sitter grammar
-* Atom integration
+* Atom and neovim integration
 * Atom go definition, highlight, and attribute
 * Atom capacity to query LNAST/Lgraph generated grammar for bit-width. The incremental grammar passed to LNAST, passed to Lgraph,
   and incremental bit-width inference.
+* neovim highlight, indent, fold support
+* Integrate with atom-hide as extra language
+
+
+In addition to the packages, there should be an iterator that use the incremental builder to support incremental changes.
+
+* Generate a lnast out of the tree-sitter pyrope grammar
 
 ## Parallel forward/backward traversal
 
