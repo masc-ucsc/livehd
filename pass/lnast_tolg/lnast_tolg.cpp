@@ -169,8 +169,6 @@ void Lnast_tolg::process_ast_phi_op(LGraph *lg, const Lnast_nid &lnidx_phi) {
       reg_node = reg_qpin.get_node();
     }
 
-
-
     // (2) remove the previous D-pin edge from the #reg
     I(reg_node.setup_sink_pin("din").inp_edges().size() <= 1);
     if (reg_node.setup_sink_pin("din").inp_edges().size() == 1) {
@@ -833,7 +831,7 @@ Node Lnast_tolg::setup_node_opr_and_lhs(LGraph *lg, const Lnast_nid &lnidx_opr, 
   bool is_new_var_chain = check_new_var_chain(lnidx_opr);
 
   //when #reg_0 at lhs, the register has not been created before, create it
-  Node_pin reg_data_pin;
+  Node_pin reg_din_spin;
   Node_pin reg_qpin;
   if (is_register(lhs_vname)) {
     if (lnast->get_data(lhs).subs == 0)
@@ -843,10 +841,15 @@ Node Lnast_tolg::setup_node_opr_and_lhs(LGraph *lg, const Lnast_nid &lnidx_opr, 
 
     if (reg_qpin.get_node().is_type_attr()) {
       auto real_reg_node = reg_qpin.get_node().setup_sink_pin("name").get_driver_node();
-      reg_data_pin = real_reg_node.setup_sink_pin("din");
+      reg_din_spin = real_reg_node.setup_sink_pin("din");
     } else {
       I(reg_qpin.get_node().is_type_flop());
-      reg_data_pin = reg_qpin.get_node().setup_sink_pin("din");
+      reg_din_spin = reg_qpin.get_node().setup_sink_pin("din");
+    }
+
+    I(reg_din_spin.inp_edges().size() <= 1);
+    if (reg_din_spin.inp_edges().size() == 1) {
+      reg_din_spin.inp_edges().begin()->del_edge();
     }
   }
 
@@ -856,8 +859,8 @@ Node Lnast_tolg::setup_node_opr_and_lhs(LGraph *lg, const Lnast_nid &lnidx_opr, 
     lg_opr_node.get_driver_pin("Y").set_name(lhs_name);
     setup_dpin_ssa(name2dpin[lhs_name], lhs_vname, lnast->get_subs(lhs));
 
-    if (is_register(lhs_name))
-      lg->add_edge(name2dpin[lhs_name], reg_data_pin);
+    if (is_register(lhs_name)) 
+      lg->add_edge(name2dpin[lhs_name], reg_din_spin);
 
     return lg_opr_node;
   }
@@ -872,13 +875,17 @@ Node Lnast_tolg::setup_node_opr_and_lhs(LGraph *lg, const Lnast_nid &lnidx_opr, 
     auto aset_vn_dpin = lg_opr_node.get_driver_pin("Y");
     lg->add_edge(aset_vn_dpin, aset_vn_spin);
 
-    name2dpin[lhs_name] = aset_node.setup_driver_pin("Y"); // dummy_attr_set node now represent the latest variable
+    if (!from_fir_op)
+      name2dpin[lhs_name] = aset_node.setup_driver_pin("Y"); // dummy_attr_set node now represent the latest variable
+    else 
+      name2dpin[lhs_name] = lg_opr_node.setup_driver_pin("Y"); 
+
     lg_opr_node.get_driver_pin("Y").set_name(lhs_name);
     aset_node.get_driver_pin("Y").set_name(lhs_name);
     setup_dpin_ssa(name2dpin[lhs_name], lhs_vname, lnast->get_subs(lhs));
     vname2attr_dpin[lhs_vname] = aset_node.setup_driver_pin("chain");
     if (is_register(lhs_name))
-      lg->add_edge(name2dpin[lhs_name], reg_data_pin);
+      lg->add_edge(name2dpin[lhs_name], reg_din_spin);
   }
   return lg_opr_node;
 }
@@ -1365,17 +1372,12 @@ void Lnast_tolg::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_v
 }
 
 void Lnast_tolg::process_firrtl_op_connection(LGraph *lg, const Lnast_nid &lnidx_fc) {
-  auto op = lnast->get_vname(lnidx_fc);
   Node fc_node;
-  fc_node = lg->create_node_sub(op);
   int i = 0;
   for (const auto& child : lnast->children(lnidx_fc)) {
     auto name = lnast->get_sname(child);
     if (child == lnast->get_first_child(lnidx_fc)) {
-      /* fc_node = setup_node_opr_and_lhs(lg, lnidx_fc, true); */
-      fc_node.setup_driver_pin("Y").set_name(name);
-      name2dpin[name] = fc_node.setup_driver_pin("Y");
-      setup_dpin_ssa(name2dpin[name], lnast->get_vname(child), lnast->get_subs(child));
+      fc_node = setup_node_opr_and_lhs(lg, lnidx_fc, true);
       i++;
       continue;
     } 
