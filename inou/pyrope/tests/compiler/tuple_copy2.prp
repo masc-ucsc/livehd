@@ -1,4 +1,4 @@
 a = $inp
-tmp = (a.foo & 0xfs4) + (a.bar & 0xFFu8)
+tmp = (a.foo & 0xf) + (a.bar & 0xFF)
 %out = tmp
 
