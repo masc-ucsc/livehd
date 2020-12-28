@@ -21,7 +21,7 @@ PlusAnd MaxN ByteSelector Darken FullAdder HiLoMultiplier LogShifter SimpleALU
 Mul VecShiftRegisterParam VecShiftRegisterSimple SimpleBitOps AddNot' 
 
 pts='BundleConnect'
-#pts='SubModule'
+# pts='SubModule'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -100,10 +100,10 @@ firrtl_test() {
     fi
   done
 
-  rm -f *.v
-  rm -f *.dot
-  rm -f lgcheck*
-  rm -rf lgdb
+  # rm -f *.v
+  # rm -f *.dot
+  # rm -f lgcheck*
+  # rm -rf lgdb
 }
 
 firrtl_test "$pts"

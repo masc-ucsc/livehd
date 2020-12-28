@@ -837,14 +837,10 @@ void Firmap::clone_subgraph_node(Node &old_node, LGraph *new_lg) {
       new_node_subg.setup_sink_pin(old_io_name);
 
       // clone the old_sub input edges
-      for (auto e : old_node.inp_edges()) {
+      for (auto e : old_node.setup_sink_pin(old_io_name).inp_edges()) {
         if (o2n_dpin.find(e.driver) == o2n_dpin.end())
           Pass::error("{} cannot find corresponding dpin in the new lgraph", e.driver.debug_name());
 
-        /* fmt::print("e.driver:{}\n", e.driver.debug_name()); */
-        /* fmt::print("o2n_dpin[e.driver]:{}\n", o2n_dpin[e.driver].debug_name()); */
-        /* fmt::print("new_node_subg:{}\n", new_node_subg.debug_name()); */
-        /* fmt::print("\n"); */
         o2n_dpin[e.driver].connect_sink(new_node_subg.setup_sink_pin(old_io_name));
       }
       continue;
