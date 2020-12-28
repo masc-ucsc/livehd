@@ -20,7 +20,7 @@ pts='Test1 Test2 Test3 Test6 TrivialAdd NotAnd Trivial Tail TrivialArith Shifts
 PlusAnd MaxN ByteSelector Darken FullAdder HiLoMultiplier LogShifter SimpleALU
 Mul VecShiftRegisterParam VecShiftRegisterSimple SimpleBitOps AddNot' 
 
-pts='BundleConnect'
+pts='Decrementer'
 # pts='SubModule'
 
 LGSHELL=./bazel-bin/main/lgshell

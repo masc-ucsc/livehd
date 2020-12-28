@@ -1,5 +1,6 @@
---- passes/equiv/equiv_make.cc	2020-09-25 20:47:28.789020647 -0700
-+++ passes/equiv/equiv_make.cc	2020-12-15 23:45:48.942932491 -0800
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' /home/renau/projs/synth/yosys/passes/equiv/equiv_make.cc ./passes/equiv/equiv_make.cc
+--- ./passes/equiv/equiv_make.cc	2020-12-27 20:18:02.461496713 -0800
++++ ./passes/equiv/equiv_make.cc	2020-12-16 23:12:16.453932687 -0800
 @@ -149,10 +149,22 @@
  		SigMap rd_signal_map;
  
@@ -83,3 +84,32 @@
  				Wire *wire = equiv_mod->addWire(id, gold_wire->width);
  				wire->port_output = true;
  				gold_wire->port_input = false;
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' /home/renau/projs/synth/yosys/passes/sat/miter.cc ./passes/sat/miter.cc
+--- ./passes/sat/miter.cc	2020-12-27 20:18:02.469496574 -0800
++++ ./passes/sat/miter.cc	2020-12-27 20:15:13.096322079 -0800
+@@ -84,12 +84,10 @@
+ 			goto match_gold_port_error;
+ 		if (gold_wire->port_input != gate_wire->port_input)
+ 			goto match_gold_port_error;
+ 		if (gold_wire->port_output != gate_wire->port_output)
+ 			goto match_gold_port_error;
+-		if (gold_wire->width != gate_wire->width)
+-			goto match_gold_port_error;
+ 		continue;
+ 	match_gold_port_error:
+ 		log_cmd_error("No matching port in gate module was found for %s!\n", gold_wire->name.c_str());
+ 	}
+ 
+@@ -101,12 +99,10 @@
+ 			goto match_gate_port_error;
+ 		if (gate_wire->port_input != gold_wire->port_input)
+ 			goto match_gate_port_error;
+ 		if (gate_wire->port_output != gold_wire->port_output)
+ 			goto match_gate_port_error;
+-		if (gate_wire->width != gold_wire->width)
+-			goto match_gate_port_error;
+ 		continue;
+ 	match_gate_port_error:
+ 		log_cmd_error("No matching port in gold module was found for %s!\n", gate_wire->name.c_str());
+ 	}
+ 
