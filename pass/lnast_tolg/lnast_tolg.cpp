@@ -229,16 +229,14 @@ void Lnast_tolg::process_ast_nary_op(LGraph *lg, const Lnast_nid &lnidx_opr) {
   auto opr_node = setup_node_opr_and_lhs(lg, lnidx_opr);
 
   std::vector<Node_pin> opds;
-  Node_pin opd;
   for (const auto &opr_child : lnast->children(lnidx_opr)) {
     if (opr_child == lnast->get_first_child(lnidx_opr))
       continue; // the lhs has been handled at setup_node_opr_and_lhs();
 
-    opd = setup_ref_node_dpin(lg, opr_child);
-    if (opd.is_invalid()) {
+    auto opd = setup_ref_node_dpin(lg, opr_child);
+    if (opd.is_invalid()) 
       Pass::error("for operator node {}, undefined variable {} is used!\n", opr_node.debug_name(), lnast->get_sname(opr_child));
-    }
-      
+    
     opds.emplace_back(opd);
   }
   nary_node_rhs_connections(lg, opr_node, opds, lnast->get_type(lnidx_opr).is_minus());
@@ -819,13 +817,19 @@ bool Lnast_tolg::check_new_var_chain(const Lnast_nid &lnidx_opr) {
 
 
 // for operator, we must create a new node and dpin as it represents a new gate in the netlist
-Node Lnast_tolg::setup_node_opr_and_lhs(LGraph *lg, const Lnast_nid &lnidx_opr) {
+Node Lnast_tolg::setup_node_opr_and_lhs(LGraph *lg, const Lnast_nid &lnidx_opr, bool from_fir_op) {
   auto lhs       = lnast->get_first_child(lnidx_opr);
   auto lhs_name  = lnast->get_sname(lhs);
   auto lhs_vname = lnast->get_vname(lhs);
 
-  auto lg_ntype_op = decode_lnast_op(lnidx_opr);
-  auto lg_opr_node = lg->create_node(lg_ntype_op);
+  Ntype_op lg_ntype_op;
+  Node lg_opr_node;
+  if (from_fir_op) {
+    lg_opr_node = lg->create_node_sub(lnast->get_vname(lnidx_opr));
+  } else {
+    lg_ntype_op = decode_lnast_op(lnidx_opr);
+    lg_opr_node = lg->create_node(lg_ntype_op);
+  }
   bool is_new_var_chain = check_new_var_chain(lnidx_opr);
 
   //when #reg_0 at lhs, the register has not been created before, create it
@@ -848,8 +852,8 @@ Node Lnast_tolg::setup_node_opr_and_lhs(LGraph *lg, const Lnast_nid &lnidx_opr) 
 
 
   if (!is_new_var_chain) {
-    name2dpin[lhs_name] = lg_opr_node.setup_driver_pin();
-    lg_opr_node.get_driver_pin().set_name(lhs_name);
+    name2dpin[lhs_name] = lg_opr_node.setup_driver_pin("Y");
+    lg_opr_node.get_driver_pin("Y").set_name(lhs_name);
     setup_dpin_ssa(name2dpin[lhs_name], lhs_vname, lnast->get_subs(lhs));
 
     if (is_register(lhs_name))
@@ -865,13 +869,12 @@ Node Lnast_tolg::setup_node_opr_and_lhs(LGraph *lg, const Lnast_nid &lnidx_opr) 
     lg->add_edge(aset_ancestor_dpin, aset_chain_spin);
 
     auto aset_vn_spin = aset_node.setup_sink_pin("name");
-    auto aset_vn_dpin = lg_opr_node.get_driver_pin();
+    auto aset_vn_dpin = lg_opr_node.get_driver_pin("Y");
     lg->add_edge(aset_vn_dpin, aset_vn_spin);
 
     name2dpin[lhs_name] = aset_node.setup_driver_pin("Y"); // dummy_attr_set node now represent the latest variable
-    lg_opr_node.get_driver_pin().set_name(lhs_name);
+    lg_opr_node.get_driver_pin("Y").set_name(lhs_name);
     aset_node.get_driver_pin("Y").set_name(lhs_name);
-    //aset_node.get_driver_pin(1).set_name(lhs_name); // for debug purpose
     setup_dpin_ssa(name2dpin[lhs_name], lhs_vname, lnast->get_subs(lhs));
     vname2attr_dpin[lhs_vname] = aset_node.setup_driver_pin("chain");
     if (is_register(lhs_name))
@@ -1369,6 +1372,7 @@ void Lnast_tolg::process_firrtl_op_connection(LGraph *lg, const Lnast_nid &lnidx
   for (const auto& child : lnast->children(lnidx_fc)) {
     auto name = lnast->get_sname(child);
     if (child == lnast->get_first_child(lnidx_fc)) {
+      /* fc_node = setup_node_opr_and_lhs(lg, lnidx_fc, true); */
       fc_node.setup_driver_pin("Y").set_name(name);
       name2dpin[name] = fc_node.setup_driver_pin("Y");
       setup_dpin_ssa(name2dpin[name], lnast->get_vname(child), lnast->get_subs(child));

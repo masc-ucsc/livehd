@@ -55,7 +55,7 @@ protected:
   void setup_lgraph_ios_and_final_var_name(LGraph *lg);
 
 
-  Node         setup_node_opr_and_lhs    (LGraph *lg, const Lnast_nid &lnidx_opr);
+  Node         setup_node_opr_and_lhs    (LGraph *lg, const Lnast_nid &lnidx_opr, bool from_fir_op = false);
   Node_pin     setup_tuple_assignment    (LGraph *lg, const Lnast_nid &lnidx_opr);
   Node_pin     setup_node_assign_and_lhs (LGraph *lg, const Lnast_nid &lnidx_opr);
   Node_pin     setup_ref_node_dpin       (LGraph *lg, const Lnast_nid &lnidx, 
