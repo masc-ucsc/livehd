@@ -100,10 +100,10 @@ firrtl_test() {
     fi
   done
 
-  # rm -f *.v
-  # rm -f *.dot
-  # rm -f lgcheck*
-  # rm -rf lgdb
+  rm -f *.v
+  rm -f *.dot
+  rm -f lgcheck*
+  rm -rf lgdb
 }
 
 firrtl_test "$pts"
