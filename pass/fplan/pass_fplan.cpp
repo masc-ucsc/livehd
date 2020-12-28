@@ -28,17 +28,26 @@ Pass_fplan::Pass_fplan(const Eprp_var& var) : Pass("pass.fplan", var) {
   root_lg = var.lgs[0];
 
   if (var.get("algorithm") == "archfp") {
-    archfp_driver ad;
     if (var.get("hierarchical") == "true") {
-      ad.load_hier_lg(root_lg, path);
+      lg_hier_floorp hfp;
+      hfp.load_lg(root_lg, path);
+      hfp.create_floorplan("hier_floorplan.txt");
     } else {
-      ad.load_flat_lg(root_lg, path);
+      lg_flat_floorp hfp;
+      hfp.load_lg(root_lg, path);
+      hfp.create_floorplan("flat_floorplan.txt");
     }
 
-    ad.create_floorplan("floorplan.txt");
   } else {
     fmt::print("algorithm not implemented!\n");
   }
+}
+
+void Pass_fplan::analyze_floorplan(const std::string_view filename) {
+  // things to record / dump:
+  // 1. number of nodes
+  // 2. HPWL
+  // 3. ??
 }
 
 void Pass_fplan::pass(Eprp_var& var) {

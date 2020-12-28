@@ -3,32 +3,34 @@
 #include <memory>
 #include <string_view>
 
+#include "absl/container/flat_hash_map.h"
+#include "floorplan.hpp"
 #include "lgraph.hpp"
 
-#include "floorplan.hpp"
-
-class archfp_driver {
+class floorplanner {
 public:
-  void load_hier_lg(LGraph* root, const std::string_view lgdb_path);
-  void load_flat_lg(LGraph* root, const std::string_view lgdb_path);
 
+  virtual void load_lg(LGraph* root, const std::string_view lgdb_path) = 0;
+
+  // create a floorplan and dump to file
   void create_floorplan(const std::string_view filename);
 
-private:
+  // TODO: write floorplan back to lgraph subnodes
+  void store_floorplan();
 
+protected:
   LGraph* root_lg;
 
   struct Attr {
     unsigned int count = 0;
-    geogLayout* l = nullptr;
+    std::unique_ptr<geogLayout>  l;
   };
 
   absl::flat_hash_map<LGraph*, Attr> attrs;
 
-  void create_layout(LGraph* lg);
-  void add_layout(LGraph* existing_lg, LGraph* lg);
+  unsigned int get_area(LGraph* lg);
 
-  void load_prep(LGraph* root, const std::string_view lgdb_path);
+  void load_prep_lg(LGraph* root, const std::string_view lgdb_path);
 
   constexpr static bool debug_print = true;
 };

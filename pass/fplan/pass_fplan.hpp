@@ -1,26 +1,22 @@
 #pragma once
 
-#include <functional>
+#include <string_view>
 
-#include "absl/container/flat_hash_map.h"
-#include "lgedgeiter.hpp"
+#include "lg_flat_loader.hpp"
+#include "lg_hier_loader.hpp"
 #include "lgraph.hpp"
-#include "node.hpp"
-#include "node_pin.hpp"
 #include "pass.hpp"
-
-#include "archfp_driver.hpp"
 
 class Pass_fplan : public Pass {
 public:
   Pass_fplan(const Eprp_var& var);
+
+  void analyze_floorplan(const std::string_view filename);
 
   static void setup();
 
   static void pass(Eprp_var& v);
 
 private:
-
-  LGraph* root_lg;  // public for debugging
-
+  LGraph* root_lg;
 };
