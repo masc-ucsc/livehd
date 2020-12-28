@@ -808,13 +808,22 @@ void Firmap::clone_lg_ops_amap(Node &old_node, LGraph *new_lg) {
 
 void Firmap::clone_subgraph_node(Node &old_node, LGraph *new_lg) {
   auto *library = Graph_library::instance(new_lg->get_path());
-  Node new_node_subg;
+  Node      new_node_subg;
   Sub_node* new_sub;
-  Sub_node* old_sub = old_node.get_class_lgraph()->ref_self_sub_node();
+  Sub_node* old_sub;
+
+  auto old_sub_name = old_node.get_type_sub_node().get_name();
+  if (library->has_name(old_sub_name)) {
+    auto lgid = library->get_lgid(old_node.get_type_sub_node().get_name());
+    old_sub   = library->ref_sub(lgid);
+  } else {
+    Pass::error("Global IO connection pass cannot find existing subgraph {} in lgdb\n", old_sub_name);
+    return;
+  }
 
   // get rid of _firrtl_ prefix to get correct new_subg_name
-  I(old_node.get_type_sub_node().get_name().substr(0,9) == "__firrtl_");
-  auto new_subg_name = old_node.get_type_sub_node().get_name().substr(9);
+  I(old_sub_name.substr(0,9) == "__firrtl_");
+  auto new_subg_name = old_sub_name.substr(9);
 
 
   // create new_lg subgraph node and its affiliate Sub_node
@@ -829,40 +838,50 @@ void Firmap::clone_subgraph_node(Node &old_node, LGraph *new_lg) {
 
   // clone all old_sub io to new_sub_io and setup all sink_pins and driver_pins for the new_sub node
   for (const auto *old_io_pin : old_sub->get_io_pins()) {
+    fmt::print("DEBUG3 io_name:{}\n", old_io_pin->name);
     I(!old_io_pin->is_invalid());
     auto old_io_name = old_io_pin->name;
     if (old_io_pin->is_input()) {
-      if (!new_sub->has_pin(old_io_name))
+      Node_pin new_spin;
+      if (!new_sub->has_pin(old_io_name)) {
         new_sub->add_input_pin(old_io_name, Port_invalid);
-      new_node_subg.setup_sink_pin(old_io_name);
-
-      // clone the old_sub input edges
-      for (auto e : old_node.setup_sink_pin(old_io_name).inp_edges()) {
-        if (o2n_dpin.find(e.driver) == o2n_dpin.end())
-          Pass::error("{} cannot find corresponding dpin in the new lgraph", e.driver.debug_name());
-
-        o2n_dpin[e.driver].connect_sink(new_node_subg.setup_sink_pin(old_io_name));
+        new_spin = new_node_subg.setup_sink_pin(old_io_name);
+      } else {
+        new_spin = new_node_subg.setup_sink_pin(old_io_name);
       }
+      
+      // clone the old_sub input edges
+      auto old_spin = old_node.setup_sink_pin(old_io_name);
+      auto old_driver_pin = old_spin.get_driver_pin();
+      if (o2n_dpin.find(old_driver_pin) == o2n_dpin.end())
+        Pass::error("{} cannot find corresponding dpin in the new lgraph", old_driver_pin.debug_name());
+
+      o2n_dpin[old_driver_pin].connect_sink(new_node_subg.setup_sink_pin(old_io_name));
       continue;
     }
 
     // handle old_io_pin->is_output()
-    auto new_dpin = new_node_subg.setup_driver_pin(old_io_name);
-    if (!new_sub->has_pin(old_io_name))
+    I(old_io_pin->is_output());
+    Node_pin new_dpin;
+    if (!new_sub->has_pin(old_io_name)) {
       new_sub->add_output_pin(old_io_name, Port_invalid);
-
-    o2n_dpin.insert_or_assign(old_node.setup_driver_pin(old_io_name), new_dpin);
+      new_dpin = new_node_subg.setup_driver_pin(old_io_name);
+    } else {
+      new_dpin = new_node_subg.setup_driver_pin(old_io_name);
+    }
+    auto old_dpin = old_node.setup_driver_pin(old_io_name);
+    o2n_dpin.insert_or_assign(old_dpin, new_dpin);
   }
 
   // get the firbits of the driver of old_graph_output, and set it to the corresponding subg_node in new_lg
-  old_node.get_class_lgraph()->each_graph_output([&new_node_subg, this](Node_pin &old_dpin_gout) {
+  auto old_sub_lg = LGraph::open(new_lg->get_path(), old_sub_name) ; // FIXME->sh: any other way that doesn't need to open a lgraph?
+  old_sub_lg->each_graph_output([&new_node_subg, this](Node_pin &old_dpin_gout) {
     auto old_spin_gout = old_dpin_gout.change_to_sink_from_graph_out_driver();
     auto old_gout_driver = old_spin_gout.get_driver_pin();
     I(fbmap.find(old_gout_driver.get_compact_flat()) != fbmap.end());
-    I(o2n_dpin.find(old_dpin_gout) != o2n_dpin.end());
+    /* I(o2n_dpin.find(old_gout_driver) != o2n_dpin.end()); */
 
     auto new_subg_dpin = new_node_subg.setup_driver_pin(old_dpin_gout.get_name());
-    fbmap.insert_or_assign(new_subg_dpin.get_compact_flat(), fbmap[old_dpin_gout.get_compact_flat()]);
-
-  }, false);
+    fbmap.insert_or_assign(new_subg_dpin.get_compact_flat(), fbmap[old_gout_driver.get_compact_flat()]);
+  });
 }
