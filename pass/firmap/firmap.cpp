@@ -840,7 +840,6 @@ void Firmap::clone_subgraph_node(Node &old_node, LGraph *new_lg) {
 
   // clone all old_sub io to new_sub_io and setup all sink_pins and driver_pins for the new_sub node
   for (const auto *old_io_pin : old_sub->get_io_pins()) {
-    fmt::print("DEBUG3 io_name:{}\n", old_io_pin->name);
     I(!old_io_pin->is_invalid());
     auto old_io_name = old_io_pin->name;
     if (old_io_pin->is_input()) {

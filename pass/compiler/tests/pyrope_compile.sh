@@ -197,6 +197,6 @@ rm -rf ./lgdb
 Pyrope_compile "$pts"
 
 
-# rm -f *.dot
-# rm -f *.v
-# rm -f lgcheck*
+rm -f *.dot
+rm -f *.v
+rm -f lgcheck*

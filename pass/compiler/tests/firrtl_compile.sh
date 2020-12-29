@@ -21,7 +21,7 @@ Trivial Tail TrivialArith Shifts PlusAnd MaxN ByteSelector Darken FullAdder
 HiLoMultiplier SimpleALU Mul VecShiftRegisterParam VecShiftRegisterSimple
 SimpleBitOps ' 
 
-pts='Life'
+# pts='BundleConnect'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
