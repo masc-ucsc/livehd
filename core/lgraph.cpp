@@ -1313,6 +1313,11 @@ void LGraph::dump() {
 
     fmt::print("  lgid:{} sub:{}\n", node.debug_name(), lgid2, child->get_name());
   });
+
+  fmt::print("FORWARD....\n");
+  for(auto node:forward()) {
+    node.dump();
+  }
 }
 
 void LGraph::dump_down_nodes() {
