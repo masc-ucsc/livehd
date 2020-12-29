@@ -6,6 +6,7 @@
 #include "lg_hier_loader.hpp"
 #include "lgraph.hpp"
 #include "pass.hpp"
+#include "iassert.hpp"
 
 class Pass_fplan : public Pass {
 public:

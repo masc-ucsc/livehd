@@ -28,16 +28,32 @@ Pass_fplan::Pass_fplan(const Eprp_var& var) : Pass("pass.fplan", var) {
   root_lg = var.lgs[0];
 
   if (var.get("algorithm") == "archfp") {
+    auto t = profile_time::timer();
     if (var.get("hierarchical") == "true") {
       lg_hier_floorp hfp;
+      
+      t.start();
+      fmt::print("  traversing hierarchy...");
       hfp.load_lg(root_lg, path);
-      hfp.create_floorplan("hier_floorplan.txt");
-    } else {
-      lg_flat_floorp hfp;
-      hfp.load_lg(root_lg, path);
-      hfp.create_floorplan("flat_floorplan.txt");
-    }
+      fmt::print(" done ({} ms).\n", t.time());
 
+      t.start();
+      fmt::print("  creating floorplan...");
+      hfp.create_floorplan("hier_floorplan.txt");
+      fmt::print(" done ({} ms).\n", t.time());
+    } else {
+      lg_flat_floorp ffp;
+
+      t.start();
+      fmt::print("  traversing hierarchy...");
+      ffp.load_lg(root_lg, path);
+      fmt::print(" done ({} ms).\n", t.time());
+
+      t.start();
+      fmt::print("  creating floorplan...");
+      ffp.create_floorplan("flat_floorplan.txt");
+      fmt::print(" done ({} ms).\n", t.time());
+    }
   } else {
     fmt::print("algorithm not implemented!\n");
   }

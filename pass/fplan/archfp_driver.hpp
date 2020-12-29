@@ -18,6 +18,17 @@ public:
   // TODO: write floorplan back to lgraph subnodes
   void store_floorplan();
 
+  ~floorplanner() {
+    std::cout << "deleting floorplanner..." << std::endl;
+    for (auto& pair : attrs) {
+      geogLayout* l = pair.second.l.release();
+
+      // TODO: actually deleting geogLayouts segfaults for some reason...
+      // delete l;
+      // pair.second.l.reset() also fails...
+    }
+  }
+
 protected:
   LGraph* root_lg;
 

@@ -8,4 +8,5 @@ public:
 
 private:
   void create_layout(LGraph* lg);
+  bool has_layout(LGraph* lg) { return attrs[lg].l.operator bool(); }
 };
