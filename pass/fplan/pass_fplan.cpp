@@ -11,7 +11,7 @@ void Pass_fplan::setup() {
 
   m.add_label_optional("algorithm", "algorithm used to generate the floorplan", "archfp");
 
-  m.add_label_optional("hierarchical", "if set to true, the floorplan will consider the LGraph hierarchy", "false");
+  m.add_label_optional("hierarchical", "if set to 'true', the floorplan will consider the LGraph hierarchy", "false");
 
   register_pass(m);
 }
