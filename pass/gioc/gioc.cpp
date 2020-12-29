@@ -100,7 +100,6 @@ void Gioc::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_view ar
         // note: for scalar input, front() == back()
         if (&subname == &hier_inp_subnames.back()) {
           auto subg_spin = subg_node.setup_sink_pin(io_pin->name); 
-          fmt::print("DEBUG setup io_pin->name:{} for subg_node\n", io_pin->name);
           tup_get.setup_driver_pin().connect_sink(subg_spin);
         }
         created_tup_gets.emplace_back(tup_get.get_driver_pin());
