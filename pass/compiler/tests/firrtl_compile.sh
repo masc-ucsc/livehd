@@ -19,7 +19,7 @@ EnableShiftRegister GCD_3bits Register RegisterSimple Flop Accumulator LFSR16
 BundleConnect SubModule Decrementer Test1 Test2 Test3 Test6 TrivialAdd NotAnd
 Trivial Tail TrivialArith Shifts PlusAnd MaxN ByteSelector Darken FullAdder
 HiLoMultiplier SimpleALU Mul VecShiftRegisterParam VecShiftRegisterSimple
-SimpleBitOps ' 
+' 
 
 # pts='BundleConnect'
 

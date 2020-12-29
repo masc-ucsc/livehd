@@ -171,7 +171,6 @@ void Pass_compiler::setup_firmap_library(LGraph *lg) {
   lg_fir_neq.add_input_pin("e2");
   lg_fir_neq.add_output_pin("Y");
 
-  //FIXME->sh: exam Hunter's code to see what should be the driver of "n"
   auto &lg_fir_pad = lg->ref_library()->setup_sub("__fir_pad", "-");
   lg_fir_pad.add_input_pin("e1");
   lg_fir_pad.add_input_pin("e2");

@@ -13,7 +13,8 @@ class Firmap {
 protected:
   bool not_finished;
   absl::flat_hash_map<Node_pin::Compact_flat, Firrtl_bits> fbmap;
-  absl::flat_hash_map<Node_pin, Node_pin> o2n_dpin; //old_dpin to new_dpin
+  absl::flat_hash_map<Node_pin, Node_pin> pinmap; //old_pin to new_pin for both dpin and spin
+  absl::flat_hash_map<Node_pin, std::vector<Node_pin>> spinmap_xorr; //special case for xorr one old spin -> multi newspin
   enum class Attr { Set_other, Set_ubits, Set_sbits, Set_max, Set_min, Set_dp_assign };
 
   static Attr get_key_attr(std::string_view key);
@@ -52,37 +53,70 @@ protected:
 
 
   //fir_op->lg_ops 
-  void map_fir_ops        (Node &node, std::string_view op, LGraph *new_lg);
-  void map_fir_add        (Node &node, LGraph *new_lg);
-  void map_fir_sub        (Node &node, LGraph *new_lg);
-  void map_fir_mul        (Node &node, LGraph *new_lg);
-  void map_fir_div        (Node &node, LGraph *new_lg);
-  void map_fir_rem        (Node &node, LGraph *new_lg);
-  void map_fir_lt_gt      (Node &node, LGraph *new_lg, std::string_view op);
-  void map_fir_leq_geq    (Node &node, LGraph *new_lg, std::string_view op);
-  void map_fir_eq         (Node &node, LGraph *new_lg);
-  void map_fir_neq        (Node &node, LGraph *new_lg);
-  void map_fir_as_uint    (Node &node, LGraph *new_lg);
-  void map_fir_as_sint    (Node &node);
+  void map_node_fir_ops        (Node &node, std::string_view op, LGraph *new_lg);
+  void map_node_fir_add        (Node &node, LGraph *new_lg);
+  void map_node_fir_sub        (Node &node, LGraph *new_lg);
+  void map_node_fir_mul        (Node &node, LGraph *new_lg);
+  void map_node_fir_div        (Node &node, LGraph *new_lg);
+  void map_node_fir_rem        (Node &node, LGraph *new_lg);
+  void map_node_fir_lt_gt      (Node &node, LGraph *new_lg, std::string_view op);
+  void map_node_fir_leq_geq    (Node &node, LGraph *new_lg, std::string_view op);
+  void map_node_fir_eq         (Node &node, LGraph *new_lg);
+  void map_node_fir_neq        (Node &node, LGraph *new_lg);
+  void map_node_fir_as_uint    (Node &node, LGraph *new_lg);
+  void map_node_fir_as_sint    (Node &node, LGraph *new_lg);
+  void map_node_fir_pad        (Node &node, LGraph *new_lg);
+  void map_node_fir_shl        (Node &node, LGraph *new_lg);
+  void map_node_fir_shr        (Node &node, LGraph *new_lg);
+  void map_node_fir_dshl       (Node &node, LGraph *new_lg);
+  void map_node_fir_dshr       (Node &node, LGraph *new_lg);
+  void map_node_fir_cvt        (Node &node, LGraph *new_lg);
+  void map_node_fir_neg        (Node &node, LGraph *new_lg);
+  void map_node_fir_not        (Node &node, LGraph *new_lg);
+  void map_node_fir_and_or_xor (Node &node, LGraph *new_lg, std::string_view op);
+  void map_node_fir_andr       (Node &node, LGraph *new_lg);
+  void map_node_fir_orr        (Node &node, LGraph *new_lg);
+  void map_node_fir_xorr       (Node &node, LGraph *new_lg);
+  void map_node_fir_cat        (Node &node, LGraph *new_lg);
+  void map_node_fir_bits       (Node &node, LGraph *new_lg);
+  void map_node_fir_head       (Node &node, LGraph *new_lg);
+  void map_node_fir_tail       (Node &node, LGraph *new_lg);
 
-  void map_fir_pad        (Node &node, LGraph *new_lg);
-  void map_fir_shl        (Node &node, LGraph *new_lg);
-  void map_fir_shr        (Node &node, LGraph *new_lg);
-  void map_fir_dshl       (Node &node, LGraph *new_lg);
-  void map_fir_dshr       (Node &node, LGraph *new_lg);
-  void map_fir_cvt        (Node &node);
-  void map_fir_neg        (Node &node, LGraph *new_lg);
-  void map_fir_not        (Node &node, LGraph *new_lg);
-  void map_fir_and_or_xor (Node &node, LGraph *new_lg, std::string_view op);
-  void map_fir_andr       (Node &node, LGraph *new_lg);
-  void map_fir_orr        (Node &node, LGraph *new_lg);
-  void map_fir_xorr       (Node &node, LGraph *new_lg);
-  void map_fir_cat        (Node &node, LGraph *new_lg);
-  void map_fir_bits       (Node &node, LGraph *new_lg);
-  void map_fir_head       (Node &node, LGraph *new_lg);
-  void map_fir_tail       (Node &node, LGraph *new_lg);
-  void clone_lg_ops_amap  (Node &node, LGraph *new_lg); // amap = as much as possible
-  void clone_subgraph_node(Node &node, LGraph *new_lg); 
+
+  void map_edge_fir_ops        (Node &node, std::string_view op, LGraph *new_lg);
+  void map_edge_fir_add        (Node &node, LGraph *new_lg);
+  void map_edge_fir_sub        (Node &node, LGraph *new_lg);
+  void map_edge_fir_mul        (Node &node, LGraph *new_lg);
+  void map_edge_fir_div        (Node &node, LGraph *new_lg);
+  void map_edge_fir_rem        (Node &node, LGraph *new_lg);
+  void map_edge_fir_lt_gt      (Node &node, LGraph *new_lg, std::string_view op);
+  void map_edge_fir_leq_geq    (Node &node, LGraph *new_lg, std::string_view op);
+  void map_edge_fir_eq         (Node &node, LGraph *new_lg);
+  void map_edge_fir_neq        (Node &node, LGraph *new_lg);
+  void map_edge_fir_as_uint    (Node &node, LGraph *new_lg);
+  void map_edge_fir_as_sint    (Node &node);
+  void map_edge_fir_pad        (Node &node, LGraph *new_lg);
+  void map_edge_fir_shl        (Node &node, LGraph *new_lg);
+  void map_edge_fir_shr        (Node &node, LGraph *new_lg);
+  void map_edge_fir_dshl       (Node &node, LGraph *new_lg);
+  void map_edge_fir_dshr       (Node &node, LGraph *new_lg);
+  void map_edge_fir_cvt        (Node &node);
+  void map_edge_fir_neg        (Node &node, LGraph *new_lg);
+  void map_edge_fir_not        (Node &node, LGraph *new_lg);
+  void map_edge_fir_and_or_xor (Node &node, LGraph *new_lg, std::string_view op);
+  void map_edge_fir_andr       (Node &node, LGraph *new_lg);
+  void map_edge_fir_orr        (Node &node, LGraph *new_lg);
+  void map_edge_fir_xorr       (Node &node, LGraph *new_lg);
+  void map_edge_fir_cat        (Node &node, LGraph *new_lg);
+  void map_edge_fir_bits       (Node &node, LGraph *new_lg);
+  void map_edge_fir_head       (Node &node, LGraph *new_lg);
+  void map_edge_fir_tail       (Node &node, LGraph *new_lg);
+
+  void clone_lg_ops_node       (Node &node, LGraph *new_lg); 
+  void clone_subgraph_node     (Node &node, LGraph *new_lg); 
+  void clone_edges             (Node &node);
+  void clone_edges_fir_xorr    (Node &node);
+  
 
 public:
   Firmap ();
