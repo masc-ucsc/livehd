@@ -14,14 +14,15 @@ pts_hier='Adder Adder4 SingleEvenFilter Life Mux4'
 pts_hier_passed='BundleConnect SubModule'
 
 # passed pattern pool
-pts='LogShifter RegXor AddNot VendingMachineSwitch VendingMachine VecShiftRegister
-Counter VecSearch ResetShiftRegister Parity EnableShiftRegister GCD_3bits
-Register RegisterSimple Flop Accumulator LFSR16 BundleConnect SubModule
-Decrementer Test1 Test2 Test3 Test6 TrivialAdd NotAnd Trivial Tail TrivialArith
-Shifts PlusAnd MaxN ByteSelector Darken FullAdder HiLoMultiplier SimpleALU Mul
-VecShiftRegisterParam VecShiftRegisterSimple SimpleBitOps ' 
+pts='LogShifter RegXor AddNot VendingMachineSwitch VendingMachine
+VecShiftRegister Counter VecSearch ResetShiftRegister Parity
+EnableShiftRegister GCD_3bits Register RegisterSimple Flop Accumulator LFSR16
+BundleConnect SubModule Decrementer Test1 Test2 Test3 Test6 TrivialAdd NotAnd
+Trivial Tail TrivialArith Shifts PlusAnd MaxN ByteSelector Darken FullAdder
+HiLoMultiplier SimpleALU Mul VecShiftRegisterParam VecShiftRegisterSimple
+SimpleBitOps ' 
 
-# pts='LogShifter RegXor'
+pts='Mux4'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck

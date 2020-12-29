@@ -7,7 +7,7 @@ circuit Mux4 :
     input io_in1 : UInt<1>
     output io_out : UInt<1>
 
-    node _T = and(io_sel, io_in1) @[Mux4.scala 18:21]
+    node _T   = and(io_sel, io_in1) @[Mux4.scala 18:21]
     node _T_1 = not(io_sel) @[Mux4.scala 18:34]
     node _T_2 = and(_T_1, io_in0) @[Mux4.scala 18:42]
     node _T_3 = or(_T, _T_2) @[Mux4.scala 18:31]
