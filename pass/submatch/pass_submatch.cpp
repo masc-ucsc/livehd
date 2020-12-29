@@ -36,7 +36,7 @@ void pass_submatch::find_subs(LGraph *g) {
   fmt::print("TODO: implement pass\n");
 
   struct Hash_attr {
-    int depth; // connection depth - how deep the connection is
+    int depth;  // connection depth - how deep the connection is
     int n;
   };
 
@@ -44,7 +44,7 @@ void pass_submatch::find_subs(LGraph *g) {
   absl::flat_hash_map<Node_pin::Compact_driver, uint64_t> dpin2hash;
   absl::flat_hash_map<Node_pin::Compact_driver, uint64_t> dpin2depth;
 
-  for (const auto node : g->forward()) {
+  for (const auto &node : g->forward()) {
     std::vector<uint64_t> i_hash;
 
     uint64_t input_depth = 0;
@@ -81,7 +81,7 @@ void pass_submatch::find_subs(LGraph *g) {
 
       uint64_t key = (input_key << 2) ^ c_key;
 
-      //fmt::print("dpin:{} input_key:{} c_key:{} key:{} d:{}\n", dpin.debug_name(), input_key, c_key, key, input_depth + 1);
+      // fmt::print("dpin:{} input_key:{} c_key:{} key:{} d:{}\n", dpin.debug_name(), input_key, c_key, key, input_depth + 1);
 
       dpin2hash[dpin.get_compact_driver()]  = key;
       dpin2depth[dpin.get_compact_driver()] = input_depth + 1;
@@ -90,10 +90,12 @@ void pass_submatch::find_subs(LGraph *g) {
     }
   }
 
+  /*
   for (const auto it : hash2attr) {
     const auto &attr = it.second;
-    //fmt::print("hash:{} depth:{} n:{} s:{}\n", it.first, attr.depth, attr.n, attr.depth * attr.n);
+    fmt::print("hash:{} depth:{} n:{} s:{}\n", it.first, attr.depth, attr.n, attr.depth * attr.n);
   }
+  */
 
   for (const auto node : g->fast()) {
     for (auto dp : node.out_connected_pins()) {

@@ -413,6 +413,8 @@ void Cprop::replace_node(Node &node, const Lconst &result) {
 
 // FIXME: not sure
 void Cprop::replace_logic_node(Node &node, const Lconst &result, const Lconst &result_reduced) {
+  (void)result_reduced;
+  
   Node_pin dpin_0;
 
   for (auto &out : node.out_edges()) {

@@ -4,5 +4,6 @@ cc_library(
    srcs = glob(["src/*.cxx","src/*.cpp"]),
    hdrs = glob(["src/*.hxx","src/*.h","include/*.hxx","include/*.h"]),
    includes = [ "include" ], # Needed because some includes use <foo.h>
+   copts = ["-Wno-error"], # disable turning warnings into errors for external lib
    visibility = ["//visibility:public"],
 )

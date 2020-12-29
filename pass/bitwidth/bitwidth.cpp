@@ -571,7 +571,11 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
   Bitwidth_range bw(0);
   bool parent_pending = false;
   bool parent_is_ginp = false;
+  (void)parent_is_ginp;
+
   bool parent_is_flop = false;
+  (void)parent_is_flop;
+  
   if (node_attr.is_sink_connected("name")) {
     auto through_dpin = node_attr.get_sink_pin("name").get_driver_pin();
     parent_is_ginp    = through_dpin.is_graph_input();

@@ -167,12 +167,14 @@ void Inou_firrtl::HandleMemTup(Lnast &ln, const Lnast_nid &tup_node, firrtl::Fir
 
     for (const auto& tup_str : mem_to_ports_lists[ln.get_name(ports_rhs)]) {
       auto port_tup_node = pname_to_tup_map[tup_str];
-      uint8_t port_type; // 0 = read, 1 = write, 2 = read-write
+      uint8_t port_type = 0; // 0 = read, 1 = write, 2 = read-write
       for (const auto& child : ln.children(port_tup_node)) {
         // Do an initial pass over to see if this is a read/write/read-write port.
         auto lhs_asg  = ln.get_first_child(child);
         auto rhs_asg  = ln.get_sibling_next(lhs_asg);
+        (void)rhs_asg;
         auto attr_str = ln.get_name(lhs_asg);
+        (void)attr_str;
         /* FIXME: Need to identify right here if read/write/read-write.
          * Then use that in next for-loop. Maybe determine by some attr? */
         // set port_type here

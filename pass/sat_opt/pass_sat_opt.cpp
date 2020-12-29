@@ -55,8 +55,8 @@ void Pass_sat_opt::check_sat_opt(LGraph *g) {
  absl::flat_hash_map<Node_pin::Compact, std::vector<int>> dpin2sat_var;
 
   // determine no of inputs
-  int i_num  = 0;
-  int i_bits = 0;
+  // int i_num  = 0;
+  // int i_bits = 0;
 
 	/*std::vector<std::vector<int>> lgraph_inputs;
   g->each_graph_input([this, &i_num, &i_bits](const Node_pin &pin) {
@@ -71,8 +71,8 @@ void Pass_sat_opt::check_sat_opt(LGraph *g) {
   // fmt::print("Declaring input variables.\n");
 
   // determine no of outputs
-  int o_num  = 0;
-  int o_bits = 0;
+  // int o_num  = 0;
+  // int o_bits = 0;
 
 	/*std::vector<std::vector<int>> lgraph_outputs;
   g->each_graph_output([this, &o_num, &o_bits](const Node_pin &pin) {
@@ -88,7 +88,7 @@ void Pass_sat_opt::check_sat_opt(LGraph *g) {
   
   std::vector<int> model_expression_vec;
   
-  g->each_graph_input([this, &sat, &dpin2sat_var, &model_expression_vec](const Node_pin &dpin) {
+  g->each_graph_input([&sat, &dpin2sat_var, &model_expression_vec](const Node_pin &dpin) {
 	  	 auto v =  sat.vec_var (dpin.debug_name(), dpin.get_bits());
 		 sat.vec_append(model_expression_vec, v);
 		dpin2sat_var[dpin.get_compact() ] = v;
@@ -122,7 +122,7 @@ void Pass_sat_opt::check_sat_opt(LGraph *g) {
 	Mux,    // Multiplexor with many options
     */
 	
-  for (const auto node : g->forward()) {
+  for (const auto& node : g->forward()) {
     // sat.generate_model();
 	
 	//auto node_type_name = node.get_type_name();
@@ -275,7 +275,7 @@ void Pass_sat_opt::check_sat_opt(LGraph *g) {
 	  
   }
 
-  g->each_graph_output([this, &sat, &dpin2sat_var, &model_expression_vec](const Node_pin &dpin) {
+  g->each_graph_output([&sat, &dpin2sat_var, &model_expression_vec](const Node_pin &dpin) {
 		  if (dpin.get_bits()<=1) {
 		     return true; // Nothing possible to optimize
 		  }

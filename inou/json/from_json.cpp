@@ -92,13 +92,13 @@ void from_json(LGraph *g, rapidjson::Document &document) {
         auto src_pid = output_edge["driver_pid"].GetString();
         int dst_nid = output_edge["sink_idx"].GetUint64();
 
-        const auto it = json_remap.find(dst_nid);
+        const auto dit = json_remap.find(dst_nid);
         Node dst_node;
-        if (it == json_remap.end()) {
+        if (dit == json_remap.end()) {
           dst_node = g->create_node();
           json_remap.insert({dst_nid, dst_node.get_compact_class()});
         }else{
-          dst_node = Node(g, it->second);
+          dst_node = Node(g, dit->second);
         }
 
         auto dst_pid = output_edge["sink_pid"].GetString();

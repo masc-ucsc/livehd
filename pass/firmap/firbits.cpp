@@ -370,6 +370,8 @@ void Firmap::analysis_fir_bits_extract(Node &node, XEdge_iterator &inp_edges) {
 
   Bits_t hi, lo;
   bool sign;
+  (void)sign;
+
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
@@ -525,6 +527,9 @@ void Firmap::analysis_fir_dshr(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size() == 2);  
 
   Bits_t bits1, bits2;
+  (void)bits1;
+  (void)bits2;
+  
   bool sign;
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());

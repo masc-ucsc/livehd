@@ -1,13 +1,13 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "meta_api.hpp"
+
 #include <regex>
 #include <string>
 
 #include "graph_library.hpp"
 #include "lgraph.hpp"
 #include "main_api.hpp"
-
-#include "meta_api.hpp"
 
 void Meta_api::open(Eprp_var &var) {
   auto path = var.get("path");
@@ -76,17 +76,18 @@ void Meta_api::match(Eprp_var &var) {
 
   try {
     library->each_lgraph(match, [&lgs, path](Lg_type_id lgid, std::string_view name) {
-        LGraph *lg = LGraph::open(path, name);
-        if (lg) {
+      (void)lgid;
+
+      LGraph *lg = LGraph::open(path, name);
+      if (lg) {
         if (lg->is_empty()) {
-        fmt::print("lgraph.match lgraph {} is empty\n", name);
+          fmt::print("lgraph.match lgraph {} is empty\n", name);
         }
         lgs.push_back(lg);
-        }
-        });
+      }
+    });
   } catch (const std::regex_error &e) {
-    Main_api::error("invalid match:{} regex. It is a FULL regex unlike bash. To test, try: `ls path | grep -E \"match\"`",
-        match);
+    Main_api::error("invalid match:{} regex. It is a FULL regex unlike bash. To test, try: `ls path | grep -E \"match\"`", match);
   }
 
   for (LGraph *lg : lgs) {

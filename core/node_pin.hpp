@@ -96,7 +96,7 @@ public:
       return H::combine(std::move(h), s.hidx.get_hash(), s.idx, s.sink);
     };
   };
-  class __attribute__((packed)) Compact_flat {
+  class Compact_flat {
   protected:
     Lg_type_id      lgid;
     uint32_t        idx : Index_bits;

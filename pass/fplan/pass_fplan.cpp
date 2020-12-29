@@ -60,6 +60,7 @@ Pass_fplan::Pass_fplan(const Eprp_var& var) : Pass("pass.fplan", var) {
 }
 
 void Pass_fplan::analyze_floorplan(const std::string_view filename) {
+  (void)filename;
   // things to record / dump:
   // 1. number of nodes
   // 2. HPWL

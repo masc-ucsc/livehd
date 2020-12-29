@@ -1,7 +1,9 @@
 # livehd specific bazel options
 build --output_filter='^//(core|pass|inou)'
 #build --output_filter="^//"
-build --cxxopt="-std=c++17" --cxxopt="-fexceptions" --cxxopt="-Wno-unknown-pragmas" --cxxopt="-Wextra" --cxxopt="-Wunused" --cxxopt="-Wshadow" --force_pic --build_tag_filters="-fixme"
+# disabling -Werror for specific classes of errors, since they show up in google libs and there's no good way to disable warnings for external libs in Bazel yet
+# https://github.com/bazelbuild/bazel/issues/12009
+build --cxxopt="-Werror" --cxxopt="-std=c++17" --cxxopt="-fexceptions" --cxxopt="-Wno-unknown-pragmas" --cxxopt="-Wextra" --cxxopt="-Wunused" --cxxopt="-Wno-error=unused-parameter" --cxxopt="-Wshadow" --cxxopt="-Wno-error=shadow" --cxxopt="-Wno-error=deprecated-copy" --cxxopt="-Wno-error=delete-non-virtual-dtor" --force_pic --build_tag_filters="-fixme"
 # test --cache_test_results=no
 
 # config that enables super aggressive optimization for max performance

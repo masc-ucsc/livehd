@@ -369,6 +369,7 @@ cc_library(
     ],
     copts = [
         "-fexceptions",
+        "-Wno-error",
     ],
     features = ["-use_header_modules"],
     licenses = ["notice"],

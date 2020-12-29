@@ -7,8 +7,8 @@ cc_library(
        "cryptominisat5/datasyncserver.cpp", # No MPI
        "cryptominisat5/cms_breakid.cpp", # No breakid compile option
 ]),
-   hdrs = glob(["cryptominisat5/*.h"])
-   ,
+   hdrs = glob(["cryptominisat5/*.h"]),
+   copts = ["-Wno-error"],
    linkopts = ["-lpthread"],
    visibility = ["//visibility:public"],
    defines = ["USE_GAUSS","USE_ZLIB","cryptominisat5_EXPORTS"],

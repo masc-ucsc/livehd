@@ -909,6 +909,7 @@ Node_pin Lnast_tolg::setup_node_assign_and_lhs(LGraph *lg, const Lnast_nid &lnid
   auto lhs_name  = lnast->get_sname(lhs);
   auto lhs_vname = lnast->get_vname(lhs);
   auto rhs       = lnast->get_sibling_next(lhs);
+  (void)rhs;
 
   //handle register as lhs
   if (is_register(lhs_name)) {
@@ -1505,10 +1506,25 @@ void Lnast_tolg::process_ast_func_def_op (LGraph *lg, const Lnast_nid &lnidx) {
   tup_add.setup_driver_pin().set_name(func_name);
 };
 
-void Lnast_tolg::process_ast_as_op       (LGraph *lg, const Lnast_nid &lnidx) { ; };
-void Lnast_tolg::process_ast_uif_op      (LGraph *lg, const Lnast_nid &lnidx) { ; };
-void Lnast_tolg::process_ast_for_op      (LGraph *lg, const Lnast_nid &lnidx) { ; };
-void Lnast_tolg::process_ast_while_op    (LGraph *lg, const Lnast_nid &lnidx) { ; };
+void Lnast_tolg::process_ast_as_op       (LGraph *lg, const Lnast_nid &lnidx) {
+  (void)lg;
+  (void)lnidx;
+};
+
+void Lnast_tolg::process_ast_uif_op      (LGraph *lg, const Lnast_nid &lnidx) {
+  (void)lg;
+  (void)lnidx;
+};
+
+void Lnast_tolg::process_ast_for_op      (LGraph *lg, const Lnast_nid &lnidx) {
+  (void)lg;
+  (void)lnidx;
+};
+
+void Lnast_tolg::process_ast_while_op    (LGraph *lg, const Lnast_nid &lnidx) {
+  (void)lg;
+  (void)lnidx;
+};
 
 void Lnast_tolg::setup_lnast_to_lgraph_primitive_type_mapping() {
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_invalid]     = Ntype_op::Invalid;

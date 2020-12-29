@@ -239,6 +239,7 @@ void Inou_firrtl::init_reg_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type,
       /* UInt SInt Clock Analog Reset Types*/
       auto reg_bits = get_bit_count(type);
       init_reg_ref_dots(lnast, id, clock, reset, init, reg_bits, parent_node, true);
+      break;
     }
 
     default: {
@@ -253,11 +254,16 @@ void Inou_firrtl::init_reg_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type,
 void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id, const firrtl::FirrtlPB_Expression& clocke,
                                     const firrtl::FirrtlPB_Expression& resete, const firrtl::FirrtlPB_Expression& inite,
                                     uint32_t bitwidth, Lnast_nid& parent_node, bool is_signed) {
+  (void)inite;
+  
   std::string id{_id};  // FIXME: isntead pass string_view, change lenght/start no need to realloc (much faster) Code can be shared
                         // with port_id
 
   auto clk  = lnast.add_string(ReturnExprString(lnast, clocke, parent_node, true));
+  (void)clk;
+
   auto rst  = lnast.add_string(ReturnExprString(lnast, resete, parent_node, true));
+  (void)rst;
 
   // Add register's name to the global list.
   register_names.insert(id.substr(1, id.length() - 1));  // Use substr to remove "#"

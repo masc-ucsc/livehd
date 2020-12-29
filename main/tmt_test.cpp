@@ -140,6 +140,8 @@ static void scrdn(TMT *vt, size_t r, size_t n) {
 }
 
 HANDLER(ed)
+(void)t;
+
 size_t b = 0;
 size_t e = s->nline;
 
@@ -160,6 +162,8 @@ clearlines(vt, b, e - b);
 }
 
 HANDLER(ich)
+(void)t;
+
 size_t n = P1(0); /* XXX use MAX */
 if (n > s->ncol - c->c - 1)
   n = s->ncol - c->c - 1;
@@ -169,6 +173,8 @@ clearline(vt, l, c->c, n);
 }
 
 HANDLER(dch)
+(void)t;
+
 size_t n = P1(0); /* XXX use MAX */
 if (n > s->ncol - c->c)
   n = s->ncol - c->c;
@@ -185,6 +191,8 @@ clearline(vt, l, s->ncol - n, s->ncol);
 }
 
 HANDLER(el)
+(void)t;
+
 switch (P0(0)) {
   case 0: clearline(vt, l, c->c, vt->screen.ncol); break;
   case 1: clearline(vt, l, 0, MIN(c->c + 1, s->ncol - 1)); break;
@@ -193,6 +201,11 @@ switch (P0(0)) {
 }
 
 HANDLER(sgr)
+(void)l;
+(void)t;
+(void)s;
+(void)c;
+
 #define FGBG(c) *(P0(i) < 40 ? &vt->attrs.fg : &vt->attrs.bg) = c
 for (size_t i = 0; i < vt->npar; i++) switch (P0(i)) {
     case 0: vt->attrs = defattrs; break;
@@ -232,6 +245,9 @@ for (size_t i = 0; i < vt->npar; i++) switch (P0(i)) {
 }
 
 HANDLER(rep)
+(void)s;
+(void)t;
+
 if (!c->c)
   return;
 wchar_t r = l->chars[c->c - 1].c;
@@ -239,12 +255,21 @@ for (size_t i = 0; i < P1(0); i++) writecharatcurs(vt, r);
 }
 
 HANDLER(dsr)
+(void)s;
+(void)l;
+(void)t;
+
 char r[BUF_MAX + 1] = {0};
 snprintf(r, BUF_MAX, "\033[%zd;%zdR", c->r + 1, c->c + 1);
 CB(vt, TMT_MSG_ANSWER, (const char *)r);
 }
 
 HANDLER(resetparser)
+(void)s;
+(void)c;
+(void)l;
+(void)t;
+
 memset(vt->pars, 0, sizeof(vt->pars));
 vt->state   = State::S_NUL;
 vt->npar    = 0;
@@ -253,12 +278,20 @@ vt->ignored = false;
 }
 
 HANDLER(consumearg)
+(void)s;
+(void)c;
+(void)l;
+(void)t;
+
 if (vt->npar < PAR_MAX)
   vt->pars[vt->npar++] = vt->arg;
 vt->arg = 0;
 }
 
 HANDLER(fixcursor)
+(void)l;
+(void)t;
+
 c->r = MIN(c->r, s->nline - 1);
 c->c = MIN(c->c, s->ncol - 1);
 }
@@ -420,6 +453,8 @@ bool tmt_resize(TMT *vt, size_t nline, size_t ncol) {
 
 static void writecharatcurs(TMT *vt, wchar_t w) {
   COMMON_VARS;
+  (void)l;
+  (void)t;
 
 #ifdef TMT_HAS_WCWIDTH
   extern int wcwidth(wchar_t c);

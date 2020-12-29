@@ -104,6 +104,9 @@ public:
   };
 
   void set(const std::string &key, const std::string &value) final {
+    (void)key;
+    (void)value;
+
     assert(false);  // No main_api interface for this module as it uses yosys plug-ins
   };
 };

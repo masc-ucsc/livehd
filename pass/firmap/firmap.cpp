@@ -603,7 +603,9 @@ void Firmap::map_fir_as_sint(Node &old_node) {
 
 
 void Firmap::map_fir_rem(Node &old_node, LGraph *new_lg) {
-  ; // todo
+  // TODO
+  (void)old_node;
+  (void)new_lg;
 }
 
 

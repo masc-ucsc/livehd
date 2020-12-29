@@ -8,7 +8,7 @@ cc_library(
     hdrs = glob(["*.hpp"]),
     includes = ["."],
     visibility = ["//visibility:public"],
-    copts = ["-O3"],
+    copts = ["-O3", "-Wno-error"],
     )
 
 # makefile and other non-source files are kept but not used.
