@@ -74,7 +74,6 @@ $ less trivial.json
 - Load RocketChip (a RISC-V core) to the DB for the first time
   ```
   $ ./bazel-bin/main/lgshell
-  livehd> files path:projects/rocketchip/ |> inou.liveparse
   livehd> inou.yosys.tolg files:lgdb/parse/file_freechips.rocketchip.system.DefaultConfig.v
   livehd> lgraph.open name:RocketTile |> pass.sample.wirecount
   ```
