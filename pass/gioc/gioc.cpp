@@ -23,8 +23,8 @@ void Gioc::do_trans(LGraph *lg) {
       if (sub_name.substr(0, 6) == "__fir_") 
         continue; 
              
-      auto *library = Graph_library::instance(path);
-      auto subg_paras = split_name(node.get_name(), ":");
+      auto *library      = Graph_library::instance(path);
+      auto subg_paras    = split_name(node.get_name(), ":");
       auto &arg_tup_name = subg_paras[0];
       auto &ret_name     = subg_paras[1];
       auto &func_name    = subg_paras[2];
@@ -41,19 +41,14 @@ void Gioc::do_trans(LGraph *lg) {
       collect_tgs_from_unified_out(node);
       subgraph_io_connection(lg, sub, arg_tup_name, ret_name, node);
       reconnect_the_tgs_from_unified_out(ret_name);
+      tgs_spins_from_unified_ta.clear();
     }
   }
 }
 
 void Gioc::collect_tgs_from_unified_out(Node subg_node) {
-  Node unified_out_ta;
-  for (auto &e : subg_node.out_edges()) {
-    unified_out_ta = e.sink.get_node();
-    /* e.del_edge(); */
-    /* unified_out_ta.set_type(Ntype_op::TupRef); */
-  }
-  if (unified_out_ta.is_invalid())
-    return;
+  I(subg_node.out_edges().size() == 1);
+  auto unified_out_ta = subg_node.out_edges().begin()->sink.get_node();
 
   for (auto &e : unified_out_ta.out_edges()) {
     tgs_spins_from_unified_ta.emplace_back(e.sink);
@@ -63,14 +58,12 @@ void Gioc::collect_tgs_from_unified_out(Node subg_node) {
 
 void Gioc::reconnect_the_tgs_from_unified_out(std::string_view ret_name) {
   auto ret_ta_dpin = name2dpin[ret_name];
-  for (auto &sink_pin : tgs_spins_from_unified_ta) {
-    ret_ta_dpin.connect(sink_pin);
+  for (auto &tg_spin : tgs_spins_from_unified_ta) {
+    ret_ta_dpin.connect(tg_spin);
   }
 }
 
 void Gioc::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_view arg_tup_name, std::string_view ret_name, Node subg_node) {
-  /* bool subg_outp_is_scalar = !subgraph_outp_is_tuple(sub); */
-
   // start query subgraph io and construct TGs for connecting inputs, TAs/scalar for connecting outputs
   for (const auto *io_pin : sub->get_io_pins()) {
     I(!io_pin->is_invalid());
@@ -106,41 +99,8 @@ void Gioc::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_view ar
       }
       continue;
     }
-    
-    /* // II. io_pin is_output and is scalar */
-    /* if (subg_outp_is_scalar) { */
-    /*   auto subg_dpin = subg_node.setup_driver_pin(io_pin->name); */
-    /*   auto scalar_node = lg->create_node(Ntype_op::Or); */
-    /*   auto scalar_dpin = scalar_node.setup_driver_pin(); */
-    /*   subg_dpin.connect_sink(scalar_node.setup_sink_pin("A")); */
 
-    /*   name2dpin[ret_name] = scalar_dpin; */
-    /*   scalar_dpin.set_name(ret_name); */
-    /*   auto pos = ret_name.find_last_of('_'); */
-    /*   auto res_vname = ret_name.substr(0,pos); */
-    /*   auto res_sub   = std::stoi(std::string(ret_name.substr(pos+1))); */
-    /*   setup_dpin_ssa(scalar_dpin, res_vname, 0); */
-
-    /*   // note: the function call scalar return must be a "new_var_chain" */
-    /*   if (vname2attr_dpin.find(res_vname) != vname2attr_dpin.end()) { */
-    /*     auto aset_node = lg->create_node(Ntype_op::AttrSet); */
-    /*     auto aset_chain_spin = aset_node.setup_sink_pin("chain"); */
-    /*     auto aset_ancestor_dpin = vname2attr_dpin[res_vname]; */
-    /*     lg->add_edge(aset_ancestor_dpin, aset_chain_spin); */
-
-    /*     auto aset_vn_spin = aset_node.setup_sink_pin("name"); */
-    /*     auto aset_vn_dpin = scalar_dpin; */
-    /*     lg->add_edge(aset_vn_dpin, aset_vn_spin); */
-
-    /*     name2dpin[ret_name] = aset_node.setup_driver_pin("Y"); // dummy_attr_set node now represent the latest variable */
-    /*     aset_node.get_driver_pin("Y").set_name(ret_name); */
-    /*     setup_dpin_ssa(name2dpin[ret_name], res_vname, res_sub); */
-    /*     vname2attr_dpin[res_vname] = aset_node.setup_driver_pin("chain"); */
-    /*   } */
-    /*   continue; */
-    /* } */
-
-    // III. hier-subgraph-output
+    // II. hier-subgraph-output
     auto hier_inp_subnames = split_name(io_pin->name, ".");
     auto i = 0;
     for (const auto &subname : hier_inp_subnames) {
