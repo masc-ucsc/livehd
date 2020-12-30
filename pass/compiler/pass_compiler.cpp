@@ -110,7 +110,7 @@ void Pass_compiler::firrtl_compilation(Eprp_var &var, Lcompiler &compiler) {
     compiler.global_io_connection();  
     compiler.global_firrtl_bits_analysis_map();
     compiler.local_bitwidth_inference();
-    compiler.global_bitwidth_inference();  
+    /* compiler.global_bitwidth_inference(); */  
 }
 
 

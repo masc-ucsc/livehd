@@ -395,11 +395,6 @@ public:
   void             dump_all_prp_vname() const;
 
 
-  void set_flag_positive();
-  bool get_flag_positive() const;
-  bool has_flag_positive() const;
-
-
   void  set_delay(float val);
   void  del_delay();
   float get_delay() const;

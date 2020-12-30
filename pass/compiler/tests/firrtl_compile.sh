@@ -13,7 +13,7 @@ pts_mem='Smem_simple Stack DynamicMemorySearch Memo'
 pts_hier='Adder Adder4 Life'
 
 # passed pattern pool
-pts='SingleEvenFilter Mux4 LogShifter RegXor AddNot VendingMachineSwitch
+pts='SingleEvenFilter Mux4 LogShifter RegXor AddNot VendingMachineSwitch Coverage
 VendingMachine VecShiftRegister Counter VecSearch ResetShiftRegister Parity
 EnableShiftRegister GCD_3bits Register RegisterSimple Flop Accumulator LFSR16
 BundleConnect SubModule Decrementer Test1 Test2 Test3 Test6 TrivialAdd NotAnd
@@ -21,7 +21,7 @@ Trivial Tail TrivialArith Shifts PlusAnd MaxN ByteSelector Darken FullAdder
 HiLoMultiplier SimpleALU Mul VecShiftRegisterParam VecShiftRegisterSimple
 ' 
 
-# pts='BundleConnect'
+pts='Adder4'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck

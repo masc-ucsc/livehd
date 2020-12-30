@@ -745,15 +745,15 @@ void Firmap::clone_lg_ops_node(Node &old_node, LGraph *new_lg) {
 }
 
 
-void Firmap::clone_subgraph_node(Node &old_node, LGraph *new_lg) {
+void Firmap::clone_subgraph_node(Node &old_node_subg, LGraph *new_lg) {
   auto *library = Graph_library::instance(new_lg->get_path());
   Node      new_node_subg;
   Sub_node* new_sub;
   Sub_node* old_sub;
 
-  auto old_sub_name = old_node.get_type_sub_node().get_name();
+  auto old_sub_name = old_node_subg.get_type_sub_node().get_name();
   if (library->has_name(old_sub_name)) {
-    auto lgid = library->get_lgid(old_node.get_type_sub_node().get_name());
+    auto lgid = library->get_lgid(old_node_subg.get_type_sub_node().get_name());
     old_sub   = library->ref_sub(lgid);
   } else {
     Pass::error("Global IO connection pass cannot find existing subgraph {} in lgdb\n", old_sub_name);
@@ -789,7 +789,7 @@ void Firmap::clone_subgraph_node(Node &old_node, LGraph *new_lg) {
       }
       
       // map the old_sub sink_pins
-      auto old_spin = old_node.setup_sink_pin(old_io_name);
+      auto old_spin = old_node_subg.setup_sink_pin(old_io_name);
       pinmap.insert_or_assign(old_spin, new_spin);
       continue;
     }
@@ -803,19 +803,20 @@ void Firmap::clone_subgraph_node(Node &old_node, LGraph *new_lg) {
     } else {
       new_dpin = new_node_subg.setup_driver_pin(old_io_name);
     }
-    auto old_dpin = old_node.setup_driver_pin(old_io_name);
+    auto old_dpin = old_node_subg.setup_driver_pin(old_io_name);
     pinmap.insert_or_assign(old_dpin, new_dpin);
   }
 
-  // get the firbits of the driver of old_graph_output, and set it to the corresponding subg_node in new_lg
+  // get the firbits of the driver of old_graph_output, and set it to the corresponding subg_node in old_lg
   // FIXME->sh: any other way that doesn't need to open a lgraph?
   auto old_sub_lg = LGraph::open(new_lg->get_path(), old_sub_name) ; 
-  old_sub_lg->each_graph_output([&new_node_subg, this](Node_pin &old_dpin_gout) {
+  old_sub_lg->each_graph_output([&old_node_subg, this](Node_pin &old_dpin_gout) {
     auto old_spin_gout = old_dpin_gout.change_to_sink_from_graph_out_driver();
     auto old_gout_driver = old_spin_gout.get_driver_pin();
     I(fbmap.find(old_gout_driver.get_compact_flat()) != fbmap.end());
 
-    auto new_subg_dpin = new_node_subg.setup_driver_pin(old_dpin_gout.get_name());
-    fbmap.insert_or_assign(new_subg_dpin.get_compact_flat(), fbmap[old_gout_driver.get_compact_flat()]);
+    /* auto new_subg_dpin = new_node_subg.setup_driver_pin(old_dpin_gout.get_name()); */
+    auto old_node_subg_dpin = old_node_subg.setup_driver_pin(old_dpin_gout.get_name());
+    fbmap.insert_or_assign(old_node_subg_dpin.get_compact_flat(), fbmap[old_gout_driver.get_compact_flat()]);
   });
 }

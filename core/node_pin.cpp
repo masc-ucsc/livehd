@@ -209,11 +209,6 @@ bool Node_pin::has_delay()  const { return Ann_node_pin_delay::ref(top_g)->has(g
 float Node_pin::get_delay() const { return Ann_node_pin_delay::ref(top_g)->get(get_compact_driver()); }
 
 
-void Node_pin::set_flag_positive() { Ann_node_pin_flag_positive::ref(top_g)->set(get_compact_driver(), true); }
-bool Node_pin::has_flag_positive() const { return Ann_node_pin_flag_positive::ref(top_g)->has(get_compact_driver()); }
-bool Node_pin::get_flag_positive() const { return Ann_node_pin_flag_positive::ref(top_g)->get(get_compact_driver()); }
-
-
 void Node_pin::del_delay() {
   Ann_node_pin_delay::ref(top_g)->erase(get_compact_driver());
 }
