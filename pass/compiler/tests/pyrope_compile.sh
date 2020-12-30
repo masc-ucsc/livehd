@@ -6,7 +6,6 @@ pts_tuple_dbg='lhs_wire3 funcall_unnamed2
 
 pts_long_time='firrtl_gcd'
 
-
 pts='tuple_copy2 hier_tuple2 hier_tuple_io if nested_if reg__q_pin tuple_copy
      capricious_bits capricious_bits2 capricious_bits4 hier_tuple if2  bits_rhs
      adder_stage hier_tuple3 lhs_wire lhs_wire2 scalar_tuple logic attr_set out_ssa

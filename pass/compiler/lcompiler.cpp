@@ -174,7 +174,7 @@ void Lcompiler::local_bitwidth_inference() {
   for (auto &lg: lgs) {
     fmt::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-3)\n", lg->get_name());
     bw.do_trans(lg);
-    gviz ? gv.do_from_lgraph(lg, "local") : void(); 
+    gviz ? gv.do_from_lgraph(lg, "") : void(); 
   }
 
 }

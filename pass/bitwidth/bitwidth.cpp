@@ -953,27 +953,25 @@ void Bitwidth::try_delete_attr_node(Node &node) {
 
 void Bitwidth::set_subgraph_boundary_bw(Node &node) {
   auto *library = Graph_library::instance(node.get_class_lgraph()->get_path());
-  Sub_node* old_sub;
+  Sub_node* sub;
 
-  auto old_sub_name = node.get_type_sub_node().get_name();
-  if (library->has_name(old_sub_name)) {
+  auto sub_name = node.get_type_sub_node().get_name();
+  if (library->has_name(sub_name)) {
     auto lgid = library->get_lgid(node.get_type_sub_node().get_name());
-    old_sub   = library->ref_sub(lgid);
+    sub   = library->ref_sub(lgid);
   } else {
-    Pass::error("Global IO connection pass cannot find existing subgraph {} in lgdb\n", old_sub_name);
+    Pass::error("Global IO connection pass cannot find existing subgraph {} in lgdb\n", sub_name);
     return;
   }
 
-  // get the BW of the driver of old_graph_output, and set it to the corresponding subg_node in old_lg
+  // get the BW of the driver of sub_graph_output, and set it to the corresponding subg_node in lg
   // FIXME->sh: any other way that doesn't need to open a lgraph?
-  auto old_sub_lg = LGraph::open(node.get_class_lgraph()->get_path(), old_sub_name) ; 
-  old_sub_lg->each_graph_output([&node, this](Node_pin &old_dpin_gout) {
-    auto old_spin_gout = old_dpin_gout.change_to_sink_from_graph_out_driver();
-    auto old_gout_driver = old_spin_gout.get_driver_pin();
-    I(bwmap.find(old_gout_driver.get_compact()) != bwmap.end());
+  auto sub_lg = LGraph::open(node.get_class_lgraph()->get_path(), sub_name) ; 
+  sub_lg->each_graph_output([&node, this](Node_pin &dpin_gout) {
+    if (bwmap.find(dpin_gout.get_compact()) == bwmap.end())
+      return; // not ready yet, only possible from Pyrope front-end
 
-    /* auto new_subg_dpin = new_node_subg.setup_driver_pin(old_dpin_gout.get_name()); */
-    auto old_node_subg_dpin = node.setup_driver_pin(old_dpin_gout.get_name());
-    bwmap.insert_or_assign(old_node_subg_dpin.get_compact(), bwmap[old_gout_driver.get_compact()]);
+    auto node_subg_dpin = node.setup_driver_pin(dpin_gout.get_name());
+    bwmap.insert_or_assign(node_subg_dpin.get_compact(), bwmap[dpin_gout.get_compact()]);
   });
 }

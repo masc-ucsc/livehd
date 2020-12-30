@@ -518,10 +518,9 @@ void Lnast::analyze_dot_lrhs_handle_a_statement(const Lnast_nid &psts_nid, const
         continue;
     }
 
-
     // normal case
     for (auto sib_child : children(sib_nid)) {
-      if (sib_child == get_first_child(sib_nid) && get_name(sib_child) == c0_dot_name) {
+      if (sib_child == get_first_child(sib_nid) && get_name(sib_child) == c0_dot_name && !get_type(sib_nid).is_if()) {
         hit = true;
         dot_lrhs_table[dot_nid].first = true; //is lhs
         dot_lrhs_table[dot_nid].second = sib_nid;
@@ -530,11 +529,6 @@ void Lnast::analyze_dot_lrhs_handle_a_statement(const Lnast_nid &psts_nid, const
         hit = true;
         dot_lrhs_table[dot_nid].first  = false;
         dot_lrhs_table[dot_nid].second = sib_nid;
-        /* if (type.is_tuple_concat() || type.is_tuple()) { */
-        /*   dot_lrhs_table[dot_nid].second = sib_nid; */
-        /* } else { */
-        /*   dot_lrhs_table[dot_nid].second = Lnast_nid(-1, -1); // rhs dot doesn't need the corresponding assignment nid */
-        /* } */
         break;
       }
     }
