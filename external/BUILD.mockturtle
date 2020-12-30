@@ -18,5 +18,5 @@ cc_library(
    includes = ["include", "lib/ez", "lib/kitty", "lib/sparsepp", "lib/percy", "lib/abcsat", "lib/bill"],
    visibility = ["//visibility:public"],
    defines = ["LIN64", "ABC_NAMESPACE=pabc","DISABLE_NAUTY"],
-   copts = ["-Wno-error"],
+   copts = ["-Wno-error", "-O2"],
 )

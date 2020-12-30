@@ -32,6 +32,7 @@ genrule(
 cc_library(
     name = "version",
     srcs = ["kernel/version.cc"],
+    copts = ["-Wno-error"],
     visibility = ["//visibility:public"],
 )
 
@@ -152,6 +153,7 @@ YOSYS_COPTS = [
   "-Wno-implicit-fallthrough",
   "-Wno-vla",
   "-std=c++11",
+  "-Wno-error",
 ]
 
 cc_library(

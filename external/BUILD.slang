@@ -36,6 +36,7 @@ cc_library(
               ]),
    includes = [ "include", "external", "generated" ,"generated/source"], # Needed because some includes use <foo.h>
    visibility = ["//visibility:public"],
+   copts = ["-Wno-error", "-O2"],
    deps = ["@fmt",
            "@json",
    ],

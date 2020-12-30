@@ -15,6 +15,7 @@ cc_library(
                  "src/sat/*.h",
                  "src/dumper/*.h"]),
    includes = ["src"],
+   copts = ["-Wno-error", "-O2"],
    visibility = ["//visibility:public"],
    deps = [
            "@cryptominisat//:cryptominisat",

@@ -8,6 +8,7 @@ cc_library(
          + glob(["include/gtkwave/*.cpp"])
          ,
     includes = ["include/","include/vltstd"],
+    copts = ["-Wno-error", "-O2"],
     visibility = ["//visibility:public"],
     defines = ["VL_THREADED=1"],
 )
@@ -26,6 +27,7 @@ cc_library(
     hdrs = [
          "include/verilated_vcd_c.h",
     ],
+    copts = ["-Wno-error", "-O2"],
     includes = ["include/"],
     visibility = ["//visibility:public"],
 )

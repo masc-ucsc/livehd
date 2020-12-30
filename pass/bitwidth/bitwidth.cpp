@@ -571,8 +571,10 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
   Bitwidth_range bw(0);
   bool parent_pending = false;
   bool parent_is_ginp = false;
+  (void)parent_is_ginp;
 
   bool parent_is_flop = false;
+  (void)parent_is_flop;
   
   if (node_attr.is_sink_connected("name")) {
     auto through_dpin = node_attr.get_sink_pin("name").get_driver_pin();
@@ -954,6 +956,7 @@ void Bitwidth::try_delete_attr_node(Node &node) {
 void Bitwidth::set_subgraph_boundary_bw(Node &node) {
   auto *library = Graph_library::instance(node.get_class_lgraph()->get_path());
   Sub_node* sub;
+  (void)sub;
 
   auto sub_name = node.get_type_sub_node().get_name();
   if (library->has_name(sub_name)) {

@@ -2,5 +2,6 @@
 cc_library(
    name = "headers",
    hdrs = ["httplib.h"],
+   copts = ["-Wno-error"],
    visibility = ["//visibility:public"],
 )
