@@ -821,6 +821,8 @@ void Bitwidth::bw_pass(LGraph *lg) {
       process_comparator(node);
     } else if (op == Ntype_op::Tposs) {
       process_tposs(node, inp_edges);
+    } else if (op == Ntype_op::Sub) {
+      set_subgraph_boundary_bw(node);
     } else {
       fmt::print("FIXME: node:{} still not handled by bitwidth\n", node.debug_name());
     }
@@ -911,92 +913,67 @@ void Bitwidth::bw_pass(LGraph *lg) {
     // FIXME: this code may need to move to cprop if we have several types of
     // attributes. Delete only if all the attributes are finished
 
-    // (1) delete all the attr_set/get for bitwidth
-    // (2) optimize the msb signed-zero away when global BW algorithm
+    // delete all the attr_set/get for bitwidth
     for (auto node : lg->fast(hier)) {
       auto op = node.get_type_op();
       if (op == Ntype_op::AttrSet) {
-        if (node.is_sink_connected("field")) {
-          auto key_dpin = node.get_sink_pin("field").get_driver_pin();
-          auto attr     = get_key_attr(key_dpin.get_name());
-          if (attr == Attr::Set_other)
-            continue;
-        }
-
-        auto node_non_hier = node.get_non_hierarchical();
-
-        if (node_non_hier.is_sink_connected("name")) {
-          auto data_dpin = node_non_hier.get_sink_pin("name").get_driver_pin();
-
-          for (auto e : node_non_hier.out_edges()) {
-            if (e.driver.get_pid() == 0)
-              e.sink.connect_driver(data_dpin);
-          }
-        }
-        if (!hier) // FIXME: once hier del works
-          node.del_node();
-      }
-
-      // set is_always_positive flag for lgyosys usigned bits optimization
-      /* if (hier) { */
-      /*   if (op == Ntype_op::Tposs || op == Ntype_op::TupKey) */
-      /*     continue; */
-
-      /*   auto dpin = node.get_driver_pin("Y"); */
-      /*   auto dpin_bits = dpin.get_bits(); */
-      /*   auto it = bwmap.find(dpin.get_compact()); */
-      /*   if (it != bwmap.end()) { */
-      /*     auto &bw = it->second; */
-      /*     if (dpin.has_outputs()) */
-      /*       I(dpin_bits != 0); */
-      /*     if (bw.is_always_positive() && dpin_bits > 1) */
-      /*       dpin.set_flag_positive(); */
-      /*       /1* dpin.set_bits(bw.get_sbits() - 1); *1/ */
-      /*   } */
-      /* } */
+        try_delete_attr_node(node);
+      }  
     } // end of lg->fast()
-
-    //FIXME->sh: optimize MSB zeros at the final global BW algorithm.
-    /* if (hier) { */
-    /*   lg->each_graph_output([this](Node_pin &dpin) { */
-    /*     I(dpin.get_name() != "%"); */
-    /*     auto dpin_bits = dpin.get_bits(); */
-    /*     auto it = bwmap.find(dpin.get_compact()); */
-    /*     if (it != bwmap.end()) { */
-    /*       auto & bw = it->second; */
-    /*       if (dpin.has_outputs()) */
-    /*         I(dpin_bits != 0); */
-    /*       if (bw.is_always_positive() && dpin_bits > 1) */
-    /*         dpin.set_flag_positive(); */
-    /*         /1* dpin.set_bits(bw.get_sbits() - 1); *1/ */
-    /*     } */
-    /*   }, true); */
-
-
-    /*   lg->each_graph_input([this](Node_pin &dpin) { */
-    /*     I(dpin.get_name() != "$"); */
-    /*     auto dpin_bits = dpin.get_bits(); */
-    /*     auto it = bwmap.find(dpin.get_compact()); */
-    /*     if (it != bwmap.end()) { */
-    /*       auto &bw = it->second; */
-    /*       auto min = bw.get_min(); */
-
-    /*       bool any_tposs_sink = false; */
-    /*       for (auto e : dpin.out_edges()) { */
-    /*         if (e.sink.get_node().get_type_op() == Ntype_op::Tposs) */
-    /*           any_tposs_sink = true; */
-    /*       } */
-
-    /*       if (bw.is_always_positive() && dpin_bits > 1 && !any_tposs_sink) */
-    /*         dpin.set_flag_positive(); */
-    /*         /1* dpin.set_bits(bw.get_sbits() - 1); *1/ */
-    /*     } */
-    /*   }, true); */
-    /* } */
   }
 #endif
 
   if (must_perform_backward) {
     fmt::print("BW-> some nodes need to back propagate width\n");
   }
+}
+
+
+void Bitwidth::try_delete_attr_node(Node &node) {
+  if (node.is_sink_connected("field")) {
+    auto key_dpin = node.get_sink_pin("field").get_driver_pin();
+    auto attr     = get_key_attr(key_dpin.get_name());
+    if (attr == Attr::Set_other)
+      return;
+  }
+
+  auto node_non_hier = node.get_non_hierarchical();
+  if (node_non_hier.is_sink_connected("name")) {
+    auto data_dpin = node_non_hier.get_sink_pin("name").get_driver_pin();
+
+    for (auto e : node_non_hier.out_edges()) {
+      if (e.driver.get_pid() == 0)
+        e.sink.connect_driver(data_dpin);
+    }
+  }
+
+  if (!hier) // FIXME: once hier del works
+    node.del_node();
+}
+
+void Bitwidth::set_subgraph_boundary_bw(Node &node) {
+  auto *library = Graph_library::instance(node.get_class_lgraph()->get_path());
+  Sub_node* old_sub;
+
+  auto old_sub_name = node.get_type_sub_node().get_name();
+  if (library->has_name(old_sub_name)) {
+    auto lgid = library->get_lgid(node.get_type_sub_node().get_name());
+    old_sub   = library->ref_sub(lgid);
+  } else {
+    Pass::error("Global IO connection pass cannot find existing subgraph {} in lgdb\n", old_sub_name);
+    return;
+  }
+
+  // get the BW of the driver of old_graph_output, and set it to the corresponding subg_node in old_lg
+  // FIXME->sh: any other way that doesn't need to open a lgraph?
+  auto old_sub_lg = LGraph::open(node.get_class_lgraph()->get_path(), old_sub_name) ; 
+  old_sub_lg->each_graph_output([&node, this](Node_pin &old_dpin_gout) {
+    auto old_spin_gout = old_dpin_gout.change_to_sink_from_graph_out_driver();
+    auto old_gout_driver = old_spin_gout.get_driver_pin();
+    I(bwmap.find(old_gout_driver.get_compact()) != bwmap.end());
+
+    /* auto new_subg_dpin = new_node_subg.setup_driver_pin(old_dpin_gout.get_name()); */
+    auto old_node_subg_dpin = node.setup_driver_pin(old_dpin_gout.get_name());
+    bwmap.insert_or_assign(old_node_subg_dpin.get_compact(), bwmap[old_gout_driver.get_compact()]);
+  });
 }

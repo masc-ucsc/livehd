@@ -48,6 +48,8 @@ protected:
   void forward_adjust_dpin(Node_pin &dpin, Bitwidth_range &bw);
   void set_graph_boundary(Node_pin &dpin, Node_pin &spin);
   void debug_unconstrained_msg(Node &node, Node_pin &d_dpin);
+  void try_delete_attr_node(Node &node);
+  void set_subgraph_boundary_bw(Node &node);
 
   void bw_pass(LGraph *lg);
 
