@@ -1,9 +1,0 @@
-#!/usr/bin/env bash
-
-# error out if commands not found
-set -e
-set -o pipefail
-
-filename=$1
-
-./tofig.pl -a 1.0 -f 22 $1 > ${filename%.*}.fig

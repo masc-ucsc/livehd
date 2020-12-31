@@ -8,7 +8,8 @@ Benchmarking tests (built using -c opt):
 
  Improvements:
  - Some way to visualize floorplans to check if they're correct
-   - use ArchFP perl script to generate floorplan pdf files
+   - ArchFP perl script doesn't work properly
+   - esesc perl script doesn't work properly either
  - LGraph attributes
    - Node attributes and Node pin attributes already exist (attribute.hpp)
    - Add aspect ratio information to LGraphs
