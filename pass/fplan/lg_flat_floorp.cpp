@@ -1,4 +1,4 @@
-#include "lg_flat_loader.hpp"
+#include "lg_flat_floorp.hpp"
 
 void lg_flat_floorp::add_layout(LGraph* existing_lg, LGraph* lg) {
   attrs[existing_lg].l->addComponentCluster(std::string(lg->get_name()), attrs[lg].count, get_area(lg), 50.0, 1.0, Center);

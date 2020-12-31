@@ -1,6 +1,6 @@
 #pragma once
 
-#include "archfp_driver.hpp"
+#include "floorplanner.hpp"
 
 class lg_flat_floorp : public floorplanner {
 public:

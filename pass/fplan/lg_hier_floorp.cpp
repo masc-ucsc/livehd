@@ -1,4 +1,4 @@
-#include "lg_hier_loader.hpp"
+#include "lg_hier_floorp.hpp"
 
 void lg_hier_floorp::create_layout(LGraph* lg) {
   attrs[lg].l = std::make_unique<geogLayout>();

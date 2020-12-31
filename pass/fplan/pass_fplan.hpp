@@ -2,17 +2,15 @@
 
 #include <string_view>
 
-#include "lg_flat_loader.hpp"
-#include "lg_hier_loader.hpp"
+#include "lg_flat_floorp.hpp"
+#include "lg_hier_floorp.hpp"
 #include "lgraph.hpp"
 #include "pass.hpp"
 #include "iassert.hpp"
 
-class Pass_fplan : public Pass {
+class Pass_fplan_makefp : public Pass {
 public:
-  Pass_fplan(const Eprp_var& var);
-
-  void analyze_floorplan(const std::string_view filename);
+  Pass_fplan_makefp(const Eprp_var& var);
 
   static void setup();
 
@@ -20,4 +18,20 @@ public:
 
 private:
   LGraph* root_lg;
+};
+
+class Pass_fplan_analyzefp : public Pass {
+public:
+  Pass_fplan_analyzefp(const Eprp_var& var);
+
+  static void setup();
+
+  static void pass(Eprp_var& v);
+
+private:
+  // Half-Perimeter Wire Length
+  void find_hpwl();
+
+  // generic floorplan information
+  void find_info();
 };

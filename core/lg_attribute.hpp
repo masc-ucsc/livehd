@@ -1,12 +1,12 @@
 #pragma once
 
 #include <string>
-#include "absl/container/flat_hash_map.h"
+#include "mmap_map.hpp"
 
 template <const char* name, typename Attr_data>
 class Lg_attribute {
 protected:
-  static absl::flat_hash_map<std::string, Attr_data> lg2data;
+  static mmap_lib::map<std::string, Attr_data> lg2data;
 
   static std::string get_full_name(LGraph* lg) {
     return absl::StrCat(std::to_string(lg->get_lgid()), name);
