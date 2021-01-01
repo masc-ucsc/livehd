@@ -98,6 +98,7 @@ protected:
 
   void         try_create_flattened_inp     (LGraph *lg);
   void         dfs_try_create_flattened_inp (LGraph *lg, Node_pin &cur_node_spin, std::string hier_name, Node &chain_head);
+  Node_pin     create_const                 (LGraph *lg, std::string_view const_str);
 
   // attribute related
   bool check_new_var_chain (const Lnast_nid &lnidx_opr);

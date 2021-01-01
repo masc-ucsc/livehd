@@ -104,7 +104,9 @@ void Firmap::clone_edges_fir_xorr(Node &node) {
 }
 
 void Firmap::map_node_fir_ops(Node &node, std::string_view op, LGraph *new_lg) {
-  if (op == "__fir_add") {
+  if (op == "__fir_const") {
+    map_node_fir_const(node, new_lg);
+  } else if (op == "__fir_add") {
     map_node_fir_add(node, new_lg);
   } else if (op == "__fir_sub") {
     map_node_fir_sub(node, new_lg);
@@ -698,6 +700,17 @@ void Firmap::map_node_fir_mul(Node &old_node, LGraph *new_lg) {
 }
 
 
+void Firmap::map_node_fir_const(Node &old_node, LGraph *new_lg) {
+  auto const_str = old_node.get_driver_pin("Y").get_name();
+  auto pos = const_str.find("bits");
+  auto new_node = new_lg->create_node_const(const_str.substr(0, pos-1)); // -1 becasue I ignore the difference between ubits and sbits strings
+  for (auto old_dpin : old_node.out_connected_pins()) {
+    pinmap.insert_or_assign(old_dpin, new_node.setup_driver_pin());
+    fmt::print("    {} maps to {}\n", old_dpin.debug_name(), new_node.setup_driver_pin().debug_name());
+  }
+}
+
+
 void Firmap::map_node_fir_add(Node &old_node, LGraph *new_lg) {
   auto new_node = new_lg->create_node(Ntype_op::Sum);
   for (auto old_spin : old_node.inp_connected_pins()) 
@@ -708,7 +721,6 @@ void Firmap::map_node_fir_add(Node &old_node, LGraph *new_lg) {
     pinmap.insert_or_assign(old_dpin, new_node.setup_driver_pin());
     fmt::print("    {} maps to {}\n", old_dpin.debug_name(), new_node.setup_driver_pin().debug_name());
   }
-
 }
 
 

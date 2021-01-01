@@ -29,6 +29,7 @@ protected:
   void analysis_lg_mux                (Node &node);
   void analysis_fir_ops               (Node &node, std::string_view op);
   //fir_op
+  void analysis_fir_const             (Node &node);
   void analysis_fir_add_sub           (Node &node, XEdge_iterator &inp_edges);
   void analysis_fir_mul               (Node &node, XEdge_iterator &inp_edges);
   void analysis_fir_div               (Node &node, XEdge_iterator &inp_edges);
@@ -54,6 +55,7 @@ protected:
 
   //fir_op->lg_ops 
   void map_node_fir_ops        (Node &node, std::string_view op, LGraph *new_lg);
+  void map_node_fir_const      (Node &node, LGraph *new_lg);
   void map_node_fir_add        (Node &node, LGraph *new_lg);
   void map_node_fir_sub        (Node &node, LGraph *new_lg);
   void map_node_fir_mul        (Node &node, LGraph *new_lg);

@@ -1047,7 +1047,7 @@ Node_pin Lnast_tolg::setup_ref_node_dpin(LGraph *lg, const Lnast_nid &lnidx_opd,
     name2dpin[name] = node_dpin;
     return node_dpin;
   } else if (is_const(name)) {
-    node_dpin = lg->create_node_const(Lconst(vname)).setup_driver_pin();
+    node_dpin = create_const(lg, vname);
   } else if (is_register(name)) {
     auto reg_node = lg->create_node(Ntype_op::Sflop);
     node_dpin     = reg_node.setup_driver_pin();
@@ -1075,6 +1075,19 @@ Ntype_op Lnast_tolg::decode_lnast_op(const Lnast_nid &lnidx_opr) {
   const auto raw_ntype = lnast->get_data(lnidx_opr).type.get_raw_ntype();
   return primitive_type_lnast2lg[raw_ntype];
 }
+
+Node_pin Lnast_tolg::create_const(LGraph *lg, std::string_view const_str) {
+  auto pos1 = const_str.find("ubits");
+  auto pos2 = const_str.find("sbits");
+  if (pos1 != std::string_view::npos || pos2 != std::string_view::npos) {
+    auto lg_fir_const_node = lg->create_node_sub("__fir_const");
+    lg_fir_const_node.setup_driver_pin("Y").set_name(const_str);
+    return lg_fir_const_node.setup_driver_pin("Y");
+  }
+  return lg->create_node_const(Lconst(const_str)).setup_driver_pin();
+}
+
+
 
 void Lnast_tolg::process_ast_attr_set_op(LGraph *lg, const Lnast_nid &lnidx_aset) {
   auto c0_aset = lnast->get_first_child(lnidx_aset);
