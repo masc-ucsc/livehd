@@ -1749,8 +1749,8 @@ std::string Inou_firrtl::ReturnExprString(Lnast& lnast, const firrtl::FirrtlPB_E
       break;
     }
     case firrtl::FirrtlPB_Expression::kUintLiteral: {     // UIntLiteral
-      /* expr_string = absl::StrCat(expr.uint_literal().value().value(), "u"); */
-      expr_string = expr.uint_literal().value().value();
+      expr_string = absl::StrCat(expr.uint_literal().value().value(), "u", expr.uint_literal().width().value());
+      /* expr_string = expr.uint_literal().value().value(); */
       break;
     }
     case firrtl::FirrtlPB_Expression::kSintLiteral: {     // SIntLiteral

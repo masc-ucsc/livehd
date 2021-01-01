@@ -604,7 +604,7 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
           break;
         }
       }
-      if (!tposs_existed)
+      if (!tposs_existed && dpin_name != "$clock_0" && dpin_name != "$reset_0")
         insert_tposs_nodes(node_attr, fwd_it);
 
     } else { // Attr::Set_sbits

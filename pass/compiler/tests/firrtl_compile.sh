@@ -21,6 +21,7 @@ NotAnd Trivial Tail TrivialArith Shifts PlusAnd MaxN ByteSelector Darken
 HiLoMultiplier SimpleALU Mul VecShiftRegisterParam VecShiftRegisterSimple ' 
 
 pts='Life'
+pts='Cell'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck

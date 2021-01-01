@@ -33,8 +33,13 @@ public:
   Lcompiler(std::string_view path, std::string_view odir, std::string_view top, bool gviz);
 
   //thread_pool.add(Lcompiler::add_thread, this, ln);
-  void add_pyrope(std::shared_ptr<Lnast> lnast) { add_pyrope_thread(lnast);}
-  void add_firrtl(std::shared_ptr<Lnast> lnast) { add_firrtl_thread(lnast);}
+  void add_pyrope(std::shared_ptr<Lnast> lnast) { 
+    add_pyrope_thread(lnast);
+  }
+  
+  void add_firrtl(std::shared_ptr<Lnast> lnast) { 
+    add_firrtl_thread(lnast);
+  }
   void local_bitwidth_inference();
   void global_io_connection();
   void global_bitwidth_inference();

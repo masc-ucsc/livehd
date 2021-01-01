@@ -163,7 +163,7 @@ void Firmap::map_node_fir_ops(Node &node, std::string_view op, LGraph *new_lg) {
   }
 }
 
-// e1 tail n = e1 & (pow(e1.fbits - n) - 1)
+// e1 tail n = e1 & (pow(2, (e1.fbits - n) - 1))
 void Firmap::map_node_fir_tail(Node &old_node, LGraph *new_lg) {
   auto new_node_mask = new_lg->create_node(Ntype_op::And);
   auto new_node_tp   = new_lg->create_node(Ntype_op::Tposs);
