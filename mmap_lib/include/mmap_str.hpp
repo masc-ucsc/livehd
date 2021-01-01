@@ -14,17 +14,33 @@ protected:
   // ptr_or_start:
   // 10 "special" character (allow to encode 2 digits as 1 character when (c&0x80) is true)
   // _size is the str _size (original not compressed)
+  //
+  // NOTE: Maybe it is faster/easier to have this instead:
+  //
+  // ptr_or_start
+  // 12 special characters
+  // if e[11]&0x80 || e[12]==0 -> overflow (ptr not start)
+  // end of string is first zero (or last e[11]&0x80)
+  //
+  // This avoid having a "size" in the costly str in-place data. The overflow
+  // can have a string size like a string_view does
+  //
+  // The only drawback is that to compute size, it needs to iterate over the e
+  // field, but asking size is not a common operation in LiveHD
 
   uint32_t ptr_or_start;  // 4 chars if _size < 14, ptr to mmap otherwise
   std::array<char, 10> e; // last 10 "special <128" characters ending the string
   uint16_t _size;          // 2 bytes
 
+  constexpr bool is_digit(char c) const {
+    return c>='0' && c <='9';
+  }
+
 public:
 
   // Must be constexpr to allow fast (constexpr) cmp for things like IDs.
-  template<std::size_t N>
-  constexpr str(const char(&s)[N]): ptr_or_start(0), e{0}, _size(N-1) { // N-1 because str includes the zero
-    if constexpr ((N-1)<(10+4)) {
+  template<std::size_t N, typename = std::enable_if_t<(N-1)<14>>
+    constexpr str(const char(&s)[N]): ptr_or_start(0), e{0}, _size(N-1) { // N-1 because str includes the zero
       auto stop    = _size<4?_size:4;
       for(auto i=0;i<stop;++i) {
         ptr_or_start <<= 8;
@@ -33,7 +49,7 @@ public:
       auto e_pos = 0;
       for(auto i=stop;i<_size;++i) {
         assert(s[i]<128); // FIXME: use ptr if so
-        if (std::isdigit(s[i]) && i<_size && std::isdigit(s[i+1])) {
+        if (is_digit(s[i]) && i<_size && is_digit(s[i+1])) {
           uint8_t v = (s[i]-'0')*10+s[i+1]-'0';
           assert(v<100); // 2 digits only
           e[e_pos] = 0x80 | v;
@@ -43,15 +59,26 @@ public:
         }
         ++e_pos;
       }
-      for(;e_pos<e.size();++e_pos)
-        e[e_pos]=0;
-    }else{
-      // FIXME:
-      ptr_or_start = 0;
-      for(auto e_pos=0u;e_pos<e.size();++e_pos)
-        e[e_pos]=0;
     }
-  }
+
+  template<std::size_t N, typename = std::enable_if_t<(N-1)>=14>, typename=void>
+    constexpr str(const char(&s)[N]): ptr_or_start(0), e{0}, _size(N-1) { // N-1 because str includes the zero
+      ptr_or_start = 0;
+      auto e_pos   = 0u;
+      for(auto i=(N-1-8);i<N-1;++i) { // 8 (not 10 to allow to grow a bit) last positions
+        assert(s[i]<128); // FIXME: use ptr if so
+        if (is_digit(s[i]) && i<_size && is_digit(s[i+1])) {
+          uint8_t v = (s[i]-'0')*10+s[i+1]-'0';
+          assert(v<100); // 2 digits only
+          e[e_pos] = 0x80 | v;
+          ++i; // skip one more
+          --_size;
+        }else{
+          e[e_pos] = s[i];
+        }
+        ++e_pos;
+      }
+    }
 
 #if 0
   fixme_const_iterator begin()  const {
