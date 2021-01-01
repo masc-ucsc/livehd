@@ -132,17 +132,18 @@ master_root: (13 bytes or 104bits -2 code)
 1: 4x16+2x19  (6)
 0: 4x15+3x14  (7)
 
+## mmap_lib projects
 
-## Visitor Set cleanup (mmap_vset)
-
-Fix the API to use the same has mmap_map
-
-* find: returns an iterator
-* has: has a return true/false
-* contains: to make it easy to port back/forth with abseil is the same as has
-* begin/end to allow an iterator
-* Add tests with Node_pin::Compact and Node::Compact
-* Improve the unit test running against abseil
+* mmap_vset finish
+    * iterator: find: returns an iterator  begin/end to allow an iterator
+    * Use contains(key): to make it easy to port back/forth with abseil
+    * Add tests with Node_pin::Compact and Node::Compact
+* mmap_str
+    * Implement class
+    * replace sting_view/string for mmap_lib::str
+    * Replace the string_view storage from mmap_map to use the new mmap_lib::str
+* mmap_vector delete
+* Each structure mmap_vector, mmap_map, mmap_bimap, ... mmap_str should have a test and bench
 
 ## ACT (Async) output
 
@@ -302,19 +303,25 @@ bitwidth/cprop tasks.
 
 ## Lgraph partition/decomposition
 
-Implement several partitioning algorithms in Lgraph. Each partition has a different attribute. The attributes/partitions could be used for synthesis/placement/...
+Implement several partitioning algorithms in Lgraph. Each partition has a
+different attribute. The attributes/partitions could be used for
+synthesis/placement/...
 
 Dependence: none
 
 Main features:
 
-* Implement some fast decomposition algorithms:
+* Break graph partitions in disjoin sets and areas that do not have cross optimization (disjoin). Similar to MockTurtle partition method (separate by flops, large adders/multipliers/dividers).
+* Mincut partitioning. Use with https://github.com/SebastianSchlag/kahypar for min-cut
+* Port ESSENT acycling partitioning to C++. This reads a LGraph (or hierarchical lgraphs) and partitions the graph to several acycling partitions.
+* Live/Incremental partition. Given 2 graphs, find matching "partitions" across the graphs that finish in equivalent points (DAC paper has more details)
+
+Optional partitionings:
 * "Bottom-Up Disjoint-Support Decomposition Based on Cofactor and Boolean Difference Analysis" https://ieeexplore.ieee.org/abstract/document/7357181/
 * "Bi-decomposition of large Boolean functions using blocking edge graphs" https://dl.acm.org/citation.cfm?id=2133553
-* Break graph partitions in disjoin sets and areas that do not have cross optimization (disjoin)
-* Mark graph with hypergraph partition
-* Port ESSENT acycling partitioning to C++. This reads a LGraph (or hierarchical lgraphs) and partitions the graph to several acycling partitions.
 
+Optional traversals:
+* It would be good to have extensions on the fast/forward/backward iterators that accept a "partition" to traverse instead of the whole graph
 
 ## Parallel and Hierarchical Synthesis with Mockturtle
 
