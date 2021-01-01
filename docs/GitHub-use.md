@@ -194,6 +194,12 @@ https://github.com/masc-ucsc/livehd/fork ) the LiveHD repo.
 
 Now create a [pull][pull] request through github, and the UCSC/MASC team will review it.
 
+## Occasional Pull Request steps
+
+If you just want to do some small contributions to LiveHD doing a public fork is the
+easiest way to contribute. Just fork, commit to forked master, and click on the web link
+after you push.
+
 ## Frequent Contributor
 
 If you are working on LiveHD at UC Santa Cruz, contact [Jose

@@ -131,12 +131,20 @@ new_git_repository(
 )
 
 new_git_repository(
-    name = "json",
+    name = "jsonxxxx",
     build_file = "BUILD.json",
-    commit = "d187488e0db0533bdd7c53ec0c687ca1745b8b9e", # Obtober 3, 2019
+    commit = "68c36963826671d3f3ba157222430109ef932bac", # Dec 31, 2020 # d187488e0db0533bdd7c53ec0c687ca1745b8b9e", # Obtober 3, 2019
     remote = "https://github.com/nlohmann/json.git",
     #strip_prefix = "include",
 )
+
+http_archive(
+    name = "json",
+    build_file = "BUILD.json",
+    urls = ["https://github.com/nlohmann/json/releases/download/v3.9.1/include.zip"],
+    sha256 = "6bea5877b1541d353bd77bdfbdb2696333ae5ed8f9e8cc22df657192218cad91",
+    )
+
 git_repository(
     name = "iassert",
     #build_file = "BUILD.iassert",
