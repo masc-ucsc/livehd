@@ -125,8 +125,9 @@ new_git_repository(
 new_git_repository(
     name = "slang",
     build_file = "BUILD.slang",
-    commit = "c0cf9a643f05df63268ecbfe561e9af37c9a62a8", # Nov 2nd, 2020 2a774123444a6152f40639296cf20e90dd7d55b0", # July 23, 2020 # 823fc41d44d53797f0b5ddb1242028cc1fd51f18", #June 12, 2020
+    commit = "c0cf9a643f05df63268ecbfe561e9af37c9a62a8", # Nov 2nd, 2020
     remote = "https://github.com/MikePopoloski/slang.git",
+    shallow_since = "1604256203 -0500",
     patches = ["//external:patch.slang"],
 )
 
@@ -177,6 +178,7 @@ new_git_repository(
     build_file = "BUILD.rapidjson",
     commit = "6534506e829a489bda78bc5eac5faa34da0a2c51", # Nov 23, 2019
     remote = "https://github.com/Tencent/rapidjson.git",
+    shallow_since = "1573466634 +0800",
     strip_prefix = "include",
 )
 new_git_repository(
@@ -184,6 +186,7 @@ new_git_repository(
     build_file = "BUILD.httplib",
     commit = "e4fd9f19cab6eeaf6489ebb129178b3407e76624", # October 24, 2019
     remote = "https://github.com/yhirose/cpp-httplib.git",
+    shallow_since = "1571833695 -0400",
 )
 new_git_repository(
     name = "replxx",
@@ -210,7 +213,8 @@ new_git_repository(
     name = "anubis",
     build_file = "BUILD.anubis",
     commit = "93088bd3c05407ccd871e8d5067d024f812aeeaa", # November 06, 2018
-    remote = "https://github.com/masc-ucsc/anubis.git"
+    remote = "https://github.com/masc-ucsc/anubis.git",
+    shallow_since = "1585037117 +0100",
     #patches = ["//external:patch.verilator"],
     #strip_prefix = "include",
 )
