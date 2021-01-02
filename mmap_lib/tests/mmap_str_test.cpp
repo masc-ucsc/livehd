@@ -30,12 +30,21 @@ TEST_F(Mmap_str_test, small_strings) {
   EXPECT_EQ(a, b);
 }
 
+bool do_check(const mmap_lib::str &str) {
+  return (str == "hello");
+}
+
 TEST_F(Mmap_str_test, const_expr_trival_cmp) {
 
   mmap_lib::str long_a("hello_hello_hello_hello_hello_hello"); // not right, but it should compile
   constexpr mmap_lib::str a("hello");
 
+  auto b = do_check("hello");
+  EXPECT_TRUE(b);
+
   std::string_view a_sv{"hello"};
+
+  EXPECT_TRUE(do_check(a_sv));
 
   fmt::print("a[0]:{} size:{}\n",a[0], a.size());
   fmt::print("a[1]:{} size:{}\n",a[1], a.size());

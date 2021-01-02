@@ -9,6 +9,15 @@ namespace mmap_lib {
 
 class str {
 protected:
+  // Keepking the code constexpr for small strings (not long) requires templates (A challenge but reasonable).
+  // Some references:
+  // https://github.com/tcsullivan/constexpr-to-string
+  // https://github.com/vesim987/constexpr_string/blob/master/constexpr_string.hpp
+  // https://github.com/vivkin/constexprhash/blob/master/constexprhash.h
+  // https://github.com/unterumarmung/fixed_string
+  // https://github.com/proxict/constexpr-string
+  // https://github.com/tonypilz/ConstexprString
+  //
   // 16 bytes data structure:
   //
   // ptr_or_start:
@@ -79,6 +88,31 @@ public:
         ++e_pos;
       }
     }
+
+  constexpr str(std::string_view sv) : ptr_or_start(0), e{0}, _size(sv.size()) {
+    // FIXME: maybe short maybe long
+    if (sv.size()<14) { // FIXME: create method to share this code with str short char constructor
+      auto stop    = _size<4?_size:4;
+      for(auto i=0;i<stop;++i) {
+        ptr_or_start <<= 8;
+        ptr_or_start |= sv[i];
+      }
+      auto e_pos = 0;
+      for(auto i=stop;i<_size;++i) {
+        assert(sv[i]<128); // FIXME: use ptr if so
+        if (is_digit(sv[i]) && i<_size && is_digit(sv[i+1])) {
+          uint8_t v = (sv[i]-'0')*10+sv[i+1]-'0';
+          assert(v<100); // 2 digits only
+          e[e_pos] = 0x80 | v;
+          ++i; // skip one more
+        }else{
+          e[e_pos] = sv[i];
+        }
+        ++e_pos;
+      }
+      _size = sv.size();
+    }
+  }
 
 #if 0
   fixme_const_iterator begin()  const {
