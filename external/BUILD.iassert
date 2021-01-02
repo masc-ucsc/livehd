@@ -3,7 +3,7 @@ cc_library(
    name = "iassert",
    srcs = ["iassert.cpp"],
    hdrs = ["iassert.hpp"],
-   copts = ["-Wno-error", "-O2"],
+   copts = ["-w", "-O2"],
    #includes = [ "." ], # Needed because some includes use <foo.h>
    visibility = ["//visibility:public"],
 )

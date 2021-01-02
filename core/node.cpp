@@ -230,7 +230,7 @@ Node_pin Node::setup_sink_pin_slow(std::string_view name) {
   Port_ID pid;
 
   if (std::isdigit(name[0])) {
-    int pos;
+    int pos = 0;
     std::from_chars(name.data(), name.data() + name.size(), pos);
 
     if (!sub.has_instance_pin(pos))

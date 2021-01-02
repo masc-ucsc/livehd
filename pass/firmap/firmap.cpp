@@ -233,7 +233,6 @@ void Firmap::map_node_fir_head(Node &old_node, LGraph *new_lg) {
   }
 }
 
-
 // (e1 >> lo) & ((1<<(hi - lo)) - 1)
 void Firmap::map_node_fir_bits(Node &old_node, LGraph *new_lg) {
   auto new_node_sra  = new_lg->create_node(Ntype_op::SRA);
@@ -241,7 +240,7 @@ void Firmap::map_node_fir_bits(Node &old_node, LGraph *new_lg) {
   auto new_node_tp   = new_lg->create_node(Ntype_op::Tposs);
   Node new_node_mask_const;
   Node new_node_lo_const;
-  uint32_t hi, lo;
+  uint32_t hi = 0, lo = 0;
   for (auto old_spin : old_node.inp_connected_pins()) {
     if (old_spin == old_node.setup_sink_pin("e1")) {
       pinmap.insert_or_assign(old_spin, new_node_sra.setup_sink_pin("a")); 

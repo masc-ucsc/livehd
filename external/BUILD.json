@@ -2,7 +2,7 @@
 cc_library(
    name = "json",
    hdrs = glob(["include/nlohmann/*.hpp","include/nlohmann/**/*.hpp"]),
-   copts = ["-Wno-error"],
+   copts = ["-w"],
    includes = ["include"],
    visibility = ["//visibility:public"],
 )

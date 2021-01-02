@@ -89,7 +89,6 @@ cc_library(
     includes = ["generic", "unix"],
     copts = TCL_COPTS + [
         "-DUSE_TCLALLOC=0",
-        "-Wno-errors",
     ],
 )
 
@@ -112,7 +111,6 @@ cc_library(
     copts = TCL_COPTS + [
         "-DTCL_LIBRARY=\\\"dependency_support/tcl_tk/library\\\"",
         "-DTCL_PACKAGE_PATH=\\\"dependency_support/tcl_tk/tcl8.6.4\\\"",
-        "-Wno-errors",
     ],
     includes = ["generic", "unix"],
 )
@@ -140,7 +138,6 @@ cc_library(
         "-DCFG_RUNTIME_INCDIR='\"this_INCDIR_does_not_exist\"'",
         "-DCFG_RUNTIME_SCRDIR='\"this_SCRDIR_does_not_exist\"'",
         "-DTCL_CFGVAL_ENCODING='\"ascii\"'",
-        "-Wno-errors",
     ],
     includes = [
         "generic/",

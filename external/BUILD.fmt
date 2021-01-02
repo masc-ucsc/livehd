@@ -4,7 +4,7 @@ cc_library(
    hdrs = glob(["include/fmt/*.h"]),
    #srcs = glob(["src/*.cc"]),
    includes = ["include"],
-   copts = ["-Wno-error"],
+   copts = ["-w"],
    visibility = ["//visibility:public"],
    # WARNING: Yosys dynamic library was giving problems without FMT_HEADER_ONLY
    defines = ["FMT_HEADER_ONLY"],

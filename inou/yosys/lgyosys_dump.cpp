@@ -98,6 +98,7 @@ RTLIL::Wire *Lgyosys_dump::create_tree(LGraph *g, const std::vector<RTLIL::Wire 
 }
 
 RTLIL::Wire *Lgyosys_dump::create_io_wire(const Node_pin &pin, RTLIL::Module *module, Port_ID pos) {
+  (void)pos;
   assert(pin.has_name());  // IO must have name
   RTLIL::IdString name = absl::StrCat("\\", pin.get_name());
 
@@ -176,6 +177,7 @@ void Lgyosys_dump::create_memory(LGraph *g, RTLIL::Module *module, Node &node) {
   int  addr_bits = ceill(log2(mem_size));
 
   int n_ports = addr_dpin.get_bits()/addr_bits;
+  (void)n_ports;
   assert(n_ports*addr_bits == (int)addr_dpin.get_bits()); // exact match
 
   auto mode_mask = mode_node.get_type_const().to_i();

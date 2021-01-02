@@ -1,10 +1,15 @@
 Benchmarking tests (built using -c opt):
  - BOOM RISC-V core:
-   - flat:
-   - hier:
- - 500K XOR table:
-   - flat:
-   - hier:
+   - flat: 
+   - hier: ?
+ - XOR chain (100):
+   - flat: 
+ - XOR chain (10,000):
+   - flat: 
+ - XOR chain (50,000):
+   - flat: 
+ - XOR chain (100,000):
+   - flat: 
 
 Misc:
  - write test for archfp, and find a way to discover illegal floorplans (overlapping segments)
@@ -25,9 +30,6 @@ Style guide refactors:
  - make sure all class/type names are uppercase
  - string ops -> abseil versions
  - getters and setters?
-
-Long term:
- - a way to call BloBB or CompaSS directly, since they're really fast (faster than ArchFP? Need to test this...)
 
 
  - floorplan at node level

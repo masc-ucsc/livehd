@@ -40,6 +40,7 @@ public:
   }
   static void warn(std::string_view msg) { eprp.parser_warn(msg); }
   static void info(std::string_view msg) {
+    (void)msg;
 #ifndef NDEBUG
     eprp.parser_info(msg);
 #endif

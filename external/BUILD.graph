@@ -5,7 +5,7 @@ cc_library(
     hdrs = glob(["include/graph/*","include/graph/impl/*"]),
     visibility = ["//visibility:public"],
     includes = ["include/graph"],
-    copts = ["-Wno-error", "-O2"], # most optimization, warnings != errors
+    copts = ["-w", "-O2"], # most optimization, warnings != errors
     deps = [
       "@range-v3//:range-v3",
     ],

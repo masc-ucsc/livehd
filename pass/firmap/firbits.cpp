@@ -324,7 +324,7 @@ void Firmap::analysis_fir_ops(Node &node, std::string_view op) {
 void Firmap::analysis_fir_tail(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size() == 2);
 
-  Bits_t bits1, bits2;
+  Bits_t bits1 = 0, bits2 = 0;
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
@@ -345,7 +345,7 @@ void Firmap::analysis_fir_tail(Node &node, XEdge_iterator &inp_edges) {
 void Firmap::analysis_fir_head(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size() == 2);
 
-  Bits_t bits2;
+  Bits_t bits2 = 0;
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
@@ -365,8 +365,8 @@ void Firmap::analysis_fir_head(Node &node, XEdge_iterator &inp_edges) {
 
 void Firmap::analysis_fir_bits_extract(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size() == 3);
-  Bits_t hi, lo;
-  bool   sign;
+  Bits_t hi = 0, lo = 0;
+  bool   sign = false;
   (void)sign;
 
   for (auto e : inp_edges) {
@@ -391,8 +391,8 @@ void Firmap::analysis_fir_bits_extract(Node &node, XEdge_iterator &inp_edges) {
 void Firmap::analysis_fir_cat(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size() == 2);
 
-  Bits_t bits1, bits2;
-  bool   sign;
+  Bits_t bits1 = 0, bits2 = 0;
+  bool   sign = false;
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
@@ -427,8 +427,8 @@ void Firmap::analysis_fir_bitwire_reduction(Node &node, XEdge_iterator &inp_edge
 void Firmap::analysis_fir_bitwise(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size() == 2);
 
-  Bits_t bits1, bits2;
-  bool   sign;
+  Bits_t bits1 = 0, bits2 = 0;
+  bool   sign = false;
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
@@ -451,7 +451,7 @@ void Firmap::analysis_fir_bitwise(Node &node, XEdge_iterator &inp_edges) {
 void Firmap::analysis_fir_not(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size() == 1);
 
-  Bits_t bits1;
+  Bits_t bits1 = 0;
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
@@ -471,7 +471,7 @@ void Firmap::analysis_fir_not(Node &node, XEdge_iterator &inp_edges) {
 void Firmap::analysis_fir_neg(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size() == 1);
 
-  Bits_t bits1;
+  Bits_t bits1 = 0;
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
@@ -491,8 +491,8 @@ void Firmap::analysis_fir_neg(Node &node, XEdge_iterator &inp_edges) {
 void Firmap::analysis_fir_cvt(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size() == 1);
 
-  Bits_t bits1;
-  bool   sign;
+  Bits_t bits1 = 0;
+  bool   sign = false;
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
@@ -516,9 +516,9 @@ void Firmap::analysis_fir_cvt(Node &node, XEdge_iterator &inp_edges) {
 
 void Firmap::analysis_fir_dshr(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size() == 2);
-  Bits_t bits1, bits2;
+  Bits_t bits1 = 0, bits2 = 0;
   (void)bits2;
-  bool   sign;
+  bool   sign = 0;
 
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
@@ -541,8 +541,8 @@ void Firmap::analysis_fir_dshr(Node &node, XEdge_iterator &inp_edges) {
 void Firmap::analysis_fir_dshl(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size() == 2);
 
-  Bits_t bits1, bits2;
-  bool   sign;
+  Bits_t bits1 = 0, bits2 = 0;
+  bool   sign = false;
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
@@ -563,8 +563,8 @@ void Firmap::analysis_fir_dshl(Node &node, XEdge_iterator &inp_edges) {
 void Firmap::analysis_fir_shr(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size() == 2);
 
-  Bits_t bits1, bits2;
-  bool   sign;
+  Bits_t bits1 = 0, bits2 = 0;
+  bool   sign = false;
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
@@ -591,8 +591,8 @@ void Firmap::analysis_fir_shr(Node &node, XEdge_iterator &inp_edges) {
 void Firmap::analysis_fir_shl(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size() == 2);
 
-  Bits_t bits1, bits2;
-  bool   sign;
+  Bits_t bits1 = 0, bits2 = 0;
+  bool   sign = false;
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
@@ -614,7 +614,7 @@ void Firmap::analysis_fir_shl(Node &node, XEdge_iterator &inp_edges) {
 void Firmap::analysis_fir_as_sint(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size() == 1);
 
-  Bits_t bits1;
+  Bits_t bits1 = 0;
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
@@ -633,7 +633,7 @@ void Firmap::analysis_fir_as_sint(Node &node, XEdge_iterator &inp_edges) {
 void Firmap::analysis_fir_as_uint(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size() == 1);
 
-  Bits_t bits1;
+  Bits_t bits1 = 0;
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
@@ -652,8 +652,8 @@ void Firmap::analysis_fir_as_uint(Node &node, XEdge_iterator &inp_edges) {
 void Firmap::analysis_fir_pad(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size() == 2);
 
-  Bits_t bits1, bits2;
-  bool   sign;
+  Bits_t bits1 = 0, bits2 = 0;
+  bool   sign = false;
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
@@ -696,8 +696,8 @@ void Firmap::analysis_fir_comp(Node &node, XEdge_iterator &inp_edges) {
 void Firmap::analysis_fir_rem(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size());
 
-  Bits_t bits1, bits2;
-  bool   sign;
+  Bits_t bits1 = 0, bits2 = 0;
+  bool   sign = false;
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
@@ -720,8 +720,8 @@ void Firmap::analysis_fir_rem(Node &node, XEdge_iterator &inp_edges) {
 void Firmap::analysis_fir_div(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size());
 
-  Bits_t bits1;
-  bool   sign;
+  Bits_t bits1 = 0;
+  bool   sign = false;
 
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
@@ -748,8 +748,8 @@ void Firmap::analysis_fir_div(Node &node, XEdge_iterator &inp_edges) {
 void Firmap::analysis_fir_mul(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size() == 2);
 
-  Bits_t bits1, bits2;
-  bool   sign;
+  Bits_t bits1 = 0, bits2 = 0;
+  bool   sign = false;
 
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
@@ -773,8 +773,8 @@ void Firmap::analysis_fir_mul(Node &node, XEdge_iterator &inp_edges) {
 void Firmap::analysis_fir_add_sub(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size() == 2);
 
-  Bits_t bits1, bits2;
-  bool   sign;
+  Bits_t bits1 = 0, bits2 = 0;
+  bool   sign = false;
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {

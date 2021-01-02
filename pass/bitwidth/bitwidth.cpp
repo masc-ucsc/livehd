@@ -243,8 +243,8 @@ void Bitwidth::process_sum(Node &node, XEdge_iterator &inp_edges) {
 void Bitwidth::process_mult(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size());  // Dangling sum??? (delete)
 
-  int max_val;
-  int min_val;
+  int max_val = 0;
+  int min_val = 0;
   for (auto e : inp_edges) {
     auto it = bwmap.find(e.driver.get_compact());
     if (it != bwmap.end()) {

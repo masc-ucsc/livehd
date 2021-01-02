@@ -3,6 +3,6 @@ cc_library(
    name = "headers",
    hdrs = glob(["taskflow/**/*.hpp"]),
    includes = ["."],
-   copts = ["-Wno-error", "-O2"],
+   copts = ["-w", "-O2"],
    visibility = ["//visibility:public"],
 )

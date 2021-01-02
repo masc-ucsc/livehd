@@ -39,5 +39,5 @@ protected:
 
   unsigned int get_area(LGraph* lg);
 
-  constexpr static bool debug_print = true;
+  constexpr static bool debug_print = false;
 };

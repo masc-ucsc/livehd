@@ -8,7 +8,7 @@ cc_library(
        "cryptominisat5/cms_breakid.cpp", # No breakid compile option
 ]),
    hdrs = glob(["cryptominisat5/*.h"]),
-   copts = ["-Wno-error"],
+   copts = ["-w"],
    linkopts = ["-lpthread"],
    visibility = ["//visibility:public"],
    defines = ["USE_GAUSS","USE_ZLIB","cryptominisat5_EXPORTS"],
