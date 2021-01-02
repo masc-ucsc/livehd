@@ -1,7 +1,6 @@
-#include "pass_fplan.hpp"
-
 #include <string>
 
+#include "pass_fplan.hpp"
 #include "profile_time.hpp"
 
 void setup_pass_fplan() { Pass_fplan_makefp::setup(); }
@@ -31,7 +30,7 @@ Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", v
     auto t = profile_time::timer();
     if (var.get("hierarchical") == "true") {
       lg_hier_floorp hfp;
-      
+
       t.start();
       fmt::print("  traversing hierarchy...");
       hfp.load_lg(root_lg, path);

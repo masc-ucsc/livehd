@@ -7,5 +7,4 @@ public:
   void load_lg(LGraph* root, const std::string_view lgdb_path);
 
 private:
-  void add_layout(LGraph* existing_lg, LGraph* lg);
 };

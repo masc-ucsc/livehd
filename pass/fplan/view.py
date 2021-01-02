@@ -16,8 +16,8 @@ parser.add_argument('-s', '--size', type=int,
                     help='height and width of png output image', default=1200)
 parser.add_argument('-f', '--fontsize', type=int,
                     help='font size of all modules', default=25)
-parser.add_argument('-v', '--verbose', type=bool,
-                    help='verbose output', default=False)
+parser.add_argument('-v', '--verbose', action='store_true',
+                    help='verbose output')
 
 args = parser.parse_args()
 

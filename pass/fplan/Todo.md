@@ -6,10 +6,12 @@ Benchmarking tests (built using -c opt):
    - flat:
    - hier:
 
- Improvements:
- - Some way to visualize floorplans to check if they're correct
-   - ArchFP perl script doesn't work properly
-   - esesc perl script doesn't work properly either
+Misc:
+ - write test for archfp, and find a way to discover illegal floorplans (overlapping segments)
+ - some sort of check() method that verifies netlists and internal functionality
+   - correct number of nodes are present
+
+Improvements:
  - LGraph attributes
    - Node attributes and Node pin attributes already exist (attribute.hpp)
    - Add aspect ratio information to LGraphs
@@ -25,7 +27,6 @@ Style guide refactors:
  - getters and setters?
 
 Long term:
- - some sort of check() method that verifies netlists and internal functionality
  - a way to call BloBB or CompaSS directly, since they're really fast (faster than ArchFP? Need to test this...)
 
 
@@ -45,6 +46,3 @@ Easy:
  - add license stuff (incl lg_attribute.hpp)
  - update usage doc (http://lava.cs.virginia.edu/archfp/index.htm)
  - have bazel clone archfp from github
-
-Tried:
- - namespaces: none of the other passes are namespaced so whatever

@@ -9,6 +9,9 @@
 
 class floorplanner {
 public:
+
+  floorplanner() : root_layout(std::make_unique<geogLayout>()) {}
+
   // load a floorplan into ArchFP using verious kinds of traversals
   virtual void load_lg(LGraph* root, const std::string_view lgdb_path) = 0;
 
@@ -16,29 +19,25 @@ public:
   void create_floorplan(const std::string_view filename);
 
   ~floorplanner() {
-    for (auto& pair : attrs) {
-      geogLayout* l = pair.second.l.release();
+    for (auto& pair : layouts) {
+      geogLayout* l = pair.second.release();
       (void)l;
 
       // TODO: actually deleting geogLayouts segfaults for some reason...
       // delete l;
       // (pair.second.l.reset() also fails)
     }
+
+    geogLayout* l = root_layout.release();
+    (void)l;
   }
 
 protected:
-  LGraph* root_lg;
+  std::unique_ptr<geogLayout> root_layout;
 
-  struct Attr {
-    unsigned int                count = 0;
-    std::unique_ptr<geogLayout> l;
-  };
-
-  absl::flat_hash_map<LGraph*, Attr> attrs;
+  absl::flat_hash_map<LGraph*, std::unique_ptr<geogLayout>> layouts;
 
   unsigned int get_area(LGraph* lg);
-
-  void load_prep_lg(LGraph* root, const std::string_view lgdb_path);
 
   constexpr static bool debug_print = true;
 };
