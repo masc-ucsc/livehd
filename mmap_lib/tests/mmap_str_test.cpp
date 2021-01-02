@@ -42,7 +42,6 @@ bool do_check_sv(std::string_view str) {
 
 TEST_F(Mmap_str_test, const_expr_trival_cmp) {
 
-<<<<<<< HEAD
   mmap_lib::str long_a("hello_hello_hello_hello_hello_hello"); // not right, but it should compile
   constexpr mmap_lib::str a("hello");
 

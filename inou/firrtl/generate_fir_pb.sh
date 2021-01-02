@@ -13,9 +13,9 @@ pts='GCD_3bits GCD Coverage Shifts AddNot Decrementer PlusAnd RegXor Trivial Tri
 pts='ShiftRegister SimpleALU Stack VecSearch Accumulator Counter 
      DynamicMemorySearch LFSR16 MaxN Memo Mul Mux4 RealGCD SingleEvenFilter VecShiftRegister VecShiftRegisterParam
      VecShiftRegisterSimple VendingMachine VendingMachineSwitch  Adder4 Adder ByteSelector FullAdder HiLoMultiplier Life 
-     Parity ResetShiftRegister Risc LogShifter'
+     Parity ResetShiftRegister Risc LogShifter Cell'
 
-pts='Cell'
+pts='Life'
 
 CHISEL_PATH=~/chisel3
 FIRRTL_PATH=~/firrtl

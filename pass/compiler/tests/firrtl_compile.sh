@@ -13,12 +13,13 @@ pts_mem='Smem_simple Stack DynamicMemorySearch Memo'
 pts_hier='Life'
 
 # passed pattern pool
-pts='Cell RegisterSimple Register Adder4 Mux4 LogShifter SingleEvenFilter RegXor AddNot VendingMachineSwitch
-Coverage VendingMachine VecShiftRegister Counter VecSearch ResetShiftRegister
-Parity EnableShiftRegister GCD_3bits Flop Accumulator
-LFSR16 BundleConnect SubModule Decrementer Test1 Test2 Test3 Test6 TrivialAdd
-NotAnd Trivial Tail TrivialArith Shifts PlusAnd MaxN ByteSelector Darken
-HiLoMultiplier SimpleALU Mul VecShiftRegisterParam VecShiftRegisterSimple ' 
+pts='Cell RegisterSimple Register Adder4 Mux4 LogShifter SingleEvenFilter
+RegXor AddNot VendingMachineSwitch Coverage VendingMachine VecShiftRegister
+Counter VecSearch ResetShiftRegister Parity EnableShiftRegister GCD_3bits Flop
+Accumulator LFSR16 BundleConnect SubModule Decrementer Test1 Test2 Test3 Test6
+TrivialAdd NotAnd Trivial Tail TrivialArith Shifts PlusAnd MaxN ByteSelector
+Darken HiLoMultiplier SimpleALU Mul VecShiftRegisterParam
+VecShiftRegisterSimple ' 
 
 pts='Life '
 
@@ -69,6 +70,7 @@ firrtl_test() {
     echo "----------------------------------------------------"
 
     ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg hier:true"
+    # ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg"
     if [ $? -eq 0 ] && [ -f ${pt}.v ]; then
         echo "Successfully generate Verilog: ${pt}.v"
         rm -f  yosys_script.*
