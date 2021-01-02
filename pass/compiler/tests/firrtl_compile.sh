@@ -13,15 +13,13 @@ pts_mem='Smem_simple Stack DynamicMemorySearch Memo'
 pts_hier='Life'
 
 # passed pattern pool
-pts='RegisterSimple Register Adder4 Mux4 LogShifter SingleEvenFilter RegXor AddNot VendingMachineSwitch
+pts='Cell RegisterSimple Register Adder4 Mux4 LogShifter SingleEvenFilter RegXor AddNot VendingMachineSwitch
 Coverage VendingMachine VecShiftRegister Counter VecSearch ResetShiftRegister
 Parity EnableShiftRegister GCD_3bits Flop Accumulator
 LFSR16 BundleConnect SubModule Decrementer Test1 Test2 Test3 Test6 TrivialAdd
 NotAnd Trivial Tail TrivialArith Shifts PlusAnd MaxN ByteSelector Darken
 HiLoMultiplier SimpleALU Mul VecShiftRegisterParam VecShiftRegisterSimple ' 
 
-pts='Register'
-pts='Cell'
 pts='Life '
 
 LGSHELL=./bazel-bin/main/lgshell
@@ -101,10 +99,10 @@ firrtl_test() {
     fi
   done
 
-  # rm -f *.v
-  # rm -f *.dot
-  # rm -f lgcheck*
-  # rm -rf lgdb
+  rm -f *.v
+  rm -f *.dot
+  rm -f lgcheck*
+  rm -rf lgdb
 }
 
 firrtl_test "$pts"
