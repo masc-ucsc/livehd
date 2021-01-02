@@ -33,6 +33,12 @@ TEST_F(Mmap_str_test, small_strings) {
 bool do_check(const mmap_lib::str &str) {
   return (str == "hello");
 }
+bool do_check_string(const std::string &str) {
+  return (str == "hello");
+}
+bool do_check_sv(std::string_view str) {
+  return (str == "hello");
+}
 
 TEST_F(Mmap_str_test, const_expr_trival_cmp) {
 
@@ -45,6 +51,9 @@ TEST_F(Mmap_str_test, const_expr_trival_cmp) {
   std::string_view a_sv{"hello"};
 
   EXPECT_TRUE(do_check(a_sv));
+
+  EXPECT_TRUE(do_check_string("hello"));
+  EXPECT_TRUE(do_check_sv("hello"));
 
   fmt::print("a[0]:{} size:{}\n",a[0], a.size());
   fmt::print("a[1]:{} size:{}\n",a[1], a.size());
