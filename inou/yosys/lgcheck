@@ -173,8 +173,8 @@ fi
 #  exit 0
 #fi
 
-${YOSYS} -p " read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}; rename -top gold; prep -top gold ; design -stash gold;
-              read_verilog -sv ${GATE}; hierarchy ${TOP_STR}; rename -top gate; prep -top gate ; design -stash gate;
+${YOSYS} -p " read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}; opt; flatten ; rename -top gold; prep -top gold ; design -stash gold;
+              read_verilog -sv ${GATE}; hierarchy ${TOP_STR}; opt; flatten ; rename -top gate; prep -top gate ; design -stash gate;
               design -copy-from gold -as gold gold
               design -copy-from gate -as gate gate
 
