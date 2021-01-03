@@ -197,9 +197,6 @@ void Bitwidth::process_sra(Node &node, XEdge_iterator &inp_edges) {
     auto max    = a_bw.get_max().to_i();
     auto min    = a_bw.get_min().to_i();
     auto amount = n_bw.get_min().to_i();
-    /* max         = Lconst(max.get_raw_num() >> amount); */
-    /* min         = Lconst(min.get_raw_num() >> amount); */
-    /* Bitwidth_range bw(min, max); */
     max = floor(max/pow(2, amount));
     min = floor(min/pow(2, amount));
 
@@ -258,7 +255,6 @@ void Bitwidth::process_mult(Node &node, XEdge_iterator &inp_edges) {
       return;
     }
   }
-  fmt::print("DEBUG: ");
   Bitwidth_range(Lconst(min_val), Lconst(max_val)).dump();
   bwmap.insert_or_assign(node.get_driver_pin().get_compact(), Bitwidth_range(Lconst(min_val), Lconst(max_val)));
 }
@@ -625,6 +621,8 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
   if (parent_pending) {
     auto through_dpin = node_attr.get_sink_pin("name").get_driver_pin();
     bwmap.insert_or_assign(through_dpin.get_compact(), bw);
+    fmt::print("DEBUG through_dpin:{}\n", through_dpin.debug_name());
+    bw.dump();
   }
 }
 
@@ -751,13 +749,12 @@ void Bitwidth::bw_pass(LGraph *lg) {
   not_finished          = false;
 
   // note: lg input bits must be set by attr_set node, it will be handled through the algorithm runs
-
-
   lg->each_graph_input([this](Node_pin &dpin) {
     if (dpin.get_bits()) {
       Bitwidth_range bw;
       bw.set_sbits_range(dpin.get_bits());
       bwmap.insert_or_assign(dpin.get_compact(), bw);
+      fmt::print("DEBUG graph input:{}, bits:{}\n", dpin.debug_name(), dpin.get_bits());
     }
   }, hier);
 
