@@ -45,7 +45,7 @@ LGraph* Firmap::do_firrtl_mapping(LGraph *lg) {
         clone_subgraph_node(node, new_lg);
       continue;
     }
-    clone_lg_ops_node(node, new_lg);  // amap = as much as possible
+    clone_lg_ops_node(node, new_lg);  
   }
 
 

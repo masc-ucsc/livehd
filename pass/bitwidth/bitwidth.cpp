@@ -243,8 +243,8 @@ void Bitwidth::process_sum(Node &node, XEdge_iterator &inp_edges) {
 void Bitwidth::process_mult(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size());  // Dangling sum??? (delete)
 
-  int max_val = 0;
-  int min_val = 0;
+  int max_val = 1;
+  int min_val = 1;
   for (auto e : inp_edges) {
     auto it = bwmap.find(e.driver.get_compact());
     if (it != bwmap.end()) {
@@ -258,7 +258,8 @@ void Bitwidth::process_mult(Node &node, XEdge_iterator &inp_edges) {
       return;
     }
   }
-
+  fmt::print("DEBUG: ");
+  Bitwidth_range(Lconst(min_val), Lconst(max_val)).dump();
   bwmap.insert_or_assign(node.get_driver_pin().get_compact(), Bitwidth_range(Lconst(min_val), Lconst(max_val)));
 }
 
@@ -570,16 +571,9 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
   // copy parent's bw for some judgement and then update to attr_set value
   Bitwidth_range bw(0);
   bool parent_pending = false;
-  bool parent_is_ginp = false;
-  (void)parent_is_ginp;
-
-  bool parent_is_flop = false;
-  (void)parent_is_flop;
   
   if (node_attr.is_sink_connected("name")) {
     auto through_dpin = node_attr.get_sink_pin("name").get_driver_pin();
-    parent_is_ginp    = through_dpin.is_graph_input();
-    parent_is_flop    = through_dpin.get_node().is_type_flop();
     auto it           = bwmap.find(through_dpin.get_compact());
     if (it != bwmap.end()) {
       bw = it->second;
