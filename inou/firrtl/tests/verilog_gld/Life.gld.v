@@ -103,13 +103,11 @@ module Life(
   input        clock,
   input        reset,
   output       io_state_0_0,
-  output       io_state_0_1,
   output       io_state_1_0,
-  output       io_state_1_1,
   input        io_running,
   input        io_writeValue,
   input  [1:0] io_writeRowAddress,
-  input  [1:0] io_writeColAddress
+  input        io_writeColAddress
 );
   wire  Cell_clock; // @[Life.scala 59:52]
   wire  Cell_reset; // @[Life.scala 59:52]
@@ -139,34 +137,6 @@ module Life(
   wire  Cell_1_io_running; // @[Life.scala 59:52]
   wire  Cell_1_io_writeEnable; // @[Life.scala 59:52]
   wire  Cell_1_io_writeValue; // @[Life.scala 59:52]
-  wire  Cell_2_clock; // @[Life.scala 59:52]
-  wire  Cell_2_reset; // @[Life.scala 59:52]
-  wire  Cell_2_io_neighbors_0; // @[Life.scala 59:52]
-  wire  Cell_2_io_neighbors_1; // @[Life.scala 59:52]
-  wire  Cell_2_io_neighbors_2; // @[Life.scala 59:52]
-  wire  Cell_2_io_neighbors_3; // @[Life.scala 59:52]
-  wire  Cell_2_io_neighbors_4; // @[Life.scala 59:52]
-  wire  Cell_2_io_neighbors_5; // @[Life.scala 59:52]
-  wire  Cell_2_io_neighbors_6; // @[Life.scala 59:52]
-  wire  Cell_2_io_neighbors_7; // @[Life.scala 59:52]
-  wire  Cell_2_io_out; // @[Life.scala 59:52]
-  wire  Cell_2_io_running; // @[Life.scala 59:52]
-  wire  Cell_2_io_writeEnable; // @[Life.scala 59:52]
-  wire  Cell_2_io_writeValue; // @[Life.scala 59:52]
-  wire  Cell_3_clock; // @[Life.scala 59:52]
-  wire  Cell_3_reset; // @[Life.scala 59:52]
-  wire  Cell_3_io_neighbors_0; // @[Life.scala 59:52]
-  wire  Cell_3_io_neighbors_1; // @[Life.scala 59:52]
-  wire  Cell_3_io_neighbors_2; // @[Life.scala 59:52]
-  wire  Cell_3_io_neighbors_3; // @[Life.scala 59:52]
-  wire  Cell_3_io_neighbors_4; // @[Life.scala 59:52]
-  wire  Cell_3_io_neighbors_5; // @[Life.scala 59:52]
-  wire  Cell_3_io_neighbors_6; // @[Life.scala 59:52]
-  wire  Cell_3_io_neighbors_7; // @[Life.scala 59:52]
-  wire  Cell_3_io_out; // @[Life.scala 59:52]
-  wire  Cell_3_io_running; // @[Life.scala 59:52]
-  wire  Cell_3_io_writeEnable; // @[Life.scala 59:52]
-  wire  Cell_3_io_writeValue; // @[Life.scala 59:52]
   Cell Cell ( // @[Life.scala 59:52]
     .clock(Cell_clock),
     .reset(Cell_reset),
@@ -199,92 +169,32 @@ module Life(
     .io_writeEnable(Cell_1_io_writeEnable),
     .io_writeValue(Cell_1_io_writeValue)
   );
-  Cell Cell_2 ( // @[Life.scala 59:52]
-    .clock(Cell_2_clock),
-    .reset(Cell_2_reset),
-    .io_neighbors_0(Cell_2_io_neighbors_0),
-    .io_neighbors_1(Cell_2_io_neighbors_1),
-    .io_neighbors_2(Cell_2_io_neighbors_2),
-    .io_neighbors_3(Cell_2_io_neighbors_3),
-    .io_neighbors_4(Cell_2_io_neighbors_4),
-    .io_neighbors_5(Cell_2_io_neighbors_5),
-    .io_neighbors_6(Cell_2_io_neighbors_6),
-    .io_neighbors_7(Cell_2_io_neighbors_7),
-    .io_out(Cell_2_io_out),
-    .io_running(Cell_2_io_running),
-    .io_writeEnable(Cell_2_io_writeEnable),
-    .io_writeValue(Cell_2_io_writeValue)
-  );
-  Cell Cell_3 ( // @[Life.scala 59:52]
-    .clock(Cell_3_clock),
-    .reset(Cell_3_reset),
-    .io_neighbors_0(Cell_3_io_neighbors_0),
-    .io_neighbors_1(Cell_3_io_neighbors_1),
-    .io_neighbors_2(Cell_3_io_neighbors_2),
-    .io_neighbors_3(Cell_3_io_neighbors_3),
-    .io_neighbors_4(Cell_3_io_neighbors_4),
-    .io_neighbors_5(Cell_3_io_neighbors_5),
-    .io_neighbors_6(Cell_3_io_neighbors_6),
-    .io_neighbors_7(Cell_3_io_neighbors_7),
-    .io_out(Cell_3_io_out),
-    .io_running(Cell_3_io_running),
-    .io_writeEnable(Cell_3_io_writeEnable),
-    .io_writeValue(Cell_3_io_writeValue)
-  );
   assign io_state_0_0 = Cell_io_out; // @[Life.scala 65:24]
-  assign io_state_0_1 = Cell_1_io_out; // @[Life.scala 65:24]
-  assign io_state_1_0 = Cell_2_io_out; // @[Life.scala 65:24]
-  assign io_state_1_1 = Cell_3_io_out; // @[Life.scala 65:24]
+  assign io_state_1_0 = Cell_1_io_out; // @[Life.scala 65:24]
   assign Cell_clock = clock;
   assign Cell_reset = reset;
-  assign Cell_io_neighbors_0 = Cell_3_io_out; // @[Life.scala 89:46]
-  assign Cell_io_neighbors_1 = Cell_2_io_out; // @[Life.scala 89:46]
-  assign Cell_io_neighbors_2 = Cell_3_io_out; // @[Life.scala 89:46]
-  assign Cell_io_neighbors_3 = Cell_1_io_out; // @[Life.scala 89:46]
-  assign Cell_io_neighbors_4 = Cell_1_io_out; // @[Life.scala 89:46]
-  assign Cell_io_neighbors_5 = Cell_3_io_out; // @[Life.scala 89:46]
-  assign Cell_io_neighbors_6 = Cell_2_io_out; // @[Life.scala 89:46]
-  assign Cell_io_neighbors_7 = Cell_3_io_out; // @[Life.scala 89:46]
+  assign Cell_io_neighbors_0 = Cell_1_io_out; // @[Life.scala 89:46]
+  assign Cell_io_neighbors_1 = Cell_1_io_out; // @[Life.scala 89:46]
+  assign Cell_io_neighbors_2 = Cell_1_io_out; // @[Life.scala 89:46]
+  assign Cell_io_neighbors_3 = Cell_io_out; // @[Life.scala 89:46]
+  assign Cell_io_neighbors_4 = Cell_io_out; // @[Life.scala 89:46]
+  assign Cell_io_neighbors_5 = Cell_1_io_out; // @[Life.scala 89:46]
+  assign Cell_io_neighbors_6 = Cell_1_io_out; // @[Life.scala 89:46]
+  assign Cell_io_neighbors_7 = Cell_1_io_out; // @[Life.scala 89:46]
   assign Cell_io_running = io_running; // @[Life.scala 66:32]
-  assign Cell_io_writeEnable = io_writeRowAddress == 2'h0 & io_writeColAddress == 2'h0; // @[Life.scala 68:68]
+  assign Cell_io_writeEnable = io_writeRowAddress == 2'h0 & ~io_writeColAddress; // @[Life.scala 68:68]
   assign Cell_io_writeValue = io_writeValue; // @[Life.scala 67:35]
   assign Cell_1_clock = clock;
   assign Cell_1_reset = reset;
-  assign Cell_1_io_neighbors_0 = Cell_2_io_out; // @[Life.scala 89:46]
-  assign Cell_1_io_neighbors_1 = Cell_3_io_out; // @[Life.scala 89:46]
-  assign Cell_1_io_neighbors_2 = Cell_2_io_out; // @[Life.scala 89:46]
-  assign Cell_1_io_neighbors_3 = Cell_io_out; // @[Life.scala 89:46]
-  assign Cell_1_io_neighbors_4 = Cell_io_out; // @[Life.scala 89:46]
-  assign Cell_1_io_neighbors_5 = Cell_2_io_out; // @[Life.scala 89:46]
-  assign Cell_1_io_neighbors_6 = Cell_3_io_out; // @[Life.scala 89:46]
-  assign Cell_1_io_neighbors_7 = Cell_2_io_out; // @[Life.scala 89:46]
+  assign Cell_1_io_neighbors_0 = Cell_io_out; // @[Life.scala 89:46]
+  assign Cell_1_io_neighbors_1 = Cell_io_out; // @[Life.scala 89:46]
+  assign Cell_1_io_neighbors_2 = Cell_io_out; // @[Life.scala 89:46]
+  assign Cell_1_io_neighbors_3 = Cell_1_io_out; // @[Life.scala 89:46]
+  assign Cell_1_io_neighbors_4 = Cell_1_io_out; // @[Life.scala 89:46]
+  assign Cell_1_io_neighbors_5 = Cell_io_out; // @[Life.scala 89:46]
+  assign Cell_1_io_neighbors_6 = Cell_io_out; // @[Life.scala 89:46]
+  assign Cell_1_io_neighbors_7 = Cell_io_out; // @[Life.scala 89:46]
   assign Cell_1_io_running = io_running; // @[Life.scala 66:32]
-  assign Cell_1_io_writeEnable = io_writeRowAddress == 2'h0 & io_writeColAddress == 2'h1; // @[Life.scala 68:68]
+  assign Cell_1_io_writeEnable = io_writeRowAddress == 2'h1 & ~io_writeColAddress; // @[Life.scala 68:68]
   assign Cell_1_io_writeValue = io_writeValue; // @[Life.scala 67:35]
-  assign Cell_2_clock = clock;
-  assign Cell_2_reset = reset;
-  assign Cell_2_io_neighbors_0 = Cell_1_io_out; // @[Life.scala 89:46]
-  assign Cell_2_io_neighbors_1 = Cell_io_out; // @[Life.scala 89:46]
-  assign Cell_2_io_neighbors_2 = Cell_1_io_out; // @[Life.scala 89:46]
-  assign Cell_2_io_neighbors_3 = Cell_3_io_out; // @[Life.scala 89:46]
-  assign Cell_2_io_neighbors_4 = Cell_3_io_out; // @[Life.scala 89:46]
-  assign Cell_2_io_neighbors_5 = Cell_1_io_out; // @[Life.scala 89:46]
-  assign Cell_2_io_neighbors_6 = Cell_io_out; // @[Life.scala 89:46]
-  assign Cell_2_io_neighbors_7 = Cell_1_io_out; // @[Life.scala 89:46]
-  assign Cell_2_io_running = io_running; // @[Life.scala 66:32]
-  assign Cell_2_io_writeEnable = io_writeRowAddress == 2'h1 & io_writeColAddress == 2'h0; // @[Life.scala 68:68]
-  assign Cell_2_io_writeValue = io_writeValue; // @[Life.scala 67:35]
-  assign Cell_3_clock = clock;
-  assign Cell_3_reset = reset;
-  assign Cell_3_io_neighbors_0 = Cell_io_out; // @[Life.scala 89:46]
-  assign Cell_3_io_neighbors_1 = Cell_1_io_out; // @[Life.scala 89:46]
-  assign Cell_3_io_neighbors_2 = Cell_io_out; // @[Life.scala 89:46]
-  assign Cell_3_io_neighbors_3 = Cell_2_io_out; // @[Life.scala 89:46]
-  assign Cell_3_io_neighbors_4 = Cell_2_io_out; // @[Life.scala 89:46]
-  assign Cell_3_io_neighbors_5 = Cell_io_out; // @[Life.scala 89:46]
-  assign Cell_3_io_neighbors_6 = Cell_1_io_out; // @[Life.scala 89:46]
-  assign Cell_3_io_neighbors_7 = Cell_io_out; // @[Life.scala 89:46]
-  assign Cell_3_io_running = io_running; // @[Life.scala 66:32]
-  assign Cell_3_io_writeEnable = io_writeRowAddress == 2'h1 & io_writeColAddress == 2'h1; // @[Life.scala 68:68]
-  assign Cell_3_io_writeValue = io_writeValue; // @[Life.scala 67:35]
 endmodule

@@ -52,83 +52,45 @@ circuit Life :
     input clock : Clock
     input reset : UInt<1>
     output io_state_0_0 : UInt<1>
-    output io_state_0_1 : UInt<1>
     output io_state_1_0 : UInt<1>
-    output io_state_1_1 : UInt<1>
     input io_running : UInt<1>
     input io_writeValue : UInt<1>
     input io_writeRowAddress : UInt<2>
-    input io_writeColAddress : UInt<2>
+    input io_writeColAddress : UInt<1>
 
     inst Cell of Cell @[Life.scala 59:52]
     inst Cell_1 of Cell @[Life.scala 59:52]
-    inst Cell_2 of Cell @[Life.scala 59:52]
-    inst Cell_3 of Cell @[Life.scala 59:52]
     node _T = eq(io_writeRowAddress, UInt<1>("h0")) @[Life.scala 68:58]
     node _T_1 = eq(io_writeColAddress, UInt<1>("h0")) @[Life.scala 68:89]
     node _T_2 = and(_T, _T_1) @[Life.scala 68:68]
-    node _T_3 = eq(io_writeRowAddress, UInt<1>("h0")) @[Life.scala 68:58]
-    node _T_4 = eq(io_writeColAddress, UInt<1>("h1")) @[Life.scala 68:89]
+    node _T_3 = eq(io_writeRowAddress, UInt<1>("h1")) @[Life.scala 68:58]
+    node _T_4 = eq(io_writeColAddress, UInt<1>("h0")) @[Life.scala 68:89]
     node _T_5 = and(_T_3, _T_4) @[Life.scala 68:68]
-    node _T_6 = eq(io_writeRowAddress, UInt<1>("h1")) @[Life.scala 68:58]
-    node _T_7 = eq(io_writeColAddress, UInt<1>("h0")) @[Life.scala 68:89]
-    node _T_8 = and(_T_6, _T_7) @[Life.scala 68:68]
-    node _T_9 = eq(io_writeRowAddress, UInt<1>("h1")) @[Life.scala 68:58]
-    node _T_10 = eq(io_writeColAddress, UInt<1>("h1")) @[Life.scala 68:89]
-    node _T_11 = and(_T_9, _T_10) @[Life.scala 68:68]
     io_state_0_0 <= Cell.io_out @[Life.scala 65:24]
-    io_state_0_1 <= Cell_1.io_out @[Life.scala 65:24]
-    io_state_1_0 <= Cell_2.io_out @[Life.scala 65:24]
-    io_state_1_1 <= Cell_3.io_out @[Life.scala 65:24]
+    io_state_1_0 <= Cell_1.io_out @[Life.scala 65:24]
     Cell.clock <= clock
     Cell.reset <= reset
-    Cell.io_neighbors_0 <= Cell_3.io_out @[Life.scala 89:46]
-    Cell.io_neighbors_1 <= Cell_2.io_out @[Life.scala 89:46]
-    Cell.io_neighbors_2 <= Cell_3.io_out @[Life.scala 89:46]
-    Cell.io_neighbors_3 <= Cell_1.io_out @[Life.scala 89:46]
-    Cell.io_neighbors_4 <= Cell_1.io_out @[Life.scala 89:46]
-    Cell.io_neighbors_5 <= Cell_3.io_out @[Life.scala 89:46]
-    Cell.io_neighbors_6 <= Cell_2.io_out @[Life.scala 89:46]
-    Cell.io_neighbors_7 <= Cell_3.io_out @[Life.scala 89:46]
+    Cell.io_neighbors_0 <= Cell_1.io_out @[Life.scala 89:46]
+    Cell.io_neighbors_1 <= Cell_1.io_out @[Life.scala 89:46]
+    Cell.io_neighbors_2 <= Cell_1.io_out @[Life.scala 89:46]
+    Cell.io_neighbors_3 <= Cell.io_out @[Life.scala 89:46]
+    Cell.io_neighbors_4 <= Cell.io_out @[Life.scala 89:46]
+    Cell.io_neighbors_5 <= Cell_1.io_out @[Life.scala 89:46]
+    Cell.io_neighbors_6 <= Cell_1.io_out @[Life.scala 89:46]
+    Cell.io_neighbors_7 <= Cell_1.io_out @[Life.scala 89:46]
     Cell.io_running <= io_running @[Life.scala 66:32]
     Cell.io_writeEnable <= _T_2 @[Life.scala 68:36]
     Cell.io_writeValue <= io_writeValue @[Life.scala 67:35]
     Cell_1.clock <= clock
     Cell_1.reset <= reset
-    Cell_1.io_neighbors_0 <= Cell_2.io_out @[Life.scala 89:46]
-    Cell_1.io_neighbors_1 <= Cell_3.io_out @[Life.scala 89:46]
-    Cell_1.io_neighbors_2 <= Cell_2.io_out @[Life.scala 89:46]
-    Cell_1.io_neighbors_3 <= Cell.io_out @[Life.scala 89:46]
-    Cell_1.io_neighbors_4 <= Cell.io_out @[Life.scala 89:46]
-    Cell_1.io_neighbors_5 <= Cell_2.io_out @[Life.scala 89:46]
-    Cell_1.io_neighbors_6 <= Cell_3.io_out @[Life.scala 89:46]
-    Cell_1.io_neighbors_7 <= Cell_2.io_out @[Life.scala 89:46]
+    Cell_1.io_neighbors_0 <= Cell.io_out @[Life.scala 89:46]
+    Cell_1.io_neighbors_1 <= Cell.io_out @[Life.scala 89:46]
+    Cell_1.io_neighbors_2 <= Cell.io_out @[Life.scala 89:46]
+    Cell_1.io_neighbors_3 <= Cell_1.io_out @[Life.scala 89:46]
+    Cell_1.io_neighbors_4 <= Cell_1.io_out @[Life.scala 89:46]
+    Cell_1.io_neighbors_5 <= Cell.io_out @[Life.scala 89:46]
+    Cell_1.io_neighbors_6 <= Cell.io_out @[Life.scala 89:46]
+    Cell_1.io_neighbors_7 <= Cell.io_out @[Life.scala 89:46]
     Cell_1.io_running <= io_running @[Life.scala 66:32]
     Cell_1.io_writeEnable <= _T_5 @[Life.scala 68:36]
     Cell_1.io_writeValue <= io_writeValue @[Life.scala 67:35]
-    Cell_2.clock <= clock
-    Cell_2.reset <= reset
-    Cell_2.io_neighbors_0 <= Cell_1.io_out @[Life.scala 89:46]
-    Cell_2.io_neighbors_1 <= Cell.io_out @[Life.scala 89:46]
-    Cell_2.io_neighbors_2 <= Cell_1.io_out @[Life.scala 89:46]
-    Cell_2.io_neighbors_3 <= Cell_3.io_out @[Life.scala 89:46]
-    Cell_2.io_neighbors_4 <= Cell_3.io_out @[Life.scala 89:46]
-    Cell_2.io_neighbors_5 <= Cell_1.io_out @[Life.scala 89:46]
-    Cell_2.io_neighbors_6 <= Cell.io_out @[Life.scala 89:46]
-    Cell_2.io_neighbors_7 <= Cell_1.io_out @[Life.scala 89:46]
-    Cell_2.io_running <= io_running @[Life.scala 66:32]
-    Cell_2.io_writeEnable <= _T_8 @[Life.scala 68:36]
-    Cell_2.io_writeValue <= io_writeValue @[Life.scala 67:35]
-    Cell_3.clock <= clock
-    Cell_3.reset <= reset
-    Cell_3.io_neighbors_0 <= Cell.io_out @[Life.scala 89:46]
-    Cell_3.io_neighbors_1 <= Cell_1.io_out @[Life.scala 89:46]
-    Cell_3.io_neighbors_2 <= Cell.io_out @[Life.scala 89:46]
-    Cell_3.io_neighbors_3 <= Cell_2.io_out @[Life.scala 89:46]
-    Cell_3.io_neighbors_4 <= Cell_2.io_out @[Life.scala 89:46]
-    Cell_3.io_neighbors_5 <= Cell.io_out @[Life.scala 89:46]
-    Cell_3.io_neighbors_6 <= Cell_1.io_out @[Life.scala 89:46]
-    Cell_3.io_neighbors_7 <= Cell.io_out @[Life.scala 89:46]
-    Cell_3.io_running <= io_running @[Life.scala 66:32]
-    Cell_3.io_writeEnable <= _T_11 @[Life.scala 68:36]
-    Cell_3.io_writeValue <= io_writeValue @[Life.scala 67:35]
