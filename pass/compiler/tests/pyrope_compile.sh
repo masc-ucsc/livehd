@@ -11,7 +11,7 @@ pts='tuple_copy2 hier_tuple2 hier_tuple_io if nested_if reg__q_pin tuple_copy
      adder_stage hier_tuple3 lhs_wire lhs_wire2 scalar_tuple logic attr_set out_ssa
      ssa_rhs tuple_if counter counter_nested_if '
 
-pts='counter'
+# pts='counter'
 
 
 # pts='firrtl_tail reg_bits_set  reg_bits_set firrtl_tail2 firrtl_tail3 firrtl_gcd_3bits  tuple_copy2 '

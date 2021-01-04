@@ -33,8 +33,8 @@ void Lcompiler::add_pyrope_thread(std::shared_ptr<Lnast> ln) {
       gv.do_from_lgraph(lg, "local.raw"); 
   }
 
-  Cprop    cp(false, false);                // hier = false, gioc = false
-  Bitwidth bw(false, 10, global_bwmap);     // hier = false, max_iters = 10
+  Cprop    cp(false, false);                            // hier = false, gioc = false
+  Bitwidth bw(false, 10, global_flat_bwmap, global_hier_bwmap); // hier = false, max_iters = 10
   for (const auto &lg : local_lgs) {
     fmt::print("------------------------ Local Copy-Propagation ---------------------- (C-1)\n");
     cp.do_trans(lg);
@@ -102,8 +102,8 @@ void Lcompiler::add_firrtl_thread(std::shared_ptr<Lnast> ln) {
 
 void Lcompiler::global_io_connection() {
   Graphviz gv(true,  false, odir);
-  Cprop    cp(false, true);               // hier = false, at_gioc = true 
-  Bitwidth bw(true, 10, global_bwmap);    // hier = false, max_iters = 10
+  Cprop    cp(false, true);                            // hier = false, at_gioc = true 
+  Bitwidth bw(true, 10, global_flat_bwmap, global_hier_bwmap); // hier = false, max_iters = 10
   Gioc     gioc(path);
 
   for (auto &lg : lgs) {
@@ -158,7 +158,7 @@ void Lcompiler::global_firrtl_bits_analysis_map() {
 
 void Lcompiler::local_bitwidth_inference() {
   Graphviz gv(true, false, odir); 
-  Bitwidth bw(false, 10, global_bwmap);     // hier = false, max_iters = 10
+  Bitwidth bw(false, 10, global_flat_bwmap, global_hier_bwmap); // hier = false, max_iters = 10
   for (auto &lg: lgs) {
     fmt::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-1)\n", lg->get_name());
     bw.do_trans(lg);
@@ -182,7 +182,7 @@ void Lcompiler::local_bitwidth_inference() {
 
 void Lcompiler::global_bitwidth_inference() {
   Graphviz gv(true, false, odir);
-  Bitwidth bw(true, 10, global_bwmap);   // hier = true, max_iters = 10
+  Bitwidth bw(true, 10, global_flat_bwmap, global_hier_bwmap); // hier = true, max_iters = 10
 
   auto lgcnt = 0;
   auto hit = false;

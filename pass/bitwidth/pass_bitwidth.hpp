@@ -9,7 +9,8 @@
 #include "node_pin.hpp"
 #include "pass.hpp"
 
-using BWMap = absl::flat_hash_map<Node_pin::Compact, Bitwidth_range>;
+using BWMap_flat = absl::flat_hash_map<Node_pin::Compact_flat, Bitwidth_range>;
+using BWMap_hier = absl::flat_hash_map<Node_pin::Compact,      Bitwidth_range>;
 
 class Pass_bitwidth : public Pass {
 protected:
@@ -17,7 +18,8 @@ protected:
   bool must_perform_backward;
   bool hier;
   static void trans(Eprp_var &var);
-  BWMap bwmap;
+  BWMap_flat flat_bwmap;
+  BWMap_hier hier_bwmap;
 
 public:
   explicit Pass_bitwidth(const Eprp_var &var);

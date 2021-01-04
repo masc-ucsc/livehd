@@ -8,7 +8,8 @@
 #include "pass.hpp"
 #include "lgedgeiter.hpp"
 
-using BWMap = absl::flat_hash_map<Node_pin::Compact, Bitwidth_range>;
+using BWMap_flat = absl::flat_hash_map<Node_pin::Compact_flat, Bitwidth_range>;
+using BWMap_hier = absl::flat_hash_map<Node_pin::Compact,      Bitwidth_range>;
 
 class Bitwidth {
 protected:
@@ -21,7 +22,8 @@ protected:
   static Attr get_key_attr(std::string_view key);
 
   bool not_finished;
-  BWMap &bwmap; // reference the global bwmap outside
+  BWMap_flat &flat_bwmap; // global bwmap indexing with dpin_compact_flat, (lgid, nid)
+  BWMap_hier &hier_bwmap; // global bwmap indexing with dpin_compact, (hidx, nid)
 
   void process_const(Node &node);
   void process_not(Node &node, XEdge_iterator &inp_edges);
@@ -54,7 +56,7 @@ protected:
   void bw_pass(LGraph *lg);
 
 public:
-  Bitwidth (bool hier, int max_iterations, BWMap &bwmap);
+  Bitwidth (bool hier, int max_iterations, BWMap_flat &flat_bwmap, BWMap_hier &hier_bwmap);
   void do_trans(LGraph *orig);
   bool is_finished() const { return !not_finished; }
 };

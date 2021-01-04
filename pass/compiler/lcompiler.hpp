@@ -10,7 +10,8 @@
 #include "lnast.hpp"
 #include "likely.hpp"
 
-using BWMap = absl::flat_hash_map<Node_pin::Compact, Bitwidth_range>;
+using BWMap_flat = absl::flat_hash_map<Node_pin::Compact_flat, Bitwidth_range>;
+using BWMap_hier = absl::flat_hash_map<Node_pin::Compact,      Bitwidth_range>;
 
 class Lcompiler {
 private:
@@ -18,7 +19,8 @@ private:
   const std::string odir;
   const std::string_view top;
   const bool gviz;
-  BWMap global_bwmap;
+  BWMap_flat global_flat_bwmap;
+  BWMap_hier global_hier_bwmap;
 
 protected:
   std::mutex lgs_mutex;
