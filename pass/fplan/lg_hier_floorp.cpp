@@ -1,6 +1,6 @@
 #include "lg_hier_floorp.hpp"
 
-void lg_hier_floorp::create_module(LGraph* lg) {
+void Lg_hier_floorp::create_module(LGraph* lg) {
   (void)lg;
   /*
   attrs[lg].l = std::make_unique<geogLayout>();
@@ -11,7 +11,7 @@ void lg_hier_floorp::create_module(LGraph* lg) {
   */
 }
 
-void lg_hier_floorp::load_lg(LGraph* root, const std::string_view lgdb_path) {
+void Lg_hier_floorp::load_lg(LGraph* root, const std::string_view lgdb_path) {
   (void)root;
   (void)lgdb_path;
 

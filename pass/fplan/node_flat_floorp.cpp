@@ -1,6 +1,6 @@
 #include "node_flat_floorp.hpp"
 
-void node_flat_floorp::load_lg(LGraph* root, const std::string_view lgdb_path) {
+void Node_flat_floorp::load_lg(LGraph* root, const std::string_view lgdb_path) {
   (void)lgdb_path;
 
   for (auto n : root->fast(true)) {

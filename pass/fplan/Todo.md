@@ -18,25 +18,28 @@ Traversal improvements:
    - node size
    - floorplan taking into account node type (ArchFP has internals for this?)
  - Node hier:
-   - write it
+   - node size
  - Lgraph flat:
-   - 
+   - none
  - Lgraph hier:
    - fix it
 
 General:
+ - add node attribute for area
+   - area per node type?
+ - add/use node attribute for location
+
  - write floorplan information back hierarchy?
- - write test for archfp, and find a way to discover illegal floorplans (overlapping segments)
  - some sort of check() method that verifies netlists and internal functionality
+   - find a way to discover illegal floorplans (overlapping segments)?
    - correct number of nodes are present
  - LGraph attributes
    - Node attributes and Node pin attributes already exist (attribute.hpp)
    - Add aspect ratio information to LGraphs
    - Add placement hint info to LGraphs
- - Can we multithread ArchFP?
- - Check out the paper for ArchFP
+ - Can ArchFP be multithreaded?
+   - Check out the paper for ArchFP
    - see what can be improved on implementation
- - Write floorplan back into hierarchy tree?
 
 Style guide refactors:
  - make sure all class/type names are uppercase
@@ -45,8 +48,9 @@ Style guide refactors:
 
 Bugs:
  - calling delete on geogLayouts causes problems for some reason
+ - view.py output is flipped due to inverted vertical coords in cairo
 
 Easy:
  - add license stuff (incl lg_attribute.hpp)
- - update usage doc (http://lava.cs.virginia.edu/archfp/index.htm)
+ - update usage doc
  - have bazel clone archfp from github

@@ -4,7 +4,7 @@
 
 #include "lgedgeiter.hpp"
 
-unsigned int floorplanner::get_area(LGraph* lg) {
+unsigned int Lhd_floorplanner::get_area(LGraph* lg) {
   // use the number of nodes as an approximation of area
   unsigned int num_nodes = 0;
   for (auto node : lg->fast(true)) {
@@ -15,7 +15,7 @@ unsigned int floorplanner::get_area(LGraph* lg) {
   return num_nodes;
 }
 
-void floorplanner::create_floorplan(const std::string_view filename) {
+void Lhd_floorplanner::create_floorplan(const std::string_view filename) {
   bool success = root_layout->layout(AspectRatio, 1);
   if (!success) {
     throw std::runtime_error("unable to lay out floorplan!");
@@ -26,7 +26,7 @@ void floorplanner::create_floorplan(const std::string_view filename) {
   }
 }
 
-void floorplanner::analyze_floorplan() {
+void Lhd_floorplanner::analyze_floorplan() {
   if (!(root_layout)) {
     throw std::runtime_error("no floorplan generated!");
   }

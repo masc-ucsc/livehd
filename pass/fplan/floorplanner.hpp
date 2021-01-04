@@ -7,10 +7,10 @@
 #include "floorplan.hpp"
 #include "lgraph.hpp"
 
-class floorplanner {
+class Lhd_floorplanner {
 public:
 
-  floorplanner() : root_layout(std::make_unique<geogLayout>()) {}
+  Lhd_floorplanner() : root_layout(std::make_unique<geogLayout>()) {}
 
   // load a floorplan into ArchFP using verious kinds of traversals
   virtual void load_lg(LGraph* root, const std::string_view lgdb_path) = 0;
@@ -20,7 +20,7 @@ public:
 
   virtual void analyze_floorplan();
 
-  ~floorplanner() {
+  ~Lhd_floorplanner() {
     for (auto& pair : layouts) {
       geogLayout* l = pair.second.release();
       (void)l;

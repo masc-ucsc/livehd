@@ -2,7 +2,7 @@
 
 #include "floorplanner.hpp"
 
-class lg_hier_floorp : public floorplanner {
+class Lg_hier_floorp : public Lhd_floorplanner {
 public:
   void load_lg(LGraph* root, const std::string_view lgdb_path);
 

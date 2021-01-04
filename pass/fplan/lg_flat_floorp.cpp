@@ -1,6 +1,6 @@
 #include "lg_flat_floorp.hpp"
 
-void lg_flat_floorp::load_lg(LGraph* root, const std::string_view lgdb_path) {
+void Lg_flat_floorp::load_lg(LGraph* root, const std::string_view lgdb_path) {
   absl::flat_hash_map<LGraph*, unsigned int> count;
 
   std::function<void(LGraph*)> count_lgs = [&](LGraph* lg) {

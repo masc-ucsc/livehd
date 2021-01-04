@@ -26,9 +26,9 @@ Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", v
 
   std::string_view t_str = var.get("traversal");
 
-  auto t = profile_time::timer();
+  auto t = profile_time::Timer();
   if (t_str == "hier_lg") {
-    lg_hier_floorp hfp;
+    Lg_hier_floorp hfp;
 
     t.start();
     fmt::print("  traversing hierarchy...");
@@ -40,7 +40,7 @@ Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", v
     hfp.create_floorplan("lg_hier_floorplan.flp");
     fmt::print(" done ({} ms).\n", t.time());
   } else if (t_str == "flat_lg") {
-    lg_flat_floorp ffp;
+    Lg_flat_floorp ffp;
 
     t.start();
     fmt::print("  traversing hierarchy...");
@@ -52,7 +52,7 @@ Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", v
     ffp.create_floorplan("lg_flat_floorplan.flp");
     fmt::print(" done ({} ms).\n", t.time());
   } else if (t_str == "flat_node") {
-    node_flat_floorp nfp;
+    Node_flat_floorp nfp;
 
     // ArchFP doesn't handle large numbers of nodes being attached to a single geogLayout instance very well
     fmt::print("WARNING: this kind of traversal only works for small numbers of nodes.\n");
@@ -73,7 +73,7 @@ Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", v
 }
 
 void Pass_fplan_makefp::pass(Eprp_var& var) {
-  auto whole_t = profile_time::timer();
+  auto whole_t = profile_time::Timer();
 
   fmt::print("generating floorplan...\n");
   whole_t.start();
