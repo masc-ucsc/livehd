@@ -4,6 +4,8 @@
 
 #include "lg_flat_floorp.hpp"
 #include "lg_hier_floorp.hpp"
+#include "node_flat_floorp.hpp"
+
 #include "lgraph.hpp"
 #include "pass.hpp"
 #include "iassert.hpp"

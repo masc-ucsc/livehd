@@ -12,12 +12,23 @@ TODO: get a node-level floorplan going.  module level is useless for XOR chains.
  - XOR chain (100,000):
    - flat: 
 
-Misc:
+Traversal improvements:
+ - Node flat:
+   - more information
+   - node size
+   - floorplan taking into account node type (ArchFP has internals for this?)
+ - Node hier:
+   - write it
+ - Lgraph flat:
+   - 
+ - Lgraph hier:
+   - fix it
+
+General:
+ - write floorplan information back hierarchy?
  - write test for archfp, and find a way to discover illegal floorplans (overlapping segments)
  - some sort of check() method that verifies netlists and internal functionality
    - correct number of nodes are present
-
-Improvements:
  - LGraph attributes
    - Node attributes and Node pin attributes already exist (attribute.hpp)
    - Add aspect ratio information to LGraphs
@@ -31,16 +42,6 @@ Style guide refactors:
  - make sure all class/type names are uppercase
  - string ops -> abseil versions
  - getters and setters?
-
-
- - floorplan at node level
-   1. floorplan nodes
-   2. create node attribute for size
-   3. exclude hier and attr nodes, and others?
-   4. write node floorplan information back into node?
-
-
- - floorplan taking into account node type (ArchFP has internals for this, I think)
 
 Bugs:
  - calling delete on geogLayouts causes problems for some reason
