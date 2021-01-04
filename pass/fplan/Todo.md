@@ -1,11 +1,12 @@
 Benchmarking tests (built using -c opt):
+TODO: get a node-level floorplan going.  module level is useless for XOR chains.
  - BOOM RISC-V core:
    - flat: 
    - hier: ?
  - XOR chain (100):
-   - flat: 
+   - flat:
  - XOR chain (10,000):
-   - flat: 
+   - flat:
  - XOR chain (50,000):
    - flat: 
  - XOR chain (100,000):

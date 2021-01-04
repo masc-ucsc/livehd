@@ -18,6 +18,8 @@ public:
   // create a floorplan and dump to file
   void create_floorplan(const std::string_view filename);
 
+  virtual void analyze_floorplan();
+
   ~floorplanner() {
     for (auto& pair : layouts) {
       geogLayout* l = pair.second.release();
@@ -39,5 +41,5 @@ protected:
 
   unsigned int get_area(LGraph* lg);
 
-  constexpr static bool debug_print = false;
+  constexpr static bool debug_print = true;
 };

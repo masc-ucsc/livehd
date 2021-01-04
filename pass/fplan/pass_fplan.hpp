@@ -19,19 +19,3 @@ public:
 private:
   LGraph* root_lg;
 };
-
-class Pass_fplan_analyzefp : public Pass {
-public:
-  Pass_fplan_analyzefp(const Eprp_var& var);
-
-  static void setup();
-
-  static void pass(Eprp_var& v);
-
-private:
-  // Half-Perimeter Wire Length
-  void find_hpwl();
-
-  // generic floorplan information
-  void find_info();
-};

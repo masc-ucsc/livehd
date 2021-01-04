@@ -25,3 +25,11 @@ void floorplanner::create_floorplan(const std::string_view filename) {
     outputHotSpotFooter(fos);
   }
 }
+
+void floorplanner::analyze_floorplan() {
+  if (!(root_layout)) {
+    throw std::runtime_error("no floorplan generated!");
+  }
+  
+  
+}
