@@ -1,6 +1,7 @@
 #!/bin/bash
 rm -rf ./lgdb
 FIRRTL_LEVEL='lo'
+FIRRTL_LEVEL='hi'
 
 pts_long_lec='GCD '
 
@@ -18,10 +19,12 @@ Decrementer Test1 Test2 Test3 Test6 TrivialAdd NotAnd Trivial Tail TrivialArith
 Shifts PlusAnd MaxN ByteSelector Darken HiLoMultiplier SimpleALU Mul
 VecShiftRegisterParam VecShiftRegisterSimple ' 
 
-# pts=''
+pts='Trivial '
+pts='GCD_3bits '
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
+POST_IO_RENAME=./inou/firrtl/post_io_renaming.py
 PATTERN_PATH=./inou/firrtl/tests/proto
 
 if [ ! -f $LGSHELL ]; then
@@ -87,6 +90,10 @@ firrtl_test() {
     echo "----------------------------------------------------"
     echo "Logic Equivalence Check"
     echo "----------------------------------------------------"
+    
+    if [ "${FIRRTL_LEVEL}" == "hi" ]; then
+        python ${POST_IO_RENAME} "${pt}.v"
+    fi
 
     ${LGCHECK} --implementation=${pt}.v --reference=./inou/firrtl/tests/verilog_gld/${pt}.gld.v
 

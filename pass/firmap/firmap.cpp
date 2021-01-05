@@ -32,8 +32,8 @@ LGraph* Firmap::do_firrtl_mapping(LGraph *lg) {
 
   // I. clone graph main body nodes
   for (auto node : lg->fast()) {
-    if (node.out_edges().size() == 0)
-      continue;
+    /* if (node.out_edges().size() == 0) */
+    /*   continue; */
 
     auto op = node.get_type_op();
     fmt::print("Node Map {}\n", node.debug_name());
@@ -51,8 +51,8 @@ LGraph* Firmap::do_firrtl_mapping(LGraph *lg) {
 
   // II. clone graph main body edges
   for (auto node : lg->fast()) {
-    if (node.out_edges().size() == 0)
-      continue;
+    /* if (node.out_edges().size() == 0) */
+    /*   continue; */
 
     auto op = node.get_type_op();
     fmt::print("Edge Map {}\n", node.debug_name());
