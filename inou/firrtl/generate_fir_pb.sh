@@ -15,7 +15,11 @@ pts='ShiftRegister SimpleALU Stack VecSearch Accumulator Counter
      VecShiftRegisterSimple VendingMachine VendingMachineSwitch  Adder4 Adder ByteSelector FullAdder HiLoMultiplier Life 
      Parity ResetShiftRegister Risc LogShifter Cell'
 
-pts='Cell_alone'
+pts='Trivial Tail TrivialArith
+Shifts PlusAnd MaxN ByteSelector Darken HiLoMultiplier SimpleALU Mul
+VecShiftRegisterParam VecShiftRegisterSimple ' 
+
+pts='Trivial'
 
 CHISEL_PATH=~/chisel3
 FIRRTL_PATH=~/firrtl
@@ -60,17 +64,17 @@ do
   $FIRRTL_EXE -i ${CHIRRTL_SRC_PATH}/${pt}/${pt}.fir -X verilog
   $FIRRTL_EXE -i ${CHIRRTL_SRC_PATH}/${pt}/${pt}.fir -X high
   $FIRRTL_EXE -i ${CHIRRTL_SRC_PATH}/${pt}/${pt}.fir -X low
+  $FIRRTL_EXE -i ${CHIRRTL_SRC_PATH}/${pt}/${pt}.fir -X none --custom-transforms firrtl.transforms.WriteHighPB
   $FIRRTL_EXE -i ${CHIRRTL_SRC_PATH}/${pt}/${pt}.fir -X none --custom-transforms firrtl.transforms.WriteLowPB
-  # $FIRRTL_EXE -i ${pt}.fir -X high
   # $FIRRTL_EXE -i ${pt}.fir -X none --custom-transforms firrtl.transforms.WriteChPB
   # $FIRRTL_EXE -i ${pt}.fir -X none --custom-transforms firrtl.transforms.WriteHighPB
 
 
-  if [ ! -f $CHISEL_PATH/${pt}.fir ]; then
-    echo "ERROR: Lower-level firrl ${pt}.fir is not generated"
+  if [ ! -f $CHISEL_PATH/${pt}.lo.fir ]; then
+    echo "ERROR: Low-level firrl ${pt}.fir is not generated"
     exit 1
-  elif [ ! -f $CHISEL_PATH/${pt}*.pb ]; then
-    echo "ERROR: Protobuf ${pt}.pb is not generated"
+  elif [ ! -f $CHISEL_PATH/${pt}.lo.pb ]; then
+    echo "ERROR: Protobuf ${pt}.lo.pb is not generated"
     exit 1
   elif [ ! -f $CHISEL_PATH/${pt}.v ]; then
     echo "ERROR: Verilog ${pt}.v is not generated"
@@ -83,6 +87,8 @@ do
 
   mv -f ${pt}.lo.fir $LIVEHD_FIRRTL_PATH/firrtl
   mv -f ${pt}.lo.pb  $LIVEHD_FIRRTL_PATH/proto
+  mv -f ${pt}.hi.fir $LIVEHD_FIRRTL_PATH/firrtl
+  mv -f ${pt}.hi.pb  $LIVEHD_FIRRTL_PATH/proto
   mv -f ${pt}.v      $LIVEHD_FIRRTL_PATH/verilog_gld/${pt}.gld.v
   rm -f ${pt}.fir 
 done

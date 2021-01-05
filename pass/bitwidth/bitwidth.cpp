@@ -652,7 +652,10 @@ void Bitwidth::insert_tposs_nodes(Node &node_attr, Fwd_edge_iterator::Fwd_iter &
 
 
 void Bitwidth::process_attr_set_propagate(Node &node_attr) {
-  auto             attr_dpin = node_attr.get_driver_pin("Y");
+  if (node_attr.out_connected_pins().size() == 0)
+    return;
+
+  auto attr_dpin = node_attr.get_driver_pin("Y");
   std::string_view dpin_name;
   if (attr_dpin.has_name())
     dpin_name = attr_dpin.get_name();

@@ -101,7 +101,7 @@ protected:
   Node_pin     create_const                 (LGraph *lg, std::string_view const_str);
 
   // attribute related
-  bool check_new_var_chain (const Lnast_nid &lnidx_opr);
+  bool is_new_var_chain (const Lnast_nid &lnidx_opr);
   bool check_is_attrset_ta (Node &node, std::string &var_name, std::string &attr_name, Lconst &bits, Node &chain_head);
   bool check_is_tup_assign (Node node) { return !node.setup_sink_pin("value").is_connected();};
   bool is_hier_inp_bits_set(const Lnast_nid &lnidx_ta);

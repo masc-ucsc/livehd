@@ -762,7 +762,7 @@ Node_pin Lnast_tolg::setup_field_dpin(LGraph *lg, std::string_view field_name) {
   return dpin;
 }
 
-bool Lnast_tolg::check_new_var_chain(const Lnast_nid &lnidx_opr) {
+bool Lnast_tolg::is_new_var_chain(const Lnast_nid &lnidx_opr) {
   std::string_view vname_1st_child;
   bool             one_of_rhs_is_lhs = false;
 
@@ -797,7 +797,7 @@ Node Lnast_tolg::setup_node_opr_and_lhs(LGraph *lg, const Lnast_nid &lnidx_opr, 
     lg_ntype_op = decode_lnast_op(lnidx_opr);
     lg_opr_node = lg->create_node(lg_ntype_op);
   }
-  bool is_new_var_chain = check_new_var_chain(lnidx_opr);
+  /* bool is_new_var_chain = check_new_var_chain(lnidx_opr); */
 
   // when #reg_0 at lhs, the register has not been created before, create it
   Node_pin reg_din_spin;
@@ -822,7 +822,7 @@ Node Lnast_tolg::setup_node_opr_and_lhs(LGraph *lg, const Lnast_nid &lnidx_opr, 
     }
   }
 
-  if (!is_new_var_chain) {
+  if (!is_new_var_chain(lnidx_opr)) {
     name2dpin[lhs_name] = lg_opr_node.setup_driver_pin("Y");
     lg_opr_node.get_driver_pin("Y").set_name(lhs_name);
     setup_dpin_ssa(name2dpin[lhs_name], lhs_vname, lnast->get_subs(lhs));
@@ -833,8 +833,9 @@ Node Lnast_tolg::setup_node_opr_and_lhs(LGraph *lg, const Lnast_nid &lnidx_opr, 
     return lg_opr_node;
   }
 
-  if (is_new_var_chain && vname2attr_dpin.find(lhs_vname) != vname2attr_dpin.end()) {
+  if (is_new_var_chain(lnidx_opr) && vname2attr_dpin.find(lhs_vname) != vname2attr_dpin.end()) {
     auto aset_node          = lg->create_node(Ntype_op::AttrSet);
+    fmt::print("DEBUG aset_node:{}\n", aset_node.debug_name());
     auto aset_chain_spin    = aset_node.setup_sink_pin("chain");
     auto aset_ancestor_dpin = vname2attr_dpin[lhs_vname];
     lg->add_edge(aset_ancestor_dpin, aset_chain_spin);
@@ -932,17 +933,17 @@ Node_pin Lnast_tolg::setup_node_assign_and_lhs(LGraph *lg, const Lnast_nid &lnid
 
   auto assign_node = lg->create_node(Ntype_op::Or);
 
-  bool is_new_var_chain = check_new_var_chain(lnidx_opr);
+  /* bool is_new_var_chain = check_new_var_chain(lnidx_opr); */
   /* fmt::print("is_new_var_chain:{}\n", is_new_var_chain); */
 
-  if (!is_new_var_chain) {
+  if (!is_new_var_chain(lnidx_opr)) {
     name2dpin[lhs_name] = assign_node.setup_driver_pin();  // or as assign
     name2dpin[lhs_name].set_name(lhs_name);
     setup_dpin_ssa(name2dpin[lhs_name], lhs_vname, lnast->get_subs(lhs));
     return assign_node.setup_sink_pin("A");
   }
 
-  if (is_new_var_chain && vname2attr_dpin.find(lhs_vname) != vname2attr_dpin.end()) {
+  if (is_new_var_chain(lnidx_opr) && vname2attr_dpin.find(lhs_vname) != vname2attr_dpin.end()) {
     auto aset_node          = lg->create_node(Ntype_op::AttrSet);
     auto aset_chain_spin    = aset_node.setup_sink_pin("chain");
     auto aset_ancestor_dpin = vname2attr_dpin[lhs_vname];
