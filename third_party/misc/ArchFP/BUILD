@@ -11,4 +11,13 @@ cc_library(
     copts = ["-O3", "-Wno-error"],
     )
 
+cc_test(
+    name = "floorplan_test",
+    srcs = ["tests/archfp_test.cpp"],
+    deps = [
+        "@gtest//:gtest_main",
+        ":archfp",
+        ],
+    )
+
 # makefile and other non-source files are kept but not used.
