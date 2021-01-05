@@ -1,3 +1,5 @@
+// test file with super deep hierarchy to test hierarchy
+
 module leaf1(input [14:0] ai, output [14:0] ao);
   assign ao = (~ai == 15'h0) ? 15'h5 : 15'h0;
 endmodule

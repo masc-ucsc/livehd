@@ -555,27 +555,27 @@ bool Node::has_color() const { return Ann_node_color::ref(current_g)->has_key(ge
 
 // LCOV_EXCL_START
 void Node::dump() {
-  auto cell_name = Ntype::get_name(get_type_op());
-  fmt::print("node:{} nid:{} type:{} ", debug_name(), nid, cell_name);
+  fmt::print("nid: {} type: {} lgraph: {} ", nid, get_type_name(), current_g->get_name());
   if (get_type_op() == Ntype_op::LUT) {
-    fmt::print(" lut={}\n", get_type_lut().to_pyrope());
+    fmt::print(" lut = {}\n", get_type_lut().to_pyrope());
   } else if (get_type_op() == Ntype_op::Const) {
-    fmt::print(" const={}\n", get_type_const().to_pyrope());
+    fmt::print(" const = {}\n", get_type_const().to_pyrope());
   } else {
     fmt::print("\n");
   }
   for (const auto &edge : inp_edges()) {
-    fmt::print("  inp bits:{:<3} pid:{:<2} name:{:<30} <- nid:{} idx:{} pid:{:<2} name:{}\n",
+    fmt::print("  inp bits: {:<3} pid: {:<2} name: {:<30} <- nid: {} idx: {} pid: {:<2} name: {}\n",
                edge.get_bits(),
                edge.sink.get_pid(),
                edge.sink.debug_name(),
                edge.driver.get_node().nid,
                edge.driver.get_idx(),
                edge.driver.get_pid(),
-               edge.driver.debug_name());
+               edge.driver.debug_name()
+               );
   }
   for (const auto &edge : out_edges()) {
-    fmt::print("  out bits:{:<3} pid:{:<2} name:{:<30} -> nid:{} idx:{} pid:{:<2} name:{}\n",
+    fmt::print("  out bits: {:<3} pid: {:<2} name: {:<30} -> nid: {} idx: {} pid: {:<2} name: {}\n",
                edge.get_bits(),
                edge.driver.get_pid(),
                edge.driver.debug_name(),

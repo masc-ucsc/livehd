@@ -4,7 +4,7 @@
 
 class Lg_hier_floorp : public Lhd_floorplanner {
 public:
-  void load_lg(LGraph* root, const std::string_view lgdb_path);
+  void load(LGraph* root, const std::string_view lgdb_path);
 
 private:
   void create_module(LGraph* lg);

@@ -144,6 +144,7 @@ public:
 
   static inline constexpr bool is_synthesizable(Ntype_op op) {
     return op != Ntype_op::Sub
+        && op != Ntype_op::Tposs
         && op != Ntype_op::TupAdd
         && op != Ntype_op::TupGet
         && op != Ntype_op::TupRef
@@ -262,5 +263,3 @@ public:
   }
 
 };
-
-

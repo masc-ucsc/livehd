@@ -1,4 +1,4 @@
-// verilog file with less hierarchy than hier_test
+// test file with less hierarchy than hier_test
 
 module leaf1(input [15:0] x, output [15:0] y);
   assign y = (x == 16'h0) ? 16'h5 : 16'h3;

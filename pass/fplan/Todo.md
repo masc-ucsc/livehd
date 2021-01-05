@@ -14,22 +14,19 @@ TODO: get a node-level floorplan going.  module level is useless for XOR chains.
 
 Traversal improvements:
  - Node flat:
+ - Node hier:
    - more information
    - node size
    - floorplan taking into account node type (ArchFP has internals for this?)
- - Node hier:
-   - node size
+   - floorplan taking into account wire length (do a pass to determine wire length, then put stuff nearby using geography hints)
  - Lgraph flat:
    - none
  - Lgraph hier:
    - fix it
 
 General:
- - add node attribute for area
-   - area per node type?
+ - add area per node type
  - add/use node attribute for location
-
- - write floorplan information back hierarchy?
  - some sort of check() method that verifies netlists and internal functionality
    - find a way to discover illegal floorplans (overlapping segments)?
    - correct number of nodes are present
@@ -40,6 +37,7 @@ General:
  - Can ArchFP be multithreaded?
    - Check out the paper for ArchFP
    - see what can be improved on implementation
+   - use other layout methods (bagLayout)?
 
 Style guide refactors:
  - make sure all class/type names are uppercase
@@ -49,6 +47,9 @@ Style guide refactors:
 Bugs:
  - calling delete on geogLayouts causes problems for some reason
  - view.py output is flipped due to inverted vertical coords in cairo
+
+LiveHD:
+ - Node colors: make new color sets?
 
 Easy:
  - add license stuff (incl lg_attribute.hpp)

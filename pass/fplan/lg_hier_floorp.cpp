@@ -11,7 +11,7 @@ void Lg_hier_floorp::create_module(LGraph* lg) {
   */
 }
 
-void Lg_hier_floorp::load_lg(LGraph* root, const std::string_view lgdb_path) {
+void Lg_hier_floorp::load(LGraph* root, const std::string_view lgdb_path) {
   (void)root;
   (void)lgdb_path;
 

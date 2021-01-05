@@ -1220,7 +1220,7 @@ Bwd_edge_iterator LGraph::backward(bool visit_sub) { return Bwd_edge_iterator(th
 Fast_edge_iterator LGraph::fast(bool visit_sub) { return Fast_edge_iterator(this, visit_sub); }
 
 void LGraph::dump() {
-  fmt::print("lgraph name:{} size:{}\n", name, node_internal.size());
+  fmt::print("lgraph name: {}, size: {}\n", name, node_internal.size());
 
 #if 0
   int n6=0;
@@ -1249,12 +1249,14 @@ void LGraph::dump() {
 #endif
 
   for (const auto *io_pin : get_self_sub_node().get_io_pins()) {
-    fmt::print("io {} pos:{} pid:{} {}\n",
+    fmt::print("  lgraph io name: {}, port pos: {}, pid: {}, i/o: {}\n",
                io_pin->name,
                io_pin->graph_io_pos,
                get_self_sub_node().get_instance_pid(io_pin->name),
                io_pin->dir == Sub_node::Direction::Input ? "input" : "output");
   }
+
+  fmt::print("\n");
 
 #if 1
   for (size_t i = 0; i < node_internal.size(); ++i) {
@@ -1268,16 +1270,20 @@ void LGraph::dump() {
   }
 #endif
 
+  fmt::print("\n");
   each_sub_fast([this](Node &node, Lg_type_id lgid2) {
     LGraph *child = LGraph::open(get_path(), node.get_type_sub());
 
-    fmt::print("  lgid:{} sub:{}\n", node.debug_name(), lgid2, child->get_name());
+    fmt::print("  subnode name:{}, lgid:{}, child lgraph name: {}\n", node.debug_name(), lgid2, child->get_name());
   });
 
+  /*
+  // not sure why this is here
   fmt::print("FORWARD....\n");
   for(auto node:forward()) {
     node.dump();
   }
+  */
 }
 
 void LGraph::dump_down_nodes() {

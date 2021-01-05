@@ -8,7 +8,7 @@ void setup_pass_fplan() { Pass_fplan_makefp::setup(); }
 void Pass_fplan_makefp::setup() {
   auto m = Eprp_method("pass.fplan.makefp", "generate a floorplan from an LGraph", &Pass_fplan_makefp::pass);
 
-  m.add_label_optional("traversal", "LGraph traversal method to use, valid options are \"hier_lg\", \"flat_lg\", and \"flat_node\"", "flat_node");
+  m.add_label_optional("traversal", "LGraph traversal method to use, valid options are \"hier_lg\", \"flat_lg\", \"flat_node\", and \"hier_node\"", "hier_node");
 
   register_pass(m);
 }
@@ -32,7 +32,7 @@ Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", v
 
     t.start();
     fmt::print("  traversing hierarchy...");
-    hfp.load_lg(root_lg, path);
+    hfp.load(root_lg, path);
     fmt::print(" done ({} ms).\n", t.time());
 
     t.start();
@@ -44,7 +44,7 @@ Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", v
 
     t.start();
     fmt::print("  traversing hierarchy...");
-    ffp.load_lg(root_lg, path);
+    ffp.load(root_lg, path);
     fmt::print(" done ({} ms).\n", t.time());
 
     t.start();
@@ -52,19 +52,31 @@ Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", v
     ffp.create_floorplan("lg_flat_floorplan.flp");
     fmt::print(" done ({} ms).\n", t.time());
   } else if (t_str == "flat_node") {
-    Node_flat_floorp nfp;
+    Node_flat_floorp nffp;
 
     // ArchFP doesn't handle large numbers of nodes being attached to a single geogLayout instance very well
     fmt::print("WARNING: this kind of traversal only works for small numbers of nodes.\n");
 
     t.start();
     fmt::print("  traversing hierarchy...");
-    nfp.load_lg(root_lg, path);
+    nffp.load(root_lg, path);
     fmt::print(" done ({} ms).\n", t.time());
 
     t.start();
     fmt::print("  creating floorplan...");
-    nfp.create_floorplan("node_flat_floorplan.flp");
+    nffp.create_floorplan("node_flat_floorplan.flp");
+    fmt::print(" done ({} ms).\n", t.time());
+  } else if (t_str == "hier_node") {
+    Node_hier_floorp nhfp;
+
+    t.start();
+    fmt::print("  traversing hierarchy...");
+    nhfp.load(root_lg, path);
+    fmt::print(" done ({} ms).\n", t.time());
+
+    t.start();
+    fmt::print("  creating floorplan...");
+    nhfp.create_floorplan("node_hier_floorplan.flp");
     fmt::print(" done ({} ms).\n", t.time());
   } else {
     std::string errstr = "unknown traversal method ";

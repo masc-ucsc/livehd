@@ -13,7 +13,7 @@ public:
   Lhd_floorplanner() : root_layout(std::make_unique<geogLayout>()) {}
 
   // load a floorplan into ArchFP using verious kinds of traversals
-  virtual void load_lg(LGraph* root, const std::string_view lgdb_path) = 0;
+  virtual void load(LGraph* root, const std::string_view lgdb_path) = 0;
 
   // create a floorplan and dump to file
   void create_floorplan(const std::string_view filename);
