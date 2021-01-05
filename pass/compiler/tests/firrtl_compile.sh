@@ -19,8 +19,17 @@ Decrementer Test1 Test2 Test3 Test6 TrivialAdd NotAnd Trivial Tail TrivialArith
 Shifts PlusAnd MaxN ByteSelector Darken HiLoMultiplier SimpleALU Mul
 VecShiftRegisterParam VecShiftRegisterSimple ' 
 
-pts='Trivial '
-pts='GCD_3bits '
+pts_hifirrtl_todo='SimpleALU Test1 Test6 LFSR16 Accumulator ByteSelector Parity ResetShiftRegister Counter Coverage Life Cell_alone Adder4 Mux4 LogShifter SingleEvenFilter
+VecShiftRegister BundleConnect SubModule PlusAnd MaxN VecShiftRegisterParam
+VecShiftRegisterSimple VecSearch Mul VendingMachineSwitch VendingMachine'
+
+pts='RegisterSimple Register RegXor AddNot EnableShiftRegister GCD_3bits Flop
+Decrementer Test2 Test3 TrivialAdd NotAnd Trivial Tail TrivialArith Shifts
+Darken HiLoMultiplier 
+' 
+
+
+
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
