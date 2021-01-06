@@ -1715,7 +1715,6 @@ void Lnast_tolg::dfs_try_create_flattened_inp(LGraph *lg, Node_pin &cur_node_spi
   bool        is_leaf   = false;
   std::string new_hier_name;
   if (cur_ntype == Ntype_op::TupGet) {
-    fmt::print("DEBUG @TG:{}\n", cur_node.debug_name());
     inp_artifacts[chain_head.get_compact()].insert(cur_node);  // only remove the artifact tup_gets
     auto [tup_name, field_name, key_pos] = Cprop::get_tuple_name_key(cur_node);
     if (!field_name.empty()) {
@@ -1743,7 +1742,6 @@ void Lnast_tolg::dfs_try_create_flattened_inp(LGraph *lg, Node_pin &cur_node_spi
   }
 
   if (is_leaf) {
-    fmt::print("DEBUG @leaf:{}\n", cur_node.debug_name());
     Node_pin ginp;
     if (!lg->is_graph_input(hier_name))
       ginp = lg->add_graph_input(hier_name, Port_invalid, 0);

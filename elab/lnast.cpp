@@ -907,7 +907,7 @@ void Lnast::ssa_lhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
       type.is_logical_op() || type.is_unary_op()  || 
       type.is_nary_op()    || type.is_tuple_get()) {
     const auto lhs_name = get_name(lhs_nid);
-    if (lhs_name.substr(0,3) == "___")
+    if (!lhs_name.empty() && lhs_name.substr(0,3) == "___")
       return;
 
     update_global_lhs_ssa_cnt_table(lhs_nid);

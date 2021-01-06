@@ -1,7 +1,7 @@
 #!/bin/bash
 rm -rf ./lgdb
 FIRRTL_LEVEL='lo'
-# FIRRTL_LEVEL='hi'
+FIRRTL_LEVEL='hi'
 
 pts_long_lec='GCD '
 
@@ -19,19 +19,28 @@ Decrementer Test1 Test2 Test3 Test6 TrivialAdd NotAnd Trivial Tail TrivialArith
 Shifts PlusAnd MaxN ByteSelector Darken HiLoMultiplier SimpleALU Mul
 VecShiftRegisterParam VecShiftRegisterSimple ' 
 
-# pts_hifirrtl_todo='SimpleALU Test1 Test6 LFSR16 Accumulator ByteSelector Parity ResetShiftRegister Counter Coverage Life Cell_alone Adder4 Mux4 LogShifter SingleEvenFilter
-# VecShiftRegister BundleConnect SubModule PlusAnd MaxN VecShiftRegisterParam
-# VecShiftRegisterSimple VecSearch Mul VendingMachineSwitch VendingMachine'
+pts_hifirrtl_todo='Test6 LFSR16 Accumulator ByteSelector ResetShiftRegister Counter Life Cell_alone Adder4 Mux4 LogShifter SingleEvenFilter
+VecShiftRegister BundleConnect SubModule PlusAnd MaxN VecShiftRegisterParam
+VecShiftRegisterSimple VecSearch VendingMachineSwitch VendingMachine'
 
-# pts='MaxN RegisterSimple Register RegXor AddNot EnableShiftRegister GCD_3bits Flop
-# Decrementer Test2 Test3 TrivialAdd NotAnd Trivial Tail TrivialArith Shifts
-# Darken HiLoMultiplier Max2 
-# ' 
+pts='MaxN RegisterSimple Register RegXor AddNot EnableShiftRegister GCD_3bits Flop
+Decrementer Test2 Test3 TrivialAdd NotAnd Trivial Tail TrivialArith Shifts
+Darken HiLoMultiplier Max2 Coverage 
+' 
 
-
-# pts='Test1'
-# pts='SimpleALU'
 # pts='Mul'
+# pts='SimpleALU'
+# pts='Test1'
+# pts='Test6'
+# pts='LFSR16'
+# pts='Accumulator'
+# pts='ByteSelector'
+# pts='ResetShiftRegister'
+# pts='Counter'
+# pts='Adder4'
+# pts='Mux4'
+# pts='LogShifter'
+# pts='SingleEvenFilter'
 # pts='Parity'
 
 
@@ -118,10 +127,10 @@ firrtl_test() {
     fi
   done
 
-  rm -f *.v
-  rm -f *.dot
-  rm -f lgcheck*
-  rm -rf lgdb
+  # rm -f *.v
+  # rm -f *.dot
+  # rm -f lgcheck*
+  # rm -rf lgdb
 }
 
 firrtl_test "$pts"
