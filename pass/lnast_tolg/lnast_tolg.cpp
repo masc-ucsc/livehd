@@ -835,7 +835,6 @@ Node Lnast_tolg::setup_node_opr_and_lhs(LGraph *lg, const Lnast_nid &lnidx_opr, 
 
   if (is_new_var_chain(lnidx_opr) && vname2attr_dpin.find(lhs_vname) != vname2attr_dpin.end()) {
     auto aset_node          = lg->create_node(Ntype_op::AttrSet);
-    fmt::print("DEBUG aset_node:{}\n", aset_node.debug_name());
     auto aset_chain_spin    = aset_node.setup_sink_pin("chain");
     auto aset_ancestor_dpin = vname2attr_dpin[lhs_vname];
     lg->add_edge(aset_ancestor_dpin, aset_chain_spin);
@@ -1125,6 +1124,9 @@ void Lnast_tolg::process_ast_attr_set_op(LGraph *lg, const Lnast_nid &lnidx_aset
     lg->add_edge(vn_dpin, vn_spin);
   } else if (name2dpin.find(aset_ancestor_name) != name2dpin.end()) {
     vn_dpin = name2dpin[aset_ancestor_name];
+    lg->add_edge(vn_dpin, vn_spin);
+  } else if (name2dpin.find(name) != name2dpin.end()) {
+    vn_dpin = name2dpin[name];
     lg->add_edge(vn_dpin, vn_spin);
   }
 
@@ -1647,7 +1649,46 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(LGraph *lg) {
       ginp.connect_sink(spin);
     }
   }
+
+  post_process_ginp_attr_connections(lg);
 }
+
+void Lnast_tolg::post_process_ginp_attr_connections(LGraph *lg) {
+  // final process to reconnect ginp-> normal_node as ginp -> attr_set_node -> normal_node if any
+  lg->each_graph_input([](Node_pin &ginp) {
+    if (ginp.get_name() == "%")
+      return;
+
+    // identtify the attr_set node of this ginp if any
+    Node_pin attr_set_dpin;
+    
+    for (auto &e : ginp.out_edges()) {
+      auto sink_node = e.sink.get_node();
+      auto sink_ntype = sink_node.get_type_op();
+      if (sink_ntype == Ntype_op::AttrSet && ginp.out_edges().size() == 1)
+        return;
+
+      if (sink_ntype == Ntype_op::AttrSet) 
+        attr_set_dpin = sink_node.setup_driver_pin("Y");
+        
+    }
+    
+    if (attr_set_dpin.is_invalid())
+      return;
+
+    for (auto &e : ginp.out_edges()) {
+      auto sink_node = e.sink.get_node();
+      auto sink_ntype = sink_node.get_type_op();
+      if (sink_ntype == Ntype_op::AttrSet) 
+        continue;
+      
+      attr_set_dpin.connect_sink(e.sink);
+      e.del_edge();
+    }
+  });
+}
+
+
 
 void Lnast_tolg::try_create_flattened_inp(LGraph *lg) {
   auto uinp = lg->get_graph_input("$");
@@ -1674,6 +1715,7 @@ void Lnast_tolg::dfs_try_create_flattened_inp(LGraph *lg, Node_pin &cur_node_spi
   bool        is_leaf   = false;
   std::string new_hier_name;
   if (cur_ntype == Ntype_op::TupGet) {
+    fmt::print("DEBUG @TG:{}\n", cur_node.debug_name());
     inp_artifacts[chain_head.get_compact()].insert(cur_node);  // only remove the artifact tup_gets
     auto [tup_name, field_name, key_pos] = Cprop::get_tuple_name_key(cur_node);
     if (!field_name.empty()) {
@@ -1686,7 +1728,7 @@ void Lnast_tolg::dfs_try_create_flattened_inp(LGraph *lg, Node_pin &cur_node_spi
     }
   } else if (cur_ntype == Ntype_op::Or && cur_node.inp_edges().size() == 1) {
     for (auto &e : cur_node.out_edges()) {
-      dfs_try_create_flattened_inp(lg, e.sink, new_hier_name, chain_head);
+      dfs_try_create_flattened_inp(lg, e.sink, hier_name, chain_head);
     }
   } else if (cur_ntype == Ntype_op::TupAdd) {
     if (check_is_tup_assign(cur_node)) {
@@ -1701,6 +1743,7 @@ void Lnast_tolg::dfs_try_create_flattened_inp(LGraph *lg, Node_pin &cur_node_spi
   }
 
   if (is_leaf) {
+    fmt::print("DEBUG @leaf:{}\n", cur_node.debug_name());
     Node_pin ginp;
     if (!lg->is_graph_input(hier_name))
       ginp = lg->add_graph_input(hier_name, Port_invalid, 0);

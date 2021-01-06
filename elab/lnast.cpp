@@ -240,13 +240,11 @@ void Lnast::trans_tuple_opr_handle_a_statement(const Lnast_nid &psts_nid, const 
 
   auto dot_nid     = opr_nid;
   auto c0_dot      = get_first_child(dot_nid); //c0 = intermediate target
-  auto c1_dot      = get_sibling_next(c0_dot);
-  auto c1_dot_name = get_name(c1_dot);
-
+  auto c1_dot_name = get_name(get_sibling_next(c0_dot));
 
   if (get_parent(psts_nid) == get_root()) {
     dot2local_tuple_chain(psts_nid, dot_nid);
-  } else if (check_tuple_table_parents_chain(psts_nid, c1_dot_name)) {
+  } else if (c1_dot_name.substr(0,3) != "___" && check_tuple_table_parents_chain(psts_nid, c1_dot_name)) {
       Lnast_nid cond_nid(-1,-1);
       bool  is_else_sts = false;
       find_cond_nid(psts_nid, cond_nid, is_else_sts);
@@ -269,7 +267,6 @@ void Lnast::find_cond_nid(const Lnast_nid &psts_nid, Lnast_nid &cond_nid, bool &
       is_else_sts = true;
     }
   }
-  // FIXME: think about the case for cstatements
 }
 
 void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid) {
@@ -342,7 +339,6 @@ void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid)
   // is rhs
   // change node semantic from dot/set->tuple_get
   if (paired_type.is_assign()) {
-
     ref_data(dot_nid)->type = Lnast_ntype::create_tuple_get();
     auto c0_tg     = get_first_child(dot_nid);
     auto c0_assign = get_first_child(paired_nid);
@@ -354,8 +350,6 @@ void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid)
   } else {
     ref_data(dot_nid)->type = Lnast_ntype::create_tuple_get();
   }
-  
-
 }
 
 /*******
@@ -908,9 +902,10 @@ void Lnast::ssa_lhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
     respect_latest_global_lhs_ssa(lhs_nid);
 
 
-  if (type.is_assign() || type.is_dp_assign() || type.is_as() || 
-      type.is_tuple()  || type.is_attr_set()  || type.is_func_call() ||
-      type.is_logical_op() || type.is_unary_op() || type.is_nary_op()) {
+  if (type.is_assign()     || type.is_dp_assign() || type.is_as() || 
+      type.is_tuple()      || type.is_attr_set()  || type.is_func_call() ||
+      type.is_logical_op() || type.is_unary_op()  || 
+      type.is_nary_op()    || type.is_tuple_get()) {
     const auto lhs_name = get_name(lhs_nid);
     if (lhs_name.substr(0,3) == "___")
       return;
