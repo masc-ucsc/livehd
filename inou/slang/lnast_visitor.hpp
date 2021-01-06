@@ -22,6 +22,7 @@ protected:
   std::unique_ptr<Lnast> lnast;
   std::vector<std::string> verilogList;
   std::vector<std::string> operandList;
+  enum operators {AND,OR,XOR,NOT};
 
 public:
   Lnast_visitor(slang::Compilation& _compilation, const size_t& _numErrors, uint32_t _errorLimit);
