@@ -132,41 +132,24 @@ master_root: (13 bytes or 104bits -2 code)
 1: 4x16+2x19  (6)
 0: 4x15+3x14  (7)
 
+## mmap_lib projects
 
-## New Visitor Set
+* mmap_vset finish
+    * iterator: find: returns an iterator  begin/end to allow an iterator
+    * Use contains(key): to make it easy to port back/forth with abseil
+    * Add tests with Node_pin::Compact and Node::Compact
+* mmap_str
+    * Implement class
+    * replace sting_view/string for mmap_lib::str
+    * Replace the string_view storage from mmap_map to use the new mmap_lib::str
+* mmap_vector delete
+* Each structure mmap_vector, mmap_map, mmap_bimap, ... mmap_str should have a test and bench
 
-Nodes and Node_pins IDs are likely to be continuous. Instead of using a normal set map, we could optimize
-to use a map with 64 bitmap entry.
+## ACT (Async) output
 
-
-```
-Visitor_set<Node, hier> set("path","file"); // persistant
-Visitor_set<Node, hier> set(top_lg); // ephemeral (not persistant)
-```
-
-```
-set.insert(node);
-set.contains(node);
-for(auto node:set) 
-  ...
-}
-set.insert(pin);
-set.contains(pin);
-for(auto pin:set) 
-  ...
-}
-```
-
-For the set to create nodes (with pointers) it needs to access the
-graph_library when unloaded (only if persistent).
-
-The index in both pin and node is (ID>>6), and then there is a uint64_t
-presence bit for each ID. The reason is that a dense set will have ~32x space
-saving, and a sparse set is by definition small so not significant overhead.
-
-
-Being able handle Node/Pins directly will make the creation faster (building
-from a compact with hierarchy needs to find the current_g which is slow).
+Once pyrope with Fluid is in the flow, we could use Pyrope to program async designs too.
+It may be interesting to output ACT (https://avlsi.csl.yale.edu/act/doku.php) to interface
+with AVLSI flow.
 
 ## New Memoize Map
 
@@ -273,10 +256,17 @@ Dependence: lnast_tolg must be completed first
 Main features:
 
 * Pyrope tree-sitter grammar
-* Atom integration
+* Atom and neovim integration
 * Atom go definition, highlight, and attribute
 * Atom capacity to query LNAST/Lgraph generated grammar for bit-width. The incremental grammar passed to LNAST, passed to Lgraph,
   and incremental bit-width inference.
+* neovim highlight, indent, fold support
+* Integrate with atom-hide as extra language
+
+
+In addition to the packages, there should be an iterator that use the incremental builder to support incremental changes.
+
+* Generate a lnast out of the tree-sitter pyrope grammar
 
 ## Parallel forward/backward traversal
 
@@ -311,21 +301,27 @@ and traverse to aggregate.
 The goal is to aim at 16 cores and achieve 10x speedup for those larger
 bitwidth/cprop tasks.
 
-## Lgraph partition/decomposition/coloring
+## Lgraph partition/decomposition
 
-Implement several partitioning/coloring algorithms in Lgraph. The
-attributes/colors could be used for synthesis/placement/...
+Implement several partitioning algorithms in Lgraph. Each partition has a
+different attribute. The attributes/partitions could be used for
+synthesis/placement/...
 
 Dependence: none
 
 Main features:
 
-* Implement some fast decomposition algorithms:
+* Break graph partitions in disjoin sets and areas that do not have cross optimization (disjoin). Similar to MockTurtle partition method (separate by flops, large adders/multipliers/dividers).
+* Mincut partitioning. Use with https://github.com/SebastianSchlag/kahypar for min-cut
+* Port ESSENT acycling partitioning to C++. This reads a LGraph (or hierarchical lgraphs) and partitions the graph to several acycling partitions.
+* Live/Incremental partition. Given 2 graphs, find matching "partitions" across the graphs that finish in equivalent points (DAC paper has more details)
+
+Optional partitionings:
 * "Bottom-Up Disjoint-Support Decomposition Based on Cofactor and Boolean Difference Analysis" https://ieeexplore.ieee.org/abstract/document/7357181/
 * "Bi-decomposition of large Boolean functions using blocking edge graphs" https://dl.acm.org/citation.cfm?id=2133553
-* Break graph partitions in disjoin sets and areas that do not have cross optimization (disjoin)
-* Mark graph with hypergraph partition
-* Patch traversal so that we have fast/forward/backward for a "color graph"
+
+Optional traversals:
+* It would be good to have extensions on the fast/forward/backward iterators that accept a "partition" to traverse instead of the whole graph
 
 ## Parallel and Hierarchical Synthesis with Mockturtle
 
@@ -341,7 +337,7 @@ Main features:
 
 ## Bring Back Incremental Synthesis to Lgraph
 
-WARNING: Traversal/color depdendence
+WARNING: Traversal depdendence
 
 Dependence: none
 
@@ -441,7 +437,7 @@ Main features:
 
 Implement a floorplanner for large Lgraph designs (firesim target).
 
-Dependence: coloring
+Dependence: partitioning
 
 Main features:
 
@@ -449,7 +445,7 @@ Main features:
 * Placed blocks do not need boundaries, just centers (analytical placer will handle the shape.
 * Implement a more traditional floorplanner leveraging min-cut.
 * Do hierarchy. Hierarchy preserves symmetry. Bassed on "A hierarchical approach for generating regular ﬂoorplans"
-* Different partitions are marked with different colors.
+* Different partitions are marked with different partitions.
 
 Some related papers in clustering:
 * FADE: Graph dra wing, clustering and visual abstraction
@@ -514,7 +510,7 @@ Main features:
 
 Leverage the incremental and push it further to make Lgraph the ECO flow for open source
 
-Dependence: bring back incremental synthesis, coloring, and SAT solver
+Dependence: bring back incremental synthesis, partitioning, and SAT solver
 
 Main features:
 
@@ -754,7 +750,7 @@ Integrate EPFL mockturtle (https://github.com/lsils/mockturtle) with Lgraph. The
 
 Some tasks that were not finished that a potential future project can address: (Good undergraduate projects)
 
-* Split the graph coloring code out of pass/mockturtle to pass/coloring
+* Split the graph partitioning code out of pass/mockturtle to pass
 * Extend the LUTs to have "bit-width". If a LUT operates over a "bus", it can have a multi-bit input per port".
 * Avoid simple NOTs by having negated ports. E.g: 0-3 are possitive, ports 4-7 are negated inputs.
 * Go over the [cleanup.md](cleanup.md) pending tasks.
@@ -998,6 +994,63 @@ Main features:
  * hot reload console. Mostly allow drag variables from/to windows.
  * source/waveform/search windows can be controlled from console
  * allow to load/save list of commands
+
+
+# Summer Intern Projects (2-3 months)
+
+## Migrate many of the rules to bazel_rules_hdl
+
+Bazel rules HDL is a new repo to have HDL bazel rules. LiveHD has many
+rules/packages like yosys, boolector, cryptominsat, mockturtle... THe idea is
+to get these outside at bazel_rules_hdl so that they can be used by other
+external projects. As the packages get exported, it will require to understand
+bazel and changes in toolchains.
+
+https://github.com/mithro/bazel_rules_hdl
+
+## Random CHISEL/Verilog/Pyrope generator
+
+Create a python/ruby/C++ program that generates pseudo-random programs in
+several languages (CHISEL/Verilog/Pyrope). The idea is that the same program
+can be implemented in multiple ways but all should have the same result
+(simulation and LEC).
+
+## Iterators
+
+We have fast/forward with and without hierarchy. Several improvements can
+be done to make it more useful.
+
+* backward iterator
+* Start iterators (forward/backward from a given position
+* Allow to run a subset of the graph (method based). A method passed to the iterator returns true/false indicating if the node is part of the requested traversal.
+
+Blocks like mockturtle will significantly benefit from such iterator
+
+## unbitwidth Local and Global bitwidth
+
+This pass is needed to create less verbose CHISEL and Pyrope code generation. 
+
+The LGraph can have bitwidth information for each dpin. This is needed for
+Verilog code generation, but not needed for Pyrope or CHISEL.  CHISEL can
+perform local bitwidth inference and Pyrope can perform global bitwidth
+inference.
+
+A new pass should remove redundant bitwidth information. The information is
+redundant because the pass/bitwidth can regenerate it if there is enough
+details. The goal is to create a pass/unbitwidth that removes either local or
+global bitwidth. The information left should be enough for the bitwidth pass to
+regenerate it.
+
+* Local bitwidth: It is possible to leave the bitwidth information in many
+places and it will have the same results, but for CHISEL the inputs should be
+sized. The storage (memories/flops) should have bitwidth when can not be
+inferred from the inputs.
+
+* Global bitwidth: Pyrope bitwidth inference goes across the call hierarchy.
+This means that a module could have no bitwidth information at all. We start
+from the leave nodes. If all the bits can be inferred given the inputs, the
+module should have no bitwidth. In that case the bitwidth can be inferred from
+outside.
 
 
 

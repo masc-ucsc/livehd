@@ -37,7 +37,7 @@ Pass_bitwidth::Pass_bitwidth(const Eprp_var &var) : Pass("pass.bitwidth", var) {
 void Pass_bitwidth::trans(Eprp_var &var) {
   Pass_bitwidth p(var);
 
-  Bitwidth bw(p.hier, p.max_iterations);
+  Bitwidth bw(p.hier, p.max_iterations, p.flat_bwmap, p.hier_bwmap);
 
   std::vector<const LGraph *> lgs;
   for (const auto &lg : var.lgs) {

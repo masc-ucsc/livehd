@@ -74,7 +74,6 @@ $ less trivial.json
 - Load RocketChip (a RISC-V core) to the DB for the first time
   ```
   $ ./bazel-bin/main/lgshell
-  livehd> files path:projects/rocketchip/ |> inou.liveparse
   livehd> inou.yosys.tolg files:lgdb/parse/file_freechips.rocketchip.system.DefaultConfig.v
   livehd> lgraph.open name:RocketTile |> pass.sample.wirecount
   ```
@@ -85,6 +84,13 @@ $ less trivial.json
   ```
 Other example projects are located in the `projects` folder.  Keep in mind that the `BoomConfig` verilog file contains almost 500,000 lines of code!
 
+- Perform a pass over BoomTile
+  ```
+  $ ./bazel-bin/main/lgshell
+  livehd> inou.yosys.tolg files:projects/boom/AsyncResetReg.v,projects/boom/SimDTM.v,projects/boom/boom.system.TestHarness.BoomConfig.v
+  livehd> lgraph.match |> lgraph.stats
+  ```
+
 ### Low level directed build
 
 - To compile an individual pass:
@@ -92,27 +98,10 @@ Other example projects are located in the `projects` folder.  Keep in mind that 
   $ bazel build -c dbg //pass/sample:pass_sample
   $ bazel build -c dbg //inou/yosys:all
   ```
-- To build a Yosys module:
+- To build a direct Yosys executable that has LiveHD embedded:
   ```
   $ bazel build -c dbg //inou/yosys:all
-  ```
-- To read a module with Yosys directly:
-  ```
-  $ yosys -m ./bazel-bin/inou/yosys/liblgraph_yosys.so
-  yosys> read_verilog -sv ./inou/yosys/tests/trivial.v
-  yosys> proc
-  yosys> opt -fast
-  yosys> pmuxtree
-  yosys> memory_dff
-  yosys> memory_share
-  yosys> memory_collect
-  yosys> yosys2lg
-  ```
-- To create a Verilog file from LGraph:
-  ```
-  yosys -m ./bazel-bin/inou/yosys/liblgraph_yosys.so
-  yosys> lg2yosys -name trivial
-  yosys> write_verilog trivial.v
+  $./bazel-bin/inou/yosys/yosys2
   ```
 
 ## Documentation

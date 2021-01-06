@@ -51,16 +51,17 @@ void Hierarchy_tree::regenerate_step(LGraph *lg, const Hierarchy_index &parent) 
 
     auto child_lgid = lg->get_type_sub(it.first.get_nid());
 
-#ifndef NDEBUG
     auto node = it.first.get_node(lg);
+#ifndef NDEBUG
     I(node.is_type_sub());
     I(child_lgid == node.get_type_sub());
 #endif
 
-    auto *child_lg  = lg->get_library().try_find_lgraph(child_lgid);
+    auto *child_lg  = lg->get_library().try_find_lgraph(child_lgid); // faster
     if (child_lg==nullptr) {
-      I(!node.is_type_sub_present());
-      continue;
+      child_lg = node.ref_type_sub_lgraph();
+      if (child_lg==nullptr)
+        continue;
     }
 
     //Hierarchy_data data(child_lgid, node.get_nid());

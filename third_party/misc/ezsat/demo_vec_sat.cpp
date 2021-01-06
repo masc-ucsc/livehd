@@ -1,5 +1,5 @@
 /*
- *  ezSAT -- A simple and easy to use CNF generator for SAT solvers
+ *  lezSAT -- A simple and easy to use CNF generator for SAT solvers
  *
  *  Copyright (C) 2013  Clifford Wolf <clifford@clifford.at>
  *
@@ -17,8 +17,9 @@
  *
  */
 
-#include "ezminisat.hpp"
 #include <cassert>
+
+#include "lezminisat.hpp"
 
 #define INIT_X 123456789
 #define INIT_Y 362436069
@@ -38,7 +39,7 @@ uint32_t xorshift128() {
   return w;
 }
 
-void xorshift128_sat(ezSAT &sat, std::vector<int> &x, std::vector<int> &y, std::vector<int> &z, std::vector<int> &w) {
+void xorshift128_sat(lezSAT &sat, std::vector<int> &x, std::vector<int> &y, std::vector<int> &z, std::vector<int> &w) {
   std::vector<int> t = sat.vec_xor(x, sat.vec_shl(x, 11));
   x                  = y;
   y                  = z;
@@ -48,7 +49,7 @@ void xorshift128_sat(ezSAT &sat, std::vector<int> &x, std::vector<int> &y, std::
 
 void find_xorshift128_init_state(uint32_t &x, uint32_t &y, uint32_t &z, uint32_t &w, uint32_t w1, uint32_t w2, uint32_t w3,
                                  uint32_t w4) {
-  ezMiniSAT sat;
+  lezMiniSAT sat;
 
   std::vector<int> vx = sat.vec_var("x", 32);
   std::vector<int> vy = sat.vec_var("y", 32);
@@ -77,7 +78,7 @@ void find_xorshift128_init_state(uint32_t &x, uint32_t &y, uint32_t &z, uint32_t
 
   // sat.printDIMACS(stdout);
 
-  if(!sat.solve(modelExpressions, modelValues)) {
+  if (!sat.solve(modelExpressions, modelValues)) {
     fprintf(stderr, "SAT solver failed to find a model!\n");
     abort();
   }
@@ -104,7 +105,7 @@ int main() {
   printf("z = %9u (%s)\n", (unsigned int)z, z == INIT_Z ? "ok" : "ERROR");
   printf("w = %9u (%s)\n", (unsigned int)w, w == INIT_W ? "ok" : "ERROR");
 
-  if(x != INIT_X || y != INIT_Y || z != INIT_Z || w != INIT_W)
+  if (x != INIT_X || y != INIT_Y || z != INIT_Z || w != INIT_W)
     abort();
 
   printf("\n");

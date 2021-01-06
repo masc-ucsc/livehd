@@ -28,6 +28,7 @@ cc_binary(
             "//pass/gioc:pass_gioc",
             "//pass/cprop:pass_cprop",
             "//pass/fplan:fplan",
+            "//pass/label:pass_label",
             "//pass/lec:pass_lec",
             "//pass/lnast_fromlg:pass_lnast_fromlg",
             "//pass/lnast_tolg:pass_lnast_tolg",
@@ -35,7 +36,9 @@ cc_binary(
             "//pass/mockturtle:pass_mockturtle",
             "//pass/punch:pass_punch",
             "//pass/sample:pass_sample",
+            "//pass/sat_opt:pass_sat_opt",
             "//pass/semantic:pass_semantic",
+            "//pass/submatch:pass_submatch",
             "//pass/compiler:pass_compiler",
 
             #add dependencies to new passes here

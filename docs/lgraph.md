@@ -90,6 +90,18 @@ my_map[node_pin2.get_compact()] = 58;
 ...
 ```
 
+* get the node_pin back from a Node_pin::Compact
+```
+Node_pin dpin(lg, some_dpin.get_compact())
+```
+
+* get the node back from a Node::Compact
+```
+Node node(lg, some_node.get_compact())
+```
+
+
+
 * create a LGraph input(output) with the name
 ```
 new_node_pin = lg->add_graph_input(std::string_view)
@@ -607,6 +619,8 @@ propagation to indicate that those bits are useless.
 
 #### Other Considerations
 
+
+
 #### Peephole Optimizations
 
 
@@ -634,11 +648,11 @@ digraph Unsigned {
 
 #### Forward Propagation
 
-<!-- * $Y     = \begin{cases} a               & a \get 0 \\ -->
-<!--                          a.mask-(\neg a) & otherwise \end{cases}$ -->
-<!-- * $Y.max = \begin{cases} a.max           & a \get 0 \\ -->
-<!--                          a.mask          & otherwise \end{cases}$ -->
-<!-- * $Y.min = 0$ -->
+* $Y     = \begin{cases} a               & a \get 0 \\
+                         a.mask+a+1      & otherwise \end{cases}$
+* $Y.max = \begin{cases} a.max           & a.min \get 0 \\
+                         a.mask          & otherwise \end{cases}$
+* $Y.min = 0$
 
 #### Backward Propagation
 
@@ -669,6 +683,13 @@ created by simply negating one of the LGraph comparators. `GT = ~LE`, `LT =
 ~GE`, and `NE = ~EQ`.
 
 #### Forward Propagation
+
+* `Y = A LT B`
+
+* `Y = A0 LT B and A1 LT B`
+
+* `Y = A0 LT B0 and A1 LT B0 and A0 LT B1 and A1 LT B1`
+
 
 #### Backward Propagation
 

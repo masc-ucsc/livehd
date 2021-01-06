@@ -1,20 +1,24 @@
 #!/bin/bash
 
 pts_to_be_merged='io_gen io_gen2 io_gen3 test2'
-pts_tuple_dbg='lhs_wire3 funcall_unnamed2 
+pts_tuple_dbg='lhs_wire3 funcall_unnamed2
                firrtl_gcd counter_tup counter2'
-pts_unsigned_issue='firrtl_gcd'               
 
-pts='hier_tuple_io tuple_copy2 firrtl_tail2 firrtl_tail3 reg__q_pin hier_tuple2 nested_if 
-     if bits_rhs capricious_bits2 capricious_bits4 hier_tuple if2 adder_stage 
-     logic reg_bits_set tuple_copy hier_tuple3 lhs_wire lhs_wire2 scalar_tuple
-     firrtl_tail attr_set capricious_bits out_ssa ssa_rhs counter counter_nested_if tuple_if'
+pts_long_time='firrtl_gcd'
 
-# Note: in bash, specify top module name at first position
+pts='tuple_copy2 hier_tuple2 hier_tuple_io if nested_if reg__q_pin tuple_copy
+     capricious_bits capricious_bits2 capricious_bits4 hier_tuple if2  bits_rhs
+     adder_stage hier_tuple3 lhs_wire lhs_wire2 scalar_tuple logic attr_set out_ssa
+     ssa_rhs tuple_if counter counter_nested_if '
+
+# pts='counter'
+
+
+# pts='firrtl_tail reg_bits_set  reg_bits_set firrtl_tail2 firrtl_tail3 firrtl_gcd_3bits  tuple_copy2 '
+# Note: in this bash script, you MUST specify top module name AT FIRST POSITION
 pts_hier1='top sum top'
 pts_hier2='top top sum'
 
-#pts="top sum"
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -46,7 +50,7 @@ Pyrope_compile () {
         exit 1
     fi
 
-    ${LGSHELL} "inou.pyrope files:${PATTERN_PATH}/${pt}.prp |> pass.compiler gviz:true"
+    ${LGSHELL} "inou.pyrope files:${PATTERN_PATH}/${pt}.prp |> pass.compiler gviz:true top:${pt}"
     ret_val=$?
     if [ $ret_val -ne 0 ]; then
       echo "ERROR: could not compile with pattern: ${pt}.prp!"
@@ -115,12 +119,12 @@ Pyrope_compile_hier () {
         echo "ERROR: could not find ${pt}.prp in ${PATTERN_PATH}"
         exit 1
     fi
-    
+
     # the first item in pts_hier is just specifying the top_module name
-    if [ -z "${top_module}" ]; then 
+    if [ -z "${top_module}" ]; then
       top_module=${pt}
       continue
-    fi  
+    fi
 
     # check if pts_concat is empty or not and perform pattern concatenation, patterns have to be comma seperated
     if [ -z "${pts_concat}" ]; then
@@ -163,9 +167,9 @@ Pyrope_compile_hier () {
   #concatenate every submodule under top_module.v
   for pt in $1
   do
-      if [[ pt != $top_module ]]; then
-          $(cat ${pt}.v >> ${top_module}.v)
-      fi
+    if [[ pt != $top_module ]]; then
+        $(cat ${pt}.v >> ${top_module}.v)
+    fi
   done
 
 
@@ -188,11 +192,11 @@ Pyrope_compile_hier () {
 
 
 rm -rf ./lgdb
+Pyrope_compile_hier "$pts_hier1"
+rm -rf ./lgdb
+Pyrope_compile_hier "$pts_hier2"
+rm -rf ./lgdb
 Pyrope_compile "$pts"
-rm -rf ./lgdb
-Pyrope_compile_hier "$pts_hier1"  
-rm -rf ./lgdb
-Pyrope_compile_hier "$pts_hier2"  
 
 
 rm -f *.dot

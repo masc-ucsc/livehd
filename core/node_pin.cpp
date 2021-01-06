@@ -14,6 +14,18 @@ Node_pin::Node_pin(LGraph *_g, Compact comp)
   I(current_g->is_valid_node_pin(idx));
 }
 
+Node_pin::Node_pin(std::string_view path, Compact_flat comp) {
+  current_g = LGraph::open(path, comp.lgid);
+  top_g = current_g;
+
+  hidx = Hierarchy_tree::invalid_index();
+  idx  = comp.idx;
+  pid  = top_g->get_dst_pid(comp.idx);
+  sink = comp.sink;
+
+  I(current_g->is_valid_node_pin(idx));
+}
+
 Node_pin::Node_pin(LGraph *_g, Compact_driver comp)
     : top_g(_g), hidx(comp.hidx), idx(comp.idx), sink(true) {
   I(!hidx.is_invalid());
@@ -44,6 +56,11 @@ Node_pin::Node_pin(LGraph *_g, Compact_class_driver comp)
 
 const Index_ID Node_pin::get_root_idx() const {
   return current_g->get_root_idx(idx);
+}
+
+Node_pin::Compact_flat Node_pin::get_compact_flat() const {
+  I(!is_invalid());
+  return Compact_flat(current_g->get_lgid(), get_root_idx(), sink);
 }
 
 Node_pin::Compact_driver Node_pin::get_compact_driver() const {
@@ -85,6 +102,11 @@ Node Node_pin::get_node() const {
   auto nid = current_g->get_node_nid(idx);
 
   return Node(top_g, current_g, hidx, nid);
+}
+
+Ntype_op Node_pin::get_type_op() const {
+  auto nid = current_g->get_node_nid(idx);
+  return current_g->get_type_op(nid);
 }
 
 Node Node_pin::get_driver_node() const { return get_driver_pin().get_node(); }
@@ -150,12 +172,28 @@ int Node_pin::get_num_edges() const {
 
 uint32_t Node_pin::get_bits() const {
   I(is_driver());
+  // FIXME: hierarchical
   return current_g->get_bits(get_root_idx());
 }
 
 void Node_pin::set_bits(uint32_t bits) {
   I(is_driver());
   current_g->set_bits(get_root_idx(), bits);
+}
+
+void Node_pin::set_io_sign() {
+  I(is_graph_io());
+  Ann_node_pin_io_unsign::ref(get_lg())->erase(get_compact_driver());
+}
+
+void Node_pin::clear_io_sign() {
+  I(is_graph_io());
+  Ann_node_pin_io_unsign::ref(get_lg())->set(get_compact_driver(), true);
+}
+
+bool Node_pin::is_io_sign() const {
+  I(is_graph_io());
+  return Ann_node_pin_io_unsign::ref(top_g)->has(get_compact_driver())?false:true;
 }
 
 std::string Node_pin::get_type_sub_pin_name() const {
@@ -166,13 +204,10 @@ std::string Node_pin::get_type_sub_pin_name() const {
   return std::to_string(pid);
 }
 
+void Node_pin::set_delay(float val) { Ann_node_pin_delay::ref(top_g)->set(get_compact_driver(), val); }
+bool Node_pin::has_delay()  const { return Ann_node_pin_delay::ref(top_g)->has(get_compact_driver()); }
 float Node_pin::get_delay() const { return Ann_node_pin_delay::ref(top_g)->get(get_compact_driver()); }
 
-bool Node_pin::has_delay() const {
-  return Ann_node_pin_delay::ref(top_g)->has(get_compact_driver());
-}
-
-void Node_pin::set_delay(float val) { Ann_node_pin_delay::ref(top_g)->set(get_compact_driver(), val); }
 
 void Node_pin::del_delay() {
   Ann_node_pin_delay::ref(top_g)->erase(get_compact_driver());
@@ -185,7 +220,7 @@ void Node_pin::set_name(std::string_view wname) {
 
 void Node_pin::del() {
   if (sink && is_graph_output()) {
-    auto dpin = get_driver_from_output();
+    auto dpin = change_to_driver_from_graph_out_sink();
     dpin.del();
     return;
   }
@@ -284,7 +319,7 @@ std::string Node_pin::debug_name() const {
                       "_",
                       sink ? "s" : "d",
                       std::to_string(pid),
-                      "_lg_",
+                      "_lg",
                       current_g->get_name());
 }
 
@@ -333,8 +368,7 @@ std::string Node_pin::get_pin_name() const {
 		return std::to_string(pid);
 	}
 
-  auto nid = current_g->get_node_nid(idx);
-  auto op = current_g->get_type_op(nid);
+  auto op = get_type_op();
   if (op == Ntype_op::Sub)
     return get_type_sub_pin_name();
   if (is_driver())

@@ -282,7 +282,8 @@ public:
   }
 
   std::string_view get_name_from_instance_pid(Port_ID instance_pid) const {
-    I(has_instance_pin(instance_pid));
+    if (!has_instance_pin(instance_pid))
+      return "INVALID_PID";
     return io_pins[instance_pid].name;
   }
 

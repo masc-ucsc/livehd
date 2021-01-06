@@ -1,7 +1,7 @@
-$inp.__bits = 1
+$inp.__ubits = 1
 
 x = 1 + 2
 if ($inp == 0) {
-  x = 4u10bits
+  x = 4
 }
 %out = x

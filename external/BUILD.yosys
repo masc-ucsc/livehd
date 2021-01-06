@@ -32,6 +32,7 @@ genrule(
 cc_library(
     name = "version",
     srcs = ["kernel/version.cc"],
+    copts = ["-Wno-error"],
     visibility = ["//visibility:public"],
 )
 
@@ -103,7 +104,7 @@ py_binary(
     name = "cellhelp",
     srcs = ["techlibs/common/cellhelp.py"],
     python_version = "PY3",
-    srcs_version = "PY2AND3",
+    srcs_version = "PY3ONLY",
     deps = [
     ],
 )
@@ -115,7 +116,7 @@ genrule(
     ],
     outs = ["techlibs/common/simlib_help.inc"],
     cmd = (
-        "$(location :cellhelp) $(SRCS) > $@"
+        "python3 $(location :cellhelp) $(SRCS) > $@"
     ),
     tools = [":cellhelp"],
 )
@@ -127,7 +128,7 @@ genrule(
     ],
     outs = ["techlibs/common/simcells_help.inc"],
     cmd = (
-        "$(location :cellhelp) $(SRCS) > $@"
+        "python3 $(location :cellhelp) $(SRCS) > $@"
     ),
     tools = [":cellhelp"],
 )
@@ -369,6 +370,7 @@ cc_library(
     ],
     copts = [
         "-fexceptions",
+        "-Wno-error",
     ],
     features = ["-use_header_modules"],
     licenses = ["notice"],
@@ -422,7 +424,7 @@ genrule(
       "passes/pmgen/xilinx_srl.pmg",
     ],
     outs = ["passes/pmgen/peepopt_pm.h"],
-    cmd = "$(location :pmgen) -o $(OUTS) -p peepopt $(SRCS)",
+    cmd = "python3 $(location :pmgen) -o $(OUTS) -p peepopt $(SRCS)",
     tools = [
         ":pmgen",
     ],
@@ -434,7 +436,7 @@ genrule(
         "passes/pmgen/%s.pmg" % pm,
     ],
     outs = ["passes/pmgen/%s_pm.h" % pm],
-    cmd = "$(location :pmgen) -o $(OUTS) -p %s $(SRCS)" % pm,
+    cmd = "python3 $(location :pmgen) -o $(OUTS) -p %s $(SRCS)" % pm,
     tools = [
         ":pmgen",
     ],

@@ -13,12 +13,12 @@
 #include "mmap_map.hpp"
 #include "mmap_vector.hpp"
 
-#define NITERS 10
+#define NITERS 7
 #define NIT 2
 
 void use_std_vector(int max) {
 
-  Lbench b("std_vector" + std::to_string(max));
+  Lbench b("mmap.std_vector_" + std::to_string(max));
 
   std::vector<uint32_t> map;
 
@@ -42,7 +42,7 @@ void use_std_vector(int max) {
 
 void use_robin_map(int max) {
 
-  Lbench b("robin_map " + std::to_string(max));
+  Lbench b("mmap.robin_map_" + std::to_string(max));
 
   robin_hood::unordered_map<uint32_t,uint32_t> map;
 
@@ -68,7 +68,7 @@ void use_robin_map(int max) {
 
 void use_mmap_map(int max) {
 
-  Lbench b("mmap_map " + std::to_string(max));
+  Lbench b("mmap.mmap_map_" + std::to_string(max));
 
   mmap_lib::map<uint32_t, uint32_t> map; // effemeral (no file backup)
   map.clear();
@@ -96,7 +96,7 @@ void use_mmap_map(int max) {
 
 void use_abseil_map(int max) {
 
-  Lbench b("use_abseil_map " + std::to_string(max));
+  Lbench b("mmap.use_abseil_map_" + std::to_string(max));
 
   absl::flat_hash_map<uint32_t,uint32_t> map;
 
@@ -120,7 +120,7 @@ void use_abseil_map(int max) {
 
 void use_mmap_vector(int max) {
 
-  Lbench b("mmap_vector " + std::to_string(max));
+  Lbench b("mmap.mmap_vector_" + std::to_string(max));
 
   mmap_lib::vector<uint32_t> map; // effemeral ("bench_vector_use_vector");
 

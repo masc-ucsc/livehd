@@ -1,6 +1,5 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -12,16 +11,13 @@
 #include <iostream>
 #include <stdexcept>
 
-#include "mustache.hpp"
-#include "kernel/yosys.h"
-
 #include "eprp_utils.hpp"
 #include "inou_yosys_api.hpp"
+#include "kernel/yosys.h"
 #include "lgraph.hpp"
+#include "mustache.hpp"
 
-static void log_error_atexit() {
-  throw std::runtime_error("yosys finished");
-}
+static void log_error_atexit() { throw std::runtime_error("yosys finished"); }
 
 void setup_inou_yosys() {
   Yosys::log_error_stderr    = true;
@@ -31,30 +27,27 @@ void setup_inou_yosys() {
   Inou_yosys_api::setup();
 }
 
-Inou_yosys_api::Inou_yosys_api(Eprp_var &var, bool do_read) : Pass("inou.yosys", var) {
-  set_script_yosys(var, do_read);
-}
+Inou_yosys_api::Inou_yosys_api(Eprp_var &var, bool do_read) : Pass("inou.yosys", var) { set_script_yosys(var, do_read); }
 
 void Inou_yosys_api::set_script_yosys(const Eprp_var &var, bool do_read) {
   auto script = var.get("script");
 
   auto main_path = Eprp_utils::get_exe_path();
 
-  fmt::print("path:{}\n",main_path);
+  fmt::print("path:{}\n", main_path);
 
-  std::vector<std::string> alt_paths{
-		  "/../pass/mockturtle/mt_test.sh.runfiles/livehd/inou/yosys/"
-		  ,"/../pass/lnast_fromlg/lgtoln_verif_from_verilog.sh.runfiles/livehd/inou/yosys/"
-		  ,"/../pass/lnast_fromlg/lgtoln_verif_from_pyrope.sh.runfiles/livehd/inou/yosys/"
-		  ,"/../pass/sample/sample_test1.sh.runfiles/livehd/inou/yosys/"
-		  ,"/main_test.runfiles/livehd/inou/yosys/"
-		  ,"/verilog.sh.runfiles/livehd/inou/yosys/"
-		  ,"/verilog.sh-long.runfiles/livehd/inou/yosys/"
-		  ,"/lgshell.runfiles/livehd/inou/yosys/"
-		  ,"/../inou/pyrope/lnast_prp_test.sh.runfiles/livehd/inou/yosys/"
-		  ,"/../share/livehd/inou/yosys/"
-		  ,"/../inou/yosys/"
-		  ,"/inou/yosys/"};
+  std::vector<std::string> alt_paths{"/../pass/mockturtle/mt_test.sh.runfiles/livehd/inou/yosys/",
+                                     "/../pass/lnast_fromlg/lgtoln_verif_from_verilog.sh.runfiles/livehd/inou/yosys/",
+                                     "/../pass/lnast_fromlg/lgtoln_verif_from_pyrope.sh.runfiles/livehd/inou/yosys/",
+                                     "/../pass/sample/sample_test1.sh.runfiles/livehd/inou/yosys/",
+                                     "/main_test.runfiles/livehd/inou/yosys/",
+                                     "/verilog.sh.runfiles/livehd/inou/yosys/",
+                                     "/verilog.sh-long.runfiles/livehd/inou/yosys/",
+                                     "/lgshell.runfiles/livehd/inou/yosys/",
+                                     "/../inou/pyrope/lnast_prp_test.sh.runfiles/livehd/inou/yosys/",
+                                     "/../share/livehd/inou/yosys/",
+                                     "/../inou/yosys/",
+                                     "/inou/yosys/"};
 
   if (script.empty()) {
     std::string do_read_str;
@@ -63,13 +56,13 @@ void Inou_yosys_api::set_script_yosys(const Eprp_var &var, bool do_read) {
     else
       do_read_str = "inou_yosys_write.ys";
 
-	  for(const auto e:alt_paths) {
-		  auto test = main_path + e + do_read_str;
-		  if (access(test.c_str(), R_OK) != -1) {
-			  script_file = test;
-			  break;
-		  }
-	  }
+    for (const auto& e : alt_paths) {
+      auto test = main_path + e + do_read_str;
+      if (access(test.c_str(), R_OK) != -1) {
+        script_file = test;
+        break;
+      }
+    }
   }
 
   if (access(std::string(script_file).c_str(), R_OK) != F_OK) {
@@ -96,17 +89,17 @@ void Inou_yosys_api::call_yosys(mustache::data &vars) {
 
   auto cmd_list = absl::StrSplit(yosys_all_cmds, '\n');
 
-  for(const auto &c:cmd_list) {
+  for (const auto &c : cmd_list) {
     auto x = std::find_if(c.begin(), c.end(), [](char ch) { return std::isalnum(ch); });
-    if (x==c.end())
-      continue; // skip empty (or just space lines)
+    if (x == c.end())
+      continue;  // skip empty (or just space lines)
 
-    std::string cmd{c}; // yosys call needs std::string
+    std::string cmd{c};  // yosys call needs std::string
 
-    fmt::print("yosys cmd:{}\n",cmd);
-    try{
+    fmt::print("yosys cmd:{}\n", cmd);
+    try {
       Yosys::Pass::call(&design, cmd);
-    }catch(...) {
+    } catch (...) {
       error("inou.yosys cmd:{} failed\n", cmd);
     }
   }
@@ -282,6 +275,9 @@ void Inou_yosys_api::do_tolg(Eprp_var &var) {
     }
   });
 
+  // Yosys::memhasher_off();
+  // Yosys::yosys_shutdown();
+
   var.add(lgs);
 }
 
@@ -303,7 +299,7 @@ void Inou_yosys_api::fromlg(Eprp_var &var) {
     auto hier = var.get("hier");
     if (!hier.empty() && (hier == "1" || hier == "true")) {
       vars.set("hier", mustache::data::type::bool_true);
-    }else{
+    } else {
       vars.set("hier", mustache::data::type::bool_false);
     }
 
@@ -312,7 +308,6 @@ void Inou_yosys_api::fromlg(Eprp_var &var) {
 }
 
 void Inou_yosys_api::setup() {
-
   Eprp_method m1("inou.yosys.tolg", "read verilog using yosys to lgraph", &Inou_yosys_api::tolg);
   m1.add_label_required("files", "verilog files to process (comma separated)");
   m1.add_label_optional("path", "path to build the lgraph[s]", "lgdb");

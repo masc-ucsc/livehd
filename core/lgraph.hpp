@@ -46,8 +46,6 @@ protected:
 
   Node_pin_iterator out_connected_pins(const Node &node) const;
   Node_pin_iterator inp_connected_pins(const Node &node) const;
-  Node_pin_iterator out_setup_pins(const Node &node) const;
-  Node_pin_iterator inp_setup_pins(const Node &node) const;
 
   Node_pin_iterator inp_drivers(const Node &node, const absl::flat_hash_set<Node::Compact> &exclude) const;
 
@@ -163,26 +161,24 @@ public:
     return htree;
   }
 
-  Index_ID add_edge(const Node_pin &dpin, const Node_pin &spin) {
+  void add_edge(const Node_pin &dpin, const Node_pin &spin) {
     I(dpin.is_driver());
     I(spin.is_sink());
     I(spin.get_class_lgraph() == dpin.get_class_lgraph());
 
-    return add_edge_int(spin.get_root_idx(), spin.get_pid(), dpin.get_root_idx(), dpin.get_pid());
+    add_edge_int(spin.get_root_idx(), spin.get_pid(), dpin.get_root_idx(), dpin.get_pid());
   }
 
-  Index_ID add_edge(const Node_pin &dpin, const Node_pin &spin, uint32_t bits) {
-    Index_ID idx = add_edge(dpin, spin);
-    I(node_internal[idx].is_root()); // add_edge returns the root
-    set_bits(idx, bits);
-    return idx;
+  void add_edge(const Node_pin &dpin, const Node_pin &spin, uint32_t bits) {
+    add_edge(dpin, spin);
+    set_bits(dpin.get_root_idx(), bits);
   }
 
   Fwd_edge_iterator  forward(bool visit_sub = false);
   Bwd_edge_iterator  backward(bool visit_sub = false);
   Fast_edge_iterator fast(bool visit_sub = false);
 
-  LGraph *clone_skeleton(std::string_view extended_name);
+  LGraph *clone_skeleton(std::string_view new_lg_name);
 
   static bool    exists(std::string_view path, std::string_view name);
   static LGraph *create(std::string_view path, std::string_view name, std::string_view source);

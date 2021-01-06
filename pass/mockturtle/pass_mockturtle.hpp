@@ -19,6 +19,7 @@
 #include "mockturtle/generators/arithmetic.hpp"
 #include "mockturtle/io/write_bench.hpp"
 //#include "mockturtle/networks/aig.hpp"
+#include "cell.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "mockturtle/algorithms/lut_mapping.hpp"
@@ -26,7 +27,6 @@
 #include "mockturtle/networks/mig.hpp"
 #include "mockturtle/views/mapping_view.hpp"
 #include "pass.hpp"
-#include "cell.hpp"
 
 #define LUTIFIED_NETWORK_NAME_SIGNATURE "_lutified"
 #define BIT_WIDTH_THRESHOLD             2
@@ -53,6 +53,12 @@ struct Comparator_input_signal {
   };
 };
 
+template<>
+struct Comparator_input_signal<mockturtle::mig_network::signal> {
+  bool             is_signed;
+  std::vector<mockturtle::mig_network::signal> signals;
+};
+
 class Pass_mockturtle : public Pass {
 protected:
   static void work(Eprp_var &var);
@@ -67,7 +73,7 @@ protected:
   absl::flat_hash_map<XEdge, Ntk_sigs<mockturtle::klut_network::signal>>
       edge2klut_inp_sigs;  // lg<->klut, search edge2mt_sigs table, only input mapping
   absl::flat_hash_map<XEdge, Ntk_sigs<mockturtle::klut_network::signal>>
-                                                                                              edge2klut_out_sigs;  // lg<->klut, search edge2mt_sigs table, only output mapping
+      edge2klut_out_sigs;  // lg<->klut, search edge2mt_sigs table, only output mapping
   absl::flat_hash_map<Node::Compact, Node::Compact>                                           old_node_to_new_node;
   absl::flat_hash_map<std::pair<unsigned int, mockturtle::klut_network::node>, Node::Compact> gid_klut_node2lg_node;
   absl::flat_hash_map<std::pair<unsigned int, mockturtle::klut_network::signal>,

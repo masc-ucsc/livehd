@@ -191,7 +191,7 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index) {
   if (is_temp_var(key)) {
     std::string key_sec = ref_map.find(key)->second;
     bool param_converted = false ;
-    if(key_sec.find(".__bits") != std::string::npos) {
+    if(key_sec.find(".__sbits") != std::string::npos || key_sec.find(".__ubits") != std::string::npos) {
       param_converted = lnast_to->convert_parameters(key_sec, std::string(ref));//for getting UInt<3> a from $a.___bits=3
     }
     if (!param_converted) {
@@ -524,8 +524,6 @@ void Code_gen::do_tposs(const mmap_lib::Tree_index& tposs_node_index) {
 
   auto first_child_index = lnast->get_first_child(tposs_node_index);
   auto first_child = lnast->get_name(first_child_index);
-  auto sec_child_is_const = lnast->get_type(lnast->get_sibling_next(first_child_index)).is_const();
-  //fmt::print("second child of {} is const = {} !!\n", first_child, sec_child_is_const);
   auto sec_child = lnast->get_name(lnast->get_sibling_next(first_child_index));
 
   auto map_it = ref_map.find(sec_child);
@@ -540,6 +538,8 @@ void Code_gen::do_tposs(const mmap_lib::Tree_index& tposs_node_index) {
     I(false, "Error: expected temp str as first child of Tposs.\n\tMight need to check this issue!\n");
   }
 
+  /*need not print anything due to the tposs node (data in __sbits or __ubits)*/
+  auto sec_child_is_const = lnast->get_type(lnast->get_sibling_next(first_child_index)).is_const();
   if(!sec_child_is_const && !sec_child_is_temp) {
   //if(!sec_child_is_const) {
     //fmt::print("\nThis is not const, first child:{}\n", first_child);

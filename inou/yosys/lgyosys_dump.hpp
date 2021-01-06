@@ -80,6 +80,8 @@ private:
   void create_subgraph(LGraph *g, RTLIL::Module *module, Node &node);
   void create_memory(LGraph *g, RTLIL::Module *module, Node &node);
 
+  RTLIL::Wire *zero_extend_one_bit(LGraph *g, RTLIL::Module *module, RTLIL::Wire *w);
+
 protected:
 public:
   Lgyosys_dump(RTLIL::Design *d, bool hier = false) : design(d) { hierarchy = hier; };
@@ -102,6 +104,9 @@ public:
   };
 
   void set(const std::string &key, const std::string &value) final {
+    (void)key;
+    (void)value;
+
     assert(false);  // No main_api interface for this module as it uses yosys plug-ins
   };
 };

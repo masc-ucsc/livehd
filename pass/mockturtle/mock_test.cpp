@@ -58,7 +58,7 @@ int tmap(mig_network &net) {
 }
 
 void mock_test_or(int net_size) {
-  Lbench b("mock_test_or" + std::to_string(net_size));
+  Lbench b("pass.MOCKTURTLE_mock_test_or" + std::to_string(net_size));
 
   b.sample("setup");
   mig_network net;
@@ -86,7 +86,7 @@ void mock_test_or(int net_size) {
 }
 
 void mock_test_xor(int net_size) {
-  Lbench b("mock_test_xor" + std::to_string(net_size));
+  Lbench b("pass.MOCKTURTLE_mock_test_xor" + std::to_string(net_size));
 
   b.sample("setup");
   mig_network net;

@@ -55,7 +55,7 @@ protected:
   void setup_lgraph_ios_and_final_var_name(LGraph *lg);
 
 
-  Node         setup_node_opr_and_lhs    (LGraph *lg, const Lnast_nid &lnidx_opr);
+  Node         setup_node_opr_and_lhs    (LGraph *lg, const Lnast_nid &lnidx_opr, bool from_fir_op = false);
   Node_pin     setup_tuple_assignment    (LGraph *lg, const Lnast_nid &lnidx_opr);
   Node_pin     setup_node_assign_and_lhs (LGraph *lg, const Lnast_nid &lnidx_opr);
   Node_pin     setup_ref_node_dpin       (LGraph *lg, const Lnast_nid &lnidx, 
@@ -96,15 +96,19 @@ protected:
   Node_pin     create_inp_tg             (LGraph *lg, std::string_view input_field);
   void         create_out_ta             (LGraph *lg, std::string_view key_name, Node_pin &val_dpin);
 
-  void         try_create_flattened_inp     (LGraph *lg);
+  void         try_create_flattened_inp           (LGraph *lg);
+  void         post_process_ginp_attr_connections (LGraph *lg);
   void         dfs_try_create_flattened_inp (LGraph *lg, Node_pin &cur_node_spin, std::string hier_name, Node &chain_head);
+  Node_pin     create_const                 (LGraph *lg, std::string_view const_str);
 
   // attribute related
-  bool check_new_var_chain (const Lnast_nid &lnidx_opr);
+  bool is_new_var_chain (const Lnast_nid &lnidx_opr);
   bool check_is_attrset_ta (Node &node, std::string &var_name, std::string &attr_name, Lconst &bits, Node &chain_head);
   bool check_is_tup_assign (Node node) { return !node.setup_sink_pin("value").is_connected();};
   bool is_hier_inp_bits_set(const Lnast_nid &lnidx_ta);
 
+  // firrtl related
+  void process_firrtl_op_connection(LGraph *lg, const Lnast_nid &lnidx_fc);
 
 };
 

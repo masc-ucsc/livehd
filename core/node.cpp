@@ -230,7 +230,7 @@ Node_pin Node::setup_sink_pin_slow(std::string_view name) {
   Port_ID pid;
 
   if (std::isdigit(name[0])) {
-    int pos;
+    int pos = 0;
     std::from_chars(name.data(), name.data() + name.size(), pos);
 
     if (!sub.has_instance_pin(pos))
@@ -281,6 +281,10 @@ int Node::get_num_inp_edges() const { return current_g->get_num_inp_edges(*this)
 int Node::get_num_out_edges() const { return current_g->get_num_out_edges(*this); }
 int Node::get_num_edges() const { return current_g->get_num_edges(*this); }
 
+Node Node::get_non_hierarchical() const {
+  return Node(current_g, current_g, Hierarchy_tree::invalid_index(), nid);
+}
+
 Node_pin Node::setup_driver_pin_raw(Port_ID pid) const {
   I(!is_type_sub()); // Do not setup subs by PID, use name
   I(Ntype::has_driver(get_type_op(),pid));
@@ -328,10 +332,30 @@ bool Node::is_type_attr() const {
   return op == Ntype_op::AttrGet || op == Ntype_op::AttrSet;
 }
 
+bool Node::is_type_flop() const {
+  auto op = get_type_op();
+
+  return op == Ntype_op::Aflop || op == Ntype_op::Sflop || op == Ntype_op::Fflop;
+}
+
+
 bool Node::is_type_tup() const {
   auto op = get_type_op();
 
   return op == Ntype_op::TupAdd || op == Ntype_op::TupGet;
+}
+
+bool Node::is_type_loop_breaker() const {
+  auto op = get_type_op();
+  if (op == Ntype_op::Sub) {
+    /* //FIXME->sh: delet __fir stuff after the two lg->fast() lgraph firmap clone is working */
+    /* const auto sub_name = get_type_sub_node().get_name(); */
+    /* if (sub_name.substr(0, 5) == "__fir") */
+    /*   return false; */
+    return true;
+  }
+
+  return Ntype::is_loop_breaker(op);
 }
 
 Hierarchy_index Node::hierarchy_go_down() const {
@@ -404,11 +428,7 @@ XEdge_iterator Node::inp_edges_ordered_reverse() const { return current_g->inp_e
 XEdge_iterator Node::out_edges_ordered_reverse() const { return current_g->out_edges_ordered_reverse(*this); }
 
 Node_pin_iterator Node::inp_connected_pins() const { return current_g->inp_connected_pins(*this); }
-
 Node_pin_iterator Node::out_connected_pins() const { return current_g->out_connected_pins(*this); }
-
-Node_pin_iterator Node::inp_setup_pins() const { return current_g->inp_setup_pins(*this); }
-Node_pin_iterator Node::out_setup_pins() const { return current_g->out_setup_pins(*this); }
 
 Node_pin_iterator Node::inp_drivers(const absl::flat_hash_set<Node::Compact> &exclude) const {
   return current_g->inp_drivers(*this, exclude);
@@ -477,14 +497,17 @@ std::string Node::debug_name() const {
   if (it != ref->end()) {
     name = ref->get_val(it);
   }
+
   if (is_type_sub()) {
-    absl::StrAppend(&name, "_sub_", get_type_sub_node().get_name());
+    if (name.find(get_type_sub_node().get_name()) == std::string::npos) { // filter out unnecessary module name
+      absl::StrAppend(&name, get_type_sub_node().get_name());
+    }
   }
 
   auto cell_name = Ntype::get_name(get_type_op());
   if (name.empty())
-    return absl::StrCat("node_", std::to_string(nid), "_", cell_name, "_lg_", current_g->get_name());
-  return absl::StrCat("node_", std::to_string(nid), "_", cell_name, "_", name, "_lg_", current_g->get_name());
+    return absl::StrCat("n", std::to_string(nid), "_", cell_name, "_lg", current_g->get_name());
+  return absl::StrCat("n", std::to_string(nid), "_", cell_name, "_", name, "_lg", current_g->get_name());
 }
 
 bool Node::has_name() const { return Ann_node_name::ref(current_g)->has_key(get_compact_class()); }

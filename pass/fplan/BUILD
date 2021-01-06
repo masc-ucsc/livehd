@@ -14,11 +14,8 @@ cc_library(
          "//core:core",
          "//pass/common:pass",
          "//task:task",
-         "//third_party/misc/blobb_compass:blobb",
          "@iassert//:iassert",
-         "@rapidjson//:headers",
-         "@graph//:graph",
-         "@range-v3//:range-v3",
          "@fmt//:fmt",
+         "//third_party/misc/ArchFP:archfp",
          ],
     )

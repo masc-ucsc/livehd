@@ -20,15 +20,20 @@
 
 #define BENCHSIZE 10000
 
+#define TESTNUMS 5
+
+/* 
+ * Creates an unordered map from std namespace
+ * puts some elements in it, then clears the map a bunch of times
+ */
 void random_std_map(int max) {
   Lrand<int> rng;
-
-  Lbench b("random_std_map");
+  Lbench b("mmap.random_std_map_" + std::to_string(max));
 
   std::unordered_map<uint32_t,uint32_t> map;
-
+  
   for (int n = 1; n < 100; ++n) {
-    for (int i = 0; i < BENCHSIZE; ++i) {
+    for (int i = 0; i < TESTNUMS; ++i) {
       int pos = rng.max(max);
       map[pos] = i;
       pos = rng.max(max);
@@ -37,44 +42,55 @@ void random_std_map(int max) {
   }
 }
 
-void random_robin_map(int max) {
-  Lrand<int> rng;
 
-  Lbench b("random_robin_map " + std::to_string(max));
-
-  robin_hood::unordered_map<uint32_t,uint32_t> map;
-
-  for (int n = 1; n < 100; ++n) {
-    for (int i = 0; i < BENCHSIZE; ++i) {
-      int pos = rng.max(max);
-      map[pos] = i;
-      pos = rng.max(max);
-      map.erase(pos);
-    }
-  }
-}
-
+/*
+ * Using a map from mmap_lib
+ * FOCUS on this one
+ */
 void random_mmap_map(int max) {
   Lrand<int> rng;
 
   {
-    Lbench b("random_mmap_map (persistent) " + std::to_string(max));
+    Lbench b("mmap.random_mmap_map_persistent_" + std::to_string(max));
 
+	// declaring a map from mmap_lib (persistent)
+	// details: map<some type (key?), some type (value?)>
+	// * two new arguments after map("x", "y"), used onlr for persistent
+	//   persistent means saving data even after program ends
     mmap_lib::map<uint32_t,uint32_t> map("lgdb_bench","bench_map_use_mmap.data");
     map.clear();
+    
+	std::cout << "max is: " << max << std::endl;
+   
+   //Run the test 3 times
+  	for (int n = 1; n < 4; ++n) {
+      
+	  // i from 0 to 10:
+	  //   generate random pos with max(MAX) -> returns a rand number in range of MAX
+	  //   insert i to map[pos]
+	  //   regenerate pos with max() --> why? maybe just to be more diverse
+	  //   clear map[pos] 
+      for (int i = 0; i < TESTNUMS; ++i) {
+      	uint32_t pos = rng.max(max);
+	    
+		std::cout << "first pass pos is: " << pos;
+      	
+		map.set(pos,i);
 
-  for (int n = 1; n < 100; ++n) {
-    for (int i = 0; i < BENCHSIZE; ++i) {
-      uint32_t pos = rng.max(max);
-      map.set(pos,i);
-      pos = rng.max(max);
-      map.erase(pos);
+      	pos = rng.max(max);
+	    
+		std::cout << " second pass pos is: " << pos << std::endl;
+      	
+		map.erase(pos);
       }
     }
   }
+  //----------
   {
-    Lbench b("random_mmap_map (effemeral) " + std::to_string(max));
+    Lbench b("mmap.random_mmap_map_effemeral_" + std::to_string(max));
 
+	// declaring a map from mmap_lib (effemeral)
+	// effemeral means destroy after program ends
     mmap_lib::map<uint32_t,uint32_t> map;
     map.clear();
 
@@ -89,13 +105,61 @@ void random_mmap_map(int max) {
   }
 }
 
+/*
+ * Testing mmap_vector
+ */
+void random_mmap_vector(int max) {
+  Lrand<int> rng;
+  {
+    Lbench b("mmap.random_mmap_vector_persistent_" + std::to_string(max));
+    mmap_lib::vector<uint32_t> map("lgdb_bench","bench_map_use_vector.data");
+    map.reserve(max);
+    for (int n = 1; n < 100; ++n) {
+      for (int i = 0; i < BENCHSIZE; ++i) {
+        int pos = rng.max(max);
+        map.set(pos, i);
+        pos = rng.max(max);
+        map.set(pos, 0);
+      }
+    }
+  }
+  //----------------
+  {
+    Lbench b("mmap.random_mmap_vector_effemeral_" + std::to_string(max));
+    mmap_lib::vector<uint32_t> map;
+    map.reserve(max);
+    for (int n = 1; n < 100; ++n) {
+      for (int i = 0; i < BENCHSIZE; ++i) {
+        int pos = rng.max(max);
+        map.set(pos,i);
+        pos = rng.max(max);
+        map.set(pos,0);
+      }
+    }
+  }
+}
+/*
+ * Using a robinhood map
+ */
+void random_robin_map(int max) {
+  Lrand<int> rng;
+  Lbench b("mmap.random_robin_map_" + std::to_string(max));
+  // declaring unordered map from robin hood
+  robin_hood::unordered_map<uint32_t,uint32_t> map;
+  for (int n = 1; n < 100; ++n) {
+    for (int i = 0; i < BENCHSIZE; ++i) {
+      int pos = rng.max(max);
+      map[pos] = i;
+      pos = rng.max(max);
+      map.erase(pos);
+    }
+  }
+}
+
 void random_abseil_map(int max) {
   Lrand<int> rng;
-
-  Lbench b("random_abseil_map" + std::to_string(max));
-
+  Lbench b("mmap.random_abseil_map_" + std::to_string(max));
   absl::flat_hash_map<uint32_t,uint32_t> map;
-
   for (int n = 1; n < 100; ++n) {
     for (int i = 0; i < BENCHSIZE; ++i) {
       int pos = rng.max(max);
@@ -108,11 +172,8 @@ void random_abseil_map(int max) {
 
 void random_ska_map(int max) {
   Lrand<int> rng;
-
-  Lbench b("random_ska_map" + std::to_string(max));
-
+  Lbench b("mmap.random_ska_map_" + std::to_string(max));
   ska::flat_hash_map<uint32_t,uint32_t> map;
-
   for (int n = 1; n < 100; ++n) {
     for (int i = 0; i < BENCHSIZE; ++i) {
       int pos = rng.max(max);
@@ -125,12 +186,9 @@ void random_ska_map(int max) {
 
 void random_vector_map(int max) {
   Lrand<int> rng;
-
-  Lbench b("random_vector_map" + std::to_string(max));
-
+  Lbench b("mmap.random_vector_map_" + std::to_string(max));
   std::vector<uint32_t> map;
   map.resize(max);
-
   for (int n = 1; n < 100; ++n) {
     for (int i = 0; i < BENCHSIZE; ++i) {
       int pos = rng.max(max);
@@ -141,43 +199,10 @@ void random_vector_map(int max) {
   }
 }
 
-void random_mmap_vector(int max) {
-  Lrand<int> rng;
-
-  {
-    Lbench b("random_mmap_vector (persistent)");
-
-    mmap_lib::vector<uint32_t> map("lgdb_bench","bench_map_use_vector.data");
-    map.reserve(max);
-
-    for (int n = 1; n < 100; ++n) {
-      for (int i = 0; i < BENCHSIZE; ++i) {
-        int pos = rng.max(max);
-        map.set(pos, i);
-        pos = rng.max(max);
-        map.set(pos, 0);
-      }
-    }
-  }
-  {
-    Lbench b("random_mmap_vector (effemeral)");
-
-    mmap_lib::vector<uint32_t> map;
-    map.reserve(max);
-
-    for (int n = 1; n < 100; ++n) {
-      for (int i = 0; i < BENCHSIZE; ++i) {
-        int pos = rng.max(max);
-        map.set(pos,i);
-        pos = rng.max(max);
-        map.set(pos,0);
-      }
-    }
-  }
-}
 
 int main(int argc, char **argv) {
-
+  
+  //std::cout << "I'm here\n";
   bool run_random_std_map     = false;
   bool run_random_robin_map   = false;
   bool run_random_mmap_vector = false;

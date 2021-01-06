@@ -1,29 +1,23 @@
 #pragma once
 
-#include "graph_info.hpp"
-#include "hier_tree.hpp"
-#include "pass.hpp"
+#include <string_view>
 
-class Pass_fplan : public Pass {
+#include "lg_flat_floorp.hpp"
+#include "lg_hier_floorp.hpp"
+#include "node_flat_floorp.hpp"
+
+#include "lgraph.hpp"
+#include "pass.hpp"
+#include "iassert.hpp"
+
+class Pass_fplan_makefp : public Pass {
 public:
-  Pass_fplan(const Eprp_var &var) : Pass("pass.fplan", var), gi() {}
+  Pass_fplan_makefp(const Eprp_var& var);
 
   static void setup();
 
-  static void pass(Eprp_var &v);
+  static void pass(Eprp_var& v);
 
 private:
-  friend class Pass_fplan_dump;
-  
-  Graph_info<g_type> gi;
-};
-
-class Pass_fplan_dump : public Pass {
-public:
-  Pass_fplan_dump(const Eprp_var &var) : Pass("pass.fplan", var) {}
-
-  static void setup();
-
-  static void dump_hier(Eprp_var &v);
-  static void dump_tree(Eprp_var &v);
+  LGraph* root_lg;
 };

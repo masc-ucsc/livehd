@@ -2,6 +2,7 @@
 #pragma once
 
 #include "absl/container/flat_hash_set.h"
+//#include "absl/container/inlined_vector.h"
 
 #include "mmap_map.hpp"
 #include "lconst.hpp"
@@ -13,7 +14,6 @@
 
 class Ann_place;
 using Node_iterator = std::vector<Node>;
-
 
 class Node {
 protected:
@@ -249,6 +249,7 @@ public:
   constexpr bool is_invalid() const { return nid == 0; }
   constexpr bool is_down_node() const { return top_g != current_g; }
   constexpr bool is_hierarchical() const { return !hidx.is_invalid(); }
+  Node           get_non_hierarchical() const;
 
   constexpr bool operator==(const Node &other) const {
     GI(nid == 0, hidx.is_invalid());
@@ -264,7 +265,7 @@ public:
   Lconst get_type_lut() const;
 
   std::string_view get_type_name() const;
-  Ntype_op          get_type_op() const;
+  Ntype_op         get_type_op() const;
   void             set_type(const Ntype_op op);
   void             set_type(const Ntype_op op, Bits_t bits);
   bool             is_type(const Ntype_op op) const;
@@ -273,13 +274,12 @@ public:
   }
   bool             is_type_const() const;
   bool             is_type_attr() const;
+  bool             is_type_flop() const;
   bool             is_type_tup() const;
   bool             is_type_io() const {
     return nid == Hardcoded_input_nid || nid == Hardcoded_output_nid;
   }
-  bool             is_type_loop_breaker() const {
-    return Ntype::is_loop_breaker(get_type_op());
-  }
+  bool             is_type_loop_breaker() const;
 
   Hierarchy_index hierarchy_go_down() const;
   Hierarchy_index hierarchy_go_up() const;
@@ -308,9 +308,6 @@ public:
 
   Node_pin_iterator out_connected_pins() const;
   Node_pin_iterator inp_connected_pins() const;
-
-  Node_pin_iterator out_setup_pins() const;
-  Node_pin_iterator inp_setup_pins() const;
 
   XEdge_iterator out_edges() const;
   XEdge_iterator inp_edges() const;

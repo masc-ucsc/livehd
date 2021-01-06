@@ -1,14 +1,14 @@
 // firrtl_gcd.prp
-$clock.__bits = 1
-$reset.__bits = 1
+$clock.__ubits = 1
+$reset.__ubits = 1
 
-$io_value1.__bits = 3
-$io_value2.__bits = 3
-$io_loading_values.__bits = 1
-%io_output_gcd.__bits = 3
-%io_output_valid.__bits = 1
-#x.__bits = 3
-#y.__bits = 3
+$io_value1.__ubits = 3
+$io_value2.__ubits = 3
+$io_loading_values.__ubits = 1
+%io_output_gcd.__ubits = 3
+%io_output_valid.__ubits = 1
+#x.__ubits = 3
+#y.__ubits = 3
 
 _i_T    = #x.__q_pin > #y.__q_pin
 _i_T_1  = #x.__q_pin - #y.__q_pin

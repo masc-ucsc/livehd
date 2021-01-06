@@ -4,7 +4,11 @@ module tuple_copy2 (
   output [8:0] out
 );
 
+  wire  [8:0] inp_bar;
+  wire  [4:0] inp_foo;
+  assign inp_foo = {1'b0, \inp.foo };
+  assign inp_bar = {1'b0, \inp.bar };
 
-assign out = $signed(\inp.foo ) + $signed(\inp.bar );
+  assign out = $signed(inp_foo ) + $signed(inp_bar);
 
 endmodule

@@ -1,9 +1,9 @@
-$a.__bits = 4
-$b.__bits = 4
-$c.__bits = 4
-$d.__bits = 4
-$e.__bits = 4
-$f.__bits = 4
+$a.__ubits = 4
+$b.__ubits = 4
+$c.__ubits = 4
+$d.__ubits = 4
+$e.__ubits = 4
+$f.__ubits = 4
 
 x = $a                         //x0
 y = 5                          //y0
@@ -24,7 +24,7 @@ if ($a > 1) {
 }
                                //x8 = phi(($a > 1), x6, x7)                  
                                //y2 = phi(($a > 1), y1, y0)
-
+%o1.__ubits = 15
 %o1 = x + $a
 %o2 = y + $a
 

@@ -7,11 +7,20 @@
 #include "pass.hpp"
 #include "cell.hpp"
 
-Graphviz::Graphviz(bool _bits, bool _verbose, std::string_view _odir): bits(_bits), verbose(_verbose), odir(_odir) {}
+Graphviz::Graphviz(bool _bits, bool _verbose, std::string_view _odir): verbose(_verbose), odir(_odir) {
+  // NOTE: since 'bits' is removed as a private member (unused), '_bits' is unused but might be used in the future
+  (void)_bits;
+}
 
-void Graphviz::populate_lg_handle_xedge(const Node &node, const XEdge &out, std::string &data) {
-  auto dp_pid  = graphviz_legalize_name(out.driver.get_pin_name());
-  auto sp_pid  = graphviz_legalize_name(out.sink.get_pin_name());
+void Graphviz::populate_lg_handle_xedge(const Node &node, const XEdge &out, std::string &data, bool verbose) {
+  std::string dp_pid, sp_pid;
+  if (verbose) {
+    dp_pid = graphviz_legalize_name(out.driver.get_pin_name());
+    sp_pid = graphviz_legalize_name(out.sink.get_pin_name());
+  } else {
+    dp_pid = graphviz_legalize_name(std::to_string(out.driver.get_pid()));
+    sp_pid = graphviz_legalize_name(std::to_string(out.sink.get_pid()));
+  }
 
   auto dn_name = graphviz_legalize_name(out.driver.get_node().debug_name());
   if (out.driver.is_graph_io()) {
@@ -22,7 +31,7 @@ void Graphviz::populate_lg_handle_xedge(const Node &node, const XEdge &out, std:
     sn_name = graphviz_legalize_name(out.sink.get_name());
   }
   auto dbits   = out.driver.get_bits();
-  auto dp_name = out.driver.has_name() ? out.driver.get_name() : "";
+  auto dp_name = graphviz_legalize_name(out.driver.has_name() ? out.driver.get_name() : "");
 
   if (node.get_type_op() == Ntype_op::Const)
     data += fmt::format(" {}->{}[label=<{}b:({},{})>];\n", dn_name, sn_name, dbits, dp_pid, sp_pid);
@@ -42,14 +51,23 @@ void Graphviz::populate_lg_handle_xedge(const Node &node, const XEdge &out, std:
 
 std::string Graphviz::graphviz_legalize_name(std::string_view name) {
   std::string legal;
-
   for (auto c : name) {
     if (std::isalnum(c)) {
       legal.append(1,c);
+    } else if (c == 32) {
+      legal += " ";
+    } else if (c == 35) {
+      legal += "#";
     } else if (c == 37) {
-      legal += "unified_out";
+      legal += "_percent_";
+    } else if (c == 36) {
+      legal += "_dollar_";
+    } else if (c == 58) {
+      legal += ":";
+    } else if (c == 95) {
+      legal += "_";
     } else {
-      legal += "_char" + std::to_string(c) + "_";
+      legal += "_c" + std::to_string(c) + "_";
     }
   }
 
@@ -133,6 +151,10 @@ void Graphviz::do_from_lgraph(LGraph *lg_parent, std::string_view dot_postfix) {
   populate_lg_data(lg_parent, dot_postfix);
 
   lg_parent->each_sub_fast([&, this](Node &node, Lg_type_id lgid) {
+    // no need to populate firrtl_op_subgraph, it's just tmap cells.
+    if (node.get_type_sub_node().get_name().substr(0,5) == "__fir")
+      return;
+
     (void)node;
     fmt::print("subgraph lgid:{}\n", lgid);
     LGraph *lg_child = LGraph::open(lg_parent->get_path(), lgid);
@@ -148,11 +170,11 @@ void Graphviz::populate_lg_data(LGraph *g, std::string_view dot_postfix) {
       continue;
     std::string node_info;
     if (!verbose) {
-      auto pos  = node.debug_name().find("_lg_");
+      auto pos  = node.debug_name().find("_lg");
       node_info = node.debug_name().substr(0, pos);  // get rid of the lgraph name
-      node_info = std::regex_replace(node_info, std::regex("node_"), "n");
+      node_info = graphviz_legalize_name(std::regex_replace(node_info, std::regex("node_"), "n"));
     } else {
-      node_info = node.debug_name();
+      node_info = graphviz_legalize_name(node.debug_name());
     }
 
     auto gv_name = graphviz_legalize_name(node.debug_name());
@@ -162,26 +184,26 @@ void Graphviz::populate_lg_data(LGraph *g, std::string_view dot_postfix) {
       data += fmt::format(" {} [label=<{}>];\n", gv_name, node_info);
 
     for (const auto &out : node.out_edges()) {
-      populate_lg_handle_xedge(node, out, data);
+      populate_lg_handle_xedge(node, out, data, verbose);
     }
   }
 
-  g->each_graph_input([&data](const Node_pin &pin) {
-    std::string_view io_name = graphviz_legalize_name(pin.get_pin_name());
+  g->each_graph_input([&](const Node_pin &pin) {
+    auto io_name = graphviz_legalize_name(pin.get_pin_name());
     data += fmt::format(" {} [label=<{}>];\n", io_name, io_name);  // pin.debug_name());
 
     for (const auto &out : pin.out_edges()) {
-      populate_lg_handle_xedge(pin.get_node(), out, data);
+      populate_lg_handle_xedge(pin.get_node(), out, data, verbose);
     }
   });
 
   // we need this to show outputs bits in graphviz
-  g->each_graph_output([&data](const Node_pin &pin) {
+  g->each_graph_output([&](const Node_pin &pin) {
     std::string_view dst_str = "virtual_dst_module";
     auto             dbits   = pin.get_bits();
     data += fmt::format(" {}->{}[label=<{}b>];\n", graphviz_legalize_name(pin.get_name()), dst_str, dbits);
     for (const auto &out : pin.out_edges()) {
-      populate_lg_handle_xedge(pin.get_node(), out, data);
+      populate_lg_handle_xedge(pin.get_node(), out, data, verbose);
     }
   });
 

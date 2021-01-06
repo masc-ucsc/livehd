@@ -1,0 +1,63 @@
+First of all, there is no input interface in the floorplan tool, so you need to change the code and recompile it everytime you want to change your floorplan. Don't panic, it won't be as bad as you might think.. 
+
+In the floorplan tool, every block or group of blocks are represented by wrapper class "geogLayout". To generate a floorplan, you need to create a wrapper in main function first and then put blocks in. A simple example is:
+
+int main(int argc, char* argv[])
+{
+    geogLayout * Unit = new geogLayout();
+    // Type, Count, Area, MaxAspectRatio, MinAspectRatio, Hint
+    Unit->addComponentCluster("L_blk", 1, 6, 50., 1., Left);
+    Unit->addComponentCluster("R_blk", 1, 2, 50., 1., Right);
+    ...
+}
+
+This 3 lines of code create a simple floorpan with only two blocks in it: L_blk on the left and R_blk on the right. The input parameters for component function addComponentCluster are: Type, Count, Area, MaxAspectRatio, MinAspectRatio, Hint. All these should be self-explaining except Hint. Hint tells the funtions the geometric requirement for the block. Allowed hints type can be found in Floorplan.hh. 
+
+So far I've shown how to add single block to a wrapper, actually the tool could do much better than this.
+
+int main(int argc, char* argv[])
+{
+    geogLayout * Unit = new geogLayout();
+    Unit->addComponentCluster("LR_blk", 2, 2, 50., 1., LeftRight);
+    Unit->addComponentCluster("M_blk", 1, 6, 50., 1., Center);
+    ...
+}
+
+The above code put two LR_blk at both sides and M_blk at center. We achieved this by passing the function 2 as count and LeftRight as hint. This is very useful when you have a regular structure or need to replicate things for multiple times. Try to be rational about what you specified (do not use things like 3 blks with LeftRight and another one in the center). Remember that this tool was not designed with robustness as top concern. (It's a course project done by Gregory Faust)
+
+Moving forward, we can also put a wrapper into another one, which allows much more complicated floorplanning.
+
+int main(int argc, char* argv[])
+{
+    geogLayout * Unit = new geogLayout();
+    Unit->addComponentCluster("LR_blk", 2, 2, 50., 1., LeftRight);
+    Unit->addComponentCluster("M_blk", 1, 6, 50., 1., Center);
+
+    geogLayout * chip = new geogLayout();
+    chip->addComponent(Unit, 1, Top);
+    chip->addComponentCluster("B_blk", 1, 3, 50., 1., Bottom);
+    ...
+}
+
+Notice that in the above code, we put wrapper Unit into wrapper chip. This is done by function addComponent, which only requires sub-wrapper pointer name, count and Hint. You can duplicate sub-wrapper here too with count larger than 1.
+
+To finish the floorplan generation, you need to put the following code after your whole description.
+
+    bool success = chip->layout(AspectRatio, 1);
+    if (!success) cout << "Unable to layout specified CMP configuration.";
+    else 
+    {
+        ostream& HSOut = outputHotSpotHeader("Sample.txt");
+        chip->outputHotSpotLayout(HSOut);
+        outputHotSpotFooter(HSOut);
+    }
+    
+Here we assumed the top level wrapper's name is "chip". Notice that you need to provide the overall aspect-ration for the final chip. In this example, it is 1.
+
+With all these features, you can now generate complicated floorplan with reasonable efforts.
+
+Some debugging trick:
+1. You can visualize your floorplan with hs2pdf command. This is helpful because sometimes the floorplaner might give messy results where blocks overlap.
+2. Aspect ratio is a very important knob, especially the whole chip ratio. Try to loose the range for each block and tune the overall aspect ratio to get reasonable floorplan.
+
+Thanks

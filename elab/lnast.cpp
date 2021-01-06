@@ -43,7 +43,7 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
 
   Lnast_nid top_sts_nid;
   if (get_type(top_nid).is_func_def()) {
-    fmt::print("Step-0: Handle Inline Function Definition\n");
+    /* fmt::print("Step-0: Handle Inline Function Definition\n"); */
     auto c0 = get_first_child(top_nid);
     auto c1 = get_sibling_next(c0);
     top_sts_nid = get_sibling_next(c1);
@@ -55,25 +55,25 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
   Phi_rtable top_phi_resolve_table;
   phi_resolve_tables[top_sts_nid] = top_phi_resolve_table;
 
-  fmt::print("Step-1: Analyze LHS or RHS of Tuple Dot/Sel\n");
+  /* fmt::print("Step-1: Analyze LHS or RHS of Tuple Dot/Sel\n"); */
   analyze_dot_lrhs(top_sts_nid);
 
-  fmt::print("Step-2: Tuple_Add/Tuple_Get Analysis\n");
+  /* fmt::print("Step-2: Tuple_Add/Tuple_Get Analysis\n"); */
   trans_tuple_opr(top_sts_nid);
 
-  fmt::print("Step-3: LHS SSA\n");
+  /* fmt::print("Step-3: LHS SSA\n"); */
   resolve_ssa_lhs_subs(top_sts_nid);
 
   //see Note I
-  fmt::print("Step-4: RHS SSA\n");
+  /* fmt::print("Step-4: RHS SSA\n"); */
   resolve_ssa_rhs_subs(top_sts_nid);
 
 
-  fmt::print("Step-5: Operator LHS Merge\n");
+  /* fmt::print("Step-5: Operator LHS Merge\n"); */
   opr_lhs_merge(top_sts_nid);
 
 
-  fmt::print("LNAST SSA Transformation Finished!\n");
+  /* fmt::print("LNAST SSA Transformation Finished!\n"); */
 }
 
 
@@ -240,13 +240,11 @@ void Lnast::trans_tuple_opr_handle_a_statement(const Lnast_nid &psts_nid, const 
 
   auto dot_nid     = opr_nid;
   auto c0_dot      = get_first_child(dot_nid); //c0 = intermediate target
-  auto c1_dot      = get_sibling_next(c0_dot);
-  auto c1_dot_name = get_name(c1_dot);
-
+  auto c1_dot_name = get_name(get_sibling_next(c0_dot));
 
   if (get_parent(psts_nid) == get_root()) {
     dot2local_tuple_chain(psts_nid, dot_nid);
-  } else if (check_tuple_table_parents_chain(psts_nid, c1_dot_name)) {
+  } else if (c1_dot_name.substr(0,3) != "___" && check_tuple_table_parents_chain(psts_nid, c1_dot_name)) {
       Lnast_nid cond_nid(-1,-1);
       bool  is_else_sts = false;
       find_cond_nid(psts_nid, cond_nid, is_else_sts);
@@ -269,7 +267,6 @@ void Lnast::find_cond_nid(const Lnast_nid &psts_nid, Lnast_nid &cond_nid, bool &
       is_else_sts = true;
     }
   }
-  // FIXME: think about the case for cstatements
 }
 
 void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid) {
@@ -342,7 +339,6 @@ void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid)
   // is rhs
   // change node semantic from dot/set->tuple_get
   if (paired_type.is_assign()) {
-
     ref_data(dot_nid)->type = Lnast_ntype::create_tuple_get();
     auto c0_tg     = get_first_child(dot_nid);
     auto c0_assign = get_first_child(paired_nid);
@@ -354,8 +350,6 @@ void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid)
   } else {
     ref_data(dot_nid)->type = Lnast_ntype::create_tuple_get();
   }
-  
-
 }
 
 /*******
@@ -518,10 +512,9 @@ void Lnast::analyze_dot_lrhs_handle_a_statement(const Lnast_nid &psts_nid, const
         continue;
     }
 
-
     // normal case
     for (auto sib_child : children(sib_nid)) {
-      if (sib_child == get_first_child(sib_nid) && get_name(sib_child) == c0_dot_name) {
+      if (sib_child == get_first_child(sib_nid) && get_name(sib_child) == c0_dot_name && !get_type(sib_nid).is_if()) {
         hit = true;
         dot_lrhs_table[dot_nid].first = true; //is lhs
         dot_lrhs_table[dot_nid].second = sib_nid;
@@ -530,11 +523,6 @@ void Lnast::analyze_dot_lrhs_handle_a_statement(const Lnast_nid &psts_nid, const
         hit = true;
         dot_lrhs_table[dot_nid].first  = false;
         dot_lrhs_table[dot_nid].second = sib_nid;
-        /* if (type.is_tuple_concat() || type.is_tuple()) { */
-        /*   dot_lrhs_table[dot_nid].second = sib_nid; */
-        /* } else { */
-        /*   dot_lrhs_table[dot_nid].second = Lnast_nid(-1, -1); // rhs dot doesn't need the corresponding assignment nid */
-        /* } */
         break;
       }
     }
@@ -914,11 +902,12 @@ void Lnast::ssa_lhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
     respect_latest_global_lhs_ssa(lhs_nid);
 
 
-  if (type.is_assign() || type.is_dp_assign() || type.is_as() || 
-      type.is_tuple()  || type.is_attr_set()  || type.is_func_call() ||
-      type.is_logical_op() || type.is_unary_op() || type.is_nary_op()) {
+  if (type.is_assign()     || type.is_dp_assign() || type.is_as() || 
+      type.is_tuple()      || type.is_attr_set()  || type.is_func_call() ||
+      type.is_logical_op() || type.is_unary_op()  || 
+      type.is_nary_op()    || type.is_tuple_get()) {
     const auto lhs_name = get_name(lhs_nid);
-    if (lhs_name.substr(0,3) == "___")
+    if (!lhs_name.empty() && lhs_name.substr(0,3) == "___")
       return;
 
     update_global_lhs_ssa_cnt_table(lhs_nid);

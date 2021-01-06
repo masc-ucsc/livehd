@@ -1,0 +1,302 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
+#include "pass_sat_opt.hpp"
+
+#include "annotate.hpp"
+#include "lezminisat.hpp"
+#include "lezsat.hpp"
+#include "lbench.hpp"
+#include "lgedgeiter.hpp"
+#include "lgraph.hpp"
+#include "node.hpp"
+#include "node_pin.hpp"
+
+static Pass_plugin sample("pass_sat_opt", Pass_sat_opt::setup);
+
+void Pass_sat_opt::setup() {
+  Eprp_method m1("pass.sat_opt", "Checks if MSBs of all the LGraph node outputs are satisfiable", &Pass_sat_opt::work);
+
+  register_pass(m1);
+}
+
+Pass_sat_opt::Pass_sat_opt(const Eprp_var &var) : Pass("pass.sat_opt", var) {}
+
+void Pass_sat_opt::do_work(LGraph *g) { check_sat_opt(g); }
+
+void Pass_sat_opt::work(Eprp_var &var) {
+  Pass_sat_opt p(var);
+
+  for (const auto &g : var.lgs) {
+    p.do_work(g);
+  }
+}
+
+void Pass_sat_opt::check_sat_opt(LGraph *g) {
+  fmt::print("TODO: implement SAT OPT\n");
+  //-----------------------------------------------------------------------------------------------------
+  lezMiniSAT sat;
+
+  auto va = sat.vec_var("a",4);											 
+  std::vector<int>  modelExpressions;
+  std::vector<bool> modelValues;
+
+  // determine no of inputs
+  int i_num  = 0;
+  int i_bits = 0;
+
+  g->each_graph_input([this, &i_num, &i_bits](const Node_pin &pin) {
+    i_num++;
+    i_bits += pin.get_bits();
+  });
+
+  fmt::print("num of inputs: {},  no of Bits: {}\n", i_num, i_bits);
+
+  // fmt::print("Declaring input variables.\n");
+
+  // determine no of outputs
+  int o_num  = 0;
+  int o_bits = 0;
+
+  g->each_graph_output([this, &o_num, &o_bits](const Node_pin &pin) {
+    o_num++;
+    o_bits += pin.get_bits();
+  });
+
+  fmt::print("num of outputs: {},  no of Bits: {}\n", o_num, o_bits);
+
+  // fmt::print("Declaring output variables.\n");
+
+  // Traverse graph
+  fmt::print("Begin forward traversal.\n");
+
+  for (const auto node : g->forward()) {
+    // sat.generate_model();
+	
+	//auto node_type_name = node.get_type_name();
+    fmt::print("node type: {}\n", node.get_type_name());
+	
+	/*Number of pins and pin names for node types
+	Sum - Input pin = "A", Output pin = "B"
+	Mult - Input pin = "A", Output pin = "B"
+	Div,
+	
+		And,
+	Or,
+	Xor,
+	Ror,    // Reduce OR
+	
+	Not,    // bitwise not
+	Tposs,  // To positive signed
+	
+	LT,     // Less Than   , also GE = !LT
+	GT,     // Greater Than, also LE = !GT
+	EQ,     // Equal       , also NE = !EQ
+
+	SHL,    // Shift Left Logical
+	SRA,    // Shift Right Arithmetic
+
+	Mux,    // Multiplexor with many options
+    */
+	switch (node.get_type_op())
+	{
+		case Ntype_op::Sum :
+			fmt::print("Input edges: {}\n", node.get_num_inp_edges());
+            for (auto &in : node.inp_edges()) 
+			{
+				//if (in.sink.get_pin_name() == "A")
+				fmt::print ("No. of bits in input edge is : {} \n", in.driver.get_bits());
+            }
+			fmt::print("Output edges: {}\n", node.get_num_out_edges());
+            for (auto &out : node.out_edges()) 
+			{
+				fmt::print ("No. of bits in output edge is : {} \n", out.driver.get_bits());
+            }
+		break;	
+		
+		case Ntype_op::Mult :
+			fmt::print("Input edges: {}\n", node.get_num_inp_edges());
+			for (auto &in : node.inp_edges()) 
+			{
+				fmt::print ("No. of bits in input edge is : {} \n", in.driver.get_bits());
+            }			
+			fmt::print("Output edges: {}\n", node.get_num_out_edges());
+            for (auto &out : node.out_edges()) 
+			{
+				fmt::print ("No. of bits in output edge is : {} \n", out.driver.get_bits());
+            }
+		break;
+		
+		case Ntype_op::Div :
+			fmt::print("Input edges: {}\n", node.get_num_inp_edges());
+			for (auto &in : node.inp_edges()) 
+			{
+				fmt::print ("No. of bits in input edge is : {} \n", in.driver.get_bits());
+            }			
+			fmt::print("Output edges: {}\n", node.get_num_out_edges());
+            for (auto &out : node.out_edges()) 
+			{
+				fmt::print ("No. of bits in output edge is : {} \n", out.driver.get_bits());
+			}
+		break;
+
+		case Ntype_op::And :
+			fmt::print("Input edges: {}\n", node.get_num_inp_edges());
+			for (auto &in : node.inp_edges()) 
+			{
+				fmt::print ("No. of bits in input edge is : {} \n", in.driver.get_bits());
+            }			
+			fmt::print("Output edges: {}\n", node.get_num_out_edges());
+            for (auto &out : node.out_edges()) 
+			{
+				fmt::print ("No. of bits in output edge is : {} \n", out.driver.get_bits());
+			}
+		break;
+  
+		case Ntype_op::Or :
+			fmt::print("Input edges: {}\n", node.get_num_inp_edges());
+			for (auto &in : node.inp_edges()) 
+			{
+				fmt::print ("No. of bits in input edge is : {} \n", in.driver.get_bits());
+            }			
+			fmt::print("Output edges: {}\n", node.get_num_out_edges());
+            for (auto &out : node.out_edges()) 
+			{
+				fmt::print ("No. of bits in output edge is : {} \n", out.driver.get_bits());
+			}
+		
+		break;
+		
+		case Ntype_op::Xor :
+			fmt::print("Input edges: {}\n", node.get_num_inp_edges());
+			for (auto &in : node.inp_edges()) 
+			{
+				fmt::print ("No. of bits in input edge is : {} \n", in.driver.get_bits());
+            }			
+			fmt::print("Output edges: {}\n", node.get_num_out_edges());
+            for (auto &out : node.out_edges()) 
+			{
+				fmt::print ("No. of bits in output edge is : {} \n", out.driver.get_bits());
+			}
+		break;
+		
+		case Ntype_op::Ror :   // Reduce OR
+			fmt::print("Input edges: {}\n", node.get_num_inp_edges());
+			for (auto &in : node.inp_edges()) 
+			{
+				fmt::print ("No. of bits in input edge is : {} \n", in.driver.get_bits());
+            }			
+			fmt::print("Output edges: {}\n", node.get_num_out_edges());
+            for (auto &out : node.out_edges()) 
+			{
+				fmt::print ("No. of bits in output edge is : {} \n", out.driver.get_bits());
+			}
+		break;
+
+		case Ntype_op::Not :    // bitwise not
+			fmt::print("Input edges: {}\n", node.get_num_inp_edges());
+			for (auto &in : node.inp_edges()) 
+			{
+				fmt::print ("No. of bits in input edge is : {} \n", in.driver.get_bits());
+            }
+			fmt::print("Output edges: {}\n", node.get_num_out_edges());
+            for (auto &out : node.out_edges()) 
+			{
+				fmt::print ("No. of bits in output edge is : {} \n", out.driver.get_bits());
+			}
+		break;
+  
+		case Ntype_op::Tposs :  // To positive signed
+			fmt::print("Input edges: {}\n", node.get_num_inp_edges());
+			for (auto &in : node.inp_edges()) 
+			{
+				fmt::print ("No. of bits in input edge is : {} \n", in.driver.get_bits());
+            }			
+			fmt::print("Output edges: {}\n", node.get_num_out_edges());
+            for (auto &out : node.out_edges()) 
+			{
+				fmt::print ("No. of bits in output edge is : {} \n", out.driver.get_bits());
+			}
+		break;
+
+		case Ntype_op::LT :     // Less Than   , also GE = !LT
+			fmt::print("Input edges: {}\n", node.get_num_inp_edges());
+			for (auto &in : node.inp_edges()) 
+			{
+				fmt::print ("No. of bits in input edge is : {} \n", in.driver.get_bits());
+            }			
+			fmt::print("Output edges: {}\n", node.get_num_out_edges());
+            for (auto &out : node.out_edges()) 
+			{
+				fmt::print ("No. of bits in output edge is : {} \n", out.driver.get_bits());
+			}
+		break;
+		
+		case Ntype_op::GT :     // Greater Than, also LE = !GT
+			fmt::print("Input edges: {}\n", node.get_num_inp_edges());
+			for (auto &in : node.inp_edges()) 
+			{
+				fmt::print ("No. of bits in input edge is : {} \n", in.driver.get_bits());
+            }			
+			fmt::print("Output edges: {}\n", node.get_num_out_edges());
+            for (auto &out : node.out_edges()) 
+			{
+				fmt::print ("No. of bits in output edge is : {} \n", out.driver.get_bits());
+			}
+		break;
+  
+		case Ntype_op::EQ :     // Equal       , also NE = !EQ
+			fmt::print("Input edges: {}\n", node.get_num_inp_edges());
+			for (auto &in : node.inp_edges()) 
+			{
+				fmt::print ("No. of bits in input edge is : {} \n", in.driver.get_bits());
+            }			
+			fmt::print("Output edges: {}\n", node.get_num_out_edges());
+            for (auto &out : node.out_edges()) 
+			{
+				fmt::print ("No. of bits in output edge is : {} \n", out.driver.get_bits());
+			}
+		break;
+
+		case Ntype_op::SHL :    // Shift Left Logical
+			fmt::print("Input edges: {}\n", node.get_num_inp_edges());
+			for (auto &in : node.inp_edges()) 
+			{
+				fmt::print ("No. of bits in input edge is : {} \n", in.driver.get_bits());
+            }			
+			fmt::print("Output edges: {}\n", node.get_num_out_edges());
+            for (auto &out : node.out_edges()) 
+			{
+				fmt::print ("No. of bits in output edge is : {} \n", out.driver.get_bits());
+			}
+		break;
+		
+		case Ntype_op::SRA :    // Shift Right Arithmetic
+			fmt::print("Input edges: {}\n", node.get_num_inp_edges());
+			for (auto &in : node.inp_edges()) 
+			{
+				fmt::print ("No. of bits in input edge is : {} \n", in.driver.get_bits());
+            }			
+			fmt::print("Output edges: {}\n", node.get_num_out_edges());
+            for (auto &out : node.out_edges()) 
+			{
+				fmt::print ("No. of bits in output edge is : {} \n", out.driver.get_bits());
+			}
+		break;
+
+		case Ntype_op::Mux :
+			fmt::print("Input edges: {}\n", node.get_num_inp_edges());
+			for (auto &in : node.inp_edges()) 
+			{
+				fmt::print ("No. of bits in input edge is : {} \n", in.driver.get_bits());
+            }
+			fmt::print("Output edges: {}\n", node.get_num_out_edges());
+            for (auto &out : node.out_edges()) 
+			{
+				fmt::print ("No. of bits in output edge is : {} \n", out.driver.get_bits());
+			}
+		break;
+		
+		default : ;// Do nothing
+	}
+  }
+}

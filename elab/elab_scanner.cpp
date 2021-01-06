@@ -100,9 +100,8 @@ void Elab_scanner::add_token(Token &t) {
     }
   } else if (t.tok == Token_id_qmark) {
     if (last_tok.tok == Token_id_alnum) {
-      auto txt = last_tok.get_text();
-      if (txt.size() && txt[0] == '0') {
-        auto last_txt = last_tok.get_text();
+      auto last_txt = last_tok.get_text();
+      if (last_txt.size() && last_txt[0] == '0') {
         if (last_txt.size() >= 2 && (last_txt[1] == 'b' || last_txt[1] == 'B')) {
           token_list.back().fuse_token(Token_id_alnum, t);
           return;
@@ -456,6 +455,11 @@ void Elab_scanner::parser_error_int(std::string_view text) const {
   scan_raw_msg("error", text, false);
   n_errors++;
   //if (n_errors > max_errors) exit(-3);
+#ifndef NDEBUG
+  //only for bazel debug mode, better swift gdb debug for developers
+  fmt::print("Pass::Error: {}\n", text);
+  I(false, "Compiler pass error! debug with gdb"); 
+#endif
   throw std::runtime_error(std::string(text));
 }
 

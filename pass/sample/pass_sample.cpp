@@ -39,7 +39,7 @@ void Pass_sample::work(Eprp_var &var) {
 }
 
 void Pass_sample::wirecount(Eprp_var &var) {
-  Lbench      b("pass.sample.wirecount");
+  Lbench      b("pass.SAMPLE_wirecount");
   Pass_sample p(var);
 
   for (const auto &g : var.lgs) {
@@ -50,14 +50,14 @@ void Pass_sample::wirecount(Eprp_var &var) {
 void Pass_sample::do_wirecount(LGraph *g, int indent) {
   int i_num  = 0;
   int i_bits = 0;
-  g->each_graph_input([this, &i_num, &i_bits](const Node_pin &pin) {
+  g->each_graph_input([&i_num, &i_bits](const Node_pin &pin) {
     i_num++;
     i_bits += pin.get_bits();
   });
 
   int o_num  = 0;
   int o_bits = 0;
-  g->each_graph_output([this, &o_num, &o_bits](const Node_pin &pin) {
+  g->each_graph_output([&o_num, &o_bits](const Node_pin &pin) {
     o_num++;
     o_bits += pin.get_bits();
   });
@@ -113,12 +113,12 @@ void Pass_sample::do_wirecount(LGraph *g, int indent) {
 }
 
 void Pass_sample::compute_histogram(LGraph *g) {
-  Lbench b("pass.sample.compute_histogram");
+  Lbench b("pass.SAMPLE_compute_histogram");
 
   std::map<Ntype_op, int> histogram;
 
   int cells = 0;
-  for (const auto node : g->forward()) {
+  for (const auto& node : g->forward()) {
     cells++;
     auto type = node.get_type_op();
 
@@ -133,12 +133,12 @@ void Pass_sample::compute_histogram(LGraph *g) {
 }
 
 void Pass_sample::compute_max_depth(LGraph *g) {
-  Lbench b("pass.sample.max_depth");
+  Lbench b("pass.SAMPLE_max_depth");
 
   absl::flat_hash_map<Node::Compact, int> depth;
 
   int max_depth = 0;
-  for (const auto node : g->forward()) {
+  for (const auto& node : g->forward()) {
     int local_max = 0;
     for (const auto &edge : node.inp_edges()) {
       int d = depth[edge.driver.get_node().get_compact()];
@@ -153,7 +153,7 @@ void Pass_sample::compute_max_depth(LGraph *g) {
 }
 
 void Pass_sample::annotate_placement(LGraph *g) {
-  Lbench b("pass.sample.replace_inline");
+  Lbench b("pass.SAMPLE_replace_inline");
 
   int x_pos = 0;
 
@@ -190,7 +190,7 @@ void Pass_sample::create_sample_graph(LGraph *g) {
   shr_out_drv.set_name("shr_out");
 
   auto s_const = lg->create_node_const(Lconst(2));
-  I(s_const.get_driver_pin().get_bits() == 2);  // Automatically set bits for const
+  I(s_const.get_driver_pin().get_bits() == 3);  // Automatically set bits for const
 
   auto a_sink = shr_node.setup_sink_pin("a");
   auto b_sink = shr_node.setup_sink_pin("b");

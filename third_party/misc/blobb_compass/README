@@ -1,5 +1,0 @@
-This program is included for the floorplanner pass (fplan) of livehd.  Only the binary is used, although a 
-BUILD file is included in case the source code needs to be accessed.
-
-Some headers have been included/deleted in order to get the program to compile correctly,
-and all .cxx and .h files have been renamed to .cpp and .hpp files.

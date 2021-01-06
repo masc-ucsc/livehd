@@ -20,7 +20,7 @@ void Inou_slang::setup() {
 Inou_slang::Inou_slang(const Eprp_var &var) : Pass("pass.lec", var) {}
 
 void Inou_slang::work(Eprp_var &var) {
-  Lbench      b("inou.verilog");
+  Lbench      b("inou.SLANG_verilog");
   Inou_slang p(var);
 
 #if 0
@@ -43,8 +43,5 @@ void Inou_slang::work(Eprp_var &var) {
     var.add(std::move(lnast));
   }
 #endif
-}
-
-void Inou_slang::do_work(LGraph *g) {
 }
 

@@ -50,6 +50,7 @@ public:
   Node_pin driver;
   Node_pin sink;
 
+  constexpr XEdge() {};
   XEdge(LGraph *g, const Compact &c);
   XEdge(const Node_pin &src_, const Node_pin &dst_);
 

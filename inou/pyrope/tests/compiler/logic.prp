@@ -1,6 +1,6 @@
-$a.__bits = 1
-$b.__bits = 3
-$c.__bits = 3
+$a.__sbits = 1
+$b.__sbits = 3
+$c.__sbits = 3
 
 // bitwise
 %o1 = ~$a
@@ -10,7 +10,7 @@ $c.__bits = 3
 %o5 = $c ^ $b
 
 // logical
-%o6 = !$a
+%o6 = !$a // if $a is True or any non-zero value->  returns False
 %o7 = !$b
 %o8 = $a and $b
 %o9 = $a or $b

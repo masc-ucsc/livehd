@@ -17,8 +17,8 @@ cc_library(
     name = "inou_firrtl_cpp",
     srcs = [
         "inou_firrtl.cpp",
-        "fir_to_lnast.cpp",
-        "lnast_to_fir.cpp",
+        "fir_tolnast.cpp",
+        "lnast_tofir.cpp",
         "find_circuit_comps.cpp",
         "inou_firrtl.hpp",
     ],

@@ -118,6 +118,10 @@ uint8_t Prp::rule_if_statement(std::list<std::tuple<Rule_id, Token_entry>> &pass
   }
 
   INIT_PSEUDO_FAIL();
+  (void)cur_loc_list_size;
+  (void)sub_cnt_start;
+  (void)pos_start;
+
   UPDATE_PSEUDO_FAIL();
 
   // optional
@@ -329,7 +333,7 @@ uint8_t Prp::rule_empty_scope_colon(std::list<std::tuple<Rule_id, Token_entry>> 
 
   // optional
   if (SCAN_IS_TOKEN(Token_id_colon, Prp_rule_empty_scope_colon)) {
-    if (!SCAN_IS_TOKEN(Token_id_colon), Prp_rule_empty_scope_colon) {
+    if (!SCAN_IS_TOKEN(Token_id_colon, Prp_rule_empty_scope_colon)) {
       RULE_FAILED("Failed rule_empty_scope_colon; couldn't find a second colon.\n");
     }
   }
@@ -426,6 +430,9 @@ uint8_t Prp::rule_scope(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) 
 
 uint8_t Prp::rule_scope_condition(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
   INIT_FUNCTION("rule_scope_condition.");
+  (void)starting_line;
+  (void)starting_pos;
+  (void)starting_tokens;
 
   // optional
   CHECK_RULE(&Prp::rule_scope_argument);
@@ -582,6 +589,11 @@ uint8_t Prp::rule_function_pipe(std::list<std::tuple<Rule_id, Token_entry>> &pas
     }
     bool next = true;
     INIT_PSEUDO_FAIL();
+    (void)cur_tokens;
+    (void)cur_loc_list_size;
+    (void)sub_cnt_start;
+    (void)lines_start;
+    (void)pos_start;
 
     /* zero or more of the following */
     while (next) {
@@ -1061,6 +1073,9 @@ uint8_t Prp::rule_tuple_dot_notation(std::list<std::tuple<Rule_id, Token_entry>>
 
 uint8_t Prp::rule_tuple_dot_dot(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
   INIT_FUNCTION("rule_tuple_dot_dot.");
+  (void)starting_line;
+  (void)starting_pos;
+  (void)starting_tokens;
   bool next = true;
 
   INIT_PSEUDO_FAIL();
@@ -1108,6 +1123,9 @@ uint8_t Prp::rule_lhs_var_name(std::list<std::tuple<Rule_id, Token_entry>> &pass
 
 uint8_t Prp::rule_tuple_array_bracket(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
   INIT_FUNCTION("rule_tuple_array_bracket.");
+  (void)starting_line;
+  (void)starting_pos;
+  (void)starting_tokens;
 
   bool next = true;
   INIT_PSEUDO_FAIL();
@@ -1319,6 +1337,9 @@ uint8_t Prp::rule_tuple_by_notation(std::list<std::tuple<Rule_id, Token_entry>> 
 
 uint8_t Prp::rule_bit_selection_bracket(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
   INIT_FUNCTION("rule_bit_selection_bracket.");
+  (void)starting_line;
+  (void)starting_pos;
+  (void)starting_tokens;
 
   bool next = true;
   INIT_PSEUDO_FAIL();

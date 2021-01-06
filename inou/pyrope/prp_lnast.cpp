@@ -707,7 +707,7 @@ Lnast_node Prp_lnast::eval_tuple(mmap_lib::Tree_index idx_start_ast, mmap_lib::T
   auto idx_tuple_not_root = idx_start_ast;
   // first thing: find any expressions inside the tuple and save the rhs temporary variables
   // get the rhs of the tuple assignment
-  Rule_id root_rid;
+  Rule_id root_rid = 0;
   if (!idx_start_ast.is_invalid()) {
     root_rid = ast->get_data(idx_start_ast).rule_id;
     if (root_rid == Prp_rule_assignment_expression) {

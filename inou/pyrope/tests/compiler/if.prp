@@ -1,11 +1,11 @@
-$inp.__bits = 1
+$inp.__ubits = 1
+%out.__ubits = 3
 
-x = 3
-
+x = 3    // 3bits sign
 if ($inp == 0) {
-  x = 4
+  x = 4  // max = 4sbits sign
 } else {
-  x = 5
+  x = 5  // max = 4sbits sign
 }
-
-%out = x
+// x // (5,4) 
+%out = x  // out:(0,7) x:(4,5)

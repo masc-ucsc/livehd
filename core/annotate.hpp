@@ -14,22 +14,24 @@
 #include "node_pin.hpp"
 
 struct Ann_name {
-  static constexpr char delay[]      = "delay";
-  static constexpr char wireoffset[] = "wireoffset";
-  static constexpr char wirename[]   = "wirename";
-  static constexpr char prp_vname[]  = "prp_vname";
-  static constexpr char nodename[]   = "nodename";
-  static constexpr char nodeplace[]  = "nodeplace";
-  static constexpr char file_loc[]   = "file_loc";
-  static constexpr char tree_pos[]   = "tree_pos";
-  static constexpr char color[]      = "color";
-  static constexpr char ssa[]        = "ssa";
+  static constexpr char delay[]         = "delay";
+  static constexpr char io_unsign[]     = "io_unsign";
+  static constexpr char offset[]        = "offset";
+  static constexpr char pin_name[]      = "pin_name";
+  static constexpr char prp_vname[]     = "prp_vname";
+  static constexpr char ssa[]           = "ssa";
+
+  static constexpr char nodename[]      = "nodename";
+  static constexpr char nodeplace[]     = "nodeplace";
+  static constexpr char file_loc[]      = "file_loc";
+  static constexpr char tree_pos[]      = "tree_pos";
+  static constexpr char color[]         = "color";
 };
 
-using Ann_node_pin_offset = Attribute<Ann_name::wireoffset, Node_pin, mmap_lib::map<Node_pin::Compact_class_driver, Bits_t> >;
+using Ann_node_pin_offset = Attribute<Ann_name::offset, Node_pin, mmap_lib::map<Node_pin::Compact_class_driver, Bits_t> >;
 
 using Ann_node_pin_name
-    = Attribute<Ann_name::wirename, Node_pin, mmap_lib::bimap<Node_pin::Compact_class_driver, std::string_view> >;
+    = Attribute<Ann_name::pin_name, Node_pin, mmap_lib::bimap<Node_pin::Compact_class_driver, std::string_view> >;
 
 using Ann_node_pin_prp_vname
     = Attribute<Ann_name::prp_vname, Node_pin, mmap_lib::map<Node_pin::Compact_class_driver, std::string_view> >;
@@ -37,6 +39,8 @@ using Ann_node_pin_prp_vname
 using Ann_node_pin_ssa = Attribute<Ann_name::ssa, Node_pin, mmap_lib::map<Node_pin::Compact_class_driver, Ann_ssa> >;
 
 using Ann_node_pin_delay = Attribute<Ann_name::delay, Node_pin, mmap_lib::map<Node_pin::Compact_driver, float> >;
+
+using Ann_node_pin_io_unsign = Attribute<Ann_name::io_unsign, Node_pin, mmap_lib::map<Node_pin::Compact_driver, bool> >;
 
 using Ann_node_name = Attribute<Ann_name::nodename, Node, mmap_lib::bimap<Node::Compact_class, std::string_view> >;
 
@@ -51,11 +55,12 @@ using Ann_node_color = Attribute<Ann_name::color, Node, mmap_lib::bimap<Node::Co
 struct Ann_support {
   // TODO: Change to object to register annotations, and have an "update" for incremental
   static void clear(LGraph *lg) {
+    Ann_node_pin_delay::clear(lg);
+    Ann_node_pin_io_unsign::clear(lg);
     Ann_node_pin_offset::clear(lg);
-    Ann_node_pin_delay::clear(lg);
     Ann_node_pin_name::clear(lg);
-    Ann_node_pin_delay::clear(lg);
     Ann_node_pin_prp_vname::clear(lg);
+    Ann_node_pin_ssa::clear(lg);
 
     Ann_node_name::clear(lg);
     Ann_node_place::clear(lg);
@@ -65,11 +70,12 @@ struct Ann_support {
   };
 
   static void sync(LGraph *lg) {
+    Ann_node_pin_delay::sync(lg);
+    Ann_node_pin_io_unsign::sync(lg);
     Ann_node_pin_offset::sync(lg);
-    Ann_node_pin_delay::sync(lg);
     Ann_node_pin_name::sync(lg);
-    Ann_node_pin_delay::sync(lg);
     Ann_node_pin_prp_vname::sync(lg);
+    Ann_node_pin_ssa::sync(lg);
 
     Ann_node_name::sync(lg);
     Ann_node_place::sync(lg);

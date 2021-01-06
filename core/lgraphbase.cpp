@@ -439,7 +439,7 @@ Index_ID LGraph_Base::get_space_output_pin(const Index_ID start_nid, const Port_
   return 0;
 }
 
-Index_ID LGraph_Base::add_edge_int(const Index_ID dst_idx, const Port_ID inp_pid, Index_ID src_idx, Port_ID dst_pid) {
+void LGraph_Base::add_edge_int(const Index_ID dst_idx, const Port_ID inp_pid, Index_ID src_idx, Port_ID dst_pid) {
   // Do not point to intermediate nodes which can be remapped, just root nodes
   I(node_internal[dst_idx].is_root());
   I(node_internal[src_idx].is_root());
@@ -598,8 +598,27 @@ Index_ID LGraph_Base::add_edge_int(const Index_ID dst_idx, const Port_ID inp_pid
   }
 #endif
 
+#ifndef NDEBUG
+  auto dst_nid = node_internal[dst_idx].get_master_root_nid();
+  auto op      = node_internal[dst_nid].get_type();
+  if (Ntype::is_single_driver_per_pin(op)) {
+    int total = 0;
+    auto idx = dst_nid;
+    while (true) {
+      if (node_internal[idx].get_dst_pid() == inp_pid)
+        total += node_internal[idx].get_num_local_inputs();
+
+      if (node_internal[idx].is_last_state()) {
+        break;
+      }
+
+      idx = node_internal[idx].get_next();
+    }
+    /* I(total==1); */
+  }
+#endif
+
   I(node_internal[root_idx].is_root());
-  return root_idx;
 }
 
 void LGraph_Base::warn_int(std::string_view text) { fmt::print("warning:{}\n", text); }
