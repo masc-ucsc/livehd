@@ -96,7 +96,8 @@ protected:
   Node_pin     create_inp_tg             (LGraph *lg, std::string_view input_field);
   void         create_out_ta             (LGraph *lg, std::string_view key_name, Node_pin &val_dpin);
 
-  void         try_create_flattened_inp     (LGraph *lg);
+  void         try_create_flattened_inp           (LGraph *lg);
+  void         post_process_ginp_attr_connections (LGraph *lg);
   void         dfs_try_create_flattened_inp (LGraph *lg, Node_pin &cur_node_spin, std::string hier_name, Node &chain_head);
   Node_pin     create_const                 (LGraph *lg, std::string_view const_str);
 

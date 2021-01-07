@@ -26,6 +26,7 @@ class Inou_firrtl : public Pass {
 protected:
   //----------- FOR toLNAST ----------
   std::string_view create_temp_var(Lnast &lnast);
+  std::string_view create_dummy_expr_node_var(Lnast &lnast);
   std::string_view get_new_seq_name(Lnast &lnast);
   std::string      get_full_name(Lnast &lnast, Lnast_nid &parent_node, const std::string &term, const bool is_rhs);
 
@@ -183,9 +184,9 @@ private:
                    READI, WRITEI, READ_WRITEI, INFER };
   absl::flat_hash_map<std::string, MPORT_DIR> late_assign_ports;
 
-
-  uint32_t temp_var_count;
-  uint32_t seq_counter;
+  uint32_t dummy_expr_node_cnt;
+  uint32_t tmp_var_cnt;
+  uint32_t seq_cnt;
 
   //----------- FOR toFIRRTL ---------
   absl::flat_hash_map<std::string, firrtl::FirrtlPB_Port *>      io_map;
