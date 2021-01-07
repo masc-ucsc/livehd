@@ -33,9 +33,7 @@ void Pass_lec::setup() {
 Pass_lec::Pass_lec(const Eprp_var &var) : Pass("pass.lec", var) {}
 
 void Pass_lec::do_work(LGraph *g) {
-  fmt::print("before check lec\n");
   check_lec(g);
-  fmt::print("inside do work\n");
 }
 // do work: call function to get lgraph1, call function to get lgraph2, or get all lgraphs
 // call function to check equivalence
@@ -45,14 +43,14 @@ void Pass_lec::work(Eprp_var &var) {
 
   for (const auto &g : var.lgs) {
     p.do_work(g);
-    fmt::print("Lgraph Size: {}\n", var.lgs.size());
-    fmt::print("name: {}\n", g->get_name());
+    //fmt::print("Lgraph Size: {}\n", var.lgs.size());
+    //fmt::print("name: {}\n", g->get_name());
   }
 }
 
 void Pass_lec::check_lec(LGraph *g) {
-  fmt::print("**********BEGIN check LEC\n");
-  std::multimap<std::string, std::string> nodeMap;
+  fmt::print("\n**********BEGIN LEC for lgraphs.\n\n");
+  //std::multimap<std::string, std::string> nodeMap;
 
   // fmt::print("TODO: implement LEC\n");
   //-------------------------------------------------
@@ -78,7 +76,7 @@ void Pass_lec::check_lec(LGraph *g) {
     i_bits += pin.get_bits();
   });
 
-  fmt::print("num of inputs: {},  no of Bits: {}\n", i_num, i_bits);
+  //fmt::print("num of inputs: {},  no of Bits: {}\n", i_num, i_bits);
 
   // determine no of outputs
   int o_num  = 0;
@@ -89,11 +87,11 @@ void Pass_lec::check_lec(LGraph *g) {
     o_bits += pin.get_bits();
   });
 
-  fmt::print("num of outputs: {},  no of Bits: {}\n", o_num, o_bits);
+  //fmt::print("num of outputs: {},  no of Bits: {}\n", o_num, o_bits);
 
   for (const auto &node : g->forward()) {
     fmt::print("Node type: {}\n", node.get_type_name());
-    nodeMap.insert(std::make_pair(node.get_type_name(), g->get_name()));
+    //nodeMap.insert(std::make_pair(node.get_type_name(), g->get_name()));
 
     // fmt::print("No of edges: {}, input edges: {}, output edges: {}\n", node.get_num_edges(), node.get_num_inp_edges(),
     // node.get_num_out_edges() );
@@ -119,13 +117,36 @@ void Pass_lec::check_lec(LGraph *g) {
       };
 
       fmt::print("\n");*/
+
+    if (node.get_type_op() == Ntype_op::Tposs){
+        fmt::print(" {} Node type  found.\n", node.get_type_name());
+    }
+
+    else if (node.get_type_op() == Ntype_op::Xor){
+        fmt::print(" {} Node type  found.\n", node.get_type_name());
+    }
+
+    else if (node.get_type_op() == Ntype_op::And){
+        fmt::print(" {} Node type  found.\n", node.get_type_name());
+    }
+
+    else if (node.get_type_op() == Ntype_op::Or){
+        fmt::print(" {} Node type  found.\n", node.get_type_name());
+    }
+
+    else if (node.get_type_op() == Ntype_op::Not){
+        fmt::print(" {} Node type  found.\n", node.get_type_name());
+    };
+
+
+
   };
 
-  for (auto &p : nodeMap) {
+  /*for (auto &p : nodeMap) {
     fmt::print("{}->{}\n", p.first, p.second);
   }
 
-  fmt::print("No of Graphs for XOR: {}\n", nodeMap.count("XOR"));
+  fmt::print("No of Graphs for XOR: {}\n", nodeMap.count("XOR"));*/
   fmt::print("*************END check LEC\n");
 
   /*
