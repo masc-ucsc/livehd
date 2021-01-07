@@ -36,7 +36,7 @@ Darken HiLoMultiplier Max2 Coverage
 # pts='Accumulator'
 # pts='ByteSelector'
 # pts='ResetShiftRegister'
-# pts='Counter'
+pts='Counter'
 # pts='Adder4'
 # pts='Mux4'
 # pts='LogShifter'

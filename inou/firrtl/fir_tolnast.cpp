@@ -217,7 +217,8 @@ void Inou_firrtl::init_wire_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type
  * clock, reset, and init values using "dot" nodes in the LNAST.
  * These functions create all of those when a reg is first declared. */
 void Inou_firrtl::init_reg_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type, const std::string& id,
-                                const firrtl::FirrtlPB_Expression& clock, const firrtl::FirrtlPB_Expression& reset,
+                                const firrtl::FirrtlPB_Expression& clock, 
+                                const firrtl::FirrtlPB_Expression& reset,
                                 const firrtl::FirrtlPB_Expression& init, Lnast_nid& parent_node) {
   switch (type.type_case()) {
     case firrtl::FirrtlPB_Type::kBundleType: {  // Bundle Type
@@ -259,10 +260,12 @@ void Inou_firrtl::init_reg_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type,
 }
 
 // FIXME: Eventually add in other "dot" nodes when supported.
-void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id, const firrtl::FirrtlPB_Expression& clocke,
-                                    const firrtl::FirrtlPB_Expression& resete, const firrtl::FirrtlPB_Expression& inite,
+void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id, 
+                                    const firrtl::FirrtlPB_Expression& clocke,
+                                    const firrtl::FirrtlPB_Expression& resete, 
+                                    const firrtl::FirrtlPB_Expression& inite,
                                     uint32_t bitwidth, Lnast_nid& parent_node, bool is_signed) {
-  (void)inite;
+  (void)inite; //FIXME->sh: should add reset initialize logit!!!!!!!!!!!!! Todo tomorrow!!
   
   std::string id{_id};  // FIXME: isntead pass string_view, change lenght/start no need to realloc (much faster) Code can be shared
                         // with port_id
@@ -275,16 +278,6 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id, const 
 
   // Add register's name to the global list.
   register_names.insert(id.substr(1, id.length() - 1));  // Use substr to remove "#"
-
-  /* Now that we have a name to access it by, we can create the
-   * relevant dot nodes like: __clk_pin, __bits, __reset_async
-   * __reset_pin, and (init... how to implement?) */
-
-  // Specify __clk_pin (all registers should have this set)
-  /*auto acc_name_c = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(id, ".__clk_pin"));
-  auto idx_asg_c = lnast.add_child(parent_node, Lnast_node::create_assign(""));
-  lnast.add_child(idx_asg_c, Lnast_node::create_ref(acc_name_c));
-  AttachExprStrToNode(lnast, clk, idx_asg_c);*/
 
   // Specify __bits, if bitwidth is explicit
   if (bitwidth > 0) {
@@ -1794,6 +1787,7 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
     }
     case firrtl::FirrtlPB_Statement::kRegister: {  // Register
       register_names.insert(stmt.register_().id());
+      fmt::print("DEBUG entry point register_name:{}\n", stmt.register_().id());
       init_reg_dots(lnast, stmt.register_().type(), absl::StrCat("#", stmt.register_().id()),
                     stmt.register_().clock(), stmt.register_().reset(),
                     stmt.register_().init(), parent_node);
