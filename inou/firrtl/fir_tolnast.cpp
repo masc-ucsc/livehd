@@ -270,11 +270,11 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id,
   std::string id{_id};  // FIXME: isntead pass string_view, change lenght/start no need to realloc (much faster) Code can be shared
                         // with port_id
 
-  auto clk  = lnast.add_string(ReturnExprString(lnast, clocke, parent_node, true));
-  (void)clk;
+  auto clk_expr_str = lnast.add_string(ReturnExprString(lnast, clocke, parent_node, true));
+  (void)clk_expr_str;
 
-  auto rst  = lnast.add_string(ReturnExprString(lnast, resete, parent_node, true));
-  (void)rst;
+  auto rst_expr_str = lnast.add_string(ReturnExprString(lnast, resete, parent_node, true));
+  fmt::print("DEBUG reset expr:{}\n", rst_expr_str);
 
   // Add register's name to the global list.
   register_names.insert(id.substr(1, id.length() - 1));  // Use substr to remove "#"
@@ -293,8 +293,32 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id,
     lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(std::to_string(bitwidth))));
   }
 
+
+  // handle the most common reset initialization (only hiFIRRTL has a meaningful flop reset description)
+  if (resete.expression_case() == firrtl::FirrtlPB_Expression::kReference) {
+    auto init_expr_str = lnast.add_string(ReturnExprString(lnast, inite, parent_node, true));
+    fmt::print("DEBUG init expr:{}\n", init_expr_str);
+    (void)init_expr_str;
+    I(lnast.get_data(parent_node).type.is_stmts());
+    auto idx_mux_if = lnast.add_child(parent_node, Lnast_node::create_if("hiFir reset init"));
+    lnast.add_child(idx_mux_if, Lnast_node::create_cond(rst_expr_str));  // from the firrtl spec, it's always reset high
+    auto idx_stmt_tr = lnast.add_child(idx_mux_if, Lnast_node::create_stmts(get_new_seq_name(lnast)));
+    InitialExprAdd(lnast, inite, idx_stmt_tr, id);
+
+    auto idx_stmt_f = lnast.add_child(idx_mux_if, Lnast_node::create_stmts(get_new_seq_name(lnast)));
+    auto idx_dot = lnast.add_child(idx_stmt_f, Lnast_node::create_dot(""));
+    auto dot_lhs = create_temp_var(lnast);
+    lnast.add_child(idx_dot, Lnast_node::create_ref(lnast.add_string(dot_lhs)));
+    lnast.add_child(idx_dot, Lnast_node::create_ref(lnast.add_string(id)));
+    lnast.add_child(idx_dot, Lnast_node::create_ref("__q_pin"));
+
+    auto idx_asg = lnast.add_child(idx_stmt_f, Lnast_node::create_assign(""));
+    lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(id)));
+    lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(dot_lhs)));
+  }
+
   // Specify __reset_async
-  if (resete.has_reference() || resete.has_sub_field() ||
+  if (resete.has_reference() || resete.has_sub_field()  ||
       resete.has_sub_index() || resete.has_sub_access() || resete.has_prim_op()) {
     bool is_reset_async = false;
     if (resete.has_prim_op()) {
@@ -1691,6 +1715,7 @@ std::string Inou_firrtl::ReturnExprString(Lnast& lnast, const firrtl::FirrtlPB_E
   switch (expr.expression_case()) {
     case firrtl::FirrtlPB_Expression::kReference: {  // Reference
       expr_string = get_full_name(lnast, parent_node, expr.reference().id(), is_rhs);
+
       if (dangling_ports_map.contains(expr_string)) {
         /* If it's a memory port created after the memory, the name found will
          * just be the port id (i.e. "r"). This needs to be changed to
@@ -2019,6 +2044,10 @@ void Inou_firrtl::ListUserModuleInfo(Eprp_var& var, const firrtl::FirrtlPB_Modul
     PreCheckForMem(*lnast, idx_stmts, stmt);
     ListStatementInfo(*lnast, stmt, idx_stmts);
   }
+
+  // FIXME->sh: move reset initialization logic here for registers!!
+
+
   PerformLateMemAssigns(*lnast, idx_stmts);
   var.add(std::move(lnast));
 }
