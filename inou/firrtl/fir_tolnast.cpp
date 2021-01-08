@@ -265,13 +265,10 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id,
                                     const firrtl::FirrtlPB_Expression& resete, 
                                     const firrtl::FirrtlPB_Expression& inite,
                                     uint32_t bitwidth, Lnast_nid& parent_node, bool is_signed) {
-  (void)inite; //FIXME->sh: should add reset initialize logit!!!!!!!!!!!!! Todo tomorrow!!
   
-  std::string id{_id};  // FIXME: isntead pass string_view, change lenght/start no need to realloc (much faster) Code can be shared
-                        // with port_id
+  std::string id{_id};   
 
-  auto clk_expr_str = lnast.add_string(ReturnExprString(lnast, clocke, parent_node, true));
-  (void)clk_expr_str;
+  lnast.add_string(ReturnExprString(lnast, clocke, parent_node, true));
 
   auto rst_expr_str = lnast.add_string(ReturnExprString(lnast, resete, parent_node, true));
   fmt::print("DEBUG reset expr:{}\n", rst_expr_str);
@@ -296,25 +293,26 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id,
 
   // handle the most common reset initialization (only hiFIRRTL has a meaningful flop reset description)
   if (resete.expression_case() == firrtl::FirrtlPB_Expression::kReference) {
-    auto init_expr_str = lnast.add_string(ReturnExprString(lnast, inite, parent_node, true));
-    fmt::print("DEBUG init expr:{}\n", init_expr_str);
-    (void)init_expr_str;
-    I(lnast.get_data(parent_node).type.is_stmts());
-    auto idx_mux_if = lnast.add_child(parent_node, Lnast_node::create_if("hiFir reset init"));
-    lnast.add_child(idx_mux_if, Lnast_node::create_cond(rst_expr_str));  // from the firrtl spec, it's always reset high
-    auto idx_stmt_tr = lnast.add_child(idx_mux_if, Lnast_node::create_stmts(get_new_seq_name(lnast)));
-    InitialExprAdd(lnast, inite, idx_stmt_tr, id);
+    reg_name2rst_init_expr.insert_or_assign(id, std::make_pair(resete, inite));
+    /* auto init_expr_str = lnast.add_string(ReturnExprString(lnast, inite, parent_node, true)); */
+    /* fmt::print("DEBUG init expr:{}\n", init_expr_str); */
+    /* (void)init_expr_str; */
+    /* I(lnast.get_data(parent_node).type.is_stmts()); */
+    /* auto idx_mux_if = lnast.add_child(parent_node, Lnast_node::create_if("hiFir reset init")); */
+    /* lnast.add_child(idx_mux_if, Lnast_node::create_cond(rst_expr_str));  // from the firrtl spec, it's always reset high */
+    /* auto idx_stmt_tr = lnast.add_child(idx_mux_if, Lnast_node::create_stmts(get_new_seq_name(lnast))); */
+    /* InitialExprAdd(lnast, inite, idx_stmt_tr, id); */
 
-    auto idx_stmt_f = lnast.add_child(idx_mux_if, Lnast_node::create_stmts(get_new_seq_name(lnast)));
-    auto idx_dot = lnast.add_child(idx_stmt_f, Lnast_node::create_dot(""));
-    auto dot_lhs = create_temp_var(lnast);
-    lnast.add_child(idx_dot, Lnast_node::create_ref(lnast.add_string(dot_lhs)));
-    lnast.add_child(idx_dot, Lnast_node::create_ref(lnast.add_string(id)));
-    lnast.add_child(idx_dot, Lnast_node::create_ref("__q_pin"));
+    /* auto idx_stmt_f = lnast.add_child(idx_mux_if, Lnast_node::create_stmts(get_new_seq_name(lnast))); */
+    /* auto idx_dot = lnast.add_child(idx_stmt_f, Lnast_node::create_dot("")); */
+    /* auto dot_lhs = create_temp_var(lnast); */
+    /* lnast.add_child(idx_dot, Lnast_node::create_ref(lnast.add_string(dot_lhs))); */
+    /* lnast.add_child(idx_dot, Lnast_node::create_ref(lnast.add_string(id))); */
+    /* lnast.add_child(idx_dot, Lnast_node::create_ref("__q_pin")); */
 
-    auto idx_asg = lnast.add_child(idx_stmt_f, Lnast_node::create_assign(""));
-    lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(id)));
-    lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(dot_lhs)));
+    /* auto idx_asg = lnast.add_child(idx_stmt_f, Lnast_node::create_assign("")); */
+    /* lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(id))); */
+    /* lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(dot_lhs))); */
   }
 
   // Specify __reset_async
@@ -2045,8 +2043,19 @@ void Inou_firrtl::ListUserModuleInfo(Eprp_var& var, const firrtl::FirrtlPB_Modul
     ListStatementInfo(*lnast, stmt, idx_stmts);
   }
 
-  // FIXME->sh: move reset initialization logic here for registers!!
-
+  // insert the reset initialization logic, which should be the highest priority and insert in the end
+  for (auto const&[reg_name, expr_pair] : reg_name2rst_init_expr) {
+    auto resete = expr_pair.first;
+    auto inite  = expr_pair.second;
+    auto init_expr_str = lnast->add_string(ReturnExprString(*lnast, inite, idx_stmts, true));
+    fmt::print("DEBUG init expr:{}\n", init_expr_str);
+    auto reset_expr_str = lnast->add_string(ReturnExprString(*lnast, resete, idx_stmts, true));
+    fmt::print("DEBUG reset expr:{}\n", reset_expr_str);
+    auto idx_mux_if = lnast->add_child(idx_stmts, Lnast_node::create_if("hiFir reset init"));
+    lnast->add_child(idx_mux_if, Lnast_node::create_cond(reset_expr_str));  // from the firrtl spec, it's always reset high
+    auto idx_stmt_tr = lnast->add_child(idx_mux_if, Lnast_node::create_stmts(get_new_seq_name(*lnast)));
+    InitialExprAdd(*lnast, inite, idx_stmt_tr, reg_name);
+  }  
 
   PerformLateMemAssigns(*lnast, idx_stmts);
   var.add(std::move(lnast));
