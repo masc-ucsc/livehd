@@ -121,7 +121,7 @@ private:
   bool      has_else_stmts             (const Lnast_nid  &if_nid);
   Lnast_nid add_phi_node               (const Lnast_nid  &cond_nid, const Lnast_nid &t_nid, const Lnast_nid &f_nid);
   Lnast_nid get_complement_nid            (std::string_view brother_name, const Lnast_nid &psts_nid, bool false_path);
-  Lnast_nid check_phi_table_parents_chain (std::string_view brother_name, const Lnast_nid &psts_nid, bool originate_from_csts);
+  Lnast_nid check_phi_table_parents_chain (std::string_view brother_name, const Lnast_nid &psts_nid);
   void      resolve_ssa_lhs_subs                (const Lnast_nid &psts_nid);
   void      resolve_ssa_rhs_subs                (const Lnast_nid &psts_nid);
   void      opr_lhs_merge                       (const Lnast_nid &psts_nid);

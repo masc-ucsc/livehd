@@ -19,29 +19,24 @@ Decrementer Test1 Test2 Test3 Test6 TrivialAdd NotAnd Trivial Tail TrivialArith
 Shifts PlusAnd MaxN ByteSelector Darken HiLoMultiplier SimpleALU Mul
 VecShiftRegisterParam VecShiftRegisterSimple ' 
 
-pts_hifirrtl_todo='Test6 LFSR16 Accumulator ByteSelector ResetShiftRegister Counter Life Cell_alone Adder4 Mux4 LogShifter SingleEvenFilter
-VecShiftRegister BundleConnect SubModule PlusAnd MaxN VecShiftRegisterParam
-VecShiftRegisterSimple VecSearch VendingMachineSwitch VendingMachine'
+# pts_hifirrtl_todo='Test6 ByteSelector ResetShiftRegister Counter Life Cell_alone Adder4 Mux4 LogShifter SingleEvenFilter
+# VecShiftRegister BundleConnect SubModule PlusAnd MaxN VecShiftRegisterParam
+# VecShiftRegisterSimple VecSearch VendingMachineSwitch VendingMachine'
 
-pts='MaxN RegisterSimple Register RegXor AddNot EnableShiftRegister GCD_3bits Flop
+pts='ResetShiftRegister Parity Counter MaxN RegisterSimple Register RegXor AddNot EnableShiftRegister GCD_3bits Flop
 Decrementer Test2 Test3 TrivialAdd NotAnd Trivial Tail TrivialArith Shifts
-Darken HiLoMultiplier Max2 Coverage 
+Darken HiLoMultiplier Max2 Coverage Accumulator LFSR16
 ' 
 
 # pts='Mul'
 # pts='SimpleALU'
 # pts='Test1'
 # pts='Test6'
-# pts='LFSR16'
-# pts='Accumulator'
 # pts='ByteSelector'
-# pts='ResetShiftRegister'
-# pts='Counter'
 # pts='Adder4'
 # pts='Mux4'
-# pts='LogShifter'
 # pts='SingleEvenFilter'
-# pts='Parity'
+# pts='LogShifter'
 
 
 LGSHELL=./bazel-bin/main/lgshell

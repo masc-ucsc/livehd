@@ -184,6 +184,9 @@ private:
                    READI, WRITEI, READ_WRITEI, INFER };
   absl::flat_hash_map<std::string, MPORT_DIR> late_assign_ports;
 
+  absl::flat_hash_map<std::string, std::pair<firrtl::FirrtlPB_Expression, firrtl::FirrtlPB_Expression>> reg_name2rst_init_expr;
+
+
   uint32_t dummy_expr_node_cnt;
   uint32_t tmp_var_cnt;
   uint32_t seq_cnt;

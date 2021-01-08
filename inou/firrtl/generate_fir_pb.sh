@@ -21,6 +21,8 @@ VecShiftRegisterParam VecShiftRegisterSimple '
 
 pts='MaxN'
 
+pts='RocketCore Risc FPU ICache'
+
 CHISEL_PATH=~/chisel3
 FIRRTL_PATH=~/firrtl
 CHIRRTL_SRC_PATH=~/chisel3/chisel_chirrtl
