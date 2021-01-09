@@ -1,8 +1,7 @@
 Benchmarking tests (built using -c opt):
-TODO: get a node-level floorplan going.  module level is useless for XOR chains.
  - BOOM RISC-V core:
    - flat: 
-   - hier: ?
+   - hier: 
  - XOR chain (100):
    - flat:
  - XOR chain (10,000):
@@ -11,6 +10,18 @@ TODO: get a node-level floorplan going.  module level is useless for XOR chains.
    - flat: 
  - XOR chain (100,000):
    - flat: 
+
+TODOs:
+1. Create per-type area attributes (mmap'ed, seperate pass)
+2. Map a floorplan instance from ArchFP to a node instance
+   - use colors initially
+   - full mapping is basically two-pass
+3. Analysis
+   - total area
+   - HPWL
+   - ^^ but for a given LGraph
+4. ArchFP code cleanup
+   - replace 90's C++ code with std::vector / std::unique_ptr
 
 Traversal improvements:
  - Node flat:
@@ -47,6 +58,7 @@ Style guide refactors:
 Bugs:
  - calling delete on geogLayouts causes problems for some reason
  - view.py output is flipped due to inverted vertical coords in cairo
+ - dimension information doesn't persist across runs of lgshell?
 
 LiveHD:
  - Node colors: make new color sets?
@@ -55,3 +67,4 @@ Easy:
  - add license stuff (incl lg_attribute.hpp)
  - update usage doc
  - have bazel clone archfp from github
+ - add more asserts

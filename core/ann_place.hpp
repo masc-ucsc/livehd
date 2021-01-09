@@ -5,18 +5,25 @@
 class __attribute__((packed)) Ann_place {
 private:
 protected:
-  uint32_t posx;  // Enough for 1nm resolution and 100mm**2 die
-  uint32_t posy;
+  // uint32_t is enough for 1nm resolution and 100mm**2 die, but having fixed precision is annoying
+  float pos_x;  // position of left side
+  float pos_y;  // position of bottom
+  float len_x;  // width
+  float len_y;  // height
 
 public:
-  constexpr Ann_place() : posx(0), posy(0){};
-  Ann_place(uint32_t x, uint32_t y) : posx(x), posy(y){};
+  constexpr Ann_place() : pos_x(0.0), pos_y(0.0), len_x(0.0), len_y(0.0){};
+  Ann_place(float px, float py, float lx, float ly) : pos_x(px), pos_y(py), len_x(lx), len_y(ly){};
 
-  void replace(uint32_t x, uint32_t y) {
-    posx = x;
-    posy = y;
+  void replace(float px, float py, float lx, float ly) {
+    pos_x = px;
+    pos_y = py;
+    len_x = lx;
+    len_y = ly;
   }
 
-  uint32_t get_x() const { return posx; }
-  uint32_t get_y() const { return posy; }
+  float get_pos_x() const { return pos_x; }
+  float get_pos_y() const { return pos_y; }
+  float get_len_x() const { return len_x; }
+  float get_len_y() const { return len_y; }
 };

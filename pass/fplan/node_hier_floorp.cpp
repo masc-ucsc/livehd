@@ -2,10 +2,13 @@
 
 #include <memory>
 
+#include "ann_place.hpp"
+#include "ntype_area.hpp"
+
 void Node_hier_floorp::load_lg_nodes(LGraph* lg, const std::string_view lgdb_path) {
   if (layouts[lg]) {
     if (debug_print) {
-      fmt::print("layout for {} exists, skipping\n", lg->get_name());
+      fmt::print("(layout for {} already exists)\n", lg->get_name());
     }
     return;
   }
@@ -15,14 +18,27 @@ void Node_hier_floorp::load_lg_nodes(LGraph* lg, const std::string_view lgdb_pat
   // floorplan leaves
   for (auto n : lg->fast()) {
     Ntype_op op = n.get_type_op();
-    if (Ntype::is_synthesizable(op)) {
-      // count is 1 because even if nodes are the same type, they aren't really identical,
-      // and if count > 1 the cluster is treated as identical.
-      if (debug_print) {
-        fmt::print("adding {} to cluster of lg {}\n", n.get_type_name(), lg->get_name());
-      }
-      l->addComponentCluster(n.get_type_name().data(), 1, 1.0, 1.0, 8.0, Center);
+    if (!Ntype::is_synthesizable(op)) {
+      continue;
     }
+
+    // count is 1 because even if nodes are the same type, they aren't really identical,
+    // and if count > 1 the cluster is treated as identical.
+    if (debug_print) {
+      fmt::print("adding {} to cluster of lg {}\n", n.get_type_name(), lg->get_name());
+    }
+
+    if (!Ntype_area::has_dim(op)) {
+      std::string errstr = "node type ";
+      errstr.append(Ntype::get_name(op));
+      errstr.append(" has no area information!");
+      throw std::runtime_error(errstr);
+    }
+
+    auto  dim       = Ntype_area::get_dim(op);
+    float node_area = dim.area;  // TODO: can we calculate some sort of bitwidth for the node?
+
+    l->addComponentCluster(n.get_type_name().data(), 1, node_area, dim.min_aspect, dim.max_aspect, Center);
   }
 
   absl::flat_hash_map<LGraph*, unsigned int> sub_lg_count;

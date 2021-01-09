@@ -4,15 +4,16 @@
 #include "absl/container/flat_hash_set.h"
 //#include "absl/container/inlined_vector.h"
 
-#include "mmap_map.hpp"
+#include "cell.hpp"
+#include "hierarchy.hpp"
 #include "lconst.hpp"
 #include "lgraph_base_core.hpp"
+#include "mmap_map.hpp"
 #include "node_pin.hpp"
-#include "cell.hpp"
 #include "sub_node.hpp"
-#include "hierarchy.hpp"
 
 class Ann_place;
+class Ann_dim;
 using Node_iterator = std::vector<Node>;
 
 class Node {
@@ -35,7 +36,7 @@ protected:
   Index_ID get_nid() const { return nid; }
 
   constexpr Node(LGraph *_g, LGraph *_c_g, const Hierarchy_index &_hidx, Index_ID _nid)
-    : top_g(_g), current_g(_c_g), hidx(_hidx), nid(_nid) {
+      : top_g(_g), current_g(_c_g), hidx(_hidx), nid(_nid) {
     assert(nid);
     assert(top_g);
     assert(current_g);
@@ -85,9 +86,9 @@ public:
     constexpr bool operator!=(const Compact &other) const { return !(*this == other); }
 
     template <typename H>
-      friend H AbslHashValue(H h, const Compact &s) {
-        return H::combine(std::move(h), s.hidx.get_hash(), s.nid);
-      };
+    friend H AbslHashValue(H h, const Compact &s) {
+      return H::combine(std::move(h), s.hidx.get_hash(), s.nid);
+    };
   };
 
   class __attribute__((packed)) Compact_class {
@@ -107,10 +108,10 @@ public:
     friend class mmap_lib::hash<Compact_class>;
 
   public:
-    //constexpr operator size_t() const { return nid; }
-    //constexpr Compact_class() : nid(0){};
+    // constexpr operator size_t() const { return nid; }
+    // constexpr Compact_class() : nid(0){};
 
-    constexpr Compact_class(const Index_ID &_nid) : nid(_nid) { };
+    constexpr Compact_class(const Index_ID &_nid) : nid(_nid){};
 
     constexpr Node get_node(LGraph *lg) const { return Node(lg, *this); }
 
@@ -121,17 +122,17 @@ public:
     constexpr bool operator!=(const Compact_class &other) const { return nid != other.nid; }
 
     template <typename H>
-      friend H AbslHashValue(H h, const Compact_class &s) {
-        return H::combine(std::move(h), s.nid);
-      };
+    friend H AbslHashValue(H h, const Compact_class &s) {
+      return H::combine(std::move(h), s.nid);
+    };
   };
 
   void update(const Hierarchy_index &_hidx);
 
   template <typename H>
-    friend H AbslHashValue(H h, const Node &s) {
-      return H::combine(std::move(h), (int)s.hidx.get_hash(), (int)s.nid);  // Ignore lgraph pointer in hash
-    };
+  friend H AbslHashValue(H h, const Node &s) {
+    return H::combine(std::move(h), (int)s.hidx.get_hash(), (int)s.nid);  // Ignore lgraph pointer in hash
+  };
 
   // NOTE: No operator<() needed for std::set std::map to avoid their use. Use flat_map_set for speed
   void update(LGraph *_g, const Node::Compact &comp);
@@ -142,7 +143,8 @@ public:
 
   Node(LGraph *_g, const Compact &comp) { update(_g, comp); }
   Node(LGraph *_g, const Hierarchy_index &_hidx, const Compact_class &comp);
-  constexpr Node(LGraph *_g, const Compact_class &comp) : top_g(_g), current_g(0), hidx(Hierarchy_tree::invalid_index()), nid(comp.nid) {
+  constexpr Node(LGraph *_g, const Compact_class &comp)
+      : top_g(_g), current_g(0), hidx(Hierarchy_tree::invalid_index()), nid(comp.nid) {
     I(nid);
     I(top_g);
 
@@ -160,9 +162,7 @@ public:
   };
 #endif
 
-  inline Compact       get_compact() const {
-    return Compact(hidx, nid);
-  }
+  inline Compact get_compact() const { return Compact(hidx, nid); }
 
   inline Compact_class get_compact_class() const {
     // OK to pick a hierarchical to avoid replication of info like names
@@ -171,7 +171,7 @@ public:
 
   LGraph *get_top_lgraph() const { return top_g; }
   LGraph *get_class_lgraph() const { return current_g; }
-  LGraph *get_lg() const { return current_g; } // To handle hierarchical API
+  LGraph *get_lg() const { return current_g; }  // To handle hierarchical API
 
   Hierarchy_index get_hidx() const { return hidx; }
 
@@ -197,7 +197,7 @@ public:
     auto pid = Ntype::get_driver_pid(get_type_op(), pname);
     if (pid)
       return get_driver_pin_raw(pid);
-    return Node_pin(top_g, current_g, hidx, nid, 0, false); // could be invalid if not setup
+    return Node_pin(top_g, current_g, hidx, nid, 0, false);  // could be invalid if not setup
   }
   Node_pin get_sink_pin_slow(std::string_view pname) const;
   Node_pin get_sink_pin(std::string_view pname) const {
@@ -208,7 +208,7 @@ public:
     auto pid = Ntype::get_sink_pid(get_type_op(), pname);
     if (pid)
       return get_sink_pin_raw(pid);
-    return Node_pin(top_g, current_g, hidx, nid, 0, true); // could be invalid if not setup
+    return Node_pin(top_g, current_g, hidx, nid, 0, true);  // could be invalid if not setup
   }
   Node_pin setup_driver_pin_slow(std::string_view name) const;
   Node_pin setup_driver_pin(std::string_view pname) const {
@@ -220,7 +220,6 @@ public:
     if (pid)
       return setup_driver_pin_raw(pid);
     return Node_pin(top_g, current_g, hidx, nid, 0, false);
-
   }
   Node_pin setup_driver_pin_raw(Port_ID pid) const;
   Node_pin setup_driver_pin() const;
@@ -234,7 +233,7 @@ public:
     auto pid = Ntype::get_sink_pid(get_type_op(), pname);
     if (pid)
       return setup_sink_pin_raw(pid);
-    return Node_pin(top_g, current_g, hidx, nid, 0, true); // could be invalid if not setup
+    return Node_pin(top_g, current_g, hidx, nid, 0, true);  // could be invalid if not setup
   }
 
   Node_pin setup_sink_pin_raw(Port_ID pid);
@@ -256,8 +255,7 @@ public:
     GI(other.nid == 0, other.hidx.is_invalid());
     GI(nid && other.nid, top_g == other.top_g);
 
-    return nid == other.nid
-      && (hidx == other.hidx || hidx.is_invalid() || other.hidx.is_invalid());
+    return nid == other.nid && (hidx == other.hidx || hidx.is_invalid() || other.hidx.is_invalid());
   }
   constexpr bool operator!=(const Node &other) const { return !(*this == other); }
 
@@ -269,16 +267,12 @@ public:
   void             set_type(const Ntype_op op);
   void             set_type(const Ntype_op op, Bits_t bits);
   bool             is_type(const Ntype_op op) const;
-  bool             is_type_sub() const {
-    return get_type_op() == Ntype_op::Sub;
-  }
+  bool             is_type_sub() const { return get_type_op() == Ntype_op::Sub; }
   bool             is_type_const() const;
   bool             is_type_attr() const;
   bool             is_type_flop() const;
   bool             is_type_tup() const;
-  bool             is_type_io() const {
-    return nid == Hardcoded_input_nid || nid == Hardcoded_output_nid;
-  }
+  bool             is_type_io() const { return nid == Hardcoded_input_nid || nid == Hardcoded_output_nid; }
   bool             is_type_loop_breaker() const;
 
   Hierarchy_index hierarchy_go_down() const;
@@ -295,10 +289,10 @@ public:
 
   Lconst get_type_const() const;
 
-  void connect_sink(const Node &n2)   const { setup_sink_pin().connect_driver(n2.setup_driver_pin()); }
+  void connect_sink(const Node &n2) const { setup_sink_pin().connect_driver(n2.setup_driver_pin()); }
   void connect_driver(const Node &n2) const { setup_driver_pin().connect_sink(n2.setup_sink_pin()); }
 
-  void connect_sink(const Node_pin &dpin)   const { setup_sink_pin().connect_driver(dpin); }
+  void connect_sink(const Node_pin &dpin) const { setup_sink_pin().connect_driver(dpin); }
   void connect_driver(const Node_pin &spin) const { setup_driver_pin().connect_sink(spin); }
 
   void nuke();  // Delete all the pins, edges, and attributes of this node
@@ -334,6 +328,7 @@ public:
   std::string_view create_name() const;
   bool             has_name() const;
 
+  void             set_place(const Ann_place &p);
   const Ann_place &get_place() const;
   Ann_place *      ref_place();
   bool             has_place() const;
@@ -360,8 +355,6 @@ struct hash<Node::Compact> {
 
 template <>
 struct hash<Node::Compact_class> {
-  constexpr size_t operator()(Node::Compact_class const &o) const {
-    return hash<uint32_t>{}(o.nid);
-  }
+  constexpr size_t operator()(Node::Compact_class const &o) const { return hash<uint32_t>{}(o.nid); }
 };
 }  // namespace mmap_lib

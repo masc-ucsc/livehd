@@ -3,7 +3,10 @@
 #include "pass_fplan.hpp"
 #include "profile_time.hpp"
 
-void setup_pass_fplan() { Pass_fplan_makefp::setup(); }
+void setup_pass_fplan() {
+  Pass_fplan_makefp::setup();
+  Pass_fplan_writearea::setup();
+}
 
 void Pass_fplan_makefp::setup() {
   auto m = Eprp_method("pass.fplan.makefp", "generate a floorplan from an LGraph", &Pass_fplan_makefp::pass);

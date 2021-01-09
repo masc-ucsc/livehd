@@ -512,6 +512,8 @@ std::string Node::debug_name() const {
 
 bool Node::has_name() const { return Ann_node_name::ref(current_g)->has_key(get_compact_class()); }
 
+void Node::set_place(const Ann_place& p) { Ann_node_place::ref(top_g)->set(get_compact(), p); }
+
 const Ann_place &Node::get_place() const {
   auto *data = Ann_node_place::ref(top_g)->ref(get_compact());
   I(data);
@@ -538,9 +540,11 @@ Bits_t Node::get_bits() const {
 bool Node::has_place() const { return Ann_node_place::ref(top_g)->has(get_compact()); }
 
 //----- Subject to changes in the future:
-#define WHITE 0
-#define GREY  1
-#define BLACK 2
+enum {
+  WHITE = 0,
+  GREY,
+  BLACK
+};
 void Node::set_color(int new_color) { Ann_node_color::ref(current_g)->set(get_compact_class(), std::to_string(new_color)); }
 
 int Node::get_color() const {

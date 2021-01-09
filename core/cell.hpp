@@ -252,7 +252,7 @@ public:
   }
 
   static std::string_view get_name(Ntype_op op) {
-    return cell_name[static_cast<int>(op)];
+    return cell_name[static_cast<size_t>(op)];
   }
 
   static Ntype_op get_op(std::string_view name) {
