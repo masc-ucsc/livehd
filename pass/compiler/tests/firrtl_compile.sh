@@ -36,7 +36,7 @@ Darken HiLoMultiplier Max2 Coverage Accumulator LFSR16
 # pts='Adder4'
 # pts='Mux4'
 # pts='SingleEvenFilter'
-# pts='LogShifter'
+pts='LogShifter'
 
 
 LGSHELL=./bazel-bin/main/lgshell
