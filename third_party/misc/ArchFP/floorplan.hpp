@@ -10,6 +10,7 @@
 #include <iostream>
 #include <map>
 #include <string>
+#include "absl/container/flat_hash_map.h"
 using namespace std;
 
 // This will be used to keep track of user's request for more output during layout.
@@ -206,16 +207,14 @@ class FPContainer : public FPObject {
   //    containers will need to use the accessors.
   // In this way, we can maintain proper refcounts that can tell us
   //    when things can be deleted.
-  int        itemCount;
-  FPObject** items;
   void       addComponentAtIndex(FPObject* comp, int index);
   FPObject*  removeComponentAtIndex(int index);
 
 protected:
-  static int maxItemCount;
+  absl::flat_hash_map<int, FPObject*> items;
 
   // These allow safe access to the item list.
-  int       getComponentCount() { return itemCount; }
+  int       getComponentCount() { return items.size(); }
   FPObject* getComponent(int index) { return items[index]; }
   FPObject* removeComponent(int index);
   void      replaceComponent(FPObject* comp, int index);

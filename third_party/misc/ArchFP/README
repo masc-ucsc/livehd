@@ -1,3 +1,3 @@
-This program is included for the floorplanner pass (fplan) of livehd.
+This program generates floorplans for the fplan pass of LiveHD, and has been modified.
 
 Non-source files (including the makefile) are kept, but not used.

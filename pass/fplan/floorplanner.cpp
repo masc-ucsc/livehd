@@ -2,17 +2,17 @@
 
 #include <functional>
 
+#include "node_type_area.hpp"
 #include "lgedgeiter.hpp"
 
-unsigned int Lhd_floorplanner::get_area(LGraph* lg) {
+float Lhd_floorplanner::get_lg_area(LGraph* lg) {
   // use the number of nodes as an approximation of area
-  unsigned int num_nodes = 0;
+  float temp_area = 0.0;
   for (auto node : lg->fast(true)) {
-    (void)node;
-    num_nodes++;
+    temp_area += Ntype_area::get_dim(node.get_type_op()).area;
   }
 
-  return num_nodes;
+  return temp_area;
 }
 
 void Lhd_floorplanner::create_floorplan(const std::string_view filename) {
@@ -24,12 +24,4 @@ void Lhd_floorplanner::create_floorplan(const std::string_view filename) {
     root_layout->outputHotSpotLayout(fos);
     outputHotSpotFooter(fos);
   }
-}
-
-void Lhd_floorplanner::analyze_floorplan() {
-  if (!(root_layout)) {
-    throw std::runtime_error("no floorplan generated!");
-  }
-  
-  
 }

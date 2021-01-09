@@ -3,7 +3,7 @@
 #include <memory>
 
 #include "ann_place.hpp"
-#include "ntype_area.hpp"
+#include "node_type_area.hpp"
 
 void Node_hier_floorp::load_lg_nodes(LGraph* lg, const std::string_view lgdb_path) {
   if (layouts[lg]) {
@@ -38,7 +38,7 @@ void Node_hier_floorp::load_lg_nodes(LGraph* lg, const std::string_view lgdb_pat
     auto  dim       = Ntype_area::get_dim(op);
     float node_area = dim.area;  // TODO: can we calculate some sort of bitwidth for the node?
 
-    l->addComponentCluster(n.get_type_name().data(), 1, node_area, dim.min_aspect, dim.max_aspect, Center);
+    l->addComponentCluster(n.get_type_name().data(), 1, node_area, dim.max_aspect, dim.min_aspect, Center);
   }
 
   absl::flat_hash_map<LGraph*, unsigned int> sub_lg_count;
@@ -100,6 +100,9 @@ void Node_hier_floorp::color_lg_nodes(LGraph* lg, const std::string_view lgdb_pa
 }
 
 void Node_hier_floorp::load(LGraph* root, const std::string_view lgdb_path) {
+
+  fmt::print("\n");
+
   for (auto n : root->fast()) {
     n.set_color(0);
   }

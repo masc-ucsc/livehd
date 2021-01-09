@@ -2,7 +2,7 @@
 #include <string>
 
 #include "fmt/core.h"
-#include "ntype_area.hpp"
+#include "node_type_area.hpp"
 #include "ann_place.hpp"
 #include "pass_fplan.hpp"
 

@@ -9,6 +9,9 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     copts = ["-O3", "-Wno-error"],
+    deps = [
+        "@com_google_absl//absl/container:flat_hash_map",
+        ],
     )
 
 cc_test(

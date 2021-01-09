@@ -1,11 +1,13 @@
 #include "node_flat_floorp.hpp"
 
+#include "node_type_area.hpp"
+
 void Node_flat_floorp::load(LGraph* root, const std::string_view lgdb_path) {
   (void)lgdb_path;
 
   for (auto n : root->fast(true)) {
     Ntype_op op = n.get_type_op();
-    
+
     std::string_view name;
     if (n.has_name()) {
       name = n.get_name();
@@ -18,8 +20,16 @@ void Node_flat_floorp::load(LGraph* root, const std::string_view lgdb_path) {
         fmt::print("adding component {} to root\n", name);
       }
 
-      // TODO: node area?
-      root_layout->addComponentCluster(name.data(), 1, 1.0, 8.0, 1.0, Center);
+      if (!Ntype_area::has_dim(op)) {
+        std::string errstr = "node type ";
+        errstr.append(Ntype::get_name(op));
+        errstr.append(" has no area information!");
+        throw std::runtime_error(errstr);
+      }
+
+      auto d = Ntype_area::get_dim(op);
+
+      root_layout->addComponentCluster(name.data(), 1, d.area, d.max_aspect, d.min_aspect, Center);
     }
   }
 }

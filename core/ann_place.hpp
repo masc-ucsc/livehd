@@ -5,7 +5,6 @@
 class __attribute__((packed)) Ann_place {
 private:
 protected:
-  // uint32_t is enough for 1nm resolution and 100mm**2 die, but having fixed precision is annoying
   float pos_x;  // position of left side
   float pos_y;  // position of bottom
   float len_x;  // width

@@ -18,7 +18,8 @@ public:
   // create a floorplan and dump to file
   void create_floorplan(const std::string_view filename);
 
-  virtual void analyze_floorplan();
+  // write the floorplan back to LiveHD for analysis and future floorplans
+  void write_floorplan(LGraph* root);
 
   ~Lhd_floorplanner() {
     for (auto& pair : layouts) {
@@ -39,7 +40,7 @@ protected:
 
   absl::flat_hash_map<LGraph*, std::unique_ptr<geogLayout>> layouts;
 
-  unsigned int get_area(LGraph* lg);
+  float get_lg_area(LGraph* lg);
 
   constexpr static bool debug_print = true;
 };
