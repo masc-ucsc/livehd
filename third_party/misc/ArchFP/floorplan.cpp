@@ -222,8 +222,13 @@ bool FPCompWrapper::layout(FPOptimization opt, double ratio) {
   return true;
 }
 
+// Methods for the FPcontainer class.
+int FPContainer::maxItemCount = 50;
+
 // Default constructor
 FPContainer::FPContainer() {
+  itemCount = 0;
+  items     = new FPObject*[maxItemCount];
   count     = 1;
   yMirror   = false;
   xMirror   = false;
@@ -232,33 +237,37 @@ FPContainer::FPContainer() {
 FPContainer::~FPContainer() {
   // It's very important to only delete items when their refcount hits zero.
   // cout << "deleting container.\n";
-  for (int i = 0; i < items.size(); i++) {
+  for (int i = 0; i < itemCount; i++) {
     FPObject* item     = items[i];
     int       newCount = item->decRefCount();
     if (newCount == 0)
       delete item;
   }
+  delete[] items;
 }
 
 // To properly handle refCount, we will only allow one method to actually add (or remove) items from the item list.
 
 void FPContainer::addComponentAtIndex(FPObject* comp, int index) {
-  if (index < 0 || index > items.size())
+  if (index < 0 || index > itemCount)
     throw invalid_argument("Attempt to add item to Container at illegal index.");
-
+  if (itemCount == maxItemCount)
+    throw out_of_range("Attempt to add more than the maximum items to a container.");
   // See if we need to move things to open space.
-  if (index < items.size())
-    for (int i = items.size(); i > index; i--) items[i] = items[i - 1];
+  if (index < itemCount)
+    for (int i = itemCount; i > index; i--) items[i] = items[i - 1];
   items[index] = comp;
+  itemCount += 1;
   comp->incRefCount();
 }
 
 FPObject* FPContainer::removeComponentAtIndex(int index) {
-  if (index < 0 || index >= items.size())
+  if (index < 0 || index >= itemCount)
     throw invalid_argument("Attempt to add item to Container at illegal index.");
   FPObject* comp = items[index];
   // Now fill in the hole.
-  for (int i = index; i < items.size() - 1; i++) items[i] = items[i + 1];
+  for (int i = index; i < itemCount - 1; i++) items[i] = items[i + 1];
+  itemCount -= 1;
   // Often this component is about to be added somewhere else.
   // So, if the refCount is now zero, don't handle it here.
   // If the caller doesn't put it somewhere else, they will have to delete it themselves.
@@ -271,7 +280,7 @@ void FPContainer::replaceComponent(FPObject* comp, int index) {
   addComponentAtIndex(comp, index);
 }
 
-void FPContainer::addComponent(FPObject* comp) { addComponentAtIndex(comp, items.size()); }
+void FPContainer::addComponent(FPObject* comp) { addComponentAtIndex(comp, itemCount); }
 
 void FPContainer::addComponentToFront(FPObject* comp) { addComponentAtIndex(comp, 0); }
 
@@ -306,7 +315,7 @@ FPObject* FPContainer::removeComponent(int index) { return removeComponentAtInde
 // We want a descending sort.
 // We know this won't change item counts, so just it have at the item list.
 void FPContainer::sortByArea() {
-  int len = items.size();
+  int len = itemCount;
   for (int i = 0; i < len; i++) {
     double maxArea      = -1;
     int    maxAreaIndex = 0;
@@ -642,8 +651,8 @@ bool geogLayout::layout(FPOptimization opt, double targetAR) {
   int        maxArraySize = itemCount * 2;
   FPObject** layoutStack  = (FPObject**)malloc(sizeof(FPObject*) * maxArraySize);
   for (int i = 0; i < maxArraySize; i++) layoutStack[i] = 0;
-  FPObject** centerItems = (FPObject**)(malloc(sizeof(FPObject*) * items.size()));
-  for (int i = 0; i < items.size(); i++) centerItems[i] = 0;
+  FPObject** centerItems = (FPObject**)(malloc(sizeof(FPObject*) * FPContainer::maxItemCount));
+  for (int i = 0; i < maxItemCount; i++) centerItems[i] = 0;
 
   // Calculate the total area, and the implied target width and height.
   area             = totalArea();
