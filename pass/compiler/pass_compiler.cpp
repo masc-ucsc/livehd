@@ -110,11 +110,14 @@ void Pass_compiler::firrtl_compilation(Eprp_var &var, Lcompiler &compiler) {
     compiler.global_io_connection();  
     compiler.global_firrtl_bits_analysis_map();
     compiler.local_bitwidth_inference();
-    compiler.global_bitwidth_inference();  
+    /* compiler.global_bitwidth_inference(); */  
 }
 
 
 void Pass_compiler::setup_firmap_library(LGraph *lg) {
+  auto &lg_fir_const = lg->ref_library()->setup_sub("__fir_const", "-");
+  lg_fir_const.add_output_pin("Y"); 
+
   auto &lg_fir_add = lg->ref_library()->setup_sub("__fir_add", "-");
   lg_fir_add.add_input_pin("e1");
   lg_fir_add.add_input_pin("e2");
@@ -171,7 +174,6 @@ void Pass_compiler::setup_firmap_library(LGraph *lg) {
   lg_fir_neq.add_input_pin("e2");
   lg_fir_neq.add_output_pin("Y");
 
-  //FIXME->sh: exam Hunter's code to see what should be the driver of "n"
   auto &lg_fir_pad = lg->ref_library()->setup_sub("__fir_pad", "-");
   lg_fir_pad.add_input_pin("e1");
   lg_fir_pad.add_input_pin("e2");

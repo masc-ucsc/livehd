@@ -230,7 +230,7 @@ Node_pin Node::setup_sink_pin_slow(std::string_view name) {
   Port_ID pid;
 
   if (std::isdigit(name[0])) {
-    int pos;
+    int pos = 0;
     std::from_chars(name.data(), name.data() + name.size(), pos);
 
     if (!sub.has_instance_pin(pos))
@@ -280,6 +280,10 @@ bool Node::has_outputs() const { return current_g->has_outputs(*this); }
 int Node::get_num_inp_edges() const { return current_g->get_num_inp_edges(*this); }
 int Node::get_num_out_edges() const { return current_g->get_num_out_edges(*this); }
 int Node::get_num_edges() const { return current_g->get_num_edges(*this); }
+
+Node Node::get_non_hierarchical() const {
+  return Node(current_g, current_g, Hierarchy_tree::invalid_index(), nid);
+}
 
 Node_pin Node::setup_driver_pin_raw(Port_ID pid) const {
   I(!is_type_sub()); // Do not setup subs by PID, use name
@@ -344,10 +348,10 @@ bool Node::is_type_tup() const {
 bool Node::is_type_loop_breaker() const {
   auto op = get_type_op();
   if (op == Ntype_op::Sub) {
-    const auto sub_name = get_type_sub_node().get_name();
-    if (sub_name.substr(0, 5) == "__fir")
-      return false;
-
+    /* //FIXME->sh: delet __fir stuff after the two lg->fast() lgraph firmap clone is working */
+    /* const auto sub_name = get_type_sub_node().get_name(); */
+    /* if (sub_name.substr(0, 5) == "__fir") */
+    /*   return false; */
     return true;
   }
 
@@ -508,6 +512,8 @@ std::string Node::debug_name() const {
 
 bool Node::has_name() const { return Ann_node_name::ref(current_g)->has_key(get_compact_class()); }
 
+void Node::set_place(const Ann_place& p) { Ann_node_place::ref(top_g)->set(get_compact(), p); }
+
 const Ann_place &Node::get_place() const {
   auto *data = Ann_node_place::ref(top_g)->ref(get_compact());
   I(data);
@@ -534,9 +540,11 @@ Bits_t Node::get_bits() const {
 bool Node::has_place() const { return Ann_node_place::ref(top_g)->has(get_compact()); }
 
 //----- Subject to changes in the future:
-#define WHITE 0
-#define GREY  1
-#define BLACK 2
+enum {
+  WHITE = 0,
+  GREY,
+  BLACK
+};
 void Node::set_color(int new_color) { Ann_node_color::ref(current_g)->set(get_compact_class(), std::to_string(new_color)); }
 
 int Node::get_color() const {
@@ -551,27 +559,27 @@ bool Node::has_color() const { return Ann_node_color::ref(current_g)->has_key(ge
 
 // LCOV_EXCL_START
 void Node::dump() {
-  auto cell_name = Ntype::get_name(get_type_op());
-  fmt::print("node:{} nid:{} type:{} ", debug_name(), nid, cell_name);
+  fmt::print("nid: {} type: {} lgraph: {} ", nid, get_type_name(), current_g->get_name());
   if (get_type_op() == Ntype_op::LUT) {
-    fmt::print(" lut={}\n", get_type_lut().to_pyrope());
+    fmt::print(" lut = {}\n", get_type_lut().to_pyrope());
   } else if (get_type_op() == Ntype_op::Const) {
-    fmt::print(" const={}\n", get_type_const().to_pyrope());
+    fmt::print(" const = {}\n", get_type_const().to_pyrope());
   } else {
     fmt::print("\n");
   }
   for (const auto &edge : inp_edges()) {
-    fmt::print("  inp bits:{:<3} pid:{:<2} name:{:<30} <- nid:{} idx:{} pid:{:<2} name:{}\n",
+    fmt::print("  inp bits: {:<3} pid: {:<2} name: {:<30} <- nid: {} idx: {} pid: {:<2} name: {}\n",
                edge.get_bits(),
                edge.sink.get_pid(),
                edge.sink.debug_name(),
                edge.driver.get_node().nid,
                edge.driver.get_idx(),
                edge.driver.get_pid(),
-               edge.driver.debug_name());
+               edge.driver.debug_name()
+               );
   }
   for (const auto &edge : out_edges()) {
-    fmt::print("  out bits:{:<3} pid:{:<2} name:{:<30} -> nid:{} idx:{} pid:{:<2} name:{}\n",
+    fmt::print("  out bits: {:<3} pid: {:<2} name: {:<30} -> nid: {} idx: {} pid: {:<2} name: {}\n",
                edge.get_bits(),
                edge.driver.get_pid(),
                edge.driver.debug_name(),

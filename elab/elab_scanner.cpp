@@ -455,6 +455,11 @@ void Elab_scanner::parser_error_int(std::string_view text) const {
   scan_raw_msg("error", text, false);
   n_errors++;
   //if (n_errors > max_errors) exit(-3);
+#ifndef NDEBUG
+  //only for bazel debug mode, better swift gdb debug for developers
+  fmt::print("Pass::Error: {}\n", text);
+  I(false, "Compiler pass error! debug with gdb"); 
+#endif
   throw std::runtime_error(std::string(text));
 }
 

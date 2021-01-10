@@ -75,7 +75,7 @@ void Pass_mockturtle::do_work(LGraph *g) {
 bool Pass_mockturtle::lg_partition(LGraph *g) {
   unsigned int new_group_id = 0;
 
-  for (const auto node : g->forward()) {
+  for (const auto& node : g->forward()) {
     if (node2gid.find(node.get_compact()) != node2gid.end())
       continue;
     if (!eligible_cell_op(node))
@@ -401,7 +401,7 @@ void Pass_mockturtle::mapping_comparison_cell_lg2mt(const bool &lt_op, const boo
 
     inp_sigs.is_signed = (inp_edge.sink.get_pid()&1)==0;
 
-    if (inp_edge.sink.get_pid() >= 0 && inp_edge.sink.get_pid() <= 1) {
+    if (inp_edge.sink.get_pid() <= 1) {
       left_opd_sigs.emplace_back(inp_sigs);
     } else {
       right_opd_sigs.emplace_back(inp_sigs);
@@ -557,8 +557,23 @@ void Pass_mockturtle::complement_to_SMR(std::vector<sig_type> const &complement_
 template <typename ntk_type>
 void Pass_mockturtle::mapping_dynamic_shift_cell_lg2mt(const bool &is_shift_right, ntk_type &mt_ntk, const Node &node,
                                                        const unsigned int &group_id) {
-  XEdge opr_A_edge = node.inp_edges()[0].sink.get_pid() == 0 ? opr_A_edge = node.inp_edges()[0] : opr_A_edge = node.inp_edges()[1];
-  XEdge opr_B_edge = node.inp_edges()[0].sink.get_pid() == 1 ? opr_B_edge = node.inp_edges()[0] : opr_B_edge = node.inp_edges()[1];
+  //XEdge opr_A_edge = node.inp_edges()[0].sink.get_pid() == 0 ? opr_A_edge = node.inp_edges()[0] : opr_A_edge = node.inp_edges()[1];
+  XEdge opr_A_edge;
+  if (node.inp_edges()[0].sink.get_pid() == 0) {
+    opr_A_edge = node.inp_edges()[0];
+  } else {
+    opr_A_edge = node.inp_edges()[1];
+  }
+  
+  //XEdge opr_B_edge = node.inp_edges()[0].sink.get_pid() == 1 ? opr_B_edge = node.inp_edges()[0] : opr_B_edge = node.inp_edges()[1];
+  XEdge opr_B_edge;
+  if (node.inp_edges()[0].sink.get_pid() == 1) {
+    opr_B_edge = node.inp_edges()[0];
+  } else {
+    opr_B_edge = node.inp_edges()[1];
+  }
+  
+  
   std::vector<typename ntk_type::signal> opr_A_sigs, out_sigs;
   // processing input signal
   ////fmt::print("opr_A_bit_width:{}\n",opr_A_edge.get_bits());
@@ -606,7 +621,7 @@ void Pass_mockturtle::mapping_dynamic_shift_cell_lg2mt(const bool &is_shift_righ
 }
 
 void Pass_mockturtle::create_mockturtle_network(LGraph *g) {
-  for (const auto node : g->forward()) {
+  for (const auto& node : g->forward()) {
     if (node2gid.find(node.get_compact()) == node2gid.end())
       continue;
 
@@ -899,7 +914,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
   // handle special case: edge mapping of graph_inp->graph_out
   for (const auto &inp_edge : old_gout_node.inp_edges_ordered()) {
     if (inp_edge.driver.get_node() == old_ginp_node) {
-      auto dpid = inp_edge.driver.get_pid();
+      // auto dpid = inp_edge.driver.get_pid();
       auto spid = inp_edge.sink.get_pid();
       new_lg->add_edge(new_ginp_node.get_driver_pin(), new_gout_node.get_sink_pin_raw(spid));
     }
@@ -1014,7 +1029,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
         I(gid_klut_node2lg_node.find(std::make_pair(group_id, klut_dst_node)) != gid_klut_node2lg_node.end());
         auto driver_node = Node(new_lg, gid_klut_node2lg_node[std::make_pair(group_id, klut_src_node)]);
         auto sink_node   = Node(new_lg, gid_klut_node2lg_node[std::make_pair(group_id, klut_dst_node)]);
-        auto driver_pin  = driver_node.setup_driver_pin(0);
+        auto driver_pin  = driver_node.setup_driver_pin("");
         auto sink_pin    = sink_node.setup_sink_pin_raw(i);
         new_lg->add_edge(driver_pin, sink_pin, 1);  // lut io should always be 1 bit
       });
@@ -1119,7 +1134,7 @@ void Pass_mockturtle::connect_complemented_signal(LGraph *g, Node_pin &driver_pi
                                                   const mockturtle::klut_network::signal &signal) {
   if (klut.is_complemented(signal)) {
     auto not_gate            = g->create_node(Ntype_op::Not);
-    auto not_gate_sink_pin   = not_gate.setup_sink_pin(0);
+    auto not_gate_sink_pin   = not_gate.setup_sink_pin("");
     auto not_gate_driver_pin = not_gate.setup_driver_pin();
     g->add_edge(driver_pin, not_gate_sink_pin, 1);
     g->add_edge(not_gate_driver_pin, sink_pin, 1);

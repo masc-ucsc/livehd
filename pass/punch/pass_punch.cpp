@@ -23,6 +23,7 @@ void Pass_punch::setup() {
 
 #if 1
 void Pass_punch::work(Eprp_var &var) {
+  (void)var;
   I(false);  // FIXME:
 }
 #else

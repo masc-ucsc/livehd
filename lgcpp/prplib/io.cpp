@@ -5,6 +5,7 @@
 static void lgcpp_test(LGraph *lg, const std::shared_ptr<Lgtuple> inp, std::shared_ptr<Lgtuple> out) {
   fmt::print("lgcpp_test called (compile time)\n");
 
+  (void) inp;
   out = std::make_shared<Lgtuple>();
   out->add(lg, Lconst(33));
 }

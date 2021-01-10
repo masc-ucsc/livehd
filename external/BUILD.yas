@@ -2,6 +2,7 @@
 cc_library(
     name = "headers",
     hdrs = glob(["yas/**/*.hpp", "yas/*.hpp"]),
+    copts = ["-w", "-O2"],
     visibility = ["//visibility:public"],
     includes = ["."],
 )

@@ -15,7 +15,10 @@ void Inou_firrtl::toFIRRTL(Eprp_var &var) {
   firrtl::FirrtlPB          fir_design;
   firrtl::FirrtlPB_Circuit *circuit = fir_design.add_circuit();
   auto                      top_msg = circuit->add_top();
+  
   bool first = true;
+  (void)first;
+
   for (const auto &lnast : var.lnasts) {
     p.do_tofirrtl(lnast, circuit);
     //if (first) {

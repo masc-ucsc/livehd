@@ -15,7 +15,6 @@
 
 struct Ann_name {
   static constexpr char delay[]         = "delay";
-  static constexpr char flag_positive[] = "flag_positive";
   static constexpr char io_unsign[]     = "io_unsign";
   static constexpr char offset[]        = "offset";
   static constexpr char pin_name[]      = "pin_name";
@@ -40,8 +39,6 @@ using Ann_node_pin_prp_vname
 using Ann_node_pin_ssa = Attribute<Ann_name::ssa, Node_pin, mmap_lib::map<Node_pin::Compact_class_driver, Ann_ssa> >;
 
 using Ann_node_pin_delay = Attribute<Ann_name::delay, Node_pin, mmap_lib::map<Node_pin::Compact_driver, float> >;
-
-using Ann_node_pin_flag_positive = Attribute<Ann_name::flag_positive, Node_pin, mmap_lib::map<Node_pin::Compact_driver, bool> >;
 
 using Ann_node_pin_io_unsign = Attribute<Ann_name::io_unsign, Node_pin, mmap_lib::map<Node_pin::Compact_driver, bool> >;
 

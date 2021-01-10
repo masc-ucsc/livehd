@@ -1,5 +1,6 @@
 $en.__ubits = 1
 #cnt.__ubits = 4
+$clock.__ubits = 1
 
 if ($en == 1) {
   #cnt := #cnt + 1

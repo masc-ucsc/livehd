@@ -26,6 +26,7 @@ class Inou_firrtl : public Pass {
 protected:
   //----------- FOR toLNAST ----------
   std::string_view create_temp_var(Lnast &lnast);
+  std::string_view create_dummy_expr_node_var(Lnast &lnast);
   std::string_view get_new_seq_name(Lnast &lnast);
   std::string      get_full_name(Lnast &lnast, Lnast_nid &parent_node, const std::string &term, const bool is_rhs);
 
@@ -75,6 +76,11 @@ protected:
   std::string_view HandleBundVecAcc(Lnast &lnast, const firrtl::FirrtlPB_Expression expr, Lnast_nid &parent_node, const bool is_rhs);
   std::string_view CreateDotsSelsFromStr(Lnast& ln, Lnast_nid& parent_node, const std::string& flattened_str);
   std::string FlattenExpression(Lnast &ln, Lnast_nid &parent_node, const firrtl::FirrtlPB_Expression &expr);
+
+  void RegResetInitialization(Lnast &lnast, Lnast_nid &parent_node);
+  void SetupOutputBitwidth(Lnast &lnast);
+
+
 
   // Deconstructing Protobuf Hierarchy
   void create_io_list(const firrtl::FirrtlPB_Type &type, uint8_t dir, const std::string &port_id,
@@ -183,9 +189,12 @@ private:
                    READI, WRITEI, READ_WRITEI, INFER };
   absl::flat_hash_map<std::string, MPORT_DIR> late_assign_ports;
 
+  absl::flat_hash_map<std::string, std::pair<firrtl::FirrtlPB_Expression, firrtl::FirrtlPB_Expression>> reg_name2rst_init_expr;
+  absl::flat_hash_map<std::string, std::tuple<Lnast_nid, bool, uint32_t>> output_name2port_info;
 
-  uint32_t temp_var_count;
-  uint32_t seq_counter;
+  uint32_t dummy_expr_node_cnt;
+  uint32_t tmp_var_cnt;
+  uint32_t seq_cnt;
 
   //----------- FOR toFIRRTL ---------
   absl::flat_hash_map<std::string, firrtl::FirrtlPB_Port *>      io_map;

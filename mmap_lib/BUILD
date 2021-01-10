@@ -137,4 +137,17 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "mmap_str_test",
+    srcs = ["tests/mmap_str_test.cpp"],
+    deps = [
+        ":mmap_lib_test_lib",
+        "//lbench:headers",
+        "@gtest//:gtest_main",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@fmt//:fmt",
+    ],
+)
+
 

@@ -45,6 +45,3 @@ void Inou_slang::work(Eprp_var &var) {
 #endif
 }
 
-void Inou_slang::do_work(LGraph *g) {
-}
-

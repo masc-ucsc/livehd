@@ -9,6 +9,7 @@
 #include "eprp.hpp"
 #include "fmt/format.h"
 #include "iassert.hpp"
+#include "graph_library.hpp"
 
 class Pass {
 protected:
@@ -33,9 +34,13 @@ protected:
 public:
   static inline Eprp eprp;
 
-  static void error(std::string_view msg) { eprp.parser_error(msg); }
+  static void error(std::string_view msg) {
+    Graph_library::sync_all();
+    eprp.parser_error(msg);
+  }
   static void warn(std::string_view msg) { eprp.parser_warn(msg); }
   static void info(std::string_view msg) {
+    (void)msg;
 #ifndef NDEBUG
     eprp.parser_info(msg);
 #endif
@@ -46,7 +51,7 @@ public:
     fmt::format_args   fargs = fmt::make_format_args(args...);
     fmt::memory_buffer tmp;
     fmt::vformat_to(tmp, format, fargs);
-    eprp.parser_error(std::string_view(tmp.data(), tmp.size()));
+    error(std::string_view(tmp.data(), tmp.size()));
   }
 
   template <typename... Args>

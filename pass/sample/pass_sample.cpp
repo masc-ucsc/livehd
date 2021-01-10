@@ -50,14 +50,14 @@ void Pass_sample::wirecount(Eprp_var &var) {
 void Pass_sample::do_wirecount(LGraph *g, int indent) {
   int i_num  = 0;
   int i_bits = 0;
-  g->each_graph_input([this, &i_num, &i_bits](const Node_pin &pin) {
+  g->each_graph_input([&i_num, &i_bits](const Node_pin &pin) {
     i_num++;
     i_bits += pin.get_bits();
   });
 
   int o_num  = 0;
   int o_bits = 0;
-  g->each_graph_output([this, &o_num, &o_bits](const Node_pin &pin) {
+  g->each_graph_output([&o_num, &o_bits](const Node_pin &pin) {
     o_num++;
     o_bits += pin.get_bits();
   });
@@ -118,7 +118,7 @@ void Pass_sample::compute_histogram(LGraph *g) {
   std::map<Ntype_op, int> histogram;
 
   int cells = 0;
-  for (const auto node : g->forward()) {
+  for (const auto& node : g->forward()) {
     cells++;
     auto type = node.get_type_op();
 
@@ -138,7 +138,7 @@ void Pass_sample::compute_max_depth(LGraph *g) {
   absl::flat_hash_map<Node::Compact, int> depth;
 
   int max_depth = 0;
-  for (const auto node : g->forward()) {
+  for (const auto& node : g->forward()) {
     int local_max = 0;
     for (const auto &edge : node.inp_edges()) {
       int d = depth[edge.driver.get_node().get_compact()];
@@ -161,16 +161,16 @@ void Pass_sample::annotate_placement(LGraph *g) {
 
   for (auto node : g->forward()) {
     auto *p = node.ref_place();
-    p->replace(x_pos++, 0);
+    p->replace(x_pos++, 0.0, 1.0, 0.0);
   }
 
   for (auto node : g->fast()) {
     const auto &place = node.get_place();
-    fmt::print("1.cell {} placed at x:{}\n", node.create_name(), place.get_x());
+    fmt::print("1.cell {} placed at x:{}\n", node.create_name(), place.get_pos_x());
   }
   for (auto node : g->forward()) {
     auto *place = node.ref_place();
-    fmt::print("2.cell {} placed at x:{}\n", node.create_name(), place->get_x());
+    fmt::print("2.cell {} placed at x:{}\n", node.create_name(), place->get_pos_x());
   }
 }
 

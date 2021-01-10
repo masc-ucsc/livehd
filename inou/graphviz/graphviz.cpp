@@ -7,7 +7,10 @@
 #include "pass.hpp"
 #include "cell.hpp"
 
-Graphviz::Graphviz(bool _bits, bool _verbose, std::string_view _odir): bits(_bits), verbose(_verbose), odir(_odir) {}
+Graphviz::Graphviz(bool _bits, bool _verbose, std::string_view _odir): verbose(_verbose), odir(_odir) {
+  // NOTE: since 'bits' is removed as a private member (unused), '_bits' is unused but might be used in the future
+  (void)_bits;
+}
 
 void Graphviz::populate_lg_handle_xedge(const Node &node, const XEdge &out, std::string &data, bool verbose) {
   std::string dp_pid, sp_pid;

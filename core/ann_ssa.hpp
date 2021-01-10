@@ -3,6 +3,7 @@
 #pragma once
 #include <string_view>
 #include <utility>
+#include <cstdint>
 
 class __attribute__((packed)) Ann_ssa {
 private:

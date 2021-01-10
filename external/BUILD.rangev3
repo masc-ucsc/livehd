@@ -3,6 +3,7 @@ cc_library (
 	hdrs = glob([
 		"include/**/*.hpp",
 	]),
+	copts = ["-w", "-O2"],
 	visibility = ["//visibility:public"],
 	includes = ["include"],
 )

@@ -5,7 +5,7 @@
 
 class pass_submatch : public Pass {
 protected:
-  void check_lec(LGraph *g);
+  void find_subs(LGraph *g);
 
   void do_work(LGraph *g);
 
