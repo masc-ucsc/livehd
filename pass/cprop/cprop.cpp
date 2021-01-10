@@ -572,7 +572,10 @@ bool Cprop::process_tuple_get(Node &node) {
       collapse_forward_for_pin(node, parent_dpin);
       return true;
     } else if (key_pos == -1 && key_name != "__ubits" && key_name != "__sbits") {
-      Pass::error("for tuple_get {} parent_node {}, try to get a field {} from a scalar!\n", node.debug_name(), parent_node.debug_name(), key_name);
+      Pass::error("for tuple_get {} parent_node {}, try to get a field {} from a scalar!\n",
+                  node.debug_name(),
+                  parent_node.debug_name(),
+                  key_name);
       return false;
     }
   }
@@ -593,7 +596,11 @@ bool Cprop::process_tuple_get(Node &node) {
     if (key.empty())
       key = std::to_string(key_pos);
 
-    Pass::error("for tuple_get {} parent_node {}, there is no tuple of {}, so no valid field:{}\n", node.debug_name(), parent_node.debug_name(), tup_name, key);
+    Pass::error("for tuple_get {} parent_node {}, there is no tuple of {}, so no valid field:{}\n",
+                node.debug_name(),
+                parent_node.debug_name(),
+                tup_name,
+                key);
     return false;
   }
 
@@ -621,22 +628,8 @@ bool Cprop::process_tuple_get(Node &node) {
   }
 
   // still unclear if the TupGet chain is resolved (final TupGet will decide)
-  fmt::print("DEBUG0 TG:{}\n", node.debug_name());
   if (!sub_tup->is_valid_val_dpin()) { 
-    fmt::print("DEBUG0\n");
-    //todo: try to create flattend graph hierarchical output here!!!
-    sub_tup->dump();
-    ctup->dump();
-    auto tg_driver = node.setup_sink_pin("tuple_name").get_driver_pin();
-    if (tg_driver.has_name() && tg_driver.get_name().substr(0,1) == "%") {
-      auto gout = try_create_graph_output_from_tg(node.get_class_lgraph(), ctup).change_to_driver_from_graph_out_sink();
-      fmt::print("DEBUG0 new_gout:{}\n", gout.debug_name());
-      collapse_forward_for_pin(node, gout);
-
-    } else {
-      node2tuple[node.get_compact()] = sub_tup;
-    }
-    /* node2tuple[node.get_compact()] = sub_tup; */
+    node2tuple[node.get_compact()] = sub_tup;
     return true;   
   }
 
@@ -684,15 +677,15 @@ std::shared_ptr<Lgtuple> Cprop::process_tuple_add_chain(Node_pin up_dpin) {
 
   auto up_node = up_dpin.get_node();
   auto ptup_it = node2tuple.find(up_node.get_compact());
-  if (ptup_it == node2tuple.end()) 
+  if (ptup_it == node2tuple.end()) {
     return nullptr;
+  }
 
   I(up_node.get_type_op() == Ntype_op::TupAdd || up_node.get_type_op() == Ntype_op::TupGet || 
     up_node.get_type_op() == Ntype_op::TupRef);
 
   return std::make_shared<Lgtuple>(*(ptup_it->second));
 }
-
 
 void Cprop::process_tuple_add(Node &node) {
   // Can not delete TupAdd here. Only TupGet can delete up chain if nobody needs the TupAdd
@@ -728,21 +721,17 @@ void Cprop::process_tuple_add(Node &node) {
         return;
       }
     } else {
-      ctup->dump();
-      chain_tup->dump();
       ctup->set(key_name, chain_tup);  // add hier-tuple field. FIXME: create lgtuple:set(pos,key,tuple)
     }
   } else {
     if (ptup) {
       ctup = ptup;
     } else {
-      fmt::print("DEBUG2\n");
       ctup = std::make_shared<Lgtuple>(tup_name);
     }
 
     if (node.is_sink_connected("value")) {
       auto val_dpin = node.get_sink_pin("value").get_driver_pin();
-      fmt::print("DEBUG2-1, val_dpin{}\n", val_dpin.debug_name());
       I(val_dpin.get_node().get_type_op() != Ntype_op::TupAdd); //sh added, check?
 
       // Tuple Concatenation operator
@@ -770,7 +759,7 @@ void Cprop::process_tuple_add(Node &node) {
   //FIXME: should move to line 779 to avoid checking every TA, but there is a bug in line that cannot retreive the tuple in line 779??
   if (node.out_edges().begin()->sink.is_graph_output()) {
     auto lg = node.get_class_lgraph();
-    try_create_graph_output_from_ta(lg, ctup);
+    try_create_graph_output(lg, ctup);
   }
 }
 
@@ -826,7 +815,7 @@ void Cprop::do_trans(LGraph *lg) {
   /* fmt::print("last_ta:{}\n", last_ta.debug_name()); */
   /* auto tup = node2tuple[last_ta.get_compact()]; */
   /* tup->dump(); */
-  /* try_create_graph_output_from_ta(lg, tup); */
+  /* try_create_graph_output(lg, tup); */
 
 
   for (auto node : lg->fast()) {
@@ -878,43 +867,19 @@ void Cprop::do_trans(LGraph *lg) {
   }
 }
 
-void Cprop::try_create_graph_output_from_ta(LGraph *lg, std::shared_ptr<Lgtuple> tup) {
+void Cprop::try_create_graph_output(LGraph *lg, std::shared_ptr<Lgtuple> tup) {
   absl::flat_hash_map<std::string, Node_pin> gout2driver;
-  bool from_tg = false;
-  tup->analyze_graph_output(gout2driver, "", from_tg);
+  tup->analyze_graph_output(gout2driver, "");
 
   for (const auto &it : gout2driver) {
     if (!lg->is_graph_output(it.first)) {
       auto flattened_gout = lg->add_graph_output(it.first, Port_invalid, 0);
-      fmt::print("DEBUG0-1 flattened_gout:{}\n", flattened_gout.get_name());
       I(!lg->get_graph_output(it.first).is_invalid());
       it.second.connect_sink(flattened_gout);
       //I(flattened_gout.get_driver_pin() == it.second);
     }
   }
 }
-
-
-Node_pin Cprop::try_create_graph_output_from_tg(LGraph *lg, std::shared_ptr<Lgtuple> tup) {
-  absl::flat_hash_map<std::string, Node_pin> gout2driver;
-  bool from_tg = true;
-  tup->analyze_graph_output(gout2driver, "", from_tg);
-
-  I(gout2driver.size() == 1);
-  Node_pin flattened_gout;
-  for (const auto &it : gout2driver) {
-    if (!lg->is_graph_output(it.first)) {
-      flattened_gout = lg->add_graph_output(it.first, Port_invalid, 0);
-      fmt::print("DEBUG0 flattened_gout:{}\n", flattened_gout.get_name());
-      I(!lg->get_graph_output(it.first).is_invalid());
-      it.second.connect_sink(flattened_gout);
-      //I(flattened_gout.get_driver_pin() == it.second);
-    }
-  }
-  return flattened_gout;
-}
-
-
 
 void Cprop::dump_node2tuples() const {
   for(const auto &it:node2tuple) {

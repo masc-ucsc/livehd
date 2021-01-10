@@ -42,8 +42,7 @@ protected:
   bool process_tuple_get(Node &node);
 
   // io construction
-  void try_create_graph_output_from_ta(LGraph *lg, std::shared_ptr<Lgtuple> tup);
-  Node_pin try_create_graph_output_from_tg(LGraph *lg, std::shared_ptr<Lgtuple> tup);
+  void try_create_graph_output(LGraph *lg, std::shared_ptr<Lgtuple> tup);
 
 
 public:
