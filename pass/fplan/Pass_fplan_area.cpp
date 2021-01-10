@@ -32,12 +32,14 @@ Pass_fplan_writearea::Pass_fplan_writearea(const Eprp_var& var) : Pass("pass.fpl
   const uint8_t start = static_cast<uint8_t>(Ntype_op::Invalid) + 1;
   const uint8_t end = static_cast<uint8_t>(Ntype_op::Last_invalid);
 
+  Ntype_area na;
+
   fmt::print("type\tarea (mm^2)\n---------------\n");
   for (uint8_t op = start; op < end; op++) {
     const Ntype_op nop = static_cast<Ntype_op>(op);
     if (Ntype::is_synthesizable(nop)) {
       float area = rd(g);
-      Ntype_area::set_dim(nop, {min_asp, max_asp, area});      
+      na.set_dim(nop, {min_asp, max_asp, area});      
       fmt::print("{}\t{:.3f}\n", Ntype::get_name(nop), area);
     }
   }

@@ -6,10 +6,12 @@
 #include "lgedgeiter.hpp"
 
 float Lhd_floorplanner::get_lg_area(LGraph* lg) {
+  Ntype_area na;
+
   // use the number of nodes as an approximation of area
   float temp_area = 0.0;
   for (auto node : lg->fast(true)) {
-    temp_area += Ntype_area::get_dim(node.get_type_op()).area;
+    temp_area += na.get_dim(node.get_type_op()).area;
   }
 
   return temp_area;

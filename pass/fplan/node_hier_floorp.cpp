@@ -15,6 +15,8 @@ void Node_hier_floorp::load_lg_nodes(LGraph* lg, const std::string_view lgdb_pat
 
   auto l = std::make_unique<geogLayout>();
 
+  Ntype_area na;
+
   // floorplan leaves
   for (auto n : lg->fast()) {
     Ntype_op op = n.get_type_op();
@@ -28,14 +30,14 @@ void Node_hier_floorp::load_lg_nodes(LGraph* lg, const std::string_view lgdb_pat
       fmt::print("adding {} to cluster of lg {}\n", n.get_type_name(), lg->get_name());
     }
 
-    if (!Ntype_area::has_dim(op)) {
+    if (!(na.has_dim(op))) {
       std::string errstr = "node type ";
       errstr.append(Ntype::get_name(op));
       errstr.append(" has no area information!");
       throw std::runtime_error(errstr);
     }
 
-    auto  dim       = Ntype_area::get_dim(op);
+    auto  dim       = na.get_dim(op);
     float node_area = dim.area;  // TODO: can we calculate some sort of bitwidth for the node?
 
     l->addComponentCluster(n.get_type_name().data(), 1, node_area, dim.max_aspect, dim.min_aspect, Center);
