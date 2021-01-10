@@ -220,7 +220,7 @@ void Pass_sat_opt::check_sat_opt(LGraph *g) {
 			  auto b_input = node.get_sink_pin("B").inp_edges();
 			  			  
 			  auto lt_result = sat.vec_lt_signed(dpin2sat_var[a_input[0].driver.get_compact()], dpin2sat_var[b_input[0].driver.get_compact()]);
-			  auto lt_result_vec = (std::vector<int>) lt_result;
+			  std::vector<int> lt_result_vec {lt_result};
 			  
 			  dpin2sat_var[node.setup_driver_pin().get_compact()] = lt_result_vec;
 
@@ -231,7 +231,7 @@ void Pass_sat_opt::check_sat_opt(LGraph *g) {
 			  auto b_input = node.get_sink_pin("B").inp_edges();
 			  			  
 			  auto gt_result = sat.vec_gt_signed(dpin2sat_var[a_input[0].driver.get_compact()], dpin2sat_var[b_input[0].driver.get_compact()]);
-			  auto gt_result_vec = (std::vector<int>) gt_result;
+			  std::vector<int> gt_result_vec {gt_result};
 			  
 			  dpin2sat_var[node.setup_driver_pin().get_compact()] = gt_result_vec;
 
