@@ -77,6 +77,11 @@ protected:
   std::string_view CreateDotsSelsFromStr(Lnast& ln, Lnast_nid& parent_node, const std::string& flattened_str);
   std::string FlattenExpression(Lnast &ln, Lnast_nid &parent_node, const firrtl::FirrtlPB_Expression &expr);
 
+  void RegResetInitialization(Lnast &lnast, Lnast_nid &parent_node);
+  void SetupOutputBitwidth(Lnast &lnast);
+
+
+
   // Deconstructing Protobuf Hierarchy
   void create_io_list(const firrtl::FirrtlPB_Type &type, uint8_t dir, const std::string &port_id,
                       std::vector<std::tuple<std::string, uint8_t, uint32_t, bool>> &vec);
@@ -185,7 +190,7 @@ private:
   absl::flat_hash_map<std::string, MPORT_DIR> late_assign_ports;
 
   absl::flat_hash_map<std::string, std::pair<firrtl::FirrtlPB_Expression, firrtl::FirrtlPB_Expression>> reg_name2rst_init_expr;
-
+  absl::flat_hash_map<std::string, std::tuple<Lnast_nid, bool, uint32_t>> output_name2port_info;
 
   uint32_t dummy_expr_node_cnt;
   uint32_t tmp_var_cnt;

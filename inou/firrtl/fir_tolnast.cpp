@@ -270,8 +270,7 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id,
 
   lnast.add_string(ReturnExprString(lnast, clocke, parent_node, true));
 
-  auto rst_expr_str = lnast.add_string(ReturnExprString(lnast, resete, parent_node, true));
-  fmt::print("DEBUG reset expr:{}\n", rst_expr_str);
+  lnast.add_string(ReturnExprString(lnast, resete, parent_node, true));
 
   // Add register's name to the global list.
   register_names.insert(id.substr(1, id.length() - 1));  // Use substr to remove "#"
@@ -1423,6 +1422,7 @@ void Inou_firrtl::ListPortInfo(Lnast& lnast, const firrtl::FirrtlPB_Port& port, 
       } else {
         full_port_name = absl::StrCat("$", port_name);
       }
+
     } else if (port_dir == firrtl::FirrtlPB_Port_Direction::FirrtlPB_Port_Direction_PORT_DIRECTION_OUT) {
       output_names.insert(port_name);
       if (port_name.find_first_of("[.") != std::string::npos) {
@@ -1430,10 +1430,12 @@ void Inou_firrtl::ListPortInfo(Lnast& lnast, const firrtl::FirrtlPB_Port& port, 
       } else {
         full_port_name = absl::StrCat("%", port_name);
       }
+      // note: create output bits attr_set at the end of lnast to avoid firrtl_bits interference problem
+      output_name2port_info.insert_or_assign(full_port_name, std::make_tuple(parent_node, port_sign, port_bits));
     } else {
       Pass::error("Found IO port {} specified with unknown direction in Protobuf message.", port_name);
     }
-
+    
     if (port_bits > 0) { // Specify __bits
       std::string_view bit_acc_name;
       if (port_sign == true) {
@@ -1445,13 +1447,6 @@ void Inou_firrtl::ListPortInfo(Lnast& lnast, const firrtl::FirrtlPB_Port& port, 
       lnast.add_child(idx_asg, Lnast_node::create_ref(bit_acc_name));
       lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(std::to_string(port_bits))));
     }
-
-    /* if (port_sign == false) { // Specify __sign */
-    /*   auto sign_acc_name = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(full_port_name, ".__sign")); */
-    /*   auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("")); */
-    /*   lnast.add_child(idx_asg, Lnast_node::create_ref(sign_acc_name)); */
-    /*   lnast.add_child(idx_asg, Lnast_node::create_const("false")); */
-    /* } */
   }
 }
 
@@ -1604,22 +1599,27 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
       }
 
       Lnast_nid idx_asg;
-      if (lhs.substr(0, 1) == "%") {
-        idx_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign(""));
-      } else {
-        idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
-      }
+      /* if (lhs.substr(0, 1) == "%") { */
+      /*   idx_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign("")); */
+      /* } else { */
+      /*   idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("")); */
+      /* } */
+      idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
+
       lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs)));
       lnast.add_child(idx_asg, Lnast_node::create_ref(expr_string));
       break;
     }
     case firrtl::FirrtlPB_Expression::kUintLiteral: {  // UIntLiteral
       Lnast_nid idx_asg;
-      if (lhs.substr(0, 1) == "%") {
-        idx_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign(""));
-      } else {
-        idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
-      }
+      /* if (lhs.substr(0, 1) == "%") { */
+      /*   idx_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign("")); */
+      /* } else { */
+      /*   idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("")); */
+      /* } */
+
+      idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
+
       lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs)));
       /* auto str_val = absl::StrCat(expr.uint_literal().value().value(), "u"); */
       auto str_val = expr.uint_literal().value().value();
@@ -1628,11 +1628,13 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
     }
     case firrtl::FirrtlPB_Expression::kSintLiteral: {  // SIntLiteral
       Lnast_nid idx_asg;
-      if (lhs.substr(0, 1) == "%") {
-        idx_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign(""));
-      } else {
-        idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
-      }
+      /* if (lhs.substr(0, 1) == "%") { */
+      /*   idx_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign("")); */
+      /* } else { */
+      /*   idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("")); */
+      /* } */
+      idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
+
       lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs)));
       /* auto str_val = absl::StrCat(expr.sint_literal().value().value(), "s"); */
       auto str_val = expr.sint_literal().value().value();
@@ -1651,11 +1653,13 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
       auto rhs = HandleBundVecAcc(lnast, expr, parent_node, true);
 
       Lnast_nid idx_asg;
-      if (lhs.substr(0, 1) == "%") {
-        idx_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign(""));
-      } else {
-        idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
-      }
+      /* if (lhs.substr(0, 1) == "%") { */
+      /*   idx_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign("")); */
+      /* } else { */
+      /*   idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("")); */
+      /* } */
+      idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
+
       lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs)));
       lnast.add_child(idx_asg, Lnast_node::create_ref(rhs));
       break;
@@ -2043,23 +2047,50 @@ void Inou_firrtl::ListUserModuleInfo(Eprp_var& var, const firrtl::FirrtlPB_Modul
     ListStatementInfo(*lnast, stmt, idx_stmts);
   }
 
-  // insert the reset initialization logic, which should be the highest priority and insert in the end
-  for (auto const&[reg_name, expr_pair] : reg_name2rst_init_expr) {
-    auto resete = expr_pair.first;
-    auto inite  = expr_pair.second;
-    auto init_expr_str = lnast->add_string(ReturnExprString(*lnast, inite, idx_stmts, true));
-    fmt::print("DEBUG init expr:{}\n", init_expr_str);
-    auto reset_expr_str = lnast->add_string(ReturnExprString(*lnast, resete, idx_stmts, true));
-    fmt::print("DEBUG reset expr:{}\n", reset_expr_str);
-    auto idx_mux_if = lnast->add_child(idx_stmts, Lnast_node::create_if("hiFir reset init"));
-    lnast->add_child(idx_mux_if, Lnast_node::create_cond(reset_expr_str));  // from the firrtl spec, it's always reset high
-    auto idx_stmt_tr = lnast->add_child(idx_mux_if, Lnast_node::create_stmts(get_new_seq_name(*lnast)));
-    InitialExprAdd(*lnast, inite, idx_stmt_tr, reg_name);
-  }  
+  RegResetInitialization(*lnast, idx_stmts);
+  /* SetupOutputBitwidth(*lnast); */
 
   PerformLateMemAssigns(*lnast, idx_stmts);
   var.add(std::move(lnast));
 }
+
+// setup the output put bits attr_set at the end of lnast to avoid firrtl_bits interference problem
+void Inou_firrtl::SetupOutputBitwidth(Lnast &lnast) {
+  for (const auto& [key, val] : output_name2port_info) {
+    auto full_port_name = key;
+    auto parent_node = std::get<0>(val);
+    auto port_sign   = std::get<1>(val);
+    auto port_bits   = std::get<2>(val);
+    if (port_bits > 0) { // Specify __bits
+      std::string_view bit_acc_name;
+      if (port_sign == true) {
+        bit_acc_name = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(full_port_name, ".__sbits"));
+      } else {
+        bit_acc_name = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(full_port_name, ".__ubits"));
+      }
+      auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
+      lnast.add_child(idx_asg, Lnast_node::create_ref(bit_acc_name));
+      lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(std::to_string(port_bits))));
+    }
+  }
+}
+
+
+// insert the reset initialization logic, which should be the highest priority and insert in the end
+void Inou_firrtl::RegResetInitialization(Lnast &lnast, Lnast_nid& idx_stmts) {
+  for (auto const&[reg_name, expr_pair] : reg_name2rst_init_expr) {
+    auto resete = expr_pair.first;
+    auto inite  = expr_pair.second;
+    /* auto init_expr_str = lnast->add_string(ReturnExprString(*lnast, inite, idx_stmts, true)); */
+    auto reset_expr_str = lnast.add_string(ReturnExprString(lnast, resete, idx_stmts, true));
+    auto idx_mux_if = lnast.add_child(idx_stmts, Lnast_node::create_if("hiFir reset init"));
+    lnast.add_child(idx_mux_if, Lnast_node::create_cond(reset_expr_str));  // from the firrtl spec, it's always reset high
+    auto idx_stmt_tr = lnast.add_child(idx_mux_if, Lnast_node::create_stmts(get_new_seq_name(lnast)));
+    InitialExprAdd(lnast, inite, idx_stmt_tr, reg_name);
+  }  
+}
+
+
 
 void Inou_firrtl::ListModuleInfo(Eprp_var& var, const firrtl::FirrtlPB_Module& module, const std::string& file_name) {
   if (module.has_external_module()) {
@@ -2280,6 +2311,8 @@ void Inou_firrtl::IterateModules(Eprp_var& var, const firrtl::FirrtlPB_Circuit& 
     mem_props_map.clear();
     dangling_ports_map.clear();
     late_assign_ports.clear();
+    reg_name2rst_init_expr.clear();
+    output_name2port_info.clear();
 
     ListModuleInfo(var, circuit.module(i), file_name);
   }

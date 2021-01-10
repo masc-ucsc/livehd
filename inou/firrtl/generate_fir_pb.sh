@@ -20,8 +20,8 @@ Shifts PlusAnd MaxN ByteSelector Darken HiLoMultiplier SimpleALU Mul
 VecShiftRegisterParam VecShiftRegisterSimple ' 
 
 pts='MaxN'
-
 pts='RocketCore Risc FPU ICache'
+pts='LogShifter'
 
 CHISEL_PATH=~/chisel3
 FIRRTL_PATH=~/firrtl

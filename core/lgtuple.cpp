@@ -162,10 +162,11 @@ void Lgtuple::set(std::string_view key, std::shared_ptr<Lgtuple> tup2) {
     pos2tuple[it->second]->add(tup2);
   }
 
-  if (tup2->hier_parent_key_name.empty())
+  if (tup2->hier_parent_key_name.empty()) {
     tup2->hier_parent_key_name = key;
-  else if (tup2->hier_parent_key_name[0] == '_' && tup2->hier_parent_key_name[2] == '_')
+  } else if (tup2->hier_parent_key_name[0] == '_' && tup2->hier_parent_key_name[2] == '_') {
     tup2->hier_parent_key_name = key;
+  }
 }
 
 void Lgtuple::set(std::string_view key, LGraph *lg, const Lconst &constant) {
@@ -322,13 +323,27 @@ void Lgtuple::dump(std::string_view indent) const {
   }
 }
 
-void Lgtuple::analyze_graph_output(absl::flat_hash_map<std::string, Node_pin> &gout2driver, std::string base_name) const {
+void Lgtuple::analyze_graph_output(absl::flat_hash_map<std::string, Node_pin> &gout2driver, std::string base_name, bool from_tg) const {
   std::string new_hier_name;
+  fmt::print("DEBUG0 bae_name:{}\n", base_name);
+  fmt::print("DEBUG0 hier_parent_key_name:{}\n", hier_parent_key_name);
+
   if (hier_parent_key_name != "%") {
     if (hier_parent_key_name[0] == '%') {
       new_hier_name = hier_parent_key_name.substr(1);
-    } else {
+
+      // remove the SSA from name
+      if (from_tg) {
+        auto pos = new_hier_name.find_last_of('_');
+        if (is_positive_integer((std::string)new_hier_name.substr(pos+1))) {
+          new_hier_name = new_hier_name.substr(0, pos);
+        }
+      }
+      /* new_hier_name = new_hier_name.substr(0, pos); */
+    } else if (hier_parent_key_name != "__ubits" || hier_parent_key_name != "__sbits") {
       new_hier_name = absl::StrCat(base_name, ".", hier_parent_key_name);
+    } else {
+      new_hier_name = base_name;
     }
 
     if (is_valid_val_dpin()) {
@@ -339,7 +354,7 @@ void Lgtuple::analyze_graph_output(absl::flat_hash_map<std::string, Node_pin> &g
 
   for (auto i = 0u; i < pos2tuple.size(); ++i) {
     if (pos2tuple[i])
-      pos2tuple[i]->analyze_graph_output(gout2driver, new_hier_name);
+      pos2tuple[i]->analyze_graph_output(gout2driver, new_hier_name, from_tg);
     else
       fmt::print("{}invalid pos:{}\n", "  ", i);
   }

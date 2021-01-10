@@ -1,7 +1,7 @@
 #!/bin/bash
 rm -rf ./lgdb
 FIRRTL_LEVEL='lo'
-# FIRRTL_LEVEL='hi'
+FIRRTL_LEVEL='hi'
 
 pts_long_lec='GCD '
 
@@ -23,20 +23,20 @@ VecShiftRegisterParam VecShiftRegisterSimple '
 # VecShiftRegister BundleConnect SubModule PlusAnd MaxN VecShiftRegisterParam
 # VecShiftRegisterSimple VecSearch VendingMachineSwitch VendingMachine'
 
-# pts='ResetShiftRegister Parity Counter MaxN RegisterSimple Register RegXor AddNot EnableShiftRegister GCD_3bits Flop
-# Decrementer Test2 Test3 TrivialAdd NotAnd Trivial Tail TrivialArith Shifts
-# Darken HiLoMultiplier Max2 Coverage Accumulator LFSR16
-# ' 
+pts='ResetShiftRegister Parity Counter MaxN RegisterSimple Register RegXor AddNot EnableShiftRegister GCD_3bits Flop
+Decrementer Test2 Test3 TrivialAdd NotAnd Trivial Tail TrivialArith Shifts
+Darken HiLoMultiplier Max2 Coverage Accumulator LFSR16
+' 
 
-# # pts='Mul'
-# # pts='SimpleALU'
-# # pts='Test1'
-# # pts='Test6'
-# # pts='ByteSelector'
-# # pts='Adder4'
-# # pts='Mux4'
-# # pts='SingleEvenFilter'
-# pts='LogShifter'
+# pts='Mul'
+# pts='SimpleALU'
+# pts='Test1'
+# pts='Test6'
+# pts='ByteSelector'
+# pts='Adder4'
+# pts='Mux4'
+# pts='SingleEvenFilter'
+pts='LogShifter'
 
 
 LGSHELL=./bazel-bin/main/lgshell

@@ -6,6 +6,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <algorithm>
 
 #include "absl/container/flat_hash_map.h"
 #include "lconst.hpp"
@@ -137,6 +138,11 @@ public:
   void dump(std::string_view indent) const;
 
   /* void analyze_graph_output(absl::flat_hash_map<std::string, Node_pin> &gout2driver) const; */
-  void    analyze_graph_output(absl::flat_hash_map<std::string, Node_pin> &gout2driver, std::string base_name) const;
+  void    analyze_graph_output(absl::flat_hash_map<std::string, Node_pin> &gout2driver, std::string base_name, bool from_tg) const;
   size_t  get_tuple_size() const { return key2pos.size(); };
+  
+  bool is_positive_integer(const std::string& str) const {
+    return !str.empty() && str.find_first_not_of("0123456789") == std::string::npos;
+  }
+
 };
