@@ -15,7 +15,7 @@ cc_library(
           "googletest/include",
           "googlemock/include",
       ],
-      copts = ["-Wno-error", "-O2"],
+      copts = ["-w", "-O2"],
       linkopts = ["-pthread"],
       visibility = ["//visibility:public"],
 )
