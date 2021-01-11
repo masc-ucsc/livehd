@@ -29,14 +29,14 @@ Darken HiLoMultiplier Max2 Coverage Accumulator LFSR16
 ' 
 
 # pts='Mul'
-# pts='SimpleALU'
+pts='SimpleALU'
 # pts='Test1'
 # pts='Test6'
 # pts='ByteSelector'
 # pts='Adder4'
 # pts='Mux4'
 # pts='SingleEvenFilter'
-pts='LogShifter'
+# pts='LogShifter'
 
 
 LGSHELL=./bazel-bin/main/lgshell
