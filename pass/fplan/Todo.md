@@ -56,7 +56,6 @@ Style guide refactors:
 Bugs:
  - calling delete on geogLayouts causes problems for some reason
  - view.py output is flipped due to inverted vertical coords in cairo
- - dimension information doesn't persist across runs of lgshell?
 
 LiveHD:
  - Node colors: make new color sets?
@@ -64,5 +63,4 @@ LiveHD:
 Easy:
  - add license stuff (incl lg_attribute.hpp)
  - update usage doc
- - have bazel clone archfp from github
  - add more asserts

@@ -12,15 +12,15 @@ public:
     float area;
   };
 
-  Ntype_area() { abort(); } // TODO: should never run this
-  Ntype_area(const std::string_view path, const std::string_view map_name) : type_area_map(path, map_name) {}
+  Ntype_area() = delete; // don't want to create new area maps all the time
+  Ntype_area(const std::string_view path) : type_area_map(path, "node_type_areas") {}
 
   void       set_dim(Ntype_op op, const dim& d) { type_area_map.set(op, d); }
-  const dim& get_dim(Ntype_op op) {
+  const dim& get_dim(Ntype_op op) const {
     I(has_dim(op));
     return type_area_map.get(op);
   };
-  bool has_dim(Ntype_op op) { return type_area_map.has(op); }
+  bool has_dim(Ntype_op op) const { return type_area_map.has(op); }
   void clear() { type_area_map.clear(); }
 
 protected:

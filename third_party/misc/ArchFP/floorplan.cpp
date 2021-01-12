@@ -223,7 +223,7 @@ bool FPCompWrapper::layout(FPOptimization opt, double ratio) {
 }
 
 // Methods for the FPcontainer class.
-int FPContainer::maxItemCount = 50;
+int FPContainer::maxItemCount = 256;
 
 // Default constructor
 FPContainer::FPContainer() {

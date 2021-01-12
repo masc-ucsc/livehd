@@ -6,7 +6,7 @@
 #include "lgedgeiter.hpp"
 
 float Lhd_floorplanner::get_lg_area(LGraph* lg) {
-  Ntype_area na;
+  Ntype_area na(lg->get_path());
 
   // use the number of nodes as an approximation of area
   float temp_area = 0.0;

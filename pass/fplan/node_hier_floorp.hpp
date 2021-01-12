@@ -17,7 +17,4 @@ private:
       n.set_color(color);
     }
   }
-
-  // lg -> layout, since different colors could map to the same layout
-  absl::flat_hash_map<LGraph*, std::unique_ptr<geogLayout>> layouts;
 };
