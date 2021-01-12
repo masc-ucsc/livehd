@@ -572,13 +572,10 @@ bool Cprop::process_tuple_get(Node &node) {
       collapse_forward_for_pin(node, parent_dpin);
       return true;
     } else if (key_pos == -1 && key_name != "__ubits" && key_name != "__sbits") {
-      Pass::error("for tuple_get {} parent_node {}, try to get a field {} from a scalar!\n",
-                  node.debug_name(),
-                  parent_node.debug_name(),
-                  key_name);
+      Pass::error("for tuple_get {} parent_node {}, try to get a field {} from a scalar!\n", node.debug_name(), parent_node.debug_name(), key_name);
       return false;
-    }
-  }
+     }
+   }
 
   // this attr comes from tail of TG chain where the TG tail has been transformed into an AttrSet node.
   if (parent_node.get_type_op() == Ntype_op::AttrSet) {
@@ -596,11 +593,7 @@ bool Cprop::process_tuple_get(Node &node) {
     if (key.empty())
       key = std::to_string(key_pos);
 
-    Pass::error("for tuple_get {} parent_node {}, there is no tuple of {}, so no valid field:{}\n",
-                node.debug_name(),
-                parent_node.debug_name(),
-                tup_name,
-                key);
+    Pass::error("for tuple_get {} parent_node {}, there is no tuple of {}, so no valid field:{}\n", node.debug_name(), parent_node.debug_name(), tup_name, key);
     return false;
   }
 

@@ -108,12 +108,12 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
     (void)xorFlag;
     (void)orFlag;
     int count=0;
-    auto node_not   = Lnast_node::create_ref ("__tmp"+std::to_string(count));
-    (void)node_not;
-    auto node_and   = Lnast_node::create_ref ("__and"+std::to_string(count));
-    (void)node_and;
+    
 
     for (auto it = verilogList.crbegin(); it != verilogList.crend(); ++it){
+        count++;
+        auto node_not   = Lnast_node::create_ref (lnast->add_string("__not"+std::to_string(count-notFlag)));
+        auto node_and   = Lnast_node::create_ref (lnast->add_string("__and"+std::to_string(count-andFlag)));
         if (*it =="AND"){
           auto idx_and = lnast->add_child(idx_stmts, Lnast_node::create_and ("AND"));
           auto node_op1    = Lnast_node::create_ref (lnast->add_string(operandList.back()));
@@ -122,16 +122,15 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
           operandList.pop_back();
           if (notFlag){
               auto idx_op2= lnast->add_child(idx_and, node_not);
-              (void)idx_op2;
               notFlag=0;
           }
-          // else if (andFlag){
-          //     auto idx_op2= lnast->add_child(idx_and, node_and);
-          //     andFlag=0;
-          // }
-          //auto node_and   = Lnast_node::create_ref ("__and"+std::to_string(count));
-          //auto idx_op3= lnast->add_child(idx_and, node_and);
-          //andFlag=1;
+          else if (andFlag){
+              auto idx_op2= lnast->add_child(idx_and, node_and);
+              andFlag=0;
+          }
+          auto node_and   = Lnast_node::create_ref (lnast->add_string("__and"+std::to_string(count)));
+          auto idx_op3= lnast->add_child(idx_and, node_and);
+          andFlag=1;
           // auto node_and   = Lnast_node::create_ref ("__and"+std::to_string(count));
           // auto idx_foo     = lnast->add_child(idx_foo1, node_and);
           // auto node_op2    = Lnast_node::create_ref (operandList.back());
@@ -168,10 +167,7 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
           auto idx_op1     = lnast->add_child(idx_not, node_op1);
           (void)idx_op1;
           operandList.pop_back();
-          auto node_not2   = Lnast_node::create_ref ("__tmp"+std::to_string(count));
-          (void)node_not2;
-          auto idx_foo1     = lnast->add_child(idx_not, node_not2);
-          (void)idx_foo1;
+          auto idx_foo1     = lnast->add_child(idx_not, node_not);
           notFlag=1;
         }
 
@@ -181,7 +177,7 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
         //   andFlag=0;
         // }
 
-        count++;
+        
       }
       // auto idx_assign  = lnast->add_child(idx_stmts,  Lnast_node::create_dp_assign ("assign"));
       // auto node_op3    = Lnast_node::create_ref (operandList.back());
