@@ -91,21 +91,6 @@ sh_test(
     ]
 )
 
-cc_binary(
-    name = "uclient_test",
-    srcs = ["uclient_test.cpp"],
-    deps = ["@httplib//:headers",
-    ],
-)
-
-cc_binary(
-    name = "userver_test",
-    srcs = ["userver_test.cpp"],
-    deps = ["@httplib//:headers",
-    ],
-    linkopts = ["-lpthread"],
-)
-
 cc_library(
     name = "tmt",
     srcs = ["tmt_test.cpp"],

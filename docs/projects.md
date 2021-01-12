@@ -1053,4 +1053,10 @@ module should have no bitwidth. In that case the bitwidth can be inferred from
 outside.
 
 
+## LiveHD gRPC client
+
+Leverage the gRPC client in liveHD to allow the submission of work to remote servers.
+
+Once we can submit gRPC from inside LiveHD, we should have to re-structure the
+pass API to have a gRPC call for each of the main steps.
 

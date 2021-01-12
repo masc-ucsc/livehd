@@ -181,13 +181,13 @@ new_git_repository(
     shallow_since = "1573466634 +0800",
     strip_prefix = "include",
 )
-new_git_repository(
-    name = "httplib",
-    build_file = "BUILD.httplib",
-    commit = "e4fd9f19cab6eeaf6489ebb129178b3407e76624", # October 24, 2019
-    remote = "https://github.com/yhirose/cpp-httplib.git",
-    shallow_since = "1571833695 -0400",
-)
+#new_git_repository(
+#    name = "httplib",
+#    build_file = "BUILD.httplib",
+#    commit = "e4fd9f19cab6eeaf6489ebb129178b3407e76624", # October 24, 2019
+#    remote = "https://github.com/yhirose/cpp-httplib.git",
+#    shallow_since = "1571833695 -0400",
+#)
 new_git_repository(
     name = "replxx",
     build_file = "BUILD.replxx",
