@@ -2,7 +2,7 @@
 
 cc_library(
   name = "opentimer",
-  copts = ["-w","-O2"],  # Always fast, no warnings to avoid spurious messages
+  copts = ["-w","-O2"],
   srcs = glob(["ot/**/*.cpp"])
        ,
   hdrs = glob(["ot/**/*.hpp", "ot/*.hpp"])

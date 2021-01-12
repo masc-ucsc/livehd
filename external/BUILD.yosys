@@ -32,7 +32,7 @@ genrule(
 cc_library(
     name = "version",
     srcs = ["kernel/version.cc"],
-    copts = ["-Wno-error"],
+    copts = ["-w"],
     visibility = ["//visibility:public"],
 )
 
@@ -149,7 +149,7 @@ YOSYS_COPTS = [
   "-DYOSYS_SRC='\"third_party/yosys\"'",
   "-DYOSYS_DATDIR='\"third_party/yosys\"'",
   "-fexceptions",
-  "-Wno-error",
+  "-w",
   "-Wno-implicit-fallthrough",
   "-Wno-vla",
   "-std=c++11",
@@ -240,6 +240,7 @@ cc_test(
     ],
     copts = [
         "-fexceptions",
+        "-w",
     ],
     features = ["-use_header_modules"],
     deps = [":bigint"],
@@ -266,6 +267,7 @@ cc_library(
     ],
     copts = [
         "-fexceptions",
+        "-w",
     ],
     features = ["-use_header_modules"],
     licenses = ["notice"],
@@ -321,6 +323,7 @@ cc_library(
     ],
     copts = [
         "-fexceptions",
+        "-w",
     ],
     features = ["-use_header_modules"],
     deps = [
@@ -335,6 +338,7 @@ cc_library(
         "libs/json11/json11.cpp",
     ],
     hdrs = ["libs/json11/json11.hpp"],
+    copts = ["-w"],
     includes = ["libs/json11"],
     licenses = ["notice"],
     visibility = ["//visibility:public"],
@@ -370,7 +374,7 @@ cc_library(
     ],
     copts = [
         "-fexceptions",
-        "-Wno-error",
+        "-w",
     ],
     features = ["-use_header_modules"],
     licenses = ["notice"],
@@ -382,6 +386,7 @@ cc_library(
         "libs/sha1/sha1.cpp",
     ],
     hdrs = ["libs/sha1/sha1.h"],
+    copts = ["-w"],
     licenses = ["notice"],
 )
 
@@ -400,6 +405,7 @@ cc_library(
         "libs/subcircuit/subcircuit.cc",
     ],
     hdrs = ["libs/subcircuit/subcircuit.h"],
+    copts = ["-w"],
     licenses = ["notice"],
 )
 

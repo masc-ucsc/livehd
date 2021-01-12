@@ -12,6 +12,7 @@ cc_library(
                 ),
     includes = ["."],
     hdrs = glob(["*.hpp"]),
+    copts = ["-w", "-O2"],
     visibility = ["//visibility:public"],
     deps = [
         "@cryptominisat//:cryptominisat",
@@ -21,6 +22,7 @@ cc_library(
 cc_test(
     name = "testbench",
     srcs = ["testbench.cpp"],
+    copts = ["-w", "-O2"],
     deps = [
         ":ezsat",
     ],

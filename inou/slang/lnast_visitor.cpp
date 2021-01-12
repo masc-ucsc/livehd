@@ -52,12 +52,15 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
   int line_num = 0, pos1 = 0, pos2 = 0;
 
   auto idx_root = Lnast_node::create_top("top", line_num, pos1, pos2);
+  (void)idx_root;
 
   if (numErrors > errorLimit)
     return;
   
   char* operand1;
   char* operand2;
+  (void)operand1;
+  (void)operand2;
   
   // lnast->set_root(idx_root);
   lnast->set_root(Lnast_node(Lnast_ntype::create_top()));
@@ -100,7 +103,10 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
           std::cout << " " << *it;
     //std::cout<<'check\n';
     fmt::print("\nlnast time\n");
-    int andFlag,orFlag,xorFlag,notFlag=0;
+    int andFlag=0,orFlag=0,xorFlag=0,notFlag=0;
+    (void)andFlag;
+    (void)xorFlag;
+    (void)orFlag;
     int count=0;
     
 
@@ -112,6 +118,7 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
           auto idx_and = lnast->add_child(idx_stmts, Lnast_node::create_and ("AND"));
           auto node_op1    = Lnast_node::create_ref (lnast->add_string(operandList.back()));
           auto idx_op1     = lnast->add_child(idx_and, node_op1);
+          (void)idx_op1;
           operandList.pop_back();
           if (notFlag){
               auto idx_op2= lnast->add_child(idx_and, node_not);
@@ -136,6 +143,7 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
           auto idx_or = lnast->add_child(idx_stmts, Lnast_node::create_or ("OR"));
           auto node_op1    = Lnast_node::create_ref (lnast->add_string(operandList.back()));
           auto idx_op1     = lnast->add_child(idx_or, node_op1);
+          (void)idx_op1;
           operandList.pop_back();
           // auto node_op2    = Lnast_node::create_ref (operandList.back());
           // auto idx_op2     = lnast->add_child(idx, node_op2);
@@ -146,6 +154,7 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
           auto idx_xor = lnast->add_child(idx_stmts, Lnast_node::create_xor ("XOR"));
           auto node_op1    = Lnast_node::create_ref (lnast->add_string(operandList.back()));
           auto idx_op1     = lnast->add_child(idx_xor, node_op1);
+          (void)idx_op1;
           operandList.pop_back();
           // auto node_op2    = Lnast_node::create_ref (operandList.back());
           // auto idx_op2     = lnast->add_child(idx, node_op2);
@@ -156,6 +165,7 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
           auto idx_not = lnast->add_child(idx_stmts, Lnast_node::create_not ("NOT"));
           auto node_op1    = Lnast_node::create_ref (lnast->add_string(operandList.back()));
           auto idx_op1     = lnast->add_child(idx_not, node_op1);
+          (void)idx_op1;
           operandList.pop_back();
           auto idx_foo1     = lnast->add_child(idx_not, node_not);
           notFlag=1;
@@ -269,6 +279,7 @@ void Lnast_visitor::handle(const slang::Expression& expr){
   if (expr.kind==ExpressionKind::BinaryOp){
     const auto &op1 = expr.as<BinaryExpression>();
     const Type& temp= op1.type->getCanonicalType(); //figure out what kind type is possible
+    (void)temp;
     const auto &check1=op1.left();
     const auto &check2=op1.right();
     switch (op1.op) {
@@ -344,6 +355,7 @@ void Lnast_visitor::handle(const slang::Expression& expr){
     if(check1.kind==ExpressionKind::NamedValue){
       const auto &rhs_1=check1.as<NamedValueExpression>();
       const auto operand1=rhs_1.symbol.name;
+      (void)operand1;
 
       operandList.emplace_back(rhs_1.symbol.name);
       fmt::print(" {} ", rhs_1.symbol.name);
