@@ -7,4 +7,5 @@ public:
   void load(LGraph* root, const std::string_view lgdb_path);
 
 private:
+  float get_lg_area(LGraph* lg);
 };

@@ -33,8 +33,6 @@ protected:
   friend class Bwd_edge_iterator;
   friend class Hierarchy_tree;
 
-  Index_ID get_nid() const { return nid; }
-
   constexpr Node(LGraph *_g, LGraph *_c_g, const Hierarchy_index &_hidx, Index_ID _nid)
       : top_g(_g), current_g(_c_g), hidx(_hidx), nid(_nid) {
     assert(nid);
@@ -173,6 +171,7 @@ public:
   LGraph *get_class_lgraph() const { return current_g; }
   LGraph *get_lg() const { return current_g; }  // To handle hierarchical API
 
+  Index_ID get_nid() const { return nid; }
   Hierarchy_index get_hidx() const { return hidx; }
 
   Node_pin get_driver_pin() const {
@@ -268,6 +267,7 @@ public:
   void             set_type(const Ntype_op op, Bits_t bits);
   bool             is_type(const Ntype_op op) const;
   bool             is_type_sub() const { return get_type_op() == Ntype_op::Sub; }
+  bool             is_type_synth() const { return Ntype::is_synthesizable(get_type_op()); }
   bool             is_type_const() const;
   bool             is_type_attr() const;
   bool             is_type_flop() const;

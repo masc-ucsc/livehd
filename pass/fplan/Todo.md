@@ -28,6 +28,7 @@ Traversal improvements:
    - more information
    - floorplan taking into account node type (ArchFP has internals for this?)
    - floorplan taking into account wire length (do a pass to determine wire length, then put stuff nearby using geography hints)
+   - change between individual calls to addComponentCluster and a batched addComponentCluster based on node amounts (allows for better handling of huge modules)
  - Lgraph flat:
    - none
  - Lgraph hier:
@@ -64,3 +65,4 @@ Easy:
  - add license stuff (incl lg_attribute.hpp)
  - update usage doc
  - add more asserts
+ - update LiveHD doc on hierarchy traversal - mention if you need advanced global hierarchy tools, just extract the htree itself.

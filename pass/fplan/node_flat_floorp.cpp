@@ -4,6 +4,7 @@
 
 void Node_flat_floorp::load(LGraph* root, const std::string_view lgdb_path) {
   (void)lgdb_path;
+  root_lg = root;
 
   Ntype_area na(lgdb_path);
 

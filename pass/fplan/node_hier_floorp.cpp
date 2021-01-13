@@ -1,5 +1,6 @@
 #include "node_hier_floorp.hpp"
 
+#include <functional>
 #include <memory>
 
 #include "ann_place.hpp"
@@ -59,47 +60,135 @@ void Node_hier_floorp::load_lg_nodes(LGraph* lg, const std::string_view lgdb_pat
   layouts[lg] = std::move(l);
 }
 
-void Node_hier_floorp::color_lg_nodes(LGraph* lg, const std::string_view lgdb_path) {
-  static int color_counter = 2;
-  lg->each_sub_fast([&](Node& n, Lg_type_id lgid) {
-    (void)n;
-    LGraph* sub_lg = LGraph::open(lgdb_path, lgid);
+// NOTE: advanced global hierarchy work with nodes basically requires the extraction of the root hierarchy tree.
+// Any other method will bring you much pain and suffering.
+void Node_hier_floorp::color_nodes() {
+  long counter = 1;  // 0 reserved for sub of root
 
-    color_lg_nodes(sub_lg, lgdb_path);
-  });
+  auto htree = root_lg->ref_htree();
 
-  /*
-  Coloring is supposed to be unique, except if there are multiple submodules of the same type within the scope of a module.  If
-  this is the case, they will be given the same color, since their layout can't really be determined that well from area
-  information alone.
-  */
-
-  absl::flat_hash_map<LGraph*, int> seen_lgs;
-  lg->each_sub_fast([&](Node& n, Lg_type_id lgid) {
-    (void)n;
-    LGraph* sub_lg = LGraph::open(lgdb_path, lgid);
-
-    if (seen_lgs.contains(sub_lg)) {
-      color_lg(sub_lg, seen_lgs[sub_lg]);
-      if (debug_print) {
-        fmt::print("coloring lg {} with color {} (rep)\n", sub_lg->get_name(), seen_lgs[sub_lg]);
+  // 1. write information for leaf nodes, which is easy since they are never put in grids.
+  for (const auto& hidx : htree->depth_preorder()) {
+    LGraph* lg = htree->ref_lgraph(hidx);
+    for (auto fn : lg->fast()) {
+      if (!fn.is_type_synth()) {
+        continue;
       }
-    } else {
-      if (debug_print) {
-        fmt::print("coloring lg {} with color {} (new)\n", sub_lg->get_name(), color_counter);
-      }
-      seen_lgs[sub_lg] = color_counter;
-      color_lg(sub_lg, color_counter++);
+
+      Node hn(root_lg, hidx, fn.get_compact_class());
+
+      Tag_info ti(counter++, -1);
+      send_map[hn.get_compact()] = ti;
+
+      recv_map[ti] = hn.get_compact();
+
+      /*
+      fmt::print("mapping synth leaf {} (l: {} p: {}) to id {}, parent {}\n",
+                 hn.debug_name(),
+                 hn.get_hidx().level,
+                 hn.get_hidx().pos,
+                 ti.node_color,
+                 ti.parent_color);
+      */
     }
-  });
+  }
+
+  // since subnodes can be floorplanned as grids, more work is needed to track which subnode maps to which floorplan instance
+  for (const auto& hidx : htree->depth_preorder()) {
+    LGraph* lg = htree->ref_lgraph(hidx);
+    // 2. count subnodes for a given node
+    absl::flat_hash_map<LGraph*, unsigned int> seen_nodes;
+    lg->each_sub_fast([&](Node& sn, Lg_type_id lgid) {
+      (void)sn;
+
+      LGraph* sub_lg = LGraph::open(root_lg->get_path(), lgid);
+      seen_nodes[sub_lg]++;
+    });
+
+    // 3. if there is more than one subnode type for a given node, they are placed in a grid.
+    // To track this placement, write the same color for all instances of the subnode and write the parent.
+    absl::flat_hash_map<LGraph*, unsigned int> counter_val;
+    lg->each_sub_fast([&](Node& sn, Lg_type_id lgid) {
+      LGraph* sn_lg = LGraph::open(root_lg->get_path(), lgid);
+      Node    hsn(root_lg, hidx, sn.get_compact_class());
+
+      Tag_info ti;
+
+      if (seen_nodes[sn_lg] > 1) {
+        if (counter_val[sn_lg] == 0) {
+          ti.node_color      = counter;  // make sure all repeated instances have the same node color
+          counter_val[sn_lg] = counter++;
+        } else {
+          ti.node_color = counter_val[sn_lg];
+        }
+
+        if (hsn.is_root()) {
+          ti.parent_color = send_map[hsn.get_compact()].node_color;
+        } else {
+          auto up         = hsn.get_up_node().get_compact();
+          ti.parent_color = send_map[up].node_color;
+        }
+
+        /*
+        fmt::print("mapping rep sub {} (l: {} p: {}) to id {}, parent {}\n",
+                   hsn.debug_name(),
+                   hsn.get_hidx().level,
+                   hsn.get_hidx().pos,
+                   ti.node_color,
+                   ti.parent_color);
+        */
+
+      } else {
+        ti = {counter++, -1};
+
+        /*
+        fmt::print("mapping first sub {} (l: {} p: {}) to id {}, parent {}\n",
+                   hsn.debug_name(),
+                   hsn.get_hidx().level,
+                   hsn.get_hidx().pos,
+                   ti.node_color,
+                   ti.parent_color);
+        */
+      }
+
+      send_map[hsn.get_compact()] = ti;
+
+      recv_map[ti] = hsn.get_compact();
+    });
+  }
+  
+  for (const auto& hidx : htree->depth_preorder()) {
+    LGraph* lg = htree->ref_lgraph(hidx);
+    lg->each_sub_fast([&](Node& sn, Lg_type_id lgid) { Node hsn(root_lg, hidx, sn.get_compact_class()); });
+
+    for (auto fn : lg->fast()) {
+      Node hn(root_lg, hidx, fn.get_compact_class());
+      if (!fn.is_type_synth() && !fn.is_type_sub()) {
+        continue;
+      }
+
+      fmt::print("node {}: ", hn.debug_name());
+
+      if (hn.is_root()) {
+        fmt::print("root node ");
+      } else {
+        fmt::print("child of {} ", hn.get_up_node().debug_name());
+      }
+
+      fmt::print("level: {}, pos: {} ", hn.get_hidx().level, hn.get_hidx().pos);
+      fmt::print("nc: {}, pc {} ", send_map[hn.get_compact()].node_color, send_map[hn.get_compact()].parent_color);
+      fmt::print("\n");
+    }
+  }
 }
 
 void Node_hier_floorp::load(LGraph* root, const std::string_view lgdb_path) {
   fmt::print("\n");
+  root_lg = root;
 
   auto check_area_exists = [&lgdb_path](LGraph* lg) {
     const Ntype_area na(lgdb_path);
-    for (auto n : lg->fast()) {
+    for (auto n : lg->fast(true)) {
       Ntype_op op = n.get_type_op();
       if (Ntype::is_synthesizable(op) && !(na.has_dim(op))) {
         std::string errstr = "node type ";
@@ -112,19 +201,21 @@ void Node_hier_floorp::load(LGraph* root, const std::string_view lgdb_path) {
 
   check_area_exists(root);
 
+  /*
   // not used yet
-  for (auto n : root->fast()) {
+  for (auto n : root->fast(true)) {
     n.set_color(0);
   }
+  */
 
-  // not used yet
-  color_lg_nodes(root, lgdb_path);
+  color_nodes();
+  return;
 
   // since coloring is only applied to subnodes, color all leaf children of root with color 1
-  color_lg(root, 1);
-  if (debug_print) {
-    fmt::print("coloring root with color 1\n\n");
-  }
+  // color_lg(root, 1);
+  // if (debug_print) {
+  // fmt::print("coloring root with color 1\n\n");
+  //}
 
   std::function<void(LGraph*)> load_nodes = [&](LGraph* lg) {
     lg->each_sub_fast([&](Node& n, Lg_type_id lgid) {
