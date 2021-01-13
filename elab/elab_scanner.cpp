@@ -61,7 +61,7 @@ void Elab_scanner::setup_translate() {
   translate['\\'] = Token_id_backslash;
 }
 
-void Elab_scanner::add_token(Token &t) {
+void Elab_scanner::add_token(Etoken &t) {
   if (t.tok == Token_id_nop) {
     token_list_spaced = true;
     I(!trying_merge);
@@ -76,7 +76,7 @@ void Elab_scanner::add_token(Token &t) {
   }
 
   trying_merge    = false;
-  Token &last_tok = token_list.back();
+  Etoken &last_tok = token_list.back();
 
   if (last_tok.tok == Token_id_or && t.tok == Token_id_gt) {
     token_list.back().fuse_token(Token_id_pipe, t);
@@ -229,7 +229,7 @@ void Elab_scanner::parse_step() {
   bool in_singleline_comment = false;
   int  in_multiline_comment  = 0;  // Nesting support
 
-  Token t;
+  Etoken t;
   t.clear(Token_id_nop, 0, std::string_view{&memblock[0],0});
 
   bool starting_comment  = false;  // Only for comments to avoid /*/* nested back to back */*/
@@ -342,7 +342,7 @@ void Elab_scanner::parse_step() {
 
       in_string_pos = true;
     } else {
-      Token_id nt = translate[c].tok;//next token
+      Token_id nt = translate[c].tok;//next Etoken
       finishing_comment = false;
 
       add_token(t);
@@ -430,7 +430,7 @@ uint32_t Elab_scanner::scan_line() const {
 }
 
 void Elab_scanner::lex_error(std::string_view text) {
-  // lexer can not look at token list
+  // lexer can not look at Etoken list
 
   fmt::print("{}\n", text);
   n_errors++;

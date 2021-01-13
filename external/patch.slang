@@ -1,7 +1,7 @@
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/AllSyntax.cpp ./generated/AllSyntax.cpp
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/AllSyntax.cpp ./generated/AllSyntax.cpp
 --- ./generated/AllSyntax.cpp	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/AllSyntax.cpp	2020-11-03 00:15:12.367819815 -0800
-@@ -0,0 +1,13190 @@
++++ ./generated/AllSyntax.cpp	2021-01-13 10:06:51.042023637 -0800
+@@ -0,0 +1,13339 @@
 +//------------------------------------------------------------------------------
 +// AllSyntax.cpp
 +// All generated syntax node data structures
@@ -105,11 +105,13 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::CoverPropertyStatement: return 8;
 +        case SyntaxKind::CoverSequenceStatement: return 8;
 +        case SyntaxKind::CoverageBins: return 9;
++        case SyntaxKind::CoverageIffClause: return 4;
 +        case SyntaxKind::CoverageOption: return 7;
 +        case SyntaxKind::CovergroupDeclaration: return 9;
 +        case SyntaxKind::Coverpoint: return 9;
 +        case SyntaxKind::CycleDelay: return 2;
-+        case SyntaxKind::DPIImportExport: return 8;
++        case SyntaxKind::DPIExport: return 8;
++        case SyntaxKind::DPIImport: return 8;
 +        case SyntaxKind::DataDeclaration: return 5;
 +        case SyntaxKind::Declarator: return 3;
 +        case SyntaxKind::DefParam: return 4;
@@ -199,7 +201,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::IfDefDirective: return 3;
 +        case SyntaxKind::IfGenerate: return 7;
 +        case SyntaxKind::IfNDefDirective: return 3;
-+        case SyntaxKind::IffClause: return 4;
++        case SyntaxKind::IffEventClause: return 2;
 +        case SyntaxKind::IffPropertyExpression: return 4;
 +        case SyntaxKind::ImmediateAssertStatement: return 6;
 +        case SyntaxKind::ImmediateAssertionMember: return 2;
@@ -359,7 +361,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::ShortIntType: return 3;
 +        case SyntaxKind::ShortRealType: return 1;
 +        case SyntaxKind::ShortcutCycleDelayRange: return 4;
-+        case SyntaxKind::SignalEventExpression: return 2;
++        case SyntaxKind::SignalEventExpression: return 3;
 +        case SyntaxKind::SignedCastExpression: return 3;
 +        case SyntaxKind::SimpleAssignmentPattern: return 3;
 +        case SyntaxKind::SimplePragmaExpression: return 1;
@@ -426,9 +428,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::UntilPropertyExpression: return 4;
 +        case SyntaxKind::UntilWithPropertyExpression: return 4;
 +        case SyntaxKind::Untyped: return 1;
++        case SyntaxKind::UserDefinedNetDeclaration: return 5;
 +        case SyntaxKind::VariableDimension: return 3;
 +        case SyntaxKind::VariablePattern: return 2;
-+        case SyntaxKind::VariablePortHeader: return 3;
++        case SyntaxKind::VariablePortHeader: return 4;
 +        case SyntaxKind::VirtualInterfaceType: return 5;
 +        case SyntaxKind::VoidCastedCallStatement: return 8;
 +        case SyntaxKind::VoidType: return 1;
@@ -2286,7 +2289,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case 0: return &attributes;
 +        case 1: return &qualifiers;
 +        case 2: return keyword;
-+        case 3: return name;
++        case 3: return name.get();
 +        case 4: return block.get();
 +        default: return nullptr;
 +    }
@@ -2297,7 +2300,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case 0: return &attributes;
 +        case 1: return &qualifiers;
 +        case 2: return keyword;
-+        case 3: return name;
++        case 3: return name.get();
 +        case 4: return block.get();
 +        default: return nullptr;
 +    }
@@ -2308,7 +2311,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case 0: attributes = child.node()->as<SyntaxList<AttributeInstanceSyntax>>(); return;
 +        case 1: qualifiers = child.node()->as<TokenList>(); return;
 +        case 2: keyword = child.token(); return;
-+        case 3: name = child.token(); return;
++        case 3: name = &child.node()->as<NameSyntax>(); return;
 +        case 4: block = &child.node()->as<ConstraintBlockSyntax>(); return;
 +        default: THROW_UNREACHABLE;
 +    }
@@ -2343,7 +2346,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case 0: return &attributes;
 +        case 1: return &qualifiers;
 +        case 2: return keyword;
-+        case 3: return name;
++        case 3: return name.get();
 +        case 4: return semi;
 +        default: return nullptr;
 +    }
@@ -2354,7 +2357,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case 0: return &attributes;
 +        case 1: return &qualifiers;
 +        case 2: return keyword;
-+        case 3: return name;
++        case 3: return name.get();
 +        case 4: return semi;
 +        default: return nullptr;
 +    }
@@ -2365,7 +2368,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case 0: attributes = child.node()->as<SyntaxList<AttributeInstanceSyntax>>(); return;
 +        case 1: qualifiers = child.node()->as<TokenList>(); return;
 +        case 2: keyword = child.token(); return;
-+        case 3: name = child.token(); return;
++        case 3: name = &child.node()->as<NameSyntax>(); return;
 +        case 4: semi = child.token(); return;
 +        default: THROW_UNREACHABLE;
 +    }
@@ -2506,7 +2509,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case 4: selector = &child.node()->as<ElementSelectSyntax>(); return;
 +        case 5: equals = child.token(); return;
 +        case 6: initializer = &child.node()->as<CoverageBinInitializerSyntax>(); return;
-+        case 7: iff = &child.node()->as<IffClauseSyntax>(); return;
++        case 7: iff = &child.node()->as<CoverageIffClauseSyntax>(); return;
 +        case 8: semi = child.token(); return;
 +        default: THROW_UNREACHABLE;
 +    }
@@ -2514,6 +2517,44 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +CoverageBinsSyntax* CoverageBinsSyntax::clone(BumpAllocator& alloc) const {
 +    return alloc.emplace<CoverageBinsSyntax>(*this);
++}
++
++bool CoverageIffClauseSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::CoverageIffClause;
++}
++
++TokenOrSyntax CoverageIffClauseSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return iff;
++        case 1: return openParen;
++        case 2: return expr.get();
++        case 3: return closeParen;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax CoverageIffClauseSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return iff;
++        case 1: return openParen;
++        case 2: return expr.get();
++        case 3: return closeParen;
++        default: return nullptr;
++    }
++}
++
++void CoverageIffClauseSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: iff = child.token(); return;
++        case 1: openParen = child.token(); return;
++        case 2: expr = &child.node()->as<ExpressionSyntax>(); return;
++        case 3: closeParen = child.token(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++CoverageIffClauseSyntax* CoverageIffClauseSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<CoverageIffClauseSyntax>(*this);
 +}
 +
 +bool CoverageOptionSyntax::isKind(SyntaxKind kind) {
@@ -2669,43 +2710,93 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return alloc.emplace<CoverpointSyntax>(*this);
 +}
 +
-+bool DPIImportExportSyntax::isKind(SyntaxKind kind) {
-+    return kind == SyntaxKind::DPIImportExport;
++bool DPIExportSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::DPIExport;
 +}
 +
-+TokenOrSyntax DPIImportExportSyntax::getChild(size_t index) {
++TokenOrSyntax DPIExportSyntax::getChild(size_t index) {
 +    switch (index) {
 +        case 0: return &attributes;
 +        case 1: return keyword;
-+        case 2: return stringLiteral;
-+        case 3: return property;
-+        case 4: return c_identifier;
-+        case 5: return equals;
-+        case 6: return method.get();
++        case 2: return specString;
++        case 3: return c_identifier;
++        case 4: return equals;
++        case 5: return functionOrTask;
++        case 6: return name;
 +        case 7: return semi;
 +        default: return nullptr;
 +    }
 +}
 +
-+ConstTokenOrSyntax DPIImportExportSyntax::getChild(size_t index) const {
++ConstTokenOrSyntax DPIExportSyntax::getChild(size_t index) const {
 +    switch (index) {
 +        case 0: return &attributes;
 +        case 1: return keyword;
-+        case 2: return stringLiteral;
-+        case 3: return property;
-+        case 4: return c_identifier;
-+        case 5: return equals;
-+        case 6: return method.get();
++        case 2: return specString;
++        case 3: return c_identifier;
++        case 4: return equals;
++        case 5: return functionOrTask;
++        case 6: return name;
 +        case 7: return semi;
 +        default: return nullptr;
 +    }
 +}
 +
-+void DPIImportExportSyntax::setChild(size_t index, TokenOrSyntax child) {
++void DPIExportSyntax::setChild(size_t index, TokenOrSyntax child) {
 +    switch (index) {
 +        case 0: attributes = child.node()->as<SyntaxList<AttributeInstanceSyntax>>(); return;
 +        case 1: keyword = child.token(); return;
-+        case 2: stringLiteral = child.token(); return;
++        case 2: specString = child.token(); return;
++        case 3: c_identifier = child.token(); return;
++        case 4: equals = child.token(); return;
++        case 5: functionOrTask = child.token(); return;
++        case 6: name = child.token(); return;
++        case 7: semi = child.token(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++DPIExportSyntax* DPIExportSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<DPIExportSyntax>(*this);
++}
++
++bool DPIImportSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::DPIImport;
++}
++
++TokenOrSyntax DPIImportSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return &attributes;
++        case 1: return keyword;
++        case 2: return specString;
++        case 3: return property;
++        case 4: return c_identifier;
++        case 5: return equals;
++        case 6: return method.get();
++        case 7: return semi;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax DPIImportSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return &attributes;
++        case 1: return keyword;
++        case 2: return specString;
++        case 3: return property;
++        case 4: return c_identifier;
++        case 5: return equals;
++        case 6: return method.get();
++        case 7: return semi;
++        default: return nullptr;
++    }
++}
++
++void DPIImportSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: attributes = child.node()->as<SyntaxList<AttributeInstanceSyntax>>(); return;
++        case 1: keyword = child.token(); return;
++        case 2: specString = child.token(); return;
 +        case 3: property = child.token(); return;
 +        case 4: c_identifier = child.token(); return;
 +        case 5: equals = child.token(); return;
@@ -2715,8 +2806,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    }
 +}
 +
-+DPIImportExportSyntax* DPIImportExportSyntax::clone(BumpAllocator& alloc) const {
-+    return alloc.emplace<DPIImportExportSyntax>(*this);
++DPIImportSyntax* DPIImportSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<DPIImportSyntax>(*this);
 +}
 +
 +bool DataDeclarationSyntax::isKind(SyntaxKind kind) {
@@ -5707,42 +5798,36 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return alloc.emplace<IfGenerateSyntax>(*this);
 +}
 +
-+bool IffClauseSyntax::isKind(SyntaxKind kind) {
-+    return kind == SyntaxKind::IffClause;
++bool IffEventClauseSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::IffEventClause;
 +}
 +
-+TokenOrSyntax IffClauseSyntax::getChild(size_t index) {
++TokenOrSyntax IffEventClauseSyntax::getChild(size_t index) {
 +    switch (index) {
 +        case 0: return iff;
-+        case 1: return openParen;
-+        case 2: return expr.get();
-+        case 3: return closeParen;
++        case 1: return expr.get();
 +        default: return nullptr;
 +    }
 +}
 +
-+ConstTokenOrSyntax IffClauseSyntax::getChild(size_t index) const {
++ConstTokenOrSyntax IffEventClauseSyntax::getChild(size_t index) const {
 +    switch (index) {
 +        case 0: return iff;
-+        case 1: return openParen;
-+        case 2: return expr.get();
-+        case 3: return closeParen;
++        case 1: return expr.get();
 +        default: return nullptr;
 +    }
 +}
 +
-+void IffClauseSyntax::setChild(size_t index, TokenOrSyntax child) {
++void IffEventClauseSyntax::setChild(size_t index, TokenOrSyntax child) {
 +    switch (index) {
 +        case 0: iff = child.token(); return;
-+        case 1: openParen = child.token(); return;
-+        case 2: expr = &child.node()->as<ExpressionSyntax>(); return;
-+        case 3: closeParen = child.token(); return;
++        case 1: expr = &child.node()->as<ExpressionSyntax>(); return;
 +        default: THROW_UNREACHABLE;
 +    }
 +}
 +
-+IffClauseSyntax* IffClauseSyntax::clone(BumpAllocator& alloc) const {
-+    return alloc.emplace<IffClauseSyntax>(*this);
++IffEventClauseSyntax* IffEventClauseSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<IffEventClauseSyntax>(*this);
 +}
 +
 +bool ImmediateAssertionMemberSyntax::isKind(SyntaxKind kind) {
@@ -6960,7 +7045,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::CoverageOption:
 +        case SyntaxKind::CovergroupDeclaration:
 +        case SyntaxKind::Coverpoint:
-+        case SyntaxKind::DPIImportExport:
++        case SyntaxKind::DPIExport:
++        case SyntaxKind::DPIImport:
 +        case SyntaxKind::DataDeclaration:
 +        case SyntaxKind::DefParam:
 +        case SyntaxKind::DefaultClockingReference:
@@ -7001,6 +7087,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::TaskDeclaration:
 +        case SyntaxKind::TimeUnitsDeclaration:
 +        case SyntaxKind::TypedefDeclaration:
++        case SyntaxKind::UserDefinedNetDeclaration:
 +            return true;
 +        default:
 +            return false;
@@ -9777,6 +9864,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    switch (index) {
 +        case 0: return edge;
 +        case 1: return expr.get();
++        case 2: return iffClause;
 +        default: return nullptr;
 +    }
 +}
@@ -9785,6 +9873,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    switch (index) {
 +        case 0: return edge;
 +        case 1: return expr.get();
++        case 2: return iffClause;
 +        default: return nullptr;
 +    }
 +}
@@ -9793,6 +9882,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    switch (index) {
 +        case 0: edge = child.token(); return;
 +        case 1: expr = &child.node()->as<ExpressionSyntax>(); return;
++        case 2: iffClause = &child.node()->as<IffEventClauseSyntax>(); return;
 +        default: THROW_UNREACHABLE;
 +    }
 +}
@@ -11097,6 +11187,47 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return alloc.emplace<UniquenessConstraintSyntax>(*this);
 +}
 +
++bool UserDefinedNetDeclarationSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::UserDefinedNetDeclaration;
++}
++
++TokenOrSyntax UserDefinedNetDeclarationSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return &attributes;
++        case 1: return netType;
++        case 2: return delay.get();
++        case 3: return &declarators;
++        case 4: return semi;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax UserDefinedNetDeclarationSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return &attributes;
++        case 1: return netType;
++        case 2: return delay.get();
++        case 3: return &declarators;
++        case 4: return semi;
++        default: return nullptr;
++    }
++}
++
++void UserDefinedNetDeclarationSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: attributes = child.node()->as<SyntaxList<AttributeInstanceSyntax>>(); return;
++        case 1: netType = child.token(); return;
++        case 2: delay = &child.node()->as<TimingControlSyntax>(); return;
++        case 3: declarators = child.node()->as<SeparatedSyntaxList<DeclaratorSyntax>>(); return;
++        case 4: semi = child.token(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++UserDefinedNetDeclarationSyntax* UserDefinedNetDeclarationSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<UserDefinedNetDeclarationSyntax>(*this);
++}
++
 +bool VariableDimensionSyntax::isKind(SyntaxKind kind) {
 +    return kind == SyntaxKind::VariableDimension;
 +}
@@ -11170,27 +11301,30 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +TokenOrSyntax VariablePortHeaderSyntax::getChild(size_t index) {
 +    switch (index) {
-+        case 0: return direction;
-+        case 1: return varKeyword;
-+        case 2: return dataType.get();
++        case 0: return constKeyword;
++        case 1: return direction;
++        case 2: return varKeyword;
++        case 3: return dataType.get();
 +        default: return nullptr;
 +    }
 +}
 +
 +ConstTokenOrSyntax VariablePortHeaderSyntax::getChild(size_t index) const {
 +    switch (index) {
-+        case 0: return direction;
-+        case 1: return varKeyword;
-+        case 2: return dataType.get();
++        case 0: return constKeyword;
++        case 1: return direction;
++        case 2: return varKeyword;
++        case 3: return dataType.get();
 +        default: return nullptr;
 +    }
 +}
 +
 +void VariablePortHeaderSyntax::setChild(size_t index, TokenOrSyntax child) {
 +    switch (index) {
-+        case 0: direction = child.token(); return;
-+        case 1: varKeyword = child.token(); return;
-+        case 2: dataType = &child.node()->as<DataTypeSyntax>(); return;
++        case 0: constKeyword = child.token(); return;
++        case 1: direction = child.token(); return;
++        case 2: varKeyword = child.token(); return;
++        case 3: dataType = &child.node()->as<DataTypeSyntax>(); return;
 +        default: THROW_UNREACHABLE;
 +    }
 +}
@@ -11838,11 +11972,11 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return *alloc.emplace<ConstraintBlockSyntax>(openBrace, items, closeBrace);
 +}
 +
-+ConstraintDeclarationSyntax& SyntaxFactory::constraintDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, const TokenList& qualifiers, Token keyword, Token name, ConstraintBlockSyntax& block) {
++ConstraintDeclarationSyntax& SyntaxFactory::constraintDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, const TokenList& qualifiers, Token keyword, NameSyntax& name, ConstraintBlockSyntax& block) {
 +    return *alloc.emplace<ConstraintDeclarationSyntax>(attributes, qualifiers, keyword, name, block);
 +}
 +
-+ConstraintPrototypeSyntax& SyntaxFactory::constraintPrototype(const SyntaxList<AttributeInstanceSyntax>& attributes, const TokenList& qualifiers, Token keyword, Token name, Token semi) {
++ConstraintPrototypeSyntax& SyntaxFactory::constraintPrototype(const SyntaxList<AttributeInstanceSyntax>& attributes, const TokenList& qualifiers, Token keyword, NameSyntax& name, Token semi) {
 +    return *alloc.emplace<ConstraintPrototypeSyntax>(attributes, qualifiers, keyword, name, semi);
 +}
 +
@@ -11854,8 +11988,12 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return *alloc.emplace<CopyClassExpressionSyntax>(scopedNew, expr);
 +}
 +
-+CoverageBinsSyntax& SyntaxFactory::coverageBins(const SyntaxList<AttributeInstanceSyntax>& attributes, Token wildcard, Token keyword, Token name, ElementSelectSyntax* selector, Token equals, CoverageBinInitializerSyntax& initializer, IffClauseSyntax* iff, Token semi) {
++CoverageBinsSyntax& SyntaxFactory::coverageBins(const SyntaxList<AttributeInstanceSyntax>& attributes, Token wildcard, Token keyword, Token name, ElementSelectSyntax* selector, Token equals, CoverageBinInitializerSyntax& initializer, CoverageIffClauseSyntax* iff, Token semi) {
 +    return *alloc.emplace<CoverageBinsSyntax>(attributes, wildcard, keyword, name, selector, equals, initializer, iff, semi);
++}
++
++CoverageIffClauseSyntax& SyntaxFactory::coverageIffClause(Token iff, Token openParen, ExpressionSyntax& expr, Token closeParen) {
++    return *alloc.emplace<CoverageIffClauseSyntax>(iff, openParen, expr, closeParen);
 +}
 +
 +CoverageOptionSyntax& SyntaxFactory::coverageOption(const SyntaxList<AttributeInstanceSyntax>& attributes, Token option, Token dot, Token name, Token equals, ExpressionSyntax& expr, Token semi) {
@@ -11870,8 +12008,12 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return *alloc.emplace<CoverpointSyntax>(attributes, type, label, coverpoint, expr, openBrace, members, closeBrace, emptySemi);
 +}
 +
-+DPIImportExportSyntax& SyntaxFactory::dPIImportExport(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, Token stringLiteral, Token property, Token c_identifier, Token equals, FunctionPrototypeSyntax& method, Token semi) {
-+    return *alloc.emplace<DPIImportExportSyntax>(attributes, keyword, stringLiteral, property, c_identifier, equals, method, semi);
++DPIExportSyntax& SyntaxFactory::dPIExport(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, Token specString, Token c_identifier, Token equals, Token functionOrTask, Token name, Token semi) {
++    return *alloc.emplace<DPIExportSyntax>(attributes, keyword, specString, c_identifier, equals, functionOrTask, name, semi);
++}
++
++DPIImportSyntax& SyntaxFactory::dPIImport(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, Token specString, Token property, Token c_identifier, Token equals, FunctionPrototypeSyntax& method, Token semi) {
++    return *alloc.emplace<DPIImportSyntax>(attributes, keyword, specString, property, c_identifier, equals, method, semi);
 +}
 +
 +DataDeclarationSyntax& SyntaxFactory::dataDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, const TokenList& modifiers, DataTypeSyntax& type, const SeparatedSyntaxList<DeclaratorSyntax>& declarators, Token semi) {
@@ -12162,8 +12304,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return *alloc.emplace<IfGenerateSyntax>(attributes, keyword, openParen, condition, closeParen, block, elseClause);
 +}
 +
-+IffClauseSyntax& SyntaxFactory::iffClause(Token iff, Token openParen, ExpressionSyntax& expr, Token closeParen) {
-+    return *alloc.emplace<IffClauseSyntax>(iff, openParen, expr, closeParen);
++IffEventClauseSyntax& SyntaxFactory::iffEventClause(Token iff, ExpressionSyntax& expr) {
++    return *alloc.emplace<IffEventClauseSyntax>(iff, expr);
 +}
 +
 +ImmediateAssertionMemberSyntax& SyntaxFactory::immediateAssertionMember(const SyntaxList<AttributeInstanceSyntax>& attributes, ImmediateAssertionStatementSyntax& statement) {
@@ -12558,8 +12700,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return *alloc.emplace<ShortcutCycleDelayRangeSyntax>(doubleHash, openBracket, op, closeBracket);
 +}
 +
-+SignalEventExpressionSyntax& SyntaxFactory::signalEventExpression(Token edge, ExpressionSyntax& expr) {
-+    return *alloc.emplace<SignalEventExpressionSyntax>(edge, expr);
++SignalEventExpressionSyntax& SyntaxFactory::signalEventExpression(Token edge, ExpressionSyntax& expr, IffEventClauseSyntax* iffClause) {
++    return *alloc.emplace<SignalEventExpressionSyntax>(edge, expr, iffClause);
 +}
 +
 +SignedCastExpressionSyntax& SyntaxFactory::signedCastExpression(Token signing, Token apostrophe, ParenthesizedExpressionSyntax& inner) {
@@ -12694,6 +12836,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return *alloc.emplace<UniquenessConstraintSyntax>(unique, ranges, semi);
 +}
 +
++UserDefinedNetDeclarationSyntax& SyntaxFactory::userDefinedNetDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, Token netType, TimingControlSyntax& delay, const SeparatedSyntaxList<DeclaratorSyntax>& declarators, Token semi) {
++    return *alloc.emplace<UserDefinedNetDeclarationSyntax>(attributes, netType, delay, declarators, semi);
++}
++
 +VariableDimensionSyntax& SyntaxFactory::variableDimension(Token openBracket, DimensionSpecifierSyntax* specifier, Token closeBracket) {
 +    return *alloc.emplace<VariableDimensionSyntax>(openBracket, specifier, closeBracket);
 +}
@@ -12702,8 +12848,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return *alloc.emplace<VariablePatternSyntax>(dot, variableName);
 +}
 +
-+VariablePortHeaderSyntax& SyntaxFactory::variablePortHeader(Token direction, Token varKeyword, DataTypeSyntax& dataType) {
-+    return *alloc.emplace<VariablePortHeaderSyntax>(direction, varKeyword, dataType);
++VariablePortHeaderSyntax& SyntaxFactory::variablePortHeader(Token constKeyword, Token direction, Token varKeyword, DataTypeSyntax& dataType) {
++    return *alloc.emplace<VariablePortHeaderSyntax>(constKeyword, direction, varKeyword, dataType);
 +}
 +
 +VirtualInterfaceTypeSyntax& SyntaxFactory::virtualInterfaceType(Token virtualKeyword, Token interfaceKeyword, Token name, ParameterValueAssignmentSyntax* parameters, DotMemberClauseSyntax* modport) {
@@ -12845,11 +12991,13 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::CoverPropertyStatement: return "CoverPropertyStatement";
 +        case SyntaxKind::CoverSequenceStatement: return "CoverSequenceStatement";
 +        case SyntaxKind::CoverageBins: return "CoverageBins";
++        case SyntaxKind::CoverageIffClause: return "CoverageIffClause";
 +        case SyntaxKind::CoverageOption: return "CoverageOption";
 +        case SyntaxKind::CovergroupDeclaration: return "CovergroupDeclaration";
 +        case SyntaxKind::Coverpoint: return "Coverpoint";
 +        case SyntaxKind::CycleDelay: return "CycleDelay";
-+        case SyntaxKind::DPIImportExport: return "DPIImportExport";
++        case SyntaxKind::DPIExport: return "DPIExport";
++        case SyntaxKind::DPIImport: return "DPIImport";
 +        case SyntaxKind::DataDeclaration: return "DataDeclaration";
 +        case SyntaxKind::Declarator: return "Declarator";
 +        case SyntaxKind::DefParam: return "DefParam";
@@ -12939,7 +13087,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::IfDefDirective: return "IfDefDirective";
 +        case SyntaxKind::IfGenerate: return "IfGenerate";
 +        case SyntaxKind::IfNDefDirective: return "IfNDefDirective";
-+        case SyntaxKind::IffClause: return "IffClause";
++        case SyntaxKind::IffEventClause: return "IffEventClause";
 +        case SyntaxKind::IffPropertyExpression: return "IffPropertyExpression";
 +        case SyntaxKind::ImmediateAssertStatement: return "ImmediateAssertStatement";
 +        case SyntaxKind::ImmediateAssertionMember: return "ImmediateAssertionMember";
@@ -13166,6 +13314,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::UntilPropertyExpression: return "UntilPropertyExpression";
 +        case SyntaxKind::UntilWithPropertyExpression: return "UntilWithPropertyExpression";
 +        case SyntaxKind::Untyped: return "Untyped";
++        case SyntaxKind::UserDefinedNetDeclaration: return "UserDefinedNetDeclaration";
 +        case SyntaxKind::VariableDimension: return "VariableDimension";
 +        case SyntaxKind::VariablePattern: return "VariablePattern";
 +        case SyntaxKind::VariablePortHeader: return "VariablePortHeader";
@@ -13192,89 +13341,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +}
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/cmake_install.cmake ./generated/cmake_install.cmake
---- ./generated/cmake_install.cmake	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/cmake_install.cmake	2020-11-03 00:14:53.168220367 -0800
-@@ -0,0 +1,75 @@
-+# Install script for directory: /soe/renau/projs/synth/slang/source
-+
-+# Set the install prefix
-+if(NOT DEFINED CMAKE_INSTALL_PREFIX)
-+  set(CMAKE_INSTALL_PREFIX "/usr/local")
-+endif()
-+string(REGEX REPLACE "/$" "" CMAKE_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
-+
-+# Set the install configuration name.
-+if(NOT DEFINED CMAKE_INSTALL_CONFIG_NAME)
-+  if(BUILD_TYPE)
-+    string(REGEX REPLACE "^[^A-Za-z0-9_]+" ""
-+           CMAKE_INSTALL_CONFIG_NAME "${BUILD_TYPE}")
-+  else()
-+    set(CMAKE_INSTALL_CONFIG_NAME "Release")
-+  endif()
-+  message(STATUS "Install configuration: \"${CMAKE_INSTALL_CONFIG_NAME}\"")
-+endif()
-+
-+# Set the component getting installed.
-+if(NOT CMAKE_INSTALL_COMPONENT)
-+  if(COMPONENT)
-+    message(STATUS "Install component: \"${COMPONENT}\"")
-+    set(CMAKE_INSTALL_COMPONENT "${COMPONENT}")
-+  else()
-+    set(CMAKE_INSTALL_COMPONENT)
-+  endif()
-+endif()
-+
-+# Install shared libraries without execute permission?
-+if(NOT DEFINED CMAKE_INSTALL_SO_NO_EXE)
-+  set(CMAKE_INSTALL_SO_NO_EXE "0")
-+endif()
-+
-+# Is this installation the result of a crosscompile?
-+if(NOT DEFINED CMAKE_CROSSCOMPILING)
-+  set(CMAKE_CROSSCOMPILING "FALSE")
-+endif()
-+
-+if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
-+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/include" TYPE DIRECTORY FILES "/soe/renau/projs/synth/slang/source/../include/")
-+endif()
-+
-+if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
-+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/include" TYPE DIRECTORY FILES "/soe/renau/projs/synth/slang/source/../external/")
-+endif()
-+
-+if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
-+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/include/slang/diagnostics" TYPE DIRECTORY FILES "/soe/renau/projs/synth/slang/build/source/slang/diagnostics/")
-+endif()
-+
-+if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
-+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/include/slang/syntax" TYPE FILE FILES "/soe/renau/projs/synth/slang/build/source/slang/syntax/AllSyntax.h")
-+endif()
-+
-+if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
-+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/include/slang/syntax" TYPE FILE FILES "/soe/renau/projs/synth/slang/build/source/slang/syntax/SyntaxKind.h")
-+endif()
-+
-+if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
-+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib" TYPE STATIC_LIBRARY FILES "/soe/renau/projs/synth/slang/build/lib/libslangcore.a")
-+endif()
-+
-+if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
-+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib" TYPE STATIC_LIBRARY FILES "/soe/renau/projs/synth/slang/build/lib/libslangparser.a")
-+endif()
-+
-+if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
-+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib" TYPE STATIC_LIBRARY FILES "/soe/renau/projs/synth/slang/build/lib/libslangcompiler.a")
-+endif()
-+
-+if("x${CMAKE_INSTALL_COMPONENT}x" STREQUAL "xUnspecifiedx" OR NOT CMAKE_INSTALL_COMPONENT)
-+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib" TYPE STATIC_LIBRARY FILES "/soe/renau/projs/synth/slang/build/lib/libslangruntime.a")
-+endif()
-+
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/DiagCode.cpp ./generated/DiagCode.cpp
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/DiagCode.cpp ./generated/DiagCode.cpp
 --- ./generated/DiagCode.cpp	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/DiagCode.cpp	2020-11-03 00:14:56.268155696 -0800
-@@ -0,0 +1,613 @@
++++ ./generated/DiagCode.cpp	2021-01-13 10:06:32.315726612 -0800
+@@ -0,0 +1,714 @@
 +//------------------------------------------------------------------------------
 +// DiagCode.cpp
 +// Generated diagnostic helpers
@@ -13292,8 +13362,15 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +static const flat_hash_map<DiagCode, std::tuple<string_view, string_view, DiagnosticSeverity, string_view>> data = {
 +    {diag::MaxInstanceDepthExceeded, std::make_tuple("MaxInstanceDepthExceeded"sv, "{} instantiation exceeded maximum depth of {}"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InvalidTopModule, std::make_tuple("InvalidTopModule"sv, "'{}' is not a valid top-level module"sv, DiagnosticSeverity::Error, ""sv)},
-+    {diag::NoMethodInClass, std::make_tuple("NoMethodInClass"sv, "out-of-block definition of '{}' does not match any declaration in '{}'"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::NoDeclInClass, std::make_tuple("NoDeclInClass"sv, "out-of-block definition of '{}' does not match any declaration in '{}'"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InvalidParamOverrideOpt, std::make_tuple("InvalidParamOverrideOpt"sv, "'{}' is not a valid form of parameter override"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::DPIExportKindMismatch, std::make_tuple("DPIExportKindMismatch"sv, "mismatch between 'function' and 'task' declared in DPI export"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::DPIExportDifferentScope, std::make_tuple("DPIExportDifferentScope"sv, "exported subroutines must be defined in the same scope as the export directive"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::DPIExportDuplicate, std::make_tuple("DPIExportDuplicate"sv, "duplicate export of '{}'"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::DPIExportImportedFunc, std::make_tuple("DPIExportImportedFunc"sv, "cannot export an imported DPI subroutine"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::InvalidDPICIdentifier, std::make_tuple("InvalidDPICIdentifier"sv, "'{}' is not a valid C identifier for DPI subroutine"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::DPISignatureMismatch, std::make_tuple("DPISignatureMismatch"sv, "more than one DPI subroutine with C identifier '{}' declared with mismatching type signatures"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::DPIExportDuplicateCId, std::make_tuple("DPIExportDuplicateCId"sv, "more than one DPI export with the same C identifier '{}' in the same scope"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::UnusedDefinition, std::make_tuple("UnusedDefinition"sv, "{} definition is unused"sv, DiagnosticSeverity::Warning, "unused-def"sv)},
 +    {diag::NoTopModules, std::make_tuple("NoTopModules"sv, "no top-level modules found in design"sv, DiagnosticSeverity::Warning, "no-top"sv)},
 +    {diag::NoteInCallTo, std::make_tuple("NoteInCallTo"sv, "in call to '{}'"sv, DiagnosticSeverity::Note, ""sv)},
@@ -13317,12 +13394,16 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::ConstEvalExceededMaxSteps, std::make_tuple("ConstEvalExceededMaxSteps"sv, "constant evaluation hit maximum step limit; possible infinite loop?"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ConstEvalTaskNotConstant, std::make_tuple("ConstEvalTaskNotConstant"sv, "cannot invoke a task in a constant expression"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ConstEvalVoidNotConstant, std::make_tuple("ConstEvalVoidNotConstant"sv, "cannot call a void function in a constant expression"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ConstEvalDPINotConstant, std::make_tuple("ConstEvalDPINotConstant"sv, "cannot call DPI import function in a constant expression"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ConstEvalMethodNotConstant, std::make_tuple("ConstEvalMethodNotConstant"sv, "cannot call class method in a constant expression"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ConstEvalSubroutineNotConstant, std::make_tuple("ConstEvalSubroutineNotConstant"sv, "'{}' is not callable in a constant expression"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ConstEvalFunctionArgDirection, std::make_tuple("ConstEvalFunctionArgDirection"sv, "cannot call a function with output, inout, or ref arguments in a constant expression"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ConstEvalFunctionInsideGenerate, std::make_tuple("ConstEvalFunctionInsideGenerate"sv, "cannot call a function declared inside a generate block in a constant expression"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ConstEvalDynamicToFixedSize, std::make_tuple("ConstEvalDynamicToFixedSize"sv, "cannot assign {} of length {} to {}"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ConstEvalAssociativeIndexInvalid, std::make_tuple("ConstEvalAssociativeIndexInvalid"sv, "index {} has x or z bits which is invalid"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ConstEvalDisableTarget, std::make_tuple("ConstEvalDisableTarget"sv, "disable statement in a constant function cannot target a block that is not currently executing"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ConstEvalClassType, std::make_tuple("ConstEvalClassType"sv, "class types are not allowed in constant expressions"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ConstEvalProceduralAssign, std::make_tuple("ConstEvalProceduralAssign"sv, "procedural assign and deassign statements are not allowed in constant functions"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ConstEvalAssociativeElementNotFound, std::make_tuple("ConstEvalAssociativeElementNotFound"sv, "element {} does not exist in associative array"sv, DiagnosticSeverity::Warning, "elem-not-found"sv)},
 +    {diag::ConstEvalStaticSkipped, std::make_tuple("ConstEvalStaticSkipped"sv, "static variable initialization is skipped in constant function calls"sv, DiagnosticSeverity::Warning, "static-skipped"sv)},
 +    {diag::ConstEvalDynamicArrayIndex, std::make_tuple("ConstEvalDynamicArrayIndex"sv, "invalid index {} for {} of length {}"sv, DiagnosticSeverity::Warning, "dynarray-index"sv)},
@@ -13349,8 +13430,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::InOutPortCannotBeVariable, std::make_tuple("InOutPortCannotBeVariable"sv, "variable port '{}' cannot have direction inout"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::RefPortMustBeVariable, std::make_tuple("RefPortMustBeVariable"sv, "ref port '{}' cannot be of net type"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::MissingPortIODeclaration, std::make_tuple("MissingPortIODeclaration"sv, "port '{}' has no I/O member declaration"sv, DiagnosticSeverity::Error, ""sv)},
-+    {diag::CantDeclarePortSigned, std::make_tuple("CantDeclarePortSigned"sv, "port '{}' cannot be declared signed because its type {} is not integral"sv, DiagnosticSeverity::Error, ""sv)},
-+    {diag::PortDeclDimensionsMismatch, std::make_tuple("PortDeclDimensionsMismatch"sv, "dimensions of port '{}' do not match its declaration"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::CantDeclarePortSigned, std::make_tuple("CantDeclarePortSigned"sv, "'{}' cannot be declared '{}' because its type {} is not integral"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::PortDeclDimensionsMismatch, std::make_tuple("PortDeclDimensionsMismatch"sv, "inconsistent dimensions declared for '{}'"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::PortDeclInANSIModule, std::make_tuple("PortDeclInANSIModule"sv, "can't use port declaration in module with ANSI style port list"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::UnusedPortDecl, std::make_tuple("UnusedPortDecl"sv, "port declaration '{}' does not match any port in the module's port list"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::UnknownPackage, std::make_tuple("UnknownPackage"sv, "unknown package '{}'"sv, DiagnosticSeverity::Error, ""sv)},
@@ -13375,30 +13456,38 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::MixingSubroutinePortKinds, std::make_tuple("MixingSubroutinePortKinds"sv, "port declarations not allowed when subroutine defines a formal argument list"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::UnpackedArrayParamType, std::make_tuple("UnpackedArrayParamType"sv, "unpacked array parameter requires explicit data type"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::AutomaticNotAllowed, std::make_tuple("AutomaticNotAllowed"sv, "automatic variables can only be declared in procedural contexts"sv, DiagnosticSeverity::Error, ""sv)},
-+    {diag::ForeachWildcardIndex, std::make_tuple("ForeachWildcardIndex"sv, "foreach loops cannot be used with associative arrays that have a wildcard index"sv, DiagnosticSeverity::Error, ""sv)},
-+    {diag::NoMethodImplFound, std::make_tuple("NoMethodImplFound"sv, "no implementation found in parent scope for '{}'"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::NoMemberImplFound, std::make_tuple("NoMemberImplFound"sv, "no implementation found in parent scope for '{}'"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::MethodKindMismatch, std::make_tuple("MethodKindMismatch"sv, "mismatch between 'function' and 'task' declared in prototype"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::MethodReturnMismatch, std::make_tuple("MethodReturnMismatch"sv, "return type {} of method '{}' does not match {} declared in its prototype"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::MethodArgCountMismatch, std::make_tuple("MethodArgCountMismatch"sv, "definition of method '{}' has different number of arguments from its prototype"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::MethodArgNameMismatch, std::make_tuple("MethodArgNameMismatch"sv, "method argument name '{}' doesn't match '{}' given in its prototype"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::MethodArgTypeMismatch, std::make_tuple("MethodArgTypeMismatch"sv, "method argument '{}' is of type {} which differs from {} given in its prototype"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::MethodArgNoDefault, std::make_tuple("MethodArgNoDefault"sv, "method argument '{}' provides a default value but its prototype does not"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::MethodArgDefaultMismatch, std::make_tuple("MethodArgDefaultMismatch"sv, "default value for method argument '{}' must exactly match the expression given in its prototype"sv, DiagnosticSeverity::Error, ""sv)},
-+    {diag::MethodDefinitionBeforeClass, std::make_tuple("MethodDefinitionBeforeClass"sv, "definition of method '{}' must come after its containing class '{}'"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::MethodArgDirectionMismatch, std::make_tuple("MethodArgDirectionMismatch"sv, "direction of method argument '{}' differs from the direction given in its prototype"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::MemberDefinitionBeforeClass, std::make_tuple("MemberDefinitionBeforeClass"sv, "definition of '{}' must come after its containing class '{}'"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::MethodReturnTypeScoped, std::make_tuple("MethodReturnTypeScoped"sv, "return type for out-of-block method '{}' must use class scope '{}::' to access nested type"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::VirtualKindMismatch, std::make_tuple("VirtualKindMismatch"sv, "mismatch between 'function' and 'task' declared in superclass method"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::VirtualReturnMismatch, std::make_tuple("VirtualReturnMismatch"sv, "return type {} of virtual method '{}' does not match {} declared in its superclass"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::VirtualArgCountMismatch, std::make_tuple("VirtualArgCountMismatch"sv, "virtual method '{}' has different number of arguments from its superclass method"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::VirtualArgNameMismatch, std::make_tuple("VirtualArgNameMismatch"sv, "virtual method argument name '{}' doesn't match '{}' given in its superclass method"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::VirtualArgTypeMismatch, std::make_tuple("VirtualArgTypeMismatch"sv, "virtual method argument '{}' is of type {} which differs from {} given in its superclass method"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::VirtualArgNoParentDefault, std::make_tuple("VirtualArgNoParentDefault"sv, "virtual method argument '{}' provides a default value but its superclass method argument does not"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::VirtualArgNoDerivedDefault, std::make_tuple("VirtualArgNoDerivedDefault"sv, "virtual method argument '{}' does not provide a default value but its superclass method argument does"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::VirtualArgDirectionMismatch, std::make_tuple("VirtualArgDirectionMismatch"sv, "direction of virtual method argument '{}' differs from the direction given in its superclass method"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::BaseConstructorDuplicate, std::make_tuple("BaseConstructorDuplicate"sv, "cannot provide both 'super.new' as well as class constructor arguments in 'extends' clause"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::BaseConstructorNotCalled, std::make_tuple("BaseConstructorNotCalled"sv, "class '{}' must provide arguments for constructing base class '{}' via 'super.new' or the 'extends' clause"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ConstVarNoInitializer, std::make_tuple("ConstVarNoInitializer"sv, "constant variable must have an initializer"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::StaticConstNoInitializer, std::make_tuple("StaticConstNoInitializer"sv, "static constant class properties must have initializers"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::PureInAbstract, std::make_tuple("PureInAbstract"sv, "pure virtual methods can only be declared in virtual classes"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::PureConstraintInAbstract, std::make_tuple("PureConstraintInAbstract"sv, "pure constraints can only be declared in virtual classes"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::BodyForPure, std::make_tuple("BodyForPure"sv, "pure virtual methods cannot have a function body defined"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::BodyForPureConstraint, std::make_tuple("BodyForPureConstraint"sv, "pure constraints cannot have a body defined"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InheritFromAbstract, std::make_tuple("InheritFromAbstract"sv, "'{}' cannot inherit from virtual class '{}' without providing an implementation for pure virtual method '{}'"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::InheritFromAbstractConstraint, std::make_tuple("InheritFromAbstractConstraint"sv, "'{}' cannot inherit from virtual class '{}' without providing an implementation for pure constraint '{}'"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InvalidPortType, std::make_tuple("InvalidPortType"sv, "{} is not a valid type for a port"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::InvalidNetType, std::make_tuple("InvalidNetType"sv, "{} is not a valid type for a net; only 4-state integral types and unpacked structs and arrays of such types are allowed"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::InvalidUserDefinedNetType, std::make_tuple("InvalidUserDefinedNetType"sv, "{} is not a valid type for a user-defined nettype; only integral types, floating types, and unpacked structs, unions, and arrays of such types are allowed"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExtendIfaceFromClass, std::make_tuple("ExtendIfaceFromClass"sv, "a normal (or virtual) class cannot extend interface class '{}'"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExtendClassFromIface, std::make_tuple("ExtendClassFromIface"sv, "an interface class cannot extend non-interface class '{}'"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ImplementNonIface, std::make_tuple("ImplementNonIface"sv, "cannot implement non-interface class '{}'"sv, DiagnosticSeverity::Error, ""sv)},
@@ -13408,6 +13497,18 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::IfaceMethodNotVirtual, std::make_tuple("IfaceMethodNotVirtual"sv, "class '{}' must provide an implementation for method '{}' specified in interface class '{}' (existing method is not virtual)"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::NotAllowedInModport, std::make_tuple("NotAllowedInModport"sv, "'{}' cannot be listed in a modport"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ModportConnMismatch, std::make_tuple("ModportConnMismatch"sv, "cannot connect modport '{}.{}' to port requiring modport '{}.{}'"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ExpectedImportExport, std::make_tuple("ExpectedImportExport"sv, "expected 'import' or 'export' for subroutine '{}' in modport"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::SingleBitVectored, std::make_tuple("SingleBitVectored"sv, "net of width 1 cannot be 'vectored' or 'scalared'"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::VarDeclWithDelay, std::make_tuple("VarDeclWithDelay"sv, "cannot specify a net delay for a variable declaration"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::InvalidRandType, std::make_tuple("InvalidRandType"sv, "{} is not a valid type for a '{}' property"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::InvalidMethodOverride, std::make_tuple("InvalidMethodOverride"sv, "cannot override built-in method '{}'"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::InvalidRandomizeOverride, std::make_tuple("InvalidRandomizeOverride"sv, "override for '{}' should be a public non-static function that returns void and takes no parameters"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::MismatchStaticConstraint, std::make_tuple("MismatchStaticConstraint"sv, "mismatch of 'static' keyword between constraint prototype and declaration"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::DPIRefArg, std::make_tuple("DPIRefArg"sv, "DPI subroutines cannot have 'ref' arguments"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::DPIPureArg, std::make_tuple("DPIPureArg"sv, "DPI imports marked 'pure' cannot have 'output' or 'inout' arguments"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::DPIPureReturn, std::make_tuple("DPIPureReturn"sv, "DPI imports marked 'pure' cannot return 'void'"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::InvalidDPIReturnType, std::make_tuple("InvalidDPIReturnType"sv, "{} is not a valid return type for a DPI subroutine"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::InvalidDPIArgType, std::make_tuple("InvalidDPIArgType"sv, "{} is not a valid argument type in a DPI subroutine"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::FatalTask, std::make_tuple("FatalTask"sv, "$fatal encountered{}"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ErrorTask, std::make_tuple("ErrorTask"sv, "$error encountered{}"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::WarningTask, std::make_tuple("WarningTask"sv, "$warning encountered{}"sv, DiagnosticSeverity::Warning, "warning-task"sv)},
@@ -13419,7 +13520,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::UnconnectedUnnamedPort, std::make_tuple("UnconnectedUnnamedPort"sv, "instance does not provide a connection for an unnamed port"sv, DiagnosticSeverity::Warning, "unconnected-unnamed-port"sv)},
 +    {diag::ImplicitNetPortNoDefault, std::make_tuple("ImplicitNetPortNoDefault"sv, "implicit net port disallowed because `default_nettype is set to 'none'"sv, DiagnosticSeverity::Warning, "implicit-net-port"sv)},
 +    {diag::DuplicateAttribute, std::make_tuple("DuplicateAttribute"sv, "duplicate attribute definition '{}'; taking last value"sv, DiagnosticSeverity::Warning, "dup-attr"sv)},
-+    {diag::EmptyMember, std::make_tuple("EmptyMember"sv, "empty member has no effect"sv, DiagnosticSeverity::Warning, "empty-member"sv)},
++    {diag::EmptyMember, std::make_tuple("EmptyMember"sv, "extra ';' has no effect"sv, DiagnosticSeverity::Warning, "empty-member"sv)},
++    {diag::SignednessNoEffect, std::make_tuple("SignednessNoEffect"sv, "'{}' on I/O declaration has no effect on type {}"sv, DiagnosticSeverity::Warning, "ineffective-sign"sv)},
++    {diag::NoConstraintBody, std::make_tuple("NoConstraintBody"sv, "no body for implicit constraint block '{}'"sv, DiagnosticSeverity::Warning, "constraint-missing"sv)},
++    {diag::DPISpecDisallowed, std::make_tuple("DPISpecDisallowed"sv, "'DPI' specified subroutines are not supported and will be treated as 'DPI-C'. Note that this may require changes to the application's C code."sv, DiagnosticSeverity::Warning, "dpi-spec"sv)},
 +    {diag::BadUnaryExpression, std::make_tuple("BadUnaryExpression"sv, "invalid operand type {} to unary expression"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::BadBinaryExpression, std::make_tuple("BadBinaryExpression"sv, "invalid operands to binary expression ({} and {})"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::BadConditionalExpression, std::make_tuple("BadConditionalExpression"sv, "invalid operands to conditional expression ({} and {})"sv, DiagnosticSeverity::Error, ""sv)},
@@ -13448,6 +13552,13 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::ReplicationZeroOutsideConcat, std::make_tuple("ReplicationZeroOutsideConcat"sv, "replication constant can only be zero inside of a concatenation"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InvalidMemberAccess, std::make_tuple("InvalidMemberAccess"sv, "invalid member access for type {}"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExpressionNotCallable, std::make_tuple("ExpressionNotCallable"sv, "expression is not callable"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::UnexpectedWithClause, std::make_tuple("UnexpectedWithClause"sv, "unexpected 'with' clause"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::WithClauseNotAllowed, std::make_tuple("WithClauseNotAllowed"sv, "cannot use 'with' expression with '{}'"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::IteratorArgsWithoutWithClause, std::make_tuple("IteratorArgsWithoutWithClause"sv, "cannot provide arguments to '{}' without corresponding 'with' clause"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ExpectedIteratorName, std::make_tuple("ExpectedIteratorName"sv, "expected name of iterator for use with 'with' expression"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::UnexpectedConstraintBlock, std::make_tuple("UnexpectedConstraintBlock"sv, "unexpected constraint block"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::MissingConstraintBlock, std::make_tuple("MissingConstraintBlock"sv, "missing inline constraint block for 'randomize' call"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ExpectedIterationExpression, std::make_tuple("ExpectedIterationExpression"sv, "expected a single array iteration expression"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::NotBooleanConvertible, std::make_tuple("NotBooleanConvertible"sv, "value of type {} is not convertible to a boolean predicate"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::EnumValueSizeMismatch, std::make_tuple("EnumValueSizeMismatch"sv, "expression width of {} does not exactly match declared enum type width of {}"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::NoCommonComparisonType, std::make_tuple("NoCommonComparisonType"sv, "{} expression of type {} is not comparable to common type {}"sv, DiagnosticSeverity::Error, ""sv)},
@@ -13499,8 +13610,19 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::NewVirtualClass, std::make_tuple("NewVirtualClass"sv, "cannot create instance of virtual class '{}'"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::NewInterfaceClass, std::make_tuple("NewInterfaceClass"sv, "cannot create instance of interface class '{}'"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::AssignToCHandle, std::make_tuple("AssignToCHandle"sv, "cannot assign to a chandle outside of a procedural context"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::AssignToNet, std::make_tuple("AssignToNet"sv, "cannot assign to a net within a procedural context"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::SelectOfVectoredNet, std::make_tuple("SelectOfVectoredNet"sv, "bit-selects and part-selects of vectored nets are disallowed"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ExpectedNetDelay, std::make_tuple("ExpectedNetDelay"sv, "invalid net delay; expected min:typ:max or single expression"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::InvalidRefArg, std::make_tuple("InvalidRefArg"sv, "invalid expression for pass by reference; only variables, class properties, and members of unpacked structs and arrays are allowed"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::RefTypeMismatch, std::make_tuple("RefTypeMismatch"sv, "argument of type {} connects to 'ref' port of inequivalent type {}"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ConstVarToRef, std::make_tuple("ConstVarToRef"sv, "cannot bind const variable to 'ref' argument"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::MissingInvocationParens, std::make_tuple("MissingInvocationParens"sv, "parentheses are required when invoking function '{}'"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::NameListWithScopeRandomize, std::make_tuple("NameListWithScopeRandomize"sv, "lookup restriction list not allowed for std::randomize call"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::IgnoredSlice, std::make_tuple("IgnoredSlice"sv, "slice size ignored for left-to-right streaming operator"sv, DiagnosticSeverity::Warning, "ignored-slice"sv)},
-+    {diag::UnsizedInConcat, std::make_tuple("UnsizedInConcat"sv, "unsized integer in concat -- using a width of {}"sv, DiagnosticSeverity::Warning, "unsized-concat"sv)},
++    {diag::UnsizedInConcat, std::make_tuple("UnsizedInConcat"sv, "unsized integer in concat; using a width of {}"sv, DiagnosticSeverity::Warning, "unsized-concat"sv)},
++    {diag::WidthExpand, std::make_tuple("WidthExpand"sv, "implicit conversion expands from {} to {} bits"sv, DiagnosticSeverity::Warning, "width-expand"sv)},
++    {diag::WidthTruncate, std::make_tuple("WidthTruncate"sv, "implicit conversion truncates from {} to {} bits"sv, DiagnosticSeverity::Warning, "width-trunc"sv)},
++    {diag::ImplicitConvert, std::make_tuple("ImplicitConvert"sv, "implicit conversion from {} to {}"sv, DiagnosticSeverity::Warning, "implicit-conv"sv)},
 +    {diag::NotYetSupported, std::make_tuple("NotYetSupported"sv, "language feature not yet supported"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExpectedExpression, std::make_tuple("ExpectedExpression"sv, "expected expression"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::NotePreviousDefinition, std::make_tuple("NotePreviousDefinition"sv, "previous definition here"sv, DiagnosticSeverity::Note, ""sv)},
@@ -13552,6 +13674,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::NotAGenvar, std::make_tuple("NotAGenvar"sv, "'{}' is not a genvar"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::NotAClass, std::make_tuple("NotAClass"sv, "'{}' is not a class type"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::NotAGenericClass, std::make_tuple("NotAGenericClass"sv, "'{}' is not a generic class type"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::NotASubroutine, std::make_tuple("NotASubroutine"sv, "'{}' is not a task or function"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::DotOnType, std::make_tuple("DotOnType"sv, "cannot use dot operator on a type name"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::HierarchicalNotAllowedInConstant, std::make_tuple("HierarchicalNotAllowedInConstant"sv, "hierarchical names are not allowed in constant expressions"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::UnknownMember, std::make_tuple("UnknownMember"sv, "no member named '{}' in {}"sv, DiagnosticSeverity::Error, ""sv)},
@@ -13584,6 +13707,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::IfaceExtendIncomplete, std::make_tuple("IfaceExtendIncomplete"sv, "cannot extend or implement an incomplete forward typedef"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ScopeIncompleteTypedef, std::make_tuple("ScopeIncompleteTypedef"sv, "cannot resolve scoped class member via incomplete forward typedef"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InvalidModportAccess, std::make_tuple("InvalidModportAccess"sv, "cannot access '{}' via modport '{}.{}'"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::LocalNotAllowed, std::make_tuple("LocalNotAllowed"sv, "'local' qualifier not allowed here"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::UnexpectedSelection, std::make_tuple("UnexpectedSelection"sv, "unexpected selection expression"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::DuplicateImport, std::make_tuple("DuplicateImport"sv, "duplicate import declaration is redundant"sv, DiagnosticSeverity::Warning, "dup-import"sv)},
 +    {diag::TooManyErrors, std::make_tuple("TooManyErrors"sv, "too many errors emitted, stopping now [--error-limit=]"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::UnknownWarningOption, std::make_tuple("UnknownWarningOption"sv, "unknown warning option '{}'"sv, DiagnosticSeverity::Warning, "unknown-warning-option"sv)},
@@ -13635,6 +13760,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::ExpectedEnumBase, std::make_tuple("ExpectedEnumBase"sv, "expected enum base type"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExpectedCaseItem, std::make_tuple("ExpectedCaseItem"sv, "expected case item"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExpectedSubroutineName, std::make_tuple("ExpectedSubroutineName"sv, "expected subroutine name"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ExpectedConstraintName, std::make_tuple("ExpectedConstraintName"sv, "invalid constraint block name"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::NoLabelOnSemicolon, std::make_tuple("NoLabelOnSemicolon"sv, "labels are not allowed on empty semicolon"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::DeferredDelayMustBeZero, std::make_tuple("DeferredDelayMustBeZero"sv, "deferred assertion delay must be zero"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InvalidGenvarIterExpression, std::make_tuple("InvalidGenvarIterExpression"sv, "invalid genvar iteration expression"sv, DiagnosticSeverity::Error, ""sv)},
@@ -13667,6 +13793,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::PureRequiresVirtual, std::make_tuple("PureRequiresVirtual"sv, "'pure' keyword must be followed by 'virtual'"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InvalidMethodQualifier, std::make_tuple("InvalidMethodQualifier"sv, "invalid method qualifier '{}'"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InvalidPropertyQualifier, std::make_tuple("InvalidPropertyQualifier"sv, "invalid property qualifier '{}'"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::InvalidConstraintQualifier, std::make_tuple("InvalidConstraintQualifier"sv, "invalid constraint qualifier '{}'"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InvalidQualifierForMember, std::make_tuple("InvalidQualifierForMember"sv, "invalid qualifier for member"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InvalidQualifierForIfaceMember, std::make_tuple("InvalidQualifierForIfaceMember"sv, "invalid qualifier for interface class member"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InvalidQualifierForConstructor, std::make_tuple("InvalidQualifierForConstructor"sv, "invalid qualifier for constructor"sv, DiagnosticSeverity::Error, ""sv)},
@@ -13686,12 +13813,22 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::TaskConstructor, std::make_tuple("TaskConstructor"sv, "class constructors cannot be tasks"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ConstructorReturnType, std::make_tuple("ConstructorReturnType"sv, "class constructors cannot declare a return type"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::NewKeywordQualified, std::make_tuple("NewKeywordQualified"sv, "invalid scope access on 'new' keyword"sv, DiagnosticSeverity::Error, ""sv)},
-+    {diag::MethodPrototypeScoped, std::make_tuple("MethodPrototypeScoped"sv, "method prototype cannot have a scoped name"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::SubroutinePrototypeScoped, std::make_tuple("SubroutinePrototypeScoped"sv, "subroutine prototype cannot have a scoped name"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::QualifiersOnOutOfBlock, std::make_tuple("QualifiersOnOutOfBlock"sv, "qualifiers are not allowed on out-of-block method definitions"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ConstraintQualOutOfBlock, std::make_tuple("ConstraintQualOutOfBlock"sv, "'{}' qualifier is not allowed on out-of-block constraint definitions"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ConstructorOutsideClass, std::make_tuple("ConstructorOutsideClass"sv, "constructor cannot be declared outside of a class"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InvalidSuperNew, std::make_tuple("InvalidSuperNew"sv, "super class constructor can only be called from the first statement in a derived class's constructor"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::IfaceMethodPure, std::make_tuple("IfaceMethodPure"sv, "method in interface class must be marked 'pure'"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::NestedIface, std::make_tuple("NestedIface"sv, "interface classes cannot be nested"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::RegAfterNettype, std::make_tuple("RegAfterNettype"sv, "net type keyword cannot be followed by the 'reg' keyword"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ChargeWithTriReg, std::make_tuple("ChargeWithTriReg"sv, "charge strength can only be specified for 'trireg' nets"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::InitializerRequired, std::make_tuple("InitializerRequired"sv, "initializer expression required"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::DriveStrengthInvalid, std::make_tuple("DriveStrengthInvalid"sv, "combination of drive strengths is invalid; need one for value '0' and one for '1'"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::DriveStrengthHighZ, std::make_tuple("DriveStrengthHighZ"sv, "combination of drive strengths is invalid; cannot combine 'highz0' and 'highz1'"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::RandOnPackedMember, std::make_tuple("RandOnPackedMember"sv, "packed members cannot have random modifiers"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::RandOnUnionMember, std::make_tuple("RandOnUnionMember"sv, "members of unions cannot have random modifiers"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::SolveBeforeDisallowed, std::make_tuple("SolveBeforeDisallowed"sv, "constraint ordering directive is not allowed within a nested constraint block"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::LifetimeForPrototype, std::make_tuple("LifetimeForPrototype"sv, "lifetime specifier is not allowed on prototype declaration"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::NonStandardGenBlock, std::make_tuple("NonStandardGenBlock"sv, "standalone generate block without loop or condition is not allowed in SystemVerilog"sv, DiagnosticSeverity::Warning, "nonstandard-generate"sv)},
 +    {diag::EmptyAssignmentPattern, std::make_tuple("EmptyAssignmentPattern"sv, "empty assignment patterns are disallowed by SystemVerilog"sv, DiagnosticSeverity::Warning, "empty-pattern"sv)},
 +    {diag::NoteToMatchThis, std::make_tuple("NoteToMatchThis"sv, "to match this '{}'"sv, DiagnosticSeverity::Note, ""sv)},
@@ -13735,21 +13872,39 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::CoverStmtNoFail, std::make_tuple("CoverStmtNoFail"sv, "cover statement cannot have a fail statement"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::StatementNotInLoop, std::make_tuple("StatementNotInLoop"sv, "statement can only be used inside a loop"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExprNotStatement, std::make_tuple("ExprNotStatement"sv, "expression is not allowed as a statement"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ExprNotConstraint, std::make_tuple("ExprNotConstraint"sv, "expression is not allowed in a constraint"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::VoidCastFuncCall, std::make_tuple("VoidCastFuncCall"sv, "void casting is only allowed for function calls"sv, DiagnosticSeverity::Error, ""sv)},
-+    {diag::NotAnArray, std::make_tuple("NotAnArray"sv, "name must refer to an array"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::NotAnArray, std::make_tuple("NotAnArray"sv, "name must refer to an iterable array"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::TooManyForeachVars, std::make_tuple("TooManyForeachVars"sv, "too many loop variables for array of type {}"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ForeachDynamicDimAfterSkipped, std::make_tuple("ForeachDynamicDimAfterSkipped"sv, "foreach index '{}' can't iterate over a dynamically sized dimension since a previous dimension was omitted"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::LoopVarShadowsArray, std::make_tuple("LoopVarShadowsArray"sv, "loop variable '{}' shadows foreach array target"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ForeachWildcardIndex, std::make_tuple("ForeachWildcardIndex"sv, "foreach loops cannot be used with associative arrays that have a wildcard index"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::CaseInsideKeyword, std::make_tuple("CaseInsideKeyword"sv, "set membership cannot be used with {} statements"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InvalidDisableTarget, std::make_tuple("InvalidDisableTarget"sv, "disable statement must specify a task or block name"sv, DiagnosticSeverity::Error, ""sv)},
-+    {diag::NotAnEvent, std::make_tuple("NotAnEvent"sv, "'{}' is not a triggerable event"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::NotAnEvent, std::make_tuple("NotAnEvent"sv, "expression is not a triggerable event"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::RepeatNotNumeric, std::make_tuple("RepeatNotNumeric"sv, "repeat type {} is not numeric"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::RepeatControlNotEvent, std::make_tuple("RepeatControlNotEvent"sv, "repeat control must be an event to count"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::UnexpectedPortDecl, std::make_tuple("UnexpectedPortDecl"sv, "unexpected port declaration"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::NonIntegralConstraintExpr, std::make_tuple("NonIntegralConstraintExpr"sv, "{} is not a valid type for a constraint expression"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::NonIntegralConstraintLiteral, std::make_tuple("NonIntegralConstraintLiteral"sv, "literals in constraints must be integers"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::UnknownConstraintLiteral, std::make_tuple("UnknownConstraintLiteral"sv, "'x' and 'z' values are not allowed in constraints"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::RandCInDist, std::make_tuple("RandCInDist"sv, "'randc' variables cannot be used in 'dist' constraints"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::RandCInUnique, std::make_tuple("RandCInUnique"sv, "'randc' variables cannot be used in 'unique' constraints"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::RandCInSolveBefore, std::make_tuple("RandCInSolveBefore"sv, "'randc' variables cannot be used in 'solve before' constraints"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::RandCInSoft, std::make_tuple("RandCInSoft"sv, "'randc' variables cannot be used in 'soft' constraints"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::RandNeededInDist, std::make_tuple("RandNeededInDist"sv, "'dist' expression must reference at least one 'rand' variable"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::InvalidUniquenessExpr, std::make_tuple("InvalidUniquenessExpr"sv, "uniqueness constraints can only contain references to integral or array random variables"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::InequivalentUniquenessTypes, std::make_tuple("InequivalentUniquenessTypes"sv, "type of '{}' is {} which is not equivalent to the type of other variables in the constraint (previously saw {})"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::TaskInConstraint, std::make_tuple("TaskInConstraint"sv, "cannot invoke tasks in constraints"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::OutRefFuncConstraint, std::make_tuple("OutRefFuncConstraint"sv, "cannot call a function with ref or output arguments in constraints"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::BadDisableSoft, std::make_tuple("BadDisableSoft"sv, "target of 'disable soft' constraint must be a 'rand' variable"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::BadSolveBefore, std::make_tuple("BadSolveBefore"sv, "target of 'solve before' constraint must be a random variable"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::EventExpressionConstant, std::make_tuple("EventExpressionConstant"sv, "edge expression is constant"sv, DiagnosticSeverity::Warning, "event-const"sv)},
-+    {diag::EmptyStatement, std::make_tuple("EmptyStatement"sv, "empty statement has no effect"sv, DiagnosticSeverity::Warning, "empty-stmt"sv)},
++    {diag::EmptyStatement, std::make_tuple("EmptyStatement"sv, "extra ';' has no effect"sv, DiagnosticSeverity::Warning, "empty-stmt"sv)},
 +    {diag::PointlessVoidCast, std::make_tuple("PointlessVoidCast"sv, "cast to void for void-returning function '{}' has no effect"sv, DiagnosticSeverity::Warning, "pointless-void-cast"sv)},
 +    {diag::UnusedResult, std::make_tuple("UnusedResult"sv, "ignoring return value of '{}', cast to void to suppress"sv, DiagnosticSeverity::Warning, "unused-result"sv)},
 +    {diag::BadSystemSubroutineArg, std::make_tuple("BadSystemSubroutineArg"sv, "invalid argument type {} to system {}"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::UnknownFormatSpecifier, std::make_tuple("UnknownFormatSpecifier"sv, "unknown format specifier '%{}'"sv, DiagnosticSeverity::Error, ""sv)},
-+    {diag::MissingFormatSpecifier, std::make_tuple("MissingFormatSpecifier"sv, "missing format specifier"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::FormatSpecifierWidthNotAllowed, std::make_tuple("FormatSpecifierWidthNotAllowed"sv, "field width not allowed on '%{}' format specifiers"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::FormatSpecifierInvalidWidth, std::make_tuple("FormatSpecifierInvalidWidth"sv, "field width is invalid"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::FormatSpecifierNotFloat, std::make_tuple("FormatSpecifierNotFloat"sv, "floating point format specifier options used on non-floating point field"sv, DiagnosticSeverity::Error, ""sv)},
@@ -13759,18 +13914,25 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::FormatEmptyArg, std::make_tuple("FormatEmptyArg"sv, "empty argument not allowed -- expecting value for '%{}' format specifier"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::FormatTooManyArgs, std::make_tuple("FormatTooManyArgs"sv, "too many arguments provided for format string"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InvalidStringArg, std::make_tuple("InvalidStringArg"sv, "value of type {} is not a valid string argument"sv, DiagnosticSeverity::Error, ""sv)},
-+    {diag::ArrayReductionIntegral, std::make_tuple("ArrayReductionIntegral"sv, "array reduction methods can only be called on unpacked arrays of integral values"sv, DiagnosticSeverity::Error, ""sv)},
-+    {diag::BadFinishNum, std::make_tuple("BadFinishNum"sv, "finish argument must have value of 0, 1, or 2"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ArrayMethodIntegral, std::make_tuple("ArrayMethodIntegral"sv, "array method '{}' can only be called on unpacked arrays of integral values"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ArrayMethodComparable, std::make_tuple("ArrayMethodComparable"sv, "array method '{}' can only be called on unpacked arrays of comparable values"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::SysFuncNotConst, std::make_tuple("SysFuncNotConst"sv, "'{}' is not allowed in a constant context"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::QueryOnDynamicType, std::make_tuple("QueryOnDynamicType"sv, "array query function '{}' cannot be called on a dynamically sized type identifier"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::DimensionIndexInvalid, std::make_tuple("DimensionIndexInvalid"sv, "{} is not a valid dimension for {}"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::DynamicDimensionIndex, std::make_tuple("DynamicDimensionIndex"sv, "cannot refer to a dynamically sized dimension with index {} greater than 1"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::QueryOnAssociativeNonIntegral, std::make_tuple("QueryOnAssociativeNonIntegral"sv, "'{}' cannot be called with an associative array with non-integral index type"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::QueryOnAssociativeWildcard, std::make_tuple("QueryOnAssociativeWildcard"sv, "'{}' cannot be called with an associative array with non-integral (or wildcard) index type"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::AssociativeWildcardNotAllowed, std::make_tuple("AssociativeWildcardNotAllowed"sv, "'{}' cannot be called with an associative array with wildcard index type"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExpectedModuleName, std::make_tuple("ExpectedModuleName"sv, "expected module name"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExpectedModOrVarName, std::make_tuple("ExpectedModOrVarName"sv, "expected module or variable name"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ExpectedScopeOrAssert, std::make_tuple("ExpectedScopeOrAssert"sv, "expected scope or assertion name"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ExpectedClassPropertyName, std::make_tuple("ExpectedClassPropertyName"sv, "expected class property name"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ExpectedVariableName, std::make_tuple("ExpectedVariableName"sv, "expected variable name"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::CastArgSingular, std::make_tuple("CastArgSingular"sv, "argument to $cast cannot be of aggregate type (type is {})"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ArrayLocatorWithClause, std::make_tuple("ArrayLocatorWithClause"sv, "'{}' requires 'with' expression for searching"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::FormatRealInt, std::make_tuple("FormatRealInt"sv, "real value provided for integer format specifier '%{}'"sv, DiagnosticSeverity::Warning, "format-real"sv)},
++    {diag::BadFinishNum, std::make_tuple("BadFinishNum"sv, "finish argument must have value of 0, 1, or 2"sv, DiagnosticSeverity::Warning, "finish-num"sv)},
++    {diag::MissingFormatSpecifier, std::make_tuple("MissingFormatSpecifier"sv, "missing format specifier"sv, DiagnosticSeverity::Warning, "missing-format"sv)},
 +    {diag::InvalidEnumBase, std::make_tuple("InvalidEnumBase"sv, "invalid enum base type {} (must be a single dimensional integer type)"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::EnumValueOverflow, std::make_tuple("EnumValueOverflow"sv, "incrementing previous value {} would overflow enum base type {}"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::EnumIncrementUnknown, std::make_tuple("EnumIncrementUnknown"sv, "cannot increment previous value {} because it has unknown bits"sv, DiagnosticSeverity::Error, ""sv)},
@@ -13784,13 +13946,13 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::PackedMemberHasInitializer, std::make_tuple("PackedMemberHasInitializer"sv, "packed members can not have initializers"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::PackedDimsOnPredefinedType, std::make_tuple("PackedDimsOnPredefinedType"sv, "packed dimensions not allowed on predefined integer type '{}'"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::PackedDimsOnUnpacked, std::make_tuple("PackedDimsOnUnpacked"sv, "unpacked types cannot have packed dimensions"sv, DiagnosticSeverity::Error, ""sv)},
-+    {diag::PackedUnionWidthMismatch, std::make_tuple("PackedUnionWidthMismatch"sv, "all members of a packed union must have the same width"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::PackedUnionWidthMismatch, std::make_tuple("PackedUnionWidthMismatch"sv, "all members of a packed union must have the same width; '{}' has width of {}, previously seen width was {}"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InvalidArraySize, std::make_tuple("InvalidArraySize"sv, "{} is not a valid size for an array"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::CannotDeclareType, std::make_tuple("CannotDeclareType"sv, "cannot declare a type here"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InvalidAssociativeIndexType, std::make_tuple("InvalidAssociativeIndexType"sv, "index type cannot be or contain floating point types"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::PackedArrayNotIntegral, std::make_tuple("PackedArrayNotIntegral"sv, "packed array elements must be of integral type (not {})"sv, DiagnosticSeverity::Error, ""sv)},
-+    {diag::PackedArrayTooLarge, std::make_tuple("PackedArrayTooLarge"sv, "packed array is too large; maximum width is {} bits"sv, DiagnosticSeverity::Error, ""sv)},
-+    {diag::ArrayDimTooLarge, std::make_tuple("ArrayDimTooLarge"sv, "array dimension is too large; maximum number of elements is {}"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::PackedArrayTooLarge, std::make_tuple("PackedArrayTooLarge"sv, "packed array of {} bits is too large; maximum width is {} bits"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ArrayDimTooLarge, std::make_tuple("ArrayDimTooLarge"sv, "array dimension of {} is too large; maximum number of elements is {}"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::UnpackedSigned, std::make_tuple("UnpackedSigned"sv, "unpacked type cannot have signedness declared"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InvalidUnionMember, std::make_tuple("InvalidUnionMember"sv, "untagged unions cannot have members of type {}"sv, DiagnosticSeverity::Error, ""sv)},
 +};
@@ -13814,8 +13976,14 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {"implicit-net-port"sv, diag::ImplicitNetPortNoDefault},
 +    {"dup-attr"sv, diag::DuplicateAttribute},
 +    {"empty-member"sv, diag::EmptyMember},
++    {"ineffective-sign"sv, diag::SignednessNoEffect},
++    {"constraint-missing"sv, diag::NoConstraintBody},
++    {"dpi-spec"sv, diag::DPISpecDisallowed},
 +    {"ignored-slice"sv, diag::IgnoredSlice},
 +    {"unsized-concat"sv, diag::UnsizedInConcat},
++    {"width-expand"sv, diag::WidthExpand},
++    {"width-trunc"sv, diag::WidthTruncate},
++    {"implicit-conv"sv, diag::ImplicitConvert},
 +    {"not-supported"sv, diag::WarnNotYetSupported},
 +    {"unknown-escape-code"sv, diag::UnknownEscapeCode},
 +    {"nonstandard-escape-code"sv, diag::NonstandardEscapeCode},
@@ -13838,12 +14006,15 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {"pointless-void-cast"sv, diag::PointlessVoidCast},
 +    {"unused-result"sv, diag::UnusedResult},
 +    {"format-real"sv, diag::FormatRealInt},
++    {"finish-num"sv, diag::BadFinishNum},
++    {"missing-format"sv, diag::MissingFormatSpecifier},
 +};
 +
 +static const flat_hash_map<string_view, DiagGroup> groupMap = {
-+    {"default"sv, DiagGroup("default", { diag::RealLiteralUnderflow, diag::RealLiteralOverflow, diag::VectorLiteralOverflow, diag::CaseGenerateDup, diag::CaseGenerateNoBlock, diag::UnconnectedNamedPort, diag::UnconnectedUnnamedPort, diag::DuplicateAttribute, diag::EventExpressionConstant, diag::RedefiningMacro, diag::NonStandardGenBlock, diag::WarnNotYetSupported, diag::UnknownPragma, diag::ExtraPragmaArgs, diag::ExpectedDiagPragmaArg, diag::UnknownDiagPragmaArg, diag::ExpectedDiagPragmaLevel, diag::StaticInitializerMustBeExplicit, diag::ConstEvalStaticSkipped, diag::ConstEvalAssociativeElementNotFound, diag::ConstEvalDynamicArrayIndex, diag::ConstEvalDynamicArrayRange, diag::ConstEvalQueueRange, diag::ConstEvalEmptyQueue, diag::UnknownEscapeCode, diag::NoTopModules, diag::WarningTask, diag::UnsizedInConcat })},
-+    {"extra"sv, DiagGroup("extra", { diag::EmptyMember, diag::EmptyStatement, diag::DuplicateImport, diag::UnusedDefinition, diag::IgnoredMacroPaste, diag::PointlessVoidCast, diag::UnusedResult, diag::FormatRealInt, diag::IgnoredSlice, diag::ConstSysTaskIgnored })},
-+    {"pedantic"sv, DiagGroup("pedantic", { diag::EmptyAssignmentPattern, diag::ImplicitNetPortNoDefault, diag::NonstandardEscapeCode })},
++    {"conversion"sv, DiagGroup("conversion", { diag::WidthTruncate, diag::WidthExpand, diag::ImplicitConvert })},
++    {"default"sv, DiagGroup("default", { diag::RealLiteralUnderflow, diag::RealLiteralOverflow, diag::VectorLiteralOverflow, diag::UnconnectedNamedPort, diag::UnconnectedUnnamedPort, diag::EventExpressionConstant, diag::RedefiningMacro, diag::WarnNotYetSupported, diag::UnknownPragma, diag::ExtraPragmaArgs, diag::ExpectedDiagPragmaArg, diag::UnknownDiagPragmaArg, diag::ExpectedDiagPragmaLevel, diag::StaticInitializerMustBeExplicit, diag::ConstEvalStaticSkipped, diag::ConstEvalAssociativeElementNotFound, diag::ConstEvalDynamicArrayIndex, diag::ConstEvalDynamicArrayRange, diag::ConstEvalQueueRange, diag::ConstEvalEmptyQueue, diag::UnknownEscapeCode, diag::NoTopModules, diag::WarningTask, diag::UnsizedInConcat, diag::BadFinishNum, diag::ImplicitConvert, diag::NoConstraintBody, diag::MissingFormatSpecifier, diag::DPISpecDisallowed })},
++    {"extra"sv, DiagGroup("extra", { diag::EmptyMember, diag::EmptyStatement, diag::DuplicateImport, diag::PointlessVoidCast, diag::CaseGenerateNoBlock, diag::CaseGenerateDup, diag::UnusedResult, diag::FormatRealInt, diag::IgnoredSlice, diag::ConstSysTaskIgnored, diag::WidthTruncate, diag::DuplicateAttribute })},
++    {"pedantic"sv, DiagGroup("pedantic", { diag::EmptyAssignmentPattern, diag::ImplicitNetPortNoDefault, diag::NonstandardEscapeCode, diag::NonStandardGenBlock })},
 +};
 +
 +std::ostream& operator<<(std::ostream& os, DiagCode code) {
@@ -13888,3039 +14059,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +}
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/Makefile ./generated/Makefile
---- ./generated/Makefile	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/Makefile	2020-11-03 00:14:53.168220367 -0800
-@@ -0,0 +1,3026 @@
-+# CMAKE generated file: DO NOT EDIT!
-+# Generated by "Unix Makefiles" Generator, CMake Version 3.17
-+
-+# Default target executed when no arguments are given to make.
-+default_target: all
-+
-+.PHONY : default_target
-+
-+# Allow only one "make -f Makefile2" at a time, but pass parallelism.
-+.NOTPARALLEL:
-+
-+
-+#=============================================================================
-+# Special targets provided by cmake.
-+
-+# Disable implicit rules so canonical targets will work.
-+.SUFFIXES:
-+
-+
-+# Disable VCS-based implicit rules.
-+% : %,v
-+
-+
-+# Disable VCS-based implicit rules.
-+% : RCS/%
-+
-+
-+# Disable VCS-based implicit rules.
-+% : RCS/%,v
-+
-+
-+# Disable VCS-based implicit rules.
-+% : SCCS/s.%
-+
-+
-+# Disable VCS-based implicit rules.
-+% : s.%
-+
-+
-+.SUFFIXES: .hpux_make_needs_suffix_list
-+
-+
-+# Command-line flag to silence nested $(MAKE).
-+$(VERBOSE)MAKESILENT = -s
-+
-+# Suppress display of executed commands.
-+$(VERBOSE).SILENT:
-+
-+
-+# A target that is always out of date.
-+cmake_force:
-+
-+.PHONY : cmake_force
-+
-+#=============================================================================
-+# Set environment variables for the build.
-+
-+# The shell in which to execute make rules.
-+SHELL = /bin/sh
-+
-+# The CMake executable.
-+CMAKE_COMMAND = /usr/bin/cmake
-+
-+# The command to remove a file.
-+RM = /usr/bin/cmake -E rm -f
-+
-+# Escaping for special characters.
-+EQUALS = =
-+
-+# The top-level source directory on which CMake was run.
-+CMAKE_SOURCE_DIR = /soe/renau/projs/synth/slang
-+
-+# The top-level build directory on which CMake was run.
-+CMAKE_BINARY_DIR = /soe/renau/projs/synth/slang/build
-+
-+#=============================================================================
-+# Targets provided globally by CMake.
-+
-+# Special rule for the target install/local
-+install/local: preinstall
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --cyan "Installing only the local directory..."
-+	/usr/bin/cmake -DCMAKE_INSTALL_LOCAL_ONLY=1 -P cmake_install.cmake
-+.PHONY : install/local
-+
-+# Special rule for the target install/local
-+install/local/fast: preinstall/fast
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --cyan "Installing only the local directory..."
-+	/usr/bin/cmake -DCMAKE_INSTALL_LOCAL_ONLY=1 -P cmake_install.cmake
-+.PHONY : install/local/fast
-+
-+# Special rule for the target install
-+install: preinstall
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --cyan "Install the project..."
-+	/usr/bin/cmake -P cmake_install.cmake
-+.PHONY : install
-+
-+# Special rule for the target install
-+install/fast: preinstall/fast
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --cyan "Install the project..."
-+	/usr/bin/cmake -P cmake_install.cmake
-+.PHONY : install/fast
-+
-+# Special rule for the target list_install_components
-+list_install_components:
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --cyan "Available install components are: \"Unspecified\""
-+.PHONY : list_install_components
-+
-+# Special rule for the target list_install_components
-+list_install_components/fast: list_install_components
-+
-+.PHONY : list_install_components/fast
-+
-+# Special rule for the target rebuild_cache
-+rebuild_cache:
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --cyan "Running CMake to regenerate build system..."
-+	/usr/bin/cmake --regenerate-during-build -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR)
-+.PHONY : rebuild_cache
-+
-+# Special rule for the target rebuild_cache
-+rebuild_cache/fast: rebuild_cache
-+
-+.PHONY : rebuild_cache/fast
-+
-+# Special rule for the target edit_cache
-+edit_cache:
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --cyan "Running CMake cache editor..."
-+	/usr/bin/ccmake -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR)
-+.PHONY : edit_cache
-+
-+# Special rule for the target edit_cache
-+edit_cache/fast: edit_cache
-+
-+.PHONY : edit_cache/fast
-+
-+# Special rule for the target test
-+test:
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --cyan "Running tests..."
-+	/usr/bin/ctest --force-new-ctest-process $(ARGS)
-+.PHONY : test
-+
-+# Special rule for the target test
-+test/fast: test
-+
-+.PHONY : test/fast
-+
-+# Special rule for the target install/strip
-+install/strip: preinstall
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --cyan "Installing the project stripped..."
-+	/usr/bin/cmake -DCMAKE_INSTALL_DO_STRIP=1 -P cmake_install.cmake
-+.PHONY : install/strip
-+
-+# Special rule for the target install/strip
-+install/strip/fast: preinstall/fast
-+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --cyan "Installing the project stripped..."
-+	/usr/bin/cmake -DCMAKE_INSTALL_DO_STRIP=1 -P cmake_install.cmake
-+.PHONY : install/strip/fast
-+
-+# The main all target
-+all: cmake_check_build_system
-+	cd /soe/renau/projs/synth/slang/build && $(CMAKE_COMMAND) -E cmake_progress_start /soe/renau/projs/synth/slang/build/CMakeFiles /soe/renau/projs/synth/slang/build/source/CMakeFiles/progress.marks
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 source/all
-+	$(CMAKE_COMMAND) -E cmake_progress_start /soe/renau/projs/synth/slang/build/CMakeFiles 0
-+.PHONY : all
-+
-+# The main clean target
-+clean:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 source/clean
-+.PHONY : clean
-+
-+# The main clean target
-+clean/fast: clean
-+
-+.PHONY : clean/fast
-+
-+# Prepare targets for installation.
-+preinstall: all
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 source/preinstall
-+.PHONY : preinstall
-+
-+# Prepare targets for installation.
-+preinstall/fast:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 source/preinstall
-+.PHONY : preinstall/fast
-+
-+# clear depends
-+depend:
-+	cd /soe/renau/projs/synth/slang/build && $(CMAKE_COMMAND) -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR) --check-build-system CMakeFiles/Makefile.cmake 1
-+.PHONY : depend
-+
-+# Convenience name for target.
-+source/CMakeFiles/slangruntime.dir/rule:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 source/CMakeFiles/slangruntime.dir/rule
-+.PHONY : source/CMakeFiles/slangruntime.dir/rule
-+
-+# Convenience name for target.
-+slangruntime: source/CMakeFiles/slangruntime.dir/rule
-+
-+.PHONY : slangruntime
-+
-+# fast build rule for target.
-+slangruntime/fast:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangruntime.dir/build.make source/CMakeFiles/slangruntime.dir/build
-+.PHONY : slangruntime/fast
-+
-+# Convenience name for target.
-+source/CMakeFiles/slangparser.dir/rule:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 source/CMakeFiles/slangparser.dir/rule
-+.PHONY : source/CMakeFiles/slangparser.dir/rule
-+
-+# Convenience name for target.
-+slangparser: source/CMakeFiles/slangparser.dir/rule
-+
-+.PHONY : slangparser
-+
-+# fast build rule for target.
-+slangparser/fast:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/build
-+.PHONY : slangparser/fast
-+
-+# Convenience name for target.
-+source/CMakeFiles/slangcore.dir/rule:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 source/CMakeFiles/slangcore.dir/rule
-+.PHONY : source/CMakeFiles/slangcore.dir/rule
-+
-+# Convenience name for target.
-+slangcore: source/CMakeFiles/slangcore.dir/rule
-+
-+.PHONY : slangcore
-+
-+# fast build rule for target.
-+slangcore/fast:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/build
-+.PHONY : slangcore/fast
-+
-+# Convenience name for target.
-+source/CMakeFiles/slangcompiler.dir/rule:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 source/CMakeFiles/slangcompiler.dir/rule
-+.PHONY : source/CMakeFiles/slangcompiler.dir/rule
-+
-+# Convenience name for target.
-+slangcompiler: source/CMakeFiles/slangcompiler.dir/rule
-+
-+.PHONY : slangcompiler
-+
-+# fast build rule for target.
-+slangcompiler/fast:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/build
-+.PHONY : slangcompiler/fast
-+
-+# Convenience name for target.
-+source/CMakeFiles/gen_version.dir/rule:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 source/CMakeFiles/gen_version.dir/rule
-+.PHONY : source/CMakeFiles/gen_version.dir/rule
-+
-+# Convenience name for target.
-+gen_version: source/CMakeFiles/gen_version.dir/rule
-+
-+.PHONY : gen_version
-+
-+# fast build rule for target.
-+gen_version/fast:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/gen_version.dir/build.make source/CMakeFiles/gen_version.dir/build
-+.PHONY : gen_version/fast
-+
-+AllSyntax.o: AllSyntax.cpp.o
-+
-+.PHONY : AllSyntax.o
-+
-+# target to build an object file
-+AllSyntax.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/AllSyntax.cpp.o
-+.PHONY : AllSyntax.cpp.o
-+
-+AllSyntax.i: AllSyntax.cpp.i
-+
-+.PHONY : AllSyntax.i
-+
-+# target to preprocess a source file
-+AllSyntax.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/AllSyntax.cpp.i
-+.PHONY : AllSyntax.cpp.i
-+
-+AllSyntax.s: AllSyntax.cpp.s
-+
-+.PHONY : AllSyntax.s
-+
-+# target to generate assembly for a file
-+AllSyntax.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/AllSyntax.cpp.s
-+.PHONY : AllSyntax.cpp.s
-+
-+DiagCode.o: DiagCode.cpp.o
-+
-+.PHONY : DiagCode.o
-+
-+# target to build an object file
-+DiagCode.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/DiagCode.cpp.o
-+.PHONY : DiagCode.cpp.o
-+
-+DiagCode.i: DiagCode.cpp.i
-+
-+.PHONY : DiagCode.i
-+
-+# target to preprocess a source file
-+DiagCode.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/DiagCode.cpp.i
-+.PHONY : DiagCode.cpp.i
-+
-+DiagCode.s: DiagCode.cpp.s
-+
-+.PHONY : DiagCode.s
-+
-+# target to generate assembly for a file
-+DiagCode.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/DiagCode.cpp.s
-+.PHONY : DiagCode.cpp.s
-+
-+Version.o: Version.cpp.o
-+
-+.PHONY : Version.o
-+
-+# target to build an object file
-+Version.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/Version.cpp.o
-+.PHONY : Version.cpp.o
-+
-+Version.i: Version.cpp.i
-+
-+.PHONY : Version.i
-+
-+# target to preprocess a source file
-+Version.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/Version.cpp.i
-+.PHONY : Version.cpp.i
-+
-+Version.s: Version.cpp.s
-+
-+.PHONY : Version.s
-+
-+# target to generate assembly for a file
-+Version.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/Version.cpp.s
-+.PHONY : Version.cpp.s
-+
-+__/external/fmt/format.o: __/external/fmt/format.cc.o
-+
-+.PHONY : __/external/fmt/format.o
-+
-+# target to build an object file
-+__/external/fmt/format.cc.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/__/external/fmt/format.cc.o
-+.PHONY : __/external/fmt/format.cc.o
-+
-+__/external/fmt/format.i: __/external/fmt/format.cc.i
-+
-+.PHONY : __/external/fmt/format.i
-+
-+# target to preprocess a source file
-+__/external/fmt/format.cc.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/__/external/fmt/format.cc.i
-+.PHONY : __/external/fmt/format.cc.i
-+
-+__/external/fmt/format.s: __/external/fmt/format.cc.s
-+
-+.PHONY : __/external/fmt/format.s
-+
-+# target to generate assembly for a file
-+__/external/fmt/format.cc.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/__/external/fmt/format.cc.s
-+.PHONY : __/external/fmt/format.cc.s
-+
-+__/external/fmt/os.o: __/external/fmt/os.cc.o
-+
-+.PHONY : __/external/fmt/os.o
-+
-+# target to build an object file
-+__/external/fmt/os.cc.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/__/external/fmt/os.cc.o
-+.PHONY : __/external/fmt/os.cc.o
-+
-+__/external/fmt/os.i: __/external/fmt/os.cc.i
-+
-+.PHONY : __/external/fmt/os.i
-+
-+# target to preprocess a source file
-+__/external/fmt/os.cc.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/__/external/fmt/os.cc.i
-+.PHONY : __/external/fmt/os.cc.i
-+
-+__/external/fmt/os.s: __/external/fmt/os.cc.s
-+
-+.PHONY : __/external/fmt/os.s
-+
-+# target to generate assembly for a file
-+__/external/fmt/os.cc.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/__/external/fmt/os.cc.s
-+.PHONY : __/external/fmt/os.cc.s
-+
-+__/external/xxhash/xxhash.o: __/external/xxhash/xxhash.cpp.o
-+
-+.PHONY : __/external/xxhash/xxhash.o
-+
-+# target to build an object file
-+__/external/xxhash/xxhash.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/__/external/xxhash/xxhash.cpp.o
-+.PHONY : __/external/xxhash/xxhash.cpp.o
-+
-+__/external/xxhash/xxhash.i: __/external/xxhash/xxhash.cpp.i
-+
-+.PHONY : __/external/xxhash/xxhash.i
-+
-+# target to preprocess a source file
-+__/external/xxhash/xxhash.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/__/external/xxhash/xxhash.cpp.i
-+.PHONY : __/external/xxhash/xxhash.cpp.i
-+
-+__/external/xxhash/xxhash.s: __/external/xxhash/xxhash.cpp.s
-+
-+.PHONY : __/external/xxhash/xxhash.s
-+
-+# target to generate assembly for a file
-+__/external/xxhash/xxhash.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/__/external/xxhash/xxhash.cpp.s
-+.PHONY : __/external/xxhash/xxhash.cpp.s
-+
-+binding/AssignmentExpressions.o: binding/AssignmentExpressions.cpp.o
-+
-+.PHONY : binding/AssignmentExpressions.o
-+
-+# target to build an object file
-+binding/AssignmentExpressions.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/AssignmentExpressions.cpp.o
-+.PHONY : binding/AssignmentExpressions.cpp.o
-+
-+binding/AssignmentExpressions.i: binding/AssignmentExpressions.cpp.i
-+
-+.PHONY : binding/AssignmentExpressions.i
-+
-+# target to preprocess a source file
-+binding/AssignmentExpressions.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/AssignmentExpressions.cpp.i
-+.PHONY : binding/AssignmentExpressions.cpp.i
-+
-+binding/AssignmentExpressions.s: binding/AssignmentExpressions.cpp.s
-+
-+.PHONY : binding/AssignmentExpressions.s
-+
-+# target to generate assembly for a file
-+binding/AssignmentExpressions.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/AssignmentExpressions.cpp.s
-+.PHONY : binding/AssignmentExpressions.cpp.s
-+
-+binding/BindContext.o: binding/BindContext.cpp.o
-+
-+.PHONY : binding/BindContext.o
-+
-+# target to build an object file
-+binding/BindContext.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/BindContext.cpp.o
-+.PHONY : binding/BindContext.cpp.o
-+
-+binding/BindContext.i: binding/BindContext.cpp.i
-+
-+.PHONY : binding/BindContext.i
-+
-+# target to preprocess a source file
-+binding/BindContext.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/BindContext.cpp.i
-+.PHONY : binding/BindContext.cpp.i
-+
-+binding/BindContext.s: binding/BindContext.cpp.s
-+
-+.PHONY : binding/BindContext.s
-+
-+# target to generate assembly for a file
-+binding/BindContext.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/BindContext.cpp.s
-+.PHONY : binding/BindContext.cpp.s
-+
-+binding/Bitstream.o: binding/Bitstream.cpp.o
-+
-+.PHONY : binding/Bitstream.o
-+
-+# target to build an object file
-+binding/Bitstream.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/Bitstream.cpp.o
-+.PHONY : binding/Bitstream.cpp.o
-+
-+binding/Bitstream.i: binding/Bitstream.cpp.i
-+
-+.PHONY : binding/Bitstream.i
-+
-+# target to preprocess a source file
-+binding/Bitstream.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/Bitstream.cpp.i
-+.PHONY : binding/Bitstream.cpp.i
-+
-+binding/Bitstream.s: binding/Bitstream.cpp.s
-+
-+.PHONY : binding/Bitstream.s
-+
-+# target to generate assembly for a file
-+binding/Bitstream.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/Bitstream.cpp.s
-+.PHONY : binding/Bitstream.cpp.s
-+
-+binding/EvalContext.o: binding/EvalContext.cpp.o
-+
-+.PHONY : binding/EvalContext.o
-+
-+# target to build an object file
-+binding/EvalContext.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/EvalContext.cpp.o
-+.PHONY : binding/EvalContext.cpp.o
-+
-+binding/EvalContext.i: binding/EvalContext.cpp.i
-+
-+.PHONY : binding/EvalContext.i
-+
-+# target to preprocess a source file
-+binding/EvalContext.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/EvalContext.cpp.i
-+.PHONY : binding/EvalContext.cpp.i
-+
-+binding/EvalContext.s: binding/EvalContext.cpp.s
-+
-+.PHONY : binding/EvalContext.s
-+
-+# target to generate assembly for a file
-+binding/EvalContext.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/EvalContext.cpp.s
-+.PHONY : binding/EvalContext.cpp.s
-+
-+binding/Expression.o: binding/Expression.cpp.o
-+
-+.PHONY : binding/Expression.o
-+
-+# target to build an object file
-+binding/Expression.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/Expression.cpp.o
-+.PHONY : binding/Expression.cpp.o
-+
-+binding/Expression.i: binding/Expression.cpp.i
-+
-+.PHONY : binding/Expression.i
-+
-+# target to preprocess a source file
-+binding/Expression.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/Expression.cpp.i
-+.PHONY : binding/Expression.cpp.i
-+
-+binding/Expression.s: binding/Expression.cpp.s
-+
-+.PHONY : binding/Expression.s
-+
-+# target to generate assembly for a file
-+binding/Expression.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/Expression.cpp.s
-+.PHONY : binding/Expression.cpp.s
-+
-+binding/FormatHelpers.o: binding/FormatHelpers.cpp.o
-+
-+.PHONY : binding/FormatHelpers.o
-+
-+# target to build an object file
-+binding/FormatHelpers.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/FormatHelpers.cpp.o
-+.PHONY : binding/FormatHelpers.cpp.o
-+
-+binding/FormatHelpers.i: binding/FormatHelpers.cpp.i
-+
-+.PHONY : binding/FormatHelpers.i
-+
-+# target to preprocess a source file
-+binding/FormatHelpers.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/FormatHelpers.cpp.i
-+.PHONY : binding/FormatHelpers.cpp.i
-+
-+binding/FormatHelpers.s: binding/FormatHelpers.cpp.s
-+
-+.PHONY : binding/FormatHelpers.s
-+
-+# target to generate assembly for a file
-+binding/FormatHelpers.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/FormatHelpers.cpp.s
-+.PHONY : binding/FormatHelpers.cpp.s
-+
-+binding/LValue.o: binding/LValue.cpp.o
-+
-+.PHONY : binding/LValue.o
-+
-+# target to build an object file
-+binding/LValue.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/LValue.cpp.o
-+.PHONY : binding/LValue.cpp.o
-+
-+binding/LValue.i: binding/LValue.cpp.i
-+
-+.PHONY : binding/LValue.i
-+
-+# target to preprocess a source file
-+binding/LValue.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/LValue.cpp.i
-+.PHONY : binding/LValue.cpp.i
-+
-+binding/LValue.s: binding/LValue.cpp.s
-+
-+.PHONY : binding/LValue.s
-+
-+# target to generate assembly for a file
-+binding/LValue.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/LValue.cpp.s
-+.PHONY : binding/LValue.cpp.s
-+
-+binding/LiteralExpressions.o: binding/LiteralExpressions.cpp.o
-+
-+.PHONY : binding/LiteralExpressions.o
-+
-+# target to build an object file
-+binding/LiteralExpressions.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/LiteralExpressions.cpp.o
-+.PHONY : binding/LiteralExpressions.cpp.o
-+
-+binding/LiteralExpressions.i: binding/LiteralExpressions.cpp.i
-+
-+.PHONY : binding/LiteralExpressions.i
-+
-+# target to preprocess a source file
-+binding/LiteralExpressions.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/LiteralExpressions.cpp.i
-+.PHONY : binding/LiteralExpressions.cpp.i
-+
-+binding/LiteralExpressions.s: binding/LiteralExpressions.cpp.s
-+
-+.PHONY : binding/LiteralExpressions.s
-+
-+# target to generate assembly for a file
-+binding/LiteralExpressions.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/LiteralExpressions.cpp.s
-+.PHONY : binding/LiteralExpressions.cpp.s
-+
-+binding/MiscExpressions.o: binding/MiscExpressions.cpp.o
-+
-+.PHONY : binding/MiscExpressions.o
-+
-+# target to build an object file
-+binding/MiscExpressions.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/MiscExpressions.cpp.o
-+.PHONY : binding/MiscExpressions.cpp.o
-+
-+binding/MiscExpressions.i: binding/MiscExpressions.cpp.i
-+
-+.PHONY : binding/MiscExpressions.i
-+
-+# target to preprocess a source file
-+binding/MiscExpressions.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/MiscExpressions.cpp.i
-+.PHONY : binding/MiscExpressions.cpp.i
-+
-+binding/MiscExpressions.s: binding/MiscExpressions.cpp.s
-+
-+.PHONY : binding/MiscExpressions.s
-+
-+# target to generate assembly for a file
-+binding/MiscExpressions.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/MiscExpressions.cpp.s
-+.PHONY : binding/MiscExpressions.cpp.s
-+
-+binding/OperatorExpressions.o: binding/OperatorExpressions.cpp.o
-+
-+.PHONY : binding/OperatorExpressions.o
-+
-+# target to build an object file
-+binding/OperatorExpressions.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/OperatorExpressions.cpp.o
-+.PHONY : binding/OperatorExpressions.cpp.o
-+
-+binding/OperatorExpressions.i: binding/OperatorExpressions.cpp.i
-+
-+.PHONY : binding/OperatorExpressions.i
-+
-+# target to preprocess a source file
-+binding/OperatorExpressions.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/OperatorExpressions.cpp.i
-+.PHONY : binding/OperatorExpressions.cpp.i
-+
-+binding/OperatorExpressions.s: binding/OperatorExpressions.cpp.s
-+
-+.PHONY : binding/OperatorExpressions.s
-+
-+# target to generate assembly for a file
-+binding/OperatorExpressions.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/OperatorExpressions.cpp.s
-+.PHONY : binding/OperatorExpressions.cpp.s
-+
-+binding/PatternExpressions.o: binding/PatternExpressions.cpp.o
-+
-+.PHONY : binding/PatternExpressions.o
-+
-+# target to build an object file
-+binding/PatternExpressions.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/PatternExpressions.cpp.o
-+.PHONY : binding/PatternExpressions.cpp.o
-+
-+binding/PatternExpressions.i: binding/PatternExpressions.cpp.i
-+
-+.PHONY : binding/PatternExpressions.i
-+
-+# target to preprocess a source file
-+binding/PatternExpressions.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/PatternExpressions.cpp.i
-+.PHONY : binding/PatternExpressions.cpp.i
-+
-+binding/PatternExpressions.s: binding/PatternExpressions.cpp.s
-+
-+.PHONY : binding/PatternExpressions.s
-+
-+# target to generate assembly for a file
-+binding/PatternExpressions.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/PatternExpressions.cpp.s
-+.PHONY : binding/PatternExpressions.cpp.s
-+
-+binding/SelectExpressions.o: binding/SelectExpressions.cpp.o
-+
-+.PHONY : binding/SelectExpressions.o
-+
-+# target to build an object file
-+binding/SelectExpressions.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/SelectExpressions.cpp.o
-+.PHONY : binding/SelectExpressions.cpp.o
-+
-+binding/SelectExpressions.i: binding/SelectExpressions.cpp.i
-+
-+.PHONY : binding/SelectExpressions.i
-+
-+# target to preprocess a source file
-+binding/SelectExpressions.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/SelectExpressions.cpp.i
-+.PHONY : binding/SelectExpressions.cpp.i
-+
-+binding/SelectExpressions.s: binding/SelectExpressions.cpp.s
-+
-+.PHONY : binding/SelectExpressions.s
-+
-+# target to generate assembly for a file
-+binding/SelectExpressions.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/SelectExpressions.cpp.s
-+.PHONY : binding/SelectExpressions.cpp.s
-+
-+binding/Statements.o: binding/Statements.cpp.o
-+
-+.PHONY : binding/Statements.o
-+
-+# target to build an object file
-+binding/Statements.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/Statements.cpp.o
-+.PHONY : binding/Statements.cpp.o
-+
-+binding/Statements.i: binding/Statements.cpp.i
-+
-+.PHONY : binding/Statements.i
-+
-+# target to preprocess a source file
-+binding/Statements.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/Statements.cpp.i
-+.PHONY : binding/Statements.cpp.i
-+
-+binding/Statements.s: binding/Statements.cpp.s
-+
-+.PHONY : binding/Statements.s
-+
-+# target to generate assembly for a file
-+binding/Statements.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/Statements.cpp.s
-+.PHONY : binding/Statements.cpp.s
-+
-+binding/SystemSubroutine.o: binding/SystemSubroutine.cpp.o
-+
-+.PHONY : binding/SystemSubroutine.o
-+
-+# target to build an object file
-+binding/SystemSubroutine.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/SystemSubroutine.cpp.o
-+.PHONY : binding/SystemSubroutine.cpp.o
-+
-+binding/SystemSubroutine.i: binding/SystemSubroutine.cpp.i
-+
-+.PHONY : binding/SystemSubroutine.i
-+
-+# target to preprocess a source file
-+binding/SystemSubroutine.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/SystemSubroutine.cpp.i
-+.PHONY : binding/SystemSubroutine.cpp.i
-+
-+binding/SystemSubroutine.s: binding/SystemSubroutine.cpp.s
-+
-+.PHONY : binding/SystemSubroutine.s
-+
-+# target to generate assembly for a file
-+binding/SystemSubroutine.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/SystemSubroutine.cpp.s
-+.PHONY : binding/SystemSubroutine.cpp.s
-+
-+binding/TimingControl.o: binding/TimingControl.cpp.o
-+
-+.PHONY : binding/TimingControl.o
-+
-+# target to build an object file
-+binding/TimingControl.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/TimingControl.cpp.o
-+.PHONY : binding/TimingControl.cpp.o
-+
-+binding/TimingControl.i: binding/TimingControl.cpp.i
-+
-+.PHONY : binding/TimingControl.i
-+
-+# target to preprocess a source file
-+binding/TimingControl.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/TimingControl.cpp.i
-+.PHONY : binding/TimingControl.cpp.i
-+
-+binding/TimingControl.s: binding/TimingControl.cpp.s
-+
-+.PHONY : binding/TimingControl.s
-+
-+# target to generate assembly for a file
-+binding/TimingControl.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/binding/TimingControl.cpp.s
-+.PHONY : binding/TimingControl.cpp.s
-+
-+compilation/Compilation.o: compilation/Compilation.cpp.o
-+
-+.PHONY : compilation/Compilation.o
-+
-+# target to build an object file
-+compilation/Compilation.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/Compilation.cpp.o
-+.PHONY : compilation/Compilation.cpp.o
-+
-+compilation/Compilation.i: compilation/Compilation.cpp.i
-+
-+.PHONY : compilation/Compilation.i
-+
-+# target to preprocess a source file
-+compilation/Compilation.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/Compilation.cpp.i
-+.PHONY : compilation/Compilation.cpp.i
-+
-+compilation/Compilation.s: compilation/Compilation.cpp.s
-+
-+.PHONY : compilation/Compilation.s
-+
-+# target to generate assembly for a file
-+compilation/Compilation.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/Compilation.cpp.s
-+.PHONY : compilation/Compilation.cpp.s
-+
-+compilation/Definition.o: compilation/Definition.cpp.o
-+
-+.PHONY : compilation/Definition.o
-+
-+# target to build an object file
-+compilation/Definition.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/Definition.cpp.o
-+.PHONY : compilation/Definition.cpp.o
-+
-+compilation/Definition.i: compilation/Definition.cpp.i
-+
-+.PHONY : compilation/Definition.i
-+
-+# target to preprocess a source file
-+compilation/Definition.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/Definition.cpp.i
-+.PHONY : compilation/Definition.cpp.i
-+
-+compilation/Definition.s: compilation/Definition.cpp.s
-+
-+.PHONY : compilation/Definition.s
-+
-+# target to generate assembly for a file
-+compilation/Definition.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/Definition.cpp.s
-+.PHONY : compilation/Definition.cpp.s
-+
-+compilation/InstanceCache.o: compilation/InstanceCache.cpp.o
-+
-+.PHONY : compilation/InstanceCache.o
-+
-+# target to build an object file
-+compilation/InstanceCache.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/InstanceCache.cpp.o
-+.PHONY : compilation/InstanceCache.cpp.o
-+
-+compilation/InstanceCache.i: compilation/InstanceCache.cpp.i
-+
-+.PHONY : compilation/InstanceCache.i
-+
-+# target to preprocess a source file
-+compilation/InstanceCache.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/InstanceCache.cpp.i
-+.PHONY : compilation/InstanceCache.cpp.i
-+
-+compilation/InstanceCache.s: compilation/InstanceCache.cpp.s
-+
-+.PHONY : compilation/InstanceCache.s
-+
-+# target to generate assembly for a file
-+compilation/InstanceCache.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/InstanceCache.cpp.s
-+.PHONY : compilation/InstanceCache.cpp.s
-+
-+compilation/ScriptSession.o: compilation/ScriptSession.cpp.o
-+
-+.PHONY : compilation/ScriptSession.o
-+
-+# target to build an object file
-+compilation/ScriptSession.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/ScriptSession.cpp.o
-+.PHONY : compilation/ScriptSession.cpp.o
-+
-+compilation/ScriptSession.i: compilation/ScriptSession.cpp.i
-+
-+.PHONY : compilation/ScriptSession.i
-+
-+# target to preprocess a source file
-+compilation/ScriptSession.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/ScriptSession.cpp.i
-+.PHONY : compilation/ScriptSession.cpp.i
-+
-+compilation/ScriptSession.s: compilation/ScriptSession.cpp.s
-+
-+.PHONY : compilation/ScriptSession.s
-+
-+# target to generate assembly for a file
-+compilation/ScriptSession.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/ScriptSession.cpp.s
-+.PHONY : compilation/ScriptSession.cpp.s
-+
-+compilation/SemanticModel.o: compilation/SemanticModel.cpp.o
-+
-+.PHONY : compilation/SemanticModel.o
-+
-+# target to build an object file
-+compilation/SemanticModel.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/SemanticModel.cpp.o
-+.PHONY : compilation/SemanticModel.cpp.o
-+
-+compilation/SemanticModel.i: compilation/SemanticModel.cpp.i
-+
-+.PHONY : compilation/SemanticModel.i
-+
-+# target to preprocess a source file
-+compilation/SemanticModel.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/SemanticModel.cpp.i
-+.PHONY : compilation/SemanticModel.cpp.i
-+
-+compilation/SemanticModel.s: compilation/SemanticModel.cpp.s
-+
-+.PHONY : compilation/SemanticModel.s
-+
-+# target to generate assembly for a file
-+compilation/SemanticModel.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/SemanticModel.cpp.s
-+.PHONY : compilation/SemanticModel.cpp.s
-+
-+compilation/builtins/ArrayMethods.o: compilation/builtins/ArrayMethods.cpp.o
-+
-+.PHONY : compilation/builtins/ArrayMethods.o
-+
-+# target to build an object file
-+compilation/builtins/ArrayMethods.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/builtins/ArrayMethods.cpp.o
-+.PHONY : compilation/builtins/ArrayMethods.cpp.o
-+
-+compilation/builtins/ArrayMethods.i: compilation/builtins/ArrayMethods.cpp.i
-+
-+.PHONY : compilation/builtins/ArrayMethods.i
-+
-+# target to preprocess a source file
-+compilation/builtins/ArrayMethods.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/builtins/ArrayMethods.cpp.i
-+.PHONY : compilation/builtins/ArrayMethods.cpp.i
-+
-+compilation/builtins/ArrayMethods.s: compilation/builtins/ArrayMethods.cpp.s
-+
-+.PHONY : compilation/builtins/ArrayMethods.s
-+
-+# target to generate assembly for a file
-+compilation/builtins/ArrayMethods.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/builtins/ArrayMethods.cpp.s
-+.PHONY : compilation/builtins/ArrayMethods.cpp.s
-+
-+compilation/builtins/ConversionFuncs.o: compilation/builtins/ConversionFuncs.cpp.o
-+
-+.PHONY : compilation/builtins/ConversionFuncs.o
-+
-+# target to build an object file
-+compilation/builtins/ConversionFuncs.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/builtins/ConversionFuncs.cpp.o
-+.PHONY : compilation/builtins/ConversionFuncs.cpp.o
-+
-+compilation/builtins/ConversionFuncs.i: compilation/builtins/ConversionFuncs.cpp.i
-+
-+.PHONY : compilation/builtins/ConversionFuncs.i
-+
-+# target to preprocess a source file
-+compilation/builtins/ConversionFuncs.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/builtins/ConversionFuncs.cpp.i
-+.PHONY : compilation/builtins/ConversionFuncs.cpp.i
-+
-+compilation/builtins/ConversionFuncs.s: compilation/builtins/ConversionFuncs.cpp.s
-+
-+.PHONY : compilation/builtins/ConversionFuncs.s
-+
-+# target to generate assembly for a file
-+compilation/builtins/ConversionFuncs.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/builtins/ConversionFuncs.cpp.s
-+.PHONY : compilation/builtins/ConversionFuncs.cpp.s
-+
-+compilation/builtins/EnumMethods.o: compilation/builtins/EnumMethods.cpp.o
-+
-+.PHONY : compilation/builtins/EnumMethods.o
-+
-+# target to build an object file
-+compilation/builtins/EnumMethods.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/builtins/EnumMethods.cpp.o
-+.PHONY : compilation/builtins/EnumMethods.cpp.o
-+
-+compilation/builtins/EnumMethods.i: compilation/builtins/EnumMethods.cpp.i
-+
-+.PHONY : compilation/builtins/EnumMethods.i
-+
-+# target to preprocess a source file
-+compilation/builtins/EnumMethods.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/builtins/EnumMethods.cpp.i
-+.PHONY : compilation/builtins/EnumMethods.cpp.i
-+
-+compilation/builtins/EnumMethods.s: compilation/builtins/EnumMethods.cpp.s
-+
-+.PHONY : compilation/builtins/EnumMethods.s
-+
-+# target to generate assembly for a file
-+compilation/builtins/EnumMethods.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/builtins/EnumMethods.cpp.s
-+.PHONY : compilation/builtins/EnumMethods.cpp.s
-+
-+compilation/builtins/MathFuncs.o: compilation/builtins/MathFuncs.cpp.o
-+
-+.PHONY : compilation/builtins/MathFuncs.o
-+
-+# target to build an object file
-+compilation/builtins/MathFuncs.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/builtins/MathFuncs.cpp.o
-+.PHONY : compilation/builtins/MathFuncs.cpp.o
-+
-+compilation/builtins/MathFuncs.i: compilation/builtins/MathFuncs.cpp.i
-+
-+.PHONY : compilation/builtins/MathFuncs.i
-+
-+# target to preprocess a source file
-+compilation/builtins/MathFuncs.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/builtins/MathFuncs.cpp.i
-+.PHONY : compilation/builtins/MathFuncs.cpp.i
-+
-+compilation/builtins/MathFuncs.s: compilation/builtins/MathFuncs.cpp.s
-+
-+.PHONY : compilation/builtins/MathFuncs.s
-+
-+# target to generate assembly for a file
-+compilation/builtins/MathFuncs.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/builtins/MathFuncs.cpp.s
-+.PHONY : compilation/builtins/MathFuncs.cpp.s
-+
-+compilation/builtins/MiscSystemFuncs.o: compilation/builtins/MiscSystemFuncs.cpp.o
-+
-+.PHONY : compilation/builtins/MiscSystemFuncs.o
-+
-+# target to build an object file
-+compilation/builtins/MiscSystemFuncs.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/builtins/MiscSystemFuncs.cpp.o
-+.PHONY : compilation/builtins/MiscSystemFuncs.cpp.o
-+
-+compilation/builtins/MiscSystemFuncs.i: compilation/builtins/MiscSystemFuncs.cpp.i
-+
-+.PHONY : compilation/builtins/MiscSystemFuncs.i
-+
-+# target to preprocess a source file
-+compilation/builtins/MiscSystemFuncs.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/builtins/MiscSystemFuncs.cpp.i
-+.PHONY : compilation/builtins/MiscSystemFuncs.cpp.i
-+
-+compilation/builtins/MiscSystemFuncs.s: compilation/builtins/MiscSystemFuncs.cpp.s
-+
-+.PHONY : compilation/builtins/MiscSystemFuncs.s
-+
-+# target to generate assembly for a file
-+compilation/builtins/MiscSystemFuncs.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/builtins/MiscSystemFuncs.cpp.s
-+.PHONY : compilation/builtins/MiscSystemFuncs.cpp.s
-+
-+compilation/builtins/NonConstFuncs.o: compilation/builtins/NonConstFuncs.cpp.o
-+
-+.PHONY : compilation/builtins/NonConstFuncs.o
-+
-+# target to build an object file
-+compilation/builtins/NonConstFuncs.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/builtins/NonConstFuncs.cpp.o
-+.PHONY : compilation/builtins/NonConstFuncs.cpp.o
-+
-+compilation/builtins/NonConstFuncs.i: compilation/builtins/NonConstFuncs.cpp.i
-+
-+.PHONY : compilation/builtins/NonConstFuncs.i
-+
-+# target to preprocess a source file
-+compilation/builtins/NonConstFuncs.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/builtins/NonConstFuncs.cpp.i
-+.PHONY : compilation/builtins/NonConstFuncs.cpp.i
-+
-+compilation/builtins/NonConstFuncs.s: compilation/builtins/NonConstFuncs.cpp.s
-+
-+.PHONY : compilation/builtins/NonConstFuncs.s
-+
-+# target to generate assembly for a file
-+compilation/builtins/NonConstFuncs.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/builtins/NonConstFuncs.cpp.s
-+.PHONY : compilation/builtins/NonConstFuncs.cpp.s
-+
-+compilation/builtins/QueryFuncs.o: compilation/builtins/QueryFuncs.cpp.o
-+
-+.PHONY : compilation/builtins/QueryFuncs.o
-+
-+# target to build an object file
-+compilation/builtins/QueryFuncs.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/builtins/QueryFuncs.cpp.o
-+.PHONY : compilation/builtins/QueryFuncs.cpp.o
-+
-+compilation/builtins/QueryFuncs.i: compilation/builtins/QueryFuncs.cpp.i
-+
-+.PHONY : compilation/builtins/QueryFuncs.i
-+
-+# target to preprocess a source file
-+compilation/builtins/QueryFuncs.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/builtins/QueryFuncs.cpp.i
-+.PHONY : compilation/builtins/QueryFuncs.cpp.i
-+
-+compilation/builtins/QueryFuncs.s: compilation/builtins/QueryFuncs.cpp.s
-+
-+.PHONY : compilation/builtins/QueryFuncs.s
-+
-+# target to generate assembly for a file
-+compilation/builtins/QueryFuncs.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/builtins/QueryFuncs.cpp.s
-+.PHONY : compilation/builtins/QueryFuncs.cpp.s
-+
-+compilation/builtins/StringMethods.o: compilation/builtins/StringMethods.cpp.o
-+
-+.PHONY : compilation/builtins/StringMethods.o
-+
-+# target to build an object file
-+compilation/builtins/StringMethods.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/builtins/StringMethods.cpp.o
-+.PHONY : compilation/builtins/StringMethods.cpp.o
-+
-+compilation/builtins/StringMethods.i: compilation/builtins/StringMethods.cpp.i
-+
-+.PHONY : compilation/builtins/StringMethods.i
-+
-+# target to preprocess a source file
-+compilation/builtins/StringMethods.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/builtins/StringMethods.cpp.i
-+.PHONY : compilation/builtins/StringMethods.cpp.i
-+
-+compilation/builtins/StringMethods.s: compilation/builtins/StringMethods.cpp.s
-+
-+.PHONY : compilation/builtins/StringMethods.s
-+
-+# target to generate assembly for a file
-+compilation/builtins/StringMethods.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/builtins/StringMethods.cpp.s
-+.PHONY : compilation/builtins/StringMethods.cpp.s
-+
-+compilation/builtins/SystemTasks.o: compilation/builtins/SystemTasks.cpp.o
-+
-+.PHONY : compilation/builtins/SystemTasks.o
-+
-+# target to build an object file
-+compilation/builtins/SystemTasks.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/builtins/SystemTasks.cpp.o
-+.PHONY : compilation/builtins/SystemTasks.cpp.o
-+
-+compilation/builtins/SystemTasks.i: compilation/builtins/SystemTasks.cpp.i
-+
-+.PHONY : compilation/builtins/SystemTasks.i
-+
-+# target to preprocess a source file
-+compilation/builtins/SystemTasks.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/builtins/SystemTasks.cpp.i
-+.PHONY : compilation/builtins/SystemTasks.cpp.i
-+
-+compilation/builtins/SystemTasks.s: compilation/builtins/SystemTasks.cpp.s
-+
-+.PHONY : compilation/builtins/SystemTasks.s
-+
-+# target to generate assembly for a file
-+compilation/builtins/SystemTasks.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/compilation/builtins/SystemTasks.cpp.s
-+.PHONY : compilation/builtins/SystemTasks.cpp.s
-+
-+diagnostics/DiagnosticClient.o: diagnostics/DiagnosticClient.cpp.o
-+
-+.PHONY : diagnostics/DiagnosticClient.o
-+
-+# target to build an object file
-+diagnostics/DiagnosticClient.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/diagnostics/DiagnosticClient.cpp.o
-+.PHONY : diagnostics/DiagnosticClient.cpp.o
-+
-+diagnostics/DiagnosticClient.i: diagnostics/DiagnosticClient.cpp.i
-+
-+.PHONY : diagnostics/DiagnosticClient.i
-+
-+# target to preprocess a source file
-+diagnostics/DiagnosticClient.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/diagnostics/DiagnosticClient.cpp.i
-+.PHONY : diagnostics/DiagnosticClient.cpp.i
-+
-+diagnostics/DiagnosticClient.s: diagnostics/DiagnosticClient.cpp.s
-+
-+.PHONY : diagnostics/DiagnosticClient.s
-+
-+# target to generate assembly for a file
-+diagnostics/DiagnosticClient.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/diagnostics/DiagnosticClient.cpp.s
-+.PHONY : diagnostics/DiagnosticClient.cpp.s
-+
-+diagnostics/DiagnosticEngine.o: diagnostics/DiagnosticEngine.cpp.o
-+
-+.PHONY : diagnostics/DiagnosticEngine.o
-+
-+# target to build an object file
-+diagnostics/DiagnosticEngine.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/diagnostics/DiagnosticEngine.cpp.o
-+.PHONY : diagnostics/DiagnosticEngine.cpp.o
-+
-+diagnostics/DiagnosticEngine.i: diagnostics/DiagnosticEngine.cpp.i
-+
-+.PHONY : diagnostics/DiagnosticEngine.i
-+
-+# target to preprocess a source file
-+diagnostics/DiagnosticEngine.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/diagnostics/DiagnosticEngine.cpp.i
-+.PHONY : diagnostics/DiagnosticEngine.cpp.i
-+
-+diagnostics/DiagnosticEngine.s: diagnostics/DiagnosticEngine.cpp.s
-+
-+.PHONY : diagnostics/DiagnosticEngine.s
-+
-+# target to generate assembly for a file
-+diagnostics/DiagnosticEngine.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/diagnostics/DiagnosticEngine.cpp.s
-+.PHONY : diagnostics/DiagnosticEngine.cpp.s
-+
-+diagnostics/Diagnostics.o: diagnostics/Diagnostics.cpp.o
-+
-+.PHONY : diagnostics/Diagnostics.o
-+
-+# target to build an object file
-+diagnostics/Diagnostics.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/diagnostics/Diagnostics.cpp.o
-+.PHONY : diagnostics/Diagnostics.cpp.o
-+
-+diagnostics/Diagnostics.i: diagnostics/Diagnostics.cpp.i
-+
-+.PHONY : diagnostics/Diagnostics.i
-+
-+# target to preprocess a source file
-+diagnostics/Diagnostics.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/diagnostics/Diagnostics.cpp.i
-+.PHONY : diagnostics/Diagnostics.cpp.i
-+
-+diagnostics/Diagnostics.s: diagnostics/Diagnostics.cpp.s
-+
-+.PHONY : diagnostics/Diagnostics.s
-+
-+# target to generate assembly for a file
-+diagnostics/Diagnostics.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/diagnostics/Diagnostics.cpp.s
-+.PHONY : diagnostics/Diagnostics.cpp.s
-+
-+diagnostics/TextDiagnosticClient.o: diagnostics/TextDiagnosticClient.cpp.o
-+
-+.PHONY : diagnostics/TextDiagnosticClient.o
-+
-+# target to build an object file
-+diagnostics/TextDiagnosticClient.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/diagnostics/TextDiagnosticClient.cpp.o
-+.PHONY : diagnostics/TextDiagnosticClient.cpp.o
-+
-+diagnostics/TextDiagnosticClient.i: diagnostics/TextDiagnosticClient.cpp.i
-+
-+.PHONY : diagnostics/TextDiagnosticClient.i
-+
-+# target to preprocess a source file
-+diagnostics/TextDiagnosticClient.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/diagnostics/TextDiagnosticClient.cpp.i
-+.PHONY : diagnostics/TextDiagnosticClient.cpp.i
-+
-+diagnostics/TextDiagnosticClient.s: diagnostics/TextDiagnosticClient.cpp.s
-+
-+.PHONY : diagnostics/TextDiagnosticClient.s
-+
-+# target to generate assembly for a file
-+diagnostics/TextDiagnosticClient.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/diagnostics/TextDiagnosticClient.cpp.s
-+.PHONY : diagnostics/TextDiagnosticClient.cpp.s
-+
-+mir/Instr.o: mir/Instr.cpp.o
-+
-+.PHONY : mir/Instr.o
-+
-+# target to build an object file
-+mir/Instr.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/mir/Instr.cpp.o
-+.PHONY : mir/Instr.cpp.o
-+
-+mir/Instr.i: mir/Instr.cpp.i
-+
-+.PHONY : mir/Instr.i
-+
-+# target to preprocess a source file
-+mir/Instr.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/mir/Instr.cpp.i
-+.PHONY : mir/Instr.cpp.i
-+
-+mir/Instr.s: mir/Instr.cpp.s
-+
-+.PHONY : mir/Instr.s
-+
-+# target to generate assembly for a file
-+mir/Instr.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/mir/Instr.cpp.s
-+.PHONY : mir/Instr.cpp.s
-+
-+mir/MIRBuilder.o: mir/MIRBuilder.cpp.o
-+
-+.PHONY : mir/MIRBuilder.o
-+
-+# target to build an object file
-+mir/MIRBuilder.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/mir/MIRBuilder.cpp.o
-+.PHONY : mir/MIRBuilder.cpp.o
-+
-+mir/MIRBuilder.i: mir/MIRBuilder.cpp.i
-+
-+.PHONY : mir/MIRBuilder.i
-+
-+# target to preprocess a source file
-+mir/MIRBuilder.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/mir/MIRBuilder.cpp.i
-+.PHONY : mir/MIRBuilder.cpp.i
-+
-+mir/MIRBuilder.s: mir/MIRBuilder.cpp.s
-+
-+.PHONY : mir/MIRBuilder.s
-+
-+# target to generate assembly for a file
-+mir/MIRBuilder.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/mir/MIRBuilder.cpp.s
-+.PHONY : mir/MIRBuilder.cpp.s
-+
-+mir/MIRPrinter.o: mir/MIRPrinter.cpp.o
-+
-+.PHONY : mir/MIRPrinter.o
-+
-+# target to build an object file
-+mir/MIRPrinter.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/mir/MIRPrinter.cpp.o
-+.PHONY : mir/MIRPrinter.cpp.o
-+
-+mir/MIRPrinter.i: mir/MIRPrinter.cpp.i
-+
-+.PHONY : mir/MIRPrinter.i
-+
-+# target to preprocess a source file
-+mir/MIRPrinter.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/mir/MIRPrinter.cpp.i
-+.PHONY : mir/MIRPrinter.cpp.i
-+
-+mir/MIRPrinter.s: mir/MIRPrinter.cpp.s
-+
-+.PHONY : mir/MIRPrinter.s
-+
-+# target to generate assembly for a file
-+mir/MIRPrinter.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/mir/MIRPrinter.cpp.s
-+.PHONY : mir/MIRPrinter.cpp.s
-+
-+mir/Procedure.o: mir/Procedure.cpp.o
-+
-+.PHONY : mir/Procedure.o
-+
-+# target to build an object file
-+mir/Procedure.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/mir/Procedure.cpp.o
-+.PHONY : mir/Procedure.cpp.o
-+
-+mir/Procedure.i: mir/Procedure.cpp.i
-+
-+.PHONY : mir/Procedure.i
-+
-+# target to preprocess a source file
-+mir/Procedure.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/mir/Procedure.cpp.i
-+.PHONY : mir/Procedure.cpp.i
-+
-+mir/Procedure.s: mir/Procedure.cpp.s
-+
-+.PHONY : mir/Procedure.s
-+
-+# target to generate assembly for a file
-+mir/Procedure.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/mir/Procedure.cpp.s
-+.PHONY : mir/Procedure.cpp.s
-+
-+numeric/ConstantValue.o: numeric/ConstantValue.cpp.o
-+
-+.PHONY : numeric/ConstantValue.o
-+
-+# target to build an object file
-+numeric/ConstantValue.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/numeric/ConstantValue.cpp.o
-+.PHONY : numeric/ConstantValue.cpp.o
-+
-+numeric/ConstantValue.i: numeric/ConstantValue.cpp.i
-+
-+.PHONY : numeric/ConstantValue.i
-+
-+# target to preprocess a source file
-+numeric/ConstantValue.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/numeric/ConstantValue.cpp.i
-+.PHONY : numeric/ConstantValue.cpp.i
-+
-+numeric/ConstantValue.s: numeric/ConstantValue.cpp.s
-+
-+.PHONY : numeric/ConstantValue.s
-+
-+# target to generate assembly for a file
-+numeric/ConstantValue.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/numeric/ConstantValue.cpp.s
-+.PHONY : numeric/ConstantValue.cpp.s
-+
-+numeric/SVInt.o: numeric/SVInt.cpp.o
-+
-+.PHONY : numeric/SVInt.o
-+
-+# target to build an object file
-+numeric/SVInt.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/numeric/SVInt.cpp.o
-+.PHONY : numeric/SVInt.cpp.o
-+
-+numeric/SVInt.i: numeric/SVInt.cpp.i
-+
-+.PHONY : numeric/SVInt.i
-+
-+# target to preprocess a source file
-+numeric/SVInt.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/numeric/SVInt.cpp.i
-+.PHONY : numeric/SVInt.cpp.i
-+
-+numeric/SVInt.s: numeric/SVInt.cpp.s
-+
-+.PHONY : numeric/SVInt.s
-+
-+# target to generate assembly for a file
-+numeric/SVInt.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/numeric/SVInt.cpp.s
-+.PHONY : numeric/SVInt.cpp.s
-+
-+numeric/Time.o: numeric/Time.cpp.o
-+
-+.PHONY : numeric/Time.o
-+
-+# target to build an object file
-+numeric/Time.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/numeric/Time.cpp.o
-+.PHONY : numeric/Time.cpp.o
-+
-+numeric/Time.i: numeric/Time.cpp.i
-+
-+.PHONY : numeric/Time.i
-+
-+# target to preprocess a source file
-+numeric/Time.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/numeric/Time.cpp.i
-+.PHONY : numeric/Time.cpp.i
-+
-+numeric/Time.s: numeric/Time.cpp.s
-+
-+.PHONY : numeric/Time.s
-+
-+# target to generate assembly for a file
-+numeric/Time.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/numeric/Time.cpp.s
-+.PHONY : numeric/Time.cpp.s
-+
-+parsing/Lexer.o: parsing/Lexer.cpp.o
-+
-+.PHONY : parsing/Lexer.o
-+
-+# target to build an object file
-+parsing/Lexer.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/parsing/Lexer.cpp.o
-+.PHONY : parsing/Lexer.cpp.o
-+
-+parsing/Lexer.i: parsing/Lexer.cpp.i
-+
-+.PHONY : parsing/Lexer.i
-+
-+# target to preprocess a source file
-+parsing/Lexer.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/parsing/Lexer.cpp.i
-+.PHONY : parsing/Lexer.cpp.i
-+
-+parsing/Lexer.s: parsing/Lexer.cpp.s
-+
-+.PHONY : parsing/Lexer.s
-+
-+# target to generate assembly for a file
-+parsing/Lexer.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/parsing/Lexer.cpp.s
-+.PHONY : parsing/Lexer.cpp.s
-+
-+parsing/LexerFacts.o: parsing/LexerFacts.cpp.o
-+
-+.PHONY : parsing/LexerFacts.o
-+
-+# target to build an object file
-+parsing/LexerFacts.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/parsing/LexerFacts.cpp.o
-+.PHONY : parsing/LexerFacts.cpp.o
-+
-+parsing/LexerFacts.i: parsing/LexerFacts.cpp.i
-+
-+.PHONY : parsing/LexerFacts.i
-+
-+# target to preprocess a source file
-+parsing/LexerFacts.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/parsing/LexerFacts.cpp.i
-+.PHONY : parsing/LexerFacts.cpp.i
-+
-+parsing/LexerFacts.s: parsing/LexerFacts.cpp.s
-+
-+.PHONY : parsing/LexerFacts.s
-+
-+# target to generate assembly for a file
-+parsing/LexerFacts.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/parsing/LexerFacts.cpp.s
-+.PHONY : parsing/LexerFacts.cpp.s
-+
-+parsing/NumberParser.o: parsing/NumberParser.cpp.o
-+
-+.PHONY : parsing/NumberParser.o
-+
-+# target to build an object file
-+parsing/NumberParser.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/parsing/NumberParser.cpp.o
-+.PHONY : parsing/NumberParser.cpp.o
-+
-+parsing/NumberParser.i: parsing/NumberParser.cpp.i
-+
-+.PHONY : parsing/NumberParser.i
-+
-+# target to preprocess a source file
-+parsing/NumberParser.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/parsing/NumberParser.cpp.i
-+.PHONY : parsing/NumberParser.cpp.i
-+
-+parsing/NumberParser.s: parsing/NumberParser.cpp.s
-+
-+.PHONY : parsing/NumberParser.s
-+
-+# target to generate assembly for a file
-+parsing/NumberParser.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/parsing/NumberParser.cpp.s
-+.PHONY : parsing/NumberParser.cpp.s
-+
-+parsing/Parser.o: parsing/Parser.cpp.o
-+
-+.PHONY : parsing/Parser.o
-+
-+# target to build an object file
-+parsing/Parser.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/parsing/Parser.cpp.o
-+.PHONY : parsing/Parser.cpp.o
-+
-+parsing/Parser.i: parsing/Parser.cpp.i
-+
-+.PHONY : parsing/Parser.i
-+
-+# target to preprocess a source file
-+parsing/Parser.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/parsing/Parser.cpp.i
-+.PHONY : parsing/Parser.cpp.i
-+
-+parsing/Parser.s: parsing/Parser.cpp.s
-+
-+.PHONY : parsing/Parser.s
-+
-+# target to generate assembly for a file
-+parsing/Parser.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/parsing/Parser.cpp.s
-+.PHONY : parsing/Parser.cpp.s
-+
-+parsing/ParserBase.o: parsing/ParserBase.cpp.o
-+
-+.PHONY : parsing/ParserBase.o
-+
-+# target to build an object file
-+parsing/ParserBase.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/parsing/ParserBase.cpp.o
-+.PHONY : parsing/ParserBase.cpp.o
-+
-+parsing/ParserBase.i: parsing/ParserBase.cpp.i
-+
-+.PHONY : parsing/ParserBase.i
-+
-+# target to preprocess a source file
-+parsing/ParserBase.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/parsing/ParserBase.cpp.i
-+.PHONY : parsing/ParserBase.cpp.i
-+
-+parsing/ParserBase.s: parsing/ParserBase.cpp.s
-+
-+.PHONY : parsing/ParserBase.s
-+
-+# target to generate assembly for a file
-+parsing/ParserBase.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/parsing/ParserBase.cpp.s
-+.PHONY : parsing/ParserBase.cpp.s
-+
-+parsing/Parser_expressions.o: parsing/Parser_expressions.cpp.o
-+
-+.PHONY : parsing/Parser_expressions.o
-+
-+# target to build an object file
-+parsing/Parser_expressions.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/parsing/Parser_expressions.cpp.o
-+.PHONY : parsing/Parser_expressions.cpp.o
-+
-+parsing/Parser_expressions.i: parsing/Parser_expressions.cpp.i
-+
-+.PHONY : parsing/Parser_expressions.i
-+
-+# target to preprocess a source file
-+parsing/Parser_expressions.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/parsing/Parser_expressions.cpp.i
-+.PHONY : parsing/Parser_expressions.cpp.i
-+
-+parsing/Parser_expressions.s: parsing/Parser_expressions.cpp.s
-+
-+.PHONY : parsing/Parser_expressions.s
-+
-+# target to generate assembly for a file
-+parsing/Parser_expressions.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/parsing/Parser_expressions.cpp.s
-+.PHONY : parsing/Parser_expressions.cpp.s
-+
-+parsing/Parser_members.o: parsing/Parser_members.cpp.o
-+
-+.PHONY : parsing/Parser_members.o
-+
-+# target to build an object file
-+parsing/Parser_members.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/parsing/Parser_members.cpp.o
-+.PHONY : parsing/Parser_members.cpp.o
-+
-+parsing/Parser_members.i: parsing/Parser_members.cpp.i
-+
-+.PHONY : parsing/Parser_members.i
-+
-+# target to preprocess a source file
-+parsing/Parser_members.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/parsing/Parser_members.cpp.i
-+.PHONY : parsing/Parser_members.cpp.i
-+
-+parsing/Parser_members.s: parsing/Parser_members.cpp.s
-+
-+.PHONY : parsing/Parser_members.s
-+
-+# target to generate assembly for a file
-+parsing/Parser_members.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/parsing/Parser_members.cpp.s
-+.PHONY : parsing/Parser_members.cpp.s
-+
-+parsing/Parser_statements.o: parsing/Parser_statements.cpp.o
-+
-+.PHONY : parsing/Parser_statements.o
-+
-+# target to build an object file
-+parsing/Parser_statements.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/parsing/Parser_statements.cpp.o
-+.PHONY : parsing/Parser_statements.cpp.o
-+
-+parsing/Parser_statements.i: parsing/Parser_statements.cpp.i
-+
-+.PHONY : parsing/Parser_statements.i
-+
-+# target to preprocess a source file
-+parsing/Parser_statements.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/parsing/Parser_statements.cpp.i
-+.PHONY : parsing/Parser_statements.cpp.i
-+
-+parsing/Parser_statements.s: parsing/Parser_statements.cpp.s
-+
-+.PHONY : parsing/Parser_statements.s
-+
-+# target to generate assembly for a file
-+parsing/Parser_statements.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/parsing/Parser_statements.cpp.s
-+.PHONY : parsing/Parser_statements.cpp.s
-+
-+parsing/Preprocessor.o: parsing/Preprocessor.cpp.o
-+
-+.PHONY : parsing/Preprocessor.o
-+
-+# target to build an object file
-+parsing/Preprocessor.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/parsing/Preprocessor.cpp.o
-+.PHONY : parsing/Preprocessor.cpp.o
-+
-+parsing/Preprocessor.i: parsing/Preprocessor.cpp.i
-+
-+.PHONY : parsing/Preprocessor.i
-+
-+# target to preprocess a source file
-+parsing/Preprocessor.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/parsing/Preprocessor.cpp.i
-+.PHONY : parsing/Preprocessor.cpp.i
-+
-+parsing/Preprocessor.s: parsing/Preprocessor.cpp.s
-+
-+.PHONY : parsing/Preprocessor.s
-+
-+# target to generate assembly for a file
-+parsing/Preprocessor.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/parsing/Preprocessor.cpp.s
-+.PHONY : parsing/Preprocessor.cpp.s
-+
-+parsing/Preprocessor_macros.o: parsing/Preprocessor_macros.cpp.o
-+
-+.PHONY : parsing/Preprocessor_macros.o
-+
-+# target to build an object file
-+parsing/Preprocessor_macros.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/parsing/Preprocessor_macros.cpp.o
-+.PHONY : parsing/Preprocessor_macros.cpp.o
-+
-+parsing/Preprocessor_macros.i: parsing/Preprocessor_macros.cpp.i
-+
-+.PHONY : parsing/Preprocessor_macros.i
-+
-+# target to preprocess a source file
-+parsing/Preprocessor_macros.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/parsing/Preprocessor_macros.cpp.i
-+.PHONY : parsing/Preprocessor_macros.cpp.i
-+
-+parsing/Preprocessor_macros.s: parsing/Preprocessor_macros.cpp.s
-+
-+.PHONY : parsing/Preprocessor_macros.s
-+
-+# target to generate assembly for a file
-+parsing/Preprocessor_macros.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/parsing/Preprocessor_macros.cpp.s
-+.PHONY : parsing/Preprocessor_macros.cpp.s
-+
-+parsing/Token.o: parsing/Token.cpp.o
-+
-+.PHONY : parsing/Token.o
-+
-+# target to build an object file
-+parsing/Token.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/parsing/Token.cpp.o
-+.PHONY : parsing/Token.cpp.o
-+
-+parsing/Token.i: parsing/Token.cpp.i
-+
-+.PHONY : parsing/Token.i
-+
-+# target to preprocess a source file
-+parsing/Token.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/parsing/Token.cpp.i
-+.PHONY : parsing/Token.cpp.i
-+
-+parsing/Token.s: parsing/Token.cpp.s
-+
-+.PHONY : parsing/Token.s
-+
-+# target to generate assembly for a file
-+parsing/Token.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/parsing/Token.cpp.s
-+.PHONY : parsing/Token.cpp.s
-+
-+runtime/Runtime.o: runtime/Runtime.cpp.o
-+
-+.PHONY : runtime/Runtime.o
-+
-+# target to build an object file
-+runtime/Runtime.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangruntime.dir/build.make source/CMakeFiles/slangruntime.dir/runtime/Runtime.cpp.o
-+.PHONY : runtime/Runtime.cpp.o
-+
-+runtime/Runtime.i: runtime/Runtime.cpp.i
-+
-+.PHONY : runtime/Runtime.i
-+
-+# target to preprocess a source file
-+runtime/Runtime.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangruntime.dir/build.make source/CMakeFiles/slangruntime.dir/runtime/Runtime.cpp.i
-+.PHONY : runtime/Runtime.cpp.i
-+
-+runtime/Runtime.s: runtime/Runtime.cpp.s
-+
-+.PHONY : runtime/Runtime.s
-+
-+# target to generate assembly for a file
-+runtime/Runtime.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangruntime.dir/build.make source/CMakeFiles/slangruntime.dir/runtime/Runtime.cpp.s
-+.PHONY : runtime/Runtime.cpp.s
-+
-+runtime/SimIO.o: runtime/SimIO.cpp.o
-+
-+.PHONY : runtime/SimIO.o
-+
-+# target to build an object file
-+runtime/SimIO.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangruntime.dir/build.make source/CMakeFiles/slangruntime.dir/runtime/SimIO.cpp.o
-+.PHONY : runtime/SimIO.cpp.o
-+
-+runtime/SimIO.i: runtime/SimIO.cpp.i
-+
-+.PHONY : runtime/SimIO.i
-+
-+# target to preprocess a source file
-+runtime/SimIO.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangruntime.dir/build.make source/CMakeFiles/slangruntime.dir/runtime/SimIO.cpp.i
-+.PHONY : runtime/SimIO.cpp.i
-+
-+runtime/SimIO.s: runtime/SimIO.cpp.s
-+
-+.PHONY : runtime/SimIO.s
-+
-+# target to generate assembly for a file
-+runtime/SimIO.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangruntime.dir/build.make source/CMakeFiles/slangruntime.dir/runtime/SimIO.cpp.s
-+.PHONY : runtime/SimIO.cpp.s
-+
-+symbols/ASTSerializer.o: symbols/ASTSerializer.cpp.o
-+
-+.PHONY : symbols/ASTSerializer.o
-+
-+# target to build an object file
-+symbols/ASTSerializer.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/ASTSerializer.cpp.o
-+.PHONY : symbols/ASTSerializer.cpp.o
-+
-+symbols/ASTSerializer.i: symbols/ASTSerializer.cpp.i
-+
-+.PHONY : symbols/ASTSerializer.i
-+
-+# target to preprocess a source file
-+symbols/ASTSerializer.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/ASTSerializer.cpp.i
-+.PHONY : symbols/ASTSerializer.cpp.i
-+
-+symbols/ASTSerializer.s: symbols/ASTSerializer.cpp.s
-+
-+.PHONY : symbols/ASTSerializer.s
-+
-+# target to generate assembly for a file
-+symbols/ASTSerializer.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/ASTSerializer.cpp.s
-+.PHONY : symbols/ASTSerializer.cpp.s
-+
-+symbols/AllTypes.o: symbols/AllTypes.cpp.o
-+
-+.PHONY : symbols/AllTypes.o
-+
-+# target to build an object file
-+symbols/AllTypes.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/AllTypes.cpp.o
-+.PHONY : symbols/AllTypes.cpp.o
-+
-+symbols/AllTypes.i: symbols/AllTypes.cpp.i
-+
-+.PHONY : symbols/AllTypes.i
-+
-+# target to preprocess a source file
-+symbols/AllTypes.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/AllTypes.cpp.i
-+.PHONY : symbols/AllTypes.cpp.i
-+
-+symbols/AllTypes.s: symbols/AllTypes.cpp.s
-+
-+.PHONY : symbols/AllTypes.s
-+
-+# target to generate assembly for a file
-+symbols/AllTypes.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/AllTypes.cpp.s
-+.PHONY : symbols/AllTypes.cpp.s
-+
-+symbols/AttributeSymbol.o: symbols/AttributeSymbol.cpp.o
-+
-+.PHONY : symbols/AttributeSymbol.o
-+
-+# target to build an object file
-+symbols/AttributeSymbol.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/AttributeSymbol.cpp.o
-+.PHONY : symbols/AttributeSymbol.cpp.o
-+
-+symbols/AttributeSymbol.i: symbols/AttributeSymbol.cpp.i
-+
-+.PHONY : symbols/AttributeSymbol.i
-+
-+# target to preprocess a source file
-+symbols/AttributeSymbol.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/AttributeSymbol.cpp.i
-+.PHONY : symbols/AttributeSymbol.cpp.i
-+
-+symbols/AttributeSymbol.s: symbols/AttributeSymbol.cpp.s
-+
-+.PHONY : symbols/AttributeSymbol.s
-+
-+# target to generate assembly for a file
-+symbols/AttributeSymbol.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/AttributeSymbol.cpp.s
-+.PHONY : symbols/AttributeSymbol.cpp.s
-+
-+symbols/BlockSymbols.o: symbols/BlockSymbols.cpp.o
-+
-+.PHONY : symbols/BlockSymbols.o
-+
-+# target to build an object file
-+symbols/BlockSymbols.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/BlockSymbols.cpp.o
-+.PHONY : symbols/BlockSymbols.cpp.o
-+
-+symbols/BlockSymbols.i: symbols/BlockSymbols.cpp.i
-+
-+.PHONY : symbols/BlockSymbols.i
-+
-+# target to preprocess a source file
-+symbols/BlockSymbols.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/BlockSymbols.cpp.i
-+.PHONY : symbols/BlockSymbols.cpp.i
-+
-+symbols/BlockSymbols.s: symbols/BlockSymbols.cpp.s
-+
-+.PHONY : symbols/BlockSymbols.s
-+
-+# target to generate assembly for a file
-+symbols/BlockSymbols.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/BlockSymbols.cpp.s
-+.PHONY : symbols/BlockSymbols.cpp.s
-+
-+symbols/ClassSymbols.o: symbols/ClassSymbols.cpp.o
-+
-+.PHONY : symbols/ClassSymbols.o
-+
-+# target to build an object file
-+symbols/ClassSymbols.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/ClassSymbols.cpp.o
-+.PHONY : symbols/ClassSymbols.cpp.o
-+
-+symbols/ClassSymbols.i: symbols/ClassSymbols.cpp.i
-+
-+.PHONY : symbols/ClassSymbols.i
-+
-+# target to preprocess a source file
-+symbols/ClassSymbols.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/ClassSymbols.cpp.i
-+.PHONY : symbols/ClassSymbols.cpp.i
-+
-+symbols/ClassSymbols.s: symbols/ClassSymbols.cpp.s
-+
-+.PHONY : symbols/ClassSymbols.s
-+
-+# target to generate assembly for a file
-+symbols/ClassSymbols.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/ClassSymbols.cpp.s
-+.PHONY : symbols/ClassSymbols.cpp.s
-+
-+symbols/CompilationUnitSymbols.o: symbols/CompilationUnitSymbols.cpp.o
-+
-+.PHONY : symbols/CompilationUnitSymbols.o
-+
-+# target to build an object file
-+symbols/CompilationUnitSymbols.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/CompilationUnitSymbols.cpp.o
-+.PHONY : symbols/CompilationUnitSymbols.cpp.o
-+
-+symbols/CompilationUnitSymbols.i: symbols/CompilationUnitSymbols.cpp.i
-+
-+.PHONY : symbols/CompilationUnitSymbols.i
-+
-+# target to preprocess a source file
-+symbols/CompilationUnitSymbols.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/CompilationUnitSymbols.cpp.i
-+.PHONY : symbols/CompilationUnitSymbols.cpp.i
-+
-+symbols/CompilationUnitSymbols.s: symbols/CompilationUnitSymbols.cpp.s
-+
-+.PHONY : symbols/CompilationUnitSymbols.s
-+
-+# target to generate assembly for a file
-+symbols/CompilationUnitSymbols.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/CompilationUnitSymbols.cpp.s
-+.PHONY : symbols/CompilationUnitSymbols.cpp.s
-+
-+symbols/DeclaredType.o: symbols/DeclaredType.cpp.o
-+
-+.PHONY : symbols/DeclaredType.o
-+
-+# target to build an object file
-+symbols/DeclaredType.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/DeclaredType.cpp.o
-+.PHONY : symbols/DeclaredType.cpp.o
-+
-+symbols/DeclaredType.i: symbols/DeclaredType.cpp.i
-+
-+.PHONY : symbols/DeclaredType.i
-+
-+# target to preprocess a source file
-+symbols/DeclaredType.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/DeclaredType.cpp.i
-+.PHONY : symbols/DeclaredType.cpp.i
-+
-+symbols/DeclaredType.s: symbols/DeclaredType.cpp.s
-+
-+.PHONY : symbols/DeclaredType.s
-+
-+# target to generate assembly for a file
-+symbols/DeclaredType.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/DeclaredType.cpp.s
-+.PHONY : symbols/DeclaredType.cpp.s
-+
-+symbols/InstanceSymbols.o: symbols/InstanceSymbols.cpp.o
-+
-+.PHONY : symbols/InstanceSymbols.o
-+
-+# target to build an object file
-+symbols/InstanceSymbols.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/InstanceSymbols.cpp.o
-+.PHONY : symbols/InstanceSymbols.cpp.o
-+
-+symbols/InstanceSymbols.i: symbols/InstanceSymbols.cpp.i
-+
-+.PHONY : symbols/InstanceSymbols.i
-+
-+# target to preprocess a source file
-+symbols/InstanceSymbols.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/InstanceSymbols.cpp.i
-+.PHONY : symbols/InstanceSymbols.cpp.i
-+
-+symbols/InstanceSymbols.s: symbols/InstanceSymbols.cpp.s
-+
-+.PHONY : symbols/InstanceSymbols.s
-+
-+# target to generate assembly for a file
-+symbols/InstanceSymbols.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/InstanceSymbols.cpp.s
-+.PHONY : symbols/InstanceSymbols.cpp.s
-+
-+symbols/Lookup.o: symbols/Lookup.cpp.o
-+
-+.PHONY : symbols/Lookup.o
-+
-+# target to build an object file
-+symbols/Lookup.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/Lookup.cpp.o
-+.PHONY : symbols/Lookup.cpp.o
-+
-+symbols/Lookup.i: symbols/Lookup.cpp.i
-+
-+.PHONY : symbols/Lookup.i
-+
-+# target to preprocess a source file
-+symbols/Lookup.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/Lookup.cpp.i
-+.PHONY : symbols/Lookup.cpp.i
-+
-+symbols/Lookup.s: symbols/Lookup.cpp.s
-+
-+.PHONY : symbols/Lookup.s
-+
-+# target to generate assembly for a file
-+symbols/Lookup.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/Lookup.cpp.s
-+.PHONY : symbols/Lookup.cpp.s
-+
-+symbols/MemberSymbols.o: symbols/MemberSymbols.cpp.o
-+
-+.PHONY : symbols/MemberSymbols.o
-+
-+# target to build an object file
-+symbols/MemberSymbols.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/MemberSymbols.cpp.o
-+.PHONY : symbols/MemberSymbols.cpp.o
-+
-+symbols/MemberSymbols.i: symbols/MemberSymbols.cpp.i
-+
-+.PHONY : symbols/MemberSymbols.i
-+
-+# target to preprocess a source file
-+symbols/MemberSymbols.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/MemberSymbols.cpp.i
-+.PHONY : symbols/MemberSymbols.cpp.i
-+
-+symbols/MemberSymbols.s: symbols/MemberSymbols.cpp.s
-+
-+.PHONY : symbols/MemberSymbols.s
-+
-+# target to generate assembly for a file
-+symbols/MemberSymbols.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/MemberSymbols.cpp.s
-+.PHONY : symbols/MemberSymbols.cpp.s
-+
-+symbols/ParameterBuilder.o: symbols/ParameterBuilder.cpp.o
-+
-+.PHONY : symbols/ParameterBuilder.o
-+
-+# target to build an object file
-+symbols/ParameterBuilder.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/ParameterBuilder.cpp.o
-+.PHONY : symbols/ParameterBuilder.cpp.o
-+
-+symbols/ParameterBuilder.i: symbols/ParameterBuilder.cpp.i
-+
-+.PHONY : symbols/ParameterBuilder.i
-+
-+# target to preprocess a source file
-+symbols/ParameterBuilder.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/ParameterBuilder.cpp.i
-+.PHONY : symbols/ParameterBuilder.cpp.i
-+
-+symbols/ParameterBuilder.s: symbols/ParameterBuilder.cpp.s
-+
-+.PHONY : symbols/ParameterBuilder.s
-+
-+# target to generate assembly for a file
-+symbols/ParameterBuilder.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/ParameterBuilder.cpp.s
-+.PHONY : symbols/ParameterBuilder.cpp.s
-+
-+symbols/ParameterSymbols.o: symbols/ParameterSymbols.cpp.o
-+
-+.PHONY : symbols/ParameterSymbols.o
-+
-+# target to build an object file
-+symbols/ParameterSymbols.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/ParameterSymbols.cpp.o
-+.PHONY : symbols/ParameterSymbols.cpp.o
-+
-+symbols/ParameterSymbols.i: symbols/ParameterSymbols.cpp.i
-+
-+.PHONY : symbols/ParameterSymbols.i
-+
-+# target to preprocess a source file
-+symbols/ParameterSymbols.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/ParameterSymbols.cpp.i
-+.PHONY : symbols/ParameterSymbols.cpp.i
-+
-+symbols/ParameterSymbols.s: symbols/ParameterSymbols.cpp.s
-+
-+.PHONY : symbols/ParameterSymbols.s
-+
-+# target to generate assembly for a file
-+symbols/ParameterSymbols.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/ParameterSymbols.cpp.s
-+.PHONY : symbols/ParameterSymbols.cpp.s
-+
-+symbols/PortSymbols.o: symbols/PortSymbols.cpp.o
-+
-+.PHONY : symbols/PortSymbols.o
-+
-+# target to build an object file
-+symbols/PortSymbols.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/PortSymbols.cpp.o
-+.PHONY : symbols/PortSymbols.cpp.o
-+
-+symbols/PortSymbols.i: symbols/PortSymbols.cpp.i
-+
-+.PHONY : symbols/PortSymbols.i
-+
-+# target to preprocess a source file
-+symbols/PortSymbols.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/PortSymbols.cpp.i
-+.PHONY : symbols/PortSymbols.cpp.i
-+
-+symbols/PortSymbols.s: symbols/PortSymbols.cpp.s
-+
-+.PHONY : symbols/PortSymbols.s
-+
-+# target to generate assembly for a file
-+symbols/PortSymbols.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/PortSymbols.cpp.s
-+.PHONY : symbols/PortSymbols.cpp.s
-+
-+symbols/Scope.o: symbols/Scope.cpp.o
-+
-+.PHONY : symbols/Scope.o
-+
-+# target to build an object file
-+symbols/Scope.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/Scope.cpp.o
-+.PHONY : symbols/Scope.cpp.o
-+
-+symbols/Scope.i: symbols/Scope.cpp.i
-+
-+.PHONY : symbols/Scope.i
-+
-+# target to preprocess a source file
-+symbols/Scope.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/Scope.cpp.i
-+.PHONY : symbols/Scope.cpp.i
-+
-+symbols/Scope.s: symbols/Scope.cpp.s
-+
-+.PHONY : symbols/Scope.s
-+
-+# target to generate assembly for a file
-+symbols/Scope.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/Scope.cpp.s
-+.PHONY : symbols/Scope.cpp.s
-+
-+symbols/SemanticFacts.o: symbols/SemanticFacts.cpp.o
-+
-+.PHONY : symbols/SemanticFacts.o
-+
-+# target to build an object file
-+symbols/SemanticFacts.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/SemanticFacts.cpp.o
-+.PHONY : symbols/SemanticFacts.cpp.o
-+
-+symbols/SemanticFacts.i: symbols/SemanticFacts.cpp.i
-+
-+.PHONY : symbols/SemanticFacts.i
-+
-+# target to preprocess a source file
-+symbols/SemanticFacts.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/SemanticFacts.cpp.i
-+.PHONY : symbols/SemanticFacts.cpp.i
-+
-+symbols/SemanticFacts.s: symbols/SemanticFacts.cpp.s
-+
-+.PHONY : symbols/SemanticFacts.s
-+
-+# target to generate assembly for a file
-+symbols/SemanticFacts.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/SemanticFacts.cpp.s
-+.PHONY : symbols/SemanticFacts.cpp.s
-+
-+symbols/Symbol.o: symbols/Symbol.cpp.o
-+
-+.PHONY : symbols/Symbol.o
-+
-+# target to build an object file
-+symbols/Symbol.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/Symbol.cpp.o
-+.PHONY : symbols/Symbol.cpp.o
-+
-+symbols/Symbol.i: symbols/Symbol.cpp.i
-+
-+.PHONY : symbols/Symbol.i
-+
-+# target to preprocess a source file
-+symbols/Symbol.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/Symbol.cpp.i
-+.PHONY : symbols/Symbol.cpp.i
-+
-+symbols/Symbol.s: symbols/Symbol.cpp.s
-+
-+.PHONY : symbols/Symbol.s
-+
-+# target to generate assembly for a file
-+symbols/Symbol.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/Symbol.cpp.s
-+.PHONY : symbols/Symbol.cpp.s
-+
-+symbols/Type.o: symbols/Type.cpp.o
-+
-+.PHONY : symbols/Type.o
-+
-+# target to build an object file
-+symbols/Type.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/Type.cpp.o
-+.PHONY : symbols/Type.cpp.o
-+
-+symbols/Type.i: symbols/Type.cpp.i
-+
-+.PHONY : symbols/Type.i
-+
-+# target to preprocess a source file
-+symbols/Type.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/Type.cpp.i
-+.PHONY : symbols/Type.cpp.i
-+
-+symbols/Type.s: symbols/Type.cpp.s
-+
-+.PHONY : symbols/Type.s
-+
-+# target to generate assembly for a file
-+symbols/Type.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/Type.cpp.s
-+.PHONY : symbols/Type.cpp.s
-+
-+symbols/TypePrinter.o: symbols/TypePrinter.cpp.o
-+
-+.PHONY : symbols/TypePrinter.o
-+
-+# target to build an object file
-+symbols/TypePrinter.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/TypePrinter.cpp.o
-+.PHONY : symbols/TypePrinter.cpp.o
-+
-+symbols/TypePrinter.i: symbols/TypePrinter.cpp.i
-+
-+.PHONY : symbols/TypePrinter.i
-+
-+# target to preprocess a source file
-+symbols/TypePrinter.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/TypePrinter.cpp.i
-+.PHONY : symbols/TypePrinter.cpp.i
-+
-+symbols/TypePrinter.s: symbols/TypePrinter.cpp.s
-+
-+.PHONY : symbols/TypePrinter.s
-+
-+# target to generate assembly for a file
-+symbols/TypePrinter.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/TypePrinter.cpp.s
-+.PHONY : symbols/TypePrinter.cpp.s
-+
-+symbols/VariableSymbols.o: symbols/VariableSymbols.cpp.o
-+
-+.PHONY : symbols/VariableSymbols.o
-+
-+# target to build an object file
-+symbols/VariableSymbols.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/VariableSymbols.cpp.o
-+.PHONY : symbols/VariableSymbols.cpp.o
-+
-+symbols/VariableSymbols.i: symbols/VariableSymbols.cpp.i
-+
-+.PHONY : symbols/VariableSymbols.i
-+
-+# target to preprocess a source file
-+symbols/VariableSymbols.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/VariableSymbols.cpp.i
-+.PHONY : symbols/VariableSymbols.cpp.i
-+
-+symbols/VariableSymbols.s: symbols/VariableSymbols.cpp.s
-+
-+.PHONY : symbols/VariableSymbols.s
-+
-+# target to generate assembly for a file
-+symbols/VariableSymbols.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcompiler.dir/build.make source/CMakeFiles/slangcompiler.dir/symbols/VariableSymbols.cpp.s
-+.PHONY : symbols/VariableSymbols.cpp.s
-+
-+syntax/SyntaxFacts.o: syntax/SyntaxFacts.cpp.o
-+
-+.PHONY : syntax/SyntaxFacts.o
-+
-+# target to build an object file
-+syntax/SyntaxFacts.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/syntax/SyntaxFacts.cpp.o
-+.PHONY : syntax/SyntaxFacts.cpp.o
-+
-+syntax/SyntaxFacts.i: syntax/SyntaxFacts.cpp.i
-+
-+.PHONY : syntax/SyntaxFacts.i
-+
-+# target to preprocess a source file
-+syntax/SyntaxFacts.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/syntax/SyntaxFacts.cpp.i
-+.PHONY : syntax/SyntaxFacts.cpp.i
-+
-+syntax/SyntaxFacts.s: syntax/SyntaxFacts.cpp.s
-+
-+.PHONY : syntax/SyntaxFacts.s
-+
-+# target to generate assembly for a file
-+syntax/SyntaxFacts.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/syntax/SyntaxFacts.cpp.s
-+.PHONY : syntax/SyntaxFacts.cpp.s
-+
-+syntax/SyntaxNode.o: syntax/SyntaxNode.cpp.o
-+
-+.PHONY : syntax/SyntaxNode.o
-+
-+# target to build an object file
-+syntax/SyntaxNode.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/syntax/SyntaxNode.cpp.o
-+.PHONY : syntax/SyntaxNode.cpp.o
-+
-+syntax/SyntaxNode.i: syntax/SyntaxNode.cpp.i
-+
-+.PHONY : syntax/SyntaxNode.i
-+
-+# target to preprocess a source file
-+syntax/SyntaxNode.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/syntax/SyntaxNode.cpp.i
-+.PHONY : syntax/SyntaxNode.cpp.i
-+
-+syntax/SyntaxNode.s: syntax/SyntaxNode.cpp.s
-+
-+.PHONY : syntax/SyntaxNode.s
-+
-+# target to generate assembly for a file
-+syntax/SyntaxNode.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/syntax/SyntaxNode.cpp.s
-+.PHONY : syntax/SyntaxNode.cpp.s
-+
-+syntax/SyntaxPrinter.o: syntax/SyntaxPrinter.cpp.o
-+
-+.PHONY : syntax/SyntaxPrinter.o
-+
-+# target to build an object file
-+syntax/SyntaxPrinter.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/syntax/SyntaxPrinter.cpp.o
-+.PHONY : syntax/SyntaxPrinter.cpp.o
-+
-+syntax/SyntaxPrinter.i: syntax/SyntaxPrinter.cpp.i
-+
-+.PHONY : syntax/SyntaxPrinter.i
-+
-+# target to preprocess a source file
-+syntax/SyntaxPrinter.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/syntax/SyntaxPrinter.cpp.i
-+.PHONY : syntax/SyntaxPrinter.cpp.i
-+
-+syntax/SyntaxPrinter.s: syntax/SyntaxPrinter.cpp.s
-+
-+.PHONY : syntax/SyntaxPrinter.s
-+
-+# target to generate assembly for a file
-+syntax/SyntaxPrinter.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/syntax/SyntaxPrinter.cpp.s
-+.PHONY : syntax/SyntaxPrinter.cpp.s
-+
-+syntax/SyntaxTree.o: syntax/SyntaxTree.cpp.o
-+
-+.PHONY : syntax/SyntaxTree.o
-+
-+# target to build an object file
-+syntax/SyntaxTree.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/syntax/SyntaxTree.cpp.o
-+.PHONY : syntax/SyntaxTree.cpp.o
-+
-+syntax/SyntaxTree.i: syntax/SyntaxTree.cpp.i
-+
-+.PHONY : syntax/SyntaxTree.i
-+
-+# target to preprocess a source file
-+syntax/SyntaxTree.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/syntax/SyntaxTree.cpp.i
-+.PHONY : syntax/SyntaxTree.cpp.i
-+
-+syntax/SyntaxTree.s: syntax/SyntaxTree.cpp.s
-+
-+.PHONY : syntax/SyntaxTree.s
-+
-+# target to generate assembly for a file
-+syntax/SyntaxTree.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/syntax/SyntaxTree.cpp.s
-+.PHONY : syntax/SyntaxTree.cpp.s
-+
-+syntax/SyntaxVisitor.o: syntax/SyntaxVisitor.cpp.o
-+
-+.PHONY : syntax/SyntaxVisitor.o
-+
-+# target to build an object file
-+syntax/SyntaxVisitor.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/syntax/SyntaxVisitor.cpp.o
-+.PHONY : syntax/SyntaxVisitor.cpp.o
-+
-+syntax/SyntaxVisitor.i: syntax/SyntaxVisitor.cpp.i
-+
-+.PHONY : syntax/SyntaxVisitor.i
-+
-+# target to preprocess a source file
-+syntax/SyntaxVisitor.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/syntax/SyntaxVisitor.cpp.i
-+.PHONY : syntax/SyntaxVisitor.cpp.i
-+
-+syntax/SyntaxVisitor.s: syntax/SyntaxVisitor.cpp.s
-+
-+.PHONY : syntax/SyntaxVisitor.s
-+
-+# target to generate assembly for a file
-+syntax/SyntaxVisitor.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangparser.dir/build.make source/CMakeFiles/slangparser.dir/syntax/SyntaxVisitor.cpp.s
-+.PHONY : syntax/SyntaxVisitor.cpp.s
-+
-+text/Json.o: text/Json.cpp.o
-+
-+.PHONY : text/Json.o
-+
-+# target to build an object file
-+text/Json.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/text/Json.cpp.o
-+.PHONY : text/Json.cpp.o
-+
-+text/Json.i: text/Json.cpp.i
-+
-+.PHONY : text/Json.i
-+
-+# target to preprocess a source file
-+text/Json.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/text/Json.cpp.i
-+.PHONY : text/Json.cpp.i
-+
-+text/Json.s: text/Json.cpp.s
-+
-+.PHONY : text/Json.s
-+
-+# target to generate assembly for a file
-+text/Json.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/text/Json.cpp.s
-+.PHONY : text/Json.cpp.s
-+
-+text/SFormat.o: text/SFormat.cpp.o
-+
-+.PHONY : text/SFormat.o
-+
-+# target to build an object file
-+text/SFormat.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/text/SFormat.cpp.o
-+.PHONY : text/SFormat.cpp.o
-+
-+text/SFormat.i: text/SFormat.cpp.i
-+
-+.PHONY : text/SFormat.i
-+
-+# target to preprocess a source file
-+text/SFormat.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/text/SFormat.cpp.i
-+.PHONY : text/SFormat.cpp.i
-+
-+text/SFormat.s: text/SFormat.cpp.s
-+
-+.PHONY : text/SFormat.s
-+
-+# target to generate assembly for a file
-+text/SFormat.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/text/SFormat.cpp.s
-+.PHONY : text/SFormat.cpp.s
-+
-+text/SourceManager.o: text/SourceManager.cpp.o
-+
-+.PHONY : text/SourceManager.o
-+
-+# target to build an object file
-+text/SourceManager.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/text/SourceManager.cpp.o
-+.PHONY : text/SourceManager.cpp.o
-+
-+text/SourceManager.i: text/SourceManager.cpp.i
-+
-+.PHONY : text/SourceManager.i
-+
-+# target to preprocess a source file
-+text/SourceManager.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/text/SourceManager.cpp.i
-+.PHONY : text/SourceManager.cpp.i
-+
-+text/SourceManager.s: text/SourceManager.cpp.s
-+
-+.PHONY : text/SourceManager.s
-+
-+# target to generate assembly for a file
-+text/SourceManager.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/text/SourceManager.cpp.s
-+.PHONY : text/SourceManager.cpp.s
-+
-+util/Assert.o: util/Assert.cpp.o
-+
-+.PHONY : util/Assert.o
-+
-+# target to build an object file
-+util/Assert.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/util/Assert.cpp.o
-+.PHONY : util/Assert.cpp.o
-+
-+util/Assert.i: util/Assert.cpp.i
-+
-+.PHONY : util/Assert.i
-+
-+# target to preprocess a source file
-+util/Assert.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/util/Assert.cpp.i
-+.PHONY : util/Assert.cpp.i
-+
-+util/Assert.s: util/Assert.cpp.s
-+
-+.PHONY : util/Assert.s
-+
-+# target to generate assembly for a file
-+util/Assert.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/util/Assert.cpp.s
-+.PHONY : util/Assert.cpp.s
-+
-+util/BumpAllocator.o: util/BumpAllocator.cpp.o
-+
-+.PHONY : util/BumpAllocator.o
-+
-+# target to build an object file
-+util/BumpAllocator.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/util/BumpAllocator.cpp.o
-+.PHONY : util/BumpAllocator.cpp.o
-+
-+util/BumpAllocator.i: util/BumpAllocator.cpp.i
-+
-+.PHONY : util/BumpAllocator.i
-+
-+# target to preprocess a source file
-+util/BumpAllocator.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/util/BumpAllocator.cpp.i
-+.PHONY : util/BumpAllocator.cpp.i
-+
-+util/BumpAllocator.s: util/BumpAllocator.cpp.s
-+
-+.PHONY : util/BumpAllocator.s
-+
-+# target to generate assembly for a file
-+util/BumpAllocator.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/util/BumpAllocator.cpp.s
-+.PHONY : util/BumpAllocator.cpp.s
-+
-+util/CommandLine.o: util/CommandLine.cpp.o
-+
-+.PHONY : util/CommandLine.o
-+
-+# target to build an object file
-+util/CommandLine.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/util/CommandLine.cpp.o
-+.PHONY : util/CommandLine.cpp.o
-+
-+util/CommandLine.i: util/CommandLine.cpp.i
-+
-+.PHONY : util/CommandLine.i
-+
-+# target to preprocess a source file
-+util/CommandLine.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/util/CommandLine.cpp.i
-+.PHONY : util/CommandLine.cpp.i
-+
-+util/CommandLine.s: util/CommandLine.cpp.s
-+
-+.PHONY : util/CommandLine.s
-+
-+# target to generate assembly for a file
-+util/CommandLine.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/util/CommandLine.cpp.s
-+.PHONY : util/CommandLine.cpp.s
-+
-+util/OS.o: util/OS.cpp.o
-+
-+.PHONY : util/OS.o
-+
-+# target to build an object file
-+util/OS.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/util/OS.cpp.o
-+.PHONY : util/OS.cpp.o
-+
-+util/OS.i: util/OS.cpp.i
-+
-+.PHONY : util/OS.i
-+
-+# target to preprocess a source file
-+util/OS.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/util/OS.cpp.i
-+.PHONY : util/OS.cpp.i
-+
-+util/OS.s: util/OS.cpp.s
-+
-+.PHONY : util/OS.s
-+
-+# target to generate assembly for a file
-+util/OS.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/util/OS.cpp.s
-+.PHONY : util/OS.cpp.s
-+
-+util/String.o: util/String.cpp.o
-+
-+.PHONY : util/String.o
-+
-+# target to build an object file
-+util/String.cpp.o:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/util/String.cpp.o
-+.PHONY : util/String.cpp.o
-+
-+util/String.i: util/String.cpp.i
-+
-+.PHONY : util/String.i
-+
-+# target to preprocess a source file
-+util/String.cpp.i:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/util/String.cpp.i
-+.PHONY : util/String.cpp.i
-+
-+util/String.s: util/String.cpp.s
-+
-+.PHONY : util/String.s
-+
-+# target to generate assembly for a file
-+util/String.cpp.s:
-+	cd /soe/renau/projs/synth/slang/build && $(MAKE) $(MAKESILENT) -f source/CMakeFiles/slangcore.dir/build.make source/CMakeFiles/slangcore.dir/util/String.cpp.s
-+.PHONY : util/String.cpp.s
-+
-+# Help Target
-+help:
-+	@echo "The following are some of the valid targets for this Makefile:"
-+	@echo "... all (the default if no target is provided)"
-+	@echo "... clean"
-+	@echo "... depend"
-+	@echo "... edit_cache"
-+	@echo "... install"
-+	@echo "... install/local"
-+	@echo "... install/strip"
-+	@echo "... list_install_components"
-+	@echo "... rebuild_cache"
-+	@echo "... test"
-+	@echo "... gen_version"
-+	@echo "... slangcompiler"
-+	@echo "... slangcore"
-+	@echo "... slangparser"
-+	@echo "... slangruntime"
-+	@echo "... AllSyntax.o"
-+	@echo "... AllSyntax.i"
-+	@echo "... AllSyntax.s"
-+	@echo "... DiagCode.o"
-+	@echo "... DiagCode.i"
-+	@echo "... DiagCode.s"
-+	@echo "... Version.o"
-+	@echo "... Version.i"
-+	@echo "... Version.s"
-+	@echo "... __/external/fmt/format.o"
-+	@echo "... __/external/fmt/format.i"
-+	@echo "... __/external/fmt/format.s"
-+	@echo "... __/external/fmt/os.o"
-+	@echo "... __/external/fmt/os.i"
-+	@echo "... __/external/fmt/os.s"
-+	@echo "... __/external/xxhash/xxhash.o"
-+	@echo "... __/external/xxhash/xxhash.i"
-+	@echo "... __/external/xxhash/xxhash.s"
-+	@echo "... binding/AssignmentExpressions.o"
-+	@echo "... binding/AssignmentExpressions.i"
-+	@echo "... binding/AssignmentExpressions.s"
-+	@echo "... binding/BindContext.o"
-+	@echo "... binding/BindContext.i"
-+	@echo "... binding/BindContext.s"
-+	@echo "... binding/Bitstream.o"
-+	@echo "... binding/Bitstream.i"
-+	@echo "... binding/Bitstream.s"
-+	@echo "... binding/EvalContext.o"
-+	@echo "... binding/EvalContext.i"
-+	@echo "... binding/EvalContext.s"
-+	@echo "... binding/Expression.o"
-+	@echo "... binding/Expression.i"
-+	@echo "... binding/Expression.s"
-+	@echo "... binding/FormatHelpers.o"
-+	@echo "... binding/FormatHelpers.i"
-+	@echo "... binding/FormatHelpers.s"
-+	@echo "... binding/LValue.o"
-+	@echo "... binding/LValue.i"
-+	@echo "... binding/LValue.s"
-+	@echo "... binding/LiteralExpressions.o"
-+	@echo "... binding/LiteralExpressions.i"
-+	@echo "... binding/LiteralExpressions.s"
-+	@echo "... binding/MiscExpressions.o"
-+	@echo "... binding/MiscExpressions.i"
-+	@echo "... binding/MiscExpressions.s"
-+	@echo "... binding/OperatorExpressions.o"
-+	@echo "... binding/OperatorExpressions.i"
-+	@echo "... binding/OperatorExpressions.s"
-+	@echo "... binding/PatternExpressions.o"
-+	@echo "... binding/PatternExpressions.i"
-+	@echo "... binding/PatternExpressions.s"
-+	@echo "... binding/SelectExpressions.o"
-+	@echo "... binding/SelectExpressions.i"
-+	@echo "... binding/SelectExpressions.s"
-+	@echo "... binding/Statements.o"
-+	@echo "... binding/Statements.i"
-+	@echo "... binding/Statements.s"
-+	@echo "... binding/SystemSubroutine.o"
-+	@echo "... binding/SystemSubroutine.i"
-+	@echo "... binding/SystemSubroutine.s"
-+	@echo "... binding/TimingControl.o"
-+	@echo "... binding/TimingControl.i"
-+	@echo "... binding/TimingControl.s"
-+	@echo "... compilation/Compilation.o"
-+	@echo "... compilation/Compilation.i"
-+	@echo "... compilation/Compilation.s"
-+	@echo "... compilation/Definition.o"
-+	@echo "... compilation/Definition.i"
-+	@echo "... compilation/Definition.s"
-+	@echo "... compilation/InstanceCache.o"
-+	@echo "... compilation/InstanceCache.i"
-+	@echo "... compilation/InstanceCache.s"
-+	@echo "... compilation/ScriptSession.o"
-+	@echo "... compilation/ScriptSession.i"
-+	@echo "... compilation/ScriptSession.s"
-+	@echo "... compilation/SemanticModel.o"
-+	@echo "... compilation/SemanticModel.i"
-+	@echo "... compilation/SemanticModel.s"
-+	@echo "... compilation/builtins/ArrayMethods.o"
-+	@echo "... compilation/builtins/ArrayMethods.i"
-+	@echo "... compilation/builtins/ArrayMethods.s"
-+	@echo "... compilation/builtins/ConversionFuncs.o"
-+	@echo "... compilation/builtins/ConversionFuncs.i"
-+	@echo "... compilation/builtins/ConversionFuncs.s"
-+	@echo "... compilation/builtins/EnumMethods.o"
-+	@echo "... compilation/builtins/EnumMethods.i"
-+	@echo "... compilation/builtins/EnumMethods.s"
-+	@echo "... compilation/builtins/MathFuncs.o"
-+	@echo "... compilation/builtins/MathFuncs.i"
-+	@echo "... compilation/builtins/MathFuncs.s"
-+	@echo "... compilation/builtins/MiscSystemFuncs.o"
-+	@echo "... compilation/builtins/MiscSystemFuncs.i"
-+	@echo "... compilation/builtins/MiscSystemFuncs.s"
-+	@echo "... compilation/builtins/NonConstFuncs.o"
-+	@echo "... compilation/builtins/NonConstFuncs.i"
-+	@echo "... compilation/builtins/NonConstFuncs.s"
-+	@echo "... compilation/builtins/QueryFuncs.o"
-+	@echo "... compilation/builtins/QueryFuncs.i"
-+	@echo "... compilation/builtins/QueryFuncs.s"
-+	@echo "... compilation/builtins/StringMethods.o"
-+	@echo "... compilation/builtins/StringMethods.i"
-+	@echo "... compilation/builtins/StringMethods.s"
-+	@echo "... compilation/builtins/SystemTasks.o"
-+	@echo "... compilation/builtins/SystemTasks.i"
-+	@echo "... compilation/builtins/SystemTasks.s"
-+	@echo "... diagnostics/DiagnosticClient.o"
-+	@echo "... diagnostics/DiagnosticClient.i"
-+	@echo "... diagnostics/DiagnosticClient.s"
-+	@echo "... diagnostics/DiagnosticEngine.o"
-+	@echo "... diagnostics/DiagnosticEngine.i"
-+	@echo "... diagnostics/DiagnosticEngine.s"
-+	@echo "... diagnostics/Diagnostics.o"
-+	@echo "... diagnostics/Diagnostics.i"
-+	@echo "... diagnostics/Diagnostics.s"
-+	@echo "... diagnostics/TextDiagnosticClient.o"
-+	@echo "... diagnostics/TextDiagnosticClient.i"
-+	@echo "... diagnostics/TextDiagnosticClient.s"
-+	@echo "... mir/Instr.o"
-+	@echo "... mir/Instr.i"
-+	@echo "... mir/Instr.s"
-+	@echo "... mir/MIRBuilder.o"
-+	@echo "... mir/MIRBuilder.i"
-+	@echo "... mir/MIRBuilder.s"
-+	@echo "... mir/MIRPrinter.o"
-+	@echo "... mir/MIRPrinter.i"
-+	@echo "... mir/MIRPrinter.s"
-+	@echo "... mir/Procedure.o"
-+	@echo "... mir/Procedure.i"
-+	@echo "... mir/Procedure.s"
-+	@echo "... numeric/ConstantValue.o"
-+	@echo "... numeric/ConstantValue.i"
-+	@echo "... numeric/ConstantValue.s"
-+	@echo "... numeric/SVInt.o"
-+	@echo "... numeric/SVInt.i"
-+	@echo "... numeric/SVInt.s"
-+	@echo "... numeric/Time.o"
-+	@echo "... numeric/Time.i"
-+	@echo "... numeric/Time.s"
-+	@echo "... parsing/Lexer.o"
-+	@echo "... parsing/Lexer.i"
-+	@echo "... parsing/Lexer.s"
-+	@echo "... parsing/LexerFacts.o"
-+	@echo "... parsing/LexerFacts.i"
-+	@echo "... parsing/LexerFacts.s"
-+	@echo "... parsing/NumberParser.o"
-+	@echo "... parsing/NumberParser.i"
-+	@echo "... parsing/NumberParser.s"
-+	@echo "... parsing/Parser.o"
-+	@echo "... parsing/Parser.i"
-+	@echo "... parsing/Parser.s"
-+	@echo "... parsing/ParserBase.o"
-+	@echo "... parsing/ParserBase.i"
-+	@echo "... parsing/ParserBase.s"
-+	@echo "... parsing/Parser_expressions.o"
-+	@echo "... parsing/Parser_expressions.i"
-+	@echo "... parsing/Parser_expressions.s"
-+	@echo "... parsing/Parser_members.o"
-+	@echo "... parsing/Parser_members.i"
-+	@echo "... parsing/Parser_members.s"
-+	@echo "... parsing/Parser_statements.o"
-+	@echo "... parsing/Parser_statements.i"
-+	@echo "... parsing/Parser_statements.s"
-+	@echo "... parsing/Preprocessor.o"
-+	@echo "... parsing/Preprocessor.i"
-+	@echo "... parsing/Preprocessor.s"
-+	@echo "... parsing/Preprocessor_macros.o"
-+	@echo "... parsing/Preprocessor_macros.i"
-+	@echo "... parsing/Preprocessor_macros.s"
-+	@echo "... parsing/Token.o"
-+	@echo "... parsing/Token.i"
-+	@echo "... parsing/Token.s"
-+	@echo "... runtime/Runtime.o"
-+	@echo "... runtime/Runtime.i"
-+	@echo "... runtime/Runtime.s"
-+	@echo "... runtime/SimIO.o"
-+	@echo "... runtime/SimIO.i"
-+	@echo "... runtime/SimIO.s"
-+	@echo "... symbols/ASTSerializer.o"
-+	@echo "... symbols/ASTSerializer.i"
-+	@echo "... symbols/ASTSerializer.s"
-+	@echo "... symbols/AllTypes.o"
-+	@echo "... symbols/AllTypes.i"
-+	@echo "... symbols/AllTypes.s"
-+	@echo "... symbols/AttributeSymbol.o"
-+	@echo "... symbols/AttributeSymbol.i"
-+	@echo "... symbols/AttributeSymbol.s"
-+	@echo "... symbols/BlockSymbols.o"
-+	@echo "... symbols/BlockSymbols.i"
-+	@echo "... symbols/BlockSymbols.s"
-+	@echo "... symbols/ClassSymbols.o"
-+	@echo "... symbols/ClassSymbols.i"
-+	@echo "... symbols/ClassSymbols.s"
-+	@echo "... symbols/CompilationUnitSymbols.o"
-+	@echo "... symbols/CompilationUnitSymbols.i"
-+	@echo "... symbols/CompilationUnitSymbols.s"
-+	@echo "... symbols/DeclaredType.o"
-+	@echo "... symbols/DeclaredType.i"
-+	@echo "... symbols/DeclaredType.s"
-+	@echo "... symbols/InstanceSymbols.o"
-+	@echo "... symbols/InstanceSymbols.i"
-+	@echo "... symbols/InstanceSymbols.s"
-+	@echo "... symbols/Lookup.o"
-+	@echo "... symbols/Lookup.i"
-+	@echo "... symbols/Lookup.s"
-+	@echo "... symbols/MemberSymbols.o"
-+	@echo "... symbols/MemberSymbols.i"
-+	@echo "... symbols/MemberSymbols.s"
-+	@echo "... symbols/ParameterBuilder.o"
-+	@echo "... symbols/ParameterBuilder.i"
-+	@echo "... symbols/ParameterBuilder.s"
-+	@echo "... symbols/ParameterSymbols.o"
-+	@echo "... symbols/ParameterSymbols.i"
-+	@echo "... symbols/ParameterSymbols.s"
-+	@echo "... symbols/PortSymbols.o"
-+	@echo "... symbols/PortSymbols.i"
-+	@echo "... symbols/PortSymbols.s"
-+	@echo "... symbols/Scope.o"
-+	@echo "... symbols/Scope.i"
-+	@echo "... symbols/Scope.s"
-+	@echo "... symbols/SemanticFacts.o"
-+	@echo "... symbols/SemanticFacts.i"
-+	@echo "... symbols/SemanticFacts.s"
-+	@echo "... symbols/Symbol.o"
-+	@echo "... symbols/Symbol.i"
-+	@echo "... symbols/Symbol.s"
-+	@echo "... symbols/Type.o"
-+	@echo "... symbols/Type.i"
-+	@echo "... symbols/Type.s"
-+	@echo "... symbols/TypePrinter.o"
-+	@echo "... symbols/TypePrinter.i"
-+	@echo "... symbols/TypePrinter.s"
-+	@echo "... symbols/VariableSymbols.o"
-+	@echo "... symbols/VariableSymbols.i"
-+	@echo "... symbols/VariableSymbols.s"
-+	@echo "... syntax/SyntaxFacts.o"
-+	@echo "... syntax/SyntaxFacts.i"
-+	@echo "... syntax/SyntaxFacts.s"
-+	@echo "... syntax/SyntaxNode.o"
-+	@echo "... syntax/SyntaxNode.i"
-+	@echo "... syntax/SyntaxNode.s"
-+	@echo "... syntax/SyntaxPrinter.o"
-+	@echo "... syntax/SyntaxPrinter.i"
-+	@echo "... syntax/SyntaxPrinter.s"
-+	@echo "... syntax/SyntaxTree.o"
-+	@echo "... syntax/SyntaxTree.i"
-+	@echo "... syntax/SyntaxTree.s"
-+	@echo "... syntax/SyntaxVisitor.o"
-+	@echo "... syntax/SyntaxVisitor.i"
-+	@echo "... syntax/SyntaxVisitor.s"
-+	@echo "... text/Json.o"
-+	@echo "... text/Json.i"
-+	@echo "... text/Json.s"
-+	@echo "... text/SFormat.o"
-+	@echo "... text/SFormat.i"
-+	@echo "... text/SFormat.s"
-+	@echo "... text/SourceManager.o"
-+	@echo "... text/SourceManager.i"
-+	@echo "... text/SourceManager.s"
-+	@echo "... util/Assert.o"
-+	@echo "... util/Assert.i"
-+	@echo "... util/Assert.s"
-+	@echo "... util/BumpAllocator.o"
-+	@echo "... util/BumpAllocator.i"
-+	@echo "... util/BumpAllocator.s"
-+	@echo "... util/CommandLine.o"
-+	@echo "... util/CommandLine.i"
-+	@echo "... util/CommandLine.s"
-+	@echo "... util/OS.o"
-+	@echo "... util/OS.i"
-+	@echo "... util/OS.s"
-+	@echo "... util/String.o"
-+	@echo "... util/String.i"
-+	@echo "... util/String.s"
-+.PHONY : help
-+
-+
-+
-+#=============================================================================
-+# Special targets to cleanup operation of make.
-+
-+# Special rule to run CMake to check the build system integrity.
-+# No rule that depends on this can have commands that come from listfiles
-+# because they might be regenerated.
-+cmake_check_build_system:
-+	cd /soe/renau/projs/synth/slang/build && $(CMAKE_COMMAND) -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR) --check-build-system CMakeFiles/Makefile.cmake 0
-+.PHONY : cmake_check_build_system
-+
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/AllDiags.h ./generated/slang/diagnostics/AllDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/AllDiags.h ./generated/slang/diagnostics/AllDiags.h
 --- ./generated/slang/diagnostics/AllDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/AllDiags.h	2020-11-03 00:14:56.258155903 -0800
++++ ./generated/slang/diagnostics/AllDiags.h	2021-01-13 10:06:32.309060077 -0800
 @@ -0,0 +1,23 @@
 +//------------------------------------------------------------------------------
 +//! @file AllDiags.h
@@ -16945,10 +14086,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +#include "slang/diagnostics/SysFuncsDiags.h"
 +#include "slang/diagnostics/TypesDiags.h"
 +
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/CompilationDiags.h ./generated/slang/diagnostics/CompilationDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/CompilationDiags.h ./generated/slang/diagnostics/CompilationDiags.h
 --- ./generated/slang/diagnostics/CompilationDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/CompilationDiags.h	2020-11-03 00:14:56.258155903 -0800
-@@ -0,0 +1,20 @@
++++ ./generated/slang/diagnostics/CompilationDiags.h	2021-01-13 10:06:32.309060077 -0800
+@@ -0,0 +1,27 @@
 +//------------------------------------------------------------------------------
 +//! @file CompilationDiags.h
 +//! @brief Generated diagnostic enums for the Compilation subsystem
@@ -16963,16 +14104,23 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +inline constexpr DiagCode MaxInstanceDepthExceeded(DiagSubsystem::Compilation, 0);
 +inline constexpr DiagCode InvalidTopModule(DiagSubsystem::Compilation, 1);
-+inline constexpr DiagCode NoMethodInClass(DiagSubsystem::Compilation, 2);
++inline constexpr DiagCode NoDeclInClass(DiagSubsystem::Compilation, 2);
 +inline constexpr DiagCode InvalidParamOverrideOpt(DiagSubsystem::Compilation, 3);
-+inline constexpr DiagCode UnusedDefinition(DiagSubsystem::Compilation, 4);
-+inline constexpr DiagCode NoTopModules(DiagSubsystem::Compilation, 5);
++inline constexpr DiagCode DPIExportKindMismatch(DiagSubsystem::Compilation, 4);
++inline constexpr DiagCode DPIExportDifferentScope(DiagSubsystem::Compilation, 5);
++inline constexpr DiagCode DPIExportDuplicate(DiagSubsystem::Compilation, 6);
++inline constexpr DiagCode DPIExportImportedFunc(DiagSubsystem::Compilation, 7);
++inline constexpr DiagCode InvalidDPICIdentifier(DiagSubsystem::Compilation, 8);
++inline constexpr DiagCode DPISignatureMismatch(DiagSubsystem::Compilation, 9);
++inline constexpr DiagCode DPIExportDuplicateCId(DiagSubsystem::Compilation, 10);
++inline constexpr DiagCode UnusedDefinition(DiagSubsystem::Compilation, 11);
++inline constexpr DiagCode NoTopModules(DiagSubsystem::Compilation, 12);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/ConstEvalDiags.h ./generated/slang/diagnostics/ConstEvalDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/ConstEvalDiags.h ./generated/slang/diagnostics/ConstEvalDiags.h
 --- ./generated/slang/diagnostics/ConstEvalDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/ConstEvalDiags.h	2020-11-03 00:14:56.258155903 -0800
-@@ -0,0 +1,48 @@
++++ ./generated/slang/diagnostics/ConstEvalDiags.h	2021-01-13 10:06:32.309060077 -0800
+@@ -0,0 +1,52 @@
 +//------------------------------------------------------------------------------
 +//! @file ConstEvalDiags.h
 +//! @brief Generated diagnostic enums for the ConstEval subsystem
@@ -17006,25 +14154,29 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode ConstEvalExceededMaxSteps(DiagSubsystem::ConstEval, 18);
 +inline constexpr DiagCode ConstEvalTaskNotConstant(DiagSubsystem::ConstEval, 19);
 +inline constexpr DiagCode ConstEvalVoidNotConstant(DiagSubsystem::ConstEval, 20);
-+inline constexpr DiagCode ConstEvalFunctionArgDirection(DiagSubsystem::ConstEval, 21);
-+inline constexpr DiagCode ConstEvalFunctionInsideGenerate(DiagSubsystem::ConstEval, 22);
-+inline constexpr DiagCode ConstEvalDynamicToFixedSize(DiagSubsystem::ConstEval, 23);
-+inline constexpr DiagCode ConstEvalAssociativeIndexInvalid(DiagSubsystem::ConstEval, 24);
-+inline constexpr DiagCode ConstEvalDisableTarget(DiagSubsystem::ConstEval, 25);
-+inline constexpr DiagCode ConstEvalClassType(DiagSubsystem::ConstEval, 26);
-+inline constexpr DiagCode ConstEvalAssociativeElementNotFound(DiagSubsystem::ConstEval, 27);
-+inline constexpr DiagCode ConstEvalStaticSkipped(DiagSubsystem::ConstEval, 28);
-+inline constexpr DiagCode ConstEvalDynamicArrayIndex(DiagSubsystem::ConstEval, 29);
-+inline constexpr DiagCode ConstEvalDynamicArrayRange(DiagSubsystem::ConstEval, 30);
-+inline constexpr DiagCode ConstEvalQueueRange(DiagSubsystem::ConstEval, 31);
-+inline constexpr DiagCode ConstEvalEmptyQueue(DiagSubsystem::ConstEval, 32);
-+inline constexpr DiagCode ConstSysTaskIgnored(DiagSubsystem::ConstEval, 33);
++inline constexpr DiagCode ConstEvalDPINotConstant(DiagSubsystem::ConstEval, 21);
++inline constexpr DiagCode ConstEvalMethodNotConstant(DiagSubsystem::ConstEval, 22);
++inline constexpr DiagCode ConstEvalSubroutineNotConstant(DiagSubsystem::ConstEval, 23);
++inline constexpr DiagCode ConstEvalFunctionArgDirection(DiagSubsystem::ConstEval, 24);
++inline constexpr DiagCode ConstEvalFunctionInsideGenerate(DiagSubsystem::ConstEval, 25);
++inline constexpr DiagCode ConstEvalDynamicToFixedSize(DiagSubsystem::ConstEval, 26);
++inline constexpr DiagCode ConstEvalAssociativeIndexInvalid(DiagSubsystem::ConstEval, 27);
++inline constexpr DiagCode ConstEvalDisableTarget(DiagSubsystem::ConstEval, 28);
++inline constexpr DiagCode ConstEvalClassType(DiagSubsystem::ConstEval, 29);
++inline constexpr DiagCode ConstEvalProceduralAssign(DiagSubsystem::ConstEval, 30);
++inline constexpr DiagCode ConstEvalAssociativeElementNotFound(DiagSubsystem::ConstEval, 31);
++inline constexpr DiagCode ConstEvalStaticSkipped(DiagSubsystem::ConstEval, 32);
++inline constexpr DiagCode ConstEvalDynamicArrayIndex(DiagSubsystem::ConstEval, 33);
++inline constexpr DiagCode ConstEvalDynamicArrayRange(DiagSubsystem::ConstEval, 34);
++inline constexpr DiagCode ConstEvalQueueRange(DiagSubsystem::ConstEval, 35);
++inline constexpr DiagCode ConstEvalEmptyQueue(DiagSubsystem::ConstEval, 36);
++inline constexpr DiagCode ConstSysTaskIgnored(DiagSubsystem::ConstEval, 37);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/DeclarationsDiags.h ./generated/slang/diagnostics/DeclarationsDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/DeclarationsDiags.h ./generated/slang/diagnostics/DeclarationsDiags.h
 --- ./generated/slang/diagnostics/DeclarationsDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/DeclarationsDiags.h	2020-11-03 00:14:56.258155903 -0800
-@@ -0,0 +1,104 @@
++++ ./generated/slang/diagnostics/DeclarationsDiags.h	2021-01-13 10:06:32.309060077 -0800
+@@ -0,0 +1,127 @@
 +//------------------------------------------------------------------------------
 +//! @file DeclarationsDiags.h
 +//! @brief Generated diagnostic enums for the Declarations subsystem
@@ -17082,57 +14234,80 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode MixingSubroutinePortKinds(DiagSubsystem::Declarations, 42);
 +inline constexpr DiagCode UnpackedArrayParamType(DiagSubsystem::Declarations, 43);
 +inline constexpr DiagCode AutomaticNotAllowed(DiagSubsystem::Declarations, 44);
-+inline constexpr DiagCode ForeachWildcardIndex(DiagSubsystem::Declarations, 45);
-+inline constexpr DiagCode NoMethodImplFound(DiagSubsystem::Declarations, 46);
++inline constexpr DiagCode NoMemberImplFound(DiagSubsystem::Declarations, 45);
++inline constexpr DiagCode MethodKindMismatch(DiagSubsystem::Declarations, 46);
 +inline constexpr DiagCode MethodReturnMismatch(DiagSubsystem::Declarations, 47);
 +inline constexpr DiagCode MethodArgCountMismatch(DiagSubsystem::Declarations, 48);
 +inline constexpr DiagCode MethodArgNameMismatch(DiagSubsystem::Declarations, 49);
 +inline constexpr DiagCode MethodArgTypeMismatch(DiagSubsystem::Declarations, 50);
 +inline constexpr DiagCode MethodArgNoDefault(DiagSubsystem::Declarations, 51);
 +inline constexpr DiagCode MethodArgDefaultMismatch(DiagSubsystem::Declarations, 52);
-+inline constexpr DiagCode MethodDefinitionBeforeClass(DiagSubsystem::Declarations, 53);
-+inline constexpr DiagCode MethodReturnTypeScoped(DiagSubsystem::Declarations, 54);
-+inline constexpr DiagCode VirtualReturnMismatch(DiagSubsystem::Declarations, 55);
-+inline constexpr DiagCode VirtualArgCountMismatch(DiagSubsystem::Declarations, 56);
-+inline constexpr DiagCode VirtualArgNameMismatch(DiagSubsystem::Declarations, 57);
-+inline constexpr DiagCode VirtualArgTypeMismatch(DiagSubsystem::Declarations, 58);
-+inline constexpr DiagCode VirtualArgNoParentDefault(DiagSubsystem::Declarations, 59);
-+inline constexpr DiagCode VirtualArgNoDerivedDefault(DiagSubsystem::Declarations, 60);
-+inline constexpr DiagCode BaseConstructorDuplicate(DiagSubsystem::Declarations, 61);
-+inline constexpr DiagCode BaseConstructorNotCalled(DiagSubsystem::Declarations, 62);
-+inline constexpr DiagCode ConstVarNoInitializer(DiagSubsystem::Declarations, 63);
-+inline constexpr DiagCode StaticConstNoInitializer(DiagSubsystem::Declarations, 64);
-+inline constexpr DiagCode PureInAbstract(DiagSubsystem::Declarations, 65);
-+inline constexpr DiagCode BodyForPure(DiagSubsystem::Declarations, 66);
-+inline constexpr DiagCode InheritFromAbstract(DiagSubsystem::Declarations, 67);
-+inline constexpr DiagCode InvalidPortType(DiagSubsystem::Declarations, 68);
-+inline constexpr DiagCode ExtendIfaceFromClass(DiagSubsystem::Declarations, 69);
-+inline constexpr DiagCode ExtendClassFromIface(DiagSubsystem::Declarations, 70);
-+inline constexpr DiagCode ImplementNonIface(DiagSubsystem::Declarations, 71);
-+inline constexpr DiagCode IfaceNameConflict(DiagSubsystem::Declarations, 72);
-+inline constexpr DiagCode IfaceMethodHidden(DiagSubsystem::Declarations, 73);
-+inline constexpr DiagCode IfaceMethodNoImpl(DiagSubsystem::Declarations, 74);
-+inline constexpr DiagCode IfaceMethodNotVirtual(DiagSubsystem::Declarations, 75);
-+inline constexpr DiagCode NotAllowedInModport(DiagSubsystem::Declarations, 76);
-+inline constexpr DiagCode ModportConnMismatch(DiagSubsystem::Declarations, 77);
-+inline constexpr DiagCode FatalTask(DiagSubsystem::Declarations, 78);
-+inline constexpr DiagCode ErrorTask(DiagSubsystem::Declarations, 79);
-+inline constexpr DiagCode WarningTask(DiagSubsystem::Declarations, 80);
-+inline constexpr DiagCode InfoTask(DiagSubsystem::Declarations, 81);
-+inline constexpr DiagCode StaticInitializerMustBeExplicit(DiagSubsystem::Declarations, 82);
-+inline constexpr DiagCode CaseGenerateDup(DiagSubsystem::Declarations, 83);
-+inline constexpr DiagCode CaseGenerateNoBlock(DiagSubsystem::Declarations, 84);
-+inline constexpr DiagCode UnconnectedNamedPort(DiagSubsystem::Declarations, 85);
-+inline constexpr DiagCode UnconnectedUnnamedPort(DiagSubsystem::Declarations, 86);
-+inline constexpr DiagCode ImplicitNetPortNoDefault(DiagSubsystem::Declarations, 87);
-+inline constexpr DiagCode DuplicateAttribute(DiagSubsystem::Declarations, 88);
-+inline constexpr DiagCode EmptyMember(DiagSubsystem::Declarations, 89);
++inline constexpr DiagCode MethodArgDirectionMismatch(DiagSubsystem::Declarations, 53);
++inline constexpr DiagCode MemberDefinitionBeforeClass(DiagSubsystem::Declarations, 54);
++inline constexpr DiagCode MethodReturnTypeScoped(DiagSubsystem::Declarations, 55);
++inline constexpr DiagCode VirtualKindMismatch(DiagSubsystem::Declarations, 56);
++inline constexpr DiagCode VirtualReturnMismatch(DiagSubsystem::Declarations, 57);
++inline constexpr DiagCode VirtualArgCountMismatch(DiagSubsystem::Declarations, 58);
++inline constexpr DiagCode VirtualArgNameMismatch(DiagSubsystem::Declarations, 59);
++inline constexpr DiagCode VirtualArgTypeMismatch(DiagSubsystem::Declarations, 60);
++inline constexpr DiagCode VirtualArgNoParentDefault(DiagSubsystem::Declarations, 61);
++inline constexpr DiagCode VirtualArgNoDerivedDefault(DiagSubsystem::Declarations, 62);
++inline constexpr DiagCode VirtualArgDirectionMismatch(DiagSubsystem::Declarations, 63);
++inline constexpr DiagCode BaseConstructorDuplicate(DiagSubsystem::Declarations, 64);
++inline constexpr DiagCode BaseConstructorNotCalled(DiagSubsystem::Declarations, 65);
++inline constexpr DiagCode ConstVarNoInitializer(DiagSubsystem::Declarations, 66);
++inline constexpr DiagCode StaticConstNoInitializer(DiagSubsystem::Declarations, 67);
++inline constexpr DiagCode PureInAbstract(DiagSubsystem::Declarations, 68);
++inline constexpr DiagCode PureConstraintInAbstract(DiagSubsystem::Declarations, 69);
++inline constexpr DiagCode BodyForPure(DiagSubsystem::Declarations, 70);
++inline constexpr DiagCode BodyForPureConstraint(DiagSubsystem::Declarations, 71);
++inline constexpr DiagCode InheritFromAbstract(DiagSubsystem::Declarations, 72);
++inline constexpr DiagCode InheritFromAbstractConstraint(DiagSubsystem::Declarations, 73);
++inline constexpr DiagCode InvalidPortType(DiagSubsystem::Declarations, 74);
++inline constexpr DiagCode InvalidNetType(DiagSubsystem::Declarations, 75);
++inline constexpr DiagCode InvalidUserDefinedNetType(DiagSubsystem::Declarations, 76);
++inline constexpr DiagCode ExtendIfaceFromClass(DiagSubsystem::Declarations, 77);
++inline constexpr DiagCode ExtendClassFromIface(DiagSubsystem::Declarations, 78);
++inline constexpr DiagCode ImplementNonIface(DiagSubsystem::Declarations, 79);
++inline constexpr DiagCode IfaceNameConflict(DiagSubsystem::Declarations, 80);
++inline constexpr DiagCode IfaceMethodHidden(DiagSubsystem::Declarations, 81);
++inline constexpr DiagCode IfaceMethodNoImpl(DiagSubsystem::Declarations, 82);
++inline constexpr DiagCode IfaceMethodNotVirtual(DiagSubsystem::Declarations, 83);
++inline constexpr DiagCode NotAllowedInModport(DiagSubsystem::Declarations, 84);
++inline constexpr DiagCode ModportConnMismatch(DiagSubsystem::Declarations, 85);
++inline constexpr DiagCode ExpectedImportExport(DiagSubsystem::Declarations, 86);
++inline constexpr DiagCode SingleBitVectored(DiagSubsystem::Declarations, 87);
++inline constexpr DiagCode VarDeclWithDelay(DiagSubsystem::Declarations, 88);
++inline constexpr DiagCode InvalidRandType(DiagSubsystem::Declarations, 89);
++inline constexpr DiagCode InvalidMethodOverride(DiagSubsystem::Declarations, 90);
++inline constexpr DiagCode InvalidRandomizeOverride(DiagSubsystem::Declarations, 91);
++inline constexpr DiagCode MismatchStaticConstraint(DiagSubsystem::Declarations, 92);
++inline constexpr DiagCode DPIRefArg(DiagSubsystem::Declarations, 93);
++inline constexpr DiagCode DPIPureArg(DiagSubsystem::Declarations, 94);
++inline constexpr DiagCode DPIPureReturn(DiagSubsystem::Declarations, 95);
++inline constexpr DiagCode InvalidDPIReturnType(DiagSubsystem::Declarations, 96);
++inline constexpr DiagCode InvalidDPIArgType(DiagSubsystem::Declarations, 97);
++inline constexpr DiagCode FatalTask(DiagSubsystem::Declarations, 98);
++inline constexpr DiagCode ErrorTask(DiagSubsystem::Declarations, 99);
++inline constexpr DiagCode WarningTask(DiagSubsystem::Declarations, 100);
++inline constexpr DiagCode InfoTask(DiagSubsystem::Declarations, 101);
++inline constexpr DiagCode StaticInitializerMustBeExplicit(DiagSubsystem::Declarations, 102);
++inline constexpr DiagCode CaseGenerateDup(DiagSubsystem::Declarations, 103);
++inline constexpr DiagCode CaseGenerateNoBlock(DiagSubsystem::Declarations, 104);
++inline constexpr DiagCode UnconnectedNamedPort(DiagSubsystem::Declarations, 105);
++inline constexpr DiagCode UnconnectedUnnamedPort(DiagSubsystem::Declarations, 106);
++inline constexpr DiagCode ImplicitNetPortNoDefault(DiagSubsystem::Declarations, 107);
++inline constexpr DiagCode DuplicateAttribute(DiagSubsystem::Declarations, 108);
++inline constexpr DiagCode EmptyMember(DiagSubsystem::Declarations, 109);
++inline constexpr DiagCode SignednessNoEffect(DiagSubsystem::Declarations, 110);
++inline constexpr DiagCode NoConstraintBody(DiagSubsystem::Declarations, 111);
++inline constexpr DiagCode DPISpecDisallowed(DiagSubsystem::Declarations, 112);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/ExpressionsDiags.h ./generated/slang/diagnostics/ExpressionsDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/ExpressionsDiags.h ./generated/slang/diagnostics/ExpressionsDiags.h
 --- ./generated/slang/diagnostics/ExpressionsDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/ExpressionsDiags.h	2020-11-03 00:14:56.258155903 -0800
-@@ -0,0 +1,95 @@
++++ ./generated/slang/diagnostics/ExpressionsDiags.h	2021-01-13 10:06:32.309060077 -0800
+@@ -0,0 +1,113 @@
 +//------------------------------------------------------------------------------
 +//! @file ExpressionsDiags.h
 +//! @brief Generated diagnostic enums for the Expressions subsystem
@@ -17173,64 +14348,82 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode ReplicationZeroOutsideConcat(DiagSubsystem::Expressions, 25);
 +inline constexpr DiagCode InvalidMemberAccess(DiagSubsystem::Expressions, 26);
 +inline constexpr DiagCode ExpressionNotCallable(DiagSubsystem::Expressions, 27);
-+inline constexpr DiagCode NotBooleanConvertible(DiagSubsystem::Expressions, 28);
-+inline constexpr DiagCode EnumValueSizeMismatch(DiagSubsystem::Expressions, 29);
-+inline constexpr DiagCode NoCommonComparisonType(DiagSubsystem::Expressions, 30);
-+inline constexpr DiagCode AssignmentPatternNoContext(DiagSubsystem::Expressions, 31);
-+inline constexpr DiagCode BadAssignmentPatternType(DiagSubsystem::Expressions, 32);
-+inline constexpr DiagCode WrongNumberAssignmentPatterns(DiagSubsystem::Expressions, 33);
-+inline constexpr DiagCode AssignmentPatternKeyExpr(DiagSubsystem::Expressions, 34);
-+inline constexpr DiagCode AssignmentPatternKeyDupDefault(DiagSubsystem::Expressions, 35);
-+inline constexpr DiagCode AssignmentPatternKeyDupValue(DiagSubsystem::Expressions, 36);
-+inline constexpr DiagCode AssignmentPatternKeyDupName(DiagSubsystem::Expressions, 37);
-+inline constexpr DiagCode AssignmentPatternNoMember(DiagSubsystem::Expressions, 38);
-+inline constexpr DiagCode AssignmentPatternNestedNoMember(DiagSubsystem::Expressions, 39);
-+inline constexpr DiagCode AssignmentPatternMissingElements(DiagSubsystem::Expressions, 40);
-+inline constexpr DiagCode AssignmentPatternDynamicDefault(DiagSubsystem::Expressions, 41);
-+inline constexpr DiagCode AssignmentPatternDynamicType(DiagSubsystem::Expressions, 42);
-+inline constexpr DiagCode AssignmentPatternAssociativeType(DiagSubsystem::Expressions, 43);
-+inline constexpr DiagCode EmptyArgNotAllowed(DiagSubsystem::Expressions, 44);
-+inline constexpr DiagCode NamedArgNotAllowed(DiagSubsystem::Expressions, 45);
-+inline constexpr DiagCode DuplicateArgAssignment(DiagSubsystem::Expressions, 46);
-+inline constexpr DiagCode MixingOrderedAndNamedArgs(DiagSubsystem::Expressions, 47);
-+inline constexpr DiagCode ArgDoesNotExist(DiagSubsystem::Expressions, 48);
-+inline constexpr DiagCode ArgCannotBeEmpty(DiagSubsystem::Expressions, 49);
-+inline constexpr DiagCode UnconnectedArg(DiagSubsystem::Expressions, 50);
-+inline constexpr DiagCode MissingReturnValue(DiagSubsystem::Expressions, 51);
-+inline constexpr DiagCode AssignmentNotAllowed(DiagSubsystem::Expressions, 52);
-+inline constexpr DiagCode IncDecNotAllowed(DiagSubsystem::Expressions, 53);
-+inline constexpr DiagCode AssignmentRequiresParens(DiagSubsystem::Expressions, 54);
-+inline constexpr DiagCode PortConnArrayMismatch(DiagSubsystem::Expressions, 55);
-+inline constexpr DiagCode AutoFromStaticInit(DiagSubsystem::Expressions, 56);
-+inline constexpr DiagCode NonblockingAssignmentToAuto(DiagSubsystem::Expressions, 57);
-+inline constexpr DiagCode AssignmentToConst(DiagSubsystem::Expressions, 58);
-+inline constexpr DiagCode EmptyConcatNotAllowed(DiagSubsystem::Expressions, 59);
-+inline constexpr DiagCode TimingControlNotAllowed(DiagSubsystem::Expressions, 60);
-+inline constexpr DiagCode NewArrayTarget(DiagSubsystem::Expressions, 61);
-+inline constexpr DiagCode NewClassTarget(DiagSubsystem::Expressions, 62);
-+inline constexpr DiagCode UnpackedConcatSize(DiagSubsystem::Expressions, 63);
-+inline constexpr DiagCode UnpackedConcatAssociative(DiagSubsystem::Expressions, 64);
-+inline constexpr DiagCode InvalidClassAccess(DiagSubsystem::Expressions, 65);
-+inline constexpr DiagCode CopyClassTarget(DiagSubsystem::Expressions, 66);
-+inline constexpr DiagCode BadStreamSlice(DiagSubsystem::Expressions, 67);
-+inline constexpr DiagCode BadStreamExprType(DiagSubsystem::Expressions, 68);
-+inline constexpr DiagCode BadStreamTargetType(DiagSubsystem::Expressions, 69);
-+inline constexpr DiagCode BadStreamSourceType(DiagSubsystem::Expressions, 70);
-+inline constexpr DiagCode BadStreamContext(DiagSubsystem::Expressions, 71);
-+inline constexpr DiagCode BadStreamSize(DiagSubsystem::Expressions, 72);
-+inline constexpr DiagCode BadStreamCast(DiagSubsystem::Expressions, 73);
-+inline constexpr DiagCode BadStreamWithType(DiagSubsystem::Expressions, 74);
-+inline constexpr DiagCode BadStreamWithOrder(DiagSubsystem::Expressions, 75);
-+inline constexpr DiagCode NewVirtualClass(DiagSubsystem::Expressions, 76);
-+inline constexpr DiagCode NewInterfaceClass(DiagSubsystem::Expressions, 77);
-+inline constexpr DiagCode AssignToCHandle(DiagSubsystem::Expressions, 78);
-+inline constexpr DiagCode IgnoredSlice(DiagSubsystem::Expressions, 79);
-+inline constexpr DiagCode UnsizedInConcat(DiagSubsystem::Expressions, 80);
++inline constexpr DiagCode UnexpectedWithClause(DiagSubsystem::Expressions, 28);
++inline constexpr DiagCode WithClauseNotAllowed(DiagSubsystem::Expressions, 29);
++inline constexpr DiagCode IteratorArgsWithoutWithClause(DiagSubsystem::Expressions, 30);
++inline constexpr DiagCode ExpectedIteratorName(DiagSubsystem::Expressions, 31);
++inline constexpr DiagCode UnexpectedConstraintBlock(DiagSubsystem::Expressions, 32);
++inline constexpr DiagCode MissingConstraintBlock(DiagSubsystem::Expressions, 33);
++inline constexpr DiagCode ExpectedIterationExpression(DiagSubsystem::Expressions, 34);
++inline constexpr DiagCode NotBooleanConvertible(DiagSubsystem::Expressions, 35);
++inline constexpr DiagCode EnumValueSizeMismatch(DiagSubsystem::Expressions, 36);
++inline constexpr DiagCode NoCommonComparisonType(DiagSubsystem::Expressions, 37);
++inline constexpr DiagCode AssignmentPatternNoContext(DiagSubsystem::Expressions, 38);
++inline constexpr DiagCode BadAssignmentPatternType(DiagSubsystem::Expressions, 39);
++inline constexpr DiagCode WrongNumberAssignmentPatterns(DiagSubsystem::Expressions, 40);
++inline constexpr DiagCode AssignmentPatternKeyExpr(DiagSubsystem::Expressions, 41);
++inline constexpr DiagCode AssignmentPatternKeyDupDefault(DiagSubsystem::Expressions, 42);
++inline constexpr DiagCode AssignmentPatternKeyDupValue(DiagSubsystem::Expressions, 43);
++inline constexpr DiagCode AssignmentPatternKeyDupName(DiagSubsystem::Expressions, 44);
++inline constexpr DiagCode AssignmentPatternNoMember(DiagSubsystem::Expressions, 45);
++inline constexpr DiagCode AssignmentPatternNestedNoMember(DiagSubsystem::Expressions, 46);
++inline constexpr DiagCode AssignmentPatternMissingElements(DiagSubsystem::Expressions, 47);
++inline constexpr DiagCode AssignmentPatternDynamicDefault(DiagSubsystem::Expressions, 48);
++inline constexpr DiagCode AssignmentPatternDynamicType(DiagSubsystem::Expressions, 49);
++inline constexpr DiagCode AssignmentPatternAssociativeType(DiagSubsystem::Expressions, 50);
++inline constexpr DiagCode EmptyArgNotAllowed(DiagSubsystem::Expressions, 51);
++inline constexpr DiagCode NamedArgNotAllowed(DiagSubsystem::Expressions, 52);
++inline constexpr DiagCode DuplicateArgAssignment(DiagSubsystem::Expressions, 53);
++inline constexpr DiagCode MixingOrderedAndNamedArgs(DiagSubsystem::Expressions, 54);
++inline constexpr DiagCode ArgDoesNotExist(DiagSubsystem::Expressions, 55);
++inline constexpr DiagCode ArgCannotBeEmpty(DiagSubsystem::Expressions, 56);
++inline constexpr DiagCode UnconnectedArg(DiagSubsystem::Expressions, 57);
++inline constexpr DiagCode MissingReturnValue(DiagSubsystem::Expressions, 58);
++inline constexpr DiagCode AssignmentNotAllowed(DiagSubsystem::Expressions, 59);
++inline constexpr DiagCode IncDecNotAllowed(DiagSubsystem::Expressions, 60);
++inline constexpr DiagCode AssignmentRequiresParens(DiagSubsystem::Expressions, 61);
++inline constexpr DiagCode PortConnArrayMismatch(DiagSubsystem::Expressions, 62);
++inline constexpr DiagCode AutoFromStaticInit(DiagSubsystem::Expressions, 63);
++inline constexpr DiagCode NonblockingAssignmentToAuto(DiagSubsystem::Expressions, 64);
++inline constexpr DiagCode AssignmentToConst(DiagSubsystem::Expressions, 65);
++inline constexpr DiagCode EmptyConcatNotAllowed(DiagSubsystem::Expressions, 66);
++inline constexpr DiagCode TimingControlNotAllowed(DiagSubsystem::Expressions, 67);
++inline constexpr DiagCode NewArrayTarget(DiagSubsystem::Expressions, 68);
++inline constexpr DiagCode NewClassTarget(DiagSubsystem::Expressions, 69);
++inline constexpr DiagCode UnpackedConcatSize(DiagSubsystem::Expressions, 70);
++inline constexpr DiagCode UnpackedConcatAssociative(DiagSubsystem::Expressions, 71);
++inline constexpr DiagCode InvalidClassAccess(DiagSubsystem::Expressions, 72);
++inline constexpr DiagCode CopyClassTarget(DiagSubsystem::Expressions, 73);
++inline constexpr DiagCode BadStreamSlice(DiagSubsystem::Expressions, 74);
++inline constexpr DiagCode BadStreamExprType(DiagSubsystem::Expressions, 75);
++inline constexpr DiagCode BadStreamTargetType(DiagSubsystem::Expressions, 76);
++inline constexpr DiagCode BadStreamSourceType(DiagSubsystem::Expressions, 77);
++inline constexpr DiagCode BadStreamContext(DiagSubsystem::Expressions, 78);
++inline constexpr DiagCode BadStreamSize(DiagSubsystem::Expressions, 79);
++inline constexpr DiagCode BadStreamCast(DiagSubsystem::Expressions, 80);
++inline constexpr DiagCode BadStreamWithType(DiagSubsystem::Expressions, 81);
++inline constexpr DiagCode BadStreamWithOrder(DiagSubsystem::Expressions, 82);
++inline constexpr DiagCode NewVirtualClass(DiagSubsystem::Expressions, 83);
++inline constexpr DiagCode NewInterfaceClass(DiagSubsystem::Expressions, 84);
++inline constexpr DiagCode AssignToCHandle(DiagSubsystem::Expressions, 85);
++inline constexpr DiagCode AssignToNet(DiagSubsystem::Expressions, 86);
++inline constexpr DiagCode SelectOfVectoredNet(DiagSubsystem::Expressions, 87);
++inline constexpr DiagCode ExpectedNetDelay(DiagSubsystem::Expressions, 88);
++inline constexpr DiagCode InvalidRefArg(DiagSubsystem::Expressions, 89);
++inline constexpr DiagCode RefTypeMismatch(DiagSubsystem::Expressions, 90);
++inline constexpr DiagCode ConstVarToRef(DiagSubsystem::Expressions, 91);
++inline constexpr DiagCode MissingInvocationParens(DiagSubsystem::Expressions, 92);
++inline constexpr DiagCode NameListWithScopeRandomize(DiagSubsystem::Expressions, 93);
++inline constexpr DiagCode IgnoredSlice(DiagSubsystem::Expressions, 94);
++inline constexpr DiagCode UnsizedInConcat(DiagSubsystem::Expressions, 95);
++inline constexpr DiagCode WidthExpand(DiagSubsystem::Expressions, 96);
++inline constexpr DiagCode WidthTruncate(DiagSubsystem::Expressions, 97);
++inline constexpr DiagCode ImplicitConvert(DiagSubsystem::Expressions, 98);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/GeneralDiags.h ./generated/slang/diagnostics/GeneralDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/GeneralDiags.h ./generated/slang/diagnostics/GeneralDiags.h
 --- ./generated/slang/diagnostics/GeneralDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/GeneralDiags.h	2020-11-03 00:14:56.258155903 -0800
++++ ./generated/slang/diagnostics/GeneralDiags.h	2021-01-13 10:06:32.309060077 -0800
 @@ -0,0 +1,22 @@
 +//------------------------------------------------------------------------------
 +//! @file GeneralDiags.h
@@ -17254,9 +14447,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode WarnNotYetSupported(DiagSubsystem::General, 7);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/LexerDiags.h ./generated/slang/diagnostics/LexerDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/LexerDiags.h ./generated/slang/diagnostics/LexerDiags.h
 --- ./generated/slang/diagnostics/LexerDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/LexerDiags.h	2020-11-03 00:14:56.258155903 -0800
++++ ./generated/slang/diagnostics/LexerDiags.h	2021-01-13 10:06:32.309060077 -0800
 @@ -0,0 +1,37 @@
 +//------------------------------------------------------------------------------
 +//! @file LexerDiags.h
@@ -17295,10 +14488,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode NonstandardEscapeCode(DiagSubsystem::Lexer, 22);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/LookupDiags.h ./generated/slang/diagnostics/LookupDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/LookupDiags.h ./generated/slang/diagnostics/LookupDiags.h
 --- ./generated/slang/diagnostics/LookupDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/LookupDiags.h	2020-11-03 00:14:56.258155903 -0800
-@@ -0,0 +1,67 @@
++++ ./generated/slang/diagnostics/LookupDiags.h	2021-01-13 10:06:32.309060077 -0800
+@@ -0,0 +1,70 @@
 +//------------------------------------------------------------------------------
 +//! @file LookupDiags.h
 +//! @brief Generated diagnostic enums for the Lookup subsystem
@@ -17331,44 +14524,47 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode NotAGenvar(DiagSubsystem::Lookup, 17);
 +inline constexpr DiagCode NotAClass(DiagSubsystem::Lookup, 18);
 +inline constexpr DiagCode NotAGenericClass(DiagSubsystem::Lookup, 19);
-+inline constexpr DiagCode DotOnType(DiagSubsystem::Lookup, 20);
-+inline constexpr DiagCode HierarchicalNotAllowedInConstant(DiagSubsystem::Lookup, 21);
-+inline constexpr DiagCode UnknownMember(DiagSubsystem::Lookup, 22);
-+inline constexpr DiagCode UnknownPackageMember(DiagSubsystem::Lookup, 23);
-+inline constexpr DiagCode UnknownClassMember(DiagSubsystem::Lookup, 24);
-+inline constexpr DiagCode UnknownUnitMember(DiagSubsystem::Lookup, 25);
-+inline constexpr DiagCode RecursiveDefinition(DiagSubsystem::Lookup, 26);
-+inline constexpr DiagCode UnknownSystemMethod(DiagSubsystem::Lookup, 27);
-+inline constexpr DiagCode ScopeNotIndexable(DiagSubsystem::Lookup, 28);
-+inline constexpr DiagCode InvalidScopeIndexExpression(DiagSubsystem::Lookup, 29);
-+inline constexpr DiagCode ScopeIndexOutOfRange(DiagSubsystem::Lookup, 30);
-+inline constexpr DiagCode CouldNotResolveHierarchicalPath(DiagSubsystem::Lookup, 31);
-+inline constexpr DiagCode UnresolvedForwardTypedef(DiagSubsystem::Lookup, 32);
-+inline constexpr DiagCode DefinitionUsedAsType(DiagSubsystem::Lookup, 33);
-+inline constexpr DiagCode DefinitionUsedAsValue(DiagSubsystem::Lookup, 34);
-+inline constexpr DiagCode AutoVariableHierarchical(DiagSubsystem::Lookup, 35);
-+inline constexpr DiagCode NonStaticClassProperty(DiagSubsystem::Lookup, 36);
-+inline constexpr DiagCode NonStaticClassMethod(DiagSubsystem::Lookup, 37);
-+inline constexpr DiagCode NestedNonStaticClassProperty(DiagSubsystem::Lookup, 38);
-+inline constexpr DiagCode NestedNonStaticClassMethod(DiagSubsystem::Lookup, 39);
-+inline constexpr DiagCode NoDefaultSpecialization(DiagSubsystem::Lookup, 40);
-+inline constexpr DiagCode GenericClassScopeResolution(DiagSubsystem::Lookup, 41);
-+inline constexpr DiagCode InvalidThisHandle(DiagSubsystem::Lookup, 42);
-+inline constexpr DiagCode LocalMemberAccess(DiagSubsystem::Lookup, 43);
-+inline constexpr DiagCode ProtectedMemberAccess(DiagSubsystem::Lookup, 44);
-+inline constexpr DiagCode InvalidConstructorAccess(DiagSubsystem::Lookup, 45);
-+inline constexpr DiagCode SuperOutsideClass(DiagSubsystem::Lookup, 46);
-+inline constexpr DiagCode SuperNoBase(DiagSubsystem::Lookup, 47);
-+inline constexpr DiagCode IfaceExtendTypeParam(DiagSubsystem::Lookup, 48);
-+inline constexpr DiagCode IfaceExtendIncomplete(DiagSubsystem::Lookup, 49);
-+inline constexpr DiagCode ScopeIncompleteTypedef(DiagSubsystem::Lookup, 50);
-+inline constexpr DiagCode InvalidModportAccess(DiagSubsystem::Lookup, 51);
-+inline constexpr DiagCode DuplicateImport(DiagSubsystem::Lookup, 52);
++inline constexpr DiagCode NotASubroutine(DiagSubsystem::Lookup, 20);
++inline constexpr DiagCode DotOnType(DiagSubsystem::Lookup, 21);
++inline constexpr DiagCode HierarchicalNotAllowedInConstant(DiagSubsystem::Lookup, 22);
++inline constexpr DiagCode UnknownMember(DiagSubsystem::Lookup, 23);
++inline constexpr DiagCode UnknownPackageMember(DiagSubsystem::Lookup, 24);
++inline constexpr DiagCode UnknownClassMember(DiagSubsystem::Lookup, 25);
++inline constexpr DiagCode UnknownUnitMember(DiagSubsystem::Lookup, 26);
++inline constexpr DiagCode RecursiveDefinition(DiagSubsystem::Lookup, 27);
++inline constexpr DiagCode UnknownSystemMethod(DiagSubsystem::Lookup, 28);
++inline constexpr DiagCode ScopeNotIndexable(DiagSubsystem::Lookup, 29);
++inline constexpr DiagCode InvalidScopeIndexExpression(DiagSubsystem::Lookup, 30);
++inline constexpr DiagCode ScopeIndexOutOfRange(DiagSubsystem::Lookup, 31);
++inline constexpr DiagCode CouldNotResolveHierarchicalPath(DiagSubsystem::Lookup, 32);
++inline constexpr DiagCode UnresolvedForwardTypedef(DiagSubsystem::Lookup, 33);
++inline constexpr DiagCode DefinitionUsedAsType(DiagSubsystem::Lookup, 34);
++inline constexpr DiagCode DefinitionUsedAsValue(DiagSubsystem::Lookup, 35);
++inline constexpr DiagCode AutoVariableHierarchical(DiagSubsystem::Lookup, 36);
++inline constexpr DiagCode NonStaticClassProperty(DiagSubsystem::Lookup, 37);
++inline constexpr DiagCode NonStaticClassMethod(DiagSubsystem::Lookup, 38);
++inline constexpr DiagCode NestedNonStaticClassProperty(DiagSubsystem::Lookup, 39);
++inline constexpr DiagCode NestedNonStaticClassMethod(DiagSubsystem::Lookup, 40);
++inline constexpr DiagCode NoDefaultSpecialization(DiagSubsystem::Lookup, 41);
++inline constexpr DiagCode GenericClassScopeResolution(DiagSubsystem::Lookup, 42);
++inline constexpr DiagCode InvalidThisHandle(DiagSubsystem::Lookup, 43);
++inline constexpr DiagCode LocalMemberAccess(DiagSubsystem::Lookup, 44);
++inline constexpr DiagCode ProtectedMemberAccess(DiagSubsystem::Lookup, 45);
++inline constexpr DiagCode InvalidConstructorAccess(DiagSubsystem::Lookup, 46);
++inline constexpr DiagCode SuperOutsideClass(DiagSubsystem::Lookup, 47);
++inline constexpr DiagCode SuperNoBase(DiagSubsystem::Lookup, 48);
++inline constexpr DiagCode IfaceExtendTypeParam(DiagSubsystem::Lookup, 49);
++inline constexpr DiagCode IfaceExtendIncomplete(DiagSubsystem::Lookup, 50);
++inline constexpr DiagCode ScopeIncompleteTypedef(DiagSubsystem::Lookup, 51);
++inline constexpr DiagCode InvalidModportAccess(DiagSubsystem::Lookup, 52);
++inline constexpr DiagCode LocalNotAllowed(DiagSubsystem::Lookup, 53);
++inline constexpr DiagCode UnexpectedSelection(DiagSubsystem::Lookup, 54);
++inline constexpr DiagCode DuplicateImport(DiagSubsystem::Lookup, 55);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/MetaDiags.h ./generated/slang/diagnostics/MetaDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/MetaDiags.h ./generated/slang/diagnostics/MetaDiags.h
 --- ./generated/slang/diagnostics/MetaDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/MetaDiags.h	2020-11-03 00:14:56.258155903 -0800
++++ ./generated/slang/diagnostics/MetaDiags.h	2021-01-13 10:06:32.309060077 -0800
 @@ -0,0 +1,16 @@
 +//------------------------------------------------------------------------------
 +//! @file MetaDiags.h
@@ -17386,9 +14582,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode UnknownWarningOption(DiagSubsystem::Meta, 1);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/NumericDiags.h ./generated/slang/diagnostics/NumericDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/NumericDiags.h ./generated/slang/diagnostics/NumericDiags.h
 --- ./generated/slang/diagnostics/NumericDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/NumericDiags.h	2020-11-03 00:14:56.258155903 -0800
++++ ./generated/slang/diagnostics/NumericDiags.h	2021-01-13 10:06:32.309060077 -0800
 @@ -0,0 +1,26 @@
 +//------------------------------------------------------------------------------
 +//! @file NumericDiags.h
@@ -17416,10 +14612,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode VectorLiteralOverflow(DiagSubsystem::Numeric, 11);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/ParserDiags.h ./generated/slang/diagnostics/ParserDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/ParserDiags.h ./generated/slang/diagnostics/ParserDiags.h
 --- ./generated/slang/diagnostics/ParserDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/ParserDiags.h	2020-11-03 00:14:56.258155903 -0800
-@@ -0,0 +1,110 @@
++++ ./generated/slang/diagnostics/ParserDiags.h	2021-01-13 10:06:32.309060077 -0800
+@@ -0,0 +1,122 @@
 +//------------------------------------------------------------------------------
 +//! @file ParserDiags.h
 +//! @brief Generated diagnostic enums for the Parser subsystem
@@ -17468,71 +14664,83 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode ExpectedEnumBase(DiagSubsystem::Parser, 33);
 +inline constexpr DiagCode ExpectedCaseItem(DiagSubsystem::Parser, 34);
 +inline constexpr DiagCode ExpectedSubroutineName(DiagSubsystem::Parser, 35);
-+inline constexpr DiagCode NoLabelOnSemicolon(DiagSubsystem::Parser, 36);
-+inline constexpr DiagCode DeferredDelayMustBeZero(DiagSubsystem::Parser, 37);
-+inline constexpr DiagCode InvalidGenvarIterExpression(DiagSubsystem::Parser, 38);
-+inline constexpr DiagCode ExpectedGenvarIterVar(DiagSubsystem::Parser, 39);
-+inline constexpr DiagCode ConstFunctionPortRequiresRef(DiagSubsystem::Parser, 40);
-+inline constexpr DiagCode ExpectedClockingSkew(DiagSubsystem::Parser, 41);
-+inline constexpr DiagCode InOutDefaultSkew(DiagSubsystem::Parser, 42);
-+inline constexpr DiagCode GlobalClockingEmpty(DiagSubsystem::Parser, 43);
-+inline constexpr DiagCode ExpectedDPISpecString(DiagSubsystem::Parser, 44);
-+inline constexpr DiagCode ParseTreeTooDeep(DiagSubsystem::Parser, 45);
-+inline constexpr DiagCode MissingModportPortDirection(DiagSubsystem::Parser, 46);
-+inline constexpr DiagCode CaseStatementEmpty(DiagSubsystem::Parser, 47);
-+inline constexpr DiagCode MultipleDefaultCases(DiagSubsystem::Parser, 48);
-+inline constexpr DiagCode DirectionOnInterfacePort(DiagSubsystem::Parser, 49);
-+inline constexpr DiagCode UnexpectedQualifiers(DiagSubsystem::Parser, 50);
-+inline constexpr DiagCode ExpectedSampleKeyword(DiagSubsystem::Parser, 51);
-+inline constexpr DiagCode MultipleGenerateDefaultCases(DiagSubsystem::Parser, 52);
-+inline constexpr DiagCode CaseGenerateEmpty(DiagSubsystem::Parser, 53);
-+inline constexpr DiagCode LabelAndName(DiagSubsystem::Parser, 54);
-+inline constexpr DiagCode EndNameMismatch(DiagSubsystem::Parser, 55);
-+inline constexpr DiagCode EndNameNotEmpty(DiagSubsystem::Parser, 56);
-+inline constexpr DiagCode DeclarationsAtStart(DiagSubsystem::Parser, 57);
-+inline constexpr DiagCode VoidNotAllowed(DiagSubsystem::Parser, 58);
-+inline constexpr DiagCode DuplicateDeclModifier(DiagSubsystem::Parser, 59);
-+inline constexpr DiagCode DeclModifierOrdering(DiagSubsystem::Parser, 60);
-+inline constexpr DiagCode DeclModifierConflict(DiagSubsystem::Parser, 61);
-+inline constexpr DiagCode DuplicateQualifier(DiagSubsystem::Parser, 62);
-+inline constexpr DiagCode QualifierConflict(DiagSubsystem::Parser, 63);
-+inline constexpr DiagCode QualifierNotFirst(DiagSubsystem::Parser, 64);
-+inline constexpr DiagCode PureRequiresVirtual(DiagSubsystem::Parser, 65);
-+inline constexpr DiagCode InvalidMethodQualifier(DiagSubsystem::Parser, 66);
-+inline constexpr DiagCode InvalidPropertyQualifier(DiagSubsystem::Parser, 67);
-+inline constexpr DiagCode InvalidQualifierForMember(DiagSubsystem::Parser, 68);
-+inline constexpr DiagCode InvalidQualifierForIfaceMember(DiagSubsystem::Parser, 69);
-+inline constexpr DiagCode InvalidQualifierForConstructor(DiagSubsystem::Parser, 70);
-+inline constexpr DiagCode MethodStaticLifetime(DiagSubsystem::Parser, 71);
-+inline constexpr DiagCode TypeRefDeclVar(DiagSubsystem::Parser, 72);
-+inline constexpr DiagCode ScopedClassCopy(DiagSubsystem::Parser, 73);
-+inline constexpr DiagCode NotAllowedInCU(DiagSubsystem::Parser, 74);
-+inline constexpr DiagCode NotAllowedInGenerate(DiagSubsystem::Parser, 75);
-+inline constexpr DiagCode NotAllowedInModule(DiagSubsystem::Parser, 76);
-+inline constexpr DiagCode NotAllowedInInterface(DiagSubsystem::Parser, 77);
-+inline constexpr DiagCode NotAllowedInProgram(DiagSubsystem::Parser, 78);
-+inline constexpr DiagCode NotAllowedInPackage(DiagSubsystem::Parser, 79);
-+inline constexpr DiagCode NotAllowedInClocking(DiagSubsystem::Parser, 80);
-+inline constexpr DiagCode NotAllowedInClass(DiagSubsystem::Parser, 81);
-+inline constexpr DiagCode NotAllowedInIfaceClass(DiagSubsystem::Parser, 82);
-+inline constexpr DiagCode TaskReturnType(DiagSubsystem::Parser, 83);
-+inline constexpr DiagCode TaskConstructor(DiagSubsystem::Parser, 84);
-+inline constexpr DiagCode ConstructorReturnType(DiagSubsystem::Parser, 85);
-+inline constexpr DiagCode NewKeywordQualified(DiagSubsystem::Parser, 86);
-+inline constexpr DiagCode MethodPrototypeScoped(DiagSubsystem::Parser, 87);
-+inline constexpr DiagCode QualifiersOnOutOfBlock(DiagSubsystem::Parser, 88);
-+inline constexpr DiagCode ConstructorOutsideClass(DiagSubsystem::Parser, 89);
-+inline constexpr DiagCode InvalidSuperNew(DiagSubsystem::Parser, 90);
-+inline constexpr DiagCode IfaceMethodPure(DiagSubsystem::Parser, 91);
-+inline constexpr DiagCode NestedIface(DiagSubsystem::Parser, 92);
-+inline constexpr DiagCode NonStandardGenBlock(DiagSubsystem::Parser, 93);
-+inline constexpr DiagCode EmptyAssignmentPattern(DiagSubsystem::Parser, 94);
-+inline constexpr DiagCode NoteToMatchThis(DiagSubsystem::Parser, 95);
++inline constexpr DiagCode ExpectedConstraintName(DiagSubsystem::Parser, 36);
++inline constexpr DiagCode NoLabelOnSemicolon(DiagSubsystem::Parser, 37);
++inline constexpr DiagCode DeferredDelayMustBeZero(DiagSubsystem::Parser, 38);
++inline constexpr DiagCode InvalidGenvarIterExpression(DiagSubsystem::Parser, 39);
++inline constexpr DiagCode ExpectedGenvarIterVar(DiagSubsystem::Parser, 40);
++inline constexpr DiagCode ConstFunctionPortRequiresRef(DiagSubsystem::Parser, 41);
++inline constexpr DiagCode ExpectedClockingSkew(DiagSubsystem::Parser, 42);
++inline constexpr DiagCode InOutDefaultSkew(DiagSubsystem::Parser, 43);
++inline constexpr DiagCode GlobalClockingEmpty(DiagSubsystem::Parser, 44);
++inline constexpr DiagCode ExpectedDPISpecString(DiagSubsystem::Parser, 45);
++inline constexpr DiagCode ParseTreeTooDeep(DiagSubsystem::Parser, 46);
++inline constexpr DiagCode MissingModportPortDirection(DiagSubsystem::Parser, 47);
++inline constexpr DiagCode CaseStatementEmpty(DiagSubsystem::Parser, 48);
++inline constexpr DiagCode MultipleDefaultCases(DiagSubsystem::Parser, 49);
++inline constexpr DiagCode DirectionOnInterfacePort(DiagSubsystem::Parser, 50);
++inline constexpr DiagCode UnexpectedQualifiers(DiagSubsystem::Parser, 51);
++inline constexpr DiagCode ExpectedSampleKeyword(DiagSubsystem::Parser, 52);
++inline constexpr DiagCode MultipleGenerateDefaultCases(DiagSubsystem::Parser, 53);
++inline constexpr DiagCode CaseGenerateEmpty(DiagSubsystem::Parser, 54);
++inline constexpr DiagCode LabelAndName(DiagSubsystem::Parser, 55);
++inline constexpr DiagCode EndNameMismatch(DiagSubsystem::Parser, 56);
++inline constexpr DiagCode EndNameNotEmpty(DiagSubsystem::Parser, 57);
++inline constexpr DiagCode DeclarationsAtStart(DiagSubsystem::Parser, 58);
++inline constexpr DiagCode VoidNotAllowed(DiagSubsystem::Parser, 59);
++inline constexpr DiagCode DuplicateDeclModifier(DiagSubsystem::Parser, 60);
++inline constexpr DiagCode DeclModifierOrdering(DiagSubsystem::Parser, 61);
++inline constexpr DiagCode DeclModifierConflict(DiagSubsystem::Parser, 62);
++inline constexpr DiagCode DuplicateQualifier(DiagSubsystem::Parser, 63);
++inline constexpr DiagCode QualifierConflict(DiagSubsystem::Parser, 64);
++inline constexpr DiagCode QualifierNotFirst(DiagSubsystem::Parser, 65);
++inline constexpr DiagCode PureRequiresVirtual(DiagSubsystem::Parser, 66);
++inline constexpr DiagCode InvalidMethodQualifier(DiagSubsystem::Parser, 67);
++inline constexpr DiagCode InvalidPropertyQualifier(DiagSubsystem::Parser, 68);
++inline constexpr DiagCode InvalidConstraintQualifier(DiagSubsystem::Parser, 69);
++inline constexpr DiagCode InvalidQualifierForMember(DiagSubsystem::Parser, 70);
++inline constexpr DiagCode InvalidQualifierForIfaceMember(DiagSubsystem::Parser, 71);
++inline constexpr DiagCode InvalidQualifierForConstructor(DiagSubsystem::Parser, 72);
++inline constexpr DiagCode MethodStaticLifetime(DiagSubsystem::Parser, 73);
++inline constexpr DiagCode TypeRefDeclVar(DiagSubsystem::Parser, 74);
++inline constexpr DiagCode ScopedClassCopy(DiagSubsystem::Parser, 75);
++inline constexpr DiagCode NotAllowedInCU(DiagSubsystem::Parser, 76);
++inline constexpr DiagCode NotAllowedInGenerate(DiagSubsystem::Parser, 77);
++inline constexpr DiagCode NotAllowedInModule(DiagSubsystem::Parser, 78);
++inline constexpr DiagCode NotAllowedInInterface(DiagSubsystem::Parser, 79);
++inline constexpr DiagCode NotAllowedInProgram(DiagSubsystem::Parser, 80);
++inline constexpr DiagCode NotAllowedInPackage(DiagSubsystem::Parser, 81);
++inline constexpr DiagCode NotAllowedInClocking(DiagSubsystem::Parser, 82);
++inline constexpr DiagCode NotAllowedInClass(DiagSubsystem::Parser, 83);
++inline constexpr DiagCode NotAllowedInIfaceClass(DiagSubsystem::Parser, 84);
++inline constexpr DiagCode TaskReturnType(DiagSubsystem::Parser, 85);
++inline constexpr DiagCode TaskConstructor(DiagSubsystem::Parser, 86);
++inline constexpr DiagCode ConstructorReturnType(DiagSubsystem::Parser, 87);
++inline constexpr DiagCode NewKeywordQualified(DiagSubsystem::Parser, 88);
++inline constexpr DiagCode SubroutinePrototypeScoped(DiagSubsystem::Parser, 89);
++inline constexpr DiagCode QualifiersOnOutOfBlock(DiagSubsystem::Parser, 90);
++inline constexpr DiagCode ConstraintQualOutOfBlock(DiagSubsystem::Parser, 91);
++inline constexpr DiagCode ConstructorOutsideClass(DiagSubsystem::Parser, 92);
++inline constexpr DiagCode InvalidSuperNew(DiagSubsystem::Parser, 93);
++inline constexpr DiagCode IfaceMethodPure(DiagSubsystem::Parser, 94);
++inline constexpr DiagCode NestedIface(DiagSubsystem::Parser, 95);
++inline constexpr DiagCode RegAfterNettype(DiagSubsystem::Parser, 96);
++inline constexpr DiagCode ChargeWithTriReg(DiagSubsystem::Parser, 97);
++inline constexpr DiagCode InitializerRequired(DiagSubsystem::Parser, 98);
++inline constexpr DiagCode DriveStrengthInvalid(DiagSubsystem::Parser, 99);
++inline constexpr DiagCode DriveStrengthHighZ(DiagSubsystem::Parser, 100);
++inline constexpr DiagCode RandOnPackedMember(DiagSubsystem::Parser, 101);
++inline constexpr DiagCode RandOnUnionMember(DiagSubsystem::Parser, 102);
++inline constexpr DiagCode SolveBeforeDisallowed(DiagSubsystem::Parser, 103);
++inline constexpr DiagCode LifetimeForPrototype(DiagSubsystem::Parser, 104);
++inline constexpr DiagCode NonStandardGenBlock(DiagSubsystem::Parser, 105);
++inline constexpr DiagCode EmptyAssignmentPattern(DiagSubsystem::Parser, 106);
++inline constexpr DiagCode NoteToMatchThis(DiagSubsystem::Parser, 107);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/PreprocessorDiags.h ./generated/slang/diagnostics/PreprocessorDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/PreprocessorDiags.h ./generated/slang/diagnostics/PreprocessorDiags.h
 --- ./generated/slang/diagnostics/PreprocessorDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/PreprocessorDiags.h	2020-11-03 00:14:56.258155903 -0800
++++ ./generated/slang/diagnostics/PreprocessorDiags.h	2021-01-13 10:06:32.309060077 -0800
 @@ -0,0 +1,48 @@
 +//------------------------------------------------------------------------------
 +//! @file PreprocessorDiags.h
@@ -17582,10 +14790,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode ExpectedDiagPragmaLevel(DiagSubsystem::Preprocessor, 33);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/StatementsDiags.h ./generated/slang/diagnostics/StatementsDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/StatementsDiags.h ./generated/slang/diagnostics/StatementsDiags.h
 --- ./generated/slang/diagnostics/StatementsDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/StatementsDiags.h	2020-11-03 00:14:56.258155903 -0800
-@@ -0,0 +1,32 @@
++++ ./generated/slang/diagnostics/StatementsDiags.h	2021-01-13 10:06:32.309060077 -0800
+@@ -0,0 +1,51 @@
 +//------------------------------------------------------------------------------
 +//! @file StatementsDiags.h
 +//! @brief Generated diagnostic enums for the Statements subsystem
@@ -17604,24 +14812,43 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode CoverStmtNoFail(DiagSubsystem::Statements, 3);
 +inline constexpr DiagCode StatementNotInLoop(DiagSubsystem::Statements, 4);
 +inline constexpr DiagCode ExprNotStatement(DiagSubsystem::Statements, 5);
-+inline constexpr DiagCode VoidCastFuncCall(DiagSubsystem::Statements, 6);
-+inline constexpr DiagCode NotAnArray(DiagSubsystem::Statements, 7);
-+inline constexpr DiagCode TooManyForeachVars(DiagSubsystem::Statements, 8);
-+inline constexpr DiagCode ForeachDynamicDimAfterSkipped(DiagSubsystem::Statements, 9);
-+inline constexpr DiagCode LoopVarShadowsArray(DiagSubsystem::Statements, 10);
-+inline constexpr DiagCode CaseInsideKeyword(DiagSubsystem::Statements, 11);
-+inline constexpr DiagCode InvalidDisableTarget(DiagSubsystem::Statements, 12);
-+inline constexpr DiagCode NotAnEvent(DiagSubsystem::Statements, 13);
-+inline constexpr DiagCode EventExpressionConstant(DiagSubsystem::Statements, 14);
-+inline constexpr DiagCode EmptyStatement(DiagSubsystem::Statements, 15);
-+inline constexpr DiagCode PointlessVoidCast(DiagSubsystem::Statements, 16);
-+inline constexpr DiagCode UnusedResult(DiagSubsystem::Statements, 17);
++inline constexpr DiagCode ExprNotConstraint(DiagSubsystem::Statements, 6);
++inline constexpr DiagCode VoidCastFuncCall(DiagSubsystem::Statements, 7);
++inline constexpr DiagCode NotAnArray(DiagSubsystem::Statements, 8);
++inline constexpr DiagCode TooManyForeachVars(DiagSubsystem::Statements, 9);
++inline constexpr DiagCode ForeachDynamicDimAfterSkipped(DiagSubsystem::Statements, 10);
++inline constexpr DiagCode LoopVarShadowsArray(DiagSubsystem::Statements, 11);
++inline constexpr DiagCode ForeachWildcardIndex(DiagSubsystem::Statements, 12);
++inline constexpr DiagCode CaseInsideKeyword(DiagSubsystem::Statements, 13);
++inline constexpr DiagCode InvalidDisableTarget(DiagSubsystem::Statements, 14);
++inline constexpr DiagCode NotAnEvent(DiagSubsystem::Statements, 15);
++inline constexpr DiagCode RepeatNotNumeric(DiagSubsystem::Statements, 16);
++inline constexpr DiagCode RepeatControlNotEvent(DiagSubsystem::Statements, 17);
++inline constexpr DiagCode UnexpectedPortDecl(DiagSubsystem::Statements, 18);
++inline constexpr DiagCode NonIntegralConstraintExpr(DiagSubsystem::Statements, 19);
++inline constexpr DiagCode NonIntegralConstraintLiteral(DiagSubsystem::Statements, 20);
++inline constexpr DiagCode UnknownConstraintLiteral(DiagSubsystem::Statements, 21);
++inline constexpr DiagCode RandCInDist(DiagSubsystem::Statements, 22);
++inline constexpr DiagCode RandCInUnique(DiagSubsystem::Statements, 23);
++inline constexpr DiagCode RandCInSolveBefore(DiagSubsystem::Statements, 24);
++inline constexpr DiagCode RandCInSoft(DiagSubsystem::Statements, 25);
++inline constexpr DiagCode RandNeededInDist(DiagSubsystem::Statements, 26);
++inline constexpr DiagCode InvalidUniquenessExpr(DiagSubsystem::Statements, 27);
++inline constexpr DiagCode InequivalentUniquenessTypes(DiagSubsystem::Statements, 28);
++inline constexpr DiagCode TaskInConstraint(DiagSubsystem::Statements, 29);
++inline constexpr DiagCode OutRefFuncConstraint(DiagSubsystem::Statements, 30);
++inline constexpr DiagCode BadDisableSoft(DiagSubsystem::Statements, 31);
++inline constexpr DiagCode BadSolveBefore(DiagSubsystem::Statements, 32);
++inline constexpr DiagCode EventExpressionConstant(DiagSubsystem::Statements, 33);
++inline constexpr DiagCode EmptyStatement(DiagSubsystem::Statements, 34);
++inline constexpr DiagCode PointlessVoidCast(DiagSubsystem::Statements, 35);
++inline constexpr DiagCode UnusedResult(DiagSubsystem::Statements, 36);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/SysFuncsDiags.h ./generated/slang/diagnostics/SysFuncsDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/SysFuncsDiags.h ./generated/slang/diagnostics/SysFuncsDiags.h
 --- ./generated/slang/diagnostics/SysFuncsDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/SysFuncsDiags.h	2020-11-03 00:14:56.258155903 -0800
-@@ -0,0 +1,38 @@
++++ ./generated/slang/diagnostics/SysFuncsDiags.h	2021-01-13 10:06:32.309060077 -0800
+@@ -0,0 +1,44 @@
 +//------------------------------------------------------------------------------
 +//! @file SysFuncsDiags.h
 +//! @brief Generated diagnostic enums for the SysFuncs subsystem
@@ -17636,33 +14863,39 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +inline constexpr DiagCode BadSystemSubroutineArg(DiagSubsystem::SysFuncs, 0);
 +inline constexpr DiagCode UnknownFormatSpecifier(DiagSubsystem::SysFuncs, 1);
-+inline constexpr DiagCode MissingFormatSpecifier(DiagSubsystem::SysFuncs, 2);
-+inline constexpr DiagCode FormatSpecifierWidthNotAllowed(DiagSubsystem::SysFuncs, 3);
-+inline constexpr DiagCode FormatSpecifierInvalidWidth(DiagSubsystem::SysFuncs, 4);
-+inline constexpr DiagCode FormatSpecifierNotFloat(DiagSubsystem::SysFuncs, 5);
-+inline constexpr DiagCode FormatUnspecifiedType(DiagSubsystem::SysFuncs, 6);
-+inline constexpr DiagCode FormatMismatchedType(DiagSubsystem::SysFuncs, 7);
-+inline constexpr DiagCode FormatNoArgument(DiagSubsystem::SysFuncs, 8);
-+inline constexpr DiagCode FormatEmptyArg(DiagSubsystem::SysFuncs, 9);
-+inline constexpr DiagCode FormatTooManyArgs(DiagSubsystem::SysFuncs, 10);
-+inline constexpr DiagCode InvalidStringArg(DiagSubsystem::SysFuncs, 11);
-+inline constexpr DiagCode ArrayReductionIntegral(DiagSubsystem::SysFuncs, 12);
-+inline constexpr DiagCode BadFinishNum(DiagSubsystem::SysFuncs, 13);
-+inline constexpr DiagCode SysFuncNotConst(DiagSubsystem::SysFuncs, 14);
-+inline constexpr DiagCode QueryOnDynamicType(DiagSubsystem::SysFuncs, 15);
-+inline constexpr DiagCode DimensionIndexInvalid(DiagSubsystem::SysFuncs, 16);
-+inline constexpr DiagCode DynamicDimensionIndex(DiagSubsystem::SysFuncs, 17);
-+inline constexpr DiagCode QueryOnAssociativeNonIntegral(DiagSubsystem::SysFuncs, 18);
-+inline constexpr DiagCode QueryOnAssociativeWildcard(DiagSubsystem::SysFuncs, 19);
++inline constexpr DiagCode FormatSpecifierWidthNotAllowed(DiagSubsystem::SysFuncs, 2);
++inline constexpr DiagCode FormatSpecifierInvalidWidth(DiagSubsystem::SysFuncs, 3);
++inline constexpr DiagCode FormatSpecifierNotFloat(DiagSubsystem::SysFuncs, 4);
++inline constexpr DiagCode FormatUnspecifiedType(DiagSubsystem::SysFuncs, 5);
++inline constexpr DiagCode FormatMismatchedType(DiagSubsystem::SysFuncs, 6);
++inline constexpr DiagCode FormatNoArgument(DiagSubsystem::SysFuncs, 7);
++inline constexpr DiagCode FormatEmptyArg(DiagSubsystem::SysFuncs, 8);
++inline constexpr DiagCode FormatTooManyArgs(DiagSubsystem::SysFuncs, 9);
++inline constexpr DiagCode InvalidStringArg(DiagSubsystem::SysFuncs, 10);
++inline constexpr DiagCode ArrayMethodIntegral(DiagSubsystem::SysFuncs, 11);
++inline constexpr DiagCode ArrayMethodComparable(DiagSubsystem::SysFuncs, 12);
++inline constexpr DiagCode SysFuncNotConst(DiagSubsystem::SysFuncs, 13);
++inline constexpr DiagCode QueryOnDynamicType(DiagSubsystem::SysFuncs, 14);
++inline constexpr DiagCode DimensionIndexInvalid(DiagSubsystem::SysFuncs, 15);
++inline constexpr DiagCode DynamicDimensionIndex(DiagSubsystem::SysFuncs, 16);
++inline constexpr DiagCode QueryOnAssociativeNonIntegral(DiagSubsystem::SysFuncs, 17);
++inline constexpr DiagCode QueryOnAssociativeWildcard(DiagSubsystem::SysFuncs, 18);
++inline constexpr DiagCode AssociativeWildcardNotAllowed(DiagSubsystem::SysFuncs, 19);
 +inline constexpr DiagCode ExpectedModuleName(DiagSubsystem::SysFuncs, 20);
 +inline constexpr DiagCode ExpectedModOrVarName(DiagSubsystem::SysFuncs, 21);
-+inline constexpr DiagCode CastArgSingular(DiagSubsystem::SysFuncs, 22);
-+inline constexpr DiagCode FormatRealInt(DiagSubsystem::SysFuncs, 23);
++inline constexpr DiagCode ExpectedScopeOrAssert(DiagSubsystem::SysFuncs, 22);
++inline constexpr DiagCode ExpectedClassPropertyName(DiagSubsystem::SysFuncs, 23);
++inline constexpr DiagCode ExpectedVariableName(DiagSubsystem::SysFuncs, 24);
++inline constexpr DiagCode CastArgSingular(DiagSubsystem::SysFuncs, 25);
++inline constexpr DiagCode ArrayLocatorWithClause(DiagSubsystem::SysFuncs, 26);
++inline constexpr DiagCode FormatRealInt(DiagSubsystem::SysFuncs, 27);
++inline constexpr DiagCode BadFinishNum(DiagSubsystem::SysFuncs, 28);
++inline constexpr DiagCode MissingFormatSpecifier(DiagSubsystem::SysFuncs, 29);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/diagnostics/TypesDiags.h ./generated/slang/diagnostics/TypesDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/TypesDiags.h ./generated/slang/diagnostics/TypesDiags.h
 --- ./generated/slang/diagnostics/TypesDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/TypesDiags.h	2020-11-03 00:14:56.258155903 -0800
++++ ./generated/slang/diagnostics/TypesDiags.h	2021-01-13 10:06:32.309060077 -0800
 @@ -0,0 +1,36 @@
 +//------------------------------------------------------------------------------
 +//! @file TypesDiags.h
@@ -17700,10 +14933,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode InvalidUnionMember(DiagSubsystem::Types, 21);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/syntax/AllSyntax.h ./generated/slang/syntax/AllSyntax.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/syntax/AllSyntax.h ./generated/slang/syntax/AllSyntax.h
 --- ./generated/slang/syntax/AllSyntax.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/syntax/AllSyntax.h	2020-11-03 00:15:12.357820024 -0800
-@@ -0,0 +1,6654 @@
++++ ./generated/slang/syntax/AllSyntax.h	2021-01-13 10:06:51.035357103 -0800
+@@ -0,0 +1,6728 @@
 +//------------------------------------------------------------------------------
 +//! @file AllSyntax.h
 +//! @brief All generated syntax node data structures
@@ -19117,6 +16350,24 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    EventControlSyntax* clone(BumpAllocator& alloc) const;
 +};
 +
++struct IffEventClauseSyntax : public SyntaxNode {
++    Token iff;
++    not_null<ExpressionSyntax*> expr;
++
++    IffEventClauseSyntax(Token iff, ExpressionSyntax& expr) :
++        SyntaxNode(SyntaxKind::IffEventClause), iff(iff), expr(&expr) {
++        this->expr->parent = this;
++    }
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    IffEventClauseSyntax* clone(BumpAllocator& alloc) const;
++};
++
 +struct EventExpressionSyntax : public SyntaxNode {
 +
 +    EventExpressionSyntax(SyntaxKind kind) :
@@ -19129,10 +16380,12 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +struct SignalEventExpressionSyntax : public EventExpressionSyntax {
 +    Token edge;
 +    not_null<ExpressionSyntax*> expr;
++    IffEventClauseSyntax* iffClause;
 +
-+    SignalEventExpressionSyntax(Token edge, ExpressionSyntax& expr) :
-+        EventExpressionSyntax(SyntaxKind::SignalEventExpression), edge(edge), expr(&expr) {
++    SignalEventExpressionSyntax(Token edge, ExpressionSyntax& expr, IffEventClauseSyntax* iffClause) :
++        EventExpressionSyntax(SyntaxKind::SignalEventExpression), edge(edge), expr(&expr), iffClause(iffClause) {
 +        this->expr->parent = this;
++        if (this->iffClause) this->iffClause->parent = this;
 +    }
 +
 +    static bool isKind(SyntaxKind kind);
@@ -19582,6 +16835,29 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    void setChild(size_t index, TokenOrSyntax child);
 +
 +    NetDeclarationSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct UserDefinedNetDeclarationSyntax : public MemberSyntax {
++    Token netType;
++    not_null<TimingControlSyntax*> delay;
++    SeparatedSyntaxList<DeclaratorSyntax> declarators;
++    Token semi;
++
++    UserDefinedNetDeclarationSyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, Token netType, TimingControlSyntax& delay, const SeparatedSyntaxList<DeclaratorSyntax>& declarators, Token semi) :
++        MemberSyntax(SyntaxKind::UserDefinedNetDeclaration, attributes), netType(netType), delay(&delay), declarators(declarators), semi(semi) {
++        this->delay->parent = this;
++        this->declarators.parent = this;
++        for (auto child : this->declarators)
++            child->parent = this;
++    }
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    UserDefinedNetDeclarationSyntax* clone(BumpAllocator& alloc) const;
 +};
 +
 +struct WithFunctionClauseSyntax : public SyntaxNode {
@@ -21014,12 +18290,13 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +};
 +
 +struct VariablePortHeaderSyntax : public PortHeaderSyntax {
++    Token constKeyword;
 +    Token direction;
 +    Token varKeyword;
 +    not_null<DataTypeSyntax*> dataType;
 +
-+    VariablePortHeaderSyntax(Token direction, Token varKeyword, DataTypeSyntax& dataType) :
-+        PortHeaderSyntax(SyntaxKind::VariablePortHeader), direction(direction), varKeyword(varKeyword), dataType(&dataType) {
++    VariablePortHeaderSyntax(Token constKeyword, Token direction, Token varKeyword, DataTypeSyntax& dataType) :
++        PortHeaderSyntax(SyntaxKind::VariablePortHeader), constKeyword(constKeyword), direction(direction), varKeyword(varKeyword), dataType(&dataType) {
 +        this->dataType->parent = this;
 +    }
 +
@@ -22398,17 +19675,17 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    DefaultClockingReferenceSyntax* clone(BumpAllocator& alloc) const;
 +};
 +
-+struct DPIImportExportSyntax : public MemberSyntax {
++struct DPIImportSyntax : public MemberSyntax {
 +    Token keyword;
-+    Token stringLiteral;
++    Token specString;
 +    Token property;
 +    Token c_identifier;
 +    Token equals;
 +    not_null<FunctionPrototypeSyntax*> method;
 +    Token semi;
 +
-+    DPIImportExportSyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, Token stringLiteral, Token property, Token c_identifier, Token equals, FunctionPrototypeSyntax& method, Token semi) :
-+        MemberSyntax(SyntaxKind::DPIImportExport, attributes), keyword(keyword), stringLiteral(stringLiteral), property(property), c_identifier(c_identifier), equals(equals), method(&method), semi(semi) {
++    DPIImportSyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, Token specString, Token property, Token c_identifier, Token equals, FunctionPrototypeSyntax& method, Token semi) :
++        MemberSyntax(SyntaxKind::DPIImport, attributes), keyword(keyword), specString(specString), property(property), c_identifier(c_identifier), equals(equals), method(&method), semi(semi) {
 +        this->method->parent = this;
 +    }
 +
@@ -22418,7 +19695,29 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    ConstTokenOrSyntax getChild(size_t index) const;
 +    void setChild(size_t index, TokenOrSyntax child);
 +
-+    DPIImportExportSyntax* clone(BumpAllocator& alloc) const;
++    DPIImportSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct DPIExportSyntax : public MemberSyntax {
++    Token keyword;
++    Token specString;
++    Token c_identifier;
++    Token equals;
++    Token functionOrTask;
++    Token name;
++    Token semi;
++
++    DPIExportSyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, Token specString, Token c_identifier, Token equals, Token functionOrTask, Token name, Token semi) :
++        MemberSyntax(SyntaxKind::DPIExport, attributes), keyword(keyword), specString(specString), c_identifier(c_identifier), equals(equals), functionOrTask(functionOrTask), name(name), semi(semi) {
++    }
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    DPIExportSyntax* clone(BumpAllocator& alloc) const;
 +};
 +
 +struct ElabSystemTaskSyntax : public MemberSyntax {
@@ -22719,12 +20018,13 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +struct ConstraintPrototypeSyntax : public MemberSyntax {
 +    TokenList qualifiers;
 +    Token keyword;
-+    Token name;
++    not_null<NameSyntax*> name;
 +    Token semi;
 +
-+    ConstraintPrototypeSyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, const TokenList& qualifiers, Token keyword, Token name, Token semi) :
-+        MemberSyntax(SyntaxKind::ConstraintPrototype, attributes), qualifiers(qualifiers), keyword(keyword), name(name), semi(semi) {
++    ConstraintPrototypeSyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, const TokenList& qualifiers, Token keyword, NameSyntax& name, Token semi) :
++        MemberSyntax(SyntaxKind::ConstraintPrototype, attributes), qualifiers(qualifiers), keyword(keyword), name(&name), semi(semi) {
 +        this->qualifiers.parent = this;
++        this->name->parent = this;
 +    }
 +
 +    static bool isKind(SyntaxKind kind);
@@ -22739,12 +20039,13 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +struct ConstraintDeclarationSyntax : public MemberSyntax {
 +    TokenList qualifiers;
 +    Token keyword;
-+    Token name;
++    not_null<NameSyntax*> name;
 +    not_null<ConstraintBlockSyntax*> block;
 +
-+    ConstraintDeclarationSyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, const TokenList& qualifiers, Token keyword, Token name, ConstraintBlockSyntax& block) :
-+        MemberSyntax(SyntaxKind::ConstraintDeclaration, attributes), qualifiers(qualifiers), keyword(keyword), name(name), block(&block) {
++    ConstraintDeclarationSyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, const TokenList& qualifiers, Token keyword, NameSyntax& name, ConstraintBlockSyntax& block) :
++        MemberSyntax(SyntaxKind::ConstraintDeclaration, attributes), qualifiers(qualifiers), keyword(keyword), name(&name), block(&block) {
 +        this->qualifiers.parent = this;
++        this->name->parent = this;
 +        this->block->parent = this;
 +    }
 +
@@ -23136,14 +20437,14 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    TransListCoverageBinInitializerSyntax* clone(BumpAllocator& alloc) const;
 +};
 +
-+struct IffClauseSyntax : public SyntaxNode {
++struct CoverageIffClauseSyntax : public SyntaxNode {
 +    Token iff;
 +    Token openParen;
 +    not_null<ExpressionSyntax*> expr;
 +    Token closeParen;
 +
-+    IffClauseSyntax(Token iff, Token openParen, ExpressionSyntax& expr, Token closeParen) :
-+        SyntaxNode(SyntaxKind::IffClause), iff(iff), openParen(openParen), expr(&expr), closeParen(closeParen) {
++    CoverageIffClauseSyntax(Token iff, Token openParen, ExpressionSyntax& expr, Token closeParen) :
++        SyntaxNode(SyntaxKind::CoverageIffClause), iff(iff), openParen(openParen), expr(&expr), closeParen(closeParen) {
 +        this->expr->parent = this;
 +    }
 +
@@ -23153,7 +20454,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    ConstTokenOrSyntax getChild(size_t index) const;
 +    void setChild(size_t index, TokenOrSyntax child);
 +
-+    IffClauseSyntax* clone(BumpAllocator& alloc) const;
++    CoverageIffClauseSyntax* clone(BumpAllocator& alloc) const;
 +};
 +
 +struct CoverageBinsSyntax : public MemberSyntax {
@@ -23163,10 +20464,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    ElementSelectSyntax* selector;
 +    Token equals;
 +    not_null<CoverageBinInitializerSyntax*> initializer;
-+    IffClauseSyntax* iff;
++    CoverageIffClauseSyntax* iff;
 +    Token semi;
 +
-+    CoverageBinsSyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, Token wildcard, Token keyword, Token name, ElementSelectSyntax* selector, Token equals, CoverageBinInitializerSyntax& initializer, IffClauseSyntax* iff, Token semi) :
++    CoverageBinsSyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, Token wildcard, Token keyword, Token name, ElementSelectSyntax* selector, Token equals, CoverageBinInitializerSyntax& initializer, CoverageIffClauseSyntax* iff, Token semi) :
 +        MemberSyntax(SyntaxKind::CoverageBins, attributes), wildcard(wildcard), keyword(keyword), name(name), selector(selector), equals(equals), initializer(&initializer), iff(iff), semi(semi) {
 +        if (this->selector) this->selector->parent = this;
 +        this->initializer->parent = this;
@@ -23672,15 +20973,17 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    ConditionalPredicateSyntax& conditionalPredicate(const SeparatedSyntaxList<ConditionalPatternSyntax>& conditions);
 +    ConditionalStatementSyntax& conditionalStatement(NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, Token uniqueOrPriority, Token ifKeyword, Token openParen, ConditionalPredicateSyntax& predicate, Token closeParen, StatementSyntax& statement, ElseClauseSyntax* elseClause);
 +    ConstraintBlockSyntax& constraintBlock(Token openBrace, const SyntaxList<ConstraintItemSyntax>& items, Token closeBrace);
-+    ConstraintDeclarationSyntax& constraintDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, const TokenList& qualifiers, Token keyword, Token name, ConstraintBlockSyntax& block);
-+    ConstraintPrototypeSyntax& constraintPrototype(const SyntaxList<AttributeInstanceSyntax>& attributes, const TokenList& qualifiers, Token keyword, Token name, Token semi);
++    ConstraintDeclarationSyntax& constraintDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, const TokenList& qualifiers, Token keyword, NameSyntax& name, ConstraintBlockSyntax& block);
++    ConstraintPrototypeSyntax& constraintPrototype(const SyntaxList<AttributeInstanceSyntax>& attributes, const TokenList& qualifiers, Token keyword, NameSyntax& name, Token semi);
 +    ContinuousAssignSyntax& continuousAssign(const SyntaxList<AttributeInstanceSyntax>& attributes, Token assign, DriveStrengthSyntax* strength, TimingControlSyntax* delay, const SeparatedSyntaxList<ExpressionSyntax>& assignments, Token semi);
 +    CopyClassExpressionSyntax& copyClassExpression(NameSyntax& scopedNew, ExpressionSyntax& expr);
-+    CoverageBinsSyntax& coverageBins(const SyntaxList<AttributeInstanceSyntax>& attributes, Token wildcard, Token keyword, Token name, ElementSelectSyntax* selector, Token equals, CoverageBinInitializerSyntax& initializer, IffClauseSyntax* iff, Token semi);
++    CoverageBinsSyntax& coverageBins(const SyntaxList<AttributeInstanceSyntax>& attributes, Token wildcard, Token keyword, Token name, ElementSelectSyntax* selector, Token equals, CoverageBinInitializerSyntax& initializer, CoverageIffClauseSyntax* iff, Token semi);
++    CoverageIffClauseSyntax& coverageIffClause(Token iff, Token openParen, ExpressionSyntax& expr, Token closeParen);
 +    CoverageOptionSyntax& coverageOption(const SyntaxList<AttributeInstanceSyntax>& attributes, Token option, Token dot, Token name, Token equals, ExpressionSyntax& expr, Token semi);
 +    CovergroupDeclarationSyntax& covergroupDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, Token covergroup, Token name, AnsiPortListSyntax* portList, SyntaxNode* event, Token semi, const SyntaxList<MemberSyntax>& members, Token endgroup, NamedBlockClauseSyntax* endBlockName);
 +    CoverpointSyntax& coverpoint(const SyntaxList<AttributeInstanceSyntax>& attributes, DataTypeSyntax* type, NamedLabelSyntax* label, Token coverpoint, ExpressionSyntax& expr, Token openBrace, const SyntaxList<MemberSyntax>& members, Token closeBrace, Token emptySemi);
-+    DPIImportExportSyntax& dPIImportExport(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, Token stringLiteral, Token property, Token c_identifier, Token equals, FunctionPrototypeSyntax& method, Token semi);
++    DPIExportSyntax& dPIExport(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, Token specString, Token c_identifier, Token equals, Token functionOrTask, Token name, Token semi);
++    DPIImportSyntax& dPIImport(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, Token specString, Token property, Token c_identifier, Token equals, FunctionPrototypeSyntax& method, Token semi);
 +    DataDeclarationSyntax& dataDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, const TokenList& modifiers, DataTypeSyntax& type, const SeparatedSyntaxList<DeclaratorSyntax>& declarators, Token semi);
 +    DeclaratorSyntax& declarator(Token name, const SyntaxList<VariableDimensionSyntax>& dimensions, EqualsValueClauseSyntax* initializer);
 +    DefParamAssignmentSyntax& defParamAssignment(NameSyntax& name, EqualsValueClauseSyntax* setter);
@@ -23753,7 +21056,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    IdentifierNameSyntax& identifierName(Token identifier);
 +    IdentifierSelectNameSyntax& identifierSelectName(Token identifier, const SyntaxList<ElementSelectSyntax>& selectors);
 +    IfGenerateSyntax& ifGenerate(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, Token openParen, ExpressionSyntax& condition, Token closeParen, MemberSyntax& block, ElseClauseSyntax* elseClause);
-+    IffClauseSyntax& iffClause(Token iff, Token openParen, ExpressionSyntax& expr, Token closeParen);
++    IffEventClauseSyntax& iffEventClause(Token iff, ExpressionSyntax& expr);
 +    ImmediateAssertionMemberSyntax& immediateAssertionMember(const SyntaxList<AttributeInstanceSyntax>& attributes, ImmediateAssertionStatementSyntax& statement);
 +    ImmediateAssertionStatementSyntax& immediateAssertionStatement(SyntaxKind kind, NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, DeferredAssertionSyntax* delay, ParenthesizedExpressionSyntax& expr, ActionBlockSyntax& action);
 +    ImplementsClauseSyntax& implementsClause(Token keyword, const SeparatedSyntaxList<NameSyntax>& interfaces);
@@ -23852,7 +21155,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    ScopedNameSyntax& scopedName(NameSyntax& left, Token separator, NameSyntax& right);
 +    SequenceDeclarationSyntax& sequenceDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, Token name, AssertionItemPortListSyntax* portList, Token semi, const SyntaxList<MemberSyntax>& assertionVariables, ExpressionSyntax& seqExpr, Token optionalSemi, Token end, NamedBlockClauseSyntax* endBlockName);
 +    ShortcutCycleDelayRangeSyntax& shortcutCycleDelayRange(Token doubleHash, Token openBracket, Token op, Token closeBracket);
-+    SignalEventExpressionSyntax& signalEventExpression(Token edge, ExpressionSyntax& expr);
++    SignalEventExpressionSyntax& signalEventExpression(Token edge, ExpressionSyntax& expr, IffEventClauseSyntax* iffClause);
 +    SignedCastExpressionSyntax& signedCastExpression(Token signing, Token apostrophe, ParenthesizedExpressionSyntax& inner);
 +    SimpleAssignmentPatternSyntax& simpleAssignmentPattern(Token openBrace, const SeparatedSyntaxList<ExpressionSyntax>& items, Token closeBrace);
 +    SimpleDirectiveSyntax& simpleDirective(SyntaxKind kind, Token directive);
@@ -23886,9 +21189,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    UnconnectedDriveDirectiveSyntax& unconnectedDriveDirective(Token directive, Token strength);
 +    UndefDirectiveSyntax& undefDirective(Token directive, Token name);
 +    UniquenessConstraintSyntax& uniquenessConstraint(Token unique, OpenRangeListSyntax& ranges, Token semi);
++    UserDefinedNetDeclarationSyntax& userDefinedNetDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, Token netType, TimingControlSyntax& delay, const SeparatedSyntaxList<DeclaratorSyntax>& declarators, Token semi);
 +    VariableDimensionSyntax& variableDimension(Token openBracket, DimensionSpecifierSyntax* specifier, Token closeBracket);
 +    VariablePatternSyntax& variablePattern(Token dot, Token variableName);
-+    VariablePortHeaderSyntax& variablePortHeader(Token direction, Token varKeyword, DataTypeSyntax& dataType);
++    VariablePortHeaderSyntax& variablePortHeader(Token constKeyword, Token direction, Token varKeyword, DataTypeSyntax& dataType);
 +    VirtualInterfaceTypeSyntax& virtualInterfaceType(Token virtualKeyword, Token interfaceKeyword, Token name, ParameterValueAssignmentSyntax* parameters, DotMemberClauseSyntax* modport);
 +    VoidCastedCallStatementSyntax& voidCastedCallStatement(NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, Token voidKeyword, Token apostrophe, Token openParen, ExpressionSyntax& expr, Token closeParen, Token semi);
 +    WaitForkStatementSyntax& waitForkStatement(NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, Token wait, Token fork, Token semi);
@@ -23999,11 +21303,13 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::CoverPropertyStatement: return visitor.visit(*static_cast<std::conditional_t<isConst, const ConcurrentAssertionStatementSyntax*, ConcurrentAssertionStatementSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::CoverSequenceStatement: return visitor.visit(*static_cast<std::conditional_t<isConst, const ConcurrentAssertionStatementSyntax*, ConcurrentAssertionStatementSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::CoverageBins: return visitor.visit(*static_cast<std::conditional_t<isConst, const CoverageBinsSyntax*, CoverageBinsSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::CoverageIffClause: return visitor.visit(*static_cast<std::conditional_t<isConst, const CoverageIffClauseSyntax*, CoverageIffClauseSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::CoverageOption: return visitor.visit(*static_cast<std::conditional_t<isConst, const CoverageOptionSyntax*, CoverageOptionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::CovergroupDeclaration: return visitor.visit(*static_cast<std::conditional_t<isConst, const CovergroupDeclarationSyntax*, CovergroupDeclarationSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::Coverpoint: return visitor.visit(*static_cast<std::conditional_t<isConst, const CoverpointSyntax*, CoverpointSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::CycleDelay: return visitor.visit(*static_cast<std::conditional_t<isConst, const DelaySyntax*, DelaySyntax*>>(node), std::forward<Args>(args)...);
-+        case SyntaxKind::DPIImportExport: return visitor.visit(*static_cast<std::conditional_t<isConst, const DPIImportExportSyntax*, DPIImportExportSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::DPIExport: return visitor.visit(*static_cast<std::conditional_t<isConst, const DPIExportSyntax*, DPIExportSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::DPIImport: return visitor.visit(*static_cast<std::conditional_t<isConst, const DPIImportSyntax*, DPIImportSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::DataDeclaration: return visitor.visit(*static_cast<std::conditional_t<isConst, const DataDeclarationSyntax*, DataDeclarationSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::Declarator: return visitor.visit(*static_cast<std::conditional_t<isConst, const DeclaratorSyntax*, DeclaratorSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::DefParam: return visitor.visit(*static_cast<std::conditional_t<isConst, const DefParamSyntax*, DefParamSyntax*>>(node), std::forward<Args>(args)...);
@@ -24093,7 +21399,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::IfDefDirective: return visitor.visit(*static_cast<std::conditional_t<isConst, const ConditionalBranchDirectiveSyntax*, ConditionalBranchDirectiveSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::IfGenerate: return visitor.visit(*static_cast<std::conditional_t<isConst, const IfGenerateSyntax*, IfGenerateSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::IfNDefDirective: return visitor.visit(*static_cast<std::conditional_t<isConst, const ConditionalBranchDirectiveSyntax*, ConditionalBranchDirectiveSyntax*>>(node), std::forward<Args>(args)...);
-+        case SyntaxKind::IffClause: return visitor.visit(*static_cast<std::conditional_t<isConst, const IffClauseSyntax*, IffClauseSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::IffEventClause: return visitor.visit(*static_cast<std::conditional_t<isConst, const IffEventClauseSyntax*, IffEventClauseSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::IffPropertyExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const BinaryExpressionSyntax*, BinaryExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::ImmediateAssertStatement: return visitor.visit(*static_cast<std::conditional_t<isConst, const ImmediateAssertionStatementSyntax*, ImmediateAssertionStatementSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::ImmediateAssertionMember: return visitor.visit(*static_cast<std::conditional_t<isConst, const ImmediateAssertionMemberSyntax*, ImmediateAssertionMemberSyntax*>>(node), std::forward<Args>(args)...);
@@ -24320,6 +21626,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::UntilPropertyExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const BinaryExpressionSyntax*, BinaryExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::UntilWithPropertyExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const BinaryExpressionSyntax*, BinaryExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::Untyped: return visitor.visit(*static_cast<std::conditional_t<isConst, const KeywordTypeSyntax*, KeywordTypeSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::UserDefinedNetDeclaration: return visitor.visit(*static_cast<std::conditional_t<isConst, const UserDefinedNetDeclarationSyntax*, UserDefinedNetDeclarationSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::VariableDimension: return visitor.visit(*static_cast<std::conditional_t<isConst, const VariableDimensionSyntax*, VariableDimensionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::VariablePattern: return visitor.visit(*static_cast<std::conditional_t<isConst, const VariablePatternSyntax*, VariablePatternSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::VariablePortHeader: return visitor.visit(*static_cast<std::conditional_t<isConst, const VariablePortHeaderSyntax*, VariablePortHeaderSyntax*>>(node), std::forward<Args>(args)...);
@@ -24358,10 +21665,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +}
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/slang/syntax/SyntaxKind.h ./generated/slang/syntax/SyntaxKind.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/syntax/SyntaxKind.h ./generated/slang/syntax/SyntaxKind.h
 --- ./generated/slang/syntax/SyntaxKind.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/syntax/SyntaxKind.h	2020-11-03 00:15:12.367819815 -0800
-@@ -0,0 +1,446 @@
++++ ./generated/slang/syntax/SyntaxKind.h	2021-01-13 10:06:51.042023637 -0800
+@@ -0,0 +1,449 @@
 +//------------------------------------------------------------------------------
 +//! @file SyntaxKind.h
 +//! @brief Generated SyntaxKind enum
@@ -24460,11 +21767,13 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    CoverPropertyStatement,
 +    CoverSequenceStatement,
 +    CoverageBins,
++    CoverageIffClause,
 +    CoverageOption,
 +    CovergroupDeclaration,
 +    Coverpoint,
 +    CycleDelay,
-+    DPIImportExport,
++    DPIExport,
++    DPIImport,
 +    DataDeclaration,
 +    Declarator,
 +    DefParam,
@@ -24554,7 +21863,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    IfDefDirective,
 +    IfGenerate,
 +    IfNDefDirective,
-+    IffClause,
++    IffEventClause,
 +    IffPropertyExpression,
 +    ImmediateAssertStatement,
 +    ImmediateAssertionMember,
@@ -24781,6 +22090,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    UntilPropertyExpression,
 +    UntilWithPropertyExpression,
 +    Untyped,
++    UserDefinedNetDeclaration,
 +    VariableDimension,
 +    VariablePattern,
 +    VariablePortHeader,
@@ -24808,9 +22118,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +string_view toString(SyntaxKind kind);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' '--exclude=CMakeFiles' ./generated/Version.cpp ./generated/Version.cpp
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/Version.cpp ./generated/Version.cpp
 --- ./generated/Version.cpp	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/Version.cpp	2020-11-03 00:14:56.168157782 -0800
++++ ./generated/Version.cpp	2021-01-13 10:06:32.242394726 -0800
 @@ -0,0 +1,26 @@
 +//------------------------------------------------------------------------------
 +// Version.cpp
@@ -24830,11 +22140,11 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +}
 +
 +int VersionInfo::getMinor() {
-+    return 6;
++    return 7;
 +}
 +
 +string_view VersionInfo::getRevision() {
-+    return "c0cf9a64"sv;
++    return "b247da18"sv;
 +}
 +
 +}

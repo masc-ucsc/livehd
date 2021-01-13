@@ -1,20 +1,31 @@
 #  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
 #  slang generates cpp at build time. The patch has the build/source directory
-#  cd slang_orig/build/
+#BUILD slang to create the generated files
+#  clone slang in slang and slang_orig
+#  cd slang/build/
 #  cmake ../
 #  make
-#  cp -a source/* ../../slang/generated
-#  rm the llvm source/codegen/
-#  cd ../../slang
-#  rm -rf ../slang_orig/build
+#  cd ../
+#MOVE generated to main directory && remove build && unnecessary files for patch
+#  mv build/source generated
+#  rm -rf build
+#  rm -rf generated/CMake*
+#  rm -rf generated/Make*
+#  rm -rf generated/cmake*
+#CREATE the patch file
 #  mkpatch ../slang_orig .
+#
+#  Update the inou/slang/slang_driver.cpp and inou/slang/tests/driver.cpp
+#  The main goes to driver.cpp the rest goes to slang_driver.cpp (and add the LNAST API)
+#
 cc_library(
    name = "slang",
    srcs = glob(["source/**/*.cpp",
                 "generated/*.cpp",
                 "external/xxhash/*.cpp",
-                "generated/**/*.cpp"],
+                "generated/**/*.cpp"
+               ],
                 exclude=[
                  "source/codegen/CGExpr.cpp",
                  "source/codegen/CGSysCall.cpp",
@@ -33,7 +44,12 @@ cc_library(
                 "external/fmt/*.cc",
                 "external/xxhash/*.h",
                 "external/ieee1800/*.h",
-              ]),
+               ],
+                exclude=[
+                "source/codegen/CGBuilder.h",
+                "source/codegen/CodeGenFunction.h",
+                "source/codegen/CodeGenTypes.h",
+               ]),
    includes = [ "include", "external", "generated" ,"generated/source"], # Needed because some includes use <foo.h>
    visibility = ["//visibility:public"],
    copts = ["-w", "-O2"],

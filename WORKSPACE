@@ -125,9 +125,9 @@ new_git_repository(
 new_git_repository(
     name = "slang",
     build_file = "BUILD.slang",
-    commit = "c0cf9a643f05df63268ecbfe561e9af37c9a62a8", # Nov 2nd, 2020
+    commit = "b247da1849be56b00422626857532bb16830fb1f", # Jan 13, 2021 c0cf9a643f05df63268ecbfe561e9af37c9a62a8", # Nov 2nd, 2020
     remote = "https://github.com/MikePopoloski/slang.git",
-    shallow_since = "1604256203 -0500",
+    shallow_since = "1610327918 -0500",
     patches = ["//external:patch.slang"],
 )
 

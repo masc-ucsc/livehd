@@ -1813,7 +1813,7 @@ inline bool Prp::check_eos() {
   auto start_line = cur_line;
   check_lb();
 #ifdef DEBUG_AST
-  PRINT_DBG_AST("About to check for a semicolon. Token = ");
+  PRINT_DBG_AST("About to check for a semicolon. Etoken = ");
   dump_token();
 #endif
   while (next) {
@@ -1857,7 +1857,7 @@ void Prp::elaborate() {
   /*
     int i = 0;
     while(!scan_is_end()){
-      fmt::print("Token {}: {}\n", i, scan_text());
+      fmt::print("Etoken {}: {}\n", i, scan_text());
       scan_next();
       i++;
     }
@@ -1982,7 +1982,7 @@ void Prp::ast_handler() {
     rule_name       = rule_id_to_string(node.rule_id);
     auto token_text = scan_text(node.token_entry);
 		(void)token_text;
-    PRINT_AST("Rule name: {}, Token text: {}, Tree level: {}\n", rule_name, token_text, it.level);
+    PRINT_AST("Rule name: {}, Etoken text: {}, Tree level: {}\n", rule_name, token_text, it.level);
   }
 }
 
@@ -2048,7 +2048,7 @@ bool Prp::chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, std::lis
   if (ws_map.find(tok) != ws_map.end()) {
     allowed_ws_after  = ws_map[tok];
     allowed_ws_before = (ws_map[tok] >> 8);
-    PRINT_DBG_AST("Token {}: ws before = {}, ws after = {}.\n", scan_text(scan_token()), allowed_ws_before, allowed_ws_after);
+    PRINT_DBG_AST("Etoken {}: ws before = {}, ws after = {}.\n", scan_text(scan_token()), allowed_ws_before, allowed_ws_after);
   }
 
   if (allowed_ws_before) {
@@ -2142,7 +2142,7 @@ bool Prp::chk_and_consume_options(Token_id *toks, uint8_t tok_cnt, Rule_id rid, 
   if (ws_map.find(toks[i]) != ws_map.end()) {
     allowed_ws_after  = ws_map[toks[i]];
     allowed_ws_before = (ws_map[toks[i]] >> 8);
-    PRINT_DBG_AST("Token {}: ws before = {}, ws after = {}.\n", scan_text(scan_token()), allowed_ws_before, allowed_ws_after);
+    PRINT_DBG_AST("Etoken {}: ws before = {}, ws after = {}.\n", scan_text(scan_token()), allowed_ws_before, allowed_ws_after);
   }
 
   if (allowed_ws_before) {

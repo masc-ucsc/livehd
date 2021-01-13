@@ -916,7 +916,7 @@ Lnast_node Prp_lnast::eval_expression(mmap_lib::Tree_index idx_start_ast, mmap_l
   std::string last_op_overload_name;
   while (!child_cur.is_invalid()) {
     const auto &child_cur_data = ast->get_data(child_cur);
-    PRINT_DBG_LN("Rule name: {}, Token text: {}\n",
+    PRINT_DBG_LN("Rule name: {}, etoken text: {}\n",
                  rule_id_to_string(child_cur_data.rule_id),
                  scan_text(child_cur_data.token_entry));
     if (child_cur_data.token_entry != 0 || child_cur_data.rule_id == Prp_rule_string_constant

@@ -35,9 +35,9 @@ void Pass_lnastfmt::parse_ln(std::shared_ptr<Lnast> ln, Eprp_var& var, std::stri
   std::unique_ptr<Lnast> lnastfmted = std::make_unique<Lnast>(module_name);
 
   observe_lnast(ln.get());//1st traversal through the original LN to record assign subtrees.
-  
+
   //now we will make the formatted LNAST:
-  lnastfmted->set_root(Lnast_node(Lnast_ntype::create_top(), Token(0, 0, 0, 0, ln->get_top_module_name()))); // root node of lnfmted
+  lnastfmted->set_root(Lnast_node(Lnast_ntype::create_top(), Etoken(0, 0, 0, 0, ln->get_top_module_name()))); // root node of lnfmted
   const auto& stmt_index = ln->get_child(ln->get_root());//stmt node of ln
   const auto& stmt_index_fmt = lnastfmted->add_child(lnastfmted->get_root(), Lnast_node(ln->get_type(stmt_index), ln->get_token(stmt_index), ln->get_subs(stmt_index))); //stmt node of lnfmted (copied from ln)
 
@@ -56,7 +56,7 @@ void Pass_lnastfmt::parse_ln(std::shared_ptr<Lnast> ln, Eprp_var& var, std::stri
       }
     }
     //fmt::print("?????all children leaves????: {}\n", all_are_leaves);
-    if(all_are_leaves) { //ln->is_leaf(leaf_child_check)) 
+    if(all_are_leaves) { //ln->is_leaf(leaf_child_check))
       if(ln->get_type(curr_index).is_assign()) {
 
         //if assign was curr_index; process assign subtree:
@@ -74,7 +74,7 @@ void Pass_lnastfmt::parse_ln(std::shared_ptr<Lnast> ln, Eprp_var& var, std::stri
           curr_index = ln->get_sibling_next(curr_index);
           curr_incremented = true;
         }
-      } 
+      }
       //if curr_index node was not ssa-assign
       //traverse and keep adding to lnfmted
       //if value from map used? replcae it and move on.
@@ -85,7 +85,7 @@ void Pass_lnastfmt::parse_ln(std::shared_ptr<Lnast> ln, Eprp_var& var, std::stri
 
           auto is = ref_hash_map.find(ln->get_name(it));
           if(is != ref_hash_map.end() && is_ssa(ln->get_name(it))) {
-            //auto frst_fmt = 
+            //auto frst_fmt =
             lnastfmted->add_child(curr_index_fmt, Lnast_node::create_ref(lnastfmted->add_string(is->second)));
           } else {
             lnastfmted->add_child(curr_index_fmt, Lnast_node(ln->get_type(it), ln->get_token(it), ln->get_subs(it)));
@@ -120,7 +120,7 @@ void Pass_lnastfmt::parse_ln(std::shared_ptr<Lnast> ln, Eprp_var& var, std::stri
           }
           curr_lev = new_lev; curr_pos = new_pos;
         } else if (new_lev+1 == curr_lev) {
-          if(is != ref_hash_map.end() && is_ssa(ln->get_name(it))) { 
+          if(is != ref_hash_map.end() && is_ssa(ln->get_name(it))) {
             curr_index_fmt = lnastfmted->append_sibling(lnastfmted->get_parent(curr_index_fmt), Lnast_node::create_ref(lnastfmted->add_string(is->second)));
           } else {
             curr_index_fmt = lnastfmted->append_sibling(lnastfmted->get_parent(curr_index_fmt), Lnast_node(ln->get_type(it), ln->get_token(it), ln->get_subs(it)));
@@ -140,7 +140,7 @@ void Pass_lnastfmt::parse_ln(std::shared_ptr<Lnast> ln, Eprp_var& var, std::stri
     if(curr_index!= ln->invalid_index() && !curr_incremented) {
       curr_index = ln->get_sibling_next(curr_index);
     }
-  } 
+  }
 
   fmt::print("****lnast fmted:  \n");
   lnastfmted->dump();
@@ -167,7 +167,7 @@ void Pass_lnastfmt::process_node(Lnast* ln, const mmap_lib::Tree_index& it) {
     auto frst_child_indx = ln->get_first_child(it);
     I(ln->get_type(frst_child_indx).debug_name()=="ref", "unexpected node found! not ref!?");
     fmt::print("first child type and data: {}, {}\n", ln->get_type(frst_child_indx).debug_name(), ln->get_name(frst_child_indx));
-   
+
     auto sec_child_indx = ln->get_sibling_next(frst_child_indx);
     fmt::print("sec child type and data: {}, {}\n", ln->get_type(sec_child_indx).debug_name(), ln->get_name(sec_child_indx));
 
@@ -175,7 +175,7 @@ void Pass_lnastfmt::process_node(Lnast* ln, const mmap_lib::Tree_index& it) {
 
     ref_hash_map.try_emplace(ln->get_name(sec_child_indx), ln->get_name(frst_child_indx));//insert key, value pair.
 
-    
+
   }
 }
 

@@ -78,18 +78,18 @@ constexpr Token_id Token_id_reference     = 13;  // \foo
 constexpr Token_id Token_id_keyword_first = 14;
 constexpr Token_id Token_id_keyword_last  = 254;
 
-class Token {
+class Etoken {
 protected:
   std::string_view text;
 public:
-  Token() {
+  Etoken() {
     tok   = Token_id_nop;
     pos1  = 0;
     pos2  = 0;
     line  = 0;
     text  = std::string_view{""};
   }
-  Token(Token_id _tok, uint64_t _pos1, uint64_t _pos2, uint32_t _line, std::string_view _text) {
+  Etoken(Token_id _tok, uint64_t _pos1, uint64_t _pos2, uint32_t _line, std::string_view _text) {
     tok   = _tok;
     pos1  = _pos1;
     pos2  = _pos2;
@@ -111,7 +111,7 @@ public:
     text  = _text;
   }
 
-  void fuse_token(Token_id new_tok, const Token &t2) {
+  void fuse_token(Token_id new_tok, const Etoken &t2) {
     I(text.data() + text.size() == t2.text.data()); // t2 must be continuous (otherwise, create new token)
     tok = new_tok;
 
@@ -119,7 +119,7 @@ public:
     text = std::string_view{text.data(), new_len};
   }
 
-  void append_token(const Token &t2) {
+  void append_token(const Etoken &t2) {
     I(text.data() + text.size() == t2.text.data()); // t2 must be continuous (otherwise, create new token)
 
     auto new_len = text.size() + t2.text.size();
@@ -142,7 +142,7 @@ public:
 
 class Elab_scanner {
 public:
-  typedef std::vector<Token> Token_list;
+  typedef std::vector<Etoken> Token_list;
 protected:
 
   Token_list       token_list;
@@ -188,7 +188,7 @@ private:
 
   void setup_translate();
 
-  void add_token(Token &t);
+  void add_token(Etoken &t);
 
   void scan_raw_msg(std::string_view cat, std::string_view text, bool third) const;
 
@@ -347,7 +347,7 @@ public:
 
   bool has_errors() const { return n_errors > 0; }
 
-  Token scan_get_token(int offset = 0) const {
+  Etoken scan_get_token(int offset = 0) const {
     size_t p = scanner_pos + offset;
     if (p >= token_list.size())
       p = token_list.size() - 1;
@@ -358,7 +358,7 @@ public:
     return token_list[p];
   }
   
-  const Token &get_token(Token_entry entry){
+  const Etoken &get_token(Token_entry entry){
     return token_list[entry];
   }
 };

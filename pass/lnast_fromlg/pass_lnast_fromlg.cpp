@@ -48,7 +48,7 @@ void Pass_lnast_fromlg::do_trans(LGraph* lg, Eprp_var& var, std::string_view mod
   seq_count      = 0;
 
   std::unique_ptr<Lnast> lnast = std::make_unique<Lnast>(module_name);
-  lnast->set_root(Lnast_node(Lnast_ntype::create_top(), Token(0, 0, 0, 0, lg->get_name())));
+  lnast->set_root(Lnast_node(Lnast_ntype::create_top(), Etoken(0, 0, 0, 0, lg->get_name())));
   auto idx_stmts = lnast->add_child(lnast->get_root(), Lnast_node::create_stmts(get_new_seq_name(*lnast)));
 
   handle_io(lg, idx_stmts, *lnast);

@@ -20,14 +20,14 @@ using Tuple_var_table = absl::flat_hash_set<std::string_view>;
 
 //tricky old C macro to avoid redundant code from function overloadings
 #define CREATE_LNAST_NODE(type) \
-        static Lnast_node create##type(std::string_view sview){return Lnast_node(Lnast_ntype::create##type(), Token(0, 0, 0, 0, sview));}\
-        static Lnast_node create##type(std::string_view sview, uint32_t line_num){return Lnast_node(Lnast_ntype::create##type(), Token(0, 0, 0, line_num, sview));}\
-        static Lnast_node create##type(std::string_view sview, uint32_t line_num, uint64_t pos1, uint64_t pos2){return Lnast_node(Lnast_ntype::create##type(), Token(0, pos1, pos2, line_num, sview));}\
-        static Lnast_node create##type(const Token &new_token){return Lnast_node(Lnast_ntype::create##type(), new_token);}
+        static Lnast_node create##type(std::string_view sview){return Lnast_node(Lnast_ntype::create##type(), Etoken(0, 0, 0, 0, sview));}\
+        static Lnast_node create##type(std::string_view sview, uint32_t line_num){return Lnast_node(Lnast_ntype::create##type(), Etoken(0, 0, 0, line_num, sview));}\
+        static Lnast_node create##type(std::string_view sview, uint32_t line_num, uint64_t pos1, uint64_t pos2){return Lnast_node(Lnast_ntype::create##type(), Etoken(0, pos1, pos2, line_num, sview));}\
+        static Lnast_node create##type(const Etoken &new_token){return Lnast_node(Lnast_ntype::create##type(), new_token);}
 
 struct Lnast_node {
   Lnast_ntype type;
-  Token       token;
+  Etoken      token;
   int16_t     subs; //ssa subscript
 
   Lnast_node(): subs(0) { }
@@ -35,10 +35,10 @@ struct Lnast_node {
   Lnast_node(Lnast_ntype _type)
     :type(_type), subs(0) { I(!type.is_invalid());}
 
-  Lnast_node(Lnast_ntype _type, const Token &_token)
+  Lnast_node(Lnast_ntype _type, const Etoken &_token)
     :type(_type), token(_token), subs(0) { I(!type.is_invalid());}
 
-  Lnast_node(Lnast_ntype _type, const Token &_token, int16_t _subs)
+  Lnast_node(Lnast_ntype _type, const Etoken &_token, int16_t _subs)
     :type(_type), token(_token), subs(_subs) { I(!type.is_invalid());}
 
   void dump() const;
@@ -196,7 +196,7 @@ public:
   std::string_view get_vname (const Lnast_nid &nid)  { return get_data(nid).token.get_text(); } //better expression for LGraph passes
   Lnast_ntype      get_type  (const Lnast_nid &nid)  { return get_data(nid).type; }
   int8_t           get_subs  (const Lnast_nid &nid)  { return get_data(nid).subs; }
-  Token            get_token (const Lnast_nid &nid)  { return get_data(nid).token; }
+  Etoken           get_token (const Lnast_nid &nid)  { return get_data(nid).token; }
   std::string      get_sname (const Lnast_nid &nid)  { //sname = ssa name
     if(get_type(nid).is_const())
       return std::string(get_name(nid));

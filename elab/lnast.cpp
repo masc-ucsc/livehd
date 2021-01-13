@@ -422,7 +422,7 @@ void Lnast::dot2hier_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid, 
       add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_ref(), get_token(c0_tg), get_subs(c0_tg)));
     }
 
-    ref_data(new_phi_nid)->token = Token();
+    ref_data(new_phi_nid)->token = Etoken();
 
 
     // handle the new tuple_add
@@ -434,7 +434,7 @@ void Lnast::dot2hier_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid, 
     }
     add_child(new_ta_nid, Lnast_node(Lnast_ntype::create_ref(), get_token(c0_phi), get_subs(c0_phi)));
 
-    ref_data(new_ta_nid)->token = Token();
+    ref_data(new_ta_nid)->token = Etoken();
 
   } else { // is rhs
     // change node semantic from dot/set->tuple_get
@@ -708,7 +708,7 @@ void Lnast::ssa_rhs_handle_a_operand_special(const Lnast_nid &gpsts_nid, const L
   auto &ssa_rhs_cnt_table = ssa_rhs_cnt_tables[gpsts_nid];
   auto       opd_name  = get_name(opd_nid);
   const auto opd_type  = get_type(opd_nid);
-  Token      ori_token = get_token(opd_nid);
+  auto       ori_token = get_token(opd_nid);
 
   if (ssa_rhs_cnt_table.find(opd_name) != ssa_rhs_cnt_table.end()) {
     auto  new_subs = ssa_rhs_cnt_table[opd_name] - 1;
@@ -721,7 +721,7 @@ void Lnast::ssa_rhs_handle_a_operand(const Lnast_nid &gpsts_nid, const Lnast_nid
   auto &ssa_rhs_cnt_table = ssa_rhs_cnt_tables[gpsts_nid];
   auto       opd_name  = get_name(opd_nid);
   const auto opd_type  = get_type(opd_nid);
-  Token      ori_token = get_token(opd_nid);
+  auto       ori_token = get_token(opd_nid);
 
   if (ssa_rhs_cnt_table.find(opd_name) != ssa_rhs_cnt_table.end()) {
     auto  new_subs = ssa_rhs_cnt_table[opd_name];
@@ -849,7 +849,7 @@ Lnast_nid Lnast::check_phi_table_parents_chain(std::string_view target_name, con
 
   if (get_parent(psts_nid) == get_root()){
     if (is_reg(target_name)) {
-      return add_child(psts_nid, Lnast_node(Lnast_ntype::create_reg_fwd(),  Token(Token_id_alnum, 0, 0, 0, "register_forwarding")));
+      return add_child(psts_nid, Lnast_node(Lnast_ntype::create_reg_fwd(),  Etoken(Token_id_alnum, 0, 0, 0, "register_forwarding")));
     } else {
       return Lnast_nid();
     }
@@ -866,10 +866,10 @@ Lnast_nid Lnast::add_phi_node(const Lnast_nid &cond_nid, const Lnast_nid &t_nid,
 
   auto if_nid = get_parent(cond_nid);
   Phi_rtable &new_added_phi_node_table = new_added_phi_node_tables[if_nid];
-  auto new_phi_nid = add_child(if_nid, Lnast_node(Lnast_ntype::create_phi(), Token()));
+  auto new_phi_nid = add_child(if_nid, Lnast_node(Lnast_ntype::create_phi(), Etoken()));
   Lnast_nid target_nid;
   if (get_type(t_nid).is_err_flag() || get_type(f_nid).is_err_flag()) {
-    target_nid  = add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_err_flag(), Token(Token_id_alnum, 0, 0, 0, "err_var_undefined"))); //ssa update later
+    target_nid  = add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_err_flag(), Etoken(Token_id_alnum, 0, 0, 0, "err_var_undefined"))); //ssa update later
   } else {
     target_nid  = add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_ref(), get_token(t_nid), get_subs(t_nid))); //ssa update later
   }

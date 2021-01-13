@@ -445,7 +445,7 @@ void Lnast_visitor::handle(const slang::InstanceSymbol& symbol) {
       I(port.defaultValue == nullptr);  // give me a case to DEBUG
       fmt::print("port:{} dir:{} bits:{}\n",
                  port.name,
-                 port.direction == PortDirection::In ? "in" : "out",
+                 port.direction == ArgumentDirection::In ? "in" : "out",
                  port.getType().getBitWidth());
     } else if (p->kind == SymbolKind::InterfacePort) {
       const auto& port = p->as<InterfacePortSymbol>();
