@@ -249,13 +249,14 @@ Main features:
 
 ## Tree-sitter Pyrope
 
-Build a tree-sitter Pyrope grammar that can output LNAST 
-
-Dependence: lnast_tolg must be completed first
+Using https://github.com/tekinengin/tree-sitter-pyrope as a starting point, complete the Pyrope grammar
+to correctly parse the Pyrope grammar (https://masc.soe.ucsc.edu/pyrope.html), interface with LiveHD
+and third party tools.
 
 Main features:
 
 * Pyrope tree-sitter grammar
+* tree-sitter to LNAST generation (Comparable to https://github.com/masc-ucsc/livehd/tree/master/inou/pyrope)
 * Atom and neovim integration
 * Atom go definition, highlight, and attribute
 * Atom capacity to query LNAST/Lgraph generated grammar for bit-width. The incremental grammar passed to LNAST, passed to Lgraph,
@@ -263,10 +264,7 @@ Main features:
 * neovim highlight, indent, fold support
 * Integrate with atom-hide as extra language
 
-
 In addition to the packages, there should be an iterator that use the incremental builder to support incremental changes.
-
-* Generate a lnast out of the tree-sitter pyrope grammar
 
 ## Parallel forward/backward traversal
 
@@ -728,18 +726,16 @@ Potential paper:
 
 Maybe use https://github.com/Boolector/boolector
 
+## Mockturtle
 
-# Past Projects
-
-## Mockturtle (Qian Chen)
-
-Integrate EPFL mockturtle (https://github.com/lsils/mockturtle) with Lgraph. The main characteristics:
+There are some issues with Mockturtle integration (new cells) and it is not using the latest Mockturtle library versions.
+The goal is to use Mockturtle (https://github.com/lsils/mockturtle) with LiveHD. The main characteristics:
 
 * Use mockturtle to tmap to LUTs
 * Use mockturtle to synthesize (optimize) logic
 * Enable cut-rewrite as an option
-* Enable hierarchy cross optimization
-* Explore cross cuts optimization (flops/arith/...)
+* Enable hierarchy cross optimization (hier:true option)
+* Use the graph labeling to find cluster to optimize
 * Re-timing
 * Map to LUTs only gates and non-wide arithmetic. E.g: 32bit add is not mapped to LUTS, but a 2-bit add is mapped.
 * List of resources to not map:
@@ -748,12 +744,7 @@ Integrate EPFL mockturtle (https://github.com/lsils/mockturtle) with Lgraph. The
     * Barrell shifters with not trivial shifts (1-2 bits) selectable at run-time
     * memories, luts
 
-Some tasks that were not finished that a potential future project can address: (Good undergraduate projects)
-
-* Split the graph partitioning code out of pass/mockturtle to pass
-* Extend the LUTs to have "bit-width". If a LUT operates over a "bus", it can have a multi-bit input per port".
-* Avoid simple NOTs by having negated ports. E.g: 0-3 are possitive, ports 4-7 are negated inputs.
-* Go over the [cleanup.md](cleanup.md) pending tasks.
+# Past Projects
 
 ## ABC (Yunxun Qiu)
 
@@ -835,23 +826,10 @@ be nice to have. Maybe based on https://github.com/VLSIDA/openram-vagrant-image
 * It would be cool if subsections (selected) parts can be visualized with something like https://github.com/nturley/netlistsvg
 * The shell may be expanded to support simulation in the future
 
-## SIMD json
+Example of queries: show path, show driver/sink of, do topo traversal,....
 
-LiveHD uses rapidjson in several places. There is a newer SIMD json library that leverages SIMD instructions to perform a faster json parsing. An issue is that SIMD json does not have code generation.
-
-The idea will be to benchmark the difference in speed, if the difference is less than 2x, it may not bet worth having 2 code bases.
-
-
-## Benchmark API in lgshell
-
-* Able to get time and performance statistics for tasks in lghsell
-* perf.start, perf.stop, perf.dump commands to allow things like:
-
-```
-lgshell> perf.start
-lgshell> lgraph.open name:foo |> ....
-lgshell> perf.stop
-```
+As an interesting extension would be to have some simple embedded language (TCL or ChaiScript or ???) to control queries more
+easily and allow to build functions/libraries.
 
 ## Use SLATE to document key API
 
@@ -870,22 +848,14 @@ https://github.com/azukaar/GuPM
 * Allow to specify a specific lgraph library
 * Allow to specify passes/commands in lgraph
 
-## Lgraph and LNAST Wavedrom/duh bitfield
-
-Wavedrom and duh allows to dump bitfield information for structures. It would
-be interesting to explore to dump tables and bit fields for Lgraph IOs, and
-structs/fields inside the module. It may be a way to integrate with the
-documentation generation.
-
 ## Lgraph and LNAST check pass
 
 Create a pass that checks that the Lgraph (and/or LNAST) is sementically correct. Some checks:
 
 * No combinational loops
-* No missmatch in bit widths
+* No mismatch in bit widths
 * No disconnected nodes
-* No nodes that could be DCE
-* Check for innefficient splits (do not split busses that can be combined)
+* Check for inefficient splits (do not split busses that can be combined)
 * Transformations stages should not drop names if same net is preserved
 
 ## Short demos
@@ -896,7 +866,7 @@ It would be good to have demos on how to "start to create a pass".
 
 https://asciinema.org/
 
-## Term record/replay for benchmarking
+## Term record/replay for benchmarking/testing
 
 Use automatic asciinema generation. Compare the test speed and summarize the
 performance difference from "a user" point of view. The results should allow to
@@ -909,17 +879,6 @@ Maybe expand tmt_test and main_test to be a more stand-alone testing setup.
 LiveHD compiles (it did) with OS X, but there are some issues with the mmap infrastructure inside mmap_lib. The code functionality
 should be able to run (the mmap_remap does not exist in OS X, but a more costly alternative is implemented for OS X, just not tested
 and it seems faulty).
-
-The main issue is the creation of the dynamic library used with yosys interface. If it can not be easily fixed, the best solution would
-be to use the json interface instead.
-
-The main areas that need some attentions:
-
-* Fix mmap_lib tests to pass on OS X
-* Make sure that the lbench performance statistics gathering do not create issues (not available in OS X)
-* Can we handle the yosys liblgyosys.so library? If not, make the json more automatic/transparent for OS X flow
-
-Windows support is through WSL. It works fine.
 
 ## Smaller tasks
 
