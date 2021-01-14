@@ -263,6 +263,7 @@ Main features:
   and incremental bit-width inference.
 * neovim highlight, indent, fold support
 * Integrate with atom-hide as extra language
+* create a prp-fmt that outputs formatted pyrope from the tree-sitter AST
 
 In addition to the packages, there should be an iterator that use the incremental builder to support incremental changes.
 
