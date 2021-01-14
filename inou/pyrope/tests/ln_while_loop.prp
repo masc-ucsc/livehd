@@ -1,3 +1,0 @@
-while(tup_foo[i] > 2) {
-  tup_foo[i] = tup_bar[3-i]
-}

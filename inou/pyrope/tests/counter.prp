@@ -1,4 +1,0 @@
-// code/counter.prp file
-if $enable {
-  @total := @total + 1
-}

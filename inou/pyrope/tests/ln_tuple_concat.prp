@@ -1,2 +1,0 @@
-tup = (foo = 1, bar = cat + 2) 
-tup = tup ++ (4, dog)

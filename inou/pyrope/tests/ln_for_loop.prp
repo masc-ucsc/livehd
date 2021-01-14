@@ -1,3 +1,0 @@
-for i in (0..3) {
-  tuple_foo[i] = tuple_bar[3-i]
-}
