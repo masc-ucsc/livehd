@@ -102,8 +102,6 @@ cc_test(
     srcs = ["tests/graph_bench.cpp"],
     deps = [
         ":core",
-         "@graph//:graph",
-         "@range-v3//:range-v3",
          "@fmt//:fmt",
 	 ":tree_lgdb_test",
         ],

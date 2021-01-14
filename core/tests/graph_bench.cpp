@@ -1,25 +1,21 @@
-#include <chrono>
 #include <iostream>
+#include <chrono>
 
-#include "Adjacency_list.hpp"
 #include "absl/container/flat_hash_map.h"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
-using namespace std::chrono;
-using namespace std;
-
 LGraph* create_some_random_lgraph() {
   LGraph* lg = LGraph::create("lgdb_bench", "random", "-");
 
-  // 1. create a new LGraph
+  I(false);
 
   return lg;
 }
 
-graph::Bi_adjacency_list g2;
-
 void populate_graph(LGraph* lg) {
+  (void)lg;
+#if 0
   absl::flat_hash_map<Node::Compact, graph::Bi_adjacency_list::Vert> map2g2vertex;
 
   map2g2vertex[lg->get_graph_input_node().get_compact()]  = g2.insert_vert();
@@ -42,56 +38,38 @@ void populate_graph(LGraph* lg) {
       g2.insert_edge(src_it->second, dst_it->second);
     }
   }
+#endif
 }
 
 void lgraph_counts(LGraph* lg) {
-  int nodes = 0, edges = 0;
+  int nodes = 0;
+  int edges = 0;
   for (auto node : lg->fast()) {
+    (void)node;
     nodes++;
     for (auto e : node.out_edges()) {
+      (void)e;
       edges++;
     }
   }
   fmt::print("Lgraph, nodes: {}, edges: {}\n", nodes, edges);
 }
 
-void boosted_graph_counts(graph::Bi_adjacency_list* g2) {
-  int nodes = 0, edges = 0;
-  for (auto vert : g2->verts()) {
-    nodes++;
-    for (auto edge : g2->out_edges(vert)) {
-      edges++;
-    }
-  }
-  fmt::print("Boosted graph, nodes: {}, edges: {}\n", nodes, edges);
-}
-
 int traverse_lgraph_nodes(LGraph* lg) {
   int i = 0;
-  for (const auto& node : lg->fast()) i++;
-  return i;
-}
-
-int traverse_boosted_graph_nodes(graph::Bi_adjacency_list* g) {
-  int i = 0;
-  for (const auto& vert : g->verts()) i++;
+  for (const auto& node : lg->fast()) {
+    (void)node;
+    i++;
+  }
   return i;
 }
 
 int traverse_lgraph_in(LGraph* lg) {
   int i = 0;
   for (const auto& node : lg->fast()) {
+    (void)node;
     for (const auto& e : node.inp_edges()) {
-      i++;
-    }
-  }
-  return i;
-}
-
-int traverse_boosted_graph_in(graph::Bi_adjacency_list* g) {
-  int i = 0;
-  for (const auto& vert : g->verts()) {
-    for (const auto& edge : g->in_edges(vert)) {
+      (void)e;
       i++;
     }
   }
@@ -101,37 +79,11 @@ int traverse_boosted_graph_in(graph::Bi_adjacency_list* g) {
 int traverse_lgraph_out(LGraph* lg) {
   int i = 0;
   for (const auto& node : lg->fast()) {
+    (void)node;
     for (const auto& e : node.out_edges()) {
+      (void)e;
       i++;
     }
-  }
-  return i;
-}
-
-int traverse_boosted_graph_out(graph::Bi_adjacency_list* g) {
-  int i = 0;
-  for (const auto& vert : g->verts()) {
-    for (const auto& edge : g->out_edges(vert)) {
-      i++;
-    }
-  }
-  return i;
-}
-
-int traverse_lgraph_in_out(LGraph* lg) {
-  int i = 0;
-  for (const auto& node : lg->fast()) {
-    for (const auto& e : node.inp_edges()) i++;
-    for (const auto& e : node.out_edges()) i++;
-  }
-  return i;
-}
-
-int traverse_boosted_graph_in_out(graph::Bi_adjacency_list* g) {
-  int i = 0;
-  for (const auto& vert : g->verts()) {
-    for (const auto& edge : g->in_edges(vert)) i++;
-    for (const auto& edge : g->out_edges(vert)) i++;
   }
   return i;
 }
@@ -153,84 +105,42 @@ int main(int argc, char** argv) {
   populate_graph(lg);
 
   lgraph_counts(lg);
-  boosted_graph_counts(&g2);
 
   // 3. benchmark same traverse the graph in all the graphs
-  fmt::print("Benchmark LGraph and boosted graph\n");
+  fmt::print("Benchmark LiveHD graph\n");
   int  iterations = 10000;
-  auto start      = high_resolution_clock::now();
-  auto stop       = high_resolution_clock::now();
-  auto duration   = duration_cast<microseconds>(stop - start);
+  auto start      = std::chrono::high_resolution_clock::now();
+  auto stop       = std::chrono::high_resolution_clock::now();
+  auto duration   = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
   int  x;
   int  micros = 1000000;
 
   fmt::print("--------------------------Nodes--------------------\n");
-  start = high_resolution_clock::now();
+  start = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < iterations; i++) {
     x = traverse_lgraph_nodes(lg);
   }
-  stop     = high_resolution_clock::now();
-  duration = duration_cast<microseconds>(stop - start);
+  stop     = std::chrono::high_resolution_clock::now();
+  duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
   fmt::print("Traverse LGraph {} times took {}s\n", iterations, duration.count() / micros);
 
-  start = high_resolution_clock::now();
-  for (int i = 0; i < iterations; i++) {
-    x = traverse_boosted_graph_nodes(&g2);
-  }
-  stop     = high_resolution_clock::now();
-  duration = duration_cast<microseconds>(stop - start);
-  fmt::print("Traverse boosted graph {} times took {}s\n", iterations, duration.count() / micros);
-
   fmt::print("--------------------------Nodes+in--------------------\n");
-  start = high_resolution_clock::now();
+  start = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < iterations; i++) {
     x = traverse_lgraph_in(lg);
   }
-  stop     = high_resolution_clock::now();
-  duration = duration_cast<microseconds>(stop - start);
+  stop     = std::chrono::high_resolution_clock::now();
+  duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
   fmt::print("Traverse LGraph {} times took {}s\n", iterations, duration.count() / micros);
 
-  start = high_resolution_clock::now();
-  for (int i = 0; i < iterations; i++) {
-    x = traverse_boosted_graph_in(&g2);
-  }
-  stop     = high_resolution_clock::now();
-  duration = duration_cast<microseconds>(stop - start);
-  fmt::print("Traverse boosted graph {} times took {}s\n", iterations, duration.count() / micros);
-
   fmt::print("--------------------------Nodes+out--------------------\n");
-  start = high_resolution_clock::now();
+  start = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < iterations; i++) {
     x = traverse_lgraph_out(lg);
   }
-  stop     = high_resolution_clock::now();
-  duration = duration_cast<microseconds>(stop - start);
+  stop     = std::chrono::high_resolution_clock::now();
+  duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
   fmt::print("Traverse LGraph {} times took {}s\n", iterations, duration.count() / micros);
-
-  start = high_resolution_clock::now();
-  for (int i = 0; i < iterations; i++) {
-    x = traverse_boosted_graph_out(&g2);
-  }
-  stop     = high_resolution_clock::now();
-  duration = duration_cast<microseconds>(stop - start);
-  fmt::print("Traverse boosted graph {} times took {}s\n", iterations, duration.count() / micros);
-
-  fmt::print("--------------------------Nodes+in+out--------------------\n");
-  start = high_resolution_clock::now();
-  for (int i = 0; i < iterations; i++) {
-    x = traverse_lgraph_in_out(lg);
-  }
-  stop     = high_resolution_clock::now();
-  duration = duration_cast<microseconds>(stop - start);
-  fmt::print("Traverse LGraph {} times took {}s\n", iterations, duration.count() / micros);
-
-  start = high_resolution_clock::now();
-  for (int i = 0; i < iterations; i++) {
-    x = traverse_boosted_graph_in_out(&g2);
-  }
-  stop     = high_resolution_clock::now();
-  duration = duration_cast<microseconds>(stop - start);
-  fmt::print("Traverse boosted graph {} times took {}s\n", iterations, duration.count() / micros);
 
   return 0;
 }

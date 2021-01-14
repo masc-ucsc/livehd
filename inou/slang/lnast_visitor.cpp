@@ -3,7 +3,6 @@
 
 #include "fmt/format.h"
 
-#include "slang/compilation/Compilation.h"
 #include "slang/symbols/ASTSerializer.h"
 #include "slang/symbols/CompilationUnitSymbols.h"
 #include "slang/syntax/SyntaxPrinter.h"
