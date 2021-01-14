@@ -256,12 +256,14 @@ new_git_repository(
     build_file = "BUILD.graph",
     commit = "b1e38e1084a0dff6f4eb4ed9a645ed63d3e83dd2", # latest commit Jan 21, 2019
     remote = "https://github.com/cbbowen/graph",
+    shallow_since = "1548127539 -0800",
 )
 new_git_repository(
 	name = "range-v3",
 	build_file = "BUILD.rangev3",
 	commit = "f013aef2ae81f3661a560e7922a968665bedebff", # 4f4beb45c5e56aca4233e4d4c760208e21fff2ec", # specific commit used by graph, made on Jan 11 2019
 	remote = "https://github.com/ericniebler/range-v3",
+  shallow_since = "1547144220 -0800",
 )
 
 git_repository(

@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 
+#include "slang/compilation/Compilation.h"
 #include "slang/symbols/ASTVisitor.h"
 
 #include "lnast.hpp"
