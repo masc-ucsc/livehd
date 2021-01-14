@@ -1,18 +1,21 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "inou_slang.hpp"
+#include "lnast_visitor.hpp"
 
-#include "annotate.hpp"
-#include "lbench.hpp"
-#include "lgedgeiter.hpp"
 #include "lgraph.hpp"
-#include "node.hpp"
-#include "node_pin.hpp"
+#include "inou_slang.hpp"
+#include "lbench.hpp"
+
+extern int slang_main(int argc, char** argv); // in slang_driver.cpp
 
 static Pass_plugin sample("inou.verilog", Inou_slang::setup);
 
 void Inou_slang::setup() {
   Eprp_method m1("inou.verilog", "System verilog to LNAST using slang", &Inou_slang::work);
+
+  m1.add_label_optional("includes", "comma separated include paths (otherwise, verilog paths)");
+  m1.add_label_optional("defines", "comma separated defines. E.g: defines:foo=1,XXX,LALA=1");
+  m1.add_label_optional("undefines", "comma separated undefines");
 
   register_pass(m1);
 }
@@ -23,25 +26,58 @@ void Inou_slang::work(Eprp_var &var) {
   Lbench      b("inou.SLANG_verilog");
   Inou_slang p(var);
 
-#if 0
-    // FIXME: Call a slang block
-    Slang converter;
-#endif
+  std::vector<std::string> default_args = {"--ignore-unknown-modules", "--single-unit"};
+  std::vector<char*> argv;
+
+  argv.push_back(strdup("lgshell"));
+
+  for (const auto& arg : default_args)
+    argv.push_back(strdup(arg.c_str()));
+
+  if (var.has_label("includes")) {
+    auto txt = var.get("includes");
+    for (auto f : absl::StrSplit(txt, ',')) {
+      argv.push_back(strdup("-I"));
+      argv.push_back(strdup(std::string(f).c_str()));
+    }
+  }
+
+  if (var.has_label("defines")) {
+    auto txt = var.get("defines");
+    for (auto f : absl::StrSplit(txt, ',')) {
+      argv.push_back(strdup("-D"));
+      argv.push_back(strdup(std::string(f).c_str()));
+    }
+  }
+
+  if (var.has_label("undefines")) {
+    auto txt = var.get("undefines");
+    for (auto f : absl::StrSplit(txt, ',')) {
+      argv.push_back(strdup("-U"));
+      argv.push_back(strdup(std::string(f).c_str()));
+    }
+  }
+
   for (auto f : absl::StrSplit(p.files, ',')) {
-
-    fmt::print("call slang with {} and return a lnast for each module\n", f);
-#if 0
-    auto lnast = slang.add_verilog(name);
-#endif
-
+    argv.push_back(strdup(std::string(f).c_str()));
   }
-#if 0
-  // FIXME: read all the lnast created (may be more than 1)
-  std::vector<std::unique_ptr<Lnast>> lnast_vector;
-  slang.move_lnast(lnast_vector);
-  for(auto &lnast:lnast_vector) {
-    var.add(std::move(lnast));
+
+  // --top if top: provided
+  // add includes
+
+  argv.push_back(nullptr);
+
+  Lnast_visitor::setup();
+
+  slang_main(argv.size() - 1, argv.data());
+
+  for(auto &l:Lnast_visitor::parsed_lnasts) {
+    var.add(std::move(l));
   }
-#endif
+
+  for(char *ptr:argv) {
+    if (ptr)
+      free(ptr);
+  }
 }
 

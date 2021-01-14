@@ -1,6 +1,14 @@
 
 #include "lnast_visitor.hpp"
 
+#include "fmt/format.h"
+
+#include "slang/compilation/Compilation.h"
+#include "slang/symbols/ASTSerializer.h"
+#include "slang/symbols/CompilationUnitSymbols.h"
+#include "slang/syntax/SyntaxPrinter.h"
+#include "slang/syntax/SyntaxTree.h"
+
 #include <iostream>
 
 #include "iassert.hpp"
@@ -198,10 +206,11 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
         // auto idx_op2     = lnast->add_child(idx_plus,  node_op2); 
         // fmt::print(" + ");
 
-      lnast->dump();
+      // lnast->dump();
+
+      parsed_lnasts.push_back(std::move(lnast));
 
     //std::move(lnast);
-    return;
   }
 void Lnast_visitor::handle(const slang::Expression& expr){
   // if (numErrors > errorLimit)

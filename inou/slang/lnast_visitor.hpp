@@ -1,17 +1,13 @@
 
 #pragma once
 
-#include "fmt/format.h"
-
-#include "slang/compilation/Compilation.h"
-#include "slang/symbols/ASTSerializer.h"
-#include "slang/symbols/ASTVisitor.h"
-#include "slang/symbols/CompilationUnitSymbols.h"
-#include "slang/syntax/SyntaxPrinter.h"
-#include "slang/syntax/SyntaxTree.h"
-#include "lnast.hpp"
 #include <vector>
-#include <string.h>
+#include <string>
+
+#include "slang/symbols/ASTVisitor.h"
+
+#include "lnast.hpp"
+
 class Lnast_visitor : public slang::ASTVisitor<Lnast_visitor, false, false> {
 protected:
   slang::Compilation& compilation;
@@ -19,13 +15,21 @@ protected:
   flat_hash_set<const slang::InstanceBodySymbol*> visitedInstanceBodies;
   uint32_t errorLimit;
   uint32_t hierarchyDepth = 0;
+
+
   std::unique_ptr<Lnast> lnast;
   std::vector<std::string> verilogList;
   std::vector<std::string> operandList;
   enum operators {AND,OR,XOR,NOT};
 
 public:
+  static inline std::vector<std::unique_ptr<Lnast>> parsed_lnasts;
+
   Lnast_visitor(slang::Compilation& _compilation, const size_t& _numErrors, uint32_t _errorLimit);
+
+  static void setup() {
+    parsed_lnasts.clear();
+  }
 
   template<typename T>
     void handle(const T& symbol) {
