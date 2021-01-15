@@ -159,7 +159,7 @@ private:
   absl::flat_hash_map<Lnast_nid, Tuple_var_table> tuple_var_tables;
   absl::flat_hash_map<Lnast_nid, Phi_rtable>      new_added_phi_node_tables; // for each if-subtree scope
   absl::flat_hash_set<std::string_view>           tuplized_table;
-  absl::flat_hash_map<Lnast_nid, Lnast_nid>       tg2paired_ta;
+  absl::flat_hash_map<std::string_view, Lnast_nid>tg_lhs2paired_ta;
   absl::flat_hash_set<Lnast_nid>                  candidates_update_phi_resolve_table;
 
   absl::flat_hash_map<std::string_view, int16_t>  global_ssa_lhs_cnt_table;

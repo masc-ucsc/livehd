@@ -328,8 +328,8 @@ void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid)
     ref_data(c1_assign)->type   = Lnast_ntype::create_tuple_get();
     ref_data(c1_assign)->token  = Etoken();
 
-    auto &ta_nid = c0_assign; //better code reading
-    auto &tg_nid = c1_assign;
+    auto ta_nid = c0_assign; //better code reading
+    auto tg_nid = c1_assign;
 
     // handle ta leaves
     for (auto child : children(dot_nid)) {
@@ -344,21 +344,20 @@ void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid)
     // handle tg leaves
     /* add_child(tg_nid, Lnast_node::create_ref(add_string(absl::StrCat("_._tg"))));//!!!!!FIXME->sh: change to concate(_._tg, tup_name, field) later */
     add_child(tg_nid, Lnast_node::create_ref(""));//!!!!!FIXME->sh: change to concate(_._tg, tup_name, field) later
-    std::string tg_hier_name_cat = "_._tg_out";
+    std::string tg_lhs_hier_name_cat = "_._tg_out";
     for (auto child : children(ta_nid)) {
       if (child != get_last_child(ta_nid)) {
         add_child(tg_nid, get_data(child));
-        tg_hier_name_cat = absl::StrCat(tg_hier_name_cat, "_", get_data(child).token.get_text());
+        tg_lhs_hier_name_cat = absl::StrCat(tg_lhs_hier_name_cat, "_", get_data(child).token.get_text());
       }
     }
     /* fmt::print("tg_hier_name:{}\n", tg_hier_name); */
 
-    auto tg_hier_name = add_string(tg_hier_name_cat);
+    auto tg_lhs_hier_name = add_string(tg_lhs_hier_name_cat);
     auto c0_tg_nid = get_first_child(tg_nid);
-    ref_data(c0_tg_nid)->token = Etoken(0, 0, 0, 0, tg_hier_name);
-    fmt::print("DEBUG tg_hier_name:{}\n", ref_data(c0_tg_nid)->token.get_text());
+    ref_data(c0_tg_nid)->token = Etoken(0, 0, 0, 0, tg_lhs_hier_name);
     
-    tg2paired_ta.insert_or_assign(tg_nid, ta_nid);
+    tg_lhs2paired_ta.insert_or_assign(tg_lhs_hier_name, ta_nid);
     return;
 
     /* //copy ta leafs content to tg */
@@ -888,7 +887,7 @@ void Lnast::ssa_handle_phi_nodes(const Lnast_nid &if_nid) {
     }
   }
   
-  for (const auto &it : candidates_update_phi_resolve_table) {
+  for (auto it : candidates_update_phi_resolve_table) {
     auto psts_nid = get_parent(if_nid);
     update_phi_resolve_table(psts_nid, it);
   }
@@ -897,7 +896,6 @@ void Lnast::ssa_handle_phi_nodes(const Lnast_nid &if_nid) {
 
 
 void Lnast::resolve_phi_nodes(const Lnast_nid &cond_nid, Phi_rtable &true_table, Phi_rtable &false_table) {
-  fmt::print("DEBUG-1\n");
   auto if_nid   = get_parent(cond_nid);
   auto psts_nid = get_parent(if_nid);
   for (auto const&[var_name, nid] : false_table) {
@@ -906,12 +904,9 @@ void Lnast::resolve_phi_nodes(const Lnast_nid &cond_nid, Phi_rtable &true_table,
         add_phi_node(cond_nid, true_table[var_name], false_table[var_name]);
         true_table.erase(var_name);
       } else {
-        fmt::print("DEBUG0, var_name:{}\n", var_name);
         auto t_nid = get_complement_nid(var_name, psts_nid, false);
-        fmt::print("Before\n");
         ref_data(t_nid)->dump();
         add_phi_node(cond_nid, t_nid, false_table[var_name]);
-        fmt::print("After\n");
         ref_data(t_nid)->dump();
       }
     }
@@ -919,7 +914,6 @@ void Lnast::resolve_phi_nodes(const Lnast_nid &cond_nid, Phi_rtable &true_table,
 
   std::vector<std::string_view> var_list;
   for (auto const&[var_name, nid] : true_table) {
-    fmt::print("DEBUG3 true table var_name:{}\n", var_name);
     if (true_table.empty()) { // it might be empty due to the erase from previous for loop
       break;
     }
@@ -958,7 +952,6 @@ Lnast_nid Lnast::check_phi_table_parents_chain(std::string_view target_name, con
   auto &parent_table = phi_resolve_tables[psts_nid];
 
   if(parent_table.find(target_name) != parent_table.end()) {
-    fmt::print("DEBUG2, target_name:{}\n", target_name);
     return parent_table[target_name];
   }
 
@@ -978,7 +971,6 @@ Lnast_nid Lnast::check_phi_table_parents_chain(std::string_view target_name, con
 
 
 void Lnast::add_phi_node(const Lnast_nid &cond_nid, const Lnast_nid &t_nid, const Lnast_nid &f_nid) {
-
   auto true_ptype  = get_type(get_parent(t_nid));
   auto false_ptype = get_type(get_parent(f_nid));
   if (true_ptype.is_tuple_add() && false_ptype.is_tuple_add())
@@ -1007,9 +999,9 @@ void Lnast::add_phi_node(const Lnast_nid &cond_nid, const Lnast_nid &t_nid, cons
 
   auto is_handling_hier_tuple = true_ptype.is_tuple_get() || false_ptype.is_tuple_get();
   if (is_handling_hier_tuple) {
-    auto prev_tg_nid = get_parent(t_nid); //either from t_nid/f_nid is fine
-    auto prev_ta_nid = tg2paired_ta[prev_tg_nid]; //getting the prev_ta is just to copy the data of its leaves
-    I(get_type(prev_ta_nid).is_tuple_add());
+    auto prev_tg_lhs_name = get_name(t_nid);
+    auto prev_ta_nid = tg_lhs2paired_ta[prev_tg_lhs_name]; //getting the prev_ta is just to copy the data of its leaves
+    
     
     // insert new ta and handling leaves
     auto new_ta_nid  = add_child(if_nid, Lnast_node(Lnast_ntype::create_tuple_add(), Etoken()));
@@ -1030,7 +1022,6 @@ void Lnast::add_phi_node(const Lnast_nid &cond_nid, const Lnast_nid &t_nid, cons
     auto new_tg_nid = add_child(if_nid, Lnast_node(Lnast_ntype::create_tuple_get(), Etoken()));
     auto lhs_new_tg_nid = add_child(new_tg_nid, Lnast_node(get_type(lhs_phi_nid), get_token(lhs_phi_nid), -1));
     update_global_lhs_ssa_cnt_table(lhs_new_tg_nid);
-    fmt::print("DEBUG 9\n");
     ref_data(psts_nid)->dump();
     /* update_phi_resolve_table(psts_nid, lhs_new_tg_nid); //the tg is a new variable in parent scope, should be inserted to the parent table */
     candidates_update_phi_resolve_table.insert(lhs_new_tg_nid);
@@ -1040,7 +1031,9 @@ void Lnast::add_phi_node(const Lnast_nid &cond_nid, const Lnast_nid &t_nid, cons
         add_child(new_tg_nid, Lnast_node(get_type(child), get_token(child), get_subs(child)));
       }
     }
-    tg2paired_ta.insert_or_assign(new_tg_nid, new_ta_nid);
+
+    auto lhs_new_tg_name = get_name(lhs_new_tg_nid);
+    tg_lhs2paired_ta.insert_or_assign(lhs_new_tg_name, new_ta_nid);
   }
 }
 
