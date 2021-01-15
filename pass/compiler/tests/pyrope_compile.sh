@@ -11,13 +11,14 @@ pts='tuple_copy2 hier_tuple2 hier_tuple_io if nested_if reg__q_pin tuple_copy
      adder_stage hier_tuple3 lhs_wire lhs_wire2 scalar_tuple logic attr_set out_ssa
      ssa_rhs tuple_if counter counter_nested_if '
 
-# pts='counter'
+pts='hier_tuple_nested_if3'
+pts='hier_tuple_nested_if hier_tuple_nested_if4 hier_tuple_nested_if5'
 
 
 # pts='firrtl_tail reg_bits_set  reg_bits_set firrtl_tail2 firrtl_tail3 firrtl_gcd_3bits  tuple_copy2 '
 # Note: in this bash script, you MUST specify top module name AT FIRST POSITION
-pts_hier1='top sum top'
-pts_hier2='top top sum'
+# pts_hier1='top sum top'
+# pts_hier2='top top sum'
 
 
 LGSHELL=./bazel-bin/main/lgshell
@@ -191,10 +192,10 @@ Pyrope_compile_hier () {
 }
 
 
-rm -rf ./lgdb
-Pyrope_compile_hier "$pts_hier1"
-rm -rf ./lgdb
-Pyrope_compile_hier "$pts_hier2"
+# rm -rf ./lgdb
+# Pyrope_compile_hier "$pts_hier1"
+# rm -rf ./lgdb
+# Pyrope_compile_hier "$pts_hier2"
 rm -rf ./lgdb
 Pyrope_compile "$pts"
 

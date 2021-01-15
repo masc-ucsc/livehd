@@ -11,7 +11,7 @@
 /* using Phi_rtable = absl::flat_hash_map<std::string_view, Lnast_nid>; // rtable = resolve_table */
 using Lnast_nid       = mmap_lib::Tree_index;
 using Phi_rtable      = std::map<std::string_view, Lnast_nid>; // rtable = resolve_table
-using Cnt_rtable      = absl::flat_hash_map<std::string_view, int8_t>;
+using Cnt_rtable      = absl::flat_hash_map<std::string_view, int16_t>;
 using Dot_lrhs_table  = absl::flat_hash_map<Lnast_nid, std::pair<bool, Lnast_nid>>;  // for both dot and selection, dot -> (lrhs, paired opr node)
 using Tuple_var_table = absl::flat_hash_set<std::string_view>;
 
@@ -119,7 +119,7 @@ private:
   void      resolve_phi_nodes          (const Lnast_nid  &cond_nid, Phi_rtable &true_table, Phi_rtable &false_table);
   void      update_phi_resolve_table   (const Lnast_nid  &psts_nid, const Lnast_nid &target_nid);
   bool      has_else_stmts             (const Lnast_nid  &if_nid);
-  Lnast_nid add_phi_node               (const Lnast_nid  &cond_nid, const Lnast_nid &t_nid, const Lnast_nid &f_nid);
+  void      add_phi_node               (const Lnast_nid  &cond_nid, const Lnast_nid &t_nid, const Lnast_nid &f_nid);
   Lnast_nid get_complement_nid            (std::string_view brother_name, const Lnast_nid &psts_nid, bool false_path);
   Lnast_nid check_phi_table_parents_chain (std::string_view brother_name, const Lnast_nid &psts_nid);
   void      resolve_ssa_lhs_subs                (const Lnast_nid &psts_nid);
@@ -159,9 +159,10 @@ private:
   absl::flat_hash_map<Lnast_nid, Tuple_var_table> tuple_var_tables;
   absl::flat_hash_map<Lnast_nid, Phi_rtable>      new_added_phi_node_tables; // for each if-subtree scope
   absl::flat_hash_set<std::string_view>           tuplized_table;
+  absl::flat_hash_map<Lnast_nid, Lnast_nid>       tg2paired_ta;
 
 
-  absl::flat_hash_map<std::string_view, int8_t>  global_ssa_lhs_cnt_table;
+  absl::flat_hash_map<std::string_view, int16_t>  global_ssa_lhs_cnt_table;
 
   // populated during LG->LN pass, maps name -> bitwidth
   absl::flat_hash_map<std::string, uint32_t> from_lgraph_bw_table;
@@ -195,7 +196,7 @@ public:
   std::string_view get_name  (const Lnast_nid &nid)  { return get_data(nid).token.get_text(); }
   std::string_view get_vname (const Lnast_nid &nid)  { return get_data(nid).token.get_text(); } //better expression for LGraph passes
   Lnast_ntype      get_type  (const Lnast_nid &nid)  { return get_data(nid).type; }
-  int8_t           get_subs  (const Lnast_nid &nid)  { return get_data(nid).subs; }
+  int16_t          get_subs  (const Lnast_nid &nid)  { return get_data(nid).subs; }
   Etoken           get_token (const Lnast_nid &nid)  { return get_data(nid).token; }
   std::string      get_sname (const Lnast_nid &nid)  { //sname = ssa name
     if(get_type(nid).is_const())

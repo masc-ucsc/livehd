@@ -50,8 +50,8 @@ protected:
   void process_ast_tuple_get_op     (LGraph *lg, const Lnast_nid &lnidx_tg);
   void process_ast_attr_set_op      (LGraph *lg, const Lnast_nid &lnidx_aset);
   void process_ast_attr_get_op      (LGraph *lg, const Lnast_nid &lnidx_aget);
-  void process_ast_tuple_phi_add_op (LGraph *lg, const Lnast_nid &lnidx_tpa);
   void process_hier_inp_bits_set    (LGraph *lg, const Lnast_nid &lnidx_ta);
+  void process_ast_tuple_add_get_pair_op (LGraph *lg, const Lnast_nid &lnidx_tpa);
   void setup_lgraph_ios_and_final_var_name(LGraph *lg);
 
 
@@ -87,6 +87,7 @@ protected:
 
   // tuple related
   Node_pin     setup_tuple_ref           (LGraph *lg, std::string_view tup_name);
+  Node_pin     setup_ta_ref              (LGraph *lg, std::string_view tup_name, int16_t);
   Node_pin     setup_field_dpin          (LGraph *lg, std::string_view key_name);
   void         reconnect_to_ff_qpin      (LGraph *lg, const Node &tg_node);
   static bool  tuple_get_has_key_name    (const Node &tup_get);

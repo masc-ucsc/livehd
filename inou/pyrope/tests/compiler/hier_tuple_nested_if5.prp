@@ -1,0 +1,20 @@
+%foo.a = 0   // foo_0
+$a.__ubits = 2
+$b.__ubits = 2
+$op.__ubits = 2
+_t = $op == 0
+if (_t) {
+    %foo.a = $a + $b // foo_1
+} else {
+    _t3 = $op == 1
+    if (_t3) {
+        %foo.a = $a + $b + 1 // foo_2
+    } else {
+        _t4 = $op == 2
+        if (_t4) {
+            %foo.a = $a + $b + 2 // foo_3
+        } else {
+            %foo.a = $a + $b + 3 // foo_4
+        }
+    }
+}        

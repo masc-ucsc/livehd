@@ -106,7 +106,7 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
     case Ntype_op::Const: // No drivers to Constants
       return "invalid";
       break;
-    case Ntype_op::Mux:   // unlimited case: 1,2,3,4,5.... // Y = "0" ? "2" : "1"
+    case Ntype_op::Mux:   // unlimited case: 1,2,3,4,5.... // Y = (pid0 == true) ? pid2 : pid1
     case Ntype_op::LUT:   // unlimited case: 1,2,3,4,5....
     case Ntype_op::Sub:   // unlimited case: 1,2,3,4,5....
       assert(is_unlimited_sink(op));

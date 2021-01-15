@@ -1,0 +1,15 @@
+%foo.a = 0
+$en.__ubits = 2
+$op.__ubits = 1
+if ($en == 0) {
+    %foo.a = 10
+} elif ($en == 1) {
+    %foo.a = 11
+} elif ($en == 2) {
+    if ($op == 1) {
+        %foo.a = 12
+    } else {
+        %foo.a = 13
+    }
+}
+

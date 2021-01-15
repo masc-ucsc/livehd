@@ -75,7 +75,7 @@ public:
     //group: compiler internal type
     Lnast_ntype_tuple_add,
     Lnast_ntype_tuple_get,
-    Lnast_ntype_tuple_phi_add,
+    Lnast_ntype_tuple_add_get_pair,
     Lnast_ntype_attr_set,
     Lnast_ntype_attr_get,
 
@@ -151,7 +151,7 @@ protected:
     //group: compiler internal type
     "tuple_add",
     "tuple_get",
-    "tuple_phi_add",
+    "tuple_add_get_pair",
     "attr_set",  
     "attr_get",
     //unsigned(tposs)
@@ -217,7 +217,7 @@ protected:
     "reg_fwd",
     "tuple_add",
     "tuple_get",
-    "tuple_phi_add",
+    "tuple_add_get_pair",
     "attr_set",
     "attr_get",
     "unsigned"//tposs
@@ -282,7 +282,7 @@ protected:
     "reg_fwd",
     "tuple_add",
     "tuple_get",
-    "tuple_phi_add",
+    "tuple_add_get_pair",
     "attr_set",
     "attr_get",
     "unsigned"//tposs
@@ -347,7 +347,7 @@ protected:
     "reg_fwd",
     "tuple_add",
     "tuple_get",
-    "tuple_phi_add",
+    "tuple_add_get_pair",
     "attr_set",
     "attr_get",
     "unsigned"//tposs
@@ -412,7 +412,7 @@ protected:
     "reg_fwd",
     "tuple_add",
     "tuple_get",
-    "tuple_phi_add",
+    "tuple_add_get_pair",
     "attr_set",
     "attr_get",
     "unsigned"
@@ -492,7 +492,7 @@ public:
 
   static constexpr Lnast_ntype create_tuple_add()     { return Lnast_ntype(Lnast_ntype_tuple_add);}
   static constexpr Lnast_ntype create_tuple_get()     { return Lnast_ntype(Lnast_ntype_tuple_get);}
-  static constexpr Lnast_ntype create_tuple_phi_add() { return Lnast_ntype(Lnast_ntype_tuple_phi_add) ;}
+  static constexpr Lnast_ntype create_tuple_add_get_pair() { return Lnast_ntype(Lnast_ntype_tuple_add_get_pair) ;}
   static constexpr Lnast_ntype create_attr_set()      { return Lnast_ntype(Lnast_ntype_attr_set) ;}
   static constexpr Lnast_ntype create_attr_get()      { return Lnast_ntype(Lnast_ntype_attr_get) ;}
   static constexpr Lnast_ntype create_tposs()      { return Lnast_ntype(Lnast_ntype_tposs) ;}
@@ -559,12 +559,12 @@ public:
   bool constexpr is_err_flag()      const { return val == Lnast_ntype_err_flag; }
   bool constexpr is_reg_fwd()       const { return val == Lnast_ntype_reg_fwd; }
 
-  bool constexpr is_tuple_add()     const { return val == Lnast_ntype_tuple_add; }
-  bool constexpr is_tuple_get()     const { return val == Lnast_ntype_tuple_get; }
-  bool constexpr is_tuple_phi_add() const { return val == Lnast_ntype_tuple_phi_add; }
-  bool constexpr is_attr_set()      const { return val == Lnast_ntype_attr_set; }
-  bool constexpr is_attr_get()      const { return val == Lnast_ntype_attr_get; }
-  bool constexpr is_tposs()      const { return val == Lnast_ntype_tposs; }
+  bool constexpr is_tuple_add()          const { return val == Lnast_ntype_tuple_add; }
+  bool constexpr is_tuple_get()          const { return val == Lnast_ntype_tuple_get; }
+  bool constexpr is_tuple_add_get_pair() const { return val == Lnast_ntype_tuple_add_get_pair; }
+  bool constexpr is_attr_set()           const { return val == Lnast_ntype_attr_set; }
+  bool constexpr is_attr_get()           const { return val == Lnast_ntype_attr_get; }
+  bool constexpr is_tposs()              const { return val == Lnast_ntype_tposs; }
 
   // Super types
   bool constexpr is_logical_op()   const { return (val == Lnast_ntype_logical_and) ||

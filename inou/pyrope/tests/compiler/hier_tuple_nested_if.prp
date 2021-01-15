@@ -1,0 +1,10 @@
+%foo.a = 0
+$en.__ubits = 2
+if ($en == 0) {
+    %foo.a = 10
+} elif ($en == 1) {
+    %foo.a = 11
+} elif ($en == 2) {
+    %foo.a = 12
+}
+
