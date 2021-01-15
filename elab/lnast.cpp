@@ -889,7 +889,7 @@ void Lnast::ssa_handle_phi_nodes(const Lnast_nid &if_nid) {
   
   for (auto it : candidates_update_phi_resolve_table) {
     auto psts_nid = get_parent(if_nid);
-    update_phi_resolve_table(psts_nid, it);
+    update_phi_resolve_table(psts_nid, it.second);
   }
   candidates_update_phi_resolve_table.clear();
 }
@@ -994,7 +994,7 @@ void Lnast::add_phi_node(const Lnast_nid &cond_nid, const Lnast_nid &t_nid, cons
 
   auto psts_nid = get_parent(if_nid);
   /* update_phi_resolve_table(psts_nid, lhs_phi_nid); //FIXME->sh: debug entry point */ 
-  candidates_update_phi_resolve_table.insert(lhs_phi_nid);
+  candidates_update_phi_resolve_table.insert_or_assign(get_name(lhs_phi_nid), lhs_phi_nid);
 
 
   auto is_handling_hier_tuple = true_ptype.is_tuple_get() || false_ptype.is_tuple_get();
@@ -1024,7 +1024,7 @@ void Lnast::add_phi_node(const Lnast_nid &cond_nid, const Lnast_nid &t_nid, cons
     update_global_lhs_ssa_cnt_table(lhs_new_tg_nid);
     ref_data(psts_nid)->dump();
     /* update_phi_resolve_table(psts_nid, lhs_new_tg_nid); //the tg is a new variable in parent scope, should be inserted to the parent table */
-    candidates_update_phi_resolve_table.insert(lhs_new_tg_nid);
+    candidates_update_phi_resolve_table.insert_or_assign(get_name(lhs_new_tg_nid), lhs_new_tg_nid);
     new_added_phi_node_table.insert_or_assign(get_name(lhs_new_tg_nid), lhs_new_tg_nid); // FIXME->sh: might need do the same for the new_tg_nid
     for (const auto &child : children(new_ta_nid)) {
       if (child != get_last_child(new_ta_nid)) {

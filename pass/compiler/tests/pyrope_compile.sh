@@ -6,12 +6,13 @@ pts_tuple_dbg='lhs_wire3 funcall_unnamed2
 
 pts_long_time='firrtl_gcd'
 
-pts='tuple_copy2 hier_tuple2 hier_tuple_io if nested_if reg__q_pin tuple_copy
-     capricious_bits capricious_bits2 capricious_bits4 hier_tuple if2  bits_rhs
+pts='hier_tuple2 hier_tuple_io 
+     hier_tuple if2  bits_rhs
      adder_stage hier_tuple3 lhs_wire lhs_wire2 scalar_tuple logic attr_set out_ssa
      ssa_rhs tuple_if counter counter_nested_if '
 
-pts='tuple_copy2 hier_tuple_nested_if hier_tuple_nested_if2 hier_tuple_nested_if3 hier_tuple_nested_if4 hier_tuple_nested_if5'
+pts='capricious_bits4 capricious_bits2 capricious_bits tuple_copy reg__q_pin if nested_if tuple_copy2 hier_tuple_nested_if hier_tuple_nested_if2
+hier_tuple_nested_if3 hier_tuple_nested_if4 hier_tuple_nested_if5'
 
 
 # pts='firrtl_tail reg_bits_set  reg_bits_set firrtl_tail2 firrtl_tail3 firrtl_gcd_3bits  tuple_copy2 '
