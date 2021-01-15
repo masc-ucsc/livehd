@@ -1,4 +1,5 @@
 %foo.a = 0
+$en.__ubits = 2
 
 if ($en == 0) {
     %foo.a = 10

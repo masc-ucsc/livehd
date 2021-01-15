@@ -1,5 +1,9 @@
 %foo.a = 0
 %foo.b = 0
+%foo.a.__ubits = 4
+%foo.b.__ubits = 4
+
+$en.__ubits = 2
 if ($en == 0) {
     %foo.a = 10
 } elif ($en == 1) {
@@ -9,3 +13,17 @@ if ($en == 0) {
     %foo.b = 12
 }
 
+
+
+
+// %a = 0
+// %b = 0
+// $en.__ubits = 2
+// if ($en == 0) {
+//     %a = 10
+// } elif ($en == 1) {
+//     %a = 11
+// } else {
+//     %a = 12
+//     %b = 12
+// }
