@@ -344,7 +344,7 @@ void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid)
     // handle tg leaves
     /* add_child(tg_nid, Lnast_node::create_ref(add_string(absl::StrCat("_._tg"))));//!!!!!FIXME->sh: change to concate(_._tg, tup_name, field) later */
     add_child(tg_nid, Lnast_node::create_ref(""));//!!!!!FIXME->sh: change to concate(_._tg, tup_name, field) later
-    std::string tg_lhs_hier_name_cat = "_._tg_out";
+    std::string tg_lhs_hier_name_cat = "_._tg";
     for (auto child : children(ta_nid)) {
       if (child != get_last_child(ta_nid)) {
         add_child(tg_nid, get_data(child));
@@ -719,7 +719,7 @@ void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
   }
 
   //handle statement lhs
-  if (type.is_assign() || type.is_as() || type.is_dp_assign() || type.is_attr_set() || type.is_tuple_add()) {
+  if (type.is_assign() || type.is_as() || type.is_dp_assign() || type.is_attr_set() || type.is_tuple_add() || type.is_tuple_concat()) {
     const auto  target_nid  = get_first_child(opr_nid);
     const auto  target_name = get_name(target_nid);
 
@@ -1047,13 +1047,11 @@ bool Lnast::has_else_stmts(const Lnast_nid &if_nid) {
 
 void Lnast::ssa_lhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
   //handle lhs of the statement, handle statement rhs in the 2nd part SSA
-  const auto type     = get_type(opr_nid);
+  const auto type = get_type(opr_nid);
   if (type.is_invalid())
     return;
 
   const auto lhs_nid  = get_first_child(opr_nid);
-
-
   /* fmt::print("opr "); */
   /* ref_data(opr_nid)->dump(); */
   /* fmt::print("lhs "); */

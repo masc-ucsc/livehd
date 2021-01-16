@@ -389,7 +389,7 @@ void Lnast_tolg::process_ast_tuple_struct(LGraph *lg, const Lnast_nid &lnidx_tup
       tup_name  = lnast->get_sname(tup_child);
       tup_vname = lnast->get_vname(tup_child);
       subs      = lnast->get_subs(tup_child);
-      setup_tuple_ref(lg, tup_vname);
+      setup_tuple_ref(lg, tup_name);
       continue;
     }
 
@@ -399,7 +399,7 @@ void Lnast_tolg::process_ast_tuple_struct(LGraph *lg, const Lnast_nid &lnidx_tup
       auto c1         = lnast->get_sibling_next(c0);
       auto field_name = lnast->get_vname(c0);
 
-      auto tn_dpin        = setup_tuple_ref(lg, tup_vname);
+      auto tn_dpin        = setup_tuple_ref(lg, tup_name);
       auto fp_dnode       = lg->create_node_const(Lconst(fp));
       auto field_pos_dpin = fp_dnode.setup_driver_pin();
       auto value_dpin     = setup_ref_node_dpin(lg, c1, 0, 0, 1);
@@ -427,7 +427,7 @@ void Lnast_tolg::process_ast_tuple_struct(LGraph *lg, const Lnast_nid &lnidx_tup
       continue;
     }
 
-    auto tn_dpin        = setup_tuple_ref(lg, tup_vname);
+    auto tn_dpin        = setup_tuple_ref(lg, tup_name);
     auto fp_dnode       = lg->create_node_const(Lconst(fp));
     auto field_pos_dpin = fp_dnode.setup_driver_pin();
     auto value_dpin     = setup_ref_node_dpin(lg, tup_child, 0, 0, 1);
@@ -1608,18 +1608,6 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(LGraph *lg) {
       continue;
     }
 
-    /* if (ntype == Ntype_op::TupAdd && !node.has_outputs() && is_output(dpin.get_name())) { */
-    /*   create_out_ta(lg, dpin.get_prp_vname(), dpin); */
-    /*   continue; */
-    /* } */
-
-
-    if (ntype == Ntype_op::TupAdd && is_output(dpin.get_name()) && node.get_num_out_edges() == 1 && node.out_edges().begin()->sink.get_node().get_type_op() == Ntype_op::TupGet) {
-      create_out_ta(lg, dpin.get_prp_vname(), dpin);
-      continue;
-    }
-
-
     // collect vname table info
     if (dpin.has_ssa() && dpin.has_prp_vname()) {
       auto vname = dpin.get_prp_vname();
@@ -1627,8 +1615,6 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(LGraph *lg) {
 
       if (vname2dpin.find(vname) == vname2dpin.end()) {
         auto [it, inserted] = vname2dpin.insert({vname, dpin});
-        (void)inserted;
-
         I(inserted);
         continue;
       }
@@ -1642,11 +1628,12 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(LGraph *lg) {
   // create scalar graph outputs or set the final variable name based on vname table
   for (auto const &[vname, vname_dpin] : vname2dpin) {
     auto dpin_vname = vname_dpin.get_prp_vname();
-    if (is_output(dpin_vname) && vname_dpin.get_node().get_type_op() != Ntype_op::TupAdd) {
+    if (is_output(dpin_vname)) {
       auto edible_dpin = vname_dpin;
       create_out_ta(lg, dpin_vname, edible_dpin);
       continue;
     }
+    //FIXME->sh: handling tuple-flop here in the future
 
     if (driver_var2wire_nodes.find(vname) != driver_var2wire_nodes.end()) {
       auto driver_ntype = vname_dpin.get_node().get_type_op();
