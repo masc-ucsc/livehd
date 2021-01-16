@@ -11,7 +11,11 @@ pts='tuple_copy2 hier_tuple2 hier_tuple_io if nested_if reg__q_pin tuple_copy
      adder_stage hier_tuple3 lhs_wire lhs_wire2 scalar_tuple logic attr_set out_ssa
      ssa_rhs tuple_if counter counter_nested_if '
 
-# pts='counter'
+pts='tuple_if counter_nested_if counter ssa_rhs out_ssa attr_set logic lhs_wire
+adder_stage bits_rhs if2 hier_tuple capricious_bits4 capricious_bits2
+capricious_bits tuple_copy reg__q_pin if nested_if tuple_copy2
+hier_tuple_nested_if hier_tuple_nested_if2 hier_tuple_nested_if3
+hier_tuple_nested_if4 hier_tuple_nested_if5'
 
 
 # pts='firrtl_tail reg_bits_set  reg_bits_set firrtl_tail2 firrtl_tail3 firrtl_gcd_3bits  tuple_copy2 '
@@ -191,10 +195,10 @@ Pyrope_compile_hier () {
 }
 
 
-rm -rf ./lgdb
-Pyrope_compile_hier "$pts_hier1"
-rm -rf ./lgdb
-Pyrope_compile_hier "$pts_hier2"
+# rm -rf ./lgdb
+# Pyrope_compile_hier "$pts_hier1"
+# rm -rf ./lgdb
+# Pyrope_compile_hier "$pts_hier2"
 rm -rf ./lgdb
 Pyrope_compile "$pts"
 
@@ -209,8 +213,8 @@ rm -f lgcheck*
 
 #!/bin/bash
 rm -rf ./lgdb
-FIRRTL_LEVEL='lo'
-# FIRRTL_LEVEL='hi'
+# FIRRTL_LEVEL='lo'
+FIRRTL_LEVEL='hi'
 
 pts_long_lec='GCD '
 
@@ -232,22 +236,23 @@ VecShiftRegisterParam VecShiftRegisterSimple '
 # VecShiftRegister BundleConnect SubModule PlusAnd MaxN VecShiftRegisterParam
 # VecShiftRegisterSimple VecSearch VendingMachineSwitch VendingMachine'
 
-# pts='ResetShiftRegister Parity Counter MaxN RegisterSimple Register RegXor AddNot EnableShiftRegister GCD_3bits Flop
-# Decrementer Test2 Test3 TrivialAdd NotAnd Trivial Tail TrivialArith Shifts
-# Darken HiLoMultiplier Max2 Coverage Accumulator LFSR16
-# ' 
+pts='SimpleALU ResetShiftRegister Parity Counter RegisterSimple Register RegXor AddNot EnableShiftRegister GCD_3bits Flop
+Decrementer Test2 Test3 TrivialAdd NotAnd Trivial Tail TrivialArith Shifts
+Darken HiLoMultiplier Coverage Accumulator LFSR16
+' 
 
-# # pts='Mul'
-# # pts='SimpleALU'
-# # pts='Test1'
-# # pts='Test6'
-# # pts='ByteSelector'
-# # pts='Adder4'
-# # pts='Mux4'
-# # pts='SingleEvenFilter'
+# pts='Mul'
+# pts='SimpleALU'
+# pts='Test1'
+# pts='Test6'
+# pts='ByteSelector'
+# pts='Adder4'
+# pts='Mux4'
+# pts='SingleEvenFilter'
 # pts='LogShifter'
+# pts='MaxN '
+# pts='Max2'
 
-# pts='PlusAnd'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -332,13 +337,10 @@ firrtl_test() {
     fi
   done
 
-  rm -f *.v
-  rm -f *.dot
-  rm -f lgcheck*
-  rm -rf lgdb
+  # rm -f *.v
+  # rm -f *.dot
+  # rm -f lgcheck*
+  # rm -rf lgdb
 }
 
 firrtl_test "$pts"
-
-
-

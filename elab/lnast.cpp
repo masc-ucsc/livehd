@@ -997,9 +997,10 @@ void Lnast::add_phi_node(const Lnast_nid &cond_nid, const Lnast_nid &t_nid, cons
   candidates_update_phi_resolve_table.insert_or_assign(get_name(lhs_phi_nid), lhs_phi_nid);
 
 
-  auto is_handling_hier_tuple = true_ptype.is_tuple_get() || false_ptype.is_tuple_get();
+  auto is_handling_hier_tuple = true_ptype.is_tuple_get() && false_ptype.is_tuple_get();
   if (is_handling_hier_tuple) {
     auto prev_tg_lhs_name = get_name(t_nid);
+    fmt::print("DEBUG prev_tg_lhs_name:{}\n", prev_tg_lhs_name);
     auto prev_ta_nid = tg_lhs2paired_ta[prev_tg_lhs_name]; //getting the prev_ta is just to copy the data of its leaves
     
     
@@ -1047,7 +1048,11 @@ bool Lnast::has_else_stmts(const Lnast_nid &if_nid) {
 void Lnast::ssa_lhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
   //handle lhs of the statement, handle statement rhs in the 2nd part SSA
   const auto type     = get_type(opr_nid);
+  if (type.is_invalid())
+    return;
+
   const auto lhs_nid  = get_first_child(opr_nid);
+
 
   /* fmt::print("opr "); */
   /* ref_data(opr_nid)->dump(); */
