@@ -20,7 +20,7 @@ public:
 private:
   LGraph* root_lg;
 
-  void makefp_int(Lhd_floorplanner& fp, bool write_file);
+  void makefp_int(Lhd_floorplanner& fp, const std::string_view dest);
 };
 
 class Pass_fplan_writearea : public Pass {

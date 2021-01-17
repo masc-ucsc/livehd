@@ -13,17 +13,15 @@ void Pass_fplan_makefp::setup() {
 
   m.add_label_optional(
       "traversal",
-      "LGraph traversal method to use, valid options are \"hier_lg\", \"flat_lg\", \"flat_node\", and \"hier_node\"",
+      "LGraph traversal method to use. Valid options are \"hier_lg\", \"flat_lg\", \"flat_node\", and \"hier_node\"",
       "hier_node");
 
-  m.add_label_optional("write_file",
-                       "If true, output will be sent to a floorplan file instead of being written back into LiveHD",
-                       "false");
+  m.add_label_optional("dest", "Where to send the floorplan file.  Valid options are \"file\" and \"livehd\".", "file");
 
   register_pass(m);
 }
 
-void Pass_fplan_makefp::makefp_int(Lhd_floorplanner& fp, bool write_file) {
+void Pass_fplan_makefp::makefp_int(Lhd_floorplanner& fp, const std::string_view dest) {
   auto t = profile_time::Timer();
   t.start();
   fmt::print("  traversing hierarchy...");
@@ -37,35 +35,62 @@ void Pass_fplan_makefp::makefp_int(Lhd_floorplanner& fp, bool write_file) {
 
   t.start();
   fmt::print("  writing floorplan...");
-  if (write_file) {
+  if (dest == "file") {
     fp.write_file("floorplan.flp");
+  } else if (dest == "livehd") {
+    fp.write_lhd(path);
   } else {
-    fp.write_lhd();
+    throw std::invalid_argument("unknown destination!");
   }
   fmt::print(" done ({} ms).\n", t.time());
 }
 
 Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", var) {
+  
+  
+  
+  
+  
+  
+  auto htree = root_lg->ref_htree();
+  for (const auto& hidx : htree->depth_preorder()) {
+    LGraph* lg = htree->ref_lgraph(hidx);
+    for (auto fn : lg->fast()) {
+
+      Node hn(root_lg, hidx, fn.get_compact_class());
+
+      I(hn.get_lg() == htree->ref_lgraph(hidx));
+    }
+  }
+
+  return;
+  
+  
+  
+  
+  
+  
+  
+  
   root_lg = var.lgs[0];
 
-  std::string_view t_str      = var.get("traversal");
-  bool             write_file = var.get("write_file").data() == std::string_view("true");
+  std::string_view t_str = var.get("traversal");
 
   if (t_str == "hier_lg") {
     Lg_hier_floorp hfp;
-    makefp_int(hfp, write_file);
+    makefp_int(hfp, "file");
   } else if (t_str == "flat_lg") {
     Lg_flat_floorp ffp;
-    makefp_int(ffp, write_file);
+    makefp_int(ffp, "file");
   } else if (t_str == "flat_node") {
     // ArchFP doesn't handle large numbers of nodes being attached to a single geogLayout instance very well
     fmt::print("WARNING: this kind of traversal only works for small numbers of nodes.\n");
 
     Node_flat_floorp nffp;
-    makefp_int(nffp, write_file);
+    makefp_int(nffp, "file");
   } else if (t_str == "hier_node") {
     Node_hier_floorp nhfp;
-    makefp_int(nhfp, write_file);
+    makefp_int(nhfp, var.get("dest"));
   } else {
     std::string errstr = "unknown traversal method ";
     throw std::invalid_argument(errstr.append(t_str));

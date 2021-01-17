@@ -17,6 +17,7 @@ private:
   // this is the case, they will be given the same color, since their layout can't really be determined that well from area
   // information alone.
 
+  /*
   class Tag_info {
   public:
     long node_color;    // if node isn't organized into a grid, assign it a unique value
@@ -35,13 +36,14 @@ private:
       return H::combine(std::move(h), ti.node_color, ti.parent_color);
     }
   };
+  */
 
   // map used when sending values to ArchFP
-  absl::flat_hash_map<Node::Compact, Tag_info> send_map;
+  // absl::flat_hash_map<Node::Compact, Tag_info> send_map;
 
   // map used when receiving floorplans back from ArchFP
-  absl::flat_hash_map<Tag_info, Node::Compact> recv_map;
+  // absl::flat_hash_map<Tag_info, Node::Compact> recv_map;
 
   //void color_nodes(LGraph* root, const std::string_view lgdb_path);
-  void color_nodes();
+  // void color_nodes();
 };

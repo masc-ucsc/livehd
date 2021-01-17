@@ -17,6 +17,8 @@
 #include <sstream>
 #include <stdexcept>
 
+#include "ann_place.hpp"
+#include "core/lgedgeiter.hpp"
 #include "mathutil.hpp"
 
 // This will be used to keep track of user's request for more output during layout.
@@ -80,49 +82,31 @@ inline double FPObject::calcY(double startY) {
     return startY + y;
 }
 
-// Map component types to names.
-string           TypeNames[] = {"Unknown",
-                      "Core",
-                      "Cache",
-                      "ICache",
-                      "DCache",
-                      "L1_",
-                      "L2_",
-                      "L3_",
-                      "RF",
-                      "FPRF",
-                      "ALU",
-                      "NoC",
-                      "Control",
-                      "CrossBar",
-                      "MemCtrl",
-                      "Grid",
-                      "Group",
-                      "Cluster"};
 map<string, int> NameCounts;
 
 // Methods for the dummy component class to help with some IO.
 ostream& operator<<(ostream& s, dummyComponent& c) {
-  s << "Component: " << c.getName() << " is of type: " << c.getType() << "\n";
+  s << "Component: " << c.getName() << " is of type: " << Ntype::get_name(c.getType()) << "\n";
   return s;
 }
 
-dummyComponent::dummyComponent(ComponentType typeArg) {
+dummyComponent::dummyComponent(Ntype_op typeArg) {
   type = typeArg;
-  name = Type2Name(type);
+  name = std::string(Ntype::get_name(type));
 }
 
 dummyComponent::dummyComponent(string nameArg) {
-  type = UnknownType;
+  type = Ntype_op::Sub;
   name = nameArg;
-  for (int i = 0; i < ComponentTypeCount; i++)
-    if (nameArg == TypeNames[i]) {
-      type = (ComponentType)i;
+  for (int i = 1; i < static_cast<int>(Ntype_op::Last_invalid); i++) {
+    if (nameArg == Ntype::get_name(static_cast<Ntype_op>(i))) {
+      type = static_cast<Ntype_op>(i);
       break;
     }
+  }
 }
 
-void dummyComponent::myPrint() { cout << "Component: " << getName() << " is of type: " << type << "\n"; }
+void dummyComponent::myPrint() { cout << "Component: " << getName() << " is of type: " << Ntype::get_name(getType()) << "\n"; }
 
 // Methods for FPObject
 FPObject::FPObject() {
@@ -131,8 +115,8 @@ FPObject::FPObject() {
   width    = 0.0;
   height   = 0.0;
   area     = 0.0;
-  type     = UnknownType;
-  name     = Type2Name(type);
+  type     = Ntype_op::Invalid;
+  name     = Ntype::get_name(Ntype_op::Invalid);
   hint     = UnknownGeography;
   count    = 1;
   refCount = 0;
@@ -289,8 +273,7 @@ void FPContainer::addComponent(FPObject* comp, int countArg) {
   addComponent(comp);
 }
 
-FPObject* FPContainer::addComponentCluster(ComponentType type, int count, double area, double maxAspectRatio,
-                                           double minAspectRatio) {
+FPObject* FPContainer::addComponentCluster(Ntype_op type, int count, double area, double maxAspectRatio, double minAspectRatio) {
   // First generate a dummy component with the correct information.
   dummyComponent* comp = new dummyComponent(type);
   // We first need to create a wrapper for the component.
@@ -345,10 +328,112 @@ double FPContainer::totalArea() {
   return area;
 }
 
+void FPContainer::writeLiveHD(const std::string_view path_arg, LGraph* root_arg, Hierarchy_tree* htree_arg) {
+  I(root_arg);
+  I(htree_arg);
+
+  path    = path_arg;
+  root_lg = root_arg;
+  htree   = htree_arg;
+
+  writeLgraph(root_lg, htree->get_root());
+}
+
+void FPContainer::writeLgraph(LGraph* lg, const Hierarchy_index hidx) {
+  I(lg);
+  I(!hidx.is_invalid());
+  I(htree->ref_lgraph(hidx) == lg);
+
+  for (int i = 0; i < getComponentCount(); i++) {
+    FPObject* ob    = getComponent(i);
+    bool      found = false;
+
+    for (int c = 0; c < ob->getCount(); c++) {
+      /*
+      fmt::print("object instance {} of {} in level {} pos {} has type {}\n",
+                 c,
+                 ob->getName(),
+                 hidx.level,
+                 hidx.pos,
+                 Ntype::get_name(ob->getType()));
+      */
+
+      // if component type is Invalid, then the component is anonymous and added by ArchFP
+      // so transparently traverse it
+      if (ob->getType() == Ntype_op::Invalid) {
+        FPContainer* cob = static_cast<FPContainer*>(ob);
+        cob->path        = path;
+        cob->root_lg     = root_lg;
+        cob->htree       = htree;
+
+        cob->writeLgraph(lg, hidx);
+      }
+
+      if (ob->getType() == Ntype_op::Sub) {
+        for (auto fn : lg->fast()) {
+          if (!fn.is_type_sub_present()) {
+            continue;
+          }
+
+          Node    hn(root_lg, hidx, fn.get_compact_class());
+          LGraph* sub_lg = LGraph::open(path, hn.get_type_sub());
+
+          if ((sub_lg->get_name() == ob->getName()) && (hn.get_hier_color() == 0)) {
+            Ann_place p(ob->getX(), ob->getY(), ob->getWidth(), ob->getHeight());
+            hn.set_place(p);
+            hn.set_hier_color(1);  // set node instance as marked after visiting it
+
+            fmt::print("setting subnode {} (l: {}, p: {}) with color {}\n",
+                       hn.debug_name(),
+                       hn.get_hidx().level,
+                       hn.get_hidx().pos,
+                       hn.get_hier_color());
+
+            FPContainer* cob = static_cast<FPContainer*>(ob);
+            cob->path        = path;
+            cob->root_lg     = root_lg;
+            cob->htree       = htree;
+
+            cob->writeLgraph(sub_lg, htree->go_down(hn));
+
+            break;
+          }
+        }
+      }
+
+      if (Ntype::is_synthesizable(ob->getType())) {
+        for (Node fn : lg->fast()) {
+          if (fn.get_type_op() != ob->getType()) {
+            continue;
+          }
+
+          Node hn(root_lg, hidx, fn.get_compact_class());
+
+          if (hn.get_hier_color() == 1) {
+            continue;
+          }
+
+          Ann_place p(ob->getX(), ob->getY(), ob->getWidth(), ob->getHeight());
+          hn.set_place(p);
+          hn.set_hier_color(1);  // set node instance as marked after visiting it
+
+          fmt::print("setting node {} (l: {}, p: {}) with color {}\n",
+                     hn.debug_name(),
+                     hn.get_hidx().level,
+                     hn.get_hidx().pos,
+                     hn.get_hier_color());
+
+          break;
+        }
+      }
+    }
+  }
+}
+
 // Methods for the GridLayout class.
 gridLayout::gridLayout() : FPContainer() {
-  type = Grid;
-  name = Type2Name(type);
+  type = Ntype_op::Invalid;
+  name = "Grid";
 }
 
 bool gridLayout::layout(FPOptimization opt, double targetAR) {
@@ -414,8 +499,8 @@ void gridLayout::outputHotSpotLayout(ostream& o, double startX, double startY) {
 
   int    compCount = xCount * yCount;
   string GridName  = getUniqueName();
-  o << "# Start of " << GridName << " Layout.  There are " << compCount << " components in a " << xCount << " by " << yCount
-    << " grid.\n";
+  o << "# Start of " << GridName << " Layout of type " << Ntype::get_name(getType()) << ".  There are " << compCount
+    << " components in a " << xCount << " by " << yCount << " grid.\n";
   o << "# Total Grid Stats: X=" << calcX(startX) << " Y=" << calcY(startY) << " W=" << width << "mm H=" << height
     << "mm Area=" << area << "mm^2\n";
   int compNum = 1;
@@ -432,8 +517,8 @@ void gridLayout::outputHotSpotLayout(ostream& o, double startX, double startY) {
 
 // Methods for Baglayout Class
 bagLayout::bagLayout() : FPContainer() {
-  type   = Group;
-  name   = Type2Name(type);
+  type   = Ntype_op::Invalid;
+  name   = "Bag";
   locked = false;
 }
 
@@ -518,7 +603,7 @@ void bagLayout::outputHotSpotLayout(ostream& o, double startX, double startY) {
   string groupName;
   if (itemCount != 1) {
     groupName = getUniqueName();
-    o << "# Start of " << groupName << " layout.\n";
+    o << "# Start of " << groupName << " layout of type " << Ntype::get_name(getType()) << ".\n";
     o << "# Total Group Stats: X=" << calcX(startX) << " Y=" << calcY(startY) << " W=" << width << "mm H=" << height
       << "mm Area=" << area << "mm^2\n";
   }
@@ -617,16 +702,17 @@ bool fixedLayout::layout(FPOptimization opt, double targetAR) {
 
 // Geographic Layout.
 geogLayout::geogLayout() : FPContainer() {
-  type = Cluster;
-  name = Type2Name(type);
+  type = Ntype_op::Invalid;
+  name = "Geog";
 }
 
 void geogLayout::addComponent(FPObject* comp, int count, GeographyHint hint) {
   comp->setHint(hint);
+  comp->setType(Ntype_op::Sub);
   FPContainer::addComponent(comp, count);
 }
 
-FPObject* geogLayout::addComponentCluster(ComponentType type, int count, double area, double maxARArg, double minARArg,
+FPObject* geogLayout::addComponentCluster(Ntype_op type, int count, double area, double maxARArg, double minARArg,
                                           GeographyHint hint) {
   FPObject* comp = FPContainer::addComponentCluster(type, count, area, maxARArg, minARArg);
   comp->setHint(hint);
@@ -837,7 +923,7 @@ bool geogLayout::layoutHelper(double remWidth, double remHeight, double curX, do
     layoutHelper(remWidth, remHeight, newX, newY, layoutStack, curDepth + 1, centerItems, centerItemsCount);
   } else if (compHint != Center) {
     cerr << "Hint is not any of the recognized hints.  Hint=" << compHint << "\n";
-    cerr << "Component is of type " << comp->getType() << "\n";
+    cerr << "Component is of type " << Ntype::get_name(comp->getType()) << "\n";
   }
 
   // TODO Here is where we should do bottom up fixups!!
@@ -849,7 +935,7 @@ bool geogLayout::layoutHelper(double remWidth, double remHeight, double curX, do
 void geogLayout::outputHotSpotLayout(ostream& o, double startX, double startY) {
   pushMirrorContext(startX, startY);
   string layoutName = getUniqueName();
-  o << "# Start of " << layoutName << " Layout.\n";
+  o << "# Start of " << layoutName << " Layout of type " << Ntype::get_name(getType()) << ".\n";
   o << "# Total Cluster Stats: X=" << calcX(startX) << " Y=" << calcY(startY) << " W=" << width << "mm H=" << height
     << "mm Area=" << area << "mm^2\n";
   for (int i = 0; i < getComponentCount(); i++) {
@@ -863,7 +949,6 @@ void geogLayout::outputHotSpotLayout(ostream& o, double startX, double startY) {
 // Output Helpers.
 
 ostream& outputHotSpotHeader(const char* filename) {
-
   // Reset the name to counts map for this output.
   NameCounts.clear();
 

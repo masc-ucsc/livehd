@@ -54,12 +54,15 @@ void Node_hier_floorp::load_lg_nodes(LGraph* lg, const std::string_view lgdb_pat
       fmt::print("adding leaf {} to cluster of lg {}", n.get_type_name(), lg->get_name());
       fmt::print(", area: {}, min asp: {}, max asp: {}\n", node_area, dim.min_aspect, dim.max_aspect);
     }
-    l->addComponentCluster(n.get_type_name().data(), 1, node_area, dim.max_aspect, dim.min_aspect, Center);
+    l->addComponentCluster(n.get_type_op(), 1, node_area, dim.max_aspect, dim.min_aspect, Center);
   }
 
+  l->setName(lg->get_name().data());
+  l->setType(Ntype_op::Sub); // treat nodes placed by us as subnodes
   layouts[lg] = std::move(l);
 }
 
+/*
 // NOTE: advanced global hierarchy work with nodes basically requires the extraction of the root hierarchy tree.
 // Any other method will bring you much pain and suffering.
 void Node_hier_floorp::color_nodes() {
@@ -81,15 +84,6 @@ void Node_hier_floorp::color_nodes() {
       send_map[hn.get_compact()] = ti;
 
       recv_map[ti] = hn.get_compact();
-
-      /*
-      fmt::print("mapping synth leaf {} (l: {} p: {}) to id {}, parent {}\n",
-                 hn.debug_name(),
-                 hn.get_hidx().level,
-                 hn.get_hidx().pos,
-                 ti.node_color,
-                 ti.parent_color);
-      */
     }
   }
 
@@ -129,26 +123,8 @@ void Node_hier_floorp::color_nodes() {
           ti.parent_color = send_map[up].node_color;
         }
 
-        /*
-        fmt::print("mapping rep sub {} (l: {} p: {}) to id {}, parent {}\n",
-                   hsn.debug_name(),
-                   hsn.get_hidx().level,
-                   hsn.get_hidx().pos,
-                   ti.node_color,
-                   ti.parent_color);
-        */
-
       } else {
         ti = {counter++, -1};
-
-        /*
-        fmt::print("mapping first sub {} (l: {} p: {}) to id {}, parent {}\n",
-                   hsn.debug_name(),
-                   hsn.get_hidx().level,
-                   hsn.get_hidx().pos,
-                   ti.node_color,
-                   ti.parent_color);
-        */
       }
 
       send_map[hsn.get_compact()] = ti;
@@ -156,31 +132,20 @@ void Node_hier_floorp::color_nodes() {
       recv_map[ti] = hsn.get_compact();
     });
   }
-  
-  for (const auto& hidx : htree->depth_preorder()) {
-    LGraph* lg = htree->ref_lgraph(hidx);
-    lg->each_sub_fast([&](Node& sn, Lg_type_id lgid) { Node hsn(root_lg, hidx, sn.get_compact_class()); });
 
-    for (auto fn : lg->fast()) {
-      Node hn(root_lg, hidx, fn.get_compact_class());
-      if (!fn.is_type_synth() && !fn.is_type_sub()) {
-        continue;
-      }
-
-      fmt::print("node {}: ", hn.debug_name());
-
-      if (hn.is_root()) {
-        fmt::print("root node ");
-      } else {
-        fmt::print("child of {} ", hn.get_up_node().debug_name());
-      }
-
-      fmt::print("level: {}, pos: {} ", hn.get_hidx().level, hn.get_hidx().pos);
-      fmt::print("nc: {}, pc {} ", send_map[hn.get_compact()].node_color, send_map[hn.get_compact()].parent_color);
-      fmt::print("\n");
-    }
+  for (auto pair : send_map) {
+    fmt::print("{} -> nc: {}, pc: {}\n", pair.first.get_node(root_lg).debug_name(), pair.second.node_color, pair.second.parent_color);
   }
+
+  fmt::print("\n\n");
+
+  for (auto pair : recv_map) {
+    fmt::print("nc: {}, pc: {} -> {}\n", pair.first.node_color, pair.first.parent_color, pair.second.get_node(root_lg).debug_name());
+  }
+
+  fmt::print("\n\n");
 }
+*/
 
 void Node_hier_floorp::load(LGraph* root, const std::string_view lgdb_path) {
   fmt::print("\n");
@@ -200,22 +165,6 @@ void Node_hier_floorp::load(LGraph* root, const std::string_view lgdb_path) {
   };
 
   check_area_exists(root);
-
-  /*
-  // not used yet
-  for (auto n : root->fast(true)) {
-    n.set_color(0);
-  }
-  */
-
-  color_nodes();
-  return;
-
-  // since coloring is only applied to subnodes, color all leaf children of root with color 1
-  // color_lg(root, 1);
-  // if (debug_print) {
-  // fmt::print("coloring root with color 1\n\n");
-  //}
 
   std::function<void(LGraph*)> load_nodes = [&](LGraph* lg) {
     lg->each_sub_fast([&](Node& n, Lg_type_id lgid) {

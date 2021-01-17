@@ -22,7 +22,7 @@ public:
   void write_file(const std::string_view filename);
 
   // write the floorplan back to LiveHD for analysis and future floorplans
-  void write_lhd();
+  void write_lhd(const std::string_view lgdb_path);
 
   virtual ~Lhd_floorplanner() {
     for (auto& pair : layouts) {

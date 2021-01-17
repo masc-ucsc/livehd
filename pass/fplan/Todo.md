@@ -13,8 +13,10 @@ Benchmarking tests (built using -c opt):
 
 TODOs:
 1. Map a floorplan instance from ArchFP to a node instance
-   - use colors initially
-   - full mapping is basically two-pass
+   1. write Node colors and parent colors to ArchFP
+   2. extract floorplans from ArchFP w/o using file
+   3. write easy nodes to LiveHD
+   4. choose mapping for grid nodes, write to LiveHD
 2. Analysis
    - total area
    - HPWL
@@ -25,21 +27,18 @@ TODOs:
 Traversal improvements:
  - Node flat:
  - Node hier:
-   - more information
    - floorplan taking into account node type (ArchFP has internals for this?)
    - floorplan taking into account wire length (do a pass to determine wire length, then put stuff nearby using geography hints)
    - change between individual calls to addComponentCluster and a batched addComponentCluster based on node amounts (allows for better handling of huge modules)
  - Lgraph flat:
-   - none
  - Lgraph hier:
    - fix it
 
 General:
- - use node attribute for location
  - some sort of check() method that verifies netlists and internal functionality
    - find a way to discover illegal floorplans (overlapping segments)?
    - correct number of nodes are present
- - LGraph attributes
+ - LGraph attributes (minor thing - node hier is more important)
    - Node attributes and Node pin attributes already exist (attribute.hpp)
    - Add aspect ratio information to LGraphs
    - Add placement hint info to LGraphs

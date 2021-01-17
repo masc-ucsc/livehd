@@ -16,6 +16,8 @@ parser.add_argument('-s', '--size', type=int,
                     help='height and width of png output image', default=1200)
 parser.add_argument('-f', '--fontsize', type=int,
                     help='font size of all modules', default=25)
+parser.add_argument('-d', '--detail', action='store_true',
+                    help='render width and height of every element')
 parser.add_argument('-v', '--verbose', action='store_true',
                     help='verbose output')
 
@@ -100,7 +102,7 @@ ctx.set_source_rgb(0, 0, 0)
 ctx.set_font_size(args.fontsize / SCALE_FACTOR)
 ctx.select_font_face('Courier', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
 
-# render floorplan names
+# render floorplan names, widths, and heights
 for line in flp_lines:
     if '#' in line:
         continue
@@ -115,13 +117,33 @@ for line in flp_lines:
     start_x = float(tok_list[3])
     start_y = float(tok_list[4])
 
-    extent = ctx.text_extents(name)
+    nextent = ctx.text_extents(name)
+    wextent = ctx.text_extents(tok_list[1])
+    hextent = ctx.text_extents(tok_list[2])
 
-    if (extent.width <= width and extent.height <= height):
-        ctx.move_to(start_x + width / 2 - extent.width / 2, start_y + height / 2 + extent.height / 2)
+    # render name
+    if nextent.width <= width and nextent.height <= height:
+        ctx.move_to(start_x + width / 2 - nextent.width / 2, start_y + height / 2 + nextent.height / 2)
         ctx.show_text(name)
     else:
         if args.verbose:
             print('skipping name ' + name)
+    
+    if args.detail:
+        # render width
+        if wextent.width <= width and wextent.height <= height:
+            ctx.move_to(start_x + width / 2 - wextent.width / 2, start_y + height / 10 + wextent.height / 2)
+            ctx.show_text("{:.3f}".format(width * 1000))
+        else:
+            if args.verbose:
+                print('skipping width for ' + name)
+    
+        # render height
+        if hextent.width <= width and hextent.height <= height:
+            ctx.move_to(start_x + width / 10 - hextent.width / 2, start_y + height / 2 + hextent.height / 2)
+            ctx.show_text("{:.3f}".format(height * 1000))
+        else:
+            if args.verbose:
+                print('skipping height for ' + name)
 
 surf.write_to_png(args.file.split('.')[0] + '.png')

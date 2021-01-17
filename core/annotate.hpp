@@ -26,6 +26,7 @@ struct Ann_name {
   static constexpr char file_loc[]      = "file_loc";
   static constexpr char tree_pos[]      = "tree_pos";
   static constexpr char color[]         = "color";
+  static constexpr char hier_color[]         = "hier_color";
 };
 
 using Ann_node_pin_offset = Attribute<Ann_name::offset, Node_pin, mmap_lib::map<Node_pin::Compact_class_driver, Bits_t> >;
@@ -52,6 +53,8 @@ using Ann_node_tree_pos = Attribute<Ann_name::tree_pos, Node, mmap_lib::map<Node
 
 using Ann_node_color = Attribute<Ann_name::color, Node, mmap_lib::bimap<Node::Compact_class, std::string_view> >;
 
+using Ann_node_hier_color = Attribute<Ann_name::hier_color, Node, mmap_lib::bimap<Node::Compact, std::string_view> >;
+
 struct Ann_support {
   // TODO: Change to object to register annotations, and have an "update" for incremental
   static void clear(LGraph *lg) {
@@ -67,6 +70,7 @@ struct Ann_support {
     Ann_node_file_loc::clear(lg);
     Ann_node_tree_pos::clear(lg);
     Ann_node_color::clear(lg);
+    Ann_node_hier_color::clear(lg);
   };
 
   static void sync(LGraph *lg) {
@@ -82,5 +86,6 @@ struct Ann_support {
     Ann_node_file_loc::sync(lg);
     Ann_node_tree_pos::sync(lg);
     Ann_node_color::sync(lg);
+    Ann_node_hier_color::sync(lg);
   };
 };

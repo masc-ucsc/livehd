@@ -10,44 +10,17 @@
 #include <iostream>
 #include <map>
 #include <string>
+
+#include "core/cell.hpp"
+#include "core/lgraph.hpp"
 using namespace std;
 
 // This will be used to keep track of user's request for more output during layout.
 extern bool verbose;
 
-// This is an emum for the types of components that can be included in a floorplan.
-// In particular, the various layout managers will want to find various components
-//     they expect to be in their layout.
-// We will use this enum as the key for a map of components neeeded in a layout manager.
-// TODO  Undoubtedly there is already an enum or other type system for components in M5.
-//       As part of integration, we will see if we can change to the standard,
-//       or continue to maintain a simpler one for floorplanning.
-#define ComponentTypeCount 18
-enum ComponentType {
-  UnknownType = 0,
-  Core,
-  Cache,
-  ICache,
-  DCache,
-  L1,
-  L2,
-  L3,
-  RF,
-  FPRF,
-  ALU,
-  NoC,
-  Control,
-  CrossBar,
-  MemController,
-  Grid,
-  Group,
-  Cluster
-};
-extern string           TypeNames[];
 extern map<string, int> NameCounts;
-inline string           Type2Name(ComponentType compType) { return TypeNames[compType]; }
 extern int              TypeCounts[];
-inline int              Type2Count(ComponentType compType) { return ++TypeCounts[compType]; }
+inline int              Type2Count(Ntype_op compType) { return ++TypeCounts[static_cast<int>(compType)]; }
 inline int              Name2Count(string arg) { return ++NameCounts[arg]; }
 string                  getStringFromInt(int in);
 void                    setNameMode(bool);
@@ -76,16 +49,16 @@ enum GeographyHint {
 
 // This class is meant to be a standin for a real component from M5 or whatever this eventually merge into.
 class dummyComponent {
-  ComponentType type;
-  string        name;
+  Ntype_op type;
+  string   name;
 
 public:
-  dummyComponent(ComponentType typeArg);
+  dummyComponent(Ntype_op typeArg);
   dummyComponent(string name);
 
-  string        getName() { return name; }
-  ComponentType getType() { return type; }
-  void          myPrint();
+  string   getName() { return name; }
+  Ntype_op getType() { return type; }
+  void     myPrint();
 };
 
 extern ostream& operator<<(ostream& s, dummyComponent& c);
@@ -109,7 +82,7 @@ protected:
   double        width;   // The width of the component in millimeters.
   double        height;  // The height of the component in millimeters.
   double        area;    // The area of the component in sq millimeters.
-  ComponentType type;    // The type of the component.
+  Ntype_op      type;    // The type of the component.
   string        name;    // The name of the component.
   GeographyHint hint;    // Arguably, we should form a map of hints to components.
                          // But for now this is simpler.
@@ -126,16 +99,16 @@ public:
   int decRefCount() { return refCount -= 1; }
 
   // Allow anyone to get the values of things.
-  virtual double        getX() { return x; }
-  virtual double        getY() { return y; }
-  virtual double        getWidth() { return width; }
-  virtual double        getHeight() { return height; }
-  virtual double        getArea() { return area; }
-  virtual double        totalArea() { return area * count; }
-  virtual string        getName() { return name; }
-  virtual ComponentType getType() { return type; }
-  virtual int           getCount() { return count; }
-  string                getUniqueName() {
+  virtual double   getX() { return x; }
+  virtual double   getY() { return y; }
+  virtual double   getWidth() { return width; }
+  virtual double   getHeight() { return height; }
+  virtual double   getArea() { return area; }
+  virtual double   totalArea() { return area * count; }
+  virtual string   getName() { return name; }
+  virtual Ntype_op getType() { return type; }
+  virtual int      getCount() { return count; }
+  string           getUniqueName() {
     if (name == " " || name == "")
       return name;
     else
@@ -155,6 +128,9 @@ public:
   virtual GeographyHint setHint(GeographyHint newHint) { return hint = newHint; }
   virtual void          setSize(double widthArg, double heightArg);
   virtual void          setLocation(double xArg, double yArg);
+  virtual void          setName(string nameArg) { name = nameArg; }
+  virtual void          setType(Ntype_op typeArg) { type = typeArg; }
+
 
   virtual bool layout(FPOptimization opt, double targetAR = 1.0) = 0;
   virtual void outputHotSpotLayout(ostream& o, double startX = 0.0, double startY = 0.0);
@@ -242,10 +218,20 @@ public:
   virtual void outputHotSpotLayout(ostream& o, double startX = 0.0, double startY = 0.0) = 0;
 
   // Ways to add components.
-  virtual FPObject* addComponentCluster(ComponentType type, int count, double area, double maxARArg, double minARArg);
+  virtual FPObject* addComponentCluster(Ntype_op type, int count, double area, double maxARArg, double minARArg);
   virtual FPObject* addComponentCluster(string name, int count, double area, double maxARArg, double minARArg);
   virtual void      addComponent(FPObject* comp);
   virtual void      addComponent(FPObject* comp, int count);
+
+  // Writes current containers and all subcontainers to the specified root lgraph
+  virtual void writeLiveHD(const std::string_view path, LGraph* root_lg, Hierarchy_tree* htree);
+  
+  // cache top-level info that doesn't change to avoid passing constants as parameters
+  std::string_view path;
+  LGraph* root_lg;
+  Hierarchy_tree* htree;
+
+  virtual void writeLgraph(LGraph* lg, const Hierarchy_index hidx);
 };
 
 // This will just be a collection of components to lay out in the given aspect ratio.
@@ -308,7 +294,7 @@ public:
 
   virtual bool      layout(FPOptimization opt, double targetAR = 1.0);
   virtual void      outputHotSpotLayout(ostream& o, double startX = 0.0, double startY = 0.0);
-  virtual FPObject* addComponentCluster(ComponentType type, int count, double area, double maxARArg, double minARArg,
+  virtual FPObject* addComponentCluster(Ntype_op type, int count, double area, double maxARArg, double minARArg,
                                         GeographyHint hint);
   virtual FPObject* addComponentCluster(string name, int count, double area, double maxARArg, double minARArg, GeographyHint hint);
   virtual void      addComponent(FPObject* comp, int count, GeographyHint hint);

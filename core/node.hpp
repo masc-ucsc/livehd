@@ -338,6 +338,10 @@ public:
   void set_color(int color);
   int  get_color() const;
   bool has_color() const;
+
+  void set_hier_color(int color);
+  int  get_hier_color() const;
+  bool has_hier_color() const;
   // END ATTRIBUTE ACCESSORS
 
   void dump();
