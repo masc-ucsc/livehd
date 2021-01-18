@@ -11,18 +11,18 @@ Benchmarking tests (built using -c opt):
  - XOR chain (100,000):
    - flat: 
 
+Bugs:
+ - calling delete on geogLayouts causes problems for some reason
+ - view.py output is flipped due to inverted vertical coords in cairo
+
 TODOs:
-1. Map a floorplan instance from ArchFP to a node instance
-   1. write Node colors and parent colors to ArchFP
-   2. extract floorplans from ArchFP w/o using file
-   3. write easy nodes to LiveHD
-   4. choose mapping for grid nodes, write to LiveHD
-2. Analysis
+1. Analysis
    - total area
    - HPWL
    - ^^ but for a given LGraph
-3. ArchFP code cleanup
-   - replace 90's C++ code with std::vector / std::unique_ptr
+2. ArchFP code cleanup
+   - clean up my code
+   - replace 90's C++ code with std::vector / std::unique_ptr?
 
 Traversal improvements:
  - Node flat:
@@ -52,10 +52,6 @@ Style guide refactors:
  - make sure all class/type names are uppercase
  - string ops -> abseil versions
  - getters and setters?
-
-Bugs:
- - calling delete on geogLayouts causes problems for some reason
- - view.py output is flipped due to inverted vertical coords in cairo
 
 LiveHD:
  - Node colors: make new color sets?

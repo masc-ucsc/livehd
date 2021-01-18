@@ -17,14 +17,14 @@ void Lhd_floorplanner::write_file(const std::string_view filename) {
 }
 
 void Lhd_floorplanner::write_lhd(const std::string_view lgdb_path) {
-
   // make sure all nodes have a hier color
   root_lg->each_hier_fast_direct([](Node& n) {
     n.set_hier_color(0);
     return true;
   });
 
-  root_layout->writeLiveHD(lgdb_path, root_lg);
+  absl::flat_hash_set<Hierarchy_index> hidx_used_set;
+  root_layout->outputLGraphLayout(root_lg, root_lg, root_lg->ref_htree()->root_index(), hidx_used_set);
 
   root_lg->each_hier_fast_direct([](const Node& n) {
     if (!n.is_type_synth()) {

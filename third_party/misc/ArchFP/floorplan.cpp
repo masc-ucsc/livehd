@@ -140,6 +140,40 @@ void FPObject::outputHotSpotLayout(ostream& o, double startX, double startY) {
     << calcY(startY) / 1000 << "\n";
 }
 
+void FPObject::outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_index hidx,
+                                  absl::flat_hash_set<mmap_lib::Tree_index>& sub_hidx_used, double startX, double startY) {
+  I(root);
+  I(lg);
+  I(!hidx.is_invalid());
+  I(root->ref_htree()->ref_lgraph(hidx) == lg);
+
+  for (Node fn : lg->fast()) {
+    if (fn.get_type_op() != getType()) {
+      continue;
+    }
+
+    Node hn(root, hidx, fn.get_compact_class());
+
+    if (hn.get_hier_color() == 1) {
+      continue;
+    }
+
+    Ann_place p(calcX(startX), calcY(startY), getWidth() / 1000, getHeight() / 1000);
+    hn.set_place(p);
+    hn.set_hier_color(1);  // set node instance as marked after visiting it
+
+/*
+    fmt::print("setting node {} (l: {}, p: {}) with color {}\n",
+               hn.debug_name(),
+               hn.get_hidx().level,
+               hn.get_hidx().pos,
+               hn.get_hier_color());
+*/
+
+    break;
+  }
+}
+
 // Methods for the FPWrapper class.
 FPCompWrapper::FPCompWrapper(dummyComponent* comp, double minAR, double maxAR, double areaArg, int countArg) {
   component      = comp;
@@ -328,120 +362,67 @@ double FPContainer::totalArea() {
   return area;
 }
 
-void FPContainer::writeLiveHD(const std::string_view path_arg, LGraph* root_arg) {
-  I(root_arg);
-
-  path    = path_arg;
-  root_lg = root_arg;
-  htree   = root_lg->ref_htree();
-
-  writeLgraph(root_lg, htree->get_root());
-}
-
-void FPContainer::writeLgraph(LGraph* lg, const Hierarchy_index hidx) {
+void FPContainer::outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_index hidx,
+                                     absl::flat_hash_set<mmap_lib::Tree_index>& sub_hidx_used, double startX, double startY) {
+  I(root);
   I(lg);
   I(!hidx.is_invalid());
-  I(htree->ref_lgraph(hidx) == lg);
+  I(root->ref_htree()->ref_lgraph(hidx) == lg);
+  
+  pushMirrorContext(startX, startY);
+  int itemCount = getComponentCount();
 
   for (int i = 0; i < getComponentCount(); i++) {
-    FPObject* ob    = getComponent(i);
-    bool      found = false;
+    FPObject* obj = getComponent(i);
 
-    for (int c = 0; c < ob->getCount(); c++) {
-      /*
-      fmt::print("object instance {} of {} in level {} pos {} has type {}\n",
-                 c,
-                 ob->getName(),
-                 hidx.level,
-                 hidx.pos,
-                 Ntype::get_name(ob->getType()));
-      */
+    Ntype_op t = obj->getType();
 
-      // if component type is Invalid, then the component is anonymous and added by ArchFP
-      // so transparently traverse it
-      if (ob->getType() == Ntype_op::Invalid) {
-        FPContainer* cob = static_cast<FPContainer*>(ob);
-        cob->path        = path;
-        cob->root_lg     = root_lg;
-        cob->htree       = htree;
+    if (Ntype::is_synthesizable(t)) {  // leaf node - current hier structure is fine
+      obj->outputLGraphLayout(root, lg, hidx, sub_hidx_used, x + startX, y + startY);
+    } else if (t == Ntype_op::Sub) {  // Sub node - parameters need to be adjusted
 
-        cob->writeLgraph(lg, hidx);
-      }
-
-      if (ob->getType() == Ntype_op::Sub) {
-        for (auto fn : lg->fast()) {
-          if (!fn.is_type_sub_present()) {
-            continue;
-          }
-
-          Node    hn(root_lg, hidx, fn.get_compact_class());
-          LGraph* sub_lg = LGraph::open(path, hn.get_type_sub());
-
-          if ((sub_lg->get_name() == ob->getName()) && (hn.get_hier_color() == 0)) {
-            Ann_place p(ob->getX(), ob->getY(), ob->getWidth(), ob->getHeight());
-            hn.set_place(p);
-            hn.set_hier_color(1);  // set node instance as marked after visiting it
-
-            /*
-            fmt::print("setting subnode {} (l: {}, p: {}) with color {}\n",
-                       hn.debug_name(),
-                       hn.get_hidx().level,
-                       hn.get_hidx().pos,
-                       hn.get_hier_color());
-            */
-
-            FPContainer* cob = static_cast<FPContainer*>(ob);
-            cob->path        = path;
-            cob->root_lg     = root_lg;
-            cob->htree       = htree;
-
-            // find compatible tree index for subnode
-            auto tidx = htree->get_first_child(hidx);
-            while (tidx != htree->invalid_index()) {
-              LGraph* sub_lg = LGraph::open(path, hn.get_type_sub());
-
-              if (!sub_hidx_used.contains(tidx) && htree->ref_lgraph(tidx) == sub_lg) {
-                sub_hidx_used.emplace(tidx);
-
-                cob->writeLgraph(sub_lg, tidx);
-                break;
-              }
-              tidx = htree->get_sibling_next(tidx);
-            }
-            break;
-          }
+      bool found = false;
+      for (auto fn : lg->fast()) {
+        if (!fn.is_type_sub_present()) {
+          continue;
         }
-      }
 
-      if (Ntype::is_synthesizable(ob->getType())) {
-        for (Node fn : lg->fast()) {
-          if (fn.get_type_op() != ob->getType()) {
-            continue;
-          }
+        Node    hn(root, hidx, fn.get_compact_class());
+        LGraph* sub_lg = LGraph::open(root->get_path(), hn.get_type_sub());
 
-          Node hn(root_lg, hidx, fn.get_compact_class());
-
-          if (hn.get_hier_color() == 1) {
-            continue;
-          }
-
-          Ann_place p(ob->getX(), ob->getY(), ob->getWidth(), ob->getHeight());
+        const std::string_view tname = Ntype::get_name(obj->getType());
+        if ((sub_lg->get_name() == obj->getName()) && (hn.get_hier_color() == 0)) {
+          Ann_place p(obj->getX(), obj->getY(), obj->getWidth(), obj->getHeight());
           hn.set_place(p);
-          hn.set_hier_color(1);  // set node instance as marked after visiting it
+          hn.set_hier_color(1);  // set subnode instance as marked after visiting it
 
-          /*
-          fmt::print("setting node {} (l: {}, p: {}) with color {}\n",
-                     hn.debug_name(),
-                     hn.get_hidx().level,
-                     hn.get_hidx().pos,
-                     hn.get_hier_color());
-          */
+          // find compatible tree index for subnode
+          auto ht   = root->ref_htree();
+          auto tidx = ht->get_first_child(hidx);
+          while (tidx != ht->invalid_index()) {
+            LGraph* sub_lg = LGraph::open(root->get_path(), hn.get_type_sub());
 
+            if (!sub_hidx_used.contains(tidx) && ht->ref_lgraph(tidx) == sub_lg) {
+              sub_hidx_used.emplace(tidx);
+              obj->outputLGraphLayout(root, sub_lg, tidx, sub_hidx_used, x + startX, y + startY);
+              found = true;
+              break;
+            }
+            tidx = ht->get_sibling_next(tidx);
+          }
           break;
         }
       }
+      I(found);
+    } else if (t == Ntype_op::Invalid) {  // specific kind of layout - current hier structure is fine
+      obj->outputLGraphLayout(root, lg, hidx, sub_hidx_used, x + startX, y + startY);
+    } else {
+      fmt::print("???\n");
+      I(false);
     }
   }
+
+  popMirrorContext();
 }
 
 // Methods for the GridLayout class.
@@ -527,6 +508,79 @@ void gridLayout::outputHotSpotLayout(ostream& o, double startX, double startY) {
     }
   }
   o << "# End of " << GridName << " Layout.\n";
+}
+
+void gridLayout::outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_index hidx,
+                                    absl::flat_hash_set<mmap_lib::Tree_index>& sub_hidx_used, double startX, double startY) {
+  I(root);
+  I(lg);
+  I(!hidx.is_invalid());
+  I(root->ref_htree()->ref_lgraph(hidx) == lg);
+  
+  if (getComponentCount() != 1) {
+    cerr << "Attempt to output a grid with other than one component.\n";
+    return;
+  }
+
+  double    compWidth, compHeight;
+  string    compName;
+  FPObject* obj = getComponent(0);
+  compWidth     = obj->getWidth();
+  compHeight    = obj->getHeight();
+  compName      = obj->getName();
+
+  int compCount = xCount * yCount;
+  int compNum   = 1;
+
+  Ntype_op t = obj->getType();
+
+  for (int i = 0; i < yCount; i++) {
+    double cy = (i * compHeight) + y + startY;
+    for (int j = 0; j < xCount; j++) {
+      double cx = (j * compWidth) + x + startX;
+
+      if (Ntype::is_synthesizable(t)) {  // leaf node - current hier structure is fine
+        obj->outputLGraphLayout(root, lg, hidx, sub_hidx_used, x + startX, y + startY);
+      } else if (t == Ntype_op::Sub) {  // Sub node - parameters need to be adjusted
+        bool found = false;
+        for (auto fn : lg->fast()) {
+          if (!fn.is_type_sub_present()) {
+            continue;
+          }
+
+          Node    hn(root, hidx, fn.get_compact_class());
+          LGraph* sub_lg = LGraph::open(root->get_path(), hn.get_type_sub());
+
+          const std::string_view tname = Ntype::get_name(obj->getType());
+          if ((sub_lg->get_name() == obj->getName()) && (hn.get_hier_color() == 0)) {
+            Ann_place p(obj->getX(), obj->getY(), obj->getWidth(), obj->getHeight());
+            hn.set_place(p);
+            hn.set_hier_color(1);  // set node instance as marked after visiting it
+
+            // find compatible tree index for subnode
+            auto ht   = root->ref_htree();
+            auto tidx = ht->get_first_child(hidx);
+            while (tidx != ht->invalid_index()) {
+              LGraph* sub_lg = LGraph::open(root->get_path(), hn.get_type_sub());
+
+              if (!sub_hidx_used.contains(tidx) && ht->ref_lgraph(tidx) == sub_lg) {
+                sub_hidx_used.emplace(tidx);
+                obj->outputLGraphLayout(root, sub_lg, tidx, sub_hidx_used, cx, cy);
+                found = true;
+                break;
+              }
+              tidx = ht->get_sibling_next(tidx);
+            }
+            break;
+          }
+        }
+        I(found);
+      } else if (t == Ntype_op::Invalid) {  // specific kind of layout - current hier structure is fine
+        obj->outputLGraphLayout(root, lg, hidx, sub_hidx_used, x + startX, y + startY);
+      }
+      compNum += 1;
+    }
+  }
 }
 
 // Methods for Baglayout Class
