@@ -231,6 +231,7 @@ public:
   void each_graph_input(std::function<void(Node_pin &pin)> f1, bool hierarchical=false);
   void each_graph_output(std::function<void(Node_pin &pin)> f1, bool hierarchical=false);
 
+  void each_hier_fast_direct(const std::function<bool(Node &)>);
   void each_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)>);
   void each_sub_unique_fast(const std::function<bool(Node &, Lg_type_id)> fn);
 

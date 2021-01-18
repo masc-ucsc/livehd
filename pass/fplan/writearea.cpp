@@ -7,7 +7,7 @@
 #include "pass_fplan.hpp"
 
 void Pass_fplan_writearea::setup() {
-  auto w = Eprp_method("pass.fplan.write_area",
+  auto w = Eprp_method("pass.fplan.writearea",
                        "randomly generates aspect ratio and area for nodes, within bounds",
                        &Pass_fplan_writearea::pass);
 

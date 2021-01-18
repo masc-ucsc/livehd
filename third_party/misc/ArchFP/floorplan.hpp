@@ -226,7 +226,7 @@ public:
   virtual void      addComponent(FPObject* comp, int count);
 
   // Writes current containers and all subcontainers to the specified root lgraph
-  virtual void writeLiveHD(const std::string_view path, LGraph* root_lg, Hierarchy_tree* htree);
+  virtual void writeLiveHD(const std::string_view path, LGraph* root_lg);
   
   // cache top-level info that doesn't change to avoid passing constants as parameters
   std::string_view path;

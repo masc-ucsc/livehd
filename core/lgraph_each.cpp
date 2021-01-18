@@ -131,6 +131,21 @@ void LGraph::each_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)> 
   }
 }
 
+void LGraph::each_hier_fast_direct(const std::function<bool(Node &)> f) {
+  const auto ht = ref_htree();
+
+  for (const auto& hidx : ht->depth_preorder()) {
+    LGraph* lg = ht->ref_lgraph(hidx);
+    for (auto fn : lg->fast()) {
+      Node hn(this, lg, hidx, fn.nid);
+
+      if (!f(hn)) {
+        return;
+      }
+    }
+  }
+}
+
 void LGraph::each_sub_unique_fast(const std::function<bool(Node &, Lg_type_id)> fn) {
   const auto &m = get_down_nodes_map();
   std::set<Lg_type_id> visited;

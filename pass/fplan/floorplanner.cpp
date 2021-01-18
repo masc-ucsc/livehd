@@ -17,66 +17,38 @@ void Lhd_floorplanner::write_file(const std::string_view filename) {
 }
 
 void Lhd_floorplanner::write_lhd(const std::string_view lgdb_path) {
-  auto ht = root_lg->ref_htree();
 
   // make sure all nodes have a hier color
-  for (const auto& hidx : ht->depth_preorder()) {
-    LGraph* lg = ht->ref_lgraph(hidx);
-    for (auto fn : lg->fast()) {
-      if (!fn.is_type_synth() && !fn.is_type_sub()) {
-        continue;
-      }
+  root_lg->each_hier_fast_direct([](Node& n) {
+    n.set_hier_color(0);
+    return true;
+  });
 
-      Node hn(root_lg, hidx, fn.get_compact_class());
+  root_layout->writeLiveHD(lgdb_path, root_lg);
 
-      hn.set_hier_color(0);
+  root_lg->each_hier_fast_direct([](const Node& n) {
+    if (!n.is_type_synth()) {
+      return true;
     }
-  }
 
-  /*
-  for (const auto& hidx : ht->depth_preorder()) {
-    LGraph* lg = ht->ref_lgraph(hidx);
-    for (auto fn : lg->fast()) {
-      if (!fn.is_type_synth()) {
-        continue;
-      }
+    // basic sanity checking for returned floorplans
+    I(n.is_hierarchical());
+    I(n.has_hier_color());
+    I(n.get_hier_color() == 1);
+    I(n.has_place());
 
-      Node hn(root_lg, hidx, fn.get_compact_class());
+    if (debug_print) {
+      fmt::print("node {} ", n.debug_name());
+      fmt::print("level {} pos {} ", n.get_hidx().level, n.get_hidx().pos);
 
-      fmt::print("node: {}, level: {}, pos: {}\n", hn.debug_name(), hn.get_hidx().level, hn.get_hidx().pos);
+      const Ann_place& p = n.get_place();
+      fmt::print("x: {:.3f}, y: {:.3f}, width: {:.3f}, height: {:.3f}\n",
+                 p.get_pos_x(),
+                 p.get_pos_y(),
+                 p.get_len_x(),
+                 p.get_len_y());
     }
-  }
-  */
 
-  root_layout->writeLiveHD(lgdb_path, root_lg, ht);
-
-  if (debug_print) {
-    for (const auto& hidx : ht->depth_preorder()) {
-      LGraph* lg = ht->ref_lgraph(hidx);
-      for (auto fn : lg->fast()) {
-        if (!fn.is_type_synth()) {
-          continue;
-        }
-
-        Node hn(root_lg, hidx, fn.get_compact_class());
-
-        fmt::print("node {} ", hn.debug_name());
-
-        I(hn.is_hierarchical());
-        fmt::print("level {} pos {} ", hn.get_hidx().level, hn.get_hidx().pos);
-
-        I(hn.has_hier_color());
-        I(hn.get_hier_color() == 1);
-
-        I(hn.has_place());
-        const Ann_place& p = hn.get_place();
-
-        fmt::print("x: {:.3f}, y: {:.3f}, width: {:.3f}, height: {:.3f}\n",
-                   p.get_pos_x(),
-                   p.get_pos_y(),
-                   p.get_len_x(),
-                   p.get_len_y());
-      }
-    }
-  }
+    return true;
+  });
 }

@@ -328,13 +328,12 @@ double FPContainer::totalArea() {
   return area;
 }
 
-void FPContainer::writeLiveHD(const std::string_view path_arg, LGraph* root_arg, Hierarchy_tree* htree_arg) {
+void FPContainer::writeLiveHD(const std::string_view path_arg, LGraph* root_arg) {
   I(root_arg);
-  I(htree_arg);
 
   path    = path_arg;
   root_lg = root_arg;
-  htree   = htree_arg;
+  htree   = root_lg->ref_htree();
 
   writeLgraph(root_lg, htree->get_root());
 }
