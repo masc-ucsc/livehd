@@ -14,6 +14,7 @@ hier_tuple_nested_if2 hier_tuple_nested_if3 hier_tuple_nested_if4
 hier_tuple_nested_if5'
 
 # pts='firrtl_tail reg_bits_set  reg_bits_set firrtl_tail2 firrtl_tail3 firrtl_gcd_3bits  tuple_copy2 '
+pts='tuple_pre_declaration'
 
 # Note: in this bash script, you MUST specify top module name AT FIRST POSITION
 pts_hier1='top sum top'
@@ -191,10 +192,10 @@ Pyrope_compile_hier () {
 }
 
 
-rm -rf ./lgdb
-Pyrope_compile_hier "$pts_hier1"
-rm -rf ./lgdb
-Pyrope_compile_hier "$pts_hier2"
+# rm -rf ./lgdb
+# Pyrope_compile_hier "$pts_hier1"
+# rm -rf ./lgdb
+# Pyrope_compile_hier "$pts_hier2"
 rm -rf ./lgdb
 Pyrope_compile "$pts"
 

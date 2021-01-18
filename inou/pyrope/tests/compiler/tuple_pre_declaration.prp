@@ -1,0 +1,38 @@
+%foo = ()
+$en.__ubits = 2
+if ($en == 0) {
+    %foo.a = 10
+} else {
+    if ($en == 1) {
+        %foo.a = 11
+    } elif ($en == 2) {
+        %foo.a = 12
+        %foo.b = 22
+    } else {
+        %foo.b = 23
+    }
+}
+
+
+
+// 
+//%foo = ()
+//if ($en == 1) {
+//    %foo.a = 2
+//} else {
+//    %foo.a = 3
+//    // %foo.b = 3
+//}
+
+
+//or 
+
+////
+//foo.a = 0
+//foo.b = 0
+
+//if ($en == 1) {
+//    foo.a = 2
+//} else {
+//    foo.b = 3
+//}

@@ -1000,9 +1000,11 @@ void Lnast::add_phi_node(const Lnast_nid &cond_nid, const Lnast_nid &t_nid, cons
   auto is_handling_hier_tuple = true_ptype.is_tuple_get() && false_ptype.is_tuple_get();
   if (is_handling_hier_tuple) {
     auto prev_tg_lhs_name = get_name(t_nid);
-    fmt::print("DEBUG prev_tg_lhs_name:{}\n", prev_tg_lhs_name);
+    auto it = tg_lhs2paired_ta.find(prev_tg_lhs_name);
+    if (it == tg_lhs2paired_ta.end()) 
+      return;
+
     auto prev_ta_nid = tg_lhs2paired_ta[prev_tg_lhs_name]; //getting the prev_ta is just to copy the data of its leaves
-    
     
     // insert new ta and handling leaves
     auto new_ta_nid  = add_child(if_nid, Lnast_node(Lnast_ntype::create_tuple_add(), Etoken()));
