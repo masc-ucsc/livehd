@@ -383,19 +383,32 @@ void FPContainer::writeLgraph(LGraph* lg, const Hierarchy_index hidx) {
             hn.set_place(p);
             hn.set_hier_color(1);  // set node instance as marked after visiting it
 
+            /*
             fmt::print("setting subnode {} (l: {}, p: {}) with color {}\n",
                        hn.debug_name(),
                        hn.get_hidx().level,
                        hn.get_hidx().pos,
                        hn.get_hier_color());
+            */
 
             FPContainer* cob = static_cast<FPContainer*>(ob);
             cob->path        = path;
             cob->root_lg     = root_lg;
             cob->htree       = htree;
 
-            cob->writeLgraph(sub_lg, htree->go_down(hn));
+            // find compatible tree index for subnode
+            auto tidx = htree->get_first_child(hidx);
+            while (tidx != htree->invalid_index()) {
+              LGraph* sub_lg = LGraph::open(path, hn.get_type_sub());
 
+              if (!sub_hidx_used.contains(tidx) && htree->ref_lgraph(tidx) == sub_lg) {
+                sub_hidx_used.emplace(tidx);
+
+                cob->writeLgraph(sub_lg, tidx);
+                break;
+              }
+              tidx = htree->get_sibling_next(tidx);
+            }
             break;
           }
         }
@@ -417,11 +430,13 @@ void FPContainer::writeLgraph(LGraph* lg, const Hierarchy_index hidx) {
           hn.set_place(p);
           hn.set_hier_color(1);  // set node instance as marked after visiting it
 
+          /*
           fmt::print("setting node {} (l: {}, p: {}) with color {}\n",
                      hn.debug_name(),
                      hn.get_hidx().level,
                      hn.get_hidx().pos,
                      hn.get_hier_color());
+          */
 
           break;
         }

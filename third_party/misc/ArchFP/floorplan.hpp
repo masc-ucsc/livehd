@@ -13,6 +13,8 @@
 
 #include "core/cell.hpp"
 #include "core/lgraph.hpp"
+#include "absl/container/flat_hash_set.h"
+#include "mmap_lib/include/mmap_tree.hpp"
 using namespace std;
 
 // This will be used to keep track of user's request for more output during layout.
@@ -230,6 +232,7 @@ public:
   std::string_view path;
   LGraph* root_lg;
   Hierarchy_tree* htree;
+  absl::flat_hash_set<mmap_lib::Tree_index> sub_hidx_used;
 
   virtual void writeLgraph(LGraph* lg, const Hierarchy_index hidx);
 };

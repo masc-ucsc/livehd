@@ -47,5 +47,5 @@ protected:
   // layout of all child nodes
   absl::flat_hash_map<LGraph*, std::unique_ptr<geogLayout>> layouts;
 
-  constexpr static bool debug_print = true;
+  constexpr static bool debug_print = false;
 };
