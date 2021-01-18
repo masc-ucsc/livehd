@@ -45,18 +45,13 @@ void Pass_fplan_makefp::makefp_int(Lhd_floorplanner& fp, const std::string_view 
   fmt::print(" done ({} ms).\n", t.time());
 }
 
-Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", var) {
-  
-  
-  
-  
-  
-  
+Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", var), root_lg(nullptr) {
+  root_lg = var.lgs[0];  // FIXME: there can be many. Maybe iterate or generate an error otherwise
+
   auto htree = root_lg->ref_htree();
   for (const auto& hidx : htree->depth_preorder()) {
     LGraph* lg = htree->ref_lgraph(hidx);
     for (auto fn : lg->fast()) {
-
       Node hn(root_lg, hidx, fn.get_compact_class());
 
       I(hn.get_lg() == htree->ref_lgraph(hidx));
@@ -64,15 +59,6 @@ Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", v
   }
 
   return;
-  
-  
-  
-  
-  
-  
-  
-  
-  root_lg = var.lgs[0];
 
   std::string_view t_str = var.get("traversal");
 

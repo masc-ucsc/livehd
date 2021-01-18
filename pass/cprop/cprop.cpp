@@ -10,8 +10,8 @@
 #include "lgtuple.hpp"
 #include "pass_cprop.hpp"
 
-//#define TRACE(x)
-#define TRACE(x) x
+#define TRACE(x)
+//#define TRACE(x) x
 
 Cprop::Cprop (bool _hier, bool _at_gioc) : hier(_hier), at_gioc(_at_gioc) {}
 
@@ -761,7 +761,7 @@ void Cprop::do_trans(LGraph *lg) {
   /* bool tup_get_left = false; */
 
   for (auto node : lg->forward()) {
-    fmt::print("{}\n", node.debug_name());
+    //fmt::print("{}\n", node.debug_name());
     auto op = node.get_type_op();
 
     // Special cases to handle in cprop
