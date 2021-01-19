@@ -57,17 +57,12 @@ void Lnast_visitor::handle(const slang::ContinuousAssignSymbol& symbol) {
 
 void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
   int line_num = 0, pos1 = 0, pos2 = 0;
-
   auto idx_root = Lnast_node::create_top("top", line_num, pos1, pos2);
-  (void)idx_root;
-
   if (numErrors > errorLimit)
     return;
   
   char* operand1;
   char* operand2;
-  (void)operand1;
-  (void)operand2;
   
   // lnast->set_root(idx_root);
   lnast->set_root(Lnast_node(Lnast_ntype::create_top()));
@@ -76,116 +71,109 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
   
   // auto node_assign  = lnast.add_child(parent_node, Lnast_node::create_assign("assign"));
 
-  auto node_stmts  = Lnast_node::create_stmts     ("stmts",  line_num, pos1, pos2);
-  auto node_dpa    = Lnast_node::create_dp_assign ("dp_assign",  line_num, pos1, pos2);
-  auto idx_stmts   = lnast->add_child(lnast->get_root(), node_stmts);                       //how does one create the root node
-  // auto idx_stmts   = lnast.add_child(lnast->get_root(), node_stmts); //error with new lnast arg
-  auto idx_assign  = lnast->add_child(idx_stmts,  node_dpa);
-  
-  fmt::print("check\n");
-  const auto& lhs = expr.left();  // slang::Expression
+  auto node_stmts  = Lnast_node::create_stmts ("stmts",  line_num, pos1, pos2);
+  auto idx_stmts   = lnast->add_child(lnast->get_root(), node_stmts);     
+
+  const auto& lhs = expr.left();
   const auto& rhs = expr.right();
-  (void)rhs;
 
-  if (lhs.kind == ExpressionKind::NamedValue) {
-    const auto& var = lhs.as<NamedValueExpression>();
-
-    fmt::print("bits:{} {} =  ", var.type->getBitWidth(), var.symbol.name);
-    operandList.emplace_back(var.symbol.name);
-    auto idx_lhs  = lnast->add_child(idx_assign, Lnast_node::create_ref(var.symbol.name)); // string_view = %out
-    (void)idx_lhs;
-  } else {
-    fmt::print("TODO. What is this");
-  }
-  fmt::print("Started recursion\n");
+  fmt::print("Start RHS recursion\n");
   handle(expr.right());
+  //check verilog list
+  fmt::print("printing operator recursion\n");
+  for (auto it = verilogList.cbegin(); it != verilogList.cend(); ++it)
+        std::cout << " " << *it;
+  //std::cout<<'\n';
+  fmt::print("\nprinting operand recursion\n");
+  for (auto it = operandList.cbegin(); it != operandList.cend(); ++it)
+        std::cout << " " << *it;
+  //std::cout<<'check\n';
+  fmt::print("\nlnast time\n");
+  int count=0;
+  
+  
+  for (auto it = verilogList.crbegin(); it != verilogList.crend(); ++it){
+      if (operandList.size()==0||operandList.size()==1) break;
+      fmt::print("check:{} ",operandList.size());
+      count++;
+      auto node_not   = Lnast_node::create_ref (lnast->add_string("__not"+std::to_string(count)));
+      auto node_and   = Lnast_node::create_ref (lnast->add_string("__and"+std::to_string(count)));
 
-    //check verilog list
-    fmt::print("printing operator recursion\n");
-    for (auto it = verilogList.cbegin(); it != verilogList.cend(); ++it)
-          std::cout << " " << *it;
-    //std::cout<<'\n';
-    fmt::print("\nprinting operand recursion\n");
-    for (auto it = operandList.cbegin(); it != operandList.cend(); ++it)
-          std::cout << " " << *it;
-    //std::cout<<'check\n';
-    fmt::print("\nlnast time\n");
-    int andFlag=0,orFlag=0,xorFlag=0,notFlag=0;
-    (void)andFlag;
-    (void)xorFlag;
-    (void)orFlag;
-    int count=0;
-    
-
-    for (auto it = verilogList.crbegin(); it != verilogList.crend(); ++it){
-        count++;
-        auto node_not   = Lnast_node::create_ref (lnast->add_string("__not"+std::to_string(count-notFlag)));
-        auto node_and   = Lnast_node::create_ref (lnast->add_string("__and"+std::to_string(count-andFlag)));
-        if (*it =="AND"){
-          auto idx_and = lnast->add_child(idx_stmts, Lnast_node::create_and ("AND"));
-          auto node_op1    = Lnast_node::create_ref (lnast->add_string(operandList.back()));
-          auto idx_op1     = lnast->add_child(idx_and, node_op1);
-          (void)idx_op1;
-          operandList.pop_back();
-          if (notFlag){
-              auto idx_op2= lnast->add_child(idx_and, node_not);
-              notFlag=0;
-          }
-          else if (andFlag){
-              auto idx_op2= lnast->add_child(idx_and, node_and);
-              andFlag=0;
-          }
-          auto node_and   = Lnast_node::create_ref (lnast->add_string("__and"+std::to_string(count)));
-          auto idx_op3= lnast->add_child(idx_and, node_and);
-          andFlag=1;
-          // auto node_and   = Lnast_node::create_ref ("__and"+std::to_string(count));
-          // auto idx_foo     = lnast->add_child(idx_foo1, node_and);
-          // auto node_op2    = Lnast_node::create_ref (operandList.back());
-          // auto idx_op2     = lnast->add_child(idx, node_op2);
-          // operandList.pop_back();
-          
-        }
-        else if (*it =="OR"){
-          // fmt::print("WASSUP OR\n");
-          auto idx_or = lnast->add_child(idx_stmts, Lnast_node::create_or ("OR"));
-          auto node_op1    = Lnast_node::create_ref (lnast->add_string(operandList.back()));
-          auto idx_op1     = lnast->add_child(idx_or, node_op1);
-          (void)idx_op1;
-          operandList.pop_back();
-          // auto node_op2    = Lnast_node::create_ref (operandList.back());
-          // auto idx_op2     = lnast->add_child(idx, node_op2);
-          // operandList.pop_back();
-        }
-        else if (*it =="XOR"){
-          // fmt::print("WASSUP XOR\n");
-          auto idx_xor = lnast->add_child(idx_stmts, Lnast_node::create_xor ("XOR"));
-          auto node_op1    = Lnast_node::create_ref (lnast->add_string(operandList.back()));
-          auto idx_op1     = lnast->add_child(idx_xor, node_op1);
-          (void)idx_op1;
-          operandList.pop_back();
-          // auto node_op2    = Lnast_node::create_ref (operandList.back());
-          // auto idx_op2     = lnast->add_child(idx, node_op2);
-          // operandList.pop_back();
-        }
-        else if (*it =="NOT"){
-          // fmt::print("WASSUP NOT\n");
-          auto idx_not = lnast->add_child(idx_stmts, Lnast_node::create_not ("NOT"));
-          auto node_op1    = Lnast_node::create_ref (lnast->add_string(operandList.back()));
-          auto idx_op1     = lnast->add_child(idx_not, node_op1);
-          (void)idx_op1;
-          operandList.pop_back();
-          auto idx_foo1     = lnast->add_child(idx_not, node_not);
-          notFlag=1;
-        }
-
-        // if(andFlag){
-        //   auto node_and   = Lnast_node::create_ref ("__and"+std::to_string(count));
-        //   auto idx_foo     = lnast.add_child(idx_and, node_and);
-        //   andFlag=0;
-        // }
-
+      if (*it =="AND"){
+        fmt::print("AND \n");
+        auto idx_and = lnast->add_child(idx_stmts, Lnast_node::create_and ("AND"));
+        auto node_op1    = Lnast_node::create_ref (lnast->add_string(operandList.back()));
+        
+        auto node_and   = Lnast_node::create_ref (lnast->add_string("__and"+std::to_string(count)));
+        // tmpList.emplace(tmpList.front(),("__and"+std::to_string(count))); //for connection the node refs
+        
+        auto idx_op3= lnast->add_child(idx_and, node_and);
+        lnast->add_child(idx_and, node_op1);
+        operandList.pop_back();
+        auto node_op2    = Lnast_node::create_ref (lnast->add_string(operandList.back()));
+        lnast->add_child(idx_and, node_op2);
+        operandList.pop_back();
         
       }
+      else if (*it =="OR"){
+        auto idx_or = lnast->add_child(idx_stmts, Lnast_node::create_or ("OR"));
+        auto node_op1    = Lnast_node::create_ref (lnast->add_string(operandList.back()));
+        auto idx_op1     = lnast->add_child(idx_or, node_op1);
+        operandList.pop_back();
+      }
+      else if (*it =="XOR"){
+        auto idx_xor = lnast->add_child(idx_stmts, Lnast_node::create_xor ("XOR"));
+        auto node_op1    = Lnast_node::create_ref (lnast->add_string(operandList.back()));
+        auto idx_op1     = lnast->add_child(idx_xor, node_op1);
+        operandList.pop_back();
+        // auto node_op2    = Lnast_node::create_ref (operandList.back());
+        // auto idx_op2     = lnast->add_child(idx, node_op2);
+        // operandList.pop_back();
+      }
+      else if (*it =="NOT"){
+        fmt::print("NOT \n");
+        auto idx_not = lnast->add_child(idx_stmts, Lnast_node::create_not ("NOT"));
+        auto node_op1    = Lnast_node::create_ref (lnast->add_string(operandList.back()));
+        
+        //check as to why emplace doesnt work
+        // tmpList.emplace(tmpList.front(),"__not"+std::to_string(count)); //for connection the node refs
+        
+        lnast->add_child(idx_not, node_not);
+        lnast->add_child(idx_not, node_op1);
+        operandList.pop_back();        
+      }
+
+  }
+  int inc=0;
+  for (auto it = verilogList.crbegin(); it != verilogList.crend(); ++it){
+    if (inc<count){
+      inc++;
+    }
+    else{
+      if(*it=="AND"){
+        fmt::print("verilog check:{} \n",*it);
+        auto idx_and = lnast->add_child(idx_stmts, Lnast_node::create_and ("AND"));
+        // auto node_not   = Lnast_node::create_ref (lnast->add_string(tmpList.back()));
+        auto node_tmp   = Lnast_node::create_ref (tmpList.back());
+        tmpList.pop_back();
+        lnast->add_child(idx_and, node_tmp);
+      }
+
+    }
+  }
+
+    auto node_dpa    = Lnast_node::create_dp_assign ("dp_assign",  line_num, pos1, pos2);
+    auto idx_assign  = lnast->add_child(idx_stmts,  node_dpa);
+    if (lhs.kind == ExpressionKind::NamedValue) {
+      const auto& var = lhs.as<NamedValueExpression>();
+      fmt::print("bits:{} {} =  ", var.type->getBitWidth(), var.symbol.name);
+      // operandList.emplace_back(var.symbol.name);
+      lnast->add_child(idx_assign, Lnast_node::create_ref(var.symbol.name)); // string_view = %out
+    } 
+    else {
+      fmt::print("TODO. What is this");
+
+    }
       // auto idx_assign  = lnast->add_child(idx_stmts,  Lnast_node::create_dp_assign ("assign"));
       // auto node_op3    = Lnast_node::create_ref (operandList.back());
       // auto idx_lhs3    = lnast->add_child(idx_assign, node_op3); 
@@ -205,7 +193,7 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
         // auto idx_op2     = lnast->add_child(idx_plus,  node_op2); 
         // fmt::print(" + ");
 
-      // lnast->dump();
+      lnast->dump();
 
       parsed_lnasts.push_back(std::move(lnast));
 
@@ -217,12 +205,9 @@ void Lnast_visitor::handle(const slang::Expression& expr){
   // if (expr==NULL){
   //   return;
   // }
-  //fmt::print("recurse!\n");
+
   if (expr.kind==ExpressionKind::UnaryOp){
-    //fmt::print("unary\n");
     const auto &op1 = expr.as<UnaryExpression>();
-    //const auto check=getBinaryExpression(temp.kind);
-    fmt::print("UnaryOperator: {} {} \n",expr.kind,op1.op);
     switch (op1.op) {
       case (UnaryOperator::Plus):
         {
@@ -237,7 +222,7 @@ void Lnast_visitor::handle(const slang::Expression& expr){
       case (UnaryOperator::BitwiseNot):
         {
           verilogList.emplace_back("NOT");
-          fmt::print("UnaryOperator: ~ \n");
+          fmt::print(" ~ ");
           break;
         }
       case (UnaryOperator::BitwiseAnd):
@@ -267,27 +252,17 @@ void Lnast_visitor::handle(const slang::Expression& expr){
         // case UnaryOperator::Postincrement:
         // case UnaryOperator::Postdecrement:
     }
-    //add flags to trigger the operators
+    //Unary operand place in back
     const auto &opswitch=op1.operand();
     if(opswitch.kind==ExpressionKind::NamedValue){
       const auto &op2 = opswitch.as<NamedValueExpression>();
       operandList.emplace_back(op2.symbol.name);
       fmt::print("RHS named value: {} \n",op2.symbol.name);
 
-      
-      
-      
-      // auto node_op   = Lnast_node::create_ref (operand);
-      // auto idx_op    = lnast->add_child(idx, node_op); //segfaulting
     }
-
   }
-  // auto idx    = lnast->add_child(idx_stmts, Lnast_node::create_xor  ("XOR"));
-
   if (expr.kind==ExpressionKind::BinaryOp){
     const auto &op1 = expr.as<BinaryExpression>();
-    const Type& temp= op1.type->getCanonicalType(); //figure out what kind type is possible
-    (void)temp;
     const auto &check1=op1.left();
     const auto &check2=op1.right();
     switch (op1.op) {
@@ -299,11 +274,6 @@ void Lnast_visitor::handle(const slang::Expression& expr){
       case BinaryOperator::Subtract: {
         // idx    = lnast->add_child(idx_stmts, Lnast_node::create_minus  ("-"));
         verilogList.emplace_back("-");
-        // auto node_op1    = Lnast_node::create_ref       (operand1);
-        // auto node_op2    = Lnast_node::create_const     (operand2);
-        // auto idx_minus   = lnast->add_child(idx_stmts, node_minus);
-        // auto idx_op1     = lnast->add_child(idx_minus, node_op1);
-        // auto idx_op2     = lnast->add_child(idx_minus, node_op2);
         break;
       }
       case BinaryOperator::Multiply: {
@@ -363,7 +333,6 @@ void Lnast_visitor::handle(const slang::Expression& expr){
     if(check1.kind==ExpressionKind::NamedValue){
       const auto &rhs_1=check1.as<NamedValueExpression>();
       const auto operand1=rhs_1.symbol.name;
-      (void)operand1;
 
       operandList.emplace_back(rhs_1.symbol.name);
       fmt::print(" {} ", rhs_1.symbol.name);
@@ -405,7 +374,6 @@ void Lnast_visitor::handle(const slang::ExpressionStatement& expr) {
 }
 
 void Lnast_visitor::handle(const slang::StatementBlockSymbol& symbol) {
-  (void)symbol;
 
   if (numErrors > errorLimit)
     return;

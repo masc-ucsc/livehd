@@ -21,6 +21,8 @@ protected:
   std::unique_ptr<Lnast> lnast;
   std::vector<std::string> verilogList;
   std::vector<std::string> operandList;
+  std::vector<std::string> tmpList;
+
   enum operators {AND,OR,XOR,NOT};
 
 public:
