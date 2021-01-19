@@ -22,7 +22,7 @@ public:
   void write_file(const std::string_view filename);
 
   // write the floorplan back to LiveHD for analysis and future floorplans
-  void write_lhd(const std::string_view lgdb_path);
+  void write_lhd();
 
   virtual ~Lhd_floorplanner() {
     for (auto& pair : layouts) {
@@ -47,5 +47,5 @@ protected:
   // layout of all child nodes
   absl::flat_hash_map<LGraph*, std::unique_ptr<geogLayout>> layouts;
 
-  constexpr static bool debug_print = true;
+  constexpr static bool debug_print = false;
 };

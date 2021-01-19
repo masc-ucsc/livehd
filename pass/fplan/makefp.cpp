@@ -33,7 +33,7 @@ void Pass_fplan_makefp::makefp_int(Lhd_floorplanner& fp, const std::string_view 
   if (dest == "file") {
     fp.write_file("floorplan.flp");
   } else if (dest == "livehd") {
-    fp.write_lhd(path);
+    fp.write_lhd();
   } else {
     throw std::invalid_argument("unknown destination!");
   }

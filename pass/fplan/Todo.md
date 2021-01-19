@@ -3,61 +3,53 @@ Benchmarking tests (built using -c opt):
    - flat: 
    - hier: 
  - XOR chain (100):
-   - flat:
- - XOR chain (10,000):
-   - flat:
- - XOR chain (50,000):
-   - flat: 
- - XOR chain (100,000):
-   - flat: 
+   - flat: ??
 
 Bugs:
  - calling delete on geogLayouts causes problems for some reason
  - view.py output is flipped due to inverted vertical coords in cairo
+ - passing super flat and wide hierarchies causes problems in ArchFP
+ - fix Lgraph hier traversal
 
 TODOs:
+0. Verification
+   - check for insane / unrealistic wirelength metrics
 1. Analysis
-   - total area
+   - total area, number of components, 
    - HPWL
-   - ^^ but for a given LGraph
-2. ArchFP code cleanup
-   - clean up my code
-   - replace 90's C++ code with std::vector / std::unique_ptr?
-
-Traversal improvements:
- - Node flat:
- - Node hier:
-   - floorplan taking into account node type (ArchFP has internals for this?)
-   - floorplan taking into account wire length (do a pass to determine wire length, then put stuff nearby using geography hints)
+   - Regularity (equation in HiReg paper)
+2. Optimization
+   - use HPWL as benchmark?
+   - easy: swap positions of leaves of the same type (within a hierarchy), see if HPWL gets better
+   - identify components that are far away, set geography hints to be closer?
+   - if we have no information to go on, use basic assumptions (Const nodes can go anywere, memory nodes should be packed, etc.)
+3. Incremental Floorplans
+   - floorplan using existing geography hints instead of "Center" for everything
+4. More accurate floorplans
+   - floorplan node pins - allows for more accurate HPWL estimation
    - change between individual calls to addComponentCluster and a batched addComponentCluster based on node amounts (allows for better handling of huge modules)
- - Lgraph flat:
- - Lgraph hier:
-   - fix it
+     - might want to have different thresholds for this - probably want to pack memory cells more than const cells!
 
 General:
- - some sort of check() method that verifies netlists and internal functionality
-   - find a way to discover illegal floorplans (overlapping segments)?
+ - checkfp:
    - correct number of nodes are present
- - LGraph attributes (minor thing - node hier is more important)
-   - Node attributes and Node pin attributes already exist (attribute.hpp)
-   - Add aspect ratio information to LGraphs
-   - Add placement hint info to LGraphs
- - Can ArchFP be multithreaded?
+   - no weird disconnected segments?
+ - multithread hier_node traversal
    - Check out the paper for ArchFP
    - see what can be improved on implementation
-   - use other layout methods (bagLayout)?
- - Overlay lgraph borders over actual nodes?
+   - create a way to floorplan using existing layouts
+ - Overlay lgraph borders over actual nodes
 
 Style guide refactors:
  - make sure all class/type names are uppercase
  - string ops -> abseil versions
  - getters and setters?
-
-LiveHD:
- - Node colors: make new color sets?
+ - replace 90's C++ code in ArchFP with std::vector / std::unique_ptr?
 
 Easy:
- - add license stuff (incl lg_attribute.hpp)
+ - add license stuff
  - update usage doc
  - add more asserts
  - update LiveHD doc on hierarchy traversal - mention if you need advanced global hierarchy tools, just extract the htree itself.
+ - write gtest test cases for both simple and regular hierarchy files
+   - make a floorplan and check it, basically

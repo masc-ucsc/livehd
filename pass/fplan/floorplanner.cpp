@@ -16,7 +16,7 @@ void Lhd_floorplanner::write_file(const std::string_view filename) {
   outputHotSpotFooter(fos);
 }
 
-void Lhd_floorplanner::write_lhd(const std::string_view lgdb_path) {
+void Lhd_floorplanner::write_lhd() {
   // make sure all nodes have a hier color
   root_lg->each_hier_fast_direct([](Node& n) {
     n.set_hier_color(0);
