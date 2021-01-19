@@ -1,0 +1,7 @@
+foo.a = 1
+xx = 2
+if true {
+    foo.b = xx
+}
+
+%sum = foo.a + foo.b

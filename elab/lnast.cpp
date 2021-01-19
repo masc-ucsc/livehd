@@ -153,8 +153,8 @@ void Lnast::trans_tuple_opr_if_subtree(const Lnast_nid &if_nid) {
 
 
 bool Lnast::update_tuple_var_1st_scope_ssa_table(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
-  if (get_parent(psts_nid) == get_root())
-    return false;
+  /* if (get_parent(psts_nid) == get_root()) */
+  /*   return false; */
 
   auto &tuple_var_1st_scope_ssa_table = tuple_var_1st_scope_ssa_tables[psts_nid];
   auto type = get_type(opr_nid);
@@ -258,6 +258,7 @@ void Lnast::rename_to_real_tuple_name(const Lnast_nid &psts_nid, const Lnast_nid
   ref_data(c0_tup)->token = get_data(c0_paired_assign).token;
   ref_data(c0_tup)->type  = get_data(c0_paired_assign).type;
   ref_data(c0_tup)->subs  = get_data(c0_paired_assign).subs;
+  update_tuple_var_1st_scope_ssa_table(psts_nid, tup_nid); 
 }
 
 
@@ -323,8 +324,16 @@ void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid)
       }
       i++;
     }
+
+  /* if (get_parent(psts_nid) == get_root()) */
     add_child(ta_nid, c1_assign_data);
+    
+
     auto is_1st_scope_ssa_tuple_var = update_tuple_var_1st_scope_ssa_table(psts_nid, ta_nid);
+    // no need to create Tuple_chain asg if the chain is at top scope, the tuple_chain_asg is used for chaining tuple-chain across different hierarchy scopes
+    if (get_parent(psts_nid) == get_root())
+      return; 
+
     if (is_1st_scope_ssa_tuple_var) {
       ref_data(dot_nid)->type    = Lnast_ntype::create_assign();
       auto asg_nid = dot_nid;   //better code reading
@@ -348,8 +357,8 @@ void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid)
     ref_data(dot_nid)->type    = Lnast_ntype::create_invalid();
     ref_data(paired_nid)->type = Lnast_ntype::create_tuple_add();
 
-    auto c0_paired_asg     = get_first_child(paired_nid);
-    auto c1_paired_asg     = get_sibling_next(c0_paired_asg);
+    auto c0_paired_asg = get_first_child(paired_nid);
+    auto c1_paired_asg = get_sibling_next(c0_paired_asg);
     auto c1_paired_asg_data_bk = get_data(c1_paired_asg); //bk = backup
 
     auto ta_nid = paired_nid; //better code reading
@@ -374,9 +383,15 @@ void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid)
       i++;
     }
     add_child(ta_nid, c1_paired_asg_data_bk);
-    auto is_1st_scope_ssa_tuple_var = update_tuple_var_1st_scope_ssa_table(psts_nid, ta_nid);
+    auto ta_lhs_name = get_name(c0_paired_asg);
 
-    if (is_1st_scope_ssa_tuple_var) {
+
+    auto is_1st_scope_ssa_tuple_var = update_tuple_var_1st_scope_ssa_table(psts_nid, ta_nid);
+    // no need to create Tuple_chain asg if the chain is at top scope, the tuple_chain_asg is used for chaining tuple-chain across different hierarchy scopes
+    if (get_parent(psts_nid) == get_root())
+      return; 
+
+    if (is_1st_scope_ssa_tuple_var && check_tuple_var_1st_scope_ssa_table_parents_chain(psts_nid, ta_lhs_name)) {
       ref_data(dot_nid)->type    = Lnast_ntype::create_assign();
       auto asg_nid = dot_nid;   //better code reading
       auto c0_asg = get_first_child(asg_nid);
@@ -426,6 +441,24 @@ void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid)
     ref_data(paired_nid)->type = Lnast_ntype::create_invalid();
   } else {
     ref_data(dot_nid)->type = Lnast_ntype::create_tuple_get();
+  }
+}
+
+
+bool Lnast::check_tuple_var_1st_scope_ssa_table_parents_chain(const Lnast_nid &psts_nid, std::string_view ref_name) {
+  if (get_parent(psts_nid) == get_root()) {
+    auto &tuple_var_1st_scope_ssa_table = tuple_var_1st_scope_ssa_tables[psts_nid];
+    return tuple_var_1st_scope_ssa_table.find(ref_name) != tuple_var_1st_scope_ssa_table.end();
+
+  } else {
+    auto tmp_if_nid = get_parent(psts_nid);
+    auto new_psts_nid = get_parent(tmp_if_nid);
+    auto &tuple_var_1st_scope_ssa_table = tuple_var_1st_scope_ssa_tables[new_psts_nid];
+    if (tuple_var_1st_scope_ssa_table.find(ref_name) != tuple_var_1st_scope_ssa_table.end()) {
+      return true;
+    } else {
+      return check_tuple_var_1st_scope_ssa_table_parents_chain(new_psts_nid, ref_name);
+    }
   }
 }
 

@@ -150,6 +150,7 @@ private:
   void      dot2attr_set_get                   (const Lnast_nid &psts_nid, Lnast_nid &opr_nid);
   void      update_tuple_var_table             (const Lnast_nid &psts_nid, const Lnast_nid &opr_nid);
   bool      update_tuple_var_1st_scope_ssa_table (const Lnast_nid &psts_nid, const Lnast_nid &opr_nid);
+  bool      check_tuple_var_1st_scope_ssa_table_parents_chain (const Lnast_nid &psts_nid, std::string_view ref_name);
 
   // hierarchical statements node -> symbol table
   absl::flat_hash_map<Lnast_nid, Phi_rtable>       phi_resolve_tables;
