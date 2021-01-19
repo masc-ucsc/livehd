@@ -19,16 +19,6 @@ Main features:
 
 In addition to the packages, there should be an iterator that use the incremental builder to support incremental changes.
 
-## Bring Back Incremental Synthesis to Lgraph
-
-WARNING: Traversal depdendence
-
-Dependence: none
-
-Main features:
-
-* Reimplement the DAC synthesis in Lgraph
-* Re-run anubis to get data
 
 ## Mockturtle
 
@@ -68,27 +58,39 @@ easily and allow to build functions/libraries.
 
 ## Lgraph and LNAST check pass
 
-Create a pass that checks that the Lgraph (and/or LNAST) is sementically correct. Some checks:
+Create a pass that checks that the Lgraph (and/or LNAST) is semantically
+correct. The LNAST already has quite a few tests (pass.semantic), but it can be
+further expanded. Some checks:
 
 * No combinational loops
 * No mismatch in bit widths
 * No disconnected nodes
-* Check for inefficient splits (do not split busses that can be combined)
+* Check for inefficient splits (do not split buses that can be combined)
 * Transformations stages should not drop names if same net is preserved
+* No writes in LNAST that are never read
+* All the edges are possible. E.g: no pin 'C' in Sum_op
 
 ## Term record/replay for benchmarking/testing
 
 Use automatic asciinema generation. Compare the test speed and summarize the
 performance difference from "a user" point of view. The results should allow to
-track performance changes.
+track performance changes. These are integration tests that should be used for
+overall performance and correctness. The same tests can be used as "demo" to
+explain how to use the flow.
 
 Maybe expand tmt_test and main_test to be a more stand-alone testing setup.
 
-## OS X Support
+## OS X, Alpine Linux Support
 
-LiveHD compiles (it did) with OS X, but there are some issues with the mmap infrastructure inside mmap_lib. The code functionality
-should be able to run (the mmap_remap does not exist in OS X, but a more costly alternative is implemented for OS X, just not tested
+LiveHD compiles (it did) with OS X, but there are some issues with the mmap
+infrastructure inside mmap_lib. The code functionality should be able to run
+(the mmap_remap does not exist in OS X, but a more costly alternative is
+implemented for OS X, just not tested
 and it seems faulty).
+
+There are different set of issues with the alpine Linux distribution. Alpine
+Linux does not use libc, and there are some failures. It would be good to fix
+them all.
 
 ## Random CHISEL/Verilog/Pyrope generator
 
@@ -143,10 +145,21 @@ from the leave nodes. If all the bits can be inferred given the inputs, the
 module should have no bitwidth. In that case the bitwidth can be inferred from
 outside.
 
-## LiveHD gRPC client
+## gRPC client
 
 Leverage the gRPC client in liveHD to allow the submission of work to remote servers.
 
 Once we can submit gRPC from inside LiveHD, we should have to re-structure the
 pass API to have a gRPC call for each of the main steps.
 
+## LNAST Opt
+
+In LiveHD, LGraph has the cprop pass that performs constant folding, copy
+propagation, strength reduction... and many other optimizations.
+
+
+It may be useful to have a copy propagation, constant folding, and dead code
+elimination in LNAST. There are several reasons:
+
+* Doing code simplification early (LNAST is the earliest) reduces workload/steps in successive passes.
+* The simulation saves checkpoints, a LNAST Opt without dead code elimination would be useful to create the intermediate values for debugging.
