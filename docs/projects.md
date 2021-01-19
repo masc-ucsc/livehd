@@ -1020,3 +1020,19 @@ Leverage the gRPC client in liveHD to allow the submission of work to remote ser
 Once we can submit gRPC from inside LiveHD, we should have to re-structure the
 pass API to have a gRPC call for each of the main steps.
 
+
+## LNAST Opt
+
+In LiveHD, LGraph has the cprop pass that performs constant folding, copy
+propagation, strength reduction... and many other optimizations.
+
+
+It may be useful to have a copy propagation, constant folding, and dead code
+elimination in LNAST. There are several reasons:
+
+* Doing code simplification early (LNAST is the earliest) reduces workload/steps in successive passes.
+* The simulation saves checkpoints, a LNAST Opt without dead code elimination would be useful to create the intermediate values for debugging.
+
+
+
+
