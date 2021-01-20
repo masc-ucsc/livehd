@@ -90,10 +90,14 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
   //std::cout<<'check\n';
   fmt::print("\nlnast time\n");
   int count=0;
-  
-  
+  int last_flag=0;
+  int last_op=0;
   for (auto it = verilogList.crbegin(); it != verilogList.crend(); ++it){
-      if (operandList.size()==0||operandList.size()==1) break;
+      if (operandList.size()==0) break;
+      else if (operandList.size()==1){
+        last_op=1;
+        break;
+      }
       fmt::print("check:{} ",operandList.size());
       count++;
       auto node_not   = Lnast_node::create_ref (lnast->add_string("__not"+std::to_string(count)));
@@ -105,7 +109,7 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
         auto node_op1    = Lnast_node::create_ref (lnast->add_string(operandList.back()));
         
         auto node_and   = Lnast_node::create_ref (lnast->add_string("__and"+std::to_string(count)));
-        // tmpList.emplace(tmpList.front(),("__and"+std::to_string(count))); //for connection the node refs
+        tmpList.insert(tmpList.begin(),("__and"+std::to_string(count))); //for connection the node refs
         
         auto idx_op3= lnast->add_child(idx_and, node_and);
         lnast->add_child(idx_and, node_op1);
@@ -134,9 +138,7 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
         fmt::print("NOT \n");
         auto idx_not = lnast->add_child(idx_stmts, Lnast_node::create_not ("NOT"));
         auto node_op1    = Lnast_node::create_ref (lnast->add_string(operandList.back()));
-        
-        //check as to why emplace doesnt work
-        // tmpList.emplace(tmpList.front(),"__not"+std::to_string(count)); //for connection the node refs
+        tmpList.insert(tmpList.begin(),"__not"+std::to_string(count)); //for connection the node refs
         
         lnast->add_child(idx_not, node_not);
         lnast->add_child(idx_not, node_op1);
@@ -144,21 +146,77 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
       }
 
   }
+
   int inc=0;
+  int tmp_size=tmpList.size();
+
   for (auto it = verilogList.crbegin(); it != verilogList.crend(); ++it){
     if (inc<count){
       inc++;
     }
     else{
+      inc++;
+      auto node_and   = Lnast_node::create_ref (lnast->add_string("__and"+std::to_string(inc)));
+      auto node_or   = Lnast_node::create_ref (lnast->add_string("__or"+std::to_string(inc)));
+  fmt::print("tmp list check: \n");
+  for (auto it = tmpList.cbegin(); it != tmpList.cend(); ++it)
+        std::cout << " " << *it;
       if(*it=="AND"){
-        fmt::print("verilog check:{} \n",*it);
+        tmpList.insert(tmpList.begin(),"__and"+std::to_string(inc)); //for connection the node refs
         auto idx_and = lnast->add_child(idx_stmts, Lnast_node::create_and ("AND"));
-        // auto node_not   = Lnast_node::create_ref (lnast->add_string(tmpList.back()));
-        auto node_tmp   = Lnast_node::create_ref (tmpList.back());
-        tmpList.pop_back();
-        lnast->add_child(idx_and, node_tmp);
+        lnast->add_child(idx_and, node_and);
+        if (last_flag!=1){
+          auto node_tmp   = Lnast_node::create_ref (lnast->add_string(tmpList.back()));
+          tmpList.pop_back();
+          lnast->add_child(idx_and, node_tmp);
+          tmp_size--;
+          if (tmp_size==0){
+            last_flag=1;
+          }
+          else{
+            auto node_tmp1   = Lnast_node::create_ref (lnast->add_string(tmpList.back()));
+            tmpList.pop_back();
+            lnast->add_child(idx_and, node_tmp1);
+            tmp_size--;
+          }
+        }
+        if (last_op && last_flag){
+          last_op=0;
+          last_flag=0;
+          tmp_size=tmpList.size();
+          auto node_op1    = Lnast_node::create_ref (lnast->add_string(operandList.back()));
+          lnast->add_child(idx_and, node_op1);
+          operandList.pop_back();
+        }
       }
-
+      if(*it=="OR"){
+        tmpList.insert(tmpList.begin(),"__or"+std::to_string(inc)); //for connection the node refs
+        auto idx_or = lnast->add_child(idx_stmts, Lnast_node::create_and ("OR"));
+        lnast->add_child(idx_or, node_or);
+        if (last_flag!=1){
+          auto node_tmp   = Lnast_node::create_ref (lnast->add_string(tmpList.back()));
+          tmpList.pop_back();
+          lnast->add_child(idx_or, node_tmp);
+          tmp_size--;
+          if (tmp_size==0){
+            last_flag=1;
+          }
+          else{
+            auto node_tmp1   = Lnast_node::create_ref (lnast->add_string(tmpList.back()));
+            tmpList.pop_back();
+            lnast->add_child(idx_or, node_tmp1);
+            tmp_size--;
+          }
+        }
+        if (last_op && last_flag){
+          last_op=0;
+          last_flag=0;
+          tmp_size=tmpList.size();
+          auto node_op1    = Lnast_node::create_ref (lnast->add_string(operandList.back()));
+          lnast->add_child(idx_or, node_op1);
+          operandList.pop_back();
+        }
+      }
     }
   }
 
