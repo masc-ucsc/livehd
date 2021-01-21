@@ -15,9 +15,6 @@ TODOs:
 0. Verification
    - check for insane / unrealistic wirelength metrics
 1. Analysis
-   - total area, number of components, 
-   - HPWL
-   - Regularity (equation in HiReg paper)
 2. Optimization
    - use HPWL as benchmark?
    - easy: swap positions of leaves of the same type (within a hierarchy), see if HPWL gets better

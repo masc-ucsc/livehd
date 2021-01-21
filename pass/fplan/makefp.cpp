@@ -82,5 +82,5 @@ void Pass_fplan_makefp::pass(Eprp_var& var) {
 
   Pass_fplan_makefp p(var);
 
-  fmt::print("floorplan generated ({} ms).\n\n", whole_t.time());
+  fmt::print("done ({} ms).\n\n", whole_t.time());
 }

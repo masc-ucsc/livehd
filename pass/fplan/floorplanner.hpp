@@ -23,7 +23,7 @@ public:
 
   // write the floorplan back to LiveHD for analysis and future floorplans
   void write_lhd();
-
+	
   virtual ~Lhd_floorplanner() {
     for (auto& pair : layouts) {
       geogLayout* l = pair.second.release();

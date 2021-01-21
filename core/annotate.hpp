@@ -26,7 +26,7 @@ struct Ann_name {
   static constexpr char file_loc[]      = "file_loc";
   static constexpr char tree_pos[]      = "tree_pos";
   static constexpr char color[]         = "color";
-  static constexpr char hier_color[]         = "hier_color";
+  static constexpr char hier_color[]    = "hier_color";
 };
 
 using Ann_node_pin_offset = Attribute<Ann_name::offset, Node_pin, mmap_lib::map<Node_pin::Compact_class_driver, Bits_t> >;
