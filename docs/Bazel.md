@@ -1,4 +1,6 @@
 
+# Bazel
+
 Bazel is a relatively new build system open sourced by google. The main difference
 with traditional Makefiles is that it checks to make sure that dependences are not
 lost and the builds are reproducible and hermetic. This document explains how
@@ -8,6 +10,7 @@ Build targets are referred to using the syntax `//<relative path to BUILD file>:
 `//` is the path of the root livehd directory.
 
 To build the LiveHD shell and supporting libraries, the target would be `//main:all`.
+To build every target in LiveHD (helpful for checking if changes cause compilation failures), the target would be `//:...`.  For more details on target syntax, see [this](https://docs.bazel.build/versions/master/guide.html#target-patterns) page.
 
 ## List bazel targets starting from top directory
 ```
