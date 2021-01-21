@@ -1,4 +1,7 @@
 #  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
+load("//:copt_default.bzl", "COPTS")
+
 cc_library(
     name = "elab",
     srcs = glob(
@@ -9,6 +12,7 @@ cc_library(
     includes = ["."],
     linkopts = ["-lpthread"],
     visibility = ["//visibility:public"],
+    copts = COPTS,
     deps = [
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
@@ -95,6 +99,7 @@ cc_test(
 cc_binary(
     name = "elab_pyrope_test",
     srcs = ["elab_pyrope_test.cpp"],
+    copts = COPTS,
     args = ["$(location :pyrope_test)"],
     deps = [
         ":elab",

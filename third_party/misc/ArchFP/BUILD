@@ -8,7 +8,8 @@ cc_library(
     hdrs = glob(["*.hpp"]),
     includes = ["."],
     visibility = ["//visibility:public"],
-    copts = ["-O3", "-Wno-error"],
+    # turning on all warnings because ArchFP has been modified somewhat
+    copts = ["-O3", "-Wall", "-Wextra"],
     deps = [
         "//core:core",
         ],

@@ -1,9 +1,13 @@
 #  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
+load("//:copt_default.bzl", "COPTS")
+
 cc_library(
     name = "headers",
     hdrs = glob(["include/*.hpp"]),
     visibility = ["//visibility:public"],
     includes = ["include"],
+    copts = COPTS,
     deps = [
         "@iassert//:iassert",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -14,6 +18,7 @@ cc_library(
     name = "mmap_lib_test_lib",
     hdrs = glob(["tests/*.hpp"]),
     visibility = ["//visibility:public"],
+    copts = COPTS,
     deps = [
         ":headers",
     ],

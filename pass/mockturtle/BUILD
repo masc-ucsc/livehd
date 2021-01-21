@@ -1,5 +1,7 @@
 #  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+load("//:copt_default.bzl", "COPTS")
+
 cc_library(
     name = "pass_mockturtle",
     srcs = glob(["pass_mockturtle.cpp"]),
@@ -7,6 +9,7 @@ cc_library(
     visibility = ["//visibility:public"],
     includes = ["."],
     alwayslink=True,
+    copts = COPTS,
     deps = [
         "//pass/common:pass",
         "@mockturtle//:mockturtle",

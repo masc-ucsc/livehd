@@ -36,7 +36,8 @@
 
 using namespace slang;
 
-static constexpr auto noteColor = fmt::terminal_color::bright_black;
+// commented because it's unused right now - ok to uncomment if used
+//static constexpr auto noteColor = fmt::terminal_color::bright_black;
 static constexpr auto warningColor = fmt::terminal_color::bright_yellow;
 static constexpr auto errorColor = fmt::terminal_color::bright_red;
 static constexpr auto highlightColor = fmt::terminal_color::bright_green;

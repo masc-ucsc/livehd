@@ -1,5 +1,7 @@
 #  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+load("//:copt_default.bzl", "COPTS")
+
 cc_binary(
     name = "lgshell",
     srcs = glob(["*.cpp"],exclude=["*test*.cpp"])
@@ -47,6 +49,7 @@ cc_binary(
         "//inou/yosys:inou_yosys_scripts",
     ],
     visibility = ["//visibility:public"],
+    copts = COPTS,
     #linkopts = ["-static"],
     #linkstatic=True,
 )
@@ -95,6 +98,7 @@ cc_library(
     name = "tmt",
     srcs = ["tmt_test.cpp"],
     hdrs = ["tmt_test.hpp"],
+    copts = COPTS,
 )
 
 cc_test(
@@ -108,6 +112,7 @@ cc_test(
         ":lgshell",
     ],
     linkopts = ["-lutil"],
+    copts = COPTS,
     local = 1, # Weird fork error due to forkpty otherwise
 )
 

@@ -1,5 +1,7 @@
 #  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+load("//:copt_default.bzl", "COPTS")
+
 cc_library(
     name = "inou_pyrope",
     srcs = glob(["*.cpp"],exclude=["*test*.cpp"]),
@@ -7,6 +9,7 @@ cc_library(
     visibility = ["//visibility:public"],
     includes = ["."],
     alwayslink=True,
+    copts = COPTS,
     deps = [
         "//pass/common:pass",
     ],
@@ -52,6 +55,7 @@ sh_test(
 cc_binary(
     name = "prp_test",
     srcs = ["prp_test.cpp"],
+    copts = COPTS,
     deps = [
         "@gtest//:gtest_main",
         ":inou_pyrope",
@@ -61,6 +65,7 @@ cc_binary(
 cc_binary(
     name = "ast_test",
     srcs = ["ast_test.cpp"],
+    copts = COPTS,
     deps = [
         "@gtest//:gtest_main",
         ":inou_pyrope",
@@ -70,6 +75,7 @@ cc_binary(
 cc_binary(
     name = "prp_lnast_test",
     srcs = ["prp_lnast_test.cpp"],
+    copts = COPTS,
     deps = [
         "@gtest//:gtest_main",
         ":inou_pyrope",
