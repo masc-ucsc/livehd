@@ -206,6 +206,7 @@ new_git_repository(
     build_file = "BUILD.gtest",
     commit = "adeef192947fbc0f68fa14a6c494c8df32177508", # August 15, 2020 "37f322783175a66c11785d17fc153477b0777753", # October 24, 2019
     remote = "https://github.com/google/googletest",
+    shallow_since = "1597389384 -0400",
 )
 new_git_repository(
     name = "verilator",
