@@ -51,7 +51,7 @@ cc_binary(
     visibility = ["//visibility:public"],
     copts = COPTS,
     #linkopts = ["-static"],
-    #linkstatic=True,
+    linkstatic=False,
 )
 
 sh_test(
