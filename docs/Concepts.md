@@ -44,6 +44,9 @@ options.
   traversal. The only type of sub-graph exposed like in single graph traversal
   are black-box sub-graphs because there is no implementation.
 
+  Explicit hierarchy information can be obtained through the LGraph `ref_htree()` method.  The obtained hierarchy can be considered global by passing the top level module to the required pass in `lgshell`:  
+  `livehd> lgraph.open name:<top level module> |> a.hier.pass`
+
 * **Class Attribute**: A class attribute is a value associated with pin, node,
   or edge. The same class attribute value is shared across all the graph
   instances.
