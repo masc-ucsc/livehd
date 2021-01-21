@@ -22,14 +22,20 @@ void Graphviz::populate_lg_handle_xedge(const Node &node, const XEdge &out, std:
     sp_pid = graphviz_legalize_name(std::to_string(out.sink.get_pid()));
   }
 
-  auto dn_name = graphviz_legalize_name(out.driver.get_node().debug_name());
+  std::string dn_name;
   if (out.driver.is_graph_io()) {
-    dn_name = graphviz_legalize_name(out.driver.get_name());
+    dn_name = graphviz_legalize_name(out.driver.get_pin_name());
+  }else{
+    dn_name = graphviz_legalize_name(out.driver.get_node().debug_name());
   }
-  auto sn_name = graphviz_legalize_name(out.sink.get_node().debug_name());
+
+  std::string sn_name;
   if (out.sink.is_graph_io()) {
-    sn_name = graphviz_legalize_name(out.sink.get_name());
+    sn_name = graphviz_legalize_name(out.sink.get_pin_name());
+  }else{
+    sn_name = graphviz_legalize_name(out.sink.get_node().debug_name());
   }
+
   auto dbits   = out.driver.get_bits();
   auto dp_name = graphviz_legalize_name(out.driver.has_name() ? out.driver.get_name() : "");
 

@@ -43,6 +43,15 @@ cc_test(
     )
 
 cc_test(
+    name = "ast_test2",
+    srcs = ["tests/ast_test2.cpp"],
+    deps = [
+        "@gtest//:gtest_main",
+        ":elab",
+        ],
+    )
+
+cc_test(
     name = "elab_scanner_test",
     srcs = ["tests/elab_scanner_test.cpp"],
     args = ["$(location :pyrope_test)"],
@@ -75,36 +84,10 @@ cc_test(
         ],
     )
 
-# cc_test(
-#     name = "lnast_parser_unit_test",
-#     srcs = ["tests/lnast_parser_unit_test.cpp"],
-#     data = ["//inou/cfg:cfg_pts"],
-#     tags = ["fixme"],
-#     deps = [
-#         ":elab",
-#         "@gtest//:gtest_main",
-#         ],
-#     )
-
-# cc_binary(
-#     name = "lnast_parser_test",
-#     srcs = ["tests/lnast_parser_test.cpp"],
-#     data = ["//inou/cfg:cfg_pts"],
-#     deps = [
-#         ":elab",
-#         "@gtest//:gtest_main",
-#         ],
-#     )
-
-cc_binary(
-    name = "elab_pyrope_test",
-    srcs = ["elab_pyrope_test.cpp"],
-    copts = COPTS,
-    args = ["$(location :pyrope_test)"],
+cc_test(
+    name = "elab_xlang_test",
+    srcs = ["tests/elab_xlang_test.cpp"],
     deps = [
         ":elab",
-        ],
-    data = [
-        ":pyrope_test",
         ],
     )

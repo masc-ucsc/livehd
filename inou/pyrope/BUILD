@@ -15,7 +15,6 @@ cc_library(
     ],
 )
 
-
 filegroup(
     name = "pyrope_tests",
     srcs = glob([
@@ -23,7 +22,6 @@ filegroup(
     ]),
     visibility = ["//visibility:public"],
 )
-
 
 sh_test(
     name = "pyrope_test.sh",
@@ -36,35 +34,9 @@ sh_test(
         ],
 )
 
-
-# sh_test(
-#     name = "lnast_prp_test.sh",
-#     srcs = ["tests/lnast_prp_test.sh"],
-#     # tags = ["manual"],
-#     # tags = ["fixme"],
-#     data = [
-#         "//main:lgshell",
-#         ":pyrope_tests"
-#         ],
-#     deps = [
-#         "//inou/yosys:scripts",
-#     ]
-# )
-
-
 cc_binary(
     name = "prp_test",
-    srcs = ["prp_test.cpp"],
-    copts = COPTS,
-    deps = [
-        "@gtest//:gtest_main",
-        ":inou_pyrope",
-    ],
-)
-
-cc_binary(
-    name = "ast_test",
-    srcs = ["ast_test.cpp"],
+    srcs = ["tests/prp_test.cpp"],
     copts = COPTS,
     deps = [
         "@gtest//:gtest_main",
@@ -74,7 +46,7 @@ cc_binary(
 
 cc_binary(
     name = "prp_lnast_test",
-    srcs = ["prp_lnast_test.cpp"],
+    srcs = ["tests/prp_lnast_test.cpp"],
     copts = COPTS,
     deps = [
         "@gtest//:gtest_main",
@@ -84,7 +56,7 @@ cc_binary(
 
 cc_test(
     name = "prp_unit_test",
-    srcs = ["prp_unit_test.cpp"],
+    srcs = ["tests/prp_unit_test.cpp"],
     deps = [
         "@gtest//:gtest_main",
         ":inou_pyrope",

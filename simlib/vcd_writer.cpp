@@ -16,7 +16,7 @@ namespace vcd {
 // -----------------------------
 struct VCDHeader {
   static const unsigned    kws = 4;
-  static const std::string kw_names[kws];
+  static const std::string kwnames[kws];
 
   TimeScale     timescale_quan;
   TimeScaleUnit timescale_unit;
@@ -25,9 +25,9 @@ struct VCDHeader {
   VCDHeader()                  = delete;
   VCDHeader(VCDHeader &&)      = default;
   VCDHeader(const VCDHeader &) = delete;
-  VCDHeader(TimeScale timescale_quan, TimeScaleUnit timescale_unit, const std::string &date, const std::string &comment,
+  VCDHeader(TimeScale _timescale_quan, TimeScaleUnit _timescale_unit, const std::string &date, const std::string &comment,
             const std::string &version)
-      : timescale_quan{timescale_quan}, timescale_unit{timescale_unit}, kw_values{timescale(), date, comment, version} {}
+      : timescale_quan{_timescale_quan}, timescale_unit{_timescale_unit}, kw_values{timescale(), date, comment, version} {}
 
   std::string timescale() const {
     const std::string TIMESCALE_UNITS[] = {"s", "ms", "us", "ns", "ps", "fs"};
@@ -42,7 +42,7 @@ HeadPtr makeVCDHeader(TimeScale timescale_quan, TimeScaleUnit timescale_unit, co
 }
 
 // -----------------------------
-const std::string VCDHeader::kw_names[VCDHeader::kws] = {"$timescale", "$date", "$comment", "$version"};
+const std::string VCDHeader::kwnames[VCDHeader::kws] = {"$timescale", "$date", "$comment", "$version"};
 
 // -----------------------------
 void VCDHeaderDeleter::operator()(VCDHeader *p) { delete p; }
@@ -53,7 +53,7 @@ struct VCDScope {
   ScopeType         type;
   std::list<VarPtr> vars;
 
-  VCDScope(const std::string &name, ScopeType type) : name(name), type(type) {}
+  VCDScope(const std::string &_name, ScopeType _type) : name(_name), type(_type) {}
 };
 
 // -----------------------------
@@ -69,14 +69,14 @@ class VCDVariable {
 protected:
   VCDVariable(const std::string &name, VariableType type, unsigned size, ScopePtr scope, unsigned next_var_id);
 
-  std::string  _ident;  // internal ID used in VCD output stream
-  VariableType _type;   // VCD variable type, one of `VariableTypes`
-  std::string  _name;   // human-readable name
-  unsigned     _size;   // size of variable, in bits
-  ScopePtr     _scope;  // pointer to scope string
+  std::string  name;   // human-readable name
+  VariableType type;   // VCD variable type, one of `VariableTypes`
+  unsigned     size;   // size of variable, in bits
+  ScopePtr     scope;  // pointer to scope string
+  std::string  ident;  // internal ID used in VCD output stream
 
   //! string representation of variable types
-  static const std::string VAR_TYPES[];
+  static const std::string var_types[];
 
 public:
   //! string representation of variable declartion in VCD
@@ -90,96 +90,97 @@ public:
 };
 
 // -----------------------------
-const std::string VCDVariable::VAR_TYPES[] = {"wire",   "reg",   "string",  "parameter", "integer", "real",   "realtime",
+const std::string VCDVariable::var_types[] = {"wire",   "reg",   "string",  "parameter", "integer", "real",   "realtime",
                                               "time",   "event", "supply0", "supply1",   "tri",     "triand", "trior",
                                               "trireg", "tri0",  "tri1",    "wand",      "wor"};
 
 // -----------------------------
 size_t VarPtrHash::operator()(const VarPtr &p) const {
   std::hash<std::string> h;
-  return (h(p->_name) ^ (h(p->_scope->name) << 1));
+  return (h(p->name) ^ (h(p->scope->name) << 1));
 }
 bool VarPtrEqual::operator()(const VarPtr &a, const VarPtr &b) const {
-  return (a->_name == b->_name) && (a->_scope->name == b->_scope->name);
+  return (a->name == b->name) && (a->scope->name == b->scope->name);
 }
 
 // -----------------------------
 // One-bit VCD scalar is a 4-state variable and thus may have one of
 // `VCDValues`. An empty *value* is the same as `VCDValues::UNDEF`
 struct VCDScalarVariable : public VCDVariable {
-  VCDScalarVariable(const std::string &name, VariableType type, unsigned size, ScopePtr scope, unsigned next_var_id)
-      : VCDVariable(name, type, size, scope, next_var_id) {}
+  VCDScalarVariable(const std::string &_name, VariableType _type, unsigned _size, ScopePtr _scope, unsigned next_var_id)
+      : VCDVariable(_name, _type, _size, _scope, next_var_id) {}
 };
 
 // -----------------------------
 // String variable as known by GTKWave. Any `string` (character-chain)
 // can be displayed as a change.This type is only supported by GTKWave.
 struct VCDStringVariable : public VCDVariable {
-  VCDStringVariable(const std::string &name, VariableType type, unsigned size, ScopePtr scope, unsigned next_var_id)
-      : VCDVariable(name, type, size, scope, next_var_id) {}
+  VCDStringVariable(const std::string &_name, VariableType _type, unsigned _size, ScopePtr _scope, unsigned next_var_id)
+      : VCDVariable(_name, _type, _size, _scope, next_var_id) {}
 };
 
 // -----------------------------
 // Real (IEEE-754 double-precision floating point) variable. Values must
 // be numeric and can't be `VCDValues::UNDEF` or `VCDValues::HIGHV` states
 struct VCDRealVariable : public VCDVariable {
-  VCDRealVariable(const std::string &name, VariableType type, unsigned size, ScopePtr scope, unsigned next_var_id)
-      : VCDVariable(name, type, size, scope, next_var_id) {}
+  VCDRealVariable(const std::string &_name, VariableType _type, unsigned _size, ScopePtr _scope, unsigned next_var_id)
+      : VCDVariable(_name, _type, _size, _scope, next_var_id) {}
 };
 
 // -----------------------------
 // Bit vector variable type for the various non-scalar and non-real
 // variable types, including integer, register, wire, etc.
 struct VCDVectorVariable : public VCDVariable {
-  VCDVectorVariable(const std::string &name, VariableType type, unsigned size, ScopePtr scope, unsigned next_var_id)
-      : VCDVariable(name, type, size, scope, next_var_id) {}
+  VCDVectorVariable(const std::string &_name, VariableType _type, unsigned _size, ScopePtr _scope, unsigned next_var_id)
+      : VCDVariable(_name, _type, _size, _scope, next_var_id) {}
 };
 
 // -----------------------------
 struct VarSearch {
-  VCDScope          vcd_scope = {"", ScopeType::module};
-  ScopePtr          ptr_scope = {&vcd_scope, [](VCDScope *) {}};
-  VCDScalarVariable vcd_var   = {"", VCDWriter::var_def_type, 0, ptr_scope, 0};
+  VCDScope          vcdscope = {"", ScopeType::module};
+  ScopePtr          ptrscope = {&vcdscope, [](VCDScope *) {}};
+  VCDScalarVariable vcd_var   = {"", VCDWriter::var_def_type, 0, ptrscope, 0};
   VarPtr            ptr_var   = {&vcd_var, [](VCDScalarVariable *) {}};
 
   VarSearch() = delete;
-  VarSearch(ScopeType scope_def_type) : vcd_scope("", scope_def_type) {}
+  VarSearch(ScopeType _scope_def_type) : vcdscope("", _scope_def_type) {}
 };
 
 // -----------------------------
-VCDWriter::VCDWriter(const std::string &filename, HeadPtr &&header, unsigned init_timestamp)
-    : _filename(filename)
-    , _timestamp(init_timestamp)
-    , _header((header) ? std::move(header) : makeVCDHeader())
-    , _registering(true)
-    , _closed(false)
-    , _dumping(true)
-    , _next_var_id(0)
-    , _scope_sep(".")
-    , _scope_def_type(ScopeType::module)
-    , _search(std::make_shared<VarSearch>(_scope_def_type)) {
-  if (!_header) throw VCDTypeException{"Invalid pointer to header"};
+VCDWriter::VCDWriter(const std::string &_filename, HeadPtr &&_header, unsigned init_timestamp)
+    : timestamp(init_timestamp)
+    , header((_header) ? std::move(_header) : makeVCDHeader())
+    , filename(_filename)
+    , scope_sep(".")
+    , scope_def_type(ScopeType::module)
+    , closed(false)
+    , dumping(true)
+    , registering(true)
+    , next_var_id(0)
+    , search(std::make_shared<VarSearch>(ScopeType::module)) {
 
-  _ofile = fopen(_filename.c_str(), "w");
-  if (!_ofile) throw VCDTypeException{utils::format("Can't open file '%s' for writing", _filename.c_str())};
+  if (!header) throw VCDTypeException{"Invalid pointer to header"};
+
+  ofile = fopen(filename.c_str(), "w");
+  if (!ofile) throw VCDTypeException{utils::format("Can't open file '%s' for writing", filename.c_str())};
 }
 
 // -----------------------------
 VarPtr VCDWriter::register_var(const std::string &scope, const std::string &name, VariableType type, unsigned size,
-                               const VarValue &init, bool duplicate_names_check) {
+                               const VarValue &init, bool duplicatenames_check) {
   VarPtr pvar;
-  if (_closed) throw VCDPhaseException{"Cannot register after close()"};
-  if (!_registering) throw VCDPhaseException{utils::format("Cannot register new var '%s', registering finished", name.c_str())};
+  if (closed) throw VCDPhaseException{"Cannot register after close()"};
+  if (!registering) throw VCDPhaseException{utils::format("Cannot register new var '%s', registering finished", name.c_str())};
 
   if (scope.size() == 0 || name.size() == 0)
     throw VCDTypeException{utils::format("Empty scope '%s' or name '%s'", scope.c_str(), name.c_str())};
 
-  _search->vcd_scope.name = scope;  //"a" goes to vcd_scope.name
-  auto cur_scope          = _scopes.find(_search->ptr_scope);
-  if (cur_scope == _scopes.end()) {
-    auto res = _scopes.insert(std::make_shared<VCDScope>(scope, _scope_def_type));
+  search->vcdscope.name = scope;  //"a" goes to vcdscope.name
+  auto curscope          = scopes.find(search->ptrscope);
+  if (curscope == scopes.end()) {
+    auto res = scopes.insert(std::make_shared<VCDScope>(scope, scope_def_type));
     if (!res.second) throw VCDPhaseException{utils::format("Cannot insert scope '%s'", scope.c_str())};
-    cur_scope = res.first;  // first is the shared ptr of type VCD scope and second is a bool
+    curscope = res.first;  // first is the shared ptr of type VCD scope and second is a bool
   }
 
   auto sz = [&size](unsigned def) { return (size ? size : def); };
@@ -189,94 +190,94 @@ VarPtr VCDWriter::register_var(const std::string &scope, const std::string &name
     case VariableType::integer:
     case VariableType::realtime:
       if (sz(64) == 1)
-        pvar = VarPtr(new VCDScalarVariable(name, type, 1, *cur_scope, _next_var_id));
+        pvar = VarPtr(new VCDScalarVariable(name, type, 1, *curscope, next_var_id));
       else
-        pvar = VarPtr(new VCDVectorVariable(name, type, sz(64), *cur_scope, _next_var_id));
+        pvar = VarPtr(new VCDVectorVariable(name, type, sz(64), *curscope, next_var_id));
       if (init_value.size() == 1 && init_value[0] == VCDValues::ZERO && size > init_value.size())
         init_value = "b" + std::string(size, VCDValues::ZERO);
       break;
 
     case VariableType::real:
-      pvar = VarPtr(new VCDRealVariable(name, type, sz(64), *cur_scope, _next_var_id));
+      pvar = VarPtr(new VCDRealVariable(name, type, sz(64), *curscope, next_var_id));
       if (init_value.size() == 1 && init_value[0] == VCDValues::ZERO) init_value = "0.0";
       break;
 
-    case VariableType::string: pvar = VarPtr(new VCDStringVariable(name, type, sz(1), *cur_scope, _next_var_id)); break;
-    case VariableType::event: pvar = VarPtr(new VCDScalarVariable(name, type, 1, *cur_scope, _next_var_id)); break;
+    case VariableType::string: pvar = VarPtr(new VCDStringVariable(name, type, sz(1), *curscope, next_var_id)); break;
+    case VariableType::event: pvar = VarPtr(new VCDScalarVariable(name, type, 1, *curscope, next_var_id)); break;
 
     case VariableType::wire:
       if (!size)
         throw VCDTypeException{
-            utils::format("Must supply size for type '%s' of var '%s'", VCDVariable::VAR_TYPES[(int)type].c_str(), name.c_str())};
+            utils::format("Must supply size for type '%s' of var '%s'", VCDVariable::var_types[(int)type].c_str(), name.c_str())};
       if (sz(64) == 1)
-        pvar = VarPtr(new VCDScalarVariable(name, type, 1, *cur_scope, _next_var_id));
+        pvar = VarPtr(new VCDScalarVariable(name, type, 1, *curscope, next_var_id));
       else
-        pvar = VarPtr(new VCDVectorVariable(name, type, size, *cur_scope, _next_var_id));
+        pvar = VarPtr(new VCDVectorVariable(name, type, size, *curscope, next_var_id));
       if (init_value.size() == 1 && init_value[0] == VCDValues::ZERO && size > init_value.size())
         init_value = "b" + std::string(size, VCDValues::ZERO);
       break;
     default:
       if (!size)
         throw VCDTypeException{
-            utils::format("Must supply size for type '%s' of var '%s'", VCDVariable::VAR_TYPES[(int)type].c_str(), name.c_str())};
-      pvar = VarPtr(new VCDVectorVariable(name, type, size, *cur_scope, _next_var_id));
+            utils::format("Must supply size for type '%s' of var '%s'", VCDVariable::var_types[(int)type].c_str(), name.c_str())};
+      pvar = VarPtr(new VCDVectorVariable(name, type, size, *curscope, next_var_id));
       if (init_value.size() == 1 && (init_value[0] == VCDValues::UNDEF || init_value[0] == VCDValues::ZERO) &&
           size > init_value.size())
         init_value = "b" + std::string(size, VCDValues::ZERO);
       break;
   }
-  if (type != VariableType::event) _change(pvar, init_value, true);
+  if (type != VariableType::event) change(pvar, init_value, true);
 
-  if (duplicate_names_check && _vars.find(pvar) != _vars.end())
+  if (duplicatenames_check && vars.find(pvar) != vars.end())
     throw VCDTypeException{utils::format("Duplicate var '%s' in scope '%s'", name.c_str(), scope.c_str())};
 
-  _vars.insert(pvar);
-  (**cur_scope).vars.push_back(pvar);
+  vars.insert(pvar);
+  (**curscope).vars.push_back(pvar);
   // Only alter state after change_func() succeeds
-  _next_var_id++;
+  next_var_id++;
   return pvar;
 }
 
 
 // -----------------------------
 VarPtr VCDWriter::register_passed_var(const std::string &scope, const std::string &name, VariableType type, unsigned size,
-                               const VarValue &init, bool duplicate_names_check) {
+                               const VarValue &init, bool duplicatenames_check) {
 
-  const std::string parent_name = scope.substr(0,scope.find_last_of(_scope_sep));
+  const std::string parentname = scope.substr(0,scope.find_last_of(scope_sep));
   /*for unique ident::
    *if (scope has scope_sep)
    * then {extract parent name}
    */
- unsigned int _unique_var_id;
+  unsigned int unique_var_id;
   VarPtr pvar;
-  if (_closed) throw VCDPhaseException{"Cannot register after close()"};
-  if (!_registering) throw VCDPhaseException{utils::format("Cannot register new var '%s', registering finished", name.c_str())};
+  if (closed) throw VCDPhaseException{"Cannot register after close()"};
+  if (!registering) throw VCDPhaseException{utils::format("Cannot register new var '%s', registering finished", name.c_str())};
 
   if (scope.size() == 0 || name.size() == 0)
     throw VCDTypeException{utils::format("Empty scope '%s' or name '%s'", scope.c_str(), name.c_str())};
 
-  _search->vcd_scope.name = scope;  //"a" goes to vcd_scope.name
-  auto cur_scope          = _scopes.find(_search->ptr_scope);
-  if (cur_scope == _scopes.end()) {
-    auto res = _scopes.insert(std::make_shared<VCDScope>(scope, _scope_def_type));
+  search->vcdscope.name = scope;  //"a" goes to vcdscope.name
+  auto curscope          = scopes.find(search->ptrscope);
+  if (curscope == scopes.end()) {
+    auto res = scopes.insert(std::make_shared<VCDScope>(scope, scope_def_type));
     if (!res.second) throw VCDPhaseException{utils::format("Cannot insert scope '%s'", scope.c_str())};
-    cur_scope = res.first;  // first is the shared ptr of type VCD scope and second is a bool
+    curscope = res.first;  // first is the shared ptr of type VCD scope and second is a bool
   }
 
   auto sz = [&size](unsigned def) { return (size ? size : def); };
-  auto parent_scope = _scopes.begin();
-   for(auto e =_scopes.begin(); e!=_scopes.end(); e++) {
+  auto parentscope = scopes.begin();
+   for(auto e =scopes.begin(); e!=scopes.end(); e++) {
 
-       if ((*e)->name == parent_name) {
-           parent_scope=e;
+       if ((*e)->name == parentname) {
+           parentscope=e;
            break;
        }
    }
 
-   for (auto var_iter = (**parent_scope).vars.begin(); var_iter!=(**parent_scope).vars.end(); var_iter++) {
+   for (auto var_iter = (**parentscope).vars.begin(); var_iter!=(**parentscope).vars.end(); var_iter++) {
        auto randm = *var_iter;
-       if(name== (*var_iter)->_name){
-           _unique_var_id =stoul((*var_iter)->_ident, 0, 16);
+       if(name== (*var_iter)->name){
+           unique_var_id =stoul((*var_iter)->ident, 0, 16);
        }
    }
   VarValue init_value(init);
@@ -284,218 +285,217 @@ VarPtr VCDWriter::register_passed_var(const std::string &scope, const std::strin
     case VariableType::integer:
     case VariableType::realtime:
       if (sz(64) == 1)
-        pvar = VarPtr(new VCDScalarVariable(name, type, 1, *cur_scope, _unique_var_id));
+        pvar = VarPtr(new VCDScalarVariable(name, type, 1, *curscope, unique_var_id));
       else
-        pvar = VarPtr(new VCDVectorVariable(name, type, sz(64), *cur_scope, _unique_var_id));
+        pvar = VarPtr(new VCDVectorVariable(name, type, sz(64), *curscope, unique_var_id));
       if (init_value.size() == 1 && init_value[0] == VCDValues::ZERO && size > init_value.size())
         init_value = "b" + std::string(size, VCDValues::ZERO);
       break;
 
     case VariableType::real:
-      pvar = VarPtr(new VCDRealVariable(name, type, sz(64), *cur_scope, _unique_var_id));
+      pvar = VarPtr(new VCDRealVariable(name, type, sz(64), *curscope, unique_var_id));
       if (init_value.size() == 1 && init_value[0] == VCDValues::ZERO) init_value = "0.0";
       break;
 
-    case VariableType::string: pvar = VarPtr(new VCDStringVariable(name, type, sz(1), *cur_scope, _unique_var_id)); break;
-    case VariableType::event: pvar = VarPtr(new VCDScalarVariable(name, type, 1, *cur_scope, _unique_var_id)); break;
+    case VariableType::string: pvar = VarPtr(new VCDStringVariable(name, type, sz(1), *curscope, unique_var_id)); break;
+    case VariableType::event: pvar = VarPtr(new VCDScalarVariable(name, type, 1, *curscope, unique_var_id)); break;
 
     case VariableType::wire:
       if (!size)
         throw VCDTypeException{
-            utils::format("Must supply size for type '%s' of var '%s'", VCDVariable::VAR_TYPES[(int)type].c_str(), name.c_str())};
+            utils::format("Must supply size for type '%s' of var '%s'", VCDVariable::var_types[(int)type].c_str(), name.c_str())};
       if (sz(64) == 1)
-        pvar = VarPtr(new VCDScalarVariable(name, type, 1, *cur_scope, _unique_var_id));
+        pvar = VarPtr(new VCDScalarVariable(name, type, 1, *curscope, unique_var_id));
       else
-        pvar = VarPtr(new VCDVectorVariable(name, type, size, *cur_scope, _unique_var_id));
+        pvar = VarPtr(new VCDVectorVariable(name, type, size, *curscope, unique_var_id));
       if (init_value.size() == 1 && init_value[0] == VCDValues::ZERO && size > init_value.size())
         init_value = "b" + std::string(size, VCDValues::ZERO);
       break;
     default:
       if (!size)
         throw VCDTypeException{
-            utils::format("Must supply size for type '%s' of var '%s'", VCDVariable::VAR_TYPES[(int)type].c_str(), name.c_str())};
-      pvar = VarPtr(new VCDVectorVariable(name, type, size, *cur_scope, _unique_var_id));
+            utils::format("Must supply size for type '%s' of var '%s'", VCDVariable::var_types[(int)type].c_str(), name.c_str())};
+      pvar = VarPtr(new VCDVectorVariable(name, type, size, *curscope, unique_var_id));
       if (init_value.size() == 1 && (init_value[0] == VCDValues::UNDEF || init_value[0] == VCDValues::ZERO) &&
           size > init_value.size())
         init_value = "b" + std::string(size, VCDValues::ZERO);
       break;
   }
-  if (type != VariableType::event) _change(pvar, init_value, true);
+  if (type != VariableType::event) change(pvar, init_value, true);
 
-  if (duplicate_names_check && _vars.find(pvar) != _vars.end())
+  if (duplicatenames_check && vars.find(pvar) != vars.end())
     throw VCDTypeException{utils::format("Duplicate var '%s' in scope '%s'", name.c_str(), scope.c_str())};
 
-  _vars.insert(pvar);
-  (**cur_scope).vars.push_back(pvar);
-  // Only alter state after change_func() succeeds
- // _next_var_id++;
+  vars.insert(pvar);
+  (**curscope).vars.push_back(pvar);
+
   return pvar;
 }
 // -----------------------------
-bool VCDWriter::_change(VarPtr var, const VarValue &value, bool reg) {
-  if (timestamp < _timestamp)
-    throw VCDPhaseException{utils::format("Out of order value change var '%s'", var->_name.c_str())};
-  else if (_closed)
+bool VCDWriter::change(VarPtr var, const VarValue &value, bool reg) {
+  if (global_timestamp < timestamp)
+    throw VCDPhaseException{utils::format("Out of order value change var '%s'", var->name.c_str())};
+  else if (closed)
     throw VCDPhaseException{"Cannot change value after close()"};
 
   if (!var) throw VCDTypeException{"Invalid VCDVariable"};
 
-  std::string change_value = (value.size() ? value : ('b' + std::string(var->_size, VCDValues::ZERO) + ' '));
+  std::string change_value = (value.size() ? value : ('b' + std::string(var->size, VCDValues::ZERO) + ' '));
   //    std::string change_value = var->change_record(value);
 
-  if (timestamp > _timestamp) {
-    if (_registering) _finalize_registration();
-    if (_dumping) fprintf(_ofile, "#%d\n", timestamp);
-    _timestamp = timestamp;
+  if (global_timestamp > timestamp) {
+    if (registering) finalize_registration();
+    if (dumping) fprintf(ofile, "#%d\n", global_timestamp);
+    timestamp = global_timestamp;
   }
 
   // if value changed
-  if (_vars_prevs.find(var) != _vars_prevs.end())  // not entered in 1st entry @ main:544 //_vars_prev is unordered_map of (varptr, str) pairs
+  if (vars_prevs.find(var) != vars_prevs.end())  // not entered in 1st entry @ main:544 //vars_prev is unordered_map of (varptr, str) pairs
   {
-    if (_vars_prevs[var] == change_value) return false;
-    _vars_prevs[var] = change_value;  // entered for #0
+    if (vars_prevs[var] == change_value) return false;
+    vars_prevs[var] = change_value;  // entered for #0
 
   } else if (!reg)
-    throw VCDTypeException{utils::format("VCDVariable '%s' do not registered", var->_name.c_str())};
+    throw VCDTypeException{utils::format("VCDVariable '%s' do not registered", var->name.c_str())};
   else
 
-    _vars_prevs.insert(std::make_pair(var, change_value));  // registering: inserted the pair for the first time
+    vars_prevs.insert(std::make_pair(var, change_value));  // registering: inserted the pair for the first time
 
   // dump it into file
-  if (_dumping && !_registering) {  // not entered in 1st entry
+  if (dumping && !registering) {  // not entered in 1st entry
 
     if (change_value.size() != 1) {
-      fprintf(_ofile, "%s %s\n", change_value.c_str(), var->_ident.c_str());
+      fprintf(ofile, "%s %s\n", change_value.c_str(), var->ident.c_str());
     } else {
-      fprintf(_ofile, "%s%s\n", change_value.c_str(), var->_ident.c_str());
+      fprintf(ofile, "%s%s\n", change_value.c_str(), var->ident.c_str());
     }
-    //            fprintf(_ofile, "%s%s\n", change_value.c_str(), var->_ident.c_str());
+    //            fprintf(ofile, "%s%s\n", change_value.c_str(), var->ident.c_str());
   }
   return true;
 }
 
 // -----------------------------
 bool VCDWriter::change(const std::string &scope, const std::string &name, const VarValue &value) {
-  return _change(var(scope, name), value, false);
+  return change(var(scope, name), value, false);
 }
 
 // -----------------------------
 VarPtr VCDWriter::var(const std::string &scope, const std::string &name) const {
   //!!! speed optimisation !!!
-  // ScopePtr pscope = std::make_shared<VCDScope>(scope, _scope_def_type);
-  // auto it_scope = _scopes.find(pscope);
-  // if (it_scope == _scopes.end())
+  // ScopePtr pscope = std::make_shared<VCDScope>(scope, scope_def_type);
+  // auto itscope = scopes.find(pscope);
+  // if (itscope == scopes.end())
   //    throw VCDPhaseException{ format("Such scope '%s' does not exist", scope.c_str()) };
-  // VarPtr pvar = std::make_shared<VCDScalarVariable>(name, VCDWriter::var_def_type, 0, *it_scope, 0);
-  // auto it_var = _vars.find(pvar);
-  _search->vcd_scope.name = scope;
-  _search->vcd_var._name  = name;
-  auto it_var             = _vars.find(_search->ptr_var);
-  if (it_var == _vars.end())
+  // VarPtr pvar = std::make_shared<VCDScalarVariable>(name, VCDWriter::var_deftype, 0, *itscope, 0);
+  // auto it_var = vars.find(pvar);
+  search->vcdscope.name = scope;
+  search->vcd_var.name  = name;
+  auto it_var             = vars.find(search->ptr_var);
+  if (it_var == vars.end())
     throw VCDPhaseException{utils::format("The var '%s' in scope '%s' does not exist", name.c_str(), scope.c_str())};
   return *it_var;
 }
 
-void VCDWriter::set_scope_type(std::string &scope, ScopeType scope_type) {
-  ScopePtr pscope = std::make_shared<VCDScope>(scope, _scope_def_type);
-  auto     it     = _scopes.find(pscope);
-  if (it == _scopes.end()) throw VCDPhaseException{utils::format("Such scope '%s' does not exist", scope.c_str())};
-  (**it).type = scope_type;
+void VCDWriter::set_scope_type(std::string &scope, ScopeType scopetype) {
+  ScopePtr pscope = std::make_shared<VCDScope>(scope, scope_def_type);
+  auto     it     = scopes.find(pscope);
+  if (it == scopes.end()) throw VCDPhaseException{utils::format("Such scope '%s' does not exist", scope.c_str())};
+  (**it).type = scopetype;
 }
 
 // -----------------------------
-void VCDWriter::_dump_off(TimeStamp timestamp) {
-  fprintf(_ofile, "#%d\n", timestamp);
-  fprintf(_ofile, "$dumpoff\n");
-  for (const auto &p : _vars_prevs) {
-    const char *ident = p.first->_ident.c_str();
+void VCDWriter::dump_off_int(TimeStamp _timestamp) {
+  fprintf(ofile, "#%d\n", _timestamp);
+  fprintf(ofile, "$dumpoff\n");
+  for (const auto &p : vars_prevs) {
+    const char *ident = p.first->ident.c_str();
     const char *value = p.second.c_str();
 
     if (value[0] == 'r') {
     }  // real variables cannot have "z" or "x" state
     else if (value[0] == 'b') {
-      fprintf(_ofile, "bx %s\n", ident);
+      fprintf(ofile, "bx %s\n", ident);
     }
     // else if (value[0] == 's')
-    //{ fprintf(_ofile, "sx %s\n", ident); }
+    //{ fprintf(ofile, "sx %s\n", ident); }
     else {
-      fprintf(_ofile, "x%s\n", ident);
+      fprintf(ofile, "x%s\n", ident);
     }
   }
-  fprintf(_ofile, "$end\n");
+  fprintf(ofile, "$end\n");
 }
 
-void VCDWriter::_dump_values(const std::string &keyword) {
-  fprintf(_ofile, (keyword + "\n").c_str());
+void VCDWriter::dump_values(const std::string &keyword) {
+  fprintf(ofile, (keyword + "\n").c_str());
   // TODO : events should be excluded
-  for (const auto &p : _vars_prevs) {
-    const char *ident = p.first->_ident.c_str();
+  for (const auto &p : vars_prevs) {
+    const char *ident = p.first->ident.c_str();
     const char *value = p.second.c_str();
     if (p.second.size() != 1) {
-      fprintf(_ofile, "%s %s\n", value, ident);
+      fprintf(ofile, "%s %s\n", value, ident);
     } else {
-      fprintf(_ofile, "%s%s\n", value,
+      fprintf(ofile, "%s%s\n", value,
               ident);  // the space gives the spacing between value and identifier in the dumped file
     }
   }
-  fprintf(_ofile, "$end\n");
+  fprintf(ofile, "$end\n");
 }
 
-void VCDWriter::_scope_declaration(const std::string &scope, size_t sub_beg, size_t sub_end) {
-  const std::string SCOPE_TYPES[] = {"begin", "fork", "function", "module", "task"};
-  auto              scope_name    = scope.substr(sub_beg, sub_end - sub_beg);
-  auto              scope_type    = SCOPE_TYPES[int(_scope_def_type)].c_str();
-  fprintf(_ofile, "$scope %s %s $end\n", scope_type, scope_name.c_str());
+void VCDWriter::scope_declaration(const std::string &scope, size_t sub_beg, size_t sub_end) {
+  const std::string SCOPEtypeS[] = {"begin", "fork", "function", "module", "task"};
+  auto              scopename    = scope.substr(sub_beg, sub_end - sub_beg);
+  auto              scopetype    = SCOPEtypeS[int(scope_def_type)].c_str();
+  fprintf(ofile, "$scope %s %s $end\n", scopetype, scopename.c_str());
 }
 
-void VCDWriter::_write_header() {
-  for (int i = 0; i < VCDHeader::kws; ++i) {
-    auto kwname  = VCDHeader::kw_names[i];
-    auto kwvalue = _header->kw_values[i];
+void VCDWriter::write_header() {
+  for (auto i = 0u; i < VCDHeader::kws; ++i) {
+    auto kwname  = VCDHeader::kwnames[i];
+    auto kwvalue = header->kw_values[i];
     if (!kwvalue.size()) continue;
     vcd::utils::replace_new_lines(kwvalue, "\n\t");
-    fprintf(_ofile, "%s %s $end\n", kwname.c_str(), kwvalue.c_str());
+    fprintf(ofile, "%s %s $end\n", kwname.c_str(), kwvalue.c_str());
   }
 
   // nested scope
   size_t      n = 0, n_prev = 0;
   std::string scope_prev = "";
-  for (auto &s : _scopes)  // sorted
+  for (auto &s : scopes)  // sorted
   {
     const std::string &scope = s->name;
     // scope print close
     if (scope_prev.size()) {
       n_prev = 0;
-      n      = scope_prev.find(_scope_sep);
+      n      = scope_prev.find(scope_sep);
       n      = (n == std::string::npos) ? scope_prev.size() : n;
       // equal prefix
       while (std::strncmp(scope.c_str(), scope_prev.c_str(), n) == 0) {
-        n_prev = n + _scope_sep.size();
-        n      = scope_prev.find(_scope_sep, n_prev);
+        n_prev = n + scope_sep.size();
+        n      = scope_prev.find(scope_sep, n_prev);
         if (n == std::string::npos) break;
       }
       // last
-      if (n_prev != (scope_prev.size() + _scope_sep.size())) fprintf(_ofile, "$upscope $end\n");
+      if (n_prev != (scope_prev.size() + scope_sep.size())) fprintf(ofile, "$upscope $end\n");
       // close
-      n = scope_prev.find(_scope_sep, n_prev);
+      n = scope_prev.find(scope_sep, n_prev);
       while (n != std::string::npos) {
-        fprintf(_ofile, "$upscope $end\n");
-        n = scope_prev.find(_scope_sep, n + _scope_sep.size());
+        fprintf(ofile, "$upscope $end\n");
+        n = scope_prev.find(scope_sep, n + scope_sep.size());
       }
     }
 
     // scope print open
-    n = scope.find(_scope_sep, n_prev);
+    n = scope.find(scope_sep, n_prev);
     while (n != std::string::npos) {
-      _scope_declaration(scope, n_prev, n);
-      n_prev = n + _scope_sep.size();
-      n      = scope.find(_scope_sep, n_prev);
+      scope_declaration(scope, n_prev, n);
+      n_prev = n + scope_sep.size();
+      n      = scope.find(scope_sep, n_prev);
     }
     // last
-    _scope_declaration(scope, n_prev);
+    scope_declaration(scope, n_prev);
 
     // dump variable declartion
-    for (const auto &var : s->vars) fprintf(_ofile, "%s\n", var->declartion().c_str());
+    for (const auto &var : s->vars) fprintf(ofile, "%s\n", var->declartion().c_str());
 
     scope_prev = scope;
   }
@@ -503,40 +503,40 @@ void VCDWriter::_write_header() {
   // scope print close (rest)
   if (scope_prev.size()) {
     // last
-    fprintf(_ofile, "$upscope $end\n");
-    n = scope_prev.find(_scope_sep);
+    fprintf(ofile, "$upscope $end\n");
+    n = scope_prev.find(scope_sep);
     while (n != std::string::npos) {
-      fprintf(_ofile, "$upscope $end\n");
-      n = scope_prev.find(_scope_sep, n + _scope_sep.size());
+      fprintf(ofile, "$upscope $end\n");
+      n = scope_prev.find(scope_sep, n + scope_sep.size());
     }
   }
 
-  fprintf(_ofile, "$enddefinitions $end\n");
+  fprintf(ofile, "$enddefinitions $end\n");
   // do not need anymore
-  _header.reset(nullptr);
+  header.reset(nullptr);
 }
 
-void VCDWriter::_finalize_registration() {
-  assert(_registering);
-  _write_header();
-  if (_vars_prevs.size()) {
-    fprintf(_ofile, "#%d\n", _timestamp);
-    _dump_values("$dumpvars");
-    if (!_dumping) _dump_off(_timestamp);
+void VCDWriter::finalize_registration() {
+  assert(registering);
+  write_header();
+  if (vars_prevs.size()) {
+    fprintf(ofile, "#%d\n", timestamp);
+    dump_values("$dumpvars");
+    if (!dumping) dump_off_int(timestamp);
   }
-  _registering = false;
+  registering = false;
 }
 
 // -----------------------------
-VCDVariable::VCDVariable(const std::string &name, VariableType type, unsigned size, ScopePtr scope, unsigned next_var_id)
-    : _name(name), _type(type), _size(size), _scope(scope) {
+VCDVariable::VCDVariable(const std::string &_name, VariableType _type, unsigned _size, ScopePtr _scope, unsigned next_var_id)
+    : name(_name), type(_type), size(_size), scope(_scope) {
   std::stringstream ss;
   ss << std::hex << next_var_id;
-  _ident = ss.str();
+  ident = ss.str();
 }
 
 std::string VCDVariable::declartion() const {
-  return utils::format("$var %s %d %s %s $end", VAR_TYPES[int(_type)].c_str(), _size, _ident.c_str(), _name.c_str());
+  return utils::format("$var %s %d %s %s $end", var_types[int(type)].c_str(), size, ident.c_str(), name.c_str());
 }
 
 // -----------------------------
@@ -560,13 +560,13 @@ VCDWriter *initialize_vcd_writer() {
 //};
 // static VCDWriter& vcd_writer_m = initialize_vcd_writer();
 void advance_to_posedge() {
-  timestamp += 5;
+  global_timestamp += 5;
 }
 void advance_to_negedge() {
-  timestamp += 3;
+  global_timestamp += 3;
 }
 void advance_to_comb() {
-  timestamp += 2;
+  global_timestamp += 2;
 }
 
 }  // namespace vcd
