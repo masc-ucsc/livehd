@@ -189,7 +189,7 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
           operandList.pop_back();
         }
       }
-      if(*it=="OR"){
+      else if(*it=="OR"){
         tmpList.insert(tmpList.begin(),"__or"+std::to_string(inc)); //for connection the node refs
         auto idx_or = lnast->add_child(idx_stmts, Lnast_node::create_and ("OR"));
         lnast->add_child(idx_or, node_or);
@@ -227,31 +227,17 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
       fmt::print("bits:{} {} =  ", var.type->getBitWidth(), var.symbol.name);
       // operandList.emplace_back(var.symbol.name);
       lnast->add_child(idx_assign, Lnast_node::create_ref(var.symbol.name)); // string_view = %out
+      auto node_tmp1   = Lnast_node::create_ref (lnast->add_string(tmpList.back()));
+      tmpList.pop_back();
+      lnast->add_child(idx_assign, node_tmp1);
+
     } 
     else {
       fmt::print("TODO. What is this");
 
     }
-      // auto idx_assign  = lnast->add_child(idx_stmts,  Lnast_node::create_dp_assign ("assign"));
-      // auto node_op3    = Lnast_node::create_ref (operandList.back());
-      // auto idx_lhs3    = lnast->add_child(idx_assign, node_op3); 
-      // operandList.pop_back();
 
-    //auto idx_lhs  = lnast->add_child(idx_assign, Lnast_node::create_ref(op1.op)); // string_view = %out
-
-    //idx = lnast->add_child(idx_stmts, Lnast_node::create_not("BitNot"));
-      //auto idx_op   = lnast->add_child(idx, Lnast_node::create_ref(op2.symbol.name)); 
-      //char operand=op2.symbol.name;
-
-
-        // auto node_op1    = Lnast_node::create_ref       (operand1);
-        // auto node_op2    = Lnast_node::create_const     (operand2);
-        // auto idx_plus    = lnast->add_child(idx_stmts, node_plus);
-        // auto idx_op1     = lnast->add_child(idx_plus,  node_op1);
-        // auto idx_op2     = lnast->add_child(idx_plus,  node_op2); 
-        // fmt::print(" + ");
-
-      lnast->dump();
+      // lnast->dump();
 
       parsed_lnasts.push_back(std::move(lnast));
 
