@@ -114,7 +114,7 @@ protected:
 };
 
 TEST_F(Setup_graphs_test, each_sub_graph) {
-  for (const auto node : top->forward()) {
+  for (const auto &node : top->forward()) {
     for (const auto &out_edge : node.out_edges()) {
       auto dpin = out_edge.driver;
       auto spin = out_edge.sink;
@@ -127,7 +127,7 @@ TEST_F(Setup_graphs_test, each_sub_graph) {
 
 TEST_F(Setup_graphs_test, annotate1a) {
 #ifndef NDEBUG
-  for (const auto node : top->forward()) {
+  for (const auto &node : top->forward()) {
     EXPECT_DEATH({ node.get_place().get_pos_x(); }, "Assertion.*failed");  // get_place for something not set, triggers failure
   }
 #else
@@ -141,13 +141,13 @@ TEST_F(Setup_graphs_test, annotate1b) {
     EXPECT_EQ(node.ref_place()->get_pos_x(), 0);
     EXPECT_TRUE(node.has_place());
   }
-  for (const auto node : top->forward()) {
+  for (const auto &node : top->forward()) {
     EXPECT_EQ(node.get_place().get_pos_x(), 0);  // Now, OK, ref passes referene or allocates
   }
 }
 
 TEST_F(Setup_graphs_test, annotated) {
-  for (const auto node : top->forward()) {
+  for (const auto &node : top->forward()) {
     for (const auto &out_edge : node.out_edges()) {
       auto dpin = out_edge.driver;
       EXPECT_EQ(dpin.get_node().ref_place()->get_pos_x(), 0);
@@ -192,7 +192,7 @@ TEST_F(Setup_graphs_test, annotate2) {
   absl::flat_hash_map<Node_pin::Compact_class, int> my_map2;
 
   int total = 0;
-  for (const auto node : top->forward()) {
+  for (const auto &node : top->forward()) {
     for (const auto &e : node.out_edges()) {
       my_map2[e.driver.get_compact_class()] = total;
       total++;
@@ -215,7 +215,7 @@ TEST_F(Setup_graphs_test, annotate2_hier) {
   absl::flat_hash_map<Node_pin::Compact, int> my_map2;
 
   int total = 0;
-  for (const auto node : top->forward(true)) {
+  for (const auto &node : top->forward(true)) {
     for (const auto &e : node.out_edges()) {
       my_map2[e.driver.get_compact()] = total;
       total++;
