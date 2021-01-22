@@ -1,5 +1,7 @@
 #  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+load("//:copt_default.bzl", "COPTS")
+
 cc_library(
     name = "inou_pyrope",
     srcs = glob(["*.cpp"],exclude=["*test*.cpp"]),
@@ -7,11 +9,11 @@ cc_library(
     visibility = ["//visibility:public"],
     includes = ["."],
     alwayslink=True,
+    copts = COPTS,
     deps = [
         "//pass/common:pass",
     ],
 )
-
 
 filegroup(
     name = "pyrope_tests",
@@ -20,7 +22,6 @@ filegroup(
     ]),
     visibility = ["//visibility:public"],
 )
-
 
 sh_test(
     name = "pyrope_test.sh",
@@ -33,34 +34,10 @@ sh_test(
         ],
 )
 
-
-# sh_test(
-#     name = "lnast_prp_test.sh",
-#     srcs = ["tests/lnast_prp_test.sh"],
-#     # tags = ["manual"],
-#     # tags = ["fixme"],
-#     data = [
-#         "//main:lgshell",
-#         ":pyrope_tests"
-#         ],
-#     deps = [
-#         "//inou/yosys:scripts",
-#     ]
-# )
-
-
 cc_binary(
     name = "prp_test",
-    srcs = ["prp_test.cpp"],
-    deps = [
-        "@gtest//:gtest_main",
-        ":inou_pyrope",
-    ],
-)
-
-cc_binary(
-    name = "ast_test",
-    srcs = ["ast_test.cpp"],
+    srcs = ["tests/prp_test.cpp"],
+    copts = COPTS,
     deps = [
         "@gtest//:gtest_main",
         ":inou_pyrope",
@@ -69,7 +46,8 @@ cc_binary(
 
 cc_binary(
     name = "prp_lnast_test",
-    srcs = ["prp_lnast_test.cpp"],
+    srcs = ["tests/prp_lnast_test.cpp"],
+    copts = COPTS,
     deps = [
         "@gtest//:gtest_main",
         ":inou_pyrope",
@@ -78,7 +56,7 @@ cc_binary(
 
 cc_test(
     name = "prp_unit_test",
-    srcs = ["prp_unit_test.cpp"],
+    srcs = ["tests/prp_unit_test.cpp"],
     deps = [
         "@gtest//:gtest_main",
         ":inou_pyrope",

@@ -220,7 +220,7 @@ protected:
       }
     });
 
-    for (const auto node : node_order) {
+    for (const auto &node : node_order) {
       if (node.is_type_sub()) {
         LGraph *sub_lg = LGraph::open("lgdb_hierarchy_test", node.get_type_sub());
         I(sub_lg);

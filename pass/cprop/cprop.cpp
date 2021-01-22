@@ -785,7 +785,7 @@ void Cprop::do_trans(LGraph *lg) {
       process_tuple_add(node);
       continue;
     } else if (op == Ntype_op::TupGet) {
-      auto ok = process_tuple_get(node);
+      auto ok = false && process_tuple_get(node);
       if (!ok) {
         fmt::print("cprop could not simplify node:{}\n",node.debug_name());
       }

@@ -1,5 +1,7 @@
 #  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+load("//:copt_default.bzl", "COPTS")
+
 cc_library(
     name = "lgyosys",
     srcs = glob(["*.cpp"],exclude=["*test*.cpp", "yosys_driver.cpp"]),
@@ -18,6 +20,7 @@ cc_library(
     ],
     features = ["-use_header_modules"],
     visibility = ["//visibility:public"],
+    copts = COPTS,
     deps = [
         "//pass/common:pass",
         "@mustache//:headers",
@@ -59,6 +62,7 @@ cc_binary(
     features = ["-use_header_modules"],
     visibility = ["//visibility:public"],
     linkstatic=True,
+    copts = COPTS,
     deps = [
         ":lgyosys",
         "//core:core",

@@ -1,4 +1,7 @@
 #  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
+load("//:copt_default.bzl", "COPTS")
+
 cc_library(
     name = "elab",
     srcs = glob(
@@ -9,6 +12,7 @@ cc_library(
     includes = ["."],
     linkopts = ["-lpthread"],
     visibility = ["//visibility:public"],
+    copts = COPTS,
     deps = [
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
@@ -32,6 +36,15 @@ filegroup(
 cc_test(
     name = "ast_test",
     srcs = ["tests/ast_test.cpp"],
+    deps = [
+        "@gtest//:gtest_main",
+        ":elab",
+        ],
+    )
+
+cc_test(
+    name = "ast_test2",
+    srcs = ["tests/ast_test2.cpp"],
     deps = [
         "@gtest//:gtest_main",
         ":elab",
@@ -71,35 +84,10 @@ cc_test(
         ],
     )
 
-# cc_test(
-#     name = "lnast_parser_unit_test",
-#     srcs = ["tests/lnast_parser_unit_test.cpp"],
-#     data = ["//inou/cfg:cfg_pts"],
-#     tags = ["fixme"],
-#     deps = [
-#         ":elab",
-#         "@gtest//:gtest_main",
-#         ],
-#     )
-
-# cc_binary(
-#     name = "lnast_parser_test",
-#     srcs = ["tests/lnast_parser_test.cpp"],
-#     data = ["//inou/cfg:cfg_pts"],
-#     deps = [
-#         ":elab",
-#         "@gtest//:gtest_main",
-#         ],
-#     )
-
-cc_binary(
-    name = "elab_pyrope_test",
-    srcs = ["elab_pyrope_test.cpp"],
-    args = ["$(location :pyrope_test)"],
+cc_test(
+    name = "elab_xlang_test",
+    srcs = ["tests/elab_xlang_test.cpp"],
     deps = [
         ":elab",
-        ],
-    data = [
-        ":pyrope_test",
         ],
     )

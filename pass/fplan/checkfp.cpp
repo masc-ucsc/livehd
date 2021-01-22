@@ -86,5 +86,5 @@ void Pass_fplan_checkfp::pass(Eprp_var& var) {
 
   // Pass_fplan_checkfp c(var);
 
-  fmt::print("floorplan checked.  {} problems found.\n\n", issue_counter);
+  fmt::print("done. {} problems found.\n\n", issue_counter);
 }

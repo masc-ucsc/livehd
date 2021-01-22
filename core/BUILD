@@ -1,4 +1,7 @@
 #  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
+load("//:copt_default.bzl", "COPTS")
+
 cc_library(
     name = "core",
     srcs = glob(["*.cpp"],exclude=["*test*.cpp"]),
@@ -7,6 +10,7 @@ cc_library(
     includes = ["."],
     alwayslink=True,
     linkopts = ["-lstdc++fs"],  # for gcc-8 or older
+    copts = COPTS,
     deps = [
         "@rapidjson//:headers",
         "@iassert//:iassert",
@@ -22,6 +26,7 @@ cc_library(
     name = "tree_lgdb_test",
     hdrs = glob(["tests/tree_lgdb_setup.hpp"]),
     includes = ["."],
+    copts = COPTS,
     deps = [
         ":core",
         "@gtest//:gtest_main",

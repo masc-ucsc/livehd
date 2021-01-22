@@ -12,7 +12,7 @@ cc_library(
                 ),
     includes = ["."],
     hdrs = glob(["*.hpp"]),
-    copts = ["-w", "-O2"],
+    copts = ["-w", "-O2"], # Always fast, no warnings to avoid spurious messages
     visibility = ["//visibility:public"],
     deps = [
         "@cryptominisat//:cryptominisat",

@@ -40,13 +40,14 @@ new_git_repository(
     commit = "362b2d9d08f4dbc8dfc751b68ddf7bd3f9c4ed54", # April 6 2019
     remote = "https://github.com/berkeley-abc/abc.git",
     patches = ["//external:patch.abc"],
+    shallow_since = "1554534526 -1000",
 )
 new_git_repository(
     name = "yosys",
     build_file = "BUILD.yosys", # relative to external path
     commit = "de79978372c1953e295fa262444cb0a28a246c5f", # Sep 24, 2020 
     remote = "https://github.com/YosysHQ/yosys.git",
-    shallow_since = "1588020530 -0700",
+    shallow_since = "1600877724 -0700",
     patches = ["//external:patch.yosys"],
 )
 new_git_repository(
@@ -60,29 +61,30 @@ new_git_repository(
 
 http_archive(
     name = "rules_proto",
-    sha256 = "602e7161d9195e50246177e7c55b2f39950a9cf7366f74ed5f22fd45750cd208",
-    strip_prefix = "rules_proto-97d8af4dc474595af3900dd85cb3a29ad28cc313",
+    sha256 = "d8992e6eeec276d49f1d4e63cfa05bbed6d4a26cfe6ca63c972827a0d141ea3b",
+    strip_prefix = "rules_proto-cfdc2fa31879c0aebe31ce7702b1a9c8a4be02d2",
     urls = [
-        "https://mirror.bazel.build/github.com/bazelbuild/rules_proto/archive/97d8af4dc474595af3900dd85cb3a29ad28cc313.tar.gz",
-        "https://github.com/bazelbuild/rules_proto/archive/97d8af4dc474595af3900dd85cb3a29ad28cc313.tar.gz",
+        "https://github.com/bazelbuild/rules_proto/archive/cfdc2fa31879c0aebe31ce7702b1a9c8a4be02d2.tar.gz",
         ],
-    )
+)
+
 load("@rules_proto//proto:repositories.bzl", "rules_proto_dependencies", "rules_proto_toolchains")
 rules_proto_dependencies()
 rules_proto_toolchains()
 
 http_archive(
     name = "rules_cc",
-    urls = ["https://github.com/bazelbuild/rules_cc/archive/262ebec3c2296296526740db4aefce68c80de7fa.zip"],
-    strip_prefix = "rules_cc-262ebec3c2296296526740db4aefce68c80de7fa",
-    )
+    sha256 = "d0c573b94a6ef20ef6ff20154a23d0efcb409fb0e1ff0979cec318dfe42f0cdd",
+    urls = ["https://github.com/bazelbuild/rules_cc/archive/b1c40e1de81913a3c40e5948f78719c28152486d.zip"],
+    strip_prefix = "rules_cc-b1c40e1de81913a3c40e5948f78719c28152486d",
+)
 
 http_archive(
     name = "rules_foreign_cc",
-    sha256 = "ab266a13f5f695c898052271af860bf4928fb2ef6a333f7b63076b81271e4342",
-    strip_prefix = "rules_foreign_cc-6bb0536452eaca3bad20c21ba6e7968d2eda004d",
-    urls = ["https://github.com/bazelbuild/rules_foreign_cc/archive/6bb0536452eaca3bad20c21ba6e7968d2eda004d.zip"],
-    )
+    sha256 = "21177439c27c994fd9b6e04d4ed6cec79d7dbcf174649f8d70e396dd582d1c82",
+    strip_prefix = "rules_foreign_cc-ed95b95affecaa3ea3bf7bab3e0ab6aa847dfb06",
+    urls = ["https://github.com/bazelbuild/rules_foreign_cc/archive/ed95b95affecaa3ea3bf7bab3e0ab6aa847dfb06.zip"],
+)
 
 load("@rules_foreign_cc//:workspace_definitions.bzl", "rules_foreign_cc_dependencies")
 rules_foreign_cc_dependencies()
@@ -91,6 +93,7 @@ git_repository(
     name = "com_google_absl",
     commit = "e96d49687d9c078f2d47356b6723c3b5715493f7", # Nov, 7 2020
     remote = "https://github.com/abseil/abseil-cpp.git",
+    shallow_since = "1604603876 -0500",
 )
 
 git_repository(
@@ -127,7 +130,7 @@ new_git_repository(
     build_file = "BUILD.slang",
     commit = "b247da1849be56b00422626857532bb16830fb1f", # Jan 13, 2021 c0cf9a643f05df63268ecbfe561e9af37c9a62a8", # Nov 2nd, 2020
     remote = "https://github.com/MikePopoloski/slang.git",
-    shallow_since = "1610327918 -0500",
+    shallow_since = "1610328265 -0500",
     patches = ["//external:patch.slang"],
 )
 
@@ -151,13 +154,14 @@ git_repository(
     #build_file = "BUILD.iassert",
     commit = "5c18eb082262532f621a23023f092f4119a44968", # September 8, 2020
     remote = "https://github.com/masc-ucsc/iassert.git",
+    shallow_since = "1599604886 -0700",
     #strip_prefix = "src",
 )
 #git_repository(
 #    name = "cryptominisat",
 #    commit = "d522ab933584ea812429bfb22f752088ed7be599", # August 10, 2019
 #    remote = "https://github.com/masc-ucsc/cryptominisat.git",
-#    shallow_since = "1565452382 -0700",
+#    shallow_since = "1598796721 +0200",
 #)
 new_git_repository(
     name = "cryptominisat",
@@ -165,6 +169,7 @@ new_git_repository(
     commit = "f8b1da0eed202953912ff8cca10175eab61c0a1d", # September 1, 2020
     remote = "https://github.com/msoos/cryptominisat.git",
     patches = ["//external:patch.cryptominisat"],
+    shallow_since = "1598796721 +0200",
 )
 new_git_repository(
     name = "boolector",
@@ -172,6 +177,7 @@ new_git_repository(
     commit = "03d76134f86170ab0767194c339fd080e92ad371", # September 1, 2020
     remote = "https://github.com/Boolector/boolector",
     patches = ["//external:patch.boolector"],
+    shallow_since = "1598469820 -0700",
 )
 new_git_repository(
     name = "rapidjson",
@@ -200,6 +206,7 @@ new_git_repository(
     build_file = "BUILD.gtest",
     commit = "adeef192947fbc0f68fa14a6c494c8df32177508", # August 15, 2020 "37f322783175a66c11785d17fc153477b0777753", # October 24, 2019
     remote = "https://github.com/google/googletest",
+    shallow_since = "1597389384 -0400",
 )
 new_git_repository(
     name = "verilator",
@@ -223,6 +230,7 @@ new_git_repository(
     build_file = "BUILD.mockturtle",
     commit = "d1b697361d53b4f137d55a18582b290f54ee86bb", # March 20, 2020 19cb4376889a5d91ee947fcbdd3da7a808662a80", # Oct 16 2019
     remote = "https://github.com/lsils/mockturtle.git",
+    shallow_since = "1585037117 +0100",
     # patches = ["//external:patch.mockturtle"],
     #strip_prefix = "include",
 )
@@ -314,6 +322,7 @@ http_archive(
 #    java_version = "11",
 #)
 
+# Is this used?  Bazel pulls in its own versions of protobuf if required...
 http_archive(
     name = "com_google_protobuf",
     #repo_mapping = {"@zlib": "@net_zlib"},
@@ -324,4 +333,3 @@ http_archive(
         "https://github.com/protocolbuffers/protobuf/archive/v3.13.0.zip",
         ],
     )
-

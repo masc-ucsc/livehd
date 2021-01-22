@@ -37,7 +37,6 @@ public:
       ast = nullptr;
     }
     void ast_handler() {
-      int i = 0;
       for (const auto &it : ast->depth_preorder(ast->get_root())) {
         auto node       = ast->get_data(it);
         auto token_text = scan_text(node.token_entry);

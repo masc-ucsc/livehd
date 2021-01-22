@@ -1,10 +1,14 @@
 #  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
+load("//:copt_default.bzl", "COPTS")
+
 cc_library(
     name = "lemu",
     srcs = glob(["*.cpp"],exclude=["*test*.cpp"]),
     hdrs = glob(["*.hpp"]),
     visibility = ["//visibility:public"],
     includes = ["."],
+    copts = COPTS,
     deps = [
         "@fmt//:fmt",
         "@boost//:multiprecision",
@@ -29,6 +33,7 @@ cc_test(
 cc_binary(
     name = "lconst_dump",
     srcs = ["tests/lconst_dump.cpp"],
+    copts = COPTS,
     deps = [
         ":lemu",
         "//simlib:headers",

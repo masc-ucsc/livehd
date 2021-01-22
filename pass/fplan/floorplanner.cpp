@@ -34,7 +34,7 @@ void Lhd_floorplanner::write_lhd() {
     // basic sanity checking for returned floorplans
     I(n.is_hierarchical());
     I(n.has_hier_color());
-    I(n.get_hier_color() == 1);
+    I(n.get_hier_color() == 1); // all (synthesizable) nodes have been visited by floorplanner
     I(n.has_place());
 
     if (debug_print) {

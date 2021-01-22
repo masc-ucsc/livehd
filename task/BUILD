@@ -1,4 +1,7 @@
 #  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
+load("//:copt_default.bzl", "COPTS")
+
 cc_library(
     name = "task",
     srcs = glob(["*.cpp"],exclude=["*test*.cpp"]),
@@ -6,6 +9,7 @@ cc_library(
     visibility = ["//visibility:public"],
     linkopts= ["-lpthread"],
     includes = ["."],
+    copts = COPTS,
 )
 
 cc_test(
