@@ -4,9 +4,9 @@ module simple_rf1
      ,input [7-1:0]           waddr0
      ,input                   we0
      ,input [13-1:0]          din0
-     ,input [7-1:0]           raddr0
+     ,input [4-1:0]           raddr0
 
-     ,output [13-1:0]         q0
+     ,output reg [13-1:0]         q0
 
      );
 
