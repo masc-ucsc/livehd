@@ -180,7 +180,7 @@ ${YOSYS} -p " read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}; opt; flatten ; ren
 
               miter -equiv -flatten -make_outputs -ignore_gold_x gold gate miter
               hierarchy -top miter
-              sat -tempinduct -prove trigger 0 -set-init-undef -enable_undef -set-def-inputs -ignore_unknown_cells -show-ports miter
+              sat -tempinduct -prove trigger 0 -set-init-undef -enable_undef -set-def-inputs -ignore_unknown_cells -show-ports miter -timeout 60
               " \
     2> /dev/null | tee lgcheck2.log | grep "proven: SUCC"
 if [ $? -eq 0 ]; then
@@ -212,7 +212,7 @@ fi
 echo "WARN: Yosys failed to prove equivalency, trying to prove equivalency with Formality."
 
 fm_top=$OPT_TOP
-if [ "${fm_top}" != "" ]; then
+if [ "${fm_top}" == "" ]; then
   filename=$(basename -- "$GOLD")
   fm_top="${filename%.*}"
   if [[ $fm_top =~ "long_" ]]; then
@@ -244,19 +244,19 @@ echo "
     read_sverilog -i  \"${GATE}\"
     set_top i:/WORK/${fm_top}
     match
-    report_unmatched_points >> \"fm_${gold_top}_error.log\"
+    report_unmatched_points >> \"fm_${fm_top}_error.log\"
     if { ![verify] }  {
-      report_failing_points >> \"fm_${gold_top}_error.log\"
-        report_aborted >> \"fm_${gold_top}_error.log\"
-        analyze_points -all >> \"fm_${gold_top}_error.log\"
+      report_failing_points >> \"fm_${fm_top}_error.log\"
+        report_aborted >> \"fm_${fm_top}_error.log\"
+        analyze_points -all >> \"fm_${fm_top}_error.log\"
     }
-exit" > fm_script_${gold_top}.tcl
+exit" > fm_script_${fm_top}.tcl
 
-${FM_SHELL} -64bit -f fm_script_${gold_top}.tcl | grep "Verification SUCCEEDED"
+${FM_SHELL} -64bit -f fm_script_${fm_top}.tcl | grep "Verification SUCCEEDED"
 if [ $? -eq 0 ]; then
-  echo "5.Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
+  echo "5.Successfully matched ${GATE} with ${GOLD} top:${fm_top}"
   exit 0
 fi
 
-echo "FAIL: circuits are not equivalent (${input}) with top:${OPT_TOP}"
+echo "FAIL: circuits are not equivalent ${GATE} vs ${GOLD} with top:${fm_top}"
 exit 1
