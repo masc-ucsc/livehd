@@ -4,16 +4,18 @@
 
 #include "lgraph.hpp"
 
-Lgtuple::Lgtuple(Node_pin &sel_dpin, const std::vector<std::shared_ptr<Lgtuple>> &tup_list) {
-  (void)sel_dpin;
+std::shared_ptr<Lgtuple> Lgtuple::make_merge(Node_pin &sel_dpin, const std::vector<std::shared_ptr<Lgtuple>> &tup_list) {
+	(void)sel_dpin;
+
+	auto tup = std::make_shared<Lgtuple>();
 
   I(tup_list.size()>1); // nothing to merge?
 
 #ifndef NDEBUG
   // FIXME: for the moment just merge unordered named tuples
-  for(const auto &tup:tup_list) {
-    I(!tup->is_ordered());
-    I(tup->is_named());
+  for(const auto &t:tup_list) {
+    I(!t->is_ordered());
+    I(t->is_named());
   }
 #endif
 
@@ -24,6 +26,8 @@ Lgtuple::Lgtuple(Node_pin &sel_dpin, const std::vector<std::shared_ptr<Lgtuple>>
       fmt::print("   {}\n",k);
     }
   }
+
+	return tup;
 
 #if 0
   std::vector<int> pos_list;

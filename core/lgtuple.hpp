@@ -1,4 +1,8 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+//
+// TODO?: Consider using a immutable map/tree (the cprop keeps making copies)
+//  https://github.com/arximboldi/immer
+//  https://github.com/dotnwat/persistent-rbtree
 
 #pragma once
 
@@ -46,7 +50,7 @@ protected:
 public:
   Lgtuple() : hier_parent_key_pos(-1) { reset(); }
   Lgtuple(std::string_view name) : hier_parent_key_name(name), hier_parent_key_pos(-1) { reset(); }
-  Lgtuple(Node_pin &sel_dpin, const std::vector<std::shared_ptr<Lgtuple>> &tup_list);
+  static std::shared_ptr<Lgtuple> make_merge(Node_pin &sel_dpin, const std::vector<std::shared_ptr<Lgtuple>> &tup_list);
 
   // pos -1 -> invalid pos
   Lgtuple(int ppos, std::string_view name) : hier_parent_key_name(name), hier_parent_key_pos(ppos) { reset(); }
@@ -70,7 +74,7 @@ public:
     return (key == 0 || (ordered && key < pos2tuple.size() && pos2tuple[key]));
   }
 
-  bool is_ordered() const { return ordered || pos2tuple.size()<1; }
+  bool is_ordered() const { return ordered; }
   bool is_named() const { return named; }
 
   size_t get_key_pos(std::string_view key) const {

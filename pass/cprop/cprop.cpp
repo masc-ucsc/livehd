@@ -575,14 +575,11 @@ bool Cprop::process_tuple_get(Node &node) {
     if (key_pos == 0 && !parent_dpin.is_invalid()) {
       collapse_forward_for_pin(node, parent_dpin);
       return true;
-    } else if (parent_ntype == Ntype_op::Mux) {
+    } else {
       Pass::info("tuple_get {} could not decide the field {} from the parent mux!\n", node.debug_name(), parent_node.debug_name(), key_name);
       return false;
-    } else if (key_pos == -1 && key_name != "__ubits" && key_name != "__sbits") {
-      Pass::error("for tuple_get {} parent_node {}, try to get a field {} from a scalar!\n", node.debug_name(), parent_node.debug_name(), key_name);
-      return false;
-     }
-   }
+		}
+	}
 
   // this attr comes from tail of TG chain where the TG tail has been transformed into an AttrSet node.
   if (parent_node.get_type_op() == Ntype_op::AttrSet) {
@@ -594,13 +591,7 @@ bool Cprop::process_tuple_get(Node &node) {
 
   auto ptup_it = node2tuple.find(parent_node.get_compact());
   if (ptup_it == node2tuple.end()) {  // ptup_it = parent_node
-    //FIXME:sh-> if the parent comes from unified input $, we should just give it a empty lgtuple
-
-    std::string key(key_name);
-    if (key.empty())
-      key = std::to_string(key_pos);
-
-    Pass::error("for tuple_get {} parent_node {}, there is no tuple of {}, so no valid field:{}\n", node.debug_name(), parent_node.debug_name(), tup_name, key);
+		Pass::info("tuple_get {} could not decide the field {} from the parent mux!\n", node.debug_name(), parent_node.debug_name(), key_name);
     return false;
   }
 
@@ -699,7 +690,7 @@ void Cprop::process_mux(Node &node) {
   if (!tup_list.empty()) {
     fmt::print("mux tuple:{}\n", node.debug_name());
 
-    auto mux_tup = std::make_shared<Lgtuple>(sel_dpin, tup_list);
+    auto mux_tup = Lgtuple::make_merge(sel_dpin, tup_list);
 
     if (!mux_tup->is_scalar()) { // scalar is a sign of failure
       node2tuple[node.get_compact()] = mux_tup;
@@ -803,7 +794,7 @@ void Cprop::do_trans(LGraph *lg) {
   /* bool tup_get_left = false; */
 
   for (auto node : lg->forward()) {
-    fmt::print("{}\n", node.debug_name());
+    //fmt::print("{}\n", node.debug_name());
     auto op = node.get_type_op();
 
     // Special cases to handle in cprop
