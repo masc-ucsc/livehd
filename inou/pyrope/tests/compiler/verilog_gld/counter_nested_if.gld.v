@@ -1,4 +1,4 @@
-module sync_cnt_nested_if_gld (
+module counter_nested_if (
   input clock,
   input c1,
   input c2,
@@ -9,11 +9,10 @@ module sync_cnt_nested_if_gld (
 reg [4:0] cnt_o_next;
 always @ (*) begin
   if (c1 == 1) begin
-    cnt_o_next = cnt_o + 1;
     if (c2 == 1) begin
-      cnt_o_next = cnt_o + 2;
+      cnt_o_next = cnt_o + 3;
     end else begin
-      cnt_o_next = {1'b0, cnt_o};
+      cnt_o_next = cnt_o + 1;
     end
   end else begin
     cnt_o_next = {1'b0, cnt_o};

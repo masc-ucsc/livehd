@@ -213,7 +213,7 @@ echo "WARN: Yosys failed to prove equivalency, trying to prove equivalency with 
 
 fm_top=$OPT_TOP
 if [ "${fm_top}" == "" ]; then
-  filename=$(basename -- "$GOLD")
+  filename=$(basename -- "$GATE")
   fm_top="${filename%.*}"
   if [[ $fm_top =~ "long_" ]]; then
     fm_top=${fm_top:5}
@@ -240,9 +240,9 @@ echo "
     set_app_var hdlin_ignore_parallel_case false
     set_app_var hdlin_ignore_full_case false
     read_sverilog -r  \"${GOLD}\"
-    set_top r:/WORK/${fm_top}
+    set_top ${fm_top}
     read_sverilog -i  \"${GATE}\"
-    set_top i:/WORK/${fm_top}
+    set_top ${fm_top}
     match
     report_unmatched_points >> \"fm_${fm_top}_error.log\"
     if { ![verify] }  {
