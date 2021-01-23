@@ -25,7 +25,7 @@ void Cprop::collapse_forward_same_op(Node &node, XEdge_iterator &inp_edges_order
       continue;
     }
 
-    if (out.driver.get_pid() != out.sink.get_pid()) { //FIXME: maybe separate different op 
+    if (out.driver.get_pid() != out.sink.get_pid()) { //FIXME: maybe separate different op
       all_done = false;
       continue;
     }
@@ -143,7 +143,7 @@ void Cprop::collapse_forward_for_pin(Node &node, Node_pin &new_dpin) {
   node.del_node();
 }
 
-void Cprop::try_constant_prop(Node &node, XEdge_iterator &inp_edges_ordered) {
+bool Cprop::try_constant_prop(Node &node, XEdge_iterator &inp_edges_ordered) {
   int n_inputs_constant = 0;
   int n_inputs          = 0;
   for (auto e : inp_edges_ordered) {
@@ -159,9 +159,13 @@ void Cprop::try_constant_prop(Node &node, XEdge_iterator &inp_edges_ordered) {
 
   if (n_inputs == n_inputs_constant && n_inputs) {
     replace_all_inputs_const(node, inp_edges_ordered);
-  } else if (n_inputs) {
+    return true;
+  } else if (n_inputs && n_inputs_constant>1) {
     replace_part_inputs_const(node, inp_edges_ordered);
+    return true;
   }
+
+  return false;
 }
 
 void Cprop::try_collapse_forward(Node &node, XEdge_iterator &inp_edges_ordered) {
@@ -324,7 +328,7 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
       auto c = e.driver.get_node().get_type_const();
       result = result.or_op(c.adjust_bits(max_bits));
     }
-    
+
     TRACE(fmt::print("cprop: and node:{} to {}\n", node.debug_name(), result.to_pyrope()));
 
     Lconst result_reduced = result == 0 ? 0 : 1;
@@ -571,6 +575,9 @@ bool Cprop::process_tuple_get(Node &node) {
     if (key_pos == 0 && !parent_dpin.is_invalid()) {
       collapse_forward_for_pin(node, parent_dpin);
       return true;
+    } else if (parent_ntype == Ntype_op::Mux) {
+      Pass::info("tuple_get {} could not decide the field {} from the parent mux!\n", node.debug_name(), parent_node.debug_name(), key_name);
+      return false;
     } else if (key_pos == -1 && key_name != "__ubits" && key_name != "__sbits") {
       Pass::error("for tuple_get {} parent_node {}, try to get a field {} from a scalar!\n", node.debug_name(), parent_node.debug_name(), key_name);
       return false;
@@ -601,7 +608,7 @@ bool Cprop::process_tuple_get(Node &node) {
 
   if (!ctup->has_key(key_pos, key_name)) {
     // the case that TG tries fetch from an empty parent tuple -> very likely it's the dummy TA connected to the SubG %
-    if (ctup->get_tuple_size() == 0) { 
+    if (ctup->get_tuple_size() == 0) {
       node2tuple[node.get_compact()] = ctup;
       return false;
     }
@@ -621,9 +628,9 @@ bool Cprop::process_tuple_get(Node &node) {
   }
 
   // still unclear if the TupGet chain is resolved (final TupGet will decide)
-  if (!sub_tup->is_valid_val_dpin()) { 
+  if (!sub_tup->is_valid_val_dpin()) {
     node2tuple[node.get_compact()] = sub_tup;
-    return true;   
+    return true;
   }
 
   if (sub_tup->is_valid_val_dpin()) {
@@ -634,7 +641,7 @@ bool Cprop::process_tuple_get(Node &node) {
       collapse_forward_for_pin(node, val_dpin);
     } else { // Has attributes
       int conta=0;
-      for(auto it : sub_tup->get_all_attributes()) {
+      for(auto it : sub_tup->get_level_attributes()) {
         auto attr_key_node = node.get_lg()->create_node(Ntype_op::TupKey);
         auto attr_key_dpin = attr_key_node.setup_driver_pin();
         attr_key_dpin.set_name(it.first);
@@ -666,7 +673,42 @@ bool Cprop::process_tuple_get(Node &node) {
   return true;
 }
 
-std::shared_ptr<Lgtuple> Cprop::process_tuple_add_chain(Node_pin up_dpin) {
+void Cprop::process_mux(Node &node) {
+
+
+  std::vector<std::shared_ptr<Lgtuple>> tup_list;
+
+  Node_pin sel_dpin;
+
+  for(auto e:node.inp_edges()) {
+    if (e.sink.get_pid() == 0) {
+      I(e.sink.get_pin_name() == "0");
+
+      sel_dpin = e.driver;
+    }else{
+      auto tup = find_lgtuple(e.driver);
+      if (tup == nullptr) {
+        tup_list.clear();
+        break; // All have to have
+      }
+
+      tup_list.emplace_back(tup);
+    }
+  }
+
+  if (!tup_list.empty()) {
+    fmt::print("mux tuple:{}\n", node.debug_name());
+
+    auto mux_tup = std::make_shared<Lgtuple>(sel_dpin, tup_list);
+
+    if (!mux_tup->is_scalar()) { // scalar is a sign of failure
+      node2tuple[node.get_compact()] = mux_tup;
+    }
+  }
+
+}
+
+std::shared_ptr<Lgtuple> Cprop::find_lgtuple(Node_pin up_dpin) {
 
   auto up_node = up_dpin.get_node();
   auto ptup_it = node2tuple.find(up_node.get_compact());
@@ -674,8 +716,8 @@ std::shared_ptr<Lgtuple> Cprop::process_tuple_add_chain(Node_pin up_dpin) {
     return nullptr;
   }
 
-  I(up_node.get_type_op() == Ntype_op::TupAdd || up_node.get_type_op() == Ntype_op::TupGet || 
-    up_node.get_type_op() == Ntype_op::TupRef);
+  I(up_node.get_type_op() == Ntype_op::TupAdd || up_node.get_type_op() == Ntype_op::TupGet ||
+    up_node.get_type_op() == Ntype_op::TupRef || up_node.get_type_op() == Ntype_op::Mux);
 
   return std::make_shared<Lgtuple>(*(ptup_it->second));
 }
@@ -685,20 +727,20 @@ void Cprop::process_tuple_add(Node &node) {
   I(node.get_type_op() == Ntype_op::TupAdd);
 
   // ptup == parent_tup == up_tup
-  std::shared_ptr<Lgtuple> ptup; 
+  std::shared_ptr<Lgtuple> ptup;
   if (node.get_sink_pin("tuple_name").is_connected())
-    ptup = process_tuple_add_chain(node.get_sink_pin("tuple_name").get_driver_pin());
+    ptup = find_lgtuple(node.get_sink_pin("tuple_name").get_driver_pin());
 
   // a new tuple chain as the val_dpin, either for a tup_concat or a new tuple hierarchy
-  std::shared_ptr<Lgtuple> chain_tup; 
+  std::shared_ptr<Lgtuple> chain_tup;
   if(node.is_sink_connected("value")) {
-    chain_tup = process_tuple_add_chain(node.get_sink_pin("value").get_driver_pin());
+    chain_tup = find_lgtuple(node.get_sink_pin("value").get_driver_pin());
   }
 
   auto [tup_name, key_name, key_pos] = get_tuple_name_key(node);
 
   std::shared_ptr<Lgtuple> ctup;
-  if (chain_tup) { 
+  if (chain_tup) {
     if (ptup) {
       ctup = std::make_shared<Lgtuple>(*ptup);
     } else {
@@ -728,7 +770,7 @@ void Cprop::process_tuple_add(Node &node) {
       I(val_dpin.get_node().get_type_op() != Ntype_op::TupAdd); //sh added, check?
 
       // Tuple Concatenation operator
-      if (key_pos < 0 && key_name.empty()) { 
+      if (key_pos < 0 && key_name.empty()) {
         if (!ptup && node.get_sink_pin("tuple_name").is_connected()) {
           ctup->add(node.get_sink_pin("tuple_name").get_driver_pin());
         }
@@ -761,7 +803,7 @@ void Cprop::do_trans(LGraph *lg) {
   /* bool tup_get_left = false; */
 
   for (auto node : lg->forward()) {
-    //fmt::print("{}\n", node.debug_name());
+    fmt::print("{}\n", node.debug_name());
     auto op = node.get_type_op();
 
     // Special cases to handle in cprop
@@ -785,21 +827,26 @@ void Cprop::do_trans(LGraph *lg) {
       process_tuple_add(node);
       continue;
     } else if (op == Ntype_op::TupGet) {
-      auto ok = false && process_tuple_get(node);
+      auto ok = process_tuple_get(node);
       if (!ok) {
         fmt::print("cprop could not simplify node:{}\n",node.debug_name());
       }
       tuple_get_left |= !ok;
       continue;
+    } else if (op == Ntype_op::Mux) {
+      process_mux(node);
     }
 
     // Normal copy prop and strength reduction
     auto inp_edges_ordered = node.inp_edges_ordered();
-    try_constant_prop(node, inp_edges_ordered);
+    auto replaced_some = try_constant_prop(node, inp_edges_ordered);
 
     if (node.is_invalid())
       continue;  // It got deleted
 
+    if (replaced_some) {
+      inp_edges_ordered = node.inp_edges_ordered();
+    }
     try_collapse_forward(node, inp_edges_ordered);
   }
 
@@ -825,7 +872,7 @@ void Cprop::do_trans(LGraph *lg) {
 
     if (!node.has_outputs()) {
       auto op = node.get_type_op();
-      if (op != Ntype_op::Sflop && op != Ntype_op::Aflop  && op != Ntype_op::Latch && 
+      if (op != Ntype_op::Sflop && op != Ntype_op::Aflop  && op != Ntype_op::Latch &&
           op != Ntype_op::Fflop && op != Ntype_op::Memory && op != Ntype_op::Sub   && op != Ntype_op::AttrSet) {
         // TODO: del_dead_end_nodes(); It can propagate back and keep deleting
         // nodes until it reaches a SubGraph or a driver_pin that has some

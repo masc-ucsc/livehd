@@ -15,8 +15,8 @@
 class Lgtuple : std::enable_shared_from_this<Lgtuple> {
 private:
 protected:
-  std::string hier_parent_key_name;  // empty not set  
-  int         hier_parent_key_pos;   // -1 not set     
+  std::string hier_parent_key_name;  // empty not set
+  int         hier_parent_key_pos;   // -1 not set
 
   bool ordered;
   bool named;
@@ -24,7 +24,10 @@ protected:
   Node_pin val_dpin;
 
   absl::flat_hash_map<std::string, int> key2pos;
-  std::vector<std::shared_ptr<Lgtuple>> pos2tuple;  // pos to its corresponding sub-tuple chain (at old time)
+
+  using pos2tuple_type=std::vector<std::shared_ptr<Lgtuple>>;
+
+  pos2tuple_type pos2tuple;  // pos to its corresponding sub-tuple chain (at old time)
 
   void reset_non_attr_fields();
 
@@ -42,8 +45,8 @@ protected:
 
 public:
   Lgtuple() : hier_parent_key_pos(-1) { reset(); }
-
   Lgtuple(std::string_view name) : hier_parent_key_name(name), hier_parent_key_pos(-1) { reset(); }
+  Lgtuple(Node_pin &sel_dpin, const std::vector<std::shared_ptr<Lgtuple>> &tup_list);
 
   // pos -1 -> invalid pos
   Lgtuple(int ppos, std::string_view name) : hier_parent_key_name(name), hier_parent_key_pos(ppos) { reset(); }
@@ -54,11 +57,8 @@ public:
   bool             has_hier_parent_key_name() const { return !hier_parent_key_name.empty(); }
   std::string_view get_hier_parent_key_name() const { return hier_parent_key_name; }
 
-
-
   bool   has_hier_parent_key_pos() const { return hier_parent_key_pos >= 0; }
   size_t get_hier_parent_key_pos() const { return hier_parent_key_pos; }
-
 
   bool has_key_name(std::string_view key) const {
     auto it = key2pos.find(key);
@@ -69,6 +69,9 @@ public:
     fmt::print("ordered:{}, pos2tuple.size:{}\n", ordered, pos2tuple.size());
     return (key == 0 || (ordered && key < pos2tuple.size() && pos2tuple[key]));
   }
+
+  bool is_ordered() const { return ordered || pos2tuple.size()<1; }
+  bool is_named() const { return named; }
 
   size_t get_key_pos(std::string_view key) const {
     I(has_key_name(key));
@@ -120,18 +123,21 @@ public:
   size_t add(const Node_pin &dpin);
   bool   add(const std::shared_ptr<Lgtuple> tup2);
 
-  bool is_scalar() const { return pos2tuple.empty(); }  
+  bool is_scalar() const { return pos2tuple.empty(); }
 
   bool is_valid_val_dpin() const { return !val_dpin.is_invalid(); }
 
   Node_pin get_value_dpin(int pos, std::string_view key) const;  // get driver dpin of value field
   Node_pin get_value_dpin() const { return val_dpin; };
 
-
   bool   is_constant() const;
   Lconst get_constant() const;
 
-  std::vector<std::pair<std::string_view, Node_pin>> get_all_attributes() const;
+  /// Get all the attributes (__bits) in the same tuple level
+  std::vector<std::pair<std::string_view, Node_pin>> get_level_attributes() const;
+
+  // Get all the keys from all the levels
+  std::vector<std::string> get_all_keys() const;
 
   void dump() const { dump("  "); }
   void dump(std::string_view indent) const;
@@ -139,4 +145,5 @@ public:
   /* void analyze_graph_output(absl::flat_hash_map<std::string, Node_pin> &gout2driver) const; */
   void    analyze_graph_output(absl::flat_hash_map<std::string, Node_pin> &gout2driver, std::string base_name) const;
   size_t  get_tuple_size() const { return key2pos.size(); };
+
 };
