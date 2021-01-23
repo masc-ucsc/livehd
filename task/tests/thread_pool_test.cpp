@@ -21,7 +21,7 @@ struct Test1 {
 };
 
 std::atomic<int> total;
-void             mywork(int a) {
+void mywork(int a) {
   total.fetch_add(a, std::memory_order_relaxed);
 }
 
