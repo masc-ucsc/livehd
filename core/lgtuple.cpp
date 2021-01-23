@@ -357,7 +357,7 @@ std::vector<std::string> Lgtuple::get_all_keys() const {
     return keys;
   }
 
-  for (const auto it:key2pos) {
+  for (const auto &it:key2pos) {
     if (pos2tuple[it.second]) {
       auto nested_keys = pos2tuple[it.second]->get_all_keys();
       for(const auto &k:nested_keys) {
