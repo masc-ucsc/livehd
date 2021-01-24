@@ -5,5 +5,5 @@ module leaf_grid(input x, output y);
 endmodule
 
 module grid_hier_test(input [15:0] testi, output [15:0] testo);
-  leaf_grid lg[15:0](.x(testi), .y(testo));
+  leaf_grid lg[32:0](.x(testi[5]), .y(testo[0]));
 endmodule

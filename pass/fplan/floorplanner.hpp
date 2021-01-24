@@ -10,7 +10,7 @@
 class Lhd_floorplanner {
 public:
 
-  Lhd_floorplanner() : root_layout(std::make_unique<geogLayout>()) {}
+  Lhd_floorplanner();
 
   // load modules into ArchFP using verious kinds of traversals
   virtual void load(LGraph* root, const std::string_view lgdb_path) = 0;
@@ -46,6 +46,9 @@ protected:
 
   // layout of all child nodes
   absl::flat_hash_map<LGraph*, std::unique_ptr<geogLayout>> layouts;
+
+  // at what number of nodes of a given type should they be laid out in a grid?
+  absl::flat_hash_map<Ntype_op, unsigned int> grid_thresh;
 
   constexpr static bool debug_print = false;
 };

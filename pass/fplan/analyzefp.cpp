@@ -1,5 +1,6 @@
 #include "ann_place.hpp"
 #include "pass_fplan.hpp"
+#include <limits>
 
 void Pass_fplan_analyzefp::setup() {
   auto a = Eprp_method("pass.fplan.analyzefp",
@@ -16,7 +17,8 @@ void Pass_fplan_analyzefp::setup() {
 Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fplan", var) {
   LGraph* root = var.lgs[0];
 
-  float min_x = 9999.0f, max_x = 0.0f, min_y = 9999.0f, max_y = 0.0f;
+  const float fmax = std::numeric_limits<float>::max();
+  float min_x = fmax, max_x = 0.0f, min_y = fmax, max_y = 0.0f;
   for (auto n : root->fast()) {
     if (!n.is_type_synth() && !n.is_type_sub()) {
       continue;

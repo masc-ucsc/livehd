@@ -19,12 +19,13 @@ void Pass_fplan_checkfp::pass(Eprp_var& var) {
   if (var.lgs.size() > 1) {
     throw std::invalid_argument("more than one root lgraph provided!");
   }
+  
+  fmt::print("checking floorplan...");
 
   unsigned int issue_counter = 0;
 
   std::vector<Ann_place> places;
 
-  // TODO: once I get more confident that the hierarchy is built correctly, optimize this using hierarchy tree
   var.lgs[0]->each_hier_fast_direct([&](const Node& n) -> bool {
     if (!n.is_type_synth()) {
       return true;
@@ -81,10 +82,6 @@ void Pass_fplan_checkfp::pass(Eprp_var& var) {
       return true;
     });
   }
-
-  fmt::print("checking floorplan...\n");
-
-  // Pass_fplan_checkfp c(var);
 
   fmt::print("done. {} problems found.\n\n", issue_counter);
 }

@@ -24,8 +24,6 @@ TODOs:
    - floorplan using existing geography hints instead of "Center" for everything
 4. More accurate floorplans
    - floorplan node pins - allows for more accurate HPWL estimation
-   - change between individual calls to addComponentCluster and a batched addComponentCluster based on node amounts (allows for better handling of huge modules)
-     - might want to have different thresholds for this - probably want to pack memory cells more than const cells!
 
 General:
  - checkfp:

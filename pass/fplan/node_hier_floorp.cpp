@@ -37,28 +37,49 @@ void Node_hier_floorp::load_lg_nodes(LGraph* lg, const std::string_view lgdb_pat
     l->addComponent(layouts[sub_lg].get(), sub_lg_count[sub_lg], Center);
   }
 
-  // floorplan leaves
+  absl::flat_hash_map<Ntype_op, unsigned int> grid_count;
+  absl::flat_hash_set<Ntype_op> skip;
   for (auto n : lg->fast()) {
     Ntype_op op = n.get_type_op();
     if (!Ntype::is_synthesizable(op)) {
       continue;
     }
 
+    grid_count[op]++;
+  }
+
+  // count and floorplan leaves
+  for (auto n : lg->fast()) {
+    Ntype_op op = n.get_type_op();
+    if (!Ntype::is_synthesizable(op)) {
+      continue;
+    }
+
+    if (skip.contains(op)) {
+      continue;
+    }
+
     I(na.has_dim(op));
+    
     auto  dim       = na.get_dim(op);
     float node_area = dim.area;  // TODO: can we calculate some sort of bitwidth for the node?
 
-    // count is 1 because even if nodes are the same type, they aren't really identical,
-    // and if count > 1 the cluster is treated as identical.
-    if (debug_print) {
-      fmt::print("adding leaf {} to cluster of lg {}", n.get_type_name(), lg->get_name());
-      fmt::print(", area: {}, min asp: {}, max asp: {}\n", node_area, dim.min_aspect, dim.max_aspect);
+    unsigned int count = 1;
+    if (grid_count[op] >= grid_thresh[op] && grid_thresh[op] > 0) {
+      count = grid_count[op];
+      skip.emplace(op);
     }
-    l->addComponentCluster(n.get_type_op(), 1, node_area, dim.max_aspect, dim.min_aspect, Center);
+
+    if (debug_print) {
+      fmt::print("adding {} of leaf {} to cluster of lg {}", count, n.get_type_name(), lg->get_name());
+      fmt::print("\tarea: {}, min asp: {}, max asp: {}\n", node_area, dim.min_aspect, dim.max_aspect);
+    }
+
+    l->addComponentCluster(n.get_type_op(), count, node_area, dim.max_aspect, dim.min_aspect, Center);
   }
 
   l->setName(lg->get_name().data());
-  l->setType(Ntype_op::Sub); // treat nodes placed by us as subnodes
+  l->setType(Ntype_op::Sub);  // treat nodes placed by us as subnodes
   layouts[lg] = std::move(l);
 }
 
