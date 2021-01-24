@@ -26,7 +26,7 @@ public:
 	
   virtual ~Lhd_floorplanner() {
     for (auto& pair : layouts) {
-      geogLayout* l = pair.second.release();
+      bagLayout* l = pair.second.release();
       (void)l;
 
       // TODO: actually deleting geogLayouts segfaults for some reason...
@@ -34,7 +34,7 @@ public:
       // (pair.second.l.reset() also fails)
     }
 
-    geogLayout* l = root_layout.release();
+    bagLayout* l = root_layout.release();
     (void)l;
   }
 
@@ -42,10 +42,10 @@ protected:
   
   // layout of root node, used frequently
   LGraph* root_lg;
-  std::unique_ptr<geogLayout> root_layout;
+  std::unique_ptr<bagLayout> root_layout;
 
   // layout of all child nodes
-  absl::flat_hash_map<LGraph*, std::unique_ptr<geogLayout>> layouts;
+  absl::flat_hash_map<LGraph*, std::unique_ptr<bagLayout>> layouts;
 
   // at what number of nodes of a given type should they be laid out in a grid?
   absl::flat_hash_map<Ntype_op, unsigned int> grid_thresh;

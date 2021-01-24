@@ -32,7 +32,7 @@ void Node_flat_floorp::load(LGraph* root, const std::string_view lgdb_path) {
 
       auto d = na.get_dim(op);
 
-      root_layout->addComponentCluster(name.data(), 1, d.area, d.max_aspect, d.min_aspect, Center);
+      root_layout->addComponentCluster(name.data(), 1, d.area, d.max_aspect, d.min_aspect);
     }
   }
 }

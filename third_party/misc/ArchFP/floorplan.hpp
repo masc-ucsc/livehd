@@ -34,12 +34,12 @@ enum FPOptimization { Area, AspectRatio };
 
 // Here is the enumeration for layout hints for the geographic layout.
 enum GeographyHint {
+  Center, // make center the default, since it's considered to be valid
   UnknownGeography,
   Left,
   Right,
   Top,
   Bottom,
-  Center,
   LeftRight,
   LeftRightMirror,
   LeftRight180,

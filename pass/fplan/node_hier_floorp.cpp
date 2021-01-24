@@ -14,7 +14,7 @@ void Node_hier_floorp::load_lg_nodes(LGraph* lg, const std::string_view lgdb_pat
     return;
   }
 
-  auto l = std::make_unique<geogLayout>();
+  auto l = std::make_unique<bagLayout>();
 
   Ntype_area na(lgdb_path);
 
@@ -34,7 +34,7 @@ void Node_hier_floorp::load_lg_nodes(LGraph* lg, const std::string_view lgdb_pat
       fmt::print("adding {} of subcomponent {} to cluster of lg {}\n", sub_lg_count[sub_lg], sub_lg->get_name(), lg->get_name());
     }
 
-    l->addComponent(layouts[sub_lg].get(), sub_lg_count[sub_lg], Center);
+    l->addComponent(layouts[sub_lg].get(), sub_lg_count[sub_lg]);
   }
 
   absl::flat_hash_map<Ntype_op, unsigned int> grid_count;
@@ -60,7 +60,7 @@ void Node_hier_floorp::load_lg_nodes(LGraph* lg, const std::string_view lgdb_pat
     }
 
     I(na.has_dim(op));
-    
+
     auto  dim       = na.get_dim(op);
     float node_area = dim.area;  // TODO: can we calculate some sort of bitwidth for the node?
 
@@ -75,7 +75,7 @@ void Node_hier_floorp::load_lg_nodes(LGraph* lg, const std::string_view lgdb_pat
       fmt::print("\tarea: {}, min asp: {}, max asp: {}\n", node_area, dim.min_aspect, dim.max_aspect);
     }
 
-    l->addComponentCluster(n.get_type_op(), count, node_area, dim.max_aspect, dim.min_aspect, Center);
+    l->addComponentCluster(n.get_type_op(), count, node_area, dim.max_aspect, dim.min_aspect);
   }
 
   l->setName(lg->get_name().data());

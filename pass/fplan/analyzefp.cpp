@@ -1,5 +1,6 @@
 #include "ann_place.hpp"
-#include "pass_fplan.hpp"
+#include "analyzefp.hpp"
+#include "lgedgeiter.hpp"
 #include <limits>
 
 void Pass_fplan_analyzefp::setup() {

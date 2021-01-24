@@ -1,7 +1,7 @@
 #include <vector>
 
 #include "ann_place.hpp"
-#include "pass_fplan.hpp"
+#include "checkfp.hpp"
 
 void Pass_fplan_checkfp::setup() {
   auto c = Eprp_method("pass.fplan.checkfp", "checks floorplan information stored in LiveHD hierarchy", &Pass_fplan_checkfp::pass);

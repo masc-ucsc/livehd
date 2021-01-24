@@ -6,6 +6,7 @@
 #include "inou_lef_api.hpp"
 #include "meta_api.hpp"
 #include "top_api.hpp"
+#include "pass_fplan.hpp"
 
 void setup_inou_pyrope();
 void setup_inou_yosys();

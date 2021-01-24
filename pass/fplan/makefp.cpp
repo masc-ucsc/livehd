@@ -1,15 +1,19 @@
+#include "makefp.hpp"
+
 #include <string>
 
-#include "pass_fplan.hpp"
+#include "iassert.hpp"
+#include "lg_hier_floorp.hpp"
+#include "node_flat_floorp.hpp"
+#include "node_hier_floorp.hpp"
 #include "profile_time.hpp"
 
 void Pass_fplan_makefp::setup() {
   auto m = Eprp_method("pass.fplan.makefp", "generate a floorplan from an LGraph", &Pass_fplan_makefp::pass);
 
-  m.add_label_optional(
-      "traversal",
-      "LGraph traversal method to use. Valid options are \"hier_lg\", \"flat_lg\", \"flat_node\", and \"hier_node\"",
-      "hier_node");
+  m.add_label_optional("traversal",
+                       "LGraph traversal method to use. Valid options are \"hier_lg\", \"flat_node\", and \"hier_node\"",
+                       "hier_node");
 
   m.add_label_optional("dest", "Where to send the floorplan file.  Valid options are \"file\" and \"livehd\".", "file");
 
@@ -48,9 +52,6 @@ Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", v
   if (t_str == "hier_lg") {
     Lg_hier_floorp hfp;
     makefp_int(hfp, "file");
-  } else if (t_str == "flat_lg") {
-    Lg_flat_floorp ffp;
-    makefp_int(ffp, "file");
   } else if (t_str == "flat_node") {
     // ArchFP doesn't handle large numbers of nodes being attached to a single geogLayout instance very well
     fmt::print("WARNING: this kind of traversal only works for small numbers of nodes.\n");

@@ -4,30 +4,29 @@
 #include "core/ann_place.hpp"
 #include "core/lgedgeiter.hpp"
 
-Lhd_floorplanner::Lhd_floorplanner() : root_layout(std::make_unique<geogLayout>()) {
+Lhd_floorplanner::Lhd_floorplanner() : root_layout(std::make_unique<bagLayout>()) {
   // skip subnodes - they get put in a grid if >1 of a subnode of a given type are found
 
   // set how many nodes of a given type must be encountered before they are put in a grid together
+  // thresholds can be 0, in which case that type of leaf is never put in a grid.
+  // (default is 0)
   grid_thresh[Ntype_op::And] = 8;
-  grid_thresh[Ntype_op::Or] = 8;
+  grid_thresh[Ntype_op::Or]  = 8;
   grid_thresh[Ntype_op::Xor] = 8;
   grid_thresh[Ntype_op::Not] = 8;
-  
+
   grid_thresh[Ntype_op::Memory] = 4;
-  grid_thresh[Ntype_op::Sflop] = 4;
-  grid_thresh[Ntype_op::Aflop] = 4;
-  grid_thresh[Ntype_op::Latch] = 4;
-  grid_thresh[Ntype_op::Fflop] = 4;
-  
+  grid_thresh[Ntype_op::Sflop]  = 4;
+  grid_thresh[Ntype_op::Aflop]  = 4;
+  grid_thresh[Ntype_op::Latch]  = 4;
+  grid_thresh[Ntype_op::Fflop]  = 4;
+
   grid_thresh[Ntype_op::LUT] = 4;
-  
+
   grid_thresh[Ntype_op::SHL] = 4;
   grid_thresh[Ntype_op::SRA] = 4;
-  
-  grid_thresh[Ntype_op::Const] = 8;
 
-  // thresholds can be 0, in which case that type of leaf is never put in a grid.
-  // if not specified, a threshold is 0.
+  grid_thresh[Ntype_op::Const] = 8;
 }
 
 void Lhd_floorplanner::create() {

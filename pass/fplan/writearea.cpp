@@ -2,9 +2,8 @@
 #include <string>
 
 #include "ann_place.hpp"
-#include "fmt/core.h"
 #include "node_type_area.hpp"
-#include "pass_fplan.hpp"
+#include "writearea.hpp"
 
 void Pass_fplan_writearea::setup() {
   auto w = Eprp_method("pass.fplan.writearea",
