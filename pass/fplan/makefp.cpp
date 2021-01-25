@@ -1,3 +1,5 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
 #include "makefp.hpp"
 
 #include <string>
@@ -46,38 +48,6 @@ void Pass_fplan_makefp::makefp_int(Lhd_floorplanner& fp, const std::string_view 
 
 Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", var), root_lg(nullptr) {
   root_lg = var.lgs[0];  // length checked by pass() before being passed to Pass_fplan_makefp
-
-/*
-  geogLayout* root_layout = new geogLayout();
-
-  //root_layout->addComponentCluster(Ntype_op::Or, 2, 3.0, 4.0, 1.0, GeographyHint::Top);
-  //root_layout->addComponentCluster(Ntype_op::Mux, 1, 1.0, 4.0, 1.0, GeographyHint::Top);
-
-  //root_layout->addComponentCluster(Ntype_op::Or, 1, 3.0, 4.0, 1.0, GeographyHint::Center);
-  //root_layout->addComponentCluster(Ntype_op::EQ, 1, 2.1505063, 4.0, 1.0, GeographyHint::Center);
-  //root_layout->addComponentCluster(Ntype_op::Const, 1, 3.060318, 4.0, 1.0, GeographyHint::Top);
-  //root_layout->addComponentCluster(Ntype_op::Const, 1, 3.060318, 4.0, 1.0, GeographyHint::Center);
-
-  //root_layout->addComponentCluster("Control", 1, 4, 10., 1., Top);
-  //root_layout->addComponentCluster("L1", 4, 9, 3., 1., Bottom);
-
-  root_layout->addComponentCluster("Controlm", 2, 4, 50., 1., Top);
-  root_layout->addComponentCluster("L1m", 1, 1, 50., 1., Top);
-
-  //root_layout->addComponentCluster("LR_blk", 2, 2, 50., 1., LeftRight);
-  //root_layout->addComponentCluster("M_blk", 1, 6, 50., 1., Center);
-
-  bool success = root_layout->layout(AspectRatio);
-  if (!success) {
-    throw std::runtime_error("unable to lay out floorplan!");
-  }
-
-  ostream& fos = outputHotSpotHeader("floorplan.flp");
-  root_layout->outputHotSpotLayout(fos);
-  outputHotSpotFooter(fos);
-
-  return;
-*/
 
   std::string_view t_str = var.get("traversal");
 

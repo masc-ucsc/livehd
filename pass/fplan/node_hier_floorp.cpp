@@ -1,3 +1,5 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
 #include "node_hier_floorp.hpp"
 
 #include <functional>

@@ -1,3 +1,5 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
 #include "node_flat_floorp.hpp"
 
 #include "node_type_area.hpp"

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 # the PyCairo package needs to be installed as a dep, see https://pycairo.readthedocs.io/en/latest/getting_started.html for details
 

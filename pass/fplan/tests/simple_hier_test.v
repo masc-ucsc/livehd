@@ -1,3 +1,5 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
 // test file with less hierarchy than hier_test
 
 module leaf1(input [15:0] x, output [15:0] y);

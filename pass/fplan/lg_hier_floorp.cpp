@@ -1,3 +1,5 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
 #include "lg_hier_floorp.hpp"
 
 void Lg_hier_floorp::create_module(LGraph* lg) {

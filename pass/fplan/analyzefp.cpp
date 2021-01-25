@@ -1,3 +1,5 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
 #include "ann_place.hpp"
 #include "analyzefp.hpp"
 #include "lgedgeiter.hpp"

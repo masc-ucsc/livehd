@@ -31,7 +31,6 @@ TODOs:
 General:
  - checkfp:
    - correct number of nodes are present
-   - no weird disconnected segments?
  - multithread hier_node traversal
    - Check out the paper for ArchFP
    - see what can be improved on implementation

@@ -1,3 +1,5 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
 // test file with lots of repeating instantiations to test grids of modules
 
 module leaf_grid(input x, output y);
