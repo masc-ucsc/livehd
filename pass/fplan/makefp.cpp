@@ -55,9 +55,6 @@ Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", v
     Lg_hier_floorp hfp;
     makefp_int(hfp, "file");
   } else if (t_str == "flat_node") {
-    // ArchFP doesn't handle large numbers of nodes being attached to a single geogLayout instance very well
-    fmt::print("WARNING: this kind of traversal only works for small numbers of nodes.\n");
-
     Node_flat_floorp nffp;
     makefp_int(nffp, "file");
   } else if (t_str == "hier_node") {

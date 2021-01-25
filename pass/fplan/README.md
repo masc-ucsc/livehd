@@ -21,7 +21,6 @@ livehd> lgraph.open name:hier_test |> pass.fplan.makefp traversal:hier_node dest
 
 # check the floorplan for errors (overlapping layouts, etc.)
 livehd> lgraph.open name:hier_test |> pass.fplan.checkfp
-
 ```
 
 ## Viewing
@@ -36,6 +35,5 @@ $ view.py -i floorplan.flp -s 1600 && open floorplan.png
  - `flat_lg`: Each LGraph module (verilog module) will be floorplanned without taking into accout the hierarchy of the modules.
  - `hier_lg`: Same as `flat_lg`, but hierarchy will be taken into account
  - `flat_node`: same as `flat_lg`, but nodes will be floorplanned instead of modules.
-    - This kind of traversal is only suitable for very small designs due to ArchFP limitations.
  - `hier_node`: same as `hier_lg`, but nodes will be floorplanned instead of modules.
     - This kind of traversal is currently the only one that is capable of writing floorplans back to the hierarchy
