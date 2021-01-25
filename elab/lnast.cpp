@@ -245,8 +245,6 @@ void Lnast::merge_hierarchical_attr_set(Lnast_nid &dot_nid) {
   auto c0_asg = get_first_child(sibling_asg_nid);
   auto c1_asg = get_sibling_next(c0_asg);
   auto c1_asg_data_bk = get_data(c1_asg);
-  fmt::print("DEBUG c0_dot:{}\n", get_name(c0_dot));
-  fmt::print("DEBUG c1_dot:{}\n", get_name(c1_dot));
 
 
   /* std::stack<Etoken> stk_tuple_fields; */ 
@@ -264,10 +262,8 @@ void Lnast::merge_hierarchical_attr_set(Lnast_nid &dot_nid) {
   ref_data(sibling_asg_nid)->type = Lnast_ntype::create_tuple_add();
 
   auto leaves_size = 1 + stk_tuple_fields.size();
-  fmt::print("DEBUG leaves_size:{}\n", leaves_size);
   for (uint8_t i = 0; i < leaves_size; i ++) {
     
-    fmt::print("DEBUG i:{}\n", i);
     Lnast_nid nid_stk_top;
     if (!stk_tuple_fields.empty())
       nid_stk_top = stk_tuple_fields.top();
@@ -297,7 +293,6 @@ void Lnast::collect_hier_tuple_nids(Lnast_nid &prev_dot_nid, std::stack<Lnast_ni
     return;
   }
   
-  fmt::print("DEBUG hello1\n");
   auto c0_dot = get_first_child(prev_dot_nid);
   auto c1_dot = get_sibling_next(c0_dot);
   auto c2_dot = get_sibling_next(c1_dot);
@@ -309,7 +304,6 @@ void Lnast::collect_hier_tuple_nids(Lnast_nid &prev_dot_nid, std::stack<Lnast_ni
     collect_hier_tuple_nids(dot_sibling, stk_tuple_fields);
   } else {
     // head of the hier_tuple, e.g., dot -> (___F9, foo, bar)
-    fmt::print("DEBUG hello2\n");
     stk_tuple_fields.push(c2_dot);
     stk_tuple_fields.push(c1_dot);
   }
