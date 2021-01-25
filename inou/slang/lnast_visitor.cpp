@@ -149,6 +149,10 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
       inc++;
       auto node_and   = Lnast_node::create_ref (lnast->add_string("__and"+std::to_string(inc)));
       auto node_or   = Lnast_node::create_ref (lnast->add_string("__or"+std::to_string(inc)));
+      auto node_xor   = Lnast_node::create_ref (lnast->add_string("__xor"+std::to_string(inc)));
+      auto node_not   = Lnast_node::create_ref (lnast->add_string("__not"+std::to_string(inc)));
+
+
       fmt::print("tmp list check: \n");
       for (auto check = tmpList.cbegin(); check!= tmpList.cend(); ++check) std::cout << " " << *check;
       
@@ -205,9 +209,35 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
           operandList.pop_back();
         }
       }
+      else if(*it=="XOR"){
+        tmpList.insert(tmpList.begin(),"__xor"+std::to_string(inc)); //for connection the node refs
+        auto idx_xor = lnast->add_child(idx_stmts, Lnast_node::create_and ("XOR"));
+        lnast->add_child(idx_xor, node_xor);
+        if (last_flag != 1) {
+          auto node_tmp = Lnast_node::create_ref(lnast->add_string(tmpList.back()));
+          tmpList.pop_back();
+          lnast->add_child(idx_xor, node_tmp);
+          tmp_size--;
+          if (tmp_size == 0) {
+            last_flag = 1;
+          } else {
+            auto node_tmp1 = Lnast_node::create_ref(lnast->add_string(tmpList.back()));
+            tmpList.pop_back();
+            lnast->add_child(idx_xor, node_tmp1);
+            tmp_size--;
+          }
+        }
+        if (last_op && last_flag) {
+          last_op       = 0;
+          last_flag     = 0;
+          tmp_size      = tmpList.size();
+          auto node_op1 = Lnast_node::create_ref(lnast->add_string(operandList.back()));
+          lnast->add_child(idx_xor, node_op1);
+          operandList.pop_back();
+        }
+      }
     }
   }
-  
   auto node_dpa    = Lnast_node::create_dp_assign ("dp_assign",  line_num, pos1, pos2);
   auto idx_assign  = lnast->add_child(idx_stmts,  node_dpa);
   const auto& lhs = expr.left();
