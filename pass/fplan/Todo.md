@@ -6,9 +6,9 @@ Benchmarking tests (built using -c opt):
    - flat: ??
 
 Issues:
- - passing super flat and wide hierarchies causes problems in ArchFP
  - ArchFP also has basically no error checking, and fails on large floorplans while returning successfully from layout() on the root layout
  - ArchFP has a refcounting implementation built-in, which causes problems when destructors are called on anything other than the root node.  Replace with std::shared_ptr
+ - ArchFP, line 797: malloc used instead of new?????
 
 Issues not related to ArchFP:
  - fix Lgraph hier traversal

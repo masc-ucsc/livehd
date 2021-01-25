@@ -10,6 +10,7 @@
 #include <iostream>
 #include <map>
 #include <string>
+#include <vector>
 
 #include "absl/container/flat_hash_set.h"
 #include "core/cell.hpp"
@@ -186,16 +187,16 @@ class FPContainer : public FPObject {
   //    containers will need to use the accessors.
   // In this way, we can maintain proper refcounts that can tell us
   //    when things can be deleted.
-  int        itemCount;
-  FPObject** items;
+  // int        itemCount;
+  std::vector<FPObject*> items;
   void       addComponentAtIndex(FPObject* comp, int index);
   FPObject*  removeComponentAtIndex(int index);
 
 protected:
-  static int maxItemCount;
+  //static int maxItemCount;
 
   // These allow safe access to the item list.
-  int       getComponentCount() { return itemCount; }
+  int       getComponentCount() { return items.size(); }
   FPObject* getComponent(int index) { return items[index]; }
   FPObject* removeComponent(int index);
   void      replaceComponent(FPObject* comp, int index);

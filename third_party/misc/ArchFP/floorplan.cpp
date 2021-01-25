@@ -162,14 +162,6 @@ void FPObject::outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_inde
     hn.set_place(p);
     hn.set_hier_color(1);  // set node instance as marked after visiting it
 
-/*
-    fmt::print("setting node {} (l: {}, p: {}) with color {}\n",
-               hn.debug_name(),
-               hn.get_hidx().level,
-               hn.get_hidx().pos,
-               hn.get_hier_color());
-*/
-
     break;
   }
 }
@@ -241,51 +233,56 @@ bool FPCompWrapper::layout(FPOptimization opt, double ratio) {
 }
 
 // Methods for the FPcontainer class.
-int FPContainer::maxItemCount = 256;
 
 // Default constructor
-FPContainer::FPContainer() {
-  itemCount = 0;
-  items     = new FPObject*[maxItemCount];
-  count     = 1;
-  yMirror   = false;
-  xMirror   = false;
+FPContainer::FPContainer() : items() {
+  count   = 1;
+  yMirror = false;
+  xMirror = false;
 }
 
 FPContainer::~FPContainer() {
   // It's very important to only delete items when their refcount hits zero.
   // cout << "deleting container.\n";
-  for (int i = 0; i < itemCount; i++) {
+  for (int i = 0; i < items.size(); i++) {
     FPObject* item     = items[i];
     int       newCount = item->decRefCount();
     if (newCount == 0)
       delete item;
   }
-  delete[] items;
 }
 
 // To properly handle refCount, we will only allow one method to actually add (or remove) items from the item list.
 
 void FPContainer::addComponentAtIndex(FPObject* comp, int index) {
-  if (index < 0 || index > itemCount)
+  if (index < 0 || index > items.size())
     throw invalid_argument("Attempt to add item to Container at illegal index.");
-  if (itemCount == maxItemCount)
-    throw out_of_range("Attempt to add more than the maximum items to a container.");
+
+  const size_t oldsize = items.size();
+  items.resize(items.size() + 1);
+
   // See if we need to move things to open space.
-  if (index < itemCount)
-    for (int i = itemCount; i > index; i--) items[i] = items[i - 1];
+  if (index < oldsize && oldsize > 0) {
+    for (int i = oldsize; i > index; i--) {
+      items[i] = items[i - 1];
+    }
+  }
+
   items[index] = comp;
-  itemCount += 1;
   comp->incRefCount();
 }
 
 FPObject* FPContainer::removeComponentAtIndex(int index) {
-  if (index < 0 || index >= itemCount)
+  if (index < 0 || index >= items.size())
     throw invalid_argument("Attempt to add item to Container at illegal index.");
   FPObject* comp = items[index];
   // Now fill in the hole.
-  for (int i = index; i < itemCount - 1; i++) items[i] = items[i + 1];
-  itemCount -= 1;
+  for (int i = index; i < items.size() - 1; i++) {
+    items[i] = items[i + 1];
+  }
+
+  items.resize(items.size() - 1);
+
   // Often this component is about to be added somewhere else.
   // So, if the refCount is now zero, don't handle it here.
   // If the caller doesn't put it somewhere else, they will have to delete it themselves.
@@ -298,7 +295,7 @@ void FPContainer::replaceComponent(FPObject* comp, int index) {
   addComponentAtIndex(comp, index);
 }
 
-void FPContainer::addComponent(FPObject* comp) { addComponentAtIndex(comp, itemCount); }
+void FPContainer::addComponent(FPObject* comp) { addComponentAtIndex(comp, items.size()); }
 
 void FPContainer::addComponentToFront(FPObject* comp) { addComponentAtIndex(comp, 0); }
 
@@ -332,7 +329,7 @@ FPObject* FPContainer::removeComponent(int index) { return removeComponentAtInde
 // We want a descending sort.
 // We know this won't change item counts, so just it have at the item list.
 void FPContainer::sortByArea() {
-  int len = itemCount;
+  int len = items.size();
   for (int i = 0; i < len; i++) {
     double maxArea      = -1;
     int    maxAreaIndex = 0;
@@ -368,7 +365,7 @@ void FPContainer::outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_i
   I(lg);
   I(!hidx.is_invalid());
   I(root->ref_htree()->ref_lgraph(hidx) == lg);
-  
+
   pushMirrorContext(startX, startY);
   int itemCount = getComponentCount();
 
@@ -516,7 +513,7 @@ void gridLayout::outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_in
   I(lg);
   I(!hidx.is_invalid());
   I(root->ref_htree()->ref_lgraph(hidx) == lg);
-  
+
   if (getComponentCount() != 1) {
     cerr << "Attempt to output a grid with other than one component.\n";
     return;
@@ -803,10 +800,10 @@ bool geogLayout::layout(FPOptimization opt, double targetAR) {
   // Assume no item will be more than split in two.
   int        itemCount    = getComponentCount();
   int        maxArraySize = itemCount * 2;
-  FPObject** layoutStack  = (FPObject**)malloc(sizeof(FPObject*) * maxArraySize);
+  FPObject** layoutStack  = new FPObject*[maxArraySize];
   for (int i = 0; i < maxArraySize; i++) layoutStack[i] = 0;
-  FPObject** centerItems = (FPObject**)(malloc(sizeof(FPObject*) * FPContainer::maxItemCount));
-  for (int i = 0; i < maxItemCount; i++) centerItems[i] = 0;
+  FPObject** centerItems = new FPObject*[itemCount];
+  for (int i = 0; i < itemCount; i++) centerItems[i] = 0;
 
   // Calculate the total area, and the implied target width and height.
   area             = totalArea();
@@ -841,8 +838,8 @@ bool geogLayout::layout(FPOptimization opt, double targetAR) {
   }
   area = width * height;
 
-  free(centerItems);
-  free(layoutStack);
+  delete[] centerItems;
+  delete[] layoutStack;
   return retval;
 }
 
