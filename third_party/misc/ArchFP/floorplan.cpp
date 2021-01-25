@@ -840,6 +840,7 @@ bool geogLayout::layout(FPOptimization opt, double targetAR) {
 
   delete[] centerItems;
   delete[] layoutStack;
+  
   return retval;
 }
 

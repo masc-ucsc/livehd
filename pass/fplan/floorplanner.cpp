@@ -9,28 +9,24 @@ Lhd_floorplanner::Lhd_floorplanner() {
   // set how many nodes of a given type must be encountered before they are put in a grid together
   // thresholds can be 0, in which case that type of leaf is never put in a grid.
   for (uint8_t type = 0; type < (uint8_t)Ntype_op::Last_invalid; type++) {
-    // grid_thresh[(Ntype_op)type] = 4;
+    grid_thresh[(Ntype_op)type] = 6;
   }
 
   // set memory elements with a lower threshold, because they should be grouped together
-  /*
   grid_thresh[Ntype_op::Memory] = 4;
   grid_thresh[Ntype_op::Sflop]  = 4;
   grid_thresh[Ntype_op::Aflop]  = 4;
   grid_thresh[Ntype_op::Latch]  = 4;
   grid_thresh[Ntype_op::Fflop]  = 4;
-  */
 }
 
-Lhd_floorplanner::~Lhd_floorplanner() {
-  delete layouts[root_lg];
-}
+Lhd_floorplanner::~Lhd_floorplanner() { delete layouts[root_lg]; }
 
 GeographyHint Lhd_floorplanner::randomHint() {
   static size_t sel = 0;
 
-  sel = (sel + 1) % valid_hints.size();
-  return valid_hints[sel];
+  sel = (sel + 1) % hint_seq.size();
+  return hint_seq[sel];
 }
 
 void Lhd_floorplanner::create() {

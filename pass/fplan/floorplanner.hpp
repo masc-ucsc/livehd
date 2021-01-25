@@ -37,12 +37,13 @@ protected:
   */
 
   // using std::array for fixed max size
-  constexpr static std::array<GeographyHint, 5> valid_hints = {
+  constexpr static std::array<GeographyHint, 5> hint_seq = {
       GeographyHint::Center,
-      GeographyHint::Left,
-      GeographyHint::Right,
       GeographyHint::Top,
       GeographyHint::Bottom,
+      GeographyHint::Left,
+      GeographyHint::Right,
+      
       /*
       
       these are only valid for two placing two nodes at a time (ugh)

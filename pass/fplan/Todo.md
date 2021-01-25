@@ -6,13 +6,13 @@ Benchmarking tests (built using -c opt):
    - flat: ??
 
 Issues:
- - ArchFP also has basically no error checking, and fails on large floorplans while returning successfully from layout() on the root layout
+ - ArchFP also has basically no error checking, and fails on large floorplans while returning successfully from layout() on the root layout...?
+    - Using a high aspect ratio and putting things in grids alleviates this problem, but does not eliminate it.
  - ArchFP has a refcounting implementation built-in, which causes problems when destructors are called on anything other than the root node.  Replace with std::shared_ptr
- - ArchFP, line 797: malloc used instead of new?????
 
 Issues not related to ArchFP:
  - fix Lgraph hier traversal
- - view.py output is flipped due to inverted vertical coords in cairo
+ - view.py output is flipped due to mismatch between coordinates for HotSpot and png coordinates in PyCairo
 
 TODOs:
 0. Verification
