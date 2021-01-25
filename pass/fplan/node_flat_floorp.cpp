@@ -6,6 +6,8 @@ void Node_flat_floorp::load(LGraph* root, const std::string_view lgdb_path) {
   (void)lgdb_path;
   root_lg = root;
 
+  layouts[root_lg] = new geogLayout();
+
   Ntype_area na(lgdb_path);
 
   for (auto n : root->fast(true)) {
@@ -32,7 +34,7 @@ void Node_flat_floorp::load(LGraph* root, const std::string_view lgdb_path) {
 
       auto d = na.get_dim(op);
 
-      root_layout->addComponentCluster(name.data(), 1, d.area, d.max_aspect, d.min_aspect);
+      layouts[root_lg]->addComponentCluster(op, 1, d.area, d.max_aspect, d.min_aspect, randomHint());
     }
   }
 }

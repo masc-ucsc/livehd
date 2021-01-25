@@ -35,7 +35,6 @@ enum FPOptimization { Area, AspectRatio };
 // Here is the enumeration for layout hints for the geographic layout.
 enum GeographyHint {
   Center, // make center the default, since it's considered to be valid
-  UnknownGeography,
   Left,
   Right,
   Top,
@@ -46,7 +45,8 @@ enum GeographyHint {
   TopBottom,
   TopBottomMirror,
   TopBottom180,
-  Periphery
+  Periphery, // not supported
+  UnknownGeography, // not supported
 };
 
 // This class is meant to be a standin for a real component from M5 or whatever this eventually merge into.

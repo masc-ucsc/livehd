@@ -3,7 +3,7 @@
 void Lg_hier_floorp::create_module(LGraph* lg) {
   (void)lg;
   /*
-  attrs[lg].l = std::make_unique<geogLayout>();
+  attrs[lg].l = std::make_shared<geogLayout>();
   attrs[lg].l->addComponentCluster(std::string(lg->get_name()), 1, get_area(lg), 4.0, 1.0, Center);
   if (debug_print) {
     fmt::print("creating {}\n", lg->get_name());
@@ -21,7 +21,7 @@ void Lg_hier_floorp::load(LGraph* root, const std::string_view lgdb_path) {
   root_lg = root;
 
   // create the root layout so the top-level module doesn't get included in its own floorplan
-  attrs[root_lg].l = std::make_unique<geogLayout>();
+  attrs[root_lg].l = std::make_shared<geogLayout>();
 
   std::function<void(LGraph*)> load_lgs = [&](LGraph* lg) {
     // create and load all submodules

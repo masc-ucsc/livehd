@@ -5,11 +5,14 @@ Benchmarking tests (built using -c opt):
  - XOR chain (100):
    - flat: ??
 
-Bugs:
- - calling delete on geogLayouts causes problems for some reason
- - view.py output is flipped due to inverted vertical coords in cairo
+Issues:
  - passing super flat and wide hierarchies causes problems in ArchFP
+ - ArchFP also has basically no error checking, and fails on large floorplans while returning successfully from layout() on the root layout
+ - ArchFP has a refcounting implementation built-in, which causes problems when destructors are called on anything other than the root node.  Replace with std::shared_ptr
+
+Issues not related to ArchFP:
  - fix Lgraph hier traversal
+ - view.py output is flipped due to inverted vertical coords in cairo
 
 TODOs:
 0. Verification
@@ -39,7 +42,6 @@ Style guide refactors:
  - make sure all class/type names are uppercase
  - string ops -> abseil versions
  - getters and setters?
- - replace 90's C++ code in ArchFP with std::vector / std::unique_ptr?
 
 Easy:
  - add license stuff

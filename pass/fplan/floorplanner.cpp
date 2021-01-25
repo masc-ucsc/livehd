@@ -4,33 +4,36 @@
 #include "core/ann_place.hpp"
 #include "core/lgedgeiter.hpp"
 
-Lhd_floorplanner::Lhd_floorplanner() : root_layout(std::make_unique<bagLayout>()) {
-  // skip subnodes - they get put in a grid if >1 of a subnode of a given type are found
-
+Lhd_floorplanner::Lhd_floorplanner() {
   // set how many nodes of a given type must be encountered before they are put in a grid together
   // thresholds can be 0, in which case that type of leaf is never put in a grid.
-  // (default is 0)
-  grid_thresh[Ntype_op::And] = 8;
-  grid_thresh[Ntype_op::Or]  = 8;
-  grid_thresh[Ntype_op::Xor] = 8;
-  grid_thresh[Ntype_op::Not] = 8;
+  for (uint8_t type = 0; type < (uint8_t)Ntype_op::Last_invalid; type++) {
+    // grid_thresh[(Ntype_op)type] = 4;
+  }
 
+  // set memory elements with a lower threshold, because they should be grouped together
+  /*
   grid_thresh[Ntype_op::Memory] = 4;
   grid_thresh[Ntype_op::Sflop]  = 4;
   grid_thresh[Ntype_op::Aflop]  = 4;
   grid_thresh[Ntype_op::Latch]  = 4;
   grid_thresh[Ntype_op::Fflop]  = 4;
+  */
+}
 
-  grid_thresh[Ntype_op::LUT] = 4;
+Lhd_floorplanner::~Lhd_floorplanner() {
+  delete layouts[root_lg];
+}
 
-  grid_thresh[Ntype_op::SHL] = 4;
-  grid_thresh[Ntype_op::SRA] = 4;
+GeographyHint Lhd_floorplanner::randomHint() {
+  static size_t sel = 0;
 
-  grid_thresh[Ntype_op::Const] = 8;
+  sel = (sel + 1) % valid_hints.size();
+  return valid_hints[sel];
 }
 
 void Lhd_floorplanner::create() {
-  bool success = root_layout->layout(AspectRatio, 1);
+  bool success = layouts[root_lg]->layout(AspectRatio);
   if (!success) {
     throw std::runtime_error("unable to lay out floorplan!");
   }
@@ -38,7 +41,7 @@ void Lhd_floorplanner::create() {
 
 void Lhd_floorplanner::write_file(const std::string_view filename) {
   ostream& fos = outputHotSpotHeader(filename.data());
-  root_layout->outputHotSpotLayout(fos);
+  layouts[root_lg]->outputHotSpotLayout(fos);
   outputHotSpotFooter(fos);
 }
 
@@ -50,7 +53,7 @@ void Lhd_floorplanner::write_lhd() {
   });
 
   absl::flat_hash_set<Hierarchy_index> hidx_used_set;
-  root_layout->outputLGraphLayout(root_lg, root_lg, root_lg->ref_htree()->root_index(), hidx_used_set);
+  layouts[root_lg]->outputLGraphLayout(root_lg, root_lg, root_lg->ref_htree()->root_index(), hidx_used_set);
 
   root_lg->each_hier_fast_direct([](const Node& n) {
     if (!n.is_type_synth()) {

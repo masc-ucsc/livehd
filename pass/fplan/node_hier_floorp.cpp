@@ -7,6 +7,7 @@
 #include "node_type_area.hpp"
 
 void Node_hier_floorp::load_lg_nodes(LGraph* lg, const std::string_view lgdb_path) {
+
   if (layouts[lg]) {
     if (debug_print) {
       fmt::print("(layout for {} already exists)\n", lg->get_name());
@@ -14,7 +15,7 @@ void Node_hier_floorp::load_lg_nodes(LGraph* lg, const std::string_view lgdb_pat
     return;
   }
 
-  auto l = std::make_unique<bagLayout>();
+  geogLayout* l = new geogLayout();
 
   Ntype_area na(lgdb_path);
 
@@ -34,11 +35,11 @@ void Node_hier_floorp::load_lg_nodes(LGraph* lg, const std::string_view lgdb_pat
       fmt::print("adding {} of subcomponent {} to cluster of lg {}\n", sub_lg_count[sub_lg], sub_lg->get_name(), lg->get_name());
     }
 
-    l->addComponent(layouts[sub_lg].get(), sub_lg_count[sub_lg]);
+    l->addComponent(layouts[sub_lg], sub_lg_count[sub_lg], randomHint());
   }
 
   absl::flat_hash_map<Ntype_op, unsigned int> grid_count;
-  absl::flat_hash_set<Ntype_op> skip;
+  absl::flat_hash_set<Ntype_op>               skip;
   for (auto n : lg->fast()) {
     Ntype_op op = n.get_type_op();
     if (!Ntype::is_synthesizable(op)) {
@@ -75,12 +76,14 @@ void Node_hier_floorp::load_lg_nodes(LGraph* lg, const std::string_view lgdb_pat
       fmt::print("\tarea: {}, min asp: {}, max asp: {}\n", node_area, dim.min_aspect, dim.max_aspect);
     }
 
-    l->addComponentCluster(n.get_type_op(), count, node_area, dim.max_aspect, dim.min_aspect);
+    l->addComponentCluster(n.get_type_op(), count, node_area, dim.max_aspect, dim.min_aspect, randomHint());
   }
 
   l->setName(lg->get_name().data());
   l->setType(Ntype_op::Sub);  // treat nodes placed by us as subnodes
-  layouts[lg] = std::move(l);
+
+  I(layouts[lg] == nullptr);
+  layouts[lg] = l;
 }
 
 void Node_hier_floorp::load(LGraph* root, const std::string_view lgdb_path) {
@@ -114,6 +117,4 @@ void Node_hier_floorp::load(LGraph* root, const std::string_view lgdb_path) {
   };
 
   load_nodes(root);
-
-  root_layout = std::move(layouts[root]);
 }
