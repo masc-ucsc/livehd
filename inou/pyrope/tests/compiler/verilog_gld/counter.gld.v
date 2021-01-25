@@ -1,4 +1,4 @@
-module counter_gld (
+module counter (
   input clock,
   input en,
   output reg [3:0] cnt_o

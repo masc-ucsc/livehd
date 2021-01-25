@@ -211,6 +211,10 @@ void Lnast::dot2attr_set_get(const Lnast_nid &psts_nid, Lnast_nid &dot_nid) {
   auto c0_dot = get_first_child(dot_nid);
   auto c1_dot = get_sibling_next(c0_dot);
   auto c2_dot = get_sibling_next(c1_dot);
+  if (get_name(c1_dot).substr(0,3) == "___") {
+    merge_hierarchical_attr_set(dot_nid);
+    return;
+  }
 
   if (is_lhs(psts_nid, dot_nid)) {
     // change node semantic from dot->attr_set ; assign->invalid
@@ -228,6 +232,84 @@ void Lnast::dot2attr_set_get(const Lnast_nid &psts_nid, Lnast_nid &dot_nid) {
   }
 }
 
+
+void Lnast::merge_hierarchical_attr_set(Lnast_nid &dot_nid) {
+  I(get_type(dot_nid).is_dot() || get_type(dot_nid).is_select());
+  auto sibling_asg_nid = get_sibling_next(dot_nid);
+  I(get_type(sibling_asg_nid).is_assign());
+
+  auto c0_dot = get_first_child(dot_nid);
+  auto c1_dot = get_sibling_next(c0_dot);
+  auto c2_dot = get_sibling_next(c1_dot);
+  I((get_name(c2_dot).substr(0,7) == "__ubits") || get_name(c2_dot).substr(0,7) == "__sbits");
+  auto c0_asg = get_first_child(sibling_asg_nid);
+  auto c1_asg = get_sibling_next(c0_asg);
+  auto c1_asg_data_bk = get_data(c1_asg);
+
+
+  /* std::stack<Etoken> stk_tuple_fields; */ 
+  std::stack<Lnast_nid> stk_tuple_fields; 
+
+  // collect hier-tuple information from siblings
+  I(get_name(c1_dot).substr(0,3) == "___");
+  /* stk_tuple_fields.push(get_data(c2_dot).token); */
+  stk_tuple_fields.push(c2_dot);
+  auto dot_sibling = get_sibling_prev(dot_nid);
+  collect_hier_tuple_nids(dot_sibling, stk_tuple_fields);
+
+  // transform the asg into a hierarchical ta to set the hierarchical attribute
+  ref_data(dot_nid)->type = Lnast_ntype::create_invalid();
+  ref_data(sibling_asg_nid)->type = Lnast_ntype::create_tuple_add();
+
+  auto leaves_size = 1 + stk_tuple_fields.size();
+  for (uint8_t i = 0; i < leaves_size; i ++) {
+    
+    Lnast_nid nid_stk_top;
+    if (!stk_tuple_fields.empty())
+      nid_stk_top = stk_tuple_fields.top();
+
+    if (i == 0) {
+      ref_data(c0_asg)->token = get_data(nid_stk_top).token;
+      ref_data(c0_asg)->type  = get_data(nid_stk_top).type;
+      ref_data(c0_asg)->subs  = get_data(nid_stk_top).subs;
+    } else if (i == 1) {
+      ref_data(c1_asg)->token = get_data(nid_stk_top).token;
+      ref_data(c1_asg)->type  = get_data(nid_stk_top).type;
+      ref_data(c1_asg)->subs  = get_data(nid_stk_top).subs;
+    } else if (i == leaves_size - 1) {
+      add_child(sibling_asg_nid, c1_asg_data_bk);
+    } else {
+      add_child(sibling_asg_nid, get_data(nid_stk_top));
+    }
+    stk_tuple_fields.pop();
+  }
+}
+ 
+void Lnast::collect_hier_tuple_nids(Lnast_nid &prev_dot_nid, std::stack<Lnast_nid> &stk_tuple_fields) {
+  auto type = get_type(prev_dot_nid);
+  // note: the dot might be transform to tuple_get, but it's fine in this case, handle it as normal dot
+  if (!type.is_dot() && !type.is_select() && !type.is_tuple_get()) {
+    get_data(prev_dot_nid).dump();
+    return;
+  }
+  
+  auto c0_dot = get_first_child(prev_dot_nid);
+  auto c1_dot = get_sibling_next(c0_dot);
+  auto c2_dot = get_sibling_next(c1_dot);
+
+  if (get_name(c1_dot).substr(0,3) == "___") {
+    // midle of the hier_tuple, e.g., dot -> (___F10, ___F9, 0)
+    stk_tuple_fields.push(c2_dot);
+    auto dot_sibling = get_sibling_prev(prev_dot_nid);
+    collect_hier_tuple_nids(dot_sibling, stk_tuple_fields);
+  } else {
+    // head of the hier_tuple, e.g., dot -> (___F9, foo, bar)
+    stk_tuple_fields.push(c2_dot);
+    stk_tuple_fields.push(c1_dot);
+  }
+
+  ref_data(prev_dot_nid)->type = Lnast_ntype::create_invalid();
+}
 
 void Lnast::merge_tconcat_paired_assign(const Lnast_nid &psts_nid, const Lnast_nid &concat_nid) {
   auto &dot_lrhs_table   = dot_lrhs_tables[psts_nid];

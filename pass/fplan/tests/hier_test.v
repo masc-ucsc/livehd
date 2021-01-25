@@ -1,3 +1,5 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
 // test file with super deep hierarchy to test hierarchy
 
 module leaf1(input [14:0] ai, output [14:0] ao);

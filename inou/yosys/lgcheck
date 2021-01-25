@@ -112,6 +112,55 @@ if [ ! -f "${YOSYS}" ]; then
   fi
 fi
 
+fm_top=$OPT_TOP
+if [ "${fm_top}" == "" ]; then
+  filename=$(basename -- "$GATE")
+  fm_top="${filename%.*}"
+  if [[ $fm_top =~ "long_" ]]; then
+    fm_top=${fm_top:5}
+  elif [[ $fm_top =~ "fixme_" ]]; then
+    fm_top=${fm_top:6}
+  fi
+fi
+
+if [ -z $FM_SHELL ]; then
+  FM_SHELL=`which fm_shell`
+  if [ $? -ne 0 ]; then
+    echo "fm_shell not found, make sure fm_shell is in your path, or define the FM_SHELL environment variable"
+    exit 1
+  fi
+fi
+
+if [ -x ${FM_SHELL} ]; then
+  echo "using formality"
+
+  echo "
+  set_app_var synopsys_auto_setup true
+  set_app_var hdlin_ignore_parallel_case false
+  set_app_var hdlin_ignore_full_case false
+  read_sverilog -r  \"${GOLD}\"
+  set_top ${fm_top}
+  read_sverilog -i  \"${GATE}\"
+  set_top ${fm_top}
+  match
+  report_unmatched_points >> \"fm_${fm_top}_error.log\"
+  if { ![verify] }  {
+    report_failing_points >> \"fm_${fm_top}_error.log\"
+    report_aborted >> \"fm_${fm_top}_error.log\"
+    analyze_points -all >> \"fm_${fm_top}_error.log\"
+  }
+  exit
+  " > fm_script_${fm_top}.tcl
+
+  ${FM_SHELL} -64bit -f fm_script_${fm_top}.tcl | grep "Verification SUCCEEDED"
+  if [ $? -eq 0 ]; then
+    echo "5.Successfully matched ${GATE} with ${GOLD} top:${fm_top}"
+    exit 0
+  fi
+
+  echo "WARN: formality failed to prove equivalency."
+fi
+
 echo "using yosys:"${YOSYS}
 
 if [ ! -f ${YOSYS} ]; then
@@ -209,46 +258,7 @@ if [ $? -eq 0 ]; then
   exit 0
 fi
 
-echo "WARN: Yosys failed to prove equivalency, trying to prove equivalency with Formality."
+echo "WARN: Yosys failed to prove equivalency."
 
-gate_top=`${YOSYS} -p "read_verilog -sv ${GATE}; hierarchy ${TOP_STR}"  | grep "Top module" | tail -n1 | tr '\\\\' ' ' | awk '{print $3}'`
-gold_top=`${YOSYS} -p "read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}"  | grep "Top module" | tail -n1 | tr '\\\\' ' ' | awk '{print $3}'`
-
-if [ -z $FM_SHELL ]; then
-  FM_SHELL=`which fm_shell`
-  if [ $? -ne 0 ]; then
-    echo "fm_shell not found, make sure fm_shell is in your path, or define the FM_SHELL environment variable"
-    exit 1
-  fi
-fi
-
-if [ ! -f ${FM_SHELL} ]; then
-  echo "fm_shell not found, make sure fm_shell is in your path"
-  exit 1
-fi
-
-echo "
-    set_app_var synopsys_auto_setup true
-    set_app_var hdlin_ignore_parallel_case false
-    set_app_var hdlin_ignore_full_case false
-    read_sverilog -r  \"${GOLD}\"
-    set_top r:/WORK/${gold_top}
-    read_sverilog -i  \"${GATE}\"
-    set_top i:/WORK/${gate_top}
-    match
-    report_unmatched_points >> \"fm_${gold_top}_error.log\"
-    if { ![verify] }  {
-      report_failing_points >> \"fm_${gold_top}_error.log\"
-        report_aborted >> \"fm_${gold_top}_error.log\"
-        analyze_points -all >> \"fm_${gold_top}_error.log\"
-    }
-exit" > fm_script_${gold_top}.tcl
-
-${FM_SHELL} -64bit -f fm_script_${gold_top}.tcl | grep "Verification SUCCEEDED"
-if [ $? -eq 0 ]; then
-  echo "5.Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
-  exit 0
-fi
-
-echo "FAIL: circuits are not equivalent (${input}) with top:${OPT_TOP}"
+echo "FAIL: circuits are not equivalent ${GATE} vs ${GOLD} with top:${fm_top}"
 exit 1

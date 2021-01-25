@@ -1,10 +1,11 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
 #include <random>
 #include <string>
 
 #include "ann_place.hpp"
-#include "fmt/core.h"
 #include "node_type_area.hpp"
-#include "pass_fplan.hpp"
+#include "writearea.hpp"
 
 void Pass_fplan_writearea::setup() {
   auto w = Eprp_method("pass.fplan.writearea",
@@ -12,7 +13,7 @@ void Pass_fplan_writearea::setup() {
                        &Pass_fplan_writearea::pass);
 
   w.add_label_optional("min_aspect_ratio", "minimum aspect ratio of nodes in lgraph", "1.0");
-  w.add_label_optional("max_aspect_ratio", "maximum aspect ratio of nodes in lgraph", "4.0");
+  w.add_label_optional("max_aspect_ratio", "maximum aspect ratio of nodes in lgraph", "50.0");
   w.add_label_optional("min_area", "minimum area of nodes in lgraph (mm²)", "1.0");
   w.add_label_optional("max_area", "maximum area of nodes in lgraph (mm²)", "4.0");
 

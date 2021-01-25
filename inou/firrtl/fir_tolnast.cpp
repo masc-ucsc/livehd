@@ -1809,7 +1809,8 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
   // Print out statement
   switch (stmt.statement_case()) {
     case firrtl::FirrtlPB_Statement::kWire: {  // Wire
-      init_wire_dots(lnast, stmt.wire().type(), stmt.wire().id(), parent_node);
+      // FIXME->sh: 1/25/2021, we don't need to specify bits for wires as in FIRRTL we could propagate the necessary information from inputs/reg
+      /* init_wire_dots(lnast, stmt.wire().type(), stmt.wire().id(), parent_node); */
       break;
     }
     case firrtl::FirrtlPB_Statement::kRegister: {  // Register

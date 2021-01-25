@@ -1055,6 +1055,24 @@ Node_pin Lnast_tolg::setup_ref_node_dpin(LGraph *lg, const Lnast_nid &lnidx_opd,
       return it->second;
     }
 
+    // FIXME->sh: this segment of code should be optimized after the tuple-mux is ready 1/22/2021
+    if (op == Ntype_op::TupAdd) {
+      auto parent_node  = node.setup_sink_pin("tuple_name").get_driver_node();
+      auto parent_ntype = parent_node.get_type_op();
+      if (parent_ntype == Ntype_op::TupRef || parent_ntype == Ntype_op::Or) {
+        // case: the tuple has only one field and being used to an operator -> it's still a scalar -> create TG to fetch field 0
+        auto tup_get        = lg->create_node(Ntype_op::TupGet);
+        auto tn_spin        = tup_get.setup_sink_pin("tuple_name");  // tuple name
+        auto field_pos_spin = tup_get.setup_sink_pin("position");    // field pos
+
+        auto tn_dpin = it->second;
+        auto field_pos_dpin = lg->create_node_const(Lconst(0)).setup_driver_pin();  // must be pos 0 as the case is "bar = a + 1", implicitly get a.0
+        lg->add_edge(tn_dpin, tn_spin);
+        lg->add_edge(field_pos_dpin, field_pos_spin);
+        return tup_get.setup_driver_pin();
+      }
+    }
+
     // FIXME->sh: temporarily design for cprop tuple-mux
     if (op == Ntype_op::TupAdd)
       return it->second;

@@ -1,3 +1,5 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
 #pragma once
 
 #include <memory>
@@ -9,8 +11,7 @@
 
 class Lhd_floorplanner {
 public:
-
-  Lhd_floorplanner() : root_layout(std::make_unique<geogLayout>()) {}
+  Lhd_floorplanner();
 
   // load modules into ArchFP using verious kinds of traversals
   virtual void load(LGraph* root, const std::string_view lgdb_path) = 0;
@@ -23,29 +24,50 @@ public:
 
   // write the floorplan back to LiveHD for analysis and future floorplans
   void write_lhd();
-	
-  virtual ~Lhd_floorplanner() {
-    for (auto& pair : layouts) {
-      geogLayout* l = pair.second.release();
-      (void)l;
 
-      // TODO: actually deleting geogLayouts segfaults for some reason...
-      // delete l;
-      // (pair.second.l.reset() also fails)
-    }
-
-    geogLayout* l = root_layout.release();
-    (void)l;
-  }
+  ~Lhd_floorplanner();
 
 protected:
-  
+  /*
+    NOTE: raw pointers, new, and delete are used because ArchFP has a built-in reference counting system, so
+    all that is required in order to free all floorplanner memory is to free the top-level layout.  Freeing every layout
+    will result in double-frees.
+
+    A fix for this would be to replace the refcounting implementation with std::shared_ptr.
+  */
+
+  // using std::array for fixed max size
+  constexpr static std::array<GeographyHint, 5> hint_seq = {
+      GeographyHint::Center,
+      GeographyHint::Top,
+      GeographyHint::Bottom,
+      GeographyHint::Left,
+      GeographyHint::Right,
+      
+      /*
+      
+      these are only valid for two placing two nodes at a time (ugh)
+
+      GeographyHint::LeftRight,
+      GeographyHint::LeftRightMirror,
+      GeographyHint::LeftRight180,
+      GeographyHint::TopBottom,
+      GeographyHint::TopBottomMirror,
+      GeographyHint::TopBottom180,
+      */
+  };
+
+  GeographyHint randomHint();
+
   // layout of root node, used frequently
   LGraph* root_lg;
-  std::unique_ptr<geogLayout> root_layout;
 
   // layout of all child nodes
-  absl::flat_hash_map<LGraph*, std::unique_ptr<geogLayout>> layouts;
+  absl::flat_hash_map<LGraph*, geogLayout*> layouts;
 
+  // at what number of nodes of a given type should they be laid out in a grid?
+  absl::flat_hash_map<Ntype_op, unsigned int> grid_thresh;
+
+  // print debug information
   constexpr static bool debug_print = false;
 };

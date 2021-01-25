@@ -1,3 +1,5 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
 #include "node_flat_floorp.hpp"
 
 #include "node_type_area.hpp"
@@ -5,6 +7,8 @@
 void Node_flat_floorp::load(LGraph* root, const std::string_view lgdb_path) {
   (void)lgdb_path;
   root_lg = root;
+
+  layouts[root_lg] = new geogLayout();
 
   Ntype_area na(lgdb_path);
 
@@ -32,7 +36,7 @@ void Node_flat_floorp::load(LGraph* root, const std::string_view lgdb_path) {
 
       auto d = na.get_dim(op);
 
-      root_layout->addComponentCluster(name.data(), 1, d.area, d.max_aspect, d.min_aspect, Center);
+      layouts[root_lg]->addComponentCluster(op, 1, d.area, d.max_aspect, d.min_aspect, randomHint());
     }
   }
 }

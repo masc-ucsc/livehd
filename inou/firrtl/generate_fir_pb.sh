@@ -19,9 +19,7 @@ pts='Trivial Tail TrivialArith
 Shifts PlusAnd MaxN ByteSelector Darken HiLoMultiplier SimpleALU Mul
 VecShiftRegisterParam VecShiftRegisterSimple ' 
 
-pts='MaxN'
-pts='RocketCore Risc FPU ICache'
-pts='LogShifter'
+pts='Xor6Thread2'
 
 CHISEL_PATH=~/chisel3
 FIRRTL_PATH=~/firrtl

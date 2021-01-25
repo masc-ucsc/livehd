@@ -118,7 +118,7 @@ int main(int argc, char** argv) {
   fmt::print("--------------------------Nodes--------------------\n");
   start = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < iterations; i++) {
-    x = traverse_lgraph_nodes(lg);
+    x += traverse_lgraph_nodes(lg);
   }
   stop     = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
@@ -127,7 +127,7 @@ int main(int argc, char** argv) {
   fmt::print("--------------------------Nodes+in--------------------\n");
   start = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < iterations; i++) {
-    x = traverse_lgraph_in(lg);
+    x += traverse_lgraph_in(lg);
   }
   stop     = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
@@ -136,11 +136,13 @@ int main(int argc, char** argv) {
   fmt::print("--------------------------Nodes+out--------------------\n");
   start = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < iterations; i++) {
-    x = traverse_lgraph_out(lg);
+    x += traverse_lgraph_out(lg);
   }
   stop     = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
   fmt::print("Traverse LGraph {} times took {}s\n", iterations, duration.count() / micros);
+
+  fmt::print("x:{} opt/check\n", x);
 
   return 0;
 }

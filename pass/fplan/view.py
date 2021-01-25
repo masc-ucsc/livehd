@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 # the PyCairo package needs to be installed as a dep, see https://pycairo.readthedocs.io/en/latest/getting_started.html for details
 
@@ -88,14 +89,14 @@ for line in flp_lines:
     start_y = float(tok_list[4]) # bottom y
 
     if args.verbose:
-        print(tok_list[0] + ': start_x = ' + tok_list[3] + ', start_y = ' + tok_list[4] + ', width = ' + tok_list[1] + ', height = ' + tok_list[2])
+        print(tok_list[0] + ': (' + tok_list[3] + ', ' + tok_list[4] + ') + (' + tok_list[1] + ', ' + tok_list[2] + ') = (' + str(width + start_x) + ', ' + str(height + start_y) + ')')
 
     ctx.set_source_rgb(1, 1, 1)
     ctx.rectangle(start_x, start_y, width, height)
     ctx.fill_preserve() # fill rectangle, preserving border
 
     ctx.set_source_rgb(0, 0, 0)
-    ctx.set_line_width(5 / SCALE_FACTOR)
+    ctx.set_line_width(1 / SCALE_FACTOR)
     ctx.stroke() # generate border
 
 ctx.set_source_rgb(0, 0, 0)

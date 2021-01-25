@@ -1,7 +1,9 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
 // test file with less hierarchy than hier_test
 
 module leaf1(input [15:0] x, output [15:0] y);
-  assign y = (x == 16'h0) ? 16'h5 : 16'h3;
+  assign y = (x == 16'h0) ? x : 16'h3;
 endmodule
 
 module leaf2(input [15:0] x, input [15:0] y, output [15:0] sum);

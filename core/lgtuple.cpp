@@ -4,6 +4,56 @@
 
 #include "lgraph.hpp"
 
+std::shared_ptr<Lgtuple> Lgtuple::make_merge(Node_pin &sel_dpin, const std::vector<std::shared_ptr<Lgtuple>> &tup_list) {
+	(void)sel_dpin;
+
+	auto tup = std::make_shared<Lgtuple>();
+
+  I(tup_list.size()>1); // nothing to merge?
+
+#ifndef NDEBUG
+  // FIXME: for the moment just merge unordered named tuples
+  for(const auto &t:tup_list) {
+    I(!t->is_ordered());
+    I(t->is_named());
+  }
+#endif
+
+  for(auto i=0u;i<tup_list.size();++i) {
+    fmt::print("keys for {}\n", tup_list[i]->get_hier_parent_key_name());
+    auto keys = tup_list[i]->get_all_keys();
+    for(const auto &k:keys) {
+      fmt::print("   {}\n",k);
+    }
+  }
+
+	return tup;
+
+#if 0
+  std::vector<int> pos_list;
+  pos_list.resize(tup_list.size());
+
+  while (true) {
+    auto &pos_0 = pos_list[0];
+    for(auto i=1u;i<it_list.size();++i) {
+      auto &pos_n = pos_list[i];
+
+      if ((*it0)->is_scalar() != (*it_list[i])->is_scalar()) {
+        LGraph::error("can not merge tuple {} (scalar vs non-scalar) fields {} and {}\n"
+            , tup_list[0]->get_hier_parent_key_name()
+            , (*it0)->get_hier_parent_key_name()
+            , (*it_list[i])->get_hier_parent_key_name());
+        return;
+      }
+      if ((*it0)->is_scalar()) {
+      }
+    }
+    break;
+  }
+#endif
+
+}
+
 Node_pin Lgtuple::get_value_dpin(int pos, std::string_view key) const {
   if (pos == 0 && is_scalar()) {
     return val_dpin;
@@ -288,7 +338,7 @@ void Lgtuple::set(const Node_pin &_val_dpin) {
   val_dpin = _val_dpin;  // this means the val_dpin of final TupAdd node from the most-up-to-date tuple-chain
 }
 
-std::vector<std::pair<std::string_view, Node_pin>> Lgtuple::get_all_attributes() const {
+std::vector<std::pair<std::string_view, Node_pin>> Lgtuple::get_level_attributes() const {
 
   std::vector<std::pair<std::string_view, Node_pin>> v;
 
@@ -300,6 +350,32 @@ std::vector<std::pair<std::string_view, Node_pin>> Lgtuple::get_all_attributes()
   }
 
   return v;
+}
+
+std::vector<std::string> Lgtuple::get_all_keys() const {
+
+  std::vector<std::string> keys;
+
+  if (key2pos.empty()) {
+    keys.emplace_back("");
+    return keys;
+  }
+
+  for (const auto &it:key2pos) {
+    if (pos2tuple[it.second]) {
+      auto nested_keys = pos2tuple[it.second]->get_all_keys();
+      for(const auto &k:nested_keys) {
+        if (k.empty())
+          keys.emplace_back(it.first);
+        else
+          keys.emplace_back(absl::StrCat(it.first, ".", k));
+      }
+    }else{
+      keys.emplace_back(it.first);
+    }
+  }
+
+  return keys;
 }
 
 void Lgtuple::dump(std::string_view indent) const {
@@ -344,3 +420,4 @@ void Lgtuple::analyze_graph_output(absl::flat_hash_map<std::string, Node_pin> &g
       fmt::print("{}invalid pos:{}\n", "  ", i);
   }
 }
+

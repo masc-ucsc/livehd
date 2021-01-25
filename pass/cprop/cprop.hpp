@@ -21,7 +21,7 @@ protected:
   void collapse_forward_always_pin0(Node &node, XEdge_iterator &inp_edges_ordered);
   void collapse_forward_for_pin(Node &node, Node_pin &new_dpin);
 
-  void try_constant_prop(Node &node, XEdge_iterator &inp_edges_ordered);
+  bool try_constant_prop(Node &node, XEdge_iterator &inp_edges_ordered);
   void try_collapse_forward(Node &node, XEdge_iterator &inp_edges_ordered);
 
   void replace_part_inputs_const(Node &node, XEdge_iterator &inp_edges_ordered);
@@ -37,9 +37,10 @@ protected:
 
 
   // Tuple methods
-  std::shared_ptr<Lgtuple> process_tuple_add_chain(Node_pin up_dpin);
+  std::shared_ptr<Lgtuple> find_lgtuple(Node_pin up_dpin);
   void process_tuple_add(Node &node);
   bool process_tuple_get(Node &node);
+  void process_mux(Node &node);
 
   // io construction
   void try_create_graph_output(LGraph *lg, std::shared_ptr<Lgtuple> tup);

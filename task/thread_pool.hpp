@@ -91,7 +91,7 @@ class Thread_pool {
     //if (((n_thread+n_inline)&0xFFFF)==0) {
       //std::cout << "n_thread:" << n_thread << " n_inline:" << n_inline << "\n";
     //}
-    if(jobs_left > 48) {
+    if(jobs_left > 48) { //FIXME->sh: what if not so much core?
       //++n_inline;
       job();
       return;
