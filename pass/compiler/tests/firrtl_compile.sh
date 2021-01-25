@@ -36,6 +36,11 @@ Darken HiLoMultiplier Coverage Accumulator LFSR16 '
 pts='LogShifter'
 # pts='Test6'
 # pts='Test1'
+pts='Life'
+# pts='Cell_alone'
+# pts='MaxN'
+# pts='Trivial'
+pts='Xor6Thread2'
 
 
 LGSHELL=./bazel-bin/main/lgshell
@@ -85,8 +90,8 @@ firrtl_test() {
     echo "LGraph -> Verilog"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg hier:true"
-    # ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg"
+    # ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg hier:true"
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg"
     if [ $? -eq 0 ] && [ -f ${pt}.v ]; then
         echo "Successfully generate Verilog: ${pt}.v"
         rm -f  yosys_script.*
