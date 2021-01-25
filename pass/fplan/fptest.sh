@@ -2,7 +2,7 @@
 
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-# a test script to chain together all the required commands for generating a floorplan
+# a basic test script to chain together all the required commands for generating a floorplan
 set -e
 
 TESTFILE=./inou/yosys/tests/long_gcd.v
