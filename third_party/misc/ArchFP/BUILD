@@ -19,7 +19,7 @@ cc_test(
     name = "floorplan_test",
     srcs = ["tests/archfp_test.cpp"],
     deps = [
-        "@gtest//:gtest_main",
+        "@com_google_googletest//:gtest_main",
         ":archfp",
         ],
     )

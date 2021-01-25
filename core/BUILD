@@ -14,6 +14,7 @@ cc_library(
     deps = [
         "@rapidjson//:headers",
         "@iassert//:iassert",
+        "@com_google_absl//absl/container:btree",
         "@boost//:multiprecision",
         "//eprp:eprp",
         "//mmap_lib:headers",
@@ -29,7 +30,18 @@ cc_library(
     copts = COPTS,
     deps = [
         ":core",
-        "@gtest//:gtest_main",
+        "@com_google_googletest//:gtest_main",
+        ],
+    )
+
+cc_test(
+    name = "lgtuple_test",
+    srcs = ["tests/lgtuple_test.cpp"],
+    includes = ["."],
+    copts = COPTS,
+    deps = [
+        ":core",
+        "@com_google_googletest//:gtest_main",
         ],
     )
 
@@ -53,7 +65,7 @@ cc_test(
     name = "graph_core_test",
     srcs = ["tests/graph_core_test.cpp"],
     deps = [
-        "@gtest//:gtest_main",
+        "@com_google_googletest//:gtest_main",
         ":core",
         ],
     )
@@ -62,7 +74,7 @@ cc_test(
     name = "lgraph_test",
     srcs = ["tests/lgraph_test.cpp"],
     deps = [
-        "@gtest//:gtest_main",
+        "@com_google_googletest//:gtest_main",
         ":core",
         ],
     )
@@ -71,7 +83,7 @@ cc_test(
     name = "attribute_test",
     srcs = ["tests/attribute_test.cpp"],
     deps = [
-        "@gtest//:gtest_main",
+        "@com_google_googletest//:gtest_main",
         ":core",
         ],
     )
@@ -80,7 +92,7 @@ cc_test(
     name = "lgraph_each",
     srcs = ["tests/lgraph_each_test.cpp"],
     deps = [
-        "@gtest//:gtest_main",
+        "@com_google_googletest//:gtest_main",
         ":core",
         ],
     )
@@ -89,7 +101,7 @@ cc_test(
     name = "node_test",
     srcs = ["tests/node_test.cpp"],
     deps = [
-        "@gtest//:gtest_main",
+        "@com_google_googletest//:gtest_main",
         ":core",
         ],
     )
@@ -116,7 +128,7 @@ cc_test(
     name = "edge_test",
     srcs = ["tests/edge_test.cpp"],
     deps = [
-        "@gtest//:gtest_main",
+        "@com_google_googletest//:gtest_main",
         ":core",
         ],
     )

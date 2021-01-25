@@ -37,7 +37,7 @@ cc_test(
     name = "ast_test",
     srcs = ["tests/ast_test.cpp"],
     deps = [
-        "@gtest//:gtest_main",
+        "@com_google_googletest//:gtest_main",
         ":elab",
         ],
     )
@@ -46,7 +46,7 @@ cc_test(
     name = "ast_test2",
     srcs = ["tests/ast_test2.cpp"],
     deps = [
-        "@gtest//:gtest_main",
+        "@com_google_googletest//:gtest_main",
         ":elab",
         ],
     )
@@ -68,7 +68,7 @@ cc_test(
     srcs = ["tests/elab_scanner_unit_test.cpp"],
     deps = [
         ":elab",
-        "@gtest//:gtest_main",
+        "@com_google_googletest//:gtest_main",
         ],
     )
 

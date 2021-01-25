@@ -55,6 +55,8 @@ Node_pin::Node_pin(LGraph *_g, Compact_class_driver comp)
 }
 
 const Index_ID Node_pin::get_root_idx() const {
+  if (unlikely(current_g==nullptr))
+    return 0;
   return current_g->get_root_idx(idx);
 }
 

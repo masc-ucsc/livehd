@@ -28,7 +28,7 @@ cc_test(
     name = "sample_test2",
     srcs = ["sample_test2.cpp"],
     deps = [
-        "@gtest//:gtest_main",
+        "@com_google_googletest//:gtest_main",
         ":pass_sample",
     ],
 )

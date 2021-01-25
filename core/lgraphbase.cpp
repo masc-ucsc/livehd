@@ -628,4 +628,7 @@ void LGraph_Base::error_int(std::string_view text) {
   throw std::runtime_error(std::string(text));
 }
 
+void LGraph_Base::info_int(std::string_view text) {
+  fmt::print("info:{}\n", text); // to be used by future warning/error reporting system
+}
 

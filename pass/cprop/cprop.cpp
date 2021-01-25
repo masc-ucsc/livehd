@@ -901,15 +901,23 @@ void Cprop::do_trans(LGraph *lg) {
 }
 
 void Cprop::try_create_graph_output(LGraph *lg, std::shared_ptr<Lgtuple> tup) {
-  absl::flat_hash_map<std::string, Node_pin> gout2driver;
-  tup->analyze_graph_output(gout2driver, "");
 
-  for (const auto &it : gout2driver) {
-    if (!lg->is_graph_output(it.first)) {
-      auto flattened_gout = lg->add_graph_output(it.first, Port_invalid, 0);
-      I(!lg->get_graph_output(it.first).is_invalid());
+  auto n = tup.get_name();
+  if (n.empty() || n[0] != '%')
+    return;
+
+  for (const auto &it : tup->get_map()) {
+    auto out_name = it.first;
+    if (!lg->is_graph_output(out_name)) {
+      int pos = tup->get_pos(out_name);
+
+      Port_ID x = Port_invalid;
+      if (pos>=0) {
+        x = pos;
+      }
+      auto flattened_gout = lg->add_graph_output(out_name, x, 0);
       it.second.connect_sink(flattened_gout);
-      //I(flattened_gout.get_driver_pin() == it.second);
+      I(!lg->get_graph_output(out_name).is_invalid());
     }
   }
 }

@@ -39,7 +39,7 @@ cc_binary(
     srcs = ["tests/prp_test.cpp"],
     copts = COPTS,
     deps = [
-        "@gtest//:gtest_main",
+        "@com_google_googletest//:gtest_main",
         ":inou_pyrope",
     ],
 )
@@ -49,7 +49,7 @@ cc_binary(
     srcs = ["tests/prp_lnast_test.cpp"],
     copts = COPTS,
     deps = [
-        "@gtest//:gtest_main",
+        "@com_google_googletest//:gtest_main",
         ":inou_pyrope",
     ],
 )
@@ -58,7 +58,7 @@ cc_test(
     name = "prp_unit_test",
     srcs = ["tests/prp_unit_test.cpp"],
     deps = [
-        "@gtest//:gtest_main",
+        "@com_google_googletest//:gtest_main",
         ":inou_pyrope",
     ],
 )
