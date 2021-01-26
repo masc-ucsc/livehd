@@ -22,10 +22,14 @@ Lhd_floorplanner::Lhd_floorplanner() {
 
 Lhd_floorplanner::~Lhd_floorplanner() { delete layouts[root_lg]; }
 
-GeographyHint Lhd_floorplanner::randomHint() {
+GeographyHint Lhd_floorplanner::randomHint(int count) const {
   static size_t sel = 0;
 
   sel = (sel + 1) % hint_seq.size();
+  if (count == 2) {
+    return hint_seq_2[sel];
+  }
+
   return hint_seq[sel];
 }
 
@@ -50,12 +54,17 @@ void Lhd_floorplanner::write_lhd() {
   });
 
   absl::flat_hash_set<Hierarchy_index> hidx_used_set;
-  layouts[root_lg]->outputLGraphLayout(root_lg, root_lg, root_lg->ref_htree()->root_index(), hidx_used_set);
 
-  root_lg->each_hier_fast_direct([](const Node& n) {
+  unsigned int placed_nodes
+      = layouts[root_lg]->outputLGraphLayout(root_lg, root_lg, root_lg->ref_htree()->root_index(), hidx_used_set);
+
+  unsigned int node_count = 0;
+  root_lg->each_hier_fast_direct([&node_count](const Node& n) {
     if (!n.is_type_synth()) {
       return true;
     }
+
+    node_count++;
 
     // basic sanity checking for returned floorplans
     I(n.is_hierarchical());
@@ -77,4 +86,7 @@ void Lhd_floorplanner::write_lhd() {
 
     return true;
   });
+
+  // check that the correct number of nodes are in the floorplan
+  I(node_count == placed_nodes);
 }

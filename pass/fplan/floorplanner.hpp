@@ -42,22 +42,21 @@ protected:
       GeographyHint::Top,
       GeographyHint::Bottom,
       GeographyHint::Left,
-      GeographyHint::Right,
-      
-      /*
-      
-      these are only valid for two placing two nodes at a time (ugh)
+      GeographyHint::Right
+  };
 
+  // these hints are only valid for exactly two nodes
+  constexpr static std::array<GeographyHint, 6> hint_seq_2 = {
       GeographyHint::LeftRight,
       GeographyHint::LeftRightMirror,
       GeographyHint::LeftRight180,
       GeographyHint::TopBottom,
       GeographyHint::TopBottomMirror,
       GeographyHint::TopBottom180,
-      */
   };
 
-  GeographyHint randomHint();
+  // return a hint based on the number of components
+  GeographyHint randomHint(int count) const;
 
   // layout of root node, used frequently
   LGraph* root_lg;

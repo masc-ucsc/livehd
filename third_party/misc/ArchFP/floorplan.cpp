@@ -140,8 +140,10 @@ void FPObject::outputHotSpotLayout(ostream& o, double startX, double startY) {
     << calcY(startY) / 1000 << "\n";
 }
 
-void FPObject::outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_index hidx,
+unsigned int FPObject::outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_index hidx,
                                   absl::flat_hash_set<mmap_lib::Tree_index>& sub_hidx_used, double startX, double startY) {
+  (void)sub_hidx_used;
+  
   I(root);
   I(lg);
   I(!hidx.is_invalid());
@@ -164,6 +166,8 @@ void FPObject::outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_inde
 
     break;
   }
+
+  return 1;
 }
 
 // Methods for the FPWrapper class.
@@ -222,6 +226,7 @@ void FPCompWrapper::flip() {
 }
 
 bool FPCompWrapper::layout(FPOptimization opt, double ratio) {
+  (void)opt;
   // Make sure the ratio is within the stated constraints.
   ratio = ARInRange(ratio);
   // Calculate width height from area and AR.
@@ -244,7 +249,7 @@ FPContainer::FPContainer() : items() {
 FPContainer::~FPContainer() {
   // It's very important to only delete items when their refcount hits zero.
   // cout << "deleting container.\n";
-  for (int i = 0; i < items.size(); i++) {
+  for (int i = 0; i < (int)items.size(); i++) {
     FPObject* item     = items[i];
     int       newCount = item->decRefCount();
     if (newCount == 0)
@@ -255,10 +260,10 @@ FPContainer::~FPContainer() {
 // To properly handle refCount, we will only allow one method to actually add (or remove) items from the item list.
 
 void FPContainer::addComponentAtIndex(FPObject* comp, int index) {
-  if (index < 0 || index > items.size())
+  if (index < 0 || index > (int)items.size())
     throw invalid_argument("Attempt to add item to Container at illegal index.");
 
-  const size_t oldsize = items.size();
+  const int oldsize = items.size();
   items.resize(items.size() + 1);
 
   // See if we need to move things to open space.
@@ -273,11 +278,11 @@ void FPContainer::addComponentAtIndex(FPObject* comp, int index) {
 }
 
 FPObject* FPContainer::removeComponentAtIndex(int index) {
-  if (index < 0 || index >= items.size())
+  if (index < 0 || index >= (int)items.size())
     throw invalid_argument("Attempt to add item to Container at illegal index.");
   FPObject* comp = items[index];
   // Now fill in the hole.
-  for (int i = index; i < items.size() - 1; i++) {
+  for (int i = index; i < (int)items.size() - 1; i++) {
     items[i] = items[i + 1];
   }
 
@@ -359,7 +364,7 @@ double FPContainer::totalArea() {
   return area;
 }
 
-void FPContainer::outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_index hidx,
+unsigned int FPContainer::outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_index hidx,
                                      absl::flat_hash_set<mmap_lib::Tree_index>& sub_hidx_used, double startX, double startY) {
   I(root);
   I(lg);
@@ -367,7 +372,8 @@ void FPContainer::outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_i
   I(root->ref_htree()->ref_lgraph(hidx) == lg);
 
   pushMirrorContext(startX, startY);
-  int itemCount = getComponentCount();
+
+  unsigned int total = 0;
 
   for (int i = 0; i < getComponentCount(); i++) {
     FPObject* obj = getComponent(i);
@@ -375,7 +381,7 @@ void FPContainer::outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_i
     Ntype_op t = obj->getType();
 
     if (Ntype::is_synthesizable(t)) {  // leaf node - current hier structure is fine
-      obj->outputLGraphLayout(root, lg, hidx, sub_hidx_used, x + startX, y + startY);
+      total += obj->outputLGraphLayout(root, lg, hidx, sub_hidx_used, x + startX, y + startY);
     } else if (t == Ntype_op::Sub) {  // Sub node - parameters need to be adjusted
 
       bool found = false;
@@ -387,7 +393,6 @@ void FPContainer::outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_i
         Node    hn(root, hidx, fn.get_compact_class());
         LGraph* sub_lg = LGraph::open(root->get_path(), hn.get_type_sub());
 
-        const std::string_view tname = Ntype::get_name(obj->getType());
         if ((sub_lg->get_name() == obj->getName()) && (hn.get_hier_color() == 0)) {
           Ann_place p(obj->getX(), obj->getY(), obj->getWidth(), obj->getHeight());
           hn.set_place(p);
@@ -401,7 +406,7 @@ void FPContainer::outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_i
 
             if (!sub_hidx_used.contains(tidx) && ht->ref_lgraph(tidx) == sub_lg) {
               sub_hidx_used.emplace(tidx);
-              obj->outputLGraphLayout(root, sub_lg, tidx, sub_hidx_used, x + startX, y + startY);
+              total += obj->outputLGraphLayout(root, sub_lg, tidx, sub_hidx_used, x + startX, y + startY);
               found = true;
               break;
             }
@@ -412,7 +417,7 @@ void FPContainer::outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_i
       }
       I(found);
     } else if (t == Ntype_op::Invalid) {  // specific kind of layout - current hier structure is fine
-      obj->outputLGraphLayout(root, lg, hidx, sub_hidx_used, x + startX, y + startY);
+      total += obj->outputLGraphLayout(root, lg, hidx, sub_hidx_used, x + startX, y + startY);
     } else {
       fmt::print("???\n");
       I(false);
@@ -420,6 +425,8 @@ void FPContainer::outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_i
   }
 
   popMirrorContext();
+
+  return total;
 }
 
 // Methods for the GridLayout class.
@@ -429,6 +436,7 @@ gridLayout::gridLayout() : FPContainer() {
 }
 
 bool gridLayout::layout(FPOptimization opt, double targetAR) {
+  (void)opt;
   // We assume that a grid is a repeating unit of a single object.
   // However, that object can be either a leaf component or a container.
   if (getComponentCount() != 1) {
@@ -507,7 +515,7 @@ void gridLayout::outputHotSpotLayout(ostream& o, double startX, double startY) {
   o << "# End of " << GridName << " Layout.\n";
 }
 
-void gridLayout::outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_index hidx,
+unsigned int gridLayout::outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_index hidx,
                                     absl::flat_hash_set<mmap_lib::Tree_index>& sub_hidx_used, double startX, double startY) {
   I(root);
   I(lg);
@@ -515,8 +523,7 @@ void gridLayout::outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_in
   I(root->ref_htree()->ref_lgraph(hidx) == lg);
 
   if (getComponentCount() != 1) {
-    cerr << "Attempt to output a grid with other than one component.\n";
-    return;
+    throw std::invalid_argument("Attempt to output a grid with other than one component.\n");
   }
 
   double    compWidth, compHeight;
@@ -526,10 +533,11 @@ void gridLayout::outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_in
   compHeight    = obj->getHeight();
   compName      = obj->getName();
 
-  int compCount = xCount * yCount;
   int compNum   = 1;
 
   Ntype_op t = obj->getType();
+
+  unsigned int total = 0;
 
   for (int i = 0; i < yCount; i++) {
     double cy = (i * compHeight) + y + startY;
@@ -537,7 +545,7 @@ void gridLayout::outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_in
       double cx = (j * compWidth) + x + startX;
 
       if (Ntype::is_synthesizable(t)) {  // leaf node - current hier structure is fine
-        obj->outputLGraphLayout(root, lg, hidx, sub_hidx_used, x + startX, y + startY);
+        total += obj->outputLGraphLayout(root, lg, hidx, sub_hidx_used, x + startX, y + startY);
       } else if (t == Ntype_op::Sub) {  // Sub node - parameters need to be adjusted
         bool found = false;
         for (auto fn : lg->fast()) {
@@ -548,7 +556,6 @@ void gridLayout::outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_in
           Node    hn(root, hidx, fn.get_compact_class());
           LGraph* sub_lg = LGraph::open(root->get_path(), hn.get_type_sub());
 
-          const std::string_view tname = Ntype::get_name(obj->getType());
           if ((sub_lg->get_name() == obj->getName()) && (hn.get_hier_color() == 0)) {
             Ann_place p(obj->getX(), obj->getY(), obj->getWidth(), obj->getHeight());
             hn.set_place(p);
@@ -562,7 +569,7 @@ void gridLayout::outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_in
 
               if (!sub_hidx_used.contains(tidx) && ht->ref_lgraph(tidx) == sub_lg) {
                 sub_hidx_used.emplace(tidx);
-                obj->outputLGraphLayout(root, sub_lg, tidx, sub_hidx_used, cx, cy);
+                total += obj->outputLGraphLayout(root, sub_lg, tidx, sub_hidx_used, cx, cy);
                 found = true;
                 break;
               }
@@ -573,11 +580,13 @@ void gridLayout::outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_in
         }
         I(found);
       } else if (t == Ntype_op::Invalid) {  // specific kind of layout - current hier structure is fine
-        obj->outputLGraphLayout(root, lg, hidx, sub_hidx_used, x + startX, y + startY);
+        total += obj->outputLGraphLayout(root, lg, hidx, sub_hidx_used, x + startX, y + startY);
       }
       compNum += 1;
     }
   }
+
+  return total;
 }
 
 // Methods for Baglayout Class
@@ -588,6 +597,7 @@ bagLayout::bagLayout() : FPContainer() {
 }
 
 bool bagLayout::layout(FPOptimization opt, double targetAR) {
+  (void)opt;
   // If we are locked, don't layout.
   if (locked)
     return true;
@@ -755,6 +765,7 @@ fixedLayout::fixedLayout(const char* filename, double scalingFactor) : bagLayout
 }
 
 bool fixedLayout::layout(FPOptimization opt, double targetAR) {
+  (void)opt;
   // Compare targetAR to our originalAR to calculate x and y scaling factors.
   double currentAR = width / height;
   double xFactor   = sqrt(targetAR / currentAR);
@@ -792,6 +803,7 @@ FPObject* geogLayout::addComponentCluster(string name, int count, double area, d
 }
 
 bool geogLayout::layout(FPOptimization opt, double targetAR) {
+  (void)opt;
   // All this routine does is set up some data structures,
   //   and then call the helper to recursively do the layout work.
   // We will keep track of containers we make in a "stack".

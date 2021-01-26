@@ -37,7 +37,7 @@ void Node_hier_floorp::load_lg_nodes(LGraph* lg, const std::string_view lgdb_pat
       fmt::print("adding {} of subcomponent {} to cluster of lg {}\n", sub_lg_count[sub_lg], sub_lg->get_name(), lg->get_name());
     }
 
-    l->addComponent(layouts[sub_lg], sub_lg_count[sub_lg], randomHint());
+    l->addComponent(layouts[sub_lg], sub_lg_count[sub_lg], randomHint(sub_lg_count[sub_lg]));
   }
 
   absl::flat_hash_map<Ntype_op, unsigned int> grid_count;
@@ -78,7 +78,7 @@ void Node_hier_floorp::load_lg_nodes(LGraph* lg, const std::string_view lgdb_pat
       fmt::print("\tarea: {}, min asp: {}, max asp: {}\n", node_area, dim.min_aspect, dim.max_aspect);
     }
 
-    l->addComponentCluster(n.get_type_op(), count, node_area, dim.max_aspect, dim.min_aspect, randomHint());
+    l->addComponentCluster(n.get_type_op(), count, node_area, dim.max_aspect, dim.min_aspect, randomHint(count));
   }
 
   l->setName(lg->get_name().data());

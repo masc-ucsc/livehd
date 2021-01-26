@@ -136,7 +136,7 @@ public:
 
   virtual bool layout(FPOptimization opt, double targetAR = 1.0) = 0;
   virtual void outputHotSpotLayout(ostream& o, double startX = 0.0, double startY = 0.0);
-  virtual void outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_index hidx,
+  virtual unsigned int outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_index hidx,
                                   absl::flat_hash_set<mmap_lib::Tree_index>& sub_hidx_used, double startX = 0.0,
                                   double startY = 0.0);
 };
@@ -229,7 +229,7 @@ public:
   virtual void      addComponent(FPObject* comp, int count);
 
   // Writes current container and all subcontainers to the specified root lgraph
-  virtual void outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_index hidx,
+  virtual unsigned int outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_index hidx,
                                   absl::flat_hash_set<mmap_lib::Tree_index>& sub_hidx_used, double startX = 0.0,
                                   double startY = 0.0);
 };
@@ -272,7 +272,7 @@ public:
 
   bool         layout(FPOptimization opt, double targetAR = 1.0);
   void         outputHotSpotLayout(ostream& o, double startX = 0.0, double startY = 0.0);
-  virtual void outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_index hidx,
+  virtual unsigned int outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_index hidx,
                                   absl::flat_hash_set<mmap_lib::Tree_index>& sub_hidx_used, double startX = 0.0,
                                   double startY = 0.0);
 
