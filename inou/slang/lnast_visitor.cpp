@@ -69,9 +69,48 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
   for (auto it = verilogList.cbegin(); it != verilogList.cend(); ++it) std::cout << " " << *it;
   // std::cout<<'\n';
   fmt::print("\nprinting operand recursion\n");
-  for (auto it = operandList.cbegin(); it != operandList.cend(); ++it) std::cout << " " << *it;
+  std::vector<std::string> v;
+  int set =0;
+  for (auto it = operandList.cbegin(); it != operandList.cend(); ++it) {
+      std::cout << " " << *it;
+      for (auto iv = v.cbegin(); iv != v.cend(); ++iv) {
+        if ((*iv)[1]==(*it)[1]){
+          set=1;
+        }
+      }
+      if (set!=1) {
+        v.emplace_back(*it);
+        set=0;
+      }
+  }
+    std::vector<std::string>::iterator ip; 
+  fmt::print("\nprinting inputs\n");
+
+  for (ip = v.begin(); ip != v.end(); ++ip) {
+      std::cout << " " << *ip;
+      auto idx_dot= lnast->add_child(idx_stmts, Lnast_node::create_dot(""));
+      lnast->add_child(idx_dot,Lnast_node::create_ref (lnast->add_string("__"+*ip)));
+      lnast->add_child(idx_dot,Lnast_node::create_ref (lnast->add_string(*ip)));
+      auto idx_assign= lnast->add_child(idx_stmts, Lnast_node::create_assign(""));
+      lnast->add_child(idx_assign,Lnast_node::create_ref (lnast->add_string("__"+*ip)));
+      lnast->add_child(idx_assign,Lnast_node::create_const ("1"));
+  }
+  const auto& lhs = expr.left();
+  std::string temp="__$";
+  if (lhs.kind == ExpressionKind::NamedValue) {
+    const auto& var = lhs.as<NamedValueExpression>();
+    fmt::print("bits:{} {} =  ", var.type->getBitWidth(), var.symbol.name);
+    auto idx_dot= lnast->add_child(idx_stmts, Lnast_node::create_dot(""));
+    lnast->add_child(idx_dot,Lnast_node::create_ref (lnast->add_string(temp.append(var.symbol.name))));
+    temp="__$";
+    lnast->add_child(idx_dot,Lnast_node::create_ref (lnast->add_string(var.symbol.name)));
+    auto idx_assign= lnast->add_child(idx_stmts, Lnast_node::create_assign(""));
+    lnast->add_child(idx_assign,Lnast_node::create_ref (lnast->add_string(temp.append(var.symbol.name))));
+    lnast->add_child(idx_assign,Lnast_node::create_const ("1")); 
+  }
   // std::cout<<'check\n';
   fmt::print("\nlnast time\n");
+
   int count=0;
   int tmp_flag=0;
   int last_op=0;
@@ -240,16 +279,17 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
   }
 
   auto node_dpa    = Lnast_node::create_dp_assign ("dp_assign",  line_num, pos1, pos2);
-  auto idx_assign  = lnast->add_child(idx_stmts,  node_dpa);
-  const auto& lhs = expr.left();
+  auto idx_dpa  = lnast->add_child(idx_stmts,  node_dpa);
+  // const auto& lhs = expr.left();
   if (lhs.kind == ExpressionKind::NamedValue) {
     const auto& var = lhs.as<NamedValueExpression>();
     fmt::print("bits:{} {} =  ", var.type->getBitWidth(), var.symbol.name);
     // operandList.emplace_back(var.symbol.name);
-    lnast->add_child(idx_assign, Lnast_node::create_ref(output.append(var.symbol.name))); // string_view = %out
+    lnast->add_child(idx_dpa, Lnast_node::create_ref(output.append(var.symbol.name))); // string_view = %out
+    output="%";
     auto node_tmp1   = Lnast_node::create_ref (lnast->add_string(tmpList.back()));
     tmpList.pop_back();
-    lnast->add_child(idx_assign, node_tmp1);
+    lnast->add_child(idx_dpa, node_tmp1);
   } 
   else {
     fmt::print("TODO. What is this");
