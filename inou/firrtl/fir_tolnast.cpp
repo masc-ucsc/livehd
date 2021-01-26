@@ -759,7 +759,7 @@ void Inou_firrtl::HandleMemPort(Lnast& lnast, Lnast_nid& parent_node, const firr
 void Inou_firrtl::create_module_inst(Lnast& lnast, const firrtl::FirrtlPB_Statement_Instance& inst, Lnast_nid& parent_node) {
   /*            dot                       assign                      fn_call
    *      /      |        \                / \                     /     |     \
-   * ___F0 inp_[inst_name] __last_value   F1 ___F0  out_[inst_name] [mod_name]  F1 */
+   * ___F0 itup_[inst_name] __last_value   F1 ___F0  otup_[inst_name] [mod_name]  F1 */
   auto temp_var_name  = create_temp_var(lnast);
   auto temp_var_name2 = lnast.add_string(absl::StrCat("F", std::to_string(tmp_var_cnt)));
   tmp_var_cnt++;
@@ -767,8 +767,8 @@ void Inou_firrtl::create_module_inst(Lnast& lnast, const firrtl::FirrtlPB_Statem
   if (inst.id().substr(0,2) == "_T") {
     inst_name = absl::StrCat("_.", inst_name);
   }
-  auto inp_name       = lnast.add_string(absl::StrCat("inp_", inst_name));
-  auto out_name       = lnast.add_string(absl::StrCat("out_", inst_name));
+  auto inp_name       = lnast.add_string(absl::StrCat("itup_", inst_name));
+  auto out_name       = lnast.add_string(absl::StrCat("otup_", inst_name));
 
   auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_dot(""));
   lnast.add_child(idx_dot, Lnast_node::create_ref(temp_var_name));
@@ -1142,6 +1142,7 @@ void Inou_firrtl::HandleTypeConvOp(Lnast& lnast, const firrtl::FirrtlPB_Expressi
  * NOTE: This return the first child of the last DOT/SELECT node made. */
 std::string_view Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB_Expression expr, Lnast_nid& parent_node, const bool is_rhs) {
   auto flattened_str = FlattenExpression(ln, parent_node, expr);
+  fmt::print("DEBUG flattened_str I:{}\n", flattened_str);
 
   /* When storing info about IO and what not, a vector may be
    * stored like vec[0], vec[1], ... . This can be a problem if
@@ -1212,24 +1213,41 @@ std::string_view Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB
     }
 
   } else if (inst_to_mod_map.count(alter_full_str.substr(0, alter_full_str.find(".")))) {
-    auto inst_name        = alter_full_str.substr(0, alter_full_str.find("."));
+    // FIXME->sh: instead of using alter_full_str, I use flattened_str.
+    auto inst_name = flattened_str.substr(0, flattened_str.find("."));
     if (inst_name.substr(0,2) == "_T") {
       inst_name = absl::StrCat("_.", inst_name);
     }
-    auto str_without_inst = alter_full_str.substr(alter_full_str.find(".") + 1);
+    auto str_without_inst = flattened_str.substr(flattened_str.find(".") + 1);
+    auto first_field_name = str_without_inst.substr(0, str_without_inst.find("."));
+    auto str_without_inst_and_io = str_without_inst.substr(flattened_str.find(".") + 1);
     auto module_name      = inst_to_mod_map[inst_name];
     auto dir              = mod_to_io_dir_map[std::make_pair(module_name, str_without_inst)];
-    if (dir == 1) {  // PORT_DIRECTION_IN
-      flattened_str = absl::StrCat("inp_", flattened_str);
-    } else if (dir == 2) {
-      flattened_str = absl::StrCat("out_", flattened_str);
-    } else {
-      Pass::error("direction unknown of {}\n", flattened_str);
-      I(false);
+
+    //note: here I assume all module io will start from a hierarchy call "IO" in all firrtl module
+    if (first_field_name == "io") {
+       if (dir == 1) {  // PORT_DIRECTION_IN
+         flattened_str = absl::StrCat("itup_", inst_name, ".inp_io.", str_without_inst_and_io);
+       } else if (dir == 2) {
+         flattened_str = absl::StrCat("otup_", inst_name, ".out_io.", str_without_inst_and_io);
+       } else {
+         Pass::error("direction unknown of {}\n", flattened_str);
+         I(false);
+       }
+    } else { // something like clock, reset, ... etc
+       if (dir == 1) {  // PORT_DIRECTION_IN
+         flattened_str = absl::StrCat("itup_", flattened_str);
+       } else if (dir == 2) {
+         flattened_str = absl::StrCat("otup_", flattened_str);
+       } else {
+         Pass::error("direction unknown of {}\n", flattened_str);
+         I(false);
+       }
     }
   }
 
   I(flattened_str.find(".") || flattened_str.find("["));
+  fmt::print("DEBUG flattened_str II:{}\n\n", flattened_str);
   return CreateDotsSelsFromStr(ln, parent_node, flattened_str);
 }
 
@@ -2049,31 +2067,9 @@ void Inou_firrtl::ListUserModuleInfo(Eprp_var& var, const firrtl::FirrtlPB_Modul
   }
 
   RegResetInitialization(*lnast, idx_stmts);
-  /* SetupOutputBitwidth(*lnast); */
 
   PerformLateMemAssigns(*lnast, idx_stmts);
   var.add(std::move(lnast));
-}
-
-// setup the output put bits attr_set at the end of lnast to avoid firrtl_bits interference problem
-void Inou_firrtl::SetupOutputBitwidth(Lnast &lnast) {
-  for (const auto& [key, val] : output_name2port_info) {
-    auto full_port_name = key;
-    auto parent_node = std::get<0>(val);
-    auto port_sign   = std::get<1>(val);
-    auto port_bits   = std::get<2>(val);
-    if (port_bits > 0) { // Specify __bits
-      std::string_view bit_acc_name;
-      if (port_sign == true) {
-        bit_acc_name = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(full_port_name, ".__sbits"));
-      } else {
-        bit_acc_name = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(full_port_name, ".__ubits"));
-      }
-      auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
-      lnast.add_child(idx_asg, Lnast_node::create_ref(bit_acc_name));
-      lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(std::to_string(port_bits))));
-    }
-  }
 }
 
 

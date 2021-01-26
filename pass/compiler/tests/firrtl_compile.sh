@@ -42,8 +42,9 @@ pts='Life'
 # pts='Trivial'
 # pts='Xor6Thread2'
 # pts='Xor6Thread2V2'
-pts='Xor3Thread1V2'
-pts='Trivial'
+pts='Xor3Thread1V3'
+pts='XorSelfThread1V1'
+# pts='Trivial'
 
 
 LGSHELL=./bazel-bin/main/lgshell

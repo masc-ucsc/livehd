@@ -22,6 +22,8 @@ VecShiftRegisterParam VecShiftRegisterSimple '
 pts='Xor6Thread2'
 pts='Xor6Thread2V2'
 pts='Xor3Thread1V2'
+pts='Xor3Thread1V3'
+pts='XorSelfThread1V1'
 
 CHISEL_PATH=~/chisel3
 FIRRTL_PATH=~/firrtl
