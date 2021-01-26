@@ -186,7 +186,8 @@ void Inou_firrtl::init_wire_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type
     }
     case firrtl::FirrtlPB_Type::kVectorType: {  // Vector Type
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
-        init_wire_dots(lnast, type.vector_type().type(), absl::StrCat(id, "[", i, "]"), parent_node);
+        init_wire_dots(lnast, type.vector_type().type(), absl::StrCat(id, ".", i), parent_node);
+        /* init_wire_dots(lnast, type.vector_type().type(), absl::StrCat(id, "[", i, "]"), parent_node); */
       }
       break;
     }
@@ -230,7 +231,8 @@ void Inou_firrtl::init_reg_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type,
     }
     case firrtl::FirrtlPB_Type::kVectorType: {  // Vector Type
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
-        init_reg_dots(lnast, type.vector_type().type(), absl::StrCat(id, "[", i, "]"), clock, reset, init, parent_node);
+        /* init_reg_dots(lnast, type.vector_type().type(), absl::StrCat(id, "[", i, "]"), clock, reset, init, parent_node); */
+        init_reg_dots(lnast, type.vector_type().type(), absl::StrCat(id, ".", i), clock, reset, init, parent_node);
       }
       break;
     }
@@ -530,7 +532,8 @@ void Inou_firrtl::InitMemory(Lnast& lnast, Lnast_nid& parent_node, const firrtl:
   mem_props_map[mem.id()] = { fwd, rd_lat, wr_lat };
 
   // To save space in LNAST, only specify __bits info for 0th element of Mem.
-  init_wire_dots(lnast, mem.type(), absl::StrCat(mem_name, "[0]"), parent_node);
+  /* init_wire_dots(lnast, mem.type(), absl::StrCat(mem_name, "[0]"), parent_node); */
+  init_wire_dots(lnast, mem.type(), absl::StrCat(mem_name, ".0"), parent_node);
 }
 
 /* CMemory is Chirrtl's version of FIRRTL Memory (where a cmemory statement
@@ -577,7 +580,8 @@ void Inou_firrtl::InitCMemory(Lnast& lnast, Lnast_nid& parent_node, const firrtl
   mem_props_map[cmem.id()] = { fwd, rd_lat, wr_lat };
 
   // To save space in LNAST, only specify __bits info for 0th element of CMem.
-  init_wire_dots(lnast, type, absl::StrCat(cmem_name, "[0]"), parent_node);
+  /* init_wire_dots(lnast, type, absl::StrCat(cmem_name, "[0]"), parent_node); */
+  init_wire_dots(lnast, type, absl::StrCat(cmem_name, ".0"), parent_node);
 }
 
 /* Because memory and memory ports can be declared inside of
@@ -1218,11 +1222,12 @@ std::string_view Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB
     if (inst_name.substr(0,2) == "_T") {
       inst_name = absl::StrCat("_.", inst_name);
     }
-    auto str_without_inst = flattened_str.substr(flattened_str.find(".") + 1);
-    auto first_field_name = str_without_inst.substr(0, str_without_inst.find("."));
+    auto str_without_inst        = flattened_str.substr(flattened_str.find(".") + 1);
+    auto first_field_name        = str_without_inst.substr(0, str_without_inst.find("."));
     auto str_without_inst_and_io = str_without_inst.substr(flattened_str.find(".") + 1);
-    auto module_name      = inst_to_mod_map[inst_name];
-    auto dir              = mod_to_io_dir_map[std::make_pair(module_name, str_without_inst)];
+    auto module_name             = inst_to_mod_map[inst_name];
+    fmt::print("  DEBUG0 str_without_inst:{}\n", str_without_inst);
+    auto dir                     = mod_to_io_dir_map[std::make_pair(module_name, str_without_inst)];
 
     //note: here I assume all module io will start from a hierarchy call "IO" in all firrtl module
     if (first_field_name == "io") {
@@ -1335,12 +1340,15 @@ std::string Inou_firrtl::FlattenExpression(Lnast& ln, Lnast_nid& parent_node, co
   if (expr.has_sub_field()) {
     return absl::StrCat(FlattenExpression(ln, parent_node, expr.sub_field().expression()), ".", expr.sub_field().field());
 
+    //FIXME->sh: 1/26/2021: no need to distinguish between [] and ., they are the same in LNAST/LGraph and handled by an unified tuple structure
   } else if (expr.has_sub_access()) {
     auto idx_str = ReturnExprString(ln, expr.sub_access().index(), parent_node, true);
-    return absl::StrCat(FlattenExpression(ln, parent_node, expr.sub_access().expression()), "[", idx_str, "]");
+    return absl::StrCat(FlattenExpression(ln, parent_node, expr.sub_access().expression()), ".", idx_str);
+    /* return absl::StrCat(FlattenExpression(ln, parent_node, expr.sub_access().expression()), "[", idx_str, "]"); */
 
   } else if (expr.has_sub_index()) {
-    return absl::StrCat(FlattenExpression(ln, parent_node, expr.sub_index().expression()), "[", expr.sub_index().index().value(), "]");
+    return absl::StrCat(FlattenExpression(ln, parent_node, expr.sub_index().expression()), ".", expr.sub_index().index().value());
+    /* return absl::StrCat(FlattenExpression(ln, parent_node, expr.sub_index().expression()), "[", expr.sub_index().index().value(), "]"); */
 
   } else if (expr.has_reference()) {
     return expr.reference().id();
@@ -1394,7 +1402,8 @@ void Inou_firrtl::create_io_list(const firrtl::FirrtlPB_Type& type, uint8_t dir,
     case firrtl::FirrtlPB_Type::kVectorType: {  // Vector type
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
         vec.emplace_back(port_id, dir, 0, false);
-        create_io_list(type.vector_type().type(), dir, absl::StrCat(port_id, "[", i, "]"), vec);
+        /* create_io_list(type.vector_type().type(), dir, absl::StrCat(port_id, "[", i, "]"), vec); */
+        create_io_list(type.vector_type().type(), dir, absl::StrCat(port_id, ".", i), vec);
       }
       break;
     }
@@ -2207,7 +2216,9 @@ void Inou_firrtl::AddPortToMap(const std::string& mod_id, const firrtl::FirrtlPB
       //FIXME: How does mod_to_io_map interact with a vector?
       mod_to_io_dir_map[std::make_pair(mod_id, port_id)] = dir;
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
-        AddPortToMap(mod_id, type.vector_type().type(), dir, absl::StrCat(port_id, "[", i, "]"), sub, inp_pos, out_pos);
+        // note: get rid of [], use . all the time
+        /* AddPortToMap(mod_id, type.vector_type().type(), dir, absl::StrCat(port_id, "[", i, "]"), sub, inp_pos, out_pos); */
+        AddPortToMap(mod_id, type.vector_type().type(), dir, absl::StrCat(port_id, ".", i), sub, inp_pos, out_pos);
       }
       break;
     }
