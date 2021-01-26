@@ -4,6 +4,6 @@ module trivial1 (
 );
 
 always @(*) begin
-  y = ((a & b) & c) | ((a & b) & ~c);
+  y = ((a & b) & c) | ((a & b) & c);
 end
 endmodule
