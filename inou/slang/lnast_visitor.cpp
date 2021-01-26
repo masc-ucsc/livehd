@@ -150,8 +150,7 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
       auto node_and   = Lnast_node::create_ref (lnast->add_string("__and"+std::to_string(inc)));
       auto node_or   = Lnast_node::create_ref (lnast->add_string("__or"+std::to_string(inc)));
       auto node_xor   = Lnast_node::create_ref (lnast->add_string("__xor"+std::to_string(inc)));
-      auto node_not   = Lnast_node::create_ref (lnast->add_string("__not"+std::to_string(inc)));
-      (void)node_not;
+      // auto node_not   = Lnast_node::create_ref (lnast->add_string("__not"+std::to_string(inc)));
 
       fmt::print("tmp list check: \n");
       for (auto check = tmpList.cbegin(); check!= tmpList.cend(); ++check) std::cout << " " << *check;
