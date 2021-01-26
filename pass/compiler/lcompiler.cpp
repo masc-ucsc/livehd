@@ -71,7 +71,7 @@ void Lcompiler::add_firrtl_thread(std::shared_ptr<Lnast> ln) {
 
   // note: since the first generated lgraphs are firrtl_op_lgs, they will be removed in the end,
   // we should keep the original module_name for the firrtl_op mapped lgraph, so here I attached
-  // "_firrtl_" prefix for the firrtl_op_lgs
+  // "__firrtl_" prefix for the firrtl_op_lgs
   fmt::print("---------------- LNAST-> LGraph ({}) --------------------- (LN-2)\n", absl::StrCat("__firrtl_", ln->get_top_module_name()));
   auto module_name = absl::StrCat("__firrtl_", ln->get_top_module_name());
   Lnast_tolg ln2lg(module_name, path);

@@ -3,10 +3,28 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 # a basic test script to chain together all the required commands for generating a floorplan
-set -e
 
-TESTFILE=./inou/yosys/tests/long_gcd.v
-TESTTOP=gcd
+set -e # exit if any command fails
+
+# works
+#TESTFILE=./inou/yosys/tests/long_gcd.v
+#TESTTOP=gcd
+
+# works
+#TESTFILE=./pass/fplan/tests/simple_hier_test.v
+#TESTTOP=simple_hier_test
+
+# does not work - nodes are missed?
+# TESTFILE=./inou/yosys/tests/punching_3.v
+# TESTTOP=punching_3
+
+# does not work - something to do with deep hierarchy?
+# TESTFILE=./pass/fplan/tests/hier_test.v
+# TESTTOP=hier_test
+
+# TODO: try every test verilog file in yosys - more probably fail
+# TODO: pass.fplan.writearea crashes
+# TODO: let everyone know that -Werror is in effect now
 
 rm -rf lgdb
 ./bazel-bin/main/lgshell -c "inou.yosys.tolg files:$TESTFILE top:$TESTTOP" > /dev/null

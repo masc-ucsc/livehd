@@ -40,7 +40,10 @@ pts='Life'
 # pts='Cell_alone'
 # pts='MaxN'
 # pts='Trivial'
-pts='Xor6Thread2'
+# pts='Xor6Thread2'
+# pts='Xor6Thread2V2'
+pts='Xor3Thread1V2'
+pts='Trivial'
 
 
 LGSHELL=./bazel-bin/main/lgshell
