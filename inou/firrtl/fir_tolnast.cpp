@@ -1226,7 +1226,6 @@ std::string_view Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB
     auto first_field_name        = str_without_inst.substr(0, str_without_inst.find("."));
     auto str_without_inst_and_io = str_without_inst.substr(flattened_str.find(".") + 1);
     auto module_name             = inst_to_mod_map[inst_name];
-    fmt::print("  DEBUG0 str_without_inst:{}\n", str_without_inst);
     auto dir                     = mod_to_io_dir_map[std::make_pair(module_name, str_without_inst)];
 
     //note: here I assume all module io will start from a hierarchy call "IO" in all firrtl module
@@ -1366,8 +1365,7 @@ std::string Inou_firrtl::FlattenExpression(Lnast& ln, Lnast_nid& parent_node, co
  * This function returns a pair which holds the full name of a wire/output/input/register
  * and the bitwidth of it (if the bw is 0, that means the bitwidth will be inferred later.
  */
-void Inou_firrtl::create_io_list(const firrtl::FirrtlPB_Type& type, uint8_t dir, const std::string& port_id,
-                                 std::vector<std::tuple<std::string, uint8_t, uint32_t, bool>>& vec) {
+void Inou_firrtl::create_io_list(const firrtl::FirrtlPB_Type& type, uint8_t dir, const std::string& port_id, std::vector<std::tuple<std::string, uint8_t, uint32_t, bool>>& vec) {
   switch (type.type_case()) {
     case firrtl::FirrtlPB_Type::kUintType: {  // UInt type
       vec.emplace_back(port_id, dir, type.uint_type().width().value(), false);
@@ -1444,7 +1442,8 @@ void Inou_firrtl::ListPortInfo(Lnast& lnast, const firrtl::FirrtlPB_Port& port, 
     std::string full_port_name;
     if (port_dir == firrtl::FirrtlPB_Port_Direction::FirrtlPB_Port_Direction_PORT_DIRECTION_IN) {
       input_names.insert(port_name);
-      if (port_name.find_first_of("[.") != std::string::npos) {
+      /* if (port_name.find_first_of("[.") != std::string::npos) { */
+      if (port_name.find(".") != std::string::npos) {
         full_port_name = absl::StrCat("$inp_", port_name);
       } else {
         full_port_name = absl::StrCat("$", port_name);
@@ -1452,7 +1451,8 @@ void Inou_firrtl::ListPortInfo(Lnast& lnast, const firrtl::FirrtlPB_Port& port, 
 
     } else if (port_dir == firrtl::FirrtlPB_Port_Direction::FirrtlPB_Port_Direction_PORT_DIRECTION_OUT) {
       output_names.insert(port_name);
-      if (port_name.find_first_of("[.") != std::string::npos) {
+      /* if (port_name.find_first_of("[.") != std::string::npos) { */
+      if (port_name.find(".") != std::string::npos) {
         full_port_name = absl::StrCat("%out_", port_name);
       } else {
         full_port_name = absl::StrCat("%", port_name);
@@ -1842,7 +1842,6 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
     }
     case firrtl::FirrtlPB_Statement::kRegister: {  // Register
       register_names.insert(stmt.register_().id());
-      fmt::print("DEBUG entry point register_name:{}\n", stmt.register_().id());
       init_reg_dots(lnast, stmt.register_().type(), absl::StrCat("#", stmt.register_().id()),
                     stmt.register_().clock(), stmt.register_().reset(),
                     stmt.register_().init(), parent_node);

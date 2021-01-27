@@ -39,6 +39,11 @@ void Gioc::do_trans(LGraph *lg) {
       }
 
       collect_tgs_from_unified_out(node);
+      /* //FIXME->sh: may need open graph to know if the $/% have no more connection inside the subgraph */
+      /* I(node.inp_edges().size() == 1); */
+      /* I(node.out_edges().size() == 1); */
+      /* node.inp_edges().begin()->del_edge(); */
+      /* node.out_edges().begin()->del_edge(); */
       subgraph_io_connection(lg, sub, arg_tup_name, ret_name, node);
       reconnect_the_tgs_from_unified_out(ret_name);
       tgs_spins_from_unified_ta.clear();
@@ -67,8 +72,11 @@ void Gioc::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_view ar
   // start query subgraph io and construct TGs for connecting inputs, TAs/scalar for connecting outputs
   for (const auto *io_pin : sub->get_io_pins()) {
     I(!io_pin->is_invalid());
-    if (io_pin->name == "$" || io_pin->name == "%")
+    fmt::print("io_pin->name:{}\n", io_pin->name);
+    if (io_pin->name == "$" || io_pin->name == "%") {
       continue;
+    }
+
 
     // I. io_pin is_input
     if (io_pin->is_input()) {

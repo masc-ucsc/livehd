@@ -128,6 +128,8 @@ void Lcompiler::global_firrtl_bits_analysis_map() {
   // hierarchical traversal
   for (auto &lg : lgs) {
     ++lgcnt;
+    lg->dump();
+    Graph_library::sync_all();
     if (lg->get_name() == top_name_before_mapping) {
       hit = true;
       fmt::print("---------------- Firrtl Bits Analysis ({}) --------------- (F-1)\n", lg->get_name());
