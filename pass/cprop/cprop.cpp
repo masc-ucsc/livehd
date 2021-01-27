@@ -562,12 +562,15 @@ std::tuple<std::string_view, std::string_view, int> Cprop::get_tuple_name_key(No
 }
 
 bool Cprop::process_tuple_get(Node &node) {
+  
   I(node.get_type_op() == Ntype_op::TupGet);
 
   auto parent_dpin  = node.get_sink_pin("tuple_name").get_driver_pin();
   auto parent_node  = parent_dpin.get_node();
   auto parent_ntype = parent_node.get_type_op();
   auto [tup_name, key_name, key_pos] = get_tuple_name_key(node);
+  fmt::print("{}\n", node.debug_name());
+  fmt::print("  tup_name:{}, key_name:{}, key_pos:{}\n", tup_name, key_name, key_pos);
 
   // special case when TG try to get a scalar variable by accessing pos 0
   // FIXME:sh-> should be handled by tup.is_scalar()
@@ -575,6 +578,9 @@ bool Cprop::process_tuple_get(Node &node) {
     if (key_pos == 0 && !parent_dpin.is_invalid()) {
       collapse_forward_for_pin(node, parent_dpin);
       return true;
+    /* } else if (key_name == "0" && !parent_dpin.is_invalid()) { */
+    /*   collapse_forward_for_pin(node, parent_dpin); */
+    /*   return true; */
     } else {
       Pass::info("tuple_get {} could not decide the field {} from the parent mux!\n", node.debug_name(), parent_node.debug_name(), key_name);
       return false;
