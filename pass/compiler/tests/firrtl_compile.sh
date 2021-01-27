@@ -40,11 +40,8 @@ pts='Life'
 # pts='Cell_alone'
 # pts='MaxN'
 # pts='Trivial'
-# pts='Xor6Thread2'
-# pts='Xor6Thread2V2'
-pts='Xor3Thread1V3'
-pts='XorSelfThread1V1'
-# pts='Trivial'
+pts='XorSelfThread1'
+pts='Xor6Thread2'
 
 
 LGSHELL=./bazel-bin/main/lgshell
@@ -130,10 +127,11 @@ firrtl_test() {
     fi
   done
 
-  # rm -f *.v
-  # rm -f *.dot
-  # rm -f lgcheck*
-  # rm -rf lgdb
+  rm -f *.v
+  rm -f *.dot
+  rm -f *.tcl
+  rm -f lgcheck*
+  rm -rf lgdb
 }
 
 firrtl_test "$pts"

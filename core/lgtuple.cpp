@@ -150,6 +150,7 @@ size_t Lgtuple::get_or_create_pos(size_t pos) {
   unscalarize_if_needed();
 
   named = false;
+  // FIXME->sh: why???
   I(pos);
   bool new_entry = false;
   if (pos > pos2tuple.size()) {
