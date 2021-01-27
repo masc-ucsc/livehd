@@ -102,8 +102,6 @@ void Gioc::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_view ar
         }
 
         tn_dpin.connect_sink(tn_spin);
-        /* auto field_dpin = setup_field_dpin(lg, subname); */
-        /* field_dpin.connect_sink(field_spin); */
 
         if (std::isdigit(subname[0])) {
           auto pos_dpin = lg->create_node_const(Lconst(subname)).setup_driver_pin();
