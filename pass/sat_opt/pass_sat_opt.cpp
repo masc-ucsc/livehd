@@ -133,7 +133,7 @@ void Pass_sat_opt::check_sat_opt(LGraph *g) {
 	 
 	 if (node.get_type_op() == Ntype_op::And) {
 			  auto inp = node.inp_edges(); // a vector of input edges - assume 2 for now although both lgraph and ezsat support more
-			  auto and_result = sat.vec_and(dpin2sat_var[inp[0].driver.get_compact()], dpin2sat_var[inp[1].driver.get_compact()]);
+			  auto and_result = sat.vec_and_wrapper(dpin2sat_var[inp[0].driver.get_compact()], dpin2sat_var[inp[1].driver.get_compact()]);
 			  dpin2sat_var[node.setup_driver_pin().get_compact()] = and_result;
 
 			  fmt::print("--Debug AND: {}\n", node.setup_driver_pin().debug_name());
@@ -141,7 +141,7 @@ void Pass_sat_opt::check_sat_opt(LGraph *g) {
 	  }
 	  	else if (node.get_type_op() == Ntype_op::Or) {
 			  auto inp = node.inp_edges(); // a vector of input edges - assume 2 for now although both lgraph and ezsat support more
-			  auto or_result = sat.vec_or(dpin2sat_var[inp[0].driver.get_compact()], dpin2sat_var[inp[1].driver.get_compact()]);
+			  auto or_result = sat.vec_or_wrapper(dpin2sat_var[inp[0].driver.get_compact()], dpin2sat_var[inp[1].driver.get_compact()]);
 			  dpin2sat_var[node.setup_driver_pin().get_compact()] = or_result;
 
 			  fmt::print("--Debug OR: {}\n", node.setup_driver_pin().debug_name());
@@ -149,7 +149,7 @@ void Pass_sat_opt::check_sat_opt(LGraph *g) {
 	  
 	  	else if (node.get_type_op() == Ntype_op::Xor) {
 			  auto inp = node.inp_edges(); // a vector of input edges - assume 2 for now although both lgraph and ezsat support more
-			  auto xor_result = sat.vec_xor(dpin2sat_var[inp[0].driver.get_compact()], dpin2sat_var[inp[1].driver.get_compact()]);
+			  auto xor_result = sat.vec_xor_wrapper(dpin2sat_var[inp[0].driver.get_compact()], dpin2sat_var[inp[1].driver.get_compact()]);
 			  dpin2sat_var[node.setup_driver_pin().get_compact()] = xor_result;
 
 			  fmt::print("--Debug XOR: {}\n", node.setup_driver_pin().debug_name());
@@ -171,8 +171,8 @@ void Pass_sat_opt::check_sat_opt(LGraph *g) {
 	  }*/
 	  	else if (node.get_type_op() == Ntype_op::EQ) {
 			  auto inp = node.inp_edges(); // a vector of input edges - assume 2 for now although both lgraph and ezsat support more
-			  auto eq_result = sat.vec_eq(dpin2sat_var[inp[0].driver.get_compact()], dpin2sat_var[inp[1].driver.get_compact()]);
-			  std::vector<int> eq_result_vec = (std::vector<int>) eq_result;
+			  auto eq_result = sat.vec_eq_wrapper(dpin2sat_var[inp[0].driver.get_compact()], dpin2sat_var[inp[1].driver.get_compact()]);
+			  std::vector<int> eq_result_vec {eq_result};
 			  dpin2sat_var[node.setup_driver_pin().get_compact()] = eq_result_vec;
 
 			  fmt::print("--Debug EQ: {}\n", node.setup_driver_pin().debug_name());
@@ -219,7 +219,7 @@ void Pass_sat_opt::check_sat_opt(LGraph *g) {
 			  auto a_input = node.get_sink_pin("A").inp_edges();
 			  auto b_input = node.get_sink_pin("B").inp_edges();
 			  			  
-			  auto lt_result = sat.vec_lt_signed(dpin2sat_var[a_input[0].driver.get_compact()], dpin2sat_var[b_input[0].driver.get_compact()]);
+			  auto lt_result = sat.vec_lt_signed_wrapper(dpin2sat_var[a_input[0].driver.get_compact()], dpin2sat_var[b_input[0].driver.get_compact()]);
 			  std::vector<int> lt_result_vec {lt_result};
 			  
 			  dpin2sat_var[node.setup_driver_pin().get_compact()] = lt_result_vec;
@@ -230,7 +230,7 @@ void Pass_sat_opt::check_sat_opt(LGraph *g) {
 			  auto a_input = node.get_sink_pin("A").inp_edges();
 			  auto b_input = node.get_sink_pin("B").inp_edges();
 			  			  
-			  auto gt_result = sat.vec_gt_signed(dpin2sat_var[a_input[0].driver.get_compact()], dpin2sat_var[b_input[0].driver.get_compact()]);
+			  auto gt_result = sat.vec_gt_signed_wrapper(dpin2sat_var[a_input[0].driver.get_compact()], dpin2sat_var[b_input[0].driver.get_compact()]);
 			  std::vector<int> gt_result_vec {gt_result};
 			  
 			  dpin2sat_var[node.setup_driver_pin().get_compact()] = gt_result_vec;

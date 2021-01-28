@@ -675,6 +675,24 @@ std::vector<int> lezSAT::vec_and(const std::vector<int> &vec1, const std::vector
   return vec;
 }
 
+std::vector<int> lezSAT::vec_and_wrapper(std::vector<int> vec1, std::vector<int> vec2) {
+		std::vector<int>::size_type vec1_size = vec1.size(), vec2_size = vec2.size();
+	if (vec1_size < vec2_size)
+	{
+		std::vector<int> pad((vec2_size - vec1_size), vec1[0]);
+		pad.insert(pad.end(),vec1.begin(), vec1.end());
+		vec1.swap(pad);
+	}
+	else if (vec2_size < vec1_size)
+	{
+		std::vector<int> pad((vec1_size - vec2_size), vec2[0]);
+		pad.insert(pad.end(), vec2.begin(), vec2.end());
+		vec2.swap(pad);
+	}
+	std::vector<int> result = lezSAT::vec_and(vec1, vec2);
+	return(result);
+}
+
 std::vector<int> lezSAT::vec_and_multiarg(const std::vector<std::vector<int>> &vec1)
 
 {
@@ -712,6 +730,24 @@ std::vector<int> lezSAT::vec_or(const std::vector<int> &vec1, const std::vector<
   return vec;
 }
 
+std::vector<int> lezSAT::vec_or_wrapper(std::vector<int> vec1, std::vector<int> vec2) {
+		std::vector<int>::size_type vec1_size = vec1.size(), vec2_size = vec2.size();
+	if (vec1_size < vec2_size)
+	{
+		std::vector<int> pad((vec2_size - vec1_size), vec1[0]);
+		pad.insert(pad.end(),vec1.begin(), vec1.end());
+		vec1.swap(pad);
+	}
+	else if (vec2_size < vec1_size)
+	{
+		std::vector<int> pad((vec1_size - vec2_size), vec2[0]);
+		pad.insert(pad.end(), vec2.begin(), vec2.end());
+		vec2.swap(pad);
+	}
+	std::vector<int> result = lezSAT::vec_or(vec1, vec2);
+	return (result);
+}
+
 std::vector<int> lezSAT::vec_or_multiarg(const std::vector<std::vector<int>> &vec1) {
   for (size_t i = 1; i < vec1.size(); i++) {
     // assert all the operands are same size
@@ -744,6 +780,24 @@ std::vector<int> lezSAT::vec_xor(const std::vector<int> &vec1, const std::vector
   std::vector<int> vec(vec1.size());
   for (int i = 0; i < int(vec1.size()); i++) vec[i] = XOR(vec1[i], vec2[i]);
   return vec;
+}
+
+std::vector<int> lezSAT::vec_xor_wrapper(std::vector<int> vec1, std::vector<int> vec2) {
+		std::vector<int>::size_type vec1_size = vec1.size(), vec2_size = vec2.size();
+	if (vec1_size < vec2_size)
+	{
+		std::vector<int> pad((vec2_size - vec1_size), vec1[0]);
+		pad.insert(pad.end(),vec1.begin(), vec1.end());
+		vec1.swap(pad);
+	}
+	else if (vec2_size < vec1_size)
+	{
+		std::vector<int> pad((vec1_size - vec2_size), vec2[0]);
+		pad.insert(pad.end(), vec2.begin(), vec2.end());
+		vec2.swap(pad);
+	}
+	std::vector<int> result = lezSAT::vec_xor(vec1, vec2);
+	return (result);
 }
 
 std::vector<int> lezSAT::vec_xor_multiarg(const std::vector<std::vector<int>> &vec1) {
@@ -998,6 +1052,24 @@ int lezSAT::vec_lt_signed(const std::vector<int> &vec1, const std::vector<int> &
   return OR(AND(NOT(overflow), sign), AND(overflow, NOT(sign)));
 }
 
+int lezSAT::vec_lt_signed_wrapper(std::vector<int> vec1, std::vector<int> vec2) {
+		std::vector<int>::size_type vec1_size = vec1.size(), vec2_size = vec2.size();
+	if (vec1_size < vec2_size)
+	{
+		std::vector<int> pad((vec2_size - vec1_size), vec1[0]);
+		pad.insert(pad.end(),vec1.begin(), vec1.end());
+		vec1.swap(pad);
+	}
+	else if (vec2_size < vec1_size)
+	{
+		std::vector<int> pad((vec1_size - vec2_size), vec2[0]);
+		pad.insert(pad.end(), vec2.begin(), vec2.end());
+		vec2.swap(pad);
+	}
+	int result = lezSAT::vec_lt_signed(vec1, vec2);
+	return(result);
+}
+
 int lezSAT::vec_le_signed(const std::vector<int> &vec1, const std::vector<int> &vec2) {
   int carry, overflow, sign, zero;
   vec_cmp(vec1, vec2, carry, overflow, sign, zero);
@@ -1014,6 +1086,24 @@ int lezSAT::vec_gt_signed(const std::vector<int> &vec1, const std::vector<int> &
   int carry, overflow, sign, zero;
   vec_cmp(vec1, vec2, carry, overflow, sign, zero);
   return AND(OR(AND(NOT(overflow), NOT(sign)), AND(overflow, sign)), NOT(zero));
+}
+
+int lezSAT::vec_gt_signed_wrapper(std::vector<int> vec1, std::vector<int> vec2) {
+		std::vector<int>::size_type vec1_size = vec1.size(), vec2_size = vec2.size();
+	if (vec1_size < vec2_size)
+	{
+		std::vector<int> pad((vec2_size - vec1_size), vec1[0]);
+		pad.insert(pad.end(),vec1.begin(), vec1.end());
+		vec1.swap(pad);
+	}
+	else if (vec2_size < vec1_size)
+	{
+		std::vector<int> pad((vec1_size - vec2_size), vec2[0]);
+		pad.insert(pad.end(), vec2.begin(), vec2.end());
+		vec2.swap(pad);
+	}
+	int result = lezSAT::vec_gt_signed(vec1, vec2);
+	return(result);
 }
 
 int lezSAT::vec_lt_unsigned(const std::vector<int> &vec1, const std::vector<int> &vec2) {
@@ -1041,6 +1131,24 @@ int lezSAT::vec_gt_unsigned(const std::vector<int> &vec1, const std::vector<int>
 }
 
 int lezSAT::vec_eq(const std::vector<int> &vec1, const std::vector<int> &vec2) { return vec_reduce_and(vec_iff(vec1, vec2)); }
+
+int lezSAT::vec_eq_wrapper(std::vector<int> vec1, std::vector<int> vec2) {
+		std::vector<int>::size_type vec1_size = vec1.size(), vec2_size = vec2.size();
+	if (vec1_size < vec2_size)
+	{
+		std::vector<int> pad((vec2_size - vec1_size), vec1[0]);
+		pad.insert(pad.end(),vec1.begin(), vec1.end());
+		vec1.swap(pad);
+	}
+	else if (vec2_size < vec1_size)
+	{
+		std::vector<int> pad((vec1_size - vec2_size), vec2[0]);
+		pad.insert(pad.end(), vec2.begin(), vec2.end());
+		vec2.swap(pad);
+	}
+	int result = lezSAT::vec_eq(vec1, vec2);
+	return(result);
+}
 
 int lezSAT::vec_ne(const std::vector<int> &vec1, const std::vector<int> &vec2) { return NOT(vec_reduce_and(vec_iff(vec1, vec2))); }
 

@@ -302,6 +302,19 @@ public:
   void vec_set(const std::vector<int> &vec1, const std::vector<int> &vec2);
   void vec_set_signed(const std::vector<int> &vec1, int64_t value);
   void vec_set_unsigned(const std::vector<int> &vec1, uint64_t value);
+  
+  
+  
+  /* New wrapper functions to handle vectors of different sizes */
+  std::vector<int> vec_and_wrapper(std::vector<int> vec1, std::vector<int> vec2);
+  std::vector<int> vec_or_wrapper(std::vector<int> vec1, std::vector<int> vec2);
+  std::vector<int> vec_xor_wrapper(std::vector<int> vec1, std::vector<int> vec2);
+  int vec_eq_wrapper(std::vector<int> vec1, std::vector<int> vec2);
+  int vec_lt_signed_wrapper(std::vector<int> vec1, std::vector<int> vec2);
+  int vec_gt_signed_wrapper(std::vector<int> vec1, std::vector<int> vec2); 
+   /* New wrapper functions to handle vectors of different sizes over */
+   
+   
 
   // helpers for generating lezSATbit and lezSATvec objects
 
