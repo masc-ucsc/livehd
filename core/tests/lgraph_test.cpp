@@ -41,10 +41,10 @@ protected:
 
     Node_pin pin;
     if (posinput.count(pos)) {
-      EXPECT_TRUE(lg->is_graph_input(name));
+      EXPECT_TRUE(lg->has_graph_input(name));
       pin = lg->get_graph_input(name);
     } else {
-      EXPECT_TRUE(lg->is_graph_output(name));
+      EXPECT_TRUE(lg->has_graph_output(name));
       if (rbool.any())
         pin = lg->get_graph_output_driver_pin(name);
       else
@@ -54,8 +54,8 @@ protected:
     // FIXME: we should get this working both ways (hier and non_hier)
     pin.get_non_hierarchical().del();  // del pin and connected edges (no dest nodes)
 
-    EXPECT_FALSE(lg->is_graph_input(name));
-    EXPECT_FALSE(lg->is_graph_output(name));
+    EXPECT_FALSE(lg->has_graph_input(name));
+    EXPECT_FALSE(lg->has_graph_output(name));
 
     posused.erase(pos);
     posinput.erase(pos);  // may be there or not
@@ -65,8 +65,8 @@ protected:
   }
 
   void add_input(LGraph *lg, const std::string &name) {
-    EXPECT_FALSE(lg->is_graph_output(name));
-    EXPECT_FALSE(lg->is_graph_input(name));
+    EXPECT_FALSE(lg->has_graph_output(name));
+    EXPECT_FALSE(lg->has_graph_input(name));
 
     EXPECT_TRUE(name2pos.find(name) == name2pos.end());
     EXPECT_TRUE(name2bits.find(name) == name2bits.end());
@@ -92,12 +92,12 @@ protected:
     EXPECT_EQ(posinput.count(pos), 1);
     EXPECT_FALSE(name2pos.find(name) == name2pos.end());
     EXPECT_FALSE(name2bits.find(name) == name2bits.end());
-    EXPECT_TRUE(lg->is_graph_input(name));
+    EXPECT_TRUE(lg->has_graph_input(name));
   }
 
   void add_output(LGraph *lg, const std::string &name) {
-    EXPECT_FALSE(lg->is_graph_output(name));
-    EXPECT_FALSE(lg->is_graph_input(name));
+    EXPECT_FALSE(lg->has_graph_output(name));
+    EXPECT_FALSE(lg->has_graph_input(name));
 
     EXPECT_TRUE(name2pos.find(name) == name2pos.end());
     EXPECT_TRUE(name2bits.find(name) == name2bits.end());
@@ -120,7 +120,7 @@ protected:
     EXPECT_EQ(posused.count(pos), 1);
     EXPECT_FALSE(name2pos.find(name) == name2pos.end());
     EXPECT_FALSE(name2bits.find(name) == name2bits.end());
-    EXPECT_TRUE(lg->is_graph_output(name));
+    EXPECT_TRUE(lg->has_graph_output(name));
   }
 
   void SetUp() override {}
@@ -134,7 +134,7 @@ protected:
 
     for (auto it : name2pos) {
       if (posinput.count(it.second)) {
-        EXPECT_TRUE(lg->is_graph_input(it.first));
+        EXPECT_TRUE(lg->has_graph_input(it.first));
 
         auto        dpin    = lg->get_graph_input(it.first);
         const auto &io_pin1 = sub_node.get_io_pin_from_instance_pid(dpin.get_pid());
@@ -146,7 +146,7 @@ protected:
         EXPECT_EQ(io_pin1.graph_io_pos, it.second);
         EXPECT_EQ(dpin.get_bits(), name2bits[it.first]);
       } else {
-        EXPECT_TRUE(lg->is_graph_output(it.first));
+        EXPECT_TRUE(lg->has_graph_output(it.first));
 
         auto        dpin    = lg->get_graph_output_driver_pin(it.first);
         const auto &io_pin1 = sub_node.get_io_pin_from_instance_pid(dpin.get_pid());

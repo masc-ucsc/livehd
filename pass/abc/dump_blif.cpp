@@ -32,7 +32,7 @@ void Pass_abc::write_src_info(const LGraph *g, const index_offset &inp, std::ofs
       break;
     }
     case GraphIO_Op: {
-      assert(g->is_graph_input(src_idx));
+      assert(g->has_graph_input(src_idx));
       fs << g->get_node_wirename(src_idx) << " ";
       break;
     }

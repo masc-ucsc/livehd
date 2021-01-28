@@ -10,7 +10,7 @@ class Cprop {
 private:
   bool hier;
   bool at_gioc;
-  bool tuple_get_left = false;
+  bool tuple_issues;
 protected:
 
   absl::flat_hash_map<Node::Compact, std::shared_ptr<Lgtuple>> node2tuple;  // node to the most up-to-dated tuple chain
@@ -37,14 +37,16 @@ protected:
 
 
   // Tuple methods
-  std::shared_ptr<Lgtuple> find_lgtuple(Node_pin up_dpin);
+  std::shared_ptr<Lgtuple const> find_lgtuple(Node_pin up_dpin);
   void process_tuple_add(Node &node);
   bool process_tuple_get(Node &node);
   void process_mux(Node &node);
 
   // io construction
-  void try_create_graph_output(LGraph *lg, std::shared_ptr<Lgtuple> tup);
+  void try_create_graph_output(Node &node, std::shared_ptr<Lgtuple> tup);
 
+  // Delete node and all the previous nodes feeding this one if single user
+  void bwd_del_node(Node &node);
 
 public:
   Cprop (bool _hier, bool _gioc);
@@ -52,5 +54,5 @@ public:
   void dump_node2tuples() const;
   // Entry point
   void do_trans(LGraph *orig);
-  bool get_tuple_get_left() const;
+  bool has_tuple_issues() const { return tuple_issues; }
 };

@@ -6,8 +6,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "lgtuple.hpp"
 #include "pass.hpp"
-
-class LGraph;
+#include "lgraph.hpp"
 
 class Lgcpp_plugin {
 public:

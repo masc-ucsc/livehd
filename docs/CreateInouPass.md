@@ -1,5 +1,7 @@
 # Select between inou and pass
 
+WARNING: this document is out dated
+
 * **inou**: reads external (non-LGraph) files to create an LGraph, or exports files from an LGraph (ex: [inou/json](../inou/json)).
 * **pass**: optimizes or regenerates a LGraph, or generates a new set of LGraphs from a given LGraph (such as dead code elimination).
 
@@ -33,44 +35,6 @@ class <My_pass> : public Pass {
   static void pass(Eprp_var &var);
 };
 
-```
-
-In the file pass/<my\_pass>/my\_pass.cpp:
-
-```cpp
-//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-
-#include "<my_pass>.hpp"
-
-void setup_pass_<my_pass>() {
-  <My_pass> p;
-  p.setup();
-}
-
-void <My_pass>::setup() {
-  Eprp_method m1("pass.<my_pass>", "<my_pass> is an example pass, this is an example help text", &<My_pass>::pass);
-  m1.add_label_required("required_label_name", "label help text");
-  register_pass(m1);
-}
-
-void <My_pass>::pass(Eprp_var &var) {
-  <My_pass> pass;
-  
-  fmt::print("the option passed in the required label name is {}.\n", var.get("required_label_name");
-  
-  for(auto &l:var.lgs) {
-    pass.do_work(l);
-  }
-}
-
-void <My_pass>::do_work(LGraph &g) {
-
-  for(auto idx : g.fast()) {
-    if(g.is_graph_output(idx)) {
-      fmt::print("found graph output {}\n",g.get_graph_output_name(idx));
-    }
-  }
-}
 ```
 
 Finally, in the pass/<my\_pass>/BUILD

@@ -402,7 +402,7 @@ void Pass_abc::conn_latch(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t 
     for (const auto &sg : graph_info->skew_group_map) {
       if (sg.second.find(latch_old_idx) != sg.second.end()) {
         std::string ck_name = sg.first;
-        if (new_graph->is_graph_input(ck_name)) {
+        if (new_graph->has_graph_input(ck_name)) {
           auto dpin = new_graph->get_graph_input(ck_name);
           auto spin = new_graph->get_node(latch_new_idx).setup_sink_pin(tcell->get_pin_id(trig_pin));
 

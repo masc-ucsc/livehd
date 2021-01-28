@@ -42,7 +42,7 @@ protected:
   pos2key_map_type pos2key_map;
   key2pos_map_type key2pos_map;
 
-  key_map_type::const_iterator get_it(int pos, std::string_view key) const {
+  key_map_type::const_iterator get_both_it(int pos, std::string_view key) const {
     I(pos>=0);
     const auto it = key_map.find(std::string{key});
     I(get_it(pos) == it);
@@ -67,31 +67,57 @@ protected:
   key_map_type::const_iterator get_it(std::string_view key) const {
     return key_map.find(std::string{key});
   }
+  key_map_type::const_iterator get_it(int pos, std::string_view key) const {
+    if (pos>=0 && !key.empty())
+      return get_both_it(pos, key);
+
+    if (pos>=0)
+      return get_it(pos);
+
+    return get_it(key);
+  }
+
+  key_map_type::const_iterator get_lower_it(int pos, std::string_view key) const {
+
+    if (pos>=0) {
+      auto str_pos = std::to_string(pos);
+
+      key_map_type::const_iterator it = key_map.lower_bound(str_pos);
+      if (it!=key_map.end()) {
+        return it;
+      }
+      auto p2k_it = pos2key_map.find(str_pos);
+      if (p2k_it!=pos2key_map.end())
+        return key_map.lower_bound(p2k_it->second);
+    }
+
+    return key_map.lower_bound(std::string{key});
+  }
 
   std::string get_last_level(const std::string &key) const;
 
-  void add_int(std::string_view key, std::shared_ptr<Lgtuple> tup);
+  void add_int(std::string_view key, std::shared_ptr<Lgtuple const> tup);
 
 public:
   Lgtuple(std::string_view _name) : name(_name) { }
 
   std::string_view get_name() const { return name; }
 
-  static std::shared_ptr<Lgtuple> make_merge(Node_pin &sel_dpin, const std::vector<std::shared_ptr<Lgtuple>> &tup_list);
+  static std::shared_ptr<Lgtuple> make_merge(Node_pin &sel_dpin, const std::vector<std::shared_ptr<Lgtuple const>> &tup_list);
 
-  bool has_dpin(int pos, std::string_view key) const { return get_it(pos, key) != key_map.end(); }
   bool has_dpin(int pos)                       const { return get_it(pos)      != key_map.end(); }
   bool has_dpin(std::string_view key)          const { return get_it(key)      != key_map.end(); }
   bool has_dpin()                              const { return has_dpin("");                      }
+  bool has_dpin(int pos, std::string_view key) const { return (pos>=0)? has_dpin(pos) : has_dpin(key); }
 
   // return pos for key, -1 if not existing
   int get_pos(std::string_view key) const;
 
   // return const Node_pin ref. WARNING: no pointer stability if add/del fields
-  const Node_pin &get_dpin(int pos, std::string_view key) const;
   const Node_pin &get_dpin(int pos) const;
   const Node_pin &get_dpin(std::string_view key) const;
   const Node_pin &get_dpin() const { return get_dpin(""); }
+  const Node_pin &get_dpin(int pos, std::string_view key) const;
 
   std::shared_ptr<Lgtuple> get_sub_tuple(int pos, std::string_view key) const;
   std::shared_ptr<Lgtuple> get_sub_tuple(int key) const;
@@ -102,20 +128,21 @@ public:
   void del(std::string_view key);
 
   // set a dpin/sub tuple. If already existed anything, it is deleted (not attributes)
-  void add(int pos, std::string_view key, std::shared_ptr<Lgtuple> tup);
+  void add(int pos, std::string_view key, std::shared_ptr<Lgtuple const> tup);
   void add(int pos, std::string_view key, const Node_pin &dpin);
 
-  void add(int pos, std::shared_ptr<Lgtuple> tup);
+  void add(int pos, std::shared_ptr<Lgtuple const> tup);
   void add(int pos, const Node_pin &dpin);
 
-  void add(std::string_view key, std::shared_ptr<Lgtuple> tup);
+  void add(std::string_view key, std::shared_ptr<Lgtuple const> tup);
   void add(std::string_view key, const Node_pin &dpin);
 
-  bool add(const std::shared_ptr<Lgtuple> tup2);
   void add(const Node_pin &dpin);
 
+  bool concat(const std::shared_ptr<Lgtuple const> tup2);
+
   /// Get all the attributes (__bits) in the same tuple level
-  std::vector<std::pair<std::string_view, Node_pin>> get_level_attributes() const;
+  std::vector<std::pair<std::string_view, Node_pin>> get_level_attributes(int pos, std::string_view key) const;
 
   const key_map_type &get_map() const { return key_map; }
 
