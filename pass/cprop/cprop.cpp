@@ -625,34 +625,6 @@ bool Cprop::process_tuple_get(Node &node) {
 
     if (conta==0) { // No attributes
       collapse_forward_for_pin(node, val_dpin);
-<<<<<<< HEAD
-    } else { // Has attributes
-      int conta=0;
-      for(auto it : sub_tup->get_level_attributes()) {
-        auto attr_key_node = node.get_lg()->create_node(Ntype_op::TupKey);
-        auto attr_key_dpin = attr_key_node.setup_driver_pin();
-        attr_key_dpin.set_name(it.first);
-
-        if (conta==0) {
-          fmt::print("cprop: changing node:{} to AttrSet node for attr:{} from pin:{}\n",node.debug_name(), it.first, it.second.debug_name());
-          // Reuse current node. First delete input edges
-          for(auto e:node.inp_edges()) {
-            e.del_edge();
-          }
-
-          node.set_type(Ntype_op::AttrSet); // Replace TupGet for AttrSet
-          node.setup_sink_pin("name").connect_driver(val_dpin);
-          node.setup_sink_pin("field").connect_driver(attr_key_dpin);
-          node.setup_sink_pin("value").connect_driver(it.second);
-        } else {
-          I(false); // FIXME: TODO handle multiple attr set (create node)
-        }
-        conta++;
-      }
-      I(conta==1); // If this is possible, maybe just connect to dpin and collapse.
-      /* collapse_forward_for_pin(node, val_dpin); */
-=======
->>>>>>> 9c35d7b1 (get several tuple passing (more pending))
     }
     return true;
   }
