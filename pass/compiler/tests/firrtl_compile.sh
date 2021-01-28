@@ -41,6 +41,7 @@ pts='Life'
 # pts='MaxN'
 # pts='Trivial'
 pts='Xor6Thread2'
+pts='XorSelfThread1'
 
 
 LGSHELL=./bazel-bin/main/lgshell
@@ -90,8 +91,8 @@ firrtl_test() {
     echo "LGraph -> Verilog"
     echo "----------------------------------------------------"
 
-    # ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg hier:true"
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg"
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg hier:true"
+    # ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg"
     if [ $? -eq 0 ] && [ -f ${pt}.v ]; then
         echo "Successfully generate Verilog: ${pt}.v"
         rm -f  yosys_script.*
@@ -126,10 +127,11 @@ firrtl_test() {
     fi
   done
 
-  # rm -f *.v
-  # rm -f *.dot
-  # rm -f lgcheck*
-  # rm -rf lgdb
+  rm -f *.v
+  rm -f *.dot
+  rm -f *.tcl
+  rm -f lgcheck*
+  rm -rf lgdb
 }
 
 firrtl_test "$pts"

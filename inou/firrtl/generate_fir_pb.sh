@@ -13,13 +13,14 @@ pts='GCD_3bits GCD Coverage Shifts AddNot Decrementer PlusAnd RegXor Trivial Tri
 pts='ShiftRegister SimpleALU Stack VecSearch Accumulator Counter 
      DynamicMemorySearch LFSR16 MaxN Memo Mul Mux4 RealGCD SingleEvenFilter VecShiftRegister VecShiftRegisterParam
      VecShiftRegisterSimple VendingMachine VendingMachineSwitch  Adder4 Adder ByteSelector FullAdder HiLoMultiplier Life 
-     Parity ResetShiftRegister Risc LogShifter Cell'
+     Parity ResetShiftRegister Risc LogShifter Cell XorSelfThread1'
 
 pts='Trivial Tail TrivialArith
 Shifts PlusAnd MaxN ByteSelector Darken HiLoMultiplier SimpleALU Mul
 VecShiftRegisterParam VecShiftRegisterSimple ' 
 
 pts='Xor6Thread2'
+pts='XorSelfThread1'
 
 CHISEL_PATH=~/chisel3
 FIRRTL_PATH=~/firrtl

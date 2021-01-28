@@ -125,10 +125,6 @@ fi
 
 if [ -z $FM_SHELL ]; then
   FM_SHELL=`which fm_shell`
-  if [ $? -ne 0 ]; then
-    echo "fm_shell not found, make sure fm_shell is in your path, or define the FM_SHELL environment variable"
-    exit 1
-  fi
 fi
 
 if [ -x ${FM_SHELL} ]; then

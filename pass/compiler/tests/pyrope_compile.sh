@@ -9,7 +9,7 @@ pts_long_time='firrtl_gcd'
 pts='hier_tuple_io hier_tuple3 lhs_wire2 hier_tuple2 scalar_tuple tuple_if
 counter_nested_if counter ssa_rhs out_ssa attr_set logic lhs_wire adder_stage
 bits_rhs if2 hier_tuple capricious_bits4 capricious_bits2 capricious_bits
-tuple_copy reg__q_pin if nested_if tuple_copy2'
+tuple_copy reg__q_pin if nested_if tuple_copy2 tup_out1 tup_out2'
 
 #hier_tuple_nested_if hier_tuple_nested_if2 hier_tuple_nested_if3 hier_tuple_nested_if4 hier_tuple_nested_if5'
 

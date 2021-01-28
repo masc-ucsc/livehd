@@ -39,6 +39,18 @@ void Gioc::do_trans(LGraph *lg) {
       }
 
       collect_tgs_from_unified_out(node);
+      /* FIXME->sh: may need open graph to know if the $/% have no more
+       * connections (fully solved) inside the subgraph, if not, we cannot
+       * remove subgraph unified_io edges here*/
+
+      I(node.inp_edges().size() == 1);
+      I(node.out_edges().size() == 1);
+      node.inp_edges().begin()->del_edge();
+      auto sub_outsink_ta_node = node.out_edges().begin()->sink.get_node();
+      node.out_edges().begin()->del_edge();
+      sub_outsink_ta_node.set_type(Ntype_op::TupRef); //change type from TA to TRef to have a valid chain
+
+
       subgraph_io_connection(lg, sub, arg_tup_name, ret_name, node);
       reconnect_the_tgs_from_unified_out(ret_name);
       tgs_spins_from_unified_ta.clear();
@@ -67,8 +79,10 @@ void Gioc::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_view ar
   // start query subgraph io and construct TGs for connecting inputs, TAs/scalar for connecting outputs
   for (const auto *io_pin : sub->get_io_pins()) {
     I(!io_pin->is_invalid());
-    if (io_pin->name == "$" || io_pin->name == "%")
+    fmt::print("io_pin->name:{}\n", io_pin->name);
+    if (io_pin->name == "$" || io_pin->name == "%") {
       continue;
+    }
 
     // I. io_pin is_input
     if (io_pin->is_input()) {
@@ -78,6 +92,7 @@ void Gioc::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_view ar
         auto tup_get = lg->create_node(Ntype_op::TupGet);
         auto tn_spin = tup_get.setup_sink_pin("tuple_name"); 
         auto field_spin = tup_get.setup_sink_pin("field"); // key name
+        auto pos_spin = tup_get.setup_sink_pin("position"); // key pos
 
         Node_pin tn_dpin;
         if (&subname == &hier_inp_subnames.front()) {
@@ -87,8 +102,16 @@ void Gioc::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_view ar
         }
 
         tn_dpin.connect_sink(tn_spin);
-        auto field_dpin = setup_field_dpin(lg, subname);
-        field_dpin.connect_sink(field_spin);
+
+        if (std::isdigit(subname[0])) {
+          auto pos_dpin = lg->create_node_const(Lconst(subname)).setup_driver_pin();
+          lg->add_edge(pos_dpin, pos_spin);
+        } else {
+          auto field_dpin = setup_field_dpin(lg, subname);
+          lg->add_edge(field_dpin, field_spin);
+        }
+
+
 
         // note: for scalar input, front() == back()
         if (&subname == &hier_inp_subnames.back()) {

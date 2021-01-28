@@ -78,8 +78,6 @@ protected:
   std::string FlattenExpression(Lnast &ln, Lnast_nid &parent_node, const firrtl::FirrtlPB_Expression &expr);
 
   void RegResetInitialization(Lnast &lnast, Lnast_nid &parent_node);
-  void SetupOutputBitwidth(Lnast &lnast);
-
 
 
   // Deconstructing Protobuf Hierarchy

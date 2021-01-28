@@ -463,8 +463,19 @@ Node_pin Lnast_tolg::create_inp_tg(LGraph *lg, std::string_view input_field) {
   tn_dpin.connect_sink(tn_spin);
 
   auto field_spin = tup_get_inp.setup_sink_pin("field");
-  auto field_dpin = setup_field_dpin(lg, input_field.substr(1, input_field.size() - 1));
-  field_dpin.connect_sink(field_spin);
+  auto pos_spin   = tup_get_inp.setup_sink_pin("position");
+  auto subname = input_field.substr(1, input_field.size() - 1);
+  /* auto field_dpin = setup_field_dpin(lg, input_field.substr(1, input_field.size() - 1)); */
+  /* field_dpin.connect_sink(field_spin); */
+
+  if (is_const(subname)) {
+    auto pos_dpin = lg->create_node_const(Lconst(subname)).setup_driver_pin();
+    lg->add_edge(pos_dpin, pos_spin);
+  } else {
+    auto field_dpin = setup_field_dpin(lg, subname);
+    lg->add_edge(field_dpin, field_spin);
+  }
+
   auto tg_dpin = tup_get_inp.setup_driver_pin();
 
 #ifndef NDEBUG
@@ -525,7 +536,8 @@ void Lnast_tolg::process_ast_tuple_get_op(LGraph *lg, const Lnast_nid &lnidx_tg)
       auto        field_pos_spin = tup_get.setup_sink_pin("position");
 
       if (is_const(cn_tg_name)) {
-        auto field_pos_dpin = setup_ref_node_dpin(lg, cn_tg);
+        /* auto field_pos_dpin = setup_ref_node_dpin(lg, cn_tg); */
+        auto field_pos_dpin = lg->create_node_const(Lconst(cn_tg_name)).setup_driver_pin();
         lg->add_edge(field_pos_dpin, field_pos_spin);
       } else {
         auto field_dpin = setup_field_dpin(lg, cn_tg_name);
@@ -565,7 +577,8 @@ void Lnast_tolg::process_ast_tuple_get_op(LGraph *lg, const Lnast_nid &lnidx_tg)
       auto        field_pos_spin = prev_tup_get.setup_sink_pin("position");
 
       if (is_const(cn_tg_name)) {
-        auto field_pos_dpin = setup_ref_node_dpin(lg, cn_tg);
+        /* auto field_pos_dpin = setup_ref_node_dpin(lg, cn_tg); */
+        auto field_pos_dpin = lg->create_node_const(Lconst(cn_tg_name)).setup_driver_pin();
         lg->add_edge(field_pos_dpin, field_pos_spin);
       } else {
         auto field_dpin = setup_field_dpin(lg, cn_tg_name);
@@ -1279,7 +1292,8 @@ void Lnast_tolg::subgraph_io_connection(LGraph *lg, Sub_node *sub, std::string_v
       for (const auto &subname : hier_inp_subnames) {
         auto tup_get    = lg->create_node(Ntype_op::TupGet);
         auto tn_spin    = tup_get.setup_sink_pin("tuple_name");
-        auto field_spin = tup_get.setup_sink_pin("field");  // key name
+        auto field_spin = tup_get.setup_sink_pin("field");    // key name
+        auto pos_spin   = tup_get.setup_sink_pin("position"); // key pos
 
         Node_pin tn_dpin;
         if (&subname == &hier_inp_subnames.front()) {
@@ -1289,8 +1303,19 @@ void Lnast_tolg::subgraph_io_connection(LGraph *lg, Sub_node *sub, std::string_v
         }
 
         tn_dpin.connect_sink(tn_spin);
-        auto field_dpin = setup_field_dpin(lg, subname);
-        field_dpin.connect_sink(field_spin);
+
+        /* auto field_dpin = setup_field_dpin(lg, subname); */
+        /* field_dpin.connect_sink(field_spin); */
+
+
+        if (is_const(subname)) {
+          auto pos_dpin = lg->create_node_const(Lconst(subname)).setup_driver_pin();
+          lg->add_edge(pos_dpin, pos_spin);
+        } else {
+          auto field_dpin = setup_field_dpin(lg, subname);
+          lg->add_edge(field_dpin, field_spin);
+        }
+
 
         // note: for scalar input, front() == back()
         if (&subname == &hier_inp_subnames.back()) {
