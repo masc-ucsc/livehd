@@ -91,6 +91,8 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
       auto idx_dot= lnast->add_child(idx_stmts, Lnast_node::create_dot(""));
       lnast->add_child(idx_dot,Lnast_node::create_ref (lnast->add_string("__"+*ip)));
       lnast->add_child(idx_dot,Lnast_node::create_ref (lnast->add_string(*ip)));
+      lnast->add_child(idx_dot,Lnast_node::create_ref ("foo"));
+
       auto idx_assign= lnast->add_child(idx_stmts, Lnast_node::create_assign(""));
       lnast->add_child(idx_assign,Lnast_node::create_ref (lnast->add_string("__"+*ip)));
       lnast->add_child(idx_assign,Lnast_node::create_const ("1"));
@@ -103,7 +105,9 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
     auto idx_dot= lnast->add_child(idx_stmts, Lnast_node::create_dot(""));
     lnast->add_child(idx_dot,Lnast_node::create_ref (lnast->add_string(temp.append(var.symbol.name))));
     temp="__$";
-    lnast->add_child(idx_dot,Lnast_node::create_ref (lnast->add_string(var.symbol.name)));
+    lnast->add_child(idx_dot,Lnast_node::create_ref (lnast->add_string(output.append(var.symbol.name))));
+    lnast->add_child(idx_dot,Lnast_node::create_ref ("foo"));
+    output="%";
     auto idx_assign= lnast->add_child(idx_stmts, Lnast_node::create_assign(""));
     lnast->add_child(idx_assign,Lnast_node::create_ref (lnast->add_string(temp.append(var.symbol.name))));
     lnast->add_child(idx_assign,Lnast_node::create_const ("1")); 
@@ -174,7 +178,7 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
       }
       else if (*it =="OR"){
         fmt::print("OR \n");
-        auto idx_or = lnast->add_child(idx_stmts, Lnast_node::create_and ("OR"));
+        auto idx_or = lnast->add_child(idx_stmts, Lnast_node::create_or ("OR"));
         auto node_or   = Lnast_node::create_ref (lnast->add_string("__or"+std::to_string(count)));
         lnast->add_child(idx_or, node_or);
         if (operandList.size()){
@@ -223,7 +227,7 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
       }
       else if (*it =="XOR"){
         fmt::print("XOR \n");
-        auto idx_xor = lnast->add_child(idx_stmts, Lnast_node::create_and ("XOR"));
+        auto idx_xor = lnast->add_child(idx_stmts, Lnast_node::create_xor ("XOR"));
         auto node_xor   = Lnast_node::create_ref (lnast->add_string("__xor"+std::to_string(count)));
         lnast->add_child(idx_xor, node_xor);
         if (operandList.size()){
@@ -285,7 +289,7 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
     const auto& var = lhs.as<NamedValueExpression>();
     fmt::print("bits:{} {} =  ", var.type->getBitWidth(), var.symbol.name);
     // operandList.emplace_back(var.symbol.name);
-    lnast->add_child(idx_dpa, Lnast_node::create_ref(output.append(var.symbol.name))); // string_view = %out
+    lnast->add_child(idx_dpa, Lnast_node::create_ref(lnast->add_string(output.append(var.symbol.name)))); // string_view = %out
     output="%";
     auto node_tmp1   = Lnast_node::create_ref (lnast->add_string(tmpList.back()));
     tmpList.pop_back();
