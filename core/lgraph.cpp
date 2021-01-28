@@ -161,6 +161,7 @@ bool LGraph::has_graph_input(std::string_view io_name) const {
     return false;
 
   auto inst_pid = get_self_sub_node().get_instance_pid(io_name);
+
   auto idx      = find_idx_from_pid(Hardcoded_input_nid, inst_pid);
   return (idx != 0);
 }

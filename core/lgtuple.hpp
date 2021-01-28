@@ -95,6 +95,7 @@ protected:
   }
 
   std::string get_last_level(const std::string &key) const;
+  std::string get_remove_first_level(const std::string &key) const;
 
   void add_int(std::string_view key, std::shared_ptr<Lgtuple const> tup);
 
@@ -142,7 +143,7 @@ public:
   bool concat(const std::shared_ptr<Lgtuple const> tup2);
 
   /// Get all the attributes (__bits) in the same tuple level
-  std::vector<std::pair<std::string_view, Node_pin>> get_level_attributes(int pos, std::string_view key) const;
+  std::vector<std::pair<std::string, Node_pin>> get_level_attributes(int pos, std::string_view key) const;
 
   const key_map_type &get_map() const { return key_map; }
 

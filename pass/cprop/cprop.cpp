@@ -592,7 +592,7 @@ bool Cprop::process_tuple_get(Node &node) {
       return true;
 		}
 
-		Pass::info("tuple_get {} could not decide the field {} from the parent mux!\n", node.debug_name(), parent_node.debug_name(), key_name);
+		Pass::info("tuple_get {} could not decide the field {}!", node.debug_name(), key_name);
     return false;
   }
 
@@ -607,6 +607,7 @@ bool Cprop::process_tuple_get(Node &node) {
       attr_key_dpin.set_name(it.first);
 
       if (conta==0) {
+
         fmt::print("cprop: changing node:{} to AttrSet node for attr:{} from pin:{}\n",node.debug_name(), it.first, it.second.debug_name());
         // Reuse current node. First delete input edges
         for(auto e:node.inp_edges()) {
@@ -631,6 +632,7 @@ bool Cprop::process_tuple_get(Node &node) {
 
   auto sub_tup = node_tup->get_sub_tuple(key_pos, key_name);
   if (!sub_tup) {
+		Pass::info("tuple_get {} could not decide the field {}!", node.debug_name(), key_name);
     return false; // Could not resolve (maybe compile error, maybe hierarchical needed)
   }
 
@@ -723,18 +725,13 @@ void Cprop::process_tuple_add(Node &node) {
     }
   } else if (node.is_sink_connected("value")) {
 
-#ifndef NDEBUG
-    if (!parent_tup && node.get_sink_pin("tuple_name").is_connected()) {
-      // If this fails, let's debug it
-      I(node.get_sink_pin("tuple_name").get_driver_pin().get_type_op() == Ntype_op::TupRef);
-    }
-#endif
-
     auto val_dpin = node.get_sink_pin("value").get_driver_pin();
     I(val_dpin.get_node().get_type_op() != Ntype_op::TupAdd); // value_tup should be true otherwise
 
     node_tup->add(key_pos, key_name, val_dpin);
-  } else if (!parent_is_a_sub) {
+  } else if (parent_is_a_sub) {
+    I(false); // Here. Query the parent outputs and build tuple
+  }else{
     I(parent_tup); // tup1 = tup2 can have no sink("value")
   }
 
@@ -786,9 +783,9 @@ void Cprop::do_trans(LGraph *lg) {
     } else if (op == Ntype_op::TupGet) {
       auto ok = process_tuple_get(node);
       if (!ok) {
-        fmt::print("cprop could not simplify node:{}\n",node.debug_name());
+        Pass::info("cprop could not simplify node:{}",node.debug_name());
+        tuple_issues = true;
       }
-      tuple_issues |= !ok;
       continue;
     } else if (op == Ntype_op::Mux) {
       process_mux(node);
@@ -845,12 +842,11 @@ void Cprop::do_trans(LGraph *lg) {
     node2tuple.clear();
   }
 
-
-  if (!hier || at_gioc) {
+  if (!tuple_issues && (!hier || at_gioc)) {
     //remove unified input $ if fully resolved
     if (lg->has_graph_input("$")) {
       auto unified_inp = lg->get_graph_input("$");
-      if (unified_inp.out_edges().size() == 0)
+      if (unified_inp.has_outputs())
         unified_inp.get_non_hierarchical().del();
     }
 
