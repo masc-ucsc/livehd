@@ -9,8 +9,7 @@
 
 #include "floorplan.hpp"
 
-#include <stdlib.h>
-
+#include <cassert>
 #include <cmath>
 #include <fstream>
 #include <iostream>
@@ -141,13 +140,13 @@ void FPObject::outputHotSpotLayout(ostream& o, double startX, double startY) {
 }
 
 unsigned int FPObject::outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_index hidx,
-                                  absl::flat_hash_set<mmap_lib::Tree_index>& sub_hidx_used, double startX, double startY) {
+                                          absl::flat_hash_set<mmap_lib::Tree_index>& sub_hidx_used, double startX, double startY) {
   (void)sub_hidx_used;
-  
-  I(root);
-  I(lg);
-  I(!hidx.is_invalid());
-  I(root->ref_htree()->ref_lgraph(hidx) == lg);
+
+  assert(root);
+  assert(lg);
+  assert(!hidx.is_invalid());
+  assert(root->ref_htree()->ref_lgraph(hidx) == lg);
 
   for (Node fn : lg->fast()) {
     if (fn.get_type_op() != getType()) {
@@ -365,11 +364,12 @@ double FPContainer::totalArea() {
 }
 
 unsigned int FPContainer::outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_index hidx,
-                                     absl::flat_hash_set<mmap_lib::Tree_index>& sub_hidx_used, double startX, double startY) {
-  I(root);
-  I(lg);
-  I(!hidx.is_invalid());
-  I(root->ref_htree()->ref_lgraph(hidx) == lg);
+                                             absl::flat_hash_set<mmap_lib::Tree_index>& sub_hidx_used, double startX,
+                                             double startY) {
+  assert(root);
+  assert(lg);
+  assert(!hidx.is_invalid());
+  assert(root->ref_htree()->ref_lgraph(hidx) == lg);
 
   pushMirrorContext(startX, startY);
 
@@ -415,12 +415,12 @@ unsigned int FPContainer::outputLGraphLayout(LGraph* root, LGraph* lg, const Hie
           break;
         }
       }
-      I(found);
+      assert(found);
     } else if (t == Ntype_op::Invalid) {  // specific kind of layout - current hier structure is fine
       total += obj->outputLGraphLayout(root, lg, hidx, sub_hidx_used, x + startX, y + startY);
     } else {
       fmt::print("???\n");
-      I(false);
+      assert(false);
     }
   }
 
@@ -516,11 +516,12 @@ void gridLayout::outputHotSpotLayout(ostream& o, double startX, double startY) {
 }
 
 unsigned int gridLayout::outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_index hidx,
-                                    absl::flat_hash_set<mmap_lib::Tree_index>& sub_hidx_used, double startX, double startY) {
-  I(root);
-  I(lg);
-  I(!hidx.is_invalid());
-  I(root->ref_htree()->ref_lgraph(hidx) == lg);
+                                            absl::flat_hash_set<mmap_lib::Tree_index>& sub_hidx_used, double startX,
+                                            double startY) {
+  assert(root);
+  assert(lg);
+  assert(!hidx.is_invalid());
+  assert(root->ref_htree()->ref_lgraph(hidx) == lg);
 
   if (getComponentCount() != 1) {
     throw std::invalid_argument("Attempt to output a grid with other than one component.\n");
@@ -533,7 +534,7 @@ unsigned int gridLayout::outputLGraphLayout(LGraph* root, LGraph* lg, const Hier
   compHeight    = obj->getHeight();
   compName      = obj->getName();
 
-  int compNum   = 1;
+  int compNum = 1;
 
   Ntype_op t = obj->getType();
 
@@ -545,7 +546,7 @@ unsigned int gridLayout::outputLGraphLayout(LGraph* root, LGraph* lg, const Hier
       double cx = (j * compWidth) + x + startX;
 
       if (Ntype::is_synthesizable(t)) {  // leaf node - current hier structure is fine
-        total += obj->outputLGraphLayout(root, lg, hidx, sub_hidx_used, x + startX, y + startY);
+        total += obj->outputLGraphLayout(root, lg, hidx, sub_hidx_used, cx, cy);
       } else if (t == Ntype_op::Sub) {  // Sub node - parameters need to be adjusted
         bool found = false;
         for (auto fn : lg->fast()) {
@@ -578,9 +579,9 @@ unsigned int gridLayout::outputLGraphLayout(LGraph* root, LGraph* lg, const Hier
             break;
           }
         }
-        I(found);
+        assert(found);
       } else if (t == Ntype_op::Invalid) {  // specific kind of layout - current hier structure is fine
-        total += obj->outputLGraphLayout(root, lg, hidx, sub_hidx_used, x + startX, y + startY);
+        total += obj->outputLGraphLayout(root, lg, hidx, sub_hidx_used, cx, cy);
       }
       compNum += 1;
     }
@@ -852,7 +853,7 @@ bool geogLayout::layout(FPOptimization opt, double targetAR) {
 
   delete[] centerItems;
   delete[] layoutStack;
-  
+
   return retval;
 }
 

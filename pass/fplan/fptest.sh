@@ -7,8 +7,8 @@
 set -e # exit if any command fails
 
 # works
-TESTFILE=./inou/yosys/tests/long_gcd.v
-TESTTOP=gcd
+# TESTFILE=./inou/yosys/tests/long_gcd.v
+# TESTTOP=gcd
 
 # works
 # TESTFILE=./pass/fplan/tests/simple_hier_test.v
@@ -31,8 +31,8 @@ TESTTOP=gcd
 # TESTTOP=punching_3
 
 # does not work - overlap
-# TESTFILE=./inou/yosys/tests/graphtest.v
-# TESTTOP=graphtest
+TESTFILE=./inou/yosys/tests/graphtest.v
+TESTTOP=graphtest
 
 # does not work - something to do with deep hierarchy?
 # TESTFILE=./pass/fplan/tests/hier_test.v

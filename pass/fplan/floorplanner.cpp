@@ -53,10 +53,10 @@ void Lhd_floorplanner::write_lhd() {
     return true;
   });
 
-  absl::flat_hash_set<Hierarchy_index> hidx_used_set;
+  absl::flat_hash_set<mmap_lib::Tree_index> hidx_used;
 
   unsigned int placed_nodes
-      = layouts[root_lg]->outputLGraphLayout(root_lg, root_lg, root_lg->ref_htree()->root_index(), hidx_used_set);
+      = layouts[root_lg]->outputLGraphLayout(root_lg, root_lg, root_lg->ref_htree()->root_index(), hidx_used);
 
   unsigned int node_count = 0;
   root_lg->each_hier_fast_direct([&node_count](const Node& n) {
@@ -66,16 +66,21 @@ void Lhd_floorplanner::write_lhd() {
 
     node_count++;
 
+    if (debug_print) {
+      fmt::print("node {} ", n.debug_name());
+    }
+
     // basic sanity checking for returned floorplans
     I(n.is_hierarchical());
+    if (debug_print) {
+      fmt::print("level {} pos {} ", n.get_hidx().level, n.get_hidx().pos);
+    }
+
     I(n.has_hier_color());
     I(n.get_hier_color() == 1);  // all (synthesizable) nodes have been visited by floorplanner
     I(n.has_place());
 
     if (debug_print) {
-      fmt::print("node {} ", n.debug_name());
-      fmt::print("level {} pos {} ", n.get_hidx().level, n.get_hidx().pos);
-
       const Ann_place& p = n.get_place();
       fmt::print("x: {:.3f}, y: {:.3f}, width: {:.3f}, height: {:.3f}\n",
                  p.get_pos_x(),
