@@ -20,6 +20,7 @@ Shifts PlusAnd MaxN ByteSelector Darken HiLoMultiplier SimpleALU Mul
 VecShiftRegisterParam VecShiftRegisterSimple ' 
 
 pts='Xor6Thread2'
+pts='XorSelfThread1'
 
 CHISEL_PATH=~/chisel3
 FIRRTL_PATH=~/firrtl

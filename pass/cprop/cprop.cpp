@@ -655,6 +655,7 @@ bool Cprop::process_tuple_get(Node &node) {
         conta++;
       }
       I(conta==1); // If this is possible, maybe just connect to dpin and collapse.
+      /* collapse_forward_for_pin(node, val_dpin); */
     }
     return true;
   }
