@@ -55,6 +55,8 @@ Node_pin::Node_pin(LGraph *_g, Compact_class_driver comp)
 }
 
 const Index_ID Node_pin::get_root_idx() const {
+  if (unlikely(current_g==nullptr))
+    return 0;
   return current_g->get_root_idx(idx);
 }
 
@@ -74,24 +76,24 @@ bool Node_pin::has_inputs() const { return current_g->has_inputs(*this); }
 
 bool Node_pin::has_outputs() const { return current_g->has_outputs(*this); }
 
-bool Node_pin::is_graph_io() const { return current_g->is_graph_io(idx); }
+bool Node_pin::is_graph_io() const { return current_g->has_graph_io(idx); }
 
-bool Node_pin::is_graph_input() const { return current_g->is_graph_input(idx); }
+bool Node_pin::is_graph_input() const { return current_g->has_graph_input(idx); }
 
-bool Node_pin::is_graph_output() const { return current_g->is_graph_output(idx); }
+bool Node_pin::is_graph_output() const { return current_g->has_graph_output(idx); }
 
 Node_pin Node_pin::get_non_hierarchical() const {
   return Node_pin(current_g, current_g, Hierarchy_tree::invalid_index(), idx, pid, sink);
 }
 
-Node_pin Node_pin::get_sink() const {
+Node_pin Node_pin::switch_to_sink() const {
   if(is_sink())
     return *this;
 
   return Node_pin(top_g, current_g, hidx, idx, pid, true);
 }
 
-Node_pin Node_pin::get_driver() const {
+Node_pin Node_pin::switch_to_driver() const {
   if (is_driver())
     return *this;
 
@@ -219,13 +221,11 @@ void Node_pin::set_name(std::string_view wname) {
 }
 
 void Node_pin::del() {
-  if (sink && is_graph_output()) {
+  if (is_graph_output() && sink) {
     auto dpin = change_to_driver_from_graph_out_sink();
     dpin.del();
     return;
   }
-
-  get_lg()->del_pin(*this);
 
   if (!sink) {
     if (has_name()) { // works for sink/driver if needed
@@ -235,6 +235,8 @@ void Node_pin::del() {
       del_delay();
     }
   }
+
+  get_lg()->del_pin(*this);
 
   invalidate();
 }

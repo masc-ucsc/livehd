@@ -156,16 +156,17 @@ Node_pin LGraph::get_graph_output_driver_pin(std::string_view str) {
   return Node(this, Hierarchy_tree::root_index(), Hardcoded_output_nid).setup_driver_pin_raw(io_pid);
 }
 
-bool LGraph::is_graph_input(std::string_view io_name) const {
+bool LGraph::has_graph_input(std::string_view io_name) const {
   if (!get_self_sub_node().is_input(io_name))
     return false;
 
   auto inst_pid = get_self_sub_node().get_instance_pid(io_name);
+
   auto idx      = find_idx_from_pid(Hardcoded_input_nid, inst_pid);
   return (idx != 0);
 }
 
-bool LGraph::is_graph_output(std::string_view io_name) const {
+bool LGraph::has_graph_output(std::string_view io_name) const {
   if (!get_self_sub_node().is_output(io_name))
     return false;
 
@@ -175,7 +176,7 @@ bool LGraph::is_graph_output(std::string_view io_name) const {
 }
 
 Node_pin LGraph::add_graph_input(std::string_view str, Port_ID pos, uint32_t bits) {
-  I(!is_graph_output(str));
+  I(!has_graph_output(str));
 
   Port_ID inst_pid;
   if (get_self_sub_node().has_pin(str)) {
@@ -199,7 +200,7 @@ Node_pin LGraph::add_graph_input(std::string_view str, Port_ID pos, uint32_t bit
 }
 
 Node_pin LGraph::add_graph_output(std::string_view str, Port_ID pos, uint32_t bits) {
-  I(!is_graph_input(str));
+  I(!has_graph_input(str));
 
   Port_ID inst_pid;
   if (get_self_sub_node().has_pin(str)) {

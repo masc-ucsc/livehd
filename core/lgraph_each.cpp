@@ -24,7 +24,8 @@ void LGraph::each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)
     auto idx = find_idx_from_pid(nid, pid);
     if (idx) {
       Node_pin pin(this, this, hidx, idx, pid, false);
-      pin_pair.emplace_back(std::make_pair(pin, io_pin->graph_io_pos));
+      if (pin.has_name())
+        pin_pair.emplace_back(std::make_pair(pin, io_pin->graph_io_pos));
     }
 
     ++pid;
@@ -90,7 +91,8 @@ void LGraph::each_graph_input(std::function<void(Node_pin &pin)> f1, bool hierar
       auto idx = find_idx_from_pid(Hardcoded_input_nid, pid);
       if (idx) {
         Node_pin dpin(this, this, hidx, idx, pid, false);
-        f1(dpin);
+        if (dpin.has_name())
+          f1(dpin);
       }
     }
   }
@@ -109,7 +111,8 @@ void LGraph::each_graph_output(std::function<void(Node_pin &pin)> f1, bool hiera
       auto idx = find_idx_from_pid(Hardcoded_output_nid, pid);
       if (idx) {
         Node_pin dpin(this, this, hidx, idx, pid, false);
-        f1(dpin);
+        if (dpin.has_name()) // It could be partially deleted
+          f1(dpin);
       }
     }
   }

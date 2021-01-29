@@ -6,8 +6,9 @@ static void lgcpp_test(LGraph *lg, const std::shared_ptr<Lgtuple> inp, std::shar
   fmt::print("lgcpp_test called (compile time)\n");
 
   (void) inp;
-  out = std::make_shared<Lgtuple>();
-  out->add(lg, Lconst(33));
+  out = std::make_shared<Lgtuple>("lgcc_var");
+  auto dpin = lg->create_node_const(33).get_driver_pin();
+  out->add(dpin);
 }
 
 static Lgcpp_plugin sample("lgcpp_test", lgcpp_test);

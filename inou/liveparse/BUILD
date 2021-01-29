@@ -20,7 +20,7 @@ cc_test(
     name = "chunkify_verilog_test",
     srcs = ["chunkify_verilog_test.cpp"],
     deps = [
-        "@gtest//:gtest_main",
+        "@com_google_googletest//:gtest_main",
         ":inou_liveparse",
     ],
 )

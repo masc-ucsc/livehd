@@ -73,13 +73,6 @@ rules_proto_dependencies()
 rules_proto_toolchains()
 
 http_archive(
-    name = "rules_cc",
-    sha256 = "d0c573b94a6ef20ef6ff20154a23d0efcb409fb0e1ff0979cec318dfe42f0cdd",
-    urls = ["https://github.com/bazelbuild/rules_cc/archive/b1c40e1de81913a3c40e5948f78719c28152486d.zip"],
-    strip_prefix = "rules_cc-b1c40e1de81913a3c40e5948f78719c28152486d",
-)
-
-http_archive(
     name = "rules_foreign_cc",
     sha256 = "21177439c27c994fd9b6e04d4ed6cec79d7dbcf174649f8d70e396dd582d1c82",
     strip_prefix = "rules_foreign_cc-ed95b95affecaa3ea3bf7bab3e0ab6aa847dfb06",
@@ -89,12 +82,36 @@ http_archive(
 load("@rules_foreign_cc//:workspace_definitions.bzl", "rules_foreign_cc_dependencies")
 rules_foreign_cc_dependencies()
 
-git_repository(
-    name = "com_google_absl",
-    commit = "e96d49687d9c078f2d47356b6723c3b5715493f7", # Nov, 7 2020
-    remote = "https://github.com/abseil/abseil-cpp.git",
-    shallow_since = "1604603876 -0500",
+# abseil-cpp
+http_archive(
+  name = "com_google_absl",
+  urls = ["https://github.com/abseil/abseil-cpp/archive/c512f118dde6ffd51cb7d8ac8804bbaf4d266c3a.zip"],
+  strip_prefix = "abseil-cpp-c512f118dde6ffd51cb7d8ac8804bbaf4d266c3a",
+  sha256 = "8400c511d64eb4d26f92c5ec72535ebd0f843067515244e8b50817b0786427f9",
 )
+
+# Google Test
+http_archive(
+  name = "com_google_googletest",
+  urls = ["https://github.com/google/googletest/archive/10b1902d893ea8cc43c69541d70868f91af3646b.zip"],
+  strip_prefix = "googletest-10b1902d893ea8cc43c69541d70868f91af3646b",
+  sha256 = "7c7709af5d0c3c2514674261f9fc321b3f1099a2c57f13d0e56187d193c07e81",
+)
+
+# C++ rules for Bazel.
+http_archive(
+    name = "rules_cc",
+    urls = ["https://github.com/bazelbuild/rules_cc/archive/9e10b8a6db775b1ecd358d8ddd3dab379a2c29a5.zip"],
+    strip_prefix = "rules_cc-9e10b8a6db775b1ecd358d8ddd3dab379a2c29a5",
+    sha256 = "954b7a3efc8752da957ae193a13b9133da227bdacf5ceb111f2e11264f7e8c95",
+)
+
+#git_repository(
+    #name = "com_google_absl",
+    #commit = "e96d49687d9c078f2d47356b6723c3b5715493f7", # Nov, 7 2020
+    #remote = "https://github.com/abseil/abseil-cpp.git",
+    #shallow_since = "1604603876 -0500",
+#)
 
 git_repository(
     name = "com_google_xls",
@@ -201,13 +218,13 @@ new_git_repository(
     remote = "https://github.com/AmokHuginnsson/replxx.git",
     shallow_since = "1583869163 +0100",
 )
-new_git_repository(
-    name = "gtest",
-    build_file = "BUILD.gtest",
-    commit = "adeef192947fbc0f68fa14a6c494c8df32177508", # August 15, 2020 "37f322783175a66c11785d17fc153477b0777753", # October 24, 2019
-    remote = "https://github.com/google/googletest",
-    shallow_since = "1597389384 -0400",
-)
+#new_git_repository(
+#    name = "gtest",
+#    build_file = "BUILD.gtest",
+#    commit = "adeef192947fbc0f68fa14a6c494c8df32177508", # August 15, 2020 "37f322783175a66c11785d17fc153477b0777753", # October 24, 2019
+#    remote = "https://github.com/google/googletest",
+#    shallow_since = "1597389384 -0400",
+#)
 new_git_repository(
     name = "verilator",
     build_file = "BUILD.verilator",

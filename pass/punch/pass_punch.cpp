@@ -153,8 +153,8 @@ void Pass_punch::add_output(LGraph *g, std::string_view wname, std::string_view 
   I(g);
   I(!wname.empty());
   I(!output.empty());
-  I(!g->is_graph_input(output));
-  I(!g->is_graph_output(output));
+  I(!g->has_graph_input(output));
+  I(!g->has_graph_output(output));
 
   bool     done = false;
   Node_pin dpin;
@@ -192,8 +192,8 @@ void Pass_punch::add_output(LGraph *g, Node_pin dpin, std::string output) {
   I(g);
   I(!output.empty());
   I(!g->has_wirename(output));
-  I(!g->is_graph_input(output));
-  I(!g->is_graph_output(output));
+  I(!g->has_graph_input(output));
+  I(!g->has_graph_output(output));
 
   auto bits   = g->get_bits(dpin);
   auto offset = g->get_offset(dpin);
@@ -207,7 +207,7 @@ bool Pass_punch::add_input(LGraph *g, std::string_view wname, std::string_view i
   I(g);
   I(!input.empty());
 
-  if (g->has_wirename(input) || g->is_graph_input(input) || g->is_graph_output(input))
+  if (g->has_wirename(input) || g->has_graph_input(input) || g->has_graph_output(input))
     return false;
 
   fmt::print("Adding input:{} lgraph:{}\n",input, g->get_name());

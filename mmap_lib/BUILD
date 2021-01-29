@@ -29,7 +29,7 @@ cc_test(
     srcs = ["tests/tree_test.cpp"],
     deps = [
         ":mmap_lib_test_lib",
-        "@gtest//:gtest_main",
+        "@com_google_googletest//:gtest_main",
         "@fmt//:fmt",
     ],
 )
@@ -40,7 +40,7 @@ cc_test(
     deps = [
         ":mmap_lib_test_lib",
         "//lbench:headers",
-        "@gtest//:gtest_main",
+        "@com_google_googletest//:gtest_main",
         "@fmt//:fmt",
     ],
 )
@@ -87,7 +87,7 @@ cc_test(
         ":mmap_lib_test_lib",
         "//lbench:headers",
         "@com_google_absl//absl/container:flat_hash_map",
-        "@gtest//:gtest_main",
+        "@com_google_googletest//:gtest_main",
         "@fmt//:fmt",
     ],
 )
@@ -102,7 +102,7 @@ cc_test(
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/container:node_hash_map",
         "@com_google_absl//absl/container:node_hash_set",
-				"@gtest//:gtest_main",
+				"@com_google_googletest//:gtest_main",
 				"@fmt//:fmt"
 		],
 )
@@ -114,7 +114,7 @@ cc_test(
         ":mmap_lib_test_lib",
         "//lbench:headers",
         "@com_google_absl//absl/container:flat_hash_map",
-        "@gtest//:gtest_main",
+        "@com_google_googletest//:gtest_main",
         "@fmt//:fmt",
     ],
 )
@@ -124,7 +124,7 @@ cc_test(
     srcs = ["tests/mmap_gc_test.cpp"],
     deps = [
         ":headers",
-        "@gtest//:gtest_main",
+        "@com_google_googletest//:gtest_main",
         "//lbench:headers",
 				
     ],
@@ -136,7 +136,7 @@ cc_test(
     deps = [
         ":mmap_lib_test_lib",
         "//lbench:headers",
-        "@gtest//:gtest_main",
+        "@com_google_googletest//:gtest_main",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
     ],
@@ -148,7 +148,7 @@ cc_test(
     deps = [
         ":mmap_lib_test_lib",
         "//lbench:headers",
-        "@gtest//:gtest_main",
+        "@com_google_googletest//:gtest_main",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
         "@fmt//:fmt",

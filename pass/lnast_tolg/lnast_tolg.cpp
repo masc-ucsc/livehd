@@ -623,7 +623,7 @@ void Lnast_tolg::process_hier_inp_bits_set(LGraph *lg, const Lnast_nid &lnidx_ta
     } else if (lnast->get_vname(child) == "__ubits" || lnast->get_vname(child) == "__sbits") {  // at the __bits child
       //(1) create flattened input
       Node_pin flattened_inp;
-      if (!lg->is_graph_input(hier_inp_name))
+      if (!lg->has_graph_input(hier_inp_name))
         flattened_inp = lg->add_graph_input(hier_inp_name, Port_invalid, 0);
       else
         flattened_inp = name2dpin[hier_inp_name];
@@ -1601,7 +1601,7 @@ void Lnast_tolg::setup_lnast_to_lgraph_primitive_type_mapping() {
 
 void Lnast_tolg::setup_clk(LGraph *lg, Node &reg_node) {
   Node_pin clk_dpin;
-  if (!lg->is_graph_input("clock")) {
+  if (!lg->has_graph_input("clock")) {
     clk_dpin = lg->add_graph_input("clock", Port_invalid, 1);
   } else {
     clk_dpin = lg->get_graph_input("clock");
@@ -1815,7 +1815,7 @@ void Lnast_tolg::dfs_try_create_flattened_inp(LGraph *lg, Node_pin &cur_node_spi
 
   if (is_leaf) {
     Node_pin ginp;
-    if (!lg->is_graph_input(hier_name))
+    if (!lg->has_graph_input(hier_name))
       ginp = lg->add_graph_input(hier_name, Port_invalid, 0);
     else if (name2dpin.find(hier_name) != name2dpin.end())
       ginp = name2dpin[hier_name];

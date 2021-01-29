@@ -85,21 +85,21 @@ protected:
   void del_node(const Node &node);
   bool del_edge(const Node_pin &dpin, const Node_pin &spin);
 
-  bool is_graph_io(Index_ID idx) const {
+  bool has_graph_io(Index_ID idx) const {
     I(static_cast<Index_ID>(node_internal.size()) > idx);
     auto nid = node_internal[idx].get_nid();
     nid = node_internal[nid].get_nid();
     return nid == Hardcoded_input_nid || nid == Hardcoded_output_nid;
   }
 
-  bool is_graph_input(Index_ID idx) const {
+  bool has_graph_input(Index_ID idx) const {
     I(static_cast<Index_ID>(node_internal.size()) > idx);
     auto nid = node_internal[idx].get_nid();
     nid = node_internal[nid].get_nid();
     return nid == Hardcoded_input_nid;
   }
 
-  bool is_graph_output(Index_ID idx) const {
+  bool has_graph_output(Index_ID idx) const {
     I(static_cast<Index_ID>(node_internal.size()) > idx);
     auto nid = node_internal[idx].get_nid();
     nid = node_internal[nid].get_nid();
@@ -113,7 +113,7 @@ protected:
         return 0;
       if (!node_internal[nid].is_valid())
         continue;
-      if (is_graph_io(nid))
+      if (has_graph_io(nid))
         continue;
       if (node_internal[nid].is_master_root())
         return nid;
@@ -221,8 +221,8 @@ public:
   Node_pin get_graph_output(std::string_view str);
   Node_pin get_graph_output_driver_pin(std::string_view str);
 
-  bool is_graph_input(std::string_view name) const;
-  bool is_graph_output(std::string_view name) const;
+  bool has_graph_input(std::string_view name) const;
+  bool has_graph_output(std::string_view name) const;
 
   // Iterators defined in the lgraph_each.cpp
 

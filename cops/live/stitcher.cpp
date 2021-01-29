@@ -38,9 +38,9 @@ void Live_stitcher::stitch(LGraph *nsynth, const std::set<Net_ID> &diffs) {
 
       auto name = nsynth->get_node_wirename(idx);
 
-      if (original->is_graph_input(name)) {
+      if (original->has_graph_input(name)) {
         inp2originalid[idx] = original->get_graph_input(name).get_idx();
-      } else if (original->is_graph_output(name)) {
+      } else if (original->has_graph_output(name)) {
         out2originalid[idx] = original->get_graph_output(name).get_idx();
       } else{ if (original->has_wirename(name)) {
         inp2originalid[idx] = original->get_node_id(name);
@@ -66,7 +66,7 @@ void Live_stitcher::stitch(LGraph *nsynth, const std::set<Net_ID> &diffs) {
 
   // connect new cells
   for (auto &idx : nsynth->fast()) {
-    if (!nsynth->is_graph_output(idx)) {
+    if (!nsynth->has_graph_output(idx)) {
       for (auto &c : nsynth->inp_edges(idx)) {
         // if driver is in the delta region
         if (nsynth2originalid.find(nsynth->get_node(c.get_out_pin()).get_nid()) != nsynth2originalid.end()) {

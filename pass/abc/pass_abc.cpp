@@ -99,7 +99,7 @@ LGraph *Pass_abc::regen(const LGraph *lg) {
 static std::string get_clock_name(const LGraph *g, Index_ID clk_idx) {
   std::string clock_name;
 
-  if (g->is_graph_input(clk_idx)) {
+  if (g->has_graph_input(clk_idx)) {
     clock_name = g->get_node_wirename(clk_idx);
   } else {
     clock_name = fmt::format("generated_clock_id_{}", clk_idx);
@@ -165,7 +165,7 @@ void Pass_abc::find_latch_conn(const LGraph *g) {
         Index_ID reset_idx = reset_pid[0].idx;
 
         std::string reset_name;
-        if (g->is_graph_input(reset_idx)) {
+        if (g->has_graph_input(reset_idx)) {
           reset_name = g->get_node_wirename(reset_idx);
         } else {
           reset_name = fmt::format("generated_reset_id_{}", reset_idx);
@@ -358,7 +358,7 @@ void Pass_abc::recursive_find(const LGraph *g, const Edge_raw *input, graph_topo
     index_offset info = {this_idx, input->get_out_pin().get_pid(), {bit_addr[0], bit_addr[1]}};
     topo.push_back(info);
   } else if (this_node_type == GraphIO_Op) {
-    if (g->is_graph_output(this_idx)) {
+    if (g->has_graph_output(this_idx)) {
       for (const auto &pre_inp : g->inp_edges(this_idx)) {
         recursive_find(g, &pre_inp, topo, bit_addr);
       }
@@ -570,10 +570,10 @@ bool Pass_abc::setup_techmap(const LGraph *g) {
         break;
       }
       case GraphIO_Op: {
-        if (g->is_graph_input(idx)) {
+        if (g->has_graph_input(idx)) {
           graph_info->graphio_input_id.push_back(idx);
         } else {
-          I(g->is_graph_output(idx));
+          I(g->has_graph_output(idx));
           graph_info->graphio_output_id.push_back(idx);
         }
         break;
@@ -741,7 +741,7 @@ void Pass_abc::conn_memory(const LGraph *g, Abc_Ntk_t *pAig) {
             Abc_ObjAddFanin(pseduo_memory_output, graph_info->combinational_cell[src_idx].pNodeOutput);
           }
         } else if (this_node_type == GraphIO_Op) {
-          assert(g->is_graph_input(src_idx));
+          assert(g->has_graph_input(src_idx));
           pseduo_memory_output = Abc_NtkCreatePo(pAig);
 
           Abc_Obj_t *pbuf  = Abc_NtkCreateNode(pAig);
@@ -814,7 +814,7 @@ void Pass_abc::conn_sub(const LGraph *g, Abc_Ntk_t *pAig) {
         }
 
         else if (this_node_type == GraphIO_Op) {
-          assert(g->is_graph_input(src_idx));
+          assert(g->has_graph_input(src_idx));
           pseduo_sub_output = Abc_NtkCreatePo(pAig);
 
           Abc_Obj_t *pbuf  = Abc_NtkCreateNode(pAig);
@@ -1195,7 +1195,7 @@ void Pass_abc::conn_combinational_cell(const LGraph *g, Abc_Ntk_t *pAig) {
           Abc_ObjAddFanin(graph_info->combinational_cell[idx].pNodeInput, graph_info->combinational_cell.at(inp.idx).pNodeOutput);
         }
       } else if (this_node_type == GraphIO_Op) {
-        assert(g->is_graph_input(src_idx));  // output is not allowed
+        assert(g->has_graph_input(src_idx));  // output is not allowed
         Abc_ObjAddFanin(graph_info->combinational_cell[idx].pNodeInput, graph_info->primary_input[rhs].PIOut);
       } else if (this_node_type == U32Const_Op || this_node_type == StrConst_Op) {
         Abc_ObjAddFanin(graph_info->combinational_cell[idx].pNodeInput, gen_const_from_lgraph(g, rhs, pAig));
@@ -1257,7 +1257,7 @@ void Pass_abc::conn_latch(const LGraph *g, Abc_Ntk_t *pAig) {
           Abc_ObjAddFanin(graph_info->sequential_cell[idx].pLatchInput, graph_info->combinational_cell[inp.idx].pNodeOutput);
         }
       } else if (this_node_type == GraphIO_Op) {
-        assert(g->is_graph_input(src_idx));
+        assert(g->has_graph_input(src_idx));
         Abc_ObjAddFanin(graph_info->sequential_cell[idx].pLatchInput, graph_info->primary_input[rhs].PIOut);
       } else if (this_node_type == U32Const_Op || this_node_type == StrConst_Op) {
         Abc_ObjAddFanin(graph_info->sequential_cell[idx].pLatchInput, gen_const_from_lgraph(g, rhs, pAig));
@@ -1326,7 +1326,7 @@ void Pass_abc::conn_primary_output(const LGraph *g, Abc_Ntk_t *pAig) {
           Abc_ObjAddFanin(graph_info->primary_output[lhs].PO, graph_info->combinational_cell[src_idx].pNodeOutput);
         }
       } else if (this_node_type == GraphIO_Op) {
-        assert(g->is_graph_input(src_idx));
+        assert(g->has_graph_input(src_idx));
         Abc_ObjAddFanin(graph_info->primary_output[lhs].PO, graph_info->primary_input[rhs].PIOut);
       } else if (this_node_type == U32Const_Op || this_node_type == StrConst_Op) {
         Abc_ObjAddFanin(graph_info->primary_output[lhs].PO, gen_const_from_lgraph(g, rhs, pAig));
@@ -1357,7 +1357,7 @@ void Pass_abc::conn_reset(const LGraph *g, Abc_Ntk_t *pAig) {
     std::string reset_name = rg.first;
     // check if this reset is the graph IO otherwise create it
     Index_ID idx = graph_info->reset_id[reset_name];
-    if (!g->is_graph_input(idx)) {
+    if (!g->has_graph_input(idx)) {
       Abc_Obj_t *generated_reset = Abc_NtkCreatePo(pAig);  // create generated reset here
       assert((g->get_node(idx).get_type_op() == TechMap_Op));
       const Tech_cell *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
@@ -1387,7 +1387,7 @@ void Pass_abc::conn_clock(const LGraph *g, Abc_Ntk_t *pAig) {
     std::string clock_name = sg.first;
     // check if this clock is the graph IO otherwise create it
     Index_ID idx = graph_info->clock_id[clock_name];
-    if (!g->is_graph_input(idx)) {
+    if (!g->has_graph_input(idx)) {
       Abc_Obj_t *generated_clock = Abc_NtkCreatePo(pAig);  // create generated clock signal
       assert((g->get_node(idx).get_type_op() == TechMap_Op));
       const Tech_cell *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));

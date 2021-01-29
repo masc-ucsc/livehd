@@ -46,8 +46,8 @@ protected:
   }
   const Index_ID get_root_idx() const;
 
-  Node_pin get_driver() const; //FIXME->sh: move under protected to avoid misuse
-  Node_pin get_sink() const;   //FIXME->sh: move under protected to avoid misuse 
+  Node_pin switch_to_driver() const;
+  Node_pin switch_to_sink() const;
 
 public:
   class __attribute__((packed)) Compact {
@@ -313,12 +313,12 @@ public:
 
   Node_pin change_to_sink_from_graph_out_driver() const {
     I(is_graph_output());
-    return get_sink();
+    return switch_to_sink();
   }
 
   Node_pin change_to_driver_from_graph_out_sink() const {
     I(is_graph_output());
-    return get_driver();
+    return switch_to_driver();
   }
 
   constexpr bool is_sink() const {

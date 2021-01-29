@@ -52,7 +52,7 @@ static void look_for_wire(LGraph *g, const RTLIL::Wire *wire) {
     I(!wire->port_output);  // any bidirectional port?
     I(wire->name.c_str()[0] == '\\');
     Node_pin pin;
-    if (g->is_graph_input(&wire->name.c_str()[1])) {
+    if (g->has_graph_input(&wire->name.c_str()[1])) {
       pin = g->get_graph_input(&wire->name.c_str()[1]);
       I(pin.get_bits() == wire->width);
     } else {
@@ -67,7 +67,7 @@ static void look_for_wire(LGraph *g, const RTLIL::Wire *wire) {
     // log("output %s\n",wire->name.c_str());
     I(wire->name.c_str()[0] == '\\');
 #if 0
-    if (!g->is_graph_output(&wire->name.c_str()[1])) {
+    if (!g->has_graph_output(&wire->name.c_str()[1])) {
       g->add_graph_output(&wire->name.c_str()[1], wire->port_id, wire->width);
     }
     auto dpin = g->get_graph_output_driver_pin(&wire->name.c_str()[1]);
@@ -206,7 +206,7 @@ static Node_pin get_edge_pin(LGraph *g, const RTLIL::Wire *wire, bool is_signed)
       // I(wire->width == wire2pin[wire].get_bits());
     }
 
-    if (is_signed)  // || !dpin.is_graph_input())
+    if (is_signed)  // || !dpin.has_graph_input())
       return dpin;
 
     auto node = dpin.get_node();
@@ -483,7 +483,7 @@ static Node resolve_memory(LGraph *g, RTLIL::Cell *cell) {
       if (chunk.width == wire->width) {
         if (wire2pin.find(wire) != wire2pin.end()) {
           const auto &or_dpin = wire2pin[wire];
-          if (or_dpin.is_graph_output()) {
+          if (or_dpin.has_graph_output()) {
             g->add_edge(dpin, or_dpin.change_to_sink_from_graph_out_driver());
           } else {
             auto or_node = or_dpin.get_node();
@@ -1198,7 +1198,7 @@ static void process_connect_outputs(RTLIL::Module *module, LGraph *g) {
 
   // we need to connect global outputs to the cell that drives it
   for (auto *wire : pending_outputs) {
-    if (!g->is_graph_output(&wire->name.c_str()[1]))
+    if (!g->has_graph_output(&wire->name.c_str()[1]))
       g->add_graph_output(&wire->name.c_str()[1], wire->port_id, wire->width);
 
     if (wire2pin.find(wire) == wire2pin.end())

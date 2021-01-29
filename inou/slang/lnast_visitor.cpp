@@ -70,16 +70,23 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
   // std::cout<<'\n';
   fmt::print("\nprinting operand recursion\n");
   std::vector<std::string> v;
+  std::string op_tmp="";
+  std::string op_="";
   int set =0;
   for (auto it = operandList.cbegin(); it != operandList.cend(); ++it) {
-      std::cout << " " << *it;
+      // std::cout << " " << *it;
       for (auto iv = v.cbegin(); iv != v.cend(); ++iv) {
-        if ((*iv)[1]==(*it)[1]){
+        op_tmp=(*it)[1];
+        op_=(*iv)[0];
+        std::cout << " " << op_;
+        
+        if (op_[0]==op_tmp[0]){
           set=1;
         }
       }
       if (set!=1) {
-        v.emplace_back(*it);
+        op_tmp=(*it)[1];
+        v.emplace_back(op_tmp);
         set=0;
       }
   }
@@ -89,24 +96,24 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
   for (ip = v.begin(); ip != v.end(); ++ip) {
       std::cout << " " << *ip;
       auto idx_dot= lnast->add_child(idx_stmts, Lnast_node::create_dot(""));
-      lnast->add_child(idx_dot,Lnast_node::create_ref (lnast->add_string("__"+*ip)));
-      lnast->add_child(idx_dot,Lnast_node::create_ref (lnast->add_string(*ip)));
-      lnast->add_child(idx_dot,Lnast_node::create_ref ("foo"));
+      lnast->add_child(idx_dot,Lnast_node::create_ref (lnast->add_string("___"+*ip)));
+      lnast->add_child(idx_dot,Lnast_node::create_ref (lnast->add_string("$"+*ip)));
+      lnast->add_child(idx_dot,Lnast_node::create_ref ("__ubits"));
 
       auto idx_assign= lnast->add_child(idx_stmts, Lnast_node::create_assign(""));
-      lnast->add_child(idx_assign,Lnast_node::create_ref (lnast->add_string("__"+*ip)));
+      lnast->add_child(idx_assign,Lnast_node::create_ref (lnast->add_string("___"+*ip)));
       lnast->add_child(idx_assign,Lnast_node::create_const ("1"));
   }
   const auto& lhs = expr.left();
-  std::string temp="__$";
+  std::string temp="___";
   if (lhs.kind == ExpressionKind::NamedValue) {
     const auto& var = lhs.as<NamedValueExpression>();
     fmt::print("bits:{} {} =  ", var.type->getBitWidth(), var.symbol.name);
     auto idx_dot= lnast->add_child(idx_stmts, Lnast_node::create_dot(""));
     lnast->add_child(idx_dot,Lnast_node::create_ref (lnast->add_string(temp.append(var.symbol.name))));
-    temp="__$";
+    temp="___";
     lnast->add_child(idx_dot,Lnast_node::create_ref (lnast->add_string(output.append(var.symbol.name))));
-    lnast->add_child(idx_dot,Lnast_node::create_ref ("foo"));
+    lnast->add_child(idx_dot,Lnast_node::create_ref ("__ubits"));
     output="%";
     auto idx_assign= lnast->add_child(idx_stmts, Lnast_node::create_assign(""));
     lnast->add_child(idx_assign,Lnast_node::create_ref (lnast->add_string(temp.append(var.symbol.name))));

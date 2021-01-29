@@ -22,7 +22,7 @@ cc_test(
     name = "lec_test1",
     srcs = ["lec_test1.cpp"],
     deps = [
-        "@gtest//:gtest_main",
+        "@com_google_googletest//:gtest_main",
         ":pass_lec",
     ],
 )

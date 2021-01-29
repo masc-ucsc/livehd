@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "pass_cprop.hpp"
 #include "cprop.hpp"
+#include "lgraph.hpp"
 
 static Pass_plugin sample("pass_cprop", Pass_cprop::setup);
 
@@ -33,6 +34,8 @@ void Pass_cprop::optimize(Eprp_var &var) {
   Cprop cp(pcp.hier, pcp.gioc);
 
   for (auto &lg : var.lgs) {
+    if (lg->is_empty())
+      continue;
     cp.do_trans(lg);
   }
 }

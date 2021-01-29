@@ -25,7 +25,7 @@ cc_test(
     srcs = ["tests/lconst_test.cpp"],
     deps = [
         ":lemu",
-        "@gtest//:gtest_main",
+        "@com_google_googletest//:gtest_main",
         "//simlib:headers",
         ],
     )
