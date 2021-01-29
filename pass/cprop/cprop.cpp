@@ -817,6 +817,12 @@ void Cprop::do_trans(LGraph *lg) {
 
   tuple_issues = false;
 
+  lg->each_sub_unique_fast([&](Node &sub_node, Lg_type_id lgid) {
+    (void)lgid;
+    process_subgraph(sub_node); // FIXME: it could be a bit simpler, just connect IOs
+    return true;
+  });
+
   for (auto node : lg->forward()) {
     //fmt::print("{}\n", node.debug_name());
     auto op = node.get_type_op();
