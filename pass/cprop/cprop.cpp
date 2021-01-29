@@ -430,18 +430,75 @@ void Cprop::replace_logic_node(Node &node, const Lconst &result, const Lconst &r
   node.del_node();
 }
 
+void Cprop::try_connect_tuple_to_sub(std::shared_ptr<Lgtuple> tup, Node &sub_node, Node &tup_node) {
+  I(sub_node.is_type_sub_present());
+  I(tup_node.get_type_op() == Ntype_op::TupAdd);
+
+  const auto &sub = sub_node.get_type_sub_node();
+  I(sub.is_input("$"));
+
+  for(const auto *io_pin:sub.get_input_pins()) {
+    if (io_pin->name == "$")
+      continue;
+
+    if (tup->has_dpin(io_pin->name)) {
+      auto dpin = tup->get_dpin(io_pin->name);
+      sub_node.get_sink_pin(io_pin->name).connect_driver(dpin);
+    }else{
+      tuple_issues = true;
+    }
+  }
+
+  if (!tuple_issues) {
+    for(const auto &it2:tup->get_map()) {
+      if (!sub.is_input(it2.first)) {
+        Pass::info("potential issue, field {} unused by the sub {} at node {}", it2.first, sub.get_name(), sub_node.debug_name());
+      }
+    }
+    sub_node.get_sink_pin("$").del();
+    if (!tup_node.has_outputs())
+      bwd_del_node(tup_node);
+  }
+}
+
 void Cprop::process_subgraph(Node &node) {
-  if (node.is_type_sub_present())
-    return;
 
-  auto *sub = node.ref_type_sub_node();
+  if (!node.is_type_sub_present()) {
+    // Still a blackbox, not much to do
+    for(const auto &e:node.inp_edges()) {
+      if (node2tuple.contains(e.driver.get_node().get_compact())) {
+        tuple_issues = true;
+        return;
+      }
+    }
+    return;
+  }
+  const auto &sub = node.get_type_sub_node();
+
   const auto &reg = Lgcpp_plugin::get_registry();
+  auto it = reg.find(sub.get_name());
+  if (it == reg.end()) {
+    // NOTE: the sub traversal can happen before or after the tuple
+    // (loop_break)
 
-  auto it = reg.find(sub->get_name());
-  if (it == reg.end())
+    if (hier)
+      return;
+
+    if (sub.is_input("$")) {
+      auto parent_dpin = node.get_sink_pin("$");
+      if (parent_dpin.is_connected()) { // $ may be disconnected
+        auto parent_node = parent_dpin.get_driver_node();
+        auto it2 = node2tuple.find(parent_node.get_compact());
+        if (it2 != node2tuple.end()) {
+          try_connect_tuple_to_sub(it2->second, node, parent_node);
+        }
+      }
+    }
+
     return;
+  }
 
-  fmt::print("cprop subgraph:{} is not present, found lgcpp...\n", sub->get_name());
+  fmt::print("cprop subgraph:{} is not present, found lgcpp...\n", sub.get_name());
 
   std::shared_ptr<Lgtuple> inp;
   std::shared_ptr<Lgtuple> out;
@@ -450,7 +507,7 @@ void Cprop::process_subgraph(Node &node) {
   if (!out) { // no out tuple populated
     return;
   }
-  fmt::print("cprop subgraph:{} has out\n", sub->get_name());
+  fmt::print("cprop subgraph:{} has out\n", sub.get_name());
   out->dump();
 
   for (auto dpin : node.out_connected_pins()) {
@@ -469,21 +526,6 @@ void Cprop::process_subgraph(Node &node) {
       }
     }
   }
-#if 0
-  Port_ID instance_pid = 0;
-  for (const auto *io_pin : sub->get_io_pins()) {
-    instance_pid++;
-    if (io_pin->is_input())
-      continue;
-    if (out->has_dpin(io_pin->name)) {
-      fmt::print("replace io_pin:{}\n", io_pin->name);
-    } else {
-      fmt::print("disconnected io_pin:{}\n", io_pin->name);
-    }
-
-    fmt::print("iopin:{} pos:{} instance_pid:{}...\n", io_pin->name, io_pin->graph_io_pos, instance_pid);
-  }
-#endif
 }
 
 void Cprop::process_attr_q_pin(Node &node, Node_pin &parent_dpin) {
@@ -730,18 +772,37 @@ void Cprop::process_tuple_add(Node &node) {
 
     node_tup->add(key_pos, key_name, val_dpin);
   } else if (parent_is_a_sub) {
-    I(false); // Here. Query the parent outputs and build tuple
+    auto parent_node = node.get_sink_pin("tuple_name").get_driver_node();
+    I(parent_node.is_type_sub());
+
+    const auto &sub = parent_node.get_type_sub_node();
+    for(const auto *io_pin:sub.get_output_pins()) {
+      auto sub_dpin = parent_node.get_driver_pin(io_pin->name);
+      if (io_pin->has_io_pos())
+        node_tup->add(io_pin->get_io_pos(), io_pin->name, sub_dpin);
+      else
+        node_tup->add(-1, io_pin->name, sub_dpin);
+    }
   }else{
     I(parent_tup); // tup1 = tup2 can have no sink("value")
   }
 
-  if (!hier && !tuple_issues && node_tup->get_name().substr(0,1) == "%") {
+  if (!hier && !tuple_issues) {
     auto *g = node.get_class_lgraph();
-    if (g->has_graph_output("%")) {
-      for(const auto &e:node.out_edges()) {
-        if (e.sink.is_graph_output()) {
-          try_create_graph_output(node, node_tup); // first add outputs
-          return; // Only need to do once
+    if (node_tup->get_name().substr(0,1) == "%" || tup_name == "%") {
+      if (g->has_graph_output("%")) {
+        for(const auto &e:node.out_edges()) {
+          if (e.sink.is_graph_output()) {
+            try_create_graph_output(node, node_tup); // first add outputs
+            return; // Only need to do once
+          }
+        }
+      }
+    } else {
+      for (const auto &e:node.out_edges()) {
+        auto sub_node = e.sink.get_node();
+        if (sub_node.is_type_sub_present() && sub_node.get_type_sub_node().is_input("$")) {
+          try_connect_tuple_to_sub(node_tup, sub_node, node);
         }
       }
     }
@@ -846,8 +907,9 @@ void Cprop::do_trans(LGraph *lg) {
     //remove unified input $ if fully resolved
     if (lg->has_graph_input("$")) {
       auto unified_inp = lg->get_graph_input("$");
-      if (unified_inp.has_outputs())
+      if (!unified_inp.has_outputs()) {
         unified_inp.get_non_hierarchical().del();
+      }
     }
 
     //remove unified output % if fully resolved
@@ -864,8 +926,6 @@ void Cprop::try_create_graph_output(Node &node, std::shared_ptr<Lgtuple> tup) {
 
   I(!hier);
   I(!tuple_issues);
-  I(!tup->get_name().empty());
-  I(tup->get_name()[0] == '%');
 
   auto *g = node.get_class_lgraph();
   bool unnamed_output = false;

@@ -15,47 +15,44 @@
 
 Gioc::Gioc(std::string_view _path) : path(_path){}
 
-//FIXME->sh: traverse whole graph just for searching sub-graph node? slow!?
 void Gioc::do_trans(LGraph *lg) {
-  for (auto node : lg->fast()) {
-    if (node.get_type_op() == Ntype_op::Sub) {
-      auto sub_name = node.get_type_sub_node().get_name();
-      if (sub_name.substr(0, 6) == "__fir_") 
-        continue; 
-             
-      auto *library      = Graph_library::instance(path);
-      auto subg_paras    = split_name(node.get_name(), ":");
-      auto &arg_tup_name = subg_paras[0];
-      auto &ret_name     = subg_paras[1];
-      auto &func_name    = subg_paras[2];
 
-      Sub_node* sub;
-      if (library->has_name(func_name)) {
-        auto lgid = library->get_lgid(func_name);
-        sub       = library->ref_sub(lgid);
-      } else {
-        Pass::error("Global IO connection pass cannot find existing subgraph {} in lgdb\n", func_name);
-        return;
-      }
+  auto *library = lg->ref_library();
 
-      collect_tgs_from_unified_out(node);
-      /* FIXME->sh: may need open graph to know if the $/% have no more
-       * connections (fully solved) inside the subgraph, if not, we cannot
-       * remove subgraph unified_io edges here*/
+  lg->each_sub_unique_fast([&](Node &node, Lg_type_id lgid) {
 
-      I(node.inp_edges().size() == 1);
-      I(node.out_edges().size() == 1);
-      node.inp_edges().begin()->del_edge();
-      auto sub_outsink_ta_node = node.out_edges().begin()->sink.get_node();
-      node.out_edges().begin()->del_edge();
-      sub_outsink_ta_node.set_type(Ntype_op::TupRef); //change type from TA to TRef to have a valid chain
+    auto sub_name = library->get_name(lgid);
+    if (sub_name.substr(0, 6) == "__fir_")
+      return true;
 
-
-      subgraph_io_connection(lg, sub, arg_tup_name, ret_name, node);
-      reconnect_the_tgs_from_unified_out(ret_name);
-      tgs_spins_from_unified_ta.clear();
+    if (!node.is_type_sub_present()) {
+      Pass::error("global IO connection cannot find subgraph {}\n", sub_name);
+      return false;
     }
-  }
+
+    auto subg_paras    = split_name(node.get_name(), ":");
+    auto &arg_tup_name = subg_paras[0];
+    auto &ret_name     = subg_paras[1];
+
+    auto  *sub     = library->ref_sub(lgid);
+    if (!sub->is_input("$") && !sub->is_output("%"))
+      return true; // all done
+
+    collect_tgs_from_unified_out(node);
+
+    I(node.inp_edges().size() == 1);
+    I(node.out_edges().size() == 1);
+    node.inp_edges().begin()->del_edge();
+    auto sub_outsink_ta_node = node.out_edges().begin()->sink.get_node();
+    node.out_edges().begin()->del_edge();
+    sub_outsink_ta_node.set_type(Ntype_op::TupRef); //change type from TA to TRef to have a valid chain
+
+    subgraph_io_connection(lg, sub, arg_tup_name, ret_name, node);
+    reconnect_the_tgs_from_unified_out(ret_name);
+    tgs_spins_from_unified_ta.clear();
+
+    return true;
+  });
 }
 
 void Gioc::collect_tgs_from_unified_out(Node subg_node) {
@@ -90,7 +87,7 @@ void Gioc::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_view ar
       auto hier_inp_subnames = split_name(io_pin->name, ".");
       for (const auto& subname : hier_inp_subnames) {
         auto tup_get = lg->create_node(Ntype_op::TupGet);
-        auto tn_spin = tup_get.setup_sink_pin("tuple_name"); 
+        auto tn_spin = tup_get.setup_sink_pin("tuple_name");
         auto field_spin = tup_get.setup_sink_pin("field"); // key name
         auto pos_spin = tup_get.setup_sink_pin("position"); // key pos
 
@@ -115,7 +112,7 @@ void Gioc::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_view ar
 
         // note: for scalar input, front() == back()
         if (&subname == &hier_inp_subnames.back()) {
-          auto subg_spin = subg_node.setup_sink_pin(io_pin->name); 
+          auto subg_spin = subg_node.setup_sink_pin(io_pin->name);
           tup_get.setup_driver_pin().connect_sink(subg_spin);
         }
         created_tup_gets.emplace_back(tup_get.get_driver_pin());
@@ -147,7 +144,7 @@ void Gioc::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_view ar
           subg_dpin.connect_sink(ta_ret.setup_sink_pin("value"));
           break;
         } else {
-          I(hier_inp_subnames.size() > 1); 
+          I(hier_inp_subnames.size() > 1);
           auto ta_subname      = lg->create_node(Ntype_op::TupAdd);
           auto ta_subname_dpin = ta_subname.setup_driver_pin();
 
@@ -159,7 +156,7 @@ void Gioc::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_view ar
           name2dpin[subname] = ta_subname_dpin;
           ta_subname_dpin.set_name(subname);
           i++;
-        } 
+        }
       } else if (i == (int)(hier_inp_subnames.size() - 1)) {
         auto parent_field_dpin = setup_field_dpin(lg, subname);
         auto parent_subname    = hier_inp_subnames[i-1];
@@ -195,9 +192,9 @@ void Gioc::subgraph_io_connection(LGraph *lg, Sub_node* sub, std::string_view ar
 bool Gioc::subgraph_outp_is_tuple(Sub_node* sub) {
   uint16_t outp_cnt = 0;
   for (const auto *io_pin : sub->get_io_pins()) {
-    if (io_pin->is_output()) 
+    if (io_pin->is_output())
       outp_cnt ++;
-    
+
     if (outp_cnt > 1)
       return true;
   }

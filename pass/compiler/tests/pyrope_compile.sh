@@ -56,6 +56,7 @@ Pyrope_compile () {
     fi
 
     ${LGSHELL} "inou.pyrope files:${PATTERN_PATH}/${pt}.prp |> pass.compiler gviz:true top:${pt}"
+    #${LGSHELL} "inou.pyrope files:${PATTERN_PATH}/${pt}.prp |> pass.compiler top:${pt}"
     ret_val=$?
     if [ $ret_val -ne 0 ]; then
       echo "ERROR: could not compile with pattern: ${pt}.prp!"
@@ -140,7 +141,8 @@ Pyrope_compile_hier () {
   done
 
 
-  ${LGSHELL} "inou.pyrope files:${pts_concat} |> pass.compiler gviz:true top:${top_module}"
+  #${LGSHELL} "inou.pyrope files:${pts_concat} |> pass.compiler gviz:true top:${top_module}"
+  ${LGSHELL} "inou.pyrope files:${pts_concat} |> pass.compiler top:${top_module}"
   ret_val=$?
   if [ $ret_val -ne 0 ]; then
     echo "ERROR: could not compile with pattern: ${pts_concat}.prp!"

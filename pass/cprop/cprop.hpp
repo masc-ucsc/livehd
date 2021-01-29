@@ -29,6 +29,7 @@ protected:
   void replace_node(Node &node, const Lconst &result);
   void replace_logic_node(Node &node, const Lconst &result, const Lconst &result_reduced);
 
+  void try_connect_tuple_to_sub(std::shared_ptr<Lgtuple> tup, Node &sub_node, Node &tup_node);
   void process_subgraph(Node &node);
 
   // Attributes method

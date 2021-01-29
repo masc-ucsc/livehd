@@ -19,36 +19,36 @@ void Pass_compiler::setup() {
 Pass_compiler::Pass_compiler(const Eprp_var &var) : Pass("pass.compiler", var) {}
 
 
-bool Pass_compiler::check_option_gviz(Eprp_var &var) { 
-  bool gviz_en; 
-  if (var.has_label("gviz")) { 
-    auto gv = var.get("gviz"); 
-    gviz_en = gv != "false" && gv != "0"; 
-  } else { 
-    gviz_en = false; 
-  } 
-  return gviz_en; 
-} 
+bool Pass_compiler::check_option_gviz(Eprp_var &var) {
+  bool gviz_en;
+  if (var.has_label("gviz")) {
+    auto gv = var.get("gviz");
+    gviz_en = gv != "false" && gv != "0";
+  } else {
+    gviz_en = false;
+  }
+  return gviz_en;
+}
 
-std::string Pass_compiler::check_option_top(Eprp_var &var) { 
-  std::string top; 
-  if (var.has_label("top")) { 
-    top = var.get("top"); 
-  }  
-  return top; 
-} 
+std::string Pass_compiler::check_option_top(Eprp_var &var) {
+  std::string top;
+  if (var.has_label("top")) {
+    top = var.get("top");
+  }
+  return top;
+}
 
 
-bool Pass_compiler::check_option_firrtl(Eprp_var &var) { 
-  bool is_firrtl; 
-  if (var.has_label("firrtl")) { 
-    auto fir = var.get("firrtl"); 
-    is_firrtl = fir != "false" && fir != "0"; 
-  } else { 
-    is_firrtl = false; 
-  } 
-  return is_firrtl; 
-} 
+bool Pass_compiler::check_option_firrtl(Eprp_var &var) {
+  bool is_firrtl;
+  if (var.has_label("firrtl")) {
+    auto fir = var.get("firrtl");
+    is_firrtl = fir != "false" && fir != "0";
+  } else {
+    is_firrtl = false;
+  }
+  return is_firrtl;
+}
 
 
 
@@ -70,9 +70,9 @@ void Pass_compiler::compile(Eprp_var &var) {
       return;
     }
 
-    for (auto f : absl::StrSplit(files, ',')) 
+    for (auto f : absl::StrSplit(files, ','))
       Pass::warn("todo: start from prp parser:{}", f);
-  } 
+  }
 
 
   if (is_firrtl) {
@@ -81,7 +81,7 @@ void Pass_compiler::compile(Eprp_var &var) {
     auto *library = Graph_library::instance(path);
     if (!library->exists(path, "__firop_seed")) {
       seed_lg = LGraph::create(path, "__firop_seed", "-");
-      setup_firmap_library(seed_lg);   
+      setup_firmap_library(seed_lg);
     }
 
     firrtl_compilation(var, compiler);
@@ -95,34 +95,35 @@ void Pass_compiler::compile(Eprp_var &var) {
 }
 
 void Pass_compiler::pyrope_compilation(Eprp_var &var, Lcompiler &compiler) {
-  for (const auto &lnast : var.lnasts) 
+  for (const auto &lnast : var.lnasts)
     compiler.add_pyrope(lnast);
 
-  compiler.global_io_connection();  
-  compiler.global_bitwidth_inference();  
+  // FIXME33: I think that global should be called only if top is set
+  compiler.global_io_connection();
+  compiler.global_bitwidth_inference();
 }
 
 
 void Pass_compiler::firrtl_compilation(Eprp_var &var, Lcompiler &compiler) {
-    for (const auto &lnast : var.lnasts) 
+    for (const auto &lnast : var.lnasts)
       compiler.add_firrtl(lnast);
-    
-    compiler.global_io_connection();  
+
+    compiler.global_io_connection();
     compiler.global_firrtl_bits_analysis_map();
     compiler.local_bitwidth_inference();
-    /* compiler.global_bitwidth_inference(); */  
+    /* compiler.global_bitwidth_inference(); */
 }
 
 
 void Pass_compiler::setup_firmap_library(LGraph *lg) {
   auto &lg_fir_const = lg->ref_library()->setup_sub("__fir_const", "-");
-  lg_fir_const.add_output_pin("Y"); 
+  lg_fir_const.add_output_pin("Y");
 
   auto &lg_fir_add = lg->ref_library()->setup_sub("__fir_add", "-");
   lg_fir_add.add_input_pin("e1");
   lg_fir_add.add_input_pin("e2");
-  lg_fir_add.add_output_pin("Y"); 
-  
+  lg_fir_add.add_output_pin("Y");
+
 
   auto &lg_fir_sub = lg->ref_library()->setup_sub("__fir_sub", "-");
   lg_fir_sub.add_input_pin("e1");

@@ -109,7 +109,8 @@ void LGraph::each_graph_output(std::function<void(Node_pin &pin)> f1, bool hiera
       auto idx = find_idx_from_pid(Hardcoded_output_nid, pid);
       if (idx) {
         Node_pin dpin(this, this, hidx, idx, pid, false);
-        f1(dpin);
+        if (dpin.has_name()) // It could be partially deleted
+          f1(dpin);
       }
     }
   }
