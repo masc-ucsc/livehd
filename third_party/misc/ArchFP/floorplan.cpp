@@ -146,13 +146,14 @@ unsigned int FPObject::outputLGraphLayout(Node_tree& tree, Tree_index tidx, doub
   while (child_idx != tree.invalid_index()) {
     Node* child = tree.ref_data(child_idx);
 
+    //fmt::print("testing child node {} with parent hier ({}, {})\n", child->debug_name(), child->get_hidx().level, child->get_hidx().pos);
     if (child->get_type_op() != getType() || child->get_hier_color() == 1) {
       child_idx = tree.get_sibling_next(child_idx);
       continue;
     }
 
     found = true;
-    fmt::print("assigning child node {} to hier: ({}, {})\n", child->debug_name(), child->get_hidx().level, child->get_hidx().pos);
+    //fmt::print("assigning child node {} to parent hier ({}, {})\n", child->debug_name(), child->get_hidx().level, child->get_hidx().pos);
     Ann_place p(calcX(startX), calcY(startY), getWidth() / 1000, getHeight() / 1000);
     child->set_place(p);
     child->set_hier_color(1);  // set node instance as marked after visiting it
@@ -387,10 +388,7 @@ static unsigned int findNode(FPObject* obj, Node_tree& tree, Tree_index tidx, do
       }
 
       found = true;
-      fmt::print("assigning child sub node {} to hier: ({}, {})\n",
-                 child->debug_name(),
-                 child->get_hidx().level,
-                 child->get_hidx().pos);
+      // fmt::print("assigning child subnode {} to parent hier ({}, {})\n", child->debug_name(), child->get_hidx().level, child->get_hidx().pos);
 
       // write placement information to subnode as well
       Ann_place p(obj->calcX(startX), obj->calcY(startY), obj->getWidth() / 1000, obj->getHeight() / 1000);

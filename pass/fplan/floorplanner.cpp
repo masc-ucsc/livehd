@@ -53,6 +53,8 @@ void Lhd_floorplanner::write_lhd(Node_tree& tree) {
     return true;
   });
 
+  tree.dump();
+
   unsigned int placed_nodes
       = layouts[root_lg]->outputLGraphLayout(tree, tree.root_index());
 

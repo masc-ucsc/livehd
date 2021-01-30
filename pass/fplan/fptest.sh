@@ -7,34 +7,36 @@
 set -e # exit if any command fails
 
 # works
-# TESTFILE=./inou/yosys/tests/long_gcd.v
-# TESTTOP=gcd
+# very narrow hierarchy
+# TESTFILE=./pass/fplan/tests/simple_hier_test.v
+# TESTTOP=simple_hier_test
 
 # works
-TESTFILE=./pass/fplan/tests/simple_hier_test.v
-TESTTOP=simple_hier_test
-
-# works
+# very wide and flat hierarchy
 # TESTFILE=./inou/yosys/tests/srasll.v
 # TESTTOP=srasll
-
-# works
-# TESTFILE=./inou/yosys/tests/punching.v
-# TESTTOP=punching
 
 # works
 # TESTFILE=./inou/yosys/tests/hierarchy.v
 # TESTTOP=hierarchy
 
-# does not work - nodes are missed?
-# TESTFILE=./inou/yosys/tests/punching_3.v
-# TESTTOP=punching_3
+# works
+# TESTFILE=./inou/yosys/tests/long_gcd.v
+# TESTTOP=gcd
+
+# does not work - nodes are skipped
+TESTFILE=./inou/yosys/tests/punching_3.v
+TESTTOP=punching_3
+
+# does not work - overlap
+# TESTFILE=./inou/yosys/tests/punching.v
+# TESTTOP=punching
 
 # does not work - overlap
 # TESTFILE=./inou/yosys/tests/graphtest.v
 # TESTTOP=graphtest
 
-# does not work - something to do with deep hierarchy?
+# does not work - overlap
 # TESTFILE=./pass/fplan/tests/hier_test.v
 # TESTTOP=hier_test
 

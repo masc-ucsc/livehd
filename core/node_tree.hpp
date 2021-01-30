@@ -10,12 +10,12 @@ using Tree_index = mmap_lib::Tree_index;
 
 class Node_tree : public mmap_lib::tree<Node> {
 private:
-
+  constexpr static bool debug_verbose = false;
 protected:
   LGraph *root;
 
 public:
-  //Node_tree() = delete;
+  Node_tree() = delete;
   Node_tree(LGraph *root);
 
   LGraph* get_root_lg() const { return root; }

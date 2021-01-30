@@ -9,9 +9,12 @@ Issues not related to ArchFP:
  - view.py output is flipped due to mismatch between coordinates for HotSpot and png coordinates in PyCairo
 
 Node hierarchy:
+ - check all verilog tests - long_gcd fails for some reason
  - check usage of startX/calcX in ArchFP, might be causing problems in checkFP
  - check grid layout not pushing mirror contexts?
  - verify node hierarchy is correct
+ - add a is_valid method to Ntype_area, use it instead of hier_color to determine if a node has been placed yet
+   - width/height == 0
 
 Easy things:
  - Node::bimap -> Node::map for hier_node_color fails?
