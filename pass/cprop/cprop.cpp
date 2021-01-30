@@ -435,11 +435,16 @@ void Cprop::try_connect_tuple_to_sub(Node_pin &dollar_spin, std::shared_ptr<Lgtu
   I(tup_node.get_type_op() == Ntype_op::TupAdd);
 
   const auto &sub = sub_node.get_type_sub_node();
-  I(sub.is_input("$"));
+
+	bool sub_dollar_is_gone = false;
 
   for(const auto *io_pin:sub.get_input_pins()) {
-    if (io_pin->name == "$")
+    if (io_pin->name == "$") {
+			if (io_pin->is_invalid()) {
+				sub_dollar_is_gone = true;
+			}
       continue;
+		}
 
     if (tup->has_dpin(io_pin->name)) {
       auto dpin = tup->get_dpin(io_pin->name);
@@ -450,7 +455,7 @@ void Cprop::try_connect_tuple_to_sub(Node_pin &dollar_spin, std::shared_ptr<Lgtu
     }
   }
 
-  if (!tuple_issues) {
+  if (!tuple_issues || sub_dollar_is_gone) {
     for(const auto &it2:tup->get_map()) {
       if (!sub.is_input(it2.first)) {
         Pass::info("potential issue, field {} unused by the sub {} at node {}", it2.first, sub.get_name(), sub_node.debug_name());
