@@ -9,7 +9,7 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     # turning on all warnings because ArchFP has been modified somewhat
-    copts = ["-O3", "-Wall", "-Wextra"],
+    copts = ["-O3", "-Wall", "-Wextra", "-Wunused"],
     deps = [
         "//core:core",
         ],

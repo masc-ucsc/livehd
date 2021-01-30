@@ -139,32 +139,28 @@ void FPObject::outputHotSpotLayout(ostream& o, double startX, double startY) {
     << calcY(startY) / 1000 << "\n";
 }
 
-unsigned int FPObject::outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_index hidx,
-                                          absl::flat_hash_set<mmap_lib::Tree_index>& sub_hidx_used, double startX, double startY) {
-  (void)sub_hidx_used;
+unsigned int FPObject::outputLGraphLayout(Node_tree& tree, Tree_index tidx, double startX, double startY) {
+  bool found = false;
 
-  assert(root);
-  assert(lg);
-  assert(!hidx.is_invalid());
-  assert(root->ref_htree()->ref_lgraph(hidx) == lg);
+  Tree_index child_idx = tree.get_first_child(tidx);
+  while (child_idx != tree.invalid_index()) {
+    Node* child = tree.ref_data(child_idx);
 
-  for (Node fn : lg->fast()) {
-    if (fn.get_type_op() != getType()) {
+    if (child->get_type_op() != getType() || child->get_hier_color() == 1) {
+      child_idx = tree.get_sibling_next(child_idx);
       continue;
     }
 
-    Node hn(root, hidx, fn.get_compact_class());
-
-    if (hn.get_hier_color() == 1) {
-      continue;
-    }
-
+    found = true;
+    fmt::print("assigning child node {} to hier: ({}, {})\n", child->debug_name(), child->get_hidx().level, child->get_hidx().pos);
     Ann_place p(calcX(startX), calcY(startY), getWidth() / 1000, getHeight() / 1000);
-    hn.set_place(p);
-    hn.set_hier_color(1);  // set node instance as marked after visiting it
+    child->set_place(p);
+    child->set_hier_color(1);  // set node instance as marked after visiting it
 
     break;
   }
+
+  assert(found);
 
   return 1;
 }
@@ -363,65 +359,69 @@ double FPContainer::totalArea() {
   return area;
 }
 
-unsigned int FPContainer::outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_index hidx,
-                                             absl::flat_hash_set<mmap_lib::Tree_index>& sub_hidx_used, double startX,
-                                             double startY) {
-  assert(root);
-  assert(lg);
-  assert(!hidx.is_invalid());
-  assert(root->ref_htree()->ref_lgraph(hidx) == lg);
+static unsigned int findNode(FPObject* obj, Node_tree& tree, Tree_index tidx, double startX, double startY) {
+  Ntype_op t = obj->getType();
 
+  unsigned int count;
+
+  if (Ntype::is_synthesizable(t)) {  // leaf node - current hier structure is fine
+    count = obj->outputLGraphLayout(tree, tidx, startX, startY);
+  } else if (t == Ntype_op::Sub) {  // Sub node - parameters need to be adjusted
+
+    bool found = false;
+
+    Tree_index child_idx = tree.get_first_child(tidx);
+    while (child_idx != tree.invalid_index()) {
+      auto child = tree.ref_data(child_idx);
+
+      if (!child->is_type_sub_present() || child->get_hier_color() == 1) {
+        child_idx = tree.get_sibling_next(child_idx);
+        continue;
+      }
+
+      LGraph* child_lg = LGraph::open(tree.get_root_lg()->get_path(), child->get_type_sub());
+
+      if (child_lg->get_name() != obj->getName()) {
+        child_idx = tree.get_sibling_next(child_idx);
+        continue;
+      }
+
+      found = true;
+      fmt::print("assigning child sub node {} to hier: ({}, {})\n",
+                 child->debug_name(),
+                 child->get_hidx().level,
+                 child->get_hidx().pos);
+
+      // write placement information to subnode as well
+      Ann_place p(obj->calcX(startX), obj->calcY(startY), obj->getWidth() / 1000, obj->getHeight() / 1000);
+
+      child->set_place(p);
+      child->set_hier_color(1);  // set node instance as marked after visiting it
+      count = obj->outputLGraphLayout(tree, child_idx, startX, startY);
+      found = true;
+
+      break;
+    }
+
+    assert(found);
+  } else if (t == Ntype_op::Invalid) {  // specific kind of layout - current hier structure is fine
+    count = obj->outputLGraphLayout(tree, tidx, startX, startY);
+  } else {
+    fmt::print("???\n");
+    assert(false);
+  }
+
+  return count;
+}
+
+unsigned int FPContainer::outputLGraphLayout(Node_tree& tree, Tree_index tidx, double startX, double startY) {
   pushMirrorContext(startX, startY);
 
   unsigned int total = 0;
 
   for (int i = 0; i < getComponentCount(); i++) {
     FPObject* obj = getComponent(i);
-
-    Ntype_op t = obj->getType();
-
-    if (Ntype::is_synthesizable(t)) {  // leaf node - current hier structure is fine
-      total += obj->outputLGraphLayout(root, lg, hidx, sub_hidx_used, x + startX, y + startY);
-    } else if (t == Ntype_op::Sub) {  // Sub node - parameters need to be adjusted
-
-      bool found = false;
-      for (auto fn : lg->fast()) {
-        if (!fn.is_type_sub_present()) {
-          continue;
-        }
-
-        Node    hn(root, hidx, fn.get_compact_class());
-        LGraph* sub_lg = LGraph::open(root->get_path(), hn.get_type_sub());
-
-        if ((sub_lg->get_name() == obj->getName()) && (hn.get_hier_color() == 0)) {
-          Ann_place p(obj->getX(), obj->getY(), obj->getWidth(), obj->getHeight());
-          hn.set_place(p);
-          hn.set_hier_color(1);  // set subnode instance as marked after visiting it
-
-          // find compatible tree index for subnode
-          auto ht   = root->ref_htree();
-          auto tidx = ht->get_first_child(hidx);
-          while (tidx != ht->invalid_index()) {
-            LGraph* sub_lg = LGraph::open(root->get_path(), hn.get_type_sub());
-
-            if (!sub_hidx_used.contains(tidx) && ht->ref_lgraph(tidx) == sub_lg) {
-              sub_hidx_used.emplace(tidx);
-              total += obj->outputLGraphLayout(root, sub_lg, tidx, sub_hidx_used, x + startX, y + startY);
-              found = true;
-              break;
-            }
-            tidx = ht->get_sibling_next(tidx);
-          }
-          break;
-        }
-      }
-      assert(found);
-    } else if (t == Ntype_op::Invalid) {  // specific kind of layout - current hier structure is fine
-      total += obj->outputLGraphLayout(root, lg, hidx, sub_hidx_used, x + startX, y + startY);
-    } else {
-      fmt::print("???\n");
-      assert(false);
-    }
+    total += findNode(obj, tree, tidx, x + startX, y + startY);
   }
 
   popMirrorContext();
@@ -515,14 +515,7 @@ void gridLayout::outputHotSpotLayout(ostream& o, double startX, double startY) {
   o << "# End of " << GridName << " Layout.\n";
 }
 
-unsigned int gridLayout::outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_index hidx,
-                                            absl::flat_hash_set<mmap_lib::Tree_index>& sub_hidx_used, double startX,
-                                            double startY) {
-  assert(root);
-  assert(lg);
-  assert(!hidx.is_invalid());
-  assert(root->ref_htree()->ref_lgraph(hidx) == lg);
-
+unsigned int gridLayout::outputLGraphLayout(Node_tree& tree, Tree_index tidx, double startX, double startY) {
   if (getComponentCount() != 1) {
     throw std::invalid_argument("Attempt to output a grid with other than one component.\n");
   }
@@ -545,44 +538,8 @@ unsigned int gridLayout::outputLGraphLayout(LGraph* root, LGraph* lg, const Hier
     for (int j = 0; j < xCount; j++) {
       double cx = (j * compWidth) + x + startX;
 
-      if (Ntype::is_synthesizable(t)) {  // leaf node - current hier structure is fine
-        total += obj->outputLGraphLayout(root, lg, hidx, sub_hidx_used, cx, cy);
-      } else if (t == Ntype_op::Sub) {  // Sub node - parameters need to be adjusted
-        bool found = false;
-        for (auto fn : lg->fast()) {
-          if (!fn.is_type_sub_present()) {
-            continue;
-          }
+      total += findNode(obj, tree, tidx, cx, cy);
 
-          Node    hn(root, hidx, fn.get_compact_class());
-          LGraph* sub_lg = LGraph::open(root->get_path(), hn.get_type_sub());
-
-          if ((sub_lg->get_name() == obj->getName()) && (hn.get_hier_color() == 0)) {
-            Ann_place p(obj->getX(), obj->getY(), obj->getWidth(), obj->getHeight());
-            hn.set_place(p);
-            hn.set_hier_color(1);  // set node instance as marked after visiting it
-
-            // find compatible tree index for subnode
-            auto ht   = root->ref_htree();
-            auto tidx = ht->get_first_child(hidx);
-            while (tidx != ht->invalid_index()) {
-              LGraph* sub_lg = LGraph::open(root->get_path(), hn.get_type_sub());
-
-              if (!sub_hidx_used.contains(tidx) && ht->ref_lgraph(tidx) == sub_lg) {
-                sub_hidx_used.emplace(tidx);
-                total += obj->outputLGraphLayout(root, sub_lg, tidx, sub_hidx_used, cx, cy);
-                found = true;
-                break;
-              }
-              tidx = ht->get_sibling_next(tidx);
-            }
-            break;
-          }
-        }
-        assert(found);
-      } else if (t == Ntype_op::Invalid) {  // specific kind of layout - current hier structure is fine
-        total += obj->outputLGraphLayout(root, lg, hidx, sub_hidx_used, cx, cy);
-      }
       compNum += 1;
     }
   }

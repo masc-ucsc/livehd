@@ -8,6 +8,11 @@ Issues not related to ArchFP:
     - populate hierarchies with area
  - view.py output is flipped due to mismatch between coordinates for HotSpot and png coordinates in PyCairo
 
+Node hierarchy:
+ - check usage of startX/calcX in ArchFP, might be causing problems in checkFP
+ - check grid layout not pushing mirror contexts?
+ - verify node hierarchy is correct
+
 Easy things:
  - Node::bimap -> Node::map for hier_node_color fails?
  - LiveHD has a random number class, use that in writearea
@@ -32,3 +37,4 @@ Things to add:
    - check for insane / unrealistic wirelength metrics
    - check for disconnected parts of floorplan
 6. Overlay lgraph borders over actual nodes on png
+   - rewrite view.py in C++, and have it source data from LiveHD

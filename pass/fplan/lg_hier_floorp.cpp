@@ -2,15 +2,14 @@
 
 #include "lg_hier_floorp.hpp"
 
+/*
 void Lg_hier_floorp::create_module(LGraph* lg) {
   (void)lg;
-  /*
   attrs[lg].l = std::make_shared<geogLayout>();
   attrs[lg].l->addComponentCluster(std::string(lg->get_name()), 1, get_area(lg), 4.0, 1.0, Center);
   if (debug_print) {
     fmt::print("creating {}\n", lg->get_name());
   }
-  */
 }
 
 void Lg_hier_floorp::load(LGraph* root, const std::string_view lgdb_path) {
@@ -19,7 +18,6 @@ void Lg_hier_floorp::load(LGraph* root, const std::string_view lgdb_path) {
 
   // TODO: not currently working, nodes are re-floorplanned all over the place.
 
-  /*
   root_lg = root;
 
   // create the root layout so the top-level module doesn't get included in its own floorplan
@@ -65,5 +63,5 @@ void Lg_hier_floorp::load(LGraph* root, const std::string_view lgdb_path) {
   };
 
   load_lgs(root);
-  */
 }
+*/

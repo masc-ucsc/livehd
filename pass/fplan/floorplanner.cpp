@@ -46,17 +46,15 @@ void Lhd_floorplanner::write_file(const std::string_view filename) {
   outputHotSpotFooter(fos);
 }
 
-void Lhd_floorplanner::write_lhd() {
+void Lhd_floorplanner::write_lhd(Node_tree& tree) {
   // make sure all nodes have a hier color
   root_lg->each_hier_fast_direct([](Node& n) {
     n.set_hier_color(0);
     return true;
   });
 
-  absl::flat_hash_set<mmap_lib::Tree_index> hidx_used;
-
   unsigned int placed_nodes
-      = layouts[root_lg]->outputLGraphLayout(root_lg, root_lg, root_lg->ref_htree()->root_index(), hidx_used);
+      = layouts[root_lg]->outputLGraphLayout(tree, tree.root_index());
 
   unsigned int node_count = 0;
   root_lg->each_hier_fast_direct([&node_count](const Node& n) {

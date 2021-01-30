@@ -22,7 +22,7 @@ void Pass_fplan_checkfp::pass(Eprp_var& var) {
     throw std::invalid_argument("more than one root lgraph provided!");
   }
 
-  fmt::print("checking floorplan...");
+  fmt::print("checking floorplan...\n");
 
   unsigned int issue_counter = 0;
 

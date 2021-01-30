@@ -8,6 +8,8 @@
 #include "lg_hier_floorp.hpp"
 #include "node_flat_floorp.hpp"
 #include "node_hier_floorp.hpp"
+#include "node_tree.hpp"
+#include "node_type_area.hpp"
 #include "profile_time.hpp"
 
 void Pass_fplan_makefp::setup() {
@@ -24,9 +26,15 @@ void Pass_fplan_makefp::setup() {
 
 void Pass_fplan_makefp::makefp_int(Lhd_floorplanner& fp, const std::string_view dest) {
   auto t = profile_time::Timer();
+
   t.start();
-  fmt::print("  traversing hierarchy...");
-  fp.load(root_lg, path);
+  fmt::print("  creating node hierarchy...");
+  auto nt = Node_tree(root_lg);
+  fmt::print(" done ({} ms).\n", t.time());
+
+  t.start();
+  fmt::print("  traversing node hierarchy...");
+  fp.load(nt, path);
   fmt::print(" done ({} ms).\n", t.time());
 
   t.start();
@@ -39,7 +47,7 @@ void Pass_fplan_makefp::makefp_int(Lhd_floorplanner& fp, const std::string_view 
   if (dest == "file") {
     fp.write_file("floorplan.flp");
   } else if (dest == "livehd") {
-    fp.write_lhd();
+    fp.write_lhd(nt);
   } else {
     throw std::invalid_argument("unknown destination!");
   }
@@ -52,11 +60,11 @@ Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", v
   std::string_view t_str = var.get("traversal");
 
   if (t_str == "hier_lg") {
-    Lg_hier_floorp hfp;
-    makefp_int(hfp, "file");
+    // Lg_hier_floorp hfp;
+    // makefp_int(hfp, "file");
   } else if (t_str == "flat_node") {
-    Node_flat_floorp nffp;
-    makefp_int(nffp, "file");
+    // Node_flat_floorp nffp;
+    // makefp_int(nffp, "file");
   } else if (t_str == "hier_node") {
     Node_hier_floorp nhfp;
     makefp_int(nhfp, var.get("dest"));

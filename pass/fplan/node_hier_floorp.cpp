@@ -9,7 +9,6 @@
 #include "node_type_area.hpp"
 
 void Node_hier_floorp::load_lg_nodes(LGraph* lg, const std::string_view lgdb_path) {
-
   if (layouts[lg]) {
     if (debug_print) {
       fmt::print("(layout for {} already exists)\n", lg->get_name());
@@ -19,7 +18,7 @@ void Node_hier_floorp::load_lg_nodes(LGraph* lg, const std::string_view lgdb_pat
 
   geogLayout* l = new geogLayout();
 
-  Ntype_area na(lgdb_path);
+  const Ntype_area na(lgdb_path);
 
   // count and floorplan subnodes
   absl::flat_hash_map<LGraph*, unsigned int> sub_lg_count;
@@ -62,7 +61,12 @@ void Node_hier_floorp::load_lg_nodes(LGraph* lg, const std::string_view lgdb_pat
       continue;
     }
 
-    I(na.has_dim(op));
+    if (!na.has_dim(op)) {
+      std::string errstr = "node type ";
+      errstr.append(Ntype::get_name(op));
+      errstr.append(" has no area information!");
+      throw std::runtime_error(errstr);
+    }
 
     auto  dim       = na.get_dim(op);
     float node_area = dim.area;  // TODO: can we calculate some sort of bitwidth for the node?
@@ -88,24 +92,9 @@ void Node_hier_floorp::load_lg_nodes(LGraph* lg, const std::string_view lgdb_pat
   layouts[lg] = l;
 }
 
-void Node_hier_floorp::load(LGraph* root, const std::string_view lgdb_path) {
+void Node_hier_floorp::load(const Node_tree& tree, const std::string_view lgdb_path) {
   fmt::print("\n");
-  root_lg = root;
-
-  auto check_area_exists = [&lgdb_path](LGraph* lg) {
-    const Ntype_area na(lgdb_path);
-    for (auto n : lg->fast(true)) {
-      Ntype_op op = n.get_type_op();
-      if (Ntype::is_synthesizable(op) && !(na.has_dim(op))) {
-        std::string errstr = "node type ";
-        errstr.append(Ntype::get_name(op));
-        errstr.append(" has no area information!");
-        throw std::runtime_error(errstr);
-      }
-    }
-  };
-
-  check_area_exists(root);
+  root_lg = tree.get_root_lg();
 
   std::function<void(LGraph*)> load_nodes = [&](LGraph* lg) {
     lg->each_sub_fast([&](Node& n, Lg_type_id lgid) {
@@ -118,5 +107,5 @@ void Node_hier_floorp::load(LGraph* root, const std::string_view lgdb_path) {
     load_lg_nodes(lg, lgdb_path);
   };
 
-  load_nodes(root);
+  load_nodes(root_lg);
 }

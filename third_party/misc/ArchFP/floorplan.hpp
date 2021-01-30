@@ -14,8 +14,7 @@
 
 #include "absl/container/flat_hash_set.h"
 #include "core/cell.hpp"
-#include "core/lgraph.hpp"
-#include "mmap_lib/include/mmap_tree.hpp"
+#include "node_tree.hpp"
 using namespace std;
 
 // This will be used to keep track of user's request for more output during layout.
@@ -35,7 +34,7 @@ enum FPOptimization { Area, AspectRatio };
 
 // Here is the enumeration for layout hints for the geographic layout.
 enum GeographyHint {
-  Center, // make center the default, since it's considered to be valid
+  Center,  // make center the default, since it's considered to be valid
   Left,
   Right,
   Top,
@@ -46,8 +45,8 @@ enum GeographyHint {
   TopBottom,
   TopBottomMirror,
   TopBottom180,
-  Periphery, // not supported
-  UnknownGeography, // not supported
+  Periphery,         // not supported
+  UnknownGeography,  // not supported
 };
 
 // This class is meant to be a standin for a real component from M5 or whatever this eventually merge into.
@@ -134,11 +133,9 @@ public:
   virtual void          setName(string nameArg) { name = nameArg; }
   virtual void          setType(Ntype_op typeArg) { type = typeArg; }
 
-  virtual bool layout(FPOptimization opt, double targetAR = 1.0) = 0;
-  virtual void outputHotSpotLayout(ostream& o, double startX = 0.0, double startY = 0.0);
-  virtual unsigned int outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_index hidx,
-                                  absl::flat_hash_set<mmap_lib::Tree_index>& sub_hidx_used, double startX = 0.0,
-                                  double startY = 0.0);
+  virtual bool         layout(FPOptimization opt, double targetAR = 1.0) = 0;
+  virtual void         outputHotSpotLayout(ostream& o, double startX = 0.0, double startY = 0.0);
+  virtual unsigned int outputLGraphLayout(Node_tree& tree, Tree_index tidx, double startX = 0.0, double startY = 0.0);
 };
 
 // This class is the lowest level in the component hierarchy.
@@ -189,11 +186,11 @@ class FPContainer : public FPObject {
   //    when things can be deleted.
   // int        itemCount;
   std::vector<FPObject*> items;
-  void       addComponentAtIndex(FPObject* comp, int index);
-  FPObject*  removeComponentAtIndex(int index);
+  void                   addComponentAtIndex(FPObject* comp, int index);
+  FPObject*              removeComponentAtIndex(int index);
 
 protected:
-  //static int maxItemCount;
+  // static int maxItemCount;
 
   // These allow safe access to the item list.
   int       getComponentCount() { return items.size(); }
@@ -229,9 +226,7 @@ public:
   virtual void      addComponent(FPObject* comp, int count);
 
   // Writes current container and all subcontainers to the specified root lgraph
-  virtual unsigned int outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_index hidx,
-                                  absl::flat_hash_set<mmap_lib::Tree_index>& sub_hidx_used, double startX = 0.0,
-                                  double startY = 0.0);
+  virtual unsigned int outputLGraphLayout(Node_tree& tree, Tree_index tidx, double startX = 0.0, double startY = 0.0);
 };
 
 // This will just be a collection of components to lay out in the given aspect ratio.
@@ -244,8 +239,8 @@ protected:
 public:
   bagLayout();
 
-  bool         layout(FPOptimization opt, double targetAR = 1.0);
-  void         outputHotSpotLayout(ostream& o, double startX = 0.0, double startY = 0.0);
+  bool layout(FPOptimization opt, double targetAR = 1.0);
+  void outputHotSpotLayout(ostream& o, double startX = 0.0, double startY = 0.0);
 };
 
 class fixedLayout : public bagLayout {
@@ -270,11 +265,9 @@ class gridLayout : public FPContainer {
 public:
   gridLayout();
 
-  bool         layout(FPOptimization opt, double targetAR = 1.0);
-  void         outputHotSpotLayout(ostream& o, double startX = 0.0, double startY = 0.0);
-  virtual unsigned int outputLGraphLayout(LGraph* root, LGraph* lg, const Hierarchy_index hidx,
-                                  absl::flat_hash_set<mmap_lib::Tree_index>& sub_hidx_used, double startX = 0.0,
-                                  double startY = 0.0);
+  bool                 layout(FPOptimization opt, double targetAR = 1.0);
+  void                 outputHotSpotLayout(ostream& o, double startX = 0.0, double startY = 0.0);
+  virtual unsigned int outputLGraphLayout(Node_tree& tree, Tree_index tidx, double startX = 0.0, double startY = 0.0);
 
   // A grid handles its counts different than other components?
 };

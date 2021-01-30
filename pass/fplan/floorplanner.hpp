@@ -8,13 +8,14 @@
 #include "absl/container/flat_hash_map.h"
 #include "floorplan.hpp"
 #include "lgraph.hpp"
+#include "node_tree.hpp"
 
 class Lhd_floorplanner {
 public:
   Lhd_floorplanner();
 
   // load modules into ArchFP using verious kinds of traversals
-  virtual void load(LGraph* root, const std::string_view lgdb_path) = 0;
+  virtual void load(const Node_tree& tree, const std::string_view lgdb_path) = 0;
 
   // create a floorplan from loaded modules
   void create();
@@ -23,7 +24,7 @@ public:
   void write_file(const std::string_view filename);
 
   // write the floorplan back to LiveHD for analysis and future floorplans
-  void write_lhd();
+  void write_lhd(Node_tree& tree);
 
   ~Lhd_floorplanner();
 

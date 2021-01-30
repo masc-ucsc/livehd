@@ -4,6 +4,7 @@
 
 #include "node_type_area.hpp"
 
+/*
 void Node_flat_floorp::load(LGraph* root, const std::string_view lgdb_path) {
   (void)lgdb_path;
   root_lg = root;
@@ -40,3 +41,4 @@ void Node_flat_floorp::load(LGraph* root, const std::string_view lgdb_path) {
     }
   }
 }
+*/
