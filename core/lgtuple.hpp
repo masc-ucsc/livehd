@@ -94,7 +94,6 @@ protected:
     return key_map.lower_bound(std::string{key});
   }
 
-  std::string get_last_level(const std::string &key) const;
   std::string get_remove_first_level(const std::string &key) const;
 
   void add_int(std::string_view key, std::shared_ptr<Lgtuple const> tup);
@@ -146,6 +145,8 @@ public:
   std::vector<std::pair<std::string, Node_pin>> get_level_attributes(int pos, std::string_view key) const;
 
   const key_map_type &get_map() const { return key_map; }
+
+  static std::string get_last_level(const std::string &key);
 
   void dump() const;
 };

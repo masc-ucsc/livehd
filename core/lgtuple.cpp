@@ -6,7 +6,7 @@
 #include "lgraph.hpp"
 #include "likely.hpp"
 
-std::string Lgtuple::get_last_level(const std::string &key) const {
+std::string Lgtuple::get_last_level(const std::string &key) {
   std::string last_key{key};
 
   auto n = last_key.find_last_of('.');

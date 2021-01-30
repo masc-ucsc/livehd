@@ -941,6 +941,9 @@ void Cprop::try_create_graph_output(Node &node, std::shared_ptr<Lgtuple> tup) {
       unnamed_output = true;
       Pass::info("Tuples connected to output tend to have named fields (pyrope supports unnamed)");
     }
+    if (out_name.find(".__") != std::string::npos)
+      continue; // do not populate attributes to the IOs
+
     if (!g->has_graph_output(out_name)) {
       int pos = tup->get_pos(out_name);
 
