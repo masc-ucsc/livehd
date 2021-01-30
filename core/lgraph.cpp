@@ -721,16 +721,18 @@ int LGraph::get_num_inp_edges(const Node_pin &pin) const {
 }
 
 void LGraph::del_pin(const Node_pin &pin) {
-  Node_pin inv;
 
   if (pin.is_graph_io()) {
     ref_self_sub_node()->del_pin(pin.get_pid());
+    return;
   }
 
   if (pin.is_driver()) {
-    del_edge_driver_int(pin, inv);
+    for(auto &e:out_edges(pin))
+      e.del_edge();
   } else {
-    del_edge_sink_int(inv, pin);
+    for(auto &e:inp_edges(pin))
+      e.del_edge();
   }
 }
 

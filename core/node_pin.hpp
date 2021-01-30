@@ -387,7 +387,7 @@ public:
   std::string_view get_name() const;
   bool             has_name() const;
   static Node_pin  find_driver_pin(LGraph *top, std::string_view wname);
-  std::string      get_pin_name() const;
+  std::string_view get_pin_name() const;
 
   void             set_prp_vname(std::string_view prp_vname);
   std::string_view get_prp_vname() const;
@@ -407,7 +407,7 @@ public:
   void    clear_io_sign();
   bool    is_io_sign() const;
 
-  std::string get_type_sub_pin_name() const;
+  std::string_view get_type_sub_pin_name() const;
 
   void   set_offset(Bits_t offset);
   Bits_t get_offset() const;

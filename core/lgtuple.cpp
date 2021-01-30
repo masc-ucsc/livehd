@@ -6,6 +6,12 @@
 #include "lgraph.hpp"
 #include "likely.hpp"
 
+Lgtuple::key_map_type::const_iterator Lgtuple::get_it(std::string_view key) const {
+  key_map_type::const_iterator it = key_map.find(std::string{key});
+
+  return it;
+}
+
 std::string Lgtuple::get_last_level(const std::string &key) {
   std::string last_key{key};
 
@@ -28,9 +34,14 @@ std::string Lgtuple::get_remove_first_level(const std::string &key) const {
   return first_level; // empty if no dot left
 }
 
-void Lgtuple::add_int(std::string_view key, std::shared_ptr<Lgtuple const> tup) {
-  std::string key_base{key};
-  key_base = key_base + ".";
+void Lgtuple::add_int(const std::string &key, std::shared_ptr<Lgtuple const> tup) {
+
+  if (tup->is_scalar()) {
+    key_map.emplace(key, tup->get_dpin());
+    return;
+  }
+
+  std::string key_base{key + "."};
 
   for(auto ent:tup->key_map) {
     key_map.emplace(key_base + ent.first, ent.second);
@@ -236,29 +247,36 @@ void Lgtuple::add(int pos, std::string_view key, std::shared_ptr<Lgtuple const> 
   if (!only_attr_add)
     del(key);
 
-  if (pos>=0 && !std::isdigit(key[0])) {
-    pos2key_map.emplace(std::to_string(pos), key);
-    key2pos_map.emplace(key, std::to_string(pos));
+  std::string key_str{key};
+  if (pos>=0 && key.empty()) {
+    key_str = std::to_string(pos);
+  }else if (pos>=0 && !std::isdigit(key_str[0])) {
+    pos2key_map.emplace(std::to_string(pos), key_str);
+    key2pos_map.emplace(key_str, std::to_string(pos));
   }
 
-  add_int(key, tup);
+  add_int(key_str, tup);
 }
 
 void Lgtuple::add(int pos, std::string_view key, const Node_pin &dpin) {
   del(key);
 
-  if (pos>=0 && (key.empty() || !std::isdigit(key[0]))) {
-    pos2key_map.emplace(std::to_string(pos), key);
-    key2pos_map.emplace(key, std::to_string(pos));
+  std::string key_str{key};
+
+  if (pos>=0 && key.empty()) {
+    key_str = std::to_string(pos);
+  }else if (pos>=0 && !std::isdigit(key_str[0])) {
+    pos2key_map.emplace(std::to_string(pos), key_str);
+    key2pos_map.emplace(key_str, std::to_string(pos));
   }
 
-  key_map.emplace(key, dpin);
+  key_map.emplace(key_str, dpin);
 }
 
 void Lgtuple::add(std::string_view key, std::shared_ptr<Lgtuple const> tup) {
   del(key);
 
-  add_int(key, tup);
+  add_int(std::string{key}, tup);
 }
 
 void Lgtuple::add(std::string_view key, const Node_pin &dpin) {

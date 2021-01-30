@@ -60,7 +60,7 @@ public:
 
     void clear() {
       dir = Direction::Invalid;
-      name.clear();
+      name = "INVALID_PID";
       graph_io_pos = Port_invalid;
       phys.clear();
     }
@@ -243,7 +243,9 @@ public:
   }
 
   const IO_pin &get_io_pin_from_instance_pid(Port_ID instance_pid) const {
-    I(has_instance_pin(instance_pid));
+    if (instance_pid>=io_pins.size()) {
+      return io_pins[0]; // invalid PID
+    }
     return io_pins[instance_pid];
   }
 

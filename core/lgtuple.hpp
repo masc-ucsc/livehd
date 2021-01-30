@@ -64,9 +64,7 @@ protected:
     return it;
   }
 
-  key_map_type::const_iterator get_it(std::string_view key) const {
-    return key_map.find(std::string{key});
-  }
+  key_map_type::const_iterator get_it(std::string_view key) const;
   key_map_type::const_iterator get_it(int pos, std::string_view key) const {
     if (pos>=0 && !key.empty())
       return get_both_it(pos, key);
@@ -96,7 +94,7 @@ protected:
 
   std::string get_remove_first_level(const std::string &key) const;
 
-  void add_int(std::string_view key, std::shared_ptr<Lgtuple const> tup);
+  void add_int(const std::string &key, std::shared_ptr<Lgtuple const> tup);
 
 public:
   Lgtuple(std::string_view _name) : name(_name) { }
@@ -116,7 +114,7 @@ public:
   // return const Node_pin ref. WARNING: no pointer stability if add/del fields
   const Node_pin &get_dpin(int pos) const;
   const Node_pin &get_dpin(std::string_view key) const;
-  const Node_pin &get_dpin() const { return get_dpin(""); }
+  const Node_pin &get_dpin() const { I(is_scalar()); return get_dpin(""); }
   const Node_pin &get_dpin(int pos, std::string_view key) const;
 
   std::shared_ptr<Lgtuple> get_sub_tuple(int pos, std::string_view key) const;
@@ -147,6 +145,12 @@ public:
   const key_map_type &get_map() const { return key_map; }
 
   static std::string get_last_level(const std::string &key);
+
+  bool is_scalar() const {
+    if (key_map.empty())
+      return true;
+    return key_map.find("") != key_map.end();
+  }
 
   void dump() const;
 };

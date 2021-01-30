@@ -198,18 +198,21 @@ bool Node_pin::is_io_sign() const {
   return Ann_node_pin_io_unsign::ref(top_g)->has(get_compact_driver())?false:true;
 }
 
-std::string Node_pin::get_type_sub_pin_name() const {
-  auto &sub_node = get_node().get_type_sub_node();
-  if (sub_node.has_instance_pin(pid))
-    return std::string(sub_node.get_name_from_instance_pid(pid));
+std::string_view Node_pin::get_type_sub_pin_name() const {
+  const auto node = get_node();
 
-  return std::to_string(pid);
+  const auto &sub    = node.get_type_sub_node();
+  const auto &io_pin = sub.get_io_pin_from_instance_pid(pid);
+
+  GI(is_driver(), !io_pin.is_input()); // it can be invalid
+  GI(is_sink(),   !io_pin.is_output());// it can be invalid
+
+  return io_pin.name;
 }
 
 void Node_pin::set_delay(float val) { Ann_node_pin_delay::ref(top_g)->set(get_compact_driver(), val); }
 bool Node_pin::has_delay()  const { return Ann_node_pin_delay::ref(top_g)->has(get_compact_driver()); }
 float Node_pin::get_delay() const { return Ann_node_pin_delay::ref(top_g)->get(get_compact_driver()); }
-
 
 void Node_pin::del_delay() {
   Ann_node_pin_delay::ref(top_g)->erase(get_compact_driver());
@@ -361,22 +364,28 @@ Node_pin Node_pin::find_driver_pin(LGraph *top, std::string_view wname) {
   return Node_pin(top, ref->get_key(it));
 }
 
-std::string Node_pin::get_pin_name() const {
+std::string_view Node_pin::get_pin_name() const {
   if (is_graph_io()) {
-		auto &sub_node = current_g->get_self_sub_node();
+		const auto &sub    = current_g->get_self_sub_node();
+    const auto &io_pin = sub.get_io_pin_from_instance_pid(pid);
+    return io_pin.name;
+#if 0
+    // handles case that there is no name by returning PID instead of INVALID
 		if (sub_node.has_instance_pin(pid))
 			return std::string(sub_node.get_name_from_instance_pid(pid));
 
 		return std::to_string(pid);
+#endif
 	}
 
   auto op = get_type_op();
   if (op == Ntype_op::Sub)
     return get_type_sub_pin_name();
-  if (is_driver())
-    return std::string(Ntype::get_driver_name(op, pid));
 
-  return std::string(Ntype::get_sink_name(op, pid));
+  if (is_driver())
+    return Ntype::get_driver_name(op, pid);
+
+  return Ntype::get_sink_name(op, pid);
 }
 
 void Node_pin::set_offset(Bits_t offset) {

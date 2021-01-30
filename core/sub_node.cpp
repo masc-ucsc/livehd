@@ -196,7 +196,9 @@ void Sub_node::del_pin(Port_ID instance_pid) {
     I(graph_pos2instance_pid[pos] != Port_invalid);
     graph_pos2instance_pid[pos] = Port_invalid;
   }
+  auto keep_name = io_pins[instance_pid].name;
   io_pins[instance_pid].clear(); // do not erase to avoid remap of all the instance_pids (users)
+  io_pins[instance_pid].name = keep_name;
 
   deleted.emplace_back(instance_pid);
   std::sort(deleted.begin(), deleted.end(), std::greater<>());
