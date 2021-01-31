@@ -95,6 +95,7 @@ protected:
   std::string get_remove_first_level(const std::string &key) const;
 
   void add_int(const std::string &key, std::shared_ptr<Lgtuple const> tup);
+  int get_next_free_pos(const std::string &key) const;
 
 public:
   Lgtuple(std::string_view _name) : name(_name) { }
@@ -145,6 +146,7 @@ public:
   const key_map_type &get_map() const { return key_map; }
 
   static std::string get_last_level(const std::string &key);
+  static std::string get_all_but_last_level(const std::string &key);
 
   bool is_scalar() const {
     if (key_map.empty())
