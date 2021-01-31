@@ -37,9 +37,9 @@ Darken HiLoMultiplier Coverage Accumulator LFSR16 '
 # pts='Test1'
 # pts='Life'
 # pts='Cell_alone'
-pts='ByteSelector '
+# pts='ByteSelector '
 # pts='SimpleALU'
-# pts='Xor6Thread2'
+pts='Xor6Thread2'
 
 
 LGSHELL=./bazel-bin/main/lgshell

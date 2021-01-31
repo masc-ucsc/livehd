@@ -1683,9 +1683,10 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(LGraph *lg) {
     auto dpin_vname = vname_dpin.get_prp_vname();
     if (is_output(dpin_vname)) {
       auto edible_dpin = vname_dpin;
-      create_out_ta(lg, dpin_vname, edible_dpin);
+      create_out_ta(lg, dpin_vname.substr(1), edible_dpin); // don't pass first char % as the key name
       continue;
     }
+
     //FIXME->sh: handling tuple-flop here in the future
 
     if (driver_var2wire_nodes.find(vname) != driver_var2wire_nodes.end()) {
