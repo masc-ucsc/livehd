@@ -199,9 +199,9 @@ public:
   static str concat(const str &a, std::string_view b);
   static str concat(const str &a, int v);
 
-  str append(const str       &b) const { return concat(this, b); }
-  str append(std::string_view b) const { return concat(this, b); }
-  str append(int              b) const { return concat(this, b); }
+  str append(const str       &b) const;
+  str append(std::string_view b) const;
+  str append(int              b) const;
 
   std::vector<str> split(const char chr);
 

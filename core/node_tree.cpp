@@ -1,7 +1,7 @@
-#include "node_tree.hpp"
 
 #include <functional>
 
+#include "node_tree.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
@@ -31,12 +31,12 @@ Node_tree::Node_tree(LGraph* root_arg)
       last_sib = tree_cidx;
 
       if (debug_verbose) {
-        fmt::print("node {}: hl: {}, hp: {}, tl: {}, tp: {}\n",
+        fmt::print("node {}: hl:{}, hp:{}, tl:{}, tp:{}\n",
                    cn.debug_name(),
-                   hidx.level,
-                   hidx.pos,
-                   tree_cidx.level,
-                   tree_cidx.pos);
+                   (int)hidx.level,
+                   (int)hidx.pos,
+                   (int)tree_cidx.level,
+                   (int)tree_cidx.pos);
       }
 
       if (fn.is_type_sub_present()) {
@@ -51,13 +51,13 @@ Node_tree::Node_tree(LGraph* root_arg)
           LGraph* sub_lg = LGraph::open(root->get_path(), cn.get_type_sub());
 
           if (debug_verbose) {
-            fmt::print("testing l: {}, p: {} ({})\n", sub_hidx.level, sub_hidx.pos, sub_lg->get_name());
+            fmt::print("testing l:{}, p:{} ({})\n", (int)sub_hidx.level, (int)sub_hidx.pos, sub_lg->get_name());
           }
 
           if (ht->ref_lgraph(sub_hidx) == sub_lg && !hidx_used.contains(sub_hidx)) {
             found = true;
             if (debug_verbose) {
-              fmt::print("found l: {}, p: {} ({}), recursing.\n", sub_hidx.level, sub_hidx.pos, sub_lg->get_name());
+              fmt::print("found l:{}, p:{} ({}), recursing.\n", (int)sub_hidx.level, (int)sub_hidx.pos, sub_lg->get_name());
             }
 
             hidx_used.emplace(sub_hidx);
