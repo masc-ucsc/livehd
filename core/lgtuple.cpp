@@ -73,7 +73,7 @@ std::shared_ptr<Lgtuple> Lgtuple::make_merge(Node_pin &sel_dpin, const std::vect
   I(tup_list.size()>1); // nothing to merge?
 
   std::vector<key_map_type::const_iterator> its;
-  for(const auto tup:tup_list) {
+  for(const auto &tup:tup_list) {
     its.emplace_back(tup->key_map.begin());
   }
 

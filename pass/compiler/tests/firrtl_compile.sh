@@ -19,15 +19,16 @@ Decrementer Test1 Test2 Test3 Test6 TrivialAdd NotAnd Trivial Tail TrivialArith
 Shifts PlusAnd MaxN ByteSelector Darken HiLoMultiplier SimpleALU Mul
 VecShiftRegisterParam VecShiftRegisterSimple ' 
 
-# pts_hifirrtl_todo='Test6 ByteSelector ResetShiftRegister Counter Life Cell_alone Adder4 Mux4 LogShifter SingleEvenFilter
-# VecShiftRegister BundleConnect SubModule PlusAnd VecShiftRegisterParam
-# VecShiftRegisterSimple VecSearch VendingMachineSwitch VendingMachine'
+# pts_hifirrtl_todo='
+# 
+# VendingMachineSwitch VendingMachine'
 
 # passed hifirrtl pattern pool
-pts='XorSelfThread1 Mux4 MaxN Max2 ResetShiftRegister Parity Counter
-RegisterSimple Register RegXor AddNot EnableShiftRegister GCD_3bits Flop
-Decrementer Test2 Test3 TrivialAdd NotAnd Trivial Tail TrivialArith Shifts
-Darken HiLoMultiplier Coverage Accumulator LFSR16 ' 
+pts='Xor6Thread2 XorSelfThread1 Cell_alone ByteSelector SimpleALU Mux4 MaxN
+Max2 ResetShiftRegister Parity Counter RegisterSimple Register RegXor AddNot
+EnableShiftRegister GCD_3bits Flop Decrementer Test2 Test3 TrivialAdd NotAnd
+Trivial Tail TrivialArith Shifts Darken HiLoMultiplier Coverage Accumulator
+LFSR16 PlusAnd VendingMachine VendingMachineSwitch'  
 
 # pts='Mul'
 # pts='Adder4'
@@ -36,10 +37,14 @@ Darken HiLoMultiplier Coverage Accumulator LFSR16 '
 # pts='Test6'
 # pts='Test1'
 # pts='Life'
-# pts='Cell_alone'
-# pts='ByteSelector '
-# pts='SimpleALU'
-pts='Xor6Thread2'
+# pts='VecShiftRegister'
+# pts='BundleConnect' 
+# pts='SubModule'
+# pts='VecShiftRegisterParam'
+# pts='VecShiftRegisterSimple '
+# pts='VecSearch '
+
+
 
 
 LGSHELL=./bazel-bin/main/lgshell
