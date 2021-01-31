@@ -1,8 +1,6 @@
 foo.a = 1
-xx.d  = 2
 xx.e  = 3
-$en.__ubits = 1
-if ($en == 1) {
+if $en {
     foo.c = xx
 } else {
     yy.e = 4

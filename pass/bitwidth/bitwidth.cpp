@@ -91,8 +91,16 @@ void Bitwidth::process_mux(Node &node, XEdge_iterator &inp_edges) {
   Lconst max_val;
   Lconst min_val;
   for (auto e : inp_edges) {
-    if (e.sink.get_pid() == 0)
-      continue;  // Skip select
+    if (e.sink.get_pid() == 0) {
+
+      Bitwidth_range bw(0, inp_edges.size()-1); // -1 for the mux sel
+      flat_bwmap.insert_or_assign(e.driver.get_compact_flat(), bw);
+
+      if (e.driver.get_bits() && e.driver.get_bits() >= bw.get_sbits()) {
+        e.driver.set_bits(bw.get_sbits());
+      }
+      continue;
+    }
 
     auto it = flat_bwmap.find(e.driver.get_compact_flat());
     if (it != flat_bwmap.end()) {

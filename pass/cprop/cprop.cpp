@@ -712,7 +712,7 @@ void Cprop::process_mux(Node &node) {
 
   Node_pin sel_dpin;
 
-  for(auto e:node.inp_edges()) {
+  for(auto e:node.inp_edges_ordered()) { // Mux needs the edges ordered
     if (e.sink.get_pid() == 0) {
       I(e.sink.get_pin_name() == "0");
 
