@@ -17,9 +17,6 @@
 #include "node_tree.hpp"
 using namespace std;
 
-// This will be used to keep track of user's request for more output during layout.
-extern bool verbose;
-
 extern map<string, int> NameCounts;
 extern int              TypeCounts[];
 inline int              Type2Count(Ntype_op compType) { return ++TypeCounts[static_cast<int>(compType)]; }

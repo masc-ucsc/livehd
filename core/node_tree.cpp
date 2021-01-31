@@ -82,7 +82,7 @@ Node_tree::Node_tree(LGraph* root_arg)
 void Node_tree::dump() const {
   for (const auto& index : depth_preorder()) {
     std::string indent(index.level, ' ');
-    const auto& index_data = get_data(index);
-    fmt::print("{} level: {} pos: {} name: {}\n", indent, index.level, index.pos, index_data.debug_name());
+    const auto& id = get_data(index);
+    fmt::print("{} name: {} loc: ({}, {}) livehd loc: ({}, {})\n", indent, id.debug_name(), index.level, index.pos, id.get_hidx().level, id.get_hidx().pos);
   }
 }

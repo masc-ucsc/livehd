@@ -1,3 +1,5 @@
 This program generates floorplans for the fplan pass of LiveHD, and has been modified.
 
 Non-source files (including the makefile) are kept, but not used.
+
+See HOWTO for instructions on how to use ArchFP.

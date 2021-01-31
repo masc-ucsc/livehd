@@ -53,11 +53,7 @@ void Node_hier_floorp::load_lg_nodes(LGraph* lg, const std::string_view lgdb_pat
   // count and floorplan leaves
   for (auto n : lg->fast()) {
     Ntype_op op = n.get_type_op();
-    if (!Ntype::is_synthesizable(op)) {
-      continue;
-    }
-
-    if (skip.contains(op)) {
+    if (!Ntype::is_synthesizable(op) || skip.contains(op)) {
       continue;
     }
 
@@ -69,7 +65,7 @@ void Node_hier_floorp::load_lg_nodes(LGraph* lg, const std::string_view lgdb_pat
     }
 
     auto  dim       = na.get_dim(op);
-    float node_area = dim.area;  // TODO: can we calculate some sort of bitwidth for the node?
+    float node_area = dim.area;
 
     unsigned int count = 1;
     if (grid_count[op] >= grid_thresh[op] && grid_thresh[op] > 0) {

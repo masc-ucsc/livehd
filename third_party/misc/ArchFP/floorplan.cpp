@@ -21,10 +21,11 @@
 #include "mathutil.hpp"
 
 // This will be used to keep track of user's request for more output during layout.
-bool verbose = false;
+constexpr bool verbose = false;
 
 // Temporary local for crazy mirror reflection stuff.
-#define maxMirrorDepth 20
+constexpr int maxMirrorDepth = 20;
+
 static bool   xReflect = false;
 static double xLeft[maxMirrorDepth];
 static double xRight[maxMirrorDepth];
@@ -146,14 +147,14 @@ unsigned int FPObject::outputLGraphLayout(Node_tree& tree, Tree_index tidx, doub
   while (child_idx != tree.invalid_index()) {
     Node* child = tree.ref_data(child_idx);
 
-    //fmt::print("testing child node {} with parent hier ({}, {})\n", child->debug_name(), child->get_hidx().level, child->get_hidx().pos);
+    // fmt::print("testing child node {} with parent hier ({}, {})\n", child->debug_name(), child->get_hidx().level, child->get_hidx().pos);
     if (child->get_type_op() != getType() || child->get_hier_color() == 1) {
       child_idx = tree.get_sibling_next(child_idx);
       continue;
     }
 
     found = true;
-    //fmt::print("assigning child node {} to parent hier ({}, {})\n", child->debug_name(), child->get_hidx().level, child->get_hidx().pos);
+    fmt::print("assigning child node {} to parent hier ({}, {})\n", child->debug_name(), child->get_hidx().level, child->get_hidx().pos);
     Ann_place p(calcX(startX), calcY(startY), getWidth() / 1000, getHeight() / 1000);
     child->set_place(p);
     child->set_hier_color(1);  // set node instance as marked after visiting it
@@ -445,7 +446,7 @@ bool gridLayout::layout(FPOptimization opt, double targetAR) {
   double theight = sqrt(tarea / targetAR);
   double twidth  = tarea / theight;
   if (verbose)
-    cout << "Begin Grid Layout, TargetAR=" << targetAR << " My area=" << tarea << " Implied W=" << twidth << " H=" << theight
+    cout << "Begin Grid Layout for " << getName() << ", TargetAR=" << targetAR << " My area=" << tarea << " Implied W=" << twidth << " H=" << theight
          << "\n";
 
   FPObject* obj   = getComponent(0);
@@ -566,7 +567,7 @@ bool bagLayout::layout(FPOptimization opt, double targetAR) {
   double nextY     = 0;
 
   if (verbose) {
-    cout << "In BagLayout, Area=" << area << " Width= " << remWidth << " Height=" << remHeight << " Target AR=" << targetAR << "\n";
+    cout << "In BagLayout for " << getName() << ", Area=" << area << " Width= " << remWidth << " Height=" << remHeight << " Target AR=" << targetAR << "\n";
   }
 
   // Sort the components, placing them in decreasing order of size.
@@ -634,7 +635,7 @@ void bagLayout::outputHotSpotLayout(ostream& o, double startX, double startY) {
   string groupName;
   if (itemCount != 1) {
     groupName = getUniqueName();
-    o << "# Start of " << groupName << " layout of type " << Ntype::get_name(getType()) << ".\n";
+    o << "# Start of " << groupName << " layout of type " << Ntype::get_name(getType()) << " (" << getComponentCount() << " items).\n";
     o << "# Total Group Stats: X=" << calcX(startX) << " Y=" << calcY(startY) << " W=" << width << "mm H=" << height
       << "mm Area=" << area << "mm^2\n";
   }
@@ -779,7 +780,7 @@ bool geogLayout::layout(FPOptimization opt, double targetAR) {
   double remWidth  = area / remHeight;
 
   if (verbose)
-    cout << "In geogLayout.  A=" << area << " W=" << remWidth << " H=" << remHeight << "\n";
+    cout << "In geogLayout for " << getName() << ".  A=" << area << " W=" << remWidth << " H=" << remHeight << "\n";
 
   // Now do the real work.
   bool retval = layoutHelper(remWidth, remHeight, 0, 0, layoutStack, 0, centerItems, 0);
@@ -916,7 +917,7 @@ bool geogLayout::layoutHelper(double remWidth, double remHeight, double curX, do
     double totalArea = comp->totalArea();
 
     if (verbose)
-      cout << "In geog, for component " << comp->getName() << " total component area=" << totalArea << "\n";
+      cout << "In geog for " << comp->getName() << ", total component area=" << totalArea << "\n";
 
     double targetWidth, targetHeight;
     newX = curX;
@@ -969,7 +970,7 @@ bool geogLayout::layoutHelper(double remWidth, double remHeight, double curX, do
 void geogLayout::outputHotSpotLayout(ostream& o, double startX, double startY) {
   pushMirrorContext(startX, startY);
   string layoutName = getUniqueName();
-  o << "# Start of " << layoutName << " Layout of type " << Ntype::get_name(getType()) << ".\n";
+  o << "# Start of " << layoutName << " Layout of type " << Ntype::get_name(getType()) << " (" << getComponentCount() << " items).\n";
   o << "# Total Cluster Stats: X=" << calcX(startX) << " Y=" << calcY(startY) << " W=" << width << "mm H=" << height
     << "mm Area=" << area << "mm^2\n";
   for (int i = 0; i < getComponentCount(); i++) {

@@ -59,6 +59,39 @@ Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", v
 
   std::string_view t_str = var.get("traversal");
 
+  
+
+
+  geogLayout* L2Stack2 = new geogLayout();
+  L2Stack2->addComponentCluster("l1", 1, 3.166, 3., 1., Top);
+  L2Stack2->addComponentCluster("l2", 1, 3.166, 3., 1., Top);
+
+  geogLayout* L2Stack = new geogLayout();
+  L2Stack->addComponent(L2Stack2, 2, Top);
+  L2Stack->addComponentCluster("l3", 1, 3.166, 3., 1., Top);
+  L2Stack->addComponentCluster("l4", 1, 3.166, 3., 1., Top);
+
+  geogLayout* chip = new geogLayout();
+  chip->addComponent(L2Stack, 2, Top);
+  //chip->addComponent(L2Stack, 1, Top); // this isn't picked up for some reason
+  //chip->addComponent(L2Stack, 1, Top);
+  //chip->addComponent(L2Stack2, 1, Top); // this is illegal, and hard to detect - need to floorplan a deep copy.
+  chip->addComponentCluster("l5", 2, 9.5, 2., 1., Top);
+
+  bool success = chip->layout(AspectRatio, 1.0);
+  if (!success) {
+    cerr << "Unable to layout specified CMP configuration." << endl;
+  }
+
+  ostream& HSOut = outputHotSpotHeader("TRIPS.flp");
+  chip->outputHotSpotLayout(HSOut);
+  outputHotSpotFooter(HSOut);
+
+
+
+
+  return;
+
   if (t_str == "hier_lg") {
     // Lg_hier_floorp hfp;
     // makefp_int(hfp, "file");

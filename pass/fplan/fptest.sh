@@ -24,19 +24,20 @@ set -e # exit if any command fails
 # TESTFILE=./inou/yosys/tests/long_gcd.v
 # TESTTOP=gcd
 
-# does not work - nodes are skipped
+# does not work - nodes are skipped because of a bug in ArchFP
+# hierarchy elements repeated in >1 hierarchy level
 TESTFILE=./inou/yosys/tests/punching_3.v
 TESTTOP=punching_3
 
-# does not work - overlap
+# does not work - overlap, bug in ArchFP
 # TESTFILE=./inou/yosys/tests/punching.v
 # TESTTOP=punching
 
-# does not work - overlap
+# does not work - overlap, bug in ArchFP
 # TESTFILE=./inou/yosys/tests/graphtest.v
 # TESTTOP=graphtest
 
-# does not work - overlap
+# does not work - overlap, bug in ArchFP
 # TESTFILE=./pass/fplan/tests/hier_test.v
 # TESTTOP=hier_test
 
