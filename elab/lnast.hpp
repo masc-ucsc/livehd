@@ -6,16 +6,12 @@
 #include "mmap_tree.hpp"
 #include "lnast_ntype.hpp"
 
-// FIXME->sh: need ordered map to guarantee phi-node generation order to be able
-// to test LNAST-SSA, better to use absl::btree_map
-
-/* using Phi_rtable = absl::flat_hash_map<std::string_view, Lnast_nid>; // rtable = resolve_table */
-using Lnast_nid = mmap_lib::Tree_index;
-using Phi_rtable = std::map<std::string_view, Lnast_nid>; // rtable = resolve_table
-using Cnt_rtable = absl::flat_hash_map<std::string_view, int16_t>;
-using Dot_lrhs_table = absl::flat_hash_map<Lnast_nid, std::pair<bool, Lnast_nid>>;  // for both dot and selection, dot -> (lrhs, paired opr node)
-using Tuple_var_table = absl::flat_hash_set<std::string_view>;
-using Tuple_var_1st_scope_ssa_table = std::map<std::string_view, Lnast_nid>; // rtable = resolve_table
+using Lnast_nid                     = mmap_lib::Tree_index;
+using Phi_rtable                    = absl::flat_hash_map<std::string_view, Lnast_nid>; // rtable = resolve_table
+using Cnt_rtable                    = absl::flat_hash_map<std::string_view, int16_t>;
+using Dot_lrhs_table                = absl::flat_hash_map<Lnast_nid, std::pair<bool, Lnast_nid>>;  // for both dot and selection, dot -> (lrhs, paired opr node)
+using Tuple_var_table               = absl::flat_hash_set<std::string_view>;
+using Tuple_var_1st_scope_ssa_table = absl::flat_hash_map<std::string_view, Lnast_nid>; // rtable = resolve_table
 
 
 //tricky old C macro to avoid redundant code from function overloadings
