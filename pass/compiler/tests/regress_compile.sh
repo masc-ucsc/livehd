@@ -339,6 +339,7 @@ firrtl_test() {
   rm -f *.dot
   rm -f lgcheck*
   rm -rf lgdb
+  rm -f *.tcl
 }
 
 firrtl_test "$pts"
