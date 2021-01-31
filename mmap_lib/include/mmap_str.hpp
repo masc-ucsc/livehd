@@ -199,8 +199,20 @@ public:
   static str concat(const str &a, std::string_view b);
   static str concat(const str &a, int v);
 
+  str append(const str       &b) const { return concat(this, b); }
+  str append(std::string_view b) const { return concat(this, b); }
+  str append(int              b) const { return concat(this, b); }
+
   std::vector<str> split(const char chr);
 
+  bool    is_i() const; // starts with digit -> is integer
+  int64_t to_i() const; // convert to integer
+
+  str get_str_after_last (const char chr) const;
+  str get_str_after_first(const char chr) const;
+
+  str get_str_before_last (const char chr) const;
+  str get_str_before_first(const char chr) const;
 };
 
 }  // namespace mmap_lib

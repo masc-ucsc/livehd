@@ -754,6 +754,7 @@ void Cprop::process_tuple_add(Node &node) {
 
   auto [tup_name, key_name, key_pos] = get_tuple_name_key(node);
 
+  Node_pin                       parent_dpin;
   std::shared_ptr<Lgtuple const> parent_tup;
   std::shared_ptr<Lgtuple const> value_tup;
   bool parent_is_a_sub = false;
@@ -765,9 +766,9 @@ void Cprop::process_tuple_add(Node &node) {
     }
 
     if (node.get_sink_pin("tuple_name").is_connected()) {
-      auto dpin = node.get_sink_pin("tuple_name").get_driver_pin();
-      parent_tup = find_lgtuple(dpin);
-      parent_is_a_sub = dpin.get_type_op() == Ntype_op::Sub;
+      parent_dpin = node.get_sink_pin("tuple_name").get_driver_pin();
+      parent_tup = find_lgtuple(parent_dpin);
+      parent_is_a_sub = parent_dpin.get_type_op() == Ntype_op::Sub;
       if (parent_tup) {
         node_tup = std::make_shared<Lgtuple>(*parent_tup);
       }
@@ -776,6 +777,10 @@ void Cprop::process_tuple_add(Node &node) {
 
   if (!node_tup) {
     node_tup = std::make_shared<Lgtuple>(tup_name); // new tuple if not already created
+    if (!value_tup && !parent_dpin.is_invalid()) {
+      if (parent_dpin.get_node().get_type_op() != Ntype_op::TupRef)
+        node_tup->add(0, parent_dpin); // the chain was a constant
+    }
   }
 
   if (value_tup) {
@@ -941,15 +946,21 @@ void Cprop::try_create_graph_output(Node &node, std::shared_ptr<Lgtuple> tup) {
   I(!tuple_issues);
 
   auto *g = node.get_class_lgraph();
-  bool unnamed_output = false;
+  bool local_error = false;
   for (const auto &it : tup->get_map()) {
     auto out_name = it.first;
-    if (out_name.empty()) {
-      unnamed_output = true;
-      Pass::info("Tuples connected to output tend to have named fields (pyrope supports unnamed)");
+    if (unlikely(out_name.empty())) {
+      local_error = true;
+      Pass::info("Tuple {} for graph {} without named field (pyrope supports unnamed)", tup->get_name(), g->get_name());
     }
     if (out_name.find(".__") != std::string::npos)
       continue; // do not populate attributes to the IOs
+
+		if (unlikely(it.second.is_invalid())) {
+      local_error = true;
+      Pass::error("graph {} has output but it has invalid field {}", g->get_name(), it.first);
+			continue;
+		}
 
     if (!g->has_graph_output(out_name)) {
       int pos = tup->get_pos(out_name);
@@ -964,7 +975,7 @@ void Cprop::try_create_graph_output(Node &node, std::shared_ptr<Lgtuple> tup) {
     }
   }
 
-  if (!unnamed_output) {
+  if (!local_error) {
     bwd_del_node(node); // then delete current tup_add
 
     auto dpin = g->get_graph_output("%"); // then delete anything left at %
