@@ -203,10 +203,10 @@ void Lnast_tolg::process_ast_concat_op(LGraph *lg, const Lnast_nid &lnidx_concat
   auto tn_spin    = tup_add.setup_sink_pin("tuple_name");  // tuple name
   auto value_spin = tup_add.setup_sink_pin("value");       // key->value
 
-  auto tn_dpin = setup_ref_node_dpin(lg, opd1, false, true);
+  auto tn_dpin = setup_ref_node_dpin(lg, opd1);
   lg->add_edge(tn_dpin, tn_spin);
 
-  auto value_dpin = setup_ref_node_dpin(lg, opd2, false, true);
+  auto value_dpin = setup_ref_node_dpin(lg, opd2);
   lg->add_edge(value_dpin, value_spin);
 
   if (lhs_name == opd1_name) {
@@ -307,7 +307,7 @@ Node Lnast_tolg::process_ast_assign_op(LGraph *lg, const Lnast_nid &lnidx_assign
   auto c0 = lnast->get_first_child(lnidx_assign);
   auto c1 = lnast->get_sibling_next(c0);
 
-  Node_pin opd1      = setup_ref_node_dpin(lg, c1, false, false, false, true);
+  Node_pin opd1      = setup_ref_node_dpin(lg, c1);
   auto     opd1_node = opd1.get_node();
   auto     opd1_ntype = opd1_node.get_type_op();
 
@@ -403,7 +403,7 @@ void Lnast_tolg::process_ast_tuple_struct(LGraph *lg, const Lnast_nid &lnidx_tup
       auto tn_dpin        = setup_tuple_ref(lg, tup_name);
       auto fp_dnode       = lg->create_node_const(Lconst(fp));
       auto field_pos_dpin = fp_dnode.setup_driver_pin();
-      auto value_dpin     = setup_ref_node_dpin(lg, c1, 0, 0, 1);
+      auto value_dpin     = setup_ref_node_dpin(lg, c1);
 
       auto tup_add        = lg->create_node(Ntype_op::TupAdd);
       auto tn_spin        = tup_add.setup_sink_pin("tuple_name");  // tuple name
@@ -431,7 +431,7 @@ void Lnast_tolg::process_ast_tuple_struct(LGraph *lg, const Lnast_nid &lnidx_tup
     auto tn_dpin        = setup_tuple_ref(lg, tup_name);
     auto fp_dnode       = lg->create_node_const(Lconst(fp));
     auto field_pos_dpin = fp_dnode.setup_driver_pin();
-    auto value_dpin     = setup_ref_node_dpin(lg, tup_child, 0, 0, 1);
+    auto value_dpin     = setup_ref_node_dpin(lg, tup_child);
 
     auto tup_add        = lg->create_node(Ntype_op::TupAdd);
     auto tn_spin        = tup_add.setup_sink_pin("tuple_name");  // tuple name
@@ -536,7 +536,6 @@ void Lnast_tolg::process_ast_tuple_get_op(LGraph *lg, const Lnast_nid &lnidx_tg)
       auto        field_pos_spin = tup_get.setup_sink_pin("position");
 
       if (is_const(cn_tg_name)) {
-        /* auto field_pos_dpin = setup_ref_node_dpin(lg, cn_tg); */
         auto field_pos_dpin = lg->create_node_const(Lconst(cn_tg_name)).setup_driver_pin();
         lg->add_edge(field_pos_dpin, field_pos_spin);
       } else {
@@ -577,7 +576,6 @@ void Lnast_tolg::process_ast_tuple_get_op(LGraph *lg, const Lnast_nid &lnidx_tg)
       auto        field_pos_spin = prev_tup_get.setup_sink_pin("position");
 
       if (is_const(cn_tg_name)) {
-        /* auto field_pos_dpin = setup_ref_node_dpin(lg, cn_tg); */
         auto field_pos_dpin = lg->create_node_const(Lconst(cn_tg_name)).setup_driver_pin();
         lg->add_edge(field_pos_dpin, field_pos_spin);
       } else {
@@ -1004,8 +1002,7 @@ Node_pin Lnast_tolg::setup_node_assign_and_lhs(LGraph *lg, const Lnast_nid &lnid
 
 // for both target and operands, except the new io, reg, and const, the node and its dpin
 // should already be in the table as the operand comes from existing operator output
-Node_pin Lnast_tolg::setup_ref_node_dpin(LGraph *lg, const Lnast_nid &lnidx_opd, bool from_phi, bool from_concat, bool from_tupstrc,
-                                         bool from_assign, bool want_reg_qpin) {
+Node_pin Lnast_tolg::setup_ref_node_dpin(LGraph *lg, const Lnast_nid &lnidx_opd, bool from_phi, bool want_reg_qpin) {
   auto name  = lnast->get_sname(lnidx_opd);  // name = ssa_name
   auto vname = lnast->get_vname(lnidx_opd);
   auto subs  = lnast->get_subs(lnidx_opd);
@@ -1036,40 +1033,9 @@ Node_pin Lnast_tolg::setup_ref_node_dpin(LGraph *lg, const Lnast_nid &lnidx_opd,
   if (it != name2dpin.end()) {
     auto node = it->second.get_node();
     auto op   = it->second.get_node().get_type_op();
-
-    // FIXME->sh: !!!I see many redundant condition and logic here, clean it up after cprop tuple-mux ready! 1/18/2021
-    // it's a scalar variable, just return the node pin
-
-
-
-    if (op != Ntype_op::TupAdd)
-      return it->second;
-
-    if (op == Ntype_op::TupAdd && from_concat)
-      return it->second;
-
-    if (op == Ntype_op::TupAdd && from_tupstrc)
-      return it->second;
-
-    // when it's a tuple chain with multiple field -> not a scalar -> return the tuple chain for it
-    if (op == Ntype_op::TupAdd && from_assign) {
-      auto parent_node  = node.setup_sink_pin("tuple_name").get_driver_node();
-      auto parent_ntype = parent_node.get_type_op();
-      if (parent_ntype == Ntype_op::TupAdd)
-        return it->second;
-
-      // case of $input as the assignment rhs
-      if (parent_ntype == Ntype_op::TupRef && is_input(parent_node.setup_driver_pin().get_name()))
-        return it->second;
-    }
-
-    // it's a tuple assignment TA
-    if (op == Ntype_op::TupAdd && check_is_tup_assign(node)) {
-      return it->second;
-    }
-
-    // FIXME->sh: this segment of code should be optimized after the tuple-mux is ready 1/22/2021
-    if (op == Ntype_op::TupAdd) {
+    
+    // if ref comes from an TA dpin
+    if (op == Ntype_op::TupAdd && !from_phi) {
       auto parent_node  = node.setup_sink_pin("tuple_name").get_driver_node();
       auto parent_ntype = parent_node.get_type_op();
       if (parent_ntype == Ntype_op::TupRef || parent_ntype == Ntype_op::Or) {
@@ -1080,37 +1046,20 @@ Node_pin Lnast_tolg::setup_ref_node_dpin(LGraph *lg, const Lnast_nid &lnidx_opd,
 
         auto tn_dpin = it->second;
         auto field_pos_dpin = lg->create_node_const(Lconst(0)).setup_driver_pin();  // must be pos 0 as the case is "bar = a + 1", implicitly get a.0
-        lg->add_edge(tn_dpin, tn_spin);
-        lg->add_edge(field_pos_dpin, field_pos_spin);
+        tn_dpin.connect_sink(tn_spin);
+        field_pos_dpin.connect_sink(field_pos_spin);
         return tup_get.setup_driver_pin();
       }
     }
 
-    // FIXME->sh: temporarily design for cprop tuple-mux
-    if (op == Ntype_op::TupAdd)
-      return it->second;
-
-    // return a connected TupGet if the ref node is a TupAdd but also a tuple-chain of a scalar
-    // FIXME->sh: none sense design to just fits the goal of using scalar as tuple. clean it up after cprop tuple-mux ready! 1/18/2021
-    /* auto tup_get        = lg->create_node(Ntype_op::TupGet); */
-    /* auto tn_spin        = tup_get.setup_sink_pin("tuple_name");  // tuple name */
-    /* auto field_pos_spin = tup_get.setup_sink_pin("position");    // field pos */
-
-    /* auto tn_dpin = it->second; */
-    /* auto field_pos_dpin */
-    /*     = lg->create_node_const(Lconst(0)).setup_driver_pin();  // must be pos 0 as the case is "bar = a + 1", implicitly get a.0 */
-    /* lg->add_edge(tn_dpin, tn_spin); */
-    /* lg->add_edge(field_pos_dpin, field_pos_spin); */
-
-    /* return tup_get.setup_driver_pin(); */
+    return it->second;
   }
 
   Node_pin node_dpin;
   if (is_output(name)) {
     ;
   } else if (is_input(name)) {
-    node_dpin
-        = lg->create_node(Ntype_op::TupRef).setup_driver_pin();  // later the node_type should change to TupGet and connected to $
+    node_dpin = lg->create_node(Ntype_op::TupRef).setup_driver_pin();  // later the node_type should change to TupGet and connected to $
     node_dpin.set_name(name.substr(0, name.size() - 2));
     name2dpin[name] = node_dpin;
     return node_dpin;
@@ -1235,7 +1184,7 @@ void Lnast_tolg::process_ast_attr_get_op(LGraph *lg, const Lnast_nid &lnidx_aget
 
   Node_pin vn_dpin;
   if (attr_field == "__q_pin") {
-    vn_dpin = setup_ref_node_dpin(lg, c1_aget, 0, 0, 0, 0, 1);
+    vn_dpin = setup_ref_node_dpin(lg, c1_aget, false, true);
   } else {
     vn_dpin = setup_ref_node_dpin(lg, c1_aget);
   }

@@ -192,10 +192,7 @@ void Firmap::analysis_lg_attr_set_new_attr(Node &node_attr) {
         I(false, "cannot set ubits to a signed parent node in firrtl!");
 
       if (fb.get_bits() && (fb.get_bits()) > (val.to_i()))
-        Pass::error("Firrtl bitwidth mismatch. Variable {} needs {}ubits, but constrained to {}ubits\n",
-                    dpin_name,
-                    fb.get_bits(),
-                    val.to_i());
+        Pass::error("Firrtl bitwidth mismatch. Variable {} needs {}ubits, but constrained to {}ubits\n", dpin_name, fb.get_bits(), val.to_i());
       fb.set_bits_sign(val.to_i(), false);
 
     } else {  // Attr::Set_sbits
@@ -203,10 +200,7 @@ void Firmap::analysis_lg_attr_set_new_attr(Node &node_attr) {
         I(false, "cannot set sbits to an unsigned parent node in firrtl!");
 
       if (fb.get_bits() && fb.get_bits() > (val.to_i()))
-        Pass::error("Firrtl bitwidth mismatch. Variable {} needs {}sbits, but constrained to {}sbits\n",
-                    dpin_name,
-                    fb.get_bits(),
-                    val.to_i());
+        Pass::error("Firrtl bitwidth mismatch. Variable {} needs {}sbits, but constrained to {}sbits\n", dpin_name, fb.get_bits(), val.to_i());
 
       fb.set_bits_sign(val.to_i(), true);
     }

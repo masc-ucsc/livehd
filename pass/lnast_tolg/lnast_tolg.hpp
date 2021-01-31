@@ -55,15 +55,10 @@ protected:
   void setup_lgraph_ios_and_final_var_name(LGraph *lg);
 
 
-  Node         setup_node_opr_and_lhs    (LGraph *lg, const Lnast_nid &lnidx_opr, bool from_fir_op = false);
-  Node_pin     setup_tuple_assignment    (LGraph *lg, const Lnast_nid &lnidx_opr);
-  Node_pin     setup_node_assign_and_lhs (LGraph *lg, const Lnast_nid &lnidx_opr);
-  Node_pin     setup_ref_node_dpin       (LGraph *lg, const Lnast_nid &lnidx, 
-                                          bool from_phi     = false, 
-                                          bool from_concat  = false,
-                                          bool from_tupstrc = false,
-                                          bool from_assign  = false,
-                                          bool want_reg_qpin = false);
+  Node     setup_node_opr_and_lhs    (LGraph *lg, const Lnast_nid &lnidx_opr, bool from_fir_op = false);
+  Node_pin setup_tuple_assignment    (LGraph *lg, const Lnast_nid &lnidx_opr);
+  Node_pin setup_node_assign_and_lhs (LGraph *lg, const Lnast_nid &lnidx_opr);
+  Node_pin setup_ref_node_dpin       (LGraph *lg, const Lnast_nid &lnidx, bool from_phi = false, bool want_reg_qpin = false);
 
   Ntype_op decode_lnast_op           (const Lnast_nid &lnidx_opr);
   void     setup_dpin_ssa            (Node_pin &dpin, std::string_view var_name, uint16_t subs);

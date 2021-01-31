@@ -1887,6 +1887,7 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
       for (int i = 0; i < stmt.when().consequent_size(); i++) {
         ListStatementInfo(lnast, stmt.when().consequent(i), idx_stmts_t);
       }
+
       if (stmt.when().otherwise_size() > 0) {
         auto idx_stmts_f = lnast.add_child(idx_when, Lnast_node::create_stmts(get_new_seq_name(lnast)));
         for (int j = 0; j < stmt.when().otherwise_size(); j++) {

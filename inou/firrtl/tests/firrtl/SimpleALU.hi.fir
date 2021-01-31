@@ -4,7 +4,7 @@ circuit SimpleALU :
     input reset : UInt<1>
     output io : { flip a : UInt<4>, flip b : UInt<4>, flip opcode : UInt<2>, out : UInt<4>}
 
-    // io.out <= UInt<1>("h0") @[SimpleALU.scala 44:10]
+    io.out <= UInt<1>("h0") @[SimpleALU.scala 44:10]
     node _T = eq(io.opcode, UInt<1>("h0")) @[SimpleALU.scala 45:19]
     when _T : @[SimpleALU.scala 45:28]
       node _T_1 = add(io.a, io.b) @[SimpleALU.scala 46:20]
