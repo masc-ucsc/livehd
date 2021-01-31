@@ -1,4 +1,9 @@
 
-(a,b) = (1,2)
-%out_a = a
+(a,b) = (1,2) //unsolvable: local key "a" has no value assign in the tuple 
+
+//       tup
+//      / | \     "a" is a value of position 0 of tuple ___a, but "a" has not been assigned before
+//   ___a a b
+
+%out_a = a    //compile error: a is a local variable of tuple (a, b)
 %out_b = b

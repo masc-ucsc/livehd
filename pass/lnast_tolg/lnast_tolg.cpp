@@ -394,7 +394,7 @@ void Lnast_tolg::process_ast_tuple_struct(LGraph *lg, const Lnast_nid &lnidx_tup
       continue;
     }
 
-    // the case with key name well-defined
+    // the cases with key name well-defined
     if (lnast->get_type(tup_child).is_assign()) {
       auto c0         = lnast->get_first_child(tup_child);
       auto c1         = lnast->get_sibling_next(c0);

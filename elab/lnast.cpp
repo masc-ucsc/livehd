@@ -332,11 +332,13 @@ void Lnast::rename_to_real_tuple_name(const Lnast_nid &psts_nid, const Lnast_nid
   if (get_type(paired_assign_nid).is_func_call())
     return;
 
-
   auto c0_tup            = get_first_child(tup_nid);
   auto c0_paired_assign  = get_first_child(paired_assign_nid);
-  ref_data(paired_assign_nid)->type = Lnast_ntype::create_invalid();
 
+  if (get_name(c0_paired_assign).substr(0,3) == "___")
+    return; 
+
+  ref_data(paired_assign_nid)->type = Lnast_ntype::create_invalid();
   ref_data(c0_tup)->token = get_data(c0_paired_assign).token;
   ref_data(c0_tup)->type  = get_data(c0_paired_assign).type;
   ref_data(c0_tup)->subs  = get_data(c0_paired_assign).subs;
@@ -790,6 +792,8 @@ void Lnast::opr_lhs_merge_handle_a_statement(const Lnast_nid &assign_nid) {
 
   if (c1_assign_name.substr(0,3) == "___") {
     auto opr_nid = get_sibling_prev(assign_nid);
+    if (get_type(opr_nid).is_tuple())
+      return;
     auto c0_opr = get_first_child(opr_nid);
     I(get_name(c0_opr) == c1_assign_name);
     ref_data(c0_opr)->token = get_data(c0_assign).token;
