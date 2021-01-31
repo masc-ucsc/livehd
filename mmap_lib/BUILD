@@ -126,7 +126,6 @@ cc_test(
         ":headers",
         "@com_google_googletest//:gtest_main",
         "//lbench:headers",
-				
     ],
 )
 
@@ -154,5 +153,4 @@ cc_test(
         "@fmt//:fmt",
     ],
 )
-
 

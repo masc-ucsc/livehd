@@ -106,6 +106,7 @@ cc_test(
     srcs = ["main_test.cpp"],
     deps = [
         "@com_google_googletest//:gtest_main",
+        "@iassert//:iassert",
         ":tmt",
     ],
     data = [

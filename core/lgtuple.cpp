@@ -145,7 +145,7 @@ int Lgtuple::get_pos(std::string_view key) const {
   auto last_key = get_last_level(std::string{key});
 
   if (last_key[0]>='0' && last_key[0]<='9') {
-    int x;
+    int x=0;
     std::from_chars(last_key.data(), last_key.data() + last_key.size(), x);
     return x;
   }
@@ -157,7 +157,7 @@ int Lgtuple::get_pos(std::string_view key) const {
   last_key = get_last_level(k2p_it->second);
   I(last_key[0]>='0' && last_key[0]<='9');
 
-  int x;
+  int x=0;
   std::from_chars(last_key.data(), last_key.data() + last_key.size(), x);
   return x;
 }

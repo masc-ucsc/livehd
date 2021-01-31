@@ -16,6 +16,7 @@
 #include <regex>
 #include <string>
 
+#include "iassert.hpp"
 #include "gtest/gtest.h"
 #include "tmt_test.hpp"
 
@@ -196,7 +197,8 @@ TEST_F(MainTest, LabelsComplete) {
   drain_stdin();
   std::string cmd = "files pa\t\n";
 
-  write(master, cmd.c_str(), cmd.size());
+  auto sz = write(master, cmd.c_str(), cmd.size());
+  I(sz == cmd.size());
 
   std::string l0 = read_line();
   std::string l1 = read_line();
