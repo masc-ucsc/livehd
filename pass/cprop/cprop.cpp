@@ -729,9 +729,12 @@ void Cprop::process_mux(Node &node) {
   }
 
   if (!tup_list.empty()) {
-    fmt::print("mux tuple:{}\n", node.debug_name());
-
-    node2tuple[node.get_compact()] = Lgtuple::make_merge(sel_dpin, tup_list);
+    auto tup = Lgtuple::make_merge(sel_dpin, tup_list);
+    if (!tup) {
+      tuple_issues = true; // could not merge
+      return;
+    }
+    node2tuple[node.get_compact()] = tup;
   }
 
 }

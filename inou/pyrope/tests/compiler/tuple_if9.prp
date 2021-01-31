@@ -1,0 +1,10 @@
+
+x.a =1
+if $rand {
+  x = (a=2,b=3,c=4) // if with pos
+}else{
+  x.c = 5  // if without pos
+  x.b = 6
+}
+
+%out = x

@@ -72,17 +72,69 @@ std::shared_ptr<Lgtuple> Lgtuple::make_merge(Node_pin &sel_dpin, const std::vect
 
   I(tup_list.size()>1); // nothing to merge?
 
-  auto tup0 = tup_list[0];
+  std::vector<key_map_type::const_iterator> its;
+  for(const auto tup:tup_list) {
+    its.emplace_back(tup->key_map.begin());
+  }
 
+  auto tup0 = tup_list[0];
 	auto new_tup = std::make_shared<Lgtuple>(tup0->get_name());
 
-  for(auto i=0u;i<tup_list.size();++i) {
-    auto tup = tup_list[i];
-    tup->dump();
-    I(tup->get_name() == tup0->get_name());
-    for(const auto &it:tup->get_map()) {
-      (void)it;
-      I(tup->pos2key_map.empty()); // FIXME: only unordered for the moment
+  while(true) {
+    bool same_names = true;
+    bool same_dpins = true;
+    auto &it0 = its[0];
+    int  use_pos    = tup0->get_pos(it0->first);
+    for(auto i=1u;i<its.size();++i) {
+      same_names &= (it0->first  == its[i]->first);
+      same_dpins &= (it0->second == its[i]->second);
+      auto v = tup_list[i]->get_pos(its[i]->first);
+      if (v!=-1 && v != use_pos) {
+        LGraph::info("tuples {} and {} have fields {} and {} at different positions {} vs {}"
+            , tup0->get_name(), tup_list[i]->get_name(), it0->first, its[i]->first
+            , tup0->get_pos(it0->first), tup_list[i]->get_pos(its[i]->first));
+        return nullptr;
+      }
+    }
+    if (same_names && same_dpins) {
+      new_tup->add(it0->first, it0->second);
+    }else if (same_names && !same_dpins) {
+      auto mux_node = sel_dpin.get_class_lgraph()->create_node(Ntype_op::Mux);
+
+      mux_node.setup_sink_pin("0").connect_driver(sel_dpin);
+      for(auto i=0u;i<its.size();++i) {
+        mux_node.setup_sink_pin_raw(i+1).connect_driver(its[i]->second);
+        I(mux_node.get_sink_pin(std::to_string(i+1)).get_pid() == i+1);
+      }
+
+      new_tup->add(it0->first, mux_node.setup_driver_pin());
+    }else{
+      std::string name_list;
+      for(auto &it:its) {
+        if(name_list.empty())
+          name_list = it->first;
+        else
+          name_list += " vs " + it->first;
+      }
+      LGraph::info("tuples {} at mux do not match names {}", tup0->get_name(), name_list);
+      return nullptr;
+    }
+
+    for(auto &it:its) {
+      ++it;
+    }
+    if (it0 == tup0->key_map.end()) {
+      bool failed = false;
+      for(auto i=1u;i<its.size();++i) {
+        if (its[i] != tup_list[i]->key_map.end()) {
+          LGraph::info("tuple {} has an extra field {} not in the other control paths", tup_list[i]->get_name(), its[i]->first);
+          failed = true;
+        }
+      }
+      if (failed)
+        return nullptr;
+
+      break;
     }
   }
 
