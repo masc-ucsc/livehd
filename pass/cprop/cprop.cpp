@@ -342,7 +342,7 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
       if (c.get_bits() > max_bits)
         max_bits = c.get_bits();
     }
-    Lconst result("-1s");
+    Lconst result("-1");
     for (auto &i : inp_edges_ordered) {
       auto c = i.driver.get_node().get_type_const();
       result = result.and_op(c.adjust_bits(max_bits));
@@ -350,7 +350,7 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
 
     TRACE(fmt::print("cprop: and node:{} to {}\n", node.debug_name(), result.to_pyrope()));
 
-    Lconst result_reduced = result == Lconst("-1s") ? 1 : 0;
+    Lconst result_reduced = result == Lconst("-1") ? 1 : 0;
 
     replace_logic_node(node, result, result_reduced);
 
