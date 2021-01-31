@@ -10,7 +10,6 @@ using Lnast_nid                     = mmap_lib::Tree_index;
 using Phi_rtable                    = absl::flat_hash_map<std::string_view, Lnast_nid>; // rtable = resolve_table
 using Cnt_rtable                    = absl::flat_hash_map<std::string_view, int16_t>;
 using Dot_lrhs_table                = absl::flat_hash_map<Lnast_nid, std::pair<bool, Lnast_nid>>;  // for both dot and selection, dot -> (lrhs, paired opr node)
-using Tuple_var_table               = absl::flat_hash_set<std::string_view>;
 using Tuple_var_1st_scope_ssa_table = absl::flat_hash_map<std::string_view, Lnast_nid>; // rtable = resolve_table
 
 
@@ -155,7 +154,6 @@ private:
   absl::flat_hash_map<Lnast_nid, Phi_rtable>       phi_resolve_tables;
   absl::flat_hash_map<Lnast_nid, Cnt_rtable>       ssa_rhs_cnt_tables;
   absl::flat_hash_map<Lnast_nid, Dot_lrhs_table>   dot_lrhs_tables;
-  absl::flat_hash_map<Lnast_nid, Tuple_var_table>  tuple_var_tables;
   absl::flat_hash_map<Lnast_nid, Phi_rtable>       new_added_phi_node_tables; // for each if-subtree scope
   absl::flat_hash_set<std::string_view>            tuplized_table;
   absl::flat_hash_map<std::string_view, Lnast_nid> candidates_update_phi_resolve_table;

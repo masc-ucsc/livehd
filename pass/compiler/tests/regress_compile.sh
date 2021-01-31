@@ -234,7 +234,7 @@ VecShiftRegisterParam VecShiftRegisterSimple '
 # VecShiftRegister BundleConnect SubModule PlusAnd MaxN VecShiftRegisterParam
 # VecShiftRegisterSimple VecSearch VendingMachineSwitch VendingMachine'
 
-pts='XorSelfThread1 Mux4 MaxN Max2 ResetShiftRegister Parity Counter
+pts='Xor6Thread2 XorSelfThread1 Mux4 MaxN Max2 ResetShiftRegister Parity Counter
 RegisterSimple Register RegXor AddNot EnableShiftRegister GCD_3bits Flop
 Decrementer Test2 Test3 TrivialAdd NotAnd Trivial Tail TrivialArith Shifts
 Darken HiLoMultiplier Coverage Accumulator LFSR16 ' 
