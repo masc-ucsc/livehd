@@ -307,9 +307,9 @@ Node Lnast_tolg::process_ast_assign_op(LGraph *lg, const Lnast_nid &lnidx_assign
   auto c0 = lnast->get_first_child(lnidx_assign);
   auto c1 = lnast->get_sibling_next(c0);
 
-  Node_pin opd1      = setup_ref_node_dpin(lg, c1);
-  auto     opd1_node = opd1.get_node();
-  auto     opd1_ntype = opd1_node.get_type_op();
+  auto opd1 = setup_ref_node_dpin(lg, c1);
+  auto opd1_node  = opd1.get_node();
+  auto opd1_ntype = opd1_node.get_type_op();
 
   Node_pin opr_spin;
   if (opd1_ntype == Ntype_op::TupAdd || opd1_ntype == Ntype_op::TupRef) {
@@ -1035,23 +1035,17 @@ Node_pin Lnast_tolg::setup_ref_node_dpin(LGraph *lg, const Lnast_nid &lnidx_opd,
     auto op   = it->second.get_node().get_type_op();
     
     // if ref comes from an TA dpin
-    if (op == Ntype_op::TupAdd && !from_phi) {
+        if (op == Ntype_op::TupAdd) {
       auto parent_node  = node.setup_sink_pin("tuple_name").get_driver_node();
       auto parent_ntype = parent_node.get_type_op();
-      if (parent_ntype == Ntype_op::TupRef || parent_ntype == Ntype_op::Or) {
+      if (parent_ntype == Ntype_op::Or) {
+        return create_scalar_access_tg(lg, it->second);
+      } else if (parent_ntype == Ntype_op::TupRef) {
         // case: the tuple has only one field and being used to an operator -> it's still a scalar -> create TG to fetch field 0
-        auto tup_get        = lg->create_node(Ntype_op::TupGet);
-        auto tn_spin        = tup_get.setup_sink_pin("tuple_name");  // tuple name
-        auto field_pos_spin = tup_get.setup_sink_pin("position");    // field pos
-
-        auto tn_dpin = it->second;
-        auto field_pos_dpin = lg->create_node_const(Lconst(0)).setup_driver_pin();  // must be pos 0 as the case is "bar = a + 1", implicitly get a.0
-        tn_dpin.connect_sink(tn_spin);
-        field_pos_dpin.connect_sink(field_pos_spin);
-        return tup_get.setup_driver_pin();
+        if (node.setup_sink_pin("value").get_driver_node().get_type_op() != Ntype_op::TupAdd)
+          return create_scalar_access_tg(lg, it->second);
       }
     }
-
     return it->second;
   }
 
@@ -1087,6 +1081,19 @@ Node_pin Lnast_tolg::setup_ref_node_dpin(LGraph *lg, const Lnast_nid &lnidx_opd,
   name2dpin[name] = node_dpin;  // for io and reg, the %$# identifier are still used in symbol table
   return node_dpin;
 }
+
+Node_pin Lnast_tolg::create_scalar_access_tg (LGraph *lg, const Node_pin &tg_tupname_dpin) {
+  auto tup_get        = lg->create_node(Ntype_op::TupGet);
+  auto tn_spin        = tup_get.setup_sink_pin("tuple_name");  // tuple name
+  auto field_pos_spin = tup_get.setup_sink_pin("position");    // field pos
+
+  auto tn_dpin = tg_tupname_dpin;
+  auto field_pos_dpin = lg->create_node_const(Lconst(0)).setup_driver_pin();  // must be pos 0 as the case is "bar = a + 1", implicitly get a.0
+  tn_dpin.connect_sink(tn_spin);
+  field_pos_dpin.connect_sink(field_pos_spin);
+  return tup_get.setup_driver_pin();
+}
+
 
 Ntype_op Lnast_tolg::decode_lnast_op(const Lnast_nid &lnidx_opr) {
   const auto raw_ntype = lnast->get_data(lnidx_opr).type.get_raw_ntype();

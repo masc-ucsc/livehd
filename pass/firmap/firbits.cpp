@@ -279,8 +279,7 @@ void Firmap::analysis_fir_ops(Node &node, std::string_view op) {
     analysis_fir_div(node, inp_edges);
   } else if (op == "__fir_rem") {
     analysis_fir_rem(node, inp_edges);
-  } else if (op == "__fir_lt" || op == "__fir_leq" || op == "__fir_gt" || op == "__fir_geq" || op == "__fir_eq"
-             || op == "__fir_neq") {
+  } else if (op == "__fir_lt" || op == "__fir_leq" || op == "__fir_gt" || op == "__fir_geq" || op == "__fir_eq" || op == "__fir_neq") {
     analysis_fir_comp(node, inp_edges);
   } else if (op == "__fir_pad") {
     analysis_fir_pad(node, inp_edges);
