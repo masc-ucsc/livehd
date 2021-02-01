@@ -296,6 +296,8 @@ void Firmap::analysis_fir_ops(Node &node, std::string_view op) {
     analysis_fir_as_sint(node, inp_edges);
   } else if (op == "__fir_as_clock") {
     I(false); // TODO
+  } else if (op == "__fir_as_async") {
+    I(false); // TODO
   } else if (op == "__fir_shl") {
     analysis_fir_shl(node, inp_edges);
   } else if (op == "__fir_shr") {

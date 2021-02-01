@@ -1130,8 +1130,7 @@ void Inou_firrtl::HandleTypeConvOp(Lnast& lnast, const firrtl::FirrtlPB_Expressi
       break;
     }
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_ASYNC_RESET: {
-      Pass::error("as_async not yet implemented");
-      I(false);
+      idx_conv = lnast.add_child(parent_node, Lnast_node::create_func_call("__fir_as_async"));
       break;
     }
     default: {
@@ -1142,7 +1141,7 @@ void Inou_firrtl::HandleTypeConvOp(Lnast& lnast, const firrtl::FirrtlPB_Expressi
 
   lnast.add_child(idx_conv, Lnast_node::create_ref(lhs_str));
   lnast.add_child(idx_conv, Lnast_node::create_ref(e1_str));
-  lnast.add_child(idx_conv, Lnast_node::create_const(lnast.add_string(op.const_(0).value())));
+  //lnast.add_child(idx_conv, Lnast_node::create_const(lnast.add_string(op.const_(0).value())));
 }
 
 // --------------------------------------- end of primitive op ----------------------------------------------
@@ -1157,7 +1156,7 @@ void Inou_firrtl::HandleTypeConvOp(Lnast& lnast, const firrtl::FirrtlPB_Expressi
  * NOTE: This return the first child of the last DOT/SELECT node made. */
 std::string_view Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB_Expression expr, Lnast_nid& parent_node, const bool is_rhs) {
   auto flattened_str = FlattenExpression(ln, parent_node, expr);
-  fmt::print("DEBUG flattened_str I:{}\n", flattened_str);
+  //fmt::print("DEBUG flattened_str I:{}\n", flattened_str);
 
   /* When storing info about IO and what not, a vector may be
    * stored like vec[0], vec[1], ... . This can be a problem if
@@ -1235,12 +1234,16 @@ std::string_view Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB
     }
     auto str_without_inst        = flattened_str.substr(flattened_str.find(".") + 1);
     auto first_field_name        = str_without_inst.substr(0, str_without_inst.find("."));
-    auto str_without_inst_and_io = str_without_inst.substr(flattened_str.find(".") + 1);
+    std::string str_without_inst_and_io{str_without_inst};
+    auto str_pos = str_without_inst.find('.');
+    if (str_pos != std::string::npos) {
+      str_without_inst_and_io = str_without_inst.substr(str_pos + 1);
+    }
     auto module_name             = inst_to_mod_map[inst_name];
     auto dir                     = mod_to_io_dir_map[std::make_pair(module_name, str_without_inst)];
 
     //note: here I assume all module io will start from a hierarchy call "IO" in all firrtl module
-    if (first_field_name == "io") {
+    if (first_field_name.size()>1 && first_field_name.substr(2) == "io") {
        if (dir == 1) {  // PORT_DIRECTION_IN
          flattened_str = absl::StrCat("itup_", inst_name, ".inp_io.", str_without_inst_and_io);
        } else if (dir == 2) {
@@ -1262,7 +1265,7 @@ std::string_view Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB
   }
 
   I(flattened_str.find(".") || flattened_str.find("["));
-  fmt::print("DEBUG flattened_str II:{}\n\n", flattened_str);
+  //fmt::print("DEBUG flattened_str II:{}\n\n", flattened_str);
   return CreateDotsSelsFromStr(ln, parent_node, flattened_str);
 }
 

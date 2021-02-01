@@ -192,6 +192,10 @@ void Pass_compiler::setup_firmap_library(LGraph *lg) {
   lg_fir_as_clock.add_input_pin("e1");
   lg_fir_as_clock.add_output_pin("Y");
 
+  auto &lg_fir_as_async = lg->ref_library()->setup_sub("__fir_as_async", "-");
+  lg_fir_as_async.add_input_pin("e1");
+  lg_fir_as_async.add_output_pin("Y");
+
   auto &lg_fir_shl = lg->ref_library()->setup_sub("__fir_shl", "-");
   lg_fir_shl.add_input_pin("e1");
   lg_fir_shl.add_input_pin("e2");

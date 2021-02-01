@@ -131,6 +131,8 @@ void Firmap::map_node_fir_ops(Node &node, std::string_view op, LGraph *new_lg) {
     map_node_fir_as_sint(node, new_lg);
   } else if (op == "__fir_as_clock") {
     I(false); // TODO
+  } else if (op == "__fir_as_async") {
+    I(false); // TODO
   } else if (op == "__fir_shl") {
     map_node_fir_shl(node, new_lg);
   } else if (op == "__fir_shr") {
