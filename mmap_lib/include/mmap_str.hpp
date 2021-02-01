@@ -207,12 +207,16 @@ public:
 
   bool    is_i() const; // starts with digit -> is integer
   int64_t to_i() const; // convert to integer
+  std::string to_s() const; // convert to string
 
   str get_str_after_last (const char chr) const;
   str get_str_after_first(const char chr) const;
 
   str get_str_before_last (const char chr) const;
   str get_str_before_first(const char chr) const;
+
+  str substr(size_t start) const;
+  str substr(size_t start, size_t end) const;
 };
 
 }  // namespace mmap_lib
