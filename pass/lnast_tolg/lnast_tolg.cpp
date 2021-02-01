@@ -695,7 +695,8 @@ void Lnast_tolg::process_ast_tuple_add_op(LGraph *lg, const Lnast_nid &lnidx_ta)
         field_dpin = setup_field_dpin(lg, field_vname);
         lg->add_edge(field_dpin, field_spin);
       }
-      ta_name.insert_or_assign(i, lnast->get_sname(c1_ta));
+      /* ta_name.insert_or_assign(i, lnast->get_sname(c1_ta)); */
+      ta_name.insert_or_assign(i, field_vname);
       i++;
       continue;
     }
@@ -1029,13 +1030,13 @@ Node_pin Lnast_tolg::setup_ref_node_dpin(LGraph *lg, const Lnast_nid &lnidx_opd,
     }
   }
 
-  const auto it = name2dpin.find(name);
+  const auto &it = name2dpin.find(name);
   if (it != name2dpin.end()) {
     auto node = it->second.get_node();
     auto op   = it->second.get_node().get_type_op();
     
     // if ref comes from an TA dpin
-        if (op == Ntype_op::TupAdd) {
+    if (op == Ntype_op::TupAdd) {
       auto parent_node  = node.setup_sink_pin("tuple_name").get_driver_node();
       auto parent_ntype = parent_node.get_type_op();
       if (parent_ntype == Ntype_op::Or) {
