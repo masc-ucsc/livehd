@@ -272,6 +272,8 @@ Firmap::Attr Firmap::get_key_attr(std::string_view key) {
 }
 
 void Firmap::analysis_fir_ops(Node &node, std::string_view op) {
+  //TODO: Create a map that indexed by op and returns a std::function (faster)
+
   auto inp_edges = node.inp_edges();
 	if (op == "__fir_const") {
 		analysis_fir_const(node);
@@ -292,6 +294,8 @@ void Firmap::analysis_fir_ops(Node &node, std::string_view op) {
     analysis_fir_as_uint(node, inp_edges);
   } else if (op == "__fir_as_sint") {
     analysis_fir_as_sint(node, inp_edges);
+  } else if (op == "__fir_as_clock") {
+    I(false); // TODO
   } else if (op == "__fir_shl") {
     analysis_fir_shl(node, inp_edges);
   } else if (op == "__fir_shr") {

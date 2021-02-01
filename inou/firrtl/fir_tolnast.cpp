@@ -1108,9 +1108,9 @@ void Inou_firrtl::HandleTypeConvOp(Lnast& lnast, const firrtl::FirrtlPB_Expressi
   I(op.arg_size() == 1 && op.const__size() == 0);
   auto lhs_str = lnast.add_string(lhs);
   auto e1_str  = lnast.add_string(ReturnExprString(lnast, op.arg(0), parent_node, true));
-  
+
   Lnast_nid idx_conv;
-  
+
   switch (op.op()) {
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_UINT: {
       idx_conv = lnast.add_child(parent_node, Lnast_node::create_func_call("__fir_as_uint"));
@@ -1120,11 +1120,22 @@ void Inou_firrtl::HandleTypeConvOp(Lnast& lnast, const firrtl::FirrtlPB_Expressi
       idx_conv = lnast.add_child(parent_node, Lnast_node::create_func_call("__fir_as_sint"));
       break;
     }
-    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_CLOCK: 
-    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_FIXED_POINT: 
-    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_ASYNC_RESET:
+    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_CLOCK: {
+      idx_conv = lnast.add_child(parent_node, Lnast_node::create_func_call("__fir_as_clock"));
+      break;
+    }
+    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_FIXED_POINT: {
+      Pass::error("as_fixed not yet implemented");
+      I(false);
+      break;
+    }
+    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_ASYNC_RESET: {
+      Pass::error("as_async not yet implemented");
+      I(false);
+      break;
+    }
     default: {
-      Pass::error("as_clock, as_fixed, as_async not yet implemented");
+      Pass::error("op option {} unrecognized not yet implemented", op.op());
       I(false);
     }
   }

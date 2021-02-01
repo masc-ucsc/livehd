@@ -101,6 +101,8 @@ void Firmap::clone_edges_fir_xorr(Node &node) {
 }
 
 void Firmap::map_node_fir_ops(Node &node, std::string_view op, LGraph *new_lg) {
+  //TODO: Create a map that indexed by op and returns a std::function (faster)
+
   if (op == "__fir_const") {
     map_node_fir_const(node, new_lg);
   } else if (op == "__fir_add") {
@@ -127,6 +129,8 @@ void Firmap::map_node_fir_ops(Node &node, std::string_view op, LGraph *new_lg) {
     map_node_fir_as_uint(node, new_lg);
   } else if (op == "__fir_as_sint") {
     map_node_fir_as_sint(node, new_lg);
+  } else if (op == "__fir_as_clock") {
+    I(false); // TODO
   } else if (op == "__fir_shl") {
     map_node_fir_shl(node, new_lg);
   } else if (op == "__fir_shr") {
