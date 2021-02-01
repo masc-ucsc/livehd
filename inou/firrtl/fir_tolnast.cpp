@@ -1141,7 +1141,7 @@ void Inou_firrtl::HandleTypeConvOp(Lnast& lnast, const firrtl::FirrtlPB_Expressi
 
   lnast.add_child(idx_conv, Lnast_node::create_ref(lhs_str));
   lnast.add_child(idx_conv, Lnast_node::create_ref(e1_str));
-  //lnast.add_child(idx_conv, Lnast_node::create_const(lnast.add_string(op.const_(0).value())));
+  /* lnast.add_child(idx_conv, Lnast_node::create_const(lnast.add_string(op.const_(0).value()))); */
 }
 
 // --------------------------------------- end of primitive op ----------------------------------------------
@@ -1243,7 +1243,8 @@ std::string_view Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB
     auto dir                     = mod_to_io_dir_map[std::make_pair(module_name, str_without_inst)];
 
     //note: here I assume all module io will start from a hierarchy call "IO" in all firrtl module
-    if (first_field_name.size()>1 && first_field_name.substr(2) == "io") {
+    /* if (first_field_name.size()>1 && first_field_name.substr(2) == "io") { */
+    if (first_field_name == "io") {
        if (dir == 1) {  // PORT_DIRECTION_IN
          flattened_str = absl::StrCat("itup_", inst_name, ".inp_io.", str_without_inst_and_io);
        } else if (dir == 2) {

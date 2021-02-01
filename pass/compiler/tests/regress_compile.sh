@@ -14,8 +14,6 @@ firrtl_tail2 firrtl_tail3 hier_tuple_nested_if
 hier_tuple_nested_if2 hier_tuple_nested_if3 hier_tuple_nested_if4
 hier_tuple_nested_if5 hier_tuple_nested_if7 '
 
-# pts=''
-
 
 # pts='firrtl_tail reg_bits_set  reg_bits_set firrtl_tail2 firrtl_tail3 firrtl_gcd_3bits  tuple_copy2 '
 
