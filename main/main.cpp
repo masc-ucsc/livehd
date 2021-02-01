@@ -266,8 +266,8 @@ void hook_color(std::string const& context, Replxx::colors_t& colors,
   }
 }
 
-unsigned long major_version = 0;
-unsigned long minor_version = 0;
+constexpr unsigned long major_version = 0;
+constexpr unsigned long minor_version = 0;
 
 int main(int argc, char** argv) {
   I_setup();
@@ -414,7 +414,7 @@ int main(int argc, char** argv) {
   rx.set_hint_callback(std::bind(&hook_hint, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, cref(examples)));
 
   if (!option_quiet) {
-    std::cout << "Welcome to livehd\n"
+    std::cout << "Welcome to livehd!\n"
               << "Press 'tab' to view autocompletions\n"
               << "Type 'help' for help\n"
               << "Type 'quit' or 'exit' to exit\n\n";
@@ -458,6 +458,7 @@ int main(int argc, char** argv) {
           help("clear", "clear the screen");
           help("history", "display the current history");
           help("prompt <str>", "change the current prompt");
+          help("cool_mode", "become the fonz"); // https://en.wikipedia.org/wiki/Fonzie
 
           Main_api::get_commands(help);
         } else {
@@ -502,29 +503,48 @@ int main(int argc, char** argv) {
         rx.history_add(input);
         continue;
 
+      } else if (input.compare(0, 9, "cool_mode") == 0) {
+        for (size_t i = 0; i < regex_color.size(); i++) {
+          regex_color[i] = std::pair(regex_color[i].first, cl::LIGHTGRAY);
+        }
+
+        rx.set_highlighter_callback(std::bind(&hook_color, std::placeholders::_1, std::placeholders::_2, cref(regex_color)));
+        prompt = "\x1b[1;37mayyyyy\x1b[0m> ";
+
       } else {
         // default action
         std::cout << input << "\n";
 
+        // add command to history file before executing it, since the command being executed
+        // could throw an exception
+        rx.history_add(input);
         Main_api::parse_inline(input);
         Graph_library::sync_all();
 
-        rx.history_add(input);
         continue;
       }
     } catch (const std::runtime_error& re) {
-      fmt::print("ERROR: {}\n", re.what());
-      fmt::print("command aborted...\n");
+      fmt::print("ERROR: {}", re.what());
+#ifndef NDEBUG
+      fmt::print(" (std::runtime_error)");
+#endif
+      fmt::print("\ncommand aborted...\n");
     } catch (const std::exception& ex) {
-      fmt::print("ERROR: {}\n", ex.what());
-      fmt::print("command aborted...\n");
+      fmt::print("ERROR: {}", ex.what());
+#ifndef NDEBUG
+      fmt::print(" (std::exception)");
+#endif
+      fmt::print("\ncommand aborted...\n");
     } catch (...) {
+#ifndef NDEBUG
+      fmt::print(" (unknown exception class)");
+#endif
       fmt::print("command aborted...\n");
     }
   }
 
   if (!option_quiet)
-    std::cerr << "See you soon\n";
+    std::cerr << "See you soon!\n";
 
   if (history)
     rx.history_save(history_file);
