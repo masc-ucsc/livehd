@@ -24,27 +24,24 @@ VecShiftRegisterParam VecShiftRegisterSimple '
 # VendingMachineSwitch VendingMachine'
 
 # passed hifirrtl pattern pool
-pts='Xor6Thread2 XorSelfThread1 Cell_alone ByteSelector SimpleALU Mux4 MaxN
-Max2 ResetShiftRegister Parity Counter RegisterSimple Register RegXor AddNot
-EnableShiftRegister GCD_3bits Flop Decrementer Test2 Test3 TrivialAdd NotAnd
-Trivial Tail TrivialArith Shifts Darken HiLoMultiplier Coverage Accumulator
-LFSR16 PlusAnd VendingMachine VendingMachineSwitch'  
+pts='SingleEvenFilter Coverage Counter Decrementer SubModule BundleConnect
+LogShifter Adder4 Xor6Thread2 XorSelfThread1 Cell_alone ByteSelector SimpleALU
+Mux4 Max2 ResetShiftRegister Parity RegisterSimple Register RegXor AddNot
+GCD_3bits Flop Test3 TrivialAdd NotAnd Trivial Tail TrivialArith Shifts Darken
+HiLoMultiplier Accumulator LFSR16 PlusAnd VendingMachine VendingMachineSwitch'  
 
 # pts='Mul'
-# pts='Adder4'
-# pts='SingleEvenFilter'
-pts='LogShifter'
-pts='Xor6Thread2'
 # pts='Test6'
 # pts='Test1'
 # pts='Life'
 # pts='VecShiftRegister'
-# pts='BundleConnect' 
-# pts='SubModule'
 # pts='VecShiftRegisterParam'
 # pts='VecShiftRegisterSimple '
 # pts='VecSearch '
 
+pts='MaxN'    #LEC
+# pts='EnableShiftRegister ' #LEC
+# pts='Test2'
 
 
 

@@ -11,7 +11,7 @@ circuit LogShifter :
 
 
     when _T_1 : @[LogShifter.scala 13:30]
-      node _s0_T = dshl(io.in, UInt<4>("h8")) @[LogShifter.scala 14:17]
+      node _s0_T = dshl(io.in, UInt<4>("h8")) //31b @[LogShifter.scala 14:17]
       s0 <= _s0_T @[LogShifter.scala 14:8]
     else :
       s0 <= io.in @[LogShifter.scala 16:8]

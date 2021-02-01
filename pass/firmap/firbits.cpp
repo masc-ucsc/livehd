@@ -174,9 +174,9 @@ void Firmap::analysis_lg_attr_set_new_attr(Node &node_attr) {
   if (node_attr.is_sink_connected("name")) {
     auto through_dpin = node_attr.get_sink_pin("name").get_driver_pin();
     is_set_graph_inp  = through_dpin.is_graph_input();
-    auto it           = fbmap.find(through_dpin.get_compact_flat());
+    auto it = fbmap.find(through_dpin.get_compact_flat());
     if (it != fbmap.end()) {
-      fb               = it->second;
+      fb = it->second;
       has_through_dpin = true;
     } else {
       parent_pending = true;
@@ -191,8 +191,10 @@ void Firmap::analysis_lg_attr_set_new_attr(Node &node_attr) {
       if (fb.get_sign() == true && has_through_dpin && !is_set_graph_inp)
         I(false, "cannot set ubits to a signed parent node in firrtl!");
 
-      if (fb.get_bits() && (fb.get_bits()) > (val.to_i()))
+      if (fb.get_bits() && (fb.get_bits()) > (val.to_i())) {
         Pass::error("Firrtl bitwidth mismatch. Variable {} needs {}ubits, but constrained to {}ubits\n", dpin_name, fb.get_bits(), val.to_i());
+			}
+
       fb.set_bits_sign(val.to_i(), false);
 
     } else {  // Attr::Set_sbits
@@ -223,7 +225,7 @@ void Firmap::analysis_lg_attr_set_dp_assign(Node &node_dp) {
   auto dpin_lhs = node_dp.get_sink_pin("value").get_driver_pin();
   auto dpin_rhs = node_dp.get_sink_pin("name").get_driver_pin();
 
-  auto        it = fbmap.find(dpin_lhs.get_compact_flat());
+  auto it = fbmap.find(dpin_lhs.get_compact_flat());
   Firrtl_bits fb_lhs(0);
   if (it != fbmap.end()) {
     fb_lhs = it->second;
@@ -231,7 +233,7 @@ void Firmap::analysis_lg_attr_set_dp_assign(Node &node_dp) {
     Pass::error("dp lhs firrtl bits must be ready even at first traverse, lhs:{}\n", dpin_lhs.debug_name());
   }
 
-  auto        it2 = fbmap.find(dpin_rhs.get_compact_flat());
+  auto it2 = fbmap.find(dpin_rhs.get_compact_flat());
   Firrtl_bits fb_rhs(0);
   if (it2 != fbmap.end()) {
     fb_rhs = it2->second;
@@ -239,8 +241,12 @@ void Firmap::analysis_lg_attr_set_dp_assign(Node &node_dp) {
     Pass::error("dp rhs firrtl bits must be ready even at first traverse, rhs:{}\n", dpin_rhs.debug_name());
   }
 
-  // note: up to now, if something has been converted to dp, the lhs_firbits must >= rhs
-  I(fb_lhs.get_bits() >= fb_rhs.get_bits());
+  // note: hiFirrtl could have bitwidth mismatch between lhs/rhs in the "Connect". The LNAST 
+  //       will insert a dp_assign for a "Connect" when lhs is not a temporary variable (such as __F10).
+  //       in such case, the lhs bitwidth must be pre-defined somewhere in the hi-firrtl, so in the firbits
+  //       analysis, we just propagate the lhs bitwidth just as dp_assign lhs:= rhs in Pyrope.
+
+  /* I(fb_lhs.get_bits() >= fb_rhs.get_bits()); */
   I(fb_lhs.get_sign() == fb_rhs.get_sign());
 
   fbmap.insert_or_assign(node_dp.setup_driver_pin("Y").get_compact_flat(), fb_lhs);
@@ -553,9 +559,11 @@ void Firmap::analysis_fir_dshl(Node &node, XEdge_iterator &inp_edges) {
     }
 
     if (e.sink.get_pin_name() == "e1") {
+			fmt::print("DEBUG e1_driver:{}\n", e.driver.debug_name());
       bits1 = it->second.get_bits();
       sign  = it->second.get_sign();
     } else {
+			fmt::print("DEBUG e2_driver:{}\n", e.driver.debug_name());
       bits2 = it->second.get_bits();
     }
   }

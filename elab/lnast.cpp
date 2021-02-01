@@ -131,6 +131,7 @@ void Lnast::trans_tuple_opr_if_subtree(const Lnast_nid &if_nid) {
 bool Lnast::update_tuple_var_1st_scope_ssa_table(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
   auto &tuple_var_1st_scope_ssa_table = tuple_var_1st_scope_ssa_tables[psts_nid];
   auto type = get_type(opr_nid);
+  fmt::print("DEBUG type:{}\n", type.debug_name());
   I(type.is_tuple() || type.is_tuple_add());
 
   auto lhs_nid = get_first_child(opr_nid);
@@ -461,7 +462,7 @@ void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid)
   } 
 
 
-  if (is_lhs(psts_nid, dot_nid) && !paired_type.is_assign()) {
+  if (is_lhs(psts_nid, dot_nid) && !paired_type.is_assign() && !paired_type.is_dp_assign()) {
     ref_data(dot_nid)->type = Lnast_ntype::create_tuple_add();
     auto c0_paired = get_first_child(paired_nid);
 
