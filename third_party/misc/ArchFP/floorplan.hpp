@@ -187,7 +187,6 @@ class FPContainer : public FPObject {
   FPObject*              removeComponentAtIndex(int index);
 
 protected:
-  // static int maxItemCount;
 
   // These allow safe access to the item list.
   int       getComponentCount() { return items.size(); }

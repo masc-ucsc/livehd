@@ -6,41 +6,51 @@
 #include <memory>
 
 #include "ann_place.hpp"
-#include "node_type_area.hpp"
 
-void Node_hier_floorp::load_lg_nodes(LGraph* lg, const std::string_view lgdb_path) {
-  if (layouts[lg]) {
-    if (debug_print) {
-      fmt::print("(layout for {} already exists)\n", lg->get_name());
-    }
-    return;
-  }
+Node_hier_floorp::Node_hier_floorp(Node_tree&& nt_arg) : Lhd_floorplanner(std::move(nt_arg)), na(root_lg->get_path()) {}
+
+geogLayout* Node_hier_floorp::load_lg_nodes(LGraph* lg) {
+  /*
+    It would be very nice if we could skip floorplanning for nodes that have already been loaded into ArchFP elsewhere.
+    However, ArchFP does not support calling addComponent more than once on the same pointer, so we are forced to deep copy repeated
+    subgraphs.
+  */
 
   geogLayout* l = new geogLayout();
 
-  const Ntype_area na(lgdb_path);
+  const std::string_view path = root_lg->get_path();
 
   // count and floorplan subnodes
   absl::flat_hash_map<LGraph*, unsigned int> sub_lg_count;
   lg->each_sub_fast([&](Node& n, Lg_type_id lgid) {
     (void)n;
-    LGraph* sub_lg = LGraph::open(lgdb_path, lgid);
+    LGraph* sub_lg = LGraph::open(path, lgid);
     sub_lg_count[sub_lg]++;
   });
 
   for (auto pair : sub_lg_count) {
     const auto& sub_lg = pair.first;
 
-    I(layouts[sub_lg]);
+    if (debug_print) {
+      fmt::print("generating subcomponent {}\n", sub_lg->get_name());
+    }
+
+    geogLayout* subl = load_lg_nodes(sub_lg);
+
+    if (debug_print) {
+      fmt::print("done.\n");
+    }
+
     if (debug_print) {
       fmt::print("adding {} of subcomponent {} to cluster of lg {}\n", sub_lg_count[sub_lg], sub_lg->get_name(), lg->get_name());
     }
 
-    l->addComponent(layouts[sub_lg], sub_lg_count[sub_lg], randomHint(sub_lg_count[sub_lg]));
+    l->addComponent(subl, sub_lg_count[sub_lg], randomHint(sub_lg_count[sub_lg]));
   }
 
   absl::flat_hash_map<Ntype_op, unsigned int> grid_count;
   absl::flat_hash_set<Ntype_op>               skip;
+
   for (auto n : lg->fast()) {
     Ntype_op op = n.get_type_op();
     if (!Ntype::is_synthesizable(op)) {
@@ -84,24 +94,10 @@ void Node_hier_floorp::load_lg_nodes(LGraph* lg, const std::string_view lgdb_pat
   l->setName(lg->get_name().data());
   l->setType(Ntype_op::Sub);  // treat nodes placed by us as subnodes
 
-  I(layouts[lg] == nullptr);
-  layouts[lg] = l;
+  return l;
 }
 
-void Node_hier_floorp::load(const Node_tree& tree, const std::string_view lgdb_path) {
+void Node_hier_floorp::load() {
   fmt::print("\n");
-  root_lg = tree.get_root_lg();
-
-  std::function<void(LGraph*)> load_nodes = [&](LGraph* lg) {
-    lg->each_sub_fast([&](Node& n, Lg_type_id lgid) {
-      (void)n;
-      LGraph* sub_lg = LGraph::open(lgdb_path, lgid);
-
-      load_nodes(sub_lg);
-    });
-
-    load_lg_nodes(lg, lgdb_path);
-  };
-
-  load_nodes(root_lg);
+  layouts[nt.root_index()] = load_lg_nodes(root_lg);
 }

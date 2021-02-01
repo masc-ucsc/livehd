@@ -52,6 +52,6 @@ rm -rf lgdb
 ./bazel-bin/main/lgshell -c "inou.yosys.tolg files:$TESTFILE top:$TESTTOP" > /dev/null
 ./bazel-bin/main/lgshell -c "lgraph.match |> pass.fplan.writearea" > /dev/null
 ./bazel-bin/main/lgshell -c "lgraph.open name:$TESTTOP |> pass.fplan.makefp traversal:hier_node dest:file" > /dev/null
-./bazel-bin/main/lgshell -c "lgraph.open name:$TESTTOP |> pass.fplan.makefp dest:livehd"
+./bazel-bin/main/lgshell -c "lgraph.open name:$TESTTOP |> pass.fplan.makefp dest:livehd" > /dev/null
 ./bazel-bin/main/lgshell -c "lgraph.open name:$TESTTOP |> pass.fplan.checkfp"
 ./pass/fplan/view.py -i floorplan.flp -s 1600

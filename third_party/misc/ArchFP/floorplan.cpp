@@ -109,18 +109,17 @@ dummyComponent::dummyComponent(string nameArg) {
 void dummyComponent::myPrint() { cout << "Component: " << getName() << " is of type: " << Ntype::get_name(getType()) << "\n"; }
 
 // Methods for FPObject
-FPObject::FPObject() {
-  x        = 0.0;
-  y        = 0.0;
-  width    = 0.0;
-  height   = 0.0;
-  area     = 0.0;
-  type     = Ntype_op::Invalid;
-  name     = Ntype::get_name(Ntype_op::Invalid);
-  hint     = UnknownGeography;
-  count    = 1;
-  refCount = 0;
-}
+FPObject::FPObject()
+    : refCount(0)
+    , x(0.0)
+    , y(0.0)
+    , width(0.0)
+    , height(0.0)
+    , area(0.0)
+    , type(Ntype_op::Invalid)
+    , name(Ntype::get_name(Ntype_op::Invalid))
+    , hint(UnknownGeography)
+    , count(1) {}
 
 void FPObject::setSize(double widthArg, double heightArg) {
   width  = widthArg;
@@ -147,14 +146,21 @@ unsigned int FPObject::outputLGraphLayout(Node_tree& tree, Tree_index tidx, doub
   while (child_idx != tree.invalid_index()) {
     Node* child = tree.ref_data(child_idx);
 
-    // fmt::print("testing child node {} with parent hier ({}, {})\n", child->debug_name(), child->get_hidx().level, child->get_hidx().pos);
+    // fmt::print("testing child node {} with parent hier ({}, {})\n", child->debug_name(), child->get_hidx().level,
+    // child->get_hidx().pos);
     if (child->get_type_op() != getType() || child->get_hier_color() == 1) {
       child_idx = tree.get_sibling_next(child_idx);
       continue;
     }
 
     found = true;
-    fmt::print("assigning child node {} to parent hier ({}, {})\n", child->debug_name(), child->get_hidx().level, child->get_hidx().pos);
+    if (verbose) {
+      fmt::print("assigning child node {} to parent hier ({}, {})\n",
+                 child->debug_name(),
+                 child->get_hidx().level,
+                 child->get_hidx().pos);
+    }
+
     Ann_place p(calcX(startX), calcY(startY), getWidth() / 1000, getHeight() / 1000);
     child->set_place(p);
     child->set_hier_color(1);  // set node instance as marked after visiting it
@@ -237,11 +243,7 @@ bool FPCompWrapper::layout(FPOptimization opt, double ratio) {
 // Methods for the FPcontainer class.
 
 // Default constructor
-FPContainer::FPContainer() : items() {
-  count   = 1;
-  yMirror = false;
-  xMirror = false;
-}
+FPContainer::FPContainer() : items(), yMirror(false), xMirror(false) {}
 
 FPContainer::~FPContainer() {
   // It's very important to only delete items when their refcount hits zero.
@@ -389,7 +391,8 @@ static unsigned int findNode(FPObject* obj, Node_tree& tree, Tree_index tidx, do
       }
 
       found = true;
-      // fmt::print("assigning child subnode {} to parent hier ({}, {})\n", child->debug_name(), child->get_hidx().level, child->get_hidx().pos);
+      // fmt::print("assigning child subnode {} to parent hier ({}, {})\n", child->debug_name(), child->get_hidx().level,
+      // child->get_hidx().pos);
 
       // write placement information to subnode as well
       Ann_place p(obj->calcX(startX), obj->calcY(startY), obj->getWidth() / 1000, obj->getHeight() / 1000);
@@ -446,8 +449,8 @@ bool gridLayout::layout(FPOptimization opt, double targetAR) {
   double theight = sqrt(tarea / targetAR);
   double twidth  = tarea / theight;
   if (verbose)
-    cout << "Begin Grid Layout for " << getName() << ", TargetAR=" << targetAR << " My area=" << tarea << " Implied W=" << twidth << " H=" << theight
-         << "\n";
+    cout << "Begin Grid Layout for " << getName() << ", TargetAR=" << targetAR << " My area=" << tarea << " Implied W=" << twidth
+         << " H=" << theight << "\n";
 
   FPObject* obj   = getComponent(0);
   int       total = obj->getCount();
@@ -567,7 +570,8 @@ bool bagLayout::layout(FPOptimization opt, double targetAR) {
   double nextY     = 0;
 
   if (verbose) {
-    cout << "In BagLayout for " << getName() << ", Area=" << area << " Width= " << remWidth << " Height=" << remHeight << " Target AR=" << targetAR << "\n";
+    cout << "In BagLayout for " << getName() << ", Area=" << area << " Width= " << remWidth << " Height=" << remHeight
+         << " Target AR=" << targetAR << "\n";
   }
 
   // Sort the components, placing them in decreasing order of size.
@@ -635,7 +639,8 @@ void bagLayout::outputHotSpotLayout(ostream& o, double startX, double startY) {
   string groupName;
   if (itemCount != 1) {
     groupName = getUniqueName();
-    o << "# Start of " << groupName << " layout of type " << Ntype::get_name(getType()) << " (" << getComponentCount() << " items).\n";
+    o << "# Start of " << groupName << " layout of type " << Ntype::get_name(getType()) << " (" << getComponentCount()
+      << " items).\n";
     o << "# Total Group Stats: X=" << calcX(startX) << " Y=" << calcY(startY) << " W=" << width << "mm H=" << height
       << "mm Area=" << area << "mm^2\n";
   }
@@ -970,7 +975,8 @@ bool geogLayout::layoutHelper(double remWidth, double remHeight, double curX, do
 void geogLayout::outputHotSpotLayout(ostream& o, double startX, double startY) {
   pushMirrorContext(startX, startY);
   string layoutName = getUniqueName();
-  o << "# Start of " << layoutName << " Layout of type " << Ntype::get_name(getType()) << " (" << getComponentCount() << " items).\n";
+  o << "# Start of " << layoutName << " Layout of type " << Ntype::get_name(getType()) << " (" << getComponentCount()
+    << " items).\n";
   o << "# Total Cluster Stats: X=" << calcX(startX) << " Y=" << calcY(startY) << " W=" << width << "mm H=" << height
     << "mm Area=" << area << "mm^2\n";
   for (int i = 0; i < getComponentCount(); i++) {

@@ -41,6 +41,8 @@ int main(int argc, char* argv[])
 
 Notice that in the above code, we put wrapper Unit into wrapper chip. This is done by function addComponent, which only requires sub-wrapper pointer name, count and Hint. You can duplicate sub-wrapper here too with count larger than 1.
 
+Also notice that calling addComponent more than once on a single wrapper instance is not considered valid.
+
 To finish the floorplan generation, you need to put the following code after your whole description.
 
     bool success = chip->layout(AspectRatio, 1);
