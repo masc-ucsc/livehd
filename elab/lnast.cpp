@@ -26,9 +26,7 @@ Lnast::~Lnast() {
 
 std::string_view Lnast::add_string(std::string_view sview) {
   string_pool.emplace_back(new std::string(sview));
-
   auto *str_ptr = string_pool.back();
-
   return *str_ptr;
 }
 
@@ -131,7 +129,6 @@ void Lnast::trans_tuple_opr_if_subtree(const Lnast_nid &if_nid) {
 bool Lnast::update_tuple_var_1st_scope_ssa_table(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
   auto &tuple_var_1st_scope_ssa_table = tuple_var_1st_scope_ssa_tables[psts_nid];
   auto type = get_type(opr_nid);
-  fmt::print("DEBUG type:{}\n", type.debug_name());
   I(type.is_tuple() || type.is_tuple_add());
 
   auto lhs_nid = get_first_child(opr_nid);
@@ -151,9 +148,7 @@ bool Lnast::is_attribute_related(const Lnast_nid &opr_nid) {
     auto c1_dot  = get_sibling_next(c0_dot);
     auto c2_dot  = get_sibling_next(c1_dot);
     auto c2_name = get_name(c2_dot);
-
-    if (c2_name.substr(0,2) == "__" && c2_name.substr(0,3) != "___" )
-      return true;
+    return (c2_name.substr(0,2) == "__" && c2_name.substr(0,3) != "___" );
   }
   return false;
 }
@@ -548,10 +543,11 @@ void Lnast::analyze_dot_lrhs_handle_a_statement(const Lnast_nid &psts_nid, const
     // hier-tuple case
     if (get_type(sib_nid).is_tuple()) {
       for (auto sib_child : children(sib_nid)) {
+        auto sib_child_type = get_type(sib_child);
         if (sib_child == get_first_child(sib_nid))
           continue;
 
-        if (!get_type(sib_child).is_assign())
+        if (!sib_child_type.is_assign() && !sib_child_type.is_dp_assign())
           continue;
 
         auto c0_assign = get_first_child(sib_child);
@@ -593,13 +589,14 @@ void Lnast::analyze_dot_lrhs_if_subtree(const Lnast_nid &if_nid) {
       dot_lrhs_tables[itr_nid] = if_sts_dot_lrhs_table;
 
       for (const auto &opr_nid : children(itr_nid)) {
-        I(!get_type(opr_nid).is_func_def());
-        if (get_type(opr_nid).is_if())
+        auto type = get_type(opr_nid);
+        I(!type.is_func_def());
+        if (type.is_if())
           analyze_dot_lrhs_if_subtree(opr_nid);
-        else if (get_type(opr_nid).is_dot() || get_type(opr_nid).is_select())
+        else if (type.is_dot() || type.is_select())
           analyze_dot_lrhs_handle_a_statement(itr_nid, opr_nid);
       }
-    } else if (get_type(itr_nid).is_phi()){
+    } else if (get_type(itr_nid).is_phi()) {
       //FIXME->sh: check with phi
       continue;
     } else { //condition node
@@ -611,11 +608,12 @@ void Lnast::analyze_dot_lrhs_if_subtree(const Lnast_nid &if_nid) {
 
 void Lnast::resolve_ssa_lhs_subs(const Lnast_nid &psts_nid) {
   for (const auto &opr_nid : children(psts_nid)) {
-    if (get_type(opr_nid).is_func_def()) {
+    auto type = get_type(opr_nid);
+    if (type.is_func_def()) {
       continue;
-    } else if (get_type(opr_nid).is_if()) {
+    } else if (type.is_if()) {
       ssa_lhs_if_subtree(opr_nid);
-    } else if (get_type(opr_nid).is_tuple_add_get_pair()) {
+    } else if (type.is_tuple_add_get_pair()) {
       auto c0 = get_first_child(opr_nid);
       auto c1 = get_sibling_next(c0);
       ssa_lhs_handle_a_statement(psts_nid, c0);
@@ -631,11 +629,12 @@ void Lnast::resolve_ssa_rhs_subs(const Lnast_nid &psts_nid) {
   Cnt_rtable top_ssa_rhs_cnt_table;
   ssa_rhs_cnt_tables[psts_nid] = top_ssa_rhs_cnt_table;
   for (const auto &opr_nid : children(psts_nid)) {
-    if (get_type(opr_nid).is_func_def()) {
+    auto type = get_type(opr_nid);
+    if (type.is_func_def()) {
       continue;
-    } else if (get_type(opr_nid).is_if()) {
+    } else if (type.is_if()) {
       ssa_rhs_if_subtree(opr_nid);
-    } else if (get_type(opr_nid).is_tuple_add_get_pair()) {
+    } else if (type.is_tuple_add_get_pair()) {
       auto c0 = get_first_child(opr_nid);
       auto c1 = get_sibling_next(c0);
       ssa_rhs_handle_a_statement(psts_nid, c0);
@@ -653,10 +652,11 @@ void Lnast::ssa_rhs_if_subtree(const Lnast_nid &if_nid) {
       ssa_rhs_cnt_tables[itr_nid] = if_sts_ssa_rhs_cnt_table;
 
       for (const auto &opr_nid : children(itr_nid)) {
-        I(!get_type(opr_nid).is_func_def());
-        if (get_type(opr_nid).is_if()) {
+        auto type = get_type(opr_nid);
+        I(!type.is_func_def());
+        if (type.is_if()) {
           ssa_rhs_if_subtree(opr_nid);
-        } else if (get_type(opr_nid).is_tuple_add_get_pair()){
+        } else if (type.is_tuple_add_get_pair()){
           auto c0 = get_first_child(opr_nid);
           auto c1 = get_sibling_next(c0);
           ssa_rhs_handle_a_statement(itr_nid, c0);
@@ -708,11 +708,12 @@ void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
 
 void Lnast::opr_lhs_merge(const Lnast_nid &psts_nid) {
   for (const auto &opr_nid : children(psts_nid)) {
-    if (get_type(opr_nid).is_func_def()) {
+    auto type = get_type(opr_nid);
+    if (type.is_func_def()) {
       continue;
-    } else if (get_type(opr_nid).is_if()) {
+    } else if (type.is_if()) {
       opr_lhs_merge_if_subtree(opr_nid);
-    } else if (get_type(opr_nid).is_assign()){
+    } else if (type.is_assign()){
       opr_lhs_merge_handle_a_statement(opr_nid);
     }
   }
@@ -726,10 +727,15 @@ void Lnast::opr_lhs_merge_if_subtree(const Lnast_nid &if_nid) {
       ssa_rhs_cnt_tables[itr_nid] = if_sts_ssa_rhs_cnt_table;
 
       for (const auto &opr_nid : children(itr_nid)) {
-        I(!get_type(opr_nid).is_func_def());
-        if (get_type(opr_nid).is_if())
+        auto opr_type = get_type(opr_nid);
+        I(!opr_type.is_func_def());
+        if (opr_type.is_if())
           opr_lhs_merge_if_subtree(opr_nid);
-        else if (get_type(opr_nid).is_assign())
+
+        // FIXME->sh: if we also merge dp_assign here, then the original purpose of introducing dp_assign is missign
+        // are you sure it will be a generic solution???
+        /* else if (opr_type.is_assign() || opr_type.is_dp_assign()) */              
+        else if (opr_type.is_assign())              
           opr_lhs_merge_handle_a_statement(opr_nid);
       }
     }
@@ -822,10 +828,11 @@ void Lnast::ssa_lhs_if_subtree(const Lnast_nid &if_nid) {
       phi_resolve_tables[itr_nid] = if_sts_phi_resolve_table;
 
       for (const auto &opr_nid : children(itr_nid)) {
-        I(!get_type(opr_nid).is_func_def());
-        if (get_type(opr_nid).is_if()) {
+        auto type = get_type(opr_nid);
+        I(!type.is_func_def());
+        if (type.is_if()) {
           ssa_lhs_if_subtree(opr_nid);
-        } else if (get_type(opr_nid).is_tuple_add_get_pair()) {
+        } else if (type.is_tuple_add_get_pair()) {
           auto c0 = get_first_child(opr_nid);
           auto c1 = get_sibling_next(c0);
           ssa_lhs_handle_a_statement(itr_nid, c0);

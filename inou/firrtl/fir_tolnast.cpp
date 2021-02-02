@@ -1646,7 +1646,10 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
       // note: hiFirrtl might have bits mismatch between lhs and rhs. To solve this problem, we use dp_assign to avoid this 
       //       problem when lhs is a pre-defined circuit component (not ___tmp variable)
       Lnast_nid idx_asg;
-      if (lhs_str.substr(0,3) == "___" || lhs_str.substr(0,3) == "_._") {
+      /* if (lhs_str.substr(0,3) == "___" || lhs_str.substr(0,3) == "_._") { */
+      // FIXME->sh: can we identify the "node" type in firrtl instead of using string prefix "_" ???
+
+      if (lhs_str.substr(0,1) == "_") {
         idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
       } else {
         idx_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign("kRef"));
