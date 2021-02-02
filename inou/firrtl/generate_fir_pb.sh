@@ -19,7 +19,7 @@ pts='Trivial Tail TrivialArith  Xor6Thread2
 Shifts PlusAnd MaxN ByteSelector Darken HiLoMultiplier SimpleALU Mul
 VecShiftRegisterParam VecShiftRegisterSimple ' 
 
-pts='Mul'
+pts='Test1'
 
 CHISEL_PATH=~/chisel3
 FIRRTL_PATH=~/firrtl
