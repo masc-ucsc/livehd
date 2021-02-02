@@ -31,7 +31,7 @@ Register RegXor AddNot GCD_3bits Flop Test3 TrivialAdd NotAnd Trivial Tail
 TrivialArith Shifts Darken HiLoMultiplier Accumulator LFSR16 PlusAnd
 VendingMachine VendingMachineSwitch'  
 
-pts='Mul'
+# pts='Mul'
 # pts='Test6'
 # pts='Test1'
 # pts='Life'
