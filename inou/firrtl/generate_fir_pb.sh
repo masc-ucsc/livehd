@@ -15,12 +15,11 @@ pts='ShiftRegister SimpleALU Stack VecSearch Accumulator Counter
      VecShiftRegisterSimple VendingMachine VendingMachineSwitch  Adder4 Adder ByteSelector FullAdder HiLoMultiplier Life 
      Parity ResetShiftRegister Risc LogShifter Cell XorSelfThread1'
 
-pts='Trivial Tail TrivialArith
+pts='Trivial Tail TrivialArith  Xor6Thread2
 Shifts PlusAnd MaxN ByteSelector Darken HiLoMultiplier SimpleALU Mul
 VecShiftRegisterParam VecShiftRegisterSimple ' 
 
-pts='Xor6Thread2'
-pts='XorSelfThread1'
+pts='Mul'
 
 CHISEL_PATH=~/chisel3
 FIRRTL_PATH=~/firrtl

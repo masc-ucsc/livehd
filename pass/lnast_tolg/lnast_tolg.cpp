@@ -335,7 +335,6 @@ void Lnast_tolg::process_ast_dp_assign_op(LGraph *lg, const Lnast_nid &lnidx_dp_
 
   auto dp_ancestor_subs = lnast->get_data(c0_dp).subs - 1;
   auto dp_ancestor_name = std::string(c0_dp_vname) + "_" + std::to_string(dp_ancestor_subs);
-  /* fmt::print("aset ancestor name:{}\n", dp_ancestor_name); */
 
   // note: this is possible in firrtl front-end where you don't set bits on the wire type so
   //       you don't have a wire lhs in hand, it's alright, just view dp_assign as normal assign
@@ -343,7 +342,6 @@ void Lnast_tolg::process_ast_dp_assign_op(LGraph *lg, const Lnast_nid &lnidx_dp_
     process_ast_assign_op(lg, lnidx_dp_assign);
     return;
   }
-
 
   auto aset_node = lg->create_node(Ntype_op::AttrSet);
   auto vn_spin   = aset_node.setup_sink_pin("name");   // variable name
