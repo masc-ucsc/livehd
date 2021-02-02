@@ -713,7 +713,8 @@ void Lnast::opr_lhs_merge(const Lnast_nid &psts_nid) {
       continue;
     } else if (type.is_if()) {
       opr_lhs_merge_if_subtree(opr_nid);
-    } else if (type.is_assign()){
+    /* } else if (type.is_assign()){ */
+    } else if (type.is_assign() || type.is_dp_assign()) {
       opr_lhs_merge_handle_a_statement(opr_nid);
     }
   }
@@ -733,9 +734,9 @@ void Lnast::opr_lhs_merge_if_subtree(const Lnast_nid &if_nid) {
           opr_lhs_merge_if_subtree(opr_nid);
 
         // FIXME->sh: if we also merge dp_assign here, then the original purpose of introducing dp_assign is missign
-        // are you sure it will be a generic solution???
-        /* else if (opr_type.is_assign() || opr_type.is_dp_assign()) */              
-        else if (opr_type.is_assign())              
+        //            are you sure it is be a generic solution???
+        /* else if (opr_type.is_assign()) */              
+        else if (opr_type.is_assign() || opr_type.is_dp_assign())              
           opr_lhs_merge_handle_a_statement(opr_nid);
       }
     }
@@ -749,8 +750,14 @@ void Lnast::opr_lhs_merge_handle_a_statement(const Lnast_nid &assign_nid) {
 
   if (c1_assign_name.substr(0,3) == "___") {
     auto opr_nid = get_sibling_prev(assign_nid);
-    if (get_type(opr_nid).is_tuple())
+    auto opr_type = get_type(opr_nid);
+    if (opr_type.is_tuple())
       return;
+
+    // note: the only valid case to merge a dp_assign is when its pre_sibling is an attr_get
+    if (get_type(assign_nid).is_dp_assign() && !opr_type.is_attr_get())
+      return; //FIXME->sh: special case for firrtl, might need expand to more cases as needed
+
     auto c0_opr = get_first_child(opr_nid);
     I(get_name(c0_opr) == c1_assign_name);
     ref_data(c0_opr)->token = get_data(c0_assign).token;

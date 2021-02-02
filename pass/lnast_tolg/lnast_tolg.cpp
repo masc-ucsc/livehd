@@ -327,26 +327,34 @@ Node Lnast_tolg::process_ast_assign_op(LGraph *lg, const Lnast_nid &lnidx_assign
 }
 
 void Lnast_tolg::process_ast_dp_assign_op(LGraph *lg, const Lnast_nid &lnidx_dp_assign) {
-  auto aset_node = lg->create_node(Ntype_op::AttrSet);
-  auto vn_spin   = aset_node.setup_sink_pin("name");   // variable name
-  auto af_spin   = aset_node.setup_sink_pin("field");  // attribute field
-  auto av_spin   = aset_node.setup_sink_pin("value");  // attribute value
-
   auto c0_dp       = lnast->get_first_child(lnidx_dp_assign);
   auto c1_dp       = lnast->get_sibling_next(c0_dp);
   auto c0_dp_name  = lnast->get_sname(c0_dp);  // ssa name
   auto attr_vname  = "__dp_assign";            // no-ssa name
   auto c0_dp_vname = lnast->get_vname(c0_dp);  // no-ssa name
 
+  auto dp_ancestor_subs = lnast->get_data(c0_dp).subs - 1;
+  auto dp_ancestor_name = std::string(c0_dp_vname) + "_" + std::to_string(dp_ancestor_subs);
+  /* fmt::print("aset ancestor name:{}\n", dp_ancestor_name); */
+
+  // note: this is possible in firrtl front-end where you don't set bits on the wire type so
+  //       you don't have a wire lhs in hand, it's alright, just view dp_assign as normal assign
+  if (name2dpin.find(dp_ancestor_name) == name2dpin.end()) {
+    process_ast_assign_op(lg, lnidx_dp_assign);
+    return;
+  }
+
+
+  auto aset_node = lg->create_node(Ntype_op::AttrSet);
+  auto vn_spin   = aset_node.setup_sink_pin("name");   // variable name
+  auto af_spin   = aset_node.setup_sink_pin("field");  // attribute field
+  auto av_spin   = aset_node.setup_sink_pin("value");  // attribute value
+
   auto vn_dpin = setup_ref_node_dpin(lg, c1_dp);
   lg->add_edge(vn_dpin, vn_spin);
   auto af_dpin = setup_field_dpin(lg, attr_vname);
   lg->add_edge(af_dpin, af_spin);
 
-  auto dp_ancestor_subs = lnast->get_data(c0_dp).subs - 1;
-  auto dp_ancestor_name = std::string(c0_dp_vname) + "_" + std::to_string(dp_ancestor_subs);
-  /* fmt::print("aset ancestor name:{}\n", dp_ancestor_name); */
-  I(name2dpin.find(dp_ancestor_name) != name2dpin.end());
 
   auto av_dpin = name2dpin[dp_ancestor_name];
   lg->add_edge(av_dpin, av_spin);

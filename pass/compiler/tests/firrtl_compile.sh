@@ -24,13 +24,14 @@ VecShiftRegisterParam VecShiftRegisterSimple '
 # VendingMachineSwitch VendingMachine'
 
 # passed hifirrtl pattern pool
-pts='MaxN SingleEvenFilter Coverage Counter Decrementer SubModule BundleConnect
-LogShifter Adder4 Xor6Thread2 XorSelfThread1 Cell_alone ByteSelector SimpleALU
-Mux4 Max2 ResetShiftRegister Parity RegisterSimple Register RegXor AddNot
-GCD_3bits Flop Test3 TrivialAdd NotAnd Trivial Tail TrivialArith Shifts Darken
-HiLoMultiplier Accumulator LFSR16 PlusAnd VendingMachine VendingMachineSwitch'  
+pts='Test2 EnableShiftRegister MaxN SingleEvenFilter Coverage Counter Decrementer
+SubModule BundleConnect LogShifter Adder4 Xor6Thread2 XorSelfThread1 Cell_alone
+ByteSelector SimpleALU Mux4 Max2 ResetShiftRegister Parity RegisterSimple
+Register RegXor AddNot GCD_3bits Flop Test3 TrivialAdd NotAnd Trivial Tail
+TrivialArith Shifts Darken HiLoMultiplier Accumulator LFSR16 PlusAnd
+VendingMachine VendingMachineSwitch'  
 
-# pts='Mul'
+pts='Mul'
 # pts='Test6'
 # pts='Test1'
 # pts='Life'
@@ -38,10 +39,6 @@ HiLoMultiplier Accumulator LFSR16 PlusAnd VendingMachine VendingMachineSwitch'
 # pts='VecShiftRegisterParam'
 # pts='VecShiftRegisterSimple '
 # pts='VecSearch '
-
-pts='EnableShiftRegister ' #LEC
-# pts='Test2'
-
 
 
 LGSHELL=./bazel-bin/main/lgshell
