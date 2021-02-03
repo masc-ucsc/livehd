@@ -104,6 +104,8 @@ public:
 
   static std::shared_ptr<Lgtuple> make_merge(Node_pin &sel_dpin, const std::vector<std::shared_ptr<Lgtuple const>> &tup_list);
 
+  std::tuple<Node_pin, std::shared_ptr<Lgtuple>> make_select(Node_pin &sel_dpin) const;
+
   bool has_dpin(int pos)                       const { return get_it(pos)      != key_map.end(); }
   bool has_dpin(std::string_view key)          const { return get_it(key)      != key_map.end(); }
   bool has_dpin()                              const { return has_dpin("");                      }

@@ -141,6 +141,15 @@ std::shared_ptr<Lgtuple> Lgtuple::make_merge(Node_pin &sel_dpin, const std::vect
 	return new_tup;
 }
 
+std::tuple<Node_pin, std::shared_ptr<Lgtuple>> Lgtuple::make_select(Node_pin &sel_dpin) const {
+  (void)sel_dpin;
+  I(false);
+
+  Node_pin invalid;
+
+  return std::tuple(invalid, nullptr);
+}
+
 int Lgtuple::get_pos(std::string_view key) const {
   auto last_key = get_last_level(std::string{key});
 
@@ -216,7 +225,7 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(int pos, std::string_view key) c
 
       auto rest_name = get_remove_first_level(it->first);
       tup->key_map.insert_or_assign(rest_name, it->second);
-    }else if (key.size() <= it->first.size() && it->first.substr(0,key.size()) == key) {
+    }else if (key.size() && key.size() <= it->first.size() && it->first.substr(0,key.size()) == key) {
       if (!tup)
         tup = std::make_shared<Lgtuple>(""); // no name
 

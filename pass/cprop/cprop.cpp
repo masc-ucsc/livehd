@@ -696,13 +696,35 @@ bool Cprop::process_tuple_get(Node &node) {
   }
 
   auto sub_tup = node_tup->get_sub_tuple(key_pos, key_name);
-  if (!sub_tup) {
-		Pass::info("tuple_get {} could not decide the field {}!", node.debug_name(), key_name);
-    return false; // Could not resolve (maybe compile error, maybe hierarchical needed)
+  if (sub_tup) {
+    node2tuple[node.get_compact()] = sub_tup;
+    return true;
   }
 
-  node2tuple[node.get_compact()] = sub_tup;
-  return true;
+  if (key_pos == -1 && key_name.empty()) {
+    auto pos_dpin = node.get_sink_pin("position").get_driver_pin();
+    auto pos_node = pos_dpin.get_node();
+    if (pos_node.is_type_const()) {
+      Pass::info("tuple_get {} could not index with position {}!", node.debug_name(), pos_node.get_type_const().to_pyrope());
+      return false; // Could not resolve (maybe compile error, maybe hierarchical needed)
+    }
+    I(!pos_node.is_type_tup()); // It should be something that can has a valid dpin
+
+    auto [res_dpin, res_tup] = node_tup->make_select(pos_dpin);
+    if (res_dpin.is_invalid() && !res_tup) {
+      return false; // Could not resolve (maybe compile error, maybe hierarchical needed)
+    }
+    if (res_tup) {
+      I(res_dpin.is_invalid());
+      node2tuple[node.get_compact()] = sub_tup;
+    }else{
+      I(!res_tup);
+      collapse_forward_for_pin(node, res_dpin);
+    }
+  }
+
+  Pass::info("tuple_get {} could not decide the field {}!", node.debug_name(), key_name);
+  return false; // Could not resolve (maybe compile error, maybe hierarchical needed)
 }
 
 void Cprop::process_mux(Node &node) {
