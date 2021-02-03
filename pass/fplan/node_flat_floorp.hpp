@@ -2,15 +2,14 @@
 
 #pragma once
 
-/*
 #include "floorplanner.hpp"
 #include "node_pin.hpp"
 #include "lgedgeiter.hpp"
 
 class Node_flat_floorp : public Lhd_floorplanner {
 public:
-  void load(LGraph* root, const std::string_view lgdb_path);
+  Node_flat_floorp(Node_tree&& nt_arg);
+  void load();
 
 private:
 };
-*/

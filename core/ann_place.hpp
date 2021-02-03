@@ -27,4 +27,8 @@ public:
   float get_pos_y() const { return pos_y; }
   float get_len_x() const { return len_x; }
   float get_len_y() const { return len_y; }
+
+  bool is_valid() const {
+    return len_x > 0 && len_y > 0;
+  }
 };

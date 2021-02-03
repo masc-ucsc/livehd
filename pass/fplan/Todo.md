@@ -9,34 +9,18 @@ Issues not related to ArchFP:
  - view.py output is flipped due to mismatch between coordinates for HotSpot and png coordinates in PyCairo
 
 Node hierarchy:
+ - check for TODOs elsewhere in the code and resolve if possible
 
-
- - addComponent pointer parameter cannot be shared across >1 call safely (have to grid or copy it)
-    - if we come across a layout that has already been loaded into ArchFP (width/height != 0):
-    1. Don't re-floorplan it.  outputHotSpotLayout() should still be okay on everything, since startX/startY is provided.
-       - Won't work since different layout instances might need vastly different aspect ratios
-    2. Make a copy and floorplan the copy (DO THIS ONE)
-       - Really expensive, but there's not much we can do about that.
-       - Do this in ArchFP
-       - Add copy constructors for every layout type with specific elements
-       - can hack around with getComponent() to get it to do bag layouts instead of grid layouts
-    - resolve TODO on line 917?
-    - check for TODOs elsewhere in the code and resolve if possible
-
-
- - check all verilog tests
  - check usage of startX/calcX in ArchFP, might be causing problems in checkFP
  - check grid layout not pushing mirror contexts?
  - verify node hierarchy is correct
  - add a is_valid method to Ntype_area, use it instead of hier_color to determine if a node has been placed yet
-   - width/height == 0
  - write non-root node to layouts[] in node_hier_floorp
 
 Easy things:
  - Node::bimap -> Node::map for hier_node_color fails?
  - LiveHD has a random number class, use that in writearea
  - put warning bazel file in //tools
- - always write hierarchical floorplans back into LiveHD, but ask to write to file
 
 Things to add:
 1. Optimization

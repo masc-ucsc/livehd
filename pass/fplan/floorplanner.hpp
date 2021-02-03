@@ -9,6 +9,7 @@
 #include "floorplan.hpp"
 #include "lgraph.hpp"
 #include "node_tree.hpp"
+#include "node_type_area.hpp"
 
 class Lhd_floorplanner {
 public:
@@ -64,6 +65,9 @@ protected:
 
   // hierarchy of node instances
   Node_tree nt;
+
+  // node area map
+  const Ntype_area na;
 
   // layout of all child nodes
   absl::flat_hash_map<Tree_index, geogLayout*> layouts;

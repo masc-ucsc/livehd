@@ -4,16 +4,14 @@
 
 #include "node_type_area.hpp"
 
-/*
-void Node_flat_floorp::load(LGraph* root, const std::string_view lgdb_path) {
-  (void)lgdb_path;
-  root_lg = root;
+Node_flat_floorp::Node_flat_floorp(Node_tree&& nt_arg) : Lhd_floorplanner(std::move(nt_arg)) {}
 
-  layouts[root_lg] = new geogLayout();
+void Node_flat_floorp::load() {
+  layouts[nt.get_root()] = new geogLayout();
 
-  Ntype_area na(lgdb_path);
+  Ntype_area na(nt.get_root_lg()->get_path());
 
-  for (auto n : root->fast(true)) {
+  for (auto n : nt.get_root_lg()->fast(true)) {
     Ntype_op op = n.get_type_op();
 
     std::string_view name;
@@ -37,8 +35,7 @@ void Node_flat_floorp::load(LGraph* root, const std::string_view lgdb_path) {
 
       auto d = na.get_dim(op);
 
-      layouts[root_lg]->addComponentCluster(op, 1, d.area, d.max_aspect, d.min_aspect, randomHint(1));
+      layouts[nt.get_root()]->addComponentCluster(op, 1, d.area, d.max_aspect, d.min_aspect, randomHint(1));
     }
   }
 }
-*/

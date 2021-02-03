@@ -6,7 +6,6 @@
 #include "floorplanner.hpp"
 #include "lgedgeiter.hpp"
 #include "node_pin.hpp"
-#include "node_type_area.hpp"
 
 class Node_hier_floorp : public Lhd_floorplanner {
 public:
@@ -14,7 +13,6 @@ public:
   void load();
 
 private:
-  const Ntype_area na;
 
   // load all the nodes in a given lgraph into an ArchFP geogLayout instance and return that instance
   geogLayout* load_lg_nodes(LGraph* lg);

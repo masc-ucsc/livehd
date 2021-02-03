@@ -7,7 +7,7 @@
 
 #include "ann_place.hpp"
 
-Node_hier_floorp::Node_hier_floorp(Node_tree&& nt_arg) : Lhd_floorplanner(std::move(nt_arg)), na(root_lg->get_path()) {}
+Node_hier_floorp::Node_hier_floorp(Node_tree&& nt_arg) : Lhd_floorplanner(std::move(nt_arg)) {}
 
 geogLayout* Node_hier_floorp::load_lg_nodes(LGraph* lg) {
   /*

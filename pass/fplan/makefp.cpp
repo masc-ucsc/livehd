@@ -19,12 +19,12 @@ void Pass_fplan_makefp::setup() {
                        "LGraph traversal method to use. Valid options are \"hier_lg\", \"flat_node\", and \"hier_node\"",
                        "hier_node");
 
-  m.add_label_optional("dest", "Where to send the floorplan file.  Valid options are \"file\" and \"livehd\".", "file");
+  m.add_label_optional("filename", "If set, write the floorplan to a file named <filename>.flp as well as back into LiveHD.");
 
   register_pass(m);
 }
 
-void Pass_fplan_makefp::makefp_int(Lhd_floorplanner& fp, const std::string_view dest) {
+void Pass_fplan_makefp::makefp_int(Lhd_floorplanner& fp, bool write_lhd, const std::string_view dest) {
   auto t = profile_time::Timer();
 
   t.start();
@@ -37,16 +37,18 @@ void Pass_fplan_makefp::makefp_int(Lhd_floorplanner& fp, const std::string_view 
   fp.create();
   fmt::print(" done ({} ms).\n", t.time());
 
-  t.start();
-  fmt::print("  writing floorplan...");
-  if (dest == "file") {
-    fp.write_file("floorplan.flp");
-  } else if (dest == "livehd") {
+  if (write_lhd) {
+    t.start();
+    fmt::print("  writing floorplan to livehd...");
     fp.write_lhd();
-  } else {
-    throw std::invalid_argument("unknown destination!");
+    fmt::print(" done ({} ms).\n", t.time());
   }
-  fmt::print(" done ({} ms).\n", t.time());
+
+  if (dest.length() > 0) {
+    fmt::print("  writing floorplan to file {}...", dest);
+    fp.write_file(dest);
+    fmt::print("done ({} ms).\n", t.time());
+  }
 }
 
 Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", var), root_lg(nullptr) {
@@ -57,7 +59,7 @@ Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", v
   auto whole_t = profile_time::Timer();
 
   fmt::print("generating floorplan...\n");
-  
+
   fmt::print("  creating node hierarchy...");
   whole_t.start();
   auto nt = Node_tree(root_lg);
@@ -67,11 +69,11 @@ Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", v
     // Lg_hier_floorp hfp;
     // makefp_int(hfp, "file");
   } else if (t_str == "flat_node") {
-    // Node_flat_floorp nffp;
-    // makefp_int(nffp, "file");
+    Node_flat_floorp nffp(std::move(nt));
+    makefp_int(nffp, false, "floorplan");
   } else if (t_str == "hier_node") {
     Node_hier_floorp nhfp(std::move(nt));
-    makefp_int(nhfp, var.get("dest"));
+    makefp_int(nhfp, true, var.get("filename"));
   } else {
     std::string errstr = "unknown traversal method ";
     throw std::invalid_argument(errstr.append(t_str));

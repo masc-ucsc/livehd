@@ -163,7 +163,7 @@ unsigned int FPObject::outputLGraphLayout(Node_tree& tree, Tree_index tidx, doub
 
     Ann_place p(calcX(startX), calcY(startY), getWidth() / 1000, getHeight() / 1000);
     child->set_place(p);
-    child->set_hier_color(1);  // set node instance as marked after visiting it
+    child->set_hier_color(1);
 
     break;
   }
@@ -390,7 +390,6 @@ static unsigned int findNode(FPObject* obj, Node_tree& tree, Tree_index tidx, do
         continue;
       }
 
-      found = true;
       // fmt::print("assigning child subnode {} to parent hier ({}, {})\n", child->debug_name(), child->get_hidx().level,
       // child->get_hidx().pos);
 
@@ -398,7 +397,7 @@ static unsigned int findNode(FPObject* obj, Node_tree& tree, Tree_index tidx, do
       Ann_place p(obj->calcX(startX), obj->calcY(startY), obj->getWidth() / 1000, obj->getHeight() / 1000);
 
       child->set_place(p);
-      child->set_hier_color(1);  // set node instance as marked after visiting it
+      child->set_hier_color(1);
       count = obj->outputLGraphLayout(tree, child_idx, startX, startY);
       found = true;
 
