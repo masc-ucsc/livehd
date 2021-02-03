@@ -4,6 +4,7 @@
 #include <fstream>
 #include <iostream>
 #include <queue>
+#include <string_view>
 
 #include "firrtl.pb.h"
 #include "google/protobuf/util/time_util.h"
@@ -186,8 +187,8 @@ void Inou_firrtl::init_wire_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type
     }
     case firrtl::FirrtlPB_Type::kVectorType: {  // Vector Type
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
-        init_wire_dots(lnast, type.vector_type().type(), absl::StrCat(id, ".", i), parent_node);
-        /* init_wire_dots(lnast, type.vector_type().type(), absl::StrCat(id, "[", i, "]"), parent_node); */
+        /* init_wire_dots(lnast, type.vector_type().type(), absl::StrCat(id, ".", i), parent_node); */
+        init_wire_dots(lnast, type.vector_type().type(), absl::StrCat(id, "[", i, "]"), parent_node);
       }
       break;
     }
@@ -231,8 +232,8 @@ void Inou_firrtl::init_reg_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type,
     }
     case firrtl::FirrtlPB_Type::kVectorType: {  // Vector Type
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
-        /* init_reg_dots(lnast, type.vector_type().type(), absl::StrCat(id, "[", i, "]"), clock, reset, init, parent_node); */
-        init_reg_dots(lnast, type.vector_type().type(), absl::StrCat(id, ".", i), clock, reset, init, parent_node);
+        init_reg_dots(lnast, type.vector_type().type(), absl::StrCat(id, "[", i, "]"), clock, reset, init, parent_node);
+        /* init_reg_dots(lnast, type.vector_type().type(), absl::StrCat(id, ".", i), clock, reset, init, parent_node); */
       }
       break;
     }
@@ -1156,7 +1157,7 @@ void Inou_firrtl::HandleTypeConvOp(Lnast& lnast, const firrtl::FirrtlPB_Expressi
  * NOTE: This return the first child of the last DOT/SELECT node made. */
 std::string_view Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB_Expression expr, Lnast_nid& parent_node, const bool is_rhs) {
   auto flattened_str = FlattenExpression(ln, parent_node, expr);
-  //fmt::print("DEBUG flattened_str I:{}\n", flattened_str);
+  /* fmt::print("DEBUG flattened_str I:{}\n", flattened_str); */
 
   /* When storing info about IO and what not, a vector may be
    * stored like vec[0], vec[1], ... . This can be a problem if
@@ -1268,84 +1269,167 @@ std::string_view Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB
   }
 
   I(flattened_str.find(".") || flattened_str.find("["));
-  //fmt::print("DEBUG flattened_str II:{}\n\n", flattened_str);
+  /* fmt::print("DEBUG flattened_str II:{}\n\n", flattened_str); */
   return CreateDotsSelsFromStr(ln, parent_node, flattened_str);
 }
+
+
+void Inou_firrtl::set_leaf_type(std::string_view subname, std::string_view full_name, size_t prev, std::vector<std::pair<std::string_view, Inou_firrtl::Leaf_type>> &hier_subnames) {
+  if (prev == 0) {
+    hier_subnames.emplace_back(std::make_pair(subname, Leaf_type::Ref));
+    fmt::print("  DEBUG subname:{}, type:{}\n", subname, "Ref");
+  } else if (full_name.at(prev-1) == '.') {
+    auto first_char = subname.at(0);
+    if (isdigit(first_char) || first_char == '-' || first_char == '+') {
+      hier_subnames.emplace_back(std::make_pair(subname, Leaf_type::Const_num));          
+      fmt::print("  DEBUG subname:{}, type:{}\n", subname, "Const_num");
+    } else {
+      hier_subnames.emplace_back(std::make_pair(subname, Leaf_type::Const_str));          
+      fmt::print("  DEBUG subname:{}, type:{}\n", subname, "Const_str");
+    }
+  } else if (full_name.at(prev-1) == '[') {
+    auto first_char = subname.at(0);
+    if (isdigit(first_char) || first_char == '-' || first_char == '+') {
+      hier_subnames.emplace_back(std::make_pair(subname, Leaf_type::Const_num));          
+      fmt::print("  DEBUG subname:{}, type:{}\n", subname, "Const_num");
+    } else {
+      hier_subnames.emplace_back(std::make_pair(subname, Leaf_type::Ref));          
+      fmt::print("  DEBUG subname:{}, type:{}\n", subname, "Ref");
+    }
+  }
+}
+
+
+void Inou_firrtl::split_hier_name(std::string_view full_name, std::vector<std::pair<std::string_view, Inou_firrtl::Leaf_type>> &hier_subnames) {
+  std::size_t prev = 0;
+  std::size_t pos;
+
+  while ((pos = full_name.find_first_of(".[", prev)) != std::string_view::npos) {
+    if (pos > prev) {
+      auto subname = full_name.substr(prev, pos - prev);
+      if (subname.back() == ']') {
+        subname = subname.substr(0, subname.size()-1); //exclude ']'
+      }
+      set_leaf_type(subname, full_name, prev, hier_subnames);
+    }
+    prev = pos + 1;
+  }
+
+  if (prev < full_name.length()) {
+    auto subname = full_name.substr(prev, std::string_view::npos);
+    if (subname.back() == ']') {
+      subname = subname.substr(0, subname.size()-1); //exclude ']'
+    }
+    set_leaf_type(subname, full_name, prev, hier_subnames);
+  }
+}
+
+
 
 /* Given a string with "."s and "["s in it, this
  * function will be able to deconstruct it into
  * DOT and SELECT nodes in an LNAST. */
-std::string_view Inou_firrtl::CreateDotsSelsFromStr(Lnast& ln, Lnast_nid& parent_node, const std::string& flattened_str) {
-  I((flattened_str.find(".") != std::string::npos) || (flattened_str.find("[") != std::string::npos));
+std::string_view Inou_firrtl::CreateDotsSelsFromStr(Lnast& ln, Lnast_nid& parent_node, const std::string& full_name) {
+  fmt::print("DEBUG DotSel full string:{}\n", full_name);
+  I((full_name.find(".") != std::string::npos) || (full_name.find("[") != std::string::npos));
 
-  size_t found = 0;
-  size_t last_found = 0;
-  std::queue<std::string> no_dot_queue;
-  // Separate name into separate parts, delimited by "."
-  while ((found = flattened_str.find(".", last_found)) != std::string::npos) {
-    no_dot_queue.push(flattened_str.substr(last_found, found-last_found));
-    last_found = found + 1;
-  }
-  no_dot_queue.push(flattened_str.substr(last_found));
+  auto tmp_var_name = create_temp_var(ln);
+  std::vector<std::pair<std::string_view, Inou_firrtl::Leaf_type>> hier_subnames;
+  hier_subnames.emplace_back(std::make_pair(tmp_var_name, Leaf_type::Ref));
 
-  std::queue<std::string> flat_queue;
-  while(no_dot_queue.size() > 0) {
-    auto elem = no_dot_queue.front();
-    if(elem.find('[') != std::string::npos) {
-      flat_queue.push(elem.substr(0, elem.find('[')));
 
-      while (elem.find('[') != std::string::npos) {
-        elem = elem.substr(elem.find('[') + 1);
-        flat_queue.push("[" + elem.substr(0, elem.find(']')) + "]");
+  split_hier_name(full_name, hier_subnames);
+
+  auto ln_node = ln.add_child(parent_node, Lnast_node::create_dot(""));
+  for (auto subname : hier_subnames) {
+    switch (subname.second) {
+      case Leaf_type::Ref: {
+        ln.add_child(ln_node, Lnast_node::create_ref(ln.add_string(subname.first)));
+        break;
       }
-    } else {
-      flat_queue.push(elem);
-    }
-    no_dot_queue.pop();
-  }
-
-  Lnast_nid ln_node;
-  bool first = true;
-  bool sel_was_last = true;
-  std::string_view bund_name;
-  while (flat_queue.size() > 0) {
-    auto elem = flat_queue.front();
-    if (elem.substr(0,2) == "_T" && !dangling_ports_map.contains(elem)) {
-      elem = absl::StrCat("_.", elem);
-    }
-
-    if (first) {
-      bund_name = ln.add_string(elem);
-      first = false;
-    } else {
-      if (elem[0] == '[') {
-        auto temp_var_name = create_temp_var(ln);
-        auto sel_str = elem.substr(1,elem.length()-2);
-        ln_node = ln.add_child(parent_node, Lnast_node::create_select(""));
-        ln.add_child(ln_node, Lnast_node::create_ref(temp_var_name));
-        ln.add_child(ln_node, Lnast_node::create_ref(bund_name));
-        auto elem_nobrack = ln.add_string(elem.substr(1, elem.length()-2));
-        if (isdigit(sel_str[0])) {
-          ln.add_child(ln_node, Lnast_node::create_const(elem_nobrack));
-        } else {
-          ln.add_child(ln_node, Lnast_node::create_ref(elem_nobrack));
-        }
-        bund_name = temp_var_name;
-        sel_was_last = true;
-      } else if (sel_was_last) {
-        auto temp_var_name = create_temp_var(ln);
-        ln_node = ln.add_child(parent_node, Lnast_node::create_dot(""));
-        ln.add_child(ln_node, Lnast_node::create_ref(temp_var_name));
-        ln.add_child(ln_node, Lnast_node::create_ref(bund_name));
-        ln.add_child(ln_node, Lnast_node::create_ref(ln.add_string(elem)));
-        bund_name = temp_var_name;
-        sel_was_last = false;
-      } else {
-        ln.add_child(ln_node, Lnast_node::create_ref(ln.add_string(elem)));
+      case Leaf_type::Const_num: {
+        ln.add_child(ln_node, Lnast_node::create_const(ln.add_string(subname.first)));
+        break;
       }
+      case Leaf_type::Const_str: {
+        ln.add_child(ln_node, Lnast_node::create_const(ln.add_string(subname.first)));
+        break;
+      }
+      default: Pass::error("Unknown port type.");
     }
-    flat_queue.pop();
   }
+
+  /* size_t found = 0; */
+  /* size_t last_found = 0; */
+  /* std::queue<std::string> no_dot_queue; */
+  /* // Separate name into separate parts, delimited by "." */
+  /* while ((found = flattened_str.find(".", last_found)) != std::string::npos) { */
+  /*   no_dot_queue.push(flattened_str.substr(last_found, found-last_found)); */
+  /*   last_found = found + 1; */
+  /* } */
+  /* no_dot_queue.push(flattened_str.substr(last_found)); */
+
+  /* std::queue<std::string> flat_queue; */
+  /* while(no_dot_queue.size() > 0) { */
+  /*   auto elem = no_dot_queue.front(); */
+  /*   if(elem.find('[') != std::string::npos) { */
+  /*     flat_queue.push(elem.substr(0, elem.find('['))); */
+
+  /*     while (elem.find('[') != std::string::npos) { */
+  /*       elem = elem.substr(elem.find('[') + 1); */
+  /*       flat_queue.push("[" + elem.substr(0, elem.find(']')) + "]"); */
+  /*     } */
+  /*   } else { */
+  /*     flat_queue.push(elem); */
+  /*   } */
+  /*   no_dot_queue.pop(); */
+  /* } */
+
+  /* Lnast_nid ln_node; */
+  /* bool first = true; */
+  /* bool sel_was_last = true; */
+  /* std::string_view bund_name; */
+  /* while (flat_queue.size() > 0) { */
+  /*   auto elem = flat_queue.front(); */
+  /*   if (elem.substr(0,2) == "_T" && !dangling_ports_map.contains(elem)) { */
+  /*     elem = absl::StrCat("_.", elem); */
+  /*   } */
+
+  /*   if (first) { */
+  /*     bund_name = ln.add_string(elem); */
+  /*     first = false; */
+  /*   } else { */
+  /*     if (elem[0] == '[') { */
+  /*       auto temp_var_name = create_temp_var(ln); */
+  /*       auto sel_str = elem.substr(1,elem.length()-2); */
+  /*       /1* ln_node = ln.add_child(parent_node, Lnast_node::create_select("")); *1/ */
+  /*       ln_node = ln.add_child(parent_node, Lnast_node::create_dot("")); */
+  /*       ln.add_child(ln_node, Lnast_node::create_ref(temp_var_name)); */
+  /*       ln.add_child(ln_node, Lnast_node::create_ref(bund_name)); */
+  /*       auto elem_nobrack = ln.add_string(elem.substr(1, elem.length()-2)); */
+  /*       if (isdigit(sel_str[0])) { */
+  /*         ln.add_child(ln_node, Lnast_node::create_const(elem_nobrack)); */
+  /*       } else { */
+  /*         ln.add_child(ln_node, Lnast_node::create_ref(elem_nobrack)); */
+  /*       } */
+  /*       bund_name = temp_var_name; */
+  /*       sel_was_last = true; */
+  /*     } else if (sel_was_last) { */
+  /*       auto temp_var_name = create_temp_var(ln); */
+  /*       ln_node = ln.add_child(parent_node, Lnast_node::create_dot("")); */
+  /*       ln.add_child(ln_node, Lnast_node::create_ref(temp_var_name)); */
+  /*       ln.add_child(ln_node, Lnast_node::create_ref(bund_name)); */
+  /*       ln.add_child(ln_node, Lnast_node::create_const(ln.add_string(elem))); */
+  /*       bund_name = temp_var_name; */
+  /*       sel_was_last = false; */
+  /*     } else { */
+  /*       // FIXME->sh: ?? how to decide .... */
+  /*       /1* ln.add_child(ln_node, Lnast_node::create_ref(ln.add_string(elem))); *1/ */
+  /*       ln.add_child(ln_node, Lnast_node::create_const(ln.add_string(elem))); */
+  /*     } */
+  /*   } */
+  /*   flat_queue.pop(); */
+  /* } */
 
   return ln.get_name(ln.get_first_child(ln_node));
 }
@@ -1356,15 +1440,14 @@ std::string Inou_firrtl::FlattenExpression(Lnast& ln, Lnast_nid& parent_node, co
   if (expr.has_sub_field()) {
     return absl::StrCat(FlattenExpression(ln, parent_node, expr.sub_field().expression()), ".", expr.sub_field().field());
 
-    //FIXME->sh: 1/26/2021: no need to distinguish between [] and ., they are the same in LNAST/LGraph and handled by an unified tuple structure
   } else if (expr.has_sub_access()) {
     auto idx_str = ReturnExprString(ln, expr.sub_access().index(), parent_node, true);
-    return absl::StrCat(FlattenExpression(ln, parent_node, expr.sub_access().expression()), ".", idx_str);
-    /* return absl::StrCat(FlattenExpression(ln, parent_node, expr.sub_access().expression()), "[", idx_str, "]"); */
+    /* return absl::StrCat(FlattenExpression(ln, parent_node, expr.sub_access().expression()), ".", idx_str); */
+    return absl::StrCat(FlattenExpression(ln, parent_node, expr.sub_access().expression()), "[", idx_str, "]");
 
   } else if (expr.has_sub_index()) {
-    return absl::StrCat(FlattenExpression(ln, parent_node, expr.sub_index().expression()), ".", expr.sub_index().index().value());
-    /* return absl::StrCat(FlattenExpression(ln, parent_node, expr.sub_index().expression()), "[", expr.sub_index().index().value(), "]"); */
+    /* return absl::StrCat(FlattenExpression(ln, parent_node, expr.sub_index().expression()), ".", expr.sub_index().index().value()); */
+    return absl::StrCat(FlattenExpression(ln, parent_node, expr.sub_index().expression()), "[", expr.sub_index().index().value(), "]");
 
   } else if (expr.has_reference()) {
     return expr.reference().id();
@@ -1417,8 +1500,8 @@ void Inou_firrtl::create_io_list(const firrtl::FirrtlPB_Type& type, uint8_t dir,
     case firrtl::FirrtlPB_Type::kVectorType: {  // Vector type
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
         vec.emplace_back(port_id, dir, 0, false);
-        /* create_io_list(type.vector_type().type(), dir, absl::StrCat(port_id, "[", i, "]"), vec); */
-        create_io_list(type.vector_type().type(), dir, absl::StrCat(port_id, ".", i), vec);
+        create_io_list(type.vector_type().type(), dir, absl::StrCat(port_id, "[", i, "]"), vec);
+        /* create_io_list(type.vector_type().type(), dir, absl::StrCat(port_id, ".", i), vec); */
       }
       break;
     }
@@ -2222,8 +2305,8 @@ void Inou_firrtl::AddPortToMap(const std::string& mod_id, const firrtl::FirrtlPB
       mod_to_io_dir_map[std::make_pair(mod_id, port_id)] = dir;
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
         // note: get rid of [], use . all the time
-        /* AddPortToMap(mod_id, type.vector_type().type(), dir, absl::StrCat(port_id, "[", i, "]"), sub, inp_pos, out_pos); */
-        AddPortToMap(mod_id, type.vector_type().type(), dir, absl::StrCat(port_id, ".", i), sub, inp_pos, out_pos);
+        AddPortToMap(mod_id, type.vector_type().type(), dir, absl::StrCat(port_id, "[", i, "]"), sub, inp_pos, out_pos);
+        /* AddPortToMap(mod_id, type.vector_type().type(), dir, absl::StrCat(port_id, ".", i), sub, inp_pos, out_pos); */
       }
       break;
     }

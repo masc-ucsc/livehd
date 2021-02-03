@@ -24,6 +24,7 @@
 
 class Inou_firrtl : public Pass {
 protected:
+  enum class Leaf_type { Const_num, Const_str, Ref};
   //----------- FOR toLNAST ----------
   std::string_view create_temp_var(Lnast &lnast);
   std::string_view create_dummy_expr_node_var(Lnast &lnast);
@@ -48,6 +49,8 @@ protected:
   void     HandleMemPort(Lnast &lnast, Lnast_nid& parent_node, const firrtl::FirrtlPB_Statement_MemoryPort& mport);
   void     PortDirInference(const std::string& port_name, const std::string& mem_name, const bool is_rhs);
   void     create_module_inst(Lnast &lnast, const firrtl::FirrtlPB_Statement_Instance &inst, Lnast_nid &parent_node);
+  void     split_hier_name(std::string_view hier_name, std::vector<std::pair<std::string_view, Inou_firrtl::Leaf_type>> &hier_subnames);
+  void     set_leaf_type  (std::string_view subname, std::string_view hier_name, size_t prev, std::vector<std::pair<std::string_view, Inou_firrtl::Leaf_type>> &hier_subnames);
 
   void HandleMuxAssign(Lnast &lnast, const firrtl::FirrtlPB_Expression &expr, Lnast_nid &parent_node,
                        const std::string &lhs_of_asg);

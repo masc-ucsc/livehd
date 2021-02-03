@@ -1280,9 +1280,10 @@ bool Lnast_tolg::subgraph_outp_is_tuple(Sub_node *sub) {
   return false;
 }
 
+// FIXME->sh: TODO: instead of return full vector, passing the reference of vector as an function argument
 std::vector<std::string_view> Lnast_tolg::split_hier_name(std::string_view hier_name) {
-  auto                          start = 0u;
-  auto                          end   = hier_name.find('.');
+  auto start = 0u;
+  auto end   = hier_name.find('.');
   std::vector<std::string_view> token_vec;
   while (end != std::string_view::npos) {
     std::string_view token = hier_name.substr(start, end - start);
@@ -1305,7 +1306,7 @@ void Lnast_tolg::subgraph_io_connection(LGraph *lg, Sub_node *sub, std::string_v
     // I. io_pin is_input
     if (io_pin->is_input()) {
       std::vector<Node_pin> created_tup_gets;
-      auto                  hier_inp_subnames = split_hier_name(io_pin->name);
+      auto hier_inp_subnames = split_hier_name(io_pin->name);
       for (const auto &subname : hier_inp_subnames) {
         auto tup_get    = lg->create_node(Ntype_op::TupGet);
         auto tn_spin    = tup_get.setup_sink_pin("tuple_name");

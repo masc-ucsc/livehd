@@ -24,8 +24,8 @@ pts='vector2'
 # pts='pp'
 
 # Note: in this bash script, you MUST specify top module name AT FIRST POSITION
-# pts_hier1='top sum top'
-# pts_hier2='top top sum'
+pts_hier1='top sum top'
+pts_hier2='top top sum'
 
 
 LGSHELL=./bazel-bin/main/lgshell
@@ -201,10 +201,10 @@ Pyrope_compile_hier () {
 }
 
 
-# rm -rf ./lgdb
-# Pyrope_compile_hier "$pts_hier1"
-# rm -rf ./lgdb
-# Pyrope_compile_hier "$pts_hier2"
+rm -rf ./lgdb
+Pyrope_compile_hier "$pts_hier1"
+rm -rf ./lgdb
+Pyrope_compile_hier "$pts_hier2"
 rm -rf ./lgdb
 Pyrope_compile "$pts"
 

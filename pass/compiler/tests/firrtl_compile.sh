@@ -28,7 +28,7 @@ pts='Test2 EnableShiftRegister MaxN SingleEvenFilter Coverage Counter Decremente
 SubModule BundleConnect LogShifter Adder4 Xor6Thread2 XorSelfThread1 Cell_alone
 ByteSelector SimpleALU Mux4 Max2 ResetShiftRegister Parity RegisterSimple
 Register RegXor AddNot GCD_3bits Flop Test3 TrivialAdd NotAnd Trivial Tail
-TrivialArith Shifts Darken HiLoMultiplier Accumulator LFSR16 PlusAnd
+TrivialArith Shifts Darken HiLoMultiplier Accumulator LFSR16 
 VendingMachine VendingMachineSwitch'  
 
 # pts='Mul'
@@ -36,10 +36,11 @@ VendingMachine VendingMachineSwitch'
 # pts='Test1'
 
 # pts='Life'
-pts='VecShiftRegister'
+# pts='VecShiftRegister'
 # pts='VecShiftRegisterParam'
 # pts='VecShiftRegisterSimple '
 # pts='VecSearch '
+# pts='PlusAnd'
 
 
 LGSHELL=./bazel-bin/main/lgshell
