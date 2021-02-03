@@ -71,7 +71,7 @@ protected:
   static bool is_register          (std::string_view name) {return name.substr(0, 1) == "#" ; }
   static bool is_input             (std::string_view name) {return name.substr(0, 1) == "$" ; }
   static bool is_output            (std::string_view name) {return name.substr(0, 1) == "%" ; }
-  static bool is_const             (std::string_view name) {return (std::isdigit(name[0]) || name.at(0) == '-'); }
+  static bool is_const_num         (std::string_view name) {return (std::isdigit(name[0]) || name.at(0) == '-'); }
   static bool is_bool_true         (std::string_view name) {return name.substr(0,4) == "true"; }
   static bool is_bool_false        (std::string_view name) {return name.substr(0,5) == "false"; }
   static bool is_err_var_undefined (std::string_view name) {return name.substr(0,17) == "err_var_undefined"; }

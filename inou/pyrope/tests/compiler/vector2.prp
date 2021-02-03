@@ -1,0 +1,7 @@
+vec[0]=$first
+vec[1]=1
+vec[2]=$mid
+tmp = 3
+vec[tmp] = 4
+vec[tmp+1] = $last
+%out = vec[$sel]

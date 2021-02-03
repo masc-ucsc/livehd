@@ -33,10 +33,10 @@ VendingMachine VendingMachineSwitch'
 
 # pts='Mul'
 # pts='Test6'
-pts='Test1'
+# pts='Test1'
 
 # pts='Life'
-# pts='VecShiftRegister'
+pts='VecShiftRegister'
 # pts='VecShiftRegisterParam'
 # pts='VecShiftRegisterSimple '
 # pts='VecSearch '

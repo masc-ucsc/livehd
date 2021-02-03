@@ -4,22 +4,18 @@
 # also prepare the upstream firrrl at home directory
 # git clone https://github.com/chipsalliance/firrtl
 
+pts='VecShiftRegisterSimple VecShiftRegisterParam Mul SimpleALU HiLoMultiplier
+Darken ByteSelector MaxN Xor6Thread2 Tail FPU Blackbox2 Blackbox Smem_simple
+Smem RWSmem SubModule MemoryController BundleConnect HwachaSequencer RocketCore
+Rob Ops ICache Flop RegisterSimple Register SimpleBitOps Test6 Test5 Test3
+Test2 Test1 TrivialArith Trivial RegXor PlusAnd Decrementer AddNot Shifts
+Coverage GCD GCD_3bits ShiftRegister SimpleALU Stack VecSearch Accumulator
+Counter DynamicMemorySearch LFSR16 MaxN Memo Mul Mux4 RealGCD SingleEvenFilter
+VecShiftRegister VecShiftRegisterParam VecShiftRegisterSimple VendingMachine
+VendingMachineSwitch  Adder4 Adder ByteSelector FullAdder HiLoMultiplier Life
+Parity ResetShiftRegister Risc LogShifter Cell XorSelfThread1'
 
-
-pts='GCD_3bits GCD Coverage Shifts AddNot Decrementer PlusAnd RegXor Trivial TrivialArith Test1 Test2 Test3 
-     Test5 Test6 SimpleBitOps Register RegisterSimple Flop ICache Ops Rob RocketCore HwachaSequencer 
-     BundleConnect MemoryController PlusAnd SubModule RWSmem Smem Smem_simple Blackbox Blackbox2 FPU'
-
-pts='ShiftRegister SimpleALU Stack VecSearch Accumulator Counter 
-     DynamicMemorySearch LFSR16 MaxN Memo Mul Mux4 RealGCD SingleEvenFilter VecShiftRegister VecShiftRegisterParam
-     VecShiftRegisterSimple VendingMachine VendingMachineSwitch  Adder4 Adder ByteSelector FullAdder HiLoMultiplier Life 
-     Parity ResetShiftRegister Risc LogShifter Cell XorSelfThread1'
-
-pts='Trivial Tail TrivialArith  Xor6Thread2
-Shifts PlusAnd MaxN ByteSelector Darken HiLoMultiplier SimpleALU Mul
-VecShiftRegisterParam VecShiftRegisterSimple ' 
-
-pts='Test1'
+pts='VecShiftRegister'
 
 CHISEL_PATH=~/chisel3
 FIRRTL_PATH=~/firrtl
