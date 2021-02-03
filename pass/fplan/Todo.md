@@ -7,11 +7,11 @@ Issues not related to ArchFP:
  - fix Lgraph hier traversal after getting hier_node working properly - useful for large designs (BOOM)
     - populate hierarchies with area
  - view.py output is flipped due to mismatch between coordinates for HotSpot and png coordinates in PyCairo
+ - blackboxes are not supported (use fixedLayout for this)
 
 Node hierarchy:
  - check for TODOs elsewhere in the code and resolve if possible
 
- - check usage of startX/calcX in ArchFP, might be causing problems in checkFP
  - check grid layout not pushing mirror contexts?
  - verify node hierarchy is correct
  - add a is_valid method to Ntype_area, use it instead of hier_color to determine if a node has been placed yet

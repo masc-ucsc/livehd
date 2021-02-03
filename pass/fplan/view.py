@@ -34,8 +34,12 @@ if args.size < 50:
 surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, SIZE, SIZE)
 ctx = cairo.Context(surf)
 
-with open(args.file, 'r') as flp:
-    flp_lines = flp.readlines()
+try:
+    with open(args.file, 'r') as flp:
+        flp_lines = flp.readlines()
+except Exception:
+    print("input file not found!")
+    exit(1)
 
 max_x = -1.0
 max_y = -1.0

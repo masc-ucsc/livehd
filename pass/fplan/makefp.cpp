@@ -70,7 +70,7 @@ Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", v
     // makefp_int(hfp, "file");
   } else if (t_str == "flat_node") {
     Node_flat_floorp nffp(std::move(nt));
-    makefp_int(nffp, false, "floorplan");
+    makefp_int(nffp, false, var.get("filename"));
   } else if (t_str == "hier_node") {
     Node_hier_floorp nhfp(std::move(nt));
     makefp_int(nhfp, true, var.get("filename"));

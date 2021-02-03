@@ -363,13 +363,13 @@ double FPContainer::totalArea() {
   return area;
 }
 
-static unsigned int findNode(FPObject* obj, Node_tree& tree, Tree_index tidx, double startX, double startY) {
+static unsigned int findNode(FPObject* obj, Node_tree& tree, Tree_index tidx, double calcX, double calcY) {
   Ntype_op t = obj->getType();
 
   unsigned int count;
 
   if (Ntype::is_synthesizable(t)) {  // leaf node - current hier structure is fine
-    count = obj->outputLGraphLayout(tree, tidx, startX, startY);
+    count = obj->outputLGraphLayout(tree, tidx, calcX, calcY);
   } else if (t == Ntype_op::Sub) {  // Sub node - parameters need to be adjusted
 
     bool found = false;
@@ -394,11 +394,11 @@ static unsigned int findNode(FPObject* obj, Node_tree& tree, Tree_index tidx, do
       // child->get_hidx().pos);
 
       // write placement information to subnode as well
-      Ann_place p(obj->calcX(startX), obj->calcY(startY), obj->getWidth() / 1000, obj->getHeight() / 1000);
+      Ann_place p(obj->calcX(calcY), obj->calcY(calcY), obj->getWidth() / 1000, obj->getHeight() / 1000);
 
       child->set_place(p);
       child->set_hier_color(1);
-      count = obj->outputLGraphLayout(tree, child_idx, startX, startY);
+      count = obj->outputLGraphLayout(tree, child_idx, calcX, calcY);
       found = true;
 
       break;
@@ -406,7 +406,7 @@ static unsigned int findNode(FPObject* obj, Node_tree& tree, Tree_index tidx, do
 
     assert(found);
   } else if (t == Ntype_op::Invalid) {  // specific kind of layout - current hier structure is fine
-    count = obj->outputLGraphLayout(tree, tidx, startX, startY);
+    count = obj->outputLGraphLayout(tree, tidx, calcX, calcY);
   } else {
     fmt::print("???\n");
     assert(false);
@@ -471,6 +471,7 @@ bool gridLayout::layout(FPOptimization opt, double targetAR) {
   // We need to set the count to 1 to avoid double counting area.
   obj->setCount(1);
   obj->layout(AspectRatio, ratio);
+  assert(obj->valid());
   obj->setCount(total);
   double compWidth  = obj->getWidth();
   double compHeight = obj->getHeight();
@@ -593,6 +594,7 @@ bool bagLayout::layout(FPOptimization opt, double targetAR) {
       comp = GL;
     }
     comp->layout(AspectRatio, AR);
+    assert(comp->valid());
     // Now we have the final component, we can set the location.
     comp->setLocation(nextX, nextY);
     // Prepare for the next round.
@@ -743,7 +745,17 @@ geogLayout::geogLayout() : FPContainer() {
   name = "Geog";
 }
 
+// some geography hints only work with certain numbers of items
+void geogLayout::checkHint(int count, GeographyHint hint) {
+  if ((hint == LeftRight || hint == LeftRightMirror || hint == LeftRight180 || hint == TopBottom || hint == TopBottomMirror
+       || hint == TopBottom180)
+      && count != 2) {
+    throw std::invalid_argument("geography hint and component count are incompatible!");
+  }
+}
+
 void geogLayout::addComponent(FPObject* comp, int count, GeographyHint hint) {
+  checkHint(count, hint);
   comp->setHint(hint);
   comp->setType(Ntype_op::Sub);
   FPContainer::addComponent(comp, count);
@@ -751,6 +763,7 @@ void geogLayout::addComponent(FPObject* comp, int count, GeographyHint hint) {
 
 FPObject* geogLayout::addComponentCluster(Ntype_op type, int count, double area, double maxARArg, double minARArg,
                                           GeographyHint hint) {
+  checkHint(count, hint);
   FPObject* comp = FPContainer::addComponentCluster(type, count, area, maxARArg, minARArg);
   comp->setHint(hint);
   return comp;
@@ -758,6 +771,7 @@ FPObject* geogLayout::addComponentCluster(Ntype_op type, int count, double area,
 
 FPObject* geogLayout::addComponentCluster(string name, int count, double area, double maxARArg, double minARArg,
                                           GeographyHint hint) {
+  checkHint(count, hint);
   FPObject* comp = FPContainer::addComponentCluster(name, count, area, maxARArg, minARArg);
   comp->setHint(hint);
   return comp;
@@ -765,6 +779,7 @@ FPObject* geogLayout::addComponentCluster(string name, int count, double area, d
 
 bool geogLayout::layout(FPOptimization opt, double targetAR) {
   (void)opt;
+
   // All this routine does is set up some data structures,
   //   and then call the helper to recursively do the layout work.
   // We will keep track of containers we make in a "stack".
@@ -852,6 +867,7 @@ bool geogLayout::layoutHelper(double remWidth, double remHeight, double curX, do
     // Not sure if we need to set the hint, but when I missed this for the grid below, it was a bug.
     FPLayout->setHint(Center);
     FPLayout->layout(AspectRatio, targetAR);
+    assert(FPLayout->valid());
     if (verbose)
       cout << "Laying out Center item(s).  Current x and y are(" << curX << "," << curY << ")\n";
     FPLayout->setLocation(curX, curY);
@@ -952,6 +968,7 @@ bool geogLayout::layoutHelper(double remWidth, double remHeight, double curX, do
       FPLayout = grid;
     }
     FPLayout->layout(AspectRatio, targetAR);
+    assert(FPLayout->valid());
     FPLayout->setLocation(curX, curY);
     // Put the layout on the stack.
     layoutStack[curDepth] = FPLayout;

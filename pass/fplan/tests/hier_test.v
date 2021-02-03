@@ -60,7 +60,7 @@ module mid2(input [899:0] di, output [899:0] dout, input [9:0] ei, output [9:0] 
   wire [29:0] w_3_to_5;
   wire [29:0] w_5_to_3;
 
-  leaf3 l3(.ci(di[28:0]), .co(w_3_to_5[28:0]));
+  leaf3 l3(.ci(di[29:0]), .co(w_3_to_5[29:0]));
   leaf4 l4(.tempi(w_3_to_5[12]), .tempo(w_3_to_5[29])); // might get 'X' on bits 12/13 but whatever
   leaf5 l5(.ci(w_3_to_5), .co(w_5_to_3));
 
@@ -89,7 +89,7 @@ module mid5(input [899:0] gi, output [890:0] gout, input [9:0] hi, output [9:0] 
   mid1 m1s(.di(gi), .dout(w_1_up_5));
 
   // duplicate instantiations of mid2, for regularity discovery
-  leaf3 l3d(.ci(gi), .co(w_3_to_5));
+  leaf3 l3d(.ci(gi[760:731]), .co(w_3_to_5));
   leaf4 l4d(.tempi(w_3_to_5[12]), .tempo(w_3_to_5[13]));
   leaf5 l5d(.ci(w_3_to_5), .co(w_5_to_3));
 
@@ -116,8 +116,8 @@ module hier_test(input [913:0] testi, output [913:0] testo);
   mid4 m4(.ei(w_4_to_2), .eo(w_2_to_4), .fi(w_3_to_4), .fo(w_4_to_3));
 
   // higher-level duplicate instantiation, for regularity discovery
-  mid5 m5(.gi(w_1_to_2), .gout(m5out[899:9]), .hi(w_2_to_4), .ho(m5out[8:0]));
-  mid5 m6(.gi(w_1_to_2), .gout(m6out[899:9]), .hi(w_2_to_4), .ho(m6out[8:0]));
+  mid5 m5(.gi(w_1_to_2), .gout(m5out[899:9]), .hi(w_2_to_4), .ho(m5out[9:0]));
+  mid5 m6(.gi(w_1_to_2), .gout(m6out[899:9]), .hi(w_2_to_4), .ho(m6out[9:0]));
 
   leaf8 l8(.i(testi[1:0]), .o(testo[1:0]));
 

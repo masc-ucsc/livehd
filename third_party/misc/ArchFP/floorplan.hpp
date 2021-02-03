@@ -104,6 +104,7 @@ public:
   virtual double   getHeight() { return height; }
   virtual double   getArea() { return area; }
   virtual double   totalArea() { return area * count; }
+  virtual bool     valid() { return x >= 0.0 && y >= 0.0 && width > 0.0 && height > 0.0; }
   virtual string   getName() { return name; }
   virtual Ntype_op getType() { return type; }
   virtual int      getCount() { return count; }
@@ -280,6 +281,8 @@ class geogLayout : public FPContainer {
   // int        centerItemsCount;
   bool layoutHelper(double targetWidth, double targetHeight, double curX, double curY, FPObject** layoutStack, int curDepth,
                     FPObject** centerItems, int centerItemsCount);
+  
+  static void checkHint(int count, GeographyHint hint);
 
 public:
   geogLayout();
