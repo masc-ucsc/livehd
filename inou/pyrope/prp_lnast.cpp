@@ -1519,16 +1519,11 @@ Lnast_node Prp_lnast::eval_tuple_dot_notation(mmap_lib::Tree_index idx_start_ast
   idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast);
   idx_nxt_ast = ast->get_child(idx_nxt_ast);
 
-  bool                 last_attribute_was_sel = true;
-  mmap_lib::Tree_index idx_dot_root;
-  Lnast_node           dot_lhs;
+  std::vector<Lnast_node> select_fields;
+
   while (!idx_nxt_ast.is_invalid()) {
-    // need three things: the LHS (temp variable)
-    // the element whose attribute is being accessed
-    // the attribute that is being accessed
     idx_nxt_ast = ast->get_sibling_next(idx_nxt_ast);  // move past the dot
-    // TODO: more special cases?
-    // evaluate the attribute being accessed, but there is a special case for tuple_array_notation
+
     const auto &attribute_node = ast->get_data(idx_nxt_ast);
 
     Lnast_node accessed_attribute;
@@ -1536,53 +1531,54 @@ Lnast_node Prp_lnast::eval_tuple_dot_notation(mmap_lib::Tree_index idx_start_ast
     if (attribute_node.rule_id == Prp_rule_tuple_array_notation) {
       // need to select the resolved attribute, not the name of the attribute
       auto idx_attribute = ast->get_child(idx_nxt_ast);
-      accessed_attribute = eval_rule(idx_attribute, idx_start_ln);
+      auto idx_attribute_node = ast->get_data(idx_attribute);
+      if (idx_attribute_node.rule_id ==  Prp_rule_reference) {
+        accessed_attribute = Lnast_node::create_const(get_token(idx_attribute_node.token_entry));
+      }else{
+        accessed_attribute = eval_rule(idx_attribute, idx_start_ln);
+      }
       attribute_is_sel   = true;
     } else {
-      accessed_attribute = eval_rule(idx_nxt_ast, idx_start_ln);
+      if (attribute_node.rule_id ==  Prp_rule_reference) {
+        accessed_attribute = Lnast_node::create_const(get_token(attribute_node.token_entry));
+      }else{
+        accessed_attribute = eval_rule(idx_nxt_ast, idx_start_ln);
+      }
     }
 
-    // create the dot and all of its children
-    if (last_attribute_was_sel) {
-      idx_dot_root    = lnast->add_child(cur_stmts, Lnast_node::create_dot(""));
-      auto lnast_temp = lnast->add_string(current_temp_var);
-      dot_lhs         = Lnast_node::create_ref(lnast_temp);
-      get_next_temp_var();
-      lnast->add_child(idx_dot_root, dot_lhs);
-      lnast->add_child(idx_dot_root, accessed_el);
-    }
-    lnast->add_child(idx_dot_root, accessed_attribute);
+    select_fields.emplace_back(accessed_attribute);
 
-    if (attribute_is_sel) {
-      // create a select node
-      auto sel_root              = Lnast_node::create_select("");
+    if (attribute_is_sel) { // create a select node
       auto idx_attribute         = ast->get_child(idx_nxt_ast);
       auto idx_tuple_array_brack = ast->get_sibling_next(idx_attribute);
       auto idx_first_brack       = ast->get_child(idx_tuple_array_brack);
       auto idx_sel_idx_ast       = ast->get_sibling_next(idx_first_brack);
 
-      auto lnast_temp = lnast->add_string(current_temp_var);
-      auto sel_rhs    = Lnast_node::create_ref(lnast_temp);
-      get_next_temp_var();
-
-      // evaluate the select expression
       auto sel_index = eval_rule(idx_sel_idx_ast, idx_start_ln);
 
-      auto idx_sel_root = lnast->add_child(cur_stmts, sel_root);
-      lnast->add_child(idx_sel_root, sel_rhs);
-      lnast->add_child(idx_sel_root, dot_lhs);
-      lnast->add_child(idx_sel_root, sel_index);
-      accessed_el = sel_rhs;
-    } else {
-      accessed_el = dot_lhs;
+      select_fields.emplace_back(sel_index);
     }
 
     // go to the next dot, or to invalid index
     idx_nxt_ast            = ast->get_sibling_next(idx_nxt_ast);
-    last_attribute_was_sel = attribute_is_sel;
   }
 
-  return accessed_el;
+#if 1
+    // create the dot and all of its children
+  auto idx_dot_root   = lnast->add_child(cur_stmts, Lnast_node::create_select(""));
+  auto lnast_temp     = lnast->add_string(current_temp_var);
+
+  Lnast_node  dot_lhs = Lnast_node::create_ref(lnast_temp);
+  get_next_temp_var();
+
+  lnast->add_child(idx_dot_root, dot_lhs);
+  lnast->add_child(idx_dot_root, accessed_el);
+  for(auto &lnode:select_fields) {
+    lnast->add_child(idx_dot_root, lnode);
+  }
+#endif
+
+  return dot_lhs;
 }
 
 Lnast_node Prp_lnast::eval_bit_selection_notation(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln) {
@@ -1624,7 +1620,9 @@ Lnast_node Prp_lnast::eval_bit_selection_notation(mmap_lib::Tree_index idx_start
 Lnast_node Prp_lnast::eval_fluid_ref(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln) {
   (void)idx_start_ln;
 
-  auto idx_dot_root = lnast->add_child(cur_stmts, Lnast_node::create_dot(""));
+  fmt::print("WARNING. The select syntax for fluid does not seem right beyond trivial cases like foo?\n");
+
+  auto idx_dot_root = lnast->add_child(cur_stmts, Lnast_node::create_select(""));
 
   // create the temporary variable for the LHS
   auto lnast_temp = lnast->add_string(current_temp_var);
@@ -1640,13 +1638,13 @@ Lnast_node Prp_lnast::eval_fluid_ref(mmap_lib::Tree_index idx_start_ast, mmap_li
   auto idx_first_fluid    = ast->get_sibling_next(idx_ref);
   auto first_command_text = scan_text(ast->get_data(idx_first_fluid).token_entry);
   if (first_command_text == "?") {
-    lnast->add_child(idx_dot_root, Lnast_node::create_ref("__valid"));
+    lnast->add_child(idx_dot_root, Lnast_node::create_const("__valid"));
   } else {  // must be either ! or !!
     auto second_fluid = ast->get_sibling_next(idx_first_fluid);
     if (second_fluid.is_invalid()) {
-      lnast->add_child(idx_dot_root, Lnast_node::create_ref("__retry"));
+      lnast->add_child(idx_dot_root, Lnast_node::create_const("__retry"));
     } else {
-      lnast->add_child(idx_dot_root, Lnast_node::create_ref("__fluid_reset"));
+      lnast->add_child(idx_dot_root, Lnast_node::create_const("__fluid_reset"));
     }
   }
   return retnode;
