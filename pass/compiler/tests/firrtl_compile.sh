@@ -40,7 +40,7 @@ VendingMachine VendingMachineSwitch'
 # pts='VecShiftRegisterParam'
 # pts='VecShiftRegisterSimple '
 # pts='VecSearch '
-# pts='PlusAnd'
+pts='PlusAnd'
 
 
 LGSHELL=./bazel-bin/main/lgshell

@@ -143,7 +143,8 @@ bool Lnast::update_tuple_var_1st_scope_ssa_table(const Lnast_nid &psts_nid, cons
 
 
 bool Lnast::is_attribute_related(const Lnast_nid &opr_nid) {
-  if (get_type(opr_nid).is_dot()) {
+  // FIXME->sh: change to is_select universally
+  if (get_type(opr_nid).is_select() || get_type(opr_nid).is_dot()) {
     auto c0_dot  = get_first_child(opr_nid);
     auto c1_dot  = get_sibling_next(c0_dot);
     auto c2_dot  = get_sibling_next(c1_dot);
