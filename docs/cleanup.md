@@ -27,3 +27,6 @@ mmap_lib::tree should support move operators like doCreate in mmap_lib::map. Imp
 * autocompletion for LGDB names. E.g: lgraph.open name:a<TAB> should match any module starting with a
 * fuzzy backward search
 
+### lnast-ssa
+* Clean up analysis based on dot, now the lnast should contains select [] only.
+* Modify fir_tolnast to generate select-only lnast tuple.

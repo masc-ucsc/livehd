@@ -1810,6 +1810,13 @@ void Lnast_tolg::dfs_try_create_flattened_inp(LGraph *lg, Node_pin &cur_node_spi
   bool        is_leaf   = false;
   std::string new_hier_name;
   if (cur_ntype == Ntype_op::TupGet && cur_node_spin == cur_node.setup_sink_pin("tuple_name")) {
+    // case: TG try to fetch from a run-time index -> impossible to solve before cprop -> don't create the flattened_inp from this TG chain.
+    auto pos_spin = cur_node.setup_sink_pin("position");
+    if (pos_spin.is_connected() && pos_spin.get_driver_node().get_type_op() != Ntype_op::Const) {
+      inp_artifacts.erase(chain_head.get_compact());
+      return;
+    }
+ 
     inp_artifacts[chain_head.get_compact()].insert(cur_node);  // only remove the artifact tup_gets
     auto [tup_name, field_name, key_pos] = Cprop::get_tuple_name_key(cur_node);
     if (!field_name.empty()) {
@@ -1848,4 +1855,6 @@ void Lnast_tolg::dfs_try_create_flattened_inp(LGraph *lg, Node_pin &cur_node_spi
     // if can reach leaf, the hierarchy is ended as a scalar, all path assignments (either Or or TA) should be removed later
     return;
   }
+
+  return;
 }
