@@ -1527,37 +1527,40 @@ Lnast_node Prp_lnast::eval_tuple_dot_notation(mmap_lib::Tree_index idx_start_ast
     const auto &attribute_node = ast->get_data(idx_nxt_ast);
 
     Lnast_node accessed_attribute;
-    bool       attribute_is_sel = false;
     if (attribute_node.rule_id == Prp_rule_tuple_array_notation) {
       // need to select the resolved attribute, not the name of the attribute
-      auto idx_attribute = ast->get_child(idx_nxt_ast);
+      auto idx_attribute      = ast->get_child(idx_nxt_ast);
       auto idx_attribute_node = ast->get_data(idx_attribute);
-      if (idx_attribute_node.rule_id ==  Prp_rule_reference) {
-        accessed_attribute = Lnast_node::create_const(get_token(idx_attribute_node.token_entry));
-      }else{
-        accessed_attribute = eval_rule(idx_attribute, idx_start_ln);
-      }
-      attribute_is_sel   = true;
+
+      I(idx_attribute_node.rule_id ==  Prp_rule_reference);
+			accessed_attribute = Lnast_node::create_const(get_token(idx_attribute_node.token_entry));
+			// if assertion fails: else accessed_attribute = eval_rule(idx_attribute, idx_start_ln);
+			select_fields.emplace_back(accessed_attribute);
+
+      auto idx_tuple_array_brack = ast->get_sibling_next(idx_attribute);
+      auto idx_first_brack       = ast->get_child(idx_tuple_array_brack);
+      auto idx_sel_idx_ast       = ast->get_sibling_next(idx_first_brack);
+			while (!idx_sel_idx_ast.is_invalid()) {
+				auto sel_index = eval_rule(idx_sel_idx_ast, idx_start_ln);
+
+				select_fields.emplace_back(sel_index);
+
+				idx_sel_idx_ast   = ast->get_sibling_next(idx_sel_idx_ast); // Skip sel_index
+				idx_sel_idx_ast   = ast->get_sibling_next(idx_sel_idx_ast); // Skip ]
+				if (idx_sel_idx_ast.is_invalid())
+					break;
+
+				idx_sel_idx_ast   = ast->get_sibling_next(idx_sel_idx_ast); // Skip [
+			}
     } else {
       if (attribute_node.rule_id ==  Prp_rule_reference) {
         accessed_attribute = Lnast_node::create_const(get_token(attribute_node.token_entry));
       }else{
         accessed_attribute = eval_rule(idx_nxt_ast, idx_start_ln);
       }
+			select_fields.emplace_back(accessed_attribute);
     }
 
-    select_fields.emplace_back(accessed_attribute);
-
-    if (attribute_is_sel) { // create a select node
-      auto idx_attribute         = ast->get_child(idx_nxt_ast);
-      auto idx_tuple_array_brack = ast->get_sibling_next(idx_attribute);
-      auto idx_first_brack       = ast->get_child(idx_tuple_array_brack);
-      auto idx_sel_idx_ast       = ast->get_sibling_next(idx_first_brack);
-
-      auto sel_index = eval_rule(idx_sel_idx_ast, idx_start_ln);
-
-      select_fields.emplace_back(sel_index);
-    }
 
     // go to the next dot, or to invalid index
     idx_nxt_ast            = ast->get_sibling_next(idx_nxt_ast);

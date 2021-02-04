@@ -301,7 +301,7 @@ protected:
   inline bool unconsume_token();
   inline bool consume_token();
   bool        go_back(uint64_t num_tok);
-  std::string rule_id_to_string(Rule_id rid);
+  std::string rule_id_to_string(Rule_id rid) const;
 
   uint8_t check_function(uint8_t (Prp::*rule)(std::list<std::tuple<Rule_id, Token_entry>> &), uint64_t *sub_cnt,
                          std::list<std::tuple<Rule_id, Token_entry>> &loc_list);
@@ -310,6 +310,7 @@ protected:
                                   std::list<std::tuple<Rule_id, Token_entry>> &loc_list);
 
   void ast_handler();
+  void ast_dump(mmap_lib::Tree_index tree_idx) const;
   void ast_builder(std::list<std::tuple<Rule_id, Token_entry>> &passed_list);
 
 #ifdef DEBUG_AST

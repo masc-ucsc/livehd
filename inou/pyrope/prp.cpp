@@ -1079,6 +1079,7 @@ uint8_t Prp::rule_tuple_dot_dot(std::list<std::tuple<Rule_id, Token_entry>> &pas
   bool next = true;
 
   INIT_PSEUDO_FAIL();
+  (void)cur_tokens;
 
   while (next) {
     UPDATE_PSEUDO_FAIL();
@@ -1986,6 +1987,18 @@ void Prp::ast_handler() {
   }
 }
 
+void Prp::ast_dump(mmap_lib::Tree_index tree_idx) const {
+  for (const auto &index : ast->depth_preorder(tree_idx)) {
+    std::string indent(index.level, ' ');
+    const auto &d  = ast->get_data(index);
+    auto rule_name = rule_id_to_string(d.rule_id);
+    auto token_text = scan_text(d.token_entry);
+
+    fmt::print("{} l:{} p:{} rule_id:{}/{} txt:{}\n"
+        , indent.c_str(), index.level, index.pos, d.rule_id, rule_name, token_text);
+  }
+}
+
 void Prp::ast_builder(std::list<std::tuple<Rule_id, Token_entry>> &passed_list) {
   for (auto it = passed_list.begin(); it != passed_list.end(); ++it) {
     auto ast_op  = *it;
@@ -2205,7 +2218,7 @@ bool Prp::chk_and_consume_options(Token_id *toks, uint8_t tok_cnt, Rule_id rid, 
   return false;
 }
 
-std::string Prp::rule_id_to_string(Rule_id rid) {
+std::string Prp::rule_id_to_string(Rule_id rid) const {
   switch (rid) {
     case Prp_invalid: return "Invalid";
     case Prp_rule: return "Program";
