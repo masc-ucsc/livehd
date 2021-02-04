@@ -762,8 +762,10 @@ void Lnast_tolg::process_ast_tuple_add_op(LGraph *lg, const Lnast_nid &lnidx_ta)
       auto tup_add  = lg->create_node(Ntype_op::TupAdd);
       auto tn_spin  = tup_add.setup_sink_pin("tuple_name");
       auto tup_name = ta_name[i - 1];
-      auto tn_dpin  = setup_tuple_ref(lg, tup_name);
-      lg->add_edge(tn_dpin, tn_spin);
+      if (!is_const_num(tup_name)) {
+        auto tn_dpin  = setup_tuple_ref(lg, tup_name);
+        lg->add_edge(tn_dpin, tn_spin);
+      }
       ta_map.insert_or_assign(i - 1, tup_add);
 
       name2dpin[tup_name] = tup_add.setup_driver_pin();
