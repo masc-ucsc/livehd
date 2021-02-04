@@ -31,7 +31,7 @@ Register RegXor AddNot GCD_3bits Flop Test3 TrivialAdd NotAnd Trivial Tail
 TrivialArith Shifts Darken HiLoMultiplier Accumulator LFSR16 
 VendingMachine VendingMachineSwitch'  
 
-# pts='Mul'
+pts='Mul'
 # pts='Test6'
 # pts='Test1'
 
@@ -40,7 +40,7 @@ VendingMachine VendingMachineSwitch'
 # pts='VecShiftRegisterParam'
 # pts='VecShiftRegisterSimple '
 # pts='VecSearch '
-pts='PlusAnd'
+# pts='PlusAnd'
 
 
 LGSHELL=./bazel-bin/main/lgshell
