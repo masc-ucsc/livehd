@@ -93,11 +93,26 @@ void Bitwidth::process_mux(Node &node, XEdge_iterator &inp_edges) {
   for (auto e : inp_edges) {
     if (e.sink.get_pid() == 0) {
 
-      Bitwidth_range bw(0, inp_edges.size()-1); // -1 for the mux sel
-      flat_bwmap.insert_or_assign(e.driver.get_compact_flat(), bw);
+      auto bits = 0u;
+      auto it = flat_bwmap.find(e.driver.get_compact_flat());
+      if (it == flat_bwmap.end()) {
+        Bitwidth_range bw(0, inp_edges.size()-1); // -1 for the mux sel
+        flat_bwmap.insert_or_assign(e.driver.get_compact_flat(), bw);
+        bits = bw.get_sbits();
+      }else{
+        if (it->second.get_min()<0) {
+          Pass::info("unconstrained mux sel pin:{}, runtime can be negative with min:{} max:{}",e.driver.debug_name(), it->second.get_min().to_pyrope(), it->second.get_max().to_pyrope());
+          continue;
+        }
+        if (it->second.get_max()>= inp_edges.size()) {
+          Pass::info("unconstrained mux sel pin:{}, runtime can overflow with min:{} max:{}",e.driver.debug_name(), it->second.get_min().to_pyrope(), it->second.get_max().to_pyrope());
+          continue;
+        }
+        bits = it->second.get_sbits();
+      }
 
-      if (e.driver.get_bits() && e.driver.get_bits() >= bw.get_sbits()) {
-        e.driver.set_bits(bw.get_sbits());
+      if (e.driver.get_bits() && e.driver.get_bits() >= bits) {
+        e.driver.set_bits(bits);
       }
       continue;
     }
