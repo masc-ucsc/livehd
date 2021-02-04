@@ -142,12 +142,42 @@ std::shared_ptr<Lgtuple> Lgtuple::make_merge(Node_pin &sel_dpin, const std::vect
 }
 
 std::tuple<Node_pin, std::shared_ptr<Lgtuple>> Lgtuple::make_select(Node_pin &sel_dpin) const {
-  (void)sel_dpin;
-  I(false);
 
   Node_pin invalid;
 
-  return std::tuple(invalid, nullptr);
+  std::vector<Node_pin> mux_dpins;
+  //std::vector<std::shared_ptr<Lgtuple const>> mux_tups;
+
+  for(const auto &ent:key_map) {
+    I(get_last_level(ent.first) == ent.first); // FIXME: No sub-tuples for the moment
+
+    size_t pos=0;
+    if (std::isdigit(ent.first[0])) {
+      pos = std::atoi(ent.first.c_str());
+    }else{
+      const auto it = key2pos_map.find(ent.first);
+      if (it == key2pos_map.end()) {
+        LGraph::info("tuple {} has a non ordered field {}. Impossible to index by number", get_name(), ent.first);
+        return std::tuple(invalid, nullptr);
+      }
+      pos = std::atoi(it->second.c_str());
+    }
+    if (pos>=mux_dpins.size())
+      mux_dpins.resize(pos+1);
+
+    mux_dpins[pos] = ent.second;
+  }
+
+  auto mux_node = sel_dpin.get_class_lgraph()->create_node(Ntype_op::Mux);
+  mux_node.setup_sink_pin("0").connect_driver(sel_dpin);
+
+  int pid = 1;
+  for(const auto &dpin:mux_dpins) {
+    mux_node.setup_sink_pin_raw(pid).connect_driver(dpin);
+    ++pid;
+  }
+
+  return std::tuple(mux_node.setup_driver_pin(), nullptr);
 }
 
 int Lgtuple::get_pos(std::string_view key) const {
@@ -209,10 +239,7 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(int pos, std::string_view key) c
   (void)pos;
   (void)key;
 
-  if ((pos==0 || pos<0) && key.empty()) {
-    // speedup simple case of just copying everything
-    return std::make_shared<Lgtuple>(*this);
-  }
+  I(pos>=0 || !key.empty()); // do not call without sub-fields
 
   std::shared_ptr<Lgtuple> tup;
 

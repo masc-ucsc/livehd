@@ -695,13 +695,7 @@ bool Cprop::process_tuple_get(Node &node) {
     return true;
   }
 
-  auto sub_tup = node_tup->get_sub_tuple(key_pos, key_name);
-  if (sub_tup) {
-    node2tuple[node.get_compact()] = sub_tup;
-    return true;
-  }
-
-  if (key_pos == -1 && key_name.empty()) {
+  if (key_pos<0 && key_name.empty()) {
     auto pos_dpin = node.get_sink_pin("position").get_driver_pin();
     auto pos_node = pos_dpin.get_node();
     if (pos_node.is_type_const()) {
@@ -716,11 +710,18 @@ bool Cprop::process_tuple_get(Node &node) {
     }
     if (res_tup) {
       I(res_dpin.is_invalid());
-      node2tuple[node.get_compact()] = sub_tup;
+      node2tuple[node.get_compact()] = res_tup;
     }else{
       I(!res_tup);
       collapse_forward_for_pin(node, res_dpin);
     }
+    return true;
+  }
+
+  auto sub_tup = node_tup->get_sub_tuple(key_pos, key_name);
+  if (sub_tup) {
+    node2tuple[node.get_compact()] = sub_tup;
+    return true;
   }
 
   Pass::info("tuple_get {} could not decide the field {}!", node.debug_name(), key_name);
