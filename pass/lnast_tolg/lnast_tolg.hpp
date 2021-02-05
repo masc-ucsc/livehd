@@ -90,8 +90,10 @@ protected:
   static bool tuple_get_has_key_pos     (const Node &tup_get);
   static bool is_tup_get_target         (const Node &tup_add, std::string_view tup_get_target);
   static bool is_tup_get_target         (const Node &tup_add, uint32_t         tup_get_target);
-  Node_pin    create_inp_tg             (LGraph *lg, std::string_view input_field);
-  void        create_out_ta             (LGraph *lg, std::string_view key_name, Node_pin &val_dpin);
+  Node_pin create_inp_tg             (LGraph *lg, std::string_view input_field);
+  void     create_out_ta             (LGraph *lg, std::string_view key_name, Node_pin &val_dpin);
+  void     create_inp_ta4dynamic_idx (LGraph *lg, const Node_pin &inp_dpin, std::string_view full_inp_hier_name);        
+  void     handle_inp_tg_runtime_idx (std::string_view hier_name, Node &chain_head, Node &cur_node);
 
   void     try_create_flattened_inp           (LGraph *lg);
   void     post_process_ginp_attr_connections (LGraph *lg);

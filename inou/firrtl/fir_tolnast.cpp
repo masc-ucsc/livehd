@@ -1157,7 +1157,6 @@ void Inou_firrtl::HandleTypeConvOp(Lnast& lnast, const firrtl::FirrtlPB_Expressi
  * NOTE: This return the first child of the last DOT/SELECT node made. */
 std::string_view Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB_Expression expr, Lnast_nid& parent_node, const bool is_rhs) {
   auto flattened_str = FlattenExpression(ln, parent_node, expr);
-  /* fmt::print("DEBUG flattened_str I:{}\n", flattened_str); */
 
   /* When storing info about IO and what not, a vector may be
    * stored like vec[0], vec[1], ... . This can be a problem if
@@ -1269,7 +1268,6 @@ std::string_view Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB
   }
 
   I(flattened_str.find(".") || flattened_str.find("["));
-  /* fmt::print("DEBUG flattened_str II:{}\n\n", flattened_str); */
   return CreateDotsSelsFromStr(ln, parent_node, flattened_str);
 }
 
@@ -1277,24 +1275,19 @@ std::string_view Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB
 void Inou_firrtl::set_leaf_type(std::string_view subname, std::string_view full_name, size_t prev, std::vector<std::pair<std::string_view, Inou_firrtl::Leaf_type>> &hier_subnames) {
   if (prev == 0) {
     hier_subnames.emplace_back(std::make_pair(subname, Leaf_type::Ref));
-    fmt::print("  DEBUG subname:{}, type:{}\n", subname, "Ref");
   } else if (full_name.at(prev-1) == '.') {
     auto first_char = subname.at(0);
     if (isdigit(first_char) || first_char == '-' || first_char == '+') {
       hier_subnames.emplace_back(std::make_pair(subname, Leaf_type::Const_num));          
-      fmt::print("  DEBUG subname:{}, type:{}\n", subname, "Const_num");
     } else {
       hier_subnames.emplace_back(std::make_pair(subname, Leaf_type::Const_str));          
-      fmt::print("  DEBUG subname:{}, type:{}\n", subname, "Const_str");
     }
   } else if (full_name.at(prev-1) == '[') {
     auto first_char = subname.at(0);
     if (isdigit(first_char) || first_char == '-' || first_char == '+') {
       hier_subnames.emplace_back(std::make_pair(subname, Leaf_type::Const_num));          
-      fmt::print("  DEBUG subname:{}, type:{}\n", subname, "Const_num");
     } else {
       hier_subnames.emplace_back(std::make_pair(subname, Leaf_type::Ref));          
-      fmt::print("  DEBUG subname:{}, type:{}\n", subname, "Ref");
     }
   }
 }
@@ -1330,7 +1323,6 @@ void Inou_firrtl::split_hier_name(std::string_view full_name, std::vector<std::p
  * function will be able to deconstruct it into
  * DOT and SELECT nodes in an LNAST. */
 std::string_view Inou_firrtl::CreateDotsSelsFromStr(Lnast& ln, Lnast_nid& parent_node, const std::string& full_name) {
-  fmt::print("DEBUG DotSel full string:{}\n", full_name);
   I((full_name.find(".") != std::string::npos) || (full_name.find("[") != std::string::npos));
 
   auto tmp_var_name = create_temp_var(ln);
