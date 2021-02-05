@@ -639,7 +639,9 @@ bool Lnast_tolg::is_hier_inp_bits_set(const Lnast_nid &lnidx_ta) {
   return false;
 }
 
-// since it's BW setting on the hier-inp, you know it's flattened scalar -> can create lg hier-input for it
+// note-I: since it's BW setting on the hier-inp, you know it's flattened scalar -> can create lg hier-input for it
+// note-II: since these inputs might be access by a TG with run-time index, you have to collect these flattened graph-inputs
+//          into a TA-chain for the future possible access. 
 void Lnast_tolg::process_hier_inp_bits_set(LGraph *lg, const Lnast_nid &lnidx_ta) {
   std::string hier_inp_name;
   for (const auto &child : lnast->children(lnidx_ta)) {
