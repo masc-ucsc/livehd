@@ -22,8 +22,11 @@ Ntype::_init::_init() {
       assert(is_unlimited_sink(static_cast<Ntype_op>(op)) || pid>10 || sink_name2pid[pin_name[0]][op] == -1 || sink_name2pid[pin_name[0]][op] == pid); // No double assign
 
       sink_pid2name[pid][op] = pin_name;
-      sink_name2pid[pin_name[0]][op] = pid;
 
+      if (is_unlimited_sink(static_cast<Ntype_op>(op)) && pid >=10)
+        continue;
+
+      sink_name2pid[pin_name[0]][op] = pid;
       assert(pid == Ntype::get_sink_pid(static_cast<Ntype_op>(op), pin_name));
       assert(pin_name == Ntype::get_sink_name(static_cast<Ntype_op>(op), pid));
     }
