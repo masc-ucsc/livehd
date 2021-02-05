@@ -77,26 +77,26 @@ protected:
   static bool is_err_var_undefined (std::string_view name) {return name.substr(0,17) == "err_var_undefined"; }
   static bool is_scalar            (Node_pin dpin) {return dpin.get_node().get_type_op() != Ntype_op::TupAdd; }
 
-  bool        subgraph_outp_is_tuple (Sub_node* sub);
-  void        subgraph_io_connection (LGraph *lg, Sub_node* sub, std::string_view arg_tup_name, std::string_view res_name, Node subg_node);
-  std::vector<std::string_view> split_hier_name (std::string_view hier_name);
+  bool subgraph_outp_is_tuple (Sub_node* sub);
+  void subgraph_io_connection (LGraph *lg, Sub_node* sub, std::string_view arg_tup_name, std::string_view res_name, Node subg_node);
+  void split_hier_name (std::string_view hier_name, std::vector<std::string_view> &hier_inp_subnames);
 
   // tuple related
-  Node_pin     setup_tuple_ref           (LGraph *lg, std::string_view tup_name);
-  Node_pin     setup_ta_ref              (LGraph *lg, std::string_view tup_name, int16_t);
-  Node_pin     setup_field_dpin          (LGraph *lg, std::string_view key_name);
-  void         reconnect_to_ff_qpin      (LGraph *lg, const Node &tg_node);
-  static bool  tuple_get_has_key_name    (const Node &tup_get);
-  static bool  tuple_get_has_key_pos     (const Node &tup_get);
-  static bool  is_tup_get_target         (const Node &tup_add, std::string_view tup_get_target);
-  static bool  is_tup_get_target         (const Node &tup_add, uint32_t         tup_get_target);
-  Node_pin     create_inp_tg             (LGraph *lg, std::string_view input_field);
-  void         create_out_ta             (LGraph *lg, std::string_view key_name, Node_pin &val_dpin);
+  Node_pin    setup_tuple_ref           (LGraph *lg, std::string_view tup_name);
+  Node_pin    setup_ta_ref              (LGraph *lg, std::string_view tup_name, int16_t);
+  Node_pin    setup_field_dpin          (LGraph *lg, std::string_view key_name);
+  void        reconnect_to_ff_qpin      (LGraph *lg, const Node &tg_node);
+  static bool tuple_get_has_key_name    (const Node &tup_get);
+  static bool tuple_get_has_key_pos     (const Node &tup_get);
+  static bool is_tup_get_target         (const Node &tup_add, std::string_view tup_get_target);
+  static bool is_tup_get_target         (const Node &tup_add, uint32_t         tup_get_target);
+  Node_pin    create_inp_tg             (LGraph *lg, std::string_view input_field);
+  void        create_out_ta             (LGraph *lg, std::string_view key_name, Node_pin &val_dpin);
 
-  void         try_create_flattened_inp           (LGraph *lg);
-  void         post_process_ginp_attr_connections (LGraph *lg);
-  void         dfs_try_create_flattened_inp (LGraph *lg, Node_pin &cur_node_spin, std::string hier_name, Node &chain_head);
-  Node_pin     create_const                 (LGraph *lg, std::string_view const_str);
+  void     try_create_flattened_inp           (LGraph *lg);
+  void     post_process_ginp_attr_connections (LGraph *lg);
+  void     dfs_try_create_flattened_inp       (LGraph *lg, Node_pin &cur_node_spin, std::string hier_name, Node &chain_head);
+  Node_pin create_const                       (LGraph *lg, std::string_view const_str);
 
   // attribute related
   bool is_new_var_chain (const Lnast_nid &lnidx_opr);

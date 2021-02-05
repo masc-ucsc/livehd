@@ -639,8 +639,8 @@ bool Lnast_tolg::is_hier_inp_bits_set(const Lnast_nid &lnidx_ta) {
   return false;
 }
 
-// note-I: since it's BW setting on the hier-inp, you know it's flattened scalar -> can create lg hier-input for it
-// note-II: since these inputs might be access by a TG with run-time index, you have to collect these flattened graph-inputs
+// note-I:  since it's BW setting on the hier-inp, you know it's flattened scalar -> can create lg hier-input for it
+// note-II: these inputs might be access by a TG with run-time index, you have to collect these flattened graph-inputs
 //          into a TA-chain for the future possible access. 
 void Lnast_tolg::process_hier_inp_bits_set(LGraph *lg, const Lnast_nid &lnidx_ta) {
   std::string hier_inp_name;
@@ -1284,24 +1284,20 @@ bool Lnast_tolg::subgraph_outp_is_tuple(Sub_node *sub) {
   return false;
 }
 
-// FIXME->sh: TODO: instead of return full vector, passing the reference of vector as an function argument
-std::vector<std::string_view> Lnast_tolg::split_hier_name(std::string_view hier_name) {
+void Lnast_tolg::split_hier_name(std::string_view full_name, std::vector<std::string_view> & hier_io_subnames) {
   auto start = 0u;
-  auto end   = hier_name.find('.');
-  std::vector<std::string_view> token_vec;
+  auto end   = full_name.find('.');
   while (end != std::string_view::npos) {
-    std::string_view token = hier_name.substr(start, end - start);
-    token_vec.emplace_back(token);
+    std::string_view token = full_name.substr(start, end - start);
+    hier_io_subnames.emplace_back(token);
     start = end + 1;  //
-    end   = hier_name.find('.', start);
+    end   = full_name.find('.', start);
   }
-  std::string_view token = hier_name.substr(start, end - start);
-  token_vec.emplace_back(token);
-  return token_vec;
+  std::string_view token = full_name.substr(start, end - start);
+  hier_io_subnames.emplace_back(token);
 }
 
-void Lnast_tolg::subgraph_io_connection(LGraph *lg, Sub_node *sub, std::string_view arg_tup_name, std::string_view ret_name,
-                                        Node subg_node) {
+void Lnast_tolg::subgraph_io_connection(LGraph *lg, Sub_node *sub, std::string_view arg_tup_name, std::string_view ret_name, Node subg_node) {
   bool subg_outp_is_scalar = !subgraph_outp_is_tuple(sub);
 
   // start query subgraph io and construct TGs for connecting inputs, TAs/scalar for connecting outputs
@@ -1310,7 +1306,9 @@ void Lnast_tolg::subgraph_io_connection(LGraph *lg, Sub_node *sub, std::string_v
     // I. io_pin is_input
     if (io_pin->is_input()) {
       std::vector<Node_pin> created_tup_gets;
-      auto hier_inp_subnames = split_hier_name(io_pin->name);
+      std::vector<std::string_view> hier_inp_subnames;
+
+      split_hier_name(io_pin->name, hier_inp_subnames);
       for (const auto &subname : hier_inp_subnames) {
         auto tup_get    = lg->create_node(Ntype_op::TupGet);
         auto tn_spin    = tup_get.setup_sink_pin("tuple_name");
@@ -1383,9 +1381,10 @@ void Lnast_tolg::subgraph_io_connection(LGraph *lg, Sub_node *sub, std::string_v
     }
 
     // III. hier-subgraph-output
-    auto hier_inp_subnames = split_hier_name(io_pin->name);
+    std::vector<std::string_view> hier_out_subnames;
+    split_hier_name(io_pin->name, hier_out_subnames);
     auto i                 = 0;
-    for (const auto &subname : hier_inp_subnames) {
+    for (const auto &subname : hier_out_subnames) {
       if (i == 0) {
         // handle the TA of function call return and the TA of first subname
         auto ta_ret      = lg->create_node(Ntype_op::TupAdd);
@@ -1400,12 +1399,12 @@ void Lnast_tolg::subgraph_io_connection(LGraph *lg, Sub_node *sub, std::string_v
         name2dpin[ret_name] = ta_ret_dpin;
         ta_ret_dpin.set_name(ret_name);
 
-        if (hier_inp_subnames.size() == 1) {
+        if (hier_out_subnames.size() == 1) {
           auto subg_dpin = subg_node.setup_driver_pin(io_pin->name);
           subg_dpin.connect_sink(ta_ret.setup_sink_pin("value"));
           break;
         } else {
-          I(hier_inp_subnames.size() > 1);
+          I(hier_out_subnames.size() > 1);
           auto ta_subname      = lg->create_node(Ntype_op::TupAdd);
           auto ta_subname_dpin = ta_subname.setup_driver_pin();
 
@@ -1418,18 +1417,18 @@ void Lnast_tolg::subgraph_io_connection(LGraph *lg, Sub_node *sub, std::string_v
           ta_subname_dpin.set_name(subname);
           i++;
         }
-      } else if (i == (int)(hier_inp_subnames.size() - 1)) {
+      } else if (i == (int)(hier_out_subnames.size() - 1)) {
         auto parent_field_dpin = setup_field_dpin(lg, subname);
-        auto parent_subname    = hier_inp_subnames[i - 1];
+        auto parent_subname    = hier_out_subnames[i - 1];
         auto ta_hier_parent    = name2dpin[parent_subname].get_node();
         parent_field_dpin.connect_sink(ta_hier_parent.setup_sink_pin("field"));
         auto subg_dpin = subg_node.setup_driver_pin(io_pin->name);
         subg_dpin.connect_sink(ta_hier_parent.setup_sink_pin("value"));
 
       } else {  // the middle ones, if any
-        I(hier_inp_subnames.size() >= 3);
+        I(hier_out_subnames.size() >= 3);
         auto ta_subname        = lg->create_node(Ntype_op::TupAdd);
-        auto parent_subname    = hier_inp_subnames[i - 1];
+        auto parent_subname    = hier_out_subnames[i - 1];
         auto ta_hier_parent    = name2dpin[parent_subname].get_node();
         auto parent_field_dpin = setup_field_dpin(lg, subname);
 
