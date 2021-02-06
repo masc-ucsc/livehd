@@ -98,7 +98,7 @@ protected:
 
   void     try_create_flattened_inp           (LGraph *lg);
   void     post_process_ginp_attr_connections (LGraph *lg);
-  void     dfs_try_create_flattened_inp       (LGraph *lg, Node_pin &cur_node_spin, std::string hier_name, Node &chain_head, absl::flat_hash_set<Node::Compact> &visited);
+  void     dfs_try_create_flattened_inp       (LGraph *lg, Node_pin &cur_node_spin, std::string hier_name, Node &chain_head);
   Node_pin create_const                       (LGraph *lg, std::string_view const_str);
 
   // attribute related

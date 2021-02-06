@@ -1780,7 +1780,6 @@ void Lnast_tolg::post_process_ginp_attr_connections(LGraph *lg) {
 
 void Lnast_tolg::try_create_flattened_inp(LGraph *lg) {
   auto uinp = lg->get_graph_input("$");
-  absl::flat_hash_set<Node::Compact> visited;
 
   for (auto &e : uinp.out_edges()) {
     auto tg = e.sink.get_node();
@@ -1790,7 +1789,7 @@ void Lnast_tolg::try_create_flattened_inp(LGraph *lg) {
     auto hier_name = (std::string)tg.get_driver_pin().get_name().substr(1);  // get rid of "$" in "$foo"
 
     for (auto &tg_out : tg.out_edges()) {
-      dfs_try_create_flattened_inp(lg, tg_out.sink, hier_name, tg, visited);
+      dfs_try_create_flattened_inp(lg, tg_out.sink, hier_name, tg);
     }
 
     for (auto itr : inp_artifacts[tg.get_compact()]) {
@@ -1846,7 +1845,7 @@ void Lnast_tolg::create_ginp_as_runtime_idx(LGraph *lg, std::string_view hier_na
   return;
 }
 
-void Lnast_tolg::dfs_try_create_flattened_inp(LGraph *lg, Node_pin &cur_node_spin, std::string hier_name, Node &chain_head, absl::flat_hash_set<Node::Compact> &visited) {
+void Lnast_tolg::dfs_try_create_flattened_inp(LGraph *lg, Node_pin &cur_node_spin, std::string hier_name, Node &chain_head) {
   auto cur_node  = cur_node_spin.get_node();
   auto cur_ntype = cur_node.get_type_op();
   bool is_leaf   = false;
@@ -1873,16 +1872,16 @@ void Lnast_tolg::dfs_try_create_flattened_inp(LGraph *lg, Node_pin &cur_node_spi
       new_hier_name = absl::StrCat(hier_name, ".", key_pos);
     }
     for (auto &e : cur_node.out_edges()) {
-      dfs_try_create_flattened_inp(lg, e.sink, new_hier_name, chain_head, visited);
+      dfs_try_create_flattened_inp(lg, e.sink, new_hier_name, chain_head);
     }
   } else if (cur_ntype == Ntype_op::Or && cur_node.inp_edges().size() == 1) {
     for (auto &e : cur_node.out_edges()) {
-      dfs_try_create_flattened_inp(lg, e.sink, hier_name, chain_head, visited);
+      dfs_try_create_flattened_inp(lg, e.sink, hier_name, chain_head);
     }
   } else if (cur_ntype == Ntype_op::TupAdd && check_is_tup_assign(cur_node)) {
     inp_artifacts[chain_head.get_compact()].insert(cur_node);
     for (auto &e : cur_node.out_edges()) {
-      dfs_try_create_flattened_inp(lg, e.sink, hier_name, chain_head, visited);
+      dfs_try_create_flattened_inp(lg, e.sink, hier_name, chain_head);
     }
   } else {
     // normal operation and pure scalar attribute set

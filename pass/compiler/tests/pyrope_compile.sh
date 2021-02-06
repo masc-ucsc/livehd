@@ -15,8 +15,8 @@ counter_nested_if counter logic lhs_wire adder_stage capricious_bits4
 capricious_bits firrtl_gcd_3bits nested_if firrtl_tail2 firrtl_tail3
 reg_bits_set '
 
-# pts='hier_tuple_nested_if hier_tuple_nested_if3 hier_tuple_nested_if4
-# hier_tuple_nested_if5 hier_tuple_nested_if7 capricious_bits2 '
+pts='hier_tuple_nested_if hier_tuple_nested_if3 hier_tuple_nested_if4
+hier_tuple_nested_if5 hier_tuple_nested_if7 capricious_bits2 '
 
 # pts='vector'
 # pts='vector2'
