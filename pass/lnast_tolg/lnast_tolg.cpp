@@ -1733,9 +1733,7 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(LGraph *lg) {
   // connect graph inputs to leaf_artifact fanout
   for (auto &itr : inp2leaf_tg_spins) {
     Node_pin ginp = itr.first;
-    fmt::print("DEBUG-2: ginp:{}\n", ginp.debug_name());
     for (auto &spin : itr.second) {
-      fmt::print("DEBUG-3: spin:{}\n", spin.debug_name());
       ginp.connect_sink(spin);
     }
   }
@@ -1850,7 +1848,6 @@ void Lnast_tolg::create_ginp_as_runtime_idx(LGraph *lg, std::string_view hier_na
 
 void Lnast_tolg::dfs_try_create_flattened_inp(LGraph *lg, Node_pin &cur_node_spin, std::string hier_name, Node &chain_head, absl::flat_hash_set<Node::Compact> &visited) {
   auto cur_node  = cur_node_spin.get_node();
-  fmt::print("DEBUG-0 cur_node:{}\n", cur_node.debug_name());
   auto cur_ntype = cur_node.get_type_op();
   bool is_leaf   = false;
   std::string new_hier_name;
@@ -1901,9 +1898,6 @@ void Lnast_tolg::dfs_try_create_flattened_inp(LGraph *lg, Node_pin &cur_node_spi
     else
       ginp = lg->get_graph_input(hier_name);
 
-    fmt::print("DEBUG-4: cur_node:{}\n", cur_node.debug_name());
-    fmt::print("DEBUG-4: ginp:{}\n", ginp.debug_name());
-    fmt::print("DEBUG-4: cur_node_spin:{}\n", cur_node_spin.debug_name());
     inp2leaf_tg_spins[ginp].emplace_back(cur_node_spin);
 
     // if can reach leaf, the hierarchy is ended as a scalar, all path
