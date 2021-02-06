@@ -160,7 +160,7 @@ bool Cprop::try_constant_prop(Node &node, XEdge_iterator &inp_edges_ordered) {
   if (n_inputs == n_inputs_constant && n_inputs) {
     replace_all_inputs_const(node, inp_edges_ordered);
     return true;
-  } else if (n_inputs && n_inputs_constant>1) {
+  } else if (n_inputs && n_inputs_constant>=1) { // Some ops like shift can opt with 1 constant input
     replace_part_inputs_const(node, inp_edges_ordered);
     return true;
   }
@@ -283,6 +283,13 @@ void Cprop::replace_part_inputs_const(Node &node, XEdge_iterator &inp_edges_orde
       collapse_forward_always_pin0(node, inp_edges_ordered);
     }else if (npending==1 && nconstants==0) {
       collapse_forward_always_pin0(node, edge_it2);
+    }
+  } else if (op == Ntype_op::SRA || op == Ntype_op::SHL) {
+    auto amt_node = inp_edges_ordered[1].driver.get_node();
+    I(amt_node == node.get_sink_pin("b").get_driver_node());
+
+    if (amt_node.is_type_const() && amt_node.get_type_const() == 0) {
+      collapse_forward_for_pin(node, inp_edges_ordered[0].driver);
     }
   }
 }
@@ -874,7 +881,7 @@ void Cprop::do_trans(LGraph *lg) {
     } else if (op == Ntype_op::Sub) {
       process_subgraph(node);
       continue;
-    } else if (op == Ntype_op::Sflop || op == Ntype_op::Aflop || op == Ntype_op::Latch || op == Ntype_op::Fflop || op == Ntype_op::Memory || op == Ntype_op::Sub) {
+    } else if (op == Ntype_op::Sflop || op == Ntype_op::Aflop || op == Ntype_op::Latch || op == Ntype_op::Fflop || op == Ntype_op::Memory) {
       fmt::print("cprop skipping node:{}\n", node.debug_name());
       // FIXME: if flop feeds itself (no update, delete, replace for zero)
       // FIXME: if flop is disconnected *after AttrGet processed*, the flop was not used. Delete

@@ -742,8 +742,7 @@ void Pass_lnast_fromlg::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node, co
   auto asg_idx_i = lnast.add_child(parent_node, Lnast_node::create_assign(""));
   auto pin_name  = lnast.add_string(dpin_get_name(pin));  // it should be with _._
   lnast.add_child(asg_idx_i, Lnast_node::create_ref(pin_name));
-  auto bits      = pin.get_bits();
-  auto const_str = pin.get_bits() == 1 ? "0u1bit" : absl::StrCat("0u", bits, "bits");
+  auto const_str = std::to_string(pin.get_bits());
   //  auto const_str = dpin_get_name(pin);//fails 3 tests
   lnast.add_child(asg_idx_i, Lnast_node::create_const(lnast.add_string(const_str)));
 

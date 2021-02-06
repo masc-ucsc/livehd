@@ -13,7 +13,7 @@
 /* #include "cfg_lnast.hpp" */
 #include "lnast_generic_parser.hpp"
 
-//void setup_inou_code_gen() { Inou_code_gen::setup(); }
+// void setup_inou_code_gen() { Inou_code_gen::setup(); }
 static Pass_plugin sample("Inou_code_gen", Inou_code_gen::setup);
 
 Inou_code_gen::Inou_code_gen(const Eprp_var &var) : Pass("inou_code_gen", var) { lg = 0; }
@@ -74,4 +74,3 @@ void Inou_code_gen::to_cpp(Eprp_var &var) {
     p.to_xxx(Code_gen_type::Type_cpp, l);
   }
 }
-
