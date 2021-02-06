@@ -32,8 +32,8 @@ NotAnd Trivial Tail TrivialArith Shifts Darken HiLoMultiplier Accumulator
 LFSR16 VendingMachine VendingMachineSwitch'  
 
 # pts='Mul'
-pts='Test6'
-# pts='Test1'
+# pts='Test6'
+pts='Test1'
 
 # pts='Life'
 # pts='VecShiftRegister'

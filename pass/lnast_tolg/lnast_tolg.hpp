@@ -94,10 +94,11 @@ protected:
   void     create_out_ta             (LGraph *lg, std::string_view key_name, Node_pin &val_dpin);
   void     create_inp_ta4dynamic_idx (LGraph *lg, const Node_pin &inp_dpin, std::string_view full_inp_hier_name);        
   void     handle_inp_tg_runtime_idx (std::string_view hier_name, Node &chain_head, Node &cur_node);
+  void     create_ginp_as_runtime_idx(LGraph *lg, std::string_view hier_name, Node &chain_head, Node &cur_node);
 
   void     try_create_flattened_inp           (LGraph *lg);
   void     post_process_ginp_attr_connections (LGraph *lg);
-  void     dfs_try_create_flattened_inp       (LGraph *lg, Node_pin &cur_node_spin, std::string hier_name, Node &chain_head);
+  void     dfs_try_create_flattened_inp       (LGraph *lg, Node_pin &cur_node_spin, std::string hier_name, Node &chain_head, absl::flat_hash_set<Node::Compact> &visited);
   Node_pin create_const                       (LGraph *lg, std::string_view const_str);
 
   // attribute related

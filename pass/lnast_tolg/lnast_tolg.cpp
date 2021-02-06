@@ -1733,7 +1733,9 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(LGraph *lg) {
   // connect graph inputs to leaf_artifact fanout
   for (auto &itr : inp2leaf_tg_spins) {
     Node_pin ginp = itr.first;
+    fmt::print("DEBUG-2: ginp:{}\n", ginp.debug_name());
     for (auto &spin : itr.second) {
+      fmt::print("DEBUG-3: spin:{}\n", spin.debug_name());
       ginp.connect_sink(spin);
     }
   }
@@ -1780,14 +1782,17 @@ void Lnast_tolg::post_process_ginp_attr_connections(LGraph *lg) {
 
 void Lnast_tolg::try_create_flattened_inp(LGraph *lg) {
   auto uinp = lg->get_graph_input("$");
+  absl::flat_hash_set<Node::Compact> visited;
+
   for (auto &e : uinp.out_edges()) {
     auto tg = e.sink.get_node();
     I(tg.get_type_op() == Ntype_op::TupGet);
 
     inp_artifacts[tg.get_compact()].insert(tg);                              // insert the head of the chain
     auto hier_name = (std::string)tg.get_driver_pin().get_name().substr(1);  // get rid of "$" in "$foo"
+
     for (auto &tg_out : tg.out_edges()) {
-      dfs_try_create_flattened_inp(lg, tg_out.sink, hier_name, tg);
+      dfs_try_create_flattened_inp(lg, tg_out.sink, hier_name, tg, visited);
     }
 
     for (auto itr : inp_artifacts[tg.get_compact()]) {
@@ -1818,14 +1823,45 @@ void Lnast_tolg::handle_inp_tg_runtime_idx(std::string_view hier_name, Node &cha
 }
 
 
+void Lnast_tolg::create_ginp_as_runtime_idx(LGraph *lg, std::string_view hier_name, Node &chain_head, Node &cur_tg) {
+  // (1) iterate and remove previous TGs in the same chain
+  for (auto itr : inp_artifacts[chain_head.get_compact()]) {
+    if (!itr.is_invalid() && itr != cur_tg) {
+      itr.del_node();
+    }
+  }
+  
+  // (2) erase the table
+  inp_artifacts.erase(chain_head.get_compact());
+  
+  // (3) create graph_input and connect to cur_tg position sink pin
+  Node_pin ginp;
+  if (!lg->has_graph_input(hier_name))
+    ginp = lg->add_graph_input(hier_name, Port_invalid, 0);
+  else if (name2dpin.find(hier_name) != name2dpin.end())
+    ginp = name2dpin[hier_name];
+  else
+    ginp = lg->get_graph_input(hier_name);
 
-void Lnast_tolg::dfs_try_create_flattened_inp(LGraph *lg, Node_pin &cur_node_spin, std::string hier_name, Node &chain_head) {
-  auto        cur_node  = cur_node_spin.get_node();
-  auto        cur_ntype = cur_node.get_type_op();
-  bool        is_leaf   = false;
+  auto pos_spin = cur_tg.setup_sink_pin("position");
+  ginp.connect_sink(pos_spin);
+  return;
+}
+
+void Lnast_tolg::dfs_try_create_flattened_inp(LGraph *lg, Node_pin &cur_node_spin, std::string hier_name, Node &chain_head, absl::flat_hash_set<Node::Compact> &visited) {
+  auto cur_node  = cur_node_spin.get_node();
+  fmt::print("DEBUG-0 cur_node:{}\n", cur_node.debug_name());
+  auto cur_ntype = cur_node.get_type_op();
+  bool is_leaf   = false;
   std::string new_hier_name;
 
-  if (cur_ntype == Ntype_op::TupGet && cur_node_spin == cur_node.setup_sink_pin("tuple_name")) {
+  if (cur_ntype == Ntype_op::TupGet && cur_node_spin == cur_node.setup_sink_pin("position")) {
+    auto pos_spin = cur_node.setup_sink_pin("position");
+    if (pos_spin.is_connected() && pos_spin.get_driver_node().get_type_op() == Ntype_op::TupGet) {
+      create_ginp_as_runtime_idx(lg, hier_name, chain_head, cur_node);
+      return;
+    }
+  } else if (cur_ntype == Ntype_op::TupGet && cur_node_spin == cur_node.setup_sink_pin("tuple_name")) {
     auto pos_spin = cur_node.setup_sink_pin("position");
     if (pos_spin.is_connected() && pos_spin.get_driver_node().get_type_op() != Ntype_op::Const) {
       handle_inp_tg_runtime_idx(hier_name, chain_head, cur_node);
@@ -1840,16 +1876,16 @@ void Lnast_tolg::dfs_try_create_flattened_inp(LGraph *lg, Node_pin &cur_node_spi
       new_hier_name = absl::StrCat(hier_name, ".", key_pos);
     }
     for (auto &e : cur_node.out_edges()) {
-      dfs_try_create_flattened_inp(lg, e.sink, new_hier_name, chain_head);
+      dfs_try_create_flattened_inp(lg, e.sink, new_hier_name, chain_head, visited);
     }
   } else if (cur_ntype == Ntype_op::Or && cur_node.inp_edges().size() == 1) {
     for (auto &e : cur_node.out_edges()) {
-      dfs_try_create_flattened_inp(lg, e.sink, hier_name, chain_head);
+      dfs_try_create_flattened_inp(lg, e.sink, hier_name, chain_head, visited);
     }
   } else if (cur_ntype == Ntype_op::TupAdd && check_is_tup_assign(cur_node)) {
     inp_artifacts[chain_head.get_compact()].insert(cur_node);
     for (auto &e : cur_node.out_edges()) {
-      dfs_try_create_flattened_inp(lg, e.sink, hier_name, chain_head);
+      dfs_try_create_flattened_inp(lg, e.sink, hier_name, chain_head, visited);
     }
   } else {
     // normal operation and pure scalar attribute set
@@ -1865,6 +1901,9 @@ void Lnast_tolg::dfs_try_create_flattened_inp(LGraph *lg, Node_pin &cur_node_spi
     else
       ginp = lg->get_graph_input(hier_name);
 
+    fmt::print("DEBUG-4: cur_node:{}\n", cur_node.debug_name());
+    fmt::print("DEBUG-4: ginp:{}\n", ginp.debug_name());
+    fmt::print("DEBUG-4: cur_node_spin:{}\n", cur_node_spin.debug_name());
     inp2leaf_tg_spins[ginp].emplace_back(cur_node_spin);
 
     // if can reach leaf, the hierarchy is ended as a scalar, all path
