@@ -59,7 +59,6 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
     return;
   std::string output = "%";
   lnast->set_root(Lnast_node(Lnast_ntype::create_top()));
-
   auto node_stmts  = Lnast_node::create_stmts ("stmts",  line_num, pos1, pos2);
   auto idx_stmts   = lnast->add_child(lnast->get_root(), node_stmts);     
   fmt::print("Start RHS recursion\n");

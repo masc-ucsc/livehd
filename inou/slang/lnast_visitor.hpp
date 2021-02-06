@@ -17,8 +17,9 @@ protected:
   uint32_t errorLimit;
   uint32_t hierarchyDepth = 0;
 
+  std::unique_ptr<Lnast> lnast = std::make_unique<Lnast>("module_name_here", "some_file");
 
-  std::unique_ptr<Lnast> lnast;
+  // std::unique_ptr<Lnast> lnast;
   std::vector<std::string> verilogList;
   std::vector<std::string> operandList;
   std::vector<std::string> tmpList;
