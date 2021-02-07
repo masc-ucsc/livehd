@@ -34,7 +34,7 @@ LFSR16 VendingMachine VendingMachineSwitch'
 pts_wait_verilog_large_mux_code_gen='Mul Test6 Test1'
 
 # pts='Life'
-# pts='VecShiftRegister'
+pts='VecShiftRegister'
 # pts='VecShiftRegisterParam'
 # pts='VecShiftRegisterSimple '
 # pts='VecSearch '

@@ -188,7 +188,7 @@ public:
   std::string_view get_source() const { return source_filename; }
 
   bool             is_lhs    (const Lnast_nid &psts_nid, const Lnast_nid &opr_nid);
-  bool             is_reg    (std::string_view name) { return name.substr(0,1) == "#"; }
+  bool             is_reg    (std::string_view name) { return name.at(0) == '#'; }
   std::string_view get_name  (const Lnast_nid &nid)  { return get_data(nid).token.get_text(); }
   std::string_view get_vname (const Lnast_nid &nid)  { return get_data(nid).token.get_text(); } //better expression for LGraph passes
   Lnast_ntype      get_type  (const Lnast_nid &nid)  { return get_data(nid).type; }
