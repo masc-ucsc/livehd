@@ -4,7 +4,7 @@ lg2yosys -path {{path}} -name {{name}} {{#hier}} -hierarchy {{/hier}}
 
 {{#hier}}
 # OPT fails without hierarchy (flatten). Yosys looses hierarchy
-opt
+#opt
 {{/hier}}
 
 write_verilog {{file}}

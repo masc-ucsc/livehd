@@ -35,9 +35,6 @@ std::string Cgen_verilog::get_expression(Node_pin &dpin) const {
 
   const auto expr_it = pin2expr.find(dpin.get_compact_class());
   I(expr_it != pin2expr.end());
-  if (expr_it->second[0] == '(')
-    return expr_it->second;
-
   for(auto ch:expr_it->second) {
     if (!std::isalnum(ch) && !std::isspace(ch))
       return absl::StrCat( "(", expr_it->second, ")");
@@ -123,7 +120,7 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
   }else if (op == Ntype_op::Not) {
   }else if (op == Ntype_op::Tposs) {
     final_expr = get_expression(node.get_sink_pin("a").get_driver_pin());
-    fmt::print("FIXME: mark out as unsigned\n");
+    //fmt::print("FIXME: mark out as unsigned\n");
   }else if (op == Ntype_op::LT) {
   }else if (op == Ntype_op::GT) {
   }else if (op == Ntype_op::SHL) {
@@ -134,7 +131,7 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
     final_expr = absl::StrCat(val_expr, " >> ", amt_expr);
   }else if (op == Ntype_op::Const) {
     final_expr = node.get_type_const().to_verilog();
-  }else if (op == Ntype_op::TupKey || op == Ntype_op::TupAdd || op==Ntype_op::TupGet || op == Ntype_op::AttrSet || op == Ntype_op::AttrGet) {
+  }else if (op == Ntype_op::TupKey || op == Ntype_op::TupRef || op == Ntype_op::TupAdd || op==Ntype_op::TupGet || op == Ntype_op::AttrSet || op == Ntype_op::AttrGet) {
     node.dump();
     Pass::error("could not generate verilog unless it is low level Lgraph node:{} is type {}\n", node.debug_name(), Ntype::get_name(op));
     return;
@@ -158,13 +155,17 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
     }
   }
 
-  fmt::print("node:{} expr:{}\n",node.debug_name(), final_expr);
+  //fmt::print("node:{} expr:{}\n",node.debug_name(), final_expr);
+	if (final_expr.empty()) {
+		Pass::info("likely issue in node:{} that has no compute value", node.debug_name());
+		final_expr = "'hx";
+	}
 
   auto var_it = pin2var.find(dpin.get_compact_class());
   if (var_it == pin2var.end()) {
     pin2expr.emplace(dpin.get_compact_class(), final_expr);
   }else{
-    absl::StrAppend(&buffer, "  ", var_it->second, " = ", final_expr , "\n");
+    absl::StrAppend(&buffer, "  ", var_it->second, " = ", final_expr , ";\n");
   }
 }
 
@@ -270,7 +271,7 @@ void Cgen_verilog::create_locals(std::string &buffer, LGraph *lg) {
     if (!dpin.has_name()) {
       if (op == Ntype_op::Mux || node.is_type_flop()) {
         name = dpin.debug_name();
-      }else if (n_out<5) {
+      }else if (n_out<2) {
         continue; // It would be nice to pick a reasonable name
       }
 
@@ -293,7 +294,7 @@ void Cgen_verilog::create_locals(std::string &buffer, LGraph *lg) {
       if (node.has_name() && node.get_name()[0] != '_')
         continue;
 
-      if (n_out>1)
+      if (n_out<2)
         continue;
     }
 
