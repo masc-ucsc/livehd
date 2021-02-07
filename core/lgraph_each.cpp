@@ -32,8 +32,23 @@ void LGraph::each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)
   }
 
   std::sort(pin_pair.begin(), pin_pair.end(), [](const std::pair<Node_pin, Port_ID> &a, const std::pair<Node_pin, Port_ID> &b) {
-    if (a.second == Port_invalid && b.second == Port_invalid)
-      return a.first.get_pid() < b.first.get_pid();
+    if (a.second == Port_invalid && b.second == Port_invalid) {
+      if (a.first.is_graph_input() && b.first.is_graph_output()) {
+        return true;
+      }
+      if (a.first.is_graph_output() && b.first.is_graph_input()) {
+        return false;
+      }
+      if (a.first.is_graph_input() && b.first.is_graph_input()) {
+        auto a_name = a.first.get_name();
+        if (a_name == "clock")
+          return true;
+        if (a_name == "reset")
+          return true;
+      }
+
+      return a.first.get_name() < b.first.get_name();
+    }
     if (a.second == Port_invalid)
       return true;
     if (b.second == Port_invalid)

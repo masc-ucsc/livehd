@@ -18,14 +18,14 @@ LGraph* Firmap::do_firrtl_mapping(LGraph *lg) {
 
   // clone graph input pins
   lg->each_graph_input([new_lg, this](Node_pin &old_dpin) {
-    auto new_ginp = new_lg->add_graph_input(old_dpin.get_name(), old_dpin.get_pid(), old_dpin.get_bits());
+    auto new_ginp = new_lg->add_graph_input(old_dpin.get_name(), Port_invalid, old_dpin.get_bits());
     pinmap.insert_or_assign(old_dpin, new_ginp);
   });
 
   // clone graph output pins
   lg->each_graph_output([new_lg, this](Node_pin &old_dpin) {
     auto old_spin = old_dpin.change_to_sink_from_graph_out_driver();
-    auto new_gout = new_lg->add_graph_output(old_dpin.get_name(), old_dpin.get_pid(), old_dpin.get_bits());
+    auto new_gout = new_lg->add_graph_output(old_dpin.get_name(), Port_invalid, old_dpin.get_bits());
     pinmap.insert_or_assign(old_spin, new_gout.change_to_sink_from_graph_out_driver());
     pinmap.insert_or_assign(old_dpin, new_gout);
   });

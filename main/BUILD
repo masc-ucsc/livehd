@@ -13,6 +13,7 @@ cc_binary(
             "//elab:elab",
             "//eprp:eprp",
 
+            "//inou/cgen:inou_cgen",
             "//inou/code_gen:inou_code_gen",
             "//inou/firrtl:inou_firrtl_cpp",
             "//inou/graphviz:inou_graphviz",
