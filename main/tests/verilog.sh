@@ -101,7 +101,8 @@ do
   fi
 
   #echo "lgraph.match path:lgdb_yosys |> pass.cprop |> inou.yosys.fromlg odir:tmp_yosys" | ${LGSHELL} -q 2>tmp_yosys/${input}.err
-  echo "lgraph.match path:lgdb_yosys |> inou.yosys.fromlg odir:tmp_yosys" | ${LGSHELL} -q 2>tmp_yosys/${input}.err
+  echo "lgraph.match path:lgdb_yosys |> pass.cprop |> pass.bitwidth |> inou.yosys.fromlg odir:tmp_yosys" | ${LGSHELL} -q 2>tmp_yosys/${input}.err
+  #echo "lgraph.match path:lgdb_yosys |> inou.cgen.verilog odir:tmp_yosys" | ${LGSHELL} -q 2>tmp_yosys/${input}.err
   LC=$(grep -iv Warning tmp_yosys/${input}.err | grep -v perf_event | grep -v "recommended to use " | grep -v "IPC=" | wc -l | cut -d" " -f1)
   if [[ $LC -gt 0 ]]; then
     echo "FAIL: Faulty "$LC" err verilog file tmp_yosys/${input}.err"

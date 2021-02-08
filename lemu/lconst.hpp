@@ -117,6 +117,7 @@ public:
 
   [[nodiscard]] Lconst tposs_op() const;
   [[nodiscard]] Lconst add_op(const Lconst &o) const;
+  [[nodiscard]] Lconst mult_op(const Lconst &o) const;
   [[nodiscard]] Lconst sub_op(const Lconst &o) const;
   [[nodiscard]] Lconst lsh_op(Bits_t amount) const;
   [[nodiscard]] Lconst rsh_op(Bits_t amount) const;
