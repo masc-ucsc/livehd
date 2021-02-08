@@ -140,11 +140,9 @@ pts_long_time='firrtl_gcd'
 
 pts='reg_bits_set bits_rhs reg__q_pin scalar_tuple hier_tuple_io hier_tuple3
 hier_tuple2 tuple_if ssa_rhs out_ssa attr_set if2 hier_tuple lhs_wire
-tuple_copy if tuple_copy2 firrtl_tail hier_tuple_nested_if
-hier_tuple_nested_if2 hier_tuple_nested_if3 hier_tuple_nested_if4
-hier_tuple_nested_if5 hier_tuple_nested_if7 lhs_wire2 counter_nested_if counter
-logic lhs_wire adder_stage capricious_bits4 capricious_bits firrtl_gcd_3bits
-nested_if firrtl_tail2 firrtl_tail3 reg_bits_set '
+tuple_copy if tuple_copy2 firrtl_tail hier_tuple_nested_if2 lhs_wire2
+counter_nested_if counter logic lhs_wire adder_stage capricious_bits4
+capricious_bits firrtl_gcd_3bits nested_if firrtl_tail2 firrtl_tail3 '
 
 
 # pts='firrtl_tail reg_bits_set  reg_bits_set firrtl_tail2 firrtl_tail3 firrtl_gcd_3bits  tuple_copy2 '
