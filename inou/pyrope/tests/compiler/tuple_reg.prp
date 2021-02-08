@@ -1,0 +1,18 @@
+$en.__ubits   = 1
+$src1.__ubits = 16
+$src2.__ubits = 16
+#reg.cnt.__ubits = 4
+// #reg.sum.__ubits = 17
+
+prev = $src1 + $src2
+#reg = (cnt = 0, sum = prev)
+
+if ($en) {
+  // #reg.cnt := #reg.cnt + 1
+  #reg.cnt := 3 + 5
+}
+
+%out.cnt = #reg.cnt
+%out.sum = #reg.sum
+// or 
+// %out = #reg

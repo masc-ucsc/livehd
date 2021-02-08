@@ -856,7 +856,7 @@ void Cprop::process_tuple_add(Node &node) {
     for(auto &e:node.out_edges()) {
       if (e.sink.is_graph_output() && e.sink.get_pin_name() == "%") {
         try_create_graph_output(node, node_tup); // first add outputs
-      }else if (e.sink.get_node().is_type_sub_present() && e.sink.get_pin_name() == "$") {
+      } else if (e.sink.get_node().is_type_sub_present() && e.sink.get_pin_name() == "$") {
         auto sub_node = e.sink.get_node();
         try_connect_tuple_to_sub(e.sink, node_tup, sub_node, node);
       }

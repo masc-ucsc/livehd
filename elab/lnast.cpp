@@ -621,11 +621,6 @@ void Lnast::resolve_ssa_lhs_subs(const Lnast_nid &psts_nid) {
       continue;
     } else if (type.is_if()) {
       ssa_lhs_if_subtree(opr_nid);
-    } else if (type.is_tuple_add_get_pair()) {
-      auto c0 = get_first_child(opr_nid);
-      auto c1 = get_sibling_next(c0);
-      ssa_lhs_handle_a_statement(psts_nid, c0);
-      ssa_lhs_handle_a_statement(psts_nid, c1);
     } else if (type.is_dp_assign()) {
       insert_implicit_dp_parent(opr_nid);
       ssa_lhs_handle_a_statement(psts_nid, opr_nid);
@@ -645,11 +640,6 @@ void Lnast::resolve_ssa_rhs_subs(const Lnast_nid &psts_nid) {
       continue;
     } else if (type.is_if()) {
       ssa_rhs_if_subtree(opr_nid);
-    } else if (type.is_tuple_add_get_pair()) {
-      auto c0 = get_first_child(opr_nid);
-      auto c1 = get_sibling_next(c0);
-      ssa_rhs_handle_a_statement(psts_nid, c0);
-      ssa_rhs_handle_a_statement(psts_nid, c1);
     } else {
       ssa_rhs_handle_a_statement(psts_nid, opr_nid);
     }
@@ -667,11 +657,6 @@ void Lnast::ssa_rhs_if_subtree(const Lnast_nid &if_nid) {
         I(!type.is_func_def());
         if (type.is_if()) {
           ssa_rhs_if_subtree(opr_nid);
-        } else if (type.is_tuple_add_get_pair()){
-          auto c0 = get_first_child(opr_nid);
-          auto c1 = get_sibling_next(c0);
-          ssa_rhs_handle_a_statement(itr_nid, c0);
-          ssa_rhs_handle_a_statement(itr_nid, c1);
         } else {
           ssa_rhs_handle_a_statement(itr_nid, opr_nid);
         }
@@ -847,11 +832,6 @@ void Lnast::ssa_lhs_if_subtree(const Lnast_nid &if_nid) {
         I(!type.is_func_def());
         if (type.is_if()) {
           ssa_lhs_if_subtree(opr_nid);
-        } else if (type.is_tuple_add_get_pair()) {
-          auto c0 = get_first_child(opr_nid);
-          auto c1 = get_sibling_next(c0);
-          ssa_lhs_handle_a_statement(itr_nid, c0);
-          ssa_lhs_handle_a_statement(itr_nid, c1);
         } else if (type.is_dp_assign()) {
           insert_implicit_dp_parent(opr_nid);
           ssa_lhs_handle_a_statement(itr_nid, opr_nid);

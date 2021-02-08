@@ -52,8 +52,6 @@ void Lnast_tolg::process_ast_stmts(LGraph *lg, const Lnast_nid &lnidx_stmts) {
       process_ast_tuple_add_op(lg, lnidx);
     } else if (ntype.is_tuple_get()) {
       process_ast_tuple_get_op(lg, lnidx);
-    } else if (ntype.is_tuple_add_get_pair()) {
-      process_ast_tuple_add_get_pair_op(lg, lnidx);
     } else if (ntype.is_logical_op()) {
       process_ast_logical_op(lg, lnidx);
     } else if (ntype.is_as()) {
@@ -107,8 +105,8 @@ void Lnast_tolg::process_ast_if_op(LGraph *lg, const Lnast_nid &lnidx_if) {
       process_ast_tuple_add_op(lg, if_child);
     } else if (ntype.is_tuple_get()) {
       process_ast_tuple_get_op(lg, if_child);
-    } else if (ntype.is_tuple_add_get_pair()) {
-      process_ast_tuple_get_op(lg, if_child);
+    /* } else if (ntype.is_tuple_add_get_pair()) { */
+    /*   process_ast_tuple_get_op(lg, if_child); */
     } else {
       I(false);  // if-subtree should only contain cstmts/stmts/cond/phi nodes
     }
@@ -387,13 +385,6 @@ void Lnast_tolg::process_ast_tuple_struct(LGraph *lg, const Lnast_nid &lnidx_tup
   }
 }
 
-
-void Lnast_tolg::process_ast_tuple_add_get_pair_op(LGraph *lg, const Lnast_nid &lnidx_tag) {
-  auto c0_tag = lnast->get_first_child(lnidx_tag);
-  auto c1_tag = lnast->get_sibling_next(c0_tag);
-  process_ast_tuple_add_op(lg, c0_tag);
-  process_ast_tuple_get_op(lg, c1_tag);
-}
 
 Node_pin Lnast_tolg::create_inp_tg(LGraph *lg, std::string_view input_field) {
   auto tup_get_inp = lg->create_node(Ntype_op::TupGet);

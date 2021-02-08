@@ -28,7 +28,7 @@ VecShiftRegisterParam VecShiftRegisterSimple '
 
 pts='PlusAnd Test2 EnableShiftRegister MaxN SingleEvenFilter Coverage Counter
 Decrementer SubModule BundleConnect LogShifter Adder4 Xor6Thread2
-XorSelfThread1 Cell_alone ByteSelector SimpleALU Mux4 Max2 ResetShiftRegister
+XorSelfThread1 ByteSelector SimpleALU Mux4 Max2 ResetShiftRegister
 Parity RegisterSimple Register RegXor AddNot GCD_3bits Flop Test3 TrivialAdd
 NotAnd Trivial Tail TrivialArith Shifts Darken HiLoMultiplier Accumulator
 LFSR16 VendingMachine VendingMachineSwitch'  
@@ -140,8 +140,8 @@ pts_long_time='firrtl_gcd'
 
 pts='reg_bits_set bits_rhs reg__q_pin scalar_tuple hier_tuple_io hier_tuple3
 hier_tuple2 tuple_if ssa_rhs out_ssa attr_set if2 hier_tuple lhs_wire
-tuple_copy if firrtl_tail hier_tuple_nested_if2 lhs_wire2
-counter_nested_if counter logic lhs_wire adder_stage capricious_bits4
+tuple_copy if firrtl_tail hier_tuple_nested_if2 lhs_wire2 tuple_copy2
+counter_nested_if counter lhs_wire adder_stage capricious_bits4
 capricious_bits firrtl_gcd_3bits nested_if firrtl_tail2 firrtl_tail3 '
 
 

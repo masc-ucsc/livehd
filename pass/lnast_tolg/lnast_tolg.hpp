@@ -51,7 +51,6 @@ protected:
   void process_ast_attr_set_op      (LGraph *lg, const Lnast_nid &lnidx_aset);
   void process_ast_attr_get_op      (LGraph *lg, const Lnast_nid &lnidx_aget);
   void process_hier_inp_bits_set    (LGraph *lg, const Lnast_nid &lnidx_ta);
-  void process_ast_tuple_add_get_pair_op (LGraph *lg, const Lnast_nid &lnidx_tpa);
   void setup_lgraph_ios_and_final_var_name(LGraph *lg);
 
 
