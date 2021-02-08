@@ -2,6 +2,7 @@
 $en.__ubits  = 1
 $inp.__ubits = 4
 
+#x = 0 
 if ($en) {
   #x = $inp
 } else {

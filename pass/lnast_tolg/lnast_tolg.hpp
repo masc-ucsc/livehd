@@ -59,12 +59,12 @@ protected:
   Node     setup_node_opr_and_lhs    (LGraph *lg, const Lnast_nid &lnidx_opr, bool from_fir_op = false);
   Node_pin setup_tuple_assignment    (LGraph *lg, const Lnast_nid &lnidx_opr);
   Node_pin setup_node_assign_and_lhs (LGraph *lg, const Lnast_nid &lnidx_opr);
-  Node_pin setup_ref_node_dpin       (LGraph *lg, const Lnast_nid &lnidx, bool from_phi = false, bool want_reg_qpin = false);
+  Node_pin setup_ref_node_dpin       (LGraph *lg, const Lnast_nid &lnidx);
 
   Ntype_op decode_lnast_op           (const Lnast_nid &lnidx_opr);
   void     setup_dpin_ssa            (Node_pin &dpin, std::string_view var_name, uint16_t subs);
   void     nary_node_rhs_connections (LGraph *lg, Node &opr_node, const std::vector<Node_pin> &opds, bool is_subt);
-  void     setup_clk                 (LGraph *lg, Node &reg_node);
+  void     setup_clock               (LGraph *lg, Node &reg_node);
   void     setup_lnast_to_lgraph_primitive_type_mapping();
 
 
@@ -100,6 +100,7 @@ protected:
   void     post_process_ginp_attr_connections (LGraph *lg);
   void     dfs_try_create_flattened_inp       (LGraph *lg, Node_pin &cur_node_spin, std::string hier_name, Node &chain_head);
   Node_pin create_const                       (LGraph *lg, std::string_view const_str);
+  void     setup_final_register               (LGraph *lg, std::string_view vname, const Node_pin &dpin_largest_ssa); 
 
   // attribute related
   bool is_new_var_chain (const Lnast_nid &lnidx_opr);

@@ -122,12 +122,12 @@ private:
   void      opr_lhs_merge                       (const Lnast_nid &psts_nid);
   void      update_global_lhs_ssa_cnt_table     (const Lnast_nid &target_nid);
   void      respect_latest_global_lhs_ssa       (const Lnast_nid &target_nid);
-  void      reg_ini_global_lhs_ssa_cnt_table    (const Lnast_nid &target_nid); //just initialize global reg when appeared in rhs
   int8_t    check_rhs_cnt_table_parents_chain   (const Lnast_nid &psts_nid, const Lnast_nid &target_key);
   void      update_rhs_ssa_cnt_table            (const Lnast_nid &psts_nid, const Lnast_nid &target_key);
   void      analyze_dot_lrhs                    (const Lnast_nid &psts_nid);
   void      analyze_dot_lrhs_if_subtree         (const Lnast_nid &if_nid);
   void      analyze_dot_lrhs_handle_a_statement (const Lnast_nid &psts_nid, const Lnast_nid &opr_nid);
+  void      insert_implicit_dp_parent           (const Lnast_nid &opr_nid);
 
   bool      is_special_case_of_dot_rhs       (const Lnast_nid &psts_nid,  const Lnast_nid &opr_nid);
   void      ssa_rhs_handle_a_operand         (const Lnast_nid &gpsts_nid, const Lnast_nid &opd_nid); //gpsts = grand parent

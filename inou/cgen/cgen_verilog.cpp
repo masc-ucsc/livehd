@@ -351,6 +351,7 @@ void Cgen_verilog::append_to_file(const std::string &filename, int fd, const std
 }
 
 void Cgen_verilog::do_from_lgraph(LGraph *lg) {
+  (void) verbose;
 
   pin2var.clear();
   pin2expr.clear();

@@ -1,5 +1,6 @@
 $inp.__ubits = 1
 
+#x = 0
 if ($inp) {
   tmp = 4
   #x = tmp + 1

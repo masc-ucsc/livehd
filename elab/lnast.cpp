@@ -54,13 +54,13 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
   Phi_rtable top_phi_resolve_table;
   phi_resolve_tables[top_sts_nid] = top_phi_resolve_table;
 
-  /* fmt::print("Step-1: Analyze LHS or RHS of Tuple Dot/Sel\n"); */
+  /* fmt::print("Step-1: Analyze LHS or RHS of Tuple Dot/Sel;  */
   analyze_dot_lrhs(top_sts_nid);
 
   /* fmt::print("Step-2: Tuple_Add/Tuple_Get Analysis\n"); */
   trans_tuple_opr(top_sts_nid);
 
-  /* fmt::print("Step-3: LHS SSA\n"); */
+  /* fmt::print("Step-3: LHS SSA\n"); Insert DP-Assign Parent_nid\n");*/
   resolve_ssa_lhs_subs(top_sts_nid);
 
   //see Note I
@@ -473,8 +473,9 @@ void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid)
     add_child(new_tup_add, get_data(c0_paired)); //add final child of the new tup_add
 
     ref_data(dot_nid)->type = Lnast_ntype::create_invalid();
-
-    update_tuple_var_1st_scope_ssa_table(psts_nid, dot_nid); //FIXME->sh: if declare a tuple at local scope but parent scope also have this tuple_var, should also insert an TA assignment node here
+    
+    //FIXME->sh: if declare a tuple at local scope but parent scope also have this tuple_var, should also insert an TA assignment node here
+    update_tuple_var_1st_scope_ssa_table(psts_nid, dot_nid); 
     return;
   } 
   
@@ -523,7 +524,7 @@ void Lnast::analyze_dot_lrhs(const Lnast_nid &psts_nid) {
       analyze_dot_lrhs_if_subtree(opr_nid);
     } else if (type.is_dot() || type.is_select() || type.is_tuple_concat() || type.is_tuple()) {
       analyze_dot_lrhs_handle_a_statement(psts_nid, opr_nid);
-    }
+    }  
   }
 }
 
@@ -581,6 +582,11 @@ void Lnast::analyze_dot_lrhs_handle_a_statement(const Lnast_nid &psts_nid, const
   } //note: practically, the assign/opr_op related to the dot/sel_op should be very close
 }
 
+void Lnast::insert_implicit_dp_parent(const Lnast_nid &dp_nid) {
+  auto c0 = get_first_child(dp_nid);
+  add_child(dp_nid, get_data(c0));
+}
+
 
 void Lnast::analyze_dot_lrhs_if_subtree(const Lnast_nid &if_nid) {
   for (const auto &itr_nid : children(if_nid)) {
@@ -592,10 +598,11 @@ void Lnast::analyze_dot_lrhs_if_subtree(const Lnast_nid &if_nid) {
       for (const auto &opr_nid : children(itr_nid)) {
         auto type = get_type(opr_nid);
         I(!type.is_func_def());
-        if (type.is_if())
+        if (type.is_if()) {
           analyze_dot_lrhs_if_subtree(opr_nid);
-        else if (type.is_dot() || type.is_select())
+        } else if (type.is_dot() || type.is_select()) {
           analyze_dot_lrhs_handle_a_statement(itr_nid, opr_nid);
+        }  
       }
     } else if (get_type(itr_nid).is_phi()) {
       //FIXME->sh: check with phi
@@ -619,6 +626,9 @@ void Lnast::resolve_ssa_lhs_subs(const Lnast_nid &psts_nid) {
       auto c1 = get_sibling_next(c0);
       ssa_lhs_handle_a_statement(psts_nid, c0);
       ssa_lhs_handle_a_statement(psts_nid, c1);
+    } else if (type.is_dp_assign()) {
+      insert_implicit_dp_parent(opr_nid);
+      ssa_lhs_handle_a_statement(psts_nid, opr_nid);
     } else {
       ssa_lhs_handle_a_statement(psts_nid, opr_nid);
     }
@@ -697,12 +707,13 @@ void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
 
   //handle statement lhs
   if (type.is_assign() || type.is_as() || type.is_dp_assign() || type.is_attr_set() || type.is_tuple_add() || type.is_tuple_concat()) {
-    const auto  target_nid  = get_first_child(opr_nid);
-    const auto  target_name = get_name(target_nid);
+    const auto  lhs_nid  = get_first_child(opr_nid);
+    const auto  lhs_name = get_name(lhs_nid);
 
-    if (target_name.substr(0,3) == "___") return;
+    if (lhs_name.substr(0,3) == "___") 
+      return;
 
-    update_rhs_ssa_cnt_table(psts_nid, target_nid);
+    update_rhs_ssa_cnt_table(psts_nid, lhs_nid);
   }
 }
 
@@ -819,10 +830,6 @@ void Lnast::ssa_rhs_handle_a_operand(const Lnast_nid &gpsts_nid, const Lnast_nid
     set_data(opd_nid, Lnast_node(opd_type, ori_token, new_subs));
   } else {
     auto new_subs = check_rhs_cnt_table_parents_chain(gpsts_nid, opd_nid);
-    // note: if the register opd_subs is -1, it is intentionally to do it to recognize reg qpin
-    if (new_subs == -1 && !is_reg(opd_name)) { 
-      new_subs = 0; //FIXME->sh: actually, here is a good place to check undefined variable
-    }
     ssa_rhs_cnt_table[opd_name] = new_subs;
     set_data(opd_nid, Lnast_node(opd_type, ori_token, new_subs));
   }
@@ -845,6 +852,9 @@ void Lnast::ssa_lhs_if_subtree(const Lnast_nid &if_nid) {
           auto c1 = get_sibling_next(c0);
           ssa_lhs_handle_a_statement(itr_nid, c0);
           ssa_lhs_handle_a_statement(itr_nid, c1);
+        } else if (type.is_dp_assign()) {
+          insert_implicit_dp_parent(opr_nid);
+          ssa_lhs_handle_a_statement(itr_nid, opr_nid);
         } else {
           ssa_lhs_handle_a_statement(itr_nid, opr_nid);
         }
@@ -1008,15 +1018,6 @@ void Lnast::ssa_lhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
   update_global_lhs_ssa_cnt_table(lhs_nid);
   update_phi_resolve_table(psts_nid, lhs_nid);
   return;
-
-  //handle rhs of the statement, but only care about rhs register here
-  for (const auto &itr : children(opr_nid)) {
-    if (itr == get_first_child(opr_nid))
-      continue;
-
-    if (is_reg(get_name(itr)))
-      reg_ini_global_lhs_ssa_cnt_table(itr);
-  }
 }
 
 bool Lnast::is_lhs(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
@@ -1027,17 +1028,6 @@ bool Lnast::is_lhs(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
 
   I(false);
   return false;
-}
-
-void Lnast::reg_ini_global_lhs_ssa_cnt_table(const Lnast_nid &rhs_nid) {
-  // initialize global reg to zero when appeared in rhs
-  const auto  rhs_name = get_name(rhs_nid);
-  auto itr = global_ssa_lhs_cnt_table.find(rhs_name);
-  if (itr != global_ssa_lhs_cnt_table.end()) {
-    return;
-  } else {
-    global_ssa_lhs_cnt_table[rhs_name] = -1; //FIXME->sh: no effect? check later
-  }
 }
 
 
@@ -1079,9 +1069,9 @@ int8_t Lnast::check_rhs_cnt_table_parents_chain(const Lnast_nid &psts_nid, const
   if (itr != ssa_rhs_cnt_table.end()) {
     return ssa_rhs_cnt_table[target_name];
   } else if (get_parent(psts_nid) == get_root()) {
-    return -1;
+    return 0;
   } else if (get_type(get_parent(psts_nid)).is_func_def()) {
-    return -1;
+    return 0;
   } else {
     auto tmp_if_nid = get_parent(psts_nid);
     auto new_psts_nid = get_parent(tmp_if_nid);

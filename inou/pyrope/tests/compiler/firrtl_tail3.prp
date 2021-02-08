@@ -4,6 +4,7 @@ $inp.__ubits = 4
 x_q = #x.__q_pin
 
 cond = x_q == 0
+#x = 0
 if (cond) {
   #x = $inp        //#x->4b
 } else {
