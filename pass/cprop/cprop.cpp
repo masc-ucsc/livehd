@@ -225,7 +225,7 @@ void Cprop::replace_part_inputs_const(Node &node, XEdge_iterator &inp_edges_orde
     }
 
     collapse_forward_for_pin(node, a_pin);
-  } else if (op == Ntype_op::Sum || op == Ntype_op::Or) {
+  } else if (op == Ntype_op::Sum || op == Ntype_op::Or || op == Ntype_op::And) {
     Lconst result;
     XEdge first_const_edge;
     int nconstants = 0;
@@ -255,9 +255,11 @@ void Cprop::replace_part_inputs_const(Node &node, XEdge_iterator &inp_edges_orde
           I(i.sink.get_pin_name() == "B");
           result = result.sub_op(c);
         }
-      }else{
-        I(op==Ntype_op::Or);
+      }else if (op == Ntype_op::Or) {
         result = result.or_op(c);
+      }else{
+        I(op==Ntype_op::And);
+        result = result.and_op(c);
       }
 
       if (nconstants==1)
@@ -343,23 +345,23 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
     replace_logic_node(node, result, result_reduced);
 
   } else if (op == Ntype_op::And) {
+#if 0
     Bits_t max_bits = 0;
     for (auto &i : inp_edges_ordered) {
       auto c = i.driver.get_node().get_type_const();
       if (c.get_bits() > max_bits)
         max_bits = c.get_bits();
     }
+#endif
     Lconst result("-1");
     for (auto &i : inp_edges_ordered) {
       auto c = i.driver.get_node().get_type_const();
-      result = result.and_op(c.adjust_bits(max_bits));
+      result = result.and_op(c);
     }
 
     TRACE(fmt::print("cprop: and node:{} to {}\n", node.debug_name(), result.to_pyrope()));
 
-    Lconst result_reduced = result == Lconst("-1") ? 1 : 0;
-
-    replace_logic_node(node, result, result_reduced);
+    replace_node(node, result);
 
   } else if (op == Ntype_op::EQ) {
     bool eq = true;

@@ -390,6 +390,8 @@ void Bitwidth::process_logic_and(Node &node, XEdge_iterator &inp_edges) {
     if (it == flat_bwmap.end()) {
       max_sbits = Bits_max;
       continue;
+    }else if (!it->second.is_always_positive()) {
+      max_sbits = Bits_max;
     }
 
     Bits_t bw_sbits      = it->second.get_sbits();
