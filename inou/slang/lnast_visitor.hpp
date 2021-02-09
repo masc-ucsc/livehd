@@ -4,9 +4,10 @@
 #include <string>
 #include <vector>
 
-#include "lnast.hpp"
 #include "slang/compilation/Compilation.h"
 #include "slang/symbols/ASTVisitor.h"
+
+#include "lnast.hpp"
 
 class Lnast_visitor : public slang::ASTVisitor<Lnast_visitor, false, false> {
 protected:
