@@ -1,5 +1,4 @@
 // Visitor set to LiveHD
-// CSE220 Project
 
 #pragma once
 
