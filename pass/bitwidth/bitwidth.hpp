@@ -15,7 +15,7 @@ class Bitwidth {
 protected:
   int  max_iterations;
   bool hier;
-  bool must_perform_backward;
+  bool discovered_some_backward_nodes_try_again;
 
   enum class Attr { Set_other, Set_ubits, Set_sbits, Set_max, Set_min, Set_dp_assign };
 

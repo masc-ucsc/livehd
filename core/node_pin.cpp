@@ -82,6 +82,11 @@ bool Node_pin::is_graph_input() const { return current_g->has_graph_input(idx); 
 
 bool Node_pin::is_graph_output() const { return current_g->has_graph_output(idx); }
 
+bool Node_pin::is_type_const() const {
+  auto nid = current_g->get_node_nid(idx);
+  return current_g->is_type_const(nid);
+}
+
 Node_pin Node_pin::get_non_hierarchical() const {
   return Node_pin(current_g, current_g, Hierarchy_tree::invalid_index(), idx, pid, sink);
 }

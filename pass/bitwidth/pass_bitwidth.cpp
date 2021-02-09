@@ -12,7 +12,7 @@ static Pass_plugin sample("pass_bitwidth", Pass_bitwidth::setup);
 void Pass_bitwidth::setup() {
   Eprp_method m1("pass.bitwidth", "MIT algorithm for bitwidth optimization", &Pass_bitwidth::trans);
 
-  m1.add_label_optional("max_iterations", "maximum number of iterations to try", "10");
+  m1.add_label_optional("max_iterations", "maximum number of iterations to try", "3");
   m1.add_label_optional("hier", "hierarchical bitwidth", "false");
 
   register_pass(m1);

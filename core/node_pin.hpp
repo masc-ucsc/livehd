@@ -311,6 +311,9 @@ public:
   bool is_graph_input() const;
   bool is_graph_output() const;
 
+  // Some redundant code with node (implemented because frequent)
+  bool             is_type_const() const;
+
   Node_pin change_to_sink_from_graph_out_driver() const {
     I(is_graph_output());
     return switch_to_sink();
