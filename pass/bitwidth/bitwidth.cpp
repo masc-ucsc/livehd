@@ -462,7 +462,7 @@ void Bitwidth::process_logic_and(Node &node, XEdge_iterator &inp_edges) {
     if (bw_bits)
       continue;  // only handle unconstrained inputs
 
-    if (e.driver.is_graph_io())
+    if (e.driver.is_graph_io() || e.driver.get_node().is_type_loop_breaker())
       e.driver.set_bits(bw.get_sbits());
   }
 
