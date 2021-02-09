@@ -30,6 +30,7 @@ pts_new_BW_issuse='logic'
 # pts='hier_tuple_nested_if8'
 # pts='hier_tuple_nested_if6'
 # pts='pp'
+# pts='pp2'
 
 # Note: in this bash script, you MUST specify top module name AT FIRST POSITION
 pts_hier1='top sum top'

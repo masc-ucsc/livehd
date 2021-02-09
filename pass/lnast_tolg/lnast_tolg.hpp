@@ -29,6 +29,7 @@ private:
   absl::flat_hash_map<std::string_view, std::vector<Node>>      driver_var2wire_nodes; // for __last_value temporarily wire nodes
   absl::flat_hash_map<Node_pin, std::vector<Node_pin>>          inp2leaf_tg_spins;
   absl::flat_hash_map<Node::Compact, absl::flat_hash_set<Node>> inp_artifacts;
+  absl::flat_hash_set<std::string_view>                         tuple_reg_name_set;
 protected:
   void top_stmts2lgraph             (LGraph *lg, const Lnast_nid &lnidx_stmts);
   void process_ast_stmts            (LGraph *lg, const Lnast_nid &lnidx_stmts);

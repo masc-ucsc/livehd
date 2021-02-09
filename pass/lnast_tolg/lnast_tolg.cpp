@@ -167,9 +167,13 @@ void Lnast_tolg::process_ast_concat_op(LGraph *lg, const Lnast_nid &lnidx_concat
   if (lhs_name == opd1_name) {
     name2dpin[opd1_name] = tup_add.setup_driver_pin();
     tup_add.setup_driver_pin().set_name(opd1_name);
+    if (is_register(opd1_name))
+      tuple_reg_name_set.insert(lnast->get_vname(opd1));
   } else {
     name2dpin[lhs_name] = tup_add.setup_driver_pin();
     tup_add.setup_driver_pin().set_name(lhs_name);
+    if (is_register(lhs_name))
+      tuple_reg_name_set.insert(lnast->get_vname(lhs));
   }
 
   setup_dpin_ssa(name2dpin[lhs_name], lnast->get_vname(lhs), lnast->get_subs(lhs));
@@ -643,6 +647,8 @@ void Lnast_tolg::process_ast_tuple_add_op(LGraph *lg, const Lnast_nid &lnidx_ta)
 
       name2dpin[tup_sname] = tup_add.setup_driver_pin();
       tup_add.setup_driver_pin().set_name(tup_sname);  
+      if (is_register(tup_vname))
+        tuple_reg_name_set.insert(tup_vname);
       setup_dpin_ssa(name2dpin[tup_sname], lnast->get_vname(c0_ta), lnast->get_subs(c0_ta));
 
       ta_map.insert_or_assign(i, tup_add);
@@ -859,6 +865,8 @@ Node_pin Lnast_tolg::setup_tuple_assignment(LGraph *lg, const Lnast_nid &lnidx_o
 
   name2dpin[tup_name] = tup_add.setup_driver_pin();
   tup_add.setup_driver_pin().set_name(tup_name);
+  if (is_register(tup_name))
+    tuple_reg_name_set.insert(tup_vname);
   setup_dpin_ssa(name2dpin[tup_name], tup_vname, lnast->get_subs(lhs));
   return tup_add.setup_sink_pin("tuple_name");
 }
@@ -1359,7 +1367,7 @@ void Lnast_tolg::process_ast_func_def_op(LGraph *lg, const Lnast_nid &lnidx) {
   auto field_dpin = setup_field_dpin(lg, "__function_call");
   field_dpin.connect_sink(field_spin);
 
-  auto *     library = Graph_library::instance(path);
+  auto *library = Graph_library::instance(path);
   Lg_type_id lgid;
   if (library->has_name(subg_module_name)) {
     lgid = library->get_lgid(subg_module_name);
@@ -1594,31 +1602,34 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(LGraph *lg) {
 
 
 void Lnast_tolg::setup_final_register(LGraph *lg, std::string_view vname, const Node_pin &dpin_largest_ssa) {
-    auto reg_node = lg->create_node(Ntype_op::Sflop);
-    auto reg_din = reg_node.setup_sink_pin("din");
-    dpin_largest_ssa.connect_sink(reg_din);
-    setup_clock(lg, reg_node);
-    auto smallest_ssa_name = absl::StrCat(vname, "_0");
-    auto node_smallest_ssa = name2dpin[smallest_ssa_name].get_node();
-    Node_pin spin;
-    auto type = node_smallest_ssa.get_type_op();
-    if (type == Ntype_op::AttrSet) {
-      auto spin_name = node_smallest_ssa.setup_sink_pin("name");
-      if (spin_name.is_connected()) {
-        node_smallest_ssa = node_smallest_ssa.setup_sink_pin("name").get_driver_node();
-        I(node_smallest_ssa.get_type_op() == Ntype_op::Or);
-        spin = node_smallest_ssa.setup_sink_pin("A");
-      } else {
-        spin = node_smallest_ssa.setup_sink_pin("name");
-      }
-    } else if (type == Ntype_op::Or) {
-        spin = node_smallest_ssa.setup_sink_pin("A");
-    }
+  if (tuple_reg_name_set.find(vname) != tuple_reg_name_set.end()) 
+    return;
 
-    auto reg_qpin = reg_node.setup_driver_pin();
-    reg_qpin.connect_sink(spin);
-    reg_qpin.set_name(smallest_ssa_name);
-    name2dpin[smallest_ssa_name] = reg_qpin;
+  auto reg_node = lg->create_node(Ntype_op::Sflop);
+  auto reg_din = reg_node.setup_sink_pin("din");
+  dpin_largest_ssa.connect_sink(reg_din);
+  setup_clock(lg, reg_node);
+  auto smallest_ssa_name = absl::StrCat(vname, "_0");
+  auto node_smallest_ssa = name2dpin[smallest_ssa_name].get_node();
+  Node_pin spin;
+  auto type = node_smallest_ssa.get_type_op();
+  if (type == Ntype_op::AttrSet) {
+    auto spin_name = node_smallest_ssa.setup_sink_pin("name");
+    if (spin_name.is_connected()) {
+      node_smallest_ssa = node_smallest_ssa.setup_sink_pin("name").get_driver_node();
+      I(node_smallest_ssa.get_type_op() == Ntype_op::Or);
+      spin = node_smallest_ssa.setup_sink_pin("A");
+    } else {
+      spin = node_smallest_ssa.setup_sink_pin("name");
+    }
+  } else if (type == Ntype_op::Or) {
+      spin = node_smallest_ssa.setup_sink_pin("A");
+  }
+
+  auto reg_qpin = reg_node.setup_driver_pin();
+  reg_qpin.connect_sink(spin);
+  reg_qpin.set_name(smallest_ssa_name);
+  name2dpin[smallest_ssa_name] = reg_qpin;
 }
 
 
