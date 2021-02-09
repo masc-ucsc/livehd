@@ -59,7 +59,7 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
     return;
   std::string output = "%";
   lnast->set_root(Lnast_node(Lnast_ntype::create_top()));
-  auto node_stmts  = Lnast_node::create_stmts ("stmts",  line_num, pos1, pos2);
+  auto node_stmts  = Lnast_node::create_stmts ("___stmts",  line_num, pos1, pos2);
   auto idx_stmts   = lnast->add_child(lnast->get_root(), node_stmts);     
   fmt::print("Start RHS recursion\n");
   handle(expr.right());
@@ -94,10 +94,10 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
 
   for (ip = v.begin(); ip != v.end(); ++ip) {
       std::cout << " " << *ip;
-      auto idx_dot= lnast->add_child(idx_stmts, Lnast_node::create_dot(""));
+      auto idx_dot= lnast->add_child(idx_stmts, Lnast_node::create_select(""));
       lnast->add_child(idx_dot,Lnast_node::create_ref (lnast->add_string("___"+*ip)));
       lnast->add_child(idx_dot,Lnast_node::create_ref (lnast->add_string("$"+*ip)));
-      lnast->add_child(idx_dot,Lnast_node::create_ref ("__ubits"));
+      lnast->add_child(idx_dot,Lnast_node::create_const ("__ubits"));
 
       auto idx_assign= lnast->add_child(idx_stmts, Lnast_node::create_assign(""));
       lnast->add_child(idx_assign,Lnast_node::create_ref (lnast->add_string("___"+*ip)));
@@ -108,11 +108,11 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
   if (lhs.kind == ExpressionKind::NamedValue) {
     const auto& var = lhs.as<NamedValueExpression>();
     fmt::print("bits:{} {} =  ", var.type->getBitWidth(), var.symbol.name);
-    auto idx_dot= lnast->add_child(idx_stmts, Lnast_node::create_dot(""));
+    auto idx_dot= lnast->add_child(idx_stmts, Lnast_node::create_select(""));
     lnast->add_child(idx_dot,Lnast_node::create_ref (lnast->add_string(temp.append(var.symbol.name))));
     temp="___";
     lnast->add_child(idx_dot,Lnast_node::create_ref (lnast->add_string(output.append(var.symbol.name))));
-    lnast->add_child(idx_dot,Lnast_node::create_ref ("__ubits"));
+    lnast->add_child(idx_dot,Lnast_node::create_const("__ubits"));
     output="%";
     auto idx_assign= lnast->add_child(idx_stmts, Lnast_node::create_assign(""));
     lnast->add_child(idx_assign,Lnast_node::create_ref (lnast->add_string(temp.append(var.symbol.name))));
@@ -233,11 +233,11 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
       }
       else if (*it =="XOR"){
         fmt::print("XOR \n");
-        auto idx_xor = lnast->add_child(idx_stmts, Lnast_node::create_xor ("XOR"));
-        auto node_xor   = Lnast_node::create_ref (lnast->add_string("__xor"+std::to_string(count)));
+        auto idx_xor = lnast->add_child(idx_stmts, Lnast_node::create_xor (""));
+        auto node_xor   = Lnast_node::create_ref (lnast->add_string("___xor"+std::to_string(count)));
         lnast->add_child(idx_xor, node_xor);
         if (operandList.size()){
-          if (first) tmpList.insert(tmpList.begin(),("__xor"+std::to_string(count))); //for connection the node refs
+          if (first) tmpList.insert(tmpList.begin(),("___xor"+std::to_string(count))); //for connection the node refs
           auto node_op1    = Lnast_node::create_ref (lnast->add_string(operandList.back()));
           lnast->add_child(idx_xor, node_op1);
           operandList.pop_back();
@@ -249,7 +249,7 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
           auto node_tmp1 = Lnast_node::create_ref(lnast->add_string(tmpList.back()));
           tmpList.pop_back();
           lnast->add_child(idx_xor, node_tmp1);
-          tmpList.insert(tmpList.end(),("__xor"+std::to_string(count))); //for connection the node refs
+          tmpList.insert(tmpList.end(),("___xor"+std::to_string(count))); //for connection the node refs
           break;
         }
         if (tmp_flag) {
@@ -262,11 +262,11 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
           auto node_op2    = Lnast_node::create_ref (lnast->add_string(operandList.back()));
           lnast->add_child(idx_xor, node_op2);
           operandList.pop_back();
-          tmpList.insert(tmpList.end(),("__xor"+std::to_string(count))); //for connection the node refs
+          tmpList.insert(tmpList.end(),("___xor"+std::to_string(count))); //for connection the node refs
           tmp_flag=1;
         }
         if (last_op){
-          tmpList.insert(tmpList.end(),("__xor"+std::to_string(count))); //for connection the node refs
+          tmpList.insert(tmpList.end(),("___xor"+std::to_string(count))); //for connection the node refs
           // lnast->add_child(idx_and, node_and);
         }
       }
@@ -288,7 +288,7 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
       
   }
 
-  auto node_dpa    = Lnast_node::create_dp_assign ("dp_assign",  line_num, pos1, pos2);
+  auto node_dpa    = Lnast_node::create_dp_assign ("",  line_num, pos1, pos2);
   auto idx_dpa  = lnast->add_child(idx_stmts,  node_dpa);
   // const auto& lhs = expr.left();
   if (lhs.kind == ExpressionKind::NamedValue) {
