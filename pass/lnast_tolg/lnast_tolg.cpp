@@ -331,8 +331,12 @@ void Lnast_tolg::process_ast_tuple_struct(LGraph *lg, const Lnast_nid &lnidx_tup
       tup_vname = lnast->get_vname(tup_child);
       subs      = lnast->get_subs(tup_child);
       setup_tuple_ref(lg, tup_name);
+      tuple_reg_name_set.insert(tup_vname);
       continue;
     }
+
+    if (lnast->get_type(tup_child).is_invalid()) 
+      continue;
 
     // the cases with key name well-defined
     if (lnast->get_type(tup_child).is_assign()) {

@@ -146,7 +146,7 @@ private:
   void      dot2attr_set_get                   (const Lnast_nid &psts_nid, Lnast_nid &opr_nid);
   void      update_tuple_var_table             (const Lnast_nid &psts_nid, const Lnast_nid &opr_nid);
   bool      update_tuple_var_1st_scope_ssa_table (const Lnast_nid &psts_nid, const Lnast_nid &opr_nid);
-  bool      check_tuple_var_1st_scope_ssa_table_parents_chain (const Lnast_nid &psts_nid, std::string_view ref_name);
+  bool      check_tuple_var_1st_scope_ssa_table_parents_chain (const Lnast_nid &psts_nid, std::string_view ref_name, const Lnast_nid &src_if_nid);
   void      merge_hierarchical_attr_set        (Lnast_nid &opr_nid);
   void      collect_hier_tuple_nids            (Lnast_nid &opr_nid, std::stack<Lnast_nid> &stk_tuple_fields); 
 
@@ -187,8 +187,9 @@ public:
   std::string_view get_top_module_name() const { return top_module_name; }
   std::string_view get_source() const { return source_filename; }
 
-  bool             is_lhs    (const Lnast_nid &psts_nid, const Lnast_nid &opr_nid);
-  bool             is_reg    (std::string_view name) { return name.at(0) == '#'; }
+  bool             is_lhs       (const Lnast_nid &psts_nid, const Lnast_nid &opr_nid);
+  bool             is_register  (std::string_view name) { return name.at(0) == '#'; }
+  bool             is_output    (std::string_view name) { return name.at(0) == '%'; }
   std::string_view get_name  (const Lnast_nid &nid)  { return get_data(nid).token.get_text(); }
   std::string_view get_vname (const Lnast_nid &nid)  { return get_data(nid).token.get_text(); } //better expression for LGraph passes
   Lnast_ntype      get_type  (const Lnast_nid &nid)  { return get_data(nid).type; }

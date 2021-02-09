@@ -22,7 +22,8 @@ hier_tuple_nested_if4 hier_tuple_nested_if5 hier_tuple_nested_if7 '
 
 pts_new_BW_issuse=''
 
-# pts='tuple_reg2'
+pts='tuple_reg2'
+pts='tuple_reg3'
 # pts='vector'
 # pts='vector2'
 
@@ -213,10 +214,10 @@ Pyrope_compile_hier () {
 }
 
 
-rm -rf ./lgdb
-Pyrope_compile_hier "$pts_hier1"
-rm -rf ./lgdb
-Pyrope_compile_hier "$pts_hier2"
+# rm -rf ./lgdb
+# Pyrope_compile_hier "$pts_hier1"
+# rm -rf ./lgdb
+# Pyrope_compile_hier "$pts_hier2"
 rm -rf ./lgdb
 Pyrope_compile "$pts"
 

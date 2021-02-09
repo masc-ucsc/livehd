@@ -75,7 +75,6 @@ public:
     //group: compiler internal type
     Lnast_ntype_tuple_add,
     Lnast_ntype_tuple_get,
-    Lnast_ntype_tuple_add_get_pair,
     Lnast_ntype_attr_set,
     Lnast_ntype_attr_get,
 
@@ -151,7 +150,6 @@ protected:
     //group: compiler internal type
     "tuple_add",
     "tuple_get",
-    "tuple_add_get_pair",
     "attr_set",  
     "attr_get",
     //unsigned(tposs)
@@ -217,7 +215,6 @@ protected:
     "reg_fwd",
     "tuple_add",
     "tuple_get",
-    "tuple_add_get_pair",
     "attr_set",
     "attr_get",
     "unsigned"//tposs
@@ -282,7 +279,6 @@ protected:
     "reg_fwd",
     "tuple_add",
     "tuple_get",
-    "tuple_add_get_pair",
     "attr_set",
     "attr_get",
     "unsigned"//tposs
@@ -347,7 +343,6 @@ protected:
     "reg_fwd",
     "tuple_add",
     "tuple_get",
-    "tuple_add_get_pair",
     "attr_set",
     "attr_get",
     "unsigned"//tposs
@@ -412,7 +407,6 @@ protected:
     "reg_fwd",
     "tuple_add",
     "tuple_get",
-    "tuple_add_get_pair",
     "attr_set",
     "attr_get",
     "unsigned"
@@ -492,7 +486,6 @@ public:
 
   static constexpr Lnast_ntype create_tuple_add()     { return Lnast_ntype(Lnast_ntype_tuple_add);}
   static constexpr Lnast_ntype create_tuple_get()     { return Lnast_ntype(Lnast_ntype_tuple_get);}
-  static constexpr Lnast_ntype create_tuple_add_get_pair() { return Lnast_ntype(Lnast_ntype_tuple_add_get_pair) ;}
   static constexpr Lnast_ntype create_attr_set()      { return Lnast_ntype(Lnast_ntype_attr_set) ;}
   static constexpr Lnast_ntype create_attr_get()      { return Lnast_ntype(Lnast_ntype_attr_get) ;}
   static constexpr Lnast_ntype create_tposs()      { return Lnast_ntype(Lnast_ntype_tposs) ;}
@@ -561,7 +554,6 @@ public:
 
   bool constexpr is_tuple_add()          const { return val == Lnast_ntype_tuple_add; }
   bool constexpr is_tuple_get()          const { return val == Lnast_ntype_tuple_get; }
-  bool constexpr is_tuple_add_get_pair() const { return val == Lnast_ntype_tuple_add_get_pair; }
   bool constexpr is_attr_set()           const { return val == Lnast_ntype_attr_set; }
   bool constexpr is_attr_get()           const { return val == Lnast_ntype_attr_get; }
   bool constexpr is_tposs()              const { return val == Lnast_ntype_tposs; }
@@ -572,21 +564,20 @@ public:
                                                   (val == Lnast_ntype_logical_not); }
   bool constexpr is_logical_not_op()   const { return (val == Lnast_ntype_logical_not); }
   bool constexpr is_unary_op()     const { return (val == Lnast_ntype_not); }
-
   bool constexpr is_nary_op()      const { return (val == Lnast_ntype_and) ||
-                                        (val == Lnast_ntype_or) ||
-                                        (val == Lnast_ntype_xor) ||
-                                        (val == Lnast_ntype_plus) ||
-                                        (val == Lnast_ntype_minus) ||
-                                        (val == Lnast_ntype_mult) ||
-                                        (val == Lnast_ntype_div) ||
-                                        (val == Lnast_ntype_same) ||
-                                        (val == Lnast_ntype_lt) ||
-                                        (val == Lnast_ntype_le) ||
-                                        (val == Lnast_ntype_gt) ||
-                                        (val == Lnast_ntype_ge) ||
-                                        (val == Lnast_ntype_shift_left) ||
-                                        (val == Lnast_ntype_shift_right); }
+                                                  (val == Lnast_ntype_or) ||
+                                                  (val == Lnast_ntype_xor) ||
+                                                  (val == Lnast_ntype_plus) ||
+                                                  (val == Lnast_ntype_minus) ||
+                                                  (val == Lnast_ntype_mult) ||
+                                                  (val == Lnast_ntype_div) ||
+                                                  (val == Lnast_ntype_same) ||
+                                                  (val == Lnast_ntype_lt) ||
+                                                  (val == Lnast_ntype_le) ||
+                                                  (val == Lnast_ntype_gt) ||
+                                                  (val == Lnast_ntype_ge) ||
+                                                  (val == Lnast_ntype_shift_left) ||
+                                                  (val == Lnast_ntype_shift_right); }
 
   std::string_view debug_name() const { return namemap[val]; }
   std::string_view debug_name_cfg() const { return namemap_cfg[val]; }

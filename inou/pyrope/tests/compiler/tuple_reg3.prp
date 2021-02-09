@@ -1,0 +1,13 @@
+// $en.__ubits = 1
+// #tup = (1, 2, 3)
+// #reg = (a = 2, b = 3)
+foo = 1
+
+if (foo == 1) {
+  #reg = (a = 4, b = 5) 
+}
+// } else {
+//   #reg = (a = 6, b = 7)  
+// }
+
+%out = #reg.a + #reg.b
