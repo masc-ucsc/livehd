@@ -555,7 +555,6 @@ bool Lnast::check_tuple_var_1st_scope_ssa_table_parents_chain(const Lnast_nid &p
     auto it = tuple_var_1st_scope_ssa_table.find(ref_name);
     if (it == tuple_var_1st_scope_ssa_table.end()) {
       if (is_register(ref_name) || is_output(ref_name)) {
-        // FIXME->sh: insert tuple-output or tuple-register pre-declaration here!
         auto prev_sib_if = get_sibling_prev(src_if_nid);
         auto tup_pre_declare = insert_next_sibling(prev_sib_if, Lnast_node(Lnast_ntype::create_tuple(), Etoken()));
         add_child(tup_pre_declare, Lnast_node::create_ref(add_string(ref_name)));
@@ -869,12 +868,12 @@ void Lnast::ssa_rhs_handle_a_operand_special(const Lnast_nid &gpsts_nid, const L
 
 void Lnast::ssa_rhs_handle_a_operand(const Lnast_nid &gpsts_nid, const Lnast_nid &opd_nid) {
   auto &ssa_rhs_cnt_table = ssa_rhs_cnt_tables[gpsts_nid];
-  auto       opd_name  = get_name(opd_nid);
+  auto opd_name  = get_name(opd_nid);
   const auto opd_type  = get_type(opd_nid);
   if (opd_type.is_invalid())
     return;
 
-  auto       ori_token = get_token(opd_nid);
+  auto ori_token = get_token(opd_nid);
 
   if (ssa_rhs_cnt_table.find(opd_name) != ssa_rhs_cnt_table.end()) {
     auto  new_subs = ssa_rhs_cnt_table[opd_name];
@@ -934,7 +933,7 @@ void Lnast::ssa_handle_phi_nodes(const Lnast_nid &if_nid) {
       resolve_phi_nodes(condition_nid, true_table, false_table);
     } else {
       Phi_rtable &true_table  = phi_resolve_tables[*itr];
-      Phi_rtable &false_table = new_added_phi_node_tables[get_parent(*itr)]; // FIXME->sh: entry debugging point
+      Phi_rtable &false_table = new_added_phi_node_tables[get_parent(*itr)]; 
       Lnast_nid condition_nid = get_sibling_prev(*itr);
       resolve_phi_nodes(condition_nid, true_table, false_table);
     }
@@ -952,16 +951,16 @@ void Lnast::resolve_phi_nodes(const Lnast_nid &cond_nid, Phi_rtable &true_table,
   auto if_nid   = get_parent(cond_nid);
   auto psts_nid = get_parent(if_nid);
   for (auto const&[var_name, nid] : false_table) {
-    if (check_phi_table_parents_chain(var_name, psts_nid) != Lnast_nid()) {
-      if (true_table.find(var_name) != true_table.end()) {
-        add_phi_node(cond_nid, true_table[var_name], false_table[var_name]);
-        true_table.erase(var_name);
-      } else {
-        auto t_nid = get_complement_nid(var_name, psts_nid, false);
-        ref_data(t_nid)->dump();
-        add_phi_node(cond_nid, t_nid, false_table[var_name]);
-        ref_data(t_nid)->dump();
-      }
+
+    if (check_phi_table_parents_chain(var_name, psts_nid) == Lnast_nid()) 
+      continue;
+    
+    if (true_table.find(var_name) != true_table.end()) {
+      add_phi_node(cond_nid, true_table[var_name], false_table[var_name]);
+      true_table.erase(var_name);
+    } else {
+      auto t_nid = get_complement_nid(var_name, psts_nid, false);
+      add_phi_node(cond_nid, t_nid, false_table[var_name]);
     }
   }
 
@@ -970,15 +969,18 @@ void Lnast::resolve_phi_nodes(const Lnast_nid &cond_nid, Phi_rtable &true_table,
     if (true_table.empty()) { // it might be empty due to the erase from previous for loop
       break;
     }
-    if (check_phi_table_parents_chain(var_name, psts_nid) != Lnast_nid()) {
-      if (false_table.find(var_name) != false_table.end()) {
-        add_phi_node(cond_nid, true_table[var_name], false_table[var_name]);
-        var_list.push_back(var_name);
-      } else {
-        auto f_nid = get_complement_nid(var_name, psts_nid, true);
-        add_phi_node(cond_nid, true_table[var_name], f_nid);
-        var_list.push_back(var_name);
-      }
+
+    if (check_phi_table_parents_chain(var_name, psts_nid) == Lnast_nid()) {
+      continue;
+    }
+
+    if (false_table.find(var_name) != false_table.end()) {
+      add_phi_node(cond_nid, true_table[var_name], false_table[var_name]);
+      var_list.push_back(var_name);
+    } else {
+      auto f_nid = get_complement_nid(var_name, psts_nid, true);
+      add_phi_node(cond_nid, true_table[var_name], f_nid);
+      var_list.push_back(var_name);
     }
   }
 
@@ -1001,19 +1003,14 @@ Lnast_nid Lnast::get_complement_nid(std::string_view brother_name, const Lnast_n
 }
 
 
-Lnast_nid Lnast::check_phi_table_parents_chain(std::string_view target_name, const Lnast_nid &psts_nid) {
+Lnast_nid Lnast::check_phi_table_parents_chain(std::string_view target_name, const Lnast_nid &psts_nid) { 
   auto &parent_table = phi_resolve_tables[psts_nid];
-
-  if(parent_table.find(target_name) != parent_table.end()) {
+  if(parent_table.find(target_name) != parent_table.end()) 
     return parent_table[target_name];
-  }
+  
 
-  if (get_parent(psts_nid) == get_root()){
-    if (is_register(target_name)) {
-      return add_child(psts_nid, Lnast_node(Lnast_ntype::create_reg_fwd(),  Etoken(Token_id_alnum, 0, 0, 0, "register_forwarding")));
-    } else {
-      return Lnast_nid();
-    }
+  if (get_parent(psts_nid) == get_root()) {
+    return Lnast_nid();
   } else {
     auto tmp_if_nid = get_parent(psts_nid);
     auto new_psts_nid = get_parent(tmp_if_nid);

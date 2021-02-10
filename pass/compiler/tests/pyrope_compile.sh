@@ -16,14 +16,14 @@ capricious_bits firrtl_gcd_3bits nested_if firrtl_tail2 firrtl_tail3 logic
 capricious_bits2 
 '
 
-pts='hier_tuple_nested_if hier_tuple_nested_if3 hier_tuple_nested_if3
-hier_tuple_nested_if4 hier_tuple_nested_if5 hier_tuple_nested_if7 '
+# pts='hier_tuple_nested_if hier_tuple_nested_if3 hier_tuple_nested_if3
+# hier_tuple_nested_if4 hier_tuple_nested_if5 hier_tuple_nested_if7 '
 
+# pts='scalar_reg_out_pre_declare'
+# pts_new_BW_issuse=''
 
-pts_new_BW_issuse=''
-
-pts='tuple_reg2'
-pts='tuple_reg3'
+# pts='tuple_reg2'
+# pts='tuple_reg3'
 # pts='vector'
 # pts='vector2'
 
