@@ -1,44 +1,49 @@
 Issues:
- - ArchFP has basically no error checking, and fails on large floorplans while returning successfully from layout() on the root layout...?
-    - Using a high aspect ratio and putting things in grids alleviates this problem, but does not eliminate it.
+ - HardAspectRatio tries to satisfy the requested aspect ratio as well as possible, even if it's not possible without incorrect layouts.
+    - This inevitably leads to problems when everything requests an aspect ratio of 1... is there a way around this?
+    - Fixing aspect ratio issues is hard.  Checking if components collide with each other is $$ and figuring out where they should go is difficult.
+       - Creating a slicing tree could be an option...?
  - ArchFP has a refcounting implementation built-in, which causes problems when destructors are called on anything other than the root node.  Replace with std::shared_ptr
 
 Issues not related to ArchFP:
- - fix Lgraph hier traversal after getting hier_node working properly - useful for large designs (BOOM)
-    - populate hierarchies with area
  - view.py output is flipped due to mismatch between coordinates for HotSpot and png coordinates in PyCairo
  - blackboxes are not supported (use fixedLayout for this)
 
 Node hierarchy:
- - check for TODOs elsewhere in the code and resolve if possible
-
- - check grid layout not pushing mirror contexts?
- - verify node hierarchy is correct
+ - areas on nodes are probably buggy since checkfp always passes, convert view.py from Python to C++ and add to LiveHD to check node position accuracy
  - add a is_valid method to Ntype_area, use it instead of hier_color to determine if a node has been placed yet
- - write non-root node to layouts[] in node_hier_floorp
+ - write non-root node to layouts[] in node_hier_floorp once I have a use for it
 
 Easy things:
  - Node::bimap -> Node::map for hier_node_color fails?
  - LiveHD has a random number class, use that in writearea
  - put warning bazel file in //tools
 
+High level goals:
+1. Get lgraph hier traversal working
+2. Test BOOM core
+3. Find / write a method that doesn't mess up on the wrong aspect ratio - HardAspectRatio not helpful for initial floorplans.
+
 Things to add:
 1. Optimization
-   - use HPWL as benchmark
-   - easy: swap positions of leaves of the same type (within a hierarchy), see if HPWL gets better
-   - identify components that are far away, set geography hints to be closer?
+
+    - use HPWL as benchmark
+    - easy: swap positions of leaves of the same type (within a hierarchy), see if HPWL gets better
+    - identify components that are far away, set geography hints to be closer?
+
+    - multithread the floorplanner
+    - multithread the Lgraph traversal
+    - Check out the paper for ArchFP
+    - improve implementation in ArchFP, fix todos, add better floorplan techniques
+    - create a way to floorplan using existing layouts
 2. Incremental Floorplans
-   - floorplan using existing geography hints instead of randomly choosing a hint
-   - assign geography hints to nodes based on wirelength metrics
+    - floorplan using existing geography hints instead of randomly choosing a hint
+    - assign geography hints to nodes based on wirelength metrics
 3. More accurate floorplans
-   - floorplan node pins - allows for more accurate HPWL estimation
-   - scale area by bitwidth of node, if possible
-4. multithread hier_node traversal
-   - Check out the paper for ArchFP
-   - improve implementation in ArchFP, fix todos, add better floorplan techniques
-   - create a way to floorplan using existing layouts
-5. add more checks to checkfp:
-   - check for insane / unrealistic wirelength metrics
-   - check for disconnected parts of floorplan
-6. Overlay lgraph borders over actual nodes on png
-   - rewrite view.py in C++, and have it source data from LiveHD
+    - floorplan node pins - allows for more accurate HPWL estimation
+    - scale area by bitwidth of node, if possible
+4. add more checks to checkfp:
+    - check for insane / unrealistic wirelength metrics
+    - check for disconnected parts of floorplan
+5. Overlay lgraph borders over actual nodes on png
+    - rewrite view.py in C++, and have it source data from LiveHD

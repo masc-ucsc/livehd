@@ -1,11 +1,4 @@
-/* -*- Mode: C++ ; indent-tabs-mode: nil ; c-file-style: "stroustrup" -*-
-
-   Rapid Prototyping Floorplanner Project
-   Author: Greg Faust
-
-   File:   Floorplan.hh     C++ Header file for floorplanner.
-
-*/
+#pragma once
 
 #include <iostream>
 #include <map>
@@ -25,9 +18,10 @@ string                  getStringFromInt(int in);
 void                    setNameMode(bool);
 
 // Here is an enumeration for the optimazation goals for a layout manager.
-// These are barely used as the moment, as everything lays it self out in the smallest area
-//      that is closest to the desired aspect ratio.
-enum FPOptimization { Area, AspectRatio };
+// Area: optimize for smallest area (not implemented)
+// SoftAspectRatio: optimize for a given aspect ratio, but generate a legal floorplan (not implemented)
+// HardAspectRatio: optimize for a given aspect ratio, possibly forming a floorplan with gaps / overlaps
+enum FPOptimization { Area, SoftAspectRatio, HardAspectRatio };
 
 // Here is the enumeration for layout hints for the geographic layout.
 enum GeographyHint {
@@ -98,17 +92,17 @@ public:
   int decRefCount() { return refCount -= 1; }
 
   // Allow anyone to get the values of things.
-  virtual double   getX() { return x; }
-  virtual double   getY() { return y; }
-  virtual double   getWidth() { return width; }
-  virtual double   getHeight() { return height; }
-  virtual double   getArea() { return area; }
+  virtual double   getX() const { return x; }
+  virtual double   getY() const { return y; }
+  virtual double   getWidth() const { return width; }
+  virtual double   getHeight() const { return height; }
+  virtual double   getArea() const { return area; }
   virtual double   totalArea() { return area * count; }
-  virtual bool     valid() { return x >= 0.0 && y >= 0.0 && width > 0.0 && height > 0.0; }
-  virtual string   getName() { return name; }
-  virtual Ntype_op getType() { return type; }
-  virtual int      getCount() { return count; }
-  string           getUniqueName() {
+  virtual bool     valid() const { return x >= 0.0 && y >= 0.0 && width > 0.0 && height > 0.0 && area > 0.0; }
+  virtual string   getName() const { return name; }
+  virtual Ntype_op getType() const { return type; }
+  virtual int      getCount() const { return count; }
+  string           getUniqueName() const {
     if (name == " " || name == "")
       return name;
     else
@@ -120,10 +114,12 @@ public:
   double calcY(double startY);
 
   // The default  behavior for ARs is to clamp to the actual width and height.
-  virtual double        getMaxAR() { return getWidth() / getHeight(); }
-  virtual double        getMinAR() { return getMaxAR(); }
-  virtual GeographyHint getHint() { return hint; }
+  virtual double        getMaxAR() const { return getWidth() / getHeight(); }
+  virtual double        getMinAR() const { return getMaxAR(); }
+  virtual GeographyHint getHint() const { return hint; }
 
+  virtual void          setX(int newX) { x = newX; }
+  virtual void          setY(int newY) { y = newY; }
   virtual int           setCount(int newCount) { return count = newCount; }
   virtual GeographyHint setHint(GeographyHint newHint) { return hint = newHint; }
   virtual void          setSize(double widthArg, double heightArg);
@@ -160,8 +156,8 @@ public:
   FPCompWrapper(string nameArg, double xArg, double yArg, double widthArg, double heightArg);
   ~FPCompWrapper();
 
-  double          getMinAR() { return minAspectRatio; }
-  double          getMaxAR() { return maxAspectRatio; }
+  double          getMinAR() const { return minAspectRatio; }
+  double          getMaxAR() const { return maxAspectRatio; }
   dummyComponent* getComp() { return component; }
 
   virtual bool layout(FPOptimization opt, double targetAR = 1.0);
@@ -188,9 +184,8 @@ class FPContainer : public FPObject {
   FPObject*              removeComponentAtIndex(int index);
 
 protected:
-
   // These allow safe access to the item list.
-  int       getComponentCount() { return items.size(); }
+  int       getComponentCount() const { return items.size(); }
   FPObject* getComponent(int index) { return items[index]; }
   FPObject* removeComponent(int index);
   void      replaceComponent(FPObject* comp, int index);
@@ -279,9 +274,9 @@ public:
 class geogLayout : public FPContainer {
   // FPObject** centerItems;    // During layout, we will store up the center items, stick them in a bag, and lay them out last.
   // int        centerItemsCount;
-  bool layoutHelper(double targetWidth, double targetHeight, double curX, double curY, FPObject** layoutStack, int curDepth,
-                    FPObject** centerItems, int centerItemsCount);
-  
+  bool layoutHelper(FPOptimization opt, double targetWidth, double targetHeight, double curX, double curY, FPObject** layoutStack,
+                    int curDepth, FPObject** centerItems, int centerItemsCount);
+
   static void checkHint(int count, GeographyHint hint);
 
 public:

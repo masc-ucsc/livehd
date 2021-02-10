@@ -37,7 +37,7 @@ GeographyHint Lhd_floorplanner::randomHint(int count) const {
 }
 
 void Lhd_floorplanner::create() {
-  bool success = layouts[nt.root_index()]->layout(AspectRatio);
+  bool success = layouts[nt.root_index()]->layout(HardAspectRatio);
   if (!success) {
     throw std::runtime_error("unable to lay out floorplan!");
   }

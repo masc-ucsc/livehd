@@ -1,18 +1,10 @@
-/* -*- Mode: C ; indent-tabs-mode: nil ; c-file-style: "stroustrup" -*-
-
-   Rapid Prototyping Floorplanner Project
-   Author: Greg Faust
-
-   File:   Floorplan.cc    Code for Floorplanner classes.
-
-*/
-
 #include "floorplan.hpp"
 
 #include <cassert>
 #include <cmath>
 #include <fstream>
 #include <iostream>
+#include <limits>  // for max double value
 #include <sstream>
 #include <stdexcept>
 
@@ -21,7 +13,7 @@
 #include "mathutil.hpp"
 
 // This will be used to keep track of user's request for more output during layout.
-constexpr bool verbose = false;
+constexpr bool verbose = true;
 
 // Temporary local for crazy mirror reflection stuff.
 constexpr int maxMirrorDepth = 20;
@@ -209,14 +201,21 @@ double FPCompWrapper::ARInRange(double AR) {
   double minAR  = getMinAR();
   double retval = AR;
   if (maxAR < 1) {
-    retval = MIN(retval, minAR);
-    retval = MAX(retval, maxAR);
+    assert(false);  // should never happen?
+    // retval = MIN(retval, minAR);
+    // retval = MAX(retval, maxAR);
   } else {
     retval = MAX(retval, minAR);
     retval = MIN(retval, maxAR);
   }
   if (verbose)
     cout << "Target AR=" << AR << " minAR=" << minAR << " maxAR=" << maxAR << " returnAR=" << retval << "\n";
+
+  if (AR < minAR || AR > maxAR) {
+    cerr << "WARNING: requested AR " << AR << " is outside legal range (" << minAR << ", " << maxAR << "), using " << retval << "."
+         << endl;
+  }
+
   return retval;
 }
 
@@ -226,6 +225,12 @@ void FPCompWrapper::flip() {
   height         = temp;
   minAspectRatio = 1 / minAspectRatio;
   maxAspectRatio = 1 / maxAspectRatio;
+
+  if (minAspectRatio > maxAspectRatio) {
+    double temp    = minAspectRatio;
+    minAspectRatio = maxAspectRatio;
+    maxAspectRatio = temp;
+  }
 }
 
 bool FPCompWrapper::layout(FPOptimization opt, double ratio) {
@@ -350,9 +355,7 @@ void FPContainer::sortByArea() {
   }
 }
 
-// TODO.  Should this store the area in itself when done, or leave alone?
 double FPContainer::totalArea() {
-  // if (area != 0) return area;
   area          = 0;
   int itemCount = getComponentCount();
   for (int i = 0; i < itemCount; i++) {
@@ -470,7 +473,7 @@ bool gridLayout::layout(FPOptimization opt, double targetAR) {
   // Now layout whatever is below us.
   // We need to set the count to 1 to avoid double counting area.
   obj->setCount(1);
-  obj->layout(AspectRatio, ratio);
+  obj->layout(opt, ratio);
   assert(obj->valid());
   obj->setCount(total);
   double compWidth  = obj->getWidth();
@@ -557,7 +560,6 @@ bagLayout::bagLayout() : FPContainer() {
 }
 
 bool bagLayout::layout(FPOptimization opt, double targetAR) {
-  (void)opt;
   // If we are locked, don't layout.
   if (locked)
     return true;
@@ -593,7 +595,7 @@ bool bagLayout::layout(FPOptimization opt, double targetAR) {
       replaceComponent(GL, i);
       comp = GL;
     }
-    comp->layout(AspectRatio, AR);
+    comp->layout(opt, AR);
     assert(comp->valid());
     // Now we have the final component, we can set the location.
     comp->setLocation(nextX, nextY);
@@ -703,8 +705,8 @@ fixedLayout::fixedLayout(const char* filename, double scalingFactor) : bagLayout
 
   // Let's find out if the baseline x,y positions are at 0, 0.
   // If not, renormalize all the locations.
-  double minX = 2000000000;
-  double minY = 2000000000;
+  double minX = std::numeric_limits<double>::max();
+  double minY = std::numeric_limits<double>::max();
   for (int i = 0; i < getComponentCount(); i++) {
     FPObject* comp = getComponent(i);
     minX           = MIN(minX, comp->getX());
@@ -778,8 +780,6 @@ FPObject* geogLayout::addComponentCluster(string name, int count, double area, d
 }
 
 bool geogLayout::layout(FPOptimization opt, double targetAR) {
-  (void)opt;
-
   // All this routine does is set up some data structures,
   //   and then call the helper to recursively do the layout work.
   // We will keep track of containers we make in a "stack".
@@ -802,7 +802,7 @@ bool geogLayout::layout(FPOptimization opt, double targetAR) {
     cout << "In geogLayout for " << getName() << ".  A=" << area << " W=" << remWidth << " H=" << remHeight << "\n";
 
   // Now do the real work.
-  bool retval = layoutHelper(remWidth, remHeight, 0, 0, layoutStack, 0, centerItems, 0);
+  bool retval = layoutHelper(opt, remWidth, remHeight, 0, 0, layoutStack, 0, centerItems, 0);
 
   // By now, the item list should be empty.
   if (getComponentCount() != 0) {
@@ -832,8 +832,8 @@ bool geogLayout::layout(FPOptimization opt, double targetAR) {
   return retval;
 }
 
-bool geogLayout::layoutHelper(double remWidth, double remHeight, double curX, double curY, FPObject** layoutStack, int curDepth,
-                              FPObject** centerItems, int centerItemsCount) {
+bool geogLayout::layoutHelper(FPOptimization opt, double remWidth, double remHeight, double curX, double curY,
+                              FPObject** layoutStack, int curDepth, FPObject** centerItems, int centerItemsCount) {
   int itemCount = getComponentCount();
   // Check for the end of the recursion.
   if (itemCount == 0 && centerItemsCount == 0)
@@ -866,7 +866,7 @@ bool geogLayout::layoutHelper(double remWidth, double remHeight, double curX, do
     }
     // Not sure if we need to set the hint, but when I missed this for the grid below, it was a bug.
     FPLayout->setHint(Center);
-    FPLayout->layout(AspectRatio, targetAR);
+    FPLayout->layout(opt, targetAR);
     assert(FPLayout->valid());
     if (verbose)
       cout << "Laying out Center item(s).  Current x and y are(" << curX << "," << curY << ")\n";
@@ -886,7 +886,7 @@ bool geogLayout::layoutHelper(double remWidth, double remHeight, double curX, do
   if (compHint == Center) {
     centerItems[centerItemsCount] = comp;
     centerItemsCount += 1;
-    layoutHelper(remWidth, remHeight, curX, curY, layoutStack, curDepth, centerItems, centerItemsCount);
+    layoutHelper(opt, remWidth, remHeight, curX, curY, layoutStack, curDepth, centerItems, centerItemsCount);
   }
 
   if (compHint == LeftRight || compHint == TopBottom || compHint == LeftRightMirror || compHint == TopBottomMirror
@@ -934,7 +934,9 @@ bool geogLayout::layoutHelper(double remWidth, double remHeight, double curX, do
   if (compHint == Left || compHint == Top || compHint == Right || compHint == Bottom) {
     // Stuff the comp into a grid, and see if we can layout it out in the desired shape.
     // TODO TODO This assumes a component has an area.  For a container, it will not have an area until it gets layed out.
+
     double totalArea = comp->totalArea();
+    assert(totalArea > 0);
 
     if (verbose)
       cout << "In geog for " << comp->getName() << ", total component area=" << totalArea << "\n";
@@ -967,7 +969,7 @@ bool geogLayout::layoutHelper(double remWidth, double remHeight, double curX, do
       grid->setHint(compHint);
       FPLayout = grid;
     }
-    FPLayout->layout(AspectRatio, targetAR);
+    FPLayout->layout(opt, targetAR);
     assert(FPLayout->valid());
     FPLayout->setLocation(curX, curY);
     // Put the layout on the stack.
@@ -976,14 +978,13 @@ bool geogLayout::layoutHelper(double remWidth, double remHeight, double curX, do
       remWidth -= FPLayout->getWidth();
     else if (compHint == Top || compHint == Bottom)
       remHeight -= FPLayout->getHeight();
-    layoutHelper(remWidth, remHeight, newX, newY, layoutStack, curDepth + 1, centerItems, centerItemsCount);
+    layoutHelper(opt, remWidth, remHeight, newX, newY, layoutStack, curDepth + 1, centerItems, centerItemsCount);
   } else if (compHint != Center) {
     cerr << "Hint is not any of the recognized hints.  Hint=" << compHint << "\n";
     cerr << "Component is of type " << Ntype::get_name(comp->getType()) << "\n";
   }
 
-  // TODO Here is where we should do bottom up fixups!!
-  // For now the only recourse is to try more AR flex in components and relayout.
+  // TODO: fixups here?
 
   return true;
 }
