@@ -300,7 +300,7 @@ void Bitwidth::process_tposs(Node &node, XEdge_iterator &inp_edges) {
     }
 
     auto &bw = it->second;
-    if (bw.is_always_positive()) {
+    if (!hier && bw.is_always_positive()) {
       for (auto &out : node.out_edges()) {
         inp_edges[0].driver.connect_sink(out.sink);
       }
