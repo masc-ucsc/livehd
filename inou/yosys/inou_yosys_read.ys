@@ -14,7 +14,7 @@ hierarchy {{top}}
 {{/hierarchy}}
 
 proc
-#opt -fast
+opt -fast
 pmuxtree
 memory_dff
 memory_share

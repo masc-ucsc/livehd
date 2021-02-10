@@ -27,7 +27,7 @@ std::string Cgen_verilog::get_append_to_name(const std::string &name, std::strin
   return name_next;
 }
 
-std::string Cgen_verilog::get_expression(Node_pin &dpin) const {
+std::string Cgen_verilog::get_expression(const Node_pin &dpin) const {
 
   auto var_it = pin2var.find(dpin.get_compact_class());
   if (var_it != pin2var.end())
@@ -65,18 +65,18 @@ void Cgen_verilog::process_mux(std::string &buffer, Node &node) {
   auto mux2vec_it = mux2vector.find(node.get_compact_class());
   if (mux2vec_it == mux2vector.end()) {
 
-    if (ordered_inp.size()==2) { // if-else case
+    if (ordered_inp.size()==3) { // if-else case
       absl::StrAppend(&buffer, "   if (", sel_expr, ") begin\n");
       absl::StrAppend(&buffer, "     ", dest_var, " = ", get_expression(ordered_inp[2].driver) ,";\n");
-      absl::StrAppend(&buffer, "   else\n");
+      absl::StrAppend(&buffer, "   end else begin\n");
       absl::StrAppend(&buffer, "     ", dest_var, " = ", get_expression(ordered_inp[1].driver) ,";\n");
-      absl::StrAppend(&buffer, "   endif\n");
+      absl::StrAppend(&buffer, "   end\n");
     }else{
       absl::StrAppend(&buffer, "   case (", sel_expr, ")\n");
-      auto sel_bits = ordered_inp[0].driver.get_bits()-1; // -1 because mux sel is always tposs
+      auto sel_bits = ordered_inp[0].driver.get_bits();
       for(auto i=1u;i<ordered_inp.size();++i) {
 
-        absl::StrAppend(&buffer, "     ", sel_bits, "'d", std::to_string(i-1), " : ", dest_var, " = ", get_expression(ordered_inp[1].driver) ,";\n");
+        absl::StrAppend(&buffer, "     ", sel_bits, "'d", std::to_string(i-1), " : ", dest_var, " = ", get_expression(ordered_inp[i].driver) ,";\n");
       }
       size_t num_cases = 1<<(sel_bits);
       if (num_cases>ordered_inp.size()-1) {
@@ -121,9 +121,37 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
   }else if (op == Ntype_op::Tposs) {
     final_expr = get_expression(node.get_sink_pin("a").get_driver_pin());
     //fmt::print("FIXME: mark out as unsigned\n");
-  }else if (op == Ntype_op::LT) {
-  }else if (op == Ntype_op::GT) {
+  }else if (op == Ntype_op::LT || op == Ntype_op::GT) {
+    std::vector<std::string> lhs;
+    std::vector<std::string> rhs;
+    for(const auto &e:node.inp_edges()) {
+      if (e.sink.get_pin_name() == "A") {
+        lhs.emplace_back(get_expression(e.driver));
+      }else{
+        rhs.emplace_back(get_expression(e.driver));
+      }
+    }
+    std::string cmp;
+    if (op == Ntype_op::GT) {
+      cmp = " > ";
+    }else{
+      cmp = " <= ";
+    }
+    for(const auto &l:lhs) {
+      for(const auto &r:rhs) {
+        if (final_expr.empty()) {
+          final_expr = absl::StrCat(l, cmp, r);
+        }else{
+          absl::StrAppend(&final_expr, " && ", l, cmp, r);
+        }
+      }
+    }
   }else if (op == Ntype_op::SHL) {
+    auto val_expr = get_expression(node.get_sink_pin("a").get_driver_pin());
+    auto amt_expr = get_expression(node.get_sink_pin("b").get_driver_pin());
+
+    final_expr = absl::StrCat(val_expr, " << ", amt_expr);
+
   }else if (op == Ntype_op::SRA) {
     auto val_expr = get_expression(node.get_sink_pin("a").get_driver_pin());
     auto amt_expr = get_expression(node.get_sink_pin("b").get_driver_pin());

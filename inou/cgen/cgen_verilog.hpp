@@ -30,8 +30,8 @@ private:
   }
 
   std::string get_append_to_name(const std::string &name, std::string_view ext) const;
-  std::string get_expression(Node_pin &dpin) const;
-  std::string get_expression(Node_pin &&dpin) const {
+  std::string get_expression(const Node_pin &dpin) const;
+  std::string get_expression(const Node_pin &&dpin) const {
     return get_expression(dpin);
   }
   void add_expression(std::string &txt_seq, std::string_view txt_op, Node_pin &dpin) const;

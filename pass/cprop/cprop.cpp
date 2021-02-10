@@ -226,6 +226,7 @@ void Cprop::replace_part_inputs_const(Node &node, XEdge_iterator &inp_edges_orde
 
     collapse_forward_for_pin(node, a_pin);
   } else if (op == Ntype_op::Sum || op == Ntype_op::Or || op == Ntype_op::And) {
+
     Lconst result;
     XEdge first_const_edge;
     int nconstants = 0;
@@ -241,7 +242,7 @@ void Cprop::replace_part_inputs_const(Node &node, XEdge_iterator &inp_edges_orde
 
       auto c = i.driver.get_node().get_type_const();
 
-      if (c == 0) { // zero, just drop
+      if (c == 0 && op != Ntype_op::Sum) { // zero, just drop (not for 0-x)
         i.del_edge();
         continue;
       }
@@ -279,12 +280,13 @@ void Cprop::replace_part_inputs_const(Node &node, XEdge_iterator &inp_edges_orde
           node.setup_sink_pin("B").connect_driver(dpin);  // substract
         }
       }else if (npending==1) {
-				collapse_forward_always_pin0(node, edge_it2);
+          collapse_forward_always_pin0(node, edge_it2);
 			}
     }else if (npending==0 && nconstants==1) {
-      collapse_forward_always_pin0(node, inp_edges_ordered);
+        collapse_forward_always_pin0(node, inp_edges_ordered);
     }else if (npending==1 && nconstants==0) {
-      collapse_forward_always_pin0(node, edge_it2);
+      if (!(op == Ntype_op::Sum && edge_it2[0].sink.get_pin_name() == "B"))
+        collapse_forward_always_pin0(node, edge_it2);
     }
   } else if (op == Ntype_op::SRA || op == Ntype_op::SHL) {
     auto amt_node = inp_edges_ordered[1].driver.get_node();

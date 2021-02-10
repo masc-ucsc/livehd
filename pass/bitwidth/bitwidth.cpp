@@ -690,7 +690,7 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
   if (parent_pending) {
     auto through_dpin = node_attr.get_sink_pin("name").get_driver_pin();
     flat_bwmap.insert_or_assign(through_dpin.get_compact_flat(), bw);
-    bw.dump();
+    //bw.dump();
   }
 }
 
@@ -927,18 +927,7 @@ void Bitwidth::bw_pass(LGraph *lg) {
 
         dpin.set_bits(bw_bits);
       }
-
-      //debug
-      if (op != Ntype_op::Sub) {
-        fmt::print("    ");
-        auto it = flat_bwmap.find(node.get_driver_pin("Y").get_compact_flat());
-        if (it != flat_bwmap.end())
-          it->second.dump();
-      }
-
     }// end of lg->forward()
-
-
 
     // set bits for graph input and output
     lg->each_graph_input([this](Node_pin &dpin) {
@@ -991,11 +980,14 @@ void Bitwidth::bw_pass(LGraph *lg) {
         if (it == flat_bwmap.end()) {
           fmt::print("node:{} {} UNKNOWN\n", node.debug_name(), dpin.get_pin_name());
         }else if (it->second.is_always_positive()) {
-          fmt::print("node:{} {} pos\n", node.debug_name(), dpin.get_pin_name());
+          fmt::print("node:{} {} pos  |", node.debug_name(), dpin.get_pin_name());
+          it->second.dump();
         }else if (it->second.is_always_negative()) {
-          fmt::print("node:{} {} neg\n", node.debug_name(), dpin.get_pin_name());
+          fmt::print("node:{} {} neg  |", node.debug_name(), dpin.get_pin_name());
+          it->second.dump();
         }else{
-          fmt::print("node:{} {} both\n", node.debug_name(), dpin.get_pin_name());
+          fmt::print("node:{} {} both |", node.debug_name(), dpin.get_pin_name());
+          it->second.dump();
         }
       }
     }
