@@ -102,6 +102,7 @@ private:
   std::string      source_filename;
   std::string_view memblock;
   int              memblock_fd;
+  Lnast_nid        undefined_var_nid;
 
   void      do_ssa_trans               (const Lnast_nid  &top_nid);
   void      ssa_lhs_handle_a_statement (const Lnast_nid  &psts_nid, const Lnast_nid &opr_nid);

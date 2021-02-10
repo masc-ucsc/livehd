@@ -51,10 +51,15 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
     top_sts_nid = get_first_child(top_nid);
   }
 
+  std::string tmp_str = "err_var_undefined";
+  std::string err_var = "err_var";
+  auto asg_nid = add_child(top_sts_nid, Lnast_node::create_assign(Etoken()));
+  add_child(asg_nid, Lnast_node::create_ref(add_string(err_var)));
+  undefined_var_nid = add_child(asg_nid, Lnast_node::create_const(add_string(tmp_str)));
+
 
   Phi_rtable top_phi_resolve_table;
   phi_resolve_tables[top_sts_nid] = top_phi_resolve_table;
-
   /* fmt::print("Step-1: Analyze LHS or RHS of Tuple Dot/Sel;  */
   analyze_dot_lrhs(top_sts_nid);
 
@@ -558,8 +563,7 @@ bool Lnast::check_tuple_var_1st_scope_ssa_table_parents_chain(const Lnast_nid &p
         auto prev_sib_if = get_sibling_prev(src_if_nid);
         auto tup_pre_declare = insert_next_sibling(prev_sib_if, Lnast_node(Lnast_ntype::create_tuple(), Etoken()));
         add_child(tup_pre_declare, Lnast_node::create_ref(add_string(ref_name)));
-        std::string tmp_str = "err_var_undefined";
-        add_child(tup_pre_declare, Lnast_node::create_const(add_string(tmp_str)));
+        add_child(tup_pre_declare, get_data(undefined_var_nid));
       } 
       return true;
     }
@@ -950,42 +954,60 @@ void Lnast::ssa_handle_phi_nodes(const Lnast_nid &if_nid) {
 void Lnast::resolve_phi_nodes(const Lnast_nid &cond_nid, Phi_rtable &true_table, Phi_rtable &false_table) {
   auto if_nid   = get_parent(cond_nid);
   auto psts_nid = get_parent(if_nid);
-  for (auto const&[var_name, nid] : false_table) {
-
-    if (check_phi_table_parents_chain(var_name, psts_nid) == Lnast_nid()) 
+  for (auto const&[vname, nid] : false_table) {
+    if (check_phi_table_parents_chain(vname, psts_nid) == Lnast_nid()) {
+      if (!(is_register(vname) || is_output(vname))) 
+        continue;
+      
+      if (true_table.find(vname) != true_table.end()) {
+        add_phi_node(cond_nid, true_table[vname], false_table[vname]);
+        true_table.erase(vname);
+      } else {
+        add_phi_node(cond_nid, undefined_var_nid, false_table[vname]);
+      }
       continue;
+    }
     
-    if (true_table.find(var_name) != true_table.end()) {
-      add_phi_node(cond_nid, true_table[var_name], false_table[var_name]);
-      true_table.erase(var_name);
+    if (true_table.find(vname) != true_table.end()) {
+      add_phi_node(cond_nid, true_table[vname], false_table[vname]);
+      true_table.erase(vname);
     } else {
-      auto t_nid = get_complement_nid(var_name, psts_nid, false);
-      add_phi_node(cond_nid, t_nid, false_table[var_name]);
+      auto t_nid = get_complement_nid(vname, psts_nid, false);
+      add_phi_node(cond_nid, t_nid, false_table[vname]);
     }
   }
 
   std::vector<std::string_view> var_list;
-  for (auto const&[var_name, nid] : true_table) {
-    if (true_table.empty()) { // it might be empty due to the erase from previous for loop
+  for (auto const&[vname, nid] : true_table) {
+    if (true_table.empty())  // it might be empty due to the erase from previous for loop
       break;
-    }
 
-    if (check_phi_table_parents_chain(var_name, psts_nid) == Lnast_nid()) {
+    if (check_phi_table_parents_chain(vname, psts_nid) == Lnast_nid()) {
+      if (!(is_register(vname) || is_output(vname))) 
+        continue;
+
+      if (false_table.find(vname) != false_table.end()) {
+        add_phi_node(cond_nid, true_table[vname], false_table[vname]);
+        var_list.push_back(vname);
+      } else {
+        add_phi_node(cond_nid, true_table[vname], undefined_var_nid);
+        var_list.push_back(vname);
+      }
       continue;
     }
 
-    if (false_table.find(var_name) != false_table.end()) {
-      add_phi_node(cond_nid, true_table[var_name], false_table[var_name]);
-      var_list.push_back(var_name);
+    if (false_table.find(vname) != false_table.end()) {
+      add_phi_node(cond_nid, true_table[vname], false_table[vname]);
+      var_list.push_back(vname);
     } else {
-      auto f_nid = get_complement_nid(var_name, psts_nid, true);
-      add_phi_node(cond_nid, true_table[var_name], f_nid);
-      var_list.push_back(var_name);
+      auto f_nid = get_complement_nid(vname, psts_nid, true);
+      add_phi_node(cond_nid, true_table[vname], f_nid);
+      var_list.push_back(vname);
     }
   }
 
-  for (auto var_name : var_list) {
-    true_table.erase(var_name);
+  for (auto vname : var_list) {
+    true_table.erase(vname);
   }
 }
 
