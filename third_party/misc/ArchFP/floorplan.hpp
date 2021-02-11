@@ -121,6 +121,7 @@ public:
   virtual void          setX(int newX) { x = newX; }
   virtual void          setY(int newY) { y = newY; }
   virtual int           setCount(int newCount) { return count = newCount; }
+  virtual void          setArea(double newArea) { area = newArea; }
   virtual GeographyHint setHint(GeographyHint newHint) { return hint = newHint; }
   virtual void          setSize(double widthArg, double heightArg);
   virtual void          setLocation(double xArg, double yArg);

@@ -49,7 +49,7 @@ void Lhd_floorplanner::write_file(const std::string_view filename) {
   outputHotSpotFooter(fos);
 }
 
-void Lhd_floorplanner::write_lhd() {
+void Lhd_floorplanner::write_lhd_node() {
   // make sure all nodes have a hier color
   root_lg->each_hier_fast_direct([](Node& n) {
     n.set_hier_color(0);
@@ -93,4 +93,8 @@ void Lhd_floorplanner::write_lhd() {
 
   // check that the correct number of nodes are in the floorplan
   I(node_count == placed_nodes);
+}
+
+void Lhd_floorplanner::write_lhd_lg() {
+  fmt::print("(not imp)\n");
 }

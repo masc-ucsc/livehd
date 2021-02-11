@@ -24,7 +24,7 @@ void Pass_fplan_makefp::setup() {
   register_pass(m);
 }
 
-void Pass_fplan_makefp::makefp_int(Lhd_floorplanner& fp, bool write_lhd, const std::string_view dest) {
+void Pass_fplan_makefp::makefp_int(Lhd_floorplanner& fp, const std::string_view dest) {
   auto t = profile_time::Timer();
 
   t.start();
@@ -37,13 +37,6 @@ void Pass_fplan_makefp::makefp_int(Lhd_floorplanner& fp, bool write_lhd, const s
   fp.create();
   fmt::print(" done ({} ms).\n", t.time());
 
-  if (write_lhd) {
-    t.start();
-    fmt::print("  writing floorplan to livehd...");
-    fp.write_lhd();
-    fmt::print(" done ({} ms).\n", t.time());
-  }
-
   if (dest.length() > 0) {
     fmt::print("  writing floorplan to file {}...", dest);
     fp.write_file(dest);
@@ -53,18 +46,6 @@ void Pass_fplan_makefp::makefp_int(Lhd_floorplanner& fp, bool write_lhd, const s
 
 Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", var), root_lg(nullptr) {
   root_lg = var.lgs[0];  // length checked by pass() before being passed to Pass_fplan_makefp
-
-
-
-
-
-
-  // bugs: space is created between components because ArchFP is trying very hard to satisfy aspect ratio constraints.
-  // we can cause illegal overlaps by smashing the aspect ratio because of the same issue.
-
-  // TODO: implement SoftAspectRatio and have it generate legal floorplans.
-  //           UNDERSTAND HOW GEOGLAYOUT WORKS BEFORE ADDING LEGALIZATION CODE - DON'T GUESS!
-  // TODO: skip collision checks on HardAspectRatio.
 
   std::string_view t_str = var.get("traversal");
 
@@ -78,14 +59,28 @@ Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", v
   fmt::print(" done ({} ms).\n", whole_t.time());
 
   if (t_str == "hier_lg") {
-    // Lg_hier_floorp hfp;
-    // makefp_int(hfp, "file");
+    Lg_hier_floorp hfp(std::move(nt));
+    makefp_int(hfp, var.get("filename"));
+
+    profile_time::Timer t;
+    t.start();
+    fmt::print("  writing floorplan to livehd...");
+    hfp.write_lhd_lg();
+    fmt::print(" done ({} ms).\n", t.time());
   } else if (t_str == "flat_node") {
     Node_flat_floorp nffp(std::move(nt));
-    makefp_int(nffp, false, var.get("filename"));
+    makefp_int(nffp, var.get("filename"));
+
+    // flat floorplans have no hierarchy and cannot be written to LiveHD
   } else if (t_str == "hier_node") {
     Node_hier_floorp nhfp(std::move(nt));
-    makefp_int(nhfp, true, var.get("filename"));
+    makefp_int(nhfp, var.get("filename"));
+
+    profile_time::Timer t;
+    t.start();
+    fmt::print("  writing floorplan to livehd...");
+    nhfp.write_lhd_node();
+    fmt::print(" done ({} ms).\n", t.time());
   } else {
     std::string errstr = "unknown traversal method ";
     throw std::invalid_argument(errstr.append(t_str));

@@ -20,9 +20,8 @@ Easy things:
  - put warning bazel file in //tools
 
 High level goals:
-1. Get lgraph hier traversal working
-2. Test BOOM core
-3. Find / write a method that doesn't mess up on the wrong aspect ratio - HardAspectRatio not helpful for initial floorplans.
+1. Test BOOM core
+2. Find / write a method that doesn't mess up on the wrong aspect ratio - HardAspectRatio not helpful for initial floorplans.
 
 Things to add:
 1. Optimization
@@ -46,4 +45,6 @@ Things to add:
     - check for insane / unrealistic wirelength metrics
     - check for disconnected parts of floorplan
 5. Overlay lgraph borders over actual nodes on png
-    - rewrite view.py in C++, and have it source data from LiveHD
+
+Tabled ideas:
+ - Cairo is LGPL, so idk if we can ship it as part of LiveHD.  I'd have to choose a different library we can ship if someone needs floorplan images from LiveHD directly.
