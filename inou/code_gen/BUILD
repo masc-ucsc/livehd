@@ -1,6 +1,6 @@
 #  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-load("//:copt_default.bzl", "COPTS")
+load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
     name = "inou_code_gen",

@@ -2,7 +2,7 @@ load("@rules_cc//cc:defs.bzl", "cc_proto_library")
 load("@rules_java//java:defs.bzl", "java_library")
 load("@rules_proto//proto:defs.bzl", "proto_library")
 
-load("//:copt_default.bzl", "COPTS")
+load("//tools:copt_default.bzl", "COPTS")
 
 proto_library(
     name = "firrtl_proto",

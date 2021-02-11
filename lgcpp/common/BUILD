@@ -1,5 +1,5 @@
 
-load("//:copt_default.bzl", "COPTS")
+load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
     name = "lgcpp",
