@@ -33,7 +33,7 @@ TEST_F(archfp_test, floorplan_test1) {
   chip->addComponentCluster("L2", 12, 9.5, 2., 1., Left);
   chip->addComponent(coreCluster, 2, TopBottomMirror);
 
-  bool success = chip->layout(AspectRatio, 1.0);
+  bool success = chip->layout(HardAspectRatio, 1.0);
   if (!success) {
     cerr << "Unable to layout specified CMP configuration." << endl;
   }
