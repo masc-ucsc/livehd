@@ -6,7 +6,7 @@ $inp.__ubits = 4
 if ($en) {
   #x = $inp
 } else {
-  foo = #x - 1
+  foo = #x.__q_pin - 1
   bar = foo >> 1
   bar := foo
   #x = bar

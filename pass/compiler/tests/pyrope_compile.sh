@@ -19,7 +19,10 @@ capricious_bits2
 # pts='hier_tuple_nested_if hier_tuple_nested_if3 hier_tuple_nested_if3
 # hier_tuple_nested_if4 hier_tuple_nested_if5 hier_tuple_nested_if7 '
 
-pts='scalar_reg_out_pre_declare tuple_reg2 tuple_reg3'
+# pts='scalar_reg_out_pre_declare tuple_reg2 tuple_reg3'
+# pts='scalar_reg_out_pre_declare'
+# pts='counter'
+# pts='adder_stage'
 
 # pts='vector'
 # pts='vector2'
