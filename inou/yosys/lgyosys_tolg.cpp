@@ -127,57 +127,80 @@ public:
   Node_pin driver;
   int      offset;
   int      width;
+  bool     is_signed;
 
-  Pick_ID(Node_pin _driver, int _offset, int _width) : driver(_driver), offset(_offset), width(_width) {}
+  constexpr Pick_ID(Node_pin _driver, int _offset, int _width, bool _is_signed) : driver(_driver), offset(_offset), width(_width), is_signed(_is_signed) {}
 
   template <typename H>
   friend H AbslHashValue(H h, const Pick_ID &s) {
-    return H::combine(std::move(h), s.driver.get_compact(), s.offset, s.width);
+    return H::combine(std::move(h), s.driver.get_compact(), s.offset, s.width, s.is_signed);
   };
 };
 
 bool operator==(const Pick_ID &lhs, const Pick_ID &rhs) {
-  return lhs.driver == rhs.driver && lhs.width == rhs.width && lhs.offset == rhs.offset;
+  return lhs.driver == rhs.driver && lhs.width == rhs.width && lhs.offset == rhs.offset && lhs.is_signed == rhs.is_signed;
 }
 
 static absl::flat_hash_map<Pick_ID, Node_pin> picks;
 
-static Node_pin create_pick_operator(const Node_pin &wide_dpin, int offset, int width) {
-  if (offset == 0 && (int)wide_dpin.get_bits() == width)
+static Node_pin create_pick_operator(const Node_pin &wide_dpin, int offset, int width, bool is_signed) {
+  if (offset == 0 && (int)wide_dpin.get_bits() == width && !is_signed)
     return wide_dpin;
 
-  Pick_ID pick_id(wide_dpin, offset, width);
+  Pick_ID pick_id(wide_dpin, offset, width, is_signed);
   if (picks.find(pick_id) != picks.end()) {
     return picks.at(pick_id);
   }
 
-  // Pick(a,width,offset):
-  //   x = a>>offset
-  //   y = x & ((1<<offset)-1)
+  Node_pin dpin;
 
-  auto *lg       = wide_dpin.get_class_lgraph();
-  auto  and_node = lg->create_node(Ntype_op::And, width);
+  auto *lg = wide_dpin.get_class_lgraph();
 
-  if (offset) {
-    auto shr_node = lg->create_node(Ntype_op::SRA, width);
-    shr_node.setup_sink_pin("a").connect_driver(wide_dpin);
-    shr_node.setup_sink_pin("b").connect_driver(lg->create_node_const(offset));
+  if (is_signed) {
+    // Pick(a,width,offset, false):
+    //   x = a>>offset
+    //   y = NOT(x) & ((1<<offset)-1)
+    //   z = NOT(y)
 
-    and_node.connect_sink(shr_node);
-  } else {
-    and_node.connect_sink(wide_dpin);
+    auto  not_node = lg->create_node(Ntype_op::Not, width);
+    if (offset) {
+      auto shr_node = lg->create_node(Ntype_op::SRA, width);
+      shr_node.setup_sink_pin("a").connect_driver(wide_dpin);
+      shr_node.setup_sink_pin("b").connect_driver(lg->create_node_const(offset));
+
+      not_node.connect_sink(shr_node);
+    } else {
+      not_node.connect_sink(wide_dpin);
+    }
+
+    auto  and_node = lg->create_node(Ntype_op::And, width);
+    and_node.connect_sink(lg->create_node_const(((Lconst(1) << Lconst(width)) - 1)));
+    and_node.connect_sink(not_node);
+
+    auto  not2_node = lg->create_node(Ntype_op::Not, width);
+    not2_node.connect_sink(and_node);
+
+    dpin = not2_node.setup_driver_pin();
+  }else{
+    // Pick(a,width,offset, false):
+    //   x = a>>offset
+    //   y = x & ((1<<offset)-1)
+
+    auto  and_node = lg->create_node(Ntype_op::And, width);
+
+    if (offset) {
+      auto shr_node = lg->create_node(Ntype_op::SRA, width);
+      shr_node.setup_sink_pin("a").connect_driver(wide_dpin);
+      shr_node.setup_sink_pin("b").connect_driver(lg->create_node_const(offset));
+
+      and_node.connect_sink(shr_node);
+    } else {
+      and_node.connect_sink(wide_dpin);
+    }
+
+    and_node.connect_sink(lg->create_node_const(((Lconst(1) << Lconst(width)) - 1)));
+    dpin = and_node.setup_driver_pin();
   }
-
-  and_node.connect_sink(lg->create_node_const(((Lconst(1) << Lconst(width)) - 1)));
-
-#if 0
-  auto tposs_node = lg->create_node(Ntype_op::Tposs, and_node.get_driver_pin().get_bits()+1);
-  tposs_node.connect_sink(and_node);
-
-  auto dpin = tposs_node.setup_driver_pin();
-#else
-  auto dpin = and_node.setup_driver_pin();
-#endif
 
   picks.insert(std::make_pair(pick_id, dpin));
 
@@ -237,7 +260,7 @@ static Node_pin create_pick_operator(LGraph *g, const RTLIL::Wire *wire, int off
   if (wire->width == width && offset == 0)
     return get_edge_pin(g, wire, is_signed);
 
-  return create_pick_operator(get_edge_pin(g, wire, is_signed), offset, width);
+  return create_pick_operator(get_edge_pin(g, wire, is_signed), offset, width, is_signed);
 }
 
 static void append_to_or_node(LGraph *g, const Node &or_node, const Node_pin &dpin, int or_offset) {
@@ -728,7 +751,7 @@ static void process_cell_drivers_intialization(RTLIL::Module *module, LGraph *g)
           } else {
             I((chunk.width + offset) <= driver_pin.get_bits());
             // output port drives multiple wires
-            Node_pin pick_pin = create_pick_operator(driver_pin, offset, chunk.width);  // FIXME: offset or 0??
+            Node_pin pick_pin = create_pick_operator(driver_pin, offset, chunk.width, wire->is_signed);
             wire2pin[wire]    = pick_pin;
             set_bits_wirename(pick_pin, wire);
           }
@@ -751,7 +774,7 @@ static void process_cell_drivers_intialization(RTLIL::Module *module, LGraph *g)
             wire2pin[wire] = n2.setup_driver_pin();
           }
 
-          auto src_pin = create_pick_operator(driver_pin, offset, chunk.width);
+          auto src_pin = create_pick_operator(driver_pin, offset, chunk.width, wire->is_signed);
           offset += chunk.width;
 
           fmt::print("partial assign from node:{} to wire:{}[{}:{}]\n",
@@ -1686,16 +1709,31 @@ static void process_cells(RTLIL::Module *module, LGraph *g) {
 
       int y_bits = get_output_size(cell);
 
-#ifdef CELL_SIZE_IGNORE
-      exit_node.set_type(Ntype_op::And, y_bits);
-      auto sum_node = g->create_node(Ntype_op::Sum, y_bits);
-
-      exit_node.connect_sink(sum_node);
-      exit_node.connect_sink(g->create_node_const((Lconst(1) << Lconst(y_bits)) - 1));
-#else
-      exit_node.set_type(Ntype_op::Sum, y_bits);
       auto sum_node = exit_node;
-#endif
+      if (y_bits <= a_bits || y_bits <= b_bits) {
+        sum_node = g->create_node(Ntype_op::Sum, y_bits);
+
+        if (false && a_sign && b_sign) {
+          // out = Not(And(Not(sum(....)), y_mask)) - Keep sign
+          auto not_node = g->create_node(Ntype_op::Not, y_bits);
+          not_node.connect_sink(sum_node);
+
+          auto and_node = g->create_node(Ntype_op::And, y_bits);
+          and_node.connect_sink(g->create_node_const((Lconst(1) << Lconst(y_bits)) - 1));
+          and_node.connect_sink(not_node);
+
+          exit_node.set_type(Ntype_op::Not, y_bits);
+          exit_node.connect_sink(and_node);
+        }else{
+          // out = And(sum(....), y_mask)
+          exit_node.set_type(Ntype_op::And, y_bits);
+
+          exit_node.connect_sink(sum_node);
+          exit_node.connect_sink(g->create_node_const((Lconst(1) << Lconst(y_bits)) - 1));
+        }
+      }else{
+        exit_node.set_type(Ntype_op::Sum, y_bits);
+      }
 
       std::string_view b{"A"};
       if (std::strncmp(cell->type.c_str(), "$sub", 4) == 0)
@@ -1826,7 +1864,7 @@ static void process_cells(RTLIL::Module *module, LGraph *g) {
       //--
 
       sra_node.setup_sink_pin("a").connect_driver(get_unsigned_dpin(g, cell, ID::A));
-      sra_node.setup_sink_pin("b").connect_driver(get_unsigned_dpin(g, cell, ID::B));
+      sra_node.setup_sink_pin("b").connect_driver(get_dpin(g, cell, ID::B));
 
       auto y0_dpin = sra_node.setup_driver_pin();
 

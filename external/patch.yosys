@@ -10,7 +10,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    std::set<const RTLIL::Wire *> signed_wire;
 +
 +    for (auto cell : cells_list) {
-+      if (cell->type.in(ID($pos), ID($add), ID($mul), ID($and), ID($or), ID($xor), ID($sub))) {
++      if (cell->type.in(ID($pos), ID($sshr), ID($add), ID($mul), ID($and), ID($or), ID($xor), ID($sub))) {
 +        bool is_signed = cell->getParam(ID::A_SIGNED).as_bool(); // || cell->type == ID($sub);
 +        if (is_signed) {
 +          const RTLIL::Wire *wire = cell->getPort(ID::Y).chunks()[0].wire;
