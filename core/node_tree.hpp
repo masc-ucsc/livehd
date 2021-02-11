@@ -15,7 +15,6 @@ protected:
   LGraph *root;
 
 public:
-  Node_tree() = delete;
   Node_tree(LGraph *root);
 
   LGraph* get_root_lg() const { return root; }

@@ -562,14 +562,14 @@ void Node::set_hier_color(int new_color) {
 
 int Node::get_hier_color() const {
   I(!hidx.is_invalid());
-  auto str = Ann_node_hier_color::ref(top_g)->get_val(get_compact());
+  auto str = Ann_node_hier_color::ref(top_g)->get(get_compact());
   int  color;
   auto ok = absl::SimpleAtoi(str, &color);
   I(ok);
   return color;
 }
 
-bool Node::has_hier_color() const { return !hidx.is_invalid() && Ann_node_hier_color::ref(top_g)->has_key(get_compact()); }
+bool Node::has_hier_color() const { return !hidx.is_invalid() && Ann_node_hier_color::ref(top_g)->has(get_compact()); }
 
 // LCOV_EXCL_START
 void Node::dump() {

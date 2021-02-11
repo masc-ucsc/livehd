@@ -13,6 +13,8 @@ void Pass_fplan_writearea::setup() {
                        &Pass_fplan_writearea::pass);
 
   w.add_label_optional("min_aspect_ratio", "minimum aspect ratio of nodes in lgraph", "1.0");
+  // aspect ratio is super high to try and avoid overlapping floorplans as much as possible, but 
+  // can be reduced if required
   w.add_label_optional("max_aspect_ratio", "maximum aspect ratio of nodes in lgraph", "50.0");
   w.add_label_optional("min_area", "minimum area of nodes in lgraph (mm²)", "1.0");
   w.add_label_optional("max_area", "maximum area of nodes in lgraph (mm²)", "4.0");

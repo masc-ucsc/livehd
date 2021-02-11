@@ -53,7 +53,7 @@ using Ann_node_tree_pos = Attribute<Ann_name::tree_pos, Node, mmap_lib::map<Node
 
 using Ann_node_color = Attribute<Ann_name::color, Node, mmap_lib::bimap<Node::Compact_class, std::string_view> >;
 
-using Ann_node_hier_color = Attribute<Ann_name::hier_color, Node, mmap_lib::bimap<Node::Compact, std::string_view> >;
+using Ann_node_hier_color = Attribute<Ann_name::hier_color, Node, mmap_lib::map<Node::Compact, std::string_view> >;
 
 struct Ann_support {
   // TODO: Change to object to register annotations, and have an "update" for incremental

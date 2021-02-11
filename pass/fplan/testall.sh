@@ -6,7 +6,7 @@
 
 set -e # exit if any command fails
 
-# basic yosys files
+# basic yosys modules
 ./pass/fplan/fptest.sh ./inou/yosys/tests/srasll.v srasll
 ./pass/fplan/fptest.sh ./inou/yosys/tests/hierarchy.v hierarchy
 ./pass/fplan/fptest.sh ./inou/yosys/tests/long_gcd.v gcd
@@ -14,8 +14,9 @@ set -e # exit if any command fails
 ./pass/fplan/fptest.sh ./inou/yosys/tests/punching_3.v punching_3
 ./pass/fplan/fptest.sh ./inou/yosys/tests/graphtest.v graphtest
 
-# files written for testing floorplan hierarchies
+# module hierarchies specifically for testing hierarchical floorplans
 ./pass/fplan/fptest.sh ./pass/fplan/tests/simple_hier_test.v simple_hier_test
+./pass/fplan/fptest.sh ./pass/fplan/tests/grid_hier_test.v grid_hier_test
 ./pass/fplan/fptest.sh ./pass/fplan/tests/hier_test.v hier_test
 
 # does not work - no support for blackboxes yet

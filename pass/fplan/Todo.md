@@ -7,16 +7,16 @@ Issues:
 
 Issues not related to ArchFP:
  - view.py output is flipped due to mismatch between coordinates for HotSpot and png coordinates in PyCairo
+
  - blackboxes are not supported (use fixedLayout for this)
+    - create a way to write aspect ratio / area information to each subnode
 
 Node hierarchy:
  - add a is_valid method to Ntype_area, use it instead of hier_color to determine if a node has been placed yet
  - write non-root node to layouts[] in node_hier_floorp once I have a use for it
 
 Easy things:
- - Node::bimap -> Node::map for hier_node_color fails?
  - LiveHD has a random number class, use that in writearea
- - put warning bazel file in //tools
 
 High level goals:
 0. Test hier_lg with hier_test.v (waiting on yosys bugfix)

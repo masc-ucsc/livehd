@@ -14,7 +14,7 @@ set -e # exit if any command fails
 
 echo -n "floorplanning $1... "
 
-rm -rf lgdb # remove lgdb directory in case a failed pass corrupted it
+rm -rf lgdb # remove lgdb directory in case an earlier failed pass corrupted it
 rm -rf floorplan.*
 
 ./bazel-bin/main/lgshell -c "inou.yosys.tolg files:$1 top:$2" > /dev/null

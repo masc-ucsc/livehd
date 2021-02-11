@@ -13,7 +13,7 @@
 #include "mathutil.hpp"
 
 // This will be used to keep track of user's request for more output during layout.
-constexpr bool verbose = true;
+constexpr bool verbose = false;
 
 // Temporary local for crazy mirror reflection stuff.
 constexpr int maxMirrorDepth = 20;
