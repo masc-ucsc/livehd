@@ -71,84 +71,88 @@ if max_x >= max_y:
 else:
     max_dim = max_y
 
-# TODO: stroke gets clipped if module is on an edge
+# stroke gets clipped if module is on an edge, but it's not very noticeable
 SCALE_FACTOR = SIZE / max_dim
 
 # scale so that maximum width/height gets scaled to the bottom/right side of the picture
 ctx.scale(SCALE_FACTOR, SCALE_FACTOR)
 
-# render floorplan modules
-for line in flp_lines:
-    if '#' in line:
-        continue
-
-    tok_list = line.replace('\n', '').split('\t')
-    if len(tok_list) != 5:
-        continue
-
-    name = tok_list[0]
-    width = float(tok_list[1])
-    height = float(tok_list[2])
-    start_x = float(tok_list[3]) # left x
-    start_y = float(tok_list[4]) # bottom y
-
-    if args.verbose:
-        print(tok_list[0] + ': (' + tok_list[3] + ', ' + tok_list[4] + ') + (' + tok_list[1] + ', ' + tok_list[2] + ') = (' + str(width + start_x) + ', ' + str(height + start_y) + ')')
-
-    ctx.set_source_rgb(1, 1, 1)
-    ctx.rectangle(start_x, start_y, width, height)
-    ctx.fill_preserve() # fill rectangle, preserving border
-
-    ctx.set_source_rgb(0, 0, 0)
-    ctx.set_line_width(1 / SCALE_FACTOR)
-    ctx.stroke() # generate border
-
-ctx.set_source_rgb(0, 0, 0)
 ctx.set_font_size(args.fontsize / SCALE_FACTOR)
 ctx.select_font_face('Courier', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
 
-# render floorplan names, widths, and heights
+namestack = []
+
+# render floorplan modules
 for line in flp_lines:
-    if '#' in line:
-        continue
+    if line[0] == '#':
+        cmd = line[2:].split(" ", 1)[0] # check for specially formatted comments
+        if cmd != 'start' and cmd != 'end':
+            continue
+        
+        tok_list = line[2:].replace('\n', '').split(' ')
+        action = tok_list[0]
+        name = tok_list[1]
 
-    tok_list = line.replace('\n', '').split('\t')
-    if len(tok_list) != 5:
-        continue
-
-    name = tok_list[0]
-    width = float(tok_list[1])
-    height = float(tok_list[2])
-    start_x = float(tok_list[3])
-    start_y = float(tok_list[4])
-
-    nextent = ctx.text_extents(name)
-    wextent = ctx.text_extents(tok_list[1])
-    hextent = ctx.text_extents(tok_list[2])
-
-    # render name
-    if nextent.width <= width and nextent.height <= height:
-        ctx.move_to(start_x + width / 2 - nextent.width / 2, start_y + height / 2 + nextent.height / 2)
-        ctx.show_text(name)
+        if action == 'start':
+            namestack.append(name)
+        elif action == 'end':
+            namestack.pop()
+        
     else:
+        tok_list = line.replace('\n', '').split('\t')
+        if len(tok_list) != 5:
+            continue
+
+        name = tok_list[0]
+        width = float(tok_list[1])
+        height = float(tok_list[2])
+        start_x = float(tok_list[3]) # left x
+        start_y = float(tok_list[4]) # bottom y
+
         if args.verbose:
-            print('skipping name ' + name)
-    
-    if args.detail:
-        # render width
-        if wextent.width <= width and wextent.height <= height:
-            ctx.move_to(start_x + width / 2 - wextent.width / 2, start_y + height / 10 + wextent.height / 2)
-            ctx.show_text("{:.3f}".format(width * 1000))
+            print(tok_list[0] + ': (' + tok_list[3] + ', ' + tok_list[4] + ') + (' + tok_list[1] + ', ' + tok_list[2] + ') = (' + str(width + start_x) + ', ' + str(height + start_y) + ')')
+
+        ctx.set_source_rgb(1, 1, 1)
+        ctx.rectangle(start_x, start_y, width, height)
+        ctx.fill_preserve() # fill rectangle, preserving border
+
+        ctx.set_source_rgb(0, 0, 0)
+        ctx.set_line_width(1 / SCALE_FACTOR)
+        ctx.stroke() # generate border
+
+        # render name
+        fullname = name + "(" + namestack[-1] + ")"
+        fextent = ctx.text_extents(fullname)
+        nextent = ctx.text_extents(name)
+        
+        if fextent.width <= width and fextent.height <= height:
+            ctx.move_to(start_x + width / 2 - fextent.width / 2, start_y + height / 2 + fextent.height / 2)
+            ctx.show_text(fullname)
+        elif nextent.width <= width and nextent.height <= height:
+            ctx.move_to(start_x + width / 2 - nextent.width / 2, start_y + height / 2 + nextent.height / 2)
+            ctx.show_text(name)
         else:
             if args.verbose:
-                print('skipping width for ' + name)
-    
-        # render height
-        if hextent.width <= width and hextent.height <= height:
-            ctx.move_to(start_x + width / 10 - hextent.width / 2, start_y + height / 2 + hextent.height / 2)
-            ctx.show_text("{:.3f}".format(height * 1000))
-        else:
-            if args.verbose:
-                print('skipping height for ' + name)
+                print('skipping name ' + name)
+
+        if args.detail:
+            wextent = ctx.text_extents(tok_list[1])
+            hextent = ctx.text_extents(tok_list[2])
+            
+            # render width
+            if wextent.width <= width and wextent.height <= height:
+                ctx.move_to(start_x + width / 2 - wextent.width / 2, start_y + height / 10 + wextent.height / 2)
+                ctx.show_text("{:.3f}".format(width * 1000))
+            else:
+                if args.verbose:
+                    print('skipping width for ' + name)
+        
+            # render height
+            if hextent.width <= width and hextent.height <= height:
+                ctx.move_to(start_x + width / 10 - hextent.width / 2, start_y + height / 2 + hextent.height / 2)
+                ctx.show_text("{:.3f}".format(height * 1000))
+            else:
+                if args.verbose:
+                    print('skipping height for ' + name)
 
 surf.write_to_png(args.file.split('.')[0] + '.png')

@@ -504,10 +504,10 @@ void gridLayout::outputHotSpotLayout(ostream& o, double startX, double startY) {
 
   int    compCount = xCount * yCount;
   string GridName  = getUniqueName();
-  o << "# Start of " << GridName << " Layout of type " << Ntype::get_name(getType()) << ".  There are " << compCount
-    << " components in a " << xCount << " by " << yCount << " grid.\n";
-  o << "# Total Grid Stats: X=" << calcX(startX) << " Y=" << calcY(startY) << " W=" << width << "mm H=" << height
-    << "mm Area=" << area << "mm^2\n";
+  o << "# " << GridName << " stats: X=" << calcX(startX) << ", Y=" << calcY(startY) << ", W=" << width << ", H=" << height
+    << ", area=" << area << "mm²\n";
+  o << "# start " << GridName << " " << Ntype::get_name(getType()) << " grid " << compCount << " " << xCount << " " << yCount
+    << "\n";
   int compNum = 1;
   for (int i = 0; i < yCount; i++) {
     double cy = (i * compHeight) + y + startY;
@@ -517,7 +517,7 @@ void gridLayout::outputHotSpotLayout(ostream& o, double startX, double startY) {
       compNum += 1;
     }
   }
-  o << "# End of " << GridName << " Layout.\n";
+  o << "# end " << GridName << "\n";
 }
 
 unsigned int gridLayout::outputLGraphLayout(Node_tree& tree, Tree_index tidx, double startX, double startY) {
@@ -642,17 +642,16 @@ void bagLayout::outputHotSpotLayout(ostream& o, double startX, double startY) {
   string groupName;
   if (itemCount != 1) {
     groupName = getUniqueName();
-    o << "# Start of " << groupName << " layout of type " << Ntype::get_name(getType()) << " (" << getComponentCount()
-      << " items).\n";
-    o << "# Total Group Stats: X=" << calcX(startX) << " Y=" << calcY(startY) << " W=" << width << "mm H=" << height
-      << "mm Area=" << area << "mm^2\n";
+    o << "# " << groupName << " stats: X=" << calcX(startX) << ", Y=" << calcY(startY) << ", W=" << width << ", H=" << height
+      << ", area=" << area << "mm²\n";
+    o << "# start " << groupName << " " << Ntype::get_name(getType()) << " bag " << itemCount << "\n";
   }
   for (int i = 0; i < getComponentCount(); i++) {
     FPObject* obj = getComponent(i);
     obj->outputHotSpotLayout(o, x + startX, y + startY);
   }
   if (itemCount != 1)
-    o << "# End of " << groupName << " Layout.\n";
+    o << "# end " << groupName << "\n";
   popMirrorContext();
 }
 
@@ -992,15 +991,14 @@ bool geogLayout::layoutHelper(FPOptimization opt, double remWidth, double remHei
 void geogLayout::outputHotSpotLayout(ostream& o, double startX, double startY) {
   pushMirrorContext(startX, startY);
   string layoutName = getUniqueName();
-  o << "# Start of " << layoutName << " Layout of type " << Ntype::get_name(getType()) << " (" << getComponentCount()
-    << " items).\n";
-  o << "# Total Cluster Stats: X=" << calcX(startX) << " Y=" << calcY(startY) << " W=" << width << "mm H=" << height
-    << "mm Area=" << area << "mm^2\n";
+  o << "# " << layoutName << " stats: X=" << calcX(startX) << ", Y=" << calcY(startY) << ", W=" << width << ", H=" << height
+    << ", area=" << area << "mm²\n";
+  o << "# start " << layoutName << " " << Ntype::get_name(getType()) << " geog " << getComponentCount() << "\n";
   for (int i = 0; i < getComponentCount(); i++) {
     FPObject* obj = getComponent(i);
     obj->outputHotSpotLayout(o, x + startX, y + startY);
   }
-  o << "# End of " << layoutName << " Layout.\n";
+  o << "# end " << layoutName << "\n";
   popMirrorContext();
 }
 
@@ -1014,6 +1012,7 @@ ostream& outputHotSpotHeader(const char* filename) {
   out << "# FloorPlan output from ArchFP: UVA's Rapid Prototyping FloorPlanner.\n";
   out << "# Formatted for Input to HotSpot.\n";
   out << "# Line Format: <unit-name>\\t<width>\\t<height>\\t<left-x>\\t<bottom-y>\n";
+  out << "# Module Format: <start/end>\\t<name>\\t<type>\\t<items>\\t<grid width (if grid)>\\t<grid height (if grid)>\n";
   out << "# all dimensions are in meters\n";
   out << "# comment lines begin with a '#'\n";
   out << "# comments and empty lines are ignored\n\n";

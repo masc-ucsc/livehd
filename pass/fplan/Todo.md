@@ -18,10 +18,11 @@ Node hierarchy:
 Easy things:
  - LiveHD has a random number class, use that in writearea
 
-High level goals:
+Goals:
 0. Test hier_lg with hier_test.v (waiting on yosys bugfix)
 1. Test BOOM core (waiting on yosys memory implementation?)
-2. Find / write a method that doesn't mess up on the wrong aspect ratio - HardAspectRatio not helpful for initial floorplans.
+2. Write node level hierarchy to file (mmap_tree not being written to file is known TODO)
+3. Find / write a method that doesn't mess up on the wrong aspect ratio - HardAspectRatio not helpful for initial floorplans.
 
 Things to add:
 1. Optimization
@@ -45,7 +46,7 @@ Things to add:
     - check for insane / unrealistic wirelength metrics
 5. Overlay lgraph borders over actual nodes on png
 6. Generate a slicing tree
-    - allows for efficient floorplan analysis (disconnected segments, etc)
+    - allows for efficient floorplan analysis, prevents disconnected segments entirely
 
-Tabled ideas:
+Tabled:
  - Cairo is LGPL, so idk if we can ship it as part of LiveHD.  I'd have to choose a different library we can ship if someone needs floorplan images from LiveHD directly.
