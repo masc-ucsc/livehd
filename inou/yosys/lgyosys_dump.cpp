@@ -606,6 +606,23 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         }
       }
       break;
+      case Ntype_op::Sext: {
+        auto *in_wire   = get_wire(node.get_sink_pin("a").get_driver_pin());
+        auto width_dpin  = node.get_sink_pin("b").get_driver_pin();
+        auto *out_wire  = cell_output_map[node.get_driver_pin().get_compact()];
+
+        I(width_dpin.is_type_const());
+        I(width_dpin.get_node().get_type_const().is_i());
+
+        auto w = width_dpin.get_node().get_type_const().to_i();
+
+        I(w == out_wire->width); // Can this be broken in yosys?
+
+        auto w2 = RTLIL::SigSpec(in_wire);
+        w2.extend_u0(out_wire->width, false);  // unsigned extend
+        module->connect(out_wire, w2);
+      }
+      break;
       case Ntype_op::LUT: {
         RTLIL::SigSpec joined_inp_wires;
         bool           has_inputs = false;

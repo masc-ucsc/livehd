@@ -127,7 +127,7 @@ if [ -z $FM_SHELL ]; then
   FM_SHELL=`which fm_shell`
 fi
 
-if [ -x ${FM_SHELL} ]; then
+if [ -x "${FM_SHELL}" ]; then
   echo "using formality"
 
   echo "

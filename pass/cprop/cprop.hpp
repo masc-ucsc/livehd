@@ -33,18 +33,18 @@ protected:
   void try_connect_lgcpp(Node &node);
   void try_connect_sub_inputs(Node &node);
 
-  void process_subgraph(Node &node);
+  void process_subgraph(Node &node, XEdge_iterator &inp_edges_ordered);
 
   // Attributes method
   bool process_attr_get(Node &node);
   void process_attr_q_pin(Node &node, Node_pin &parent_dpin);
 
-
   // Tuple methods
   std::shared_ptr<Lgtuple const> find_lgtuple(Node_pin up_dpin);
   void process_tuple_add(Node &node);
-  bool process_tuple_get(Node &node);
-  void process_mux(Node &node);
+  bool process_tuple_get(Node &node, XEdge_iterator &inp_edges_ordered);
+  void process_mux(Node &node, XEdge_iterator &inp_edges_ordered);
+  void process_sext(Node &node, XEdge_iterator &inp_edges_ordered);
 
   // io construction
   void try_create_graph_output(Node &node, std::shared_ptr<Lgtuple> tup);

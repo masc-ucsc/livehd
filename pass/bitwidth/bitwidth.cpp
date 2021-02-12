@@ -314,6 +314,38 @@ void Bitwidth::process_tposs(Node &node, XEdge_iterator &inp_edges) {
   flat_bwmap.insert_or_assign(node.get_driver_pin().get_compact_flat(), Bitwidth_range(min_val, max_val));
 }
 
+void Bitwidth::process_sext(Node &node, XEdge_iterator &inp_edges) {
+
+  auto wire_dpin = inp_edges[0].driver;
+  auto pos_dpin  = inp_edges[1].driver;
+
+  I(inp_edges[0].sink.get_pin_name() == "a");
+  I(inp_edges[1].sink.get_pin_name() == "b");
+
+  auto wire_it = flat_bwmap.find(wire_dpin.get_compact_flat());
+
+  auto sign_max = Bits_max;
+  if (pos_dpin.is_type_const()) {
+    sign_max = pos_dpin.get_type_const().to_i();
+  }
+
+  if (sign_max == Bits_max && wire_it == flat_bwmap.end()) {
+    debug_unconstrained_msg(node, pos_dpin);
+    not_finished = true;
+    return;
+  }
+
+  if (wire_it != flat_bwmap.end()) {
+    auto b = wire_it->second.get_sbits();
+    if (b < sign_max)
+      sign_max = b;
+  }
+
+  Bitwidth_range bw;
+  bw.set_sbits_range(sign_max);
+  flat_bwmap.insert_or_assign(node.get_driver_pin().get_compact_flat(), bw);
+}
+
 void Bitwidth::process_comparator(Node &node) {
   Bitwidth_range bw;
   bw.set_sbits_range(1);
@@ -898,6 +930,8 @@ void Bitwidth::bw_pass(LGraph *lg) {
         process_comparator(node);
       } else if (op == Ntype_op::Tposs) {
         process_tposs(node, inp_edges);
+      } else if (op == Ntype_op::Sext) {
+        process_sext(node, inp_edges);
       } else if (op == Ntype_op::Sub) {
         set_subgraph_boundary_bw(node);
       } else {

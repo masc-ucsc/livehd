@@ -159,32 +159,26 @@ static Node_pin create_pick_operator(const Node_pin &wide_dpin, int offset, int 
   if (is_signed) {
     // Pick(a,width,offset, false):
     //   x = a>>offset
-    //   y = NOT(x) & ((1<<offset)-1)
-    //   z = NOT(y)
+    //   y = Sext(x, width)
 
-    auto  not_node = lg->create_node(Ntype_op::Not, width);
+    auto  sext_node = lg->create_node(Ntype_op::Sext, width);
+
     if (offset) {
       auto shr_node = lg->create_node(Ntype_op::SRA, width);
       shr_node.setup_sink_pin("a").connect_driver(wide_dpin);
       shr_node.setup_sink_pin("b").connect_driver(lg->create_node_const(offset));
 
-      not_node.connect_sink(shr_node);
+      sext_node.setup_sink_pin("a").connect_driver(shr_node);
     } else {
-      not_node.connect_sink(wide_dpin);
+      sext_node.setup_sink_pin("a").connect_driver(wide_dpin);
     }
 
-    auto  and_node = lg->create_node(Ntype_op::And, width);
-    and_node.connect_sink(lg->create_node_const(((Lconst(1) << Lconst(width)) - 1)));
-    and_node.connect_sink(not_node);
-
-    auto  not2_node = lg->create_node(Ntype_op::Not, width);
-    not2_node.connect_sink(and_node);
-
-    dpin = not2_node.setup_driver_pin();
+    sext_node.setup_sink_pin("b").connect_driver(lg->create_node_const(Lconst(width)));
+    dpin = sext_node.setup_driver_pin();
   }else{
     // Pick(a,width,offset, false):
     //   x = a>>offset
-    //   y = x & ((1<<offset)-1)
+    //   y = x & ((1<<width)-1)
 
     auto  and_node = lg->create_node(Ntype_op::And, width);
 

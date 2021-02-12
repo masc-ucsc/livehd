@@ -541,11 +541,11 @@ void Cprop::try_connect_sub_inputs(Node &node) {
   }
 }
 
-void Cprop::process_subgraph(Node &node) {
+void Cprop::process_subgraph(Node &node, XEdge_iterator &inp_edges_ordered) {
 
   if (!node.is_type_sub_present()) {
     // Still a blackbox, not much to do
-    for(const auto &e:node.inp_edges()) {
+    for(const auto &e:inp_edges_ordered) {
       if (node2tuple.contains(e.driver.get_node().get_compact())) {
         tuple_issues = true;
         return;
@@ -646,7 +646,7 @@ std::tuple<std::string_view, std::string_view, int> Cprop::get_tuple_name_key(No
   return std::make_tuple(tup_name, key_name, key_pos);
 }
 
-bool Cprop::process_tuple_get(Node &node) {
+bool Cprop::process_tuple_get(Node &node, XEdge_iterator &inp_edges_ordered) {
 
   I(node.get_type_op() == Ntype_op::TupGet);
 
@@ -686,7 +686,7 @@ bool Cprop::process_tuple_get(Node &node) {
 
         fmt::print("cprop: changing node:{} to AttrSet node for attr:{} from pin:{}\n",node.debug_name(), it.first, it.second.debug_name());
         // Reuse current node. First delete input edges
-        for(auto e:node.inp_edges()) {
+        for(auto &e:inp_edges_ordered) {
           e.del_edge();
         }
 
@@ -739,14 +739,13 @@ bool Cprop::process_tuple_get(Node &node) {
   return false; // Could not resolve (maybe compile error, maybe hierarchical needed)
 }
 
-void Cprop::process_mux(Node &node) {
-
+void Cprop::process_mux(Node &node, XEdge_iterator &inp_edges_ordered) {
 
   std::vector<std::shared_ptr<Lgtuple const>> tup_list;
 
   Node_pin sel_dpin;
 
-  for(auto e:node.inp_edges_ordered()) { // Mux needs the edges ordered
+  for(auto &e:inp_edges_ordered) { // Mux needs the edges ordered
     if (e.sink.get_pid() == 0) {
       I(e.sink.get_pin_name() == "0");
 
@@ -770,7 +769,38 @@ void Cprop::process_mux(Node &node) {
     }
     node2tuple[node.get_compact()] = tup;
   }
+}
 
+void Cprop::process_sext(Node &node, XEdge_iterator &inp_edges_ordered) {
+
+  const auto &pos_dpin = inp_edges_ordered[1].driver;
+  if (!pos_dpin.is_type_const()) {
+    return; // not much to do
+  }
+
+  const auto &wire_dpin = inp_edges_ordered[0].driver;
+  if (wire_dpin.get_type_op() != Ntype_op::Sext)
+    return;
+
+  // Sext(Sext(X,a),b) == Sext(X, min(a,b))
+
+  auto parent_pos_dpin = wire_dpin.get_node().get_sink_pin("b").get_driver_pin();
+  if (!parent_pos_dpin.is_type_const())
+    return;
+
+  auto self_pos   = pos_dpin.get_type_const().to_i();
+  auto parent_pos = parent_pos_dpin.get_type_const().to_i();
+
+  auto b = std::min(self_pos, parent_pos);
+  if (b != self_pos) {
+    auto new_const_node = node.get_class_lgraph()->create_node_const(b);
+    inp_edges_ordered[1].del_edge();
+    node.setup_sink_pin("b").connect_driver(new_const_node);
+  }
+
+  auto parent_wire_dpin = wire_dpin.get_node().get_sink_pin("a").get_driver_pin();
+  inp_edges_ordered[0].del_edge();
+  node.setup_sink_pin("a").connect_driver(parent_wire_dpin);
 }
 
 std::shared_ptr<Lgtuple const> Cprop::find_lgtuple(Node_pin up_dpin) {
@@ -876,6 +906,8 @@ void Cprop::do_trans(LGraph *lg) {
     //fmt::print("{}\n", node.debug_name());
     auto op = node.get_type_op();
 
+    auto inp_edges_ordered = node.inp_edges_ordered();
+
     // Special cases to handle in cprop
     if (op == Ntype_op::AttrGet) {
       process_attr_get(node);
@@ -883,7 +915,7 @@ void Cprop::do_trans(LGraph *lg) {
     } else if (op == Ntype_op::AttrSet) {
       continue;  // Nothing to do in cprop
     } else if (op == Ntype_op::Sub) {
-      process_subgraph(node);
+      process_subgraph(node, inp_edges_ordered);
       continue;
     } else if (op == Ntype_op::Sflop || op == Ntype_op::Aflop || op == Ntype_op::Latch || op == Ntype_op::Fflop || op == Ntype_op::Memory) {
       fmt::print("cprop skipping node:{}\n", node.debug_name());
@@ -897,18 +929,18 @@ void Cprop::do_trans(LGraph *lg) {
       process_tuple_add(node);
       continue;
     } else if (op == Ntype_op::TupGet) {
-      auto ok = process_tuple_get(node);
+      auto ok = process_tuple_get(node, inp_edges_ordered);
       if (!ok) {
         Pass::info("cprop could not simplify node:{}",node.debug_name());
         tuple_issues = true;
       }
       continue;
+    } else if (op == Ntype_op::Sext) {
+      process_sext(node, inp_edges_ordered);
     } else if (op == Ntype_op::Mux) {
-      process_mux(node);
+      process_mux(node, inp_edges_ordered);
     }
 
-    // Normal copy prop and strength reduction
-    auto inp_edges_ordered = node.inp_edges_ordered();
     auto replaced_some = try_constant_prop(node, inp_edges_ordered);
 
     if (node.is_invalid())
