@@ -24,7 +24,7 @@ VecShiftRegisterParam VecShiftRegisterSimple '
 # VendingMachineSwitch VendingMachine'
 
 # passed hifirrtl pattern pool
-pts='Cell_alone PlusAnd Test2 EnableShiftRegister MaxN SingleEvenFilter
+pts='EnableShiftRegister Cell_alone MaxN PlusAnd Test2 SingleEvenFilter
 Coverage Counter Decrementer SubModule BundleConnect LogShifter Adder4
 Xor6Thread2 XorSelfThread1 ByteSelector SimpleALU Mux4 Max2 ResetShiftRegister
 Parity RegisterSimple Register RegXor AddNot GCD_3bits Flop Test3 TrivialAdd
