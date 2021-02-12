@@ -511,8 +511,9 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
 
         RTLIL::Wire *adds_result = nullptr;
         if (add_signed.size() > 1) {
+          int  xtra_bits = ceill(log2(add_signed.size()));
           if (sub_signed.size() > 0) {
-            adds_result = module->addWire(next_id(g), size);
+            adds_result = module->addWire(next_id(g), size+xtra_bits);
           } else {
             adds_result = cell_output_map[node.get_driver_pin().get_compact()];
           }
@@ -523,8 +524,9 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
 
         RTLIL::Wire *subs_result = nullptr;
         if (sub_signed.size() > 1) {
+          int  xtra_bits = ceill(log2(sub_signed.size()));
           if (add_signed.size() > 0) {
-            subs_result = module->addWire(next_id(g), size);
+            subs_result = module->addWire(next_id(g), size+xtra_bits);
           } else {
             subs_result = cell_output_map[node.get_driver_pin().get_compact()];
           }
