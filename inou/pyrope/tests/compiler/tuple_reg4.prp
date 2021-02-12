@@ -1,7 +1,6 @@
 foo = 1
 if (foo == 1) {
-  %out = 1
   #reg.a = 2
 }
 
-%out2 = #reg.a.__q_pin
+%out = #reg.a.__q_pin

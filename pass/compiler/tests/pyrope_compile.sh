@@ -13,16 +13,14 @@ hier_tuple2 tuple_if ssa_rhs out_ssa attr_set if2 hier_tuple lhs_wire
 tuple_copy if firrtl_tail hier_tuple_nested_if2 lhs_wire2 tuple_copy2
 counter_nested_if counter lhs_wire adder_stage capricious_bits4
 capricious_bits firrtl_gcd_3bits nested_if firrtl_tail2 firrtl_tail3 logic
-capricious_bits2 
+capricious_bits2 scalar_reg_out_pre_declare
 '
 
 # pts='hier_tuple_nested_if hier_tuple_nested_if3 hier_tuple_nested_if3
 # hier_tuple_nested_if4 hier_tuple_nested_if5 hier_tuple_nested_if7 '
 
-# pts='scalar_reg_out_pre_declare tuple_reg2 tuple_reg3'
-# pts='scalar_reg_out_pre_declare'
-# pts='counter'
-# pts='adder_stage'
+pts='tuple_reg2 tuple_reg3'
+pts='tuple_reg'
 
 # pts='vector'
 # pts='vector2'
@@ -214,12 +212,12 @@ Pyrope_compile_hier () {
 }
 
 
-# rm -rf ./lgdb
-# Pyrope_compile_hier "$pts_hier1"
-# rm -rf ./lgdb
-# Pyrope_compile_hier "$pts_hier2"
 rm -rf ./lgdb
 Pyrope_compile "$pts"
+rm -rf ./lgdb
+Pyrope_compile_hier "$pts_hier1"
+rm -rf ./lgdb
+Pyrope_compile_hier "$pts_hier2"
 
 
 rm -f *.dot

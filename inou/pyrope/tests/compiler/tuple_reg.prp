@@ -9,7 +9,7 @@ prev = $src1 + $src2
 
 if ($en) {
   // #reg.cnt := #reg.cnt + 1
-  #reg.cnt := 3 + 5
+  #reg.cnt := #reg.cnt + 1
 }
 
 %out.cnt = #reg.cnt
