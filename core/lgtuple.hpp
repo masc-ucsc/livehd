@@ -76,7 +76,6 @@ protected:
   }
 
   key_map_type::const_iterator get_lower_it(int pos, std::string_view key) const {
-
     if (pos>=0) {
       auto str_pos = std::to_string(pos);
 
@@ -106,8 +105,8 @@ public:
 
   std::tuple<Node_pin, std::shared_ptr<Lgtuple>> make_select(Node_pin &sel_dpin) const;
 
-  bool has_dpin(int pos)                       const { return get_it(pos)      != key_map.end(); }
-  bool has_dpin(std::string_view key)          const { return get_it(key)      != key_map.end(); }
+  bool has_dpin(int pos)                       const { return get_it(pos) != key_map.end(); }
+  bool has_dpin(std::string_view key)          const { return get_it(key) != key_map.end(); }
   bool has_dpin()                              const { return has_dpin("");                      }
   bool has_dpin(int pos, std::string_view key) const { return (pos>=0)? has_dpin(pos) : has_dpin(key); }
 

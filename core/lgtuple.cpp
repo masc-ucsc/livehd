@@ -46,7 +46,6 @@ std::string Lgtuple::get_remove_first_level(const std::string &key) const {
 }
 
 void Lgtuple::add_int(const std::string &key, std::shared_ptr<Lgtuple const> tup) {
-
   if (tup->is_scalar()) {
     key_map.insert_or_assign(key, tup->get_dpin());
     return;
@@ -61,6 +60,7 @@ void Lgtuple::add_int(const std::string &key, std::shared_ptr<Lgtuple const> tup
   for(auto ent:tup->pos2key_map) {
     pos2key_map.insert_or_assign(key_base + ent.first, key_base + ent.second);
   }
+
   for(auto ent:tup->key2pos_map) {
     key2pos_map.insert_or_assign(key_base + ent.first, key_base + ent.second);
   }
@@ -69,46 +69,46 @@ void Lgtuple::add_int(const std::string &key, std::shared_ptr<Lgtuple const> tup
 
 std::shared_ptr<Lgtuple> Lgtuple::make_merge(Node_pin &sel_dpin, const std::vector<std::shared_ptr<Lgtuple const>> &tup_list) {
 	(void)sel_dpin;
-
-  I(tup_list.size()>1); // nothing to merge?
+  I(tup_list.size() > 1); // nothing to merge?
 
   std::vector<key_map_type::const_iterator> its;
-  for(const auto &tup:tup_list) {
+  for (const auto &tup : tup_list) {
     its.emplace_back(tup->key_map.begin());
   }
 
   auto tup0 = tup_list[0];
 	auto new_tup = std::make_shared<Lgtuple>(tup0->get_name());
 
-  while(true) {
+  while (true) {
     bool same_names = true;
     bool same_dpins = true;
     auto &it0 = its[0];
     int  use_pos    = tup0->get_pos(it0->first);
-    for(auto i=1u;i<its.size();++i) {
+    for (auto i = 1u; i < its.size(); ++i) {
       same_names &= (it0->first  == its[i]->first);
       same_dpins &= (it0->second == its[i]->second);
       auto v = tup_list[i]->get_pos(its[i]->first);
-      if (v!=-1 && v != use_pos) {
+      if (v != -1 && v != use_pos) {
         LGraph::info("tuples {} and {} have fields {} and {} at different positions {} vs {}"
             , tup0->get_name(), tup_list[i]->get_name(), it0->first, its[i]->first
             , tup0->get_pos(it0->first), tup_list[i]->get_pos(its[i]->first));
         return nullptr;
       }
     }
+
     if (same_names && same_dpins) {
       new_tup->add(it0->first, it0->second);
-    }else if (same_names && !same_dpins) {
+    } else if (same_names && !same_dpins) {
       auto mux_node = sel_dpin.get_class_lgraph()->create_node(Ntype_op::Mux);
 
       mux_node.setup_sink_pin("0").connect_driver(sel_dpin);
-      for(auto i=0u;i<its.size();++i) {
+      for (auto i = 0u; i < its.size(); ++i) {
         mux_node.setup_sink_pin_raw(i+1).connect_driver(its[i]->second);
         I(mux_node.get_sink_pin(std::to_string(i+1)).get_pid() == i+1);
       }
-
       new_tup->add(it0->first, mux_node.setup_driver_pin());
-    }else{
+
+    } else {
       std::string name_list;
       for(auto &it:its) {
         if(name_list.empty())
@@ -120,9 +120,10 @@ std::shared_ptr<Lgtuple> Lgtuple::make_merge(Node_pin &sel_dpin, const std::vect
       return nullptr;
     }
 
-    for(auto &it:its) {
+    for (auto &it:its) {
       ++it;
     }
+
     if (it0 == tup0->key_map.end()) {
       bool failed = false;
       for(auto i=1u;i<its.size();++i) {
@@ -137,14 +138,11 @@ std::shared_ptr<Lgtuple> Lgtuple::make_merge(Node_pin &sel_dpin, const std::vect
       break;
     }
   }
-
 	return new_tup;
 }
 
 std::tuple<Node_pin, std::shared_ptr<Lgtuple>> Lgtuple::make_select(Node_pin &sel_dpin) const {
-
   Node_pin invalid;
-
   std::vector<Node_pin> mux_dpins;
   //std::vector<std::shared_ptr<Lgtuple const>> mux_tups;
 
@@ -154,7 +152,7 @@ std::tuple<Node_pin, std::shared_ptr<Lgtuple>> Lgtuple::make_select(Node_pin &se
     size_t pos=0;
     if (std::isdigit(ent.first[0])) {
       pos = std::atoi(ent.first.c_str());
-    }else{
+    } else {
       const auto it = key2pos_map.find(ent.first);
       if (it == key2pos_map.end()) {
         LGraph::info("tuple {} has a non ordered field {}. Impossible to index by number", get_name(), ent.first);
@@ -172,7 +170,7 @@ std::tuple<Node_pin, std::shared_ptr<Lgtuple>> Lgtuple::make_select(Node_pin &se
   mux_node.setup_sink_pin("0").connect_driver(sel_dpin);
 
   int pid = 1;
-  for(const auto &dpin:mux_dpins) {
+  for (const auto &dpin:mux_dpins) {
     mux_node.setup_sink_pin_raw(pid).connect_driver(dpin);
     ++pid;
   }
@@ -223,6 +221,7 @@ const Node_pin &Lgtuple::get_dpin(std::string_view key) const {
   return it->second;
 }
 
+// get_dpin == get_value_driver_pin
 const Node_pin &Lgtuple::get_dpin(int pos, std::string_view key) const {
   auto it = get_it(pos, key);
   if (unlikely(it == key_map.end())) {
@@ -300,19 +299,19 @@ void Lgtuple::del(std::string_view key) {
   std::string key2_match{std::string{key} + "."};
   std::string key2_attr_match{std::string{key} + ".__"};
 
-  for(auto it=key_map.begin(); it!=key_map.end(); ) { // delete any match to key (even subkeys like key.foo.bar)
+  for (auto it = key_map.begin(); it != key_map.end();) { // delete any match to key (even subkeys like key.foo.bar)
     const auto &n = it->first;
-    if (key1_match.size() == n.size() && strcasecmp(n.c_str(), key1_match.data())==0) { // exact
+    if (key1_match.size() == n.size() && strcasecmp(n.c_str(), key1_match.data()) == 0) { // exact
       auto k2p_it = key2pos_map.find(it->first);
       if (k2p_it != key2pos_map.end()) {
         pos2key_map.erase(k2p_it->second);
         key2pos_map.erase(k2p_it);
       }
       it = key_map.erase(it);
-    }else if (key2_match.size() <= n.size() && strncasecmp(n.c_str(), key2_match.data(), key2_match.size())==0) { // subkeys
+    } else if (key2_match.size() <= n.size() && strncasecmp(n.c_str(), key2_match.data(), key2_match.size())==0) { // subkeys
       if (key2_attr_match.size() <= n.size() && strncasecmp(n.c_str(), key2_attr_match.c_str(), key2_attr_match.size()) == 0) { 
         ++it; // Do not remove hidden or attributes
-      }else{
+      } else {
         auto k2p_it = key2pos_map.find(it->first);
         if (k2p_it != key2pos_map.end()) {
           pos2key_map.erase(k2p_it->second);
@@ -320,7 +319,7 @@ void Lgtuple::del(std::string_view key) {
         }
         it = key_map.erase(it);
       }
-    }else{
+    } else {
       ++it;
     }
   }
@@ -347,12 +346,12 @@ void Lgtuple::add(int pos, std::string_view key, std::shared_ptr<Lgtuple const> 
     del(key);
 
   std::string key_str{key};
-  if (pos>=0 && key.empty()) {                        // fix position
+  if (pos >= 0 && key.empty()) {                        // fix position
     key_str = std::to_string(pos);
-  }else if (pos>=0 && !std::isdigit(key_str[0])) {    // fix position & key
+  } else if (pos >= 0 && !std::isdigit(key_str[0])) {    // fix position & key
     pos2key_map.insert_or_assign(std::to_string(pos), key_str);
     key2pos_map.insert_or_assign(key_str, std::to_string(pos));
-  }else if (pos<0 && key.empty() && !key_map.empty()) { // append (no key or position)
+  } else if (pos < 0 && key.empty() && !key_map.empty()) { // append (no key or position)
     auto v = get_next_free_pos("");
     key_str = std::to_string(v);
   }
@@ -366,10 +365,10 @@ void Lgtuple::add(int pos, std::string_view key, const Node_pin &dpin) {
   std::string key_str{key};
   if (pos>=0 && key.empty()) {                        // fix position
     key_str = std::to_string(pos);
-  }else if (pos>=0 && !std::isdigit(key_str[0])) {    // fix position & key
+  } else if (pos>=0 && !std::isdigit(key_str[0])) {    // fix position & key
     pos2key_map.insert_or_assign(std::to_string(pos), key_str);
     key2pos_map.insert_or_assign(key_str, std::to_string(pos));
-  }else if (pos<0 && key.empty() && !key_map.empty()) { // append (no key or position)
+  } else if (pos<0 && key.empty() && !key_map.empty()) { // append (no key or position)
     auto v = get_next_free_pos("");
     key_str = std::to_string(v);
   }
@@ -432,7 +431,7 @@ void Lgtuple::add(int pos, const Node_pin &dpin) {
     pos2key_map.insert_or_assign(str_pos, key_match);
     key2pos_map.insert_or_assign(key_match, str_pos);
     key_map.insert_or_assign(key_match, dpin);
-  }else{
+  } else {
     key_map.insert_or_assign(str_pos, dpin);
   }
 }
@@ -470,7 +469,6 @@ int Lgtuple::get_next_free_pos(const std::string &match) const {
 }
 
 bool Lgtuple::concat(std::shared_ptr<Lgtuple const> tup) {
-
   bool ok = true;
 
   for(auto it:tup->key_map) {
@@ -513,29 +511,28 @@ bool Lgtuple::concat(std::shared_ptr<Lgtuple const> tup) {
 }
 
 std::vector<std::pair<std::string, Node_pin>> Lgtuple::get_level_attributes(int pos, std::string_view key) const {
-
   std::vector<std::pair<std::string, Node_pin>> v;
+  I(key.substr(0,3) != "___");
 
-  if (key.size()>2 && key.substr(0,2) == "__")
+  if (key.size() > 2 && key.substr(0,2) == "__")
     return v; // no recursive attributes
 
   auto it = get_lower_it(pos, key);
-
   auto str_pos = std::to_string(pos);
-  while(it!=key_map.end()) {
+
+  while (it != key_map.end()) {
     if ( (str_pos.size() > it->first.size() || it->first.substr(0,str_pos.size()) != str_pos)
       && (key.size() > it->first.size() || it->first.substr(0,key.size()) != key)) {
       return v;
     }
     auto last_level = get_last_level(it->first);
 
-    if (last_level.size()>2 && last_level.substr(0,2) == "__") {
+    if (last_level.size() > 2 && last_level.substr(0,2) == "__") {
       I(last_level != it->first); // There must be a dot
       v.emplace_back(last_level, it->second);
     }
     ++it;
   }
-
   return v;
 }
 

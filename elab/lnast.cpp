@@ -1148,8 +1148,8 @@ void Lnast::set_bitwidth(const std::string_view name, const uint32_t bitwidth) {
 void Lnast::dump() const {
   for (const auto &it : depth_preorder(get_root())) {
     const auto &node = get_data(it);
-    std::string indent{"  "};
-    for (int i = 0; i < it.level; ++i) indent += "  ";
+    std::string indent{"    "};
+    for (int i = 0; i < it.level; ++i) indent += "    ";
 
     fmt::print("{} {} {:>20} : {}\n", it.level, indent, node.type.to_s(), node.token.get_text());
   }

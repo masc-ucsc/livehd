@@ -1543,7 +1543,6 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(LGraph *lg) {
 
     // collect vname table info
     if (dpin.has_ssa() && dpin.has_prp_vname()) {
-      fmt::print("DEBUG dpin ssa_name:{}\n", dpin.get_prp_vname());
       auto vname = dpin.get_prp_vname();
       auto subs  = dpin.ref_ssa()->get_subs();
 
