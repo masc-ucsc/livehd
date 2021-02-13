@@ -38,8 +38,7 @@ enum class Ntype_op : uint8_t {
   //------------------BEGIN PIPELINED (break LOOPS)
   Memory,
 
-  Sflop,  // Synchronous reset flop
-  Aflop,  // Asynchronous reset flop
+  Flop,   // Asynchronous & sync reset flop
   Latch,  // Latch
   Fflop,  // Fluid flop
 
@@ -80,7 +79,7 @@ protected:
 
                                                           "Memory",
 
-                                                          "Sflop",       "Aflop",   "Latch",  "Fflop",
+                                                          "Sflop",       "Flop",   "Fflop",
 
                                                           "Sub",         "Const",
 

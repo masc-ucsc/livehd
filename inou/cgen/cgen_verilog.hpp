@@ -36,6 +36,7 @@ private:
   }
   void add_expression(std::string &txt_seq, std::string_view txt_op, Node_pin &dpin) const;
 
+  void process_flop(std::string &buffer, Node &node);
   void process_mux(std::string &buffer, Node &node);
   void process_simple_node(std::string &buffer, Node &node);
 

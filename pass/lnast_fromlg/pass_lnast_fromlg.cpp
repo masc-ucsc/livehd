@@ -79,15 +79,14 @@ void Pass_lnast_fromlg::initial_tree_coloring(LGraph* lg, Lnast& lnast) {
         } else {
           dpin_set_map_name(dpin_editable, create_temp_var(lnast));
         }
-        if ((ntype == Ntype_op::Sflop) || (ntype == Ntype_op::Aflop) || (ntype == Ntype_op::Fflop) || (ntype == Ntype_op::Latch)) {
+        if ((ntype == Ntype_op::Flop) || (ntype == Ntype_op::Fflop) || (ntype == Ntype_op::Latch)) {
           dpin_set_map_name(dpin_editable, lnast.add_string(absl::StrCat("#", dpin_get_name(dpin_editable))));
         }
       } else if (dpin_editable.has_name() && (dpin_editable.get_name()[0] == '#')) {
-        if (!((ntype == Ntype_op::Sflop) || (ntype == Ntype_op::Aflop) || (ntype == Ntype_op::Fflop)
-              || (ntype == Ntype_op::Latch))) {
+        if (!((ntype == Ntype_op::Flop) || (ntype == Ntype_op::Fflop) || (ntype == Ntype_op::Latch))) {
           dpin_set_map_name(dpin_editable, lnast.add_string(dpin_get_name(dpin_editable).substr(1)));
         }
-      } else if ((ntype == Ntype_op::Sflop) || (ntype == Ntype_op::Aflop) || (ntype == Ntype_op::Fflop)
+      } else if ((ntype == Ntype_op::Flop) || (ntype == Ntype_op::Fflop)
                  || (ntype == Ntype_op::Latch)) {
         if (dpin_editable.get_name()[0] != '#') {
           dpin_set_map_name(dpin_editable, lnast.add_string(absl::StrCat("#", dpin_get_name(dpin_editable))));
@@ -140,7 +139,7 @@ void Pass_lnast_fromlg::handle_source_node(LGraph* lg, Node_pin& pin, Lnast& lna
       auto editable_pin = inp.driver;
       if (editable_pin.get_node().get_color() == GREY || editable_pin.get_node().get_color() == WHITE) {
         auto ntype = editable_pin.get_node().get_type_op();
-        if (ntype == Ntype_op::Aflop || ntype == Ntype_op::Sflop || ntype == Ntype_op::Fflop || ntype == Ntype_op::Latch) {
+        if (ntype == Ntype_op::Flop || ntype == Ntype_op::Fflop || ntype == Ntype_op::Latch) {
           continue;
         }
         handle_source_node(lg, editable_pin, lnast, ln_node);
@@ -199,7 +198,7 @@ void Pass_lnast_fromlg::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node, co
   auto             bw = pin.get_bits();
   // if ((bw > 0) & (pin.get_name().substr(0,3) != "___")) {
   if ((bw > 0) & (dpin_get_name(pin).substr(0, 3) != "___")) {
-    if (ntype == Ntype_op::Sflop || ntype == Ntype_op::Aflop || ntype == Ntype_op::Latch) {
+    if (ntype == Ntype_op::Flop || ntype == Ntype_op::Latch) {
       /* NOTE->hunter: I decided to only specify reg and IO bw (not
        * wires). If more is needed just widen below condition. */
       name = dpin_get_name(pin);
@@ -228,8 +227,7 @@ void Pass_lnast_fromlg::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node, co
     case Ntype_op::SRA:
     case Ntype_op::SHL: attach_simple_node(lnast, parent_node, pin); break;
     case Ntype_op::Mux: attach_mux_node(lnast, parent_node, pin); break;
-    case Ntype_op::Sflop:
-    case Ntype_op::Aflop: attach_flop_node(lnast, parent_node, pin); break;
+    case Ntype_op::Flop: attach_flop_node(lnast, parent_node, pin); break;
     case Ntype_op::Latch: attach_latch_node(lnast, parent_node, pin); break;
     case Ntype_op::Sub: attach_subgraph_node(lnast, parent_node, pin); break;
     case Ntype_op::Memory: attach_memory_node(lnast, parent_node, pin); break;
@@ -775,45 +773,43 @@ void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, c
   bool     has_din   = false;
   bool     has_en    = false;
   bool     has_reset = false;
-  bool     has_set_v = false;
   bool     has_pola  = false;
   bool     has_init  = false;
-  Node_pin clk_pin, din_pin, en_pin, reset_pin, set_v_pin, pola_pin, init_pin;
+  bool     has_async = false;
+  Node_pin clk_pin, din_pin, en_pin, reset_pin, pola_pin, init_pin, async_pin;
   for (const auto& inp : pin.get_node().inp_edges()) {
-    if (inp.sink.get_pid() == 2) {
+    auto pin_name = inp.sink.get_pin_name();
+    if (pin_name == "clock") {
       I(!has_clk);
       has_clk = true;
       clk_pin = inp.driver;
-
-    } else if (inp.sink.get_pid() == 3) {
+    } else if (pin_name == "din") {
       I(!has_din);
       has_din = true;
       din_pin = inp.driver;
-
-    } else if (inp.sink.get_pid() == 4) {
+    } else if (pin_name == "enable") {
       I(!has_en);
       has_en = true;
       en_pin = inp.driver;
 
-    } else if (inp.sink.get_pid() == 0) {
+    } else if (pin_name == "reset") {
       I(!has_reset);
       has_reset = true;
       reset_pin = inp.driver;
 
-    } else if (inp.sink.get_pid() == 6) {
-      I(!has_set_v);
-      has_set_v = true;
-      set_v_pin = inp.driver;
-
-    } else if (inp.sink.get_pid() == 5) {  // clock polarity
+    } else if (pin_name == "posclk") {
       I(!has_pola);
       has_pola = true;
       pola_pin = inp.driver;
 
-    } else if (inp.sink.get_pid() == 1) {  //"initial" // reset value
+    } else if (pin_name == "initial") {
       I(!has_init);
       has_init = true;
       init_pin = inp.driver;
+    } else if (pin_name == "async") {
+      I(!has_init);
+      has_async = true;
+      async_pin = inp.driver;
     } else {
       I(false);  // There shouldn't be any other inputs to a flop.
     }
@@ -826,20 +822,14 @@ void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, c
   // Set __clk_pin
   /* FIXME: Currently, this is commented out since LN->LG does not support __clk_pin attribute.
    * (It always set clk pin to "clock". Once implemented on LN->LG, this code snippet needs to be put back in. */
-#if 0
-  auto temp_var_c = create_temp_var(lnast);
-  auto dot_clk_node = lnast.add_child(parent_node, Lnast_node::create_dot("dot_flop_clk"));
-  lnast.add_child(dot_clk_node, Lnast_node::create_ref(temp_var_c));
-  lnast.add_child(dot_clk_node, Lnast_node::create_ref(pin_name));
-  lnast.add_child(dot_clk_node, Lnast_node::create_ref("__clk_pin"));
-
-  auto asg_clk_node = lnast.add_child(parent_node, Lnast_node::create_assign("asg_flop_clk"));
-  lnast.add_child(asg_clk_node, Lnast_node::create_ref(temp_var_c));
-  attach_child(lnast, asg_clk_node, clk_pin);
-#endif
 
   // Specify if async reset
-  if (pin.get_node().get_type_op() == Ntype_op::Aflop) {
+  if (has_async) { // possible to say __async = false
+    I(async_pin.get_node().is_type_const());
+    has_async = async_pin.get_node().get_type_const().to_i()!=0;
+  }
+
+  if (has_async) {
     auto temp_var_name = create_temp_var(lnast);
 
     auto dot_asr_node = lnast.add_child(parent_node, Lnast_node::create_dot("dot_flop_async"));
@@ -878,12 +868,8 @@ void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, c
     attach_child(lnast, asg_init_node, init_pin);
   }
 
-  if (has_set_v) {
-    // FIXME: Not sure what this is yet. Initial value?
-  }
-
   if (has_pola) {
-    I(pin.get_node().get_type_op() != Ntype_op::Aflop);
+    I(pin.get_node().get_type_op() != Ntype_op::Flop);
     auto temp_var_name = create_temp_var(lnast);
     auto dot_pol       = lnast.add_child(parent_node, Lnast_node::create_dot("dot_flop_pol"));
     lnast.add_child(dot_pol, Lnast_node::create_ref(temp_var_name));
@@ -1241,7 +1227,7 @@ void Pass_lnast_fromlg::attach_child(Lnast& lnast, Lnast_nid& op_node, const Nod
     auto out_driver_name = lnast.add_string(name);
     lnast.add_child(op_node,
                     Lnast_node::create_ref(out_driver_name));  // lnast.add_string(absl::StrCat(prefix, "%", dpin.get_name()))));
-  } else if ((dpin.get_node().get_type_op() == Ntype_op::Aflop) || (dpin.get_node().get_type_op() == Ntype_op::Sflop)) {
+  } else if ((dpin.get_node().get_type_op() == Ntype_op::Flop)) {
     // dpin_name is already persistent, no need to do add_string but cleaner
     lnast.add_child(op_node, Lnast_node::create_ref(lnast.add_string(dpin_get_name(dpin))));
   } else if (dpin.get_node().get_type_op() == Ntype_op::Const) {
@@ -1273,7 +1259,7 @@ void Pass_lnast_fromlg::attach_cond_child(Lnast& lnast, Lnast_nid& op_node, cons
     } else {
       lnast.add_child(op_node, Lnast_node::create_cond(lnast.add_string(absl::StrCat("%", dpin_name))));
     }
-  } else if ((dpin.get_node().get_type_op() == Ntype_op::Aflop) || (dpin.get_node().get_type_op() == Ntype_op::Sflop)) {
+  } else if ((dpin.get_node().get_type_op() == Ntype_op::Flop)) {
     lnast.add_child(op_node, Lnast_node::create_cond(lnast.add_string(dpin.get_name())));
   } else if (dpin.get_node().get_type_op() == Ntype_op::Const) {
     lnast.add_child(op_node, Lnast_node::create_cond(lnast.add_string(dpin.get_node().get_type_const().to_pyrope())));

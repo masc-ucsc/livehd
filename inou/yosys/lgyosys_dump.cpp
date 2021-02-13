@@ -718,8 +718,7 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         module->addDlatch(next_id(g), enable_wire, din_wire, cell_output_map[node.get_driver_pin().get_compact()], polarity);
       }
       break;
-      case Ntype_op::Sflop:
-      case Ntype_op::Aflop: {
+      case Ntype_op::Flop: {
 
         Node_pin    reset_dpin;
         Node_pin  initial_dpin;

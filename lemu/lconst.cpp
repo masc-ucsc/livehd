@@ -359,6 +359,21 @@ Lconst Lconst::mult_op(const Lconst &o) const {
   return adjust(res_num, o);
 }
 
+Lconst Lconst::div_op(const Lconst &o) const {
+
+  if (explicit_str || o.explicit_str) {
+    auto max_bits = bits*o.bits;
+
+    std::string qmarks("0b");
+    qmarks.append(max_bits, '?');
+    return Lconst(qmarks);
+  }
+
+  Number res_num = get_num() / o.get_num();
+
+  return adjust(res_num, o);
+}
+
 Lconst Lconst::sub_op(const Lconst &o) const {
 
   if (explicit_str || o.explicit_str) {
@@ -673,10 +688,7 @@ std::string Lconst::to_verilog() const {
     ss << std::hex;
     ss << v;
 
-    if (is_negative())
-      absl::StrAppend(&str, "'sh", ss.str());
-    else
-      absl::StrAppend(&str, "'h", ss.str());
+    absl::StrAppend(&str, "'sh", ss.str());
   }
 
   return str;

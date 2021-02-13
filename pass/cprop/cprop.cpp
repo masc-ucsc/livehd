@@ -393,6 +393,22 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
     }
 
     replace_node(node, result);
+  } else if (op == Ntype_op::Mult) {
+    Lconst result("1");
+    for (auto &i : inp_edges_ordered) {
+      auto c = i.driver.get_node().get_type_const();
+      result = result.mult_op(c);
+    }
+
+    replace_node(node, result);
+  } else if (op == Ntype_op::Div) {
+    I(inp_edges_ordered.size()==2);
+    Lconst a = inp_edges_ordered[0].driver.get_type_const();
+    Lconst b = inp_edges_ordered[1].driver.get_type_const();
+
+    auto result = a.div_op(b);
+
+    replace_node(node, result);
   } else {
     fmt::print("FIXME: cprop still does not copy prop node:{}\n", node.debug_name());
   }
@@ -917,7 +933,7 @@ void Cprop::do_trans(LGraph *lg) {
     } else if (op == Ntype_op::Sub) {
       process_subgraph(node, inp_edges_ordered);
       continue;
-    } else if (op == Ntype_op::Sflop || op == Ntype_op::Aflop || op == Ntype_op::Latch || op == Ntype_op::Fflop || op == Ntype_op::Memory) {
+    } else if (op == Ntype_op::Flop || op == Ntype_op::Latch || op == Ntype_op::Fflop || op == Ntype_op::Memory) {
       fmt::print("cprop skipping node:{}\n", node.debug_name());
       // FIXME: if flop feeds itself (no update, delete, replace for zero)
       // FIXME: if flop is disconnected *after AttrGet processed*, the flop was not used. Delete
@@ -974,7 +990,7 @@ void Cprop::do_trans(LGraph *lg) {
 
     if (!node.has_outputs()) {
       auto op = node.get_type_op();
-      if (op != Ntype_op::Sflop && op != Ntype_op::Aflop  && op != Ntype_op::Latch &&
+      if (op != Ntype_op::Flop && op != Ntype_op::Latch &&
           op != Ntype_op::Fflop && op != Ntype_op::Memory && op != Ntype_op::Sub   && op != Ntype_op::AttrSet) {
         // TODO: del_dead_end_nodes(); It can propagate back and keep deleting
         // nodes until it reaches a SubGraph or a driver_pin that has some

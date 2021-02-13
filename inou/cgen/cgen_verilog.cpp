@@ -52,6 +52,11 @@ void Cgen_verilog::add_expression(std::string &txt_seq, std::string_view txt_op,
     absl::StrAppend(&txt_seq, " ", txt_op, " ", expr);
 }
 
+void Cgen_verilog::process_flop(std::string &buffer, Node &node) {
+  (void)buffer;
+  (void)node;
+}
+
 void Cgen_verilog::process_mux(std::string &buffer, Node &node) {
 
   auto ordered_inp = node.inp_edges_ordered();
@@ -116,11 +121,46 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
     }
 
   }else if (op == Ntype_op::Ror) {
+    auto inp_edges = node.inp_edges();
+    if (inp_edges.size()==1) {
+      auto expr = get_expression(inp_edges[0].driver);
+      final_expr = absl::StrCat("|", expr);
+    }else{
+      auto expr = get_expression(inp_edges[0].driver);
+      final_expr = absl::StrCat("|{", expr);
+      for(auto i=1u;i<inp_edges.size();++i) {
+        absl::StrAppend(&final_expr, " | ", get_expression(inp_edges[i].driver));
+      }
+      absl::StrAppend(&final_expr, "}");
+    }
   }else if (op == Ntype_op::Div) {
+    auto lhs = get_expression(node.get_sink_pin("a").get_driver_pin());
+    auto rhs = get_expression(node.get_sink_pin("b").get_driver_pin());
+    final_expr = absl::StrCat(lhs, "/", rhs);
+
   }else if (op == Ntype_op::Not) {
+    auto lhs = get_expression(node.get_sink_pin("a").get_driver_pin());
+    final_expr = absl::StrCat("~", lhs);
+
   }else if (op == Ntype_op::Tposs) {
+#if 0
+    const std::string src = get_expression(node.get_sink_pin("a").get_driver_pin());
+    final_expr = absl::StrCat("{1'b0,", src, "}");
+#else
     final_expr = get_expression(node.get_sink_pin("a").get_driver_pin());
-    //fmt::print("FIXME: mark out as unsigned\n");
+#endif
+  }else if (op == Ntype_op::Sext) {
+    auto lhs = get_expression(node.get_sink_pin("a").get_driver_pin());
+    auto pos_node = node.get_sink_pin("b").get_driver_node();
+    if (pos_node.is_type_const()) {
+      auto pos = pos_node.get_type_const().to_verilog();
+      final_expr = absl::StrCat(lhs, "[", pos ,":0]");
+    }else{
+      auto bits = node.get_sink_pin("b").get_driver_pin().get_bits();
+      auto pos_expr = get_expression(node.get_sink_pin("b").get_driver_pin());
+
+      final_expr = absl::StrCat(lhs, "& ((1'sh", std::to_string(bits), " << ", pos_expr, ")-1)");
+    }
   }else if (op == Ntype_op::LT || op == Ntype_op::GT) {
     std::vector<std::string> lhs;
     std::vector<std::string> rhs;
@@ -135,7 +175,7 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
     if (op == Ntype_op::GT) {
       cmp = " > ";
     }else{
-      cmp = " <= ";
+      cmp = " < ";
     }
     for(const auto &l:lhs) {
       for(const auto &r:rhs) {
@@ -212,9 +252,9 @@ void Cgen_verilog::create_module_io(std::string &buffer, LGraph *lg) {
     first_arg = false;
 
     if (pin.is_graph_input()) {
-      absl::StrAppend(&buffer, "input ");
+      absl::StrAppend(&buffer, "input signed ");
     }else{
-      absl::StrAppend(&buffer, "output reg ");
+      absl::StrAppend(&buffer, "output signed reg ");
     }
 
     const auto name = get_scaped_name(pin.get_name());
@@ -244,7 +284,9 @@ void Cgen_verilog::create_combinational(std::string &buffer, LGraph *lg) {
     if (!node.has_outputs())
       continue;
 
-    if (op == Ntype_op::Mux) {
+    if (op == Ntype_op::Flop) {
+      process_flop(buffer, node); 
+    }else if (op == Ntype_op::Mux) {
       process_mux(buffer, node);
     }else{
       process_simple_node(buffer, node);
@@ -255,8 +297,11 @@ void Cgen_verilog::create_combinational(std::string &buffer, LGraph *lg) {
 void Cgen_verilog::create_outputs(std::string &buffer, LGraph *lg) {
   lg->each_graph_output([&](const Node_pin &dpin) {
     const auto name = get_scaped_name(dpin.get_name());
-    auto out_dpin = dpin.change_to_sink_from_graph_out_driver().get_driver_pin();
-    absl::StrAppend(&buffer, "  ", name, " = ", get_expression(out_dpin), ";\n");
+    auto spin = dpin.change_to_sink_from_graph_out_driver();
+    if (spin.is_connected()) {
+      auto out_dpin = spin.get_driver_pin();
+      absl::StrAppend(&buffer, "  ", name, " = ", get_expression(out_dpin), ";\n");
+    }
   });
 }
 
@@ -268,11 +313,62 @@ void Cgen_verilog::create_registers(std::string &buffer, LGraph *lg) {
 
     auto dpin = node.get_driver_pin();
 
-    absl::StrAppend(&buffer, "always @(posedge ) begin\n");
+    std::string pin_name = dpin.wire_name();
 
-    const auto name      = get_scaped_name(dpin.get_name());
-    const auto name_next = get_scaped_name(std::string(dpin.get_name()) + "_next");
-    absl::StrAppend(&buffer, name_next, " <= ", name, ";\n");
+    // FIXME: HERE if flop is output, do not create flop
+    const auto name      = get_scaped_name(pin_name);
+    const auto name_next = get_scaped_name(std::string(pin_name) + "_next");
+
+    std::string edge="posedge";
+    if (node.get_sink_pin("posclk").is_connected()) {
+      auto v = node.get_sink_pin("posclk").get_driver_pin().get_type_const().to_i()!=0;
+      if (!v) {
+        edge="negedge";
+      }
+    }
+    std::string clock = node.get_sink_pin("clock").wire_name();
+
+    std::string reset_async;
+    std::string reset;
+    bool negreset = false;
+
+    if (node.get_sink_pin("reset").is_connected()) {
+      if (node.get_sink_pin("negreset").is_connected()) {
+        negreset = node.get_sink_pin("negreset").get_driver_pin().get_type_const().to_i()!=0;
+      }
+
+      if (node.get_sink_pin("async").is_connected()) {
+        auto v = node.get_sink_pin("async").get_driver_pin().get_type_const().to_i()!=0;
+        if (v) {
+          reset_async = absl::StrCat(negreset?"or negedge ":"or posedge ", reset);
+        }
+      }
+
+      reset = node.get_sink_pin("reset").wire_name();
+    }
+
+    std::string reset_initial = "'h0";
+    if (node.get_sink_pin("initial").is_connected()) {
+      reset_initial = node.get_sink_pin("initial").get_driver_pin().get_type_const().to_verilog();
+    }
+
+    absl::StrAppend(&buffer, "always @(", edge, " ", clock, reset_async, " ) begin\n");
+
+    if (!reset.empty()) {
+      if (negreset) {
+        absl::StrAppend(&buffer, "if (!", reset,") begin\n");
+      }else{
+        absl::StrAppend(&buffer, "if (", reset,") begin\n");
+      }
+      absl::StrAppend(&buffer, name, " <= ", reset_initial, ";\n");
+      absl::StrAppend(&buffer, "end else begin\n");
+    }
+
+    absl::StrAppend(&buffer, name, " <= ", name_next, ";\n");
+
+    if (!reset.empty()) {
+      absl::StrAppend(&buffer, "end\n");
+    }
 
     absl::StrAppend(&buffer, "end\n");
   }
@@ -295,18 +391,9 @@ void Cgen_verilog::create_locals(std::string &buffer, LGraph *lg) {
 
     auto dpin = node.get_driver_pin();
 
-    std::string name;
-    if (!dpin.has_name()) {
-      if (op == Ntype_op::Mux || node.is_type_flop()) {
-        name = dpin.debug_name();
-      }else if (n_out<2) {
-        continue; // It would be nice to pick a reasonable name
-      }
+    std::string name = get_scaped_name(dpin.wire_name());
 
-      name = dpin.debug_name();
-    }else{
-      name = get_scaped_name(dpin.get_name());
-    }
+    bool out_unsigned = false;
 
     if (op == Ntype_op::Mux) {
       // mux needs name, but it can also has a vector to avoid ifs
@@ -316,8 +403,10 @@ void Cgen_verilog::create_locals(std::string &buffer, LGraph *lg) {
 
         // FIXME: mux2vector.emplace(node.get_compact_class(), name_sel);
 
-        absl::StrAppend(&buffer, "reg [", node.get_driver_pin().get_bits()-1, ":0] ", name_sel , ";\n");
+        absl::StrAppend(&buffer, "reg signed [", node.get_driver_pin().get_bits()-1, ":0] ", name_sel , ";\n");
       }
+    }else if (op == Ntype_op::Tposs) {
+      out_unsigned = true; // Tposs needs a variable because converts/removes sign
     }else if (!node.is_type_flop()) {
       if (node.has_name() && node.get_name()[0] != '_')
         continue;
@@ -327,21 +416,32 @@ void Cgen_verilog::create_locals(std::string &buffer, LGraph *lg) {
     }
 
     pin2var.emplace(dpin.get_compact_class(), name);
-    const auto bits = dpin.get_bits();
+    int bits = dpin.get_bits();
 
-    if (bits>1) {
-      absl::StrAppend(&buffer, "reg [", bits-1, ":0] ", name , ";\n");
+    std::string reg_str;
+    if (out_unsigned) {
+      reg_str = "reg ";
     }else{
-      absl::StrAppend(&buffer, "reg ", name , ";\n");
+      reg_str = "reg signed ";
+    }
+
+    --bits; //[0:0] is 1 bit already
+    if (out_unsigned)
+      --bits;
+
+    if (bits<=0) {
+      absl::StrAppend(&buffer, reg_str, name , ";\n");
+    }else{
+      absl::StrAppend(&buffer, reg_str, "[", bits, ":0] ", name , ";\n");
     }
 
     if (node.is_type_flop()) {
       auto name_next = get_append_to_name(name, "_next");
 
-      if (bits>1) {
-        absl::StrAppend(&buffer, "reg [", bits-1, ":0] ", name_next , ";\n");
+      if (bits<=0) {
+        absl::StrAppend(&buffer, reg_str, name_next , ";\n");
       }else{
-        absl::StrAppend(&buffer, "reg ", name_next , ";\n");
+        absl::StrAppend(&buffer, reg_str, "[", bits, ":0] ", name_next , ";\n");
       }
     }
   }

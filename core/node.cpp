@@ -336,7 +336,7 @@ bool Node::is_type_attr() const {
 bool Node::is_type_flop() const {
   auto op = get_type_op();
 
-  return op == Ntype_op::Aflop || op == Ntype_op::Sflop || op == Ntype_op::Fflop;
+  return op == Ntype_op::Flop || op == Ntype_op::Fflop;
 }
 
 bool Node::is_type_tup() const {

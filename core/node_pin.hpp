@@ -37,7 +37,7 @@ protected:
   constexpr Node_pin(LGraph *_g, LGraph *_c_g, const Hierarchy_index &_hidx, Index_ID _idx, Port_ID _pid, bool _sink)
     : top_g(_g), current_g(_c_g), hidx(_hidx), idx(_idx), pid(_pid), sink(_sink) {
     assert(_g);
-    assert(_idx);
+    // Could be IDX=0 for invalid
   }
 
   const Index_ID get_idx() const {
@@ -385,6 +385,7 @@ public:
 
   // BEGIN ATTRIBUTE ACCESSORS
   std::string debug_name() const;
+  std::string wire_name() const;
 
   void             set_name(std::string_view wname);
   void             del_name();

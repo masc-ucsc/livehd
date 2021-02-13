@@ -35,7 +35,7 @@ void Firmap::do_firbits_analysis(LGraph *lg) {
         continue;
     } else if (op == Ntype_op::AttrGet) {
       I(false, "firrtl ir should not have any attr_get node, it's achieved by firrtl bits op");
-    } else if (op == Ntype_op::Sflop || op == Ntype_op::Aflop || op == Ntype_op::Fflop) {
+    } else if (op == Ntype_op::Flop || op == Ntype_op::Fflop) {
       analysis_lg_flop(node);
     } else if (op == Ntype_op::Mux) {
       analysis_lg_mux(node);

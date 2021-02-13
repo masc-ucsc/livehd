@@ -337,6 +337,32 @@ std::string Node_pin::debug_name() const {
                       current_g->get_name());
 }
 
+std::string Node_pin::wire_name() const {
+  if (is_sink()) {
+    auto dpin = get_driver_pin();
+    if (dpin.is_invalid())
+      return "";
+    return dpin.wire_name();
+  }
+
+  if (!is_connected())
+    return "";
+
+  if (has_name())
+    return std::string(get_name());
+
+  std::string pname;
+  if (pid!=0) {
+    pname = "_" + std::string(get_pin_name());
+  }
+
+  if (is_hierarchical()) {
+    return absl::StrCat("pin", std::to_string(get_root_idx()), pname, "_lg", current_g->get_name());
+  }
+
+  return absl::StrCat("pin", std::to_string(get_root_idx()), pname);
+}
+
 std::string_view Node_pin::get_name() const {
 #ifndef NDEBUG
   if (!is_graph_io()) {

@@ -258,7 +258,7 @@ void Lnast_tolg::nary_node_rhs_connections(LGraph *lg, Node &opr_node, const std
     } break;
     default: {
       I(opr_node.get_type_op() != Ntype_op::Mux);
-      I(opr_node.get_type_op() != Ntype_op::Sflop);
+      I(opr_node.get_type_op() != Ntype_op::Flop);
       for (const auto &opd : opds) {
         lg->add_edge(opd, opr_node.setup_sink_pin());
       }
@@ -1616,10 +1616,10 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(LGraph *lg) {
 
 
 void Lnast_tolg::setup_final_register(LGraph *lg, std::string_view vname, const Node_pin &dpin_largest_ssa) {
-  if (tuple_reg_names.find(vname) != tuple_reg_names.end()) 
+  if (tuple_reg_names.find(vname) != tuple_reg_names.end())
     return;
 
-  auto reg_node = lg->create_node(Ntype_op::Sflop);
+  auto reg_node = lg->create_node(Ntype_op::Flop);
   auto reg_din = reg_node.setup_sink_pin("din");
   dpin_largest_ssa.connect_sink(reg_din);
   setup_clock(lg, reg_node);

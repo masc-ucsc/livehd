@@ -1546,7 +1546,15 @@ static void process_cells(RTLIL::Module *module, LGraph *g) {
                || std::strncmp(cell->type.c_str(), "$adffe", 6) == 0 || std::strncmp(cell->type.c_str(), "$adffsr", 7) == 0
                || std::strncmp(cell->type.c_str(), "$sdff", 5) == 0 || std::strncmp(cell->type.c_str(), "$sdffe", 6) == 0
                || std::strncmp(cell->type.c_str(), "$sdffsr", 7) == 0) {
-      exit_node.set_type(Ntype_op::Sflop, get_output_size(cell));
+
+      exit_node.set_type(Ntype_op::Flop, get_output_size(cell));
+
+      if (cell->hasPort(ID::Q)) {
+        const RTLIL::Wire *wire = cell->getPort(ID::Q).chunks()[0].wire;
+        if (wire) {
+          exit_node.setup_driver_pin().set_name(wire->name.str());
+        }
+      }
 
       // NOTE: yosys has 0s and 1s but multibit flops, but it is not a polarity per bit
       if (cell->hasParam(ID::CLK_POLARITY) && !cell->getParam(ID::CLK_POLARITY).as_bool()) {
@@ -2100,14 +2108,14 @@ static void process_cells(RTLIL::Module *module, LGraph *g) {
 
       //--------------------------------------------------------------
     } else if (std::strncmp(cell->type.c_str(), "$_DFF_P_", 8) == 0) {
-      exit_node.set_type(Ntype_op::Sflop, get_output_size(cell));
+      exit_node.set_type(Ntype_op::Flop, get_output_size(cell));
 
       exit_node.setup_sink_pin("clock").connect_driver(get_dpin(g, cell, ID::C));
       exit_node.setup_sink_pin("din").connect_driver(get_dpin(g, cell, ID::D));
 
       //--------------------------------------------------------------
     } else if (std::strncmp(cell->type.c_str(), "$_DFF_N_", 8) == 0) {
-      exit_node.set_type(Ntype_op::Sflop, get_output_size(cell));
+      exit_node.set_type(Ntype_op::Flop, get_output_size(cell));
 
       exit_node.setup_sink_pin("posclk").connect_driver(g->create_node_const(0));
       exit_node.setup_sink_pin("clock").connect_driver(get_dpin(g, cell, ID::C));

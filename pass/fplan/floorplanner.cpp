@@ -15,8 +15,7 @@ Lhd_floorplanner::Lhd_floorplanner(Node_tree&& nt_arg) : root_lg(nt_arg.get_root
 
   // set memory elements with a lower threshold, because they should be grouped together
   grid_thresh[Ntype_op::Memory] = 4;
-  grid_thresh[Ntype_op::Sflop]  = 4;
-  grid_thresh[Ntype_op::Aflop]  = 4;
+  grid_thresh[Ntype_op::Flop]   = 4;
   grid_thresh[Ntype_op::Latch]  = 4;
   grid_thresh[Ntype_op::Fflop]  = 4;
 }
