@@ -578,51 +578,6 @@ void Cprop::process_subgraph(Node &node, XEdge_iterator &inp_edges_ordered) {
   try_connect_sub_inputs(node);
 }
 
-void Cprop::process_attr_q_pin(Node &node, Node_pin &parent_dpin) {
-  // if some attribute are set on the flop, you will get that dpin instead of the real flop qpin
-  if (parent_dpin.get_node().get_type_op() == Ntype_op::AttrSet) {
-    collapse_forward_for_pin(node, parent_dpin);
-    return;
-  }
-
-  // Get variable name
-  auto driver_wname = parent_dpin.get_name();
-
-  // remove the SSA from name
-  auto pos   = driver_wname.find_last_of('_');
-  auto wname = driver_wname.substr(0, pos);
-
-  if (wname == driver_wname) {
-    collapse_forward_for_pin(node, parent_dpin);
-  } else {
-    // Find flop
-    auto target_ff_qpin = Node_pin::find_driver_pin(node.get_class_lgraph(), wname);
-    collapse_forward_for_pin(node, target_ff_qpin);
-  }
-}
-
-bool Cprop::process_attr_get(Node &node) {
-  I(node.get_type_op() == Ntype_op::AttrGet);
-
-  if (!node.is_sink_connected("name") || !node.is_sink_connected("field"))
-    return false;
-
-  // Either pos or name
-  auto parent_dpin   = node.get_sink_pin("name").get_driver_pin();
-  auto key_name_dpin = node.get_sink_pin("field").get_driver_pin();
-
-  I(key_name_dpin.get_node().get_type_op() == Ntype_op::TupKey);
-  I(key_name_dpin.has_name());
-  auto key_name = key_name_dpin.get_name();
-  if (key_name.substr(0, 2) == "__") { //FIXME->sh: why not merge?
-    if (key_name.substr(0, 7) == "__q_pin") {
-      fmt::print("process_attr_q_pin parent_node:{} node:{}\n", parent_dpin.get_node().debug_name(), node.debug_name());
-      process_attr_q_pin(node, parent_dpin);
-      return true;
-    }
-  }
-  return false;
-}
 
 std::tuple<std::string_view, std::string_view, int> Cprop::get_tuple_name_key(Node &node) {
   std::string_view tup_name;
@@ -926,8 +881,7 @@ void Cprop::do_trans(LGraph *lg) {
 
     // Special cases to handle in cprop
     if (op == Ntype_op::AttrGet) {
-      process_attr_get(node);
-      continue;
+      continue; // attr_get only happened on scalar and has been handled at LN->LG
     } else if (op == Ntype_op::AttrSet) {
       continue;  // Nothing to do in cprop
     } else if (op == Ntype_op::Sub) {

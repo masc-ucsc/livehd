@@ -35,9 +35,6 @@ protected:
 
   void process_subgraph(Node &node, XEdge_iterator &inp_edges_ordered);
 
-  // Attributes method
-  bool process_attr_get(Node &node);
-  void process_attr_q_pin(Node &node, Node_pin &parent_dpin);
 
   // Tuple methods
   std::shared_ptr<Lgtuple const> find_lgtuple(Node_pin up_dpin);
