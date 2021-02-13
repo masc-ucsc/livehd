@@ -4,6 +4,7 @@
 #include "cell.hpp"
 #include "core/ann_place.hpp"
 #include "core/lgedgeiter.hpp"
+#include "annotate.hpp"
 
 Lhd_floorplanner::Lhd_floorplanner(Node_tree&& nt_arg) : root_lg(nt_arg.get_root_lg()), nt(nt_arg), na(root_lg->get_path()) {
   // set how many nodes of a given type must be encountered before they are put in a grid together
@@ -36,8 +37,8 @@ GeographyHint Lhd_floorplanner::randomHint(int count) const {
   return hint_seq[sel];
 }
 
-void Lhd_floorplanner::create() {
-  bool success = layouts[nt.root_index()]->layout(HardAspectRatio);
+void Lhd_floorplanner::create(double ar) {
+  bool success = layouts[nt.root_index()]->layout(HardAspectRatio, ar);
   if (!success) {
     throw std::runtime_error("unable to lay out floorplan!");
   }
@@ -50,13 +51,12 @@ void Lhd_floorplanner::write_file(const std::string_view filename) {
 }
 
 void Lhd_floorplanner::write_lhd_node() {
-  // make sure all nodes have a hier color
-  root_lg->each_hier_fast_direct([](Node& n) {
-    n.set_hier_color(0);
-    return true;
-  });
+  Ann_node_place::clear(nt.get_root_lg()); // clear out any existing node placements
+  NameCounts.clear(); // clear ArchFP name counts
 
-  unsigned int placed_nodes = layouts[nt.root_index()]->outputLGraphLayout(nt, nt.root_index());
+  auto rl = layouts[nt.root_index()];
+
+  unsigned int placed_nodes = rl->outputLGraphLayout(nt, nt.root_index());
 
   unsigned int node_count = 0;
   root_lg->each_hier_fast_direct([&node_count](const Node& n) {

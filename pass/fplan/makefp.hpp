@@ -17,6 +17,6 @@ public:
 private:
   LGraph* root_lg;
 
-  void makefp_int(Lhd_floorplanner& fp, const std::string_view dest);
+  void makefp_int(Lhd_floorplanner& fp, const std::string_view dest, const double ar);
 };
 

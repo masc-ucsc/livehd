@@ -19,7 +19,7 @@ public:
   virtual void load() = 0;
 
   // create a floorplan from loaded modules
-  void create();
+  void create(double ar);
 
   // dump floorplan to file
   void write_file(const std::string_view filename);
@@ -79,5 +79,5 @@ protected:
   absl::flat_hash_map<Ntype_op, unsigned int> grid_thresh;
 
   // print debug information
-  constexpr static bool debug_print = true;
+  constexpr static bool debug_print = false;
 };

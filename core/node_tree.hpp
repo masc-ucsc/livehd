@@ -17,10 +17,8 @@ protected:
 public:
   Node_tree(LGraph *root);
 
+  // return root LGraph used to generate the node tree
   LGraph* get_root_lg() const { return root; }
 
   void dump() const;
-
-  // TODO: write this
-  // void regenerate();
 };

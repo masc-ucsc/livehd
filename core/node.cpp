@@ -555,22 +555,6 @@ int Node::get_color() const {
 
 bool Node::has_color() const { return Ann_node_color::ref(current_g)->has_key(get_compact_class()); }
 
-void Node::set_hier_color(int new_color) {
-  I(!hidx.is_invalid());
-  Ann_node_hier_color::ref(top_g)->set(get_compact(), std::to_string(new_color));
-}
-
-int Node::get_hier_color() const {
-  I(!hidx.is_invalid());
-  auto str = Ann_node_hier_color::ref(top_g)->get(get_compact());
-  int  color;
-  auto ok = absl::SimpleAtoi(str, &color);
-  I(ok);
-  return color;
-}
-
-bool Node::has_hier_color() const { return !hidx.is_invalid() && Ann_node_hier_color::ref(top_g)->has(get_compact()); }
-
 // LCOV_EXCL_START
 void Node::dump() {
   fmt::print("nid: {} type: {} lgraph: {} ", nid, get_type_name(), current_g->get_name());

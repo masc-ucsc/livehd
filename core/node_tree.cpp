@@ -7,6 +7,7 @@
 
 Node_tree::Node_tree(LGraph* root_arg)
     : mmap_lib::tree<Node>(root_arg->get_path(), absl::StrCat(root_arg->get_name(), "_ntree")), root(root_arg) {
+  
   auto ht = root->ref_htree();
 
   set_root(Node());
@@ -17,7 +18,7 @@ Node_tree::Node_tree(LGraph* root_arg)
     Tree_index last_sib;
     for (auto fn : lg->fast()) {
       if (!fn.is_type_synth() && !fn.is_type_sub_present()) {
-        continue;  // skip subnodes
+        continue;
       }
 
       auto cn = Node(root, hidx, fn.get_compact_class());

@@ -18,13 +18,14 @@ void Pass_fplan_makefp::setup() {
   m.add_label_optional("traversal",
                        "LGraph traversal method to use. Valid options are \"hier_lg\", \"flat_node\", and \"hier_node\"",
                        "hier_node");
-
+                       
   m.add_label_optional("filename", "If set, write the floorplan to a file named <filename>.flp as well as back into LiveHD.");
+  m.add_label_optional("aspect", "Requested aspect ratio of the entire floorplan, default is 1.0.", "1.0");
 
   register_pass(m);
 }
 
-void Pass_fplan_makefp::makefp_int(Lhd_floorplanner& fp, const std::string_view dest) {
+void Pass_fplan_makefp::makefp_int(Lhd_floorplanner& fp, const std::string_view dest, const double ar) {
   auto t = profile_time::Timer();
 
   t.start();
@@ -34,7 +35,7 @@ void Pass_fplan_makefp::makefp_int(Lhd_floorplanner& fp, const std::string_view 
 
   t.start();
   fmt::print("  creating floorplan...");
-  fp.create();
+  fp.create(ar);
   fmt::print(" done ({} ms).\n", t.time());
 
   if (dest.length() > 0) {
@@ -58,9 +59,11 @@ Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", v
   auto nt = Node_tree(root_lg);
   fmt::print(" done ({} ms).\n", whole_t.time());
 
+  double ar = std::stod(var.get("aspect").data());
+
   if (t_str == "hier_lg") {
     Lg_hier_floorp hfp(std::move(nt));
-    makefp_int(hfp, var.get("filename"));
+    makefp_int(hfp, var.get("filename"), ar);
 
     profile_time::Timer t;
     t.start();
@@ -69,12 +72,12 @@ Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", v
     fmt::print(" done ({} ms).\n", t.time());
   } else if (t_str == "flat_node") {
     Node_flat_floorp nffp(std::move(nt));
-    makefp_int(nffp, var.get("filename"));
+    makefp_int(nffp, var.get("filename"), ar);
 
     // flat floorplans have no hierarchy and cannot be written to LiveHD
   } else if (t_str == "hier_node") {
     Node_hier_floorp nhfp(std::move(nt));
-    makefp_int(nhfp, var.get("filename"));
+    makefp_int(nhfp, var.get("filename"), ar);
 
     profile_time::Timer t;
     t.start();

@@ -140,7 +140,7 @@ unsigned int FPObject::outputLGraphLayout(Node_tree& tree, Tree_index tidx, doub
 
     // fmt::print("testing child node {} with parent hier ({}, {})\n", child->debug_name(), child->get_hidx().level,
     // child->get_hidx().pos);
-    if (child->get_type_op() != getType() || child->get_hier_color() == 1) {
+    if (child->get_type_op() != getType() || child->has_place()) {
       child_idx = tree.get_sibling_next(child_idx);
       continue;
     }
@@ -153,9 +153,9 @@ unsigned int FPObject::outputLGraphLayout(Node_tree& tree, Tree_index tidx, doub
                  child->get_hidx().pos);
     }
 
-    Ann_place p(calcX(startX), calcY(startY), getWidth() / 1000, getHeight() / 1000);
+    Ann_place p(calcX(startX), calcY(startY), getWidth(), getHeight());
     child->set_place(p);
-    child->set_hier_color(1);
+    child->set_name(getUniqueName()); // set livehd name to floorplan node name so floorplan nodes can be easily identified by user later
 
     break;
   }
@@ -366,13 +366,13 @@ double FPContainer::totalArea() {
   return area;
 }
 
-static unsigned int findNode(FPObject* obj, Node_tree& tree, Tree_index tidx, double calcX, double calcY) {
-  Ntype_op t = obj->getType();
+unsigned int FPObject::findNode(Node_tree& tree, Tree_index tidx, double cX, double cY) {
+  Ntype_op t = getType();
 
   unsigned int count;
 
   if (Ntype::is_synthesizable(t)) {  // leaf node - current hier structure is fine
-    count = obj->outputLGraphLayout(tree, tidx, calcX, calcY);
+    count = outputLGraphLayout(tree, tidx, cX, cY);
   } else if (t == Ntype_op::Sub) {  // Sub node - parameters need to be adjusted
 
     bool found = false;
@@ -381,14 +381,14 @@ static unsigned int findNode(FPObject* obj, Node_tree& tree, Tree_index tidx, do
     while (child_idx != tree.invalid_index()) {
       auto child = tree.ref_data(child_idx);
 
-      if (!child->is_type_sub_present() || child->get_hier_color() == 1) {
+      if (!child->is_type_sub_present() || child->has_place()) {
         child_idx = tree.get_sibling_next(child_idx);
         continue;
       }
 
       LGraph* child_lg = LGraph::open(tree.get_root_lg()->get_path(), child->get_type_sub());
 
-      if (child_lg->get_name() != obj->getName()) {
+      if (child_lg->get_name() != getName()) {
         child_idx = tree.get_sibling_next(child_idx);
         continue;
       }
@@ -397,11 +397,12 @@ static unsigned int findNode(FPObject* obj, Node_tree& tree, Tree_index tidx, do
       // child->get_hidx().pos);
 
       // write placement information to subnode as well
-      Ann_place p(obj->calcX(calcY), obj->calcY(calcY), obj->getWidth() / 1000, obj->getHeight() / 1000);
+      Ann_place p(calcX(cX), calcY(cY), getWidth() / 1000, getHeight() / 1000);
 
       child->set_place(p);
-      child->set_hier_color(1);
-      count = obj->outputLGraphLayout(tree, child_idx, calcX, calcY);
+      child->set_name(getUniqueName());
+
+      count = outputLGraphLayout(tree, child_idx, cX, cY);
       found = true;
 
       break;
@@ -409,7 +410,7 @@ static unsigned int findNode(FPObject* obj, Node_tree& tree, Tree_index tidx, do
 
     assert(found);
   } else if (t == Ntype_op::Invalid) {  // specific kind of layout - current hier structure is fine
-    count = obj->outputLGraphLayout(tree, tidx, calcX, calcY);
+    count = outputLGraphLayout(tree, tidx, cX, cY);
   } else {
     fmt::print("???\n");
     assert(false);
@@ -425,7 +426,7 @@ unsigned int FPContainer::outputLGraphLayout(Node_tree& tree, Tree_index tidx, d
 
   for (int i = 0; i < getComponentCount(); i++) {
     FPObject* obj = getComponent(i);
-    total += findNode(obj, tree, tidx, x + startX, y + startY);
+    total += obj->findNode(tree, tidx, x + startX, y + startY);
   }
 
   popMirrorContext();
@@ -543,7 +544,7 @@ unsigned int gridLayout::outputLGraphLayout(Node_tree& tree, Tree_index tidx, do
     for (int j = 0; j < xCount; j++) {
       double cx = (j * compWidth) + x + startX;
 
-      total += findNode(obj, tree, tidx, cx, cy);
+      total += obj->findNode(tree, tidx, cx, cy);
 
       compNum += 1;
     }
@@ -1021,8 +1022,6 @@ ostream& outputHotSpotHeader(const char* filename) {
 }
 
 void outputHotSpotFooter(ostream& o) {
-  // We don't need to close, as the destructor will do the close for us.
-  // o.close();
   delete (&o);
 }
 
