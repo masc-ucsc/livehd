@@ -23,7 +23,7 @@ capricious_bits2 scalar_reg_out_pre_declare firrtl_tail2
 
 # pts='tuple_reg2 tuple_reg3'
 pts='tuple_reg'
-pts='pp'
+# pts='pp'
 
 # pts='vector'
 # pts='vector2'
