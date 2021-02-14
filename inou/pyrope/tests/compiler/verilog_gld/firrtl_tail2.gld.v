@@ -5,8 +5,9 @@ module firrtl_tail2 (
   output [3:0] out
 );
 
-reg  [3:0] x_next;
-wire [4:0] foo = $signed(x) - $signed(2'h1);
+reg [3:0] x;
+reg [3:0] x_next;
+wire signed [4:0] foo = $signed(x) - 2'sh1;
 always @ (*) begin
   if (en == 1)
     x_next = inp;
@@ -14,7 +15,6 @@ always @ (*) begin
     x_next = foo[3:0];
 end
 
-reg [3:0] x;
 always @ (posedge clock) begin
   x <= x_next;
 end

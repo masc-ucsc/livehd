@@ -7,7 +7,7 @@ if ($en) {
   #x = $inp
 } else {
   foo = #x.__q_pin - 1
-  bar = foo >> 1
+  bar = #x.__q_pin
   bar := foo
   #x = bar
 }

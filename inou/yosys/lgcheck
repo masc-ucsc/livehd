@@ -225,6 +225,7 @@ ${YOSYS} -p " read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}; opt; flatten ; ren
 
               miter -equiv -flatten -make_outputs -ignore_gold_x gold gate miter
               hierarchy -top miter
+              write_verilog trace2.v
               sat -tempinduct -prove trigger 0 -set-init-undef -enable_undef -set-def-inputs -ignore_unknown_cells -show-ports miter
               " \
     2> /dev/null | tee lgcheck2.log | grep "proven: SUCC"
