@@ -18,8 +18,9 @@ private:
   absl::flat_hash_map<Node::Compact_class, std::string> mux2vector;
 
   inline std::string get_scaped_name(const std::string &name) const {
-    if (name.find('.') != std::string::npos) {
-       return std::string("\\") + name + " ";
+    for(auto ch:name) {
+      if (!std::isalnum(ch))
+        return std::string("\\") + name + " ";
     }
     return name;
   }

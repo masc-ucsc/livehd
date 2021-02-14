@@ -53,8 +53,18 @@ void Cgen_verilog::add_expression(std::string &txt_seq, std::string_view txt_op,
 }
 
 void Cgen_verilog::process_flop(std::string &buffer, Node &node) {
-  (void)buffer;
-  (void)node;
+
+  auto dpin_d = node.get_sink_pin("din").get_driver_pin();
+  auto dpin_q = node.get_driver_pin();
+
+  std::string pin_name = dpin_q.wire_name();
+  const auto name_next = get_scaped_name(std::string(pin_name) + "_next");
+
+  if (dpin_d.is_invalid()) {
+    absl::StrAppend(&buffer, "  ", name_next, " = 'hx; // disconnected flop\n");
+  }else{
+    absl::StrAppend(&buffer, "  ", name_next, " = ", get_expression(dpin_d), ";\n");
+  }
 }
 
 void Cgen_verilog::process_mux(std::string &buffer, Node &node) {
@@ -254,7 +264,7 @@ void Cgen_verilog::create_module_io(std::string &buffer, LGraph *lg) {
     if (pin.is_graph_input()) {
       absl::StrAppend(&buffer, "input signed ");
     }else{
-      absl::StrAppend(&buffer, "output signed reg ");
+      absl::StrAppend(&buffer, "output reg signed ");
     }
 
     const auto name = get_scaped_name(pin.get_name());
@@ -281,12 +291,11 @@ void Cgen_verilog::create_combinational(std::string &buffer, LGraph *lg) {
       continue;
     }
 
-    if (!node.has_outputs())
+    if (!node.has_outputs() || node.is_type_flop())
       continue;
 
-    if (op == Ntype_op::Flop) {
-      process_flop(buffer, node); 
-    }else if (op == Ntype_op::Mux) {
+    // flops added to the last always with outputs
+    if (op == Ntype_op::Mux) {
       process_mux(buffer, node);
     }else{
       process_simple_node(buffer, node);
@@ -303,6 +312,13 @@ void Cgen_verilog::create_outputs(std::string &buffer, LGraph *lg) {
       absl::StrAppend(&buffer, "  ", name, " = ", get_expression(out_dpin), ";\n");
     }
   });
+
+  for(auto node:lg->fast()) {
+    if (!node.is_type_flop())
+      continue;
+
+    process_flop(buffer, node);
+  }
 }
 
 void Cgen_verilog::create_registers(std::string &buffer, LGraph *lg) {
@@ -317,7 +333,7 @@ void Cgen_verilog::create_registers(std::string &buffer, LGraph *lg) {
 
     // FIXME: HERE if flop is output, do not create flop
     const auto name      = get_scaped_name(pin_name);
-    const auto name_next = get_scaped_name(std::string(pin_name) + "_next");
+    const auto name_next = get_scaped_name(std::string(pin_name) + "_next "); // space to scape
 
     std::string edge="posedge";
     if (node.get_sink_pin("posclk").is_connected()) {
@@ -436,7 +452,7 @@ void Cgen_verilog::create_locals(std::string &buffer, LGraph *lg) {
     }
 
     if (node.is_type_flop()) {
-      auto name_next = get_append_to_name(name, "_next");
+      auto name_next = get_append_to_name(name, "_next ");
 
       if (bits<=0) {
         absl::StrAppend(&buffer, reg_str, name_next , ";\n");
