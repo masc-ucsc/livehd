@@ -86,7 +86,7 @@ protected:
 
   // tuple related
   Node_pin    setup_tuple_ref           (LGraph *lg, std::string_view tup_name);
-  Node_pin    setup_ta_ref              (LGraph *lg, std::string_view tup_name, int16_t);
+  Node_pin    setup_ta_ref_previous_ssa (LGraph *lg, std::string_view tup_name, int16_t);
   Node_pin    setup_field_dpin          (LGraph *lg, std::string_view key_name);
   void        reconnect_to_ff_qpin      (LGraph *lg, const Node &tg_node);
   static bool tuple_get_has_key_name    (const Node &tup_get);

@@ -335,8 +335,8 @@ void Lnast_tolg::process_ast_tuple_struct(LGraph *lg, const Lnast_nid &lnidx_tup
       tup_name  = lnast->get_sname(tup_child);
       tup_vname = lnast->get_vname(tup_child);
       subs      = lnast->get_subs(tup_child);
-      setup_tuple_ref(lg, tup_name);
-      tuple_reg_names.insert(tup_vname);
+      if (is_register(tup_vname))
+        tuple_reg_names.insert(tup_vname);
       continue;
     }
 
@@ -349,7 +349,13 @@ void Lnast_tolg::process_ast_tuple_struct(LGraph *lg, const Lnast_nid &lnidx_tup
       auto c1         = lnast->get_sibling_next(c0);
       auto field_name = lnast->get_vname(c0);
 
-      auto tn_dpin        = setup_tuple_ref(lg, tup_name);
+      Node_pin tn_dpin;
+      if (fp == 0) {
+        tn_dpin = setup_ta_ref_previous_ssa(lg, tup_vname, subs);
+      } else {
+        tn_dpin = setup_tuple_ref(lg, tup_name);
+      }
+
       auto fp_dnode       = lg->create_node_const(Lconst(fp));
       auto field_pos_dpin = fp_dnode.setup_driver_pin();
       auto value_dpin     = setup_ref_node_dpin(lg, c1);
@@ -656,7 +662,7 @@ void Lnast_tolg::process_ast_tuple_add_op(LGraph *lg, const Lnast_nid &lnidx_ta)
 
       auto tup_add = lg->create_node(Ntype_op::TupAdd);
       auto tn_spin = tup_add.setup_sink_pin("tuple_name");
-      auto tn_dpin = setup_ta_ref(lg, tup_vname, subs);
+      auto tn_dpin = setup_ta_ref_previous_ssa(lg, tup_vname, subs);
       tn_dpin.connect_sink(tn_spin);
 
       // exclude invalid scalar->tuple cases
@@ -779,7 +785,7 @@ Node_pin Lnast_tolg::setup_tuple_ref(LGraph *lg, std::string_view ref_name) {
 }
 
 
-Node_pin Lnast_tolg::setup_ta_ref(LGraph *lg, std::string_view ref_vname, int16_t subs) {
+Node_pin Lnast_tolg::setup_ta_ref_previous_ssa(LGraph *lg, std::string_view ref_vname, int16_t subs) {
   if (subs == 0) {
     auto ref_name = absl::StrCat(ref_vname, "_", subs); 
     auto dpin = lg->create_node(Ntype_op::TupRef).setup_driver_pin();

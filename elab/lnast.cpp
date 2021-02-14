@@ -622,6 +622,7 @@ void Lnast::analyze_dot_lrhs_handle_a_statement(const Lnast_nid &psts_nid, const
         hit = true;
         dot_lrhs_table[dot_nid].first = true; //is lhs
         dot_lrhs_table[dot_nid].second = sib_nid;
+        fmt::print("DEBUG found lhs! name:{}\n", c0_dot_name);
         break;
       } else if (get_name(sib_child) == c0_dot_name){
         hit = true;

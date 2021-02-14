@@ -22,7 +22,8 @@ capricious_bits2 scalar_reg_out_pre_declare firrtl_tail2
 # hier_tuple_nested_if4 hier_tuple_nested_if5 hier_tuple_nested_if7 '
 
 # pts='tuple_reg2 tuple_reg3'
-# pts='tuple_reg'
+pts='tuple_reg'
+pts='pp'
 
 # pts='vector'
 # pts='vector2'
