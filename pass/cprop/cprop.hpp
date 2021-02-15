@@ -11,10 +11,12 @@ private:
   bool hier;
   bool at_gioc;
   bool tuple_issues;
-protected:
+  absl::flat_hash_map<std::string_view, Node_pin> reg_name2qpin;
+  absl::flat_hash_map<std::string_view, std::pair<std::string_view, Node_pin>> reg_attr_map;
 
+protected:
   absl::flat_hash_map<Node::Compact, std::shared_ptr<Lgtuple>> node2tuple;  // node to the most up-to-dated tuple chain
-  absl::flat_hash_map<std::string_view, Node_pin> oname2dpin;
+  absl::flat_hash_map<std::string_view, Node_pin>              oname2dpin;
 
   void collapse_forward_same_op(Node &node, XEdge_iterator &inp_edges_ordered);
   void collapse_forward_sum(Node &node, XEdge_iterator &inp_edges_ordered);
@@ -32,9 +34,10 @@ protected:
   void try_connect_tuple_to_sub(Node_pin &dollar_spin, std::shared_ptr<Lgtuple> tup, Node &sub_node, Node &tup_node);
   void try_connect_lgcpp(Node &node);
   void try_connect_sub_inputs(Node &node);
+  
+
 
   void process_subgraph(Node &node, XEdge_iterator &inp_edges_ordered);
-
 
   // Tuple methods
   std::shared_ptr<Lgtuple const> find_lgtuple(Node_pin up_dpin);
@@ -46,13 +49,16 @@ protected:
   // io construction
   void try_create_graph_output(Node &node, std::shared_ptr<Lgtuple> tup);
 
+  // reg construction
+  void try_create_register(Node &node, std::shared_ptr<Lgtuple> tup);
+
   // Delete node and all the previous nodes feeding this one if single user
   void bwd_del_node(Node &node);
 
 public:
-  Cprop (bool _hier, bool _gioc);
+  Cprop(bool _hier, bool _gioc);
   static std::tuple<std::string_view, std::string_view, int> get_tuple_name_key(Node &node);
-  void dump_node2tuples() const;
+  void                                                       dump_node2tuples() const;
   // Entry point
   void do_trans(LGraph *orig);
   bool has_tuple_issues() const { return tuple_issues; }

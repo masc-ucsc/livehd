@@ -537,7 +537,7 @@ std::vector<std::pair<std::string, Node_pin>> Lgtuple::get_level_attributes(int 
 }
 
 void Lgtuple::dump() const {
-  fmt::print("tuple name:{}\n", name);
+  fmt::print("tuple_name:{}\n", name);
   for (const auto &it : key_map) {
     auto it_pos = key2pos_map.find(it.first);
     if (it_pos == key2pos_map.end()) {
