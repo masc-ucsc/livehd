@@ -74,17 +74,17 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
   }
 
   const Node_tree nt(root);
-  nt.dump();
 
   for (auto name : names) {
     if (name == var.get("top")) {
       // TODO: fix this!
       fmt::print("no support for top level modules right now.\n");
+      continue;
     }
 
     bool found = false;
 
-    for (const auto& index : nt.depth_preorder()) {  // going preorder because higher level nodes probably going to be analyzed more
+    for (const auto& index : nt.depth_preorder()) {  // preorder because higher level nodes are probably going to be analyzed more
                                                      // often than leaf nodes
       if (index == nt.get_root()) {
         continue;  // skip root for now
@@ -103,7 +103,7 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
         fmt::print("module {}\t", n.get_name());
 
         if (!n.has_place()) {
-          fmt::print("(no area information)");
+          fmt::print("(no area information)\n");
           break;
         } else {
           print_area(nt, index);
@@ -119,7 +119,7 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
               counter++;
             }
 
-            fmt::print(", {} components", counter);
+            fmt::print(", {} components\n", counter);
             print_children(nt, index);
           }
 
@@ -149,6 +149,4 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
   }
 }
 
-void Pass_fplan_analyzefp::pass(Eprp_var& var) {
-  Pass_fplan_analyzefp a(var);
-}
+void Pass_fplan_analyzefp::pass(Eprp_var& var) { Pass_fplan_analyzefp a(var); }

@@ -6,24 +6,23 @@ Issues:
     - Does this need to be fixed?  It's well encapsulated by the Lhd_floorplanner class...
 
 Issues not related to ArchFP:
- - fix checkfp bug(s)
- - fix analyzefp bug where node names are wrong
  - view.py output is flipped due to mismatch between coordinates for HotSpot and png coordinates in PyCairo
 
 Node hierarchy:
  - write non-root node to layouts[] in node_hier_floorp once I have a use for it
 
 Ask about:
+ - ask about relaxing requirement that nodes have to be valid to be hashed...
  - LiveHD has a random number class, use that in writearea
  - put fplan tests into yosys tests since they crash livehd fairly often
  - Dynamic loading of cairo lib...?
+ - Node names aren't hierarchical
  - reason why I need mmap_tree:
- 1. HighReg depends very heavily on hierarchy trees to function, and I don't think it's the only one.  Leaves open the possibility of more passes.
- 2. When working with nodes (which is going to be a lot when more analysis passes get added), I need both implementation information and hierarchy information (which module instance is this node a part of?).  Currently there is no easy way to get this information.
+ 1. HighReg depends very heavily on explicit hierarchy trees to function, and I don't think it's the only one.  Leaves open the possibility of more kinds of passes.
+ 2. When working with nodes (which is going to be a lot when more analysis passes get added and connections are taken into account), I need to be able to easily move between implementation information and hierarchy information (which module instance is this node a part of?).  Currently there is no easy way to get this information.
+ 3. Sometimes node attributes aren't hierarchical when I want them to be, but sacrificing speed / what everyone else needs for a single floorplanner doesn't make a ton of sense...
 
 Goals:
-0. Fix analyzefp pass, since that pass will discover bugs in written hierarchy
-1. Fix checkfp pass once we're sure the written hierarchy is correct
 2. Test hier_lg with hier_test.v (waiting on yosys bugfix)
 3. Test BOOM core (waiting on yosys memory implementation?)
 4. Write node level hierarchy to file (mmap_tree not being written to file is known TODO)
@@ -41,6 +40,7 @@ Things to add:
     - allow for querying of top level floorplans, current layout is messy (create a top level node below top level?)
     - add a recursive dump option
     - dump everything if no nodes are passed
+    - Node names are not hierarchical, so I can't query information about a specific Or node...
 1. Optimization
     - multithread the floorplanner (need deep hierarchies to play with - waiting on (0))
     - multithread the Lgraph traversal (need deep hierarchies to play with - waiting on (0))

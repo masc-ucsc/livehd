@@ -11,16 +11,19 @@ An example floorplan generated from [this](../../inou/yosys/tests/long_gcd.v) ve
 livehd> inou.yosys.tolg files:./pass/fplan/tests/hier_test.v root:hier_test
 
 # define the area and aspect ratio of all possible synthesizable node types in the current hierarchy
-livehd> lgraph.match |> pass.fplan.writearea
+livehd> pass.fplan.writearea
 
 # generate a floorplan at the node level and write it to livehd/floorplan.flp
-livehd> lgraph.open name:hier_test |> pass.fplan.makefp traversal:flat_lg dest:file
+livehd> lgraph.open name:hier_test |> pass.fplan.makefp traversal:hier_lg dest:file
 
 # generate a second floorplan using exiting hierarchy, and write it back to said hierarchy
 livehd> lgraph.open name:hier_test |> pass.fplan.makefp traversal:hier_node dest:livehd
 
 # check the floorplan for errors (overlapping layouts, etc.)
 livehd> lgraph.open name:hier_test |> pass.fplan.checkfp
+
+# analyze a module in the floorplan
+livehd> pass.fplan.analyzefp top:hier_test nodes:mid51,mid52
 ```
 
 ## Viewing
@@ -28,12 +31,11 @@ There are tools that come with ArchFP that convert a .flp file to a .pdf file fo
   
 The following one-liner should be suitable for most purposes:
 ```
-$ view.py -i floorplan.flp -s 1600 && open floorplan.png
+$ view.py -f 24 -s 1600 -i floorplan.flp && open floorplan.png
 ```
 
 ## Traversal methods
- - `flat_lg`: Each LGraph module (verilog module) will be floorplanned without taking into accout the hierarchy of the modules.
- - `hier_lg`: Same as `flat_lg`, but hierarchy will be taken into account
- - `flat_node`: same as `flat_lg`, but nodes will be floorplanned instead of modules.
+ - `hier_lg`: Each LGraph module (verilog module) will be floorplanned taking into accout the hierarchy of the modules.
+ - `flat_node`: same as `flat_lg`, but nodes will be floorplanned instead of modules and hierarchy will not be considered.
  - `hier_node`: same as `hier_lg`, but nodes will be floorplanned instead of modules.
-    - This kind of traversal is currently the only one that is capable of writing floorplans back to the hierarchy
+    - This kind of traversal is currently the only type that writes floorplans back into the LiveHD hierarchy.
