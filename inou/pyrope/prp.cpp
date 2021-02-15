@@ -1967,7 +1967,7 @@ inline bool Prp::unconsume_token() {
 bool Prp::go_back(uint64_t num_tok) {
   if (num_tok == 0)
     return true;
-  bool ok;
+  bool ok = false;
   PRINT_DBG_AST("Going back {} token(s); total token(s) consumed: {}.\n", num_tok, tokens_consumed);
   for (uint64_t i = 0; i < num_tok; i++) {
     ok = unconsume_token();
