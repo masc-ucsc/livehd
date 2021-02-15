@@ -11,9 +11,9 @@ void Pass_fplan_analyzefp::setup() {
                        "return information about a given floorplan within a livehd hierarchy",
                        &Pass_fplan_analyzefp::pass);
 
-  a.add_label_optional("regularity", "determine the amount of regularity in the design", "false");
-  a.add_label_optional("hpwl", "not implemented", "false");
-  a.add_label_optional("all", "run all available kinds of analysis on the floorplan", "false");
+  a.add_label_optional("regularity", "determine the amount of regularity in a module", "false");
+  a.add_label_optional("hpwl", "determine the half-perimeter wire length of a module", "false");
+  a.add_label_optional("all", "run all available kinds of analysis on a module", "false");
 
   a.add_label_required("top", "top level module in floorplan");
   a.add_label_required("nodes", "modules to analyze");
@@ -37,7 +37,12 @@ void Pass_fplan_analyzefp::print_children(const Node_tree& nt, const Tree_index&
   for (auto child_idx : nt.children(tidx)) {
     auto child = nt.get_data(child_idx);
 
-    fmt::print(" ├─ node {}\t", child.get_name());
+    if (child_idx != nt.get_last_child(tidx)) {
+      fmt::print(" ├─ node {}\t", child.get_name());
+    } else {
+      fmt::print(" └─ node {}\t", child.get_name());
+    }
+    
     print_area(nt, child_idx);
     fmt::print("\n");
   }

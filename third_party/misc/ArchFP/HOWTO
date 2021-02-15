@@ -53,12 +53,14 @@ To finish the floorplan generation, you need to put the following code after you
         chip->outputHotSpotLayout(HSOut);
         outputHotSpotFooter(HSOut);
     }
+
+After creating a hierarchy of geogLayout modules, delete should only be called on the root module.  The other modules will be freed automatically.
     
 Here we assumed the top level wrapper's name is "chip". Notice that you need to provide the overall aspect-ration for the final chip. In this example, it is 1.
 
-With all these features, you can now generate complicated floorplan with reasonable efforts.
+With all these features, you can now generate complicated floorplan with reasonable effort.
 
-Some debugging trick:
+Some debugging tricks:
 1. You can visualize your floorplan with hs2pdf command. This is helpful because sometimes the floorplaner might give messy results where blocks overlap.
 2. Aspect ratio is a very important knob, especially the whole chip ratio. Try to loose the range for each block and tune the overall aspect ratio to get reasonable floorplan.
 

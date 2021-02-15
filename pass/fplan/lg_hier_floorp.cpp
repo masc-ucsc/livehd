@@ -79,5 +79,5 @@ geogLayout* Lg_hier_floorp::load_lg_modules(LGraph* lg) {
 }
 
 void Lg_hier_floorp::load() {
-  layouts[nt.root_index()] = load_lg_modules(root_lg);
+  root_layout = load_lg_modules(root_lg);
 }

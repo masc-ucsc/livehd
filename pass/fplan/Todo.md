@@ -1,26 +1,21 @@
 Issues:
  - HardAspectRatio tries to satisfy the requested aspect ratio as well as possible, even if it's not possible without incorrect layouts.
-    - This inevitably leads to problems when everything requests an aspect ratio of 1... is there a way around this?
-    - Fixing aspect ratio issues is hard.  Checking if components collide with each other is $$ and figuring out where they should go is difficult.
- - ArchFP has a refcounting implementation built-in, which causes problems when destructors are called on anything other than the root node.
-    - Does this need to be fixed?  It's well encapsulated by the Lhd_floorplanner class...
+    - Fixing aspect ratio issues automatically is hard.  Checking if components collide with each other is $$ and figuring out where they should go is difficult.
 
 Issues not related to ArchFP:
  - view.py output is flipped due to mismatch between coordinates for HotSpot and png coordinates in PyCairo
 
-Node hierarchy:
- - write non-root node to layouts[] in node_hier_floorp once I have a use for it
-
 Ask about:
- - ask about relaxing requirement that nodes have to be valid to be hashed...
- - LiveHD has a random number class, use that in writearea
- - put fplan tests into yosys tests since they crash livehd fairly often
- - Dynamic loading of cairo lib...?
- - Node names aren't hierarchical
  - reason why I need mmap_tree:
  1. HighReg depends very heavily on explicit hierarchy trees to function, and I don't think it's the only one.  Leaves open the possibility of more kinds of passes.
  2. When working with nodes (which is going to be a lot when more analysis passes get added and connections are taken into account), I need to be able to easily move between implementation information and hierarchy information (which module instance is this node a part of?).  Currently there is no easy way to get this information.
- 3. Sometimes node attributes aren't hierarchical when I want them to be, but sacrificing speed / what everyone else needs for a single floorplanner doesn't make a ton of sense...
+ 3. Sometimes node attributes aren't hierarchical when I want them to be, but sacrificing speed / what everyone else needs for a single floorplanner doesn't make a ton of sense.
+
+ - put fplan tests into yosys tests since they crash livehd fairly often
+ - Dynamic loading of cairo lib...?
+ - Node names aren't hierarchical, can they be?
+
+ - LiveHD does not function correctly with non-english names (rename broken, importing broken as well (non-ascii characters skipped?))
 
 Goals:
 2. Test hier_lg with hier_test.v (waiting on yosys bugfix)
@@ -46,10 +41,10 @@ Things to add:
     - multithread the Lgraph traversal (need deep hierarchies to play with - waiting on (0))
        - create a way to floorplan using existing layouts
     - Check out the paper for ArchFP
-    - improve implementation in ArchFP, fix todos, add better floorplan techniques
+    - improve implementation in ArchFP, resolve todos, add better floorplan techniques
        - double -> float?
 2. Incremental Floorplans (waiting on goal (2))
-    - floorplan using existing geography hints instead of randomly choosing a hint
+    - floorplan using existing geography hints/specific AR instead of randomly choosing a hint/using AR = 1.0
     - assign geography hints to nodes based on wirelength metrics
     - use HPWL as benchmark (waiting on goal (2) - need node hierarchy)
     - easy: swap positions of leaves of the same type (within a hierarchy), see if HPWL gets better
@@ -64,4 +59,5 @@ Things to add:
     - allows for efficient floorplan analysis, prevents disconnected segments entirely
 
 Tabled:
- - Cairo is LGPL, so idk if we can ship it as part of LiveHD.
+ - Cairo is LGPL, so it can't be shipped with LiveHD.
+ - Lrand random class doesn't support floats, not using it for writearea pass

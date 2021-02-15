@@ -73,7 +73,7 @@ protected:
   const Ntype_area na;
 
   // layout of all child nodes
-  absl::flat_hash_map<Tree_index, geogLayout*> layouts;
+  geogLayout* root_layout;
 
   // at what number of nodes of a given type should they be laid out in a grid?
   absl::flat_hash_map<Ntype_op, unsigned int> grid_thresh;

@@ -21,7 +21,8 @@ Lhd_floorplanner::Lhd_floorplanner(Node_tree&& nt_arg) : root_lg(nt_arg.get_root
 }
 
 Lhd_floorplanner::~Lhd_floorplanner() {
-  delete layouts[nt.root_index()];
+  delete root_layout;
+  root_layout = nullptr;
   root_lg = nullptr;
 }
 
@@ -37,7 +38,7 @@ GeographyHint Lhd_floorplanner::randomHint(int count) const {
 }
 
 void Lhd_floorplanner::create(float ar) {
-  bool success = layouts[nt.root_index()]->layout(HardAspectRatio, ar);
+  bool success = root_layout->layout(HardAspectRatio, ar);
   if (!success) {
     throw std::runtime_error("unable to lay out floorplan!");
   }
@@ -45,7 +46,7 @@ void Lhd_floorplanner::create(float ar) {
 
 void Lhd_floorplanner::write_file(const std::string_view filename) {
   ostream& fos = outputHotSpotHeader(filename.data());
-  layouts[nt.root_index()]->outputHotSpotLayout(fos);
+  root_layout->outputHotSpotLayout(fos);
   outputHotSpotFooter(fos);
 }
 
@@ -53,9 +54,7 @@ void Lhd_floorplanner::write_lhd_node() {
   Ann_node_place::clear(nt.get_root_lg()); // clear out any existing node placements
   clearCount(); // clear ArchFP name counts
 
-  auto rl = layouts[nt.root_index()];
-
-  unsigned int placed_nodes = rl->outputLGraphLayout(nt, nt.root_index());
+  unsigned int placed_nodes = root_layout->outputLGraphLayout(nt, nt.root_index());
 
   unsigned int node_count = 0;
   root_lg->each_hier_fast_direct([&node_count](const Node& n) {
