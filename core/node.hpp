@@ -137,12 +137,12 @@ public:
   void update(const Node::Compact &comp);
   void update(const Node &node);
 
-  constexpr Node() : top_g(0), current_g(0), nid(0) {}
+  constexpr Node() : top_g(nullptr), current_g(nullptr), nid(0) {}
 
   Node(LGraph *_g, const Compact &comp) { update(_g, comp); }
   Node(LGraph *_g, const Hierarchy_index &_hidx, const Compact_class &comp);
   constexpr Node(LGraph *_g, const Compact_class &comp)
-      : top_g(_g), current_g(0), hidx(Hierarchy_tree::invalid_index()), nid(comp.nid) {
+      : top_g(_g), current_g(nullptr), hidx(Hierarchy_tree::invalid_index()), nid(comp.nid) {
     I(nid);
     I(top_g);
 
