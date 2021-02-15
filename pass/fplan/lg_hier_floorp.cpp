@@ -30,7 +30,7 @@ geogLayout* Lg_hier_floorp::load_lg_modules(LGraph* lg) {
 
     Ntype_area narea(path);
 
-    double area = 0.0;
+    float area = 0.0;
     for (auto n : lg->fast()) {
       Ntype_op op = n.get_type_op();
       if (Ntype::is_synthesizable(op)) {

@@ -18,6 +18,8 @@ void Pass_fplan_analyzefp::setup() {
   a.add_label_required("top", "top level module in floorplan");
   a.add_label_required("nodes", "modules to analyze");
 
+  a.add_label_optional("path", "lgdb directory to analyze", "lgdb"); // can't pass lgraphs because lgraph names are different
+
   register_pass(a);
 }
 
@@ -54,8 +56,8 @@ void Pass_fplan_analyzefp::print_area(const Node_tree& nt, const Tree_index& tid
   }
 
   const Ann_place& p = nt.get_data(tidx).get_place();
-  const double     x = p.get_pos_x();
-  const double     y = p.get_pos_y();
+  const float     x = p.get_pos_x();
+  const float     y = p.get_pos_y();
 
   const float area = (max_x - min_x) * (max_y - min_y);
   fmt::print("x: {:.3f}, y: {:.3f}, width: {:.3f} mm², height: {:.3f} mm², area: {:.3f} mm², {} unique components\n",
@@ -79,10 +81,10 @@ void Pass_fplan_analyzefp::print_children(const Node_tree& nt, const Tree_index&
     }
 
     const Ann_place& p = child.get_place();
-    const double     x = p.get_pos_x();
-    const double     y = p.get_pos_y();
-    const double     w = p.get_len_x();
-    const double     h = p.get_len_y();
+    const float     x = p.get_pos_x();
+    const float     y = p.get_pos_y();
+    const float     w = p.get_len_x();
+    const float     h = p.get_len_y();
 
     fmt::print("x: {:.3f}, y: {:.3f}, width: {:.3f} mm², height: {:.3f} mm², area: {:.3f} mm²\n", x, y, w, h, w * h);
   }
@@ -110,12 +112,12 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
     } else if (isalnum(c) || c == '_') {
       ;
     } else {
-      throw std::invalid_argument("unrecognized character while parsing node list!");
+      error("unrecognized character while parsing node list!");
     }
   }
 
   if (names.size() == 0) {
-    throw std::invalid_argument("no nodes were passed!");
+    error("no nodes were passed!");
   }
 
   const Node_tree nt(root);
@@ -139,7 +141,7 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
       I(!n.is_invalid());
 
       if (!n.has_name()) {
-        throw std::runtime_error("floorplanner has not been run!");
+        error("floorplanner has not been run!");
       }
 
       fmt::print("testing {} against {}\n", n.get_name(), name);
@@ -176,7 +178,7 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
       std::string errstr = "cannot locate module ";
       errstr += name.data();
       errstr += "!";
-      throw std::runtime_error(errstr);
+      error(errstr);
     }
   }
 }

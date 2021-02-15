@@ -21,14 +21,14 @@ public:
     len_y = ly;
   }
 
-  friend bool operator==(const Ann_place& lhs, const Ann_place& rhs){ return lhs.pos_x == rhs.pos_x && lhs.pos_y == rhs.pos_y && lhs.len_x == rhs.len_x && lhs.len_y == rhs.len_y; }
+  friend bool operator==(const Ann_place& lhs, const Ann_place& rhs) {
+    return lhs.pos_x == rhs.pos_x && lhs.pos_y == rhs.pos_y && lhs.len_x == rhs.len_x && lhs.len_y == rhs.len_y;
+  }
 
   float get_pos_x() const { return pos_x; }
   float get_pos_y() const { return pos_y; }
   float get_len_x() const { return len_x; }
   float get_len_y() const { return len_y; }
 
-  bool is_valid() const {
-    return len_x > 0 && len_y > 0;
-  }
+  bool is_valid() const { return len_x > 0 && len_y > 0; }
 };

@@ -6,7 +6,6 @@ Issues:
     - Does this need to be fixed?  It's well encapsulated by the Lhd_floorplanner class...
 
 Issues not related to ArchFP:
- - fix bug where not passing lgraphs into a pass crashes LiveHD
  - fix checkfp bug(s)
  - fix analyzefp bug where node names are wrong
  - view.py output is flipped due to mismatch between coordinates for HotSpot and png coordinates in PyCairo
@@ -37,6 +36,7 @@ Things to add:
        - create a way to floorplan using existing layouts
     - Check out the paper for ArchFP
     - improve implementation in ArchFP, fix todos, add better floorplan techniques
+       - double -> float?
 2. Incremental Floorplans (waiting on goal (2))
     - floorplan using existing geography hints instead of randomly choosing a hint
     - assign geography hints to nodes based on wirelength metrics

@@ -19,7 +19,7 @@ public:
   virtual void load() = 0;
 
   // create a floorplan from loaded modules
-  void create(double ar);
+  void create(float ar);
 
   // dump floorplan to file
   void write_file(const std::string_view filename);

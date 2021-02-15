@@ -15,11 +15,11 @@ Pass_fplan_checkfp::Pass_fplan_checkfp(const Eprp_var& var) : Pass("pass.fplan",
 
 void Pass_fplan_checkfp::pass(Eprp_var& var) {
   if (var.lgs.size() == 0) {
-    throw std::invalid_argument("no lgraphs provided!");
+    error("no lgraphs provided!");
   }
 
   if (var.lgs.size() > 1) {
-    throw std::invalid_argument("more than one root lgraph provided!");
+    error("more than one root lgraph provided!");
   }
 
   fmt::print("checking floorplan...\n");

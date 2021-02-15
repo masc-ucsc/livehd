@@ -25,7 +25,7 @@ void Pass_fplan_makefp::setup() {
   register_pass(m);
 }
 
-void Pass_fplan_makefp::makefp_int(Lhd_floorplanner& fp, const std::string_view dest, const double ar) {
+void Pass_fplan_makefp::makefp_int(Lhd_floorplanner& fp, const std::string_view dest, const float ar) {
   auto t = profile_time::Timer();
 
   t.start();
@@ -59,7 +59,7 @@ Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", v
   auto nt = Node_tree(root_lg);
   fmt::print(" done ({} ms).\n", whole_t.time());
 
-  double ar = std::stod(var.get("aspect").data());
+  float ar = std::stof(var.get("aspect").data());
 
   if (t_str == "hier_lg") {
     Lg_hier_floorp hfp(std::move(nt));
@@ -86,7 +86,7 @@ Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", v
     fmt::print(" done ({} ms).\n", t.time());
   } else {
     std::string errstr = "unknown traversal method ";
-    throw std::invalid_argument(errstr.append(t_str));
+    error(errstr.append(t_str));
   }
 
   fmt::print("done ({} ms).\n\n", whole_t.time());
@@ -94,11 +94,11 @@ Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", v
 
 void Pass_fplan_makefp::pass(Eprp_var& var) {
   if (var.lgs.size() == 0) {
-    throw std::invalid_argument("no lgraphs provided!");
+    error("no lgraphs provided!");
   }
 
   if (var.lgs.size() > 1) {
-    throw std::invalid_argument("more than one root lgraph provided!");
+    error("more than one root lgraph provided!");
   }
 
   Pass_fplan_makefp p(var);
