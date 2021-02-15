@@ -17,7 +17,7 @@ private:
   pin2str_type pin2var;
   absl::flat_hash_map<Node::Compact_class, std::string> mux2vector;
 
-  inline std::string get_scaped_name(const std::string &name) const {
+  inline static std::string get_scaped_name(const std::string &name) {
     for(auto ch:name) {
       if (!std::isalnum(ch))
         return std::string("\\") + name + " ";
@@ -25,7 +25,7 @@ private:
     return name;
   }
 
-  std::string get_scaped_name(std::string_view wire_name) const {
+  static std::string get_scaped_name(std::string_view wire_name) {
     std::string name{wire_name};
     return get_scaped_name(name);
   }
@@ -42,6 +42,7 @@ private:
   void process_simple_node(std::string &buffer, Node &node);
 
   void create_module_io(std::string &buffer, LGraph *lg);
+  void create_subs(std::string &buffer, LGraph *lg);
   void create_combinational(std::string &buffer, LGraph *lg);
   void create_outputs(std::string &buffer, LGraph *lg);
   void create_registers(std::string &buffer, LGraph *lg);

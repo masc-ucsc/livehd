@@ -441,6 +441,23 @@ void Node::del_node() {
 
 void Node::set_name(std::string_view iname) { Ann_node_name::ref(current_g)->set(get_compact_class(), iname); }
 
+std::string Node::get_instance_name() const {
+  std::string name{"i"};
+
+  if (is_hierarchical()) {
+    absl::StrAppend(&name, "_lg", current_g->get_name(), "_hidx" ,std::to_string(hidx.level), "_", std::to_string(hidx.pos));
+  }
+
+  if (has_name()) {
+    absl::StrAppend(&name, get_name());
+    return name;
+  }
+
+  absl::StrAppend(&name, "_nid" , std::to_string(nid));
+
+  return name;
+}
+
 std::string_view Node::create_name() const {
   auto *     ref = Ann_node_name::ref(current_g);
   const auto it  = ref->find(get_compact_class());

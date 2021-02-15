@@ -323,6 +323,7 @@ public:
   // BEGIN ATTRIBUTE ACCESSORS
   std::string debug_name() const;
 
+  std::string      get_instance_name() const;
   void             set_name(std::string_view iname);
   std::string_view get_name() const;
   std::string_view create_name() const;

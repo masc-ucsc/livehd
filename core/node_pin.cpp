@@ -337,30 +337,37 @@ std::string Node_pin::debug_name() const {
                       current_g->get_name());
 }
 
-std::string Node_pin::wire_name() const {
+std::string Node_pin::get_wire_name() const {
   if (is_sink()) {
     auto dpin = get_driver_pin();
     if (dpin.is_invalid())
       return "";
-    return dpin.wire_name();
+    return dpin.get_wire_name();
   }
 
   if (!is_connected())
     return "";
 
-  if (has_name())
-    return std::string(get_name());
-
-  std::string pname;
-  if (pid!=0) {
-    pname = "_" + std::string(get_pin_name());
-  }
+  std::string name;
 
   if (is_hierarchical()) {
-    return absl::StrCat("pin", std::to_string(get_root_idx()), pname, "_lg", current_g->get_name());
+    absl::StrAppend(&name, "lg", current_g->get_name(), "_hidx" ,std::to_string(hidx.level), "_", std::to_string(hidx.pos));
   }
 
-  return absl::StrCat("pin", std::to_string(get_root_idx()), pname);
+  if (has_name()) {
+    absl::StrAppend(&name, get_name());
+    return name;
+  }
+
+  if (name.empty())
+    name = "t";
+
+  absl::StrAppend(&name, "_pin" , std::to_string(get_root_idx()));
+  if (pid!=0) {
+    absl::StrAppend(&name, "_" , get_pin_name());
+  }
+
+  return name;
 }
 
 std::string_view Node_pin::get_name() const {

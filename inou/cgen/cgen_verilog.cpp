@@ -57,7 +57,7 @@ void Cgen_verilog::process_flop(std::string &buffer, Node &node) {
   auto dpin_d = node.get_sink_pin("din").get_driver_pin();
   auto dpin_q = node.get_driver_pin();
 
-  std::string pin_name = dpin_q.wire_name();
+  std::string pin_name = dpin_q.get_wire_name();
   const auto name_next = get_scaped_name(std::string(pin_name) + "_next");
 
   if (dpin_d.is_invalid()) {
@@ -206,7 +206,8 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
     auto val_expr = get_expression(node.get_sink_pin("a").get_driver_pin());
     auto amt_expr = get_expression(node.get_sink_pin("b").get_driver_pin());
 
-    final_expr = absl::StrCat(val_expr, " >> ", amt_expr);
+    // TODO: If val_expr min>=0, then >> is OK
+    final_expr = absl::StrCat(val_expr, " >>> ", amt_expr);
   }else if (op == Ntype_op::Const) {
     final_expr = node.get_type_const().to_verilog();
   }else if (op == Ntype_op::TupKey || op == Ntype_op::TupRef || op == Ntype_op::TupAdd || op==Ntype_op::TupGet || op == Ntype_op::AttrSet || op == Ntype_op::AttrGet) {
@@ -249,7 +250,7 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
 
 void Cgen_verilog::create_module_io(std::string &buffer, LGraph *lg) {
 
-  absl::StrAppend(&buffer, "module ", lg->get_name(), "(\n");
+  absl::StrAppend(&buffer, "module ", get_scaped_name(lg->get_name()), "(\n");
 
   bool first_arg = true;
   lg->each_sorted_graph_io([&](const Node_pin &pin, Port_ID pos) {
@@ -282,12 +283,52 @@ void Cgen_verilog::create_module_io(std::string &buffer, LGraph *lg) {
   absl::StrAppend(&buffer, ");\n");
 }
 
+void Cgen_verilog::create_subs(std::string &buffer, LGraph *lg) {
+
+  lg->each_sub_fast([&buffer](Node &node, Lg_type_id lgid) {
+    (void)lgid;
+
+    auto iname      = get_scaped_name(node.get_instance_name());
+    const auto &sub = node.get_type_sub_node();
+
+    absl::StrAppend(&buffer, get_scaped_name(sub.get_name()), " ", iname, "(\n");
+
+    bool first_entry = true;
+    for(auto &io_pin:sub.get_sorted_io_pins()) {
+      if (first_entry) {
+        absl::StrAppend(&buffer, "  .");
+        first_entry = false;
+      }else{
+        absl::StrAppend(&buffer, " ,.");
+      }
+      if (io_pin.is_input()) {
+        auto spin = node.get_sink_pin(io_pin.name);
+        auto dpin = spin.get_driver_pin();
+        if (dpin.is_invalid()) {
+          absl::StrAppend(&buffer, io_pin.name, "() // disconnected input\n");
+        }else{
+          absl::StrAppend(&buffer, io_pin.name, "(", get_scaped_name(dpin.get_wire_name()), ")\n");
+        }
+      }else{
+        I(io_pin.is_output());
+        auto dpin = node.get_driver_pin(io_pin.name);
+        if (dpin.is_invalid()) {
+          absl::StrAppend(&buffer, io_pin.name, "() // disconnected output\n");
+        }else{
+          absl::StrAppend(&buffer, io_pin.name, "(", get_scaped_name(dpin.get_wire_name()), ")\n");
+        }
+      }
+    }
+
+    absl::StrAppend(&buffer, ");\n");
+  });
+}
+
 void Cgen_verilog::create_combinational(std::string &buffer, LGraph *lg) {
 
   for(auto node:lg->forward()) {
     auto op = node.get_type_op();
     if (Ntype::is_multi_driver(op)) {
-      absl::StrAppend(&buffer, "FIXME:", node.debug_name());
       continue;
     }
 
@@ -329,7 +370,7 @@ void Cgen_verilog::create_registers(std::string &buffer, LGraph *lg) {
 
     auto dpin = node.get_driver_pin();
 
-    std::string pin_name = dpin.wire_name();
+    std::string pin_name = dpin.get_wire_name();
 
     // FIXME: HERE if flop is output, do not create flop
     const auto name      = get_scaped_name(pin_name);
@@ -342,7 +383,7 @@ void Cgen_verilog::create_registers(std::string &buffer, LGraph *lg) {
         edge="negedge";
       }
     }
-    std::string clock = node.get_sink_pin("clock").wire_name();
+    std::string clock = get_scaped_name(node.get_sink_pin("clock").get_wire_name());
 
     std::string reset_async;
     std::string reset;
@@ -360,7 +401,7 @@ void Cgen_verilog::create_registers(std::string &buffer, LGraph *lg) {
         }
       }
 
-      reset = node.get_sink_pin("reset").wire_name();
+      reset = get_scaped_name(node.get_sink_pin("reset").get_wire_name());
     }
 
     std::string reset_initial = "'h0";
@@ -398,8 +439,19 @@ void Cgen_verilog::create_locals(std::string &buffer, LGraph *lg) {
 
   for(auto node:lg->fast()) {
     auto op = node.get_type_op();
-    if (Ntype::is_multi_driver(op))
+
+    if (Ntype::is_multi_driver(op)) {
+      if (op == Ntype_op::Sub) {
+        auto iname = get_scaped_name(node.get_instance_name());
+        for(auto &e:node.out_edges()) {
+          auto name = get_scaped_name(e.driver.get_wire_name());
+          absl::StrAppend(&buffer, "wire signed [", e.driver.get_bits()-1, ":0] ", name , ";\n");
+          pin2var.emplace(e.driver.get_compact_class(), name);
+        }
+      }
       continue;
+    }
+    I(op != Ntype_op::Sub && op != Ntype_op::Memory);
 
     auto n_out = node.get_num_out_edges();
     if (n_out==0)
@@ -407,7 +459,7 @@ void Cgen_verilog::create_locals(std::string &buffer, LGraph *lg) {
 
     auto dpin = node.get_driver_pin();
 
-    std::string name = get_scaped_name(dpin.wire_name());
+    std::string name = get_scaped_name(dpin.get_wire_name());
 
     bool out_unsigned = false;
 
@@ -461,6 +513,7 @@ void Cgen_verilog::create_locals(std::string &buffer, LGraph *lg) {
       }
     }
   }
+
 }
 
 std::tuple<std::string, int> Cgen_verilog::setup_file(LGraph *lg) const {
@@ -514,6 +567,12 @@ void Cgen_verilog::do_from_lgraph(LGraph *lg) {
   {
     std::string buffer;
     create_locals(buffer, lg); // pin2var & mux2vector adds
+    append_to_file(filename, fd, buffer);
+  }
+
+  {
+    std::string buffer;
+    create_subs(buffer, lg); // pin2var & mux2vector reads
     append_to_file(filename, fd, buffer);
   }
 
