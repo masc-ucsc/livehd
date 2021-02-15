@@ -8,13 +8,12 @@ $en.__ubits   = 1
 #reg = (cnt = 0)                // #reg_1
 
 if ($en) {
-                                // #reg_2 = #reg_1
-  #reg.cnt := #reg.cnt + 1      // #reg_3 = #reg_2
+  #reg.cnt := #reg.cnt.__q_pin + 1  // #reg_3 = #reg_2 //FIXME->sh: should be #reg.cnt := #reg.cnt.__q_pin + 1 ????
 }
-                                // #reg_4 = phi(#reg_3, #reg_1)      
+                                    // #reg_4 = phi(#reg_3, #reg_1)      
 
 
-%out.cnt = #reg.cnt.__q_pin             // = #reg_4
+%out.cnt = #reg.cnt.__q_pin         // = #reg_4
 // %out.sum = #reg.sum.__q_pin
 
 // todo

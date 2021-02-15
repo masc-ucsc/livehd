@@ -385,7 +385,7 @@ public:
 
   // BEGIN ATTRIBUTE ACCESSORS
   std::string debug_name() const;
-  std::string wire_name() const;
+  std::string get_wire_name() const;
 
   void             set_name(std::string_view wname);
   void             del_name();

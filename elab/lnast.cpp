@@ -494,6 +494,10 @@ void Lnast::dot2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &dot_nid)
       for (auto old_child : children(dot_nid)) {
         add_child(new_tg, get_data(old_child));
       }
+      if (is_register(c1_dot_name)){
+        std::string qpin_str = "__q_pin";
+        add_child(new_tg, Lnast_node::create_const(add_string(qpin_str)));
+      }
 
       ref_data(dot_nid)->type = Lnast_ntype::create_assign();
       auto asg_nid           = dot_nid;  // better code reading
