@@ -982,7 +982,7 @@ void Cprop::process_tuple_add(Node &node) {
 
 void Cprop::try_create_register(Node &node, std::shared_ptr<Lgtuple> tup) {
   I(!tuple_issues);
-  /* tup->dump(); */
+  tup->dump();
   auto *lg = node.get_class_lgraph();
   auto reg_root_ssa_name = tup->get_name();
   auto pos = reg_root_ssa_name.find_last_of("_"); 

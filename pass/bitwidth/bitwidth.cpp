@@ -683,7 +683,7 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
 
     if (attr == Attr::Set_ubits) {
       if (bw.get_sbits() && (bw.get_sbits() - 1) > (val.to_i()))
-        Pass::error("bitwidth mismatch. Variable {} needs {}sbits, but constrained to {}ubits\n", dpin_name, bw.get_sbits(), val.to_i());
+        Pass::error("bitwidth mismatch at node {}. \nVariable {} needs {}sbits, but constrained to {}ubits\n", node_attr.debug_name(), dpin_name, bw.get_sbits(), val.to_i());
 
       bw.set_sbits_range(val.to_i()); //note: still set sbits range and rely on the Tposs to turn max/min to positive
       bool tposs_existed = false;
@@ -698,7 +698,7 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
 
     } else { // Attr::Set_sbits
       if (bw.get_sbits() && bw.get_sbits() > (val.to_i()))
-        Pass::error("bitwidth mismatch. Variable {} needs {}sbits, but constrained to {}sbits\n", dpin_name, bw.get_sbits(), val.to_i());
+        Pass::error("bitwidth mismatch at node {}. \nVariable {} needs {}sbits, but constrained to {}sbits\n", node_attr.debug_name(), dpin_name, bw.get_sbits(), val.to_i());
 
       bw.set_sbits_range(val.to_i());
     }

@@ -1,20 +1,20 @@
 $en.__ubits   = 1
-// $src1.__ubits = 16
-// $src2.__ubits = 16
+$src1.__ubits = 16
+$src2.__ubits = 16
 #reg.cnt.__ubits = 4            // #reg_0
 
-// prev = $src1 + $src2
-// #reg = (cnt = 0, sum = prev) // #reg_1
-#reg = (cnt = 0)                // #reg_1
+prev = $src1 + $src2
+#reg = (cnt = 0, sum = prev) // #reg_1
 
 if ($en) {
-  #reg.cnt := #reg.cnt.__q_pin + 1  // #reg_3 = #reg_2 //FIXME->sh: should be #reg.cnt := #reg.cnt.__q_pin + 1 ????
+                                    // #reg_2 = #reg_1
+  #reg.cnt := #reg.cnt.__q_pin + 1  // #reg_3 = #reg_2 
 }
                                     // #reg_4 = phi(#reg_3, #reg_1)      
 
 
 %out.cnt = #reg.cnt.__q_pin         // = #reg_4
-// %out.sum = #reg.sum.__q_pin
+%out.sum = #reg.sum.__q_pin
 
 // todo
 // %out = #reg
