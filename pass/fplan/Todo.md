@@ -27,9 +27,17 @@ Goals:
 2. Write node level hierarchy to file (mmap_tree not being written to file is known TODO)
 3. Find / write a method that doesn't mess up on the wrong aspect ratio - HardAspectRatio not helpful for initial floorplans.
 
+Performance (using -c opt):
+    xor_30000.v -> file: 38 ms
+    xor_30000.v -> livehd: 16 ms
+
+    xor_100000.v -> file: 131 ms
+    xor_100000.v -> livehd: 46 ms
+
 Things to add:
 0. Interactivity
     - allow for querying of top level floorplans, current layout is messy (create a top level node below top level?)
+    - add a recursive dump option
 1. Optimization
     - multithread the floorplanner (need deep hierarchies to play with - waiting on (0))
     - multithread the Lgraph traversal (need deep hierarchies to play with - waiting on (0))

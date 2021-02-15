@@ -63,33 +63,10 @@ enum class Ntype_op : uint8_t {
 
 class Ntype {
 protected:
-  inline static constexpr std::string_view cell_name[] = {"Invalid",     "Sum",     "Mult",   "Div",
-
-                                                          "And",         "Or",      "Xor",    "Ror",
-
-                                                          "Not",         "Tposs",   "Sext",
-
-                                                          "LT",          "GT",      "EQ",
-
-                                                          "SHL",         "SRA",
-
-                                                          "Mux",         "LUT",
-
-                                                          "IO",
-
-                                                          "Memory",
-
-                                                          "Sflop",       "Flop",   "Fflop",
-
-                                                          "Sub",         "Const",
-
-                                                          "TupAdd",      "TupGet",  "TupRef", "TupKey",
-
-                                                          "AttrSet",     "AttrGet",
-
-                                                          "CompileErr",
-
-                                                          "Last_invalid"};
+  inline static constexpr std::string_view cell_name[]
+      = {"Invalid", "Sum", "Mult",  "Div",    "And",    "Or",     "Xor",    "Ror",     "Not",     "Tposs",      "Sext",
+         "LT",      "GT",  "EQ",    "SHL",    "SRA",    "Mux",    "LUT",    "IO",      "Memory",  "Sflop",      "Flop",
+         "Fflop",   "Sub", "Const", "TupAdd", "TupGet", "TupRef", "TupKey", "AttrSet", "AttrGet", "CompileErr", "Last_invalid"};
 
   inline static absl::flat_hash_map<std::string, Ntype_op> cell_name_map;
 

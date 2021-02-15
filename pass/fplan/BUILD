@@ -6,7 +6,6 @@ cc_library(
     name = "fplan",
     srcs = glob(
         ["*.cpp"],
-        exclude = ["*test*.cpp"],
     ),
     hdrs = glob(["*.hpp"]),
     includes = ["."],
@@ -16,7 +15,6 @@ cc_library(
     deps = [
          "//core:core",
          "//pass/common:pass",
-         "//task:task",
          "@iassert//:iassert",
          "@fmt//:fmt",
          "//third_party/misc/ArchFP:archfp",

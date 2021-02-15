@@ -1,20 +1,20 @@
 
+#include "node_tree.hpp"
+
 #include <functional>
 
-#include "node_tree.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
 Node_tree::Node_tree(LGraph* root_arg)
-    : mmap_lib::tree<Node>(root_arg->get_path(), absl::StrCat(root_arg->get_name(), "_ntree")), root(root_arg) {
-  
-  auto ht = root->ref_htree();
-
+    : mmap_lib::tree<Node>(root_arg->get_path(), absl::StrCat(root_arg->get_name(), "_ntree")), root(root_arg), last_free() {
   set_root(Node());
 
   absl::flat_hash_set<Hierarchy_index> hidx_used;
 
   std::function<void(LGraph*, Hierarchy_index, Tree_index)> add_lg_nodes = [&](LGraph* lg, Hierarchy_index hidx, Tree_index tidx) {
+    auto ht = root->ref_htree();
+
     Tree_index last_sib;
     for (auto fn : lg->fast()) {
       if (!fn.is_type_synth() && !fn.is_type_sub_present()) {
@@ -23,7 +23,7 @@ Node_tree::Node_tree(LGraph* root_arg)
 
       auto cn = Node(root, hidx, fn.get_compact_class());
 
-      Tree_index tree_cidx; // current child index in tree
+      Tree_index tree_cidx;  // current child index in tree
       if (last_sib.is_invalid()) {
         tree_cidx = add_child(tidx, cn);
       } else {
@@ -69,6 +69,11 @@ Node_tree::Node_tree(LGraph* root_arg)
         }
 
         I(found);
+      } else {
+        auto& p = last_free[tidx][size_t(cn.get_type_op()) - 1];
+        if (p.is_invalid()) {
+          p = last_sib;
+        }
       }
     }
 
@@ -84,6 +89,12 @@ void Node_tree::dump() const {
   for (const auto& index : depth_preorder()) {
     std::string indent(index.level, ' ');
     const auto& id = get_data(index);
-    fmt::print("{} name: {} loc: ({}, {}) livehd loc: ({}, {})\n", indent, id.debug_name(), index.level, index.pos, id.get_hidx().level, id.get_hidx().pos);
+    fmt::print("{} name: {} loc: ({}, {}) livehd loc: ({}, {})\n",
+               indent,
+               id.debug_name(),
+               index.level,
+               index.pos,
+               id.get_hidx().level,
+               id.get_hidx().pos);
   }
 }

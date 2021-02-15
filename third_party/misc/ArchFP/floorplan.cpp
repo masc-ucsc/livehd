@@ -140,7 +140,8 @@ string FPObject::getUniqueName() const {
 unsigned int FPObject::outputLGraphLayout(Node_tree& tree, Tree_index tidx, double startX, double startY) {
   bool found = false;
 
-  Tree_index child_idx = tree.get_first_child(tidx);
+  //Tree_index child_idx = tree.get_first_child(tidx);
+  Tree_index child_idx = tree.get_last_free(tidx, getType());
   while (child_idx != tree.invalid_index()) {
     Node* child = tree.ref_data(child_idx);
 
@@ -164,6 +165,8 @@ unsigned int FPObject::outputLGraphLayout(Node_tree& tree, Tree_index tidx, doub
 
     // set livehd name to floorplan node name so floorplan nodes can be easily identified by user later
     child->set_name(getUniqueName());
+
+    tree.set_last_free(tidx, getType(), child_idx);
 
     break;
   }
