@@ -7,7 +7,13 @@
 Node_flat_floorp::Node_flat_floorp(Node_tree&& nt_arg) : Lhd_floorplanner(std::move(nt_arg)) {}
 
 void Node_flat_floorp::load() {
-  layouts[nt.get_root()] = new geogLayout();
+  unsigned int count = 0; // avoid tons of memory reallocations when creating nodes
+  for (auto n : nt.get_root_lg()->fast(true)) {
+    (void)n;
+    count++;
+  }
+
+  layouts[nt.get_root()] = new geogLayout(count);
 
   Ntype_area narea(nt.get_root_lg()->get_path());
 

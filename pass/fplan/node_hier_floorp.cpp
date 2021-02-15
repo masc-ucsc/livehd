@@ -16,7 +16,7 @@ geogLayout* Node_hier_floorp::load_lg_nodes(LGraph* lg) {
     subgraphs.
   */
 
-  geogLayout* l = new geogLayout();
+  geogLayout* l = new geogLayout(lg->size());
 
   const std::string_view path = root_lg->get_path();
 

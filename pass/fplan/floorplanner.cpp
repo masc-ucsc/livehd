@@ -51,7 +51,7 @@ void Lhd_floorplanner::write_file(const std::string_view filename) {
 
 void Lhd_floorplanner::write_lhd_node() {
   Ann_node_place::clear(nt.get_root_lg()); // clear out any existing node placements
-  NameCounts.clear(); // clear ArchFP name counts
+  clearCount(); // clear ArchFP name counts
 
   auto rl = layouts[nt.root_index()];
 

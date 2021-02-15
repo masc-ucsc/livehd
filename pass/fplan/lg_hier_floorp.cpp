@@ -22,7 +22,7 @@ geogLayout* Lg_hier_floorp::load_lg_modules(LGraph* lg) {
     sub_lg_count[sub_lg]++;
   });
 
-  geogLayout* l = new geogLayout();
+  geogLayout* l = new geogLayout(sub_lg_count.size());
   l->setName(lg->get_name().data());
 
   if (sub_lg_count.empty()) {

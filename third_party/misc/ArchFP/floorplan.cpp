@@ -8,6 +8,7 @@
 #include <sstream>
 #include <stdexcept>
 
+#include "absl/container/flat_hash_map.h"
 #include "ann_place.hpp"
 #include "core/lgedgeiter.hpp"
 #include "mathutil.hpp"
@@ -26,9 +27,11 @@ static bool   yReflect     = false;
 static double yBottom[maxMirrorDepth];
 static double yTop[maxMirrorDepth];
 static int    yMirrorDepth = 0;
-static bool   printNames   = true;
 
-void setNameMode(bool flag) { printNames = flag; }
+absl::flat_hash_map<string, int> NameCounts;
+
+int  Name2Count(const string& arg) { return ++NameCounts[arg]; }
+void clearCount() { NameCounts.clear(); }
 
 void FPContainer::pushMirrorContext(double startX, double startY) {
   if (xMirror) {
@@ -60,21 +63,19 @@ void FPContainer::popMirrorContext() {
   }
 }
 
-inline double FPObject::calcX(double startX) {
+double FPObject::calcX(double startX) const {
   if (xReflect) {
     return xLeft[xMirrorDepth - 1] - (startX + x - xRight[xMirrorDepth - 1] + width);
   } else
     return startX + x;
 }
 
-inline double FPObject::calcY(double startY) {
+double FPObject::calcY(double startY) const {
   if (yReflect) {
     return yTop[yMirrorDepth - 1] - (startY + y - yBottom[yMirrorDepth - 1] + height);
   } else
     return startY + y;
 }
-
-map<string, int> NameCounts;
 
 // Methods for the dummy component class to help with some IO.
 ostream& operator<<(ostream& s, dummyComponent& c) {
@@ -125,10 +126,15 @@ void FPObject::setLocation(double xArg, double yArg) {
 }
 
 void FPObject::outputHotSpotLayout(ostream& o, double startX, double startY) {
-  string uname = (printNames) ? getUniqueName() : " ";
-
-  o << uname << "\t" << getWidth() / 1000 << "\t" << getHeight() / 1000 << "\t" << calcX(startX) / 1000 << "\t"
+  o << getUniqueName() << "\t" << getWidth() / 1000 << "\t" << getHeight() / 1000 << "\t" << calcX(startX) / 1000 << "\t"
     << calcY(startY) / 1000 << "\n";
+}
+
+string FPObject::getUniqueName() const {
+  if (name == " " || name == "")
+    return name;
+  else
+    return name + std::to_string(Name2Count(name));
 }
 
 unsigned int FPObject::outputLGraphLayout(Node_tree& tree, Tree_index tidx, double startX, double startY) {
@@ -155,7 +161,9 @@ unsigned int FPObject::outputLGraphLayout(Node_tree& tree, Tree_index tidx, doub
 
     Ann_place p(calcX(startX), calcY(startY), getWidth(), getHeight());
     child->set_place(p);
-    child->set_name(getUniqueName()); // set livehd name to floorplan node name so floorplan nodes can be easily identified by user later
+
+    // set livehd name to floorplan node name so floorplan nodes can be easily identified by user later
+    child->set_name(getUniqueName());
 
     break;
   }
@@ -202,11 +210,11 @@ double FPCompWrapper::ARInRange(double AR) {
   double retval = AR;
   if (maxAR < 1) {
     assert(false);  // should never happen?
-    // retval = MIN(retval, minAR);
-    // retval = MAX(retval, maxAR);
+    // retval = std::min(retval, minAR);
+    // retval = std::max(retval, maxAR);
   } else {
-    retval = MAX(retval, minAR);
-    retval = MIN(retval, maxAR);
+    retval = std::max(retval, minAR);
+    retval = std::min(retval, maxAR);
   }
   if (verbose)
     cout << "Target AR=" << AR << " minAR=" << minAR << " maxAR=" << maxAR << " returnAR=" << retval << "\n";
@@ -248,7 +256,9 @@ bool FPCompWrapper::layout(FPOptimization opt, double ratio) {
 // Methods for the FPcontainer class.
 
 // Default constructor
-FPContainer::FPContainer() : items(), yMirror(false), xMirror(false) {}
+FPContainer::FPContainer(unsigned int rsize) : items(), yMirror(false), xMirror(false) {
+  items.reserve(rsize);  // avoid many memory reallocations due to vector resizing, if possible
+}
 
 FPContainer::~FPContainer() {
   // It's very important to only delete items when their refcount hits zero.
@@ -435,7 +445,7 @@ unsigned int FPContainer::outputLGraphLayout(Node_tree& tree, Tree_index tidx, d
 }
 
 // Methods for the GridLayout class.
-gridLayout::gridLayout() : FPContainer() {
+gridLayout::gridLayout(unsigned int rsize) : FPContainer(rsize) {
   type = Ntype_op::Invalid;
   name = "Grid";
 }
@@ -554,7 +564,7 @@ unsigned int gridLayout::outputLGraphLayout(Node_tree& tree, Tree_index tidx, do
 }
 
 // Methods for Baglayout Class
-bagLayout::bagLayout() : FPContainer() {
+bagLayout::bagLayout(unsigned int rsize) : FPContainer(rsize) {
   type   = Ntype_op::Invalid;
   name   = "Bag";
   locked = false;
@@ -591,7 +601,7 @@ bool bagLayout::layout(FPOptimization opt, double targetAR) {
         = (remWidth > remHeight || i == itemCount - 1) ? (compArea / remHeight) / remHeight : remWidth / (compArea / remWidth);
     if (comp->getCount() > 1) {
       // We have more than one component of the same type, so let the grid layout do the work.
-      gridLayout* GL = new gridLayout();
+      gridLayout* GL = new gridLayout(1);
       GL->addComponent(comp);
       replaceComponent(GL, i);
       comp = GL;
@@ -631,8 +641,8 @@ void bagLayout::recalcSize() {
   height = 0;
   for (int i = 0; i < getComponentCount(); i++) {
     FPObject* comp = getComponent(i);
-    width          = MAX(width, comp->getX() + comp->getWidth());
-    height         = MAX(height, comp->getY() + comp->getHeight());
+    width          = std::max(width, comp->getX() + comp->getWidth());
+    height         = std::max(height, comp->getY() + comp->getHeight());
   }
   area = width * height;
 }
@@ -666,7 +676,7 @@ void fixedLayout::morph(double xFactor, double yFactor) {
 
 // This will read in a hotspot file, and create a bag layout that is locked.
 // NOTE: In general, the layout method on a bag layout manager would not have been able to create the resultant layout.
-fixedLayout::fixedLayout(const char* filename, double scalingFactor) : bagLayout() {
+fixedLayout::fixedLayout(const char* filename, double scalingFactor) : bagLayout(1) {
   locked = true;
 
   ifstream in(filename);
@@ -709,8 +719,8 @@ fixedLayout::fixedLayout(const char* filename, double scalingFactor) : bagLayout
   double minY = std::numeric_limits<double>::max();
   for (int i = 0; i < getComponentCount(); i++) {
     FPObject* comp = getComponent(i);
-    minX           = MIN(minX, comp->getX());
-    minY           = MIN(minY, comp->getY());
+    minX           = std::min(minX, comp->getX());
+    minY           = std::min(minY, comp->getY());
   }
   if (minX != 0.0 || minY != 0) {
     for (int i = 0; i < getComponentCount(); i++) {
@@ -742,13 +752,13 @@ bool fixedLayout::layout(FPOptimization opt, double targetAR) {
 }
 
 // Geographic Layout.
-geogLayout::geogLayout() : FPContainer() {
+geogLayout::geogLayout(unsigned int rsize) : FPContainer(rsize) {
   type = Ntype_op::Invalid;
   name = "Geog";
 }
 
 // some geography hints only work with certain numbers of items
-void geogLayout::checkHint(int count, GeographyHint hint) {
+void geogLayout::checkHint(int count, GeographyHint hint) const {
   if ((hint == LeftRight || hint == LeftRightMirror || hint == LeftRight180 || hint == TopBottom || hint == TopBottomMirror
        || hint == TopBottom180)
       && count != 2) {
@@ -821,8 +831,8 @@ bool geogLayout::layout(FPOptimization opt, double targetAR) {
     if (!comp)
       break;
     FPContainer::addComponent(comp);
-    width  = MAX(width, comp->getX() + comp->getWidth());
-    height = MAX(height, comp->getY() + comp->getHeight());
+    width  = std::max(width, comp->getX() + comp->getWidth());
+    height = std::max(height, comp->getY() + comp->getHeight());
   }
   area = width * height;
 
@@ -846,7 +856,7 @@ bool geogLayout::layoutHelper(FPOptimization opt, double remWidth, double remHei
     // We will do this by finding the GCD of the counts in the collection of components.
     int gcd = centerItems[0]->getCount();
     for (int i = 1; i < centerItemsCount; i++) gcd = GCD(gcd, centerItems[i]->getCount());
-    bagLayout* BL = new bagLayout();
+    bagLayout* BL = new bagLayout(centerItemsCount);
     for (int i = 0; i < centerItemsCount; i++) {
       FPObject* item = centerItems[i];
       BL->addComponent(item, item->getCount() / gcd);
@@ -860,7 +870,7 @@ bool geogLayout::layoutHelper(FPOptimization opt, double remWidth, double remHei
     FPContainer* FPLayout = BL;
     if (gcd > 1) {
       // Put the bag container into a grid container and lay it out.
-      gridLayout* GL = new gridLayout();
+      gridLayout* GL = new gridLayout(1);
       GL->addComponent(BL, gcd);
       FPLayout = GL;
     }
@@ -901,8 +911,8 @@ bool geogLayout::layoutHelper(FPOptimization opt, double remWidth, double remHei
     if (comp->getCount() % 2 == 0) {
       int newCount = comp->getCount() / 2;
       comp->setCount(newCount);
-      bagLayout* BL1 = new bagLayout();
-      bagLayout* BL2 = new bagLayout();
+      bagLayout* BL1 = new bagLayout(1);
+      bagLayout* BL2 = new bagLayout(1);
       BL1->addComponent(comp);
       BL2->addComponent(comp);
       if (compHint == LeftRight || compHint == LeftRightMirror || compHint == LeftRight180) {
@@ -964,7 +974,7 @@ bool geogLayout::layoutHelper(FPOptimization opt, double remWidth, double remHei
     double    targetAR = targetWidth / targetHeight;
     FPObject* FPLayout = comp;
     if (comp->getCount() > 1) {
-      gridLayout* grid = new gridLayout();
+      gridLayout* grid = new gridLayout(1);
       grid->addComponent(comp);
       grid->setHint(compHint);
       FPLayout = grid;
@@ -1021,12 +1031,4 @@ ostream& outputHotSpotHeader(const char* filename) {
   return out;
 }
 
-void outputHotSpotFooter(ostream& o) {
-  delete (&o);
-}
-
-string getStringFromInt(int in) {
-  stringstream ss;
-  ss << in;
-  return ss.str();
-}
+void outputHotSpotFooter(ostream& o) { delete (&o); }

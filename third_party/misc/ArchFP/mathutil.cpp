@@ -11,7 +11,6 @@
 
 #include <climits>
 #include <cmath>
-#include <cstdlib>
 
 /*
   This will be some functions surrounding primes.
@@ -37,12 +36,7 @@ static bool primesInitialized = false;
 // However, then I can't send it any arguments.  Unclear what is best here.
 // Indicate we are now initialized.
 
-// As indicated, used properly, primes to 100,000 are enough to find prime factorization of any 32 bit int.
-int   Primes::candidateArrayLen = 100000;
 bool *Primes::candidateArray    = new bool[candidateArrayLen];
-
-// There are almost 10,000 primes less than 100,000.
-int  Primes::primeArrayLen = 10000;
 int *Primes::primeArray    = new int[primeArrayLen];
 
 int Primes::currMaxPrimeInx = 0;
@@ -112,8 +106,7 @@ primeFactorization::primeFactorization(int num) {
   // For now use the following reasoning.
   // 2*3*5*7*11*13*17*19*23*29 = 6,469,693,230 > any 32 bit int.
   // Therefore, a 32 bit int can not possibly have more than 10 DIFFERENT prime factors.
-  factorArrayLen = 10;
-  factorization  = (primeFactor *)(malloc(sizeof(primeFactor) * factorArrayLen));
+  factorization  = new primeFactor[factorArrayLen];
   currMaxFactor  = 0;
   // Start by getting some facts about num.
   int posnum  = abs(num);
@@ -147,18 +140,18 @@ primeFactorization::primeFactorization(int num) {
     addFactor(posnum, 1);
 }
 
-primeFactorization::~primeFactorization() { free(factorization); }
+primeFactorization::~primeFactorization() { delete[] factorization; }
 
 // This expands the prime factorization into an integer array of the primes.
 // Each prime is repeated the appropriate number of times in the array.
 // Ergo, multiplying together all of the factors in the array will recreate the original number.
-int primeFactorization::countFactors() {
+int primeFactorization::countFactors() const {
   int factorCount = 0;
   for (int i = 0; i < currMaxFactor; i++) factorCount += factorization[i].Exp();
   return factorCount;
 }
 
-void primeFactorization::expandFactors(int *factors) {
+void primeFactorization::expandFactors(int *factors) const {
   // Fill the array with the factors.
   int factorInx = 0;
   for (int i = 0; i < currMaxFactor; i++) {
@@ -167,7 +160,7 @@ void primeFactorization::expandFactors(int *factors) {
   }
 }
 
-void primeFactorization::printFactors(ostream &o) {
+void primeFactorization::printFactors(ostream &o) const {
   o << number << "=" << factorization[0].Prime();
   for (int i = 0; i < currMaxFactor; i++) {
     primeFactor pf = factorization[i];
@@ -207,12 +200,12 @@ int balanceFactors(int composite, double targetRatio) {
 
   // Get an array of the factors of the number.
   int  len       = pf.countFactors();
-  int *factArray = (int *)malloc(sizeof(int) * len);
+  int *factArray = new int[len];
   pf.expandFactors(factArray);
 
   // Allocate an array of booleans to dictate which factor combination we are about to try.
   // Initializing to false is the equivalent of "zero".
-  bool *boolArr = (bool *)malloc(sizeof(bool) * len);
+  bool *boolArr = new bool[len];
   for (int i = 0; i < len; i++) boolArr[i] = false;
 
   bool   flip  = (targetRatio < 1);
@@ -246,8 +239,9 @@ int balanceFactors(int composite, double targetRatio) {
       curf2     = f2;
     }
   }
-  free(factArray);
-  free(boolArr);
+
+  delete[] factArray;
+  delete[] boolArr;
 
   int retval = flip ? curf2 : curf1;
   // cout << "Composite=" << composite << " ratio=" << targetRatio << " retval=" << retval << " other=" << composite/retval << "
