@@ -11,7 +11,7 @@
 #include "slang/syntax/SyntaxTree.h"
 
 using namespace slang;  // just inside this file
-
+// void addTmps(verilogList OP, tmpList& tmp);
 Lnast_visitor::Lnast_visitor(slang::Compilation& _compilation, const size_t& _numErrors, uint32_t _errorLimit)
     : compilation(_compilation), numErrors(_numErrors), errorLimit(_errorLimit) {
   lnast = std::make_unique<Lnast>("module name");
@@ -135,8 +135,9 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
     fmt::print("check:{} ", operandList.size());
     count++;
     fmt::print("tmp list check: \n");
-    for (auto check = tmpList.cbegin(); check != tmpList.cend(); ++check) std::cout << " " << *check;
-    if (*it == "AND") {
+    
+    // for (auto check = tmpList.cbegin(); check != tmpList.cend(); ++check) std::cout << " " << *check;
+    if (*it == operators::AND) {
       fmt::print("AND \n");
       auto idx_and  = lnast->add_child(idx_stmts, Lnast_node::create_and("AND"));
       auto node_and = Lnast_node::create_ref(lnast->add_string("__and" + std::to_string(count)));
@@ -181,7 +182,7 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
         // lnast->add_child(idx_and, node_and);
       }
 
-    } else if (*it == "OR") {
+    } else if (*it == operators::OR) {
       fmt::print("OR \n");
       auto idx_or  = lnast->add_child(idx_stmts, Lnast_node::create_or("OR"));
       auto node_or = Lnast_node::create_ref(lnast->add_string("__or" + std::to_string(count)));
@@ -229,7 +230,7 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
         tmpList.insert(tmpList.end(), ("__or" + std::to_string(count)));  // for connection the node refs
         // lnast->add_child(idx_and, node_and);
       }
-    } else if (*it == "XOR") {
+    } else if (*it == operators::XOR) {
       fmt::print("XOR \n");
       auto idx_xor  = lnast->add_child(idx_stmts, Lnast_node::create_xor(""));
       auto node_xor = Lnast_node::create_ref(lnast->add_string("___xor" + std::to_string(count)));
@@ -266,7 +267,7 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
         tmpList.insert(tmpList.end(), ("___xor" + std::to_string(count)));  // for connection the node refs
         // lnast->add_child(idx_and, node_and);
       }
-    } else if (*it == "NOT") {  // think about how to make not work
+    } else if (*it == operators::NOT) {  // think about how to make not work
       fmt::print("NOT \n");
       auto idx_not  = lnast->add_child(idx_stmts, Lnast_node::create_not("NOT"));
       auto node_not = Lnast_node::create_ref(lnast->add_string("__not" + std::to_string(count)));
@@ -321,7 +322,7 @@ void Lnast_visitor::handle(const slang::Expression& expr) {
         break;
       }
       case (UnaryOperator::BitwiseNot): {
-        verilogList.emplace_back("NOT");
+        verilogList.emplace_back(operators::NOT);
         fmt::print(" ~ ");
         break;
       }
@@ -365,34 +366,34 @@ void Lnast_visitor::handle(const slang::Expression& expr) {
     switch (op1.op) {
       case BinaryOperator::Add: {
         // idx   = lnast->add_child(idx_stmts, Lnast_node::create_plus  ("+"));
-        verilogList.emplace_back("+");
+        verilogList.emplace_back(operators::PLUS);
         break;
       }
       case BinaryOperator::Subtract: {
         // idx    = lnast->add_child(idx_stmts, Lnast_node::create_minus  ("-"));
-        verilogList.emplace_back("-");
+        verilogList.emplace_back(operators::MINUS);
         break;
       }
       case BinaryOperator::Multiply: {
-        fmt::print(" * ");
+        verilogList.emplace_back(operators::MULT);
         break;
       }
-      case BinaryOperator::Divide: fmt::print(" / "); break;
-      case BinaryOperator::Mod: fmt::print(" % "); break;
+      case BinaryOperator::Divide: verilogList.emplace_back(operators::DIV);break;
+      case BinaryOperator::Mod: verilogList.emplace_back(operators::MOD); break;
       case BinaryOperator::BinaryAnd: {
-        verilogList.emplace_back("AND");
+        verilogList.emplace_back(operators::AND);
         // idx = lnast->add_child(idx_stmts, Lnast_node::create_and ("AND"));
         fmt::print(" & ");
         break;
       }
       case BinaryOperator::BinaryOr:
-        verilogList.emplace_back("OR");
+        verilogList.emplace_back(operators::OR);
         // idx = lnast->add_child(idx_stmts, Lnast_node::create_or ("OR"));
         // fmt::print("my list says {}\n", verilogList.back());
         fmt::print(" | ");
         break;
       case BinaryOperator::BinaryXor: {
-        verilogList.emplace_back("XOR");
+        verilogList.emplace_back(operators::XOR);
         // idx = lnast->add_child(idx_stmts, Lnast_node::create_xor ("XOR"));
         fmt::print(" ^ \n");
         break;
@@ -403,7 +404,7 @@ void Lnast_visitor::handle(const slang::Expression& expr) {
       }
       default: {
         // int flag=0;
-        fmt::print("check!\n");
+        fmt::print("what is this operator?\n");
         break;
       }
         // case BinaryOperator::Equality:

@@ -20,11 +20,12 @@ protected:
   std::unique_ptr<Lnast> lnast = std::make_unique<Lnast>("module_name_here", "some_file");
 
   // std::unique_ptr<Lnast> lnast;
-  std::vector<std::string> verilogList;
+
+
+  enum operators { AND, OR, XOR, NOT, PLUS, MINUS, MULT, DIV, MOD};
+  std::vector<operators> verilogList;
   std::vector<std::string> operandList;
   std::vector<std::string> tmpList;
-
-  enum operators { AND, OR, XOR, NOT };
 
 public:
   static inline std::vector<std::unique_ptr<Lnast>> parsed_lnasts;
