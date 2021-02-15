@@ -617,12 +617,73 @@ std::tuple<std::string_view, std::string_view, int> Cprop::get_tuple_name_key(No
   return std::make_tuple(tup_name, key_name, key_pos);
 }
 
+bool Cprop::reg_q_pin_access_preparation(Node &tg_parent_node, Node_pin &ori_tg_dpin) {
+  auto cur_node = tg_parent_node;
+  std::string hier_reg_name;
+  while (true) {
+    auto [tup_name, key_name, key_pos] = get_tuple_name_key(cur_node);
+    if (!key_name.empty() && hier_reg_name.empty()) {
+      hier_reg_name = key_name;
+    } else if (!key_name.empty() && !hier_reg_name.empty()) {
+      hier_reg_name = absl::StrCat(key_name, ".", hier_reg_name);
+    } else if (key_pos < 0) {
+      I(false); // it should be captured at previous process_tuple_get() -> impossible cases here.
+    } else {
+      auto pos_str = std::to_string(key_pos);
+      hier_reg_name = absl::StrCat(pos_str, ".", hier_reg_name);
+    }
+
+    auto parent_dpin = cur_node.get_sink_pin("tuple_name").get_driver_pin();
+    auto parent_node = parent_dpin.get_node();
+    auto ptype       = parent_node.get_type_op();
+    if (ptype != Ntype_op::TupGet) {
+      // hier_reg_name collection finished!
+      if (ptype != Ntype_op::TupAdd && ptype != Ntype_op::Mux) 
+        return false;
+      
+      I(parent_dpin.has_name());
+      auto reg_root_ssa_name = parent_dpin.get_name();
+      auto pos = reg_root_ssa_name.find_last_of("_");
+      auto reg_root_name = reg_root_ssa_name.substr(0, pos);
+      hier_reg_name = absl::StrCat(reg_root_name, ".", hier_reg_name);
+
+      for (auto &e : ori_tg_dpin.out_edges()) {
+        auto sink_node = e.sink.get_node();
+        auto sink_ntype = sink_node.get_type_op();
+        if (sink_ntype == Ntype_op::TupAdd && e.sink == sink_node.setup_sink_pin("value")) {
+          // note: sometimes the tg(__q_pin) will drives some value pin in graph output TA chain, 
+          // but this % TA chain will be deleted before the registers is created, so suddenly
+          // the TA sink_pin("value") will disappear. Here I insert an dummy assignment node to
+          // make sure there will always a valid spin for the future reg_q_pin to connect to.
+          auto new_asg_node = cur_node.get_class_lgraph()->create_node(Ntype_op::Or);
+          auto asg_dpin = new_asg_node.setup_driver_pin();
+          asg_dpin.connect_sink(e.sink);
+          auto asg_spin = new_asg_node.setup_sink_pin("A");
+          reg_name2sink_pins[hier_reg_name].emplace_back(asg_spin);
+          e.del_edge();
+        } else {
+          reg_name2sink_pins[hier_reg_name].emplace_back(e.sink);
+        }
+      }
+      return true;
+    } else {
+      cur_node = parent_node;
+    }
+  }
+  return true;
+}
+  
+
 bool Cprop::process_tuple_get(Node &node, XEdge_iterator &inp_edges_ordered) {
   I(node.get_type_op() == Ntype_op::TupGet);
 
   auto parent_dpin                   = node.get_sink_pin("tuple_name").get_driver_pin();
   auto parent_node                   = parent_dpin.get_node();
   auto [tup_name, key_name, key_pos] = get_tuple_name_key(node);
+  if (key_name == "__q_pin") {
+    auto tg_dpin = node.setup_driver_pin();
+    return reg_q_pin_access_preparation(parent_node, tg_dpin); // start from parent tg to collect the hierarchical reg name
+  }
 
   // this attr comes from tail of TG chain where the TG tail has been transformed into an AttrSet node.
   if (parent_node.get_type_op() == Ntype_op::AttrSet) {
@@ -644,7 +705,20 @@ bool Cprop::process_tuple_get(Node &node, XEdge_iterator &inp_edges_ordered) {
 
   const auto node_tup = ptup_it->second;
   auto       val_dpin = node_tup->get_dpin(key_pos, key_name);
-  if (!val_dpin.is_invalid()) {
+
+  // note: if child is TG(__q_pin), don't change cur_tg into AttrSet
+  bool child_is_tg_qpin_fetch = false;
+  for (auto &e : node.out_edges()) {
+    auto sink_node = e.sink.get_node();
+    if (sink_node.get_type_op() == Ntype_op::TupGet) {
+      auto [child_tup_name, child_key_name, child_key_pos] = get_tuple_name_key(sink_node);
+      if (child_key_name == "__q_pin")
+        child_is_tg_qpin_fetch = true;
+    }
+  }
+  
+
+  if (!val_dpin.is_invalid() && !child_is_tg_qpin_fetch) {
     int conta = 0;
     for (auto it : node_tup->get_level_attributes(key_pos, key_name)) {
       auto attr_key_node = node.get_lg()->create_node(Ntype_op::TupKey);
@@ -706,6 +780,10 @@ bool Cprop::process_tuple_get(Node &node, XEdge_iterator &inp_edges_ordered) {
     return true;
   }
 
+  if (child_is_tg_qpin_fetch)
+    return true;
+
+
   Pass::info("tuple_get {} could not decide the field {}!", node.debug_name(), key_name);
   return false;  // Could not resolve (maybe compile error, maybe hierarchical needed)
 }
@@ -758,7 +836,6 @@ void Cprop::process_mux(Node &node, XEdge_iterator &inp_edges_ordered) {
       is_reg_tuple = dpin.get_name().at(0) == '#' ? true : false;
 
     if (is_tail && is_reg_tuple) {
-      fmt::print("DEBUG-0 node:{} is tuple reg tail\n", node.debug_name());
       try_create_register(node, tup);
     }
   }
@@ -935,10 +1012,11 @@ void Cprop::try_create_register(Node &node, std::shared_ptr<Lgtuple> tup) {
 
 
     if (Node_pin::find_driver_pin(lg, reg_full_name).is_invalid()) {
-      auto reg = lg->create_node(Ntype_op::Flop);
-      it.second.connect_sink(reg.setup_sink_pin("din"));
-      reg_name2qpin.insert_or_assign(reg_full_name, reg.setup_driver_pin());
-      reg.setup_driver_pin().set_name(reg_full_name);
+      auto reg_node = lg->create_node(Ntype_op::Flop);
+      setup_clock(reg_node);
+      it.second.connect_sink(reg_node.setup_sink_pin("din"));
+      reg_name2qpin.insert_or_assign(reg_full_name, reg_node.setup_driver_pin());
+      reg_node.setup_driver_pin().set_name(reg_full_name);
     }
   }
 
@@ -963,6 +1041,21 @@ void Cprop::try_create_register(Node &node, std::shared_ptr<Lgtuple> tup) {
   }
   return;
 }
+
+
+void Cprop::setup_clock(Node &reg_node) {
+  auto *lg = reg_node.get_class_lgraph();
+  Node_pin clk_dpin;
+  if (!lg->has_graph_input("clock")) {
+    clk_dpin = lg->add_graph_input("clock", Port_invalid, 1);
+  } else {
+    clk_dpin = lg->get_graph_input("clock");
+  }
+
+  auto clk_spin = reg_node.setup_sink_pin("clock");
+  lg->add_edge(clk_dpin, clk_spin);
+}
+
 
 void Cprop::do_trans(LGraph *lg) {
   /* Lbench b("pass.cprop"); */
@@ -1026,6 +1119,24 @@ void Cprop::do_trans(LGraph *lg) {
   /* tup->dump(); */
   /* try_create_graph_output(lg, tup); */
 
+  
+
+
+  // connect register q_pin to sinks
+  for (const auto &[reg_name, sink_pins] : reg_name2sink_pins) {
+    auto it = reg_name2qpin.find(reg_name);
+    Node_pin q_pin;
+    if (it == reg_name2qpin.end()) {
+      I(false);
+    } 
+    q_pin = it->second;
+    for (auto sink_pin : sink_pins) {
+      q_pin.connect_sink(sink_pin);
+    }
+  }
+
+
+  // tuple chain clean up
   for (auto node : lg->fast()) {
     if (!tuple_issues && node.is_type_tup()) {
       if (hier) {

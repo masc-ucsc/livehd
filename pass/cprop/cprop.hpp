@@ -11,8 +11,9 @@ private:
   bool hier;
   bool at_gioc;
   bool tuple_issues;
-  absl::flat_hash_map<std::string_view, Node_pin> reg_name2qpin;
+  absl::flat_hash_map<std::string, Node_pin> reg_name2qpin;
   absl::flat_hash_map<std::string_view, std::pair<std::string_view, Node_pin>> reg_attr_map;
+  absl::flat_hash_map<std::string, std::vector<Node_pin>> reg_name2sink_pins;
 
 protected:
   absl::flat_hash_map<Node::Compact, std::shared_ptr<Lgtuple>> node2tuple;  // node to the most up-to-dated tuple chain
@@ -51,6 +52,8 @@ protected:
 
   // reg construction
   void try_create_register(Node &node, std::shared_ptr<Lgtuple> tup);
+  bool reg_q_pin_access_preparation(Node &parent_node, Node_pin &ori_tg_dpin);
+  void setup_clock(Node &reg_node);
 
   // Delete node and all the previous nodes feeding this one if single user
   void bwd_del_node(Node &node);
