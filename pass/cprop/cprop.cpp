@@ -907,7 +907,6 @@ void Cprop::try_create_register(Node &node, std::shared_ptr<Lgtuple> tup) {
   I(!tuple_issues);
   /* tup->dump(); */
   auto *lg = node.get_class_lgraph();
-  bool local_error = false;
   auto reg_root_ssa_name = tup->get_name();
   auto pos = reg_root_ssa_name.find_last_of("_"); 
   auto reg_root_name = reg_root_ssa_name.substr(0, pos);
@@ -915,7 +914,6 @@ void Cprop::try_create_register(Node &node, std::shared_ptr<Lgtuple> tup) {
   for (const auto &it : tup->get_map()) {
     auto hier_key_name = it.first;
     if (unlikely(hier_key_name.empty())) {
-      local_error = true;
       Pass::info("Tuple {} for graph {} has unnamed field (pyrope supports unnamed)", tup->get_name(), lg->get_name());
     }
 
@@ -931,7 +929,6 @@ void Cprop::try_create_register(Node &node, std::shared_ptr<Lgtuple> tup) {
     }
 
     if (unlikely(it.second.is_invalid())) {
-      local_error = true;
       Pass::error("graph {} try to create register but it has invalid field {}", lg->get_name(), hier_key_name);
       continue;
     }
