@@ -33,24 +33,24 @@ void Lcompiler::add_pyrope_thread(std::shared_ptr<Lnast> ln) {
       gv.do_from_lgraph(lg, "local.raw"); 
   }
 
-  Cprop    cp(false, false);                            // hier = false, gioc = false
+  Cprop    cp(false, false);                                    // hier = false, gioc = false
   Bitwidth bw(false, 10, global_flat_bwmap, global_hier_bwmap); // hier = false, max_iters = 10
   for (const auto &lg : local_lgs) {
-    fmt::print("------------------------ Local Copy-Propagation ---------------------- (C-1)\n");
+    fmt::print("------------------------ Local Copy-Propagation ---------------------- (C-0)\n");
     cp.do_trans(lg);
-    gviz ? gv.do_from_lgraph(lg, "local.no_bits") : void();
+    gviz ? gv.do_from_lgraph(lg, "local.cprop-ed") : void();
+
+    fmt::print("------------------------ Local Bitwidth-Inference -------------------- (B-0)\n");
+    bw.do_trans(lg);
+    gviz ? gv.do_from_lgraph(lg, "local.bitwidth-ed-0") : void(); 
 
     fmt::print("------------------------ Local Bitwidth-Inference -------------------- (B-1)\n");
     bw.do_trans(lg);
-    gviz ? gv.do_from_lgraph(lg, "local.debug0") : void(); 
+    gviz ? gv.do_from_lgraph(lg, "local.bitwidth-ed-1") : void(); 
 
-    fmt::print("------------------------ Local Bitwidth-Inference -------------------- (B-2)\n");
-    bw.do_trans(lg);
-    gviz ? gv.do_from_lgraph(lg, "local.debug1") : void(); 
-
-    fmt::print("------------------------ Local Bitwidth-Inference -------------------- (B-3)\n");
-    bw.do_trans(lg);
-    gviz ? gv.do_from_lgraph(lg, "local") : void(); 
+    /* fmt::print("------------------------ Local Bitwidth-Inference -------------------- (B-2)\n"); */
+    /* bw.do_trans(lg); */
+    /* gviz ? gv.do_from_lgraph(lg, "local.bitwidth-ed-2") : void(); */ 
   }
 
   std::lock_guard<std::mutex> guard(lgs_mutex);
@@ -64,7 +64,7 @@ void Lcompiler::add_firrtl_thread(std::shared_ptr<Lnast> ln) {
   Graphviz gv(true, false, odir); 
   gviz ? gv.do_from_lnast(ln, "raw") : void(); 
   
-  fmt::print("---------------- Firrtl_Protobuf -> LNAST-SSA ({}) ------- (LN-1)\n", absl::StrCat("__firrtl_", ln->get_top_module_name()));
+  fmt::print("---------------- Firrtl_Protobuf -> LNAST-SSA ({}) ------- (LN-0)\n", absl::StrCat("__firrtl_", ln->get_top_module_name()));
   ln->ssa_trans();
   gviz ? gv.do_from_lnast(ln) : void();
 
@@ -72,7 +72,7 @@ void Lcompiler::add_firrtl_thread(std::shared_ptr<Lnast> ln) {
   // note: since the first generated lgraphs are firrtl_op_lgs, they will be removed in the end,
   // we should keep the original module_name for the firrtl_op mapped lgraph, so here I attached
   // "__firrtl_" prefix for the firrtl_op_lgs
-  fmt::print("---------------- LNAST-> LGraph ({}) --------------------- (LN-2)\n", absl::StrCat("__firrtl_", ln->get_top_module_name()));
+  fmt::print("---------------- LNAST-> LGraph ({}) --------------------- (LN-1)\n", absl::StrCat("__firrtl_", ln->get_top_module_name()));
   auto module_name = absl::StrCat("__firrtl_", ln->get_top_module_name());
   Lnast_tolg ln2lg(module_name, path);
 
@@ -88,9 +88,9 @@ void Lcompiler::add_firrtl_thread(std::shared_ptr<Lnast> ln) {
   for (const auto &lg : local_lgs) {
     Cprop    cp(false, false);  // hier = false, gioc = false
 
-    fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-1)\n", lg->get_name());
+    fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg->get_name());
     cp.do_trans(lg);
-    gviz ? gv.do_from_lgraph(lg, "local.no_bits") : void();
+    gviz ? gv.do_from_lgraph(lg, "local.cprop-ed") : void();
   }
 
   std::lock_guard<std::mutex> guard(lgs_mutex);
@@ -102,7 +102,7 @@ void Lcompiler::add_firrtl_thread(std::shared_ptr<Lnast> ln) {
 
 void Lcompiler::global_io_connection() {
   Graphviz gv(true,  false, odir);
-  Cprop    cp(false, true);                            // hier = false, at_gioc = true 
+  Cprop    cp(false, true);                                    // hier = false, at_gioc = true 
   Bitwidth bw(true, 10, global_flat_bwmap, global_hier_bwmap); // hier = false, max_iters = 10
   Gioc     gioc(path);
 
@@ -112,7 +112,7 @@ void Lcompiler::global_io_connection() {
     gviz ? gv.do_from_lgraph(lg, "gioc.raw") : void(); 
     fmt::print("---------------- Global Copy-Propagation ({}) ------------ (GC)\n", lg->get_name());
     cp.do_trans(lg);
-    gviz ? gv.do_from_lgraph(lg, "gioc.no_bits") : void();
+    gviz ? gv.do_from_lgraph(lg, "gioc.cprop-ed") : void();
   }
 }
 
@@ -130,12 +130,12 @@ void Lcompiler::global_firrtl_bits_analysis_map() {
     ++lgcnt;
     if (lg->get_name() == top_name_before_mapping) {
       hit = true;
+      fmt::print("---------------- Firrtl Bits Analysis ({}) --------------- (F-0)\n", lg->get_name());
+      fm.do_firbits_analysis(lg);
       fmt::print("---------------- Firrtl Bits Analysis ({}) --------------- (F-1)\n", lg->get_name());
       fm.do_firbits_analysis(lg);
-      fmt::print("---------------- Firrtl Bits Analysis ({}) --------------- (F-2)\n", lg->get_name());
-      fm.do_firbits_analysis(lg);
     }
-    gviz ? gv.do_from_lgraph(lg, "gioc.firbits") : void(); 
+    gviz ? gv.do_from_lgraph(lg, "gioc.firbits-ed") : void(); 
   }
 
   if (lgcnt > 1 && hit == false) 
@@ -143,7 +143,7 @@ void Lcompiler::global_firrtl_bits_analysis_map() {
 
   std::vector<LGraph*> mapped_lgs;
   for (auto &lg : lgs) {
-    fmt::print("---------------- Firrtl Op Mapping ({}) --------------- (F-3)\n", lg->get_name());
+    fmt::print("---------------- Firrtl Op Mapping ({}) --------------- (F-2)\n", lg->get_name());
     auto new_lg = fm.do_firrtl_mapping(lg);
     mapped_lgs.emplace_back(new_lg);
   }
@@ -151,7 +151,7 @@ void Lcompiler::global_firrtl_bits_analysis_map() {
 
   lgs = mapped_lgs;
   for (auto &lg : lgs) {
-    gviz ? gv.do_from_lgraph(lg, "gioc.firmap") : void(); 
+    gviz ? gv.do_from_lgraph(lg, "gioc.firmap-ed") : void(); 
   }
 }
 
@@ -160,23 +160,10 @@ void Lcompiler::local_bitwidth_inference() {
   Graphviz gv(true, false, odir); 
   Bitwidth bw(false, 10, global_flat_bwmap, global_hier_bwmap); // hier = false, max_iters = 10
   for (auto &lg: lgs) {
-    fmt::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-1)\n", lg->get_name());
+    fmt::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-0)\n", lg->get_name());
     bw.do_trans(lg);
-    gviz ? gv.do_from_lgraph(lg, "local.debug0") : void(); 
+    gviz ? gv.do_from_lgraph(lg, "local.bitwidth-ed-0") : void(); 
   }
-
-  for (auto &lg: lgs) {
-    fmt::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-2)\n", lg->get_name());
-    bw.do_trans(lg);
-    gviz ? gv.do_from_lgraph(lg, "local.debug1") : void(); 
-  }
-
-  for (auto &lg: lgs) {
-    fmt::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-3)\n", lg->get_name());
-    bw.do_trans(lg);
-    gviz ? gv.do_from_lgraph(lg, "") : void(); 
-  }
-
 }
 
 

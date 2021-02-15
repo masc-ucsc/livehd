@@ -20,9 +20,6 @@ Shifts PlusAnd MaxN ByteSelector Darken HiLoMultiplier SimpleALU Mul
 VecShiftRegisterParam VecShiftRegisterSimple ' 
 
 # pts_hifirrtl_todo='
-# 
-# VendingMachineSwitch VendingMachine'
-
 # passed hifirrtl pattern pool
 pts='EnableShiftRegister Cell_alone MaxN PlusAnd Test2 SingleEvenFilter
 Coverage Counter Decrementer SubModule BundleConnect LogShifter Adder4
@@ -33,7 +30,7 @@ LFSR16 VendingMachine VendingMachineSwitch'
 
 pts_wait_verilog_large_mux_code_gen='Mul Test6 Test1'
 
-pts='Life'
+# pts='Life'
 # pts='VecShiftRegister'
 # pts='VecShiftRegisterParam'
 # pts='VecShiftRegisterSimple '
