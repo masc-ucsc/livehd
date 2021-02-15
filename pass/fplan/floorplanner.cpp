@@ -81,10 +81,10 @@ void Lhd_floorplanner::write_lhd_node() {
     if (debug_print) {
       const Ann_place& p = n.get_place();
       fmt::print("x: {:.3f}, y: {:.3f}, width: {:.3f}, height: {:.3f}\n",
-                 p.get_pos_x(),
-                 p.get_pos_y(),
-                 p.get_len_x(),
-                 p.get_len_y());
+                 p.get_x(),
+                 p.get_y(),
+                 p.get_width(),
+                 p.get_height());
     }
 
     return true;

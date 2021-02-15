@@ -22,10 +22,12 @@ Ask about:
  2. When working with nodes (which is going to be a lot when more analysis passes get added), I need both implementation information and hierarchy information (which module instance is this node a part of?).  Currently there is no easy way to get this information.
 
 Goals:
-0. Test hier_lg with hier_test.v (waiting on yosys bugfix)
-1. Test BOOM core (waiting on yosys memory implementation?)
-2. Write node level hierarchy to file (mmap_tree not being written to file is known TODO)
-3. Find / write a method that doesn't mess up on the wrong aspect ratio - HardAspectRatio not helpful for initial floorplans.
+0. Fix analyzefp pass, since that pass will discover bugs in written hierarchy
+1. Fix checkfp pass once we're sure the written hierarchy is correct
+2. Test hier_lg with hier_test.v (waiting on yosys bugfix)
+3. Test BOOM core (waiting on yosys memory implementation?)
+4. Write node level hierarchy to file (mmap_tree not being written to file is known TODO)
+5. Find / write a method that doesn't mess up on the wrong aspect ratio - HardAspectRatio not helpful for initial floorplans.
 
 Performance (using -c opt):
     xor_30000.v -> file: 38 ms
@@ -38,6 +40,7 @@ Things to add:
 0. Interactivity
     - allow for querying of top level floorplans, current layout is messy (create a top level node below top level?)
     - add a recursive dump option
+    - dump everything if no nodes are passed
 1. Optimization
     - multithread the floorplanner (need deep hierarchies to play with - waiting on (0))
     - multithread the Lgraph traversal (need deep hierarchies to play with - waiting on (0))

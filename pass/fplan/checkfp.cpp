@@ -70,15 +70,15 @@ void Pass_fplan_checkfp::pass(Eprp_var& var) {
         return in_x && in_y;
       };
 
-      float px0 = np.get_pos_x();
-      float px1 = np.get_pos_x() + np.get_len_x();
-      float py0 = np.get_pos_y();
-      float py1 = np.get_pos_y() + np.get_len_y();
+      float px0 = np.get_x();
+      float px1 = np.get_x() + np.get_width();
+      float py0 = np.get_y();
+      float py1 = np.get_y() + np.get_height();
 
-      float tx0 = tp.get_pos_x();
-      float tx1 = tp.get_pos_x() + tp.get_len_x();
-      float ty0 = tp.get_pos_y();
-      float ty1 = tp.get_pos_y() + tp.get_len_y();
+      float tx0 = tp.get_x();
+      float tx1 = tp.get_x() + tp.get_width();
+      float ty0 = tp.get_y();
+      float ty1 = tp.get_y() + tp.get_height();
 
       bool intersect = false;
       intersect = intersect || inside(tx0, ty0, tx1, ty1, px0, py0);

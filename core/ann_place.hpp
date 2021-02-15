@@ -5,30 +5,31 @@
 class __attribute__((packed)) Ann_place {
 private:
 protected:
-  float pos_x;  // position of left side
-  float pos_y;  // position of bottom
-  float len_x;  // width
-  float len_y;  // height
+  float x;  // position of left side
+  float y;  // position of bottom
+  float width;
+  float height;
 
 public:
-  constexpr Ann_place() : pos_x(0.0), pos_y(0.0), len_x(0.0), len_y(0.0){};
-  Ann_place(float px, float py, float lx, float ly) : pos_x(px), pos_y(py), len_x(lx), len_y(ly){};
+  constexpr Ann_place() : x(0.0), y(0.0), width(0.0), height(0.0){};
+  Ann_place(float _x, float _y, float _w, float _h) : x(_x), y(_y), width(_w), height(_h){};
 
-  void replace(float px, float py, float lx, float ly) {
-    pos_x = px;
-    pos_y = py;
-    len_x = lx;
-    len_y = ly;
+  void replace(float _x, float _y, float _w, float _h) {
+    x      = _x;
+    y      = _y;
+    width  = _w;
+    height = _h;
   }
 
   friend bool operator==(const Ann_place& lhs, const Ann_place& rhs) {
-    return lhs.pos_x == rhs.pos_x && lhs.pos_y == rhs.pos_y && lhs.len_x == rhs.len_x && lhs.len_y == rhs.len_y;
+    return lhs.x == rhs.x && lhs.y == rhs.y && lhs.width == rhs.width && lhs.height == rhs.height;
   }
 
-  float get_pos_x() const { return pos_x; }
-  float get_pos_y() const { return pos_y; }
-  float get_len_x() const { return len_x; }
-  float get_len_y() const { return len_y; }
+  float get_x() const { return x; }
+  float get_y() const { return y; }
+  float get_width() const { return width; }
+  float get_height() const { return height; }
+  float get_area() const { return width * height; }
 
-  bool is_valid() const { return len_x > 0 && len_y > 0; }
+  bool is_valid() const { return width > 0 && height > 0; }
 };

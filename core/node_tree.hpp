@@ -15,6 +15,7 @@ private:
 protected:
   LGraph *root;
 
+  // store last tree index written for each component type (costs a bit to set up, but drops traversal time from O(n^2) -> O(n))
   absl::flat_hash_map<Tree_index, std::array<Tree_index, 24>> last_free;
 
 public:

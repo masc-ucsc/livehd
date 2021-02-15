@@ -410,7 +410,7 @@ unsigned int FPObject::findNode(Node_tree& tree, Tree_index tidx, double cX, dou
       // child->get_hidx().pos);
 
       // write placement information to subnode as well
-      Ann_place p(calcX(cX), calcY(cY), getWidth() / 1000, getHeight() / 1000);
+      Ann_place p(calcX(cX), calcY(cY), getWidth(), getHeight());
 
       child->set_place(p);
       child->set_name(getUniqueName());

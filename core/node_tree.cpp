@@ -89,9 +89,17 @@ void Node_tree::dump() const {
   for (const auto& index : depth_preorder()) {
     std::string indent(index.level, ' ');
     const auto& id = get_data(index);
+
+    std::string_view name;
+    if (id.is_invalid()) {
+      name = "root module";
+    } else {
+      name = id.get_name();
+    }
+    
     fmt::print("{} name: {} loc: ({}, {}) livehd loc: ({}, {})\n",
                indent,
-               id.debug_name(),
+               name,
                index.level,
                index.pos,
                id.get_hidx().level,

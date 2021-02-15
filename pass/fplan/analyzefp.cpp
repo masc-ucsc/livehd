@@ -18,55 +18,19 @@ void Pass_fplan_analyzefp::setup() {
   a.add_label_required("top", "top level module in floorplan");
   a.add_label_required("nodes", "modules to analyze");
 
-  a.add_label_optional("path", "lgdb directory to analyze", "lgdb"); // can't pass lgraphs because lgraph names are different
+  a.add_label_optional("path", "lgdb directory to analyze", "lgdb");  // can't pass lgraphs because lgraph names are different
 
   register_pass(a);
 }
 
 void Pass_fplan_analyzefp::print_area(const Node_tree& nt, const Tree_index& tidx) const {
-  const float  fmax  = std::numeric_limits<float>::max();
-  float        min_x = fmax, max_x = 0.0f, min_y = fmax, max_y = 0.0f;
-  unsigned int counter = 0;
-
-  for (auto child_idx : nt.children(tidx)) {
-    auto child = nt.get_data(child_idx);
-    if (!child.has_place()) {
-      fmt::print("(no area information)\n");
-      return;
-    }
-
-    const Ann_place& p = child.get_place();
-    if (p.get_pos_x() < min_x) {
-      min_x = p.get_pos_x();
-    }
-
-    if (p.get_pos_y() < min_y) {
-      min_y = p.get_pos_y();
-    }
-
-    if (p.get_pos_x() + p.get_len_x() > max_x) {
-      max_x = p.get_pos_x() + p.get_len_x();
-    }
-
-    if (p.get_pos_y() + p.get_len_y() > max_y) {
-      max_y = p.get_pos_y() + p.get_len_y();
-    }
-
-    counter++;
-  }
-
   const Ann_place& p = nt.get_data(tidx).get_place();
-  const float     x = p.get_pos_x();
-  const float     y = p.get_pos_y();
-
-  const float area = (max_x - min_x) * (max_y - min_y);
-  fmt::print("x: {:.3f}, y: {:.3f}, width: {:.3f} mm², height: {:.3f} mm², area: {:.3f} mm², {} unique components\n",
-             x,
-             y,
-             max_x,
-             max_y,
-             area,
-             counter);
+  fmt::print("x: {:.3f} mm, y: {:.3f} mm, width: {:.3f} mm, height: {:.3f} mm, area: {:.3f} mm²",
+             p.get_x(),
+             p.get_y(),
+             p.get_width(),
+             p.get_height(),
+             p.get_area());
 }
 
 void Pass_fplan_analyzefp::print_children(const Node_tree& nt, const Tree_index& tidx) const {
@@ -74,19 +38,8 @@ void Pass_fplan_analyzefp::print_children(const Node_tree& nt, const Tree_index&
     auto child = nt.get_data(child_idx);
 
     fmt::print(" ├─ node {}\t", child.get_name());
-
-    if (!child.has_place()) {
-      fmt::print("(no area information)\n");
-      continue;
-    }
-
-    const Ann_place& p = child.get_place();
-    const float     x = p.get_pos_x();
-    const float     y = p.get_pos_y();
-    const float     w = p.get_len_x();
-    const float     h = p.get_len_y();
-
-    fmt::print("x: {:.3f}, y: {:.3f}, width: {:.3f} mm², height: {:.3f} mm², area: {:.3f} mm²\n", x, y, w, h, w * h);
+    print_area(nt, child_idx);
+    fmt::print("\n");
   }
 }
 
@@ -121,6 +74,7 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
   }
 
   const Node_tree nt(root);
+  nt.dump();
 
   for (auto name : names) {
     if (name == var.get("top")) {
@@ -144,8 +98,6 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
         error("floorplanner has not been run!");
       }
 
-      fmt::print("testing {} against {}\n", n.get_name(), name);
-
       if (n.get_name() == name) {
         found = true;
         fmt::print("module {}\t", n.get_name());
@@ -156,8 +108,22 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
         } else {
           print_area(nt, index);
           if (n.is_type_sub_present()) {
+            unsigned int counter = 0;
+            for (auto child_idx : nt.children(index)) {
+              auto child = nt.get_data(child_idx);
+              if (!child.has_place()) {
+                fmt::print("(no area information)\n");
+                return;
+              }
+
+              counter++;
+            }
+
+            fmt::print(", {} components", counter);
             print_children(nt, index);
           }
+
+          fmt::print("\n");
         }
 
         if (var.get("hpwl") == "true" || var.get("all") == "true") {
@@ -184,9 +150,5 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
 }
 
 void Pass_fplan_analyzefp::pass(Eprp_var& var) {
-  if (var.lgs.size() != 0) {
-    // TODO: not providing lgraphs breaks things...?
-  }
-
   Pass_fplan_analyzefp a(var);
 }

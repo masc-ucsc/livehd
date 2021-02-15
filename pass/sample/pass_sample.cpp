@@ -166,11 +166,11 @@ void Pass_sample::annotate_placement(LGraph *g) {
 
   for (auto node : g->fast()) {
     const auto &place = node.get_place();
-    fmt::print("1.cell {} placed at x:{}\n", node.create_name(), place.get_pos_x());
+    fmt::print("1.cell {} placed at x:{}\n", node.create_name(), place.get_x());
   }
   for (auto node : g->forward()) {
     auto *place = node.ref_place();
-    fmt::print("2.cell {} placed at x:{}\n", node.create_name(), place->get_pos_x());
+    fmt::print("2.cell {} placed at x:{}\n", node.create_name(), place->get_x());
   }
 }
 
