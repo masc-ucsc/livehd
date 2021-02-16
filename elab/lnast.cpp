@@ -791,6 +791,55 @@ void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
   }
 }
 
+void Lnast::insert_tg_q_pin_fetch(const Lnast_nid &tg_nid) {
+  auto c0      = get_first_child(tg_nid);
+  auto c1      = get_sibling_next(c0);
+  auto c1_name = get_name(c1);
+  auto c1_subs = get_subs(c1);
+  if (!(is_register(c1_name) && c1_subs == 0)) 
+    return;
+
+  std::string hier_tuple_reg_name;
+  for (auto &child : children(tg_nid)) {
+    if (child == get_first_child(tg_nid))
+      continue;
+    if (hier_tuple_reg_name.empty())
+      hier_tuple_reg_name = (std::string)get_name(child); 
+    else 
+      hier_tuple_reg_name = absl::StrCat(hier_tuple_reg_name, ".", get_name(child));
+  }
+  
+  //TG behaves like rhs and is fetching #reg_k.foo_0, which means it actually fetchs q_pin of the register #reg.foo
+  auto it = collected_hier_tuple_reg_name.find(hier_tuple_reg_name);
+  if (it == collected_hier_tuple_reg_name.end()) {
+    std::string q_pin_str = "__q_pin";
+    add_child(tg_nid, Lnast_node::create_const(add_string(q_pin_str)));
+  }
+}
+
+
+void Lnast::collect_reg_hier_name_tup(const Lnast_nid &tup_nid) {
+  (void)tup_nid;
+}
+
+
+void Lnast::collect_reg_hier_name_ta(const Lnast_nid &ta_nid) {
+  auto c0 = get_first_child(ta_nid);
+  auto c0_name = get_name(c0);
+  if (!is_register(c0_name))
+    return;
+  
+  std::string hier_tuple_reg_name = (std::string)c0_name;
+  for (auto &child : children(ta_nid)) {
+    if (child == get_first_child(ta_nid) || child == get_last_child(ta_nid))
+      break;
+    hier_tuple_reg_name = absl::StrCat(hier_tuple_reg_name, ".", get_name(child));
+  }
+
+  collected_hier_tuple_reg_name.insert(hier_tuple_reg_name);
+}
+
+
 void Lnast::opr_lhs_merge(const Lnast_nid &psts_nid) {
   for (const auto &opr_nid : children(psts_nid)) {
     auto type = get_type(opr_nid);
@@ -801,6 +850,12 @@ void Lnast::opr_lhs_merge(const Lnast_nid &psts_nid) {
       /* } else if (type.is_assign()){ */
     } else if (type.is_assign() || type.is_dp_assign()) {
       opr_lhs_merge_handle_a_statement(opr_nid);
+    } else if (type.is_tuple_add()) {
+      collect_reg_hier_name_ta(opr_nid);
+    } else if (type.is_tuple()) {
+      collect_reg_hier_name_tup(opr_nid);
+    } else if (type.is_tuple_get()) {
+      insert_tg_q_pin_fetch(opr_nid);
     }
   }
 }
@@ -814,14 +869,20 @@ void Lnast::opr_lhs_merge_if_subtree(const Lnast_nid &if_nid) {
       for (const auto &opr_nid : children(itr_nid)) {
         auto opr_type = get_type(opr_nid);
         I(!opr_type.is_func_def());
-        if (opr_type.is_if())
+        if (opr_type.is_if()) {
           opr_lhs_merge_if_subtree(opr_nid);
-
+        } else if (opr_type.is_assign() || opr_type.is_dp_assign()) {
+        /*else if (opr_type.is_assign()) */
         // FIXME->sh: if we also merge dp_assign here, then the original purpose of introducing dp_assign is missign
         //            are you sure it is be a generic solution???
-        /* else if (opr_type.is_assign()) */
-        else if (opr_type.is_assign() || opr_type.is_dp_assign())
           opr_lhs_merge_handle_a_statement(opr_nid);
+        } else if (opr_type.is_tuple_add()) {
+          collect_reg_hier_name_ta(opr_nid);
+        } else if (opr_type.is_tuple()) {
+          collect_reg_hier_name_tup(opr_nid);
+        } else if (opr_type.is_tuple_get()) {
+          insert_tg_q_pin_fetch(opr_nid);
+        }
       }
     }
   }

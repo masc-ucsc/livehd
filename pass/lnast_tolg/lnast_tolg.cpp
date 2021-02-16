@@ -980,13 +980,16 @@ Node_pin Lnast_tolg::setup_ref_node_dpin(LGraph *lg, const Lnast_nid &lnidx_opd)
   } else if (is_const_num(name)) {
     node_dpin = create_const(lg, vname);
   } else if (is_register(name)) {
-    // the register is first appear at the rhs! Create a floating Or to represent this reg
+    // note: the register is first appear at the rhs! Create a floating Or to represent this reg
     // later, this Or should be driven by the reg q-pin at the end of program sequence
+    // note: in the case that the Or is driven by a reg TA chain, change Or -> assignment TA 
     auto wire_or_node = lg->create_node(Ntype_op::Or);
     node_dpin = wire_or_node.setup_driver_pin();
     node_dpin.set_name(name);
     name2dpin[name] = node_dpin; 
 
+    // TODO
+    /* driver_var2wire_nodes[vname].push_back(wire_or_node); */
     if (!is_tmp_var(vname))
       setup_dpin_ssa(node_dpin, vname, 0); // FIXME->sh: do we really need this?
     return node_dpin;
@@ -1589,10 +1592,11 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(LGraph *lg) {
     }
   }
 
-  // note, you have to wait the outputs have been connected to the unified output % TA so that the 
+  // note: you have to wait the outputs have been connected to the unified output % TA so that the 
   // attr_get.__q_pin has a real sink that is a output pin (val_dpin of the TA %).
   for (auto const &[vname, dpin_largest_ssa] : vname2ssa_dpin) {
     if (is_register(vname)) {
+      fmt::print("DEBUG vname:{}, dpin_largest_ssa:{}\n", vname, dpin_largest_ssa.debug_name());
       setup_final_register(lg, vname, dpin_largest_ssa); 
       continue;
     }
@@ -1621,8 +1625,10 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(LGraph *lg) {
 
 
 void Lnast_tolg::setup_final_register(LGraph *lg, std::string_view vname, const Node_pin &dpin_largest_ssa) {
-  if (tuple_reg_names.find(vname) != tuple_reg_names.end())
+  if (tuple_reg_names.find(vname) != tuple_reg_names.end()) {
+    // TODO: maybe connect the tuple-reg tail to the TG that is fetching un-existed tuple-reg chain
     return;
+  }
 
   auto reg_node = lg->create_node(Ntype_op::Flop);
   auto reg_din = reg_node.setup_sink_pin("din");

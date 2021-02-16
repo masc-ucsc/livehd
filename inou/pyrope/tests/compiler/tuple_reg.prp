@@ -12,9 +12,6 @@ if ($en) {
 }
                                     // #reg_4 = phi(#reg_3, #reg_1)      
 
-
 %out.cnt = #reg.cnt.__q_pin         // = #reg_4
 %out.sum = #reg.sum.__q_pin
 
-// todo
-// %out = #reg

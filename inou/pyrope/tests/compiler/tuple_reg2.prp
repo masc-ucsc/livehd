@@ -1,7 +1,13 @@
-foo = #reg.a
+pick = #reg.foo.bar
 
-if (foo == 1) {
-  %out = 5
+if (pick == 9) {
+  %out = 12
 }
 
-#reg = (a = 1, b = 2)
+
+// #reg = (a = 1, b = 2)
+#reg.foo.bar = 55
+
+
+poke = #reg.baz
+#reg.baz = 66

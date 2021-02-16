@@ -121,6 +121,9 @@ private:
   void      resolve_ssa_lhs_subs                (const Lnast_nid &psts_nid);
   void      resolve_ssa_rhs_subs                (const Lnast_nid &psts_nid);
   void      opr_lhs_merge                       (const Lnast_nid &psts_nid);
+  void      insert_tg_q_pin_fetch               (const Lnast_nid &opr_nid);
+  void      collect_reg_hier_name_tup           (const Lnast_nid &opr_nid);
+  void      collect_reg_hier_name_ta            (const Lnast_nid &opr_nid);
   void      update_global_lhs_ssa_cnt_table     (const Lnast_nid &target_nid);
   void      respect_latest_global_lhs_ssa       (const Lnast_nid &target_nid);
   int8_t    check_rhs_cnt_table_parents_chain   (const Lnast_nid &psts_nid, const Lnast_nid &target_key);
@@ -160,6 +163,8 @@ private:
   absl::flat_hash_map<std::string_view, Lnast_nid> candidates_update_phi_resolve_table;
   absl::flat_hash_map<std::string_view, int16_t>   global_ssa_lhs_cnt_table;
   absl::flat_hash_map<Lnast_nid, Phi_rtable>       tuple_var_1st_scope_ssa_tables; // for chaining parent tuple-chain and local tuple chain, only record the first tuple variable appeared in each local scope
+  absl::flat_hash_set<std::string>                 collected_hier_tuple_reg_name; 
+
 
   // populated during LG->LN pass, maps name -> bitwidth
   absl::flat_hash_map<std::string, uint32_t> from_lgraph_bw_table;
