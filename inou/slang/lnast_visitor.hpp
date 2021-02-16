@@ -26,6 +26,7 @@ protected:
   std::vector<operators> verilogList;
   std::vector<std::string> operandList;
   std::vector<std::string> tmpList;
+  void addLnast(const mmap_lib::Tree_index& idx_stmts, operators List, int count, int& first, int& tmp_flag, int& not_flag, int& last_op);
 
 public:
   static inline std::vector<std::unique_ptr<Lnast>> parsed_lnasts;
@@ -65,7 +66,6 @@ public:
     visitDefault(symbol);
     return true;
   }
-
   void handle(const slang::ExplicitImportSymbol& symbol);
   void handle(const slang::WildcardImportSymbol& symbol);
   void handle(const slang::IntegerLiteral& expr);
