@@ -11,9 +11,9 @@ void Pass_fplan_analyzefp::setup() {
                        "return information about a given floorplan within a livehd hierarchy",
                        &Pass_fplan_analyzefp::pass);
 
-  a.add_label_optional("regularity", "determine the amount of regularity in the design", "false");
-  a.add_label_optional("hpwl", "not implemented", "false");
-  a.add_label_optional("all", "run all available kinds of analysis on the floorplan", "false");
+  a.add_label_optional("regularity", "determine the amount of regularity in a module", "false");
+  a.add_label_optional("hpwl", "determine the half-perimeter wire length of a module", "false");
+  a.add_label_optional("all", "run all available kinds of analysis on a module", "false");
 
   a.add_label_required("top", "top level module in floorplan");
   a.add_label_required("nodes", "modules to analyze");
@@ -37,7 +37,12 @@ void Pass_fplan_analyzefp::print_children(const Node_tree& nt, const Tree_index&
   for (auto child_idx : nt.children(tidx)) {
     auto child = nt.get_data(child_idx);
 
-    fmt::print(" ├─ node {}\t", child.get_name());
+    if (child_idx != nt.get_last_child(tidx)) {
+      fmt::print(" ├─ node {}\t", child.get_name());
+    } else {
+      fmt::print(" └─ node {}\t", child.get_name());
+    }
+    
     print_area(nt, child_idx);
     fmt::print("\n");
   }
@@ -74,17 +79,17 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
   }
 
   const Node_tree nt(root);
-  nt.dump();
 
   for (auto name : names) {
     if (name == var.get("top")) {
       // TODO: fix this!
       fmt::print("no support for top level modules right now.\n");
+      continue;
     }
 
     bool found = false;
 
-    for (const auto& index : nt.depth_preorder()) {  // going preorder because higher level nodes probably going to be analyzed more
+    for (const auto& index : nt.depth_preorder()) {  // preorder because higher level nodes are probably going to be analyzed more
                                                      // often than leaf nodes
       if (index == nt.get_root()) {
         continue;  // skip root for now
@@ -103,7 +108,7 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
         fmt::print("module {}\t", n.get_name());
 
         if (!n.has_place()) {
-          fmt::print("(no area information)");
+          fmt::print("(no area information)\n");
           break;
         } else {
           print_area(nt, index);
@@ -119,7 +124,7 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
               counter++;
             }
 
-            fmt::print(", {} components", counter);
+            fmt::print(", {} components\n", counter);
             print_children(nt, index);
           }
 
@@ -149,6 +154,4 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
   }
 }
 
-void Pass_fplan_analyzefp::pass(Eprp_var& var) {
-  Pass_fplan_analyzefp a(var);
-}
+void Pass_fplan_analyzefp::pass(Eprp_var& var) { Pass_fplan_analyzefp a(var); }

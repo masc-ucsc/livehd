@@ -13,7 +13,7 @@ void Node_flat_floorp::load() {
     count++;
   }
 
-  layouts[nt.get_root()] = new geogLayout(count);
+  root_layout = new geogLayout(count);
 
   Ntype_area narea(nt.get_root_lg()->get_path());
 
@@ -41,7 +41,7 @@ void Node_flat_floorp::load() {
 
       auto d = narea.get_dim(op);
 
-      layouts[nt.get_root()]->addComponentCluster(op, 1, d.area, d.max_aspect, d.min_aspect, randomHint(1));
+      root_layout->addComponentCluster(op, 1, d.area, d.max_aspect, d.min_aspect, randomHint(1));
     }
   }
 }

@@ -85,10 +85,8 @@ module mid5(input [899:0] gi, output [890:0] gout, input [9:0] hi, output [9:0] 
 
   wire [899:0] w_1_up_5;
 
-  // instance of mid1 inside mid5 to test out lgraph characteristics
   mid1 m1s(.di(gi), .dout(w_1_up_5));
 
-  // duplicate instantiations of mid2, for regularity discovery
   leaf3 l3d(.ci(gi[760:731]), .co(w_3_to_5));
   leaf4 l4d(.tempi(w_3_to_5[12]), .tempo(w_3_to_5[13]));
   leaf5 l5d(.ci(w_3_to_5), .co(w_5_to_3));

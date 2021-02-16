@@ -63,9 +63,12 @@ void Pass_fplan_checkfp::pass(Eprp_var& var) {
 
       // is (xt, yt) inside a rectangle from (x0, y0) -> (x1, y1)?
       auto inside = [](float x0, float y0, float x1, float y1, float xt, float yt) -> bool {
-        bool in_x = (x0 <= xt) && (xt <= x1);
+        I(x0 < x1);
+        I(y0 < y1);
+
+        bool in_x = (x0 < xt) && (xt < x1);
         //fmt::print("x0 ({}) <= xp ({}) <= x1({}): {}\n", x0, xt, x1, in_x);
-        bool in_y = (y0 <= yt) && (yt <= y1);
+        bool in_y = (y0 < yt) && (yt < y1);
         //fmt::print("y0 ({}) <= yp ({}) <= yp ({}): {}\n", y0, yt, y1, in_y);
         return in_x && in_y;
       };
