@@ -107,7 +107,7 @@ public:
 
   public:
     // constexpr operator size_t() const { return nid; }
-    // constexpr Compact_class() : nid(0){};
+    constexpr Compact_class() : nid(0){}; // needed for mmap_tree which allocates empty data
 
     constexpr Compact_class(const Index_ID &_nid) : nid(_nid){};
 
@@ -312,7 +312,7 @@ public:
   XEdge_iterator out_edges_ordered_reverse() const;  // Slower than inp_edges, but edges ordered by driver.pid
   XEdge_iterator inp_edges_ordered_reverse() const;  // Slower than inp_edges, but edges ordered by sink.pid
 
-  Node_pin_iterator inp_drivers(const absl::flat_hash_set<Node::Compact> &exclude) const;
+  Node_pin_iterator inp_drivers() const;
 
   bool is_graph_io() const { return nid == Hardcoded_input_nid || nid == Hardcoded_output_nid; }
   bool is_graph_input() const { return nid == Hardcoded_input_nid; }

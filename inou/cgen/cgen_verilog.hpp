@@ -19,7 +19,7 @@ private:
 
   inline static std::string get_scaped_name(const std::string &name) {
     for(auto ch:name) {
-      if (!std::isalnum(ch))
+      if (!std::isalnum(ch) && ch != '_')
         return std::string("\\") + name + " ";
     }
     return name;

@@ -294,9 +294,7 @@ Node_pin_iterator LGraph::inp_connected_pins(const Node &node) const {
   return xiter;
 }
 
-Node_pin_iterator LGraph::inp_drivers(const Node &node, const absl::flat_hash_set<Node::Compact> &restrict_to) const {
-  (void)restrict_to;
-
+Node_pin_iterator LGraph::inp_drivers(const Node &node) const {
   I(node.get_class_lgraph() == this);
 
   Node_pin_iterator xiter;
@@ -321,9 +319,6 @@ Node_pin_iterator LGraph::inp_drivers(const Node &node, const absl::flat_hash_se
         I(node_internal[driver_pin_idx].get_dst_pid() == driver_pin_pid);
         auto driver_master_nid = node_internal[driver_pin_idx].get_nid();
         I(node_internal[driver_master_nid].is_master_root());
-
-        //        if (!restrict_to.contains(Node::Compact(node.get_hidx(), driver_master_nid)))
-        //          continue;
 
         Node_pin dpin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx(), driver_pin_idx, driver_pin_pid, false);
 

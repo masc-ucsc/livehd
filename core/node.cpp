@@ -99,7 +99,7 @@ Node::Node(LGraph *_g, const Hierarchy_index &_hidx, const Compact_class &comp)
 }
 
 Node_pin Node::get_driver_pin_raw(Port_ID pid) const {
-  I(!is_type_sub());  // Do not setup subs by PID, use name
+  I(!is_type_sub());  // Do not setup subs by PID, use name. IF your really need it, use setup_driver_pin_raw
   I(Ntype::has_driver(get_type_op(), pid));
   Index_ID idx = current_g->find_idx_from_pid(nid, pid);
   // It can be zero, then invalid node_pin
@@ -107,7 +107,7 @@ Node_pin Node::get_driver_pin_raw(Port_ID pid) const {
 }
 
 Node_pin Node::get_sink_pin_raw(Port_ID pid) const {
-  I(!is_type_sub());  // Do not setup subs by PID, use name
+  I(!is_type_sub());  // Do not setup subs by PID, use name. IF your really need it, use setup_driver_pin_raw
   I(Ntype::has_sink(get_type_op(), pid));
   Index_ID idx = current_g->find_idx_from_pid(nid, pid);
   // It can be zero, then invalid node_pin
@@ -258,13 +258,13 @@ Node_pin Node::setup_sink_pin_slow(std::string_view name) {
 }
 
 Node_pin Node::setup_sink_pin_raw(Port_ID pid) {
-  I(!is_type_sub());  // Do not setup subs by PID, use name
-  I(Ntype::has_sink(get_type_op(), pid));
 #ifndef NDEBUG
   if (is_type_sub()) {
     Lg_type_id  sub_lgid = current_g->get_type_sub(nid);
     const auto &sub      = current_g->get_library().get_sub(sub_lgid);
     I(sub.has_instance_pin(pid));
+  }else{
+    I(Ntype::has_sink(get_type_op(), pid));
   }
 #endif
 
@@ -287,14 +287,14 @@ int Node::get_num_edges() const { return current_g->get_num_edges(*this); }
 Node Node::get_non_hierarchical() const { return Node(current_g, current_g, Hierarchy_tree::invalid_index(), nid); }
 
 Node_pin Node::setup_driver_pin_raw(Port_ID pid) const {
-  I(!is_type_sub());  // Do not setup subs by PID, use name
-  I(Ntype::has_driver(get_type_op(), pid));
 #ifndef NDEBUG
   if (is_type_sub()) {
     Lg_type_id  sub_lgid = current_g->get_type_sub(nid);
     const auto &sub      = current_g->get_library().get_sub(sub_lgid);
     I(sub.has_instance_pin(pid));
     I(sub.is_output_from_instance_pid(pid), "ERROR: An input can not be a driver pin");
+  }else{
+    I(Ntype::has_driver(get_type_op(), pid));
   }
 #endif
 
@@ -430,9 +430,7 @@ XEdge_iterator Node::out_edges_ordered_reverse() const { return current_g->out_e
 Node_pin_iterator Node::inp_connected_pins() const { return current_g->inp_connected_pins(*this); }
 Node_pin_iterator Node::out_connected_pins() const { return current_g->out_connected_pins(*this); }
 
-Node_pin_iterator Node::inp_drivers(const absl::flat_hash_set<Node::Compact> &exclude) const {
-  return current_g->inp_drivers(*this, exclude);
-}
+Node_pin_iterator Node::inp_drivers() const { return current_g->inp_drivers(*this); }
 
 void Node::del_node() {
   current_g->del_node(*this);

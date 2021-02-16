@@ -219,7 +219,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending() {
       if (likely(!any_propagated && !node.is_graph_io() && (!visit_sub || !node.is_type_sub_present()))) {
         can_be_visited = true;
 
-        auto dpin_list = node.inp_drivers(unvisited);
+        auto dpin_list = node.inp_drivers();
 
         if (!dpin_list.empty()) {         // Something got added, track potential combinational loops
           for (auto &dpin : dpin_list) {  // fwd
@@ -264,7 +264,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending() {
     I(!(*global_it).is_graph_io());  // NOTE: should we propagate IO for going up?
     if (unvisited.count((*global_it).get_compact())) {
       pending_stack.push_back(*global_it);
-      for (auto &dpin : (*global_it).inp_drivers(unvisited)) {  // fwd
+      for (auto &dpin : (*global_it).inp_drivers()) {  // fwd
         if (unvisited.contains(dpin.get_node().get_compact()))
           topo_add_chain_fwd(dpin);
       }

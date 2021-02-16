@@ -313,6 +313,7 @@ public:
 
   // Some redundant code with node (implemented because frequent)
   bool             is_type_const() const;
+  bool             is_type_loop_breaker() const;
   Lconst           get_type_const() const;
 
   Node_pin change_to_sink_from_graph_out_driver() const {
@@ -334,6 +335,7 @@ public:
     return !sink;
   }
 
+  Index_ID get_node_nid() const;
   Node     get_node() const;
   Ntype_op get_type_op() const;
 

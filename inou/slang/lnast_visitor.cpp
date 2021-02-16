@@ -144,22 +144,23 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
   if (numErrors > errorLimit)
     return;
   std::string output = "%";
-  lnast->set_root(Lnast_node(Lnast_ntype::create_top()));
-  auto node_stmts = Lnast_node::create_stmts("___stmts", line_num, pos1, pos2);
-  auto idx_stmts  = lnast->add_child(lnast->get_root(), node_stmts);
+
+  auto idx_stmts  = lnast->get_child(lnast->get_root());
   fmt::print("Start RHS recursion\n");
   handle(expr.right());
   // check verilog list
   fmt::print("printing operator recursion\n");
   for (auto it = verilogList.cbegin(); it != verilogList.cend(); ++it) std::cout << " " << *it;
   // std::cout<<'\n';
+#if 0
   fmt::print("\nprinting operand recursion\n");
   std::vector<std::string> v;
   std::string              op_tmp = "";
   std::string              op_    = "";
   int                      set    = 0;
+  // The bits for the inputs is not kept in string, printing when iterating over Ports
   for (auto it = operandList.cbegin(); it != operandList.cend(); ++it) {
-    // std::cout << " " << *it;
+    // std::cout << "OP: " << *it;
     for (auto iv = v.cbegin(); iv != v.cend(); ++iv) {
       op_tmp = (*it)[1];
       op_    = (*iv)[0];
@@ -189,6 +190,7 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
     lnast->add_child(idx_assign, Lnast_node::create_ref(lnast->add_string("___" + *ip)));
     lnast->add_child(idx_assign, Lnast_node::create_const("1"));
   }
+#endif
   const auto& lhs  = expr.left();
   std::string temp = "___";
   if (lhs.kind == ExpressionKind::NamedValue) {
@@ -202,7 +204,7 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
     output          = "%";
     auto idx_assign = lnast->add_child(idx_stmts, Lnast_node::create_assign(""));
     lnast->add_child(idx_assign, Lnast_node::create_ref(lnast->add_string(temp.append(var.symbol.name))));
-    lnast->add_child(idx_assign, Lnast_node::create_const("1"));
+    lnast->add_child(idx_assign, Lnast_node::create_const(lnast->add_string(std::to_string(var.type->getBitWidth()))));
   }
   // std::cout<<'check\n';
   fmt::print("\nlnast time\n");
@@ -441,19 +443,34 @@ void Lnast_visitor::handle(const slang::InstanceSymbol& symbol) {
 
   const auto& def = symbol.getDefinition();
   fmt::print("definition:{}\n", def.name);
+
   lnast = std::make_unique<Lnast>(def.name);
+  lnast->set_root(Lnast_node(Lnast_ntype::create_top()));
+  auto node_stmts = Lnast_node::create_stmts("___stmts");
+  auto idx_stmts  = lnast->add_child(lnast->get_root(), node_stmts);
 
   symbol.resolvePortConnections();
   for (const auto& p : symbol.body.getPortList()) {
     if (p->kind == SymbolKind::Port) {
-      const auto& port = p->as<PortSymbol>();
-      (void)port;
+      const auto &port = p->as<PortSymbol>();
 
       I(port.defaultValue == nullptr);  // give me a case to DEBUG
-      fmt::print("port:{} dir:{} bits:{}\n",
-                 port.name,
-                 port.direction == ArgumentDirection::In ? "in" : "out",
-                 port.getType().getBitWidth());
+
+      auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_select(""));
+      auto tmp     = lnast->add_string(absl::StrCat("___", port.name, "_attr"));
+      std::string_view var_name;
+      if (port.direction == ArgumentDirection::In)
+        var_name = lnast->add_string(absl::StrCat("$", port.name));
+      else
+        var_name = lnast->add_string(absl::StrCat("%", port.name));
+
+      lnast->add_child(idx_dot, Lnast_node::create_ref(tmp));
+      lnast->add_child(idx_dot, Lnast_node::create_ref(var_name));
+      lnast->add_child(idx_dot, Lnast_node::create_const("__ubits")); // FIXME: if input is signed use __sbits
+
+      auto idx_assign = lnast->add_child(idx_stmts, Lnast_node::create_assign(""));
+      lnast->add_child(idx_assign, Lnast_node::create_ref(tmp));
+      lnast->add_child(idx_assign, Lnast_node::create_const(lnast->add_string(std::to_string(port.getType().getBitWidth()))));
     } else if (p->kind == SymbolKind::InterfacePort) {
       const auto& port = p->as<InterfacePortSymbol>();
       (void)port;

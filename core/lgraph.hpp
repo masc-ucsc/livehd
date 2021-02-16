@@ -47,7 +47,7 @@ protected:
   Node_pin_iterator out_connected_pins(const Node &node) const;
   Node_pin_iterator inp_connected_pins(const Node &node) const;
 
-  Node_pin_iterator inp_drivers(const Node &node, const absl::flat_hash_set<Node::Compact> &exclude) const;
+  Node_pin_iterator inp_drivers(const Node &node) const;
 
   XEdge_iterator out_edges(const Node &node) const;
   XEdge_iterator inp_edges(const Node &node) const;

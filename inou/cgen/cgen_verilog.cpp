@@ -474,6 +474,7 @@ void Cgen_verilog::create_locals(std::string &buffer, LGraph *lg) {
         absl::StrAppend(&buffer, "reg signed [", node.get_driver_pin().get_bits()-1, ":0] ", name_sel , ";\n");
       }
     }else if (op == Ntype_op::Tposs) {
+      name = get_scaped_name(node.get_sink_pin("a").get_wire_name() + "_unsign");
       out_unsigned = true; // Tposs needs a variable because converts/removes sign
     }else if (!node.is_type_flop()) {
       if (node.has_name() && node.get_name()[0] != '_')

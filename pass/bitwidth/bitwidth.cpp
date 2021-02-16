@@ -600,7 +600,6 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_dp, Fwd_edge_iterator::Fwd_
     lhs_is_attr_bit_set = c1 || c2;
   }
 
-
   if (bw_rhs.get_sbits() >= bw_lhs.get_sbits() || lhs_is_attr_bit_set) {
     auto mask_node  = node_dp.get_class_lgraph()->create_node(Ntype_op::And);
     auto mask_dpin  = mask_node.get_driver_pin();
@@ -610,7 +609,6 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_dp, Fwd_edge_iterator::Fwd_
     auto mask_const = (Lconst(1UL) << Lconst(bw_lhs_bits)) - 1;
     auto all_one_node = node_dp.get_class_lgraph()->create_node_const(mask_const);
     auto all_one_dpin = all_one_node.setup_driver_pin();
-
 
     // Note: I set the unsigned k-bits (max, min) for the mask
     flat_bwmap.insert_or_assign(mask_dpin.get_compact_flat(), Bitwidth_range(Lconst(0), mask_const));

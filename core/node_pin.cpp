@@ -86,6 +86,13 @@ bool Node_pin::is_type_const() const {
   auto nid = current_g->get_node_nid(idx);
   return current_g->is_type_const(nid);
 }
+
+bool Node_pin::is_type_loop_breaker() const {
+  auto nid = current_g->get_node_nid(idx);
+  auto op = current_g->get_type_op(nid);
+  return Ntype::is_loop_breaker(op);
+}
+
 Lconst Node_pin::get_type_const() const {
   auto nid = current_g->get_node_nid(idx);
   return current_g->get_type_const(nid);
@@ -114,6 +121,8 @@ Node Node_pin::get_node() const {
 
   return Node(top_g, current_g, hidx, nid);
 }
+
+Index_ID Node_pin::get_node_nid() const { return current_g->get_node_nid(idx); }
 
 Ntype_op Node_pin::get_type_op() const {
   auto nid = current_g->get_node_nid(idx);

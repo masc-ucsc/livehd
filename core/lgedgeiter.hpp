@@ -90,7 +90,7 @@ public:
 
   void add_node(const Node &node) {
     bool all_inputs_visited=true;
-    for(auto e:node.inp_edges()) {
+    for(const auto &e:node.inp_edges()) {
       if (unvisited.contains(e.driver.get_node().get_compact())) {
         all_inputs_visited = false;
         break;
