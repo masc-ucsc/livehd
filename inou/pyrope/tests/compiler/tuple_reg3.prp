@@ -10,4 +10,4 @@ if (foo == 1) {
 //   #reg = (a = 6, b = 7)  
 // }
 
-%out = #reg.a + #reg.b
+%out = #reg.a.__q_pin + #reg.b.__q_pin

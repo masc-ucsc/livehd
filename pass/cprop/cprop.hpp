@@ -18,6 +18,7 @@ protected:
   absl::flat_hash_map<std::string, Node_pin>                              reg_name2qpin;
   absl::flat_hash_map<std::string, std::pair<std::string_view, Node_pin>> reg_attr_map;
   absl::flat_hash_map<std::string, std::vector<Node_pin>>                 reg_name2sink_pins;
+  absl::flat_hash_set<Node::Compact>                                      dont_touch;
 
   void collapse_forward_same_op(Node &node, XEdge_iterator &inp_edges_ordered);
   void collapse_forward_sum(Node &node, XEdge_iterator &inp_edges_ordered);

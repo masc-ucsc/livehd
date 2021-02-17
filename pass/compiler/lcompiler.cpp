@@ -103,7 +103,7 @@ void Lcompiler::add_firrtl_thread(std::shared_ptr<Lnast> ln) {
 void Lcompiler::global_io_connection() {
   Graphviz gv(true,  false, odir);
   Cprop    cp(false, true);                                    // hier = false, at_gioc = true 
-  Bitwidth bw(true, 10, global_flat_bwmap, global_hier_bwmap); // hier = false, max_iters = 10
+  Bitwidth bw(true, 10, global_flat_bwmap, global_hier_bwmap); // hier = true,  max_iters = 10
   Gioc     gioc(path);
 
   for (auto &lg : lgs) {

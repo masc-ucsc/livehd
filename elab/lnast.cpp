@@ -795,21 +795,27 @@ void Lnast::insert_tg_q_pin_fetch(const Lnast_nid &tg_nid) {
   auto c0      = get_first_child(tg_nid);
   auto c1      = get_sibling_next(c0);
   auto c1_name = get_name(c1);
-  auto c1_subs = get_subs(c1);
-  if (!(is_register(c1_name) && c1_subs == 0)) 
+  if (!is_register(c1_name)) 
     return;
 
   std::string hier_tuple_reg_name;
   for (auto &child : children(tg_nid)) {
     if (child == get_first_child(tg_nid))
       continue;
+    
+    auto child_name = get_name(child);
+    if (child_name == "__q_pin")
+      return;
+
+
     if (hier_tuple_reg_name.empty())
-      hier_tuple_reg_name = (std::string)get_name(child); 
+      hier_tuple_reg_name = (std::string)child_name; 
     else 
-      hier_tuple_reg_name = absl::StrCat(hier_tuple_reg_name, ".", get_name(child));
+      hier_tuple_reg_name = absl::StrCat(hier_tuple_reg_name, ".", child_name);
   }
   
   //TG behaves like rhs and is fetching #reg_k.foo_0, which means it actually fetchs q_pin of the register #reg.foo
+
   auto it = collected_hier_tuple_reg_name.find(hier_tuple_reg_name);
   if (it == collected_hier_tuple_reg_name.end()) {
     std::string q_pin_str = "__q_pin";
@@ -832,7 +838,7 @@ void Lnast::collect_reg_hier_name_ta(const Lnast_nid &ta_nid) {
   std::string hier_tuple_reg_name = (std::string)c0_name;
   for (auto &child : children(ta_nid)) {
     if (child == get_first_child(ta_nid) || child == get_last_child(ta_nid))
-      break;
+      continue;
     hier_tuple_reg_name = absl::StrCat(hier_tuple_reg_name, ".", get_name(child));
   }
 
