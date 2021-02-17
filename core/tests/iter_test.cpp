@@ -499,6 +499,7 @@ void simple(int num) {
   delete sub_g;
 }
 
+#if 0
 class Decouple_forward_iterator {
 protected:
   spmc256<Node> queue;
@@ -591,6 +592,7 @@ public:
     return dcit;
   }
 };
+#endif
 
 int main(int argc, char **argv) {
 
@@ -606,8 +608,8 @@ int main(int argc, char **argv) {
     Lbench bench("fwd.custom");
     int total = 0;
 //#define ITER_MMAP 1
-//#define ITER_DIRECT 1
-#define ITER_THREAD 1
+#define ITER_DIRECT 1
+//#define ITER_THREAD 1
 //#define ITER_VECTOR 1
 //#define ITER_VECTOR_CHECK_ORDER 1
 //#define ITER_TREE 1
