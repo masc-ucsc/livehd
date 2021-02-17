@@ -248,7 +248,7 @@ VarPtr VCDWriter::register_passed_var(const std::string &scope, const std::strin
    *if (scope has scope_sep)
    * then {extract parent name}
    */
-  unsigned int unique_var_id;
+  unsigned int unique_var_id = 0;
   VarPtr pvar;
   if (closed) throw VCDPhaseException{"Cannot register after close()"};
   if (!registering) throw VCDPhaseException{utils::format("Cannot register new var '%s', registering finished", name.c_str())};
