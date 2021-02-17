@@ -844,7 +844,7 @@ void Cprop::process_mux(Node &node, XEdge_iterator &inp_edges_ordered) {
       is_reg_tuple = dpin.get_name().at(0) == '#' ? true : false;
 
     if (is_tail && is_reg_tuple) {
-      fmt::print("DEBUG mux is tail:{}\n");
+      fmt::print("DEBUG mux is tail\n");
       try_create_register(node, tup);
     }
   }
