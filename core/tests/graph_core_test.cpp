@@ -55,5 +55,7 @@ TEST_F(Setup_graph_core, shallow_tree) {
 
   Graph_core c1("lgdb_gc", "shallow_tree");
 
+  //test functions create master root
+  //do set s and gets
   // TEST now
 }
