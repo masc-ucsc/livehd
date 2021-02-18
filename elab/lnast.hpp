@@ -9,7 +9,7 @@
 using Lnast_nid                     = mmap_lib::Tree_index;
 using Phi_rtable                    = absl::flat_hash_map<std::string_view, Lnast_nid>; // rtable = resolve_table
 using Cnt_rtable                    = absl::flat_hash_map<std::string_view, int16_t>;
-using Sel_lrhs_table                = absl::flat_hash_map<Lnast_nid, std::pair<bool, Lnast_nid>>;  // sel -> (lrhs, paired opr node)
+using Selc_lrhs_table               = absl::flat_hash_map<Lnast_nid, std::pair<bool, Lnast_nid>>;  // sel -> (lrhs, paired opr node)
 using Tuple_var_1st_scope_ssa_table = absl::flat_hash_map<std::string_view, Lnast_nid>; // rtable = resolve_table
 
 
@@ -128,9 +128,9 @@ private:
   void      respect_latest_global_lhs_ssa       (const Lnast_nid &target_nid);
   int8_t    check_rhs_cnt_table_parents_chain   (const Lnast_nid &psts_nid, const Lnast_nid &target_key);
   void      update_rhs_ssa_cnt_table            (const Lnast_nid &psts_nid, const Lnast_nid &target_key);
-  void      analyze_sel_lrhs                    (const Lnast_nid &psts_nid);
-  void      analyze_sel_lrhs_if_subtree         (const Lnast_nid &if_nid);
-  void      analyze_sel_lrhs_handle_a_statement (const Lnast_nid &psts_nid, const Lnast_nid &opr_nid);
+  void      analyze_selc_lrhs                    (const Lnast_nid &psts_nid);
+  void      analyze_selc_lrhs_if_subtree         (const Lnast_nid &if_nid);
+  void      analyze_selc_lrhs_handle_a_statement (const Lnast_nid &psts_nid, const Lnast_nid &opr_nid);
   void      insert_implicit_dp_parent           (const Lnast_nid &opr_nid);
 
   bool      is_special_case_of_sel_rhs       (const Lnast_nid &psts_nid,  const Lnast_nid &opr_nid);
@@ -157,7 +157,7 @@ private:
   // hierarchical statements node -> symbol table
   absl::flat_hash_map<Lnast_nid, Phi_rtable>       phi_resolve_tables;
   absl::flat_hash_map<Lnast_nid, Cnt_rtable>       ssa_rhs_cnt_tables;
-  absl::flat_hash_map<Lnast_nid, Sel_lrhs_table>   sel_lrhs_tables;
+  absl::flat_hash_map<Lnast_nid, Selc_lrhs_table>  selc_lrhs_tables;
   absl::flat_hash_map<Lnast_nid, Phi_rtable>       new_added_phi_node_tables; // for each if-subtree scope
   absl::flat_hash_set<std::string_view>            tuplized_table;
   absl::flat_hash_map<std::string_view, Lnast_nid> candidates_update_phi_resolve_table;

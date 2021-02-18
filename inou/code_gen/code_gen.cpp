@@ -115,11 +115,13 @@ void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
                || curr_node_type.is_shift_right()) {
       do_op(curr_index);
     } else if (curr_node_type.is_dot()) {
+      I(false, "should use select instead");
       do_dot(curr_index);
     } else if (curr_node_type.is_tuple()) {
       do_tuple(curr_index);
-    } else if (curr_node_type.is_select()) {
-      do_select(curr_index, "select");
+    } else if (curr_node_type.is_selc()) {
+      //do_select(curr_index, "select");
+      do_select(curr_index, "selc");
     } else if (curr_node_type.is_bit_select()) {
       do_select(curr_index, "bit");
     } else if (curr_node_type.is_func_def()) {
@@ -653,7 +655,7 @@ void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index) {
 //-------------------------------------------------------------------------------------
 // Process the select node:
 // ref LNAST subtree: select,""  ->  ref,"___l" , ref,"A" , const,"0"
-void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index, std::string select_type) {
+void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index, std::string select_type) {  //FIXME->sh: at use const std::string & foo
   fmt::print("node:select\n");
   auto                          curr_index = lnast->get_first_child(select_node_index);
   std::vector<std::string_view> sel_str_vect;

@@ -126,7 +126,7 @@ protected:
     "tuple",
     "tuple_concat", // ++
     "tuple_delete", // --
-    "select",     // []
+    "selc",     // []
     "bit_select", // [[]]
     "range",      // ..
     "shift_right",
@@ -195,7 +195,7 @@ protected:
     "()",
     "tuple_concat", // ++
     "tuple_delete", // --
-    "select",  // []
+    "selc",  // []
     "bit_select", // [[]]
     "range", // ..
     "shift_right",
@@ -259,7 +259,7 @@ protected:
     "()",
     "++", //"tuple_concat", // ++
     "--", //"tuple_delete", // --
-    "select",  // []
+    "selc",  // []
     "bit_select", // [[]]
     "range",      // ..
     ">>",
@@ -323,7 +323,7 @@ protected:
     "()",
     "tuple_concat",
     "tuple_delete",
-    "select", // []
+    "selc", // []
     "bit_select", // [[]]
     "range",      // ..
     "shift_right",
@@ -387,7 +387,7 @@ protected:
     "()",
     "tuple_concat", // ++
     "tuple_delete", // --
-    "select", // []
+    "selc", // []
     "bit_select", // [[]]
     "range",         // ..
     ">>",//shift_right",
@@ -531,7 +531,7 @@ public:
   bool constexpr is_tuple()        const { return val == Lnast_ntype_tuple; }
   bool constexpr is_tuple_concat() const { return val == Lnast_ntype_tuple_concat; }
   bool constexpr is_tuple_delete() const { return val == Lnast_ntype_tuple_delete; }
-  bool constexpr is_select()       const { return val == Lnast_ntype_select; }
+  bool constexpr is_selc()         const { return val == Lnast_ntype_select; }
   bool constexpr is_bit_select()   const { return val == Lnast_ntype_bit_select; }
   bool constexpr is_range()        const { return val == Lnast_ntype_range; }
 

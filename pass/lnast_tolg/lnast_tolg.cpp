@@ -78,7 +78,7 @@ void Lnast_tolg::process_ast_stmts(LGraph *lg, const Lnast_nid &lnidx_stmts) {
     } else if (ntype.is_const()) {
       I(lnast->get_name(lnidx) == "err_var_undefined");
       continue;
-    } else if (ntype.is_dot() || ntype.is_select()) {
+    } else if (ntype.is_selc()) {
       I(false);  // have been converted to tuple chain
     } else if (ntype.is_reg_fwd()) {
       I(lnast->get_name(lnidx) == "register_forwarding");

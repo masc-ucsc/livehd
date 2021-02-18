@@ -19,7 +19,7 @@ using FlatHashMap = absl::flat_hash_map<std::string_view, std::string_view>;
 
 bool Semantic_check::is_primitive_op(const Lnast_ntype node_type) {
   if (node_type.is_logical_op() || node_type.is_unary_op() || node_type.is_nary_op() || node_type.is_assign()
-      || node_type.is_dp_assign() || node_type.is_as() || node_type.is_eq() || node_type.is_select() || node_type.is_bit_select()
+      || node_type.is_dp_assign() || node_type.is_as() || node_type.is_eq() || node_type.is_selc() || node_type.is_bit_select()
       || node_type.is_logic_shift_right() || node_type.is_arith_shift_right() || node_type.is_arith_shift_left()
       || node_type.is_rotate_shift_right() || node_type.is_rotate_shift_left() || node_type.is_dynamic_shift_left()
       || node_type.is_dynamic_shift_right() || node_type.is_dot() || node_type.is_tuple() || node_type.is_tuple_concat()) {
@@ -592,7 +592,9 @@ void Semantic_check::check_primitive_ops(Lnast* lnast, const Lnast_nid &lnidx_op
         error_print_lnast_by_type(lnast, node_type.to_s());
         Pass::error("Tuple Concatenation Operation Error: Missing Reference Node\n");
       }
-    } else if (node_type.is_select() || node_type.is_dot()) {
+    } else if (node_type.is_dot()) {
+      I(false, "lnast dot type is deprecated!, you should use select type instead\n");
+    } else if (node_type.is_selc()) {
       int num_of_ref = 0;
       for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
         const auto node_type_child = lnast->get_data(lnidx_opr_child).type;
