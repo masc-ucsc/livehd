@@ -41,9 +41,11 @@ public:
   void add(const Eprp_dict &_dict);
   void add(const Eprp_lgs &_lgs);
   void add(const Eprp_var &_var);
+  void add(Eprp_lnasts &_var);
 
   void add(LGraph *lg);
   void add(std::unique_ptr<Lnast> lnast);
+  void add(std::shared_ptr<Lnast> lnast);
   void add(const std::string &name, std::string_view value);
   void replace(std::shared_ptr<Lnast> lnast_old, std::unique_ptr<Lnast> lnast_new);
   template<typename Str>

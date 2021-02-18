@@ -79,3 +79,5 @@ public:
   void handle(const slang::InstanceSymbol& symbol);
   void handle(const slang::GenerateBlockSymbol& symbol);
 };
+
+void slang_tree(const slang::RootSymbol &root);

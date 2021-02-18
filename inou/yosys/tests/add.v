@@ -14,8 +14,8 @@ module add(input [7:0] a, input [7:0] b,
   assign e = a + b - a;
   //assign ei = - a - b;
 
-  signed wire [7:0] as = a;
-  signed wire [7:0] bs = b;
+  wire signed [7:0] as = a;
+  wire signed [7:0] bs = b;
 
   assign f = as + bs;
   assign g = as - bs;

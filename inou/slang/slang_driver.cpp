@@ -33,6 +33,7 @@
 
 #include "pass.hpp"
 #include "lnast_visitor.hpp"
+#include "slang_tree.hpp"
 
 using namespace slang;
 
@@ -629,13 +630,16 @@ int driverMain(int argc, TArgs argv, bool suppressColorsStdout, bool suppressCol
                                           ignoreUnknownModules == true, showColors);
             anyErrors |= !compiler.run();
 
-            if (!anyErrors) {
-              Lnast_visitor lnast_visitor(compilation, 0, 0);
-              compilation.getRoot().visit(lnast_visitor);
-            }
-
             if (astJsonFile) {
                 compiler.printJson(*astJsonFile, astJsonScopes);
+            }
+
+            if (!anyErrors) {
+              Slang_tree::process_root(compilation.getRoot());
+#if 0
+              Lnast_visitor lnast_visitor(compilation, 0, 0);
+              compilation.getRoot().visit(lnast_visitor);
+#endif
             }
 
 #if defined(INCLUDE_SIM)

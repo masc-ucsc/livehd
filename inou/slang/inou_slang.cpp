@@ -5,6 +5,7 @@
 #include "lgraph.hpp"
 #include "inou_slang.hpp"
 #include "lbench.hpp"
+#include "slang_tree.hpp"
 
 extern int slang_main(int argc, char** argv); // in slang_driver.cpp
 
@@ -67,12 +68,12 @@ void Inou_slang::work(Eprp_var &var) {
 
   argv.push_back(nullptr);
 
-  Lnast_visitor::setup();
+  Slang_tree::setup(); // setup
 
-  slang_main(argv.size() - 1, argv.data());
+  slang_main(argv.size() - 1, argv.data()); // compile to lnasts
 
-  for(auto &l:Lnast_visitor::parsed_lnasts) {
-    var.add(std::move(l));
+  for (auto &ln:Slang_tree::pick_lnast()) {
+    var.add(ln);
   }
 
   for(char *ptr:argv) {

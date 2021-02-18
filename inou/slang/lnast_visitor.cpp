@@ -63,35 +63,49 @@ void Lnast_visitor::addLnast(const mmap_lib::Tree_index& idx_stmts, operators Li
       tmpIn="__and" + std::to_string(count);
       node_ = Lnast_node::create_ref(lnast->add_string(tmpIn));
       break;
-    
+
+    case (operators::MINUS):
+      fmt::print("MINUS \n");
+      idx_ = lnast->add_child(idx_stmts, Lnast_node::create_minus("MINUS"));
+      tmpIn="__minus" + std::to_string(count);
+      node_ = Lnast_node::create_ref(lnast->add_string(tmpIn));
+      break;
+
+    case (operators::PLUS):
+      fmt::print("PLUS \n");
+      idx_ = lnast->add_child(idx_stmts, Lnast_node::create_plus("PLUS"));
+      tmpIn="__plus" + std::to_string(count);
+      node_ = Lnast_node::create_ref(lnast->add_string(tmpIn));
+      break;
+
     case (operators::OR):
       fmt::print("OR \n");
       idx_ = lnast->add_child(idx_stmts, Lnast_node::create_or("OR"));
       tmpIn="__or" + std::to_string(count);
       node_ = Lnast_node::create_ref(lnast->add_string(tmpIn));
       break;
-    
+
     case (operators::XOR):
       fmt::print("XOR \n");
       idx_ = lnast->add_child(idx_stmts, Lnast_node::create_xor("XOR"));
       tmpIn="__xor" + std::to_string(count);
       node_ = Lnast_node::create_ref(lnast->add_string(tmpIn));
       break;
-    
+
     case (operators::NOT):
       fmt::print("NOT \n");
       idx_ = lnast->add_child(idx_stmts, Lnast_node::create_not("NOT"));
       tmpIn="__not" + std::to_string(count);
-      node_ = Lnast_node::create_ref(lnast->add_string(tmpIn));  
+      node_ = Lnast_node::create_ref(lnast->add_string(tmpIn));
       break;
-    
+
     default:
       // fmt::print("AND \n");
       // auto idx_ = lnast->add_child(idx_stmts, Lnast_node::create_and("AND"));
       // std::string tmpIn="__and" + std::to_string(count);
       // auto node_ = Lnast_node::create_ref(lnast->add_string(tmpIn));
       break;
-    
+
   }
   lnast->add_child(idx_, node_);
   if (operandList.size()) {
@@ -240,10 +254,8 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
   } else {
     fmt::print("TODO. What is this");
   }
-  lnast->dump();
-  parsed_lnasts.push_back(std::move(lnast));
-  // std::move(lnast);
 }
+
 void Lnast_visitor::handle(const slang::Expression& expr) {
   // if (numErrors > errorLimit)
   //   return;
@@ -453,6 +465,8 @@ void Lnast_visitor::handle(const slang::InstanceSymbol& symbol) {
   for (const auto& p : symbol.body.getPortList()) {
     if (p->kind == SymbolKind::Port) {
       const auto &port = p->as<PortSymbol>();
+      // TODO: Nicer to do this instead (still issues at LNAST)
+      // $ = (a.__ubits=1, c.__sbits=3)
 
       I(port.defaultValue == nullptr);  // give me a case to DEBUG
 
@@ -499,6 +513,9 @@ void Lnast_visitor::handle(const slang::InstanceSymbol& symbol) {
   hierarchyDepth++;
   visit(symbol.body);
   hierarchyDepth--;
+
+  lnast->dump();
+  parsed_lnasts.push_back(std::move(lnast));
 }
 
 void Lnast_visitor::handle(const slang::GenerateBlockSymbol& symbol) {

@@ -20,6 +20,12 @@ void Eprp_var::add(const Eprp_lgs &_lgs) {
   }
 }
 
+void Eprp_var::add(Eprp_lnasts &_lns) {
+  for (auto ln : _lns) {
+    lnasts.emplace_back(ln);
+  }
+}
+
 void Eprp_var::add(const Eprp_var &_var) {
   add(_var.lgs);
   add(_var.dict);
@@ -31,6 +37,10 @@ void Eprp_var::add(LGraph *lg) {
 
 void Eprp_var::add(std::unique_ptr<Lnast> lnast) {
   lnasts.emplace_back(std::move(lnast));
+}
+
+void Eprp_var::add(std::shared_ptr<Lnast> lnast) {
+  lnasts.emplace_back(lnast);
 }
 
 void Eprp_var::add(const std::string &name, std::string_view value) {
