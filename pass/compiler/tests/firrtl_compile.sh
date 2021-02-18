@@ -30,8 +30,10 @@ LFSR16 VendingMachine VendingMachineSwitch'
 
 pts_wait_verilog_large_mux_code_gen='Mul Test6 Test1'
 
+# pts='Test1'
 # pts='Life'
 # pts='VecShiftRegister'
+# pts='Cell_alone'
 # pts='VecShiftRegisterParam'
 # pts='VecShiftRegisterSimple '
 # pts='VecSearch '
@@ -120,11 +122,11 @@ firrtl_test() {
     fi
   done
 
-  rm -f *.v
-  rm -f *.dot
-  rm -f *.tcl
-  rm -f lgcheck*
-  rm -rf lgdb
+  # rm -f *.v
+  # rm -f *.dot
+  # rm -f *.tcl
+  # rm -f lgcheck*
+  # rm -rf lgdb
 }
 
 firrtl_test "$pts"

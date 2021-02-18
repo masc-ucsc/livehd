@@ -22,7 +22,7 @@ scalar_reg_out_pre_declare firrtl_tail2 tuple_reg tuple_reg2'
 
 # pts='tuple_reg2 tuple_reg3'
 # pts='pp'
-pts='tuple_reg3'
+# pts='tuple_reg3'
 
 # pts='vector'
 # pts='vector2'

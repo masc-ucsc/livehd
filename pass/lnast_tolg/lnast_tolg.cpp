@@ -270,6 +270,8 @@ void Lnast_tolg::nary_node_rhs_connections(LGraph *lg, Node &opr_node, const std
 Node Lnast_tolg::process_ast_assign_op(LGraph *lg, const Lnast_nid &lnidx_assign) {
   auto c0 = lnast->get_first_child(lnidx_assign);
   auto c1 = lnast->get_sibling_next(c0);
+  fmt::print("DEBUG c0 name:{}\n", lnast->get_name(c0));
+  fmt::print("DEBUG c1 name:{}\n", lnast->get_name(c1));
 
   auto opd1 = setup_ref_node_dpin(lg, c1);
   auto opd1_node  = opd1.get_node();
