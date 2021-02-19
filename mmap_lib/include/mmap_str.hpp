@@ -40,6 +40,11 @@ protected:
   uint32_t ptr_or_start;  // 4 chars if _size < 14, ptr to mmap otherwise
   std::array<char, 10> e; // last 10 "special <128" characters ending the string
   uint16_t _size;          // 2 bytes
+  int map_key 
+  using Map = typename mmap_lib::map<uint32_t, uint32_t>;
+  static Map string_map();
+  staticc vector<int> string_vector ; 
+
 
   constexpr bool is_digit(char c) const {
     return c>='0' && c <='9';
@@ -48,7 +53,8 @@ protected:
 public:
 
   // Must be constexpr to allow fast (constexpr) cmp for things like IDs.
-  template<std::size_t N, typename = std::enable_if_t<(N-1)<14>>
+  /*template<std::size_t N, typename = std::enable_if_t<(N-1)<14>>
+
     constexpr str(const char(&s)[N]): ptr_or_start(0), e{0}, _size(N-1) { // N-1 because str includes the zero
       auto stop    = _size<4?_size:4;
       for(auto i=0;i<stop;++i) {
@@ -69,8 +75,29 @@ public:
         ++e_pos;
       }
     }
+  */
 
-  template<std::size_t N, typename = std::enable_if_t<(N-1)>=14>, typename=void>
+    constexpr str(const char(&s)[N]): ptr_or_start(0), e{0}, _size(N-1) { // N-1 because str includes the zero
+      auto stop    = _size<4?_size:4;
+      for(auto i=0;i<stop;++i) {
+        ptr_or_start <<= 8;
+        ptr_or_start |= s[i];
+      }
+      auto e_pos = 0;
+      for(auto i=stop;i<_size;++i) {
+        assert(s[i]<128); // FIXME: use ptr if so
+        /*if (is_digit(s[i]) && i<_size && is_digit(s[i+1])) {
+          uint8_t v = (s[i]-'0')*10+s[i+1]-'0';
+          assert(v<100); // 2 digits only
+          e[e_pos] = 0x80 | v;1000 0000
+          ++i; // skip one more
+        }else{*/
+        e[e_pos] = s[i];
+        /*}*/
+        ++e_pos;
+      }
+    }
+  /*template<std::size_t N, typename = std::enable_if_t<(N-1)>=14>, typename=void>
     constexpr str(const char(&s)[N]): ptr_or_start(0), e{0}, _size(N-1) { // N-1 because str includes the zero
       ptr_or_start = 0;
       auto e_pos   = 0u;
@@ -87,8 +114,52 @@ public:
         }
         ++e_pos;
       }
-    }
+    }*/
+    constexpr str(const char(&s)[N]): ptr_or_start(0), e{0}, _size(N-1) { // N-1 because str includes the zero
+      //the first two charactors 
+      e[0] = s[0];
+      e[1] = s[1];
+      //the last eight  charactors
+      for (int i=0;i<8;i++){
+        e[_size-i] = s[_size-i];
+      } 
+      //checking if it exists
+      char*  long_str;
+      for (int i =0 ; i<_size-8 ; i++){
+          long_str[i] = s[i+2]; 
+      }
+      pair<int, int> pair = str_exists(long_str, _size-10);
+      if (pair.second){
+       ptr_or_start = pair.first;
+      } else{
 
+        for (int i =0;i<_size-10;i++){
+          string_vector.push_back(s[i]);
+          //add the starting position of the vector as a key to the map
+          //now add the size -10 as a value to the map
+          //ptr_ot_start will be the key
+        }
+
+      }
+
+    }
+    std::pair<int, int> str_exists(const char* string_to_check,uint32_t size){
+      bool vector_flag = true;
+        for (auto i = string_map.begin(),end = string_map.end();i !=end ;++i){
+          uint32_t key = string_map.get_key(i); 
+          uint16_t value = string_map.gets(i);
+          if (value != size) continue;
+          for(int i =0; i<size;i++){
+            if(string_vector.at(key+i) != string_to_check[i])  {
+              vector_flag = false;
+              break;
+            } 
+            if (vector_flag) return std::make_pair(key, value);
+            vector_flag = true; 
+          }   
+        }
+      return std::make_pair(0, 0);
+    }
   constexpr str(std::string_view sv) : ptr_or_start(0), e{0}, _size(sv.size()) {
     // FIXME: maybe short maybe long
     if (sv.size()<14) { // FIXME: create method to share this code with str short char constructor
