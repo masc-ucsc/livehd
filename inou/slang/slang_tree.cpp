@@ -568,6 +568,18 @@ std::string_view Slang_tree::process_expression(const slang::Expression& expr) {
     return "fix_binary_op";
   }
 
+  if (expr.kind == slang::ExpressionKind::Conversion) {
+    const auto &conv = expr.as<slang::ConversionExpression>();
+    const slang::Type *to_type = conv.type;
+
+    auto res = process_expression(conv.operand()); // NOTHING TO DO? (the dp_assign handles it?)
+
+    auto bits = create_lnast(to_type->getBitWidth());
+    auto mask = create_mask_stmts(bits);
+
+    return create_and_stmts(res, mask);
+  }
+
   fmt::print("FIXME still unimplemented Expression kind\n");
 
   return "FIXME_op";
