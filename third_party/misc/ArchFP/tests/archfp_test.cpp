@@ -1,4 +1,4 @@
-#include "floorplan.hpp"
+#include "GeogLayout.hpp"
 //#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
@@ -35,10 +35,10 @@ TEST_F(archfp_test, floorplan_test1) {
 
   bool success = chip->layout(HardAspectRatio, 1.0);
   if (!success) {
-    cerr << "Unable to layout specified CMP configuration." << endl;
+    std::cerr << "Unable to layout specified CMP configuration.\n";
   }
 
-  ostream& HSOut = outputHotSpotHeader("TRIPS.flp");
+  std::ostream& HSOut = outputHotSpotHeader("TRIPS.flp");
   chip->outputHotSpotLayout(HSOut);
   outputHotSpotFooter(HSOut);
 
