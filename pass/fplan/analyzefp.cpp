@@ -18,6 +18,7 @@ void Pass_fplan_analyzefp::setup() {
   a.add_label_optional("hpwl", "determine the half-perimeter wire length of a module", "false");
   a.add_label_optional("all", "run all available kinds of analysis on a module", "false");
 
+  // TODO: not yet implemented
   a.add_label_optional("ar", "required aspect ratio of subnode(s)", "1.0");
 
   a.add_label_optional("path",

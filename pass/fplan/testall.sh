@@ -15,9 +15,9 @@ set -e # exit if any command fails
 ./pass/fplan/fptest.sh ./inou/yosys/tests/graphtest.v graphtest
 
 # module hierarchies specifically for testing hierarchical floorplans
-./pass/fplan/fptest.sh ./pass/fplan/tests/simple_hier_test.v simple_hier_test
-./pass/fplan/fptest.sh ./pass/fplan/tests/grid_hier_test.v grid_hier_test
-./pass/fplan/fptest.sh ./pass/fplan/tests/hier_test.v hier_test
+./pass/fplan/fptest.sh ./inou/yosys/tests/simple_hier_test.v simple_hier_test
+./pass/fplan/fptest.sh ./inou/yosys/tests/grid_hier_test.v grid_hier_test
+./pass/fplan/fptest.sh ./inou/yosys/tests/hier_test.v hier_test
 
 # does not work - no support for blackboxes yet
 # ./inou/yosys/tests/nocheck_cpp_api.v

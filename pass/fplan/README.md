@@ -8,7 +8,7 @@ An example floorplan generated from [this](../../inou/yosys/tests/long_gcd.v) ve
 ## Sample Usage
 ```
 # import a small verilog file with lots of hierarchy
-livehd> inou.yosys.tolg files:./pass/fplan/tests/hier_test.v root:hier_test
+livehd> inou.yosys.tolg files:./inou/yosys/tests/hier_test.v root:hier_test
 
 # define the area and aspect ratio of all possible synthesizable node types in the current hierarchy
 livehd> pass.fplan.writearea
@@ -22,7 +22,7 @@ livehd> lgraph.open name:hier_test |> pass.fplan.makefp traversal:hier_node dest
 # check the floorplan for errors (overlapping layouts, etc.)
 livehd> lgraph.open name:hier_test |> pass.fplan.checkfp
 
-# analyze a module in the floorplan
+# analyze module(s) in the floorplan
 livehd> pass.fplan.analyzefp top:hier_test nodes:mid51,mid52
 ```
 
