@@ -89,6 +89,14 @@ std::shared_ptr<Lgtuple> Lgtuple::make_merge(Node_pin &sel_dpin, const std::vect
       same_dpins &= (it0->second == its[i]->second);
       auto v = tup_list[i]->get_pos(its[i]->first);
       if (v != -1 && v != use_pos) {
+        fmt::print("DEBUG tup0\n");
+        tup0->dump();
+        fmt::print("DEBUG tup-i\n");
+        tup_list[i]->dump();
+        // FIXME->sh: TODO: design entry point
+        // if it's tuple-reg and one of the tuple-chain branch doesn't have a corresponding field,
+        // which means it actually tries to fetch the q-pin
+
         LGraph::info("tuples {} and {} have fields {} and {} at different positions {} vs {}",
                      tup0->get_name(),
                      tup_list[i]->get_name(),

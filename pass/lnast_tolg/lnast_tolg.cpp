@@ -332,7 +332,6 @@ void Lnast_tolg::process_ast_tuple_struct(LGraph *lg, const Lnast_nid &lnidx_tup
   auto c0_tup = lnast->get_first_child(lnidx_tup);
   auto c1_tup = lnast->get_sibling_next(c0_tup);
   auto c1_tup_vname = lnast->get_vname(c1_tup);
-  fmt::print("DEBUG c1_tup_vname:{}\n", c1_tup_vname);
   int8_t           subs = 0;
   uint16_t         fp   = 0;  // field position
 
@@ -394,14 +393,6 @@ void Lnast_tolg::process_ast_tuple_struct(LGraph *lg, const Lnast_nid &lnidx_tup
 
     if (is_err_var_undefined(c1_tup_vname)) {
       setup_tuple_ref(lg, tup_name);
-      /* auto tn_dpin = setup_tuple_ref(lg, tup_name); */
-      /* auto tup_add = lg->create_node(Ntype_op::TupAdd); */
-      /* tn_dpin.connect_sink(tup_add.setup_sink_pin("tuple_name")); */
-      /* name2dpin[tup_name] = tup_add.setup_driver_pin(); */
-      /* tup_add.setup_driver_pin().set_name(tup_name); */
-
-      /* if (!is_tmp_var(tup_vname)) */
-      /*   setup_dpin_ssa(name2dpin[tup_name], tup_vname, subs); */
       return;
     }
 

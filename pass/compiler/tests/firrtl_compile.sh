@@ -21,11 +21,11 @@ VecShiftRegisterParam VecShiftRegisterSimple '
 
 # pts_hifirrtl_todo='
 # passed hifirrtl pattern pool
-pts='EnableShiftRegister Cell_alone MaxN PlusAnd Test2 SingleEvenFilter
+pts='EnableShiftRegister Flop Cell_alone MaxN PlusAnd Test2 SingleEvenFilter
 Coverage Counter Decrementer SubModule BundleConnect LogShifter Adder4
 Xor6Thread2 XorSelfThread1 ByteSelector SimpleALU Mux4 Max2 ResetShiftRegister
-Parity RegisterSimple Register RegXor AddNot GCD_3bits Flop Test3 TrivialAdd
-NotAnd Trivial Tail TrivialArith Shifts Darken HiLoMultiplier Accumulator
+Parity RegisterSimple Register RegXor GCD_3bits Test3 TrivialAdd
+Accumulator AddNot HiLoMultiplier Darken Shifts NotAnd TrivialArith Tail Trivial
 LFSR16 VendingMachine VendingMachineSwitch'  
 
 pts_wait_verilog_large_mux_code_gen='Mul Test6 Test1'
@@ -33,6 +33,7 @@ pts_wait_verilog_large_mux_code_gen='Mul Test6 Test1'
 # pts='Test1'
 # pts='Life'
 pts='VecShiftRegister'
+# pts=''
 # pts='VecShiftRegisterParam'
 # pts='VecShiftRegisterSimple '
 # pts='VecSearch '

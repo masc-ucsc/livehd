@@ -79,8 +79,8 @@ std::string Inou_firrtl::get_full_name(Lnast &lnast, Lnast_nid &parent_node, con
     return absl::StrCat("%", term);
   } else if (register_names.count(term)) {
     if (is_rhs) {
-      // Have to create a dot node to get the .__q_pin of register
-      return (std::string)CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat("#", term, ".__q_pin"));
+      // Have to create a selc node to get the .__q_pin of register
+      return (std::string)CreateSelectsFromStr(lnast, parent_node, absl::StrCat("#", term, ".__q_pin"));
     } else {
       return absl::StrCat("#", term);
     }
@@ -132,9 +132,9 @@ void Inou_firrtl::create_bitwidth_dot_node(Lnast& lnast, uint32_t bitwidth, Lnas
 
   std::string_view bit_acc_name;
   if (is_signed) {
-    bit_acc_name = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(port_id, ".__sbits"));
+    bit_acc_name = CreateSelectsFromStr(lnast, parent_node, absl::StrCat(port_id, ".__sbits"));
   } else {
-    bit_acc_name = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(port_id, ".__ubits"));
+    bit_acc_name = CreateSelectsFromStr(lnast, parent_node, absl::StrCat(port_id, ".__ubits"));
   }
 
   auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
@@ -231,8 +231,8 @@ void Inou_firrtl::init_reg_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type,
     }
     case firrtl::FirrtlPB_Type::kVectorType: {  // Vector Type
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
-        init_reg_dots(lnast, type.vector_type().type(), absl::StrCat(id, "[", i, "]"), clock, reset, init, parent_node);
-        /* init_reg_dots(lnast, type.vector_type().type(), absl::StrCat(id, ".", i), clock, reset, init, parent_node); */
+        /* init_reg_dots(lnast, type.vector_type().type(), absl::StrCat(id, "[", i, "]"), clock, reset, init, parent_node); */
+        init_reg_dots(lnast, type.vector_type().type(), absl::StrCat(id, ".", i), clock, reset, init, parent_node);
       }
       break;
     }
@@ -271,7 +271,6 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id,
   std::string id{_id};   
 
   lnast.add_string(ReturnExprString(lnast, clocke, parent_node, true));
-
   lnast.add_string(ReturnExprString(lnast, resete, parent_node, true));
 
   // Add register's name to the global list.
@@ -281,9 +280,11 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id,
   if (bitwidth > 0) {
     std::string_view acc_name_bw;
     if (is_signed) {
-      acc_name_bw = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(id, ".__sbits"));
+      acc_name_bw = CreateSelectsFromStr(lnast, parent_node, absl::StrCat(id, ".__sbits"));
     } else {
-      acc_name_bw = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(id, ".__ubits"));
+      fmt::print("DEBUG-5 reg id:{}\n", id);
+      fmt::print("DEBUG-5 recored reg id:{}\n", id.substr(1, id.length() - 1));
+      acc_name_bw = CreateSelectsFromStr(lnast, parent_node, absl::StrCat(id, ".__ubits"));
     }
 
     auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
@@ -295,25 +296,6 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id,
   // handle the most common reset initialization (only hiFIRRTL has a meaningful flop reset description)
   if (resete.expression_case() == firrtl::FirrtlPB_Expression::kReference) {
     reg_name2rst_init_expr.insert_or_assign(id, std::make_pair(resete, inite));
-    /* auto init_expr_str = lnast.add_string(ReturnExprString(lnast, inite, parent_node, true)); */
-    /* fmt::print("DEBUG init expr:{}\n", init_expr_str); */
-    /* (void)init_expr_str; */
-    /* I(lnast.get_data(parent_node).type.is_stmts()); */
-    /* auto idx_mux_if = lnast.add_child(parent_node, Lnast_node::create_if("hiFir reset init")); */
-    /* lnast.add_child(idx_mux_if, Lnast_node::create_cond(rst_expr_str));  // from the firrtl spec, it's always reset high */
-    /* auto idx_stmt_tr = lnast.add_child(idx_mux_if, Lnast_node::create_stmts(get_new_seq_name(lnast))); */
-    /* InitialExprAdd(lnast, inite, idx_stmt_tr, id); */
-
-    /* auto idx_stmt_f = lnast.add_child(idx_mux_if, Lnast_node::create_stmts(get_new_seq_name(lnast))); */
-    /* auto idx_dot = lnast.add_child(idx_stmt_f, Lnast_node::create_select("")); */
-    /* auto dot_lhs = create_temp_var(lnast); */
-    /* lnast.add_child(idx_dot, Lnast_node::create_ref(lnast.add_string(dot_lhs))); */
-    /* lnast.add_child(idx_dot, Lnast_node::create_ref(lnast.add_string(id))); */
-    /* lnast.add_child(idx_dot, Lnast_node::create_ref("__q_pin")); */
-
-    /* auto idx_asg = lnast.add_child(idx_stmt_f, Lnast_node::create_assign("")); */
-    /* lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(id))); */
-    /* lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(dot_lhs))); */
   }
 
   // Specify __reset_async
@@ -330,32 +312,13 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id,
     }
 
     if (is_reset_async) {
-      auto acc_name_sy = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(id, ".__reset_async"));
+      auto acc_name_sy = CreateSelectsFromStr(lnast, parent_node, absl::StrCat(id, ".__reset_async"));
 
       auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
       lnast.add_child(idx_asg, Lnast_node::create_ref(acc_name_sy));
       lnast.add_child(idx_asg, Lnast_node::create_const("true"));
     }
   }
-
-  // Specify __reset_pin
-#if 0
-  auto acc_name_rp = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(id, ".__reset_pin"));
-  auto idx_asg_rp  = lnast.add_child(parent_node, Lnast_node::create_assign(""));
-  lnast.add_child(idx_asg_rp, Lnast_node::create_ref(acc_name_rp));
-  AttachExprStrToNode(lnast, rst, idx_asg_rp);
-
-  // Specify init value
-  auto acc_name_r = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(id, ".__reset"));
-  auto idx_fdef   = lnast.add_child(parent_node, Lnast_node::create_func_def(""));
-  lnast.add_child(idx_fdef, Lnast_node::create_ref(acc_name_r));
-  lnast.add_child(idx_fdef, Lnast_node::create_const("true"));
-  auto idx_fstmts = lnast.add_child(idx_fdef, Lnast_node::create_stmts(""));
-  auto init = lnast.add_string(ReturnExprString(lnast, inite, idx_fstmts, true));
-  auto idx_asg_r  = lnast.add_child(idx_fstmts, Lnast_node::create_assign(""));
-  lnast.add_child(idx_asg_r, Lnast_node::create_ref("this"));
-  AttachExprStrToNode(lnast, init, idx_asg_r);
-#endif
 }
 
 // Set up any of the parameters related to a Memory block.
@@ -1154,9 +1117,13 @@ void Inou_firrtl::HandleTypeConvOp(Lnast& lnast, const firrtl::FirrtlPB_Expressi
  * can exist inside one another (vector of bundles) which
  * means we may need more than one DOT and/or SELECT node.
  * NOTE: This return the first child of the last DOT/SELECT node made. */
+
+
 std::string_view Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB_Expression expr, Lnast_nid& parent_node, const bool is_rhs) {
-  auto flattened_str = FlattenExpression(ln, parent_node, expr);
-  auto alter_full_str = get_full_name(ln, parent_node, flattened_str, false);//Note: I put false here so if reg I get the "#"
+  auto flattened_str  = FlattenExpression(ln, parent_node, expr);
+  auto alter_full_str = get_full_name(ln, parent_node, flattened_str, false); // Note: I put false here so if reg I get the "#"
+  /* fmt::print("DEBUG-0 flattened_str:{}\n", flattened_str); */
+  /* fmt::print("DEBUG-1 alter_full_str:{}\n", alter_full_str); */
 
   if (alter_full_str[0] == '$') {
     flattened_str = absl::StrCat("$inp_", flattened_str);
@@ -1164,7 +1131,7 @@ std::string_view Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB
     flattened_str = absl::StrCat("%out_", flattened_str);
   } else if (alter_full_str[0] == '#') {
     if (is_rhs) {
-      flattened_str = absl::StrCat(flattened_str, ".__q_pin");
+      flattened_str = absl::StrCat("#", flattened_str, ".__q_pin");
     } else {
       flattened_str = absl::StrCat("#", flattened_str);
     }
@@ -1227,7 +1194,8 @@ std::string_view Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB
   }
 
   I(flattened_str.find("."));
-  return CreateDotsSelsFromStr(ln, parent_node, flattened_str);
+  return CreateSelectsFromStr(ln, parent_node, flattened_str);
+  /* return CreateSelectsFromStr(ln, parent_node, alter_full_str); */
 }
 
 
@@ -1281,33 +1249,34 @@ void Inou_firrtl::split_hier_name(std::string_view full_name, std::vector<std::p
 /* Given a string with "."s and "["s in it, this
  * function will be able to deconstruct it into
  * DOT and SELECT nodes in an LNAST. */
-std::string_view Inou_firrtl::CreateDotsSelsFromStr(Lnast& ln, Lnast_nid& parent_node, const std::string& full_name) {
+std::string_view Inou_firrtl::CreateSelectsFromStr(Lnast& ln, Lnast_nid& parent_node, const std::string& full_name) {
+  fmt::print("DEBUG-6 full_name:{}\n", full_name);
   I((full_name.find(".") != std::string::npos));
 
   auto tmp_var_name = create_temp_var(ln);
   std::vector<std::pair<std::string_view, Inou_firrtl::Leaf_type>> hier_subnames;
   hier_subnames.emplace_back(std::make_pair(tmp_var_name, Leaf_type::Ref));
   split_hier_name(full_name, hier_subnames);
-  auto ln_node = ln.add_child(parent_node, Lnast_node::create_select(""));
+  auto selc_node = ln.add_child(parent_node, Lnast_node::create_select(""));
   for (auto subname : hier_subnames) {
     switch (subname.second) {
       case Leaf_type::Ref: {
-        ln.add_child(ln_node, Lnast_node::create_ref(ln.add_string(subname.first)));
+        ln.add_child(selc_node, Lnast_node::create_ref(ln.add_string(subname.first)));
         break;
       }
       case Leaf_type::Const_num: {
-        ln.add_child(ln_node, Lnast_node::create_const(ln.add_string(subname.first)));
+        ln.add_child(selc_node, Lnast_node::create_const(ln.add_string(subname.first)));
         break;
       }
       case Leaf_type::Const_str: {
-        ln.add_child(ln_node, Lnast_node::create_const(ln.add_string(subname.first)));
+        ln.add_child(selc_node, Lnast_node::create_const(ln.add_string(subname.first)));
         break;
       }
       default: Pass::error("Unknown port type.");
     }
   }
 
-  return ln.get_name(ln.get_first_child(ln_node));
+  return ln.get_name(ln.get_first_child(selc_node));
 }
 
 /* Given an expression that may or may
@@ -1444,9 +1413,9 @@ void Inou_firrtl::ListPortInfo(Lnast& lnast, const firrtl::FirrtlPB_Port& port, 
     if (port_bits > 0) { // Specify __bits
       std::string_view bit_acc_name;
       if (port_sign == true) {
-        bit_acc_name = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(full_port_name, ".__sbits"));
+        bit_acc_name = CreateSelectsFromStr(lnast, parent_node, absl::StrCat(full_port_name, ".__sbits"));
       } else {
-        bit_acc_name = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat(full_port_name, ".__ubits"));
+        bit_acc_name = CreateSelectsFromStr(lnast, parent_node, absl::StrCat(full_port_name, ".__ubits"));
       }
       auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
       lnast.add_child(idx_asg, Lnast_node::create_ref(bit_acc_name));
@@ -1598,7 +1567,7 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
         // If port type was INFER, then we can perform inference here.
         PortDirInference((std::string)rhs_str, mem_name, true);
 
-        rhs_str = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat("#", mem_name, ".", rhs_str, ".__data"));
+        rhs_str = CreateSelectsFromStr(lnast, parent_node, absl::StrCat("#", mem_name, ".", rhs_str, ".__data"));
       } else {
         rhs_str = lnast.add_string(get_full_name(lnast, parent_node, rhs_expr.reference().id(), true));
       }
@@ -1658,17 +1627,25 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
       break;
     }
     case firrtl::FirrtlPB_Expression::kSubIndex: {  // SubIndex
-      auto expr_name = lnast.add_string(ReturnExprString(lnast, rhs_expr.sub_index().expression(), parent_node, true));
-      auto temp_var_name = create_temp_var(lnast);
+      auto rhs = HandleBundVecAcc(lnast, rhs_expr, parent_node, true);
 
-      auto idx_select = lnast.add_child(parent_node, Lnast_node::create_select("selectSI"));
-      lnast.add_child(idx_select, Lnast_node::create_ref(temp_var_name));
-      AttachExprStrToNode(lnast, expr_name, idx_select);
-      lnast.add_child(idx_select, Lnast_node::create_const(lnast.add_string(rhs_expr.sub_index().index().value())));
+      Lnast_nid idx_asg;
+      idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
 
-      auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("selectSI_asg"));
       lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs_str)));
-      lnast.add_child(idx_asg, Lnast_node::create_ref(temp_var_name));
+      lnast.add_child(idx_asg, Lnast_node::create_ref(rhs));
+      break;
+      /* auto expr_name = lnast.add_string(ReturnExprString(lnast, rhs_expr.sub_index().expression(), parent_node, true)); */
+      /* auto temp_var_name = create_temp_var(lnast); */
+
+      /* auto idx_select = lnast.add_child(parent_node, Lnast_node::create_select("selectSI")); */
+      /* lnast.add_child(idx_select, Lnast_node::create_ref(temp_var_name)); */
+      /* AttachExprStrToNode(lnast, expr_name, idx_select); */
+      /* lnast.add_child(idx_select, Lnast_node::create_const(lnast.add_string(rhs_expr.sub_index().index().value()))); */
+
+      /* auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign("selectSI_asg")); */
+      /* lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs_str))); */
+      /* lnast.add_child(idx_asg, Lnast_node::create_ref(temp_var_name)); */
       break;
     }
     case firrtl::FirrtlPB_Expression::kSubAccess: {  // SubAccess
@@ -1727,7 +1704,7 @@ std::string Inou_firrtl::ReturnExprString(Lnast& lnast, const firrtl::FirrtlPB_E
         if (!is_rhs) {
           expr_string = lnast.add_string(absl::StrCat(mem_name, "_", expr_string, "_data"));
         } else {
-          expr_string = CreateDotsSelsFromStr(lnast, parent_node, absl::StrCat("#", mem_name, ".", expr_string, ".__data"));
+          expr_string = CreateSelectsFromStr(lnast, parent_node, absl::StrCat("#", mem_name, ".", expr_string, ".__data"));
         }
       }
       break;
@@ -2004,7 +1981,7 @@ void Inou_firrtl::PerformLateMemAssigns(Lnast& lnast, Lnast_nid& parent_node) {
 
     // Actually create all of the assigns based off what was specified.
     for (const auto& assign_pair : assign_pairs) {
-      auto lhs_str = CreateDotsSelsFromStr(lnast, parent_node, assign_pair.first);
+      auto lhs_str = CreateSelectsFromStr(lnast, parent_node, assign_pair.first);
       auto rhs_str = lnast.add_string(assign_pair.second);
       auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign(""));
       lnast.add_child(idx_asg, Lnast_node::create_ref(lhs_str));

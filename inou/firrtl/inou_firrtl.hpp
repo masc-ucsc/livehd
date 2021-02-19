@@ -77,8 +77,8 @@ protected:
   void AttachExprStrToNode(Lnast &lnast, const std::string_view access_str, Lnast_nid &parent_node);
 
   std::string_view HandleBundVecAcc(Lnast &lnast, const firrtl::FirrtlPB_Expression expr, Lnast_nid &parent_node, const bool is_rhs);
-  std::string_view CreateDotsSelsFromStr(Lnast& ln, Lnast_nid& parent_node, const std::string& flattened_str);
-  std::string FlattenExpression(Lnast &ln, Lnast_nid &parent_node, const firrtl::FirrtlPB_Expression &expr);
+  std::string_view CreateSelectsFromStr(Lnast& ln, Lnast_nid& parent_node, const std::string& flattened_str);
+  std::string      FlattenExpression(Lnast &ln, Lnast_nid &parent_node, const firrtl::FirrtlPB_Expression &expr);
 
   void RegResetInitialization(Lnast &lnast, Lnast_nid &parent_node);
 
