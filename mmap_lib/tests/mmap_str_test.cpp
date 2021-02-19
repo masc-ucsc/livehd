@@ -61,14 +61,14 @@ TEST_F(Mmap_str_test, const_expr_trival_cmp) {
   fmt::print("a[3]:{} size:{}\n",a[3], a.size());
   fmt::print("a[4]:{} size:{}\n",a[4], a.size());
 
-  static_assert(a[0] == 'h');   // compile time check
-  static_assert(a[1] == 'e');   // compile time check
-  static_assert(a[2] == 'l');   // compile time check
-  static_assert(a[3] == 'l');   // compile time check
-  static_assert(a[4] == 'o');   // compile time check
-  static_assert(a.size() == 5); // compile time check
+  assert(a[0] == 'h');   // compile time check
+  assert(a[1] == 'e');   // compile time check
+  assert(a[2] == 'l');   // compile time check
+  assert(a[3] == 'l');   // compile time check
+  assert(a[4] == 'o');   // compile time check
+  assert(a.size() == 5); // compile time check
   // TODO: static_assert(a==a_sv);       // compile time check
-  static_assert(a=="hello");    // compile time check
+  assert(a=="hello");    // compile time check
   //static_assert(a!="helxo");    // compile time check
   //static_assert(a!="hell");     // compile time check
   //static_assert(a!="hellox");   // compile time check
