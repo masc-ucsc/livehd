@@ -5,8 +5,8 @@ module add2(input [6:0] a, input [7:0] b,
   output [8:0] ju
 );
 
-  signed wire [6:0] as = a;
-  signed wire [7:0] bs = b;
+  wire signed [6:0] as = a;
+  wire signed [7:0] bs = b;
 
   assign ju = as + bs;
   assign js = as + bs;
