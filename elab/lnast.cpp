@@ -416,7 +416,7 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
   // case-II
   // hier_TA: change (sel, paired_assign) -> (invalud, TA) or (TA_assignment_to_parent_TA, TA)
   if (sel_is_lhs && paired_type.is_assign()) {
-    ref_data(selc_nid)->type    = Lnast_ntype::create_invalid();
+    ref_data(selc_nid)->type   = Lnast_ntype::create_invalid();
     ref_data(paired_nid)->type = Lnast_ntype::create_tuple_add();
 
     auto c0_paired_asg         = get_first_child(paired_nid);
@@ -447,6 +447,8 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
     if (get_parent(psts_nid) == get_root())
       return;
 
+    fmt::print("DEBUG-0\n");
+    fmt::print("  ta_lhs_name:{}\n", ta_lhs_name);
     if (is_1st_scope_ssa_tuple_var
         && check_tuple_var_1st_scope_ssa_table_parents_chain(psts_nid, ta_lhs_name, get_parent(psts_nid))) {
       ref_data(selc_nid)->type = Lnast_ntype::create_assign();
@@ -527,6 +529,8 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
     add_child(new_tup_add, get_data(c0_paired));  // add final child of the new tup_add
     ref_data(selc_nid)->type = Lnast_ntype::create_invalid();
 
+
+
     // FIXME->sh: if declare a tuple at local scope but parent scope also have this tuple_var, should we also insert an TA assignment
     // node here?
     update_tuple_var_1st_scope_ssa_table(psts_nid, get_first_child(selc_nid));
@@ -588,8 +592,8 @@ bool Lnast::check_tuple_var_1st_scope_ssa_table_parents_chain(const Lnast_nid &p
         auto tup_pre_declare = insert_next_sibling(prev_sib_if, Lnast_node(Lnast_ntype::create_tuple(), Etoken()));
         add_child(tup_pre_declare, Lnast_node::create_ref(add_string(ref_name)));
         add_child(tup_pre_declare, get_data(undefined_var_nid));
+        return true;
       }
-      return true;
     }
     return false;
     /* return tuple_var_1st_scope_ssa_table.find(ref_name) != tuple_var_1st_scope_ssa_table.end(); */
@@ -598,6 +602,7 @@ bool Lnast::check_tuple_var_1st_scope_ssa_table_parents_chain(const Lnast_nid &p
     auto  new_psts_nid                  = get_parent(tmp_if_nid);
     auto &tuple_var_1st_scope_ssa_table = tuple_var_1st_scope_ssa_tables[new_psts_nid];
     if (tuple_var_1st_scope_ssa_table.find(ref_name) != tuple_var_1st_scope_ssa_table.end()) {
+      fmt::print("DEBUG-1 hit! ref_name:{}\n", ref_name);
       return true;
     } else {
       return check_tuple_var_1st_scope_ssa_table_parents_chain(new_psts_nid, ref_name, tmp_if_nid);
