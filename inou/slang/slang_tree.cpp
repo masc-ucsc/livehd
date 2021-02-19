@@ -115,7 +115,6 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol& symbol) {
   I(symbol.isModule()); // modules are fine. Interfaces are a TODO
 
   I(lnast == nullptr);
-  fmt::print("definition:{}\n", def.name);
 
   parsed_lnasts.emplace(def.name, nullptr); // insert to avoid recursion (reinsert at the end)
 
@@ -138,7 +137,9 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol& symbol) {
       }
 
       create_declare_bits_stmts(var_name, port.getType().isSigned(), port.getType().getBitWidth());
-      fmt::print("TODO: set bit declaration position\n");
+#ifndef NDEBUG
+      fmt::print("TODO: set declaration position\n");
+#endif
 
     } else if (p->kind == slang::SymbolKind::InterfacePort) {
       const auto& port = p->as<slang::InterfacePortSymbol>();
@@ -154,7 +155,18 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol& symbol) {
     if (member.kind == slang::SymbolKind::Port) {
       // already done
     }else if (member.kind == slang::SymbolKind::Net) {
-      // No need, handled in assignments directly
+			const auto &ns = member.as<slang::NetSymbol>();
+			auto *expr = ns.getInitializer();
+			if (expr) {
+				std::string_view lhs_var = create_lnast_var(member.name);
+
+				auto it = net2attr.find(member.name);
+				if (it == net2attr.end()) {
+					net2attr.emplace(member.name, Net_attr::Local);
+					create_declare_bits_stmts(lhs_var, ns.getType().isSigned(), ns.getType().getBitWidth());
+				}
+				create_dp_assign_stmts(lhs_var, process_expression(*expr));
+			}
     }else if (member.kind == slang::SymbolKind::ContinuousAssign) {
       const auto &ca = member.as<slang::ContinuousAssignSymbol>();
       const auto &as = ca.getAssignment();
