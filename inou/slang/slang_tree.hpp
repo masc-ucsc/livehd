@@ -50,6 +50,7 @@ protected:
   std::string_view create_xor_stmts(std::string_view a_var, std::string_view b_var);
   std::string_view create_shift_left_stmts(std::string_view a_var, std::string_view b_var);
   void             create_dp_assign_stmts(std::string_view a_var, std::string_view b_var);
+  void             create_assign_stmts(std::string_view a_var, std::string_view b_var);
   void             create_declare_bits_stmts(std::string_view a_var, bool is_signed, int bits);
   std::string_view create_minus_stmts(std::string_view a_var, std::string_view b_var);
   std::string_view create_plus_stmts(std::string_view a_var, std::string_view b_var);

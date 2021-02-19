@@ -880,7 +880,7 @@ void Bitwidth::bw_pass(LGraph *lg) {
     auto lgit = lg->forward(hier);
     for (auto fwd_it = lgit.begin(); fwd_it != lgit.end() ; ++fwd_it) {
       auto node = *fwd_it;
-      fmt::print("{}\n", node.debug_name());
+      //fmt::print("{}\n", node.debug_name());
       auto inp_edges = node.inp_edges();
       auto op        = node.get_type_op();
 

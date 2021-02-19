@@ -210,7 +210,9 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol& symbol) {
     }
   }
 
+#ifndef NDEBUG
   lnast->dump();
+#endif
 
   parsed_lnasts.insert_or_assign(def.name, lnast);
   lnast = nullptr;
@@ -404,6 +406,18 @@ void Slang_tree::create_dp_assign_stmts(std::string_view lhs_var, std::string_vi
   I(rhs_var.size());
 
   auto idx_assign = lnast->add_child(idx_stmts, Lnast_node::create_dp_assign(""));
+  lnast->add_child(idx_assign, Lnast_node::create_ref(lhs_var));
+  if (std::isdigit(rhs_var[0]))
+    lnast->add_child(idx_assign, Lnast_node::create_const(rhs_var));
+  else
+    lnast->add_child(idx_assign, Lnast_node::create_ref(rhs_var));
+}
+
+void Slang_tree::create_assign_stmts(std::string_view lhs_var, std::string_view rhs_var) {
+  I(lhs_var.size());
+  I(rhs_var.size());
+
+  auto idx_assign = lnast->add_child(idx_stmts, Lnast_node::create_assign(""));
   lnast->add_child(idx_assign, Lnast_node::create_ref(lhs_var));
   if (std::isdigit(rhs_var[0]))
     lnast->add_child(idx_assign, Lnast_node::create_const(rhs_var));
