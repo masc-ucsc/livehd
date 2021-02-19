@@ -447,8 +447,6 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
     if (get_parent(psts_nid) == get_root())
       return;
 
-    fmt::print("DEBUG-0\n");
-    fmt::print("  ta_lhs_name:{}\n", ta_lhs_name);
     if (is_1st_scope_ssa_tuple_var
         && check_tuple_var_1st_scope_ssa_table_parents_chain(psts_nid, ta_lhs_name, get_parent(psts_nid))) {
       ref_data(selc_nid)->type = Lnast_ntype::create_assign();
@@ -602,7 +600,6 @@ bool Lnast::check_tuple_var_1st_scope_ssa_table_parents_chain(const Lnast_nid &p
     auto  new_psts_nid                  = get_parent(tmp_if_nid);
     auto &tuple_var_1st_scope_ssa_table = tuple_var_1st_scope_ssa_tables[new_psts_nid];
     if (tuple_var_1st_scope_ssa_table.find(ref_name) != tuple_var_1st_scope_ssa_table.end()) {
-      fmt::print("DEBUG-1 hit! ref_name:{}\n", ref_name);
       return true;
     } else {
       return check_tuple_var_1st_scope_ssa_table_parents_chain(new_psts_nid, ref_name, tmp_if_nid);
