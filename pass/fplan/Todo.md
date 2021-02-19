@@ -6,15 +6,27 @@ Issues not related to ArchFP:
  - view.py output is flipped due to mismatch between coordinates for HotSpot and png coordinates in PyCairo
 
 Ask about:
- - put fplan tests into yosys tests since they crash livehd fairly often
  - LiveHD does not function correctly with non-english names (rename broken, importing broken as well (non-ascii characters skipped?))
 
 Goals:
+
+
+
+
+
+
+0. Fix ArchFP - crashes when generating small hierarchical floorplans due to valid() assertions failing
+    using abs() doesn't help - write fix up code.  This needs to work.
+
+
+
+
+
+
 1. Check on how nextpnr gets hints, if it gets hints at all.  Can we write hints for nextpnr to consume?
-2. Test hier_lg with hier_test.v (put hier_test file in yosys test dir, and check it for partially disconnected wires)
-3. Test BOOM core (waiting on yosys memory implementation?)
-4. Write node level hierarchy to file (mmap_tree not being written to file is known TODO)
-5. Find / write a method that doesn't mess up on the wrong aspect ratio - HardAspectRatio not helpful for initial floorplans.
+2. Test BOOM core (waiting on yosys memory implementation?)
+3. Write node level hierarchy to file (mmap_tree not being written to file is known TODO)
+4. Find / write a method that doesn't mess up on the wrong aspect ratio - HardAspectRatio not helpful for initial floorplans.
 
 Things to add:
 0. Interactivity
@@ -27,8 +39,12 @@ Things to add:
     - multithread the Lgraph traversal (need deep hierarchies to play with - waiting on (0))
        - create a way to floorplan using existing layouts
     - Check out the paper for ArchFP
-    - improve implementation in ArchFP, resolve todos, add better floorplan techniques
+    - improve implementation in ArchFP, resolve todos
        - double -> float?
+    - write a slicing floorplanner (HardAspectRatio quality goes down significantly with larger floorplans to the point of being unusable)
+       - http://eda.ee.ucla.edu/EE201A-04Spring/polish.pdf
+       - https://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.12.3375&rep=rep1&type=pdf
+
 2. Incremental Floorplans (waiting on goal (2))
     - floorplan using existing geography hints/specific AR instead of randomly choosing a hint/using AR = 1.0
     - assign geography hints to nodes based on wirelength metrics

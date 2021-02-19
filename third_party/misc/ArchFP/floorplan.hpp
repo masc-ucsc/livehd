@@ -4,16 +4,14 @@
 #include <string>
 
 #include <cassert>
-#include <cmath>
 #include <fstream>
 #include <stdexcept>
 
 // Here is an enumeration for the optimazation goals for a layout manager.
 // Area: optimize for smallest area (not implemented)
-// SliceTree: create an optimal slice tree floorplan
-// SoftAspectRatio: optimize for a given aspect ratio, but generate a legal floorplan (not implemented)
+// SliceTree: create an optimal slice tree floorplan (not implemented)
 // HardAspectRatio: optimize for a given aspect ratio, possibly forming a floorplan with gaps / overlaps
-enum FPOptimization { Area, SliceTree, SoftAspectRatio, HardAspectRatio };
+enum FPOptimization { Area, SliceTree, HardAspectRatio };
 
 // Here is the enumeration for layout hints for the geographic layout.
 enum GeographyHint {
@@ -33,7 +31,7 @@ enum GeographyHint {
 };
 
 // This will be used to keep track of user's request for more output during layout.
-constexpr bool verbose = true;
+constexpr bool verbose = false;
 
 // Temporary local for crazy mirror reflection stuff.
 constexpr int maxMirrorDepth = 20;

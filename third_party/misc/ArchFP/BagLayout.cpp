@@ -48,7 +48,7 @@ bool bagLayout::layout(FPOptimization opt, double targetAR) {
       replaceComponent(GL, i);
       comp = GL;
     }
-    comp->layout(opt, abs(AR));
+    comp->layout(opt, AR);
     assert(comp->valid());
     // Now we have the final component, we can set the location.
     comp->setLocation(nextX, nextY);

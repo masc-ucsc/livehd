@@ -12,6 +12,9 @@
 #include "node_type_area.hpp"
 #include "profile_time.hpp"
 
+constexpr size_t           opt_map_size               = 4;
+constexpr std::string_view opt_name_map[opt_map_size] = {"area", "slice_tree", "hard_ar"};
+
 void Pass_fplan_makefp::setup() {
   auto m = Eprp_method("pass.fplan.makefp", "generate a floorplan from an LGraph", &Pass_fplan_makefp::pass);
 
@@ -19,9 +22,7 @@ void Pass_fplan_makefp::setup() {
                        "LGraph traversal method to use. Valid options are \"hier_lg\", \"flat_node\", and \"hier_node\"",
                        "hier_node");
 
-  m.add_label_optional("strategy",
-                       "Floorplanning method to use.  Valid options are \"hard_ar\", and \"slicing\"",
-                       "slicing");
+  m.add_label_optional("strategy", "Floorplanning method to use.  Valid options are \"aspect_ratio\" and \"slice_tree\"", "slice_tree");
 
   m.add_label_optional("filename", "If set, write the floorplan to a file named <filename>.flp as well as back into LiveHD.");
   m.add_label_optional("aspect", "Requested aspect ratio of the entire floorplan, default is 1.0.", "1.0");
@@ -29,7 +30,7 @@ void Pass_fplan_makefp::setup() {
   register_pass(m);
 }
 
-void Pass_fplan_makefp::makefp_int(Lhd_floorplanner& fp, const std::string_view dest, const float ar) {
+void Pass_fplan_makefp::makefp_int(Lhd_floorplanner& fp, const std::string_view dest, const std::string_view opt, const float ar) {
   auto t = profile_time::Timer();
 
   t.start();
@@ -37,9 +38,21 @@ void Pass_fplan_makefp::makefp_int(Lhd_floorplanner& fp, const std::string_view 
   fp.load();
   fmt::print(" done ({} ms).\n", t.time());
 
+  bool found = false;
   t.start();
   fmt::print("  creating floorplan...");
-  fp.create(ar);
+  for (size_t i = 0; i < opt_map_size; i++) {
+    if (opt_name_map[i] == opt) {
+      fp.create((FPOptimization)i, ar);
+      found = true;
+      break;
+    }
+  }
+
+  if (!found) {
+    error("unknown strategy!");
+  }
+
   fmt::print(" done ({} ms).\n", t.time());
 
   if (dest.length() > 0) {
@@ -67,7 +80,7 @@ Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", v
 
   if (t_str == "hier_lg") {
     Lg_hier_floorp hfp(std::move(nt));
-    makefp_int(hfp, var.get("filename"), ar);
+    makefp_int(hfp, var.get("filename"), var.get("strategy"), ar);
 
     profile_time::Timer t;
     t.start();
@@ -76,12 +89,12 @@ Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", v
     fmt::print(" done ({} ms).\n", t.time());
   } else if (t_str == "flat_node") {
     Node_flat_floorp nffp(std::move(nt));
-    makefp_int(nffp, var.get("filename"), ar);
+    makefp_int(nffp, var.get("filename"), var.get("strategy"), ar);
 
     // flat floorplans have no hierarchy and cannot be written to LiveHD
   } else if (t_str == "hier_node") {
     Node_hier_floorp nhfp(std::move(nt));
-    makefp_int(nhfp, var.get("filename"), ar);
+    makefp_int(nhfp, var.get("filename"), var.get("strategy"), ar);
 
     profile_time::Timer t;
     t.start();

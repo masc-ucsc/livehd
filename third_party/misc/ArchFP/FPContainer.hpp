@@ -2,7 +2,7 @@
 
 #include "FPObject.hpp"
 #include "floorplan.hpp"
-#include "node_tree.hpp"
+#include "core/node_tree.hpp"
 
 // Should the container and the layout manager be two separate classes or one class?
 // For some reason the GUI engines have them as separate things, that are independent.

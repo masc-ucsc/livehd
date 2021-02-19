@@ -11,10 +11,8 @@
 // To handle the recursion, we will use a recursive helper to the layout routine.
 
 class geogLayout : public FPContainer {
-  bool layoutHardARHelper(FPOptimization opt, double targetWidth, double targetHeight, double curX, double curY, FPObject** layoutStack,
+  bool layoutHelper(FPOptimization opt, double targetWidth, double targetHeight, double curX, double curY, FPObject** layoutStack,
                     int curDepth, FPObject** centerItems, int centerItemsCount);
-  bool layoutHardAR(double targetAR = 1.0);
-  bool layoutSliceTree();
 public:
   geogLayout(unsigned int rsize);
 
