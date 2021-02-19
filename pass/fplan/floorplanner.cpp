@@ -6,7 +6,7 @@
 #include "core/lgedgeiter.hpp"
 #include "annotate.hpp"
 
-Lhd_floorplanner::Lhd_floorplanner(Node_tree&& nt_arg) : root_lg(nt_arg.get_root_lg()), nt(nt_arg), na(root_lg->get_path()) {
+Lhd_floorplanner::Lhd_floorplanner(Node_tree&& nt_arg) : root_lg(nt_arg.get_root_lg()), nt(std::move(nt_arg)), na(root_lg->get_path()) {
   // set how many nodes of a given type must be encountered before they are put in a grid together
   // thresholds can be 0, in which case that type of leaf is never put in a grid.
   for (uint8_t type = 0; type < (uint8_t)Ntype_op::Last_invalid; type++) {

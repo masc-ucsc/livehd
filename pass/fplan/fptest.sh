@@ -18,7 +18,7 @@ rm -rf lgdb # remove lgdb directory in case an earlier failed pass corrupted it
 rm -rf floorplan.*
 
 ./bazel-bin/main/lgshell -c "inou.yosys.tolg files:$1 top:$2" > /dev/null
-./bazel-bin/main/lgshell -c "pass.fplan.writearea" > /dev/null
+./bazel-bin/main/lgshell -c "pass.fplan.write_range" > /dev/null
 ./bazel-bin/main/lgshell -c "lgraph.open name:$2 |> pass.fplan.makefp traversal:hier_lg filename:lg_floorplan.flp" > /dev/null
 ./bazel-bin/main/lgshell -c "lgraph.open name:$2 |> pass.fplan.makefp traversal:flat_node filename:flat_floorplan.flp" > /dev/null
 ./bazel-bin/main/lgshell -c "lgraph.open name:$2 |> pass.fplan.makefp traversal:hier_node filename:hier_floorplan.flp" > /dev/null

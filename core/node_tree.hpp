@@ -19,6 +19,9 @@ protected:
   absl::flat_hash_map<Tree_index, std::array<Tree_index, 24>> last_free;
 
 public:
+  // do not copy node trees if possible, very slow
+  Node_tree(const Node_tree& other) = delete;
+  Node_tree(Node_tree&& other) = default;
   Node_tree(LGraph *root);
 
   // return root LGraph used to generate the node tree

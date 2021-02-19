@@ -29,7 +29,6 @@ public:
   float get_y() const { return y; }
   float get_width() const { return width; }
   float get_height() const { return height; }
-  float get_area() const { return width * height; }
 
   bool is_valid() const { return width > 0 && height > 0; }
 };

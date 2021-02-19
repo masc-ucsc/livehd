@@ -11,26 +11,31 @@ void Pass_fplan_analyzefp::setup() {
                        "return information about a given floorplan within a livehd hierarchy",
                        &Pass_fplan_analyzefp::pass);
 
+  a.add_label_required("top", "top level module in floorplan");
+  a.add_label_required("nodes", "modules to analyze");
+
   a.add_label_optional("regularity", "determine the amount of regularity in a module", "false");
   a.add_label_optional("hpwl", "determine the half-perimeter wire length of a module", "false");
   a.add_label_optional("all", "run all available kinds of analysis on a module", "false");
 
-  a.add_label_required("top", "top level module in floorplan");
-  a.add_label_required("nodes", "modules to analyze");
+  a.add_label_optional("ar", "required aspect ratio of subnode(s)", "1.0");
 
-  a.add_label_optional("path", "lgdb directory to analyze", "lgdb");  // can't pass lgraphs because lgraph names are different
+  a.add_label_optional("path",
+                       "lgdb directory to analyze",
+                       "lgdb");  // can't pass lgraphs because lgraph names are the same per instance
 
   register_pass(a);
 }
 
 void Pass_fplan_analyzefp::print_area(const Node_tree& nt, const Tree_index& tidx) const {
   const Ann_place& p = nt.get_data(tidx).get_place();
-  fmt::print("x: {:.3f} mm, y: {:.3f} mm, width: {:.3f} mm, height: {:.3f} mm, area: {:.3f} mm²",
+  fmt::print("x: {:.3f} mm, y: {:.3f} mm, width: {:.3f} mm, height: {:.3f} mm, area: {:.3f} mm², ar {:.3f}",
              p.get_x(),
              p.get_y(),
              p.get_width(),
              p.get_height(),
-             p.get_area());
+             p.get_width() * p.get_height(),
+             p.get_width() / p.get_height());
 }
 
 void Pass_fplan_analyzefp::print_children(const Node_tree& nt, const Tree_index& tidx) const {
@@ -38,11 +43,12 @@ void Pass_fplan_analyzefp::print_children(const Node_tree& nt, const Tree_index&
     auto child = nt.get_data(child_idx);
 
     if (child_idx != nt.get_last_child(tidx)) {
-      fmt::print(" ├─ node {}\t", child.get_name());
+      fmt::print(" ├─ ");
     } else {
-      fmt::print(" └─ node {}\t", child.get_name());
+      fmt::print(" └─ ");
     }
-    
+    fmt::print("node {}\t", child.get_name());
+
     print_area(nt, child_idx);
     fmt::print("\n");
   }
@@ -78,7 +84,7 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
     error("no nodes were passed!");
   }
 
-  const Node_tree nt(root);
+  Node_tree nt(root);
 
   for (auto name : names) {
     if (name == var.get("top")) {
@@ -88,6 +94,8 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
     }
 
     bool found = false;
+
+    // can't just open an lgraph node, as different floorplan instances have different names
 
     for (const auto& index : nt.depth_preorder()) {  // preorder because higher level nodes are probably going to be analyzed more
                                                      // often than leaf nodes
@@ -105,6 +113,14 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
 
       if (n.get_name() == name) {
         found = true;
+
+        if (var.has_label("ar") || var.has_label("ar")) {
+          float ar = std::stof(var.get("ar").data());
+          I(false); // TODO: write this
+          fmt::print("set aspect ratio of module {} to {}.\n", n.get_name(), ar);
+          break;
+        }
+
         fmt::print("module {}\t", n.get_name());
 
         if (!n.has_place()) {
@@ -115,12 +131,7 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
           if (n.is_type_sub_present()) {
             unsigned int counter = 0;
             for (auto child_idx : nt.children(index)) {
-              auto child = nt.get_data(child_idx);
-              if (!child.has_place()) {
-                fmt::print("(no area information)\n");
-                return;
-              }
-
+              (void)child_idx;
               counter++;
             }
 

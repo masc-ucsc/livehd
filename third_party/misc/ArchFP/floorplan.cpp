@@ -137,43 +137,6 @@ string FPObject::getUniqueName() const {
     return name + std::to_string(Name2Count(name));
 }
 
-unsigned int FPObject::outputLGraphLayout(Node_tree& tree, Tree_index tidx, double startX, double startY) {
-  bool found = false;
-
-  // Tree_index child_idx = tree.get_first_child(tidx);
-  Tree_index child_idx = tree.get_last_free(tidx, getType());
-  while (child_idx != tree.invalid_index()) {
-    Node* child = tree.ref_data(child_idx);
-
-    // fmt::print("testing child node {} with parent hier ({}, {})\n", child->debug_name(), child->get_hidx().level,
-    // child->get_hidx().pos);
-    if (child->get_type_op() != getType() || child->has_place()) {
-      child_idx = tree.get_sibling_next(child_idx);
-      continue;
-    }
-
-    found = true;
-    if (verbose) {
-      fmt::print("assigning child node {} to parent hier ({}, {})\n",
-                 child->debug_name(),
-                 child->get_hidx().level,
-                 child->get_hidx().pos);
-    }
-
-    Ann_place p(calcX(startX), calcY(startY), getWidth(), getHeight());
-    child->set_place(p);
-    child->set_name(Ntype::get_name(getType()));
-
-    tree.set_last_free(tidx, getType(), child_idx);
-
-    break;
-  }
-
-  assert(found);
-
-  return 1;
-}
-
 // Methods for the FPWrapper class.
 FPCompWrapper::FPCompWrapper(dummyComponent* comp, double minAR, double maxAR, double areaArg, int countArg) {
   component      = comp;
@@ -377,6 +340,43 @@ double FPContainer::totalArea() {
   return area;
 }
 
+unsigned int FPObject::outputLGraphLayout(Node_tree& tree, Tree_index tidx, double startX, double startY) {
+  bool found = false;
+
+  // Tree_index child_idx = tree.get_first_child(tidx);
+  Tree_index child_idx = tree.get_last_free(tidx, getType());
+  while (child_idx != tree.invalid_index()) {
+    Node* child = tree.ref_data(child_idx);
+
+    // fmt::print("testing child node {} with parent hier ({}, {})\n", child->debug_name(), child->get_hidx().level,
+    // child->get_hidx().pos);
+    if (child->get_type_op() != getType() || child->has_place()) {
+      child_idx = tree.get_sibling_next(child_idx);
+      continue;
+    }
+
+    found = true;
+    if (verbose) {
+      fmt::print("assigning child node {} to parent hier ({}, {})\n",
+                 child->debug_name(),
+                 child->get_hidx().level,
+                 child->get_hidx().pos);
+    }
+
+    Ann_place p(calcX(startX), calcY(startY), getWidth(), getHeight());
+    child->set_place(p);
+    child->set_name(Ntype::get_name(getType()));
+
+    tree.set_last_free(tidx, getType(), child_idx);
+
+    break;
+  }
+
+  assert(found);
+
+  return 1;
+}
+
 unsigned int FPObject::findNode(Node_tree& tree, Tree_index tidx, double cX, double cY) {
   Ntype_op t = getType();
 
@@ -404,7 +404,8 @@ unsigned int FPObject::findNode(Node_tree& tree, Tree_index tidx, double cX, dou
         continue;
       }
 
-      // fmt::print("assigning child subnode {} to parent hier ({}, {})\n", child->debug_name(), child->get_hidx().level, child->get_hidx().pos);
+      // fmt::print("assigning child subnode {} to parent hier ({}, {})\n", child->debug_name(), child->get_hidx().level,
+      // child->get_hidx().pos);
 
       // write placement information to subnode as well
       Ann_place p(calcX(cX), calcY(cY), getWidth(), getHeight());
@@ -422,7 +423,6 @@ unsigned int FPObject::findNode(Node_tree& tree, Tree_index tidx, double cX, dou
   } else if (t == Ntype_op::Invalid) {  // specific kind of layout - current hier structure is fine
     count = outputLGraphLayout(tree, tidx, cX, cY);
   } else {
-    fmt::print("???\n");
     assert(false);
   }
 
