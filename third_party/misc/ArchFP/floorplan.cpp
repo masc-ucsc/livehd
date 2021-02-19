@@ -14,7 +14,7 @@
 #include "mathutil.hpp"
 
 // This will be used to keep track of user's request for more output during layout.
-constexpr bool verbose = false;
+constexpr bool verbose = true;
 
 // Temporary local for crazy mirror reflection stuff.
 constexpr int maxMirrorDepth = 20;
@@ -474,7 +474,7 @@ bool gridLayout::layout(FPOptimization opt, double targetAR) {
   // We want the gridRatio to express the actual width to height.
   double gridRatio = ((double)xCount) / yCount;
   // Now see what we want as the component ratio.
-  double ratio = targetAR / gridRatio;
+  double ratio = abs(targetAR) / gridRatio;
 
   if (verbose) {
     cout << "In Grid Layout, xCount=" << xCount << " yCount=" << yCount << "\n";
@@ -606,7 +606,7 @@ bool bagLayout::layout(FPOptimization opt, double targetAR) {
       replaceComponent(GL, i);
       comp = GL;
     }
-    comp->layout(opt, AR);
+    comp->layout(opt, abs(AR));
     assert(comp->valid());
     // Now we have the final component, we can set the location.
     comp->setLocation(nextX, nextY);
@@ -757,17 +757,7 @@ geogLayout::geogLayout(unsigned int rsize) : FPContainer(rsize) {
   name = "Geog";
 }
 
-// some geography hints only work with certain numbers of items
-void geogLayout::checkHint(int count, GeographyHint hint) const {
-  if ((hint == LeftRight || hint == LeftRightMirror || hint == LeftRight180 || hint == TopBottom || hint == TopBottomMirror
-       || hint == TopBottom180)
-      && count != 2) {
-    throw std::invalid_argument("geography hint and component count are incompatible!");
-  }
-}
-
 void geogLayout::addComponent(FPObject* comp, int count, GeographyHint hint) {
-  checkHint(count, hint);
   comp->setHint(hint);
   comp->setType(Ntype_op::Sub);
   FPContainer::addComponent(comp, count);
@@ -775,7 +765,6 @@ void geogLayout::addComponent(FPObject* comp, int count, GeographyHint hint) {
 
 FPObject* geogLayout::addComponentCluster(Ntype_op type, int count, double area, double maxARArg, double minARArg,
                                           GeographyHint hint) {
-  checkHint(count, hint);
   FPObject* comp = FPContainer::addComponentCluster(type, count, area, maxARArg, minARArg);
   comp->setHint(hint);
   return comp;
@@ -783,7 +772,6 @@ FPObject* geogLayout::addComponentCluster(Ntype_op type, int count, double area,
 
 FPObject* geogLayout::addComponentCluster(string name, int count, double area, double maxARArg, double minARArg,
                                           GeographyHint hint) {
-  checkHint(count, hint);
   FPObject* comp = FPContainer::addComponentCluster(name, count, area, maxARArg, minARArg);
   comp->setHint(hint);
   return comp;
@@ -876,7 +864,7 @@ bool geogLayout::layoutHelper(FPOptimization opt, double remWidth, double remHei
     }
     // Not sure if we need to set the hint, but when I missed this for the grid below, it was a bug.
     FPLayout->setHint(Center);
-    FPLayout->layout(opt, targetAR);
+    FPLayout->layout(opt, abs(targetAR));
     assert(FPLayout->valid());
     if (verbose)
       cout << "Laying out Center item(s).  Current x and y are(" << curX << "," << curY << ")\n";
@@ -962,6 +950,7 @@ bool geogLayout::layoutHelper(FPOptimization opt, double remWidth, double remHei
       targetWidth  = remWidth;
       targetHeight = totalArea / targetWidth;
     }
+
     if (compHint == Left)
       newX += targetWidth;
     if (compHint == Right)
@@ -979,7 +968,7 @@ bool geogLayout::layoutHelper(FPOptimization opt, double remWidth, double remHei
       grid->setHint(compHint);
       FPLayout = grid;
     }
-    FPLayout->layout(opt, targetAR);
+    FPLayout->layout(opt, abs(targetAR));
     assert(FPLayout->valid());
     FPLayout->setLocation(curX, curY);
     // Put the layout on the stack.

@@ -9,7 +9,7 @@
 using namespace std;
 
 int    Name2Count(const string& arg);
-void clearCount();
+void   clearCount();
 string getStringFromInt(int in);
 void   setNameMode(bool);
 
@@ -93,12 +93,15 @@ public:
   virtual double   getWidth() const { return width; }
   virtual double   getHeight() const { return height; }
   virtual double   getArea() const { return area; }
-  virtual double   totalArea() { return area * count; }
-  virtual bool     valid() const { return x >= 0.0 && y >= 0.0 && width > 0.0 && height > 0.0 && area > 0.0; }
   virtual string   getName() const { return name; }
   virtual Ntype_op getType() const { return type; }
   virtual int      getCount() const { return count; }
   string           getUniqueName() const;
+
+  virtual double totalArea() { return area * count; }
+
+  // check if object has valid parameters (some overlap ok, so position is not checked)
+  virtual bool   valid() const { return width > 0.0 && height > 0.0 && area > 0.0; }
 
   // Calculate the output position taking starting offset and mirroring.
   double calcX(double startX) const;
@@ -270,8 +273,6 @@ class geogLayout : public FPContainer {
   // int        centerItemsCount;
   bool layoutHelper(FPOptimization opt, double targetWidth, double targetHeight, double curX, double curY, FPObject** layoutStack,
                     int curDepth, FPObject** centerItems, int centerItemsCount);
-
-  void checkHint(int count, GeographyHint hint) const;
 
 public:
   geogLayout(unsigned int rsize);

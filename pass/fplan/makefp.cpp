@@ -41,7 +41,7 @@ void Pass_fplan_makefp::makefp_int(Lhd_floorplanner& fp, const std::string_view 
   if (dest.length() > 0) {
     fmt::print("  writing floorplan to file {}...", dest);
     fp.write_file(dest);
-    fmt::print("done ({} ms).\n", t.time());
+    fmt::print(" done ({} ms).\n", t.time());
   }
 }
 

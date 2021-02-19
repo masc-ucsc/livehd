@@ -50,7 +50,7 @@ protected:
       GeographyHint::Right
   };
 
-  // these hints are only valid for exactly two nodes
+  // these hints are only valid for node counts divisible by 2
   constexpr static std::array<GeographyHint, 6> hint_seq_2 = {
       GeographyHint::LeftRight,
       GeographyHint::LeftRightMirror,

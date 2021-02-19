@@ -18,9 +18,6 @@ void Pass_fplan_analyzefp::setup() {
   a.add_label_optional("hpwl", "determine the half-perimeter wire length of a module", "false");
   a.add_label_optional("all", "run all available kinds of analysis on a module", "false");
 
-  // TODO: not yet implemented
-  a.add_label_optional("ar", "required aspect ratio of subnode(s)", "1.0");
-
   a.add_label_optional("path",
                        "lgdb directory to analyze",
                        "lgdb");  // can't pass lgraphs because lgraph names are the same per instance
@@ -114,13 +111,6 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
 
       if (n.get_name() == name) {
         found = true;
-
-        if (var.has_label("ar") || var.has_label("ar")) {
-          float ar = std::stof(var.get("ar").data());
-          I(false); // TODO: write this
-          fmt::print("set aspect ratio of module {} to {}.\n", n.get_name(), ar);
-          break;
-        }
 
         fmt::print("module {}\t", n.get_name());
 

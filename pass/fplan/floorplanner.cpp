@@ -30,7 +30,7 @@ GeographyHint Lhd_floorplanner::randomHint(int count) const {
   static size_t sel = 0;
 
   sel = (sel + 1) % hint_seq.size();
-  if (count == 2) {
+  if (count % 2 == 0) {
     return hint_seq_2[sel];
   }
 
