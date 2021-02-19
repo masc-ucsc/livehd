@@ -549,6 +549,7 @@ std::string_view Slang_tree::process_expression(const slang::Expression& expr) {
     auto lhs = process_expression(op.left());
     auto rhs = process_expression(op.right());
     std::string_view res_var;
+	(void)res_var;
     switch (op.op) {
       case slang::BinaryOperator::Add:        return create_plus_stmts(lhs, rhs);
       case slang::BinaryOperator::Subtract:   return create_minus_stmts(lhs, rhs);
