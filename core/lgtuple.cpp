@@ -85,7 +85,7 @@ std::shared_ptr<Lgtuple> Lgtuple::make_merge(Node_pin &sel_dpin, const std::vect
     auto &it0        = its[0];
     int   use_pos    = tup0->get_pos(it0->first);
     for (auto i = 1u; i < its.size(); ++i) {
-      same_names &= (it0->first == its[i]->first);
+      same_names &= (it0->first  == its[i]->first);
       same_dpins &= (it0->second == its[i]->second);
       auto v = tup_list[i]->get_pos(its[i]->first);
       if (v != -1 && v != use_pos) {
@@ -94,8 +94,10 @@ std::shared_ptr<Lgtuple> Lgtuple::make_merge(Node_pin &sel_dpin, const std::vect
         fmt::print("DEBUG tup-i\n");
         tup_list[i]->dump();
         // FIXME->sh: TODO: design entry point
-        // if it's tuple-reg and one of the tuple-chain branch doesn't have a corresponding field,
-        // which means it actually tries to fetch the q-pin
+        // if it's tuple-reg and one of the tuple-chain branch doesn't have a
+        // corresponding field, which means even in parent scope, this
+        // tuple-field is not defined before, and it actually tries to fetch
+        // the q-pin
 
         LGraph::info("tuples {} and {} have fields {} and {} at different positions {} vs {}",
                      tup0->get_name(),

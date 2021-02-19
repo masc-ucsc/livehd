@@ -17,10 +17,12 @@ scalar_reg_out_pre_declare firrtl_tail2 tuple_reg tuple_reg2'
 
 # pts='firrtl_tail2'
 
-# pts='hier_tuple_nested_if hier_tuple_nested_if3 hier_tuple_nested_if3
-# hier_tuple_nested_if4 hier_tuple_nested_if5 hier_tuple_nested_if7 '
+pts='hier_tuple_nested_if hier_tuple_nested_if3
+hier_tuple_nested_if4 hier_tuple_nested_if5 '
 
-# pts='tuple_reg2 tuple_reg3'
+pts='hier_tuple_nested_if7'
+
+# pts='tuple_reg2 tuple_reg3 hier_tuple_nested_if7 '
 # pts='pp'
 # pts='tuple_reg3'
 
