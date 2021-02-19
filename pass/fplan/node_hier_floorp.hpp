@@ -4,6 +4,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "floorplanner.hpp"
+#include "GeogLayout.hpp"
 #include "lgedgeiter.hpp"
 #include "node_pin.hpp"
 

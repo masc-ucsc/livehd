@@ -4,6 +4,8 @@
 
 #include "node_type_area.hpp"
 
+#include "GeogLayout.hpp"
+
 Node_flat_floorp::Node_flat_floorp(Node_tree&& nt_arg) : Lhd_floorplanner(std::move(nt_arg)) {}
 
 void Node_flat_floorp::load() {

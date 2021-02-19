@@ -18,7 +18,11 @@ void Pass_fplan_makefp::setup() {
   m.add_label_optional("traversal",
                        "LGraph traversal method to use. Valid options are \"hier_lg\", \"flat_node\", and \"hier_node\"",
                        "hier_node");
-                       
+
+  m.add_label_optional("strategy",
+                       "Floorplanning method to use.  Valid options are \"hard_ar\", and \"slicing\"",
+                       "slicing");
+
   m.add_label_optional("filename", "If set, write the floorplan to a file named <filename>.flp as well as back into LiveHD.");
   m.add_label_optional("aspect", "Requested aspect ratio of the entire floorplan, default is 1.0.", "1.0");
 

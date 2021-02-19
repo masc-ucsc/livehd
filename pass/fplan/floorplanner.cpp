@@ -45,7 +45,7 @@ void Lhd_floorplanner::create(float ar) {
 }
 
 void Lhd_floorplanner::write_file(const std::string_view filename) {
-  ostream& fos = outputHotSpotHeader(filename.data());
+  std::ostream& fos = outputHotSpotHeader(filename.data());
   root_layout->outputHotSpotLayout(fos);
   outputHotSpotFooter(fos);
 }
