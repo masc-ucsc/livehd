@@ -19,7 +19,7 @@ bool bagLayout::layout(FPOptimization opt, double targetAR) {
 
   // Calculate our area, and the implied target width and height.
   area             = totalArea();
-  double remHeight = sqrt(area / targetAR);
+  double remHeight = sqrt(area / abs(targetAR));
   double remWidth  = area / remHeight;
   double nextX     = 0;
   double nextY     = 0;
@@ -32,6 +32,7 @@ bool bagLayout::layout(FPOptimization opt, double targetAR) {
   // Sort the components, placing them in decreasing order of size.
   sortByArea();
   int itemCount = getComponentCount();
+  bool correct = true;
   for (int i = 0; i < itemCount; i++) {
     FPObject* comp     = getComponent(i);
     double    compArea = comp->totalArea();
@@ -48,7 +49,7 @@ bool bagLayout::layout(FPOptimization opt, double targetAR) {
       replaceComponent(GL, i);
       comp = GL;
     }
-    comp->layout(opt, AR);
+    correct = correct && comp->layout(opt, AR);
     assert(comp->valid());
     // Now we have the final component, we can set the location.
     comp->setLocation(nextX, nextY);

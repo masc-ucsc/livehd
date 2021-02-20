@@ -10,21 +10,8 @@ Ask about:
 
 Goals:
 
-
-
-
-
-
-0. Fix ArchFP - crashes when generating small hierarchical floorplans due to valid() assertions failing
-    using abs() doesn't help - write fix up code.  This needs to work.
-
-
-
-
-
-
 1. Check on how nextpnr gets hints, if it gets hints at all.  Can we write hints for nextpnr to consume?
-2. Test BOOM core (waiting on yosys memory implementation?)
+2. Test BOOM core
 3. Write node level hierarchy to file (mmap_tree not being written to file is known TODO)
 4. Find / write a method that doesn't mess up on the wrong aspect ratio - HardAspectRatio not helpful for initial floorplans.
 
@@ -42,9 +29,9 @@ Things to add:
     - improve implementation in ArchFP, resolve todos
        - double -> float?
     - write a slicing floorplanner (HardAspectRatio quality goes down significantly with larger floorplans to the point of being unusable)
+       - seperate pass from geogLayout - need to make Lhd_floorplanner a template beforehand
        - http://eda.ee.ucla.edu/EE201A-04Spring/polish.pdf
        - https://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.12.3375&rep=rep1&type=pdf
-
 2. Incremental Floorplans (waiting on goal (2))
     - floorplan using existing geography hints/specific AR instead of randomly choosing a hint/using AR = 1.0
     - assign geography hints to nodes based on wirelength metrics
