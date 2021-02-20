@@ -546,7 +546,7 @@ void random_mmap_vset(int max, std::string_view name) {
 
       pos = rng.max(max);
 
-      if (set.find(pos))
+      if (set.efind(pos))
         set.erase(pos);
     }
   }
