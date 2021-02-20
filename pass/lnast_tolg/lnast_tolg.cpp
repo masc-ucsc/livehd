@@ -9,6 +9,7 @@
 
 Lnast_tolg::Lnast_tolg(std::string_view _module_name, std::string_view _path) : module_name(_module_name), path(_path) {
   setup_lnast_to_lgraph_primitive_type_mapping();
+  tuple_assign_str = "tuple_assign";
 }
 
 std::vector<LGraph *> Lnast_tolg::do_tolg(std::shared_ptr<Lnast> ln, const Lnast_nid &top_stmts) {
@@ -130,8 +131,8 @@ void Lnast_tolg::process_ast_phi_op(LGraph *lg, const Lnast_nid &lnidx_phi) {
   auto     cond_dpin = setup_ref_node_dpin(lg, c1);
   Node_pin true_dpin;
   Node_pin false_dpin;
-  true_dpin  = setup_ref_node_dpin(lg, c2);
-  false_dpin = setup_ref_node_dpin(lg, c3);
+  true_dpin  = setup_ref_node_dpin(lg, c2, false, true);
+  false_dpin = setup_ref_node_dpin(lg, c3, false, true);
 
   I(!true_dpin.is_invalid());
   I(!false_dpin.is_invalid());
@@ -270,15 +271,15 @@ void Lnast_tolg::nary_node_rhs_connections(LGraph *lg, Node &opr_node, const std
 Node Lnast_tolg::process_ast_assign_op(LGraph *lg, const Lnast_nid &lnidx_assign) {
   auto c0 = lnast->get_first_child(lnidx_assign);
   auto c1 = lnast->get_sibling_next(c0);
-  fmt::print("DEBUG c0 name:{}\n", lnast->get_name(c0));
-  fmt::print("DEBUG c1 name:{}\n", lnast->get_name(c1));
 
-  auto opd1 = setup_ref_node_dpin(lg, c1);
+  bool is_tup_asg = lnast->get_name(lnidx_assign) == tuple_assign_str;
+  auto opd1 = setup_ref_node_dpin(lg, c1, is_tup_asg);
   auto opd1_node  = opd1.get_node();
   auto opd1_ntype = opd1_node.get_type_op();
+  
 
   Node_pin opr_spin;
-  if (opd1_ntype == Ntype_op::TupAdd || opd1_ntype == Ntype_op::TupRef) {
+  if (is_tup_asg || opd1_ntype == Ntype_op::TupAdd || opd1_ntype == Ntype_op::TupRef) {
     opr_spin = setup_tuple_assignment(lg, lnidx_assign);
   } else if (opd1_ntype == Ntype_op::AttrSet) {
     opr_spin = setup_node_assign_and_lhs(lg, lnidx_assign);
@@ -954,7 +955,7 @@ Node_pin Lnast_tolg::setup_node_assign_and_lhs(LGraph *lg, const Lnast_nid &lnid
 
 // for both lhs and rhs, except the new io, reg, and const, the node and its dpin
 // should already be in the table as the operand comes from existing operator output
-Node_pin Lnast_tolg::setup_ref_node_dpin(LGraph *lg, const Lnast_nid &lnidx_opd) {
+Node_pin Lnast_tolg::setup_ref_node_dpin(LGraph *lg, const Lnast_nid &lnidx_opd, bool from_ta_assign, bool from_phi) {
   auto name  = lnast->get_sname(lnidx_opd);  // name = ssa_name
   auto vname = lnast->get_vname(lnidx_opd);
   I(!name.empty());
@@ -965,23 +966,29 @@ Node_pin Lnast_tolg::setup_ref_node_dpin(LGraph *lg, const Lnast_nid &lnidx_opd)
     auto op   = it->second.get_node().get_type_op();
     
     // if ref comes from an TA dpin
-    if (op == Ntype_op::TupAdd) {
+    if (op == Ntype_op::TupAdd && !from_ta_assign && !from_phi) {
       auto parent_node  = node.setup_sink_pin("tuple_name").get_driver_node();
       auto parent_ntype = parent_node.get_type_op();
-      auto val_spin = node.setup_sink_pin("value");
+      auto val_spin     = node.setup_sink_pin("value");
 
       if (parent_ntype == Ntype_op::Or) {
         return create_scalar_access_tg(lg, it->second);
       } else if (parent_ntype == Ntype_op::TupRef && val_spin.is_connected()) {
-        // case: the tuple has only one field and being used to an operator -> it's still a scalar -> create TG to fetch field 0
+        // case: the tuple has only one pos sink pin connected and being used
+        // to an operator -> it's still a scalar -> create TG to fetch field 0
+        // note: if the field is connected, it cannot be viewed as scalar so
+        // just return the TA chain itself, not the scalar-TG(0) optimization.
         if (val_spin.get_driver_node().get_type_op() != Ntype_op::TupAdd) {
-          if (node.setup_sink_pin("field").is_connected()) {
-            auto field_dpin = node.setup_sink_pin("field").get_driver_pin();
-            I(field_dpin.has_name());
-            return create_scalar_access_tg(lg, it->second, field_dpin);
-          } else {
+          if (!node.setup_sink_pin("field").is_connected()) {
             return create_scalar_access_tg(lg, it->second);
           }
+          /* if (node.setup_sink_pin("field").is_connected()) { */
+          /*   auto field_dpin = node.setup_sink_pin("field").get_driver_pin(); */
+          /*   I(field_dpin.has_name()); */
+          /*   return create_scalar_access_tg(lg, it->second, field_dpin); */
+          /* } else { */
+          /*   return create_scalar_access_tg(lg, it->second); */
+          /* } */
         }
       }
     }

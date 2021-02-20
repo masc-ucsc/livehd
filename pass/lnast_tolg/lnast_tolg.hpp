@@ -22,6 +22,7 @@ private:
   std::shared_ptr<Lnast> lnast;
   std::string_view module_name;
   std::string_view path;
+  std::string      tuple_assign_str;
   
   absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Ntype_op>   primitive_type_lnast2lg;
   absl::flat_hash_map<std::string_view, Node_pin>               vname2attr_dpin;       // for dummy attribute node construction, vn = variable non-ssa name, dpin = last attr dpin within "any" attributes
@@ -62,7 +63,7 @@ protected:
   Node     setup_node_opr_and_lhs    (LGraph *lg, const Lnast_nid &lnidx_opr, bool from_fir_op = false);
   Node_pin setup_tuple_assignment    (LGraph *lg, const Lnast_nid &lnidx_opr);
   Node_pin setup_node_assign_and_lhs (LGraph *lg, const Lnast_nid &lnidx_opr);
-  Node_pin setup_ref_node_dpin       (LGraph *lg, const Lnast_nid &lnidx);
+  Node_pin setup_ref_node_dpin       (LGraph *lg, const Lnast_nid &lnidx, bool from_ta_assign = false, bool  from_phi = false);
 
   Ntype_op decode_lnast_op           (const Lnast_nid &lnidx_opr);
   void     setup_dpin_ssa            (Node_pin &dpin, std::string_view var_name, uint16_t subs);

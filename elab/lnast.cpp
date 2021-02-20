@@ -362,6 +362,8 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
   if (!paired_nid.is_invalid())
     paired_type = get_type(paired_nid);
 
+  std::string ta_asg_str = "tuple_assign";
+
   // hier_TA but is actually doing __bits set
   auto last_token  = get_token(get_last_child(selc_nid)).get_text();
   bool is_attr_set = last_token.substr(0, 2) == "__" && last_token.substr(0, 3) != "___";
@@ -451,6 +453,7 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
         && check_tuple_var_1st_scope_ssa_table_parents_chain(psts_nid, ta_lhs_name, get_parent(psts_nid))) {
       ref_data(selc_nid)->type = Lnast_ntype::create_assign();
       auto asg_nid            = selc_nid;  // better code reading
+      ref_data(asg_nid)->token = Etoken(0, 0, 0, 0, add_string(ta_asg_str));
       auto c0_asg             = get_first_child(asg_nid);
       auto c1_asg             = get_sibling_next(c0_asg);
       auto c2_asg             = get_sibling_next(c1_asg);
@@ -501,6 +504,8 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
 
       ref_data(selc_nid)->type = Lnast_ntype::create_assign();
       auto asg_nid           = selc_nid;  // better code reading
+      ref_data(asg_nid)->token = Etoken(0, 0, 0, 0, add_string(ta_asg_str)); //trick for LN->LG
+
       auto c0_asg            = get_first_child(asg_nid);
       auto c1_asg            = get_sibling_next(c0_asg);
       auto c2_asg            = get_sibling_next(c1_asg);
@@ -568,7 +573,9 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
       add_child(new_tg, get_data(old_child));
     }
 
-    ref_data(old_tg)->type = Lnast_ntype::create_assign();
+    ref_data(old_tg)->type  = Lnast_ntype::create_assign();
+    ref_data(old_tg)->token = Etoken(0, 0, 0, 0, add_string(ta_asg_str));
+    /* auto idx_select = lnast.add_child(parent_node, Lnast_node::create_select("selectSI")); */
     auto asg_nid           = selc_nid;  // better code reading
     auto c0_asg            = get_first_child(asg_nid);
     auto c1_asg            = get_sibling_next(c0_asg);
