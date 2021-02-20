@@ -80,6 +80,7 @@ protected:
     }
     void set_master_root();
     void set_master();
+    void set_type(uint8_t type);
 
     constexpr Index_ID get_overflow() const; // returns the next Entry64 if overflow, zero otherwise
     constexpr Index_ID get_next() const;     // returns the next Entry16 that is master, zero if none
@@ -135,7 +136,7 @@ public:
   Index_iter inp_ids(const Index_ID s);  // Iterate over the inp edges of s
 
   uint8_t get_type(const Index_ID master_root_id) const;  // set/get type on the master_root id (s or pointed by s)
-  void    set_type(const Index_ID master_root_id, uint8_t type, Entry16 newNode);
+  void    set_type(const Index_ID master_root_id);
 
   Port_ID get_pid(const Index_ID master_root_id) const; // pid for master or 0 for master_root
 
