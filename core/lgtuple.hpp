@@ -55,9 +55,25 @@ protected:
     if (it!=key_map.end())
       return it; // case when there was no key, just pos
 
+    if (pos==0 && key_map.size()==1) {
+      return key_map.begin();
+    }
+
     auto p2k_it = pos2key_map.find(str_pos);
-    if (p2k_it==pos2key_map.end())
+    if (p2k_it==pos2key_map.end()) {
+      if (pos==0) {
+        it = key_map.end();
+        for(auto it2 = key_map.begin(); it2 != key_map.end(); ++it2) {
+          if (it2->first.substr(2) == "__")
+            continue; // skip attributes
+          if (it2 != key_map.end())
+            return key_map.end(); // foo.0 == foo.bar only if foo has 1 field (and n-attributes)
+          it = it2;
+        }
+        return it;
+      }
       return key_map.end(); // case when key did not exist
+    }
 
     it = key_map.find(p2k_it->second);
     I(it != key_map.end()); // both maps should hit in this case
