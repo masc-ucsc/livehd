@@ -34,7 +34,7 @@ Index_ID Graph_core::create_master_root(uint8_t type){
    // pid zero is already set to zero, because there is type or pid bits
    Index_ID id = table16.size();
    m.set_type(type);
-   table16.push_back(m); //emplace back is more efficient
+   table16.emplace_back(m); //emplace back is more efficient
    //use pointers to deal with mismatching type
 
    //set_type(master_root_id, type, m);
