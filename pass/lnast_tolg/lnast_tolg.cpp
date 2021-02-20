@@ -974,8 +974,15 @@ Node_pin Lnast_tolg::setup_ref_node_dpin(LGraph *lg, const Lnast_nid &lnidx_opd)
         return create_scalar_access_tg(lg, it->second);
       } else if (parent_ntype == Ntype_op::TupRef && val_spin.is_connected()) {
         // case: the tuple has only one field and being used to an operator -> it's still a scalar -> create TG to fetch field 0
-        if (val_spin.get_driver_node().get_type_op() != Ntype_op::TupAdd)
-          return create_scalar_access_tg(lg, it->second);
+        if (val_spin.get_driver_node().get_type_op() != Ntype_op::TupAdd) {
+          if (node.setup_sink_pin("field").is_connected()) {
+            auto field_dpin = node.setup_sink_pin("field").get_driver_pin();
+            I(field_dpin.has_name());
+            return create_scalar_access_tg(lg, it->second, field_dpin);
+          } else {
+            return create_scalar_access_tg(lg, it->second);
+          }
+        }
       }
     }
     return it->second;
@@ -1018,6 +1025,19 @@ Node_pin Lnast_tolg::setup_ref_node_dpin(LGraph *lg, const Lnast_nid &lnidx_opd)
   name2dpin[name] = node_dpin;  // for io and reg, the %$# identifier are still used in symbol table
   return node_dpin;
 }
+
+
+Node_pin Lnast_tolg::create_scalar_access_tg (LGraph *lg, const Node_pin &tg_tupname_dpin, const Node_pin &field_dpin) {
+  auto tup_get    = lg->create_node(Ntype_op::TupGet);
+  auto tn_spin    = tup_get.setup_sink_pin("tuple_name");  // tuple name
+  auto field_spin = tup_get.setup_sink_pin("field");       // field 
+
+  auto tn_dpin = tg_tupname_dpin;
+  tn_dpin.connect_sink(tn_spin);
+  field_dpin.connect_sink(field_spin);
+  return tup_get.setup_driver_pin();
+}
+
 
 Node_pin Lnast_tolg::create_scalar_access_tg (LGraph *lg, const Node_pin &tg_tupname_dpin) {
   auto tup_get        = lg->create_node(Ntype_op::TupGet);
