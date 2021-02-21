@@ -532,7 +532,7 @@ void Prp_lnast::eval_if_statement(mmap_lib::Tree_index idx_start_ast, mmap_lib::
   if (cur_ast.rule_id == Prp_rule_if_statement) {  // conditioned if
     if (scan_text(cur_ast.token_entry) == "if") {  // if
       root_if_node = Lnast_node::create_if(get_token(cur_ast.token_entry));
-    } else if (scan_text(cur_ast.token_entry) == "uif") {  // unique ifs
+    } else if (scan_text(cur_ast.token_entry) == "unique") {  // unique ifs
       root_if_node = Lnast_node::create_uif(get_token(cur_ast.token_entry));
       idx_nxt_ast  = ast->get_sibling_next(idx_nxt_ast);
     } else {  // just a block of code with no condition

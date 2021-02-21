@@ -97,6 +97,7 @@ uint8_t Prp::rule_if_statement(std::list<std::tuple<Rule_id, Token_entry>> &pass
 
   // optional
   SCAN_IS_TOKEN(Pyrope_id_unique, Prp_rule_if_statement);
+
   if (!(SCAN_IS_TOKEN(Pyrope_id_if, Prp_rule_if_statement))) {
     if (!SCAN_IS_TOKEN(Token_id_ob, Prp_rule_if_statement)) {
       RULE_FAILED("Failed rule_if_statement; couldn't find a starting open brace (option 2).\n");
