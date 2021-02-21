@@ -18,6 +18,7 @@ hier_tuple_nested_if hier_tuple_nested_if3 hier_tuple_nested_if4
 hier_tuple_nested_if5 hier_tuple_nested_if7 '
 
 # pts='tuple_reg3'
+pts='basic_op'
 
 # pts='vector'
 # pts='vector2'
