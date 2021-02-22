@@ -98,13 +98,12 @@ int main(void) {
     auto idx_stmts0 = lnast->add_child(lnast->get_root(), Lnast_node::create_stmts ("stmts0",  line_num, pos1, pos2));
     auto idx_if     = lnast->add_child(idx_stmts0, Lnast_node::create_if    ("if",  line_num, pos1, pos2));
 
-    auto idx_cstmts = lnast->add_child(idx_if,     Lnast_node::create_cstmts("cstmts",  line_num, pos1, pos2));
-    auto idx_gt     = lnast->add_child(idx_cstmts, Lnast_node::create_gt    ("gt",  line_num, pos1, pos2));
+    auto idx_gt     = lnast->add_child(idx_if,     Lnast_node::create_gt    ("gt",  line_num, pos1, pos2));
     auto idx_lhs1   = lnast->add_child(idx_gt,     Lnast_node::create_ref   ("___a",  line_num, pos1, pos2));
     auto idx_op1    = lnast->add_child(idx_gt,     Lnast_node::create_ref   ("a",  line_num, pos1, pos2));
     auto idx_op2    = lnast->add_child(idx_gt,     Lnast_node::create_const ("0d3",  line_num, pos1, pos2));
 
-    auto idx_cond1  = lnast->add_child(idx_if,     Lnast_node::create_cond  ("___a",  line_num, pos1, pos2));
+    auto idx_cond1  = lnast->add_child(idx_if,     Lnast_node::create_ref   ("___a",  line_num, pos1, pos2));
 
     auto idx_stmts1 = lnast->add_child(idx_if,     Lnast_node::create_stmts ("stmts1",  line_num, pos1, pos2));
     auto idx_plus   = lnast->add_child(idx_stmts1, Lnast_node::create_plus  ("plus",  line_num, pos1, pos2));
@@ -135,13 +134,12 @@ int main(void) {
     auto idx_stmts0  = lnast->add_child(lnast->get_root(), Lnast_node::create_stmts ("stmts0",  line_num, pos1, pos2));
     auto idx_if      = lnast->add_child(idx_stmts0,  Lnast_node::create_if    ("if",  line_num, pos1, pos2));
 
-    auto idx_cstmts  = lnast->add_child(idx_if,      Lnast_node::create_cstmts("cstmts",  line_num, pos1, pos2));
-    auto idx_gt      = lnast->add_child(idx_cstmts,  Lnast_node::create_gt    ("gt",  line_num, pos1, pos2));
+    auto idx_gt      = lnast->add_child(idx_if,      Lnast_node::create_gt    ("gt",  line_num, pos1, pos2));
     auto idx_lhs1    = lnast->add_child(idx_gt,      Lnast_node::create_ref   ("a",  line_num, pos1, pos2));
     auto idx_op1     = lnast->add_child(idx_gt,      Lnast_node::create_ref   ("foo",  line_num, pos1, pos2));
     auto idx_op2     = lnast->add_child(idx_gt,      Lnast_node::create_const ("0d3",  line_num, pos1, pos2));
 
-    auto idx_cond1   = lnast->add_child(idx_if,      Lnast_node::create_cond  ("a",  line_num, pos1, pos2));
+    auto idx_cond1   = lnast->add_child(idx_if,      Lnast_node::create_ref   ("a",  line_num, pos1, pos2));
 
     auto idx_stmts1  = lnast->add_child(idx_if,      Lnast_node::create_stmts ("stmts1",  line_num, pos1, pos2));
 
@@ -176,26 +174,24 @@ int main(void) {
     auto idx_stmts0  = lnast->add_child(lnast->get_root(), Lnast_node::create_stmts ("stmts0",  line_num, pos1, pos2));
     auto idx_if      = lnast->add_child(idx_stmts0, Lnast_node::create_if    ("if",  line_num, pos1, pos2));
 
-    auto idx_cstmts1 = lnast->add_child(idx_if,     Lnast_node::create_cstmts("cstmts",  line_num, pos1, pos2));
-    auto idx_gt      = lnast->add_child(idx_cstmts1,Lnast_node::create_gt    ("gt",  line_num, pos1, pos2));
+    auto idx_gt      = lnast->add_child(idx_if,     Lnast_node::create_gt    ("gt",  line_num, pos1, pos2));
     auto idx_lhs1    = lnast->add_child(idx_gt,     Lnast_node::create_ref   ("___a",  line_num, pos1, pos2));
     auto idx_op1     = lnast->add_child(idx_gt,     Lnast_node::create_ref   ("a",  line_num, pos1, pos2));
     auto idx_op2     = lnast->add_child(idx_gt,     Lnast_node::create_const ("0d10",  line_num, pos1, pos2));
 
-    auto idx_cond1   = lnast->add_child(idx_if,     Lnast_node::create_cond  ("___a",  line_num, pos1, pos2));
+    auto idx_cond1   = lnast->add_child(idx_if,     Lnast_node::create_ref   ("___a",  line_num, pos1, pos2));
 
     auto idx_stmts1  = lnast->add_child(idx_if,     Lnast_node::create_stmts ("stmts1",  line_num, pos1, pos2));
     auto idx_assign1 = lnast->add_child(idx_stmts1, Lnast_node::create_assign("assign",  line_num, pos1, pos2));
     auto idx_lhs2    = lnast->add_child(idx_assign1,Lnast_node::create_ref   ("b",  line_num, pos1, pos2));
     auto idx_op3     = lnast->add_child(idx_assign1,Lnast_node::create_const ("0d3",  line_num, pos1, pos2));
 
-    auto idx_cstmts2 = lnast->add_child(idx_if,     Lnast_node::create_cstmts("cstmts2",  line_num, pos1, pos2));
-    auto idx_lt      = lnast->add_child(idx_cstmts2,Lnast_node::create_lt    ("lt",  line_num, pos1, pos2));
+    auto idx_lt      = lnast->add_child(idx_if,     Lnast_node::create_lt    ("lt",  line_num, pos1, pos2));
     auto idx_lhs3    = lnast->add_child(idx_lt,     Lnast_node::create_ref   ("___b",  line_num, pos1, pos2));
     auto idx_op4     = lnast->add_child(idx_lt,     Lnast_node::create_ref   ("a",  line_num, pos1, pos2));
     auto idx_op5     = lnast->add_child(idx_lt,     Lnast_node::create_const ("0d1",  line_num, pos1, pos2));
 
-    auto idx_cond2   = lnast->add_child(idx_if,     Lnast_node::create_cond  ("___b",  line_num, pos1, pos2));
+    auto idx_cond2   = lnast->add_child(idx_if,     Lnast_node::create_ref   ("___b",  line_num, pos1, pos2));
 
     auto idx_stmts2  = lnast->add_child(idx_if,     Lnast_node::create_stmts ("stmts2",  line_num, pos1, pos2));
     auto idx_assign2 = lnast->add_child(idx_stmts2, Lnast_node::create_assign("assign",  line_num, pos1, pos2));
@@ -278,7 +274,7 @@ int main(void) {
     auto idx_stmts0  = lnast->add_child(lnast->get_root(), Lnast_node::create_stmts ("stmts0",  line_num, pos1, pos2));
 
     auto idx_while   = lnast->add_child(idx_stmts0,  Lnast_node::create_while("while",  line_num, pos1, pos2));
-    auto idx_cond    = lnast->add_child(idx_while,   Lnast_node::create_cond ("___a",  line_num, pos1, pos2));
+    auto idx_cond    = lnast->add_child(idx_while,   Lnast_node::create_ref  ("___a",  line_num, pos1, pos2));
     auto idx_stmts1  = lnast->add_child(idx_while,   Lnast_node::create_stmts("stmts",  line_num, pos1, pos2));
 
     auto idx_minus   = lnast->add_child(idx_stmts1, Lnast_node::create_minus ("minus", line_num, pos1, pos2));
@@ -309,7 +305,7 @@ int main(void) {
     auto idx_func    = lnast->add_child(idx_stmts0, Lnast_node::create_func_def("func_def",  line_num, pos1, pos2));
 
     auto idx_fname   = lnast->add_child(idx_func,   Lnast_node::create_ref   ("func_xor",  line_num, pos1, pos2));
-    auto idx_cond    = lnast->add_child(idx_func,   Lnast_node::create_cond  ("condition",  line_num, pos1, pos2));
+    auto idx_cond    = lnast->add_child(idx_func,   Lnast_node::create_ref   ("condition",  line_num, pos1, pos2));
     auto idx_stmts1  = lnast->add_child(idx_func,   Lnast_node::create_stmts ("stmts",  line_num, pos1, pos2));
     auto idx_io1     = lnast->add_child(idx_func,   Lnast_node::create_ref   ("$a",  line_num, pos1, pos2));
     auto idx_io2     = lnast->add_child(idx_func,   Lnast_node::create_ref   ("$b",  line_num, pos1, pos2));
@@ -343,7 +339,7 @@ int main(void) {
     auto idx_stmts0   = lnast->add_child(lnast->get_root(), Lnast_node::create_stmts ("stmts0",  line_num, pos1, pos2));  auto idx_func     = lnast->add_child(idx_stmts0, Lnast_node::create_func_def("stmts0",  line_num, pos1, pos2));
 
     auto idx_fname    = lnast->add_child(idx_func,    Lnast_node::create_ref    ("func_xor",  line_num, pos1, pos2));
-    auto idx_cond     = lnast->add_child(idx_func,    Lnast_node::create_cond   ("$valid",  line_num, pos1, pos2));
+    auto idx_cond     = lnast->add_child(idx_func,    Lnast_node::create_ref    ("$valid",  line_num, pos1, pos2));
     auto idx_stmts1   = lnast->add_child(idx_func,    Lnast_node::create_stmts  ("stmts1",  line_num, pos1, pos2));
     auto idx_io1      = lnast->add_child(idx_func,    Lnast_node::create_ref    ("$a",  line_num, pos1, pos2));
     auto idx_io2      = lnast->add_child(idx_func,    Lnast_node::create_ref    ("$b",  line_num, pos1, pos2));
@@ -384,7 +380,7 @@ int main(void) {
     auto idx_func    = lnast->add_child(idx_stmts0 , Lnast_node::create_func_def("func_def",  line_num, pos1, pos2));
 
     auto idx_fname   = lnast->add_child(idx_func   , Lnast_node::create_ref      ("func_xor",  line_num, pos1, pos2));
-    auto idx_cond    = lnast->add_child(idx_func   , Lnast_node::create_cond     ("true",  line_num, pos1, pos2));
+    auto idx_cond    = lnast->add_child(idx_func   , Lnast_node::create_const    ("true",  line_num, pos1, pos2));
 
     auto idx_stmts1  = lnast->add_child(idx_func   , Lnast_node::create_stmts    ("stmts1",  line_num, pos1, pos2));
     auto idx_io1     = lnast->add_child(idx_func   , Lnast_node::create_ref      ("$a",  line_num, pos1, pos2));
@@ -419,7 +415,7 @@ int main(void) {
     auto idx_target  = lnast->add_child(idx_fcall  , Lnast_node::create_ref      ("func_xor",  line_num, pos1, pos2));
     auto idx_arg     = lnast->add_child(idx_fcall  , Lnast_node::create_ref      ("___d",  line_num, pos1, pos2));
 
-    auto idx_dot     = lnast->add_child(idx_stmts0 , Lnast_node::create_dot      ("dot",  line_num, pos1, pos2));
+    auto idx_dot     = lnast->add_child(idx_stmts0 , Lnast_node::create_select   ("dot",  line_num, pos1, pos2));
     auto idx_lhs7    = lnast->add_child(idx_dot    , Lnast_node::create_ref      ("___f",  line_num, pos1, pos2));
     auto idx_op7     = lnast->add_child(idx_dot    , Lnast_node::create_ref      ("my_xor",  line_num, pos1, pos2));
     auto idx_op8     = lnast->add_child(idx_dot    , Lnast_node::create_ref      ("out",  line_num, pos1, pos2));
@@ -448,7 +444,7 @@ int main(void) {
     auto idx_func    = lnast->add_child(idx_stmts0 , Lnast_node::create_func_def("func_def",  line_num, pos1, pos2));
 
     auto idx_fname   = lnast->add_child(idx_func   , Lnast_node::create_ref      ("func_xor",  line_num, pos1, pos2));
-    auto idx_cond    = lnast->add_child(idx_func   , Lnast_node::create_cond     ("true",  line_num, pos1, pos2));
+    auto idx_cond    = lnast->add_child(idx_func   , Lnast_node::create_const    ("true",  line_num, pos1, pos2));
     auto idx_stmts1  = lnast->add_child(idx_func   , Lnast_node::create_stmts    ("stmts1",  line_num, pos1, pos2));
     auto idx_io1     = lnast->add_child(idx_func   , Lnast_node::create_ref      ("$a",  line_num, pos1, pos2));
     auto idx_io2     = lnast->add_child(idx_func   , Lnast_node::create_ref      ("$b",  line_num, pos1, pos2));
@@ -482,7 +478,7 @@ int main(void) {
     auto idx_target  = lnast->add_child(idx_fcall  , Lnast_node::create_ref      ("func_xor",  line_num, pos1, pos2));
     auto idx_arg     = lnast->add_child(idx_fcall  , Lnast_node::create_ref      ("___d",  line_num, pos1, pos2));
 
-    auto idx_dot     = lnast->add_child(idx_stmts0 , Lnast_node::create_dot      ("dot",  line_num, pos1, pos2));
+    auto idx_dot     = lnast->add_child(idx_stmts0 , Lnast_node::create_select   ("dot",  line_num, pos1, pos2));
     auto idx_lhs7    = lnast->add_child(idx_dot    , Lnast_node::create_ref      ("___j",  line_num, pos1, pos2));
     auto idx_op7     = lnast->add_child(idx_dot    , Lnast_node::create_ref      ("my_xor",  line_num, pos1, pos2));
     auto idx_op8     = lnast->add_child(idx_dot    , Lnast_node::create_ref      ("out",  line_num, pos1, pos2));
@@ -595,10 +591,10 @@ int main(void) {
 
     auto idx_stmts   = lnast->add_child(lnast->get_root(), Lnast_node::create_stmts ("stmts0",  line_num, pos1, pos2));
 
-    auto idx_dot     = lnast->add_child(idx_stmts,   Lnast_node::create_dot    ("stmts0",  line_num, pos1, pos2));
+    auto idx_dot     = lnast->add_child(idx_stmts,   Lnast_node::create_select ("stmts0",  line_num, pos1, pos2));
     auto idx_lhs1    = lnast->add_child(idx_dot,     Lnast_node::create_ref    ("___a",  line_num, pos1, pos2));
     auto idx_op1     = lnast->add_child(idx_dot,     Lnast_node::create_ref    ("foo",  line_num, pos1, pos2));
-    auto idx_op2     = lnast->add_child(idx_dot,     Lnast_node::create_ref    ("__bits",  line_num, pos1, pos2));
+    auto idx_op2     = lnast->add_child(idx_dot,     Lnast_node::create_const  ("__bits",  line_num, pos1, pos2));
 
     auto idx_assign1 = lnast->add_child(idx_stmts,   Lnast_node::create_assign("assign",  line_num, pos1, pos2));
     auto idx_lhs2    = lnast->add_child(idx_assign1, Lnast_node::create_ref   ("___a",  line_num, pos1, pos2));

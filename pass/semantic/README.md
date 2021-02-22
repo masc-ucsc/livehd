@@ -224,7 +224,7 @@ Following each tree-structure operation, push `write_dict` and `read_dict` onto 
 `check_if_ops`
 * **Parameters**: LNAST class, LNAST node, LNAST statement name (parent to node)
 * **Return value**: Void
-* **Description**: Check the LNAST node to make sure the only child node-types are '*cstmts*', '*stmts*', or '*ref*'. <br><br>
+* **Description**: Check the LNAST node to make sure the only child node-types are '*stmts*', or '*ref*'. <br><br>
 All other node-types will throw an error.
 
 `check_for_ops`

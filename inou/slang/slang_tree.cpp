@@ -66,7 +66,7 @@ void Slang_tree::new_lnast(std::string_view name) {
   lnast = std::make_unique<Lnast>(name);
   lnast->set_root(Lnast_node(Lnast_ntype::create_top()));
 
-  auto node_stmts = Lnast_node::create_stmts("___stmts");
+  auto node_stmts = Lnast_node::create_stmts();
   idx_stmts = lnast->add_child(lnast->get_root(), node_stmts);
 
   net2attr.clear();
@@ -160,12 +160,17 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol& symbol) {
 			if (expr) {
 				std::string_view lhs_var = create_lnast_var(member.name);
 
+#if 0
+        // ALso correct, more checks but is it needed? Not if all the bit ops are correctly tracked
 				auto it = net2attr.find(member.name);
 				if (it == net2attr.end()) {
 					net2attr.emplace(member.name, Net_attr::Local);
 					create_declare_bits_stmts(lhs_var, ns.getType().isSigned(), ns.getType().getBitWidth());
 				}
-				create_dp_assign_stmts(lhs_var, process_expression(*expr));
+				create_assign_stmts(lhs_var, process_expression(*expr));
+#else
+				create_assign_stmts(lhs_var, process_expression(*expr));
+#endif
 			}
     }else if (member.kind == slang::SymbolKind::ContinuousAssign) {
       const auto &ca = member.as<slang::ContinuousAssignSymbol>();
@@ -265,18 +270,18 @@ bool Slang_tree::process(const slang::AssignmentExpression& expr) {
     auto expr_var     = process_expression(expr.right());
 
     auto mask_h_var   = create_mask_stmts(dest_max_bit); // (1<<H)-1
-    auto mask_l_var   = create_not_stmts(create_mask_stmts(dest_min_bit)); // ~((1<<L)-1)
-    auto mask_var     = create_and_stmts(mask_h_var, mask_l_var); // ((1<<H)-1) & (~((1<<L)-1))
-    auto mask_not_var = create_not_stmts(mask_var);
+    auto mask_l_var   = create_bit_not_stmts(create_mask_stmts(dest_min_bit)); // ~((1<<L)-1)
+    auto mask_var     = create_bit_and_stmts(mask_h_var, mask_l_var); // ((1<<H)-1) & (~((1<<L)-1))
+    auto mask_not_var = create_bit_not_stmts(mask_var);
 
-    auto adj_rhs_var  = create_shift_left_stmts(expr_var   , dest_min_bit);
-    auto updated_rhs  = create_and_stmts(adj_rhs_var, mask_var);
-    auto rest_rhs     = create_and_stmts(var_name   , mask_not_var);
+    auto adj_rhs_var  = create_shl_stmts(expr_var   , dest_min_bit);
+    auto updated_rhs  = create_bit_and_stmts(adj_rhs_var, mask_var);
+    auto rest_rhs     = create_bit_and_stmts(var_name   , mask_not_var);
 
-    rhs_var = create_or_stmts(updated_rhs, rest_rhs);
+    rhs_var = create_bit_or_stmts({updated_rhs, rest_rhs});
   }
 
-  create_dp_assign_stmts(var_name, rhs_var);
+  create_assign_stmts(var_name, rhs_var);
 
   return true;
 }
@@ -296,18 +301,18 @@ std::string_view Slang_tree::create_mask_stmts(std::string_view dest_max_bit) {
     }
   }
 
-  auto shl_var    = create_shift_left_stmts("1", dest_max_bit);
+  auto shl_var    = create_shl_stmts("1", dest_max_bit);
   auto mask_h_var = create_minus_stmts(shl_var, "1");
 
   return mask_h_var;
 }
 
-std::string_view Slang_tree::create_not_stmts(std::string_view var_name) {
+std::string_view Slang_tree::create_bit_not_stmts(std::string_view var_name) {
   if (var_name.empty())
     return var_name;
 
   auto res_var = create_lnast_tmp();
-  auto not_idx = lnast->add_child(idx_stmts, Lnast_node::create_not("NOT"));
+  auto not_idx = lnast->add_child(idx_stmts, Lnast_node::create_bit_not());
   lnast->add_child(not_idx, Lnast_node::create_ref(res_var));
   if (std::isdigit(var_name[0]))
     lnast->add_child(not_idx, Lnast_node::create_const(var_name));
@@ -317,14 +322,29 @@ std::string_view Slang_tree::create_not_stmts(std::string_view var_name) {
   return res_var;
 }
 
-std::string_view Slang_tree::create_and_stmts(std::string_view a_var, std::string_view b_var) {
+std::string_view Slang_tree::create_logical_not_stmts(std::string_view var_name) {
+  if (var_name.empty())
+    return var_name;
+
+  auto res_var = create_lnast_tmp();
+  auto not_idx = lnast->add_child(idx_stmts, Lnast_node::create_logical_not());
+  lnast->add_child(not_idx, Lnast_node::create_ref(res_var));
+  if (std::isdigit(var_name[0]))
+    lnast->add_child(not_idx, Lnast_node::create_const(var_name));
+  else
+    lnast->add_child(not_idx, Lnast_node::create_ref(var_name));
+
+  return res_var;
+}
+
+std::string_view Slang_tree::create_bit_and_stmts(std::string_view a_var, std::string_view b_var) {
   if (a_var.empty())
     return b_var;
   if (b_var.empty())
     return a_var;
 
   auto res_var = create_lnast_tmp();
-  auto and_idx = lnast->add_child(idx_stmts, Lnast_node::create_and("AND"));
+  auto and_idx = lnast->add_child(idx_stmts, Lnast_node::create_bit_and());
   lnast->add_child(and_idx, Lnast_node::create_ref(res_var));
   if (std::isdigit(a_var[0]))
     lnast->add_child(and_idx, Lnast_node::create_const(a_var));
@@ -338,14 +358,38 @@ std::string_view Slang_tree::create_and_stmts(std::string_view a_var, std::strin
   return res_var;
 }
 
-std::string_view Slang_tree::create_or_stmts(std::string_view a_var, std::string_view b_var) {
+std::string_view Slang_tree::create_bit_or_stmts(std::vector<std::string_view> var) {
+
+  std::string_view res_var;
+  Lnast_nid lid;
+
+  for(auto v:var) {
+    if (v.empty())
+      continue;
+
+    if (res_var.empty()) {
+      res_var = create_lnast_tmp();
+      lid = lnast->add_child(idx_stmts, Lnast_node::create_bit_or());
+      lnast->add_child(lid, Lnast_node::create_ref(res_var));
+    }
+
+    if (std::isdigit(v[0]))
+      lnast->add_child(lid, Lnast_node::create_const(v));
+    else
+      lnast->add_child(lid, Lnast_node::create_ref(v));
+  }
+
+  return res_var;
+}
+
+std::string_view Slang_tree::create_bit_xor_stmts(std::string_view a_var, std::string_view b_var) {
   if (a_var.empty())
     return b_var;
   if (b_var.empty())
     return a_var;
 
   auto res_var = create_lnast_tmp();
-  auto or_idx = lnast->add_child(idx_stmts, Lnast_node::create_or("OR"));
+  auto or_idx = lnast->add_child(idx_stmts, Lnast_node::create_bit_xor());
   lnast->add_child(or_idx, Lnast_node::create_ref(res_var));
   if (std::isdigit(a_var[0]))
     lnast->add_child(or_idx, Lnast_node::create_const(a_var));
@@ -359,35 +403,14 @@ std::string_view Slang_tree::create_or_stmts(std::string_view a_var, std::string
   return res_var;
 }
 
-std::string_view Slang_tree::create_xor_stmts(std::string_view a_var, std::string_view b_var) {
-  if (a_var.empty())
-    return b_var;
-  if (b_var.empty())
-    return a_var;
-
-  auto res_var = create_lnast_tmp();
-  auto or_idx = lnast->add_child(idx_stmts, Lnast_node::create_xor("XOR"));
-  lnast->add_child(or_idx, Lnast_node::create_ref(res_var));
-  if (std::isdigit(a_var[0]))
-    lnast->add_child(or_idx, Lnast_node::create_const(a_var));
-  else
-    lnast->add_child(or_idx, Lnast_node::create_ref(a_var));
-  if (std::isdigit(b_var[0]))
-    lnast->add_child(or_idx, Lnast_node::create_const(b_var));
-  else
-    lnast->add_child(or_idx, Lnast_node::create_ref(b_var));
-
-  return res_var;
-}
-
-std::string_view Slang_tree::create_shift_left_stmts(std::string_view a_var, std::string_view b_var) {
+std::string_view Slang_tree::create_shl_stmts(std::string_view a_var, std::string_view b_var) {
   if (a_var.empty())
     return a_var;
   if (b_var.empty())
     return a_var;
 
   auto res_var = create_lnast_tmp();
-  auto shl_idx = lnast->add_child(idx_stmts, Lnast_node::create_shift_left("SHL"));
+  auto shl_idx = lnast->add_child(idx_stmts, Lnast_node::create_shl());
   lnast->add_child(shl_idx, Lnast_node::create_ref(res_var));
   if (std::isdigit(a_var[0]))
     lnast->add_child(shl_idx, Lnast_node::create_const(a_var));
@@ -405,7 +428,7 @@ void Slang_tree::create_dp_assign_stmts(std::string_view lhs_var, std::string_vi
   I(lhs_var.size());
   I(rhs_var.size());
 
-  auto idx_assign = lnast->add_child(idx_stmts, Lnast_node::create_dp_assign(""));
+  auto idx_assign = lnast->add_child(idx_stmts, Lnast_node::create_dp_assign());
   lnast->add_child(idx_assign, Lnast_node::create_ref(lhs_var));
   if (std::isdigit(rhs_var[0]))
     lnast->add_child(idx_assign, Lnast_node::create_const(rhs_var));
@@ -417,7 +440,7 @@ void Slang_tree::create_assign_stmts(std::string_view lhs_var, std::string_view 
   I(lhs_var.size());
   I(rhs_var.size());
 
-  auto idx_assign = lnast->add_child(idx_stmts, Lnast_node::create_assign(""));
+  auto idx_assign = lnast->add_child(idx_stmts, Lnast_node::create_assign());
   lnast->add_child(idx_assign, Lnast_node::create_ref(lhs_var));
   if (std::isdigit(rhs_var[0]))
     lnast->add_child(idx_assign, Lnast_node::create_const(rhs_var));
@@ -428,7 +451,7 @@ void Slang_tree::create_assign_stmts(std::string_view lhs_var, std::string_view 
 void Slang_tree::create_declare_bits_stmts(std::string_view a_var, bool is_signed, int bits) {
   auto tmp_var = create_lnast_tmp();
 
-  auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_select(""));
+  auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_select());
   lnast->add_child(idx_dot, Lnast_node::create_ref(tmp_var));
   lnast->add_child(idx_dot, Lnast_node::create_ref(a_var));
 
@@ -437,7 +460,7 @@ void Slang_tree::create_declare_bits_stmts(std::string_view a_var, bool is_signe
   }else{
     lnast->add_child(idx_dot, Lnast_node::create_const("__ubits"));
   }
-  auto idx_assign = lnast->add_child(idx_stmts, Lnast_node::create_assign(""));
+  auto idx_assign = lnast->add_child(idx_stmts, Lnast_node::create_assign());
   lnast->add_child(idx_assign, Lnast_node::create_ref(tmp_var));
   lnast->add_child(idx_assign, Lnast_node::create_const(create_lnast(bits)));
 }
@@ -447,7 +470,7 @@ std::string_view Slang_tree::create_minus_stmts(std::string_view a_var, std::str
     return a_var;
 
   auto res_var = create_lnast_tmp();
-  auto sub_idx = lnast->add_child(idx_stmts, Lnast_node::create_minus("MINUS"));
+  auto sub_idx = lnast->add_child(idx_stmts, Lnast_node::create_minus());
   lnast->add_child(sub_idx, Lnast_node::create_ref(res_var));
   if (a_var.empty()) {
     lnast->add_child(sub_idx, Lnast_node::create_const("0"));
@@ -472,7 +495,7 @@ std::string_view Slang_tree::create_plus_stmts(std::string_view a_var, std::stri
     return a_var;
 
   auto res_var = create_lnast_tmp();
-  auto add_idx = lnast->add_child(idx_stmts, Lnast_node::create_plus("PLUS"));
+  auto add_idx = lnast->add_child(idx_stmts, Lnast_node::create_plus());
   lnast->add_child(add_idx, Lnast_node::create_ref(res_var));
   if (std::isdigit(a_var[0]))
     lnast->add_child(add_idx, Lnast_node::create_const(a_var));
@@ -493,7 +516,7 @@ std::string_view Slang_tree::create_mult_stmts(std::string_view a_var, std::stri
     return a_var;
 
   auto res_var = create_lnast_tmp();
-  auto idx = lnast->add_child(idx_stmts, Lnast_node::create_mult("MULT"));
+  auto idx = lnast->add_child(idx_stmts, Lnast_node::create_mult());
   lnast->add_child(idx, Lnast_node::create_ref(res_var));
   if (std::isdigit(a_var[0]))
     lnast->add_child(idx, Lnast_node::create_const(a_var));
@@ -512,7 +535,7 @@ std::string_view Slang_tree::create_div_stmts(std::string_view a_var, std::strin
     return a_var;
 
   auto res_var = create_lnast_tmp();
-  auto idx = lnast->add_child(idx_stmts, Lnast_node::create_div("DIV"));
+  auto idx = lnast->add_child(idx_stmts, Lnast_node::create_div());
   lnast->add_child(idx, Lnast_node::create_ref(res_var));
 
   if (a_var.empty()) {
@@ -536,7 +559,7 @@ std::string_view Slang_tree::create_mod_stmts(std::string_view a_var, std::strin
   I(a_var.size() && b_var.size());
 
   auto res_var = create_lnast_tmp();
-  auto idx = lnast->add_child(idx_stmts, Lnast_node::create_mod("MOD"));
+  auto idx = lnast->add_child(idx_stmts, Lnast_node::create_mod());
   lnast->add_child(idx, Lnast_node::create_ref(res_var));
   if (std::isdigit(a_var[0]))
     lnast->add_child(idx, Lnast_node::create_const(a_var));
@@ -581,16 +604,39 @@ std::string_view Slang_tree::process_expression(const slang::Expression& expr) {
       case slang::BinaryOperator::Multiply:   return create_mult_stmts(lhs,rhs);
       case slang::BinaryOperator::Divide:     return create_div_stmts(lhs, rhs);
       case slang::BinaryOperator::Mod:        return create_mod_stmts(lhs, rhs);
-      case slang::BinaryOperator::BinaryAnd:  return create_and_stmts(lhs, rhs);
-      case slang::BinaryOperator::BinaryOr:   return create_or_stmts(lhs,rhs);
-      case slang::BinaryOperator::BinaryXor:  return create_xor_stmts(lhs, rhs);
-      case slang::BinaryOperator::BinaryXnor: return create_not_stmts(create_xor_stmts(lhs, rhs));
+      case slang::BinaryOperator::BinaryAnd:  return create_bit_and_stmts(lhs, rhs);
+      case slang::BinaryOperator::BinaryOr:   return create_bit_or_stmts({lhs,rhs});
+      case slang::BinaryOperator::BinaryXor:  return create_bit_xor_stmts(lhs, rhs);
+      case slang::BinaryOperator::BinaryXnor: return create_bit_not_stmts(create_bit_xor_stmts(lhs, rhs));
       default: {
         fmt::print("FIXME unimplemented binary operator\n");
-        break;
       }
     }
     return "fix_binary_op";
+  }
+
+  if (expr.kind == slang::ExpressionKind::UnaryOp) {
+    const auto &op = expr.as<slang::UnaryExpression>();
+    auto lhs = process_expression(op.operand());
+    switch (op.op) {
+      case slang::UnaryOperator::BitwiseNot: return create_bit_not_stmts(lhs);
+      case slang::UnaryOperator::LogicalNot: return create_logical_not_stmts(lhs);
+      case slang::UnaryOperator::Plus:
+      case slang::UnaryOperator::Minus:
+      case slang::UnaryOperator::BitwiseAnd:
+      case slang::UnaryOperator::BitwiseOr:
+      case slang::UnaryOperator::BitwiseXor:
+      case slang::UnaryOperator::BitwiseNand:
+      case slang::UnaryOperator::BitwiseNor:
+      case slang::UnaryOperator::BitwiseXnor:
+        // case UnaryOperator::Preincrement:
+        // case UnaryOperator::Predecrement:
+        // case UnaryOperator::Postincrement:
+        // case UnaryOperator::Postdecrement:
+      default: {
+        fmt::print("FIXME unimplemented unary operator\n");
+      }
+    }
   }
 
   if (expr.kind == slang::ExpressionKind::Conversion) {
@@ -599,10 +645,36 @@ std::string_view Slang_tree::process_expression(const slang::Expression& expr) {
 
     auto res = process_expression(conv.operand()); // NOTHING TO DO? (the dp_assign handles it?)
 
+    if (to_type->isSigned())
+      return res; // No mask needed if signed
+
     auto bits = create_lnast(to_type->getBitWidth());
     auto mask = create_mask_stmts(bits);
 
-    return create_and_stmts(res, mask);
+    return create_bit_and_stmts(res, mask);
+  }
+
+  if (expr.kind == slang::ExpressionKind::Concatenation) {
+    const auto &concat = expr.as<slang::ConcatenationExpression>();
+
+    auto offset = 0u;
+
+    std::vector<std::string_view> adjusted_fields;
+
+    for(const auto &e:concat.operands()) {
+      auto bits = e->type->getBitWidth();
+
+      auto res_var = process_expression(*e);
+
+      if (offset) {
+        res_var = create_shl_stmts(res_var, lnast->add_string(std::to_string(offset)));
+      }
+      adjusted_fields.emplace_back(res_var);
+
+      offset += bits;
+    }
+
+    return create_bit_or_stmts(adjusted_fields);
   }
 
   fmt::print("FIXME still unimplemented Expression kind\n");
