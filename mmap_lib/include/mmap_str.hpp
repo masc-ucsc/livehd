@@ -101,7 +101,7 @@ public:
   }
 #endif
   // FIXME: This type of constructor is needed to be a constexpr
-  template<std::size_t N, typename = std::enable_if_t<(N-1)<14>, typename=void>
+  template<std::size_t N, typename = std::enable_if_t<(N-1)<14>>
   constexpr str(const char(&s)[N]): ptr_or_start(0), e{0}, _size(N-1) {
     auto stop    = _size<4?_size:4;
     //isptr =  _size<14?false:true;
@@ -117,7 +117,7 @@ public:
   }
   
  
-  template <std::size_t N>
+  template<std::size_t N, typename = std::enable_if_t<(N-1)>=14>, typename=void>
   str(const char (&s)[N]) : ptr_or_start(0), e{0}, _size(N - 1) {
     // the first two charactors
     e[0] = s[0];
@@ -213,7 +213,8 @@ public:
 	      str::string_map.set(string_vector.size() - (_size - 10), _size - 10);
 	    }
   	}
-  
+    
+    /* 
     std::cout << "this is ptr_or_start: " << ptr_or_start << std::endl;
     std::cout << "this is e: ";
     for (int i = 0; i < 10; ++i) { std::cout << e[i] << " "; }
@@ -223,13 +224,56 @@ public:
     for (std::vector<int>::const_iterator i = string_vector.begin(); i != string_vector.end(); ++i) {
       std::cout << *i << " ";
     }
-    std::cout << std::endl;
-    
-
-
-
-    
+    */
   }
+
+  void print_PoS () { 
+    std::cout << "This is ptr_or_start: " << std::endl;
+    if (_size > 14) {
+      std::cout << "Pointer: " << ptr_or_start << std::endl;
+    } else if (_size <= 14) {
+      std::cout << "Start: ";
+      // [first] [sec] [thr] [fourth] 
+      for (int i = 3; i >= 0; --i) {
+        std::cout << char(ptr_or_start >> (i * 8));
+      }
+      std::cout << std::endl;
+    } 
+  }
+
+  void print_e () {
+    std::cout << "this is e: ";
+    for (int i = 0; i < 10; ++i) { std::cout << e[i] << " "; }
+    std::cout << std::endl;
+  }
+
+  void print_StrVec () {
+    std::cout << "this is string_vector: ";
+    /*
+    for (std::vector<int>::const_iterator i : string_vector) {
+      std::cout << i << std::endl;
+    }
+    */
+    for (std::vector<int>::const_iterator i = string_vector.begin(); i != string_vector.end(); ++i) 
+    {
+      std::cout << char(*i) << " ";
+    }
+    std::cout << std::endl;
+  }
+
+  void print_key_val_str () {
+    std::cout << "Key:  " << "Val:  " << "String:  " << std::endl;
+    for (auto it = string_map.begin(), end = string_map.end(); it != end; ++it) {
+      uint32_t key   = string_map.get_key(it);
+      uint32_t value = string_map.get(it);
+      std::cout << key << "   " << value << "   ";
+      for (int i = key; i < (key+value); ++i) {
+        std::cout << string_vector.at(i);
+      }
+      std::cout << std::endl;
+    }
+  }
+
 #if 0
   fixme_const_iterator begin()  const {
     for(const auto &ch:data.b) {
