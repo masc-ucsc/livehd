@@ -57,20 +57,18 @@ double FPCompWrapper::ARInRange(double AR) {
   maxAR         = getMaxAR();
   double minAR  = getMinAR();
   double retval = AR;
+  
   if (maxAR < 1) {
-    assert(false);  // should never happen?
-    // retval = std::min(retval, minAR);
-    // retval = std::max(retval, maxAR);
-  } else {
-    retval = std::max(retval, minAR);
-    retval = std::min(retval, maxAR);
+    double temp = maxAR;
+    maxAR = minAR;
+    minAR = temp;
   }
+
+  retval = std::max(retval, minAR);
+  retval = std::min(retval, maxAR);
+
   if (verbose)
     std::cout << "Target AR=" << AR << " minAR=" << minAR << " maxAR=" << maxAR << " returnAR=" << retval << "\n";
-
-  if (AR < minAR || AR > maxAR) {
-    std::cerr << "WARNING: requested AR " << AR << " is outside legal range (" << minAR << ", " << maxAR << "), using " << retval << ".\n";
-  }
 
   return retval;
 }
@@ -92,11 +90,17 @@ void FPCompWrapper::flip() {
 bool FPCompWrapper::layout(FPOptimization opt, double ratio) {
   (void)opt;
   // Make sure the ratio is within the stated constraints.
+  double oldratio = ratio;
   ratio = ARInRange(ratio);
   // Calculate width height from area and AR.
   // We have w/h = ratio => w = ratio*h.
   // and w*h = area => ratio*h*h = area => h^2 = area/ratio => h = sqrt(area/ratio)
   height = sqrt(area / ratio);
   width  = area / height;
-  return true;
+
+  if (oldratio < minAspectRatio || oldratio > maxAspectRatio) {
+    std::cerr << "WARNING: requested AR " << oldratio << " is outside legal range (" << minAspectRatio << ", " << maxAspectRatio << "), using " << ratio << ".\n";
+  }
+
+  return oldratio == ratio;
 }

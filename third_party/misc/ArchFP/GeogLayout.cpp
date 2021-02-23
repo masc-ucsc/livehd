@@ -29,7 +29,7 @@ FPObject* geogLayout::addComponentCluster(std::string name, int count, double ar
   return comp;
 }
 
-bool geogLayout::layoutHelper(FPOptimization opt, double remWidth, double remHeight, double curX, double curY,
+bool geogLayout::hardARLayoutHelper(double remWidth, double remHeight, double curX, double curY,
                               FPObject** layoutStack, int curDepth, FPObject** centerItems, int centerItemsCount) {
   int itemCount = getComponentCount();
   // Check for the end of the recursion.
@@ -63,7 +63,7 @@ bool geogLayout::layoutHelper(FPOptimization opt, double remWidth, double remHei
     }
     // Not sure if we need to set the hint, but when I missed this for the grid below, it was a bug.
     FPLayout->setHint(Center);
-    FPLayout->layout(opt, targetAR);
+    bool correct = FPLayout->layout(HardAspectRatio, targetAR);
     assert(FPLayout->valid());
     if (verbose)
       std::cout << "Laying out Center item(s).  Current x and y are(" << curX << "," << curY << ")\n";
@@ -71,7 +71,7 @@ bool geogLayout::layoutHelper(FPOptimization opt, double remWidth, double remHei
     // Put the layout on the stack.
     // DO we really need to do this????
     layoutStack[curDepth] = FPLayout;
-    return true;
+    return correct;
   }
 
   // Start by pealing off the first componet cluster.
@@ -83,7 +83,7 @@ bool geogLayout::layoutHelper(FPOptimization opt, double remWidth, double remHei
   if (compHint == Center) {
     centerItems[centerItemsCount] = comp;
     centerItemsCount += 1;
-    layoutHelper(opt, remWidth, remHeight, curX, curY, layoutStack, curDepth, centerItems, centerItemsCount);
+    hardARLayoutHelper(remWidth, remHeight, curX, curY, layoutStack, curDepth, centerItems, centerItemsCount);
   }
 
   if (compHint == LeftRight || compHint == TopBottom || compHint == LeftRightMirror || compHint == TopBottomMirror
@@ -126,6 +126,8 @@ bool geogLayout::layoutHelper(FPOptimization opt, double remWidth, double remHei
     compHint = comp->getHint();
   }
 
+  bool correct = false;
+
   // Now handle left, right, top, bottom.
   double newX, newY;
   if (compHint == Left || compHint == Top || compHint == Right || compHint == Bottom) {
@@ -137,7 +139,8 @@ bool geogLayout::layoutHelper(FPOptimization opt, double remWidth, double remHei
 
     if (verbose)
       std::cout << "In geog for " << comp->getName() << ", total component area=" << totalArea << "\n";
-
+    
+    // TODO: adding components in this way assumes everything will fit and lays out components with insane aspect ratios.
     double targetWidth, targetHeight;
     newX = curX;
     newY = curY;
@@ -167,7 +170,7 @@ bool geogLayout::layoutHelper(FPOptimization opt, double remWidth, double remHei
       grid->setHint(compHint);
       FPLayout = grid;
     }
-    FPLayout->layout(opt, targetAR);
+    correct = FPLayout->layout(HardAspectRatio, targetAR);
     assert(FPLayout->valid());
     FPLayout->setLocation(curX, curY);
     // Put the layout on the stack.
@@ -176,17 +179,16 @@ bool geogLayout::layoutHelper(FPOptimization opt, double remWidth, double remHei
       remWidth -= FPLayout->getWidth();
     else if (compHint == Top || compHint == Bottom)
       remHeight -= FPLayout->getHeight();
-    layoutHelper(opt, remWidth, remHeight, newX, newY, layoutStack, curDepth + 1, centerItems, centerItemsCount);
+    hardARLayoutHelper(remWidth, remHeight, newX, newY, layoutStack, curDepth + 1, centerItems, centerItemsCount);
   } else if (compHint != Center) {
     std::cerr << "Hint is not any of the recognized hints.  Hint=" << compHint << "\n";
     std::cerr << "Component is of type " << Ntype::get_name(comp->getType()) << "\n";
   }
 
-  return true;
+  return correct;
 }
 
-bool geogLayout::layout(FPOptimization opt, double targetAR) {
-  (void)opt;
+bool geogLayout::hardARLayout(double targetAR) {
   // All this routine does is set up some data structures,
   //   and then call the helper to recursively do the layout work.
   // We will keep track of containers we make in a "stack".
@@ -202,14 +204,14 @@ bool geogLayout::layout(FPOptimization opt, double targetAR) {
 
   // Calculate the total area, and the implied target width and height.
   area             = totalArea();
-  double remHeight = sqrt(area / targetAR);
+  double remHeight = sqrt(area / abs(targetAR));
   double remWidth  = area / remHeight;
 
   if (verbose)
     std::cout << "In geogLayout for " << getName() << ".  A=" << area << " W=" << remWidth << " H=" << remHeight << "\n";
 
   // Now do the real work.
-  bool retval = layoutHelper(opt, remWidth, remHeight, 0, 0, layoutStack, 0, centerItems, 0);
+  bool correct = hardARLayoutHelper(remWidth, remHeight, 0, 0, layoutStack, 0, centerItems, 0);
 
   // By now, the item list should be empty.
   if (getComponentCount() != 0) {
@@ -217,7 +219,7 @@ bool geogLayout::layout(FPOptimization opt, double targetAR) {
     std::cerr << "Remaining Component count=" << getComponentCount() << "\n";
     for (int i = 0; i < getComponentCount(); i++)
       std::cerr << "Component " << i << " is of type " << getComponent(i)->getName() << "\n";
-    return false;
+    throw std::runtime_error("non-empty item list!");
   }
 
   // Now install the list of containers as our items.
@@ -237,7 +239,14 @@ bool geogLayout::layout(FPOptimization opt, double targetAR) {
   delete[] centerItems;
   delete[] layoutStack;
 
-  return retval;
+  return correct;
+}
+
+bool geogLayout::layout(const FPOptimization opt, const double targetAR) {
+  switch (opt) {
+    case HardAspectRatio: return hardARLayout(targetAR);
+    case SliceTree: assert(false);
+  }
 }
 
 void geogLayout::outputHotSpotLayout(std::ostream& o, double startX, double startY) {

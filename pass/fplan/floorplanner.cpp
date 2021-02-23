@@ -40,7 +40,7 @@ GeographyHint Lhd_floorplanner::randomHint(int count) const {
 void Lhd_floorplanner::create(FPOptimization opt, float ar) {
   bool success = root_layout->layout(opt, ar);
   if (!success) {
-    throw std::runtime_error("unable to lay out floorplan!");
+    fmt::print("WARNING: floorplan may contain overlapping layouts.  Adjusting the overall aspect ratio is recommended.\n");
   }
 }
 

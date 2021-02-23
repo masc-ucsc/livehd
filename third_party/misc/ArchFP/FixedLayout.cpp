@@ -83,7 +83,7 @@ bool fixedLayout::layout(FPOptimization opt, double targetAR) {
   (void)opt;
   // Compare targetAR to our originalAR to calculate x and y scaling factors.
   double currentAR = width / height;
-  double xFactor   = sqrt(targetAR / currentAR);
+  double xFactor   = sqrt(targetAR / abs(currentAR));
   double yFactor   = 1.0 / xFactor;
   morph(xFactor, yFactor);
   width  = xFactor * width;
