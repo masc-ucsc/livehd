@@ -59,49 +59,49 @@ void Lnast_visitor::addLnast(const mmap_lib::Tree_index& idx_stmts, operators Li
   switch (List){
     case (operators::AND):
       fmt::print("AND \n");
-      idx_ = lnast->add_child(idx_stmts, Lnast_node::create_and("AND"));
+      idx_ = lnast->add_child(idx_stmts, Lnast_node::create_bit_and());
       tmpIn="__and" + std::to_string(count);
       node_ = Lnast_node::create_ref(lnast->add_string(tmpIn));
       break;
 
     case (operators::MINUS):
       fmt::print("MINUS \n");
-      idx_ = lnast->add_child(idx_stmts, Lnast_node::create_minus("MINUS"));
+      idx_ = lnast->add_child(idx_stmts, Lnast_node::create_minus());
       tmpIn="__minus" + std::to_string(count);
       node_ = Lnast_node::create_ref(lnast->add_string(tmpIn));
       break;
 
     case (operators::PLUS):
       fmt::print("PLUS \n");
-      idx_ = lnast->add_child(idx_stmts, Lnast_node::create_plus("PLUS"));
+      idx_ = lnast->add_child(idx_stmts, Lnast_node::create_plus());
       tmpIn="__plus" + std::to_string(count);
       node_ = Lnast_node::create_ref(lnast->add_string(tmpIn));
       break;
 
     case (operators::OR):
       fmt::print("OR \n");
-      idx_ = lnast->add_child(idx_stmts, Lnast_node::create_or("OR"));
+      idx_ = lnast->add_child(idx_stmts, Lnast_node::create_bit_or());
       tmpIn="__or" + std::to_string(count);
       node_ = Lnast_node::create_ref(lnast->add_string(tmpIn));
       break;
 
     case (operators::XOR):
       fmt::print("XOR \n");
-      idx_ = lnast->add_child(idx_stmts, Lnast_node::create_xor("XOR"));
+      idx_ = lnast->add_child(idx_stmts, Lnast_node::create_bit_xor());
       tmpIn="__xor" + std::to_string(count);
       node_ = Lnast_node::create_ref(lnast->add_string(tmpIn));
       break;
 
     case (operators::NOT):
       fmt::print("NOT \n");
-      idx_ = lnast->add_child(idx_stmts, Lnast_node::create_not("NOT"));
+      idx_ = lnast->add_child(idx_stmts, Lnast_node::create_bit_not());
       tmpIn="__not" + std::to_string(count);
       node_ = Lnast_node::create_ref(lnast->add_string(tmpIn));
       break;
 
     default:
       // fmt::print("AND \n");
-      // auto idx_ = lnast->add_child(idx_stmts, Lnast_node::create_and("AND"));
+      // auto idx_ = lnast->add_child(idx_stmts, Lnast_node::create_and());
       // std::string tmpIn="__and" + std::to_string(count);
       // auto node_ = Lnast_node::create_ref(lnast->add_string(tmpIn));
       break;
@@ -210,13 +210,13 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
   if (lhs.kind == ExpressionKind::NamedValue) {
     const auto& var = lhs.as<NamedValueExpression>();
     fmt::print("bits:{} {} =  ", var.type->getBitWidth(), var.symbol.name);
-    auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_select(""));
+    auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_select());
     lnast->add_child(idx_dot, Lnast_node::create_ref(lnast->add_string(temp.append(var.symbol.name))));
     temp = "___";
     lnast->add_child(idx_dot, Lnast_node::create_ref(lnast->add_string(output.append(var.symbol.name))));
     lnast->add_child(idx_dot, Lnast_node::create_const("__ubits"));
     output          = "%";
-    auto idx_assign = lnast->add_child(idx_stmts, Lnast_node::create_assign(""));
+    auto idx_assign = lnast->add_child(idx_stmts, Lnast_node::create_assign());
     lnast->add_child(idx_assign, Lnast_node::create_ref(lnast->add_string(temp.append(var.symbol.name))));
     lnast->add_child(idx_assign, Lnast_node::create_const(lnast->add_string(std::to_string(var.type->getBitWidth()))));
   }
@@ -458,7 +458,7 @@ void Lnast_visitor::handle(const slang::InstanceSymbol& symbol) {
 
   lnast = std::make_unique<Lnast>(def.name);
   lnast->set_root(Lnast_node(Lnast_ntype::create_top()));
-  auto node_stmts = Lnast_node::create_stmts("___stmts");
+  auto node_stmts = Lnast_node::create_stmts();
   auto idx_stmts  = lnast->add_child(lnast->get_root(), node_stmts);
 
   symbol.resolvePortConnections();
@@ -470,7 +470,7 @@ void Lnast_visitor::handle(const slang::InstanceSymbol& symbol) {
 
       I(port.defaultValue == nullptr);  // give me a case to DEBUG
 
-      auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_select(""));
+      auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_select());
       auto tmp     = lnast->add_string(absl::StrCat("___", port.name, "_attr"));
       std::string_view var_name;
       if (port.direction == ArgumentDirection::In)
@@ -482,7 +482,7 @@ void Lnast_visitor::handle(const slang::InstanceSymbol& symbol) {
       lnast->add_child(idx_dot, Lnast_node::create_ref(var_name));
       lnast->add_child(idx_dot, Lnast_node::create_const("__ubits")); // FIXME: if input is signed use __sbits
 
-      auto idx_assign = lnast->add_child(idx_stmts, Lnast_node::create_assign(""));
+      auto idx_assign = lnast->add_child(idx_stmts, Lnast_node::create_assign());
       lnast->add_child(idx_assign, Lnast_node::create_ref(tmp));
       lnast->add_child(idx_assign, Lnast_node::create_const(lnast->add_string(std::to_string(port.getType().getBitWidth()))));
     } else if (p->kind == SymbolKind::InterfacePort) {

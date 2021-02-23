@@ -810,7 +810,7 @@ void Cprop::process_mux(Node &node, XEdge_iterator &inp_edges_ordered) {
       auto tup = find_lgtuple(e.driver);
       if (tup == nullptr) {
 
-        fmt::print("DEBUG-0\n");
+        fmt::print("DEBUG-0, node:{}\n", node.debug_name());
         tup_list.clear();
         break;  // All have to have
       }

@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "code_gen_all_lang.hpp"
+#include "lnast_map.hpp"
 
 std::string Prp_parser::ref_name(const std::string &prp_term, bool) const { return prp_term; }
 
@@ -59,9 +60,9 @@ std::string_view Prp_parser::get_lang_type() const { return lang_type; }
 std::string_view Cpp_parser::get_lang_type() const { return lang_type; }
 std::string_view Ver_parser::get_lang_type() const { return lang_type; }
 
-std::string_view Prp_parser::debug_name_lang(Lnast_ntype node_type) const { return node_type.debug_name_pyrope(); }
-std::string_view Cpp_parser::debug_name_lang(Lnast_ntype node_type) const { return node_type.debug_name_cpp(); }
-std::string_view Ver_parser::debug_name_lang(Lnast_ntype node_type) const { return node_type.debug_name_verilog(); }
+std::string_view Prp_parser::debug_name_lang(Lnast_ntype node_type) const { return Lnast_map::debug_name_pyrope(node_type); }
+std::string_view Cpp_parser::debug_name_lang(Lnast_ntype node_type) const { return Lnast_map::debug_name_cpp(node_type); }
+std::string_view Ver_parser::debug_name_lang(Lnast_ntype node_type) const { return Lnast_map::debug_name_verilog(node_type); }
 
 std::string_view Prp_parser::start_else_if() const { return ("} elif ("); }
 std::string_view Cpp_parser::start_else_if() const { return ("} else if ("); }

@@ -40,7 +40,6 @@ protected:
   void process_ast_dp_assign_op     (LGraph *lg, const Lnast_nid &lnidx);
   void process_ast_nary_op          (LGraph *lg, const Lnast_nid &lnidx);
   void process_ast_logical_op       (LGraph *lg, const Lnast_nid &lnidx);
-  void process_ast_as_op            (LGraph *lg, const Lnast_nid &lnidx);
   void process_ast_if_op            (LGraph *lg, const Lnast_nid &lnidx);
   void process_ast_phi_op           (LGraph *lg, const Lnast_nid &lnidx);
   void process_ast_uif_op           (LGraph *lg, const Lnast_nid &lnidx);
@@ -60,7 +59,7 @@ protected:
 
   Node_pin create_scalar_access_tg   (LGraph *lg, const Node_pin &tg_tupname_dpin);
   Node_pin create_scalar_access_tg   (LGraph *lg, const Node_pin &tg_tupname_dpin, const Node_pin &field_dpin);
-  Node     setup_node_opr_and_lhs    (LGraph *lg, const Lnast_nid &lnidx_opr, bool from_fir_op = false);
+  Node     setup_node_opr_and_lhs    (LGraph *lg, const Lnast_nid &lnidx_opr, std::string_view fir_func_name);
   Node_pin setup_tuple_assignment    (LGraph *lg, const Lnast_nid &lnidx_opr);
   Node_pin setup_node_assign_and_lhs (LGraph *lg, const Lnast_nid &lnidx_opr);
   Node_pin setup_ref_node_dpin       (LGraph *lg, const Lnast_nid &lnidx, bool from_ta_assign = false, bool  from_phi = false);
@@ -84,6 +83,7 @@ protected:
 
   bool subgraph_outp_is_tuple (Sub_node* sub);
   void subgraph_io_connection (LGraph *lg, Sub_node* sub, std::string_view arg_tup_name, std::string_view res_name, Node subg_node);
+  void process_direct_op_connection(LGraph *lg, const Lnast_nid &lnidx_fc);
   void split_hier_name (std::string_view hier_name, std::vector<std::string_view> &hier_inp_subnames);
 
   // tuple related

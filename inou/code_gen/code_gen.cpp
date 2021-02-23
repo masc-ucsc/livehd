@@ -106,24 +106,12 @@ void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
       do_assign(curr_index);
     } else if (curr_node_type.is_if()) {
       do_if(curr_index);
-    } else if (curr_node_type.is_and() || curr_node_type.is_or() || curr_node_type.is_not() || curr_node_type.is_xor()
-               || curr_node_type.is_logical_not() || curr_node_type.is_logical_and() || curr_node_type.is_logical_or()
-               || curr_node_type.is_same() || curr_node_type.is_as() || curr_node_type.is_plus() || curr_node_type.is_minus()
-               || curr_node_type.is_mult() || curr_node_type.is_div() || curr_node_type.is_lt() || curr_node_type.is_le()
-               || curr_node_type.is_gt() || curr_node_type.is_ge() || curr_node_type.is_tuple_concat()
-               || curr_node_type.is_tuple_delete() || curr_node_type.is_shift_left() || curr_node_type.is_arith_shift_right()
-               || curr_node_type.is_shift_right()) {
-      do_op(curr_index);
-    } else if (curr_node_type.is_dot()) {
-      I(false, "should use select instead");
-      do_dot(curr_index);
     } else if (curr_node_type.is_tuple()) {
       do_tuple(curr_index);
-    } else if (curr_node_type.is_selc()) {
-      //do_select(curr_index, "select");
+    } else if (curr_node_type.is_select()) {
       do_select(curr_index, "selc");
-    } else if (curr_node_type.is_bit_select()) {
-      do_select(curr_index, "bit");
+    } else if (curr_node_type.is_primitive_op()) {
+      do_op(curr_index);
     } else if (curr_node_type.is_func_def()) {
       do_func_def(curr_index);
     } else if (curr_node_type.is_func_call()) {
@@ -132,8 +120,10 @@ void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
       do_for(curr_index);
     } else if (curr_node_type.is_while()) {
       do_while(curr_index);
-    } else if (curr_node_type.is_tposs()) {
+    } else if (curr_node_type.is_zext()) {
       do_tposs(curr_index);
+    } else{
+      fmt::print("WARNING, unhandled case\n");
     }
 
     curr_index = lnast->get_sibling_next(curr_index);
@@ -418,29 +408,16 @@ void Code_gen::do_if(const mmap_lib::Tree_index& if_node_index) {
     fmt::print("Processing if child {} at level {} \n", lnast->get_name(curr_index), curlvl);
 
     if (node_num > 2) {
-      // if(curr_node_type.is_cstmts()) {
-      //  do_stmts(curr_index);
-      //} else
-      if (curr_node_type.is_cond()) {
+      if (curr_node_type.is_ref() || curr_node_type.is_const()) {
         absl::StrAppend(&buffer_to_print, indent(), lnast_to->start_else_if());
         do_cond(curr_index);
       } else if (curr_node_type.is_stmts()) {
-        bool prev_was_cond = (lnast->get_data(lnast->get_sibling_prev(curr_index))).type.is_cond();
-        if (!prev_was_cond) {
-          absl::StrAppend(&buffer_to_print, indent(), lnast_to->start_else());
-        }
         indendation++;
         do_stmts(curr_index);
         indendation--;
-        if (!prev_was_cond) {
-          absl::StrAppend(&buffer_to_print, indent(), lnast_to->end_if_or_else());
-        }
       }
     } else {
-      // if(curr_node_type.is_cstmts()) {
-      //  do_stmts(curr_index);
-      //} else
-      if (curr_node_type.is_cond()) {
+      if (curr_node_type.is_ref() || curr_node_type.is_const()) {
         absl::StrAppend(&buffer_to_print, indent(), lnast_to->start_cond());
         do_cond(curr_index);
       } else if (curr_node_type.is_stmts()) {

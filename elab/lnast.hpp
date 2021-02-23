@@ -15,7 +15,13 @@ using Tuple_var_1st_scope_ssa_table = absl::flat_hash_map<std::string_view, Lnas
 
 //tricky old C macro to avoid redundant code from function overloadings
 #define CREATE_LNAST_NODE(type) \
-        static Lnast_node create##type(std::string_view sview){return Lnast_node(Lnast_ntype::create##type(), Etoken(0, 0, 0, 0, sview));}\
+        static Lnast_node create##type() {return Lnast_node(Lnast_ntype::create##type(), Etoken(0, 0, 0, 0, ""));}\
+        static Lnast_node create##type(std::string_view sview, uint32_t line_num){return Lnast_node(Lnast_ntype::create##type(), Etoken(0, 0, 0, line_num, sview));}\
+        static Lnast_node create##type(std::string_view sview, uint32_t line_num, uint64_t pos1, uint64_t pos2){return Lnast_node(Lnast_ntype::create##type(), Etoken(0, pos1, pos2, line_num, sview));}\
+        static Lnast_node create##type(const Etoken &new_token){return Lnast_node(Lnast_ntype::create##type(), new_token);}
+
+#define CREATE_LNAST_NODE_sv(type) \
+        static Lnast_node create##type(std::string_view sview) {return Lnast_node(Lnast_ntype::create##type(), Etoken(0, 0, 0, 0, sview));}\
         static Lnast_node create##type(std::string_view sview, uint32_t line_num){return Lnast_node(Lnast_ntype::create##type(), Etoken(0, 0, 0, line_num, sview));}\
         static Lnast_node create##type(std::string_view sview, uint32_t line_num, uint64_t pos1, uint64_t pos2){return Lnast_node(Lnast_ntype::create##type(), Etoken(0, pos1, pos2, line_num, sview));}\
         static Lnast_node create##type(const Etoken &new_token){return Lnast_node(Lnast_ntype::create##type(), new_token);}
@@ -39,62 +45,72 @@ struct Lnast_node {
   void dump() const;
 
   CREATE_LNAST_NODE(_invalid)
+
   CREATE_LNAST_NODE(_top)
   CREATE_LNAST_NODE(_stmts)
-  CREATE_LNAST_NODE(_cstmts)
   CREATE_LNAST_NODE(_if)
-  CREATE_LNAST_NODE(_cond)
   CREATE_LNAST_NODE(_uif)
   CREATE_LNAST_NODE(_for)
   CREATE_LNAST_NODE(_while)
   CREATE_LNAST_NODE(_phi)
+  CREATE_LNAST_NODE(_hot_phi)
   CREATE_LNAST_NODE(_func_call)
   CREATE_LNAST_NODE(_func_def)
+
   CREATE_LNAST_NODE(_assign)
   CREATE_LNAST_NODE(_dp_assign)
-  CREATE_LNAST_NODE(_as)
-  CREATE_LNAST_NODE(_label)
+  CREATE_LNAST_NODE(_mut)
+
+  CREATE_LNAST_NODE(_bit_and)
+  CREATE_LNAST_NODE(_bit_or)
+  CREATE_LNAST_NODE(_bit_not)
+  CREATE_LNAST_NODE(_bit_xor)
+
   CREATE_LNAST_NODE(_logical_and)
   CREATE_LNAST_NODE(_logical_or)
   CREATE_LNAST_NODE(_logical_not)
-  CREATE_LNAST_NODE(_and)
-  CREATE_LNAST_NODE(_or)
-  CREATE_LNAST_NODE(_not)
-  CREATE_LNAST_NODE(_tposs)
-  CREATE_LNAST_NODE(_xor)
-  CREATE_LNAST_NODE(_parity)
+
+  CREATE_LNAST_NODE(_reduce_and)
+  CREATE_LNAST_NODE(_reduce_or)
+  CREATE_LNAST_NODE(_reduce_xor)
+
   CREATE_LNAST_NODE(_plus)
   CREATE_LNAST_NODE(_minus)
   CREATE_LNAST_NODE(_mult)
   CREATE_LNAST_NODE(_div)
   CREATE_LNAST_NODE(_mod)
+
+  CREATE_LNAST_NODE(_shr)
+  CREATE_LNAST_NODE(_shl)
+  CREATE_LNAST_NODE(_sra)
+
+  CREATE_LNAST_NODE(_sext)
+  CREATE_LNAST_NODE(_zext)
+
+  CREATE_LNAST_NODE(_is)
+  CREATE_LNAST_NODE(_ne)
   CREATE_LNAST_NODE(_eq)
-  CREATE_LNAST_NODE(_same)
   CREATE_LNAST_NODE(_lt)
   CREATE_LNAST_NODE(_le)
   CREATE_LNAST_NODE(_gt)
   CREATE_LNAST_NODE(_ge)
+
   CREATE_LNAST_NODE(_tuple)
   CREATE_LNAST_NODE(_tuple_concat)
   CREATE_LNAST_NODE(_tuple_delete)
   CREATE_LNAST_NODE(_select)
-  CREATE_LNAST_NODE(_dot)
-  CREATE_LNAST_NODE(_bit_select)
-  CREATE_LNAST_NODE(_range)
-  CREATE_LNAST_NODE(_shift_right)
-  CREATE_LNAST_NODE(_shift_left)
-  CREATE_LNAST_NODE(_logic_shift_right)
-  CREATE_LNAST_NODE(_arith_shift_right)
-  CREATE_LNAST_NODE(_arith_shift_left)
-  CREATE_LNAST_NODE(_rotate_shift_right)
-  CREATE_LNAST_NODE(_rotate_shift_left)
-  CREATE_LNAST_NODE(_dynamic_shift_right)
-  CREATE_LNAST_NODE(_dynamic_shift_left)
-  CREATE_LNAST_NODE(_ref)
-  CREATE_LNAST_NODE(_const)
-  CREATE_LNAST_NODE(_assert)
-};
 
+  CREATE_LNAST_NODE_sv(_ref)
+  CREATE_LNAST_NODE_sv(_const)
+
+  CREATE_LNAST_NODE(_assert)
+  CREATE_LNAST_NODE(_err_flag)
+
+  CREATE_LNAST_NODE(_tuple_add)
+  CREATE_LNAST_NODE(_tuple_get)
+  CREATE_LNAST_NODE(_attr_set)
+  CREATE_LNAST_NODE(_attr_get)
+};
 
 class Lnast : public mmap_lib::tree<Lnast_node> {
 private:
@@ -145,7 +161,6 @@ private:
   void      sel2local_tuple_chain              (const Lnast_nid &pats_nid, Lnast_nid &sel_nid);
   void      merge_tconcat_paired_assign        (const Lnast_nid &psts_nid, const Lnast_nid &concat_nid);
   void      rename_to_real_tuple_name          (const Lnast_nid &psts_nid, const Lnast_nid &tup_nid);
-  void      find_cond_nid                      (const Lnast_nid &psts_nid, Lnast_nid &cond_nid, bool &is_else_sts);
   bool      is_attribute_related               (const Lnast_nid &opr_nid);
   void      sel2attr_set_get                   (const Lnast_nid &psts_nid, Lnast_nid &opr_nid);
   void      update_tuple_var_table             (const Lnast_nid &psts_nid, const Lnast_nid &opr_nid);
