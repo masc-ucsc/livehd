@@ -15,7 +15,9 @@ mmap_lib::str foo("yohelloooooo12345678");
   //foo.print_size(); // expect 8
   //foo.print_e(); // 2345678
   //foo.print_PoS(); 
-  //std::cout << foo.is_i() << std::endl; 
+  //std::cout << foo.is_i() << std::endl;
+ std::string_view str_view("abcdef");
+ mmap_lib::str boo(str_view);
 }
 
 

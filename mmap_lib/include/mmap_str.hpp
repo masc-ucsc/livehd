@@ -78,7 +78,6 @@ public:
       ++e_pos;
     }
   }
-
   template <std::size_t N>
   constexpr str(const char (&s)[N]) : ptr_or_start(0), e{0}, _size(N - 1) {
     auto stop = _size < 4 ? _size : 4;
@@ -92,7 +91,7 @@ public:
       if (is_digit(s[i]) && i<_size && is_digit(s[i+1])) {
         uint8_t v = (s[i]-'0')*10+s[i+1]-'0';
         assert(v<100); // 2 digits only
-        e[e_pos] = 0x80 | v;1000 0000
+        e[e_pos] = 0x80 | v;//1000 0000
         ++i; // skip one more
       } else {
         e[e_pos] = s[i];
@@ -101,23 +100,18 @@ public:
     }
   }
 #endif
-  
   // FIXME: This type of constructor is needed to be a constexpr
   template<std::size_t N, typename = std::enable_if_t<(N-1)<14>, typename=void>
   constexpr str(const char(&s)[N]): ptr_or_start(0), e{0}, _size(N-1) {
-    ptr_or_start = 0;
+    auto stop    = _size<4?_size:4;
+    //isptr =  _size<14?false:true;
+    for(auto i=0;i<stop;++i) {
+      ptr_or_start <<= 8;
+      ptr_or_start |= s[i];
+    }
     auto e_pos   = 0u;
-    for(auto i=(N-1-8);i<N-1;++i) { // 8 (not 10 to allow to grow a bit) last positions
-      assert(s[i]<128); // FIXME: use ptr if so
-      if (is_digit(s[i]) && i<_size && is_digit(s[i+1])) {
-        uint8_t v = (s[i]-'0')*10+s[i+1]-'0';
-        assert(v<100); // 2 digits only
-        e[e_pos] = 0x80 | v;
-        ++i; // skip one more
-        --_size;
-      }else{
-        e[e_pos] = s[i];
-      }
+    for(auto i=stop ;i<N-1;++i) { // 8 (not 10 to allow to grow a bit) last positions
+       e[e_pos] = s[i];
       ++e_pos;
     }
   }
@@ -143,13 +137,10 @@ public:
     } else {
       for (int i = 0; i < _size - 10; i++) {
         string_vector.push_back(s[i]);
-        // add the starting position of the vector as a key to the map
-        // now add the size -10 as a value to the map
-        // ptr_or_start will be the key
       }
       str::string_map.set(string_vector.size() - (_size - 10), _size - 10);
     }
-    
+    /*
     std::cout << "this is ptr_or_start: " << ptr_or_start << std::endl;
     std::cout << "this is e: ";
     for (int i = 0; i < 10; ++i) { std::cout << e[i] << " "; }
@@ -159,6 +150,7 @@ public:
       std::cout << *i << " ";
     }
     std::cout << std::endl;
+    */
 
   }
   
@@ -185,32 +177,59 @@ public:
 
 
   str(std::string_view sv) : ptr_or_start(0), e{0}, _size(sv.size()) {
-    // FIXME: maybe short maybe long
-    if (sv.size() < 14) {  // FIXME: create method to share this code with str short char constructor
-      auto stop = _size < 4 ? _size : 4;
-      for (auto i = 0; i < stop; ++i) {
-        ptr_or_start <<= 8;
-        ptr_or_start |= sv[i];
-      }
-      auto e_pos = 0;
-      for (auto i = stop; i < _size; ++i) {
-        assert(sv[i] < 128);  // FIXME: use ptr if so
-        if (is_digit(sv[i]) && i < _size && is_digit(sv[i + 1])) {
-          uint8_t v = (sv[i] - '0') * 10 + sv[i + 1] - '0';
-          assert(v < 100);  // 2 digits only
-          e[e_pos] = 0x80 | v;
-          ++i;  // skip one more
-        } else {
-          e[e_pos] = sv[i];
-        }
-        ++e_pos;
-      }
-      _size = sv.size();
-    }else{
-      _size = 0; // FIXME: to address compile error
-    }
-  }
+    //claim is to treat it as a normal string 
+  	if (_size < 14 ){
+		auto stop    = _size<4?_size:4;
+	    for(auto i=0;i<stop;++i) {
+	      ptr_or_start <<= 8;
+	      ptr_or_start |= sv.at(i);
+	    }
+	    auto e_pos   = 0u;
+	    for(auto i=stop;i<_size;++i) { // 8 (not 10 to allow to grow a bit) last positions
+	       e[e_pos] = sv.at(i);
+	       ++e_pos;
+	  	}
 
+  	} else {
+
+  		e[0] = sv.at(0);
+	    e[1] = sv.at(1);
+	    // the last eight  charactors
+	    for (int i = 0; i < 8; i++) {
+	      e[9-i] = sv.at(_size - i);
+	    }
+	    // checking if it exists
+	    char *long_str;
+	    for (int i = 0; i < _size - 8; i++) {
+	      long_str[i] = sv.at(i + 2);
+	    }
+	    std::pair<int, int> pair = str_exists(long_str, _size - 10);
+	    if (pair.second) {
+	      ptr_or_start = pair.first;
+	    } else {
+	      for (int i = 0; i < _size - 10; i++) {
+	        string_vector.push_back(sv.at(i));
+	      }
+	      str::string_map.set(string_vector.size() - (_size - 10), _size - 10);
+	    }
+  	}
+  
+    std::cout << "this is ptr_or_start: " << ptr_or_start << std::endl;
+    std::cout << "this is e: ";
+    for (int i = 0; i < 10; ++i) { std::cout << e[i] << " "; }
+    std::cout << std::endl;
+    std::cout << "This is the size : "<< _size << std::endl;
+    std::cout << "this is string_vector: ";
+    for (std::vector<int>::const_iterator i = string_vector.begin(); i != string_vector.end(); ++i) {
+      std::cout << *i << " ";
+    }
+    std::cout << std::endl;
+    
+
+
+
+    
+  }
 #if 0
   fixme_const_iterator begin()  const {
     for(const auto &ch:data.b) {
