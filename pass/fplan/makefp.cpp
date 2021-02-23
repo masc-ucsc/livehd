@@ -12,8 +12,8 @@
 #include "node_type_area.hpp"
 #include "profile_time.hpp"
 
-constexpr size_t           opt_map_size               = 4;
-constexpr std::string_view opt_name_map[opt_map_size] = {"area", "slice_tree", "hard_ar"};
+constexpr size_t           opt_map_size               = 2;
+constexpr std::string_view opt_name_map[opt_map_size] = {"slice_tree", "aspect_ratio"};
 
 void Pass_fplan_makefp::setup() {
   auto m = Eprp_method("pass.fplan.makefp", "generate a floorplan from an LGraph", &Pass_fplan_makefp::pass);
@@ -22,7 +22,7 @@ void Pass_fplan_makefp::setup() {
                        "LGraph traversal method to use. Valid options are \"hier_lg\", \"flat_node\", and \"hier_node\"",
                        "hier_node");
 
-  m.add_label_optional("strategy", "Floorplanning method to use.  Valid options are \"aspect_ratio\" and \"slice_tree\"", "slice_tree");
+  m.add_label_optional("strategy", "Floorplanning method to use.  Valid options are \"aspect_ratio\" and \"slice_tree\"", "aspect_ratio");
 
   m.add_label_optional("filename", "If set, write the floorplan to a file named <filename>.flp as well as back into LiveHD.");
   m.add_label_optional("aspect", "Requested aspect ratio of the entire floorplan, default is 1.0.", "1.0");
