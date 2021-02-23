@@ -183,8 +183,7 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
       switch (pid) {
         case 0: return "tuple_name";  // tuple name
         case 2: return "position";    // position of tuple field
-        case 3:
-          return "value";
+        case 3: return "value";
           // no 4 to keep f 5
         case 5: return "field";  // tuple field
         default: return "invalid";
@@ -193,8 +192,7 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
     case Ntype_op::TupGet:
       switch (pid) {
         case 0: return "tuple_name";
-        case 2:
-          return "position";
+        case 2: return "position";
           // no 3,4 to keep f 5
         case 5: return "field";
         default: return "invalid";

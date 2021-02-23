@@ -642,9 +642,9 @@ bool Cprop::reg_q_pin_access_preparation(Node &tg_parent_node, Node_pin &ori_tg_
     }
 
     // hier_reg_name collection finished!
-    if (ptype != Ntype_op::TupAdd && ptype != Ntype_op::Mux) 
+    if (ptype != Ntype_op::TupAdd && ptype != Ntype_op::Mux)
       return false;
-    
+
     I(parent_dpin.has_name());
     auto reg_root_ssa_name = parent_dpin.get_name();
     auto pos = reg_root_ssa_name.find_last_of("_");
@@ -655,7 +655,7 @@ bool Cprop::reg_q_pin_access_preparation(Node &tg_parent_node, Node_pin &ori_tg_
       auto sink_node = e.sink.get_node();
       auto sink_ntype = sink_node.get_type_op();
       if (sink_ntype == Ntype_op::TupAdd && e.sink == sink_node.setup_sink_pin("value")) {
-        // note: sometimes the tg(__q_pin) will drive value_dpin of graph output TA chain, 
+        // note: sometimes the tg(__q_pin) will drive value_dpin of graph output TA chain,
         // but this % TA chain will be deleted before the registers is created, so suddenly
         // the TA sink_pin("value") will disappear. Here I insert an dummy assignment node to
         // make sure there will always a valid spin for the future reg_q_pin to connect to.
@@ -667,8 +667,8 @@ bool Cprop::reg_q_pin_access_preparation(Node &tg_parent_node, Node_pin &ori_tg_
         e.del_edge();
       } else if (sink_ntype == Ntype_op::Or && sink_node.inp_edges().size() == 1) {
         // originally, if it's an assignment_OR driven by TG(__q_pin), it will be deleted by cprop,
-        // and it will cause the sink_pin floating. Here I put the asg_OR to dont_touch table at the first 
-        // cprop. This dont_touch table only needed at the first cprop as at the time of second cprop, 
+        // and it will cause the sink_pin floating. Here I put the asg_OR to dont_touch table at the first
+        // cprop. This dont_touch table only needed at the first cprop as at the time of second cprop,
         // the TG(__q_pin) should be resolved and th asg_or could be cprop-ed at that time.
         dont_touch.insert(sink_node.get_compact());
         reg_name2sink_pins[hier_reg_name].emplace_back(e.sink);
@@ -680,7 +680,7 @@ bool Cprop::reg_q_pin_access_preparation(Node &tg_parent_node, Node_pin &ori_tg_
   }
   return true;
 }
-  
+
 
 bool Cprop::process_tuple_get(Node &node, XEdge_iterator &inp_edges_ordered) {
   I(node.get_type_op() == Ntype_op::TupGet);
@@ -707,7 +707,7 @@ bool Cprop::process_tuple_get(Node &node, XEdge_iterator &inp_edges_ordered) {
       return true;
     }
 
-    Pass::info("tuple_get {} could not decide the field {}!", node.debug_name(), key_name);
+    Pass::info("tuple_get {} could not decide the field {} (1)", node.debug_name(), key_name);
     return false;
   }
 
@@ -724,7 +724,7 @@ bool Cprop::process_tuple_get(Node &node, XEdge_iterator &inp_edges_ordered) {
         child_is_tg_qpin_fetch = true;
     }
   }
-  
+
 
   if (!val_dpin.is_invalid() && !child_is_tg_qpin_fetch) {
     int conta = 0;
@@ -792,7 +792,7 @@ bool Cprop::process_tuple_get(Node &node, XEdge_iterator &inp_edges_ordered) {
     return true;
 
 
-  Pass::info("tuple_get {} could not decide the field {}!", node.debug_name(), key_name);
+  Pass::info("tuple_get {} could not decide the field {} (2)", node.debug_name(), key_name);
   return false;  // Could not resolve (maybe compile error, maybe hierarchical needed)
 }
 
@@ -810,7 +810,7 @@ void Cprop::process_mux(Node &node, XEdge_iterator &inp_edges_ordered) {
       auto tup = find_lgtuple(e.driver);
       if (tup == nullptr) {
 
-        fmt::print("DEBUG-0\n");
+        fmt::print("DEBUG-0, node:{}\n", node.debug_name());
         tup_list.clear();
         break;  // All have to have
       }
@@ -818,7 +818,7 @@ void Cprop::process_mux(Node &node, XEdge_iterator &inp_edges_ordered) {
       tup_list.emplace_back(tup);
     }
   }
-  
+
   std::shared_ptr<Lgtuple> tup;
   if (!tup_list.empty()) {
     tup = Lgtuple::make_merge(sel_dpin, tup_list);
@@ -837,7 +837,7 @@ void Cprop::process_mux(Node &node, XEdge_iterator &inp_edges_ordered) {
       auto sink_type = e.sink.get_type_op();
       if (sink_type == Ntype_op::TupAdd || sink_type == Ntype_op::Mux) {
         is_tail = false;
-      } 
+      }
     }
 
     bool is_reg_tuple = false;
@@ -919,7 +919,7 @@ void Cprop::process_tuple_add(Node &node) {
       node_tup = std::make_shared<Lgtuple>(*parent_tup);
     }
   }
-  
+
 
   if (!node_tup) {
     node_tup = std::make_shared<Lgtuple>(tup_name);  // new tuple if not already created
@@ -963,7 +963,7 @@ void Cprop::process_tuple_add(Node &node) {
   node2tuple[node.get_compact()] = node_tup;
 
 
-  // post handling for graph outputs, sub-graph and register. 
+  // post handling for graph outputs, sub-graph and register.
   bool is_tail = true;
   if (!hier && !tuple_issues) {
     for (auto &e : node.out_edges()) {
@@ -977,7 +977,7 @@ void Cprop::process_tuple_add(Node &node) {
         return;
       } else if (sink_type == Ntype_op::TupAdd || sink_type == Ntype_op::Mux) {
         is_tail = false;
-      } 
+      }
     }
 
     bool is_reg_tuple = false;
@@ -996,7 +996,7 @@ void Cprop::try_create_register(Node &node, std::shared_ptr<Lgtuple> tup) {
   tup->dump();
   auto *lg = node.get_class_lgraph();
   auto reg_root_ssa_name = tup->get_name();
-  auto pos = reg_root_ssa_name.find_last_of("_"); 
+  auto pos = reg_root_ssa_name.find_last_of("_");
   auto reg_root_name = reg_root_ssa_name.substr(0, pos);
 
   for (const auto &it : tup->get_map()) {
@@ -1038,7 +1038,7 @@ void Cprop::try_create_register(Node &node, std::shared_ptr<Lgtuple> tup) {
     auto attr_node = lg->create_node(Ntype_op::AttrSet);
     auto an_spin = attr_node.setup_sink_pin("name");
     auto af_spin = attr_node.setup_sink_pin("field");
-    auto av_spin = attr_node.setup_sink_pin("value"); 
+    auto av_spin = attr_node.setup_sink_pin("value");
 
     auto attr_key_node = node.get_lg()->create_node(Ntype_op::TupKey);
     auto attr_key_dpin = attr_key_node.setup_driver_pin();
@@ -1123,11 +1123,11 @@ void Cprop::do_trans(LGraph *lg) {
 
 
     if (op == Ntype_op::Or) {
-      // (1) don't cprop the Or at the first cprop 
+      // (1) don't cprop the Or at the first cprop
       // (2) and clean the dont_touch table for the second cprop to collapse
       if (dont_touch.find(node.get_compact()) != dont_touch.end()) {
         dont_touch.erase(node.get_compact());
-        continue; 
+        continue;
       }
     }
 
@@ -1143,7 +1143,7 @@ void Cprop::do_trans(LGraph *lg) {
       //I(false);
       break; // maybe next cprop iteration could solve
     }
-    
+
     if (sink_pins.empty())
       continue;
 
@@ -1274,6 +1274,8 @@ void Cprop::bwd_del_node(Node &node) {
 
     if (!n.is_invalid() && !n.has_outputs() && !n.is_type_loop_breaker()) {
       for (auto e : n.inp_edges()) {
+        if (e.driver.is_graph_io())
+          continue;
         potential.emplace_back(e.driver.get_node());
       }
       n.del_node();

@@ -75,28 +75,19 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
   } else if (ntype.is_nary_op()) {
     auto fstmt = pos_to_add_to == 0 ? when->add_consequent() : when->add_otherwise();
     process_ln_nary_op(ln, lnidx, fstmt);
-  } else if (ntype.is_not()) {
+  } else if (ntype.is_bit_not()) {
     auto fstmt = pos_to_add_to == 0 ? when->add_consequent() : when->add_otherwise();
-    process_ln_not_op(ln, lnidx, fstmt);
-  } else if (ntype.is_parity()) {
+    process_ln_bit_not_op(ln, lnidx, fstmt);
+  } else if (ntype.is_reduce_xor()) {
     auto fstmt = pos_to_add_to == 0 ? when->add_consequent() : when->add_otherwise();
-    process_ln_par_op(ln, lnidx, fstmt);
-    /*} else if (ntype.is_select()) {
-      I(false); // should has been converted to tuple chain
-    } else if (ntype.is_as()) {
-      process_ast_as_op(dfg, lnidx);*/
+    process_ln_reduce_xor_op(ln, lnidx, fstmt);
   } else if (ntype.is_if()) {
     auto nested_when_stmt = process_ln_if_op(ln, lnidx);
     auto fstmt            = pos_to_add_to == 0 ? when->add_consequent() : when->add_otherwise();
     fstmt->set_allocated_when(nested_when_stmt);
-  } else if (ntype.is_range()) {
-    process_ln_range_op(ln, lnidx);
-  } else if (ntype.is_bit_select()) {
-    auto fstmt = pos_to_add_to == 0 ? when->add_consequent() : when->add_otherwise();
-    process_ln_bitsel_op(ln, lnidx, fstmt);
-  } else if (ntype.is_dot()) {
+  } else if (ntype.is_select()) {
     auto fstmt       = pos_to_add_to == 0 ? when->add_consequent() : when->add_otherwise();
-    auto stmt_needed = process_ln_dot(ln, lnidx, fstmt);
+    auto stmt_needed = process_ln_select(ln, lnidx, fstmt);
     if (!stmt_needed) {
       /*Note->hunter: If the assign returned false, then we
        * didn't need that assign so erase that statement made.*/
@@ -151,28 +142,19 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
   } else if (ntype.is_nary_op()) {
     auto fstmt = umod->add_statement();
     process_ln_nary_op(ln, lnidx, fstmt);
-  } else if (ntype.is_not()) {
+  } else if (ntype.is_bit_not()) {
     auto fstmt = umod->add_statement();
-    process_ln_not_op(ln, lnidx, fstmt);
-  } else if (ntype.is_parity()) {
+    process_ln_bit_not_op(ln, lnidx, fstmt);
+  } else if (ntype.is_reduce_xor()) {
     auto fstmt = umod->add_statement();
-    process_ln_par_op(ln, lnidx, fstmt);
-  /*} else if (ntype.is_select()) {
-    I(false); // should has been converted to tuple chain
-  } else if (ntype.is_as()) {
-    process_ast_as_op(dfg, lnidx);*/
+    process_ln_reduce_xor_op(ln, lnidx, fstmt);
   } else if (ntype.is_if()) {
     auto when_stmt = process_ln_if_op(ln, lnidx);
     auto fstmt     = umod->add_statement();
     fstmt->set_allocated_when(when_stmt);
-  } else if (ntype.is_range()) {
-    process_ln_range_op(ln, lnidx);
-  } else if (ntype.is_bit_select()) {
-    auto fstmt = umod->add_statement();
-    process_ln_bitsel_op(ln, lnidx, fstmt);
-  } else if (ntype.is_dot()) {
+  } else if (ntype.is_select()) {
     auto fstmt       = umod->add_statement();
-    auto stmt_needed = process_ln_dot(ln, lnidx, fstmt);
+    auto stmt_needed = process_ln_select(ln, lnidx, fstmt);
     if (!stmt_needed) {
       /*Note->hunter: If the assign returned false, then we
        * didn't need that assign so erase that statement made.*/
@@ -294,7 +276,7 @@ firrtl::FirrtlPB_Expression_SubField* Inou_firrtl::make_subfield_expr(std::strin
   return subfield_expr;
 }
 
-void Inou_firrtl::process_ln_not_op(Lnast &ln, const Lnast_nid &lnidx_not, firrtl::FirrtlPB_Statement *fstmt) {
+void Inou_firrtl::process_ln_bit_not_op(Lnast &ln, const Lnast_nid &lnidx_not, firrtl::FirrtlPB_Statement *fstmt) {
   auto c0       = ln.get_first_child(lnidx_not);
   auto c1       = ln.get_sibling_next(c0);
   auto ntype_c0 = ln.get_type(c0);
@@ -314,7 +296,7 @@ void Inou_firrtl::process_ln_not_op(Lnast &ln, const Lnast_nid &lnidx_not, firrt
   make_assignment(ln, c0, rhs_expr, fstmt);
 }
 
-void Inou_firrtl::process_ln_par_op(Lnast &ln, const Lnast_nid &lnidx_par, firrtl::FirrtlPB_Statement *fstmt) {
+void Inou_firrtl::process_ln_reduce_xor_op(Lnast &ln, const Lnast_nid &lnidx_par, firrtl::FirrtlPB_Statement *fstmt) {
   auto c0       = ln.get_first_child(lnidx_par);
   auto c1       = ln.get_sibling_next(c0);
   auto ntype_c0 = ln.get_type(c0);
@@ -412,7 +394,7 @@ firrtl::FirrtlPB_Statement_When *Inou_firrtl::process_ln_if_op(Lnast &ln, const 
         process_ln_stmt(ln, stmt_child, when_lowest, pos_to_add_to);
       }
       pos_to_add_to++;  // Set to 1 (or 2 if last stmt)
-    } else if (ntype.is_cond()) {
+    } else if (ntype.is_ref() || ntype.is_const()) {
       // A new cond has been found, meaning we need to create another when
       if (pos_to_add_to == 1) {
         auto new_when = new firrtl::FirrtlPB_Statement_When();
@@ -425,8 +407,6 @@ firrtl::FirrtlPB_Statement_When *Inou_firrtl::process_ln_if_op(Lnast &ln, const 
       auto predicate = new firrtl::FirrtlPB_Expression();
       add_refcon_as_expr(ln, if_child, predicate);
       when_lowest->set_allocated_predicate(predicate);
-    //} else if (ntype.is_cstmts()) {
-    //  continue;
     } else {
       I(false);
     }
@@ -435,6 +415,7 @@ firrtl::FirrtlPB_Statement_When *Inou_firrtl::process_ln_if_op(Lnast &ln, const 
   return when_highest;
 }
 
+#if 0
 /* Since the range op only indicates that there is a
  * value range from the low value to the high value,
  * this is added to a map for later access. */
@@ -471,8 +452,9 @@ void Inou_firrtl::process_ln_bitsel_op(Lnast &ln, const Lnast_nid &lnidx_bitsel,
   // Now assign lhs to rhs.
   make_assignment(ln, lhs_node, rhs_expr, fstmt);
 }
+#endif
 
-bool Inou_firrtl::process_ln_dot(Lnast &ln, const Lnast_nid &lnidx_dot, firrtl::FirrtlPB_Statement *fstmt) {
+bool Inou_firrtl::process_ln_select(Lnast &ln, const Lnast_nid &lnidx_dot, firrtl::FirrtlPB_Statement *fstmt) {
   auto lhs   = ln.get_first_child(lnidx_dot);
   auto tup   = ln.get_sibling_next(lhs);
   auto field = ln.get_sibling_next(tup);
@@ -743,7 +725,7 @@ bool Inou_firrtl::is_wire(const std::string_view str) {
 std::string Inou_firrtl::get_firrtl_name_format(Lnast &ln, const Lnast_nid &lnidx) {
   auto                   ntype = ln.get_type(lnidx);
   const std::string_view str   = ln.get_name(lnidx);
-  if (ntype.is_ref() || ntype.is_cond()) {
+  if (ntype.is_ref() || ntype.is_const()) {
     return strip_prefixes(str);
   } else if (ntype.is_const()) {
     auto lconst_holder = Lconst(ln.get_name(lnidx));
@@ -816,19 +798,19 @@ firrtl::FirrtlPB_Expression_PrimOp_Op Inou_firrtl::get_firrtl_oper_code(const Ln
     return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_LESS_EQ;
   } else if (ntype.is_lt()) {
     return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_LESS;
-  } else if (ntype.is_same()) {
+  } else if (ntype.is_ne()) {
+    return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_NOT_EQUAL;
+  } else if (ntype.is_eq()) {
     return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_EQUAL;
-  } else if (ntype.is_and()) {
+  } else if (ntype.is_bit_and()) {
     return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_BIT_AND;
-  } else if (ntype.is_or()) {
+  } else if (ntype.is_bit_or()) {
     return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_BIT_OR;
-  } else if (ntype.is_xor()) {
+  } else if (ntype.is_bit_xor()) {
     return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_BIT_XOR;
-  } else if (ntype.is_bit_select()) {
-    return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_EXTRACT_BITS;
-  } else if (ntype.is_shift_left()) {
+  } else if (ntype.is_shl()) {
     return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_DYNAMIC_SHIFT_LEFT;
-  } else if (ntype.is_shift_right()) {
+  } else if (ntype.is_shr()) {
     return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_DYNAMIC_SHIFT_RIGHT;
   } else {
     I(false);  // some nary op not yet supported
@@ -839,14 +821,14 @@ firrtl::FirrtlPB_Expression_PrimOp_Op Inou_firrtl::get_firrtl_oper_code(const Ln
 /* Provided some ref or const node and an expression pointer,
  * this will form that ref/const in the expression pointer. */
 void Inou_firrtl::add_refcon_as_expr(Lnast &ln, const Lnast_nid &lnidx, firrtl::FirrtlPB_Expression *expr) {
-  if (ln.get_data(lnidx).type.is_ref() || (ln.get_data(lnidx).type.is_cond() && (!isdigit(ln.get_name(lnidx)[0])))) {
+  if (ln.get_data(lnidx).type.is_ref()) {
     // Lnidx is a variable, so I need to make a Reference argument.
     auto                                   str     = get_firrtl_name_format(ln, lnidx);
     firrtl::FirrtlPB_Expression_Reference *rhs_ref = new firrtl::FirrtlPB_Expression_Reference();
     rhs_ref->set_id(str);
     expr->set_allocated_reference(rhs_ref);
 
-  } else if (ln.get_data(lnidx).type.is_const() || (ln.get_data(lnidx).type.is_cond() && (isdigit(ln.get_name(lnidx)[0])))) {
+  } else if (ln.get_data(lnidx).type.is_const()) {
     // Lnidx is a number, so I need to make a [U/S]IntLiteral argument.
     auto lconst_holder = Lconst(ln.get_name(lnidx));
     auto lconst_str    = lconst_holder.to_firrtl();

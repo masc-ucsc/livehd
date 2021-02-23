@@ -44,11 +44,12 @@ protected:
   std::string_view process_expression(const slang::Expression& expr);
 
   std::string_view create_mask_stmts(std::string_view dest_max_bit);
-  std::string_view create_not_stmts(std::string_view var_name);
-  std::string_view create_and_stmts(std::string_view a_var, std::string_view b_var);
-  std::string_view create_or_stmts(std::string_view a_var, std::string_view b_var);
-  std::string_view create_xor_stmts(std::string_view a_var, std::string_view b_var);
-  std::string_view create_shift_left_stmts(std::string_view a_var, std::string_view b_var);
+  std::string_view create_bit_not_stmts(std::string_view var_name);
+  std::string_view create_logical_not_stmts(std::string_view var_name);
+  std::string_view create_bit_and_stmts(std::string_view a_var, std::string_view b_var);
+  std::string_view create_bit_or_stmts(std::vector<std::string_view> var);
+  std::string_view create_bit_xor_stmts(std::string_view a_var, std::string_view b_var);
+  std::string_view create_shl_stmts(std::string_view a_var, std::string_view b_var);
   void             create_dp_assign_stmts(std::string_view a_var, std::string_view b_var);
   void             create_assign_stmts(std::string_view a_var, std::string_view b_var);
   void             create_declare_bits_stmts(std::string_view a_var, bool is_signed, int bits);
