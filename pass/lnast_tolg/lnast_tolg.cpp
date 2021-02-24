@@ -1379,6 +1379,13 @@ void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc)
   auto ret_name      = lnast->get_sname(c0_fc);
   auto arg_tup_name  = lnast->get_sname(lnast->get_last_child(lnidx_fc));
 
+#if 0
+  std::string func_name = (std::string)func_name_tmp;
+  if (lg->get_name().find("__firrtl_") != std::string::npos) {
+    func_name = absl::StrCat("__firrtl_", func_name_tmp);
+  }
+#endif
+
   auto *library = Graph_library::instance(path);
   if (name2dpin.find(func_name) == name2dpin.end()) {
     fmt::print("function {} defined in separated prp file, query lgdb\n", func_name);
