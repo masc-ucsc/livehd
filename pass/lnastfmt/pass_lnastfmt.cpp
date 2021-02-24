@@ -32,13 +32,14 @@ void Pass_lnastfmt::fmt_begin(Eprp_var& var) {
 }
 
 void Pass_lnastfmt::parse_ln(std::shared_ptr<Lnast> ln, Eprp_var& var, std::string_view module_name) {
-  std::unique_ptr<Lnast> lnastfmted = std::make_unique<Lnast>(module_name);
+  std::shared_ptr<Lnast> lnastfmted = std::make_shared<Lnast>(module_name);
 
   observe_lnast(ln.get());//1st traversal through the original LN to record assign subtrees.
 
   //now we will make the formatted LNAST:
   lnastfmted->set_root(Lnast_node(Lnast_ntype::create_top(), Etoken(0, 0, 0, 0, ln->get_top_module_name()))); // root node of lnfmted
   const auto& stmt_index = ln->get_child(ln->get_root());//stmt node of ln
+  lnastfmted->add_string(ln->get_name(stmt_index));
   const auto& stmt_index_fmt = lnastfmted->add_child(lnastfmted->get_root(), Lnast_node(ln->get_type(stmt_index), ln->get_token(stmt_index), ln->get_subs(stmt_index))); //stmt node of lnfmted (copied from ln)
 
   auto curr_index = ln->get_child(stmt_index);//1st child of ln after stmt
@@ -79,6 +80,7 @@ void Pass_lnastfmt::parse_ln(std::shared_ptr<Lnast> ln, Eprp_var& var, std::stri
       //traverse and keep adding to lnfmted
       //if value from map used? replcae it and move on.
       if(curr_index!= ln->invalid_index() && !curr_incremented) {
+        lnastfmted->add_string(ln->get_name(curr_index));
         auto curr_index_fmt = lnastfmted->add_child(stmt_index_fmt, Lnast_node(ln->get_type(curr_index), ln->get_token(curr_index), ln->get_subs(curr_index)));
 
         for (const mmap_lib::Tree_index& it : ln->children(curr_index)) {
@@ -88,13 +90,15 @@ void Pass_lnastfmt::parse_ln(std::shared_ptr<Lnast> ln, Eprp_var& var, std::stri
             //auto frst_fmt =
             lnastfmted->add_child(curr_index_fmt, Lnast_node::create_ref(lnastfmted->add_string(is->second)));
           } else {
+            lnastfmted->add_string(ln->get_name(it));
             lnastfmted->add_child(curr_index_fmt, Lnast_node(ln->get_type(it), ln->get_token(it), ln->get_subs(it)));
           }
         }
 
       }
-    } else {//suppose it is "if" subtree
+    } else {// This else is for nested subtrees (like an "if" subtree)
 
+      lnastfmted->add_string(ln->get_name(curr_index));
       auto curr_index_fmt = lnastfmted->add_child(stmt_index_fmt,  Lnast_node(ln->get_type(curr_index), ln->get_token(curr_index), ln->get_subs(curr_index)));
       auto curr_lev = curr_index.level;
       auto curr_pos = curr_index.pos;
@@ -110,12 +114,14 @@ void Pass_lnastfmt::parse_ln(std::shared_ptr<Lnast> ln, Eprp_var& var, std::stri
           if(is != ref_hash_map.end() && is_ssa(ln->get_name(it))) {
             curr_index_fmt = lnastfmted->add_child(curr_index_fmt, Lnast_node::create_ref(lnastfmted->add_string(is->second)));
           } else {
+            lnastfmted->add_string(ln->get_name(it));
             curr_index_fmt = lnastfmted->add_child(curr_index_fmt, Lnast_node(ln->get_type(it), ln->get_token(it), ln->get_subs(it)));
           }
         } else if (new_lev==curr_lev && new_pos > curr_pos) {
           if(is != ref_hash_map.end() && is_ssa(ln->get_name(it))) {
             curr_index_fmt = lnastfmted->append_sibling(curr_index_fmt, Lnast_node::create_ref(lnastfmted->add_string(is->second)));
           } else {
+            lnastfmted->add_string(ln->get_name(it));
             curr_index_fmt = lnastfmted->append_sibling(curr_index_fmt,Lnast_node(ln->get_type(it), ln->get_token(it), ln->get_subs(it)));
           }
           curr_lev = new_lev; curr_pos = new_pos;
@@ -123,6 +129,7 @@ void Pass_lnastfmt::parse_ln(std::shared_ptr<Lnast> ln, Eprp_var& var, std::stri
           if(is != ref_hash_map.end() && is_ssa(ln->get_name(it))) {
             curr_index_fmt = lnastfmted->append_sibling(lnastfmted->get_parent(curr_index_fmt), Lnast_node::create_ref(lnastfmted->add_string(is->second)));
           } else {
+            lnastfmted->add_string(ln->get_name(it));
             curr_index_fmt = lnastfmted->append_sibling(lnastfmted->get_parent(curr_index_fmt), Lnast_node(ln->get_type(it), ln->get_token(it), ln->get_subs(it)));
           }
           curr_lev = new_lev; curr_pos = new_pos;
@@ -130,10 +137,20 @@ void Pass_lnastfmt::parse_ln(std::shared_ptr<Lnast> ln, Eprp_var& var, std::stri
           if(is != ref_hash_map.end() && is_ssa(ln->get_name(it))) {
             curr_index_fmt = lnastfmted->append_sibling(lnastfmted->get_parent(lnastfmted->get_parent(curr_index_fmt)), Lnast_node::create_ref(lnastfmted->add_string(is->second)));
           } else {
+            lnastfmted->add_string(ln->get_name(it));
             curr_index_fmt = lnastfmted->append_sibling(lnastfmted->get_parent(lnastfmted->get_parent(curr_index_fmt)), Lnast_node(ln->get_type(it), ln->get_token(it), ln->get_subs(it)));
           }
           curr_lev = new_lev; curr_pos = new_pos;
+        } else if (new_lev+3 == curr_lev) {
+          if(is != ref_hash_map.end() && is_ssa(ln->get_name(it))) {
+            curr_index_fmt = lnastfmted->append_sibling(lnastfmted->get_parent(lnastfmted->get_parent(lnastfmted->get_parent(curr_index_fmt))), Lnast_node::create_ref(lnastfmted->add_string(is->second)));
+          } else {
+            lnastfmted->add_string(ln->get_name(it));
+            curr_index_fmt = lnastfmted->append_sibling(lnastfmted->get_parent(lnastfmted->get_parent(lnastfmted->get_parent(curr_index_fmt))), Lnast_node(ln->get_type(it), ln->get_token(it), ln->get_subs(it)));
+          }
+          curr_lev = new_lev; curr_pos = new_pos;
         }
+
 
       }
     }
@@ -145,8 +162,10 @@ void Pass_lnastfmt::parse_ln(std::shared_ptr<Lnast> ln, Eprp_var& var, std::stri
   //fmt::print("****lnast fmted:  \n");
   //lnastfmted->dump();
   //fmt::print("\n:lnast fmted****\n");
-  //var.replace(ln, std::move(lnastfmted));//just replace the pointer
-  var.add(std::move(lnastfmted));
+  var.replace(ln, lnastfmted);//just replace the pointer
+  //fmt::print("\nAFTER REPLACE:\n");
+  //ln->dump();
+  //var.add(std::move(lnastfmted));//FIXME. make replace function instead of add
 }
 
 void Pass_lnastfmt::observe_lnast(Lnast* ln) {
