@@ -15,7 +15,10 @@ VecShiftRegister VecShiftRegisterParam VecShiftRegisterSimple VendingMachine
 VendingMachineSwitch  Adder4 Adder ByteSelector FullAdder HiLoMultiplier Life
 Parity ResetShiftRegister Risc LogShifter Cell XorSelfThread1'
 
-pts='VecShiftRegister'
+pts='Xor800Thread8'
+pts='Xor32Thread8'
+pts='Xor64Thread8'
+pts='Xor128Thread8'
 
 CHISEL_PATH=~/chisel3
 FIRRTL_PATH=~/firrtl
