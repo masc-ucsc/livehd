@@ -20,6 +20,7 @@ public:
 
 };
 
+#if 0
 TEST_F(Mmap_str_test, small_strings) {
 
   mmap_lib::str a("hello");
@@ -73,4 +74,4 @@ TEST_F(Mmap_str_test, const_expr_trival_cmp) {
   //static_assert(a!="hell");     // compile time check
   //static_assert(a!="hellox");   // compile time check
 }
-
+#endif

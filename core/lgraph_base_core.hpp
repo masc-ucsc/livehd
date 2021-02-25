@@ -60,7 +60,7 @@ protected:
     Setup_path(std::string_view path);
   };
 
-  Setup_path  p;  // Must be first in base object
+  Setup_path  _p;  // Must be first in base object
   std::string path;
   std::string name;
   const std::string unique_name;

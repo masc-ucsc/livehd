@@ -6,6 +6,7 @@ circuit VecShiftRegister :
 
     reg delays : UInt<4>[2], clock with :
       reset => (UInt<1>("h0"), delays) @[VecShiftRegister.scala 21:19]
+
     when io.load : @[VecShiftRegister.scala 22:18]
       delays[0] <= io.ins[0] @[VecShiftRegister.scala 23:15]
       delays[1] <= io.ins[1] @[VecShiftRegister.scala 24:15]

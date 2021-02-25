@@ -162,6 +162,7 @@ public:
 
   const key_map_type &get_map() const { return key_map; }
 
+  static std::string get_attribute_field(const std::string &key);
   static std::string get_last_level(const std::string &key);
   static std::string get_all_but_last_level(const std::string &key);
 

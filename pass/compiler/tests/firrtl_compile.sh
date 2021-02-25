@@ -37,6 +37,10 @@ pts='VecShiftRegister'
 # pts='VecShiftRegisterParam'
 # pts='VecShiftRegisterSimple '
 # pts='VecSearch '
+pts='Xor800Thread8'
+pts='Xor32Thread8'
+pts='Xor64Thread8'
+pts='Xor128Thread8'
 
 
 LGSHELL=./bazel-bin/main/lgshell
