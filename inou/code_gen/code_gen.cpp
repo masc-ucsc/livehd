@@ -412,9 +412,16 @@ void Code_gen::do_if(const mmap_lib::Tree_index& if_node_index) {
         absl::StrAppend(&buffer_to_print, indent(), lnast_to->start_else_if());
         do_cond(curr_index);
       } else if (curr_node_type.is_stmts()) {
+        bool prev_was_cond = (lnast->get_data(lnast->get_sibling_prev(curr_index))).type.is_const() || (lnast->get_data(lnast->get_sibling_prev(curr_index))).type.is_ref();
+        if(!prev_was_cond) {
+          absl::StrAppend(&buffer_to_print, indent(), lnast_to->start_else());
+        }
         indendation++;
         do_stmts(curr_index);
         indendation--;
+        if(!prev_was_cond) {
+          absl::StrAppend(&buffer_to_print, indent(), lnast_to->end_if_or_else());
+        }
       }
     } else {
       if (curr_node_type.is_ref() || curr_node_type.is_const()) {
