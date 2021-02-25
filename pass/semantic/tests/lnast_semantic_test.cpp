@@ -25,7 +25,7 @@ int main(void) {
     auto node_stmts  = Lnast_node::create_stmts  ("stmts0", line_num, pos1, pos2);
     auto node_assign = Lnast_node::create_assign ("assign", line_num, pos1, pos2);
     auto node_target = Lnast_node::create_ref    ("val", line_num, pos1, pos2);
-    auto node_const  = Lnast_node::create_const  ("0d1023u10", line_num, pos1, pos2);
+    auto node_const  = Lnast_node::create_const  ("0d1023", line_num, pos1, pos2);
 
     lnast->set_root(idx_root);
 

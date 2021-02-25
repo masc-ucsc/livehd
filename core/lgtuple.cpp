@@ -13,11 +13,33 @@ Lgtuple::key_map_type::const_iterator Lgtuple::get_it(std::string_view key) cons
   return it;
 }
 
+std::string Lgtuple::get_attribute_field(const std::string &key) {
+
+  if (key.substr(0,2) == "__")
+    return key;
+
+  auto n = key.find(".__");
+
+  if (n == std::string::npos)
+    return ""; // no atr
+
+  I(key.substr(n+1).find(".__") == std::string::npos);
+
+  return key.substr(n+1);
+}
+
 std::string Lgtuple::get_last_level(const std::string &key) {
   std::string last_key{key};
 
   auto n = last_key.find_last_of('.');
-  if (n != std::string::npos) {
+  if (n && n != std::string::npos) {
+    // If there are attributes, show keep them.
+    if (last_key.substr(n,3) == ".__") {
+      auto n2 = last_key.substr(0,n-1).find_last_of('.');
+      if (n2 != std::string::npos) {
+        return last_key.substr(n2 + 1);
+      }
+    }
     last_key = last_key.substr(n + 1);
   }
 
@@ -71,6 +93,46 @@ std::shared_ptr<Lgtuple> Lgtuple::make_merge(Node_pin &sel_dpin, const std::vect
   (void)sel_dpin;
   I(tup_list.size() > 1);  // nothing to merge?
 
+#if 0
+  auto cur_tup = tup_list.back();
+  auto cur_id  = 0u;
+  tup_list.pop_back();
+
+  auto new_tup = std::make_shared<Lgtuple>(cur_tup->get_name());
+
+  std::vector<Node_pin> tup_dpins;
+
+  for(auto it:cur_tup) {
+    auto it_name = it->first;
+    auto it_dpin = it->second;
+
+    tup_dpins.clear();
+    tup_dpins.resize(tup_list.size());
+    tup_dpins[cur_id] = it_dpin;
+
+    for (auto i = cur_id+1; i < tup_list.size(); ++i) {
+      auot it2 = tup_list[i].find(it_name);
+      if (it2 != tup_list[i].end()) {
+        tup_dpins[i] = it2->second;
+      }
+    }
+
+    bool all_same_dpin = true;
+    for(auto dpin:dup_dpins) {
+      if (dpin != it_dpin) {
+        all_same_dpin = false;
+        break;
+      }
+    }
+    if (all_same_dpin) {
+      new_tup.add(it_pos, it_name, it_dpin);
+    }
+
+  }
+
+  return new_tup;
+
+#else
   std::vector<key_map_type::const_iterator> its;
   for (const auto &tup : tup_list) {
     its.emplace_back(tup->key_map.begin());
@@ -89,16 +151,6 @@ std::shared_ptr<Lgtuple> Lgtuple::make_merge(Node_pin &sel_dpin, const std::vect
       same_dpins &= (it0->second == its[i]->second);
       auto v = tup_list[i]->get_pos(its[i]->first);
       if (v != -1 && v != use_pos) {
-        fmt::print("DEBUG tup0\n");
-        tup0->dump();
-        fmt::print("DEBUG tup-i\n");
-        tup_list[i]->dump();
-        // FIXME->sh: TODO: design entry point
-        // if it's tuple-reg and one of the tuple-chain branch doesn't have a
-        // corresponding field, which means even in parent scope, this
-        // tuple-field is not defined before, and it actually tries to fetch
-        // the q-pin
-
         LGraph::info("tuples {} and {} have fields {} and {} at different positions {} vs {}",
                      tup0->get_name(),
                      tup_list[i]->get_name(),
@@ -153,6 +205,7 @@ std::shared_ptr<Lgtuple> Lgtuple::make_merge(Node_pin &sel_dpin, const std::vect
     }
   }
   return new_tup;
+#endif
 }
 
 std::tuple<Node_pin, std::shared_ptr<Lgtuple>> Lgtuple::make_select(Node_pin &sel_dpin) const {
@@ -339,6 +392,7 @@ void Lgtuple::del(std::string_view key) {
 }
 
 void Lgtuple::del(int pos) {
+  //I(false);
   auto str_pos = std::to_string(pos);
   auto p2k_it  = pos2key_map.find(str_pos);
   if (p2k_it == pos2key_map.end())
@@ -535,11 +589,11 @@ std::vector<std::pair<std::string, Node_pin>> Lgtuple::get_level_attributes(int 
         && (key.size() > it->first.size() || it->first.substr(0, key.size()) != key)) {
       return v;
     }
-    auto last_level = get_last_level(it->first);
-
-    if (last_level.size() > 2 && last_level.substr(0, 2) == "__") {
-      I(last_level != it->first);  // There must be a dot
-      v.emplace_back(last_level, it->second);
+    auto attr_pos = it->first.find(".__");
+    if (attr_pos != std::string::npos) {
+      v.emplace_back(it->first.substr(attr_pos+1), it->second);
+    }else if (it->first.substr(0,2) == "__") {
+      v.emplace_back(it->first, it->second);
     }
     ++it;
   }
