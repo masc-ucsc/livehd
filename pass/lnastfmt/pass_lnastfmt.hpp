@@ -15,6 +15,7 @@ protected:
   absl::flat_hash_map<std::string_view, std::string_view> ref_hash_map;
   bool is_temp_var(std::string_view test_string);
   bool is_ssa(std::string_view test_string);
+  Lnast_node duplicate_node(std::shared_ptr<Lnast>& lnastfmted, std::shared_ptr<Lnast>  ln, const mmap_lib::Tree_index &it);
 
 public:
   static void fmt_begin(Eprp_var& var);
