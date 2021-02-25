@@ -12,6 +12,7 @@ public:
     //group: tree structure
     Lnast_ntype_top,
     Lnast_ntype_stmts,   // stmts
+    Lnast_ntype_cstmts,
     Lnast_ntype_if,
     Lnast_ntype_uif,
     Lnast_ntype_for,
@@ -98,6 +99,7 @@ protected:
     //group: tree structure
     "top",
     "stmts",
+    "cstmts",
     "if",
     "uif",
     "for",

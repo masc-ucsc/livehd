@@ -110,8 +110,6 @@ void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
       do_tuple(curr_index);
     } else if (curr_node_type.is_select()) {
       do_select(curr_index, "selc");
-    } else if (curr_node_type.is_primitive_op()) {
-      do_op(curr_index);
     } else if (curr_node_type.is_func_def()) {
       do_func_def(curr_index);
     } else if (curr_node_type.is_func_call()) {
@@ -122,6 +120,8 @@ void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
       do_while(curr_index);
     } else if (curr_node_type.is_zext()) {
       do_tposs(curr_index);
+    } else if (curr_node_type.is_primitive_op()) {
+      do_op(curr_index);
     } else{
       fmt::print("WARNING, unhandled case\n");
     }
@@ -141,7 +141,7 @@ void Code_gen::invalid_node() {
 // Process the assign node:
 void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index) {
   fmt::print("node:assign: {}:{}\n", lnast->get_name(assign_node_index), lnast->get_type(assign_node_index).debug_name());
-  auto                          curr_index = lnast->get_first_child(assign_node_index);
+  auto curr_index = lnast->get_first_child(assign_node_index);
   std::vector<std::string_view> assign_str_vect;
 
   while (curr_index != lnast->invalid_index()) {
