@@ -282,8 +282,6 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id,
     if (is_signed) {
       acc_name_bw = CreateSelectsFromStr(lnast, parent_node, absl::StrCat(id, ".__sbits"));
     } else {
-      fmt::print("DEBUG-5 reg id:{}\n", id);
-      fmt::print("DEBUG-5 recored reg id:{}\n", id.substr(1, id.length() - 1));
       acc_name_bw = CreateSelectsFromStr(lnast, parent_node, absl::StrCat(id, ".__ubits"));
     }
 
@@ -1161,7 +1159,6 @@ void Inou_firrtl::split_hier_name(std::string_view full_name, std::vector<std::p
  * function will be able to deconstruct it into
  * DOT and SELECT nodes in an LNAST. */
 std::string_view Inou_firrtl::CreateSelectsFromStr(Lnast& ln, Lnast_nid& parent_node, const std::string& full_name) {
-  fmt::print("DEBUG-6 full_name:{}\n", full_name);
   I((full_name.find(".") != std::string::npos));
 
   auto tmp_var_name = create_temp_var(ln);
