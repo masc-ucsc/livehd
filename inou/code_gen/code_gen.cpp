@@ -632,9 +632,9 @@ void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index) {
 //-------------------------------------------------------------------------------------
 // Process the select node:
 // ref LNAST subtree: select,""  ->  ref,"___l" , ref,"A" , const,"0"
-void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index, std::string select_type) {  //FIXME->sh: at use const std::string & foo
+void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index, const std::string& select_type) { 
   fmt::print("node:select\n");
-  auto                          curr_index = lnast->get_first_child(select_node_index);
+  auto curr_index = lnast->get_first_child(select_node_index);
   std::vector<std::string_view> sel_str_vect;
   while (curr_index != lnast->invalid_index()) {
     assert(!(lnast->get_type(curr_index)).is_invalid());

@@ -38,7 +38,7 @@ public:
   void        do_if(const mmap_lib::Tree_index& dot_node_index);
   void        do_cond(const mmap_lib::Tree_index& cond_node_index);
   void        do_tuple(const mmap_lib::Tree_index& tuple_node_index);
-  void        do_select(const mmap_lib::Tree_index& select_node_index, std::string select_type);
+  void        do_select(const mmap_lib::Tree_index& select_node_index, const std::string& select_type);
   void        do_func_def(const mmap_lib::Tree_index& func_def_node_index);
   void        do_func_call(const mmap_lib::Tree_index& func_def_node_index);
   void        do_tposs(const mmap_lib::Tree_index& tposs_node_index);
