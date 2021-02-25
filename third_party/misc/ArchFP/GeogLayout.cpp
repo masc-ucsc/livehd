@@ -29,8 +29,8 @@ FPObject* geogLayout::addComponentCluster(std::string name, int count, double ar
   return comp;
 }
 
-bool geogLayout::hardARLayoutHelper(double remWidth, double remHeight, double curX, double curY,
-                              FPObject** layoutStack, int curDepth, FPObject** centerItems, int centerItemsCount) {
+bool geogLayout::layoutHelper(double remWidth, double remHeight, double curX, double curY, FPObject** layoutStack,
+                                    int curDepth, FPObject** centerItems, int centerItemsCount) {
   int itemCount = getComponentCount();
   // Check for the end of the recursion.
   if (itemCount == 0 && centerItemsCount == 0)
@@ -83,7 +83,7 @@ bool geogLayout::hardARLayoutHelper(double remWidth, double remHeight, double cu
   if (compHint == Center) {
     centerItems[centerItemsCount] = comp;
     centerItemsCount += 1;
-    hardARLayoutHelper(remWidth, remHeight, curX, curY, layoutStack, curDepth, centerItems, centerItemsCount);
+    layoutHelper(remWidth, remHeight, curX, curY, layoutStack, curDepth, centerItems, centerItemsCount);
   }
 
   if (compHint == LeftRight || compHint == TopBottom || compHint == LeftRightMirror || compHint == TopBottomMirror
@@ -139,7 +139,7 @@ bool geogLayout::hardARLayoutHelper(double remWidth, double remHeight, double cu
 
     if (verbose)
       std::cout << "In geog for " << comp->getName() << ", total component area=" << totalArea << "\n";
-    
+
     // TODO: adding components in this way assumes everything will fit and lays out components with insane aspect ratios.
     double targetWidth, targetHeight;
     newX = curX;
@@ -179,7 +179,7 @@ bool geogLayout::hardARLayoutHelper(double remWidth, double remHeight, double cu
       remWidth -= FPLayout->getWidth();
     else if (compHint == Top || compHint == Bottom)
       remHeight -= FPLayout->getHeight();
-    hardARLayoutHelper(remWidth, remHeight, newX, newY, layoutStack, curDepth + 1, centerItems, centerItemsCount);
+    layoutHelper(remWidth, remHeight, newX, newY, layoutStack, curDepth + 1, centerItems, centerItemsCount);
   } else if (compHint != Center) {
     std::cerr << "Hint is not any of the recognized hints.  Hint=" << compHint << "\n";
     std::cerr << "Component is of type " << Ntype::get_name(comp->getType()) << "\n";
@@ -188,7 +188,7 @@ bool geogLayout::hardARLayoutHelper(double remWidth, double remHeight, double cu
   return correct;
 }
 
-bool geogLayout::hardARLayout(double targetAR) {
+bool geogLayout::layout(const FPOptimization opt, const double targetAR) {
   // All this routine does is set up some data structures,
   //   and then call the helper to recursively do the layout work.
   // We will keep track of containers we make in a "stack".
@@ -211,7 +211,7 @@ bool geogLayout::hardARLayout(double targetAR) {
     std::cout << "In geogLayout for " << getName() << ".  A=" << area << " W=" << remWidth << " H=" << remHeight << "\n";
 
   // Now do the real work.
-  bool correct = hardARLayoutHelper(remWidth, remHeight, 0, 0, layoutStack, 0, centerItems, 0);
+  bool correct = layoutHelper(remWidth, remHeight, 0, 0, layoutStack, 0, centerItems, 0);
 
   // By now, the item list should be empty.
   if (getComponentCount() != 0) {
@@ -240,13 +240,6 @@ bool geogLayout::hardARLayout(double targetAR) {
   delete[] layoutStack;
 
   return correct;
-}
-
-bool geogLayout::layout(const FPOptimization opt, const double targetAR) {
-  switch (opt) {
-    case HardAspectRatio: return hardARLayout(targetAR);
-    case SliceTree: assert(false);
-  }
 }
 
 void geogLayout::outputHotSpotLayout(std::ostream& o, double startX, double startY) {
