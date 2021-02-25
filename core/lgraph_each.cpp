@@ -38,10 +38,6 @@ void LGraph::each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)
     }
   }
 
-  for(auto &e:pin_pair) {
-    fmt::print("x pin idx:{} pid:{}\n", e.dpin.get_idx(), e.dpin.get_pid());
-  }
-
   std::sort(pin_pair.begin(), pin_pair.end(), [&pin_pair](const Pair_type &a, const Pair_type &b) -> bool {
     if (a.pos == Port_invalid && b.pos == Port_invalid) {
       if (a.dpin.is_graph_input() && b.dpin.is_graph_output()) {
