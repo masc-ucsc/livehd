@@ -45,6 +45,7 @@ public:
   std::string resolve_tuple_assign(const mmap_lib::Tree_index& tuple_assign_index);
   std::string resolve_func_cond(const mmap_lib::Tree_index& func_cond_index);
   bool        is_temp_var(std::string_view test_string);  // can go to private/protected section!?
+  bool        has_DblUndrScor(std::string_view test_string);  // can go to private/protected section!?
   // std::string_view get_node_name(Lnast_node node);//can go to private/protected section!?
   bool is_number(std::string_view test_string);
   //  void invalid_node();
