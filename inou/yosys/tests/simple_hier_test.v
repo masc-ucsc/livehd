@@ -7,7 +7,10 @@ module leaf1(input [15:0] x, output [15:0] y);
 endmodule
 
 module leaf2(input [15:0] x, input [15:0] y, output [15:0] sum);
-  assign sum = x + y;
+  wire [15:0] wy;
+  leaf1 sub_l1(.x(x), .y(wy));
+
+  assign sum = x + y + wy;
 endmodule
 
 module simple_hier_test(input [15:0] testi, output [15:0] testo);

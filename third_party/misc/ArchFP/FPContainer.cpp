@@ -4,6 +4,7 @@
 
 #include "FPCompWrapper.hpp"
 #include "FPObject.hpp"
+#include "helpers.hpp"
 
 // Default constructor
 FPContainer::FPContainer(unsigned int rsize) : items(), yMirror(false), xMirror(false) {

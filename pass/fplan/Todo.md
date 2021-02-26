@@ -1,16 +1,16 @@
 Plan:
-0. Strip out optimization parameters for geogLayout
 1. Find DeFer src/license, check
 2. Possibly adjust stuff so DeFer and ArchFP can both operate on the same node hierarchy (and so that different floorplanners can operate on different segments)
 
 
+lgraph.list - lists lgraphs!
 
 
 1. Write/pull in a floorplanning method that actually works properly into ArchFP
 
     General idea:
     - if someone wants to manually provide hints to a module, use geogLayout for it (since it is assumed that the person knows what they're doing)
-    - otherwise, use some other method to generate an initial floorplan
+    - otherwise, use some other method to generate an initial floorplan (run DeFer per module, cache the result?)
     - this initial floorplan is used to generate hints for the placer (it would be really cool if the floorplanner itself used some of the same hints!)
 
     - write/pull another floorplanner, and make sure it generates legal floorplans automatically.
@@ -18,9 +18,7 @@ Plan:
        - Chris Chu writes good tools/papers (code has weird license issues) - wrote DeFer, could use that.  Pretty fast.
        - http://eda.ee.ucla.edu/EE201A-04Spring/polish.pdf: original simulated annealing floorplanner
 2. Create method of writing and reading geographic hints manually
-    - can't do this until I have a way to read/write node instances by name (name might come from a human) or by nid/hidx
-    - solution: create floorplan name -> nid + hidx mmap::map for humans
-    - print hint(s) for each node (new node attr class)
+    - implement hint storage
 3. Work on creating methods for automatic hint insertion
     - better hints (place near here, put in this section, block divide design around here, put anchor points here, etc)
        - goal of the whole floorplanner project is to provide hints to placer!

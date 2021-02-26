@@ -1,10 +1,8 @@
 #pragma once
 
-#include <ostream>
-#include <string>
-
 #include <cassert>
 #include <fstream>
+#include <ostream>
 #include <stdexcept>
 
 // Here is an enumeration for the optimazation goals for a layout manager.
@@ -25,30 +23,10 @@ enum GeographyHint {
   TopBottom,
   TopBottomMirror,
   TopBottom180,
-  Periphery,         // not supported
-  UnknownGeography,  // not supported
+  Periphery,    // not supported
+  UnknownHint,  // not supported
+  InvalidHint,  // not supported
 };
 
 // This will be used to keep track of user's request for more output during layout.
 constexpr bool verbose = false;
-
-// Temporary local for crazy mirror reflection stuff.
-constexpr int maxMirrorDepth = 20;
-
-extern bool   xReflect;
-extern double xLeft[];
-extern double xRight[];
-extern int    xMirrorDepth;
-extern bool   yReflect;
-extern double yBottom[];
-extern double yTop[];
-extern int    yMirrorDepth;
-
-int    Name2Count(const std::string& arg);
-void   clearCount();
-std::string getStringFromInt(int in);
-void   setNameMode(bool);
-
-// Output Helper Functions.
-std::ostream& outputHotSpotHeader(const char* filename);
-void     outputHotSpotFooter(std::ostream& o);

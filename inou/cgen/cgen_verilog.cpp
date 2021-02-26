@@ -288,7 +288,7 @@ void Cgen_verilog::create_subs(std::string &buffer, LGraph *lg) {
   lg->each_sub_fast([&buffer](Node &node, Lg_type_id lgid) {
     (void)lgid;
 
-    auto iname      = get_scaped_name(node.get_instance_name());
+    auto iname      = get_scaped_name(node.default_instance_name());
     const auto &sub = node.get_type_sub_node();
 
     absl::StrAppend(&buffer, get_scaped_name(sub.get_name()), " ", iname, "(\n");
@@ -442,7 +442,7 @@ void Cgen_verilog::create_locals(std::string &buffer, LGraph *lg) {
 
     if (Ntype::is_multi_driver(op)) {
       if (op == Ntype_op::Sub) {
-        auto iname = get_scaped_name(node.get_instance_name());
+        auto iname = get_scaped_name(node.default_instance_name());
         for(auto &e:node.out_edges()) {
           auto name = get_scaped_name(e.driver.get_wire_name());
           absl::StrAppend(&buffer, "wire signed [", e.driver.get_bits()-1, ":0] ", name , ";\n");

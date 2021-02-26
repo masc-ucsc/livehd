@@ -263,7 +263,7 @@ Node_pin Node::setup_sink_pin_raw(Port_ID pid) {
     Lg_type_id  sub_lgid = current_g->get_type_sub(nid);
     const auto &sub      = current_g->get_library().get_sub(sub_lgid);
     I(sub.has_instance_pin(pid));
-  }else{
+  } else {
     I(Ntype::has_sink(get_type_op(), pid));
   }
 #endif
@@ -293,7 +293,7 @@ Node_pin Node::setup_driver_pin_raw(Port_ID pid) const {
     const auto &sub      = current_g->get_library().get_sub(sub_lgid);
     I(sub.has_instance_pin(pid));
     I(sub.is_output_from_instance_pid(pid), "ERROR: An input can not be a driver pin");
-  }else{
+  } else {
     I(Ntype::has_driver(get_type_op(), pid));
   }
 #endif
@@ -439,11 +439,17 @@ void Node::del_node() {
 
 void Node::set_name(std::string_view iname) { Ann_node_name::ref(current_g)->set(get_compact_class(), iname); }
 
-std::string Node::get_instance_name() const {
+void Node::set_instance_name(std::string_view iname) { Ann_inst_name::ref(current_g)->set(get_compact(), iname); }
+
+std::string_view Node::get_instance_name() const { return Ann_inst_name::ref(current_g)->get(get_compact()); }
+
+bool Node::has_instance_name() const { return Ann_inst_name::ref(current_g)->has(get_compact()); }
+
+std::string Node::default_instance_name() const {
   std::string name{"i"};
 
   if (is_hierarchical()) {
-    absl::StrAppend(&name, "_lg", current_g->get_name(), "_hidx" ,std::to_string(hidx.level), "_", std::to_string(hidx.pos));
+    absl::StrAppend(&name, "_lg", current_g->get_name(), "_hidx", std::to_string(hidx.level), "_", std::to_string(hidx.pos));
   }
 
   if (has_name()) {
@@ -451,7 +457,7 @@ std::string Node::get_instance_name() const {
     return name;
   }
 
-  absl::StrAppend(&name, "_nid" , std::to_string(nid));
+  absl::StrAppend(&name, "_nid", std::to_string(nid));
 
   return name;
 }
@@ -556,9 +562,7 @@ bool Node::has_place() const { return Ann_node_place::ref(top_g)->has(get_compac
 
 //----- Subject to changes in the future:
 enum { WHITE = 0, GREY, BLACK };
-void Node::set_color(int new_color) {
-  Ann_node_color::ref(current_g)->set(get_compact_class(), std::to_string(new_color));
-}
+void Node::set_color(int new_color) { Ann_node_color::ref(current_g)->set(get_compact_class(), std::to_string(new_color)); }
 
 int Node::get_color() const {
   auto str = Ann_node_color::ref(current_g)->get_val(get_compact_class());

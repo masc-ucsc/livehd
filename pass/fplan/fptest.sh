@@ -24,6 +24,6 @@ rm -rf floorplan.*
 ./bazel-bin/main/lgshell -c "lgraph.open name:$2 |> pass.fplan.makefp traversal:hier_node filename:hier_floorplan.flp" > /dev/null
 ./bazel-bin/main/lgshell -c "lgraph.open name:$2 |> pass.fplan.checkfp" | tail -n +3
 
-./third_party/misc/ArchFP/view.py -i lg_floorplan.flp -s 1600
-./third_party/misc/ArchFP/view.py -i flat_floorplan.flp -s 1600
-./third_party/misc/ArchFP/view.py -i hier_floorplan.flp -s 1600
+./pass/fplan/view.py -i lg_floorplan.flp -s 1600
+./pass/fplan/view.py -i flat_floorplan.flp -s 1600
+./pass/fplan/view.py -i hier_floorplan.flp -s 1600
