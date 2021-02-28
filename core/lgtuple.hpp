@@ -23,153 +23,101 @@ class Lgtuple : std::enable_shared_from_this<Lgtuple> {
 private:
 protected:
 
-  struct less_key {
-    bool operator()(const std::string &a, const std::string &b) const {
-      return strcasecmp(a.c_str(), b.c_str()) < 0;
-    }
-  };
-
-  using key_map_type=absl::btree_map<std::string, Node_pin, less_key>;
-
-  // bimap needed for entries that have both key and pos
-  using pos2key_map_type=absl::flat_hash_map<std::string, std::string>;
-  using key2pos_map_type=absl::flat_hash_map<std::string, std::string>;
+  using Key_map_type=std::vector<std::pair<std::string, Node_pin>>;
 
   const std::string name;
-  Node_pin invalid_dpin;
+  static inline Node_pin invalid_dpin;
 
-  key_map_type key_map;
-  pos2key_map_type pos2key_map;
-  key2pos_map_type key2pos_map;
+  Key_map_type key_map;
 
-  key_map_type::const_iterator get_both_it(int pos, std::string_view key) const {
-    I(pos>=0);
-    const auto it = key_map.find(std::string{key});
-    I(get_it(pos) == it);
-    return it;
-  }
+  static std::tuple<bool, size_t, size_t> match_int_advance(std::string_view a, std::string_view b, size_t a_pos, size_t b_pos);
+	static std::tuple<bool,bool, size_t>    match_int(std::string_view a, std::string_view b);
 
-  key_map_type::const_iterator get_it(int pos) const {
-    auto str_pos = std::to_string(pos);
-    auto it = key_map.find(str_pos);
-    if (it!=key_map.end())
-      return it; // case when there was no key, just pos
+	void append_field(std::string &a, std::string_view b) const;
+	void learn_fix_int(std::string &a, std::string &b);
 
-    if (pos==0 && key_map.size()==1) {
-      return key_map.begin();
-    }
-
-    auto p2k_it = pos2key_map.find(str_pos);
-    if (p2k_it==pos2key_map.end()) {
-      if (pos==0) {
-        it = key_map.end();
-        for(auto it2 = key_map.begin(); it2 != key_map.end(); ++it2) {
-          if (it2->first.substr(2) == "__")
-            continue; // skip attributes
-          if (it2 != key_map.end())
-            return key_map.end(); // foo.0 == foo.bar only if foo has 1 field (and n-attributes)
-          it = it2;
-        }
-        return it;
-      }
-      return key_map.end(); // case when key did not exist
-    }
-
-    it = key_map.find(p2k_it->second);
-    I(it != key_map.end()); // both maps should hit in this case
-    return it;
-  }
-
-  key_map_type::const_iterator get_it(std::string_view key) const;
-  key_map_type::const_iterator get_it(int pos, std::string_view key) const {
-    if (pos>=0 && !key.empty())
-      return get_both_it(pos, key);
-
-    if (pos>=0)
-      return get_it(pos);
-
-    return get_it(key);
-  }
-
-  key_map_type::const_iterator get_lower_it(int pos, std::string_view key) const {
-    if (pos>=0) {
-      auto str_pos = std::to_string(pos);
-
-      key_map_type::const_iterator it = key_map.lower_bound(str_pos);
-      if (it!=key_map.end()) {
-        return it;
-      }
-      auto p2k_it = pos2key_map.find(str_pos);
-      if (p2k_it!=pos2key_map.end())
-        return key_map.lower_bound(p2k_it->second);
-    }
-
-    return key_map.lower_bound(std::string{key});
-  }
-
-  std::string get_remove_first_level(const std::string &key) const;
+  static bool   match(std::string_view a, std::string_view b);
+	static size_t match_first_partial(std::string_view a, std::string_view b);
+	static bool   match_either_partial(std::string_view a, std::string_view b);
 
   void add_int(const std::string &key, std::shared_ptr<Lgtuple const> tup);
-  int get_next_free_pos(const std::string &key) const;
+
+  static std::string_view get_last_level(std::string_view key);
+  static std::string_view get_all_but_last_level(std::string_view key);
+	static std::string_view get_all_but_first_level(std::string_view key);
 
 public:
   Lgtuple(std::string_view _name) : name(_name) { }
 
   std::string_view get_name() const { return name; }
 
-  static std::shared_ptr<Lgtuple> make_merge(Node_pin &sel_dpin, const std::vector<std::shared_ptr<Lgtuple const>> &tup_list);
+  static std::shared_ptr<Lgtuple> make_mux(Node_pin &sel_dpin, const std::vector<std::shared_ptr<Lgtuple const>> &tup_list);
 
-  std::tuple<Node_pin, std::shared_ptr<Lgtuple>> make_select(Node_pin &sel_dpin) const;
+  bool has_dpin(std::string_view key)          const;
+  bool has_dpin()                              const { return has_dpin("");       }
 
-  bool has_dpin(int pos)                       const { return get_it(pos) != key_map.end(); }
-  bool has_dpin(std::string_view key)          const { return get_it(key) != key_map.end(); }
-  bool has_dpin()                              const { return has_dpin("");                      }
-  bool has_dpin(int pos, std::string_view key) const { return (pos>=0)? has_dpin(pos) : has_dpin(key); }
+	static int              get_first_level_pos(std::string_view key);
+	static std::string_view get_first_level_name(std::string_view key);
 
-  // return pos for key, -1 if not existing
-  int get_pos(std::string_view key) const;
+	static bool is_single_level(std::string_view key) {
+		return key.find('.') == std::string::npos;
+	}
+
+	static bool is_root_attribute(std::string_view key) {
+		return (key.substr(0,2) == "__" && key[3] != '_');
+	}
+
+	static bool is_attribute(std::string_view key) {
+		if (is_root_attribute(key))
+			return true;
+
+		auto it = key.find(".__");
+		if (it != std::string::npos) {
+			if (key[it+3] != '_')
+				return true;
+		}
+
+		auto it2 = key.find(":__");
+		if (it2 != std::string::npos) {
+			if (key[it2+3] != '_')
+				return true;
+		}
+
+		return false;
+	}
+
+
+	std::string learn_fix(std::string_view key);
 
   // return const Node_pin ref. WARNING: no pointer stability if add/del fields
-  const Node_pin &get_dpin(int pos) const;
   const Node_pin &get_dpin(std::string_view key) const;
   const Node_pin &get_dpin() const { I(is_scalar()); return get_dpin(""); }
-  const Node_pin &get_dpin(int pos, std::string_view key) const;
 
-  std::shared_ptr<Lgtuple> get_sub_tuple(int pos, std::string_view key) const;
-  std::shared_ptr<Lgtuple> get_sub_tuple(int key) const;
   std::shared_ptr<Lgtuple> get_sub_tuple(std::string_view key) const;
 
-  void del(int pos, std::string_view key);
-  void del(int pos);
   void del(std::string_view key);
 
   // set a dpin/sub tuple. If already existed anything, it is deleted (not attributes)
-  void add(int pos, std::string_view key, std::shared_ptr<Lgtuple const> tup);
-  void add(int pos, std::string_view key, const Node_pin &dpin);
-
-  void add(int pos, std::shared_ptr<Lgtuple const> tup);
-  void add(int pos, const Node_pin &dpin);
 
   void add(std::string_view key, std::shared_ptr<Lgtuple const> tup);
   void add(std::string_view key, const Node_pin &dpin);
 
-  void add(const Node_pin &dpin);
+  void add(const Node_pin &dpin) {
+		return add("", dpin);
+	}
 
-  bool concat(const std::shared_ptr<Lgtuple const> tup2);
+  bool append_tuple(const std::shared_ptr<Lgtuple const> tup2);
+  bool append_tuple(const Node_pin &dpin);
 
   /// Get all the attributes (__bits) in the same tuple level
-  std::vector<std::pair<std::string, Node_pin>> get_level_attributes(int pos, std::string_view key) const;
+  std::vector<std::pair<std::string, Node_pin>> get_level_attributes(std::string_view key) const;
 
-  const key_map_type &get_map() const { return key_map; }
-
-  static std::string get_attribute_field(const std::string &key);
-  static std::string get_last_level(const std::string &key);
-  static std::string get_all_but_last_level(const std::string &key);
+  const Key_map_type &get_map() const { return key_map; }
 
   bool is_scalar() const {
     if (key_map.empty())
       return true;
-    return key_map.find("") != key_map.end();
+    return key_map.size() == 1 && key_map[0].first == "";
   }
 
   void dump() const;

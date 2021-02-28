@@ -36,8 +36,6 @@ protected:
   void try_connect_tuple_to_sub(Node_pin &dollar_spin, std::shared_ptr<Lgtuple> tup, Node &sub_node, Node &tup_node);
   void try_connect_lgcpp(Node &node);
   void try_connect_sub_inputs(Node &node);
-  
-
 
   void process_subgraph(Node &node, XEdge_iterator &inp_edges_ordered);
 
@@ -61,9 +59,11 @@ protected:
 
 public:
   Cprop(bool _hier, bool _gioc);
-  static std::tuple<std::string_view, std::string_view, int> get_tuple_name_key(Node &node);
-  void                                                       dump_node2tuples() const;
-  // Entry point
+
+  static std::tuple<std::string_view, std::string> get_tuple_name_key(Node &node);
+
+  void dump_node2tuples() const;
+
   void do_trans(LGraph *orig);
   bool has_tuple_issues() const { return tuple_issues; }
 };

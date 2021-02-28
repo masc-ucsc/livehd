@@ -1838,11 +1838,11 @@ void Lnast_tolg::dfs_try_create_flattened_inp(LGraph *lg, Node_pin &cur_node_spi
     }
 
     inp_artifacts[chain_head.get_compact()].insert(cur_node);  // only remove the artifact tup_gets
-    auto [tup_name, field_name, key_pos] = Cprop::get_tuple_name_key(cur_node);
-    if (!field_name.empty()) {
+    auto [tup_name, field_name] = Cprop::get_tuple_name_key(cur_node);
+    if (field_name.empty()) {
+      new_hier_name = hier_name;
+    }else{
       new_hier_name = absl::StrCat(hier_name, ".", field_name);
-    } else {
-      new_hier_name = absl::StrCat(hier_name, ".", key_pos);
     }
     for (auto &e : cur_node.out_edges()) {
       dfs_try_create_flattened_inp(lg, e.sink, new_hier_name, chain_head);
