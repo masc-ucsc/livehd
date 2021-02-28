@@ -649,7 +649,7 @@ void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index, const st
   }
   if(has_DblUndrScor(sel_str_vect.back())) {//treat like dot operator
     do_dot(select_node_index);//TODO: pass the vector also, no need to calc it again!
-  } else { //do not treat like dot operator
+  } else if (is_pos_int(sel_str_vect.back())) { //do not treat like dot operator
     
     if (select_type == "bit") {
       assert(sel_str_vect.size() >= 2);
@@ -681,6 +681,8 @@ void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index, const st
     } else {
       fmt::print("ERROR:\n\t\t------CHECK THE NODE TYPE IN THIS IF -----!!\n");
     }
+  } else {
+    I(false, "Unexpected node. Please check.");
   }
 }
 
@@ -839,6 +841,16 @@ bool Code_gen::is_number(std::string_view test_string) {
     return true;
   }
   return false;
+}
+
+//-------------------------------------------------------------------------------------
+//Returns true if test_string is a number else false
+bool Code_gen::is_pos_int(std::string_view test_string) {
+  for (auto i=0; i<int(test_string.length()); i++) {
+    if (is_digit(test_string[i]) == false)
+      return false;
+  }
+  return true;
 }
 
 //-------------------------------------------------------------------------------------
