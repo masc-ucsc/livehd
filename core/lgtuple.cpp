@@ -617,29 +617,39 @@ std::shared_ptr<Lgtuple> Lgtuple::make_mux(Node_pin &sel_dpin, const std::vector
 
   auto fixing_tup = std::make_shared<Lgtuple>(tup_list.back()->get_name());
 
+	std::vector<size_t> keymap_counter;
+
 	for(const auto &tup:tup_list) {
 		for(const auto &e:tup->get_map()) {
 			auto fixed_key = fixing_tup->learn_fix(e.first);
-			bool found = false;
-			// Since it is fixed a direct strcmp would do it
+			bool found     = false;
+
+			if (keymap_counter.size() < fixing_tup->key_map.size()) {
+				keymap_counter.resize(fixing_tup->key_map.size());
+			}
+
 			for(auto i=0u;i<fixing_tup->key_map.size();++i) {
-				if (fixing_tup->key_map[i].first != fixed_key) {
+				if (fixing_tup->key_map[i].first != fixed_key) { // for fixed, a direct strcmp works
 					continue;
 				}
 				if (fixing_tup->key_map[i].second != e.second) { // Diff dpin will need a mux
 					fixing_tup->key_map[i].second = invalid_dpin;
 				}
 
+				keymap_counter[i]++;
+
 				found = true;
 				break;
 			}
-			if (!found)
+			if (!found) {
 				fixing_tup->key_map.emplace_back(fixed_key, e.second);
+			}
 		}
 	}
 
-	for(auto &e:fixing_tup->key_map) {
-		if (!e.second.is_invalid())
+	for(auto e_index = 0u;e_index < fixing_tup->key_map.size(); ++e_index) {
+		auto &e = fixing_tup->key_map[e_index];
+		if (!e.second.is_invalid() && keymap_counter[e_index] == (tup_list.size()-1))
 			continue;
 
 		auto mux_node = sel_dpin.get_class_lgraph()->create_node(Ntype_op::Mux);
@@ -647,7 +657,10 @@ std::shared_ptr<Lgtuple> Lgtuple::make_mux(Node_pin &sel_dpin, const std::vector
 
 		for (auto i = 0u; i < tup_list.size(); ++i) {
 			const auto &dpin = tup_list[i]->get_dpin(e.first);
-			if (!dpin.is_invalid()) {
+			if (dpin.is_invalid()) {
+				auto cerr = sel_dpin.get_class_lgraph()->create_node(Ntype_op::CompileErr);
+				mux_node.setup_sink_pin_raw(i+1).connect_driver(cerr.setup_driver_pin());
+			}else{
 				mux_node.setup_sink_pin_raw(i+1).connect_driver(dpin);
 			}
 		}

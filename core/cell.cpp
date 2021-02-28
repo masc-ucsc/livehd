@@ -112,6 +112,7 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
     case Ntype_op::Mux:  // unlimited case: 1,2,3,4,5.... // Y = (pid0 == true) ? pid2 : pid1
     case Ntype_op::LUT:  // unlimited case: 1,2,3,4,5....
     case Ntype_op::Sub:  // unlimited case: 1,2,3,4,5....
+    case Ntype_op::CompileErr:
       assert(is_unlimited_sink(op));
       switch (pid) {
         case 0: return "0";
@@ -215,23 +216,6 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
         case 5: return "field";
         default: return "invalid";
       }
-      break;
-    case Ntype_op::CompileErr:
-      switch (pid) {
-        case 0: return "A";
-        case 1: return "B";
-        case 2: return "C";
-        case 3: return "D";
-        case 4: return "E";
-        case 5: return "F";
-        case 6: return "G";
-        case 7: return "H";
-        case 8: return "I";
-        case 9: return "J";
-        case 10: return "K";
-        default: return "invalid";
-      }
-      return "invalid";
       break;
     default: assert(false); return "invalid";
   }
