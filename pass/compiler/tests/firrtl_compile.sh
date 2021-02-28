@@ -40,7 +40,7 @@ pts='VecShiftRegister'
 pts='Xor32Thread8'
 pts='Xor64Thread8'
 pts='Xor128Thread8'
-pts='Xor800Thread8'
+# pts='Xor800Thread8'
 
 
 LGSHELL=./bazel-bin/main/lgshell
@@ -96,7 +96,7 @@ firrtl_test() {
         echo "Successfully generate Verilog: ${pt}.v"
         rm -f  yosys_script.*
     else
-        echo "ERROR: Pyrope compiler failed: verilog generation, testcase: ${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb"
+        echo "ERROR: Firrtl compiler failed: verilog generation, testcase: ${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb"
         exit 1
     fi
   done
