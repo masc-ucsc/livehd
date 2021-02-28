@@ -45,7 +45,8 @@ void Pass_fplan_analyzefp::print_children(const Node_tree& nt, const Tree_index&
     } else {
       fmt::print(" └─ ");
     }
-    fmt::print("node {}\t", child.get_name());
+
+    fmt::print("{} {}\t", (child.get_type_op() == Ntype_op::Sub) ? "mod" : "node", child.get_instance_name());
 
     print_area(nt, child_idx);
     fmt::print("\n");
@@ -54,6 +55,9 @@ void Pass_fplan_analyzefp::print_children(const Node_tree& nt, const Tree_index&
 
 Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fplan", var) {
   LGraph* root = LGraph::open(path, var.get("top"));
+  if (root == nullptr) {
+    error("cannot find top level lgraph!");
+  }
 
   std::vector<std::string_view> names;
 
@@ -105,14 +109,14 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
 
       I(!n.is_invalid());
 
-      if (!n.has_name()) {
+      if (!n.has_instance_name()) {
         error("floorplanner has not been run!");
       }
 
-      if (n.get_name() == name) {
+      if (n.get_instance_name() == name) {
         found = true;
 
-        fmt::print("module {}\t", n.get_name());
+        fmt::print("module {}\t", n.get_instance_name());
 
         if (!n.has_place()) {
           fmt::print("(no area information)\n");

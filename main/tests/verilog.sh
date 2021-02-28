@@ -76,8 +76,8 @@ do
   rm -rf lgdb_yosys tmp_yosys
   mkdir -p tmp_yosys
 
-  echo "inou.yosys.tolg path:lgdb_yosys top:${base} files:"${full_input}  | ${LGSHELL} -q >tmp_yosys/${input}.log 2>tmp_yosys/${input}.err
-  #echo "inou.verilog path:lgdb_yosys top:${base} files:"${full_input}" |> pass.compiler "  | ${LGSHELL} -q >tmp_yosys/${input}.log 2>tmp_yosys/${input}.err
+  #echo "inou.yosys.tolg path:lgdb_yosys top:${base} files:"${full_input}  | ${LGSHELL} -q >tmp_yosys/${input}.log 2>tmp_yosys/${input}.err
+  echo "inou.verilog path:lgdb_yosys top:${base} files:"${full_input}" |> pass.compiler "  | ${LGSHELL} -q >tmp_yosys/${input}.log 2>tmp_yosys/${input}.err
   if [ $? -eq 0 ]; then
     echo "Successfully created graph from ${input}"
   else

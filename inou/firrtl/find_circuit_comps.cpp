@@ -26,16 +26,11 @@ void Inou_firrtl::SearchNode(Lnast &ln, const Lnast_nid &parent_node, firrtl::Fi
     return;
   } else if (ntype.is_ref()) {
     CheckRefForComp(ln, parent_node, umod);
-  } else if (ntype.is_cond()) {
-    // Cond, possibly, is a circuit component (or just a const/temp var)
-    if (!isdigit(ln.get_name(parent_node)[0])) {
-      CheckRefForComp(ln, parent_node, umod);
-    }
   } else if (ntype.is_tuple()) {
     CheckTuple(ln, parent_node, umod);
   } else if (ntype.is_func_call()) {
     CreateSubmodInst(ln, parent_node, umod);
-  } else if (ntype.is_dot()) {
+  } else if (ntype.is_select()) {
     return;
   } else {
     // If "regular" node

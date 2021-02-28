@@ -29,7 +29,7 @@ protected:
   }
 
   std::string create_rand_name(int levels) {
-    std::vector<std::string> pool = { "a", "xx", " ", "not_a_dot", "long_name", "zz", "not here", "foo:33", "potato", "__b", "nothing", "x", "Zoom" };
+    std::vector<std::string> pool = { "a", "xx", " ", "not_a_dot", "long_name", "zz", "not here", "foo33", "potato", "__b", "nothing", "x", "Zoom" };
 
     Lrand<uint8_t> rng;
 
@@ -72,7 +72,16 @@ TEST_F(Lgtuple_test, flat1) {
 
     names.emplace_back(name);
 
+    if (names[i]=="not here1")
+      fmt::print("DEBUG {} got deleted by {}\n", names[1], names[i]);
+
     tup.add(name, dpin[i]);
+    if (i>0u) {
+      if(!tup.has_dpin(names[1])) {
+        fmt::print("{} got deleted by [{}]\n", names[1], names[i]);
+      }
+      EXPECT_TRUE(tup.has_dpin(names[1]));
+    }
   }
 
   for(auto i=0u;i<dpin.size();++i) {
@@ -89,12 +98,12 @@ TEST_F(Lgtuple_test, flat2) {
   Lgtuple tup("flat");
 
   for(auto i=0u;i<dpin.size();++i) {
-    tup.add(i, dpin[i]);
+    tup.add(std::to_string(i), dpin[i]);
   }
 
   for(auto i=0u;i<dpin.size();++i) {
-    EXPECT_TRUE(tup.has_dpin(i));
-    EXPECT_EQ(tup.get_dpin(i) , dpin[i]);
+    EXPECT_TRUE(tup.has_dpin(std::to_string(i)));
+    EXPECT_EQ(tup.get_dpin(std::to_string(i)) , dpin[i]);
   }
 }
 
@@ -110,15 +119,18 @@ TEST_F(Lgtuple_test, flat3) {
 
     names.emplace_back(name);
 
-    tup.add(i, name, dpin[i]);
+    auto pname = absl::StrCat(":", std::to_string(i), ":", name);
+    tup.add(pname, dpin[i]);
   }
 
   for(auto i=0u;i<dpin.size();++i) {
     EXPECT_TRUE(tup.has_dpin(names[i]));
-    EXPECT_TRUE(tup.has_dpin(i));
+    EXPECT_TRUE(tup.has_dpin(std::to_string(i)));
     EXPECT_EQ(tup.get_dpin(names[i]) , dpin[i]);
-    EXPECT_EQ(tup.get_dpin(i) , dpin[i]);
-    EXPECT_EQ(tup.get_dpin(i,names[i]) , dpin[i]);
+
+    EXPECT_EQ(tup.get_dpin(std::to_string(i)) , dpin[i]);
+    auto pname = absl::StrCat(":", std::to_string(i), ":", names[i]);
+    EXPECT_EQ(tup.get_dpin(pname) , dpin[i]);
   }
 }
 
@@ -155,15 +167,16 @@ TEST_F(Lgtuple_test, hier2) {
 
     names.emplace_back(name);
 
-    tup.add(i, name, dpin[i]);
+    auto xx = absl::StrCat(":",std::to_string(i),":",name);
+    tup.add(xx, dpin[i]);
   }
 
   for(auto i=0u;i<dpin.size();++i) {
     EXPECT_TRUE(tup.has_dpin(names[i]));
-    EXPECT_TRUE(tup.has_dpin(i));
     EXPECT_EQ(tup.get_dpin(names[i]) , dpin[i]);
-    EXPECT_EQ(tup.get_dpin(i) , dpin[i]);
-    EXPECT_EQ(tup.get_dpin(i,names[i]) , dpin[i]);
+
+    auto xx = absl::StrCat(":",std::to_string(i),":",names[i]);
+    EXPECT_EQ(tup.get_dpin(xx) , dpin[i]);
   }
 }
 
@@ -218,5 +231,43 @@ TEST_F(Lgtuple_test, nested1) {
   EXPECT_TRUE(top->has_dpin("xxx.foo")); // dpin at foo
   EXPECT_FALSE(top->has_dpin("xxx.foo.p4"));
   EXPECT_FALSE(top->has_dpin("xxx.foo.p5"));
+}
+
+TEST_F(Lgtuple_test, internal_test) {
+
+  auto top = std::make_shared<Lgtuple>("top");
+
+  //EXPECT_EQ(top->get_next_free_pos(""), 0);
+
+  top->add(":3:foo", dpin[1]);
+  top->add("foo.:2:bar", dpin[2]);
+  EXPECT_TRUE(top->has_dpin("foo"));
+  EXPECT_TRUE(top->has_dpin("3"));
+  EXPECT_TRUE(top->has_dpin("3.bar"));
+  EXPECT_TRUE(top->has_dpin("3.2"));
+
+  top->add("foo.xxx", dpin[3]);
+  top->add("foo.:5:xxx.potato", dpin[4]); // It should learn from this
+  top->add("foo.5.jojojo", dpin[5]);
+
+  //EXPECT_EQ(top->get_next_free_pos(""), 4);
+  //EXPECT_EQ(top->get_next_free_pos("foo"), 2);
+  EXPECT_EQ(top->get_first_level_pos("lalala.bar"), -1);
+  EXPECT_EQ(top->get_first_level_pos("5.bar"), 5);
+  EXPECT_EQ(top->get_first_level_pos(":55:jejeje.bar"), 55);
+
+  EXPECT_EQ(top->get_dpin("3"), dpin[1]);
+  EXPECT_EQ(top->get_dpin("foo"), dpin[1]);
+  EXPECT_EQ(top->get_dpin("3.bar"), dpin[2]);
+  EXPECT_EQ(top->get_dpin("3.2"), dpin[2]);
+
+  EXPECT_EQ(top->get_dpin("foo.xxx.potato"), dpin[4]);
+  EXPECT_EQ(top->get_dpin("foo.5.potato"), dpin[4]);
+  EXPECT_EQ(top->get_dpin("foo.:5:xxx.potato"), dpin[4]);
+  EXPECT_EQ(top->get_dpin("3.:5:xxx.potato"), dpin[4]);
+  //EXPECT_EQ(top->get_dpin("3.:5:xxx.potato.0.0.0"), dpin[4]); // 0.0.0 legal
+
+  EXPECT_EQ(top->get_dpin("foo.5.jojojo"), dpin[5]);
+  EXPECT_EQ(top->get_dpin("foo.xxx.jojojo"), dpin[5]);
 }
 

@@ -11,6 +11,9 @@ namespace mmap_lib {
 // vset will have a Key to identify each BitMap
 // data will be the BitMap (various numbers of different bits)
 
+// end() for now returns the Actual last element, need it to return AFTER last
+
+
 template <typename Key, typename T>
 class vset {
 
@@ -262,14 +265,11 @@ public:
     }
   }
 
-  /* Can add functions here to get a single bit of the bitmap
-   */
 
   // Not the 'real' find function
   // Need a wrapper to call this func and put it in a vIter
   [[nodiscard]] bool efind(T &&ele) {
     // finding the correct bitmap to get
-    std::cout << "efind() ran" << std::endl;
     const auto p = ele / (sizeof(T) * 8);
     const auto i = ele % (sizeof(T) * 8);
 
@@ -282,7 +282,6 @@ public:
   }
 
   [[nodiscard]] bool efind(const T &&ele) {
-    std::cout << "efind() ran" << std::endl;
     const auto p = ele / (sizeof(T) * 8);
     const auto i = ele % (sizeof(T) * 8);
 
@@ -292,14 +291,7 @@ public:
       return false;
     }
   }
-
-  [[nodiscard]] bool contains(T &&ele) {
-    return vset::efind(ele);
-  }
-
-  [[nodiscard]] bool contains(const T &&ele) {
-    return vset::efind(ele);
-  }
+  
 
   // Functions used for iterating, begin() and end()
   [[nodiscard]] bool is_start(T &&ele) {
@@ -326,7 +318,8 @@ public:
     T test = 0;
     vset &owner; // a reference to the vset this vIter is a part of
                  // this reference included in order to access vset members
-    T iData;
+    T iData = 0;
+  
   public:
 
     vIter(vset &tmp): iData(0) , owner(tmp){ }
@@ -335,97 +328,46 @@ public:
     void cont_test() { std::cout << "made it" << std::endl; }
     void iter_change(T ele) { iData = ele; }
     T iter_val() { return iData; }
-    
-    /* Revert back to old ways for now 
-     * Need to think about how to make sure vIter doesnt ++ or -- blindly*/
-    //vIter operator++() { iData = (iData < 0) ? 0 : iData - 1;}
-    //vIter operator++(int other) { iData = (iData == 0) ? 0 : iData - 1;} 
-    //vIter operator--() { iData = (iData == 0) ? 0 : iData - 1; }
-    //vIter operator--(int other) { iData = (iData == 0) ? 0 : iData - 1; }
-    
+     
     T get_set_max() { return owner.max; }
     
-
-    //=================================================
-    //
-    // This operator is not working, keeps getting looped
-    // Need to figure out why
-    // Also somehow manages to get a core dump/Seg Fault
-    //
-    // Note: "in the else" never prints, narrows problem down to inside if() 
-    //       or the while loop
-    //
-    // Strategy: Maybe try to revert back to old code before optimize
-    //           to see if it makes a difference
-    //
-    //=================================================
-    vIter operator ++() {
-      /*      
-      //if iData < max
-      //  while(!(owner.find(iData+1)))
-      //    ++iData;
-      //  ++iData
-      //else if (iData == max)
-      //  do nothing
-      if (iData <= owner.get_max()) {
-        //std::cout << "really?" << std::endl;
-        while (!(owner.efind(iData + 1)) && !(iData == owner.get_max())) { 
-          ++iData; 
-          //std::cout << "in loop" << std::endl; // <=== STUCK HERE
-        }
-        //std::cout << "or not?" << std::endl; // <=== AND HERE?
-        ++iData;
-      } else {
-        std::cout << "in the else" << std::endl; // this one does not print
-      }
-      std::cout << "make it here?" << std::endl; // <=== ALSO HERE
-      */
-      std::cout << "in prefix ++ " << std::endl;
-      if (iData < owner.get_max()) {
-        std::cout << "in first if" << std::endl;
-        while (!(owner.efind(iData+1))) { //<--- issue is in efind() xD
+    vIter& operator ++() {
+      int flg = 0;
+      if (iData == owner.get_max()) {
+        ;
+        //return *this;
+        //++iData // --> need to find out how to return AFTER end
+        //std::cout << "already max" << std::endl;
+      } else if (iData > owner.get_max()) {
+        return *this;
+        //std::cout << "more than max" << std::endl;
+      } else if (iData < owner.get_max()) {
+        //std::cout << "should increment" << std::endl;
+        while (owner.efind(iData+1) == false) { //<--- issue is in efind() xD
           ++iData;
-          std::cout << "in while()" << std::endl;
+          if (iData == owner.get_max()) {
+            flg = 1;
+            //std::cout << "got to max in the while()" << std::endl;
+            break;
+          }
         }
-        ++iData;
-      } else if (iData == owner.get_max()) {
-        std::cout << "cmon" << std::endl;
+        if (flg == 0) {
+          ++iData;
+        } else {
+          flg = 0;
+        }
       }
-       
+      return *this;
     } //prefix ++i
 
     vIter operator ++(int other) { 
-      /*
-      //if iData < max
-      //  while(!(owner.find(iData+1)))
-      //    ++iData;
-      //  ++iData
-      //else if (iData == max)
-      //  do nothing
-      if (iData <= owner.get_max()) {
-        while (!(owner.efind(iData + 1)) && !(iData == owner.get_max())) { 
-          ++iData; 
-        }
-        ++iData;
-      }
-      */
-      if (iData < owner.get_max()) {
-        while (!(owner.efind(iData+1))) {
-          ++iData;
-        }
-        ++iData;
-      } else if (iData == owner.get_max()) {
-        ;
-      }
+      vIter temp = *this;
+      ++*this;
+      return temp;
     } //postfix i++
 
-    vIter operator --() { 
+    vIter& operator --() { 
       T _iData = iData;
-
-      //_iData = iData
-      //if _iData > 0
-      //  while(!(owner.find(iData - 1))) { --_iData; }
-      //  iData = --_iData
 
       while (true) {
         if (_iData == 0) {
@@ -440,23 +382,13 @@ public:
           }
         }
       }
+      return *this;
     } //prefix --i
     
     vIter operator --(int other) {
-      T _iData = iData;
-      while (true) {
-        if (_iData == 0) {
-          break;
-        } else {
-          if (owner.efind(_iData - 1)) {
-            _iData = _iData - 1;
-            iData = _iData;
-            break;
-          } else {
-            _iData = _iData - 1;
-          }
-        }
-      }
+      vIter temp = *this;
+      --*this;
+      return temp;
     } //postfix i--
     
     bool operator !=(vIter other) const {
@@ -491,16 +423,7 @@ public:
   }
 
 
-  //=========================================
-  //
-  // In bench_set_use tests, vset is getting stuck at the first loop
-  // My guess is that it stopped because of begin() and end() in vIter
-  // Something is happening where it is not returning from these
-  //
-  //=========================================
-
   [[nodiscard]] vIter begin() {
-    //std::cout << "begin";
     vIter tmp(*this);
     if (visitor_set.empty() == true) {
       //Exception?
@@ -520,15 +443,18 @@ public:
   }
   
   [[nodiscard]] vIter end() {
-    //std::cout << "end";
     vIter tmp(*this);
     if (visitor_set.empty() == true) {
       //Exception?
       //Assertion?
       return tmp;
     }
+    
+    // includes last element of set
     //tmp.iter_change(vset::get_max()+1);
-    tmp.iter_change(vset::get_max());
+    
+    // does not include last element of set
+    tmp.iter_change(vset::get_max()); 
     return tmp;
   }
   
@@ -545,6 +471,13 @@ public:
     }
   }
 
+  [[nodiscard]] vIter contains(T &&ele) {
+    return vset::find(ele);
+  }
+
+  [[nodiscard]] vIter contains(const T &&ele) {
+    return vset::find(ele);
+  }
 };
 
 }  // namespace mmap_lib

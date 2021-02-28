@@ -102,7 +102,7 @@ public:
     return op == Ntype_op::IO || op == Ntype_op::LUT || op == Ntype_op::Sub || op == Ntype_op::Mux || op == Ntype_op::CompileErr;
   }
   static inline constexpr bool is_unlimited_driver(Ntype_op op) {
-    return op == Ntype_op::Sub || op == Ntype_op::IO || op == Ntype_op::CompileErr;
+    return op == Ntype_op::Sub || op == Ntype_op::IO;
   }
   static inline constexpr bool is_multi_driver(Ntype_op op) { return op == Ntype_op::AttrSet || is_unlimited_driver(op); }
   static inline constexpr bool is_single_driver_per_pin(Ntype_op op) {

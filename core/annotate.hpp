@@ -22,6 +22,7 @@ struct Ann_name {
   static constexpr char ssa[]           = "ssa";
 
   static constexpr char nodename[]      = "nodename";
+  static constexpr char instname[]      = "instname";
   static constexpr char nodeplace[]     = "nodeplace";
   static constexpr char file_loc[]      = "file_loc";
   static constexpr char tree_pos[]      = "tree_pos";
@@ -45,6 +46,8 @@ using Ann_node_pin_io_unsign = Attribute<Ann_name::io_unsign, Node_pin, mmap_lib
 
 using Ann_node_name = Attribute<Ann_name::nodename, Node, mmap_lib::bimap<Node::Compact_class, std::string_view> >;
 
+using Ann_inst_name = Attribute<Ann_name::instname, Node, mmap_lib::map<Node::Compact, std::string_view> >;
+
 using Ann_node_place = Attribute<Ann_name::nodeplace, Node, mmap_lib::map<Node::Compact, Ann_place> >;
 
 using Ann_node_file_loc = Attribute<Ann_name::file_loc, Node, mmap_lib::map<Node::Compact_class, Ann_file_loc> >;
@@ -64,6 +67,7 @@ struct Ann_support {
     Ann_node_pin_ssa::clear(lg);
 
     Ann_node_name::clear(lg);
+    Ann_inst_name::clear(lg);
     Ann_node_place::clear(lg);
     Ann_node_file_loc::clear(lg);
     Ann_node_tree_pos::clear(lg);
@@ -79,6 +83,7 @@ struct Ann_support {
     Ann_node_pin_ssa::sync(lg);
 
     Ann_node_name::sync(lg);
+    Ann_inst_name::sync(lg);
     Ann_node_place::sync(lg);
     Ann_node_file_loc::sync(lg);
     Ann_node_tree_pos::sync(lg);

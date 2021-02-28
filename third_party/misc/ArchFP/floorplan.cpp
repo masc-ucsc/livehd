@@ -1,7 +1,5 @@
 #include "floorplan.hpp"
-
-//#include <limits>  // for max double value
-//#include <sstream>
+#include "helpers.hpp"
 
 #include "absl/container/flat_hash_map.h"
 #include "core/lgedgeiter.hpp"
@@ -15,7 +13,7 @@ double yBottom[maxMirrorDepth];
 double yTop[maxMirrorDepth];
 int    yMirrorDepth = 0;
 
-absl::flat_hash_map<std::string, int> NameCounts;
+absl::flat_hash_map<std::string, unsigned int> NameCounts;
 
 int  Name2Count(const std::string& arg) { return ++NameCounts[arg]; }
 void clearCount() { NameCounts.clear(); }

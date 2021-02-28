@@ -1,4 +1,4 @@
-$inp.__bits = 8
+$inp.__sbits = 8
 a = $inp
 tmp = a.foo + a.bar
 %out = tmp

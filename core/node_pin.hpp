@@ -279,6 +279,7 @@ public:
   Node_pin(LGraph *_g, Compact_class_driver comp);
 
   // No constexpr (get_root_idx)
+
   Compact        get_compact() const {
     if(hidx.is_invalid())
       return Compact(Hierarchy_tree::root_index(), get_root_idx(), sink);
@@ -431,6 +432,7 @@ public:
 
   Node_pin get_down_pin() const;
   Node_pin get_up_pin() const;
+
 };
 
 namespace mmap_lib {

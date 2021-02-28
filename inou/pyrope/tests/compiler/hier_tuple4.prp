@@ -1,7 +1,6 @@
-foo.tup1.a = 1
-foo.tup1.b = 3
-foo.tup2.c = 5
-foo.tup3   = 7
-
-%out = foo
-
+a.c = 2
+if $run {
+  a = (b=5)
+}
+// a.0 == a.b
+%out = a.0 + a.c

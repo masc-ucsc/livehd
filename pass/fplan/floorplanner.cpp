@@ -1,5 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "floorplanner.hpp"
+#include "helpers.hpp"
 
 #include "cell.hpp"
 #include "core/ann_place.hpp"
@@ -40,7 +41,7 @@ GeographyHint Lhd_floorplanner::randomHint(int count) const {
 void Lhd_floorplanner::create(FPOptimization opt, float ar) {
   bool success = root_layout->layout(opt, ar);
   if (!success) {
-    throw std::runtime_error("unable to lay out floorplan!");
+    fmt::print("WARNING: floorplan may contain overlapping layouts.  Adjusting the overall aspect ratio is recommended.\n");
   }
 }
 
@@ -73,6 +74,8 @@ void Lhd_floorplanner::write_lhd_node() {
     if (debug_print) {
       fmt::print("level {} pos {} ", n.get_hidx().level, n.get_hidx().pos);
     }
+
+    I(n.has_instance_name());
 
     I(n.has_place());
     I(n.get_place().is_valid());

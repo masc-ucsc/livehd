@@ -24,6 +24,8 @@
 
 class Inou_firrtl : public Pass {
 protected:
+  static inline absl::flat_hash_map<firrtl::FirrtlPB_Expression_PrimOp_Op, std::string> op2firsub;
+
   enum class Leaf_type { Const_num, Const_str, Ref};
   //----------- FOR toLNAST ----------
   std::string_view create_temp_var(Lnast &lnast);
@@ -120,12 +122,12 @@ protected:
   bool process_ln_assign_op(Lnast &ln, const Lnast_nid &lnidx_assign, firrtl::FirrtlPB_Statement *fstmt);
   void process_tup_asg(Lnast &ln, const Lnast_nid& lnidx_asg, const std::string_view &lhs, firrtl::FirrtlPB_Statement *fstmt);
   void process_ln_nary_op(Lnast &ln, const Lnast_nid &lnidx_assign, firrtl::FirrtlPB_Statement *fstmt);
-  void process_ln_not_op(Lnast &ln, const Lnast_nid &lnidx_op, firrtl::FirrtlPB_Statement *fstmt);
-  void process_ln_par_op(Lnast &ln, const Lnast_nid &lnidx_op, firrtl::FirrtlPB_Statement *fstmt);
+  void process_ln_bit_not_op(Lnast &ln, const Lnast_nid &lnidx_op, firrtl::FirrtlPB_Statement *fstmt);
+  void process_ln_reduce_xor_op(Lnast &ln, const Lnast_nid &lnidx_op, firrtl::FirrtlPB_Statement *fstmt);
   firrtl::FirrtlPB_Statement_When *process_ln_if_op(Lnast &ln, const Lnast_nid &lnidx_if);
-  void                             process_ln_range_op(Lnast &ln, const Lnast_nid &lnidx_op);
-  void                             process_ln_bitsel_op(Lnast &ln, const Lnast_nid &lnidx_op, firrtl::FirrtlPB_Statement *fstmt);
-  bool                             process_ln_dot(Lnast &ln, const Lnast_nid &lnidx_op, firrtl::FirrtlPB_Statement *fstmt);
+  //void                             process_ln_range_op(Lnast &ln, const Lnast_nid &lnidx_op);
+  //void                             process_ln_bitsel_op(Lnast &ln, const Lnast_nid &lnidx_op, firrtl::FirrtlPB_Statement *fstmt);
+  bool                             process_ln_select(Lnast &ln, const Lnast_nid &lnidx_op, firrtl::FirrtlPB_Statement *fstmt);
 
   void handle_attr_assign(Lnast &ln, const Lnast_nid &lhs, const Lnast_nid &rhs);
   void handle_sign_attr  (Lnast &ln, const std::string_view &var_name, const Lnast_nid &rhs);

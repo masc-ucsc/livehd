@@ -87,11 +87,11 @@ module mid5(input [59:0] gi, output [890:0] gout, input [9:0] hi, output [9:0] h
 
   mid1 m1s(.di(gi), .dout(w_1_up_5));
 
-  leaf3 l3d(.ci(gi[760:731]), .co(w_3_to_5));
+  leaf3 l3d(.ci(gi[58:28]), .co(w_3_to_5));
   leaf4 l4d(.tempi(w_3_to_5[12]), .tempo(w_3_to_5[13]));
   leaf5 l5d(.ci(w_3_to_5), .co(w_5_to_3));
 
-  assign gout = ~{gi[890:30] & w_1_up_5[890:30], w_3_to_5};
+  assign gout = ~{gi[59:30] & w_1_up_5[890:30], w_3_to_5};
   assign ho = ~{hi[9:1], w_5_to_3[0]};
 endmodule
 

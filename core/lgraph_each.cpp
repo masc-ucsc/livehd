@@ -11,7 +11,15 @@ void LGraph::each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)
   if (node_internal.size() < Hardcoded_output_nid)
     return;
 
-  std::vector<std::pair<Node_pin, Port_ID>> pin_pair;
+  struct Pair_type {
+    Pair_type(LGraph *lg, Hierarchy_index hidx, Index_ID idx, Port_ID pid, Port_ID _pos)
+      : dpin(lg, lg, hidx, idx, pid, false)
+      , pos(_pos) {
+      }
+    Node_pin dpin;
+    Port_ID  pos;
+  };
+  std::vector<Pair_type> pin_pair;
 
   auto hidx = hierarchical? Hierarchy_tree::root_index() : Hierarchy_tree::invalid_index();
 
@@ -23,42 +31,46 @@ void LGraph::each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)
       nid = Hardcoded_input_nid;
     auto idx = find_idx_from_pid(nid, pid);
     if (idx) {
-      Node_pin pin(this, this, hidx, idx, pid, false);
-      if (pin.has_name())
-        pin_pair.emplace_back(std::make_pair(pin, io_pin->graph_io_pos));
+      Pair_type p(this, hidx, idx, pid, io_pin->graph_io_pos);
+      if (p.dpin.has_name()) {
+        pin_pair.emplace_back(p);
+      }
     }
-
-    ++pid;
   }
 
-  std::sort(pin_pair.begin(), pin_pair.end(), [](const std::pair<Node_pin, Port_ID> &a, const std::pair<Node_pin, Port_ID> &b) {
-    if (a.second == Port_invalid && b.second == Port_invalid) {
-      if (a.first.is_graph_input() && b.first.is_graph_output()) {
+  std::sort(pin_pair.begin(), pin_pair.end(), [](const Pair_type &a, const Pair_type &b) -> bool {
+    if (a.pos == Port_invalid && b.pos == Port_invalid) {
+      if (a.dpin.is_graph_input() && b.dpin.is_graph_output()) {
         return true;
       }
-      if (a.first.is_graph_output() && b.first.is_graph_input()) {
+      if (a.dpin.is_graph_output() && b.dpin.is_graph_input()) {
         return false;
       }
-      if (a.first.is_graph_input() && b.first.is_graph_input()) {
-        auto a_name = a.first.get_name();
+      if (a.dpin.is_graph_input() && b.dpin.is_graph_input()) {
+        auto a_name = a.dpin.get_name();
         if (a_name == "clock")
           return true;
         if (a_name == "reset")
           return true;
+        auto b_name = b.dpin.get_name();
+        if (b_name == "clock")
+          return false;
+        if (b_name == "reset")
+          return false;
       }
 
-      return a.first.get_name() < b.first.get_name();
+      return a.dpin.get_name() < b.dpin.get_name();
     }
-    if (a.second == Port_invalid)
+    if (a.pos == Port_invalid)
       return true;
-    if (b.second == Port_invalid)
+    if (b.pos == Port_invalid)
       return false;
 
-    return a.second < b.second;
+    return a.pos < b.pos;
   });
 
   for (auto &pp : pin_pair) {
-    f1(pp.first, pp.second);
+    f1(pp.dpin, pp.pos);
   }
 }
 

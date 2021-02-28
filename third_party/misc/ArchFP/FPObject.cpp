@@ -2,6 +2,8 @@
 #include "lgraph.hpp"
 #include "cell.hpp"
 
+#include "helpers.hpp"
+
 #include "FPObject.hpp"
 
 FPObject::FPObject()
@@ -13,7 +15,7 @@ FPObject::FPObject()
     , area(0.0)
     , type(Ntype_op::Invalid)
     , name(Ntype::get_name(Ntype_op::Invalid))
-    , hint(UnknownGeography)
+    , hint(UnknownHint)
     , count(1) {}
 
 void FPObject::setSize(double widthArg, double heightArg) {
@@ -87,7 +89,7 @@ unsigned int FPObject::findNode(Node_tree& tree, Tree_index tidx, double cX, dou
       Ann_place p(calcX(cX), calcY(cY), getWidth(), getHeight());
 
       child->set_place(p);
-      child->set_name(getUniqueName());
+      child->set_instance_name(getUniqueName());
 
       sub_count = outputLGraphLayout(tree, child_idx, cX, cY);
       found = true;
@@ -130,7 +132,7 @@ unsigned int FPObject::outputLGraphLayout(Node_tree& tree, Tree_index tidx, doub
 
     Ann_place p(calcX(startX), calcY(startY), getWidth(), getHeight());
     child->set_place(p);
-    child->set_name(Ntype::get_name(getType()));
+    child->set_instance_name(getUniqueName());
 
     tree.set_last_free(tidx, getType(), child_idx);
 

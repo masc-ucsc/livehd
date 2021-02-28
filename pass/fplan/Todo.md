@@ -1,65 +1,52 @@
-Issues:
- - HardAspectRatio tries to satisfy the requested aspect ratio as well as possible, even if it's not possible without incorrect layouts.
-    - Fixing aspect ratio issues automatically is hard.  Checking if components collide with each other is $$ and figuring out where they should go is difficult.
-
-Issues not related to ArchFP:
- - view.py output is flipped due to mismatch between coordinates for HotSpot and png coordinates in PyCairo
-
-Ask about:
- - LiveHD does not function correctly with non-english names (rename broken, importing broken as well (non-ascii characters skipped?))
-
-Goals:
+Plan:
+1. Find DeFer src/license, check
+2. Possibly adjust stuff so DeFer and ArchFP can both operate on the same node hierarchy (and so that different floorplanners can operate on different segments)
 
 
+lgraph.list - lists lgraphs!
 
 
+1. Write/pull in a floorplanning method that actually works properly into ArchFP
 
+    General idea:
+    - if someone wants to manually provide hints to a module, use geogLayout for it (since it is assumed that the person knows what they're doing)
+    - otherwise, use some other method to generate an initial floorplan (run DeFer per module, cache the result?)
+    - this initial floorplan is used to generate hints for the placer (it would be really cool if the floorplanner itself used some of the same hints!)
 
-0. Fix ArchFP - crashes when generating small hierarchical floorplans due to valid() assertions failing
-    using abs() doesn't help - write fix up code.  This needs to work.
+    - write/pull another floorplanner, and make sure it generates legal floorplans automatically.
+       - research what an analytical placer actually does, because this will tell us how good our floorplanner needs to be.
+       - Chris Chu writes good tools/papers (code has weird license issues) - wrote DeFer, could use that.  Pretty fast.
+       - http://eda.ee.ucla.edu/EE201A-04Spring/polish.pdf: original simulated annealing floorplanner
+2. Create method of writing and reading geographic hints manually
+    - implement hint storage
+3. Work on creating methods for automatic hint insertion
+    - better hints (place near here, put in this section, block divide design around here, put anchor points here, etc)
+       - goal of the whole floorplanner project is to provide hints to placer!
+       - anchor points are exact, but also want to be able to have hard lines between sections of a chip
+       - give hints for anchor points!
+       - adjust floorplan unit size with better granularity?
 
-
-
-
-
-
-1. Check on how nextpnr gets hints, if it gets hints at all.  Can we write hints for nextpnr to consume?
-2. Test BOOM core (waiting on yosys memory implementation?)
-3. Write node level hierarchy to file (mmap_tree not being written to file is known TODO)
-4. Find / write a method that doesn't mess up on the wrong aspect ratio - HardAspectRatio not helpful for initial floorplans.
-
-Things to add:
-0. Interactivity
-    - allow for querying of top level floorplans, current layout is messy (create a top level node below top level?)
-    - add a recursive dump option
-    - dump everything if no nodes are passed
-    - Node names are not hierarchical, so I can't query information about a specific Or node...
+Possible Improvements:
 1. Optimization
-    - multithread the floorplanner (need deep hierarchies to play with - waiting on (0))
-    - multithread the Lgraph traversal (need deep hierarchies to play with - waiting on (0))
+    - multithread the floorplanner (how to decide what layout() calls get spun off into threads?)
+    - multithread the Lgraph traversal
        - create a way to floorplan using existing layouts
-    - Check out the paper for ArchFP
-    - improve implementation in ArchFP, resolve todos
-       - double -> float?
-    - write a slicing floorplanner (HardAspectRatio quality goes down significantly with larger floorplans to the point of being unusable)
-       - http://eda.ee.ucla.edu/EE201A-04Spring/polish.pdf
-       - https://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.12.3375&rep=rep1&type=pdf
+    - double -> float in ArchFP?  We use float everywhere else...
 
-2. Incremental Floorplans (waiting on goal (2))
+2. Incremental Floorplans
     - floorplan using existing geography hints/specific AR instead of randomly choosing a hint/using AR = 1.0
     - assign geography hints to nodes based on wirelength metrics
-    - use HPWL as benchmark (waiting on goal (2) - need node hierarchy)
+    - use HPWL as benchmark
     - easy: swap positions of leaves of the same type (within a hierarchy), see if HPWL gets better
     - identify components that are far away, set geography hints to be closer?
-3. More accurate floorplans
-    - floorplan node pins - allows for more accurate HPWL estimation
-    - scale area by bitwidth of node, if possible
-    - implement blackboxes (waiting on goal (2))
-4. add more checks to checkfp:
-    - check for insane / unrealistic wirelength metrics
-5. Create area-based floorplans
-    - allows for efficient floorplan analysis, prevents disconnected segments entirely
+3. Misc
+    - implement blackboxes
+
+Issues:
+ - view.py output is flipped due to mismatch between coordinates for HotSpot and png coordinates in PyCairo
+ - LiveHD does not function correctly with non-english names (rename broken, importing broken as well (non-ascii characters skipped?))
 
 Tabled:
  - Cairo is LGPL, so it can't be shipped with LiveHD.  Python script is fine.
  - Lrand random class doesn't support floats, not using it for writearea pass
+ - floorplaning node pins allows for more accurate HPWL estimation, but doing sub node-level floorplans isn't a job for LiveHD

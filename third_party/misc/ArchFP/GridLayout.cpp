@@ -16,7 +16,7 @@ bool gridLayout::layout(FPOptimization opt, double targetAR) {
     return false;
   }
   double tarea   = totalArea();
-  double theight = sqrt(tarea / targetAR);
+  double theight = sqrt(tarea / abs(targetAR));
   double twidth  = tarea / theight;
   if (verbose)
     std::cout << "Begin Grid Layout for " << getName() << ", TargetAR=" << targetAR << " My area=" << tarea << " Implied W=" << twidth
@@ -41,7 +41,7 @@ bool gridLayout::layout(FPOptimization opt, double targetAR) {
   // Now layout whatever is below us.
   // We need to set the count to 1 to avoid double counting area.
   obj->setCount(1);
-  obj->layout(opt, ratio);
+  bool correct = obj->layout(opt, ratio);
   assert(obj->valid());
   obj->setCount(total);
   double compWidth  = obj->getWidth();
@@ -54,7 +54,7 @@ bool gridLayout::layout(FPOptimization opt, double targetAR) {
   if (verbose)
     std::cout << "At End Grid Layout, TargetAR=" << targetAR << " actualAR=" << width / height << "\n";
 
-  return true;
+  return correct;
 }
 
 void gridLayout::outputHotSpotLayout(std::ostream& o, double startX, double startY) {

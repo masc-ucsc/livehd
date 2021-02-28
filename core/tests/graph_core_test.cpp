@@ -51,9 +51,13 @@ TEST_F(Setup_graph_core, bench_compress) {
 }
 
 TEST_F(Setup_graph_core, shallow_tree) {
-  Lbench b("core.GRAPH_CORE_shallow_tree");
+   Lbench b("core.GRAPH_CORE_shallow_tree");
 
-  Graph_core c1("lgdb_gc", "shallow_tree");
+   Graph_core c1("lgdb_gc", "shallow_tree");
 
-  // TEST now
+   //test functions create master root
+   //do set s and gets
+   // TEST now
+
+   //create_master_root
 }

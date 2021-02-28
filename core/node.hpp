@@ -107,7 +107,7 @@ public:
 
   public:
     // constexpr operator size_t() const { return nid; }
-    constexpr Compact_class() : nid(0){}; // needed for mmap_tree which allocates empty data
+    constexpr Compact_class() : nid(0){};  // needed for mmap_tree which allocates empty data
 
     constexpr Compact_class(const Index_ID &_nid) : nid(_nid){};
 
@@ -171,7 +171,7 @@ public:
   LGraph *get_class_lgraph() const { return current_g; }
   LGraph *get_lg() const { return current_g; }  // To handle hierarchical API
 
-  Index_ID get_nid() const { return nid; }
+  Index_ID        get_nid() const { return nid; }
   Hierarchy_index get_hidx() const { return hidx; }
 
   Node_pin get_driver_pin() const {
@@ -322,8 +322,14 @@ public:
 
   // BEGIN ATTRIBUTE ACCESSORS
   std::string debug_name() const;
+  std::string default_instance_name() const;
 
-  std::string      get_instance_name() const;
+  // user-defined node instance name (1 per node instance)
+  void             set_instance_name(std::string_view iname);
+  std::string_view get_instance_name() const;
+  bool             has_instance_name() const;
+
+  // non-hierarchical node name (1 for all nodes)
   void             set_name(std::string_view iname);
   std::string_view get_name() const;
   std::string_view create_name() const;
