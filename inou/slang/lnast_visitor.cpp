@@ -52,7 +52,6 @@ void Lnast_visitor::handle(const slang::ContinuousAssignSymbol& symbol) {
 //   //base cases, traverse recursion for expr.right() checking nested lefts and rights
 // }
 void Lnast_visitor::addLnast(const mmap_lib::Tree_index& idx_stmts, operators List, int count, int& first, int& tmp_flag, int& not_flag, int& last_op){
-  //idk if the flags can carry over properly
   mmap_lib::Tree_index idx_;
   std::string tmpIn;
   auto node_=Lnast_node::create_ref("");
@@ -230,10 +229,9 @@ void Lnast_visitor::handle(const slang::AssignmentExpression& expr) {
   int first    = 0;
   for (auto it = verilogList.crbegin(); it != verilogList.crend(); ++it) {
     // if (operandList.size()==0) last_op=1;
-    if (operandList.size() == 1) {
-      last_op = 1;
-      // break;
-    }
+    if (operandList.size() == 1) last_op = 1;
+    if (*it==operators::NOT) not_flag=1;
+
     fmt::print("check:{} ", operandList.size());
     count++;
     fmt::print("tmp list check: \n");
