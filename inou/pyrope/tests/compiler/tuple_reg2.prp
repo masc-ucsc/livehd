@@ -1,6 +1,6 @@
 pick = #reg.foo.bar
 
-if (pick == 9) {
+if (pick == 56) {
   %out = 12
 }
 
