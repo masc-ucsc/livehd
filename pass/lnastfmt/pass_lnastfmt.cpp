@@ -103,7 +103,9 @@ void Pass_lnastfmt::parse_ln(std::shared_ptr<Lnast> ln, Eprp_var& var, std::stri
       auto curr_lev = curr_index.level;
       auto curr_pos = curr_index.pos;
       for (const mmap_lib::Tree_index& it : ln->depth_preorder(curr_index)) {
-
+        if (((it.level == curr_index.level) && (it.pos > curr_index.pos)) || (it.level < curr_index.level)) {
+          break;
+        }//This if is needed because depth preorder traverses the next subtree as well. It does not stop after traversing the particular subtree (of root curr_index)
         auto new_lev = it.level;
         auto new_pos = it.pos;
         auto is = ref_hash_map.find(ln->get_name(it));
