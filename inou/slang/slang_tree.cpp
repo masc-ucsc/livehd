@@ -624,7 +624,7 @@ std::string_view Slang_tree::process_expression(const slang::Expression& expr) {
       case slang::UnaryOperator::Plus:
       case slang::UnaryOperator::Minus:
       case slang::UnaryOperator::BitwiseAnd:
-      case slang::UnaryOperator::BitwiseOr:
+      case slang::UnaryOperator::BitwiseOr: //implement this part
       case slang::UnaryOperator::BitwiseXor:
       case slang::UnaryOperator::BitwiseNand:
       case slang::UnaryOperator::BitwiseNor:
