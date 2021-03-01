@@ -140,7 +140,7 @@ std::tuple<bool,bool, size_t> Lgtuple::match_int(std::string_view a, std::string
   return std::make_tuple(a_match, b_match, b_pos);
 }
 
-void Lgtuple::append_field(std::string &a, std::string_view b) const {
+void Lgtuple::append_field(std::string &a, std::string_view b) {
 	if (a.empty())
 		a = b;
 	else
@@ -460,8 +460,12 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(std::string_view key) const {
 			continue;
 		I(entry[e_pos] != '.'); // . not included
 
-		if (!tup)
-			tup = std::make_shared<Lgtuple>(absl::StrCat(name, ".", key));
+		if (!tup) {
+			std::string key_with_pos{key};
+			std::string expanded{e.first};
+			learn_fix_int(key_with_pos, expanded);
+			tup = std::make_shared<Lgtuple>(absl::StrCat(name, ".", key_with_pos));
+		}
 
 		if (e_pos>entry.size())
 			tup->key_map.emplace_back("", e.second);
