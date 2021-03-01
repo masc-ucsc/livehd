@@ -51,7 +51,8 @@ protected:
 
   // reg construction
   void try_create_register(Node &node, std::shared_ptr<Lgtuple> tup);
-  bool reg_q_pin_access_preparation(Node &parent_node, Node_pin &ori_tg_dpin);
+  bool reg_q_pin_access_preparation  (Node &parent_node, Node_pin &ori_tg_dpin);
+  bool reg_q_pin_access_preparation2(Node &parent_node, Node_pin &ori_tg_dpin);
   void setup_clock(Node &reg_node);
 
   // Delete node and all the previous nodes feeding this one if single user

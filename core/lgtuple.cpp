@@ -695,8 +695,8 @@ std::vector<std::pair<std::string, Node_pin>> Lgtuple::get_level_attributes(std:
 }
 
 void Lgtuple::dump() const {
-  fmt::print("tuple_name:{}\n", name);
+  fmt::print("tuple_name: {}\n", name);
   for (const auto &it : key_map) {
-		fmt::print("  key:{} dpin:{}\n", it.first, it.second.debug_name());
+		fmt::print("  key: {} dpin: {}\n", it.first, it.second.debug_name());
   }
 }

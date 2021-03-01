@@ -605,8 +605,45 @@ std::tuple<std::string_view, std::string> Cprop::get_tuple_name_key(Node &node) 
   return std::make_tuple(tup_name, std::string(key_name));
 }
 
-bool Cprop::reg_q_pin_access_preparation(Node &tg_parent_node, Node_pin &ori_tg_dpin) {
-  auto cur_node = tg_parent_node;
+
+bool Cprop::reg_q_pin_access_preparation2(Node &parent_node, Node_pin &ori_tg_dpin) {
+  (void) ori_tg_dpin;
+  fmt::print("DEBUG2: parent_node:{}\n", parent_node.debug_name());
+  I(parent_node.get_type_op() == Ntype_op::TupGet);
+
+  auto ptup_it = node2tuple.find(parent_node.get_compact());
+  ptup_it->second->dump();
+  auto raw_key_name = ptup_it->second->get_name();
+  
+  std::string raw_key_name2;   
+  auto pos = raw_key_name.find_last_of(":");
+  if (pos != std::string::npos) {
+    raw_key_name2 = raw_key_name.substr(pos+1);
+  } else {
+    raw_key_name2 = raw_key_name;
+  }
+  /* fmt::print("DEBUG2-0: raw_key_name:{}, clear_key_name:{}\n", raw_key_name, clear_key_name); */
+  
+  /* auto pos = */ 
+  /* if (po) */
+
+
+  /* std::string hier_reg_name; */
+
+  /* while (true) { */
+  /*   if (hier_reg_name.empty()) { */
+  /*     hier_reg_name = */ 
+  /*   } else { */
+      
+  /*   } */
+  /* } */
+
+  return true;
+}
+
+bool Cprop::reg_q_pin_access_preparation(Node &tgq_parent_node, Node_pin &ori_tg_dpin) {
+
+  auto cur_node = tgq_parent_node;
   std::string hier_reg_name;
   while (true) {
     auto [tup_name, key_name] = get_tuple_name_key(cur_node);
@@ -668,20 +705,23 @@ bool Cprop::reg_q_pin_access_preparation(Node &tg_parent_node, Node_pin &ori_tg_
 
 bool Cprop::process_tuple_get(Node &node, XEdge_iterator &inp_edges_ordered) {
   I(node.get_type_op() == Ntype_op::TupGet);
-
   auto parent_dpin          = node.get_sink_pin("tuple_name").get_driver_pin();
   auto parent_node          = parent_dpin.get_node();
   auto [tup_name, key_name] = get_tuple_name_key(node);
   if (key_name == "__q_pin") {
+    fmt::print("DEBUG1: tgq_node:{}\n", node.debug_name());
     auto tg_dpin = node.setup_driver_pin();
-    auto ptup_it = node2tuple.find(parent_node.get_compact());
-    if (ptup_it == node2tuple.end()) {
-      if (tuple_issues)
-        return false;
-      collapse_forward_for_pin(node, parent_dpin);
-      return true;
-    }
-    return reg_q_pin_access_preparation(parent_node, tg_dpin); // start from parent tg to collect the hierarchical reg name
+    //FIXME->sh: is this for scalar register?
+    
+    /* auto ptup_it = node2tuple.find(parent_node.get_compact()); */
+    /* ptup_it->second->dump(); */
+    /* if (ptup_it == node2tuple.end()) { */
+    /*   if (tuple_issues) */
+    /*     return false; */
+    /*   collapse_forward_for_pin(node, parent_dpin); */
+    /*   return true; */
+    /* } */
+    return reg_q_pin_access_preparation2(parent_node, tg_dpin); // start from parent tg to collect the hierarchical reg name
   }
 
   // this attr comes from tail of TG chain where the TG tail has been transformed into an AttrSet node.
@@ -690,22 +730,6 @@ bool Cprop::process_tuple_get(Node &node, XEdge_iterator &inp_edges_ordered) {
     collapse_forward_for_pin(node, attr_val_dpin);
     return true;
   }
-
-  auto ptup_it = node2tuple.find(parent_node.get_compact());
-  if (ptup_it == node2tuple.end()) {
-    if (tuple_issues)
-      return false;
-    if (!parent_dpin.is_invalid()) {
-      collapse_forward_for_pin(node, parent_dpin);
-      return true;
-    }
-
-    Pass::info("tuple_get {} could not decide the field {} (1)", node.debug_name(), key_name);
-    return false;
-  }
-
-  const auto node_tup = ptup_it->second;
-  auto       val_dpin = node_tup->get_dpin(key_name);
 
   // note: if child is TG(__q_pin), don't change cur_tg into AttrSet
   bool child_is_tg_qpin_fetch = false;
@@ -717,6 +741,25 @@ bool Cprop::process_tuple_get(Node &node, XEdge_iterator &inp_edges_ordered) {
         child_is_tg_qpin_fetch = true;
     }
   }
+
+
+  auto ptup_it = node2tuple.find(parent_node.get_compact());
+  if (ptup_it == node2tuple.end()) {
+    if (tuple_issues) {
+      return false;
+    }
+    if (!parent_dpin.is_invalid() && !child_is_tg_qpin_fetch) {
+      collapse_forward_for_pin(node, parent_dpin);
+      return true;
+    }
+
+    Pass::info("tuple_get {} could not decide the field {} (1)", node.debug_name(), key_name);
+    return false;
+  }
+
+  const auto node_tup = ptup_it->second;
+  auto       val_dpin = node_tup->get_dpin(key_name);
+
 
   if (!val_dpin.is_invalid() && !child_is_tg_qpin_fetch) {
     int conta = 0;
@@ -754,10 +797,10 @@ bool Cprop::process_tuple_get(Node &node, XEdge_iterator &inp_edges_ordered) {
   I(!key_name.empty());
   auto sub_tup = node_tup->get_sub_tuple(key_name);
   if (sub_tup) {
-    if (sub_tup->is_scalar()) {
+    if (sub_tup->is_scalar() && !child_is_tg_qpin_fetch) {
       auto dpin = sub_tup->get_dpin();
       collapse_forward_for_pin(node, dpin);
-    }else{
+    } else {
       node2tuple[node.get_compact()] = sub_tup;
     }
     return true;
@@ -783,8 +826,6 @@ void Cprop::process_mux(Node &node, XEdge_iterator &inp_edges_ordered) {
     } else {
       auto tup = find_lgtuple(e.driver);
       if (tup == nullptr) {
-
-        fmt::print("DEBUG-0, node:{}\n", node.debug_name());
         tup_list.clear();
         break;  // All have to have
       }
@@ -820,7 +861,7 @@ void Cprop::process_mux(Node &node, XEdge_iterator &inp_edges_ordered) {
       is_reg_tuple = dpin.get_name().at(0) == '#' ? true : false;
 
     if (is_tail && is_reg_tuple) {
-      fmt::print("DEBUG mux is tail\n");
+      fmt::print("DEBUGN mux is tail\n");
       try_create_register(node, tup);
     }
   }
