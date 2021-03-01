@@ -20,6 +20,7 @@ hier_tuple_nested_if5 hier_tuple_nested_if6 hier_tuple_nested_if7 '
 
 pts='tuple_reg tuple_reg2 tuple_reg3 '
 pts='tuple_reg2'
+pts='tuple_reg'
 
 # pts='vector'
 # pts='vector2'

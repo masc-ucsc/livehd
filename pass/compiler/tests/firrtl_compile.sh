@@ -42,7 +42,6 @@ pts='Xor64Thread8'
 pts='Xor128Thread8'
 # pts='Xor800Thread8'
 
-
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
 POST_IO_RENAME=./inou/firrtl/post_io_renaming.py

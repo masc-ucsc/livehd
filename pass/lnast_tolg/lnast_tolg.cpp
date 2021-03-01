@@ -247,6 +247,7 @@ void Lnast_tolg::nary_node_rhs_connections(LGraph *lg, Node &opr_node, const std
     } break;
     case Ntype_op::Div:
     case Ntype_op::SHL:
+    case Ntype_op::Sext:
     case Ntype_op::SRA: {
       I(opds.size() == 2);  // val<<amount
       lg->add_edge(opds[0], opr_node.setup_sink_pin("a"));
@@ -1514,6 +1515,8 @@ void Lnast_tolg::setup_lnast_to_lgraph_primitive_type_mapping() {
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_sra]         = Ntype_op::SRA;
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_shr]         = Ntype_op::SRA; // FIXME: it should be sra(tposs(a),b)
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_shl]         = Ntype_op::SHL;
+
+  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_sext]        = Ntype_op::Sext;
   // FIXME->sh: to be extended ...
 }
 

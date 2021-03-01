@@ -989,10 +989,10 @@ void Cprop::try_create_register(Node &node, std::shared_ptr<Lgtuple> tup) {
     }
 
     std::string reg_full_name;
-    if (hier_key_name.find(".__") != std::string::npos) {
-      reg_full_name = absl::StrCat(reg_root_name, ".", it.first.substr(0, pos-1)); // -2 = char before the '.'
-      // record attr information
-      auto attr_name = hier_key_name.substr(pos);
+    auto attr_pos = hier_key_name.find(".__");
+    if (attr_pos != std::string::npos) {
+      reg_full_name  = absl::StrCat(reg_root_name, ".", it.first.substr(0, attr_pos));
+      auto attr_name = hier_key_name.substr(attr_pos+1);
       reg_attr_map.insert_or_assign(reg_full_name, std::make_pair(attr_name, it.second));
       continue;
     } else {
@@ -1153,8 +1153,8 @@ void Cprop::do_trans(LGraph *lg) {
 
     if (!node.has_outputs()) {
       auto op = node.get_type_op();
-      if (op != Ntype_op::Flop && op != Ntype_op::Latch && op != Ntype_op::Fflop && op != Ntype_op::Memory && op != Ntype_op::Sub
-          && op != Ntype_op::AttrSet) {
+      if (op != Ntype_op::Flop && op != Ntype_op::Latch && op != Ntype_op::Fflop && op != Ntype_op::Memory && op != Ntype_op::Sub) {
+          //&& op != Ntype_op::AttrSet) {
         // TODO: del_dead_end_nodes(); It can propagate back and keep deleting
         // nodes until it reaches a SubGraph or a driver_pin that has some
         // other outputs. Doing this dead_end_nodes delete iterator can retuce
