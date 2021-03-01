@@ -337,6 +337,48 @@ std::string_view Slang_tree::create_logical_not_stmts(std::string_view var_name)
   return res_var;
 }
 
+std::string_view Slang_tree::create_and_reduce_stmts(std::string_view var_name) {
+  if (var_name.empty())
+    return var_name;
+  auto res_var = create_lnast_tmp();
+  auto and_idx = lnast->add_child(idx_stmts, Lnast_node::create_reduce_and());
+  lnast->add_child(and_idx, Lnast_node::create_ref(res_var));
+  if (std::isdigit(var_name[0]))
+    lnast->add_child(and_idx, Lnast_node::create_const(var_name));
+  else
+    lnast->add_child(and_idx, Lnast_node::create_ref(var_name));
+
+  return res_var;
+}
+
+std::string_view Slang_tree::create_or_reduce_stmts(std::string_view var_name) {
+  if (var_name.empty())
+    return var_name;
+  auto res_var = create_lnast_tmp();
+  auto or_idx = lnast->add_child(idx_stmts, Lnast_node::create_reduce_or());
+  lnast->add_child(or_idx, Lnast_node::create_ref(res_var));
+  if (std::isdigit(var_name[0]))
+    lnast->add_child(or_idx, Lnast_node::create_const(var_name));
+  else
+    lnast->add_child(or_idx, Lnast_node::create_ref(var_name));
+
+  return res_var;
+}
+
+std::string_view Slang_tree::create_xor_reduce_stmts(std::string_view var_name) {
+  if (var_name.empty())
+    return var_name;
+  auto res_var = create_lnast_tmp();
+  auto xor_idx = lnast->add_child(idx_stmts, Lnast_node::create_reduce_xor());
+  lnast->add_child(xor_idx, Lnast_node::create_ref(res_var));
+  if (std::isdigit(var_name[0]))
+    lnast->add_child(xor_idx, Lnast_node::create_const(var_name));
+  else
+    lnast->add_child(xor_idx, Lnast_node::create_ref(var_name));
+
+  return res_var;
+}
+
 std::string_view Slang_tree::create_sext_stmts(std::string_view a_var, std::string_view b_var) {
   I(!a_var.empty());
   I(!b_var.empty());
@@ -650,12 +692,14 @@ std::string_view Slang_tree::process_expression(const slang::Expression& expr) {
       case slang::UnaryOperator::LogicalNot: return create_logical_not_stmts(lhs);
       case slang::UnaryOperator::Plus:
       case slang::UnaryOperator::Minus:
-      case slang::UnaryOperator::BitwiseAnd:
-      case slang::UnaryOperator::BitwiseOr: //implement this part
-      case slang::UnaryOperator::BitwiseXor:
-      case slang::UnaryOperator::BitwiseNand:
-      case slang::UnaryOperator::BitwiseNor:
-      case slang::UnaryOperator::BitwiseXnor:
+      case slang::UnaryOperator::BitwiseAnd: return create_and_reduce_stmts(lhs);
+      case slang::UnaryOperator::BitwiseOr: return create_or_reduce_stmts(lhs);
+      case slang::UnaryOperator::BitwiseXor: return create_xor_reduce_stmts(lhs);
+      //do I use bit not or logical not? 
+      //Also is it ok for it to be two connected references if we have no lnast node?
+      case slang::UnaryOperator::BitwiseNand: return(create_bit_not_stmts(create_and_reduce_stmts(lhs)));
+      case slang::UnaryOperator::BitwiseNor: return(create_bit_not_stmts(create_or_reduce_stmts(lhs)));
+      case slang::UnaryOperator::BitwiseXnor: return(create_bit_not_stmts(create_xor_reduce_stmts(lhs)));
         // case UnaryOperator::Preincrement:
         // case UnaryOperator::Predecrement:
         // case UnaryOperator::Postincrement:
