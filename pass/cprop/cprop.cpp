@@ -620,11 +620,15 @@ void Cprop::split_hier_name(std::string_view full_name, std::vector<std::string_
 }
 
 
-
 bool Cprop::reg_q_pin_access_preparation(Node &tgq_parent_node, Node_pin &ori_tgq_dpin) {
   I(tgq_parent_node.get_type_op() == Ntype_op::TupGet);
   auto ptup_it = node2tuple.find(tgq_parent_node.get_compact());
   auto raw_hier_name = ptup_it->second->get_name();
+	
+	fmt::print("DEBUG0 tgq_parent_node:{}\n", tgq_parent_node.debug_name());
+	fmt::print("DEBUG1 raw_hier_name:{}\n", raw_hier_name);
+  ptup_it->second->dump();
+
   std::vector<std::string_view> subnames;
   split_hier_name(raw_hier_name, subnames);
 
