@@ -351,7 +351,7 @@ void Bitwidth::process_sext(Node &node, XEdge_iterator &inp_edges) {
       // sext(and(X,a),b) == a<b ? and(X,a):sext(X,b)
       if (wire_it->second.get_sbits() <= sign_max) {
         for(auto &e:node.out_edges()) {
-          wire_dpin.connect_driver(e.sink);
+          e.sink.connect_driver(wire_dpin);
         }
         node.del_node();
       }else{

@@ -227,10 +227,14 @@ void Cprop::replace_part_inputs_const(Node &node, XEdge_iterator &inp_edges_orde
 
     collapse_forward_for_pin(node, a_pin);
   } else if (op == Ntype_op::Sum || op == Ntype_op::Or || op == Ntype_op::And) {
-    Lconst         result;
     XEdge          first_const_edge;
     int            nconstants = 0;
     int            npending   = 0;
+
+    Lconst         result;
+    if (op==Ntype_op::And)
+      result = Lconst(-1);
+
     XEdge_iterator edge_it2;
     for (auto &i : inp_edges_ordered) {
       if (!i.driver.get_node().is_type_const()) {
@@ -241,11 +245,6 @@ void Cprop::replace_part_inputs_const(Node &node, XEdge_iterator &inp_edges_orde
       }
 
       auto c = i.driver.get_node().get_type_const();
-
-      if (c == 0 && op != Ntype_op::Sum) {  // zero, just drop (not for 0-x)
-        i.del_edge();
-        continue;
-      }
 
       ++nconstants;
 

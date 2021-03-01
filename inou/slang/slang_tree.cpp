@@ -674,18 +674,36 @@ std::string_view Slang_tree::process_expression(const slang::Expression& expr) {
 
     const slang::Type *from_type = conv.operand().type;
 
-    if (to_type->isSigned() == from_type->isSigned() && to_type->getBitWidth() > from_type->getBitWidth())
+    if (to_type->isSigned() == from_type->isSigned() && to_type->getBitWidth() >= from_type->getBitWidth())
       return res; // no need to add mask if expanding
 
-    if (to_type->isSigned()) {
-      return create_sext_stmts(res, create_lnast(to_type->getBitWidth()));
-    }else{
-//HERE: Must insert tposs if going from neg to pos
-      auto bits = create_lnast(to_type->getBitWidth());
-      auto mask = create_mask_stmts(bits);
+    auto min_bits = std::min(to_type->getBitWidth(),from_type->getBitWidth());
 
-      return create_bit_and_stmts(res, mask);
+    if (to_type->isSigned())
+      return create_sext_stmts(res, create_lnast(min_bits));
+
+    I(!to_type->isSigned());
+    // and(and(X,a),b) -> and(X,min(a,b))
+    auto mask = create_mask_stmts(create_lnast(min_bits));
+    return create_bit_and_stmts(res, mask);
+#if 0
+    if (to_type->isSigned() && !from_type->isSigned()) {
+      if (to_type->getBitWidth()<=from_type->getBitWidth()) {
+        // sext(and(X,a),b) && a>b -> sext(X,b)
+        return create_sext_stmts(res, create_lnast(min_bits));
+      }else{
+        // sext(and(X,a),b) && a<b -> and(X,a)
+        auto mask = create_mask_stmts(create_lnast(min_bits));
+        return create_bit_and_stmts(res, mask);
+      }
     }
+
+    I(!to_type->isSigned() && from_type->isSigned());
+
+    auto tmp = create_sext_stmts(res, create_lnast(from_type->getBitWidth()));
+    auto mask = create_mask_stmts(create_lnast(to_type->getBitWidth()));
+    return create_bit_and_stmts(tmp, mask);
+#endif
   }
 
   if (expr.kind == slang::ExpressionKind::Concatenation) {
