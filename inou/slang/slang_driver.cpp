@@ -32,7 +32,6 @@
 #endif
 
 #include "pass.hpp"
-#include "lnast_visitor.hpp"
 #include "slang_tree.hpp"
 
 using namespace slang;
