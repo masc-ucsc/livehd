@@ -674,12 +674,13 @@ std::string_view Slang_tree::process_expression(const slang::Expression& expr) {
 
     const slang::Type *from_type = conv.operand().type;
 
-    if (to_type->getBitWidth() > from_type->getBitWidth())
+    if (to_type->isSigned() == from_type->isSigned() && to_type->getBitWidth() > from_type->getBitWidth())
       return res; // no need to add mask if expanding
 
     if (to_type->isSigned()) {
       return create_sext_stmts(res, create_lnast(to_type->getBitWidth()));
     }else{
+//HERE: Must insert tposs if going from neg to pos
       auto bits = create_lnast(to_type->getBitWidth());
       auto mask = create_mask_stmts(bits);
 
