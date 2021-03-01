@@ -37,11 +37,10 @@ pts='VecShiftRegister'
 # pts='VecShiftRegisterParam'
 # pts='VecShiftRegisterSimple '
 # pts='VecSearch '
-pts='Xor32Thread8'
-pts='Xor64Thread8'
-pts='Xor128Thread8'
+# pts='Xor32Thread8'
+# pts='Xor64Thread8'
+# pts='Xor128Thread8'
 # pts='Xor800Thread8'
-
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck

@@ -461,7 +461,7 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(std::string_view key) const {
 		I(entry[e_pos] != '.'); // . not included
 
 		if (!tup)
-			tup = std::make_shared<Lgtuple>(entry);
+			tup = std::make_shared<Lgtuple>(absl::StrCat(name, ".", entry));
 
 		if (e_pos>entry.size())
 			tup->key_map.emplace_back("", e.second);
@@ -695,8 +695,8 @@ std::vector<std::pair<std::string, Node_pin>> Lgtuple::get_level_attributes(std:
 }
 
 void Lgtuple::dump() const {
-  fmt::print("tuple_name:{}\n", name);
+  fmt::print("tuple_name: {}\n", name);
   for (const auto &it : key_map) {
-		fmt::print("  key:{} dpin:{}\n", it.first, it.second.debug_name());
+		fmt::print("  key: {} dpin: {}\n", it.first, it.second.debug_name());
   }
 }

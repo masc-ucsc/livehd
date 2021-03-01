@@ -46,6 +46,7 @@ protected:
   std::string_view create_mask_stmts(std::string_view dest_max_bit);
   std::string_view create_bit_not_stmts(std::string_view var_name);
   std::string_view create_logical_not_stmts(std::string_view var_name);
+  std::string_view create_sext_stmts(std::string_view a_var, std::string_view b_var);
   std::string_view create_bit_and_stmts(std::string_view a_var, std::string_view b_var);
   std::string_view create_bit_or_stmts(std::vector<std::string_view> var);
   std::string_view create_bit_xor_stmts(std::string_view a_var, std::string_view b_var);

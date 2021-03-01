@@ -342,6 +342,46 @@ void Bitwidth::process_sext(Node &node, XEdge_iterator &inp_edges) {
   Bitwidth_range bw;
   bw.set_sbits_range(sign_max);
   flat_bwmap.insert_or_assign(node.get_driver_pin().get_compact_flat(), bw);
+
+  if (!not_finished && wire_it != flat_bwmap.end()) {
+    auto wire_node = wire_dpin.get_node();
+    auto wire_op = wire_node.get_type_op();
+    if (wire_op == Ntype_op::Sext || wire_op == Ntype_op::And) {
+      // sext1(sext2(X,a),b) == a<=b ? sext2(X,a):sext1(X,b)
+      // sext(and(X,a),b) == a<b ? and(X,a):sext(X,b)
+      if (wire_it->second.get_sbits() <= sign_max) {
+        for(auto &e:node.out_edges()) {
+          e.sink.connect_driver(wire_dpin);
+        }
+        node.del_node();
+      }else{
+        Node_pin grandpa_dpin;
+        if (wire_op == Ntype_op::Sext) {
+          grandpa_dpin = wire_node.get_sink_pin("a").get_driver_pin();
+        }else{ // Find the other in the And(other,MASK)
+          auto mask_e=wire_node.inp_edges();
+          if (mask_e.size()!=2)
+            return;
+          auto n0 = mask_e[0].driver.get_node();
+          auto n1 = mask_e[1].driver.get_node();
+          auto n0c = n0.is_type_const();
+          auto n1c = n1.is_type_const();
+          if (!n0c && !n1c)
+            return;
+
+          if (n0c && n0.get_type_const().is_mask()) {
+            grandpa_dpin = mask_e[1].driver;
+          }else if (n1c && n1.get_type_const().is_mask()) {
+            grandpa_dpin = mask_e[0].driver;
+          }else{
+            return;
+          }
+        }
+        inp_edges[0].del_edge();
+        node.setup_sink_pin("a").connect_driver(grandpa_dpin);
+      }
+    }
+  }
 }
 
 void Bitwidth::process_comparator(Node &node) {

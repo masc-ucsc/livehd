@@ -1,11 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "lnast_visitor.hpp"
+#include "slang_tree.hpp"
 
 #include "lgraph.hpp"
 #include "inou_slang.hpp"
 #include "lbench.hpp"
-#include "slang_tree.hpp"
 
 extern int slang_main(int argc, char** argv); // in slang_driver.cpp
 

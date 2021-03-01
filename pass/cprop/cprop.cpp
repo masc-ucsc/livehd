@@ -227,10 +227,14 @@ void Cprop::replace_part_inputs_const(Node &node, XEdge_iterator &inp_edges_orde
 
     collapse_forward_for_pin(node, a_pin);
   } else if (op == Ntype_op::Sum || op == Ntype_op::Or || op == Ntype_op::And) {
-    Lconst         result;
     XEdge          first_const_edge;
     int            nconstants = 0;
     int            npending   = 0;
+
+    Lconst         result;
+    if (op==Ntype_op::And)
+      result = Lconst(-1);
+
     XEdge_iterator edge_it2;
     for (auto &i : inp_edges_ordered) {
       if (!i.driver.get_node().is_type_const()) {
@@ -241,11 +245,6 @@ void Cprop::replace_part_inputs_const(Node &node, XEdge_iterator &inp_edges_orde
       }
 
       auto c = i.driver.get_node().get_type_const();
-
-      if (c == 0 && op != Ntype_op::Sum) {  // zero, just drop (not for 0-x)
-        i.del_edge();
-        continue;
-      }
 
       ++nconstants;
 
@@ -605,62 +604,70 @@ std::tuple<std::string_view, std::string> Cprop::get_tuple_name_key(Node &node) 
   return std::make_tuple(tup_name, std::string(key_name));
 }
 
-bool Cprop::reg_q_pin_access_preparation(Node &tg_parent_node, Node_pin &ori_tg_dpin) {
-  auto cur_node = tg_parent_node;
+
+
+void Cprop::split_hier_name(std::string_view full_name, std::vector<std::string_view> &subnames) {
+  auto start = 0u;
+  auto end   = full_name.find('.');
+  while (end != std::string_view::npos) {
+    std::string_view token = full_name.substr(start, end - start);
+    subnames.emplace_back(token);
+    start = end + 1;  //
+    end   = full_name.find('.', start);
+  }
+  std::string_view token = full_name.substr(start, end - start);
+  subnames.emplace_back(token);
+}
+
+
+bool Cprop::reg_q_pin_access_preparation(Node &tgq_parent_node, Node_pin &ori_tgq_dpin) {
+  I(tgq_parent_node.get_type_op() == Ntype_op::TupGet);
+  auto ptup_it = node2tuple.find(tgq_parent_node.get_compact());
+  auto raw_hier_name = ptup_it->second->get_name();
+	
+	fmt::print("DEBUG0 tgq_parent_node:{}\n", tgq_parent_node.debug_name());
+	fmt::print("DEBUG1 raw_hier_name:{}\n", raw_hier_name);
+  ptup_it->second->dump();
+
+  std::vector<std::string_view> subnames;
+  split_hier_name(raw_hier_name, subnames);
+
   std::string hier_reg_name;
-  while (true) {
-    auto [tup_name, key_name] = get_tuple_name_key(cur_node);
-
-    if (hier_reg_name.empty()) {
-      hier_reg_name = key_name;
-    } else{
-      hier_reg_name = absl::StrCat(key_name, ".", hier_reg_name);
+  int i = 0;
+  for (const auto &subname : subnames) {
+    if (i == 0) { // get rid of ssa postfix
+      auto pos = subname.find_last_of('_');
+      hier_reg_name = absl::StrCat(subname.substr(0, pos));
+    } else if (subname.substr(0, 2) != "__"){  
+      hier_reg_name = absl::StrCat(hier_reg_name, ".", subname);
     }
+    i++;
+  }
 
-    auto parent_dpin = cur_node.get_sink_pin("tuple_name").get_driver_pin();
-    auto parent_node = parent_dpin.get_node();
-    auto ptype       = parent_node.get_type_op();
-    if (ptype == Ntype_op::TupGet) {
-      cur_node = parent_node;
-      continue;
+  for (auto &e : ori_tgq_dpin.out_edges()) {
+    auto sink_node = e.sink.get_node();
+    auto sink_ntype = sink_node.get_type_op();
+    if (sink_ntype == Ntype_op::TupAdd && e.sink == sink_node.setup_sink_pin("value")) {
+      /* note: sometimes the tg(__q_pin) will drive value_dpin of graph output TA chain,
+         but this % TA chain will be deleted before the registers is created, so suddenly
+         the TA sink_pin("value") will disappear. Here I insert an dummy assignment node to
+         make sure there will always a valid spin for the future reg_q_pin to connect to. */
+      auto new_asg_node = tgq_parent_node.get_class_lgraph()->create_node(Ntype_op::Or);
+      auto asg_dpin = new_asg_node.setup_driver_pin();
+      asg_dpin.connect_sink(e.sink);
+      auto asg_spin = new_asg_node.setup_sink_pin("A");
+      reg_name2sink_pins[hier_reg_name].emplace_back(asg_spin);
+      e.del_edge();
+    } else if (sink_ntype == Ntype_op::Or && sink_node.inp_edges().size() == 1) {
+      /* originally, if it's an assignment_OR driven by TG(__q_pin), it will be deleted by cprop,
+         and it will cause the sink_pin floating. Here I put the asg_OR to dont_touch table at the first
+         cprop. This dont_touch table only needed at the first cprop as at the time of second cprop,
+         the TG(__q_pin) should be resolved and th asg_or could be cprop-ed at that time. */
+      dont_touch.insert(sink_node.get_compact());
+      reg_name2sink_pins[hier_reg_name].emplace_back(e.sink);
+    } else {
+      reg_name2sink_pins[hier_reg_name].emplace_back(e.sink);
     }
-
-    // hier_reg_name collection finished!
-    if (ptype != Ntype_op::TupAdd && ptype != Ntype_op::Mux)
-      return false;
-
-    I(parent_dpin.has_name());
-    auto reg_root_ssa_name = parent_dpin.get_name();
-    auto pos = reg_root_ssa_name.find_last_of("_");
-    auto reg_root_name = reg_root_ssa_name.substr(0, pos);
-    hier_reg_name = absl::StrCat(reg_root_name, ".", hier_reg_name);
-
-    for (auto &e : ori_tg_dpin.out_edges()) {
-      auto sink_node = e.sink.get_node();
-      auto sink_ntype = sink_node.get_type_op();
-      if (sink_ntype == Ntype_op::TupAdd && e.sink == sink_node.setup_sink_pin("value")) {
-        // note: sometimes the tg(__q_pin) will drive value_dpin of graph output TA chain,
-        // but this % TA chain will be deleted before the registers is created, so suddenly
-        // the TA sink_pin("value") will disappear. Here I insert an dummy assignment node to
-        // make sure there will always a valid spin for the future reg_q_pin to connect to.
-        auto new_asg_node = cur_node.get_class_lgraph()->create_node(Ntype_op::Or);
-        auto asg_dpin = new_asg_node.setup_driver_pin();
-        asg_dpin.connect_sink(e.sink);
-        auto asg_spin = new_asg_node.setup_sink_pin("A");
-        reg_name2sink_pins[hier_reg_name].emplace_back(asg_spin);
-        e.del_edge();
-      } else if (sink_ntype == Ntype_op::Or && sink_node.inp_edges().size() == 1) {
-        // originally, if it's an assignment_OR driven by TG(__q_pin), it will be deleted by cprop,
-        // and it will cause the sink_pin floating. Here I put the asg_OR to dont_touch table at the first
-        // cprop. This dont_touch table only needed at the first cprop as at the time of second cprop,
-        // the TG(__q_pin) should be resolved and th asg_or could be cprop-ed at that time.
-        dont_touch.insert(sink_node.get_compact());
-        reg_name2sink_pins[hier_reg_name].emplace_back(e.sink);
-      } else {
-        reg_name2sink_pins[hier_reg_name].emplace_back(e.sink);
-      }
-    }
-    return true;
   }
   return true;
 }
@@ -668,19 +675,21 @@ bool Cprop::reg_q_pin_access_preparation(Node &tg_parent_node, Node_pin &ori_tg_
 
 bool Cprop::process_tuple_get(Node &node, XEdge_iterator &inp_edges_ordered) {
   I(node.get_type_op() == Ntype_op::TupGet);
-
   auto parent_dpin          = node.get_sink_pin("tuple_name").get_driver_pin();
   auto parent_node          = parent_dpin.get_node();
   auto [tup_name, key_name] = get_tuple_name_key(node);
   if (key_name == "__q_pin") {
     auto tg_dpin = node.setup_driver_pin();
-    auto ptup_it = node2tuple.find(parent_node.get_compact());
-    if (ptup_it == node2tuple.end()) {
-      if (tuple_issues)
-        return false;
-      collapse_forward_for_pin(node, parent_dpin);
-      return true;
-    }
+    //FIXME->sh: is this for scalar register?
+    
+    /* auto ptup_it = node2tuple.find(parent_node.get_compact()); */
+    /* ptup_it->second->dump(); */
+    /* if (ptup_it == node2tuple.end()) { */
+    /*   if (tuple_issues) */
+    /*     return false; */
+    /*   collapse_forward_for_pin(node, parent_dpin); */
+    /*   return true; */
+    /* } */
     return reg_q_pin_access_preparation(parent_node, tg_dpin); // start from parent tg to collect the hierarchical reg name
   }
 
@@ -690,22 +699,6 @@ bool Cprop::process_tuple_get(Node &node, XEdge_iterator &inp_edges_ordered) {
     collapse_forward_for_pin(node, attr_val_dpin);
     return true;
   }
-
-  auto ptup_it = node2tuple.find(parent_node.get_compact());
-  if (ptup_it == node2tuple.end()) {
-    if (tuple_issues)
-      return false;
-    if (!parent_dpin.is_invalid()) {
-      collapse_forward_for_pin(node, parent_dpin);
-      return true;
-    }
-
-    Pass::info("tuple_get {} could not decide the field {} (1)", node.debug_name(), key_name);
-    return false;
-  }
-
-  const auto node_tup = ptup_it->second;
-  auto       val_dpin = node_tup->get_dpin(key_name);
 
   // note: if child is TG(__q_pin), don't change cur_tg into AttrSet
   bool child_is_tg_qpin_fetch = false;
@@ -717,6 +710,25 @@ bool Cprop::process_tuple_get(Node &node, XEdge_iterator &inp_edges_ordered) {
         child_is_tg_qpin_fetch = true;
     }
   }
+
+
+  auto ptup_it = node2tuple.find(parent_node.get_compact());
+  if (ptup_it == node2tuple.end()) {
+    if (tuple_issues) {
+      return false;
+    }
+    if (!parent_dpin.is_invalid() && !child_is_tg_qpin_fetch) {
+      collapse_forward_for_pin(node, parent_dpin);
+      return true;
+    }
+
+    Pass::info("tuple_get {} could not decide the field {} (1)", node.debug_name(), key_name);
+    return false;
+  }
+
+  const auto node_tup = ptup_it->second;
+  auto       val_dpin = node_tup->get_dpin(key_name);
+
 
   if (!val_dpin.is_invalid() && !child_is_tg_qpin_fetch) {
     int conta = 0;
@@ -754,10 +766,10 @@ bool Cprop::process_tuple_get(Node &node, XEdge_iterator &inp_edges_ordered) {
   I(!key_name.empty());
   auto sub_tup = node_tup->get_sub_tuple(key_name);
   if (sub_tup) {
-    if (sub_tup->is_scalar()) {
+    if (sub_tup->is_scalar() && !child_is_tg_qpin_fetch) {
       auto dpin = sub_tup->get_dpin();
       collapse_forward_for_pin(node, dpin);
-    }else{
+    } else {
       node2tuple[node.get_compact()] = sub_tup;
     }
     return true;
@@ -783,8 +795,6 @@ void Cprop::process_mux(Node &node, XEdge_iterator &inp_edges_ordered) {
     } else {
       auto tup = find_lgtuple(e.driver);
       if (tup == nullptr) {
-
-        fmt::print("DEBUG-0, node:{}\n", node.debug_name());
         tup_list.clear();
         break;  // All have to have
       }
@@ -820,7 +830,7 @@ void Cprop::process_mux(Node &node, XEdge_iterator &inp_edges_ordered) {
       is_reg_tuple = dpin.get_name().at(0) == '#' ? true : false;
 
     if (is_tail && is_reg_tuple) {
-      fmt::print("DEBUG mux is tail\n");
+      fmt::print("DEBUGN mux is tail\n");
       try_create_register(node, tup);
     }
   }
@@ -989,10 +999,10 @@ void Cprop::try_create_register(Node &node, std::shared_ptr<Lgtuple> tup) {
     }
 
     std::string reg_full_name;
-    if (hier_key_name.find(".__") != std::string::npos) {
-      reg_full_name = absl::StrCat(reg_root_name, ".", it.first.substr(0, pos-1)); // -2 = char before the '.'
-      // record attr information
-      auto attr_name = hier_key_name.substr(pos);
+    auto attr_pos = hier_key_name.find(".__");
+    if (attr_pos != std::string::npos) {
+      reg_full_name  = absl::StrCat(reg_root_name, ".", it.first.substr(0, attr_pos));
+      auto attr_name = hier_key_name.substr(attr_pos+1);
       reg_attr_map.insert_or_assign(reg_full_name, std::make_pair(attr_name, it.second));
       continue;
     } else {
@@ -1153,8 +1163,8 @@ void Cprop::do_trans(LGraph *lg) {
 
     if (!node.has_outputs()) {
       auto op = node.get_type_op();
-      if (op != Ntype_op::Flop && op != Ntype_op::Latch && op != Ntype_op::Fflop && op != Ntype_op::Memory && op != Ntype_op::Sub
-          && op != Ntype_op::AttrSet) {
+      if (op != Ntype_op::Flop && op != Ntype_op::Latch && op != Ntype_op::Fflop && op != Ntype_op::Memory && op != Ntype_op::Sub) {
+          //&& op != Ntype_op::AttrSet) {
         // TODO: del_dead_end_nodes(); It can propagate back and keep deleting
         // nodes until it reaches a SubGraph or a driver_pin that has some
         // other outputs. Doing this dead_end_nodes delete iterator can retuce
