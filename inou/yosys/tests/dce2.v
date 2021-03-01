@@ -1,4 +1,4 @@
-module dce2(input clk, input a, input b, output d);
+module dce2(input clk, input a, input b, output reg d);
 reg [1:0] array1;
 reg [1:0] array2;
 

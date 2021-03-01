@@ -33,8 +33,8 @@ protected:
   static std::tuple<bool, size_t, size_t> match_int_advance(std::string_view a, std::string_view b, size_t a_pos, size_t b_pos);
 	static std::tuple<bool,bool, size_t>    match_int(std::string_view a, std::string_view b);
 
-	void append_field(std::string &a, std::string_view b) const;
-	void learn_fix_int(std::string &a, std::string &b);
+	static void append_field(std::string &a, std::string_view b);
+	static void learn_fix_int(std::string &a, std::string &b);
 
   static bool   match(std::string_view a, std::string_view b);
 	static size_t match_first_partial(std::string_view a, std::string_view b);
