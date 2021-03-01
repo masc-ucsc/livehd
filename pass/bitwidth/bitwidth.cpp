@@ -335,8 +335,14 @@ void Bitwidth::process_sext(Node &node, XEdge_iterator &inp_edges) {
 
   if (wire_it != flat_bwmap.end()) {
     auto b = wire_it->second.get_sbits();
-    if (b < sign_max)
+    if (b <= sign_max) { // sext is useless
       sign_max = b;
+      for(auto &e:node.out_edges()) {
+        e.sink.connect_driver(inp_edges[0].driver);
+      }
+      node.del_node();
+      return;
+    }
   }
 
   Bitwidth_range bw;

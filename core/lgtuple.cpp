@@ -461,7 +461,7 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(std::string_view key) const {
 		I(entry[e_pos] != '.'); // . not included
 
 		if (!tup)
-			tup = std::make_shared<Lgtuple>(absl::StrCat(name, ".", entry));
+			tup = std::make_shared<Lgtuple>(absl::StrCat(name, ".", key));
 
 		if (e_pos>entry.size())
 			tup->key_map.emplace_back("", e.second);
