@@ -198,6 +198,10 @@ void Cprop::try_collapse_forward(Node &node, XEdge_iterator &inp_edges_ordered) 
     collapse_forward_same_op(node, inp_edges_ordered);
   } else if (op == Ntype_op::Mux) {
     // If all the options are the same. Collapse forward
+		if (inp_edges_ordered.size()<=1) {
+			node.del_node();
+			return;
+		}
     auto &a_pin = inp_edges_ordered[1].driver;
     for (auto i = 2u; i < inp_edges_ordered.size(); ++i) {
       if (a_pin != inp_edges_ordered[i].driver)
@@ -580,10 +584,11 @@ void Cprop::process_flop(Node &node) {
 
   auto din_it = node2tuple.find(din_node.get_compact());
 	if (din_it==node2tuple.end()) {
-		if (din_node.is_type_tup()) {
+		auto op = din_node.get_type_op();
+		if (din_node.is_type_tup() || op == Ntype_op::Mux || op == Ntype_op::Flop) { // TODO: Any node that could generate a LGTUPLE
 			// Not done. 2nd pass needed
 			if (flop_needs_2nd_iteration && !tuple_issues) {
-				Pass::error("2nd iteration could not solve flop:{}",node.debug_name());
+				Pass::info("2nd iteration could not solve flop:{}",node.debug_name());
 				return;
 			}
 			if (!tuple_issues) {
@@ -829,11 +834,6 @@ void Cprop::process_mux(Node &node, XEdge_iterator &inp_edges_ordered) {
       auto tup = find_lgtuple(e.driver);
       if (tup) {
 				tup_list.emplace_back(tup);
-#if 1
-			}else{
-				tup_list.clear();
-				break;
-#endif
 			}
     }
   }
@@ -1133,7 +1133,7 @@ void Cprop::do_trans(LGraph *lg) {
 				process_subgraph(node, inp_edges_ordered);
 				continue;
 			} else if (op == Ntype_op::Flop) {
-				//process_flop(node);
+				process_flop(node);
 				continue;
 			} else if (op == Ntype_op::Latch || op == Ntype_op::Fflop || op == Ntype_op::Memory) {
 				fmt::print("cprop skipping node:{}\n", node.debug_name());
