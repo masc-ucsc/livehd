@@ -22,15 +22,12 @@ Decrementer Test1 Test2 Test3 Test6 TrivialAdd NotAnd Trivial Tail TrivialArith
 Shifts PlusAnd MaxN ByteSelector Darken HiLoMultiplier SimpleALU Mul
 VecShiftRegisterParam VecShiftRegisterSimple ' 
 
-# pts_hifirrtl_todo='Test6 ByteSelector ResetShiftRegister Counter Life Cell_alone Adder4 Mux4 LogShifter SingleEvenFilter
-# VecShiftRegister BundleConnect SubModule PlusAnd MaxN VecShiftRegisterParam
-# VecShiftRegisterSimple VecSearch VendingMachineSwitch VendingMachine'
 
-pts='EnableShiftRegister Cell_alone MaxN PlusAnd Test2 SingleEvenFilter
+pts='EnableShiftRegister Flop Cell_alone MaxN PlusAnd Test2 SingleEvenFilter
 Coverage Counter Decrementer SubModule BundleConnect LogShifter Adder4
 Xor6Thread2 XorSelfThread1 ByteSelector SimpleALU Mux4 Max2 ResetShiftRegister
-Parity RegisterSimple Register RegXor AddNot GCD_3bits Flop Test3 TrivialAdd
-NotAnd Trivial Tail TrivialArith Shifts Darken HiLoMultiplier Accumulator
+Parity RegisterSimple Register RegXor GCD_3bits Test3 TrivialAdd
+Accumulator AddNot HiLoMultiplier Darken Shifts NotAnd TrivialArith Tail Trivial
 LFSR16 VendingMachine VendingMachineSwitch'  
 
 
@@ -138,14 +135,15 @@ pts_tuple_dbg='lhs_wire3 funcall_unnamed2
 
 pts_long_time='firrtl_gcd'
 
-pts='reg_bits_set bits_rhs reg__q_pin scalar_tuple hier_tuple_io hier_tuple3
-hier_tuple2 tuple_if ssa_rhs out_ssa attr_set if2 hier_tuple lhs_wire
-tuple_copy if firrtl_tail hier_tuple_nested_if2 lhs_wire2 tuple_copy2
-counter_nested_if counter lhs_wire adder_stage capricious_bits4 capricious_bits
-firrtl_gcd_3bits nested_if firrtl_tail3 logic capricious_bits2
-scalar_reg_out_pre_declare firrtl_tail2
-hier_tuple_nested_if hier_tuple_nested_if3 hier_tuple_nested_if4
-hier_tuple_nested_if5 hier_tuple_nested_if7 '
+pts='tuple_reg tuple_reg2 reg_bits_set bits_rhs reg__q_pin scalar_tuple
+hier_tuple_io hier_tuple3 hier_tuple2 tuple_if ssa_rhs out_ssa attr_set if2
+hier_tuple lhs_wire tuple_copy if firrtl_tail hier_tuple_nested_if2 lhs_wire2
+tuple_copy2 counter_nested_if counter lhs_wire adder_stage capricious_bits4
+capricious_bits firrtl_gcd_3bits nested_if firrtl_tail3 logic capricious_bits2
+scalar_reg_out_pre_declare firrtl_tail2 hier_tuple_nested_if
+hier_tuple_nested_if3 hier_tuple_nested_if4 hier_tuple_nested_if5
+hier_tuple_nested_if6 hier_tuple_nested_if7 '
+
 
 
 # pts="tuple_reg tuple_reg2" zero init due to cprop seems to break it

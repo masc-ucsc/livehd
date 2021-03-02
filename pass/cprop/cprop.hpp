@@ -52,6 +52,7 @@ protected:
   // reg construction
   void try_create_register(Node &node, std::shared_ptr<Lgtuple> tup);
   bool reg_q_pin_access_preparation  (Node &parent_node, Node_pin &ori_tg_dpin);
+  bool reg_q_pin_access_preparation2 (Node &parent_node, Node_pin &ori_tg_dpin);
   void setup_clock(Node &reg_node);
   void split_hier_name (std::string_view hier_name, std::vector<std::string_view> &subnames);
 
