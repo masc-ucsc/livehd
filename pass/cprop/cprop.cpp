@@ -619,7 +619,7 @@ void Cprop::split_hier_name(std::string_view full_name, std::vector<std::string_
   subnames.emplace_back(token);
 }
 
-bool Cprop::reg_q_pin_access_preparation2(Node &tg_parent_node, Node_pin &ori_tgq_dpin) {
+bool Cprop::reg_q_pin_access_preparation(Node &tg_parent_node, Node_pin &ori_tgq_dpin) {
   auto cur_node = tg_parent_node;
   std::string hier_reg_name;
   while (true) {
@@ -647,8 +647,6 @@ bool Cprop::reg_q_pin_access_preparation2(Node &tg_parent_node, Node_pin &ori_tg
     auto pos = reg_root_ssa_name.find_last_of("_");
     auto reg_root_name = reg_root_ssa_name.substr(0, pos);
     hier_reg_name = absl::StrCat(reg_root_name, ".", hier_reg_name);
-    /* fmt::print("DEBUG0 ori_tgq_node:{}\n", ori_tgq_dpin.get_node().debug_name()); */
-    fmt::print("DEBUG0 hier_reg_name from tgq collection:{}\n", hier_reg_name);
     // hier_reg_name collection finished!
     for (auto &e : ori_tgq_dpin.out_edges()) {
       auto sink_node = e.sink.get_node();
@@ -680,60 +678,6 @@ bool Cprop::reg_q_pin_access_preparation2(Node &tg_parent_node, Node_pin &ori_tg
   return true;
 }
 
-bool Cprop::reg_q_pin_access_preparation(Node &tgq_parent_node, Node_pin &ori_tgq_dpin) {
-  I(tgq_parent_node.get_type_op() == Ntype_op::TupGet);
-  auto ptup_it = node2tuple.find(tgq_parent_node.get_compact());
-  auto raw_hier_name = ptup_it->second->get_name();
-	
-	fmt::print("DEBUG0 tgq_parent_node:{}\n", tgq_parent_node.debug_name());
-	fmt::print("DEBUG1 raw_hier_name:{}\n", raw_hier_name);
-  ptup_it->second->dump();
-
-  std::vector<std::string_view> subnames;
-  split_hier_name(raw_hier_name, subnames);
-
-  std::string hier_reg_name;
-  int i = 0;
-  for (const auto &subname : subnames) {
-    fmt::print("DEBUG2 subname:{}\n", subname);
-    if (i == 0) { // get rid of ssa postfix
-      auto pos = subname.find_last_of('_');
-      hier_reg_name = absl::StrCat(subname.substr(0, pos));
-    } else if (subname.substr(0, 2) != "__"){  
-      hier_reg_name = absl::StrCat(hier_reg_name, ".", subname);
-    }
-    i++;
-  }
-
-  for (auto &e : ori_tgq_dpin.out_edges()) {
-    auto sink_node = e.sink.get_node();
-    auto sink_ntype = sink_node.get_type_op();
-    if (sink_ntype == Ntype_op::TupAdd && e.sink == sink_node.setup_sink_pin("value")) {
-      /* note: sometimes the tg(__q_pin) will drive value_dpin of graph output TA chain,
-         but this % TA chain will be deleted before the registers is created, so suddenly
-         the TA sink_pin("value") will disappear. Here I insert an dummy assignment node to
-         make sure there will always a valid spin for the future reg_q_pin to connect to. */
-      auto new_asg_node = tgq_parent_node.get_class_lgraph()->create_node(Ntype_op::Or);
-      auto asg_dpin = new_asg_node.setup_driver_pin();
-      asg_dpin.connect_sink(e.sink);
-      auto asg_spin = new_asg_node.setup_sink_pin("A");
-      reg_name2sink_pins[hier_reg_name].emplace_back(asg_spin);
-      e.del_edge();
-    } else if (sink_ntype == Ntype_op::Or && sink_node.inp_edges().size() == 1) {
-      /* originally, if it's an assignment_OR driven by TG(__q_pin), it will be deleted by cprop,
-         and it will cause the sink_pin floating. Here I put the asg_OR to dont_touch table at the first
-         cprop. This dont_touch table only needed at the first cprop as at the time of second cprop,
-         the TG(__q_pin) should be resolved and th asg_or could be cprop-ed at that time. */
-      dont_touch.insert(sink_node.get_compact());
-      reg_name2sink_pins[hier_reg_name].emplace_back(e.sink);
-    } else {
-      reg_name2sink_pins[hier_reg_name].emplace_back(e.sink);
-    }
-  }
-  return true;
-}
-
-
 bool Cprop::process_tuple_get(Node &node, XEdge_iterator &inp_edges_ordered) {
   I(node.get_type_op() == Ntype_op::TupGet);
   auto parent_dpin          = node.get_sink_pin("tuple_name").get_driver_pin();
@@ -741,17 +685,7 @@ bool Cprop::process_tuple_get(Node &node, XEdge_iterator &inp_edges_ordered) {
   auto [tup_name, key_name] = get_tuple_name_key(node);
   if (key_name == "__q_pin") {
     auto tg_dpin = node.setup_driver_pin();
-    //FIXME->sh: is this for scalar register?
-    
-    /* auto ptup_it = node2tuple.find(parent_node.get_compact()); */
-    /* ptup_it->second->dump(); */
-    /* if (ptup_it == node2tuple.end()) { */
-    /*   if (tuple_issues) */
-    /*     return false; */
-    /*   collapse_forward_for_pin(node, parent_dpin); */
-    /*   return true; */
-    /* } */
-    return reg_q_pin_access_preparation2(parent_node, tg_dpin); // start from parent tg to collect the hierarchical reg name
+    return reg_q_pin_access_preparation(parent_node, tg_dpin); // start from parent tg to collect the hierarchical reg name
   }
 
   // this attr comes from tail of TG chain where the TG tail has been transformed into an AttrSet node.
@@ -1055,7 +989,6 @@ void Cprop::try_create_register(Node &node, std::shared_ptr<Lgtuple> tup) {
 
   for (const auto &it : tup->get_map()) {
     auto hier_key_name = it.first;
-    fmt::print("DEBUG3: hier_key_name:{}\n", hier_key_name);
     if (unlikely(hier_key_name.empty())) {
       Pass::info("Tuple {} for graph {} has unnamed field (pyrope supports unnamed)", tup->get_name(), lg->get_name());
     }
@@ -1066,16 +999,13 @@ void Cprop::try_create_register(Node &node, std::shared_ptr<Lgtuple> tup) {
       hier_key_name = hier_key_name.substr(pos2+1);
     }
 
-    fmt::print("DEBUG3: hier_key_name2:{}\n", hier_key_name);
 
     std::string reg_full_name;
     auto attr_pos = hier_key_name.find(".__");
     if (attr_pos != std::string::npos) {
       reg_full_name  = absl::StrCat(reg_root_name, ".", hier_key_name.substr(0, attr_pos));
       auto attr_name = hier_key_name.substr(attr_pos+1);
-      fmt::print("DEBUG3-1: attr_name:{}\n", attr_name);
       reg_attr_map.insert_or_assign(reg_full_name, std::make_pair(attr_name, it.second));
-      fmt::print("DEBUG3-2: reg_full_name:{}\n", reg_full_name);
       continue;
     } else {
       reg_full_name = absl::StrCat(reg_root_name, ".", hier_key_name);
@@ -1094,12 +1024,10 @@ void Cprop::try_create_register(Node &node, std::shared_ptr<Lgtuple> tup) {
       reg_name2qpin.insert_or_assign(reg_full_name, reg_node.setup_driver_pin());
       reg_node.setup_driver_pin().set_name(reg_full_name);
     }
-  fmt::print("DEBUG3: reg_full_name:{}\n", reg_full_name);
   }
 
   // connect to Q pin after registers are created
   for (const auto &[reg_full_name, attr] : reg_attr_map) {
-    fmt::print("DEBUG4: reg_full_name:{}\n", reg_full_name);
     auto it_qpin = reg_name2qpin.find(reg_full_name);
     I(it_qpin != reg_name2qpin.end());
     auto attr_node = lg->create_node(Ntype_op::AttrSet);
