@@ -11,12 +11,13 @@ private:
   bool hier;
   bool at_gioc;
   bool tuple_issues;
+  bool flop_needs_2nd_iteration;
 
 protected:
   absl::flat_hash_map<Node::Compact, std::shared_ptr<Lgtuple>>            node2tuple;  // node to the most up-to-dated tuple chain
   absl::flat_hash_map<std::string_view, Node_pin>                         oname2dpin;
   absl::flat_hash_map<std::string, Node_pin>                              reg_name2qpin;
-  absl::flat_hash_map<std::string, std::pair<std::string_view, Node_pin>> reg_attr_map;
+  absl::flat_hash_map<std::string, std::pair<std::string, Node_pin>>      reg_attr_map;
   absl::flat_hash_map<std::string, std::vector<Node_pin>>                 reg_name2sink_pins;
   absl::flat_hash_set<Node::Compact>                                      dont_touch;
 
@@ -57,6 +58,8 @@ protected:
 
   // Delete node and all the previous nodes feeding this one if single user
   void bwd_del_node(Node &node);
+
+  void process_flop(Node &node);
 
 public:
   Cprop(bool _hier, bool _gioc);

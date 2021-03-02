@@ -675,6 +675,60 @@ std::shared_ptr<Lgtuple> Lgtuple::make_mux(Node_pin &sel_dpin, const std::vector
 	return fixing_tup;
 }
 
+std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) {
+	I(flop.is_type(Ntype_op::Flop));
+
+	if (is_scalar())
+		return nullptr;
+
+	{
+		// Try to reuse the flop if there is a single field + Attr
+		int n_fields = 0;
+		int n_attr   = 0;
+		std::string rename_flop;
+		for(auto &e:key_map) {
+			if (is_attribute(e.first)) {
+				++n_attr;
+				continue;
+			}
+			++n_fields;
+			if (n_fields>1)
+				break; // no need to keep going (abort)
+			rename_flop = e.first;
+		}
+		if (n_fields==1) {
+			// No need to create. Already there
+			if (n_attr) {
+				fmt::print("FIXME 1: Set the flop to attribute\n");
+			}
+			flop.set_name(rename_flop);
+			return nullptr;
+		}
+	}
+
+	std::string_view flop_name;
+	if (flop.get_driver_pin().has_name())
+		flop_name = flop.get_driver_pin().get_name();
+	else
+		flop_name = name;
+
+  auto ret_tup = std::make_shared<Lgtuple>(flop_name);
+
+	for(auto &e:key_map) {
+		if (e.second.get_node() == flop)
+			continue; // no loop to itself
+		if (is_attribute(e.first)) {
+			fmt::print("FIXME 2: Set the flop to attribute:{}\n",e.first);
+			continue;
+		}
+		auto node = flop.get_class_lgraph()->create_node(Ntype_op::Flop);
+		node.setup_sink_pin("din").connect_driver(e.second);
+		ret_tup->key_map.emplace_back(e.first, node.setup_driver_pin());
+	}
+
+	return ret_tup;
+}
+
 std::vector<std::pair<std::string, Node_pin>> Lgtuple::get_level_attributes(std::string_view key) const {
 
   I(!is_root_attribute(key));

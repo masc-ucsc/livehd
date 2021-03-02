@@ -564,6 +564,45 @@ void Cprop::process_subgraph(Node &node, XEdge_iterator &inp_edges_ordered) {
   try_connect_sub_inputs(node);
 }
 
+void Cprop::process_flop(Node &node) {
+
+	if (tuple_issues)
+		return;
+
+	auto din_spin = node.get_sink_pin("din");
+	if (!din_spin.is_connected()) {
+		//node.del_node();
+		fmt::print("delete flop\n");
+		return;
+	}
+
+	auto din_node = node.get_sink_pin("din").get_driver_node();
+
+  auto din_it = node2tuple.find(din_node.get_compact());
+	if (din_it==node2tuple.end()) {
+		if (din_node.is_type_tup()) {
+			// Not done. 2nd pass needed
+			if (flop_needs_2nd_iteration && !tuple_issues) {
+				Pass::error("2nd iteration could not solve flop:{}",node.debug_name());
+				return;
+			}
+			if (!tuple_issues) {
+				flop_needs_2nd_iteration = true;
+				tuple_issues = true;
+			}
+		}
+		return; // done or wait for 2nd iteration
+	}
+
+  auto node_it = node2tuple.find(node.get_compact());
+	if (node_it==node2tuple.end()) {
+		auto flop_tup = din_it->second->make_flop(node);
+		if (flop_tup) {
+			node2tuple[node.get_compact()] = flop_tup;
+		}
+	}
+}
+
 std::tuple<std::string_view, std::string> Cprop::get_tuple_name_key(Node &node) {
   std::string_view tup_name;
   std::string_view key_name;
@@ -706,7 +745,6 @@ bool Cprop::process_tuple_get(Node &node, XEdge_iterator &inp_edges_ordered) {
     }
   }
 
-
   auto ptup_it = node2tuple.find(parent_node.get_compact());
   if (ptup_it == node2tuple.end()) {
     if (tuple_issues) {
@@ -721,8 +759,8 @@ bool Cprop::process_tuple_get(Node &node, XEdge_iterator &inp_edges_ordered) {
     return false;
   }
 
-  const auto node_tup = ptup_it->second;
-  auto       val_dpin = node_tup->get_dpin(key_name);
+  const auto &node_tup = ptup_it->second;
+  auto        val_dpin = node_tup->get_dpin(key_name);
 
 
   if (!val_dpin.is_invalid() && !child_is_tg_qpin_fetch) {
@@ -789,22 +827,32 @@ void Cprop::process_mux(Node &node, XEdge_iterator &inp_edges_ordered) {
       sel_dpin = e.driver;
     } else {
       auto tup = find_lgtuple(e.driver);
-      if (tup == nullptr) {
-        tup_list.clear();
-        break;  // All have to have
-      }
-
-      tup_list.emplace_back(tup);
+      if (tup) {
+				tup_list.emplace_back(tup);
+#if 1
+			}else{
+				tup_list.clear();
+				break;
+#endif
+			}
     }
   }
 
   std::shared_ptr<Lgtuple> tup;
   if (!tup_list.empty()) {
-    tup = Lgtuple::make_mux(sel_dpin, tup_list);
-    if (!tup) {
-      tuple_issues = true;  // could not merge
-      return;
-    }
+		if ((tup_list.size()+1) != inp_edges_ordered.size()) {
+			tuple_issues = true;
+		}
+		if (tup_list.size()==1) {
+			I(tuple_issues);
+      tup = std::make_shared<Lgtuple>(*tup_list[0]);
+		}else{
+			tup = Lgtuple::make_mux(sel_dpin, tup_list);
+			if (!tup) {
+				tuple_issues = true;  // could not merge
+				return;
+			}
+		}
     node2tuple[node.get_compact()] = tup;
     // tup->dump();
   }
@@ -870,7 +918,7 @@ std::shared_ptr<Lgtuple const> Cprop::find_lgtuple(Node_pin up_dpin) {
     return nullptr;
   }
 
-  I(up_node.get_type_op() == Ntype_op::TupAdd || up_node.get_type_op() == Ntype_op::TupGet
+  I(up_node.get_type_op() == Ntype_op::TupAdd || up_node.get_type_op() == Ntype_op::TupGet || up_node.get_type_op() == Ntype_op::Flop
     || up_node.get_type_op() == Ntype_op::TupRef || up_node.get_type_op() == Ntype_op::Mux);
 
   return ptup_it->second;
@@ -1065,68 +1113,77 @@ void Cprop::do_trans(LGraph *lg) {
   /* Lbench b("pass.cprop"); */
   /* bool tup_get_left = false; */
 
-  tuple_issues = false;
 
-  for (auto node : lg->forward()) {
-    // fmt::print("{}\n", node.debug_name());
-    auto op = node.get_type_op();
+	int n_iters=0;
+	flop_needs_2nd_iteration = false;
+	do {
+		tuple_issues = false;
+		for (auto node : lg->forward()) {
+			// fmt::print("{}\n", node.debug_name());
+			auto op = node.get_type_op();
 
-    auto inp_edges_ordered = node.inp_edges_ordered();
+			auto inp_edges_ordered = node.inp_edges_ordered();
 
-    // Special cases to handle in cprop
-    if (op == Ntype_op::AttrGet) {
-      continue;  // attr_get only happened on scalar and has been handled at LN->LG
-    } else if (op == Ntype_op::AttrSet) {
-      continue;  // Nothing to do in cprop
-    } else if (op == Ntype_op::Sub) {
-      process_subgraph(node, inp_edges_ordered);
-      continue;
-    } else if (op == Ntype_op::Flop || op == Ntype_op::Latch || op == Ntype_op::Fflop || op == Ntype_op::Memory) {
-      fmt::print("cprop skipping node:{}\n", node.debug_name());
-      // FIXME: if flop feeds itself (no update, delete, replace for zero)
-      // FIXME: if flop is disconnected *after AttrGet processed*, the flop was not used. Delete
-      continue;
-    } else if (!node.has_outputs()) {
-      node.del_node();
-      continue;
-    } else if (op == Ntype_op::TupAdd) {
-      process_tuple_add(node);
-      continue;
-    } else if (op == Ntype_op::TupGet) {
-      auto ok = process_tuple_get(node, inp_edges_ordered);
-      if (!ok) {
-        Pass::info("cprop could not simplify node:{}", node.debug_name());
-        tuple_issues = true;
-      }
-      continue;
-    } else if (op == Ntype_op::Sext) {
-      process_sext(node, inp_edges_ordered);
-    } else if (op == Ntype_op::Mux) {
-      process_mux(node, inp_edges_ordered);
-    }
+			// Special cases to handle in cprop
+			if (op == Ntype_op::AttrGet) {
+				continue;  // attr_get only happened on scalar and has been handled at LN->LG
+			} else if (op == Ntype_op::AttrSet) {
+				continue;  // Nothing to do in cprop
+			} else if (op == Ntype_op::Sub) {
+				process_subgraph(node, inp_edges_ordered);
+				continue;
+			} else if (op == Ntype_op::Flop) {
+				//process_flop(node);
+				continue;
+			} else if (op == Ntype_op::Latch || op == Ntype_op::Fflop || op == Ntype_op::Memory) {
+				fmt::print("cprop skipping node:{}\n", node.debug_name());
+				// FIXME: if flop feeds itself (no update, delete, replace for zero)
+				// FIXME: if flop is disconnected *after AttrGet processed*, the flop was not used. Delete
+				continue;
+			} else if (!node.has_outputs()) {
+				node.del_node();
+				continue;
+			} else if (op == Ntype_op::TupAdd) {
+				process_tuple_add(node);
+				continue;
+			} else if (op == Ntype_op::TupGet) {
+				auto ok = process_tuple_get(node, inp_edges_ordered);
+				if (!ok) {
+					Pass::info("cprop could not simplify node:{}", node.debug_name());
+					tuple_issues = true;
+				}
+				continue;
+			} else if (op == Ntype_op::Sext) {
+				process_sext(node, inp_edges_ordered);
+			} else if (op == Ntype_op::Mux) {
+				process_mux(node, inp_edges_ordered);
+			}
 
-    auto replaced_some = try_constant_prop(node, inp_edges_ordered);
+			auto replaced_some = try_constant_prop(node, inp_edges_ordered);
 
-    if (node.is_invalid())
-      continue;  // It got deleted
+			if (node.is_invalid())
+				continue;  // It got deleted
 
-    if (replaced_some) {
-      inp_edges_ordered = node.inp_edges_ordered();
-    }
+			if (replaced_some) {
+				inp_edges_ordered = node.inp_edges_ordered();
+			}
 
 
-    if (op == Ntype_op::Or) {
-      // (1) don't cprop the Or at the first cprop
-      // (2) and clean the dont_touch table for the second cprop to collapse
-      if (dont_touch.find(node.get_compact()) != dont_touch.end()) {
-        dont_touch.erase(node.get_compact());
-        continue;
-      }
-    }
+			if (op == Ntype_op::Or) {
+				// (1) don't cprop the Or at the first cprop
+				// (2) and clean the dont_touch table for the second cprop to collapse
+				if (dont_touch.find(node.get_compact()) != dont_touch.end()) {
+					dont_touch.erase(node.get_compact());
+					continue;
+				}
+			}
 
-    try_collapse_forward(node, inp_edges_ordered);
-  }
-
+			try_collapse_forward(node, inp_edges_ordered);
+		}
+		++n_iters;
+		if (n_iters>=2)
+			break;
+	}while(flop_needs_2nd_iteration);
 
   // connect register q_pin to sinks
   for (const auto &[reg_name, sink_pins] : reg_name2sink_pins) {
