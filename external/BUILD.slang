@@ -16,13 +16,8 @@
 #CREATE the patch file
 #  mkpatch ../slang_orig .
 #
-#  Update the inou/slang/slang_driver.cpp
-#
-#  Mostly:
-#  -add includes
-#  -add Slang_tree::proce... call
-#  -s/OS::printE/Pass::error/g
-#  -Look for s/int main/int slang_main/g
+#  Update the inou/slang/slang_driver.cpp and inou/slang/tests/driver.cpp
+#  The main goes to driver.cpp the rest goes to slang_driver.cpp (and add the LNAST API)
 #
 cc_library(
    name = "slang",

@@ -8,6 +8,7 @@
 #include <fstream>
 #include <iostream>
 
+
 #include "slang/compilation/Compilation.h"
 #include "slang/diagnostics/DeclarationsDiags.h"
 #include "slang/diagnostics/DiagnosticEngine.h"
@@ -35,6 +36,7 @@
 
 using namespace slang;
 
+// commented because it's unused right now - ok to uncomment if used
 //static constexpr auto noteColor = fmt::terminal_color::bright_black;
 static constexpr auto warningColor = fmt::terminal_color::bright_yellow;
 static constexpr auto errorColor = fmt::terminal_color::bright_red;
@@ -71,7 +73,7 @@ bool runPreprocessor(SourceManager& sourceManager, const Bag& options,
         }
     }
 
-    OS::print("{}\n", output.str());
+    fmt::print("{}\n", output.str());
     return true;
 }
 
@@ -101,7 +103,7 @@ void printMacros(SourceManager& sourceManager, const Bag& options,
             printer.print(*macro->formalArguments);
         printer.print(macro->body);
 
-        OS::print("{}\n", printer.str());
+        fmt::print("{}\n", printer.str());
     }
 }
 
@@ -115,24 +117,15 @@ SourceBuffer readSource(SourceManager& sourceManager, const std::string& file) {
 
 bool loadAllSources(Compilation& compilation, SourceManager& sourceManager,
                     const std::vector<SourceBuffer>& buffers, const Bag& options, bool singleUnit,
-                    bool onlyLint, const std::vector<std::string>& libraryFiles,
+                    const std::vector<std::string>& libraryFiles,
                     const std::vector<std::string>& libDirs,
                     const std::vector<std::string>& libExts) {
     if (singleUnit) {
-        auto tree = SyntaxTree::fromBuffers(buffers, sourceManager, options);
-        if (onlyLint)
-            tree->isLibrary = true;
-
-        compilation.addSyntaxTree(tree);
+        compilation.addSyntaxTree(SyntaxTree::fromBuffers(buffers, sourceManager, options));
     }
     else {
-        for (const SourceBuffer& buffer : buffers) {
-            auto tree = SyntaxTree::fromBuffer(buffer, sourceManager, options);
-            if (onlyLint)
-                tree->isLibrary = true;
-
-            compilation.addSyntaxTree(tree);
-        }
+        for (const SourceBuffer& buffer : buffers)
+            compilation.addSyntaxTree(SyntaxTree::fromBuffer(buffer, sourceManager, options));
     }
 
     bool ok = true;
@@ -240,8 +233,8 @@ public:
     bool quiet = false;
     bool onlyParse = false;
 
-    Compiler(Compilation& compilation) :
-        compilation(compilation), diagEngine(*compilation.getSourceManager()) {
+    Compiler(Compilation& _compilation) :
+        compilation(_compilation), diagEngine(*_compilation.getSourceManager()) {
         diagClient = std::make_shared<TextDiagnosticClient>();
         diagEngine.addClient(diagClient);
     }
@@ -273,10 +266,10 @@ public:
 #ifndef FUZZ_TARGET
             auto topInstances = compilation.getRoot().topInstances;
             if (!quiet && !topInstances.empty()) {
-                OS::print(fg(warningColor), "Top level design units:\n");
+                fmt::print(fg(warningColor), "Top level design units:\n");
                 for (auto inst : topInstances)
-                    OS::print("    {}\n", inst->name);
-                OS::print("\n");
+                    fmt::print("    {}\n", inst->name);
+                fmt::print("\n");
             }
 #endif
 
@@ -288,18 +281,18 @@ public:
 
 #ifndef FUZZ_TARGET
         std::string diagStr = diagClient->getString();
-        fmt::print("{}", diagStr);
+        fmt::print("slang: {}", diagStr);
 
         if (!quiet && !onlyParse) {
             if (diagStr.size() > 1)
-                OS::print("\n");
+                fmt::print("\n");
 
             if (succeeded)
-                OS::print(fg(highlightColor), "Build succeeded: ");
+                fmt::print(fg(highlightColor), "Build succeeded: ");
             else
-                OS::print(fg(errorColor), "Build failed: ");
+                fmt::print(fg(errorColor), "Build failed: ");
 
-            OS::print("{} error{}, {} warning{}\n", diagEngine.getNumErrors(),
+            fmt::print("{} error{}, {} warning{}\n", diagEngine.getNumErrors(),
                       diagEngine.getNumErrors() == 1 ? "" : "s", diagEngine.getNumWarnings(),
                       diagEngine.getNumWarnings() == 1 ? "" : "s");
         }
@@ -360,14 +353,11 @@ int driverMain(int argc, TArgs argv, bool suppressColorsStdout, bool suppressCol
     optional<bool> onlyPreprocess;
     optional<bool> onlyParse;
     optional<bool> onlyMacros;
-    optional<bool> onlyLint;
     cmdLine.add("-E,--preprocess", onlyPreprocess,
                 "Only run the preprocessor (and print preprocessed files to stdout)");
     cmdLine.add("--macros-only", onlyMacros, "Print a list of found macros and exit");
     cmdLine.add("--parse-only", onlyParse,
                 "Stop after parsing input files, don't perform elaboration or type checking");
-    cmdLine.add("--lint-only", onlyLint,
-                "Only perform linting of code, don't try to elaborate a full hierarchy");
 
     // Include paths
     std::vector<std::string> includeDirs;
@@ -498,12 +488,12 @@ int driverMain(int argc, TArgs argv, bool suppressColorsStdout, bool suppressCol
     }
 
     if (showHelp == true) {
-        OS::print("{}", cmdLine.getHelpText("slang SystemVerilog compiler"));
+        fmt::print("{}", cmdLine.getHelpText("slang SystemVerilog compiler"));
         return 0;
     }
 
     if (showVersion == true) {
-        OS::print("slang version {}.{}.{}\n", VersionInfo::getMajor(), VersionInfo::getMinor(),
+        fmt::print("slang version {}.{}.{}\n", VersionInfo::getMajor(), VersionInfo::getMinor(),
                   VersionInfo::getRevision());
         return 0;
     }
@@ -514,11 +504,10 @@ int driverMain(int argc, TArgs argv, bool suppressColorsStdout, bool suppressCol
     else
         showColors = !suppressColorsStderr && OS::fileSupportsColors(stderr);
 
-    if (showColors) {
+    if (showColors)
         OS::setStderrColorsEnabled(true);
-        if (!suppressColorsStdout && OS::fileSupportsColors(stdout))
-            OS::setStdoutColorsEnabled(true);
-    }
+    if (!suppressColorsStdout && OS::fileSupportsColors(stdout))
+        OS::setStdoutColorsEnabled(true);
 
     bool anyErrors = false;
     SourceManager sourceManager;
@@ -571,12 +560,6 @@ int driverMain(int argc, TArgs argv, bool suppressColorsStdout, bool suppressCol
         coptions.maxConstexprBacktrace = *maxConstexprBacktrace;
     if (errorLimit.has_value())
         coptions.errorLimit = *errorLimit * 2;
-    if (astJsonFile)
-        coptions.disableInstanceCaching = true;
-    if (onlyLint == true) {
-        coptions.suppressUnused = true;
-        coptions.lintMode = true;
-    }
 
     for (auto& name : topModules)
         coptions.topModules.emplace(name);
@@ -621,9 +604,7 @@ int driverMain(int argc, TArgs argv, bool suppressColorsStdout, bool suppressCol
         return 3;
     }
 
-    if (onlyParse.has_value() + onlyPreprocess.has_value() + onlyMacros.has_value() +
-            onlyLint.has_value() >
-        1) {
+    if (onlyParse.has_value() + onlyPreprocess.has_value() + onlyMacros.has_value() > 1) {
         Pass::error("can only specify one of --preprocess, --macros-only, --parse-only");
         return 4;
     }
@@ -638,12 +619,8 @@ int driverMain(int argc, TArgs argv, bool suppressColorsStdout, bool suppressCol
         }
         else {
             Compilation compilation(options);
-            anyErrors =
-                !loadAllSources(compilation, sourceManager, buffers, options, singleUnit == true,
-                                onlyLint == true, libraryFiles, libDirs, libExts);
-
-            if (onlyLint == true)
-                ignoreUnknownModules = true;
+            anyErrors = !loadAllSources(compilation, sourceManager, buffers, options,
+                                        singleUnit == true, libraryFiles, libDirs, libExts);
 
             Compiler compiler(compilation);
             compiler.quiet = quiet == true;
@@ -658,6 +635,10 @@ int driverMain(int argc, TArgs argv, bool suppressColorsStdout, bool suppressCol
 
             if (!anyErrors) {
               Slang_tree::process_root(compilation.getRoot());
+#if 0
+              Lnast_visitor lnast_visitor(compilation, 0, 0);
+              compilation.getRoot().visit(lnast_visitor);
+#endif
             }
 
 #if defined(INCLUDE_SIM)
@@ -747,11 +728,9 @@ void writeToFile(string_view fileName, string_view contents) {
     }
 }
 
-#    ifndef FUZZ_TARGET
 int slang_main(int argc, char** argv) {
     return driverMain(argc, argv, false, false);
 }
-#    endif
 
 #endif
 
