@@ -101,7 +101,7 @@ firrtl_test() {
     echo "----------------------------------------------------"
     
     if [ "${FIRRTL_LEVEL}" == "hi" ]; then
-        python ${POST_IO_RENAME} "${pt}.v"
+        python3 ${POST_IO_RENAME} "${pt}.v"
     fi
 
     ${LGCHECK} --implementation=${pt}.v --reference=./inou/firrtl/tests/verilog_gld/${pt}.gld.v
