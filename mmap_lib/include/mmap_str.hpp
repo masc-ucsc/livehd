@@ -51,7 +51,7 @@ protected:
 
 
 public:
-  static mmap_lib::map<uint32_t, uint32_t> string_map;
+  static mmap_lib::map<uint32_t, uint32_t> string_map; //LUT  <our class str, position in vector>
   inline static std::vector<int> string_vector;
   
   // FIXME: This type of constructor is needed to be a constexpr
@@ -76,6 +76,9 @@ public:
   //  "============helper function to check if a string exists========= "
   std::pair<int, int> str_exists(const char *string_to_check, uint32_t size) {
     bool vector_flag = true;
+    
+    // the line below should be constant time
+    
     for (auto i = string_map.begin(), end = string_map.end(); i != end; ++i) {
       uint32_t key   = string_map.get_key(i);
       uint16_t value = string_map.get(i);
@@ -131,7 +134,11 @@ public:
 
    /*"================================= "
     "============constructor 3========= "
-    "================================== "*/
+    "================================== "
+    sv might not have null terminator
+    don't copy one beyond what you need
+    keep copying till we find a \0
+    */
   str(std::string_view sv) : ptr_or_start(0), e{0}, _size(sv.size()) {
     //claim is to treat it as a normal string 
   	if (_size < 14 ){
@@ -150,9 +157,9 @@ public:
 
   		e[0] = sv.at(0);
 	    e[1] = sv.at(1);
-	    // the last eight  charactors
+	    // the last eight  characters
 	    for (int i = 0; i < 8; i++) {
-	      e[9-i] = sv.at(_size -1- i);
+	      e[9-i] = sv.at(_size -1- i); //there is no null terminator in sv
 	    }
 	    // checking if it exists
 	    char long_str[_size-10];
