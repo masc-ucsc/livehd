@@ -41,6 +41,7 @@ pts_wait_verilog_large_mux_code_gen='Mul Test6 Test1'
 # pts='Xor128Thread8'
 # pts='Xor800Thread8'
 pts='VecShiftRegister'
+pts='Xor80000Thread64'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -68,7 +69,7 @@ firrtl_test() {
     if [ ! -f ${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb ]; then
         echo "ERROR: could not find ${pt}.${FIRRTL_LEVEL}.pb in ${PATTERN_PATH}"
         exit 1
-    fi
+    fi 
 
     ${LGSHELL} "inou.firrtl.tolnast files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb |> pass.compiler gviz:true top:${pt} firrtl:true"
     ret_val=$?
