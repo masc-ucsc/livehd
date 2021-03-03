@@ -12,6 +12,7 @@
 Firmap::Firmap() {}
 
 LGraph* Firmap::do_firrtl_mapping(LGraph *lg) {
+  Lbench b("pass.firmap");
   auto lg_name = lg->get_name();
   std::string  lg_source{lg->get_library().get_source(lg->get_lgid())}; 
   LGraph *new_lg = LGraph::create(lg->get_path(), lg_name.substr(9), lg_source);

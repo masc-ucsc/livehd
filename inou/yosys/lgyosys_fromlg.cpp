@@ -72,7 +72,7 @@ struct LG2Yosys_Pass : public Yosys::Pass {
     // handle extra options (e.g. selection)
     extra_args(args, argidx, design);
 
-    Lbench b("inou.YOSYS_fromlg");
+    Lbench b("inou.yosys_fromlg");
 
     std::vector<LGraph *> lgs;
     if (single_graph_mode) {

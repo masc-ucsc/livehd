@@ -10,6 +10,7 @@
 #include "struct_firbits.hpp"
 
 void Firmap::do_firbits_analysis(LGraph *lg) {
+  Lbench b("pass.firbits");
   for (auto node : lg->forward(true)) {
     fmt::print("{}\n", node.debug_name());
     auto op = node.get_type_op();

@@ -53,6 +53,7 @@ bool Pass_compiler::check_option_firrtl(Eprp_var &var) {
 
 
 void Pass_compiler::compile(Eprp_var &var) {
+  Lbench b("pass.compiler.front_end");
   Pass_compiler pc(var);
   auto path      = pc.get_path(var);
   auto odir      = pc.get_odir(var);
@@ -105,12 +106,11 @@ void Pass_compiler::pyrope_compilation(Eprp_var &var, Lcompiler &compiler) {
 
 
 void Pass_compiler::firrtl_compilation(Eprp_var &var, Lcompiler &compiler) {
-    for (const auto &lnast : var.lnasts)
-      compiler.add_firrtl(lnast);
+  for (const auto &lnast : var.lnasts)
+    compiler.add_firrtl(lnast);
 
-    compiler.global_firrtl_bits_analysis_map();
-    compiler.local_bitwidth_inference();
-    /* compiler.global_bitwidth_inference(); */
+  compiler.global_firrtl_bits_analysis_map();
+  compiler.local_bitwidth_inference();
 }
 
 

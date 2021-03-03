@@ -15,7 +15,7 @@ Bitwidth::Bitwidth(bool _hier, int _max_iterations, BWMap_flat &_flat_bwmap, BWM
   :  max_iterations(_max_iterations), hier(_hier), flat_bwmap(_flat_bwmap), hier_bwmap(_hier_bwmap) {}
 
 void Bitwidth::do_trans(LGraph *lg) {
-  /* Lbench b("pass.bitwidth"); */
+  Lbench b("pass.bitwidth");
   bw_pass(lg);
 }
 

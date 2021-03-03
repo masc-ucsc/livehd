@@ -16,6 +16,7 @@
 #include <iostream>
 #include <vector>
 #include <sstream>
+#include <iomanip>
 #ifndef __linux__
 #include <mach/mach.h>
 #endif
@@ -225,12 +226,12 @@ public:
     std::chrono::duration<double> t = tp - start_time;
     std::stringstream sstr;
     sstr
-      << sample_name << " secs=" << t.count()
-      << ":IPC=" << ((double)stats[1]) / (stats[0]+1)
-      << ":BR MPKI=" << ((double)stats[2]*1000) / (stats[1]+1)
-      << ":L2 MPKI=" << ((double)stats[3]*1000) / (stats[1]+1)
+      << std::setw(28) << std::left << sample_name 
+      << " secs="      << std::setw(15) << t.count()
+      << " IPC="       << std::setw(6)  << ((double)stats[1]) / (stats[0]+1)
+      << " BR_MPKI="   << std::setw(6)  << ((double)stats[2]*1000) / (stats[1]+1)
+      << " L2_MPKI="   << std::setw(6)  << ((double)stats[3]*1000) / (stats[1]+1)
       << "\n";
-
     // std::cerr << sstr.str();
 
     int tfd = ::open("lbench.trace",O_CREAT|O_RDWR|O_APPEND, 0644);

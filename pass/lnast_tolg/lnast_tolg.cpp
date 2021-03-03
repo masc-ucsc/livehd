@@ -13,6 +13,7 @@ Lnast_tolg::Lnast_tolg(std::string_view _module_name, std::string_view _path) : 
 }
 
 std::vector<LGraph *> Lnast_tolg::do_tolg(std::shared_ptr<Lnast> ln, const Lnast_nid &top_stmts) {
+  Lbench b("pass.lnast_tolg");
   lnast = ln;
   LGraph *lg;
   std::string src{lnast->get_source()};

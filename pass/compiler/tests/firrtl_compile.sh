@@ -62,7 +62,7 @@ firrtl_test() {
   echo ""
   echo ""
   echo "======================================================================"
-  echo "                         LoFIRRTL Full Compilation"
+  echo "                         HiFIRRTL Full Compilation"
   echo "======================================================================"
   for pt in $1
   do

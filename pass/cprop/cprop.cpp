@@ -1110,7 +1110,7 @@ void Cprop::setup_clock(Node &reg_node) {
 
 
 void Cprop::do_trans(LGraph *lg) {
-  /* Lbench b("pass.cprop"); */
+  Lbench b("pass.cprop");
   /* bool tup_get_left = false; */
 
 

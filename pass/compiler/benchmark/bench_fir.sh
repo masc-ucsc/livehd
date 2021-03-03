@@ -1,8 +1,6 @@
 #!/bin/bash
 rm -rf ./lgdb
-# FIRRTL_LEVEL='lo'
-FIRRTL_LEVEL='hi'
-
+mv -f lbench.trace lbench.trace.old
 
 if [ ! -d ./livehd_regression ]; then
   git clone git@github.com:masc-ucsc/livehd_regression.git
@@ -12,11 +10,13 @@ if [ ! -d ./livehd_regression ]; then
   cd ../../
 fi
 
-
+FIRRTL_LEVEL='hi'
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
 POST_IO_RENAME=./inou/firrtl/post_io_renaming.py
 PATTERN_PATH=./livehd_regression/synthetic/generated
+LGDB=/local/scrap/masc/swang203
+GVIZ='true'
 
 if [ ! -f $LGSHELL ]; then
     if [ -f ./main/lgshell ]; then
@@ -35,7 +35,8 @@ do
 done
 
 
-pts='Xor8000Thread64'
+# pts='Xor8000Thread64'
+pts='Cell_alone'
 
 echo -e "All Benchmark Patterns:" '\n'$pts
 
@@ -54,7 +55,7 @@ firrtl_test() {
         exit 1
     fi 
 
-    ${LGSHELL} "inou.firrtl.tolnast files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb |> pass.compiler gviz:true top:${pt} firrtl:true"
+    ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true"
     ret_val=$?
     if [ $ret_val -ne 0 ]; then
       echo "ERROR: could not compile with pattern: ${pt}.${FIRRTL_LEVEL}.pb!"
@@ -73,7 +74,7 @@ firrtl_test() {
     echo "LGraph -> Verilog"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg hier:true"
+    ${LGSHELL} "lgraph.open path:${LGDB} name:${pt} |> inou.yosys.fromlg hier:true"
     # ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg"
     if [ $? -eq 0 ] && [ -f ${pt}.v ]; then
         echo "Successfully generate Verilog: ${pt}.v"
@@ -99,7 +100,7 @@ firrtl_test() {
   #       python3 ${POST_IO_RENAME} "${pt}.v"
   #   fi
 
-  #   ${LGCHECK} --implementation=${pt}.v --reference=./inou/firrtl/tests/verilog_gld/${pt}.gld.v
+  #   ${LGCHECK} --implementation=${pt}.v --reference=${PATTERN_PATH}/${pt}.v
 
   #   if [ $? -eq 0 ]; then
   #     echo "Successfully pass LEC!"
