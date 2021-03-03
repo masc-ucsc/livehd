@@ -137,15 +137,11 @@ new_git_repository(
     #strip_prefix = "include",
     shallow_since = "1596729061 -0700",
 )
-# Move xxhash.c to xxhash.cpp, fix include inside xxhash.h
-# mkdir build; cd build ; cmake ../ ; make ; mv source ../generated/ ; cd ..
-# rm -rf source/codegen # LLVM code generation code
-# mkpatch --exclude=CMakeFiles ../slang_orig/ .
-# s/\.\/slang_orig//g
+
 new_git_repository(
     name = "slang",
     build_file = "BUILD.slang",
-    commit = "b247da1849be56b00422626857532bb16830fb1f", # Jan 13, 2021 c0cf9a643f05df63268ecbfe561e9af37c9a62a8", # Nov 2nd, 2020
+    commit = "5fd85b769d5136e093f757ef6e20a56bd917a70c", # March 1, 2021
     remote = "https://github.com/MikePopoloski/slang.git",
     shallow_since = "1610328265 -0500",
     patches = ["//external:patch.slang"],

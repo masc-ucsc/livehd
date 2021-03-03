@@ -1,7 +1,7 @@
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/AllSyntax.cpp ./generated/AllSyntax.cpp
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/AllSyntax.cpp ./generated/AllSyntax.cpp
 --- ./generated/AllSyntax.cpp	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/AllSyntax.cpp	2021-01-13 10:06:51.042023637 -0800
-@@ -0,0 +1,13339 @@
++++ ./generated/AllSyntax.cpp	2021-03-02 17:51:09.141286189 -0800
+@@ -0,0 +1,14662 @@
 +//------------------------------------------------------------------------------
 +// AllSyntax.cpp
 +// All generated syntax node data structures
@@ -34,6 +34,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::AndAssignmentExpression: return 4;
 +        case SyntaxKind::AndSequenceExpression: return 4;
 +        case SyntaxKind::AnsiPortList: return 3;
++        case SyntaxKind::AnsiUdpPortList: return 4;
 +        case SyntaxKind::ArgumentList: return 3;
 +        case SyntaxKind::ArithmeticLeftShiftAssignmentExpression: return 4;
 +        case SyntaxKind::ArithmeticRightShiftAssignmentExpression: return 4;
@@ -93,6 +94,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::ConcurrentAssertionMember: return 2;
 +        case SyntaxKind::ConditionalConstraint: return 6;
 +        case SyntaxKind::ConditionalExpression: return 6;
++        case SyntaxKind::ConditionalPathDeclaration: return 6;
 +        case SyntaxKind::ConditionalPattern: return 2;
 +        case SyntaxKind::ConditionalPredicate: return 1;
 +        case SyntaxKind::ConditionalStatement: return 9;
@@ -126,6 +128,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::DefineDirective: return 4;
 +        case SyntaxKind::Delay3: return 8;
 +        case SyntaxKind::DelayControl: return 2;
++        case SyntaxKind::DelayedTerminalArg: return 4;
 +        case SyntaxKind::DescendingRangeSelect: return 3;
 +        case SyntaxKind::DisableConstraint: return 4;
 +        case SyntaxKind::DisableForkStatement: return 5;
@@ -140,6 +143,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::DoWhileStatement: return 9;
 +        case SyntaxKind::DotMemberClause: return 2;
 +        case SyntaxKind::DriveStrength: return 5;
++        case SyntaxKind::EdgeControlSpecifier: return 3;
++        case SyntaxKind::EdgeDescriptor: return 2;
++        case SyntaxKind::EdgeSensitivePathSuffix: return 6;
 +        case SyntaxKind::ElabSystemTask: return 4;
 +        case SyntaxKind::ElementSelect: return 3;
 +        case SyntaxKind::ElementSelectExpression: return 2;
@@ -153,6 +159,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::EmptyPortConnection: return 2;
 +        case SyntaxKind::EmptyQueueExpression: return 2;
 +        case SyntaxKind::EmptyStatement: return 3;
++        case SyntaxKind::EmptyTimingCheckArg: return 1;
 +        case SyntaxKind::EndCellDefineDirective: return 1;
 +        case SyntaxKind::EndIfDirective: return 2;
 +        case SyntaxKind::EndKeywordsDirective: return 1;
@@ -172,6 +179,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::ExpressionOrDist: return 2;
 +        case SyntaxKind::ExpressionPattern: return 1;
 +        case SyntaxKind::ExpressionStatement: return 4;
++        case SyntaxKind::ExpressionTimingCheckArg: return 2;
 +        case SyntaxKind::ExtendsClause: return 3;
 +        case SyntaxKind::ExternModule: return 2;
 +        case SyntaxKind::FinalBlock: return 3;
@@ -201,6 +209,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::IfDefDirective: return 3;
 +        case SyntaxKind::IfGenerate: return 7;
 +        case SyntaxKind::IfNDefDirective: return 3;
++        case SyntaxKind::IfNonePathDeclaration: return 3;
 +        case SyntaxKind::IffEventClause: return 2;
 +        case SyntaxKind::IffPropertyExpression: return 4;
 +        case SyntaxKind::ImmediateAssertStatement: return 6;
@@ -286,6 +295,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::NextTimePropertyExpression: return 3;
 +        case SyntaxKind::NoUnconnectedDriveDirective: return 1;
 +        case SyntaxKind::NonAnsiPortList: return 3;
++        case SyntaxKind::NonAnsiUdpPortList: return 4;
 +        case SyntaxKind::NonOverlappedFollowedByPropertyExpression: return 4;
 +        case SyntaxKind::NonOverlappedImplicationPropertyExpression: return 4;
 +        case SyntaxKind::NonblockingAssignmentExpression: return 4;
@@ -315,6 +325,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::ParenPragmaExpression: return 3;
 +        case SyntaxKind::ParenthesizedEventExpression: return 3;
 +        case SyntaxKind::ParenthesizedExpression: return 3;
++        case SyntaxKind::PathDeclaration: return 7;
++        case SyntaxKind::PathDescription: return 7;
 +        case SyntaxKind::PatternCaseItem: return 5;
 +        case SyntaxKind::PortConcatenation: return 3;
 +        case SyntaxKind::PortDeclaration: return 4;
@@ -324,15 +336,16 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::PowerExpression: return 4;
 +        case SyntaxKind::PragmaDirective: return 3;
 +        case SyntaxKind::PrimaryBlockEventExpression: return 2;
-+        case SyntaxKind::ProceduralAssignStatement: return 7;
++        case SyntaxKind::ProceduralAssignStatement: return 5;
 +        case SyntaxKind::ProceduralDeassignStatement: return 5;
-+        case SyntaxKind::ProceduralForceStatement: return 7;
++        case SyntaxKind::ProceduralForceStatement: return 5;
 +        case SyntaxKind::ProceduralReleaseStatement: return 5;
 +        case SyntaxKind::ProgramDeclaration: return 5;
 +        case SyntaxKind::ProgramHeader: return 7;
 +        case SyntaxKind::PropertyDeclaration: return 10;
 +        case SyntaxKind::PropertySpec: return 3;
 +        case SyntaxKind::PropertyType: return 1;
++        case SyntaxKind::PulseStyleDeclaration: return 4;
 +        case SyntaxKind::QueueDimensionSpecifier: return 2;
 +        case SyntaxKind::RandCaseItem: return 3;
 +        case SyntaxKind::RandCaseStatement: return 5;
@@ -364,9 +377,13 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::SignalEventExpression: return 3;
 +        case SyntaxKind::SignedCastExpression: return 3;
 +        case SyntaxKind::SimpleAssignmentPattern: return 3;
++        case SyntaxKind::SimplePathSuffix: return 1;
 +        case SyntaxKind::SimplePragmaExpression: return 1;
 +        case SyntaxKind::SimpleRangeSelect: return 3;
 +        case SyntaxKind::SolveBeforeConstraint: return 5;
++        case SyntaxKind::SpecifyBlock: return 4;
++        case SyntaxKind::SpecparamDeclaration: return 5;
++        case SyntaxKind::SpecparamDeclarator: return 3;
 +        case SyntaxKind::StandardCaseItem: return 3;
 +        case SyntaxKind::StreamExpression: return 2;
 +        case SyntaxKind::StreamExpressionWithRange: return 2;
@@ -383,6 +400,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::SyncAcceptOnPropertyExpression: return 3;
 +        case SyntaxKind::SyncRejectOnPropertyExpression: return 3;
 +        case SyntaxKind::SystemName: return 1;
++        case SyntaxKind::SystemTimingCheck: return 6;
 +        case SyntaxKind::TaggedPattern: return 3;
 +        case SyntaxKind::TaggedUnionExpression: return 3;
 +        case SyntaxKind::TaskDeclaration: return 6;
@@ -392,6 +410,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::TimeScaleDirective: return 4;
 +        case SyntaxKind::TimeType: return 3;
 +        case SyntaxKind::TimeUnitsDeclaration: return 5;
++        case SyntaxKind::TimingCheckCondition: return 2;
++        case SyntaxKind::TimingCheckEvent: return 4;
 +        case SyntaxKind::TimingControlExpression: return 2;
 +        case SyntaxKind::TimingControlExpressionConcatenation: return 3;
 +        case SyntaxKind::TimingControlStatement: return 4;
@@ -403,6 +423,13 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::TypeParameterDeclaration: return 3;
 +        case SyntaxKind::TypeReference: return 4;
 +        case SyntaxKind::TypedefDeclaration: return 6;
++        case SyntaxKind::UdpBody: return 5;
++        case SyntaxKind::UdpDeclaration: return 7;
++        case SyntaxKind::UdpEdgeIndicator: return 4;
++        case SyntaxKind::UdpEntry: return 8;
++        case SyntaxKind::UdpInitialStmt: return 5;
++        case SyntaxKind::UdpInputPortDecl: return 3;
++        case SyntaxKind::UdpOutputPortDecl: return 5;
 +        case SyntaxKind::UnaryBitwiseAndExpression: return 3;
 +        case SyntaxKind::UnaryBitwiseNandExpression: return 3;
 +        case SyntaxKind::UnaryBitwiseNorExpression: return 3;
@@ -445,6 +472,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::WildcardPattern: return 1;
 +        case SyntaxKind::WildcardPortConnection: return 2;
 +        case SyntaxKind::WildcardPortList: return 3;
++        case SyntaxKind::WildcardUdpPortList: return 4;
 +        case SyntaxKind::WithClause: return 4;
 +        case SyntaxKind::WithFunctionClause: return 2;
 +        case SyntaxKind::WithFunctionSample: return 4;
@@ -519,6 +547,44 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +AnsiPortListSyntax* AnsiPortListSyntax::clone(BumpAllocator& alloc) const {
 +    return alloc.emplace<AnsiPortListSyntax>(*this);
++}
++
++bool AnsiUdpPortListSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::AnsiUdpPortList;
++}
++
++TokenOrSyntax AnsiUdpPortListSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return openParen;
++        case 1: return &ports;
++        case 2: return closeParen;
++        case 3: return semi;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax AnsiUdpPortListSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return openParen;
++        case 1: return &ports;
++        case 2: return closeParen;
++        case 3: return semi;
++        default: return nullptr;
++    }
++}
++
++void AnsiUdpPortListSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: openParen = child.token(); return;
++        case 1: ports = child.node()->as<SeparatedSyntaxList<UdpPortDeclSyntax>>(); return;
++        case 2: closeParen = child.token(); return;
++        case 3: semi = child.token(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++AnsiUdpPortListSyntax* AnsiUdpPortListSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<AnsiUdpPortListSyntax>(*this);
 +}
 +
 +bool ArgumentListSyntax::isKind(SyntaxKind kind) {
@@ -2131,6 +2197,50 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return alloc.emplace<ConditionalExpressionSyntax>(*this);
 +}
 +
++bool ConditionalPathDeclarationSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::ConditionalPathDeclaration;
++}
++
++TokenOrSyntax ConditionalPathDeclarationSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return &attributes;
++        case 1: return keyword;
++        case 2: return openParen;
++        case 3: return predicate.get();
++        case 4: return closeParen;
++        case 5: return path.get();
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax ConditionalPathDeclarationSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return &attributes;
++        case 1: return keyword;
++        case 2: return openParen;
++        case 3: return predicate.get();
++        case 4: return closeParen;
++        case 5: return path.get();
++        default: return nullptr;
++    }
++}
++
++void ConditionalPathDeclarationSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: attributes = child.node()->as<SyntaxList<AttributeInstanceSyntax>>(); return;
++        case 1: keyword = child.token(); return;
++        case 2: openParen = child.token(); return;
++        case 3: predicate = &child.node()->as<ExpressionSyntax>(); return;
++        case 4: closeParen = child.token(); return;
++        case 5: path = &child.node()->as<PathDeclarationSyntax>(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++ConditionalPathDeclarationSyntax* ConditionalPathDeclarationSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<ConditionalPathDeclarationSyntax>(*this);
++}
++
 +bool ConditionalPatternSyntax::isKind(SyntaxKind kind) {
 +    return kind == SyntaxKind::ConditionalPattern;
 +}
@@ -2927,7 +3037,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +TokenOrSyntax DefParamAssignmentSyntax::getChild(size_t index) {
 +    switch (index) {
 +        case 0: return name.get();
-+        case 1: return setter;
++        case 1: return setter.get();
 +        default: return nullptr;
 +    }
 +}
@@ -2935,7 +3045,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +ConstTokenOrSyntax DefParamAssignmentSyntax::getChild(size_t index) const {
 +    switch (index) {
 +        case 0: return name.get();
-+        case 1: return setter;
++        case 1: return setter.get();
 +        default: return nullptr;
 +    }
 +}
@@ -3327,6 +3437,44 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +DelaySyntax* DelaySyntax::clone(BumpAllocator& alloc) const {
 +    return alloc.emplace<DelaySyntax>(*this);
++}
++
++bool DelayedTerminalArgSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::DelayedTerminalArg;
++}
++
++TokenOrSyntax DelayedTerminalArgSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return terminal;
++        case 1: return openBracket;
++        case 2: return expr.get();
++        case 3: return closeBracket;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax DelayedTerminalArgSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return terminal;
++        case 1: return openBracket;
++        case 2: return expr.get();
++        case 3: return closeBracket;
++        default: return nullptr;
++    }
++}
++
++void DelayedTerminalArgSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: terminal = child.token(); return;
++        case 1: openBracket = child.token(); return;
++        case 2: expr = &child.node()->as<ExpressionSyntax>(); return;
++        case 3: closeBracket = child.token(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++DelayedTerminalArgSyntax* DelayedTerminalArgSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<DelayedTerminalArgSyntax>(*this);
 +}
 +
 +bool DimensionSpecifierSyntax::isKind(SyntaxKind kind) {
@@ -3815,6 +3963,117 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return alloc.emplace<DriveStrengthSyntax>(*this);
 +}
 +
++bool EdgeControlSpecifierSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::EdgeControlSpecifier;
++}
++
++TokenOrSyntax EdgeControlSpecifierSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return openBracket;
++        case 1: return &descriptors;
++        case 2: return closeBracket;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax EdgeControlSpecifierSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return openBracket;
++        case 1: return &descriptors;
++        case 2: return closeBracket;
++        default: return nullptr;
++    }
++}
++
++void EdgeControlSpecifierSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: openBracket = child.token(); return;
++        case 1: descriptors = child.node()->as<SeparatedSyntaxList<EdgeDescriptorSyntax>>(); return;
++        case 2: closeBracket = child.token(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++EdgeControlSpecifierSyntax* EdgeControlSpecifierSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<EdgeControlSpecifierSyntax>(*this);
++}
++
++bool EdgeDescriptorSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::EdgeDescriptor;
++}
++
++TokenOrSyntax EdgeDescriptorSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return t1;
++        case 1: return t2;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax EdgeDescriptorSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return t1;
++        case 1: return t2;
++        default: return nullptr;
++    }
++}
++
++void EdgeDescriptorSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: t1 = child.token(); return;
++        case 1: t2 = child.token(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++EdgeDescriptorSyntax* EdgeDescriptorSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<EdgeDescriptorSyntax>(*this);
++}
++
++bool EdgeSensitivePathSuffixSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::EdgeSensitivePathSuffix;
++}
++
++TokenOrSyntax EdgeSensitivePathSuffixSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return openParen;
++        case 1: return &outputs;
++        case 2: return polarityOperator;
++        case 3: return colon;
++        case 4: return expr.get();
++        case 5: return closeParen;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax EdgeSensitivePathSuffixSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return openParen;
++        case 1: return &outputs;
++        case 2: return polarityOperator;
++        case 3: return colon;
++        case 4: return expr.get();
++        case 5: return closeParen;
++        default: return nullptr;
++    }
++}
++
++void EdgeSensitivePathSuffixSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: openParen = child.token(); return;
++        case 1: outputs = child.node()->as<SeparatedSyntaxList<NameSyntax>>(); return;
++        case 2: polarityOperator = child.token(); return;
++        case 3: colon = child.token(); return;
++        case 4: expr = &child.node()->as<ExpressionSyntax>(); return;
++        case 5: closeParen = child.token(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++EdgeSensitivePathSuffixSyntax* EdgeSensitivePathSuffixSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<EdgeSensitivePathSuffixSyntax>(*this);
++}
++
 +bool ElabSystemTaskSyntax::isKind(SyntaxKind kind) {
 +    return kind == SyntaxKind::ElabSystemTask;
 +}
@@ -4174,6 +4433,35 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +EmptyStatementSyntax* EmptyStatementSyntax::clone(BumpAllocator& alloc) const {
 +    return alloc.emplace<EmptyStatementSyntax>(*this);
++}
++
++bool EmptyTimingCheckArgSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::EmptyTimingCheckArg;
++}
++
++TokenOrSyntax EmptyTimingCheckArgSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return placeholder;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax EmptyTimingCheckArgSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return placeholder;
++        default: return nullptr;
++    }
++}
++
++void EmptyTimingCheckArgSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: placeholder = child.token(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++EmptyTimingCheckArgSyntax* EmptyTimingCheckArgSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<EmptyTimingCheckArgSyntax>(*this);
 +}
 +
 +bool EnumTypeSyntax::isKind(SyntaxKind kind) {
@@ -4830,6 +5118,38 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        default:
 +            return false;
 +    }
++}
++
++bool ExpressionTimingCheckArgSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::ExpressionTimingCheckArg;
++}
++
++TokenOrSyntax ExpressionTimingCheckArgSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return expr.get();
++        case 1: return condition;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax ExpressionTimingCheckArgSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return expr.get();
++        case 1: return condition;
++        default: return nullptr;
++    }
++}
++
++void ExpressionTimingCheckArgSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: expr = &child.node()->as<ExpressionSyntax>(); return;
++        case 1: condition = &child.node()->as<TimingCheckConditionSyntax>(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++ExpressionTimingCheckArgSyntax* ExpressionTimingCheckArgSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<ExpressionTimingCheckArgSyntax>(*this);
 +}
 +
 +bool ExtendsClauseSyntax::isKind(SyntaxKind kind) {
@@ -5796,6 +6116,41 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +IfGenerateSyntax* IfGenerateSyntax::clone(BumpAllocator& alloc) const {
 +    return alloc.emplace<IfGenerateSyntax>(*this);
++}
++
++bool IfNonePathDeclarationSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::IfNonePathDeclaration;
++}
++
++TokenOrSyntax IfNonePathDeclarationSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return &attributes;
++        case 1: return keyword;
++        case 2: return path.get();
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax IfNonePathDeclarationSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return &attributes;
++        case 1: return keyword;
++        case 2: return path.get();
++        default: return nullptr;
++    }
++}
++
++void IfNonePathDeclarationSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: attributes = child.node()->as<SyntaxList<AttributeInstanceSyntax>>(); return;
++        case 1: keyword = child.token(); return;
++        case 2: path = &child.node()->as<PathDeclarationSyntax>(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++IfNonePathDeclarationSyntax* IfNonePathDeclarationSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<IfNonePathDeclarationSyntax>(*this);
 +}
 +
 +bool IffEventClauseSyntax::isKind(SyntaxKind kind) {
@@ -7038,6 +7393,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::ClockingDeclaration:
 +        case SyntaxKind::ClockingItem:
 +        case SyntaxKind::ConcurrentAssertionMember:
++        case SyntaxKind::ConditionalPathDeclaration:
 +        case SyntaxKind::ConstraintDeclaration:
 +        case SyntaxKind::ConstraintPrototype:
 +        case SyntaxKind::ContinuousAssign:
@@ -7064,6 +7420,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::GenvarDeclaration:
 +        case SyntaxKind::HierarchyInstantiation:
 +        case SyntaxKind::IfGenerate:
++        case SyntaxKind::IfNonePathDeclaration:
 +        case SyntaxKind::ImmediateAssertionMember:
 +        case SyntaxKind::ImplicitAnsiPort:
 +        case SyntaxKind::InitialBlock:
@@ -7080,13 +7437,19 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::PackageDeclaration:
 +        case SyntaxKind::PackageImportDeclaration:
 +        case SyntaxKind::ParameterDeclarationStatement:
++        case SyntaxKind::PathDeclaration:
 +        case SyntaxKind::PortDeclaration:
 +        case SyntaxKind::ProgramDeclaration:
 +        case SyntaxKind::PropertyDeclaration:
++        case SyntaxKind::PulseStyleDeclaration:
 +        case SyntaxKind::SequenceDeclaration:
++        case SyntaxKind::SpecifyBlock:
++        case SyntaxKind::SpecparamDeclaration:
++        case SyntaxKind::SystemTimingCheck:
 +        case SyntaxKind::TaskDeclaration:
 +        case SyntaxKind::TimeUnitsDeclaration:
 +        case SyntaxKind::TypedefDeclaration:
++        case SyntaxKind::UdpDeclaration:
 +        case SyntaxKind::UserDefinedNetDeclaration:
 +            return true;
 +        default:
@@ -8116,6 +8479,44 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    }
 +}
 +
++bool NonAnsiUdpPortListSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::NonAnsiUdpPortList;
++}
++
++TokenOrSyntax NonAnsiUdpPortListSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return openParen;
++        case 1: return &ports;
++        case 2: return closeParen;
++        case 3: return semi;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax NonAnsiUdpPortListSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return openParen;
++        case 1: return &ports;
++        case 2: return closeParen;
++        case 3: return semi;
++        default: return nullptr;
++    }
++}
++
++void NonAnsiUdpPortListSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: openParen = child.token(); return;
++        case 1: ports = child.node()->as<SeparatedSyntaxList<IdentifierNameSyntax>>(); return;
++        case 2: closeParen = child.token(); return;
++        case 3: semi = child.token(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++NonAnsiUdpPortListSyntax* NonAnsiUdpPortListSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<NonAnsiUdpPortListSyntax>(*this);
++}
++
 +bool NumberPragmaExpressionSyntax::isKind(SyntaxKind kind) {
 +    return kind == SyntaxKind::NumberPragmaExpression;
 +}
@@ -8705,6 +9106,110 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return alloc.emplace<ParenthesizedExpressionSyntax>(*this);
 +}
 +
++bool PathDeclarationSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::PathDeclaration;
++}
++
++TokenOrSyntax PathDeclarationSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return &attributes;
++        case 1: return desc.get();
++        case 2: return equals;
++        case 3: return openParen;
++        case 4: return &delays;
++        case 5: return closeParen;
++        case 6: return semi;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax PathDeclarationSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return &attributes;
++        case 1: return desc.get();
++        case 2: return equals;
++        case 3: return openParen;
++        case 4: return &delays;
++        case 5: return closeParen;
++        case 6: return semi;
++        default: return nullptr;
++    }
++}
++
++void PathDeclarationSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: attributes = child.node()->as<SyntaxList<AttributeInstanceSyntax>>(); return;
++        case 1: desc = &child.node()->as<PathDescriptionSyntax>(); return;
++        case 2: equals = child.token(); return;
++        case 3: openParen = child.token(); return;
++        case 4: delays = child.node()->as<SeparatedSyntaxList<ExpressionSyntax>>(); return;
++        case 5: closeParen = child.token(); return;
++        case 6: semi = child.token(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++PathDeclarationSyntax* PathDeclarationSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<PathDeclarationSyntax>(*this);
++}
++
++bool PathDescriptionSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::PathDescription;
++}
++
++TokenOrSyntax PathDescriptionSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return openParen;
++        case 1: return edgeIdentifier;
++        case 2: return &inputs;
++        case 3: return polarityOperator;
++        case 4: return pathOperator;
++        case 5: return suffix.get();
++        case 6: return closeParen;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax PathDescriptionSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return openParen;
++        case 1: return edgeIdentifier;
++        case 2: return &inputs;
++        case 3: return polarityOperator;
++        case 4: return pathOperator;
++        case 5: return suffix.get();
++        case 6: return closeParen;
++        default: return nullptr;
++    }
++}
++
++void PathDescriptionSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: openParen = child.token(); return;
++        case 1: edgeIdentifier = child.token(); return;
++        case 2: inputs = child.node()->as<SeparatedSyntaxList<NameSyntax>>(); return;
++        case 3: polarityOperator = child.token(); return;
++        case 4: pathOperator = child.token(); return;
++        case 5: suffix = &child.node()->as<PathSuffixSyntax>(); return;
++        case 6: closeParen = child.token(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++PathDescriptionSyntax* PathDescriptionSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<PathDescriptionSyntax>(*this);
++}
++
++bool PathSuffixSyntax::isKind(SyntaxKind kind) {
++    switch (kind) {
++        case SyntaxKind::EdgeSensitivePathSuffix:
++        case SyntaxKind::SimplePathSuffix:
++            return true;
++        default:
++            return false;
++    }
++}
++
 +bool PatternCaseItemSyntax::isKind(SyntaxKind kind) {
 +    return kind == SyntaxKind::PatternCaseItem;
 +}
@@ -9157,10 +9662,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case 0: return label;
 +        case 1: return &attributes;
 +        case 2: return keyword;
-+        case 3: return lvalue.get();
-+        case 4: return equals;
-+        case 5: return value.get();
-+        case 6: return semi;
++        case 3: return expr.get();
++        case 4: return semi;
 +        default: return nullptr;
 +    }
 +}
@@ -9170,10 +9673,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case 0: return label;
 +        case 1: return &attributes;
 +        case 2: return keyword;
-+        case 3: return lvalue.get();
-+        case 4: return equals;
-+        case 5: return value.get();
-+        case 6: return semi;
++        case 3: return expr.get();
++        case 4: return semi;
 +        default: return nullptr;
 +    }
 +}
@@ -9183,10 +9684,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case 0: label = &child.node()->as<NamedLabelSyntax>(); return;
 +        case 1: attributes = child.node()->as<SyntaxList<AttributeInstanceSyntax>>(); return;
 +        case 2: keyword = child.token(); return;
-+        case 3: lvalue = &child.node()->as<ExpressionSyntax>(); return;
-+        case 4: equals = child.token(); return;
-+        case 5: value = &child.node()->as<ExpressionSyntax>(); return;
-+        case 6: semi = child.token(); return;
++        case 3: expr = &child.node()->as<ExpressionSyntax>(); return;
++        case 4: semi = child.token(); return;
 +        default: THROW_UNREACHABLE;
 +    }
 +}
@@ -9376,6 +9875,44 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +PropertySpecSyntax* PropertySpecSyntax::clone(BumpAllocator& alloc) const {
 +    return alloc.emplace<PropertySpecSyntax>(*this);
++}
++
++bool PulseStyleDeclarationSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::PulseStyleDeclaration;
++}
++
++TokenOrSyntax PulseStyleDeclarationSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return &attributes;
++        case 1: return keyword;
++        case 2: return &inputs;
++        case 3: return semi;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax PulseStyleDeclarationSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return &attributes;
++        case 1: return keyword;
++        case 2: return &inputs;
++        case 3: return semi;
++        default: return nullptr;
++    }
++}
++
++void PulseStyleDeclarationSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: attributes = child.node()->as<SyntaxList<AttributeInstanceSyntax>>(); return;
++        case 1: keyword = child.token(); return;
++        case 2: inputs = child.node()->as<SeparatedSyntaxList<NameSyntax>>(); return;
++        case 3: semi = child.token(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++PulseStyleDeclarationSyntax* PulseStyleDeclarationSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<PulseStyleDeclarationSyntax>(*this);
 +}
 +
 +bool QueueDimensionSpecifierSyntax::isKind(SyntaxKind kind) {
@@ -10000,6 +10537,35 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return alloc.emplace<SimpleDirectiveSyntax>(*this);
 +}
 +
++bool SimplePathSuffixSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::SimplePathSuffix;
++}
++
++TokenOrSyntax SimplePathSuffixSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return &outputs;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax SimplePathSuffixSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return &outputs;
++        default: return nullptr;
++    }
++}
++
++void SimplePathSuffixSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: outputs = child.node()->as<SeparatedSyntaxList<NameSyntax>>(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++SimplePathSuffixSyntax* SimplePathSuffixSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<SimplePathSuffixSyntax>(*this);
++}
++
 +bool SimplePragmaExpressionSyntax::isKind(SyntaxKind kind) {
 +    return kind == SyntaxKind::SimplePragmaExpression;
 +}
@@ -10068,6 +10634,120 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +SolveBeforeConstraintSyntax* SolveBeforeConstraintSyntax::clone(BumpAllocator& alloc) const {
 +    return alloc.emplace<SolveBeforeConstraintSyntax>(*this);
++}
++
++bool SpecifyBlockSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::SpecifyBlock;
++}
++
++TokenOrSyntax SpecifyBlockSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return &attributes;
++        case 1: return specify;
++        case 2: return &items;
++        case 3: return endspecify;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax SpecifyBlockSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return &attributes;
++        case 1: return specify;
++        case 2: return &items;
++        case 3: return endspecify;
++        default: return nullptr;
++    }
++}
++
++void SpecifyBlockSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: attributes = child.node()->as<SyntaxList<AttributeInstanceSyntax>>(); return;
++        case 1: specify = child.token(); return;
++        case 2: items = child.node()->as<SyntaxList<MemberSyntax>>(); return;
++        case 3: endspecify = child.token(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++SpecifyBlockSyntax* SpecifyBlockSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<SpecifyBlockSyntax>(*this);
++}
++
++bool SpecparamDeclarationSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::SpecparamDeclaration;
++}
++
++TokenOrSyntax SpecparamDeclarationSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return &attributes;
++        case 1: return keyword;
++        case 2: return type.get();
++        case 3: return &declarators;
++        case 4: return semi;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax SpecparamDeclarationSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return &attributes;
++        case 1: return keyword;
++        case 2: return type.get();
++        case 3: return &declarators;
++        case 4: return semi;
++        default: return nullptr;
++    }
++}
++
++void SpecparamDeclarationSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: attributes = child.node()->as<SyntaxList<AttributeInstanceSyntax>>(); return;
++        case 1: keyword = child.token(); return;
++        case 2: type = &child.node()->as<ImplicitTypeSyntax>(); return;
++        case 3: declarators = child.node()->as<SeparatedSyntaxList<SpecparamDeclaratorSyntax>>(); return;
++        case 4: semi = child.token(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++SpecparamDeclarationSyntax* SpecparamDeclarationSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<SpecparamDeclarationSyntax>(*this);
++}
++
++bool SpecparamDeclaratorSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::SpecparamDeclarator;
++}
++
++TokenOrSyntax SpecparamDeclaratorSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return name;
++        case 1: return equals;
++        case 2: return value.get();
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax SpecparamDeclaratorSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return name;
++        case 1: return equals;
++        case 2: return value.get();
++        default: return nullptr;
++    }
++}
++
++void SpecparamDeclaratorSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: name = child.token(); return;
++        case 1: equals = child.token(); return;
++        case 2: value = &child.node()->as<ExpressionSyntax>(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++SpecparamDeclaratorSyntax* SpecparamDeclaratorSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<SpecparamDeclaratorSyntax>(*this);
 +}
 +
 +bool StandardCaseItemSyntax::isKind(SyntaxKind kind) {
@@ -10494,6 +11174,50 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return alloc.emplace<SystemNameSyntax>(*this);
 +}
 +
++bool SystemTimingCheckSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::SystemTimingCheck;
++}
++
++TokenOrSyntax SystemTimingCheckSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return &attributes;
++        case 1: return name;
++        case 2: return openParen;
++        case 3: return &args;
++        case 4: return closeParen;
++        case 5: return semi;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax SystemTimingCheckSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return &attributes;
++        case 1: return name;
++        case 2: return openParen;
++        case 3: return &args;
++        case 4: return closeParen;
++        case 5: return semi;
++        default: return nullptr;
++    }
++}
++
++void SystemTimingCheckSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: attributes = child.node()->as<SyntaxList<AttributeInstanceSyntax>>(); return;
++        case 1: name = child.token(); return;
++        case 2: openParen = child.token(); return;
++        case 3: args = child.node()->as<SeparatedSyntaxList<TimingCheckArgSyntax>>(); return;
++        case 4: closeParen = child.token(); return;
++        case 5: semi = child.token(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++SystemTimingCheckSyntax* SystemTimingCheckSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<SystemTimingCheckSyntax>(*this);
++}
++
 +bool TaggedPatternSyntax::isKind(SyntaxKind kind) {
 +    return kind == SyntaxKind::TaggedPattern;
 +}
@@ -10641,6 +11365,88 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +TimeUnitsDeclarationSyntax* TimeUnitsDeclarationSyntax::clone(BumpAllocator& alloc) const {
 +    return alloc.emplace<TimeUnitsDeclarationSyntax>(*this);
++}
++
++bool TimingCheckArgSyntax::isKind(SyntaxKind kind) {
++    switch (kind) {
++        case SyntaxKind::DelayedTerminalArg:
++        case SyntaxKind::EmptyTimingCheckArg:
++        case SyntaxKind::ExpressionTimingCheckArg:
++        case SyntaxKind::TimingCheckEvent:
++            return true;
++        default:
++            return false;
++    }
++}
++
++bool TimingCheckConditionSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::TimingCheckCondition;
++}
++
++TokenOrSyntax TimingCheckConditionSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return tripleAnd;
++        case 1: return expr.get();
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax TimingCheckConditionSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return tripleAnd;
++        case 1: return expr.get();
++        default: return nullptr;
++    }
++}
++
++void TimingCheckConditionSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: tripleAnd = child.token(); return;
++        case 1: expr = &child.node()->as<ExpressionSyntax>(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++TimingCheckConditionSyntax* TimingCheckConditionSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<TimingCheckConditionSyntax>(*this);
++}
++
++bool TimingCheckEventSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::TimingCheckEvent;
++}
++
++TokenOrSyntax TimingCheckEventSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return edge;
++        case 1: return controlSpecifier;
++        case 2: return terminal.get();
++        case 3: return condition;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax TimingCheckEventSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return edge;
++        case 1: return controlSpecifier;
++        case 2: return terminal.get();
++        case 3: return condition;
++        default: return nullptr;
++    }
++}
++
++void TimingCheckEventSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: edge = child.token(); return;
++        case 1: controlSpecifier = &child.node()->as<EdgeControlSpecifierSyntax>(); return;
++        case 2: terminal = &child.node()->as<NameSyntax>(); return;
++        case 3: condition = &child.node()->as<TimingCheckConditionSyntax>(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++TimingCheckEventSyntax* TimingCheckEventSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<TimingCheckEventSyntax>(*this);
 +}
 +
 +bool TimingControlExpressionConcatenationSyntax::isKind(SyntaxKind kind) {
@@ -11048,6 +11854,345 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +TypedefDeclarationSyntax* TypedefDeclarationSyntax::clone(BumpAllocator& alloc) const {
 +    return alloc.emplace<TypedefDeclarationSyntax>(*this);
++}
++
++bool UdpBodySyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::UdpBody;
++}
++
++TokenOrSyntax UdpBodySyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return &portDecls;
++        case 1: return initialStmt;
++        case 2: return table;
++        case 3: return &entries;
++        case 4: return endtable;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax UdpBodySyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return &portDecls;
++        case 1: return initialStmt;
++        case 2: return table;
++        case 3: return &entries;
++        case 4: return endtable;
++        default: return nullptr;
++    }
++}
++
++void UdpBodySyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: portDecls = child.node()->as<SeparatedSyntaxList<UdpPortDeclSyntax>>(); return;
++        case 1: initialStmt = &child.node()->as<UdpInitialStmtSyntax>(); return;
++        case 2: table = child.token(); return;
++        case 3: entries = child.node()->as<SyntaxList<UdpEntrySyntax>>(); return;
++        case 4: endtable = child.token(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++UdpBodySyntax* UdpBodySyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<UdpBodySyntax>(*this);
++}
++
++bool UdpDeclarationSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::UdpDeclaration;
++}
++
++TokenOrSyntax UdpDeclarationSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return &attributes;
++        case 1: return primitive;
++        case 2: return name;
++        case 3: return portList.get();
++        case 4: return body.get();
++        case 5: return endprimitive;
++        case 6: return endBlockName;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax UdpDeclarationSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return &attributes;
++        case 1: return primitive;
++        case 2: return name;
++        case 3: return portList.get();
++        case 4: return body.get();
++        case 5: return endprimitive;
++        case 6: return endBlockName;
++        default: return nullptr;
++    }
++}
++
++void UdpDeclarationSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: attributes = child.node()->as<SyntaxList<AttributeInstanceSyntax>>(); return;
++        case 1: primitive = child.token(); return;
++        case 2: name = child.token(); return;
++        case 3: portList = &child.node()->as<UdpPortListSyntax>(); return;
++        case 4: body = &child.node()->as<UdpBodySyntax>(); return;
++        case 5: endprimitive = child.token(); return;
++        case 6: endBlockName = &child.node()->as<NamedBlockClauseSyntax>(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++UdpDeclarationSyntax* UdpDeclarationSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<UdpDeclarationSyntax>(*this);
++}
++
++bool UdpEdgeIndicatorSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::UdpEdgeIndicator;
++}
++
++TokenOrSyntax UdpEdgeIndicatorSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return openParen;
++        case 1: return first;
++        case 2: return second;
++        case 3: return closeParen;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax UdpEdgeIndicatorSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return openParen;
++        case 1: return first;
++        case 2: return second;
++        case 3: return closeParen;
++        default: return nullptr;
++    }
++}
++
++void UdpEdgeIndicatorSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: openParen = child.token(); return;
++        case 1: first = child.token(); return;
++        case 2: second = child.token(); return;
++        case 3: closeParen = child.token(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++UdpEdgeIndicatorSyntax* UdpEdgeIndicatorSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<UdpEdgeIndicatorSyntax>(*this);
++}
++
++bool UdpEntrySyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::UdpEntry;
++}
++
++TokenOrSyntax UdpEntrySyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return &preInputs;
++        case 1: return edgeIndicator;
++        case 2: return &postInputs;
++        case 3: return colon1;
++        case 4: return current;
++        case 5: return colon2;
++        case 6: return next;
++        case 7: return semi;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax UdpEntrySyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return &preInputs;
++        case 1: return edgeIndicator;
++        case 2: return &postInputs;
++        case 3: return colon1;
++        case 4: return current;
++        case 5: return colon2;
++        case 6: return next;
++        case 7: return semi;
++        default: return nullptr;
++    }
++}
++
++void UdpEntrySyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: preInputs = child.node()->as<TokenList>(); return;
++        case 1: edgeIndicator = &child.node()->as<UdpEdgeIndicatorSyntax>(); return;
++        case 2: postInputs = child.node()->as<TokenList>(); return;
++        case 3: colon1 = child.token(); return;
++        case 4: current = child.token(); return;
++        case 5: colon2 = child.token(); return;
++        case 6: next = child.token(); return;
++        case 7: semi = child.token(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++UdpEntrySyntax* UdpEntrySyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<UdpEntrySyntax>(*this);
++}
++
++bool UdpInitialStmtSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::UdpInitialStmt;
++}
++
++TokenOrSyntax UdpInitialStmtSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return initial;
++        case 1: return name;
++        case 2: return equals;
++        case 3: return value.get();
++        case 4: return semi;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax UdpInitialStmtSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return initial;
++        case 1: return name;
++        case 2: return equals;
++        case 3: return value.get();
++        case 4: return semi;
++        default: return nullptr;
++    }
++}
++
++void UdpInitialStmtSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: initial = child.token(); return;
++        case 1: name = child.token(); return;
++        case 2: equals = child.token(); return;
++        case 3: value = &child.node()->as<ExpressionSyntax>(); return;
++        case 4: semi = child.token(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++UdpInitialStmtSyntax* UdpInitialStmtSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<UdpInitialStmtSyntax>(*this);
++}
++
++bool UdpInputPortDeclSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::UdpInputPortDecl;
++}
++
++TokenOrSyntax UdpInputPortDeclSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return &attributes;
++        case 1: return keyword;
++        case 2: return &names;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax UdpInputPortDeclSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return &attributes;
++        case 1: return keyword;
++        case 2: return &names;
++        default: return nullptr;
++    }
++}
++
++void UdpInputPortDeclSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: attributes = child.node()->as<SyntaxList<AttributeInstanceSyntax>>(); return;
++        case 1: keyword = child.token(); return;
++        case 2: names = child.node()->as<SeparatedSyntaxList<IdentifierNameSyntax>>(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++UdpInputPortDeclSyntax* UdpInputPortDeclSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<UdpInputPortDeclSyntax>(*this);
++}
++
++bool UdpOutputPortDeclSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::UdpOutputPortDecl;
++}
++
++TokenOrSyntax UdpOutputPortDeclSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return &attributes;
++        case 1: return keyword;
++        case 2: return reg;
++        case 3: return name;
++        case 4: return initializer;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax UdpOutputPortDeclSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return &attributes;
++        case 1: return keyword;
++        case 2: return reg;
++        case 3: return name;
++        case 4: return initializer;
++        default: return nullptr;
++    }
++}
++
++void UdpOutputPortDeclSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: attributes = child.node()->as<SyntaxList<AttributeInstanceSyntax>>(); return;
++        case 1: keyword = child.token(); return;
++        case 2: reg = child.token(); return;
++        case 3: name = child.token(); return;
++        case 4: initializer = &child.node()->as<EqualsValueClauseSyntax>(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++UdpOutputPortDeclSyntax* UdpOutputPortDeclSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<UdpOutputPortDeclSyntax>(*this);
++}
++
++bool UdpPortDeclSyntax::isKind(SyntaxKind kind) {
++    switch (kind) {
++        case SyntaxKind::UdpInputPortDecl:
++        case SyntaxKind::UdpOutputPortDecl:
++            return true;
++        default:
++            return false;
++    }
++}
++
++TokenOrSyntax UdpPortDeclSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return &attributes;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax UdpPortDeclSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return &attributes;
++        default: return nullptr;
++    }
++}
++
++void UdpPortDeclSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: attributes = child.node()->as<SyntaxList<AttributeInstanceSyntax>>(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++UdpPortDeclSyntax* UdpPortDeclSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<UdpPortDeclSyntax>(*this);
++}
++
++bool UdpPortListSyntax::isKind(SyntaxKind kind) {
++    switch (kind) {
++        case SyntaxKind::AnsiUdpPortList:
++        case SyntaxKind::NonAnsiUdpPortList:
++        case SyntaxKind::WildcardUdpPortList:
++            return true;
++        default:
++            return false;
++    }
 +}
 +
 +bool UnconditionalBranchDirectiveSyntax::isKind(SyntaxKind kind) {
@@ -11684,6 +12829,44 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return alloc.emplace<WildcardPortListSyntax>(*this);
 +}
 +
++bool WildcardUdpPortListSyntax::isKind(SyntaxKind kind) {
++    return kind == SyntaxKind::WildcardUdpPortList;
++}
++
++TokenOrSyntax WildcardUdpPortListSyntax::getChild(size_t index) {
++    switch (index) {
++        case 0: return openParen;
++        case 1: return dotStar;
++        case 2: return closeParen;
++        case 3: return semi;
++        default: return nullptr;
++    }
++}
++
++ConstTokenOrSyntax WildcardUdpPortListSyntax::getChild(size_t index) const {
++    switch (index) {
++        case 0: return openParen;
++        case 1: return dotStar;
++        case 2: return closeParen;
++        case 3: return semi;
++        default: return nullptr;
++    }
++}
++
++void WildcardUdpPortListSyntax::setChild(size_t index, TokenOrSyntax child) {
++    switch (index) {
++        case 0: openParen = child.token(); return;
++        case 1: dotStar = child.token(); return;
++        case 2: closeParen = child.token(); return;
++        case 3: semi = child.token(); return;
++        default: THROW_UNREACHABLE;
++    }
++}
++
++WildcardUdpPortListSyntax* WildcardUdpPortListSyntax::clone(BumpAllocator& alloc) const {
++    return alloc.emplace<WildcardUdpPortListSyntax>(*this);
++}
++
 +bool WithClauseSyntax::isKind(SyntaxKind kind) {
 +    return kind == SyntaxKind::WithClause;
 +}
@@ -11798,6 +12981,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +AnsiPortListSyntax& SyntaxFactory::ansiPortList(Token openParen, const SeparatedSyntaxList<MemberSyntax>& ports, Token closeParen) {
 +    return *alloc.emplace<AnsiPortListSyntax>(openParen, ports, closeParen);
++}
++
++AnsiUdpPortListSyntax& SyntaxFactory::ansiUdpPortList(Token openParen, const SeparatedSyntaxList<UdpPortDeclSyntax>& ports, Token closeParen, Token semi) {
++    return *alloc.emplace<AnsiUdpPortListSyntax>(openParen, ports, closeParen, semi);
 +}
 +
 +ArgumentListSyntax& SyntaxFactory::argumentList(Token openParen, const SeparatedSyntaxList<ArgumentSyntax>& parameters, Token closeParen) {
@@ -11956,6 +13143,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return *alloc.emplace<ConditionalExpressionSyntax>(predicate, question, attributes, left, colon, right);
 +}
 +
++ConditionalPathDeclarationSyntax& SyntaxFactory::conditionalPathDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, Token openParen, ExpressionSyntax& predicate, Token closeParen, PathDeclarationSyntax& path) {
++    return *alloc.emplace<ConditionalPathDeclarationSyntax>(attributes, keyword, openParen, predicate, closeParen, path);
++}
++
 +ConditionalPatternSyntax& SyntaxFactory::conditionalPattern(ExpressionSyntax& expr, MatchesClauseSyntax* matchesClause) {
 +    return *alloc.emplace<ConditionalPatternSyntax>(expr, matchesClause);
 +}
@@ -12024,7 +13215,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return *alloc.emplace<DeclaratorSyntax>(name, dimensions, initializer);
 +}
 +
-+DefParamAssignmentSyntax& SyntaxFactory::defParamAssignment(NameSyntax& name, EqualsValueClauseSyntax* setter) {
++DefParamAssignmentSyntax& SyntaxFactory::defParamAssignment(NameSyntax& name, EqualsValueClauseSyntax& setter) {
 +    return *alloc.emplace<DefParamAssignmentSyntax>(name, setter);
 +}
 +
@@ -12066,6 +13257,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +DelaySyntax& SyntaxFactory::delay(SyntaxKind kind, Token hash, ExpressionSyntax& delayValue) {
 +    return *alloc.emplace<DelaySyntax>(kind, hash, delayValue);
++}
++
++DelayedTerminalArgSyntax& SyntaxFactory::delayedTerminalArg(Token terminal, Token openBracket, ExpressionSyntax& expr, Token closeBracket) {
++    return *alloc.emplace<DelayedTerminalArgSyntax>(terminal, openBracket, expr, closeBracket);
 +}
 +
 +DisableConstraintSyntax& SyntaxFactory::disableConstraint(Token disable, Token soft, NameSyntax& name, Token semi) {
@@ -12112,6 +13307,18 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return *alloc.emplace<DriveStrengthSyntax>(openParen, strength0, comma, strength1, closeParen);
 +}
 +
++EdgeControlSpecifierSyntax& SyntaxFactory::edgeControlSpecifier(Token openBracket, const SeparatedSyntaxList<EdgeDescriptorSyntax>& descriptors, Token closeBracket) {
++    return *alloc.emplace<EdgeControlSpecifierSyntax>(openBracket, descriptors, closeBracket);
++}
++
++EdgeDescriptorSyntax& SyntaxFactory::edgeDescriptor(Token t1, Token t2) {
++    return *alloc.emplace<EdgeDescriptorSyntax>(t1, t2);
++}
++
++EdgeSensitivePathSuffixSyntax& SyntaxFactory::edgeSensitivePathSuffix(Token openParen, const SeparatedSyntaxList<NameSyntax>& outputs, Token polarityOperator, Token colon, ExpressionSyntax& expr, Token closeParen) {
++    return *alloc.emplace<EdgeSensitivePathSuffixSyntax>(openParen, outputs, polarityOperator, colon, expr, closeParen);
++}
++
 +ElabSystemTaskSyntax& SyntaxFactory::elabSystemTask(const SyntaxList<AttributeInstanceSyntax>& attributes, Token name, ArgumentListSyntax* arguments, Token semi) {
 +    return *alloc.emplace<ElabSystemTaskSyntax>(attributes, name, arguments, semi);
 +}
@@ -12154,6 +13361,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +EmptyStatementSyntax& SyntaxFactory::emptyStatement(NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, Token semicolon) {
 +    return *alloc.emplace<EmptyStatementSyntax>(label, attributes, semicolon);
++}
++
++EmptyTimingCheckArgSyntax& SyntaxFactory::emptyTimingCheckArg(Token placeholder) {
++    return *alloc.emplace<EmptyTimingCheckArgSyntax>(placeholder);
 +}
 +
 +EnumTypeSyntax& SyntaxFactory::enumType(Token keyword, DataTypeSyntax* baseType, Token openBrace, const SeparatedSyntaxList<DeclaratorSyntax>& members, Token closeBrace, const SyntaxList<VariableDimensionSyntax>& dimensions) {
@@ -12206,6 +13417,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +ExpressionStatementSyntax& SyntaxFactory::expressionStatement(NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, ExpressionSyntax& expr, Token semi) {
 +    return *alloc.emplace<ExpressionStatementSyntax>(label, attributes, expr, semi);
++}
++
++ExpressionTimingCheckArgSyntax& SyntaxFactory::expressionTimingCheckArg(ExpressionSyntax& expr, TimingCheckConditionSyntax* condition) {
++    return *alloc.emplace<ExpressionTimingCheckArgSyntax>(expr, condition);
 +}
 +
 +ExtendsClauseSyntax& SyntaxFactory::extendsClause(Token keyword, NameSyntax& baseName, ArgumentListSyntax* arguments) {
@@ -12302,6 +13517,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +IfGenerateSyntax& SyntaxFactory::ifGenerate(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, Token openParen, ExpressionSyntax& condition, Token closeParen, MemberSyntax& block, ElseClauseSyntax* elseClause) {
 +    return *alloc.emplace<IfGenerateSyntax>(attributes, keyword, openParen, condition, closeParen, block, elseClause);
++}
++
++IfNonePathDeclarationSyntax& SyntaxFactory::ifNonePathDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, PathDeclarationSyntax& path) {
++    return *alloc.emplace<IfNonePathDeclarationSyntax>(attributes, keyword, path);
 +}
 +
 +IffEventClauseSyntax& SyntaxFactory::iffEventClause(Token iff, ExpressionSyntax& expr) {
@@ -12536,6 +13755,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return *alloc.emplace<NonAnsiPortListSyntax>(openParen, ports, closeParen);
 +}
 +
++NonAnsiUdpPortListSyntax& SyntaxFactory::nonAnsiUdpPortList(Token openParen, const SeparatedSyntaxList<IdentifierNameSyntax>& ports, Token closeParen, Token semi) {
++    return *alloc.emplace<NonAnsiUdpPortListSyntax>(openParen, ports, closeParen, semi);
++}
++
 +NumberPragmaExpressionSyntax& SyntaxFactory::numberPragmaExpression(Token size, Token base, Token value) {
 +    return *alloc.emplace<NumberPragmaExpressionSyntax>(size, base, value);
 +}
@@ -12600,6 +13823,14 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return *alloc.emplace<ParenthesizedExpressionSyntax>(openParen, expression, closeParen);
 +}
 +
++PathDeclarationSyntax& SyntaxFactory::pathDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, PathDescriptionSyntax& desc, Token equals, Token openParen, const SeparatedSyntaxList<ExpressionSyntax>& delays, Token closeParen, Token semi) {
++    return *alloc.emplace<PathDeclarationSyntax>(attributes, desc, equals, openParen, delays, closeParen, semi);
++}
++
++PathDescriptionSyntax& SyntaxFactory::pathDescription(Token openParen, Token edgeIdentifier, const SeparatedSyntaxList<NameSyntax>& inputs, Token polarityOperator, Token pathOperator, PathSuffixSyntax& suffix, Token closeParen) {
++    return *alloc.emplace<PathDescriptionSyntax>(openParen, edgeIdentifier, inputs, polarityOperator, pathOperator, suffix, closeParen);
++}
++
 +PatternCaseItemSyntax& SyntaxFactory::patternCaseItem(PatternSyntax& pattern, Token tripleAnd, ExpressionSyntax* expr, Token colon, StatementSyntax& statement) {
 +    return *alloc.emplace<PatternCaseItemSyntax>(pattern, tripleAnd, expr, colon, statement);
 +}
@@ -12632,8 +13863,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return *alloc.emplace<PrimaryBlockEventExpressionSyntax>(keyword, name);
 +}
 +
-+ProceduralAssignStatementSyntax& SyntaxFactory::proceduralAssignStatement(SyntaxKind kind, NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, ExpressionSyntax& lvalue, Token equals, ExpressionSyntax& value, Token semi) {
-+    return *alloc.emplace<ProceduralAssignStatementSyntax>(kind, label, attributes, keyword, lvalue, equals, value, semi);
++ProceduralAssignStatementSyntax& SyntaxFactory::proceduralAssignStatement(SyntaxKind kind, NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, ExpressionSyntax& expr, Token semi) {
++    return *alloc.emplace<ProceduralAssignStatementSyntax>(kind, label, attributes, keyword, expr, semi);
 +}
 +
 +ProceduralBlockSyntax& SyntaxFactory::proceduralBlock(SyntaxKind kind, const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, StatementSyntax& statement) {
@@ -12650,6 +13881,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +PropertySpecSyntax& SyntaxFactory::propertySpec(TimingControlSyntax* clocking, DisableIffSyntax* disable, ExpressionSyntax& expr) {
 +    return *alloc.emplace<PropertySpecSyntax>(clocking, disable, expr);
++}
++
++PulseStyleDeclarationSyntax& SyntaxFactory::pulseStyleDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, const SeparatedSyntaxList<NameSyntax>& inputs, Token semi) {
++    return *alloc.emplace<PulseStyleDeclarationSyntax>(attributes, keyword, inputs, semi);
 +}
 +
 +QueueDimensionSpecifierSyntax& SyntaxFactory::queueDimensionSpecifier(Token dollar, ColonExpressionClauseSyntax* maxSizeClause) {
@@ -12716,12 +13951,28 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return *alloc.emplace<SimpleDirectiveSyntax>(kind, directive);
 +}
 +
++SimplePathSuffixSyntax& SyntaxFactory::simplePathSuffix(const SeparatedSyntaxList<NameSyntax>& outputs) {
++    return *alloc.emplace<SimplePathSuffixSyntax>(outputs);
++}
++
 +SimplePragmaExpressionSyntax& SyntaxFactory::simplePragmaExpression(Token value) {
 +    return *alloc.emplace<SimplePragmaExpressionSyntax>(value);
 +}
 +
 +SolveBeforeConstraintSyntax& SyntaxFactory::solveBeforeConstraint(Token solve, const SeparatedSyntaxList<ExpressionSyntax>& beforeExpr, Token before, const SeparatedSyntaxList<ExpressionSyntax>& afterExpr, Token semi) {
 +    return *alloc.emplace<SolveBeforeConstraintSyntax>(solve, beforeExpr, before, afterExpr, semi);
++}
++
++SpecifyBlockSyntax& SyntaxFactory::specifyBlock(const SyntaxList<AttributeInstanceSyntax>& attributes, Token specify, const SyntaxList<MemberSyntax>& items, Token endspecify) {
++    return *alloc.emplace<SpecifyBlockSyntax>(attributes, specify, items, endspecify);
++}
++
++SpecparamDeclarationSyntax& SyntaxFactory::specparamDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, ImplicitTypeSyntax& type, const SeparatedSyntaxList<SpecparamDeclaratorSyntax>& declarators, Token semi) {
++    return *alloc.emplace<SpecparamDeclarationSyntax>(attributes, keyword, type, declarators, semi);
++}
++
++SpecparamDeclaratorSyntax& SyntaxFactory::specparamDeclarator(Token name, Token equals, ExpressionSyntax& value) {
++    return *alloc.emplace<SpecparamDeclaratorSyntax>(name, equals, value);
 +}
 +
 +StandardCaseItemSyntax& SyntaxFactory::standardCaseItem(const SeparatedSyntaxList<ExpressionSyntax>& expressions, Token colon, SyntaxNode& clause) {
@@ -12760,6 +14011,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return *alloc.emplace<SystemNameSyntax>(systemIdentifier);
 +}
 +
++SystemTimingCheckSyntax& SyntaxFactory::systemTimingCheck(const SyntaxList<AttributeInstanceSyntax>& attributes, Token name, Token openParen, const SeparatedSyntaxList<TimingCheckArgSyntax>& args, Token closeParen, Token semi) {
++    return *alloc.emplace<SystemTimingCheckSyntax>(attributes, name, openParen, args, closeParen, semi);
++}
++
 +TaggedPatternSyntax& SyntaxFactory::taggedPattern(Token tagged, Token memberName, PatternSyntax* pattern) {
 +    return *alloc.emplace<TaggedPatternSyntax>(tagged, memberName, pattern);
 +}
@@ -12774,6 +14029,14 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +TimeUnitsDeclarationSyntax& SyntaxFactory::timeUnitsDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, Token time, DividerClauseSyntax* divider, Token semi) {
 +    return *alloc.emplace<TimeUnitsDeclarationSyntax>(attributes, keyword, time, divider, semi);
++}
++
++TimingCheckConditionSyntax& SyntaxFactory::timingCheckCondition(Token tripleAnd, ExpressionSyntax& expr) {
++    return *alloc.emplace<TimingCheckConditionSyntax>(tripleAnd, expr);
++}
++
++TimingCheckEventSyntax& SyntaxFactory::timingCheckEvent(Token edge, EdgeControlSpecifierSyntax* controlSpecifier, NameSyntax& terminal, TimingCheckConditionSyntax* condition) {
++    return *alloc.emplace<TimingCheckEventSyntax>(edge, controlSpecifier, terminal, condition);
 +}
 +
 +TimingControlExpressionConcatenationSyntax& SyntaxFactory::timingControlExpressionConcatenation(ExpressionSyntax& left, TimingControlSyntax& timing, ExpressionSyntax& right) {
@@ -12818,6 +14081,34 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +TypedefDeclarationSyntax& SyntaxFactory::typedefDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, Token typedefKeyword, DataTypeSyntax& type, Token name, const SyntaxList<VariableDimensionSyntax>& dimensions, Token semi) {
 +    return *alloc.emplace<TypedefDeclarationSyntax>(attributes, typedefKeyword, type, name, dimensions, semi);
++}
++
++UdpBodySyntax& SyntaxFactory::udpBody(const SeparatedSyntaxList<UdpPortDeclSyntax>& portDecls, UdpInitialStmtSyntax* initialStmt, Token table, const SyntaxList<UdpEntrySyntax>& entries, Token endtable) {
++    return *alloc.emplace<UdpBodySyntax>(portDecls, initialStmt, table, entries, endtable);
++}
++
++UdpDeclarationSyntax& SyntaxFactory::udpDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, Token primitive, Token name, UdpPortListSyntax& portList, UdpBodySyntax& body, Token endprimitive, NamedBlockClauseSyntax* endBlockName) {
++    return *alloc.emplace<UdpDeclarationSyntax>(attributes, primitive, name, portList, body, endprimitive, endBlockName);
++}
++
++UdpEdgeIndicatorSyntax& SyntaxFactory::udpEdgeIndicator(Token openParen, Token first, Token second, Token closeParen) {
++    return *alloc.emplace<UdpEdgeIndicatorSyntax>(openParen, first, second, closeParen);
++}
++
++UdpEntrySyntax& SyntaxFactory::udpEntry(const TokenList& preInputs, UdpEdgeIndicatorSyntax* edgeIndicator, const TokenList& postInputs, Token colon1, Token current, Token colon2, Token next, Token semi) {
++    return *alloc.emplace<UdpEntrySyntax>(preInputs, edgeIndicator, postInputs, colon1, current, colon2, next, semi);
++}
++
++UdpInitialStmtSyntax& SyntaxFactory::udpInitialStmt(Token initial, Token name, Token equals, ExpressionSyntax& value, Token semi) {
++    return *alloc.emplace<UdpInitialStmtSyntax>(initial, name, equals, value, semi);
++}
++
++UdpInputPortDeclSyntax& SyntaxFactory::udpInputPortDecl(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, const SeparatedSyntaxList<IdentifierNameSyntax>& names) {
++    return *alloc.emplace<UdpInputPortDeclSyntax>(attributes, keyword, names);
++}
++
++UdpOutputPortDeclSyntax& SyntaxFactory::udpOutputPortDecl(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, Token reg, Token name, EqualsValueClauseSyntax* initializer) {
++    return *alloc.emplace<UdpOutputPortDeclSyntax>(attributes, keyword, reg, name, initializer);
 +}
 +
 +UnconditionalBranchDirectiveSyntax& SyntaxFactory::unconditionalBranchDirective(SyntaxKind kind, Token directive, const TokenList& disabledTokens) {
@@ -12888,6 +14179,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    return *alloc.emplace<WildcardPortListSyntax>(openParen, dotStar, closeParen);
 +}
 +
++WildcardUdpPortListSyntax& SyntaxFactory::wildcardUdpPortList(Token openParen, Token dotStar, Token closeParen, Token semi) {
++    return *alloc.emplace<WildcardUdpPortListSyntax>(openParen, dotStar, closeParen, semi);
++}
++
 +WithClauseSyntax& SyntaxFactory::withClause(Token with, Token openParen, ExpressionSyntax& expr, Token closeParen) {
 +    return *alloc.emplace<WithClauseSyntax>(with, openParen, expr, closeParen);
 +}
@@ -12920,6 +14215,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::AndAssignmentExpression: return "AndAssignmentExpression";
 +        case SyntaxKind::AndSequenceExpression: return "AndSequenceExpression";
 +        case SyntaxKind::AnsiPortList: return "AnsiPortList";
++        case SyntaxKind::AnsiUdpPortList: return "AnsiUdpPortList";
 +        case SyntaxKind::ArgumentList: return "ArgumentList";
 +        case SyntaxKind::ArithmeticLeftShiftAssignmentExpression: return "ArithmeticLeftShiftAssignmentExpression";
 +        case SyntaxKind::ArithmeticRightShiftAssignmentExpression: return "ArithmeticRightShiftAssignmentExpression";
@@ -12979,6 +14275,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::ConcurrentAssertionMember: return "ConcurrentAssertionMember";
 +        case SyntaxKind::ConditionalConstraint: return "ConditionalConstraint";
 +        case SyntaxKind::ConditionalExpression: return "ConditionalExpression";
++        case SyntaxKind::ConditionalPathDeclaration: return "ConditionalPathDeclaration";
 +        case SyntaxKind::ConditionalPattern: return "ConditionalPattern";
 +        case SyntaxKind::ConditionalPredicate: return "ConditionalPredicate";
 +        case SyntaxKind::ConditionalStatement: return "ConditionalStatement";
@@ -13012,6 +14309,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::DefineDirective: return "DefineDirective";
 +        case SyntaxKind::Delay3: return "Delay3";
 +        case SyntaxKind::DelayControl: return "DelayControl";
++        case SyntaxKind::DelayedTerminalArg: return "DelayedTerminalArg";
 +        case SyntaxKind::DescendingRangeSelect: return "DescendingRangeSelect";
 +        case SyntaxKind::DisableConstraint: return "DisableConstraint";
 +        case SyntaxKind::DisableForkStatement: return "DisableForkStatement";
@@ -13026,6 +14324,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::DoWhileStatement: return "DoWhileStatement";
 +        case SyntaxKind::DotMemberClause: return "DotMemberClause";
 +        case SyntaxKind::DriveStrength: return "DriveStrength";
++        case SyntaxKind::EdgeControlSpecifier: return "EdgeControlSpecifier";
++        case SyntaxKind::EdgeDescriptor: return "EdgeDescriptor";
++        case SyntaxKind::EdgeSensitivePathSuffix: return "EdgeSensitivePathSuffix";
 +        case SyntaxKind::ElabSystemTask: return "ElabSystemTask";
 +        case SyntaxKind::ElementSelect: return "ElementSelect";
 +        case SyntaxKind::ElementSelectExpression: return "ElementSelectExpression";
@@ -13039,6 +14340,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::EmptyPortConnection: return "EmptyPortConnection";
 +        case SyntaxKind::EmptyQueueExpression: return "EmptyQueueExpression";
 +        case SyntaxKind::EmptyStatement: return "EmptyStatement";
++        case SyntaxKind::EmptyTimingCheckArg: return "EmptyTimingCheckArg";
 +        case SyntaxKind::EndCellDefineDirective: return "EndCellDefineDirective";
 +        case SyntaxKind::EndIfDirective: return "EndIfDirective";
 +        case SyntaxKind::EndKeywordsDirective: return "EndKeywordsDirective";
@@ -13058,6 +14360,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::ExpressionOrDist: return "ExpressionOrDist";
 +        case SyntaxKind::ExpressionPattern: return "ExpressionPattern";
 +        case SyntaxKind::ExpressionStatement: return "ExpressionStatement";
++        case SyntaxKind::ExpressionTimingCheckArg: return "ExpressionTimingCheckArg";
 +        case SyntaxKind::ExtendsClause: return "ExtendsClause";
 +        case SyntaxKind::ExternModule: return "ExternModule";
 +        case SyntaxKind::FinalBlock: return "FinalBlock";
@@ -13087,6 +14390,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::IfDefDirective: return "IfDefDirective";
 +        case SyntaxKind::IfGenerate: return "IfGenerate";
 +        case SyntaxKind::IfNDefDirective: return "IfNDefDirective";
++        case SyntaxKind::IfNonePathDeclaration: return "IfNonePathDeclaration";
 +        case SyntaxKind::IffEventClause: return "IffEventClause";
 +        case SyntaxKind::IffPropertyExpression: return "IffPropertyExpression";
 +        case SyntaxKind::ImmediateAssertStatement: return "ImmediateAssertStatement";
@@ -13172,6 +14476,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::NextTimePropertyExpression: return "NextTimePropertyExpression";
 +        case SyntaxKind::NoUnconnectedDriveDirective: return "NoUnconnectedDriveDirective";
 +        case SyntaxKind::NonAnsiPortList: return "NonAnsiPortList";
++        case SyntaxKind::NonAnsiUdpPortList: return "NonAnsiUdpPortList";
 +        case SyntaxKind::NonOverlappedFollowedByPropertyExpression: return "NonOverlappedFollowedByPropertyExpression";
 +        case SyntaxKind::NonOverlappedImplicationPropertyExpression: return "NonOverlappedImplicationPropertyExpression";
 +        case SyntaxKind::NonblockingAssignmentExpression: return "NonblockingAssignmentExpression";
@@ -13201,6 +14506,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::ParenPragmaExpression: return "ParenPragmaExpression";
 +        case SyntaxKind::ParenthesizedEventExpression: return "ParenthesizedEventExpression";
 +        case SyntaxKind::ParenthesizedExpression: return "ParenthesizedExpression";
++        case SyntaxKind::PathDeclaration: return "PathDeclaration";
++        case SyntaxKind::PathDescription: return "PathDescription";
 +        case SyntaxKind::PatternCaseItem: return "PatternCaseItem";
 +        case SyntaxKind::PortConcatenation: return "PortConcatenation";
 +        case SyntaxKind::PortDeclaration: return "PortDeclaration";
@@ -13219,6 +14526,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::PropertyDeclaration: return "PropertyDeclaration";
 +        case SyntaxKind::PropertySpec: return "PropertySpec";
 +        case SyntaxKind::PropertyType: return "PropertyType";
++        case SyntaxKind::PulseStyleDeclaration: return "PulseStyleDeclaration";
 +        case SyntaxKind::QueueDimensionSpecifier: return "QueueDimensionSpecifier";
 +        case SyntaxKind::RandCaseItem: return "RandCaseItem";
 +        case SyntaxKind::RandCaseStatement: return "RandCaseStatement";
@@ -13250,9 +14558,13 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::SignalEventExpression: return "SignalEventExpression";
 +        case SyntaxKind::SignedCastExpression: return "SignedCastExpression";
 +        case SyntaxKind::SimpleAssignmentPattern: return "SimpleAssignmentPattern";
++        case SyntaxKind::SimplePathSuffix: return "SimplePathSuffix";
 +        case SyntaxKind::SimplePragmaExpression: return "SimplePragmaExpression";
 +        case SyntaxKind::SimpleRangeSelect: return "SimpleRangeSelect";
 +        case SyntaxKind::SolveBeforeConstraint: return "SolveBeforeConstraint";
++        case SyntaxKind::SpecifyBlock: return "SpecifyBlock";
++        case SyntaxKind::SpecparamDeclaration: return "SpecparamDeclaration";
++        case SyntaxKind::SpecparamDeclarator: return "SpecparamDeclarator";
 +        case SyntaxKind::StandardCaseItem: return "StandardCaseItem";
 +        case SyntaxKind::StreamExpression: return "StreamExpression";
 +        case SyntaxKind::StreamExpressionWithRange: return "StreamExpressionWithRange";
@@ -13269,6 +14581,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::SyncAcceptOnPropertyExpression: return "SyncAcceptOnPropertyExpression";
 +        case SyntaxKind::SyncRejectOnPropertyExpression: return "SyncRejectOnPropertyExpression";
 +        case SyntaxKind::SystemName: return "SystemName";
++        case SyntaxKind::SystemTimingCheck: return "SystemTimingCheck";
 +        case SyntaxKind::TaggedPattern: return "TaggedPattern";
 +        case SyntaxKind::TaggedUnionExpression: return "TaggedUnionExpression";
 +        case SyntaxKind::TaskDeclaration: return "TaskDeclaration";
@@ -13278,6 +14591,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::TimeScaleDirective: return "TimeScaleDirective";
 +        case SyntaxKind::TimeType: return "TimeType";
 +        case SyntaxKind::TimeUnitsDeclaration: return "TimeUnitsDeclaration";
++        case SyntaxKind::TimingCheckCondition: return "TimingCheckCondition";
++        case SyntaxKind::TimingCheckEvent: return "TimingCheckEvent";
 +        case SyntaxKind::TimingControlExpression: return "TimingControlExpression";
 +        case SyntaxKind::TimingControlExpressionConcatenation: return "TimingControlExpressionConcatenation";
 +        case SyntaxKind::TimingControlStatement: return "TimingControlStatement";
@@ -13289,6 +14604,13 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::TypeParameterDeclaration: return "TypeParameterDeclaration";
 +        case SyntaxKind::TypeReference: return "TypeReference";
 +        case SyntaxKind::TypedefDeclaration: return "TypedefDeclaration";
++        case SyntaxKind::UdpBody: return "UdpBody";
++        case SyntaxKind::UdpDeclaration: return "UdpDeclaration";
++        case SyntaxKind::UdpEdgeIndicator: return "UdpEdgeIndicator";
++        case SyntaxKind::UdpEntry: return "UdpEntry";
++        case SyntaxKind::UdpInitialStmt: return "UdpInitialStmt";
++        case SyntaxKind::UdpInputPortDecl: return "UdpInputPortDecl";
++        case SyntaxKind::UdpOutputPortDecl: return "UdpOutputPortDecl";
 +        case SyntaxKind::UnaryBitwiseAndExpression: return "UnaryBitwiseAndExpression";
 +        case SyntaxKind::UnaryBitwiseNandExpression: return "UnaryBitwiseNandExpression";
 +        case SyntaxKind::UnaryBitwiseNorExpression: return "UnaryBitwiseNorExpression";
@@ -13331,6 +14653,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::WildcardPattern: return "WildcardPattern";
 +        case SyntaxKind::WildcardPortConnection: return "WildcardPortConnection";
 +        case SyntaxKind::WildcardPortList: return "WildcardPortList";
++        case SyntaxKind::WildcardUdpPortList: return "WildcardUdpPortList";
 +        case SyntaxKind::WithClause: return "WithClause";
 +        case SyntaxKind::WithFunctionClause: return "WithFunctionClause";
 +        case SyntaxKind::WithFunctionSample: return "WithFunctionSample";
@@ -13341,10 +14664,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +}
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/DiagCode.cpp ./generated/DiagCode.cpp
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/DiagCode.cpp ./generated/DiagCode.cpp
 --- ./generated/DiagCode.cpp	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/DiagCode.cpp	2021-01-13 10:06:32.315726612 -0800
-@@ -0,0 +1,714 @@
++++ ./generated/DiagCode.cpp	2021-03-02 17:50:54.001601827 -0800
+@@ -0,0 +1,733 @@
 +//------------------------------------------------------------------------------
 +// DiagCode.cpp
 +// Generated diagnostic helpers
@@ -13361,6 +14684,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +static const flat_hash_map<DiagCode, std::tuple<string_view, string_view, DiagnosticSeverity, string_view>> data = {
 +    {diag::MaxInstanceDepthExceeded, std::make_tuple("MaxInstanceDepthExceeded"sv, "{} instantiation exceeded maximum depth of {}"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::InfinitelyRecursiveHierarchy, std::make_tuple("InfinitelyRecursiveHierarchy"sv, "infinitely recursive instantiation of {}"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InvalidTopModule, std::make_tuple("InvalidTopModule"sv, "'{}' is not a valid top-level module"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::NoDeclInClass, std::make_tuple("NoDeclInClass"sv, "out-of-block definition of '{}' does not match any declaration in '{}'"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InvalidParamOverrideOpt, std::make_tuple("InvalidParamOverrideOpt"sv, "'{}' is not a valid form of parameter override"sv, DiagnosticSeverity::Error, ""sv)},
@@ -13371,6 +14695,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::InvalidDPICIdentifier, std::make_tuple("InvalidDPICIdentifier"sv, "'{}' is not a valid C identifier for DPI subroutine"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::DPISignatureMismatch, std::make_tuple("DPISignatureMismatch"sv, "more than one DPI subroutine with C identifier '{}' declared with mismatching type signatures"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::DPIExportDuplicateCId, std::make_tuple("DPIExportDuplicateCId"sv, "more than one DPI export with the same C identifier '{}' in the same scope"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::DefParamTargetChange, std::make_tuple("DefParamTargetChange"sv, "defparam target resolves differently post-elaboration; see '{}' vs '{}'"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::DefParamCycle, std::make_tuple("DefParamCycle"sv, "cyclic dependency found when resolving defparam"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::UnusedDefinition, std::make_tuple("UnusedDefinition"sv, "{} definition is unused"sv, DiagnosticSeverity::Warning, "unused-def"sv)},
 +    {diag::NoTopModules, std::make_tuple("NoTopModules"sv, "no top-level modules found in design"sv, DiagnosticSeverity::Warning, "no-top"sv)},
 +    {diag::NoteInCallTo, std::make_tuple("NoteInCallTo"sv, "in call to '{}'"sv, DiagnosticSeverity::Note, ""sv)},
@@ -13509,6 +14835,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::DPIPureReturn, std::make_tuple("DPIPureReturn"sv, "DPI imports marked 'pure' cannot return 'void'"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InvalidDPIReturnType, std::make_tuple("InvalidDPIReturnType"sv, "{} is not a valid return type for a DPI subroutine"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InvalidDPIArgType, std::make_tuple("InvalidDPIArgType"sv, "{} is not a valid argument type in a DPI subroutine"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::Delay3OnVar, std::make_tuple("Delay3OnVar"sv, "continuous assignments to variables cannot have multi-value delays"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::DefParamTarget, std::make_tuple("DefParamTarget"sv, "target of defparam must be a parameter"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::DefParamLocal, std::make_tuple("DefParamLocal"sv, "'{}' is a localparam and so cannot be the target of a defparam"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::FatalTask, std::make_tuple("FatalTask"sv, "$fatal encountered{}"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ErrorTask, std::make_tuple("ErrorTask"sv, "$error encountered{}"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::WarningTask, std::make_tuple("WarningTask"sv, "$warning encountered{}"sv, DiagnosticSeverity::Warning, "warning-task"sv)},
@@ -13618,6 +14947,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::ConstVarToRef, std::make_tuple("ConstVarToRef"sv, "cannot bind const variable to 'ref' argument"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::MissingInvocationParens, std::make_tuple("MissingInvocationParens"sv, "parentheses are required when invoking function '{}'"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::NameListWithScopeRandomize, std::make_tuple("NameListWithScopeRandomize"sv, "lookup restriction list not allowed for std::randomize call"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::UnboundedNotAllowed, std::make_tuple("UnboundedNotAllowed"sv, "unbounded literal '$' not allowed here"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::DynamicNotProcedural, std::make_tuple("DynamicNotProcedural"sv, "cannot refer to an element or member of a dynamic type outside of a procedural context"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::SpecparamInConstant, std::make_tuple("SpecparamInConstant"sv, "specparams cannot be used in general constant expressions"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::IgnoredSlice, std::make_tuple("IgnoredSlice"sv, "slice size ignored for left-to-right streaming operator"sv, DiagnosticSeverity::Warning, "ignored-slice"sv)},
 +    {diag::UnsizedInConcat, std::make_tuple("UnsizedInConcat"sv, "unsized integer in concat; using a width of {}"sv, DiagnosticSeverity::Warning, "unsized-concat"sv)},
 +    {diag::WidthExpand, std::make_tuple("WidthExpand"sv, "implicit conversion expands from {} to {} bits"sv, DiagnosticSeverity::Warning, "width-expand"sv)},
@@ -13761,6 +15093,11 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::ExpectedCaseItem, std::make_tuple("ExpectedCaseItem"sv, "expected case item"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExpectedSubroutineName, std::make_tuple("ExpectedSubroutineName"sv, "expected subroutine name"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExpectedConstraintName, std::make_tuple("ExpectedConstraintName"sv, "invalid constraint block name"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ExpectedUdpPort, std::make_tuple("ExpectedUdpPort"sv, "expected UDP port"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ExpectedUdpEntry, std::make_tuple("ExpectedUdpEntry"sv, "expected UDP table entry"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ExpectedPathName, std::make_tuple("ExpectedPathName"sv, "expected path name"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ExpectedPathOp, std::make_tuple("ExpectedPathOp"sv, "expected path operator ('*>' or '=>')"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ExpectedEdgeDescriptor, std::make_tuple("ExpectedEdgeDescriptor"sv, "expected edge descriptor"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::NoLabelOnSemicolon, std::make_tuple("NoLabelOnSemicolon"sv, "labels are not allowed on empty semicolon"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::DeferredDelayMustBeZero, std::make_tuple("DeferredDelayMustBeZero"sv, "deferred assertion delay must be zero"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InvalidGenvarIterExpression, std::make_tuple("InvalidGenvarIterExpression"sv, "invalid genvar iteration expression"sv, DiagnosticSeverity::Error, ""sv)},
@@ -13867,6 +15204,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::UnknownDiagPragmaArg, std::make_tuple("UnknownDiagPragmaArg"sv, "unknown diagnostic pragma argument '{}'"sv, DiagnosticSeverity::Warning, "unknown-diag-arg"sv)},
 +    {diag::ExpectedDiagPragmaLevel, std::make_tuple("ExpectedDiagPragmaLevel"sv, "expected diagnostic severity (ignore,warn,error,fatal)"sv, DiagnosticSeverity::Warning, "pragma-diag-level"sv)},
 +    {diag::ReturnNotInSubroutine, std::make_tuple("ReturnNotInSubroutine"sv, "return statement is only valid inside task and function blocks"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ReturnInParallel, std::make_tuple("ReturnInParallel"sv, "return statement is not allowed in fork-join block"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::DelayNotNumeric, std::make_tuple("DelayNotNumeric"sv, "delay expression type {} is not numeric"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::InvalidEventExpression, std::make_tuple("InvalidEventExpression"sv, "invalid type {} for event expression"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::CoverStmtNoFail, std::make_tuple("CoverStmtNoFail"sv, "cover statement cannot have a fail statement"sv, DiagnosticSeverity::Error, ""sv)},
@@ -13899,6 +15237,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::OutRefFuncConstraint, std::make_tuple("OutRefFuncConstraint"sv, "cannot call a function with ref or output arguments in constraints"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::BadDisableSoft, std::make_tuple("BadDisableSoft"sv, "target of 'disable soft' constraint must be a 'rand' variable"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::BadSolveBefore, std::make_tuple("BadSolveBefore"sv, "target of 'solve before' constraint must be a random variable"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::BadProceduralAssign, std::make_tuple("BadProceduralAssign"sv, "lvalue of procedural assign/deassign must be a variable or concatenation of variables -- bit-selects, part-selects, and references to nets are disallowed"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::BadProceduralForce, std::make_tuple("BadProceduralForce"sv, "lvalue of force/release must be a net, a variable, a constant select of a net, or a concatenation of these"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::BadForceNetType, std::make_tuple("BadForceNetType"sv, "force and release cannot be applied to nets with a user-defined nettype"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::EventExpressionConstant, std::make_tuple("EventExpressionConstant"sv, "edge expression is constant"sv, DiagnosticSeverity::Warning, "event-const"sv)},
 +    {diag::EmptyStatement, std::make_tuple("EmptyStatement"sv, "extra ';' has no effect"sv, DiagnosticSeverity::Warning, "empty-stmt"sv)},
 +    {diag::PointlessVoidCast, std::make_tuple("PointlessVoidCast"sv, "cast to void for void-returning function '{}' has no effect"sv, DiagnosticSeverity::Warning, "pointless-void-cast"sv)},
@@ -13928,6 +15269,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    {diag::ExpectedScopeOrAssert, std::make_tuple("ExpectedScopeOrAssert"sv, "expected scope or assertion name"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExpectedClassPropertyName, std::make_tuple("ExpectedClassPropertyName"sv, "expected class property name"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ExpectedVariableName, std::make_tuple("ExpectedVariableName"sv, "expected variable name"sv, DiagnosticSeverity::Error, ""sv)},
++    {diag::ExpectedModuleInstance, std::make_tuple("ExpectedModuleInstance"sv, "expected module instance"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::CastArgSingular, std::make_tuple("CastArgSingular"sv, "argument to $cast cannot be of aggregate type (type is {})"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::ArrayLocatorWithClause, std::make_tuple("ArrayLocatorWithClause"sv, "'{}' requires 'with' expression for searching"sv, DiagnosticSeverity::Error, ""sv)},
 +    {diag::FormatRealInt, std::make_tuple("FormatRealInt"sv, "real value provided for integer format specifier '%{}'"sv, DiagnosticSeverity::Warning, "format-real"sv)},
@@ -14059,9 +15401,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +}
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/AllDiags.h ./generated/slang/diagnostics/AllDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/AllDiags.h ./generated/slang/diagnostics/AllDiags.h
 --- ./generated/slang/diagnostics/AllDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/AllDiags.h	2021-01-13 10:06:32.309060077 -0800
++++ ./generated/slang/diagnostics/AllDiags.h	2021-03-02 17:50:53.981602243 -0800
 @@ -0,0 +1,23 @@
 +//------------------------------------------------------------------------------
 +//! @file AllDiags.h
@@ -14086,10 +15428,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +#include "slang/diagnostics/SysFuncsDiags.h"
 +#include "slang/diagnostics/TypesDiags.h"
 +
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/CompilationDiags.h ./generated/slang/diagnostics/CompilationDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/CompilationDiags.h ./generated/slang/diagnostics/CompilationDiags.h
 --- ./generated/slang/diagnostics/CompilationDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/CompilationDiags.h	2021-01-13 10:06:32.309060077 -0800
-@@ -0,0 +1,27 @@
++++ ./generated/slang/diagnostics/CompilationDiags.h	2021-03-02 17:50:53.961602660 -0800
+@@ -0,0 +1,30 @@
 +//------------------------------------------------------------------------------
 +//! @file CompilationDiags.h
 +//! @brief Generated diagnostic enums for the Compilation subsystem
@@ -14103,23 +15445,26 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +namespace slang::diag {
 +
 +inline constexpr DiagCode MaxInstanceDepthExceeded(DiagSubsystem::Compilation, 0);
-+inline constexpr DiagCode InvalidTopModule(DiagSubsystem::Compilation, 1);
-+inline constexpr DiagCode NoDeclInClass(DiagSubsystem::Compilation, 2);
-+inline constexpr DiagCode InvalidParamOverrideOpt(DiagSubsystem::Compilation, 3);
-+inline constexpr DiagCode DPIExportKindMismatch(DiagSubsystem::Compilation, 4);
-+inline constexpr DiagCode DPIExportDifferentScope(DiagSubsystem::Compilation, 5);
-+inline constexpr DiagCode DPIExportDuplicate(DiagSubsystem::Compilation, 6);
-+inline constexpr DiagCode DPIExportImportedFunc(DiagSubsystem::Compilation, 7);
-+inline constexpr DiagCode InvalidDPICIdentifier(DiagSubsystem::Compilation, 8);
-+inline constexpr DiagCode DPISignatureMismatch(DiagSubsystem::Compilation, 9);
-+inline constexpr DiagCode DPIExportDuplicateCId(DiagSubsystem::Compilation, 10);
-+inline constexpr DiagCode UnusedDefinition(DiagSubsystem::Compilation, 11);
-+inline constexpr DiagCode NoTopModules(DiagSubsystem::Compilation, 12);
++inline constexpr DiagCode InfinitelyRecursiveHierarchy(DiagSubsystem::Compilation, 1);
++inline constexpr DiagCode InvalidTopModule(DiagSubsystem::Compilation, 2);
++inline constexpr DiagCode NoDeclInClass(DiagSubsystem::Compilation, 3);
++inline constexpr DiagCode InvalidParamOverrideOpt(DiagSubsystem::Compilation, 4);
++inline constexpr DiagCode DPIExportKindMismatch(DiagSubsystem::Compilation, 5);
++inline constexpr DiagCode DPIExportDifferentScope(DiagSubsystem::Compilation, 6);
++inline constexpr DiagCode DPIExportDuplicate(DiagSubsystem::Compilation, 7);
++inline constexpr DiagCode DPIExportImportedFunc(DiagSubsystem::Compilation, 8);
++inline constexpr DiagCode InvalidDPICIdentifier(DiagSubsystem::Compilation, 9);
++inline constexpr DiagCode DPISignatureMismatch(DiagSubsystem::Compilation, 10);
++inline constexpr DiagCode DPIExportDuplicateCId(DiagSubsystem::Compilation, 11);
++inline constexpr DiagCode DefParamTargetChange(DiagSubsystem::Compilation, 12);
++inline constexpr DiagCode DefParamCycle(DiagSubsystem::Compilation, 13);
++inline constexpr DiagCode UnusedDefinition(DiagSubsystem::Compilation, 14);
++inline constexpr DiagCode NoTopModules(DiagSubsystem::Compilation, 15);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/ConstEvalDiags.h ./generated/slang/diagnostics/ConstEvalDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/ConstEvalDiags.h ./generated/slang/diagnostics/ConstEvalDiags.h
 --- ./generated/slang/diagnostics/ConstEvalDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/ConstEvalDiags.h	2021-01-13 10:06:32.309060077 -0800
++++ ./generated/slang/diagnostics/ConstEvalDiags.h	2021-03-02 17:50:53.961602660 -0800
 @@ -0,0 +1,52 @@
 +//------------------------------------------------------------------------------
 +//! @file ConstEvalDiags.h
@@ -14173,10 +15518,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode ConstSysTaskIgnored(DiagSubsystem::ConstEval, 37);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/DeclarationsDiags.h ./generated/slang/diagnostics/DeclarationsDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/DeclarationsDiags.h ./generated/slang/diagnostics/DeclarationsDiags.h
 --- ./generated/slang/diagnostics/DeclarationsDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/DeclarationsDiags.h	2021-01-13 10:06:32.309060077 -0800
-@@ -0,0 +1,127 @@
++++ ./generated/slang/diagnostics/DeclarationsDiags.h	2021-03-02 17:50:53.961602660 -0800
+@@ -0,0 +1,130 @@
 +//------------------------------------------------------------------------------
 +//! @file DeclarationsDiags.h
 +//! @brief Generated diagnostic enums for the Declarations subsystem
@@ -14287,27 +15632,30 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode DPIPureReturn(DiagSubsystem::Declarations, 95);
 +inline constexpr DiagCode InvalidDPIReturnType(DiagSubsystem::Declarations, 96);
 +inline constexpr DiagCode InvalidDPIArgType(DiagSubsystem::Declarations, 97);
-+inline constexpr DiagCode FatalTask(DiagSubsystem::Declarations, 98);
-+inline constexpr DiagCode ErrorTask(DiagSubsystem::Declarations, 99);
-+inline constexpr DiagCode WarningTask(DiagSubsystem::Declarations, 100);
-+inline constexpr DiagCode InfoTask(DiagSubsystem::Declarations, 101);
-+inline constexpr DiagCode StaticInitializerMustBeExplicit(DiagSubsystem::Declarations, 102);
-+inline constexpr DiagCode CaseGenerateDup(DiagSubsystem::Declarations, 103);
-+inline constexpr DiagCode CaseGenerateNoBlock(DiagSubsystem::Declarations, 104);
-+inline constexpr DiagCode UnconnectedNamedPort(DiagSubsystem::Declarations, 105);
-+inline constexpr DiagCode UnconnectedUnnamedPort(DiagSubsystem::Declarations, 106);
-+inline constexpr DiagCode ImplicitNetPortNoDefault(DiagSubsystem::Declarations, 107);
-+inline constexpr DiagCode DuplicateAttribute(DiagSubsystem::Declarations, 108);
-+inline constexpr DiagCode EmptyMember(DiagSubsystem::Declarations, 109);
-+inline constexpr DiagCode SignednessNoEffect(DiagSubsystem::Declarations, 110);
-+inline constexpr DiagCode NoConstraintBody(DiagSubsystem::Declarations, 111);
-+inline constexpr DiagCode DPISpecDisallowed(DiagSubsystem::Declarations, 112);
++inline constexpr DiagCode Delay3OnVar(DiagSubsystem::Declarations, 98);
++inline constexpr DiagCode DefParamTarget(DiagSubsystem::Declarations, 99);
++inline constexpr DiagCode DefParamLocal(DiagSubsystem::Declarations, 100);
++inline constexpr DiagCode FatalTask(DiagSubsystem::Declarations, 101);
++inline constexpr DiagCode ErrorTask(DiagSubsystem::Declarations, 102);
++inline constexpr DiagCode WarningTask(DiagSubsystem::Declarations, 103);
++inline constexpr DiagCode InfoTask(DiagSubsystem::Declarations, 104);
++inline constexpr DiagCode StaticInitializerMustBeExplicit(DiagSubsystem::Declarations, 105);
++inline constexpr DiagCode CaseGenerateDup(DiagSubsystem::Declarations, 106);
++inline constexpr DiagCode CaseGenerateNoBlock(DiagSubsystem::Declarations, 107);
++inline constexpr DiagCode UnconnectedNamedPort(DiagSubsystem::Declarations, 108);
++inline constexpr DiagCode UnconnectedUnnamedPort(DiagSubsystem::Declarations, 109);
++inline constexpr DiagCode ImplicitNetPortNoDefault(DiagSubsystem::Declarations, 110);
++inline constexpr DiagCode DuplicateAttribute(DiagSubsystem::Declarations, 111);
++inline constexpr DiagCode EmptyMember(DiagSubsystem::Declarations, 112);
++inline constexpr DiagCode SignednessNoEffect(DiagSubsystem::Declarations, 113);
++inline constexpr DiagCode NoConstraintBody(DiagSubsystem::Declarations, 114);
++inline constexpr DiagCode DPISpecDisallowed(DiagSubsystem::Declarations, 115);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/ExpressionsDiags.h ./generated/slang/diagnostics/ExpressionsDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/ExpressionsDiags.h ./generated/slang/diagnostics/ExpressionsDiags.h
 --- ./generated/slang/diagnostics/ExpressionsDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/ExpressionsDiags.h	2021-01-13 10:06:32.309060077 -0800
-@@ -0,0 +1,113 @@
++++ ./generated/slang/diagnostics/ExpressionsDiags.h	2021-03-02 17:50:53.961602660 -0800
+@@ -0,0 +1,116 @@
 +//------------------------------------------------------------------------------
 +//! @file ExpressionsDiags.h
 +//! @brief Generated diagnostic enums for the Expressions subsystem
@@ -14414,16 +15762,19 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode ConstVarToRef(DiagSubsystem::Expressions, 91);
 +inline constexpr DiagCode MissingInvocationParens(DiagSubsystem::Expressions, 92);
 +inline constexpr DiagCode NameListWithScopeRandomize(DiagSubsystem::Expressions, 93);
-+inline constexpr DiagCode IgnoredSlice(DiagSubsystem::Expressions, 94);
-+inline constexpr DiagCode UnsizedInConcat(DiagSubsystem::Expressions, 95);
-+inline constexpr DiagCode WidthExpand(DiagSubsystem::Expressions, 96);
-+inline constexpr DiagCode WidthTruncate(DiagSubsystem::Expressions, 97);
-+inline constexpr DiagCode ImplicitConvert(DiagSubsystem::Expressions, 98);
++inline constexpr DiagCode UnboundedNotAllowed(DiagSubsystem::Expressions, 94);
++inline constexpr DiagCode DynamicNotProcedural(DiagSubsystem::Expressions, 95);
++inline constexpr DiagCode SpecparamInConstant(DiagSubsystem::Expressions, 96);
++inline constexpr DiagCode IgnoredSlice(DiagSubsystem::Expressions, 97);
++inline constexpr DiagCode UnsizedInConcat(DiagSubsystem::Expressions, 98);
++inline constexpr DiagCode WidthExpand(DiagSubsystem::Expressions, 99);
++inline constexpr DiagCode WidthTruncate(DiagSubsystem::Expressions, 100);
++inline constexpr DiagCode ImplicitConvert(DiagSubsystem::Expressions, 101);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/GeneralDiags.h ./generated/slang/diagnostics/GeneralDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/GeneralDiags.h ./generated/slang/diagnostics/GeneralDiags.h
 --- ./generated/slang/diagnostics/GeneralDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/GeneralDiags.h	2021-01-13 10:06:32.309060077 -0800
++++ ./generated/slang/diagnostics/GeneralDiags.h	2021-03-02 17:50:53.971602450 -0800
 @@ -0,0 +1,22 @@
 +//------------------------------------------------------------------------------
 +//! @file GeneralDiags.h
@@ -14447,9 +15798,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode WarnNotYetSupported(DiagSubsystem::General, 7);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/LexerDiags.h ./generated/slang/diagnostics/LexerDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/LexerDiags.h ./generated/slang/diagnostics/LexerDiags.h
 --- ./generated/slang/diagnostics/LexerDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/LexerDiags.h	2021-01-13 10:06:32.309060077 -0800
++++ ./generated/slang/diagnostics/LexerDiags.h	2021-03-02 17:50:53.971602450 -0800
 @@ -0,0 +1,37 @@
 +//------------------------------------------------------------------------------
 +//! @file LexerDiags.h
@@ -14488,9 +15839,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode NonstandardEscapeCode(DiagSubsystem::Lexer, 22);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/LookupDiags.h ./generated/slang/diagnostics/LookupDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/LookupDiags.h ./generated/slang/diagnostics/LookupDiags.h
 --- ./generated/slang/diagnostics/LookupDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/LookupDiags.h	2021-01-13 10:06:32.309060077 -0800
++++ ./generated/slang/diagnostics/LookupDiags.h	2021-03-02 17:50:53.971602450 -0800
 @@ -0,0 +1,70 @@
 +//------------------------------------------------------------------------------
 +//! @file LookupDiags.h
@@ -14562,9 +15913,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode DuplicateImport(DiagSubsystem::Lookup, 55);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/MetaDiags.h ./generated/slang/diagnostics/MetaDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/MetaDiags.h ./generated/slang/diagnostics/MetaDiags.h
 --- ./generated/slang/diagnostics/MetaDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/MetaDiags.h	2021-01-13 10:06:32.309060077 -0800
++++ ./generated/slang/diagnostics/MetaDiags.h	2021-03-02 17:50:53.971602450 -0800
 @@ -0,0 +1,16 @@
 +//------------------------------------------------------------------------------
 +//! @file MetaDiags.h
@@ -14582,9 +15933,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode UnknownWarningOption(DiagSubsystem::Meta, 1);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/NumericDiags.h ./generated/slang/diagnostics/NumericDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/NumericDiags.h ./generated/slang/diagnostics/NumericDiags.h
 --- ./generated/slang/diagnostics/NumericDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/NumericDiags.h	2021-01-13 10:06:32.309060077 -0800
++++ ./generated/slang/diagnostics/NumericDiags.h	2021-03-02 17:50:53.971602450 -0800
 @@ -0,0 +1,26 @@
 +//------------------------------------------------------------------------------
 +//! @file NumericDiags.h
@@ -14612,10 +15963,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode VectorLiteralOverflow(DiagSubsystem::Numeric, 11);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/ParserDiags.h ./generated/slang/diagnostics/ParserDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/ParserDiags.h ./generated/slang/diagnostics/ParserDiags.h
 --- ./generated/slang/diagnostics/ParserDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/ParserDiags.h	2021-01-13 10:06:32.309060077 -0800
-@@ -0,0 +1,122 @@
++++ ./generated/slang/diagnostics/ParserDiags.h	2021-03-02 17:50:53.971602450 -0800
+@@ -0,0 +1,127 @@
 +//------------------------------------------------------------------------------
 +//! @file ParserDiags.h
 +//! @brief Generated diagnostic enums for the Parser subsystem
@@ -14665,82 +16016,87 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode ExpectedCaseItem(DiagSubsystem::Parser, 34);
 +inline constexpr DiagCode ExpectedSubroutineName(DiagSubsystem::Parser, 35);
 +inline constexpr DiagCode ExpectedConstraintName(DiagSubsystem::Parser, 36);
-+inline constexpr DiagCode NoLabelOnSemicolon(DiagSubsystem::Parser, 37);
-+inline constexpr DiagCode DeferredDelayMustBeZero(DiagSubsystem::Parser, 38);
-+inline constexpr DiagCode InvalidGenvarIterExpression(DiagSubsystem::Parser, 39);
-+inline constexpr DiagCode ExpectedGenvarIterVar(DiagSubsystem::Parser, 40);
-+inline constexpr DiagCode ConstFunctionPortRequiresRef(DiagSubsystem::Parser, 41);
-+inline constexpr DiagCode ExpectedClockingSkew(DiagSubsystem::Parser, 42);
-+inline constexpr DiagCode InOutDefaultSkew(DiagSubsystem::Parser, 43);
-+inline constexpr DiagCode GlobalClockingEmpty(DiagSubsystem::Parser, 44);
-+inline constexpr DiagCode ExpectedDPISpecString(DiagSubsystem::Parser, 45);
-+inline constexpr DiagCode ParseTreeTooDeep(DiagSubsystem::Parser, 46);
-+inline constexpr DiagCode MissingModportPortDirection(DiagSubsystem::Parser, 47);
-+inline constexpr DiagCode CaseStatementEmpty(DiagSubsystem::Parser, 48);
-+inline constexpr DiagCode MultipleDefaultCases(DiagSubsystem::Parser, 49);
-+inline constexpr DiagCode DirectionOnInterfacePort(DiagSubsystem::Parser, 50);
-+inline constexpr DiagCode UnexpectedQualifiers(DiagSubsystem::Parser, 51);
-+inline constexpr DiagCode ExpectedSampleKeyword(DiagSubsystem::Parser, 52);
-+inline constexpr DiagCode MultipleGenerateDefaultCases(DiagSubsystem::Parser, 53);
-+inline constexpr DiagCode CaseGenerateEmpty(DiagSubsystem::Parser, 54);
-+inline constexpr DiagCode LabelAndName(DiagSubsystem::Parser, 55);
-+inline constexpr DiagCode EndNameMismatch(DiagSubsystem::Parser, 56);
-+inline constexpr DiagCode EndNameNotEmpty(DiagSubsystem::Parser, 57);
-+inline constexpr DiagCode DeclarationsAtStart(DiagSubsystem::Parser, 58);
-+inline constexpr DiagCode VoidNotAllowed(DiagSubsystem::Parser, 59);
-+inline constexpr DiagCode DuplicateDeclModifier(DiagSubsystem::Parser, 60);
-+inline constexpr DiagCode DeclModifierOrdering(DiagSubsystem::Parser, 61);
-+inline constexpr DiagCode DeclModifierConflict(DiagSubsystem::Parser, 62);
-+inline constexpr DiagCode DuplicateQualifier(DiagSubsystem::Parser, 63);
-+inline constexpr DiagCode QualifierConflict(DiagSubsystem::Parser, 64);
-+inline constexpr DiagCode QualifierNotFirst(DiagSubsystem::Parser, 65);
-+inline constexpr DiagCode PureRequiresVirtual(DiagSubsystem::Parser, 66);
-+inline constexpr DiagCode InvalidMethodQualifier(DiagSubsystem::Parser, 67);
-+inline constexpr DiagCode InvalidPropertyQualifier(DiagSubsystem::Parser, 68);
-+inline constexpr DiagCode InvalidConstraintQualifier(DiagSubsystem::Parser, 69);
-+inline constexpr DiagCode InvalidQualifierForMember(DiagSubsystem::Parser, 70);
-+inline constexpr DiagCode InvalidQualifierForIfaceMember(DiagSubsystem::Parser, 71);
-+inline constexpr DiagCode InvalidQualifierForConstructor(DiagSubsystem::Parser, 72);
-+inline constexpr DiagCode MethodStaticLifetime(DiagSubsystem::Parser, 73);
-+inline constexpr DiagCode TypeRefDeclVar(DiagSubsystem::Parser, 74);
-+inline constexpr DiagCode ScopedClassCopy(DiagSubsystem::Parser, 75);
-+inline constexpr DiagCode NotAllowedInCU(DiagSubsystem::Parser, 76);
-+inline constexpr DiagCode NotAllowedInGenerate(DiagSubsystem::Parser, 77);
-+inline constexpr DiagCode NotAllowedInModule(DiagSubsystem::Parser, 78);
-+inline constexpr DiagCode NotAllowedInInterface(DiagSubsystem::Parser, 79);
-+inline constexpr DiagCode NotAllowedInProgram(DiagSubsystem::Parser, 80);
-+inline constexpr DiagCode NotAllowedInPackage(DiagSubsystem::Parser, 81);
-+inline constexpr DiagCode NotAllowedInClocking(DiagSubsystem::Parser, 82);
-+inline constexpr DiagCode NotAllowedInClass(DiagSubsystem::Parser, 83);
-+inline constexpr DiagCode NotAllowedInIfaceClass(DiagSubsystem::Parser, 84);
-+inline constexpr DiagCode TaskReturnType(DiagSubsystem::Parser, 85);
-+inline constexpr DiagCode TaskConstructor(DiagSubsystem::Parser, 86);
-+inline constexpr DiagCode ConstructorReturnType(DiagSubsystem::Parser, 87);
-+inline constexpr DiagCode NewKeywordQualified(DiagSubsystem::Parser, 88);
-+inline constexpr DiagCode SubroutinePrototypeScoped(DiagSubsystem::Parser, 89);
-+inline constexpr DiagCode QualifiersOnOutOfBlock(DiagSubsystem::Parser, 90);
-+inline constexpr DiagCode ConstraintQualOutOfBlock(DiagSubsystem::Parser, 91);
-+inline constexpr DiagCode ConstructorOutsideClass(DiagSubsystem::Parser, 92);
-+inline constexpr DiagCode InvalidSuperNew(DiagSubsystem::Parser, 93);
-+inline constexpr DiagCode IfaceMethodPure(DiagSubsystem::Parser, 94);
-+inline constexpr DiagCode NestedIface(DiagSubsystem::Parser, 95);
-+inline constexpr DiagCode RegAfterNettype(DiagSubsystem::Parser, 96);
-+inline constexpr DiagCode ChargeWithTriReg(DiagSubsystem::Parser, 97);
-+inline constexpr DiagCode InitializerRequired(DiagSubsystem::Parser, 98);
-+inline constexpr DiagCode DriveStrengthInvalid(DiagSubsystem::Parser, 99);
-+inline constexpr DiagCode DriveStrengthHighZ(DiagSubsystem::Parser, 100);
-+inline constexpr DiagCode RandOnPackedMember(DiagSubsystem::Parser, 101);
-+inline constexpr DiagCode RandOnUnionMember(DiagSubsystem::Parser, 102);
-+inline constexpr DiagCode SolveBeforeDisallowed(DiagSubsystem::Parser, 103);
-+inline constexpr DiagCode LifetimeForPrototype(DiagSubsystem::Parser, 104);
-+inline constexpr DiagCode NonStandardGenBlock(DiagSubsystem::Parser, 105);
-+inline constexpr DiagCode EmptyAssignmentPattern(DiagSubsystem::Parser, 106);
-+inline constexpr DiagCode NoteToMatchThis(DiagSubsystem::Parser, 107);
++inline constexpr DiagCode ExpectedUdpPort(DiagSubsystem::Parser, 37);
++inline constexpr DiagCode ExpectedUdpEntry(DiagSubsystem::Parser, 38);
++inline constexpr DiagCode ExpectedPathName(DiagSubsystem::Parser, 39);
++inline constexpr DiagCode ExpectedPathOp(DiagSubsystem::Parser, 40);
++inline constexpr DiagCode ExpectedEdgeDescriptor(DiagSubsystem::Parser, 41);
++inline constexpr DiagCode NoLabelOnSemicolon(DiagSubsystem::Parser, 42);
++inline constexpr DiagCode DeferredDelayMustBeZero(DiagSubsystem::Parser, 43);
++inline constexpr DiagCode InvalidGenvarIterExpression(DiagSubsystem::Parser, 44);
++inline constexpr DiagCode ExpectedGenvarIterVar(DiagSubsystem::Parser, 45);
++inline constexpr DiagCode ConstFunctionPortRequiresRef(DiagSubsystem::Parser, 46);
++inline constexpr DiagCode ExpectedClockingSkew(DiagSubsystem::Parser, 47);
++inline constexpr DiagCode InOutDefaultSkew(DiagSubsystem::Parser, 48);
++inline constexpr DiagCode GlobalClockingEmpty(DiagSubsystem::Parser, 49);
++inline constexpr DiagCode ExpectedDPISpecString(DiagSubsystem::Parser, 50);
++inline constexpr DiagCode ParseTreeTooDeep(DiagSubsystem::Parser, 51);
++inline constexpr DiagCode MissingModportPortDirection(DiagSubsystem::Parser, 52);
++inline constexpr DiagCode CaseStatementEmpty(DiagSubsystem::Parser, 53);
++inline constexpr DiagCode MultipleDefaultCases(DiagSubsystem::Parser, 54);
++inline constexpr DiagCode DirectionOnInterfacePort(DiagSubsystem::Parser, 55);
++inline constexpr DiagCode UnexpectedQualifiers(DiagSubsystem::Parser, 56);
++inline constexpr DiagCode ExpectedSampleKeyword(DiagSubsystem::Parser, 57);
++inline constexpr DiagCode MultipleGenerateDefaultCases(DiagSubsystem::Parser, 58);
++inline constexpr DiagCode CaseGenerateEmpty(DiagSubsystem::Parser, 59);
++inline constexpr DiagCode LabelAndName(DiagSubsystem::Parser, 60);
++inline constexpr DiagCode EndNameMismatch(DiagSubsystem::Parser, 61);
++inline constexpr DiagCode EndNameNotEmpty(DiagSubsystem::Parser, 62);
++inline constexpr DiagCode DeclarationsAtStart(DiagSubsystem::Parser, 63);
++inline constexpr DiagCode VoidNotAllowed(DiagSubsystem::Parser, 64);
++inline constexpr DiagCode DuplicateDeclModifier(DiagSubsystem::Parser, 65);
++inline constexpr DiagCode DeclModifierOrdering(DiagSubsystem::Parser, 66);
++inline constexpr DiagCode DeclModifierConflict(DiagSubsystem::Parser, 67);
++inline constexpr DiagCode DuplicateQualifier(DiagSubsystem::Parser, 68);
++inline constexpr DiagCode QualifierConflict(DiagSubsystem::Parser, 69);
++inline constexpr DiagCode QualifierNotFirst(DiagSubsystem::Parser, 70);
++inline constexpr DiagCode PureRequiresVirtual(DiagSubsystem::Parser, 71);
++inline constexpr DiagCode InvalidMethodQualifier(DiagSubsystem::Parser, 72);
++inline constexpr DiagCode InvalidPropertyQualifier(DiagSubsystem::Parser, 73);
++inline constexpr DiagCode InvalidConstraintQualifier(DiagSubsystem::Parser, 74);
++inline constexpr DiagCode InvalidQualifierForMember(DiagSubsystem::Parser, 75);
++inline constexpr DiagCode InvalidQualifierForIfaceMember(DiagSubsystem::Parser, 76);
++inline constexpr DiagCode InvalidQualifierForConstructor(DiagSubsystem::Parser, 77);
++inline constexpr DiagCode MethodStaticLifetime(DiagSubsystem::Parser, 78);
++inline constexpr DiagCode TypeRefDeclVar(DiagSubsystem::Parser, 79);
++inline constexpr DiagCode ScopedClassCopy(DiagSubsystem::Parser, 80);
++inline constexpr DiagCode NotAllowedInCU(DiagSubsystem::Parser, 81);
++inline constexpr DiagCode NotAllowedInGenerate(DiagSubsystem::Parser, 82);
++inline constexpr DiagCode NotAllowedInModule(DiagSubsystem::Parser, 83);
++inline constexpr DiagCode NotAllowedInInterface(DiagSubsystem::Parser, 84);
++inline constexpr DiagCode NotAllowedInProgram(DiagSubsystem::Parser, 85);
++inline constexpr DiagCode NotAllowedInPackage(DiagSubsystem::Parser, 86);
++inline constexpr DiagCode NotAllowedInClocking(DiagSubsystem::Parser, 87);
++inline constexpr DiagCode NotAllowedInClass(DiagSubsystem::Parser, 88);
++inline constexpr DiagCode NotAllowedInIfaceClass(DiagSubsystem::Parser, 89);
++inline constexpr DiagCode TaskReturnType(DiagSubsystem::Parser, 90);
++inline constexpr DiagCode TaskConstructor(DiagSubsystem::Parser, 91);
++inline constexpr DiagCode ConstructorReturnType(DiagSubsystem::Parser, 92);
++inline constexpr DiagCode NewKeywordQualified(DiagSubsystem::Parser, 93);
++inline constexpr DiagCode SubroutinePrototypeScoped(DiagSubsystem::Parser, 94);
++inline constexpr DiagCode QualifiersOnOutOfBlock(DiagSubsystem::Parser, 95);
++inline constexpr DiagCode ConstraintQualOutOfBlock(DiagSubsystem::Parser, 96);
++inline constexpr DiagCode ConstructorOutsideClass(DiagSubsystem::Parser, 97);
++inline constexpr DiagCode InvalidSuperNew(DiagSubsystem::Parser, 98);
++inline constexpr DiagCode IfaceMethodPure(DiagSubsystem::Parser, 99);
++inline constexpr DiagCode NestedIface(DiagSubsystem::Parser, 100);
++inline constexpr DiagCode RegAfterNettype(DiagSubsystem::Parser, 101);
++inline constexpr DiagCode ChargeWithTriReg(DiagSubsystem::Parser, 102);
++inline constexpr DiagCode InitializerRequired(DiagSubsystem::Parser, 103);
++inline constexpr DiagCode DriveStrengthInvalid(DiagSubsystem::Parser, 104);
++inline constexpr DiagCode DriveStrengthHighZ(DiagSubsystem::Parser, 105);
++inline constexpr DiagCode RandOnPackedMember(DiagSubsystem::Parser, 106);
++inline constexpr DiagCode RandOnUnionMember(DiagSubsystem::Parser, 107);
++inline constexpr DiagCode SolveBeforeDisallowed(DiagSubsystem::Parser, 108);
++inline constexpr DiagCode LifetimeForPrototype(DiagSubsystem::Parser, 109);
++inline constexpr DiagCode NonStandardGenBlock(DiagSubsystem::Parser, 110);
++inline constexpr DiagCode EmptyAssignmentPattern(DiagSubsystem::Parser, 111);
++inline constexpr DiagCode NoteToMatchThis(DiagSubsystem::Parser, 112);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/PreprocessorDiags.h ./generated/slang/diagnostics/PreprocessorDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/PreprocessorDiags.h ./generated/slang/diagnostics/PreprocessorDiags.h
 --- ./generated/slang/diagnostics/PreprocessorDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/PreprocessorDiags.h	2021-01-13 10:06:32.309060077 -0800
++++ ./generated/slang/diagnostics/PreprocessorDiags.h	2021-03-02 17:50:53.971602450 -0800
 @@ -0,0 +1,48 @@
 +//------------------------------------------------------------------------------
 +//! @file PreprocessorDiags.h
@@ -14790,10 +16146,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode ExpectedDiagPragmaLevel(DiagSubsystem::Preprocessor, 33);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/StatementsDiags.h ./generated/slang/diagnostics/StatementsDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/StatementsDiags.h ./generated/slang/diagnostics/StatementsDiags.h
 --- ./generated/slang/diagnostics/StatementsDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/StatementsDiags.h	2021-01-13 10:06:32.309060077 -0800
-@@ -0,0 +1,51 @@
++++ ./generated/slang/diagnostics/StatementsDiags.h	2021-03-02 17:50:53.971602450 -0800
+@@ -0,0 +1,55 @@
 +//------------------------------------------------------------------------------
 +//! @file StatementsDiags.h
 +//! @brief Generated diagnostic enums for the Statements subsystem
@@ -14807,48 +16163,52 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +namespace slang::diag {
 +
 +inline constexpr DiagCode ReturnNotInSubroutine(DiagSubsystem::Statements, 0);
-+inline constexpr DiagCode DelayNotNumeric(DiagSubsystem::Statements, 1);
-+inline constexpr DiagCode InvalidEventExpression(DiagSubsystem::Statements, 2);
-+inline constexpr DiagCode CoverStmtNoFail(DiagSubsystem::Statements, 3);
-+inline constexpr DiagCode StatementNotInLoop(DiagSubsystem::Statements, 4);
-+inline constexpr DiagCode ExprNotStatement(DiagSubsystem::Statements, 5);
-+inline constexpr DiagCode ExprNotConstraint(DiagSubsystem::Statements, 6);
-+inline constexpr DiagCode VoidCastFuncCall(DiagSubsystem::Statements, 7);
-+inline constexpr DiagCode NotAnArray(DiagSubsystem::Statements, 8);
-+inline constexpr DiagCode TooManyForeachVars(DiagSubsystem::Statements, 9);
-+inline constexpr DiagCode ForeachDynamicDimAfterSkipped(DiagSubsystem::Statements, 10);
-+inline constexpr DiagCode LoopVarShadowsArray(DiagSubsystem::Statements, 11);
-+inline constexpr DiagCode ForeachWildcardIndex(DiagSubsystem::Statements, 12);
-+inline constexpr DiagCode CaseInsideKeyword(DiagSubsystem::Statements, 13);
-+inline constexpr DiagCode InvalidDisableTarget(DiagSubsystem::Statements, 14);
-+inline constexpr DiagCode NotAnEvent(DiagSubsystem::Statements, 15);
-+inline constexpr DiagCode RepeatNotNumeric(DiagSubsystem::Statements, 16);
-+inline constexpr DiagCode RepeatControlNotEvent(DiagSubsystem::Statements, 17);
-+inline constexpr DiagCode UnexpectedPortDecl(DiagSubsystem::Statements, 18);
-+inline constexpr DiagCode NonIntegralConstraintExpr(DiagSubsystem::Statements, 19);
-+inline constexpr DiagCode NonIntegralConstraintLiteral(DiagSubsystem::Statements, 20);
-+inline constexpr DiagCode UnknownConstraintLiteral(DiagSubsystem::Statements, 21);
-+inline constexpr DiagCode RandCInDist(DiagSubsystem::Statements, 22);
-+inline constexpr DiagCode RandCInUnique(DiagSubsystem::Statements, 23);
-+inline constexpr DiagCode RandCInSolveBefore(DiagSubsystem::Statements, 24);
-+inline constexpr DiagCode RandCInSoft(DiagSubsystem::Statements, 25);
-+inline constexpr DiagCode RandNeededInDist(DiagSubsystem::Statements, 26);
-+inline constexpr DiagCode InvalidUniquenessExpr(DiagSubsystem::Statements, 27);
-+inline constexpr DiagCode InequivalentUniquenessTypes(DiagSubsystem::Statements, 28);
-+inline constexpr DiagCode TaskInConstraint(DiagSubsystem::Statements, 29);
-+inline constexpr DiagCode OutRefFuncConstraint(DiagSubsystem::Statements, 30);
-+inline constexpr DiagCode BadDisableSoft(DiagSubsystem::Statements, 31);
-+inline constexpr DiagCode BadSolveBefore(DiagSubsystem::Statements, 32);
-+inline constexpr DiagCode EventExpressionConstant(DiagSubsystem::Statements, 33);
-+inline constexpr DiagCode EmptyStatement(DiagSubsystem::Statements, 34);
-+inline constexpr DiagCode PointlessVoidCast(DiagSubsystem::Statements, 35);
-+inline constexpr DiagCode UnusedResult(DiagSubsystem::Statements, 36);
++inline constexpr DiagCode ReturnInParallel(DiagSubsystem::Statements, 1);
++inline constexpr DiagCode DelayNotNumeric(DiagSubsystem::Statements, 2);
++inline constexpr DiagCode InvalidEventExpression(DiagSubsystem::Statements, 3);
++inline constexpr DiagCode CoverStmtNoFail(DiagSubsystem::Statements, 4);
++inline constexpr DiagCode StatementNotInLoop(DiagSubsystem::Statements, 5);
++inline constexpr DiagCode ExprNotStatement(DiagSubsystem::Statements, 6);
++inline constexpr DiagCode ExprNotConstraint(DiagSubsystem::Statements, 7);
++inline constexpr DiagCode VoidCastFuncCall(DiagSubsystem::Statements, 8);
++inline constexpr DiagCode NotAnArray(DiagSubsystem::Statements, 9);
++inline constexpr DiagCode TooManyForeachVars(DiagSubsystem::Statements, 10);
++inline constexpr DiagCode ForeachDynamicDimAfterSkipped(DiagSubsystem::Statements, 11);
++inline constexpr DiagCode LoopVarShadowsArray(DiagSubsystem::Statements, 12);
++inline constexpr DiagCode ForeachWildcardIndex(DiagSubsystem::Statements, 13);
++inline constexpr DiagCode CaseInsideKeyword(DiagSubsystem::Statements, 14);
++inline constexpr DiagCode InvalidDisableTarget(DiagSubsystem::Statements, 15);
++inline constexpr DiagCode NotAnEvent(DiagSubsystem::Statements, 16);
++inline constexpr DiagCode RepeatNotNumeric(DiagSubsystem::Statements, 17);
++inline constexpr DiagCode RepeatControlNotEvent(DiagSubsystem::Statements, 18);
++inline constexpr DiagCode UnexpectedPortDecl(DiagSubsystem::Statements, 19);
++inline constexpr DiagCode NonIntegralConstraintExpr(DiagSubsystem::Statements, 20);
++inline constexpr DiagCode NonIntegralConstraintLiteral(DiagSubsystem::Statements, 21);
++inline constexpr DiagCode UnknownConstraintLiteral(DiagSubsystem::Statements, 22);
++inline constexpr DiagCode RandCInDist(DiagSubsystem::Statements, 23);
++inline constexpr DiagCode RandCInUnique(DiagSubsystem::Statements, 24);
++inline constexpr DiagCode RandCInSolveBefore(DiagSubsystem::Statements, 25);
++inline constexpr DiagCode RandCInSoft(DiagSubsystem::Statements, 26);
++inline constexpr DiagCode RandNeededInDist(DiagSubsystem::Statements, 27);
++inline constexpr DiagCode InvalidUniquenessExpr(DiagSubsystem::Statements, 28);
++inline constexpr DiagCode InequivalentUniquenessTypes(DiagSubsystem::Statements, 29);
++inline constexpr DiagCode TaskInConstraint(DiagSubsystem::Statements, 30);
++inline constexpr DiagCode OutRefFuncConstraint(DiagSubsystem::Statements, 31);
++inline constexpr DiagCode BadDisableSoft(DiagSubsystem::Statements, 32);
++inline constexpr DiagCode BadSolveBefore(DiagSubsystem::Statements, 33);
++inline constexpr DiagCode BadProceduralAssign(DiagSubsystem::Statements, 34);
++inline constexpr DiagCode BadProceduralForce(DiagSubsystem::Statements, 35);
++inline constexpr DiagCode BadForceNetType(DiagSubsystem::Statements, 36);
++inline constexpr DiagCode EventExpressionConstant(DiagSubsystem::Statements, 37);
++inline constexpr DiagCode EmptyStatement(DiagSubsystem::Statements, 38);
++inline constexpr DiagCode PointlessVoidCast(DiagSubsystem::Statements, 39);
++inline constexpr DiagCode UnusedResult(DiagSubsystem::Statements, 40);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/SysFuncsDiags.h ./generated/slang/diagnostics/SysFuncsDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/SysFuncsDiags.h ./generated/slang/diagnostics/SysFuncsDiags.h
 --- ./generated/slang/diagnostics/SysFuncsDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/SysFuncsDiags.h	2021-01-13 10:06:32.309060077 -0800
-@@ -0,0 +1,44 @@
++++ ./generated/slang/diagnostics/SysFuncsDiags.h	2021-03-02 17:50:53.981602243 -0800
+@@ -0,0 +1,45 @@
 +//------------------------------------------------------------------------------
 +//! @file SysFuncsDiags.h
 +//! @brief Generated diagnostic enums for the SysFuncs subsystem
@@ -14886,16 +16246,17 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode ExpectedScopeOrAssert(DiagSubsystem::SysFuncs, 22);
 +inline constexpr DiagCode ExpectedClassPropertyName(DiagSubsystem::SysFuncs, 23);
 +inline constexpr DiagCode ExpectedVariableName(DiagSubsystem::SysFuncs, 24);
-+inline constexpr DiagCode CastArgSingular(DiagSubsystem::SysFuncs, 25);
-+inline constexpr DiagCode ArrayLocatorWithClause(DiagSubsystem::SysFuncs, 26);
-+inline constexpr DiagCode FormatRealInt(DiagSubsystem::SysFuncs, 27);
-+inline constexpr DiagCode BadFinishNum(DiagSubsystem::SysFuncs, 28);
-+inline constexpr DiagCode MissingFormatSpecifier(DiagSubsystem::SysFuncs, 29);
++inline constexpr DiagCode ExpectedModuleInstance(DiagSubsystem::SysFuncs, 25);
++inline constexpr DiagCode CastArgSingular(DiagSubsystem::SysFuncs, 26);
++inline constexpr DiagCode ArrayLocatorWithClause(DiagSubsystem::SysFuncs, 27);
++inline constexpr DiagCode FormatRealInt(DiagSubsystem::SysFuncs, 28);
++inline constexpr DiagCode BadFinishNum(DiagSubsystem::SysFuncs, 29);
++inline constexpr DiagCode MissingFormatSpecifier(DiagSubsystem::SysFuncs, 30);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/TypesDiags.h ./generated/slang/diagnostics/TypesDiags.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/diagnostics/TypesDiags.h ./generated/slang/diagnostics/TypesDiags.h
 --- ./generated/slang/diagnostics/TypesDiags.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/diagnostics/TypesDiags.h	2021-01-13 10:06:32.309060077 -0800
++++ ./generated/slang/diagnostics/TypesDiags.h	2021-03-02 17:50:53.981602243 -0800
 @@ -0,0 +1,36 @@
 +//------------------------------------------------------------------------------
 +//! @file TypesDiags.h
@@ -14933,10 +16294,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +inline constexpr DiagCode InvalidUnionMember(DiagSubsystem::Types, 21);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/syntax/AllSyntax.h ./generated/slang/syntax/AllSyntax.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/syntax/AllSyntax.h ./generated/slang/syntax/AllSyntax.h
 --- ./generated/slang/syntax/AllSyntax.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/syntax/AllSyntax.h	2021-01-13 10:06:51.035357103 -0800
-@@ -0,0 +1,6728 @@
++++ ./generated/slang/syntax/AllSyntax.h	2021-03-02 17:51:09.111286812 -0800
+@@ -0,0 +1,8096 @@
 +//------------------------------------------------------------------------------
 +//! @file AllSyntax.h
 +//! @brief All generated syntax node data structures
@@ -14960,6 +16321,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(kind) {
 +    }
 +
++    explicit ExpressionSyntax(const ExpressionSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +};
 +
@@ -14968,6 +16331,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    DataTypeSyntax(SyntaxKind kind) :
 +        ExpressionSyntax(kind) {
 +    }
++
++    explicit DataTypeSyntax(const DataTypeSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +};
@@ -14982,6 +16347,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(SyntaxKind::EqualsValueClause), equals(equals), expr(&expr) {
 +        this->expr->parent = this;
 +    }
++
++    explicit EqualsValueClauseSyntax(const EqualsValueClauseSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -15000,6 +16367,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(SyntaxKind::AttributeSpec), name(name), value(value) {
 +        if (this->value) this->value->parent = this;
 +    }
++
++    explicit AttributeSpecSyntax(const AttributeSpecSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -15022,6 +16391,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit AttributeInstanceSyntax(const AttributeInstanceSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -15038,6 +16409,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    NamedLabelSyntax(Token name, Token colon) :
 +        SyntaxNode(SyntaxKind::NamedLabel), name(name), colon(colon) {
 +    }
++
++    explicit NamedLabelSyntax(const NamedLabelSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -15060,6 +16433,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit StatementSyntax(const StatementSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -15079,6 +16454,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit MemberSyntax(const MemberSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -15096,6 +16473,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(kind) {
 +    }
 +
++    explicit ArgumentSyntax(const ArgumentSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +};
 +
@@ -15105,6 +16484,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    EmptyArgumentSyntax(Token placeholder) :
 +        ArgumentSyntax(SyntaxKind::EmptyArgument), placeholder(placeholder) {
 +    }
++
++    explicit EmptyArgumentSyntax(const EmptyArgumentSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -15122,6 +16503,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        ArgumentSyntax(SyntaxKind::OrderedArgument), expr(&expr) {
 +        this->expr->parent = this;
 +    }
++
++    explicit OrderedArgumentSyntax(const OrderedArgumentSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -15144,6 +16527,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->expr) this->expr->parent = this;
 +    }
 +
++    explicit NamedArgumentSyntax(const NamedArgumentSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -15165,6 +16550,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit ArgumentListSyntax(const ArgumentListSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -15183,6 +16570,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->assignments->parent = this;
 +    }
 +
++    explicit ParameterValueAssignmentSyntax(const ParameterValueAssignmentSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -15200,6 +16589,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(kind) {
 +    }
 +
++    explicit PatternSyntax(const PatternSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +};
 +
@@ -15210,6 +16601,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    VariablePatternSyntax(Token dot, Token variableName) :
 +        PatternSyntax(SyntaxKind::VariablePattern), dot(dot), variableName(variableName) {
 +    }
++
++    explicit VariablePatternSyntax(const VariablePatternSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -15227,6 +16620,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        PatternSyntax(SyntaxKind::WildcardPattern), dotStar(dotStar) {
 +    }
 +
++    explicit WildcardPatternSyntax(const WildcardPatternSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -15243,6 +16638,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        PatternSyntax(SyntaxKind::ExpressionPattern), expr(&expr) {
 +        this->expr->parent = this;
 +    }
++
++    explicit ExpressionPatternSyntax(const ExpressionPatternSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -15263,6 +16660,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->pattern) this->pattern->parent = this;
 +    }
 +
++    explicit TaggedPatternSyntax(const TaggedPatternSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -15278,6 +16677,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(kind) {
 +    }
 +
++    explicit StructurePatternMemberSyntax(const StructurePatternMemberSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +};
 +
@@ -15288,6 +16689,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        StructurePatternMemberSyntax(SyntaxKind::OrderedStructurePatternMember), pattern(&pattern) {
 +        this->pattern->parent = this;
 +    }
++
++    explicit OrderedStructurePatternMemberSyntax(const OrderedStructurePatternMemberSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -15307,6 +16710,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        StructurePatternMemberSyntax(SyntaxKind::NamedStructurePatternMember), name(name), colon(colon), pattern(&pattern) {
 +        this->pattern->parent = this;
 +    }
++
++    explicit NamedStructurePatternMemberSyntax(const NamedStructurePatternMemberSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -15329,6 +16734,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit StructurePatternSyntax(const StructurePatternSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -15346,6 +16753,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(SyntaxKind::MatchesClause), matchesKeyword(matchesKeyword), pattern(&pattern) {
 +        this->pattern->parent = this;
 +    }
++
++    explicit MatchesClauseSyntax(const MatchesClauseSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -15366,6 +16775,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->matchesClause) this->matchesClause->parent = this;
 +    }
 +
++    explicit ConditionalPatternSyntax(const ConditionalPatternSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -15385,6 +16796,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit ConditionalPredicateSyntax(const ConditionalPredicateSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -15400,6 +16813,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(kind) {
 +    }
 +
++    explicit AssignmentPatternSyntax(const AssignmentPatternSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +};
 +
@@ -15414,6 +16829,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        for (auto child : this->items)
 +            child->parent = this;
 +    }
++
++    explicit SimpleAssignmentPatternSyntax(const SimpleAssignmentPatternSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -15435,6 +16852,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->expr->parent = this;
 +    }
 +
++    explicit AssignmentPatternItemSyntax(const AssignmentPatternItemSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -15455,6 +16874,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        for (auto child : this->items)
 +            child->parent = this;
 +    }
++
++    explicit StructuredAssignmentPatternSyntax(const StructuredAssignmentPatternSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -15481,6 +16902,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit ReplicatedAssignmentPatternSyntax(const ReplicatedAssignmentPatternSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -15500,6 +16923,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->expr->parent = this;
 +    }
 +
++    explicit BadExpressionSyntax(const BadExpressionSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -15514,6 +16939,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    PrimaryExpressionSyntax(SyntaxKind kind) :
 +        ExpressionSyntax(kind) {
 +    }
++
++    explicit PrimaryExpressionSyntax(const PrimaryExpressionSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +};
@@ -15530,6 +16957,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +        this->operand->parent = this;
 +    }
++
++    explicit PrefixUnaryExpressionSyntax(const PrefixUnaryExpressionSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -15552,6 +16981,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        for (auto child : this->attributes)
 +            child->parent = this;
 +    }
++
++    explicit PostfixUnaryExpressionSyntax(const PostfixUnaryExpressionSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -15577,6 +17008,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->right->parent = this;
 +    }
 +
++    explicit BinaryExpressionSyntax(const BinaryExpressionSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -15600,6 +17033,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->max->parent = this;
 +    }
 +
++    explicit MinTypMaxExpressionSyntax(const MinTypMaxExpressionSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -15618,6 +17053,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        ExpressionSyntax(SyntaxKind::TaggedUnionExpression), tagged(tagged), member(member), expr(expr) {
 +        if (this->expr) this->expr->parent = this;
 +    }
++
++    explicit TaggedUnionExpressionSyntax(const TaggedUnionExpressionSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -15641,6 +17078,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->right->parent = this;
 +    }
 +
++    explicit OpenRangeExpressionSyntax(const OpenRangeExpressionSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -15662,6 +17101,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit OpenRangeListSyntax(const OpenRangeListSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -15681,6 +17122,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->expr->parent = this;
 +        this->ranges->parent = this;
 +    }
++
++    explicit InsideExpressionSyntax(const InsideExpressionSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -15709,6 +17152,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->right->parent = this;
 +    }
 +
++    explicit ConditionalExpressionSyntax(const ConditionalExpressionSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -15728,6 +17173,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->pattern->parent = this;
 +    }
 +
++    explicit AssignmentPatternExpressionSyntax(const AssignmentPatternExpressionSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -15745,6 +17192,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(kind) {
 +    }
 +
++    explicit SelectorSyntax(const SelectorSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +};
 +
@@ -15755,6 +17204,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SelectorSyntax(SyntaxKind::BitSelect), expr(&expr) {
 +        this->expr->parent = this;
 +    }
++
++    explicit BitSelectSyntax(const BitSelectSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -15776,6 +17227,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->right->parent = this;
 +    }
 +
++    explicit RangeSelectSyntax(const RangeSelectSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -15795,6 +17248,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->selector) this->selector->parent = this;
 +    }
 +
++    explicit ElementSelectSyntax(const ElementSelectSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -15812,6 +17267,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        ExpressionSyntax(kind) {
 +    }
 +
++    explicit NameSyntax(const NameSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +};
 +
@@ -15821,6 +17278,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    IdentifierNameSyntax(Token identifier) :
 +        NameSyntax(SyntaxKind::IdentifierName), identifier(identifier) {
 +    }
++
++    explicit IdentifierNameSyntax(const IdentifierNameSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -15837,6 +17296,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    SystemNameSyntax(Token systemIdentifier) :
 +        NameSyntax(SyntaxKind::SystemName), systemIdentifier(systemIdentifier) {
 +    }
++
++    explicit SystemNameSyntax(const SystemNameSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -15858,6 +17319,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit IdentifierSelectNameSyntax(const IdentifierSelectNameSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -15874,6 +17337,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        NameSyntax(SyntaxKind::EmptyIdentifierName), placeholder(placeholder) {
 +    }
 +
++    explicit EmptyIdentifierNameSyntax(const EmptyIdentifierNameSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -15889,6 +17354,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    KeywordNameSyntax(SyntaxKind kind, Token keyword) :
 +        NameSyntax(kind), keyword(keyword) {
 +    }
++
++    explicit KeywordNameSyntax(const KeywordNameSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -15907,6 +17374,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        NameSyntax(SyntaxKind::ClassName), identifier(identifier), parameters(&parameters) {
 +        this->parameters->parent = this;
 +    }
++
++    explicit ClassNameSyntax(const ClassNameSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -15928,6 +17397,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->right->parent = this;
 +    }
 +
++    explicit ScopedNameSyntax(const ScopedNameSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -15945,6 +17416,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    LiteralExpressionSyntax(SyntaxKind kind, Token literal) :
 +        PrimaryExpressionSyntax(kind), literal(literal) {
 +    }
++
++    explicit LiteralExpressionSyntax(const LiteralExpressionSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -15964,6 +17437,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        PrimaryExpressionSyntax(SyntaxKind::IntegerVectorExpression), size(size), base(base), value(value) {
 +    }
 +
++    explicit IntegerVectorExpressionSyntax(const IntegerVectorExpressionSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -15980,6 +17455,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    EmptyQueueExpressionSyntax(Token openBrace, Token closeBrace) :
 +        PrimaryExpressionSyntax(SyntaxKind::EmptyQueueExpression), openBrace(openBrace), closeBrace(closeBrace) {
 +    }
++
++    explicit EmptyQueueExpressionSyntax(const EmptyQueueExpressionSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -16002,6 +17479,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit ConcatenationExpressionSyntax(const ConcatenationExpressionSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -16023,6 +17502,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->concatenation->parent = this;
 +    }
 +
++    explicit MultipleConcatenationExpressionSyntax(const MultipleConcatenationExpressionSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -16040,6 +17521,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(SyntaxKind::StreamExpressionWithRange), withKeyword(withKeyword), range(&range) {
 +        this->range->parent = this;
 +    }
++
++    explicit StreamExpressionWithRangeSyntax(const StreamExpressionWithRangeSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -16059,6 +17542,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->expression->parent = this;
 +        if (this->withRange) this->withRange->parent = this;
 +    }
++
++    explicit StreamExpressionSyntax(const StreamExpressionSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -16086,6 +17571,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit StreamingConcatenationExpressionSyntax(const StreamingConcatenationExpressionSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -16104,6 +17591,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        PrimaryExpressionSyntax(SyntaxKind::ParenthesizedExpression), openParen(openParen), expression(&expression), closeParen(closeParen) {
 +        this->expression->parent = this;
 +    }
++
++    explicit ParenthesizedExpressionSyntax(const ParenthesizedExpressionSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -16128,6 +17617,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->initializer) this->initializer->parent = this;
 +    }
 +
++    explicit NewArrayExpressionSyntax(const NewArrayExpressionSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -16147,6 +17638,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->argList) this->argList->parent = this;
 +    }
 +
++    explicit NewClassExpressionSyntax(const NewClassExpressionSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -16165,6 +17658,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->scopedNew->parent = this;
 +        this->expr->parent = this;
 +    }
++
++    explicit CopyClassExpressionSyntax(const CopyClassExpressionSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -16187,6 +17682,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->select->parent = this;
 +    }
 +
++    explicit ElementSelectExpressionSyntax(const ElementSelectExpressionSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -16205,6 +17702,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        ExpressionSyntax(SyntaxKind::MemberAccessExpression), left(&left), dot(dot), name(name) {
 +        this->left->parent = this;
 +    }
++
++    explicit MemberAccessExpressionSyntax(const MemberAccessExpressionSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -16229,6 +17728,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->arguments) this->arguments->parent = this;
 +    }
 +
++    explicit InvocationExpressionSyntax(const InvocationExpressionSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -16249,6 +17750,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->right->parent = this;
 +    }
 +
++    explicit CastExpressionSyntax(const CastExpressionSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -16268,6 +17771,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->inner->parent = this;
 +    }
 +
++    explicit SignedCastExpressionSyntax(const SignedCastExpressionSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -16285,6 +17790,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(kind) {
 +    }
 +
++    explicit TimingControlSyntax(const TimingControlSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +};
 +
@@ -16296,6 +17803,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        TimingControlSyntax(kind), hash(hash), delayValue(&delayValue) {
 +        this->delayValue->parent = this;
 +    }
++
++    explicit DelaySyntax(const DelaySyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -16323,6 +17832,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->delay3) this->delay3->parent = this;
 +    }
 +
++    explicit Delay3Syntax(const Delay3Syntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -16340,6 +17851,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        TimingControlSyntax(SyntaxKind::EventControl), at(at), eventName(&eventName) {
 +        this->eventName->parent = this;
 +    }
++
++    explicit EventControlSyntax(const EventControlSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -16359,6 +17872,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->expr->parent = this;
 +    }
 +
++    explicit IffEventClauseSyntax(const IffEventClauseSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -16374,6 +17889,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(kind) {
 +    }
 +
++    explicit EventExpressionSyntax(const EventExpressionSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +};
 +
@@ -16387,6 +17904,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->expr->parent = this;
 +        if (this->iffClause) this->iffClause->parent = this;
 +    }
++
++    explicit SignalEventExpressionSyntax(const SignalEventExpressionSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -16408,6 +17927,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->right->parent = this;
 +    }
 +
++    explicit BinaryEventExpressionSyntax(const BinaryEventExpressionSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -16426,6 +17947,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        EventExpressionSyntax(SyntaxKind::ParenthesizedEventExpression), openParen(openParen), expr(&expr), closeParen(closeParen) {
 +        this->expr->parent = this;
 +    }
++
++    explicit ParenthesizedEventExpressionSyntax(const ParenthesizedEventExpressionSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -16446,6 +17969,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        TimingControlSyntax(SyntaxKind::ImplicitEventControl), at(at), openParen(openParen), star(star), closeParen(closeParen) {
 +    }
 +
++    explicit ImplicitEventControlSyntax(const ImplicitEventControlSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -16463,6 +17988,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        TimingControlSyntax(SyntaxKind::EventControlWithExpression), at(at), expr(&expr) {
 +        this->expr->parent = this;
 +    }
++
++    explicit EventControlWithExpressionSyntax(const EventControlWithExpressionSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -16486,6 +18013,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->eventControl) this->eventControl->parent = this;
 +    }
 +
++    explicit RepeatedEventControlSyntax(const RepeatedEventControlSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -16504,6 +18033,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->timing->parent = this;
 +        this->expr->parent = this;
 +    }
++
++    explicit TimingControlExpressionSyntax(const TimingControlExpressionSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -16526,6 +18057,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->right->parent = this;
 +    }
 +
++    explicit TimingControlExpressionConcatenationSyntax(const TimingControlExpressionConcatenationSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -16545,6 +18078,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        TimingControlSyntax(SyntaxKind::ShortcutCycleDelayRange), doubleHash(doubleHash), openBracket(openBracket), op(op), closeBracket(closeBracket) {
 +    }
 +
++    explicit ShortcutCycleDelayRangeSyntax(const ShortcutCycleDelayRangeSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -16562,6 +18097,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(kind) {
 +    }
 +
++    explicit DimensionSpecifierSyntax(const DimensionSpecifierSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +};
 +
@@ -16572,6 +18109,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        DimensionSpecifierSyntax(SyntaxKind::RangeDimensionSpecifier), selector(&selector) {
 +        this->selector->parent = this;
 +    }
++
++    explicit RangeDimensionSpecifierSyntax(const RangeDimensionSpecifierSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -16588,6 +18127,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    WildcardDimensionSpecifierSyntax(Token star) :
 +        DimensionSpecifierSyntax(SyntaxKind::WildcardDimensionSpecifier), star(star) {
 +    }
++
++    explicit WildcardDimensionSpecifierSyntax(const WildcardDimensionSpecifierSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -16607,6 +18148,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->expr->parent = this;
 +    }
 +
++    explicit ColonExpressionClauseSyntax(const ColonExpressionClauseSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -16624,6 +18167,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        DimensionSpecifierSyntax(SyntaxKind::QueueDimensionSpecifier), dollar(dollar), maxSizeClause(maxSizeClause) {
 +        if (this->maxSizeClause) this->maxSizeClause->parent = this;
 +    }
++
++    explicit QueueDimensionSpecifierSyntax(const QueueDimensionSpecifierSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -16643,6 +18188,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(SyntaxKind::VariableDimension), openBracket(openBracket), specifier(specifier), closeBracket(closeBracket) {
 +        if (this->specifier) this->specifier->parent = this;
 +    }
++
++    explicit VariableDimensionSyntax(const VariableDimensionSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -16665,6 +18212,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +        if (this->initializer) this->initializer->parent = this;
 +    }
++
++    explicit DeclaratorSyntax(const DeclaratorSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -16690,6 +18239,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit DataDeclarationSyntax(const DataDeclarationSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -16714,6 +18265,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit TypedefDeclarationSyntax(const TypedefDeclarationSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -16732,6 +18285,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    ForwardTypedefDeclarationSyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, Token typedefKeyword, Token keyword, Token name, Token semi) :
 +        MemberSyntax(SyntaxKind::ForwardTypedefDeclaration, attributes), typedefKeyword(typedefKeyword), keyword(keyword), name(name), semi(semi) {
 +    }
++
++    explicit ForwardTypedefDeclarationSyntax(const ForwardTypedefDeclarationSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -16753,6 +18308,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        MemberSyntax(SyntaxKind::ForwardInterfaceClassTypedefDeclaration, attributes), typedefKeyword(typedefKeyword), interfaceKeyword(interfaceKeyword), classKeyword(classKeyword), name(name), semi(semi) {
 +    }
 +
++    explicit ForwardInterfaceClassTypedefDeclarationSyntax(const ForwardInterfaceClassTypedefDeclarationSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -16768,6 +18325,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(kind) {
 +    }
 +
++    explicit NetStrengthSyntax(const NetStrengthSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +};
 +
@@ -16779,6 +18338,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    ChargeStrengthSyntax(Token openParen, Token strength, Token closeParen) :
 +        NetStrengthSyntax(SyntaxKind::ChargeStrength), openParen(openParen), strength(strength), closeParen(closeParen) {
 +    }
++
++    explicit ChargeStrengthSyntax(const ChargeStrengthSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -16799,6 +18360,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    DriveStrengthSyntax(Token openParen, Token strength0, Token comma, Token strength1, Token closeParen) :
 +        NetStrengthSyntax(SyntaxKind::DriveStrength), openParen(openParen), strength0(strength0), comma(comma), strength1(strength1), closeParen(closeParen) {
 +    }
++
++    explicit DriveStrengthSyntax(const DriveStrengthSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -16828,6 +18391,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit NetDeclarationSyntax(const NetDeclarationSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -16851,6 +18416,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit UserDefinedNetDeclarationSyntax(const UserDefinedNetDeclarationSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -16868,6 +18435,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(SyntaxKind::WithFunctionClause), with(with), name(&name) {
 +        this->name->parent = this;
 +    }
++
++    explicit WithFunctionClauseSyntax(const WithFunctionClauseSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -16891,6 +18460,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->withFunction) this->withFunction->parent = this;
 +    }
 +
++    explicit NetTypeDeclarationSyntax(const NetTypeDeclarationSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -16908,6 +18479,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    PackageImportItemSyntax(Token package, Token doubleColon, Token item) :
 +        SyntaxNode(SyntaxKind::PackageImportItem), package(package), doubleColon(doubleColon), item(item) {
 +    }
++
++    explicit PackageImportItemSyntax(const PackageImportItemSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -16930,6 +18503,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit PackageImportDeclarationSyntax(const PackageImportDeclarationSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -16945,6 +18520,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    ParameterDeclarationBaseSyntax(SyntaxKind kind, Token keyword) :
 +        SyntaxNode(kind), keyword(keyword) {
 +    }
++
++    explicit ParameterDeclarationBaseSyntax(const ParameterDeclarationBaseSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -16967,6 +18544,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit ParameterDeclarationSyntax(const ParameterDeclarationSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -16985,6 +18564,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->type->parent = this;
 +    }
 +
++    explicit EqualsTypeClauseSyntax(const EqualsTypeClauseSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -17002,6 +18583,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(SyntaxKind::TypeAssignment), name(name), assignment(assignment) {
 +        if (this->assignment) this->assignment->parent = this;
 +    }
++
++    explicit TypeAssignmentSyntax(const TypeAssignmentSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -17023,6 +18606,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit TypeParameterDeclarationSyntax(const TypeParameterDeclarationSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -17041,6 +18626,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->parameter->parent = this;
 +    }
 +
++    explicit ParameterDeclarationStatementSyntax(const ParameterDeclarationStatementSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -17055,6 +18642,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    PortHeaderSyntax(SyntaxKind kind) :
 +        SyntaxNode(kind) {
 +    }
++
++    explicit PortHeaderSyntax(const PortHeaderSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +};
@@ -17071,6 +18660,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        for (auto child : this->declarators)
 +            child->parent = this;
 +    }
++
++    explicit PortDeclarationSyntax(const PortDeclarationSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -17092,6 +18683,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        for (auto child : this->identifiers)
 +            child->parent = this;
 +    }
++
++    explicit GenvarDeclarationSyntax(const GenvarDeclarationSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -17116,6 +18709,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit IntegerTypeSyntax(const IntegerTypeSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -17131,6 +18726,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    KeywordTypeSyntax(SyntaxKind kind, Token keyword) :
 +        DataTypeSyntax(kind), keyword(keyword) {
 +    }
++
++    explicit KeywordTypeSyntax(const KeywordTypeSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -17148,6 +18745,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        DataTypeSyntax(SyntaxKind::NamedType), name(&name) {
 +        this->name->parent = this;
 +    }
++
++    explicit NamedTypeSyntax(const NamedTypeSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -17175,6 +18774,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        for (auto child : this->declarators)
 +            child->parent = this;
 +    }
++
++    explicit StructUnionMemberSyntax(const StructUnionMemberSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -17205,6 +18806,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit StructUnionTypeSyntax(const StructUnionTypeSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -17233,6 +18836,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit EnumTypeSyntax(const EnumTypeSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -17253,6 +18858,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->expr->parent = this;
 +    }
 +
++    explicit TypeReferenceSyntax(const TypeReferenceSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -17269,6 +18876,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    DotMemberClauseSyntax(Token dot, Token member) :
 +        SyntaxNode(SyntaxKind::DotMemberClause), dot(dot), member(member) {
 +    }
++
++    explicit DotMemberClauseSyntax(const DotMemberClauseSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -17292,6 +18901,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->modport) this->modport->parent = this;
 +    }
 +
++    explicit VirtualInterfaceTypeSyntax(const VirtualInterfaceTypeSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -17311,6 +18922,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        for (auto child : this->dimensions)
 +            child->parent = this;
 +    }
++
++    explicit ImplicitTypeSyntax(const ImplicitTypeSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -17332,6 +18945,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(SyntaxKind::DeferredAssertion), hash(hash), zero(zero), finalKeyword(finalKeyword) {
 +    }
 +
++    explicit DeferredAssertionSyntax(const DeferredAssertionSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -17349,6 +18964,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(SyntaxKind::ElseClause), elseKeyword(elseKeyword), clause(&clause) {
 +        this->clause->parent = this;
 +    }
++
++    explicit ElseClauseSyntax(const ElseClauseSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -17368,6 +18985,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->statement) this->statement->parent = this;
 +        if (this->elseClause) this->elseClause->parent = this;
 +    }
++
++    explicit ActionBlockSyntax(const ActionBlockSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -17391,6 +19010,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->action->parent = this;
 +    }
 +
++    explicit ImmediateAssertionStatementSyntax(const ImmediateAssertionStatementSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -17412,6 +19033,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->expr->parent = this;
 +    }
 +
++    explicit DisableIffSyntax(const DisableIffSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -17432,6 +19055,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->disable) this->disable->parent = this;
 +        this->expr->parent = this;
 +    }
++
++    explicit PropertySpecSyntax(const PropertySpecSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -17456,6 +19081,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->action->parent = this;
 +    }
 +
++    explicit ConcurrentAssertionStatementSyntax(const ConcurrentAssertionStatementSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -17472,6 +19099,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        MemberSyntax(SyntaxKind::ConcurrentAssertionMember, attributes), statement(&statement) {
 +        this->statement->parent = this;
 +    }
++
++    explicit ConcurrentAssertionMemberSyntax(const ConcurrentAssertionMemberSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -17490,6 +19119,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->statement->parent = this;
 +    }
 +
++    explicit ImmediateAssertionMemberSyntax(const ImmediateAssertionMemberSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -17507,6 +19138,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    EmptyStatementSyntax(NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, Token semicolon) :
 +        StatementSyntax(SyntaxKind::EmptyStatement, label, attributes), semicolon(semicolon) {
 +    }
++
++    explicit EmptyStatementSyntax(const EmptyStatementSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -17533,6 +19166,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->elseClause) this->elseClause->parent = this;
 +    }
 +
++    explicit ConditionalStatementSyntax(const ConditionalStatementSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -17548,6 +19183,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(kind) {
 +    }
 +
++    explicit CaseItemSyntax(const CaseItemSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +};
 +
@@ -17560,6 +19197,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        CaseItemSyntax(SyntaxKind::DefaultCaseItem), defaultKeyword(defaultKeyword), colon(colon), clause(&clause) {
 +        this->clause->parent = this;
 +    }
++
++    explicit DefaultCaseItemSyntax(const DefaultCaseItemSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -17584,6 +19223,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->statement->parent = this;
 +    }
 +
++    explicit PatternCaseItemSyntax(const PatternCaseItemSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -17605,6 +19246,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +        this->clause->parent = this;
 +    }
++
++    explicit StandardCaseItemSyntax(const StandardCaseItemSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -17633,6 +19276,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit CaseStatementSyntax(const CaseStatementSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -17650,6 +19295,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        StatementSyntax(SyntaxKind::ForeverStatement, label, attributes), foreverKeyword(foreverKeyword), statement(&statement) {
 +        this->statement->parent = this;
 +    }
++
++    explicit ForeverStatementSyntax(const ForeverStatementSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -17672,6 +19319,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->expr->parent = this;
 +        this->statement->parent = this;
 +    }
++
++    explicit LoopStatementSyntax(const LoopStatementSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -17697,6 +19346,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->expr->parent = this;
 +    }
 +
++    explicit DoWhileStatementSyntax(const DoWhileStatementSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -17716,6 +19367,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->type) this->type->parent = this;
 +        this->declarator->parent = this;
 +    }
++
++    explicit ForVariableDeclarationSyntax(const ForVariableDeclarationSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -17749,6 +19402,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->statement->parent = this;
 +    }
 +
++    explicit ForLoopStatementSyntax(const ForLoopStatementSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -17774,6 +19429,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit ForeachLoopListSyntax(const ForeachLoopListSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -17794,6 +19451,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->statement->parent = this;
 +    }
 +
++    explicit ForeachLoopStatementSyntax(const ForeachLoopStatementSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -17813,6 +19472,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->returnValue) this->returnValue->parent = this;
 +    }
 +
++    explicit ReturnStatementSyntax(const ReturnStatementSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -17829,6 +19490,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    JumpStatementSyntax(NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, Token breakOrContinue, Token semi) :
 +        StatementSyntax(SyntaxKind::JumpStatement, label, attributes), breakOrContinue(breakOrContinue), semi(semi) {
 +    }
++
++    explicit JumpStatementSyntax(const JumpStatementSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -17849,6 +19512,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->statement->parent = this;
 +    }
 +
++    explicit TimingControlStatementSyntax(const TimingControlStatementSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -17866,6 +19531,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        StatementSyntax(SyntaxKind::ExpressionStatement, label, attributes), expr(&expr), semi(semi) {
 +        this->expr->parent = this;
 +    }
++
++    explicit ExpressionStatementSyntax(const ExpressionStatementSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -17889,6 +19556,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->expr->parent = this;
 +    }
 +
++    explicit VoidCastedCallStatementSyntax(const VoidCastedCallStatementSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -17900,16 +19569,15 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +struct ProceduralAssignStatementSyntax : public StatementSyntax {
 +    Token keyword;
-+    not_null<ExpressionSyntax*> lvalue;
-+    Token equals;
-+    not_null<ExpressionSyntax*> value;
++    not_null<ExpressionSyntax*> expr;
 +    Token semi;
 +
-+    ProceduralAssignStatementSyntax(SyntaxKind kind, NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, ExpressionSyntax& lvalue, Token equals, ExpressionSyntax& value, Token semi) :
-+        StatementSyntax(kind, label, attributes), keyword(keyword), lvalue(&lvalue), equals(equals), value(&value), semi(semi) {
-+        this->lvalue->parent = this;
-+        this->value->parent = this;
++    ProceduralAssignStatementSyntax(SyntaxKind kind, NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, ExpressionSyntax& expr, Token semi) :
++        StatementSyntax(kind, label, attributes), keyword(keyword), expr(&expr), semi(semi) {
++        this->expr->parent = this;
 +    }
++
++    explicit ProceduralAssignStatementSyntax(const ProceduralAssignStatementSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -17930,6 +19598,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->variable->parent = this;
 +    }
 +
++    explicit ProceduralDeassignStatementSyntax(const ProceduralDeassignStatementSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -17949,6 +19619,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->name->parent = this;
 +    }
 +
++    explicit DisableStatementSyntax(const DisableStatementSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -17967,6 +19639,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        StatementSyntax(SyntaxKind::DisableForkStatement, label, attributes), disable(disable), fork(fork), semi(semi) {
 +    }
 +
++    explicit DisableForkStatementSyntax(const DisableForkStatementSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -17983,6 +19657,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    NamedBlockClauseSyntax(Token colon, Token name) :
 +        SyntaxNode(SyntaxKind::NamedBlockClause), colon(colon), name(name) {
 +    }
++
++    explicit NamedBlockClauseSyntax(const NamedBlockClauseSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -18009,6 +19685,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->endBlockName) this->endBlockName->parent = this;
 +    }
 +
++    explicit BlockStatementSyntax(const BlockStatementSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -18031,6 +19709,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->statement->parent = this;
 +    }
 +
++    explicit WaitStatementSyntax(const WaitStatementSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -18048,6 +19728,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    WaitForkStatementSyntax(NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, Token wait, Token fork, Token semi) :
 +        StatementSyntax(SyntaxKind::WaitForkStatement, label, attributes), wait(wait), fork(fork), semi(semi) {
 +    }
++
++    explicit WaitForkStatementSyntax(const WaitForkStatementSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -18073,6 +19755,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->action->parent = this;
 +    }
 +
++    explicit WaitOrderStatementSyntax(const WaitOrderStatementSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -18092,6 +19776,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->expr->parent = this;
 +        this->statement->parent = this;
 +    }
++
++    explicit RandCaseItemSyntax(const RandCaseItemSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -18114,6 +19800,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit RandCaseStatementSyntax(const RandCaseStatementSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -18135,6 +19823,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->name->parent = this;
 +    }
 +
++    explicit EventTriggerStatementSyntax(const EventTriggerStatementSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -18152,6 +19842,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(kind) {
 +    }
 +
++    explicit PortListSyntax(const PortListSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +};
 +
@@ -18161,6 +19853,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(kind) {
 +    }
 +
++    explicit NonAnsiPortSyntax(const NonAnsiPortSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +};
 +
@@ -18169,6 +19863,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    PortExpressionSyntax(SyntaxKind kind) :
 +        SyntaxNode(kind) {
 +    }
++
++    explicit PortExpressionSyntax(const PortExpressionSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +};
@@ -18181,6 +19877,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        PortExpressionSyntax(SyntaxKind::PortReference), name(name), select(select) {
 +        if (this->select) this->select->parent = this;
 +    }
++
++    explicit PortReferenceSyntax(const PortReferenceSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -18203,6 +19901,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit PortConcatenationSyntax(const PortConcatenationSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -18219,6 +19919,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        NonAnsiPortSyntax(SyntaxKind::ImplicitNonAnsiPort), expr(expr) {
 +        if (this->expr) this->expr->parent = this;
 +    }
++
++    explicit ImplicitNonAnsiPortSyntax(const ImplicitNonAnsiPortSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -18241,6 +19943,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->expr) this->expr->parent = this;
 +    }
 +
++    explicit ExplicitNonAnsiPortSyntax(const ExplicitNonAnsiPortSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -18262,6 +19966,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit NonAnsiPortListSyntax(const NonAnsiPortListSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -18279,6 +19985,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        PortHeaderSyntax(SyntaxKind::InterfacePortHeader), nameOrKeyword(nameOrKeyword), modport(modport) {
 +        if (this->modport) this->modport->parent = this;
 +    }
++
++    explicit InterfacePortHeaderSyntax(const InterfacePortHeaderSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -18300,6 +20008,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->dataType->parent = this;
 +    }
 +
++    explicit VariablePortHeaderSyntax(const VariablePortHeaderSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -18318,6 +20028,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        PortHeaderSyntax(SyntaxKind::InterconnectPortHeader), direction(direction), interconnect(interconnect), type(&type) {
 +        this->type->parent = this;
 +    }
++
++    explicit InterconnectPortHeaderSyntax(const InterconnectPortHeaderSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -18338,6 +20050,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->dataType->parent = this;
 +    }
 +
++    explicit NetPortHeaderSyntax(const NetPortHeaderSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -18356,6 +20070,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->header->parent = this;
 +        this->declarator->parent = this;
 +    }
++
++    explicit ImplicitAnsiPortSyntax(const ImplicitAnsiPortSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -18379,6 +20095,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->expr) this->expr->parent = this;
 +    }
 +
++    explicit ExplicitAnsiPortSyntax(const ExplicitAnsiPortSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -18400,6 +20118,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit AnsiPortListSyntax(const AnsiPortListSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -18417,6 +20137,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    WildcardPortListSyntax(Token openParen, Token dotStar, Token closeParen) :
 +        PortListSyntax(SyntaxKind::WildcardPortList), openParen(openParen), dotStar(dotStar), closeParen(closeParen) {
 +    }
++
++    explicit WildcardPortListSyntax(const WildcardPortListSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -18439,6 +20161,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        for (auto child : this->declarations)
 +            child->parent = this;
 +    }
++
++    explicit ParameterPortListSyntax(const ParameterPortListSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -18467,6 +20191,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->ports) this->ports->parent = this;
 +    }
 +
++    explicit ModuleHeaderSyntax(const ModuleHeaderSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -18491,6 +20217,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->blockName) this->blockName->parent = this;
 +    }
 +
++    explicit ModuleDeclarationSyntax(const ModuleDeclarationSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -18508,6 +20236,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(SyntaxKind::ExternModule), externKeyword(externKeyword), header(&header) {
 +        this->header->parent = this;
 +    }
++
++    explicit ExternModuleSyntax(const ExternModuleSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -18529,6 +20259,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->qualifiers.parent = this;
 +    }
 +
++    explicit EmptyMemberSyntax(const EmptyMemberSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -18546,6 +20278,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        MemberSyntax(kind, attributes), keyword(keyword), statement(&statement) {
 +        this->statement->parent = this;
 +    }
++
++    explicit ProceduralBlockSyntax(const ProceduralBlockSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -18567,6 +20301,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        for (auto child : this->members)
 +            child->parent = this;
 +    }
++
++    explicit GenerateRegionSyntax(const GenerateRegionSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -18599,6 +20335,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->block->parent = this;
 +    }
 +
++    explicit LoopGenerateSyntax(const LoopGenerateSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -18622,6 +20360,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->block->parent = this;
 +        if (this->elseClause) this->elseClause->parent = this;
 +    }
++
++    explicit IfGenerateSyntax(const IfGenerateSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -18647,6 +20387,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        for (auto child : this->items)
 +            child->parent = this;
 +    }
++
++    explicit CaseGenerateSyntax(const CaseGenerateSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -18675,6 +20417,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->endName) this->endName->parent = this;
 +    }
 +
++    explicit GenerateBlockSyntax(const GenerateBlockSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -18691,6 +20435,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    DividerClauseSyntax(Token divide, Token value) :
 +        SyntaxNode(SyntaxKind::DividerClause), divide(divide), value(value) {
 +    }
++
++    explicit DividerClauseSyntax(const DividerClauseSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -18712,6 +20458,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->divider) this->divider->parent = this;
 +    }
 +
++    explicit TimeUnitsDeclarationSyntax(const TimeUnitsDeclarationSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -18731,6 +20479,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit PortConnectionSyntax(const PortConnectionSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -18746,6 +20496,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    EmptyPortConnectionSyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, Token placeholder) :
 +        PortConnectionSyntax(SyntaxKind::EmptyPortConnection, attributes), placeholder(placeholder) {
 +    }
++
++    explicit EmptyPortConnectionSyntax(const EmptyPortConnectionSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -18763,6 +20515,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        PortConnectionSyntax(SyntaxKind::OrderedPortConnection, attributes), expr(&expr) {
 +        this->expr->parent = this;
 +    }
++
++    explicit OrderedPortConnectionSyntax(const OrderedPortConnectionSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -18785,6 +20539,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->expr) this->expr->parent = this;
 +    }
 +
++    explicit NamedPortConnectionSyntax(const NamedPortConnectionSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -18800,6 +20556,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    WildcardPortConnectionSyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, Token dotStar) :
 +        PortConnectionSyntax(SyntaxKind::WildcardPortConnection, attributes), dotStar(dotStar) {
 +    }
++
++    explicit WildcardPortConnectionSyntax(const WildcardPortConnectionSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -18827,6 +20585,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit HierarchicalInstanceSyntax(const HierarchicalInstanceSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -18850,6 +20610,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit HierarchyInstantiationSyntax(const HierarchyInstantiationSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -18869,6 +20631,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        for (auto child : this->targets)
 +            child->parent = this;
 +    }
++
++    explicit BindTargetListSyntax(const BindTargetListSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -18892,6 +20656,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->instantiation->parent = this;
 +    }
 +
++    explicit BindDirectiveSyntax(const BindDirectiveSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -18911,6 +20677,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        for (auto child : this->dimensions)
 +            child->parent = this;
 +    }
++
++    explicit GateInstanceNameSyntax(const GateInstanceNameSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -18934,6 +20702,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        for (auto child : this->connections)
 +            child->parent = this;
 +    }
++
++    explicit GateInstanceSyntax(const GateInstanceSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -18959,6 +20729,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        for (auto child : this->instances)
 +            child->parent = this;
 +    }
++
++    explicit GateInstantiationSyntax(const GateInstantiationSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -18986,6 +20758,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->declarator->parent = this;
 +    }
 +
++    explicit FunctionPortSyntax(const FunctionPortSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -19006,6 +20780,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        for (auto child : this->ports)
 +            child->parent = this;
 +    }
++
++    explicit FunctionPortListSyntax(const FunctionPortListSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -19029,6 +20805,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->name->parent = this;
 +        if (this->portList) this->portList->parent = this;
 +    }
++
++    explicit FunctionPrototypeSyntax(const FunctionPrototypeSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -19055,6 +20833,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->endBlockName) this->endBlockName->parent = this;
 +    }
 +
++    explicit FunctionDeclarationSyntax(const FunctionDeclarationSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -19080,6 +20860,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->declarator->parent = this;
 +    }
 +
++    explicit AssertionItemPortSyntax(const AssertionItemPortSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -19100,6 +20882,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        for (auto child : this->ports)
 +            child->parent = this;
 +    }
++
++    explicit AssertionItemPortListSyntax(const AssertionItemPortListSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -19122,6 +20906,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->portList) this->portList->parent = this;
 +        this->initializer->parent = this;
 +    }
++
++    explicit LetDeclarationSyntax(const LetDeclarationSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -19153,6 +20939,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->endBlockName) this->endBlockName->parent = this;
 +    }
 +
++    explicit PropertyDeclarationSyntax(const PropertyDeclarationSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -19183,6 +20971,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->endBlockName) this->endBlockName->parent = this;
 +    }
 +
++    explicit SequenceDeclarationSyntax(const SequenceDeclarationSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -19203,6 +20993,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->arguments) this->arguments->parent = this;
 +    }
 +
++    explicit ExtendsClauseSyntax(const ExtendsClauseSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -19222,6 +21014,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        for (auto child : this->interfaces)
 +            child->parent = this;
 +    }
++
++    explicit ImplementsClauseSyntax(const ImplementsClauseSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -19256,6 +21050,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->endBlockName) this->endBlockName->parent = this;
 +    }
 +
++    explicit ClassDeclarationSyntax(const ClassDeclarationSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -19274,6 +21070,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->qualifiers.parent = this;
 +        this->declaration->parent = this;
 +    }
++
++    explicit ClassPropertyDeclarationSyntax(const ClassPropertyDeclarationSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -19294,6 +21092,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->declaration->parent = this;
 +    }
 +
++    explicit ClassMethodDeclarationSyntax(const ClassMethodDeclarationSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -19313,6 +21113,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->qualifiers.parent = this;
 +        this->prototype->parent = this;
 +    }
++
++    explicit ClassMethodPrototypeSyntax(const ClassMethodPrototypeSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -19339,6 +21141,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit ContinuousAssignSyntax(const ContinuousAssignSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -19350,13 +21154,15 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +struct DefParamAssignmentSyntax : public SyntaxNode {
 +    not_null<NameSyntax*> name;
-+    EqualsValueClauseSyntax* setter;
++    not_null<EqualsValueClauseSyntax*> setter;
 +
-+    DefParamAssignmentSyntax(NameSyntax& name, EqualsValueClauseSyntax* setter) :
-+        SyntaxNode(SyntaxKind::DefParamAssignment), name(&name), setter(setter) {
++    DefParamAssignmentSyntax(NameSyntax& name, EqualsValueClauseSyntax& setter) :
++        SyntaxNode(SyntaxKind::DefParamAssignment), name(&name), setter(&setter) {
 +        this->name->parent = this;
-+        if (this->setter) this->setter->parent = this;
++        this->setter->parent = this;
 +    }
++
++    explicit DefParamAssignmentSyntax(const DefParamAssignmentSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -19379,6 +21185,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit DefParamSyntax(const DefParamSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -19396,6 +21204,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        MemberSyntax(SyntaxKind::ModportClockingPort, attributes), clocking(clocking), name(name) {
 +    }
 +
++    explicit ModportClockingPortSyntax(const ModportClockingPortSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -19411,6 +21221,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(kind) {
 +    }
 +
++    explicit ModportPortSyntax(const ModportPortSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +};
 +
@@ -19420,6 +21232,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    ModportNamedPortSyntax(Token name) :
 +        ModportPortSyntax(SyntaxKind::ModportNamedPort), name(name) {
 +    }
++
++    explicit ModportNamedPortSyntax(const ModportNamedPortSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -19442,6 +21256,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->expr) this->expr->parent = this;
 +    }
 +
++    explicit ModportExplicitPortSyntax(const ModportExplicitPortSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -19462,6 +21278,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit ModportSimplePortListSyntax(const ModportSimplePortListSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -19478,6 +21296,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        ModportPortSyntax(SyntaxKind::ModportSubroutinePort), prototype(&prototype) {
 +        this->prototype->parent = this;
 +    }
++
++    explicit ModportSubroutinePortSyntax(const ModportSubroutinePortSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -19499,6 +21319,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit ModportSubroutinePortListSyntax(const ModportSubroutinePortListSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -19516,6 +21338,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(SyntaxKind::ModportItem), name(name), ports(&ports) {
 +        this->ports->parent = this;
 +    }
++
++    explicit ModportItemSyntax(const ModportItemSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -19538,6 +21362,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit ModportDeclarationSyntax(const ModportDeclarationSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -19555,6 +21381,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(SyntaxKind::ClockingSkew), edge(edge), delay(delay) {
 +        if (this->delay) this->delay->parent = this;
 +    }
++
++    explicit ClockingSkewSyntax(const ClockingSkewSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -19577,6 +21405,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->ouputSkew) this->ouputSkew->parent = this;
 +    }
 +
++    explicit ClockingDirectionSyntax(const ClockingDirectionSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -19595,6 +21425,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        MemberSyntax(SyntaxKind::DefaultSkewItem, attributes), keyword(keyword), direction(&direction), semi(semi) {
 +        this->direction->parent = this;
 +    }
++
++    explicit DefaultSkewItemSyntax(const DefaultSkewItemSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -19617,6 +21449,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        for (auto child : this->decls)
 +            child->parent = this;
 +    }
++
++    explicit ClockingItemSyntax(const ClockingItemSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -19647,6 +21481,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->endBlockName) this->endBlockName->parent = this;
 +    }
 +
++    explicit ClockingDeclarationSyntax(const ClockingDeclarationSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -19665,6 +21501,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    DefaultClockingReferenceSyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, Token defaultKeyword, Token clocking, Token name, Token semi) :
 +        MemberSyntax(SyntaxKind::DefaultClockingReference, attributes), defaultKeyword(defaultKeyword), clocking(clocking), name(name), semi(semi) {
 +    }
++
++    explicit DefaultClockingReferenceSyntax(const DefaultClockingReferenceSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -19689,6 +21527,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->method->parent = this;
 +    }
 +
++    explicit DPIImportSyntax(const DPIImportSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -19711,6 +21551,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        MemberSyntax(SyntaxKind::DPIExport, attributes), keyword(keyword), specString(specString), c_identifier(c_identifier), equals(equals), functionOrTask(functionOrTask), name(name), semi(semi) {
 +    }
 +
++    explicit DPIExportSyntax(const DPIExportSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -19730,6 +21572,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->arguments) this->arguments->parent = this;
 +    }
 +
++    explicit ElabSystemTaskSyntax(const ElabSystemTaskSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -19739,6 +21583,711 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    ElabSystemTaskSyntax* clone(BumpAllocator& alloc) const;
 +};
 +
++struct UdpPortDeclSyntax : public SyntaxNode {
++    SyntaxList<AttributeInstanceSyntax> attributes;
++
++    UdpPortDeclSyntax(SyntaxKind kind, const SyntaxList<AttributeInstanceSyntax>& attributes) :
++        SyntaxNode(kind), attributes(attributes) {
++        this->attributes.parent = this;
++        for (auto child : this->attributes)
++            child->parent = this;
++    }
++
++    explicit UdpPortDeclSyntax(const UdpPortDeclSyntax&) = default;
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    UdpPortDeclSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct UdpOutputPortDeclSyntax : public UdpPortDeclSyntax {
++    Token keyword;
++    Token reg;
++    Token name;
++    EqualsValueClauseSyntax* initializer;
++
++    UdpOutputPortDeclSyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, Token reg, Token name, EqualsValueClauseSyntax* initializer) :
++        UdpPortDeclSyntax(SyntaxKind::UdpOutputPortDecl, attributes), keyword(keyword), reg(reg), name(name), initializer(initializer) {
++        if (this->initializer) this->initializer->parent = this;
++    }
++
++    explicit UdpOutputPortDeclSyntax(const UdpOutputPortDeclSyntax&) = default;
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    UdpOutputPortDeclSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct UdpInputPortDeclSyntax : public UdpPortDeclSyntax {
++    Token keyword;
++    SeparatedSyntaxList<IdentifierNameSyntax> names;
++
++    UdpInputPortDeclSyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, const SeparatedSyntaxList<IdentifierNameSyntax>& names) :
++        UdpPortDeclSyntax(SyntaxKind::UdpInputPortDecl, attributes), keyword(keyword), names(names) {
++        this->names.parent = this;
++        for (auto child : this->names)
++            child->parent = this;
++    }
++
++    explicit UdpInputPortDeclSyntax(const UdpInputPortDeclSyntax&) = default;
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    UdpInputPortDeclSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct UdpPortListSyntax : public SyntaxNode {
++
++    UdpPortListSyntax(SyntaxKind kind) :
++        SyntaxNode(kind) {
++    }
++
++    explicit UdpPortListSyntax(const UdpPortListSyntax&) = default;
++
++    static bool isKind(SyntaxKind kind);
++};
++
++struct AnsiUdpPortListSyntax : public UdpPortListSyntax {
++    Token openParen;
++    SeparatedSyntaxList<UdpPortDeclSyntax> ports;
++    Token closeParen;
++    Token semi;
++
++    AnsiUdpPortListSyntax(Token openParen, const SeparatedSyntaxList<UdpPortDeclSyntax>& ports, Token closeParen, Token semi) :
++        UdpPortListSyntax(SyntaxKind::AnsiUdpPortList), openParen(openParen), ports(ports), closeParen(closeParen), semi(semi) {
++        this->ports.parent = this;
++        for (auto child : this->ports)
++            child->parent = this;
++    }
++
++    explicit AnsiUdpPortListSyntax(const AnsiUdpPortListSyntax&) = default;
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    AnsiUdpPortListSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct NonAnsiUdpPortListSyntax : public UdpPortListSyntax {
++    Token openParen;
++    SeparatedSyntaxList<IdentifierNameSyntax> ports;
++    Token closeParen;
++    Token semi;
++
++    NonAnsiUdpPortListSyntax(Token openParen, const SeparatedSyntaxList<IdentifierNameSyntax>& ports, Token closeParen, Token semi) :
++        UdpPortListSyntax(SyntaxKind::NonAnsiUdpPortList), openParen(openParen), ports(ports), closeParen(closeParen), semi(semi) {
++        this->ports.parent = this;
++        for (auto child : this->ports)
++            child->parent = this;
++    }
++
++    explicit NonAnsiUdpPortListSyntax(const NonAnsiUdpPortListSyntax&) = default;
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    NonAnsiUdpPortListSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct WildcardUdpPortListSyntax : public UdpPortListSyntax {
++    Token openParen;
++    Token dotStar;
++    Token closeParen;
++    Token semi;
++
++    WildcardUdpPortListSyntax(Token openParen, Token dotStar, Token closeParen, Token semi) :
++        UdpPortListSyntax(SyntaxKind::WildcardUdpPortList), openParen(openParen), dotStar(dotStar), closeParen(closeParen), semi(semi) {
++    }
++
++    explicit WildcardUdpPortListSyntax(const WildcardUdpPortListSyntax&) = default;
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    WildcardUdpPortListSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct UdpInitialStmtSyntax : public SyntaxNode {
++    Token initial;
++    Token name;
++    Token equals;
++    not_null<ExpressionSyntax*> value;
++    Token semi;
++
++    UdpInitialStmtSyntax(Token initial, Token name, Token equals, ExpressionSyntax& value, Token semi) :
++        SyntaxNode(SyntaxKind::UdpInitialStmt), initial(initial), name(name), equals(equals), value(&value), semi(semi) {
++        this->value->parent = this;
++    }
++
++    explicit UdpInitialStmtSyntax(const UdpInitialStmtSyntax&) = default;
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    UdpInitialStmtSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct UdpEdgeIndicatorSyntax : public SyntaxNode {
++    Token openParen;
++    Token first;
++    Token second;
++    Token closeParen;
++
++    UdpEdgeIndicatorSyntax(Token openParen, Token first, Token second, Token closeParen) :
++        SyntaxNode(SyntaxKind::UdpEdgeIndicator), openParen(openParen), first(first), second(second), closeParen(closeParen) {
++    }
++
++    explicit UdpEdgeIndicatorSyntax(const UdpEdgeIndicatorSyntax&) = default;
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    UdpEdgeIndicatorSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct UdpEntrySyntax : public SyntaxNode {
++    TokenList preInputs;
++    UdpEdgeIndicatorSyntax* edgeIndicator;
++    TokenList postInputs;
++    Token colon1;
++    Token current;
++    Token colon2;
++    Token next;
++    Token semi;
++
++    UdpEntrySyntax(const TokenList& preInputs, UdpEdgeIndicatorSyntax* edgeIndicator, const TokenList& postInputs, Token colon1, Token current, Token colon2, Token next, Token semi) :
++        SyntaxNode(SyntaxKind::UdpEntry), preInputs(preInputs), edgeIndicator(edgeIndicator), postInputs(postInputs), colon1(colon1), current(current), colon2(colon2), next(next), semi(semi) {
++        this->preInputs.parent = this;
++        if (this->edgeIndicator) this->edgeIndicator->parent = this;
++        this->postInputs.parent = this;
++    }
++
++    explicit UdpEntrySyntax(const UdpEntrySyntax&) = default;
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    UdpEntrySyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct UdpBodySyntax : public SyntaxNode {
++    SeparatedSyntaxList<UdpPortDeclSyntax> portDecls;
++    UdpInitialStmtSyntax* initialStmt;
++    Token table;
++    SyntaxList<UdpEntrySyntax> entries;
++    Token endtable;
++
++    UdpBodySyntax(const SeparatedSyntaxList<UdpPortDeclSyntax>& portDecls, UdpInitialStmtSyntax* initialStmt, Token table, const SyntaxList<UdpEntrySyntax>& entries, Token endtable) :
++        SyntaxNode(SyntaxKind::UdpBody), portDecls(portDecls), initialStmt(initialStmt), table(table), entries(entries), endtable(endtable) {
++        this->portDecls.parent = this;
++        for (auto child : this->portDecls)
++            child->parent = this;
++        if (this->initialStmt) this->initialStmt->parent = this;
++        this->entries.parent = this;
++        for (auto child : this->entries)
++            child->parent = this;
++    }
++
++    explicit UdpBodySyntax(const UdpBodySyntax&) = default;
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    UdpBodySyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct UdpDeclarationSyntax : public MemberSyntax {
++    Token primitive;
++    Token name;
++    not_null<UdpPortListSyntax*> portList;
++    not_null<UdpBodySyntax*> body;
++    Token endprimitive;
++    NamedBlockClauseSyntax* endBlockName;
++
++    UdpDeclarationSyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, Token primitive, Token name, UdpPortListSyntax& portList, UdpBodySyntax& body, Token endprimitive, NamedBlockClauseSyntax* endBlockName) :
++        MemberSyntax(SyntaxKind::UdpDeclaration, attributes), primitive(primitive), name(name), portList(&portList), body(&body), endprimitive(endprimitive), endBlockName(endBlockName) {
++        this->portList->parent = this;
++        this->body->parent = this;
++        if (this->endBlockName) this->endBlockName->parent = this;
++    }
++
++    explicit UdpDeclarationSyntax(const UdpDeclarationSyntax&) = default;
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    UdpDeclarationSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct SpecparamDeclaratorSyntax : public SyntaxNode {
++    Token name;
++    Token equals;
++    not_null<ExpressionSyntax*> value;
++
++    SpecparamDeclaratorSyntax(Token name, Token equals, ExpressionSyntax& value) :
++        SyntaxNode(SyntaxKind::SpecparamDeclarator), name(name), equals(equals), value(&value) {
++        this->value->parent = this;
++    }
++
++    explicit SpecparamDeclaratorSyntax(const SpecparamDeclaratorSyntax&) = default;
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    SpecparamDeclaratorSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct SpecparamDeclarationSyntax : public MemberSyntax {
++    Token keyword;
++    not_null<ImplicitTypeSyntax*> type;
++    SeparatedSyntaxList<SpecparamDeclaratorSyntax> declarators;
++    Token semi;
++
++    SpecparamDeclarationSyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, ImplicitTypeSyntax& type, const SeparatedSyntaxList<SpecparamDeclaratorSyntax>& declarators, Token semi) :
++        MemberSyntax(SyntaxKind::SpecparamDeclaration, attributes), keyword(keyword), type(&type), declarators(declarators), semi(semi) {
++        this->type->parent = this;
++        this->declarators.parent = this;
++        for (auto child : this->declarators)
++            child->parent = this;
++    }
++
++    explicit SpecparamDeclarationSyntax(const SpecparamDeclarationSyntax&) = default;
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    SpecparamDeclarationSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct PathSuffixSyntax : public SyntaxNode {
++
++    PathSuffixSyntax(SyntaxKind kind) :
++        SyntaxNode(kind) {
++    }
++
++    explicit PathSuffixSyntax(const PathSuffixSyntax&) = default;
++
++    static bool isKind(SyntaxKind kind);
++};
++
++struct SimplePathSuffixSyntax : public PathSuffixSyntax {
++    SeparatedSyntaxList<NameSyntax> outputs;
++
++    SimplePathSuffixSyntax(const SeparatedSyntaxList<NameSyntax>& outputs) :
++        PathSuffixSyntax(SyntaxKind::SimplePathSuffix), outputs(outputs) {
++        this->outputs.parent = this;
++        for (auto child : this->outputs)
++            child->parent = this;
++    }
++
++    explicit SimplePathSuffixSyntax(const SimplePathSuffixSyntax&) = default;
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    SimplePathSuffixSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct EdgeSensitivePathSuffixSyntax : public PathSuffixSyntax {
++    Token openParen;
++    SeparatedSyntaxList<NameSyntax> outputs;
++    Token polarityOperator;
++    Token colon;
++    not_null<ExpressionSyntax*> expr;
++    Token closeParen;
++
++    EdgeSensitivePathSuffixSyntax(Token openParen, const SeparatedSyntaxList<NameSyntax>& outputs, Token polarityOperator, Token colon, ExpressionSyntax& expr, Token closeParen) :
++        PathSuffixSyntax(SyntaxKind::EdgeSensitivePathSuffix), openParen(openParen), outputs(outputs), polarityOperator(polarityOperator), colon(colon), expr(&expr), closeParen(closeParen) {
++        this->outputs.parent = this;
++        for (auto child : this->outputs)
++            child->parent = this;
++        this->expr->parent = this;
++    }
++
++    explicit EdgeSensitivePathSuffixSyntax(const EdgeSensitivePathSuffixSyntax&) = default;
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    EdgeSensitivePathSuffixSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct PathDescriptionSyntax : public SyntaxNode {
++    Token openParen;
++    Token edgeIdentifier;
++    SeparatedSyntaxList<NameSyntax> inputs;
++    Token polarityOperator;
++    Token pathOperator;
++    not_null<PathSuffixSyntax*> suffix;
++    Token closeParen;
++
++    PathDescriptionSyntax(Token openParen, Token edgeIdentifier, const SeparatedSyntaxList<NameSyntax>& inputs, Token polarityOperator, Token pathOperator, PathSuffixSyntax& suffix, Token closeParen) :
++        SyntaxNode(SyntaxKind::PathDescription), openParen(openParen), edgeIdentifier(edgeIdentifier), inputs(inputs), polarityOperator(polarityOperator), pathOperator(pathOperator), suffix(&suffix), closeParen(closeParen) {
++        this->inputs.parent = this;
++        for (auto child : this->inputs)
++            child->parent = this;
++        this->suffix->parent = this;
++    }
++
++    explicit PathDescriptionSyntax(const PathDescriptionSyntax&) = default;
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    PathDescriptionSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct PathDeclarationSyntax : public MemberSyntax {
++    not_null<PathDescriptionSyntax*> desc;
++    Token equals;
++    Token openParen;
++    SeparatedSyntaxList<ExpressionSyntax> delays;
++    Token closeParen;
++    Token semi;
++
++    PathDeclarationSyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, PathDescriptionSyntax& desc, Token equals, Token openParen, const SeparatedSyntaxList<ExpressionSyntax>& delays, Token closeParen, Token semi) :
++        MemberSyntax(SyntaxKind::PathDeclaration, attributes), desc(&desc), equals(equals), openParen(openParen), delays(delays), closeParen(closeParen), semi(semi) {
++        this->desc->parent = this;
++        this->delays.parent = this;
++        for (auto child : this->delays)
++            child->parent = this;
++    }
++
++    explicit PathDeclarationSyntax(const PathDeclarationSyntax&) = default;
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    PathDeclarationSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct ConditionalPathDeclarationSyntax : public MemberSyntax {
++    Token keyword;
++    Token openParen;
++    not_null<ExpressionSyntax*> predicate;
++    Token closeParen;
++    not_null<PathDeclarationSyntax*> path;
++
++    ConditionalPathDeclarationSyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, Token openParen, ExpressionSyntax& predicate, Token closeParen, PathDeclarationSyntax& path) :
++        MemberSyntax(SyntaxKind::ConditionalPathDeclaration, attributes), keyword(keyword), openParen(openParen), predicate(&predicate), closeParen(closeParen), path(&path) {
++        this->predicate->parent = this;
++        this->path->parent = this;
++    }
++
++    explicit ConditionalPathDeclarationSyntax(const ConditionalPathDeclarationSyntax&) = default;
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    ConditionalPathDeclarationSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct IfNonePathDeclarationSyntax : public MemberSyntax {
++    Token keyword;
++    not_null<PathDeclarationSyntax*> path;
++
++    IfNonePathDeclarationSyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, PathDeclarationSyntax& path) :
++        MemberSyntax(SyntaxKind::IfNonePathDeclaration, attributes), keyword(keyword), path(&path) {
++        this->path->parent = this;
++    }
++
++    explicit IfNonePathDeclarationSyntax(const IfNonePathDeclarationSyntax&) = default;
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    IfNonePathDeclarationSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct PulseStyleDeclarationSyntax : public MemberSyntax {
++    Token keyword;
++    SeparatedSyntaxList<NameSyntax> inputs;
++    Token semi;
++
++    PulseStyleDeclarationSyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, const SeparatedSyntaxList<NameSyntax>& inputs, Token semi) :
++        MemberSyntax(SyntaxKind::PulseStyleDeclaration, attributes), keyword(keyword), inputs(inputs), semi(semi) {
++        this->inputs.parent = this;
++        for (auto child : this->inputs)
++            child->parent = this;
++    }
++
++    explicit PulseStyleDeclarationSyntax(const PulseStyleDeclarationSyntax&) = default;
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    PulseStyleDeclarationSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct TimingCheckArgSyntax : public SyntaxNode {
++
++    TimingCheckArgSyntax(SyntaxKind kind) :
++        SyntaxNode(kind) {
++    }
++
++    explicit TimingCheckArgSyntax(const TimingCheckArgSyntax&) = default;
++
++    static bool isKind(SyntaxKind kind);
++};
++
++struct EmptyTimingCheckArgSyntax : public TimingCheckArgSyntax {
++    Token placeholder;
++
++    EmptyTimingCheckArgSyntax(Token placeholder) :
++        TimingCheckArgSyntax(SyntaxKind::EmptyTimingCheckArg), placeholder(placeholder) {
++    }
++
++    explicit EmptyTimingCheckArgSyntax(const EmptyTimingCheckArgSyntax&) = default;
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    EmptyTimingCheckArgSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct EdgeDescriptorSyntax : public SyntaxNode {
++    Token t1;
++    Token t2;
++
++    EdgeDescriptorSyntax(Token t1, Token t2) :
++        SyntaxNode(SyntaxKind::EdgeDescriptor), t1(t1), t2(t2) {
++    }
++
++    explicit EdgeDescriptorSyntax(const EdgeDescriptorSyntax&) = default;
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    EdgeDescriptorSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct EdgeControlSpecifierSyntax : public SyntaxNode {
++    Token openBracket;
++    SeparatedSyntaxList<EdgeDescriptorSyntax> descriptors;
++    Token closeBracket;
++
++    EdgeControlSpecifierSyntax(Token openBracket, const SeparatedSyntaxList<EdgeDescriptorSyntax>& descriptors, Token closeBracket) :
++        SyntaxNode(SyntaxKind::EdgeControlSpecifier), openBracket(openBracket), descriptors(descriptors), closeBracket(closeBracket) {
++        this->descriptors.parent = this;
++        for (auto child : this->descriptors)
++            child->parent = this;
++    }
++
++    explicit EdgeControlSpecifierSyntax(const EdgeControlSpecifierSyntax&) = default;
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    EdgeControlSpecifierSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct TimingCheckConditionSyntax : public SyntaxNode {
++    Token tripleAnd;
++    not_null<ExpressionSyntax*> expr;
++
++    TimingCheckConditionSyntax(Token tripleAnd, ExpressionSyntax& expr) :
++        SyntaxNode(SyntaxKind::TimingCheckCondition), tripleAnd(tripleAnd), expr(&expr) {
++        this->expr->parent = this;
++    }
++
++    explicit TimingCheckConditionSyntax(const TimingCheckConditionSyntax&) = default;
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    TimingCheckConditionSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct TimingCheckEventSyntax : public TimingCheckArgSyntax {
++    Token edge;
++    EdgeControlSpecifierSyntax* controlSpecifier;
++    not_null<NameSyntax*> terminal;
++    TimingCheckConditionSyntax* condition;
++
++    TimingCheckEventSyntax(Token edge, EdgeControlSpecifierSyntax* controlSpecifier, NameSyntax& terminal, TimingCheckConditionSyntax* condition) :
++        TimingCheckArgSyntax(SyntaxKind::TimingCheckEvent), edge(edge), controlSpecifier(controlSpecifier), terminal(&terminal), condition(condition) {
++        if (this->controlSpecifier) this->controlSpecifier->parent = this;
++        this->terminal->parent = this;
++        if (this->condition) this->condition->parent = this;
++    }
++
++    explicit TimingCheckEventSyntax(const TimingCheckEventSyntax&) = default;
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    TimingCheckEventSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct DelayedTerminalArgSyntax : public TimingCheckArgSyntax {
++    Token terminal;
++    Token openBracket;
++    not_null<ExpressionSyntax*> expr;
++    Token closeBracket;
++
++    DelayedTerminalArgSyntax(Token terminal, Token openBracket, ExpressionSyntax& expr, Token closeBracket) :
++        TimingCheckArgSyntax(SyntaxKind::DelayedTerminalArg), terminal(terminal), openBracket(openBracket), expr(&expr), closeBracket(closeBracket) {
++        this->expr->parent = this;
++    }
++
++    explicit DelayedTerminalArgSyntax(const DelayedTerminalArgSyntax&) = default;
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    DelayedTerminalArgSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct ExpressionTimingCheckArgSyntax : public TimingCheckArgSyntax {
++    not_null<ExpressionSyntax*> expr;
++    TimingCheckConditionSyntax* condition;
++
++    ExpressionTimingCheckArgSyntax(ExpressionSyntax& expr, TimingCheckConditionSyntax* condition) :
++        TimingCheckArgSyntax(SyntaxKind::ExpressionTimingCheckArg), expr(&expr), condition(condition) {
++        this->expr->parent = this;
++        if (this->condition) this->condition->parent = this;
++    }
++
++    explicit ExpressionTimingCheckArgSyntax(const ExpressionTimingCheckArgSyntax&) = default;
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    ExpressionTimingCheckArgSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct SystemTimingCheckSyntax : public MemberSyntax {
++    Token name;
++    Token openParen;
++    SeparatedSyntaxList<TimingCheckArgSyntax> args;
++    Token closeParen;
++    Token semi;
++
++    SystemTimingCheckSyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, Token name, Token openParen, const SeparatedSyntaxList<TimingCheckArgSyntax>& args, Token closeParen, Token semi) :
++        MemberSyntax(SyntaxKind::SystemTimingCheck, attributes), name(name), openParen(openParen), args(args), closeParen(closeParen), semi(semi) {
++        this->args.parent = this;
++        for (auto child : this->args)
++            child->parent = this;
++    }
++
++    explicit SystemTimingCheckSyntax(const SystemTimingCheckSyntax&) = default;
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    SystemTimingCheckSyntax* clone(BumpAllocator& alloc) const;
++};
++
++struct SpecifyBlockSyntax : public MemberSyntax {
++    Token specify;
++    SyntaxList<MemberSyntax> items;
++    Token endspecify;
++
++    SpecifyBlockSyntax(const SyntaxList<AttributeInstanceSyntax>& attributes, Token specify, const SyntaxList<MemberSyntax>& items, Token endspecify) :
++        MemberSyntax(SyntaxKind::SpecifyBlock, attributes), specify(specify), items(items), endspecify(endspecify) {
++        this->items.parent = this;
++        for (auto child : this->items)
++            child->parent = this;
++    }
++
++    explicit SpecifyBlockSyntax(const SpecifyBlockSyntax&) = default;
++
++    static bool isKind(SyntaxKind kind);
++
++    TokenOrSyntax getChild(size_t index);
++    ConstTokenOrSyntax getChild(size_t index) const;
++    void setChild(size_t index, TokenOrSyntax child);
++
++    SpecifyBlockSyntax* clone(BumpAllocator& alloc) const;
++};
++
 +// ----- CONSTRAINTS -----
 +
 +struct ConstraintItemSyntax : public SyntaxNode {
@@ -19746,6 +22295,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    ConstraintItemSyntax(SyntaxKind kind) :
 +        SyntaxNode(kind) {
 +    }
++
++    explicit ConstraintItemSyntax(const ConstraintItemSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +};
@@ -19758,6 +22309,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(SyntaxKind::DistWeight), op(op), expr(&expr) {
 +        this->expr->parent = this;
 +    }
++
++    explicit DistWeightSyntax(const DistWeightSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -19777,6 +22330,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->range->parent = this;
 +        if (this->weight) this->weight->parent = this;
 +    }
++
++    explicit DistItemSyntax(const DistItemSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -19800,6 +22355,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit DistConstraintListSyntax(const DistConstraintListSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -19818,6 +22375,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->expr->parent = this;
 +        this->distribution->parent = this;
 +    }
++
++    explicit ExpressionOrDistSyntax(const ExpressionOrDistSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -19838,6 +22397,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->expr->parent = this;
 +    }
 +
++    explicit ExpressionConstraintSyntax(const ExpressionConstraintSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -19856,6 +22417,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        ConstraintItemSyntax(SyntaxKind::UniquenessConstraint), unique(unique), ranges(&ranges), semi(semi) {
 +        this->ranges->parent = this;
 +    }
++
++    explicit UniquenessConstraintSyntax(const UniquenessConstraintSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -19877,6 +22440,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->constraints->parent = this;
 +    }
 +
++    explicit ImplicationConstraintSyntax(const ImplicationConstraintSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -19894,6 +22459,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(SyntaxKind::ElseConstraintClause), elseKeyword(elseKeyword), constraints(&constraints) {
 +        this->constraints->parent = this;
 +    }
++
++    explicit ElseConstraintClauseSyntax(const ElseConstraintClauseSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -19919,6 +22486,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->elseClause) this->elseClause->parent = this;
 +    }
 +
++    explicit ConditionalConstraintSyntax(const ConditionalConstraintSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -19939,6 +22508,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->constraints->parent = this;
 +    }
 +
++    explicit LoopConstraintSyntax(const LoopConstraintSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -19958,6 +22529,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        ConstraintItemSyntax(SyntaxKind::DisableConstraint), disable(disable), soft(soft), name(&name), semi(semi) {
 +        this->name->parent = this;
 +    }
++
++    explicit DisableConstraintSyntax(const DisableConstraintSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -19985,6 +22558,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit SolveBeforeConstraintSyntax(const SolveBeforeConstraintSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -20006,6 +22581,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit ConstraintBlockSyntax(const ConstraintBlockSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -20026,6 +22603,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->qualifiers.parent = this;
 +        this->name->parent = this;
 +    }
++
++    explicit ConstraintPrototypeSyntax(const ConstraintPrototypeSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -20049,6 +22628,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->block->parent = this;
 +    }
 +
++    explicit ConstraintDeclarationSyntax(const ConstraintDeclarationSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -20069,6 +22650,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        for (auto child : this->expressions)
 +            child->parent = this;
 +    }
++
++    explicit ParenExpressionListSyntax(const ParenExpressionListSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -20092,6 +22675,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->constraints) this->constraints->parent = this;
 +    }
 +
++    explicit ArrayOrRandomizeMethodExpressionSyntax(const ArrayOrRandomizeMethodExpressionSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -20114,6 +22699,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->portList->parent = this;
 +    }
 +
++    explicit WithFunctionSampleSyntax(const WithFunctionSampleSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -20129,6 +22716,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(kind) {
 +    }
 +
++    explicit BlockEventExpressionSyntax(const BlockEventExpressionSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +};
 +
@@ -20142,6 +22731,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->left->parent = this;
 +        this->right->parent = this;
 +    }
++
++    explicit BinaryBlockEventExpressionSyntax(const BinaryBlockEventExpressionSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -20160,6 +22751,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        BlockEventExpressionSyntax(SyntaxKind::PrimaryBlockEventExpression), keyword(keyword), name(&name) {
 +        this->name->parent = this;
 +    }
++
++    explicit PrimaryBlockEventExpressionSyntax(const PrimaryBlockEventExpressionSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -20180,6 +22773,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(SyntaxKind::BlockCoverageEvent), atat(atat), openParen(openParen), expr(&expr), closeParen(closeParen) {
 +        this->expr->parent = this;
 +    }
++
++    explicit BlockCoverageEventSyntax(const BlockCoverageEventSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -20210,6 +22805,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->endBlockName) this->endBlockName->parent = this;
 +    }
 +
++    explicit CovergroupDeclarationSyntax(const CovergroupDeclarationSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -20231,6 +22828,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        MemberSyntax(SyntaxKind::CoverageOption, attributes), option(option), dot(dot), name(name), equals(equals), expr(&expr), semi(semi) {
 +        this->expr->parent = this;
 +    }
++
++    explicit CoverageOptionSyntax(const CoverageOptionSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -20261,6 +22860,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit CoverpointSyntax(const CoverpointSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -20276,6 +22877,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(kind) {
 +    }
 +
++    explicit CoverageBinInitializerSyntax(const CoverageBinInitializerSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +};
 +
@@ -20286,6 +22889,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    DefaultCoverageBinInitializerSyntax(Token defaultKeyword, Token sequenceKeyword) :
 +        CoverageBinInitializerSyntax(SyntaxKind::DefaultCoverageBinInitializer), defaultKeyword(defaultKeyword), sequenceKeyword(sequenceKeyword) {
 +    }
++
++    explicit DefaultCoverageBinInitializerSyntax(const DefaultCoverageBinInitializerSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -20307,6 +22912,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->expr->parent = this;
 +    }
 +
++    explicit WithClauseSyntax(const WithClauseSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -20325,6 +22932,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->expr->parent = this;
 +        if (this->withClause) this->withClause->parent = this;
 +    }
++
++    explicit ExpressionCoverageBinInitializerSyntax(const ExpressionCoverageBinInitializerSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -20345,6 +22954,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->withClause) this->withClause->parent = this;
 +    }
 +
++    explicit RangeCoverageBinInitializerSyntax(const RangeCoverageBinInitializerSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -20364,6 +22975,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(SyntaxKind::TransRepeatRange), openBracket(openBracket), specifier(specifier), selector(selector), closeBracket(closeBracket) {
 +        if (this->selector) this->selector->parent = this;
 +    }
++
++    explicit TransRepeatRangeSyntax(const TransRepeatRangeSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -20386,6 +22999,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->repeat) this->repeat->parent = this;
 +    }
 +
++    explicit TransRangeSyntax(const TransRangeSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -20406,6 +23021,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        for (auto child : this->ranges)
 +            child->parent = this;
 +    }
++
++    explicit TransSetSyntax(const TransSetSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -20428,6 +23045,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->withClause) this->withClause->parent = this;
 +    }
 +
++    explicit TransListCoverageBinInitializerSyntax(const TransListCoverageBinInitializerSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -20447,6 +23066,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(SyntaxKind::CoverageIffClause), iff(iff), openParen(openParen), expr(&expr), closeParen(closeParen) {
 +        this->expr->parent = this;
 +    }
++
++    explicit CoverageIffClauseSyntax(const CoverageIffClauseSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -20474,6 +23095,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        if (this->iff) this->iff->parent = this;
 +    }
 +
++    explicit CoverageBinsSyntax(const CoverageBinsSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -20496,6 +23119,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit CompilationUnitSyntax(const CompilationUnitSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -20514,6 +23139,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(kind), directive(directive) {
 +    }
 +
++    explicit DirectiveSyntax(const DirectiveSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -20528,6 +23155,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    SimpleDirectiveSyntax(SyntaxKind kind, Token directive) :
 +        DirectiveSyntax(kind, directive) {
 +    }
++
++    explicit SimpleDirectiveSyntax(const SimpleDirectiveSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -20544,6 +23173,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    IncludeDirectiveSyntax(Token directive, Token fileName) :
 +        DirectiveSyntax(SyntaxKind::IncludeDirective, directive), fileName(fileName) {
 +    }
++
++    explicit IncludeDirectiveSyntax(const IncludeDirectiveSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -20563,6 +23194,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->disabledTokens.parent = this;
 +    }
 +
++    explicit ConditionalBranchDirectiveSyntax(const ConditionalBranchDirectiveSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -20579,6 +23212,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        DirectiveSyntax(kind, directive), disabledTokens(disabledTokens) {
 +        this->disabledTokens.parent = this;
 +    }
++
++    explicit UnconditionalBranchDirectiveSyntax(const UnconditionalBranchDirectiveSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -20598,6 +23233,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->tokens.parent = this;
 +    }
 +
++    explicit MacroArgumentDefaultSyntax(const MacroArgumentDefaultSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -20615,6 +23252,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(SyntaxKind::MacroFormalArgument), name(name), defaultValue(defaultValue) {
 +        if (this->defaultValue) this->defaultValue->parent = this;
 +    }
++
++    explicit MacroFormalArgumentSyntax(const MacroFormalArgumentSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -20637,6 +23276,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit MacroFormalArgumentListSyntax(const MacroFormalArgumentListSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -20657,6 +23298,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->body.parent = this;
 +    }
 +
++    explicit DefineDirectiveSyntax(const DefineDirectiveSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -20673,6 +23316,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(SyntaxKind::MacroActualArgument), tokens(tokens) {
 +        this->tokens.parent = this;
 +    }
++
++    explicit MacroActualArgumentSyntax(const MacroActualArgumentSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -20695,6 +23340,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit MacroActualArgumentListSyntax(const MacroActualArgumentListSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -20711,6 +23358,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        DirectiveSyntax(SyntaxKind::MacroUsage, directive), args(args) {
 +        if (this->args) this->args->parent = this;
 +    }
++
++    explicit MacroUsageSyntax(const MacroUsageSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -20730,6 +23379,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        DirectiveSyntax(SyntaxKind::TimeScaleDirective, directive), timeUnit(timeUnit), slash(slash), timePrecision(timePrecision) {
 +    }
 +
++    explicit TimeScaleDirectiveSyntax(const TimeScaleDirectiveSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -20746,6 +23397,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        DirectiveSyntax(SyntaxKind::DefaultNetTypeDirective, directive), netType(netType) {
 +    }
 +
++    explicit DefaultNetTypeDirectiveSyntax(const DefaultNetTypeDirectiveSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -20761,6 +23414,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    UnconnectedDriveDirectiveSyntax(Token directive, Token strength) :
 +        DirectiveSyntax(SyntaxKind::UnconnectedDriveDirective, directive), strength(strength) {
 +    }
++
++    explicit UnconnectedDriveDirectiveSyntax(const UnconnectedDriveDirectiveSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -20780,6 +23435,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        DirectiveSyntax(SyntaxKind::LineDirective, directive), lineNumber(lineNumber), fileName(fileName), level(level) {
 +    }
 +
++    explicit LineDirectiveSyntax(const LineDirectiveSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -20795,6 +23452,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    UndefDirectiveSyntax(Token directive, Token name) :
 +        DirectiveSyntax(SyntaxKind::UndefDirective, directive), name(name) {
 +    }
++
++    explicit UndefDirectiveSyntax(const UndefDirectiveSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -20812,6 +23471,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        DirectiveSyntax(SyntaxKind::BeginKeywordsDirective, directive), versionSpecifier(versionSpecifier) {
 +    }
 +
++    explicit BeginKeywordsDirectiveSyntax(const BeginKeywordsDirectiveSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -20827,6 +23488,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        SyntaxNode(kind) {
 +    }
 +
++    explicit PragmaExpressionSyntax(const PragmaExpressionSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +};
 +
@@ -20836,6 +23499,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    SimplePragmaExpressionSyntax(Token value) :
 +        PragmaExpressionSyntax(SyntaxKind::SimplePragmaExpression), value(value) {
 +    }
++
++    explicit SimplePragmaExpressionSyntax(const SimplePragmaExpressionSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -20856,6 +23521,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        this->value->parent = this;
 +    }
 +
++    explicit NameValuePragmaExpressionSyntax(const NameValuePragmaExpressionSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -20873,6 +23540,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    NumberPragmaExpressionSyntax(Token size, Token base, Token value) :
 +        PragmaExpressionSyntax(SyntaxKind::NumberPragmaExpression), size(size), base(base), value(value) {
 +    }
++
++    explicit NumberPragmaExpressionSyntax(const NumberPragmaExpressionSyntax&) = default;
 +
 +    static bool isKind(SyntaxKind kind);
 +
@@ -20895,6 +23564,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit ParenPragmaExpressionSyntax(const ParenPragmaExpressionSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -20915,6 +23586,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +            child->parent = this;
 +    }
 +
++    explicit PragmaDirectiveSyntax(const PragmaDirectiveSyntax&) = default;
++
 +    static bool isKind(SyntaxKind kind);
 +
 +    TokenOrSyntax getChild(size_t index);
@@ -20930,6 +23603,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +
 +    ActionBlockSyntax& actionBlock(StatementSyntax* statement, ElseClauseSyntax* elseClause);
 +    AnsiPortListSyntax& ansiPortList(Token openParen, const SeparatedSyntaxList<MemberSyntax>& ports, Token closeParen);
++    AnsiUdpPortListSyntax& ansiUdpPortList(Token openParen, const SeparatedSyntaxList<UdpPortDeclSyntax>& ports, Token closeParen, Token semi);
 +    ArgumentListSyntax& argumentList(Token openParen, const SeparatedSyntaxList<ArgumentSyntax>& parameters, Token closeParen);
 +    ArrayOrRandomizeMethodExpressionSyntax& arrayOrRandomizeMethodExpression(ExpressionSyntax& method, Token with, ParenExpressionListSyntax* args, ConstraintBlockSyntax* constraints);
 +    AssertionItemPortListSyntax& assertionItemPortList(Token openParen, const SeparatedSyntaxList<AssertionItemPortSyntax>& ports, Token closeParen);
@@ -20969,6 +23643,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    ConditionalBranchDirectiveSyntax& conditionalBranchDirective(SyntaxKind kind, Token directive, Token name, const TokenList& disabledTokens);
 +    ConditionalConstraintSyntax& conditionalConstraint(Token ifKeyword, Token openParen, ExpressionSyntax& condition, Token closeParen, ConstraintItemSyntax& constraints, ElseConstraintClauseSyntax* elseClause);
 +    ConditionalExpressionSyntax& conditionalExpression(ConditionalPredicateSyntax& predicate, Token question, const SyntaxList<AttributeInstanceSyntax>& attributes, ExpressionSyntax& left, Token colon, ExpressionSyntax& right);
++    ConditionalPathDeclarationSyntax& conditionalPathDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, Token openParen, ExpressionSyntax& predicate, Token closeParen, PathDeclarationSyntax& path);
 +    ConditionalPatternSyntax& conditionalPattern(ExpressionSyntax& expr, MatchesClauseSyntax* matchesClause);
 +    ConditionalPredicateSyntax& conditionalPredicate(const SeparatedSyntaxList<ConditionalPatternSyntax>& conditions);
 +    ConditionalStatementSyntax& conditionalStatement(NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, Token uniqueOrPriority, Token ifKeyword, Token openParen, ConditionalPredicateSyntax& predicate, Token closeParen, StatementSyntax& statement, ElseClauseSyntax* elseClause);
@@ -20986,7 +23661,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    DPIImportSyntax& dPIImport(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, Token specString, Token property, Token c_identifier, Token equals, FunctionPrototypeSyntax& method, Token semi);
 +    DataDeclarationSyntax& dataDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, const TokenList& modifiers, DataTypeSyntax& type, const SeparatedSyntaxList<DeclaratorSyntax>& declarators, Token semi);
 +    DeclaratorSyntax& declarator(Token name, const SyntaxList<VariableDimensionSyntax>& dimensions, EqualsValueClauseSyntax* initializer);
-+    DefParamAssignmentSyntax& defParamAssignment(NameSyntax& name, EqualsValueClauseSyntax* setter);
++    DefParamAssignmentSyntax& defParamAssignment(NameSyntax& name, EqualsValueClauseSyntax& setter);
 +    DefParamSyntax& defParam(const SyntaxList<AttributeInstanceSyntax>& attributes, Token defparam, const SeparatedSyntaxList<DefParamAssignmentSyntax>& assignments, Token semi);
 +    DefaultCaseItemSyntax& defaultCaseItem(Token defaultKeyword, Token colon, SyntaxNode& clause);
 +    DefaultClockingReferenceSyntax& defaultClockingReference(const SyntaxList<AttributeInstanceSyntax>& attributes, Token defaultKeyword, Token clocking, Token name, Token semi);
@@ -20997,6 +23672,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    DefineDirectiveSyntax& defineDirective(Token directive, Token name, MacroFormalArgumentListSyntax* formalArguments, const TokenList& body);
 +    Delay3Syntax& delay3(Token hash, Token openParen, ExpressionSyntax& delay1, Token comma1, ExpressionSyntax* delay2, Token comma2, ExpressionSyntax* delay3, Token closeParen);
 +    DelaySyntax& delay(SyntaxKind kind, Token hash, ExpressionSyntax& delayValue);
++    DelayedTerminalArgSyntax& delayedTerminalArg(Token terminal, Token openBracket, ExpressionSyntax& expr, Token closeBracket);
 +    DisableConstraintSyntax& disableConstraint(Token disable, Token soft, NameSyntax& name, Token semi);
 +    DisableForkStatementSyntax& disableForkStatement(NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, Token disable, Token fork, Token semi);
 +    DisableIffSyntax& disableIff(Token disable, Token iff, Token openParen, ExpressionSyntax& expr, Token closeParen);
@@ -21008,6 +23684,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    DoWhileStatementSyntax& doWhileStatement(NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, Token doKeyword, StatementSyntax& statement, Token whileKeyword, Token openParen, ExpressionSyntax& expr, Token closeParen, Token semi);
 +    DotMemberClauseSyntax& dotMemberClause(Token dot, Token member);
 +    DriveStrengthSyntax& driveStrength(Token openParen, Token strength0, Token comma, Token strength1, Token closeParen);
++    EdgeControlSpecifierSyntax& edgeControlSpecifier(Token openBracket, const SeparatedSyntaxList<EdgeDescriptorSyntax>& descriptors, Token closeBracket);
++    EdgeDescriptorSyntax& edgeDescriptor(Token t1, Token t2);
++    EdgeSensitivePathSuffixSyntax& edgeSensitivePathSuffix(Token openParen, const SeparatedSyntaxList<NameSyntax>& outputs, Token polarityOperator, Token colon, ExpressionSyntax& expr, Token closeParen);
 +    ElabSystemTaskSyntax& elabSystemTask(const SyntaxList<AttributeInstanceSyntax>& attributes, Token name, ArgumentListSyntax* arguments, Token semi);
 +    ElementSelectExpressionSyntax& elementSelectExpression(ExpressionSyntax& left, ElementSelectSyntax& select);
 +    ElementSelectSyntax& elementSelect(Token openBracket, SelectorSyntax* selector, Token closeBracket);
@@ -21019,6 +23698,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    EmptyPortConnectionSyntax& emptyPortConnection(const SyntaxList<AttributeInstanceSyntax>& attributes, Token placeholder);
 +    EmptyQueueExpressionSyntax& emptyQueueExpression(Token openBrace, Token closeBrace);
 +    EmptyStatementSyntax& emptyStatement(NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, Token semicolon);
++    EmptyTimingCheckArgSyntax& emptyTimingCheckArg(Token placeholder);
 +    EnumTypeSyntax& enumType(Token keyword, DataTypeSyntax* baseType, Token openBrace, const SeparatedSyntaxList<DeclaratorSyntax>& members, Token closeBrace, const SyntaxList<VariableDimensionSyntax>& dimensions);
 +    EqualsTypeClauseSyntax& equalsTypeClause(Token equals, DataTypeSyntax& type);
 +    EqualsValueClauseSyntax& equalsValueClause(Token equals, ExpressionSyntax& expr);
@@ -21032,6 +23712,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    ExpressionOrDistSyntax& expressionOrDist(ExpressionSyntax& expr, DistConstraintListSyntax& distribution);
 +    ExpressionPatternSyntax& expressionPattern(ExpressionSyntax& expr);
 +    ExpressionStatementSyntax& expressionStatement(NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, ExpressionSyntax& expr, Token semi);
++    ExpressionTimingCheckArgSyntax& expressionTimingCheckArg(ExpressionSyntax& expr, TimingCheckConditionSyntax* condition);
 +    ExtendsClauseSyntax& extendsClause(Token keyword, NameSyntax& baseName, ArgumentListSyntax* arguments);
 +    ExternModuleSyntax& externModule(Token externKeyword, ModuleHeaderSyntax& header);
 +    ForLoopStatementSyntax& forLoopStatement(NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, Token forKeyword, Token openParen, const SeparatedSyntaxList<SyntaxNode>& initializers, Token semi1, ExpressionSyntax& stopExpr, Token semi2, const SeparatedSyntaxList<ExpressionSyntax>& steps, Token closeParen, StatementSyntax& statement);
@@ -21056,6 +23737,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    IdentifierNameSyntax& identifierName(Token identifier);
 +    IdentifierSelectNameSyntax& identifierSelectName(Token identifier, const SyntaxList<ElementSelectSyntax>& selectors);
 +    IfGenerateSyntax& ifGenerate(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, Token openParen, ExpressionSyntax& condition, Token closeParen, MemberSyntax& block, ElseClauseSyntax* elseClause);
++    IfNonePathDeclarationSyntax& ifNonePathDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, PathDeclarationSyntax& path);
 +    IffEventClauseSyntax& iffEventClause(Token iff, ExpressionSyntax& expr);
 +    ImmediateAssertionMemberSyntax& immediateAssertionMember(const SyntaxList<AttributeInstanceSyntax>& attributes, ImmediateAssertionStatementSyntax& statement);
 +    ImmediateAssertionStatementSyntax& immediateAssertionStatement(SyntaxKind kind, NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, DeferredAssertionSyntax* delay, ParenthesizedExpressionSyntax& expr, ActionBlockSyntax& action);
@@ -21114,6 +23796,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    NewArrayExpressionSyntax& newArrayExpression(NameSyntax& newKeyword, Token openBracket, ExpressionSyntax& sizeExpr, Token closeBracket, ParenthesizedExpressionSyntax* initializer);
 +    NewClassExpressionSyntax& newClassExpression(NameSyntax& scopedNew, ArgumentListSyntax* argList);
 +    NonAnsiPortListSyntax& nonAnsiPortList(Token openParen, const SeparatedSyntaxList<NonAnsiPortSyntax>& ports, Token closeParen);
++    NonAnsiUdpPortListSyntax& nonAnsiUdpPortList(Token openParen, const SeparatedSyntaxList<IdentifierNameSyntax>& ports, Token closeParen, Token semi);
 +    NumberPragmaExpressionSyntax& numberPragmaExpression(Token size, Token base, Token value);
 +    OpenRangeExpressionSyntax& openRangeExpression(Token openBracket, ExpressionSyntax& left, Token colon, ExpressionSyntax& right, Token closeBracket);
 +    OpenRangeListSyntax& openRangeList(Token openBrace, const SeparatedSyntaxList<ExpressionSyntax>& valueRanges, Token closeBrace);
@@ -21130,6 +23813,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    ParenPragmaExpressionSyntax& parenPragmaExpression(Token openParen, const SeparatedSyntaxList<PragmaExpressionSyntax>& values, Token closeParen);
 +    ParenthesizedEventExpressionSyntax& parenthesizedEventExpression(Token openParen, EventExpressionSyntax& expr, Token closeParen);
 +    ParenthesizedExpressionSyntax& parenthesizedExpression(Token openParen, ExpressionSyntax& expression, Token closeParen);
++    PathDeclarationSyntax& pathDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, PathDescriptionSyntax& desc, Token equals, Token openParen, const SeparatedSyntaxList<ExpressionSyntax>& delays, Token closeParen, Token semi);
++    PathDescriptionSyntax& pathDescription(Token openParen, Token edgeIdentifier, const SeparatedSyntaxList<NameSyntax>& inputs, Token polarityOperator, Token pathOperator, PathSuffixSyntax& suffix, Token closeParen);
 +    PatternCaseItemSyntax& patternCaseItem(PatternSyntax& pattern, Token tripleAnd, ExpressionSyntax* expr, Token colon, StatementSyntax& statement);
 +    PortConcatenationSyntax& portConcatenation(Token openBrace, const SeparatedSyntaxList<PortReferenceSyntax>& references, Token closeBrace);
 +    PortDeclarationSyntax& portDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, PortHeaderSyntax& header, const SeparatedSyntaxList<DeclaratorSyntax>& declarators, Token semi);
@@ -21138,11 +23823,12 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    PragmaDirectiveSyntax& pragmaDirective(Token directive, Token name, const SeparatedSyntaxList<PragmaExpressionSyntax>& args);
 +    PrefixUnaryExpressionSyntax& prefixUnaryExpression(SyntaxKind kind, Token operatorToken, const SyntaxList<AttributeInstanceSyntax>& attributes, ExpressionSyntax& operand);
 +    PrimaryBlockEventExpressionSyntax& primaryBlockEventExpression(Token keyword, NameSyntax& name);
-+    ProceduralAssignStatementSyntax& proceduralAssignStatement(SyntaxKind kind, NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, ExpressionSyntax& lvalue, Token equals, ExpressionSyntax& value, Token semi);
++    ProceduralAssignStatementSyntax& proceduralAssignStatement(SyntaxKind kind, NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, ExpressionSyntax& expr, Token semi);
 +    ProceduralBlockSyntax& proceduralBlock(SyntaxKind kind, const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, StatementSyntax& statement);
 +    ProceduralDeassignStatementSyntax& proceduralDeassignStatement(SyntaxKind kind, NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, ExpressionSyntax& variable, Token semi);
 +    PropertyDeclarationSyntax& propertyDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, Token name, AssertionItemPortListSyntax* portList, Token semi, const SyntaxList<MemberSyntax>& assertionVariables, PropertySpecSyntax& propertySpec, Token optionalSemi, Token end, NamedBlockClauseSyntax* endBlockName);
 +    PropertySpecSyntax& propertySpec(TimingControlSyntax* clocking, DisableIffSyntax* disable, ExpressionSyntax& expr);
++    PulseStyleDeclarationSyntax& pulseStyleDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, const SeparatedSyntaxList<NameSyntax>& inputs, Token semi);
 +    QueueDimensionSpecifierSyntax& queueDimensionSpecifier(Token dollar, ColonExpressionClauseSyntax* maxSizeClause);
 +    RandCaseItemSyntax& randCaseItem(ExpressionSyntax& expr, Token colon, StatementSyntax& statement);
 +    RandCaseStatementSyntax& randCaseStatement(NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, Token randCase, const SyntaxList<RandCaseItemSyntax>& items, Token endCase);
@@ -21159,8 +23845,12 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    SignedCastExpressionSyntax& signedCastExpression(Token signing, Token apostrophe, ParenthesizedExpressionSyntax& inner);
 +    SimpleAssignmentPatternSyntax& simpleAssignmentPattern(Token openBrace, const SeparatedSyntaxList<ExpressionSyntax>& items, Token closeBrace);
 +    SimpleDirectiveSyntax& simpleDirective(SyntaxKind kind, Token directive);
++    SimplePathSuffixSyntax& simplePathSuffix(const SeparatedSyntaxList<NameSyntax>& outputs);
 +    SimplePragmaExpressionSyntax& simplePragmaExpression(Token value);
 +    SolveBeforeConstraintSyntax& solveBeforeConstraint(Token solve, const SeparatedSyntaxList<ExpressionSyntax>& beforeExpr, Token before, const SeparatedSyntaxList<ExpressionSyntax>& afterExpr, Token semi);
++    SpecifyBlockSyntax& specifyBlock(const SyntaxList<AttributeInstanceSyntax>& attributes, Token specify, const SyntaxList<MemberSyntax>& items, Token endspecify);
++    SpecparamDeclarationSyntax& specparamDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, ImplicitTypeSyntax& type, const SeparatedSyntaxList<SpecparamDeclaratorSyntax>& declarators, Token semi);
++    SpecparamDeclaratorSyntax& specparamDeclarator(Token name, Token equals, ExpressionSyntax& value);
 +    StandardCaseItemSyntax& standardCaseItem(const SeparatedSyntaxList<ExpressionSyntax>& expressions, Token colon, SyntaxNode& clause);
 +    StreamExpressionSyntax& streamExpression(ExpressionSyntax& expression, StreamExpressionWithRangeSyntax* withRange);
 +    StreamExpressionWithRangeSyntax& streamExpressionWithRange(Token withKeyword, ElementSelectSyntax& range);
@@ -21170,10 +23860,13 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    StructurePatternSyntax& structurePattern(Token openBrace, const SeparatedSyntaxList<StructurePatternMemberSyntax>& members, Token closeBrace);
 +    StructuredAssignmentPatternSyntax& structuredAssignmentPattern(Token openBrace, const SeparatedSyntaxList<AssignmentPatternItemSyntax>& items, Token closeBrace);
 +    SystemNameSyntax& systemName(Token systemIdentifier);
++    SystemTimingCheckSyntax& systemTimingCheck(const SyntaxList<AttributeInstanceSyntax>& attributes, Token name, Token openParen, const SeparatedSyntaxList<TimingCheckArgSyntax>& args, Token closeParen, Token semi);
 +    TaggedPatternSyntax& taggedPattern(Token tagged, Token memberName, PatternSyntax* pattern);
 +    TaggedUnionExpressionSyntax& taggedUnionExpression(Token tagged, Token member, ExpressionSyntax* expr);
 +    TimeScaleDirectiveSyntax& timeScaleDirective(Token directive, Token timeUnit, Token slash, Token timePrecision);
 +    TimeUnitsDeclarationSyntax& timeUnitsDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, Token time, DividerClauseSyntax* divider, Token semi);
++    TimingCheckConditionSyntax& timingCheckCondition(Token tripleAnd, ExpressionSyntax& expr);
++    TimingCheckEventSyntax& timingCheckEvent(Token edge, EdgeControlSpecifierSyntax* controlSpecifier, NameSyntax& terminal, TimingCheckConditionSyntax* condition);
 +    TimingControlExpressionConcatenationSyntax& timingControlExpressionConcatenation(ExpressionSyntax& left, TimingControlSyntax& timing, ExpressionSyntax& right);
 +    TimingControlExpressionSyntax& timingControlExpression(TimingControlSyntax& timing, ExpressionSyntax& expr);
 +    TimingControlStatementSyntax& timingControlStatement(NamedLabelSyntax* label, const SyntaxList<AttributeInstanceSyntax>& attributes, TimingControlSyntax& timingControl, StatementSyntax& statement);
@@ -21185,6 +23878,13 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    TypeParameterDeclarationSyntax& typeParameterDeclaration(Token keyword, Token typeKeyword, const SeparatedSyntaxList<TypeAssignmentSyntax>& declarators);
 +    TypeReferenceSyntax& typeReference(Token typeKeyword, Token openParen, ExpressionSyntax& expr, Token closeParen);
 +    TypedefDeclarationSyntax& typedefDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, Token typedefKeyword, DataTypeSyntax& type, Token name, const SyntaxList<VariableDimensionSyntax>& dimensions, Token semi);
++    UdpBodySyntax& udpBody(const SeparatedSyntaxList<UdpPortDeclSyntax>& portDecls, UdpInitialStmtSyntax* initialStmt, Token table, const SyntaxList<UdpEntrySyntax>& entries, Token endtable);
++    UdpDeclarationSyntax& udpDeclaration(const SyntaxList<AttributeInstanceSyntax>& attributes, Token primitive, Token name, UdpPortListSyntax& portList, UdpBodySyntax& body, Token endprimitive, NamedBlockClauseSyntax* endBlockName);
++    UdpEdgeIndicatorSyntax& udpEdgeIndicator(Token openParen, Token first, Token second, Token closeParen);
++    UdpEntrySyntax& udpEntry(const TokenList& preInputs, UdpEdgeIndicatorSyntax* edgeIndicator, const TokenList& postInputs, Token colon1, Token current, Token colon2, Token next, Token semi);
++    UdpInitialStmtSyntax& udpInitialStmt(Token initial, Token name, Token equals, ExpressionSyntax& value, Token semi);
++    UdpInputPortDeclSyntax& udpInputPortDecl(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, const SeparatedSyntaxList<IdentifierNameSyntax>& names);
++    UdpOutputPortDeclSyntax& udpOutputPortDecl(const SyntaxList<AttributeInstanceSyntax>& attributes, Token keyword, Token reg, Token name, EqualsValueClauseSyntax* initializer);
 +    UnconditionalBranchDirectiveSyntax& unconditionalBranchDirective(SyntaxKind kind, Token directive, const TokenList& disabledTokens);
 +    UnconnectedDriveDirectiveSyntax& unconnectedDriveDirective(Token directive, Token strength);
 +    UndefDirectiveSyntax& undefDirective(Token directive, Token name);
@@ -21202,6 +23902,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    WildcardPatternSyntax& wildcardPattern(Token dotStar);
 +    WildcardPortConnectionSyntax& wildcardPortConnection(const SyntaxList<AttributeInstanceSyntax>& attributes, Token dotStar);
 +    WildcardPortListSyntax& wildcardPortList(Token openParen, Token dotStar, Token closeParen);
++    WildcardUdpPortListSyntax& wildcardUdpPortList(Token openParen, Token dotStar, Token closeParen, Token semi);
 +    WithClauseSyntax& withClause(Token with, Token openParen, ExpressionSyntax& expr, Token closeParen);
 +    WithFunctionClauseSyntax& withFunctionClause(Token with, NameSyntax& name);
 +    WithFunctionSampleSyntax& withFunctionSample(Token with, Token function, Token sample, AnsiPortListSyntax& portList);
@@ -21232,6 +23933,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::AndAssignmentExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const BinaryExpressionSyntax*, BinaryExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::AndSequenceExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const BinaryExpressionSyntax*, BinaryExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::AnsiPortList: return visitor.visit(*static_cast<std::conditional_t<isConst, const AnsiPortListSyntax*, AnsiPortListSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::AnsiUdpPortList: return visitor.visit(*static_cast<std::conditional_t<isConst, const AnsiUdpPortListSyntax*, AnsiUdpPortListSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::ArgumentList: return visitor.visit(*static_cast<std::conditional_t<isConst, const ArgumentListSyntax*, ArgumentListSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::ArithmeticLeftShiftAssignmentExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const BinaryExpressionSyntax*, BinaryExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::ArithmeticRightShiftAssignmentExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const BinaryExpressionSyntax*, BinaryExpressionSyntax*>>(node), std::forward<Args>(args)...);
@@ -21291,6 +23993,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::ConcurrentAssertionMember: return visitor.visit(*static_cast<std::conditional_t<isConst, const ConcurrentAssertionMemberSyntax*, ConcurrentAssertionMemberSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::ConditionalConstraint: return visitor.visit(*static_cast<std::conditional_t<isConst, const ConditionalConstraintSyntax*, ConditionalConstraintSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::ConditionalExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const ConditionalExpressionSyntax*, ConditionalExpressionSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::ConditionalPathDeclaration: return visitor.visit(*static_cast<std::conditional_t<isConst, const ConditionalPathDeclarationSyntax*, ConditionalPathDeclarationSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::ConditionalPattern: return visitor.visit(*static_cast<std::conditional_t<isConst, const ConditionalPatternSyntax*, ConditionalPatternSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::ConditionalPredicate: return visitor.visit(*static_cast<std::conditional_t<isConst, const ConditionalPredicateSyntax*, ConditionalPredicateSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::ConditionalStatement: return visitor.visit(*static_cast<std::conditional_t<isConst, const ConditionalStatementSyntax*, ConditionalStatementSyntax*>>(node), std::forward<Args>(args)...);
@@ -21324,6 +24027,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::DefineDirective: return visitor.visit(*static_cast<std::conditional_t<isConst, const DefineDirectiveSyntax*, DefineDirectiveSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::Delay3: return visitor.visit(*static_cast<std::conditional_t<isConst, const Delay3Syntax*, Delay3Syntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::DelayControl: return visitor.visit(*static_cast<std::conditional_t<isConst, const DelaySyntax*, DelaySyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::DelayedTerminalArg: return visitor.visit(*static_cast<std::conditional_t<isConst, const DelayedTerminalArgSyntax*, DelayedTerminalArgSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::DescendingRangeSelect: return visitor.visit(*static_cast<std::conditional_t<isConst, const RangeSelectSyntax*, RangeSelectSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::DisableConstraint: return visitor.visit(*static_cast<std::conditional_t<isConst, const DisableConstraintSyntax*, DisableConstraintSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::DisableForkStatement: return visitor.visit(*static_cast<std::conditional_t<isConst, const DisableForkStatementSyntax*, DisableForkStatementSyntax*>>(node), std::forward<Args>(args)...);
@@ -21338,6 +24042,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::DoWhileStatement: return visitor.visit(*static_cast<std::conditional_t<isConst, const DoWhileStatementSyntax*, DoWhileStatementSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::DotMemberClause: return visitor.visit(*static_cast<std::conditional_t<isConst, const DotMemberClauseSyntax*, DotMemberClauseSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::DriveStrength: return visitor.visit(*static_cast<std::conditional_t<isConst, const DriveStrengthSyntax*, DriveStrengthSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::EdgeControlSpecifier: return visitor.visit(*static_cast<std::conditional_t<isConst, const EdgeControlSpecifierSyntax*, EdgeControlSpecifierSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::EdgeDescriptor: return visitor.visit(*static_cast<std::conditional_t<isConst, const EdgeDescriptorSyntax*, EdgeDescriptorSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::EdgeSensitivePathSuffix: return visitor.visit(*static_cast<std::conditional_t<isConst, const EdgeSensitivePathSuffixSyntax*, EdgeSensitivePathSuffixSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::ElabSystemTask: return visitor.visit(*static_cast<std::conditional_t<isConst, const ElabSystemTaskSyntax*, ElabSystemTaskSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::ElementSelect: return visitor.visit(*static_cast<std::conditional_t<isConst, const ElementSelectSyntax*, ElementSelectSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::ElementSelectExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const ElementSelectExpressionSyntax*, ElementSelectExpressionSyntax*>>(node), std::forward<Args>(args)...);
@@ -21351,6 +24058,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::EmptyPortConnection: return visitor.visit(*static_cast<std::conditional_t<isConst, const EmptyPortConnectionSyntax*, EmptyPortConnectionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::EmptyQueueExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const EmptyQueueExpressionSyntax*, EmptyQueueExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::EmptyStatement: return visitor.visit(*static_cast<std::conditional_t<isConst, const EmptyStatementSyntax*, EmptyStatementSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::EmptyTimingCheckArg: return visitor.visit(*static_cast<std::conditional_t<isConst, const EmptyTimingCheckArgSyntax*, EmptyTimingCheckArgSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::EndCellDefineDirective: return visitor.visit(*static_cast<std::conditional_t<isConst, const SimpleDirectiveSyntax*, SimpleDirectiveSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::EndIfDirective: return visitor.visit(*static_cast<std::conditional_t<isConst, const UnconditionalBranchDirectiveSyntax*, UnconditionalBranchDirectiveSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::EndKeywordsDirective: return visitor.visit(*static_cast<std::conditional_t<isConst, const SimpleDirectiveSyntax*, SimpleDirectiveSyntax*>>(node), std::forward<Args>(args)...);
@@ -21370,6 +24078,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::ExpressionOrDist: return visitor.visit(*static_cast<std::conditional_t<isConst, const ExpressionOrDistSyntax*, ExpressionOrDistSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::ExpressionPattern: return visitor.visit(*static_cast<std::conditional_t<isConst, const ExpressionPatternSyntax*, ExpressionPatternSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::ExpressionStatement: return visitor.visit(*static_cast<std::conditional_t<isConst, const ExpressionStatementSyntax*, ExpressionStatementSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::ExpressionTimingCheckArg: return visitor.visit(*static_cast<std::conditional_t<isConst, const ExpressionTimingCheckArgSyntax*, ExpressionTimingCheckArgSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::ExtendsClause: return visitor.visit(*static_cast<std::conditional_t<isConst, const ExtendsClauseSyntax*, ExtendsClauseSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::ExternModule: return visitor.visit(*static_cast<std::conditional_t<isConst, const ExternModuleSyntax*, ExternModuleSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::FinalBlock: return visitor.visit(*static_cast<std::conditional_t<isConst, const ProceduralBlockSyntax*, ProceduralBlockSyntax*>>(node), std::forward<Args>(args)...);
@@ -21399,6 +24108,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::IfDefDirective: return visitor.visit(*static_cast<std::conditional_t<isConst, const ConditionalBranchDirectiveSyntax*, ConditionalBranchDirectiveSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::IfGenerate: return visitor.visit(*static_cast<std::conditional_t<isConst, const IfGenerateSyntax*, IfGenerateSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::IfNDefDirective: return visitor.visit(*static_cast<std::conditional_t<isConst, const ConditionalBranchDirectiveSyntax*, ConditionalBranchDirectiveSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::IfNonePathDeclaration: return visitor.visit(*static_cast<std::conditional_t<isConst, const IfNonePathDeclarationSyntax*, IfNonePathDeclarationSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::IffEventClause: return visitor.visit(*static_cast<std::conditional_t<isConst, const IffEventClauseSyntax*, IffEventClauseSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::IffPropertyExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const BinaryExpressionSyntax*, BinaryExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::ImmediateAssertStatement: return visitor.visit(*static_cast<std::conditional_t<isConst, const ImmediateAssertionStatementSyntax*, ImmediateAssertionStatementSyntax*>>(node), std::forward<Args>(args)...);
@@ -21484,6 +24194,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::NextTimePropertyExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const PrefixUnaryExpressionSyntax*, PrefixUnaryExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::NoUnconnectedDriveDirective: return visitor.visit(*static_cast<std::conditional_t<isConst, const SimpleDirectiveSyntax*, SimpleDirectiveSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::NonAnsiPortList: return visitor.visit(*static_cast<std::conditional_t<isConst, const NonAnsiPortListSyntax*, NonAnsiPortListSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::NonAnsiUdpPortList: return visitor.visit(*static_cast<std::conditional_t<isConst, const NonAnsiUdpPortListSyntax*, NonAnsiUdpPortListSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::NonOverlappedFollowedByPropertyExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const BinaryExpressionSyntax*, BinaryExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::NonOverlappedImplicationPropertyExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const BinaryExpressionSyntax*, BinaryExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::NonblockingAssignmentExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const BinaryExpressionSyntax*, BinaryExpressionSyntax*>>(node), std::forward<Args>(args)...);
@@ -21513,6 +24224,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::ParenPragmaExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const ParenPragmaExpressionSyntax*, ParenPragmaExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::ParenthesizedEventExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const ParenthesizedEventExpressionSyntax*, ParenthesizedEventExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::ParenthesizedExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const ParenthesizedExpressionSyntax*, ParenthesizedExpressionSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::PathDeclaration: return visitor.visit(*static_cast<std::conditional_t<isConst, const PathDeclarationSyntax*, PathDeclarationSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::PathDescription: return visitor.visit(*static_cast<std::conditional_t<isConst, const PathDescriptionSyntax*, PathDescriptionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::PatternCaseItem: return visitor.visit(*static_cast<std::conditional_t<isConst, const PatternCaseItemSyntax*, PatternCaseItemSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::PortConcatenation: return visitor.visit(*static_cast<std::conditional_t<isConst, const PortConcatenationSyntax*, PortConcatenationSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::PortDeclaration: return visitor.visit(*static_cast<std::conditional_t<isConst, const PortDeclarationSyntax*, PortDeclarationSyntax*>>(node), std::forward<Args>(args)...);
@@ -21531,6 +24244,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::PropertyDeclaration: return visitor.visit(*static_cast<std::conditional_t<isConst, const PropertyDeclarationSyntax*, PropertyDeclarationSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::PropertySpec: return visitor.visit(*static_cast<std::conditional_t<isConst, const PropertySpecSyntax*, PropertySpecSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::PropertyType: return visitor.visit(*static_cast<std::conditional_t<isConst, const KeywordTypeSyntax*, KeywordTypeSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::PulseStyleDeclaration: return visitor.visit(*static_cast<std::conditional_t<isConst, const PulseStyleDeclarationSyntax*, PulseStyleDeclarationSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::QueueDimensionSpecifier: return visitor.visit(*static_cast<std::conditional_t<isConst, const QueueDimensionSpecifierSyntax*, QueueDimensionSpecifierSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::RandCaseItem: return visitor.visit(*static_cast<std::conditional_t<isConst, const RandCaseItemSyntax*, RandCaseItemSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::RandCaseStatement: return visitor.visit(*static_cast<std::conditional_t<isConst, const RandCaseStatementSyntax*, RandCaseStatementSyntax*>>(node), std::forward<Args>(args)...);
@@ -21562,9 +24276,13 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::SignalEventExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const SignalEventExpressionSyntax*, SignalEventExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::SignedCastExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const SignedCastExpressionSyntax*, SignedCastExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::SimpleAssignmentPattern: return visitor.visit(*static_cast<std::conditional_t<isConst, const SimpleAssignmentPatternSyntax*, SimpleAssignmentPatternSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::SimplePathSuffix: return visitor.visit(*static_cast<std::conditional_t<isConst, const SimplePathSuffixSyntax*, SimplePathSuffixSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::SimplePragmaExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const SimplePragmaExpressionSyntax*, SimplePragmaExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::SimpleRangeSelect: return visitor.visit(*static_cast<std::conditional_t<isConst, const RangeSelectSyntax*, RangeSelectSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::SolveBeforeConstraint: return visitor.visit(*static_cast<std::conditional_t<isConst, const SolveBeforeConstraintSyntax*, SolveBeforeConstraintSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::SpecifyBlock: return visitor.visit(*static_cast<std::conditional_t<isConst, const SpecifyBlockSyntax*, SpecifyBlockSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::SpecparamDeclaration: return visitor.visit(*static_cast<std::conditional_t<isConst, const SpecparamDeclarationSyntax*, SpecparamDeclarationSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::SpecparamDeclarator: return visitor.visit(*static_cast<std::conditional_t<isConst, const SpecparamDeclaratorSyntax*, SpecparamDeclaratorSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::StandardCaseItem: return visitor.visit(*static_cast<std::conditional_t<isConst, const StandardCaseItemSyntax*, StandardCaseItemSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::StreamExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const StreamExpressionSyntax*, StreamExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::StreamExpressionWithRange: return visitor.visit(*static_cast<std::conditional_t<isConst, const StreamExpressionWithRangeSyntax*, StreamExpressionWithRangeSyntax*>>(node), std::forward<Args>(args)...);
@@ -21581,6 +24299,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::SyncAcceptOnPropertyExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const PrefixUnaryExpressionSyntax*, PrefixUnaryExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::SyncRejectOnPropertyExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const PrefixUnaryExpressionSyntax*, PrefixUnaryExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::SystemName: return visitor.visit(*static_cast<std::conditional_t<isConst, const SystemNameSyntax*, SystemNameSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::SystemTimingCheck: return visitor.visit(*static_cast<std::conditional_t<isConst, const SystemTimingCheckSyntax*, SystemTimingCheckSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::TaggedPattern: return visitor.visit(*static_cast<std::conditional_t<isConst, const TaggedPatternSyntax*, TaggedPatternSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::TaggedUnionExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const TaggedUnionExpressionSyntax*, TaggedUnionExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::TaskDeclaration: return visitor.visit(*static_cast<std::conditional_t<isConst, const FunctionDeclarationSyntax*, FunctionDeclarationSyntax*>>(node), std::forward<Args>(args)...);
@@ -21590,6 +24309,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::TimeScaleDirective: return visitor.visit(*static_cast<std::conditional_t<isConst, const TimeScaleDirectiveSyntax*, TimeScaleDirectiveSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::TimeType: return visitor.visit(*static_cast<std::conditional_t<isConst, const IntegerTypeSyntax*, IntegerTypeSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::TimeUnitsDeclaration: return visitor.visit(*static_cast<std::conditional_t<isConst, const TimeUnitsDeclarationSyntax*, TimeUnitsDeclarationSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::TimingCheckCondition: return visitor.visit(*static_cast<std::conditional_t<isConst, const TimingCheckConditionSyntax*, TimingCheckConditionSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::TimingCheckEvent: return visitor.visit(*static_cast<std::conditional_t<isConst, const TimingCheckEventSyntax*, TimingCheckEventSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::TimingControlExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const TimingControlExpressionSyntax*, TimingControlExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::TimingControlExpressionConcatenation: return visitor.visit(*static_cast<std::conditional_t<isConst, const TimingControlExpressionConcatenationSyntax*, TimingControlExpressionConcatenationSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::TimingControlStatement: return visitor.visit(*static_cast<std::conditional_t<isConst, const TimingControlStatementSyntax*, TimingControlStatementSyntax*>>(node), std::forward<Args>(args)...);
@@ -21601,6 +24322,13 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::TypeParameterDeclaration: return visitor.visit(*static_cast<std::conditional_t<isConst, const TypeParameterDeclarationSyntax*, TypeParameterDeclarationSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::TypeReference: return visitor.visit(*static_cast<std::conditional_t<isConst, const TypeReferenceSyntax*, TypeReferenceSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::TypedefDeclaration: return visitor.visit(*static_cast<std::conditional_t<isConst, const TypedefDeclarationSyntax*, TypedefDeclarationSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::UdpBody: return visitor.visit(*static_cast<std::conditional_t<isConst, const UdpBodySyntax*, UdpBodySyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::UdpDeclaration: return visitor.visit(*static_cast<std::conditional_t<isConst, const UdpDeclarationSyntax*, UdpDeclarationSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::UdpEdgeIndicator: return visitor.visit(*static_cast<std::conditional_t<isConst, const UdpEdgeIndicatorSyntax*, UdpEdgeIndicatorSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::UdpEntry: return visitor.visit(*static_cast<std::conditional_t<isConst, const UdpEntrySyntax*, UdpEntrySyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::UdpInitialStmt: return visitor.visit(*static_cast<std::conditional_t<isConst, const UdpInitialStmtSyntax*, UdpInitialStmtSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::UdpInputPortDecl: return visitor.visit(*static_cast<std::conditional_t<isConst, const UdpInputPortDeclSyntax*, UdpInputPortDeclSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::UdpOutputPortDecl: return visitor.visit(*static_cast<std::conditional_t<isConst, const UdpOutputPortDeclSyntax*, UdpOutputPortDeclSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::UnaryBitwiseAndExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const PrefixUnaryExpressionSyntax*, PrefixUnaryExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::UnaryBitwiseNandExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const PrefixUnaryExpressionSyntax*, PrefixUnaryExpressionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::UnaryBitwiseNorExpression: return visitor.visit(*static_cast<std::conditional_t<isConst, const PrefixUnaryExpressionSyntax*, PrefixUnaryExpressionSyntax*>>(node), std::forward<Args>(args)...);
@@ -21643,6 +24371,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +        case SyntaxKind::WildcardPattern: return visitor.visit(*static_cast<std::conditional_t<isConst, const WildcardPatternSyntax*, WildcardPatternSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::WildcardPortConnection: return visitor.visit(*static_cast<std::conditional_t<isConst, const WildcardPortConnectionSyntax*, WildcardPortConnectionSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::WildcardPortList: return visitor.visit(*static_cast<std::conditional_t<isConst, const WildcardPortListSyntax*, WildcardPortListSyntax*>>(node), std::forward<Args>(args)...);
++        case SyntaxKind::WildcardUdpPortList: return visitor.visit(*static_cast<std::conditional_t<isConst, const WildcardUdpPortListSyntax*, WildcardUdpPortListSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::WithClause: return visitor.visit(*static_cast<std::conditional_t<isConst, const WithClauseSyntax*, WithClauseSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::WithFunctionClause: return visitor.visit(*static_cast<std::conditional_t<isConst, const WithFunctionClauseSyntax*, WithFunctionClauseSyntax*>>(node), std::forward<Args>(args)...);
 +        case SyntaxKind::WithFunctionSample: return visitor.visit(*static_cast<std::conditional_t<isConst, const WithFunctionSampleSyntax*, WithFunctionSampleSyntax*>>(node), std::forward<Args>(args)...);
@@ -21665,10 +24394,10 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +}
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/syntax/SyntaxKind.h ./generated/slang/syntax/SyntaxKind.h
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/slang/syntax/SyntaxKind.h ./generated/slang/syntax/SyntaxKind.h
 --- ./generated/slang/syntax/SyntaxKind.h	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/slang/syntax/SyntaxKind.h	2021-01-13 10:06:51.042023637 -0800
-@@ -0,0 +1,449 @@
++++ ./generated/slang/syntax/SyntaxKind.h	2021-03-02 17:51:09.141286189 -0800
+@@ -0,0 +1,477 @@
 +//------------------------------------------------------------------------------
 +//! @file SyntaxKind.h
 +//! @brief Generated SyntaxKind enum
@@ -21696,6 +24425,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    AndAssignmentExpression,
 +    AndSequenceExpression,
 +    AnsiPortList,
++    AnsiUdpPortList,
 +    ArgumentList,
 +    ArithmeticLeftShiftAssignmentExpression,
 +    ArithmeticRightShiftAssignmentExpression,
@@ -21755,6 +24485,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    ConcurrentAssertionMember,
 +    ConditionalConstraint,
 +    ConditionalExpression,
++    ConditionalPathDeclaration,
 +    ConditionalPattern,
 +    ConditionalPredicate,
 +    ConditionalStatement,
@@ -21788,6 +24519,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    DefineDirective,
 +    Delay3,
 +    DelayControl,
++    DelayedTerminalArg,
 +    DescendingRangeSelect,
 +    DisableConstraint,
 +    DisableForkStatement,
@@ -21802,6 +24534,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    DoWhileStatement,
 +    DotMemberClause,
 +    DriveStrength,
++    EdgeControlSpecifier,
++    EdgeDescriptor,
++    EdgeSensitivePathSuffix,
 +    ElabSystemTask,
 +    ElementSelect,
 +    ElementSelectExpression,
@@ -21815,6 +24550,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    EmptyPortConnection,
 +    EmptyQueueExpression,
 +    EmptyStatement,
++    EmptyTimingCheckArg,
 +    EndCellDefineDirective,
 +    EndIfDirective,
 +    EndKeywordsDirective,
@@ -21834,6 +24570,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    ExpressionOrDist,
 +    ExpressionPattern,
 +    ExpressionStatement,
++    ExpressionTimingCheckArg,
 +    ExtendsClause,
 +    ExternModule,
 +    FinalBlock,
@@ -21863,6 +24600,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    IfDefDirective,
 +    IfGenerate,
 +    IfNDefDirective,
++    IfNonePathDeclaration,
 +    IffEventClause,
 +    IffPropertyExpression,
 +    ImmediateAssertStatement,
@@ -21948,6 +24686,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    NextTimePropertyExpression,
 +    NoUnconnectedDriveDirective,
 +    NonAnsiPortList,
++    NonAnsiUdpPortList,
 +    NonOverlappedFollowedByPropertyExpression,
 +    NonOverlappedImplicationPropertyExpression,
 +    NonblockingAssignmentExpression,
@@ -21977,6 +24716,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    ParenPragmaExpression,
 +    ParenthesizedEventExpression,
 +    ParenthesizedExpression,
++    PathDeclaration,
++    PathDescription,
 +    PatternCaseItem,
 +    PortConcatenation,
 +    PortDeclaration,
@@ -21995,6 +24736,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    PropertyDeclaration,
 +    PropertySpec,
 +    PropertyType,
++    PulseStyleDeclaration,
 +    QueueDimensionSpecifier,
 +    RandCaseItem,
 +    RandCaseStatement,
@@ -22026,9 +24768,13 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    SignalEventExpression,
 +    SignedCastExpression,
 +    SimpleAssignmentPattern,
++    SimplePathSuffix,
 +    SimplePragmaExpression,
 +    SimpleRangeSelect,
 +    SolveBeforeConstraint,
++    SpecifyBlock,
++    SpecparamDeclaration,
++    SpecparamDeclarator,
 +    StandardCaseItem,
 +    StreamExpression,
 +    StreamExpressionWithRange,
@@ -22045,6 +24791,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    SyncAcceptOnPropertyExpression,
 +    SyncRejectOnPropertyExpression,
 +    SystemName,
++    SystemTimingCheck,
 +    TaggedPattern,
 +    TaggedUnionExpression,
 +    TaskDeclaration,
@@ -22054,6 +24801,8 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    TimeScaleDirective,
 +    TimeType,
 +    TimeUnitsDeclaration,
++    TimingCheckCondition,
++    TimingCheckEvent,
 +    TimingControlExpression,
 +    TimingControlExpressionConcatenation,
 +    TimingControlStatement,
@@ -22065,6 +24814,13 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    TypeParameterDeclaration,
 +    TypeReference,
 +    TypedefDeclaration,
++    UdpBody,
++    UdpDeclaration,
++    UdpEdgeIndicator,
++    UdpEntry,
++    UdpInitialStmt,
++    UdpInputPortDecl,
++    UdpOutputPortDecl,
 +    UnaryBitwiseAndExpression,
 +    UnaryBitwiseNandExpression,
 +    UnaryBitwiseNorExpression,
@@ -22107,6 +24863,7 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +    WildcardPattern,
 +    WildcardPortConnection,
 +    WildcardPortList,
++    WildcardUdpPortList,
 +    WithClause,
 +    WithFunctionClause,
 +    WithFunctionSample,
@@ -22118,9 +24875,9 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +string_view toString(SyntaxKind kind);
 +
 +}
-diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/Version.cpp ./generated/Version.cpp
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./generated/Version.cpp ./generated/Version.cpp
 --- ./generated/Version.cpp	1969-12-31 16:00:00.000000000 -0800
-+++ ./generated/Version.cpp	2021-01-13 10:06:32.242394726 -0800
++++ ./generated/Version.cpp	2021-03-02 17:50:53.851604954 -0800
 @@ -0,0 +1,26 @@
 +//------------------------------------------------------------------------------
 +// Version.cpp
@@ -22144,7 +24901,23 @@ diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude
 +}
 +
 +string_view VersionInfo::getRevision() {
-+    return "b247da18"sv;
++    return "5fd85b76"sv;
 +}
 +
 +}
+diff -bBdNrw -U5 '--exclude=*.orig' '--exclude=.git' '--exclude=.svn' '--exclude=esesc.xcode' '--exclude=build' '--exclude=CVS' '--exclude=CVSmain' '--exclude=cscope.files' '--exclude=cscope.out' '--exclude=ChangeLog' ./include/slang/util/OS.h ./include/slang/util/OS.h
+--- ./include/slang/util/OS.h	2021-03-02 16:27:19.475579506 -0800
++++ ./include/slang/util/OS.h	2021-03-02 17:58:05.412608286 -0800
+@@ -75,11 +75,11 @@
+ 
+     /// Prints colored formatted text to stdout, handling Unicode conversions where necessary.
+     template<typename... Args>
+     static void print(const fmt::text_style& style, string_view format, const Args&... args) {
+         if (showColorsStdout) {
+-            fmt::vprint(stdout, style, format, fmt::make_format_args(args...));
++            fmt::print(format, args...);
+         }
+         else {
+             fmt::vprint(stdout, format, fmt::make_format_args(args...));
+         }
+     }
