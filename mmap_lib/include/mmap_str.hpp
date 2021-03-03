@@ -52,6 +52,10 @@ protected:
 
 public:
   static mmap_lib::map<uint32_t, uint32_t> string_map; //LUT  <our class str, position in vector>
+#if 0
+  inline static mmap_lib::map<std::string_view, bool> string_map;
+#endif
+
   inline static std::vector<int> string_vector;
   
   // FIXME: This type of constructor is needed to be a constexpr
@@ -75,6 +79,15 @@ public:
 
   //  "============helper function to check if a string exists========= "
   std::pair<int, int> str_exists(const char *string_to_check, uint32_t size) {
+#if 0
+    std::string_view sv(string_to_check);
+    auto it = string_map.find(sv);
+    if (it==string_map.end()) {
+      it = string_map.insert(sv,false);
+    }
+    return std::make_pair(it.first, size);
+#endif
+
     bool vector_flag = true;
     
     // the line below should be constant time
