@@ -51,6 +51,10 @@ protected:
 
 
 public:
+#if 0
+  inline static mmap_lib::map<std::string_view, bool> string_map;
+#endif
+
   static mmap_lib::map<uint32_t, uint32_t> string_map;
   inline static std::vector<int> string_vector;
   
@@ -75,6 +79,15 @@ public:
 
   //  "============helper function to check if a string exists========= "
   std::pair<int, int> str_exists(const char *string_to_check, uint32_t size) {
+#if 0
+    std::string_view sv(string_to_check);
+    auto it = string_map.find(sv);
+    if (it==string_map.end()) {
+      it = string_map.insert(sv,false);
+    }
+    return std::make_pair(it.first, size);
+#endif
+
     bool vector_flag = true;
     for (auto i = string_map.begin(), end = string_map.end(); i != end; ++i) {
       uint32_t key   = string_map.get_key(i);
