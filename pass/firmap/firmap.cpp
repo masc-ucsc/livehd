@@ -197,7 +197,6 @@ void Firmap::map_node_fir_tail(Node &old_node, LGraph *new_lg) {
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node_tp.setup_driver_pin());
-    fmt::print("    {} maps to {}\n", old_dpin.debug_name(), new_node_tp.setup_driver_pin().debug_name());
   }
 }
 
@@ -235,7 +234,6 @@ void Firmap::map_node_fir_head(Node &old_node, LGraph *new_lg) {
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node_tp.setup_driver_pin());
-    fmt::print("    {} maps to {}\n", old_dpin.debug_name(), new_node_tp.setup_driver_pin().debug_name());
   }
 }
 
@@ -268,7 +266,6 @@ void Firmap::map_node_fir_bits(Node &old_node, LGraph *new_lg) {
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node_tp.setup_driver_pin());
-    fmt::print("    {} maps to {}\n", old_dpin.debug_name(), new_node_tp.setup_driver_pin().debug_name());
   }
 }
 
@@ -297,7 +294,6 @@ void Firmap::map_node_fir_cat(Node &old_node, LGraph *new_lg) {
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node_tp.setup_driver_pin());
-    fmt::print("    {} maps to {}\n", old_dpin.debug_name(), new_node_tp.setup_driver_pin().debug_name());
   }
 }
 
@@ -314,7 +310,6 @@ void Firmap::map_node_fir_orr(Node &old_node, LGraph *new_lg) {
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node_tp.setup_driver_pin());
-    fmt::print("    {} maps to {}\n", old_dpin.debug_name(), new_node_tp.setup_driver_pin().debug_name());
   }
 }
 
@@ -347,7 +342,6 @@ void Firmap::map_node_fir_xorr(Node &old_node, LGraph *new_lg) {
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node_tp.setup_driver_pin());
-    fmt::print("    {} maps to {}\n", old_dpin.debug_name(), new_node_tp.setup_driver_pin().debug_name());
   }
 }
 
@@ -387,7 +381,6 @@ void Firmap::map_node_fir_andr(Node &old_node, LGraph *new_lg) {
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node_tp.setup_driver_pin());
-    fmt::print("    {} maps to {}\n", old_dpin.debug_name(), new_node_tp.setup_driver_pin().debug_name());
   }
 }
 
@@ -410,7 +403,6 @@ void Firmap::map_node_fir_and_or_xor(Node &old_node, LGraph *new_lg, std::string
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node_tp.setup_driver_pin());
-    fmt::print("    {} maps to {}\n", old_dpin.debug_name(), new_node_tp.setup_driver_pin().debug_name());
   }
 }
 
@@ -443,7 +435,6 @@ void Firmap::map_node_fir_not(Node &old_node, LGraph *new_lg) {
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node_tp.setup_driver_pin());
-    fmt::print("    {} maps to {}\n", old_dpin.debug_name(), new_node_tp.setup_driver_pin().debug_name());
   }
 }
 
@@ -460,7 +451,6 @@ void Firmap::map_node_fir_neg(Node &old_node, LGraph *new_lg) {
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node_sum.setup_driver_pin());
-    fmt::print("    {} maps to {}\n", old_dpin.debug_name(), new_node_sum.setup_driver_pin().debug_name());
   }
 }
 
@@ -475,7 +465,6 @@ void Firmap::map_node_fir_cvt(Node &old_node, LGraph *new_lg) {
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node.setup_driver_pin());
-    fmt::print("    {} maps to {}\n", old_dpin.debug_name(), new_node.setup_driver_pin().debug_name());
   }
 }
 
@@ -491,7 +480,6 @@ void Firmap::map_node_fir_dshr(Node &old_node, LGraph *new_lg) {
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node.setup_driver_pin());
-    fmt::print("    {} maps to {}\n", old_dpin.debug_name(), new_node.setup_driver_pin().debug_name());
   }
 }
 
@@ -511,7 +499,6 @@ void Firmap::map_node_fir_dshl(Node &old_node, LGraph *new_lg) {
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node_shl.setup_driver_pin());
-    fmt::print("    {} maps to {}\n", old_dpin.debug_name(), new_node_shl.setup_driver_pin().debug_name());
   }
 }
 
@@ -528,7 +515,6 @@ void Firmap::map_node_fir_shl(Node &old_node, LGraph *new_lg) {
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node.setup_driver_pin());
-    fmt::print("    {} maps to {}\n", old_dpin.debug_name(), new_node.setup_driver_pin().debug_name());
   }
 }
 
@@ -545,7 +531,6 @@ void Firmap::map_node_fir_shr(Node &old_node, LGraph *new_lg) {
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node.setup_driver_pin());
-    fmt::print("    {} maps to {}\n", old_dpin.debug_name(), new_node.setup_driver_pin().debug_name());
   }
 }
 
@@ -557,7 +542,6 @@ void Firmap::map_node_fir_as_uint(Node &old_node, LGraph *new_lg) {
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node.setup_driver_pin());
-    fmt::print("    {} maps to {}\n", old_dpin.debug_name(), new_node.setup_driver_pin().debug_name());
   }
 }
 
@@ -572,7 +556,6 @@ void Firmap::map_node_fir_as_sint(Node &old_node, LGraph *new_lg) {
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node.setup_driver_pin());
-    fmt::print("    {} maps to {}\n", old_dpin.debug_name(), new_node.setup_driver_pin().debug_name());
   }
 }
 
@@ -594,7 +577,6 @@ void Firmap::map_node_fir_pad(Node &old_node, LGraph *new_lg) {
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node.setup_driver_pin());
-    fmt::print("    {} maps to {}\n", old_dpin.debug_name(), new_node.setup_driver_pin().debug_name());
   }
 }
 
@@ -608,7 +590,6 @@ void Firmap::map_node_fir_neq(Node &old_node, LGraph *new_lg) {
   new_node_eq.setup_driver_pin().connect_sink(new_node_not.setup_sink_pin("a"));
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node_not.setup_driver_pin());
-    fmt::print("    {} maps to {}\n", old_dpin.debug_name(), new_node_not.setup_driver_pin().debug_name());
   }
 }
 
@@ -619,7 +600,6 @@ void Firmap::map_node_fir_eq(Node &old_node, LGraph *new_lg) {
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node.setup_driver_pin());
-    fmt::print("    {} maps to {}\n", old_dpin.debug_name(), new_node.setup_driver_pin().debug_name());
   }
 }
 
@@ -645,7 +625,6 @@ void Firmap::map_node_fir_leq_geq(Node &old_node, LGraph *new_lg, std::string_vi
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node_not.setup_driver_pin());
-    fmt::print("    {} maps to {}\n", old_dpin.debug_name(), new_node_not.setup_driver_pin().debug_name());
   }
 }
 
@@ -669,7 +648,6 @@ void Firmap::map_node_fir_lt_gt(Node &old_node, LGraph *new_lg, std::string_view
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node.setup_driver_pin());
-    fmt::print("    {} maps to {}\n", old_dpin.debug_name(), new_node.setup_driver_pin().debug_name());
   }
 }
 
@@ -686,7 +664,6 @@ void Firmap::map_node_fir_div(Node &old_node, LGraph *new_lg) {
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node.setup_driver_pin());
-    fmt::print("    {} maps to {}\n", old_dpin.debug_name(), new_node.setup_driver_pin().debug_name());
   }
 }
 
@@ -699,7 +676,6 @@ void Firmap::map_node_fir_mul(Node &old_node, LGraph *new_lg) {
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node.setup_driver_pin());
-    fmt::print("    {} maps to {}\n", old_dpin.debug_name(), new_node.setup_driver_pin().debug_name());
   }
 }
 
@@ -710,7 +686,6 @@ void Firmap::map_node_fir_const(Node &old_node, LGraph *new_lg) {
   auto new_node = new_lg->create_node_const(const_str.substr(0, pos-1)); // -1 becasue I ignore the difference between ubits and sbits strings
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node.setup_driver_pin());
-    fmt::print("    {} maps to {}\n", old_dpin.debug_name(), new_node.setup_driver_pin().debug_name());
   }
 }
 
@@ -723,7 +698,6 @@ void Firmap::map_node_fir_add(Node &old_node, LGraph *new_lg) {
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node.setup_driver_pin());
-    fmt::print("    {} maps to {}\n", old_dpin.debug_name(), new_node.setup_driver_pin().debug_name());
   }
 }
 
@@ -740,7 +714,7 @@ void Firmap::map_node_fir_sub(Node &old_node, LGraph *new_lg) {
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node.setup_driver_pin());
-    fmt::print("    {} maps to {}\n", old_dpin.debug_name(), new_node.setup_driver_pin().debug_name());
+    /* fmt::print("    {} maps to {}\n", old_dpin.debug_name(), new_node.setup_driver_pin().debug_name()); */
   }
 }
 
@@ -753,7 +727,6 @@ void Firmap::clone_lg_ops_node(Node &old_node, LGraph *new_lg) {
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node.setup_driver_pin_raw(old_dpin.get_pid()));
-    fmt::print("    {} maps to {}\n", old_dpin.debug_name(), new_node.setup_driver_pin_raw(old_dpin.get_pid()).debug_name());
     if (old_dpin.has_name())
       new_node.setup_driver_pin_raw(old_dpin.get_pid()).set_name(old_dpin.get_name());
   }

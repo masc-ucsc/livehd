@@ -1,11 +1,11 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "lnast.hpp"
-
 #include <string>
 
+#include "lnast.hpp"
 #include "elab_scanner.hpp"
 #include "mmap_vector.hpp"
+#include "lbench.hpp"
 
 void Lnast_node::dump() const {
   fmt::print("{}, {}, {}\n", type.debug_name(), token.get_text(), subs);  // TODO: cleaner API to also dump token
@@ -40,6 +40,7 @@ std::string_view Lnast::add_string(const std::string &str) {
 }
 
 void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
+  Lbench b("pass.lnast_ssa");
   Lnast_nid top_sts_nid;
   if (get_type(top_nid).is_func_def()) {
     /* fmt::print("Step-0: Handle Inline Function Definition\n"); */

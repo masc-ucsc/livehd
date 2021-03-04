@@ -592,7 +592,11 @@ void Bitwidth::process_attr_get(Node &node) {
   Lconst result;
   if (attr == Attr::Set_ubits) {
     result = bw.get_min() >= 0 ? Lconst(bw.get_sbits() - 1) : Lconst(bw.get_sbits());
-    fmt::print("min:{}, result:{}\n", bw.get_min().to_i(), result.to_i());
+
+    #ifndef NDEBUG
+      fmt::print("min:{}, result:{}\n", bw.get_min().to_i(), result.to_i());
+    #endif
+
   } else if (attr == Attr::Set_sbits) {
     result = Lconst(bw.get_sbits());
   } else if (attr == Attr::Set_max) {
@@ -622,7 +626,9 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_dp, Fwd_edge_iterator::Fwd_
   if (it != flat_bwmap.end()) {
     bw_lhs = it->second;
   } else {
-    fmt::print("BW-> LHS isn't ready, wait for next iteration\n");
+    #ifndef NDEBUG
+      fmt::print("BW-> LHS isn't ready, wait for next iteration\n");
+    #endif
     return;
   }
 
@@ -631,7 +637,9 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_dp, Fwd_edge_iterator::Fwd_
   if (it2 != flat_bwmap.end()) {
     bw_rhs = it2->second;
   } else {
-    fmt::print("BW-> RHS isn't ready, wait for next iteration\n");
+    #ifndef NDEBUG
+      fmt::print("BW-> RHS isn't ready, wait for next iteration\n");
+    #endif
     return;
   }
 
@@ -822,7 +830,9 @@ void Bitwidth::process_attr_set_propagate(Node &node_attr) {
 
   auto parent_attr_it = flat_bwmap.find(parent_attr_dpin.get_compact_flat());
   if (parent_attr_it == flat_bwmap.end()) {
-    fmt::print("attr_set propagate flat_bwmap to AttrSet name:{}\n", dpin_name);
+    #ifndef NDEBUG
+      fmt::print("attr_set propagate flat_bwmap to AttrSet name:{}\n", dpin_name);
+    #endif
     not_finished = true;
     return;
   }
@@ -882,10 +892,15 @@ void Bitwidth::set_graph_boundary(Node_pin &dpin, Node_pin &spin) {
 
 
 void Bitwidth::debug_unconstrained_msg(Node &node, Node_pin &dpin) {
+  (void) node;
   if (dpin.has_name()) {
-    fmt::print("BW-> gate:{} has input pin:{} unconstrained\n", node.debug_name(), dpin.debug_name());
+    #ifndef NDEBUG
+      fmt::print("BW-> gate:{} has input pin:{} unconstrained\n", node.debug_name(), dpin.debug_name());
+    #endif
   } else {
-    fmt::print("BW-> gate:{} has some inputs unconstrained\n", node.debug_name());
+    #ifndef NDEBUG
+      fmt::print("BW-> gate:{} has some inputs unconstrained\n", node.debug_name());
+    #endif
   }
 }
 
@@ -978,7 +993,9 @@ void Bitwidth::bw_pass(LGraph *lg) {
       } else if (op == Ntype_op::Sub) {
         set_subgraph_boundary_bw(node);
       } else {
-        fmt::print("FIXME: node:{} still not handled by bitwidth\n", node.debug_name());
+        #ifndef NDEBUG
+          fmt::print("FIXME: node:{} still not handled by bitwidth\n", node.debug_name());
+        #endif
       }
       if (node.is_invalid())
         continue;
@@ -995,7 +1012,9 @@ void Bitwidth::bw_pass(LGraph *lg) {
 
         auto bw_bits = it->second.get_sbits();
         if (bw_bits == 0 && it->second.is_overflow()) {
-          fmt::print("BW-> dpin:{} has over {}bits (simplify first!)\n", dpin.debug_name(), it->second.get_raw_max());
+          #ifndef NDEBUG
+            fmt::print("BW-> dpin:{} has over {}bits (simplify first!)\n", dpin.debug_name(), it->second.get_raw_max());
+          #endif
           continue;
         }
 
@@ -1079,16 +1098,24 @@ void Bitwidth::bw_pass(LGraph *lg) {
     for (auto dpin : node.out_connected_pins()) {
       auto it = flat_bwmap.find(dpin.get_compact_flat());
       if (it == flat_bwmap.end()) {
-        fmt::print("node:{} {} UNKNOWN\n", node.debug_name(), dpin.get_pin_name());
+        #ifndef NDEBUG
+          fmt::print("node:{} {} UNKNOWN\n", node.debug_name(), dpin.get_pin_name());
+        #endif
       }else if (it->second.is_always_positive()) {
-        fmt::print("node:{} {} pos  |", node.debug_name(), dpin.get_pin_name());
-        it->second.dump();
+        #ifndef NDEBUG
+          fmt::print("node:{} {} pos  |", node.debug_name(), dpin.get_pin_name());
+          it->second.dump();
+        #endif
       }else if (it->second.is_always_negative()) {
-        fmt::print("node:{} {} neg  |", node.debug_name(), dpin.get_pin_name());
-        it->second.dump();
+        #ifndef NDEBUG
+          fmt::print("node:{} {} neg  |", node.debug_name(), dpin.get_pin_name());
+          it->second.dump();
+        #endif
       }else{
-        fmt::print("node:{} {} both |", node.debug_name(), dpin.get_pin_name());
-        it->second.dump();
+        #ifndef NDEBUG
+          fmt::print("node:{} {} both |", node.debug_name(), dpin.get_pin_name());
+          it->second.dump();
+        #endif
       }
     }
   }

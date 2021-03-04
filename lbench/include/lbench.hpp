@@ -226,11 +226,11 @@ public:
     std::chrono::duration<double> t = tp - start_time;
     std::stringstream sstr;
     sstr
-      << std::setw(28) << std::left << sample_name 
-      << " secs="      << std::setw(15) << t.count()
-      << " IPC="       << std::setw(6)  << ((double)stats[1]) / (stats[0]+1)
-      << " BR_MPKI="   << std::setw(6)  << ((double)stats[2]*1000) / (stats[1]+1)
-      << " L2_MPKI="   << std::setw(6)  << ((double)stats[3]*1000) / (stats[1]+1)
+      << std::setw(20) << std::left << sample_name 
+      << " secs="      << std::setw(15)  << t.count()
+      << " IPC="       << std::setw(10)  << ((double)stats[1]) / (stats[0]+1)
+      << " BR_MPKI="   << std::setw(10)  << ((double)stats[2]*1000) / (stats[1]+1)
+      << " L2_MPKI="   << std::setw(10)  << ((double)stats[3]*1000) / (stats[1]+1)
       << "\n";
     // std::cerr << sstr.str();
 

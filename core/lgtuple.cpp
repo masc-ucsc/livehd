@@ -435,7 +435,9 @@ const Node_pin &Lgtuple::get_dpin(std::string_view key) const {
 		if (match(e.first, key))
 			return e.second;
 	}
-	LGraph::info("key:{} does not exist in tuple:{}", key, name); // may be OK if dead code eliminated
+  #ifndef NDEBUG
+	  LGraph::info("key:{} does not exist in tuple:{}", key, name); // may be OK if dead code eliminated
+  #endif
 	return invalid_dpin;
 }
 

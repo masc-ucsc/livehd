@@ -223,7 +223,9 @@ void Cprop::replace_part_inputs_const(Node &node, XEdge_iterator &inp_edges_orde
 
     Node_pin a_pin;
     if ((sel + 1) >= inp_edges_ordered.size()) {
-      fmt::print("WARNING: mux selector:{} goes over limit:{} in mux. Using zero\n", sel, inp_edges_ordered.size());
+      #ifndef NDEBUG
+        fmt::print("WARNING: mux selector:{} goes over limit:{} in mux. Using zero\n", sel, inp_edges_ordered.size());
+      #endif
       a_pin = node.get_class_lgraph()->create_node_const(0).get_driver_pin();
     } else {
       a_pin = inp_edges_ordered[sel + 1].driver;
@@ -346,7 +348,9 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
     TRACE(fmt::print("cprop: and node:{} to {}\n", node.debug_name(), result.to_pyrope()));
 
     Lconst result_reduced = result == 0 ? 0 : 1;
-    fmt::print("node {}, result {}, result_reduced {}\n", node.debug_name(), result.to_i(), result_reduced.to_i());
+    #ifndef NDEBUG
+      fmt::print("node {}, result {}, result_reduced {}\n", node.debug_name(), result.to_i(), result_reduced.to_i());
+    #endif
     replace_logic_node(node, result, result_reduced);
 
   } else if (op == Ntype_op::And) {
@@ -390,7 +394,9 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
 
     Lconst result;
     if ((sel + 1) >= inp_edges_ordered.size()) {
-      fmt::print("WARNING: mux selector:{} goes over limit:{} in mux. Using zero\n", sel, inp_edges_ordered.size());
+      #ifndef NDEBUG
+        fmt::print("WARNING: mux selector:{} goes over limit:{} in mux. Using zero\n", sel, inp_edges_ordered.size());
+      #endif
     } else {
       result = inp_edges_ordered[sel + 1].driver.get_node().get_type_const();
     }
@@ -413,7 +419,9 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
 
     replace_node(node, result);
   } else {
-    fmt::print("FIXME: cprop still does not copy prop node:{}\n", node.debug_name());
+    #ifndef NDEBUG
+      fmt::print("FIXME: cprop still does not copy prop node:{}\n", node.debug_name());
+    #endif
   }
 }
 
@@ -503,7 +511,9 @@ void Cprop::try_connect_lgcpp(Node &node) {
 
   auto it = reg.find(sub.get_name());
   if (it != reg.end()) {
-    fmt::print("cprop subgraph:{} is not present, found lgcpp...\n", sub.get_name());
+    #ifndef NDEBUG
+      fmt::print("cprop subgraph:{} is not present, found lgcpp...\n", sub.get_name());
+    #endif
 
     std::shared_ptr<Lgtuple> inp;
     std::shared_ptr<Lgtuple> out;
@@ -512,12 +522,14 @@ void Cprop::try_connect_lgcpp(Node &node) {
     if (!out) {  // no out tuple populated
       return;
     }
-    fmt::print("cprop subgraph:{} has out\n", sub.get_name());
-    out->dump();
 
-    for (auto dpin : node.out_connected_pins()) {
-      fmt::print("dpin:{} pid:{} testing...\n", dpin.debug_name(), dpin.get_pid());
-    }
+    #ifndef NDEBUG
+      fmt::print("cprop subgraph:{} has out\n", sub.get_name());
+      out->dump();
+      for (auto dpin : node.out_connected_pins()) {
+          fmt::print("dpin:{} pid:{} testing...\n", dpin.debug_name(), dpin.get_pid());
+      }
+    #endif
   }
 }
 
@@ -570,33 +582,29 @@ void Cprop::process_subgraph(Node &node, XEdge_iterator &inp_edges_ordered) {
 
 void Cprop::process_flop(Node &node) {
 
-  fmt::print("DEBUG1 \n");
 	if (tuple_issues)
 		return;
 
 	auto din_spin = node.get_sink_pin("din");
 	if (!din_spin.is_connected()) {
 		//node.del_node();
-		fmt::print("delete flop\n");
+    #ifndef NDEBUG
+		  fmt::print("delete flop\n");
+    #endif
 		return;
 	}
 
 	auto din_node = node.get_sink_pin("din").get_driver_node();
 
-  fmt::print("DEBUG2 \n");
   auto din_it = node2tuple.find(din_node.get_compact());
 	if (din_it==node2tuple.end()) {
-    fmt::print("DEBUG3 \n");
 		auto op = din_node.get_type_op();
 		if (din_node.is_type_tup() || op == Ntype_op::Mux || op == Ntype_op::Flop) { // TODO: Any node that could generate a LGTUPLE
-      fmt::print("DEBUG4 \n");
 			// Not done. 2nd pass needed
 			if (flop_needs_2nd_iteration && !tuple_issues) {
-        fmt::print("DEBUG5 \n");
 				Pass::info("2nd iteration could not solve flop:{}",node.debug_name().c_str());
 				return;
 			}
-      fmt::print("DEBUG6 \n");
 			if (!tuple_issues) {
 				flop_needs_2nd_iteration = true;
 				tuple_issues = true;
@@ -782,10 +790,10 @@ bool Cprop::process_tuple_get(Node &node, XEdge_iterator &inp_edges_ordered) {
       attr_key_dpin.set_name(it.first);
 
       if (conta == 0) {
-        fmt::print("cprop: changing node:{} to AttrSet node for attr:{} from pin:{}\n",
-                   node.debug_name(),
-                   it.first,
-                   it.second.debug_name());
+
+      #ifndef NDEBUG
+        fmt::print("cprop: changing node:{} to AttrSet node for attr:{} from pin:{}\n", node.debug_name(), it.first, it.second.debug_name());
+      #endif
         // Reuse current node. First delete input edges
         for (auto &e : inp_edges_ordered) {
           e.del_edge();
@@ -879,7 +887,10 @@ void Cprop::process_mux(Node &node, XEdge_iterator &inp_edges_ordered) {
       is_reg_tuple = dpin.get_name().at(0) == '#' ? true : false;
 
     if (is_tail && is_reg_tuple) {
-      fmt::print("DEBUGN mux is tail\n");
+
+      #ifndef NDEBUG
+        fmt::print("DEBUGN mux is tail\n");
+      #endif
       try_create_register(node, tup);
     }
   }
@@ -1124,7 +1135,9 @@ void Cprop::do_trans(LGraph *lg) {
 	do {
 		tuple_issues = false;
 		for (auto node : lg->forward()) {
-			fmt::print("{}\n", node.debug_name());
+      #ifndef NDEBUG
+			  fmt::print("{}\n", node.debug_name());
+      #endif
 			auto op = node.get_type_op();
 
 			auto inp_edges_ordered = node.inp_edges_ordered();
@@ -1141,7 +1154,10 @@ void Cprop::do_trans(LGraph *lg) {
 				process_flop(node);
 				continue;
 			} else if (op == Ntype_op::Latch || op == Ntype_op::Fflop || op == Ntype_op::Memory) {
-				fmt::print("cprop skipping node:{}\n", node.debug_name());
+
+        #ifndef NDEBUG
+          fmt::print("cprop skipping node:{}\n", node.debug_name());
+        #endif
 				// FIXME: if flop feeds itself (no update, delete, replace for zero)
 				// FIXME: if flop is disconnected *after AttrGet processed*, the flop was not used. Delete
 				continue;
@@ -1191,7 +1207,6 @@ void Cprop::do_trans(LGraph *lg) {
 	} while(flop_needs_2nd_iteration);
 
 
-  fmt::print("DEBUG0 \n");
 
   // connect register q_pin to sinks
   for (const auto &[reg_name, sink_pins] : reg_name2sink_pins) {
@@ -1343,7 +1358,9 @@ void Cprop::bwd_del_node(Node &node) {
 
 void Cprop::dump_node2tuples() const {
   for (const auto &it : node2tuple) {
-    fmt::print("node nid:{}\n", it.first.get_nid());
+    #ifndef NDEBUG
+      fmt::print("node nid:{}\n", it.first.get_nid());
+    #endif
     it.second->dump();
   }
 }

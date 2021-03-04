@@ -53,7 +53,7 @@ bool Pass_compiler::check_option_firrtl(Eprp_var &var) {
 
 
 void Pass_compiler::compile(Eprp_var &var) {
-  Lbench b("pass.compiler.front_end");
+  Lbench b("pass.compile.front");
   Pass_compiler pc(var);
   auto path      = pc.get_path(var);
   auto odir      = pc.get_odir(var);

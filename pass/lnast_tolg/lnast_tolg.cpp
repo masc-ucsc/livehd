@@ -1403,7 +1403,9 @@ void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc)
 
   auto *library = Graph_library::instance(path);
   if (name2dpin.find(func_name) == name2dpin.end()) {
-    fmt::print("function {} defined in separated prp file, query lgdb\n", func_name);
+    #ifndef NDEBUG
+      fmt::print("function {} defined in separated prp file, query lgdb\n", func_name);
+    #endif
     Node      subg_node;
     Sub_node *sub;
     if (library->has_name(func_name)) {
@@ -1416,7 +1418,6 @@ void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc)
     }
 
     subg_node.set_name(absl::StrCat(arg_tup_name, ":", ret_name, ":", func_name));
-    fmt::print("subg node_name:{}\n", subg_node.get_name());
 
     // just connect to $ and %, handle the rest at global io connection
     Node_pin subg_spin;
