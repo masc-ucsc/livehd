@@ -1,5 +1,4 @@
 #!/bin/bash
-rm -rf ./lgdb
 mv -f lbench.trace lbench.trace.old
 
 if [ ! -d ./livehd_regression ]; then
@@ -15,9 +14,10 @@ LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
 POST_IO_RENAME=./inou/firrtl/post_io_renaming.py
 PATTERN_PATH=./livehd_regression/synthetic/generated
-LGDB=/local/scrap/masc/swang203
+LGDB=/local/scrap/masc/swang203/lgdb
 GVIZ='false'
 
+rm -rf $LGDB
 if [ ! -f $LGSHELL ]; then
     if [ -f ./main/lgshell ]; then
         LGSHELL=./main/lgshell
@@ -27,6 +27,7 @@ if [ ! -f $LGSHELL ]; then
     fi
 fi
 
+
 pts=''
 for filename in ./livehd_regression/synthetic/generated/*.hi.pb
 do
@@ -35,7 +36,7 @@ do
 done
 
 
-pts='Xor16000Thread64'
+pts='Xor8000Thread64'
 
 echo -e "All Benchmark Patterns:" '\n'$pts
 
