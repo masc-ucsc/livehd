@@ -48,6 +48,7 @@ cc_library(
                exclude=["src/misc/parse/parseCore.c",
                         "src/misc/espresso/*.c",
                         "src/misc/avl/*.c",
+                        "src/misc/zlib/*.c",
               ])
         + glob(["src/opt/**/*.c"],
                exclude=["src/opt/res/resSim_old.c",
