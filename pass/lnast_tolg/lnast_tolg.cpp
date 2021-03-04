@@ -1124,9 +1124,10 @@ void Lnast_tolg::process_ast_attr_set_op(LGraph *lg, const Lnast_nid &lnidx_aset
 
   aset_node.setup_driver_pin("Y").set_name(name);
   /* fmt::print("DEBUG1: aset_dpin_name:{}\n", aset_node.setup_driver_pin("Y").debug_name()); */
-#ifndef NDEBUG
+/* #ifndef NDEBUG */
+/*   aset_node.setup_driver_pin("chain").set_name(name);  // just for debug purpose */
+/* #endif */
   aset_node.setup_driver_pin("chain").set_name(name);  // just for debug purpose
-#endif
   name2dpin[name]        = aset_node.get_driver_pin("Y");
   vname2attr_dpin[vname] = aset_node.get_driver_pin("chain");
 }

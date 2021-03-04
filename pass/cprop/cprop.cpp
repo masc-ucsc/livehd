@@ -570,6 +570,7 @@ void Cprop::process_subgraph(Node &node, XEdge_iterator &inp_edges_ordered) {
 
 void Cprop::process_flop(Node &node) {
 
+  fmt::print("DEBUG1 \n");
 	if (tuple_issues)
 		return;
 
@@ -582,15 +583,20 @@ void Cprop::process_flop(Node &node) {
 
 	auto din_node = node.get_sink_pin("din").get_driver_node();
 
+  fmt::print("DEBUG2 \n");
   auto din_it = node2tuple.find(din_node.get_compact());
 	if (din_it==node2tuple.end()) {
+    fmt::print("DEBUG3 \n");
 		auto op = din_node.get_type_op();
 		if (din_node.is_type_tup() || op == Ntype_op::Mux || op == Ntype_op::Flop) { // TODO: Any node that could generate a LGTUPLE
+      fmt::print("DEBUG4 \n");
 			// Not done. 2nd pass needed
 			if (flop_needs_2nd_iteration && !tuple_issues) {
+        fmt::print("DEBUG5 \n");
 				Pass::info("2nd iteration could not solve flop:{}",node.debug_name());
 				return;
 			}
+      fmt::print("DEBUG6 \n");
 			if (!tuple_issues) {
 				flop_needs_2nd_iteration = true;
 				tuple_issues = true;
@@ -1113,13 +1119,12 @@ void Cprop::do_trans(LGraph *lg) {
   Lbench b("pass.cprop");
   /* bool tup_get_left = false; */
 
-
 	int n_iters=0;
 	flop_needs_2nd_iteration = false;
 	do {
 		tuple_issues = false;
 		for (auto node : lg->forward()) {
-			// fmt::print("{}\n", node.debug_name());
+			fmt::print("{}\n", node.debug_name());
 			auto op = node.get_type_op();
 
 			auto inp_edges_ordered = node.inp_edges_ordered();
@@ -1183,7 +1188,10 @@ void Cprop::do_trans(LGraph *lg) {
 		++n_iters;
 		if (n_iters>=2)
 			break;
-	}while(flop_needs_2nd_iteration);
+	} while(flop_needs_2nd_iteration);
+
+
+  fmt::print("DEBUG0 \n");
 
   // connect register q_pin to sinks
   for (const auto &[reg_name, sink_pins] : reg_name2sink_pins) {
