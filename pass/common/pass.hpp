@@ -40,33 +40,28 @@ public:
   }
   static void warn(std::string_view msg) { eprp.parser_warn(msg); }
   static void info(std::string_view msg) {
-    (void)msg;
 #ifndef NDEBUG
     eprp.parser_info(msg);
+#else
+    (void)msg;
 #endif
   }
 
   template <typename... Args>
   static void error(const char *format, const Args &... args) {
-    fmt::format_args   fargs = fmt::make_format_args(args...);
-    fmt::memory_buffer tmp;
-    fmt::vformat_to(tmp, format, fargs);
+    auto tmp = fmt::format(format, args...);
     error(std::string_view(tmp.data(), tmp.size()));
   }
 
   template <typename... Args>
   static void warn(std::string_view format, const Args &... args) {
-    fmt::format_args   fargs = fmt::make_format_args(args...);
-    fmt::memory_buffer tmp;
-    fmt::vformat_to(tmp, format, fargs);
+    auto tmp = fmt::format(format, args...);
     eprp.parser_warn(std::string_view(tmp.data(), tmp.size()));
   }
 
   template <typename... Args>
   static void info(std::string_view format, const Args &... args) {
-    fmt::format_args   fargs = fmt::make_format_args(args...);
-    fmt::memory_buffer tmp;
-    fmt::vformat_to(tmp, format, fargs);
+    auto tmp = fmt::format(format, args...);
     eprp.parser_info(std::string_view(tmp.data(), tmp.size()));
   }
 

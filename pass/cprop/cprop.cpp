@@ -593,7 +593,7 @@ void Cprop::process_flop(Node &node) {
 			// Not done. 2nd pass needed
 			if (flop_needs_2nd_iteration && !tuple_issues) {
         fmt::print("DEBUG5 \n");
-				Pass::info("2nd iteration could not solve flop:{}",node.debug_name());
+				Pass::info("2nd iteration could not solve flop:{}",node.debug_name().c_str());
 				return;
 			}
       fmt::print("DEBUG6 \n");

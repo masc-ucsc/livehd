@@ -663,8 +663,8 @@ void Lnast_tolg::process_ast_tuple_add_op(LGraph *lg, const Lnast_nid &lnidx_ta)
     return;
   }
 
-  absl::flat_hash_map<int, Node>             ta_map;
-  absl::flat_hash_map<int, std::string_view> ta_name;
+  absl::flat_hash_map<int, Node>        ta_map;
+  absl::flat_hash_map<int, std::string> ta_name;
   int i = 0;
 
   for (const auto &child : lnast->children(lnidx_ta)) {
