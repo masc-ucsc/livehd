@@ -37,6 +37,12 @@ $ bazel build <target>
 ```
 $ bazel build -c dbg <target>
 ```
+
+or use address sanitizer to detect memory leaks
+```
+$ bazel build -c dbg --config asan //...
+```
+
  - Release build: most optimization, no debug symbols, assertions turned off
 ```
 $ bazel build -c opt <target>
@@ -45,6 +51,8 @@ $ bazel build -c opt <target>
 ```
 $ bazel build --config=bench <target>
 ```
+
+
 
 ## Clear out cache (not needed in most cases)
 
