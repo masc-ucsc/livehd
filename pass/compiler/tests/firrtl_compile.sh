@@ -1,7 +1,5 @@
 #!/bin/bash
 rm -rf ./lgdb
-# FIRRTL_LEVEL='lo'
-FIRRTL_LEVEL='hi'
 
 pts_long_lec='GCD '
 
@@ -10,23 +8,50 @@ HwachaSequencer RocketCore Ops Router'
 
 pts_mem='Smem_simple Stack DynamicMemorySearch Memo'
 
-# passed lofirrtl pattern pool
-pts='Life Cell_alone RegisterSimple Register Adder4 Mux4 LogShifter
-SingleEvenFilter RegXor AddNot VendingMachineSwitch Coverage VendingMachine
-VecShiftRegister Counter VecSearch ResetShiftRegister Parity
-EnableShiftRegister GCD_3bits Flop Accumulator LFSR16 BundleConnect SubModule
-Decrementer Test1 Test2 Test3 Test6 TrivialAdd NotAnd Trivial Tail TrivialArith
-Shifts PlusAnd MaxN ByteSelector Darken HiLoMultiplier SimpleALU Mul
-VecShiftRegisterParam VecShiftRegisterSimple ' 
 
-# pts_hifirrtl_todo='
-# passed hifirrtl pattern pool
-pts='EnableShiftRegister Flop Cell_alone MaxN PlusAnd Test2 SingleEvenFilter
-Coverage Counter Decrementer SubModule BundleConnect LogShifter Adder4
-Xor6Thread2 XorSelfThread1 ByteSelector SimpleALU Mux4 Max2 ResetShiftRegister
-Parity RegisterSimple Register RegXor GCD_3bits Test3 TrivialAdd
-Accumulator AddNot HiLoMultiplier Darken Shifts NotAnd TrivialArith Tail Trivial
-LFSR16 VendingMachine VendingMachineSwitch'  
+if [ $# -eq 0 ]; then
+  echo "Default regression set"
+  # passed lofirrtl pattern pool
+  pts='Life Cell_alone RegisterSimple Register Adder4 Mux4 LogShifter
+  SingleEvenFilter RegXor AddNot VendingMachineSwitch Coverage VendingMachine
+  VecShiftRegister Counter VecSearch ResetShiftRegister Parity
+  EnableShiftRegister GCD_3bits Flop Accumulator LFSR16 BundleConnect SubModule
+  Decrementer Test1 Test2 Test3 Test6 TrivialAdd NotAnd Trivial Tail TrivialArith
+  Shifts PlusAnd MaxN ByteSelector Darken HiLoMultiplier SimpleALU Mul
+  VecShiftRegisterParam VecShiftRegisterSimple '
+
+  # pts_hifirrtl_todo='
+  # passed hifirrtl pattern pool
+  pts='EnableShiftRegister Flop Cell_alone MaxN PlusAnd Test2 SingleEvenFilter
+  Coverage Counter Decrementer SubModule BundleConnect LogShifter Adder4
+  Xor6Thread2 XorSelfThread1 ByteSelector SimpleALU Mux4 Max2 ResetShiftRegister
+  Parity RegisterSimple Register RegXor GCD_3bits Test3 TrivialAdd
+  Accumulator AddNot HiLoMultiplier Darken Shifts NotAnd TrivialArith Tail Trivial
+  LFSR16 VendingMachine VendingMachineSwitch'
+
+  PATTERN_PATH=./inou/firrtl/tests/proto
+  # FIRRTL_LEVEL='lo'
+  FIRRTL_LEVEL='hi'
+else
+
+  file=$(basename $1)
+  if [ "${file#*.}" == "hi.pb" ]; then
+    pts=$(basename $1 ".hi.pb")
+    FIRRTL_LEVEL='hi'
+  elif [ "${file#*.}" == "lo.pb" ]; then
+    pts=$(basename $1 ".lo.pb")
+    FIRRTL_LEVEL='lo'
+  else
+    echo "Illegal FIRRTL extension. Either hi.pb or lo.pb"
+    exit -3
+  fi
+
+  PATTERN_PATH=$(dirname $1)
+  if [ -f "${PATTERN_PATH}/${file}.${FIRRTL_LEVEL}.pb" ]; then
+    echo "Could not access test ${pts} at path ${PATTERN_PATH}"
+    exit -3
+  fi
+fi
 
 pts_wait_verilog_large_mux_code_gen='Mul Test6 Test1'
 
@@ -45,7 +70,6 @@ pts_wait_verilog_large_mux_code_gen='Mul Test6 Test1'
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
 POST_IO_RENAME=./inou/firrtl/post_io_renaming.py
-PATTERN_PATH=./inou/firrtl/tests/proto
 
 if [ ! -f $LGSHELL ]; then
     if [ -f ./main/lgshell ]; then
@@ -55,6 +79,7 @@ if [ ! -f $LGSHELL ]; then
         echo "ERROR: could not find lgshell binary in $(pwd)";
     fi
 fi
+
 
 firrtl_test() {
   echo ""
@@ -68,7 +93,7 @@ firrtl_test() {
     if [ ! -f ${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb ]; then
         echo "ERROR: could not find ${pt}.${FIRRTL_LEVEL}.pb in ${PATTERN_PATH}"
         exit 1
-    fi 
+    fi
 
     ${LGSHELL} "inou.firrtl.tolnast files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb |> pass.compiler gviz:true top:${pt} firrtl:true"
     ret_val=$?
@@ -110,7 +135,7 @@ firrtl_test() {
     echo "----------------------------------------------------"
     echo "Logic Equivalence Check"
     echo "----------------------------------------------------"
-    
+
     if [ "${FIRRTL_LEVEL}" == "hi" ]; then
         python3 ${POST_IO_RENAME} "${pt}.v"
     fi
