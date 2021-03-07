@@ -200,6 +200,13 @@ public:
         assert(e >= 0);
       }
     }
+    if (!mmap_name.empty()) {
+      struct stat sb;
+      if (stat(mmap_name.c_str(), &sb) == 0) {
+        assert(S_ISREG(sb.st_mode));
+        entries_capacity          = (sb.st_size - 4096) / sizeof(T);
+      }
+    }
   }
 
   explicit vector() : mmap_base(0), entries_size(nullptr), entries_capacity(0), mmap_size(0), mmap_fd(-1) {}
@@ -332,9 +339,13 @@ public:
   }
 
   [[nodiscard]] size_t size() const {
-    if (MMAP_LIB_LIKELY(entries_size != nullptr)) {
+    if (entries_size != nullptr) {
       return *entries_size;
     }
+    if (entries_capacity == 0) { // Never mmap_base and files does not exist
+      return 0;
+    }
+
     ref_base();  // Force to get entries_size
     return *entries_size;
   }

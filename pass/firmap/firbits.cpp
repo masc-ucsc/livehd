@@ -24,7 +24,7 @@ void Firmap::do_firbits_analysis(LGraph *lg) {
 
     if (op == Ntype_op::Sub) {
       auto subname = node.get_type_sub_node().get_name();
-      if (subname.substr(0, 5) == "__fir")
+      if (subname.substr(0, 6) == "__fir_")
         analysis_fir_ops(node, subname);
       else
         continue;
