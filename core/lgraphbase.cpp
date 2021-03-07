@@ -51,7 +51,7 @@ void LGraph_Base::clear() {
 
 void LGraph_Base::sync() {
   Lgraph_base_core::sync();
-  library->sync();
+  // Avoid recursion library->sync();
 }
 
 void LGraph_Base::emplace_back() {

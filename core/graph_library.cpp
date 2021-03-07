@@ -53,7 +53,6 @@ void Graph_library::shutdown() {
   }
   global_name2lgraph.clear();
 
-
   absl::flat_hash_set<Graph_library *> gl_deleted;
 
   // The same graph library is inserted TWICE (full and short path)
@@ -69,11 +68,14 @@ void Graph_library::shutdown() {
 }
 
 void Graph_library::sync_all() {
+#if 0
+  // Every data structure is mmap, no need to sync
   for (auto &it : global_name2lgraph) {
     for (auto &it2 : it.second) {
       it2.second->sync();
     }
   }
+#endif
   for (auto &it : global_instances) {
     it.second->clean_library();
   }
@@ -582,8 +584,6 @@ Lg_type_id Graph_library::copy_lgraph(std::string_view name, std::string_view ne
   }
 
   closedir(dr);
-
-
 
   clean_library();
 

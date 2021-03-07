@@ -31,6 +31,11 @@ struct mmap_gc_entry {
     size = 0;
     fd   = -1;
   }
+  void touch_age() {
+    if ((age+1)==global_age || (global_age>>14))
+      return;
+    age = global_age++;
+  }
   std::string                       name;  // Mostly for debugging
   int                               fd;
   size_t                            size;
@@ -46,8 +51,8 @@ protected:
   static inline int n_open_mmaps = 0;
   static inline int n_open_fds   = 0;
 
-  static inline int n_max_mmaps = 512;
-  static inline int n_max_fds   = 512;
+  static inline int n_max_mmaps = 2048;
+  static inline int n_max_fds   = 750;
 
   static void recycle_older() {
     // Recycle around 1/2 of the newer open fds with mmap
@@ -339,7 +344,7 @@ public:
     entry.base        = base;
 
     assert(mmap_gc_pool.find(base) == mmap_gc_pool.end());
-    // std::cerr << "mmap_gc_pool add name:" << name << " fd:" << fd << " base:" << base << std::endl;
+    //std::cerr << "mmap_gc_pool add name:" << name << " fd:" << fd << " base:" << base << std::endl;
     mmap_gc_pool[base] = entry;
 
     return {base, final_size};
@@ -370,6 +375,8 @@ public:
       }
       /* LCOV_EXCL_STOP */
     }
+
+    it->second.touch_age();
 
     void *base;
 #ifdef __APPLE__

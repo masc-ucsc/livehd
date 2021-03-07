@@ -519,7 +519,7 @@ int main(int argc, char** argv) {
         // could throw an exception
         rx.history_add(input);
         Main_api::parse_inline(input);
-        Graph_library::sync_all();
+        //Graph_library::sync_all();
 
         continue;
       }
