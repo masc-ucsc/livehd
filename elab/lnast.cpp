@@ -1026,10 +1026,19 @@ void Lnast::ssa_handle_phi_nodes(const Lnast_nid &if_nid) {
   candidates_update_phi_resolve_table.clear();
 }
 
+
+
+std::string_view Lnast::create_tmp_var() {
+  auto tmp_var_name = add_string(absl::StrCat("___T", tmp_var_cnt));
+  tmp_var_cnt++;
+  return tmp_var_name;
+}
+
+
 void Lnast::resolve_phi_nodes(const Lnast_nid &cond_nid, Phi_rtable &true_table, Phi_rtable &false_table) {
   auto if_nid   = get_parent(cond_nid);
   auto psts_nid = get_parent(if_nid);
-  for (auto const &[vname, nid] : false_table) {
+  for (auto const &[vname, f_nid] : false_table) {
     if (check_phi_table_parents_chain(vname, psts_nid) == Lnast_nid()) {
       if (!(is_register(vname) || is_output(vname)))
         continue;
@@ -1037,6 +1046,15 @@ void Lnast::resolve_phi_nodes(const Lnast_nid &cond_nid, Phi_rtable &true_table,
       if (true_table.find(vname) != true_table.end()) {
         add_phi_node(cond_nid, true_table[vname], false_table[vname]);
         true_table.erase(vname);
+      } else if (is_register(vname)) {
+        // create attr_get_q node and feed to phi node
+        auto new_attget = add_child(if_nid, Lnast_node(Lnast_ntype::create_attr_get(), Etoken()));
+        auto tmp_var   = create_tmp_var();
+        std::string qpin_str = "__q_pin";
+        auto tg_lhs = add_child(new_attget, Lnast_node::create_ref(tmp_var));
+        add_child(new_attget, Lnast_node(get_type(f_nid), get_token(f_nid), get_subs(f_nid)));
+        add_child(new_attget, Lnast_node::create_const(add_string(qpin_str)));
+        add_phi_node(cond_nid, tg_lhs, false_table[vname]);
       } else {
         add_phi_node(cond_nid, undefined_var_nid, false_table[vname]);
       }
@@ -1053,17 +1071,25 @@ void Lnast::resolve_phi_nodes(const Lnast_nid &cond_nid, Phi_rtable &true_table,
   }
 
   std::vector<std::string_view> var_list;
-  for (auto const &[vname, nid] : true_table) {
+  for (auto const &[vname, t_nid] : true_table) {
     if (true_table.empty())  // it might be empty due to the erase from previous for loop
       break;
 
     if (check_phi_table_parents_chain(vname, psts_nid) == Lnast_nid()) {
       if (!(is_register(vname) || is_output(vname)))
         continue;
-
       if (false_table.find(vname) != false_table.end()) {
         add_phi_node(cond_nid, true_table[vname], false_table[vname]);
         var_list.push_back(vname);
+      } else if (is_register(vname)) {
+        // create tgq node and feed to phi node
+        auto new_attget = add_child(if_nid, Lnast_node(Lnast_ntype::create_attr_get(), Etoken()));
+        auto tmp_var   = create_tmp_var();
+        std::string qpin_str = "__q_pin";
+        auto tg_lhs = add_child(new_attget, Lnast_node::create_ref(tmp_var));
+        add_child(new_attget, Lnast_node(get_type(t_nid), get_token(t_nid), get_subs(t_nid)));
+        add_child(new_attget, Lnast_node::create_const(add_string(qpin_str)));
+        add_phi_node(cond_nid, true_table[vname], tg_lhs);
       } else {
         add_phi_node(cond_nid, true_table[vname], undefined_var_nid);
         var_list.push_back(vname);
@@ -1118,21 +1144,14 @@ void Lnast::add_phi_node(const Lnast_nid &cond_nid, const Lnast_nid &t_nid, cons
   Phi_rtable &new_added_phi_node_table = new_added_phi_node_tables[if_nid];
   auto        new_phi_nid              = add_child(if_nid, Lnast_node(Lnast_ntype::create_phi(), Etoken()));
   Lnast_nid   lhs_phi_nid;
-  if (get_type(t_nid).is_err_flag() || get_type(f_nid).is_err_flag()) {
-    lhs_phi_nid = add_child(
-        new_phi_nid,
-        Lnast_node(Lnast_ntype::create_err_flag(), Etoken(Token_id_alnum, 0, 0, 0, "err_var_undefined")));  // ssa update later
-  } else {
-    lhs_phi_nid
-        = add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_ref(), get_token(t_nid), get_subs(t_nid)));  // ssa update later
-  }
+
+  lhs_phi_nid = add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_ref(), get_token(t_nid), get_subs(t_nid)));  // ssa update later
 
   update_global_lhs_ssa_cnt_table(lhs_phi_nid);
   add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_ref(), get_token(cond_nid), get_subs(cond_nid)));
   add_child(new_phi_nid, Lnast_node(get_type(t_nid), get_token(t_nid), get_subs(t_nid)));
   add_child(new_phi_nid, Lnast_node(get_type(f_nid), get_token(f_nid), get_subs(f_nid)));
-  new_added_phi_node_table.insert_or_assign(get_name(lhs_phi_nid),
-                                            lhs_phi_nid);  // FIXME->sh: might need do the same for the new_tg_nid
+  new_added_phi_node_table.insert_or_assign(get_name(lhs_phi_nid), lhs_phi_nid);  // FIXME->sh: might need do the same for the new_tg_nid
 
   candidates_update_phi_resolve_table.insert_or_assign(get_name(lhs_phi_nid), lhs_phi_nid);
 }

@@ -103,6 +103,8 @@ void Lnast_tolg::process_ast_if_op(LGraph *lg, const Lnast_nid &lnidx_if) {
       process_ast_tuple_add_op(lg, if_child);
     } else if (ntype.is_tuple_get()) {
       process_ast_tuple_get_op(lg, if_child);
+    } else if (ntype.is_attr_get()) {
+      process_ast_attr_get_op(lg, if_child);
     } else {
       I(false);  // if-subtree should only contain stmts/cond/phi nodes
     }
@@ -122,11 +124,9 @@ void Lnast_tolg::process_ast_phi_op(LGraph *lg, const Lnast_nid &lnidx_phi) {
   auto lhs_sname = lnast->get_sname(lhs);
   auto lhs_vname = lnast->get_vname(lhs);
 
-  auto     cond_dpin = setup_ref_node_dpin(lg, c1);
-  Node_pin true_dpin;
-  Node_pin false_dpin;
-  true_dpin  = setup_ref_node_dpin(lg, c2, false, true);
-  false_dpin = setup_ref_node_dpin(lg, c3, false, true);
+  auto     cond_dpin  = setup_ref_node_dpin(lg, c1);
+  Node_pin true_dpin  = setup_ref_node_dpin(lg, c2, false, true);
+  Node_pin false_dpin = setup_ref_node_dpin(lg, c3, false, true);
 
   I(!true_dpin.is_invalid());
   I(!false_dpin.is_invalid());
@@ -992,13 +992,6 @@ Node_pin Lnast_tolg::setup_ref_node_dpin(LGraph *lg, const Lnast_nid &lnidx_opd,
           if (!node.setup_sink_pin("field").is_connected()) {
             return create_scalar_access_tg(lg, it->second);
           }
-          /* if (node.setup_sink_pin("field").is_connected()) { */
-          /*   auto field_dpin = node.setup_sink_pin("field").get_driver_pin(); */
-          /*   I(field_dpin.has_name()); */
-          /*   return create_scalar_access_tg(lg, it->second, field_dpin); */
-          /* } else { */
-          /*   return create_scalar_access_tg(lg, it->second); */
-          /* } */
         }
       }
     }
@@ -1007,7 +1000,7 @@ Node_pin Lnast_tolg::setup_ref_node_dpin(LGraph *lg, const Lnast_nid &lnidx_opd,
 
   Node_pin node_dpin;
   if (is_output(name)) {
-    // FIXME->sh: should create a wire_or_op for %foo, no?
+    ;
   } else if (is_input(name)) {
     // later the node_type should change to TupGet and connected to $
     node_dpin = lg->create_node(Ntype_op::TupRef).setup_driver_pin();

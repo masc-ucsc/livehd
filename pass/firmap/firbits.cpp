@@ -92,28 +92,57 @@ void Firmap::analysis_lg_mux(Node &node) {
 
   Bits_t max_bits     = 0;
   bool   sign         = false;
-  bool   is_1st_input = true;
+  bool   no_one_ready = true;
+  bool   some_one_ready = false;
   for (auto e : inp_edges) {
     if (e.sink.get_pid() == 0)
       continue;  // Skip select
 
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it != fbmap.end()) {
-      if (is_1st_input) {
-        max_bits     = it->second.get_bits();
-        sign         = it->second.get_sign();
-        is_1st_input = false;
-      } else {
-        I(sign == it->second.get_sign());
+      if (some_one_ready) {
+        /* I(max_bits == it->second.get_bits()); */
         max_bits = (max_bits < it->second.get_bits()) ? it->second.get_bits() : max_bits;
+        I(sign     == it->second.get_sign());
+        continue;
       }
-    } else {
-      // should wait till every input is ready
+      max_bits       = it->second.get_bits();
+      sign           = it->second.get_sign();
+      no_one_ready   = false;
+      some_one_ready = true;
+    }  
+  }
+
+  if (no_one_ready) {
+      // should wait till at least one of the inputs is ready
       not_finished = true;
       return;
-    }
   }
   fbmap.insert_or_assign(node.get_driver_pin().get_compact_flat(), Firrtl_bits(max_bits, sign));
+  /* Bits_t max_bits     = 0; */
+  /* bool   sign         = false; */
+  /* bool   is_1st_input = true; */
+  /* for (auto e : inp_edges) { */
+  /*   if (e.sink.get_pid() == 0) */
+  /*     continue;  // Skip select */
+
+  /*   auto it = fbmap.find(e.driver.get_compact_flat()); */
+  /*   if (it != fbmap.end()) { */
+  /*     if (is_1st_input) { */
+  /*       max_bits     = it->second.get_bits(); */
+  /*       sign         = it->second.get_sign(); */
+  /*       is_1st_input = false; */
+  /*     } else { */
+  /*       I(sign == it->second.get_sign()); */
+  /*       max_bits = (max_bits < it->second.get_bits()) ? it->second.get_bits() : max_bits; */
+  /*     } */
+  /*   } else { */
+  /*     // should wait till every input is ready */
+  /*     not_finished = true; */
+  /*     return; */
+  /*   } */
+  /* } */
+  /* fbmap.insert_or_assign(node.get_driver_pin().get_compact_flat(), Firrtl_bits(max_bits, sign)); */
 }
 
 void Firmap::analysis_lg_const(Node &node) {
@@ -240,7 +269,11 @@ void Firmap::analysis_lg_attr_set_dp_assign(Node &node_dp) {
   if (it != fbmap.end()) {
     fb_lhs = it->second;
   } else {
-    Pass::error("dp lhs firrtl bits must be ready even at first traverse, lhs:{}\n", dpin_lhs.debug_name());
+    #ifndef NDEBUG
+      fmt::print("    {} input driver {} not ready\n", node_dp.debug_name(), dpin_lhs.debug_name());
+    #endif
+    not_finished = true;
+    return;
   }
 
   auto it2 = fbmap.find(dpin_rhs.get_compact_flat());
@@ -248,7 +281,11 @@ void Firmap::analysis_lg_attr_set_dp_assign(Node &node_dp) {
   if (it2 != fbmap.end()) {
     fb_rhs = it2->second;
   } else {
-    Pass::error("dp rhs firrtl bits must be ready even at first traverse, rhs:{}\n", dpin_rhs.debug_name());
+    #ifndef NDEBUG
+      fmt::print("    {} input driver {} not ready\n", node_dp.debug_name(), dpin_rhs.debug_name());
+    #endif
+    not_finished = true;
+    return;
   }
 
   // note: hiFirrtl could have bitwidth mismatch between lhs/rhs in the "Connect". The LNAST 
@@ -869,5 +906,6 @@ void Firmap::analysis_fir_add_sub(Node &node, XEdge_iterator &inp_edges) {
     }
   }
 
+  fmt::print("DEBUG firmap insertion:{}\n", node.get_driver_pin("Y").debug_name());
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_flat(), Firrtl_bits(std::max(bits1, bits2) + 1, sign));
 }

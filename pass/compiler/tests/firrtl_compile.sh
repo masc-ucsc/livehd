@@ -32,8 +32,8 @@ if [ $# -eq 0 ]; then
   PATTERN_PATH=./inou/firrtl/tests/proto
   # FIRRTL_LEVEL='lo'
   FIRRTL_LEVEL='hi'
-else
 
+else
   file=$(basename $1)
   if [ "${file#*.}" == "hi.pb" ]; then
     pts=$(basename $1 ".hi.pb")
@@ -41,8 +41,12 @@ else
   elif [ "${file#*.}" == "lo.pb" ]; then
     pts=$(basename $1 ".lo.pb")
     FIRRTL_LEVEL='lo'
+  elif [ "${file#*.}" == "ch.pb" ]; then
+    pts=$(basename $1 ".ch.pb")
+    FIRRTL_LEVEL='ch'
+    echo "Warning: Experimental Chirrtl extension"
   else
-    echo "Illegal FIRRTL extension. Either hi.pb or lo.pb"
+    echo "Illegal FIRRTL extension. Either ch.pb, hi.pb or lo.pb"
     exit -3
   fi
 
@@ -136,7 +140,7 @@ firrtl_test() {
     echo "Logic Equivalence Check"
     echo "----------------------------------------------------"
 
-    if [ "${FIRRTL_LEVEL}" == "hi" ]; then
+    if [ "${FIRRTL_LEVEL}" == "hi" ] || [ "${FIRRTL_LEVEL}" == "ch" ]; then
         python3 ${POST_IO_RENAME} "${pt}.v"
     fi
 

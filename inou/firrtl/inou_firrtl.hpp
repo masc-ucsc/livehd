@@ -28,7 +28,7 @@ protected:
 
   enum class Leaf_type { Const_num, Const_str, Ref};
   //----------- FOR toLNAST ----------
-  std::string_view create_temp_var(Lnast &lnast);
+  std::string_view create_tmp_var(Lnast &lnast);
   std::string_view create_dummy_expr_node_var(Lnast &lnast);
   std::string_view get_new_seq_name(Lnast &lnast);
   std::string      get_full_name(Lnast &lnast, Lnast_nid &parent_node, const std::string &term, const bool is_rhs);

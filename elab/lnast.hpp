@@ -119,6 +119,7 @@ private:
   std::string_view memblock;
   int              memblock_fd;
   Lnast_nid        undefined_var_nid;
+  uint32_t         tmp_var_cnt = 0;
 
   void      do_ssa_trans               (const Lnast_nid  &top_nid);
   void      ssa_lhs_handle_a_statement (const Lnast_nid  &psts_nid, const Lnast_nid &opr_nid);
@@ -168,6 +169,8 @@ private:
   bool      check_tuple_var_1st_scope_ssa_table_parents_chain (const Lnast_nid &psts_nid, std::string_view ref_name, const Lnast_nid &src_if_nid);
   void      merge_hierarchical_attr_set        (Lnast_nid &opr_nid);
   void      collect_hier_tuple_nids            (Lnast_nid &opr_nid, std::stack<Lnast_nid> &stk_tuple_fields); 
+  std::string_view create_tmp_var();
+
 
   // hierarchical statements node -> symbol table
   absl::flat_hash_map<Lnast_nid, Phi_rtable>       phi_resolve_tables;
