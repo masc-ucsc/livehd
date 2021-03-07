@@ -37,7 +37,7 @@ do
 done
 
 
-# pts='SNX96000Thread64'
+pts='Snx1024Insts256'
 
 echo -e "All Benchmark Patterns:" '\n'$pts
 
